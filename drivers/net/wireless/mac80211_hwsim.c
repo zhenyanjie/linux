@@ -2183,6 +2183,7 @@ static int mac80211_hwsim_create_radio(int channels, const char *reg_alpha2,
 	return idx;
 
 failed_hw:
+	device_release_driver(data->dev);
 	device_unregister(data->dev);
 failed_drvdata:
 	ieee80211_free_hw(hw);
