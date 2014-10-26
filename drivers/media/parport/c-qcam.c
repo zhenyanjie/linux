@@ -785,7 +785,7 @@ static int init_cqcam(struct parport *port)
 		int i, found = 0;
 
 		for (i = 0; i < MAX_CAMS && parport[i] != -1; i++) {
-			if (parport[0] == port->number)
+			if (parport[i] == port->number)
 				found = 1;
 		}
 		if (!found)
