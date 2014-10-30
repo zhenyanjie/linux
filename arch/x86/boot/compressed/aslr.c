@@ -299,7 +299,8 @@ static unsigned long find_random_addr(unsigned long minimum,
 unsigned char *choose_kernel_location(unsigned char *input,
 				      unsigned long input_size,
 				      unsigned char *output,
-				      unsigned long output_size)
+				      unsigned long output_size,
+				      unsigned long reserved_size)
 {
 	unsigned long choice = (unsigned long)output;
 	unsigned long random;
@@ -321,7 +322,7 @@ unsigned char *choose_kernel_location(unsigned char *input,
 		       (unsigned long)output, output_size);
 
 	/* Walk e820 and find a random address. */
-	random = find_random_addr(choice, output_size);
+	random = find_random_addr(choice, output_size + reserved_size);
 	if (!random) {
 		debug_putstr("KASLR could not find suitable E820 region...\n");
 		goto out;

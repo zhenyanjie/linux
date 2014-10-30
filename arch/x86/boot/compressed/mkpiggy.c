@@ -36,11 +36,12 @@ int main(int argc, char *argv[])
 	uint32_t olen;
 	long ilen;
 	unsigned long offs;
+	unsigned long reserved_size;
 	FILE *f = NULL;
 	int retval = 1;
 
-	if (argc < 2) {
-		fprintf(stderr, "Usage: %s compressed_file\n", argv[0]);
+	if (argc < 3) {
+		fprintf(stderr, "Usage: %s compressed_file reserved_size\n", argv[0]);
 		goto bail;
 	}
 
@@ -74,6 +75,7 @@ int main(int argc, char *argv[])
 	offs += olen >> 12;	/* Add 8 bytes for each 32K block */
 	offs += 64*1024 + 128;	/* Add 64K + 128 bytes slack */
 	offs = (offs+4095) & ~4095; /* Round to a 4K boundary */
+	reserved_size = atoi(argv[2]);
 
 	printf(".section \".rodata..compressed\",\"a\",@progbits\n");
 	printf(".globl z_input_len\n");
@@ -85,6 +87,8 @@ int main(int argc, char *argv[])
 	/* z_extract_offset_negative allows simplification of head_32.S */
 	printf(".globl z_extract_offset_negative\n");
 	printf("z_extract_offset_negative = -0x%lx\n", offs);
+	printf(".globl reserved_size\n");
+	printf("reserved_size = 0x%lx\n", reserved_size);
 
 	printf(".globl input_data, input_data_end\n");
 	printf("input_data:\n");

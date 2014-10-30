@@ -59,7 +59,8 @@ int cmdline_find_option_bool(const char *option);
 unsigned char *choose_kernel_location(unsigned char *input,
 				      unsigned long input_size,
 				      unsigned char *output,
-				      unsigned long output_size);
+				      unsigned long output_size,
+				      unsigned long reserved_size);
 /* cpuflags.c */
 bool has_cpuflag(int flag);
 #else
@@ -67,7 +68,8 @@ static inline
 unsigned char *choose_kernel_location(unsigned char *input,
 				      unsigned long input_size,
 				      unsigned char *output,
-				      unsigned long output_size)
+				      unsigned long output_size,
+				      unsigned long reserved_size)
 {
 	return output;
 }

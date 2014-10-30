@@ -207,6 +207,7 @@ relocated:
  * Do the decompression, and jump to the new kernel..
  */
 				/* push arguments for decompress_kernel: */
+	pushl	$reserved_size
 	pushl	$z_output_len	/* decompressed length */
 	leal	z_extract_offset_negative(%ebx), %ebp
 	pushl	%ebp		/* output address */
@@ -217,7 +218,7 @@ relocated:
 	pushl	%eax		/* heap area */
 	pushl	%esi		/* real mode pointer */
 	call	decompress_kernel /* returns kernel location in %eax */
-	addl	$24, %esp
+	addl	$28, %esp
 
 /*
  * Jump to the decompressed kernel.
