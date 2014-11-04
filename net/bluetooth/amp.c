@@ -151,7 +151,6 @@ static int hmac_sha256(u8 *key, u8 ksize, char *plaintext, u8 psize, u8 *output)
 	} else {
 		struct {
 			struct shash_desc shash;
-			char ctx[crypto_shash_descsize(tfm)];
 		} desc;
 
 		desc.shash.tfm = tfm;
