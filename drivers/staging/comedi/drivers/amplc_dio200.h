@@ -43,9 +43,9 @@ struct dio200_layout {
 	unsigned short n_subdevs;	/* number of subdevices */
 	unsigned char sdtype[DIO200_MAX_SUBDEVS];	/* enum dio200_sdtype */
 	unsigned char sdinfo[DIO200_MAX_SUBDEVS];	/* depends on sdtype */
-	bool has_int_sce:1;		/* has interrupt enable/status reg */
-	bool has_clk_gat_sce:1;		/* has clock/gate selection registers */
-	bool has_enhancements:1;	/* has enhanced features */
+	bool has_int_sce;		/* has interrupt enable/status reg */
+	bool has_clk_gat_sce;		/* has clock/gate selection registers */
+	bool has_enhancements;	/* has enhanced features */
 };
 
 enum dio200_bustype { isa_bustype, pci_bustype };

@@ -97,16 +97,16 @@ struct chameleon_gdd {
  * @size:
  */
 struct chameleon_bdd {
-	unsigned int irq:6;
-	unsigned int rev:6;
-	unsigned int var:6;
-	unsigned int dev:10;
-	unsigned int dtype:4;
-	unsigned int bar:3;
-	unsigned int inst:6;
-	unsigned int dbar:3;
-	unsigned int group:6;
-	unsigned int reserved:14;
+	unsigned int irq;
+	unsigned int rev;
+	unsigned int var;
+	unsigned int dev;
+	unsigned int dtype;
+	unsigned int bar;
+	unsigned int inst;
+	unsigned int dbar;
+	unsigned int group;
+	unsigned int reserved;
 	u32 chamoff;
 	u32 offset;
 	u32 size;

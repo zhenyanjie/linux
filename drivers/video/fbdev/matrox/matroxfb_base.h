@@ -513,7 +513,7 @@ struct matrox_fb_info {
 		struct {
 			unsigned int	ddr:1,
 			                emrswen:1,
-					dll:1;
+					dll;
 				      } memory;
 			      } values;
 	u_int32_t cmap[16];

@@ -122,9 +122,9 @@ struct mpt3_ioctl_diag_reset {
 struct mpt3_ioctl_pci_info {
 	union {
 		struct {
-			uint32_t device:5;
-			uint32_t function:3;
-			uint32_t bus:24;
+			uint32_t device;
+			uint32_t function;
+			uint32_t bus;
 		} bits;
 		uint32_t  word;
 	} u;

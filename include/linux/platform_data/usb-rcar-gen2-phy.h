@@ -14,9 +14,9 @@
 
 struct rcar_gen2_phy_platform_data {
 	/* USB channel 0 configuration */
-	bool chan0_pci:1;	/* true: PCI USB host 0, false: USBHS */
+	bool chan0_pci;	/* true: PCI USB host 0, false: USBHS */
 	/* USB channel 2 configuration */
-	bool chan2_pci:1;	/* true: PCI USB host 2, false: USBSS */
+	bool chan2_pci;	/* true: PCI USB host 2, false: USBSS */
 };
 
 #endif

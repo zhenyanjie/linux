@@ -376,9 +376,9 @@ struct mediatable {
 	u16 defaultmedia;
 	u8 leafcount;
 	u8 csr12dir;		/* General purpose pin directions. */
-	unsigned has_mii:1;
-	unsigned has_nonmii:1;
-	unsigned has_reset:6;
+	unsigned has_mii;
+	unsigned has_nonmii;
+	unsigned has_reset;
 	u32 csr15dir;
 	u32 csr15val;		/* 21143 NWay setting. */
 	struct medialeaf mleaf[0];
@@ -425,15 +425,15 @@ struct tulip_private {
 #ifdef 	CONFIG_TULIP_NAPI_HW_MITIGATION
         int mit_on;
 #endif
-	unsigned int full_duplex:1;	/* Full-duplex operation requested. */
-	unsigned int full_duplex_lock:1;
-	unsigned int fake_addr:1;	/* Multiport board faked address. */
-	unsigned int default_port:4;	/* Last dev->if_port value. */
-	unsigned int media2:4;	/* Secondary monitored media port. */
-	unsigned int medialock:1;	/* Don't sense media type. */
-	unsigned int mediasense:1;	/* Media sensing in progress. */
-	unsigned int nway:1, nwayset:1;		/* 21143 internal NWay. */
-	unsigned int timeout_recovery:1;
+	unsigned int full_duplex;	/* Full-duplex operation requested. */
+	unsigned int full_duplex_lock;
+	unsigned int fake_addr;	/* Multiport board faked address. */
+	unsigned int default_port;	/* Last dev->if_port value. */
+	unsigned int media2;	/* Secondary monitored media port. */
+	unsigned int medialock;	/* Don't sense media type. */
+	unsigned int mediasense;	/* Media sensing in progress. */
+	unsigned int nway:1, nwayset;		/* 21143 internal NWay. */
+	unsigned int timeout_recovery;
 	unsigned int csr0;	/* CSR0 setting. */
 	unsigned int csr6;	/* Current CSR6 control settings. */
 	unsigned char eeprom[EEPROM_SIZE];	/* Serial EEPROM contents. */

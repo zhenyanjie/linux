@@ -99,10 +99,10 @@ enum adv7604_page {
 /* Platform dependent definition */
 struct adv7604_platform_data {
 	/* DIS_PWRDNB: 1 if the PWRDNB pin is unused and unconnected */
-	unsigned disable_pwrdnb:1;
+	unsigned disable_pwrdnb;
 
 	/* DIS_CABLE_DET_RST: 1 if the 5V pins are unused and unconnected */
-	unsigned disable_cable_det_rst:1;
+	unsigned disable_cable_det_rst;
 
 	int default_input;
 
@@ -119,19 +119,19 @@ struct adv7604_platform_data {
 	enum adv7604_int1_config int1_config;
 
 	/* IO register 0x02 */
-	unsigned alt_gamma:1;
-	unsigned op_656_range:1;
-	unsigned alt_data_sat:1;
+	unsigned alt_gamma;
+	unsigned op_656_range;
+	unsigned alt_data_sat;
 
 	/* IO register 0x05 */
-	unsigned blank_data:1;
-	unsigned insert_av_codes:1;
-	unsigned replicate_av_codes:1;
+	unsigned blank_data;
+	unsigned insert_av_codes;
+	unsigned replicate_av_codes;
 
 	/* IO register 0x06 */
-	unsigned inv_vs_pol:1;
-	unsigned inv_hs_pol:1;
-	unsigned inv_llc_pol:1;
+	unsigned inv_vs_pol;
+	unsigned inv_hs_pol;
+	unsigned inv_llc_pol;
 
 	/* IO register 0x14 */
 	enum adv7604_drive_strength dr_str_data;
@@ -139,7 +139,7 @@ struct adv7604_platform_data {
 	enum adv7604_drive_strength dr_str_sync;
 
 	/* IO register 0x30 */
-	unsigned output_bus_lsb_to_msb:1;
+	unsigned output_bus_lsb_to_msb;
 
 	/* Free run */
 	unsigned hdmi_free_run_mode;

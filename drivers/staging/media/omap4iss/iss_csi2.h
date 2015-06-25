@@ -96,9 +96,9 @@ struct iss_csi2_ctx_cfg {
 
 struct iss_csi2_timing_cfg {
 	u8 ionum;			/* IO1 or IO2 as in CSI2_TIMING */
-	unsigned force_rx_mode:1;
-	unsigned stop_state_16x:1;
-	unsigned stop_state_4x:1;
+	unsigned force_rx_mode;
+	unsigned stop_state_16x;
+	unsigned stop_state_4x;
 	u16 stop_state_counter;
 };
 

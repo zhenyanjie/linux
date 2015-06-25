@@ -35,22 +35,22 @@ struct r8a66597_platdata {
 	u16		buswait;
 
 	/* set one = on chip controller, set zero = external controller */
-	unsigned	on_chip:1;
+	unsigned	on_chip;
 
 	/* (external controller only) set R8A66597_PLATDATA_XTAL_nnMHZ */
-	unsigned	xtal:2;
+	unsigned	xtal;
 
 	/* set one = 3.3V, set zero = 1.5V */
-	unsigned	vif:1;
+	unsigned	vif;
 
 	/* set one = big endian, set zero = little endian */
-	unsigned	endian:1;
+	unsigned	endian;
 
 	/* (external controller only) set one = WR0_N shorted to WR1_N */
-	unsigned	wr0_shorted_to_wr1:1;
+	unsigned	wr0_shorted_to_wr1;
 
 	/* set one = using SUDMAC */
-	unsigned	sudmac:1;
+	unsigned	sudmac;
 };
 
 /* Register definitions */

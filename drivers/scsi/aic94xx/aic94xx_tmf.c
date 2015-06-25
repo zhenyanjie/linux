@@ -59,7 +59,7 @@ static int asd_enqueue_internal(struct asd_ascb *ascb,
 struct tasklet_completion_status {
 	int	dl_opcode;
 	int	tmf_state;
-	u8	tag_valid:1;
+	u8	tag_valid;
 	__be16	tag;
 };
 

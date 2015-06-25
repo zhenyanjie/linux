@@ -18,8 +18,8 @@
 #include <net/netfilter/nf_tables.h>
 
 struct nft_bitwise {
-	enum nft_registers	sreg:8;
-	enum nft_registers	dreg:8;
+	enum nft_registers	sreg;
+	enum nft_registers	dreg;
 	u8			len;
 	struct nft_data		mask;
 	struct nft_data		xor;

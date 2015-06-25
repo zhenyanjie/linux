@@ -1128,9 +1128,9 @@ struct r_port {
 	struct tty_port port;
 	int line;
 	int flags;		/* Don't yet match the ASY_ flags!! */
-	unsigned int board:3;
-	unsigned int aiop:2;
-	unsigned int chan:3;
+	unsigned int board;
+	unsigned int aiop;
+	unsigned int chan;
 	CONTROLLER_t *ctlp;
 	CHANNEL_t channel;
 	int intmask;

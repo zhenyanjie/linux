@@ -165,8 +165,8 @@ typedef struct {
 	unsigned long	timestamp;
 	unsigned long	gencount;
 	unsigned int	cache_entry_index;
-	unsigned int	plus:1;
-	unsigned int	eof:1;
+	unsigned int	plus;
+	unsigned int	eof;
 } nfs_readdir_descriptor_t;
 
 /*

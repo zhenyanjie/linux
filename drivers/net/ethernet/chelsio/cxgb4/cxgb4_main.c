@@ -191,11 +191,11 @@ enum {
 struct filter_entry {
 	/* Administrative fields for filter.
 	 */
-	u32 valid:1;            /* filter allocated and valid */
-	u32 locked:1;           /* filter is administratively locked */
+	u32 valid;            /* filter allocated and valid */
+	u32 locked;           /* filter is administratively locked */
 
-	u32 pending:1;          /* filter action is pending firmware reply */
-	u32 smtidx:8;           /* Source MAC Table index for smac */
+	u32 pending;          /* filter action is pending firmware reply */
+	u32 smtidx;           /* Source MAC Table index for smac */
 	struct l2t_entry *l2t;  /* Layer Two Table entry for dmac */
 
 	/* The filter itself.  Most of this is a straight copy of information

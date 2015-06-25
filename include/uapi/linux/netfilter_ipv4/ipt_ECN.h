@@ -25,7 +25,7 @@ struct ipt_ECN_info {
 	__u8 ip_ect;	/* ECT codepoint of IPv4 header, pre-shifted */
 	union {
 		struct {
-			__u8 ece:1, cwr:1; /* TCP ECT bits */
+			__u8 ece:1, cwr; /* TCP ECT bits */
 		} tcp;
 	} proto;
 };

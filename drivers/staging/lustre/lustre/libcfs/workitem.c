@@ -66,11 +66,11 @@ typedef struct cfs_wi_sched {
 	/** number of scheduled workitems */
 	int			ws_nscheduled;
 	/** started scheduler thread, protected by cfs_wi_data::wi_glock */
-	unsigned int		ws_nthreads:30;
+	unsigned int		ws_nthreads;
 	/** shutting down, protected by cfs_wi_data::wi_glock */
-	unsigned int		ws_stopping:1;
+	unsigned int		ws_stopping;
 	/** serialize starting thread, protected by cfs_wi_data::wi_glock */
-	unsigned int		ws_starting:1;
+	unsigned int		ws_starting;
 	/** scheduler name */
 	char			ws_name[CFS_WS_NAME_LEN];
 } cfs_wi_sched_t;

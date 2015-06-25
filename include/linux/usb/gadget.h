@@ -97,10 +97,10 @@ struct usb_request {
 	unsigned		num_sgs;
 	unsigned		num_mapped_sgs;
 
-	unsigned		stream_id:16;
-	unsigned		no_interrupt:1;
-	unsigned		zero:1;
-	unsigned		short_not_ok:1;
+	unsigned		stream_id;
+	unsigned		no_interrupt;
+	unsigned		zero;
+	unsigned		short_not_ok;
 
 	void			(*complete)(struct usb_ep *ep,
 					struct usb_request *req);
@@ -173,11 +173,11 @@ struct usb_ep {
 	const char		*name;
 	const struct usb_ep_ops	*ops;
 	struct list_head	ep_list;
-	unsigned		maxpacket:16;
-	unsigned		maxpacket_limit:16;
-	unsigned		max_streams:16;
-	unsigned		mult:2;
-	unsigned		maxburst:5;
+	unsigned		maxpacket;
+	unsigned		maxpacket_limit;
+	unsigned		max_streams;
+	unsigned		mult;
+	unsigned		maxburst;
 	u8			address;
 	const struct usb_endpoint_descriptor	*desc;
 	const struct usb_ss_ep_comp_descriptor	*comp_desc;
@@ -556,13 +556,13 @@ struct usb_gadget {
 	unsigned			out_epnum;
 	unsigned			in_epnum;
 
-	unsigned			sg_supported:1;
-	unsigned			is_otg:1;
-	unsigned			is_a_peripheral:1;
-	unsigned			b_hnp_enable:1;
-	unsigned			a_hnp_support:1;
-	unsigned			a_alt_hnp_support:1;
-	unsigned			quirk_ep_out_aligned_size:1;
+	unsigned			sg_supported;
+	unsigned			is_otg;
+	unsigned			is_a_peripheral;
+	unsigned			b_hnp_enable;
+	unsigned			a_hnp_support;
+	unsigned			a_alt_hnp_support;
+	unsigned			quirk_ep_out_aligned_size;
 };
 #define work_to_gadget(w)	(container_of((w), struct usb_gadget, work))
 

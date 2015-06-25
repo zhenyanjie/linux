@@ -171,101 +171,101 @@ static uint32_t ipu_channel_status(struct ipu *ipu, enum ipu_channel channel)
 
 struct chan_param_mem_planar {
 	/* Word 0 */
-	u32	xv:10;
-	u32	yv:10;
-	u32	xb:12;
+	u32	xv;
+	u32	yv;
+	u32	xb;
 
-	u32	yb:12;
-	u32	res1:2;
-	u32	nsb:1;
-	u32	lnpb:6;
-	u32	ubo_l:11;
+	u32	yb;
+	u32	res1;
+	u32	nsb;
+	u32	lnpb;
+	u32	ubo_l;
 
-	u32	ubo_h:15;
-	u32	vbo_l:17;
+	u32	ubo_h;
+	u32	vbo_l;
 
-	u32	vbo_h:9;
-	u32	res2:3;
-	u32	fw:12;
-	u32	fh_l:8;
+	u32	vbo_h;
+	u32	res2;
+	u32	fw;
+	u32	fh_l;
 
-	u32	fh_h:4;
-	u32	res3:28;
+	u32	fh_h;
+	u32	res3;
 
 	/* Word 1 */
 	u32	eba0;
 
 	u32	eba1;
 
-	u32	bpp:3;
-	u32	sl:14;
-	u32	pfs:3;
-	u32	bam:3;
-	u32	res4:2;
-	u32	npb:6;
-	u32	res5:1;
+	u32	bpp;
+	u32	sl;
+	u32	pfs;
+	u32	bam;
+	u32	res4;
+	u32	npb;
+	u32	res5;
 
-	u32	sat:2;
-	u32	res6:30;
+	u32	sat;
+	u32	res6;
 } __attribute__ ((packed));
 
 struct chan_param_mem_interleaved {
 	/* Word 0 */
-	u32	xv:10;
-	u32	yv:10;
-	u32	xb:12;
+	u32	xv;
+	u32	yv;
+	u32	xb;
 
-	u32	yb:12;
-	u32	sce:1;
-	u32	res1:1;
-	u32	nsb:1;
-	u32	lnpb:6;
-	u32	sx:10;
-	u32	sy_l:1;
+	u32	yb;
+	u32	sce;
+	u32	res1;
+	u32	nsb;
+	u32	lnpb;
+	u32	sx;
+	u32	sy_l;
 
-	u32	sy_h:9;
-	u32	ns:10;
-	u32	sm:10;
-	u32	sdx_l:3;
+	u32	sy_h;
+	u32	ns;
+	u32	sm;
+	u32	sdx_l;
 
-	u32	sdx_h:2;
-	u32	sdy:5;
-	u32	sdrx:1;
-	u32	sdry:1;
-	u32	sdr1:1;
-	u32	res2:2;
-	u32	fw:12;
-	u32	fh_l:8;
+	u32	sdx_h;
+	u32	sdy;
+	u32	sdrx;
+	u32	sdry;
+	u32	sdr1;
+	u32	res2;
+	u32	fw;
+	u32	fh_l;
 
-	u32	fh_h:4;
-	u32	res3:28;
+	u32	fh_h;
+	u32	res3;
 
 	/* Word 1 */
 	u32	eba0;
 
 	u32	eba1;
 
-	u32	bpp:3;
-	u32	sl:14;
-	u32	pfs:3;
-	u32	bam:3;
-	u32	res4:2;
-	u32	npb:6;
-	u32	res5:1;
+	u32	bpp;
+	u32	sl;
+	u32	pfs;
+	u32	bam;
+	u32	res4;
+	u32	npb;
+	u32	res5;
 
-	u32	sat:2;
-	u32	scc:1;
-	u32	ofs0:5;
-	u32	ofs1:5;
-	u32	ofs2:5;
-	u32	ofs3:5;
-	u32	wid0:3;
-	u32	wid1:3;
-	u32	wid2:3;
+	u32	sat;
+	u32	scc;
+	u32	ofs0;
+	u32	ofs1;
+	u32	ofs2;
+	u32	ofs3;
+	u32	wid0;
+	u32	wid1;
+	u32	wid2;
 
-	u32	wid3:3;
-	u32	dec_sel:1;
-	u32	res6:28;
+	u32	wid3;
+	u32	dec_sel;
+	u32	res6;
 } __attribute__ ((packed));
 
 union chan_param_mem {

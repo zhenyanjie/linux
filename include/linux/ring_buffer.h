@@ -14,7 +14,7 @@ struct ring_buffer_iter;
  */
 struct ring_buffer_event {
 	kmemcheck_bitfield_begin(bitfield);
-	u32		type_len:5, time_delta:27;
+	u32		type_len:5, time_delta;
 	kmemcheck_bitfield_end(bitfield);
 
 	u32		array[];

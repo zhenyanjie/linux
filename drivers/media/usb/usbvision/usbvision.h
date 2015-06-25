@@ -335,14 +335,14 @@ struct usbvision_device_data_st {
 	const char *model_string;
 	int interface; /* to handle special interface number like BELKIN and Hauppauge WinTV-USB II */
 	__u16 codec;
-	unsigned video_channels:3;
-	unsigned audio_channels:2;
-	unsigned radio:1;
-	unsigned vbi:1;
-	unsigned tuner:1;
-	unsigned vin_reg1_override:1;	/* Override default value with */
-	unsigned vin_reg2_override:1;   /* vin_reg1, vin_reg2, etc. */
-	unsigned dvi_yuv_override:1;
+	unsigned video_channels;
+	unsigned audio_channels;
+	unsigned radio;
+	unsigned vbi;
+	unsigned tuner;
+	unsigned vin_reg1_override;	/* Override default value with */
+	unsigned vin_reg2_override;   /* vin_reg1, vin_reg2, etc. */
+	unsigned dvi_yuv_override;
 	__u8 vin_reg1;
 	__u8 vin_reg2;
 	__u8 dvi_yuv;

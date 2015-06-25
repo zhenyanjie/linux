@@ -28,17 +28,17 @@ struct pebs_record_32 {
 union intel_x86_pebs_dse {
 	u64 val;
 	struct {
-		unsigned int ld_dse:4;
-		unsigned int ld_stlb_miss:1;
-		unsigned int ld_locked:1;
-		unsigned int ld_reserved:26;
+		unsigned int ld_dse;
+		unsigned int ld_stlb_miss;
+		unsigned int ld_locked;
+		unsigned int ld_reserved;
 	};
 	struct {
-		unsigned int st_l1d_hit:1;
-		unsigned int st_reserved1:3;
-		unsigned int st_stlb_miss:1;
-		unsigned int st_locked:1;
-		unsigned int st_reserved2:26;
+		unsigned int st_l1d_hit;
+		unsigned int st_reserved1;
+		unsigned int st_stlb_miss;
+		unsigned int st_locked;
+		unsigned int st_reserved2;
 	};
 };
 

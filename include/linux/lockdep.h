@@ -248,13 +248,13 @@ struct held_lock {
 	 * The following field is used to detect when we cross into an
 	 * interrupt context:
 	 */
-	unsigned int irq_context:2; /* bit 0 - soft, bit 1 - hard */
-	unsigned int trylock:1;						/* 16 bits */
+	unsigned int irq_context; /* bit 0 - soft, bit 1 - hard */
+	unsigned int trylock;						/* 16 bits */
 
-	unsigned int read:2;        /* see lock_acquire() comment */
-	unsigned int check:1;       /* see lock_acquire() comment */
-	unsigned int hardirqs_off:1;
-	unsigned int references:12;					/* 32 bits */
+	unsigned int read;        /* see lock_acquire() comment */
+	unsigned int check;       /* see lock_acquire() comment */
+	unsigned int hardirqs_off;
+	unsigned int references;					/* 32 bits */
 };
 
 /*

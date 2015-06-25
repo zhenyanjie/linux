@@ -218,10 +218,10 @@ typedef enum _ULTRA_TOOL_ACTIONS {
 } ULTRA_TOOL_ACTIONS;
 
 typedef struct _ULTRA_EFI_SPAR_INDICATION  {
-	u64 BootToFirmwareUI:1;	/* Bit 0: Stop in uefi ui */
-	u64 ClearNvram:1;	/* Bit 1: Clear NVRAM */
-	u64 ClearCmos:1;	/* Bit 2: Clear CMOS */
-	u64 BootToTool:1;	/* Bit 3: Run install tool */
+	u64 BootToFirmwareUI;	/* Bit 0: Stop in uefi ui */
+	u64 ClearNvram;	/* Bit 1: Clear NVRAM */
+	u64 ClearCmos;	/* Bit 2: Clear CMOS */
+	u64 BootToTool;	/* Bit 3: Run install tool */
 	/* remaining bits are available */
 } ULTRA_EFI_SPAR_INDICATION;
 
@@ -248,25 +248,25 @@ typedef struct _CONTROLVM_MESSAGE_HEADER  {
 	u32 CompletionStatus;	/* Error status code or result of
 				 * message completion */
 	struct  {
-		u32 failed:1;		   /**< =1 in a response to * signify
+		u32 failed;		   /**< =1 in a response to * signify
 					    * failure */
-		u32 responseExpected:1;   /**< =1 in all messages that expect a
+		u32 responseExpected;   /**< =1 in all messages that expect a
 					   * response (Control ignores this
 					   * bit) */
-		u32 server:1;		   /**< =1 in all bus & device-related
+		u32 server;		   /**< =1 in all bus & device-related
 					    * messages where the message
 					    * receiver is to act as the bus or
 					    * device server */
-		u32 testMessage:1;	   /**< =1 for testing use only
+		u32 testMessage;	   /**< =1 for testing use only
 					    * (Control and Command ignore this
 					    * bit) */
-		u32 partialCompletion:1;  /**< =1 if there are forthcoming
+		u32 partialCompletion;  /**< =1 if there are forthcoming
 					   * responses/acks associated
 					   * with this message */
-		u32 preserve:1;	       /**< =1 this is to let us know to
+		u32 preserve;	       /**< =1 this is to let us know to
 					* preserve channel contents
 					* (for running guests)*/
-		u32 writerInDiag:1;	/**< =1 the DiagWriter is active in the
+		u32 writerInDiag;	/**< =1 the DiagWriter is active in the
 					 * Diagnostic Partition*/
 
 		    /* remaining bits in this 32-bit word are available */
@@ -396,7 +396,7 @@ typedef struct _CONTROLVM_MESSAGE_PACKET  {
 			u32 devNo;
 			ULTRA_SEGMENT_STATE state;
 			struct  {
-				u32 physicalDevice:1;	/* =1 if message is for
+				u32 physicalDevice;	/* =1 if message is for
 							 * a physical device */
 			/* remaining bits in this 32-bit word are available */
 			} flags;

@@ -118,7 +118,7 @@ struct addi_private {
 	unsigned short us_OutputRegister;	/*  Contain data written at iobase + 0 */
 	unsigned char b_Timer2Mode;	/*  Specify the timer 2 mode */
 	unsigned char b_Timer2Interrupt;	/* Timer2  interrupt enable or disable */
-	unsigned int ai_running:1;
+	unsigned int ai_running;
 	unsigned char b_InterruptMode;	/*  eoc eos or dma */
 	unsigned char b_EocEosInterrupt;	/*  Enable disable eoc eos interrupt */
 	unsigned int ui_EocEosConversionTime;

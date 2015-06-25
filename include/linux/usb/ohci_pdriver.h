@@ -31,9 +31,9 @@
  * these options are activating more or less workarounds for some hardware.
  */
 struct usb_ohci_pdata {
-	unsigned	big_endian_desc:1;
-	unsigned	big_endian_mmio:1;
-	unsigned	no_big_frame_no:1;
+	unsigned	big_endian_desc;
+	unsigned	big_endian_mmio;
+	unsigned	no_big_frame_no;
 	unsigned int	num_ports;
 
 	/* Turn on all power and clocks */

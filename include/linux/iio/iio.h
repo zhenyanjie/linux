@@ -237,10 +237,10 @@ struct iio_chan_spec {
 	const struct iio_chan_spec_ext_info *ext_info;
 	const char		*extend_name;
 	const char		*datasheet_name;
-	unsigned		modified:1;
-	unsigned		indexed:1;
-	unsigned		output:1;
-	unsigned		differential:1;
+	unsigned		modified;
+	unsigned		indexed;
+	unsigned		output;
+	unsigned		differential;
 };
 
 

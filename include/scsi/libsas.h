@@ -121,9 +121,9 @@ struct ex_phy {
 	enum sas_device_type attached_dev_type;
 	enum sas_linkrate linkrate;
 
-	u8   attached_sata_host:1;
-	u8   attached_sata_dev:1;
-	u8   attached_sata_ps:1;
+	u8   attached_sata_host;
+	u8   attached_sata_dev;
+	u8   attached_sata_ps;
 
 	enum sas_protocol attached_tproto;
 	enum sas_protocol attached_iproto;
@@ -133,7 +133,7 @@ struct ex_phy {
 
 	int phy_change_count;
 	enum routing_attribute routing_attr;
-	u8   virtual:1;
+	u8   virtual;
 
 	int  last_da_index;
 
@@ -148,9 +148,9 @@ struct expander_device {
 	u16    max_route_indexes;
 	u8     num_phys;
 
-	u8     t2t_supp:1;
-	u8     configuring:1;
-	u8     conf_route_table:1;
+	u8     t2t_supp;
+	u8     configuring;
+	u8     conf_route_table;
 
 	u8     enclosure_logical_id[8];
 
@@ -580,12 +580,12 @@ struct sas_ata_task {
 
 	u8     retry_count;	  /* hardware retry, should be > 0 */
 
-	u8     dma_xfer:1;	  /* PIO:0 or DMA:1 */
-	u8     use_ncq:1;
-	u8     set_affil_pol:1;
-	u8     stp_affil_pol:1;
+	u8     dma_xfer;	  /* PIO:0 or DMA:1 */
+	u8     use_ncq;
+	u8     set_affil_pol;
+	u8     stp_affil_pol;
 
-	u8     device_control_reg_update:1;
+	u8     device_control_reg_update;
 };
 
 struct sas_smp_task {
@@ -604,7 +604,7 @@ struct sas_ssp_task {
 	u8     retry_count;	  /* hardware retry, should be > 0 */
 
 	u8     LUN[8];
-	u8     enable_first_burst:1;
+	u8     enable_first_burst;
 	enum   task_attribute task_attr;
 	u8     task_prio;
 	struct scsi_cmnd *cmd;
@@ -628,7 +628,7 @@ struct sas_task {
 	struct scatterlist *scatter;
 	int    num_scatter;
 	u32    total_xfer_len;
-	u8     data_dir:2;	  /* Use PCI_DMA_... */
+	u8     data_dir;	  /* Use PCI_DMA_... */
 
 	struct task_status_struct task_status;
 	void   (*task_done)(struct sas_task *);

@@ -98,22 +98,22 @@ struct orinoco_private {
 	u16 channel_mask;
 
 	/* Boolean capabilities */
-	unsigned int has_ibss:1;
-	unsigned int has_port3:1;
-	unsigned int has_wep:1;
-	unsigned int has_big_wep:1;
-	unsigned int has_mwo:1;
-	unsigned int has_pm:1;
-	unsigned int has_preamble:1;
-	unsigned int has_sensitivity:1;
-	unsigned int has_hostscan:1;
-	unsigned int has_alt_txcntl:1;
-	unsigned int has_ext_scan:1;
-	unsigned int has_wpa:1;
-	unsigned int do_fw_download:1;
-	unsigned int broken_disableport:1;
-	unsigned int broken_monitor:1;
-	unsigned int prefer_port3:1;
+	unsigned int has_ibss;
+	unsigned int has_port3;
+	unsigned int has_wep;
+	unsigned int has_big_wep;
+	unsigned int has_mwo;
+	unsigned int has_pm;
+	unsigned int has_preamble;
+	unsigned int has_sensitivity;
+	unsigned int has_hostscan;
+	unsigned int has_alt_txcntl;
+	unsigned int has_ext_scan;
+	unsigned int has_wpa;
+	unsigned int do_fw_download;
+	unsigned int broken_disableport;
+	unsigned int broken_monitor;
+	unsigned int prefer_port3;
 
 	/* Configuration paramaters */
 	enum nl80211_iftype iw_mode;
@@ -155,9 +155,9 @@ struct orinoco_private {
 	struct crypto_hash *rx_tfm_mic;
 	struct crypto_hash *tx_tfm_mic;
 
-	unsigned int wpa_enabled:1;
-	unsigned int tkip_cm_active:1;
-	unsigned int key_mgmt:3;
+	unsigned int wpa_enabled;
+	unsigned int tkip_cm_active;
+	unsigned int key_mgmt;
 
 #if defined(CONFIG_HERMES_CACHE_FW_ON_INIT) || defined(CONFIG_PM_SLEEP)
 	/* Cached in memory firmware to use during ->resume. */

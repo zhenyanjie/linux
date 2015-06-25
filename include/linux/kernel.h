@@ -826,10 +826,12 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
  * @member:	the name of the member within the struct.
  *
  */
-void *__container_of(void *ptr, void *member);
-extern void *dummyforcontainer;
+static inline void *__container_of(void *ptr, void *member) {
+	return ptr;
+}
+static void *dummyforcontainer;
 #define container_of(ptr, type, member)		\
-	((type *)__container_of((void*)ptr, &(((type *)dummyforcontainer)->member)))
+	((type *)__container_of((void*)ptr, (void*)(&(((type *)dummyforcontainer)->member))))
 
 /* Trap pasters of __FUNCTION__ at compile-time */
 #define __FUNCTION__ (__func__)

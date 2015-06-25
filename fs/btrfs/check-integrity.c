@@ -140,11 +140,11 @@ struct btrfsic_state;
 
 struct btrfsic_block {
 	u32 magic_num;		/* only used for debug purposes */
-	unsigned int is_metadata:1;	/* if it is meta-data, not data-data */
-	unsigned int is_superblock:1;	/* if it is one of the superblocks */
-	unsigned int is_iodone:1;	/* if is done by lower subsystem */
-	unsigned int iodone_w_error:1;	/* error was indicated to endio */
-	unsigned int never_written:1;	/* block was added because it was
+	unsigned int is_metadata;	/* if it is meta-data, not data-data */
+	unsigned int is_superblock;	/* if it is one of the superblocks */
+	unsigned int is_iodone;	/* if is done by lower subsystem */
+	unsigned int iodone_w_error;	/* error was indicated to endio */
+	unsigned int never_written;	/* block was added because it was
 					 * referenced, not because it was
 					 * written */
 	unsigned int mirror_num;	/* large enough to hold

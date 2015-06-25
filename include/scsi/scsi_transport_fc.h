@@ -716,46 +716,46 @@ struct fc_function_template {
 	 */
 
 	/* remote port fixed attributes */
-	unsigned long	show_rport_maxframe_size:1;
-	unsigned long	show_rport_supported_classes:1;
-	unsigned long   show_rport_dev_loss_tmo:1;
+	unsigned long	show_rport_maxframe_size;
+	unsigned long	show_rport_supported_classes;
+	unsigned long   show_rport_dev_loss_tmo;
 
 	/*
 	 * target dynamic attributes
 	 * These should all be "1" if the driver uses the remote port
 	 * add/delete functions (so attributes reflect rport values).
 	 */
-	unsigned long	show_starget_node_name:1;
-	unsigned long	show_starget_port_name:1;
-	unsigned long	show_starget_port_id:1;
+	unsigned long	show_starget_node_name;
+	unsigned long	show_starget_port_name;
+	unsigned long	show_starget_port_id;
 
 	/* host fixed attributes */
-	unsigned long	show_host_node_name:1;
-	unsigned long	show_host_port_name:1;
-	unsigned long	show_host_permanent_port_name:1;
-	unsigned long	show_host_supported_classes:1;
-	unsigned long	show_host_supported_fc4s:1;
-	unsigned long	show_host_supported_speeds:1;
-	unsigned long	show_host_maxframe_size:1;
-	unsigned long	show_host_serial_number:1;
-	unsigned long	show_host_manufacturer:1;
-	unsigned long	show_host_model:1;
-	unsigned long	show_host_model_description:1;
-	unsigned long	show_host_hardware_version:1;
-	unsigned long	show_host_driver_version:1;
-	unsigned long	show_host_firmware_version:1;
-	unsigned long	show_host_optionrom_version:1;
+	unsigned long	show_host_node_name;
+	unsigned long	show_host_port_name;
+	unsigned long	show_host_permanent_port_name;
+	unsigned long	show_host_supported_classes;
+	unsigned long	show_host_supported_fc4s;
+	unsigned long	show_host_supported_speeds;
+	unsigned long	show_host_maxframe_size;
+	unsigned long	show_host_serial_number;
+	unsigned long	show_host_manufacturer;
+	unsigned long	show_host_model;
+	unsigned long	show_host_model_description;
+	unsigned long	show_host_hardware_version;
+	unsigned long	show_host_driver_version;
+	unsigned long	show_host_firmware_version;
+	unsigned long	show_host_optionrom_version;
 	/* host dynamic attributes */
-	unsigned long	show_host_port_id:1;
-	unsigned long	show_host_port_type:1;
-	unsigned long	show_host_port_state:1;
-	unsigned long	show_host_active_fc4s:1;
-	unsigned long	show_host_speed:1;
-	unsigned long	show_host_fabric_name:1;
-	unsigned long	show_host_symbolic_name:1;
-	unsigned long	show_host_system_hostname:1;
+	unsigned long	show_host_port_id;
+	unsigned long	show_host_port_type;
+	unsigned long	show_host_port_state;
+	unsigned long	show_host_active_fc4s;
+	unsigned long	show_host_speed;
+	unsigned long	show_host_fabric_name;
+	unsigned long	show_host_symbolic_name;
+	unsigned long	show_host_system_hostname;
 
-	unsigned long	disable_target_scan:1;
+	unsigned long	disable_target_scan;
 };
 
 

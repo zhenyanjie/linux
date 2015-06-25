@@ -70,19 +70,19 @@ enum tb_cfg_pkg_type {
 
 /* common header */
 struct tb_cfg_header {
-	u32 route_hi:22;
-	u32 unknown:10; /* highest order bit is set on replies */
+	u32 route_hi;
+	u32 unknown; /* highest order bit is set on replies */
 	u32 route_lo;
 } __packed;
 
 /* additional header for read/write packets */
 struct tb_cfg_address {
-	u32 offset:13; /* in dwords */
-	u32 length:6; /* in dwords */
-	u32 port:6;
-	enum tb_cfg_space space:2;
-	u32 seq:2; /* sequence number  */
-	u32 zero:3;
+	u32 offset; /* in dwords */
+	u32 length; /* in dwords */
+	u32 port;
+	enum tb_cfg_space space;
+	u32 seq; /* sequence number  */
+	u32 zero;
 } __packed;
 
 /* TB_CFG_PKG_READ, response for TB_CFG_PKG_WRITE */
@@ -101,19 +101,19 @@ struct cfg_write_pkg {
 /* TB_CFG_PKG_ERROR */
 struct cfg_error_pkg {
 	struct tb_cfg_header header;
-	enum tb_cfg_error error:4;
-	u32 zero1:4;
-	u32 port:6;
-	u32 zero2:2; /* Both should be zero, still they are different fields. */
-	u32 zero3:16;
+	enum tb_cfg_error error;
+	u32 zero1;
+	u32 port;
+	u32 zero2; /* Both should be zero, still they are different fields. */
+	u32 zero3;
 } __packed;
 
 /* TB_CFG_PKG_EVENT */
 struct cfg_event_pkg {
 	struct tb_cfg_header header;
-	u32 port:6;
-	u32 zero:25;
-	bool unplug:1;
+	u32 port;
+	u32 zero;
+	bool unplug;
 } __packed;
 
 /* TB_CFG_PKG_RESET */

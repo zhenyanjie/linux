@@ -31,10 +31,10 @@ enum tda8290_lna {
 struct tda829x_config {
 	enum tda8290_lna lna_cfg;
 
-	unsigned int probe_tuner:1;
+	unsigned int probe_tuner;
 #define TDA829X_PROBE_TUNER 0
 #define TDA829X_DONT_PROBE  1
-	unsigned int no_i2c_gate:1;
+	unsigned int no_i2c_gate;
 	struct tda18271_std_map *tda18271_std_map;
 };
 

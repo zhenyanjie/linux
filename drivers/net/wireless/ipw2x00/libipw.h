@@ -308,7 +308,7 @@ struct libipw_device;
 #define SCM_TEMPORAL_KEY_LENGTH	16
 
 struct libipw_security {
-	u16 active_key:2, enabled:1, unicast_uses_group:1, encrypt:1;
+	u16 active_key, enabled, unicast_uses_group, encrypt;
 	u8 auth_mode;
 	u8 encode_alg[WEP_KEYS];
 	u8 key_sizes[WEP_KEYS];
@@ -397,7 +397,7 @@ struct libipw_info_element {
 	u8 current_ap[ETH_ALEN];
 	u16 listen_interval;
 	struct {
-		u16 association_id:14, reserved:2;
+		u16 association_id, reserved;
 	} __packed;
 	u32 time_stamp[2];
 	u16 reason;

@@ -48,7 +48,7 @@ struct interval_node {
 	struct interval_node   *in_parent;
 	unsigned		in_color:1,
 				in_intree:1, /** set if the node is in tree */
-				in_res1:30;
+				in_res1;
 	__u8		    in_res2[4];  /** tags, 8-bytes aligned */
 	__u64		   in_max_high;
 	struct interval_node_extent {

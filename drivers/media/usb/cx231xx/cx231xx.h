@@ -361,13 +361,13 @@ struct cx231xx_board {
 	/* for devices with I2C chips for IR */
 	char *rc_map_name;
 
-	unsigned int max_range_640_480:1;
-	unsigned int has_dvb:1;
-	unsigned int has_417:1;
-	unsigned int valid:1;
-	unsigned int no_alt_vanc:1;
-	unsigned int external_av:1;
-	unsigned int dont_use_port_3:1;
+	unsigned int max_range_640_480;
+	unsigned int has_dvb;
+	unsigned int has_417;
+	unsigned int valid;
+	unsigned int no_alt_vanc;
+	unsigned int external_av;
+	unsigned int dont_use_port_3;
 
 	unsigned char xclk, i2c_speed;
 
@@ -436,7 +436,7 @@ struct cx231xx;
 struct cx231xx_fh {
 	struct v4l2_fh fh;
 	struct cx231xx *dev;
-	unsigned int stream_on:1;	/* Locks streams */
+	unsigned int stream_on;	/* Locks streams */
 	enum v4l2_buf_type type;
 
 	struct videobuf_queue vb_vidq;
@@ -604,10 +604,10 @@ struct cx231xx {
 	struct IR_i2c_init_data    init_data;
 	struct i2c_client          *ir_i2c_client;
 
-	unsigned int stream_on:1;	/* Locks streams */
-	unsigned int vbi_stream_on:1;	/* Locks streams for VBI */
-	unsigned int has_audio_class:1;
-	unsigned int has_alsa_audio:1;
+	unsigned int stream_on;	/* Locks streams */
+	unsigned int vbi_stream_on;	/* Locks streams for VBI */
+	unsigned int has_audio_class;
+	unsigned int has_alsa_audio;
 
 	struct cx231xx_fmt *format;
 
@@ -628,7 +628,7 @@ struct cx231xx {
 
 	/* I2C adapters: Master 1 & 2 (External) & Master 3 (Internal only) */
 	struct cx231xx_i2c i2c_bus[3];
-	unsigned int xc_fw_load_done:1;
+	unsigned int xc_fw_load_done;
 	/* locks */
 	struct mutex gpio_i2c_lock;
 	struct mutex i2c_lock;

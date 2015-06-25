@@ -246,8 +246,8 @@ struct s5k6aa {
 	u16 pclk_fmin;
 	u16 pclk_fmax;
 
-	unsigned int inv_hflip:1;
-	unsigned int inv_vflip:1;
+	unsigned int inv_hflip;
+	unsigned int inv_vflip;
 
 	/* protects the struct members below */
 	struct mutex lock;
@@ -260,9 +260,9 @@ struct s5k6aa {
 	struct s5k6aa_preset *preset;
 	const struct s5k6aa_interval *fiv;
 
-	unsigned int streaming:1;
-	unsigned int apply_cfg:1;
-	unsigned int apply_crop:1;
+	unsigned int streaming;
+	unsigned int apply_cfg;
+	unsigned int apply_crop;
 	unsigned int power;
 };
 

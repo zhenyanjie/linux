@@ -8102,10 +8102,10 @@ mpt_sas_log_info(MPT_ADAPTER *ioc, u32 log_info, u8 cb_idx)
 union loginfo_type {
 	u32	loginfo;
 	struct {
-		u32	subcode:16;
-		u32	code:8;
-		u32	originator:4;
-		u32	bus_type:4;
+		u32	subcode;
+		u32	code;
+		u32	originator;
+		u32	bus_type;
 	}dw;
 };
 	union loginfo_type sas_loginfo;

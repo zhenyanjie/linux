@@ -859,9 +859,9 @@
  * @i2chs_keepon: Keep on high speed internal clock in sleep state.
  */
 struct tps65910_sleep_keepon_data {
-	unsigned therm_keepon:1;
-	unsigned clkout32k_keepon:1;
-	unsigned i2chs_keepon:1;
+	unsigned therm_keepon;
+	unsigned clkout32k_keepon;
+	unsigned i2chs_keepon;
 };
 
 /**

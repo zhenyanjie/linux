@@ -91,7 +91,7 @@ struct hv_ring_buffer {
 
 	union {
 		struct {
-			u32 feat_pending_send_sz:1;
+			u32 feat_pending_send_sz;
 		};
 		u32 value;
 	} feature_bits;
@@ -410,8 +410,8 @@ struct vmbus_channel_offer_channel {
 	/*
 	 * win7 and beyond splits this field into a bit field.
 	 */
-	u8 monitor_allocated:1;
-	u8 reserved:7;
+	u8 monitor_allocated;
+	u8 reserved;
 	/*
 	 * These are new fields added in win7 and later.
 	 * Do not access these fields without checking the
@@ -423,8 +423,8 @@ struct vmbus_channel_offer_channel {
 	 *
 	 * connection_id is to be used in signaling the host.
 	 */
-	u16 is_dedicated_interrupt:1;
-	u16 reserved1:15;
+	u16 is_dedicated_interrupt;
+	u16 reserved1;
 	u32 connection_id;
 } __packed;
 
@@ -616,8 +616,8 @@ struct vmbus_close_msg {
 union hv_connection_id {
 	u32 asu32;
 	struct {
-		u32 id:24;
-		u32 reserved:8;
+		u32 id;
+		u32 reserved;
 	} u;
 };
 

@@ -54,8 +54,8 @@ struct hash_netport4_elem {
 	__be32 ip;
 	__be16 port;
 	u8 proto;
-	u8 cidr:7;
-	u8 nomatch:1;
+	u8 cidr;
+	u8 nomatch;
 };
 
 /* Common functions */
@@ -267,8 +267,8 @@ struct hash_netport6_elem {
 	union nf_inet_addr ip;
 	__be16 port;
 	u8 proto;
-	u8 cidr:7;
-	u8 nomatch:1;
+	u8 cidr;
+	u8 nomatch;
 };
 
 /* Common functions */

@@ -566,18 +566,18 @@ struct dpst_ie_histogram_control {
 	union {
 		uint32_t data;
 		struct {
-			uint32_t bin_reg_index:7;
-			uint32_t reserved:4;
-			uint32_t bin_reg_func_select:1;
-			uint32_t sync_to_phase_in:1;
-			uint32_t alt_enhancement_mode:2;
-			uint32_t reserved1:1;
-			uint32_t sync_to_phase_in_count:8;
-			uint32_t histogram_mode_select:1;
-			uint32_t reserved2:4;
-			uint32_t ie_pipe_assignment:1;
-			uint32_t ie_mode_table_enabled:1;
-			uint32_t ie_histogram_enable:1;
+			uint32_t bin_reg_index;
+			uint32_t reserved;
+			uint32_t bin_reg_func_select;
+			uint32_t sync_to_phase_in;
+			uint32_t alt_enhancement_mode;
+			uint32_t reserved1;
+			uint32_t sync_to_phase_in_count;
+			uint32_t histogram_mode_select;
+			uint32_t reserved2;
+			uint32_t ie_pipe_assignment;
+			uint32_t ie_mode_table_enabled;
+			uint32_t ie_histogram_enable;
 		};
 	};
 };
@@ -586,10 +586,10 @@ struct dpst_guardband {
 	union {
 		uint32_t data;
 		struct {
-			uint32_t guardband:22;
-			uint32_t guardband_interrupt_delay:8;
-			uint32_t interrupt_status:1;
-			uint32_t interrupt_enable:1;
+			uint32_t guardband;
+			uint32_t guardband_interrupt_delay;
+			uint32_t interrupt_status;
+			uint32_t interrupt_enable;
 		};
 	};
 };

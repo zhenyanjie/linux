@@ -25,24 +25,24 @@ struct wm8993_platform_data {
 	int num_retune_configs;
 
 	/* LINEOUT can be differential or single ended */
-	unsigned int lineout1_diff:1;
-	unsigned int lineout2_diff:1;
+	unsigned int lineout1_diff;
+	unsigned int lineout2_diff;
 
 	/* Common mode feedback */
-	unsigned int lineout1fb:1;
-	unsigned int lineout2fb:1;
+	unsigned int lineout1fb;
+	unsigned int lineout2fb;
 
 	/* Delay to add for microphones to stabalise after power up */
 	int micbias1_delay;
 	int micbias2_delay;
 
 	/* Microphone biases: 0=0.9*AVDD1 1=0.65*AVVD1 */
-	unsigned int micbias1_lvl:1;
-	unsigned int micbias2_lvl:1;
+	unsigned int micbias1_lvl;
+	unsigned int micbias2_lvl;
 
 	/* Jack detect threshold levels, see datasheet for values */
-	unsigned int jd_scthr:2;
-	unsigned int jd_thr:2;
+	unsigned int jd_scthr;
+	unsigned int jd_thr;
 };
 
 #endif

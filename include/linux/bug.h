@@ -12,7 +12,7 @@ enum bug_trap_type {
 
 struct pt_regs;
 
-#ifdef __CHECKER__
+#if 1
 #define BUILD_BUG_ON_NOT_POWER_OF_2(n) (0)
 #define BUILD_BUG_ON_ZERO(e) (0)
 #define BUILD_BUG_ON_NULL(e) ((void*)0)

@@ -2722,7 +2722,7 @@ struct vb2_fileio_buf {
 	void *vaddr;
 	unsigned int size;
 	unsigned int pos;
-	unsigned int queued:1;
+	unsigned int queued;
 };
 
 /**

@@ -39,9 +39,9 @@ enum wm2200_mbias_lvl {
 
 struct wm2200_micbias {
 	enum wm2200_mbias_lvl mb_lvl;      /** Regulated voltage */
-	unsigned int discharge:1;          /** Actively discharge */
-	unsigned int fast_start:1;         /** Enable aggressive startup ramp rate */
-	unsigned int bypass:1;             /** Use bypass mode */
+	unsigned int discharge;          /** Actively discharge */
+	unsigned int fast_start;         /** Enable aggressive startup ramp rate */
+	unsigned int bypass;             /** Use bypass mode */
 };
 
 struct wm2200_pdata {

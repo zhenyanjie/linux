@@ -258,11 +258,11 @@ struct floppy_fdc_state {
 	unsigned char version;	/* FDC version code */
 	unsigned char dor;
 	unsigned long address;	/* io address */
-	unsigned int rawcmd:2;
-	unsigned int reset:1;
-	unsigned int need_configure:1;
-	unsigned int perp_mode:2;
-	unsigned int has_fifo:1;
+	unsigned int rawcmd;
+	unsigned int reset;
+	unsigned int need_configure;
+	unsigned int perp_mode;
+	unsigned int has_fifo;
 	unsigned int driver_version;	/* version code for floppy driver */
 #define FD_DRIVER_VERSION 0x100
 /* user programs using the floppy API should use floppy_fdc_state to

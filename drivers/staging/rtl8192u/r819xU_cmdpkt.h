@@ -25,13 +25,13 @@ typedef struct tag_cmd_pkt_tx_feedback {
 	u8	length;				/* Command packet length. */
 	/* Change tx feedback info field. */
 	/*------TX Feedback Info Field */
-	u8	TID:4;
-	u8	fail_reason:3;
-	u8	tok:1;				/* Transmit ok. */
-	u8	reserve1:4;
-	u8	pkt_type:2;
-	u8	bandwidth:1;
-	u8	qos_pkt:1;
+	u8	TID;
+	u8	fail_reason;
+	u8	tok;				/* Transmit ok. */
+	u8	reserve1;
+	u8	pkt_type;
+	u8	bandwidth;
+	u8	qos_pkt;
 
 	/* DWORD 1 */
 	u8	reserve2;
@@ -70,13 +70,13 @@ typedef struct tag_cmd_pkt_set_configuration {
 	u8	length;				/* Command packet length. */
 	u16	reserve1;
 	/* Configuration info. */
-	u8	cfg_reserve1:3;
-	u8	cfg_size:2;
-	u8	cfg_type:2;
-	u8	cfg_action:1;
+	u8	cfg_reserve1;
+	u8	cfg_size;
+	u8	cfg_type;
+	u8	cfg_action;
 	u8	cfg_reserve2;
-	u8	cfg_page:4;
-	u8	cfg_reserve3:4;
+	u8	cfg_page;
+	u8	cfg_reserve3;
 	u8	cfg_offset;
 	u32	value;
 	u32	mask;

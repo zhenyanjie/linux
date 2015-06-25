@@ -45,11 +45,11 @@
 #define IPPP_RESET_MAXDATABYTES	32
 
 struct isdn_ppp_resetparams {
-  unsigned char valid:1;	/* rw Is this structure filled at all ? */
-  unsigned char rsend:1;	/* rw Should we send one at all ? */
-  unsigned char idval:1;	/* rw Is the id field valid ? */
-  unsigned char dtval:1;	/* rw Is the data field valid ? */
-  unsigned char expra:1;	/* rw Is an Ack expected for this Req ? */
+  unsigned char valid;	/* rw Is this structure filled at all ? */
+  unsigned char rsend;	/* rw Should we send one at all ? */
+  unsigned char idval;	/* rw Is the id field valid ? */
+  unsigned char dtval;	/* rw Is the data field valid ? */
+  unsigned char expra;	/* rw Is an Ack expected for this Req ? */
   unsigned char id;		/* wo Send CCP ResetReq with this id */
   unsigned short maxdlen;	/* ro Max bytes to be stored in data field */
   unsigned short dlen;		/* rw Bytes stored in data field */
@@ -138,8 +138,8 @@ struct ippp_ccp_reset_state {
   enum ippp_ccp_reset_states state;	/* State of this transaction */
   struct ippp_struct *is;		/* Backlink to device stuff */
   unsigned char id;			/* Backlink id index */
-  unsigned char ta:1;			/* The timer is active (flag) */
-  unsigned char expra:1;		/* We expect a ResetAck at all */
+  unsigned char ta;			/* The timer is active (flag) */
+  unsigned char expra;		/* We expect a ResetAck at all */
   int dlen;				/* Databytes stored in data */
   struct timer_list timer;		/* For timeouts/retries */
   /* This is a hack but seems sufficient for the moment. We do not want

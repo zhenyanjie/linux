@@ -159,8 +159,8 @@ struct renesas_usbhs_driver_param {
 	/*
 	 * option:
 	 */
-	u32 has_otg:1; /* for controlling PWEN/EXTLP */
-	u32 has_sudmac:1; /* for SUDMAC */
+	u32 has_otg; /* for controlling PWEN/EXTLP */
+	u32 has_sudmac; /* for SUDMAC */
 };
 
 #define USBHS_TYPE_R8A7790 1

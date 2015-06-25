@@ -109,7 +109,7 @@ struct dvb_ca_slot {
 	u8 config_option;
 
 	/* if 1, the CAM supports DA IRQs */
-	u8 da_irq_supported:1;
+	u8 da_irq_supported;
 
 	/* size of the buffer to use when talking to the CAM */
 	int link_buf_size;
@@ -146,10 +146,10 @@ struct dvb_ca_private {
 	struct task_struct *thread;
 
 	/* Flag indicating if the CA device is open */
-	unsigned int open:1;
+	unsigned int open;
 
 	/* Flag indicating the thread should wake up now */
-	unsigned int wakeup:1;
+	unsigned int wakeup;
 
 	/* Delay the main thread should use */
 	unsigned long delay;

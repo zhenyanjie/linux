@@ -589,8 +589,8 @@ static void ps3avd(struct work_struct *work)
 #define SHIFT_VESA	8
 
 static const struct {
-	unsigned mask:19;
-	unsigned id:4;
+	unsigned mask;
+	unsigned id;
 } ps3av_preferred_modes[] = {
 	{ PS3AV_RESBIT_WUXGA      << SHIFT_VESA, PS3AV_MODE_WUXGA   },
 	{ PS3AV_RESBIT_1920x1080P << SHIFT_60,   PS3AV_MODE_1080P60 },

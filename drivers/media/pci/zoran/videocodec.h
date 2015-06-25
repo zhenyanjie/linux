@@ -221,14 +221,14 @@ M                       zr36055[1] 0001 0000c001 00000000 (zr36050[1])
 /* ========================= */
 
 struct vfe_polarity {
-	unsigned int vsync_pol:1;
-	unsigned int hsync_pol:1;
-	unsigned int field_pol:1;
-	unsigned int blank_pol:1;
-	unsigned int subimg_pol:1;
-	unsigned int poe_pol:1;
-	unsigned int pvalid_pol:1;
-	unsigned int vclk_pol:1;
+	unsigned int vsync_pol;
+	unsigned int hsync_pol;
+	unsigned int field_pol;
+	unsigned int blank_pol;
+	unsigned int subimg_pol;
+	unsigned int poe_pol;
+	unsigned int pvalid_pol;
+	unsigned int vclk_pol;
 };
 
 struct vfe_settings {

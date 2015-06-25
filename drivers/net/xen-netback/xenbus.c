@@ -33,7 +33,7 @@ struct backend_info {
 
 	enum xenbus_state frontend_state;
 	struct xenbus_watch hotplug_status_watch;
-	u8 have_hotplug_status_watch:1;
+	u8 have_hotplug_status_watch;
 };
 
 static int connect_rings(struct backend_info *be, struct xenvif_queue *queue);

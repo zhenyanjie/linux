@@ -119,7 +119,7 @@ struct arizona {
 
 	struct arizona_pdata pdata;
 
-	unsigned int external_dcvdd:1;
+	unsigned int external_dcvdd;
 
 	int irq;
 	struct irq_domain *virq;

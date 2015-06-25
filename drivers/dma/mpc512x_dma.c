@@ -147,11 +147,11 @@ struct __attribute__ ((__packed__)) mpc_dma_tcd {
 	/* 0x00 */
 	u32 saddr;		/* Source address */
 
-	u32 smod:5;		/* Source address modulo */
-	u32 ssize:3;		/* Source data transfer size */
-	u32 dmod:5;		/* Destination address modulo */
-	u32 dsize:3;		/* Destination data transfer size */
-	u32 soff:16;		/* Signed source address offset */
+	u32 smod;		/* Source address modulo */
+	u32 ssize;		/* Source data transfer size */
+	u32 dmod;		/* Destination address modulo */
+	u32 dsize;		/* Destination data transfer size */
+	u32 soff;		/* Signed source address offset */
 
 	/* 0x08 */
 	u32 nbytes;		/* Inner "minor" byte count */
@@ -159,12 +159,12 @@ struct __attribute__ ((__packed__)) mpc_dma_tcd {
 	u32 daddr;		/* Destination address */
 
 	/* 0x14 */
-	u32 citer_elink:1;	/* Enable channel-to-channel linking on
+	u32 citer_elink;	/* Enable channel-to-channel linking on
 				 * minor loop complete
 				 */
-	u32 citer_linkch:6;	/* Link channel for minor loop complete */
-	u32 citer:9;		/* Current "major" iteration count */
-	u32 doff:16;		/* Signed destination address offset */
+	u32 citer_linkch;	/* Link channel for minor loop complete */
+	u32 citer;		/* Current "major" iteration count */
+	u32 doff;		/* Signed destination address offset */
 
 	/* 0x18 */
 	u32 dlast_sga;		/* Last Destination address adjustment/scatter
@@ -172,27 +172,27 @@ struct __attribute__ ((__packed__)) mpc_dma_tcd {
 				 */
 
 	/* 0x1c */
-	u32 biter_elink:1;	/* Enable channel-to-channel linking on major
+	u32 biter_elink;	/* Enable channel-to-channel linking on major
 				 * loop complete
 				 */
-	u32 biter_linkch:6;
-	u32 biter:9;		/* Beginning "major" iteration count */
-	u32 bwc:2;		/* Bandwidth control */
-	u32 major_linkch:6;	/* Link channel number */
-	u32 done:1;		/* Channel done */
-	u32 active:1;		/* Channel active */
-	u32 major_elink:1;	/* Enable channel-to-channel linking on major
+	u32 biter_linkch;
+	u32 biter;		/* Beginning "major" iteration count */
+	u32 bwc;		/* Bandwidth control */
+	u32 major_linkch;	/* Link channel number */
+	u32 done;		/* Channel done */
+	u32 active;		/* Channel active */
+	u32 major_elink;	/* Enable channel-to-channel linking on major
 				 * loop complete
 				 */
-	u32 e_sg:1;		/* Enable scatter/gather processing */
-	u32 d_req:1;		/* Disable request */
-	u32 int_half:1;		/* Enable an interrupt when major counter is
+	u32 e_sg;		/* Enable scatter/gather processing */
+	u32 d_req;		/* Disable request */
+	u32 int_half;		/* Enable an interrupt when major counter is
 				 * half complete
 				 */
-	u32 int_maj:1;		/* Enable an interrupt when major iteration
+	u32 int_maj;		/* Enable an interrupt when major iteration
 				 * count completes
 				 */
-	u32 start:1;		/* Channel start */
+	u32 start;		/* Channel start */
 };
 
 struct mpc_dma_desc {

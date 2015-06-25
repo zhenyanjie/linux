@@ -181,20 +181,20 @@
  **********************************************/
 
 struct reg_bit {      /* reading this one will clear the interrupt    */
-    __u8 error:1;     /* previous command ended in an error	      */
-    __u8 more:1;      /* more DATA coming soon, poll BSY & DRQ (PIO)  */
-    __u8 corr:1;      /* data read was successfully corrected with ECC*/
-    __u8 drq:1;	      /* data request active  */     
-    __u8 sc:1;	      /* seek complete	      */
-    __u8 fault:1;     /* write fault	      */
-    __u8 ready:1;     /* drive ready	      */
-    __u8 busy:1;      /* controller busy      */
+    __u8 error;     /* previous command ended in an error	      */
+    __u8 more;      /* more DATA coming soon, poll BSY & DRQ (PIO)  */
+    __u8 corr;      /* data read was successfully corrected with ECC*/
+    __u8 drq;	      /* data request active  */     
+    __u8 sc;	      /* seek complete	      */
+    __u8 fault;     /* write fault	      */
+    __u8 ready;     /* drive ready	      */
+    __u8 busy;      /* controller busy      */
 };
 
 struct reg_abit {     /* reading this won't clear the interrupt */
-    __u8 abusy:1;     /* auxiliary busy				*/
-    __u8 irq:1;	      /* set when drive interrupt is asserted	*/
-    __u8 dummy:6;
+    __u8 abusy;     /* auxiliary busy				*/
+    __u8 irq;	      /* set when drive interrupt is asserted	*/
+    __u8 dummy;
 };
 
 struct eata_register {	    /* EATA register set */
@@ -212,7 +212,7 @@ struct get_conf {	      /* Read Configuration Array		*/
     __u32  len;		      /* Should return 0x22, 0x24, etc		*/
     __u32 signature;	      /* Signature MUST be "EATA"		*/
     __u8    version2:4,
-	     version:4;	      /* EATA Version level			*/
+	     version;	      /* EATA Version level			*/
     __u8 OCS_enabled:1,	      /* Overlap Command Support enabled	*/
 	 TAR_support:1,	      /* SCSI Target Mode supported		*/
 	      TRNXFR:1,	      /* Truncate Transfer Cmd not necessary	*
@@ -222,7 +222,7 @@ struct get_conf {	      /* Read Configuration Array		*/
 			       * this mode				*/
 	   DMA_valid:1,	      /* DRQ value in Byte 30 is valid		*/
 		 ATA:1,	      /* ATA device connected (not supported)	*/
-	   HAA_valid:1;	      /* Hostadapter Address is valid		*/
+	   HAA_valid;	      /* Hostadapter Address is valid		*/
 
     __u16 cppadlen;	      /* Number of pad bytes send after CD data *
 			       * set to zero for DMA commands		*/
@@ -237,23 +237,23 @@ struct get_conf {	      /* Read Configuration Array		*/
     __u8    IRQ:4,	      /* IRQ used this HA			*/
 	 IRQ_TR:1,	      /* IRQ Trigger: 0=edge, 1=level		*/
 	 SECOND:1,	      /* This is a secondary controller		*/
-    DMA_channel:2;	      /* DRQ index, DRQ is 2comp of DRQX	*/
+    DMA_channel;	      /* DRQ index, DRQ is 2comp of DRQX	*/
     __u8 sync;		      /* device at ID 7 tru 0 is running in	*
 			       * synchronous mode, this will disappear	*/
     __u8   DSBLE:1,	      /* ISA i/o addressing is disabled		*/
 	 FORCADR:1,	      /* i/o address has been forced		*/
 	  SG_64K:1,
 	  SG_UAE:1,
-		:4;
+		;
     __u8  MAX_ID:5,	      /* Max number of SCSI target IDs		*/
-	MAX_CHAN:3;	      /* Number of SCSI busses on HBA		*/
+	MAX_CHAN;	      /* Number of SCSI busses on HBA		*/
     __u8 MAX_LUN;	      /* Max number of LUNs			*/
     __u8	:3,
 	 AUTOTRM:1,
 	 M1_inst:1,
 	 ID_qest:1,	      /* Raidnum ID is questionable		*/
 	  is_PCI:1,	      /* HBA is PCI				*/
-	 is_EISA:1;	      /* HBA is EISA				*/
+	 is_EISA;	      /* HBA is EISA				*/
     __u8 RAIDNUM;             /* unique HBA identifier                  */
     __u8 unused[474]; 
 };
@@ -273,24 +273,24 @@ struct eata_ccb {	      /* Send Command Packet structure	    */
 	     Resrvd:1,	      /* RFU					*/
 	  Interpret:1,	      /* Interpret the SCSI cdb of own use	*/
 	    DataOut:1,	      /* Data Out phase with command		*/
-	     DataIn:1;	      /* Data In phase with command		*/
+	     DataIn;	      /* Data In phase with command		*/
     __u8 reqlen;	      /* Request Sense Length			* 
 			       * Valid if Auto_Req_Sen=1		*/
     __u8 unused[3];
     __u8  FWNEST:1,	      /* send cmd to phys RAID component	*/
-	 unused2:7;
+	 unused2;
     __u8 Phsunit:1,	      /* physical unit on mirrored pair		*/
 	    I_AT:1,	      /* inhibit address translation		*/
 	 I_HBA_C:1,	      /* HBA inhibit caching			*/
-	 unused3:5;
+	 unused3;
 
     __u8     cp_id:5,	      /* SCSI Device ID of target		*/ 
-	cp_channel:3;	      /* SCSI Channel # of HBA			*/
+	cp_channel;	      /* SCSI Channel # of HBA			*/
     __u8    cp_lun:3,
 		  :2,
 	 cp_luntar:1,	      /* CP is for target ROUTINE		*/
 	 cp_dispri:1,	      /* Grant disconnect privilege		*/
-       cp_identify:1;	      /* Always TRUE				*/
+       cp_identify;	      /* Always TRUE				*/
     __u8 cp_msg1;	      /* Message bytes 0-3			*/
     __u8 cp_msg2;
     __u8 cp_msg3;
@@ -317,7 +317,7 @@ struct eata_ccb {	      /* Send Command Packet structure	    */
 
 struct eata_sp {
     __u8 hba_stat:7,	      /* HBA status				*/
-	      EOC:1;	      /* True if command finished		*/
+	      EOC;	      /* True if command finished		*/
     __u8 scsi_stat;	      /* Target SCSI status			*/
     __u8 reserved[2];
     __u32  residue_len;	      /* Number of bytes not transferred	*/
@@ -338,7 +338,7 @@ typedef struct hstd {
     __u8   primary;		 /* true if primary	       */
     __u8        more_support:1,  /* HBA supports MORE flag     */
            immediate_support:1,  /* HBA supports IMMEDIATE CMDs*/
-              broken_INQUIRY:1;	 /* This is an EISA HBA with   *
+              broken_INQUIRY;	 /* This is an EISA HBA with   *
 				  * broken INQUIRY	       */
     __u8   do_latency;		 /* Latency measurement flag   */
     __u32  reads[13];

@@ -179,60 +179,60 @@ struct bb_reg_definition {
 };
 
 struct tx_fwinfo {
-	u8			TxRate:7;
-	u8			CtsEnable:1;
-	u8			RtsRate:7;
-	u8			RtsEnable:1;
-	u8			TxHT:1;
-	u8			Short:1;
-	u8			TxBandwidth:1;
-	u8			TxSubCarrier:2;
-	u8			STBC:2;
-	u8			AllowAggregation:1;
-	u8			RtsHT:1;
-	u8			RtsShort:1;
-	u8			RtsBandwidth:1;
-	u8			RtsSubcarrier:2;
-	u8			RtsSTBC:2;
-	u8			EnableCPUDur:1;
+	u8			TxRate;
+	u8			CtsEnable;
+	u8			RtsRate;
+	u8			RtsEnable;
+	u8			TxHT;
+	u8			Short;
+	u8			TxBandwidth;
+	u8			TxSubCarrier;
+	u8			STBC;
+	u8			AllowAggregation;
+	u8			RtsHT;
+	u8			RtsShort;
+	u8			RtsBandwidth;
+	u8			RtsSubcarrier;
+	u8			RtsSTBC;
+	u8			EnableCPUDur;
 
-	u32			RxMF:2;
-	u32			RxAMD:3;
-	u32			Reserved1:3;
-	u32			TxAGCOffset:4;
-	u32			TxAGCSign:1;
-	u32			Tx_INFO_RSVD:6;
-	u32			PacketID:13;
+	u32			RxMF;
+	u32			RxAMD;
+	u32			Reserved1;
+	u32			TxAGCOffset;
+	u32			TxAGCSign;
+	u32			Tx_INFO_RSVD;
+	u32			PacketID;
 };
 
 struct tx_fwinfo_8190pci {
-	u8			TxRate:7;
-	u8			CtsEnable:1;
-	u8			RtsRate:7;
-	u8			RtsEnable:1;
-	u8			TxHT:1;
-	u8			Short:1;
-	u8			TxBandwidth:1;
-	u8			TxSubCarrier:2;
-	u8			STBC:2;
-	u8			AllowAggregation:1;
-	u8			RtsHT:1;
-	u8			RtsShort:1;
-	u8			RtsBandwidth:1;
-	u8			RtsSubcarrier:2;
-	u8			RtsSTBC:2;
-	u8			EnableCPUDur:1;
+	u8			TxRate;
+	u8			CtsEnable;
+	u8			RtsRate;
+	u8			RtsEnable;
+	u8			TxHT;
+	u8			Short;
+	u8			TxBandwidth;
+	u8			TxSubCarrier;
+	u8			STBC;
+	u8			AllowAggregation;
+	u8			RtsHT;
+	u8			RtsShort;
+	u8			RtsBandwidth;
+	u8			RtsSubcarrier;
+	u8			RtsSTBC;
+	u8			EnableCPUDur;
 
-	u32			RxMF:2;
-	u32			RxAMD:3;
-	u32			TxPerPktInfoFeedback:1;
-	u32			Reserved1:2;
-	u32			TxAGCOffset:4;
-	u32			TxAGCSign:1;
-	u32			RAW_TXD:1;
-	u32			Retry_Limit:4;
-	u32			Reserved2:1;
-	u32			PacketID:13;
+	u32			RxMF;
+	u32			RxAMD;
+	u32			TxPerPktInfoFeedback;
+	u32			Reserved1;
+	u32			TxAGCOffset;
+	u32			TxAGCSign;
+	u32			RAW_TXD;
+	u32			Retry_Limit;
+	u32			Reserved2;
+	u32			PacketID;
 
 
 };
@@ -270,10 +270,10 @@ struct log_int_8190 {
 };
 
 struct phy_ofdm_rx_status_rxsc_sgien_exintfflag {
-	u8			reserved:4;
-	u8			rxsc:2;
-	u8			sgi_en:1;
-	u8			ex_intf_flag:1;
+	u8			reserved;
+	u8			rxsc;
+	u8			sgi_en;
+	u8			ex_intf_flag;
 };
 
 struct phy_sts_ofdm_819xpci {
@@ -305,30 +305,30 @@ struct phy_sts_cck_819xpci {
 struct tx_desc {
 	u16	PktSize;
 	u8	Offset;
-	u8	Reserved1:3;
-	u8	CmdInit:1;
-	u8	LastSeg:1;
-	u8	FirstSeg:1;
-	u8	LINIP:1;
-	u8	OWN:1;
+	u8	Reserved1;
+	u8	CmdInit;
+	u8	LastSeg;
+	u8	FirstSeg;
+	u8	LINIP;
+	u8	OWN;
 
 	u8	TxFWInfoSize;
-	u8	RATid:3;
-	u8	DISFB:1;
-	u8	USERATE:1;
-	u8	MOREFRAG:1;
-	u8	NoEnc:1;
-	u8	PIFS:1;
-	u8	QueueSelect:5;
-	u8	NoACM:1;
-	u8	Resv:2;
-	u8	SecCAMID:5;
-	u8	SecDescAssign:1;
-	u8	SecType:2;
+	u8	RATid;
+	u8	DISFB;
+	u8	USERATE;
+	u8	MOREFRAG;
+	u8	NoEnc;
+	u8	PIFS;
+	u8	QueueSelect;
+	u8	NoACM;
+	u8	Resv;
+	u8	SecCAMID;
+	u8	SecDescAssign;
+	u8	SecType;
 
 	u16	TxBufferSize;
-	u8	PktId:7;
-	u8	Resv1:1;
+	u8	PktId;
+	u8	Resv1;
 	u8	Reserved2;
 
 	u32	TxBuffAddr;
@@ -344,12 +344,12 @@ struct tx_desc {
 struct tx_desc_cmd {
 	u16	PktSize;
 	u8	Reserved1;
-	u8	CmdType:3;
-	u8	CmdInit:1;
-	u8	LastSeg:1;
-	u8	FirstSeg:1;
-	u8	LINIP:1;
-	u8	OWN:1;
+	u8	CmdType;
+	u8	CmdInit;
+	u8	LastSeg;
+	u8	FirstSeg;
+	u8	LINIP;
+	u8	OWN;
 
 	u16	ElementReport;
 	u16	Reserved2;
@@ -365,17 +365,17 @@ struct tx_desc_cmd {
 };
 
 struct rx_desc {
-	u16			Length:14;
-	u16			CRC32:1;
-	u16			ICV:1;
+	u16			Length;
+	u16			CRC32;
+	u16			ICV;
 	u8			RxDrvInfoSize;
-	u8			Shift:2;
-	u8			PHYStatus:1;
-	u8			SWDec:1;
-	u8			LastSeg:1;
-	u8			FirstSeg:1;
-	u8			EOR:1;
-	u8			OWN:1;
+	u8			Shift;
+	u8			PHYStatus;
+	u8			SWDec;
+	u8			LastSeg;
+	u8			FirstSeg;
+	u8			EOR;
+	u8			OWN;
 
 	u32			Reserved2;
 
@@ -387,21 +387,21 @@ struct rx_desc {
 
 
 struct rx_fwinfo {
-	u16			Reserved1:12;
-	u16			PartAggr:1;
-	u16			FirstAGGR:1;
-	u16			Reserved2:2;
+	u16			Reserved1;
+	u16			PartAggr;
+	u16			FirstAGGR;
+	u16			Reserved2;
 
-	u8			RxRate:7;
-	u8			RxHT:1;
+	u8			RxRate;
+	u8			RxHT;
 
-	u8			BW:1;
-	u8			SPLCP:1;
-	u8			Reserved3:2;
-	u8			PAM:1;
-	u8			Mcast:1;
-	u8			Bcast:1;
-	u8			Reserved4:1;
+	u8			BW;
+	u8			SPLCP;
+	u8			Reserved3;
+	u8			PAM;
+	u8			Mcast;
+	u8			Bcast;
+	u8			Reserved4;
 
 	u32			TSFL;
 

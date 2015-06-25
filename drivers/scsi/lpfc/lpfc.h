@@ -168,7 +168,7 @@ typedef struct lpfc_vpd {
 	} rev;
 	struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-		uint32_t rsvd3  :19;  /* Reserved                             */
+		uint32_t rsvd3  ;  /* Reserved                             */
 		uint32_t cdss	: 1;  /* Configure Data Security SLI          */
 		uint32_t rsvd2	: 3;  /* Reserved                             */
 		uint32_t cbg	: 1;  /* Configure BlockGuard                 */
@@ -192,7 +192,7 @@ typedef struct lpfc_vpd {
 		uint32_t cbg	: 1;  /* Configure BlockGuard                 */
 		uint32_t rsvd2	: 3;  /* Reserved                             */
 		uint32_t cdss	: 1;  /* Configure Data Security SLI          */
-		uint32_t rsvd3  :19;  /* Reserved                             */
+		uint32_t rsvd3  ;  /* Reserved                             */
 #endif
 	} sli3Feat;
 } lpfc_vpd_t;

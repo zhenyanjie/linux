@@ -77,7 +77,7 @@ struct tifm_ms {
 	unsigned int            block_pos;
 	unsigned long           timeout_jiffies;
 	unsigned char           eject:1,
-				use_dma:1;
+				use_dma;
 	unsigned char           cmd_flags;
 	unsigned char           io_pos;
 	unsigned int            io_word;

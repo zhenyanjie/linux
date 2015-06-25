@@ -186,24 +186,24 @@ struct ar9170_tx_hw_mac_control {
 			 * Beware of compiler bugs in all gcc pre 4.4!
 			 */
 
-			u8 erp_prot:2;
-			u8 no_ack:1;
-			u8 backoff:1;
-			u8 burst:1;
-			u8 ampdu:1;
+			u8 erp_prot;
+			u8 no_ack;
+			u8 backoff;
+			u8 burst;
+			u8 ampdu;
 
-			u8 enc_mode:2;
+			u8 enc_mode;
 
-			u8 hw_mmic:1;
-			u8 hw_duration:1;
+			u8 hw_mmic;
+			u8 hw_duration;
 
-			u8 qos_queue:2;
+			u8 qos_queue;
 
-			u8 disable_txop:1;
-			u8 txop_rifs:1;
+			u8 disable_txop;
+			u8 txop_rifs;
 
-			u8 ba_end:1;
-			u8 probe:1;
+			u8 ba_end;
+			u8 probe;
 		} __packed;
 
 		__le16 set;
@@ -217,16 +217,16 @@ struct ar9170_tx_hw_phy_control {
 			 * Beware of compiler bugs in all gcc pre 4.4!
 			 */
 
-			u8 modulation:2;
-			u8 preamble:1;
-			u8 bandwidth:2;
-			u8:1;
-			u8 heavy_clip:3;
-			u8 tx_power:6;
-			u8 chains:3;
-			u8 mcs:7;
-			u8:6;
-			u8 short_gi:1;
+			u8 modulation;
+			u8 preamble;
+			u8 bandwidth;
+			u8;
+			u8 heavy_clip;
+			u8 tx_power;
+			u8 chains;
+			u8 mcs;
+			u8;
+			u8 short_gi;
 		} __packed;
 
 		__le32 set;
@@ -234,10 +234,10 @@ struct ar9170_tx_hw_phy_control {
 } __packed;
 
 struct ar9170_tx_rate_info {
-	u8 tries:3;
-	u8 erp_prot:2;
-	u8 ampdu:1;
-	u8 free:2; /* free for use (e.g.:RIFS/TXOP/AMPDU) */
+	u8 tries;
+	u8 erp_prot;
+	u8 ampdu;
+	u8 free; /* free for use (e.g.:RIFS/TXOP/AMPDU) */
 } __packed;
 
 struct carl9170_tx_superdesc {
@@ -245,16 +245,16 @@ struct carl9170_tx_superdesc {
 	u8 rix;
 	u8 cnt;
 	u8 cookie;
-	u8 ampdu_density:3;
-	u8 ampdu_factor:2;
-	u8 ampdu_commit_density:1;
-	u8 ampdu_commit_factor:1;
-	u8 ampdu_unused_bit:1;
-	u8 queue:2;
-	u8 assign_seq:1;
-	u8 vif_id:3;
-	u8 fill_in_tsf:1;
-	u8 cab:1;
+	u8 ampdu_density;
+	u8 ampdu_factor;
+	u8 ampdu_commit_density;
+	u8 ampdu_commit_factor;
+	u8 ampdu_unused_bit;
+	u8 queue;
+	u8 assign_seq;
+	u8 vif_id;
+	u8 fill_in_tsf;
+	u8 cab;
 	u8 padding2;
 	struct ar9170_tx_rate_info ri[CARL9170_TX_MAX_RATES];
 	struct ar9170_tx_hw_phy_control rr[CARL9170_TX_MAX_RETRY_RATES];

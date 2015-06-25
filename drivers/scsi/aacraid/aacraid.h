@@ -157,11 +157,11 @@ struct creation_info
 						 */
 	u8		year;			/* e.g., 1997 = 97 */
 	__le32		date;			/*
-						 * unsigned	Month		:4;	// 1 - 12
-						 * unsigned	Day		:6;	// 1 - 32
-						 * unsigned	Hour		:6;	// 0 - 23
-						 * unsigned	Minute		:6;	// 0 - 60
-						 * unsigned	Second		:6;	// 0 - 60
+						 * unsigned	Month		;	// 1 - 12
+						 * unsigned	Day		;	// 1 - 32
+						 * unsigned	Hour		;	// 0 - 23
+						 * unsigned	Minute		;	// 0 - 60
+						 * unsigned	Second		;	// 0 - 60
 						 */
 	__le32		serial[2];			/* e.g., 0x1DEADB0BFAFAF001 */
 };
@@ -809,16 +809,16 @@ struct aac_fib_context {
 
 struct sense_data {
 	u8 error_code;		/* 70h (current errors), 71h(deferred errors) */
-	u8 valid:1;		/* A valid bit of one indicates that the information  */
+	u8 valid;		/* A valid bit of one indicates that the information  */
 				/* field contains valid information as defined in the
 				 * SCSI-2 Standard.
 				 */
 	u8 segment_number;	/* Only used for COPY, COMPARE, or COPY AND VERIFY Commands */
-	u8 sense_key:4;		/* Sense Key */
-	u8 reserved:1;
-	u8 ILI:1;		/* Incorrect Length Indicator */
-	u8 EOM:1;		/* End Of Medium - reserved for random access devices */
-	u8 filemark:1;		/* Filemark - reserved for random access devices */
+	u8 sense_key;		/* Sense Key */
+	u8 reserved;
+	u8 ILI;		/* Incorrect Length Indicator */
+	u8 EOM;		/* End Of Medium - reserved for random access devices */
+	u8 filemark;		/* Filemark - reserved for random access devices */
 
 	u8 information[4];	/* for direct-access devices, contains the unsigned
 				 * logical block address or residue associated with
@@ -829,17 +829,17 @@ struct sense_data {
 	u8 ASC;			/* Additional Sense Code */
 	u8 ASCQ;		/* Additional Sense Code Qualifier */
 	u8 FRUC;		/* Field Replaceable Unit Code - not used */
-	u8 bit_ptr:3;		/* indicates which byte of the CDB or parameter data
+	u8 bit_ptr;		/* indicates which byte of the CDB or parameter data
 				 * was in error
 				 */
-	u8 BPV:1;		/* bit pointer valid (BPV): 1- indicates that
+	u8 BPV;		/* bit pointer valid (BPV): 1- indicates that
 				 * the bit_ptr field has valid value
 				 */
-	u8 reserved2:2;
-	u8 CD:1;		/* command data bit: 1- illegal parameter in CDB.
+	u8 reserved2;
+	u8 CD;		/* command data bit: 1- illegal parameter in CDB.
 				 * 0- illegal parameter in data.
 				 */
-	u8 SKSV:1;
+	u8 SKSV;
 	u8 field_ptr[2];	/* byte of the CDB or parameter data in error */
 };
 

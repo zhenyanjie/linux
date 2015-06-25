@@ -202,7 +202,7 @@ struct omap3_l3 {
 	int app_irq;
 
 	/* true when and inband functional error occurs */
-	unsigned inband:1;
+	unsigned inband;
 };
 
 /* offsets for l3 agents in order with the Flag status register */

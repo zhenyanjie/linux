@@ -109,7 +109,7 @@ enum cardtype { MBH10302, MBH10304, TDK, CONTEC, LA501, UNGERMANN,
 struct local_info {
 	struct pcmcia_device	*p_dev;
     long open_time;
-    uint tx_started:1;
+    uint tx_started;
     uint tx_queue;
     u_short tx_queue_len;
     enum cardtype cardtype;

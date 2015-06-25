@@ -163,10 +163,10 @@ struct usbduxsigma_private {
 
 	unsigned int ao_readback[USBDUXSIGMA_NUM_AO_CHAN];
 
-	unsigned high_speed:1;
-	unsigned ai_cmd_running:1;
-	unsigned ao_cmd_running:1;
-	unsigned pwm_cmd_running:1;
+	unsigned high_speed;
+	unsigned ai_cmd_running;
+	unsigned ao_cmd_running;
+	unsigned pwm_cmd_running;
 
 	/* number of samples to acquire */
 	int ai_sample_count;

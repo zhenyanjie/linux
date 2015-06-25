@@ -609,8 +609,8 @@ typedef struct {
 // a single struct pointed to by atm_vcc->dev_data
 
 typedef struct {
-  u8               tx_vc_bits:7;
-  u8               tx_present:1;
+  u8               tx_vc_bits;
+  u8               tx_present;
 } amb_tx_info;
 
 typedef struct {

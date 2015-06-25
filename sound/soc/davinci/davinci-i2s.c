@@ -149,7 +149,7 @@ struct davinci_mcbsp_dev {
 	 * so that no pops are heard, and the left and right channels
 	 * won't end up being swapped because of the underrun.
 	 */
-	unsigned enable_channel_combine:1;
+	unsigned enable_channel_combine;
 
 	unsigned int fmt;
 	int clk_div;

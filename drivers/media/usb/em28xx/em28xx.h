@@ -313,7 +313,7 @@ struct em28xx_audio_mode {
 	u16 ac97_feat;
 	u32 ac97_vendor_id;
 
-	unsigned int has_audio:1;
+	unsigned int has_audio;
 
 	u8 i2s_samplerates;
 };
@@ -445,14 +445,14 @@ struct em28xx_board {
 	struct em28xx_reg_seq *tuner_gpio;
 	struct em28xx_reg_seq *mute_gpio;
 
-	unsigned int is_em2800:1;
-	unsigned int has_msp34xx:1;
-	unsigned int mts_firmware:1;
-	unsigned int max_range_640_480:1;
-	unsigned int has_dvb:1;
-	unsigned int is_webcam:1;
-	unsigned int valid:1;
-	unsigned int has_ir_i2c:1;
+	unsigned int is_em2800;
+	unsigned int has_msp34xx;
+	unsigned int mts_firmware;
+	unsigned int max_range_640_480;
+	unsigned int has_dvb;
+	unsigned int is_webcam;
+	unsigned int valid;
+	unsigned int has_ir_i2c;
 
 	unsigned char xclk, i2c_speed;
 	unsigned char radio_addr;
@@ -605,12 +605,12 @@ struct em28xx {
 	int devno;		/* marks the number of this device */
 	enum em28xx_chip_id chip_id;
 
-	unsigned int is_em25xx:1;	/* em25xx/em276x/7x/8x family bridge */
-	unsigned char disconnected:1;	/* device has been diconnected */
-	unsigned int has_video:1;
-	unsigned int has_audio_class:1;
-	unsigned int has_alsa_audio:1;
-	unsigned int is_audio_only:1;
+	unsigned int is_em25xx;	/* em25xx/em276x/7x/8x family bridge */
+	unsigned char disconnected;	/* device has been diconnected */
+	unsigned int has_video;
+	unsigned int has_audio_class;
+	unsigned int has_alsa_audio;
+	unsigned int is_audio_only;
 
 	struct em28xx_board board;
 
@@ -632,7 +632,7 @@ struct em28xx {
 	struct i2c_client i2c_client[NUM_I2C_BUSES];
 	struct em28xx_i2c_bus i2c_bus[NUM_I2C_BUSES];
 
-	unsigned char eeprom_addrwidth_16bit:1;
+	unsigned char eeprom_addrwidth_16bit;
 	unsigned def_i2c_bus;	/* Default I2C bus */
 	unsigned cur_i2c_bus;	/* Current I2C bus */
 	struct rt_mutex i2c_bus_lock;
@@ -680,12 +680,12 @@ struct em28xx {
 				   URB buffer size definition */
 	int num_alt;		/* number of alternative settings */
 	unsigned int *alt_max_pkt_size_isoc; /* array of isoc wMaxPacketSize */
-	unsigned int analog_xfer_bulk:1;	/* use bulk instead of isoc
+	unsigned int analog_xfer_bulk;	/* use bulk instead of isoc
 						   transfers for analog      */
 	int dvb_alt_isoc;	/* alternate setting for DVB isoc transfers */
 	unsigned int dvb_max_pkt_size_isoc;	/* isoc max packet size of the
 						   selected DVB ep at dvb_alt */
-	unsigned int dvb_xfer_bulk:1;		/* use bulk instead of isoc
+	unsigned int dvb_xfer_bulk;		/* use bulk instead of isoc
 						   transfers for DVB          */
 	char urb_buf[URB_MAX_CTRL_SIZE];	/* urb control msg buffer */
 

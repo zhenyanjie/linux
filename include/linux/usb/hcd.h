@@ -131,19 +131,19 @@ struct usb_hcd {
 #define HCD_DEAD(hcd)		((hcd)->flags & (1U << HCD_FLAG_DEAD))
 
 	/* Flags that get set only during HCD registration or removal. */
-	unsigned		rh_registered:1;/* is root hub registered? */
-	unsigned		rh_pollable:1;	/* may we poll the root hub? */
-	unsigned		msix_enabled:1;	/* driver has MSI-X enabled? */
-	unsigned		remove_phy:1;	/* auto-remove USB phy */
+	unsigned		rh_registered;/* is root hub registered? */
+	unsigned		rh_pollable;	/* may we poll the root hub? */
+	unsigned		msix_enabled;	/* driver has MSI-X enabled? */
+	unsigned		remove_phy;	/* auto-remove USB phy */
 
 	/* The next flag is a stopgap, to be removed when all the HCDs
 	 * support the new root-hub polling mechanism. */
-	unsigned		uses_new_polling:1;
-	unsigned		wireless:1;	/* Wireless USB HCD */
-	unsigned		authorized_default:1;
-	unsigned		has_tt:1;	/* Integrated TT in root hub */
-	unsigned		amd_resume_bug:1; /* AMD remote wakeup quirk */
-	unsigned		can_do_streams:1; /* HC supports streams */
+	unsigned		uses_new_polling;
+	unsigned		wireless;	/* Wireless USB HCD */
+	unsigned		authorized_default;
+	unsigned		has_tt;	/* Integrated TT in root hub */
+	unsigned		amd_resume_bug; /* AMD remote wakeup quirk */
+	unsigned		can_do_streams; /* HC supports streams */
 
 	unsigned int		irq;		/* irq allocated */
 	void __iomem		*regs;		/* device memory/io */

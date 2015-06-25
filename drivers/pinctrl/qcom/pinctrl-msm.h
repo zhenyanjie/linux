@@ -74,24 +74,24 @@ struct msm_pingroup {
 	s16 intr_status_reg;
 	s16 intr_target_reg;
 
-	unsigned mux_bit:5;
+	unsigned mux_bit;
 
-	unsigned pull_bit:5;
-	unsigned drv_bit:5;
+	unsigned pull_bit;
+	unsigned drv_bit;
 
-	unsigned oe_bit:5;
-	unsigned in_bit:5;
-	unsigned out_bit:5;
+	unsigned oe_bit;
+	unsigned in_bit;
+	unsigned out_bit;
 
-	unsigned intr_enable_bit:5;
-	unsigned intr_status_bit:5;
-	unsigned intr_ack_high:1;
+	unsigned intr_enable_bit;
+	unsigned intr_status_bit;
+	unsigned intr_ack_high;
 
-	unsigned intr_target_bit:5;
-	unsigned intr_raw_status_bit:5;
-	unsigned intr_polarity_bit:5;
-	unsigned intr_detection_bit:5;
-	unsigned intr_detection_width:5;
+	unsigned intr_target_bit;
+	unsigned intr_raw_status_bit;
+	unsigned intr_polarity_bit;
+	unsigned intr_detection_bit;
+	unsigned intr_detection_width;
 };
 
 /**

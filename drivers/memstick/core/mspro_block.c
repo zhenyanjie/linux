@@ -154,7 +154,7 @@ struct mspro_block_data {
 			      eject:1,
 			      has_request:1,
 			      data_dir:1,
-			      active:1;
+			      active;
 	unsigned char         transfer_cmd;
 
 	int                   (*mrq_handler)(struct memstick_dev *card,

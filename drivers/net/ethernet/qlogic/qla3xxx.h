@@ -838,12 +838,12 @@ enum {EEPROM_SIZE = FM93C86A_SIZE_16,
  * BIOS data structure
  */
 struct eeprom_bios_cfg {
-	u16 SpinDlyEn:1, disBios:1, EnMemMap:1, EnSelectBoot:1, Reserved:12;
+	u16 SpinDlyEn, disBios, EnMemMap, EnSelectBoot, Reserved;
 
-	u8 bootID0:7, boodID0Valid:1;
+	u8 bootID0, boodID0Valid;
 	u8 bootLun0[8];
 
-	u8 bootID1:7, boodID1Valid:1;
+	u8 bootID1, boodID1Valid;
 	u8 bootLun1[8];
 
 	u16 MaxLunsTrgt;

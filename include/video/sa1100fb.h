@@ -47,7 +47,7 @@ struct sa1100fb_mach_info {
 	u_int		cmap_greyscale:1,
 			cmap_inverse:1,
 			cmap_static:1,
-			unused:29;
+			unused;
 
 	u_int		lccr0;
 	u_int		lccr3;

@@ -59,7 +59,7 @@ struct ct_atc_pcm {
 	struct snd_pcm_substream *substream;
 	void (*interrupt)(struct ct_atc_pcm *apcm);
 	struct ct_timer_instance *timer;
-	unsigned int started:1;
+	unsigned int started;
 
 	/* Only mono and interleaved modes are supported now. */
 	struct ct_vm_block *vm_block;

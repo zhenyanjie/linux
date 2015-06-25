@@ -254,10 +254,10 @@ struct whc_qset {
 	int td_start;
 	int td_end;
 	struct list_head list_node;
-	unsigned in_sw_list:1;
-	unsigned in_hw_list:1;
-	unsigned remove:1;
-	unsigned reset:1;
+	unsigned in_sw_list;
+	unsigned in_hw_list;
+	unsigned remove;
+	unsigned reset;
 	struct urb *pause_after_urb;
 	struct completion remove_complete;
 	uint16_t max_packet;

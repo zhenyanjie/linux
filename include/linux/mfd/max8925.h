@@ -218,11 +218,11 @@ struct max8925_touch_pdata {
 
 struct max8925_power_pdata {
 	int		(*set_charger)(int);
-	unsigned	batt_detect:1;
-	unsigned	topoff_threshold:2;
-	unsigned	fast_charge:3;	/* charge current */
-	unsigned	no_temp_support:1; /* set if no temperature detect */
-	unsigned	no_insert_detect:1; /* set if no ac insert detect */
+	unsigned	batt_detect;
+	unsigned	topoff_threshold;
+	unsigned	fast_charge;	/* charge current */
+	unsigned	no_temp_support; /* set if no temperature detect */
+	unsigned	no_insert_detect; /* set if no ac insert detect */
 	char		**supplied_to;
 	int		num_supplicants;
 };

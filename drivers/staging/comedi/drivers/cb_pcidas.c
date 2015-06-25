@@ -244,8 +244,8 @@ struct cb_pcidas_board {
 	int fifo_size;		/*  number of samples fifo can hold */
 	const struct comedi_lrange *ranges;
 	enum trimpot_model trimpot;
-	unsigned has_dac08:1;
-	unsigned is_1602:1;
+	unsigned has_dac08;
+	unsigned is_1602;
 };
 
 static const struct cb_pcidas_board cb_pcidas_boards[] = {

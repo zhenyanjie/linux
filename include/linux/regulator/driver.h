@@ -306,7 +306,7 @@ struct regulator_config {
 	struct regmap *regmap;
 
 	int ena_gpio;
-	unsigned int ena_gpio_invert:1;
+	unsigned int ena_gpio_invert;
 	unsigned int ena_gpio_flags;
 };
 
@@ -349,7 +349,7 @@ struct regulator_dev {
 	struct dentry *debugfs;
 
 	struct regulator_enable_gpio *ena_pin;
-	unsigned int ena_gpio_state:1;
+	unsigned int ena_gpio_state;
 };
 
 struct regulator_dev *

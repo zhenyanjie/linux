@@ -142,46 +142,46 @@ struct pvr2_device_desc {
 	unsigned char digital_control_scheme;
 
 	/* If set, we don't bother trying to load cx23416 firmware. */
-	unsigned int flag_skip_cx23416_firmware:1;
+	unsigned int flag_skip_cx23416_firmware;
 
 	/* If set, the encoder must be healthy in order for digital mode to
 	   work (otherwise we assume that digital streaming will work even
 	   if we fail to locate firmware for the encoder).  If the device
 	   doesn't support digital streaming then this flag has no
 	   effect. */
-	unsigned int flag_digital_requires_cx23416:1;
+	unsigned int flag_digital_requires_cx23416;
 
 	/* Device has a hauppauge eeprom which we can interrogate. */
-	unsigned int flag_has_hauppauge_rom:1;
+	unsigned int flag_has_hauppauge_rom;
 
 	/* Device does not require a powerup command to be issued. */
-	unsigned int flag_no_powerup:1;
+	unsigned int flag_no_powerup;
 
 	/* Device has a cx25840 - this enables special additional logic to
 	   handle it. */
-	unsigned int flag_has_cx25840:1;
+	unsigned int flag_has_cx25840;
 
 	/* Device has a wm8775 - this enables special additional logic to
 	   ensure that it is found. */
-	unsigned int flag_has_wm8775:1;
+	unsigned int flag_has_wm8775;
 
 	/* Indicate IR scheme of hardware.  If not set, then it is assumed
 	   that IR can work without any help from the driver. */
-	unsigned int ir_scheme:3;
+	unsigned int ir_scheme;
 
 	/* These bits define which kinds of sources the device can handle.
 	   Note: Digital tuner presence is inferred by the
 	   digital_control_scheme enumeration. */
-	unsigned int flag_has_fmradio:1;       /* Has FM radio receiver */
-	unsigned int flag_has_analogtuner:1;   /* Has analog tuner */
-	unsigned int flag_has_composite:1;     /* Has composite input */
-	unsigned int flag_has_svideo:1;        /* Has s-video input */
-	unsigned int flag_fx2_16kb:1;          /* 16KB FX2 firmware OK here */
+	unsigned int flag_has_fmradio;       /* Has FM radio receiver */
+	unsigned int flag_has_analogtuner;   /* Has analog tuner */
+	unsigned int flag_has_composite;     /* Has composite input */
+	unsigned int flag_has_svideo;        /* Has s-video input */
+	unsigned int flag_fx2_16kb;          /* 16KB FX2 firmware OK here */
 
 	/* If this driver is considered experimental, i.e. not all aspects
 	   are working correctly and/or it is untested, mark that fact
 	   with this flag. */
-	unsigned int flag_is_experimental:1;
+	unsigned int flag_is_experimental;
 };
 
 extern struct usb_device_id pvr2_device_table[];

@@ -27,12 +27,12 @@ struct icmp6hdr {
                         		override:1,
                         		solicited:1,
                         		router:1,
-					reserved2:24;
+					reserved2;
 #elif defined(__BIG_ENDIAN_BITFIELD)
                         __u32		router:1,
 					solicited:1,
                         		override:1,
-                        		reserved:29;
+                        		reserved;
 #else
 #error	"Please fix <asm/byteorder.h>"
 #endif						
@@ -45,14 +45,14 @@ struct icmp6hdr {
 					router_pref:2,
 					home_agent:1,
 					other:1,
-					managed:1;
+					managed;
 
 #elif defined(__BIG_ENDIAN_BITFIELD)
 			__u8		managed:1,
 					other:1,
 					home_agent:1,
 					router_pref:2,
-					reserved:3;
+					reserved;
 #else
 #error	"Please fix <asm/byteorder.h>"
 #endif

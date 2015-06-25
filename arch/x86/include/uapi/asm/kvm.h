@@ -87,14 +87,14 @@ struct kvm_ioapic_state {
 		__u64 bits;
 		struct {
 			__u8 vector;
-			__u8 delivery_mode:3;
-			__u8 dest_mode:1;
-			__u8 delivery_status:1;
-			__u8 polarity:1;
-			__u8 remote_irr:1;
-			__u8 trig_mode:1;
-			__u8 mask:1;
-			__u8 reserve:7;
+			__u8 delivery_mode;
+			__u8 dest_mode;
+			__u8 delivery_status;
+			__u8 polarity;
+			__u8 remote_irr;
+			__u8 trig_mode;
+			__u8 mask;
+			__u8 reserve;
 			__u8 reserved[4];
 			__u8 dest_id;
 		} fields;

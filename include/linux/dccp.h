@@ -177,7 +177,7 @@ extern int dccp_parse_options(struct sock *sk, struct dccp_request_sock *dreq,
 			      struct sk_buff *skb);
 
 struct dccp_options_received {
-	u64	dccpor_ndp:48;
+	u64	dccpor_ndp;
 	u32	dccpor_timestamp;
 	u32	dccpor_timestamp_echo;
 	u32	dccpor_elapsed_time;
@@ -278,12 +278,12 @@ struct dccp_sock {
 	__u32				dccps_timestamp_time;
 	__u16				dccps_l_ack_ratio;
 	__u16				dccps_r_ack_ratio;
-	__u64				dccps_l_seq_win:48;
-	__u64				dccps_r_seq_win:48;
-	__u8				dccps_pcslen:4;
-	__u8				dccps_pcrlen:4;
-	__u8				dccps_send_ndp_count:1;
-	__u64				dccps_ndp_count:48;
+	__u64				dccps_l_seq_win;
+	__u64				dccps_r_seq_win;
+	__u8				dccps_pcslen;
+	__u8				dccps_pcrlen;
+	__u8				dccps_send_ndp_count;
+	__u64				dccps_ndp_count;
 	unsigned long			dccps_rate_last;
 	struct list_head		dccps_featneg;
 	struct dccp_ackvec		*dccps_hc_rx_ackvec;
@@ -292,11 +292,11 @@ struct dccp_sock {
 	struct dccp_options_received	dccps_options_received;
 	__u8				dccps_qpolicy;
 	__u32				dccps_tx_qlen;
-	enum dccp_role			dccps_role:2;
-	__u8				dccps_hc_rx_insert_options:1;
-	__u8				dccps_hc_tx_insert_options:1;
-	__u8				dccps_server_timewait:1;
-	__u8				dccps_sync_scheduled:1;
+	enum dccp_role			dccps_role;
+	__u8				dccps_hc_rx_insert_options;
+	__u8				dccps_hc_tx_insert_options;
+	__u8				dccps_server_timewait;
+	__u8				dccps_sync_scheduled;
 	struct tasklet_struct		dccps_xmitlet;
 	struct timer_list		dccps_xmit_timer;
 };

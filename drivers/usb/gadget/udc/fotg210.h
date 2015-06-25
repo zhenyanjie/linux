@@ -221,9 +221,9 @@ struct fotg210_ep {
 	struct fotg210_udc	*fotg210;
 
 	struct list_head	queue;
-	unsigned		stall:1;
-	unsigned		wedged:1;
-	unsigned		use_dma:1;
+	unsigned		stall;
+	unsigned		wedged;
+	unsigned		use_dma;
 
 	unsigned char		epnum;
 	unsigned char		type;

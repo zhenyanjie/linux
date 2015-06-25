@@ -181,8 +181,8 @@ struct tb_drom_header {
 	u32 data_crc32; /* checksum for data_len bytes starting at byte 13 */
 	/* BYTE 13 */
 	u8 device_rom_revision; /* should be <= 1 */
-	u16 data_len:10;
-	u8 __unknown1:6;
+	u16 data_len;
+	u8 __unknown1;
 	/* BYTES 16-21 */
 	u16 vendor_id;
 	u16 model_id;
@@ -198,35 +198,35 @@ enum tb_drom_entry_type {
 
 struct tb_drom_entry_header {
 	u8 len;
-	u8 index:6;
-	bool port_disabled:1; /* only valid if type is TB_DROM_ENTRY_PORT */
-	enum tb_drom_entry_type type:1;
+	u8 index;
+	bool port_disabled; /* only valid if type is TB_DROM_ENTRY_PORT */
+	enum tb_drom_entry_type type;
 } __packed;
 
 struct tb_drom_entry_port {
 	/* BYTES 0-1 */
 	struct tb_drom_entry_header header;
 	/* BYTE 2 */
-	u8 dual_link_port_rid:4;
-	u8 link_nr:1;
-	u8 unknown1:2;
-	bool has_dual_link_port:1;
+	u8 dual_link_port_rid;
+	u8 link_nr;
+	u8 unknown1;
+	bool has_dual_link_port;
 
 	/* BYTE 3 */
-	u8 dual_link_port_nr:6;
-	u8 unknown2:2;
+	u8 dual_link_port_nr;
+	u8 unknown2;
 
 	/* BYTES 4 - 5 TODO decode */
-	u8 micro2:4;
-	u8 micro1:4;
+	u8 micro2;
+	u8 micro1;
 	u8 micro3;
 
 	/* BYTES 5-6, TODO: verify (find hardware that has these set) */
-	u8 peer_port_rid:4;
-	u8 unknown3:3;
-	bool has_peer_port:1;
-	u8 peer_port_nr:6;
-	u8 unknown4:2;
+	u8 peer_port_rid;
+	u8 unknown3;
+	bool has_peer_port;
+	u8 peer_port_nr;
+	u8 unknown4;
 } __packed;
 
 

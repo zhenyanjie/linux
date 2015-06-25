@@ -248,24 +248,24 @@ struct dm_target {
 	 * Set if this target needs to receive flushes regardless of
 	 * whether or not its underlying devices have support.
 	 */
-	bool flush_supported:1;
+	bool flush_supported;
 
 	/*
 	 * Set if this target needs to receive discards regardless of
 	 * whether or not its underlying devices have support.
 	 */
-	bool discards_supported:1;
+	bool discards_supported;
 
 	/*
 	 * Set if the target required discard bios to be split
 	 * on max_io_len boundary.
 	 */
-	bool split_discard_bios:1;
+	bool split_discard_bios;
 
 	/*
 	 * Set if this target does not return zeroes on discarded blocks.
 	 */
-	bool discard_zeroes_data_unsupported:1;
+	bool discard_zeroes_data_unsupported;
 };
 
 /* Each target can link one of these into the table */

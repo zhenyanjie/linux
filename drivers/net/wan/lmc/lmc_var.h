@@ -184,9 +184,9 @@ struct lmc___ctl {
  * structure than meets the eye.  It should probably be:
  *
  * struct tulip_desc_t {
- *         u8  own:1;
- *         u32 status:31;
- *         u32 control:10;
+ *         u8  own;
+ *         u32 status;
+ *         u32 control;
  *         u32 buffer1;
  *         u32 buffer2;
  * };

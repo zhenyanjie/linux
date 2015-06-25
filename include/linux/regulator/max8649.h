@@ -34,11 +34,11 @@ enum {
 struct max8649_platform_data {
 	struct regulator_init_data *regulator;
 
-	unsigned	mode:2;		/* bit[1:0] = VID1,VID0 */
-	unsigned	extclk_freq:2;
-	unsigned	extclk:1;
-	unsigned	ramp_timing:3;
-	unsigned	ramp_down:1;
+	unsigned	mode;		/* bit[1:0] = VID1,VID0 */
+	unsigned	extclk_freq;
+	unsigned	extclk;
+	unsigned	ramp_timing;
+	unsigned	ramp_down;
 };
 
 #endif	/* __LINUX_REGULATOR_MAX8649_H */

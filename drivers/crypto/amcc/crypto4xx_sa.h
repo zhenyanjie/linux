@@ -28,24 +28,24 @@
  */
 union dynamic_sa_contents {
 	struct {
-		u32 arc4_state_ptr:1;
-		u32 arc4_ij_ptr:1;
-		u32 state_ptr:1;
-		u32 iv3:1;
-		u32 iv2:1;
-		u32 iv1:1;
-		u32 iv0:1;
-		u32 seq_num_mask3:1;
-		u32 seq_num_mask2:1;
-		u32 seq_num_mask1:1;
-		u32 seq_num_mask0:1;
-		u32 seq_num1:1;
-		u32 seq_num0:1;
-		u32 spi:1;
-		u32 outer_size:5;
-		u32 inner_size:5;
-		u32 key_size:4;
-		u32 cmd_size:4;
+		u32 arc4_state_ptr;
+		u32 arc4_ij_ptr;
+		u32 state_ptr;
+		u32 iv3;
+		u32 iv2;
+		u32 iv1;
+		u32 iv0;
+		u32 seq_num_mask3;
+		u32 seq_num_mask2;
+		u32 seq_num_mask1;
+		u32 seq_num_mask0;
+		u32 seq_num1;
+		u32 seq_num0;
+		u32 spi;
+		u32 outer_size;
+		u32 inner_size;
+		u32 key_size;
+		u32 cmd_size;
 	} bf;
 	u32 w;
 } __attribute__((packed));
@@ -89,23 +89,23 @@ union dynamic_sa_contents {
 
 union sa_command_0 {
 	struct {
-		u32 scatter:1;
-		u32 gather:1;
-		u32 save_hash_state:1;
-		u32 save_iv:1;
-		u32 load_hash_state:2;
-		u32 load_iv:2;
-		u32 digest_len:4;
-		u32 hdr_proc:1;
-		u32 extend_pad:1;
-		u32 stream_cipher_pad:1;
-		u32 rsv:1;
-		u32 hash_alg:4;
-		u32 cipher_alg:4;
-		u32 pad_type:2;
-		u32 op_group:2;
-		u32 dir:1;
-		u32 opcode:3;
+		u32 scatter;
+		u32 gather;
+		u32 save_hash_state;
+		u32 save_iv;
+		u32 load_hash_state;
+		u32 load_iv;
+		u32 digest_len;
+		u32 hdr_proc;
+		u32 extend_pad;
+		u32 stream_cipher_pad;
+		u32 rsv;
+		u32 hash_alg;
+		u32 cipher_alg;
+		u32 pad_type;
+		u32 op_group;
+		u32 dir;
+		u32 opcode;
 	} bf;
 	u32 w;
 } __attribute__((packed));
@@ -146,24 +146,24 @@ union sa_command_0 {
 
 union sa_command_1 {
 	struct {
-		u32 crypto_mode31:1;
-		u32 save_arc4_state:1;
-		u32 arc4_stateful:1;
-		u32 key_len:5;
-		u32 hash_crypto_offset:8;
-		u32 sa_rev:2;
-		u32 byte_offset:1;
-		u32 hmac_muting:1;
-		u32 feedback_mode:2;
-		u32 crypto_mode9_8:2;
-		u32 extended_seq_num:1;
-		u32 seq_num_mask:1;
-		u32 mutable_bit_proc:1;
-		u32 ip_version:1;
-		u32 copy_pad:1;
-		u32 copy_payload:1;
-		u32 copy_hdr:1;
-		u32 rsv1:1;
+		u32 crypto_mode31;
+		u32 save_arc4_state;
+		u32 arc4_stateful;
+		u32 key_len;
+		u32 hash_crypto_offset;
+		u32 sa_rev;
+		u32 byte_offset;
+		u32 hmac_muting;
+		u32 feedback_mode;
+		u32 crypto_mode9_8;
+		u32 extended_seq_num;
+		u32 seq_num_mask;
+		u32 mutable_bit_proc;
+		u32 ip_version;
+		u32 copy_pad;
+		u32 copy_payload;
+		u32 copy_hdr;
+		u32 rsv1;
 	} bf;
 	u32 w;
 } __attribute__((packed));

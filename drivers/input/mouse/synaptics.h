@@ -140,11 +140,11 @@ struct synaptics_hw_state {
 	int y;
 	int z;
 	int w;
-	unsigned int left:1;
-	unsigned int right:1;
-	unsigned int middle:1;
-	unsigned int up:1;
-	unsigned int down:1;
+	unsigned int left;
+	unsigned int right;
+	unsigned int middle;
+	unsigned int up;
+	unsigned int down;
 	unsigned char ext_buttons;
 	signed char scroll;
 

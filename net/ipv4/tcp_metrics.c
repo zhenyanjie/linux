@@ -28,7 +28,7 @@ static struct tcp_metrics_block *__tcp_get_metrics(const struct inetpeer_addr *s
 
 struct tcp_fastopen_metrics {
 	u16	mss;
-	u16	syn_loss:10;		/* Recurring Fast Open SYN losses */
+	u16	syn_loss;		/* Recurring Fast Open SYN losses */
 	unsigned long	last_syn_loss;	/* Last Fast Open SYN loss */
 	struct	tcp_fastopen_cookie	cookie;
 };

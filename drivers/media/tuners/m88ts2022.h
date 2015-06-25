@@ -29,7 +29,7 @@ struct m88ts2022_config {
 	/*
 	 * RF loop-through
 	 */
-	u8 loop_through:1;
+	u8 loop_through;
 
 	/*
 	 * clock output
@@ -37,13 +37,13 @@ struct m88ts2022_config {
 #define M88TS2022_CLOCK_OUT_DISABLED        0
 #define M88TS2022_CLOCK_OUT_ENABLED         1
 #define M88TS2022_CLOCK_OUT_ENABLED_XTALOUT 2
-	u8 clock_out:2;
+	u8 clock_out;
 
 	/*
 	 * clock output divider
 	 * 1 - 31
 	 */
-	u8 clock_out_div:5;
+	u8 clock_out_div;
 
 	/*
 	 * pointer to DVB frontend

@@ -35,13 +35,13 @@ struct dib7000p_config {
 	int (*agc_control) (struct dvb_frontend *, u8 before);
 
 	u8 output_mode;
-	u8 disable_sample_and_hold:1;
+	u8 disable_sample_and_hold;
 
-	u8 enable_current_mirror:1;
+	u8 enable_current_mirror;
 	u16 diversity_delay;
 
 	u8 default_i2c_addr;
-	u8 enMpegOutput:1;
+	u8 enMpegOutput;
 };
 
 #define DEFAULT_DIB7000P_I2C_ADDRESS 18

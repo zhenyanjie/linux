@@ -40,17 +40,17 @@
  * @bitinvd2:	Secondary decoder bit inversion switch (1=don't invert)
  */
 struct img_ir_control {
-	unsigned decoden:1;
-	unsigned code_type:2;
-	unsigned hdrtog:1;
-	unsigned ldrdec:1;
-	unsigned decodinpol:1;
-	unsigned bitorien:1;
-	unsigned d1validsel:1;
-	unsigned bitinv:1;
-	unsigned decodend2:1;
-	unsigned bitoriend2:1;
-	unsigned bitinvd2:1;
+	unsigned decoden;
+	unsigned code_type;
+	unsigned hdrtog;
+	unsigned ldrdec;
+	unsigned decodinpol;
+	unsigned bitorien;
+	unsigned d1validsel;
+	unsigned bitinv;
+	unsigned decodend2;
+	unsigned bitoriend2;
+	unsigned bitinvd2;
 };
 
 /**

@@ -639,11 +639,11 @@ struct t30_info_s {
 
 typedef struct async_s ASYNC_FORMAT;
 struct async_s {
-	unsigned pe:1;
-	unsigned parity:2;
-	unsigned spare:2;
-	unsigned stp:1;
-	unsigned ch_len:2;   /* 3th octett in CAI */
+	unsigned pe;
+	unsigned parity;
+	unsigned spare;
+	unsigned stp;
+	unsigned ch_len;   /* 3th octett in CAI */
 };
 
 

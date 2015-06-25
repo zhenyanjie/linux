@@ -26,16 +26,16 @@ struct channel_path_desc_fmt1 {
 	u8 lsn;
 	u8 desc;
 	u8 chpid;
-	u32:24;
+	u32:8;
 	u8 chpp;
 	u32 unused[2];
 	u16 chid;
-	u32:16;
+	u32:8;
 	u16 mdc;
-	u16:13;
-	u8 r:1;
-	u8 s:1;
-	u8 f:1;
+	u16;
+	u8 r;
+	u8 s;
+	u8 f;
 	u32 zeros[2];
 } __attribute__ ((packed));
 
@@ -50,9 +50,9 @@ struct css_chsc_char {
 	u32 : 20;
 	u32 scssc : 1;  /* bit 107 */
 	u32 scsscf : 1; /* bit 108 */
-	u32:7;
-	u32 pnso:1; /* bit 116 */
-	u32:11;
+	u32:8;
+	u32 pnso; /* bit 116 */
+	u32:8;
 }__attribute__((packed));
 
 extern struct css_chsc_char css_chsc_characteristics;
@@ -66,50 +66,50 @@ struct chsc_ssd_info {
 
 struct chsc_ssqd_area {
 	struct chsc_header request;
-	u16:10;
-	u8 ssid:2;
-	u8 fmt:4;
+	u16;
+	u8 ssid;
+	u8 fmt;
 	u16 first_sch;
-	u16:16;
+	u16;
 	u16 last_sch;
-	u32:32;
+	u32:8;
 	struct chsc_header response;
-	u32:32;
+	u32:8;
 	struct qdio_ssqd_desc qdio_ssqd;
 } __packed;
 
 struct chsc_scssc_area {
 	struct chsc_header request;
 	u16 operation_code;
-	u16:16;
-	u32:32;
-	u32:32;
+	u16;
+	u32:8;
+	u32:8;
 	u64 summary_indicator_addr;
 	u64 subchannel_indicator_addr;
-	u32 ks:4;
-	u32 kc:4;
-	u32:21;
-	u32 isc:3;
+	u32 ks;
+	u32 kc;
+	u32:8;
+	u32 isc;
 	u32 word_with_d_bit;
-	u32:32;
+	u32:8;
 	struct subchannel_id schid;
 	u32 reserved[1004];
 	struct chsc_header response;
-	u32:32;
+	u32:8;
 } __packed;
 
 struct chsc_scpd {
 	struct chsc_header request;
-	u32:2;
-	u32 m:1;
-	u32 c:1;
-	u32 fmt:4;
-	u32 cssid:8;
-	u32:4;
-	u32 rfmt:4;
-	u32 first_chpid:8;
-	u32:24;
-	u32 last_chpid:8;
+	u32:8;
+	u32 m;
+	u32 c;
+	u32 fmt;
+	u32 cssid;
+	u32:8;
+	u32 rfmt;
+	u32 first_chpid;
+	u32:8;
+	u32 last_chpid;
 	u32 zeroes1;
 	struct chsc_header response;
 	u8 data[PAGE_SIZE - 20];
@@ -147,23 +147,23 @@ int chsc_siosl(struct subchannel_id schid);
 /* Functions and definitions to query storage-class memory. */
 struct sale {
 	u64 sa;
-	u32 p:4;
-	u32 op_state:4;
-	u32 data_state:4;
-	u32 rank:4;
-	u32 r:1;
-	u32:7;
-	u32 rid:8;
-	u32:32;
+	u32 p;
+	u32 op_state;
+	u32 data_state;
+	u32 rank;
+	u32 r;
+	u32:8;
+	u32 rid;
+	u32:8;
 } __packed;
 
 struct chsc_scm_info {
 	struct chsc_header request;
-	u32:32;
+	u32:8;
 	u64 reqtok;
 	u32 reserved1[4];
 	struct chsc_header response;
-	u64:56;
+	u64:8;
 	u8 rq;
 	u32 mbc;
 	u64 msa;
@@ -186,33 +186,33 @@ struct chsc_brinfo_resume_token {
 
 struct chsc_brinfo_naihdr {
 	struct chsc_brinfo_resume_token resume_token;
-	u32:32;
+	u32:8;
 	u32 instance;
-	u32:24;
+	u32:8;
 	u8 naids;
 	u32 reserved[3];
 } __packed;
 
 struct chsc_pnso_area {
 	struct chsc_header request;
-	u8:2;
-	u8 m:1;
-	u8:5;
-	u8:2;
-	u8 ssid:2;
-	u8 fmt:4;
+	u8:8;
+	u8 m;
+	u8:8;
+	u8:8;
+	u8 ssid;
+	u8 fmt;
 	u16 sch;
 	u8:8;
 	u8 cssid;
-	u16:16;
+	u16;
 	u8 oc;
-	u32:24;
+	u32:8;
 	struct chsc_brinfo_resume_token resume_token;
-	u32 n:1;
-	u32:31;
+	u32 n;
+	u32:8;
 	u32 reserved[3];
 	struct chsc_header response;
-	u32:32;
+	u32:8;
 	struct chsc_brinfo_naihdr naihdr;
 	union {
 		struct qdio_brinfo_entry_l3_ipv6 l3_ipv6[0];

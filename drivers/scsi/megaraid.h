@@ -123,10 +123,10 @@ typedef struct {
 #define MAX_REQ_SENSE_LEN       0x20
 
 typedef struct {
-	u8 timeout:3;		/* 0=6sec/1=60sec/2=10min/3=3hrs */
-	u8 ars:1;
-	u8 reserved:3;
-	u8 islogical:1;
+	u8 timeout;		/* 0=6sec/1=60sec/2=10min/3=3hrs */
+	u8 ars;
+	u8 reserved;
+	u8 islogical;
 	u8 logdrv;		/* if islogical == 1 */
 	u8 channel;		/* if islogical == 0 */
 	u8 target;		/* if islogical == 0 */
@@ -147,12 +147,12 @@ typedef struct {
  * Extended passthru: support CDB > 10 bytes
  */
 typedef struct {
-	u8 timeout:3;		/* 0=6sec/1=60sec/2=10min/3=3hrs */
-	u8 ars:1;
-	u8 rsvd1:1;
-	u8 cd_rom:1;
-	u8 rsvd2:1;
-	u8 islogical:1;
+	u8 timeout;		/* 0=6sec/1=60sec/2=10min/3=3hrs */
+	u8 ars;
+	u8 rsvd1;
+	u8 cd_rom;
+	u8 rsvd2;
+	u8 islogical;
 	u8 logdrv;		/* if islogical == 1 */
 	u8 channel;		/* if islogical == 0 */
 	u8 target;		/* if islogical == 0 */
@@ -629,14 +629,14 @@ typedef struct {
 
 
 struct private_bios_data {
-	u8	geometry:4;	/*
+	u8	geometry;	/*
 				 * bits 0-3 - BIOS geometry
 				 * 0x0001 - 1GB
 				 * 0x0010 - 2GB
 				 * 0x1000 - 8GB
 				 * Others values are invalid
 							 */
-	u8	unused:4;	/* bits 4-7 are unused */
+	u8	unused;	/* bits 4-7 are unused */
 	u8	boot_drv;	/*
 				 * logical drive set as boot drive
 				 * 0..7 - for 8LD cards

@@ -36,7 +36,7 @@ struct tb_port {
 	u8 port; /* port number on switch */
 	bool disabled; /* disabled by eeprom */
 	struct tb_port *dual_link_port;
-	u8 link_nr:1;
+	u8 link_nr;
 };
 
 /**
@@ -84,8 +84,8 @@ struct tb_path {
 	enum tb_path_port ingress_fc_enable;
 	enum tb_path_port egress_fc_enable;
 
-	int priority:3;
-	int weight:4;
+	int priority;
+	int weight;
 	bool drop_packages;
 	bool activated;
 	struct tb_path_hop *hops;

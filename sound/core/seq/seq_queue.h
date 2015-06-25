@@ -43,7 +43,7 @@ struct snd_seq_queue {
 	unsigned int	locked:1,	/* timer is only accesibble by owner if set */
 		klocked:1,	/* kernel lock (after START) */	
 		check_again:1,
-		check_blocked:1;
+		check_blocked;
 
 	unsigned int flags;		/* status flags */
 	unsigned int info_flags;	/* info for sync */

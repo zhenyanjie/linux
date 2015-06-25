@@ -716,13 +716,13 @@ struct qib_message_header {
 /* sequence number bits for message */
 union qib_seqnum {
 	struct {
-		__u32 seq:11;
-		__u32 gen:8;
-		__u32 flow:5;
+		__u32 seq;
+		__u32 gen;
+		__u32 flow;
 	};
 	struct {
-		__u32 pkt:16;
-		__u32 msg:8;
+		__u32 pkt;
+		__u32 msg;
 	};
 	__u32 val;
 };

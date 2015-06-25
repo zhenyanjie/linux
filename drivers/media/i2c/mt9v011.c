@@ -53,8 +53,8 @@ struct mt9v011 {
 	struct v4l2_ctrl_handler ctrls;
 	unsigned width, height;
 	unsigned xtal;
-	unsigned hflip:1;
-	unsigned vflip:1;
+	unsigned hflip;
+	unsigned vflip;
 
 	u16 global_gain, exposure;
 	s16 red_bal, blue_bal;

@@ -143,14 +143,14 @@ enum sensors {
 
 /* table of the disabled controls */
 struct ctrl_valid {
-	unsigned int has_brightness:1;
-	unsigned int has_contrast:1;
-	unsigned int has_exposure:1;
-	unsigned int has_autogain:1;
-	unsigned int has_sat:1;
-	unsigned int has_hvflip:1;
-	unsigned int has_autobright:1;
-	unsigned int has_freq:1;
+	unsigned int has_brightness;
+	unsigned int has_contrast;
+	unsigned int has_exposure;
+	unsigned int has_autogain;
+	unsigned int has_sat;
+	unsigned int has_hvflip;
+	unsigned int has_autobright;
+	unsigned int has_freq;
 };
 
 static const struct ctrl_valid valid_controls[] = {

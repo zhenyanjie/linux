@@ -137,7 +137,7 @@ struct ssi_protocol {
 	unsigned int		main_state;
 	unsigned int		send_state;
 	unsigned int		recv_state;
-	unsigned int		waketest:1;
+	unsigned int		waketest;
 	u8			rxid;
 	u8			txid;
 	unsigned int		txqueue_len;

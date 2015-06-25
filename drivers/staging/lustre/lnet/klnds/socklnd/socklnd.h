@@ -219,9 +219,9 @@ typedef struct				  /* transmit packet */
 	struct iovec  *tx_iov;	 /* packet iovec frags */
 	int	    tx_nkiov;       /* # packet page frags */
 	unsigned short tx_zc_aborted;  /* aborted ZC request */
-	unsigned short tx_zc_capable:1; /* payload is large enough for ZC */
-	unsigned short tx_zc_checked:1; /* Have I checked if I should ZC? */
-	unsigned short tx_nonblk:1;    /* it's a non-blocking ACK */
+	unsigned short tx_zc_capable; /* payload is large enough for ZC */
+	unsigned short tx_zc_checked; /* Have I checked if I should ZC? */
+	unsigned short tx_nonblk;    /* it's a non-blocking ACK */
 	lnet_kiov_t   *tx_kiov;	/* packet page frags */
 	struct ksock_conn  *tx_conn;	/* owning conn */
 	lnet_msg_t    *tx_lnetmsg;     /* lnet message for lnet_finalize() */
@@ -271,11 +271,11 @@ typedef struct ksock_conn
 	__u32	       ksnc_myipaddr;   /* my IP */
 	__u32	       ksnc_ipaddr;     /* peer's IP */
 	int		 ksnc_port;       /* peer's port */
-	signed int	  ksnc_type:3;     /* type of connection,
+	signed int	  ksnc_type;     /* type of connection,
 					      * should be signed value */
-	unsigned int	    ksnc_closing:1;  /* being shut down */
-	unsigned int	    ksnc_flip:1;     /* flip or not, only for V2.x */
-	unsigned int	    ksnc_zc_capable:1; /* enable to ZC */
+	unsigned int	    ksnc_closing;  /* being shut down */
+	unsigned int	    ksnc_flip;     /* flip or not, only for V2.x */
+	unsigned int	    ksnc_zc_capable; /* enable to ZC */
 	struct ksock_proto *ksnc_proto;      /* protocol for the connection */
 
 	/* reader */
@@ -324,10 +324,10 @@ typedef struct ksock_route
 	__u32		 ksnr_myipaddr;    /* my IP */
 	__u32		 ksnr_ipaddr;      /* IP address to connect to */
 	int		   ksnr_port;	/* port to connect to */
-	unsigned int	  ksnr_scheduled:1; /* scheduled for attention */
-	unsigned int	  ksnr_connecting:1;/* connection establishment in progress */
-	unsigned int	  ksnr_connected:4; /* connections established by type */
-	unsigned int	  ksnr_deleted:1;   /* been removed from peer? */
+	unsigned int	  ksnr_scheduled; /* scheduled for attention */
+	unsigned int	  ksnr_connecting;/* connection establishment in progress */
+	unsigned int	  ksnr_connected; /* connections established by type */
+	unsigned int	  ksnr_deleted;   /* been removed from peer? */
 	unsigned int	  ksnr_share_count; /* created explicitly? */
 	int		   ksnr_conn_count;  /* # conns established by this route */
 } ksock_route_t;

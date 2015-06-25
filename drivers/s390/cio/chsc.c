@@ -68,15 +68,15 @@ EXPORT_SYMBOL_GPL(chsc_error_from_response);
 
 struct chsc_ssd_area {
 	struct chsc_header request;
-	u16 :10;
-	u16 ssid:2;
-	u16 :4;
+	u16 :8;
+	u16 ssid;
+	u16 :8;
 	u16 f_sch;	  /* first subchannel */
-	u16 :16;
+	u16 :8;
 	u16 l_sch;	  /* last subchannel */
-	u32 :32;
+	u32 :8;
 	struct chsc_header response;
-	u32 :32;
+	u32 :8;
 	u8 sch_valid : 1;
 	u8 dev_valid : 1;
 	u8 st	     : 3; /* subchannel type */
@@ -332,7 +332,7 @@ struct chsc_sei {
 	u32 reserved1;
 	u64 ntsm;			/* notification type mask */
 	struct chsc_header response;
-	u32 :24;
+	u32 :8;
 	u8 nt;
 	union {
 		struct chsc_sei_nt0_area nt0_area;
@@ -1005,17 +1005,17 @@ int chsc_enable_facility(int operation_code)
 	int ret;
 	struct {
 		struct chsc_header request;
-		u8 reserved1:4;
-		u8 format:4;
+		u8 reserved1;
+		u8 format;
 		u8 reserved2;
 		u16 operation_code;
 		u32 reserved3;
 		u32 reserved4;
 		u32 operation_data_area[252];
 		struct chsc_header response;
-		u32 reserved5:4;
-		u32 format2:4;
-		u32 reserved6:24;
+		u32 reserved5;
+		u32 format2;
+		u32 reserved6;
 	} __attribute__ ((packed)) *sda_area;
 
 	spin_lock_irqsave(&chsc_page_lock, flags);

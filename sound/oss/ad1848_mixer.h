@@ -57,16 +57,16 @@
 				 SOUND_MASK_OGAIN)
 
 struct mixer_def {
-	unsigned int regno:6;		/* register number for volume */
-	unsigned int polarity:1;	/* volume polarity: 0=normal, 1=reversed */
-	unsigned int bitpos:3;		/* position of bits in register for volume */
-	unsigned int nbits:3;		/* number of bits in register for volume */
-	unsigned int mutereg:6;		/* register number for mute bit */
-	unsigned int mutepol:1;		/* mute polarity: 0=normal, 1=reversed */
-	unsigned int mutepos:4;		/* position of mute bit in register */
-	unsigned int recreg:6;		/* register number for recording bit */
-	unsigned int recpol:1;		/* recording polarity: 0=normal, 1=reversed */
-	unsigned int recpos:4;		/* position of recording bit in register */
+	unsigned int regno;		/* register number for volume */
+	unsigned int polarity;	/* volume polarity: 0=normal, 1=reversed */
+	unsigned int bitpos;		/* position of bits in register for volume */
+	unsigned int nbits;		/* number of bits in register for volume */
+	unsigned int mutereg;		/* register number for mute bit */
+	unsigned int mutepol;		/* mute polarity: 0=normal, 1=reversed */
+	unsigned int mutepos;		/* position of mute bit in register */
+	unsigned int recreg;		/* register number for recording bit */
+	unsigned int recpol;		/* recording polarity: 0=normal, 1=reversed */
+	unsigned int recpos;		/* position of recording bit in register */
 };
 
 static char mix_cvt[101] = {

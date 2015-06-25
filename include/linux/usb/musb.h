@@ -64,20 +64,20 @@ struct musb_hdrc_config {
 	unsigned		fifo_cfg_size;	/* size of the fifo configuration */
 
 	/* MUSB configuration-specific details */
-	unsigned	multipoint:1;	/* multipoint device */
+	unsigned	multipoint;	/* multipoint device */
 	unsigned	dyn_fifo:1 __deprecated; /* supports dynamic fifo sizing */
 	unsigned	soft_con:1 __deprecated; /* soft connect required */
 	unsigned	utm_16:1 __deprecated; /* utm data witdh is 16 bits */
-	unsigned	big_endian:1;	/* true if CPU uses big-endian */
-	unsigned	mult_bulk_tx:1;	/* Tx ep required for multbulk pkts */
-	unsigned	mult_bulk_rx:1;	/* Rx ep required for multbulk pkts */
-	unsigned	high_iso_tx:1;	/* Tx ep required for HB iso */
-	unsigned	high_iso_rx:1;	/* Rx ep required for HD iso */
+	unsigned	big_endian;	/* true if CPU uses big-endian */
+	unsigned	mult_bulk_tx;	/* Tx ep required for multbulk pkts */
+	unsigned	mult_bulk_rx;	/* Rx ep required for multbulk pkts */
+	unsigned	high_iso_tx;	/* Tx ep required for HB iso */
+	unsigned	high_iso_rx;	/* Rx ep required for HD iso */
 	unsigned	dma:1 __deprecated; /* supports DMA */
 	unsigned	vendor_req:1 __deprecated; /* vendor registers required */
 
 	/* need to explicitly de-assert the port reset after resume? */
-	unsigned	host_port_deassert_reset_at_resume:1;
+	unsigned	host_port_deassert_reset_at_resume;
 
 	u8		num_eps;	/* number of endpoints _with_ ep0 */
 	u8		dma_channels __deprecated; /* number of dma channels */
@@ -118,7 +118,7 @@ struct musb_hdrc_platform_data {
 	u8		potpgt;
 
 	/* (HOST or OTG) program PHY for external Vbus */
-	unsigned	extvbus:1;
+	unsigned	extvbus;
 
 	/* Power the device on or off */
 	int		(*set_power)(int state);

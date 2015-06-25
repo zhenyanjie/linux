@@ -1245,8 +1245,8 @@ typedef struct hfa384x {
 #define WORK_RX_RESUME	4
 #define WORK_TX_RESUME	5
 
-	unsigned short req_timer_done:1;
-	unsigned short resp_timer_done:1;
+	unsigned short req_timer_done;
+	unsigned short resp_timer_done;
 
 	int endp_in;
 	int endp_out;

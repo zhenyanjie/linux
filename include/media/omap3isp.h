@@ -61,11 +61,11 @@ enum {
  *		0 - Normal, 1 - One's complement
  */
 struct isp_parallel_platform_data {
-	unsigned int data_lane_shift:2;
-	unsigned int clk_pol:1;
-	unsigned int hs_pol:1;
-	unsigned int vs_pol:1;
-	unsigned int data_pol:1;
+	unsigned int data_lane_shift;
+	unsigned int clk_pol;
+	unsigned int hs_pol;
+	unsigned int vs_pol;
+	unsigned int data_pol;
 };
 
 enum {
@@ -115,11 +115,11 @@ struct isp_csiphy_lanes_cfg {
  * @vpclk_div: Video port output clock control
  */
 struct isp_ccp2_platform_data {
-	unsigned int strobe_clk_pol:1;
-	unsigned int crc:1;
-	unsigned int ccp2_mode:1;
-	unsigned int phy_layer:1;
-	unsigned int vpclk_div:2;
+	unsigned int strobe_clk_pol;
+	unsigned int crc;
+	unsigned int ccp2_mode;
+	unsigned int phy_layer;
+	unsigned int vpclk_div;
 	struct isp_csiphy_lanes_cfg lanecfg;
 };
 
@@ -129,8 +129,8 @@ struct isp_ccp2_platform_data {
  * @vpclk_div: Video port output clock control
  */
 struct isp_csi2_platform_data {
-	unsigned crc:1;
-	unsigned vpclk_div:2;
+	unsigned crc;
+	unsigned vpclk_div;
 	struct isp_csiphy_lanes_cfg lanecfg;
 };
 

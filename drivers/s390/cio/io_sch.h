@@ -13,9 +13,9 @@ struct io_subchannel_private {
 	struct ccw1 sense_ccw;	/* static ccw for sense command */
 	struct ccw_device *cdev;/* pointer to the child ccw device */
 	struct {
-		unsigned int suspend:1;	/* allow suspend */
-		unsigned int prefetch:1;/* deny prefetch */
-		unsigned int inter:1;	/* suppress intermediate interrupts */
+		unsigned int suspend;	/* allow suspend */
+		unsigned int prefetch;/* deny prefetch */
+		unsigned int inter;	/* suppress intermediate interrupts */
 	} __packed options;
 } __aligned(8);
 
@@ -78,10 +78,10 @@ struct ccw_request {
 				 enum io_status);
 	void (*callback)(struct ccw_device *, void *, int);
 	void *data;
-	unsigned int singlepath:1;
+	unsigned int singlepath;
 	/* These fields are used internally. */
-	unsigned int cancel:1;
-	unsigned int done:1;
+	unsigned int cancel;
+	unsigned int done;
 	u16 mask;
 	u16 retries;
 	int drc;
@@ -133,24 +133,24 @@ struct ccw_device_private {
 	u8 path_gone_mask;	/* mask of paths, that became unavailable */
 	u8 path_new_mask;	/* mask of paths, that became available */
 	struct {
-		unsigned int fast:1;	/* post with "channel end" */
-		unsigned int repall:1;	/* report every interrupt status */
-		unsigned int pgroup:1;	/* do path grouping */
-		unsigned int force:1;	/* allow forced online */
-		unsigned int mpath:1;	/* do multipathing */
+		unsigned int fast;	/* post with "channel end" */
+		unsigned int repall;	/* report every interrupt status */
+		unsigned int pgroup;	/* do path grouping */
+		unsigned int force;	/* allow forced online */
+		unsigned int mpath;	/* do multipathing */
 	} __attribute__ ((packed)) options;
 	struct {
-		unsigned int esid:1;	    /* Ext. SenseID supported by HW */
-		unsigned int dosense:1;	    /* delayed SENSE required */
-		unsigned int doverify:1;    /* delayed path verification */
-		unsigned int donotify:1;    /* call notify function */
-		unsigned int recog_done:1;  /* dev. recog. complete */
-		unsigned int fake_irb:2;    /* deliver faked irb */
-		unsigned int resuming:1;    /* recognition while resume */
-		unsigned int pgroup:1;	    /* pathgroup is set up */
-		unsigned int mpath:1;	    /* multipathing is set up */
-		unsigned int pgid_unknown:1;/* unknown pgid state */
-		unsigned int initialized:1; /* set if initial reference held */
+		unsigned int esid;	    /* Ext. SenseID supported by HW */
+		unsigned int dosense;	    /* delayed SENSE required */
+		unsigned int doverify;    /* delayed path verification */
+		unsigned int donotify;    /* call notify function */
+		unsigned int recog_done;  /* dev. recog. complete */
+		unsigned int fake_irb;    /* deliver faked irb */
+		unsigned int resuming;    /* recognition while resume */
+		unsigned int pgroup;	    /* pathgroup is set up */
+		unsigned int mpath;	    /* multipathing is set up */
+		unsigned int pgid_unknown;/* unknown pgid state */
+		unsigned int initialized; /* set if initial reference held */
 	} __attribute__((packed)) flags;
 	unsigned long intparm;	/* user interruption parameter */
 	struct qdio_irq *qdio_data;

@@ -236,9 +236,9 @@ static void atl2_force_ps(struct atl2_hw *hw);
 #define VLAN_SIZE                                               4
 
 struct tx_pkt_header {
-	unsigned pkt_size:11;
+	unsigned pkt_size;
 	unsigned:4;			/* reserved */
-	unsigned ins_vlan:1;		/* txmac should insert vlan */
+	unsigned ins_vlan;		/* txmac should insert vlan */
 	unsigned short vlan;		/* vlan tag */
 };
 /* FIXME: replace above bitfields with MASK/SHIFT defines below */
@@ -250,23 +250,23 @@ struct tx_pkt_header {
 #define TX_PKT_HEADER_VLAN_TAG_SHIFT	16
 
 struct tx_pkt_status {
-	unsigned pkt_size:11;
+	unsigned pkt_size;
 	unsigned:5;		/* reserved */
-	unsigned ok:1;		/* current packet transmitted without error */
-	unsigned bcast:1;	/* broadcast packet */
-	unsigned mcast:1;	/* multicast packet */
-	unsigned pause:1;	/* transmiited a pause frame */
-	unsigned ctrl:1;
-	unsigned defer:1;    	/* current packet is xmitted with defer */
-	unsigned exc_defer:1;
-	unsigned single_col:1;
-	unsigned multi_col:1;
-	unsigned late_col:1;
-	unsigned abort_col:1;
-	unsigned underun:1;	/* current packet is aborted
+	unsigned ok;		/* current packet transmitted without error */
+	unsigned bcast;	/* broadcast packet */
+	unsigned mcast;	/* multicast packet */
+	unsigned pause;	/* transmiited a pause frame */
+	unsigned ctrl;
+	unsigned defer;    	/* current packet is xmitted with defer */
+	unsigned exc_defer;
+	unsigned single_col;
+	unsigned multi_col;
+	unsigned late_col;
+	unsigned abort_col;
+	unsigned underun;	/* current packet is aborted
 				 * due to txram underrun */
 	unsigned:3;		/* reserved */
-	unsigned update:1;	/* always 1'b1 in tx_status_buf */
+	unsigned update;	/* always 1'b1 in tx_status_buf */
 };
 /* FIXME: replace above bitfields with MASK/SHIFT defines below */
 #define TX_PKT_STATUS_SIZE_MASK		0x7FF
@@ -299,26 +299,26 @@ struct tx_pkt_status {
 #define TX_PKT_STATUS_UPDATE_SHIFT	31
 
 struct rx_pkt_status {
-	unsigned pkt_size:11;	/* packet size, max 2047 bytes */
-	unsigned:5;		/* reserved */
-	unsigned ok:1;		/* current packet received ok without error */
-	unsigned bcast:1;	/* current packet is broadcast */
-	unsigned mcast:1;	/* current packet is multicast */
-	unsigned pause:1;
-	unsigned ctrl:1;
-	unsigned crc:1;		/* received a packet with crc error */
-	unsigned code:1;	/* received a packet with code error */
-	unsigned runt:1;	/* received a packet less than 64 bytes
+	unsigned pkt_size;	/* packet size, max 2047 bytes */
+	unsigned:8;		/* reserved */
+	unsigned ok;		/* current packet received ok without error */
+	unsigned bcast;	/* current packet is broadcast */
+	unsigned mcast;	/* current packet is multicast */
+	unsigned pause;
+	unsigned ctrl;
+	unsigned crc;		/* received a packet with crc error */
+	unsigned code;	/* received a packet with code error */
+	unsigned runt;	/* received a packet less than 64 bytes
 				 * with good crc */
-	unsigned frag:1;	/* received a packet less than 64 bytes
+	unsigned frag;	/* received a packet less than 64 bytes
 				 * with bad crc */
-	unsigned trunc:1;	/* current frame truncated due to rxram full */
-	unsigned align:1;	/* this packet is alignment error */
-	unsigned vlan:1;	/* this packet has vlan */
-	unsigned:3;		/* reserved */
-	unsigned update:1;
+	unsigned trunc;	/* current frame truncated due to rxram full */
+	unsigned align;	/* this packet is alignment error */
+	unsigned vlan;	/* this packet has vlan */
+	unsigned:8;		/* reserved */
+	unsigned update;
 	unsigned short vtag;	/* vlan tag */
-	unsigned:16;
+	unsigned:8;
 };
 /* FIXME: replace above bitfields with MASK/SHIFT defines below */
 #define RX_PKT_STATUS_SIZE_MASK		0x7FF

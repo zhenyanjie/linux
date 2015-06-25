@@ -2,7 +2,7 @@
 #define _NFT_REJECT_H_
 
 struct nft_reject {
-	enum nft_reject_types	type:8;
+	enum nft_reject_types	type;
 	u8			icmp_code;
 };
 

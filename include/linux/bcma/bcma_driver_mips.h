@@ -35,8 +35,8 @@ struct bcma_device;
 
 struct bcma_drv_mips {
 	struct bcma_device *core;
-	u8 setup_done:1;
-	u8 early_setup_done:1;
+	u8 setup_done;
+	u8 early_setup_done;
 };
 
 #ifdef CONFIG_BCMA_DRIVER_MIPS

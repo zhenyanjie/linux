@@ -708,8 +708,8 @@ struct snd_soc_component {
 
 	unsigned int active;
 
-	unsigned int ignore_pmdown_time:1; /* pmdown_time is ignored at stop */
-	unsigned int registered_as_component:1;
+	unsigned int ignore_pmdown_time; /* pmdown_time is ignored at stop */
+	unsigned int registered_as_component;
 
 	struct list_head list;
 
@@ -744,12 +744,12 @@ struct snd_soc_codec {
 
 	/* runtime */
 	struct snd_ac97 *ac97;  /* for ad-hoc ac97 devices */
-	unsigned int cache_bypass:1; /* Suppress access to the cache */
-	unsigned int suspended:1; /* Codec is in suspend PM state */
-	unsigned int probed:1; /* Codec has been probed */
-	unsigned int ac97_registered:1; /* Codec has been AC97 registered */
-	unsigned int ac97_created:1; /* Codec has been created by SoC */
-	unsigned int cache_init:1; /* codec cache has been initialized */
+	unsigned int cache_bypass; /* Suppress access to the cache */
+	unsigned int suspended; /* Codec is in suspend PM state */
+	unsigned int probed; /* Codec has been probed */
+	unsigned int ac97_registered; /* Codec has been AC97 registered */
+	unsigned int ac97_created; /* Codec has been created by SoC */
+	unsigned int cache_init; /* codec cache has been initialized */
 	u32 cache_only;  /* Suppress writes to hardware */
 	u32 cache_sync; /* Cache needs to be synced to hardware */
 
@@ -873,8 +873,8 @@ struct snd_soc_platform {
 	struct device *dev;
 	const struct snd_soc_platform_driver *driver;
 
-	unsigned int suspended:1; /* platform is suspended */
-	unsigned int probed:1;
+	unsigned int suspended; /* platform is suspended */
+	unsigned int probed;
 
 	struct list_head list;
 
@@ -932,25 +932,25 @@ struct snd_soc_dai_link {
 	enum snd_soc_dpcm_trigger trigger[2]; /* trigger type for DPCM */
 
 	/* Keep DAI active over suspend */
-	unsigned int ignore_suspend:1;
+	unsigned int ignore_suspend;
 
 	/* Symmetry requirements */
-	unsigned int symmetric_rates:1;
-	unsigned int symmetric_channels:1;
-	unsigned int symmetric_samplebits:1;
+	unsigned int symmetric_rates;
+	unsigned int symmetric_channels;
+	unsigned int symmetric_samplebits;
 
 	/* Do not create a PCM for this DAI link (Backend link) */
-	unsigned int no_pcm:1;
+	unsigned int no_pcm;
 
 	/* This DAI link can route to other DAI links at runtime (Frontend)*/
-	unsigned int dynamic:1;
+	unsigned int dynamic;
 
 	/* DPCM capture and Playback support */
-	unsigned int dpcm_capture:1;
-	unsigned int dpcm_playback:1;
+	unsigned int dpcm_capture;
+	unsigned int dpcm_playback;
 
 	/* pmdown_time is ignored at stop */
-	unsigned int ignore_pmdown_time:1;
+	unsigned int ignore_pmdown_time;
 
 	/* codec/machine specific init - e.g. add machine controls */
 	int (*init)(struct snd_soc_pcm_runtime *rtd);
@@ -1096,14 +1096,14 @@ struct snd_soc_pcm_runtime {
 	enum snd_soc_pcm_subclass pcm_subclass;
 	struct snd_pcm_ops ops;
 
-	unsigned int dev_registered:1;
+	unsigned int dev_registered;
 
 	/* Dynamic PCM BE runtime data */
 	struct snd_soc_dpcm_runtime dpcm[2];
 	int fe_compr;
 
 	long pmdown_time;
-	unsigned char pop_wait:1;
+	unsigned char pop_wait;
 
 	/* runtime devices */
 	struct snd_pcm *pcm;
@@ -1129,8 +1129,8 @@ struct soc_mixer_control {
 	int reg, rreg;
 	unsigned int shift, rshift;
 	unsigned int sign_bit;
-	unsigned int invert:1;
-	unsigned int autodisable:1;
+	unsigned int invert;
+	unsigned int autodisable;
 };
 
 struct soc_bytes {

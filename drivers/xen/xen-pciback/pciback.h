@@ -42,11 +42,11 @@ struct xen_pcibk_device {
 struct xen_pcibk_dev_data {
 	struct list_head config_fields;
 	struct pci_saved_state *pci_saved_state;
-	unsigned int permissive:1;
-	unsigned int warned_on_write:1;
-	unsigned int enable_intx:1;
-	unsigned int isr_on:1; /* Whether the IRQ handler is installed. */
-	unsigned int ack_intr:1; /* .. and ACK-ing */
+	unsigned int permissive;
+	unsigned int warned_on_write;
+	unsigned int enable_intx;
+	unsigned int isr_on; /* Whether the IRQ handler is installed. */
+	unsigned int ack_intr; /* .. and ACK-ing */
 	unsigned long handled;
 	unsigned int irq; /* Saved in case device transitions to MSI/MSI-X */
 	char irq_name[0]; /* xen-pcibk[000:04:00.0] */

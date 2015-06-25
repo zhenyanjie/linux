@@ -33,10 +33,10 @@ enum RSCTYP {
 struct rsc_ops;
 
 struct rsc {
-	u32 idx:12;	/* The index of a resource */
-	u32 type:4;	/* The type (RSCTYP) of a resource */
-	u32 conj:12;	/* Current conjugate index */
-	u32 msr:4;	/* The Master Sample Rate a resource working on */
+	u32 idx;	/* The index of a resource */
+	u32 type;	/* The type (RSCTYP) of a resource */
+	u32 conj;	/* Current conjugate index */
+	u32 msr;	/* The Master Sample Rate a resource working on */
 	void *ctrl_blk;	/* Chip specific control info block for a resource */
 	void *hw;	/* Chip specific object for hardware access means */
 	struct rsc_ops *ops;	/* Generic resource operations */

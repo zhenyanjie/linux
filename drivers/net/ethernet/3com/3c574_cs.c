@@ -198,7 +198,7 @@ struct el3_private {
 	struct pcmcia_device	*p_dev;
 	u16 advertising, partner;		/* NWay media advertisement */
 	unsigned char phys;			/* MII device address */
-	unsigned int autoselect:1, default_media:3;	/* Read from the EEPROM/Wn3_Config. */
+	unsigned int autoselect:1, default_media;	/* Read from the EEPROM/Wn3_Config. */
 	/* for transceiver monitoring */
 	struct timer_list media;
 	unsigned short media_status;

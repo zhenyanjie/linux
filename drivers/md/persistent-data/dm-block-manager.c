@@ -364,7 +364,7 @@ static void dm_block_manager_write_callback(struct dm_buffer *buf)
  *--------------------------------------------------------------*/
 struct dm_block_manager {
 	struct dm_bufio_client *bufio;
-	bool read_only:1;
+	bool read_only;
 };
 
 struct dm_block_manager *dm_block_manager_create(struct block_device *bdev,

@@ -155,16 +155,16 @@ static const struct dentry_operations isofs_dentry_ops[] = {
 };
 
 struct iso9660_options{
-	unsigned int rock:1;
-	unsigned int joliet:1;
-	unsigned int cruft:1;
-	unsigned int hide:1;
-	unsigned int showassoc:1;
-	unsigned int nocompress:1;
-	unsigned int overriderockperm:1;
-	unsigned int uid_set:1;
-	unsigned int gid_set:1;
-	unsigned int utf8:1;
+	unsigned int rock;
+	unsigned int joliet;
+	unsigned int cruft;
+	unsigned int hide;
+	unsigned int showassoc;
+	unsigned int nocompress;
+	unsigned int overriderockperm;
+	unsigned int uid_set;
+	unsigned int gid_set;
+	unsigned int utf8;
 	unsigned char map;
 	unsigned char check;
 	unsigned int blocksize;

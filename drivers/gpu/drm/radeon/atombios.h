@@ -354,13 +354,13 @@ typedef struct _ATOM_MASTER_COMMAND_TABLE
 typedef struct _ATOM_TABLE_ATTRIBUTE
 {
 #if ATOM_BIG_ENDIAN
-  USHORT  UpdatedByUtility:1;         //[15]=Table updated by utility flag
-  USHORT  PS_SizeInBytes:7;           //[14:8]=Size of parameter space in Bytes (multiple of a dword), 
-  USHORT  WS_SizeInBytes:8;           //[7:0]=Size of workspace in Bytes (in multiple of a dword), 
+  USHORT  UpdatedByUtility;         //[15]=Table updated by utility flag
+  USHORT  PS_SizeInBytes;           //[14:8]=Size of parameter space in Bytes (multiple of a dword), 
+  USHORT  WS_SizeInBytes;           //[7:0]=Size of workspace in Bytes (in multiple of a dword), 
 #else
-  USHORT  WS_SizeInBytes:8;           //[7:0]=Size of workspace in Bytes (in multiple of a dword), 
-  USHORT  PS_SizeInBytes:7;           //[14:8]=Size of parameter space in Bytes (multiple of a dword), 
-  USHORT  UpdatedByUtility:1;         //[15]=Table updated by utility flag
+  USHORT  WS_SizeInBytes;           //[7:0]=Size of workspace in Bytes (in multiple of a dword), 
+  USHORT  PS_SizeInBytes;           //[14:8]=Size of parameter space in Bytes (multiple of a dword), 
+  USHORT  UpdatedByUtility;         //[15]=Table updated by utility flag
 #endif
 }ATOM_TABLE_ATTRIBUTE;
 
@@ -394,13 +394,13 @@ typedef struct _ATOM_COMMON_ROM_COMMAND_TABLE_HEADER
 typedef struct _ATOM_ADJUST_MEMORY_CLOCK_FREQ
 {
 #if ATOM_BIG_ENDIAN
-  ULONG ulPointerReturnFlag:1;      // BYTE_3[7]=1 - Return the pointer to the right Data Block; BYTE_3[7]=0 - Program the right Data Block 
-  ULONG ulMemoryModuleNumber:7;     // BYTE_3[6:0]
-  ULONG ulClockFreq:24;
+  ULONG ulPointerReturnFlag;      // BYTE_3[7]=1 - Return the pointer to the right Data Block; BYTE_3[7]=0 - Program the right Data Block 
+  ULONG ulMemoryModuleNumber;     // BYTE_3[6:0]
+  ULONG ulClockFreq;
 #else
-  ULONG ulClockFreq:24;
-  ULONG ulMemoryModuleNumber:7;     // BYTE_3[6:0]
-  ULONG ulPointerReturnFlag:1;      // BYTE_3[7]=1 - Return the pointer to the right Data Block; BYTE_3[7]=0 - Program the right Data Block 
+  ULONG ulClockFreq;
+  ULONG ulMemoryModuleNumber;     // BYTE_3[6:0]
+  ULONG ulPointerReturnFlag;      // BYTE_3[7]=1 - Return the pointer to the right Data Block; BYTE_3[7]=0 - Program the right Data Block 
 #endif
 }ATOM_ADJUST_MEMORY_CLOCK_FREQ;
 #define POINTER_RETURN_FLAG             0x80
@@ -441,11 +441,11 @@ typedef struct _COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V2
 typedef struct _ATOM_COMPUTE_CLOCK_FREQ
 {
 #if ATOM_BIG_ENDIAN
-  ULONG ulComputeClockFlag:8;                 // =1: COMPUTE_MEMORY_PLL_PARAM, =2: COMPUTE_ENGINE_PLL_PARAM
-  ULONG ulClockFreq:24;                       // in unit of 10kHz
+  ULONG ulComputeClockFlag;                 // =1: COMPUTE_MEMORY_PLL_PARAM, =2: COMPUTE_ENGINE_PLL_PARAM
+  ULONG ulClockFreq;                       // in unit of 10kHz
 #else
-  ULONG ulClockFreq:24;                       // in unit of 10kHz
-  ULONG ulComputeClockFlag:8;                 // =1: COMPUTE_MEMORY_PLL_PARAM, =2: COMPUTE_ENGINE_PLL_PARAM
+  ULONG ulClockFreq;                       // in unit of 10kHz
+  ULONG ulComputeClockFlag;                 // =1: COMPUTE_MEMORY_PLL_PARAM, =2: COMPUTE_ENGINE_PLL_PARAM
 #endif
 }ATOM_COMPUTE_CLOCK_FREQ;
 
@@ -480,11 +480,11 @@ typedef struct _COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V3
 typedef struct _COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V4
 {
 #if ATOM_BIG_ENDIAN
-  ULONG  ucPostDiv:8;        //return parameter: post divider which is used to program to register directly
-  ULONG  ulClock:24;         //Input= target clock, output = actual clock 
+  ULONG  ucPostDiv;        //return parameter: post divider which is used to program to register directly
+  ULONG  ulClock;         //Input= target clock, output = actual clock 
 #else
-  ULONG  ulClock:24;         //Input= target clock, output = actual clock 
-  ULONG  ucPostDiv:8;        //return parameter: post divider which is used to program to register directly
+  ULONG  ulClock;         //Input= target clock, output = actual clock 
+  ULONG  ucPostDiv;        //return parameter: post divider which is used to program to register directly
 #endif
 }COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V4;
 
@@ -749,17 +749,17 @@ typedef struct _DIG_ENCODER_CONTROL_PARAMETERS
 typedef struct _ATOM_DIG_ENCODER_CONFIG_V2
 {
 #if ATOM_BIG_ENDIAN
-    UCHAR ucReserved1:2;
-    UCHAR ucTransmitterSel:2;     // =0: UniphyAB, =1: UniphyCD  =2: UniphyEF
-    UCHAR ucLinkSel:1;            // =0: linkA/C/E =1: linkB/D/F
-    UCHAR ucReserved:1;
-    UCHAR ucDPLinkRate:1;         // =0: 1.62Ghz, =1: 2.7Ghz
+    UCHAR ucReserved1;
+    UCHAR ucTransmitterSel;     // =0: UniphyAB, =1: UniphyCD  =2: UniphyEF
+    UCHAR ucLinkSel;            // =0: linkA/C/E =1: linkB/D/F
+    UCHAR ucReserved;
+    UCHAR ucDPLinkRate;         // =0: 1.62Ghz, =1: 2.7Ghz
 #else
-    UCHAR ucDPLinkRate:1;         // =0: 1.62Ghz, =1: 2.7Ghz
-    UCHAR ucReserved:1;
-    UCHAR ucLinkSel:1;            // =0: linkA/C/E =1: linkB/D/F
-    UCHAR ucTransmitterSel:2;     // =0: UniphyAB, =1: UniphyCD  =2: UniphyEF
-    UCHAR ucReserved1:2;
+    UCHAR ucDPLinkRate;         // =0: 1.62Ghz, =1: 2.7Ghz
+    UCHAR ucReserved;
+    UCHAR ucLinkSel;            // =0: linkA/C/E =1: linkB/D/F
+    UCHAR ucTransmitterSel;     // =0: UniphyAB, =1: UniphyCD  =2: UniphyEF
+    UCHAR ucReserved1;
 #endif
 }ATOM_DIG_ENCODER_CONFIG_V2;
 
@@ -816,15 +816,15 @@ typedef struct _DIG_ENCODER_CONTROL_PARAMETERS_V2
 typedef struct _ATOM_DIG_ENCODER_CONFIG_V3
 {
 #if ATOM_BIG_ENDIAN
-    UCHAR ucReserved1:1;
-    UCHAR ucDigSel:3;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
-    UCHAR ucReserved:3;
-    UCHAR ucDPLinkRate:1;         // =0: 1.62Ghz, =1: 2.7Ghz
+    UCHAR ucReserved1;
+    UCHAR ucDigSel;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
+    UCHAR ucReserved;
+    UCHAR ucDPLinkRate;         // =0: 1.62Ghz, =1: 2.7Ghz
 #else
-    UCHAR ucDPLinkRate:1;         // =0: 1.62Ghz, =1: 2.7Ghz
-    UCHAR ucReserved:3;
-    UCHAR ucDigSel:3;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
-    UCHAR ucReserved1:1;
+    UCHAR ucDPLinkRate;         // =0: 1.62Ghz, =1: 2.7Ghz
+    UCHAR ucReserved;
+    UCHAR ucDigSel;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
+    UCHAR ucReserved1;
 #endif
 }ATOM_DIG_ENCODER_CONFIG_V3;
 
@@ -869,15 +869,15 @@ typedef struct _DIG_ENCODER_CONTROL_PARAMETERS_V3
 typedef struct _ATOM_DIG_ENCODER_CONFIG_V4
 {
 #if ATOM_BIG_ENDIAN
-    UCHAR ucReserved1:1;
-    UCHAR ucDigSel:3;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
-    UCHAR ucReserved:2;
-    UCHAR ucDPLinkRate:2;         // =0: 1.62Ghz, =1: 2.7Ghz, 2=5.4Ghz    <= Changed comparing to previous version
+    UCHAR ucReserved1;
+    UCHAR ucDigSel;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
+    UCHAR ucReserved;
+    UCHAR ucDPLinkRate;         // =0: 1.62Ghz, =1: 2.7Ghz, 2=5.4Ghz    <= Changed comparing to previous version
 #else
-    UCHAR ucDPLinkRate:2;         // =0: 1.62Ghz, =1: 2.7Ghz, 2=5.4Ghz    <= Changed comparing to previous version
-    UCHAR ucReserved:2;
-    UCHAR ucDigSel:3;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
-    UCHAR ucReserved1:1;
+    UCHAR ucDPLinkRate;         // =0: 1.62Ghz, =1: 2.7Ghz, 2=5.4Ghz    <= Changed comparing to previous version
+    UCHAR ucReserved;
+    UCHAR ucDigSel;             // =0/1/2/3/4/5: DIG0/1/2/3/4/5 (In register spec also referred as DIGA/B/C/D/E/F)
+    UCHAR ucReserved1;
 #endif
 }ATOM_DIG_ENCODER_CONFIG_V4;
 
@@ -1022,26 +1022,26 @@ typedef struct _DIG_TRANSMITTER_CONTROL_PARAMETERS
 typedef struct _ATOM_DIG_TRANSMITTER_CONFIG_V2
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
+  UCHAR ucTransmitterSel;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
                                     //        =1 Dig Transmitter 2 ( Uniphy CD )
                                     //        =2 Dig Transmitter 3 ( Uniphy EF )
-  UCHAR ucReserved:1;               
-  UCHAR fDPConnector:1;             //bit4=0: DP connector  =1: None DP connector
-  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA( DIG inst0 ). =1: Data/clk path source from DIGB ( DIG inst1 )
-  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
+  UCHAR ucReserved;               
+  UCHAR fDPConnector;             //bit4=0: DP connector  =1: None DP connector
+  UCHAR ucEncoderSel;             //bit3=0: Data/Clk path source from DIGA( DIG inst0 ). =1: Data/clk path source from DIGB ( DIG inst1 )
+  UCHAR ucLinkSel;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
                                     //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
 
-  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
-  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
+  UCHAR fCoherentMode;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
+  UCHAR fDualLinkConnector;       //bit0=1: Dual Link DVI connector
 #else
-  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
-  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
-  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
+  UCHAR fDualLinkConnector;       //bit0=1: Dual Link DVI connector
+  UCHAR fCoherentMode;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
+  UCHAR ucLinkSel;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
                                     //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
-  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA( DIG inst0 ). =1: Data/clk path source from DIGB ( DIG inst1 )
-  UCHAR fDPConnector:1;             //bit4=0: DP connector  =1: None DP connector
-  UCHAR ucReserved:1;               
-  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
+  UCHAR ucEncoderSel;             //bit3=0: Data/Clk path source from DIGA( DIG inst0 ). =1: Data/clk path source from DIGB ( DIG inst1 )
+  UCHAR fDPConnector;             //bit4=0: DP connector  =1: None DP connector
+  UCHAR ucReserved;               
+  UCHAR ucTransmitterSel;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
                                     //        =1 Dig Transmitter 2 ( Uniphy CD )
                                     //        =2 Dig Transmitter 3 ( Uniphy EF )
 #endif
@@ -1089,23 +1089,23 @@ typedef struct _DIG_TRANSMITTER_CONTROL_PARAMETERS_V2
 typedef struct _ATOM_DIG_TRANSMITTER_CONFIG_V3
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
+  UCHAR ucTransmitterSel;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
                                     //        =1 Dig Transmitter 2 ( Uniphy CD )
                                     //        =2 Dig Transmitter 3 ( Uniphy EF )
-  UCHAR ucRefClkSource:2;           //bit5:4: PPLL1 =0, PPLL2=1, EXT_CLK=2
-  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
-  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
+  UCHAR ucRefClkSource;           //bit5:4: PPLL1 =0, PPLL2=1, EXT_CLK=2
+  UCHAR ucEncoderSel;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
+  UCHAR ucLinkSel;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
                                     //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
-  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
-  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
+  UCHAR fCoherentMode;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
+  UCHAR fDualLinkConnector;       //bit0=1: Dual Link DVI connector
 #else
-  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
-  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
-  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
+  UCHAR fDualLinkConnector;       //bit0=1: Dual Link DVI connector
+  UCHAR fCoherentMode;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
+  UCHAR ucLinkSel;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
                                     //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
-  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
-  UCHAR ucRefClkSource:2;           //bit5:4: PPLL1 =0, PPLL2=1, EXT_CLK=2
-  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
+  UCHAR ucEncoderSel;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
+  UCHAR ucRefClkSource;           //bit5:4: PPLL1 =0, PPLL2=1, EXT_CLK=2
+  UCHAR ucTransmitterSel;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
                                     //        =1 Dig Transmitter 2 ( Uniphy CD )
                                     //        =2 Dig Transmitter 3 ( Uniphy EF )
 #endif
@@ -1170,13 +1170,13 @@ typedef struct _ATOM_DP_VS_MODE_V4
  	  UCHAR ucLaneSet;
  	  struct {
 #if ATOM_BIG_ENDIAN
- 		  UCHAR ucPOST_CURSOR2:2;         //Bit[7:6] Post Cursor2 Level      <= New in V4
- 		  UCHAR ucPRE_EMPHASIS:3;         //Bit[5:3] Pre-emphasis Level
- 		  UCHAR ucVOLTAGE_SWING:3;        //Bit[2:0] Voltage Swing Level
+ 		  UCHAR ucPOST_CURSOR2;         //Bit[7:6] Post Cursor2 Level      <= New in V4
+ 		  UCHAR ucPRE_EMPHASIS;         //Bit[5:3] Pre-emphasis Level
+ 		  UCHAR ucVOLTAGE_SWING;        //Bit[2:0] Voltage Swing Level
 #else
- 		  UCHAR ucVOLTAGE_SWING:3;        //Bit[2:0] Voltage Swing Level
- 		  UCHAR ucPRE_EMPHASIS:3;         //Bit[5:3] Pre-emphasis Level
- 		  UCHAR ucPOST_CURSOR2:2;         //Bit[7:6] Post Cursor2 Level      <= New in V4
+ 		  UCHAR ucVOLTAGE_SWING;        //Bit[2:0] Voltage Swing Level
+ 		  UCHAR ucPRE_EMPHASIS;         //Bit[5:3] Pre-emphasis Level
+ 		  UCHAR ucPOST_CURSOR2;         //Bit[7:6] Post Cursor2 Level      <= New in V4
 #endif
  		};
  	}; 
@@ -1185,23 +1185,23 @@ typedef struct _ATOM_DP_VS_MODE_V4
 typedef struct _ATOM_DIG_TRANSMITTER_CONFIG_V4
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
+  UCHAR ucTransmitterSel;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
                                     //        =1 Dig Transmitter 2 ( Uniphy CD )
                                     //        =2 Dig Transmitter 3 ( Uniphy EF )
-  UCHAR ucRefClkSource:2;           //bit5:4: PPLL1 =0, PPLL2=1, DCPLL=2, EXT_CLK=3   <= New
-  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
-  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
+  UCHAR ucRefClkSource;           //bit5:4: PPLL1 =0, PPLL2=1, DCPLL=2, EXT_CLK=3   <= New
+  UCHAR ucEncoderSel;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
+  UCHAR ucLinkSel;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
                                     //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
-  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
-  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
+  UCHAR fCoherentMode;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
+  UCHAR fDualLinkConnector;       //bit0=1: Dual Link DVI connector
 #else
-  UCHAR fDualLinkConnector:1;       //bit0=1: Dual Link DVI connector
-  UCHAR fCoherentMode:1;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
-  UCHAR ucLinkSel:1;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
+  UCHAR fDualLinkConnector;       //bit0=1: Dual Link DVI connector
+  UCHAR fCoherentMode;            //bit1=1: Coherent Mode ( for DVI/HDMI mode )
+  UCHAR ucLinkSel;                //bit2=0: Uniphy LINKA or C or E when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is A or C or E
                                     //    =1: Uniphy LINKB or D or F when fDualLinkConnector=0. when fDualLinkConnector=1, it means master link of dual link is B or D or F
-  UCHAR ucEncoderSel:1;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
-  UCHAR ucRefClkSource:2;           //bit5:4: PPLL1 =0, PPLL2=1, DCPLL=2, EXT_CLK=3   <= New
-  UCHAR ucTransmitterSel:2;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
+  UCHAR ucEncoderSel;             //bit3=0: Data/Clk path source from DIGA/C/E. =1: Data/clk path source from DIGB/D/F
+  UCHAR ucRefClkSource;           //bit5:4: PPLL1 =0, PPLL2=1, DCPLL=2, EXT_CLK=3   <= New
+  UCHAR ucTransmitterSel;         //bit7:6: =0 Dig Transmitter 1 ( Uniphy AB )
                                     //        =1 Dig Transmitter 2 ( Uniphy CD )
                                     //        =2 Dig Transmitter 3 ( Uniphy EF )
 #endif
@@ -1254,17 +1254,17 @@ typedef struct _DIG_TRANSMITTER_CONTROL_PARAMETERS_V4
 typedef struct _ATOM_DIG_TRANSMITTER_CONFIG_V5
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR ucReservd1:1;
-  UCHAR ucHPDSel:3;
-  UCHAR ucPhyClkSrcId:2;            
-  UCHAR ucCoherentMode:1;            
-  UCHAR ucReserved:1;
+  UCHAR ucReservd1;
+  UCHAR ucHPDSel;
+  UCHAR ucPhyClkSrcId;            
+  UCHAR ucCoherentMode;            
+  UCHAR ucReserved;
 #else
-  UCHAR ucReserved:1;
-  UCHAR ucCoherentMode:1;            
-  UCHAR ucPhyClkSrcId:2;            
-  UCHAR ucHPDSel:3;
-  UCHAR ucReservd1:1;
+  UCHAR ucReserved;
+  UCHAR ucCoherentMode;            
+  UCHAR ucPhyClkSrcId;            
+  UCHAR ucHPDSel;
+  UCHAR ucReservd1;
 #endif
 }ATOM_DIG_TRANSMITTER_CONFIG_V5;
 
@@ -1669,14 +1669,14 @@ typedef struct _PIXEL_CLOCK_PARAMETERS_V5
 typedef struct _CRTC_PIXEL_CLOCK_FREQ
 {
 #if ATOM_BIG_ENDIAN
-  ULONG  ucCRTC:8;            // ATOM_CRTC1~6, indicate the CRTC controller to 
+  ULONG  ucCRTC;            // ATOM_CRTC1~6, indicate the CRTC controller to 
                               // drive the pixel clock. not used for DCPLL case.
-  ULONG  ulPixelClock:24;     // target the pixel clock to drive the CRTC timing. 
+  ULONG  ulPixelClock;     // target the pixel clock to drive the CRTC timing. 
                               // 0 means disable PPLL/DCPLL. Expanded to 24 bits comparing to previous version.
 #else
-  ULONG  ulPixelClock:24;     // target the pixel clock to drive the CRTC timing. 
+  ULONG  ulPixelClock;     // target the pixel clock to drive the CRTC timing. 
                               // 0 means disable PPLL/DCPLL. Expanded to 24 bits comparing to previous version.
-  ULONG  ucCRTC:8;            // ATOM_CRTC1~6, indicate the CRTC controller to 
+  ULONG  ucCRTC;            // ATOM_CRTC1~6, indicate the CRTC controller to 
                               // drive the pixel clock. not used for DCPLL case.
 #endif
 }CRTC_PIXEL_CLOCK_FREQ;
@@ -2458,33 +2458,33 @@ typedef struct _ATOM_MULTIMEDIA_CONFIG_INFO
 typedef struct _ATOM_FIRMWARE_CAPABILITY
 {
 #if ATOM_BIG_ENDIAN
-  USHORT Reserved:1;
-  USHORT SCL2Redefined:1;
-  USHORT PostWithoutModeSet:1;
-  USHORT HyperMemory_Size:4;
-  USHORT HyperMemory_Support:1;
-  USHORT PPMode_Assigned:1;
-  USHORT WMI_SUPPORT:1;
-  USHORT GPUControlsBL:1;
-  USHORT EngineClockSS_Support:1;
-  USHORT MemoryClockSS_Support:1;
-  USHORT ExtendedDesktopSupport:1;
-  USHORT DualCRTC_Support:1;
-  USHORT FirmwarePosted:1;
+  USHORT Reserved;
+  USHORT SCL2Redefined;
+  USHORT PostWithoutModeSet;
+  USHORT HyperMemory_Size;
+  USHORT HyperMemory_Support;
+  USHORT PPMode_Assigned;
+  USHORT WMI_SUPPORT;
+  USHORT GPUControlsBL;
+  USHORT EngineClockSS_Support;
+  USHORT MemoryClockSS_Support;
+  USHORT ExtendedDesktopSupport;
+  USHORT DualCRTC_Support;
+  USHORT FirmwarePosted;
 #else
-  USHORT FirmwarePosted:1;
-  USHORT DualCRTC_Support:1;
-  USHORT ExtendedDesktopSupport:1;
-  USHORT MemoryClockSS_Support:1;
-  USHORT EngineClockSS_Support:1;
-  USHORT GPUControlsBL:1;
-  USHORT WMI_SUPPORT:1;
-  USHORT PPMode_Assigned:1;
-  USHORT HyperMemory_Support:1;
-  USHORT HyperMemory_Size:4;
-  USHORT PostWithoutModeSet:1;
-  USHORT SCL2Redefined:1;
-  USHORT Reserved:1;
+  USHORT FirmwarePosted;
+  USHORT DualCRTC_Support;
+  USHORT ExtendedDesktopSupport;
+  USHORT MemoryClockSS_Support;
+  USHORT EngineClockSS_Support;
+  USHORT GPUControlsBL;
+  USHORT WMI_SUPPORT;
+  USHORT PPMode_Assigned;
+  USHORT HyperMemory_Support;
+  USHORT HyperMemory_Size;
+  USHORT PostWithoutModeSet;
+  USHORT SCL2Redefined;
+  USHORT Reserved;
 #endif
 }ATOM_FIRMWARE_CAPABILITY;
 
@@ -2889,8 +2889,8 @@ ulOtherDisplayMisc: [15:8]- Bootup LCD Expansion selection; 0-center, 1-full pan
 			              [7:0] - BootupTV standard selection; This is a bit vector to indicate what TV standards are supported by the system. Refer to ucTVSupportedStd definition;
 
 ulDDISlot1Config: Describes the PCIE lane configuration on this DDI PCIE slot (ADD2 card) or connector (Mobile design).
-      [3:0]  - Bit vector to indicate PCIE lane config of the DDI slot/connector on chassis (bit 0=1 lane 3:0; bit 1=1 lane 7:4; bit 2=1 lane 11:8; bit 3=1 lane 15:12)
-			[7:4]  - Bit vector to indicate PCIE lane config of the same DDI slot/connector on docking station (bit 4=1 lane 3:0; bit 5=1 lane 7:4; bit 6=1 lane 11:8; bit 7=1 lane 15:12)
+      [3:0]  - Bit vector to indicate PCIE lane config of the DDI slot/connector on chassis (bit 0=1 lane 3; bit 1=1 lane 7; bit 2=1 lane 11; bit 3=1 lane 15:12)
+			[7:4]  - Bit vector to indicate PCIE lane config of the same DDI slot/connector on docking station (bit 4=1 lane 3; bit 5=1 lane 7; bit 6=1 lane 11; bit 7=1 lane 15:12)
       When a DDI connector is not "paired" (meaming two connections mutualexclusive on chassis or docking, only one of them can be connected at one time.
       in both chassis and docking, SBIOS has to duplicate the same PCIE lane info from chassis to docking or vice versa. For example:
       one DDI connector is only populated in docking with PCIE lane 8-11, but there is no paired connection on chassis, SBIOS has to copy bit 6 to bit 2.
@@ -3181,13 +3181,13 @@ typedef struct _ATOM_INTEGRATED_SYSTEM_INFO_V5
 typedef struct _ATOM_I2C_ID_CONFIG
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR   bfHW_Capable:1;
-  UCHAR   bfHW_EngineID:3;
-  UCHAR   bfI2C_LineMux:4;
+  UCHAR   bfHW_Capable;
+  UCHAR   bfHW_EngineID;
+  UCHAR   bfI2C_LineMux;
 #else
-  UCHAR   bfI2C_LineMux:4;
-  UCHAR   bfHW_EngineID:3;
-  UCHAR   bfHW_Capable:1;
+  UCHAR   bfI2C_LineMux;
+  UCHAR   bfHW_EngineID;
+  UCHAR   bfHW_Capable;
 #endif
 }ATOM_I2C_ID_CONFIG;
 
@@ -3240,29 +3240,29 @@ typedef struct _ATOM_GPIO_I2C_INFO
 typedef struct _ATOM_MODE_MISC_INFO
 { 
 #if ATOM_BIG_ENDIAN
-  USHORT Reserved:6;
-  USHORT RGB888:1;
-  USHORT DoubleClock:1;
-  USHORT Interlace:1;
-  USHORT CompositeSync:1;
-  USHORT V_ReplicationBy2:1;
-  USHORT H_ReplicationBy2:1;
-  USHORT VerticalCutOff:1;
-  USHORT VSyncPolarity:1;      //0=Active High, 1=Active Low
-  USHORT HSyncPolarity:1;      //0=Active High, 1=Active Low
-  USHORT HorizontalCutOff:1;
+  USHORT Reserved;
+  USHORT RGB888;
+  USHORT DoubleClock;
+  USHORT Interlace;
+  USHORT CompositeSync;
+  USHORT V_ReplicationBy2;
+  USHORT H_ReplicationBy2;
+  USHORT VerticalCutOff;
+  USHORT VSyncPolarity;      //0=Active High, 1=Active Low
+  USHORT HSyncPolarity;      //0=Active High, 1=Active Low
+  USHORT HorizontalCutOff;
 #else
-  USHORT HorizontalCutOff:1;
-  USHORT HSyncPolarity:1;      //0=Active High, 1=Active Low
-  USHORT VSyncPolarity:1;      //0=Active High, 1=Active Low
-  USHORT VerticalCutOff:1;
-  USHORT H_ReplicationBy2:1;
-  USHORT V_ReplicationBy2:1;
-  USHORT CompositeSync:1;
-  USHORT Interlace:1;
-  USHORT DoubleClock:1;
-  USHORT RGB888:1;
-  USHORT Reserved:6;           
+  USHORT HorizontalCutOff;
+  USHORT HSyncPolarity;      //0=Active High, 1=Active Low
+  USHORT VSyncPolarity;      //0=Active High, 1=Active Low
+  USHORT VerticalCutOff;
+  USHORT H_ReplicationBy2;
+  USHORT V_ReplicationBy2;
+  USHORT CompositeSync;
+  USHORT Interlace;
+  USHORT DoubleClock;
+  USHORT RGB888;
+  USHORT Reserved;           
 #endif
 }ATOM_MODE_MISC_INFO;
   
@@ -4096,15 +4096,15 @@ typedef struct _ATOM_SRC_DST_TABLE_FOR_ONE_OBJECT         //usSrcDstTableOffset 
 typedef struct _ATOM_DP_CONN_CHANNEL_MAPPING
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR ucDP_Lane3_Source:2;
-  UCHAR ucDP_Lane2_Source:2;
-  UCHAR ucDP_Lane1_Source:2;
-  UCHAR ucDP_Lane0_Source:2;
+  UCHAR ucDP_Lane3_Source;
+  UCHAR ucDP_Lane2_Source;
+  UCHAR ucDP_Lane1_Source;
+  UCHAR ucDP_Lane0_Source;
 #else
-  UCHAR ucDP_Lane0_Source:2;
-  UCHAR ucDP_Lane1_Source:2;
-  UCHAR ucDP_Lane2_Source:2;
-  UCHAR ucDP_Lane3_Source:2;
+  UCHAR ucDP_Lane0_Source;
+  UCHAR ucDP_Lane1_Source;
+  UCHAR ucDP_Lane2_Source;
+  UCHAR ucDP_Lane3_Source;
 #endif
 }ATOM_DP_CONN_CHANNEL_MAPPING;
 
@@ -4116,15 +4116,15 @@ typedef struct _ATOM_DP_CONN_CHANNEL_MAPPING
 typedef struct _ATOM_DVI_CONN_CHANNEL_MAPPING
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR ucDVI_CLK_Source:2;
-  UCHAR ucDVI_DATA0_Source:2;
-  UCHAR ucDVI_DATA1_Source:2;
-  UCHAR ucDVI_DATA2_Source:2;
+  UCHAR ucDVI_CLK_Source;
+  UCHAR ucDVI_DATA0_Source;
+  UCHAR ucDVI_DATA1_Source;
+  UCHAR ucDVI_DATA2_Source;
 #else
-  UCHAR ucDVI_DATA2_Source:2;
-  UCHAR ucDVI_DATA1_Source:2;
-  UCHAR ucDVI_DATA0_Source:2;
-  UCHAR ucDVI_CLK_Source:2;
+  UCHAR ucDVI_DATA2_Source;
+  UCHAR ucDVI_DATA1_Source;
+  UCHAR ucDVI_DATA0_Source;
+  UCHAR ucDVI_CLK_Source;
 #endif
 }ATOM_DVI_CONN_CHANNEL_MAPPING;
 
@@ -4338,13 +4338,13 @@ typedef struct  _ATOM_ENCODER_CAP_RECORD
     USHORT                    usEncoderCap;         
     struct {
 #if ATOM_BIG_ENDIAN
-      USHORT                  usReserved:14;        // Bit1-15 may be defined for other capability in future
-      USHORT                  usHBR2En:1;           // Bit1 is for DP1.2 HBR2 enable
-      USHORT                  usHBR2Cap:1;          // Bit0 is for DP1.2 HBR2 capability. 
+      USHORT                  usReserved;        // Bit1-15 may be defined for other capability in future
+      USHORT                  usHBR2En;           // Bit1 is for DP1.2 HBR2 enable
+      USHORT                  usHBR2Cap;          // Bit0 is for DP1.2 HBR2 capability. 
 #else
-      USHORT                  usHBR2Cap:1;          // Bit0 is for DP1.2 HBR2 capability. 
-      USHORT                  usHBR2En:1;           // Bit1 is for DP1.2 HBR2 enable
-      USHORT                  usReserved:14;        // Bit1-15 may be defined for other capability in future
+      USHORT                  usHBR2Cap;          // Bit0 is for DP1.2 HBR2 capability. 
+      USHORT                  usHBR2En;           // Bit1 is for DP1.2 HBR2 enable
+      USHORT                  usReserved;        // Bit1-15 may be defined for other capability in future
 #endif
     };
   }; 
@@ -4959,15 +4959,15 @@ typedef struct _ATOM_FUSION_SYSTEM_INFO_V1
 typedef struct _ATOM_TDP_CONFIG_BITS
 {
 #if ATOM_BIG_ENDIAN
-  ULONG   uReserved:2;
-  ULONG   uTDP_Value:14;  // Original TDP value in tens of milli watts
-  ULONG   uCTDP_Value:14; // Override value in tens of milli watts
-  ULONG   uCTDP_Enable:2; // = (uCTDP_Value > uTDP_Value? 2: (uCTDP_Value < uTDP_Value))
+  ULONG   uReserved;
+  ULONG   uTDP_Value;  // Original TDP value in tens of milli watts
+  ULONG   uCTDP_Value; // Override value in tens of milli watts
+  ULONG   uCTDP_Enable; // = (uCTDP_Value > uTDP_Value? 2: (uCTDP_Value < uTDP_Value))
 #else
-  ULONG   uCTDP_Enable:2; // = (uCTDP_Value > uTDP_Value? 2: (uCTDP_Value < uTDP_Value))
-  ULONG   uCTDP_Value:14; // Override value in tens of milli watts
-  ULONG   uTDP_Value:14;  // Original TDP value in tens of milli watts
-  ULONG   uReserved:2;
+  ULONG   uCTDP_Enable; // = (uCTDP_Value > uTDP_Value? 2: (uCTDP_Value < uTDP_Value))
+  ULONG   uCTDP_Value; // Override value in tens of milli watts
+  ULONG   uTDP_Value;  // Original TDP value in tens of milli watts
+  ULONG   uReserved;
 #endif
 }ATOM_TDP_CONFIG_BITS;
 
@@ -6265,11 +6265,11 @@ typedef struct _ATOM_MEMORY_VENDOR_BLOCK{
 
 typedef struct _ATOM_MEMORY_SETTING_ID_CONFIG{
 #if ATOM_BIG_ENDIAN
-	ULONG												ucMemBlkId:8;
-	ULONG												ulMemClockRange:24;
+	ULONG												ucMemBlkId;
+	ULONG												ulMemClockRange;
 #else
-	ULONG												ulMemClockRange:24;
-	ULONG												ucMemBlkId:8;
+	ULONG												ulMemClockRange;
+	ULONG												ucMemBlkId;
 #endif
 }ATOM_MEMORY_SETTING_ID_CONFIG;
 
@@ -7472,11 +7472,11 @@ typedef struct  _COMPASSIONATE_DATA
 typedef struct _ATOM_CONNECTOR_INFO
 {
 #if ATOM_BIG_ENDIAN
-  UCHAR   bfConnectorType:4;
-  UCHAR   bfAssociatedDAC:4;
+  UCHAR   bfConnectorType;
+  UCHAR   bfAssociatedDAC;
 #else
-  UCHAR   bfAssociatedDAC:4;
-  UCHAR   bfConnectorType:4;
+  UCHAR   bfAssociatedDAC;
+  UCHAR   bfConnectorType;
 #endif
 }ATOM_CONNECTOR_INFO;
 

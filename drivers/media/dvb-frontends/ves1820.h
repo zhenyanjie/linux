@@ -35,10 +35,10 @@ struct ves1820_config
 	u32 xin;
 
 	/* does inversion need inverted? */
-	u8 invert:1;
+	u8 invert;
 
 	/* SELAGC control */
-	u8 selagc:1;
+	u8 selagc;
 };
 
 #if IS_ENABLED(CONFIG_DVB_VES1820)

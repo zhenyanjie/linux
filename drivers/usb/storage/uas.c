@@ -52,10 +52,10 @@ struct uas_dev_info {
 	int qdepth, resetting;
 	struct response_iu response;
 	unsigned cmd_pipe, status_pipe, data_in_pipe, data_out_pipe;
-	unsigned use_streams:1;
-	unsigned uas_sense_old:1;
-	unsigned running_task:1;
-	unsigned shutdown:1;
+	unsigned use_streams;
+	unsigned uas_sense_old;
+	unsigned running_task;
+	unsigned shutdown;
 	struct scsi_cmnd *cmnd;
 	spinlock_t lock;
 	struct work_struct work;

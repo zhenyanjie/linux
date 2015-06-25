@@ -38,20 +38,20 @@ struct sta350_platform_data {
 	u8 ffx_power_output_mode;
 	u8 drop_compensation_ns;
 	u8 powerdown_delay_divider;
-	unsigned int thermal_warning_recovery:1;
-	unsigned int thermal_warning_adjustment:1;
-	unsigned int fault_detect_recovery:1;
-	unsigned int oc_warning_adjustment:1;
-	unsigned int max_power_use_mpcc:1;
-	unsigned int max_power_correction:1;
-	unsigned int am_reduction_mode:1;
-	unsigned int odd_pwm_speed_mode:1;
-	unsigned int distortion_compensation:1;
-	unsigned int invalid_input_detect_mute:1;
-	unsigned int activate_mute_output:1;
-	unsigned int bridge_immediate_off:1;
-	unsigned int noise_shape_dc_cut:1;
-	unsigned int powerdown_master_vol:1;
+	unsigned int thermal_warning_recovery;
+	unsigned int thermal_warning_adjustment;
+	unsigned int fault_detect_recovery;
+	unsigned int oc_warning_adjustment;
+	unsigned int max_power_use_mpcc;
+	unsigned int max_power_correction;
+	unsigned int am_reduction_mode;
+	unsigned int odd_pwm_speed_mode;
+	unsigned int distortion_compensation;
+	unsigned int invalid_input_detect_mute;
+	unsigned int activate_mute_output;
+	unsigned int bridge_immediate_off;
+	unsigned int noise_shape_dc_cut;
+	unsigned int powerdown_master_vol;
 };
 
 #endif /* __LINUX_SND__STA350_H */

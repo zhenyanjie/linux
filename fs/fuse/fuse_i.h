@@ -156,7 +156,7 @@ struct fuse_file {
 	wait_queue_head_t poll_wait;
 
 	/** Has flock been performed on this file? */
-	bool flock:1;
+	bool flock;
 };
 
 /** One input argument of a request */
@@ -171,7 +171,7 @@ struct fuse_in {
 	struct fuse_in_header h;
 
 	/** True if the data for the last argument is in req->pages */
-	unsigned argpages:1;
+	unsigned argpages;
 
 	/** Number of arguments */
 	unsigned numargs;
@@ -198,16 +198,16 @@ struct fuse_out {
 
 	/** Last argument is variable length (can be shorter than
 	    arg->size) */
-	unsigned argvar:1;
+	unsigned argvar;
 
 	/** Last argument is a list of pages to copy data to */
-	unsigned argpages:1;
+	unsigned argpages;
 
 	/** Zero partially or not copied pages */
-	unsigned page_zeroing:1;
+	unsigned page_zeroing;
 
 	/** Pages may be replaced with new ones */
-	unsigned page_replace:1;
+	unsigned page_replace;
 
 	/** Number or arguments */
 	unsigned numargs;
@@ -270,25 +270,25 @@ struct fuse_req {
 	 */
 
 	/** True if the request has reply */
-	unsigned isreply:1;
+	unsigned isreply;
 
 	/** Force sending of the request even if interrupted */
-	unsigned force:1;
+	unsigned force;
 
 	/** The request was aborted */
-	unsigned aborted:1;
+	unsigned aborted;
 
 	/** Request is sent in the background */
-	unsigned background:1;
+	unsigned background;
 
 	/** The request has been interrupted */
-	unsigned interrupted:1;
+	unsigned interrupted;
 
 	/** Data is being copied to/from the request */
-	unsigned locked:1;
+	unsigned locked;
 
 	/** Request is counted as "waiting" */
-	unsigned waiting:1;
+	unsigned waiting;
 
 	/** State of the request */
 	enum fuse_req_state state;
@@ -463,25 +463,25 @@ struct fuse_conn {
 	/** Connection failed (version mismatch).  Cannot race with
 	    setting other bitfields since it is only set once in INIT
 	    reply, before any other request, and never cleared */
-	unsigned conn_error:1;
+	unsigned conn_error;
 
 	/** Connection successful.  Only set in INIT */
-	unsigned conn_init:1;
+	unsigned conn_init;
 
 	/** Do readpages asynchronously?  Only set in INIT */
-	unsigned async_read:1;
+	unsigned async_read;
 
 	/** Do not send separate SETATTR request before open(O_TRUNC)  */
-	unsigned atomic_o_trunc:1;
+	unsigned atomic_o_trunc;
 
 	/** Filesystem supports NFS exporting.  Only set in INIT */
-	unsigned export_support:1;
+	unsigned export_support;
 
 	/** Set if bdi is valid */
-	unsigned bdi_initialized:1;
+	unsigned bdi_initialized;
 
 	/** write-back cache policy (default is write-through) */
-	unsigned writeback_cache:1;
+	unsigned writeback_cache;
 
 	/*
 	 * The following bitfields are only for optimization purposes
@@ -489,73 +489,73 @@ struct fuse_conn {
 	 */
 
 	/** Is open/release not implemented by fs? */
-	unsigned no_open:1;
+	unsigned no_open;
 
 	/** Is fsync not implemented by fs? */
-	unsigned no_fsync:1;
+	unsigned no_fsync;
 
 	/** Is fsyncdir not implemented by fs? */
-	unsigned no_fsyncdir:1;
+	unsigned no_fsyncdir;
 
 	/** Is flush not implemented by fs? */
-	unsigned no_flush:1;
+	unsigned no_flush;
 
 	/** Is setxattr not implemented by fs? */
-	unsigned no_setxattr:1;
+	unsigned no_setxattr;
 
 	/** Is getxattr not implemented by fs? */
-	unsigned no_getxattr:1;
+	unsigned no_getxattr;
 
 	/** Is listxattr not implemented by fs? */
-	unsigned no_listxattr:1;
+	unsigned no_listxattr;
 
 	/** Is removexattr not implemented by fs? */
-	unsigned no_removexattr:1;
+	unsigned no_removexattr;
 
 	/** Are posix file locking primitives not implemented by fs? */
-	unsigned no_lock:1;
+	unsigned no_lock;
 
 	/** Is access not implemented by fs? */
-	unsigned no_access:1;
+	unsigned no_access;
 
 	/** Is create not implemented by fs? */
-	unsigned no_create:1;
+	unsigned no_create;
 
 	/** Is interrupt not implemented by fs? */
-	unsigned no_interrupt:1;
+	unsigned no_interrupt;
 
 	/** Is bmap not implemented by fs? */
-	unsigned no_bmap:1;
+	unsigned no_bmap;
 
 	/** Is poll not implemented by fs? */
-	unsigned no_poll:1;
+	unsigned no_poll;
 
 	/** Do multi-page cached writes */
-	unsigned big_writes:1;
+	unsigned big_writes;
 
 	/** Don't apply umask to creation modes */
-	unsigned dont_mask:1;
+	unsigned dont_mask;
 
 	/** Are BSD file locking primitives not implemented by fs? */
-	unsigned no_flock:1;
+	unsigned no_flock;
 
 	/** Is fallocate not implemented by fs? */
-	unsigned no_fallocate:1;
+	unsigned no_fallocate;
 
 	/** Is rename with flags implemented by fs? */
-	unsigned no_rename2:1;
+	unsigned no_rename2;
 
 	/** Use enhanced/automatic page cache invalidation. */
-	unsigned auto_inval_data:1;
+	unsigned auto_inval_data;
 
 	/** Does the filesystem support readdirplus? */
-	unsigned do_readdirplus:1;
+	unsigned do_readdirplus;
 
 	/** Does the filesystem want adaptive readdirplus? */
-	unsigned readdirplus_auto:1;
+	unsigned readdirplus_auto;
 
 	/** Does the filesystem support asynchronous direct-IO submission? */
-	unsigned async_dio:1;
+	unsigned async_dio;
 
 	/** The number of requests waiting for completion */
 	atomic_t num_waiting;

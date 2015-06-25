@@ -523,9 +523,9 @@ static struct irq_chip pmic_arb_irqchip = {
 };
 
 struct spmi_pmic_arb_irq_spec {
-	unsigned slave:4;
-	unsigned per:8;
-	unsigned irq:3;
+	unsigned slave;
+	unsigned per;
+	unsigned irq;
 };
 
 static int search_mapping_table(struct spmi_pmic_arb_dev *pa,

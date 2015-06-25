@@ -347,7 +347,7 @@ struct snd_interval {
 	unsigned int openmin:1,
 		     openmax:1,
 		     integer:1,
-		     empty:1;
+		     empty;
 };
 
 #define SNDRV_MASK_MAX	256

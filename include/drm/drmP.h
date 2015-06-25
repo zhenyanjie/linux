@@ -384,16 +384,16 @@ struct drm_prime_file_private {
 
 /** File private data */
 struct drm_file {
-	unsigned authenticated :1;
+	unsigned authenticated ;
 	/* Whether we're master for a minor. Protected by master_mutex */
-	unsigned is_master :1;
+	unsigned is_master ;
 	/* true when the client has asked us to expose stereo 3D mode flags */
-	unsigned stereo_allowed :1;
+	unsigned stereo_allowed ;
 	/*
 	 * true if client understands CRTC primary planes and cursor planes
 	 * in the plane list
 	 */
-	unsigned universal_planes:1;
+	unsigned universal_planes;
 
 	struct pid *pid;
 	kuid_t uid;

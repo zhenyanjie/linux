@@ -93,7 +93,7 @@
 struct wm831x_rtc {
 	struct wm831x *wm831x;
 	struct rtc_device *rtc;
-	unsigned int alarm_enabled:1;
+	unsigned int alarm_enabled;
 };
 
 static void wm831x_rtc_add_randomness(struct wm831x *wm831x)

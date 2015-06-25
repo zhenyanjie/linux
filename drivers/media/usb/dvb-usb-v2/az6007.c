@@ -50,7 +50,7 @@ struct az6007_device_state {
 	struct mutex		mutex;
 	struct mutex		ca_mutex;
 	struct dvb_ca_en50221	ca;
-	unsigned		warm:1;
+	unsigned		warm;
 	int			(*gate_ctrl) (struct dvb_frontend *, int);
 	unsigned char		data[4096];
 };

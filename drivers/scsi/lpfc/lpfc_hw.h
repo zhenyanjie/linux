@@ -77,8 +77,8 @@
 union CtRevisionId {
 	/* Structure is in Big Endian format */
 	struct {
-		uint32_t Revision:8;
-		uint32_t InId:24;
+		uint32_t Revision;
+		uint32_t InId;
 	} bits;
 	uint32_t word;
 };
@@ -86,8 +86,8 @@ union CtRevisionId {
 union CtCommandResponse {
 	/* Structure is in Big Endian format */
 	struct {
-		uint32_t CmdRsp:16;
-		uint32_t Size:16;
+		uint32_t CmdRsp;
+		uint32_t Size;
 	} bits;
 	uint32_t word;
 };
@@ -120,19 +120,19 @@ struct lpfc_sli_ct_request {
 			uint32_t PortId;	/* For RFT_ID requests */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-			uint32_t rsvd0:16;
-			uint32_t rsvd1:7;
-			uint32_t fcpReg:1;	/* Type 8 */
-			uint32_t rsvd2:2;
-			uint32_t ipReg:1;	/* Type 5 */
-			uint32_t rsvd3:5;
+			uint32_t rsvd0;
+			uint32_t rsvd1;
+			uint32_t fcpReg;	/* Type 8 */
+			uint32_t rsvd2;
+			uint32_t ipReg;	/* Type 5 */
+			uint32_t rsvd3;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-			uint32_t rsvd0:16;
-			uint32_t fcpReg:1;	/* Type 8 */
-			uint32_t rsvd1:7;
-			uint32_t rsvd3:5;
-			uint32_t ipReg:1;	/* Type 5 */
-			uint32_t rsvd2:2;
+			uint32_t rsvd0;
+			uint32_t fcpReg;	/* Type 8 */
+			uint32_t rsvd1;
+			uint32_t rsvd3;
+			uint32_t ipReg;	/* Type 5 */
+			uint32_t rsvd2;
 #endif
 
 			uint32_t rsvd[7];
@@ -316,13 +316,13 @@ struct lpfc_name {
 	union {
 		struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-			uint8_t nameType:4;	/* FC Word 0, bit 28:31 */
-			uint8_t IEEEextMsn:4;	/* FC Word 0, bit 24:27, bit
+			uint8_t nameType;	/* FC Word 0, bit 28:31 */
+			uint8_t IEEEextMsn;	/* FC Word 0, bit 24:27, bit
 						   8:11 of IEEE ext */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-			uint8_t IEEEextMsn:4;	/* FC Word 0, bit 24:27, bit
+			uint8_t IEEEextMsn;	/* FC Word 0, bit 24:27, bit
 						   8:11 of IEEE ext */
-			uint8_t nameType:4;	/* FC Word 0, bit 28:31 */
+			uint8_t nameType;	/* FC Word 0, bit 28:31 */
 #endif
 
 #define NAME_IEEE           0x1	/* IEEE name - nameType */
@@ -358,37 +358,37 @@ struct csp {
  */
 #define virtual_fabric_support randomOffset /* Word 1, bit 30 */
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint16_t request_multiple_Nport:1;	/* FC Word 1, bit 31 */
-	uint16_t randomOffset:1;	/* FC Word 1, bit 30 */
-	uint16_t response_multiple_NPort:1;	/* FC Word 1, bit 29 */
-	uint16_t fPort:1;	/* FC Word 1, bit 28 */
-	uint16_t altBbCredit:1;	/* FC Word 1, bit 27 */
-	uint16_t edtovResolution:1;	/* FC Word 1, bit 26 */
-	uint16_t multicast:1;	/* FC Word 1, bit 25 */
-	uint16_t broadcast:1;	/* FC Word 1, bit 24 */
+	uint16_t request_multiple_Nport;	/* FC Word 1, bit 31 */
+	uint16_t randomOffset;	/* FC Word 1, bit 30 */
+	uint16_t response_multiple_NPort;	/* FC Word 1, bit 29 */
+	uint16_t fPort;	/* FC Word 1, bit 28 */
+	uint16_t altBbCredit;	/* FC Word 1, bit 27 */
+	uint16_t edtovResolution;	/* FC Word 1, bit 26 */
+	uint16_t multicast;	/* FC Word 1, bit 25 */
+	uint16_t broadcast;	/* FC Word 1, bit 24 */
 
-	uint16_t huntgroup:1;	/* FC Word 1, bit 23 */
-	uint16_t simplex:1;	/* FC Word 1, bit 22 */
-	uint16_t word1Reserved1:3;	/* FC Word 1, bit 21:19 */
-	uint16_t dhd:1;		/* FC Word 1, bit 18 */
-	uint16_t contIncSeqCnt:1;	/* FC Word 1, bit 17 */
-	uint16_t payloadlength:1;	/* FC Word 1, bit 16 */
+	uint16_t huntgroup;	/* FC Word 1, bit 23 */
+	uint16_t simplex;	/* FC Word 1, bit 22 */
+	uint16_t word1Reserved1;	/* FC Word 1, bit 21:19 */
+	uint16_t dhd;		/* FC Word 1, bit 18 */
+	uint16_t contIncSeqCnt;	/* FC Word 1, bit 17 */
+	uint16_t payloadlength;	/* FC Word 1, bit 16 */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint16_t broadcast:1;	/* FC Word 1, bit 24 */
-	uint16_t multicast:1;	/* FC Word 1, bit 25 */
-	uint16_t edtovResolution:1;	/* FC Word 1, bit 26 */
-	uint16_t altBbCredit:1;	/* FC Word 1, bit 27 */
-	uint16_t fPort:1;	/* FC Word 1, bit 28 */
-	uint16_t response_multiple_NPort:1;	/* FC Word 1, bit 29 */
-	uint16_t randomOffset:1;	/* FC Word 1, bit 30 */
-	uint16_t request_multiple_Nport:1;	/* FC Word 1, bit 31 */
+	uint16_t broadcast;	/* FC Word 1, bit 24 */
+	uint16_t multicast;	/* FC Word 1, bit 25 */
+	uint16_t edtovResolution;	/* FC Word 1, bit 26 */
+	uint16_t altBbCredit;	/* FC Word 1, bit 27 */
+	uint16_t fPort;	/* FC Word 1, bit 28 */
+	uint16_t response_multiple_NPort;	/* FC Word 1, bit 29 */
+	uint16_t randomOffset;	/* FC Word 1, bit 30 */
+	uint16_t request_multiple_Nport;	/* FC Word 1, bit 31 */
 
-	uint16_t payloadlength:1;	/* FC Word 1, bit 16 */
-	uint16_t contIncSeqCnt:1;	/* FC Word 1, bit 17 */
-	uint16_t dhd:1;		/* FC Word 1, bit 18 */
-	uint16_t word1Reserved1:3;	/* FC Word 1, bit 21:19 */
-	uint16_t simplex:1;	/* FC Word 1, bit 22 */
-	uint16_t huntgroup:1;	/* FC Word 1, bit 23 */
+	uint16_t payloadlength;	/* FC Word 1, bit 16 */
+	uint16_t contIncSeqCnt;	/* FC Word 1, bit 17 */
+	uint16_t dhd;		/* FC Word 1, bit 18 */
+	uint16_t word1Reserved1;	/* FC Word 1, bit 21:19 */
+	uint16_t simplex;	/* FC Word 1, bit 22 */
+	uint16_t huntgroup;	/* FC Word 1, bit 23 */
 #endif
 
 	uint8_t bbRcvSizeMsb;	/* Upper nibble is reserved */
@@ -410,54 +410,54 @@ struct csp {
 
 struct class_parms {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint8_t classValid:1;	/* FC Word 0, bit 31 */
-	uint8_t intermix:1;	/* FC Word 0, bit 30 */
-	uint8_t stackedXparent:1;	/* FC Word 0, bit 29 */
-	uint8_t stackedLockDown:1;	/* FC Word 0, bit 28 */
-	uint8_t seqDelivery:1;	/* FC Word 0, bit 27 */
-	uint8_t word0Reserved1:3;	/* FC Word 0, bit 24:26 */
+	uint8_t classValid;	/* FC Word 0, bit 31 */
+	uint8_t intermix;	/* FC Word 0, bit 30 */
+	uint8_t stackedXparent;	/* FC Word 0, bit 29 */
+	uint8_t stackedLockDown;	/* FC Word 0, bit 28 */
+	uint8_t seqDelivery;	/* FC Word 0, bit 27 */
+	uint8_t word0Reserved1;	/* FC Word 0, bit 24:26 */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint8_t word0Reserved1:3;	/* FC Word 0, bit 24:26 */
-	uint8_t seqDelivery:1;	/* FC Word 0, bit 27 */
-	uint8_t stackedLockDown:1;	/* FC Word 0, bit 28 */
-	uint8_t stackedXparent:1;	/* FC Word 0, bit 29 */
-	uint8_t intermix:1;	/* FC Word 0, bit 30 */
-	uint8_t classValid:1;	/* FC Word 0, bit 31 */
+	uint8_t word0Reserved1;	/* FC Word 0, bit 24:26 */
+	uint8_t seqDelivery;	/* FC Word 0, bit 27 */
+	uint8_t stackedLockDown;	/* FC Word 0, bit 28 */
+	uint8_t stackedXparent;	/* FC Word 0, bit 29 */
+	uint8_t intermix;	/* FC Word 0, bit 30 */
+	uint8_t classValid;	/* FC Word 0, bit 31 */
 
 #endif
 
 	uint8_t word0Reserved2;	/* FC Word 0, bit 16:23 */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint8_t iCtlXidReAssgn:2;	/* FC Word 0, Bit 14:15 */
-	uint8_t iCtlInitialPa:2;	/* FC Word 0, bit 12:13 */
-	uint8_t iCtlAck0capable:1;	/* FC Word 0, bit 11 */
-	uint8_t iCtlAckNcapable:1;	/* FC Word 0, bit 10 */
-	uint8_t word0Reserved3:2;	/* FC Word 0, bit  8: 9 */
+	uint8_t iCtlXidReAssgn;	/* FC Word 0, Bit 14:15 */
+	uint8_t iCtlInitialPa;	/* FC Word 0, bit 12:13 */
+	uint8_t iCtlAck0capable;	/* FC Word 0, bit 11 */
+	uint8_t iCtlAckNcapable;	/* FC Word 0, bit 10 */
+	uint8_t word0Reserved3;	/* FC Word 0, bit  8: 9 */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint8_t word0Reserved3:2;	/* FC Word 0, bit  8: 9 */
-	uint8_t iCtlAckNcapable:1;	/* FC Word 0, bit 10 */
-	uint8_t iCtlAck0capable:1;	/* FC Word 0, bit 11 */
-	uint8_t iCtlInitialPa:2;	/* FC Word 0, bit 12:13 */
-	uint8_t iCtlXidReAssgn:2;	/* FC Word 0, Bit 14:15 */
+	uint8_t word0Reserved3;	/* FC Word 0, bit  8: 9 */
+	uint8_t iCtlAckNcapable;	/* FC Word 0, bit 10 */
+	uint8_t iCtlAck0capable;	/* FC Word 0, bit 11 */
+	uint8_t iCtlInitialPa;	/* FC Word 0, bit 12:13 */
+	uint8_t iCtlXidReAssgn;	/* FC Word 0, Bit 14:15 */
 #endif
 
 	uint8_t word0Reserved4;	/* FC Word 0, bit  0: 7 */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint8_t rCtlAck0capable:1;	/* FC Word 1, bit 31 */
-	uint8_t rCtlAckNcapable:1;	/* FC Word 1, bit 30 */
-	uint8_t rCtlXidInterlck:1;	/* FC Word 1, bit 29 */
-	uint8_t rCtlErrorPolicy:2;	/* FC Word 1, bit 27:28 */
-	uint8_t word1Reserved1:1;	/* FC Word 1, bit 26 */
-	uint8_t rCtlCatPerSeq:2;	/* FC Word 1, bit 24:25 */
+	uint8_t rCtlAck0capable;	/* FC Word 1, bit 31 */
+	uint8_t rCtlAckNcapable;	/* FC Word 1, bit 30 */
+	uint8_t rCtlXidInterlck;	/* FC Word 1, bit 29 */
+	uint8_t rCtlErrorPolicy;	/* FC Word 1, bit 27:28 */
+	uint8_t word1Reserved1;	/* FC Word 1, bit 26 */
+	uint8_t rCtlCatPerSeq;	/* FC Word 1, bit 24:25 */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint8_t rCtlCatPerSeq:2;	/* FC Word 1, bit 24:25 */
-	uint8_t word1Reserved1:1;	/* FC Word 1, bit 26 */
-	uint8_t rCtlErrorPolicy:2;	/* FC Word 1, bit 27:28 */
-	uint8_t rCtlXidInterlck:1;	/* FC Word 1, bit 29 */
-	uint8_t rCtlAckNcapable:1;	/* FC Word 1, bit 30 */
-	uint8_t rCtlAck0capable:1;	/* FC Word 1, bit 31 */
+	uint8_t rCtlCatPerSeq;	/* FC Word 1, bit 24:25 */
+	uint8_t word1Reserved1;	/* FC Word 1, bit 26 */
+	uint8_t rCtlErrorPolicy;	/* FC Word 1, bit 27:28 */
+	uint8_t rCtlXidInterlck;	/* FC Word 1, bit 29 */
+	uint8_t rCtlAckNcapable;	/* FC Word 1, bit 30 */
+	uint8_t rCtlAck0capable;	/* FC Word 1, bit 31 */
 #endif
 
 	uint8_t word1Reserved2;	/* FC Word 1, bit 16:23 */
@@ -676,19 +676,19 @@ typedef struct _PRLI {		/* Structure is in Big Endian format */
 	uint8_t word0Reserved1;	/* FC Parm Word 0, bit 16:23 */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint8_t origProcAssocV:1;	/* FC Parm Word 0, bit 15 */
-	uint8_t respProcAssocV:1;	/* FC Parm Word 0, bit 14 */
-	uint8_t estabImagePair:1;	/* FC Parm Word 0, bit 13 */
+	uint8_t origProcAssocV;	/* FC Parm Word 0, bit 15 */
+	uint8_t respProcAssocV;	/* FC Parm Word 0, bit 14 */
+	uint8_t estabImagePair;	/* FC Parm Word 0, bit 13 */
 
 	/*    ACC = imagePairEstablished */
-	uint8_t word0Reserved2:1;	/* FC Parm Word 0, bit 12 */
-	uint8_t acceptRspCode:4;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
+	uint8_t word0Reserved2;	/* FC Parm Word 0, bit 12 */
+	uint8_t acceptRspCode;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint8_t acceptRspCode:4;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
-	uint8_t word0Reserved2:1;	/* FC Parm Word 0, bit 12 */
-	uint8_t estabImagePair:1;	/* FC Parm Word 0, bit 13 */
-	uint8_t respProcAssocV:1;	/* FC Parm Word 0, bit 14 */
-	uint8_t origProcAssocV:1;	/* FC Parm Word 0, bit 15 */
+	uint8_t acceptRspCode;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
+	uint8_t word0Reserved2;	/* FC Parm Word 0, bit 12 */
+	uint8_t estabImagePair;	/* FC Parm Word 0, bit 13 */
+	uint8_t respProcAssocV;	/* FC Parm Word 0, bit 14 */
+	uint8_t origProcAssocV;	/* FC Parm Word 0, bit 15 */
 	/*    ACC = imagePairEstablished */
 #endif
 
@@ -709,39 +709,39 @@ typedef struct _PRLI {		/* Structure is in Big Endian format */
 	uint8_t word3Reserved2;	/* FC Parm Word 3, bit 16:23 */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint16_t Word3bit15Resved:1;	/* FC Parm Word 3, bit 15 */
-	uint16_t Word3bit14Resved:1;	/* FC Parm Word 3, bit 14 */
-	uint16_t Word3bit13Resved:1;	/* FC Parm Word 3, bit 13 */
-	uint16_t Word3bit12Resved:1;	/* FC Parm Word 3, bit 12 */
-	uint16_t Word3bit11Resved:1;	/* FC Parm Word 3, bit 11 */
-	uint16_t Word3bit10Resved:1;	/* FC Parm Word 3, bit 10 */
-	uint16_t TaskRetryIdReq:1;	/* FC Parm Word 3, bit  9 */
-	uint16_t Retry:1;	/* FC Parm Word 3, bit  8 */
-	uint16_t ConfmComplAllowed:1;	/* FC Parm Word 3, bit  7 */
-	uint16_t dataOverLay:1;	/* FC Parm Word 3, bit  6 */
-	uint16_t initiatorFunc:1;	/* FC Parm Word 3, bit  5 */
-	uint16_t targetFunc:1;	/* FC Parm Word 3, bit  4 */
-	uint16_t cmdDataMixEna:1;	/* FC Parm Word 3, bit  3 */
-	uint16_t dataRspMixEna:1;	/* FC Parm Word 3, bit  2 */
-	uint16_t readXferRdyDis:1;	/* FC Parm Word 3, bit  1 */
-	uint16_t writeXferRdyDis:1;	/* FC Parm Word 3, bit  0 */
+	uint16_t Word3bit15Resved;	/* FC Parm Word 3, bit 15 */
+	uint16_t Word3bit14Resved;	/* FC Parm Word 3, bit 14 */
+	uint16_t Word3bit13Resved;	/* FC Parm Word 3, bit 13 */
+	uint16_t Word3bit12Resved;	/* FC Parm Word 3, bit 12 */
+	uint16_t Word3bit11Resved;	/* FC Parm Word 3, bit 11 */
+	uint16_t Word3bit10Resved;	/* FC Parm Word 3, bit 10 */
+	uint16_t TaskRetryIdReq;	/* FC Parm Word 3, bit  9 */
+	uint16_t Retry;	/* FC Parm Word 3, bit  8 */
+	uint16_t ConfmComplAllowed;	/* FC Parm Word 3, bit  7 */
+	uint16_t dataOverLay;	/* FC Parm Word 3, bit  6 */
+	uint16_t initiatorFunc;	/* FC Parm Word 3, bit  5 */
+	uint16_t targetFunc;	/* FC Parm Word 3, bit  4 */
+	uint16_t cmdDataMixEna;	/* FC Parm Word 3, bit  3 */
+	uint16_t dataRspMixEna;	/* FC Parm Word 3, bit  2 */
+	uint16_t readXferRdyDis;	/* FC Parm Word 3, bit  1 */
+	uint16_t writeXferRdyDis;	/* FC Parm Word 3, bit  0 */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint16_t Retry:1;	/* FC Parm Word 3, bit  8 */
-	uint16_t TaskRetryIdReq:1;	/* FC Parm Word 3, bit  9 */
-	uint16_t Word3bit10Resved:1;	/* FC Parm Word 3, bit 10 */
-	uint16_t Word3bit11Resved:1;	/* FC Parm Word 3, bit 11 */
-	uint16_t Word3bit12Resved:1;	/* FC Parm Word 3, bit 12 */
-	uint16_t Word3bit13Resved:1;	/* FC Parm Word 3, bit 13 */
-	uint16_t Word3bit14Resved:1;	/* FC Parm Word 3, bit 14 */
-	uint16_t Word3bit15Resved:1;	/* FC Parm Word 3, bit 15 */
-	uint16_t writeXferRdyDis:1;	/* FC Parm Word 3, bit  0 */
-	uint16_t readXferRdyDis:1;	/* FC Parm Word 3, bit  1 */
-	uint16_t dataRspMixEna:1;	/* FC Parm Word 3, bit  2 */
-	uint16_t cmdDataMixEna:1;	/* FC Parm Word 3, bit  3 */
-	uint16_t targetFunc:1;	/* FC Parm Word 3, bit  4 */
-	uint16_t initiatorFunc:1;	/* FC Parm Word 3, bit  5 */
-	uint16_t dataOverLay:1;	/* FC Parm Word 3, bit  6 */
-	uint16_t ConfmComplAllowed:1;	/* FC Parm Word 3, bit  7 */
+	uint16_t Retry;	/* FC Parm Word 3, bit  8 */
+	uint16_t TaskRetryIdReq;	/* FC Parm Word 3, bit  9 */
+	uint16_t Word3bit10Resved;	/* FC Parm Word 3, bit 10 */
+	uint16_t Word3bit11Resved;	/* FC Parm Word 3, bit 11 */
+	uint16_t Word3bit12Resved;	/* FC Parm Word 3, bit 12 */
+	uint16_t Word3bit13Resved;	/* FC Parm Word 3, bit 13 */
+	uint16_t Word3bit14Resved;	/* FC Parm Word 3, bit 14 */
+	uint16_t Word3bit15Resved;	/* FC Parm Word 3, bit 15 */
+	uint16_t writeXferRdyDis;	/* FC Parm Word 3, bit  0 */
+	uint16_t readXferRdyDis;	/* FC Parm Word 3, bit  1 */
+	uint16_t dataRspMixEna;	/* FC Parm Word 3, bit  2 */
+	uint16_t cmdDataMixEna;	/* FC Parm Word 3, bit  3 */
+	uint16_t targetFunc;	/* FC Parm Word 3, bit  4 */
+	uint16_t initiatorFunc;	/* FC Parm Word 3, bit  5 */
+	uint16_t dataOverLay;	/* FC Parm Word 3, bit  6 */
+	uint16_t ConfmComplAllowed;	/* FC Parm Word 3, bit  7 */
 #endif
 } PRLI;
 
@@ -756,15 +756,15 @@ typedef struct _PRLO {		/* Structure is in Big Endian format */
 	uint8_t word0Reserved1;	/* FC Parm Word 0, bit 16:23 */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint8_t origProcAssocV:1;	/* FC Parm Word 0, bit 15 */
-	uint8_t respProcAssocV:1;	/* FC Parm Word 0, bit 14 */
-	uint8_t word0Reserved2:2;	/* FC Parm Word 0, bit 12:13 */
-	uint8_t acceptRspCode:4;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
+	uint8_t origProcAssocV;	/* FC Parm Word 0, bit 15 */
+	uint8_t respProcAssocV;	/* FC Parm Word 0, bit 14 */
+	uint8_t word0Reserved2;	/* FC Parm Word 0, bit 12:13 */
+	uint8_t acceptRspCode;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint8_t acceptRspCode:4;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
-	uint8_t word0Reserved2:2;	/* FC Parm Word 0, bit 12:13 */
-	uint8_t respProcAssocV:1;	/* FC Parm Word 0, bit 14 */
-	uint8_t origProcAssocV:1;	/* FC Parm Word 0, bit 15 */
+	uint8_t acceptRspCode;	/* FC Parm Word 0, bit 8:11, ACC ONLY */
+	uint8_t word0Reserved2;	/* FC Parm Word 0, bit 12:13 */
+	uint8_t respProcAssocV;	/* FC Parm Word 0, bit 14 */
+	uint8_t origProcAssocV;	/* FC Parm Word 0, bit 15 */
 #endif
 
 #define PRLO_REQ_EXECUTED     0x1	/* acceptRspCode */
@@ -788,8 +788,8 @@ typedef struct _ADISC {		/* Structure is in Big Endian format */
 } ADISC;
 
 typedef struct _FARP {		/* Structure is in Big Endian format */
-	uint32_t Mflags:8;
-	uint32_t Odid:24;
+	uint32_t Mflags;
+	uint32_t Odid;
 #define FARP_NO_ACTION          0	/* FARP information enclosed, no
 					   action */
 #define FARP_MATCH_PORT         0x1	/* Match on Responder Port Name */
@@ -799,8 +799,8 @@ typedef struct _FARP {		/* Structure is in Big Endian format */
 					   supported */
 #define FARP_MATCH_IPV6         0x6	/* Match on IPV6 address, not
 					   supported */
-	uint32_t Rflags:8;
-	uint32_t Rdid:24;
+	uint32_t Rflags;
+	uint32_t Rdid;
 #define FARP_REQUEST_PLOGI      0x1	/* Request for PLOGI */
 #define FARP_REQUEST_FARPR      0x2	/* Request for FARP Response */
 	struct lpfc_name OportName;
@@ -1065,8 +1065,8 @@ typedef struct _ELS_PKT {	/* Structure is in Big Endian format */
 union AttributesDef {
 	/* Structure is in Big Endian format */
 	struct {
-		uint32_t AttrType:16;
-		uint32_t AttrLen:16;
+		uint32_t AttrType;
+		uint32_t AttrLen;
 	} bits;
 	uint32_t word;
 };
@@ -1619,23 +1619,23 @@ typedef struct {
 struct ulp_bde {
 	uint32_t bdeAddress;
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t bdeReserved:4;
-	uint32_t bdeAddrHigh:4;
-	uint32_t bdeSize:24;
+	uint32_t bdeReserved;
+	uint32_t bdeAddrHigh;
+	uint32_t bdeSize;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t bdeSize:24;
-	uint32_t bdeAddrHigh:4;
-	uint32_t bdeReserved:4;
+	uint32_t bdeSize;
+	uint32_t bdeAddrHigh;
+	uint32_t bdeReserved;
 #endif
 };
 
 typedef struct ULP_BDL {	/* SLI-2 */
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t bdeFlags:8;	/* BDL Flags */
-	uint32_t bdeSize:24;	/* Size of BDL array in host memory (bytes) */
+	uint32_t bdeFlags;	/* BDL Flags */
+	uint32_t bdeSize;	/* Size of BDL array in host memory (bytes) */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t bdeSize:24;	/* Size of BDL array in host memory (bytes) */
-	uint32_t bdeFlags:8;	/* BDL Flags */
+	uint32_t bdeSize;	/* Size of BDL array in host memory (bytes) */
+	uint32_t bdeFlags;	/* BDL Flags */
 #endif
 
 	uint32_t addrLow;	/* Address 0:31 */
@@ -1749,23 +1749,23 @@ struct lpfc_pde7 {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd2:25;
-	uint32_t acknowledgment:1;
-	uint32_t version:1;
-	uint32_t erase_or_prog:1;
-	uint32_t update_flash:1;
-	uint32_t update_ram:1;
-	uint32_t method:1;
-	uint32_t load_cmplt:1;
+	uint32_t rsvd2;
+	uint32_t acknowledgment;
+	uint32_t version;
+	uint32_t erase_or_prog;
+	uint32_t update_flash;
+	uint32_t update_ram;
+	uint32_t method;
+	uint32_t load_cmplt;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t load_cmplt:1;
-	uint32_t method:1;
-	uint32_t update_ram:1;
-	uint32_t update_flash:1;
-	uint32_t erase_or_prog:1;
-	uint32_t version:1;
-	uint32_t acknowledgment:1;
-	uint32_t rsvd2:25;
+	uint32_t load_cmplt;
+	uint32_t method;
+	uint32_t update_ram;
+	uint32_t update_flash;
+	uint32_t erase_or_prog;
+	uint32_t version;
+	uint32_t acknowledgment;
+	uint32_t rsvd2;
 #endif
 
 	uint32_t dl_to_adr_low;
@@ -1788,11 +1788,11 @@ typedef struct {
 	uint32_t nodename[2];	/* NODE name */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t pref_DID:24;
-	uint32_t hardAL_PA:8;
+	uint32_t pref_DID;
+	uint32_t hardAL_PA;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t hardAL_PA:8;
-	uint32_t pref_DID:24;
+	uint32_t hardAL_PA;
+	uint32_t pref_DID;
 #endif
 
 	uint32_t rsvd3[21];	/* Read as all one's */
@@ -1807,11 +1807,11 @@ typedef struct {
 	uint32_t nodename[2];	/* NODE name */
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t pref_DID:24;
-	uint32_t hardAL_PA:8;
+	uint32_t pref_DID;
+	uint32_t hardAL_PA;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t hardAL_PA:8;
-	uint32_t pref_DID:24;
+	uint32_t hardAL_PA;
+	uint32_t pref_DID;
 #endif
 
 	uint32_t rsvd3[21];	/* Must be all one's */
@@ -1849,11 +1849,11 @@ struct READ_EVENT_LOG_VAR {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd1:24;
-	uint32_t lipsr_AL_PA:8;	/* AL_PA to issue Lip Selective Reset to */
+	uint32_t rsvd1;
+	uint32_t lipsr_AL_PA;	/* AL_PA to issue Lip Selective Reset to */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t lipsr_AL_PA:8;	/* AL_PA to issue Lip Selective Reset to */
-	uint32_t rsvd1:24;
+	uint32_t lipsr_AL_PA;	/* AL_PA to issue Lip Selective Reset to */
+	uint32_t rsvd1;
 #endif
 
 #ifdef __BIG_ENDIAN_BITFIELD
@@ -1899,19 +1899,19 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t cr:1;
-	uint32_t ci:1;
-	uint32_t cr_delay:6;
-	uint32_t cr_count:8;
-	uint32_t rsvd1:8;
-	uint32_t MaxBBC:8;
+	uint32_t cr;
+	uint32_t ci;
+	uint32_t cr_delay;
+	uint32_t cr_count;
+	uint32_t rsvd1;
+	uint32_t MaxBBC;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t MaxBBC:8;
-	uint32_t rsvd1:8;
-	uint32_t cr_count:8;
-	uint32_t cr_delay:6;
-	uint32_t ci:1;
-	uint32_t cr:1;
+	uint32_t MaxBBC;
+	uint32_t rsvd1;
+	uint32_t cr_count;
+	uint32_t cr_delay;
+	uint32_t ci;
+	uint32_t cr;
 #endif
 
 	uint32_t myId;
@@ -1924,15 +1924,15 @@ typedef struct {
 	uint32_t crtov;
 	uint32_t citov;
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rrq_enable:1;
-	uint32_t rrq_immed:1;
-	uint32_t rsvd4:29;
-	uint32_t ack0_enable:1;
+	uint32_t rrq_enable;
+	uint32_t rrq_immed;
+	uint32_t rsvd4;
+	uint32_t ack0_enable;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t ack0_enable:1;
-	uint32_t rsvd4:29;
-	uint32_t rrq_immed:1;
-	uint32_t rrq_enable:1;
+	uint32_t ack0_enable;
+	uint32_t rsvd4;
+	uint32_t rrq_immed;
+	uint32_t rrq_enable;
 #endif
 } CONFIG_LINK;
 
@@ -1955,11 +1955,11 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t unused1:24;
-	uint32_t numRing:8;
+	uint32_t unused1;
+	uint32_t numRing;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t numRing:8;
-	uint32_t unused1:24;
+	uint32_t numRing;
+	uint32_t unused1;
 #endif
 
 	RING_DEF ringdef[4];
@@ -1970,21 +1970,21 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t unused2:6;
-	uint32_t recvSeq:1;
-	uint32_t recvNotify:1;
-	uint32_t numMask:8;
-	uint32_t profile:8;
-	uint32_t unused1:4;
-	uint32_t ring:4;
+	uint32_t unused2;
+	uint32_t recvSeq;
+	uint32_t recvNotify;
+	uint32_t numMask;
+	uint32_t profile;
+	uint32_t unused1;
+	uint32_t ring;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t ring:4;
-	uint32_t unused1:4;
-	uint32_t profile:8;
-	uint32_t numMask:8;
-	uint32_t recvNotify:1;
-	uint32_t recvSeq:1;
-	uint32_t unused2:6;
+	uint32_t ring;
+	uint32_t unused1;
+	uint32_t profile;
+	uint32_t numMask;
+	uint32_t recvNotify;
+	uint32_t recvSeq;
+	uint32_t unused2;
 #endif
 
 #ifdef __BIG_ENDIAN_BITFIELD
@@ -2008,40 +2008,40 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t cr:1;
-	uint32_t ci:1;
-	uint32_t cr_delay:6;
-	uint32_t cr_count:8;
-	uint32_t InitBBC:8;
-	uint32_t MaxBBC:8;
+	uint32_t cr;
+	uint32_t ci;
+	uint32_t cr_delay;
+	uint32_t cr_count;
+	uint32_t InitBBC;
+	uint32_t MaxBBC;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t MaxBBC:8;
-	uint32_t InitBBC:8;
-	uint32_t cr_count:8;
-	uint32_t cr_delay:6;
-	uint32_t ci:1;
-	uint32_t cr:1;
+	uint32_t MaxBBC;
+	uint32_t InitBBC;
+	uint32_t cr_count;
+	uint32_t cr_delay;
+	uint32_t ci;
+	uint32_t cr;
 #endif
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t topology:8;
-	uint32_t myDid:24;
+	uint32_t topology;
+	uint32_t myDid;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t myDid:24;
-	uint32_t topology:8;
+	uint32_t myDid;
+	uint32_t topology;
 #endif
 
 	/* Defines for topology (defined previously) */
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t AR:1;
-	uint32_t IR:1;
-	uint32_t rsvd1:29;
-	uint32_t ack0:1;
+	uint32_t AR;
+	uint32_t IR;
+	uint32_t rsvd1;
+	uint32_t ack0;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t ack0:1;
-	uint32_t rsvd1:29;
-	uint32_t IR:1;
-	uint32_t AR:1;
+	uint32_t ack0;
+	uint32_t rsvd1;
+	uint32_t IR;
+	uint32_t AR;
 #endif
 
 	uint32_t edtov;
@@ -2075,19 +2075,19 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd2:7;
-	uint32_t recvNotify:1;
-	uint32_t numMask:8;
-	uint32_t profile:8;
-	uint32_t rsvd1:4;
-	uint32_t ring:4;
+	uint32_t rsvd2;
+	uint32_t recvNotify;
+	uint32_t numMask;
+	uint32_t profile;
+	uint32_t rsvd1;
+	uint32_t ring;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t ring:4;
-	uint32_t rsvd1:4;
-	uint32_t profile:8;
-	uint32_t numMask:8;
-	uint32_t recvNotify:1;
-	uint32_t rsvd2:7;
+	uint32_t ring;
+	uint32_t rsvd1;
+	uint32_t profile;
+	uint32_t numMask;
+	uint32_t recvNotify;
+	uint32_t rsvd2;
 #endif
 
 #ifdef __BIG_ENDIAN_BITFIELD
@@ -2145,13 +2145,13 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd1:31;
-	uint32_t clrCounters:1;
+	uint32_t rsvd1;
+	uint32_t clrCounters;
 	uint16_t activeXriCnt;
 	uint16_t activeRpiCnt;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t clrCounters:1;
-	uint32_t rsvd1:31;
+	uint32_t clrCounters;
+	uint32_t rsvd1;
 	uint16_t activeRpiCnt;
 	uint16_t activeXriCnt;
 #endif
@@ -2175,13 +2175,13 @@ typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
 	uint16_t nextRpi;
 	uint16_t reqRpi;
-	uint32_t rsvd2:8;
-	uint32_t DID:24;
+	uint32_t rsvd2;
+	uint32_t DID;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
 	uint16_t reqRpi;
 	uint16_t nextRpi;
-	uint32_t DID:24;
-	uint32_t rsvd2:8;
+	uint32_t DID;
+	uint32_t rsvd2;
 #endif
 
 	union {
@@ -2199,37 +2199,37 @@ typedef struct {
 	uint16_t reqXri;
 	uint16_t rsvd1;
 	uint16_t rpi;
-	uint32_t rsvd2:8;
-	uint32_t DID:24;
-	uint32_t rsvd3:8;
-	uint32_t SID:24;
+	uint32_t rsvd2;
+	uint32_t DID;
+	uint32_t rsvd3;
+	uint32_t SID;
 	uint32_t rsvd4;
 	uint8_t seqId;
 	uint8_t rsvd5;
 	uint16_t seqCount;
 	uint16_t oxId;
 	uint16_t rxId;
-	uint32_t rsvd6:30;
-	uint32_t si:1;
-	uint32_t exchOrig:1;
+	uint32_t rsvd6;
+	uint32_t si;
+	uint32_t exchOrig;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
 	uint16_t reqXri;
 	uint16_t nextXri;
 	uint16_t rpi;
 	uint16_t rsvd1;
-	uint32_t DID:24;
-	uint32_t rsvd2:8;
-	uint32_t SID:24;
-	uint32_t rsvd3:8;
+	uint32_t DID;
+	uint32_t rsvd2;
+	uint32_t SID;
+	uint32_t rsvd3;
 	uint32_t rsvd4;
 	uint16_t seqCount;
 	uint8_t rsvd5;
 	uint8_t seqId;
 	uint16_t rxId;
 	uint16_t oxId;
-	uint32_t exchOrig:1;
-	uint32_t si:1;
-	uint32_t rsvd6:30;
+	uint32_t exchOrig;
+	uint32_t si;
+	uint32_t rsvd6;
 #endif
 } READ_XRI_VAR;
 
@@ -2237,21 +2237,21 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t cv:1;
-	uint32_t rr:1;
-	uint32_t rsvd2:2;
-	uint32_t v3req:1;
-	uint32_t v3rsp:1;
-	uint32_t rsvd1:25;
-	uint32_t rv:1;
+	uint32_t cv;
+	uint32_t rr;
+	uint32_t rsvd2;
+	uint32_t v3req;
+	uint32_t v3rsp;
+	uint32_t rsvd1;
+	uint32_t rv;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t rv:1;
-	uint32_t rsvd1:25;
-	uint32_t v3rsp:1;
-	uint32_t v3req:1;
-	uint32_t rsvd2:2;
-	uint32_t rr:1;
-	uint32_t cv:1;
+	uint32_t rv;
+	uint32_t rsvd1;
+	uint32_t v3rsp;
+	uint32_t v3req;
+	uint32_t rsvd2;
+	uint32_t rr;
+	uint32_t cv;
 #endif
 
 	uint32_t biuRev;
@@ -2262,17 +2262,17 @@ typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
 			uint8_t ProgType;
 			uint8_t ProgId;
-			uint16_t ProgVer:4;
-			uint16_t ProgRev:4;
-			uint16_t ProgFixLvl:2;
-			uint16_t ProgDistType:2;
-			uint16_t DistCnt:4;
+			uint16_t ProgVer;
+			uint16_t ProgRev;
+			uint16_t ProgFixLvl;
+			uint16_t ProgDistType;
+			uint16_t DistCnt;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-			uint16_t DistCnt:4;
-			uint16_t ProgDistType:2;
-			uint16_t ProgFixLvl:2;
-			uint16_t ProgRev:4;
-			uint16_t ProgVer:4;
+			uint16_t DistCnt;
+			uint16_t ProgDistType;
+			uint16_t ProgFixLvl;
+			uint16_t ProgRev;
+			uint16_t ProgVer;
 			uint8_t ProgId;
 			uint8_t ProgType;
 #endif
@@ -2326,13 +2326,13 @@ typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
 	uint16_t rsvd1;
 	uint16_t rpi;
-	uint32_t rsvd2:8;
-	uint32_t did:24;
+	uint32_t rsvd2;
+	uint32_t did;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
 	uint16_t rpi;
 	uint16_t rsvd1;
-	uint32_t did:24;
-	uint32_t rsvd2:8;
+	uint32_t did;
+	uint32_t rsvd2;
 #endif
 
 	union {
@@ -2354,13 +2354,13 @@ typedef struct {
 typedef union {
 	struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-		uint16_t rsvd1:12;
-		uint16_t wd30_class:4;
+		uint16_t rsvd1;
+		uint16_t wd30_class;
 		uint16_t xri;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
 		uint16_t xri;
-		uint16_t wd30_class:4;
-		uint16_t rsvd1:12;
+		uint16_t wd30_class;
+		uint16_t rsvd1;
 #endif
 	} f;
 	uint32_t word;
@@ -2394,18 +2394,18 @@ typedef struct {
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
 	uint32_t rsvd1;
-	uint32_t rsvd2:7;
-	uint32_t upd:1;
-	uint32_t sid:24;
+	uint32_t rsvd2;
+	uint32_t upd;
+	uint32_t sid;
 	uint32_t wwn[2];
 	uint32_t rsvd5;
 	uint16_t vfi;
 	uint16_t vpi;
 #else	/*  __LITTLE_ENDIAN */
 	uint32_t rsvd1;
-	uint32_t sid:24;
-	uint32_t upd:1;
-	uint32_t rsvd2:7;
+	uint32_t sid;
+	uint32_t upd;
+	uint32_t rsvd2;
 	uint32_t wwn[2];
 	uint32_t rsvd5;
 	uint16_t vpi;
@@ -2551,21 +2551,21 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd:25;
-	uint32_t ra:1;
-	uint32_t co:1;
-	uint32_t cv:1;
-	uint32_t type:4;
-	uint32_t entry_index:16;
-	uint32_t region_id:16;
+	uint32_t rsvd;
+	uint32_t ra;
+	uint32_t co;
+	uint32_t cv;
+	uint32_t type;
+	uint32_t entry_index;
+	uint32_t region_id;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t type:4;
-	uint32_t cv:1;
-	uint32_t co:1;
-	uint32_t ra:1;
-	uint32_t rsvd:25;
-	uint32_t region_id:16;
-	uint32_t entry_index:16;
+	uint32_t type;
+	uint32_t cv;
+	uint32_t co;
+	uint32_t ra;
+	uint32_t rsvd;
+	uint32_t region_id;
+	uint32_t entry_index;
 #endif
 
 	uint32_t sli4_length;
@@ -2614,17 +2614,17 @@ struct prog_id {
 #ifdef __BIG_ENDIAN_BITFIELD
 	uint8_t  type;
 	uint8_t  id;
-	uint32_t ver:4;  /* Major Version */
-	uint32_t rev:4;  /* Revision */
-	uint32_t lev:2;  /* Level */
-	uint32_t dist:2; /* Dist Type */
-	uint32_t num:4;  /* number after dist type */
+	uint32_t ver;  /* Major Version */
+	uint32_t rev;  /* Revision */
+	uint32_t lev;  /* Level */
+	uint32_t dist; /* Dist Type */
+	uint32_t num;  /* number after dist type */
 #else /*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t num:4;  /* number after dist type */
-	uint32_t dist:2; /* Dist Type */
-	uint32_t lev:2;  /* Level */
-	uint32_t rev:4;  /* Revision */
-	uint32_t ver:4;  /* Major Version */
+	uint32_t num;  /* number after dist type */
+	uint32_t dist; /* Dist Type */
+	uint32_t lev;  /* Level */
+	uint32_t rev;  /* Revision */
+	uint32_t ver;  /* Major Version */
 	uint8_t  id;
 	uint8_t  type;
 #endif
@@ -2634,25 +2634,25 @@ struct prog_id {
 
 struct update_cfg_var {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd2:16;
-	uint32_t type:8;
-	uint32_t rsvd:1;
-	uint32_t ra:1;
-	uint32_t co:1;
-	uint32_t cv:1;
-	uint32_t req:4;
-	uint32_t entry_length:16;
-	uint32_t region_id:16;
+	uint32_t rsvd2;
+	uint32_t type;
+	uint32_t rsvd;
+	uint32_t ra;
+	uint32_t co;
+	uint32_t cv;
+	uint32_t req;
+	uint32_t entry_length;
+	uint32_t region_id;
 #else  /*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t req:4;
-	uint32_t cv:1;
-	uint32_t co:1;
-	uint32_t ra:1;
-	uint32_t rsvd:1;
-	uint32_t type:8;
-	uint32_t rsvd2:16;
-	uint32_t region_id:16;
-	uint32_t entry_length:16;
+	uint32_t req;
+	uint32_t cv;
+	uint32_t co;
+	uint32_t ra;
+	uint32_t rsvd;
+	uint32_t type;
+	uint32_t rsvd2;
+	uint32_t region_id;
+	uint32_t entry_length;
 #endif
 
 	uint32_t resp_info;
@@ -2679,48 +2679,48 @@ struct hbq_mask {
 
 struct config_hbq_var {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd1      :7;
-	uint32_t recvNotify :1;     /* Receive Notification */
-	uint32_t numMask    :8;     /* # Mask Entries       */
-	uint32_t profile    :8;     /* Selection Profile    */
-	uint32_t rsvd2      :8;
+	uint32_t rsvd1      ;
+	uint32_t recvNotify ;     /* Receive Notification */
+	uint32_t numMask    ;     /* # Mask Entries       */
+	uint32_t profile    ;     /* Selection Profile    */
+	uint32_t rsvd2      ;
 #else	/*  __LITTLE_ENDIAN */
-	uint32_t rsvd2      :8;
-	uint32_t profile    :8;     /* Selection Profile    */
-	uint32_t numMask    :8;     /* # Mask Entries       */
-	uint32_t recvNotify :1;     /* Receive Notification */
-	uint32_t rsvd1      :7;
+	uint32_t rsvd2      ;
+	uint32_t profile    ;     /* Selection Profile    */
+	uint32_t numMask    ;     /* # Mask Entries       */
+	uint32_t recvNotify ;     /* Receive Notification */
+	uint32_t rsvd1      ;
 #endif
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t hbqId      :16;
-	uint32_t rsvd3      :12;
-	uint32_t ringMask   :4;
+	uint32_t hbqId      ;
+	uint32_t rsvd3      ;
+	uint32_t ringMask   ;
 #else	/*  __LITTLE_ENDIAN */
-	uint32_t ringMask   :4;
-	uint32_t rsvd3      :12;
-	uint32_t hbqId      :16;
+	uint32_t ringMask   ;
+	uint32_t rsvd3      ;
+	uint32_t hbqId      ;
 #endif
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t entry_count :16;
-	uint32_t rsvd4        :8;
-	uint32_t headerLen    :8;
+	uint32_t entry_count ;
+	uint32_t rsvd4        ;
+	uint32_t headerLen    ;
 #else	/*  __LITTLE_ENDIAN */
-	uint32_t headerLen    :8;
-	uint32_t rsvd4        :8;
-	uint32_t entry_count :16;
+	uint32_t headerLen    ;
+	uint32_t rsvd4        ;
+	uint32_t entry_count ;
 #endif
 
 	uint32_t hbqaddrLow;
 	uint32_t hbqaddrHigh;
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd5      :31;
-	uint32_t logEntry   :1;
+	uint32_t rsvd5      ;
+	uint32_t logEntry   ;
 #else	/*  __LITTLE_ENDIAN */
-	uint32_t logEntry   :1;
-	uint32_t rsvd5      :31;
+	uint32_t logEntry   ;
+	uint32_t rsvd5      ;
 #endif
 
 	uint32_t rsvd6;    /* w7 */
@@ -2735,38 +2735,38 @@ struct config_hbq_var {
 
 		struct {
 			#ifdef __BIG_ENDIAN_BITFIELD
-				uint32_t	seqlenoff	:16;
-				uint32_t	maxlen		:16;
+				uint32_t	seqlenoff	;
+				uint32_t	maxlen		;
 			#else	/*  __LITTLE_ENDIAN */
-				uint32_t	maxlen		:16;
-				uint32_t	seqlenoff	:16;
+				uint32_t	maxlen		;
+				uint32_t	seqlenoff	;
 			#endif
 			#ifdef __BIG_ENDIAN_BITFIELD
-				uint32_t	rsvd1		:28;
-				uint32_t	seqlenbcnt	:4;
+				uint32_t	rsvd1		;
+				uint32_t	seqlenbcnt	;
 			#else	/*  __LITTLE_ENDIAN */
-				uint32_t	seqlenbcnt	:4;
-				uint32_t	rsvd1		:28;
+				uint32_t	seqlenbcnt	;
+				uint32_t	rsvd1		;
 			#endif
 			uint32_t rsvd[10];
 		} profile2;
 
 		struct {
 			#ifdef __BIG_ENDIAN_BITFIELD
-				uint32_t	seqlenoff	:16;
-				uint32_t	maxlen		:16;
+				uint32_t	seqlenoff	;
+				uint32_t	maxlen		;
 			#else	/*  __LITTLE_ENDIAN */
-				uint32_t	maxlen		:16;
-				uint32_t	seqlenoff	:16;
+				uint32_t	maxlen		;
+				uint32_t	seqlenoff	;
 			#endif
 			#ifdef __BIG_ENDIAN_BITFIELD
-				uint32_t	cmdcodeoff	:28;
-				uint32_t	rsvd1		:12;
-				uint32_t	seqlenbcnt	:4;
+				uint32_t	cmdcodeoff	;
+				uint32_t	rsvd1		;
+				uint32_t	seqlenbcnt	;
 			#else	/*  __LITTLE_ENDIAN */
-				uint32_t	seqlenbcnt	:4;
-				uint32_t	rsvd1		:12;
-				uint32_t	cmdcodeoff	:28;
+				uint32_t	seqlenbcnt	;
+				uint32_t	rsvd1		;
+				uint32_t	cmdcodeoff	;
 			#endif
 			uint32_t cmdmatch[8];
 
@@ -2775,20 +2775,20 @@ struct config_hbq_var {
 
 		struct {
 			#ifdef __BIG_ENDIAN_BITFIELD
-				uint32_t	seqlenoff	:16;
-				uint32_t	maxlen		:16;
+				uint32_t	seqlenoff	;
+				uint32_t	maxlen		;
 			#else	/*  __LITTLE_ENDIAN */
-				uint32_t	maxlen		:16;
-				uint32_t	seqlenoff	:16;
+				uint32_t	maxlen		;
+				uint32_t	seqlenoff	;
 			#endif
 			#ifdef __BIG_ENDIAN_BITFIELD
-				uint32_t	cmdcodeoff	:28;
-				uint32_t	rsvd1		:12;
-				uint32_t	seqlenbcnt	:4;
+				uint32_t	cmdcodeoff	;
+				uint32_t	rsvd1		;
+				uint32_t	seqlenbcnt	;
 			#else	/*  __LITTLE_ENDIAN */
-				uint32_t	seqlenbcnt	:4;
-				uint32_t	rsvd1		:12;
-				uint32_t	cmdcodeoff	:28;
+				uint32_t	seqlenbcnt	;
+				uint32_t	rsvd1		;
+				uint32_t	cmdcodeoff	;
 			#endif
 			uint32_t cmdmatch[8];
 
@@ -2926,21 +2926,21 @@ typedef struct {
 /* Structure for MB Command CONFIG_MSI (0x30) */
 struct config_msi_var {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t dfltMsgNum:8;	/* Default message number            */
-	uint32_t rsvd1:11;	/* Reserved                          */
-	uint32_t NID:5;		/* Number of secondary attention IDs */
-	uint32_t rsvd2:5;	/* Reserved                          */
-	uint32_t dfltPresent:1;	/* Default message number present    */
-	uint32_t addFlag:1;	/* Add association flag              */
-	uint32_t reportFlag:1;	/* Report association flag           */
+	uint32_t dfltMsgNum;	/* Default message number            */
+	uint32_t rsvd1;	/* Reserved                          */
+	uint32_t NID;		/* Number of secondary attention IDs */
+	uint32_t rsvd2;	/* Reserved                          */
+	uint32_t dfltPresent;	/* Default message number present    */
+	uint32_t addFlag;	/* Add association flag              */
+	uint32_t reportFlag;	/* Report association flag           */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t reportFlag:1;	/* Report association flag           */
-	uint32_t addFlag:1;	/* Add association flag              */
-	uint32_t dfltPresent:1;	/* Default message number present    */
-	uint32_t rsvd2:5;	/* Reserved                          */
-	uint32_t NID:5;		/* Number of secondary attention IDs */
-	uint32_t rsvd1:11;	/* Reserved                          */
-	uint32_t dfltMsgNum:8;	/* Default message number            */
+	uint32_t reportFlag;	/* Report association flag           */
+	uint32_t addFlag;	/* Add association flag              */
+	uint32_t dfltPresent;	/* Default message number present    */
+	uint32_t rsvd2;	/* Reserved                          */
+	uint32_t NID;		/* Number of secondary attention IDs */
+	uint32_t rsvd1;	/* Reserved                          */
+	uint32_t dfltMsgNum;	/* Default message number            */
 #endif
 	uint32_t attentionConditions[2];
 	uint8_t  attentionId[16];
@@ -2948,11 +2948,11 @@ struct config_msi_var {
 	uint8_t  messageNumberByID[16];
 	uint32_t autoClearHA[2];
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd3:16;
-	uint32_t autoClearID:16;
+	uint32_t rsvd3;
+	uint32_t autoClearID;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t autoClearID:16;
-	uint32_t rsvd3:16;
+	uint32_t autoClearID;
+	uint32_t rsvd3;
 #endif
 	uint32_t rsvd4;
 };
@@ -2974,18 +2974,18 @@ typedef struct _SLI2_RDSC {
 
 typedef struct _PCB {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t type:8;
+	uint32_t type;
 #define TYPE_NATIVE_SLI2       0x01
-	uint32_t feature:8;
+	uint32_t feature;
 #define FEATURE_INITIAL_SLI2   0x01
-	uint32_t rsvd:12;
-	uint32_t maxRing:4;
+	uint32_t rsvd;
+	uint32_t maxRing;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t maxRing:4;
-	uint32_t rsvd:12;
-	uint32_t feature:8;
+	uint32_t maxRing;
+	uint32_t rsvd;
+	uint32_t feature;
 #define FEATURE_INITIAL_SLI2   0x01
-	uint32_t type:8;
+	uint32_t type;
 #define TYPE_NATIVE_SLI2       0x01
 #endif
 
@@ -3004,19 +3004,19 @@ typedef struct _PCB {
 /* NEW_FEATURE */
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd0:27;
-	uint32_t discardFarp:1;
-	uint32_t IPEnable:1;
-	uint32_t nodeName:1;
-	uint32_t portName:1;
-	uint32_t filterEnable:1;
+	uint32_t rsvd0;
+	uint32_t discardFarp;
+	uint32_t IPEnable;
+	uint32_t nodeName;
+	uint32_t portName;
+	uint32_t filterEnable;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t filterEnable:1;
-	uint32_t portName:1;
-	uint32_t nodeName:1;
-	uint32_t IPEnable:1;
-	uint32_t discardFarp:1;
-	uint32_t rsvd:27;
+	uint32_t filterEnable;
+	uint32_t portName;
+	uint32_t nodeName;
+	uint32_t IPEnable;
+	uint32_t discardFarp;
+	uint32_t rsvd;
 #endif
 
 	uint8_t portname[8];	/* Used to be struct lpfc_name */
@@ -3031,11 +3031,11 @@ typedef struct {
 
 typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rsvd:30;
-	uint32_t ring:2;	/* Ring for ASYNC_EVENT iocb Bits 0-1*/
+	uint32_t rsvd;
+	uint32_t ring;	/* Ring for ASYNC_EVENT iocb Bits 0-1*/
 #else /*  __LITTLE_ENDIAN */
-	uint32_t ring:2;	/* Ring for ASYNC_EVENT iocb Bits 0-1*/
-	uint32_t rsvd:30;
+	uint32_t ring;	/* Ring for ASYNC_EVENT iocb Bits 0-1*/
+	uint32_t rsvd;
 #endif
 } ASYNCEVT_ENABLE_VAR;
 
@@ -3133,13 +3133,13 @@ typedef struct {
 #ifdef __BIG_ENDIAN_BITFIELD
 	uint16_t mbxStatus;
 	uint8_t mbxCommand;
-	uint8_t mbxReserved:6;
-	uint8_t mbxHc:1;
-	uint8_t mbxOwner:1;	/* Low order bit first word */
+	uint8_t mbxReserved;
+	uint8_t mbxHc;
+	uint8_t mbxOwner;	/* Low order bit first word */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint8_t mbxOwner:1;	/* Low order bit first word */
-	uint8_t mbxHc:1;
-	uint8_t mbxReserved:6;
+	uint8_t mbxOwner;	/* Low order bit first word */
+	uint8_t mbxHc;
+	uint8_t mbxReserved;
 	uint8_t mbxCommand;
 	uint16_t mbxStatus;
 #endif
@@ -3293,17 +3293,17 @@ typedef struct {
 	struct ulp_bde elsRsp;
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t word4Rsvd:7;
-	uint32_t fl:1;
-	uint32_t myID:24;
-	uint32_t word5Rsvd:8;
-	uint32_t remoteID:24;
+	uint32_t word4Rsvd;
+	uint32_t fl;
+	uint32_t myID;
+	uint32_t word5Rsvd;
+	uint32_t remoteID;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t myID:24;
-	uint32_t fl:1;
-	uint32_t word4Rsvd:7;
-	uint32_t remoteID:24;
-	uint32_t word5Rsvd:8;
+	uint32_t myID;
+	uint32_t fl;
+	uint32_t word4Rsvd;
+	uint32_t remoteID;
+	uint32_t word5Rsvd;
 #endif
 } ELS_REQUEST;
 
@@ -3313,11 +3313,11 @@ typedef struct {
 	uint32_t parmRo;
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t word5Rsvd:8;
-	uint32_t remoteID:24;
+	uint32_t word5Rsvd;
+	uint32_t remoteID;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t remoteID:24;
-	uint32_t word5Rsvd:8;
+	uint32_t remoteID;
+	uint32_t word5Rsvd;
 #endif
 } RCV_ELS_REQ;
 
@@ -3350,11 +3350,11 @@ typedef struct {
 	uint32_t rsvd[4];
 	uint32_t parmRo;
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t word5Rsvd:8;
-	uint32_t remoteID:24;
+	uint32_t word5Rsvd;
+	uint32_t remoteID;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t remoteID:24;
-	uint32_t word5Rsvd:8;
+	uint32_t remoteID;
+	uint32_t word5Rsvd;
 #endif
 } GET_RPI;
 
@@ -3397,17 +3397,17 @@ typedef struct {
 typedef struct {
 	ULP_BDL bdl;
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t word4Rsvd:7;
-	uint32_t fl:1;
-	uint32_t myID:24;
-	uint32_t word5Rsvd:8;
-	uint32_t remoteID:24;
+	uint32_t word4Rsvd;
+	uint32_t fl;
+	uint32_t myID;
+	uint32_t word5Rsvd;
+	uint32_t remoteID;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t myID:24;
-	uint32_t fl:1;
-	uint32_t word4Rsvd:7;
-	uint32_t remoteID:24;
-	uint32_t word5Rsvd:8;
+	uint32_t myID;
+	uint32_t fl;
+	uint32_t word4Rsvd;
+	uint32_t remoteID;
+	uint32_t word5Rsvd;
 #endif
 } ELS_REQUEST64;
 
@@ -3425,11 +3425,11 @@ typedef struct {
 	uint32_t parmRo;
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t word5Rsvd:8;
-	uint32_t remoteID:24;
+	uint32_t word5Rsvd;
+	uint32_t remoteID;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t remoteID:24;
-	uint32_t word5Rsvd:8;
+	uint32_t remoteID;
+	uint32_t word5Rsvd;
 #endif
 } RCV_ELS_REQ64;
 
@@ -3439,25 +3439,25 @@ struct rcv_seq64 {
 	uint32_t hbq_1;
 	uint32_t parmRo;
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t rctl:8;
-	uint32_t type:8;
-	uint32_t dfctl:8;
-	uint32_t ls:1;
-	uint32_t fs:1;
-	uint32_t rsvd2:3;
-	uint32_t si:1;
-	uint32_t bc:1;
-	uint32_t rsvd3:1;
+	uint32_t rctl;
+	uint32_t type;
+	uint32_t dfctl;
+	uint32_t ls;
+	uint32_t fs;
+	uint32_t rsvd2;
+	uint32_t si;
+	uint32_t bc;
+	uint32_t rsvd3;
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t rsvd3:1;
-	uint32_t bc:1;
-	uint32_t si:1;
-	uint32_t rsvd2:3;
-	uint32_t fs:1;
-	uint32_t ls:1;
-	uint32_t dfctl:8;
-	uint32_t type:8;
-	uint32_t rctl:8;
+	uint32_t rsvd3;
+	uint32_t bc;
+	uint32_t si;
+	uint32_t rsvd2;
+	uint32_t fs;
+	uint32_t ls;
+	uint32_t dfctl;
+	uint32_t type;
+	uint32_t rctl;
 #endif
 };
 
@@ -3684,11 +3684,11 @@ typedef struct _IOCB {	/* IOCB structure */
 		struct {
 #ifdef __BIG_ENDIAN_BITFIELD
 			uint16_t ulpContext;	/* High order bits word 6 */
-			uint16_t ulpIoTag1:2;	/* Low  order bits word 6 */
-			uint16_t ulpIoTag0:14;	/* Low  order bits word 6 */
+			uint16_t ulpIoTag1;	/* Low  order bits word 6 */
+			uint16_t ulpIoTag0;	/* Low  order bits word 6 */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-			uint16_t ulpIoTag0:14;	/* Low  order bits word 6 */
-			uint16_t ulpIoTag1:2;	/* Low  order bits word 6 */
+			uint16_t ulpIoTag0;	/* Low  order bits word 6 */
+			uint16_t ulpIoTag1;	/* Low  order bits word 6 */
 			uint16_t ulpContext;	/* High order bits word 6 */
 #endif
 		} t2;
@@ -3698,29 +3698,29 @@ typedef struct _IOCB {	/* IOCB structure */
 #define ulpIoTag0  un1.t2.ulpIoTag0
 
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint32_t ulpTimeout:8;
-	uint32_t ulpXS:1;
-	uint32_t ulpFCP2Rcvy:1;
-	uint32_t ulpPU:2;
-	uint32_t ulpIr:1;
-	uint32_t ulpClass:3;
-	uint32_t ulpCommand:8;
-	uint32_t ulpStatus:4;
-	uint32_t ulpBdeCount:2;
-	uint32_t ulpLe:1;
-	uint32_t ulpOwner:1;	/* Low order bit word 7 */
+	uint32_t ulpTimeout;
+	uint32_t ulpXS;
+	uint32_t ulpFCP2Rcvy;
+	uint32_t ulpPU;
+	uint32_t ulpIr;
+	uint32_t ulpClass;
+	uint32_t ulpCommand;
+	uint32_t ulpStatus;
+	uint32_t ulpBdeCount;
+	uint32_t ulpLe;
+	uint32_t ulpOwner;	/* Low order bit word 7 */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint32_t ulpOwner:1;	/* Low order bit word 7 */
-	uint32_t ulpLe:1;
-	uint32_t ulpBdeCount:2;
-	uint32_t ulpStatus:4;
-	uint32_t ulpCommand:8;
-	uint32_t ulpClass:3;
-	uint32_t ulpIr:1;
-	uint32_t ulpPU:2;
-	uint32_t ulpFCP2Rcvy:1;
-	uint32_t ulpXS:1;
-	uint32_t ulpTimeout:8;
+	uint32_t ulpOwner;	/* Low order bit word 7 */
+	uint32_t ulpLe;
+	uint32_t ulpBdeCount;
+	uint32_t ulpStatus;
+	uint32_t ulpCommand;
+	uint32_t ulpClass;
+	uint32_t ulpIr;
+	uint32_t ulpPU;
+	uint32_t ulpFCP2Rcvy;
+	uint32_t ulpXS;
+	uint32_t ulpTimeout;
 #endif
 
 	union {

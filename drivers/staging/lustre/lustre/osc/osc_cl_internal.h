@@ -318,7 +318,7 @@ struct osc_lock {
 	/**
 	 * For async glimpse lock.
 	 */
-				 ols_agl:1;
+				 ols_agl;
 	/**
 	 * IO that owns this lock. This field is used for a dead-lock
 	 * avoidance by osc_lock_enqueue_wait().
@@ -367,7 +367,7 @@ struct osc_page {
 	/**
 	 * Set if the page must be transferred with OBD_BRW_SRVLOCK.
 	 */
-			      ops_srvlock:1;
+			      ops_srvlock;
 	union {
 		/**
 		 * lru page list. ops_inflight and ops_lru are exclusive so
@@ -641,7 +641,7 @@ struct osc_extent {
 			   oe_hp:1,
 	/** this extent should be written back asap. set if one of pages is
 	 * called by page WB daemon, or sync write or reading requests. */
-			   oe_urgent:1;
+			   oe_urgent;
 	/** how many grants allocated for this extent.
 	 *  Grant allocated for this extent. There is no grant allocated
 	 *  for reading extents and sync write extents. */

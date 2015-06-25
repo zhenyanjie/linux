@@ -125,13 +125,13 @@ struct mrvl_ie_wildcard_ssid_param_set {
 
 struct chanscanmode {
 #ifdef __BIG_ENDIAN_BITFIELD
-	u8 reserved_2_7:6;
-	u8 disablechanfilt:1;
-	u8 passivescan:1;
+	u8 reserved_2_7;
+	u8 disablechanfilt;
+	u8 passivescan;
 #else
-	u8 passivescan:1;
-	u8 disablechanfilt:1;
-	u8 reserved_2_7:6;
+	u8 passivescan;
+	u8 disablechanfilt;
+	u8 reserved_2_7;
 #endif
 } __packed;
 

@@ -412,10 +412,10 @@ struct s5c73m3 {
 
 	struct s5c73m3_ctrls ctrls;
 
-	u8 streaming:1;
-	u8 apply_fmt:1;
-	u8 apply_fiv:1;
-	u8 isp_ready:1;
+	u8 streaming;
+	u8 apply_fmt;
+	u8 apply_fiv;
+	u8 isp_ready;
 
 	short power;
 

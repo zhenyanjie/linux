@@ -104,9 +104,9 @@ struct _coeff_div {
 	u32 mclk;
 	u32 rate;
 	u16 fs;
-	u8 sr:4;
-	u8 bosr:1;
-	u8 usb:1;
+	u8 sr;
+	u8 bosr;
+	u8 usb;
 };
 
 /* codec mclk clock divider coefficients */

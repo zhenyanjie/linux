@@ -249,34 +249,34 @@ static struct us_unusual_dev ene_ub6250_unusual_dev_list[] = {
 
 
 struct SD_STATUS {
-	u8    Insert:1;
-	u8    Ready:1;
-	u8    MediaChange:1;
-	u8    IsMMC:1;
-	u8    HiCapacity:1;
-	u8    HiSpeed:1;
-	u8    WtP:1;
-	u8    Reserved:1;
+	u8    Insert;
+	u8    Ready;
+	u8    MediaChange;
+	u8    IsMMC;
+	u8    HiCapacity;
+	u8    HiSpeed;
+	u8    WtP;
+	u8    Reserved;
 };
 
 struct MS_STATUS {
-	u8    Insert:1;
-	u8    Ready:1;
-	u8    MediaChange:1;
-	u8    IsMSPro:1;
-	u8    IsMSPHG:1;
-	u8    Reserved1:1;
-	u8    WtP:1;
-	u8    Reserved2:1;
+	u8    Insert;
+	u8    Ready;
+	u8    MediaChange;
+	u8    IsMSPro;
+	u8    IsMSPHG;
+	u8    Reserved1;
+	u8    WtP;
+	u8    Reserved2;
 };
 
 struct SM_STATUS {
-	u8    Insert:1;
-	u8    Ready:1;
-	u8    MediaChange:1;
-	u8    Reserved:3;
-	u8    WtP:1;
-	u8    IsMS:1;
+	u8    Insert;
+	u8    Ready;
+	u8    MediaChange;
+	u8    Reserved;
+	u8    WtP;
+	u8    IsMS;
 };
 
 struct ms_bootblock_cis {

@@ -94,11 +94,11 @@ enum MR_RAID_FLAGS_IO_SUB_TYPE {
 
 struct RAID_CONTEXT {
 #if   defined(__BIG_ENDIAN_BITFIELD)
-	u8	nseg:4;
-	u8	Type:4;
+	u8	nseg;
+	u8	Type;
 #else
-	u8	Type:4;
-	u8	nseg:4;
+	u8	Type;
+	u8	nseg;
 #endif
 	u8	resvd0;
 	u16     timeoutValue;
@@ -304,11 +304,11 @@ struct MPI2_RAID_SCSI_IO_REQUEST {
  */
 struct MEGASAS_RAID_MFA_IO_REQUEST_DESCRIPTOR {
 #if   defined(__BIG_ENDIAN_BITFIELD)
-	u32     MessageAddress1:24; /* bits 31:8*/
-	u32     RequestFlags:8;
+	u32     MessageAddress1; /* bits 31:8*/
+	u32     RequestFlags;
 #else
-	u32     RequestFlags:8;
-	u32     MessageAddress1:24; /* bits 31:8*/
+	u32     RequestFlags;
+	u32     MessageAddress1; /* bits 31:8*/
 #endif
 	u32     MessageAddress2;      /* bits 61:32 */
 };
@@ -532,29 +532,29 @@ struct MR_SPAN_BLOCK_INFO {
 struct MR_LD_RAID {
 	struct {
 #if   defined(__BIG_ENDIAN_BITFIELD)
-		u32     reserved4:7;
-		u32	fpNonRWCapable:1;
-		u32     fpReadAcrossStripe:1;
-		u32     fpWriteAcrossStripe:1;
-		u32     fpReadCapable:1;
-		u32     fpWriteCapable:1;
-		u32     encryptionType:8;
-		u32     pdPiMode:4;
-		u32     ldPiMode:4;
-		u32     reserved5:3;
-		u32     fpCapable:1;
+		u32     reserved4;
+		u32	fpNonRWCapable;
+		u32     fpReadAcrossStripe;
+		u32     fpWriteAcrossStripe;
+		u32     fpReadCapable;
+		u32     fpWriteCapable;
+		u32     encryptionType;
+		u32     pdPiMode;
+		u32     ldPiMode;
+		u32     reserved5;
+		u32     fpCapable;
 #else
-		u32     fpCapable:1;
-		u32     reserved5:3;
-		u32     ldPiMode:4;
-		u32     pdPiMode:4;
-		u32     encryptionType:8;
-		u32     fpWriteCapable:1;
-		u32     fpReadCapable:1;
-		u32     fpWriteAcrossStripe:1;
-		u32     fpReadAcrossStripe:1;
-		u32	fpNonRWCapable:1;
-		u32     reserved4:7;
+		u32     fpCapable;
+		u32     reserved5;
+		u32     ldPiMode;
+		u32     pdPiMode;
+		u32     encryptionType;
+		u32     fpWriteCapable;
+		u32     fpReadCapable;
+		u32     fpWriteAcrossStripe;
+		u32     fpReadAcrossStripe;
+		u32	fpNonRWCapable;
+		u32     reserved4;
 #endif
 	} capability;
 	u32     reserved6;
@@ -575,8 +575,8 @@ struct MR_LD_RAID {
 	u16     seqNum;
 
 	struct {
-		u32 ldSyncRequired:1;
-		u32 reserved:31;
+		u32 ldSyncRequired;
+		u32 reserved;
 	} flags;
 
 	u8	LUN[8]; /* 0x24 8 byte LUN field used for SCSI IO's */

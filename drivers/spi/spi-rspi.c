@@ -195,8 +195,8 @@ struct rspi_data {
 	int rx_irq, tx_irq;
 	const struct spi_ops *ops;
 
-	unsigned dma_callbacked:1;
-	unsigned byte_access:1;
+	unsigned dma_callbacked;
+	unsigned byte_access;
 };
 
 static void rspi_write8(const struct rspi_data *rspi, u8 data, u16 offset)

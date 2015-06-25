@@ -1630,9 +1630,9 @@ static int dib0090_get_offset(struct dib0090_state *state, enum frontend_tune_st
 struct dc_calibration {
 	u8 addr;
 	u8 offset;
-	u8 pga:1;
+	u8 pga;
 	u16 bb1;
-	u8 i:1;
+	u8 i;
 };
 
 static const struct dc_calibration dc_table[] = {

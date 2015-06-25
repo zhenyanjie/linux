@@ -74,7 +74,7 @@ struct snd_hwdep {
 	struct mutex open_mutex;
 	int used;			/* reference counter */
 	unsigned int dsp_loaded;	/* bit fields of loaded dsp indices */
-	unsigned int exclusive:1;	/* exclusive access mode */
+	unsigned int exclusive;	/* exclusive access mode */
 };
 
 extern int snd_hwdep_new(struct snd_card *card, char *id, int device,

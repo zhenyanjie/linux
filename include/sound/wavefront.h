@@ -206,23 +206,23 @@ typedef u8 UCHAR8;
 
 struct wf_envelope
 {
-    u8 attack_time:7;
-    u8 Unused1:1;
+    u8 attack_time;
+    u8 Unused1;
 
-    u8 decay1_time:7;
-    u8 Unused2:1;
+    u8 decay1_time;
+    u8 Unused2;
 
-    u8 decay2_time:7;
-    u8 Unused3:1;
+    u8 decay2_time;
+    u8 Unused3;
 
-    u8 sustain_time:7;
-    u8 Unused4:1;
+    u8 sustain_time;
+    u8 Unused4;
 
-    u8 release_time:7;
-    u8 Unused5:1;
+    u8 release_time;
+    u8 Unused5;
 
-    u8 release2_time:7;
-    u8 Unused6:1;
+    u8 release2_time;
+    u8 Unused6;
 
     s8 attack_level;
     s8 decay1_level;
@@ -230,14 +230,14 @@ struct wf_envelope
     s8 sustain_level;
     s8 release_level;
 
-    u8 attack_velocity:7;
-    u8 Unused7:1;
+    u8 attack_velocity;
+    u8 Unused7;
 
-    u8 volume_velocity:7;
-    u8 Unused8:1;
+    u8 volume_velocity;
+    u8 Unused8;
 
-    u8 keyboard_scaling:7;
-    u8 Unused9:1;
+    u8 keyboard_scaling;
+    u8 Unused9;
 };
 typedef struct wf_envelope wavefront_envelope;
 
@@ -245,22 +245,22 @@ struct wf_lfo
 {
     u8 sample_number;
 
-    u8 frequency:7;
-    u8 Unused1:1;
+    u8 frequency;
+    u8 Unused1;
 
-    u8 am_src:4;
-    u8 fm_src:4;
+    u8 am_src;
+    u8 fm_src;
 
     s8 fm_amount;
     s8 am_amount;
     s8 start_level;
     s8 end_level;
 
-    u8 ramp_delay:7;
-    u8 wave_restart:1; /* for LFO2 only */
+    u8 ramp_delay;
+    u8 wave_restart; /* for LFO2 only */
 
-    u8 ramp_time:7;
-    u8 Unused2:1;
+    u8 ramp_time;
+    u8 Unused2;
 };
 typedef struct wf_lfo wavefront_lfo;
 
@@ -268,39 +268,39 @@ struct wf_patch
 {
     s16  frequency_bias;         /*  ** THIS IS IN MOTOROLA FORMAT!! ** */
 
-    u8 amplitude_bias:7;
-    u8 Unused1:1;
+    u8 amplitude_bias;
+    u8 Unused1;
 
-    u8 portamento:7;
-    u8 Unused2:1;
+    u8 portamento;
+    u8 Unused2;
 
     u8 sample_number;
 
-    u8 pitch_bend:4;
-    u8 sample_msb:1;
-    u8 Unused3:3;
+    u8 pitch_bend;
+    u8 sample_msb;
+    u8 Unused3;
 
-    u8 mono:1;
-    u8 retrigger:1;
-    u8 nohold:1;
-    u8 restart:1;
-    u8 filterconfig:2; /* SDK says "not used" */
-    u8 reuse:1;
-    u8 reset_lfo:1;    
+    u8 mono;
+    u8 retrigger;
+    u8 nohold;
+    u8 restart;
+    u8 filterconfig; /* SDK says "not used" */
+    u8 reuse;
+    u8 reset_lfo;    
 
-    u8 fm_src2:4;
-    u8 fm_src1:4;   
+    u8 fm_src2;
+    u8 fm_src1;   
 
     s8 fm_amount1;
     s8 fm_amount2;
 
-    u8 am_src:4;
-    u8 Unused4:4;
+    u8 am_src;
+    u8 Unused4;
 
     s8 am_amount;
 
-    u8 fc1_mode:4;
-    u8 fc2_mode:4;
+    u8 fc1_mode;
+    u8 fc2_mode;
 
     s8 fc1_mod_amount;
     s8 fc1_keyboard_scaling;
@@ -309,8 +309,8 @@ struct wf_patch
     s8 fc2_keyboard_scaling;
     s8 fc2_bias;
 
-    u8 randomizer:7;
-    u8 Unused5:1;
+    u8 randomizer;
+    u8 Unused5;
 
     struct wf_envelope envelope1;
     struct wf_envelope envelope2;
@@ -323,16 +323,16 @@ struct wf_layer
 {
     u8 patch_number;
 
-    u8 mix_level:7;
-    u8 mute:1;
+    u8 mix_level;
+    u8 mute;
 
-    u8 split_point:7;
-    u8 play_below:1;
+    u8 split_point;
+    u8 play_below;
 
-    u8 pan_mod_src:2;
-    u8 pan_or_mod:1;
-    u8 pan:4;
-    u8 split_type:1;
+    u8 pan_mod_src;
+    u8 pan_or_mod;
+    u8 pan;
+    u8 split_type;
 };
 typedef struct wf_layer wavefront_layer;
 
@@ -344,9 +344,9 @@ typedef struct wf_program wavefront_program;
 
 struct wf_sample_offset
 {
-    s32 Fraction:4;
-    s32 Integer:20;
-    s32 Unused:8;
+    s32 Fraction;
+    s32 Integer;
+    s32 Unused;
 };
 typedef struct wf_sample_offset wavefront_sample_offset;          
      
@@ -439,13 +439,13 @@ typedef struct wf_sample {
     struct wf_sample_offset loopEndOffset;
     struct wf_sample_offset sampleEndOffset;
     s16 FrequencyBias;
-    u8 SampleResolution:2;  /* sample_format */
-    u8 Unused1:1;
-    u8 Loop:1;
-    u8 Bidirectional:1;
-    u8 Unused2:1;
-    u8 Reverse:1;
-    u8 Unused3:1;
+    u8 SampleResolution;  /* sample_format */
+    u8 Unused1;
+    u8 Loop;
+    u8 Bidirectional;
+    u8 Unused2;
+    u8 Reverse;
+    u8 Unused3;
 } wavefront_sample;
 
 typedef struct wf_multisample {
@@ -463,13 +463,13 @@ typedef struct wf_alias {
 
     s16  FrequencyBias;
 
-    u8 SampleResolution:2;
-    u8 Unused1:1;
-    u8 Loop:1;
-    u8 Bidirectional:1;
-    u8 Unused2:1;
-    u8 Reverse:1;
-    u8 Unused3:1;
+    u8 SampleResolution;
+    u8 Unused1;
+    u8 Loop;
+    u8 Bidirectional;
+    u8 Unused2;
+    u8 Reverse;
+    u8 Unused3;
     
     /* This structure is meant to be padded only to 16 bits on their
        original. Of course, whoever wrote their documentation didn't
@@ -485,14 +485,14 @@ typedef struct wf_alias {
 
 typedef struct wf_drum {
     u8 PatchNumber;
-    u8 MixLevel:7;
-    u8 Unmute:1;
-    u8 Group:4;
-    u8 Unused1:4;
-    u8 PanModSource:2;
-    u8 PanModulated:1;
-    u8 PanAmount:4;
-    u8 Unused2:1;
+    u8 MixLevel;
+    u8 Unmute;
+    u8 Group;
+    u8 Unused1;
+    u8 PanModSource;
+    u8 PanModulated;
+    u8 PanAmount;
+    u8 Unused2;
 } wavefront_drum;
 
 typedef struct wf_drumkit {

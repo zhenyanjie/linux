@@ -69,102 +69,102 @@
 #define SGI		BIT(6)
 
 struct txdesc_8723a {
-	u32 pktlen:16;
-	u32 offset:8;
-	u32 bmc:1;
-	u32 htc:1;
-	u32 ls:1;
-	u32 fs:1;
-	u32 linip:1;
-	u32 noacm:1;
-	u32 gf:1;
-	u32 own:1;
+	u32 pktlen;
+	u32 offset;
+	u32 bmc;
+	u32 htc;
+	u32 ls;
+	u32 fs;
+	u32 linip;
+	u32 noacm;
+	u32 gf;
+	u32 own;
 
-	u32 macid:5;
-	u32 agg_en:1;
-	u32 bk:1;
-	u32 rd_en:1;
-	u32 qsel:5;
-	u32 rd_nav_ext:1;
-	u32 lsig_txop_en:1;
-	u32 pifs:1;
-	u32 rate_id:4;
-	u32 navusehdr:1;
-	u32 en_desc_id:1;
-	u32 sectype:2;
-	u32 rsvd0424:2;
-	u32 pkt_offset:5;	/*  unit: 8 bytes */
-	u32 rsvd0431:1;
+	u32 macid;
+	u32 agg_en;
+	u32 bk;
+	u32 rd_en;
+	u32 qsel;
+	u32 rd_nav_ext;
+	u32 lsig_txop_en;
+	u32 pifs;
+	u32 rate_id;
+	u32 navusehdr;
+	u32 en_desc_id;
+	u32 sectype;
+	u32 rsvd0424;
+	u32 pkt_offset;	/*  unit: 8 bytes */
+	u32 rsvd0431;
 
-	u32 rts_rc:6;
-	u32 data_rc:6;
-	u32 rsvd0812:2;
-	u32 bar_rty_th:2;
-	u32 rsvd0816:1;
-	u32 morefrag:1;
-	u32 raw:1;
-	u32 ccx:1;
-	u32 ampdu_density:3;
-	u32 bt_null:1;
-	u32 ant_sel_a:1;
-	u32 ant_sel_b:1;
-	u32 tx_ant_cck:2;
-	u32 tx_antl:2;
-	u32 tx_ant_ht:2;
+	u32 rts_rc;
+	u32 data_rc;
+	u32 rsvd0812;
+	u32 bar_rty_th;
+	u32 rsvd0816;
+	u32 morefrag;
+	u32 raw;
+	u32 ccx;
+	u32 ampdu_density;
+	u32 bt_null;
+	u32 ant_sel_a;
+	u32 ant_sel_b;
+	u32 tx_ant_cck;
+	u32 tx_antl;
+	u32 tx_ant_ht;
 
-	u32 nextheadpage:8;
-	u32 tailpage:8;
-	u32 seq:12;
-	u32 cpu_handle:1;
-	u32 tag1:1;
-	u32 trigger_int:1;
-	u32 hwseq_en:1;
+	u32 nextheadpage;
+	u32 tailpage;
+	u32 seq;
+	u32 cpu_handle;
+	u32 tag1;
+	u32 trigger_int;
+	u32 hwseq_en;
 
-	u32 rtsrate:5;
-	u32 ap_dcfe:1;
-	u32 hwseq_sel:2;
-	u32 userate:1;
-	u32 disrtsfb:1;
-	u32 disdatafb:1;
-	u32 cts2self:1;
-	u32 rtsen:1;
-	u32 hw_rts_en:1;
-	u32 port_id:1;
-	u32 rsvd1615:3;
-	u32 wait_dcts:1;
-	u32 cts2ap_en:1;
-	u32 data_sc:2;
-	u32 data_stbc:2;
-	u32 data_short:1;
-	u32 data_bw:1;
-	u32 rts_short:1;
-	u32 rts_bw:1;
-	u32 rts_sc:2;
-	u32 vcs_stbc:2;
+	u32 rtsrate;
+	u32 ap_dcfe;
+	u32 hwseq_sel;
+	u32 userate;
+	u32 disrtsfb;
+	u32 disdatafb;
+	u32 cts2self;
+	u32 rtsen;
+	u32 hw_rts_en;
+	u32 port_id;
+	u32 rsvd1615;
+	u32 wait_dcts;
+	u32 cts2ap_en;
+	u32 data_sc;
+	u32 data_stbc;
+	u32 data_short;
+	u32 data_bw;
+	u32 rts_short;
+	u32 rts_bw;
+	u32 rts_sc;
+	u32 vcs_stbc;
 
-	u32 datarate:6;
-	u32 sgi:1;
-	u32 try_rate:1;
-	u32 data_ratefb_lmt:5;
-	u32 rts_ratefb_lmt:4;
-	u32 rty_lmt_en:1;
-	u32 data_rt_lmt:6;
-	u32 usb_txagg_num:8;
+	u32 datarate;
+	u32 sgi;
+	u32 try_rate;
+	u32 data_ratefb_lmt;
+	u32 rts_ratefb_lmt;
+	u32 rty_lmt_en;
+	u32 data_rt_lmt;
+	u32 usb_txagg_num;
 
-	u32 txagg_a:5;
-	u32 txagg_b:5;
-	u32 use_max_len:1;
-	u32 max_agg_num:5;
-	u32 mcsg1_max_len:4;
-	u32 mcsg2_max_len:4;
-	u32 mcsg3_max_len:4;
-	u32 mcs7_sgi_max_len:4;
+	u32 txagg_a;
+	u32 txagg_b;
+	u32 use_max_len;
+	u32 max_agg_num;
+	u32 mcsg1_max_len;
+	u32 mcsg2_max_len;
+	u32 mcsg3_max_len;
+	u32 mcs7_sgi_max_len;
 
-	u32 checksum:16;	/*  TxBuffSize(PCIe)/CheckSum(USB) */
-	u32 mcsg4_max_len:4;
-	u32 mcsg5_max_len:4;
-	u32 mcsg6_max_len:4;
-	u32 mcs15_sgi_max_len:4;
+	u32 checksum;	/*  TxBuffSize(PCIe)/CheckSum(USB) */
+	u32 mcsg4_max_len;
+	u32 mcsg5_max_len;
+	u32 mcsg6_max_len;
+	u32 mcs15_sgi_max_len;
 };
 
 #define txdesc_set_ccx_sw_8723a(txdesc, value) \
@@ -176,22 +176,22 @@ struct txdesc_8723a {
 
 struct txrpt_ccx_8723a {
 	/* offset 0 */
-	u8 tag1:1;
-	u8 rsvd:4;
-	u8 int_bt:1;
-	u8 int_tri:1;
-	u8 int_ccx:1;
+	u8 tag1;
+	u8 rsvd;
+	u8 int_bt;
+	u8 int_tri;
+	u8 int_ccx;
 
 	/* offset 1 */
-	u8 mac_id:5;
-	u8 pkt_drop:1;
-	u8 pkt_ok:1;
-	u8 bmc:1;
+	u8 mac_id;
+	u8 pkt_drop;
+	u8 pkt_ok;
+	u8 bmc;
 
 	/* offset 2 */
-	u8 retry_cnt:6;
-	u8 lifetime_over:1;
-	u8 retry_over:1;
+	u8 retry_cnt;
+	u8 lifetime_over;
+	u8 retry_over;
 
 	/* offset 3 */
 	u8 ccx_qtime0;
@@ -201,8 +201,8 @@ struct txrpt_ccx_8723a {
 	u8 final_data_rate;
 
 	/* offset 6 */
-	u8 sw1:4;
-	u8 qsel:4;
+	u8 sw1;
+	u8 qsel;
 
 	/* offset 7 */
 	u8 sw0;

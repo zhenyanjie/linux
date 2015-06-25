@@ -171,7 +171,7 @@ struct adp5520_keys_platform_data {
 	int cols_en_mask;		/* Number of columns */
 	const unsigned short *keymap;	/* Pointer to keymap */
 	unsigned short keymapsize;	/* Keymap size */
-	unsigned repeat:1;		/* Enable key repeat */
+	unsigned repeat;		/* Enable key repeat */
 };
 
 

@@ -32,29 +32,29 @@ struct sxgbe_tx_norm_desc {
 		/* TX Read-Format Desc 2,3 */
 		struct {
 			/* TDES2 */
-			u32 buf1_size:14;
-			u32 vlan_tag_ctl:2;
-			u32 buf2_size:14;
-			u32 timestmp_enable:1;
-			u32 int_on_com:1;
+			u32 buf1_size;
+			u32 vlan_tag_ctl;
+			u32 buf2_size;
+			u32 timestmp_enable;
+			u32 int_on_com;
 			/* TDES3 */
 			union {
 				u16 tcp_payload_len;
 				struct {
-					u32 total_pkt_len:15;
-					u32 reserved1:1;
+					u32 total_pkt_len;
+					u32 reserved1;
 				} pkt_len;
 			} tx_pkt_len;
 
-			u16 cksum_ctl:2;
-			u16 tse_bit:1;
-			u16 tcp_hdr_len:4;
-			u16 sa_insert_ctl:3;
-			u16 crc_pad_ctl:2;
-			u16 last_desc:1;
-			u16 first_desc:1;
-			u16 ctxt_bit:1;
-			u16 own_bit:1;
+			u16 cksum_ctl;
+			u16 tse_bit;
+			u16 tcp_hdr_len;
+			u16 sa_insert_ctl;
+			u16 crc_pad_ctl;
+			u16 last_desc;
+			u16 first_desc;
+			u16 ctxt_bit;
+			u16 own_bit;
 		} tx_rd_des23;
 
 		/* tx write back Desc 2,3 */
@@ -62,8 +62,8 @@ struct sxgbe_tx_norm_desc {
 			/* WB TES2 */
 			u32 reserved1;
 			/* WB TES3 */
-			u32 reserved2:31;
-			u32 own_bit:1;
+			u32 reserved2;
+			u32 own_bit;
 		} tx_wb_des23;
 	} tdes23;
 };
@@ -72,8 +72,8 @@ struct sxgbe_rx_norm_desc {
 	union {
 		u64 rdes01; /* buf1 address */
 		union {
-			u32 out_vlan_tag:16;
-			u32 in_vlan_tag:16;
+			u32 out_vlan_tag;
+			u32 in_vlan_tag;
 			u32 rss_hash;
 		} rx_wb_des01;
 	} rdes01;
@@ -82,43 +82,43 @@ struct sxgbe_rx_norm_desc {
 		/* RX Read format Desc 2,3 */
 		struct{
 			/* RDES2 */
-			u64 buf2_addr:62;
+			u64 buf2_addr;
 			/* RDES3 */
-			u32 int_on_com:1;
-			u32 own_bit:1;
+			u32 int_on_com;
+			u32 own_bit;
 		} rx_rd_des23;
 
 		/* RX write back */
 		struct{
 			/* WB RDES2 */
-			u32 hdr_len:10;
-			u32 rdes2_reserved:2;
-			u32 elrd_val:1;
-			u32 iovt_sel:1;
-			u32 res_pkt:1;
-			u32 vlan_filter_match:1;
-			u32 sa_filter_fail:1;
-			u32 da_filter_fail:1;
-			u32 hash_filter_pass:1;
-			u32 macaddr_filter_match:8;
-			u32 l3_filter_match:1;
-			u32 l4_filter_match:1;
-			u32 l34_filter_num:3;
+			u32 hdr_len;
+			u32 rdes2_reserved;
+			u32 elrd_val;
+			u32 iovt_sel;
+			u32 res_pkt;
+			u32 vlan_filter_match;
+			u32 sa_filter_fail;
+			u32 da_filter_fail;
+			u32 hash_filter_pass;
+			u32 macaddr_filter_match;
+			u32 l3_filter_match;
+			u32 l4_filter_match;
+			u32 l34_filter_num;
 
 			/* WB RDES3 */
-			u32 pkt_len:14;
-			u32 rdes3_reserved:1;
-			u32 err_summary:1;
-			u32 err_l2_type:4;
-			u32 layer34_pkt_type:4;
-			u32 no_coagulation_pkt:1;
-			u32 in_seq_pkt:1;
-			u32 rss_valid:1;
-			u32 context_des_avail:1;
-			u32 last_desc:1;
-			u32 first_desc:1;
-			u32 recv_context_desc:1;
-			u32 own_bit:1;
+			u32 pkt_len;
+			u32 rdes3_reserved;
+			u32 err_summary;
+			u32 err_l2_type;
+			u32 layer34_pkt_type;
+			u32 no_coagulation_pkt;
+			u32 in_seq_pkt;
+			u32 rss_valid;
+			u32 context_des_avail;
+			u32 last_desc;
+			u32 first_desc;
+			u32 recv_context_desc;
+			u32 own_bit;
 		} rx_wb_des23;
 	} rdes23;
 };
@@ -127,34 +127,34 @@ struct sxgbe_rx_norm_desc {
 struct sxgbe_tx_ctxt_desc {
 	u32 tstamp_lo;
 	u32 tstamp_hi;
-	u32 maxseg_size:15;
-	u32 reserved1:1;
-	u32 ivlan_tag:16;
-	u32 vlan_tag:16;
-	u32 vltag_valid:1;
-	u32 ivlan_tag_valid:1;
-	u32 ivlan_tag_ctl:2;
-	u32 reserved2:3;
-	u32 ctxt_desc_err:1;
-	u32 reserved3:2;
-	u32 ostc:1;
-	u32 tcmssv:1;
-	u32 reserved4:2;
-	u32 ctxt_bit:1;
-	u32 own_bit:1;
+	u32 maxseg_size;
+	u32 reserved1;
+	u32 ivlan_tag;
+	u32 vlan_tag;
+	u32 vltag_valid;
+	u32 ivlan_tag_valid;
+	u32 ivlan_tag_ctl;
+	u32 reserved2;
+	u32 ctxt_desc_err;
+	u32 reserved3;
+	u32 ostc;
+	u32 tcmssv;
+	u32 reserved4;
+	u32 ctxt_bit;
+	u32 own_bit;
 };
 
 struct sxgbe_rx_ctxt_desc {
 	u32 tstamp_lo;
 	u32 tstamp_hi;
 	u32 reserved1;
-	u32 ptp_msgtype:4;
-	u32 tstamp_available:1;
-	u32 ptp_rsp_err:1;
-	u32 tstamp_dropped:1;
-	u32 reserved2:23;
-	u32 rx_ctxt_desc:1;
-	u32 own_bit:1;
+	u32 ptp_msgtype;
+	u32 tstamp_available;
+	u32 ptp_rsp_err;
+	u32 tstamp_dropped;
+	u32 reserved2;
+	u32 rx_ctxt_desc;
+	u32 own_bit;
 };
 
 struct sxgbe_desc_ops {

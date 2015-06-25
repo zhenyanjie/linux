@@ -270,7 +270,7 @@ struct io_ctl {
 	unsigned long size;
 	int index;
 	int num_pages;
-	unsigned check_crcs:1;
+	unsigned check_crcs;
 };
 
 static int io_ctl_init(struct io_ctl *io_ctl, struct inode *inode,

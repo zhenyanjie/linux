@@ -109,9 +109,9 @@ struct board_info {
 	u8		imr_all;
 
 	unsigned int	flags;
-	unsigned int	in_timeout:1;
-	unsigned int	in_suspend:1;
-	unsigned int	wake_supported:1;
+	unsigned int	in_timeout;
+	unsigned int	in_suspend;
+	unsigned int	wake_supported;
 
 	enum dm9000_type type;
 

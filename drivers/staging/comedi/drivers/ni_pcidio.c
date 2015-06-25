@@ -268,7 +268,7 @@ enum nidio_boardid {
 
 struct nidio_board {
 	const char *name;
-	unsigned int uses_firmware:1;
+	unsigned int uses_firmware;
 };
 
 static const struct nidio_board nidio_boards[] = {

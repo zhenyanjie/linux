@@ -85,11 +85,11 @@ struct edgeport_product_info {
 	__u8	NumPorts;			/* Number of ports on edgeport */
 	__u8	ProdInfoVer;			/* What version of structure is this? */
 
-	__u32	IsServer        :1;		/* Set if Server */
-	__u32	IsRS232         :1;		/* Set if RS-232 ports exist */
-	__u32	IsRS422         :1;		/* Set if RS-422 ports exist */
-	__u32	IsRS485         :1;		/* Set if RS-485 ports exist */
-	__u32	IsReserved      :28;		/* Reserved for later expansion */
+	__u32	IsServer        ;		/* Set if Server */
+	__u32	IsRS232         ;		/* Set if RS-232 ports exist */
+	__u32	IsRS422         ;		/* Set if RS-422 ports exist */
+	__u32	IsRS485         ;		/* Set if RS-485 ports exist */
+	__u32	IsReserved      ;		/* Reserved for later expansion */
 
 	__u8	RomSize;			/* Size of ROM/E2PROM in K */
 	__u8	RamSize;			/* Size of external RAM in K */

@@ -36,7 +36,7 @@
 
 struct juli_spec {
 	struct ak4114 *ak4114;
-	unsigned int analog:1;
+	unsigned int analog;
 };
 
 /*

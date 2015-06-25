@@ -108,17 +108,17 @@ struct cm109_dev {
 	 * They have to be separate since they are accessed from IRQ
 	 * context.
 	 */
-	unsigned irq_urb_pending:1;	/* irq_urb is in flight */
-	unsigned ctl_urb_pending:1;	/* ctl_urb is in flight */
-	unsigned buzzer_pending:1;	/* need to issue buzz command */
+	unsigned irq_urb_pending;	/* irq_urb is in flight */
+	unsigned ctl_urb_pending;	/* ctl_urb is in flight */
+	unsigned buzzer_pending;	/* need to issue buzz command */
 	spinlock_t ctl_submit_lock;
 
 	unsigned char buzzer_state;	/* on/off */
 
 	/* flags */
-	unsigned open:1;
-	unsigned resetting:1;
-	unsigned shutdown:1;
+	unsigned open;
+	unsigned resetting;
+	unsigned shutdown;
 
 	/* This mutex protects writes to the above flags */
 	struct mutex pm_mutex;

@@ -50,12 +50,12 @@ struct schib_config {
 	u64 mba;
 	u32 intparm;
 	u16 mbi;
-	u32 isc:3;
-	u32 ena:1;
-	u32 mme:2;
-	u32 mp:1;
-	u32 csense:1;
-	u32 mbfc:1;
+	u32 isc;
+	u32 ena;
+	u32 mme;
+	u32 mp;
+	u32 csense;
+	u32 mbfc;
 } __attribute__ ((packed));
 
 /*

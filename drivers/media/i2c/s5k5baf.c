@@ -323,10 +323,10 @@ struct s5k5baf {
 
 	struct s5k5baf_ctrls ctrls;
 
-	unsigned int streaming:1;
-	unsigned int apply_cfg:1;
-	unsigned int apply_crop:1;
-	unsigned int valid_auto_alg:1;
+	unsigned int streaming;
+	unsigned int apply_cfg;
+	unsigned int apply_crop;
+	unsigned int valid_auto_alg;
 	unsigned int power;
 };
 

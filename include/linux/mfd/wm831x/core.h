@@ -376,9 +376,9 @@ struct wm831x {
 	bool soft_shutdown;
 
 	/* Chip revision based flags */
-	unsigned has_gpio_ena:1;         /* Has GPIO enable bit */
-	unsigned has_cs_sts:1;           /* Has current sink status bit */
-	unsigned charger_irq_wake:1;     /* Are charger IRQs a wake source? */
+	unsigned has_gpio_ena;         /* Has GPIO enable bit */
+	unsigned has_cs_sts;           /* Has current sink status bit */
+	unsigned charger_irq_wake;     /* Are charger IRQs a wake source? */
 
 	int num_gpio;
 
@@ -398,7 +398,7 @@ struct wm831x {
 	 * writes if the lock is held.
 	 */
 	struct mutex key_lock;
-	unsigned int locked:1;
+	unsigned int locked;
 };
 
 /* Device I/O API */

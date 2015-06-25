@@ -502,7 +502,7 @@ struct ldlm_namespace {
 	 * Flag to indicate namespace is being freed. Used to determine if
 	 * recalculation of LDLM pool statistics should be skipped.
 	 */
-	unsigned		ns_stopping:1;
+	unsigned		ns_stopping;
 };
 
 /**

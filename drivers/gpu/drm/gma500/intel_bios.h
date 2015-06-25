@@ -49,9 +49,9 @@ struct vbios_data {
 	u8 type; /* 0 == desktop, 1 == mobile */
 	u8 relstage;
 	u8 chipset;
-	u8 lvds_present:1;
-	u8 tv_present:1;
-	u8 rsvd2:6; /* finish byte */
+	u8 lvds_present;
+	u8 tv_present;
+	u8 rsvd2; /* finish byte */
 	u8 rsvd3[4];
 	u8 signon[155];
 	u8 copyright[61];
@@ -104,35 +104,35 @@ struct vbios_data {
 
 struct bdb_general_features {
 	/* bits 1 */
-	u8 panel_fitting:2;
-	u8 flexaim:1;
-	u8 msg_enable:1;
-	u8 clear_screen:3;
-	u8 color_flip:1;
+	u8 panel_fitting;
+	u8 flexaim;
+	u8 msg_enable;
+	u8 clear_screen;
+	u8 color_flip;
 
 	/* bits 2 */
-	u8 download_ext_vbt:1;
-	u8 enable_ssc:1;
-	u8 ssc_freq:1;
-	u8 enable_lfp_on_override:1;
-	u8 disable_ssc_ddt:1;
-	u8 rsvd8:3; /* finish byte */
+	u8 download_ext_vbt;
+	u8 enable_ssc;
+	u8 ssc_freq;
+	u8 enable_lfp_on_override;
+	u8 disable_ssc_ddt;
+	u8 rsvd8; /* finish byte */
 
 	/* bits 3 */
-	u8 disable_smooth_vision:1;
-	u8 single_dvi:1;
-	u8 rsvd9:6; /* finish byte */
+	u8 disable_smooth_vision;
+	u8 single_dvi;
+	u8 rsvd9; /* finish byte */
 
 	/* bits 4 */
 	u8 legacy_monitor_detect;
 
 	/* bits 5 */
-	u8 int_crt_support:1;
-	u8 int_tv_support:1;
-	u8 int_efp_support:1;
-	u8 dp_ssc_enb:1;	/* PCH attached eDP supports SSC */
-	u8 dp_ssc_freq:1;	/* SSC freq for PCH attached eDP */
-	u8 rsvd11:3; /* finish byte */
+	u8 int_crt_support;
+	u8 int_tv_support;
+	u8 int_efp_support;
+	u8 dp_ssc_enb;	/* PCH attached eDP supports SSC */
+	u8 dp_ssc_freq;	/* SSC freq for PCH attached eDP */
+	u8 rsvd11; /* finish byte */
 } __attribute__((packed));
 
 /* pre-915 */
@@ -221,10 +221,10 @@ struct bdb_general_definitions {
 	u8 crt_ddc_gmbus_pin;
 
 	/* DPMS bits */
-	u8 dpms_acpi:1;
-	u8 skip_boot_crt_detect:1;
-	u8 dpms_aim:1;
-	u8 rsvd1:5; /* finish byte */
+	u8 dpms_acpi;
+	u8 skip_boot_crt_detect;
+	u8 dpms_aim;
+	u8 rsvd1; /* finish byte */
 
 	/* boot device bits */
 	u8 boot_display[2];
@@ -248,21 +248,21 @@ struct bdb_lvds_options {
 	u8 panel_type;
 	u8 rsvd1;
 	/* LVDS capabilities, stored in a dword */
-	u8 pfit_mode:2;
-	u8 pfit_text_mode_enhanced:1;
-	u8 pfit_gfx_mode_enhanced:1;
-	u8 pfit_ratio_auto:1;
-	u8 pixel_dither:1;
-	u8 lvds_edid:1;
-	u8 rsvd2:1;
+	u8 pfit_mode;
+	u8 pfit_text_mode_enhanced;
+	u8 pfit_gfx_mode_enhanced;
+	u8 pfit_ratio_auto;
+	u8 pixel_dither;
+	u8 lvds_edid;
+	u8 rsvd2;
 	u8 rsvd4;
 } __attribute__((packed));
 
 struct bdb_lvds_backlight {
-	u8 type:2;
-	u8 pol:1;
-	u8 gpio:3;
-	u8 gmbus:2;
+	u8 type;
+	u8 pol;
+	u8 gpio;
+	u8 gmbus;
 	u16 freq;
 	u8 minbrightness;
 	u8 i2caddr;
@@ -306,28 +306,28 @@ struct lvds_dvo_timing {
 	u16 clock;		/**< In 10khz */
 	u8 hactive_lo;
 	u8 hblank_lo;
-	u8 hblank_hi:4;
-	u8 hactive_hi:4;
+	u8 hblank_hi;
+	u8 hactive_hi;
 	u8 vactive_lo;
 	u8 vblank_lo;
-	u8 vblank_hi:4;
-	u8 vactive_hi:4;
+	u8 vblank_hi;
+	u8 vactive_hi;
 	u8 hsync_off_lo;
 	u8 hsync_pulse_width;
-	u8 vsync_pulse_width:4;
-	u8 vsync_off:4;
-	u8 rsvd0:6;
-	u8 hsync_off_hi:2;
+	u8 vsync_pulse_width;
+	u8 vsync_off;
+	u8 rsvd0;
+	u8 hsync_off_hi;
 	u8 h_image;
 	u8 v_image;
 	u8 max_hv;
 	u8 h_border;
 	u8 v_border;
-	u8 rsvd1:3;
-	u8 digital:2;
-	u8 vsync_positive:1;
-	u8 hsync_positive:1;
-	u8 rsvd2:1;
+	u8 rsvd1;
+	u8 digital;
+	u8 vsync_positive;
+	u8 hsync_positive;
+	u8 rsvd2;
 } __attribute__((packed));
 
 struct lvds_pnp_id {
@@ -399,37 +399,37 @@ struct bdb_sdvo_lvds_options {
 #define BDB_DRIVER_FEATURE_EDP			3
 
 struct bdb_driver_features {
-	u8 boot_dev_algorithm:1;
-	u8 block_display_switch:1;
-	u8 allow_display_switch:1;
-	u8 hotplug_dvo:1;
-	u8 dual_view_zoom:1;
-	u8 int15h_hook:1;
-	u8 sprite_in_clone:1;
-	u8 primary_lfp_id:1;
+	u8 boot_dev_algorithm;
+	u8 block_display_switch;
+	u8 allow_display_switch;
+	u8 hotplug_dvo;
+	u8 dual_view_zoom;
+	u8 int15h_hook;
+	u8 sprite_in_clone;
+	u8 primary_lfp_id;
 
 	u16 boot_mode_x;
 	u16 boot_mode_y;
 	u8 boot_mode_bpp;
 	u8 boot_mode_refresh;
 
-	u16 enable_lfp_primary:1;
-	u16 selective_mode_pruning:1;
-	u16 dual_frequency:1;
-	u16 render_clock_freq:1; /* 0: high freq; 1: low freq */
-	u16 nt_clone_support:1;
-	u16 power_scheme_ui:1; /* 0: CUI; 1: 3rd party */
-	u16 sprite_display_assign:1; /* 0: secondary; 1: primary */
-	u16 cui_aspect_scaling:1;
-	u16 preserve_aspect_ratio:1;
-	u16 sdvo_device_power_down:1;
-	u16 crt_hotplug:1;
-	u16 lvds_config:2;
-	u16 tv_hotplug:1;
-	u16 hdmi_config:2;
+	u16 enable_lfp_primary;
+	u16 selective_mode_pruning;
+	u16 dual_frequency;
+	u16 render_clock_freq; /* 0: high freq; 1: low freq */
+	u16 nt_clone_support;
+	u16 power_scheme_ui; /* 0: CUI; 1: 3rd party */
+	u16 sprite_display_assign; /* 0: secondary; 1: primary */
+	u16 cui_aspect_scaling;
+	u16 preserve_aspect_ratio;
+	u16 sdvo_device_power_down;
+	u16 crt_hotplug;
+	u16 lvds_config;
+	u16 tv_hotplug;
+	u16 hdmi_config;
 
-	u8 static_display:1;
-	u8 reserved2:7;
+	u8 static_display;
+	u8 reserved2;
 	u16 legacy_crt_max_x;
 	u16 legacy_crt_max_y;
 	u8 legacy_crt_max_refresh;
@@ -464,10 +464,10 @@ struct edp_power_seq {
 } __attribute__ ((packed));
 
 struct edp_link_params {
-	u8 rate:4;
-	u8 lanes:4;
-	u8 preemphasis:4;
-	u8 vswing:4;
+	u8 rate;
+	u8 lanes;
+	u8 preemphasis;
+	u8 vswing;
 } __attribute__ ((packed));
 
 struct bdb_edp {

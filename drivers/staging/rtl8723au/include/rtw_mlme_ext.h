@@ -635,15 +635,15 @@ int tdls_hdl23a(struct rtw_adapter *padapter, const u8 *pbuf);
 struct C2HEvent_Header {
 #ifdef __LITTLE_ENDIAN
 
-	unsigned int len:16;
-	unsigned int ID:8;
-	unsigned int seq:8;
+	unsigned int len;
+	unsigned int ID;
+	unsigned int seq;
 
 #elif defined(__BIG_ENDIAN)
 
-	unsigned int seq:8;
-	unsigned int ID:8;
-	unsigned int len:16;
+	unsigned int seq;
+	unsigned int ID;
+	unsigned int len;
 
 #else
 

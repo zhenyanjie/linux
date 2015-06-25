@@ -75,11 +75,11 @@ struct alc_customize_define {
 	unsigned char check_sum;
 	unsigned char customization;
 	unsigned char external_amp;
-	unsigned int  enable_pcbeep:1;
-	unsigned int  platform_type:1;
-	unsigned int  swap:1;
-	unsigned int  override:1;
-	unsigned int  fixup:1; /* Means that this sku is set by driver, not read from hw */
+	unsigned int  enable_pcbeep;
+	unsigned int  platform_type;
+	unsigned int  swap;
+	unsigned int  override;
+	unsigned int  fixup; /* Means that this sku is set by driver, not read from hw */
 };
 
 struct alc_spec {
@@ -94,8 +94,8 @@ struct alc_spec {
 	unsigned int parse_flags; /* flag for snd_hda_parse_pin_defcfg() */
 
 	/* inverted dmic fix */
-	unsigned int inv_dmic_fixup:1; /* has inverted digital-mic workaround */
-	unsigned int inv_dmic_muted:1; /* R-ch of inv d-mic is muted? */
+	unsigned int inv_dmic_fixup; /* has inverted digital-mic workaround */
+	unsigned int inv_dmic_muted; /* R-ch of inv d-mic is muted? */
 	hda_nid_t inv_dmic_pin;
 
 	/* mute LED for HP laptops, see alc269_fixup_mic_mute_hook() */
@@ -119,8 +119,8 @@ struct alc_spec {
 
 	int init_amp;
 	int codec_variant;	/* flag for other variants */
-	unsigned int has_alc5505_dsp:1;
-	unsigned int no_depop_delay:1;
+	unsigned int has_alc5505_dsp;
+	unsigned int no_depop_delay;
 
 	/* for PLL fix */
 	hda_nid_t pll_nid;

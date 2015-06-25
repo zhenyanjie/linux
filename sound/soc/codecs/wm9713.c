@@ -678,11 +678,11 @@ static int ac97_write(struct snd_soc_codec *codec, unsigned int reg,
 
 /* PLL divisors */
 struct _pll_div {
-	u32 divsel:1;
-	u32 divctl:1;
-	u32 lf:1;
-	u32 n:4;
-	u32 k:24;
+	u32 divsel;
+	u32 divctl;
+	u32 lf;
+	u32 n;
+	u32 k;
 };
 
 /* The size in bits of the PLL divide multiplied by 10

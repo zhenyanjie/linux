@@ -147,9 +147,9 @@ struct sr030pc30_info {
 	const struct sr030pc30_platform_data *pdata;
 	const struct sr030pc30_format *curr_fmt;
 	const struct sr030pc30_frmsize *curr_win;
-	unsigned int hflip:1;
-	unsigned int vflip:1;
-	unsigned int sleep:1;
+	unsigned int hflip;
+	unsigned int vflip;
+	unsigned int sleep;
 	struct {
 		/* auto whitebalance control cluster */
 		struct v4l2_ctrl *awb;

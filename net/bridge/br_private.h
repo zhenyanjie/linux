@@ -258,9 +258,9 @@ struct net_bridge
 #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
 	unsigned char			multicast_router;
 
-	u8				multicast_disabled:1;
-	u8				multicast_querier:1;
-	u8				multicast_query_use_ifaddr:1;
+	u8				multicast_disabled;
+	u8				multicast_querier;
+	u8				multicast_query_use_ifaddr;
 
 	u32				hash_elasticity;
 	u32				hash_max;

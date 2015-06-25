@@ -336,10 +336,10 @@ struct pcl812_board {
 	unsigned int ai_ns_min;
 	const struct comedi_lrange *rangelist_ai;
 	unsigned int IRQbits;
-	unsigned int has_dma:1;
-	unsigned int has_16bit_ai:1;
-	unsigned int has_mpc508_mux:1;
-	unsigned int has_dio:1;
+	unsigned int has_dma;
+	unsigned int has_16bit_ai;
+	unsigned int has_mpc508_mux;
+	unsigned int has_dio;
 };
 
 static const struct pcl812_board boardtypes[] = {
@@ -525,11 +525,11 @@ struct pcl812_private {
 	unsigned int ao_readback[2];	/*  data for AO readback */
 	unsigned int divisor1;
 	unsigned int divisor2;
-	unsigned int use_diff:1;
-	unsigned int use_mpc508:1;
-	unsigned int use_ext_trg:1;
-	unsigned int ai_dma:1;
-	unsigned int ai_eos:1;
+	unsigned int use_diff;
+	unsigned int use_mpc508;
+	unsigned int use_ext_trg;
+	unsigned int ai_dma;
+	unsigned int ai_eos;
 };
 
 static void pcl812_start_pacer(struct comedi_device *dev, bool load_timers)

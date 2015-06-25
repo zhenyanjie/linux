@@ -202,16 +202,16 @@ struct zd_mac {
 	struct ieee80211_supported_band band;
 
 	/* Short preamble (used for RTS/CTS) */
-	unsigned int short_preamble:1;
+	unsigned int short_preamble;
 
 	/* whether to pass frames with CRC errors to stack */
-	unsigned int pass_failed_fcs:1;
+	unsigned int pass_failed_fcs;
 
 	/* whether to pass control frames to stack */
-	unsigned int pass_ctrl:1;
+	unsigned int pass_ctrl;
 
 	/* whether we have received a 802.11 ACK that is pending */
-	unsigned int ack_pending:1;
+	unsigned int ack_pending;
 
 	/* signal strength of the last 802.11 ACK received */
 	int ack_signal;

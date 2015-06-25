@@ -777,7 +777,7 @@ struct mscp {
 	       		:1,
 	       interp	:1,	/* The controller interprets cp, not the target */
 	       dout	:1,	/* Direction of Transfer is Out (Host to Target) */
-	       din	:1;	/* Direction of Transfer is In (Target to Host) */
+	       din	;	/* Direction of Transfer is In (Target to Host) */
 	unchar sense_len;	/* Request Sense Length */
 	unchar unused[3];
 	unchar fwnest	: 1,	/* Send command to a component of an Array Group */

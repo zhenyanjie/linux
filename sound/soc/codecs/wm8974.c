@@ -267,8 +267,8 @@ static const struct snd_soc_dapm_route wm8974_dapm_routes[] = {
 };
 
 struct pll_ {
-	unsigned int pre_div:1;
-	unsigned int n:4;
+	unsigned int pre_div;
+	unsigned int n;
 	unsigned int k;
 };
 

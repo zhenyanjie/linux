@@ -62,10 +62,10 @@ struct card_conf {
 };
 
 struct capabilities {
-	unsigned int digit_io_switch:1;
-	unsigned int dedicated_mic:1;
-	unsigned int output_switch:1;
-	unsigned int mic_source_switch:1;
+	unsigned int digit_io_switch;
+	unsigned int dedicated_mic;
+	unsigned int output_switch;
+	unsigned int mic_source_switch;
 };
 
 struct hw {

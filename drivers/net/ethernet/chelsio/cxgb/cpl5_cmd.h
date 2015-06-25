@@ -179,15 +179,15 @@ struct tcp_options {
 	u16 mss;
 	u8 wsf;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 rsvd:4;
-	u8 ecn:1;
-	u8 sack:1;
-	u8 tstamp:1;
+	u8 rsvd;
+	u8 ecn;
+	u8 sack;
+	u8 tstamp;
 #else
-	u8 tstamp:1;
-	u8 sack:1;
-	u8 ecn:1;
-	u8 rsvd:4;
+	u8 tstamp;
+	u8 sack;
+	u8 ecn;
+	u8 rsvd;
 #endif
 };
 
@@ -435,17 +435,17 @@ struct cpl_rx_data_ddp {
 struct cpl_tx_pkt {
 	u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 iff:4;
-	u8 ip_csum_dis:1;
-	u8 l4_csum_dis:1;
-	u8 vlan_valid:1;
-	u8 rsvd:1;
+	u8 iff;
+	u8 ip_csum_dis;
+	u8 l4_csum_dis;
+	u8 vlan_valid;
+	u8 rsvd;
 #else
-	u8 rsvd:1;
-	u8 vlan_valid:1;
-	u8 l4_csum_dis:1;
-	u8 ip_csum_dis:1;
-	u8 iff:4;
+	u8 rsvd;
+	u8 vlan_valid;
+	u8 l4_csum_dis;
+	u8 ip_csum_dis;
+	u8 iff;
 #endif
 	u16 vlan;
 	u16 len_hi;
@@ -455,28 +455,28 @@ struct cpl_tx_pkt {
 struct cpl_tx_pkt_lso {
 	u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 iff:4;
-	u8 ip_csum_dis:1;
-	u8 l4_csum_dis:1;
-	u8 vlan_valid:1;
-	u8 :1;
+	u8 iff;
+	u8 ip_csum_dis;
+	u8 l4_csum_dis;
+	u8 vlan_valid;
+	u8 ;
 #else
-	u8 :1;
-	u8 vlan_valid:1;
-	u8 l4_csum_dis:1;
-	u8 ip_csum_dis:1;
-	u8 iff:4;
+	u8 ;
+	u8 vlan_valid;
+	u8 l4_csum_dis;
+	u8 ip_csum_dis;
+	u8 iff;
 #endif
 	u16 vlan;
 	__be32 len;
 
 	u8 rsvd[5];
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 tcp_hdr_words:4;
-	u8 ip_hdr_words:4;
+	u8 tcp_hdr_words;
+	u8 ip_hdr_words;
 #else
-	u8 ip_hdr_words:4;
-	u8 tcp_hdr_words:4;
+	u8 ip_hdr_words;
+	u8 tcp_hdr_words;
 #endif
 	__be16 eth_type_mss;
 };
@@ -484,17 +484,17 @@ struct cpl_tx_pkt_lso {
 struct cpl_rx_pkt {
 	u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 iff:4;
-	u8 csum_valid:1;
-	u8 bad_pkt:1;
-	u8 vlan_valid:1;
-	u8 rsvd:1;
+	u8 iff;
+	u8 csum_valid;
+	u8 bad_pkt;
+	u8 vlan_valid;
+	u8 rsvd;
 #else
-	u8 rsvd:1;
-	u8 vlan_valid:1;
-	u8 bad_pkt:1;
-	u8 csum_valid:1;
-	u8 iff:4;
+	u8 rsvd;
+	u8 vlan_valid;
+	u8 bad_pkt;
+	u8 csum_valid;
+	u8 iff;
 #endif
 	u16 csum;
 	u16 vlan;
@@ -531,13 +531,13 @@ struct cpl_smt_write_req {
 	union opcode_tid ot;
 	u8 rsvd0;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 rsvd1:1;
-	u8 mtu_idx:3;
-	u8 iff:4;
+	u8 rsvd1;
+	u8 mtu_idx;
+	u8 iff;
 #else
-	u8 iff:4;
-	u8 mtu_idx:3;
-	u8 rsvd1:1;
+	u8 iff;
+	u8 mtu_idx;
+	u8 rsvd1;
 #endif
 	u16 rsvd2;
 	u16 rsvd3;
@@ -556,11 +556,11 @@ struct cpl_smt_read_req {
 	union opcode_tid ot;
 	u8 rsvd0;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 rsvd1:4;
-	u8 iff:4;
+	u8 rsvd1;
+	u8 iff;
 #else
-	u8 iff:4;
-	u8 rsvd1:4;
+	u8 iff;
+	u8 rsvd1;
 #endif
 	u16 rsvd2;
 };
@@ -569,13 +569,13 @@ struct cpl_smt_read_rpl {
 	union opcode_tid ot;
 	u8 status;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 rsvd1:1;
-	u8 mtu_idx:3;
-	u8 rsvd0:4;
+	u8 rsvd1;
+	u8 mtu_idx;
+	u8 rsvd0;
 #else
-	u8 rsvd0:4;
-	u8 mtu_idx:3;
-	u8 rsvd1:1;
+	u8 rsvd0;
+	u8 mtu_idx;
+	u8 rsvd1;
 #endif
 	u16 rsvd2;
 	u16 rsvd3;
@@ -619,11 +619,11 @@ struct cpl_rte_read_rpl {
 	u8 rsvd0[2];
 	u8 l2t_idx;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 rsvd1:7;
-	u8 select:1;
+	u8 rsvd1;
+	u8 select;
 #else
-	u8 select:1;
-	u8 rsvd1:7;
+	u8 select;
+	u8 rsvd1;
 #endif
 	u8 rsvd2[3];
 	u32 addr;

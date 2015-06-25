@@ -95,9 +95,9 @@ struct rs5c372 {
 	struct i2c_client	*client;
 	struct rtc_device	*rtc;
 	enum rtc_type		type;
-	unsigned		time24:1;
-	unsigned		has_irq:1;
-	unsigned		smbus:1;
+	unsigned		time24;
+	unsigned		has_irq;
+	unsigned		smbus;
 	char			buf[17];
 	char			*regs;
 };

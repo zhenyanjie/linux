@@ -104,7 +104,7 @@
  * IFRAME-02:  0001 (we should allow)
  *
  *     allow = (IFRAME-02 & bssid_mask) == (bssid_mask & MAC) ? 1 : 0;
- *  --> allow = (0001 & 0010) ==  (0010 & 0001) ? 1 :0;
+ *  --> allow = (0001 & 0010) ==  (0010 & 0001) ? 1 ;
  *  --> allow = (0000) == (0000)
  *  --> allow = 1
  *

@@ -243,29 +243,29 @@ struct relocation_info
   /* Address (within segment) to be relocated.  */
   int r_address;
   /* The meaning of r_symbolnum depends on r_extern.  */
-  unsigned int r_symbolnum:24;
+  unsigned int r_symbolnum;
   /* Nonzero means value is a pc-relative offset
      and it should be relocated for changes in its own address
      as well as for changes in the symbol or section specified.  */
-  unsigned int r_pcrel:1;
+  unsigned int r_pcrel;
   /* Length (as exponent of 2) of the field to be relocated.
      Thus, a value of 2 indicates 1<<2 bytes.  */
-  unsigned int r_length:2;
+  unsigned int r_length;
   /* 1 => relocate with value of symbol.
           r_symbolnum is the index of the symbol
 	  in file's the symbol table.
      0 => relocate with the address of a segment.
           r_symbolnum is N_TEXT, N_DATA, N_BSS or N_ABS
 	  (the N_EXT bit may be set also, but signifies nothing).  */
-  unsigned int r_extern:1;
+  unsigned int r_extern;
   /* Four bits that aren't used, but when writing an object file
      it is desirable to clear them.  */
 #ifdef NS32K
-  unsigned r_bsr:1;
-  unsigned r_disp:1;
-  unsigned r_pad:2;
+  unsigned r_bsr;
+  unsigned r_disp;
+  unsigned r_pad;
 #else
-  unsigned int r_pad:4;
+  unsigned int r_pad;
 #endif
 };
 #endif /* no N_RELOCATION_INFO_DECLARED.  */

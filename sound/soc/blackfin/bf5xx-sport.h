@@ -65,8 +65,8 @@ struct sport_device {
 	unsigned int rx_desc_bytes;
 	unsigned int tx_desc_bytes;
 
-	unsigned int rx_run:1; /* rx is running */
-	unsigned int tx_run:1; /* tx is running */
+	unsigned int rx_run; /* rx is running */
+	unsigned int tx_run; /* tx is running */
 
 	struct dmasg *dummy_rx_desc;
 	struct dmasg *dummy_tx_desc;

@@ -619,7 +619,7 @@ struct layout_dev {
 	u32 have_lineout_detect:1,
 	    have_headphone_detect:1,
 	    switch_on_headphone:1,
-	    switch_on_lineout:1;
+	    switch_on_lineout;
 };
 
 static LIST_HEAD(layouts_list);

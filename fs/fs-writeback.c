@@ -42,11 +42,11 @@ struct wb_writeback_work {
 	struct super_block *sb;
 	unsigned long *older_than_this;
 	enum writeback_sync_modes sync_mode;
-	unsigned int tagged_writepages:1;
-	unsigned int for_kupdate:1;
-	unsigned int range_cyclic:1;
-	unsigned int for_background:1;
-	unsigned int for_sync:1;	/* sync(2) WB_SYNC_ALL writeback */
+	unsigned int tagged_writepages;
+	unsigned int for_kupdate;
+	unsigned int range_cyclic;
+	unsigned int for_background;
+	unsigned int for_sync;	/* sync(2) WB_SYNC_ALL writeback */
 	enum wb_reason reason;		/* why was writeback initiated? */
 
 	struct list_head list;		/* pending work list */

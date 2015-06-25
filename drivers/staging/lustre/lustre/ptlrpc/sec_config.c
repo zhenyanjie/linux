@@ -505,7 +505,7 @@ struct sptlrpc_conf {
 	char		    sc_fsname[MTI_NAME_MAXLEN];
 	unsigned int	    sc_modified;  /* modified during updating */
 	unsigned int	    sc_updated:1, /* updated copy from MGS */
-				sc_local:1;   /* local copy from target */
+				sc_local;   /* local copy from target */
 	struct sptlrpc_rule_set sc_rset;      /* fs general rules */
 	struct list_head	      sc_tgts;      /* target-specific rules */
 };

@@ -220,10 +220,10 @@ struct ir_raw_event {
 		};
 	};
 
-	unsigned                pulse:1;
-	unsigned                reset:1;
-	unsigned                timeout:1;
-	unsigned                carrier_report:1;
+	unsigned                pulse;
+	unsigned                reset;
+	unsigned                timeout;
+	unsigned                carrier_report;
 };
 
 #define DEFINE_IR_RAW_EVENT(event) \

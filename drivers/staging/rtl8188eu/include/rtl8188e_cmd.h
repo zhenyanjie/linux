@@ -90,14 +90,14 @@ struct rsvdpage_loc {
 };
 
 struct P2P_PS_Offload_t {
-	u8 Offload_En:1;
-	u8 role:1; /*  1: Owner, 0: Client */
-	u8 CTWindow_En:1;
-	u8 NoA0_En:1;
-	u8 NoA1_En:1;
-	u8 AllStaSleep:1; /*  Only valid in Owner */
-	u8 discovery:1;
-	u8 rsvd:1;
+	u8 Offload_En;
+	u8 role; /*  1: Owner, 0: Client */
+	u8 CTWindow_En;
+	u8 NoA0_En;
+	u8 NoA1_En;
+	u8 AllStaSleep; /*  Only valid in Owner */
+	u8 discovery;
+	u8 rsvd;
 };
 
 struct P2P_PS_CTWPeriod_t {

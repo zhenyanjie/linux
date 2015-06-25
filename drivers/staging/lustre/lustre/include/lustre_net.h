@@ -422,15 +422,15 @@ struct ptlrpc_reply_state {
 	/** A spinlock to protect the reply state flags */
 	spinlock_t		rs_lock;
 	/** Reply state flags */
-	unsigned long	  rs_difficult:1;     /* ACK/commit stuff */
-	unsigned long	  rs_no_ack:1;    /* no ACK, even for
+	unsigned long	  rs_difficult;     /* ACK/commit stuff */
+	unsigned long	  rs_no_ack;    /* no ACK, even for
 						  difficult requests */
-	unsigned long	  rs_scheduled:1;     /* being handled? */
-	unsigned long	  rs_scheduled_ever:1;/* any schedule attempts? */
-	unsigned long	  rs_handled:1;  /* been handled yet? */
-	unsigned long	  rs_on_net:1;   /* reply_out_callback pending? */
-	unsigned long	  rs_prealloc:1; /* rs from prealloc list */
-	unsigned long	  rs_committed:1;/* the transaction was committed
+	unsigned long	  rs_scheduled;     /* being handled? */
+	unsigned long	  rs_scheduled_ever;/* any schedule attempts? */
+	unsigned long	  rs_handled;  /* been handled yet? */
+	unsigned long	  rs_on_net;   /* reply_out_callback pending? */
+	unsigned long	  rs_prealloc; /* rs from prealloc list */
+	unsigned long	  rs_committed;/* the transaction was committed
 						 and the rs was dispatched
 						 by ptlrpc_commit_replies */
 	/** Size of the state */
@@ -855,12 +855,12 @@ struct ptlrpc_nrs {
 	/**
 	 * This NRS head is in progress of starting a policy
 	 */
-	unsigned			nrs_policy_starting:1;
+	unsigned			nrs_policy_starting;
 	/**
 	 * In progress of shutting down the whole NRS head; used during
 	 * unregistration
 	 */
-	unsigned			nrs_stopping:1;
+	unsigned			nrs_stopping;
 };
 
 #define NRS_POL_NAME_MAX		16
@@ -1047,7 +1047,7 @@ struct ptlrpc_nrs_pol_info {
 	/**
 	 * Is this a fallback policy?
 	 */
-	unsigned			pi_fallback:1;
+	unsigned			pi_fallback;
 };
 
 /**
@@ -1432,22 +1432,22 @@ struct nrs_orr_req {
 	 * An ORR policy instance has filled in request information while
 	 * enqueueing the request on the service partition's regular NRS head.
 	 */
-	unsigned int			or_orr_set:1;
+	unsigned int			or_orr_set;
 	/**
 	 * A TRR policy instance has filled in request information while
 	 * enqueueing the request on the service partition's regular NRS head.
 	 */
-	unsigned int			or_trr_set:1;
+	unsigned int			or_trr_set;
 	/**
 	 * Request offset ranges have been filled in with logical offset
 	 * values.
 	 */
-	unsigned int			or_logical_set:1;
+	unsigned int			or_logical_set;
 	/**
 	 * Request offset ranges have been filled in with physical offset
 	 * values.
 	 */
-	unsigned int			or_physical_set:1;
+	unsigned int			or_physical_set;
 };
 
 /** @} ORR/TRR */
@@ -1472,10 +1472,10 @@ struct ptlrpc_nrs_request {
 	 * \see nrs_request_enqueue()
 	 */
 	unsigned			nr_res_idx;
-	unsigned			nr_initialized:1;
-	unsigned			nr_enqueued:1;
-	unsigned			nr_started:1;
-	unsigned			nr_finalized:1;
+	unsigned			nr_initialized;
+	unsigned			nr_enqueued;
+	unsigned			nr_started;
+	unsigned			nr_finalized;
 	cfs_binheap_node_t		nr_node;
 
 	/**
@@ -1607,7 +1607,7 @@ struct ptlrpc_request {
 		rq_no_retry_einprogress:1,
 		/* allow the req to be sent if the import is in recovery
 		 * status */
-		rq_allow_replay:1;
+		rq_allow_replay;
 
 	unsigned int rq_nr_resend;
 
@@ -1673,7 +1673,7 @@ struct ptlrpc_request {
 				 rq_pack_bulk:1,
 				 /* doesn't expect reply FIXME */
 				 rq_no_reply:1,
-				 rq_pill_init:1;     /* pill initialized */
+				 rq_pill_init;     /* pill initialized */
 
 	uid_t		    rq_auth_uid;	/* authed uid */
 	uid_t		    rq_auth_mapped_uid; /* authed uid mapped to */
@@ -2018,11 +2018,11 @@ struct ptlrpc_bulk_page {
  */
 struct ptlrpc_bulk_desc {
 	/** completed with failure */
-	unsigned long bd_failure:1;
+	unsigned long bd_failure;
 	/** {put,get}{source,sink} */
-	unsigned long bd_type:2;
+	unsigned long bd_type;
 	/** client side */
-	unsigned long bd_registered:1;
+	unsigned long bd_registered;
 	/** For serialization with callback */
 	spinlock_t bd_lock;
 	/** Import generation when request for this bulk was sent */
@@ -2283,7 +2283,7 @@ struct ptlrpc_service {
 	/** soft watchdog timeout multiplier */
 	int			     srv_watchdog_factor;
 	/** under unregister_service */
-	unsigned			srv_is_stopping:1;
+	unsigned			srv_is_stopping;
 
 	/** max # request buffers in history per partition */
 	int				srv_hist_nrqbds_cpt_max;

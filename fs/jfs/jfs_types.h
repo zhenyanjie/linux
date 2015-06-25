@@ -61,8 +61,8 @@ struct timestruc_t {
  *	physical xd (pxd)
  */
 typedef struct {
-	unsigned len:24;
-	unsigned addr1:8;
+	unsigned len;
+	unsigned addr1;
 	__le32 addr2;
 } pxd_t;
 
@@ -93,11 +93,11 @@ struct pxdlist {
  *	data extent descriptor (dxd)
  */
 typedef struct {
-	unsigned flag:8;	/* 1: flags */
-	unsigned rsrvd:24;
+	unsigned flag;	/* 1: flags */
+	unsigned rsrvd;
 	__le32 size;		/* 4: size in byte */
-	unsigned len:24;	/* 3: length in unit of fsblksize */
-	unsigned addr1:8;	/* 1: address in unit of fsblksize */
+	unsigned len;	/* 3: length in unit of fsblksize */
+	unsigned addr1;	/* 1: address in unit of fsblksize */
 	__le32 addr2;		/* 4: address in unit of fsblksize */
 } dxd_t;			/* - 16 - */
 

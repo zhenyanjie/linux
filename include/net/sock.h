@@ -181,9 +181,9 @@ struct sock_common {
 
 	unsigned short		skc_family;
 	volatile unsigned char	skc_state;
-	unsigned char		skc_reuse:4;
-	unsigned char		skc_reuseport:1;
-	unsigned char		skc_ipv6only:1;
+	unsigned char		skc_reuse;
+	unsigned char		skc_reuseport;
+	unsigned char		skc_ipv6only;
 	int			skc_bound_dev_if;
 	union {
 		struct hlist_node	skc_bind_node;

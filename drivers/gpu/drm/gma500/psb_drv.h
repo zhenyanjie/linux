@@ -525,11 +525,11 @@ struct drm_psb_private {
 	struct psb_intel_i2c_chan *lvds_i2c_bus; /* FIXME: Remove this? */
 
 	/* Feature bits from the VBIOS */
-	unsigned int int_tv_support:1;
-	unsigned int lvds_dither:1;
-	unsigned int lvds_vbt:1;
-	unsigned int int_crt_support:1;
-	unsigned int lvds_use_ssc:1;
+	unsigned int int_tv_support;
+	unsigned int lvds_dither;
+	unsigned int lvds_vbt;
+	unsigned int int_crt_support;
+	unsigned int lvds_use_ssc;
 	int lvds_ssc_freq;
 	bool is_lvds_on;
 	bool is_mipi_on;
@@ -620,7 +620,7 @@ struct drm_psb_private {
 /* Operations for each board type */
 struct psb_ops {
 	const char *name;
-	unsigned int accel_2d:1;
+	unsigned int accel_2d;
 	int pipes;		/* Number of output pipes */
 	int crtcs;		/* Number of CRTCs */
 	int sgx_offset;		/* Base offset of SGX device */

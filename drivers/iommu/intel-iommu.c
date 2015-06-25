@@ -387,7 +387,7 @@ struct dmar_atsr_unit {
 	struct acpi_dmar_header *hdr;	/* ACPI header */
 	struct dmar_dev_scope *devices;	/* target devices */
 	int devices_cnt;		/* target device count */
-	u8 include_all:1;		/* include all ports */
+	u8 include_all;		/* include all ports */
 };
 
 static LIST_HEAD(dmar_atsr_units);

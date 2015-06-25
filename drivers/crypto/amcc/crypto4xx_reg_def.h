@@ -145,23 +145,23 @@
 #define CRYPTO4XX_DMA_CFG_OFFSET		0x40
 union ce_pe_dma_cfg {
 	struct {
-		u32 rsv:7;
-		u32 dir_host:1;
-		u32 rsv1:2;
-		u32 bo_td_en:1;
-		u32 dis_pdr_upd:1;
-		u32 bo_sgpd_en:1;
-		u32 bo_data_en:1;
-		u32 bo_sa_en:1;
-		u32 bo_pd_en:1;
-		u32 rsv2:4;
-		u32 dynamic_sa_en:1;
-		u32 pdr_mode:2;
-		u32 pe_mode:1;
-		u32 rsv3:5;
-		u32 reset_sg:1;
-		u32 reset_pdr:1;
-		u32 reset_pe:1;
+		u32 rsv;
+		u32 dir_host;
+		u32 rsv1;
+		u32 bo_td_en;
+		u32 dis_pdr_upd;
+		u32 bo_sgpd_en;
+		u32 bo_data_en;
+		u32 bo_sa_en;
+		u32 bo_pd_en;
+		u32 rsv2;
+		u32 dynamic_sa_en;
+		u32 pdr_mode;
+		u32 pe_mode;
+		u32 rsv3;
+		u32 reset_sg;
+		u32 reset_pdr;
+		u32 reset_pe;
 	} bf;
     u32 w;
 } __attribute__((packed));
@@ -171,9 +171,9 @@ union ce_pe_dma_cfg {
 #define CRYPTO4XX_RING_SIZE_OFFSET		0x50
 union ce_ring_size {
 	struct {
-		u32 ring_offset:16;
-		u32 rsv:6;
-		u32 ring_size:10;
+		u32 ring_offset;
+		u32 rsv;
+		u32 ring_size;
 	} bf;
     u32 w;
 } __attribute__((packed));
@@ -181,11 +181,11 @@ union ce_ring_size {
 #define CRYPTO4XX_RING_CONTROL_OFFSET		0x54
 union ce_ring_contol {
 	struct {
-		u32 continuous:1;
-		u32 rsv:5;
-		u32 ring_retry_divisor:10;
-		u32 rsv1:4;
-		u32 ring_poll_divisor:10;
+		u32 continuous;
+		u32 rsv;
+		u32 ring_retry_divisor;
+		u32 rsv1;
+		u32 ring_poll_divisor;
 	} bf;
     u32 w;
 } __attribute__((packed));
@@ -193,10 +193,10 @@ union ce_ring_contol {
 #define CRYPTO4XX_IO_THRESHOLD_OFFSET		0x60
 union ce_io_threshold {
 	struct {
-		u32 rsv:6;
-		u32 output_threshold:10;
-		u32 rsv1:6;
-		u32 input_threshold:10;
+		u32 rsv;
+		u32 output_threshold;
+		u32 rsv1;
+		u32 input_threshold;
 	} bf;
     u32 w;
 } __attribute__((packed));
@@ -206,8 +206,8 @@ union ce_io_threshold {
 
 union ce_part_ring_size  {
 	struct {
-		u32 sdr_size:16;
-		u32 gdr_size:16;
+		u32 sdr_size;
+		u32 gdr_size;
 	} bf;
     u32 w;
 } __attribute__((packed));
@@ -219,10 +219,10 @@ union ce_part_ring_size  {
 
 /* gather descriptor control length */
 struct gd_ctl_len {
-	u32 len:16;
-	u32 rsv:14;
-	u32 done:1;
-	u32 ready:1;
+	u32 len;
+	u32 rsv;
+	u32 done;
+	u32 ready;
 } __attribute__((packed));
 
 struct ce_gd {
@@ -231,9 +231,9 @@ struct ce_gd {
 } __attribute__((packed));
 
 struct sd_ctl {
-	u32 ctl:30;
-	u32 done:1;
-	u32 rdy:1;
+	u32 ctl;
+	u32 done;
+	u32 rdy;
 } __attribute__((packed));
 
 struct ce_sd {
@@ -247,27 +247,27 @@ struct ce_sd {
 #define PD_PAD_CTL_256	0x80
 union ce_pd_ctl {
 	struct {
-		u32 pd_pad_ctl:8;
-		u32 status:8;
-		u32 next_hdr:8;
-		u32 rsv:2;
-		u32 cached_sa:1;
-		u32 hash_final:1;
-		u32 init_arc4:1;
-		u32 rsv1:1;
-		u32 pe_done:1;
-		u32 host_ready:1;
+		u32 pd_pad_ctl;
+		u32 status;
+		u32 next_hdr;
+		u32 rsv;
+		u32 cached_sa;
+		u32 hash_final;
+		u32 init_arc4;
+		u32 rsv1;
+		u32 pe_done;
+		u32 host_ready;
 	} bf;
 	u32 w;
 } __attribute__((packed));
 
 union ce_pd_ctl_len {
 	struct {
-		u32 bypass:8;
-		u32 pe_done:1;
-		u32 host_ready:1;
-		u32 rsv:2;
-		u32 pkt_len:20;
+		u32 bypass;
+		u32 pe_done;
+		u32 host_ready;
+		u32 rsv;
+		u32 pkt_len;
 	} bf;
 	u32 w;
 } __attribute__((packed));

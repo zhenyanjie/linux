@@ -1134,7 +1134,7 @@ struct gfar_private {
 		/* Flow control flags */
 		pause_aneg_en:1,
 		tx_pause_en:1,
-		rx_pause_en:1;
+		rx_pause_en;
 
 	/* The total tx and rx ring size for the enabled queues */
 	unsigned int total_tx_ring_size;

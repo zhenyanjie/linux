@@ -87,7 +87,7 @@ struct tas {
 	u32			mute_l:1, mute_r:1 ,
 				controls_created:1 ,
 				drc_enabled:1,
-				hw_enabled:1;
+				hw_enabled;
 	u8			cached_volume_l, cached_volume_r;
 	u8			mixer_l[3], mixer_r[3];
 	u8			bass, treble;

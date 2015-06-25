@@ -65,7 +65,7 @@ struct dib9000_state {
 
 	union {			/* common for all chips */
 		struct {
-			u8 mobile_mode:1;
+			u8 mobile_mode;
 		} host;
 
 		struct {

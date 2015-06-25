@@ -235,7 +235,7 @@ struct bau_msg_payload {
 	/* 16 bits */
 	unsigned short	acknowledge_count;	/* filled in by destination */
 	/* 16 bits */
-	unsigned int	reserved1:32;		/* not usable */
+	unsigned int	reserved1;		/* not usable */
 };
 
 
@@ -244,81 +244,81 @@ struct bau_msg_payload {
  * see table 4.2.3.0.1 in broacast_assist spec.
  */
 struct uv1_bau_msg_header {
-	unsigned int	dest_subnodeid:6;	/* must be 0x10, for the LB */
+	unsigned int	dest_subnodeid;	/* must be 0x10, for the LB */
 	/* bits 5:0 */
-	unsigned int	base_dest_nasid:15;	/* nasid of the first bit */
+	unsigned int	base_dest_nasid;	/* nasid of the first bit */
 	/* bits 20:6 */				/* in uvhub map */
-	unsigned int	command:8;		/* message type */
+	unsigned int	command;		/* message type */
 	/* bits 28:21 */
 	/* 0x38: SN3net EndPoint Message */
-	unsigned int	rsvd_1:3;		/* must be zero */
+	unsigned int	rsvd_1;		/* must be zero */
 	/* bits 31:29 */
 	/* int will align on 32 bits */
-	unsigned int	rsvd_2:9;		/* must be zero */
+	unsigned int	rsvd_2;		/* must be zero */
 	/* bits 40:32 */
 	/* Suppl_A is 56-41 */
-	unsigned int	sequence:16;		/* message sequence number */
+	unsigned int	sequence;		/* message sequence number */
 	/* bits 56:41 */			/* becomes bytes 16-17 of msg */
 						/* Address field (96:57) is
 						   never used as an address
 						   (these are address bits
 						   42:3) */
 
-	unsigned int	rsvd_3:1;		/* must be zero */
+	unsigned int	rsvd_3;		/* must be zero */
 	/* bit 57 */
 	/* address bits 27:4 are payload */
 	/* these next 24  (58-81) bits become bytes 12-14 of msg */
 	/* bits 65:58 land in byte 12 */
-	unsigned int	replied_to:1;		/* sent as 0 by the source to
+	unsigned int	replied_to;		/* sent as 0 by the source to
 						   byte 12 */
 	/* bit 58 */
-	unsigned int	msg_type:3;		/* software type of the
+	unsigned int	msg_type;		/* software type of the
 						   message */
 	/* bits 61:59 */
-	unsigned int	canceled:1;		/* message canceled, resource
+	unsigned int	canceled;		/* message canceled, resource
 						   is to be freed*/
 	/* bit 62 */
-	unsigned int	payload_1a:1;		/* not currently used */
+	unsigned int	payload_1a;		/* not currently used */
 	/* bit 63 */
-	unsigned int	payload_1b:2;		/* not currently used */
+	unsigned int	payload_1b;		/* not currently used */
 	/* bits 65:64 */
 
 	/* bits 73:66 land in byte 13 */
-	unsigned int	payload_1ca:6;		/* not currently used */
+	unsigned int	payload_1ca;		/* not currently used */
 	/* bits 71:66 */
-	unsigned int	payload_1c:2;		/* not currently used */
+	unsigned int	payload_1c;		/* not currently used */
 	/* bits 73:72 */
 
 	/* bits 81:74 land in byte 14 */
-	unsigned int	payload_1d:6;		/* not currently used */
+	unsigned int	payload_1d;		/* not currently used */
 	/* bits 79:74 */
-	unsigned int	payload_1e:2;		/* not currently used */
+	unsigned int	payload_1e;		/* not currently used */
 	/* bits 81:80 */
 
-	unsigned int	rsvd_4:7;		/* must be zero */
+	unsigned int	rsvd_4;		/* must be zero */
 	/* bits 88:82 */
-	unsigned int	swack_flag:1;		/* software acknowledge flag */
+	unsigned int	swack_flag;		/* software acknowledge flag */
 	/* bit 89 */
 						/* INTD trasactions at
 						   destination are to wait for
 						   software acknowledge */
-	unsigned int	rsvd_5:6;		/* must be zero */
+	unsigned int	rsvd_5;		/* must be zero */
 	/* bits 95:90 */
-	unsigned int	rsvd_6:5;		/* must be zero */
+	unsigned int	rsvd_6;		/* must be zero */
 	/* bits 100:96 */
-	unsigned int	int_both:1;		/* if 1, interrupt both sockets
+	unsigned int	int_both;		/* if 1, interrupt both sockets
 						   on the uvhub */
 	/* bit 101*/
-	unsigned int	fairness:3;		/* usually zero */
+	unsigned int	fairness;		/* usually zero */
 	/* bits 104:102 */
-	unsigned int	multilevel:1;		/* multi-level multicast
+	unsigned int	multilevel;		/* multi-level multicast
 						   format */
 	/* bit 105 */
 	/* 0 for TLB: endpoint multi-unicast messages */
-	unsigned int	chaining:1;		/* next descriptor is part of
+	unsigned int	chaining;		/* next descriptor is part of
 						   this activation*/
 	/* bit 106 */
-	unsigned int	rsvd_7:21;		/* must be zero */
+	unsigned int	rsvd_7;		/* must be zero */
 	/* bits 127:107 */
 };
 
@@ -328,62 +328,62 @@ struct uv1_bau_msg_header {
  * assuming UV3 is the same
  */
 struct uv2_3_bau_msg_header {
-	unsigned int	base_dest_nasid:15;	/* nasid of the first bit */
+	unsigned int	base_dest_nasid;	/* nasid of the first bit */
 	/* bits 14:0 */				/* in uvhub map */
-	unsigned int	dest_subnodeid:5;	/* must be 0x10, for the LB */
+	unsigned int	dest_subnodeid;	/* must be 0x10, for the LB */
 	/* bits 19:15 */
-	unsigned int	rsvd_1:1;		/* must be zero */
+	unsigned int	rsvd_1;		/* must be zero */
 	/* bit 20 */
 	/* Address bits 59:21 */
 	/* bits 25:2 of address (44:21) are payload */
 	/* these next 24 bits become bytes 12-14 of msg */
 	/* bits 28:21 land in byte 12 */
-	unsigned int	replied_to:1;		/* sent as 0 by the source to
+	unsigned int	replied_to;		/* sent as 0 by the source to
 						   byte 12 */
 	/* bit 21 */
-	unsigned int	msg_type:3;		/* software type of the
+	unsigned int	msg_type;		/* software type of the
 						   message */
 	/* bits 24:22 */
-	unsigned int	canceled:1;		/* message canceled, resource
+	unsigned int	canceled;		/* message canceled, resource
 						   is to be freed*/
 	/* bit 25 */
-	unsigned int	payload_1:3;		/* not currently used */
+	unsigned int	payload_1;		/* not currently used */
 	/* bits 28:26 */
 
 	/* bits 36:29 land in byte 13 */
-	unsigned int	payload_2a:3;		/* not currently used */
-	unsigned int	payload_2b:5;		/* not currently used */
+	unsigned int	payload_2a;		/* not currently used */
+	unsigned int	payload_2b;		/* not currently used */
 	/* bits 36:29 */
 
 	/* bits 44:37 land in byte 14 */
-	unsigned int	payload_3:8;		/* not currently used */
+	unsigned int	payload_3;		/* not currently used */
 	/* bits 44:37 */
 
-	unsigned int	rsvd_2:7;		/* reserved */
+	unsigned int	rsvd_2;		/* reserved */
 	/* bits 51:45 */
-	unsigned int	swack_flag:1;		/* software acknowledge flag */
+	unsigned int	swack_flag;		/* software acknowledge flag */
 	/* bit 52 */
-	unsigned int	rsvd_3a:3;		/* must be zero */
-	unsigned int	rsvd_3b:8;		/* must be zero */
-	unsigned int	rsvd_3c:8;		/* must be zero */
-	unsigned int	rsvd_3d:3;		/* must be zero */
+	unsigned int	rsvd_3a;		/* must be zero */
+	unsigned int	rsvd_3b;		/* must be zero */
+	unsigned int	rsvd_3c;		/* must be zero */
+	unsigned int	rsvd_3d;		/* must be zero */
 	/* bits 74:53 */
-	unsigned int	fairness:3;		/* usually zero */
+	unsigned int	fairness;		/* usually zero */
 	/* bits 77:75 */
 
-	unsigned int	sequence:16;		/* message sequence number */
+	unsigned int	sequence;		/* message sequence number */
 	/* bits 93:78  Suppl_A  */
-	unsigned int	chaining:1;		/* next descriptor is part of
+	unsigned int	chaining;		/* next descriptor is part of
 						   this activation*/
 	/* bit 94 */
-	unsigned int	multilevel:1;		/* multi-level multicast
+	unsigned int	multilevel;		/* multi-level multicast
 						   format */
 	/* bit 95 */
-	unsigned int	rsvd_4:24;		/* ordered / source node /
+	unsigned int	rsvd_4;		/* ordered / source node /
 						   source subnode / aging
 						   must be zero */
 	/* bits 119:96 */
-	unsigned int	command:8;		/* message type */
+	unsigned int	command;		/* message type */
 	/* bits 127:120 */
 };
 
@@ -445,10 +445,10 @@ struct bau_pq_entry {
 	unsigned short	acknowledge_count; /* filled in by destination */
 	/* 16 bits, bytes 10-11 */
 	/* these next 3 bytes come from bits 58-81 of the message header */
-	unsigned short	replied_to:1;	/* sent as 0 by the source */
-	unsigned short	msg_type:3;	/* software message type */
-	unsigned short	canceled:1;	/* sent as 0 by the source */
-	unsigned short	unused1:3;	/* not currently using */
+	unsigned short	replied_to;	/* sent as 0 by the source */
+	unsigned short	msg_type;	/* software message type */
+	unsigned short	canceled;	/* sent as 0 by the source */
+	unsigned short	unused1;	/* not currently using */
 	/* byte 12 */
 	unsigned char	unused2a;	/* not currently using */
 	/* byte 13 */

@@ -58,13 +58,13 @@ struct m88ds3103_config {
 	 * spectrum inversion
 	 * Default: 0
 	 */
-	u8 spec_inv:1;
+	u8 spec_inv;
 
 	/*
 	 * AGC polarity
 	 * Default: 0
 	 */
-	u8 agc_inv:1;
+	u8 agc_inv;
 
 	/*
 	 * clock output
@@ -79,7 +79,7 @@ struct m88ds3103_config {
 	 * DiSEqC envelope mode
 	 * Default: 0
 	 */
-	u8 envelope_mode:1;
+	u8 envelope_mode;
 
 	/*
 	 * AGC configuration

@@ -297,7 +297,7 @@ struct snd_gf1 {
 	unsigned int enh_mode:1,	/* enhanced mode (GFA1) */
 		     hw_lfo:1,		/* use hardware LFO */
 		     sw_lfo:1,		/* use software LFO */
-		     effect:1;		/* use effect voices */
+		     effect;		/* use effect voices */
 
 	unsigned long port;		/* port of GF1 chip */
 	struct resource *res_port1;
@@ -417,7 +417,7 @@ struct snd_gus_card {
 	 interwave:1,			/* hey - we have InterWave card */
 	 ess_flag:1,			/* ESS chip found... GUS Extreme */
 	 ace_flag:1,			/* GUS ACE detected */
-	 uart_enable:1;			/* enable MIDI UART */
+	 uart_enable;			/* enable MIDI UART */
 	unsigned short revision;	/* revision of chip */
 	unsigned short max_cntrl_val;	/* GUS MAX control value */
 	unsigned short mix_cntrl_reg;	/* mixer control register */

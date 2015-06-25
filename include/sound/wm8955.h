@@ -17,10 +17,10 @@
 
 struct wm8955_pdata {
 	/* Configure LOUT2/ROUT2 to drive a speaker */
-	unsigned int out2_speaker:1;
+	unsigned int out2_speaker;
 
 	/* Configure MONOIN+/- in differential mode */
-	unsigned int monoin_diff:1;
+	unsigned int monoin_diff;
 };
 
 #endif

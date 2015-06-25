@@ -221,7 +221,7 @@ struct mmci_host {
 	struct variant_data	*variant;
 
 	u8			hw_designer;
-	u8			hw_revision:4;
+	u8			hw_revision;
 
 	struct timer_list	timer;
 	unsigned int		oldstat;

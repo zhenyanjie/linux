@@ -217,8 +217,8 @@ typedef struct tagRDES0 {
 		volatile u16    f15Reserved;
 		struct {
 			volatile u8 f8Reserved1;
-			volatile u8 f1Owner:1;
-			volatile u8 f7Reserved:7;
+			volatile u8 f1Owner;
+			volatile u8 f7Reserved;
 		} __attribute__ ((__packed__));
 	} __attribute__ ((__packed__));
 } __attribute__ ((__packed__))
@@ -228,8 +228,8 @@ SRDES0, *PSRDES0;
 
 typedef struct tagRDES0 {
 	unsigned short wResCount;
-	unsigned short f15Reserved:15;
-	unsigned short f1Owner:1;
+	unsigned short f15Reserved;
+	unsigned short f1Owner;
 } __attribute__ ((__packed__))
 SRDES0;
 
@@ -264,8 +264,8 @@ typedef struct tagTDES0 {
 		volatile u16    f15Txtime;
 		struct {
 			volatile u8 f8Reserved1;
-			volatile u8 f1Owner:1;
-			volatile u8 f7Reserved:7;
+			volatile u8 f1Owner;
+			volatile u8 f7Reserved;
 		} __attribute__ ((__packed__));
 	} __attribute__ ((__packed__));
 } __attribute__ ((__packed__))
@@ -276,8 +276,8 @@ STDES0, PSTDES0;
 typedef struct tagTDES0 {
 	volatile    unsigned char byTSR0;
 	volatile    unsigned char byTSR1;
-	volatile    unsigned short f15Txtime:15;
-	volatile    unsigned short f1Owner:1;
+	volatile    unsigned short f15Txtime;
+	volatile    unsigned short f1Owner;
 } __attribute__ ((__packed__))
 STDES0;
 
@@ -562,10 +562,10 @@ SMICHDRHead, *PSMICHDRHead;
 typedef const SMICHDRHead *PCSMICHDRHead;
 
 typedef struct tagSBEACONCtl {
-	u32 BufReady:1;
-	u32 TSF:15;
-	u32 BufLen:11;
-	u32 Reserved:5;
+	u32 BufReady;
+	u32 TSF;
+	u32 BufLen;
+	u32 Reserved;
 } __attribute__ ((__packed__))
 SBEACONCtl;
 

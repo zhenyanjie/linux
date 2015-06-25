@@ -144,7 +144,7 @@ struct kimage {
 #define KEXEC_TYPE_CRASH   1
 	unsigned int preserve_context : 1;
 	/* If set, we are using file mode kexec syscall */
-	unsigned int file_mode:1;
+	unsigned int file_mode;
 
 #ifdef ARCH_HAS_KIMAGE_ARCH
 	struct kimage_arch arch;

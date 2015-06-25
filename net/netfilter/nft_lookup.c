@@ -20,8 +20,8 @@
 
 struct nft_lookup {
 	struct nft_set			*set;
-	enum nft_registers		sreg:8;
-	enum nft_registers		dreg:8;
+	enum nft_registers		sreg;
+	enum nft_registers		dreg;
 	struct nft_set_binding		binding;
 };
 

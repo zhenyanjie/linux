@@ -3401,7 +3401,7 @@ u32 ieee80211_mandatory_rates(struct ieee80211_supported_band *sband,
  */
 
 struct radiotap_align_size {
-	uint8_t align:4, size:4;
+	uint8_t align:4, size;
 };
 
 struct ieee80211_radiotap_namespace {

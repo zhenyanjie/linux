@@ -185,11 +185,11 @@ struct sigmatel_spec {
 	struct hda_gen_spec gen;
 
 	unsigned int eapd_switch: 1;
-	unsigned int linear_tone_beep:1;
-	unsigned int headset_jack:1; /* 4-pin headset jack (hp + mono mic) */
-	unsigned int volknob_init:1; /* special volume-knob initialization */
-	unsigned int powerdown_adcs:1;
-	unsigned int have_spdif_mux:1;
+	unsigned int linear_tone_beep;
+	unsigned int headset_jack; /* 4-pin headset jack (hp + mono mic) */
+	unsigned int volknob_init; /* special volume-knob initialization */
+	unsigned int powerdown_adcs;
+	unsigned int have_spdif_mux;
 
 	/* gpio lines */
 	unsigned int eapd_mask;

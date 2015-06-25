@@ -128,9 +128,9 @@ struct sh_mobile_ceu_dev {
 	int sequence;
 	unsigned long flags;
 
-	unsigned int image_mode:1;
-	unsigned int is_16bit:1;
-	unsigned int frozen:1;
+	unsigned int image_mode;
+	unsigned int is_16bit;
+	unsigned int frozen;
 };
 
 struct sh_mobile_ceu_cam {

@@ -38,11 +38,11 @@ struct snd_usb_audio {
 	u32 usb_id;
 	struct mutex mutex;
 	struct rw_semaphore shutdown_rwsem;
-	unsigned int shutdown:1;
-	unsigned int probing:1;
-	unsigned int in_pm:1;
-	unsigned int autosuspended:1;	
-	unsigned int txfr_quirk:1; /* Subframe boundaries on transfers */
+	unsigned int shutdown;
+	unsigned int probing;
+	unsigned int in_pm;
+	unsigned int autosuspended;	
+	unsigned int txfr_quirk; /* Subframe boundaries on transfers */
 	
 	int num_interfaces;
 	int num_suspended_intf;

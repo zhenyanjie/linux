@@ -210,7 +210,7 @@ struct btree_keys {
 	const struct btree_keys_ops	*ops;
 	uint8_t			page_order;
 	uint8_t			nsets;
-	unsigned		last_set_unwritten:1;
+	unsigned		last_set_unwritten;
 	bool			*expensive_debug_checks;
 
 	/*

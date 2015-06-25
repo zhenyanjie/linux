@@ -151,21 +151,21 @@ enum antenna_path {
 };
 
 struct r_antenna_select_ofdm {
-	u32 r_tx_antenna:4;
-	u32 r_ant_l:4;
-	u32 r_ant_non_ht:4;
-	u32 r_ant_ht1:4;
-	u32 r_ant_ht2:4;
-	u32 r_ant_ht_s1:4;
-	u32 r_ant_non_ht_s1:4;
-	u32 ofdm_txsc:2;
-	u32 reserved:2;
+	u32 r_tx_antenna;
+	u32 r_ant_l;
+	u32 r_ant_non_ht;
+	u32 r_ant_ht1;
+	u32 r_ant_ht2;
+	u32 r_ant_ht_s1;
+	u32 r_ant_non_ht_s1;
+	u32 ofdm_txsc;
+	u32 reserved;
 };
 
 struct r_antenna_select_cck {
-	u8 r_cckrx_enable_2:2;
-	u8 r_cckrx_enable:2;
-	u8 r_ccktx_enable:4;
+	u8 r_cckrx_enable_2;
+	u8 r_cckrx_enable;
+	u8 r_ccktx_enable;
 };
 
 

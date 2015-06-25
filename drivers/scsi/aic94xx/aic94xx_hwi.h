@@ -136,12 +136,12 @@ struct asd_ascb {
 	struct asd_dma_tok *sg_arr;
 
 	void (*tasklet_complete)(struct asd_ascb *, struct done_list_struct *);
-	u8     uldd_timer:1;
+	u8     uldd_timer;
 
 	/* internally generated command */
 	struct timer_list timer;
 	struct completion *completion;
-	u8        tag_valid:1;
+	u8        tag_valid;
 	__be16    tag;		  /* error recovery only */
 
 	/* If this is an Empty SCB, index of first edb in seq->edb_arr. */

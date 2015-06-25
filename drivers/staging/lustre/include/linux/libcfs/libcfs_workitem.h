@@ -81,9 +81,9 @@ typedef struct cfs_workitem {
 	/** arg for working function */
 	void	    *wi_data;
 	/** in running */
-	unsigned short   wi_running:1;
+	unsigned short   wi_running;
 	/** scheduled */
-	unsigned short   wi_scheduled:1;
+	unsigned short   wi_scheduled;
 } cfs_workitem_t;
 
 static inline void

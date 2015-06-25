@@ -205,8 +205,8 @@ struct omap_i2c_dev {
 						 * if set, should be trsh+1
 						 */
 	u32			rev;
-	unsigned		b_hw:1;		/* bad h/w fixes */
-	unsigned		receiver:1;	/* true when we're in receiver mode */
+	unsigned		b_hw;		/* bad h/w fixes */
+	unsigned		receiver;	/* true when we're in receiver mode */
 	u16			iestate;	/* Saved interrupt register */
 	u16			pscstate;
 	u16			scllstate;

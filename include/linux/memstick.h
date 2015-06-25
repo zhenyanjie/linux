@@ -240,7 +240,7 @@ struct memstick_request {
 	unsigned char tpc;
 	unsigned char data_dir:1,
 		      need_card_int:1,
-		      long_data:1;
+		      long_data;
 	unsigned char int_reg;
 	int           error;
 	union {

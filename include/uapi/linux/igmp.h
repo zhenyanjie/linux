@@ -67,11 +67,11 @@ struct igmpv3_query {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
 	__u8 qrv:3,
 	     suppress:1,
-	     resv:4;
+	     resv;
 #elif defined(__BIG_ENDIAN_BITFIELD)
 	__u8 resv:4,
 	     suppress:1,
-	     qrv:3;
+	     qrv;
 #else
 #error "Please fix <asm/byteorder.h>"
 #endif

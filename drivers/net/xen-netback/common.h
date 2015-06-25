@@ -224,12 +224,12 @@ struct xenvif {
 	int gso_mask;
 	int gso_prefix_mask;
 
-	u8 can_sg:1;
-	u8 ip_csum:1;
-	u8 ipv6_csum:1;
+	u8 can_sg;
+	u8 ip_csum;
+	u8 ipv6_csum;
 
 	/* Internal feature information. */
-	u8 can_queue:1;	    /* can queue packets for receiver? */
+	u8 can_queue;	    /* can queue packets for receiver? */
 
 	/* Is this interface disabled? True when backend discovers
 	 * frontend is rogue.

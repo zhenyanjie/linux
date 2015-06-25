@@ -100,8 +100,8 @@ struct msp_state {
 	/* thread */
 	struct task_struct   *kthread;
 	wait_queue_head_t    wq;
-	unsigned int         restart:1;
-	unsigned int         watch_stereo:1;
+	unsigned int         restart;
+	unsigned int         watch_stereo;
 };
 
 static inline struct msp_state *to_state(struct v4l2_subdev *sd)

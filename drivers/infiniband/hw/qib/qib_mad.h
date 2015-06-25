@@ -344,8 +344,8 @@ struct ib_cc_log_attr {
 struct ib_cc_log_event {
 	u8 local_qp_cn_entry;
 	u8 remote_qp_number_cn_entry[3];
-	u8  sl_cn_entry:4;
-	u8  service_type_cn_entry:4;
+	u8  sl_cn_entry;
+	u8  service_type_cn_entry;
 	__be32 remote_lid_cn_entry;
 	__be32 timestamp_cn_entry;
 } __packed;

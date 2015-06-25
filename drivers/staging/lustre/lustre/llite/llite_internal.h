@@ -73,7 +73,7 @@
 struct ll_dentry_data {
 	struct lookup_intent		*lld_it;
 	unsigned int			lld_sa_generation;
-	unsigned int			lld_invalid:1;
+	unsigned int			lld_invalid;
 	struct rcu_head			lld_rcu_head;
 };
 
@@ -476,7 +476,7 @@ struct ll_sb_info {
 
 	int		       ll_flags;
 	unsigned int		  ll_umounting:1,
-				  ll_xattr_cache_enabled:1;
+				  ll_xattr_cache_enabled;
 	struct list_head		ll_conn_chain; /* per-conn chain of SBs */
 	struct lustre_client_ocd  ll_lco;
 
@@ -1184,7 +1184,7 @@ struct ll_statahead_info {
 	unsigned int	    sai_skip_hidden;/* skipped hidden dentry count */
 	unsigned int	    sai_ls_all:1,   /* "ls -al", do stat-ahead for
 						 * hidden entries */
-				sai_agl_valid:1;/* AGL is valid for the dir */
+				sai_agl_valid;/* AGL is valid for the dir */
 	wait_queue_head_t	     sai_waitq;      /* stat-ahead wait queue */
 	struct ptlrpc_thread    sai_thread;     /* stat-ahead thread */
 	struct ptlrpc_thread    sai_agl_thread; /* AGL thread */

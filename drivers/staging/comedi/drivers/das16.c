@@ -242,8 +242,8 @@ struct das16_board {
 	unsigned int ai_maxdata;
 	unsigned int ai_speed;	/*  max conversion speed in nanosec */
 	unsigned int ai_pg;
-	unsigned int has_ao:1;
-	unsigned int has_8255:1;
+	unsigned int has_ao;
+	unsigned int has_8255;
 
 	unsigned int i8255_offset;
 
@@ -466,7 +466,7 @@ struct das16_private_struct {
 	struct timer_list	timer;
 	short			timer_running;
 	unsigned long		extra_iobase;
-	unsigned int		can_burst:1;
+	unsigned int		can_burst;
 };
 
 static void das16_ai_enable(struct comedi_device *dev,

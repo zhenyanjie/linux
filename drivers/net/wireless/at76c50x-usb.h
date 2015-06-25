@@ -437,8 +437,8 @@ struct at76_priv {
 	enum board_type board_type;
 	struct mib_fw_version fw_version;
 
-	unsigned int device_unplugged:1;
-	unsigned int netdev_registered:1;
+	unsigned int device_unplugged;
+	unsigned int netdev_registered;
 	struct set_mib_buffer mib_buf;	/* global buffer for set_mib calls */
 
 	int beacon_period;	/* period of mgmt beacons, Kus */

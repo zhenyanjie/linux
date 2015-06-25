@@ -42,7 +42,7 @@ struct mmc_csd {
 	unsigned int		read_partial:1,
 				read_misalign:1,
 				write_partial:1,
-				write_misalign:1;
+				write_misalign;
 };
 
 struct mmc_ext_csd {
@@ -184,7 +184,7 @@ struct sdio_cccr {
 				wide_bus:1,
 				high_power:1,
 				high_speed:1,
-				disable_cd:1;
+				disable_cd;
 };
 
 struct sdio_cis {

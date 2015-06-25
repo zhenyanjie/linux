@@ -55,8 +55,8 @@ struct hash_ipportnet4_elem {
 	__be32 ip;
 	__be32 ip2;
 	__be16 port;
-	u8 cidr:7;
-	u8 nomatch:1;
+	u8 cidr;
+	u8 nomatch;
 	u8 proto;
 };
 
@@ -305,8 +305,8 @@ struct hash_ipportnet6_elem {
 	union nf_inet_addr ip;
 	union nf_inet_addr ip2;
 	__be16 port;
-	u8 cidr:7;
-	u8 nomatch:1;
+	u8 cidr;
+	u8 nomatch;
 	u8 proto;
 };
 

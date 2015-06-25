@@ -104,12 +104,12 @@ struct integrity_iint_cache {
 	struct inode *inode;	/* back pointer to inode in question */
 	u64 version;		/* track inode changes */
 	unsigned long flags;
-	enum integrity_status ima_file_status:4;
-	enum integrity_status ima_mmap_status:4;
-	enum integrity_status ima_bprm_status:4;
-	enum integrity_status ima_module_status:4;
-	enum integrity_status ima_firmware_status:4;
-	enum integrity_status evm_status:4;
+	enum integrity_status ima_file_status;
+	enum integrity_status ima_mmap_status;
+	enum integrity_status ima_bprm_status;
+	enum integrity_status ima_module_status;
+	enum integrity_status ima_firmware_status;
+	enum integrity_status evm_status;
 	struct ima_digest_data *ima_hash;
 };
 

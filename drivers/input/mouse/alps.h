@@ -118,16 +118,16 @@ struct alps_fields {
 	struct input_mt_pos st;
 	struct input_mt_pos mt[MAX_TOUCHES];
 
-	unsigned int first_mp:1;
-	unsigned int is_mp:1;
+	unsigned int first_mp;
+	unsigned int is_mp;
 
-	unsigned int left:1;
-	unsigned int right:1;
-	unsigned int middle:1;
+	unsigned int left;
+	unsigned int right;
+	unsigned int middle;
 
-	unsigned int ts_left:1;
-	unsigned int ts_right:1;
-	unsigned int ts_middle:1;
+	unsigned int ts_left;
+	unsigned int ts_right;
+	unsigned int ts_middle;
 };
 
 /**

@@ -231,11 +231,11 @@ struct wm_coeff_ctl {
 	struct wm_coeff_ctl_ops ops;
 	struct wm_adsp *adsp;
 	void *private;
-	unsigned int enabled:1;
+	unsigned int enabled;
 	struct list_head list;
 	void *cache;
 	size_t len;
-	unsigned int set:1;
+	unsigned int set;
 	struct snd_kcontrol *kcontrol;
 };
 

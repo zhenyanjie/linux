@@ -74,13 +74,13 @@ struct ei_device {
 	unsigned long rmem_end;
 	void __iomem *mem;
 	unsigned char mcfilter[8];
-	unsigned open:1;
-	unsigned word16:1;  		/* We have the 16-bit (vs 8-bit) version of the card. */
-	unsigned bigendian:1;		/* 16-bit big endian mode. Do NOT */
+	unsigned open;
+	unsigned word16;  		/* We have the 16-bit (vs 8-bit) version of the card. */
+	unsigned bigendian;		/* 16-bit big endian mode. Do NOT */
 					/* set this on random 8390 clones! */
-	unsigned txing:1;		/* Transmit Active */
-	unsigned irqlock:1;		/* 8390's intrs disabled when '1'. */
-	unsigned dmaing:1;		/* Remote DMA Active */
+	unsigned txing;		/* Transmit Active */
+	unsigned irqlock;		/* 8390's intrs disabled when '1'. */
+	unsigned dmaing;		/* Remote DMA Active */
 	unsigned char tx_start_page, rx_start_page, stop_page;
 	unsigned char current_page;	/* Read pointer in buffer  */
 	unsigned char interface_num;	/* Net port (AUI, 10bT.) to use. */

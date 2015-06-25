@@ -151,13 +151,13 @@ struct adv7842_sdp_io_sync_adjustment {
 /* Platform dependent definition */
 struct adv7842_platform_data {
 	/* chip reset during probe */
-	unsigned chip_reset:1;
+	unsigned chip_reset;
 
 	/* DIS_PWRDNB: 1 if the PWRDNB pin is unused and unconnected */
-	unsigned disable_pwrdnb:1;
+	unsigned disable_pwrdnb;
 
 	/* DIS_CABLE_DET_RST: 1 if the 5V pins are unused and unconnected */
-	unsigned disable_cable_det_rst:1;
+	unsigned disable_cable_det_rst;
 
 	/* Analog input muxing mode */
 	enum adv7842_ain_sel ain_sel;
@@ -178,19 +178,19 @@ struct adv7842_platform_data {
 	enum adv7842_op_format_sel op_format_sel;
 
 	/* IO register 0x02 */
-	unsigned alt_gamma:1;
-	unsigned op_656_range:1;
-	unsigned rgb_out:1;
-	unsigned alt_data_sat:1;
+	unsigned alt_gamma;
+	unsigned op_656_range;
+	unsigned rgb_out;
+	unsigned alt_data_sat;
 
 	/* IO register 0x05 */
-	unsigned blank_data:1;
-	unsigned insert_av_codes:1;
-	unsigned replicate_av_codes:1;
-	unsigned invert_cbcr:1;
+	unsigned blank_data;
+	unsigned insert_av_codes;
+	unsigned replicate_av_codes;
+	unsigned invert_cbcr;
 
 	/* IO register 0x30 */
-	unsigned output_bus_lsb_to_msb:1;
+	unsigned output_bus_lsb_to_msb;
 
 	/* IO register 0x14 */
 	enum adv7842_drive_strength dr_str_data;
@@ -201,27 +201,27 @@ struct adv7842_platform_data {
 	 * IO register 0x19: Adjustment to the LLC DLL phase in
 	 * increments of 1/32 of a clock period.
 	 */
-	unsigned llc_dll_phase:5;
+	unsigned llc_dll_phase;
 
 	/* External RAM for 3-D comb or frame synchronizer */
 	unsigned sd_ram_size; /* ram size in MB */
-	unsigned sd_ram_ddr:1; /* ddr or sdr sdram */
+	unsigned sd_ram_ddr; /* ddr or sdr sdram */
 
 	/* HDMI free run, CP-reg 0xBA */
-	unsigned hdmi_free_run_enable:1;
+	unsigned hdmi_free_run_enable;
 	/* 0 = Mode 0: run when there is no TMDS clock
 	   1 = Mode 1: run when there is no TMDS clock or the
 	       video resolution does not match programmed one. */
-	unsigned hdmi_free_run_mode:1;
+	unsigned hdmi_free_run_mode;
 
 	/* SDP free run, CP-reg 0xDD */
-	unsigned sdp_free_run_auto:1;
-	unsigned sdp_free_run_man_col_en:1;
-	unsigned sdp_free_run_cbar_en:1;
-	unsigned sdp_free_run_force:1;
+	unsigned sdp_free_run_auto;
+	unsigned sdp_free_run_man_col_en;
+	unsigned sdp_free_run_cbar_en;
+	unsigned sdp_free_run_force;
 
 	/* HPA manual (0) or auto (1), affects HDMI register 0x69 */
-	unsigned hpa_auto:1;
+	unsigned hpa_auto;
 
 	struct adv7842_sdp_csc_coeff sdp_csc_coeff;
 

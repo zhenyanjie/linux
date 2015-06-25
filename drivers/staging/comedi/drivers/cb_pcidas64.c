@@ -601,7 +601,7 @@ struct pcidas64_board {
 	const struct hw_fifo_info *const ai_fifo;
 	/*  different board families have slightly different registers */
 	enum register_layout layout;
-	unsigned has_8255:1;
+	unsigned has_8255;
 };
 
 static const struct hw_fifo_info ai_fifo_4020 = {

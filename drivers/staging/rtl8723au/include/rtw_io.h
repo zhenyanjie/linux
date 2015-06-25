@@ -116,19 +116,19 @@ struct reg_protocol_rd {
 #ifdef __LITTLE_ENDIAN
 
 	/* DW1 */
-	u32		NumOfTrans:4;
-	u32		Reserved1:4;
-	u32		Reserved2:24;
+	u32		NumOfTrans;
+	u32		Reserved1;
+	u32		Reserved2;
 	/* DW2 */
-	u32		ByteCount:7;
-	u32		WriteEnable:1;		/* 0:read, 1:write */
-	u32		FixOrContinuous:1;	/* 0:continuous, 1: Fix */
-	u32		BurstMode:1;
-	u32		Byte1Access:1;
-	u32		Byte2Access:1;
-	u32		Byte4Access:1;
-	u32		Reserved3:3;
-	u32		Reserved4:16;
+	u32		ByteCount;
+	u32		WriteEnable;		/* 0:read, 1:write */
+	u32		FixOrContinuous;	/* 0:continuous, 1: Fix */
+	u32		BurstMode;
+	u32		Byte1Access;
+	u32		Byte2Access;
+	u32		Byte4Access;
+	u32		Reserved3;
+	u32		Reserved4;
 	/* DW3 */
 	u32		BusAddress;
 	/* DW4 */
@@ -137,14 +137,14 @@ struct reg_protocol_rd {
 
 
 /* DW1 */
-	u32 Reserved1  :4;
-	u32 NumOfTrans :4;
+	u32 Reserved1  ;
+	u32 NumOfTrans ;
 
-	u32 Reserved2  :24;
+	u32 Reserved2  ;
 
 	/* DW2 */
 	u32 WriteEnable : 1;
-	u32 ByteCount :7;
+	u32 ByteCount ;
 
 
 	u32 Reserved3 : 3;
@@ -174,19 +174,19 @@ struct reg_protocol_wt {
 #ifdef __LITTLE_ENDIAN
 
 	/* DW1 */
-	u32		NumOfTrans:4;
-	u32		Reserved1:4;
-	u32		Reserved2:24;
+	u32		NumOfTrans;
+	u32		Reserved1;
+	u32		Reserved2;
 	/* DW2 */
-	u32		ByteCount:7;
-	u32		WriteEnable:1;		/* 0:read, 1:write */
-	u32		FixOrContinuous:1;	/* 0:continuous, 1: Fix */
-	u32		BurstMode:1;
-	u32		Byte1Access:1;
-	u32		Byte2Access:1;
-	u32		Byte4Access:1;
-	u32		Reserved3:3;
-	u32		Reserved4:16;
+	u32		ByteCount;
+	u32		WriteEnable;		/* 0:read, 1:write */
+	u32		FixOrContinuous;	/* 0:continuous, 1: Fix */
+	u32		BurstMode;
+	u32		Byte1Access;
+	u32		Byte2Access;
+	u32		Byte4Access;
+	u32		Reserved3;
+	u32		Reserved4;
 	/* DW3 */
 	u32		BusAddress;
 	/* DW4 */
@@ -194,14 +194,14 @@ struct reg_protocol_wt {
 
 #else
 	/* DW1 */
-	u32 Reserved1  :4;
-	u32 NumOfTrans :4;
+	u32 Reserved1  ;
+	u32 NumOfTrans ;
 
-	u32 Reserved2  :24;
+	u32 Reserved2  ;
 
 	/* DW2 */
 	u32 WriteEnable : 1;
-	u32 ByteCount :7;
+	u32 ByteCount ;
 
 	u32 Reserved3 : 3;
 	u32 Byte4Access : 1;

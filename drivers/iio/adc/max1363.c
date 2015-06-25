@@ -174,7 +174,7 @@ struct max1363_state {
 	/* Using monitor modes and buffer at the same time is
 	   currently not supported */
 	bool				monitor_on;
-	unsigned int			monitor_speed:3;
+	unsigned int			monitor_speed;
 	u8				mask_high;
 	u8				mask_low;
 	/* 4x unipolar first then the fours bipolar ones */

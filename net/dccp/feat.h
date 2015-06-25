@@ -68,7 +68,7 @@ typedef union {
  */
 struct dccp_feat_entry {
 	dccp_feat_val           val;
-	enum dccp_feat_state    state:8;
+	enum dccp_feat_state    state;
 	u8                      feat_num;
 
 	bool			needs_mandatory,
@@ -96,7 +96,7 @@ static inline u8 dccp_feat_genopt(struct dccp_feat_entry *entry)
 struct ccid_dependency {
 	u8	dependent_feat;
 	bool	is_local:1,
-		is_mandatory:1;
+		is_mandatory;
 	u8	val;
 };
 

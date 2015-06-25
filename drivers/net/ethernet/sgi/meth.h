@@ -36,11 +36,11 @@
    dma completion. */
 
 typedef struct tx_status_vector {
-	u64		sent:1; /* always set to 1...*/
-	u64		pad0:34;/* always set to 0 */
-	u64		flags:9;			/*I'm too lazy to specify each one separately at the moment*/
-	u64		col_retry_cnt:4;	/*collision retry count*/
-	u64		len:16;				/*Transmit length in bytes*/
+	u64		sent; /* always set to 1...*/
+	u64		pad0;/* always set to 0 */
+	u64		flags;			/*I'm too lazy to specify each one separately at the moment*/
+	u64		col_retry_cnt;	/*collision retry count*/
+	u64		len;				/*Transmit length in bytes*/
 } tx_status_vector;
 
 /*
@@ -49,21 +49,21 @@ typedef struct tx_status_vector {
  * buffer pointers and up to 120 data bytes.
  */
 typedef struct tx_packet_hdr {
-	u64		pad1:36; /*should be filled with 0 */
+	u64		pad1; /*should be filled with 0 */
 	u64		cat_ptr3_valid:1,	/*Concatination pointer valid flags*/
 			cat_ptr2_valid:1,
-			cat_ptr1_valid:1;
-	u64		tx_int_flag:1;		/*Generate TX intrrupt when packet has been sent*/
-	u64		term_dma_flag:1;	/*Terminate transmit DMA on transmit abort conditions*/
-	u64		data_offset:7;		/*Starting byte offset in ring data block*/
-	u64		data_len:16;		/*Length of valid data in bytes-1*/
+			cat_ptr1_valid;
+	u64		tx_int_flag;		/*Generate TX intrrupt when packet has been sent*/
+	u64		term_dma_flag;	/*Terminate transmit DMA on transmit abort conditions*/
+	u64		data_offset;		/*Starting byte offset in ring data block*/
+	u64		data_len;		/*Length of valid data in bytes-1*/
 } tx_packet_hdr;
 typedef union tx_cat_ptr {
 	struct {
-		u64		pad2:16; /* should be 0 */
-		u64		len:16;				/*length of buffer data - 1*/
-		u64		start_addr:29;		/*Physical starting address*/
-		u64		pad1:3; /* should be zero */
+		u64		pad2; /* should be 0 */
+		u64		len;				/*length of buffer data - 1*/
+		u64		start_addr;		/*Physical starting address*/
+		u64		pad1; /* should be zero */
 	} form;
 	u64 raw;
 } tx_cat_ptr;
@@ -82,22 +82,22 @@ typedef struct tx_packet {
 
 typedef union rx_status_vector {
 	volatile struct {
-		u64		pad1:1;/*fill it with ones*/
-		u64		pad2:15;/*fill with 0*/
-		u64		ip_chk_sum:16;
-		u64		seq_num:5;
-		u64		mac_addr_match:1;
-		u64		mcast_addr_match:1;
-		u64		carrier_event_seen:1;
-		u64		bad_packet:1;
-		u64		long_event_seen:1;
-		u64		invalid_preamble:1;
-		u64		broadcast:1;
-		u64		multicast:1;
-		u64		crc_error:1;
-		u64		huh:1;/*???*/
-		u64		rx_code_violation:1;
-		u64		rx_len:16;
+		u64		pad1;/*fill it with ones*/
+		u64		pad2;/*fill with 0*/
+		u64		ip_chk_sum;
+		u64		seq_num;
+		u64		mac_addr_match;
+		u64		mcast_addr_match;
+		u64		carrier_event_seen;
+		u64		bad_packet;
+		u64		long_event_seen;
+		u64		invalid_preamble;
+		u64		broadcast;
+		u64		multicast;
+		u64		crc_error;
+		u64		huh;/*???*/
+		u64		rx_code_violation;
+		u64		rx_len;
 	} parsed;
 	volatile u64 raw;
 } rx_status_vector;

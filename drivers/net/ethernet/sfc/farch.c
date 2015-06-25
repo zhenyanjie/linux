@@ -1852,8 +1852,8 @@ enum efx_farch_filter_index {
 };
 
 struct efx_farch_filter_spec {
-	u8	type:4;
-	u8	priority:4;
+	u8	type;
+	u8	priority;
 	u8	flags;
 	u16	dmaq_id;
 	u32	data[3];

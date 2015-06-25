@@ -372,8 +372,8 @@ struct gsc_ctx {
 	u32			flags;
 	u32			state;
 	int			rotation;
-	unsigned int		hflip:1;
-	unsigned int		vflip:1;
+	unsigned int		hflip;
+	unsigned int		vflip;
 	struct gsc_dev		*gsc_dev;
 	struct v4l2_m2m_ctx	*m2m_ctx;
 	struct v4l2_fh		fh;

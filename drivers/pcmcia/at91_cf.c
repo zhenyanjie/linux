@@ -45,7 +45,7 @@
 struct at91_cf_socket {
 	struct pcmcia_socket	socket;
 
-	unsigned		present:1;
+	unsigned		present;
 
 	struct platform_device	*pdev;
 	struct at91_cf_data	*board;

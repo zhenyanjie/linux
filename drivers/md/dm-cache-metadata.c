@@ -113,8 +113,8 @@ struct dm_cache_metadata {
 
 	sector_t data_block_size;
 	dm_cblock_t cache_blocks;
-	bool changed:1;
-	bool clean_when_opened:1;
+	bool changed;
+	bool clean_when_opened;
 
 	char policy_name[CACHE_POLICY_NAME_SIZE];
 	unsigned policy_version[CACHE_POLICY_VERSION_SIZE];

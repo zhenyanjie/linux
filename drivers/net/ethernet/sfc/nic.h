@@ -200,7 +200,7 @@ struct falcon_spi_device {
 	int device_id;
 	unsigned int size;
 	unsigned int addr_len;
-	unsigned int munge_address:1;
+	unsigned int munge_address;
 	u8 erase_command;
 	unsigned int erase_size;
 	unsigned int block_size;

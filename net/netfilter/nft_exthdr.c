@@ -22,7 +22,7 @@ struct nft_exthdr {
 	u8			type;
 	u8			offset;
 	u8			len;
-	enum nft_registers	dreg:8;
+	enum nft_registers	dreg;
 };
 
 static void nft_exthdr_eval(const struct nft_expr *expr,

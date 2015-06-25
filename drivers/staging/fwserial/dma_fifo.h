@@ -49,7 +49,7 @@ struct dma_fifo {
 	unsigned	 out;		/* updated when dma is pended         */
 	unsigned	 done;		/* updated upon dma completion        */
 	struct {
-		unsigned corrupt:1;
+		unsigned corrupt;
 	};
 	int		 size;		/* 'apparent' size of fifo	      */
 	int		 guard;		/* ofs of guard area		      */

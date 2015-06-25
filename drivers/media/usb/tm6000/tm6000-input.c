@@ -64,9 +64,9 @@ struct tm6000_IR {
 	/* poll expernal decoder */
 	int			polling;
 	struct delayed_work	work;
-	u8			wait:1;
-	u8			pwled:2;
-	u8			submit_urb:1;
+	u8			wait;
+	u8			pwled;
+	u8			submit_urb;
 	u16			key_addr;
 	struct urb		*int_urb;
 

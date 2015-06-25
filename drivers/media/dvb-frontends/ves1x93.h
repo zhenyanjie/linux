@@ -37,7 +37,7 @@ struct ves1x93_config
 	u32 xin;
 
 	/* should PWM be inverted? */
-	u8 invert_pwm:1;
+	u8 invert_pwm;
 };
 
 #if IS_ENABLED(CONFIG_DVB_VES1X93)

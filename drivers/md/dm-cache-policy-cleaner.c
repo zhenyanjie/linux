@@ -25,8 +25,8 @@ struct wb_cache_entry {
 
 	dm_oblock_t oblock;
 	dm_cblock_t cblock;
-	bool dirty:1;
-	bool pending:1;
+	bool dirty;
+	bool pending;
 };
 
 struct hash {

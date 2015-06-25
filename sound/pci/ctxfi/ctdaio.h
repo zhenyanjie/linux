@@ -65,8 +65,8 @@ struct dai {
 };
 
 struct dao_desc {
-	unsigned int msr:4;
-	unsigned int passthru:1;
+	unsigned int msr;
+	unsigned int passthru;
 };
 
 struct dao_rsc_ops {
@@ -91,9 +91,9 @@ struct dai_rsc_ops {
 
 /* Define daio resource request description info */
 struct daio_desc {
-	unsigned int type:4;
-	unsigned int msr:4;
-	unsigned int passthru:1;
+	unsigned int type;
+	unsigned int msr;
+	unsigned int passthru;
 };
 
 struct daio_mgr {

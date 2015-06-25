@@ -132,7 +132,7 @@ static int aha1740_makecode(unchar *sense, unchar *status)
 		    :1,	ini:1,	/* Initialization Required */
 			me:1,	/* Major error or exception */
 		    :1,	eca:1,  /* Extended Contingent alliance */
-		    :1;
+		    ;
 	} status_word;
 	int retval = DID_OK;
 

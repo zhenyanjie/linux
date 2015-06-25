@@ -56,32 +56,32 @@
 typedef union _SCSI3Addr_struct {
    struct {
     BYTE Dev;
-    BYTE Bus:6;
-    BYTE Mode:2;        /* b00 */
+    BYTE Bus;
+    BYTE Mode;        /* b00 */
   } PeripDev;
    struct {
     BYTE DevLSB;
-    BYTE DevMSB:6;
-    BYTE Mode:2;        /* b01 */
+    BYTE DevMSB;
+    BYTE Mode;        /* b01 */
   } LogDev;
    struct {
-    BYTE Dev:5;
-    BYTE Bus:3;
-    BYTE Targ:6;
-    BYTE Mode:2;        /* b10 */
+    BYTE Dev;
+    BYTE Bus;
+    BYTE Targ;
+    BYTE Mode;        /* b10 */
   } LogUnit;
 } SCSI3Addr_struct;
 
 typedef struct _PhysDevAddr_struct {
-  DWORD             TargetId:24;
-  DWORD             Bus:6;
-  DWORD             Mode:2;
+  DWORD             TargetId;
+  DWORD             Bus;
+  DWORD             Mode;
   SCSI3Addr_struct  Target[2]; /* 2 level target device addr */
 } PhysDevAddr_struct;
 
 typedef struct _LogDevAddr_struct {
-  DWORD            VolId:30;
-  DWORD            Mode:2;
+  DWORD            VolId;
+  DWORD            Mode;
   BYTE             reserved[4];
 } LogDevAddr_struct;
 
@@ -95,9 +95,9 @@ typedef union _LUNAddr_struct {
 typedef struct _RequestBlock_struct {
   BYTE   CDBLen;
   struct {
-    BYTE Type:3;
-    BYTE Attribute:3;
-    BYTE Direction:2;
+    BYTE Type;
+    BYTE Attribute;
+    BYTE Direction;
   } Type;
   HWORD  Timeout;
   BYTE   CDB[16];

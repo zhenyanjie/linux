@@ -305,10 +305,10 @@ struct lola_stream {
 	unsigned int format_verb;
 
 	/* flags */
-	unsigned int opened:1;
-	unsigned int prepared:1;
-	unsigned int paused:1;
-	unsigned int running:1;
+	unsigned int opened;
+	unsigned int prepared;
+	unsigned int paused;
+	unsigned int running;
 };
 
 #define PLAY	SNDRV_PCM_STREAM_PLAYBACK
@@ -374,9 +374,9 @@ struct lola {
 	unsigned int sample_rate_max;
 
 	/* flags */
-	unsigned int initialized:1;
-	unsigned int cold_reset:1;
-	unsigned int polling_mode:1;
+	unsigned int initialized;
+	unsigned int cold_reset;
+	unsigned int polling_mode;
 
 	/* for debugging */
 	unsigned int debug_res;

@@ -62,9 +62,9 @@
 
 struct phy_rx_agc_info {
 	#ifdef __LITTLE_ENDIAN
-		u8	gain:7, trsw:1;
+		u8	gain:7, trsw;
 	#else
-		u8	trsw:1, gain:7;
+		u8	trsw:1, gain;
 	#endif
 };
 
@@ -88,21 +88,21 @@ struct phy_status_rpt {
 	u8	rsvd_3;
 
 #ifdef __LITTLE_ENDIAN
-	u8	antsel_rx_keep_2:1;	/* ex_intf_flg:1; */
-	u8	sgi_en:1;
-	u8	rxsc:2;
-	u8	idle_long:1;
-	u8	r_ant_train_en:1;
-	u8	ant_sel_b:1;
-	u8	ant_sel:1;
+	u8	antsel_rx_keep_2;	/* ex_intf_flg; */
+	u8	sgi_en;
+	u8	rxsc;
+	u8	idle_long;
+	u8	r_ant_train_en;
+	u8	ant_sel_b;
+	u8	ant_sel;
 #else	/*  _BIG_ENDIAN_ */
-	u8	ant_sel:1;
-	u8	ant_sel_b:1;
-	u8	r_ant_train_en:1;
-	u8	idle_long:1;
-	u8	rxsc:2;
-	u8	sgi_en:1;
-	u8	antsel_rx_keep_2:1;	/* ex_intf_flg:1; */
+	u8	ant_sel;
+	u8	ant_sel_b;
+	u8	r_ant_train_en;
+	u8	idle_long;
+	u8	rxsc;
+	u8	sgi_en;
+	u8	antsel_rx_keep_2;	/* ex_intf_flg; */
 #endif
 };
 

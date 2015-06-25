@@ -432,10 +432,10 @@ int pcmcia_replace_cis(struct pcmcia_socket *s,
 /* The high-level CIS tuple services */
 
 typedef struct tuple_flags {
-	u_int		link_space:4;
-	u_int		has_link:1;
-	u_int		mfc_fn:3;
-	u_int		space:4;
+	u_int		link_space;
+	u_int		has_link;
+	u_int		mfc_fn;
+	u_int		space;
 } tuple_flags;
 
 #define LINK_SPACE(f)	(((tuple_flags *)(&(f)))->link_space)

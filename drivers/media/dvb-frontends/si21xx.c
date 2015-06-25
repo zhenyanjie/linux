@@ -140,7 +140,7 @@ struct si21xx_state {
 	struct i2c_adapter *i2c;
 	const struct si21xx_config *config;
 	struct dvb_frontend frontend;
-	u8 initialised:1;
+	u8 initialised;
 	int errmode;
 	int fs;			/*Sampling rate of the ADC in MHz*/
 };

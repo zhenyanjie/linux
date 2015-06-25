@@ -26,7 +26,7 @@ struct matroxfb_dh_fb_info {
 		unsigned int	len;
 			      } mmio;
 
-	unsigned int		interlaced:1;
+	unsigned int		interlaced;
 
 	u_int32_t cmap[16];
 };

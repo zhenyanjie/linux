@@ -1463,19 +1463,19 @@ enum bfa_flash_err {
 union bfa_flash_cmd_reg {
 	struct {
 #ifdef __BIG_ENDIAN
-		u32	act:1;
-		u32	rsv:1;
-		u32	write_cnt:9;
-		u32	read_cnt:9;
-		u32	addr_cnt:4;
-		u32	cmd:8;
+		u32	act;
+		u32	rsv;
+		u32	write_cnt;
+		u32	read_cnt;
+		u32	addr_cnt;
+		u32	cmd;
 #else
-		u32	cmd:8;
-		u32	addr_cnt:4;
-		u32	read_cnt:9;
-		u32	write_cnt:9;
-		u32	rsv:1;
-		u32	act:1;
+		u32	cmd;
+		u32	addr_cnt;
+		u32	read_cnt;
+		u32	write_cnt;
+		u32	rsv;
+		u32	act;
 #endif
 	} r;
 	u32	i;
@@ -1485,21 +1485,21 @@ union bfa_flash_cmd_reg {
 union bfa_flash_dev_status_reg {
 	struct {
 #ifdef __BIG_ENDIAN
-		u32	rsv:21;
-		u32	fifo_cnt:6;
-		u32	busy:1;
-		u32	init_status:1;
-		u32	present:1;
-		u32	bad:1;
-		u32	good:1;
+		u32	rsv;
+		u32	fifo_cnt;
+		u32	busy;
+		u32	init_status;
+		u32	present;
+		u32	bad;
+		u32	good;
 #else
-		u32	good:1;
-		u32	bad:1;
-		u32	present:1;
-		u32	init_status:1;
-		u32	busy:1;
-		u32	fifo_cnt:6;
-		u32	rsv:21;
+		u32	good;
+		u32	bad;
+		u32	present;
+		u32	init_status;
+		u32	busy;
+		u32	fifo_cnt;
+		u32	rsv;
 #endif
 	} r;
 	u32	i;
@@ -1509,11 +1509,11 @@ union bfa_flash_dev_status_reg {
 union bfa_flash_addr_reg {
 	struct {
 #ifdef __BIG_ENDIAN
-		u32	addr:24;
-		u32	dummy:8;
+		u32	addr;
+		u32	dummy;
 #else
-		u32	dummy:8;
-		u32	addr:24;
+		u32	dummy;
+		u32	addr;
 #endif
 	} r;
 	u32	i;

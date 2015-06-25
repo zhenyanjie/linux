@@ -25,10 +25,10 @@ struct adfs_discrecord {
     __u8  disc_name[10];
     __le32 disc_type;
     __le32 disc_size_high;
-    __u8  log2sharesize:4;
-    __u8  unused40:4;
-    __u8  big_flag:1;
-    __u8  unused41:1;
+    __u8  log2sharesize;
+    __u8  unused40;
+    __u8  big_flag;
+    __u8  unused41;
     __u8  nzones_high;
     __le32 format_version;
     __le32 root_size;

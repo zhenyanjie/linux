@@ -301,8 +301,8 @@ enum {
 
 struct bpf_insn {
 	__u8	code;		/* opcode */
-	__u8	dst_reg:4;	/* dest register */
-	__u8	src_reg:4;	/* source register */
+	__u8	dst_reg;	/* dest register */
+	__u8	src_reg;	/* source register */
 	__s16	off;		/* signed offset */
 	__s32	imm;		/* signed immediate constant */
 };
@@ -326,7 +326,7 @@ struct seccomp_data;
 
 struct bpf_prog {
 	u32			jited:1,	/* Is our filter JIT'ed? */
-				len:31;		/* Number of filter blocks */
+				len;		/* Number of filter blocks */
 	struct sock_fprog_kern	*orig_prog;	/* Original BPF program */
 	unsigned int		(*bpf_func)(const struct sk_buff *skb,
 					    const struct bpf_insn *filter);

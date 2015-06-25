@@ -757,17 +757,17 @@ struct tcp_options {
 	__be16 mss;
 	__u8 wsf;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8:4;
-	__u8 unknown:1;
-	__u8:1;
-	__u8 sack:1;
-	__u8 tstamp:1;
+	__u8;
+	__u8 unknown;
+	__u8;
+	__u8 sack;
+	__u8 tstamp;
 #else
-	__u8 tstamp:1;
-	__u8 sack:1;
-	__u8:1;
-	__u8 unknown:1;
-	__u8:4;
+	__u8 tstamp;
+	__u8 sack;
+	__u8;
+	__u8 unknown;
+	__u8;
 #endif
 };
 

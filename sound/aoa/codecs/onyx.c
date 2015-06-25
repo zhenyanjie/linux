@@ -53,7 +53,7 @@ struct onyx {
 	u32			initialised:1,
 				spdif_locked:1,
 				analog_locked:1,
-				original_mute:2;
+				original_mute;
 	int			open_count;
 	struct codec_info	*codec_info;
 

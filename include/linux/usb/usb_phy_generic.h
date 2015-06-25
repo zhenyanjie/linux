@@ -8,8 +8,8 @@ struct usb_phy_generic_platform_data {
 	unsigned long clk_rate;
 
 	/* if set fails with -EPROBE_DEFER if can't get regulator */
-	unsigned int needs_vcc:1;
-	unsigned int needs_reset:1;	/* deprecated */
+	unsigned int needs_vcc;
+	unsigned int needs_reset;	/* deprecated */
 	int gpio_reset;
 };
 

@@ -66,7 +66,7 @@ struct bfin_crypto_crc {
 	struct tasklet_struct	done_task;
 	struct crypto_queue	queue; /* waiting requests */
 
-	u8			busy:1; /* crc device in operation flag */
+	u8			busy; /* crc device in operation flag */
 };
 
 static struct bfin_crypto_crc_list {

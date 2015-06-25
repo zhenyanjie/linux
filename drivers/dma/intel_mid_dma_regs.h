@@ -87,38 +87,38 @@
 /*DMA channel control registers*/
 union intel_mid_dma_ctl_lo {
 	struct {
-		u32	int_en:1;	/*enable or disable interrupts*/
+		u32	int_en;	/*enable or disable interrupts*/
 					/*should be 0*/
-		u32	dst_tr_width:3;	/*destination transfer width*/
+		u32	dst_tr_width;	/*destination transfer width*/
 					/*usually 32 bits = 010*/
-		u32	src_tr_width:3; /*source transfer width*/
+		u32	src_tr_width; /*source transfer width*/
 					/*usually 32 bits = 010*/
-		u32	dinc:2;		/*destination address inc/dec*/
+		u32	dinc;		/*destination address inc/dec*/
 					/*For mem:INC=00, Periphral NoINC=11*/
-		u32	sinc:2;		/*source address inc or dec, as above*/
-		u32	dst_msize:3;	/*destination burst transaction length*/
+		u32	sinc;		/*source address inc or dec, as above*/
+		u32	dst_msize;	/*destination burst transaction length*/
 					/*always = 16 ie 011*/
-		u32	src_msize:3;	/*source burst transaction length*/
+		u32	src_msize;	/*source burst transaction length*/
 					/*always = 16 ie 011*/
-		u32	reser1:3;
-		u32	tt_fc:3;	/*transfer type and flow controller*/
+		u32	reser1;
+		u32	tt_fc;	/*transfer type and flow controller*/
 					/*M-M = 000
 					  P-M = 010
 					  M-P = 001*/
-		u32	dms:2;		/*destination master select = 0*/
-		u32	sms:2;		/*source master select = 0*/
-		u32	llp_dst_en:1;	/*enable/disable destination LLP = 0*/
-		u32	llp_src_en:1;	/*enable/disable source LLP = 0*/
-		u32	reser2:3;
+		u32	dms;		/*destination master select = 0*/
+		u32	sms;		/*source master select = 0*/
+		u32	llp_dst_en;	/*enable/disable destination LLP = 0*/
+		u32	llp_src_en;	/*enable/disable source LLP = 0*/
+		u32	reser2;
 	} ctlx;
 	u32	ctl_lo;
 };
 
 union intel_mid_dma_ctl_hi {
 	struct {
-		u32	block_ts:12;	/*block transfer size*/
-		u32	done:1;		/*Done - updated by DMAC*/
-		u32	reser:19;	/*configured by DMAC*/
+		u32	block_ts;	/*block transfer size*/
+		u32	done;		/*Done - updated by DMAC*/
+		u32	reser;	/*configured by DMAC*/
 	} ctlx;
 	u32	ctl_hi;
 
@@ -127,32 +127,32 @@ union intel_mid_dma_ctl_hi {
 /*DMA channel configuration registers*/
 union intel_mid_dma_cfg_lo {
 	struct {
-		u32	reser1:5;
-		u32	ch_prior:3;	/*channel priority = 0*/
-		u32	ch_susp:1;	/*channel suspend = 0*/
-		u32	fifo_empty:1;	/*FIFO empty or not R bit = 0*/
-		u32	hs_sel_dst:1;	/*select HW/SW destn handshaking*/
+		u32	reser1;
+		u32	ch_prior;	/*channel priority = 0*/
+		u32	ch_susp;	/*channel suspend = 0*/
+		u32	fifo_empty;	/*FIFO empty or not R bit = 0*/
+		u32	hs_sel_dst;	/*select HW/SW destn handshaking*/
 					/*HW = 0, SW = 1*/
-		u32	hs_sel_src:1;	/*select HW/SW src handshaking*/
-		u32	reser2:6;
-		u32	dst_hs_pol:1;	/*dest HS interface polarity*/
-		u32	src_hs_pol:1;	/*src HS interface polarity*/
-		u32	max_abrst:10;	/*max AMBA burst len = 0 (no sw limit*/
-		u32	reload_src:1;	/*auto reload src addr =1 if src is P*/
-		u32	reload_dst:1;	/*AR destn addr =1 if dstn is P*/
+		u32	hs_sel_src;	/*select HW/SW src handshaking*/
+		u32	reser2;
+		u32	dst_hs_pol;	/*dest HS interface polarity*/
+		u32	src_hs_pol;	/*src HS interface polarity*/
+		u32	max_abrst;	/*max AMBA burst len = 0 (no sw limit*/
+		u32	reload_src;	/*auto reload src addr =1 if src is P*/
+		u32	reload_dst;	/*AR destn addr =1 if dstn is P*/
 	} cfgx;
 	u32	cfg_lo;
 };
 
 union intel_mid_dma_cfg_hi {
 	struct {
-		u32	fcmode:1;	/*flow control mode = 1*/
-		u32	fifo_mode:1;	/*FIFO mode select = 1*/
-		u32	protctl:3;	/*protection control = 0*/
-		u32	rsvd:2;
-		u32	src_per:4;	/*src hw HS interface*/
-		u32	dst_per:4;	/*dstn hw HS interface*/
-		u32	reser2:17;
+		u32	fcmode;	/*flow control mode = 1*/
+		u32	fifo_mode;	/*FIFO mode select = 1*/
+		u32	protctl;	/*protection control = 0*/
+		u32	rsvd;
+		u32	src_per;	/*src hw HS interface*/
+		u32	dst_per;	/*dstn hw HS interface*/
+		u32	reser2;
 	} cfgx;
 	u32	cfg_hi;
 };

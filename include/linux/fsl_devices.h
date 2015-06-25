@@ -82,16 +82,16 @@ struct fsl_usb2_platform_data {
 	void __iomem	*regs;		/* ioremap'd register base */
 	struct clk	*clk;
 	unsigned	power_budget;	/* hcd->power_budget */
-	unsigned	big_endian_mmio:1;
-	unsigned	big_endian_desc:1;
-	unsigned	es:1;		/* need USBMODE:ES */
-	unsigned	le_setup_buf:1;
-	unsigned	have_sysif_regs:1;
-	unsigned	invert_drvvbus:1;
-	unsigned	invert_pwr_fault:1;
+	unsigned	big_endian_mmio;
+	unsigned	big_endian_desc;
+	unsigned	es;		/* need USBMODE:ES */
+	unsigned	le_setup_buf;
+	unsigned	have_sysif_regs;
+	unsigned	invert_drvvbus;
+	unsigned	invert_pwr_fault;
 
-	unsigned	suspended:1;
-	unsigned	already_suspended:1;
+	unsigned	suspended;
+	unsigned	already_suspended;
 
 	/* register save area for suspend/resume */
 	u32		pm_command;

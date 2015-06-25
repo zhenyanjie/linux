@@ -47,7 +47,7 @@ struct lustre_intent_data {
 	int		it_remote_lock_mode;
 	__u64	   it_remote_lock_handle;
 	void	   *it_data;
-	unsigned int    it_lock_set:1;
+	unsigned int    it_lock_set;
 };
 
 struct lookup_intent {

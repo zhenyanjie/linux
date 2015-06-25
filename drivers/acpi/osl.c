@@ -135,10 +135,10 @@ static void __init acpi_osi_setup_late(void);
  */
 
 static struct osi_linux {
-	unsigned int	enable:1;
-	unsigned int	dmi:1;
-	unsigned int	cmdline:1;
-	unsigned int	default_disabling:1;
+	unsigned int	enable;
+	unsigned int	dmi;
+	unsigned int	cmdline;
+	unsigned int	default_disabling;
 } osi_linux = {0, 0, 0, 0};
 
 static u32 acpi_osi_handler(acpi_string interface, u32 supported)

@@ -77,7 +77,7 @@ struct af9013_config {
 #define AF9013_TS_USB       0
 #define AF9013_TS_PARALLEL  1
 #define AF9013_TS_SERIAL    2
-	u8 ts_mode:2;
+	u8 ts_mode;
 
 	/*
 	 * input spectrum inversion

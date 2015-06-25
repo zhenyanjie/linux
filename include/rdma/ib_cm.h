@@ -125,12 +125,12 @@ struct ib_cm_req_event_param {
 	u32			starting_psn;
 	u8			responder_resources;
 	u8			initiator_depth;
-	unsigned int		local_cm_response_timeout:5;
-	unsigned int		flow_control:1;
-	unsigned int		remote_cm_response_timeout:5;
-	unsigned int		retry_count:3;
-	unsigned int		rnr_retry_count:3;
-	unsigned int		srq:1;
+	unsigned int		local_cm_response_timeout;
+	unsigned int		flow_control;
+	unsigned int		remote_cm_response_timeout;
+	unsigned int		retry_count;
+	unsigned int		rnr_retry_count;
+	unsigned int		srq;
 };
 
 struct ib_cm_rep_event_param {
@@ -140,11 +140,11 @@ struct ib_cm_rep_event_param {
 	u32			starting_psn;
 	u8			responder_resources;
 	u8			initiator_depth;
-	unsigned int		target_ack_delay:5;
-	unsigned int		failover_accepted:2;
-	unsigned int		flow_control:1;
-	unsigned int		rnr_retry_count:3;
-	unsigned int		srq:1;
+	unsigned int		target_ack_delay;
+	unsigned int		failover_accepted;
+	unsigned int		flow_control;
+	unsigned int		rnr_retry_count;
+	unsigned int		srq;
 };
 
 enum ib_cm_rej_reason {

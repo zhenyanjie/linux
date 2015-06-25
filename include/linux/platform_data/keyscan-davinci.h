@@ -32,7 +32,7 @@ struct davinci_ks_platform_data {
 	int		(*device_enable)(struct device *dev);
 	unsigned short	*keymap;
 	u32		keymapsize;
-	u8		rep:1;
+	u8		rep;
 	u8		strobe;
 	u8		interval;
 	u8		matrix_type;

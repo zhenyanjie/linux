@@ -55,10 +55,10 @@ static struct acpi_driver acpi_smb_hc_driver = {
 union acpi_smb_status {
 	u8 raw;
 	struct {
-		u8 status:5;
-		u8 reserved:1;
-		u8 alarm:1;
-		u8 done:1;
+		u8 status;
+		u8 reserved;
+		u8 alarm;
+		u8 done;
 	} fields;
 };
 

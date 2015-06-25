@@ -239,7 +239,7 @@ struct i2400mu {
 	u8 rx_size_auto_shrink;
 
 	struct dentry *debugfs_dentry;
-	unsigned i6050:1;	/* 1 if this is a 6050 based SKU */
+	unsigned i6050;	/* 1 if this is a 6050 based SKU */
 };
 
 

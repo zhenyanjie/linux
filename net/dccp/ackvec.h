@@ -70,10 +70,10 @@ struct dccp_ackvec {
 	u8			av_buf[DCCPAV_MAX_ACKVEC_LEN];
 	u16			av_buf_head;
 	u16			av_buf_tail;
-	u64			av_buf_ackno:48;
-	u64			av_tail_ackno:48;
+	u64			av_buf_ackno;
+	u64			av_tail_ackno;
 	bool			av_buf_nonce[DCCPAV_NUM_ACKVECS];
-	u8			av_overflow:1;
+	u8			av_overflow;
 	struct list_head	av_records;
 };
 
@@ -94,11 +94,11 @@ struct dccp_ackvec {
  */
 struct dccp_ackvec_record {
 	struct list_head avr_node;
-	u64		 avr_ack_seqno:48;
-	u64		 avr_ack_ackno:48;
+	u64		 avr_ack_seqno;
+	u64		 avr_ack_ackno;
 	u16		 avr_ack_ptr;
 	u8		 avr_ack_runlen;
-	u8		 avr_ack_nonce:1;
+	u8		 avr_ack_nonce;
 };
 
 int dccp_ackvec_init(void);
@@ -129,7 +129,7 @@ static inline bool dccp_ackvec_is_empty(const struct dccp_ackvec *av)
 struct dccp_ackvec_parsed {
 	u8		 *vec,
 			 len,
-			 nonce:1;
+			 nonce;
 	struct list_head node;
 };
 

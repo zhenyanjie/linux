@@ -349,12 +349,12 @@
 struct sym_trans {
 	u8 period;
 	u8 offset;
-	unsigned int width:1;
-	unsigned int iu:1;
-	unsigned int dt:1;
-	unsigned int qas:1;
-	unsigned int check_nego:1;
-	unsigned int renego:2;
+	unsigned int width;
+	unsigned int iu;
+	unsigned int dt;
+	unsigned int qas;
+	unsigned int check_nego;
+	unsigned int renego;
 };
 
 /*

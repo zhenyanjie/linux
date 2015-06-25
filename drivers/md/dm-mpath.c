@@ -83,11 +83,11 @@ struct multipath {
 	struct priority_group *next_pg;	/* Switch to this PG if set */
 	unsigned repeat_count;		/* I/Os left before calling PS again */
 
-	unsigned queue_io:1;		/* Must we queue all I/O? */
-	unsigned queue_if_no_path:1;	/* Queue I/O if last path fails? */
-	unsigned saved_queue_if_no_path:1; /* Saved state during suspension */
-	unsigned retain_attached_hw_handler:1; /* If there's already a hw_handler present, don't change it. */
-	unsigned pg_init_disabled:1;	/* pg_init is not currently allowed */
+	unsigned queue_io;		/* Must we queue all I/O? */
+	unsigned queue_if_no_path;	/* Queue I/O if last path fails? */
+	unsigned saved_queue_if_no_path; /* Saved state during suspension */
+	unsigned retain_attached_hw_handler; /* If there's already a hw_handler present, don't change it. */
+	unsigned pg_init_disabled;	/* pg_init is not currently allowed */
 
 	unsigned pg_init_retries;	/* Number of times to retry pg_init */
 	unsigned pg_init_count;		/* Number of times pg_init called */

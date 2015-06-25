@@ -29,9 +29,9 @@ struct smbus_methods_t {
 struct acpi_smbus_cmi {
 	acpi_handle handle;
 	struct i2c_adapter adapter;
-	u8 cap_info:1;
-	u8 cap_read:1;
-	u8 cap_write:1;
+	u8 cap_info;
+	u8 cap_read;
+	u8 cap_write;
 	struct smbus_methods_t *methods;
 };
 

@@ -242,7 +242,7 @@ struct main_vc
  	u_short 	trm;	   
 	u_short 	rm_timestamp_hi;  
 	u_short 	rm_timestamp_lo:8,  
-			crm:8;		  
+			crm;		  
 	u_short 	remainder; 	/* ABR and UBR fields - last 10 bits*/  
 	u_short 	next_vc_sched;  
 	u_short 	present_desc;	/* all classes */  
@@ -254,7 +254,7 @@ struct main_vc
 	u_short 	mcr;  
 	u_short 	acr;		 
 	u_short 	unack:8,  
-			status:8;	/* all classes */  
+			status;	/* all classes */  
 #define UIOLI 0x80  
 #define CRC_APPEND 0x40			/* for status field - CRC-32 append */  
 #define ABR_STATE 0x02  
@@ -323,7 +323,7 @@ struct rx_buf_desc {
 	unsigned short dma_start_lo;  
 	unsigned short crc_upper;  
 	unsigned short crc_lower;  
-	unsigned short res:8, timeout:8;  
+	unsigned short res:8, timeout;  
 	unsigned short res2[5];	/* reserved field */  
 };  
   

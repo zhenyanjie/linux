@@ -2396,7 +2396,7 @@ struct cl_io {
 	/**
 	 * O_NOATIME
 	 */
-			     ci_noatime:1;
+			     ci_noatime;
 	/**
 	 * Number of pages owned by this IO. For invariant checking.
 	 */

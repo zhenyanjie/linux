@@ -23,8 +23,8 @@ struct device;
 struct c2port_ops;
 struct c2port_device {
 	kmemcheck_bitfield_begin(flags);
-	unsigned int access:1;
-	unsigned int flash_access:1;
+	unsigned int access;
+	unsigned int flash_access;
 	kmemcheck_bitfield_end(flags);
 
 	int id;

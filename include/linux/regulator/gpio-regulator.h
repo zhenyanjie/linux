@@ -70,8 +70,8 @@ struct gpio_regulator_config {
 	const char *supply_name;
 
 	int enable_gpio;
-	unsigned enable_high:1;
-	unsigned enabled_at_boot:1;
+	unsigned enable_high;
+	unsigned enabled_at_boot;
 	unsigned startup_delay;
 
 	struct gpio *gpios;

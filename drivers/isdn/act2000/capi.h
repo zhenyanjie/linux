@@ -46,10 +46,10 @@ typedef struct actcapi_addr {
 typedef  union actcapi_infonr {              /* info number                  */
 	__u16 mask;                          /* info-mask field              */
 	struct bmask {                       /* bit definitions              */
-		unsigned  codes:3;           /* code set                     */
-		unsigned  rsvd:5;            /* reserved                     */
-		unsigned  svind:1;           /* single, variable length ind. */
-		unsigned  wtype:7;           /* W-element type               */
+		unsigned  codes;           /* code set                     */
+		unsigned  rsvd;            /* reserved                     */
+		unsigned  svind;           /* single, variable length ind. */
+		unsigned  wtype;           /* W-element type               */
 	} bmask;
 } actcapi_infonr;
 
@@ -59,12 +59,12 @@ typedef union  actcapi_infoel {              /* info element                 */
 	__u8 display[40];                    /* display contents             */
 	__u8 uuinfo[40];                     /* User-user info field         */
 	struct cause {                       /* Cause information            */
-		unsigned ext2:1;             /* extension                    */
-		unsigned cod:2;              /* coding standard              */
-		unsigned spare:1;            /* spare                        */
-		unsigned loc:4;              /* location                     */
-		unsigned ext1:1;             /* extension                    */
-		unsigned cval:7;             /* Cause value                  */
+		unsigned ext2;             /* extension                    */
+		unsigned cod;              /* coding standard              */
+		unsigned spare;            /* spare                        */
+		unsigned loc;              /* location                     */
+		unsigned ext1;             /* extension                    */
+		unsigned cval;             /* Cause value                  */
 	} cause;
 	struct charge {                      /* Charging information         */
 		__u8 toc;                    /* type of charging info        */

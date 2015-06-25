@@ -101,7 +101,7 @@ struct dmxdev {
 	int filternum;
 	int capabilities;
 
-	unsigned int exit:1;
+	unsigned int exit;
 #define DMXDEV_CAP_DUPLEX 1
 	struct dmx_frontend *dvr_orig_fe;
 

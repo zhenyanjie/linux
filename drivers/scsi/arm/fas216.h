@@ -249,8 +249,8 @@ typedef struct {
 		unsigned char	msgin_fifo;		/* bytes in fifo at time of message in	*/
 		unsigned char	message[256];		/* last message received from device	*/
 
-		unsigned char	disconnectable:1;	/* this command can be disconnected	*/
-		unsigned char	aborting:1;		/* aborting command			*/
+		unsigned char	disconnectable;	/* this command can be disconnected	*/
+		unsigned char	aborting;		/* aborting command			*/
 	} scsi;
 
 	/* statistics information */
@@ -276,7 +276,7 @@ typedef struct {
 		unsigned char	cntl3;			/* Control Reg 3			*/
 		unsigned int	asyncperiod;		/* Async transfer period (ns)		*/
 		unsigned int	capabilities;		/* driver capabilities			*/
-		unsigned int	disconnect_ok:1;	/* Disconnects allowed?			*/
+		unsigned int	disconnect_ok;	/* Disconnects allowed?			*/
 	} ifcfg;
 
 	/* queue handling */
@@ -287,9 +287,9 @@ typedef struct {
 
 	/* per-device info */
 	struct fas216_device {
-		unsigned char	disconnect_ok:1;	/* device can disconnect		*/
-		unsigned char	parity_enabled:1;	/* parity checking enabled		*/
-		unsigned char	parity_check:1;		/* need to check parity checking	*/
+		unsigned char	disconnect_ok;	/* device can disconnect		*/
+		unsigned char	parity_enabled;	/* parity checking enabled		*/
+		unsigned char	parity_check;		/* need to check parity checking	*/
 		unsigned char	period;			/* sync xfer period in (*4ns)		*/
 		unsigned char	stp;			/* synchronous transfer period		*/
 		unsigned char	sof;			/* synchronous offset register		*/

@@ -41,8 +41,8 @@ struct dm_table {
 	struct dm_target *targets;
 
 	struct target_type *immutable_target_type;
-	unsigned integrity_supported:1;
-	unsigned singleton:1;
+	unsigned integrity_supported;
+	unsigned singleton;
 
 	/*
 	 * Indicates the rw permissions for the new logical

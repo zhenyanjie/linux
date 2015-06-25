@@ -203,7 +203,7 @@ struct ccc_object {
 	 *
 	 * \see ll_dirty_page_discard_warn.
 	 */
-	unsigned int		cob_discard_page_warned:1;
+	unsigned int		cob_discard_page_warned;
 };
 
 /**

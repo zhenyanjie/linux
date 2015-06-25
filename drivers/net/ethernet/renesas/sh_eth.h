@@ -472,20 +472,20 @@ struct sh_eth_cpu_data {
 
 	/* hardware features */
 	unsigned long irq_flags; /* IRQ configuration flags */
-	unsigned no_psr:1;	/* EtherC DO NOT have PSR */
-	unsigned apr:1;		/* EtherC have APR */
-	unsigned mpr:1;		/* EtherC have MPR */
-	unsigned tpauser:1;	/* EtherC have TPAUSER */
-	unsigned bculr:1;	/* EtherC have BCULR */
-	unsigned tsu:1;		/* EtherC have TSU */
-	unsigned hw_swap:1;	/* E-DMAC have DE bit in EDMR */
-	unsigned rpadir:1;	/* E-DMAC have RPADIR */
-	unsigned no_trimd:1;	/* E-DMAC DO NOT have TRIMD */
-	unsigned no_ade:1;	/* E-DMAC DO NOT have ADE bit in EESR */
-	unsigned hw_crc:1;	/* E-DMAC have CSMR */
-	unsigned select_mii:1;	/* EtherC have RMII_MII (MII select register) */
-	unsigned shift_rd0:1;	/* shift Rx descriptor word 0 right by 16 */
-	unsigned rmiimode:1;	/* EtherC has RMIIMODE register */
+	unsigned no_psr;	/* EtherC DO NOT have PSR */
+	unsigned apr;		/* EtherC have APR */
+	unsigned mpr;		/* EtherC have MPR */
+	unsigned tpauser;	/* EtherC have TPAUSER */
+	unsigned bculr;	/* EtherC have BCULR */
+	unsigned tsu;		/* EtherC have TSU */
+	unsigned hw_swap;	/* E-DMAC have DE bit in EDMR */
+	unsigned rpadir;	/* E-DMAC have RPADIR */
+	unsigned no_trimd;	/* E-DMAC DO NOT have TRIMD */
+	unsigned no_ade;	/* E-DMAC DO NOT have ADE bit in EESR */
+	unsigned hw_crc;	/* E-DMAC have CSMR */
+	unsigned select_mii;	/* EtherC have RMII_MII (MII select register) */
+	unsigned shift_rd0;	/* shift Rx descriptor word 0 right by 16 */
+	unsigned rmiimode;	/* EtherC has RMIIMODE register */
 };
 
 struct sh_eth_private {
@@ -520,8 +520,8 @@ struct sh_eth_private {
 	int port;			/* for TSU */
 	int vlan_num_ids;		/* for VLAN tag filter */
 
-	unsigned no_ether_link:1;
-	unsigned ether_link_active_low:1;
+	unsigned no_ether_link;
+	unsigned ether_link_active_low;
 };
 
 static inline void sh_eth_soft_swap(char *src, int len)

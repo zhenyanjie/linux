@@ -335,7 +335,7 @@ struct gfs2_glock {
 		     gl_target:2,	/* Target state */
 		     gl_demote_state:2,	/* State requested by remote node */
 		     gl_req:2,		/* State in last dlm request */
-		     gl_reply:8;	/* Last reply from the dlm */
+		     gl_reply;	/* Last reply from the dlm */
 
 	unsigned int gl_hash;
 	unsigned long gl_demote_time; /* time of first demote request */
@@ -466,9 +466,9 @@ struct gfs2_trans {
 	unsigned int tr_blocks;
 	unsigned int tr_revokes;
 	unsigned int tr_reserved;
-	unsigned int tr_touched:1;
-	unsigned int tr_attached:1;
-	unsigned int tr_alloced:1;
+	unsigned int tr_touched;
+	unsigned int tr_attached;
+	unsigned int tr_alloced;
 
 	unsigned int tr_num_buf_new;
 	unsigned int tr_num_databuf_new;
@@ -541,18 +541,18 @@ struct gfs2_args {
 	char ar_lockproto[GFS2_LOCKNAME_LEN];	/* Name of the Lock Protocol */
 	char ar_locktable[GFS2_LOCKNAME_LEN];	/* Name of the Lock Table */
 	char ar_hostdata[GFS2_LOCKNAME_LEN];	/* Host specific data */
-	unsigned int ar_spectator:1;		/* Don't get a journal */
-	unsigned int ar_localflocks:1;		/* Let the VFS do flock|fcntl */
-	unsigned int ar_debug:1;		/* Oops on errors */
-	unsigned int ar_posix_acl:1;		/* Enable posix acls */
-	unsigned int ar_quota:2;		/* off/account/on */
-	unsigned int ar_suiddir:1;		/* suiddir support */
-	unsigned int ar_data:2;			/* ordered/writeback */
-	unsigned int ar_meta:1;			/* mount metafs */
-	unsigned int ar_discard:1;		/* discard requests */
-	unsigned int ar_errors:2;               /* errors=withdraw | panic */
-	unsigned int ar_nobarrier:1;            /* do not send barriers */
-	unsigned int ar_rgrplvb:1;		/* use lvbs for rgrp info */
+	unsigned int ar_spectator;		/* Don't get a journal */
+	unsigned int ar_localflocks;		/* Let the VFS do flock|fcntl */
+	unsigned int ar_debug;		/* Oops on errors */
+	unsigned int ar_posix_acl;		/* Enable posix acls */
+	unsigned int ar_quota;		/* off/account/on */
+	unsigned int ar_suiddir;		/* suiddir support */
+	unsigned int ar_data;			/* ordered/writeback */
+	unsigned int ar_meta;			/* mount metafs */
+	unsigned int ar_discard;		/* discard requests */
+	unsigned int ar_errors;               /* errors=withdraw | panic */
+	unsigned int ar_nobarrier;            /* do not send barriers */
+	unsigned int ar_rgrplvb;		/* use lvbs for rgrp info */
 	int ar_commit;				/* Commit interval */
 	int ar_statfs_quantum;			/* The fast statfs interval */
 	int ar_quota_quantum;			/* The quota interval */

@@ -53,9 +53,9 @@ struct vbios_data {
 	u8 type; /* 0 == desktop, 1 == mobile */
 	u8 relstage;
 	u8 chipset;
-	u8 lvds_present:1;
-	u8 tv_present:1;
-	u8 rsvd2:6; /* finish byte */
+	u8 lvds_present;
+	u8 tv_present;
+	u8 rsvd2; /* finish byte */
 	u8 rsvd3[4];
 	u8 signon[155];
 	u8 copyright[61];
@@ -110,39 +110,39 @@ struct vbios_data {
 
 struct bdb_general_features {
         /* bits 1 */
-	u8 panel_fitting:2;
-	u8 flexaim:1;
-	u8 msg_enable:1;
-	u8 clear_screen:3;
-	u8 color_flip:1;
+	u8 panel_fitting;
+	u8 flexaim;
+	u8 msg_enable;
+	u8 clear_screen;
+	u8 color_flip;
 
         /* bits 2 */
-	u8 download_ext_vbt:1;
-	u8 enable_ssc:1;
-	u8 ssc_freq:1;
-	u8 enable_lfp_on_override:1;
-	u8 disable_ssc_ddt:1;
-	u8 rsvd7:1;
-	u8 display_clock_mode:1;
-	u8 rsvd8:1; /* finish byte */
+	u8 download_ext_vbt;
+	u8 enable_ssc;
+	u8 ssc_freq;
+	u8 enable_lfp_on_override;
+	u8 disable_ssc_ddt;
+	u8 rsvd7;
+	u8 display_clock_mode;
+	u8 rsvd8; /* finish byte */
 
         /* bits 3 */
-	u8 disable_smooth_vision:1;
-	u8 single_dvi:1;
-	u8 rsvd9:1;
-	u8 fdi_rx_polarity_inverted:1;
-	u8 rsvd10:4; /* finish byte */
+	u8 disable_smooth_vision;
+	u8 single_dvi;
+	u8 rsvd9;
+	u8 fdi_rx_polarity_inverted;
+	u8 rsvd10; /* finish byte */
 
         /* bits 4 */
 	u8 legacy_monitor_detect;
 
         /* bits 5 */
-	u8 int_crt_support:1;
-	u8 int_tv_support:1;
-	u8 int_efp_support:1;
-	u8 dp_ssc_enb:1;	/* PCH attached eDP supports SSC */
-	u8 dp_ssc_freq:1;	/* SSC freq for PCH attached eDP */
-	u8 rsvd11:3; /* finish byte */
+	u8 int_crt_support;
+	u8 int_tv_support;
+	u8 int_efp_support;
+	u8 dp_ssc_enb;	/* PCH attached eDP supports SSC */
+	u8 dp_ssc_freq;	/* SSC freq for PCH attached eDP */
+	u8 rsvd11; /* finish byte */
 } __packed;
 
 /* pre-915 */
@@ -259,10 +259,10 @@ struct bdb_general_definitions {
 	u8 crt_ddc_gmbus_pin;
 
 	/* DPMS bits */
-	u8 dpms_acpi:1;
-	u8 skip_boot_crt_detect:1;
-	u8 dpms_aim:1;
-	u8 rsvd1:5; /* finish byte */
+	u8 dpms_acpi;
+	u8 skip_boot_crt_detect;
+	u8 dpms_aim;
+	u8 rsvd1; /* finish byte */
 
 	/* boot device bits */
 	u8 boot_display[2];
@@ -289,13 +289,13 @@ struct bdb_lvds_options {
 	u8 panel_type;
 	u8 rsvd1;
 	/* LVDS capabilities, stored in a dword */
-	u8 pfit_mode:2;
-	u8 pfit_text_mode_enhanced:1;
-	u8 pfit_gfx_mode_enhanced:1;
-	u8 pfit_ratio_auto:1;
-	u8 pixel_dither:1;
-	u8 lvds_edid:1;
-	u8 rsvd2:1;
+	u8 pfit_mode;
+	u8 pfit_text_mode_enhanced;
+	u8 pfit_gfx_mode_enhanced;
+	u8 pfit_ratio_auto;
+	u8 pixel_dither;
+	u8 lvds_edid;
+	u8 rsvd2;
 	u8 rsvd4;
 	/* LVDS Panel channel bits stored here */
 	u32 lvds_panel_channel_bits;
@@ -347,28 +347,28 @@ struct lvds_dvo_timing {
 	u16 clock;		/**< In 10khz */
 	u8 hactive_lo;
 	u8 hblank_lo;
-	u8 hblank_hi:4;
-	u8 hactive_hi:4;
+	u8 hblank_hi;
+	u8 hactive_hi;
 	u8 vactive_lo;
 	u8 vblank_lo;
-	u8 vblank_hi:4;
-	u8 vactive_hi:4;
+	u8 vblank_hi;
+	u8 vactive_hi;
 	u8 hsync_off_lo;
 	u8 hsync_pulse_width;
-	u8 vsync_pulse_width:4;
-	u8 vsync_off:4;
-	u8 rsvd0:6;
-	u8 hsync_off_hi:2;
+	u8 vsync_pulse_width;
+	u8 vsync_off;
+	u8 rsvd0;
+	u8 hsync_off_hi;
 	u8 h_image;
 	u8 v_image;
 	u8 max_hv;
 	u8 h_border;
 	u8 v_border;
-	u8 rsvd1:3;
-	u8 digital:2;
-	u8 vsync_positive:1;
-	u8 hsync_positive:1;
-	u8 rsvd2:1;
+	u8 rsvd1;
+	u8 digital;
+	u8 vsync_positive;
+	u8 hsync_positive;
+	u8 rsvd2;
 } __packed;
 
 struct lvds_pnp_id {
@@ -393,9 +393,9 @@ struct bdb_lvds_lfp_data {
 #define BDB_BACKLIGHT_TYPE_PWM	2
 
 struct bdb_lfp_backlight_data_entry {
-	u8 type:2;
-	u8 active_low_pwm:1;
-	u8 obsolete1:5;
+	u8 type;
+	u8 active_low_pwm;
+	u8 obsolete1;
 	u16 pwm_freq_hz;
 	u8 min_brightness;
 	u8 obsolete2;
@@ -460,37 +460,37 @@ struct bdb_sdvo_lvds_options {
 #define BDB_DRIVER_FEATURE_EDP			3
 
 struct bdb_driver_features {
-	u8 boot_dev_algorithm:1;
-	u8 block_display_switch:1;
-	u8 allow_display_switch:1;
-	u8 hotplug_dvo:1;
-	u8 dual_view_zoom:1;
-	u8 int15h_hook:1;
-	u8 sprite_in_clone:1;
-	u8 primary_lfp_id:1;
+	u8 boot_dev_algorithm;
+	u8 block_display_switch;
+	u8 allow_display_switch;
+	u8 hotplug_dvo;
+	u8 dual_view_zoom;
+	u8 int15h_hook;
+	u8 sprite_in_clone;
+	u8 primary_lfp_id;
 
 	u16 boot_mode_x;
 	u16 boot_mode_y;
 	u8 boot_mode_bpp;
 	u8 boot_mode_refresh;
 
-	u16 enable_lfp_primary:1;
-	u16 selective_mode_pruning:1;
-	u16 dual_frequency:1;
-	u16 render_clock_freq:1; /* 0: high freq; 1: low freq */
-	u16 nt_clone_support:1;
-	u16 power_scheme_ui:1; /* 0: CUI; 1: 3rd party */
-	u16 sprite_display_assign:1; /* 0: secondary; 1: primary */
-	u16 cui_aspect_scaling:1;
-	u16 preserve_aspect_ratio:1;
-	u16 sdvo_device_power_down:1;
-	u16 crt_hotplug:1;
-	u16 lvds_config:2;
-	u16 tv_hotplug:1;
-	u16 hdmi_config:2;
+	u16 enable_lfp_primary;
+	u16 selective_mode_pruning;
+	u16 dual_frequency;
+	u16 render_clock_freq; /* 0: high freq; 1: low freq */
+	u16 nt_clone_support;
+	u16 power_scheme_ui; /* 0: CUI; 1: 3rd party */
+	u16 sprite_display_assign; /* 0: secondary; 1: primary */
+	u16 cui_aspect_scaling;
+	u16 preserve_aspect_ratio;
+	u16 sdvo_device_power_down;
+	u16 crt_hotplug;
+	u16 lvds_config;
+	u16 tv_hotplug;
+	u16 hdmi_config;
 
-	u8 static_display:1;
-	u8 reserved2:7;
+	u8 static_display;
+	u8 reserved2;
 	u16 legacy_crt_max_x;
 	u16 legacy_crt_max_y;
 	u8 legacy_crt_max_refresh;
@@ -498,19 +498,19 @@ struct bdb_driver_features {
 	u8 hdmi_termination;
 	u8 custom_vbt_version;
 	/* Driver features data block */
-	u16 rmpm_enabled:1;
-	u16 s2ddt_enabled:1;
-	u16 dpst_enabled:1;
-	u16 bltclt_enabled:1;
-	u16 adb_enabled:1;
-	u16 drrs_enabled:1;
-	u16 grs_enabled:1;
-	u16 gpmt_enabled:1;
-	u16 tbt_enabled:1;
-	u16 psr_enabled:1;
-	u16 ips_enabled:1;
-	u16 reserved3:4;
-	u16 pc_feature_valid:1;
+	u16 rmpm_enabled;
+	u16 s2ddt_enabled;
+	u16 dpst_enabled;
+	u16 bltclt_enabled;
+	u16 adb_enabled;
+	u16 drrs_enabled;
+	u16 grs_enabled;
+	u16 gpmt_enabled;
+	u16 tbt_enabled;
+	u16 psr_enabled;
+	u16 ips_enabled;
+	u16 reserved3;
+	u16 pc_feature_valid;
 } __packed;
 
 #define EDP_18BPP	0
@@ -539,10 +539,10 @@ struct edp_power_seq {
 } __packed;
 
 struct edp_link_params {
-	u8 rate:4;
-	u8 lanes:4;
-	u8 preemphasis:4;
-	u8 vswing:4;
+	u8 rate;
+	u8 lanes;
+	u8 preemphasis;
+	u8 vswing;
 } __packed;
 
 struct bdb_edp {
@@ -761,44 +761,44 @@ struct mipi_config {
 	u16 panel_id;
 
 	/* General Params */
-	u32 enable_dithering:1;
-	u32 rsvd1:1;
-	u32 is_bridge:1;
+	u32 enable_dithering;
+	u32 rsvd1;
+	u32 is_bridge;
 
-	u32 panel_arch_type:2;
-	u32 is_cmd_mode:1;
+	u32 panel_arch_type;
+	u32 is_cmd_mode;
 
 #define NON_BURST_SYNC_PULSE	0x1
 #define NON_BURST_SYNC_EVENTS	0x2
 #define BURST_MODE		0x3
-	u32 video_transfer_mode:2;
+	u32 video_transfer_mode;
 
-	u32 cabc_supported:1;
-	u32 pwm_blc:1;
+	u32 cabc_supported;
+	u32 pwm_blc;
 
 	/* Bit 13:10 */
 #define PIXEL_FORMAT_RGB565			0x1
 #define PIXEL_FORMAT_RGB666			0x2
 #define PIXEL_FORMAT_RGB666_LOOSELY_PACKED	0x3
 #define PIXEL_FORMAT_RGB888			0x4
-	u32 videomode_color_format:4;
+	u32 videomode_color_format;
 
 	/* Bit 15:14 */
 #define ENABLE_ROTATION_0	0x0
 #define ENABLE_ROTATION_90	0x1
 #define ENABLE_ROTATION_180	0x2
 #define ENABLE_ROTATION_270	0x3
-	u32 rotation:2;
-	u32 bta_enabled:1;
-	u32 rsvd2:15;
+	u32 rotation;
+	u32 bta_enabled;
+	u32 rsvd2;
 
 	/* 2 byte Port Description */
 #define DUAL_LINK_NOT_SUPPORTED	0
 #define DUAL_LINK_FRONT_BACK	1
 #define DUAL_LINK_PIXEL_ALT	2
-	u16 dual_link:2;
-	u16 lane_cnt:2;
-	u16 rsvd3:12;
+	u16 dual_link;
+	u16 lane_cnt;
+	u16 rsvd3;
 
 	u16 rsvd4;
 
@@ -809,15 +809,15 @@ struct mipi_config {
 #define  BYTE_CLK_SEL_20MHZ		0
 #define  BYTE_CLK_SEL_10MHZ		1
 #define  BYTE_CLK_SEL_5MHZ		2
-	u8 byte_clk_sel:2;
+	u8 byte_clk_sel;
 
-	u8 rsvd6:6;
+	u8 rsvd6;
 
 	/* DPHY Flags */
-	u16 dphy_param_valid:1;
-	u16 eot_pkt_disabled:1;
-	u16 enable_clk_stop:1;
-	u16 rsvd7:13;
+	u16 dphy_param_valid;
+	u16 eot_pkt_disabled;
+	u16 enable_clk_stop;
+	u16 rsvd7;
 
 	u32 hs_tx_timeout;
 	u32 lp_rx_timeout;
@@ -828,13 +828,13 @@ struct mipi_config {
 	u32 lp_byte_clk_val;
 
 	/*  4 byte Dphy Params */
-	u32 prepare_cnt:6;
-	u32 rsvd8:2;
-	u32 clk_zero_cnt:8;
-	u32 trail_cnt:5;
-	u32 rsvd9:3;
-	u32 exit_zero_cnt:6;
-	u32 rsvd10:2;
+	u32 prepare_cnt;
+	u32 rsvd8;
+	u32 clk_zero_cnt;
+	u32 trail_cnt;
+	u32 rsvd9;
+	u32 exit_zero_cnt;
+	u32 rsvd10;
 
 	u32 clk_lane_switch_cnt;
 	u32 hl_switch_cnt;

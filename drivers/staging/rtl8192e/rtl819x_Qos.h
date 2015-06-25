@@ -57,16 +57,16 @@
 union qos_tsinfo {
 	u8		charData[3];
 	struct {
-		u8		ucTrafficType:1;
-		u8		ucTSID:4;
-		u8		ucDirection:2;
-		u8		ucAccessPolicy:2;
-		u8		ucAggregation:1;
-		u8		ucPSB:1;
-		u8		ucUP:3;
-		u8		ucTSInfoAckPolicy:2;
-		u8		ucSchedule:1;
-		u8		ucReserved:7;
+		u8		ucTrafficType;
+		u8		ucTSID;
+		u8		ucDirection;
+		u8		ucAccessPolicy;
+		u8		ucAggregation;
+		u8		ucPSB;
+		u8		ucUP;
+		u8		ucTSInfoAckPolicy;
+		u8		ucSchedule;
+		u8		ucReserved;
 	} field;
 };
 
@@ -378,18 +378,18 @@ union aci_aifsn {
 	u8	charData;
 
 	struct {
-		u8	AIFSN:4;
-		u8	acm:1;
-		u8	ACI:2;
-		u8	Reserved:1;
+		u8	AIFSN;
+		u8	acm;
+		u8	ACI;
+		u8	Reserved;
 	} f;
 };
 
 union ecw {
 	u8	charData;
 	struct {
-		u8	ECWmin:4;
-		u8	ECWmax:4;
+		u8	ECWmin;
+		u8	ECWmax;
 	} f;
 };
 

@@ -85,10 +85,10 @@
 struct iphdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
 	__u8	ihl:4,
-		version:4;
+		version;
 #elif defined (__BIG_ENDIAN_BITFIELD)
 	__u8	version:4,
-  		ihl:4;
+  		ihl;
 #else
 #error	"Please fix <asm/byteorder.h>"
 #endif

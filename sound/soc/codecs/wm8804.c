@@ -294,11 +294,11 @@ static int wm8804_hw_params(struct snd_pcm_substream *substream,
 }
 
 struct pll_div {
-	u32 prescale:1;
-	u32 mclkdiv:1;
-	u32 freqmode:2;
-	u32 n:4;
-	u32 k:22;
+	u32 prescale;
+	u32 mclkdiv;
+	u32 freqmode;
+	u32 n;
+	u32 k;
 };
 
 /* PLL rate to output rate divisions */

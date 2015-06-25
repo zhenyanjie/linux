@@ -694,8 +694,8 @@ typedef struct skb_pool {
 	 card. */
 
 typedef struct vc_map {
-	volatile unsigned int tx:1;	/* TX vc? */
-	volatile unsigned int rx:1;	/* RX vc? */
+	volatile unsigned int tx;	/* TX vc? */
+	volatile unsigned int rx;	/* RX vc? */
 	struct atm_vcc *tx_vcc, *rx_vcc;
 	struct sk_buff *rx_iov;	/* RX iovector skb */
 	scq_info *scq;		/* To keep track of the SCQ */

@@ -189,55 +189,55 @@ struct hda_gen_spec {
 
 	/* for pin sensing */
 	/* current status; set in hda_geneic.c */
-	unsigned int hp_jack_present:1;
-	unsigned int line_jack_present:1;
-	unsigned int speaker_muted:1; /* current status of speaker mute */
-	unsigned int line_out_muted:1; /* current status of LO mute */
+	unsigned int hp_jack_present;
+	unsigned int line_jack_present;
+	unsigned int speaker_muted; /* current status of speaker mute */
+	unsigned int line_out_muted; /* current status of LO mute */
 
 	/* internal states of automute / autoswitch behavior */
-	unsigned int auto_mic:1;
-	unsigned int automute_speaker:1; /* automute speaker outputs */
-	unsigned int automute_lo:1; /* automute LO outputs */
+	unsigned int auto_mic;
+	unsigned int automute_speaker; /* automute speaker outputs */
+	unsigned int automute_lo; /* automute LO outputs */
 
 	/* capabilities detected by parser */
-	unsigned int detect_hp:1;	/* Headphone detection enabled */
-	unsigned int detect_lo:1;	/* Line-out detection enabled */
-	unsigned int automute_speaker_possible:1; /* there are speakers and either LO or HP */
-	unsigned int automute_lo_possible:1;	  /* there are line outs and HP */
+	unsigned int detect_hp;	/* Headphone detection enabled */
+	unsigned int detect_lo;	/* Line-out detection enabled */
+	unsigned int automute_speaker_possible; /* there are speakers and either LO or HP */
+	unsigned int automute_lo_possible;	  /* there are line outs and HP */
 
 	/* additional parameters set by codec drivers */
-	unsigned int master_mute:1;	/* master mute over all */
-	unsigned int keep_vref_in_automute:1; /* Don't clear VREF in automute */
-	unsigned int line_in_auto_switch:1; /* allow line-in auto switch */
-	unsigned int auto_mute_via_amp:1; /* auto-mute via amp instead of pinctl */
+	unsigned int master_mute;	/* master mute over all */
+	unsigned int keep_vref_in_automute; /* Don't clear VREF in automute */
+	unsigned int line_in_auto_switch; /* allow line-in auto switch */
+	unsigned int auto_mute_via_amp; /* auto-mute via amp instead of pinctl */
 
 	/* parser behavior flags; set before snd_hda_gen_parse_auto_config() */
-	unsigned int suppress_auto_mute:1; /* suppress input jack auto mute */
-	unsigned int suppress_auto_mic:1; /* suppress input jack auto switch */
+	unsigned int suppress_auto_mute; /* suppress input jack auto mute */
+	unsigned int suppress_auto_mic; /* suppress input jack auto switch */
 
 	/* other parse behavior flags */
-	unsigned int need_dac_fix:1; /* need to limit DACs for multi channels */
-	unsigned int hp_mic:1; /* Allow HP as a mic-in */
-	unsigned int suppress_hp_mic_detect:1; /* Don't detect HP/mic */
-	unsigned int no_primary_hp:1; /* Don't prefer HP pins to speaker pins */
-	unsigned int no_multi_io:1; /* Don't try multi I/O config */
-	unsigned int multi_cap_vol:1; /* allow multiple capture xxx volumes */
-	unsigned int inv_dmic_split:1; /* inverted dmic w/a for conexant */
-	unsigned int own_eapd_ctl:1; /* set EAPD by own function */
-	unsigned int keep_eapd_on:1; /* don't turn off EAPD automatically */
-	unsigned int vmaster_mute_enum:1; /* add vmaster mute mode enum */
-	unsigned int indep_hp:1; /* independent HP supported */
-	unsigned int prefer_hp_amp:1; /* enable HP amp for speaker if any */
-	unsigned int add_stereo_mix_input:1; /* add aamix as a capture src */
-	unsigned int add_jack_modes:1; /* add i/o jack mode enum ctls */
-	unsigned int power_down_unused:1; /* power down unused widgets */
+	unsigned int need_dac_fix; /* need to limit DACs for multi channels */
+	unsigned int hp_mic; /* Allow HP as a mic-in */
+	unsigned int suppress_hp_mic_detect; /* Don't detect HP/mic */
+	unsigned int no_primary_hp; /* Don't prefer HP pins to speaker pins */
+	unsigned int no_multi_io; /* Don't try multi I/O config */
+	unsigned int multi_cap_vol; /* allow multiple capture xxx volumes */
+	unsigned int inv_dmic_split; /* inverted dmic w/a for conexant */
+	unsigned int own_eapd_ctl; /* set EAPD by own function */
+	unsigned int keep_eapd_on; /* don't turn off EAPD automatically */
+	unsigned int vmaster_mute_enum; /* add vmaster mute mode enum */
+	unsigned int indep_hp; /* independent HP supported */
+	unsigned int prefer_hp_amp; /* enable HP amp for speaker if any */
+	unsigned int add_stereo_mix_input; /* add aamix as a capture src */
+	unsigned int add_jack_modes; /* add i/o jack mode enum ctls */
+	unsigned int power_down_unused; /* power down unused widgets */
 
 	/* other internal flags */
-	unsigned int no_analog:1; /* digital I/O only */
-	unsigned int dyn_adc_switch:1; /* switch ADCs (for ALC275) */
-	unsigned int indep_hp_enabled:1; /* independent HP enabled */
-	unsigned int have_aamix_ctl:1;
-	unsigned int hp_mic_jack_modes:1;
+	unsigned int no_analog; /* digital I/O only */
+	unsigned int dyn_adc_switch; /* switch ADCs (for ALC275) */
+	unsigned int indep_hp_enabled; /* independent HP enabled */
+	unsigned int have_aamix_ctl;
+	unsigned int hp_mic_jack_modes;
 
 	/* additional mute flags (only effective with auto_mute_via_amp=1) */
 	u64 mute_bits;

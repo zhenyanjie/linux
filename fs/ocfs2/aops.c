@@ -861,7 +861,7 @@ struct ocfs2_write_ctxt {
 	 * w_target_locked is used for page_mkwrite path indicating no unlocking
 	 * against w_target_page in ocfs2_write_end_nolock.
 	 */
-	unsigned int			w_target_locked:1;
+	unsigned int			w_target_locked;
 
 	/*
 	 * ocfs2_write_end() uses this to know what the real range to

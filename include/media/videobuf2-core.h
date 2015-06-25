@@ -417,10 +417,10 @@ struct vb2_queue {
 	void				*alloc_ctx[VIDEO_MAX_PLANES];
 	unsigned int			plane_sizes[VIDEO_MAX_PLANES];
 
-	unsigned int			streaming:1;
-	unsigned int			start_streaming_called:1;
-	unsigned int			error:1;
-	unsigned int			waiting_for_buffers:1;
+	unsigned int			streaming;
+	unsigned int			start_streaming_called;
+	unsigned int			error;
+	unsigned int			waiting_for_buffers;
 
 	struct vb2_fileio_data		*fileio;
 	struct vb2_threadio_data	*threadio;

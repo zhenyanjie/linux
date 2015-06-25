@@ -32,7 +32,7 @@
 struct tfrc_loss_interval {
 	u64		 li_seqno:48,
 			 li_ccval:4,
-			 li_is_closed:1;
+			 li_is_closed;
 	u32		 li_length;
 };
 

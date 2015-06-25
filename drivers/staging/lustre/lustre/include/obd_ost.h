@@ -84,7 +84,7 @@ struct osc_enqueue_args {
 	struct ost_lvb	   *oa_lvb;
 	struct lustre_handle     *oa_lockh;
 	struct ldlm_enqueue_info *oa_ei;
-	unsigned int	      oa_agl:1;
+	unsigned int	      oa_agl;
 };
 
 extern void osc_update_enqueue(struct lustre_handle *lov_lockhp,

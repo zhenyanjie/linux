@@ -2807,8 +2807,8 @@ struct rep_manu_reply{
 	u8 response_length;
 	u16 expander_change_count;
 	u8 reserved0[2];
-	u8 sas_format:1;
-	u8 reserved1:7;
+	u8 sas_format;
+	u8 reserved1;
 	u8 reserved2[3];
 	u8 vendor_id[SAS_EXPANDER_VENDOR_ID_LEN];
 	u8 product_id[SAS_EXPANDER_PRODUCT_ID_LEN];

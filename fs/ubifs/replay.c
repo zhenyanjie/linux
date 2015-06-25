@@ -56,7 +56,7 @@ struct replay_entry {
 	int lnum;
 	int offs;
 	int len;
-	unsigned int deletion:1;
+	unsigned int deletion;
 	unsigned long long sqnum;
 	struct list_head list;
 	union ubifs_key key;

@@ -34,13 +34,13 @@ struct crc_info {
 	unsigned long pos_verify;
 	};
 	/* CRC mirror flags */
-	unsigned int bitmirr:1;
-	unsigned int bytmirr:1;
-	unsigned int w16swp:1;
-	unsigned int fdsel:1;
-	unsigned int rsltmirr:1;
-	unsigned int polymirr:1;
-	unsigned int cmpmirr:1;
+	unsigned int bitmirr;
+	unsigned int bytmirr;
+	unsigned int w16swp;
+	unsigned int fdsel;
+	unsigned int rsltmirr;
+	unsigned int polymirr;
+	unsigned int cmpmirr;
 };
 
 /* Userspace interface */

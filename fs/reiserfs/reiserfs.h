@@ -82,7 +82,7 @@ struct reiserfs_inode_info {
 	 * new_packing_locality is created; new blocks for the contents
 	 * of this directory should be displaced
 	 */
-	unsigned new_packing_locality:1;
+	unsigned new_packing_locality;
 
 	/*
 	 * we use these for fsync or O_SYNC to decide which transaction
@@ -2857,7 +2857,7 @@ struct reiserfs_transaction_handle {
 	 * if new block allocation occurres, that block
 	 * should be displaced from others
 	 */
-	unsigned displace_new_blocks:1;
+	unsigned displace_new_blocks;
 
 	struct list_head t_list;
 };
@@ -3293,8 +3293,8 @@ struct __reiserfs_blocknr_hint {
 	 * the allocator uses different polices for getting disk
 	 * space for formatted/unformatted blocks with/without preallocation
 	 */
-	unsigned formatted_node:1;
-	unsigned preallocate:1;
+	unsigned formatted_node;
+	unsigned preallocate;
 };
 
 typedef struct __reiserfs_blocknr_hint reiserfs_blocknr_hint_t;

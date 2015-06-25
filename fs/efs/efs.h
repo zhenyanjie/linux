@@ -36,10 +36,10 @@ typedef uint32_t	efs_ino_t;
 typedef union extent_u {
 	unsigned char raw[8];
 	struct extent_s {
-		unsigned int	ex_magic:8;	/* magic # (zero) */
-		unsigned int	ex_bn:24;	/* basic block */
-		unsigned int	ex_length:8;	/* numblocks in this extent */
-		unsigned int	ex_offset:24;	/* logical offset into file */
+		unsigned int	ex_magic;	/* magic # (zero) */
+		unsigned int	ex_bn;	/* basic block */
+		unsigned int	ex_length;	/* numblocks in this extent */
+		unsigned int	ex_offset;	/* logical offset into file */
 	} cooked;
 } efs_extent;
 

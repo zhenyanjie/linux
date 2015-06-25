@@ -245,7 +245,7 @@ struct hso_serial {
 	enum rx_ctrl_state rx_state;
 	u8 rts_state;
 	u8 dtr_state;
-	unsigned tx_urb_used:1;
+	unsigned tx_urb_used;
 
 	struct tty_port port;
 	/* from usb_serial_port */

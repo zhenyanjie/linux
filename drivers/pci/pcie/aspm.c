@@ -47,16 +47,16 @@ struct pcie_link_state {
 	struct list_head link;		/* node in parent's children list */
 
 	/* ASPM state */
-	u32 aspm_support:3;		/* Supported ASPM state */
-	u32 aspm_enabled:3;		/* Enabled ASPM state */
-	u32 aspm_capable:3;		/* Capable ASPM state with latency */
-	u32 aspm_default:3;		/* Default ASPM state by BIOS */
-	u32 aspm_disable:3;		/* Disabled ASPM state */
+	u32 aspm_support;		/* Supported ASPM state */
+	u32 aspm_enabled;		/* Enabled ASPM state */
+	u32 aspm_capable;		/* Capable ASPM state with latency */
+	u32 aspm_default;		/* Default ASPM state by BIOS */
+	u32 aspm_disable;		/* Disabled ASPM state */
 
 	/* Clock PM state */
-	u32 clkpm_capable:1;		/* Clock PM capable? */
-	u32 clkpm_enabled:1;		/* Current Clock PM state */
-	u32 clkpm_default:1;		/* Default Clock PM state by BIOS */
+	u32 clkpm_capable;		/* Clock PM capable? */
+	u32 clkpm_enabled;		/* Current Clock PM state */
+	u32 clkpm_default;		/* Default Clock PM state by BIOS */
 
 	/* Exit latencies */
 	struct aspm_latency latency_up;	/* Upstream direction exit latency */
@@ -282,8 +282,8 @@ static u32 calc_l1_acceptable(u32 encoding)
 }
 
 struct aspm_register_info {
-	u32 support:2;
-	u32 enabled:2;
+	u32 support;
+	u32 enabled;
 	u32 latency_encoding_l0s;
 	u32 latency_encoding_l1;
 };

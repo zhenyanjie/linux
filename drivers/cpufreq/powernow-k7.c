@@ -62,7 +62,7 @@ union powernow_acpi_control_t {
 		unsigned long fid:5,
 			vid:5,
 			sgtc:20,
-			res1:2;
+			res1;
 	} bits;
 	unsigned long val;
 };

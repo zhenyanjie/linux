@@ -89,10 +89,10 @@ struct apci3xxx_boardinfo {
 	unsigned int ai_maxdata;
 	unsigned char ai_conv_units;
 	unsigned int ai_min_acq_ns;
-	unsigned int has_ao:1;
-	unsigned int has_dig_in:1;
-	unsigned int has_dig_out:1;
-	unsigned int has_ttl_io:1;
+	unsigned int has_ao;
+	unsigned int has_dig_in;
+	unsigned int has_dig_out;
+	unsigned int has_ttl_io;
 };
 
 static const struct apci3xxx_boardinfo apci3xxx_boardtypes[] = {

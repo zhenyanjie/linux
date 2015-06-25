@@ -66,7 +66,7 @@ struct max8973_regulator_platform_data {
 	unsigned long control_flags;
 	bool enable_ext_control;
 	int dvs_gpio;
-	unsigned dvs_def_state:1;
+	unsigned dvs_def_state;
 };
 
 #endif /* __LINUX_REGULATOR_MAX8973_H */

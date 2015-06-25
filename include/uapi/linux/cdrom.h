@@ -219,8 +219,8 @@ struct cdrom_subchnl
 struct cdrom_tocentry 
 {
 	__u8	cdte_track;
-	__u8	cdte_adr	:4;
-	__u8	cdte_ctrl	:4;
+	__u8	cdte_adr	;
+	__u8	cdte_ctrl	;
 	__u8	cdte_format;
 	union cdrom_addr cdte_addr;
 	__u8	cdte_datamode;
@@ -912,31 +912,31 @@ struct mode_page_header {
 struct rm_feature_desc {
 	__be16 feature_code;
 #if defined(__BIG_ENDIAN_BITFIELD)
-	__u8 reserved1:2;
-	__u8 feature_version:4;
-	__u8 persistent:1;
-	__u8 curr:1;
+	__u8 reserved1;
+	__u8 feature_version;
+	__u8 persistent;
+	__u8 curr;
 #elif defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 curr:1;
-	__u8 persistent:1;
-	__u8 feature_version:4;
-	__u8 reserved1:2;
+	__u8 curr;
+	__u8 persistent;
+	__u8 feature_version;
+	__u8 reserved1;
 #endif
 	__u8 add_len;
 #if defined(__BIG_ENDIAN_BITFIELD)
-	__u8 mech_type:3;
-	__u8 load:1;
-	__u8 eject:1;
-	__u8 pvnt_jmpr:1;
-	__u8 dbml:1;
-	__u8 lock:1;
+	__u8 mech_type;
+	__u8 load;
+	__u8 eject;
+	__u8 pvnt_jmpr;
+	__u8 dbml;
+	__u8 lock;
 #elif defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 lock:1;
-	__u8 dbml:1;
-	__u8 pvnt_jmpr:1;
-	__u8 eject:1;
-	__u8 load:1;
-	__u8 mech_type:3;
+	__u8 lock;
+	__u8 dbml;
+	__u8 pvnt_jmpr;
+	__u8 eject;
+	__u8 load;
+	__u8 mech_type;
 #endif
 	__u8 reserved2;
 	__u8 reserved3;

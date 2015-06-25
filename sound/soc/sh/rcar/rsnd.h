@@ -249,11 +249,11 @@ struct rsnd_dai {
 	struct rsnd_dai_stream playback;
 	struct rsnd_dai_stream capture;
 
-	unsigned int clk_master:1;
-	unsigned int bit_clk_inv:1;
-	unsigned int frm_clk_inv:1;
-	unsigned int sys_delay:1;
-	unsigned int data_alignment:1;
+	unsigned int clk_master;
+	unsigned int bit_clk_inv;
+	unsigned int frm_clk_inv;
+	unsigned int sys_delay;
+	unsigned int data_alignment;
 };
 
 #define rsnd_rdai_nr(priv) ((priv)->rdai_nr)

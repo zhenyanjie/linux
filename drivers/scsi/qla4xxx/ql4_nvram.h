@@ -66,16 +66,16 @@
 /* EEPROM format */
 /**/
 struct bios_params {
-	uint16_t SpinUpDelay:1;
-	uint16_t BIOSDisable:1;
-	uint16_t MMAPEnable:1;
-	uint16_t BootEnable:1;
-	uint16_t Reserved0:12;
-	uint8_t bootID0:7;
-	uint8_t bootID0Valid:1;
+	uint16_t SpinUpDelay;
+	uint16_t BIOSDisable;
+	uint16_t MMAPEnable;
+	uint16_t BootEnable;
+	uint16_t Reserved0;
+	uint8_t bootID0;
+	uint8_t bootID0Valid;
 	uint8_t bootLUN0[8];
-	uint8_t bootID1:7;
-	uint8_t bootID1Valid:1;
+	uint8_t bootID1;
+	uint8_t bootID1Valid;
 	uint8_t bootLUN1[8];
 	uint16_t MaxLunsPerTarget;
 	uint8_t Reserved1[10];

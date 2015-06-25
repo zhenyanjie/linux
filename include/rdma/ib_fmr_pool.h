@@ -61,7 +61,7 @@ struct ib_fmr_pool_param {
 	void                  (*flush_function)(struct ib_fmr_pool *pool,
 						void               *arg);
 	void                   *flush_arg;
-	unsigned                cache:1;
+	unsigned                cache;
 };
 
 struct ib_pool_fmr {

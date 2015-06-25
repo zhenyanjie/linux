@@ -71,19 +71,19 @@ struct stv0299_config
 	u32 mclk;
 
 	/* does the inversion require inversion? */
-	u8 invert:1;
+	u8 invert;
 
 	/* Skip reinitialisation? */
-	u8 skip_reinit:1;
+	u8 skip_reinit;
 
 	/* LOCK OUTPUT setting */
-	u8 lock_output:2;
+	u8 lock_output;
 
 	/* Is 13v controlled by OP0 or OP1? */
-	u8 volt13_op0_op1:1;
+	u8 volt13_op0_op1;
 
 	/* Turn-off OP0? */
-	u8 op0_off:1;
+	u8 op0_off;
 
 	/* minimum delay before retuning */
 	int min_delay_ms;

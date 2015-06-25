@@ -763,8 +763,8 @@ struct hci_phy_link_bss_info {
 };
 
 struct packet_irp_hcicmd_data {
-	u16		OCF:10;
-	u16		OGF:6;
+	u16		OCF;
+	u16		OGF;
 	u8		Length;
 	u8		Data[20];
 };
@@ -1043,9 +1043,9 @@ struct bt_30info {
 };
 
 struct packet_irp_acl_data {
-	u16		Handle:12;
-	u16		PB_Flag:2;
-	u16		BC_Flag:2;
+	u16		Handle;
+	u16		PB_Flag;
+	u16		BC_Flag;
 	u16		Length;
 	u8		Data[1];
 };

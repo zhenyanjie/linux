@@ -88,9 +88,9 @@ union drbd_dev_state {
 		unsigned aftr_isp:1 ; /* isp .. imposed sync pause */
 		unsigned peer_isp:1 ;
 		unsigned user_isp:1 ;
-		unsigned _pad:11;   /* 0	 unused */
+		unsigned _pad;   /* 0	 unused */
 #elif defined(__BIG_ENDIAN_BITFIELD)
-		unsigned _pad:11;
+		unsigned _pad;
 		unsigned user_isp:1 ;
 		unsigned peer_isp:1 ;
 		unsigned aftr_isp:1 ; /* isp .. imposed sync pause */

@@ -57,7 +57,7 @@ struct isp1301 {
 	int			irq_type;
 
 	u32			last_otg_ctrl;
-	unsigned		working:1;
+	unsigned		working;
 
 	struct timer_list	timer;
 

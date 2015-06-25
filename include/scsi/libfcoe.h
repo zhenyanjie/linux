@@ -220,7 +220,7 @@ struct fcoe_fcf {
 	u8 flogi_sent;
 	u16 flags;
 	u32 fka_period;
-	u8 fd_flags:1;
+	u8 fd_flags;
 };
 
 #define fcoe_fcf_to_fcf_dev(x)			\

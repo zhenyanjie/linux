@@ -212,7 +212,7 @@ struct btree_op {
 	/* Btree level at which we start taking write locks */
 	short			lock;
 
-	unsigned		insert_collision:1;
+	unsigned		insert_collision;
 };
 
 static inline void bch_btree_op_init(struct btree_op *op, int write_lock_level)

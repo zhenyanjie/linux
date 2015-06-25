@@ -25,8 +25,8 @@
 struct imxuart_platform_data {
 	unsigned int flags;
 	void (*irda_enable)(int enable);
-	unsigned int irda_inv_rx:1;
-	unsigned int irda_inv_tx:1;
+	unsigned int irda_inv_rx;
+	unsigned int irda_inv_tx;
 	unsigned short transceiver_delay;
 };
 

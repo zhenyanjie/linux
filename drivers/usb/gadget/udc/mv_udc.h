@@ -212,7 +212,7 @@ struct mv_udc {
 				force_fs:1,
 				clock_gating:1,
 				active:1,
-				stopped:1;      /* stop bit is setted */
+				stopped;      /* stop bit is setted */
 
 	struct work_struct	vbus_work;
 	struct workqueue_struct *qwork;
@@ -236,7 +236,7 @@ struct mv_ep {
 	unsigned		stopped:1,
 				wedge:1,
 				ep_type:2,
-				ep_num:8;
+				ep_num;
 };
 
 /* request data structure */
@@ -247,7 +247,7 @@ struct mv_req {
 	struct list_head	queue;
 	unsigned int            test_mode;
 	unsigned		dtd_count;
-	unsigned		mapped:1;
+	unsigned		mapped;
 };
 
 #define EP_QUEUE_HEAD_MULT_POS			30

@@ -641,7 +641,7 @@ struct transaction_s
 	 * This transaction is being forced and some process is
 	 * waiting for it to finish.
 	 */
-	unsigned int t_synchronous_commit:1;
+	unsigned int t_synchronous_commit;
 
 	/* Disk flush needs to be sent to fs partition [no locking] */
 	int			t_need_data_flush;

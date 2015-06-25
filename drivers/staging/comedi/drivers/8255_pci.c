@@ -79,7 +79,7 @@ struct pci_8255_boardinfo {
 	const char *name;
 	int dio_badr;
 	int n_8255;
-	unsigned int has_mite:1;
+	unsigned int has_mite;
 };
 
 static const struct pci_8255_boardinfo pci_8255_boards[] = {

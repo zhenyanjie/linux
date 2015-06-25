@@ -674,12 +674,12 @@ struct bcm_sysport_priv {
 	int			old_duplex;
 
 	/* Misc fields */
-	unsigned int		rx_chk_en:1;
-	unsigned int		tsb_en:1;
-	unsigned int		crc_fwd:1;
+	unsigned int		rx_chk_en;
+	unsigned int		tsb_en;
+	unsigned int		crc_fwd;
 	u16			rev;
 	u32			wolopts;
-	unsigned int		wol_irq_disabled:1;
+	unsigned int		wol_irq_disabled;
 
 	/* MIB related fields */
 	struct bcm_sysport_mib	mib;

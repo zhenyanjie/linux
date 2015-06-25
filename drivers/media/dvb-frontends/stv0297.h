@@ -36,10 +36,10 @@ struct stv0297_config
 	u8* inittab;
 
 	/* does the "inversion" need inverted? */
-	u8 invert:1;
+	u8 invert;
 
 	/* set to 1 if the device requires an i2c STOP during reading */
-	u8 stop_during_read:1;
+	u8 stop_during_read;
 };
 
 #if IS_ENABLED(CONFIG_DVB_STV0297)

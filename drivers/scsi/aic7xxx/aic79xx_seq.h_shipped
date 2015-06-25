@@ -1031,7 +1031,7 @@ static const struct patch {
 	ahd_patch_func_t		*patch_func;
 	uint32_t		 begin		:10,
 				 skip_instr	:10,
-				 skip_patch	:12;
+				 skip_patch	;
 } patches[] = {
 	{ ahd_patch1_func, 0, 3, 3 },
 	{ ahd_patch1_func, 1, 1, 2 },

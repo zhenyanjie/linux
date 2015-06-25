@@ -32,12 +32,12 @@ struct s5h1420_config
 	u8 demod_address;
 
 	/* does the inversion require inversion? */
-	u8 invert:1;
+	u8 invert;
 
-	u8 repeated_start_workaround:1;
-	u8 cdclk_polarity:1; /* 1 == falling edge, 0 == raising edge */
+	u8 repeated_start_workaround;
+	u8 cdclk_polarity; /* 1 == falling edge, 0 == raising edge */
 
-	u8 serial_mpeg:1;
+	u8 serial_mpeg;
 };
 
 #if IS_ENABLED(CONFIG_DVB_S5H1420)

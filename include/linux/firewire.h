@@ -194,11 +194,11 @@ struct fw_device {
 	const u32 *config_rom;
 	size_t config_rom_length;
 	int config_rom_retries;
-	unsigned is_local:1;
-	unsigned max_rec:4;
-	unsigned cmc:1;
-	unsigned irmc:1;
-	unsigned bc_implemented:2;
+	unsigned is_local;
+	unsigned max_rec;
+	unsigned cmc;
+	unsigned irmc;
+	unsigned bc_implemented;
 
 	work_func_t workfn;
 	struct delayed_work work;
@@ -391,12 +391,12 @@ void fw_core_remove_descriptor(struct fw_descriptor *desc);
  */
 struct fw_iso_packet {
 	u16 payload_length;	/* Length of indirect payload		*/
-	u32 interrupt:1;	/* Generate interrupt on this packet	*/
-	u32 skip:1;		/* tx: Set to not send packet at all	*/
+	u32 interrupt;	/* Generate interrupt on this packet	*/
+	u32 skip;		/* tx: Set to not send packet at all	*/
 				/* rx: Sync bit, wait for matching sy	*/
-	u32 tag:2;		/* tx: Tag in packet header		*/
-	u32 sy:4;		/* tx: Sy in packet header		*/
-	u32 header_length:8;	/* Length of immediate header		*/
+	u32 tag;		/* tx: Tag in packet header		*/
+	u32 sy;		/* tx: Sy in packet header		*/
+	u32 header_length;	/* Length of immediate header		*/
 	u32 header[0];		/* tx: Top of 1394 isoch. data_block	*/
 };
 

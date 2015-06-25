@@ -123,11 +123,11 @@ struct bfi_sge_s {
 #ifdef __BIG_ENDIAN
 	u32	flags:2,
 			rsvd:2,
-			sg_len:28;
+			sg_len;
 #else
 	u32	sg_len:28,
 			rsvd:2,
-			flags:2;
+			flags;
 #endif
 	union bfi_addr_u sga;
 };

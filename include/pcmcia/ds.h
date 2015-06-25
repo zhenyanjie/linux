@@ -117,25 +117,25 @@ struct pcmcia_device {
 	unsigned int		io_lines;	/* number of I/O lines */
 
 	/* Is the device suspended? */
-	u16			suspended:1;
+	u16			suspended;
 
 	/* Flags whether io, irq, win configurations were
 	 * requested, and whether the configuration is "locked" */
-	u16			_irq:1;
-	u16			_io:1;
-	u16			_win:4;
-	u16			_locked:1;
+	u16			_irq;
+	u16			_io;
+	u16			_win;
+	u16			_locked;
 
 	/* Flag whether a "fuzzy" func_id based match is
 	 * allowed. */
-	u16			allow_func_id_match:1;
+	u16			allow_func_id_match;
 
 	/* information about this device */
-	u16			has_manf_id:1;
-	u16			has_card_id:1;
-	u16			has_func_id:1;
+	u16			has_manf_id;
+	u16			has_card_id;
+	u16			has_func_id;
 
-	u16			reserved:4;
+	u16			reserved;
 
 	u8			func_id;
 	u16			manf_id;

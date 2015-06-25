@@ -110,9 +110,9 @@ extern u_char emulating;
 
 struct address {
 	unsigned int offset;
-	unsigned int selector:16;
-	unsigned int opcode:11;
-	unsigned int empty:5;
+	unsigned int selector;
+	unsigned int opcode;
+	unsigned int empty;
 };
 struct fpu__reg {
 	unsigned sigl;

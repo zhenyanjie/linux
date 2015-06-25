@@ -204,10 +204,10 @@ struct usbdux_private {
 
 	unsigned int ao_readback[USBDUX_NUM_AO_CHAN];
 
-	unsigned int high_speed:1;
-	unsigned int ai_cmd_running:1;
-	unsigned int ao_cmd_running:1;
-	unsigned int pwm_cmd_running:1;
+	unsigned int high_speed;
+	unsigned int ai_cmd_running;
+	unsigned int ao_cmd_running;
+	unsigned int pwm_cmd_running;
 
 	/* number of samples to acquire */
 	int ai_sample_count;

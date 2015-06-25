@@ -18,10 +18,10 @@ struct i2c_adapter;
 struct dib0090_io_config {
 	u32 clock_khz;
 
-	u8 pll_bypass:1;
-	u8 pll_range:1;
-	u8 pll_prediv:6;
-	u8 pll_loopdiv:6;
+	u8 pll_bypass;
+	u8 pll_range;
+	u8 pll_prediv;
+	u8 pll_loopdiv;
 
 	u8 adc_clock_ratio;	/* valid is 8, 7 ,6 */
 	u16 pll_int_loop_filt;
@@ -53,7 +53,7 @@ struct dib0090_config {
 
 	int (*get_adc_power) (struct dvb_frontend *);
 
-	u8 clkouttobamse:1;	/* activate or deactivate clock output */
+	u8 clkouttobamse;	/* activate or deactivate clock output */
 	u8 analog_output;
 
 	u8 i2c_address;

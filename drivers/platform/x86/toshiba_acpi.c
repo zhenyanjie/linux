@@ -158,19 +158,19 @@ struct toshiba_acpi_dev {
 	int kbd_mode;
 	int kbd_time;
 
-	unsigned int illumination_supported:1;
-	unsigned int video_supported:1;
-	unsigned int fan_supported:1;
-	unsigned int system_event_supported:1;
-	unsigned int ntfy_supported:1;
-	unsigned int info_supported:1;
-	unsigned int tr_backlight_supported:1;
-	unsigned int kbd_illum_supported:1;
-	unsigned int kbd_led_registered:1;
-	unsigned int touchpad_supported:1;
-	unsigned int eco_supported:1;
-	unsigned int accelerometer_supported:1;
-	unsigned int sysfs_created:1;
+	unsigned int illumination_supported;
+	unsigned int video_supported;
+	unsigned int fan_supported;
+	unsigned int system_event_supported;
+	unsigned int ntfy_supported;
+	unsigned int info_supported;
+	unsigned int tr_backlight_supported;
+	unsigned int kbd_illum_supported;
+	unsigned int kbd_led_registered;
+	unsigned int touchpad_supported;
+	unsigned int eco_supported;
+	unsigned int accelerometer_supported;
+	unsigned int sysfs_created;
 
 	struct mutex mutex;
 };

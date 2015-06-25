@@ -78,11 +78,11 @@ struct csio_fcf_info {
 	uint8_t			fc_map[3];
 	uint32_t		fka_adv;
 	uint32_t		fcfi;
-	uint8_t			get_next:1;
-	uint8_t			link_aff:1;
-	uint8_t			fpma:1;
-	uint8_t			spma:1;
-	uint8_t			login:1;
+	uint8_t			get_next;
+	uint8_t			link_aff;
+	uint8_t			fpma;
+	uint8_t			spma;
+	uint8_t			login;
 	uint8_t			portid;
 	uint8_t			spma_mac[6];
 	struct kref		kref;

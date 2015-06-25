@@ -109,7 +109,7 @@
  *     printf ("#define ICADE_MAX_USAGE %d\n\n", max_usage);
  *     printf ("struct icade_key {\n");
  *     printf ("\tu16 to;\n");
- *     printf ("\tu8 press:1;\n");
+ *     printf ("\tu8 press;\n");
  *     printf ("};\n\n");
  *     printf ("static const struct icade_key "
  *             "icade_usage_table[%d] = {\n", max_usage + 1);
@@ -127,7 +127,7 @@
 
 struct icade_key {
 	u16 to;
-	u8 press:1;
+	u8 press;
 };
 
 static const struct icade_key icade_usage_table[30] = {

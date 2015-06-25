@@ -29,12 +29,12 @@
  *	extent allocation descriptor (xad)
  */
 typedef struct xad {
-	unsigned flag:8;	/* 1: flag */
-	unsigned rsvrd:16;	/* 2: reserved */
-	unsigned off1:8;	/* 1: offset in unit of fsblksize */
+	unsigned flag;	/* 1: flag */
+	unsigned rsvrd;	/* 2: reserved */
+	unsigned off1;	/* 1: offset in unit of fsblksize */
 	__le32 off2;		/* 4: offset in unit of fsblksize */
-	unsigned len:24;	/* 3: length in unit of fsblksize */
-	unsigned addr1:8;	/* 1: address in unit of fsblksize */
+	unsigned len;	/* 3: length in unit of fsblksize */
+	unsigned addr1;	/* 1: address in unit of fsblksize */
 	__le32 addr2;		/* 4: address in unit of fsblksize */
 } xad_t;			/* (16) */
 

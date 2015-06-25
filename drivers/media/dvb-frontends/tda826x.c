@@ -37,7 +37,7 @@ struct tda826x_priv {
 	/* i2c details */
 	int i2c_address;
 	struct i2c_adapter *i2c;
-	u8 has_loopthrough:1;
+	u8 has_loopthrough;
 	u32 frequency;
 };
 

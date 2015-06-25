@@ -62,8 +62,8 @@ struct mms114_data {
 };
 
 struct mms114_touch {
-	u8 id:4, reserved_bit4:1, type:2, pressed:1;
-	u8 x_hi:4, y_hi:4;
+	u8 id, reserved_bit4, type, pressed;
+	u8 x_hi, y_hi;
 	u8 x_lo;
 	u8 y_lo;
 	u8 width;

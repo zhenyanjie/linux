@@ -132,13 +132,13 @@ struct tm6000_gpio {
 };
 
 struct tm6000_capabilities {
-	unsigned int    has_tuner:1;
-	unsigned int    has_tda9874:1;
-	unsigned int    has_dvb:1;
-	unsigned int    has_zl10353:1;
-	unsigned int    has_eeprom:1;
-	unsigned int    has_remote:1;
-	unsigned int    has_radio:1;
+	unsigned int    has_tuner;
+	unsigned int    has_tda9874;
+	unsigned int    has_dvb;
+	unsigned int    has_zl10353;
+	unsigned int    has_eeprom;
+	unsigned int    has_remote;
+	unsigned int    has_radio;
 };
 
 struct tm6000_dvb {

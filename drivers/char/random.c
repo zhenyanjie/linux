@@ -432,9 +432,9 @@ struct entropy_store {
 	unsigned short input_rotate;
 	int entropy_count;
 	int entropy_total;
-	unsigned int initialized:1;
-	unsigned int limit:1;
-	unsigned int last_data_init:1;
+	unsigned int initialized;
+	unsigned int limit;
+	unsigned int last_data_init;
 	__u8 last_data[EXTRACT_SIZE];
 };
 
@@ -723,7 +723,7 @@ static void credit_entropy_bits_safe(struct entropy_store *r, int nbits)
 struct timer_rand_state {
 	cycles_t last_time;
 	long last_delta, last_delta2;
-	unsigned dont_count_entropy:1;
+	unsigned dont_count_entropy;
 };
 
 #define INIT_TIMER_RAND_STATE { INITIAL_JIFFIES, };

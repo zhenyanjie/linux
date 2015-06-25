@@ -37,8 +37,8 @@
 struct pcl724_board {
 	const char *name;
 	unsigned int io_range;
-	unsigned int can_have96:1;
-	unsigned int is_pet48:1;
+	unsigned int can_have96;
+	unsigned int is_pet48;
 	int numofports;
 };
 

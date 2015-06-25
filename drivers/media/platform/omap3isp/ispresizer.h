@@ -112,7 +112,7 @@ struct isp_res_device {
 	u32 crop_offset; /* additional offset for crop in memory mode */
 	struct resizer_ratio ratio;
 	int pm_state;
-	unsigned int applycrop:1;
+	unsigned int applycrop;
 	enum isp_pipeline_stream_state state;
 	wait_queue_head_t wait;
 	atomic_t stopping;

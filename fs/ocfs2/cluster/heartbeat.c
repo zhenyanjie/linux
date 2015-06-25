@@ -219,7 +219,7 @@ struct o2hb_region {
 	unsigned		hr_unclean_stop:1,
 				hr_aborted_start:1,
 				hr_item_pinned:1,
-				hr_item_dropped:1;
+				hr_item_dropped;
 
 	/* protected by the hr_callback_sem */
 	struct task_struct 	*hr_task;

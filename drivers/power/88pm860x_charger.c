@@ -106,10 +106,10 @@ struct pm860x_charger_info {
 	struct mutex lock;
 	int irq_nums;
 	int irq[7];
-	unsigned state:3;	/* fsm state */
-	unsigned online:1;	/* usb charger */
-	unsigned present:1;	/* battery present */
-	unsigned allowed:1;
+	unsigned state;	/* fsm state */
+	unsigned online;	/* usb charger */
+	unsigned present;	/* battery present */
+	unsigned allowed;
 };
 
 static char *pm860x_supplied_to[] = {

@@ -454,8 +454,8 @@ struct dwc3_ep {
 
 	char			name[20];
 
-	unsigned		direction:1;
-	unsigned		stream_capable:1;
+	unsigned		direction;
+	unsigned		stream_capable;
 };
 
 enum dwc3_phy {
@@ -594,9 +594,9 @@ struct dwc3_request {
 	struct dwc3_trb		*trb;
 	dma_addr_t		trb_dma;
 
-	unsigned		direction:1;
-	unsigned		mapped:1;
-	unsigned		queued:1;
+	unsigned		direction;
+	unsigned		mapped;
+	unsigned		queued;
 };
 
 /*
@@ -758,17 +758,17 @@ struct dwc3 {
 	u8			test_mode;
 	u8			test_mode_nr;
 
-	unsigned		delayed_status:1;
-	unsigned		ep0_bounced:1;
-	unsigned		ep0_expect_in:1;
-	unsigned		has_hibernation:1;
-	unsigned		is_selfpowered:1;
-	unsigned		needs_fifo_resize:1;
-	unsigned		pullups_connected:1;
-	unsigned		resize_fifos:1;
-	unsigned		setup_packet_pending:1;
-	unsigned		start_config_issued:1;
-	unsigned		three_stage_setup:1;
+	unsigned		delayed_status;
+	unsigned		ep0_bounced;
+	unsigned		ep0_expect_in;
+	unsigned		has_hibernation;
+	unsigned		is_selfpowered;
+	unsigned		needs_fifo_resize;
+	unsigned		pullups_connected;
+	unsigned		resize_fifos;
+	unsigned		setup_packet_pending;
+	unsigned		start_config_issued;
+	unsigned		three_stage_setup;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -776,9 +776,9 @@ struct dwc3 {
 /* -------------------------------------------------------------------------- */
 
 struct dwc3_event_type {
-	u32	is_devspec:1;
-	u32	type:7;
-	u32	reserved8_31:24;
+	u32	is_devspec;
+	u32	type;
+	u32	reserved8_31;
 } __packed;
 
 #define DWC3_DEPEVT_XFERCOMPLETE	0x01
@@ -808,11 +808,11 @@ struct dwc3_event_type {
  *	more information.
  */
 struct dwc3_event_depevt {
-	u32	one_bit:1;
-	u32	endpoint_number:5;
-	u32	endpoint_event:4;
-	u32	reserved11_10:2;
-	u32	status:4;
+	u32	one_bit;
+	u32	endpoint_number;
+	u32	endpoint_event;
+	u32	reserved11_10;
+	u32	status;
 
 /* Within XferNotReady */
 #define DEPEVT_STATUS_TRANSFER_ACTIVE	(1 << 3)
@@ -831,7 +831,7 @@ struct dwc3_event_depevt {
 #define DEPEVT_STATUS_CONTROL_DATA	1
 #define DEPEVT_STATUS_CONTROL_STATUS	2
 
-	u32	parameters:16;
+	u32	parameters;
 } __packed;
 
 /**
@@ -857,12 +857,12 @@ struct dwc3_event_depevt {
  * @reserved31_25: Reserved, not used
  */
 struct dwc3_event_devt {
-	u32	one_bit:1;
-	u32	device_event:7;
-	u32	type:4;
-	u32	reserved15_12:4;
-	u32	event_info:9;
-	u32	reserved31_25:7;
+	u32	one_bit;
+	u32	device_event;
+	u32	type;
+	u32	reserved15_12;
+	u32	event_info;
+	u32	reserved31_25;
 } __packed;
 
 /**
@@ -873,10 +873,10 @@ struct dwc3_event_devt {
  * @reserved31_12: Reserved, not used.
  */
 struct dwc3_event_gevt {
-	u32	one_bit:1;
-	u32	device_event:7;
-	u32	phy_port_number:4;
-	u32	reserved31_12:20;
+	u32	one_bit;
+	u32	device_event;
+	u32	phy_port_number;
+	u32	reserved31_12;
 } __packed;
 
 /**

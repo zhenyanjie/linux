@@ -34,7 +34,7 @@ struct snd_seq_timer {
 	/* ... tempo / offset / running state */
 
 	unsigned int		running:1,	/* running state of queue */	
-				initialized:1;	/* timer is initialized */
+				initialized;	/* timer is initialized */
 
 	unsigned int		tempo;		/* current tempo, us/tick */
 	int			ppq;		/* time resolution, ticks/quarter */

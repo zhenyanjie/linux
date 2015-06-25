@@ -538,10 +538,10 @@ struct  rx_fwinfo {
 	/* DWORD 6 */
 	u8 sigevm;
 	u8 max_ex_pwr;
-	u8 ex_intf_flag:1;
-	u8 sgi_en:1;
-	u8 rxsc:2;
-	u8 reserve:4;
+	u8 ex_intf_flag;
+	u8 sgi_en;
+	u8 rxsc;
+	u8 reserve;
 };
 
 struct phy_sts_cck_8192s_t {

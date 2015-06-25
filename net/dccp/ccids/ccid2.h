@@ -83,7 +83,7 @@ struct ccid2_hc_tx_sock {
 				tx_mdev_max,
 				tx_rttvar,
 				tx_rto;
-	u64			tx_rtt_seq:48;
+	u64			tx_rtt_seq;
 	struct timer_list	tx_rtotimer;
 
 	/* Congestion Window validation (optional, RFC 2861) */

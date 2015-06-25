@@ -74,7 +74,7 @@ struct budget_av {
 	struct tasklet_struct ciintf_irq_tasklet;
 	int slot_status;
 	struct dvb_ca_en50221 ca;
-	u8 reinitialise_demod:1;
+	u8 reinitialise_demod;
 };
 
 static int ciintf_slot_shutdown(struct dvb_ca_en50221 *ca, int slot);

@@ -566,11 +566,11 @@ struct i2400m_barker_db;
 struct i2400m {
 	struct wimax_dev wimax_dev;	/* FIRST! See doc */
 
-	unsigned updown:1;		/* Network device is up or down */
-	unsigned boot_mode:1;		/* is the device in boot mode? */
-	unsigned sboot:1;		/* signed or unsigned fw boot */
-	unsigned ready:1;		/* Device comm infrastructure ready */
-	unsigned rx_reorder:1;		/* RX reorder is enabled */
+	unsigned updown;		/* Network device is up or down */
+	unsigned boot_mode;		/* is the device in boot mode? */
+	unsigned sboot;		/* signed or unsigned fw boot */
+	unsigned ready;		/* Device comm infrastructure ready */
+	unsigned rx_reorder;		/* RX reorder is enabled */
 	u8 trace_msg_from_user;		/* echo rx msgs to 'trace' pipe */
 					/* typed u8 so /sys/kernel/debug/u8 can tweak */
 	enum i2400m_system_state state;
@@ -593,7 +593,7 @@ struct i2400m {
 	ssize_t (*bus_bm_wait_for_ack)(struct i2400m *,
 				       struct i2400m_bootrom_header *, size_t);
 	const char **bus_fw_names;
-	unsigned bus_bm_mac_addr_impaired:1;
+	unsigned bus_bm_mac_addr_impaired;
 	const struct i2400m_poke_table *bus_bm_pokes_table;
 
 	spinlock_t tx_lock;		/* protect TX state */

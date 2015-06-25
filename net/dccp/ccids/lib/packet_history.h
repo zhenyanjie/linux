@@ -79,8 +79,8 @@ void tfrc_tx_hist_purge(struct tfrc_tx_hist_entry **headp);
 struct tfrc_rx_hist_entry {
 	u64		 tfrchrx_seqno:48,
 			 tfrchrx_ccval:4,
-			 tfrchrx_type:4;
-	u64		 tfrchrx_ndp:48;
+			 tfrchrx_type;
+	u64		 tfrchrx_ndp;
 	ktime_t		 tfrchrx_tstamp;
 };
 
@@ -94,7 +94,7 @@ struct tfrc_rx_hist_entry {
 struct tfrc_rx_hist {
 	struct tfrc_rx_hist_entry *ring[TFRC_NDUPACK + 1];
 	u8			  loss_count:2,
-				  loss_start:2;
+				  loss_start;
 #define rtt_sample_prev		  loss_start
 };
 

@@ -125,18 +125,18 @@ static struct acpi_driver acpi_thermal_driver = {
 };
 
 struct acpi_thermal_state {
-	u8 critical:1;
-	u8 hot:1;
-	u8 passive:1;
-	u8 active:1;
-	u8 reserved:4;
+	u8 critical;
+	u8 hot;
+	u8 passive;
+	u8 active;
+	u8 reserved;
 	int active_index;
 };
 
 struct acpi_thermal_state_flags {
-	u8 valid:1;
-	u8 enabled:1;
-	u8 reserved:6;
+	u8 valid;
+	u8 enabled;
+	u8 reserved;
 };
 
 struct acpi_thermal_critical {
@@ -172,9 +172,9 @@ struct acpi_thermal_trips {
 };
 
 struct acpi_thermal_flags {
-	u8 cooling_mode:1;	/* _SCP */
-	u8 devices:1;		/* _TZD */
-	u8 reserved:6;
+	u8 cooling_mode;	/* _SCP */
+	u8 devices;		/* _TZD */
+	u8 reserved;
 };
 
 struct acpi_thermal {

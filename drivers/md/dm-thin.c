@@ -147,10 +147,10 @@ enum pool_mode {
 struct pool_features {
 	enum pool_mode mode;
 
-	bool zero_new_blocks:1;
-	bool discard_enabled:1;
-	bool discard_passdown:1;
-	bool error_if_no_space:1;
+	bool zero_new_blocks;
+	bool discard_enabled;
+	bool discard_passdown;
+	bool error_if_no_space;
 };
 
 struct thin_c;
@@ -170,7 +170,7 @@ struct pool {
 	int sectors_per_block_shift;
 
 	struct pool_features pf;
-	bool low_water_triggered:1;	/* A dm event has been sent */
+	bool low_water_triggered;	/* A dm event has been sent */
 
 	struct dm_bio_prison *prison;
 	struct dm_kcopyd_client *copier;
@@ -232,7 +232,7 @@ struct thin_c {
 
 	struct pool *pool;
 	struct dm_thin_device *td;
-	bool requeue_mode:1;
+	bool requeue_mode;
 	spinlock_t lock;
 	struct bio_list deferred_bio_list;
 	struct bio_list retry_on_resume_list;
@@ -555,8 +555,8 @@ static void remap_and_issue(struct thin_c *tc, struct bio *bio,
 struct dm_thin_new_mapping {
 	struct list_head list;
 
-	bool pass_discard:1;
-	bool definitely_not_shared:1;
+	bool pass_discard;
+	bool definitely_not_shared;
 
 	/*
 	 * Track quiescing, copying and zeroing preparation actions.  When this

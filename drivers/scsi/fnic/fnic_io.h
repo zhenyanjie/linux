@@ -59,7 +59,7 @@ struct fnic_io_req {
 	dma_addr_t sgl_list_pa;	/* dma address for sgl list */
 	u16 sgl_cnt;
 	u8 sgl_type; /* device DMA descriptor list type */
-	u8 io_completed:1; /* set to 1 when fw completes IO */
+	u8 io_completed; /* set to 1 when fw completes IO */
 	u32 port_id; /* remote port DID */
 	unsigned long start_time; /* in jiffies */
 	struct completion *abts_done; /* completion for abts */

@@ -94,8 +94,8 @@ struct acpi_battery {
 	u16 mode;
 	u16 spec;
 	u8 id;
-	u8 present:1;
-	u8 have_sysfs_alarm:1;
+	u8 present;
+	u8 have_sysfs_alarm;
 };
 
 #define to_acpi_battery(x) container_of(x, struct acpi_battery, bat)
@@ -106,9 +106,9 @@ struct acpi_sbs {
 	struct acpi_smb_hc *hc;
 	struct mutex lock;
 	struct acpi_battery battery[MAX_SBS_BAT];
-	u8 batteries_supported:4;
-	u8 manager_present:1;
-	u8 charger_present:1;
+	u8 batteries_supported;
+	u8 manager_present;
+	u8 charger_present;
 };
 
 #define to_acpi_sbs(x) container_of(x, struct acpi_sbs, charger)

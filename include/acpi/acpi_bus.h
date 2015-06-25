@@ -119,8 +119,8 @@ struct acpi_hotplug_profile {
 	struct kobject kobj;
 	int (*scan_dependent)(struct acpi_device *adev);
 	void (*notify_online)(struct acpi_device *adev);
-	bool enabled:1;
-	bool demand_offline:1;
+	bool enabled;
+	bool demand_offline;
 };
 
 static inline struct acpi_hotplug_profile *to_acpi_hotplug_profile(
@@ -187,27 +187,27 @@ struct acpi_driver {
 /* Status (_STA) */
 
 struct acpi_device_status {
-	u32 present:1;
-	u32 enabled:1;
-	u32 show_in_ui:1;
-	u32 functional:1;
-	u32 battery_present:1;
-	u32 reserved:27;
+	u32 present;
+	u32 enabled;
+	u32 show_in_ui;
+	u32 functional;
+	u32 battery_present;
+	u32 reserved;
 };
 
 /* Flags */
 
 struct acpi_device_flags {
-	u32 dynamic_status:1;
-	u32 removable:1;
-	u32 ejectable:1;
-	u32 power_manageable:1;
-	u32 match_driver:1;
-	u32 initialized:1;
-	u32 visited:1;
-	u32 hotplug_notify:1;
-	u32 is_dock_station:1;
-	u32 reserved:23;
+	u32 dynamic_status;
+	u32 removable;
+	u32 ejectable;
+	u32 power_manageable;
+	u32 match_driver;
+	u32 initialized;
+	u32 visited;
+	u32 hotplug_notify;
+	u32 is_dock_station;
+	u32 reserved;
 };
 
 /* File System */
@@ -231,10 +231,10 @@ struct acpi_hardware_id {
 };
 
 struct acpi_pnp_type {
-	u32 hardware_id:1;
-	u32 bus_address:1;
-	u32 platform_id:1;
-	u32 reserved:29;
+	u32 hardware_id;
+	u32 bus_address;
+	u32 platform_id;
+	u32 reserved;
 };
 
 struct acpi_device_pnp {
@@ -257,21 +257,21 @@ const char *acpi_device_hid(struct acpi_device *device);
 /* Power Management */
 
 struct acpi_device_power_flags {
-	u32 explicit_get:1;	/* _PSC present? */
-	u32 power_resources:1;	/* Power resources */
-	u32 inrush_current:1;	/* Serialize Dx->D0 */
-	u32 power_removed:1;	/* Optimize Dx->D0 */
-	u32 ignore_parent:1;	/* Power is independent of parent power state */
-	u32 dsw_present:1;	/* _DSW present? */
-	u32 reserved:26;
+	u32 explicit_get;	/* _PSC present? */
+	u32 power_resources;	/* Power resources */
+	u32 inrush_current;	/* Serialize Dx->D0 */
+	u32 power_removed;	/* Optimize Dx->D0 */
+	u32 ignore_parent;	/* Power is independent of parent power state */
+	u32 dsw_present;	/* _DSW present? */
+	u32 reserved;
 };
 
 struct acpi_device_power_state {
 	struct {
-		u8 valid:1;
-		u8 os_accessible:1;
-		u8 explicit_set:1;	/* _PSx present? */
-		u8 reserved:6;
+		u8 valid;
+		u8 os_accessible;
+		u8 explicit_set;	/* _PSx present? */
+		u8 reserved;
 	} flags;
 	int power;		/* % Power (compared to D0) */
 	int latency;		/* Dx->D0 time (microseconds) */
@@ -287,13 +287,13 @@ struct acpi_device_power {
 /* Performance Management */
 
 struct acpi_device_perf_flags {
-	u8 reserved:8;
+	u8 reserved;
 };
 
 struct acpi_device_perf_state {
 	struct {
-		u8 valid:1;
-		u8 reserved:7;
+		u8 valid;
+		u8 reserved;
 	} flags;
 	u8 power;		/* % Power (compared to P0) */
 	u8 performance;		/* % Performance (    "   ) */
@@ -309,9 +309,9 @@ struct acpi_device_perf {
 
 /* Wakeup Management */
 struct acpi_device_wakeup_flags {
-	u8 valid:1;		/* Can successfully enable wakeup? */
-	u8 run_wake:1;		/* Run-Wake GPE devices */
-	u8 notifier_present:1;  /* Wake-up notify handler has been installed */
+	u8 valid;		/* Can successfully enable wakeup? */
+	u8 run_wake;		/* Run-Wake GPE devices */
+	u8 notifier_present;  /* Wake-up notify handler has been installed */
 };
 
 struct acpi_device_wakeup_context {
@@ -334,7 +334,7 @@ struct acpi_device_physical_node {
 	unsigned int node_id;
 	struct list_head node;
 	struct device *dev;
-	bool put_online:1;
+	bool put_online;
 };
 
 /* Device */

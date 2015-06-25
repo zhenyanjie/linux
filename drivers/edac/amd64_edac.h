@@ -439,8 +439,8 @@ struct ecc_settings {
 	bool nbctl_valid;
 
 	struct flags {
-		unsigned long nb_mce_enable:1;
-		unsigned long nb_ecc_prev:1;
+		unsigned long nb_mce_enable;
+		unsigned long nb_ecc_prev;
 	} flags;
 };
 

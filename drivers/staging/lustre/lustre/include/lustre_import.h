@@ -295,7 +295,7 @@ struct obd_import {
 				   * chose new connection */
 				  imp_force_reconnect:1,
 				  /* import has tried to connect with server */
-				  imp_connect_tried:1;
+				  imp_connect_tried;
 	__u32		     imp_connect_op;
 	struct obd_connect_data   imp_connect_data;
 	__u64		     imp_connect_flags_orig;

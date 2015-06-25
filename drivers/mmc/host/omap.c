@@ -138,7 +138,7 @@ struct mmc_omap_host {
 	unsigned int		reg_shift;
 
 	struct work_struct	cmd_abort_work;
-	unsigned		abort:1;
+	unsigned		abort;
 	struct timer_list	cmd_abort_timer;
 
 	struct work_struct      slot_release_work;
@@ -153,8 +153,8 @@ struct mmc_omap_host {
 	u32			total_bytes_left;
 
 	unsigned		features;
-	unsigned		brs_received:1, dma_done:1;
-	unsigned		dma_in_use:1;
+	unsigned		brs_received, dma_done;
+	unsigned		dma_in_use;
 	spinlock_t		dma_lock;
 
 	struct mmc_omap_slot    *slots[OMAP_MMC_MAX_SLOTS];
@@ -165,7 +165,7 @@ struct mmc_omap_host {
 
 	struct timer_list       clk_timer;
 	spinlock_t		clk_lock;     /* for changing enabled state */
-	unsigned int            fclk_enabled:1;
+	unsigned int            fclk_enabled;
 	struct workqueue_struct *mmc_omap_wq;
 
 	struct omap_mmc_platform_data *pdata;

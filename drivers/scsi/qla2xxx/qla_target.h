@@ -349,17 +349,17 @@ struct fcp_hdr_le {
 struct atio7_fcp_cmnd {
 	uint64_t lun;
 	uint8_t  cmnd_ref;
-	uint8_t  task_attr:3;
-	uint8_t  reserved:5;
+	uint8_t  task_attr;
+	uint8_t  reserved;
 	uint8_t  task_mgmt_flags;
 #define FCP_CMND_TASK_MGMT_CLEAR_ACA		6
 #define FCP_CMND_TASK_MGMT_TARGET_RESET		5
 #define FCP_CMND_TASK_MGMT_LU_RESET		4
 #define FCP_CMND_TASK_MGMT_CLEAR_TASK_SET	2
 #define FCP_CMND_TASK_MGMT_ABORT_TASK_SET	1
-	uint8_t  wrdata:1;
-	uint8_t  rddata:1;
-	uint8_t  add_cdb_len:6;
+	uint8_t  wrdata;
+	uint8_t  rddata;
+	uint8_t  add_cdb_len;
 	uint8_t  cdb[16];
 	/*
 	 * add_cdb is optional and can absent from struct atio7_fcp_cmnd. Size 4
@@ -399,8 +399,8 @@ struct atio_from_isp {
 		struct {
 			uint16_t entry_hdr;
 			uint8_t  fcp_cmnd_len_low;
-			uint8_t  fcp_cmnd_len_high:4;
-			uint8_t  attr:4;
+			uint8_t  fcp_cmnd_len_high;
+			uint8_t  attr;
 			uint32_t exchange_addr;
 #define ATIO_EXCHANGE_ADDRESS_UNKNOWN	0xFFFFFFFF
 			struct fcp_hdr fcp_hdr;
@@ -598,8 +598,8 @@ struct abts_recv_from_24xx {
 	uint16_t nport_handle;
 	uint8_t  reserved_2[2];
 	uint8_t  vp_index;
-	uint8_t  reserved_3:4;
-	uint8_t  sof_type:4;
+	uint8_t  reserved_3;
+	uint8_t  sof_type;
 	uint32_t exchange_address;
 	struct fcp_hdr_le fcp_hdr_le;
 	uint8_t  reserved_4[16];
@@ -646,8 +646,8 @@ struct abts_resp_to_24xx {
 	uint16_t control_flags;
 #define ABTS_CONTR_FLG_TERM_EXCHG	BIT_0
 	uint8_t  vp_index;
-	uint8_t  reserved_3:4;
-	uint8_t  sof_type:4;
+	uint8_t  reserved_3;
+	uint8_t  sof_type;
 	uint32_t exchange_address;
 	struct fcp_hdr_le fcp_hdr_le;
 	union {
@@ -677,8 +677,8 @@ struct abts_resp_from_24xx_fw {
 	uint16_t nport_handle;
 	uint16_t reserved_1;
 	uint8_t  reserved_2;
-	uint8_t  reserved_3:4;
-	uint8_t  sof_type:4;
+	uint8_t  reserved_3;
+	uint8_t  sof_type;
 	uint32_t exchange_address;
 	struct fcp_hdr_le fcp_hdr_le;
 	uint8_t reserved_4[8];
@@ -828,8 +828,8 @@ struct qla_tgt {
 	int datasegs_per_cmd, datasegs_per_cont, sg_tablesize;
 
 	/* Target's flags, serialized by pha->hardware_lock */
-	unsigned int tgt_enable_64bit_addr:1; /* 64-bits PCI addr enabled */
-	unsigned int link_reinit_iocb_pending:1;
+	unsigned int tgt_enable_64bit_addr; /* 64-bits PCI addr enabled */
+	unsigned int link_reinit_iocb_pending;
 
 	/*
 	 * Protected by tgt_mutex AND hardware_lock for writing and tgt_mutex
@@ -883,9 +883,9 @@ struct qla_tgt_sess {
 	uint16_t loop_id;
 	port_id_t s_id;
 
-	unsigned int conf_compl_supported:1;
-	unsigned int deleted:1;
-	unsigned int local:1;
+	unsigned int conf_compl_supported;
+	unsigned int deleted;
+	unsigned int local;
 
 	struct se_session *se_sess;
 	struct scsi_qla_host *vha;
@@ -909,12 +909,12 @@ struct qla_tgt_cmd {
 	unsigned char sense_buffer[TRANSPORT_SENSE_BUFFER];
 
 	/* to save extra sess dereferences */
-	unsigned int conf_compl_supported:1;
-	unsigned int sg_mapped:1;
-	unsigned int free_sg:1;
-	unsigned int aborted:1; /* Needed in case of SRR */
-	unsigned int write_data_transferred:1;
-	unsigned int ctx_dsd_alloced:1;
+	unsigned int conf_compl_supported;
+	unsigned int sg_mapped;
+	unsigned int free_sg;
+	unsigned int aborted; /* Needed in case of SRR */
+	unsigned int write_data_transferred;
+	unsigned int ctx_dsd_alloced;
 
 	struct scatterlist *sg;	/* cmd data buffer SG vector */
 	int sg_cnt;		/* SG segments count */

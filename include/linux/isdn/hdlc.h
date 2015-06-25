@@ -44,15 +44,15 @@ struct isdnhdlc_vars {
 	u8 ffvalue;
 
 	/* set if transferring data */
-	u32 data_received:1;
+	u32 data_received;
 	/* set if D channel (send idle instead of flags) */
-	u32 dchannel:1;
+	u32 dchannel;
 	/* set if 56K adaptation */
-	u32 do_adapt56:1;
+	u32 do_adapt56;
 	/* set if in closing phase (need to send CRC + flag) */
-	u32 do_closing:1;
+	u32 do_closing;
 	/* set if data is bitreverse */
-	u32 do_bitreverse:1;
+	u32 do_bitreverse;
 };
 
 /* Feature Flags */

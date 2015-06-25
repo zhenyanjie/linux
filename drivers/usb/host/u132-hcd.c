@@ -152,15 +152,15 @@ struct u132_endp {
 	struct u132 *u132;
 	struct list_head endp_ring;
 	struct u132_ring *ring;
-	unsigned toggle_bits:2;
-	unsigned active:1;
-	unsigned delayed:1;
-	unsigned input:1;
-	unsigned output:1;
-	unsigned pipetype:2;
-	unsigned dequeueing:1;
-	unsigned edset_flush:1;
-	unsigned spare_bits:14;
+	unsigned toggle_bits;
+	unsigned active;
+	unsigned delayed;
+	unsigned input;
+	unsigned output;
+	unsigned pipetype;
+	unsigned dequeueing;
+	unsigned edset_flush;
+	unsigned spare_bits;
 	unsigned long jiffies;
 	struct usb_host_endpoint *hep;
 	struct u132_spin queue_lock;
@@ -172,8 +172,8 @@ struct u132_endp {
 	struct delayed_work scheduler;
 };
 struct u132_ring {
-	unsigned in_use:1;
-	unsigned length:7;
+	unsigned in_use;
+	unsigned length;
 	u8 number;
 	struct u132 *u132;
 	struct u132_endp *curr_endp;

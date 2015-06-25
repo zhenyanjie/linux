@@ -101,8 +101,8 @@ struct go7007_board_info {
 	int num_i2c_devs;
 	struct go_i2c {
 		const char *type;
-		unsigned int is_video:1;
-		unsigned int is_audio:1;
+		unsigned int is_video;
+		unsigned int is_audio;
 		int addr;
 		u32 flags;
 	} i2c_devs[5];
@@ -198,9 +198,9 @@ struct go7007 {
 	int height;
 	int encoder_h_offset;
 	int encoder_v_offset;
-	unsigned int encoder_h_halve:1;
-	unsigned int encoder_v_halve:1;
-	unsigned int encoder_subsample:1;
+	unsigned int encoder_h_halve;
+	unsigned int encoder_v_halve;
+	unsigned int encoder_subsample;
 
 	/* Encoder config */
 	u32 format;
@@ -209,18 +209,18 @@ struct go7007 {
 	int pali;
 	int aspect_ratio;
 	int gop_size;
-	unsigned int ipb:1;
-	unsigned int closed_gop:1;
-	unsigned int repeat_seqhead:1;
-	unsigned int seq_header_enable:1;
-	unsigned int gop_header_enable:1;
-	unsigned int dvd_mode:1;
-	unsigned int interlace_coding:1;
+	unsigned int ipb;
+	unsigned int closed_gop;
+	unsigned int repeat_seqhead;
+	unsigned int seq_header_enable;
+	unsigned int gop_header_enable;
+	unsigned int dvd_mode;
+	unsigned int interlace_coding;
 
 	/* Motion detection */
-	unsigned int modet_enable:1;
+	unsigned int modet_enable;
 	struct {
-		unsigned int enable:1;
+		unsigned int enable;
 		int pixel_threshold;
 		int motion_threshold;
 		int mb_threshold;

@@ -77,8 +77,8 @@ struct blinkm_data {
 	/* currently unused / todo */
 	u8 fade_speed;		/* fade speed     1 - 255 */
 	s8 time_adjust;		/* time adjust -128 - 127 */
-	u8 fade:1;		/* fade on = 1, off = 0 */
-	u8 rand:1;		/* rand fade mode on = 1 */
+	u8 fade;		/* fade on = 1, off = 0 */
+	u8 rand;		/* rand fade mode on = 1 */
 	u8 script_id;		/* script ID */
 	u8 script_repeats;	/* repeats of script */
 	u8 script_startline;	/* line to start */
@@ -123,7 +123,7 @@ static const struct {
 	u8 cmdbyte;
 	u8 nr_args;
 	u8 nr_ret;
-	u8 dir:2;
+	u8 dir;
 } blinkm_cmds[17] = {
   /* cmdchar, cmdbyte, nr_args, nr_ret,  dir */
 	{ 'n', 0x6e, 3, 0, 1},

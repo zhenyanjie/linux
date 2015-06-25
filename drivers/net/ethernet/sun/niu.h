@@ -2704,27 +2704,27 @@ struct fcram_hash_ipv6 {
 
 struct rx_pkt_hdr0 {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8	inputport:2,
-		maccheck:1,
-		class:5;
-	u8	vlan:1,
-		llcsnap:1,
-		noport:1,
-		badip:1,
-		tcamhit:1,
-		tres:2,
-		tzfvld:1;
+	u8	inputport,
+		maccheck,
+		class;
+	u8	vlan,
+		llcsnap,
+		noport,
+		badip,
+		tcamhit,
+		tres,
+		tzfvld;
 #elif defined(__BIG_ENDIAN_BITFIELD)
-	u8	class:5,
-		maccheck:1,
-		inputport:2;
-	u8	tzfvld:1,
-		tres:2,
-		tcamhit:1,
-		badip:1,
-		noport:1,
-		llcsnap:1,
-		vlan:1;
+	u8	class,
+		maccheck,
+		inputport;
+	u8	tzfvld,
+		tres,
+		tcamhit,
+		badip,
+		noport,
+		llcsnap,
+		vlan;
 #endif
 };
 
@@ -2732,25 +2732,25 @@ struct rx_pkt_hdr1 {
 	u8	hwrsvd1;
 	u8	tcammatch;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8	hwrsvd2:2,
-		hashit:1,
-		exact:1,
-		hzfvld:1,
-		hashsidx:3;
+	u8	hwrsvd2,
+		hashit,
+		exact,
+		hzfvld,
+		hashsidx;
 #elif defined(__BIG_ENDIAN_BITFIELD)
-	u8	hashsidx:3,
-		hzfvld:1,
-		exact:1,
-		hashit:1,
-		hwrsvd2:2;
+	u8	hashsidx,
+		hzfvld,
+		exact,
+		hashit,
+		hwrsvd2;
 #endif
 	u8	zcrsvd;
 
 	/* Bits 11:8 of zero copy flow ID.  */
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8	hwrsvd3:4, zflowid0:4;
+	u8	hwrsvd3, zflowid0;
 #elif defined(__BIG_ENDIAN_BITFIELD)
-	u8	zflowid0:4, hwrsvd3:4;
+	u8	zflowid0, hwrsvd3;
 #endif
 
 	/* Bits 7:0 of zero copy flow ID.  */
@@ -2764,9 +2764,9 @@ struct rx_pkt_hdr1 {
 
 	/* Bits 19:16 of hash value, H1.  */
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8	hwrsvd4:4, hashval1_0:4;
+	u8	hwrsvd4, hashval1_0;
 #elif defined(__BIG_ENDIAN_BITFIELD)
-	u8	hashval1_0:4, hwrsvd4:4;
+	u8	hashval1_0, hwrsvd4;
 #endif
 
 	/* Bits 15:8 of hash value, H1.  */

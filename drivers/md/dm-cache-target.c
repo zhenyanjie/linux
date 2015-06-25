@@ -263,12 +263,12 @@ struct cache {
 	struct dm_cache_policy *policy;
 	unsigned policy_nr_args;
 
-	bool need_tick_bio:1;
-	bool sized:1;
-	bool invalidate:1;
-	bool commit_requested:1;
-	bool loaded_mappings:1;
-	bool loaded_discards:1;
+	bool need_tick_bio;
+	bool sized;
+	bool invalidate;
+	bool commit_requested;
+	bool loaded_mappings;
+	bool loaded_discards;
 
 	/*
 	 * Cache features such as write-through.
@@ -285,8 +285,8 @@ struct cache {
 };
 
 struct per_bio_data {
-	bool tick:1;
-	unsigned req_nr:2;
+	bool tick;
+	unsigned req_nr;
 	struct dm_deferred_entry *all_io_entry;
 	struct dm_hook_info hook_info;
 
@@ -309,12 +309,12 @@ struct dm_cache_migration {
 	dm_oblock_t new_oblock;
 	dm_cblock_t cblock;
 
-	bool err:1;
-	bool writeback:1;
-	bool demote:1;
-	bool promote:1;
-	bool requeue_holder:1;
-	bool invalidate:1;
+	bool err;
+	bool writeback;
+	bool demote;
+	bool promote;
+	bool requeue_holder;
+	bool invalidate;
 
 	struct dm_bio_prison_cell *old_ocell;
 	struct dm_bio_prison_cell *new_ocell;

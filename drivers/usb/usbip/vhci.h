@@ -80,7 +80,7 @@ struct vhci_hcd {
 
 	u32 port_status[VHCI_NPORTS];
 
-	unsigned resuming:1;
+	unsigned resuming;
 	unsigned long re_timeout;
 
 	atomic_t seqnum;

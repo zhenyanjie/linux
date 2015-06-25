@@ -263,7 +263,7 @@ struct fwtty_port {
 	unsigned		   break_ctl:1,
 				   write_only:1,
 				   overrun:1,
-				   loopback:1;
+				   loopback;
 	unsigned long		   flags;
 
 	struct fwtty_peer __rcu	   *peer;

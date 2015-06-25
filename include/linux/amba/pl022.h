@@ -249,7 +249,7 @@ struct dma_chan;
 struct pl022_ssp_controller {
 	u16 bus_id;
 	u8 num_chipselect;
-	u8 enable_dma:1;
+	u8 enable_dma;
 	bool (*dma_filter)(struct dma_chan *chan, void *filter_param);
 	void *dma_rx_param;
 	void *dma_tx_param;

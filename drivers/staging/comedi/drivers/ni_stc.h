@@ -1388,7 +1388,7 @@ struct ni_board_struct {
 	unsigned int ai_maxdata;
 
 	int ai_fifo_depth;
-	unsigned int alwaysdither:1;
+	unsigned int alwaysdither;
 	int gainlkup;
 	int ai_speed;
 
@@ -1399,8 +1399,8 @@ struct ni_board_struct {
 	unsigned ao_speed;
 
 	int reg_type;
-	unsigned int has_8255:1;
-	unsigned int has_32dio_chan:1;
+	unsigned int has_8255;
+	unsigned int has_32dio_chan;
 
 	enum caldac_enum caldac[3];
 };
@@ -1477,16 +1477,16 @@ struct ni_private {
 	struct mite_dma_descriptor_ring *gpct_mite_ring[NUM_GPCT];
 
 	/* ni_pcimio board type flags (based on the boardinfo reg_type) */
-	unsigned int is_m_series:1;
-	unsigned int is_6xxx:1;
-	unsigned int is_611x:1;
-	unsigned int is_6143:1;
-	unsigned int is_622x:1;
-	unsigned int is_625x:1;
-	unsigned int is_628x:1;
-	unsigned int is_67xx:1;
-	unsigned int is_6711:1;
-	unsigned int is_6713:1;
+	unsigned int is_m_series;
+	unsigned int is_6xxx;
+	unsigned int is_611x;
+	unsigned int is_6143;
+	unsigned int is_622x;
+	unsigned int is_625x;
+	unsigned int is_628x;
+	unsigned int is_67xx;
+	unsigned int is_6711;
+	unsigned int is_6713;
 };
 
 #endif /* _COMEDI_NI_STC_H */

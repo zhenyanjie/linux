@@ -39,8 +39,8 @@
 struct asc_port {
 	struct uart_port port;
 	struct clk *clk;
-	unsigned int hw_flow_control:1;
-	unsigned int force_m1:1;
+	unsigned int hw_flow_control;
+	unsigned int force_m1;
 };
 
 static struct asc_port asc_ports[ASC_MAX_PORTS];

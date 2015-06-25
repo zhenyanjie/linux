@@ -769,9 +769,9 @@ static int wm8960_set_bias_level_capless(struct snd_soc_codec *codec,
 
 /* PLL divisors */
 struct _pll_div {
-	u32 pre_div:1;
-	u32 n:4;
-	u32 k:24;
+	u32 pre_div;
+	u32 n;
+	u32 k;
 };
 
 /* The size in bits of the pll divide multiplied by 10

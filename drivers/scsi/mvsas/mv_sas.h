@@ -257,28 +257,28 @@ struct mvs_device {
 /* Generate  PHY tunning parameters */
 struct phy_tuning {
 	/* 1 bit,  transmitter emphasis enable	*/
-	u8	trans_emp_en:1;
+	u8	trans_emp_en;
 	/* 4 bits, transmitter emphasis amplitude */
-	u8	trans_emp_amp:4;
+	u8	trans_emp_amp;
 	/* 3 bits, reserved space */
-	u8	Reserved_2bit_1:3;
+	u8	Reserved_2bit_1;
 	/* 5 bits, transmitter amplitude */
-	u8	trans_amp:5;
+	u8	trans_amp;
 	/* 2 bits, transmitter amplitude adjust */
-	u8	trans_amp_adj:2;
+	u8	trans_amp_adj;
 	/* 1 bit, reserved space */
-	u8	resv_2bit_2:1;
+	u8	resv_2bit_2;
 	/* 2 bytes, reserved space */
 	u8	reserved[2];
 };
 
 struct ffe_control {
 	/* 4 bits,  FFE Capacitor Select  (value range 0~F)  */
-	u8 ffe_cap_sel:4;
+	u8 ffe_cap_sel;
 	/* 3 bits,  FFE Resistor Select (value range 0~7) */
-	u8 ffe_rss_sel:3;
+	u8 ffe_rss_sel;
 	/* 1 bit reserve*/
-	u8 reserved:1;
+	u8 reserved;
 };
 
 /*

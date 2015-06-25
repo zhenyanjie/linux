@@ -62,7 +62,7 @@ struct tusb_omap_dma {
 	int				ch;
 	s8				dmareq;
 	s8				sync_dev;
-	unsigned			multichannel:1;
+	unsigned			multichannel;
 };
 
 /*

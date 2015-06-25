@@ -658,16 +658,16 @@ enum i40e_rx_l2_ptype {
 };
 
 struct i40e_rx_ptype_decoded {
-	u32 ptype:8;
-	u32 known:1;
-	u32 outer_ip:1;
-	u32 outer_ip_ver:1;
-	u32 outer_frag:1;
-	u32 tunnel_type:3;
-	u32 tunnel_end_prot:2;
-	u32 tunnel_end_frag:1;
-	u32 inner_prot:4;
-	u32 payload_layer:3;
+	u32 ptype;
+	u32 known;
+	u32 outer_ip;
+	u32 outer_ip_ver;
+	u32 outer_frag;
+	u32 tunnel_type;
+	u32 tunnel_end_prot;
+	u32 tunnel_end_frag;
+	u32 inner_prot;
+	u32 payload_layer;
 };
 
 enum i40e_rx_ptype_outer_ip {

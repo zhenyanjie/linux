@@ -89,14 +89,14 @@ struct rsvdpage_loc {
 };
 
 struct P2P_PS_Offload_t {
-	u8 Offload_En:1;
-	u8 role:1; /*  1: Owner, 0: Client */
-	u8 CTWindow_En:1;
-	u8 NoA0_En:1;
-	u8 NoA1_En:1;
-	u8 AllStaSleep:1; /*  Only valid in Owner */
-	u8 discovery:1;
-	u8 rsvd:1;
+	u8 Offload_En;
+	u8 role; /*  1: Owner, 0: Client */
+	u8 CTWindow_En;
+	u8 NoA0_En;
+	u8 NoA1_En;
+	u8 AllStaSleep; /*  Only valid in Owner */
+	u8 discovery;
+	u8 rsvd;
 };
 
 struct P2P_PS_CTWPeriod_t {
@@ -131,9 +131,9 @@ struct scan_en_parm {
 #define SET_H2CCMD_BT_FW_PATCH_SIZE(__pH2CCmd, __Value)						SET_BITS_TO_LE_4BYTE(__pH2CCmd, 8, 16, __Value) /*	SET_BITS_TO_LE_2BYTE((__pH2CCmd)+1, 0, 16, __Value) */
 
 struct lowpwr_lps_parm{
-	u8 bcn_count:4;
-	u8 tb_bcn_threshold:3;
-	u8 enable:1;
+	u8 bcn_count;
+	u8 tb_bcn_threshold;
+	u8 enable;
 	u8 bcn_interval;
 	u8 drop_threshold;
 	u8 max_early_period;

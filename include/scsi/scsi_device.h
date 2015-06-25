@@ -20,7 +20,7 @@ struct scsi_mode_data {
 	__u8	medium_type;
 	__u8	device_specific;
 	__u8	header_length;
-	__u8	longlba:1;
+	__u8	longlba;
 };
 
 /*
@@ -127,53 +127,53 @@ struct scsi_device {
 				 * pass settings from slave_alloc to scsi
 				 * core. */
 	unsigned int eh_timeout; /* Error handling timeout */
-	unsigned removable:1;
-	unsigned changed:1;	/* Data invalid due to media change */
-	unsigned busy:1;	/* Used to prevent races */
-	unsigned lockable:1;	/* Able to prevent media removal */
-	unsigned locked:1;      /* Media removal disabled */
-	unsigned borken:1;	/* Tell the Seagate driver to be 
+	unsigned removable;
+	unsigned changed;	/* Data invalid due to media change */
+	unsigned busy;	/* Used to prevent races */
+	unsigned lockable;	/* Able to prevent media removal */
+	unsigned locked;      /* Media removal disabled */
+	unsigned borken;	/* Tell the Seagate driver to be 
 				 * painfully slow on this device */
-	unsigned disconnect:1;	/* can disconnect */
-	unsigned soft_reset:1;	/* Uses soft reset option */
-	unsigned sdtr:1;	/* Device supports SDTR messages */
-	unsigned wdtr:1;	/* Device supports WDTR messages */
-	unsigned ppr:1;		/* Device supports PPR messages */
-	unsigned tagged_supported:1;	/* Supports SCSI-II tagged queuing */
-	unsigned simple_tags:1;	/* simple queue tag messages are enabled */
-	unsigned ordered_tags:1;/* ordered queue tag messages are enabled */
-	unsigned was_reset:1;	/* There was a bus reset on the bus for 
+	unsigned disconnect;	/* can disconnect */
+	unsigned soft_reset;	/* Uses soft reset option */
+	unsigned sdtr;	/* Device supports SDTR messages */
+	unsigned wdtr;	/* Device supports WDTR messages */
+	unsigned ppr;		/* Device supports PPR messages */
+	unsigned tagged_supported;	/* Supports SCSI-II tagged queuing */
+	unsigned simple_tags;	/* simple queue tag messages are enabled */
+	unsigned ordered_tags;/* ordered queue tag messages are enabled */
+	unsigned was_reset;	/* There was a bus reset on the bus for 
 				 * this device */
-	unsigned expecting_cc_ua:1; /* Expecting a CHECK_CONDITION/UNIT_ATTN
+	unsigned expecting_cc_ua; /* Expecting a CHECK_CONDITION/UNIT_ATTN
 				     * because we did a bus reset. */
-	unsigned use_10_for_rw:1; /* first try 10-byte read / write */
-	unsigned use_10_for_ms:1; /* first try 10-byte mode sense/select */
-	unsigned no_report_opcodes:1;	/* no REPORT SUPPORTED OPERATION CODES */
-	unsigned no_write_same:1;	/* no WRITE SAME command */
-	unsigned use_16_for_rw:1; /* Use read/write(16) over read/write(10) */
-	unsigned skip_ms_page_8:1;	/* do not use MODE SENSE page 0x08 */
-	unsigned skip_ms_page_3f:1;	/* do not use MODE SENSE page 0x3f */
-	unsigned skip_vpd_pages:1;	/* do not read VPD pages */
-	unsigned try_vpd_pages:1;	/* attempt to read VPD pages */
-	unsigned use_192_bytes_for_3f:1; /* ask for 192 bytes from page 0x3f */
-	unsigned no_start_on_add:1;	/* do not issue start on add */
-	unsigned allow_restart:1; /* issue START_UNIT in error handler */
-	unsigned manage_start_stop:1;	/* Let HLD (sd) manage start/stop */
-	unsigned start_stop_pwr_cond:1;	/* Set power cond. in START_STOP_UNIT */
-	unsigned no_uld_attach:1; /* disable connecting to upper level drivers */
-	unsigned select_no_atn:1;
-	unsigned fix_capacity:1;	/* READ_CAPACITY is too high by 1 */
-	unsigned guess_capacity:1;	/* READ_CAPACITY might be too high by 1 */
-	unsigned retry_hwerror:1;	/* Retry HARDWARE_ERROR */
-	unsigned last_sector_bug:1;	/* do not use multisector accesses on
+	unsigned use_10_for_rw; /* first try 10-byte read / write */
+	unsigned use_10_for_ms; /* first try 10-byte mode sense/select */
+	unsigned no_report_opcodes;	/* no REPORT SUPPORTED OPERATION CODES */
+	unsigned no_write_same;	/* no WRITE SAME command */
+	unsigned use_16_for_rw; /* Use read/write(16) over read/write(10) */
+	unsigned skip_ms_page_8;	/* do not use MODE SENSE page 0x08 */
+	unsigned skip_ms_page_3f;	/* do not use MODE SENSE page 0x3f */
+	unsigned skip_vpd_pages;	/* do not read VPD pages */
+	unsigned try_vpd_pages;	/* attempt to read VPD pages */
+	unsigned use_192_bytes_for_3f; /* ask for 192 bytes from page 0x3f */
+	unsigned no_start_on_add;	/* do not issue start on add */
+	unsigned allow_restart; /* issue START_UNIT in error handler */
+	unsigned manage_start_stop;	/* Let HLD (sd) manage start/stop */
+	unsigned start_stop_pwr_cond;	/* Set power cond. in START_STOP_UNIT */
+	unsigned no_uld_attach; /* disable connecting to upper level drivers */
+	unsigned select_no_atn;
+	unsigned fix_capacity;	/* READ_CAPACITY is too high by 1 */
+	unsigned guess_capacity;	/* READ_CAPACITY might be too high by 1 */
+	unsigned retry_hwerror;	/* Retry HARDWARE_ERROR */
+	unsigned last_sector_bug;	/* do not use multisector accesses on
 					   SD_LAST_BUGGY_SECTORS */
-	unsigned no_read_disc_info:1;	/* Avoid READ_DISC_INFO cmds */
-	unsigned no_read_capacity_16:1; /* Avoid READ_CAPACITY_16 cmds */
-	unsigned try_rc_10_first:1;	/* Try READ_CAPACACITY_10 first */
-	unsigned is_visible:1;	/* is the device visible in sysfs */
-	unsigned wce_default_on:1;	/* Cache is ON by default */
-	unsigned no_dif:1;	/* T10 PI (DIF) should be disabled */
-	unsigned broken_fua:1;		/* Don't set FUA bit */
+	unsigned no_read_disc_info;	/* Avoid READ_DISC_INFO cmds */
+	unsigned no_read_capacity_16; /* Avoid READ_CAPACITY_16 cmds */
+	unsigned try_rc_10_first;	/* Try READ_CAPACACITY_10 first */
+	unsigned is_visible;	/* is the device visible in sysfs */
+	unsigned wce_default_on;	/* Cache is ON by default */
+	unsigned no_dif;	/* T10 PI (DIF) should be disabled */
+	unsigned broken_fua;		/* Don't set FUA bit */
 
 	atomic_t disk_events_disable_depth; /* disable depth for disk events */
 
@@ -278,15 +278,15 @@ struct scsi_target {
 	unsigned int		channel;
 	unsigned int		id; /* target id ... replace
 				     * scsi_device.id eventually */
-	unsigned int		create:1; /* signal that it needs to be added */
-	unsigned int		single_lun:1;	/* Indicates we should only
+	unsigned int		create; /* signal that it needs to be added */
+	unsigned int		single_lun;	/* Indicates we should only
 						 * allow I/O to one of the luns
 						 * for the device at a time. */
-	unsigned int		pdt_1f_for_no_lun:1;	/* PDT = 0x1f
+	unsigned int		pdt_1f_for_no_lun;	/* PDT = 0x1f
 						 * means no lun present. */
-	unsigned int		no_report_luns:1;	/* Don't use
+	unsigned int		no_report_luns;	/* Don't use
 						 * REPORT LUNS for scanning. */
-	unsigned int		expecting_lun_change:1;	/* A device has reported
+	unsigned int		expecting_lun_change;	/* A device has reported
 						 * a 3F/0E UA, other devices on
 						 * the same target will also. */
 	/* commands actually active on LLD. */

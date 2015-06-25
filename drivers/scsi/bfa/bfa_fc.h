@@ -62,19 +62,19 @@ struct scsi_cdb_s {
  */
 struct fchs_s {
 #ifdef __BIG_ENDIAN
-	u32        routing:4;	/* routing bits */
-	u32        cat_info:4;	/* category info */
+	u32        routing;	/* routing bits */
+	u32        cat_info;	/* category info */
 #else
-	u32        cat_info:4;	/* category info */
-	u32        routing:4;	/* routing bits */
+	u32        cat_info;	/* category info */
+	u32        routing;	/* routing bits */
 #endif
-	u32        d_id:24;	/* destination identifier */
+	u32        d_id;	/* destination identifier */
 
-	u32        cs_ctl:8;	/* class specific control */
-	u32        s_id:24;	/* source identifier */
+	u32        cs_ctl;	/* class specific control */
+	u32        s_id;	/* source identifier */
 
-	u32        type:8;	/* data structure type */
-	u32        f_ctl:24;	/* initial frame control */
+	u32        type;	/* data structure type */
+	u32        f_ctl;	/* initial frame control */
 
 	u8         seq_id;	/* sequence identifier */
 	u8         df_ctl;	/* data field control */
@@ -204,8 +204,8 @@ enum {
  * generic ELS command
  */
 struct fc_els_cmd_s {
-	u32        els_code:8;	/* ELS Command Code */
-	u32        reserved:24;
+	u32        els_code;	/* ELS Command Code */
+	u32        reserved;
 };
 
 /*
@@ -288,7 +288,7 @@ struct fc_plogi_csp_s {
 			altbbcred:1,	/* alternate BB_Credit */
 			resolution:1,	/* ms/ns ED_TOV resolution */
 			vvl_info:1,	/* VVL Info included */
-			reserved1:1;
+			reserved1;
 
 	u8		hg_supp:1,
 			query_dbc:1,
@@ -297,7 +297,7 @@ struct fc_plogi_csp_s {
 			r_t_tov:1,
 			dh_dup_supp:1,
 			cisc:1,		/* continuously increasing seq count */
-			payload:1;
+			payload;
 #else
 	u8		reserved2:2,
 			resolution:1,	/* ms/ns ED_TOV resolution */
@@ -305,7 +305,7 @@ struct fc_plogi_csp_s {
 			port_type:1,	/* N_Port/F_port */
 			npiv_supp:1,	/* NPIV supported */
 			rro:1,		/* random relative offset */
-			ciro:1;		/* continuously increasing RO */
+			ciro;		/* continuously increasing RO */
 
 	u8		payload:1,
 			cisc:1,		/* continuously increasing seq count */
@@ -314,7 +314,7 @@ struct fc_plogi_csp_s {
 			sync_cap:1,
 			security:1,
 			query_dbc:1,
-			hg_supp:1;
+			hg_supp;
 #endif
 	__be16		rxsz;		/* receive data_field size */
 	__be16		conseq;
@@ -328,34 +328,34 @@ struct fc_plogi_csp_s {
  */
 struct fc_plogi_clp_s {
 #ifdef __BIG_ENDIAN
-	u32        class_valid:1;
-	u32        intermix:1;	/* class intermix supported if set =1.
+	u32        class_valid;
+	u32        intermix;	/* class intermix supported if set =1.
 				 * valid only for class1. Reserved for
 				 * class2 & class3 */
-	u32        reserved1:2;
-	u32        sequential:1;
-	u32        reserved2:3;
+	u32        reserved1;
+	u32        sequential;
+	u32        reserved2;
 #else
-	u32        reserved2:3;
-	u32        sequential:1;
-	u32        reserved1:2;
-	u32        intermix:1;	/* class intermix supported if set =1.
+	u32        reserved2;
+	u32        sequential;
+	u32        reserved1;
+	u32        intermix;	/* class intermix supported if set =1.
 				 * valid only for class1. Reserved for
 				 * class2 & class3 */
-	u32        class_valid:1;
+	u32        class_valid;
 #endif
-	u32        reserved3:24;
+	u32        reserved3;
 
-	u32        reserved4:16;
-	u32        rxsz:16;	/* Receive data_field size */
+	u32        reserved4;
+	u32        rxsz;	/* Receive data_field size */
 
-	u32        reserved5:8;
-	u32        conseq:8;
-	u32        e2e_credit:16; /* end to end credit */
+	u32        reserved5;
+	u32        conseq;
+	u32        e2e_credit; /* end to end credit */
 
-	u32        reserved7:8;
-	u32        ospx:8;
-	u32        reserved8:16;
+	u32        reserved7;
+	u32        ospx;
+	u32        reserved8;
 };
 
 /* ASCII value for each character in string "BRCD" */
@@ -381,8 +381,8 @@ struct fc_logi_s {
  */
 struct fc_logo_s {
 	struct fc_els_cmd_s	els_cmd;	/* ELS command code */
-	u32			res1:8;
-	u32		nport_id:24;	/* N_Port identifier of source */
+	u32			res1;
+	u32		nport_id;	/* N_Port identifier of source */
 	wwn_t           orig_port_name;	/* Port name of the LOGO originator */
 };
 
@@ -391,24 +391,24 @@ struct fc_logo_s {
  */
 struct fc_adisc_s {
 	struct fc_els_cmd_s els_cmd;	/* ELS command code */
-	u32		res1:8;
-	u32		orig_HA:24;	/* originator hard address */
+	u32		res1;
+	u32		orig_HA;	/* originator hard address */
 	wwn_t		orig_port_name;	/* originator port name */
 	wwn_t		orig_node_name;	/* originator node name */
-	u32		res2:8;
-	u32		nport_id:24;	/* originator NPortID */
+	u32		res2;
+	u32		nport_id;	/* originator NPortID */
 };
 
 /*
  * Exchange status block
  */
 struct fc_exch_status_blk_s {
-	u32        oxid:16;
-	u32        rxid:16;
-	u32        res1:8;
-	u32        orig_np:24;	/* originator NPortID */
-	u32        res2:8;
-	u32        resp_np:24;	/* responder NPortID */
+	u32        oxid;
+	u32        rxid;
+	u32        res1;
+	u32        orig_np;	/* originator NPortID */
+	u32        res2;
+	u32        resp_np;	/* responder NPortID */
 	u32        es_bits;
 	u32        res3;
 	/*
@@ -421,10 +421,10 @@ struct fc_exch_status_blk_s {
  */
 struct fc_res_s {
 	struct fc_els_cmd_s els_cmd;	/* ELS command code */
-	u32        res1:8;
-	u32        nport_id:24;		/* N_Port identifier of source */
-	u32        oxid:16;
-	u32        rxid:16;
+	u32        res1;
+	u32        nport_id;		/* N_Port identifier of source */
+	u32        oxid;
+	u32        rxid;
 	u8         assoc_hdr[32];
 };
 
@@ -441,10 +441,10 @@ struct fc_res_acc_s {
  */
 struct fc_rec_s {
 	struct fc_els_cmd_s els_cmd;	/* ELS command code */
-	u32        res1:8;
-	u32        nport_id:24;	/* N_Port identifier of source */
-	u32        oxid:16;
-	u32        rxid:16;
+	u32        res1;
+	u32        nport_id;	/* N_Port identifier of source */
+	u32        oxid;
+	u32        rxid;
 };
 
 #define FC_REC_ESB_OWN_RSP	0x80000000	/* responder owns */
@@ -462,12 +462,12 @@ struct fc_rec_s {
  */
 struct fc_rec_acc_s {
 	struct fc_els_cmd_s els_cmd;	/* ELS command code */
-	u32        oxid:16;
-	u32        rxid:16;
-	u32        res1:8;
-	u32        orig_id:24;	/* N_Port id of exchange originator */
-	u32        res2:8;
-	u32        resp_id:24;	/* N_Port id of exchange responder */
+	u32        oxid;
+	u32        rxid;
+	u32        res1;
+	u32        orig_id;	/* N_Port id of exchange originator */
+	u32        res2;
+	u32        resp_id;	/* N_Port id of exchange responder */
 	u32        count;	/* data transfer count */
 	u32        e_stat;	/* exchange status */
 };
@@ -477,10 +477,10 @@ struct fc_rec_acc_s {
  */
 struct fc_rsi_s {
 	struct fc_els_cmd_s els_cmd;
-	u32        res1:8;
-	u32        orig_sid:24;
-	u32        oxid:16;
-	u32        rxid:16;
+	u32        res1;
+	u32        orig_sid;
+	u32        oxid;
+	u32        rxid;
 };
 
 /*
@@ -488,35 +488,35 @@ struct fc_rsi_s {
  * see FC-PH-X table 113 & 115 for explanation also FCP table 8
  */
 struct fc_prli_params_s {
-	u32        reserved:16;
+	u32        reserved;
 #ifdef __BIG_ENDIAN
-	u32        reserved1:5;
-	u32        rec_support:1;
-	u32        task_retry_id:1;
-	u32        retry:1;
+	u32        reserved1;
+	u32        rec_support;
+	u32        task_retry_id;
+	u32        retry;
 
-	u32        confirm:1;
-	u32        doverlay:1;
-	u32        initiator:1;
-	u32        target:1;
-	u32        cdmix:1;
-	u32        drmix:1;
-	u32        rxrdisab:1;
-	u32        wxrdisab:1;
+	u32        confirm;
+	u32        doverlay;
+	u32        initiator;
+	u32        target;
+	u32        cdmix;
+	u32        drmix;
+	u32        rxrdisab;
+	u32        wxrdisab;
 #else
-	u32        retry:1;
-	u32        task_retry_id:1;
-	u32        rec_support:1;
-	u32        reserved1:5;
+	u32        retry;
+	u32        task_retry_id;
+	u32        rec_support;
+	u32        reserved1;
 
-	u32        wxrdisab:1;
-	u32        rxrdisab:1;
-	u32        drmix:1;
-	u32        cdmix:1;
-	u32        target:1;
-	u32        initiator:1;
-	u32        doverlay:1;
-	u32        confirm:1;
+	u32        wxrdisab;
+	u32        rxrdisab;
+	u32        drmix;
+	u32        cdmix;
+	u32        target;
+	u32        initiator;
+	u32        doverlay;
+	u32        confirm;
 #endif
 };
 
@@ -529,22 +529,22 @@ enum {
 };
 
 struct fc_prli_params_page_s {
-	u32        type:8;
-	u32        codext:8;
+	u32        type;
+	u32        codext;
 #ifdef __BIG_ENDIAN
-	u32        origprocasv:1;
-	u32        rsppav:1;
-	u32        imagepair:1;
-	u32        reserved1:1;
-	u32        rspcode:4;
+	u32        origprocasv;
+	u32        rsppav;
+	u32        imagepair;
+	u32        reserved1;
+	u32        rspcode;
 #else
-	u32        rspcode:4;
-	u32        reserved1:1;
-	u32        imagepair:1;
-	u32        rsppav:1;
-	u32        origprocasv:1;
+	u32        rspcode;
+	u32        reserved1;
+	u32        imagepair;
+	u32        rsppav;
+	u32        origprocasv;
 #endif
-	u32        reserved2:8;
+	u32        reserved2;
 
 	u32        origprocas;
 	u32        rspprocas;
@@ -555,9 +555,9 @@ struct fc_prli_params_page_s {
  * PRLI request and accept payload, FC-PH-X tables 112 & 114
  */
 struct fc_prli_s {
-	u32        command:8;
-	u32        pglen:8;
-	u32        pagebytes:16;
+	u32        command;
+	u32        pglen;
+	u32        pagebytes;
 	struct fc_prli_params_page_s parampage;
 };
 
@@ -565,16 +565,16 @@ struct fc_prli_s {
  * PRLO logout params page
  */
 struct fc_prlo_params_page_s {
-	u32        type:8;
-	u32        type_ext:8;
+	u32        type;
+	u32        type_ext;
 #ifdef __BIG_ENDIAN
-	u32        opa_valid:1;	/* originator process associator valid */
-	u32        rpa_valid:1;	/* responder process associator valid */
-	u32        res1:14;
+	u32        opa_valid;	/* originator process associator valid */
+	u32        rpa_valid;	/* responder process associator valid */
+	u32        res1;
 #else
-	u32        res1:14;
-	u32        rpa_valid:1;	/* responder process associator valid */
-	u32        opa_valid:1;	/* originator process associator valid */
+	u32        res1;
+	u32        rpa_valid;	/* responder process associator valid */
+	u32        opa_valid;	/* originator process associator valid */
 #endif
 	u32        orig_process_assc;
 	u32        resp_process_assc;
@@ -586,9 +586,9 @@ struct fc_prlo_params_page_s {
  * PRLO els command payload
  */
 struct fc_prlo_s {
-	u32	command:8;
-	u32	page_len:8;
-	u32	payload_len:16;
+	u32	command;
+	u32	page_len;
+	u32	payload_len;
 	struct fc_prlo_params_page_s	prlo_params[1];
 };
 
@@ -596,17 +596,17 @@ struct fc_prlo_s {
  * PRLO Logout response parameter page
  */
 struct fc_prlo_acc_params_page_s {
-	u32        type:8;
-	u32        type_ext:8;
+	u32        type;
+	u32        type_ext;
 
 #ifdef __BIG_ENDIAN
-	u32        opa_valid:1;	/* originator process associator valid */
-	u32        rpa_valid:1;	/* responder process associator valid */
-	u32        res1:14;
+	u32        opa_valid;	/* originator process associator valid */
+	u32        rpa_valid;	/* responder process associator valid */
+	u32        res1;
 #else
-	u32        res1:14;
-	u32        rpa_valid:1;	/* responder process associator valid */
-	u32        opa_valid:1;	/* originator process associator valid */
+	u32        res1;
+	u32        rpa_valid;	/* responder process associator valid */
+	u32        opa_valid;	/* originator process associator valid */
 #endif
 	u32        orig_process_assc;
 	u32        resp_process_assc;
@@ -618,9 +618,9 @@ struct fc_prlo_acc_params_page_s {
  * PRLO els command ACC payload
  */
 struct fc_prlo_acc_s {
-	u32        command:8;
-	u32        page_len:8;
-	u32        payload_len:16;
+	u32        command;
+	u32        page_len;
+	u32        payload_len;
 	struct fc_prlo_acc_params_page_s prlo_acc_params[1];
 };
 
@@ -640,11 +640,11 @@ enum {
 };
 
 struct fc_scr_s {
-	u32 command:8;
-	u32 res:24;
-	u32 vu_reg_func:8; /* Vendor Unique Registrations */
-	u32 res1:16;
-	u32 reg_func:8;
+	u32 command;
+	u32 res;
+	u32 vu_reg_func; /* Vendor Unique Registrations */
+	u32 res1;
+	u32 reg_func;
 };
 
 /*
@@ -664,10 +664,10 @@ enum {
  */
 struct fc_ls_rjt_s {
 	struct fc_els_cmd_s els_cmd;	/* ELS command code */
-	u32        res1:8;
-	u32        reason_code:8;	/* Reason code for reject */
-	u32        reason_code_expl:8;	/* Reason code explanation */
-	u32        vendor_unique:8;	/* Vendor specific */
+	u32        res1;
+	u32        reason_code;	/* Reason code for reject */
+	u32        reason_code_expl;	/* Reason code explanation */
+	u32        vendor_unique;	/* Vendor specific */
 };
 
 /*
@@ -713,11 +713,11 @@ enum {
  */
 struct fc_rrq_s {
 	struct fc_els_cmd_s els_cmd;	/* ELS command code */
-	u32        res1:8;
-	u32        s_id:24;	/* exchange originator S_ID */
+	u32        res1;
+	u32        s_id;	/* exchange originator S_ID */
 
-	u32        ox_id:16;	/* originator exchange ID */
-	u32        rx_id:16;	/* responder exchange ID */
+	u32        ox_id;	/* originator exchange ID */
+	u32        rx_id;	/* responder exchange ID */
 
 	u32        res2[8];	/* optional association header */
 };
@@ -726,50 +726,50 @@ struct fc_rrq_s {
  * ABTS BA_ACC reply payload
  */
 struct fc_ba_acc_s {
-	u32        seq_id_valid:8;	/* set to 0x00 for Abort Exchange */
-	u32        seq_id:8;		/* invalid for Abort Exchange */
-	u32        res2:16;
-	u32        ox_id:16;		/* OX_ID from ABTS frame */
-	u32        rx_id:16;		/* RX_ID from ABTS frame */
-	u32        low_seq_cnt:16;	/* set to 0x0000 for Abort Exchange */
-	u32        high_seq_cnt:16;	/* set to 0xFFFF for Abort Exchange */
+	u32        seq_id_valid;	/* set to 0x00 for Abort Exchange */
+	u32        seq_id;		/* invalid for Abort Exchange */
+	u32        res2;
+	u32        ox_id;		/* OX_ID from ABTS frame */
+	u32        rx_id;		/* RX_ID from ABTS frame */
+	u32        low_seq_cnt;	/* set to 0x0000 for Abort Exchange */
+	u32        high_seq_cnt;	/* set to 0xFFFF for Abort Exchange */
 };
 
 /*
  * ABTS BA_RJT reject payload
  */
 struct fc_ba_rjt_s {
-	u32        res1:8;		/* Reserved */
-	u32        reason_code:8;	/* reason code for reject */
-	u32        reason_expl:8;	/* reason code explanation */
-	u32        vendor_unique:8; /* vendor unique reason code,set to 0 */
+	u32        res1;		/* Reserved */
+	u32        reason_code;	/* reason code for reject */
+	u32        reason_expl;	/* reason code explanation */
+	u32        vendor_unique; /* vendor unique reason code,set to 0 */
 };
 
 /*
  * TPRLO logout parameter page
  */
 struct fc_tprlo_params_page_s {
-	u32        type:8;
-	u32        type_ext:8;
+	u32        type;
+	u32        type_ext;
 
 #ifdef __BIG_ENDIAN
-	u32        opa_valid:1;
-	u32        rpa_valid:1;
-	u32        tpo_nport_valid:1;
-	u32        global_process_logout:1;
-	u32        res1:12;
+	u32        opa_valid;
+	u32        rpa_valid;
+	u32        tpo_nport_valid;
+	u32        global_process_logout;
+	u32        res1;
 #else
-	u32        res1:12;
-	u32        global_process_logout:1;
-	u32        tpo_nport_valid:1;
-	u32        rpa_valid:1;
-	u32        opa_valid:1;
+	u32        res1;
+	u32        global_process_logout;
+	u32        tpo_nport_valid;
+	u32        rpa_valid;
+	u32        opa_valid;
 #endif
 
 	u32        orig_process_assc;
 	u32        resp_process_assc;
 
-	u32        res2:8;
+	u32        res2;
 	u32        tpo_nport_id;
 };
 
@@ -777,9 +777,9 @@ struct fc_tprlo_params_page_s {
  * TPRLO ELS command payload
  */
 struct fc_tprlo_s {
-	u32        command:8;
-	u32        page_len:8;
-	u32        payload_len:16;
+	u32        command;
+	u32        page_len;
+	u32        payload_len;
 
 	struct fc_tprlo_params_page_s tprlo_params[1];
 };
@@ -793,9 +793,9 @@ enum fc_tprlo_type {
  * TPRLO els command ACC payload
  */
 struct fc_tprlo_acc_s {
-	u32	command:8;
-	u32	page_len:8;
-	u32	payload_len:16;
+	u32	command;
+	u32	page_len;
+	u32	payload_len;
 	struct fc_prlo_acc_params_page_s tprlo_acc_params[1];
 };
 
@@ -812,10 +812,10 @@ enum fc_rscn_format {
 };
 
 struct fc_rscn_event_s {
-	u32	format:2;
-	u32	qualifier:4;
-	u32	resvd:2;
-	u32	portid:24;
+	u32	format;
+	u32	qualifier;
+	u32	resvd;
+	u32	portid;
 };
 
 struct fc_rscn_pl_s {
@@ -858,8 +858,8 @@ struct fc_echo_s {
  */
 struct fc_rnid_cmd_s {
 	struct fc_els_cmd_s els_cmd;
-	u32        node_id_data_format:8;
-	u32        reserved:24;
+	u32        node_id_data_format;
+	u32        reserved;
 };
 
 /*
@@ -876,20 +876,20 @@ struct fc_rnid_general_topology_data_s {
 	__be32     asso_type;
 	u32        phy_port_num;
 	__be32     num_attached_nodes;
-	u32        node_mgmt:8;
-	u32        ip_version:8;
-	u32        udp_tcp_port_num:16;
+	u32        node_mgmt;
+	u32        ip_version;
+	u32        udp_tcp_port_num;
 	u32        ip_address[4];
-	u32        reserved:16;
-	u32        vendor_specific:16;
+	u32        reserved;
+	u32        vendor_specific;
 };
 
 struct fc_rnid_acc_s {
 	struct fc_els_cmd_s els_cmd;
-	u32        node_id_data_format:8;
-	u32        common_id_data_length:8;
-	u32        reserved:8;
-	u32        specific_id_data_length:8;
+	u32        node_id_data_format;
+	u32        common_id_data_length;
+	u32        reserved;
+	u32        specific_id_data_length;
 	struct fc_rnid_common_id_data_s common_id_data;
 	struct fc_rnid_general_topology_data_s gen_topology_data;
 };
@@ -947,9 +947,9 @@ struct fc_rpsc_cmd_s {
  * RPSC Acc
  */
 struct fc_rpsc_acc_s {
-	u32        command:8;
-	u32        rsvd:8;
-	u32        num_entries:16;
+	u32        command;
+	u32        rsvd;
+	u32        num_entries;
 
 	struct fc_rpsc_speed_info_s speed_info[1];
 };
@@ -965,8 +965,8 @@ struct fc_rpsc2_cmd_s {
 	u16	resvd;
 	__be16	num_pids;		/* Number of pids in the request */
 	struct  {
-		u32	rsvd1:8;
-		u32	pid:24;		/* port identifier */
+		u32	rsvd1;
+		u32	pid;		/* port identifier */
 	} pid_list[1];
 };
 
@@ -1042,15 +1042,15 @@ struct fc_alpabm_s {
  * @caution This is defined only in BIG ENDIAN format.
  */
 struct fc_vft_s {
-	u32        r_ctl:8;
-	u32        ver:2;
-	u32        type:4;
-	u32        res_a:2;
-	u32        priority:3;
-	u32        vf_id:12;
-	u32        res_b:1;
-	u32        hopct:8;
-	u32        res_c:24;
+	u32        r_ctl;
+	u32        ver;
+	u32        type;
+	u32        res_a;
+	u32        priority;
+	u32        vf_id;
+	u32        res_b;
+	u32        hopct;
+	u32        res_c;
 };
 
 /*
@@ -1065,19 +1065,19 @@ struct fcp_cmnd_s {
 #ifdef __BIG_ENDIAN
 	u8		resvd:1,
 			priority:4,	/* FCP-3: SAM-3 priority */
-			taskattr:3;	/* scsi task attribute */
+			taskattr;	/* scsi task attribute */
 #else
 	u8		taskattr:3,	/* scsi task attribute */
 			priority:4,	/* FCP-3: SAM-3 priority */
-			resvd:1;
+			resvd;
 #endif
 	u8		tm_flags;	/* task management flags */
 #ifdef __BIG_ENDIAN
 	u8		addl_cdb_len:6,	/* additional CDB length words */
-			iodir:2;	/* read/write FCP_DATA IUs */
+			iodir;	/* read/write FCP_DATA IUs */
 #else
 	u8		iodir:2,	/* read/write FCP_DATA IUs */
-			addl_cdb_len:6;	/* additional CDB length */
+			addl_cdb_len;	/* additional CDB length */
 #endif
 	struct scsi_cdb_s      cdb;
 
@@ -1118,8 +1118,8 @@ enum fcp_residue {
 };
 
 struct fcp_rspinfo_s {
-	u32        res0:24;
-	u32        rsp_code:8;		/* response code (as above) */
+	u32        res0;
+	u32        rsp_code;		/* response code (as above) */
 	u32        res1;
 };
 
@@ -1127,17 +1127,17 @@ struct fcp_resp_s {
 	u32        reserved[2];		/* 2 words reserved */
 	u16        reserved2;
 #ifdef __BIG_ENDIAN
-	u8         reserved3:3;
-	u8         fcp_conf_req:1;	/* FCP_CONF is requested */
-	u8         resid_flags:2;	/* underflow/overflow */
-	u8         sns_len_valid:1;	/* sense len is valid */
-	u8         rsp_len_valid:1;	/* response len is valid */
+	u8         reserved3;
+	u8         fcp_conf_req;	/* FCP_CONF is requested */
+	u8         resid_flags;	/* underflow/overflow */
+	u8         sns_len_valid;	/* sense len is valid */
+	u8         rsp_len_valid;	/* response len is valid */
 #else
-	u8         rsp_len_valid:1;	/* response len is valid */
-	u8         sns_len_valid:1;	/* sense len is valid */
-	u8         resid_flags:2;	/* underflow/overflow */
-	u8         fcp_conf_req:1;	/* FCP_CONF is requested */
-	u8         reserved3:3;
+	u8         rsp_len_valid;	/* response len is valid */
+	u8         sns_len_valid;	/* sense len is valid */
+	u8         resid_flags;	/* underflow/overflow */
+	u8         fcp_conf_req;	/* FCP_CONF is requested */
+	u8         reserved3;
 #endif
 	u8         scsi_status;		/* one byte SCSI status */
 	u32        residue;		/* residual data bytes */
@@ -1156,18 +1156,18 @@ struct fcp_resp_s {
  * CT
  */
 struct ct_hdr_s {
-	u32	rev_id:8;	/* Revision of the CT */
-	u32	in_id:24;	/* Initiator Id */
-	u32	gs_type:8;	/* Generic service Type */
-	u32	gs_sub_type:8;	/* Generic service sub type */
-	u32	options:8;	/* options */
-	u32	rsvrd:8;	/* reserved */
-	u32	cmd_rsp_code:16;/* ct command/response code */
-	u32	max_res_size:16;/* maximum/residual size */
-	u32	frag_id:8;	/* fragment ID */
-	u32	reason_code:8;	/* reason code */
-	u32	exp_code:8;	/* explanation code */
-	u32	vendor_unq:8;	/* vendor unique */
+	u32	rev_id;	/* Revision of the CT */
+	u32	in_id;	/* Initiator Id */
+	u32	gs_type;	/* Generic service Type */
+	u32	gs_sub_type;	/* Generic service sub type */
+	u32	options;	/* options */
+	u32	rsvrd;	/* reserved */
+	u32	cmd_rsp_code;/* ct command/response code */
+	u32	max_res_size;/* maximum/residual size */
+	u32	frag_id;	/* fragment ID */
+	u32	reason_code;	/* reason code */
+	u32	exp_code;	/* explanation code */
+	u32	vendor_unq;	/* vendor unique */
 };
 
 /*
@@ -1294,8 +1294,8 @@ enum {
 };
 
 struct fcgs_id_req_s {
-	u32 rsvd:8;
-	u32 dap:24; /* port identifier */
+	u32 rsvd;
+	u32 dap; /* port identifier */
 };
 #define fcgs_gpnid_req_t struct fcgs_id_req_s
 #define fcgs_gnnid_req_t struct fcgs_id_req_s
@@ -1306,16 +1306,16 @@ struct fcgs_gidpn_req_s {
 };
 
 struct fcgs_gidpn_resp_s {
-	u32	rsvd:8;
-	u32	dap:24;		/* port identifier */
+	u32	rsvd;
+	u32	dap;		/* port identifier */
 };
 
 /*
  * RFT_ID
  */
 struct fcgs_rftid_req_s {
-	u32	rsvd:8;
-	u32	dap:24;		/* port identifier */
+	u32	rsvd;
+	u32	dap;		/* port identifier */
 	__be32	fc4_type[8];	/* fc4 types */
 };
 
@@ -1326,11 +1326,11 @@ struct fcgs_rftid_req_s {
 #define FC_GS_FCP_FC4_FEATURE_TARGET	 0x01
 
 struct fcgs_rffid_req_s {
-	u32	rsvd:8;
-	u32	dap:24;		/* port identifier */
-	u32	rsvd1:16;
-	u32	fc4ftr_bits:8;	/* fc4 feature bits */
-	u32	fc4_type:8;		/* corresponding FC4 Type */
+	u32	rsvd;
+	u32	dap;		/* port identifier */
+	u32	rsvd1;
+	u32	fc4ftr_bits;	/* fc4 feature bits */
+	u32	fc4_type;		/* corresponding FC4 Type */
 };
 
 /*
@@ -1347,17 +1347,17 @@ struct fcgs_gidft_req_s {
  * GID_FT Response
  */
 struct fcgs_gidft_resp_s {
-	u8	last:1;		/* last port identifier flag */
-	u8	reserved:7;
-	u32	pid:24;		/* port identifier */
+	u8	last;		/* last port identifier flag */
+	u8	reserved;
+	u32	pid;		/* port identifier */
 };
 
 /*
  * RSPN_ID
  */
 struct fcgs_rspnid_req_s {
-	u32	rsvd:8;
-	u32	dap:24;		/* port identifier */
+	u32	rsvd;
+	u32	dap;		/* port identifier */
 	u8	spn_len;	/* symbolic port name length */
 	u8	spn[256];	/* symbolic port name */
 };
@@ -1375,8 +1375,8 @@ struct fcgs_rsnn_nn_req_s {
  * RPN_ID
  */
 struct fcgs_rpnid_req_s {
-	u32	rsvd:8;
-	u32	port_id:24;
+	u32	rsvd;
+	u32	port_id;
 	wwn_t	port_name;
 };
 
@@ -1384,8 +1384,8 @@ struct fcgs_rpnid_req_s {
  * RNN_ID
  */
 struct fcgs_rnnid_req_s {
-	u32	rsvd:8;
-	u32	port_id:24;
+	u32	rsvd;
+	u32	port_id;
 	wwn_t	node_name;
 };
 
@@ -1393,8 +1393,8 @@ struct fcgs_rnnid_req_s {
  * RCS_ID
  */
 struct fcgs_rcsid_req_s {
-	u32	rsvd:8;
-	u32	port_id:24;
+	u32	rsvd;
+	u32	port_id;
 	u32	cos;
 };
 
@@ -1402,26 +1402,26 @@ struct fcgs_rcsid_req_s {
  * RPT_ID
  */
 struct fcgs_rptid_req_s {
-	u32	rsvd:8;
-	u32	port_id:24;
-	u32	port_type:8;
-	u32	rsvd1:24;
+	u32	rsvd;
+	u32	port_id;
+	u32	port_type;
+	u32	rsvd1;
 };
 
 /*
  * GA_NXT Request
  */
 struct fcgs_ganxt_req_s {
-	u32	rsvd:8;
-	u32	port_id:24;
+	u32	rsvd;
+	u32	port_id;
 };
 
 /*
  * GA_NXT Response
  */
 struct fcgs_ganxt_rsp_s {
-	u32		port_type:8;	/* Port Type */
-	u32		port_id:24;	/* Port Identifier */
+	u32		port_type;	/* Port Type */
+	u32		port_id;	/* Port Identifier */
 	wwn_t		port_name;	/* Port Name */
 	u8		spn_len;	/* Length of Symbolic Port Name */
 	char		spn[255];	/* Symbolic Port Name */
@@ -1433,8 +1433,8 @@ struct fcgs_ganxt_rsp_s {
 	u32		cos;		/* Class of Service */
 	u32		fc4types[8];	/* FC-4 TYPEs */
 	wwn_t		fabric_port_name; /* Fabric Port Name */
-	u32		rsvd:8;		/* Reserved */
-	u32		hard_addr:24;	/* Hard Address */
+	u32		rsvd;		/* Reserved */
+	u32		hard_addr;	/* Hard Address */
 };
 
 /*

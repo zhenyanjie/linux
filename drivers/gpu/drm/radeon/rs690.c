@@ -218,7 +218,7 @@ void rs690_line_buffer_adjust(struct radeon_device *rdev,
 	 *  3 - D1 gets 1/4 of the line buffer, D2 gets 3/4
 	 * Setting bit 2 of R_006520_DC_LB_MEMORY_SPLIT controls switches to manual
 	 * allocation mode. In manual allocation mode, D1 always starts at 0,
-	 * D1 end/2 is specified in bits 14:4; D2 allocation follows D1.
+	 * D1 end/2 is specified in bits 14; D2 allocation follows D1.
 	 */
 	tmp = RREG32(R_006520_DC_LB_MEMORY_SPLIT) & C_006520_DC_LB_MEMORY_SPLIT;
 	tmp &= ~C_006520_DC_LB_MEMORY_SPLIT_MODE;

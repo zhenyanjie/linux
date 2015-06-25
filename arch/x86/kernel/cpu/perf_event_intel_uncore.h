@@ -431,9 +431,9 @@ struct intel_uncore_type {
 	unsigned fixed_ctl;
 	unsigned box_ctl;
 	unsigned msr_offset;
-	unsigned num_shared_regs:8;
-	unsigned single_fixed:1;
-	unsigned pair_ctr_ctl:1;
+	unsigned num_shared_regs;
+	unsigned single_fixed;
+	unsigned pair_ctr_ctl;
 	unsigned *msr_offsets;
 	struct event_constraint unconstrainted;
 	struct event_constraint *constraints;

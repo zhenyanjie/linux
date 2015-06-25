@@ -444,7 +444,7 @@ struct net2272_ep {
 	         is_in:1,
 	         is_iso:1,
 	         dma:1,
-	         not_empty:1;
+	         not_empty;
 };
 
 struct net2272 {
@@ -463,7 +463,7 @@ struct net2272 {
 	         dma_eot_polarity:1,
 	         dma_dack_polarity:1,
 	         dma_dreq_polarity:1,
-	         dma_busy:1;
+	         dma_busy;
 	u16 chiprev;
 	u8 pagesel;
 
@@ -595,7 +595,7 @@ struct net2272_request {
 	struct usb_request req;
 	struct list_head queue;
 	unsigned mapped:1,
-	         valid:1;
+	         valid;
 };
 
 #endif

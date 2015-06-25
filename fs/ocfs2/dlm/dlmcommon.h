@@ -228,7 +228,7 @@ struct dlm_assert_master_priv
 	struct dlm_lock_resource *lockres;
 	u8 request_from;
 	u32 flags;
-	unsigned ignore_higher:1;
+	unsigned ignore_higher;
 };
 
 struct dlm_deref_lockres_priv
@@ -323,7 +323,7 @@ struct dlm_lock_resource
 
 	struct dlm_ctxt *dlm;
 
-	unsigned migration_pending:1;
+	unsigned migration_pending;
 	atomic_t asts_reserved;
 	spinlock_t spinlock;
 	wait_queue_head_t wq;
@@ -373,7 +373,7 @@ struct dlm_lock
 		 lock_pending:1,
 		 cancel_pending:1,
 		 unlock_pending:1,
-		 lksb_kernel_allocated:1;
+		 lksb_kernel_allocated;
 };
 
 

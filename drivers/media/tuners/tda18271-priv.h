@@ -112,7 +112,7 @@ struct tda18271_priv {
 	enum tda18271_small_i2c small_i2c;
 
 	unsigned int config; /* interface to saa713x / tda829x */
-	unsigned int cal_initialized:1;
+	unsigned int cal_initialized;
 
 	u8 tm_rfcal;
 

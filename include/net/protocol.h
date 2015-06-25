@@ -48,7 +48,7 @@ struct net_protocol {
 				 * icmp tag validation than simple
 				 * socket lookup?
 				 */
-				icmp_strict_tag_validation:1;
+				icmp_strict_tag_validation;
 };
 
 #if IS_ENABLED(CONFIG_IPV6)

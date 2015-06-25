@@ -397,11 +397,11 @@ struct netdev_private {
 	struct netdev_desc *last_tx;		/* Last Tx descriptor used. */
 	unsigned int cur_tx, dirty_tx;
 	/* These values are keep track of the transceiver/media in use. */
-	unsigned int flowctrl:1;
-	unsigned int default_port:4;		/* Last dev->if_port value. */
-	unsigned int an_enable:1;
+	unsigned int flowctrl;
+	unsigned int default_port;		/* Last dev->if_port value. */
+	unsigned int an_enable;
 	unsigned int speed;
-	unsigned int wol_enabled:1;			/* Wake on LAN enabled */
+	unsigned int wol_enabled;			/* Wake on LAN enabled */
 	struct tasklet_struct rx_tasklet;
 	struct tasklet_struct tx_tasklet;
 	int budget;

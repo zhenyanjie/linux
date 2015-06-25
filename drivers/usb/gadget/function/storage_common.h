@@ -93,14 +93,14 @@ struct fsg_lun {
 	loff_t		file_length;
 	loff_t		num_sectors;
 
-	unsigned int	initially_ro:1;
-	unsigned int	ro:1;
-	unsigned int	removable:1;
-	unsigned int	cdrom:1;
-	unsigned int	prevent_medium_removal:1;
-	unsigned int	registered:1;
-	unsigned int	info_valid:1;
-	unsigned int	nofua:1;
+	unsigned int	initially_ro;
+	unsigned int	ro;
+	unsigned int	removable;
+	unsigned int	cdrom;
+	unsigned int	prevent_medium_removal;
+	unsigned int	registered;
+	unsigned int	info_valid;
+	unsigned int	nofua;
 
 	u32		sense_data;
 	u32		sense_data_info;

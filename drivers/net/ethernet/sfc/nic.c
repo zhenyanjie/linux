@@ -177,8 +177,8 @@ void efx_nic_fini_interrupt(struct efx_nic *efx)
 #define REGISTER_REVISION_EZ	4	/* latest EF10 revision */
 
 struct efx_nic_reg {
-	u32 offset:24;
-	u32 min_revision:3, max_revision:3;
+	u32 offset;
+	u32 min_revision, max_revision;
 };
 
 #define REGISTER(name, arch, min_rev, max_rev) {			\
@@ -305,9 +305,9 @@ static const struct efx_nic_reg efx_nic_regs[] = {
 };
 
 struct efx_nic_reg_table {
-	u32 offset:24;
-	u32 min_revision:3, max_revision:3;
-	u32 step:6, rows:21;
+	u32 offset;
+	u32 min_revision, max_revision;
+	u32 step, rows;
 };
 
 #define REGISTER_TABLE_DIMENSIONS(_, offset, arch, min_rev, max_rev, step, rows) { \

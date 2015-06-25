@@ -156,9 +156,9 @@ struct rds_iw_connection {
 	atomic_t		i_credits;
 
 	/* Protocol version specific information */
-	unsigned int		i_flowctl:1;	/* enable/disable flow ctl */
-	unsigned int		i_dma_local_lkey:1;
-	unsigned int		i_fastreg_posted:1; /* fastreg posted on this connection */
+	unsigned int		i_flowctl;	/* enable/disable flow ctl */
+	unsigned int		i_dma_local_lkey;
+	unsigned int		i_fastreg_posted; /* fastreg posted on this connection */
 	/* Batched completions */
 	unsigned int		i_unsignaled_wrs;
 	long			i_unsignaled_bytes;
@@ -185,7 +185,7 @@ struct rds_iw_device {
 	struct rds_iw_mr_pool	*mr_pool;
 	int			max_sge;
 	unsigned int		max_wrs;
-	unsigned int		dma_local_lkey:1;
+	unsigned int		dma_local_lkey;
 	spinlock_t		spinlock;	/* protect the above */
 };
 

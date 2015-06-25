@@ -92,10 +92,10 @@ struct fimd_driver_data {
 	unsigned int lcdblk_vt_shift;
 	unsigned int lcdblk_bypass_shift;
 
-	unsigned int has_shadowcon:1;
-	unsigned int has_clksel:1;
-	unsigned int has_limited_fmt:1;
-	unsigned int has_vidoutcon:1;
+	unsigned int has_shadowcon;
+	unsigned int has_clksel;
+	unsigned int has_limited_fmt;
+	unsigned int has_vidoutcon;
 };
 
 static struct fimd_driver_data s3c64xx_fimd_driver_data = {

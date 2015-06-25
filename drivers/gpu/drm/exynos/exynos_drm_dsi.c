@@ -261,7 +261,7 @@ struct exynos_dsi_transfer {
 struct exynos_dsi_driver_data {
 	unsigned int plltmr_reg;
 
-	unsigned int has_freqband:1;
+	unsigned int has_freqband;
 };
 
 struct exynos_dsi {

@@ -145,10 +145,10 @@ struct s3c_hsotg_ep {
 	unsigned char           mc;
 	unsigned char           interval;
 
-	unsigned int            halted:1;
-	unsigned int            periodic:1;
-	unsigned int            isochronous:1;
-	unsigned int            sent_zlp:1;
+	unsigned int            halted;
+	unsigned int            periodic;
+	unsigned int            isochronous;
+	unsigned int            sent_zlp;
 
 	char                    name[10];
 };
@@ -194,7 +194,7 @@ struct s3c_hsotg {
 	struct regulator_bulk_data supplies[ARRAY_SIZE(s3c_hsotg_supply_names)];
 
 	u32                     phyif;
-	unsigned int            dedicated_fifos:1;
+	unsigned int            dedicated_fifos;
 	unsigned char           num_of_eps;
 
 	struct dentry           *debug_root;
@@ -463,28 +463,28 @@ struct dwc2_core_params {
  * @snpsid:             Value from SNPSID register
  */
 struct dwc2_hw_params {
-	unsigned op_mode:3;
-	unsigned arch:2;
-	unsigned dma_desc_enable:1;
-	unsigned enable_dynamic_fifo:1;
-	unsigned en_multiple_tx_fifo:1;
-	unsigned host_rx_fifo_size:16;
-	unsigned host_nperio_tx_fifo_size:16;
-	unsigned host_perio_tx_fifo_size:16;
-	unsigned nperio_tx_q_depth:3;
-	unsigned host_perio_tx_q_depth:3;
-	unsigned dev_token_q_depth:5;
-	unsigned max_transfer_size:26;
-	unsigned max_packet_count:11;
-	unsigned host_channels:5;
-	unsigned hs_phy_type:2;
-	unsigned fs_phy_type:2;
-	unsigned i2c_enable:1;
-	unsigned num_dev_ep:4;
-	unsigned num_dev_perio_in_ep:4;
-	unsigned total_fifo_size:16;
-	unsigned power_optimized:1;
-	unsigned utmi_phy_data_width:2;
+	unsigned op_mode;
+	unsigned arch;
+	unsigned dma_desc_enable;
+	unsigned enable_dynamic_fifo;
+	unsigned en_multiple_tx_fifo;
+	unsigned host_rx_fifo_size;
+	unsigned host_nperio_tx_fifo_size;
+	unsigned host_perio_tx_fifo_size;
+	unsigned nperio_tx_q_depth;
+	unsigned host_perio_tx_q_depth;
+	unsigned dev_token_q_depth;
+	unsigned max_transfer_size;
+	unsigned max_packet_count;
+	unsigned host_channels;
+	unsigned hs_phy_type;
+	unsigned fs_phy_type;
+	unsigned i2c_enable;
+	unsigned num_dev_ep;
+	unsigned num_dev_perio_in_ep;
+	unsigned total_fifo_size;
+	unsigned power_optimized;
+	unsigned utmi_phy_data_width;
 	u32 snpsid;
 };
 
@@ -593,8 +593,8 @@ struct dwc2_hsotg {
 	struct dwc2_core_params *core_params;
 	enum usb_otg_state op_state;
 
-	unsigned int queuing_high_bandwidth:1;
-	unsigned int srp_success:1;
+	unsigned int queuing_high_bandwidth;
+	unsigned int srp_success;
 
 	struct workqueue_struct *wq_otg;
 	struct work_struct wf_otg;
@@ -604,14 +604,14 @@ struct dwc2_hsotg {
 	union dwc2_hcd_internal_flags {
 		u32 d32;
 		struct {
-			unsigned port_connect_status_change:1;
-			unsigned port_connect_status:1;
-			unsigned port_reset_change:1;
-			unsigned port_enable_change:1;
-			unsigned port_suspend_change:1;
-			unsigned port_over_current_change:1;
-			unsigned port_l1_change:1;
-			unsigned reserved:26;
+			unsigned port_connect_status_change;
+			unsigned port_connect_status;
+			unsigned port_reset_change;
+			unsigned port_enable_change;
+			unsigned port_suspend_change;
+			unsigned port_over_current_change;
+			unsigned port_l1_change;
+			unsigned reserved;
 		} b;
 	} flags;
 

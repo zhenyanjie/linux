@@ -19,9 +19,9 @@
 
 struct nft_cmp_expr {
 	struct nft_data		data;
-	enum nft_registers	sreg:8;
+	enum nft_registers	sreg;
 	u8			len;
-	enum nft_cmp_ops	op:8;
+	enum nft_cmp_ops	op;
 };
 
 static void nft_cmp_eval(const struct nft_expr *expr,

@@ -311,7 +311,7 @@ static const struct dt282x_board boardtypes[] = {
 };
 
 struct dt282x_private {
-	unsigned int ad_2scomp:1;
+	unsigned int ad_2scomp;
 
 	unsigned int divisor;
 

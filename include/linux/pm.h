@@ -557,24 +557,24 @@ struct pm_subsys_data {
 
 struct dev_pm_info {
 	pm_message_t		power_state;
-	unsigned int		can_wakeup:1;
-	unsigned int		async_suspend:1;
-	bool			is_prepared:1;	/* Owned by the PM core */
-	bool			is_suspended:1;	/* Ditto */
-	bool			is_noirq_suspended:1;
-	bool			is_late_suspended:1;
-	bool			ignore_children:1;
-	bool			early_init:1;	/* Owned by the PM core */
-	bool			direct_complete:1;	/* Owned by the PM core */
+	unsigned int		can_wakeup;
+	unsigned int		async_suspend;
+	bool			is_prepared;	/* Owned by the PM core */
+	bool			is_suspended;	/* Ditto */
+	bool			is_noirq_suspended;
+	bool			is_late_suspended;
+	bool			ignore_children;
+	bool			early_init;	/* Owned by the PM core */
+	bool			direct_complete;	/* Owned by the PM core */
 	spinlock_t		lock;
 #ifdef CONFIG_PM_SLEEP
 	struct list_head	entry;
 	struct completion	completion;
 	struct wakeup_source	*wakeup;
-	bool			wakeup_path:1;
-	bool			syscore:1;
+	bool			wakeup_path;
+	bool			syscore;
 #else
-	unsigned int		should_wakeup:1;
+	unsigned int		should_wakeup;
 #endif
 #ifdef CONFIG_PM_RUNTIME
 	struct timer_list	suspend_timer;
@@ -583,17 +583,17 @@ struct dev_pm_info {
 	wait_queue_head_t	wait_queue;
 	atomic_t		usage_count;
 	atomic_t		child_count;
-	unsigned int		disable_depth:3;
-	unsigned int		idle_notification:1;
-	unsigned int		request_pending:1;
-	unsigned int		deferred_resume:1;
-	unsigned int		run_wake:1;
-	unsigned int		runtime_auto:1;
-	unsigned int		no_callbacks:1;
-	unsigned int		irq_safe:1;
-	unsigned int		use_autosuspend:1;
-	unsigned int		timer_autosuspends:1;
-	unsigned int		memalloc_noio:1;
+	unsigned int		disable_depth;
+	unsigned int		idle_notification;
+	unsigned int		request_pending;
+	unsigned int		deferred_resume;
+	unsigned int		run_wake;
+	unsigned int		runtime_auto;
+	unsigned int		no_callbacks;
+	unsigned int		irq_safe;
+	unsigned int		use_autosuspend;
+	unsigned int		timer_autosuspends;
+	unsigned int		memalloc_noio;
 	enum rpm_request	request;
 	enum rpm_status		runtime_status;
 	int			runtime_error;

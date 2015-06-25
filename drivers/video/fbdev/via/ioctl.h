@@ -81,15 +81,15 @@
 #define MAX_ACTIVE_DEV_NUM  2
 
 struct device_t {
-	unsigned short crt:1;
-	unsigned short dvi:1;
-	unsigned short lcd:1;
-	unsigned short samm:1;
-	unsigned short lcd_dsp_cent:1;
-	unsigned char lcd_mode:1;
-	unsigned short epia_dvi:1;
-	unsigned short lcd_dual_edge:1;
-	unsigned short lcd2:1;
+	unsigned short crt;
+	unsigned short dvi;
+	unsigned short lcd;
+	unsigned short samm;
+	unsigned short lcd_dsp_cent;
+	unsigned char lcd_mode;
+	unsigned short epia_dvi;
+	unsigned short lcd_dual_edge;
+	unsigned short lcd2;
 
 	unsigned short primary_dev;
 	unsigned char lcd_panel_id;

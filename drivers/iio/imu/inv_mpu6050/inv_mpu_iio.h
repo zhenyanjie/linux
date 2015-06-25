@@ -74,12 +74,12 @@ enum inv_devices {
  *  @fifo_rate:		FIFO update rate.
  */
 struct inv_mpu6050_chip_config {
-	unsigned int fsr:2;
-	unsigned int lpf:3;
-	unsigned int accl_fs:2;
-	unsigned int enable:1;
-	unsigned int accl_fifo_enable:1;
-	unsigned int gyro_fifo_enable:1;
+	unsigned int fsr;
+	unsigned int lpf;
+	unsigned int accl_fs;
+	unsigned int enable;
+	unsigned int accl_fifo_enable;
+	unsigned int gyro_fifo_enable;
 	u16 fifo_rate;
 };
 

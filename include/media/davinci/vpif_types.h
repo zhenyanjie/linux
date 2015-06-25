@@ -30,9 +30,9 @@ enum vpif_if_type {
 
 struct vpif_interface {
 	enum vpif_if_type if_type;
-	unsigned hd_pol:1;
-	unsigned vd_pol:1;
-	unsigned fid_pol:1;
+	unsigned hd_pol;
+	unsigned vd_pol;
+	unsigned fid_pol;
 };
 
 struct vpif_subdev_info {

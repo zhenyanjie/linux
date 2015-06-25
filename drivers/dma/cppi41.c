@@ -104,9 +104,9 @@ struct cppi41_channel {
 	unsigned int port_num;
 
 	unsigned td_retry;
-	unsigned td_queued:1;
-	unsigned td_seen:1;
-	unsigned td_desc_seen:1;
+	unsigned td_queued;
+	unsigned td_seen;
+	unsigned td_desc_seen;
 };
 
 struct cppi41_desc {

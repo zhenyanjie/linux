@@ -235,9 +235,9 @@ struct m5mols_info {
 	struct m5mols_version ver;
 	struct m5mols_capture cap;
 
-	unsigned int isp_ready:1;
-	unsigned int power:1;
-	unsigned int ctrl_sync:1;
+	unsigned int isp_ready;
+	unsigned int power;
+	unsigned int ctrl_sync;
 
 	u8 resolution;
 	u8 mode;

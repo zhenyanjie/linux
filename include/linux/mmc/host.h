@@ -313,11 +313,11 @@ struct mmc_host {
 	struct mmc_ios		ios;		/* current io bus settings */
 
 	/* group bitfields together to minimize padding */
-	unsigned int		use_spi_crc:1;
-	unsigned int		claimed:1;	/* host exclusively claimed */
-	unsigned int		bus_dead:1;	/* bus has been released */
+	unsigned int		use_spi_crc;
+	unsigned int		claimed;	/* host exclusively claimed */
+	unsigned int		bus_dead;	/* bus has been released */
 #ifdef CONFIG_MMC_DEBUG
-	unsigned int		removed:1;	/* host is being removed */
+	unsigned int		removed;	/* host is being removed */
 #endif
 
 	int			rescan_disable;	/* disable card detection */

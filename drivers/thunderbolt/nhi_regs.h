@@ -32,10 +32,10 @@ enum ring_desc_flags {
  */
 struct ring_desc {
 	u64 phys;
-	u32 length:12;
-	u32 eof:4;
-	u32 sof:4;
-	enum ring_desc_flags flags:12;
+	u32 length;
+	u32 eof;
+	u32 sof;
+	enum ring_desc_flags flags;
 	u32 time; /* write zero */
 } __packed;
 

@@ -120,19 +120,19 @@ struct sci_phy_cap {
 			 * to 0 if the PHY CAPABILITIES were either not
 			 * received or speed negotiation failed.
 			 */
-			u8 start:1;
-			u8 tx_ssc_type:1;
-			u8 res1:2;
-			u8 req_logical_linkrate:4;
+			u8 start;
+			u8 tx_ssc_type;
+			u8 res1;
+			u8 req_logical_linkrate;
 
-			u32 gen1_no_ssc:1;
-			u32 gen1_ssc:1;
-			u32 gen2_no_ssc:1;
-			u32 gen2_ssc:1;
-			u32 gen3_no_ssc:1;
-			u32 gen3_ssc:1;
-			u32 res2:17;
-			u32 parity:1;
+			u32 gen1_no_ssc;
+			u32 gen1_ssc;
+			u32 gen2_no_ssc;
+			u32 gen2_ssc;
+			u32 gen3_no_ssc;
+			u32 gen3_ssc;
+			u32 res2;
+			u32 parity;
 		};
 		u32 all;
 	};
@@ -142,16 +142,16 @@ struct sci_phy_cap {
 struct sci_phy_proto {
 	union {
 		struct {
-			u16 _r_a:1;
-			u16 smp_iport:1;
-			u16 stp_iport:1;
-			u16 ssp_iport:1;
-			u16 _r_b:4;
-			u16 _r_c:1;
-			u16 smp_tport:1;
-			u16 stp_tport:1;
-			u16 ssp_tport:1;
-			u16 _r_d:4;
+			u16 _r_a;
+			u16 smp_iport;
+			u16 stp_iport;
+			u16 ssp_iport;
+			u16 _r_b;
+			u16 _r_c;
+			u16 smp_tport;
+			u16 stp_tport;
+			u16 ssp_tport;
+			u16 _r_d;
 		};
 		u16 all;
 	};

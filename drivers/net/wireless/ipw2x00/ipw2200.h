@@ -880,9 +880,9 @@ static inline void ipw_set_scan_type(struct ipw_scan_request_ext *scan,
 struct ipw_associate {
 	u8 channel;
 #ifdef __LITTLE_ENDIAN_BITFIELD
-	u8 auth_type:4, auth_key:4;
+	u8 auth_type, auth_key;
 #else
-	u8 auth_key:4, auth_type:4;
+	u8 auth_key, auth_type;
 #endif
 	u8 assoc_type;
 	u8 reserved;

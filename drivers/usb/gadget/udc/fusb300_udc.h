@@ -644,9 +644,9 @@ struct fusb300_ep {
 	struct fusb300		*fusb300;
 
 	struct list_head	queue;
-	unsigned		stall:1;
-	unsigned		wedged:1;
-	unsigned		use_dma:1;
+	unsigned		stall;
+	unsigned		wedged;
+	unsigned		use_dma;
 
 	unsigned char		epnum;
 	unsigned char		type;

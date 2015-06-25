@@ -373,13 +373,13 @@ struct tpt_attributes {
 	u32 qpid;
 	u32 pbl_addr;
 	u32 pbl_size;
-	u32 state:1;
-	u32 type:2;
-	u32 rsvd:1;
-	u32 remote_invaliate_disable:1;
-	u32 zbva:1;
-	u32 mw_bind_enable:1;
-	u32 page_size:5;
+	u32 state;
+	u32 type;
+	u32 rsvd;
+	u32 remote_invaliate_disable;
+	u32 zbva;
+	u32 mw_bind_enable;
+	u32 page_size;
 };
 
 struct c4iw_mr {

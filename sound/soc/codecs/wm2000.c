@@ -69,11 +69,11 @@ struct wm2000_priv {
 
 	enum wm2000_anc_mode anc_mode;
 
-	unsigned int anc_active:1;
-	unsigned int anc_eng_ena:1;
-	unsigned int spk_ena:1;
+	unsigned int anc_active;
+	unsigned int anc_eng_ena;
+	unsigned int spk_ena;
 
-	unsigned int speech_clarity:1;
+	unsigned int speech_clarity;
 
 	int anc_download_size;
 	char *anc_download;

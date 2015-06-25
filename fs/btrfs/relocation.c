@@ -61,27 +61,27 @@ struct backref_node {
 	/* extent buffer got by COW the block */
 	struct extent_buffer *eb;
 	/* level of tree block */
-	unsigned int level:8;
+	unsigned int level;
 	/* is the block in non-reference counted tree */
-	unsigned int cowonly:1;
+	unsigned int cowonly;
 	/* 1 if no child node in the cache */
-	unsigned int lowest:1;
+	unsigned int lowest;
 	/* is the extent buffer locked */
-	unsigned int locked:1;
+	unsigned int locked;
 	/* has the block been processed */
-	unsigned int processed:1;
+	unsigned int processed;
 	/* have backrefs of this block been checked */
-	unsigned int checked:1;
+	unsigned int checked;
 	/*
 	 * 1 if corresponding block has been cowed but some upper
 	 * level block pointers may not point to the new location
 	 */
-	unsigned int pending:1;
+	unsigned int pending;
 	/*
 	 * 1 if the backref node isn't connected to any other
 	 * backref node.
 	 */
-	unsigned int detached:1;
+	unsigned int detached;
 };
 
 /*
@@ -141,8 +141,8 @@ struct tree_block {
 	struct rb_node rb_node;
 	u64 bytenr;
 	struct btrfs_key key;
-	unsigned int level:8;
-	unsigned int key_ready:1;
+	unsigned int level;
+	unsigned int key_ready;
 };
 
 #define MAX_EXTENTS 128
@@ -183,10 +183,10 @@ struct reloc_control {
 	u64 search_start;
 	u64 extents_found;
 
-	unsigned int stage:8;
-	unsigned int create_reloc_tree:1;
-	unsigned int merge_reloc_tree:1;
-	unsigned int found_file_extent:1;
+	unsigned int stage;
+	unsigned int create_reloc_tree;
+	unsigned int merge_reloc_tree;
+	unsigned int found_file_extent;
 };
 
 /* stages of data relocation */

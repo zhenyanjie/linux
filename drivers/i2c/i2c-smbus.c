@@ -30,7 +30,7 @@
 #include <linux/slab.h>
 
 struct i2c_smbus_alert {
-	unsigned int		alert_edge_triggered:1;
+	unsigned int		alert_edge_triggered;
 	int			irq;
 	struct work_struct	alert;
 	struct i2c_client	*ara;		/* Alert response address */
@@ -38,7 +38,7 @@ struct i2c_smbus_alert {
 
 struct alert_data {
 	unsigned short		addr;
-	u8			flag:1;
+	u8			flag;
 };
 
 /* If this is the alerting device, notify its driver */

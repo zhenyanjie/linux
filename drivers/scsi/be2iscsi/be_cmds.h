@@ -1030,7 +1030,7 @@ struct tcp_connect_and_offload_in_v1 {
 	u16 tcp_window_size;
 	u8 tcp_window_scale_count;
 	u8 rsvd1;
-	u32 tcp_mss:24;
+	u32 tcp_mss;
 	u8 rsvd2;
 } __packed;
 

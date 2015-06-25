@@ -262,18 +262,18 @@ union external_hw_config_reg {
 		/* FIXME: Do we even need this?	 All values are
 		 * referred to by 16 bit quantities.  Platform and
 		 * endianess issues. */
-		__le32 bReserved0:1;
-		__le32 bSDRAMProtectionMethod:2;
-		__le32 bSDRAMBanks:1;
-		__le32 bSDRAMChipWidth:1;
-		__le32 bSDRAMChipSize:2;
-		__le32 bParityDisable:1;
-		__le32 bExternalMemoryType:1;
-		__le32 bFlashBIOSWriteEnable:1;
-		__le32 bFlashUpperBankSelect:1;
-		__le32 bWriteBurst:2;
-		__le32 bReserved1:3;
-		__le32 bMask:16;
+		__le32 bReserved0;
+		__le32 bSDRAMProtectionMethod;
+		__le32 bSDRAMBanks;
+		__le32 bSDRAMChipWidth;
+		__le32 bSDRAMChipSize;
+		__le32 bParityDisable;
+		__le32 bExternalMemoryType;
+		__le32 bFlashBIOSWriteEnable;
+		__le32 bFlashUpperBankSelect;
+		__le32 bWriteBurst;
+		__le32 bReserved1;
+		__le32 bMask;
 	};
 	uint32_t Asuint32_t;
 };

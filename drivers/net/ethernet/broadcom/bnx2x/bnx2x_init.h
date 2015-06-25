@@ -44,26 +44,26 @@ enum {
 
 /* structs for the various opcodes */
 struct raw_op {
-	u32 op:8;
-	u32 offset:24;
+	u32 op;
+	u32 offset;
 	u32 raw_data;
 };
 
 struct op_read {
-	u32 op:8;
-	u32 offset:24;
+	u32 op;
+	u32 offset;
 	u32 val;
 };
 
 struct op_write {
-	u32 op:8;
-	u32 offset:24;
+	u32 op;
+	u32 offset;
 	u32 val;
 };
 
 struct op_arr_write {
-	u32 op:8;
-	u32 offset:24;
+	u32 op;
+	u32 offset;
 #ifdef __BIG_ENDIAN
 	u16 data_len;
 	u16 data_off;
@@ -74,14 +74,14 @@ struct op_arr_write {
 };
 
 struct op_zero {
-	u32 op:8;
-	u32 offset:24;
+	u32 op;
+	u32 offset;
 	u32 len;
 };
 
 struct op_if_mode {
-	u32 op:8;
-	u32 cmd_offset:24;
+	u32 op;
+	u32 cmd_offset;
 	u32 mode_bit_map;
 };
 

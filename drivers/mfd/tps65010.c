@@ -75,9 +75,9 @@ struct tps65010 {
 	struct mutex		lock;
 	struct delayed_work	work;
 	struct dentry		*file;
-	unsigned		charging:1;
-	unsigned		por:1;
-	unsigned		model:8;
+	unsigned		charging;
+	unsigned		por;
+	unsigned		model;
 	u16			vbus;
 	unsigned long		flags;
 #define	FLAG_VBUS_CHANGED	0

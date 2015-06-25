@@ -126,8 +126,8 @@ struct pcl816_private {
 	unsigned int ai_poll_ptr;	/*  how many sampes transfer poll */
 	unsigned int divisor1;
 	unsigned int divisor2;
-	unsigned int ai_cmd_running:1;
-	unsigned int ai_cmd_canceled:1;
+	unsigned int ai_cmd_running;
+	unsigned int ai_cmd_canceled;
 };
 
 static void pcl816_start_pacer(struct comedi_device *dev, bool load_counters)

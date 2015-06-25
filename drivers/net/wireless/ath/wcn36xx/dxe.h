@@ -196,25 +196,25 @@ enum wcn36xx_dxe_ch_desc_num {
  *
  * @ctrl: is a union that consists of following bits:
  * union {
- *	u32	valid		:1; //0 = DMA stop, 1 = DMA continue with this
+ *	u32	valid		; //0 = DMA stop, 1 = DMA continue with this
  *				    //descriptor
- *	u32	transfer_type	:2; //0 = Host to Host space
- *	u32	eop		:1; //End of Packet
- *	u32	bd_handling	:1; //if transferType = Host to BMU, then 0
+ *	u32	transfer_type	; //0 = Host to Host space
+ *	u32	eop		; //End of Packet
+ *	u32	bd_handling	; //if transferType = Host to BMU, then 0
  *				    // means first 128 bytes contain BD, and 1
  *				    // means create new empty BD
- *	u32	siq		:1; // SIQ
- *	u32	diq		:1; // DIQ
- *	u32	pdu_rel		:1; //0 = don't release BD and PDUs when done,
+ *	u32	siq		; // SIQ
+ *	u32	diq		; // DIQ
+ *	u32	pdu_rel		; //0 = don't release BD and PDUs when done,
  *				    // 1 = release them
- *	u32	bthld_sel	:4; //BMU Threshold Select
- *	u32	prio		:3; //Specifies the priority level to use for
+ *	u32	bthld_sel	; //BMU Threshold Select
+ *	u32	prio		; //Specifies the priority level to use for
  *				    // the transfer
- *	u32	stop_channel	:1; //1 = DMA stops processing further, channel
+ *	u32	stop_channel	; //1 = DMA stops processing further, channel
  *				    //requires re-enabling after this
- *	u32	intr		:1; //Interrupt on Descriptor Done
- *	u32	rsvd		:1; //reserved
- *	u32	size		:14;//14 bits used - ignored for BMU transfers,
+ *	u32	intr		; //Interrupt on Descriptor Done
+ *	u32	rsvd		; //reserved
+ *	u32	size		;//14 bits used - ignored for BMU transfers,
  *				    //only used for host to host transfers?
  * } ctrl;
  */

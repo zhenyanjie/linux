@@ -506,10 +506,10 @@ struct snd_soc_dapm_path {
 	struct snd_soc_dapm_widget *sink;
 
 	/* status */
-	u32 connect:1;	/* source and sink widgets are connected */
-	u32 walked:1;	/* path has been walked */
-	u32 walking:1;  /* path is in the process of being walked */
-	u32 weak:1;	/* path ignored for power management */
+	u32 connect;	/* source and sink widgets are connected */
+	u32 walked;	/* path has been walked */
+	u32 walking;  /* path is in the process of being walked */
+	u32 weak;	/* path ignored for power management */
 
 	int (*connected)(struct snd_soc_dapm_widget *source,
 			 struct snd_soc_dapm_widget *sink);
@@ -539,15 +539,15 @@ struct snd_soc_dapm_widget {
 	unsigned int mask;			/* non-shifted mask */
 	unsigned int on_val;			/* on state value */
 	unsigned int off_val;			/* off state value */
-	unsigned char power:1;			/* block power status */
-	unsigned char active:1;			/* active stream on DAC, ADC's */
-	unsigned char connected:1;		/* connected codec pin */
-	unsigned char new:1;			/* cnew complete */
-	unsigned char ext:1;			/* has external widgets */
-	unsigned char force:1;			/* force state */
-	unsigned char ignore_suspend:1;         /* kept enabled over suspend */
-	unsigned char new_power:1;		/* power from this run */
-	unsigned char power_checked:1;		/* power checked this run */
+	unsigned char power;			/* block power status */
+	unsigned char active;			/* active stream on DAC, ADC's */
+	unsigned char connected;		/* connected codec pin */
+	unsigned char new;			/* cnew complete */
+	unsigned char ext;			/* has external widgets */
+	unsigned char force;			/* force state */
+	unsigned char ignore_suspend;         /* kept enabled over suspend */
+	unsigned char new_power;		/* power from this run */
+	unsigned char power_checked;		/* power checked this run */
 	int subseq;				/* sort within widget type */
 
 	int (*power_check)(struct snd_soc_dapm_widget *w);
@@ -586,7 +586,7 @@ struct snd_soc_dapm_context {
 	enum snd_soc_bias_level bias_level;
 	enum snd_soc_bias_level suspend_bias_level;
 	struct delayed_work delayed_work;
-	unsigned int idle_bias_off:1; /* Use BIAS_OFF instead of STANDBY */
+	unsigned int idle_bias_off; /* Use BIAS_OFF instead of STANDBY */
 
 	void (*seq_notifier)(struct snd_soc_dapm_context *,
 			     enum snd_soc_dapm_type, int);

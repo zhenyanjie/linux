@@ -327,12 +327,12 @@ struct ubi_volume {
 	void *upd_buf;
 
 	int *eba_tbl;
-	unsigned int checked:1;
-	unsigned int corrupted:1;
-	unsigned int upd_marker:1;
-	unsigned int updating:1;
-	unsigned int changing_leb:1;
-	unsigned int direct_writes:1;
+	unsigned int checked;
+	unsigned int corrupted;
+	unsigned int upd_marker;
+	unsigned int updating;
+	unsigned int changing_leb;
+	unsigned int direct_writes;
 };
 
 /**
@@ -364,11 +364,11 @@ struct ubi_wl_entry;
  * @dfs_emulate_io_failures: debugfs knob to emulate write/erase failures
  */
 struct ubi_debug_info {
-	unsigned int chk_gen:1;
-	unsigned int chk_io:1;
-	unsigned int disable_bgt:1;
-	unsigned int emulate_bitflips:1;
-	unsigned int emulate_io_failures:1;
+	unsigned int chk_gen;
+	unsigned int chk_io;
+	unsigned int disable_bgt;
+	unsigned int emulate_bitflips;
+	unsigned int emulate_io_failures;
 	char dfs_dir_name[UBI_DFS_DIR_LEN + 1];
 	struct dentry *dfs_dir;
 	struct dentry *dfs_chk_gen;
@@ -573,8 +573,8 @@ struct ubi_device {
 	int vid_hdr_offset;
 	int vid_hdr_aloffset;
 	int vid_hdr_shift;
-	unsigned int bad_allowed:1;
-	unsigned int nor_flash:1;
+	unsigned int bad_allowed;
+	unsigned int nor_flash;
 	int max_write_size;
 	struct mtd_info *mtd;
 
@@ -607,8 +607,8 @@ struct ubi_ainf_peb {
 	int pnum;
 	int vol_id;
 	int lnum;
-	unsigned int scrub:1;
-	unsigned int copy_flag:1;
+	unsigned int scrub;
+	unsigned int copy_flag;
 	unsigned long long sqnum;
 	union {
 		struct rb_node rb;

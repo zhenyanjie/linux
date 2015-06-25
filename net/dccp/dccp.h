@@ -356,8 +356,8 @@ struct dccp_skb_cb {
 		struct inet6_skb_parm	h6;
 #endif
 	} header;
-	__u8  dccpd_type:4;
-	__u8  dccpd_ccval:4;
+	__u8  dccpd_type;
+	__u8  dccpd_ccval;
 	__u8  dccpd_reset_code,
 	      dccpd_reset_data[3];
 	__u16 dccpd_opt_len;

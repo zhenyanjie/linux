@@ -52,10 +52,10 @@ struct ab3100_otp {
 	u32 freq;
 	bool paf;
 	bool imeich;
-	u16 cid:14;
-	u32 tac:20;
+	u16 cid;
+	u32 tac;
 	u8 fac;
-	u32 svn:20;
+	u32 svn;
 	struct dentry *debugfs;
 };
 

@@ -122,14 +122,14 @@ enum ipu_panel {
 };
 
 struct ipu_di_signal_cfg {
-	unsigned datamask_en:1;
-	unsigned clksel_en:1;
-	unsigned clkidle_en:1;
-	unsigned data_pol:1;	/* true = inverted */
-	unsigned clk_pol:1;	/* true = rising edge */
-	unsigned enable_pol:1;
-	unsigned Hsync_pol:1;	/* true = active high */
-	unsigned Vsync_pol:1;
+	unsigned datamask_en;
+	unsigned clksel_en;
+	unsigned clkidle_en;
+	unsigned data_pol;	/* true = inverted */
+	unsigned clk_pol;	/* true = rising edge */
+	unsigned enable_pol;
+	unsigned Hsync_pol;	/* true = active high */
+	unsigned Vsync_pol;
 };
 
 static const struct fb_videomode mx3fb_modedb[] = {

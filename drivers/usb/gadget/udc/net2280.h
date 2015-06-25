@@ -100,7 +100,7 @@ struct net2280_ep {
 	dma_addr_t				td_dma;	/* of dummy */
 	struct net2280				*dev;
 	unsigned long				irqs;
-	unsigned is_halt:1, dma_started:1;
+	unsigned is_halt:1, dma_started;
 
 	/* analogous to a host-side qh */
 	struct list_head			queue;
@@ -166,7 +166,7 @@ struct net2280 {
 					ltm_enable:1,
 					wakeup_enable:1,
 					selfpowered:1,
-					addressed_state:1;
+					addressed_state;
 	u16				chiprev;
 	int enhanced_mode;
 	int n_ep;

@@ -217,8 +217,8 @@ typedef struct srpc_client_rpc {
 	void		*crpc_priv;      /* caller data */
 
 	/* state flags */
-	unsigned int	 crpc_aborted:1; /* being given up */
-	unsigned int	 crpc_closed:1;  /* completed */
+	unsigned int	 crpc_aborted; /* being given up */
+	unsigned int	 crpc_closed;  /* completed */
 
 	/* RPC events */
 	srpc_event_t	 crpc_bulkev;    /* bulk event */
@@ -366,14 +366,14 @@ typedef struct sfw_test_instance {
 	sfw_test_client_ops_t  *tsi_ops;	  /* test client operations */
 
 	/* public parameter for all test units */
-	unsigned int		tsi_is_client:1;     /* is test client */
-	unsigned int		tsi_stoptsu_onerr:1; /* stop tsu on error */
+	unsigned int		tsi_is_client;     /* is test client */
+	unsigned int		tsi_stoptsu_onerr; /* stop tsu on error */
 	int		     tsi_concur;	  /* concurrency */
 	int		     tsi_loop;	    /* loop count */
 
 	/* status of test instance */
 	spinlock_t		tsi_lock;	  /* serialize */
-	unsigned int		tsi_stopping:1;   /* test is stopping */
+	unsigned int		tsi_stopping;   /* test is stopping */
 	atomic_t	    tsi_nactive;      /* # of active test unit */
 	struct list_head	      tsi_units;	/* test units */
 	struct list_head	      tsi_free_rpcs;    /* free rpcs */

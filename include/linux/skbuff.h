@@ -525,12 +525,12 @@ struct sk_buff {
 				cloned:1,
 				ip_summed:2,
 				nohdr:1,
-				nfctinfo:3;
+				nfctinfo;
 	__u8			pkt_type:3,
 				fclone:2,
 				ipvs_property:1,
 				peeked:1,
-				nf_trace:1;
+				nf_trace;
 	kmemcheck_bitfield_end(flags1);
 	__be16			protocol;
 
@@ -559,25 +559,25 @@ struct sk_buff {
 	__u16			queue_mapping;
 	kmemcheck_bitfield_begin(flags2);
 #ifdef CONFIG_IPV6_NDISC_NODETYPE
-	__u8			ndisc_nodetype:2;
+	__u8			ndisc_nodetype;
 #endif
-	__u8			pfmemalloc:1;
-	__u8			ooo_okay:1;
-	__u8			l4_hash:1;
-	__u8			sw_hash:1;
-	__u8			wifi_acked_valid:1;
-	__u8			wifi_acked:1;
-	__u8			no_fcs:1;
-	__u8			head_frag:1;
+	__u8			pfmemalloc;
+	__u8			ooo_okay;
+	__u8			l4_hash;
+	__u8			sw_hash;
+	__u8			wifi_acked_valid;
+	__u8			wifi_acked;
+	__u8			no_fcs;
+	__u8			head_frag;
 	/* Encapsulation protocol and NIC drivers should use
 	 * this flag to indicate to each other if the skb contains
 	 * encapsulated packet or not and maybe use the inner packet
 	 * headers if needed
 	 */
-	__u8			encapsulation:1;
-	__u8			encap_hdr_csum:1;
-	__u8			csum_valid:1;
-	__u8			csum_complete_sw:1;
+	__u8			encapsulation;
+	__u8			encap_hdr_csum;
+	__u8			csum_valid;
+	__u8			csum_complete_sw;
 	/* 2/4 bit hole (depending on ndisc_nodetype presence) */
 	kmemcheck_bitfield_end(flags2);
 

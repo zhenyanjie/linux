@@ -40,8 +40,8 @@ struct ct_timer_instance {
 	struct list_head running_list;
 	unsigned int position;
 	unsigned int frag_count;
-	unsigned int running:1;
-	unsigned int need_update:1;
+	unsigned int running;
+	unsigned int need_update;
 };
 
 /* timer instance manager */
@@ -53,9 +53,9 @@ struct ct_timer {
 	struct list_head instance_head;
 	struct list_head running_head;
 	unsigned int wc;		/* current wallclock */
-	unsigned int irq_handling:1;	/* in IRQ handling */
-	unsigned int reprogram:1;	/* need to reprogram the internval */
-	unsigned int running:1;		/* global timer running */
+	unsigned int irq_handling;	/* in IRQ handling */
+	unsigned int reprogram;	/* need to reprogram the internval */
+	unsigned int running;		/* global timer running */
 };
 
 

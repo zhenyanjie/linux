@@ -52,11 +52,11 @@ struct max8649_regulator_info {
 	struct device		*dev;
 	struct regmap		*regmap;
 
-	unsigned	mode:2;	/* bit[1:0] = VID1, VID0 */
-	unsigned	extclk_freq:2;
-	unsigned	extclk:1;
-	unsigned	ramp_timing:3;
-	unsigned	ramp_down:1;
+	unsigned	mode;	/* bit[1:0] = VID1, VID0 */
+	unsigned	extclk_freq;
+	unsigned	extclk;
+	unsigned	ramp_timing;
+	unsigned	ramp_down;
 };
 
 static int max8649_enable_time(struct regulator_dev *rdev)

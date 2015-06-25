@@ -224,7 +224,7 @@ struct entry {
 	/*
 	 * FIXME: pack these better
 	 */
-	bool dirty:1;
+	bool dirty;
 	unsigned hit_count;
 	unsigned generation;
 	unsigned tick;

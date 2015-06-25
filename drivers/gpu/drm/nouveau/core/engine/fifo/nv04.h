@@ -133,10 +133,10 @@
 #define NV40_PFIFO_CACHE1_DATA(i)                  (0x00090004+(i*8))
 
 struct ramfc_desc {
-	unsigned bits:6;
-	unsigned ctxs:5;
-	unsigned ctxp:8;
-	unsigned regs:5;
+	unsigned bits;
+	unsigned ctxs;
+	unsigned ctxp;
+	unsigned regs;
 	unsigned regp;
 };
 

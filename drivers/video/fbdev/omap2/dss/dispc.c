@@ -83,15 +83,15 @@ struct dispc_features {
 	u8 num_fifos;
 
 	/* swap GFX & WB fifos */
-	bool gfx_fifo_workaround:1;
+	bool gfx_fifo_workaround;
 
 	/* no DISPC_IRQ_FRAMEDONETV on this SoC */
-	bool no_framedone_tv:1;
+	bool no_framedone_tv;
 
 	/* revert to the OMAP4 mechanism of DISPC Smart Standby operation */
-	bool mstandby_workaround:1;
+	bool mstandby_workaround;
 
-	bool set_max_preload:1;
+	bool set_max_preload;
 };
 
 #define DISPC_MAX_NR_FIFOS 5

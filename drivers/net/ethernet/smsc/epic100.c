@@ -282,8 +282,8 @@ struct epic_private {
 	u16 advertising;					/* NWay media advertisement */
 	int mii_phy_cnt;
 	struct mii_if_info mii;
-	unsigned int tx_full:1;				/* The Tx queue is full. */
-	unsigned int default_port:4;		/* Last dev->if_port value. */
+	unsigned int tx_full;				/* The Tx queue is full. */
+	unsigned int default_port;		/* Last dev->if_port value. */
 };
 
 static int epic_open(struct net_device *dev);

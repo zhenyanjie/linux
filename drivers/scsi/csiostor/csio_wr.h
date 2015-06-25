@@ -111,9 +111,9 @@ extern int csio_intr_coalesce_time;
 /* Ingress queue params */
 struct csio_iq_params {
 
-	uint8_t		iq_start:1;
-	uint8_t		iq_stop:1;
-	uint8_t		pfn:3;
+	uint8_t		iq_start;
+	uint8_t		iq_stop;
+	uint8_t		pfn;
 
 	uint8_t		vfn;
 
@@ -202,26 +202,26 @@ struct csio_eq_params {
 	uint8_t		pfn;
 	uint8_t		vfn;
 
-	uint8_t		eqstart:1;
-	uint8_t		eqstop:1;
+	uint8_t		eqstart;
+	uint8_t		eqstop;
 
 	uint16_t        physeqid;
 	uint32_t	eqid;
 
-	uint8_t		hostfcmode:2;
-	uint8_t		cprio:1;
-	uint8_t		pciechn:3;
+	uint8_t		hostfcmode;
+	uint8_t		cprio;
+	uint8_t		pciechn;
 
 	uint16_t	iqid;
 
-	uint8_t		dcaen:1;
-	uint8_t		dcacpu:5;
+	uint8_t		dcaen;
+	uint8_t		dcacpu;
 
-	uint8_t		fbmin:3;
-	uint8_t		fbmax:3;
+	uint8_t		fbmin;
+	uint8_t		fbmax;
 
-	uint8_t		cidxfthresho:1;
-	uint8_t		cidxfthresh:3;
+	uint8_t		cidxfthresho;
+	uint8_t		cidxfthresh;
 
 	uint16_t	eqsize;
 

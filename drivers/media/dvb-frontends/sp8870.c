@@ -48,7 +48,7 @@ struct sp8870_state {
 	struct dvb_frontend frontend;
 
 	/* demodulator private data */
-	u8 initialised:1;
+	u8 initialised;
 };
 
 static int debug;

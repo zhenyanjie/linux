@@ -265,7 +265,7 @@ struct l2cap_ctrl {
 		final:1,
 		fcs:1,
 		sar:2,
-		super:2;
+		super;
 	__u16	reqseq;
 	__u16	txseq;
 	__u8	retries;

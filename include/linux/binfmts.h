@@ -25,11 +25,11 @@ struct linux_binprm {
 	unsigned int
 		cred_prepared:1,/* true if creds already prepared (multiple
 				 * preps happen for interpreters) */
-		cap_effective:1;/* true if has elevated effective capabilities,
+		cap_effective;/* true if has elevated effective capabilities,
 				 * false if not; except for init which inherits
 				 * its parent's caps anyway */
 #ifdef __alpha__
-	unsigned int taso:1;
+	unsigned int taso;
 #endif
 	unsigned int recursion_depth; /* only for search_binary_handler() */
 	struct file * file;

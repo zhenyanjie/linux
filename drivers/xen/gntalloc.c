@@ -80,8 +80,8 @@ static DEFINE_MUTEX(gref_mutex);
 static int gref_size;
 
 struct notify_info {
-	uint16_t pgoff:12;    /* Bits 0-11: Offset of the byte to clear */
-	uint16_t flags:2;     /* Bits 12-13: Unmap notification flags */
+	uint16_t pgoff;    /* Bits 0-11: Offset of the byte to clear */
+	uint16_t flags;     /* Bits 12-13: Unmap notification flags */
 	int event;            /* Port (event channel) to notify */
 };
 

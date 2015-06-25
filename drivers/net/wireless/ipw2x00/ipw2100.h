@@ -151,7 +151,7 @@ extern const char *band_str[];
 struct bd_status {
 	union {
 		struct {
-			u8 nlf:1, txType:2, intEnabled:1, reserved:4;
+			u8 nlf, txType, intEnabled, reserved;
 		} fields;
 		u8 field;
 	} info;

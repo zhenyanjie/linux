@@ -171,7 +171,7 @@ struct zd_usb_interrupt {
 	dma_addr_t buffer_dma;
 	int interval;
 	atomic_t read_regs_enabled;
-	u8 read_regs_int_overridden:1;
+	u8 read_regs_int_overridden;
 };
 
 static inline struct usb_int_regs *get_read_regs(struct zd_usb_interrupt *intr)
@@ -209,7 +209,7 @@ struct zd_usb_tx {
 	struct sk_buff_head submitted_skbs;
 	struct usb_anchor submitted;
 	int submitted_urbs;
-	u8 stopped:1, watchdog_enabled:1;
+	u8 stopped, watchdog_enabled;
 };
 
 /* Contains the usb parts. The structure doesn't require a lock because intf
@@ -224,7 +224,7 @@ struct zd_usb {
 	struct urb *urb_async_waiting;
 	int cmd_error;
 	u8 req_buf[64]; /* zd_usb_iowrite16v needs 62 bytes */
-	u8 is_zd1211b:1, initialized:1, was_running:1, in_async:1;
+	u8 is_zd1211b, initialized, was_running, in_async;
 };
 
 #define zd_usb_dev(usb) (&usb->intf->dev)

@@ -1573,9 +1573,9 @@ struct xhci_hcd {
 	__le32 __iomem		**usb2_ports;
 	unsigned int		num_usb2_ports;
 	/* support xHCI 0.96 spec USB2 software LPM */
-	unsigned		sw_lpm_support:1;
+	unsigned		sw_lpm_support;
 	/* support xHCI 1.0 spec USB2 hardware LPM */
-	unsigned		hw_lpm_support:1;
+	unsigned		hw_lpm_support;
 	/* cached usb2 extened protocol capabilites */
 	u32                     *ext_caps;
 	unsigned int            num_ext_caps;

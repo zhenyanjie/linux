@@ -116,16 +116,16 @@ union dm_version {
 
 union dm_caps {
 	struct {
-		__u64 balloon:1;
-		__u64 hot_add:1;
+		__u64 balloon;
+		__u64 hot_add;
 		/*
 		 * To support guests that may have alignment
 		 * limitations on hot-add, the guest can specify
 		 * its alignment requirements; a value of n
 		 * represents an alignment of 2^n in mega bytes.
 		 */
-		__u64 hot_add_alignment:4;
-		__u64 reservedz:58;
+		__u64 hot_add_alignment;
+		__u64 reservedz;
 	} cap_bits;
 	__u64 caps;
 } __packed;
@@ -137,11 +137,11 @@ union dm_mem_page_range {
 		 * 40 bits is the architectural limit of a PFN
 		 * number for AMD64.
 		 */
-		__u64 start_page:40;
+		__u64 start_page;
 		/*
 		 * The number of pages in the range.
 		 */
-		__u64 page_cnt:24;
+		__u64 page_cnt;
 	} finfo;
 	__u64  page_range;
 } __packed;
@@ -190,8 +190,8 @@ struct dm_message {
 struct dm_version_request {
 	struct dm_header hdr;
 	union dm_version version;
-	__u32 is_last_attempt:1;
-	__u32 reservedz:31;
+	__u32 is_last_attempt;
+	__u32 reservedz;
 } __packed;
 
 /*
@@ -207,8 +207,8 @@ struct dm_version_request {
 
 struct dm_version_response {
 	struct dm_header hdr;
-	__u64 is_accepted:1;
-	__u64 reservedz:63;
+	__u64 is_accepted;
+	__u64 reservedz;
 } __packed;
 
 /*
@@ -235,8 +235,8 @@ struct dm_capabilities {
 
 struct dm_capabilities_resp_msg {
 	struct dm_header hdr;
-	__u64 is_accepted:1;
-	__u64 reservedz:63;
+	__u64 is_accepted;
+	__u64 reservedz;
 } __packed;
 
 /*
@@ -302,8 +302,8 @@ struct dm_balloon {
 struct dm_balloon_response {
 	struct dm_header hdr;
 	__u32 reservedz;
-	__u32 more_pages:1;
-	__u32 range_count:31;
+	__u32 more_pages;
+	__u32 range_count;
 	union dm_mem_page_range range_array[];
 } __packed;
 
@@ -324,8 +324,8 @@ struct dm_balloon_response {
 
 struct dm_unballoon_request {
 	struct dm_header hdr;
-	__u32 more_pages:1;
-	__u32 reservedz:31;
+	__u32 more_pages;
+	__u32 reservedz;
 	__u32 range_count;
 	union dm_mem_page_range range_array[];
 } __packed;

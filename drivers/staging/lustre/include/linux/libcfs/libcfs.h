@@ -170,7 +170,7 @@ void cfs_get_random_bytes(void *buf, int size);
 #include "libcfs_crypto.h"
 
 /* container_of depends on "likely" which is defined in libcfs_private.h */
-static inline void *__container_of(void *ptr, unsigned long shift)
+static inline void *__container_of0(void *ptr, unsigned long shift)
 {
 	if (unlikely(IS_ERR(ptr) || ptr == NULL))
 		return ptr;

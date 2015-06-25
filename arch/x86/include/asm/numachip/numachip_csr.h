@@ -82,10 +82,10 @@ static inline void write_lcsr(unsigned long offset, unsigned int val)
 union numachip_csr_g0_state_clear {
 	unsigned int v;
 	struct numachip_csr_g0_state_clear_s {
-		unsigned int _state:2;
-		unsigned int _rsvd_2_6:5;
-		unsigned int _lost:1;
-		unsigned int _rsvd_8_31:24;
+		unsigned int _state;
+		unsigned int _rsvd_2_6;
+		unsigned int _lost;
+		unsigned int _rsvd_8_31;
 	} s;
 };
 
@@ -97,9 +97,9 @@ union numachip_csr_g0_state_clear {
 union numachip_csr_g0_node_ids {
 	unsigned int v;
 	struct numachip_csr_g0_node_ids_s {
-		unsigned int _initialid:16;
-		unsigned int _nodeid:12;
-		unsigned int _rsvd_28_31:4;
+		unsigned int _initialid;
+		unsigned int _nodeid;
+		unsigned int _rsvd_28_31;
 	} s;
 };
 
@@ -111,10 +111,10 @@ union numachip_csr_g0_node_ids {
 union numachip_csr_g3_ext_irq_gen {
 	unsigned int v;
 	struct numachip_csr_g3_ext_irq_gen_s {
-		unsigned int _vector:8;
-		unsigned int _msgtype:3;
-		unsigned int _index:5;
-		unsigned int _destination_apic_id:16;
+		unsigned int _vector;
+		unsigned int _msgtype;
+		unsigned int _index;
+		unsigned int _destination_apic_id;
 	} s;
 };
 
@@ -126,7 +126,7 @@ union numachip_csr_g3_ext_irq_gen {
 union numachip_csr_g3_ext_irq_status {
 	unsigned int v;
 	struct numachip_csr_g3_ext_irq_status_s {
-		unsigned int _result:32;
+		unsigned int _result;
 	} s;
 };
 
@@ -138,8 +138,8 @@ union numachip_csr_g3_ext_irq_status {
 union numachip_csr_g3_ext_irq_dest {
 	unsigned int v;
 	struct numachip_csr_g3_ext_irq_dest_s {
-		unsigned int _irq:8;
-		unsigned int _rsvd_8_31:24;
+		unsigned int _irq;
+		unsigned int _rsvd_8_31;
 	} s;
 };
 
@@ -151,9 +151,9 @@ union numachip_csr_g3_ext_irq_dest {
 union numachip_csr_g3_nc_att_map_select {
 	unsigned int v;
 	struct numachip_csr_g3_nc_att_map_select_s {
-		unsigned int _upper_address_bits:4;
-		unsigned int _select_ram:4;
-		unsigned int _rsvd_8_31:24;
+		unsigned int _upper_address_bits;
+		unsigned int _select_ram;
+		unsigned int _rsvd_8_31;
 	} s;
 };
 

@@ -59,7 +59,7 @@ struct state {
 	u8 prechip_version;
 	u8 chip_version;
 	u16 chip_type;
-	u8 dual_mode:1;
+	u8 dual_mode;
 	u16 eeprom_addr;
 	struct af9033_config af9033_config[2];
 

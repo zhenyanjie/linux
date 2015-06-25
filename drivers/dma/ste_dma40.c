@@ -564,7 +564,7 @@ struct d40_base {
 	spinlock_t			 execmd_lock;
 	struct device			 *dev;
 	void __iomem			 *virtbase;
-	u8				  rev:4;
+	u8				  rev;
 	struct clk			 *clk;
 	phys_addr_t			  phy_start;
 	resource_size_t			  phy_size;

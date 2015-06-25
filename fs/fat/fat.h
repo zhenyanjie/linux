@@ -53,7 +53,7 @@ struct fat_mount_options {
 		 tz_set:1,	   /* Filesystem timestamps' offset set */
 		 rodir:1,	   /* allow ATTR_RO for directory */
 		 discard:1,	   /* Issue discard requests on deletions */
-		 dos1xfloppy:1;	   /* Assume default BPB for DOS 1.x floppies */
+		 dos1xfloppy;	   /* Assume default BPB for DOS 1.x floppies */
 };
 
 #define FAT_HASH_BITS	8

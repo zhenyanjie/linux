@@ -22,9 +22,9 @@ struct qlcnic_bc_payload {
 struct qlcnic_bc_hdr {
 #if defined(__LITTLE_ENDIAN)
 	u8	version;
-	u8	msg_type:4;
-	u8	rsvd1:3;
-	u8	op_type:1;
+	u8	msg_type;
+	u8	rsvd1;
+	u8	op_type;
 	u8	num_cmds;
 	u8	num_frags;
 	u8	frag_num;
@@ -34,9 +34,9 @@ struct qlcnic_bc_hdr {
 #elif defined(__BIG_ENDIAN)
 	u8	num_frags;
 	u8	num_cmds;
-	u8	op_type:1;
-	u8	rsvd1:3;
-	u8	msg_type:4;
+	u8	op_type;
+	u8	rsvd1;
+	u8	msg_type;
 	u8	version;
 	u16	seq_id;
 	u8	cmd_op;

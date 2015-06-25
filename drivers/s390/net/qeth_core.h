@@ -174,7 +174,7 @@ enum qeth_sbp_states {
 struct qeth_sbp_info {
 	__u32 supported_funcs;
 	enum qeth_sbp_roles role;
-	__u32 hostnotification:1;
+	__u32 hostnotification;
 };
 
 static inline int qeth_is_ipa_supported(struct qeth_ipa_info *ipa,

@@ -253,21 +253,21 @@
    some information about the board's configuration. */
 typedef union {
   struct {
-    unsigned reserved:2;    /* reserved */
-    unsigned tardisc:1;     /* Target disconnect: 0=disabled, 1=enabled */
-    unsigned syncneg:1;     /* Initial sync neg: 0=disabled, 1=enabled */
-    unsigned msgclasses:2;  /* Message classes
+    unsigned reserved;    /* reserved */
+    unsigned tardisc;     /* Target disconnect: 0=disabled, 1=enabled */
+    unsigned syncneg;     /* Initial sync neg: 0=disabled, 1=enabled */
+    unsigned msgclasses;  /* Message classes
                                  0=#4
                                  1=#0, #1, #2, #3, #4
                                  2=#0, #3, #4
                                  3=#0, #4
                              */
-    unsigned boot:1;        /* boot: 0=disabled, 1=enabled */
-    unsigned dma:1;         /* Transfer mode: 0=PIO; 1=DMA */
-    unsigned id:3;          /* SCSI-id */
-    unsigned irq:2;         /* IRQ-Channel: 0,3=12, 1=10, 2=11 */
-    unsigned dmachan:2;     /* DMA-Channel: 0=0, 1=5, 2=6, 3=7 */
-    unsigned parity:1;      /* SCSI-parity: 1=enabled 0=disabled */
+    unsigned boot;        /* boot: 0=disabled, 1=enabled */
+    unsigned dma;         /* Transfer mode: 0=PIO; 1=DMA */
+    unsigned id;          /* SCSI-id */
+    unsigned irq;         /* IRQ-Channel: 0,3=12, 1=10, 2=11 */
+    unsigned dmachan;     /* DMA-Channel: 0=0, 1=5, 2=6, 3=7 */
+    unsigned parity;      /* SCSI-parity: 1=enabled 0=disabled */
   } fields;
   unsigned short port;
 } aha152x_config ;

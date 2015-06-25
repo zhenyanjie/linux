@@ -38,7 +38,7 @@ struct s5h1411_state {
 	struct dvb_frontend frontend;
 
 	fe_modulation_t current_modulation;
-	unsigned int first_tune:1;
+	unsigned int first_tune;
 
 	u32 current_frequency;
 	int if_freq;

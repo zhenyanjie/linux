@@ -55,64 +55,64 @@ struct tape_3590_disc_data {
 
 struct tape_3590_sense {
 
-	unsigned int command_rej:1;
-	unsigned int interv_req:1;
-	unsigned int bus_out_check:1;
-	unsigned int eq_check:1;
-	unsigned int data_check:1;
-	unsigned int overrun:1;
-	unsigned int def_unit_check:1;
-	unsigned int assgnd_elsew:1;
+	unsigned int command_rej;
+	unsigned int interv_req;
+	unsigned int bus_out_check;
+	unsigned int eq_check;
+	unsigned int data_check;
+	unsigned int overrun;
+	unsigned int def_unit_check;
+	unsigned int assgnd_elsew;
 
-	unsigned int locate_fail:1;
-	unsigned int inst_online:1;
-	unsigned int reserved:1;
-	unsigned int blk_seq_err:1;
-	unsigned int begin_part:1;
-	unsigned int wr_mode:1;
-	unsigned int wr_prot:1;
-	unsigned int not_cap:1;
+	unsigned int locate_fail;
+	unsigned int inst_online;
+	unsigned int reserved;
+	unsigned int blk_seq_err;
+	unsigned int begin_part;
+	unsigned int wr_mode;
+	unsigned int wr_prot;
+	unsigned int not_cap;
 
-	unsigned int bra:2;
-	unsigned int lc:3;
-	unsigned int vlf_active:1;
-	unsigned int stm:1;
-	unsigned int med_pos:1;
+	unsigned int bra;
+	unsigned int lc;
+	unsigned int vlf_active;
+	unsigned int stm;
+	unsigned int med_pos;
 
-	unsigned int rac:8;
+	unsigned int rac;
 
-	unsigned int rc_rqc:16;
+	unsigned int rc_rqc;
 
-	unsigned int mc:8;
+	unsigned int mc;
 
-	unsigned int sense_fmt:8;
+	unsigned int sense_fmt;
 
 	union {
 		struct {
-			unsigned int emc:4;
-			unsigned int smc:4;
-			unsigned int sev:2;
-			unsigned int reserved:6;
-			unsigned int md:8;
-			unsigned int refcode:8;
-			unsigned int mid:16;
-			unsigned int mp:16;
+			unsigned int emc;
+			unsigned int smc;
+			unsigned int sev;
+			unsigned int reserved;
+			unsigned int md;
+			unsigned int refcode;
+			unsigned int mid;
+			unsigned int mp;
 			unsigned char volid[6];
-			unsigned int fid:8;
+			unsigned int fid;
 		} f70;
 		struct {
-			unsigned int emc:4;
-			unsigned int smc:4;
-			unsigned int sev:2;
-			unsigned int reserved1:5;
-			unsigned int mdf:1;
+			unsigned int emc;
+			unsigned int smc;
+			unsigned int sev;
+			unsigned int reserved1;
+			unsigned int mdf;
 			unsigned char md[3];
-			unsigned int simid:8;
-			unsigned int uid:16;
-			unsigned int refcode1:16;
-			unsigned int refcode2:16;
-			unsigned int refcode3:16;
-			unsigned int reserved2:8;
+			unsigned int simid;
+			unsigned int uid;
+			unsigned int refcode1;
+			unsigned int refcode2;
+			unsigned int refcode3;
+			unsigned int reserved2;
 		} f71;
 		unsigned char data[14];
 	} fmt;
@@ -121,8 +121,8 @@ struct tape_3590_sense {
 } __attribute__ ((packed));
 
 struct tape_3590_med_sense {
-	unsigned int macst:4;
-	unsigned int masst:4;
+	unsigned int macst;
+	unsigned int masst;
 	char pad1[7];
 	unsigned int flags;
 	char pad2[116];

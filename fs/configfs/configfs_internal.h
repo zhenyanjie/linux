@@ -1,4 +1,4 @@
-/* -*- mode: c; c-basic-offset:8; -*-
+/* -*- mode: c; c-basic-offset; -*-
  * vim: noexpandtab sw=8 ts=8 sts=0:
  *
  * configfs_internal.h - Internal stuff for configfs

@@ -86,11 +86,11 @@ struct dummy_ep {
 	struct usb_gadget		*gadget;
 	const struct usb_endpoint_descriptor *desc;
 	struct usb_ep			ep;
-	unsigned			halted:1;
-	unsigned			wedged:1;
-	unsigned			already_seen:1;
-	unsigned			setup_stage:1;
-	unsigned			stream_en:1;
+	unsigned			halted;
+	unsigned			wedged;
+	unsigned			already_seen;
+	unsigned			setup_stage;
+	unsigned			stream_en;
 };
 
 struct dummy_request {
@@ -176,9 +176,9 @@ struct dummy_hcd {
 	u32				stream_en_ep;
 	u8				num_stream[30 / 2];
 
-	unsigned			active:1;
-	unsigned			old_active:1;
-	unsigned			resuming:1;
+	unsigned			active;
+	unsigned			old_active;
+	unsigned			resuming;
 };
 
 struct dummy {
@@ -194,8 +194,8 @@ struct dummy {
 	struct dummy_request		fifo_req;
 	u8				fifo_buf[FIFO_SIZE];
 	u16				devstatus;
-	unsigned			udc_suspended:1;
-	unsigned			pullup:1;
+	unsigned			udc_suspended;
+	unsigned			pullup;
 
 	/*
 	 * MASTER/HOST side support

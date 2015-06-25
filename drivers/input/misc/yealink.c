@@ -118,7 +118,7 @@ struct yealink_dev {
 	u8 lcdMap[ARRAY_SIZE(lcdMap)];	/* state of LCD, LED ... */
 	int key_code;			/* last reported key	 */
 
-	unsigned int shutdown:1;
+	unsigned int shutdown;
 
 	int	stat_ix;
 	union {

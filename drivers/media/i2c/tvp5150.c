@@ -452,7 +452,7 @@ struct tvp5150_vbi_type {
 	unsigned int vbi_type;
 	unsigned int ini_line;
 	unsigned int end_line;
-	unsigned int by_field :1;
+	unsigned int by_field ;
 };
 
 struct i2c_vbi_ram_value {

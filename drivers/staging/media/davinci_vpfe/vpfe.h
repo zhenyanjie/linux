@@ -61,11 +61,11 @@ struct vpfe_ext_subdev_info {
 	/* i2c subdevice board info */
 	struct i2c_board_info board_info;
 	/* Is this a camera sub device ? */
-	unsigned is_camera:1;
+	unsigned is_camera;
 	/* check if sub dev supports routing */
-	unsigned can_route:1;
+	unsigned can_route;
 	/* registered ? */
-	unsigned registered:1;
+	unsigned registered;
 };
 
 struct vpfe_config {

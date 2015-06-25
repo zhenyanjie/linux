@@ -154,9 +154,9 @@ struct pxa_i2c {
 	unsigned long		iosize;
 
 	int			irq;
-	unsigned int		use_pio :1;
-	unsigned int		fast_mode :1;
-	unsigned int		high_mode:1;
+	unsigned int		use_pio ;
+	unsigned int		fast_mode ;
+	unsigned int		high_mode;
 	unsigned char		master_code;
 	unsigned long		rate;
 	bool			highmode_enter;

@@ -45,7 +45,7 @@ enum dfw_cmd {
 
 struct dfw_binrec {
 	u8 command;
-	u32 length:24;
+	u32 length;
 	u32 address;
 	uint8_t data[0];
 } __packed;
@@ -59,7 +59,7 @@ struct dfw_inforec {
 
 struct dfw_pllrec {
 	u8 command;
-	u32 length:24;
+	u32 length;
 	u32 address;
 	u32 clkctrl1;
 	u32 clkctrl2;

@@ -199,17 +199,17 @@ struct NCR_700_Host_Parameters {
 	__u32	dmode_extra;	/* adjustable bus settings */
 	__u32	dcntl_extra;	/* adjustable bus settings */
 	__u32	ctest7_extra;	/* adjustable bus settings */
-	__u32	differential:1;	/* if we are differential */
+	__u32	differential;	/* if we are differential */
 #ifdef CONFIG_53C700_LE_ON_BE
 	/* This option is for HP only.  Set it if your chip is wired for
 	 * little endian on this platform (which is big endian) */
-	__u32	force_le_on_be:1;
+	__u32	force_le_on_be;
 #endif
-	__u32	chip710:1;	/* set if really a 710 not 700 */
-	__u32	burst_length:4;	/* set to 0 to disable 710 bursting */
+	__u32	chip710;	/* set if really a 710 not 700 */
+	__u32	burst_length;	/* set to 0 to disable 710 bursting */
 
 	/* NOTHING BELOW HERE NEEDS ALTERING */
-	__u32	fast:1;		/* if we can alter the SCSI bus clock
+	__u32	fast;		/* if we can alter the SCSI bus clock
                                    speed (so can negiotiate sync) */
 	int	sync_clock;	/* The speed of the SYNC core */
 

@@ -194,38 +194,38 @@ struct gru_tlb_fault_map {
  *
  */
 struct gru_tlb_global_handle {
-	unsigned int cmd:1;		/* DW 0 */
-	unsigned int delresp:1;
-	unsigned int opc:1;
-	unsigned int fill1:5;
+	unsigned int cmd;		/* DW 0 */
+	unsigned int delresp;
+	unsigned int opc;
+	unsigned int fill1;
 
-	unsigned int fill2:8;
+	unsigned int fill2;
 
-	unsigned int status:2;
-	unsigned long fill3:2;
-	unsigned int state:3;
-	unsigned long fill4:1;
+	unsigned int status;
+	unsigned long fill3;
+	unsigned int state;
+	unsigned long fill4;
 
-	unsigned int cause:3;
-	unsigned long fill5:37;
+	unsigned int cause;
+	unsigned long fill5;
 
-	unsigned long vaddr:64;		/* DW 1 */
+	unsigned long vaddr;		/* DW 1 */
 
-	unsigned int asid:24;		/* DW 2 */
-	unsigned int fill6:8;
+	unsigned int asid;		/* DW 2 */
+	unsigned int fill6;
 
-	unsigned int pagesize:5;
-	unsigned int fill7:11;
+	unsigned int pagesize;
+	unsigned int fill7;
 
-	unsigned int global:1;
-	unsigned int fill8:15;
+	unsigned int global;
+	unsigned int fill8;
 
-	unsigned long vaddrmask:39;	/* DW 3 */
-	unsigned int fill9:9;
-	unsigned int n:10;
-	unsigned int fill10:6;
+	unsigned long vaddrmask;	/* DW 3 */
+	unsigned int fill9;
+	unsigned int n;
+	unsigned int fill10;
 
-	unsigned int ctxbitmap:16;	/* DW4 */
+	unsigned int ctxbitmap;	/* DW4 */
 	unsigned long fill11[3];
 };
 
@@ -269,42 +269,42 @@ enum gru_tgh_cause {
  *
  */
 struct gru_tlb_fault_handle {
-	unsigned int cmd:1;		/* DW 0 - low 32*/
-	unsigned int delresp:1;
-	unsigned int fill0:2;
-	unsigned int opc:3;
-	unsigned int fill1:9;
+	unsigned int cmd;		/* DW 0 - low 32*/
+	unsigned int delresp;
+	unsigned int fill0;
+	unsigned int opc;
+	unsigned int fill1;
 
-	unsigned int status:2;
-	unsigned int fill2:2;
-	unsigned int state:3;
-	unsigned int fill3:1;
+	unsigned int status;
+	unsigned int fill2;
+	unsigned int state;
+	unsigned int fill3;
 
-	unsigned int cause:6;
-	unsigned int cb_int:1;
-	unsigned int fill4:1;
+	unsigned int cause;
+	unsigned int cb_int;
+	unsigned int fill4;
 
-	unsigned int indexway:12;	/* DW 0 - high 32 */
-	unsigned int fill5:4;
+	unsigned int indexway;	/* DW 0 - high 32 */
+	unsigned int fill5;
 
-	unsigned int ctxnum:4;
-	unsigned int fill6:12;
+	unsigned int ctxnum;
+	unsigned int fill6;
 
-	unsigned long missvaddr:64;	/* DW 1 */
+	unsigned long missvaddr;	/* DW 1 */
 
-	unsigned int missasid:24;	/* DW 2 */
-	unsigned int fill7:8;
-	unsigned int fillasid:24;
-	unsigned int dirty:1;
-	unsigned int gaa:2;
-	unsigned long fill8:5;
+	unsigned int missasid;	/* DW 2 */
+	unsigned int fill7;
+	unsigned int fillasid;
+	unsigned int dirty;
+	unsigned int gaa;
+	unsigned long fill8;
 
-	unsigned long pfn:41;		/* DW 3 */
-	unsigned int fill9:7;
-	unsigned int pagesize:5;
-	unsigned int fill10:11;
+	unsigned long pfn;		/* DW 3 */
+	unsigned int fill9;
+	unsigned int pagesize;
+	unsigned int fill10;
 
-	unsigned long fillvaddr:64;	/* DW 4 */
+	unsigned long fillvaddr;	/* DW 4 */
 
 	unsigned long fill11[3];
 };
@@ -362,24 +362,24 @@ enum tfh_cause {
  *
  */
 struct gru_context_configuration_handle {
-	unsigned int cmd:1;			/* DW0 */
-	unsigned int delresp:1;
-	unsigned int opc:3;
-	unsigned int unmap_enable:1;
-	unsigned int req_slice_set_enable:1;
-	unsigned int req_slice:2;
-	unsigned int cb_int_enable:1;
-	unsigned int tlb_int_enable:1;
-	unsigned int tfm_fault_bit_enable:1;
-	unsigned int tlb_int_select:4;
+	unsigned int cmd;			/* DW0 */
+	unsigned int delresp;
+	unsigned int opc;
+	unsigned int unmap_enable;
+	unsigned int req_slice_set_enable;
+	unsigned int req_slice;
+	unsigned int cb_int_enable;
+	unsigned int tlb_int_enable;
+	unsigned int tfm_fault_bit_enable;
+	unsigned int tlb_int_select;
 
-	unsigned int status:2;
-	unsigned int state:2;
-	unsigned int reserved2:4;
+	unsigned int status;
+	unsigned int state;
+	unsigned int reserved2;
 
-	unsigned int cause:4;
-	unsigned int tfm_done_bit_enable:1;
-	unsigned int unused:3;
+	unsigned int cause;
+	unsigned int tfm_done_bit_enable;
+	unsigned int unused;
 
 	unsigned int dsr_allocation_map;
 
@@ -431,40 +431,40 @@ enum gru_cch_cause {
  *
  */
 struct gru_control_block_extended {
-	unsigned int reserved0:1;	/* DW 0  - low */
-	unsigned int imacpy:3;
-	unsigned int reserved1:4;
-	unsigned int xtypecpy:3;
-	unsigned int iaa0cpy:2;
-	unsigned int iaa1cpy:2;
-	unsigned int reserved2:1;
-	unsigned int opccpy:8;
-	unsigned int exopccpy:8;
+	unsigned int reserved0;	/* DW 0  - low */
+	unsigned int imacpy;
+	unsigned int reserved1;
+	unsigned int xtypecpy;
+	unsigned int iaa0cpy;
+	unsigned int iaa1cpy;
+	unsigned int reserved2;
+	unsigned int opccpy;
+	unsigned int exopccpy;
 
-	unsigned int idef2cpy:22;	/* DW 0  - high */
-	unsigned int reserved3:10;
+	unsigned int idef2cpy;	/* DW 0  - high */
+	unsigned int reserved3;
 
-	unsigned int idef4cpy:22;	/* DW 1 */
-	unsigned int reserved4:10;
-	unsigned int idef4upd:22;
-	unsigned int reserved5:10;
+	unsigned int idef4cpy;	/* DW 1 */
+	unsigned int reserved4;
+	unsigned int idef4upd;
+	unsigned int reserved5;
 
-	unsigned long idef1upd:64;	/* DW 2 */
+	unsigned long idef1upd;	/* DW 2 */
 
-	unsigned long idef5cpy:64;	/* DW 3 */
+	unsigned long idef5cpy;	/* DW 3 */
 
-	unsigned long idef6cpy:64;	/* DW 4 */
+	unsigned long idef6cpy;	/* DW 4 */
 
-	unsigned long idef3upd:64;	/* DW 5 */
+	unsigned long idef3upd;	/* DW 5 */
 
-	unsigned long idef5upd:64;	/* DW 6 */
+	unsigned long idef5upd;	/* DW 6 */
 
-	unsigned int idef2upd:22;	/* DW 7 */
-	unsigned int reserved6:10;
+	unsigned int idef2upd;	/* DW 7 */
+	unsigned int reserved6;
 
-	unsigned int ecause:20;
-	unsigned int cbrstate:4;
-	unsigned int cbrexecstatus:8;
+	unsigned int ecause;
+	unsigned int cbrstate;
+	unsigned int cbrexecstatus;
 };
 
 /* CBE fields for active BCOPY instructions */

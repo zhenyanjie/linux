@@ -122,7 +122,7 @@ struct ds1307 {
 };
 
 struct chip_desc {
-	unsigned		alarm:1;
+	unsigned		alarm;
 	u16			nvram_offset;
 	u16			nvram_size;
 	u16			trickle_charger_reg;

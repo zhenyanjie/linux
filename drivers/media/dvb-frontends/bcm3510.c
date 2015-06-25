@@ -55,7 +55,7 @@ struct bcm3510_state {
 
 	/* demodulator private data */
 	struct mutex hab_mutex;
-	u8 firmware_loaded:1;
+	u8 firmware_loaded;
 
 	unsigned long next_status_check;
 	unsigned long status_check_interval;

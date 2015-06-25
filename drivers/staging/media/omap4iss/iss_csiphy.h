@@ -22,7 +22,7 @@ struct iss_csiphy_dphy_cfg {
 	u8 ths_term;
 	u8 ths_settle;
 	u8 tclk_term;
-	unsigned tclk_miss:1;
+	unsigned tclk_miss;
 	u8 tclk_settle;
 };
 

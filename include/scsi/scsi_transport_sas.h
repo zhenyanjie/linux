@@ -101,9 +101,9 @@ struct sas_rphy {
 struct sas_end_device {
 	struct sas_rphy		rphy;
 	/* flags */
-	unsigned		ready_led_meaning:1;
-	unsigned		tlr_supported:1;
-	unsigned		tlr_enabled:1;
+	unsigned		ready_led_meaning;
+	unsigned		tlr_supported;
+	unsigned		tlr_enabled;
 	/* parameters */
 	u16			I_T_nexus_loss_timeout;
 	u16			initiator_response_timeout;
@@ -138,7 +138,7 @@ struct sas_port {
 	int			port_identifier;
 	int			num_phys;
 	/* port flags */
-	unsigned int		is_backlink:1;
+	unsigned int		is_backlink;
 
 	/* the other end of the link */
 	struct sas_rphy		*rphy;

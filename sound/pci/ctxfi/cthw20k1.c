@@ -89,14 +89,14 @@ static void hw_write_pci(struct hw *hw, u32 reg, u32 data);
 /* SRC resource register dirty flags */
 union src_dirty {
 	struct {
-		u16 ctl:1;
-		u16 ccr:1;
-		u16 sa:1;
-		u16 la:1;
-		u16 ca:1;
-		u16 mpr:1;
-		u16 czbfs:1;	/* Clear Z-Buffers */
-		u16 rsv:9;
+		u16 ctl;
+		u16 ccr;
+		u16 sa;
+		u16 la;
+		u16 ca;
+		u16 mpr;
+		u16 czbfs;	/* Clear Z-Buffers */
+		u16 rsv;
 	} bf;
 	u16 data;
 };
@@ -114,16 +114,16 @@ struct src_rsc_ctrl_blk {
 /* SRC manager control block */
 union src_mgr_dirty {
 	struct {
-		u16 enb0:1;
-		u16 enb1:1;
-		u16 enb2:1;
-		u16 enb3:1;
-		u16 enb4:1;
-		u16 enb5:1;
-		u16 enb6:1;
-		u16 enb7:1;
-		u16 enbsa:1;
-		u16 rsv:7;
+		u16 enb0;
+		u16 enb1;
+		u16 enb2;
+		u16 enb3;
+		u16 enb4;
+		u16 enb5;
+		u16 enb6;
+		u16 enb7;
+		u16 enbsa;
+		u16 rsv;
 	} bf;
 	u16 data;
 };
@@ -147,8 +147,8 @@ struct srcimap {
 /* SRCIMP manager register dirty flags */
 union srcimp_mgr_dirty {
 	struct {
-		u16 srcimap:1;
-		u16 rsv:15;
+		u16 srcimap;
+		u16 rsv;
 	} bf;
 	u16 data;
 };
@@ -593,9 +593,9 @@ static int srcimp_mgr_commit_write(struct hw *hw, void *blk)
 /* AMIXER resource register dirty flags */
 union amixer_dirty {
 	struct {
-		u16 amoplo:1;
-		u16 amophi:1;
-		u16 rsv:14;
+		u16 amoplo;
+		u16 amophi;
+		u16 rsv;
 	} bf;
 	u16 data;
 };
@@ -755,8 +755,8 @@ static int amixer_mgr_put_ctrl_blk(void *blk)
 /* DAIO Receiver register dirty flags */
 union dai_dirty {
 	struct {
-		u16 srtctl:1;
-		u16 rsv:15;
+		u16 srtctl;
+		u16 rsv;
 	} bf;
 	u16 data;
 };
@@ -770,8 +770,8 @@ struct dai_ctrl_blk {
 /* S/PDIF Transmitter register dirty flags */
 union dao_dirty {
 	struct {
-		u16 spos:1;
-		u16 rsv:15;
+		u16 spos;
+		u16 rsv;
 	} bf;
 	u16 data;
 };
@@ -812,12 +812,12 @@ struct daoimap {
 /* DAIO manager register dirty flags */
 union daio_mgr_dirty {
 	struct {
-		u32 i2soctl:4;
-		u32 i2sictl:4;
-		u32 spoctl:4;
-		u32 spictl:4;
-		u32 daoimap:1;
-		u32 rsv:15;
+		u32 i2soctl;
+		u32 i2sictl;
+		u32 spoctl;
+		u32 spictl;
+		u32 daoimap;
+		u32 rsv;
 	} bf;
 	u32 data;
 };

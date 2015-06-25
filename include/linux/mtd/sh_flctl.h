@@ -161,10 +161,10 @@ struct sh_flctl {
 	uint32_t flcmncr_base;	/* base value of FLCMNCR */
 	uint32_t flintdmacr_base;	/* irq enable bits */
 
-	unsigned page_size:1;	/* NAND page size (0 = 512, 1 = 2048) */
-	unsigned hwecc:1;	/* Hardware ECC (0 = disabled, 1 = enabled) */
-	unsigned holden:1;	/* Hardware has FLHOLDCR and HOLDEN is set */
-	unsigned qos_request:1;	/* QoS request to prevent deep power shutdown */
+	unsigned page_size;	/* NAND page size (0 = 512, 1 = 2048) */
+	unsigned hwecc;	/* Hardware ECC (0 = disabled, 1 = enabled) */
+	unsigned holden;	/* Hardware has FLHOLDCR and HOLDEN is set */
+	unsigned qos_request;	/* QoS request to prevent deep power shutdown */
 
 	/* DMA related objects */
 	struct dma_chan		*chan_fifo0_rx;
@@ -177,8 +177,8 @@ struct sh_flctl_platform_data {
 	int			nr_parts;
 	unsigned long		flcmncr_val;
 
-	unsigned has_hwecc:1;
-	unsigned use_holden:1;
+	unsigned has_hwecc;
+	unsigned use_holden;
 
 	unsigned int            slave_id_fifo0_tx;
 	unsigned int            slave_id_fifo0_rx;

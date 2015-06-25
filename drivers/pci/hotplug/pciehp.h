@@ -95,9 +95,9 @@ struct controller {
 	u32 slot_ctrl;
 	struct timer_list poll_timer;
 	unsigned long cmd_started;	/* jiffies */
-	unsigned int cmd_busy:1;
-	unsigned int link_active_reporting:1;
-	unsigned int notification_enabled:1;
+	unsigned int cmd_busy;
+	unsigned int link_active_reporting;
+	unsigned int notification_enabled;
 	unsigned int power_fault_detected;
 };
 

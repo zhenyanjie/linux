@@ -191,7 +191,7 @@ struct pcmmio_private {
 	spinlock_t spinlock;	/* protects the member variables */
 	unsigned int enabled_mask;
 	unsigned int stop_count;
-	unsigned int active:1;
+	unsigned int active;
 
 	unsigned int ao_readback[8];
 };

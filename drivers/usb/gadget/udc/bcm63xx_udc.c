@@ -225,7 +225,7 @@ struct bcm63xx_ep {
 	struct usb_ep			ep;
 	struct bcm63xx_udc		*udc;
 	struct list_head		queue;
-	unsigned			halted:1;
+	unsigned			halted;
 };
 
 /**
@@ -305,12 +305,12 @@ struct bcm63xx_udc {
 
 	unsigned long			wedgemap;
 
-	unsigned			ep0_req_reset:1;
-	unsigned			ep0_req_set_cfg:1;
-	unsigned			ep0_req_set_iface:1;
-	unsigned			ep0_req_shutdown:1;
+	unsigned			ep0_req_reset;
+	unsigned			ep0_req_set_cfg;
+	unsigned			ep0_req_set_iface;
+	unsigned			ep0_req_shutdown;
 
-	unsigned			ep0_req_completed:1;
+	unsigned			ep0_req_completed;
 	struct usb_request		*ep0_reply;
 	struct usb_request		*ep0_request;
 

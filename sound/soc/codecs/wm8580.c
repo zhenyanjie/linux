@@ -340,11 +340,11 @@ static const struct snd_soc_dapm_route wm8580_dapm_routes[] = {
 
 /* PLL divisors */
 struct _pll_div {
-	u32 prescale:1;
-	u32 postscale:1;
-	u32 freqmode:2;
-	u32 n:4;
-	u32 k:24;
+	u32 prescale;
+	u32 postscale;
+	u32 freqmode;
+	u32 n;
+	u32 k;
 };
 
 /* The size in bits of the pll divide */

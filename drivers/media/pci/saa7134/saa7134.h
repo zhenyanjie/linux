@@ -115,11 +115,11 @@ struct saa7134_format {
 	unsigned int   pm;
 	unsigned int   vshift;   /* vertical downsampling (for planar yuv) */
 	unsigned int   hshift;   /* horizontal downsampling (for planar yuv) */
-	unsigned int   bswap:1;
-	unsigned int   wswap:1;
-	unsigned int   yuv:1;
-	unsigned int   planar:1;
-	unsigned int   uvswap:1;
+	unsigned int   bswap;
+	unsigned int   wswap;
+	unsigned int   yuv;
+	unsigned int   planar;
+	unsigned int   uvswap;
 };
 
 struct saa7134_card_ir {
@@ -361,7 +361,7 @@ struct saa7134_input {
 	unsigned int            vmux;
 	enum saa7134_audio_in   amux;
 	unsigned int            gpio;
-	unsigned int            tv:1;
+	unsigned int            tv;
 };
 
 enum saa7134_mpeg_type {
@@ -401,7 +401,7 @@ struct saa7134_board {
 	enum saa7134_mpeg_type  mpeg;
 	enum saa7134_mpeg_ts_type ts_type;
 	unsigned int            vid_port_opts;
-	unsigned int            ts_force_val:1;
+	unsigned int            ts_force_val;
 };
 
 #define card_has_radio(dev)   (NULL != saa7134_boards[dev->board].radio.name)

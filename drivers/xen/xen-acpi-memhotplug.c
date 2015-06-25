@@ -35,7 +35,7 @@ struct acpi_memory_info {
 	unsigned short caching;	/* memory cache attribute */
 	unsigned short write_protect;	/* memory read/write attribute */
 				/* copied from buffer getting from _CRS */
-	unsigned int enabled:1;
+	unsigned int enabled;
 };
 
 struct acpi_memory_device {

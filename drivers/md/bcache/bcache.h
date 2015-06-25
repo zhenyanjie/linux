@@ -283,7 +283,7 @@ struct bcache_device {
 
 	struct bio_set		*bio_split;
 
-	unsigned		data_csum:1;
+	unsigned		data_csum;
 
 	int (*cache_miss)(struct btree *, struct search *,
 			  struct bio *, unsigned);
@@ -365,12 +365,12 @@ struct cached_dev {
 	unsigned		sequential_cutoff;
 	unsigned		readahead;
 
-	unsigned		verify:1;
-	unsigned		bypass_torture_test:1;
+	unsigned		verify;
+	unsigned		bypass_torture_test;
 
-	unsigned		partial_stripes_expensive:1;
-	unsigned		writeback_metadata:1;
-	unsigned		writeback_running:1;
+	unsigned		partial_stripes_expensive;
+	unsigned		writeback_metadata;
+	unsigned		writeback_running;
 	unsigned char		writeback_percent;
 	unsigned		writeback_delay;
 
@@ -440,7 +440,7 @@ struct cache {
 	 * until a gc finishes - otherwise we could pointlessly burn a ton of
 	 * cpu
 	 */
-	unsigned		invalidate_needs_gc:1;
+	unsigned		invalidate_needs_gc;
 
 	bool			discard; /* Get rid of? */
 
@@ -671,11 +671,11 @@ struct cache_set {
 
 	unsigned short		journal_delay_ms;
 	bool			expensive_debug_checks;
-	unsigned		verify:1;
-	unsigned		key_merging_disabled:1;
-	unsigned		gc_always_rewrite:1;
-	unsigned		shrinker_disabled:1;
-	unsigned		copy_gc_enabled:1;
+	unsigned		verify;
+	unsigned		key_merging_disabled;
+	unsigned		gc_always_rewrite;
+	unsigned		shrinker_disabled;
+	unsigned		copy_gc_enabled;
 
 #define BUCKET_HASH_BITS	12
 	struct hlist_head	bucket_hash[1 << BUCKET_HASH_BITS];

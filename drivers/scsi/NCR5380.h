@@ -269,7 +269,7 @@ struct NCR5380_hostdata {
 	volatile int restart_select;		/* we have disconnected,
 						   used to restart 
 						   NCR5380_select() */
-	volatile unsigned aborted:1;		/* flag, says aborted */
+	volatile unsigned aborted;		/* flag, says aborted */
 	int flags;
 	unsigned long time_expires;		/* in jiffies, set prior to sleeping */
 	int select_time;			/* timer in select for target response */

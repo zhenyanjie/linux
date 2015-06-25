@@ -259,22 +259,22 @@ struct fit_completion_entry_v1 {
 #define FIT_PROTOCOL_VERSION_CURRENT	FIT_PROTOCOL_VERSION_1
 
 struct fit_comp_error_info {
-	uint8_t		type:7; /* 00: Bits0-6 indicates the type of sense data. */
-	uint8_t		valid:1; /* 00: Bit 7 := 1 ==> info field is valid. */
+	uint8_t		type; /* 00: Bits0-6 indicates the type of sense data. */
+	uint8_t		valid; /* 00: Bit 7 := 1 ==> info field is valid. */
 	uint8_t		reserved0; /* 01: Obsolete field */
-	uint8_t		key:4; /* 02: Bits0-3 indicate the sense key. */
-	uint8_t		reserved2:1; /* 02: Reserved bit. */
-	uint8_t		bad_length:1; /* 02: Incorrect Length Indicator */
-	uint8_t		end_medium:1; /* 02: End of Medium */
-	uint8_t		file_mark:1; /* 02: Filemark */
+	uint8_t		key; /* 02: Bits0-3 indicate the sense key. */
+	uint8_t		reserved2; /* 02: Reserved bit. */
+	uint8_t		bad_length; /* 02: Incorrect Length Indicator */
+	uint8_t		end_medium; /* 02: End of Medium */
+	uint8_t		file_mark; /* 02: Filemark */
 	uint8_t		info[4]; /* 03: */
 	uint8_t		reserved1; /* 07: Additional Sense Length */
 	uint8_t		cmd_spec[4]; /* 08: Command Specific Information */
 	uint8_t		code; /* 0C: Additional Sense Code */
 	uint8_t		qual; /* 0D: Additional Sense Code Qualifier */
 	uint8_t		fruc; /* 0E: Field Replaceable Unit Code */
-	uint8_t		sks_high:7; /* 0F: Sense Key Specific (MSB) */
-	uint8_t		sks_valid:1; /* 0F: Sense Key Specific Valid */
+	uint8_t		sks_high; /* 0F: Sense Key Specific (MSB) */
+	uint8_t		sks_valid; /* 0F: Sense Key Specific Valid */
 	uint16_t	sks_low; /* 10: Sense Key Specific (LSW) */
 	uint16_t	reserved3; /* 12: Part of additional sense bytes (unused) */
 	uint16_t	uec; /* 14: Additional Sense Bytes */
@@ -306,8 +306,8 @@ struct skd_scsi_request {
 };
 
 struct driver_inquiry_data {
-	uint8_t		peripheral_device_type:5;
-	uint8_t		qualifier:3;
+	uint8_t		peripheral_device_type;
+	uint8_t		qualifier;
 	uint8_t		page_code;
 	uint16_t	page_length;
 	uint16_t	pcie_bus_number;

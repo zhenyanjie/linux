@@ -244,9 +244,9 @@ struct pcl818_board {
 	unsigned int ns_min;
 	int n_aochan;
 	const struct comedi_lrange *ai_range_type;
-	unsigned int has_dma:1;
-	unsigned int has_fifo:1;
-	unsigned int is_818:1;
+	unsigned int has_dma;
+	unsigned int has_fifo;
+	unsigned int is_818;
 };
 
 static const struct pcl818_board boardtypes[] = {
@@ -322,9 +322,9 @@ struct pcl818_private {
 	unsigned int ao_readback[2];
 	unsigned int divisor1;
 	unsigned int divisor2;
-	unsigned int usefifo:1;
-	unsigned int ai_cmd_running:1;
-	unsigned int ai_cmd_canceled:1;
+	unsigned int usefifo;
+	unsigned int ai_cmd_running;
+	unsigned int ai_cmd_canceled;
 };
 
 static void pcl818_start_pacer(struct comedi_device *dev, bool load_counters)

@@ -94,11 +94,11 @@ enum {
 };
 
 struct pat_ctrl {
-	u32 start:4;
-	u32 dir:4;
-	u32 lut_id:8;
-	u32 sync:12;
-	u32 ini:4;
+	u32 start;
+	u32 dir;
+	u32 lut_id;
+	u32 sync;
+	u32 ini;
 };
 
 struct pat {

@@ -341,20 +341,20 @@ struct pxa_ep {
 	struct list_head	queue;
 	spinlock_t		lock;		/* Protects this structure */
 						/* (queues, stats) */
-	unsigned		enabled:1;
-	unsigned		in_handle_ep:1;
+	unsigned		enabled;
+	unsigned		in_handle_ep;
 
-	unsigned		idx:5;
+	unsigned		idx;
 	char			*name;
 
 	/*
 	 * Specific pxa endpoint data, needed for hardware initialization
 	 */
-	unsigned		dir_in:1;
-	unsigned		addr:4;
-	unsigned		config:2;
-	unsigned		interface:3;
-	unsigned		alternate:3;
+	unsigned		dir_in;
+	unsigned		addr;
+	unsigned		config;
+	unsigned		interface;
+	unsigned		alternate;
 	unsigned		fifo_size;
 	unsigned		type;
 
@@ -375,7 +375,7 @@ struct pxa_ep {
 struct pxa27x_request {
 	struct usb_request			req;
 	struct udc_usb_ep			*udc_usb_ep;
-	unsigned				in_use:1;
+	unsigned				in_use;
 	struct list_head			queue;
 };
 
@@ -455,13 +455,13 @@ struct pxa_udc {
 	struct udc_usb_ep			udc_usb_ep[NR_USB_ENDPOINTS];
 	struct pxa_ep				pxa_ep[NR_PXA_ENDPOINTS];
 
-	unsigned				enabled:1;
-	unsigned				pullup_on:1;
-	unsigned				pullup_resume:1;
-	unsigned				vbus_sensed:1;
-	unsigned				config:2;
-	unsigned				last_interface:3;
-	unsigned				last_alternate:3;
+	unsigned				enabled;
+	unsigned				pullup_on;
+	unsigned				pullup_resume;
+	unsigned				vbus_sensed;
+	unsigned				config;
+	unsigned				last_interface;
+	unsigned				last_alternate;
 
 #ifdef CONFIG_PM
 	unsigned				udccsr0;

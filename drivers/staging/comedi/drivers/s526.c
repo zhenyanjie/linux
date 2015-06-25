@@ -77,29 +77,29 @@ comedi_config /dev/comedi0 s526 0x2C0,0x3
 
 struct counter_mode_register_t {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	unsigned short coutSource:1;
-	unsigned short coutPolarity:1;
-	unsigned short autoLoadResetRcap:3;
-	unsigned short hwCtEnableSource:2;
-	unsigned short ctEnableCtrl:2;
-	unsigned short clockSource:2;
-	unsigned short countDir:1;
-	unsigned short countDirCtrl:1;
-	unsigned short outputRegLatchCtrl:1;
-	unsigned short preloadRegSel:1;
-	unsigned short reserved:1;
+	unsigned short coutSource;
+	unsigned short coutPolarity;
+	unsigned short autoLoadResetRcap;
+	unsigned short hwCtEnableSource;
+	unsigned short ctEnableCtrl;
+	unsigned short clockSource;
+	unsigned short countDir;
+	unsigned short countDirCtrl;
+	unsigned short outputRegLatchCtrl;
+	unsigned short preloadRegSel;
+	unsigned short reserved;
  #elif defined(__BIG_ENDIAN_BITFIELD)
-	unsigned short reserved:1;
-	unsigned short preloadRegSel:1;
-	unsigned short outputRegLatchCtrl:1;
-	unsigned short countDirCtrl:1;
-	unsigned short countDir:1;
-	unsigned short clockSource:2;
-	unsigned short ctEnableCtrl:2;
-	unsigned short hwCtEnableSource:2;
-	unsigned short autoLoadResetRcap:3;
-	unsigned short coutPolarity:1;
-	unsigned short coutSource:1;
+	unsigned short reserved;
+	unsigned short preloadRegSel;
+	unsigned short outputRegLatchCtrl;
+	unsigned short countDirCtrl;
+	unsigned short countDir;
+	unsigned short clockSource;
+	unsigned short ctEnableCtrl;
+	unsigned short hwCtEnableSource;
+	unsigned short autoLoadResetRcap;
+	unsigned short coutPolarity;
+	unsigned short coutSource;
 #else
 #error Unknown bit field order
 #endif

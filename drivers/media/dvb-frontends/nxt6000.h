@@ -30,7 +30,7 @@ struct nxt6000_config
 	u8 demod_address;
 
 	/* should clock inversion be used? */
-	u8 clock_inversion:1;
+	u8 clock_inversion;
 };
 
 #if IS_ENABLED(CONFIG_DVB_NXT6000)

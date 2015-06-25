@@ -51,9 +51,9 @@ struct usbtest_info {
 	const char		*name;
 	u8			ep_in;		/* bulk/intr source */
 	u8			ep_out;		/* bulk/intr sink */
-	unsigned		autoconf:1;
-	unsigned		ctrl_out:1;
-	unsigned		iso:1;		/* try iso in/out */
+	unsigned		autoconf;
+	unsigned		ctrl_out;
+	unsigned		iso;		/* try iso in/out */
 	int			alt;
 };
 

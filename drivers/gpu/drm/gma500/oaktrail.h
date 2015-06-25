@@ -23,57 +23,57 @@ struct oaktrail_timing_info {
 	u16 pixel_clock;
 	u8 hactive_lo;
 	u8 hblank_lo;
-	u8 hblank_hi:4;
-	u8 hactive_hi:4;
+	u8 hblank_hi;
+	u8 hactive_hi;
 	u8 vactive_lo;
 	u8 vblank_lo;
-	u8 vblank_hi:4;
-	u8 vactive_hi:4;
+	u8 vblank_hi;
+	u8 vactive_hi;
 	u8 hsync_offset_lo;
 	u8 hsync_pulse_width_lo;
-	u8 vsync_pulse_width_lo:4;
-	u8 vsync_offset_lo:4;
-	u8 vsync_pulse_width_hi:2;
-	u8 vsync_offset_hi:2;
-	u8 hsync_pulse_width_hi:2;
-	u8 hsync_offset_hi:2;
+	u8 vsync_pulse_width_lo;
+	u8 vsync_offset_lo;
+	u8 vsync_pulse_width_hi;
+	u8 vsync_offset_hi;
+	u8 hsync_pulse_width_hi;
+	u8 hsync_offset_hi;
 	u8 width_mm_lo;
 	u8 height_mm_lo;
-	u8 height_mm_hi:4;
-	u8 width_mm_hi:4;
+	u8 height_mm_hi;
+	u8 width_mm_hi;
 	u8 hborder;
 	u8 vborder;
-	u8 unknown0:1;
-	u8 hsync_positive:1;
-	u8 vsync_positive:1;
-	u8 separate_sync:2;
-	u8 stereo:1;
-	u8 unknown6:1;
-	u8 interlaced:1;
+	u8 unknown0;
+	u8 hsync_positive;
+	u8 vsync_positive;
+	u8 separate_sync;
+	u8 stereo;
+	u8 unknown6;
+	u8 interlaced;
 } __packed;
 
 struct gct_r10_timing_info {
 	u16 pixel_clock;
-	u32 hactive_lo:8;
-	u32 hactive_hi:4;
-	u32 hblank_lo:8;
-	u32 hblank_hi:4;
-	u32 hsync_offset_lo:8;
-	u16 hsync_offset_hi:2;
-	u16 hsync_pulse_width_lo:8;
-	u16 hsync_pulse_width_hi:2;
-	u16 hsync_positive:1;
-	u16 rsvd_1:3;
-	u8  vactive_lo:8;
-	u16 vactive_hi:4;
-	u16 vblank_lo:8;
-	u16 vblank_hi:4;
-	u16 vsync_offset_lo:4;
-	u16 vsync_offset_hi:2;
-	u16 vsync_pulse_width_lo:4;
-	u16 vsync_pulse_width_hi:2;
-	u16 vsync_positive:1;
-	u16 rsvd_2:3;
+	u32 hactive_lo;
+	u32 hactive_hi;
+	u32 hblank_lo;
+	u32 hblank_hi;
+	u32 hsync_offset_lo;
+	u16 hsync_offset_hi;
+	u16 hsync_pulse_width_lo;
+	u16 hsync_pulse_width_hi;
+	u16 hsync_positive;
+	u16 rsvd_1;
+	u8  vactive_lo;
+	u16 vactive_hi;
+	u16 vblank_lo;
+	u16 vblank_hi;
+	u16 vsync_offset_lo;
+	u16 vsync_offset_hi;
+	u16 vsync_pulse_width_lo;
+	u16 vsync_pulse_width_hi;
+	u16 vsync_positive;
+	u16 rsvd_2;
 } __packed;
 
 struct oaktrail_panel_descriptor_v1 {
@@ -137,18 +137,18 @@ struct oaktrail_panel_descriptor_v2 {
 
 union oaktrail_panel_rx {
 	struct {
-		u16 NumberOfLanes:2; /*Num of Lanes, 2 bits,0 = 1 lane,*/
+		u16 NumberOfLanes; /*Num of Lanes, 2 bits,0 = 1 lane,*/
 			/* 1 = 2 lanes, 2 = 3 lanes, 3 = 4 lanes. */
-		u16 MaxLaneFreq:3; /* 0: 100MHz, 1: 200MHz, 2: 300MHz, */
+		u16 MaxLaneFreq; /* 0: 100MHz, 1: 200MHz, 2: 300MHz, */
 		/*3: 400MHz, 4: 500MHz, 5: 600MHz, 6: 700MHz, 7: 800MHz.*/
-		u16 SupportedVideoTransferMode:2; /*0: Non-burst only */
+		u16 SupportedVideoTransferMode; /*0: Non-burst only */
 					/* 1: Burst and non-burst */
 					/* 2/3: Reserved */
-		u16 HSClkBehavior:1; /*0: Continuous, 1: Non-continuous*/
-		u16 DuoDisplaySupport:1; /*1 bit,0: No, 1: Yes*/
-		u16 ECC_ChecksumCapabilities:1;/*1 bit,0: No, 1: Yes*/
-		u16 BidirectionalCommunication:1;/*1 bit,0: No, 1: Yes */
-		u16 Rsvd:5;/*5 bits,00000b */
+		u16 HSClkBehavior; /*0: Continuous, 1: Non-continuous*/
+		u16 DuoDisplaySupport; /*1 bit,0: No, 1: Yes*/
+		u16 ECC_ChecksumCapabilities;/*1 bit,0: No, 1: Yes*/
+		u16 BidirectionalCommunication;/*1 bit,0: No, 1: Yes */
+		u16 Rsvd;/*5 bits,00000b */
 	} panelrx;
 	u16 panel_receiver;
 } __packed;
@@ -156,12 +156,12 @@ union oaktrail_panel_rx {
 struct gct_r0 {
 	union { /*8 bits,Defined as follows: */
 		struct {
-			u8 PanelType:4; /*4 bits, Bit field for panels*/
+			u8 PanelType; /*4 bits, Bit field for panels*/
 					/* 0 - 3: 0 = LVDS, 1 = MIPI*/
 					/*2 bits,Specifies which of the*/
-			u8 BootPanelIndex:2;
+			u8 BootPanelIndex;
 					/* 4 panels to use by default*/
-			u8 BootMIPI_DSI_RxIndex:2;/*Specifies which of*/
+			u8 BootMIPI_DSI_RxIndex;/*Specifies which of*/
 					/* the 4 MIPI DSI receivers to use*/
 		} PD;
 		u8 PanelDescriptor;
@@ -173,12 +173,12 @@ struct gct_r0 {
 struct gct_r1 {
 	union { /*8 bits,Defined as follows: */
 		struct {
-			u8 PanelType:4; /*4 bits, Bit field for panels*/
+			u8 PanelType; /*4 bits, Bit field for panels*/
 					/* 0 - 3: 0 = LVDS, 1 = MIPI*/
 					/*2 bits,Specifies which of the*/
-			u8 BootPanelIndex:2;
+			u8 BootPanelIndex;
 					/* 4 panels to use by default*/
-			u8 BootMIPI_DSI_RxIndex:2;/*Specifies which of*/
+			u8 BootMIPI_DSI_RxIndex;/*Specifies which of*/
 					/* the 4 MIPI DSI receivers to use*/
 		} PD;
 		u8 PanelDescriptor;

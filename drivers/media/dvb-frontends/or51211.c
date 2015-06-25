@@ -62,7 +62,7 @@ struct or51211_state {
 	struct bt878* bt;
 
 	/* Demodulator private data */
-	u8 initialized:1;
+	u8 initialized;
 	u32 snr; /* Result of last SNR claculation */
 
 	/* Tuner private data */

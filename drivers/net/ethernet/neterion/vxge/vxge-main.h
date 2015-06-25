@@ -185,7 +185,7 @@ struct vxge_config {
 			rth_hash_type_ipv6:1,
 			rth_hash_type_tcpipv6ex:1,
 			rth_hash_type_ipv6ex:1,
-			rth_bkt_sz:8;
+			rth_bkt_sz;
 	int		rth_jhash_golden_ratio;
 	int		tx_steering_type;
 	int 	fifo_indicate_max_pkts;
@@ -278,7 +278,7 @@ struct vxge_ring {
 	unsigned long jiffies;
 
 	/* copy of the flag indicating whether rx_hwts is to be used */
-	u32 rx_hwts:1;
+	u32 rx_hwts;
 
 	int pkts_processed;
 	int budget;
@@ -355,7 +355,7 @@ struct vxgedev {
 
 	/* A flag indicating whether rx_hwts is to be used or not. */
 	u32	rx_hwts:1,
-		titan1:1;
+		titan1;
 
 	struct vxge_msix_entry *vxge_entries;
 	struct msix_entry *entries;

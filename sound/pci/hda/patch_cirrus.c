@@ -42,9 +42,9 @@ struct cs_spec {
 	unsigned int gpio_eapd_speaker; /* EAPD GPIO bit for speakers */
 
 	/* CS421x */
-	unsigned int spdif_detect:1;
-	unsigned int spdif_present:1;
-	unsigned int sense_b:1;
+	unsigned int spdif_detect;
+	unsigned int spdif_present;
+	unsigned int sense_b;
 	hda_nid_t vendor_nid;
 
 	/* for MBP SPDIF control */

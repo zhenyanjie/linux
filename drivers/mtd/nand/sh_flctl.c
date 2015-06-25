@@ -1023,8 +1023,8 @@ static irqreturn_t flctl_handle_flste(int irq, void *dev_id)
 
 struct flctl_soc_config {
 	unsigned long flcmncr_val;
-	unsigned has_hwecc:1;
-	unsigned use_holden:1;
+	unsigned has_hwecc;
+	unsigned use_holden;
 };
 
 static struct flctl_soc_config flctl_sh7372_config = {

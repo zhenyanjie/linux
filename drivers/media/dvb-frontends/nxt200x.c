@@ -63,7 +63,7 @@ struct nxt200x_state {
 
 	/* demodulator private data */
 	nxt_chip_type demod_chip;
-	u8 initialised:1;
+	u8 initialised;
 };
 
 static int debug;

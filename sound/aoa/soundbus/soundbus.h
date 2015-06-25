@@ -38,7 +38,7 @@ struct transfer_info {
 	unsigned int rates;	/* SNDRV_PCM_RATE_* */
 	/* flags */
 	u32 transfer_in:1, /* input = 1, output = 0 */
-	    must_be_clock_source:1;
+	    must_be_clock_source;
 	/* for codecs to distinguish among their TIs */
 	int tag;
 };
@@ -168,7 +168,7 @@ struct soundbus_dev {
 
 	/* private for the soundbus provider */
 	struct list_head codec_list;
-	u32 have_out:1, have_in:1;
+	u32 have_out:1, have_in;
 };
 #define to_soundbus_device(d) container_of(d, struct soundbus_dev, ofdev.dev)
 #define of_to_soundbus_device(d) container_of(d, struct soundbus_dev, ofdev)

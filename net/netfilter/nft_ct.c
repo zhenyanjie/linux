@@ -22,11 +22,11 @@
 #include <net/netfilter/nf_conntrack_labels.h>
 
 struct nft_ct {
-	enum nft_ct_keys	key:8;
-	enum ip_conntrack_dir	dir:8;
+	enum nft_ct_keys	key;
+	enum ip_conntrack_dir	dir;
 	union {
-		enum nft_registers	dreg:8;
-		enum nft_registers	sreg:8;
+		enum nft_registers	dreg;
+		enum nft_registers	sreg;
 	};
 };
 

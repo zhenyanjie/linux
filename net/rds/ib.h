@@ -150,7 +150,7 @@ struct rds_ib_connection {
 	atomic_t		i_credits;
 
 	/* Protocol version specific information */
-	unsigned int		i_flowctl:1;	/* enable/disable flow ctl */
+	unsigned int		i_flowctl;	/* enable/disable flow ctl */
 
 	/* Batched completions */
 	unsigned int		i_unsignaled_wrs;

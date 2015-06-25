@@ -457,9 +457,9 @@ struct dtv_cmds_h {
 	__u32	cmd;		/* A unique ID */
 
 	/* Flags */
-	__u32	set:1;		/* Either a set or get property */
-	__u32	buffer:1;	/* Does this property use the buffer? */
-	__u32	reserved:30;	/* Align */
+	__u32	set;		/* Either a set or get property */
+	__u32	buffer;	/* Does this property use the buffer? */
+	__u32	reserved;	/* Align */
 };
 
 /**

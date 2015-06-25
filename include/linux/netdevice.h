@@ -1624,14 +1624,14 @@ struct net_device {
 	       NETREG_UNREGISTERED,	/* completed unregister todo */
 	       NETREG_RELEASED,		/* called free_netdev */
 	       NETREG_DUMMY,		/* dummy device for NAPI poll */
-	} reg_state:8;
+	} reg_state;
 
 	bool dismantle;
 
 	enum {
 		RTNL_LINK_INITIALIZED,
 		RTNL_LINK_INITIALIZING,
-	} rtnl_link_state:16;
+	} rtnl_link_state;
 
 	void (*destructor)(struct net_device *dev);
 

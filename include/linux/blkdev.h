@@ -454,10 +454,10 @@ struct request_queue {
 	 * for flush operations
 	 */
 	unsigned int		flush_flags;
-	unsigned int		flush_not_queueable:1;
-	unsigned int		flush_queue_delayed:1;
-	unsigned int		flush_pending_idx:1;
-	unsigned int		flush_running_idx:1;
+	unsigned int		flush_not_queueable;
+	unsigned int		flush_queue_delayed;
+	unsigned int		flush_pending_idx;
+	unsigned int		flush_running_idx;
 	unsigned long		flush_pending_since;
 	struct list_head	flush_queue[2];
 	struct list_head	flush_data_in_flight;

@@ -48,7 +48,7 @@ enum mxl_if_freq {
 
 struct mxl111sf_tuner_config {
 	enum mxl_if_freq if_freq;
-	unsigned int invert_spectrum:1;
+	unsigned int invert_spectrum;
 
 	int (*read_reg)(struct mxl111sf_state *state, u8 addr, u8 *data);
 	int (*write_reg)(struct mxl111sf_state *state, u8 addr, u8 data);

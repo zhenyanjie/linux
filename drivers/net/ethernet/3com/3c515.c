@@ -319,7 +319,7 @@ struct corkscrew_private {
 		default_media:3,	/* Read from the EEPROM. */
 		full_duplex:1, autoselect:1, bus_master:1,	/* Vortex can only do a fragment bus-m. */
 		full_bus_master_tx:1, full_bus_master_rx:1,	/* Boomerang  */
-		tx_full:1;
+		tx_full;
 	spinlock_t lock;
 	struct device *dev;
 };
@@ -336,7 +336,7 @@ static struct media_table {
 	char *name;
 	unsigned int media_bits:16,	/* Bits to set in Wn4_Media register. */
 		mask:8,			/* The transceiver-present bit in Wn3_Config. */
-		next:8;			/* The media type to try next. */
+		next;			/* The media type to try next. */
 	short wait;			/* Time before we check media status. */
 } media_tbl[] = {
 	{ "10baseT", Media_10TP, 0x08, XCVR_10base2, (14 * HZ) / 10 },

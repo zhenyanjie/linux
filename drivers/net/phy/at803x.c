@@ -48,7 +48,7 @@ MODULE_AUTHOR("Matus Ujhelyi");
 MODULE_LICENSE("GPL");
 
 struct at803x_priv {
-	bool phy_reset:1;
+	bool phy_reset;
 	struct gpio_desc *gpiod_reset;
 };
 

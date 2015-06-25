@@ -75,9 +75,9 @@ enum prcm_gpiocr_altcx_index {
  * @control_bit: PRCM GPIOCR bit used to control the function
  */
 struct prcm_gpiocr_altcx {
-	bool used:1;
-	u8 reg_index:2;
-	u8 control_bit:5;
+	bool used;
+	u8 reg_index;
+	u8 control_bit;
 } __packed;
 
 /**

@@ -241,9 +241,9 @@ struct fnic {
 	atomic64_t io_cmpl_skip;
 	struct fnic_stats fnic_stats;
 
-	u32 vlan_hw_insert:1;	        /* let hw insert the tag */
-	u32 in_remove:1;                /* fnic device in removal */
-	u32 stop_rx_link_events:1;      /* stop proc. rx frames, link events */
+	u32 vlan_hw_insert;	        /* let hw insert the tag */
+	u32 in_remove;                /* fnic device in removal */
+	u32 stop_rx_link_events;      /* stop proc. rx frames, link events */
 
 	struct completion *remove_wait; /* device remove thread blocks */
 

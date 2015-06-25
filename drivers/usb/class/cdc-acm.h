@@ -115,10 +115,10 @@ struct acm {
 	unsigned char clocal;				/* termios CLOCAL */
 	unsigned int ctrl_caps;				/* control capabilities from the class specific header */
 	unsigned int susp_count;			/* number of suspended interfaces */
-	unsigned int combined_interfaces:1;		/* control and data collapsed */
-	unsigned int is_int_ep:1;			/* interrupt endpoints contrary to spec used */
-	unsigned int throttled:1;			/* actually throttled */
-	unsigned int throttle_req:1;			/* throttle requested */
+	unsigned int combined_interfaces;		/* control and data collapsed */
+	unsigned int is_int_ep;			/* interrupt endpoints contrary to spec used */
+	unsigned int throttled;			/* actually throttled */
+	unsigned int throttle_req;			/* throttle requested */
 	u8 bInterval;
 	struct usb_anchor delayed;			/* writes queued for a device about to be woken */
 };

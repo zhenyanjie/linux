@@ -100,7 +100,7 @@ struct wusb_dev {
 	struct list_head rekey_node;	/* GTK rekey list */
 	u8 port_idx;
 	u8 addr;
-	u8 beacon_type:4;
+	u8 beacon_type;
 	struct usb_encryption_descriptor ccm1_etd;
 	struct wusb_ckhdid cdid;
 	unsigned long entry_ts;
@@ -263,7 +263,7 @@ struct wusbhc {
 	struct wusb_port *port;			/* Fake port status handling */
 	struct wusb_dev_info *dev_info;		/* for Set Device Info mgmt */
 	u8 ports_max;
-	unsigned active:1;			/* currently xmit'ing MMCs */
+	unsigned active;			/* currently xmit'ing MMCs */
 	struct wuie_keep_alive keep_alive_ie;	/* protected by mutex */
 	struct delayed_work keep_alive_timer;
 	struct list_head cack_list;		/* Connect acknowledging */

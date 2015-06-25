@@ -121,10 +121,10 @@ struct rtc_device
 	struct timer_list uie_timer;
 	/* Those fields are protected by rtc->irq_lock */
 	unsigned int oldsecs;
-	unsigned int uie_irq_active:1;
-	unsigned int stop_uie_polling:1;
-	unsigned int uie_task_active:1;
-	unsigned int uie_timer_active:1;
+	unsigned int uie_irq_active;
+	unsigned int stop_uie_polling;
+	unsigned int uie_task_active;
+	unsigned int uie_timer_active;
 #endif
 };
 #define to_rtc_device(d) container_of(d, struct rtc_device, dev)

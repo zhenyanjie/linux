@@ -765,9 +765,9 @@ struct snd_m3 {
 	int external_amp;
 	int amp_gpio;	/* gpio pin #  for external amp, -1 = default */
 	unsigned int hv_config;		/* hardware-volume config bits */
-	unsigned irda_workaround :1;	/* avoid to touch 0x10 on GPIO_DIRECTION
+	unsigned irda_workaround ;	/* avoid to touch 0x10 on GPIO_DIRECTION
 					   (e.g. for IrDA on Dell Inspirons) */
-	unsigned is_omnibook :1;	/* Do HP OmniBook GPIO magic? */
+	unsigned is_omnibook ;	/* Do HP OmniBook GPIO magic? */
 
 	/* midi */
 	struct snd_rawmidi *rmidi;

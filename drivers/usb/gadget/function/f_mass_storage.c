@@ -295,13 +295,13 @@ struct fsg_common {
 	u32			residue;
 	u32			usb_amount_left;
 
-	unsigned int		can_stall:1;
-	unsigned int		free_storage_on_release:1;
-	unsigned int		phase_error:1;
-	unsigned int		short_packet_received:1;
-	unsigned int		bad_lun_okay:1;
-	unsigned int		running:1;
-	unsigned int		sysfs:1;
+	unsigned int		can_stall;
+	unsigned int		free_storage_on_release;
+	unsigned int		phase_error;
+	unsigned int		short_packet_received;
+	unsigned int		bad_lun_okay;
+	unsigned int		running;
+	unsigned int		sysfs;
 
 	int			thread_wakeup_needed;
 	struct completion	thread_notifier;
@@ -328,8 +328,8 @@ struct fsg_dev {
 
 	u16			interface_number;
 
-	unsigned int		bulk_in_enabled:1;
-	unsigned int		bulk_out_enabled:1;
+	unsigned int		bulk_in_enabled;
+	unsigned int		bulk_out_enabled;
 
 	unsigned long		atomic_bitflags;
 #define IGNORE_BULK_OUT		0

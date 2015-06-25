@@ -261,9 +261,9 @@ struct host_to_dev_fis {
 #ifdef __LITTLE_ENDIAN_BITFIELD
 struct sas_identify_frame {
 	/* Byte 0 */
-	u8  frame_type:4;
-	u8  dev_type:3;
-	u8  _un0:1;
+	u8  frame_type;
+	u8  dev_type;
+	u8  _un0;
 
 	/* Byte 1 */
 	u8  _un1;
@@ -271,11 +271,11 @@ struct sas_identify_frame {
 	/* Byte 2 */
 	union {
 		struct {
-			u8  _un20:1;
-			u8  smp_iport:1;
-			u8  stp_iport:1;
-			u8  ssp_iport:1;
-			u8  _un247:4;
+			u8  _un20;
+			u8  smp_iport;
+			u8  stp_iport;
+			u8  ssp_iport;
+			u8  _un247;
 		};
 		u8 initiator_bits;
 	};
@@ -283,11 +283,11 @@ struct sas_identify_frame {
 	/* Byte 3 */
 	union {
 		struct {
-			u8  _un30:1;
-			u8 smp_tport:1;
-			u8 stp_tport:1;
-			u8 ssp_tport:1;
-			u8 _un347:4;
+			u8  _un30;
+			u8 smp_tport;
+			u8 stp_tport;
+			u8 ssp_tport;
+			u8 _un347;
 		};
 		u8 target_bits;
 	};
@@ -313,13 +313,13 @@ struct ssp_frame_hdr {
 	u8     hashed_src_addr[HASHED_SAS_ADDR_SIZE];
 	__be16 _r_b;
 
-	u8     changing_data_ptr:1;
-	u8     retransmit:1;
-	u8     retry_data_frames:1;
-	u8     _r_c:5;
+	u8     changing_data_ptr;
+	u8     retransmit;
+	u8     retry_data_frames;
+	u8     _r_c;
 
-	u8     num_fill_bytes:2;
-	u8     _r_d:6;
+	u8     num_fill_bytes;
+	u8     _r_d;
 
 	u32    _r_e;
 	__be16 tag;
@@ -330,8 +330,8 @@ struct ssp_frame_hdr {
 struct ssp_response_iu {
 	u8     _r_a[10];
 
-	u8     datapres:2;
-	u8     _r_b:6;
+	u8     datapres;
+	u8     _r_b;
 
 	u8     status;
 
@@ -352,14 +352,14 @@ struct report_general_resp {
 	u8      _r_a;
 	u8      num_phys;
 
-	u8      conf_route_table:1;
-	u8      configuring:1;
-	u8	config_others:1;
-	u8	orej_retry_supp:1;
-	u8	stp_cont_awt:1;
-	u8	self_config:1;
-	u8	zone_config:1;
-	u8	t2t_supp:1;
+	u8      conf_route_table;
+	u8      configuring;
+	u8	config_others;
+	u8	orej_retry_supp;
+	u8	stp_cont_awt;
+	u8	self_config;
+	u8	zone_config;
+	u8	t2t_supp;
 
 	u8      _r_c;
 
@@ -374,21 +374,21 @@ struct discover_resp {
 	u8    phy_id;
 	__be16 _r_b;
 
-	u8    _r_c:4;
-	u8    attached_dev_type:3;
-	u8    _r_d:1;
+	u8    _r_c;
+	u8    attached_dev_type;
+	u8    _r_d;
 
-	u8    linkrate:4;
-	u8    _r_e:4;
+	u8    linkrate;
+	u8    _r_e;
 
-	u8    attached_sata_host:1;
-	u8    iproto:3;
-	u8    _r_f:4;
+	u8    attached_sata_host;
+	u8    iproto;
+	u8    _r_f;
 
-	u8    attached_sata_dev:1;
-	u8    tproto:3;
-	u8    _r_g:3;
-	u8    attached_sata_ps:1;
+	u8    attached_sata_dev;
+	u8    tproto;
+	u8    _r_g;
+	u8    attached_sata_ps;
 
 	u8    sas_addr[8];
 	u8    attached_sas_addr[8];
@@ -396,19 +396,19 @@ struct discover_resp {
 
 	u8    _r_h[7];
 
-	u8    hmin_linkrate:4;
-	u8    pmin_linkrate:4;
-	u8    hmax_linkrate:4;
-	u8    pmax_linkrate:4;
+	u8    hmin_linkrate;
+	u8    pmin_linkrate;
+	u8    hmax_linkrate;
+	u8    pmax_linkrate;
 
 	u8    change_count;
 
-	u8    pptv:4;
-	u8    _r_i:3;
-	u8    virtual:1;
+	u8    pptv;
+	u8    _r_i;
+	u8    virtual;
 
-	u8    routing_attr:4;
-	u8    _r_j:4;
+	u8    routing_attr;
+	u8    _r_j;
 
 	u8    conn_type;
 	u8    conn_el_index;
@@ -423,9 +423,9 @@ struct report_phy_sata_resp {
 	u8    phy_id;
 	u8    _r_b;
 
-	u8    affil_valid:1;
-	u8    affil_supp:1;
-	u8    _r_c:6;
+	u8    affil_valid;
+	u8    affil_supp;
+	u8    _r_c;
 
 	u32    _r_d;
 
@@ -455,9 +455,9 @@ struct smp_resp {
 #elif defined(__BIG_ENDIAN_BITFIELD)
 struct sas_identify_frame {
 	/* Byte 0 */
-	u8  _un0:1;
-	u8  dev_type:3;
-	u8  frame_type:4;
+	u8  _un0;
+	u8  dev_type;
+	u8  frame_type;
 
 	/* Byte 1 */
 	u8  _un1;
@@ -465,11 +465,11 @@ struct sas_identify_frame {
 	/* Byte 2 */
 	union {
 		struct {
-			u8  _un247:4;
-			u8  ssp_iport:1;
-			u8  stp_iport:1;
-			u8  smp_iport:1;
-			u8  _un20:1;
+			u8  _un247;
+			u8  ssp_iport;
+			u8  stp_iport;
+			u8  smp_iport;
+			u8  _un20;
 		};
 		u8 initiator_bits;
 	};
@@ -477,11 +477,11 @@ struct sas_identify_frame {
 	/* Byte 3 */
 	union {
 		struct {
-			u8 _un347:4;
-			u8 ssp_tport:1;
-			u8 stp_tport:1;
-			u8 smp_tport:1;
-			u8 _un30:1;
+			u8 _un347;
+			u8 ssp_tport;
+			u8 stp_tport;
+			u8 smp_tport;
+			u8 _un30;
 		};
 		u8 target_bits;
 	};
@@ -507,13 +507,13 @@ struct ssp_frame_hdr {
 	u8     hashed_src_addr[HASHED_SAS_ADDR_SIZE];
 	__be16 _r_b;
 
-	u8     _r_c:5;
-	u8     retry_data_frames:1;
-	u8     retransmit:1;
-	u8     changing_data_ptr:1;
+	u8     _r_c;
+	u8     retry_data_frames;
+	u8     retransmit;
+	u8     changing_data_ptr;
 
-	u8     _r_d:6;
-	u8     num_fill_bytes:2;
+	u8     _r_d;
+	u8     num_fill_bytes;
 
 	u32    _r_e;
 	__be16 tag;
@@ -524,8 +524,8 @@ struct ssp_frame_hdr {
 struct ssp_response_iu {
 	u8     _r_a[10];
 
-	u8     _r_b:6;
-	u8     datapres:2;
+	u8     _r_b;
+	u8     datapres;
 
 	u8     status;
 
@@ -546,14 +546,14 @@ struct report_general_resp {
 	u8      _r_a;
 	u8      num_phys;
 
-	u8	t2t_supp:1;
-	u8	zone_config:1;
-	u8	self_config:1;
-	u8	stp_cont_awt:1;
-	u8	orej_retry_supp:1;
-	u8	config_others:1;
-	u8      configuring:1;
-	u8      conf_route_table:1;
+	u8	t2t_supp;
+	u8	zone_config;
+	u8	self_config;
+	u8	stp_cont_awt;
+	u8	orej_retry_supp;
+	u8	config_others;
+	u8      configuring;
+	u8      conf_route_table;
 
 	u8      _r_c;
 
@@ -568,21 +568,21 @@ struct discover_resp {
 	u8    phy_id;
 	__be16 _r_b;
 
-	u8    _r_d:1;
-	u8    attached_dev_type:3;
-	u8    _r_c:4;
+	u8    _r_d;
+	u8    attached_dev_type;
+	u8    _r_c;
 
-	u8    _r_e:4;
-	u8    linkrate:4;
+	u8    _r_e;
+	u8    linkrate;
 
-	u8    _r_f:4;
-	u8    iproto:3;
-	u8    attached_sata_host:1;
+	u8    _r_f;
+	u8    iproto;
+	u8    attached_sata_host;
 
-	u8    attached_sata_ps:1;
-	u8    _r_g:3;
-	u8    tproto:3;
-	u8    attached_sata_dev:1;
+	u8    attached_sata_ps;
+	u8    _r_g;
+	u8    tproto;
+	u8    attached_sata_dev;
 
 	u8    sas_addr[8];
 	u8    attached_sas_addr[8];
@@ -590,19 +590,19 @@ struct discover_resp {
 
 	u8    _r_h[7];
 
-	u8    pmin_linkrate:4;
-	u8    hmin_linkrate:4;
-	u8    pmax_linkrate:4;
-	u8    hmax_linkrate:4;
+	u8    pmin_linkrate;
+	u8    hmin_linkrate;
+	u8    pmax_linkrate;
+	u8    hmax_linkrate;
 
 	u8    change_count;
 
-	u8    virtual:1;
-	u8    _r_i:3;
-	u8    pptv:4;
+	u8    virtual;
+	u8    _r_i;
+	u8    pptv;
 
-	u8    _r_j:4;
-	u8    routing_attr:4;
+	u8    _r_j;
+	u8    routing_attr;
 
 	u8    conn_type;
 	u8    conn_el_index;
@@ -617,9 +617,9 @@ struct report_phy_sata_resp {
 	u8    phy_id;
 	u8    _r_b;
 
-	u8    _r_c:6;
-	u8    affil_supp:1;
-	u8    affil_valid:1;
+	u8    _r_c;
+	u8    affil_supp;
+	u8    affil_valid;
 
 	u32   _r_d;
 

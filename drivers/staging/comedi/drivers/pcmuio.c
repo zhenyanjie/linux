@@ -131,8 +131,8 @@ struct pcmuio_asic {
 	spinlock_t spinlock;	/* protects member variables */
 	unsigned int enabled_mask;
 	unsigned int stop_count;
-	unsigned int active:1;
-	unsigned int continuous:1;
+	unsigned int active;
+	unsigned int continuous;
 };
 
 struct pcmuio_private {

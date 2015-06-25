@@ -700,9 +700,9 @@ static const struct snd_soc_dapm_route wm8753_dapm_routes[] = {
 
 /* PLL divisors */
 struct _pll_div {
-	u32 div2:1;
-	u32 n:4;
-	u32 k:24;
+	u32 div2;
+	u32 n;
+	u32 k;
 };
 
 /* The size in bits of the pll divide multiplied by 10
@@ -800,8 +800,8 @@ static int wm8753_set_dai_pll(struct snd_soc_dai *codec_dai, int pll_id,
 struct _coeff_div {
 	u32 mclk;
 	u32 rate;
-	u8 sr:5;
-	u8 usb:1;
+	u8 sr;
+	u8 usb;
 };
 
 /* codec hifi mclk (after PLL) clock divider coefficients */

@@ -32,10 +32,10 @@
  *  been received for a bus or device.
  */
 typedef struct {
-	u32 created:1;
-	u32 attached:1;
-	u32 configured:1;
-	u32 running:1;
+	u32 created;
+	u32 attached;
+	u32 configured;
+	u32 running;
 	/* Add new fields above. */
 	/* Remaining bits in this 32-bit word are unused. */
 } VISORCHIPSET_STATE;
@@ -135,7 +135,7 @@ typedef struct {
 	u32 Reserved2;
 	MYPROCOBJECT *procObject;
 	struct {
-		u32 server:1;
+		u32 server;
 		/* Add new fields above. */
 		/* Remaining bits in this 32-bit word are unused. */
 	} flags;

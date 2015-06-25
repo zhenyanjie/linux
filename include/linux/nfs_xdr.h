@@ -1056,13 +1056,13 @@ struct nfs4_fs_locations_arg {
 	struct page *page;
 	const u32 *bitmask;
 	clientid4 clientid;
-	unsigned char migration:1, renew:1;
+	unsigned char migration:1, renew;
 };
 
 struct nfs4_fs_locations_res {
 	struct nfs4_sequence_res	seq_res;
 	struct nfs4_fs_locations       *fs_locations;
-	unsigned char			migration:1, renew:1;
+	unsigned char			migration:1, renew;
 };
 
 struct nfs4_secinfo4 {
@@ -1090,13 +1090,13 @@ struct nfs4_fsid_present_arg {
 	struct nfs4_sequence_args	seq_args;
 	const struct nfs_fh		*fh;
 	clientid4			clientid;
-	unsigned char			renew:1;
+	unsigned char			renew;
 };
 
 struct nfs4_fsid_present_res {
 	struct nfs4_sequence_res	seq_res;
 	struct nfs_fh			*fh;
-	unsigned char			renew:1;
+	unsigned char			renew;
 };
 
 #endif /* CONFIG_NFS_V4 */
@@ -1198,7 +1198,7 @@ struct nfs41_create_session_res {
 struct nfs41_reclaim_complete_args {
 	struct nfs4_sequence_args	seq_args;
 	/* In the future extend to include curr_fh for use with migration */
-	unsigned char			one_fs:1;
+	unsigned char			one_fs;
 };
 
 struct nfs41_reclaim_complete_res {

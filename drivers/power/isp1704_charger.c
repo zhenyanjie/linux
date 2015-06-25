@@ -65,8 +65,8 @@ struct isp1704_charger {
 
 	/* properties */
 	char			model[8];
-	unsigned		present:1;
-	unsigned		online:1;
+	unsigned		present;
+	unsigned		online;
 	unsigned		current_max;
 };
 

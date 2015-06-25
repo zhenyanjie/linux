@@ -24,8 +24,8 @@
 struct regulator {
 	struct device *dev;
 	struct list_head list;
-	unsigned int always_on:1;
-	unsigned int bypass:1;
+	unsigned int always_on;
+	unsigned int bypass;
 	int uA_load;
 	int min_uV;
 	int max_uV;

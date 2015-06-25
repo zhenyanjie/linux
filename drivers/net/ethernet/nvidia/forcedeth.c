@@ -719,8 +719,8 @@ static const struct register_test nv_registers_test[] = {
 struct nv_skb_map {
 	struct sk_buff *skb;
 	dma_addr_t dma;
-	unsigned int dma_len:31;
-	unsigned int dma_single:1;
+	unsigned int dma_len;
+	unsigned int dma_single;
 	struct ring_desc_ex *first_tx_desc;
 	struct nv_skb_map *next_tx_ctx;
 };

@@ -23,7 +23,7 @@ struct xt_policy_spec {
 			proto:1,
 			mode:1,
 			spi:1,
-			reqid:1;
+			reqid;
 };
 
 #ifndef __KERNEL__

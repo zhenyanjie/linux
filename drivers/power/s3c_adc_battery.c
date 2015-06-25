@@ -36,7 +36,7 @@ struct s3c_adc_bat {
 	unsigned int			timestamp;
 	int				level;
 	int				status;
-	int				cable_plugged:1;
+	int				cable_plugged;
 };
 
 static struct delayed_work bat_work;

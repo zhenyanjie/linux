@@ -124,29 +124,29 @@ enum _cache_type {
 
 union _cpuid4_leaf_eax {
 	struct {
-		enum _cache_type	type:5;
-		unsigned int		level:3;
-		unsigned int		is_self_initializing:1;
-		unsigned int		is_fully_associative:1;
-		unsigned int		reserved:4;
-		unsigned int		num_threads_sharing:12;
-		unsigned int		num_cores_on_die:6;
+		enum _cache_type	type;
+		unsigned int		level;
+		unsigned int		is_self_initializing;
+		unsigned int		is_fully_associative;
+		unsigned int		reserved;
+		unsigned int		num_threads_sharing;
+		unsigned int		num_cores_on_die;
 	} split;
 	u32 full;
 };
 
 union _cpuid4_leaf_ebx {
 	struct {
-		unsigned int		coherency_line_size:12;
-		unsigned int		physical_line_partition:10;
-		unsigned int		ways_of_associativity:10;
+		unsigned int		coherency_line_size;
+		unsigned int		physical_line_partition;
+		unsigned int		ways_of_associativity;
 	} split;
 	u32 full;
 };
 
 union _cpuid4_leaf_ecx {
 	struct {
-		unsigned int		number_of_sets:32;
+		unsigned int		number_of_sets;
 	} split;
 	u32 full;
 };
@@ -174,31 +174,31 @@ unsigned short			num_cache_leaves;
    Maybe later */
 union l1_cache {
 	struct {
-		unsigned line_size:8;
-		unsigned lines_per_tag:8;
-		unsigned assoc:8;
-		unsigned size_in_kb:8;
+		unsigned line_size;
+		unsigned lines_per_tag;
+		unsigned assoc;
+		unsigned size_in_kb;
 	};
 	unsigned val;
 };
 
 union l2_cache {
 	struct {
-		unsigned line_size:8;
-		unsigned lines_per_tag:4;
-		unsigned assoc:4;
-		unsigned size_in_kb:16;
+		unsigned line_size;
+		unsigned lines_per_tag;
+		unsigned assoc;
+		unsigned size_in_kb;
 	};
 	unsigned val;
 };
 
 union l3_cache {
 	struct {
-		unsigned line_size:8;
-		unsigned lines_per_tag:4;
-		unsigned assoc:4;
-		unsigned res:2;
-		unsigned size_encoded:14;
+		unsigned line_size;
+		unsigned lines_per_tag;
+		unsigned assoc;
+		unsigned res;
+		unsigned size_encoded;
 	};
 	unsigned val;
 };

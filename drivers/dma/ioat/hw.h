@@ -71,20 +71,20 @@ struct ioat_dma_descriptor {
 	union {
 		uint32_t ctl;
 		struct {
-			unsigned int int_en:1;
-			unsigned int src_snoop_dis:1;
-			unsigned int dest_snoop_dis:1;
-			unsigned int compl_write:1;
-			unsigned int fence:1;
-			unsigned int null:1;
-			unsigned int src_brk:1;
-			unsigned int dest_brk:1;
-			unsigned int bundle:1;
-			unsigned int dest_dca:1;
-			unsigned int hint:1;
-			unsigned int rsvd2:13;
+			unsigned int int_en;
+			unsigned int src_snoop_dis;
+			unsigned int dest_snoop_dis;
+			unsigned int compl_write;
+			unsigned int fence;
+			unsigned int null;
+			unsigned int src_brk;
+			unsigned int dest_brk;
+			unsigned int bundle;
+			unsigned int dest_dca;
+			unsigned int hint;
+			unsigned int rsvd2;
 			#define IOAT_OP_COPY 0x00
-			unsigned int op:8;
+			unsigned int op;
 		} ctl_f;
 	};
 	uint64_t	src_addr;
@@ -105,19 +105,19 @@ struct ioat_xor_descriptor {
 	union {
 		uint32_t ctl;
 		struct {
-			unsigned int int_en:1;
-			unsigned int src_snoop_dis:1;
-			unsigned int dest_snoop_dis:1;
-			unsigned int compl_write:1;
-			unsigned int fence:1;
-			unsigned int src_cnt:3;
-			unsigned int bundle:1;
-			unsigned int dest_dca:1;
-			unsigned int hint:1;
-			unsigned int rsvd:13;
+			unsigned int int_en;
+			unsigned int src_snoop_dis;
+			unsigned int dest_snoop_dis;
+			unsigned int compl_write;
+			unsigned int fence;
+			unsigned int src_cnt;
+			unsigned int bundle;
+			unsigned int dest_dca;
+			unsigned int hint;
+			unsigned int rsvd;
 			#define IOAT_OP_XOR 0x87
 			#define IOAT_OP_XOR_VAL 0x88
-			unsigned int op:8;
+			unsigned int op;
 		} ctl_f;
 	};
 	uint64_t	src_addr;
@@ -142,36 +142,36 @@ struct ioat_pq_descriptor {
 		uint32_t	size;
 		uint32_t	dwbes;
 		struct {
-			unsigned int rsvd:25;
-			unsigned int p_val_err:1;
-			unsigned int q_val_err:1;
-			unsigned int rsvd1:4;
-			unsigned int wbes:1;
+			unsigned int rsvd;
+			unsigned int p_val_err;
+			unsigned int q_val_err;
+			unsigned int rsvd1;
+			unsigned int wbes;
 		} dwbes_f;
 	};
 	union {
 		uint32_t ctl;
 		struct {
-			unsigned int int_en:1;
-			unsigned int src_snoop_dis:1;
-			unsigned int dest_snoop_dis:1;
-			unsigned int compl_write:1;
-			unsigned int fence:1;
-			unsigned int src_cnt:3;
-			unsigned int bundle:1;
-			unsigned int dest_dca:1;
-			unsigned int hint:1;
-			unsigned int p_disable:1;
-			unsigned int q_disable:1;
-			unsigned int rsvd2:2;
-			unsigned int wb_en:1;
-			unsigned int prl_en:1;
-			unsigned int rsvd3:7;
+			unsigned int int_en;
+			unsigned int src_snoop_dis;
+			unsigned int dest_snoop_dis;
+			unsigned int compl_write;
+			unsigned int fence;
+			unsigned int src_cnt;
+			unsigned int bundle;
+			unsigned int dest_dca;
+			unsigned int hint;
+			unsigned int p_disable;
+			unsigned int q_disable;
+			unsigned int rsvd2;
+			unsigned int wb_en;
+			unsigned int prl_en;
+			unsigned int rsvd3;
 			#define IOAT_OP_PQ 0x89
 			#define IOAT_OP_PQ_VAL 0x8a
 			#define IOAT_OP_PQ_16S 0xa0
 			#define IOAT_OP_PQ_VAL_16S 0xa1
-			unsigned int op:8;
+			unsigned int op;
 		} ctl_f;
 	};
 	uint64_t	src_addr;
@@ -201,21 +201,21 @@ struct ioat_pq_update_descriptor {
 	union {
 		uint32_t ctl;
 		struct {
-			unsigned int int_en:1;
-			unsigned int src_snoop_dis:1;
-			unsigned int dest_snoop_dis:1;
-			unsigned int compl_write:1;
-			unsigned int fence:1;
-			unsigned int src_cnt:3;
-			unsigned int bundle:1;
-			unsigned int dest_dca:1;
-			unsigned int hint:1;
-			unsigned int p_disable:1;
-			unsigned int q_disable:1;
-			unsigned int rsvd:3;
-			unsigned int coef:8;
+			unsigned int int_en;
+			unsigned int src_snoop_dis;
+			unsigned int dest_snoop_dis;
+			unsigned int compl_write;
+			unsigned int fence;
+			unsigned int src_cnt;
+			unsigned int bundle;
+			unsigned int dest_dca;
+			unsigned int hint;
+			unsigned int p_disable;
+			unsigned int q_disable;
+			unsigned int rsvd;
+			unsigned int coef;
 			#define IOAT_OP_PQ_UP 0x8b
-			unsigned int op:8;
+			unsigned int op;
 		} ctl_f;
 	};
 	uint64_t	src_addr;

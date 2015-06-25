@@ -112,7 +112,7 @@ MODULE_PARM_DESC(iSerialNum, "1");
 
 static char *iPNPstring;
 module_param(iPNPstring, charp, S_IRUGO);
-MODULE_PARM_DESC(iPNPstring, "MFG:linux;MDL:g_printer;CLS:PRINTER;SN:1;");
+MODULE_PARM_DESC(iPNPstring, "MFG:linux;MDL:g_printer;CLS:PRINTER;SN;");
 
 /* Number of requests to allocate per endpoint, not used for ep0. */
 static unsigned qlen = 10;
@@ -229,7 +229,7 @@ static const struct usb_descriptor_header *otg_desc[] = {
 static char				product_desc [40] = DRIVER_DESC;
 static char				serial_num [40] = "1";
 static char				pnp_string [1024] =
-	"XXMFG:linux;MDL:g_printer;CLS:PRINTER;SN:1;";
+	"XXMFG:linux;MDL:g_printer;CLS:PRINTER;SN;";
 
 /* static strings, in UTF-8 */
 static struct usb_string		strings [] = {

@@ -25,7 +25,7 @@
 
 struct icmp_err {
   int		errno;
-  unsigned int	fatal:1;
+  unsigned int	fatal;
 };
 
 extern const struct icmp_err icmp_err_convert[];

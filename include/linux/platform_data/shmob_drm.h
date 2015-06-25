@@ -63,16 +63,16 @@ struct shmob_drm_panel_data {
 };
 
 struct shmob_drm_sys_interface_data {
-	unsigned int read_latch:6;
-	unsigned int read_setup:8;
-	unsigned int read_cycle:8;
-	unsigned int read_strobe:8;
-	unsigned int write_setup:8;
-	unsigned int write_cycle:8;
-	unsigned int write_strobe:8;
-	unsigned int cs_setup:3;
-	unsigned int vsync_active_high:1;
-	unsigned int vsync_dir_input:1;
+	unsigned int read_latch;
+	unsigned int read_setup;
+	unsigned int read_cycle;
+	unsigned int read_strobe;
+	unsigned int write_setup;
+	unsigned int write_cycle;
+	unsigned int write_strobe;
+	unsigned int cs_setup;
+	unsigned int vsync_active_high;
+	unsigned int vsync_dir_input;
 };
 
 #define SHMOB_DRM_IFACE_FL_DWPOL (1 << 0) /* Rising edge dot clock data latch */

@@ -170,9 +170,9 @@ struct menelaus_chip {
 #ifdef CONFIG_RTC_DRV_TWL92330
 	struct rtc_device	*rtc;
 	u8			rtc_control;
-	unsigned		uie:1;
+	unsigned		uie;
 #endif
-	unsigned		vcore_hw_mode:1;
+	unsigned		vcore_hw_mode;
 	u8			mask1, mask2;
 	void			(*handlers[16])(struct menelaus_chip *);
 	void			(*mmc_callback)(void *data, u8 mask);

@@ -212,7 +212,7 @@ struct goku_ep {
 	unsigned				num:8,
 						dma:1,
 						is_in:1,
-						stopped:1;
+						stopped;
 
 	/* analogous to a host-side qh */
 	struct list_head			queue;
@@ -226,7 +226,7 @@ struct goku_request {
 	struct usb_request		req;
 	struct list_head		queue;
 
-	unsigned			mapped:1;
+	unsigned			mapped;
 };
 
 enum ep0state {
@@ -250,7 +250,7 @@ struct goku_udc {
 					got_region:1,
 					req_config:1,
 					configured:1,
-					enabled:1;
+					enabled;
 
 	/* pci state used to access those endpoints */
 	struct pci_dev			*pdev;

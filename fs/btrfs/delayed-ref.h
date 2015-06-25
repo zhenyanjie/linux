@@ -50,21 +50,21 @@ struct btrfs_delayed_ref_node {
 	 */
 	int ref_mod;
 
-	unsigned int action:8;
-	unsigned int type:8;
-	unsigned int no_quota:1;
+	unsigned int action;
+	unsigned int type;
+	unsigned int no_quota;
 	/* is this node still in the rbtree? */
-	unsigned int is_head:1;
-	unsigned int in_tree:1;
+	unsigned int is_head;
+	unsigned int in_tree;
 };
 
 struct btrfs_delayed_extent_op {
 	struct btrfs_disk_key key;
 	u64 flags_to_set;
 	int level;
-	unsigned int update_key:1;
-	unsigned int update_flags:1;
-	unsigned int is_data:1;
+	unsigned int update_key;
+	unsigned int update_flags;
+	unsigned int is_data;
 };
 
 /*
@@ -100,9 +100,9 @@ struct btrfs_delayed_ref_head {
 	 * we need to update the in ram accounting to properly reflect
 	 * the free has happened.
 	 */
-	unsigned int must_insert_reserved:1;
-	unsigned int is_data:1;
-	unsigned int processing:1;
+	unsigned int must_insert_reserved;
+	unsigned int is_data;
+	unsigned int processing;
 };
 
 struct btrfs_delayed_tree_ref {

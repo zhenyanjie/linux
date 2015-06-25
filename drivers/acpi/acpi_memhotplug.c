@@ -75,7 +75,7 @@ struct acpi_memory_info {
 	u64 length;		/* Memory Range length */
 	unsigned short caching;	/* memory cache attribute */
 	unsigned short write_protect;	/* memory read/write attribute */
-	unsigned int enabled:1;
+	unsigned int enabled;
 };
 
 struct acpi_memory_device {

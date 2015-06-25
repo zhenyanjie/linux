@@ -1695,7 +1695,7 @@ struct snd_emu10k1 {
 	unsigned int tos_link: 1,		/* tos link detected */
 		rear_ac97: 1,			/* rear channels are on AC'97 */
 		enable_ir: 1;
-	unsigned int support_tlv :1;
+	unsigned int support_tlv ;
 	/* Contains profile of card capabilities */
 	const struct snd_emu_chip_details *card_capabilities;
 	unsigned int audigy;			/* is Audigy? */

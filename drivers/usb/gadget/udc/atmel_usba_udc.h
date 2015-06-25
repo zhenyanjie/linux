@@ -278,10 +278,10 @@ struct usba_ep {
 	u16					fifo_size;
 	u8					nr_banks;
 	u8					index;
-	unsigned int				can_dma:1;
-	unsigned int				can_isoc:1;
-	unsigned int				is_isoc:1;
-	unsigned int				is_in:1;
+	unsigned int				can_dma;
+	unsigned int				can_isoc;
+	unsigned int				is_isoc;
+	unsigned int				is_in;
 
 #ifdef CONFIG_USB_GADGET_DEBUG_FS
 	u32					last_dma_status;
@@ -298,10 +298,10 @@ struct usba_request {
 
 	u32					ctrl;
 
-	unsigned int				submitted:1;
-	unsigned int				last_transaction:1;
-	unsigned int				using_dma:1;
-	unsigned int				mapped:1;
+	unsigned int				submitted;
+	unsigned int				last_transaction;
+	unsigned int				using_dma;
+	unsigned int				mapped;
 };
 
 struct usba_udc {

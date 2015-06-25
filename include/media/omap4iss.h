@@ -39,8 +39,8 @@ struct iss_csiphy_lanes_cfg {
  * @vpclk_div: Video port output clock control
  */
 struct iss_csi2_platform_data {
-	unsigned crc:1;
-	unsigned vpclk_div:2;
+	unsigned crc;
+	unsigned vpclk_div;
 	struct iss_csiphy_lanes_cfg lanecfg;
 };
 

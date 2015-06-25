@@ -27,7 +27,7 @@
 struct tda18218_config {
 	u8 i2c_address;
 	u8 i2c_wr_max;
-	u8 loop_through:1;
+	u8 loop_through;
 };
 
 #if IS_ENABLED(CONFIG_MEDIA_TUNER_TDA18218)

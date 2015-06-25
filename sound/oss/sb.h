@@ -63,8 +63,8 @@
 
 struct mixer_def {
 	unsigned int regno: 8;
-	unsigned int bitoffs:4;
-	unsigned int nbits:4;
+	unsigned int bitoffs;
+	unsigned int nbits;
 };
 
 typedef struct mixer_def mixer_tab[32][2];

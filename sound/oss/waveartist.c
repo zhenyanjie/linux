@@ -112,12 +112,12 @@ struct wavnc_info {
 
 #ifdef CONFIG_ARCH_NETWINDER
 	signed int	slider_vol;	   /* hardware slider volume     */
-	unsigned int	handset_detect	:1;
-	unsigned int	telephone_detect:1;
-	unsigned int	no_autoselect	:1;/* handset/telephone autoselects a path */
-	unsigned int	spkr_mute_state	:1;/* set by ioctl or autoselect */
-	unsigned int	line_mute_state	:1;/* set by ioctl or autoselect */
-	unsigned int	use_slider	:1;/* use slider setting for o/p vol */
+	unsigned int	handset_detect	;
+	unsigned int	telephone_detect;
+	unsigned int	no_autoselect	;/* handset/telephone autoselects a path */
+	unsigned int	spkr_mute_state	;/* set by ioctl or autoselect */
+	unsigned int	line_mute_state	;/* set by ioctl or autoselect */
+	unsigned int	use_slider	;/* use slider setting for o/p vol */
 #endif
 };
 

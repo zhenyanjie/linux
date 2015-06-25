@@ -44,7 +44,7 @@ struct cword {
 		keygen:1,
 		interm:1,
 		encdec:1,
-		ksize:2;
+		ksize;
 } __attribute__ ((__aligned__(PADLOCK_ALIGNMENT)));
 
 /* Whenever making any changes to the following

@@ -13,7 +13,7 @@
 struct omap2_mcspi_platform_config {
 	unsigned short	num_cs;
 	unsigned int regs_offset;
-	unsigned int pin_dir:1;
+	unsigned int pin_dir;
 };
 
 struct omap2_mcspi_dev_attr {
@@ -21,10 +21,10 @@ struct omap2_mcspi_dev_attr {
 };
 
 struct omap2_mcspi_device_config {
-	unsigned turbo_mode:1;
+	unsigned turbo_mode;
 
 	/* toggle chip select after every word */
-	unsigned cs_per_word:1;
+	unsigned cs_per_word;
 };
 
 #endif

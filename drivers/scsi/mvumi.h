@@ -239,14 +239,14 @@ enum resource_type {
 };
 
 struct mvumi_sense_data {
-	u8 error_code:7;
-	u8 valid:1;
+	u8 error_code;
+	u8 valid;
 	u8 segment_number;
-	u8 sense_key:4;
-	u8 reserved:1;
-	u8 incorrect_length:1;
-	u8 end_of_media:1;
-	u8 file_mark:1;
+	u8 sense_key;
+	u8 reserved;
+	u8 incorrect_length;
+	u8 end_of_media;
+	u8 file_mark;
 	u8 information[4];
 	u8 additional_sense_length;
 	u8 command_specific_information[4];

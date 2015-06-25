@@ -65,7 +65,7 @@ struct hd29l2_priv {
 	struct i2c_adapter *i2c;
 	struct dvb_frontend fe;
 	struct hd29l2_config cfg;
-	u8 tuner_i2c_addr_programmed:1;
+	u8 tuner_i2c_addr_programmed;
 
 	fe_status_t fe_status;
 };

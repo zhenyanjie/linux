@@ -108,7 +108,7 @@ uisqueue_get_cmdrsp(struct uisqueue_info *queueinfo, void *cmdrsp,
 #define MAX_NAME_SIZE_UISQUEUE 64
 
 struct extport_info {
-	u8 valid:1;
+	u8 valid;
 	/* if 1, indicates this extport slot is occupied
 	 * if 0, indicates that extport slot is unoccupied */
 
@@ -190,12 +190,12 @@ struct sn_list_entry {
 };
 
 struct networkPolicy {
-	u32 promiscuous:1;
-	u32 macassign:1;
-	u32 peerforwarding:1;
-	u32 nonotify:1;
-	u32 standby:1;
-	u32 callhome:2;
+	u32 promiscuous;
+	u32 macassign;
+	u32 peerforwarding;
+	u32 nonotify;
+	u32 standby;
+	u32 callhome;
 	char ip_addr[30];
 };
 

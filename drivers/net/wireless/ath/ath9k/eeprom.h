@@ -394,11 +394,11 @@ struct modal_eep_4k_header {
 	u8 iqCalQCh[AR5416_EEP4K_MAX_CHAINS];
 	u8 pdGainOverlap;
 #ifdef __BIG_ENDIAN_BITFIELD
-	u8 ob_1:4, ob_0:4;
-	u8 db1_1:4, db1_0:4;
+	u8 ob_1, ob_0;
+	u8 db1_1, db1_0;
 #else
-	u8 ob_0:4, ob_1:4;
-	u8 db1_0:4, db1_1:4;
+	u8 ob_0, ob_1;
+	u8 db1_0, db1_1;
 #endif
 	u8 xpaBiasLvl;
 	u8 txFrameToDataStart;
@@ -410,25 +410,25 @@ struct modal_eep_4k_header {
 	u8 xatten2Db[AR5416_EEP4K_MAX_CHAINS];
 	u8 xatten2Margin[AR5416_EEP4K_MAX_CHAINS];
 #ifdef __BIG_ENDIAN_BITFIELD
-	u8 db2_1:4, db2_0:4;
+	u8 db2_1, db2_0;
 #else
-	u8 db2_0:4, db2_1:4;
+	u8 db2_0, db2_1;
 #endif
 	u8 version;
 #ifdef __BIG_ENDIAN_BITFIELD
-	u8 ob_3:4, ob_2:4;
-	u8 antdiv_ctl1:4, ob_4:4;
-	u8 db1_3:4, db1_2:4;
-	u8 antdiv_ctl2:4, db1_4:4;
-	u8 db2_2:4, db2_3:4;
-	u8 reserved:4, db2_4:4;
+	u8 ob_3, ob_2;
+	u8 antdiv_ctl1, ob_4;
+	u8 db1_3, db1_2;
+	u8 antdiv_ctl2, db1_4;
+	u8 db2_2, db2_3;
+	u8 reserved, db2_4;
 #else
-	u8 ob_2:4, ob_3:4;
-	u8 ob_4:4, antdiv_ctl1:4;
-	u8 db1_2:4, db1_3:4;
-	u8 db1_4:4, antdiv_ctl2:4;
-	u8 db2_2:4, db2_3:4;
-	u8 db2_4:4, reserved:4;
+	u8 ob_2, ob_3;
+	u8 ob_4, antdiv_ctl1;
+	u8 db1_2, db1_3;
+	u8 db1_4, antdiv_ctl2;
+	u8 db2_2, db2_3;
+	u8 db2_4, reserved;
 #endif
 	u8 tx_diversity;
 	u8 flc_pwr_thresh;

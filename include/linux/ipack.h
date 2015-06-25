@@ -105,9 +105,9 @@ struct ipack_device {
 	u32			 id_vendor;
 	u32			 id_device;
 	u8			 id_format;
-	unsigned int		 id_crc_correct:1;
-	unsigned int		 speed_8mhz:1;
-	unsigned int		 speed_32mhz:1;
+	unsigned int		 id_crc_correct;
+	unsigned int		 speed_8mhz;
+	unsigned int		 speed_32mhz;
 };
 
 /**

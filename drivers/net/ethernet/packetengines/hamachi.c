@@ -494,9 +494,9 @@ struct hamachi_private {
 	unsigned int cur_rx, dirty_rx;		/* Producer/consumer ring indices */
 	unsigned int cur_tx, dirty_tx;
 	unsigned int rx_buf_sz;			/* Based on MTU+slack. */
-	unsigned int tx_full:1;			/* The Tx queue is full. */
-	unsigned int duplex_lock:1;
-	unsigned int default_port:4;		/* Last dev->if_port value. */
+	unsigned int tx_full;			/* The Tx queue is full. */
+	unsigned int duplex_lock;
+	unsigned int default_port;		/* Last dev->if_port value. */
 	/* MII transceiver section. */
 	int mii_cnt;								/* MII device addresses. */
 	struct mii_if_info mii_if;		/* MII lib hooks/info */

@@ -184,14 +184,14 @@ struct dm_pool_metadata {
 	uint64_t trans_id;
 	unsigned long flags;
 	sector_t data_block_size;
-	bool read_only:1;
+	bool read_only;
 
 	/*
 	 * Set if a transaction has to be aborted but the attempt to roll back
 	 * to the previous (good) transaction failed.  The only pool metadata
 	 * operation possible in this state is the closing of the device.
 	 */
-	bool fail_io:1;
+	bool fail_io;
 
 	/*
 	 * Reading the space map roots can fail, so we read it into these
@@ -207,8 +207,8 @@ struct dm_thin_device {
 	dm_thin_id id;
 
 	int open_count;
-	bool changed:1;
-	bool aborted_with_changes:1;
+	bool changed;
+	bool aborted_with_changes;
 	uint64_t mapped_blocks;
 	uint64_t transaction_id;
 	uint32_t creation_time;

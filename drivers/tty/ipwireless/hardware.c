@@ -132,17 +132,17 @@ enum {
 #define NL_FOLLOWING_PACKET_HEADER_SIZE    1
 
 struct nl_first_packet_header {
-	unsigned char protocol:3;
-	unsigned char address:3;
-	unsigned char packet_rank:2;
+	unsigned char protocol;
+	unsigned char address;
+	unsigned char packet_rank;
 	unsigned char length_lsb;
 	unsigned char length_msb;
 };
 
 struct nl_packet_header {
-	unsigned char protocol:3;
-	unsigned char address:3;
-	unsigned char packet_rank:2;
+	unsigned char protocol;
+	unsigned char address;
+	unsigned char packet_rank;
 };
 
 /* Value of 'packet_rank' above */

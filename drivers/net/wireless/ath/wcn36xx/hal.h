@@ -767,8 +767,8 @@ struct wcn36xx_hal_set_sta_key_params {
 
 /* 4-byte control message header used by HAL*/
 struct wcn36xx_hal_msg_header {
-	enum wcn36xx_hal_host_msg_type msg_type:16;
-	enum wcn36xx_hal_host_msg_version msg_version:16;
+	enum wcn36xx_hal_host_msg_type msg_type;
+	enum wcn36xx_hal_host_msg_version msg_version;
 	u32 len;
 } __packed;
 
@@ -890,33 +890,33 @@ struct wcn36xx_hal_mac_frame_ctl {
 
 #ifndef ANI_LITTLE_BIT_ENDIAN
 
-	u8 subType:4;
-	u8 type:2;
-	u8 protVer:2;
+	u8 subType;
+	u8 type;
+	u8 protVer;
 
-	u8 order:1;
-	u8 wep:1;
-	u8 moreData:1;
-	u8 powerMgmt:1;
-	u8 retry:1;
-	u8 moreFrag:1;
-	u8 fromDS:1;
-	u8 toDS:1;
+	u8 order;
+	u8 wep;
+	u8 moreData;
+	u8 powerMgmt;
+	u8 retry;
+	u8 moreFrag;
+	u8 fromDS;
+	u8 toDS;
 
 #else
 
-	u8 protVer:2;
-	u8 type:2;
-	u8 subType:4;
+	u8 protVer;
+	u8 type;
+	u8 subType;
 
-	u8 toDS:1;
-	u8 fromDS:1;
-	u8 moreFrag:1;
-	u8 retry:1;
-	u8 powerMgmt:1;
-	u8 moreData:1;
-	u8 wep:1;
-	u8 order:1;
+	u8 toDS;
+	u8 fromDS;
+	u8 moreFrag;
+	u8 retry;
+	u8 powerMgmt;
+	u8 moreData;
+	u8 wep;
+	u8 order;
 
 #endif
 
@@ -924,9 +924,9 @@ struct wcn36xx_hal_mac_frame_ctl {
 
 /* Sequence control field */
 struct wcn36xx_hal_mac_seq_ctl {
-	u8 fragNum:4;
-	u8 seqNumLo:4;
-	u8 seqNumHi:8;
+	u8 fragNum;
+	u8 seqNumLo;
+	u8 seqNumHi;
 };
 
 /* Management header format */
@@ -1471,26 +1471,26 @@ struct wcn36xx_hal_rate_set {
 /* access category record */
 struct wcn36xx_hal_aci_aifsn {
 #ifndef ANI_LITTLE_BIT_ENDIAN
-	u8 rsvd:1;
-	u8 aci:2;
-	u8 acm:1;
-	u8 aifsn:4;
+	u8 rsvd;
+	u8 aci;
+	u8 acm;
+	u8 aifsn;
 #else
-	u8 aifsn:4;
-	u8 acm:1;
-	u8 aci:2;
-	u8 rsvd:1;
+	u8 aifsn;
+	u8 acm;
+	u8 aci;
+	u8 rsvd;
 #endif
 } __packed;
 
 /* contention window size */
 struct wcn36xx_hal_mac_cw {
 #ifndef ANI_LITTLE_BIT_ENDIAN
-	u8 max:4;
-	u8 min:4;
+	u8 max;
+	u8 min;
 #else
-	u8 min:4;
-	u8 max:4;
+	u8 min;
+	u8 max;
 #endif
 } __packed;
 
@@ -2420,34 +2420,34 @@ struct set_link_state_rsp_msg {
 /* TSPEC Params */
 struct wcn36xx_hal_ts_info_tfc {
 #ifndef ANI_LITTLE_BIT_ENDIAN
-	u16 ackPolicy:2;
-	u16 userPrio:3;
-	u16 psb:1;
-	u16 aggregation:1;
-	u16 accessPolicy:2;
-	u16 direction:2;
-	u16 tsid:4;
-	u16 trafficType:1;
+	u16 ackPolicy;
+	u16 userPrio;
+	u16 psb;
+	u16 aggregation;
+	u16 accessPolicy;
+	u16 direction;
+	u16 tsid;
+	u16 trafficType;
 #else
-	u16 trafficType:1;
-	u16 tsid:4;
-	u16 direction:2;
-	u16 accessPolicy:2;
-	u16 aggregation:1;
-	u16 psb:1;
-	u16 userPrio:3;
-	u16 ackPolicy:2;
+	u16 trafficType;
+	u16 tsid;
+	u16 direction;
+	u16 accessPolicy;
+	u16 aggregation;
+	u16 psb;
+	u16 userPrio;
+	u16 ackPolicy;
 #endif
 };
 
 /* Flag to schedule the traffic type */
 struct wcn36xx_hal_ts_info_sch {
 #ifndef ANI_LITTLE_BIT_ENDIAN
-	u8 rsvd:7;
-	u8 schedule:1;
+	u8 rsvd;
+	u8 schedule;
 #else
-	u8 schedule:1;
-	u8 rsvd:7;
+	u8 schedule;
+	u8 rsvd;
 #endif
 };
 
@@ -2634,9 +2634,9 @@ struct wcn36xx_hal_add_ba_rsp_msg {
 } __packed;
 
 struct add_ba_info {
-	u16 ba_enable:1;
-	u16 starting_seq_num:12;
-	u16 reserved:3;
+	u16 ba_enable;
+	u16 starting_seq_num;
+	u16 reserved;
 };
 
 struct wcn36xx_hal_trigger_ba_rsp_candidate {
@@ -3131,10 +3131,10 @@ struct wcn36xx_hal_ns_offload_params {
 	u8 target_ipv6_addr2[WCN36XX_HAL_IPV6_ADDR_LEN];
 
 	u8 self_addr[ETH_ALEN];
-	u8 src_ipv6_addr_valid:1;
-	u8 target_ipv6_addr1_valid:1;
-	u8 target_ipv6_addr2_valid:1;
-	u8 reserved1:5;
+	u8 src_ipv6_addr_valid;
+	u8 target_ipv6_addr1_valid;
+	u8 target_ipv6_addr2_valid;
+	u8 reserved1;
 
 	/* make it DWORD aligned */
 	u8 reserved2;
@@ -3186,29 +3186,29 @@ struct wcn36xx_hal_keep_alive_req_msg {
 struct wcn36xx_hal_rssi_threshold_req_msg {
 	struct wcn36xx_hal_msg_header header;
 
-	s8 threshold1:8;
-	s8 threshold2:8;
-	s8 threshold3:8;
-	u8 thres1_pos_notify:1;
-	u8 thres1_neg_notify:1;
-	u8 thres2_pos_notify:1;
-	u8 thres2_neg_notify:1;
-	u8 thres3_pos_notify:1;
-	u8 thres3_neg_notify:1;
-	u8 reserved10:2;
+	s8 threshold1;
+	s8 threshold2;
+	s8 threshold3;
+	u8 thres1_pos_notify;
+	u8 thres1_neg_notify;
+	u8 thres2_pos_notify;
+	u8 thres2_neg_notify;
+	u8 thres3_pos_notify;
+	u8 thres3_neg_notify;
+	u8 reserved10;
 };
 
 struct wcn36xx_hal_enter_uapsd_req_msg {
 	struct wcn36xx_hal_msg_header header;
 
-	u8 bk_delivery:1;
-	u8 be_delivery:1;
-	u8 vi_delivery:1;
-	u8 vo_delivery:1;
-	u8 bk_trigger:1;
-	u8 be_trigger:1;
-	u8 vi_trigger:1;
-	u8 vo_trigger:1;
+	u8 bk_delivery;
+	u8 be_delivery;
+	u8 vi_delivery;
+	u8 vo_delivery;
+	u8 bk_trigger;
+	u8 be_trigger;
+	u8 vi_trigger;
+	u8 vo_trigger;
 	u8 bss_index;
 };
 
@@ -3442,14 +3442,14 @@ struct wcn36xx_hal_exit_uapsd_rsp_msg {
 struct wcn36xx_hal_rssi_notification_ind_msg {
 	struct wcn36xx_hal_msg_header header;
 
-	u32 rssi_thres1_pos_cross:1;
-	u32 rssi_thres1_neg_cross:1;
-	u32 rssi_thres2_pos_cross:1;
-	u32 rssi_thres2_neg_cross:1;
-	u32 rssi_thres3_pos_cross:1;
-	u32 rssi_thres3_neg_cross:1;
-	u32 avg_rssi:8;
-	u32 reserved:18;
+	u32 rssi_thres1_pos_cross;
+	u32 rssi_thres1_neg_cross;
+	u32 rssi_thres2_pos_cross;
+	u32 rssi_thres2_neg_cross;
+	u32 rssi_thres3_pos_cross;
+	u32 rssi_thres3_neg_cross;
+	u32 avg_rssi;
+	u32 reserved;
 
 };
 
@@ -4490,8 +4490,8 @@ struct wcn36xx_hal_wake_reason_ind {
 	 * specific wake type */
 	u8 data_start[1];
 
-	u32 bss_index:8;
-	u32 reserved:24;
+	u32 bss_index;
+	u32 reserved;
 };
 
 #define WCN36XX_HAL_GTK_KEK_BYTES 16

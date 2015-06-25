@@ -74,9 +74,9 @@ struct scrub_page {
 	u64			physical_for_dev_replace;
 	atomic_t		ref_count;
 	struct {
-		unsigned int	mirror_num:8;
-		unsigned int	have_csum:1;
-		unsigned int	io_error:1;
+		unsigned int	mirror_num;
+		unsigned int	have_csum;
+		unsigned int	io_error;
 	};
 	u8			csum[BTRFS_CSUM_SIZE];
 };
@@ -106,10 +106,10 @@ struct scrub_block {
 	atomic_t		ref_count; /* free mem on transition to zero */
 	struct scrub_ctx	*sctx;
 	struct {
-		unsigned int	header_error:1;
-		unsigned int	checksum_error:1;
-		unsigned int	no_io_error_seen:1;
-		unsigned int	generation_error:1; /* also sets header_error */
+		unsigned int	header_error;
+		unsigned int	checksum_error;
+		unsigned int	no_io_error_seen;
+		unsigned int	generation_error; /* also sets header_error */
 	};
 };
 

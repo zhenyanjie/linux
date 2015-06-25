@@ -602,19 +602,19 @@ struct wm8350_audio_platform_data {
 	int drain_msecs;	/* OFF drain time */
 	int cap_discharge_msecs;	/* Cap ON (from OFF) discharge time */
 	int vmid_charge_msecs;	/* vmid power up time */
-	u32 vmid_s_curve:2;	/* vmid enable s curve speed */
-	u32 dis_out4:2;		/* out4 discharge speed */
-	u32 dis_out3:2;		/* out3 discharge speed */
-	u32 dis_out2:2;		/* out2 discharge speed */
-	u32 dis_out1:2;		/* out1 discharge speed */
-	u32 vroi_out4:1;	/* out4 tie off */
-	u32 vroi_out3:1;	/* out3 tie off */
-	u32 vroi_out2:1;	/* out2 tie off */
-	u32 vroi_out1:1;	/* out1 tie off */
-	u32 vroi_enable:1;	/* enable tie off */
-	u32 codec_current_on:2;	/* current level ON */
-	u32 codec_current_standby:2;	/* current level STANDBY */
-	u32 codec_current_charge:2;	/* codec current @ vmid charge */
+	u32 vmid_s_curve;	/* vmid enable s curve speed */
+	u32 dis_out4;		/* out4 discharge speed */
+	u32 dis_out3;		/* out3 discharge speed */
+	u32 dis_out2;		/* out2 discharge speed */
+	u32 dis_out1;		/* out1 discharge speed */
+	u32 vroi_out4;	/* out4 tie off */
+	u32 vroi_out3;	/* out3 tie off */
+	u32 vroi_out2;	/* out2 tie off */
+	u32 vroi_out1;	/* out1 tie off */
+	u32 vroi_enable;	/* enable tie off */
+	u32 codec_current_on;	/* current level ON */
+	u32 codec_current_standby;	/* current level STANDBY */
+	u32 codec_current_charge;	/* codec current @ vmid charge */
 };
 
 struct snd_soc_codec;

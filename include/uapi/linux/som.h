@@ -67,12 +67,12 @@ struct som_hdr {
 #define SOM_ID_NEW		87102412
 
 struct aux_id {
-	unsigned int	mandatory :1;	/* the linker must understand this */
-	unsigned int	copy	  :1;	/* Must be copied by the linker */
-	unsigned int	append	  :1;	/* Must be merged by the linker */
-	unsigned int	ignore	  :1;	/* Discard section if unknown */
-	unsigned int	reserved  :12;
-	unsigned int	type	  :16;	/* Header type */
+	unsigned int	mandatory ;	/* the linker must understand this */
+	unsigned int	copy	  ;	/* Must be copied by the linker */
+	unsigned int	append	  ;	/* Must be merged by the linker */
+	unsigned int	ignore	  ;	/* Discard section if unknown */
+	unsigned int	reserved  ;
+	unsigned int	type	  ;	/* Header type */
 	unsigned int	length;		/* length of _following_ data */
 };
 
@@ -102,14 +102,14 @@ union name_pt {
 /* The Space Dictionary */
 struct space_dictionary_record {
 	union name_pt	name;			/* index to subspace name */
-	unsigned int	is_loadable	:1;	/* loadable */
-	unsigned int	is_defined	:1;	/* defined within file */
-	unsigned int	is_private	:1;	/* not sharable */
-	unsigned int	has_intermediate_code :1; /* contains intermediate code */
-	unsigned int	is_tspecific	:1;	/* thread specific */
-	unsigned int	reserved	:11;	/* for future expansion */
-	unsigned int	sort_key	:8;	/* for linker */
-	unsigned int	reserved2	:8;	/* for future expansion */
+	unsigned int	is_loadable	;	/* loadable */
+	unsigned int	is_defined	;	/* defined within file */
+	unsigned int	is_private	;	/* not sharable */
+	unsigned int	has_intermediate_code ; /* contains intermediate code */
+	unsigned int	is_tspecific	;	/* thread specific */
+	unsigned int	reserved	;	/* for future expansion */
+	unsigned int	sort_key	;	/* for linker */
+	unsigned int	reserved2	;	/* for future expansion */
 
 	int		space_number;		/* index */
 	int		subspace_index;		/* index into subspace dict */
@@ -123,28 +123,28 @@ struct space_dictionary_record {
 /* The Subspace Dictionary */
 struct subspace_dictionary_record {
 	int		space_index;
-	unsigned int	access_control_bits :7;
-	unsigned int	memory_resident	:1;
-	unsigned int	dup_common	:1;
-	unsigned int	is_common	:1;
-	unsigned int	quadrant	:2;
-	unsigned int	initially_frozen :1;
-	unsigned int	is_first	:1;
-	unsigned int	code_only	:1;
-	unsigned int	sort_key	:8;
-	unsigned int	replicate_init	:1;
-	unsigned int	continuation	:1;
-	unsigned int	is_tspecific	:1;
-	unsigned int	is_comdat	:1;
-	unsigned int	reserved	:4;
+	unsigned int	access_control_bits ;
+	unsigned int	memory_resident	;
+	unsigned int	dup_common	;
+	unsigned int	is_common	;
+	unsigned int	quadrant	;
+	unsigned int	initially_frozen ;
+	unsigned int	is_first	;
+	unsigned int	code_only	;
+	unsigned int	sort_key	;
+	unsigned int	replicate_init	;
+	unsigned int	continuation	;
+	unsigned int	is_tspecific	;
+	unsigned int	is_comdat	;
+	unsigned int	reserved	;
 
 	int		file_loc_init_value;
 	unsigned int	initialization_length;
 	unsigned int	subspace_start;
 	unsigned int	subspace_length;
 
-	unsigned int	reserved2	:5;
-	unsigned int	alignment	:27;
+	unsigned int	reserved2	;
+	unsigned int	alignment	;
 
 	union name_pt	name;
 	int		fixup_request_index;

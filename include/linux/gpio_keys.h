@@ -46,7 +46,7 @@ struct gpio_keys_platform_data {
 	struct gpio_keys_button *buttons;
 	int nbuttons;
 	unsigned int poll_interval;
-	unsigned int rep:1;
+	unsigned int rep;
 	int (*enable)(struct device *dev);
 	void (*disable)(struct device *dev);
 	const char *name;

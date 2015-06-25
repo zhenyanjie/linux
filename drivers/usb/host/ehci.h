@@ -141,12 +141,12 @@ struct ehci_hcd {			/* one per controller */
 	enum ehci_rh_state	rh_state;
 
 	/* general schedule support */
-	bool			scanning:1;
-	bool			need_rescan:1;
-	bool			intr_unlinking:1;
-	bool			iaa_in_progress:1;
-	bool			async_unlinking:1;
-	bool			shutdown:1;
+	bool			scanning;
+	bool			need_rescan;
+	bool			intr_unlinking;
+	bool			iaa_in_progress;
+	bool			async_unlinking;
+	bool			shutdown;
 	struct ehci_qh		*qh_scan_next;
 
 	/* async schedule support */
@@ -213,19 +213,19 @@ struct ehci_hcd {			/* one per controller */
 	u32			command;
 
 	/* SILICON QUIRKS */
-	unsigned		no_selective_suspend:1;
-	unsigned		has_fsl_port_bug:1; /* FreeScale */
-	unsigned		big_endian_mmio:1;
-	unsigned		big_endian_desc:1;
-	unsigned		big_endian_capbase:1;
-	unsigned		has_amcc_usb23:1;
-	unsigned		need_io_watchdog:1;
-	unsigned		amd_pll_fix:1;
-	unsigned		use_dummy_qh:1;	/* AMD Frame List table quirk*/
-	unsigned		has_synopsys_hc_bug:1; /* Synopsys HC */
-	unsigned		frame_index_bug:1; /* MosChip (AKA NetMos) */
-	unsigned		need_oc_pp_cycle:1; /* MPC834X port power */
-	unsigned		imx28_write_fix:1; /* For Freescale i.MX28 */
+	unsigned		no_selective_suspend;
+	unsigned		has_fsl_port_bug; /* FreeScale */
+	unsigned		big_endian_mmio;
+	unsigned		big_endian_desc;
+	unsigned		big_endian_capbase;
+	unsigned		has_amcc_usb23;
+	unsigned		need_io_watchdog;
+	unsigned		amd_pll_fix;
+	unsigned		use_dummy_qh;	/* AMD Frame List table quirk*/
+	unsigned		has_synopsys_hc_bug; /* Synopsys HC */
+	unsigned		frame_index_bug; /* MosChip (AKA NetMos) */
+	unsigned		need_oc_pp_cycle; /* MPC834X port power */
+	unsigned		imx28_write_fix; /* For Freescale i.MX28 */
 
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
@@ -235,9 +235,9 @@ struct ehci_hcd {			/* one per controller */
 	#define OHCI_HCCTRL_OFFSET      0x4
 	#define OHCI_HCCTRL_LEN         0x4
 	__hc32			*ohci_hcctrl_reg;
-	unsigned		has_hostpc:1;
-	unsigned		has_tdi_phy_lpm:1;
-	unsigned		has_ppcd:1; /* support per-port change bits */
+	unsigned		has_hostpc;
+	unsigned		has_tdi_phy_lpm;
+	unsigned		has_ppcd; /* support per-port change bits */
 	u8			sbrn;		/* packed release number */
 
 	/* irq statistics */
@@ -433,10 +433,10 @@ struct ehci_qh {
 
 	u8			gap_uf;		/* uframes split/csplit gap */
 
-	unsigned		is_out:1;	/* bulk or intr OUT */
-	unsigned		clearing_tt:1;	/* Clear-TT-Buf in progress */
-	unsigned		dequeue_during_giveback:1;
-	unsigned		exception:1;	/* got a fault, or an unlink
+	unsigned		is_out;	/* bulk or intr OUT */
+	unsigned		clearing_tt;	/* Clear-TT-Buf in progress */
+	unsigned		dequeue_during_giveback;
+	unsigned		exception;	/* got a fault, or an unlink
 						   was requested */
 };
 

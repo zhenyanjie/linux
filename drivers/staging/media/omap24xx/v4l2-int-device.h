@@ -135,17 +135,17 @@ struct v4l2_if_type_bt656 {
 	 * 0: Frame begins when vsync is high.
 	 * 1: Frame begins when vsync changes from low to high.
 	 */
-	unsigned frame_start_on_rising_vs:1;
+	unsigned frame_start_on_rising_vs;
 	/* Use Bt synchronisation codes for sync correction. */
-	unsigned bt_sync_correct:1;
+	unsigned bt_sync_correct;
 	/* Swap every two adjacent image data elements. */
-	unsigned swap:1;
+	unsigned swap;
 	/* Inverted latch clock polarity from slave. */
-	unsigned latch_clk_inv:1;
+	unsigned latch_clk_inv;
 	/* Hs polarity. 0 is active high, 1 active low. */
-	unsigned nobt_hs_inv:1;
+	unsigned nobt_hs_inv;
 	/* Vs polarity. 0 is active high, 1 active low. */
-	unsigned nobt_vs_inv:1;
+	unsigned nobt_vs_inv;
 	enum v4l2_if_type_bt656_mode mode;
 	/* Minimum accepted bus clock for slave (in Hz). */
 	u32 clock_min;

@@ -543,7 +543,7 @@ struct htt_security_indication {
 		u8 flags; /* %htt_security_flags */
 		struct {
 			u8 security_type:7, /* %htt_security_types */
-			   is_unicast:1;
+			   is_unicast;
 		} __packed;
 	} __packed;
 	__le16 peer_id;
@@ -590,7 +590,7 @@ struct htt_data_tx_completion {
 		struct {
 			u8 status:3,
 			   tid:4,
-			   tid_invalid:1;
+			   tid_invalid;
 		} __packed;
 	} __packed;
 	u8 num_msdus;
@@ -630,7 +630,7 @@ struct htt_rx_fragment_indication {
 		u8 info0; /* %HTT_RX_FRAG_IND_INFO0_ */
 		struct {
 			u8 ext_tid:5,
-			   flush_valid:1;
+			   flush_valid;
 		} __packed;
 	} __packed;
 	__le16 peer_id;
@@ -1009,8 +1009,8 @@ struct htt_stats_conf_item {
 	union {
 		u8 info;
 		struct {
-			u8 stat_type:5; /* %HTT_DBG_STATS_ */
-			u8 status:3; /* %HTT_DBG_STATS_STATUS_ */
+			u8 stat_type; /* %HTT_DBG_STATS_ */
+			u8 status; /* %HTT_DBG_STATS_STATUS_ */
 		} __packed;
 	} __packed;
 	u8 pad;

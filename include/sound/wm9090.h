@@ -13,15 +13,15 @@
 
 struct wm9090_platform_data {
 	/* Line inputs 1 & 2 can optionally be differential */
-	unsigned int lin1_diff:1;
-	unsigned int lin2_diff:1;
+	unsigned int lin1_diff;
+	unsigned int lin2_diff;
 
 	/* AGC configuration.  This is intended to protect the speaker
 	 * against overdriving and will therefore depend on the
 	 * hardware setup with incorrect runtime configuration
 	 * potentially causing hardware damage.
 	 */
-	unsigned int agc_ena:1;
+	unsigned int agc_ena;
 	u16 agc[3];
 };
 

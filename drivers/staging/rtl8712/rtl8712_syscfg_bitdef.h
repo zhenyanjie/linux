@@ -148,7 +148,7 @@
 
 
 /* EFUSE_CTRL*/
-#define EF_FLAG			BIT(31)		/* Access Flag, Write:1;
+#define EF_FLAG			BIT(31)		/* Access Flag, Write;
 						 *	        Read:0*/
 #define EF_PGPD			0x70000000	/* E-fuse Program time*/
 #define EF_RDT			0x0F000000	/* E-fuse read time: in the

@@ -198,7 +198,7 @@ struct mei_cl_cb {
 	unsigned long buf_idx;
 	unsigned long read_time;
 	struct file *file_object;
-	u32 internal:1;
+	u32 internal;
 };
 
 /* MEI client instance carried as file->private_data*/

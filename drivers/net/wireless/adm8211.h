@@ -571,8 +571,8 @@ struct adm8211_priv {
 #define ADM8211_TYPE_MARVEL	0x02
 #define ADM8211_TYPE_AIROHA	0x03
 #define ADM8211_TYPE_ADMTEK     0x05
-	unsigned int rf_type:3;
-	unsigned int bbp_type:3;
+	unsigned int rf_type;
+	unsigned int bbp_type;
 
 	u8 specific_bbptype;
 	enum {

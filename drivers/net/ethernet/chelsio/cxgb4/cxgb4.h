@@ -705,9 +705,9 @@ struct ch_filter_tuple {
 	 */
 	uint32_t ethtype:ETHTYPE_BITWIDTH;      /* Ethernet type */
 	uint32_t frag:FRAG_BITWIDTH;            /* IP fragmentation header */
-	uint32_t ivlan_vld:1;                   /* inner VLAN valid */
-	uint32_t ovlan_vld:1;                   /* outer VLAN valid */
-	uint32_t pfvf_vld:1;                    /* PF/VF valid */
+	uint32_t ivlan_vld;                   /* inner VLAN valid */
+	uint32_t ovlan_vld;                   /* outer VLAN valid */
+	uint32_t pfvf_vld;                    /* PF/VF valid */
 	uint32_t macidx:MACIDX_BITWIDTH;        /* exact match MAC index */
 	uint32_t fcoe:FCOE_BITWIDTH;            /* FCoE packet */
 	uint32_t iport:IPORT_BITWIDTH;          /* ingress port */
@@ -733,37 +733,37 @@ struct ch_filter_tuple {
 struct ch_filter_specification {
 	/* Administrative fields for filter.
 	 */
-	uint32_t hitcnts:1;     /* count filter hits in TCB */
-	uint32_t prio:1;        /* filter has priority over active/server */
+	uint32_t hitcnts;     /* count filter hits in TCB */
+	uint32_t prio;        /* filter has priority over active/server */
 
 	/* Fundamental filter typing.  This is the one element of filter
 	 * matching that doesn't exist as a (value, mask) tuple.
 	 */
-	uint32_t type:1;        /* 0 => IPv4, 1 => IPv6 */
+	uint32_t type;        /* 0 => IPv4, 1 => IPv6 */
 
 	/* Packet dispatch information.  Ingress packets which match the
 	 * filter rules will be dropped, passed to the host or switched back
 	 * out as egress packets.
 	 */
-	uint32_t action:2;      /* drop, pass, switch */
+	uint32_t action;      /* drop, pass, switch */
 
-	uint32_t rpttid:1;      /* report TID in RSS hash field */
+	uint32_t rpttid;      /* report TID in RSS hash field */
 
-	uint32_t dirsteer:1;    /* 0 => RSS, 1 => steer to iq */
-	uint32_t iq:10;         /* ingress queue */
+	uint32_t dirsteer;    /* 0 => RSS, 1 => steer to iq */
+	uint32_t iq;         /* ingress queue */
 
-	uint32_t maskhash:1;    /* dirsteer=0: store RSS hash in TCB */
-	uint32_t dirsteerhash:1;/* dirsteer=1: 0 => TCB contains RSS hash */
+	uint32_t maskhash;    /* dirsteer=0: store RSS hash in TCB */
+	uint32_t dirsteerhash;/* dirsteer=1: 0 => TCB contains RSS hash */
 				/*             1 => TCB contains IQ ID */
 
 	/* Switch proxy/rewrite fields.  An ingress packet which matches a
 	 * filter with "switch" set will be looped back out as an egress
 	 * packet -- potentially with some Ethernet header rewriting.
 	 */
-	uint32_t eport:2;       /* egress port to switch packet out */
-	uint32_t newdmac:1;     /* rewrite destination MAC address */
-	uint32_t newsmac:1;     /* rewrite source MAC address */
-	uint32_t newvlan:2;     /* rewrite VLAN Tag */
+	uint32_t eport;       /* egress port to switch packet out */
+	uint32_t newdmac;     /* rewrite destination MAC address */
+	uint32_t newsmac;     /* rewrite source MAC address */
+	uint32_t newvlan;     /* rewrite VLAN Tag */
 	uint8_t dmac[ETH_ALEN]; /* new destination MAC address */
 	uint8_t smac[ETH_ALEN]; /* new source MAC address */
 	uint16_t vlan;          /* VLAN Tag to insert */

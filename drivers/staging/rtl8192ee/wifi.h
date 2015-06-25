@@ -679,10 +679,10 @@ union aci_aifsn {
 	u8 char_data;
 
 	struct {
-		u8 aifsn:4;
-		u8 acm:1;
-		u8 aci:2;
-		u8 reserved:1;
+		u8 aifsn;
+		u8 acm;
+		u8 aci;
+		u8 reserved;
 	} f;			/* Field */
 };
 
@@ -1017,14 +1017,14 @@ struct rtl_p2p_ps_info {
 };
 
 struct p2p_ps_offload_t {
-	u8 Offload_En:1;
-	u8 role:1; /* 1: Owner, 0: Client */
-	u8 CTWindow_En:1;
-	u8 NoA0_En:1;
-	u8 NoA1_En:1;
-	u8 AllStaSleep:1;
-	u8 discovery:1;
-	u8 reserved:1;
+	u8 Offload_En;
+	u8 role; /* 1: Owner, 0: Client */
+	u8 CTWindow_En;
+	u8 NoA0_En;
+	u8 NoA1_En;
+	u8 AllStaSleep;
+	u8 discovery;
+	u8 reserved;
 };
 
 #define IQK_MATRIX_REG_NUM	8
@@ -1736,13 +1736,13 @@ struct rtl_stats {
 	s32 recvsignalpower;
 	s8 rxpower;		/*in dBm Translate from PWdB */
 	u8 signalstrength;	/*in 0-100 index. */
-	u16 b_hwerror:1;
-	u16 b_crc:1;
-	u16 b_icv:1;
-	u16 b_shortpreamble:1;
-	u16 antenna:1;
-	u16 decrypted:1;
-	u16 wakeup:1;
+	u16 b_hwerror;
+	u16 b_crc;
+	u16 b_icv;
+	u16 b_shortpreamble;
+	u16 antenna;
+	u16 decrypted;
+	u16 wakeup;
 	u32 timestamp_low;
 	u32 timestamp_high;
 	bool b_shift;
@@ -1806,30 +1806,30 @@ struct rt_link_detect {
 };
 
 struct rtl_tcb_desc {
-	u8 packet_bw:2;
-	u8 b_multicast:1;
-	u8 b_broadcast:1;
+	u8 packet_bw;
+	u8 b_multicast;
+	u8 b_broadcast;
 
-	u8 b_rts_stbc:1;
-	u8 b_rts_enable:1;
-	u8 b_cts_enable:1;
-	u8 b_rts_use_shortpreamble:1;
-	u8 b_rts_use_shortgi:1;
-	u8 rts_sc:1;
-	u8 b_rts_bw:1;
+	u8 b_rts_stbc;
+	u8 b_rts_enable;
+	u8 b_cts_enable;
+	u8 b_rts_use_shortpreamble;
+	u8 b_rts_use_shortgi;
+	u8 rts_sc;
+	u8 b_rts_bw;
 	u8 rts_rate;
 
-	u8 use_shortgi:1;
-	u8 use_shortpreamble:1;
-	u8 use_driver_rate:1;
-	u8 disable_ratefallback:1;
+	u8 use_shortgi;
+	u8 use_shortpreamble;
+	u8 use_driver_rate;
+	u8 disable_ratefallback;
 
 	u8 ratr_index;
 	u8 mac_id;
 	u8 hw_rate;
 
-	u8 b_last_inipkt:1;
-	u8 b_cmd_or_init:1;
+	u8 b_last_inipkt;
+	u8 b_cmd_or_init;
 	u8 queue_index;
 
 	/* early mode */

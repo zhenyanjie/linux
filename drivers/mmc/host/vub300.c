@@ -287,13 +287,13 @@ static inline int interface_to_InterfaceNumber(struct usb_interface *interface)
 }
 
 struct sdio_register {
-	unsigned func_num:3;
-	unsigned sdio_reg:17;
-	unsigned activate:1;
-	unsigned prepared:1;
-	unsigned regvalue:8;
-	unsigned response:8;
-	unsigned sparebit:26;
+	unsigned func_num;
+	unsigned sdio_reg;
+	unsigned activate;
+	unsigned prepared;
+	unsigned regvalue;
+	unsigned response;
+	unsigned sparebit;
 };
 
 struct vub300_mmc_host {
@@ -314,7 +314,7 @@ struct vub300_mmc_host {
 	bool app_spec; /* ApplicationSpecific */
 	bool irq_enabled; /* by the MMC CORE */
 	bool irq_disabled; /* in the firmware */
-	unsigned bus_width:4;
+	unsigned bus_width;
 	u8 total_offload_count;
 	u8 dynamic_register_count;
 	u8 resp_len;

@@ -9,7 +9,7 @@ struct pci_ats {
 	int stu;        /* Smallest Translation Unit */
 	int qdep;       /* Invalidate Queue Depth */
 	int ref_cnt;    /* Physical Function reference count */
-	unsigned int is_enabled:1;      /* Enable bit is set */
+	unsigned int is_enabled;      /* Enable bit is set */
 };
 
 #ifdef CONFIG_PCI_ATS

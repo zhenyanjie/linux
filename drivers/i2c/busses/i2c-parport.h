@@ -34,7 +34,7 @@ struct adapter_parm {
 	struct lineop getsda;
 	struct lineop getscl;
 	struct lineop init;
-	unsigned int smbus_alert:1;
+	unsigned int smbus_alert;
 };
 
 static const struct adapter_parm adapter_parm[] = {

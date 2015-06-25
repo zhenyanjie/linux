@@ -99,57 +99,57 @@ struct rx_fwinfo_92c {
 	u8 csi_target[2];
 	u8 sigevm;
 	u8 max_ex_pwr;
-	u8 ex_intf_flag:1;
-	u8 sgi_en:1;
-	u8 rxsc:2;
-	u8 reserve:4;
+	u8 ex_intf_flag;
+	u8 sgi_en;
+	u8 rxsc;
+	u8 reserve;
 } __packed;
 
 struct rx_desc_92c {
-	u32 length:14;
-	u32 crc32:1;
-	u32 icverror:1;
-	u32 drv_infosize:4;
-	u32 security:3;
-	u32 qos:1;
-	u32 shift:2;
-	u32 phystatus:1;
-	u32 swdec:1;
-	u32 lastseg:1;
-	u32 firstseg:1;
-	u32 eor:1;
-	u32 own:1;
-	u32 macid:5;	/* word 1 */
-	u32 tid:4;
-	u32 hwrsvd:5;
-	u32 paggr:1;
-	u32 faggr:1;
-	u32 a1_fit:4;
-	u32 a2_fit:4;
-	u32 pam:1;
-	u32 pwr:1;
-	u32 moredata:1;
-	u32 morefrag:1;
-	u32 type:2;
-	u32 mc:1;
-	u32 bc:1;
-	u32 seq:12;	/* word 2 */
-	u32 frag:4;
-	u32 nextpktlen:14;
-	u32 nextind:1;
-	u32 rsvd:1;
-	u32 rxmcs:6;	/* word 3 */
-	u32 rxht:1;
-	u32 amsdu:1;
-	u32 splcp:1;
-	u32 bandwidth:1;
-	u32 htc:1;
-	u32 tcpchk_rpt:1;
-	u32 ipcchk_rpt:1;
-	u32 tcpchk_valid:1;
-	u32 hwpcerr:1;
-	u32 hwpcind:1;
-	u32 iv0:16;
+	u32 length;
+	u32 crc32;
+	u32 icverror;
+	u32 drv_infosize;
+	u32 security;
+	u32 qos;
+	u32 shift;
+	u32 phystatus;
+	u32 swdec;
+	u32 lastseg;
+	u32 firstseg;
+	u32 eor;
+	u32 own;
+	u32 macid;	/* word 1 */
+	u32 tid;
+	u32 hwrsvd;
+	u32 paggr;
+	u32 faggr;
+	u32 a1_fit;
+	u32 a2_fit;
+	u32 pam;
+	u32 pwr;
+	u32 moredata;
+	u32 morefrag;
+	u32 type;
+	u32 mc;
+	u32 bc;
+	u32 seq;	/* word 2 */
+	u32 frag;
+	u32 nextpktlen;
+	u32 nextind;
+	u32 rsvd;
+	u32 rxmcs;	/* word 3 */
+	u32 rxht;
+	u32 amsdu;
+	u32 splcp;
+	u32 bandwidth;
+	u32 htc;
+	u32 tcpchk_rpt;
+	u32 ipcchk_rpt;
+	u32 tcpchk_valid;
+	u32 hwpcerr;
+	u32 hwpcind;
+	u32 iv0;
 	u32 iv1;	/* word 4 */
 	u32 tsfl;	/* word 5 */
 	u32 bufferaddress;	/* word 6 */

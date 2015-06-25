@@ -781,7 +781,7 @@ struct pmcraid_instance {
 
 
 
-	u32 ioa_state:4;	/* For IOA Reset sequence FSM */
+	u32 ioa_state;	/* For IOA Reset sequence FSM */
 #define IOA_STATE_OPERATIONAL       0x0
 #define IOA_STATE_UNKNOWN           0x1
 #define IOA_STATE_DEAD              0x2
@@ -791,17 +791,17 @@ struct pmcraid_instance {
 #define IOA_STATE_IN_BRINGDOWN      0x6
 #define IOA_STATE_IN_BRINGUP        0x7
 
-	u32 ioa_reset_in_progress:1; /* true if IOA reset is in progress */
-	u32 ioa_hard_reset:1;	/* TRUE if Hard Reset is needed */
-	u32 ioa_unit_check:1;	/* Indicates Unit Check condition */
-	u32 ioa_bringdown:1;	/* whether IOA needs to be brought down */
-	u32 force_ioa_reset:1;  /* force adapter reset ? */
-	u32 reinit_cfg_table:1; /* reinit config table due to lost CCN */
-	u32 ioa_shutdown_type:2;/* shutdown type used during reset */
+	u32 ioa_reset_in_progress; /* true if IOA reset is in progress */
+	u32 ioa_hard_reset;	/* TRUE if Hard Reset is needed */
+	u32 ioa_unit_check;	/* Indicates Unit Check condition */
+	u32 ioa_bringdown;	/* whether IOA needs to be brought down */
+	u32 force_ioa_reset;  /* force adapter reset ? */
+	u32 reinit_cfg_table; /* reinit config table due to lost CCN */
+	u32 ioa_shutdown_type;/* shutdown type used during reset */
 #define SHUTDOWN_NONE               0x0
 #define SHUTDOWN_NORMAL             0x1
 #define SHUTDOWN_ABBREV             0x2
-	u32 timestamp_error:1; /* indicate set timestamp for out of sync */
+	u32 timestamp_error; /* indicate set timestamp for out of sync */
 
 };
 

@@ -67,8 +67,8 @@ do {\
 } while(0)
 
 struct c2h_evt_hdr {
-	u8 id:4;
-	u8 plen:4;
+	u8 id;
+	u8 plen;
 	u8 seq;
 	u8 payload[0];
 };

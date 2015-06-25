@@ -66,14 +66,14 @@ struct usb_hub {
 	unsigned		wakeup_enabled_descendants;
 #endif
 
-	unsigned		limited_power:1;
-	unsigned		quiescing:1;
-	unsigned		disconnected:1;
-	unsigned		in_reset:1;
+	unsigned		limited_power;
+	unsigned		quiescing;
+	unsigned		disconnected;
+	unsigned		in_reset;
 
-	unsigned		quirk_check_port_auto_suspend:1;
+	unsigned		quirk_check_port_auto_suspend;
 
-	unsigned		has_indicators:1;
+	unsigned		has_indicators;
 	u8			indicator[USB_MAXCHILDREN];
 	struct delayed_work	leds;
 	struct delayed_work	init_work;
@@ -103,7 +103,7 @@ struct usb_port {
 	usb_port_location_t location;
 	struct mutex status_lock;
 	u8 portnum;
-	unsigned int is_superspeed:1;
+	unsigned int is_superspeed;
 };
 
 #define to_usb_port(_dev) \

@@ -28,14 +28,14 @@ enum tea5767_xtal {
 };
 
 struct tea5767_ctrl {
-	unsigned int		port1:1;
-	unsigned int		port2:1;
-	unsigned int		high_cut:1;
-	unsigned int		st_noise:1;
-	unsigned int		soft_mute:1;
-	unsigned int		japan_band:1;
-	unsigned int		deemph_75:1;
-	unsigned int		pllref:1;
+	unsigned int		port1;
+	unsigned int		port2;
+	unsigned int		high_cut;
+	unsigned int		st_noise;
+	unsigned int		soft_mute;
+	unsigned int		japan_band;
+	unsigned int		deemph_75;
+	unsigned int		pllref;
 	enum tea5767_xtal	xtal_freq;
 };
 

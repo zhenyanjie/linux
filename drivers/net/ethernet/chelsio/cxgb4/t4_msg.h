@@ -174,19 +174,19 @@ union opcode_tid {
 struct rss_header {
 	u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 channel:2;
-	u8 filter_hit:1;
-	u8 filter_tid:1;
-	u8 hash_type:2;
-	u8 ipv6:1;
-	u8 send2fw:1;
+	u8 channel;
+	u8 filter_hit;
+	u8 filter_tid;
+	u8 hash_type;
+	u8 ipv6;
+	u8 send2fw;
 #else
-	u8 send2fw:1;
-	u8 ipv6:1;
-	u8 hash_type:2;
-	u8 filter_tid:1;
-	u8 filter_hit:1;
-	u8 channel:2;
+	u8 send2fw;
+	u8 ipv6;
+	u8 hash_type;
+	u8 filter_tid;
+	u8 filter_hit;
+	u8 channel;
 #endif
 	__be16 qid;
 	__be32 hash_val;
@@ -559,17 +559,17 @@ struct cpl_rx_data {
 	__be32 seq;
 	__be16 urg;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 dack_mode:2;
-	u8 psh:1;
-	u8 heartbeat:1;
-	u8 ddp_off:1;
-	u8 :3;
+	u8 dack_mode;
+	u8 psh;
+	u8 heartbeat;
+	u8 ddp_off;
+	u8 :8;
 #else
-	u8 :3;
-	u8 ddp_off:1;
-	u8 heartbeat:1;
-	u8 psh:1;
-	u8 dack_mode:2;
+	u8 :8;
+	u8 ddp_off;
+	u8 heartbeat;
+	u8 psh;
+	u8 dack_mode;
 #endif
 	u8 status;
 };
@@ -586,17 +586,17 @@ struct cpl_rx_pkt {
 	struct rss_header rsshdr;
 	u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 iff:4;
-	u8 csum_calc:1;
-	u8 ipmi_pkt:1;
-	u8 vlan_ex:1;
-	u8 ip_frag:1;
+	u8 iff;
+	u8 csum_calc;
+	u8 ipmi_pkt;
+	u8 vlan_ex;
+	u8 ip_frag;
 #else
-	u8 ip_frag:1;
-	u8 vlan_ex:1;
-	u8 ipmi_pkt:1;
-	u8 csum_calc:1;
-	u8 iff:4;
+	u8 ip_frag;
+	u8 vlan_ex;
+	u8 ipmi_pkt;
+	u8 csum_calc;
+	u8 iff;
 #endif
 	__be16 csum;
 	__be16 vlan;
@@ -650,17 +650,17 @@ struct cpl_trace_pkt {
 	u8 opcode;
 	u8 intf;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	u8 runt:4;
-	u8 filter_hit:4;
-	u8 :6;
-	u8 err:1;
-	u8 trunc:1;
+	u8 runt;
+	u8 filter_hit;
+	u8 :8;
+	u8 err;
+	u8 trunc;
 #else
-	u8 filter_hit:4;
-	u8 runt:4;
-	u8 trunc:1;
-	u8 err:1;
-	u8 :6;
+	u8 filter_hit;
+	u8 runt;
+	u8 trunc;
+	u8 err;
+	u8 :8;
 #endif
 	__be16 rsvd;
 	__be16 len;
@@ -671,17 +671,17 @@ struct cpl_t5_trace_pkt {
 	__u8 opcode;
 	__u8 intf;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 runt:4;
-	__u8 filter_hit:4;
-	__u8:6;
-	__u8 err:1;
-	__u8 trunc:1;
+	__u8 runt;
+	__u8 filter_hit;
+	__u8:8;
+	__u8 err;
+	__u8 trunc;
 #else
-	__u8 filter_hit:4;
-	__u8 runt:4;
-	__u8 trunc:1;
-	__u8 err:1;
-	__u8:6;
+	__u8 filter_hit;
+	__u8 runt;
+	__u8 trunc;
+	__u8 err;
+	__u8:8;
 #endif
 	__be16 rsvd;
 	__be16 len;

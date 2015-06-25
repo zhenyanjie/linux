@@ -314,13 +314,13 @@ typedef struct {
 
 struct event {
 #ifdef __LITTLE_ENDIAN_BITFIELD
-	u32	idx:12;
-	u32	code:12;
-	u32	evt:8;
+	u32	idx;
+	u32	code;
+	u32	evt;
 #else
-	u32	evt:8;
-	u32	code:12;
-	u32	idx:12;
+	u32	evt;
+	u32	code;
+	u32	idx;
 #endif
 	u32     pad;
 };
@@ -360,13 +360,13 @@ struct event {
 
 struct cmd {
 #ifdef __LITTLE_ENDIAN_BITFIELD
-	u32	idx:12;
-	u32	code:12;
-	u32	evt:8;
+	u32	idx;
+	u32	code;
+	u32	evt;
 #else
-	u32	evt:8;
-	u32	code:12;
-	u32	idx:12;
+	u32	evt;
+	u32	code;
+	u32	idx;
 #endif
 };
 

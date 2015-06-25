@@ -58,7 +58,7 @@ struct stv0299_state {
 	const struct stv0299_config* config;
 	struct dvb_frontend frontend;
 
-	u8 initialised:1;
+	u8 initialised;
 	u32 tuner_frequency;
 	u32 symbol_rate;
 	fe_code_rate_t fec_inner;

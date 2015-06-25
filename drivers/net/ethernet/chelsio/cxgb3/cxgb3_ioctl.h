@@ -159,17 +159,17 @@ struct ch_trace {
 	uint16_t sport_mask;
 	uint16_t dport;
 	uint16_t dport_mask;
-	uint32_t vlan:12;
-	uint32_t vlan_mask:12;
-	uint32_t intf:4;
-	uint32_t intf_mask:4;
+	uint32_t vlan;
+	uint32_t vlan_mask;
+	uint32_t intf;
+	uint32_t intf_mask;
 	uint8_t proto;
 	uint8_t proto_mask;
-	uint8_t invert_match:1;
-	uint8_t config_tx:1;
-	uint8_t config_rx:1;
-	uint8_t trace_tx:1;
-	uint8_t trace_rx:1;
+	uint8_t invert_match;
+	uint8_t config_tx;
+	uint8_t config_rx;
+	uint8_t trace_tx;
+	uint8_t trace_rx;
 };
 
 #define SIOCCHIOCTL SIOCDEVPRIVATE

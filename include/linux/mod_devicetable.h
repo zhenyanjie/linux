@@ -465,8 +465,8 @@ enum dmi_field {
 };
 
 struct dmi_strmatch {
-	unsigned char slot:7;
-	unsigned char exact_match:1;
+	unsigned char slot;
+	unsigned char exact_match;
 	char substr[79];
 };
 

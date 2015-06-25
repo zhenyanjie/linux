@@ -73,7 +73,7 @@
 struct it821x_dev
 {
 	unsigned int smart:1,		/* Are we in smart raid mode */
-		timing10:1;		/* Rev 0x10 */
+		timing10;		/* Rev 0x10 */
 	u8	clock_mode;		/* 0, ATA_50 or ATA_66 */
 	u8	want[2][2];		/* Mode/Pri log for master slave */
 	/* We need these for switching the clock when DMA goes on/off

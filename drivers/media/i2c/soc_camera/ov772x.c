@@ -400,8 +400,8 @@ struct ov772x_priv {
 	struct ov772x_camera_info        *info;
 	const struct ov772x_color_format *cfmt;
 	const struct ov772x_win_size     *win;
-	unsigned short                    flag_vflip:1;
-	unsigned short                    flag_hflip:1;
+	unsigned short                    flag_vflip;
+	unsigned short                    flag_hflip;
 	/* band_filter = COM8[5] ? 256 - BDBASE : 0 */
 	unsigned short                    band_filter;
 };

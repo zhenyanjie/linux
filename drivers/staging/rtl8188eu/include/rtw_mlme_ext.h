@@ -729,13 +729,13 @@ static struct cmd_hdl wlancmds[] = {
 
 struct C2HEvent_Header {
 #ifdef __LITTLE_ENDIAN
-	unsigned int len:16;
-	unsigned int ID:8;
-	unsigned int seq:8;
+	unsigned int len;
+	unsigned int ID;
+	unsigned int seq;
 #elif defined(__BIG_ENDIAN)
-	unsigned int seq:8;
-	unsigned int ID:8;
-	unsigned int len:16;
+	unsigned int seq;
+	unsigned int ID;
+	unsigned int len;
 #endif
 	unsigned int rsvd;
 };

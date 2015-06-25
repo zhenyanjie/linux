@@ -132,12 +132,12 @@ static inline int do_eqbs(u64 token, unsigned char *state, int queue,
 struct qdio_irq;
 
 struct siga_flag {
-	u8 input:1;
-	u8 output:1;
-	u8 sync:1;
-	u8 sync_after_ai:1;
-	u8 sync_out_after_pci:1;
-	u8:3;
+	u8 input;
+	u8 output;
+	u8 sync;
+	u8 sync_after_ai;
+	u8 sync_out_after_pci;
+	u8;
 } __attribute__ ((packed));
 
 struct qdio_dev_perf_stat {

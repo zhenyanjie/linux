@@ -188,16 +188,16 @@ struct ap_message {
 	size_t length;			/* Message length. */
 
 	void *private;			/* ap driver private pointer. */
-	unsigned int special:1;		/* Used for special commands. */
+	unsigned int special;		/* Used for special commands. */
 	/* receive is called from tasklet context */
 	void (*receive)(struct ap_device *, struct ap_message *,
 			struct ap_message *);
 };
 
 struct ap_config_info {
-	unsigned int special_command:1;
-	unsigned int ap_extended:1;
-	unsigned char reserved1:6;
+	unsigned int special_command;
+	unsigned int ap_extended;
+	unsigned char reserved1;
 	unsigned char reserved2[15];
 	unsigned int apm[8];		/* AP ID mask */
 	unsigned int aqm[8];		/* AP queue mask */

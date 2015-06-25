@@ -731,7 +731,7 @@ struct ip_vs_dest {
 	__u32			vfwmark;	/* firewall mark of service */
 
 	struct list_head	t_list;		/* in dest_trash */
-	unsigned int		in_rs_table:1;	/* we are in rs_table */
+	unsigned int		in_rs_table;	/* we are in rs_table */
 };
 
 

@@ -370,7 +370,7 @@ struct oxu_murb {
 };
 
 struct oxu_hcd {				/* one per controller */
-	unsigned int		is_otg:1;
+	unsigned int		is_otg;
 
 	u8			qh_used[QHEAD_NUM];
 	u8			qtd_used[QTD_NUM];
@@ -391,8 +391,8 @@ struct oxu_hcd {				/* one per controller */
 	/* async schedule support */
 	struct ehci_qh		*async;
 	struct ehci_qh		*reclaim;
-	unsigned		reclaim_ready:1;
-	unsigned		scanning:1;
+	unsigned		reclaim_ready;
+	unsigned		scanning;
 
 	/* periodic schedule support */
 	unsigned		periodic_size;

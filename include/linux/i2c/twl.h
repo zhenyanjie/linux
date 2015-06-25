@@ -686,7 +686,7 @@ struct twl4030_codec_data {
 	unsigned int digimic_delay; /* in ms */
 	unsigned int ramp_delay_value;
 	unsigned int offset_cncl_path;
-	unsigned int hs_extmute:1;
+	unsigned int hs_extmute;
 	int hs_extmute_gpio;
 };
 

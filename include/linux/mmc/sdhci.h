@@ -145,7 +145,7 @@ struct sdhci_host {
 	struct mmc_request *mrq;	/* Current request */
 	struct mmc_command *cmd;	/* Current command */
 	struct mmc_data *data;	/* Current data request */
-	unsigned int data_early:1;	/* Data finished before cmd */
+	unsigned int data_early;	/* Data finished before cmd */
 
 	struct sg_mapping_iter sg_miter;	/* SG state for PIO */
 	unsigned int blocks;	/* remaining PIO blocks */

@@ -172,7 +172,7 @@ struct net_local {
     struct timer_list timer;	/* Media selection timer. */
     long last_rx_time;		/* Last Rx, in jiffies, to handle Rx hang. */
     int saved_tx_size;
-    unsigned int tx_unit_busy:1;
+    unsigned int tx_unit_busy;
     unsigned char re_tx,	/* Number of packet retransmissions. */
 		addr_mode,		/* Current Rx filter e.g. promiscuous, etc. */
 		pac_cnt_in_tx_buf;

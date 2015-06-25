@@ -39,8 +39,8 @@
 struct tw2804 {
 	struct v4l2_subdev sd;
 	struct v4l2_ctrl_handler hdl;
-	u8 channel:2;
-	u8 input:1;
+	u8 channel;
+	u8 input;
 	int norm;
 };
 

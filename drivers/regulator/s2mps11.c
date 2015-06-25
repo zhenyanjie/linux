@@ -48,7 +48,7 @@ struct s2mps11_info {
 	 * One bit for each S2MPS14/S2MPU02 regulator whether the suspend mode
 	 * was enabled.
 	 */
-	unsigned long long s2mps14_suspend_state:35;
+	unsigned long long s2mps14_suspend_state;
 
 	/* Array of size rdev_num with GPIO-s for external sleep control */
 	int *ext_control_gpio;

@@ -99,10 +99,10 @@ struct ispstat {
 	struct media_pad pad;	/* sink pad */
 
 	/* Control */
-	unsigned configured:1;
-	unsigned update:1;
-	unsigned buf_processing:1;
-	unsigned sbl_ovl_recover:1;
+	unsigned configured;
+	unsigned update;
+	unsigned buf_processing;
+	unsigned sbl_ovl_recover;
 	u8 inc_config;
 	atomic_t buf_err;
 	enum ispstat_state_t state;	/* enabling/disabling state */

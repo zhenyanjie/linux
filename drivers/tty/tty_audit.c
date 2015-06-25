@@ -17,7 +17,7 @@ struct tty_audit_buf {
 	atomic_t count;
 	struct mutex mutex;	/* Protects all data below */
 	int major, minor;	/* The TTY which the data is from */
-	unsigned icanon:1;
+	unsigned icanon;
 	size_t valid;
 	unsigned char *data;	/* Allocated size N_TTY_BUF_SIZE */
 };

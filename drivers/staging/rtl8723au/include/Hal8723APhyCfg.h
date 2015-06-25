@@ -142,21 +142,21 @@ struct bb_reg_define {
 };
 
 struct r_antenna_sel_ofdm {
-	u32			r_tx_antenna:4;
-	u32			r_ant_l:4;
-	u32			r_ant_non_ht:4;
-	u32			r_ant_ht1:4;
-	u32			r_ant_ht2:4;
-	u32			r_ant_ht_s1:4;
-	u32			r_ant_non_ht_s1:4;
-	u32			OFDM_TXSC:2;
-	u32			Reserved:2;
+	u32			r_tx_antenna;
+	u32			r_ant_l;
+	u32			r_ant_non_ht;
+	u32			r_ant_ht1;
+	u32			r_ant_ht2;
+	u32			r_ant_ht_s1;
+	u32			r_ant_non_ht_s1;
+	u32			OFDM_TXSC;
+	u32			Reserved;
 };
 
 struct r_antenna_sel_cck {
-	u8			r_cckrx_enable_2:2;
-	u8			r_cckrx_enable:2;
-	u8			r_ccktx_enable:4;
+	u8			r_cckrx_enable_2;
+	u8			r_cckrx_enable;
+	u8			r_ccktx_enable;
 };
 
 /*------------------------------Define structure----------------------------*/

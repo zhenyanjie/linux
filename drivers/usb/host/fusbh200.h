@@ -91,11 +91,11 @@ struct fusbh200_hcd {			/* one per controller */
 	enum fusbh200_rh_state	rh_state;
 
 	/* general schedule support */
-	bool			scanning:1;
-	bool			need_rescan:1;
-	bool			intr_unlinking:1;
-	bool			async_unlinking:1;
-	bool			shutdown:1;
+	bool			scanning;
+	bool			need_rescan;
+	bool			intr_unlinking;
+	bool			async_unlinking;
+	bool			shutdown;
 	struct fusbh200_qh		*qh_scan_next;
 
 	/* async schedule support */
@@ -159,8 +159,8 @@ struct fusbh200_hcd {			/* one per controller */
 	u32			command;
 
 	/* SILICON QUIRKS */
-	unsigned		need_io_watchdog:1;
-	unsigned		fs_i_thresh:1;	/* Intel iso scheduling */
+	unsigned		need_io_watchdog;
+	unsigned		fs_i_thresh;	/* Intel iso scheduling */
 
 	u8			sbrn;		/* packed release number */
 
@@ -503,8 +503,8 @@ struct fusbh200_qh {
 #define NO_FRAME ((unsigned short)~0)			/* pick new start */
 
 	struct usb_device	*dev;		/* access to TT */
-	unsigned		is_out:1;	/* bulk or intr OUT */
-	unsigned		clearing_tt:1;	/* Clear-TT-Buf in progress */
+	unsigned		is_out;	/* bulk or intr OUT */
+	unsigned		clearing_tt;	/* Clear-TT-Buf in progress */
 };
 
 /*-------------------------------------------------------------------------*/

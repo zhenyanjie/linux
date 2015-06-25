@@ -210,26 +210,26 @@ struct tcp_options {
 	__be16 mss;
 	__u8 wsf;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	 __u8:5;
-	__u8 ecn:1;
-	__u8 sack:1;
-	__u8 tstamp:1;
+	 __u8:8;
+	__u8 ecn;
+	__u8 sack;
+	__u8 tstamp;
 #else
-	__u8 tstamp:1;
-	__u8 sack:1;
-	__u8 ecn:1;
-	 __u8:5;
+	__u8 tstamp;
+	__u8 sack;
+	__u8 ecn;
+	 __u8:8;
 #endif
 };
 
 struct rss_header {
 	__u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 cpu_idx:6;
-	__u8 hash_type:2;
+	__u8 cpu_idx;
+	__u8 hash_type;
 #else
-	__u8 hash_type:2;
-	__u8 cpu_idx:6;
+	__u8 hash_type;
+	__u8 cpu_idx;
 #endif
 	__be16 cq_idx;
 	__be32 rss_hash_val;
@@ -547,15 +547,15 @@ struct cpl_pass_accept_req {
 	__be16 vlan_tag;
 	__u8 src_mac[6];
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	 __u8:3;
-	__u8 addr_idx:3;
-	__u8 port_idx:1;
-	__u8 exact_match:1;
+	 __u8:8;
+	__u8 addr_idx;
+	__u8 port_idx;
+	__u8 exact_match;
 #else
-	__u8 exact_match:1;
-	__u8 port_idx:1;
-	__u8 addr_idx:3;
-	 __u8:3;
+	__u8 exact_match;
+	__u8 port_idx;
+	__u8 addr_idx;
+	 __u8:8;
 #endif
 	__u8 rsvd;
 	__be32 rcv_isn;
@@ -686,15 +686,15 @@ struct cpl_pcmd {
 	union opcode_tid ot;
 	__u8 rsvd[3];
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 src:1;
-	__u8 bundle:1;
-	__u8 channel:1;
-	 __u8:5;
+	__u8 src;
+	__u8 bundle;
+	__u8 channel;
+	 __u8:8;
 #else
-	 __u8:5;
-	__u8 channel:1;
-	__u8 bundle:1;
-	__u8 src:1;
+	 __u8:8;
+	__u8 channel;
+	__u8 bundle;
+	__u8 src;
 #endif
 	__be32 pcmd_parm[2];
 };
@@ -921,15 +921,15 @@ struct cpl_rx_data {
 	__be32 seq;
 	__be16 urg;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 dack_mode:2;
-	__u8 psh:1;
-	__u8 heartbeat:1;
-	 __u8:4;
+	__u8 dack_mode;
+	__u8 psh;
+	__u8 heartbeat;
+	 __u8:8;
 #else
-	 __u8:4;
-	__u8 heartbeat:1;
-	__u8 psh:1;
-	__u8 dack_mode:2;
+	 __u8:8;
+	__u8 heartbeat;
+	__u8 psh;
+	__u8 dack_mode;
 #endif
 	__u8 status;
 };
@@ -1156,30 +1156,30 @@ struct cpl_trace_pkt {
 #ifdef CHELSIO_FW
 	__u8 rss_opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 err:1;
-	 __u8:7;
+	__u8 err;
+	 __u8:8;
 #else
-	 __u8:7;
-	__u8 err:1;
+	 __u8:8;
+	__u8 err;
 #endif
 	__u8 rsvd0;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 qid:4;
-	 __u8:4;
+	__u8 qid;
+	 __u8:8;
 #else
-	 __u8:4;
-	__u8 qid:4;
+	 __u8:8;
+	__u8 qid;
 #endif
 	__be32 tstamp;
 #endif				/* CHELSIO_FW */
 
 	__u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 iff:4;
-	 __u8:4;
+	__u8 iff;
+	 __u8:8;
 #else
-	 __u8:4;
-	__u8 iff:4;
+	 __u8:8;
+	__u8 iff;
 #endif
 	__u8 rsvd[4];
 	__be16 len;
@@ -1188,17 +1188,17 @@ struct cpl_trace_pkt {
 struct cpl_rx_pkt {
 	RSS_HDR __u8 opcode;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 iff:4;
-	__u8 csum_valid:1;
-	__u8 ipmi_pkt:1;
-	__u8 vlan_valid:1;
-	__u8 fragment:1;
+	__u8 iff;
+	__u8 csum_valid;
+	__u8 ipmi_pkt;
+	__u8 vlan_valid;
+	__u8 fragment;
 #else
-	__u8 fragment:1;
-	__u8 vlan_valid:1;
-	__u8 ipmi_pkt:1;
-	__u8 csum_valid:1;
-	__u8 iff:4;
+	__u8 fragment;
+	__u8 vlan_valid;
+	__u8 ipmi_pkt;
+	__u8 csum_valid;
+	__u8 iff;
 #endif
 	__be16 csum;
 	__be16 vlan;
@@ -1280,11 +1280,11 @@ struct cpl_smt_write_req {
 	union opcode_tid ot;
 	__u8 rsvd0;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 mtu_idx:4;
-	__u8 iff:4;
+	__u8 mtu_idx;
+	__u8 iff;
 #else
-	__u8 iff:4;
-	__u8 mtu_idx:4;
+	__u8 iff;
+	__u8 mtu_idx;
 #endif
 	__be16 rsvd2;
 	__be16 rsvd3;
@@ -1304,11 +1304,11 @@ struct cpl_smt_read_req {
 	union opcode_tid ot;
 	__u8 rsvd0;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	 __u8:4;
-	__u8 iff:4;
+	 __u8:8;
+	__u8 iff;
 #else
-	__u8 iff:4;
-	 __u8:4;
+	__u8 iff;
+	 __u8:8;
 #endif
 	__be16 rsvd2;
 };
@@ -1317,11 +1317,11 @@ struct cpl_smt_read_rpl {
 	RSS_HDR union opcode_tid ot;
 	__u8 status;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 mtu_idx:4;
-	 __u8:4;
+	__u8 mtu_idx;
+	 __u8:8;
 #else
-	 __u8:4;
-	__u8 mtu_idx:4;
+	 __u8:8;
+	__u8 mtu_idx;
 #endif
 	__be16 rsvd2;
 	__be16 rsvd3;
@@ -1361,13 +1361,13 @@ struct cpl_rte_write_req {
 	WR_HDR;
 	union opcode_tid ot;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	 __u8:6;
-	__u8 write_tcam:1;
-	__u8 write_l2t_lut:1;
+	 __u8:8;
+	__u8 write_tcam;
+	__u8 write_l2t_lut;
 #else
-	__u8 write_l2t_lut:1;
-	__u8 write_tcam:1;
-	 __u8:6;
+	__u8 write_l2t_lut;
+	__u8 write_tcam;
+	 __u8:8;
 #endif
 	__u8 rsvd[3];
 	__be32 lut_params;
@@ -1406,11 +1406,11 @@ struct cpl_rte_read_rpl {
 	__u8 rsvd0;
 	__be16 l2t_idx;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	 __u8:7;
-	__u8 select:1;
+	 __u8:8;
+	__u8 select;
 #else
-	__u8 select:1;
-	 __u8:7;
+	__u8 select;
+	 __u8:8;
 #endif
 	__u8 rsvd2[3];
 	__be32 addr;
@@ -1438,11 +1438,11 @@ struct cpl_rdma_terminate {
 	__u8 opcode;
 	__u8 rsvd[2];
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8 rspq:3;
-	 __u8:5;
+	__u8 rspq;
+	 __u8:8;
 #else
-	 __u8:5;
-	__u8 rspq:3;
+	 __u8:8;
+	__u8 rspq;
 #endif
 	__be32 tid_len;
 #endif

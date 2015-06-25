@@ -104,8 +104,8 @@ struct n_tty_data {
 	bool no_room;
 
 	/* must hold exclusive termios_rwsem to reset these */
-	unsigned char lnext:1, erasing:1, raw:1, real_raw:1, icanon:1;
-	unsigned char push:1;
+	unsigned char lnext:1, erasing:1, raw:1, real_raw:1, icanon;
+	unsigned char push;
 
 	/* shared by producer and consumer */
 	char read_buf[N_TTY_BUF_SIZE];

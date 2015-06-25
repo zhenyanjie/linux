@@ -636,16 +636,16 @@ struct CommandControlBlock{
 */
 struct SENSE_DATA
 {
-	uint8_t				ErrorCode:7;
+	uint8_t				ErrorCode;
 #define SCSI_SENSE_CURRENT_ERRORS	0x70
 #define SCSI_SENSE_DEFERRED_ERRORS	0x71
-	uint8_t				Valid:1;
+	uint8_t				Valid;
 	uint8_t				SegmentNumber;
-	uint8_t				SenseKey:4;
-	uint8_t				Reserved:1;
-	uint8_t				IncorrectLength:1;
-	uint8_t				EndOfMedia:1;
-	uint8_t				FileMark:1;
+	uint8_t				SenseKey;
+	uint8_t				Reserved;
+	uint8_t				IncorrectLength;
+	uint8_t				EndOfMedia;
+	uint8_t				FileMark;
 	uint8_t				Information[4];
 	uint8_t				AdditionalSenseLength;
 	uint8_t				CommandSpecificInformation[4];

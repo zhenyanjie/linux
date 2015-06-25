@@ -161,14 +161,14 @@ s32  igb_check_polarity_m88(struct e1000_hw *hw);
 #define E1000_SFF_ETH_FLAGS_OFFSET	0x06
 /* Flags for SFP modules compatible with ETH up to 1Gb */
 struct e1000_sfp_flags {
-	u8 e1000_base_sx:1;
-	u8 e1000_base_lx:1;
-	u8 e1000_base_cx:1;
-	u8 e1000_base_t:1;
-	u8 e100_base_lx:1;
-	u8 e100_base_fx:1;
-	u8 e10_base_bx10:1;
-	u8 e10_base_px:1;
+	u8 e1000_base_sx;
+	u8 e1000_base_lx;
+	u8 e1000_base_cx;
+	u8 e1000_base_t;
+	u8 e100_base_lx;
+	u8 e100_base_fx;
+	u8 e10_base_bx10;
+	u8 e10_base_px;
 };
 
 #endif

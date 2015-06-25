@@ -415,10 +415,10 @@ struct trace_params {
 	u16 sport_mask;
 	u16 dport;
 	u16 dport_mask;
-	u32 vlan:12;
-	u32 vlan_mask:12;
-	u32 intf:4;
-	u32 intf_mask:4;
+	u32 vlan;
+	u32 vlan_mask;
+	u32 intf;
+	u32 intf_mask;
 	u8 proto;
 	u8 proto_mask;
 };

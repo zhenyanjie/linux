@@ -127,11 +127,11 @@ struct blkfront_info
 	unsigned long shadow_free;
 	unsigned int feature_flush;
 	unsigned int flush_op;
-	unsigned int feature_discard:1;
-	unsigned int feature_secdiscard:1;
+	unsigned int feature_discard;
+	unsigned int feature_secdiscard;
 	unsigned int discard_granularity;
 	unsigned int discard_alignment;
-	unsigned int feature_persistent:1;
+	unsigned int feature_persistent;
 	unsigned int max_indirect_segments;
 	int is_ready;
 };

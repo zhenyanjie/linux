@@ -129,10 +129,10 @@ enum efx_filter_flags {
  * depends on which fields are matched.
  */
 struct efx_filter_spec {
-	u32	match_flags:12;
-	u32	priority:2;
-	u32	flags:6;
-	u32	dmaq_id:12;
+	u32	match_flags;
+	u32	priority;
+	u32	flags;
+	u32	dmaq_id;
 	u32	rss_context;
 	__be16	outer_vid __aligned(4); /* allow jhash2() of match values */
 	__be16	inner_vid;

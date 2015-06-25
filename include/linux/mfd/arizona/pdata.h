@@ -75,10 +75,10 @@ struct regulator_init_data;
 
 struct arizona_micbias {
 	int mV;                    /** Regulated voltage */
-	unsigned int ext_cap:1;    /** External capacitor fitted */
-	unsigned int discharge:1;  /** Actively discharge */
-	unsigned int soft_start:1; /** Disable aggressive startup ramp rate */
-	unsigned int bypass:1;     /** Use bypass mode */
+	unsigned int ext_cap;    /** External capacitor fitted */
+	unsigned int discharge;  /** Actively discharge */
+	unsigned int soft_start; /** Disable aggressive startup ramp rate */
+	unsigned int bypass;     /** Use bypass mode */
 };
 
 struct arizona_micd_config {

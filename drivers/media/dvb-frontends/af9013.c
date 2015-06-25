@@ -44,7 +44,7 @@ struct af9013_state {
 	unsigned long read_status_jiffies;
 	bool first_tune;
 	bool i2c_gate_state;
-	unsigned int statistics_step:3;
+	unsigned int statistics_step;
 	struct delayed_work statistics_work;
 };
 

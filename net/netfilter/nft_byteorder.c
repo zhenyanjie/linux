@@ -18,9 +18,9 @@
 #include <net/netfilter/nf_tables.h>
 
 struct nft_byteorder {
-	enum nft_registers	sreg:8;
-	enum nft_registers	dreg:8;
-	enum nft_byteorder_ops	op:8;
+	enum nft_registers	sreg;
+	enum nft_registers	dreg;
+	enum nft_byteorder_ops	op;
 	u8			len;
 	u8			size;
 };

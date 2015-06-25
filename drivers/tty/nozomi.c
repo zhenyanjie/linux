@@ -225,13 +225,13 @@ enum port_type {
 /* Big endian */
 
 struct toggles {
-	unsigned int enabled:5;	/*
+	unsigned int enabled;	/*
 				 * Toggle fields are valid if enabled is 0,
 				 * else A-channels must always be used.
 				 */
-	unsigned int diag_dl:1;
-	unsigned int mdm_dl:1;
-	unsigned int mdm_ul:1;
+	unsigned int diag_dl;
+	unsigned int mdm_dl;
+	unsigned int mdm_ul;
 } __attribute__ ((packed));
 
 /* Configuration table to read at startup of card */
@@ -272,19 +272,19 @@ struct config_table {
 /* This stores all control downlink flags */
 struct ctrl_dl {
 	u8 port;
-	unsigned int reserved:4;
-	unsigned int CTS:1;
-	unsigned int RI:1;
-	unsigned int DCD:1;
-	unsigned int DSR:1;
+	unsigned int reserved;
+	unsigned int CTS;
+	unsigned int RI;
+	unsigned int DCD;
+	unsigned int DSR;
 } __attribute__ ((packed));
 
 /* This stores all control uplink flags */
 struct ctrl_ul {
 	u8 port;
-	unsigned int reserved:6;
-	unsigned int RTS:1;
-	unsigned int DTR:1;
+	unsigned int reserved;
+	unsigned int RTS;
+	unsigned int DTR;
 } __attribute__ ((packed));
 
 #else
@@ -292,10 +292,10 @@ struct ctrl_ul {
 
 /* This represents the toggle information */
 struct toggles {
-	unsigned int mdm_ul:1;
-	unsigned int mdm_dl:1;
-	unsigned int diag_dl:1;
-	unsigned int enabled:5;	/*
+	unsigned int mdm_ul;
+	unsigned int mdm_dl;
+	unsigned int diag_dl;
+	unsigned int enabled;	/*
 				 * Toggle fields are valid if enabled is 0,
 				 * else A-channels must always be used.
 				 */
@@ -331,19 +331,19 @@ struct config_table {
 
 /* This stores all control downlink flags */
 struct ctrl_dl {
-	unsigned int DSR:1;
-	unsigned int DCD:1;
-	unsigned int RI:1;
-	unsigned int CTS:1;
-	unsigned int reserverd:4;
+	unsigned int DSR;
+	unsigned int DCD;
+	unsigned int RI;
+	unsigned int CTS;
+	unsigned int reserverd;
 	u8 port;
 } __attribute__ ((packed));
 
 /* This stores all control uplink flags */
 struct ctrl_ul {
-	unsigned int DTR:1;
-	unsigned int RTS:1;
-	unsigned int reserved:6;
+	unsigned int DTR;
+	unsigned int RTS;
+	unsigned int reserved;
 	u8 port;
 } __attribute__ ((packed));
 #endif

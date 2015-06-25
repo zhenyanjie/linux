@@ -1290,9 +1290,9 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(ntfs_volume *vol)
 	u32 old_alen = 0;
 	u8 *b, tb;
 	struct {
-		u8 added_cluster:1;
-		u8 added_run:1;
-		u8 mp_rebuilt:1;
+		u8 added_cluster;
+		u8 added_run;
+		u8 mp_rebuilt;
 	} status = { 0, 0, 0 };
 
 	ntfs_debug("Extending mft bitmap allocation.");

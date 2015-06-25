@@ -29,8 +29,8 @@ struct ieee80211_ADDBA_Req{
 typedef union _SEQUENCE_CONTROL{
 	u16 ShortData;
 	struct {
-		u16	FragNum:4;
-		u16	SeqNum:12;
+		u16	FragNum;
+		u16	SeqNum;
 	}field;
 }SEQUENCE_CONTROL, *PSEQUENCE_CONTROL;
 
@@ -38,10 +38,10 @@ typedef union _BA_PARAM_SET {
 	u8 charData[2];
 	u16 shortData;
 	struct {
-		u16 AMSDU_Support:1;
-		u16 BAPolicy:1;
-		u16 TID:4;
-		u16 BufferSize:10;
+		u16 AMSDU_Support;
+		u16 BAPolicy;
+		u16 TID;
+		u16 BufferSize;
 	} field;
 } BA_PARAM_SET, *PBA_PARAM_SET;
 
@@ -49,9 +49,9 @@ typedef union _DELBA_PARAM_SET {
 	u8 charData[2];
 	u16 shortData;
 	struct {
-		u16 Reserved:11;
-		u16 Initiator:1;
-		u16 TID:4;
+		u16 Reserved;
+		u16 Initiator;
+		u16 TID;
 	} field;
 } DELBA_PARAM_SET, *PDELBA_PARAM_SET;
 

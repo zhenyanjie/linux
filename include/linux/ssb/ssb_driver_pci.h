@@ -82,9 +82,9 @@ struct pci_dev;
 
 struct ssb_pcicore {
 	struct ssb_device *dev;
-	u8 setup_done:1;
-	u8 hostmode:1;
-	u8 cardbusmode:1;
+	u8 setup_done;
+	u8 hostmode;
+	u8 cardbusmode;
 };
 
 extern void ssb_pcicore_init(struct ssb_pcicore *pc);

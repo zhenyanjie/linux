@@ -27,11 +27,11 @@
 #include <net/ip.h>
 
 struct nft_nat {
-	enum nft_registers      sreg_addr_min:8;
-	enum nft_registers      sreg_addr_max:8;
-	enum nft_registers      sreg_proto_min:8;
-	enum nft_registers      sreg_proto_max:8;
-	enum nf_nat_manip_type  type:8;
+	enum nft_registers      sreg_addr_min;
+	enum nft_registers      sreg_addr_max;
+	enum nft_registers      sreg_proto_min;
+	enum nft_registers      sreg_proto_max;
+	enum nf_nat_manip_type  type;
 	u8			family;
 };
 

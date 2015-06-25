@@ -171,9 +171,9 @@ struct arm_ccn_dt {
 struct arm_ccn {
 	struct device *dev;
 	void __iomem *base;
-	unsigned irq_used:1;
-	unsigned sbas_present:1;
-	unsigned sbsx_present:1;
+	unsigned irq_used;
+	unsigned sbas_present;
+	unsigned sbsx_present;
 
 	int num_nodes;
 	struct arm_ccn_component *node;

@@ -55,7 +55,7 @@ struct usb_onetouch {
 	struct urb *irq;	/* urb for interrupt in report */
 	unsigned char *data;	/* input data */
 	dma_addr_t data_dma;
-	unsigned int is_open:1;
+	unsigned int is_open;
 };
 
 

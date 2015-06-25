@@ -393,8 +393,8 @@ static unsigned long iopm_base;
 struct kvm_ldttss_desc {
 	u16 limit0;
 	u16 base0;
-	unsigned base1:8, type:5, dpl:2, p:1;
-	unsigned limit1:4, zero0:3, g:1, base2:8;
+	unsigned base1:8, type:5, dpl:2, p;
+	unsigned limit1:4, zero0:3, g:1, base2;
 	u32 base3;
 	u32 zero1;
 } __attribute__((packed));

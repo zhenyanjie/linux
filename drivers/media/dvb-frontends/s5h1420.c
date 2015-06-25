@@ -49,7 +49,7 @@ struct s5h1420_state {
 
 	u8 CON_1_val;
 
-	u8 postlocked:1;
+	u8 postlocked;
 	u32 fclk;
 	u32 tunedfreq;
 	fe_code_rate_t fec_inner;

@@ -281,18 +281,18 @@ enum _mii_esr {
 typedef union t_MII_PHY_SCR {
 	u16 image;
 	struct {
-		u16 disable_jabber:1;	// bit 0
-		u16 polarity_reversal:1;	// bit 1
-		u16 SEQ_test:1;	// bit 2
-		u16 _bit_3:1;	// bit 3
-		u16 disable_CLK125:1;	// bit 4
-		u16 mdi_crossover_mode:2;	// bit 6:5
-		u16 enable_ext_dist:1;	// bit 7
-		u16 _bit_8_9:2;	// bit 9:8
-		u16 force_link:1;	// bit 10
-		u16 assert_CRS:1;	// bit 11
-		u16 rcv_fifo_depth:2;	// bit 13:12
-		u16 xmit_fifo_depth:2;	// bit 15:14
+		u16 disable_jabber;	// bit 0
+		u16 polarity_reversal;	// bit 1
+		u16 SEQ_test;	// bit 2
+		u16 _bit_3;	// bit 3
+		u16 disable_CLK125;	// bit 4
+		u16 mdi_crossover_mode;	// bit 6:5
+		u16 enable_ext_dist;	// bit 7
+		u16 _bit_8_9;	// bit 9:8
+		u16 force_link;	// bit 10
+		u16 assert_CRS;	// bit 11
+		u16 rcv_fifo_depth;	// bit 13:12
+		u16 xmit_fifo_depth;	// bit 15:14
 	} bits;
 } PHY_SCR_t, *PPHY_SCR_t;
 #endif
@@ -378,14 +378,14 @@ struct netdev_private {
 	unsigned int rx_coalesce; 	/* Maximum frames each RxDMAComplete intr */
 	unsigned int rx_timeout; 	/* Wait time between RxDMAComplete intr */
 	unsigned int tx_coalesce;	/* Maximum frames each tx interrupt */
-	unsigned int full_duplex:1;	/* Full-duplex operation requested. */
-	unsigned int an_enable:2;	/* Auto-Negotiated Enable */
-	unsigned int jumbo:1;		/* Jumbo frame enable */
-	unsigned int coalesce:1;	/* Rx coalescing enable */
-	unsigned int tx_flow:1;		/* Tx flow control enable */
-	unsigned int rx_flow:1;		/* Rx flow control enable */
-	unsigned int phy_media:1;	/* 1: fiber, 0: copper */
-	unsigned int link_status:1;	/* Current link status */
+	unsigned int full_duplex;	/* Full-duplex operation requested. */
+	unsigned int an_enable;	/* Auto-Negotiated Enable */
+	unsigned int jumbo;		/* Jumbo frame enable */
+	unsigned int coalesce;	/* Rx coalescing enable */
+	unsigned int tx_flow;		/* Tx flow control enable */
+	unsigned int rx_flow;		/* Rx flow control enable */
+	unsigned int phy_media;	/* 1: fiber, 0: copper */
+	unsigned int link_status;	/* Current link status */
 	struct netdev_desc *last_tx;	/* Last Tx descriptor used. */
 	unsigned long cur_rx, old_rx;	/* Producer/consumer ring indices */
 	unsigned long cur_tx, old_tx;

@@ -262,7 +262,7 @@ enum {
 
 
 struct snd_ak4xxx_private {
-	unsigned int cif:1;		/* CIF mode */
+	unsigned int cif;		/* CIF mode */
 	unsigned char caddr;		/* C0 and C1 bits */
 	unsigned int data_mask;		/* DATA gpio bit */
 	unsigned int clk_mask;		/* CLK gpio bit */
@@ -332,16 +332,16 @@ struct snd_ice1712 {
 	struct snd_ice1712_card_info *card_info;
 
 	unsigned int pro_volumes[20];
-	unsigned int omni:1;		/* Delta Omni I/O */
-	unsigned int dxr_enable:1;	/* Terratec DXR enable for DMX6FIRE */
-	unsigned int vt1724:1;
-	unsigned int vt1720:1;
-	unsigned int has_spdif:1;	/* VT1720/4 - has SPDIF I/O */
-	unsigned int force_pdma4:1;	/* VT1720/4 - PDMA4 as non-spdif */
-	unsigned int force_rdma1:1;	/* VT1720/4 - RDMA1 as non-spdif */
-	unsigned int midi_output:1;	/* VT1720/4: MIDI output triggered */
-	unsigned int midi_input:1;	/* VT1720/4: MIDI input triggered */
-	unsigned int own_routing:1;	/* VT1720/4: use own routing ctls */
+	unsigned int omni;		/* Delta Omni I/O */
+	unsigned int dxr_enable;	/* Terratec DXR enable for DMX6FIRE */
+	unsigned int vt1724;
+	unsigned int vt1720;
+	unsigned int has_spdif;	/* VT1720/4 - has SPDIF I/O */
+	unsigned int force_pdma4;	/* VT1720/4 - PDMA4 as non-spdif */
+	unsigned int force_rdma1;	/* VT1720/4 - RDMA1 as non-spdif */
+	unsigned int midi_output;	/* VT1720/4: MIDI output triggered */
+	unsigned int midi_input;	/* VT1720/4: MIDI input triggered */
+	unsigned int own_routing;	/* VT1720/4: use own routing ctls */
 	unsigned int num_total_dacs;	/* total DACs */
 	unsigned int num_total_adcs;	/* total ADCs */
 	unsigned int cur_rate;		/* current rate */
@@ -393,8 +393,8 @@ struct snd_ice1712 {
 #ifdef CONFIG_PM_SLEEP
 	int (*pm_suspend)(struct snd_ice1712 *);
 	int (*pm_resume)(struct snd_ice1712 *);
-	unsigned int pm_suspend_enabled:1;
-	unsigned int pm_saved_is_spdif_master:1;
+	unsigned int pm_suspend_enabled;
+	unsigned int pm_saved_is_spdif_master;
 	unsigned int pm_saved_spdif_ctrl;
 	unsigned char pm_saved_spdif_cfg;
 	unsigned int pm_saved_route;
@@ -525,7 +525,7 @@ struct snd_ice1712_card_info {
 	int (*chip_init)(struct snd_ice1712 *);
 	void (*chip_exit)(struct snd_ice1712 *);
 	int (*build_controls)(struct snd_ice1712 *);
-	unsigned int no_mpu401:1;
+	unsigned int no_mpu401;
 	unsigned int mpu401_1_info_flags;
 	unsigned int mpu401_2_info_flags;
 	const char *mpu401_1_name;

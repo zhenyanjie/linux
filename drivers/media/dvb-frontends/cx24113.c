@@ -50,28 +50,28 @@ struct cx24113_state {
 	u8 rev;
 	u8 ver;
 
-	u8 icp_mode:1;
+	u8 icp_mode;
 
 #define ICP_LEVEL1 0
 #define ICP_LEVEL2 1
 #define ICP_LEVEL3 2
 #define ICP_LEVEL4 3
-	u8 icp_man:2;
-	u8 icp_auto_low:2;
-	u8 icp_auto_mlow:2;
-	u8 icp_auto_mhi:2;
-	u8 icp_auto_hi:2;
+	u8 icp_man;
+	u8 icp_auto_low;
+	u8 icp_auto_mlow;
+	u8 icp_auto_mhi;
+	u8 icp_auto_hi;
 	u8 icp_dig;
 
 #define LNA_MIN_GAIN 0
 #define LNA_MID_GAIN 1
 #define LNA_MAX_GAIN 2
-	u8 lna_gain:2;
+	u8 lna_gain;
 
-	u8 acp_on:1;
+	u8 acp_on;
 
-	u8 vco_mode:2;
-	u8 vco_shift:1;
+	u8 vco_mode;
+	u8 vco_shift;
 #define VCOBANDSEL_6 0x80
 #define VCOBANDSEL_5 0x01
 #define VCOBANDSEL_4 0x02
@@ -84,10 +84,10 @@ struct cx24113_state {
 #define VCODIV2 2
 	u8 vcodiv;
 
-	u8 bs_delay:4;
-	u16 bs_freqcnt:13;
+	u8 bs_delay;
+	u16 bs_freqcnt;
 	u16 bs_rdiv;
-	u8 prescaler_mode:1;
+	u8 prescaler_mode;
 
 	u8 rfvga_bias_ctrl;
 

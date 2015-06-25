@@ -205,21 +205,21 @@ struct imx_port {
 	struct timer_list	timer;
 	unsigned int		old_status;
 	int			txirq, rxirq, rtsirq;
-	unsigned int		have_rtscts:1;
-	unsigned int		dte_mode:1;
-	unsigned int		use_irda:1;
-	unsigned int		irda_inv_rx:1;
-	unsigned int		irda_inv_tx:1;
+	unsigned int		have_rtscts;
+	unsigned int		dte_mode;
+	unsigned int		use_irda;
+	unsigned int		irda_inv_rx;
+	unsigned int		irda_inv_tx;
 	unsigned short		trcv_delay; /* transceiver delay */
 	struct clk		*clk_ipg;
 	struct clk		*clk_per;
 	const struct imx_uart_data *devdata;
 
 	/* DMA fields */
-	unsigned int		dma_is_inited:1;
-	unsigned int		dma_is_enabled:1;
-	unsigned int		dma_is_rxing:1;
-	unsigned int		dma_is_txing:1;
+	unsigned int		dma_is_inited;
+	unsigned int		dma_is_enabled;
+	unsigned int		dma_is_rxing;
+	unsigned int		dma_is_txing;
 	struct dma_chan		*dma_chan_rx, *dma_chan_tx;
 	struct scatterlist	rx_sgl, tx_sgl[2];
 	void			*rx_buf;

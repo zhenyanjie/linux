@@ -2758,10 +2758,10 @@ struct scsi_qlt_host {
 
 struct qlt_hw_data {
 	/* Protected by hw lock */
-	uint32_t enable_class_2:1;
-	uint32_t enable_explicit_conf:1;
-	uint32_t ini_mode_force_reverse:1;
-	uint32_t node_name_set:1;
+	uint32_t enable_class_2;
+	uint32_t enable_explicit_conf;
+	uint32_t ini_mode_force_reverse;
+	uint32_t node_name_set;
 
 	dma_addr_t atio_dma;	/* Physical address. */
 	struct atio *atio_ring;	/* Base virtual address */
@@ -2798,42 +2798,42 @@ struct qla_hw_data {
 	mempool_t       *srb_mempool;
 
 	volatile struct {
-		uint32_t	mbox_int		:1;
-		uint32_t	mbox_busy		:1;
-		uint32_t	disable_risc_code_load	:1;
-		uint32_t	enable_64bit_addressing	:1;
-		uint32_t	enable_lip_reset	:1;
-		uint32_t	enable_target_reset	:1;
-		uint32_t	enable_lip_full_login	:1;
-		uint32_t	enable_led_scheme	:1;
+		uint32_t	mbox_int		;
+		uint32_t	mbox_busy		;
+		uint32_t	disable_risc_code_load	;
+		uint32_t	enable_64bit_addressing	;
+		uint32_t	enable_lip_reset	;
+		uint32_t	enable_target_reset	;
+		uint32_t	enable_lip_full_login	;
+		uint32_t	enable_led_scheme	;
 
-		uint32_t	msi_enabled		:1;
-		uint32_t	msix_enabled		:1;
-		uint32_t	disable_serdes		:1;
-		uint32_t	gpsc_supported		:1;
-		uint32_t	npiv_supported		:1;
-		uint32_t	pci_channel_io_perm_failure	:1;
-		uint32_t	fce_enabled		:1;
-		uint32_t	fac_supported		:1;
+		uint32_t	msi_enabled		;
+		uint32_t	msix_enabled		;
+		uint32_t	disable_serdes		;
+		uint32_t	gpsc_supported		;
+		uint32_t	npiv_supported		;
+		uint32_t	pci_channel_io_perm_failure	;
+		uint32_t	fce_enabled		;
+		uint32_t	fac_supported		;
 
-		uint32_t	chip_reset_done		:1;
-		uint32_t	running_gold_fw		:1;
-		uint32_t	eeh_busy		:1;
-		uint32_t	cpu_affinity_enabled	:1;
-		uint32_t	disable_msix_handshake	:1;
-		uint32_t	fcp_prio_enabled	:1;
-		uint32_t	isp82xx_fw_hung:1;
-		uint32_t	nic_core_hung:1;
+		uint32_t	chip_reset_done		;
+		uint32_t	running_gold_fw		;
+		uint32_t	eeh_busy		;
+		uint32_t	cpu_affinity_enabled	;
+		uint32_t	disable_msix_handshake	;
+		uint32_t	fcp_prio_enabled	;
+		uint32_t	isp82xx_fw_hung;
+		uint32_t	nic_core_hung;
 
-		uint32_t	quiesce_owner:1;
-		uint32_t	nic_core_reset_hdlr_active:1;
-		uint32_t	nic_core_reset_owner:1;
-		uint32_t	isp82xx_no_md_cap:1;
-		uint32_t	host_shutting_down:1;
-		uint32_t	idc_compl_status:1;
+		uint32_t	quiesce_owner;
+		uint32_t	nic_core_reset_hdlr_active;
+		uint32_t	nic_core_reset_owner;
+		uint32_t	isp82xx_no_md_cap;
+		uint32_t	host_shutting_down;
+		uint32_t	idc_compl_status;
 
-		uint32_t        mr_reset_hdlr_active:1;
-		uint32_t        mr_intr_valid:1;
+		uint32_t        mr_reset_hdlr_active;
+		uint32_t        mr_intr_valid;
 		/* 34 bits */
 	} flags;
 
@@ -3353,16 +3353,16 @@ typedef struct scsi_qla_host {
 	uint8_t		host_str[16];
 
 	volatile struct {
-		uint32_t	init_done		:1;
-		uint32_t	online			:1;
-		uint32_t	reset_active		:1;
+		uint32_t	init_done		;
+		uint32_t	online			;
+		uint32_t	reset_active		;
 
-		uint32_t	management_server_logged_in :1;
-		uint32_t	process_response_queue	:1;
-		uint32_t	difdix_supported:1;
-		uint32_t	delete_progress:1;
+		uint32_t	management_server_logged_in ;
+		uint32_t	process_response_queue	;
+		uint32_t	difdix_supported;
+		uint32_t	delete_progress;
 
-		uint32_t	fw_tgt_reported:1;
+		uint32_t	fw_tgt_reported;
 	} flags;
 
 	atomic_t	loop_state;

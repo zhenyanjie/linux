@@ -229,10 +229,10 @@ typedef struct {
  * @dataxferlen		: amount of the data to be transferred.
  */
 typedef struct {
-	uint8_t		timeout		:3;
-	uint8_t		ars		:1;
-	uint8_t		reserved	:3;
-	uint8_t		islogical	:1;
+	uint8_t		timeout		;
+	uint8_t		ars		;
+	uint8_t		reserved	;
+	uint8_t		islogical	;
 	uint8_t		logdrv;
 	uint8_t		channel;
 	uint8_t		target;
@@ -281,12 +281,12 @@ typedef struct {
  * @dataxferlen		: amount of the data to be transferred.
  */
 typedef struct {
-	uint8_t		timeout		:3;
-	uint8_t		ars		:1;
-	uint8_t		rsvd1		:1;
-	uint8_t		cd_rom		:1;
-	uint8_t		rsvd2		:1;
-	uint8_t		islogical	:1;
+	uint8_t		timeout		;
+	uint8_t		ars		;
+	uint8_t		rsvd1		;
+	uint8_t		cd_rom		;
+	uint8_t		rsvd2		;
+	uint8_t		islogical	;
 	uint8_t		logdrv;
 	uint8_t		channel;
 	uint8_t		target;
@@ -757,8 +757,8 @@ typedef struct {
  * @cksum	: 0-(sum of first 13 bytes of this structure)
  */
 struct private_bios_data {
-	uint8_t		geometry	:4;
-	uint8_t		unused		:4;
+	uint8_t		geometry	;
+	uint8_t		unused		;
 	uint8_t		boot_drv;
 	uint8_t		rsvd[12];
 	uint16_t	cksum;

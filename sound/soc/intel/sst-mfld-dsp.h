@@ -187,8 +187,8 @@ enum sst_error_codes {
 };
 
 struct ipc_dsp_hdr {
-	u16 mod_index_id:8;		/*!< DSP Command ID specific to tasks */
-	u16 pipe_id:8;	/*!< instance of the module in the pipeline */
+	u16 mod_index_id;		/*!< DSP Command ID specific to tasks */
+	u16 pipe_id;	/*!< instance of the module in the pipeline */
 	u16 mod_id;		/*!< Pipe_id */
 	u16 cmd_id;		/*!< Module ID = lpe_algo_types_t */
 	u16 length;		/*!< Length of the payload only */
@@ -196,15 +196,15 @@ struct ipc_dsp_hdr {
 
 union ipc_header_high {
 	struct {
-		u32  msg_id:8;	    /* Message ID - Max 256 Message Types */
-		u32  task_id:4;	    /* Task ID associated with this comand */
-		u32  drv_id:4;    /* Identifier for the driver to track*/
-		u32  rsvd1:8;	    /* Reserved */
-		u32  result:4;	    /* Reserved */
-		u32  res_rqd:1;	    /* Response rqd */
-		u32  large:1;	    /* Large Message if large = 1 */
-		u32  done:1;	    /* bit 30 - Done bit */
-		u32  busy:1;	    /* bit 31 - busy bit*/
+		u32  msg_id;	    /* Message ID - Max 256 Message Types */
+		u32  task_id;	    /* Task ID associated with this comand */
+		u32  drv_id;    /* Identifier for the driver to track*/
+		u32  rsvd1;	    /* Reserved */
+		u32  result;	    /* Reserved */
+		u32  res_rqd;	    /* Response rqd */
+		u32  large;	    /* Large Message if large = 1 */
+		u32  done;	    /* bit 30 - Done bit */
+		u32  busy;	    /* bit 31 - busy bit*/
 	} part;
 	u32 full;
 } __packed;
@@ -221,13 +221,13 @@ union ipc_header_mrfld {
 /* IPC Header */
 union ipc_header {
 	struct {
-		u32  msg_id:8; /* Message ID - Max 256 Message Types */
-		u32  str_id:5;
-		u32  large:1;	/* Large Message if large = 1 */
-		u32  reserved:2;	/* Reserved for future use */
-		u32  data:14;	/* Ack/Info for msg, size of msg in Mailbox */
-		u32  done:1; /* bit 30 */
-		u32  busy:1; /* bit 31 */
+		u32  msg_id; /* Message ID - Max 256 Message Types */
+		u32  str_id;
+		u32  large;	/* Large Message if large = 1 */
+		u32  reserved;	/* Reserved for future use */
+		u32  data;	/* Ack/Info for msg, size of msg in Mailbox */
+		u32  done; /* bit 30 */
+		u32  busy; /* bit 31 */
 	} part;
 	u32 full;
 } __packed;

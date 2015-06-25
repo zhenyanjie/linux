@@ -30,9 +30,9 @@ struct lm3533 {
 	int gpio_hwen;
 	int irq;
 
-	unsigned have_als:1;
-	unsigned have_backlights:1;
-	unsigned have_leds:1;
+	unsigned have_als;
+	unsigned have_backlights;
+	unsigned have_leds;
 };
 
 struct lm3533_ctrlbank {
@@ -42,7 +42,7 @@ struct lm3533_ctrlbank {
 };
 
 struct lm3533_als_platform_data {
-	unsigned pwm_mode:1;		/* PWM input mode (default analog) */
+	unsigned pwm_mode;		/* PWM input mode (default analog) */
 	u8 r_select;			/* 1 - 127 (ignored in PWM-mode) */
 };
 

@@ -10,7 +10,7 @@ struct ifx_modem_platform_data {
 	unsigned short mrdy;		/* MRDY */
 	unsigned char modem_type;	/* Modem type */
 	unsigned long max_hz;		/* max SPI frequency */
-	unsigned short use_dma:1;	/* spi protocol driver supplies
+	unsigned short use_dma;	/* spi protocol driver supplies
 					   dma-able addrs */
 };
 #define IFX_MODEM_6160	1

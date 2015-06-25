@@ -144,8 +144,8 @@ struct adp5588_kpad_platform_data {
 	int cols;			/* Number of columns */
 	const unsigned short *keymap;	/* Pointer to keymap */
 	unsigned short keymapsize;	/* Keymap size */
-	unsigned repeat:1;		/* Enable key repeat */
-	unsigned en_keylock:1;		/* Enable Key Lock feature */
+	unsigned repeat;		/* Enable key repeat */
+	unsigned en_keylock;		/* Enable Key Lock feature */
 	unsigned short unlock_key1;	/* Unlock Key 1 */
 	unsigned short unlock_key2;	/* Unlock Key 2 */
 	const struct adp5588_gpi_map *gpimap;

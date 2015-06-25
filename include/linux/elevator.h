@@ -110,7 +110,7 @@ struct elevator_queue
 	void *elevator_data;
 	struct kobject kobj;
 	struct mutex sysfs_lock;
-	unsigned int registered:1;
+	unsigned int registered;
 	DECLARE_HASHTABLE(hash, ELV_HASH_BITS);
 };
 

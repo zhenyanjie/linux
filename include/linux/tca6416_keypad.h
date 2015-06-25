@@ -25,7 +25,7 @@ struct tca6416_button {
 struct tca6416_keys_platform_data {
 	struct tca6416_button *buttons;
 	int nbuttons;
-	unsigned int rep:1;	/* enable input subsystem auto repeat */
+	unsigned int rep;	/* enable input subsystem auto repeat */
 	uint16_t pinmask;
 	uint16_t invert;
 	int irq_is_gpio;

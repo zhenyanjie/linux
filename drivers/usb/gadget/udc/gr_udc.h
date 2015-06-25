@@ -146,11 +146,11 @@ struct gr_ep {
 	unsigned int dma_start;
 	struct gr_epregs __iomem *regs;
 
-	unsigned num:8;
-	unsigned is_in:1;
-	unsigned stopped:1;
-	unsigned wedged:1;
-	unsigned callback:1;
+	unsigned num;
+	unsigned is_in;
+	unsigned stopped;
+	unsigned wedged;
+	unsigned callback;
 
 	/* analogous to a host-side qh */
 	struct list_head queue;
@@ -198,9 +198,9 @@ struct gr_udc {
 	int irqi;
 	int irqo;
 
-	unsigned added:1;
-	unsigned irq_enabled:1;
-	unsigned remote_wakeup:1;
+	unsigned added;
+	unsigned irq_enabled;
+	unsigned remote_wakeup;
 
 	u8 test_mode;
 

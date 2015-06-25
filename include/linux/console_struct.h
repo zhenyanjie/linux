@@ -77,12 +77,12 @@ struct vc_data {
 	unsigned int	vc_deccolm	: 1;	/* 80/132 Column Mode */
 	/* attribute flags */
 	unsigned int	vc_intensity	: 2;	/* 0=half-bright, 1=normal, 2=bold */
-	unsigned int    vc_italic:1;
+	unsigned int    vc_italic;
 	unsigned int	vc_underline	: 1;
 	unsigned int	vc_blink	: 1;
 	unsigned int	vc_reverse	: 1;
 	unsigned int	vc_s_intensity	: 2;	/* saved rendition */
-	unsigned int    vc_s_italic:1;
+	unsigned int    vc_s_italic;
 	unsigned int	vc_s_underline	: 1;
 	unsigned int	vc_s_blink	: 1;
 	unsigned int	vc_s_reverse	: 1;

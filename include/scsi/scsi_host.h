@@ -424,12 +424,12 @@ struct scsi_host_template {
 	/*
 	 * This specifies the mode that a LLD supports.
 	 */
-	unsigned supported_mode:2;
+	unsigned supported_mode;
 
 	/*
 	 * True if this host adapter uses unchecked DMA onto an ISA bus.
 	 */
-	unsigned unchecked_isa_dma:1;
+	unsigned unchecked_isa_dma;
 
 	/*
 	 * True if this host adapter can make good use of clustering.
@@ -439,30 +439,30 @@ struct scsi_host_template {
 	 * number of segments (i.e. use clustering).  I guess it is
 	 * inefficient.
 	 */
-	unsigned use_clustering:1;
+	unsigned use_clustering;
 
 	/*
 	 * True for emulated SCSI host adapters (e.g. ATAPI).
 	 */
-	unsigned emulated:1;
+	unsigned emulated;
 
 	/*
 	 * True if the low-level driver performs its own reset-settle delays.
 	 */
-	unsigned skip_settle_delay:1;
+	unsigned skip_settle_delay;
 
 	/*
 	 * True if we are using ordered write support.
 	 */
-	unsigned ordered_tag:1;
+	unsigned ordered_tag;
 
 	/* True if the controller does not support WRITE SAME */
-	unsigned no_write_same:1;
+	unsigned no_write_same;
 
 	/*
 	 * True if asynchronous aborts are not supported
 	 */
-	unsigned no_async_abort:1;
+	unsigned no_async_abort;
 
 	/*
 	 * Countdown for host blocking with no commands outstanding.
@@ -644,42 +644,42 @@ struct Scsi_Host {
 	 */
 	unsigned long cmd_serial_number;
 	
-	unsigned active_mode:2;
-	unsigned unchecked_isa_dma:1;
-	unsigned use_clustering:1;
-	unsigned use_blk_tcq:1;
+	unsigned active_mode;
+	unsigned unchecked_isa_dma;
+	unsigned use_clustering;
+	unsigned use_blk_tcq;
 
 	/*
 	 * Host has requested that no further requests come through for the
 	 * time being.
 	 */
-	unsigned host_self_blocked:1;
+	unsigned host_self_blocked;
     
 	/*
 	 * Host uses correct SCSI ordering not PC ordering. The bit is
 	 * set for the minority of drivers whose authors actually read
 	 * the spec ;).
 	 */
-	unsigned reverse_ordering:1;
+	unsigned reverse_ordering;
 
 	/*
 	 * Ordered write support
 	 */
-	unsigned ordered_tag:1;
+	unsigned ordered_tag;
 
 	/* Task mgmt function in progress */
-	unsigned tmf_in_progress:1;
+	unsigned tmf_in_progress;
 
 	/* Asynchronous scan in progress */
-	unsigned async_scan:1;
+	unsigned async_scan;
 
 	/* Don't resume host in EH */
-	unsigned eh_noresume:1;
+	unsigned eh_noresume;
 
 	/* The controller does not support WRITE SAME */
-	unsigned no_write_same:1;
+	unsigned no_write_same;
 
-	unsigned use_blk_mq:1;
+	unsigned use_blk_mq;
 
 	/*
 	 * Optional work queue to be utilized by the transport

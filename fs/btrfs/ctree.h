@@ -605,12 +605,12 @@ struct btrfs_path {
 	 * set by btrfs_split_item, tells search_slot to keep all locks
 	 * and to force calls to keep space in the nodes
 	 */
-	unsigned int search_for_split:1;
-	unsigned int keep_locks:1;
-	unsigned int skip_locking:1;
-	unsigned int leave_spinning:1;
-	unsigned int search_commit_root:1;
-	unsigned int need_commit_sem:1;
+	unsigned int search_for_split;
+	unsigned int keep_locks;
+	unsigned int skip_locking;
+	unsigned int leave_spinning;
+	unsigned int search_commit_root;
+	unsigned int need_commit_sem;
 };
 
 /*
@@ -1144,11 +1144,11 @@ struct btrfs_space_info {
 				   delalloc/allocations */
 	u64 bytes_readonly;	/* total bytes that are read only */
 
-	unsigned int full:1;	/* indicates that we cannot allocate any more
+	unsigned int full;	/* indicates that we cannot allocate any more
 				   chunks for this space */
-	unsigned int chunk_alloc:1;	/* set if we are allocating a chunk */
+	unsigned int chunk_alloc;	/* set if we are allocating a chunk */
 
-	unsigned int flush:1;		/* set if we are trying to make space */
+	unsigned int flush;		/* set if we are trying to make space */
 
 	unsigned int force_alloc;	/* set if we need to force a chunk
 					   alloc for this space */
@@ -1275,9 +1275,9 @@ struct btrfs_block_group_cache {
 	/* for raid56, this is a full stripe, without parity */
 	unsigned long full_stripe_len;
 
-	unsigned int ro:1;
-	unsigned int dirty:1;
-	unsigned int iref:1;
+	unsigned int ro;
+	unsigned int dirty;
+	unsigned int iref;
 
 	int disk_cache_state;
 
@@ -1404,7 +1404,7 @@ struct btrfs_fs_info {
 	 */
 	u64 last_trans_log_full_commit;
 	unsigned long mount_opt;
-	unsigned long compress_type:4;
+	unsigned long compress_type;
 	int commit_interval;
 	/*
 	 * It is a suggestive number, the read side is safe even it gets a
@@ -1652,13 +1652,13 @@ struct btrfs_fs_info {
 	/*
 	 * quota information
 	 */
-	unsigned int quota_enabled:1;
+	unsigned int quota_enabled;
 
 	/*
 	 * quota_enabled only changes state after a commit. This holds the
 	 * next state.
 	 */
-	unsigned int pending_quota_state:1;
+	unsigned int pending_quota_state;
 
 	/* is qgroup tracking in a consistent state? */
 	u64 qgroup_flags;
@@ -1719,7 +1719,7 @@ struct btrfs_fs_info {
 	wait_queue_head_t replace_wait;
 
 	struct semaphore uuid_tree_rescan_sem;
-	unsigned int update_uuid_tree_gen:1;
+	unsigned int update_uuid_tree_gen;
 
 	/* Used to reclaim the metadata space in the background. */
 	struct work_struct async_reclaim_work;

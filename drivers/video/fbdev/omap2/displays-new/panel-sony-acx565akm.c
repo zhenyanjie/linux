@@ -78,8 +78,8 @@ struct panel_drv_data {
 	int		model;
 	int		revision;
 	u8		display_id[3];
-	unsigned	has_bc:1;
-	unsigned	has_cabc:1;
+	unsigned	has_bc;
+	unsigned	has_cabc;
 	unsigned	cabc_mode;
 	unsigned long	hw_guard_end;		/* next value of jiffies
 						   when we can issue the

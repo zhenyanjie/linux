@@ -950,12 +950,12 @@ struct esas2r_adapter {
 	struct semaphore nvram_semaphore;
 	struct atto_ioctl *local_atto_ioctl;
 	u8 fw_coredump_buff[ESAS2R_FWCOREDUMP_SZ];
-	unsigned int sysfs_fw_created:1;
-	unsigned int sysfs_fs_created:1;
-	unsigned int sysfs_vda_created:1;
-	unsigned int sysfs_hw_created:1;
-	unsigned int sysfs_live_nvram_created:1;
-	unsigned int sysfs_default_nvram_created:1;
+	unsigned int sysfs_fw_created;
+	unsigned int sysfs_fs_created;
+	unsigned int sysfs_vda_created;
+	unsigned int sysfs_hw_created;
+	unsigned int sysfs_live_nvram_created;
+	unsigned int sysfs_default_nvram_created;
 };
 
 /*

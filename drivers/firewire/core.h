@@ -176,14 +176,14 @@ struct fw_node {
 	u16 node_id;
 	u8 color;
 	u8 port_count;
-	u8 link_on:1;
-	u8 initiated_reset:1;
-	u8 b_path:1;
-	u8 phy_speed:2;	/* As in the self ID packet. */
-	u8 max_speed:2;	/* Minimum of all phy-speeds on the path from the
+	u8 link_on;
+	u8 initiated_reset;
+	u8 b_path;
+	u8 phy_speed;	/* As in the self ID packet. */
+	u8 max_speed;	/* Minimum of all phy-speeds on the path from the
 			 * local node to this node. */
-	u8 max_depth:4;	/* Maximum depth to any leaf node */
-	u8 max_hops:4;	/* Max hops in this sub tree */
+	u8 max_depth;	/* Maximum depth to any leaf node */
+	u8 max_hops;	/* Max hops in this sub tree */
 	atomic_t ref_count;
 
 	/* For serializing node topology into a list. */

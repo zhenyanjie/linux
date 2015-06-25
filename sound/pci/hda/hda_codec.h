@@ -144,16 +144,16 @@ struct hda_bus {
 	DECLARE_BITMAP(pcm_dev_bits, SNDRV_PCM_DEVICES);
 
 	/* misc op flags */
-	unsigned int needs_damn_long_delay :1;
-	unsigned int allow_bus_reset:1;	/* allow bus reset at fatal error */
-	unsigned int sync_write:1;	/* sync after verb write */
+	unsigned int needs_damn_long_delay ;
+	unsigned int allow_bus_reset;	/* allow bus reset at fatal error */
+	unsigned int sync_write;	/* sync after verb write */
 	/* status for codec/controller */
-	unsigned int shutdown :1;	/* being unloaded */
-	unsigned int rirb_error:1;	/* error in codec communication */
-	unsigned int response_reset:1;	/* controller was reset */
-	unsigned int in_reset:1;	/* during reset operation */
-	unsigned int power_keep_link_on:1; /* don't power off HDA link */
-	unsigned int no_response_fallback:1; /* don't fallback at RIRB error */
+	unsigned int shutdown ;	/* being unloaded */
+	unsigned int rirb_error;	/* error in codec communication */
+	unsigned int response_reset;	/* controller was reset */
+	unsigned int in_reset;	/* during reset operation */
+	unsigned int power_keep_link_on; /* don't power off HDA link */
+	unsigned int no_response_fallback; /* don't fallback at RIRB error */
 
 	int primary_dig_out_type;	/* primary digital out PCM type */
 };
@@ -204,8 +204,8 @@ struct hda_codec_ops {
 
 /* record for amp information cache */
 struct hda_cache_head {
-	u32 key:31;		/* hash key */
-	u32 dirty:1;
+	u32 key;		/* hash key */
+	u32 dirty;
 	u16 val;		/* assigned value */
 	u16 next;
 };
@@ -345,32 +345,32 @@ struct hda_codec {
 #endif
 
 	/* misc flags */
-	unsigned int spdif_status_reset :1; /* needs to toggle SPDIF for each
+	unsigned int spdif_status_reset ; /* needs to toggle SPDIF for each
 					     * status change
 					     * (e.g. Realtek codecs)
 					     */
-	unsigned int pin_amp_workaround:1; /* pin out-amp takes index
+	unsigned int pin_amp_workaround; /* pin out-amp takes index
 					    * (e.g. Conexant codecs)
 					    */
-	unsigned int single_adc_amp:1; /* adc in-amp takes no index
+	unsigned int single_adc_amp; /* adc in-amp takes no index
 					* (e.g. CX20549 codec)
 					*/
-	unsigned int no_sticky_stream:1; /* no sticky-PCM stream assignment */
-	unsigned int pins_shutup:1;	/* pins are shut up */
-	unsigned int no_trigger_sense:1; /* don't trigger at pin-sensing */
-	unsigned int no_jack_detect:1;	/* Machine has no jack-detection */
-	unsigned int inv_eapd:1; /* broken h/w: inverted EAPD control */
-	unsigned int inv_jack_detect:1;	/* broken h/w: inverted detection bit */
-	unsigned int pcm_format_first:1; /* PCM format must be set first */
-	unsigned int epss:1;		/* supporting EPSS? */
-	unsigned int cached_write:1;	/* write only to caches */
-	unsigned int dp_mst:1; /* support DP1.2 Multi-stream transport */
-	unsigned int dump_coef:1; /* dump processing coefs in codec proc file */
+	unsigned int no_sticky_stream; /* no sticky-PCM stream assignment */
+	unsigned int pins_shutup;	/* pins are shut up */
+	unsigned int no_trigger_sense; /* don't trigger at pin-sensing */
+	unsigned int no_jack_detect;	/* Machine has no jack-detection */
+	unsigned int inv_eapd; /* broken h/w: inverted EAPD control */
+	unsigned int inv_jack_detect;	/* broken h/w: inverted detection bit */
+	unsigned int pcm_format_first; /* PCM format must be set first */
+	unsigned int epss;		/* supporting EPSS? */
+	unsigned int cached_write;	/* write only to caches */
+	unsigned int dp_mst; /* support DP1.2 Multi-stream transport */
+	unsigned int dump_coef; /* dump processing coefs in codec proc file */
 #ifdef CONFIG_PM
-	unsigned int power_on :1;	/* current (global) power-state */
-	unsigned int d3_stop_clk:1;	/* support D3 operation without BCLK */
-	unsigned int pm_up_notified:1;	/* PM notified to controller */
-	unsigned int in_pm:1;		/* suspend/resume being performed */
+	unsigned int power_on ;	/* current (global) power-state */
+	unsigned int d3_stop_clk;	/* support D3 operation without BCLK */
+	unsigned int pm_up_notified;	/* PM notified to controller */
+	unsigned int in_pm;		/* suspend/resume being performed */
 	int power_transition;	/* power-state in transition */
 	int power_count;	/* current (global) power refcount */
 	struct delayed_work power_work; /* delayed task for powerdown */

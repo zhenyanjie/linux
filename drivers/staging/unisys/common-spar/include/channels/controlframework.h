@@ -37,19 +37,19 @@
 /* Define Ki scale page to be traditional 4KB page */
 #define ULTRA_MEMORY_PAGE_Ki (ULTRA_MEMORY_PAGE_WORD * ULTRA_MEMORY_COUNT_Ki)
 typedef struct _ULTRA_SEGMENT_STATE  {
-	u16 Enabled:1;		/* Bit 0: May enter other states */
-	u16 Active:1;		/* Bit 1: Assigned to active partition */
-	u16 Alive:1;		/* Bit 2: Configure message sent to
+	u16 Enabled;		/* Bit 0: May enter other states */
+	u16 Active;		/* Bit 1: Assigned to active partition */
+	u16 Alive;		/* Bit 2: Configure message sent to
 				 * service/server */
-	u16 Revoked:1;		/* Bit 3: similar to partition state
+	u16 Revoked;		/* Bit 3: similar to partition state
 				 * ShuttingDown */
-	u16 Allocated:1;	/* Bit 4: memory (device/port number)
+	u16 Allocated;	/* Bit 4: memory (device/port number)
 				 * has been selected by Command */
-	u16 Known:1;		/* Bit 5: has been introduced to the
+	u16 Known;		/* Bit 5: has been introduced to the
 				 * service/guest partition */
-	u16 Ready:1;		/* Bit 6: service/Guest partition has
+	u16 Ready;		/* Bit 6: service/Guest partition has
 				 * responded to introduction */
-	u16 Operating:1;	/* Bit 7: resource is configured and
+	u16 Operating;	/* Bit 7: resource is configured and
 				 * operating */
 	/* Note: don't use high bit unless we need to switch to ushort
 	 * which is non-compliant */

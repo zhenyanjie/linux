@@ -99,8 +99,8 @@ struct omap_ssi_port {
 	int			wake_gpio;
 	struct tasklet_struct	pio_tasklet;
 	struct tasklet_struct	wake_tasklet;
-	bool			wktest:1; /* FIXME: HACK to be removed */
-	bool			wkin_cken:1; /* Workaround */
+	bool			wktest; /* FIXME: HACK to be removed */
+	bool			wkin_cken; /* Workaround */
 	unsigned int		wk_refcount;
 	/* OMAP SSI port context */
 	u32			sys_mpu_enable; /* We use only one irq */

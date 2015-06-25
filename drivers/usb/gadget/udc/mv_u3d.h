@@ -206,19 +206,19 @@ struct mv_u3d_ep_context {
 
 /* TRB control data structure */
 struct mv_u3d_trb_ctrl {
-	u32	own:1;		/* owner of TRB */
-	u32	rsvd1:3;
-	u32	chain:1;	/* associate this TRB with the
+	u32	own;		/* owner of TRB */
+	u32	rsvd1;
+	u32	chain;	/* associate this TRB with the
 				next TRB on the Ring */
-	u32	ioc:1;		/* interrupt on complete */
-	u32	rsvd2:4;
-	u32	type:6;		/* TRB type */
+	u32	ioc;		/* interrupt on complete */
+	u32	rsvd2;
+	u32	type;		/* TRB type */
 #define TYPE_NORMAL	1
 #define TYPE_DATA	3
 #define TYPE_LINK	6
-	u32	dir:1;		/* Working at data stage of control endpoint
+	u32	dir;		/* Working at data stage of control endpoint
 				operation. 0 is OUT and 1 is IN. */
-	u32	rsvd3:15;
+	u32	rsvd3;
 };
 
 /* TRB data structure
@@ -273,12 +273,12 @@ struct mv_u3d {
 
 	unsigned int		errors;
 
-	unsigned		softconnect:1;
-	unsigned		vbus_active:1;	/* vbus is active or not */
-	unsigned		remote_wakeup:1; /* support remote wakeup */
-	unsigned		clock_gating:1;	/* clock gating or not */
-	unsigned		active:1;	/* udc is active or not */
-	unsigned		vbus_valid_detect:1; /* udc vbus detection */
+	unsigned		softconnect;
+	unsigned		vbus_active;	/* vbus is active or not */
+	unsigned		remote_wakeup; /* support remote wakeup */
+	unsigned		clock_gating;	/* clock gating or not */
+	unsigned		active;	/* udc is active or not */
+	unsigned		vbus_valid_detect; /* udc vbus detection */
 
 	struct mv_usb_addon_irq *vbus;
 	unsigned int		power;
@@ -298,10 +298,10 @@ struct mv_u3d_ep {
 	u32			processing; /* there is ep request
 						queued on haredware */
 	spinlock_t		req_lock; /* ep lock */
-	unsigned		wedge:1;
-	unsigned		enabled:1;
-	unsigned		ep_type:2;
-	unsigned		ep_num:8;
+	unsigned		wedge;
+	unsigned		enabled;
+	unsigned		ep_type;
+	unsigned		ep_num;
 };
 
 /* request data structure */

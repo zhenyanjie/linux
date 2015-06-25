@@ -74,7 +74,7 @@ struct hdmi_driver_data {
 	unsigned int type;
 	const struct hdmiphy_config *phy_confs;
 	unsigned int phy_conf_count;
-	unsigned int is_apb_phy:1;
+	unsigned int is_apb_phy;
 };
 
 struct hdmi_resources {

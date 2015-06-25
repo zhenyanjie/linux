@@ -158,44 +158,44 @@ static inline void *netdev_priv_rsl(struct net_device *dev)
 /* At most 28 byte */
 struct cb_desc {
 	/* Tx Desc Related flags (8-9) */
-	u8 bLastIniPkt:1;
-	u8 bCmdOrInit:1;
-	u8 bFirstSeg:1;
-	u8 bLastSeg:1;
-	u8 bEncrypt:1;
-	u8 bTxDisableRateFallBack:1;
-	u8 bTxUseDriverAssingedRate:1;
-	u8 bHwSec:1;
+	u8 bLastIniPkt;
+	u8 bCmdOrInit;
+	u8 bFirstSeg;
+	u8 bLastSeg;
+	u8 bEncrypt;
+	u8 bTxDisableRateFallBack;
+	u8 bTxUseDriverAssingedRate;
+	u8 bHwSec;
 
 	u8 nStuckCount;
 
 	/* Tx Firmware Related flags (10-11)*/
-	u8 bCTSEnable:1;
-	u8 bRTSEnable:1;
-	u8 bUseShortGI:1;
-	u8 bUseShortPreamble:1;
-	u8 bTxEnableFwCalcDur:1;
-	u8 bAMPDUEnable:1;
-	u8 bRTSSTBC:1;
-	u8 RTSSC:1;
+	u8 bCTSEnable;
+	u8 bRTSEnable;
+	u8 bUseShortGI;
+	u8 bUseShortPreamble;
+	u8 bTxEnableFwCalcDur;
+	u8 bAMPDUEnable;
+	u8 bRTSSTBC;
+	u8 RTSSC;
 
-	u8 bRTSBW:1;
-	u8 bPacketBW:1;
-	u8 bRTSUseShortPreamble:1;
-	u8 bRTSUseShortGI:1;
-	u8 bMulticast:1;
-	u8 bBroadcast:1;
-	u8 drv_agg_enable:1;
-	u8 reserved2:1;
+	u8 bRTSBW;
+	u8 bPacketBW;
+	u8 bRTSUseShortPreamble;
+	u8 bRTSUseShortGI;
+	u8 bMulticast;
+	u8 bBroadcast;
+	u8 drv_agg_enable;
+	u8 reserved2;
 
 	/* Tx Desc related element(12-19) */
 	u8 rata_index;
 	u8 queue_index;
 	u16 txbuf_size;
 	u8 RATRIndex;
-	u8 bAMSDU:1;
-	u8 bFromAggrQ:1;
-	u8 reserved6:6;
+	u8 bAMSDU;
+	u8 bFromAggrQ;
+	u8 reserved6;
 	u8 macId;
 	u8 priority;
 
@@ -979,14 +979,14 @@ struct rtllib_rx_stats {
 	s32 RecvSignalPower;
 	s8  RxPower;
 	u8  SignalStrength;
-	u16 bHwError:1;
-	u16 bCRC:1;
-	u16 bICV:1;
-	u16 bShortPreamble:1;
-	u16 Antenna:1;
-	u16 Decrypted:1;
-	u16 Wakeup:1;
-	u16 Reserved0:1;
+	u16 bHwError;
+	u16 bCRC;
+	u16 bICV;
+	u16 bShortPreamble;
+	u16 Antenna;
+	u16 Decrypted;
+	u16 Wakeup;
+	u16 Reserved0;
 	u8  AGC;
 	u32 TimeStampLow;
 	u32 TimeStampHigh;
@@ -1092,7 +1092,7 @@ struct rtllib_security {
 	    auth_mode:2,
 	    auth_algo:4,
 	    unicast_uses_group:1,
-	    encrypt:1;
+	    encrypt;
 	u8 key_sizes[NUM_WEP_KEYS];
 	u8 keys[NUM_WEP_KEYS][SCM_KEY_LEN];
 	u8 level;
@@ -1318,11 +1318,11 @@ union frameqos {
 	u16 shortdata;
 	u8  chardata[2];
 	struct {
-		u16 tid:4;
-		u16 eosp:1;
-		u16 ack_policy:2;
-		u16 reserved:1;
-		u16 txop:8;
+		u16 tid;
+		u16 eosp;
+		u16 ack_policy;
+		u16 reserved;
+		u16 txop;
 	} field;
 };
 
@@ -1528,7 +1528,7 @@ struct rtllib_info_element_hdr {
 	u8 current_ap[ETH_ALEN];
 	u16 listen_interval;
 	struct {
-		u16 association_id:14, reserved:2;
+		u16 association_id:14, reserved;
 	} __packed;
 	u32 time_stamp[2];
 	u16 reason;

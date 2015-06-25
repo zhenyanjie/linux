@@ -16,23 +16,23 @@
  */
 struct cmd_orb {
 	u32 intparm;	/* interruption parameter */
-	u32 key:4;	/* flags, like key, suspend control, etc. */
-	u32 spnd:1;	/* suspend control */
-	u32 res1:1;	/* reserved */
-	u32 mod:1;	/* modification control */
-	u32 sync:1;	/* synchronize control */
-	u32 fmt:1;	/* format control */
-	u32 pfch:1;	/* prefetch control */
-	u32 isic:1;	/* initial-status-interruption control */
-	u32 alcc:1;	/* address-limit-checking control */
-	u32 ssic:1;	/* suppress-suspended-interr. control */
-	u32 res2:1;	/* reserved */
-	u32 c64:1;	/* IDAW/QDIO 64 bit control  */
-	u32 i2k:1;	/* IDAW 2/4kB block size control */
-	u32 lpm:8;	/* logical path mask */
-	u32 ils:1;	/* incorrect length */
-	u32 zero:6;	/* reserved zeros */
-	u32 orbx:1;	/* ORB extension control */
+	u32 key;	/* flags, like key, suspend control, etc. */
+	u32 spnd;	/* suspend control */
+	u32 res1;	/* reserved */
+	u32 mod;	/* modification control */
+	u32 sync;	/* synchronize control */
+	u32 fmt;	/* format control */
+	u32 pfch;	/* prefetch control */
+	u32 isic;	/* initial-status-interruption control */
+	u32 alcc;	/* address-limit-checking control */
+	u32 ssic;	/* suppress-suspended-interr. control */
+	u32 res2;	/* reserved */
+	u32 c64;	/* IDAW/QDIO 64 bit control  */
+	u32 i2k;	/* IDAW 2/4kB block size control */
+	u32 lpm;	/* logical path mask */
+	u32 ils;	/* incorrect length */
+	u32 zero;	/* reserved zeros */
+	u32 orbx;	/* ORB extension control */
 	u32 cpa;	/* channel program address */
 }  __packed __aligned(4);
 
@@ -41,22 +41,22 @@ struct cmd_orb {
  */
 struct tm_orb {
 	u32 intparm;
-	u32 key:4;
-	u32:9;
-	u32 b:1;
-	u32:2;
-	u32 lpm:8;
-	u32:7;
-	u32 x:1;
+	u32 key;
+	u32:8;
+	u32 b;
+	u32:8;
+	u32 lpm;
+	u32:8;
+	u32 x;
 	u32 tcw;
-	u32 prio:8;
+	u32 prio;
 	u32:8;
-	u32 rsvpgm:8;
+	u32 rsvpgm;
 	u32:8;
-	u32:32;
-	u32:32;
-	u32:32;
-	u32:32;
+	u32:8;
+	u32:8;
+	u32:8;
+	u32:8;
 }  __packed __aligned(4);
 
 /*
@@ -64,22 +64,22 @@ struct tm_orb {
  */
 struct eadm_orb {
 	u32 intparm;
-	u32 key:4;
-	u32:4;
-	u32 compat1:1;
-	u32 compat2:1;
-	u32:21;
-	u32 x:1;
+	u32 key;
+	u32:8;
+	u32 compat1;
+	u32 compat2;
+	u32:8;
+	u32 x;
 	u32 aob;
-	u32 css_prio:8;
+	u32 css_prio;
 	u32:8;
-	u32 scm_prio:8;
+	u32 scm_prio;
 	u32:8;
-	u32:29;
-	u32 fmt:3;
-	u32:32;
-	u32:32;
-	u32:32;
+	u32:8;
+	u32 fmt;
+	u32:8;
+	u32:8;
+	u32:8;
 }  __packed __aligned(4);
 
 union orb {

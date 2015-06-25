@@ -45,9 +45,9 @@ struct bcm_eth_packet_info {
 
 struct bcm_eth_q_frame {
 	struct bcm_eth_header EThHdr;
-	unsigned short UserPriority:3;
-	unsigned short CFI:1;
-	unsigned short VLANID:12;
+	unsigned short UserPriority;
+	unsigned short CFI;
+	unsigned short VLANID;
 	unsigned short EthType;
 } __packed;
 

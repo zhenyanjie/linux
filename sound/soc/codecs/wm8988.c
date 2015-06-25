@@ -453,8 +453,8 @@ struct _coeff_div {
 	u32 mclk;
 	u32 rate;
 	u16 fs;
-	u8 sr:5;
-	u8 usb:1;
+	u8 sr;
+	u8 usb;
 };
 
 /* codec hifi mclk clock divider coefficients */

@@ -80,10 +80,10 @@ static unsigned int mw64[] = { 0x89, 0x8B, 0xAB };
 #endif /* not __i386__ */
 
 struct prefix_bits {
-	unsigned shorted:1;
-	unsigned enlarged:1;
-	unsigned rexr:1;
-	unsigned rex:1;
+	unsigned shorted;
+	unsigned enlarged;
+	unsigned rexr;
+	unsigned rex;
 };
 
 static int skip_prefix(unsigned char *addr, struct prefix_bits *prf)

@@ -171,7 +171,7 @@ struct ni_65xx_board {
 	unsigned num_dio_ports;
 	unsigned num_di_ports;
 	unsigned num_do_ports;
-	unsigned legacy_invert:1;
+	unsigned legacy_invert;
 };
 
 static const struct ni_65xx_board ni_65xx_boards[] = {

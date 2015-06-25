@@ -494,37 +494,37 @@ struct megasas_ctrl_prop {
 	*/
 	struct {
 #if   defined(__BIG_ENDIAN_BITFIELD)
-		u32     reserved:18;
-		u32     enableJBOD:1;
-		u32     disableSpinDownHS:1;
-		u32     allowBootWithPinnedCache:1;
-		u32     disableOnlineCtrlReset:1;
-		u32     enableSecretKeyControl:1;
-		u32     autoEnhancedImport:1;
-		u32     enableSpinDownUnconfigured:1;
-		u32     SSDPatrolReadEnabled:1;
-		u32     SSDSMARTerEnabled:1;
-		u32     disableNCQ:1;
-		u32     useFdeOnly:1;
-		u32     prCorrectUnconfiguredAreas:1;
-		u32     SMARTerEnabled:1;
-		u32     copyBackDisabled:1;
+		u32     reserved;
+		u32     enableJBOD;
+		u32     disableSpinDownHS;
+		u32     allowBootWithPinnedCache;
+		u32     disableOnlineCtrlReset;
+		u32     enableSecretKeyControl;
+		u32     autoEnhancedImport;
+		u32     enableSpinDownUnconfigured;
+		u32     SSDPatrolReadEnabled;
+		u32     SSDSMARTerEnabled;
+		u32     disableNCQ;
+		u32     useFdeOnly;
+		u32     prCorrectUnconfiguredAreas;
+		u32     SMARTerEnabled;
+		u32     copyBackDisabled;
 #else
-		u32     copyBackDisabled:1;
-		u32     SMARTerEnabled:1;
-		u32     prCorrectUnconfiguredAreas:1;
-		u32     useFdeOnly:1;
-		u32     disableNCQ:1;
-		u32     SSDSMARTerEnabled:1;
-		u32     SSDPatrolReadEnabled:1;
-		u32     enableSpinDownUnconfigured:1;
-		u32     autoEnhancedImport:1;
-		u32     enableSecretKeyControl:1;
-		u32     disableOnlineCtrlReset:1;
-		u32     allowBootWithPinnedCache:1;
-		u32     disableSpinDownHS:1;
-		u32     enableJBOD:1;
-		u32     reserved:18;
+		u32     copyBackDisabled;
+		u32     SMARTerEnabled;
+		u32     prCorrectUnconfiguredAreas;
+		u32     useFdeOnly;
+		u32     disableNCQ;
+		u32     SSDSMARTerEnabled;
+		u32     SSDPatrolReadEnabled;
+		u32     enableSpinDownUnconfigured;
+		u32     autoEnhancedImport;
+		u32     enableSecretKeyControl;
+		u32     disableOnlineCtrlReset;
+		u32     allowBootWithPinnedCache;
+		u32     disableSpinDownHS;
+		u32     enableJBOD;
+		u32     reserved;
 #endif
 	} OnOffProperties;
 	u8 autoSnapVDSpace;
@@ -556,12 +556,12 @@ struct megasas_ctrl_info {
 	 */
 	struct {
 
-		u8 PCIX:1;
-		u8 PCIE:1;
-		u8 iSCSI:1;
-		u8 SAS_3G:1;
-		u8 SRIOV:1;
-		u8 reserved_0:3;
+		u8 PCIX;
+		u8 PCIE;
+		u8 iSCSI;
+		u8 SAS_3G;
+		u8 SRIOV;
+		u8 reserved_0;
 		u8 reserved_1[6];
 		u8 port_count;
 		u64 port_addr[8];
@@ -573,11 +573,11 @@ struct megasas_ctrl_info {
 	 */
 	struct {
 
-		u8 SPI:1;
-		u8 SAS_3G:1;
-		u8 SATA_1_5G:1;
-		u8 SATA_3G:1;
-		u8 reserved_0:4;
+		u8 SPI;
+		u8 SAS_3G;
+		u8 SATA_1_5G;
+		u8 SATA_3G;
+		u8 reserved_0;
 		u8 reserved_1[6];
 		u8 port_count;
 		u64 port_addr[8];
@@ -630,11 +630,11 @@ struct megasas_ctrl_info {
 	 */
 	struct {
 
-		u32 bbu:1;
-		u32 alarm:1;
-		u32 nvram:1;
-		u32 uart:1;
-		u32 reserved:28;
+		u32 bbu;
+		u32 alarm;
+		u32 nvram;
+		u32 uart;
+		u32 reserved;
 
 	} __attribute__ ((packed)) hw_present;
 
@@ -688,44 +688,44 @@ struct megasas_ctrl_info {
 	 */
 	struct {
 
-		u32 raid_level_0:1;
-		u32 raid_level_1:1;
-		u32 raid_level_5:1;
-		u32 raid_level_1E:1;
-		u32 raid_level_6:1;
-		u32 reserved:27;
+		u32 raid_level_0;
+		u32 raid_level_1;
+		u32 raid_level_5;
+		u32 raid_level_1E;
+		u32 raid_level_6;
+		u32 reserved;
 
 	} __attribute__ ((packed)) raid_levels;
 
 	struct {
 
-		u32 rbld_rate:1;
-		u32 cc_rate:1;
-		u32 bgi_rate:1;
-		u32 recon_rate:1;
-		u32 patrol_rate:1;
-		u32 alarm_control:1;
-		u32 cluster_supported:1;
-		u32 bbu:1;
-		u32 spanning_allowed:1;
-		u32 dedicated_hotspares:1;
-		u32 revertible_hotspares:1;
-		u32 foreign_config_import:1;
-		u32 self_diagnostic:1;
-		u32 mixed_redundancy_arr:1;
-		u32 global_hot_spares:1;
-		u32 reserved:17;
+		u32 rbld_rate;
+		u32 cc_rate;
+		u32 bgi_rate;
+		u32 recon_rate;
+		u32 patrol_rate;
+		u32 alarm_control;
+		u32 cluster_supported;
+		u32 bbu;
+		u32 spanning_allowed;
+		u32 dedicated_hotspares;
+		u32 revertible_hotspares;
+		u32 foreign_config_import;
+		u32 self_diagnostic;
+		u32 mixed_redundancy_arr;
+		u32 global_hot_spares;
+		u32 reserved;
 
 	} __attribute__ ((packed)) adapter_operations;
 
 	struct {
 
-		u32 read_policy:1;
-		u32 write_policy:1;
-		u32 io_policy:1;
-		u32 access_policy:1;
-		u32 disk_cache_policy:1;
-		u32 reserved:27;
+		u32 read_policy;
+		u32 write_policy;
+		u32 io_policy;
+		u32 access_policy;
+		u32 disk_cache_policy;
+		u32 reserved;
 
 	} __attribute__ ((packed)) ld_operations;
 
@@ -739,21 +739,21 @@ struct megasas_ctrl_info {
 
 	struct {
 
-		u32 force_online:1;
-		u32 force_offline:1;
-		u32 force_rebuild:1;
-		u32 reserved:29;
+		u32 force_online;
+		u32 force_offline;
+		u32 force_rebuild;
+		u32 reserved;
 
 	} __attribute__ ((packed)) pd_operations;
 
 	struct {
 
-		u32 ctrl_supports_sas:1;
-		u32 ctrl_supports_sata:1;
-		u32 allow_mix_in_encl:1;
-		u32 allow_mix_in_ld:1;
-		u32 allow_sata_in_cluster:1;
-		u32 reserved:27;
+		u32 ctrl_supports_sas;
+		u32 ctrl_supports_sata;
+		u32 allow_mix_in_encl;
+		u32 allow_mix_in_ld;
+		u32 allow_sata_in_cluster;
+		u32 reserved;
 
 	} __attribute__ ((packed)) pd_mix_support;
 
@@ -785,35 +785,35 @@ struct megasas_ctrl_info {
 	u8          reserved3[128];              /*6e0h */
 
 	struct {                                /*760h */
-		u16 minPdRaidLevel_0:4;
-		u16 maxPdRaidLevel_0:12;
+		u16 minPdRaidLevel_0;
+		u16 maxPdRaidLevel_0;
 
-		u16 minPdRaidLevel_1:4;
-		u16 maxPdRaidLevel_1:12;
+		u16 minPdRaidLevel_1;
+		u16 maxPdRaidLevel_1;
 
-		u16 minPdRaidLevel_5:4;
-		u16 maxPdRaidLevel_5:12;
+		u16 minPdRaidLevel_5;
+		u16 maxPdRaidLevel_5;
 
-		u16 minPdRaidLevel_1E:4;
-		u16 maxPdRaidLevel_1E:12;
+		u16 minPdRaidLevel_1E;
+		u16 maxPdRaidLevel_1E;
 
-		u16 minPdRaidLevel_6:4;
-		u16 maxPdRaidLevel_6:12;
+		u16 minPdRaidLevel_6;
+		u16 maxPdRaidLevel_6;
 
-		u16 minPdRaidLevel_10:4;
-		u16 maxPdRaidLevel_10:12;
+		u16 minPdRaidLevel_10;
+		u16 maxPdRaidLevel_10;
 
-		u16 minPdRaidLevel_50:4;
-		u16 maxPdRaidLevel_50:12;
+		u16 minPdRaidLevel_50;
+		u16 maxPdRaidLevel_50;
 
-		u16 minPdRaidLevel_60:4;
-		u16 maxPdRaidLevel_60:12;
+		u16 minPdRaidLevel_60;
+		u16 maxPdRaidLevel_60;
 
-		u16 minPdRaidLevel_1E_RLQ0:4;
-		u16 maxPdRaidLevel_1E_RLQ0:12;
+		u16 minPdRaidLevel_1E_RLQ0;
+		u16 maxPdRaidLevel_1E_RLQ0;
 
-		u16 minPdRaidLevel_1E0_RLQ0:4;
-		u16 maxPdRaidLevel_1E0_RLQ0:12;
+		u16 minPdRaidLevel_1E0_RLQ0;
+		u16 maxPdRaidLevel_1E0_RLQ0;
 
 		u16 reserved[6];
 	} pdsForRaidLevels;
@@ -841,64 +841,64 @@ struct megasas_ctrl_info {
 
 	struct {                                /*7A4h */
 #if   defined(__BIG_ENDIAN_BITFIELD)
-		u32     reserved:5;
-		u32	activePassive:2;
-		u32	supportConfigAutoBalance:1;
-		u32	mpio:1;
-		u32	supportDataLDonSSCArray:1;
-		u32	supportPointInTimeProgress:1;
-		u32     supportUnevenSpans:1;
-		u32     dedicatedHotSparesLimited:1;
-		u32     headlessMode:1;
-		u32     supportEmulatedDrives:1;
-		u32     supportResetNow:1;
-		u32     realTimeScheduler:1;
-		u32     supportSSDPatrolRead:1;
-		u32     supportPerfTuning:1;
-		u32     disableOnlinePFKChange:1;
-		u32     supportJBOD:1;
-		u32     supportBootTimePFKChange:1;
-		u32     supportSetLinkSpeed:1;
-		u32     supportEmergencySpares:1;
-		u32     supportSuspendResumeBGops:1;
-		u32     blockSSDWriteCacheChange:1;
-		u32     supportShieldState:1;
-		u32     supportLdBBMInfo:1;
-		u32     supportLdPIType3:1;
-		u32     supportLdPIType2:1;
-		u32     supportLdPIType1:1;
-		u32     supportPIcontroller:1;
+		u32     reserved;
+		u32	activePassive;
+		u32	supportConfigAutoBalance;
+		u32	mpio;
+		u32	supportDataLDonSSCArray;
+		u32	supportPointInTimeProgress;
+		u32     supportUnevenSpans;
+		u32     dedicatedHotSparesLimited;
+		u32     headlessMode;
+		u32     supportEmulatedDrives;
+		u32     supportResetNow;
+		u32     realTimeScheduler;
+		u32     supportSSDPatrolRead;
+		u32     supportPerfTuning;
+		u32     disableOnlinePFKChange;
+		u32     supportJBOD;
+		u32     supportBootTimePFKChange;
+		u32     supportSetLinkSpeed;
+		u32     supportEmergencySpares;
+		u32     supportSuspendResumeBGops;
+		u32     blockSSDWriteCacheChange;
+		u32     supportShieldState;
+		u32     supportLdBBMInfo;
+		u32     supportLdPIType3;
+		u32     supportLdPIType2;
+		u32     supportLdPIType1;
+		u32     supportPIcontroller;
 #else
-		u32     supportPIcontroller:1;
-		u32     supportLdPIType1:1;
-		u32     supportLdPIType2:1;
-		u32     supportLdPIType3:1;
-		u32     supportLdBBMInfo:1;
-		u32     supportShieldState:1;
-		u32     blockSSDWriteCacheChange:1;
-		u32     supportSuspendResumeBGops:1;
-		u32     supportEmergencySpares:1;
-		u32     supportSetLinkSpeed:1;
-		u32     supportBootTimePFKChange:1;
-		u32     supportJBOD:1;
-		u32     disableOnlinePFKChange:1;
-		u32     supportPerfTuning:1;
-		u32     supportSSDPatrolRead:1;
-		u32     realTimeScheduler:1;
+		u32     supportPIcontroller;
+		u32     supportLdPIType1;
+		u32     supportLdPIType2;
+		u32     supportLdPIType3;
+		u32     supportLdBBMInfo;
+		u32     supportShieldState;
+		u32     blockSSDWriteCacheChange;
+		u32     supportSuspendResumeBGops;
+		u32     supportEmergencySpares;
+		u32     supportSetLinkSpeed;
+		u32     supportBootTimePFKChange;
+		u32     supportJBOD;
+		u32     disableOnlinePFKChange;
+		u32     supportPerfTuning;
+		u32     supportSSDPatrolRead;
+		u32     realTimeScheduler;
 
-		u32     supportResetNow:1;
-		u32     supportEmulatedDrives:1;
-		u32     headlessMode:1;
-		u32     dedicatedHotSparesLimited:1;
+		u32     supportResetNow;
+		u32     supportEmulatedDrives;
+		u32     headlessMode;
+		u32     dedicatedHotSparesLimited;
 
 
-		u32     supportUnevenSpans:1;
-		u32	supportPointInTimeProgress:1;
-		u32	supportDataLDonSSCArray:1;
-		u32	mpio:1;
-		u32	supportConfigAutoBalance:1;
-		u32	activePassive:2;
-		u32     reserved:5;
+		u32     supportUnevenSpans;
+		u32	supportPointInTimeProgress;
+		u32	supportDataLDonSSCArray;
+		u32	mpio;
+		u32	supportConfigAutoBalance;
+		u32	activePassive;
+		u32     reserved;
 #endif
 	} adapterOperations2;
 
@@ -916,13 +916,13 @@ struct megasas_ctrl_info {
 	* HA cluster information
 	*/
 	struct {
-		u32     peerIsPresent:1;
-		u32     peerIsIncompatible:1;
-		u32     hwIncompatible:1;
-		u32     fwVersionMismatch:1;
-		u32     ctrlPropIncompatible:1;
-		u32     premiumFeatureMismatch:1;
-		u32     reserved:26;
+		u32     peerIsPresent;
+		u32     peerIsIncompatible;
+		u32     hwIncompatible;
+		u32     fwVersionMismatch;
+		u32     ctrlPropIncompatible;
+		u32     premiumFeatureMismatch;
+		u32     reserved;
 	} cluster;
 
 	char clusterId[16];                     /*7D4h */
@@ -1133,13 +1133,13 @@ union megasas_sgl_frame {
 typedef union _MFI_CAPABILITIES {
 	struct {
 #if   defined(__BIG_ENDIAN_BITFIELD)
-		u32     reserved:30;
-		u32     support_additional_msix:1;
-		u32     support_fp_remote_lun:1;
+		u32     reserved;
+		u32     support_additional_msix;
+		u32     support_fp_remote_lun;
 #else
-		u32     support_fp_remote_lun:1;
-		u32     support_additional_msix:1;
-		u32     reserved:30;
+		u32     support_fp_remote_lun;
+		u32     support_additional_msix;
+		u32     reserved;
 #endif
 	} mfi_capabilities;
 	u32     reg;
@@ -1687,9 +1687,9 @@ struct MR_CTRL_HB_HOST_MEM {
 	struct {
 		u32 fwCounter;	/* Firmware heart beat counter */
 		struct {
-			u32 debugmode:1; /* 1=Firmware is in debug mode.
+			u32 debugmode; /* 1=Firmware is in debug mode.
 					    Heart beat will not be updated. */
-			u32 reserved:31;
+			u32 reserved;
 		} debug;
 		u32 reserved_fw[6];
 		u32 driverCounter; /* Driver heart beat counter.  0x20 */

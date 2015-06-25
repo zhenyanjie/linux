@@ -113,7 +113,7 @@ struct loopback_pcm {
 	unsigned int pcm_salign;	/* bytes per sample * channels */
 	unsigned int pcm_rate_shift;	/* rate shift value */
 	/* flags */
-	unsigned int period_update_pending :1;
+	unsigned int period_update_pending ;
 	/* timer stuff */
 	unsigned int irq_pos;		/* fractional IRQ position */
 	unsigned int period_size_frac;

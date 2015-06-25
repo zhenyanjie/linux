@@ -97,14 +97,14 @@ struct at91_ep {
 	struct at91_udc			*udc;
 	void __iomem			*creg;
 
-	unsigned			maxpacket:16;
+	unsigned			maxpacket;
 	u8				int_mask;
-	unsigned			is_pingpong:1;
+	unsigned			is_pingpong;
 
-	unsigned			stopped:1;
-	unsigned			is_in:1;
-	unsigned			is_iso:1;
-	unsigned			fifo_bank:1;
+	unsigned			stopped;
+	unsigned			is_in;
+	unsigned			is_iso;
+	unsigned			fifo_bank;
 };
 
 /*
@@ -115,15 +115,15 @@ struct at91_udc {
 	struct usb_gadget		gadget;
 	struct at91_ep			ep[NUM_ENDPOINTS];
 	struct usb_gadget_driver	*driver;
-	unsigned			vbus:1;
-	unsigned			enabled:1;
-	unsigned			clocked:1;
-	unsigned			suspended:1;
-	unsigned			req_pending:1;
-	unsigned			wait_for_addr_ack:1;
-	unsigned			wait_for_config_ack:1;
-	unsigned			selfpowered:1;
-	unsigned			active_suspend:1;
+	unsigned			vbus;
+	unsigned			enabled;
+	unsigned			clocked;
+	unsigned			suspended;
+	unsigned			req_pending;
+	unsigned			wait_for_addr_ack;
+	unsigned			wait_for_config_ack;
+	unsigned			selfpowered;
+	unsigned			active_suspend;
 	u8				addr;
 	struct at91_udc_data		board;
 	struct clk			*iclk, *fclk, *uclk;

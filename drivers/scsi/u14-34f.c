@@ -550,8 +550,8 @@ struct sg_list {
 struct mscp {
 
 #if defined(__BIG_ENDIAN_BITFIELD)
-   unsigned char sg:1, ca:1, dcn:1, xdir:2, opcode:3;
-   unsigned char lun: 3, channel:2, target:3;
+   unsigned char sg:1, ca:1, dcn:1, xdir:2, opcode;
+   unsigned char lun: 3, channel:2, target;
 #else
    unsigned char opcode: 3,             /* type of command */
                  xdir: 2,               /* data transfer direction */

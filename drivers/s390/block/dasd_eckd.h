@@ -112,18 +112,18 @@ struct eckd_home {
 
 struct DE_eckd_data {
 	struct {
-		unsigned char perm:2;	/* Permissions on this extent */
-		unsigned char reserved:1;
-		unsigned char seek:2;	/* Seek control */
-		unsigned char auth:2;	/* Access authorization */
-		unsigned char pci:1;	/* PCI Fetch mode */
+		unsigned char perm;	/* Permissions on this extent */
+		unsigned char reserved;
+		unsigned char seek;	/* Seek control */
+		unsigned char auth;	/* Access authorization */
+		unsigned char pci;	/* PCI Fetch mode */
 	} __attribute__ ((packed)) mask;
 	struct {
-		unsigned char mode:2;	/* Architecture mode */
-		unsigned char ckd:1;	/* CKD Conversion */
-		unsigned char operation:3;	/* Operation mode */
-		unsigned char cfw:1;	/* Cache fast write */
-		unsigned char dfw:1;	/* DASD fast write */
+		unsigned char mode;	/* Architecture mode */
+		unsigned char ckd;	/* CKD Conversion */
+		unsigned char operation;	/* Operation mode */
+		unsigned char cfw;	/* Cache fast write */
+		unsigned char dfw;	/* DASD fast write */
 	} __attribute__ ((packed)) attributes;
 	__u16 blk_size;		/* Blocksize */
 	__u16 fast_write_id;
@@ -141,13 +141,13 @@ struct DE_eckd_data {
 
 struct LO_eckd_data {
 	struct {
-		unsigned char orientation:2;
-		unsigned char operation:6;
+		unsigned char orientation;
+		unsigned char operation;
 	} __attribute__ ((packed)) operation;
 	struct {
-		unsigned char last_bytes_used:1;
-		unsigned char reserved:6;
-		unsigned char read_count_suffix:1;
+		unsigned char last_bytes_used;
+		unsigned char reserved;
+		unsigned char read_count_suffix;
 	} __attribute__ ((packed)) auxiliary;
 	__u8 unused;
 	__u8 count;
@@ -159,17 +159,17 @@ struct LO_eckd_data {
 
 struct LRE_eckd_data {
 	struct {
-		unsigned char orientation:2;
-		unsigned char operation:6;
+		unsigned char orientation;
+		unsigned char operation;
 	} __attribute__ ((packed)) operation;
 	struct {
-		unsigned char length_valid:1;
-		unsigned char length_scope:1;
-		unsigned char imbedded_ccw_valid:1;
-		unsigned char check_bytes:2;
-		unsigned char imbedded_count_valid:1;
-		unsigned char reserved:1;
-		unsigned char read_count_suffix:1;
+		unsigned char length_valid;
+		unsigned char length_scope;
+		unsigned char imbedded_ccw_valid;
+		unsigned char check_bytes;
+		unsigned char imbedded_count_valid;
+		unsigned char reserved;
+		unsigned char read_count_suffix;
 	} __attribute__ ((packed)) auxiliary;
 	__u8 imbedded_ccw;
 	__u8 count;
@@ -187,11 +187,11 @@ struct LRE_eckd_data {
 struct PFX_eckd_data {
 	unsigned char format;
 	struct {
-		unsigned char define_extent:1;
-		unsigned char time_stamp:1;
-		unsigned char verify_base:1;
-		unsigned char hyper_pav:1;
-		unsigned char reserved:4;
+		unsigned char define_extent;
+		unsigned char time_stamp;
+		unsigned char verify_base;
+		unsigned char hyper_pav;
+		unsigned char reserved;
 	} __attribute__ ((packed)) validity;
 	__u8 base_address;
 	__u8 aux;
@@ -204,33 +204,33 @@ struct PFX_eckd_data {
 struct dasd_eckd_characteristics {
 	__u16 cu_type;
 	struct {
-		unsigned char support:2;
-		unsigned char async:1;
-		unsigned char reserved:1;
-		unsigned char cache_info:1;
-		unsigned char model:3;
+		unsigned char support;
+		unsigned char async;
+		unsigned char reserved;
+		unsigned char cache_info;
+		unsigned char model;
 	} __attribute__ ((packed)) cu_model;
 	__u16 dev_type;
 	__u8 dev_model;
 	struct {
-		unsigned char mult_burst:1;
-		unsigned char RT_in_LR:1;
-		unsigned char reserved1:1;
-		unsigned char RD_IN_LR:1;
-		unsigned char reserved2:4;
-		unsigned char reserved3:8;
-		unsigned char defect_wr:1;
-		unsigned char XRC_supported:1;
-		unsigned char reserved4:1;
-		unsigned char striping:1;
-		unsigned char reserved5:4;
-		unsigned char cfw:1;
-		unsigned char reserved6:2;
-		unsigned char cache:1;
-		unsigned char dual_copy:1;
-		unsigned char dfw:1;
-		unsigned char reset_alleg:1;
-		unsigned char sense_down:1;
+		unsigned char mult_burst;
+		unsigned char RT_in_LR;
+		unsigned char reserved1;
+		unsigned char RD_IN_LR;
+		unsigned char reserved2;
+		unsigned char reserved3;
+		unsigned char defect_wr;
+		unsigned char XRC_supported;
+		unsigned char reserved4;
+		unsigned char striping;
+		unsigned char reserved5;
+		unsigned char cfw;
+		unsigned char reserved6;
+		unsigned char cache;
+		unsigned char dual_copy;
+		unsigned char dfw;
+		unsigned char reset_alleg;
+		unsigned char sense_down;
 	} __attribute__ ((packed)) facilities;
 	__u8 dev_class;
 	__u8 unit_type;
@@ -278,13 +278,13 @@ struct dasd_eckd_characteristics {
 /* elements of the configuration data */
 struct dasd_ned {
 	struct {
-		__u8 identifier:2;
-		__u8 token_id:1;
-		__u8 sno_valid:1;
-		__u8 subst_sno:1;
-		__u8 recNED:1;
-		__u8 emuNED:1;
-		__u8 reserved:1;
+		__u8 identifier;
+		__u8 token_id;
+		__u8 sno_valid;
+		__u8 subst_sno;
+		__u8 recNED;
+		__u8 emuNED;
+		__u8 reserved;
 	} __attribute__ ((packed)) flags;
 	__u8 descriptor;
 	__u8 dev_class;
@@ -300,8 +300,8 @@ struct dasd_ned {
 
 struct dasd_sneq {
 	struct {
-		__u8 identifier:2;
-		__u8 reserved:6;
+		__u8 identifier;
+		__u8 reserved;
 	} __attribute__ ((packed)) flags;
 	__u8 res1;
 	__u16 format;
@@ -313,8 +313,8 @@ struct dasd_sneq {
 
 struct vd_sneq {
 	struct {
-		__u8 identifier:2;
-		__u8 reserved:6;
+		__u8 identifier;
+		__u8 reserved;
 	} __attribute__ ((packed)) flags;
 	__u8 res1;
 	__u16 format;
@@ -325,13 +325,13 @@ struct vd_sneq {
 
 struct dasd_gneq {
 	struct {
-		__u8 identifier:2;
-		__u8 reserved:6;
+		__u8 identifier;
+		__u8 reserved;
 	} __attribute__ ((packed)) flags;
 	__u8 reserved[5];
 	struct {
-		__u8 value:2;
-		__u8 number:6;
+		__u8 value;
+		__u8 number;
 	} __attribute__ ((packed)) timeout;
 	__u8 reserved3;
 	__u16 subsystemID;

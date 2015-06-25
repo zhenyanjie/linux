@@ -120,22 +120,22 @@ enum TXDESC_SC {
 
 struct txrpt_ccx_88e {
 	/* offset 0 */
-	u8 tag1:1;
-	u8 pkt_num:3;
-	u8 txdma_underflow:1;
-	u8 int_bt:1;
-	u8 int_tri:1;
-	u8 int_ccx:1;
+	u8 tag1;
+	u8 pkt_num;
+	u8 txdma_underflow;
+	u8 int_bt;
+	u8 int_tri;
+	u8 int_ccx;
 
 	/* offset 1 */
-	u8 mac_id:6;
-	u8 pkt_ok:1;
-	u8 bmc:1;
+	u8 mac_id;
+	u8 pkt_ok;
+	u8 bmc;
 
 	/* offset 2 */
-	u8 retry_cnt:6;
-	u8 lifetime_over:1;
-	u8 retry_over:1;
+	u8 retry_cnt;
+	u8 lifetime_over;
+	u8 retry_over;
 
 	/* offset 3 */
 	u8 ccx_qtime0;
@@ -145,8 +145,8 @@ struct txrpt_ccx_88e {
 	u8 final_data_rate;
 
 	/* offset 6 */
-	u8 sw1:4;
-	u8 qsel:4;
+	u8 sw1;
+	u8 qsel;
 
 	/* offset 7 */
 	u8 sw0;

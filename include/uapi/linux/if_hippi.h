@@ -80,22 +80,22 @@ struct hippi_fp_hdr {
 #if 0
 	__u8		ulp;				/* must contain 4 */
 #if defined (__BIG_ENDIAN_BITFIELD)
-	__u8		d1_data_present:1;		/* must be 1 */
-	__u8		start_d2_burst_boundary:1;	/* must be zero */
-	__u8		reserved:6;			/* must be zero */
+	__u8		d1_data_present;		/* must be 1 */
+	__u8		start_d2_burst_boundary;	/* must be zero */
+	__u8		reserved;			/* must be zero */
 #if 0
-	__u16		reserved1:5;
-	__u16		d1_area_size:8;			/* must be 3 */
-	__u16		d2_offset:3;			/* must be zero */
+	__u16		reserved1;
+	__u16		d1_area_size;			/* must be 3 */
+	__u16		d2_offset;			/* must be zero */
 #endif
 #elif defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8		reserved:6;			/* must be zero */
-	__u8	 	start_d2_burst_boundary:1;	/* must be zero */
-	__u8		d1_data_present:1;		/* must be 1 */
+	__u8		reserved;			/* must be zero */
+	__u8	 	start_d2_burst_boundary;	/* must be zero */
+	__u8		d1_data_present;		/* must be 1 */
 #if 0
-	__u16		d2_offset:3;			/* must be zero */
-	__u16		d1_area_size:8;			/* must be 3 */
-	__u16		reserved1:5;			/* must be zero */
+	__u16		d2_offset;			/* must be zero */
+	__u16		d1_area_size;			/* must be 3 */
+	__u16		reserved1;			/* must be zero */
 #endif
 #else
 #error	"Please fix <asm/byteorder.h>"
@@ -108,21 +108,21 @@ struct hippi_fp_hdr {
 
 struct hippi_le_hdr {
 #if defined (__BIG_ENDIAN_BITFIELD)
-	__u8		fc:3;
-	__u8		double_wide:1;
-	__u8		message_type:4;
+	__u8		fc;
+	__u8		double_wide;
+	__u8		message_type;
 #elif defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8		message_type:4;
-	__u8		double_wide:1;
-	__u8		fc:3;
+	__u8		message_type;
+	__u8		double_wide;
+	__u8		fc;
 #endif
 	__u8		dest_switch_addr[3];
 #if defined (__BIG_ENDIAN_BITFIELD)
 	__u8		dest_addr_type:4,
-			src_addr_type:4;
+			src_addr_type;
 #elif defined(__LITTLE_ENDIAN_BITFIELD)
 	__u8		src_addr_type:4,
-			dest_addr_type:4;
+			dest_addr_type;
 #endif
 	__u8		src_switch_addr[3];
 	__u16		reserved;

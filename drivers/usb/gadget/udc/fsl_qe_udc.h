@@ -259,7 +259,7 @@ struct qe_req {
 	/* ep_queue() func will add
 	 a request->queue into a udc_ep->queue 'd tail */
 	struct qe_ep *ep;
-	unsigned mapped:1;
+	unsigned mapped;
 };
 
 struct qe_ep {
@@ -303,10 +303,10 @@ struct qe_ep {
 
 	char name[14];
 
-	unsigned double_buf:1;
-	unsigned stopped:1;
-	unsigned fnf:1;
-	unsigned has_dma:1;
+	unsigned double_buf;
+	unsigned stopped;
+	unsigned fnf;
+	unsigned has_dma;
 
 	u8 ackwait;
 	u8 dma_channel;

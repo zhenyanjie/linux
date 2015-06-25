@@ -372,7 +372,7 @@ struct bttv {
 	unsigned int tuner_type;  /* tuner chip type */
 	unsigned int tda9887_conf;
 	unsigned int svhs, dig;
-	unsigned int has_saa6588:1;
+	unsigned int has_saa6588;
 	struct bttv_pll_info pll;
 	int triton1;
 	int gpioirq;

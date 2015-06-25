@@ -410,7 +410,7 @@ struct netdev_private {
 	unsigned int linkok;
 	unsigned int line_speed;
 	unsigned int duplexmode;
-	unsigned int default_port:4;	/* Last dev->if_port value. */
+	unsigned int default_port;	/* Last dev->if_port value. */
 	unsigned int PHYType;
 
 	/* MII transceiver section. */

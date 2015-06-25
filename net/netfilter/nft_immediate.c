@@ -19,7 +19,7 @@
 
 struct nft_immediate_expr {
 	struct nft_data		data;
-	enum nft_registers	dreg:8;
+	enum nft_registers	dreg;
 	u8			dlen;
 };
 

@@ -282,9 +282,9 @@ void	bfa_rport_res_recfg(struct bfa_s *bfa, u16 num_rport_fw);
 struct bfa_rport_info_s {
 	u16	max_frmsz;	/*  max rcv pdu size		    */
 	u32	pid:24,	/*  remote port ID		    */
-		lp_tag:8;	/*  tag			    */
+		lp_tag;	/*  tag			    */
 	u32	local_pid:24,	/*  local port ID		    */
-		cisc:8;	/*  CIRO supported		    */
+		cisc;	/*  CIRO supported		    */
 	u8	fc_class;	/*  supported FC classes. enum fc_cos */
 	u8	vf_en;		/*  virtual fabric enable	    */
 	u16	vf_id;		/*  virtual fabric ID		    */

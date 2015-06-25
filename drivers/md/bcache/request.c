@@ -461,9 +461,9 @@ struct search {
 	struct bcache_device	*d;
 
 	unsigned		insert_bio_sectors;
-	unsigned		recoverable:1;
-	unsigned		write:1;
-	unsigned		read_dirty_data:1;
+	unsigned		recoverable;
+	unsigned		write;
+	unsigned		read_dirty_data;
 
 	unsigned long		start_time;
 

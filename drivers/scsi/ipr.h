@@ -502,10 +502,10 @@ struct ipr_hrr_queue {
 	u32 size;
 	u32 min_cmd_id;
 	u32 max_cmd_id;
-	u8 allow_interrupts:1;
-	u8 ioa_is_dead:1;
-	u8 allow_cmds:1;
-	u8 removing_ioa:1;
+	u8 allow_interrupts;
+	u8 ioa_is_dead;
+	u8 allow_cmds;
+	u8 removing_ioa;
 
 	struct blk_iopoll iopoll;
 };
@@ -1266,12 +1266,12 @@ struct ipr_sata_port {
 };
 
 struct ipr_resource_entry {
-	u8 needs_sync_complete:1;
-	u8 in_erp:1;
-	u8 add_to_ml:1;
-	u8 del_from_ml:1;
-	u8 resetting_device:1;
-	u8 reset_occurred:1;
+	u8 needs_sync_complete;
+	u8 in_erp;
+	u8 add_to_ml;
+	u8 del_from_ml;
+	u8 resetting_device;
+	u8 reset_occurred;
 
 	u32 bus;		/* AKA channel */
 	u32 target;		/* AKA id */
@@ -1448,20 +1448,20 @@ struct ipr_ioa_cfg {
 
 	struct list_head queue;
 
-	u8 in_reset_reload:1;
-	u8 in_ioa_bringdown:1;
-	u8 ioa_unit_checked:1;
-	u8 dump_taken:1;
-	u8 allow_ml_add_del:1;
-	u8 needs_hard_reset:1;
-	u8 dual_raid:1;
-	u8 needs_warm_reset:1;
-	u8 msi_received:1;
-	u8 sis64:1;
-	u8 dump_timeout:1;
-	u8 cfg_locked:1;
-	u8 clear_isr:1;
-	u8 probe_done:1;
+	u8 in_reset_reload;
+	u8 in_ioa_bringdown;
+	u8 ioa_unit_checked;
+	u8 dump_taken;
+	u8 allow_ml_add_del;
+	u8 needs_hard_reset;
+	u8 dual_raid;
+	u8 needs_warm_reset;
+	u8 msi_received;
+	u8 sis64;
+	u8 dump_timeout;
+	u8 cfg_locked;
+	u8 clear_isr;
+	u8 probe_done;
 
 	u8 revid;
 

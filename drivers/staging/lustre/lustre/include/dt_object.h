@@ -754,10 +754,10 @@ struct thandle {
 	__s32	     th_result;
 
 	/** whether we need sync commit */
-	unsigned int		th_sync:1;
+	unsigned int		th_sync;
 
 	/* local transation, no need to inform other layers */
-	unsigned int		th_local:1;
+	unsigned int		th_local;
 
 	/* In DNE, one transaction can be disassemblied into
 	 * updates on several different MDTs, and these updates

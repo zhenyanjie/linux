@@ -66,21 +66,21 @@ struct wme_ac_parameter {
 	u8	aifsn:4,
 		acm:1,
 		aci:2,
-		reserved:1;
+		reserved;
 
 	/* byte 2 */
 	u8	eCWmin:4,
-		eCWmax:4;
+		eCWmax;
 #elif defined(__BIG_ENDIAN)
 	/* byte 1 */
 	u8	reserved:1,
 		aci:2,
 		acm:1,
-		aifsn:4;
+		aifsn;
 
 	/* byte 2 */
 	u8	eCWmax:4,
-		eCWmin:4;
+		eCWmin;
 #else
 #error	"Please fix <endian.h>"
 #endif

@@ -28,10 +28,10 @@ enum tiler_fmt {
 };
 
 struct pat_area {
-	u32 x0:8;
-	u32 y0:8;
-	u32 x1:8;
-	u32 y1:8;
+	u32 x0;
+	u32 y0;
+	u32 x1;
+	u32 y1;
 };
 
 struct tiler_block {

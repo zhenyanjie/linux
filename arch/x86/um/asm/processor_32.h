@@ -14,8 +14,8 @@ extern int host_has_cmov;
 
 struct uml_tls_struct {
 	struct user_desc tls;
-	unsigned flushed:1;
-	unsigned present:1;
+	unsigned flushed;
+	unsigned present;
 };
 
 struct arch_thread {

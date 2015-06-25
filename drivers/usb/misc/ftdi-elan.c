@@ -159,11 +159,11 @@ struct usb_ftdi {
 	struct u132_respond respond[RESPOND_SIZE];
 	struct u132_target target[4];
 	char device_name[16];
-	unsigned synchronized:1;
-	unsigned enumerated:1;
-	unsigned registered:1;
-	unsigned initialized:1;
-	unsigned card_ejected:1;
+	unsigned synchronized;
+	unsigned enumerated;
+	unsigned registered;
+	unsigned initialized;
+	unsigned card_ejected;
 	int function;
 	int sequence_num;
 	int disconnected;

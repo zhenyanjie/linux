@@ -810,9 +810,9 @@ static void rds_ib_cong_recv(struct rds_connection *conn,
 struct rds_ib_ack_state {
 	u64		ack_next;
 	u64		ack_recv;
-	unsigned int	ack_required:1;
-	unsigned int	ack_next_valid:1;
-	unsigned int	ack_recv_valid:1;
+	unsigned int	ack_required;
+	unsigned int	ack_next_valid;
+	unsigned int	ack_recv_valid;
 };
 
 static void rds_ib_process_recv(struct rds_connection *conn,

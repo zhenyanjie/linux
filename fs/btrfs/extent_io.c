@@ -120,10 +120,10 @@ struct extent_page_data {
 	/* tells writepage not to lock the state bits for this range
 	 * it still does the unlocking
 	 */
-	unsigned int extent_locked:1;
+	unsigned int extent_locked;
 
 	/* tells the submit_bio code to use a WRITE_SYNC */
-	unsigned int sync_io:1;
+	unsigned int sync_io;
 };
 
 static noinline void flush_write_bio(void *data);

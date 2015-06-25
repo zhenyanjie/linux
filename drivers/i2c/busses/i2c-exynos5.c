@@ -145,7 +145,7 @@
 
 struct exynos5_i2c {
 	struct i2c_adapter	adap;
-	unsigned int		suspended:1;
+	unsigned int		suspended;
 
 	struct i2c_msg		*msg;
 	struct completion	msg_complete;

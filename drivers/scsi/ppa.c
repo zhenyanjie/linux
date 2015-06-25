@@ -35,8 +35,8 @@ typedef struct {
 	struct delayed_work ppa_tq;	/* Polling interrupt stuff       */
 	unsigned long jstart;	/* Jiffies at start             */
 	unsigned long recon_tmo;	/* How many usecs to wait for reconnection (6th bit) */
-	unsigned int failed:1;	/* Failure flag                 */
-	unsigned wanted:1;	/* Parport sharing busy flag    */
+	unsigned int failed;	/* Failure flag                 */
+	unsigned wanted;	/* Parport sharing busy flag    */
 	wait_queue_head_t *waiting;
 	struct Scsi_Host *host;
 	struct list_head list;

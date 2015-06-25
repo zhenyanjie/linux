@@ -1338,8 +1338,8 @@ struct xfrm_algo_comp_info {
 struct xfrm_algo_desc {
 	char *name;
 	char *compat;
-	u8 available:1;
-	u8 pfkey_supported:1;
+	u8 available;
+	u8 pfkey_supported;
 	union {
 		struct xfrm_algo_aead_info aead;
 		struct xfrm_algo_auth_info auth;

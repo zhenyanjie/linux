@@ -45,13 +45,13 @@ struct dgram_sock {
 	struct ieee802154_addr src_addr;
 	struct ieee802154_addr dst_addr;
 
-	unsigned int bound:1;
-	unsigned int connected:1;
-	unsigned int want_ack:1;
-	unsigned int secen:1;
-	unsigned int secen_override:1;
-	unsigned int seclevel:3;
-	unsigned int seclevel_override:1;
+	unsigned int bound;
+	unsigned int connected;
+	unsigned int want_ack;
+	unsigned int secen;
+	unsigned int secen_override;
+	unsigned int seclevel;
+	unsigned int seclevel_override;
 };
 
 static inline struct dgram_sock *dgram_sk(const struct sock *sk)

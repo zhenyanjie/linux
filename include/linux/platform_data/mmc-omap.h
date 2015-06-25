@@ -41,7 +41,7 @@ struct omap_mmc_platform_data {
 	struct device *dev;
 
 	/* number of slots per controller */
-	unsigned nr_slots:2;
+	unsigned nr_slots;
 
 	/* set if your board has components or wiring that limits the
 	 * maximum frequency on the MMC bus */
@@ -82,28 +82,28 @@ struct omap_mmc_platform_data {
 		 * nomux means "standard" muxing is wrong on this board, and
 		 * that board-specific code handled it before common init logic.
 		 */
-		unsigned nomux:1;
+		unsigned nomux;
 
 		/* switch pin can be for card detect (default) or card cover */
-		unsigned cover:1;
+		unsigned cover;
 
 		/* use the internal clock */
-		unsigned internal_clock:1;
+		unsigned internal_clock;
 
 		/* nonremovable e.g. eMMC */
-		unsigned nonremovable:1;
+		unsigned nonremovable;
 
 		/* Try to sleep or power off when possible */
-		unsigned power_saving:1;
+		unsigned power_saving;
 
 		/* If using power_saving and the MMC power is not to go off */
-		unsigned no_off:1;
+		unsigned no_off;
 
 		/* eMMC does not handle power off when not in sleep state */
-		unsigned no_regulator_off_init:1;
+		unsigned no_regulator_off_init;
 
 		/* Regulator off remapped to sleep */
-		unsigned vcc_aux_disable_is_sleep:1;
+		unsigned vcc_aux_disable_is_sleep;
 
 		/* we can put the features above into this variable */
 #define HSMMC_HAS_PBIAS		(1 << 0)
@@ -146,7 +146,7 @@ struct omap_mmc_platform_data {
 		int card_detect_irq;
 		int (*card_detect)(struct device *dev, int slot);
 
-		unsigned int ban_openended:1;
+		unsigned int ban_openended;
 
 	} slots[OMAP_MMC_MAX_SLOTS];
 };

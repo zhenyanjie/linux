@@ -77,8 +77,8 @@ struct arizona_priv {
 	int num_inputs;
 	unsigned int in_pending;
 
-	unsigned int spk_ena:2;
-	unsigned int spk_ena_pending:1;
+	unsigned int spk_ena;
+	unsigned int spk_ena_pending;
 };
 
 #define ARIZONA_NUM_MIXER_INPUTS 103

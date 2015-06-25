@@ -78,43 +78,43 @@ struct ssp_remote_node_context {
 	 * node index can not exceed the maximum number of remote nodes reported in
 	 * the SCU device context capacity register.
 	 */
-	u32 remote_node_index:12;
-	u32 reserved0_1:4;
+	u32 remote_node_index;
+	u32 reserved0_1;
 
 	/**
 	 * This field tells the SCU hardware how many simultaneous connections that
 	 * this remote node will support.
 	 */
-	u32 remote_node_port_width:4;
+	u32 remote_node_port_width;
 
 	/**
 	 * This field tells the SCU hardware which logical port to associate with this
 	 * remote node.
 	 */
-	u32 logical_port_index:3;
-	u32 reserved0_2:5;
+	u32 logical_port_index;
+	u32 reserved0_2;
 
 	/**
 	 * This field will enable the I_T nexus loss timer for this remote node.
 	 */
-	u32 nexus_loss_timer_enable:1;
+	u32 nexus_loss_timer_enable;
 
 	/**
 	 * This field is the for driver debug only and is not used.
 	 */
-	u32 check_bit:1;
+	u32 check_bit;
 
 	/**
 	 * This field must be set to true when the hardware DMAs the remote node
 	 * context to the hardware SRAM.  When the remote node is being invalidated
 	 * this field must be set to false.
 	 */
-	u32 is_valid:1;
+	u32 is_valid;
 
 	/**
 	 * This field must be set to true.
 	 */
-	u32 is_remote_node_context:1;
+	u32 is_remote_node_context;
 
 	/* WORD 1 - 2 */
 
@@ -134,52 +134,52 @@ struct ssp_remote_node_context {
 	 * This value must match the virtual function number that is being used to
 	 * communicate to the device.
 	 */
-	u32 function_number:8;
-	u32 reserved3_1:8;
+	u32 function_number;
+	u32 reserved3_1;
 
 	/**
 	 * This field provides the driver a way to cheat on the arbitration wait time
 	 * for this remote node.
 	 */
-	u32 arbitration_wait_time:16;
+	u32 arbitration_wait_time;
 
 	/* WORD 4 */
 	/**
 	 * This field tells the SCU hardware how long this device may occupy the
 	 * connection before it must be closed.
 	 */
-	u32 connection_occupancy_timeout:16;
+	u32 connection_occupancy_timeout;
 
 	/**
 	 * This field tells the SCU hardware how long to maintain a connection when
 	 * there are no frames being transmitted on the link.
 	 */
-	u32 connection_inactivity_timeout:16;
+	u32 connection_inactivity_timeout;
 
 	/* WORD  5 */
 	/**
 	 * This field allows the driver to cheat on the arbitration wait time for this
 	 * remote node.
 	 */
-	u32 initial_arbitration_wait_time:16;
+	u32 initial_arbitration_wait_time;
 
 	/**
 	 * This field is tells the hardware what to program for the connection rate in
 	 * the open address frame.  See the SAS spec for valid values.
 	 */
-	u32 oaf_connection_rate:4;
+	u32 oaf_connection_rate;
 
 	/**
 	 * This field tells the SCU hardware what to program for the features in the
 	 * open address frame.  See the SAS spec for valid values.
 	 */
-	u32 oaf_features:4;
+	u32 oaf_features;
 
 	/**
 	 * This field tells the SCU hardware what to use for the source zone group in
 	 * the open address frame.  See the SAS spec for more details on zoning.
 	 */
-	u32 oaf_source_zone_group:8;
+	u32 oaf_source_zone_group;
 
 	/* WORD 6 */
 	/**

@@ -2342,15 +2342,15 @@ typedef struct {
 	setting time to NT4 and some older servers via
 	the primitive DOS time format */
 typedef struct {
-	__u16 Day:5;
-	__u16 Month:4;
-	__u16 Year:7;
+	__u16 Day;
+	__u16 Month;
+	__u16 Year;
 } __attribute__((packed)) SMB_DATE;
 
 typedef struct {
-	__u16 TwoSeconds:5;
-	__u16 Minutes:6;
-	__u16 Hours:5;
+	__u16 TwoSeconds;
+	__u16 Minutes;
+	__u16 Hours;
 } __attribute__((packed)) SMB_TIME;
 
 typedef struct {

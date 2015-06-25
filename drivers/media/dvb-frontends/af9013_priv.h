@@ -33,8 +33,8 @@
 
 struct af9013_reg_bit {
 	u16 addr;
-	u8  pos:4;
-	u8  len:4;
+	u8  pos;
+	u8  len;
 	u8  val;
 };
 

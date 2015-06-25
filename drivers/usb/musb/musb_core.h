@@ -351,7 +351,7 @@ struct musb {
 	struct phy		*phy;
 
 	int nIrq;
-	unsigned		irq_wake:1;
+	unsigned		irq_wake;
 
 	struct musb_hw_ep	 endpoints[MUSB_C_NUM_EPS];
 #define control_ep		endpoints
@@ -372,38 +372,38 @@ struct musb {
 	unsigned long		idle_timeout;	/* Next timeout in jiffies */
 
 	/* active means connected and not suspended */
-	unsigned		is_active:1;
+	unsigned		is_active;
 
-	unsigned is_multipoint:1;
+	unsigned is_multipoint;
 
-	unsigned		hb_iso_rx:1;	/* high bandwidth iso rx? */
-	unsigned		hb_iso_tx:1;	/* high bandwidth iso tx? */
-	unsigned		dyn_fifo:1;	/* dynamic FIFO supported? */
+	unsigned		hb_iso_rx;	/* high bandwidth iso rx? */
+	unsigned		hb_iso_tx;	/* high bandwidth iso tx? */
+	unsigned		dyn_fifo;	/* dynamic FIFO supported? */
 
-	unsigned		bulk_split:1;
+	unsigned		bulk_split;
 #define	can_bulk_split(musb,type) \
 	(((type) == USB_ENDPOINT_XFER_BULK) && (musb)->bulk_split)
 
-	unsigned		bulk_combine:1;
+	unsigned		bulk_combine;
 #define	can_bulk_combine(musb,type) \
 	(((type) == USB_ENDPOINT_XFER_BULK) && (musb)->bulk_combine)
 
 	/* is_suspended means USB B_PERIPHERAL suspend */
-	unsigned		is_suspended:1;
+	unsigned		is_suspended;
 
 	/* may_wakeup means remote wakeup is enabled */
-	unsigned		may_wakeup:1;
+	unsigned		may_wakeup;
 
 	/* is_self_powered is reported in device status and the
 	 * config descriptor.  is_bus_powered means B_PERIPHERAL
 	 * draws some VBUS current; both can be true.
 	 */
-	unsigned		is_self_powered:1;
-	unsigned		is_bus_powered:1;
+	unsigned		is_self_powered;
+	unsigned		is_bus_powered;
 
-	unsigned		set_address:1;
-	unsigned		test_mode:1;
-	unsigned		softconnect:1;
+	unsigned		set_address;
+	unsigned		test_mode;
+	unsigned		softconnect;
 
 	u8			address;
 	u8			test_mode_nr;
@@ -424,7 +424,7 @@ struct musb {
 	 * We added this flag to forcefully disable double
 	 * buffering until we get it working.
 	 */
-	unsigned                double_buffer_not_ok:1;
+	unsigned                double_buffer_not_ok;
 
 	struct musb_hdrc_config	*config;
 

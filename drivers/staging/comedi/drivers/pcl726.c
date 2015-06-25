@@ -111,8 +111,8 @@ struct pcl726_board {
 	const struct comedi_lrange *const *ao_ranges;
 	int ao_num_ranges;
 	int ao_nchan;
-	unsigned int have_dio:1;
-	unsigned int is_pcl727:1;
+	unsigned int have_dio;
+	unsigned int is_pcl727;
 };
 
 static const struct pcl726_board pcl726_boards[] = {
@@ -157,7 +157,7 @@ static const struct pcl726_board pcl726_boards[] = {
 struct pcl726_private {
 	const struct comedi_lrange *rangelist[12];
 	unsigned int ao_readback[12];
-	unsigned int cmd_running:1;
+	unsigned int cmd_running;
 };
 
 static int pcl726_intr_insn_bits(struct comedi_device *dev,

@@ -775,9 +775,9 @@ static int wm8985_hw_params(struct snd_pcm_substream *substream,
 }
 
 struct pll_div {
-	u32 div2:1;
-	u32 n:4;
-	u32 k:24;
+	u32 div2;
+	u32 n;
+	u32 k;
 };
 
 #define FIXED_PLL_SIZE ((1ULL << 24) * 10)

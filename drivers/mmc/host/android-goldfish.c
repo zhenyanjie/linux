@@ -125,8 +125,8 @@ struct goldfish_mmc_host {
 	unsigned char		hw_bus_mode;
 
 	unsigned int		sg_len;
-	unsigned		dma_done:1;
-	unsigned		dma_in_use:1;
+	unsigned		dma_done;
+	unsigned		dma_in_use;
 
 	void __iomem		*reg_base;
 };

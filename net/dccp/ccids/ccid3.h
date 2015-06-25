@@ -102,7 +102,7 @@ struct ccid3_hc_tx_sock {
 	u32				tx_t_rto;
 	u32				tx_t_ipi;
 	u16				tx_s;
-	enum ccid3_hc_tx_states		tx_state:8;
+	enum ccid3_hc_tx_states		tx_state;
 	u8				tx_last_win_count;
 	ktime_t				tx_t_last_win_count;
 	struct timer_list		tx_no_feedback_timer;
@@ -138,8 +138,8 @@ enum ccid3_hc_rx_states {
  * @rx_pinv:		     Inverse of Loss Event Rate (RFC 4342, sec. 8.5)
  */
 struct ccid3_hc_rx_sock {
-	u8				rx_last_counter:4;
-	enum ccid3_hc_rx_states		rx_state:8;
+	u8				rx_last_counter;
+	enum ccid3_hc_rx_states		rx_state;
 	u32				rx_bytes_recv;
 	u32				rx_x_recv;
 	u32				rx_rtt;

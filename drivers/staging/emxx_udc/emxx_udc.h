@@ -583,7 +583,7 @@ struct nbu2ss_req {
 
 	bool		unaligned;
 
-	unsigned			mapped:1;
+	unsigned			mapped;
 };
 
 struct nbu2ss_ep {
@@ -598,9 +598,9 @@ struct nbu2ss_ep {
 	u8		direct;
 	u8		ep_type;
 
-	unsigned		wedged:1;
-	unsigned		halted:1;
-	unsigned		stalled:1;
+	unsigned		wedged;
+	unsigned		halted;
+	unsigned		stalled;
 
 	u8		*virt_buf;
 	dma_addr_t	phys_buf;
@@ -623,14 +623,14 @@ struct nbu2ss_udc {
 
 	struct nbu2ss_ep	ep[NUM_ENDPOINTS];
 
-	unsigned		softconnect:1;
-	unsigned		vbus_active:1;
-	unsigned		linux_suspended:1;
-	unsigned		linux_resume:1;
-	unsigned		usb_suspended:1;
-	unsigned		self_powered:1;
-	unsigned		remote_wakeup:1;
-	unsigned		udc_enabled:1;
+	unsigned		softconnect;
+	unsigned		vbus_active;
+	unsigned		linux_suspended;
+	unsigned		linux_resume;
+	unsigned		usb_suspended;
+	unsigned		self_powered;
+	unsigned		remote_wakeup;
+	unsigned		udc_enabled;
 
 	unsigned		mA;
 

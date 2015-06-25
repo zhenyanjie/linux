@@ -65,19 +65,19 @@
 #define DSP_Interrupt              0x000E	/* Interrupt register (IPC source) */
 
 typedef struct {
-	unsigned char ClockControl:1;	/* RW: Clock control: 0=normal, 1=stop 3780i clocks */
-	unsigned char SoftReset:1;	/* RW: Soft reset 0=normal, 1=soft reset active */
-	unsigned char ConfigMode:1;	/* RW: Configuration mode, 0=normal, 1=config mode */
-	unsigned char Reserved:5;	/* 0: Reserved */
+	unsigned char ClockControl;	/* RW: Clock control: 0=normal, 1=stop 3780i clocks */
+	unsigned char SoftReset;	/* RW: Soft reset 0=normal, 1=soft reset active */
+	unsigned char ConfigMode;	/* RW: Configuration mode, 0=normal, 1=config mode */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_ISA_SLAVE_CONTROL;
 
 
 typedef struct {
-	unsigned short EnableDspInt:1;	/* RW: Enable DSP to X86 ISA interrupt 0=mask it, 1=enable it */
-	unsigned short MemAutoInc:1;	/* RW: Memory address auto increment, 0=disable, 1=enable */
-	unsigned short IoAutoInc:1;	/* RW: I/O address auto increment, 0=disable, 1=enable */
-	unsigned short DiagnosticMode:1;	/* RW: Disgnostic mode 0=nromal, 1=diagnostic mode */
-	unsigned short IsaPacingTimer:12;	/* R: ISA access pacing timer: count of core cycles stolen */
+	unsigned short EnableDspInt;	/* RW: Enable DSP to X86 ISA interrupt 0=mask it, 1=enable it */
+	unsigned short MemAutoInc;	/* RW: Memory address auto increment, 0=disable, 1=enable */
+	unsigned short IoAutoInc;	/* RW: I/O address auto increment, 0=disable, 1=enable */
+	unsigned short DiagnosticMode;	/* RW: Disgnostic mode 0=nromal, 1=diagnostic mode */
+	unsigned short IsaPacingTimer;	/* R: ISA access pacing timer: count of core cycles stolen */
 } DSP_HBRIDGE_CONTROL;
 
 
@@ -93,57 +93,57 @@ typedef struct {
 #define DSP_HBusTimerCfgIndex      0x0011	/* HBUS timer load value */
 
 typedef struct {
-	unsigned char IrqActiveLow:1;	/* RW: IRQ active high or low: 0=high, 1=low */
-	unsigned char IrqPulse:1;	/* RW: IRQ pulse or level: 0=level, 1=pulse  */
-	unsigned char Irq:3;	/* RW: IRQ selection */
-	unsigned char BaseIO:2;	/* RW: Base I/O selection */
-	unsigned char Reserved:1;	/* 0: Reserved */
+	unsigned char IrqActiveLow;	/* RW: IRQ active high or low: 0=high, 1=low */
+	unsigned char IrqPulse;	/* RW: IRQ pulse or level: 0=level, 1=pulse  */
+	unsigned char Irq;	/* RW: IRQ selection */
+	unsigned char BaseIO;	/* RW: Base I/O selection */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_UART_CFG_1;
 
 typedef struct {
-	unsigned char Enable:1;	/* RW: Enable I/O and IRQ: 0=FALSE, 1=TRUE */
-	unsigned char Reserved:7;	/* 0: Reserved */
+	unsigned char Enable;	/* RW: Enable I/O and IRQ: 0=FALSE, 1=TRUE */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_UART_CFG_2;
 
 typedef struct {
-	unsigned char IrqActiveLow:1;	/* RW: IRQ active high=0 or low=1 */
-	unsigned char IrqPulse:1;	/* RW: IRQ pulse=1 or level=0 */
-	unsigned char Irq:3;	/* RW: IRQ selection */
-	unsigned char AccessMode:1;	/* RW: 16-bit register access method 0=byte, 1=word */
-	unsigned char Reserved:2;	/* 0: Reserved */
+	unsigned char IrqActiveLow;	/* RW: IRQ active high=0 or low=1 */
+	unsigned char IrqPulse;	/* RW: IRQ pulse=1 or level=0 */
+	unsigned char Irq;	/* RW: IRQ selection */
+	unsigned char AccessMode;	/* RW: 16-bit register access method 0=byte, 1=word */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_HBRIDGE_CFG_1;
 
 typedef struct {
-	unsigned char Enable:1;	/* RW: enable I/O and IRQ: 0=FALSE, 1=TRUE */
-	unsigned char Reserved:7;	/* 0: Reserved */
+	unsigned char Enable;	/* RW: enable I/O and IRQ: 0=FALSE, 1=TRUE */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_HBRIDGE_CFG_2;
 
 
 typedef struct {
-	unsigned char Dma:3;	/* RW: DMA channel selection */
-	unsigned char NumTransfers:2;	/* RW: Maximum # of transfers once being granted the ISA bus */
-	unsigned char ReRequest:2;	/* RW: Minimum delay between releasing the ISA bus and requesting it again */
-	unsigned char MEMCS16:1;	/* RW: ISA signal MEMCS16: 0=disabled, 1=enabled */
+	unsigned char Dma;	/* RW: DMA channel selection */
+	unsigned char NumTransfers;	/* RW: Maximum # of transfers once being granted the ISA bus */
+	unsigned char ReRequest;	/* RW: Minimum delay between releasing the ISA bus and requesting it again */
+	unsigned char MEMCS16;	/* RW: ISA signal MEMCS16: 0=disabled, 1=enabled */
 } DSP_BUSMASTER_CFG_1;
 
 typedef struct {
-	unsigned char IsaMemCmdWidth:2;	/* RW: ISA memory command width */
-	unsigned char Reserved:6;	/* 0: Reserved */
+	unsigned char IsaMemCmdWidth;	/* RW: ISA memory command width */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_BUSMASTER_CFG_2;
 
 
 typedef struct {
-	unsigned char GateIOCHRDY:1;	/* RW: Enable IOCHRDY gating: 0=FALSE, 1=TRUE */
-	unsigned char Reserved:7;	/* 0: Reserved */
+	unsigned char GateIOCHRDY;	/* RW: Enable IOCHRDY gating: 0=FALSE, 1=TRUE */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_ISA_PROT_CFG;
 
 typedef struct {
-	unsigned char Enable:1;	/* RW: Enable low power suspend/resume 0=FALSE, 1=TRUE */
-	unsigned char Reserved:7;	/* 0: Reserved */
+	unsigned char Enable;	/* RW: Enable low power suspend/resume 0=FALSE, 1=TRUE */
+	unsigned char Reserved;	/* 0: Reserved */
 } DSP_POWER_MGMT_CFG;
 
 typedef struct {
-	unsigned char LoadValue:8;	/* RW: HBUS timer load value */
+	unsigned char LoadValue;	/* RW: HBUS timer load value */
 } DSP_HBUS_TIMER_CFG;
 
 
@@ -160,90 +160,90 @@ typedef struct {
 #define DSP_GpioOutputData_15_8    0x80000072
 
 typedef struct {
-	unsigned short NMI:1;	/* RW: non maskable interrupt */
-	unsigned short Halt:1;	/* RW: Halt MSP clock */
-	unsigned short ResetCore:1;	/* RW: Reset MSP core interface */
-	unsigned short Reserved:13;	/* 0: Reserved */
+	unsigned short NMI;	/* RW: non maskable interrupt */
+	unsigned short Halt;	/* RW: Halt MSP clock */
+	unsigned short ResetCore;	/* RW: Reset MSP core interface */
+	unsigned short Reserved;	/* 0: Reserved */
 } DSP_BOOT_DOMAIN;
 
 typedef struct {
-	unsigned short DisableTimeout:1;	/* RW: Disable LBus timeout */
-	unsigned short Reserved:15;	/* 0: Reserved */
+	unsigned short DisableTimeout;	/* RW: Disable LBus timeout */
+	unsigned short Reserved;	/* 0: Reserved */
 } DSP_LBUS_TIMEOUT_DISABLE;
 
 typedef struct {
-	unsigned short Memory:1;	/* RW: Reset memory interface */
-	unsigned short SerialPort1:1;	/* RW: Reset serial port 1 interface */
-	unsigned short SerialPort2:1;	/* RW: Reset serial port 2 interface */
-	unsigned short SerialPort3:1;	/* RW: Reset serial port 3 interface */
-	unsigned short Gpio:1;	/* RW: Reset GPIO interface */
-	unsigned short Dma:1;	/* RW: Reset DMA interface */
-	unsigned short SoundBlaster:1;	/* RW: Reset soundblaster interface */
-	unsigned short Uart:1;	/* RW: Reset UART interface */
-	unsigned short Midi:1;	/* RW: Reset MIDI interface */
-	unsigned short IsaMaster:1;	/* RW: Reset ISA master interface */
-	unsigned short Reserved:6;	/* 0: Reserved */
+	unsigned short Memory;	/* RW: Reset memory interface */
+	unsigned short SerialPort1;	/* RW: Reset serial port 1 interface */
+	unsigned short SerialPort2;	/* RW: Reset serial port 2 interface */
+	unsigned short SerialPort3;	/* RW: Reset serial port 3 interface */
+	unsigned short Gpio;	/* RW: Reset GPIO interface */
+	unsigned short Dma;	/* RW: Reset DMA interface */
+	unsigned short SoundBlaster;	/* RW: Reset soundblaster interface */
+	unsigned short Uart;	/* RW: Reset UART interface */
+	unsigned short Midi;	/* RW: Reset MIDI interface */
+	unsigned short IsaMaster;	/* RW: Reset ISA master interface */
+	unsigned short Reserved;	/* 0: Reserved */
 } DSP_CHIP_RESET;
 
 typedef struct {
-	unsigned short N_Divisor:6;	/* RW: (N) PLL output clock divisor */
-	unsigned short Reserved1:2;	/* 0: reserved */
-	unsigned short M_Multiplier:6;	/* RW: (M) PLL feedback clock multiplier */
-	unsigned short Reserved2:2;	/* 0: reserved */
+	unsigned short N_Divisor;	/* RW: (N) PLL output clock divisor */
+	unsigned short Reserved1;	/* 0: reserved */
+	unsigned short M_Multiplier;	/* RW: (M) PLL feedback clock multiplier */
+	unsigned short Reserved2;	/* 0: reserved */
 } DSP_CLOCK_CONTROL_1;
 
 typedef struct {
-	unsigned short PllBypass:1;	/* RW: PLL Bypass */
-	unsigned short Reserved:15;	/* 0: Reserved */
+	unsigned short PllBypass;	/* RW: PLL Bypass */
+	unsigned short Reserved;	/* 0: Reserved */
 } DSP_CLOCK_CONTROL_2;
 
 typedef struct {
-	unsigned short Latch8:1;
-	unsigned short Latch9:1;
-	unsigned short Latch10:1;
-	unsigned short Latch11:1;
-	unsigned short Latch12:1;
-	unsigned short Latch13:1;
-	unsigned short Latch14:1;
-	unsigned short Latch15:1;
-	unsigned short Mask8:1;
-	unsigned short Mask9:1;
-	unsigned short Mask10:1;
-	unsigned short Mask11:1;
-	unsigned short Mask12:1;
-	unsigned short Mask13:1;
-	unsigned short Mask14:1;
-	unsigned short Mask15:1;
+	unsigned short Latch8;
+	unsigned short Latch9;
+	unsigned short Latch10;
+	unsigned short Latch11;
+	unsigned short Latch12;
+	unsigned short Latch13;
+	unsigned short Latch14;
+	unsigned short Latch15;
+	unsigned short Mask8;
+	unsigned short Mask9;
+	unsigned short Mask10;
+	unsigned short Mask11;
+	unsigned short Mask12;
+	unsigned short Mask13;
+	unsigned short Mask14;
+	unsigned short Mask15;
 } DSP_GPIO_OUTPUT_DATA_15_8;
 
 typedef struct {
-	unsigned short Enable8:1;
-	unsigned short Enable9:1;
-	unsigned short Enable10:1;
-	unsigned short Enable11:1;
-	unsigned short Enable12:1;
-	unsigned short Enable13:1;
-	unsigned short Enable14:1;
-	unsigned short Enable15:1;
-	unsigned short Mask8:1;
-	unsigned short Mask9:1;
-	unsigned short Mask10:1;
-	unsigned short Mask11:1;
-	unsigned short Mask12:1;
-	unsigned short Mask13:1;
-	unsigned short Mask14:1;
-	unsigned short Mask15:1;
+	unsigned short Enable8;
+	unsigned short Enable9;
+	unsigned short Enable10;
+	unsigned short Enable11;
+	unsigned short Enable12;
+	unsigned short Enable13;
+	unsigned short Enable14;
+	unsigned short Enable15;
+	unsigned short Mask8;
+	unsigned short Mask9;
+	unsigned short Mask10;
+	unsigned short Mask11;
+	unsigned short Mask12;
+	unsigned short Mask13;
+	unsigned short Mask14;
+	unsigned short Mask15;
 } DSP_GPIO_DRIVER_ENABLE_15_8;
 
 typedef struct {
-	unsigned short GpioMode8:2;
-	unsigned short GpioMode9:2;
-	unsigned short GpioMode10:2;
-	unsigned short GpioMode11:2;
-	unsigned short GpioMode12:2;
-	unsigned short GpioMode13:2;
-	unsigned short GpioMode14:2;
-	unsigned short GpioMode15:2;
+	unsigned short GpioMode8;
+	unsigned short GpioMode9;
+	unsigned short GpioMode10;
+	unsigned short GpioMode11;
+	unsigned short GpioMode12;
+	unsigned short GpioMode13;
+	unsigned short GpioMode14;
+	unsigned short GpioMode15;
 } DSP_GPIO_MODE_15_8;
 
 /* Component masks that are defined in dspmgr.h */

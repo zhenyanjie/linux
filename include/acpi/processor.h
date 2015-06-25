@@ -184,16 +184,16 @@ struct acpi_processor_limit {
 };
 
 struct acpi_processor_flags {
-	u8 power:1;
-	u8 performance:1;
-	u8 throttling:1;
-	u8 limit:1;
-	u8 bm_control:1;
-	u8 bm_check:1;
-	u8 has_cst:1;
-	u8 power_setup_done:1;
-	u8 bm_rld_set:1;
-	u8 need_hotplug_init:1;
+	u8 power;
+	u8 performance;
+	u8 throttling;
+	u8 limit;
+	u8 bm_control;
+	u8 bm_check;
+	u8 has_cst;
+	u8 power_setup_done;
+	u8 bm_rld_set;
+	u8 need_hotplug_init;
 };
 
 struct acpi_processor {
@@ -218,9 +218,9 @@ struct acpi_processor {
 struct acpi_processor_errata {
 	u8 smp;
 	struct {
-		u8 throttle:1;
-		u8 fdma:1;
-		u8 reserved:6;
+		u8 throttle;
+		u8 fdma;
+		u8 reserved;
 		u32 bmisx;
 	} piix4;
 };

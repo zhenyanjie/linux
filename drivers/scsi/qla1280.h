@@ -347,28 +347,28 @@ struct nvram {
 	uint8_t version;	/* 4 */
 
 	struct {
-		uint8_t bios_configuration_mode:2;
-		uint8_t bios_disable:1;
-		uint8_t selectable_scsi_boot_enable:1;
-		uint8_t cd_rom_boot_enable:1;
-		uint8_t disable_loading_risc_code:1;
-		uint8_t enable_64bit_addressing:1;
-		uint8_t unused_7:1;
+		uint8_t bios_configuration_mode;
+		uint8_t bios_disable;
+		uint8_t selectable_scsi_boot_enable;
+		uint8_t cd_rom_boot_enable;
+		uint8_t disable_loading_risc_code;
+		uint8_t enable_64bit_addressing;
+		uint8_t unused_7;
 	} cntr_flags_1;		/* 5 */
 
 	struct {
-		uint8_t boot_lun_number:5;
-		uint8_t scsi_bus_number:1;
-		uint8_t unused_6:1;
-		uint8_t unused_7:1;
+		uint8_t boot_lun_number;
+		uint8_t scsi_bus_number;
+		uint8_t unused_6;
+		uint8_t unused_7;
 	} cntr_flags_2l;	/* 7 */
 
 	struct {
-		uint8_t boot_target_number:4;
-		uint8_t unused_12:1;
-		uint8_t unused_13:1;
-		uint8_t unused_14:1;
-		uint8_t unused_15:1;
+		uint8_t boot_target_number;
+		uint8_t unused_12;
+		uint8_t unused_13;
+		uint8_t unused_14;
+		uint8_t unused_15;
 	} cntr_flags_2h;	/* 8 */
 
 	uint16_t unused_8;	/* 8, 9 */
@@ -377,22 +377,22 @@ struct nvram {
 	uint16_t unused_14;	/* 14, 15 */
 
 	struct {
-		uint8_t reserved:2;
-		uint8_t burst_enable:1;
-		uint8_t reserved_1:1;
-		uint8_t fifo_threshold:4;
+		uint8_t reserved;
+		uint8_t burst_enable;
+		uint8_t reserved_1;
+		uint8_t fifo_threshold;
 	} isp_config;		/* 16 */
 
 	/* Termination
 	 * 0 = Disable, 1 = high only, 3 = Auto term
 	 */
 	struct {
-		uint8_t scsi_bus_1_control:2;
-		uint8_t scsi_bus_0_control:2;
-		uint8_t unused_0:1;
-		uint8_t unused_1:1;
-		uint8_t unused_2:1;
-		uint8_t auto_term_support:1;
+		uint8_t scsi_bus_1_control;
+		uint8_t scsi_bus_0_control;
+		uint8_t unused_0;
+		uint8_t unused_1;
+		uint8_t unused_2;
+		uint8_t auto_term_support;
 	} termination;		/* 17 */
 
 	uint16_t isp_parameter;	/* 18, 19 */
@@ -400,22 +400,22 @@ struct nvram {
 	union {
 		uint16_t w;
 		struct {
-			uint16_t enable_fast_posting:1;
-			uint16_t report_lvd_bus_transition:1;
-			uint16_t unused_2:1;
-			uint16_t unused_3:1;
-			uint16_t disable_iosbs_with_bus_reset_status:1;
-			uint16_t disable_synchronous_backoff:1;
-			uint16_t unused_6:1;
-			uint16_t synchronous_backoff_reporting:1;
-			uint16_t disable_reselection_fairness:1;
-			uint16_t unused_9:1;
-			uint16_t unused_10:1;
-			uint16_t unused_11:1;
-			uint16_t unused_12:1;
-			uint16_t unused_13:1;
-			uint16_t unused_14:1;
-			uint16_t unused_15:1;
+			uint16_t enable_fast_posting;
+			uint16_t report_lvd_bus_transition;
+			uint16_t unused_2;
+			uint16_t unused_3;
+			uint16_t disable_iosbs_with_bus_reset_status;
+			uint16_t disable_synchronous_backoff;
+			uint16_t unused_6;
+			uint16_t synchronous_backoff_reporting;
+			uint16_t disable_reselection_fairness;
+			uint16_t unused_9;
+			uint16_t unused_10;
+			uint16_t unused_11;
+			uint16_t unused_12;
+			uint16_t unused_13;
+			uint16_t unused_14;
+			uint16_t unused_15;
 		} f;
 	} firmware_feature;	/* 20, 21 */
 
@@ -423,11 +423,11 @@ struct nvram {
 
 	struct {
 		struct {
-			uint8_t initiator_id:4;
-			uint8_t scsi_reset_disable:1;
-			uint8_t scsi_bus_size:1;
-			uint8_t scsi_bus_type:1;
-			uint8_t unused_7:1;
+			uint8_t initiator_id;
+			uint8_t scsi_reset_disable;
+			uint8_t scsi_bus_size;
+			uint8_t scsi_bus_type;
+			uint8_t unused_7;
 		} config_1;	/* 24 */
 
 		uint8_t bus_reset_delay;	/* 25 */
@@ -435,11 +435,11 @@ struct nvram {
 		uint8_t retry_delay;	/* 27 */
 
 		struct {
-			uint8_t async_data_setup_time:4;
-			uint8_t req_ack_active_negation:1;
-			uint8_t data_line_active_negation:1;
-			uint8_t unused_6:1;
-			uint8_t unused_7:1;
+			uint8_t async_data_setup_time;
+			uint8_t req_ack_active_negation;
+			uint8_t data_line_active_negation;
+			uint8_t unused_6;
+			uint8_t unused_7;
 		} config_2;	/* 28 */
 
 		uint8_t unused_29;	/* 29 */
@@ -453,14 +453,14 @@ struct nvram {
 
 		struct {
 			struct {
-				uint8_t renegotiate_on_error:1;
-				uint8_t stop_queue_on_check:1;
-				uint8_t auto_request_sense:1;
-				uint8_t tag_queuing:1;
-				uint8_t enable_sync:1;
-				uint8_t enable_wide:1;
-				uint8_t parity_checking:1;
-				uint8_t disconnect_allowed:1;
+				uint8_t renegotiate_on_error;
+				uint8_t stop_queue_on_check;
+				uint8_t auto_request_sense;
+				uint8_t tag_queuing;
+				uint8_t enable_sync;
+				uint8_t enable_wide;
+				uint8_t parity_checking;
+				uint8_t disconnect_allowed;
 			} parameter;	/* 40 */
 
 			uint8_t execution_throttle;	/* 41 */
@@ -469,26 +469,26 @@ struct nvram {
 			union {		/* 43 */
 				uint8_t flags_43;
 				struct {
-					uint8_t sync_offset:4;
-					uint8_t device_enable:1;
-					uint8_t lun_disable:1;
-					uint8_t unused_6:1;
-					uint8_t unused_7:1;
+					uint8_t sync_offset;
+					uint8_t device_enable;
+					uint8_t lun_disable;
+					uint8_t unused_6;
+					uint8_t unused_7;
 				} flags1x80;
 				struct {
-					uint8_t sync_offset:5;
-					uint8_t device_enable:1;
-					uint8_t unused_6:1;
-					uint8_t unused_7:1;
+					uint8_t sync_offset;
+					uint8_t device_enable;
+					uint8_t unused_6;
+					uint8_t unused_7;
 				} flags1x160;
 			} flags;
 			union {	/* PPR flags for the 1x160 controllers */
 				uint8_t unused_44;
 				struct {
-					uint8_t ppr_options:4;
-					uint8_t ppr_bus_width:2;
-					uint8_t unused_8:1;
-					uint8_t enable_ppr:1;
+					uint8_t ppr_options;
+					uint8_t ppr_bus_width;
+					uint8_t unused_8;
+					uint8_t enable_ppr;
 				} flags;	/* 44 */
 			} ppr_1x160;
 			uint8_t unused_45;	/* 45 */
@@ -995,17 +995,17 @@ struct bus_param {
 	uint16_t lun_disables;	/* LUN disable bits. */
 	uint16_t qtag_enables;	/* Tag queue enables. */
 	uint16_t hiwat;		/* High water mark per device. */
-	uint8_t reset_marker:1;
-	uint8_t disable_scsi_reset:1;
-	uint8_t scsi_bus_dead:1;	/* SCSI Bus is Dead, when 5 back to back resets failed */
+	uint8_t reset_marker;
+	uint8_t disable_scsi_reset;
+	uint8_t scsi_bus_dead;	/* SCSI Bus is Dead, when 5 back to back resets failed */
 };
 
 
 struct qla_driver_setup {
-	uint32_t no_sync:1;
-	uint32_t no_wide:1;
-	uint32_t no_ppr:1;
-	uint32_t no_nvram:1;
+	uint32_t no_sync;
+	uint32_t no_wide;
+	uint32_t no_ppr;
+	uint32_t no_nvram;
 	uint16_t sync_mask;
 	uint16_t wide_mask;
 	uint16_t ppr_mask;
@@ -1057,14 +1057,14 @@ struct scsi_qla_host {
 	struct completion *mailbox_wait;
 
 	volatile struct {
-		uint32_t online:1;			/* 0 */
-		uint32_t reset_marker:1;		/* 1 */
-		uint32_t disable_host_adapter:1;	/* 2 */
-		uint32_t reset_active:1;		/* 3 */
-		uint32_t abort_isp_active:1;		/* 4 */
-		uint32_t disable_risc_code_load:1;	/* 5 */
+		uint32_t online;			/* 0 */
+		uint32_t reset_marker;		/* 1 */
+		uint32_t disable_host_adapter;	/* 2 */
+		uint32_t reset_active;		/* 3 */
+		uint32_t abort_isp_active;		/* 4 */
+		uint32_t disable_risc_code_load;	/* 5 */
 #ifdef __ia64__
-		uint32_t use_pci_vchannel:1;
+		uint32_t use_pci_vchannel;
 #endif
 	} flags;
 

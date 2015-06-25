@@ -120,9 +120,9 @@ struct dsp_scb_descriptor {
 	int ref_count;
 
 	u16 volume[2];
-	unsigned int deleted :1;
-	unsigned int updated :1;
-	unsigned int volume_set :1;
+	unsigned int deleted ;
+	unsigned int updated ;
+	unsigned int volume_set ;
 };
 
 struct dsp_task_descriptor {

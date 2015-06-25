@@ -39,10 +39,10 @@ typedef struct {
 	struct scsi_cmnd *cur_cmd;	/* Current queued command       */
 	struct delayed_work imm_tq;	/* Polling interrupt stuff       */
 	unsigned long jstart;	/* Jiffies at start             */
-	unsigned failed:1;	/* Failure flag                 */
-	unsigned dp:1;		/* Data phase present           */
-	unsigned rd:1;		/* Read data in data phase      */
-	unsigned wanted:1;	/* Parport sharing busy flag    */
+	unsigned failed;	/* Failure flag                 */
+	unsigned dp;		/* Data phase present           */
+	unsigned rd;		/* Read data in data phase      */
+	unsigned wanted;	/* Parport sharing busy flag    */
 	wait_queue_head_t *waiting;
 	struct Scsi_Host *host;
 	struct list_head list;

@@ -86,19 +86,19 @@ union ht_capability {
 	u8	CharData[2];
 	struct
 	{
-		u16	AdvCoding:1;
-		u16	ChlWidth:1;
-		u16	MimoPwrSave:2;
-		u16	GreenField:1;
-		u16	ShortGI20Mhz:1;
-		u16	ShortGI40Mhz:1;
-		u16	STBC:1;
-		u16	BeamForm:1;
-		u16	DelayBA:1;
-		u16	MaxAMSDUSize:1;
-		u16	DssCCk:1;
-		u16	PSMP:1;
-		u16	Rsvd:3;
+		u16	AdvCoding;
+		u16	ChlWidth;
+		u16	MimoPwrSave;
+		u16	GreenField;
+		u16	ShortGI20Mhz;
+		u16	ShortGI40Mhz;
+		u16	STBC;
+		u16	BeamForm;
+		u16	DelayBA;
+		u16	MaxAMSDUSize;
+		u16	DssCCk;
+		u16	PSMP;
+		u16	Rsvd;
 	}Field;
 };
 
@@ -107,9 +107,9 @@ union ht_capability_macpara {
 	u8	CharData[1];
 	struct
 	{
-		u8	MaxRxAMPDU:2;
-		u8	MPDUDensity:2;
-		u8	Rsvd:4;
+		u8	MaxRxAMPDU;
+		u8	MPDUDensity;
+		u8	Rsvd;
 	}Field;
 };
 */
@@ -137,24 +137,24 @@ enum ht_bw40_sc {
 
 struct ht_capab_ele {
 
-	u8	AdvCoding:1;
-	u8	ChlWidth:1;
-	u8	MimoPwrSave:2;
-	u8	GreenField:1;
-	u8	ShortGI20Mhz:1;
-	u8	ShortGI40Mhz:1;
-	u8	TxSTBC:1;
-	u8	RxSTBC:2;
-	u8	DelayBA:1;
-	u8	MaxAMSDUSize:1;
-	u8	DssCCk:1;
-	u8	PSMP:1;
-	u8	Rsvd1:1;
-	u8	LSigTxopProtect:1;
+	u8	AdvCoding;
+	u8	ChlWidth;
+	u8	MimoPwrSave;
+	u8	GreenField;
+	u8	ShortGI20Mhz;
+	u8	ShortGI40Mhz;
+	u8	TxSTBC;
+	u8	RxSTBC;
+	u8	DelayBA;
+	u8	MaxAMSDUSize;
+	u8	DssCCk;
+	u8	PSMP;
+	u8	Rsvd1;
+	u8	LSigTxopProtect;
 
-	u8	MaxRxAMPDUFactor:2;
-	u8	MPDUDensity:3;
-	u8	Rsvd2:3;
+	u8	MaxRxAMPDUFactor;
+	u8	MPDUDensity;
+	u8	Rsvd2;
 
 	u8	MCS[16];
 
@@ -171,34 +171,34 @@ struct ht_capab_ele {
 struct ht_info_ele {
 	u8	ControlChl;
 
-	u8	ExtChlOffset:2;
-	u8	RecommemdedTxWidth:1;
-	u8	RIFS:1;
-	u8	PSMPAccessOnly:1;
-	u8	SrvIntGranularity:3;
+	u8	ExtChlOffset;
+	u8	RecommemdedTxWidth;
+	u8	RIFS;
+	u8	PSMPAccessOnly;
+	u8	SrvIntGranularity;
 
-	u8	OptMode:2;
-	u8	NonGFDevPresent:1;
-	u8	Revd1:5;
-	u8	Revd2:8;
+	u8	OptMode;
+	u8	NonGFDevPresent;
+	u8	Revd1;
+	u8	Revd2;
 
-	u8	Rsvd3:6;
-	u8	DualBeacon:1;
-	u8	DualCTSProtect:1;
+	u8	Rsvd3;
+	u8	DualBeacon;
+	u8	DualCTSProtect;
 
-	u8	SecondaryBeacon:1;
-	u8	LSigTxopProtectFull:1;
-	u8	PcoActive:1;
-	u8	PcoPhase:1;
-	u8	Rsvd4:4;
+	u8	SecondaryBeacon;
+	u8	LSigTxopProtectFull;
+	u8	PcoActive;
+	u8	PcoPhase;
+	u8	Rsvd4;
 
 	u8	BasicMSC[16];
 } __packed;
 
 struct mimops_ctrl {
-	u8	MimoPsEnable:1;
-	u8	MimoPsMode:1;
-	u8	Reserved:6;
+	u8	MimoPsEnable;
+	u8	MimoPsMode;
+	u8	Reserved;
 };
 
 enum ht_spec_ver {

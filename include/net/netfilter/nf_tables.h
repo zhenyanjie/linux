@@ -386,7 +386,7 @@ struct nft_rule {
 	u64				handle:42,
 					genmask:2,
 					dlen:12,
-					ulen:8;
+					ulen;
 	unsigned char			data[]
 		__attribute__((aligned(__alignof__(struct nft_expr))));
 };

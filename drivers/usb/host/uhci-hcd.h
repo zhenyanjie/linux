@@ -172,11 +172,11 @@ struct uhci_qh {
 	int type;			/* Queue type (control, bulk, etc) */
 	int skel;			/* Skeleton queue number */
 
-	unsigned int initial_toggle:1;	/* Endpoint's current toggle value */
-	unsigned int needs_fixup:1;	/* Must fix the TD toggle values */
-	unsigned int is_stopped:1;	/* Queue was stopped by error/unlink */
-	unsigned int wait_expired:1;	/* QH_WAIT_TIMEOUT has expired */
-	unsigned int bandwidth_reserved:1;	/* Periodic bandwidth has
+	unsigned int initial_toggle;	/* Endpoint's current toggle value */
+	unsigned int needs_fixup;	/* Must fix the TD toggle values */
+	unsigned int is_stopped;	/* Queue was stopped by error/unlink */
+	unsigned int wait_expired;	/* QH_WAIT_TIMEOUT has expired */
+	unsigned int bandwidth_reserved;	/* Periodic bandwidth has
 						 * been allocated */
 } __attribute__((aligned(16)));
 
@@ -409,24 +409,24 @@ struct uhci_hcd {
 	unsigned int last_iso_frame;		/* Frame of last scan */
 	unsigned int cur_iso_frame;		/* Frame for current scan */
 
-	unsigned int scan_in_progress:1;	/* Schedule scan is running */
-	unsigned int need_rescan:1;		/* Redo the schedule scan */
-	unsigned int dead:1;			/* Controller has died */
-	unsigned int RD_enable:1;		/* Suspended root hub with
+	unsigned int scan_in_progress;	/* Schedule scan is running */
+	unsigned int need_rescan;		/* Redo the schedule scan */
+	unsigned int dead;			/* Controller has died */
+	unsigned int RD_enable;		/* Suspended root hub with
 						   Resume-Detect interrupts
 						   enabled */
-	unsigned int is_initialized:1;		/* Data structure is usable */
-	unsigned int fsbr_is_on:1;		/* FSBR is turned on */
-	unsigned int fsbr_is_wanted:1;		/* Does any URB want FSBR? */
-	unsigned int fsbr_expiring:1;		/* FSBR is timing out */
+	unsigned int is_initialized;		/* Data structure is usable */
+	unsigned int fsbr_is_on;		/* FSBR is turned on */
+	unsigned int fsbr_is_wanted;		/* Does any URB want FSBR? */
+	unsigned int fsbr_expiring;		/* FSBR is timing out */
 
 	struct timer_list fsbr_timer;		/* For turning off FBSR */
 
 	/* Silicon quirks */
-	unsigned int oc_low:1;			/* OverCurrent bit active low */
-	unsigned int wait_for_hp:1;		/* Wait for HP port reset */
-	unsigned int big_endian_mmio:1;		/* Big endian registers */
-	unsigned int big_endian_desc:1;		/* Big endian descriptors */
+	unsigned int oc_low;			/* OverCurrent bit active low */
+	unsigned int wait_for_hp;		/* Wait for HP port reset */
+	unsigned int big_endian_mmio;		/* Big endian registers */
+	unsigned int big_endian_desc;		/* Big endian descriptors */
 
 	/* Support for port suspend/resume/reset */
 	unsigned long port_c_suspend;		/* Bit-arrays of ports */
@@ -481,7 +481,7 @@ struct urb_priv {
 	struct uhci_qh *qh;		/* QH for this URB */
 	struct list_head td_list;
 
-	unsigned fsbr:1;		/* URB wants FSBR */
+	unsigned fsbr;		/* URB wants FSBR */
 };
 
 

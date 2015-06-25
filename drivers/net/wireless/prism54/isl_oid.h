@@ -59,7 +59,7 @@ struct obj_buffer {
 
 struct obj_bss {
 	u8 address[6];
-	int:16;			/* padding */
+	int;			/* padding */
 
 	char state;
 	char reserved;
@@ -75,7 +75,7 @@ struct obj_bss {
 	short capinfo;
 	short rates;
 	short basic_rates;
-	int:16;			/* padding */
+	int;			/* padding */
 } __packed;
 
 struct obj_bsslist {

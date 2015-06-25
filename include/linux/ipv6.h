@@ -147,22 +147,22 @@ struct ipv6_pinfo {
 	 * Omit one shift by by putting the signed field at MSB.
 	 */
 #if defined(__BIG_ENDIAN_BITFIELD)
-	__s16			hop_limit:9;
-	__u16			__unused_1:7;
+	__s16			hop_limit;
+	__u16			__unused_1;
 #else
-	__u16			__unused_1:7;
-	__s16			hop_limit:9;
+	__u16			__unused_1;
+	__s16			hop_limit;
 #endif
 
 #if defined(__BIG_ENDIAN_BITFIELD)
 	/* Packed in 16bits. */
-	__s16			mcast_hops:9;
+	__s16			mcast_hops;
 	__u16			__unused_2:6,
-				mc_loop:1;
+				mc_loop;
 #else
 	__u16			mc_loop:1,
-				__unused_2:6;
-	__s16			mcast_hops:9;
+				__unused_2;
+	__s16			mcast_hops;
 #endif
 	int			ucast_oif;
 	int			mcast_oif;
@@ -183,7 +183,7 @@ struct ipv6_pinfo {
                                 rxflow:1,
 				rxtclass:1,
 				rxpmtu:1,
-				rxorigdstaddr:1;
+				rxorigdstaddr;
 				/* 2 bits hole */
 		} bits;
 		__u16		all;
@@ -200,7 +200,7 @@ struct ipv6_pinfo {
 						 * 100: prefer care-of address
 						 */
 				dontfrag:1,
-				autoflowlabel:1;
+				autoflowlabel;
 	__u8			min_hopcount;
 	__u8			tclass;
 	__be32			rcv_flowinfo;

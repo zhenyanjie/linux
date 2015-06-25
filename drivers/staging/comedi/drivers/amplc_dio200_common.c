@@ -129,7 +129,7 @@ struct dio200_subdev_intr {
 	unsigned int valid_isns;
 	unsigned int enabled_isns;
 	unsigned int stopcount;
-	bool active:1;
+	bool active;
 };
 
 static inline const struct dio200_layout *

@@ -108,9 +108,9 @@ struct page {
 					atomic_t _mapcount;
 
 					struct { /* SLUB */
-						unsigned inuse:16;
-						unsigned objects:15;
-						unsigned frozen:1;
+						unsigned inuse;
+						unsigned objects;
+						unsigned frozen;
 					};
 					int units;	/* SLOB */
 				};

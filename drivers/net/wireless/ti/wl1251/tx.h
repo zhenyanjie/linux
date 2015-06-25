@@ -80,10 +80,10 @@
 
 struct tx_control {
 	/* Rate Policy (class) index */
-	unsigned rate_policy:3;
+	unsigned rate_policy;
 
 	/* When set, no ack policy is expected */
-	unsigned ack_policy:1;
+	unsigned ack_policy;
 
 	/*
 	 * Packet type:
@@ -92,21 +92,21 @@ struct tx_control {
 	 * 2 -> IP
 	 * 3 -> raw codec
 	 */
-	unsigned packet_type:2;
+	unsigned packet_type;
 
 	/* If set, this is a QoS-Null or QoS-Data frame */
-	unsigned qos:1;
+	unsigned qos;
 
 	/*
 	 * If set, the target triggers the tx complete INT
 	 * upon frame sending completion.
 	 */
-	unsigned tx_complete:1;
+	unsigned tx_complete;
 
 	/* 2 bytes padding before packet header */
-	unsigned xfer_pad:1;
+	unsigned xfer_pad;
 
-	unsigned reserved:7;
+	unsigned reserved;
 } __packed;
 
 

@@ -63,9 +63,9 @@ enum led_bits {
  * State '2' : 'on'.
  */
 struct led_state {
-	unsigned r:2;
-	unsigned g:2;
-	unsigned b:2;
+	unsigned r;
+	unsigned g;
+	unsigned b;
 };
 
 struct bd2802_led {

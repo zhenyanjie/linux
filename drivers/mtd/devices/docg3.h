@@ -304,9 +304,9 @@ struct docg3_cascade {
 struct docg3 {
 	struct device *dev;
 	struct docg3_cascade *cascade;
-	unsigned int device_id:4;
-	unsigned int if_cfg:1;
-	unsigned int reliable:2;
+	unsigned int device_id;
+	unsigned int if_cfg;
+	unsigned int reliable;
 	int max_block;
 	u8 *bbt;
 	loff_t oob_write_ofs;

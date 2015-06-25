@@ -36,15 +36,15 @@ struct aer_err_info {
 	struct pci_dev *dev[AER_MAX_MULTI_ERR_DEVICES];
 	int error_dev_num;
 
-	unsigned int id:16;
+	unsigned int id;
 
-	unsigned int severity:2;	/* 0:NONFATAL | 1:FATAL | 2:COR */
-	unsigned int __pad1:5;
-	unsigned int multi_error_valid:1;
+	unsigned int severity;	/* 0:NONFATAL | 1:FATAL | 2:COR */
+	unsigned int __pad1;
+	unsigned int multi_error_valid;
 
-	unsigned int first_error:5;
-	unsigned int __pad2:2;
-	unsigned int tlp_header_valid:1;
+	unsigned int first_error;
+	unsigned int __pad2;
+	unsigned int tlp_header_valid;
 
 	unsigned int status;		/* COR/UNCOR Error Status */
 	unsigned int mask;		/* COR/UNCOR Error Mask */

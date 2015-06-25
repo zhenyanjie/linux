@@ -894,14 +894,14 @@ struct fc_lport {
 	struct fc_els_rnid_gen	       rnid_gen;
 
 	/* Capabilities */
-	u32			       sg_supp:1;
-	u32			       seq_offload:1;
-	u32			       crc_offload:1;
-	u32			       lro_enabled:1;
-	u32			       does_npiv:1;
-	u32			       npiv_enabled:1;
-	u32			       point_to_multipoint:1;
-	u32			       fdmi_enabled:1;
+	u32			       sg_supp;
+	u32			       seq_offload;
+	u32			       crc_offload;
+	u32			       lro_enabled;
+	u32			       does_npiv;
+	u32			       npiv_enabled;
+	u32			       point_to_multipoint;
+	u32			       fdmi_enabled;
 	u32			       mfs;
 	u8			       max_retry_count;
 	u8			       max_rport_retry_count;

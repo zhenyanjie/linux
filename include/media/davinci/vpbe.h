@@ -70,7 +70,7 @@ struct vpbe_output {
 struct encoder_config_info {
 	char module_name[32];
 	/* Is this an i2c device ? */
-	unsigned int is_i2c:1;
+	unsigned int is_i2c;
 	/* i2c subdevice board info */
 	struct i2c_board_info board_info;
 };
@@ -79,7 +79,7 @@ struct encoder_config_info {
 struct amp_config_info {
 	char module_name[32];
 	/* Is this an i2c device ? */
-	unsigned int is_i2c:1;
+	unsigned int is_i2c;
 	/* i2c subdevice board info */
 	struct i2c_board_info board_info;
 };

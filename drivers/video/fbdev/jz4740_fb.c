@@ -130,7 +130,7 @@ struct jzfb {
 	struct clk *ldclk;
 	struct clk *lpclk;
 
-	unsigned is_enabled:1;
+	unsigned is_enabled;
 	struct mutex lock;
 
 	uint32_t pseudo_palette[16];

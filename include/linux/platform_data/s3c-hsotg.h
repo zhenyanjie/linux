@@ -30,7 +30,7 @@ enum s3c_hsotg_dmamode {
  */
 struct s3c_hsotg_plat {
 	enum s3c_hsotg_dmamode	dma;
-	unsigned int		is_osc:1;
+	unsigned int		is_osc;
 	int                     phy_type;
 
 	int (*phy_init)(struct platform_device *pdev, int type);

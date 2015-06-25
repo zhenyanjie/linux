@@ -490,8 +490,8 @@ struct se_cmd {
 	unsigned int		map_tag;
 	/* Transport protocol dependent state, see transport_state_table */
 	enum transport_state_table t_state;
-	unsigned		cmd_wait_set:1;
-	unsigned		unknown_data_length:1;
+	unsigned		cmd_wait_set;
+	unsigned		unknown_data_length;
 	/* See se_cmd_flags_table */
 	u32			se_cmd_flags;
 	u32			se_ordered_id;
@@ -582,7 +582,7 @@ struct se_node_acl {
 	char			initiatorname[TRANSPORT_IQN_LEN];
 	/* Used to signal demo mode created ACL, disabled by default */
 	bool			dynamic_node_acl;
-	bool			acl_stop:1;
+	bool			acl_stop;
 	u32			queue_depth;
 	u32			acl_index;
 #define MAX_ACL_TAG_SIZE 64
@@ -607,7 +607,7 @@ struct se_node_acl {
 };
 
 struct se_session {
-	unsigned		sess_tearing_down:1;
+	unsigned		sess_tearing_down;
 	u64			sess_bin_isid;
 	enum target_prot_op	sup_prot_ops;
 	struct se_node_acl	*se_node_acl;

@@ -302,7 +302,7 @@ static int msi2500_convert_stream(struct msi2500_state *s, u8 *dst, u8 *src,
 		{
 			s16 *s16src = (s16 *) src;
 			u16 *u16dst = (u16 *) dst;
-			struct {signed int x:14; } se; /* sign extension */
+			struct {signed int x; } se; /* sign extension */
 			unsigned int utmp;
 
 			for (j = 0; j < 1008; j += 2) {

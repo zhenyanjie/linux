@@ -32,7 +32,7 @@ struct dib8000_config {
 	u8 div_cfg;
 	u8 output_mode;
 	u8 refclksel;
-	u8 enMpegOutput:1;
+	u8 enMpegOutput;
 
 	struct dibx000_bandwidth_config *plltable;
 };

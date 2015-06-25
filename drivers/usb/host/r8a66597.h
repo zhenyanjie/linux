@@ -77,9 +77,9 @@ struct r8a66597_td {
 	u16 address;		/* R8A66597's USB address */
 	u16 maxpacket;
 
-	unsigned zero_packet:1;
-	unsigned short_packet:1;
-	unsigned set_address:1;
+	unsigned zero_packet;
+	unsigned short_packet;
+	unsigned set_address;
 };
 
 struct r8a66597_device {
@@ -130,8 +130,8 @@ struct r8a66597 {
 	struct list_head child_device;
 	unsigned long child_connect_map[4];
 
-	unsigned bus_suspended:1;
-	unsigned irq_sense_low:1;
+	unsigned bus_suspended;
+	unsigned irq_sense_low;
 };
 
 static inline struct r8a66597 *hcd_to_r8a66597(struct usb_hcd *hcd)

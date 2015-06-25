@@ -235,21 +235,21 @@ struct phone_codec_data
 ******************************************************************************/
 struct phone_except
 {
-	unsigned int dtmf_ready:1;
-	unsigned int hookstate:1;
-	unsigned int pstn_ring:1;
-	unsigned int caller_id:1;
-	unsigned int pstn_wink:1;
-	unsigned int f0:1;
-	unsigned int f1:1;
-	unsigned int f2:1;
-	unsigned int f3:1;
-	unsigned int flash:1;
-	unsigned int fc0:1;
-	unsigned int fc1:1;
-	unsigned int fc2:1;
-	unsigned int fc3:1;
-	unsigned int reserved:18;
+	unsigned int dtmf_ready;
+	unsigned int hookstate;
+	unsigned int pstn_ring;
+	unsigned int caller_id;
+	unsigned int pstn_wink;
+	unsigned int f0;
+	unsigned int f1;
+	unsigned int f2;
+	unsigned int f3;
+	unsigned int flash;
+	unsigned int fc0;
+	unsigned int fc1;
+	unsigned int fc2;
+	unsigned int fc3;
+	unsigned int reserved;
 };
 
 union telephony_exception {

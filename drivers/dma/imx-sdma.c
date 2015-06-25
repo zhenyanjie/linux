@@ -168,17 +168,17 @@ struct sdma_channel_control {
  * @lm:		loop mode
  */
 struct sdma_state_registers {
-	u32 pc     :14;
-	u32 unused1: 1;
-	u32 t      : 1;
-	u32 rpc    :14;
-	u32 unused0: 1;
-	u32 sf     : 1;
-	u32 spc    :14;
-	u32 unused2: 1;
-	u32 df     : 1;
-	u32 epc    :14;
-	u32 lm     : 2;
+	u32 pc     ;
+	u32 unused1;
+	u32 t      ;
+	u32 rpc    ;
+	u32 unused0;
+	u32 sf     ;
+	u32 spc    ;
+	u32 unused2;
+	u32 df     ;
+	u32 epc    ;
+	u32 lm     ;
 } __attribute__ ((packed));
 
 /**

@@ -76,7 +76,7 @@ struct rx8025_data {
 	struct rtc_device *rtc;
 	struct work_struct work;
 	u8 ctrl1;
-	unsigned exiting:1;
+	unsigned exiting;
 };
 
 static int rx8025_read_reg(struct i2c_client *client, int number, u8 *value)

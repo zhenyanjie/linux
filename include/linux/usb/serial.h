@@ -153,10 +153,10 @@ struct usb_serial {
 	struct usb_device		*dev;
 	struct usb_serial_driver	*type;
 	struct usb_interface		*interface;
-	unsigned char			disconnected:1;
-	unsigned char			suspending:1;
-	unsigned char			attached:1;
-	unsigned char			minors_reserved:1;
+	unsigned char			disconnected;
+	unsigned char			suspending;
+	unsigned char			attached;
+	unsigned char			minors_reserved;
 	unsigned char			num_ports;
 	unsigned char			num_port_pointers;
 	char				num_interrupt_in;

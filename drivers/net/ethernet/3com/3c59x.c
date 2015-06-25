@@ -633,7 +633,7 @@ struct vortex_private {
 		open:1,
 		medialock:1,
 		large_frames:1,			/* accept large frames */
-		handling_irq:1;			/* private in_irq indicator */
+		handling_irq;			/* private in_irq indicator */
 	/* {get|set}_wol operations are already serialized by rtnl.
 	 * no additional locking is required for the enable_wol and acpi_set_WOL()
 	 */
@@ -722,7 +722,7 @@ static const struct media_table {
 	char *name;
 	unsigned int media_bits:16,		/* Bits to set in Wn4_Media register. */
 		mask:8,						/* The transceiver-present bit in Wn3_Config.*/
-		next:8;						/* The media type to try next. */
+		next;						/* The media type to try next. */
 	int wait;						/* Time before we check media status. */
 } media_tbl[] = {
   {	"10baseT",   Media_10TP,0x08, XCVR_10base2, (14*HZ)/10},

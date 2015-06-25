@@ -154,12 +154,12 @@ extern int kdb_nextline; /* Current number of lines displayed */
 
 typedef struct _kdb_bp {
 	unsigned long	bp_addr;	/* Address breakpoint is present at */
-	unsigned int	bp_free:1;	/* This entry is available */
-	unsigned int	bp_enabled:1;	/* Breakpoint is active in register */
-	unsigned int	bp_type:4;	/* Uses hardware register */
-	unsigned int	bp_installed:1;	/* Breakpoint is installed */
-	unsigned int	bp_delay:1;	/* Do delayed bp handling */
-	unsigned int	bp_delayed:1;	/* Delayed breakpoint */
+	unsigned int	bp_free;	/* This entry is available */
+	unsigned int	bp_enabled;	/* Breakpoint is active in register */
+	unsigned int	bp_type;	/* Uses hardware register */
+	unsigned int	bp_installed;	/* Breakpoint is installed */
+	unsigned int	bp_delay;	/* Do delayed bp handling */
+	unsigned int	bp_delayed;	/* Delayed breakpoint */
 	unsigned int	bph_length;	/* HW break length */
 } kdb_bp_t;
 

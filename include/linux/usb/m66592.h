@@ -27,19 +27,19 @@
 
 struct m66592_platdata {
 	/* one = on chip controller, zero = external controller */
-	unsigned	on_chip:1;
+	unsigned	on_chip;
 
 	/* one = big endian, zero = little endian */
-	unsigned	endian:1;
+	unsigned	endian;
 
 	/* (external controller only) M66592_PLATDATA_XTAL_nnMHZ */
-	unsigned	xtal:2;
+	unsigned	xtal;
 
 	/* (external controller only) one = 3.3V, zero = 1.5V */
-	unsigned	vif:1;
+	unsigned	vif;
 
 	/* (external controller only) set one = WR0_N shorted to WR1_N */
-	unsigned	wr0_shorted_to_wr1:1;
+	unsigned	wr0_shorted_to_wr1;
 };
 
 #endif /* __LINUX_USB_M66592_H */

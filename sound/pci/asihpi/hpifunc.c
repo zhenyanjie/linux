@@ -5,11 +5,11 @@
 #include "hpidebug.h"
 
 struct hpi_handle {
-	unsigned int obj_index:12;
-	unsigned int obj_type:4;
-	unsigned int adapter_index:14;
-	unsigned int spare:1;
-	unsigned int read_only:1;
+	unsigned int obj_index;
+	unsigned int obj_type;
+	unsigned int adapter_index;
+	unsigned int spare;
+	unsigned int read_only;
 };
 
 union handle_word {

@@ -311,9 +311,9 @@ struct gru_state;
  * There is one of these per address space.
  */
 struct gru_mm_tracker {				/* pack to reduce size */
-	unsigned int		mt_asid_gen:24;	/* ASID wrap count */
-	unsigned int		mt_asid:24;	/* current base ASID for gru */
-	unsigned short		mt_ctxbitmap:16;/* bitmap of contexts using
+	unsigned int		mt_asid_gen;	/* ASID wrap count */
+	unsigned int		mt_asid;	/* current base ASID for gru */
+	unsigned short		mt_ctxbitmap;/* bitmap of contexts using
 						   asid */
 } __attribute__ ((packed));
 

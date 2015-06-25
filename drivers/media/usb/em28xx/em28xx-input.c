@@ -51,8 +51,8 @@ MODULE_PARM_DESC(ir_debug, "enable debug messages [IR]");
  **********************************************************/
 
 struct em28xx_ir_poll_result {
-	unsigned int toggle_bit:1;
-	unsigned int read_count:7;
+	unsigned int toggle_bit;
+	unsigned int read_count;
 
 	enum rc_type protocol;
 	u32 scancode;
@@ -67,7 +67,7 @@ struct em28xx_IR {
 	/* poll decoder */
 	int polling;
 	struct delayed_work work;
-	unsigned int full_code:1;
+	unsigned int full_code;
 	unsigned int last_readcount;
 	u64 rc_type;
 

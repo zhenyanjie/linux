@@ -49,8 +49,8 @@ struct dib7000p_state {
 	struct dibx000_agc_config *current_agc;
 	u32 timf;
 
-	u8 div_force_off:1;
-	u8 div_state:1;
+	u8 div_force_off;
+	u8 div_state;
 	u16 div_sync_wait;
 
 	u8 agc_state;
@@ -58,7 +58,7 @@ struct dib7000p_state {
 	u16 gpio_dir;
 	u16 gpio_val;
 
-	u8 sfn_workaround_active:1;
+	u8 sfn_workaround_active;
 
 #define SOC7090 0x7090
 	u16 version;

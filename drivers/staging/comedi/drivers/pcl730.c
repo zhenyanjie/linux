@@ -108,11 +108,11 @@
 struct pcl730_board {
 	const char *name;
 	unsigned int io_range;
-	unsigned is_pcl725:1;
-	unsigned is_acl7225b:1;
-	unsigned is_ir104:1;
-	unsigned has_readback:1;
-	unsigned has_ttl_io:1;
+	unsigned is_pcl725;
+	unsigned is_acl7225b;
+	unsigned is_ir104;
+	unsigned has_readback;
+	unsigned has_ttl_io;
 	int n_subdevs;
 	int n_iso_out_chan;
 	int n_iso_in_chan;

@@ -349,12 +349,12 @@ struct hda_intel {
 	struct list_head list;
 
 	/* extra flags */
-	unsigned int irq_pending_warned:1;
+	unsigned int irq_pending_warned;
 
 	/* VGA-switcheroo setup */
-	unsigned int use_vga_switcheroo:1;
-	unsigned int vga_switcheroo_registered:1;
-	unsigned int init_failed:1; /* delayed init failed */
+	unsigned int use_vga_switcheroo;
+	unsigned int vga_switcheroo_registered;
+	unsigned int init_failed; /* delayed init failed */
 
 	/* secondary power domain for hdmi audio under vga device */
 	struct dev_pm_domain hdmi_pm_domain;

@@ -2,10 +2,10 @@
 #define _NFT_META_H_
 
 struct nft_meta {
-	enum nft_meta_keys	key:8;
+	enum nft_meta_keys	key;
 	union {
-		enum nft_registers	dreg:8;
-		enum nft_registers	sreg:8;
+		enum nft_registers	dreg;
+		enum nft_registers	sreg;
 	};
 };
 

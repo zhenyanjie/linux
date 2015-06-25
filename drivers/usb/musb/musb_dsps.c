@@ -96,28 +96,28 @@ struct dsps_musb_wrapper {
 	u16	rx_mode;
 
 	/* bit positions for control */
-	unsigned	reset:5;
+	unsigned	reset;
 
 	/* bit positions for interrupt */
-	unsigned	usb_shift:5;
+	unsigned	usb_shift;
 	u32		usb_mask;
 	u32		usb_bitmap;
-	unsigned	drvvbus:5;
+	unsigned	drvvbus;
 
-	unsigned	txep_shift:5;
+	unsigned	txep_shift;
 	u32		txep_mask;
 	u32		txep_bitmap;
 
-	unsigned	rxep_shift:5;
+	unsigned	rxep_shift;
 	u32		rxep_mask;
 	u32		rxep_bitmap;
 
 	/* bit positions for phy_utmi */
-	unsigned	otg_disable:5;
+	unsigned	otg_disable;
 
 	/* bit positions for mode */
-	unsigned	iddig:5;
-	unsigned	iddig_mux:5;
+	unsigned	iddig;
+	unsigned	iddig_mux;
 	/* miscellaneous stuff */
 	u8		poll_seconds;
 };

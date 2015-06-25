@@ -599,8 +599,8 @@ struct signal_struct {
 	 * process will inherit a flag if they should look for a
 	 * child_subreaper process at exit.
 	 */
-	unsigned int		is_child_subreaper:1;
-	unsigned int		has_child_subreaper:1;
+	unsigned int		is_child_subreaper;
+	unsigned int		has_child_subreaper;
 
 	/* POSIX.1b Interval Timers */
 	int			posix_timer_id;
@@ -1283,7 +1283,7 @@ struct task_struct {
 
 	struct mm_struct *mm, *active_mm;
 #ifdef CONFIG_COMPAT_BRK
-	unsigned brk_randomized:1;
+	unsigned brk_randomized;
 #endif
 	/* per-thread vma caching */
 	u32 vmacache_seqnum;
@@ -1300,13 +1300,13 @@ struct task_struct {
 	/* Used for emulating ABI behavior of previous Linux versions */
 	unsigned int personality;
 
-	unsigned in_execve:1;	/* Tell the LSMs that the process is doing an
+	unsigned in_execve;	/* Tell the LSMs that the process is doing an
 				 * execve */
-	unsigned in_iowait:1;
+	unsigned in_iowait;
 
 	/* Revert to default priority/policy when forking */
-	unsigned sched_reset_on_fork:1;
-	unsigned sched_contributes_to_load:1;
+	unsigned sched_reset_on_fork;
+	unsigned sched_contributes_to_load;
 
 	unsigned long atomic_flags; /* Flags needing atomic access. */
 
@@ -1634,7 +1634,7 @@ struct task_struct {
 		struct mem_cgroup *memcg;
 		gfp_t gfp_mask;
 		int order;
-		unsigned int may_oom:1;
+		unsigned int may_oom;
 	} memcg_oom;
 #endif
 #ifdef CONFIG_UPROBES

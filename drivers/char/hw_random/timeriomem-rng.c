@@ -37,7 +37,7 @@ struct timeriomem_rng_private_data {
 	void __iomem		*io_base;
 	unsigned int		expires;
 	unsigned int		period;
-	unsigned int		present:1;
+	unsigned int		present;
 
 	struct timer_list	timer;
 	struct completion	completion;

@@ -91,7 +91,7 @@ struct snd_wss {
 	unsigned short single_dma:1,	/* forced single DMA mode (GUS 16-bit */
 					/* daughter board) or dma1 == dma2 */
 		       ebus_flag:1,	/* SPARC: EBUS present */
-		       thinkpad_flag:1;	/* Thinkpad CS4248 needs extra help */
+		       thinkpad_flag;	/* Thinkpad CS4248 needs extra help */
 
 	struct snd_card *card;
 	struct snd_pcm *pcm;

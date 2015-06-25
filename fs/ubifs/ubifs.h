@@ -404,10 +404,10 @@ struct ubifs_inode {
 	unsigned int xattr_size;
 	unsigned int xattr_cnt;
 	unsigned int xattr_names;
-	unsigned int dirty:1;
-	unsigned int xattr:1;
-	unsigned int bulk_read:1;
-	unsigned int compr_type:2;
+	unsigned int dirty;
+	unsigned int xattr;
+	unsigned int bulk_read;
+	unsigned int compr_type;
 	struct mutex ui_mutex;
 	spinlock_t ui_lock;
 	loff_t synced_i_size;
@@ -494,8 +494,8 @@ struct ubifs_lprops {
 struct ubifs_lpt_lprops {
 	int free;
 	int dirty;
-	unsigned tgc:1;
-	unsigned cmt:1;
+	unsigned tgc;
+	unsigned cmt;
 };
 
 /**
@@ -696,8 +696,8 @@ struct ubifs_wbuf {
 	ktime_t softlimit;
 	unsigned long long delta;
 	struct hrtimer timer;
-	unsigned int no_timer:1;
-	unsigned int need_sync:1;
+	unsigned int no_timer;
+	unsigned int need_sync;
 	int next_ino;
 	ino_t *inodes;
 };
@@ -729,7 +729,7 @@ struct ubifs_bud {
 struct ubifs_jhead {
 	struct ubifs_wbuf wbuf;
 	struct list_head buds_list;
-	unsigned int grouped:1;
+	unsigned int grouped;
 };
 
 /**
@@ -875,17 +875,17 @@ struct ubifs_compressor {
  * @dirtied_ino_d fields are aligned.
  */
 struct ubifs_budget_req {
-	unsigned int fast:1;
-	unsigned int recalculate:1;
+	unsigned int fast;
+	unsigned int recalculate;
 #ifndef UBIFS_DEBUG
-	unsigned int new_page:1;
-	unsigned int dirtied_page:1;
-	unsigned int new_dent:1;
-	unsigned int mod_dent:1;
-	unsigned int new_ino:1;
-	unsigned int new_ino_d:13;
-	unsigned int dirtied_ino:4;
-	unsigned int dirtied_ino_d:15;
+	unsigned int new_page;
+	unsigned int dirtied_page;
+	unsigned int new_dent;
+	unsigned int mod_dent;
+	unsigned int new_ino;
+	unsigned int new_ino_d;
+	unsigned int dirtied_ino;
+	unsigned int dirtied_ino_d;
 #else
 	/* Not bit-fields to check for overflows */
 	unsigned int new_page;
@@ -921,9 +921,9 @@ struct ubifs_orphan {
 	struct ubifs_orphan *cnext;
 	struct ubifs_orphan *dnext;
 	ino_t inum;
-	unsigned new:1;
-	unsigned cmt:1;
-	unsigned del:1;
+	unsigned new;
+	unsigned cmt;
+	unsigned del;
 };
 
 /**
@@ -939,11 +939,11 @@ struct ubifs_orphan {
  *              (%UBIFS_COMPR_NONE, etc)
  */
 struct ubifs_mount_opts {
-	unsigned int unmount_mode:2;
-	unsigned int bulk_read:2;
-	unsigned int chk_data_crc:2;
-	unsigned int override_compr:1;
-	unsigned int compr_type:2;
+	unsigned int unmount_mode;
+	unsigned int bulk_read;
+	unsigned int chk_data_crc;
+	unsigned int override_compr;
+	unsigned int compr_type;
 };
 
 /**
@@ -973,8 +973,8 @@ struct ubifs_budg_info {
 	long long uncommitted_idx;
 	unsigned long long old_idx_sz;
 	int min_idx_lebs;
-	unsigned int nospace:1;
-	unsigned int nospace_rp:1;
+	unsigned int nospace;
+	unsigned int nospace_rp;
 	int page_budget;
 	int inode_budget;
 	int dent_budget;
@@ -1264,12 +1264,12 @@ struct ubifs_info {
 	spinlock_t cs_lock;
 	wait_queue_head_t cmt_wq;
 
-	unsigned int big_lpt:1;
-	unsigned int space_fixup:1;
-	unsigned int no_chk_data_crc:1;
-	unsigned int bulk_read:1;
-	unsigned int default_compr:2;
-	unsigned int rw_incompat:1;
+	unsigned int big_lpt;
+	unsigned int space_fixup;
+	unsigned int no_chk_data_crc;
+	unsigned int bulk_read;
+	unsigned int default_compr;
+	unsigned int rw_incompat;
 
 	struct mutex tnc_mutex;
 	struct ubifs_zbranch zroot;
@@ -1327,9 +1327,9 @@ struct ubifs_info {
 	int leb_cnt;
 	int max_leb_cnt;
 	int old_leb_cnt;
-	unsigned int ro_media:1;
-	unsigned int ro_mount:1;
-	unsigned int ro_error:1;
+	unsigned int ro_media;
+	unsigned int ro_mount;
+	unsigned int ro_error;
 
 	atomic_long_t dirty_pg_cnt;
 	atomic_long_t dirty_zn_cnt;
@@ -1442,12 +1442,12 @@ struct ubifs_info {
 	kgid_t rp_gid;
 
 	/* The below fields are used only during mounting and re-mounting */
-	unsigned int empty:1;
-	unsigned int need_recovery:1;
-	unsigned int replaying:1;
-	unsigned int mounting:1;
-	unsigned int remounting_rw:1;
-	unsigned int probing:1;
+	unsigned int empty;
+	unsigned int need_recovery;
+	unsigned int replaying;
+	unsigned int mounting;
+	unsigned int remounting_rw;
+	unsigned int probing;
 	struct list_head replay_list;
 	struct list_head replay_buds;
 	unsigned long long cs_sqnum;

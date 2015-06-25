@@ -145,15 +145,15 @@ struct atm_trafprm {
         unsigned int 	frtt : 24;	/* Fixed Round Trip Time (24-bit) */
         unsigned int 	rif  : 4;       /* Rate Increment Factor (4-bit) */
         unsigned int 	rdf  : 4;       /* Rate Decrease Factor (4-bit) */
-        unsigned int nrm_pres  :1;      /* nrm present bit */
-        unsigned int trm_pres  :1;     	/* rm present bit */
-        unsigned int adtf_pres :1;     	/* adtf present bit */
-        unsigned int cdf_pres  :1;    	/* cdf present bit*/
-        unsigned int nrm       :3;     	/* Max # of Cells for each forward RM cell (3-bit) */
-        unsigned int trm       :3;    	/* Time between forward RM cells (3-bit) */    
-	unsigned int adtf      :10;     /* ACR Decrease Time Factor (10-bit) */
-	unsigned int cdf       :3;      /* Cutoff Decrease Factor (3-bit) */
-        unsigned int spare     :9;      /* spare bits */ 
+        unsigned int nrm_pres  ;      /* nrm present bit */
+        unsigned int trm_pres  ;     	/* rm present bit */
+        unsigned int adtf_pres ;     	/* adtf present bit */
+        unsigned int cdf_pres  ;    	/* cdf present bit*/
+        unsigned int nrm       ;     	/* Max # of Cells for each forward RM cell (3-bit) */
+        unsigned int trm       ;    	/* Time between forward RM cells (3-bit) */    
+	unsigned int adtf      ;     /* ACR Decrease Time Factor (10-bit) */
+	unsigned int cdf       ;      /* Cutoff Decrease Factor (3-bit) */
+        unsigned int spare     ;      /* spare bits */ 
 };
 
 struct atm_qos {

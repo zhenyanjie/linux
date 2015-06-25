@@ -231,28 +231,28 @@ struct tvcard {
 	unsigned int tuner_type;
 	u8 tuner_addr;
 	u8 video_inputs;	/* Number of inputs */
-	unsigned int svhs:4;	/* Which input is s-video */
+	unsigned int svhs;	/* Which input is s-video */
 #define NO_SVHS	15
-	unsigned int pll:2;
+	unsigned int pll;
 #define PLL_NONE 0
 #define PLL_28   1
 #define PLL_35   2
 #define PLL_14   3
 
 	/* i2c audio flags */
-	unsigned int no_msp34xx:1;
-	unsigned int no_tda7432:1;
-	unsigned int msp34xx_alt:1;
+	unsigned int no_msp34xx;
+	unsigned int no_tda7432;
+	unsigned int msp34xx_alt;
 	/* Note: currently no card definition needs to mark the presence
 	   of a RDS saa6588 chip. If this is ever needed, then add a new
 	   'has_saa6588' bit here. */
 
-	unsigned int no_video:1; /* video pci function is unused */
-	unsigned int has_dvb:1;
-	unsigned int has_remote:1;
-	unsigned int has_radio:1;
-	unsigned int has_dig_in:1; /* Has digital input (always last input) */
-	unsigned int no_gpioirq:1;
+	unsigned int no_video; /* video pci function is unused */
+	unsigned int has_dvb;
+	unsigned int has_remote;
+	unsigned int has_radio;
+	unsigned int has_dig_in; /* Has digital input (always last input) */
+	unsigned int no_gpioirq;
 };
 
 extern struct tvcard bttv_tvcards[];

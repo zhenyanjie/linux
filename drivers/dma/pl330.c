@@ -270,12 +270,12 @@ struct pl330_config {
 	u32	periph_id;
 #define DMAC_MODE_NS	(1 << 0)
 	unsigned int	mode;
-	unsigned int	data_bus_width:10; /* In number of bits */
-	unsigned int	data_buf_dep:10;
-	unsigned int	num_chan:4;
-	unsigned int	num_peri:6;
+	unsigned int	data_bus_width; /* In number of bits */
+	unsigned int	data_buf_dep;
+	unsigned int	num_chan;
+	unsigned int	num_peri;
 	u32		peri_ns;
-	unsigned int	num_events:6;
+	unsigned int	num_events;
 	u32		irq_ns;
 };
 
@@ -289,8 +289,8 @@ struct pl330_config {
  */
 struct pl330_reqcfg {
 	/* Address Incrementing */
-	unsigned dst_inc:1;
-	unsigned src_inc:1;
+	unsigned dst_inc;
+	unsigned src_inc;
 
 	/*
 	 * For now, the SRC & DST protection levels
@@ -299,8 +299,8 @@ struct pl330_reqcfg {
 	bool nonsecure;
 	bool privileged;
 	bool insnaccess;
-	unsigned brst_len:5;
-	unsigned brst_size:3; /* in power of 2 */
+	unsigned brst_len;
+	unsigned brst_size; /* in power of 2 */
 
 	enum pl330_cachectrl dcctl;
 	enum pl330_cachectrl scctl;
@@ -505,7 +505,7 @@ struct dma_pl330_desc {
 
 	enum dma_transfer_direction rqtype;
 	/* Index of peripheral for the xfer. */
-	unsigned peri:5;
+	unsigned peri;
 	/* Hook to attach to DMAC's list of reqs with due callback */
 	struct list_head rqd;
 };

@@ -71,8 +71,8 @@ struct portals_handle {
 	/* newly added fields to handle the RCU issue. -jxiong */
 	cfs_rcu_head_t			h_rcu;
 	spinlock_t			h_lock;
-	unsigned int			h_size:31;
-	unsigned int			h_in:1;
+	unsigned int			h_size;
+	unsigned int			h_in;
 };
 #define RCU2HANDLE(rcu)    container_of(rcu, struct portals_handle, h_rcu)
 

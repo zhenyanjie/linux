@@ -103,7 +103,7 @@ struct packet_sock {
 	unsigned int		running:1,	/* prot_hook is attached*/
 				auxdata:1,
 				origdev:1,
-				has_vnet_hdr:1;
+				has_vnet_hdr;
 	int			ifindex;	/* bound device		*/
 	__be16			num;
 	struct packet_mclist	*mclist;
@@ -111,8 +111,8 @@ struct packet_sock {
 	enum tpacket_versions	tp_version;
 	unsigned int		tp_hdrlen;
 	unsigned int		tp_reserve;
-	unsigned int		tp_loss:1;
-	unsigned int		tp_tx_has_off:1;
+	unsigned int		tp_loss;
+	unsigned int		tp_tx_has_off;
 	unsigned int		tp_tstamp;
 	struct net_device __rcu	*cached_dev;
 	int			(*xmit)(struct sk_buff *skb);

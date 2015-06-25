@@ -837,91 +837,91 @@ enum {
 
 struct ksz_desc_rx_stat {
 #ifdef __BIG_ENDIAN_BITFIELD
-	u32 hw_owned:1;
-	u32 first_desc:1;
-	u32 last_desc:1;
-	u32 csum_err_ip:1;
-	u32 csum_err_tcp:1;
-	u32 csum_err_udp:1;
-	u32 error:1;
-	u32 multicast:1;
-	u32 src_port:4;
-	u32 err_phy:1;
-	u32 err_too_long:1;
-	u32 err_runt:1;
-	u32 err_crc:1;
-	u32 frame_type:1;
-	u32 reserved1:4;
-	u32 frame_len:11;
+	u32 hw_owned;
+	u32 first_desc;
+	u32 last_desc;
+	u32 csum_err_ip;
+	u32 csum_err_tcp;
+	u32 csum_err_udp;
+	u32 error;
+	u32 multicast;
+	u32 src_port;
+	u32 err_phy;
+	u32 err_too_long;
+	u32 err_runt;
+	u32 err_crc;
+	u32 frame_type;
+	u32 reserved1;
+	u32 frame_len;
 #else
-	u32 frame_len:11;
-	u32 reserved1:4;
-	u32 frame_type:1;
-	u32 err_crc:1;
-	u32 err_runt:1;
-	u32 err_too_long:1;
-	u32 err_phy:1;
-	u32 src_port:4;
-	u32 multicast:1;
-	u32 error:1;
-	u32 csum_err_udp:1;
-	u32 csum_err_tcp:1;
-	u32 csum_err_ip:1;
-	u32 last_desc:1;
-	u32 first_desc:1;
-	u32 hw_owned:1;
+	u32 frame_len;
+	u32 reserved1;
+	u32 frame_type;
+	u32 err_crc;
+	u32 err_runt;
+	u32 err_too_long;
+	u32 err_phy;
+	u32 src_port;
+	u32 multicast;
+	u32 error;
+	u32 csum_err_udp;
+	u32 csum_err_tcp;
+	u32 csum_err_ip;
+	u32 last_desc;
+	u32 first_desc;
+	u32 hw_owned;
 #endif
 };
 
 struct ksz_desc_tx_stat {
 #ifdef __BIG_ENDIAN_BITFIELD
-	u32 hw_owned:1;
-	u32 reserved1:31;
+	u32 hw_owned;
+	u32 reserved1;
 #else
-	u32 reserved1:31;
-	u32 hw_owned:1;
+	u32 reserved1;
+	u32 hw_owned;
 #endif
 };
 
 struct ksz_desc_rx_buf {
 #ifdef __BIG_ENDIAN_BITFIELD
-	u32 reserved4:6;
-	u32 end_of_ring:1;
-	u32 reserved3:14;
-	u32 buf_size:11;
+	u32 reserved4;
+	u32 end_of_ring;
+	u32 reserved3;
+	u32 buf_size;
 #else
-	u32 buf_size:11;
-	u32 reserved3:14;
-	u32 end_of_ring:1;
-	u32 reserved4:6;
+	u32 buf_size;
+	u32 reserved3;
+	u32 end_of_ring;
+	u32 reserved4;
 #endif
 };
 
 struct ksz_desc_tx_buf {
 #ifdef __BIG_ENDIAN_BITFIELD
-	u32 intr:1;
-	u32 first_seg:1;
-	u32 last_seg:1;
-	u32 csum_gen_ip:1;
-	u32 csum_gen_tcp:1;
-	u32 csum_gen_udp:1;
-	u32 end_of_ring:1;
-	u32 reserved4:1;
-	u32 dest_port:4;
-	u32 reserved3:9;
-	u32 buf_size:11;
+	u32 intr;
+	u32 first_seg;
+	u32 last_seg;
+	u32 csum_gen_ip;
+	u32 csum_gen_tcp;
+	u32 csum_gen_udp;
+	u32 end_of_ring;
+	u32 reserved4;
+	u32 dest_port;
+	u32 reserved3;
+	u32 buf_size;
 #else
-	u32 buf_size:11;
-	u32 reserved3:9;
-	u32 dest_port:4;
-	u32 reserved4:1;
-	u32 end_of_ring:1;
-	u32 csum_gen_udp:1;
-	u32 csum_gen_tcp:1;
-	u32 csum_gen_ip:1;
-	u32 last_seg:1;
-	u32 first_seg:1;
-	u32 intr:1;
+	u32 buf_size;
+	u32 reserved3;
+	u32 dest_port;
+	u32 reserved4;
+	u32 end_of_ring;
+	u32 csum_gen_udp;
+	u32 csum_gen_tcp;
+	u32 csum_gen_ip;
+	u32 last_seg;
+	u32 first_seg;
+	u32 intr;
 #endif
 };
 
@@ -1046,9 +1046,9 @@ struct ksz_mac_table {
 	u16 vid;
 	u8 fid;
 	u8 ports;
-	u8 override:1;
-	u8 use_fid:1;
-	u8 valid:1;
+	u8 override;
+	u8 use_fid;
+	u8 valid;
 };
 
 #define VLAN_TABLE_ENTRIES		16

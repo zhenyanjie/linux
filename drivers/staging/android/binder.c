@@ -232,13 +232,13 @@ struct binder_node {
 	int local_strong_refs;
 	binder_uintptr_t ptr;
 	binder_uintptr_t cookie;
-	unsigned has_strong_ref:1;
-	unsigned pending_strong_ref:1;
-	unsigned has_weak_ref:1;
-	unsigned pending_weak_ref:1;
-	unsigned has_async_transaction:1;
-	unsigned accept_fds:1;
-	unsigned min_priority:8;
+	unsigned has_strong_ref;
+	unsigned pending_strong_ref;
+	unsigned has_weak_ref;
+	unsigned pending_weak_ref;
+	unsigned has_async_transaction;
+	unsigned accept_fds;
+	unsigned min_priority;
 	struct list_head async_todo;
 };
 
@@ -268,10 +268,10 @@ struct binder_buffer {
 	struct list_head entry; /* free and allocated entries by address */
 	struct rb_node rb_node; /* free entry by size or allocated entry */
 				/* by address */
-	unsigned free:1;
-	unsigned allow_user_free:1;
-	unsigned async_transaction:1;
-	unsigned debug_id:29;
+	unsigned free;
+	unsigned allow_user_free;
+	unsigned async_transaction;
+	unsigned debug_id;
 
 	struct binder_transaction *transaction;
 
@@ -355,8 +355,8 @@ struct binder_transaction {
 	struct binder_proc *to_proc;
 	struct binder_thread *to_thread;
 	struct binder_transaction *to_parent;
-	unsigned need_reply:1;
-	/* unsigned is_dead:1; */	/* not used at the moment */
+	unsigned need_reply;
+	/* unsigned is_dead; */	/* not used at the moment */
 
 	struct binder_buffer *buffer;
 	unsigned int	code;

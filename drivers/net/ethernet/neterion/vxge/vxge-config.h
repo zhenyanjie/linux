@@ -34,7 +34,7 @@
 #define VXGE_HW_MAX_ROM_IMAGES			8
 
 struct eprom_image {
-	u8 is_valid:1;
+	u8 is_valid;
 	u8 index;
 	u8 type;
 	u16 version;
@@ -450,7 +450,7 @@ struct vxge_hw_device_config {
 #define VXGE_HW_RTS_MAC_ENABLE			1
 #define VXGE_HW_RTS_MAC_DEFAULT			0
 
-						hwts_en:1;
+						hwts_en;
 #define	VXGE_HW_HWTS_DISABLE			0
 #define	VXGE_HW_HWTS_ENABLE			1
 #define	VXGE_HW_HWTS_DEFAULT			1
@@ -1458,7 +1458,7 @@ struct vxge_hw_rth_hash_types {
 	   hash_type_tcpipv6_en:1,
 	   hash_type_ipv6_en:1,
 	   hash_type_tcpipv6ex_en:1,
-	   hash_type_ipv6ex_en:1;
+	   hash_type_ipv6ex_en;
 };
 
 void vxge_hw_device_debug_set(

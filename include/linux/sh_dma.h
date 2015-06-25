@@ -86,12 +86,12 @@ struct sh_dmae_pdata {
 	unsigned int chcr_offset;
 	u32 chcr_ie_bit;
 
-	unsigned int dmaor_is_32bit:1;
-	unsigned int needs_tend_set:1;
-	unsigned int no_dmars:1;
-	unsigned int chclr_present:1;
-	unsigned int chclr_bitwise:1;
-	unsigned int slave_only:1;
+	unsigned int dmaor_is_32bit;
+	unsigned int needs_tend_set;
+	unsigned int no_dmars;
+	unsigned int chclr_present;
+	unsigned int chclr_bitwise;
+	unsigned int slave_only;
 };
 
 /* DMAOR definitions */

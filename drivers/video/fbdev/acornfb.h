@@ -19,21 +19,21 @@
 #define EXTEND4(x) ((x)|(x)<<4|(x)<<8|(x)<<12)
 
 struct vidc20_palette {
-	u_int red:8;
-	u_int green:8;
-	u_int blue:8;
-	u_int ext:4;
-	u_int unused:4;
+	u_int red;
+	u_int green;
+	u_int blue;
+	u_int ext;
+	u_int unused;
 };
 
 struct vidc_palette {
-	u_int red:4;
-	u_int green:4;
-	u_int blue:4;
-	u_int trans:1;
-	u_int sbz1:13;
-	u_int reg:4;
-	u_int sbz2:2;
+	u_int red;
+	u_int green;
+	u_int blue;
+	u_int trans;
+	u_int sbz1;
+	u_int reg;
+	u_int sbz2;
 };
 
 union palette {

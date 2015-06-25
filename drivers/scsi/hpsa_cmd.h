@@ -273,33 +273,33 @@ struct SenseSubsystem_info {
 union SCSI3Addr {
 	struct {
 		u8 Dev;
-		u8 Bus:6;
-		u8 Mode:2;        /* b00 */
+		u8 Bus;
+		u8 Mode;        /* b00 */
 	} PeripDev;
 	struct {
 		u8 DevLSB;
-		u8 DevMSB:6;
-		u8 Mode:2;        /* b01 */
+		u8 DevMSB;
+		u8 Mode;        /* b01 */
 	} LogDev;
 	struct {
-		u8 Dev:5;
-		u8 Bus:3;
-		u8 Targ:6;
-		u8 Mode:2;        /* b10 */
+		u8 Dev;
+		u8 Bus;
+		u8 Targ;
+		u8 Mode;        /* b10 */
 	} LogUnit;
 };
 
 struct PhysDevAddr {
-	u32             TargetId:24;
-	u32             Bus:6;
-	u32             Mode:2;
+	u32             TargetId;
+	u32             Bus;
+	u32             Mode;
 	/* 2 level target device addr */
 	union SCSI3Addr  Target[2];
 };
 
 struct LogDevAddr {
-	u32            VolId:30;
-	u32            Mode:2;
+	u32            VolId;
+	u32            Mode;
 	u8             reserved[4];
 };
 
@@ -321,9 +321,9 @@ struct CommandListHeader {
 struct RequestBlock {
 	u8   CDBLen;
 	struct {
-		u8 Type:3;
-		u8 Attribute:3;
-		u8 Direction:2;
+		u8 Type;
+		u8 Attribute;
+		u8 Direction;
 	} Type;
 	u16  Timeout;
 	u8   CDB[16];

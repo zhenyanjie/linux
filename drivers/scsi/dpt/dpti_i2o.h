@@ -59,9 +59,9 @@ struct i2o_message
 	u8	version_offset;
 	u8	flags;
 	u16	size;
-	u32	target_tid:12;
-	u32	init_tid:12;
-	u32	function:8;
+	u32	target_tid;
+	u32	init_tid;
+	u32	function;
 	u32	initiator_context;
 	/* List follows */
 };
@@ -106,10 +106,10 @@ struct i2o_sys_tbl_entry
 {
 	u16	org_id;
 	u16	reserved1;
-	u32	iop_id:12;
-	u32	reserved2:20;
-	u16	seg_num:12;
-	u16	i2o_version:4;
+	u32	iop_id;
+	u32	reserved2;
+	u16	seg_num;
+	u16	i2o_version;
 	u8	iop_state;
 	u8	msg_type;
 	u16	frame_size;

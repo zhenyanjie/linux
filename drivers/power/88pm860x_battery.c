@@ -107,8 +107,8 @@ struct pm860x_battery_info {
 	int resistor;		/* Battery Internal Resistor */
 	int last_capacity;
 	int start_soc;
-	unsigned present:1;
-	unsigned temp_type:1;	/* TINT or TBAT */
+	unsigned present;
+	unsigned temp_type;	/* TINT or TBAT */
 };
 
 struct ccnt {

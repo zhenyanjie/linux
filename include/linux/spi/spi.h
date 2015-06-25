@@ -617,9 +617,9 @@ struct spi_transfer {
 	struct sg_table tx_sg;
 	struct sg_table rx_sg;
 
-	unsigned	cs_change:1;
-	unsigned	tx_nbits:3;
-	unsigned	rx_nbits:3;
+	unsigned	cs_change;
+	unsigned	tx_nbits;
+	unsigned	rx_nbits;
 #define	SPI_NBITS_SINGLE	0x01 /* 1bit transfer */
 #define	SPI_NBITS_DUAL		0x02 /* 2bits transfer */
 #define	SPI_NBITS_QUAD		0x04 /* 4bits transfer */
@@ -664,7 +664,7 @@ struct spi_message {
 
 	struct spi_device	*spi;
 
-	unsigned		is_dma_mapped:1;
+	unsigned		is_dma_mapped;
 
 	/* REVISIT:  we might want a flag affecting the behavior of the
 	 * last transfer ... allowing things like "read 16 bit length L"

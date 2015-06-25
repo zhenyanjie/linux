@@ -52,6 +52,6 @@ struct max8660_subdev_data {
 struct max8660_platform_data {
 	int num_subdevs;
 	struct max8660_subdev_data *subdevs;
-	unsigned en34_is_high:1;
+	unsigned en34_is_high;
 };
 #endif

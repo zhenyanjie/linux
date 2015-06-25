@@ -109,7 +109,7 @@ struct ecb {			/* Enhanced Control Block 6.1 */
 	:2, ses:1,		/* Suppress Underrun error */
 	:1, sg:1,		/* Scatter/Gather */
 	:1, dsb:1,		/* Disable Status Block */
-	 ars:1;			/* Automatic Request Sense */
+	 ars;			/* Automatic Request Sense */
 	/* Flag Word 2 */
 	u16 lun:3,		/* Logical Unit */
 	 tag:1,			/* Tagged Queuing */
@@ -119,7 +119,7 @@ struct ecb {			/* Enhanced Control Block 6.1 */
 	 dir:1,			/* Direction of transfer 1 = datain */
 	 st:1,			/* Suppress Transfer */
 	 chk:1,			/* Calculate Checksum */
-	:2, rec:1,:1;		/* Error Recovery */
+	:2, rec:1,;		/* Error Recovery */
 	u16 nil0;		/* nothing */
 	u32 dataptr;		/* Data or Scatter List ptr */
 	u32 datalen;		/* Data or Scatter List len */

@@ -155,8 +155,8 @@ struct wa_xfer {
 	struct urb *urb;		/* URB we are transferring for */
 	struct wa_seg **seg;		/* transfer segments */
 	u8 segs, segs_submitted, segs_done;
-	unsigned is_inbound:1;
-	unsigned is_dma:1;
+	unsigned is_inbound;
+	unsigned is_dma;
 	size_t seg_size;
 	int result;
 

@@ -35,7 +35,7 @@ struct gre_hdr {
 		csum:1,
 		version:3,
 		reserved:4,
-		ack:1;
+		ack;
 #elif defined(__BIG_ENDIAN_BITFIELD)
 	__u16	csum:1,
 		routing:1,
@@ -45,7 +45,7 @@ struct gre_hdr {
 		rec:3,
 		ack:1,
 		reserved:4,
-		version:3;
+		version;
 #else
 #error "Adjust your <asm/byteorder.h> defines"
 #endif

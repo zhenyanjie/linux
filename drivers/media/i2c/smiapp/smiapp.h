@@ -155,8 +155,8 @@ struct smiapp_csi_data_format {
 #define SMIAPP_PADS			2
 
 struct smiapp_binning_subtype {
-	u8 horizontal:4;
-	u8 vertical:4;
+	u8 horizontal;
+	u8 vertical;
 } __packed;
 
 struct smiapp_subdev {

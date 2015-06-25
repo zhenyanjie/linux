@@ -47,15 +47,15 @@ struct max98095_pdata {
 	 * 0 = analog microphone input (normal setting)
 	 * 1 = digital microphone input
 	 */
-	unsigned int digmic_left_mode:1;
-	unsigned int digmic_right_mode:1;
+	unsigned int digmic_left_mode;
+	unsigned int digmic_right_mode;
 
 	/* Pin5 is the mechanical method of sensing jack insertion
 	 * but it is something that might not be supported.
 	 * 0 = PIN5 not supported
 	 * 1 = PIN5 supported
 	 */
-	unsigned int jack_detect_pin5en:1;
+	unsigned int jack_detect_pin5en;
 
 	/* Slew amount for jack detection. Calculated as 4 * (delay + 1).
 	 * Default delay is 24 to get a time of 100ms.

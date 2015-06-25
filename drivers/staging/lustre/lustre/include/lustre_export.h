@@ -240,7 +240,7 @@ struct obd_export {
 				  exp_abort_active_req:1,
 				  /* if to swap nidtbl entries for 2.2 clients.
 				   * Only used by the MGS to fix LU-1644. */
-				  exp_need_mne_swab:1;
+				  exp_need_mne_swab;
 	/* also protected by exp_lock */
 	enum lustre_sec_part      exp_sp_peer;
 	struct sptlrpc_flavor     exp_flvr;	     /* current */

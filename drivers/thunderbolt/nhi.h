@@ -42,8 +42,8 @@ struct tb_ring {
 	struct list_head queue;
 	struct list_head in_flight;
 	struct work_struct work;
-	bool is_tx:1; /* rx otherwise */
-	bool running:1;
+	bool is_tx; /* rx otherwise */
+	bool running;
 };
 
 struct ring_frame;
@@ -56,10 +56,10 @@ struct ring_frame {
 	dma_addr_t buffer_phy;
 	ring_cb callback;
 	struct list_head list;
-	u32 size:12; /* TX: in, RX: out*/
-	u32 flags:12; /* RX: out */
-	u32 eof:4; /* TX:in, RX: out */
-	u32 sof:4; /* TX:in, RX: out */
+	u32 size; /* TX: in, RX: out*/
+	u32 flags; /* RX: out */
+	u32 eof; /* TX:in, RX: out */
+	u32 sof; /* TX:in, RX: out */
 };
 
 #define TB_FRAME_SIZE 0x100    /* minimum size for ring_rx */

@@ -255,10 +255,10 @@ struct carl9170_tx_status {
 	 */
 
 	u8 cookie;
-	u8 queue:2;
-	u8 rix:2;
-	u8 tries:3;
-	u8 success:1;
+	u8 queue;
+	u8 rix;
+	u8 tries;
+	u8 success;
 } __packed;
 #endif /* __CARL9170FW__ */
 

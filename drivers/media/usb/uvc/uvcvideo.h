@@ -209,7 +209,7 @@ struct uvc_control {
 	     loaded:1,
 	     modified:1,
 	     cached:1,
-	     initialized:1;
+	     initialized;
 
 	__u8 *uvc_data;
 };

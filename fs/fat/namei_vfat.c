@@ -254,7 +254,7 @@ static int vfat_find_form(struct inode *dir, unsigned char *name)
 struct shortname_info {
 	unsigned char lower:1,
 		      upper:1,
-		      valid:1;
+		      valid;
 };
 #define INIT_SHORTNAME_INFO(x)	do {		\
 	(x)->lower = 1;				\

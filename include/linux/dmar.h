@@ -51,8 +51,8 @@ struct dmar_drhd_unit {
 	struct	dmar_dev_scope *devices;/* target device array	*/
 	int	devices_cnt;		/* target device count	*/
 	u16	segment;		/* PCI domain		*/
-	u8	ignored:1; 		/* ignore drhd		*/
-	u8	include_all:1;
+	u8	ignored; 		/* ignore drhd		*/
+	u8	include_all;
 	struct intel_iommu *iommu;
 };
 

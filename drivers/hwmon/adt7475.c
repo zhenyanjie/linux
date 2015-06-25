@@ -173,9 +173,9 @@ struct adt7475_data {
 	u8 config5;
 	u8 has_voltage;
 	u8 bypass_attn;		/* Bypass voltage attenuator */
-	u8 has_pwm2:1;
-	u8 has_fan4:1;
-	u8 has_vid:1;
+	u8 has_pwm2;
+	u8 has_fan4;
+	u8 has_vid;
 	u32 alarms;
 	u16 voltage[3][6];
 	u16 temp[7][3];

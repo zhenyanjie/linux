@@ -116,7 +116,7 @@ struct tmio_nand {
 
 	/* for tmio_nand_read_byte */
 	u8			read;
-	unsigned read_good:1;
+	unsigned read_good;
 };
 
 #define mtd_to_tmio(m)			container_of(m, struct tmio_nand, mtd)

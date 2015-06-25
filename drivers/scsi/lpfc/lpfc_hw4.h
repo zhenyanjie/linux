@@ -213,12 +213,12 @@ struct ulp_bde64 {
 		uint32_t w;
 		struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-			uint32_t bdeFlags:8;	/* BDE Flags 0 IS A SUPPORTED
+			uint32_t bdeFlags;	/* BDE Flags 0 IS A SUPPORTED
 						   VALUE !! */
-			uint32_t bdeSize:24;	/* Size of buffer (in bytes) */
+			uint32_t bdeSize;	/* Size of buffer (in bytes) */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-			uint32_t bdeSize:24;	/* Size of buffer (in bytes) */
-			uint32_t bdeFlags:8;	/* BDE Flags 0 IS A SUPPORTED
+			uint32_t bdeSize;	/* Size of buffer (in bytes) */
+			uint32_t bdeFlags;	/* BDE Flags 0 IS A SUPPORTED
 						   VALUE !! */
 #endif
 #define BUFF_TYPE_BDE_64    0x00	/* BDE (Host_resident) */

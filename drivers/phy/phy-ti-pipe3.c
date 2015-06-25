@@ -63,7 +63,7 @@
 struct pipe3_dpll_params {
 	u16	m;
 	u8	n;
-	u8	freq:3;
+	u8	freq;
 	u8	sd;
 	u32	mf;
 };

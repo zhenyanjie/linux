@@ -69,7 +69,7 @@ struct i2s_dai {
 #define DAI_MANAGER	(1 << 1) /* Dai is the manager */
 	unsigned mode;
 	/* CDCLK pin direction: 0  - input, 1 - output */
-	unsigned int cdclk_out:1;
+	unsigned int cdclk_out;
 	/* Driver for this DAI */
 	struct snd_soc_dai_driver i2s_dai_drv;
 	/* DMA parameters */

@@ -77,8 +77,8 @@ struct acpi_pci_link_irq {
 	u8 resource_type;
 	u8 possible_count;
 	u8 possible[ACPI_PCI_LINK_MAX_POSSIBLE];
-	u8 initialized:1;
-	u8 reserved:7;
+	u8 initialized;
+	u8 reserved;
 };
 
 struct acpi_pci_link {

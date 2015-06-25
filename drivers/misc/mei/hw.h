@@ -120,12 +120,12 @@ enum  mei_cl_disconnect_status {
  *  MEI BUS Interface Section
  */
 struct mei_msg_hdr {
-	u32 me_addr:8;
-	u32 host_addr:8;
-	u32 length:9;
-	u32 reserved:5;
-	u32 internal:1;
-	u32 msg_complete:1;
+	u32 me_addr;
+	u32 host_addr;
+	u32 length;
+	u32 reserved;
+	u32 internal;
+	u32 msg_complete;
 } __packed;
 
 

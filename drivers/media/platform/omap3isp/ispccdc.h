@@ -143,7 +143,7 @@ struct isp_ccdc_device {
 	unsigned int alaw:1,
 		     lpf:1,
 		     obclamp:1,
-		     fpc_en:1;
+		     fpc_en;
 	struct omap3isp_ccdc_blcomp blcomp;
 	struct omap3isp_ccdc_bclamp clamp;
 	struct ispccdc_fpc fpc;
@@ -151,7 +151,7 @@ struct isp_ccdc_device {
 	unsigned int update;
 	unsigned int shadow_update;
 
-	unsigned int underrun:1;
+	unsigned int underrun;
 	enum isp_pipeline_stream_state state;
 	spinlock_t lock;
 	wait_queue_head_t wait;

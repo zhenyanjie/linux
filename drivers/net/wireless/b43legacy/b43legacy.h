@@ -391,7 +391,7 @@ struct b43legacy_iv {
 struct b43legacy_lopair {
 	s8 low;
 	s8 high;
-	u8 used:1;
+	u8 used;
 };
 #define B43legacy_LO_COUNT	(14*4)
 
@@ -413,7 +413,7 @@ struct b43legacy_phy {
 	/* Radio versioning */
 	u16 radio_manuf;	/* Radio manufacturer */
 	u16 radio_ver;		/* Radio version */
-	u8 calibrated:1;
+	u8 calibrated;
 	u8 radio_rev;		/* Radio revision */
 
 	bool dyn_tssi_tbl;	/* tssi2dbm is kmalloc()ed. */

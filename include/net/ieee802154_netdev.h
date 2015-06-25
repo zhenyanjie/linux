@@ -36,11 +36,11 @@ struct ieee802154_sechdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
 	u8 level:3,
 	   key_id_mode:2,
-	   reserved:3;
+	   reserved;
 #elif defined(__BIG_ENDIAN_BITFIELD)
 	u8 reserved:3,
 	   key_id_mode:2,
-	   level:3;
+	   level;
 #else
 #error	"Please fix <asm/byteorder.h>"
 #endif
@@ -71,7 +71,7 @@ struct ieee802154_hdr_fc {
 	    reserved:3,
 	    dest_addr_mode:2,
 	    version:2,
-	    source_addr_mode:2;
+	    source_addr_mode;
 #elif defined(__BIG_ENDIAN_BITFIELD)
 	u16 reserved:1,
 	    intra_pan:1,
@@ -82,7 +82,7 @@ struct ieee802154_hdr_fc {
 	    source_addr_mode:2,
 	    version:2,
 	    dest_addr_mode:2,
-	    reserved2:2;
+	    reserved2;
 #else
 #error	"Please fix <asm/byteorder.h>"
 #endif

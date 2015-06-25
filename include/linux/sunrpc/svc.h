@@ -393,7 +393,7 @@ struct svc_version {
 
 	unsigned int		vs_hidden : 1,	/* Don't register with portmapper.
 						 * Only used for nfsacl so far. */
-				vs_rpcb_optnl:1;/* Don't care the result of register.
+				vs_rpcb_optnl;/* Don't care the result of register.
 						 * Only used for nfsv4. */
 
 	/* Override dispatch function (e.g. when caching replies).

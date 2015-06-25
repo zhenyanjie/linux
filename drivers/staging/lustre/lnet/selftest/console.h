@@ -142,13 +142,13 @@ typedef struct {
 	/** tests features of the session */
 	unsigned		ses_features;
 	/** features are synced with remote test nodes */
-	unsigned		ses_feats_updated:1;
+	unsigned		ses_feats_updated;
 	/** force creating */
-	unsigned		ses_force:1;
+	unsigned		ses_force;
 	/** session is shutting down */
-	unsigned		ses_shutdown:1;
+	unsigned		ses_shutdown;
 	/** console is timedout */
-	unsigned		ses_expired:1;
+	unsigned		ses_expired;
 	__u64		   ses_id_cookie;  /* batch id cookie */
 	char		    ses_name[LST_NAME_SIZE];  /* session name */
 	lstcon_rpc_trans_t     *ses_ping;       /* session pinger */

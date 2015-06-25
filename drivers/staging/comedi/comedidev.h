@@ -242,8 +242,8 @@ struct comedi_device {
 
 	const char *board_name;
 	const void *board_ptr;
-	bool attached:1;
-	bool ioenabled:1;
+	bool attached;
+	bool ioenabled;
 	spinlock_t spinlock;
 	struct mutex mutex;
 	struct rw_semaphore attach_lock;

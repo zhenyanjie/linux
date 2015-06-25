@@ -450,43 +450,43 @@ struct smb_vol {
 	umode_t dir_mode;
 	enum securityEnum sectype; /* sectype requested via mnt opts */
 	bool sign; /* was signing requested via mnt opts? */
-	bool retry:1;
-	bool intr:1;
-	bool setuids:1;
-	bool override_uid:1;
-	bool override_gid:1;
-	bool dynperm:1;
-	bool noperm:1;
-	bool no_psx_acl:1; /* set if posix acl support should be disabled */
-	bool cifs_acl:1;
+	bool retry;
+	bool intr;
+	bool setuids;
+	bool override_uid;
+	bool override_gid;
+	bool dynperm;
+	bool noperm;
+	bool no_psx_acl; /* set if posix acl support should be disabled */
+	bool cifs_acl;
 	bool backupuid_specified; /* mount option  backupuid  is specified */
 	bool backupgid_specified; /* mount option  backupgid  is specified */
-	bool no_xattr:1;   /* set if xattr (EA) support should be disabled*/
-	bool server_ino:1; /* use inode numbers from server ie UniqueId */
-	bool direct_io:1;
-	bool strict_io:1; /* strict cache behavior */
-	bool remap:1;      /* set to remap seven reserved chars in filenames */
-	bool posix_paths:1; /* unset to not ask for posix pathnames. */
-	bool no_linux_ext:1;
-	bool sfu_emul:1;
-	bool nullauth:1;   /* attempt to authenticate with null user */
-	bool nocase:1;     /* request case insensitive filenames */
-	bool nobrl:1;      /* disable sending byte range locks to srv */
-	bool mand_lock:1;  /* send mandatory not posix byte range lock reqs */
-	bool seal:1;       /* request transport encryption on share */
-	bool nodfs:1;      /* Do not request DFS, even if available */
-	bool local_lease:1; /* check leases only on local system, not remote */
-	bool noblocksnd:1;
-	bool noautotune:1;
-	bool nostrictsync:1; /* do not force expensive SMBflush on every sync */
-	bool fsc:1;	/* enable fscache */
-	bool mfsymlinks:1; /* use Minshall+French Symlinks */
-	bool multiuser:1;
-	bool rwpidforward:1; /* pid forward for read/write operations */
+	bool no_xattr;   /* set if xattr (EA) support should be disabled*/
+	bool server_ino; /* use inode numbers from server ie UniqueId */
+	bool direct_io;
+	bool strict_io; /* strict cache behavior */
+	bool remap;      /* set to remap seven reserved chars in filenames */
+	bool posix_paths; /* unset to not ask for posix pathnames. */
+	bool no_linux_ext;
+	bool sfu_emul;
+	bool nullauth;   /* attempt to authenticate with null user */
+	bool nocase;     /* request case insensitive filenames */
+	bool nobrl;      /* disable sending byte range locks to srv */
+	bool mand_lock;  /* send mandatory not posix byte range lock reqs */
+	bool seal;       /* request transport encryption on share */
+	bool nodfs;      /* Do not request DFS, even if available */
+	bool local_lease; /* check leases only on local system, not remote */
+	bool noblocksnd;
+	bool noautotune;
+	bool nostrictsync; /* do not force expensive SMBflush on every sync */
+	bool fsc;	/* enable fscache */
+	bool mfsymlinks; /* use Minshall+French Symlinks */
+	bool multiuser;
+	bool rwpidforward; /* pid forward for read/write operations */
 	bool nosharesock;
 	unsigned int rsize;
 	unsigned int wsize;
-	bool sockopt_tcp_nodelay:1;
+	bool sockopt_tcp_nodelay;
 	unsigned long actimeo; /* attribute cache timeout (jiffies) */
 	struct smb_version_operations *ops;
 	struct smb_version_values *vals;
@@ -562,11 +562,11 @@ struct TCP_Server_Info {
 #ifdef CONFIG_CIFS_SMB2
 	int echo_credits;  /* echo reserved slots */
 	int oplock_credits;  /* oplock break reserved slots */
-	bool echoes:1; /* enable echoes */
+	bool echoes; /* enable echoes */
 	__u8 client_guid[SMB2_CLIENT_GUID_SIZE]; /* Client GUID */
 #endif
 	u16 dialect; /* dialect index that server chose */
-	bool oplocks:1; /* enable oplocks */
+	bool oplocks; /* enable oplocks */
 	unsigned int maxReq;	/* Clients should submit no more */
 	/* than maxReq distinct unanswered SMBs to the server when using  */
 	/* multiplexed reads or writes */
@@ -792,7 +792,7 @@ struct cifs_ses {
 	struct ntlmssp_auth *ntlmssp; /* ciphertext, flags, server challenge */
 	enum securityEnum sectype; /* what security flavor was specified? */
 	bool sign;		/* is signing required? */
-	bool need_reconnect:1; /* connection reset, uid now invalid */
+	bool need_reconnect; /* connection reset, uid now invalid */
 #ifdef CONFIG_CIFS_SMB2
 	__u16 session_flags;
 	char smb3signingkey[SMB3_SIGN_KEY_SIZE]; /* for signing smb3 packets */
@@ -874,19 +874,19 @@ struct cifs_tcon {
 	FILE_SYSTEM_DEVICE_INFO fsDevInfo;
 	FILE_SYSTEM_ATTRIBUTE_INFO fsAttrInfo; /* ok if fs name truncated */
 	FILE_SYSTEM_UNIX_INFO fsUnixInfo;
-	bool ipc:1;		/* set if connection to IPC$ eg for RPC/PIPES */
-	bool retry:1;
-	bool nocase:1;
-	bool seal:1;      /* transport encryption for this mounted share */
-	bool unix_ext:1;  /* if false disable Linux extensions to CIFS protocol
+	bool ipc;		/* set if connection to IPC$ eg for RPC/PIPES */
+	bool retry;
+	bool nocase;
+	bool seal;      /* transport encryption for this mounted share */
+	bool unix_ext;  /* if false disable Linux extensions to CIFS protocol
 				for this mount even if server would support */
-	bool local_lease:1; /* check leases (only) on local system not remote */
+	bool local_lease; /* check leases (only) on local system not remote */
 	bool broken_posix_open; /* e.g. Samba server versions < 3.3.2, 3.2.9 */
 	bool broken_sparse_sup; /* if server or share does not support sparse */
-	bool need_reconnect:1; /* connection reset, tid now invalid */
+	bool need_reconnect; /* connection reset, tid now invalid */
 #ifdef CONFIG_CIFS_SMB2
-	bool print:1;		/* set if connection to printer share */
-	bool bad_network_name:1; /* set if ret status STATUS_BAD_NETWORK_NAME */
+	bool print;		/* set if connection to printer share */
+	bool bad_network_name; /* set if ret status STATUS_BAD_NETWORK_NAME */
 	__le32 capabilities;
 	__u32 share_flags;
 	__u32 maximal_access;
@@ -981,10 +981,10 @@ struct cifs_search_info {
 	char *last_entry;
 	const char *presume_name;
 	unsigned int resume_name_len;
-	bool endOfSearch:1;
-	bool emptyDir:1;
-	bool unicode:1;
-	bool smallBuf:1; /* so we know which buf_release function to call */
+	bool endOfSearch;
+	bool emptyDir;
+	bool unicode;
+	bool smallBuf; /* so we know which buf_release function to call */
 };
 
 struct cifs_open_parms {
@@ -995,7 +995,7 @@ struct cifs_open_parms {
 	int create_options;
 	const char *path;
 	struct cifs_fid *fid;
-	bool reconnect:1;
+	bool reconnect;
 };
 
 struct cifs_fid {
@@ -1028,8 +1028,8 @@ struct cifsFileInfo {
 	struct dentry *dentry;
 	unsigned int f_flags;
 	struct tcon_link *tlink;
-	bool invalidHandle:1;	/* file closed via session abend */
-	bool oplock_break_cancelled:1;
+	bool invalidHandle;	/* file closed via session abend */
+	bool oplock_break_cancelled;
 	int count;		/* refcount protected by cifs_file_list_lock */
 	struct mutex fh_mutex; /* prevents reopen race after dead ses*/
 	struct cifs_search_info srch_inf;
@@ -1261,9 +1261,9 @@ struct mid_q_entry {
 	void *resp_buf;		/* pointer to received SMB header */
 	int mid_state;	/* wish this were enum but can not pass to wait_event */
 	__le16 command;		/* smb command code */
-	bool large_buf:1;	/* if valid response, is pointer to large buf */
-	bool multiRsp:1;	/* multiple trans2 responses for one request  */
-	bool multiEnd:1;	/* both received */
+	bool large_buf;	/* if valid response, is pointer to large buf */
+	bool multiRsp;	/* multiple trans2 responses for one request  */
+	bool multiEnd;	/* both received */
 };
 
 /*	Make code in transport.c a little cleaner by moving

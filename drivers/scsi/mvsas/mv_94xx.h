@@ -184,18 +184,18 @@ enum pci_interrupt_cause {
 union reg_phy_cfg {
 	u32 v;
 	struct {
-		u32 phy_reset:1;
-		u32 sas_support:1;
-		u32 sata_support:1;
-		u32 sata_host_mode:1;
+		u32 phy_reset;
+		u32 sas_support;
+		u32 sata_support;
+		u32 sata_host_mode;
 		/*
 		 * bit 2: 6Gbps support
 		 * bit 1: 3Gbps support
 		 * bit 0: 1.5Gbps support
 		 */
-		u32 speed_support:3;
-		u32 snw_3_support:1;
-		u32 tx_lnk_parity:1;
+		u32 speed_support;
+		u32 snw_3_support;
+		u32 tx_lnk_parity;
 		/*
 		 * bit 5: G1 (1.5Gbps) Without SSC
 		 * bit 4: G1 (1.5Gbps) with SSC
@@ -204,15 +204,15 @@ union reg_phy_cfg {
 		 * bit 1: G3 (6.0Gbps) without SSC
 		 * bit 0: G3 (6.0Gbps) with SSC
 		 */
-		u32 tx_spt_phs_lnk_rate:6;
+		u32 tx_spt_phs_lnk_rate;
 		/* 8h: 1.5Gbps 9h: 3Gbps Ah: 6Gbps */
-		u32 tx_lgcl_lnk_rate:4;
-		u32 tx_ssc_type:1;
-		u32 sata_spin_up_spt:1;
-		u32 sata_spin_up_en:1;
-		u32 bypass_oob:1;
-		u32 disable_phy:1;
-		u32 rsvd:8;
+		u32 tx_lgcl_lnk_rate;
+		u32 tx_ssc_type;
+		u32 sata_spin_up_spt;
+		u32 sata_spin_up_en;
+		u32 bypass_oob;
+		u32 disable_phy;
+		u32 rsvd;
 	} u;
 };
 
@@ -220,15 +220,15 @@ union reg_phy_cfg {
 
 struct mvs_prd_imt {
 #ifndef __BIG_ENDIAN
-	__le32			len:22;
-	u8			_r_a:2;
-	u8			misc_ctl:4;
-	u8			inter_sel:4;
+	__le32			len;
+	u8			_r_a;
+	u8			misc_ctl;
+	u8			inter_sel;
 #else
-	u32			inter_sel:4;
-	u32			misc_ctl:4;
-	u32			_r_a:2;
-	u32			len:22;
+	u32			inter_sel;
+	u32			misc_ctl;
+	u32			_r_a;
+	u32			len;
 #endif
 };
 

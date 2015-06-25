@@ -19,7 +19,7 @@ union msr_fidvidctl {
 		FIDCHGRATIO:1,	// 20
 		reserved4:11,	// 31-21
 		SGTC:20,		// 32:51
-		reserved5:12;	// 63:52
+		reserved5;	// 63:52
 	} bits;
 	unsigned long long val;
 };
@@ -37,7 +37,7 @@ union msr_fidvidstatus {
 		SVID:5,			// 44:40
 		reserved5:3,	// 47:45
 		MVID:5,			// 52:48
-		reserved6:11;	// 63:53
+		reserved6;	// 63:53
 	} bits;
 	unsigned long long val;
 };

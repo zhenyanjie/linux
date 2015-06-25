@@ -61,8 +61,8 @@ struct omap_cf_socket {
 	struct pcmcia_socket	socket;
 
 	struct timer_list	timer;
-	unsigned		present:1;
-	unsigned		active:1;
+	unsigned		present;
+	unsigned		active;
 
 	struct platform_device	*pdev;
 	unsigned long		phys_cf;

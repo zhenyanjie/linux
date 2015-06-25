@@ -297,7 +297,7 @@ typedef struct acornscsi_hostdata {
 	MsgQueue_t	msgs;
 
 	unsigned short	last_message;		/* last message to be sent		*/
-	unsigned char	disconnectable:1;	/* this command can be disconnected	*/
+	unsigned char	disconnectable;	/* this command can be disconnected	*/
     } scsi;
 
     /* statistics information */
@@ -323,7 +323,7 @@ typedef struct acornscsi_hostdata {
     struct {
 	unsigned char	sync_xfer;		/* synchronous transfer (SBIC value)	*/
 	syncxfer_t	sync_state;		/* sync xfer negotiation state		*/
-	unsigned char	disconnect_ok:1;	/* device can disconnect		*/
+	unsigned char	disconnect_ok;	/* device can disconnect		*/
     } device[8];
     unsigned long	busyluns[64 / sizeof(unsigned long)];/* array of bits indicating LUNs busy	*/
 
@@ -336,9 +336,9 @@ typedef struct acornscsi_hostdata {
 	unsigned int	xfer_start;		/* scheduled DMA transfer start		*/
 	unsigned int	xfer_length;		/* scheduled DMA transfer length	*/
 	char		*xfer_ptr;		/* pointer to area			*/
-	unsigned char	xfer_required:1;	/* set if we need to transfer something	*/
-	unsigned char	xfer_setup:1;		/* set if DMA is setup			*/
-	unsigned char	xfer_done:1;		/* set if DMA reached end of BH list	*/
+	unsigned char	xfer_required;	/* set if we need to transfer something	*/
+	unsigned char	xfer_setup;		/* set if DMA is setup			*/
+	unsigned char	xfer_done;		/* set if DMA reached end of BH list	*/
     } dma;
 
     /* card info */

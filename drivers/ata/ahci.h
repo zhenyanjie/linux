@@ -301,9 +301,9 @@ struct ahci_port_priv {
 	void			*rx_fis;
 	dma_addr_t		rx_fis_dma;
 	/* for NCQ spurious interrupt analysis */
-	unsigned int		ncq_saw_d2h:1;
-	unsigned int		ncq_saw_dmas:1;
-	unsigned int		ncq_saw_sdb:1;
+	unsigned int		ncq_saw_d2h;
+	unsigned int		ncq_saw_dmas;
+	unsigned int		ncq_saw_sdb;
 	u32			intr_status;	/* interrupts to handle */
 	spinlock_t		lock;		/* protects parent ata_port */
 	u32 			intr_mask;	/* interrupts to enable */

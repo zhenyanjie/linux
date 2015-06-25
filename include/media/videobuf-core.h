@@ -148,8 +148,8 @@ struct videobuf_queue {
 	const struct videobuf_queue_ops  *ops;
 	struct videobuf_qtype_ops  *int_ops;
 
-	unsigned int               streaming:1;
-	unsigned int               reading:1;
+	unsigned int               streaming;
+	unsigned int               reading;
 
 	/* capture via mmap() + ioctl(QBUF/DQBUF) */
 	struct list_head           stream;

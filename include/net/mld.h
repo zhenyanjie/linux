@@ -44,11 +44,11 @@ struct mld2_query {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
 	__u8			mld2q_qrv:3,
 				mld2q_suppress:1,
-				mld2q_resv2:4;
+				mld2q_resv2;
 #elif defined(__BIG_ENDIAN_BITFIELD)
 	__u8			mld2q_resv2:4,
 				mld2q_suppress:1,
-				mld2q_qrv:3;
+				mld2q_qrv;
 #else
 #error "Please fix <asm/byteorder.h>"
 #endif

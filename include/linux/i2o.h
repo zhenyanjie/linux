@@ -397,9 +397,9 @@ struct i2o_message {
 			u8 version_offset;
 			u8 flags;
 			u16 size;
-			u32 target_tid:12;
-			u32 init_tid:12;
-			u32 function:8;
+			u32 target_tid;
+			u32 init_tid;
+			u32 function;
 			u32 icntxt;	/* initiator context */
 			u32 tcntxt;	/* transaction context */
 		} s;
@@ -447,7 +447,7 @@ struct i2o_event {
  *	I2O classes which could be handled by the OSM
  */
 struct i2o_class_id {
-	u16 class_id:12;
+	u16 class_id;
 };
 
 /*
@@ -524,13 +524,13 @@ struct i2o_controller {
 
 	struct pci_dev *pdev;	/* PCI device */
 
-	unsigned int promise:1;	/* Promise controller */
-	unsigned int adaptec:1;	/* DPT / Adaptec controller */
-	unsigned int raptor:1;	/* split bar */
-	unsigned int no_quiesce:1;	/* dont quiesce before reset */
-	unsigned int short_req:1;	/* use small block sizes */
-	unsigned int limit_sectors:1;	/* limit number of sectors / request */
-	unsigned int pae_support:1;	/* controller has 64-bit SGL support */
+	unsigned int promise;	/* Promise controller */
+	unsigned int adaptec;	/* DPT / Adaptec controller */
+	unsigned int raptor;	/* split bar */
+	unsigned int no_quiesce;	/* dont quiesce before reset */
+	unsigned int short_req;	/* use small block sizes */
+	unsigned int limit_sectors;	/* limit number of sectors / request */
+	unsigned int pae_support;	/* controller has 64-bit SGL support */
 
 	struct list_head devices;	/* list of I2O devices */
 	struct list_head list;	/* Controller list */
@@ -554,9 +554,9 @@ struct i2o_controller {
 
 	struct i2o_pool in_msg;	/* mempool for inbound messages */
 
-	unsigned int battery:1;	/* Has a battery backup */
-	unsigned int io_alloc:1;	/* An I/O resource was allocated */
-	unsigned int mem_alloc:1;	/* A memory resource was allocated */
+	unsigned int battery;	/* Has a battery backup */
+	unsigned int io_alloc;	/* An I/O resource was allocated */
+	unsigned int mem_alloc;	/* A memory resource was allocated */
 
 	struct resource io_resource;	/* I/O resource allocated to the IOP */
 	struct resource mem_resource;	/* Mem resource allocated to the IOP */
@@ -584,10 +584,10 @@ struct i2o_controller {
 struct i2o_sys_tbl_entry {
 	u16 org_id;
 	u16 reserved1;
-	u32 iop_id:12;
-	u32 reserved2:20;
-	u16 seg_num:12;
-	u16 i2o_version:4;
+	u32 iop_id;
+	u32 reserved2;
+	u16 seg_num;
+	u16 i2o_version;
 	u8 iop_state;
 	u8 msg_type;
 	u16 frame_size;

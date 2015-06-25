@@ -36,8 +36,8 @@ enum {
 struct auto_pin_cfg_item {
 	hda_nid_t pin;
 	int type;
-	unsigned int is_headset_mic:1;
-	unsigned int is_headphone_mic:1; /* Mic-only in headphone jack */
+	unsigned int is_headset_mic;
+	unsigned int is_headphone_mic; /* Mic-only in headphone jack */
 };
 
 struct auto_pin_cfg;

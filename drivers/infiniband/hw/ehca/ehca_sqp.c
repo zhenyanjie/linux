@@ -127,16 +127,16 @@ struct ib_perf {
 
 /* TC/SL/FL packed into 32 bits, as in ClassPortInfo */
 struct tcslfl {
-	u32 tc:8;
-	u32 sl:4;
-	u32 fl:20;
+	u32 tc;
+	u32 sl;
+	u32 fl;
 } __attribute__ ((packed));
 
 /* IP Version/TC/FL packed into 32 bits, as in GRH */
 struct vertcfl {
-	u32 ver:4;
-	u32 tc:8;
-	u32 fl:20;
+	u32 ver;
+	u32 tc;
+	u32 fl;
 } __attribute__ ((packed));
 
 static int ehca_process_perf(struct ib_device *ibdev, u8 port_num,

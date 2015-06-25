@@ -283,9 +283,9 @@ struct wm97xx {
 	struct work_struct pen_event_work;
 	u16 acc_slot;			/* AC97 slot used for acc touch data */
 	u16 acc_rate;			/* acc touch data rate */
-	unsigned pen_is_down:1;		/* Pen is down */
-	unsigned aux_waiting:1;		/* aux measurement waiting */
-	unsigned pen_probably_down:1;	/* used in polling mode */
+	unsigned pen_is_down;		/* Pen is down */
+	unsigned aux_waiting;		/* aux measurement waiting */
+	unsigned pen_probably_down;	/* used in polling mode */
 	u16 variant;			/* WM97xx chip variant */
 	u16 suspend_mode;               /* PRP in suspend mode */
 };

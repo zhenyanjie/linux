@@ -126,7 +126,7 @@ struct max3421_hcd {
 	/* lower 16 bits contain port status, upper 16 bits the change mask: */
 	u32 port_status;
 
-	unsigned active:1;
+	unsigned active;
 
 	struct list_head ep_list;	/* list of EP's with work */
 

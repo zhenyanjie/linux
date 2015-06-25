@@ -142,10 +142,10 @@ struct cytp_contact {
 struct cytp_report_data {
 	int contact_cnt;
 	struct cytp_contact contacts[CYTP_MAX_MT_SLOTS];
-	unsigned int left:1;
-	unsigned int right:1;
-	unsigned int middle:1;
-	unsigned int tap:1;  /* multi-finger tap detected. */
+	unsigned int left;
+	unsigned int right;
+	unsigned int middle;
+	unsigned int tap;  /* multi-finger tap detected. */
 };
 
 /* The structure of Cypress Trackpad device private data. */

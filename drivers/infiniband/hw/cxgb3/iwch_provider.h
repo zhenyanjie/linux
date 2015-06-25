@@ -54,14 +54,14 @@ static inline struct iwch_pd *to_iwch_pd(struct ib_pd *ibpd)
 
 struct tpt_attributes {
 	u32 stag;
-	u32 state:1;
-	u32 type:2;
-	u32 rsvd:1;
+	u32 state;
+	u32 type;
+	u32 rsvd;
 	enum tpt_mem_perm perms;
-	u32 remote_invaliate_disable:1;
-	u32 zbva:1;
-	u32 mw_bind_enable:1;
-	u32 page_size:5;
+	u32 remote_invaliate_disable;
+	u32 zbva;
+	u32 mw_bind_enable;
+	u32 page_size;
 
 	u32 pdid;
 	u32 qpid;

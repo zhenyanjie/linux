@@ -15,8 +15,8 @@
 struct imx_usbmisc_data {
 	int index;
 
-	unsigned int disable_oc:1; /* over current detect disabled */
-	unsigned int evdo:1; /* set external vbus divider option */
+	unsigned int disable_oc; /* over current detect disabled */
+	unsigned int evdo; /* set external vbus divider option */
 };
 
 int imx_usbmisc_init(struct imx_usbmisc_data *);

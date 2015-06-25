@@ -80,7 +80,7 @@ static struct ptlrpc_enc_page_pool {
 	wait_queue_head_t      epp_waitq;       /* waiting threads */
 	unsigned int     epp_waitqlen;    /* wait queue length */
 	unsigned long    epp_pages_short; /* # of pages wanted of in-q users */
-	unsigned int     epp_growing:1;   /* during adding pages */
+	unsigned int     epp_growing;   /* during adding pages */
 
 	/*
 	 * indicating how idle the pools are, from 0 to MAX_IDLE_IDX

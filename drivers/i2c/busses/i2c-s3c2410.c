@@ -103,7 +103,7 @@ enum s3c24xx_i2c_state {
 struct s3c24xx_i2c {
 	wait_queue_head_t	wait;
 	kernel_ulong_t		quirks;
-	unsigned int		suspended:1;
+	unsigned int		suspended;
 
 	struct i2c_msg		*msg;
 	unsigned int		msg_num;

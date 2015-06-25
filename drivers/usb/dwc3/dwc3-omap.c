@@ -126,7 +126,7 @@ struct dwc3_omap {
 	u32			debug_offset;
 	u32			irq0_offset;
 
-	u32			dma_status:1;
+	u32			dma_status;
 
 	struct extcon_specific_cable_nb extcon_vbus_dev;
 	struct extcon_specific_cable_nb extcon_id_dev;

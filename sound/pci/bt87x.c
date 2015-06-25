@@ -160,8 +160,8 @@ enum snd_bt87x_boardid {
 struct snd_bt87x_board {
 	int dig_rate;		/* Digital input sampling rate */
 	u32 digital_fmt;	/* Register settings for digital input */
-	unsigned no_analog:1;	/* No analog input */
-	unsigned no_digital:1;	/* No digital input */
+	unsigned no_analog;	/* No analog input */
+	unsigned no_digital;	/* No digital input */
 };
 
 static struct snd_bt87x_board snd_bt87x_boards[] = {

@@ -108,12 +108,12 @@ struct ubifs_debug_info {
 	long long saved_free;
 	int saved_idx_gc_cnt;
 
-	unsigned int chk_gen:1;
-	unsigned int chk_index:1;
-	unsigned int chk_orph:1;
-	unsigned int chk_lprops:1;
-	unsigned int chk_fs:1;
-	unsigned int tst_rcvry:1;
+	unsigned int chk_gen;
+	unsigned int chk_index;
+	unsigned int chk_orph;
+	unsigned int chk_lprops;
+	unsigned int chk_fs;
+	unsigned int tst_rcvry;
 
 	char dfs_dir_name[UBIFS_DFS_DIR_LEN + 1];
 	struct dentry *dfs_dir;
@@ -140,12 +140,12 @@ struct ubifs_debug_info {
  * @tst_rcvry: if UBIFS recovery testing mode enabled
  */
 struct ubifs_global_debug_info {
-	unsigned int chk_gen:1;
-	unsigned int chk_index:1;
-	unsigned int chk_orph:1;
-	unsigned int chk_lprops:1;
-	unsigned int chk_fs:1;
-	unsigned int tst_rcvry:1;
+	unsigned int chk_gen;
+	unsigned int chk_index;
+	unsigned int chk_orph;
+	unsigned int chk_lprops;
+	unsigned int chk_fs;
+	unsigned int tst_rcvry;
 };
 
 #define ubifs_assert(expr) do {                                                \

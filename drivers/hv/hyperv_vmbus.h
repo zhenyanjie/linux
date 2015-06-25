@@ -105,8 +105,8 @@ enum hv_message_type {
 union hv_port_id {
 	u32 asu32;
 	struct {
-		u32 id:24;
-		u32 reserved:8;
+		u32 id;
+		u32 reserved;
 	} u ;
 };
 
@@ -161,8 +161,8 @@ struct hv_connection_info {
 union hv_message_flags {
 	u8 asu8;
 	struct {
-		u8 msg_pending:1;
-		u8 reserved:7;
+		u8 msg_pending;
+		u8 reserved;
 	};
 };
 
@@ -217,8 +217,8 @@ struct hv_synic_event_flags_page {
 union hv_synic_scontrol {
 	u64 as_uint64;
 	struct {
-		u64 enable:1;
-		u64 reserved:63;
+		u64 enable;
+		u64 reserved;
 	};
 };
 
@@ -226,11 +226,11 @@ union hv_synic_scontrol {
 union hv_synic_sint {
 	u64 as_uint64;
 	struct {
-		u64 vector:8;
-		u64 reserved1:8;
-		u64 masked:1;
-		u64 auto_eoi:1;
-		u64 reserved2:46;
+		u64 vector;
+		u64 reserved1;
+		u64 masked;
+		u64 auto_eoi;
+		u64 reserved2;
 	};
 };
 
@@ -238,9 +238,9 @@ union hv_synic_sint {
 union hv_synic_simp {
 	u64 as_uint64;
 	struct {
-		u64 simp_enabled:1;
-		u64 preserved:11;
-		u64 base_simp_gpa:52;
+		u64 simp_enabled;
+		u64 preserved;
+		u64 base_simp_gpa;
 	};
 };
 
@@ -248,9 +248,9 @@ union hv_synic_simp {
 union hv_synic_siefp {
 	u64 as_uint64;
 	struct {
-		u64 siefp_enabled:1;
-		u64 preserved:11;
-		u64 base_siefp_gpa:52;
+		u64 siefp_enabled;
+		u64 preserved;
+		u64 base_siefp_gpa;
 	};
 };
 
@@ -273,8 +273,8 @@ union hv_monitor_trigger_state {
 	u32 asu32;
 
 	struct {
-		u32 group_enable:4;
-		u32 rsvdz:28;
+		u32 group_enable;
+		u32 rsvdz;
 	};
 };
 
@@ -356,12 +356,12 @@ enum hv_guest_os_microsoft_ids {
 union hv_x64_msr_guest_os_id_contents {
 	u64 as_uint64;
 	struct {
-		u64 build_number:16;
-		u64 service_version:8; /* Service Pack, etc. */
-		u64 minor_version:8;
-		u64 major_version:8;
-		u64 os_id:8; /* enum hv_guest_os_microsoft_ids (if Vendor=MS) */
-		u64 vendor_id:16; /* enum hv_guest_os_vendor */
+		u64 build_number;
+		u64 service_version; /* Service Pack, etc. */
+		u64 minor_version;
+		u64 major_version;
+		u64 os_id; /* enum hv_guest_os_microsoft_ids (if Vendor=MS) */
+		u64 vendor_id; /* enum hv_guest_os_vendor */
 	};
 };
 
@@ -373,9 +373,9 @@ union hv_x64_msr_guest_os_id_contents {
 union hv_x64_msr_hypercall_contents {
 	u64 as_uint64;
 	struct {
-		u64 enable:1;
-		u64 reserved:11;
-		u64 guest_physical_address:52;
+		u64 enable;
+		u64 reserved;
+		u64 guest_physical_address;
 	};
 };
 

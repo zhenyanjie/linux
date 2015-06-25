@@ -439,8 +439,8 @@ struct bfi_lps_login_rsp_s {
 	__be16		bb_credit;
 	u8		f_port;
 	u8		npiv_en;
-	u32	lp_pid:24;
-	u32	auth_req:8;
+	u32	lp_pid;
+	u32	auth_req;
 	mac_t		lp_mac;
 	mac_t		fcf_mac;
 	u8		ext_status;
@@ -472,7 +472,7 @@ struct bfi_lps_cvl_event_s {
 struct bfi_lps_n2n_pid_req_s {
 	struct bfi_mhdr_s	mh;	/*  common msg header		*/
 	u8	fw_tag;
-	u32	lp_pid:24;
+	u32	lp_pid;
 };
 
 union bfi_lps_h2i_msg_u {
@@ -509,9 +509,9 @@ struct bfi_rport_create_req_s {
 	u16	bfa_handle;	/*  host rport handle		*/
 	__be16	max_frmsz;	/*  max rcv pdu size		*/
 	u32	pid:24,	/*  remote port ID		*/
-		lp_fwtag:8;	/*  local port tag		*/
+		lp_fwtag;	/*  local port tag		*/
 	u32	local_pid:24,	/*  local port ID		*/
-		cisc:8;
+		cisc;
 	u8	fc_class;	/*  supported FC classes	*/
 	u8	vf_en;		/*  virtual fabric enable	*/
 	u16	vf_id;		/*  virtual fabric ID		*/

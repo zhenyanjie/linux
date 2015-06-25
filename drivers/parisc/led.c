@@ -87,8 +87,8 @@ struct lcd_block {
 /* NOTE: we use unsigned long:16 two times, since the following member 
    lcd_cmd_reg_addr needs to be 64bit aligned on 64bit PA2.0-machines */
 struct pdc_chassis_lcd_info_ret_block {
-	unsigned long model:16;		/* DISPLAY_MODEL_XXXX */
-	unsigned long lcd_width:16;	/* width of the LCD in chars (DISPLAY_MODEL_LCD only) */
+	unsigned long model;		/* DISPLAY_MODEL_XXXX */
+	unsigned long lcd_width;	/* width of the LCD in chars (DISPLAY_MODEL_LCD only) */
 	unsigned long lcd_cmd_reg_addr;	/* ptr to LCD cmd-register & data ptr for LED */
 	unsigned long lcd_data_reg_addr; /* ptr to LCD data-register (LCD only) */
 	unsigned int min_cmd_delay;	/* delay in uS after cmd-write (LCD only) */

@@ -85,7 +85,7 @@ struct rds_connection {
 	struct hlist_node	c_hash_node;
 	__be32			c_laddr;
 	__be32			c_faddr;
-	unsigned int		c_loopback:1;
+	unsigned int		c_loopback;
 	struct rds_connection	*c_passive;
 
 	struct rds_cong_map	*c_lcong;
@@ -212,9 +212,9 @@ struct rds_mr {
 	u32			r_key;
 
 	/* A copy of the creation flags */
-	unsigned int		r_use_once:1;
-	unsigned int		r_invalidate:1;
-	unsigned int		r_write:1;
+	unsigned int		r_use_once;
+	unsigned int		r_invalidate;
+	unsigned int		r_write;
 
 	/* This is for RDS_MR_DEAD.
 	 * It would be nice & consistent to make this part of the above
@@ -330,11 +330,11 @@ struct rds_message {
 
 			u32			op_rkey;
 			u64			op_remote_addr;
-			unsigned int		op_notify:1;
-			unsigned int		op_recverr:1;
-			unsigned int		op_mapped:1;
-			unsigned int		op_silent:1;
-			unsigned int		op_active:1;
+			unsigned int		op_notify;
+			unsigned int		op_recverr;
+			unsigned int		op_mapped;
+			unsigned int		op_silent;
+			unsigned int		op_active;
 			struct scatterlist	*op_sg;
 			struct rds_notifier	*op_notifier;
 
@@ -343,13 +343,13 @@ struct rds_message {
 		struct rm_rdma_op {
 			u32			op_rkey;
 			u64			op_remote_addr;
-			unsigned int		op_write:1;
-			unsigned int		op_fence:1;
-			unsigned int		op_notify:1;
-			unsigned int		op_recverr:1;
-			unsigned int		op_mapped:1;
-			unsigned int		op_silent:1;
-			unsigned int		op_active:1;
+			unsigned int		op_write;
+			unsigned int		op_fence;
+			unsigned int		op_notify;
+			unsigned int		op_recverr;
+			unsigned int		op_mapped;
+			unsigned int		op_silent;
+			unsigned int		op_active;
 			unsigned int		op_bytes;
 			unsigned int		op_nents;
 			unsigned int		op_count;
@@ -359,7 +359,7 @@ struct rds_message {
 			struct rds_mr		*op_rdma_mr;
 		} rdma;
 		struct rm_data_op {
-			unsigned int		op_active:1;
+			unsigned int		op_active;
 			unsigned int		op_nents;
 			unsigned int		op_count;
 			struct scatterlist	*op_sg;
@@ -416,7 +416,7 @@ struct rds_transport {
 	char			t_name[TRANSNAMSIZ];
 	struct list_head	t_item;
 	struct module		*t_owner;
-	unsigned int		t_prefer_loopback:1;
+	unsigned int		t_prefer_loopback;
 	unsigned int		t_type;
 
 	int (*laddr_check)(__be32 addr);

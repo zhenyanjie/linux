@@ -239,7 +239,7 @@ struct sci_oem_params {
 			 *  SATA SSC Tx at +0 / -4257 PPM Spread    = 0x6
 			 *  SATA SSC Tx at +0 / -4967 PPM Spread    = 0x7
 			 */
-				uint8_t ssc_sata_tx_spread_level:4;
+				uint8_t ssc_sata_tx_spread_level;
 			/*
 			 * SAS SSC Tx Disabled                     = 0x0
 			 *
@@ -255,7 +255,7 @@ struct sci_oem_params {
 			 *  SAS SSC Tx at +1064 / -1064 PPM Spread  = 0x3
 			 *  SAS SSC Tx at +2129 / -2129 PPM Spread  = 0x6
 			 */
-				uint8_t ssc_sas_tx_spread_level:3;
+				uint8_t ssc_sas_tx_spread_level;
 			/*
 			 * NOTE: Refer to the SSC section of the SAS 2.x
 			 * Specification for proper setting of this field.
@@ -265,7 +265,7 @@ struct sci_oem_params {
 			 *  Down-spreading SSC      = 0
 			 *  Center-spreading SSC    = 1
 			 */
-				uint8_t ssc_sas_tx_type:1;
+				uint8_t ssc_sas_tx_type;
 			};
 			uint8_t do_enable_ssc;
 		};

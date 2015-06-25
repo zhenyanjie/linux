@@ -142,7 +142,7 @@ struct omap2_mcspi {
 	struct device		*dev;
 	struct omap2_mcspi_regs ctx;
 	int			fifo_depth;
-	unsigned int		pin_dir:1;
+	unsigned int		pin_dir;
 };
 
 struct omap2_mcspi_cs {

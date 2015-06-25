@@ -516,8 +516,8 @@ static int wm8940_set_bias_level(struct snd_soc_codec *codec,
 }
 
 struct pll_ {
-	unsigned int pre_scale:2;
-	unsigned int n:4;
+	unsigned int pre_scale;
+	unsigned int n;
 	unsigned int k;
 };
 

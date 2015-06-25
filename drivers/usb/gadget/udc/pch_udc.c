@@ -298,7 +298,7 @@ struct pch_udc_ep {
 	struct list_head		queue;
 	unsigned			num:5,
 					in:1,
-					halted:1;
+					halted;
 	unsigned long			epsts;
 };
 
@@ -363,7 +363,7 @@ struct pch_udc_dev {
 			connected:1,
 			vbus_session:1,
 			set_cfg_not_acked:1,
-			waiting_zlp_ack:1;
+			waiting_zlp_ack;
 	struct pci_pool		*data_requests;
 	struct pci_pool		*stp_requests;
 	dma_addr_t			dma_addr;
@@ -414,7 +414,7 @@ struct pch_udc_request {
 	struct list_head		queue;
 	unsigned			dma_going:1,
 					dma_mapped:1,
-					dma_done:1;
+					dma_done;
 	unsigned			chain_len;
 	void				*buf;
 	dma_addr_t			dma;

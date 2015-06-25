@@ -23,7 +23,7 @@ struct udp_port_cfg {
 	__be16			peer_udp_port;
 	unsigned int		use_udp_checksums:1,
 				use_udp6_tx_checksums:1,
-				use_udp6_rx_checksums:1;
+				use_udp6_rx_checksums;
 };
 
 int udp_sock_create(struct net *net, struct udp_port_cfg *cfg,

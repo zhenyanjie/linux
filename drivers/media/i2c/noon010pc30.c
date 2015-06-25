@@ -142,11 +142,11 @@ struct noon010_info {
 
 	const struct noon010_format *curr_fmt;
 	const struct noon010_frmsize *curr_win;
-	unsigned int apply_new_cfg:1;
-	unsigned int streaming:1;
-	unsigned int hflip:1;
-	unsigned int vflip:1;
-	unsigned int power:1;
+	unsigned int apply_new_cfg;
+	unsigned int streaming;
+	unsigned int hflip;
+	unsigned int vflip;
+	unsigned int power;
 	u8 i2c_reg_page;
 };
 

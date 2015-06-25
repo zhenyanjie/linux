@@ -28,15 +28,15 @@ struct tda18271_std_map_item {
 	u16 if_freq;
 
 	/* EP3[4:3] */
-	unsigned int agc_mode:2;
+	unsigned int agc_mode;
 	/* EP3[2:0] */
-	unsigned int std:3;
+	unsigned int std;
 	/* EP4[7] */
-	unsigned int fm_rfn:1;
+	unsigned int fm_rfn;
 	/* EP4[4:2] */
-	unsigned int if_lvl:3;
+	unsigned int if_lvl;
 	/* EB22[6:0] */
-	unsigned int rfagc_top:7;
+	unsigned int rfagc_top;
 };
 
 struct tda18271_std_map {
@@ -103,12 +103,12 @@ struct tda18271_config {
 	enum tda18271_small_i2c small_i2c;
 
 	/* force rf tracking filter calibration on startup */
-	unsigned int rf_cal_on_startup:1;
+	unsigned int rf_cal_on_startup;
 
 	/* prevent any register access during attach(),
 	 * delaying both IR & RF calibration until init()
 	 * module option 'cal' overrides this delay */
-	unsigned int delay_cal:1;
+	unsigned int delay_cal;
 
 	/* interface to saa713x / tda829x */
 	unsigned int config;

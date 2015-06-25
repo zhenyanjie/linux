@@ -215,32 +215,32 @@ typedef struct _tx_desc_819x_usb {
 	/* DWORD 0 */
 	u16	PktSize;
 	u8	Offset;
-	u8	Reserved0:3;
-	u8	CmdInit:1;
-	u8	LastSeg:1;
-	u8	FirstSeg:1;
-	u8	LINIP:1;
-	u8	OWN:1;
+	u8	Reserved0;
+	u8	CmdInit;
+	u8	LastSeg;
+	u8	FirstSeg;
+	u8	LINIP;
+	u8	OWN;
 
 	/* DWORD 1 */
 	u8	TxFWInfoSize;
-	u8	RATid:3;
-	u8	DISFB:1;
-	u8	USERATE:1;
-	u8	MOREFRAG:1;
-	u8	NoEnc:1;
-	u8	PIFS:1;
-	u8	QueueSelect:5;
-	u8	NoACM:1;
-	u8	Reserved1:2;
-	u8	SecCAMID:5;
-	u8	SecDescAssign:1;
-	u8	SecType:2;
+	u8	RATid;
+	u8	DISFB;
+	u8	USERATE;
+	u8	MOREFRAG;
+	u8	NoEnc;
+	u8	PIFS;
+	u8	QueueSelect;
+	u8	NoACM;
+	u8	Reserved1;
+	u8	SecCAMID;
+	u8	SecDescAssign;
+	u8	SecType;
 
 	/* DWORD 2 */
 	u16	TxBufferSize;
-	u8	ResvForPaddingLen:7;
-	u8	Reserved3:1;
+	u8	ResvForPaddingLen;
+	u8	Reserved3;
 	u8	Reserved4;
 
 	/* DWORD 3, 4, 5 */
@@ -257,20 +257,20 @@ typedef struct _tx_desc_819x_usb_aggr_subframe {
 	u8	TxFWInfoSize;
 
 	/* DWORD 1 */
-	u8	RATid:3;
-	u8	DISFB:1;
-	u8	USERATE:1;
-	u8	MOREFRAG:1;
-	u8	NoEnc:1;
-	u8	PIFS:1;
-	u8	QueueSelect:5;
-	u8	NoACM:1;
-	u8	Reserved1:2;
-	u8	SecCAMID:5;
-	u8	SecDescAssign:1;
-	u8	SecType:2;
-	u8	PacketID:7;
-	u8	OWN:1;
+	u8	RATid;
+	u8	DISFB;
+	u8	USERATE;
+	u8	MOREFRAG;
+	u8	NoEnc;
+	u8	PIFS;
+	u8	QueueSelect;
+	u8	NoACM;
+	u8	Reserved1;
+	u8	SecCAMID;
+	u8	SecDescAssign;
+	u8	SecType;
+	u8	PacketID;
+	u8	OWN;
 } tx_desc_819x_usb_aggr_subframe, *ptx_desc_819x_usb_aggr_subframe;
 #endif
 
@@ -280,12 +280,12 @@ typedef struct _tx_desc_cmd_819x_usb {
 	/* DWORD 0 */
 	u16	Reserved0;
 	u8	Reserved1;
-	u8	Reserved2:3;
-	u8	CmdInit:1;
-	u8	LastSeg:1;
-	u8	FirstSeg:1;
-	u8	LINIP:1;
-	u8	OWN:1;
+	u8	Reserved2;
+	u8	CmdInit;
+	u8	LastSeg;
+	u8	FirstSeg;
+	u8	LINIP;
+	u8	OWN;
 
 	/* DOWRD 1 */
 	u8	TxFWInfoSize;
@@ -306,35 +306,35 @@ typedef struct _tx_desc_cmd_819x_usb {
 
 typedef struct _tx_fwinfo_819x_usb {
 	/* DOWRD 0 */
-	u8	TxRate:7;
-	u8	CtsEnable:1;
-	u8	RtsRate:7;
-	u8	RtsEnable:1;
-	u8	TxHT:1;
-	u8	Short:1;        /* Error out, always on */
-	u8	TxBandwidth:1;	/* Used for HT MCS rate only */
-	u8	TxSubCarrier:2; /* Used for legacy OFDM rate only */
-	u8	STBC:2;
-	u8	AllowAggregation:1;
+	u8	TxRate;
+	u8	CtsEnable;
+	u8	RtsRate;
+	u8	RtsEnable;
+	u8	TxHT;
+	u8	Short;        /* Error out, always on */
+	u8	TxBandwidth;	/* Used for HT MCS rate only */
+	u8	TxSubCarrier; /* Used for legacy OFDM rate only */
+	u8	STBC;
+	u8	AllowAggregation;
 	/* Interpret RtsRate field as high throughput data rate */
-	u8	RtsHT:1;
-	u8	RtsShort:1;     /* Short PLCP for CCK or short GI for 11n MCS */
-	u8	RtsBandwidth:1;	/* Used for HT MCS rate only */
-	u8	RtsSubcarrier:2;/* Used for legacy OFDM rate only */
-	u8	RtsSTBC:2;
+	u8	RtsHT;
+	u8	RtsShort;     /* Short PLCP for CCK or short GI for 11n MCS */
+	u8	RtsBandwidth;	/* Used for HT MCS rate only */
+	u8	RtsSubcarrier;/* Used for legacy OFDM rate only */
+	u8	RtsSTBC;
 	/* Enable firmware to recalculate and assign packet duration */
-	u8	EnableCPUDur:1;
+	u8	EnableCPUDur;
 
 	/* DWORD 1 */
-	u32	RxMF:2;
-	u32	RxAMD:3;
+	u32	RxMF;
+	u32	RxAMD;
 	/* 1 indicate Tx info gathered by firmware and returned by Rx Cmd */
-	u32	TxPerPktInfoFeedback:1;
-	u32	Reserved1:2;
-	u32	TxAGCOffSet:4;
-	u32	TxAGCSign:1;
-	u32	Tx_INFO_RSVD:6;
-	u32	PacketID:13;
+	u32	TxPerPktInfoFeedback;
+	u32	Reserved1;
+	u32	TxAGCOffSet;
+	u32	TxAGCSign;
+	u32	Tx_INFO_RSVD;
+	u32	PacketID;
 } tx_fwinfo_819x_usb, *ptx_fwinfo_819x_usb;
 
 typedef struct rtl8192_rx_info {
@@ -345,14 +345,14 @@ typedef struct rtl8192_rx_info {
 
 typedef struct rx_desc_819x_usb {
 	/* DOWRD 0 */
-	u16                 Length:14;
-	u16                 CRC32:1;
-	u16                 ICV:1;
+	u16                 Length;
+	u16                 CRC32;
+	u16                 ICV;
 	u8                  RxDrvInfoSize;
-	u8                  Shift:2;
-	u8                  PHYStatus:1;
-	u8                  SWDec:1;
-	u8                  Reserved1:4;
+	u8                  Shift;
+	u8                  PHYStatus;
+	u8                  SWDec;
+	u8                  Reserved1;
 
 	/* DWORD 1 */
 	u32                 Reserved2;
@@ -361,16 +361,16 @@ typedef struct rx_desc_819x_usb {
 #ifdef USB_RX_AGGREGATION_SUPPORT
 typedef struct _rx_desc_819x_usb_aggr_subframe {
 	/* DOWRD 0 */
-	u16			Length:14;
-	u16			CRC32:1;
-	u16			ICV:1;
+	u16			Length;
+	u16			CRC32;
+	u16			ICV;
 	u8			Offset;
 	u8			RxDrvInfoSize;
 	/* DOWRD 1 */
-	u8			Shift:2;
-	u8			PHYStatus:1;
-	u8			SWDec:1;
-	u8			Reserved1:4;
+	u8			Shift;
+	u8			PHYStatus;
+	u8			SWDec;
+	u8			Reserved1;
 	u8			Reserved2;
 	u16			Reserved3;
 } rx_desc_819x_usb_aggr_subframe, *prx_desc_819x_usb_aggr_subframe;
@@ -378,21 +378,21 @@ typedef struct _rx_desc_819x_usb_aggr_subframe {
 
 typedef struct rx_drvinfo_819x_usb {
 	/* DWORD 0 */
-	u16                 Reserved1:12;
-	u16                 PartAggr:1;
-	u16                 FirstAGGR:1;
-	u16                 Reserved2:2;
+	u16                 Reserved1;
+	u16                 PartAggr;
+	u16                 FirstAGGR;
+	u16                 Reserved2;
 
-	u8                  RxRate:7;
-	u8                  RxHT:1;
+	u8                  RxRate;
+	u8                  RxHT;
 
-	u8                  BW:1;
-	u8                  SPLCP:1;
-	u8                  Reserved3:2;
-	u8                  PAM:1;
-	u8                  Mcast:1;
-	u8                  Bcast:1;
-	u8                  Reserved4:1;
+	u8                  BW;
+	u8                  SPLCP;
+	u8                  Reserved3;
+	u8                  PAM;
+	u8                  Mcast;
+	u8                  Bcast;
+	u8                  Reserved4;
 
 	/* DWORD 1 */
 	u32                  TSFL;
@@ -819,10 +819,10 @@ typedef struct _phy_cck_rx_status_report_819xusb {
 
 
 typedef struct _phy_ofdm_rx_status_rxsc_sgien_exintfflag {
-	u8			reserved:4;
-	u8			rxsc:2;
-	u8			sgi_en:1;
-	u8			ex_intf_flag:1;
+	u8			reserved;
+	u8			rxsc;
+	u8			sgi_en;
+	u8			ex_intf_flag;
 } phy_ofdm_rx_status_rxsc_sgien_exintfflag;
 
 typedef enum _RT_CUSTOMER_ID {

@@ -414,9 +414,9 @@ typedef struct {
 typedef struct {
 	unsigned int start;
 	unsigned int finish;
-	unsigned int prim:8;
-	unsigned int stateidx:8;
-	unsigned int numverts:16;	/* overloaded as offset/64 for elt prims */
+	unsigned int prim;
+	unsigned int stateidx;
+	unsigned int numverts;	/* overloaded as offset/64 for elt prims */
 	unsigned int vc_format;	/* vertex format */
 } drm_radeon_prim_t;
 

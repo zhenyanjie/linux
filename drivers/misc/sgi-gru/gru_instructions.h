@@ -109,7 +109,7 @@ struct gru_instruction_bits {
     unsigned int		idef2:    22;	/* TRi0 */
     unsigned char		reserved2: 2;
     unsigned char		istatus:   2;
-    unsigned char		isubstatus:4;
+    unsigned char		isubstatus;
     unsigned char		reserved3: 1;
     unsigned char		tlb_fault_color: 1;
     /* DW 1 */
@@ -622,14 +622,14 @@ extern int gru_get_cb_exception_detail(void *cb,
  * Control block definition for checking status
  */
 struct gru_control_block_status {
-	unsigned int	icmd		:1;
-	unsigned int	ima		:3;
-	unsigned int	reserved0	:4;
-	unsigned int	unused1		:24;
-	unsigned int	unused2		:24;
-	unsigned int	istatus		:2;
-	unsigned int	isubstatus	:4;
-	unsigned int	unused3		:2;
+	unsigned int	icmd		;
+	unsigned int	ima		;
+	unsigned int	reserved0	;
+	unsigned int	unused1		;
+	unsigned int	unused2		;
+	unsigned int	istatus		;
+	unsigned int	isubstatus	;
+	unsigned int	unused3		;
 };
 
 /* Get CB status */

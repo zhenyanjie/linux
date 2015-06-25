@@ -300,15 +300,15 @@ struct KorgSharedBuffer {
 struct SensBits {
    union {
       struct {
-         unsigned int leftChanVal:8;
-         unsigned int leftChanId:8;
+         unsigned int leftChanVal;
+         unsigned int leftChanId;
       } v;
       u16  leftSensBits;
    } l;
    union {
       struct {
-         unsigned int rightChanVal:8;
-         unsigned int rightChanId:8;
+         unsigned int rightChanVal;
+         unsigned int rightChanId;
       } v;
       u16  rightSensBits;
    } r;

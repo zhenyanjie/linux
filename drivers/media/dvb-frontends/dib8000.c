@@ -73,8 +73,8 @@ struct dib8000_state {
 	u32 timf;
 	u32 timf_default;
 
-	u8 div_force_off:1;
-	u8 div_state:1;
+	u8 div_force_off;
+	u8 div_state;
 	u16 div_sync_wait;
 
 	u8 agc_state;

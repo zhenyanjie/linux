@@ -51,13 +51,13 @@ struct intel_sdvo_caps {
 	u8 device_rev_id;
 	u8 sdvo_version_major;
 	u8 sdvo_version_minor;
-	unsigned int sdvo_inputs_mask:2;
-	unsigned int smooth_scaling:1;
-	unsigned int sharp_scaling:1;
-	unsigned int up_scaling:1;
-	unsigned int down_scaling:1;
-	unsigned int stall_support:1;
-	unsigned int pad:1;
+	unsigned int sdvo_inputs_mask;
+	unsigned int smooth_scaling;
+	unsigned int sharp_scaling;
+	unsigned int up_scaling;
+	unsigned int down_scaling;
+	unsigned int stall_support;
+	unsigned int pad;
 	u16 output_flags;
 } __packed;
 
@@ -105,9 +105,9 @@ struct intel_sdvo_preferred_input_timing_args {
 	u16 clock;
 	u16 width;
 	u16 height;
-	u8	interlace:1;
-	u8	scaled:1;
-	u8	pad:6;
+	u8	interlace;
+	u8	scaled;
+	u8	pad;
 } __packed;
 
 /* I2C registers for SDVO */
@@ -159,9 +159,9 @@ struct intel_sdvo_preferred_input_timing_args {
  */
 #define SDVO_CMD_GET_TRAINED_INPUTS			0x03
 struct intel_sdvo_get_trained_inputs_response {
-	unsigned int input0_trained:1;
-	unsigned int input1_trained:1;
-	unsigned int pad:6;
+	unsigned int input0_trained;
+	unsigned int input1_trained;
+	unsigned int pad;
 } __packed;
 
 /** Returns a struct intel_sdvo_output_flags of active outputs. */
@@ -216,9 +216,9 @@ struct intel_sdvo_in_out_map {
 #define SDVO_CMD_GET_INTERRUPT_EVENT_SOURCE		0x0f
 struct intel_sdvo_get_interrupt_event_source_response {
 	u16 interrupt_status;
-	unsigned int ambient_light_interrupt:1;
-	unsigned int hdmi_audio_encrypt_change:1;
-	unsigned int pad:6;
+	unsigned int ambient_light_interrupt;
+	unsigned int hdmi_audio_encrypt_change;
+	unsigned int pad;
 } __packed;
 
 /**
@@ -230,8 +230,8 @@ struct intel_sdvo_get_interrupt_event_source_response {
  */
 #define SDVO_CMD_SET_TARGET_INPUT			0x10
 struct intel_sdvo_set_target_input_args {
-	unsigned int target_1:1;
-	unsigned int pad:7;
+	unsigned int target_1;
+	unsigned int pad;
 } __packed;
 
 /**
@@ -319,57 +319,57 @@ struct intel_sdvo_set_target_input_args {
 #define SDVO_CMD_GET_SUPPORTED_TV_FORMATS		0x27
 /** 6 bytes of bit flags for TV formats shared by all TV format functions */
 struct intel_sdvo_tv_format {
-	unsigned int ntsc_m:1;
-	unsigned int ntsc_j:1;
-	unsigned int ntsc_443:1;
-	unsigned int pal_b:1;
-	unsigned int pal_d:1;
-	unsigned int pal_g:1;
-	unsigned int pal_h:1;
-	unsigned int pal_i:1;
+	unsigned int ntsc_m;
+	unsigned int ntsc_j;
+	unsigned int ntsc_443;
+	unsigned int pal_b;
+	unsigned int pal_d;
+	unsigned int pal_g;
+	unsigned int pal_h;
+	unsigned int pal_i;
 
-	unsigned int pal_m:1;
-	unsigned int pal_n:1;
-	unsigned int pal_nc:1;
-	unsigned int pal_60:1;
-	unsigned int secam_b:1;
-	unsigned int secam_d:1;
-	unsigned int secam_g:1;
-	unsigned int secam_k:1;
+	unsigned int pal_m;
+	unsigned int pal_n;
+	unsigned int pal_nc;
+	unsigned int pal_60;
+	unsigned int secam_b;
+	unsigned int secam_d;
+	unsigned int secam_g;
+	unsigned int secam_k;
 
-	unsigned int secam_k1:1;
-	unsigned int secam_l:1;
-	unsigned int secam_60:1;
-	unsigned int hdtv_std_smpte_240m_1080i_59:1;
-	unsigned int hdtv_std_smpte_240m_1080i_60:1;
-	unsigned int hdtv_std_smpte_260m_1080i_59:1;
-	unsigned int hdtv_std_smpte_260m_1080i_60:1;
-	unsigned int hdtv_std_smpte_274m_1080i_50:1;
+	unsigned int secam_k1;
+	unsigned int secam_l;
+	unsigned int secam_60;
+	unsigned int hdtv_std_smpte_240m_1080i_59;
+	unsigned int hdtv_std_smpte_240m_1080i_60;
+	unsigned int hdtv_std_smpte_260m_1080i_59;
+	unsigned int hdtv_std_smpte_260m_1080i_60;
+	unsigned int hdtv_std_smpte_274m_1080i_50;
 
-	unsigned int hdtv_std_smpte_274m_1080i_59:1;
-	unsigned int hdtv_std_smpte_274m_1080i_60:1;
-	unsigned int hdtv_std_smpte_274m_1080p_23:1;
-	unsigned int hdtv_std_smpte_274m_1080p_24:1;
-	unsigned int hdtv_std_smpte_274m_1080p_25:1;
-	unsigned int hdtv_std_smpte_274m_1080p_29:1;
-	unsigned int hdtv_std_smpte_274m_1080p_30:1;
-	unsigned int hdtv_std_smpte_274m_1080p_50:1;
+	unsigned int hdtv_std_smpte_274m_1080i_59;
+	unsigned int hdtv_std_smpte_274m_1080i_60;
+	unsigned int hdtv_std_smpte_274m_1080p_23;
+	unsigned int hdtv_std_smpte_274m_1080p_24;
+	unsigned int hdtv_std_smpte_274m_1080p_25;
+	unsigned int hdtv_std_smpte_274m_1080p_29;
+	unsigned int hdtv_std_smpte_274m_1080p_30;
+	unsigned int hdtv_std_smpte_274m_1080p_50;
 
-	unsigned int hdtv_std_smpte_274m_1080p_59:1;
-	unsigned int hdtv_std_smpte_274m_1080p_60:1;
-	unsigned int hdtv_std_smpte_295m_1080i_50:1;
-	unsigned int hdtv_std_smpte_295m_1080p_50:1;
-	unsigned int hdtv_std_smpte_296m_720p_59:1;
-	unsigned int hdtv_std_smpte_296m_720p_60:1;
-	unsigned int hdtv_std_smpte_296m_720p_50:1;
-	unsigned int hdtv_std_smpte_293m_480p_59:1;
+	unsigned int hdtv_std_smpte_274m_1080p_59;
+	unsigned int hdtv_std_smpte_274m_1080p_60;
+	unsigned int hdtv_std_smpte_295m_1080i_50;
+	unsigned int hdtv_std_smpte_295m_1080p_50;
+	unsigned int hdtv_std_smpte_296m_720p_59;
+	unsigned int hdtv_std_smpte_296m_720p_60;
+	unsigned int hdtv_std_smpte_296m_720p_50;
+	unsigned int hdtv_std_smpte_293m_480p_59;
 
-	unsigned int hdtv_std_smpte_170m_480i_59:1;
-	unsigned int hdtv_std_iturbt601_576i_50:1;
-	unsigned int hdtv_std_iturbt601_576p_50:1;
-	unsigned int hdtv_std_eia_7702a_480i_60:1;
-	unsigned int hdtv_std_eia_7702a_480p_60:1;
-	unsigned int pad:3;
+	unsigned int hdtv_std_smpte_170m_480i_59;
+	unsigned int hdtv_std_iturbt601_576i_50;
+	unsigned int hdtv_std_iturbt601_576p_50;
+	unsigned int hdtv_std_eia_7702a_480i_60;
+	unsigned int hdtv_std_eia_7702a_480p_60;
+	unsigned int pad;
 } __packed;
 
 #define SDVO_CMD_GET_TV_FORMAT				0x28
@@ -379,53 +379,53 @@ struct intel_sdvo_tv_format {
 /** Returns the resolutiosn that can be used with the given TV format */
 #define SDVO_CMD_GET_SDTV_RESOLUTION_SUPPORT		0x83
 struct intel_sdvo_sdtv_resolution_request {
-	unsigned int ntsc_m:1;
-	unsigned int ntsc_j:1;
-	unsigned int ntsc_443:1;
-	unsigned int pal_b:1;
-	unsigned int pal_d:1;
-	unsigned int pal_g:1;
-	unsigned int pal_h:1;
-	unsigned int pal_i:1;
+	unsigned int ntsc_m;
+	unsigned int ntsc_j;
+	unsigned int ntsc_443;
+	unsigned int pal_b;
+	unsigned int pal_d;
+	unsigned int pal_g;
+	unsigned int pal_h;
+	unsigned int pal_i;
 
-	unsigned int pal_m:1;
-	unsigned int pal_n:1;
-	unsigned int pal_nc:1;
-	unsigned int pal_60:1;
-	unsigned int secam_b:1;
-	unsigned int secam_d:1;
-	unsigned int secam_g:1;
-	unsigned int secam_k:1;
+	unsigned int pal_m;
+	unsigned int pal_n;
+	unsigned int pal_nc;
+	unsigned int pal_60;
+	unsigned int secam_b;
+	unsigned int secam_d;
+	unsigned int secam_g;
+	unsigned int secam_k;
 
-	unsigned int secam_k1:1;
-	unsigned int secam_l:1;
-	unsigned int secam_60:1;
-	unsigned int pad:5;
+	unsigned int secam_k1;
+	unsigned int secam_l;
+	unsigned int secam_60;
+	unsigned int pad;
 } __packed;
 
 struct intel_sdvo_sdtv_resolution_reply {
-	unsigned int res_320x200:1;
-	unsigned int res_320x240:1;
-	unsigned int res_400x300:1;
-	unsigned int res_640x350:1;
-	unsigned int res_640x400:1;
-	unsigned int res_640x480:1;
-	unsigned int res_704x480:1;
-	unsigned int res_704x576:1;
+	unsigned int res_320x200;
+	unsigned int res_320x240;
+	unsigned int res_400x300;
+	unsigned int res_640x350;
+	unsigned int res_640x400;
+	unsigned int res_640x480;
+	unsigned int res_704x480;
+	unsigned int res_704x576;
 
-	unsigned int res_720x350:1;
-	unsigned int res_720x400:1;
-	unsigned int res_720x480:1;
-	unsigned int res_720x540:1;
-	unsigned int res_720x576:1;
-	unsigned int res_768x576:1;
-	unsigned int res_800x600:1;
-	unsigned int res_832x624:1;
+	unsigned int res_720x350;
+	unsigned int res_720x400;
+	unsigned int res_720x480;
+	unsigned int res_720x540;
+	unsigned int res_720x576;
+	unsigned int res_768x576;
+	unsigned int res_800x600;
+	unsigned int res_832x624;
 
-	unsigned int res_920x766:1;
-	unsigned int res_1024x768:1;
-	unsigned int res_1280x1024:1;
-	unsigned int pad:5;
+	unsigned int res_920x766;
+	unsigned int res_1024x768;
+	unsigned int res_1280x1024;
+	unsigned int pad;
 } __packed;
 
 /* Get supported resolution with squire pixel aspect ratio that can be
@@ -433,90 +433,90 @@ struct intel_sdvo_sdtv_resolution_reply {
 #define SDVO_CMD_GET_SCALED_HDTV_RESOLUTION_SUPPORT		0x85
 
 struct intel_sdvo_hdtv_resolution_request {
-	unsigned int hdtv_std_smpte_240m_1080i_59:1;
-	unsigned int hdtv_std_smpte_240m_1080i_60:1;
-	unsigned int hdtv_std_smpte_260m_1080i_59:1;
-	unsigned int hdtv_std_smpte_260m_1080i_60:1;
-	unsigned int hdtv_std_smpte_274m_1080i_50:1;
-	unsigned int hdtv_std_smpte_274m_1080i_59:1;
-	unsigned int hdtv_std_smpte_274m_1080i_60:1;
-	unsigned int hdtv_std_smpte_274m_1080p_23:1;
+	unsigned int hdtv_std_smpte_240m_1080i_59;
+	unsigned int hdtv_std_smpte_240m_1080i_60;
+	unsigned int hdtv_std_smpte_260m_1080i_59;
+	unsigned int hdtv_std_smpte_260m_1080i_60;
+	unsigned int hdtv_std_smpte_274m_1080i_50;
+	unsigned int hdtv_std_smpte_274m_1080i_59;
+	unsigned int hdtv_std_smpte_274m_1080i_60;
+	unsigned int hdtv_std_smpte_274m_1080p_23;
 
-	unsigned int hdtv_std_smpte_274m_1080p_24:1;
-	unsigned int hdtv_std_smpte_274m_1080p_25:1;
-	unsigned int hdtv_std_smpte_274m_1080p_29:1;
-	unsigned int hdtv_std_smpte_274m_1080p_30:1;
-	unsigned int hdtv_std_smpte_274m_1080p_50:1;
-	unsigned int hdtv_std_smpte_274m_1080p_59:1;
-	unsigned int hdtv_std_smpte_274m_1080p_60:1;
-	unsigned int hdtv_std_smpte_295m_1080i_50:1;
+	unsigned int hdtv_std_smpte_274m_1080p_24;
+	unsigned int hdtv_std_smpte_274m_1080p_25;
+	unsigned int hdtv_std_smpte_274m_1080p_29;
+	unsigned int hdtv_std_smpte_274m_1080p_30;
+	unsigned int hdtv_std_smpte_274m_1080p_50;
+	unsigned int hdtv_std_smpte_274m_1080p_59;
+	unsigned int hdtv_std_smpte_274m_1080p_60;
+	unsigned int hdtv_std_smpte_295m_1080i_50;
 
-	unsigned int hdtv_std_smpte_295m_1080p_50:1;
-	unsigned int hdtv_std_smpte_296m_720p_59:1;
-	unsigned int hdtv_std_smpte_296m_720p_60:1;
-	unsigned int hdtv_std_smpte_296m_720p_50:1;
-	unsigned int hdtv_std_smpte_293m_480p_59:1;
-	unsigned int hdtv_std_smpte_170m_480i_59:1;
-	unsigned int hdtv_std_iturbt601_576i_50:1;
-	unsigned int hdtv_std_iturbt601_576p_50:1;
+	unsigned int hdtv_std_smpte_295m_1080p_50;
+	unsigned int hdtv_std_smpte_296m_720p_59;
+	unsigned int hdtv_std_smpte_296m_720p_60;
+	unsigned int hdtv_std_smpte_296m_720p_50;
+	unsigned int hdtv_std_smpte_293m_480p_59;
+	unsigned int hdtv_std_smpte_170m_480i_59;
+	unsigned int hdtv_std_iturbt601_576i_50;
+	unsigned int hdtv_std_iturbt601_576p_50;
 
-	unsigned int hdtv_std_eia_7702a_480i_60:1;
-	unsigned int hdtv_std_eia_7702a_480p_60:1;
-	unsigned int pad:6;
+	unsigned int hdtv_std_eia_7702a_480i_60;
+	unsigned int hdtv_std_eia_7702a_480p_60;
+	unsigned int pad;
 } __packed;
 
 struct intel_sdvo_hdtv_resolution_reply {
-	unsigned int res_640x480:1;
-	unsigned int res_800x600:1;
-	unsigned int res_1024x768:1;
-	unsigned int res_1280x960:1;
-	unsigned int res_1400x1050:1;
-	unsigned int res_1600x1200:1;
-	unsigned int res_1920x1440:1;
-	unsigned int res_2048x1536:1;
+	unsigned int res_640x480;
+	unsigned int res_800x600;
+	unsigned int res_1024x768;
+	unsigned int res_1280x960;
+	unsigned int res_1400x1050;
+	unsigned int res_1600x1200;
+	unsigned int res_1920x1440;
+	unsigned int res_2048x1536;
 
-	unsigned int res_2560x1920:1;
-	unsigned int res_3200x2400:1;
-	unsigned int res_3840x2880:1;
-	unsigned int pad1:5;
+	unsigned int res_2560x1920;
+	unsigned int res_3200x2400;
+	unsigned int res_3840x2880;
+	unsigned int pad1;
 
-	unsigned int res_848x480:1;
-	unsigned int res_1064x600:1;
-	unsigned int res_1280x720:1;
-	unsigned int res_1360x768:1;
-	unsigned int res_1704x960:1;
-	unsigned int res_1864x1050:1;
-	unsigned int res_1920x1080:1;
-	unsigned int res_2128x1200:1;
+	unsigned int res_848x480;
+	unsigned int res_1064x600;
+	unsigned int res_1280x720;
+	unsigned int res_1360x768;
+	unsigned int res_1704x960;
+	unsigned int res_1864x1050;
+	unsigned int res_1920x1080;
+	unsigned int res_2128x1200;
 
-	unsigned int res_2560x1400:1;
-	unsigned int res_2728x1536:1;
-	unsigned int res_3408x1920:1;
-	unsigned int res_4264x2400:1;
-	unsigned int res_5120x2880:1;
-	unsigned int pad2:3;
+	unsigned int res_2560x1400;
+	unsigned int res_2728x1536;
+	unsigned int res_3408x1920;
+	unsigned int res_4264x2400;
+	unsigned int res_5120x2880;
+	unsigned int pad2;
 
-	unsigned int res_768x480:1;
-	unsigned int res_960x600:1;
-	unsigned int res_1152x720:1;
-	unsigned int res_1124x768:1;
-	unsigned int res_1536x960:1;
-	unsigned int res_1680x1050:1;
-	unsigned int res_1728x1080:1;
-	unsigned int res_1920x1200:1;
+	unsigned int res_768x480;
+	unsigned int res_960x600;
+	unsigned int res_1152x720;
+	unsigned int res_1124x768;
+	unsigned int res_1536x960;
+	unsigned int res_1680x1050;
+	unsigned int res_1728x1080;
+	unsigned int res_1920x1200;
 
-	unsigned int res_2304x1440:1;
-	unsigned int res_2456x1536:1;
-	unsigned int res_3072x1920:1;
-	unsigned int res_3840x2400:1;
-	unsigned int res_4608x2880:1;
-	unsigned int pad3:3;
+	unsigned int res_2304x1440;
+	unsigned int res_2456x1536;
+	unsigned int res_3072x1920;
+	unsigned int res_3840x2400;
+	unsigned int res_4608x2880;
+	unsigned int pad3;
 
-	unsigned int res_1280x1024:1;
-	unsigned int pad4:7;
+	unsigned int res_1280x1024;
+	unsigned int pad4;
 
-	unsigned int res_1280x768:1;
-	unsigned int pad5:7;
+	unsigned int res_1280x768;
+	unsigned int pad5;
 } __packed;
 
 /* Get supported power state returns info for encoder and monitor, rely on
@@ -550,13 +550,13 @@ struct sdvo_panel_power_sequencing {
 	u8 t3;
 	u8 t4;
 
-	unsigned int t0_high:2;
-	unsigned int t1_high:2;
-	unsigned int t2_high:2;
-	unsigned int t3_high:2;
+	unsigned int t0_high;
+	unsigned int t1_high;
+	unsigned int t2_high;
+	unsigned int t3_high;
 
-	unsigned int t4_high:2;
-	unsigned int pad:6;
+	unsigned int t4_high;
+	unsigned int pad;
 } __packed;
 
 #define SDVO_CMD_GET_MAX_BACKLIGHT_LEVEL		0x30
@@ -578,8 +578,8 @@ struct sdvo_get_ambient_light_reply {
 struct sdvo_set_ambient_light_reply {
 	u16 trip_low;
 	u16 trip_high;
-	unsigned int enable:1;
-	unsigned int pad:7;
+	unsigned int enable;
+	unsigned int pad;
 } __packed;
 
 /* Set display power state */
@@ -591,23 +591,23 @@ struct sdvo_set_ambient_light_reply {
 
 #define SDVO_CMD_GET_SUPPORTED_ENHANCEMENTS		0x84
 struct intel_sdvo_enhancements_reply {
-	unsigned int flicker_filter:1;
-	unsigned int flicker_filter_adaptive:1;
-	unsigned int flicker_filter_2d:1;
-	unsigned int saturation:1;
-	unsigned int hue:1;
-	unsigned int brightness:1;
-	unsigned int contrast:1;
-	unsigned int overscan_h:1;
+	unsigned int flicker_filter;
+	unsigned int flicker_filter_adaptive;
+	unsigned int flicker_filter_2d;
+	unsigned int saturation;
+	unsigned int hue;
+	unsigned int brightness;
+	unsigned int contrast;
+	unsigned int overscan_h;
 
-	unsigned int overscan_v:1;
-	unsigned int hpos:1;
-	unsigned int vpos:1;
-	unsigned int sharpness:1;
-	unsigned int dot_crawl:1;
-	unsigned int dither:1;
-	unsigned int tv_chroma_filter:1;
-	unsigned int tv_luma_filter:1;
+	unsigned int overscan_v;
+	unsigned int hpos;
+	unsigned int vpos;
+	unsigned int sharpness;
+	unsigned int dot_crawl;
+	unsigned int dither;
+	unsigned int tv_chroma_filter;
+	unsigned int tv_luma_filter;
 } __packed;
 
 /* Picture enhancement limits below are dependent on the current TV format,

@@ -240,8 +240,8 @@ struct cxgb4_lld_info {
 	unsigned short nrxq;                 /* # of Rx queues */
 	unsigned short ntxq;                 /* # of Tx queues */
 	unsigned short nciq;		     /* # of concentrator IQ */
-	unsigned char nchan:4;               /* # of channels */
-	unsigned char nports:4;              /* # of ports */
+	unsigned char nchan;               /* # of channels */
+	unsigned char nports;              /* # of ports */
 	unsigned char wr_cred;               /* WR 16-byte credits */
 	unsigned char adapter_type;          /* type of adapter */
 	unsigned char fw_api_ver;            /* FW API version */

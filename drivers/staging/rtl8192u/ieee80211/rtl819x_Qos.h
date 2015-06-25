@@ -82,38 +82,38 @@ typedef	union _QOS_CTRL_FIELD{
 
 	// WMM spec
 	struct {
-		u8		UP:3;
-		u8		usRsvd1:1;
-		u8		EOSP:1;
-		u8		AckPolicy:2;
-		u8		usRsvd2:1;
+		u8		UP;
+		u8		usRsvd1;
+		u8		EOSP;
+		u8		AckPolicy;
+		u8		usRsvd2;
 		u8		ucRsvdByte;
 	}WMM;
 
 	// 802.11e: QoS data type frame sent by non-AP QSTAs.
 	struct {
-		u8		TID:4;
-		u8		bIsQsize:1;// 0: BIT[8:15] is TXOP Duration Requested, 1: BIT[8:15] is Queue Size.
-		u8		AckPolicy:2;
-		u8		usRsvd:1;
+		u8		TID;
+		u8		bIsQsize;// 0: BIT[8:15] is TXOP Duration Requested, 1: BIT[8:15] is Queue Size.
+		u8		AckPolicy;
+		u8		usRsvd;
 		u8		TxopOrQsize;	// (BIT4=0)TXOP Duration Requested or (BIT4=1)Queue Size.
 	}BySta;
 
 	// 802.11e: QoS data, QoS Null, and QoS Data+CF-Ack frames sent by HC.
 	struct {
-		u8		TID:4;
-		u8		EOSP:1;
-		u8		AckPolicy:2;
-		u8		usRsvd:1;
+		u8		TID;
+		u8		EOSP;
+		u8		AckPolicy;
+		u8		usRsvd;
 		u8		PSBufState;		// QAP PS Buffer State.
 	}ByHc_Data;
 
 	// 802.11e: QoS (+) CF-Poll frames sent by HC.
 	struct {
-		u8		TID:4;
-		u8		EOSP:1;
-		u8		AckPolicy:2;
-		u8		usRsvd:1;
+		u8		TID;
+		u8		EOSP;
+		u8		AckPolicy;
+		u8		usRsvd;
 		u8		TxopLimit;		// TXOP Limit.
 	}ByHc_CFP;
 
@@ -130,78 +130,78 @@ typedef	union _QOS_INFO_FIELD{
 	u8	charData;
 
 	struct {
-		u8		ucParameterSetCount:4;
-		u8		ucReserved:4;
+		u8		ucParameterSetCount;
+		u8		ucReserved;
 	}WMM;
 
 	struct {
 		//Ref WMM_Specification_1-1.pdf, 2006-06-13 Isaiah
-		u8		ucAC_VO_UAPSD:1;
-		u8		ucAC_VI_UAPSD:1;
-		u8		ucAC_BE_UAPSD:1;
-		u8		ucAC_BK_UAPSD:1;
-		u8		ucReserved1:1;
-		u8		ucMaxSPLen:2;
-		u8		ucReserved2:1;
+		u8		ucAC_VO_UAPSD;
+		u8		ucAC_VI_UAPSD;
+		u8		ucAC_BE_UAPSD;
+		u8		ucAC_BK_UAPSD;
+		u8		ucReserved1;
+		u8		ucMaxSPLen;
+		u8		ucReserved2;
 
 	}ByWmmPsSta;
 
 	struct {
 		//Ref WMM_Specification_1-1.pdf, 2006-06-13 Isaiah
-		u8		ucParameterSetCount:4;
-		u8		ucReserved:3;
-		u8		ucApUapsd:1;
+		u8		ucParameterSetCount;
+		u8		ucReserved;
+		u8		ucApUapsd;
 	}ByWmmPsAp;
 
 	struct {
-		u8		ucAC3_UAPSD:1;
-		u8		ucAC2_UAPSD:1;
-		u8		ucAC1_UAPSD:1;
-		u8		ucAC0_UAPSD:1;
-		u8		ucQAck:1;
-		u8		ucMaxSPLen:2;
-		u8		ucMoreDataAck:1;
+		u8		ucAC3_UAPSD;
+		u8		ucAC2_UAPSD;
+		u8		ucAC1_UAPSD;
+		u8		ucAC0_UAPSD;
+		u8		ucQAck;
+		u8		ucMaxSPLen;
+		u8		ucMoreDataAck;
 	} By11eSta;
 
 	struct {
-		u8		ucParameterSetCount:4;
-		u8		ucQAck:1;
-		u8		ucQueueReq:1;
-		u8		ucTXOPReq:1;
-		u8		ucReserved:1;
+		u8		ucParameterSetCount;
+		u8		ucQAck;
+		u8		ucQueueReq;
+		u8		ucTXOPReq;
+		u8		ucReserved;
 	} By11eAp;
 
 	struct {
-		u8		ucReserved1:4;
-		u8		ucQAck:1;
-		u8		ucReserved2:2;
-		u8		ucMoreDataAck:1;
+		u8		ucReserved1;
+		u8		ucQAck;
+		u8		ucReserved2;
+		u8		ucMoreDataAck;
 	} ByWmmsaSta;
 
 	struct {
-		u8		ucReserved1:4;
-		u8		ucQAck:1;
-		u8		ucQueueReq:1;
-		u8		ucTXOPReq:1;
-		u8		ucReserved2:1;
+		u8		ucReserved1;
+		u8		ucQAck;
+		u8		ucQueueReq;
+		u8		ucTXOPReq;
+		u8		ucReserved2;
 	} ByWmmsaAp;
 
 	struct {
-		u8		ucAC3_UAPSD:1;
-		u8		ucAC2_UAPSD:1;
-		u8		ucAC1_UAPSD:1;
-		u8		ucAC0_UAPSD:1;
-		u8		ucQAck:1;
-		u8		ucMaxSPLen:2;
-		u8		ucMoreDataAck:1;
+		u8		ucAC3_UAPSD;
+		u8		ucAC2_UAPSD;
+		u8		ucAC1_UAPSD;
+		u8		ucAC0_UAPSD;
+		u8		ucQAck;
+		u8		ucMaxSPLen;
+		u8		ucMoreDataAck;
 	} ByAllSta;
 
 	struct {
-		u8		ucParameterSetCount:4;
-		u8		ucQAck:1;
-		u8		ucQueueReq:1;
-		u8		ucTXOPReq:1;
-		u8		ucApUapsd:1;
+		u8		ucParameterSetCount;
+		u8		ucQAck;
+		u8		ucQueueReq;
+		u8		ucTXOPReq;
+		u8		ucApUapsd;
 	} ByAllAp;
 
 }QOS_INFO_FIELD, *PQOS_INFO_FIELD;
@@ -234,10 +234,10 @@ typedef	union _ACI_AIFSN{
 	u8	charData;
 
 	struct {
-		u8	AIFSN:4;
-		u8	ACM:1;
-		u8	ACI:2;
-		u8	Reserved:1;
+		u8	AIFSN;
+		u8	ACM;
+		u8	ACI;
+		u8	Reserved;
 	}f;	// Field
 }ACI_AIFSN, *PACI_AIFSN;
 
@@ -248,8 +248,8 @@ typedef	union _ACI_AIFSN{
 typedef	union _ECW{
 	u8	charData;
 	struct {
-		u8	ECWmin:4;
-		u8	ECWmax:4;
+		u8	ECWmin;
+		u8	ECWmax;
 	}f;	// Field
 }ECW, *PECW;
 
@@ -300,16 +300,16 @@ typedef	enum _DIRECTION_VALUE{
 typedef union _QOS_TSINFO{
 	u8		charData[3];
 	struct {
-		u8		ucTrafficType:1;			//WMM is reserved
-		u8		ucTSID:4;
-		u8		ucDirection:2;
-		u8		ucAccessPolicy:2;	//WMM: bit8=0, bit7=1
-		u8		ucAggregation:1;		//WMM is reserved
-		u8		ucPSB:1;				//WMMSA is APSD
-		u8		ucUP:3;
-		u8		ucTSInfoAckPolicy:2;		//WMM is reserved
-		u8		ucSchedule:1;			//WMM is reserved
-		u8		ucReserved:7;
+		u8		ucTrafficType;			//WMM is reserved
+		u8		ucTSID;
+		u8		ucDirection;
+		u8		ucAccessPolicy;	//WMM: bit8=0, bit7=1
+		u8		ucAggregation;		//WMM is reserved
+		u8		ucPSB;				//WMMSA is APSD
+		u8		ucUP;
+		u8		ucTSInfoAckPolicy;		//WMM is reserved
+		u8		ucSchedule;			//WMM is reserved
+		u8		ucReserved;
 	}field;
 }QOS_TSINFO, *PQOS_TSINFO;
 

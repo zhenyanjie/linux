@@ -35,8 +35,8 @@ enum vpss_ccdc_source_sel {
 };
 
 struct vpss_sync_pol {
-	unsigned int ccdpg_hdpol:1;
-	unsigned int ccdpg_vdpol:1;
+	unsigned int ccdpg_hdpol;
+	unsigned int ccdpg_vdpol;
 };
 
 struct vpss_pg_frame_size {

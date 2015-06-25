@@ -189,7 +189,7 @@ struct snd_ali_voice {
 		midi :1,
 		mode :1,
 		synth :1,
-		running :1;
+		running ;
 
 	/* PCM data */
 	struct snd_ali *codec;
@@ -230,8 +230,8 @@ struct snd_ali {
 	unsigned long	port;
 	unsigned char	revision;
 
-	unsigned int hw_initialized :1;
-	unsigned int spdif_support :1;
+	unsigned int hw_initialized ;
+	unsigned int spdif_support ;
 
 	struct pci_dev	*pci;
 	struct pci_dev	*pci_m1533;

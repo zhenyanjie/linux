@@ -56,7 +56,7 @@ struct o2nm_node {
 
 struct o2nm_cluster {
 	struct config_group	cl_group;
-	unsigned		cl_has_local:1;
+	unsigned		cl_has_local;
 	u8			cl_local_node;
 	rwlock_t		cl_nodes_lock;
 	struct o2nm_node  	*cl_nodes[O2NM_MAX_NODES];

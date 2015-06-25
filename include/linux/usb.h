@@ -175,14 +175,14 @@ struct usb_interface {
 	int minor;			/* minor number this interface is
 					 * bound to */
 	enum usb_interface_condition condition;		/* state of binding */
-	unsigned sysfs_files_created:1;	/* the sysfs attributes exist */
-	unsigned ep_devs_created:1;	/* endpoint "devices" exist */
-	unsigned unregistering:1;	/* unregistration is in progress */
-	unsigned needs_remote_wakeup:1;	/* driver requires remote wakeup */
-	unsigned needs_altsetting0:1;	/* switch to altsetting 0 is pending */
-	unsigned needs_binding:1;	/* needs delayed unbind/rebind */
-	unsigned reset_running:1;
-	unsigned resetting_device:1;	/* true: bandwidth alloc after reset */
+	unsigned sysfs_files_created;	/* the sysfs attributes exist */
+	unsigned ep_devs_created;	/* endpoint "devices" exist */
+	unsigned unregistering;	/* unregistration is in progress */
+	unsigned needs_remote_wakeup;	/* driver requires remote wakeup */
+	unsigned needs_altsetting0;	/* switch to altsetting 0 is pending */
+	unsigned needs_binding;	/* needs delayed unbind/rebind */
+	unsigned reset_running;
+	unsigned resetting_device;	/* true: bandwidth alloc after reset */
 
 	struct device dev;		/* interface specific device info */
 	struct device *usb_dev;
@@ -334,14 +334,14 @@ struct usb_bus {
 					 * for control transfers?
 					 */
 	u8 otg_port;			/* 0, or number of OTG/HNP port */
-	unsigned is_b_host:1;		/* true during some HNP roleswitches */
-	unsigned b_hnp_enable:1;	/* OTG: did A-Host enable HNP? */
-	unsigned no_stop_on_short:1;    /*
+	unsigned is_b_host;		/* true during some HNP roleswitches */
+	unsigned b_hnp_enable;	/* OTG: did A-Host enable HNP? */
+	unsigned no_stop_on_short;    /*
 					 * Quirk: some controllers don't stop
 					 * the ep queue on a short transfer
 					 * with the URB_SHORT_NOT_OK flag set.
 					 */
-	unsigned no_sg_constraint:1;	/* no sg constraint */
+	unsigned no_sg_constraint;	/* no sg constraint */
 	unsigned sg_tablesize;		/* 0 or largest number of sg list entries */
 
 	int devnum_next;		/* Next open device number in
@@ -547,18 +547,18 @@ struct usb_device {
 	u8 portnum;
 	u8 level;
 
-	unsigned can_submit:1;
-	unsigned persist_enabled:1;
-	unsigned have_langid:1;
-	unsigned authorized:1;
-	unsigned authenticated:1;
-	unsigned wusb:1;
-	unsigned lpm_capable:1;
-	unsigned usb2_hw_lpm_capable:1;
-	unsigned usb2_hw_lpm_besl_capable:1;
-	unsigned usb2_hw_lpm_enabled:1;
-	unsigned usb2_hw_lpm_allowed:1;
-	unsigned usb3_lpm_enabled:1;
+	unsigned can_submit;
+	unsigned persist_enabled;
+	unsigned have_langid;
+	unsigned authorized;
+	unsigned authenticated;
+	unsigned wusb;
+	unsigned lpm_capable;
+	unsigned usb2_hw_lpm_capable;
+	unsigned usb2_hw_lpm_besl_capable;
+	unsigned usb2_hw_lpm_enabled;
+	unsigned usb2_hw_lpm_allowed;
+	unsigned usb3_lpm_enabled;
 	int string_langid;
 
 	/* static strings from the device */
@@ -578,9 +578,9 @@ struct usb_device {
 #ifdef CONFIG_PM
 	unsigned long connect_time;
 
-	unsigned do_remote_wakeup:1;
-	unsigned reset_resume:1;
-	unsigned port_is_suspended:1;
+	unsigned do_remote_wakeup;
+	unsigned reset_resume;
+	unsigned port_is_suspended;
 #endif
 	struct wusb_dev *wusb_dev;
 	int slot_id;
@@ -1080,10 +1080,10 @@ struct usb_driver {
 
 	struct usb_dynids dynids;
 	struct usbdrv_wrap drvwrap;
-	unsigned int no_dynamic_id:1;
-	unsigned int supports_autosuspend:1;
-	unsigned int disable_hub_initiated_lpm:1;
-	unsigned int soft_unbind:1;
+	unsigned int no_dynamic_id;
+	unsigned int supports_autosuspend;
+	unsigned int disable_hub_initiated_lpm;
+	unsigned int soft_unbind;
 };
 #define	to_usb_driver(d) container_of(d, struct usb_driver, drvwrap.driver)
 
@@ -1115,7 +1115,7 @@ struct usb_device_driver {
 	int (*suspend) (struct usb_device *udev, pm_message_t message);
 	int (*resume) (struct usb_device *udev, pm_message_t message);
 	struct usbdrv_wrap drvwrap;
-	unsigned int supports_autosuspend:1;
+	unsigned int supports_autosuspend;
 };
 #define	to_usb_device_driver(d) container_of(d, struct usb_device_driver, \
 		drvwrap.driver)
@@ -1226,7 +1226,7 @@ struct usb_anchor {
 	wait_queue_head_t wait;
 	spinlock_t lock;
 	atomic_t suspend_wakeups;
-	unsigned int poisoned:1;
+	unsigned int poisoned;
 };
 
 static inline void init_usb_anchor(struct usb_anchor *anchor)

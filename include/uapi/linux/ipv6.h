@@ -110,10 +110,10 @@ struct ipv6_destopt_hao {
 struct ipv6hdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
 	__u8			priority:4,
-				version:4;
+				version;
 #elif defined(__BIG_ENDIAN_BITFIELD)
 	__u8			version:4,
-				priority:4;
+				priority;
 #else
 #error	"Please fix <asm/byteorder.h>"
 #endif

@@ -81,7 +81,7 @@ struct dcp_async_ctx {
 	/* SHA Hash-specific context */
 	struct mutex			mutex;
 	uint32_t			alg;
-	unsigned int			hot:1;
+	unsigned int			hot;
 
 	/* Crypto-specific context */
 	struct crypto_ablkcipher	*fallback;
@@ -90,13 +90,13 @@ struct dcp_async_ctx {
 };
 
 struct dcp_aes_req_ctx {
-	unsigned int	enc:1;
-	unsigned int	ecb:1;
+	unsigned int	enc;
+	unsigned int	ecb;
 };
 
 struct dcp_sha_req_ctx {
-	unsigned int	init:1;
-	unsigned int	fini:1;
+	unsigned int	init;
+	unsigned int	fini;
 };
 
 /*

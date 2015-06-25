@@ -107,8 +107,8 @@ struct {
 	struct timer_list	auto_update_timer;
 	int			stop_auto_update;
 	struct omapfb_update_window	auto_update_window;
-	unsigned		te_connected:1;
-	unsigned		vsync_only:1;
+	unsigned		te_connected;
+	unsigned		vsync_only;
 
 	struct hwa742_request	req_pool[REQ_POOL_SIZE];
 	struct list_head	pending_req_list;

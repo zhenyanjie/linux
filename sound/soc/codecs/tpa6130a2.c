@@ -48,7 +48,7 @@ struct tpa6130a2_data {
 	unsigned char regs[TPA6130A2_CACHEREGNUM];
 	struct regulator *supply;
 	int power_gpio;
-	u8 power_state:1;
+	u8 power_state;
 	enum tpa_model id;
 };
 

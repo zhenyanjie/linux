@@ -989,23 +989,23 @@ union sfp_xcvr_e10g_code_u {
 	u8		b;
 	struct {
 #ifdef __BIG_ENDIAN
-		u8	e10g_unall:1;   /* 10G Ethernet compliance */
-		u8	e10g_lrm:1;
-		u8	e10g_lr:1;
-		u8	e10g_sr:1;
-		u8	ib_sx:1;    /* Infiniband compliance */
-		u8	ib_lx:1;
-		u8	ib_cu_a:1;
-		u8	ib_cu_p:1;
+		u8	e10g_unall;   /* 10G Ethernet compliance */
+		u8	e10g_lrm;
+		u8	e10g_lr;
+		u8	e10g_sr;
+		u8	ib_sx;    /* Infiniband compliance */
+		u8	ib_lx;
+		u8	ib_cu_a;
+		u8	ib_cu_p;
 #else
-		u8	ib_cu_p:1;
-		u8	ib_cu_a:1;
-		u8	ib_lx:1;
-		u8	ib_sx:1;    /* Infiniband compliance */
-		u8	e10g_sr:1;
-		u8	e10g_lr:1;
-		u8	e10g_lrm:1;
-		u8	e10g_unall:1;   /* 10G Ethernet compliance */
+		u8	ib_cu_p;
+		u8	ib_cu_a;
+		u8	ib_lx;
+		u8	ib_sx;    /* Infiniband compliance */
+		u8	e10g_sr;
+		u8	e10g_lr;
+		u8	e10g_lrm;
+		u8	e10g_unall;   /* 10G Ethernet compliance */
 #endif
 	} r;
 };
@@ -1013,55 +1013,55 @@ union sfp_xcvr_e10g_code_u {
 union sfp_xcvr_so1_code_u {
 	u8		b;
 	struct {
-		u8	escon:2;    /* ESCON compliance code */
-		u8	oc192_reach:1;  /* SONET compliance code */
-		u8	so_reach:2;
-		u8	oc48_reach:3;
+		u8	escon;    /* ESCON compliance code */
+		u8	oc192_reach;  /* SONET compliance code */
+		u8	so_reach;
+		u8	oc48_reach;
 	} r;
 };
 
 union sfp_xcvr_so2_code_u {
 	u8		b;
 	struct {
-		u8	reserved:1;
-		u8	oc12_reach:3;   /* OC12 reach */
-		u8	reserved1:1;
-		u8	oc3_reach:3;    /* OC3 reach */
+		u8	reserved;
+		u8	oc12_reach;   /* OC12 reach */
+		u8	reserved1;
+		u8	oc3_reach;    /* OC3 reach */
 	} r;
 };
 
 union sfp_xcvr_eth_code_u {
 	u8		b;
 	struct {
-		u8	base_px:1;
-		u8	base_bx10:1;
-		u8	e100base_fx:1;
-		u8	e100base_lx:1;
-		u8	e1000base_t:1;
-		u8	e1000base_cx:1;
-		u8	e1000base_lx:1;
-		u8	e1000base_sx:1;
+		u8	base_px;
+		u8	base_bx10;
+		u8	e100base_fx;
+		u8	e100base_lx;
+		u8	e1000base_t;
+		u8	e1000base_cx;
+		u8	e1000base_lx;
+		u8	e1000base_sx;
 	} r;
 };
 
 struct sfp_xcvr_fc1_code_s {
-	u8	link_len:5; /* FC link length */
-	u8	xmtr_tech2:3;
-	u8	xmtr_tech1:7;   /* FC transmitter technology */
-	u8	reserved1:1;
+	u8	link_len; /* FC link length */
+	u8	xmtr_tech2;
+	u8	xmtr_tech1;   /* FC transmitter technology */
+	u8	reserved1;
 };
 
 union sfp_xcvr_fc2_code_u {
 	u8		b;
 	struct {
-		u8	tw_media:1; /* twin axial pair (tw) */
-		u8	tp_media:1; /* shielded twisted pair (sp) */
-		u8	mi_media:1; /* miniature coax (mi) */
-		u8	tv_media:1; /* video coax (tv) */
-		u8	m6_media:1; /* multimode, 62.5m (m6) */
-		u8	m5_media:1; /* multimode, 50m (m5) */
-		u8	reserved:1;
-		u8	sm_media:1; /* single mode (sm) */
+		u8	tw_media; /* twin axial pair (tw) */
+		u8	tp_media; /* shielded twisted pair (sp) */
+		u8	mi_media; /* miniature coax (mi) */
+		u8	tv_media; /* video coax (tv) */
+		u8	m6_media; /* multimode, 62.5m (m6) */
+		u8	m5_media; /* multimode, 50m (m5) */
+		u8	reserved;
+		u8	sm_media; /* single mode (sm) */
 	} r;
 };
 
@@ -1069,23 +1069,23 @@ union sfp_xcvr_fc3_code_u {
 	u8		b;
 	struct {
 #ifdef __BIG_ENDIAN
-		u8	rsv4:1;
-		u8	mb800:1;    /* 800 Mbytes/sec */
-		u8	mb1600:1;   /* 1600 Mbytes/sec */
-		u8	mb400:1;    /* 400 Mbytes/sec */
-		u8	rsv2:1;
-		u8	mb200:1;    /* 200 Mbytes/sec */
-		u8	rsv1:1;
-		u8	mb100:1;    /* 100 Mbytes/sec */
+		u8	rsv4;
+		u8	mb800;    /* 800 Mbytes/sec */
+		u8	mb1600;   /* 1600 Mbytes/sec */
+		u8	mb400;    /* 400 Mbytes/sec */
+		u8	rsv2;
+		u8	mb200;    /* 200 Mbytes/sec */
+		u8	rsv1;
+		u8	mb100;    /* 100 Mbytes/sec */
 #else
-		u8	mb100:1;    /* 100 Mbytes/sec */
-		u8	rsv1:1;
-		u8	mb200:1;    /* 200 Mbytes/sec */
-		u8	rsv2:1;
-		u8	mb400:1;    /* 400 Mbytes/sec */
-		u8	mb1600:1;   /* 1600 Mbytes/sec */
-		u8	mb800:1;    /* 800 Mbytes/sec */
-		u8	rsv4:1;
+		u8	mb100;    /* 100 Mbytes/sec */
+		u8	rsv1;
+		u8	mb200;    /* 200 Mbytes/sec */
+		u8	rsv2;
+		u8	mb400;    /* 400 Mbytes/sec */
+		u8	mb1600;   /* 1600 Mbytes/sec */
+		u8	mb800;    /* 800 Mbytes/sec */
+		u8	rsv4;
 #endif
 	} r;
 };

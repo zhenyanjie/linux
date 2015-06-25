@@ -145,7 +145,7 @@ struct hsi_client {
 	struct hsi_config	rx_cfg;
 	/* private: */
 	void			(*ehandler)(struct hsi_client *, unsigned long);
-	unsigned int		pclaimed:1;
+	unsigned int		pclaimed;
 	struct notifier_block	nb;
 };
 
@@ -210,8 +210,8 @@ struct hsi_msg {
 	int			status;
 	unsigned int		actual_len;
 	unsigned int		channel;
-	unsigned int		ttype:1;
-	unsigned int		break_frame:1;
+	unsigned int		ttype;
+	unsigned int		break_frame;
 };
 
 struct hsi_msg *hsi_alloc_msg(unsigned int n_frag, gfp_t flags);
@@ -239,7 +239,7 @@ struct hsi_port {
 	struct hsi_config		tx_cfg;
 	struct hsi_config		rx_cfg;
 	unsigned int			num;
-	unsigned int			shared:1;
+	unsigned int			shared;
 	int				claimed;
 	struct mutex			lock;
 	int				(*async)(struct hsi_msg *msg);

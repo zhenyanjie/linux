@@ -51,7 +51,7 @@ struct ip_options {
 			is_changed:1,
 			rr_needaddr:1,
 			ts_needtime:1,
-			ts_needaddr:1;
+			ts_needaddr;
 	unsigned char	router_alert;
 	unsigned char	cipso;
 	unsigned char	__pad2;
@@ -182,7 +182,7 @@ struct inet_sock {
 				mc_loop:1,
 				transparent:1,
 				mc_all:1,
-				nodefrag:1;
+				nodefrag;
 	__u8			rcv_tos;
 	int			uc_index;
 	int			mc_index;

@@ -113,8 +113,8 @@ struct adp8860_bl {
 	int id;
 	int revid;
 	int current_brightness;
-	unsigned en_ambl_sens:1;
-	unsigned gdwn_dis:1;
+	unsigned en_ambl_sens;
+	unsigned gdwn_dis;
 };
 
 static int adp8860_read(struct i2c_client *client, int reg, uint8_t *val)

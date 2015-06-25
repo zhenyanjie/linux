@@ -259,10 +259,10 @@ typedef struct serdma_s {
         unsigned sbufsz;	// 2**buforder.
         unsigned fragsamples;
         // OSS stuff 
-        unsigned mapped:1;	// Buffer mapped in cs4297a_mmap()?
-        unsigned ready:1;	// prog_dmabuf_dac()/adc() successful?
-        unsigned endcleared:1;
-        unsigned type:1;	// adc or dac buffer (CS_TYPE_XXX)
+        unsigned mapped;	// Buffer mapped in cs4297a_mmap()?
+        unsigned ready;	// prog_dmabuf_dac()/adc() successful?
+        unsigned endcleared;
+        unsigned type;	// adc or dac buffer (CS_TYPE_XXX)
         unsigned ossfragshift;
         int ossmaxfrags;
         unsigned subdivision;
@@ -304,7 +304,7 @@ struct cs4297a_state {
 		unsigned channels;
 		unsigned rate;
 	} prop_dac, prop_adc;
-	unsigned conversion:1;	// conversion from 16 to 8 bit in progress
+	unsigned conversion;	// conversion from 16 to 8 bit in progress
 	unsigned ena;
 	spinlock_t lock;
 	struct mutex open_mutex;

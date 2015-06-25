@@ -45,7 +45,7 @@ struct g760a_data {
 	u16 fan_div; /* default P=2 */
 
 	/* g760a register cache */
-	unsigned int valid:1;
+	unsigned int valid;
 	unsigned long last_updated; /* In jiffies */
 
 	u8 set_cnt; /* PWM (period) count number; 0xff stops fan */

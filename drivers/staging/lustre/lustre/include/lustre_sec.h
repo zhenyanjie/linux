@@ -511,7 +511,7 @@ struct ptlrpc_cli_ctx {
 	struct ptlrpc_sec      *cc_sec;
 	struct ptlrpc_ctx_ops  *cc_ops;
 	unsigned long	      cc_expire;     /* in seconds */
-	unsigned int	    cc_early_expire:1;
+	unsigned int	    cc_early_expire;
 	unsigned long	   cc_flags;
 	struct vfs_cred	 cc_vcred;
 	spinlock_t		cc_lock;
@@ -826,7 +826,7 @@ struct ptlrpc_sec {
 	struct sptlrpc_flavor	   ps_flvr;
 	enum lustre_sec_part	    ps_part;
 	/** after set, no more new context will be created */
-	unsigned int		    ps_dying:1;
+	unsigned int		    ps_dying;
 	/** owning import */
 	struct obd_import	      *ps_import;
 	spinlock_t			ps_lock;

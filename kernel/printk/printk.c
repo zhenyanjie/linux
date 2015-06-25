@@ -221,8 +221,8 @@ struct printk_log {
 	u16 text_len;		/* length of text buffer */
 	u16 dict_len;		/* length of dictionary buffer */
 	u8 facility;		/* syslog facility */
-	u8 flags:5;		/* internal record flags */
-	u8 level:3;		/* syslog level */
+	u8 flags;		/* internal record flags */
+	u8 level;		/* syslog level */
 };
 
 /*
@@ -1525,7 +1525,7 @@ static struct cont {
 	u8 level;			/* log level of first message */
 	u8 facility;			/* log facility of first message */
 	enum log_flags flags;		/* prefix, newline flags */
-	bool flushed:1;			/* buffer sealed and committed */
+	bool flushed;			/* buffer sealed and committed */
 } cont;
 
 static void cont_flush(enum log_flags flags)
@@ -1873,7 +1873,7 @@ static struct cont {
 	size_t len;
 	size_t cons;
 	u8 level;
-	bool flushed:1;
+	bool flushed;
 } cont;
 static struct printk_log *log_from_idx(u32 idx) { return NULL; }
 static u32 log_next(u32 idx) { return 0; }

@@ -93,7 +93,7 @@ struct usbg_cmd {
 	/* BOT only */
 	__le32 bot_tag;
 	unsigned int csw_code;
-	unsigned is_read:1;
+	unsigned is_read;
 
 };
 

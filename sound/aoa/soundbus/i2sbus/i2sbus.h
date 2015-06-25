@@ -34,13 +34,13 @@ struct dbdma_command_mem {
 	struct dbdma_cmd *cmds;
 	void *space;
 	int size;
-	u32 running:1;
-	u32 stopping:1;
+	u32 running;
+	u32 stopping;
 };
 
 struct pcm_info {
 	u32 created:1, /* has this direction been created with alsa? */
-	    active:1;  /* is this stream active? */
+	    active;  /* is this stream active? */
 	/* runtime information */
 	struct snd_pcm_substream *substream;
 	int current_period;

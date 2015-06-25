@@ -17,7 +17,7 @@ struct wm2000_platform_data {
 
 	/** Disable speech clarity enhancement, for use when an
 	 * external algorithm is used. */
-	unsigned int speech_enh_disable:1;
+	unsigned int speech_enh_disable;
 };
 
 #endif

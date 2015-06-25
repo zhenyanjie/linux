@@ -92,7 +92,7 @@ struct tifm_sd {
 
 	unsigned short        eject:1,
 			      open_drain:1,
-			      no_dma:1;
+			      no_dma;
 	unsigned short        cmd_flags;
 
 	unsigned int          clk_freq;

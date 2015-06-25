@@ -188,10 +188,10 @@ struct fimc_effect {
  * @real_height:	source pixel (height - offset)
  */
 struct fimc_scaler {
-	unsigned int scaleup_h:1;
-	unsigned int scaleup_v:1;
-	unsigned int copy_mode:1;
-	unsigned int enabled:1;
+	unsigned int scaleup_h;
+	unsigned int scaleup_v;
+	unsigned int copy_mode;
+	unsigned int enabled;
 	u32	hfactor;
 	u32	vfactor;
 	u32	pre_hratio;
@@ -363,11 +363,11 @@ struct fimc_pix_limit {
  * @min_vsize_align: minimum vertical pixel size alignment
  */
 struct fimc_variant {
-	unsigned int	has_inp_rot:1;
-	unsigned int	has_out_rot:1;
-	unsigned int	has_mainscaler_ext:1;
-	unsigned int	has_cam_if:1;
-	unsigned int	has_isp_wb:1;
+	unsigned int	has_inp_rot;
+	unsigned int	has_out_rot;
+	unsigned int	has_mainscaler_ext;
+	unsigned int	has_cam_if;
+	unsigned int	has_isp_wb;
 	const struct fimc_pix_limit *pix_limit;
 	u16		min_inp_pixsize;
 	u16		min_out_pixsize;
@@ -496,8 +496,8 @@ struct fimc_ctx {
 	struct fimc_scaler	scaler;
 	struct fimc_effect	effect;
 	int			rotation;
-	unsigned int		hflip:1;
-	unsigned int		vflip:1;
+	unsigned int		hflip;
+	unsigned int		vflip;
 	u32			flags;
 	u32			state;
 	struct fimc_dev		*fimc_dev;

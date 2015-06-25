@@ -430,14 +430,14 @@ struct uiscmdrsp_scsi {
 * AdditionalSenseLength		contains will be sizeof(sense_data)-8=10.
 */
 struct sense_data {
-	u8 ErrorCode:7;
-	u8 Valid:1;
+	u8 ErrorCode;
+	u8 Valid;
 	u8 SegmentNumber;
-	u8 SenseKey:4;
-	u8 Reserved:1;
-	u8 IncorrectLength:1;
-	u8 EndOfMedia:1;
-	u8 FileMark:1;
+	u8 SenseKey;
+	u8 Reserved;
+	u8 IncorrectLength;
+	u8 EndOfMedia;
+	u8 FileMark;
 	u8 Information[4];
 	u8 AdditionalSenseLength;
 	u8 CommandSpecificInformation[4];

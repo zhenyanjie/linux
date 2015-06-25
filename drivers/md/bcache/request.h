@@ -16,15 +16,15 @@ struct data_insert_op {
 		uint16_t	flags;
 
 	struct {
-		unsigned	bypass:1;
-		unsigned	writeback:1;
-		unsigned	flush_journal:1;
-		unsigned	csum:1;
+		unsigned	bypass;
+		unsigned	writeback;
+		unsigned	flush_journal;
+		unsigned	csum;
 
-		unsigned	replace:1;
-		unsigned	replace_collision:1;
+		unsigned	replace;
+		unsigned	replace_collision;
 
-		unsigned	insert_data_done:1;
+		unsigned	insert_data_done;
 	};
 	};
 

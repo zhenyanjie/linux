@@ -1348,10 +1348,10 @@ EXPORT_SYMBOL(pci_enable_device);
  * when a device is enabled using managed PCI device enable interface.
  */
 struct pci_devres {
-	unsigned int enabled:1;
-	unsigned int pinned:1;
-	unsigned int orig_intx:1;
-	unsigned int restore_intx:1;
+	unsigned int enabled;
+	unsigned int pinned;
+	unsigned int orig_intx;
+	unsigned int restore_intx;
 	u32 region_mask;
 };
 

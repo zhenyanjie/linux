@@ -66,11 +66,11 @@ struct panel_drv_data {
 	int nreset_gpio;
 	u16 gamma[12];
 	u32 mode;
-	u32 hmirror:1;
-	u32 vmirror:1;
-	u32 powered_on:1;
-	u32 spi_suspended:1;
-	u32 power_on_resume:1;
+	u32 hmirror;
+	u32 vmirror;
+	u32 powered_on;
+	u32 spi_suspended;
+	u32 power_on_resume;
 };
 
 static const struct omap_video_timings tpo_td043_timings = {

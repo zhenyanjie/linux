@@ -201,19 +201,19 @@ struct azx_dev {
 	unsigned char index;		/* stream index */
 	int assigned_key;		/* last device# key assigned to */
 
-	unsigned int opened:1;
-	unsigned int running:1;
-	unsigned int irq_pending:1;
-	unsigned int prepared:1;
-	unsigned int locked:1;
+	unsigned int opened;
+	unsigned int running;
+	unsigned int irq_pending;
+	unsigned int prepared;
+	unsigned int locked;
 	/*
 	 * For VIA:
 	 *  A flag to ensure DMA position is 0
 	 *  when link position is not greater than FIFO size
 	 */
-	unsigned int insufficient:1;
-	unsigned int wc_marked:1;
-	unsigned int no_period_wakeup:1;
+	unsigned int insufficient;
+	unsigned int wc_marked;
+	unsigned int no_period_wakeup;
 
 	struct timecounter  azx_tc;
 	struct cyclecounter azx_cc;
@@ -337,16 +337,16 @@ struct azx {
 	/* flags */
 	const int *bdl_pos_adj;
 	int poll_count;
-	unsigned int running:1;
-	unsigned int initialized:1;
-	unsigned int single_cmd:1;
-	unsigned int polling_mode:1;
-	unsigned int msi:1;
-	unsigned int probing:1; /* codec probing phase */
-	unsigned int snoop:1;
-	unsigned int align_buffer_size:1;
-	unsigned int region_requested:1;
-	unsigned int disabled:1; /* disabled by VGA-switcher */
+	unsigned int running;
+	unsigned int initialized;
+	unsigned int single_cmd;
+	unsigned int polling_mode;
+	unsigned int msi;
+	unsigned int probing; /* codec probing phase */
+	unsigned int snoop;
+	unsigned int align_buffer_size;
+	unsigned int region_requested;
+	unsigned int disabled; /* disabled by VGA-switcher */
 
 	/* for debugging */
 	unsigned int last_cmd[AZX_MAX_CODECS];

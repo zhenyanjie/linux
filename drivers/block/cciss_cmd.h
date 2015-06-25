@@ -119,9 +119,9 @@ typedef struct _ReadCapdata_struct_16
 {
 	BYTE total_size[8];   /* Total size in blocks */
 	BYTE block_size[4];   /* Size of blocks in bytes */
-	BYTE prot_en:1;       /* protection enable bit */
-	BYTE rto_en:1;        /* reference tag own enable bit */
-	BYTE reserved:6;      /* reserved bits */
+	BYTE prot_en;       /* protection enable bit */
+	BYTE rto_en;        /* reference tag own enable bit */
+	BYTE reserved;      /* reserved bits */
 	BYTE reserved2[18];   /* reserved bytes per spec */
 } ReadCapdata_struct_16;
 

@@ -69,7 +69,7 @@ struct lov_oinfo {		 /* per-stripe data structure */
 	int loi_ost_idx;	   /* OST stripe index in lov_tgt_desc->tgts */
 	int loi_ost_gen;	   /* generation of this loi_ost_idx */
 
-	unsigned long loi_kms_valid:1;
+	unsigned long loi_kms_valid;
 	__u64 loi_kms;	     /* known minimum size */
 	struct ost_lvb loi_lvb;
 	struct osc_async_rc     loi_ar;
@@ -412,7 +412,7 @@ struct client_obd {
 	struct obd_export       *cl_mgc_mgsexp;
 
 	/* checksumming for data sent over the network */
-	unsigned int	     cl_checksum:1; /* 0 = disabled, 1 = enabled */
+	unsigned int	     cl_checksum; /* 0 = disabled, 1 = enabled */
 	/* supported checksum types that are worked out at connect time */
 	__u32		    cl_supp_cksum_types;
 	/* checksum algorithm to be used */
@@ -470,7 +470,7 @@ struct ltd_qos {
 	__u64	       ltq_penalty_per_obj; /* penalty decrease every obj*/
 	__u64	       ltq_weight;      /* net weighting */
 	time_t	      ltq_used;	/* last used time, seconds */
-	unsigned int	ltq_usable:1;    /* usable for striping */
+	unsigned int	ltq_usable;    /* usable for striping */
 };
 
 /* Generic subset of OSTs */
@@ -488,7 +488,7 @@ struct lov_qos_rr {
 	__u32	       lqr_offset_idx;  /* aliasing for start_idx  */
 	int		 lqr_start_count; /* reseed counter */
 	struct ost_pool     lqr_pool;	/* round-robin optimized list */
-	unsigned long       lqr_dirty:1;     /* recalc round-robin list */
+	unsigned long       lqr_dirty;     /* recalc round-robin list */
 };
 
 /* allow statfs data caching for 1 second */
@@ -510,7 +510,7 @@ struct lov_qos {
 			    lq_same_space:1,/* the ost's all have approx.
 					       the same space avail */
 			    lq_reset:1,     /* zero current penalties */
-			    lq_statfs_in_progress:1; /* statfs op in
+			    lq_statfs_in_progress; /* statfs op in
 							progress */
 	/* qos statfs data */
 	struct lov_statfs_data *lq_statfs_data;
@@ -528,7 +528,7 @@ struct lov_tgt_desc {
 	__u32	       ltd_index;   /* index in lov_obd->tgts */
 	unsigned long       ltd_active:1,/* is this target up for requests */
 			    ltd_activate:1,/* should  target be activated */
-			    ltd_reap:1;  /* should this target be deleted */
+			    ltd_reap;  /* should this target be deleted */
 };
 
 /* Pool metadata */
@@ -579,7 +579,7 @@ struct lmv_tgt_desc {
 	struct obd_export	*ltd_exp;
 	int			ltd_idx;
 	struct mutex		ltd_fid_mutex;
-	unsigned long		ltd_active:1; /* target up for requests */
+	unsigned long		ltd_active; /* target up for requests */
 };
 
 enum placement_policy {
@@ -705,7 +705,7 @@ struct obd_trans_info {
 	struct llog_cookie      *oti_logcookies;
 	int		      oti_numcookies;
 	/** synchronous write is needed */
-	unsigned long		 oti_sync_write:1;
+	unsigned long		 oti_sync_write;
 
 	/* initial thread handling transaction */
 	struct ptlrpc_thread *   oti_thread;
@@ -858,10 +858,10 @@ struct obd_device {
 		      obd_inactive:1,      /* device active/inactive
 					   * (for /proc/status only!!) */
 		      obd_no_ir:1,	 /* no imperative recovery. */
-		      obd_process_conf:1;  /* device is processing mgs config */
+		      obd_process_conf;  /* device is processing mgs config */
 	/* use separate field as it is set in interrupt to don't mess with
 	 * protection of other bits using _bh lock */
-	unsigned long obd_recovery_expired:1;
+	unsigned long obd_recovery_expired;
 	/* uuid-export hash body */
 	struct cfs_hash	     *obd_uuid_hash;
 	/* nid-export hash body */

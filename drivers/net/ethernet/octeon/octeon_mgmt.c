@@ -49,21 +49,21 @@ union mgmt_port_ring_entry {
 #define RING_ENTRY_CODE_DONE 0xf
 #define RING_ENTRY_CODE_MORE 0x10
 #ifdef __BIG_ENDIAN_BITFIELD
-		u64 reserved_62_63:2;
+		u64 reserved_62_63;
 		/* Length of the buffer/packet in bytes */
-		u64 len:14;
+		u64 len;
 		/* For TX, signals that the packet should be timestamped */
-		u64 tstamp:1;
+		u64 tstamp;
 		/* The RX error code */
-		u64 code:7;
+		u64 code;
 		/* Physical address of the buffer */
-		u64 addr:40;
+		u64 addr;
 #else
-		u64 addr:40;
-		u64 code:7;
-		u64 tstamp:1;
-		u64 len:14;
-		u64 reserved_62_63:2;
+		u64 addr;
+		u64 code;
+		u64 tstamp;
+		u64 len;
+		u64 reserved_62_63;
 #endif
 	} s;
 };

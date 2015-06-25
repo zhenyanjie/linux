@@ -90,10 +90,10 @@ struct rx_drv_info_92c {
 	/* DWORD 6 */
 	u8 sigevm;
 	u8 max_ex_pwr;
-	u8 ex_intf_flag:1;
-	u8 sgi_en:1;
-	u8 rxsc:2;
-	u8 reserve:4;
+	u8 ex_intf_flag;
+	u8 sgi_en;
+	u8 rxsc;
+	u8 reserve;
 } __packed;
 
 /* Define a macro that takes a le32 word, converts it to host ordering,

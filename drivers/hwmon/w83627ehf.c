@@ -499,8 +499,8 @@ struct w83627ehf_data {
 
 	u16 have_temp;
 	u16 have_temp_offset;
-	u8 in6_skip:1;
-	u8 temp3_val_only:1;
+	u8 in6_skip;
+	u8 temp3_val_only;
 
 #ifdef CONFIG_PM
 	/* Remember extra register values over suspend/resume */

@@ -53,8 +53,8 @@ struct fs_path {
 			char *end;
 
 			char *buf;
-			unsigned short buf_len:15;
-			unsigned short reversed:1;
+			unsigned short buf_len;
+			unsigned short reversed;
 			char inline_buf[];
 		};
 		/*

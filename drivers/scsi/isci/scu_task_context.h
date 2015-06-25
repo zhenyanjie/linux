@@ -297,27 +297,27 @@ typedef enum {
  */
 struct ssp_task_context {
 	/* OFFSET 0x18 */
-	u32 reserved00:24;
-	u32 frame_type:8;
+	u32 reserved00;
+	u32 frame_type;
 
 	/* OFFSET 0x1C */
 	u32 reserved01;
 
 	/* OFFSET 0x20 */
-	u32 fill_bytes:2;
-	u32 reserved02:6;
-	u32 changing_data_pointer:1;
-	u32 retransmit:1;
-	u32 retry_data_frame:1;
-	u32 tlr_control:2;
-	u32 reserved03:19;
+	u32 fill_bytes;
+	u32 reserved02;
+	u32 changing_data_pointer;
+	u32 retransmit;
+	u32 retry_data_frame;
+	u32 tlr_control;
+	u32 reserved03;
 
 	/* OFFSET 0x24 */
 	u32 uiRsvd4;
 
 	/* OFFSET 0x28 */
-	u32 target_port_transfer_tag:16;
-	u32 tag:16;
+	u32 target_port_transfer_tag;
+	u32 tag;
 
 	/* OFFSET 0x2C */
 	u32 data_offset;
@@ -331,12 +331,12 @@ struct ssp_task_context {
  */
 struct stp_task_context {
 	/* OFFSET 0x18 */
-	u32 fis_type:8;
-	u32 pm_port:4;
-	u32 reserved0:3;
-	u32 control:1;
-	u32 command:8;
-	u32 features:8;
+	u32 fis_type;
+	u32 pm_port;
+	u32 reserved0;
+	u32 control;
+	u32 command;
+	u32 features;
 
 	/* OFFSET 0x1C */
 	u32 reserved1;
@@ -348,8 +348,8 @@ struct stp_task_context {
 	u32 reserved3;
 
 	/* OFFSET 0x28 */
-	u32 ncq_tag:5;
-	u32 reserved4:27;
+	u32 ncq_tag;
+	u32 reserved4;
 
 	/* OFFSET 0x2C */
 	u32 data_offset; /* TODO: What is this used for? */
@@ -363,14 +363,14 @@ struct stp_task_context {
  */
 struct smp_task_context {
 	/* OFFSET 0x18 */
-	u32 response_length:8;
-	u32 function_result:8;
-	u32 function:8;
-	u32 frame_type:8;
+	u32 response_length;
+	u32 function_result;
+	u32 function;
+	u32 frame_type;
 
 	/* OFFSET 0x1C */
-	u32 smp_response_ufi:12;
-	u32 reserved1:20;
+	u32 smp_response_ufi;
+	u32 reserved1;
 
 	/* OFFSET 0x20 */
 	u32 reserved2;
@@ -452,13 +452,13 @@ struct scu_sgl_element {
 	/**
 	 * This field is the number of bytes to transfer.
 	 */
-	u32 length:24;
+	u32 length;
 
 	/**
 	 * This field is the address modifier to be used when a virtual function is
 	 * requesting a data transfer.
 	 */
-	u32 address_modifier:8;
+	u32 address_modifier;
 
 };
 
@@ -516,15 +516,15 @@ struct transport_snapshot {
 	u32 data_offset;
 
 	/* OFFSET 0x50 */
-	u32 data_transfer_size:24;
-	u32 reserved_50_0:8;
+	u32 data_transfer_size;
+	u32 reserved_50_0;
 
 	/* OFFSET 0x54 */
 	u32 next_initiator_write_data_offset;
 
 	/* OFFSET 0x58 */
-	u32 next_initiator_write_data_xfer_size:24;
-	u32 reserved_58_0:8;
+	u32 next_initiator_write_data_xfer_size;
+	u32 reserved_58_0;
 };
 
 /**
@@ -542,30 +542,30 @@ struct scu_task_context {
 	 *    - SCU_TASK_PRIORITY_HEAD_OF_Q
 	 *    - SCU_TASK_PRIORITY_HIGH
 	 */
-	u32 priority:2;
+	u32 priority;
 
 	/**
 	 * This field must be set to true if this is an initiator generated request.
 	 * Until target mode is supported all task requests are initiator requests.
 	 */
-	u32 initiator_request:1;
+	u32 initiator_request;
 
 	/**
 	 * This field must be set to one of the valid connection rates valid values
 	 * are 0x8, 0x9, and 0xA.
 	 */
-	u32 connection_rate:4;
+	u32 connection_rate;
 
 	/**
 	 * This field muse be programed when generating an SMP response since the SMP
 	 * connection remains open until the SMP response is generated.
 	 */
-	u32 protocol_engine_index:3;
+	u32 protocol_engine_index;
 
 	/**
 	 * This field must contain the logical port for the task request.
 	 */
-	u32 logical_port_index:3;
+	u32 logical_port_index;
 
 	/**
 	 * This field must be set to one of the SCU_TASK_CONTEXT_PROTOCOL values
@@ -574,52 +574,52 @@ struct scu_task_context {
 	 *    - SCU_TASK_CONTEXT_PROTOCOL_STP
 	 *    - SCU_TASK_CONTEXT_PROTOCOL_NONE
 	 */
-	u32 protocol_type:3;
+	u32 protocol_type;
 
 	/**
 	 * This filed must be set to the TCi allocated for this task
 	 */
-	u32 task_index:12;
+	u32 task_index;
 
 	/**
 	 * This field is reserved and must be set to 0x00
 	 */
-	u32 reserved_00_0:1;
+	u32 reserved_00_0;
 
 	/**
 	 * For a normal task request this must be set to 0.  If this is an abort of
 	 * this task request it must be set to 1.
 	 */
-	u32 abort:1;
+	u32 abort;
 
 	/**
 	 * This field must be set to true for the SCU hardware to process the task.
 	 */
-	u32 valid:1;
+	u32 valid;
 
 	/**
 	 * This field must be set to SCU_TASK_CONTEXT_TYPE
 	 */
-	u32 context_type:1;
+	u32 context_type;
 
 	/* OFFSET 0x04 */
 	/**
 	 * This field contains the RNi that is the target of this request.
 	 */
-	u32 remote_node_index:12;
+	u32 remote_node_index;
 
 	/**
 	 * This field is programmed if this is a mirrored request, which we are not
 	 * using, in which case it is the RNi for the mirrored target.
 	 */
-	u32 mirrored_node_index:12;
+	u32 mirrored_node_index;
 
 	/**
 	 * This field is programmed with the direction of the SATA reqeust
 	 *    - SCU_SATA_WRITE_DATA_DIRECTION
 	 *    - SCU_SATA_READ_DATA_DIRECTION
 	 */
-	u32 sata_direction:1;
+	u32 sata_direction;
 
 	/**
 	 * This field is programmsed with one of the following SCU_COMMAND_CODE
@@ -628,13 +628,13 @@ struct scu_task_context {
 	 *    - SCU_COMMAND_CODE_PRIMITIVE_SEQ_TASK
 	 *    - SCU_COMMAND_CODE_TARGET_RAW_FRAMES
 	 */
-	u32 command_code:2;
+	u32 command_code;
 
 	/**
 	 * This field is set to true if the remote node should be suspended.
 	 * This bit is only valid for SSP & SMP target devices.
 	 */
-	u32 suspend_node:1;
+	u32 suspend_node;
 
 	/**
 	 * This field is programmed with one of the following command type codes
@@ -656,132 +656,132 @@ struct scu_task_context {
 	 *    - SCU_TASK_TYPE_FPDMAQ_WRITE
 	 *    - SCU_TASK_TYPE_PACKET_DMA_OUT
 	 */
-	u32 task_type:4;
+	u32 task_type;
 
 	/* OFFSET 0x08 */
 	/**
 	 * This field is reserved and the must be set to 0x00
 	 */
-	u32 link_layer_control:8; /* presently all reserved */
+	u32 link_layer_control; /* presently all reserved */
 
 	/**
 	 * This field is set to true when TLR is to be enabled
 	 */
-	u32 ssp_tlr_enable:1;
+	u32 ssp_tlr_enable;
 
 	/**
 	 * This is field specifies if the SCU DMAs a response frame to host
 	 * memory for good response frames when operating in target mode.
 	 */
-	u32 dma_ssp_target_good_response:1;
+	u32 dma_ssp_target_good_response;
 
 	/**
 	 * This field indicates if the SCU should DMA the response frame to
 	 * host memory.
 	 */
-	u32 do_not_dma_ssp_good_response:1;
+	u32 do_not_dma_ssp_good_response;
 
 	/**
 	 * This field is set to true when strict ordering is to be enabled
 	 */
-	u32 strict_ordering:1;
+	u32 strict_ordering;
 
 	/**
 	 * This field indicates the type of endianess to be utilized for the
 	 * frame.  command, task, and response frames utilized control_frame
 	 * set to 1.
 	 */
-	u32 control_frame:1;
+	u32 control_frame;
 
 	/**
 	 * This field is reserved and the driver should set to 0x00
 	 */
-	u32 tl_control_reserved:3;
+	u32 tl_control_reserved;
 
 	/**
 	 * This field is set to true when the SCU hardware task timeout control is to
 	 * be enabled
 	 */
-	u32 timeout_enable:1;
+	u32 timeout_enable;
 
 	/**
 	 * This field is reserved and the driver should set it to 0x00
 	 */
-	u32 pts_control_reserved:7;
+	u32 pts_control_reserved;
 
 	/**
 	 * This field should be set to true when block guard is to be enabled
 	 */
-	u32 block_guard_enable:1;
+	u32 block_guard_enable;
 
 	/**
 	 * This field is reserved and the driver should set to 0x00
 	 */
-	u32 sdma_control_reserved:7;
+	u32 sdma_control_reserved;
 
 	/* OFFSET 0x0C */
 	/**
 	 * This field is the address modifier for this io request it should be
 	 * programmed with the virtual function that is making the request.
 	 */
-	u32 address_modifier:16;
+	u32 address_modifier;
 
 	/**
 	 * @todo What we support mirrored SMP response frame?
 	 */
-	u32 mirrored_protocol_engine:3;  /* mirrored protocol Engine Index */
+	u32 mirrored_protocol_engine;  /* mirrored protocol Engine Index */
 
 	/**
 	 * If this is a mirrored request the logical port index for the mirrored RNi
 	 * must be programmed.
 	 */
-	u32 mirrored_logical_port:4;  /* mirrored local port index */
+	u32 mirrored_logical_port;  /* mirrored local port index */
 
 	/**
 	 * This field is reserved and the driver must set it to 0x00
 	 */
-	u32 reserved_0C_0:8;
+	u32 reserved_0C_0;
 
 	/**
 	 * This field must be set to true if the mirrored request processing is to be
 	 * enabled.
 	 */
-	u32 mirror_request_enable:1;  /* Mirrored request Enable */
+	u32 mirror_request_enable;  /* Mirrored request Enable */
 
 	/* OFFSET 0x10 */
 	/**
 	 * This field is the command iu length in dwords
 	 */
-	u32 ssp_command_iu_length:8;
+	u32 ssp_command_iu_length;
 
 	/**
 	 * This is the target TLR enable bit it must be set to 0 when creatning the
 	 * task context.
 	 */
-	u32 xfer_ready_tlr_enable:1;
+	u32 xfer_ready_tlr_enable;
 
 	/**
 	 * This field is reserved and the driver must set it to 0x00
 	 */
-	u32 reserved_10_0:7;
+	u32 reserved_10_0;
 
 	/**
 	 * This is the maximum burst size that the SCU hardware will send in one
 	 * connection its value is (N x 512) and N must be a multiple of 2.  If the
 	 * value is 0x00 then maximum burst size is disabled.
 	 */
-	u32 ssp_max_burst_size:16;
+	u32 ssp_max_burst_size;
 
 	/* OFFSET 0x14 */
 	/**
 	 * This filed is set to the number of bytes to be transfered in the request.
 	 */
-	u32 transfer_length_bytes:24; /* In terms of bytes */
+	u32 transfer_length_bytes; /* In terms of bytes */
 
 	/**
 	 * This field is reserved and the driver should set it to 0x00
 	 */
-	u32 reserved_14_0:8;
+	u32 reserved_14_0;
 
 	/* OFFSET 0x18-0x2C */
 	/**
@@ -820,28 +820,28 @@ struct scu_task_context {
 	 * This field is set to the task phase of the SCU hardware. The driver must
 	 * set this to 0x01
 	 */
-	u32 task_phase:8;
+	u32 task_phase;
 
 	/**
 	 * This field is set to the transport layer task status.  The driver must set
 	 * this to 0x00
 	 */
-	u32 task_status:8;
+	u32 task_status;
 
 	/**
 	 * This field is used during initiator write TLR
 	 */
-	u32 previous_extended_tag:4;
+	u32 previous_extended_tag;
 
 	/**
 	 * This field is set the maximum number of retries for a STP non-data FIS
 	 */
-	u32 stp_retry_count:2;
+	u32 stp_retry_count;
 
 	/**
 	 * This field is reserved and the driver must set it to 0x00
 	 */
-	u32 reserved_40_1:2;
+	u32 reserved_40_1;
 
 	/**
 	 * This field is used by the SCU TL to determine when to take a snapshot when
@@ -852,12 +852,12 @@ struct scu_task_context {
 	 *    - 0x04 128k
 	 *    - 0x08 256k
 	 */
-	u32 ssp_tlr_threshold:4;
+	u32 ssp_tlr_threshold;
 
 	/**
 	 * This field is reserved and the driver must set it to 0x00
 	 */
-	u32 reserved_40_2:4;
+	u32 reserved_40_2;
 
 	/* OFFSET 0x44 */
 	u32 write_data_length; /* read only set to 0 */
@@ -866,14 +866,14 @@ struct scu_task_context {
 	struct transport_snapshot snapshot; /* read only set to 0 */
 
 	/* OFFSET 0x5C */
-	u32 blk_prot_en:1;
-	u32 blk_sz:2;
-	u32 blk_prot_func:2;
-	u32 reserved_5C_0:9;
-	u32 active_sgl_element:2;  /* read only set to 0 */
-	u32 sgl_exhausted:1;  /* read only set to 0 */
-	u32 payload_data_transfer_error:4;  /* read only set to 0 */
-	u32 frame_buffer_offset:11; /* read only set to 0 */
+	u32 blk_prot_en;
+	u32 blk_sz;
+	u32 blk_prot_func;
+	u32 reserved_5C_0;
+	u32 active_sgl_element;  /* read only set to 0 */
+	u32 sgl_exhausted;  /* read only set to 0 */
+	u32 payload_data_transfer_error;  /* read only set to 0 */
+	u32 frame_buffer_offset; /* read only set to 0 */
 
 	/* OFFSET 0x60-0x7C */
 	/**
@@ -896,60 +896,60 @@ struct scu_task_context {
 	u32 reserved_C4_CC[3];
 
 	/* OFFSET 0xD0 */
-	u32 interm_crc_val:16;
-	u32 init_crc_seed:16;
+	u32 interm_crc_val;
+	u32 init_crc_seed;
 
 	/* OFFSET 0xD4 */
-	u32 app_tag_verify:16;
-	u32 app_tag_gen:16;
+	u32 app_tag_verify;
+	u32 app_tag_gen;
 
 	/* OFFSET 0xD8 */
 	u32 ref_tag_seed_verify;
 
 	/* OFFSET 0xDC */
-	u32 UD_bytes_immed_val:13;
-	u32 reserved_DC_0:3;
-	u32 DIF_bytes_immed_val:4;
-	u32 reserved_DC_1:12;
+	u32 UD_bytes_immed_val;
+	u32 reserved_DC_0;
+	u32 DIF_bytes_immed_val;
+	u32 reserved_DC_1;
 
 	/* OFFSET 0xE0 */
-	u32 bgc_blk_sz:13;
-	u32 reserved_E0_0:3;
-	u32 app_tag_gen_mask:16;
+	u32 bgc_blk_sz;
+	u32 reserved_E0_0;
+	u32 app_tag_gen_mask;
 
 	/* OFFSET 0xE4 */
 	union {
 		u16 bgctl;
 		struct {
-			u16 crc_verify:1;
-			u16 app_tag_chk:1;
-			u16 ref_tag_chk:1;
-			u16 op:2;
-			u16 legacy:1;
-			u16 invert_crc_seed:1;
-			u16 ref_tag_gen:1;
-			u16 fixed_ref_tag:1;
-			u16 invert_crc:1;
-			u16 app_ref_f_detect:1;
-			u16 uninit_dif_check_err:1;
-			u16 uninit_dif_bypass:1;
-			u16 app_f_detect:1;
-			u16 reserved_0:2;
+			u16 crc_verify;
+			u16 app_tag_chk;
+			u16 ref_tag_chk;
+			u16 op;
+			u16 legacy;
+			u16 invert_crc_seed;
+			u16 ref_tag_gen;
+			u16 fixed_ref_tag;
+			u16 invert_crc;
+			u16 app_ref_f_detect;
+			u16 uninit_dif_check_err;
+			u16 uninit_dif_bypass;
+			u16 app_f_detect;
+			u16 reserved_0;
 		} bgctl_f;
 	};
 
 	u16 app_tag_verify_mask;
 
 	/* OFFSET 0xE8 */
-	u32 blk_guard_err:8;
-	u32 reserved_E8_0:24;
+	u32 blk_guard_err;
+	u32 reserved_E8_0;
 
 	/* OFFSET 0xEC */
 	u32 ref_tag_seed_gen;
 
 	/* OFFSET 0xF0 */
-	u32 intermediate_crc_valid_snapshot:16;
-	u32 reserved_F0_0:16;
+	u32 intermediate_crc_valid_snapshot;
+	u32 reserved_F0_0;
 
 	/* OFFSET 0xF4 */
 	u32 reference_tag_seed_for_verify_function_snapshot;

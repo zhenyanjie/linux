@@ -145,7 +145,7 @@ struct bfa_fcs_lport_s {
 	struct bfa_fcs_fabric_s *fabric;	/*  parent fabric */
 	struct bfa_lport_cfg_s  port_cfg;	/*  port configuration */
 	struct bfa_timer_s link_timer;	/*  timer for link offline */
-	u32        pid:24;	/*  FC address */
+	u32        pid;	/*  FC address */
 	u8         lp_tag;		/*  lport tag */
 	u16        num_rports;	/*  Num of r-ports */
 	struct list_head         rport_q; /*  queue of discovered r-ports */

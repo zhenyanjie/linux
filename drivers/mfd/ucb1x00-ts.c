@@ -49,7 +49,7 @@ struct ucb1x00_ts {
 	u16			x_res;
 	u16			y_res;
 
-	unsigned int		adcsync:1;
+	unsigned int		adcsync;
 };
 
 static int adcsync;

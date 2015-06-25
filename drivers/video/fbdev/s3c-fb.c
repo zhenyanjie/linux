@@ -86,7 +86,7 @@ struct s3c_fb;
  * @has_fixvclk: Set if VIDCON1 register has FIXVCLK bits.
  */
 struct s3c_fb_variant {
-	unsigned int	is_2443:1;
+	unsigned int	is_2443;
 	unsigned short	nr_windows;
 	unsigned int	vidtcon;
 	unsigned short	wincon;
@@ -99,11 +99,11 @@ struct s3c_fb_variant {
 	unsigned short	osd_stride;
 	unsigned short	palette[S3C_FB_MAX_WIN];
 
-	unsigned int	has_prtcon:1;
-	unsigned int	has_shadowcon:1;
-	unsigned int	has_blendcon:1;
-	unsigned int	has_clksel:1;
-	unsigned int	has_fixvclk:1;
+	unsigned int	has_prtcon;
+	unsigned int	has_shadowcon;
+	unsigned int	has_blendcon;
+	unsigned int	has_clksel;
+	unsigned int	has_fixvclk;
 };
 
 /**
@@ -120,10 +120,10 @@ struct s3c_fb_variant {
  * valid_bpp bit x is set if (x+1)BPP is supported.
  */
 struct s3c_fb_win_variant {
-	unsigned int	has_osd_c:1;
-	unsigned int	has_osd_d:1;
-	unsigned int	has_osd_alpha:1;
-	unsigned int	palette_16bpp:1;
+	unsigned int	has_osd_c;
+	unsigned int	has_osd_d;
+	unsigned int	has_osd_alpha;
+	unsigned int	palette_16bpp;
 	unsigned short	osd_size_off;
 	unsigned short	palette_sz;
 	u32		valid_bpp;

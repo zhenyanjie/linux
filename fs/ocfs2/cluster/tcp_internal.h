@@ -92,7 +92,7 @@ struct o2net_node {
 	/* set the moment an sc is allocated and a connect is started */
 	struct o2net_sock_container	*nn_sc;
 	/* _valid is only set after the handshake passes and tx can happen */
-	unsigned			nn_sc_valid:1;
+	unsigned			nn_sc_valid;
 	/* if this is set tx just returns it */
 	int				nn_persistent_error;
 	/* It is only set to 1 after the idle time out. */
@@ -158,7 +158,7 @@ struct o2net_sock_container {
 	struct timer_list	sc_idle_timeout;
 	struct delayed_work	sc_keepalive_work;
 
-	unsigned		sc_handshake_ok:1;
+	unsigned		sc_handshake_ok;
 
 	struct page 		*sc_page;
 	size_t			sc_page_off;

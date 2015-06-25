@@ -71,11 +71,11 @@ struct kobject {
 #ifdef CONFIG_DEBUG_KOBJECT_RELEASE
 	struct delayed_work	release;
 #endif
-	unsigned int state_initialized:1;
-	unsigned int state_in_sysfs:1;
-	unsigned int state_add_uevent_sent:1;
-	unsigned int state_remove_uevent_sent:1;
-	unsigned int uevent_suppress:1;
+	unsigned int state_initialized;
+	unsigned int state_in_sysfs;
+	unsigned int state_add_uevent_sent;
+	unsigned int state_remove_uevent_sent;
+	unsigned int uevent_suppress;
 };
 
 extern __printf(2, 3)

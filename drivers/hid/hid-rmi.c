@@ -448,15 +448,15 @@ static int rmi_post_resume(struct hid_device *hdev)
 #define RMI4_END_OF_PDT(id) ((id) == 0x00 || (id) == 0xff)
 
 struct pdt_entry {
-	u8 query_base_addr:8;
-	u8 command_base_addr:8;
-	u8 control_base_addr:8;
-	u8 data_base_addr:8;
-	u8 interrupt_source_count:3;
-	u8 bits3and4:2;
-	u8 function_version:2;
-	u8 bit7:1;
-	u8 function_number:8;
+	u8 query_base_addr;
+	u8 command_base_addr;
+	u8 control_base_addr;
+	u8 data_base_addr;
+	u8 interrupt_source_count;
+	u8 bits3and4;
+	u8 function_version;
+	u8 bit7;
+	u8 function_number;
 } __attribute__((__packed__));
 
 static inline unsigned long rmi_gen_mask(unsigned irq_base, unsigned irq_count)

@@ -616,8 +616,8 @@ struct bcma_drv_cc {
 	u32 status;
 	u32 capabilities;
 	u32 capabilities_ext;
-	u8 setup_done:1;
-	u8 early_setup_done:1;
+	u8 setup_done;
+	u8 early_setup_done;
 	/* Fast Powerup Delay constant */
 	u16 fast_pwrup_delay;
 	struct bcma_chipcommon_pmu pmu;

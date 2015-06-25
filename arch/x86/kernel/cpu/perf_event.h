@@ -324,16 +324,16 @@ struct extra_reg {
 
 union perf_capabilities {
 	struct {
-		u64	lbr_format:6;
-		u64	pebs_trap:1;
-		u64	pebs_arch_reg:1;
-		u64	pebs_format:4;
-		u64	smm_freeze:1;
+		u64	lbr_format;
+		u64	pebs_trap;
+		u64	pebs_arch_reg;
+		u64	pebs_format;
+		u64	smm_freeze;
 		/*
 		 * PMU supports separate counter range for writing
 		 * values > 32bit.
 		 */
-		u64	full_width_write:1;
+		u64	full_width_write;
 	};
 	u64	capabilities;
 };
@@ -359,7 +359,7 @@ union x86_pmu_config {
 		    event2:4,
 		    __reserved2:4,
 		    go:1,
-		    ho:1;
+		    ho;
 	} bits;
 	u64 value;
 };
@@ -445,7 +445,7 @@ struct x86_pmu {
 			bts_active	:1,
 			pebs		:1,
 			pebs_active	:1,
-			pebs_broken	:1;
+			pebs_broken	;
 	int		pebs_record_size;
 	void		(*drain_pebs)(struct pt_regs *regs);
 	struct event_constraint *pebs_constraints;

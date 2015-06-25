@@ -449,10 +449,10 @@ atc_pcm_playback_position(struct ct_atc *atc, struct ct_atc_pcm *apcm)
 
 struct src_node_conf_t {
 	unsigned int pitch;
-	unsigned int msr:8;
-	unsigned int mix_msr:8;
-	unsigned int imp_msr:8;
-	unsigned int vo:1;
+	unsigned int msr;
+	unsigned int mix_msr;
+	unsigned int imp_msr;
+	unsigned int vo;
 };
 
 static void setup_src_node_conf(struct ct_atc *atc, struct ct_atc_pcm *apcm,

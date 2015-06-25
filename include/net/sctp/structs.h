@@ -642,7 +642,7 @@ struct sctp_chunk {
 		auth:1,			/* IN: was auth'ed | OUT: needs auth */
 		has_asconf:1,		/* IN: have seen an asconf before */
 		tsn_missing_report:2,	/* Data chunk missing counter. */
-		fast_retransmit:2;	/* Is this chunk fast retransmitted? */
+		fast_retransmit;	/* Is this chunk fast retransmitted? */
 };
 
 void sctp_chunk_hold(struct sctp_chunk *);
@@ -707,7 +707,7 @@ struct sctp_packet {
 	    has_sack:1,		/* This packet contains a SACK chunk. */
 	    has_auth:1,		/* This packet contains an AUTH chunk */
 	    has_data:1,		/* This packet contains at least 1 DATA chunk */
-	    ipfragok:1;		/* So let ip fragment this packet */
+	    ipfragok;		/* So let ip fragment this packet */
 };
 
 struct sctp_packet *sctp_packet_init(struct sctp_packet *,
@@ -771,7 +771,7 @@ struct sctp_transport {
 		hb_sent:1,
 
 		/* Is the Path MTU update pending on this tranport */
-		pmtu_pending:1;
+		pmtu_pending;
 
 	/* Has this transport moved the ctsn since we last sacked */
 	__u32 sack_generation;
@@ -1477,7 +1477,7 @@ struct sctp_association {
 			hostname_address:1, /* Peer understands DNS addresses? */
 			asconf_capable:1,   /* Does peer support ADDIP? */
 			prsctp_capable:1,   /* Can peer do PR-SCTP? */
-			auth_capable:1;     /* Is peer doing SCTP-AUTH? */
+			auth_capable;     /* Is peer doing SCTP-AUTH? */
 
 		/* Ack State   : This flag indicates if the next received
 		 *             : packet is to be responded to with a
@@ -1834,7 +1834,7 @@ struct sctp_association {
 	__u16 active_key_id;
 
 	__u8 need_ecne:1,	/* Need to send an ECNE Chunk? */
-	     temp:1;		/* Is it a temporary association? */
+	     temp;		/* Is it a temporary association? */
 
 	struct sctp_priv_assoc_stats stats;
 };

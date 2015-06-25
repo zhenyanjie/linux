@@ -391,8 +391,8 @@ struct uwb_rc {
 	int beaconing;			/* Beaconing state [channel number] */
 	int beaconing_forced;
 	int scanning;
-	enum uwb_scan_type scan_type:3;
-	unsigned ready:1;
+	enum uwb_scan_type scan_type;
+	unsigned ready;
 	struct uwb_notifs_chain notifs_chain;
 	struct uwb_beca uwb_beca;
 

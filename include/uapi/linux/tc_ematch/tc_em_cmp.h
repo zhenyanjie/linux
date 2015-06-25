@@ -8,10 +8,10 @@ struct tcf_em_cmp {
 	__u32		val;
 	__u32		mask;
 	__u16		off;
-	__u8		align:4;
-	__u8		flags:4;
-	__u8		layer:4;
-	__u8		opnd:4;
+	__u8		align;
+	__u8		flags;
+	__u8		layer;
+	__u8		opnd;
 };
 
 enum {

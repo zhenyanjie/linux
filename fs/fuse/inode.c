@@ -62,10 +62,10 @@ struct fuse_mount_data {
 	unsigned rootmode;
 	kuid_t user_id;
 	kgid_t group_id;
-	unsigned fd_present:1;
-	unsigned rootmode_present:1;
-	unsigned user_id_present:1;
-	unsigned group_id_present:1;
+	unsigned fd_present;
+	unsigned rootmode_present;
+	unsigned user_id_present;
+	unsigned group_id_present;
 	unsigned flags;
 	unsigned max_read;
 	unsigned blksize;

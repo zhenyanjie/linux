@@ -36,25 +36,25 @@ struct kbd_struct {
 #define VC_CTRLRLOCK	KG_CTRLR 	/* ctrlr lock mode */
 	unsigned char slockstate; 	/* for `sticky' Shift, Ctrl, etc. */
 
-	unsigned char ledmode:1;
+	unsigned char ledmode;
 #define LED_SHOW_FLAGS 0        /* traditional state */
 #define LED_SHOW_IOCTL 1        /* only change leds upon ioctl */
 
-	unsigned char ledflagstate:4;	/* flags, not lights */
-	unsigned char default_ledflagstate:4;
+	unsigned char ledflagstate;	/* flags, not lights */
+	unsigned char default_ledflagstate;
 #define VC_SCROLLOCK	0	/* scroll-lock mode */
 #define VC_NUMLOCK	1	/* numeric lock mode */
 #define VC_CAPSLOCK	2	/* capslock mode */
 #define VC_KANALOCK	3	/* kanalock mode */
 
-	unsigned char kbdmode:3;	/* one 3-bit value */
+	unsigned char kbdmode;	/* one 3-bit value */
 #define VC_XLATE	0	/* translate keycodes using keymap */
 #define VC_MEDIUMRAW	1	/* medium raw (keycode) mode */
 #define VC_RAW		2	/* raw (scancode) mode */
 #define VC_UNICODE	3	/* Unicode mode */
 #define VC_OFF		4	/* disabled mode */
 
-	unsigned char modeflags:5;
+	unsigned char modeflags;
 #define VC_APPLIC	0	/* application key mode */
 #define VC_CKMODE	1	/* cursor key mode */
 #define VC_REPEAT	2	/* keyboard repeat */

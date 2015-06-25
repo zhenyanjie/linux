@@ -61,12 +61,12 @@ struct r8a66597_ep {
 	struct r8a66597_dma	*dma;
 
 	struct list_head	queue;
-	unsigned		busy:1;
-	unsigned		wedge:1;
-	unsigned		internal_ccpl:1;	/* use only control */
+	unsigned		busy;
+	unsigned		wedge;
+	unsigned		internal_ccpl;	/* use only control */
 
 	/* this member can able to after r8a66597_enable */
-	unsigned		use_dma:1;
+	unsigned		use_dma;
 	u16			pipenum;
 	u16			type;
 
@@ -80,8 +80,8 @@ struct r8a66597_ep {
 };
 
 struct r8a66597_dma {
-	unsigned		used:1;
-	unsigned		dir:1;	/* 1 = IN(write), 0 = OUT(read) */
+	unsigned		used;
+	unsigned		dir;	/* 1 = IN(write), 0 = OUT(read) */
 };
 
 struct r8a66597 {
@@ -114,7 +114,7 @@ struct r8a66597 {
 	unsigned char isochronous;
 	unsigned char num_dma;
 
-	unsigned irq_sense_low:1;
+	unsigned irq_sense_low;
 };
 
 #define gadget_to_r8a66597(_gadget)	\

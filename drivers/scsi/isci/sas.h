@@ -83,12 +83,12 @@
  */
 struct ssp_cmd_iu {
 	u8 LUN[8];
-	u8 add_cdb_len:6;
-	u8 _r_a:2;
+	u8 add_cdb_len;
+	u8 _r_a;
 	u8 _r_b;
-	u8 en_fburst:1;
-	u8 task_prio:4;
-	u8 task_attr:3;
+	u8 en_fburst;
+	u8 task_prio;
+	u8 task_attr;
 	u8 _r_c;
 
 	u8 cdb[16];
@@ -122,8 +122,8 @@ struct ssp_task_iu {
 struct smp_req_phy_id {
 	u8 _r_a[4];		/* bytes 4-7 */
 
-	u8 ign_zone_grp:1;	/* byte 8 */
-	u8 _r_b:7;
+	u8 ign_zone_grp;	/* byte 8 */
+	u8 _r_b;
 
 	u8 phy_id;		/* byte 9 */
 	u8 _r_c;		/* byte 10 */
@@ -146,8 +146,8 @@ struct smp_req_conf_rtinfo {
 	u8 phy_id;			/* byte 9 */
 	u16 _r_b;			/* bytes 10-11 */
 
-	u8 _r_c:7;			/* byte 12 */
-	u8 dis_rt_entry:1;
+	u8 _r_c;			/* byte 12 */
+	u8 dis_rt_entry;
 	u8 _r_d[3];			/* bytes 13-15 */
 
 	u8 rt_sas_addr[8];		/* bytes 16-23 */
@@ -169,23 +169,23 @@ struct smp_req_phycntl {
 	u8 phy_id;			/* byte 9 */
 	u8 phy_op;			/* byte 10 */
 
-	u8 upd_pathway:1;		/* byte 11 */
-	u8 _r_b:7;
+	u8 upd_pathway;		/* byte 11 */
+	u8 _r_b;
 
 	u8 _r_c[12];			/* byte 12-23 */
 
 	u8 att_dev_name[8];             /* byte 24-31 */
 
-	u8 _r_d:4;			/* byte 32 */
-	u8 min_linkrate:4;
+	u8 _r_d;			/* byte 32 */
+	u8 min_linkrate;
 
-	u8 _r_e:4;			/* byte 33 */
-	u8 max_linkrate:4;
+	u8 _r_e;			/* byte 33 */
+	u8 max_linkrate;
 
 	u8 _r_f[2];			/* byte 34-35 */
 
-	u8 pathway:4;			/* byte 36 */
-	u8 _r_g:4;
+	u8 pathway;			/* byte 36 */
+	u8 _r_g;
 
 	u8 _r_h[3];			/* bytes 37-39 */
 }  __packed;

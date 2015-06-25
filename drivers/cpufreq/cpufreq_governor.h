@@ -159,14 +159,14 @@ struct od_cpu_dbs_info_s {
 	unsigned int freq_lo_jiffies;
 	unsigned int freq_hi_jiffies;
 	unsigned int rate_mult;
-	unsigned int sample_type:1;
+	unsigned int sample_type;
 };
 
 struct cs_cpu_dbs_info_s {
 	struct cpu_dbs_common_info cdbs;
 	unsigned int down_skip;
 	unsigned int requested_freq;
-	unsigned int enable:1;
+	unsigned int enable;
 };
 
 /* Per policy Governors sysfs tunables */

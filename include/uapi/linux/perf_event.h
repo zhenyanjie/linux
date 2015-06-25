@@ -742,7 +742,7 @@ union perf_mem_data_src {
 			mem_snoop:5,	/* snoop mode */
 			mem_lock:2,	/* lock instr */
 			mem_dtlb:7,	/* tlb access */
-			mem_rsvd:31;
+			mem_rsvd;
 	};
 };
 
@@ -818,7 +818,7 @@ struct perf_branch_entry {
 		predicted:1,/* target predicted */
 		in_tx:1,    /* in transaction */
 		abort:1,    /* transaction abort */
-		reserved:60;
+		reserved;
 };
 
 #endif /* _UAPI_LINUX_PERF_EVENT_H */

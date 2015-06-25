@@ -491,12 +491,12 @@ extern char *qib_sdma_state_names[];
 extern char *qib_sdma_event_names[];
 
 struct sdma_set_state_action {
-	unsigned op_enable:1;
-	unsigned op_intenable:1;
-	unsigned op_halt:1;
-	unsigned op_drain:1;
-	unsigned go_s99_running_tofalse:1;
-	unsigned go_s99_running_totrue:1;
+	unsigned op_enable;
+	unsigned op_intenable;
+	unsigned op_halt;
+	unsigned op_drain;
+	unsigned go_s99_running_tofalse;
+	unsigned go_s99_running_totrue;
 };
 
 struct qib_sdma_state {

@@ -419,7 +419,7 @@ output_code()
 "	%spatch_func_t		*patch_func;\n"
 "	uint32_t		 begin		:10,\n"
 "				 skip_instr	:10,\n"
-"				 skip_patch	:12;\n"
+"				 skip_patch	;\n"
 "} patches[] = {\n", prefix);
 
 	for (cur_patch = STAILQ_FIRST(&patches);

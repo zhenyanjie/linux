@@ -82,8 +82,8 @@ struct flchip {
 	flstate_t state;
 	flstate_t oldstate;
 
-	unsigned int write_suspended:1;
-	unsigned int erase_suspended:1;
+	unsigned int write_suspended;
+	unsigned int erase_suspended;
 	unsigned long in_progress_block_addr;
 
 	struct mutex mutex;

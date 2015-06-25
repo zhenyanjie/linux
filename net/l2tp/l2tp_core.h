@@ -54,15 +54,15 @@ struct l2tp_tunnel;
  */
 struct l2tp_session_cfg {
 	enum l2tp_pwtype	pw_type;
-	unsigned int		data_seq:2;	/* data sequencing level
+	unsigned int		data_seq;	/* data sequencing level
 						 * 0 => none, 1 => IP only,
 						 * 2 => all
 						 */
-	unsigned int		recv_seq:1;	/* expect receive packets with
+	unsigned int		recv_seq;	/* expect receive packets with
 						 * sequence numbers? */
-	unsigned int		send_seq:1;	/* send packets with sequence
+	unsigned int		send_seq;	/* send packets with sequence
 						 * numbers? */
-	unsigned int		lns_mode:1;	/* behave as LNS? LAC enables
+	unsigned int		lns_mode;	/* behave as LNS? LAC enables
 						 * sequence numbers under
 						 * control of LNS. */
 	int			debug;		/* bitmask of debug message
@@ -112,15 +112,15 @@ struct l2tp_session {
 
 	char			name[32];	/* for logging */
 	char			ifname[IFNAMSIZ];
-	unsigned int		data_seq:2;	/* data sequencing level
+	unsigned int		data_seq;	/* data sequencing level
 						 * 0 => none, 1 => IP only,
 						 * 2 => all
 						 */
-	unsigned int		recv_seq:1;	/* expect receive packets with
+	unsigned int		recv_seq;	/* expect receive packets with
 						 * sequence numbers? */
-	unsigned int		send_seq:1;	/* send packets with sequence
+	unsigned int		send_seq;	/* send packets with sequence
 						 * numbers? */
-	unsigned int		lns_mode:1;	/* behave as LNS? LAC enables
+	unsigned int		lns_mode;	/* behave as LNS? LAC enables
 						 * sequence numbers under
 						 * control of LNS. */
 	int			debug;		/* bitmask of debug message
@@ -164,7 +164,7 @@ struct l2tp_tunnel_cfg {
 	u16			peer_udp_port;
 	unsigned int		use_udp_checksums:1,
 				udp6_zero_tx_checksums:1,
-				udp6_zero_rx_checksums:1;
+				udp6_zero_rx_checksums;
 };
 
 struct l2tp_tunnel {

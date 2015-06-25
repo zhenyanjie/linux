@@ -483,11 +483,11 @@ struct nvsp_2_vsc_capability {
 	union {
 		u64 data;
 		struct {
-			u64 vmq:1;
-			u64 chimney:1;
-			u64 sriov:1;
-			u64 ieee8021q:1;
-			u64 correlation_id:1;
+			u64 vmq;
+			u64 chimney;
+			u64 sriov;
+			u64 ieee8021q;
+			u64 correlation_id;
 		};
 	};
 } __packed;
@@ -802,10 +802,10 @@ enum ndis_per_pkt_info_type {
 struct ndis_pkt_8021q_info {
 	union {
 		struct {
-			u32 pri:3; /* User Priority */
-			u32 cfi:1; /* Canonical Format ID */
-			u32 vlanid:12; /* VLAN ID */
-			u32 reserved:16;
+			u32 pri; /* User Priority */
+			u32 cfi; /* Canonical Format ID */
+			u32 vlanid; /* VLAN ID */
+			u32 reserved;
 		};
 		u32 value;
 	};
@@ -874,24 +874,24 @@ struct ndis_offload_params {
 struct ndis_tcp_ip_checksum_info {
 	union {
 		struct {
-			u32 is_ipv4:1;
-			u32 is_ipv6:1;
-			u32 tcp_checksum:1;
-			u32 udp_checksum:1;
-			u32 ip_header_checksum:1;
-			u32 reserved:11;
-			u32 tcp_header_offset:10;
+			u32 is_ipv4;
+			u32 is_ipv6;
+			u32 tcp_checksum;
+			u32 udp_checksum;
+			u32 ip_header_checksum;
+			u32 reserved;
+			u32 tcp_header_offset;
 		} transmit;
 		struct {
-			u32 tcp_checksum_failed:1;
-			u32 udp_checksum_failed:1;
-			u32 ip_checksum_failed:1;
-			u32 tcp_checksum_succeeded:1;
-			u32 udp_checksum_succeeded:1;
-			u32 ip_checksum_succeeded:1;
-			u32 loopback:1;
-			u32 tcp_checksum_value_invalid:1;
-			u32 ip_checksum_value_invalid:1;
+			u32 tcp_checksum_failed;
+			u32 udp_checksum_failed;
+			u32 ip_checksum_failed;
+			u32 tcp_checksum_succeeded;
+			u32 udp_checksum_succeeded;
+			u32 ip_checksum_succeeded;
+			u32 loopback;
+			u32 tcp_checksum_value_invalid;
+			u32 ip_checksum_value_invalid;
 		} receive;
 		u32  value;
 	};
@@ -900,31 +900,31 @@ struct ndis_tcp_ip_checksum_info {
 struct ndis_tcp_lso_info {
 	union {
 		struct {
-			u32 unused:30;
-			u32 type:1;
-			u32 reserved2:1;
+			u32 unused;
+			u32 type;
+			u32 reserved2;
 		} transmit;
 		struct {
-			u32 mss:20;
-			u32 tcp_header_offset:10;
-			u32 type:1;
-			u32 reserved2:1;
+			u32 mss;
+			u32 tcp_header_offset;
+			u32 type;
+			u32 reserved2;
 		} lso_v1_transmit;
 		struct {
-			u32 tcp_payload:30;
-			u32 type:1;
-			u32 reserved2:1;
+			u32 tcp_payload;
+			u32 type;
+			u32 reserved2;
 		} lso_v1_transmit_complete;
 		struct {
-			u32 mss:20;
-			u32 tcp_header_offset:10;
-			u32 type:1;
-			u32 ip_version:1;
+			u32 mss;
+			u32 tcp_header_offset;
+			u32 type;
+			u32 ip_version;
 		} lso_v2_transmit;
 		struct {
-			u32 reserved:30;
-			u32 type:1;
-			u32 reserved2:1;
+			u32 reserved;
+			u32 type;
+			u32 reserved2;
 		} lso_v2_transmit_complete;
 		u32  value;
 	};

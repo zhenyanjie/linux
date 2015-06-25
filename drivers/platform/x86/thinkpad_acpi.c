@@ -279,11 +279,11 @@ struct ibm_struct {
 	struct tp_acpi_drv_struct *acpi;
 
 	struct {
-		u8 acpi_driver_registered:1;
-		u8 acpi_notify_installed:1;
-		u8 proc_created:1;
-		u8 init_called:1;
-		u8 experimental:1;
+		u8 acpi_driver_registered;
+		u8 acpi_notify_installed;
+		u8 proc_created;
+		u8 init_called;
+		u8 experimental;
 	} flags;
 };
 
@@ -296,33 +296,33 @@ struct ibm_init_struct {
 };
 
 static struct {
-	u32 bluetooth:1;
-	u32 hotkey:1;
-	u32 hotkey_mask:1;
-	u32 hotkey_wlsw:1;
-	u32 hotkey_tablet:1;
-	u32 light:1;
-	u32 light_status:1;
-	u32 bright_acpimode:1;
-	u32 bright_unkfw:1;
-	u32 wan:1;
-	u32 uwb:1;
-	u32 fan_ctrl_status_undef:1;
-	u32 second_fan:1;
-	u32 beep_needs_two_args:1;
-	u32 mixer_no_level_control:1;
-	u32 input_device_registered:1;
-	u32 platform_drv_registered:1;
-	u32 platform_drv_attrs_registered:1;
-	u32 sensors_pdrv_registered:1;
-	u32 sensors_pdrv_attrs_registered:1;
-	u32 sensors_pdev_attrs_registered:1;
-	u32 hotkey_poll_active:1;
+	u32 bluetooth;
+	u32 hotkey;
+	u32 hotkey_mask;
+	u32 hotkey_wlsw;
+	u32 hotkey_tablet;
+	u32 light;
+	u32 light_status;
+	u32 bright_acpimode;
+	u32 bright_unkfw;
+	u32 wan;
+	u32 uwb;
+	u32 fan_ctrl_status_undef;
+	u32 second_fan;
+	u32 beep_needs_two_args;
+	u32 mixer_no_level_control;
+	u32 input_device_registered;
+	u32 platform_drv_registered;
+	u32 platform_drv_attrs_registered;
+	u32 sensors_pdrv_registered;
+	u32 sensors_pdrv_attrs_registered;
+	u32 sensors_pdev_attrs_registered;
+	u32 hotkey_poll_active;
 } tp_features;
 
 static struct {
-	u16 hotkey_mask_ff:1;
-	u16 volume_ctrl_forbidden:1;
+	u16 hotkey_mask_ff;
+	u16 volume_ctrl_forbidden;
 } tp_warned;
 
 struct thinkpad_id_data {
@@ -1949,16 +1949,16 @@ enum {	/* NVRAM to ACPI HKEY group map */
 
 #ifdef CONFIG_THINKPAD_ACPI_HOTKEY_POLL
 struct tp_nvram_state {
-       u16 thinkpad_toggle:1;
-       u16 zoom_toggle:1;
-       u16 display_toggle:1;
-       u16 thinklight_toggle:1;
-       u16 hibernate_toggle:1;
-       u16 displayexp_toggle:1;
-       u16 display_state:1;
-       u16 brightness_toggle:1;
-       u16 volume_toggle:1;
-       u16 mute:1;
+       u16 thinkpad_toggle;
+       u16 zoom_toggle;
+       u16 display_toggle;
+       u16 thinklight_toggle;
+       u16 hibernate_toggle;
+       u16 displayexp_toggle;
+       u16 display_state;
+       u16 brightness_toggle;
+       u16 volume_toggle;
+       u16 mute;
 
        u8 brightness_level;
        u8 volume_level;

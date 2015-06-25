@@ -175,10 +175,10 @@ typedef struct _i2o_other_bus {
 
 typedef struct _i2o_hrt_entry {
 	__u32 adapter_id;
-	__u32 parent_tid:12;
-	__u32 state:4;
-	__u32 bus_num:8;
-	__u32 bus_type:8;
+	__u32 parent_tid;
+	__u32 state;
+	__u32 bus_num;
+	__u32 bus_type;
 	union {
 		i2o_pci_bus pci_bus;
 		i2o_local_bus local_bus;
@@ -198,26 +198,26 @@ typedef struct _i2o_hrt {
 } i2o_hrt;
 
 typedef struct _i2o_lct_entry {
-	__u32 entry_size:16;
-	__u32 tid:12;
-	__u32 reserved:4;
+	__u32 entry_size;
+	__u32 tid;
+	__u32 reserved;
 	__u32 change_ind;
 	__u32 device_flags;
-	__u32 class_id:12;
-	__u32 version:4;
-	__u32 vendor_id:16;
+	__u32 class_id;
+	__u32 version;
+	__u32 vendor_id;
 	__u32 sub_class;
-	__u32 user_tid:12;
-	__u32 parent_tid:12;
-	__u32 bios_info:8;
+	__u32 user_tid;
+	__u32 parent_tid;
+	__u32 bios_info;
 	__u8 identity_tag[8];
 	__u32 event_capabilities;
 } i2o_lct_entry;
 
 typedef struct _i2o_lct {
-	__u32 table_size:16;
-	__u32 boot_tid:12;
-	__u32 lct_ver:4;
+	__u32 table_size;
+	__u32 boot_tid;
+	__u32 lct_ver;
 	__u32 iop_flags;
 	__u32 change_ind;
 	i2o_lct_entry lct_entry[1];
@@ -226,11 +226,11 @@ typedef struct _i2o_lct {
 typedef struct _i2o_status_block {
 	__u16 org_id;
 	__u16 reserved;
-	__u16 iop_id:12;
-	__u16 reserved1:4;
+	__u16 iop_id;
+	__u16 reserved1;
 	__u16 host_unit_id;
-	__u16 segment_number:12;
-	__u16 i2o_version:4;
+	__u16 segment_number;
+	__u16 i2o_version;
 	__u8 iop_state;
 	__u8 msg_type;
 	__u16 inbound_frame_size;
@@ -248,8 +248,8 @@ typedef struct _i2o_status_block {
 	__u32 desired_io_size;
 	__u32 current_io_size;
 	__u32 current_io_base;
-	__u32 reserved3:24;
-	__u32 cmd_status:8;
+	__u32 reserved3;
+	__u32 cmd_status;
 } i2o_status_block;
 
 /* Event indicator mask flags */

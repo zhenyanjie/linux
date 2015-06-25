@@ -450,7 +450,7 @@ struct fsl_req {
 	/* ep_queue() func will add
 	   a request->queue into a udc_ep->queue 'd tail */
 	struct fsl_ep *ep;
-	unsigned mapped:1;
+	unsigned mapped;
 
 	struct ep_td_struct *head, *tail;	/* For dTD List
 						   cpu endian Virtual addr */
@@ -467,7 +467,7 @@ struct fsl_ep {
 	struct usb_gadget *gadget;
 
 	char name[14];
-	unsigned stopped:1;
+	unsigned stopped;
 };
 
 #define EP_DIR_IN	1
@@ -485,12 +485,12 @@ struct fsl_udc {
 	struct usb_ctrlrequest local_setup_buff;
 	spinlock_t lock;
 	struct usb_phy *transceiver;
-	unsigned softconnect:1;
-	unsigned vbus_active:1;
-	unsigned stopped:1;
-	unsigned remote_wakeup:1;
-	unsigned already_stopped:1;
-	unsigned big_endian_desc:1;
+	unsigned softconnect;
+	unsigned vbus_active;
+	unsigned stopped;
+	unsigned remote_wakeup;
+	unsigned already_stopped;
+	unsigned big_endian_desc;
 
 	struct ep_queue_head *ep_qh;	/* Endpoints Queue-Head */
 	struct fsl_req *status_req;	/* ep0 status request */

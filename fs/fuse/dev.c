@@ -645,7 +645,7 @@ struct fuse_copy_state {
 	struct page *pg;
 	unsigned len;
 	unsigned offset;
-	unsigned move_pages:1;
+	unsigned move_pages;
 };
 
 static void fuse_copy_init(struct fuse_copy_state *cs, struct fuse_conn *fc,

@@ -42,14 +42,14 @@ bool kmemcheck_is_obj_initialized(unsigned long addr, size_t size);
  * How to use: If you have a struct using bitfields, for example
  *
  *     struct a {
- *             int x:8, y:8;
+ *             int x:8, y;
  *     };
  *
  * then this should be rewritten as
  *
  *     struct a {
  *             kmemcheck_bitfield_begin(flags);
- *             int x:8, y:8;
+ *             int x:8, y;
  *             kmemcheck_bitfield_end(flags);
  *     };
  *

@@ -740,7 +740,7 @@ struct ieee80211_security {
 	enabled:1,
 	auth_mode:2,
 	auth_algo:4,
-	unicast_uses_group:1;
+	unicast_uses_group;
 	u8 key_sizes[WEP_KEYS];
 	u8 keys[WEP_KEYS][WEP_KEY_LEN];
 	u8 level;
@@ -808,7 +808,7 @@ struct ieee80211_info_element {
 	u8 current_ap[ETH_ALEN];
 	u16 listen_interval;
 	struct {
-		u16 association_id:14, reserved:2;
+		u16 association_id:14, reserved;
 	} __packed;
 	u32 time_stamp[2];
 	u16 reason;

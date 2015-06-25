@@ -46,12 +46,12 @@ struct ehci_hcd_omap_platform_data {
 	enum usbhs_omap_port_mode	port_mode[OMAP3_HS_USB_PORTS];
 	int				reset_gpio_port[OMAP3_HS_USB_PORTS];
 	struct regulator		*regulator[OMAP3_HS_USB_PORTS];
-	unsigned			phy_reset:1;
+	unsigned			phy_reset;
 };
 
 struct ohci_hcd_omap_platform_data {
 	enum usbhs_omap_port_mode	port_mode[OMAP3_HS_USB_PORTS];
-	unsigned			es2_compatibility:1;
+	unsigned			es2_compatibility;
 };
 
 struct usbhs_omap_platform_data {
@@ -64,9 +64,9 @@ struct usbhs_omap_platform_data {
 	struct ohci_hcd_omap_platform_data	*ohci_data;
 
 	/* OMAP3 <= ES2.1 have a single ulpi bypass control bit */
-	unsigned single_ulpi_bypass:1;
-	unsigned es2_compatibility:1;
-	unsigned phy_reset:1;
+	unsigned single_ulpi_bypass;
+	unsigned es2_compatibility;
+	unsigned phy_reset;
 };
 
 /*-------------------------------------------------------------------------*/
@@ -75,7 +75,7 @@ struct omap_musb_board_data {
 	u8	interface_type;
 	u8	mode;
 	u16	power;
-	unsigned extvbus:1;
+	unsigned extvbus;
 	void	(*set_phy_power)(u8 on);
 	void	(*clear_irq)(void);
 	void	(*set_mode)(u8 mode);

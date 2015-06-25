@@ -70,8 +70,8 @@ struct dm_disk_bitset {
 	uint32_t current_index;
 	uint64_t current_bits;
 
-	bool current_index_set:1;
-	bool dirty:1;
+	bool current_index_set;
+	bool dirty;
 };
 
 /*

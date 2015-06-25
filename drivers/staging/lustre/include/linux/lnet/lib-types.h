@@ -181,31 +181,31 @@ typedef struct lnet_msg {
 	__u32			msg_type;
 
 	/* committed for sending */
-	unsigned int		msg_tx_committed:1;
+	unsigned int		msg_tx_committed;
 	/* CPT # this message committed for sending */
-	unsigned int		msg_tx_cpt:15;
+	unsigned int		msg_tx_cpt;
 	/* committed for receiving */
-	unsigned int		msg_rx_committed:1;
+	unsigned int		msg_rx_committed;
 	/* CPT # this message committed for receiving */
-	unsigned int		msg_rx_cpt:15;
+	unsigned int		msg_rx_cpt;
 	/* queued for tx credit */
-	unsigned int		msg_tx_delayed:1;
+	unsigned int		msg_tx_delayed;
 	/* queued for RX buffer */
-	unsigned int		msg_rx_delayed:1;
+	unsigned int		msg_rx_delayed;
 	/* ready for pending on RX delay list */
-	unsigned int		msg_rx_ready_delay:1;
+	unsigned int		msg_rx_ready_delay;
 
-	unsigned int	  msg_vmflush:1;      /* VM trying to free memory */
-	unsigned int	  msg_target_is_router:1; /* sending to a router */
-	unsigned int	  msg_routing:1;      /* being forwarded */
-	unsigned int	  msg_ack:1;	  /* ack on finalize (PUT) */
-	unsigned int	  msg_sending:1;      /* outgoing message */
-	unsigned int	  msg_receiving:1;    /* being received */
-	unsigned int	  msg_txcredit:1;     /* taken an NI send credit */
-	unsigned int	  msg_peertxcredit:1; /* taken a peer send credit */
-	unsigned int	  msg_rtrcredit:1;    /* taken a global router credit */
-	unsigned int	  msg_peerrtrcredit:1; /* taken a peer router credit */
-	unsigned int	  msg_onactivelist:1; /* on the activelist */
+	unsigned int	  msg_vmflush;      /* VM trying to free memory */
+	unsigned int	  msg_target_is_router; /* sending to a router */
+	unsigned int	  msg_routing;      /* being forwarded */
+	unsigned int	  msg_ack;	  /* ack on finalize (PUT) */
+	unsigned int	  msg_sending;      /* outgoing message */
+	unsigned int	  msg_receiving;    /* being received */
+	unsigned int	  msg_txcredit;     /* taken an NI send credit */
+	unsigned int	  msg_peertxcredit; /* taken a peer send credit */
+	unsigned int	  msg_rtrcredit;    /* taken a global router credit */
+	unsigned int	  msg_peerrtrcredit; /* taken a peer router credit */
+	unsigned int	  msg_onactivelist; /* on the activelist */
 
 	struct lnet_peer     *msg_txpeer;	 /* peer I'm sending to */
 	struct lnet_peer     *msg_rxpeer;	 /* peer I received from */
@@ -450,10 +450,10 @@ typedef struct lnet_peer {
 	int	       lp_mintxcredits;      /* low water mark */
 	int	       lp_rtrcredits;	/* # router credits */
 	int	       lp_minrtrcredits;     /* low water mark */
-	unsigned int      lp_alive:1;	   /* alive/dead? */
-	unsigned int      lp_notify:1;	  /* notification outstanding? */
-	unsigned int      lp_notifylnd:1;       /* outstanding notification for LND? */
-	unsigned int      lp_notifying:1;       /* some thread is handling notification */
+	unsigned int      lp_alive;	   /* alive/dead? */
+	unsigned int      lp_notify;	  /* notification outstanding? */
+	unsigned int      lp_notifylnd;       /* outstanding notification for LND? */
+	unsigned int      lp_notifying;       /* some thread is handling notification */
 	unsigned int      lp_ping_notsent;      /* SEND event outstanding from ping */
 	int	       lp_alive_count;       /* # times router went dead<->alive */
 	long	      lp_txqnob;	    /* bytes queued for sending */

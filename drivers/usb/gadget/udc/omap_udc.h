@@ -132,7 +132,7 @@ struct omap_req {
 	struct usb_request		req;
 	struct list_head		queue;
 	unsigned			dma_bytes;
-	unsigned			mapped:1;
+	unsigned			mapped;
 };
 
 struct omap_ep {
@@ -144,10 +144,10 @@ struct omap_ep {
 	u16				maxpacket;
 	u8				bEndpointAddress;
 	u8				bmAttributes;
-	unsigned			double_buf:1;
-	unsigned			stopped:1;
-	unsigned			fnf:1;
-	unsigned			has_dma:1;
+	unsigned			double_buf;
+	unsigned			stopped;
+	unsigned			fnf;
+	unsigned			has_dma;
 	u8				ackwait;
 	u8				dma_channel;
 	u16				dma_counter;
@@ -165,17 +165,17 @@ struct omap_udc {
 	u16				clr_halt;
 	struct usb_phy			*transceiver;
 	struct list_head		iso;
-	unsigned			softconnect:1;
-	unsigned			vbus_active:1;
-	unsigned			ep0_pending:1;
-	unsigned			ep0_in:1;
-	unsigned			ep0_set_config:1;
-	unsigned			ep0_reset_config:1;
-	unsigned			ep0_setup:1;
+	unsigned			softconnect;
+	unsigned			vbus_active;
+	unsigned			ep0_pending;
+	unsigned			ep0_in;
+	unsigned			ep0_set_config;
+	unsigned			ep0_reset_config;
+	unsigned			ep0_setup;
 	struct completion		*done;
 	struct clk			*dc_clk;
 	struct clk			*hhc_clk;
-	unsigned			clk_requested:1;
+	unsigned			clk_requested;
 };
 
 /*-------------------------------------------------------------------------*/

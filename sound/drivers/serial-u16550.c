@@ -163,7 +163,7 @@ struct snd_uart16550 {
         int drop_on_full;
 
 	/* wait timer */
-	unsigned int timer_running:1;
+	unsigned int timer_running;
 	struct timer_list buffer_timer;
 
 };

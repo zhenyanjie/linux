@@ -223,12 +223,12 @@ struct sg_header
     int reply_len;   /* [i] max length of expected reply (inc. sg_header) */
     int pack_id;     /* [io] id number of packet (use ints >= 0) */
     int result;      /* [o] 0==ok, else (+ve) Unix errno (best ignored) */
-    unsigned int twelve_byte:1;
+    unsigned int twelve_byte;
 	/* [i] Force 12 byte command length for group 6 & 7 commands  */
-    unsigned int target_status:5;   /* [o] scsi status from target */
-    unsigned int host_status:8;     /* [o] host status (see "DID" codes) */
-    unsigned int driver_status:8;   /* [o] driver status+suggestion */
-    unsigned int other_flags:10;    /* unused */
+    unsigned int target_status;   /* [o] scsi status from target */
+    unsigned int host_status;     /* [o] host status (see "DID" codes) */
+    unsigned int driver_status;   /* [o] driver status+suggestion */
+    unsigned int other_flags;    /* unused */
     unsigned char sense_buffer[SG_MAX_SENSE]; /* [o] Output in 3 cases:
 	   when target_status is CHECK_CONDITION or
 	   when target_status is COMMAND_TERMINATED or

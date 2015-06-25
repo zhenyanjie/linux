@@ -777,7 +777,7 @@ struct zd_chip {
 	unsigned int pa_type:4,
 		patch_cck_gain:1, patch_cr157:1, patch_6m_band_edge:1,
 		new_phy_layout:1, al2230s_bit:1,
-		supports_tx_led:1;
+		supports_tx_led;
 };
 
 static inline struct zd_chip *zd_usb_to_chip(struct zd_usb *usb)

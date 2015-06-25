@@ -115,20 +115,20 @@ struct dwc2_qh;
 struct dwc2_host_chan {
 	u8 hc_num;
 
-	unsigned dev_addr:7;
-	unsigned ep_num:4;
-	unsigned ep_is_in:1;
-	unsigned speed:4;
-	unsigned ep_type:2;
-	unsigned max_packet:11;
-	unsigned data_pid_start:2;
+	unsigned dev_addr;
+	unsigned ep_num;
+	unsigned ep_is_in;
+	unsigned speed;
+	unsigned ep_type;
+	unsigned max_packet;
+	unsigned data_pid_start;
 #define DWC2_HC_PID_DATA0	TSIZ_SC_MC_PID_DATA0
 #define DWC2_HC_PID_DATA2	TSIZ_SC_MC_PID_DATA2
 #define DWC2_HC_PID_DATA1	TSIZ_SC_MC_PID_DATA1
 #define DWC2_HC_PID_MDATA	TSIZ_SC_MC_PID_MDATA
 #define DWC2_HC_PID_SETUP	TSIZ_SC_MC_PID_SETUP
 
-	unsigned multi_count:2;
+	unsigned multi_count;
 
 	u8 *xfer_buf;
 	dma_addr_t xfer_dma;
@@ -283,7 +283,7 @@ struct dwc2_qh {
 	struct dwc2_hcd_dma_desc *desc_list;
 	dma_addr_t desc_list_dma;
 	u32 *n_bytes;
-	unsigned tt_buffer_dirty:1;
+	unsigned tt_buffer_dirty;
 };
 
 /**

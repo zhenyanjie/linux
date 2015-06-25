@@ -688,9 +688,9 @@ struct drbd_resource {
 	struct mutex adm_mutex;		/* mutex to serialize administrative requests */
 	spinlock_t req_lock;
 
-	unsigned susp:1;		/* IO suspended by user */
-	unsigned susp_nod:1;		/* IO suspended because no data */
-	unsigned susp_fen:1;		/* IO suspended because fence peer handler runs */
+	unsigned susp;		/* IO suspended by user */
+	unsigned susp_nod;		/* IO suspended because no data */
+	unsigned susp_fen;		/* IO suspended because fence peer handler runs */
 
 	enum write_ordering_e write_ordering;
 

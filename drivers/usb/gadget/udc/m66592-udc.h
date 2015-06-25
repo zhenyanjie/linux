@@ -446,11 +446,11 @@ struct m66592_ep {
 	struct m66592		*m66592;
 
 	struct list_head	queue;
-	unsigned		busy:1;
-	unsigned		internal_ccpl:1;	/* use only control */
+	unsigned		busy;
+	unsigned		internal_ccpl;	/* use only control */
 
 	/* this member can able to after m66592_enable */
-	unsigned		use_dma:1;
+	unsigned		use_dma;
 	u16			pipenum;
 	u16			type;
 

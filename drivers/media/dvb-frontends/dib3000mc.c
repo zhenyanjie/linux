@@ -44,7 +44,7 @@ struct dib3000mc_state {
 
 	u16 dev_id;
 
-	u8 sfn_workaround_active :1;
+	u8 sfn_workaround_active ;
 };
 
 static u16 dib3000mc_read_word(struct dib3000mc_state *state, u16 reg)

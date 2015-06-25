@@ -33,7 +33,7 @@ struct mt312_config {
 	u8 demod_address;
 
 	/* inverted voltage setting */
-	unsigned int voltage_inverted:1;
+	unsigned int voltage_inverted;
 };
 
 #if IS_ENABLED(CONFIG_DVB_MT312)

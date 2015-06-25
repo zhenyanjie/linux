@@ -52,13 +52,13 @@ struct zd_rf {
 
 	/* whether channel integration and calibration should be updated
 	 * defaults to 1 (yes) */
-	u8 update_channel_int:1;
+	u8 update_channel_int;
 
 	/* whether ZD_CR47 should be patched from the EEPROM, if the appropriate
 	 * flag is set in the POD. The vendor driver suggests that this should
 	 * be done for all RF's, but a bug in their code prevents but their
 	 * HW_OverWritePhyRegFromE2P() routine from ever taking effect. */
-	u8 patch_cck_gain:1;
+	u8 patch_cck_gain;
 
 	/* private RF driver data */
 	void *priv;

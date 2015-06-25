@@ -396,13 +396,13 @@ struct drm_i915_error_state {
 		u32 read_domains;
 		u32 write_domain;
 		s32 fence_reg:I915_MAX_NUM_FENCE_BITS;
-		s32 pinned:2;
-		u32 tiling:2;
-		u32 dirty:1;
-		u32 purgeable:1;
-		u32 userptr:1;
-		s32 ring:4;
-		u32 cache_level:3;
+		s32 pinned;
+		u32 tiling;
+		u32 dirty;
+		u32 purgeable;
+		u32 userptr;
+		s32 ring;
+		u32 cache_level;
 	} **active_bo, **pinned_bo;
 
 	u32 *active_bo_count, *pinned_bo_count;
@@ -551,7 +551,7 @@ struct intel_uncore {
 
 struct intel_device_info {
 	u32 display_mmio_offset;
-	u8 num_pipes:3;
+	u8 num_pipes;
 	u8 num_sprites[I915_MAX_PIPES];
 	u8 gen;
 	u8 ring_mask; /* Rings supported by the HW */
@@ -1230,9 +1230,9 @@ enum modeset_restore {
 struct ddi_vbt_port_info {
 	uint8_t hdmi_level_shift;
 
-	uint8_t supports_dvi:1;
-	uint8_t supports_hdmi:1;
-	uint8_t supports_dp:1;
+	uint8_t supports_dvi;
+	uint8_t supports_hdmi;
+	uint8_t supports_dp;
 };
 
 enum drrs_support_type {
@@ -1246,14 +1246,14 @@ struct intel_vbt_data {
 	struct drm_display_mode *sdvo_lvds_vbt_mode; /* if any */
 
 	/* Feature bits */
-	unsigned int int_tv_support:1;
-	unsigned int lvds_dither:1;
-	unsigned int lvds_vbt:1;
-	unsigned int int_crt_support:1;
-	unsigned int lvds_use_ssc:1;
-	unsigned int display_clock_mode:1;
-	unsigned int fdi_rx_polarity_inverted:1;
-	unsigned int has_mipi:1;
+	unsigned int int_tv_support;
+	unsigned int lvds_dither;
+	unsigned int lvds_vbt;
+	unsigned int int_crt_support;
+	unsigned int lvds_use_ssc;
+	unsigned int display_clock_mode;
+	unsigned int fdi_rx_polarity_inverted;
+	unsigned int has_mipi;
 	int lvds_ssc_freq;
 	unsigned int bios_lvds_val; /* initial [PCH_]LVDS reg val in VBIOS */
 
@@ -1708,13 +1708,13 @@ struct drm_i915_gem_object {
 	 * rendering and so a non-zero seqno), and is not set if it i s on
 	 * inactive (ready to be unbound) list.
 	 */
-	unsigned int active:1;
+	unsigned int active;
 
 	/**
 	 * This is set if the object has been written to since last bound
 	 * to the GTT
 	 */
-	unsigned int dirty:1;
+	unsigned int dirty;
 
 	/**
 	 * Fence register bits (if any) for this object.  Will be set
@@ -1726,12 +1726,12 @@ struct drm_i915_gem_object {
 	/**
 	 * Advice: are the backing pages purgeable?
 	 */
-	unsigned int madv:2;
+	unsigned int madv;
 
 	/**
 	 * Current tiling mode for the object.
 	 */
-	unsigned int tiling_mode:2;
+	unsigned int tiling_mode;
 	/**
 	 * Whether the tiling parameters for the currently associated fence
 	 * register have changed. Note that for the purposes of tracking
@@ -1739,40 +1739,40 @@ struct drm_i915_gem_object {
 	 * slot that the object occupies whilst it executes a fenced
 	 * command (such as BLT on gen2/3), as a "fence".
 	 */
-	unsigned int fence_dirty:1;
+	unsigned int fence_dirty;
 
 	/**
 	 * Is the object at the current location in the gtt mappable and
 	 * fenceable? Used to avoid costly recalculations.
 	 */
-	unsigned int map_and_fenceable:1;
+	unsigned int map_and_fenceable;
 
 	/**
 	 * Whether the current gtt mapping needs to be mappable (and isn't just
 	 * mappable by accident). Track pin and fault separate for a more
 	 * accurate mappable working set.
 	 */
-	unsigned int fault_mappable:1;
-	unsigned int pin_mappable:1;
-	unsigned int pin_display:1;
+	unsigned int fault_mappable;
+	unsigned int pin_mappable;
+	unsigned int pin_display;
 
 	/*
 	 * Is the object to be mapped as read-only to the GPU
 	 * Only honoured if hardware has relevant pte bit
 	 */
-	unsigned long gt_ro:1;
+	unsigned long gt_ro;
 
 	/*
 	 * Is the GPU currently using a fence to access this buffer,
 	 */
-	unsigned int pending_fenced_gpu_access:1;
-	unsigned int fenced_gpu_access:1;
+	unsigned int pending_fenced_gpu_access;
+	unsigned int fenced_gpu_access;
 
-	unsigned int cache_level:3;
+	unsigned int cache_level;
 
-	unsigned int has_aliasing_ppgtt_mapping:1;
-	unsigned int has_global_gtt_mapping:1;
-	unsigned int has_dma_mapping:1;
+	unsigned int has_aliasing_ppgtt_mapping;
+	unsigned int has_global_gtt_mapping;
+	unsigned int has_dma_mapping;
 
 	unsigned int frontbuffer_bits:INTEL_FRONTBUFFER_BITS;
 
@@ -1810,8 +1810,8 @@ struct drm_i915_gem_object {
 	union {
 		struct i915_gem_userptr {
 			uintptr_t ptr;
-			unsigned read_only :1;
-			unsigned workers :4;
+			unsigned read_only ;
+			unsigned workers ;
 #define I915_GEM_USERPTR_MAX_WORKERS 15
 
 			struct i915_mm_struct *mm;

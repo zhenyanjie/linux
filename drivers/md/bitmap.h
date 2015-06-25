@@ -160,16 +160,16 @@ struct bitmap_page {
 	 * in emergencies (when map cannot be alloced), hijack the map
 	 * pointer and use it as two counters itself
 	 */
-	unsigned int hijacked:1;
+	unsigned int hijacked;
 	/*
 	 * If any counter in this page is '1' or '2' - and so could be
 	 * cleared then that page is marked as 'pending'
 	 */
-	unsigned int pending:1;
+	unsigned int pending;
 	/*
 	 * count of dirty bits on the page
 	 */
-	unsigned int  count:30;
+	unsigned int  count;
 };
 
 /* the main bitmap structure - one per mddev */

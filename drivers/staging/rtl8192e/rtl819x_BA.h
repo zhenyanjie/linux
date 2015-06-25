@@ -39,8 +39,8 @@
 union sequence_control {
 	u16 ShortData;
 	struct {
-		u16	FragNum:4;
-		u16	SeqNum:12;
+		u16	FragNum;
+		u16	SeqNum;
 	} field;
 };
 
@@ -48,10 +48,10 @@ union ba_param_set {
 	u8 charData[2];
 	u16 shortData;
 	struct {
-		u16 AMSDU_Support:1;
-		u16 BAPolicy:1;
-		u16 TID:4;
-		u16 BufferSize:10;
+		u16 AMSDU_Support;
+		u16 BAPolicy;
+		u16 TID;
+		u16 BufferSize;
 	} field;
 };
 
@@ -59,9 +59,9 @@ union delba_param_set {
 	u8 charData[2];
 	u16 shortData;
 	struct {
-		u16 Reserved:11;
-		u16 Initiator:1;
-		u16 TID:4;
+		u16 Reserved;
+		u16 Initiator;
+		u16 TID;
 	} field;
 };
 

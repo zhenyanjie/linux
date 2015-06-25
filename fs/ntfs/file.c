@@ -498,10 +498,10 @@ static int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
 	bool rl_write_locked, was_hole, is_retry;
 	unsigned char blocksize_bits;
 	struct {
-		u8 runlist_merged:1;
-		u8 mft_attr_mapped:1;
-		u8 mp_rebuilt:1;
-		u8 attr_switched:1;
+		u8 runlist_merged;
+		u8 mft_attr_mapped;
+		u8 mp_rebuilt;
+		u8 attr_switched;
 	} status = { 0, 0, 0, 0 };
 
 	BUG_ON(!nr_pages);

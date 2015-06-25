@@ -83,18 +83,18 @@ struct scan_control {
 	/* Scan (total_size >> priority) pages at once */
 	int priority;
 
-	unsigned int may_writepage:1;
+	unsigned int may_writepage;
 
 	/* Can mapped pages be reclaimed? */
-	unsigned int may_unmap:1;
+	unsigned int may_unmap;
 
 	/* Can pages be swapped as part of reclaim? */
-	unsigned int may_swap:1;
+	unsigned int may_swap;
 
-	unsigned int hibernation_mode:1;
+	unsigned int hibernation_mode;
 
 	/* One of the zones is ready for compaction */
-	unsigned int compaction_ready:1;
+	unsigned int compaction_ready;
 
 	/* Incremented by the number of inactive pages that were scanned */
 	unsigned long nr_scanned;

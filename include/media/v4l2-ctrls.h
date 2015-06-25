@@ -167,19 +167,19 @@ struct v4l2_ctrl {
 	struct v4l2_ctrl_handler *handler;
 	struct v4l2_ctrl **cluster;
 	unsigned ncontrols;
-	unsigned int done:1;
+	unsigned int done;
 
-	unsigned int is_new:1;
-	unsigned int has_changed:1;
-	unsigned int is_private:1;
-	unsigned int is_auto:1;
-	unsigned int is_int:1;
-	unsigned int is_string:1;
-	unsigned int is_ptr:1;
-	unsigned int is_array:1;
-	unsigned int has_volatiles:1;
-	unsigned int call_notify:1;
-	unsigned int manual_mode_value:8;
+	unsigned int is_new;
+	unsigned int has_changed;
+	unsigned int is_private;
+	unsigned int is_auto;
+	unsigned int is_int;
+	unsigned int is_string;
+	unsigned int is_ptr;
+	unsigned int is_array;
+	unsigned int has_volatiles;
+	unsigned int call_notify;
+	unsigned int manual_mode_value;
 
 	const struct v4l2_ctrl_ops *ops;
 	const struct v4l2_ctrl_type_ops *type_ops;
@@ -301,7 +301,7 @@ struct v4l2_ctrl_config {
 	u64 menu_skip_mask;
 	const char * const *qmenu;
 	const s64 *qmenu_int;
-	unsigned int is_private:1;
+	unsigned int is_private;
 };
 
 /** v4l2_ctrl_fill() - Fill in the control fields based on the control ID.

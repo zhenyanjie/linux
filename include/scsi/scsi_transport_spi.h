@@ -33,30 +33,30 @@ struct spi_transport_attrs {
 	int min_period;
 	int offset;
 	int max_offset;
-	unsigned int width:1;	/* 0 - narrow, 1 - wide */
-	unsigned int max_width:1;
-	unsigned int iu:1;	/* Information Units enabled */
-	unsigned int max_iu:1;
-	unsigned int dt:1;	/* DT clocking enabled */
-	unsigned int qas:1;	/* Quick Arbitration and Selection enabled */
-	unsigned int max_qas:1;
-	unsigned int wr_flow:1;	/* Write Flow control enabled */
-	unsigned int rd_strm:1;	/* Read streaming enabled */
-	unsigned int rti:1;	/* Retain Training Information */
-	unsigned int pcomp_en:1;/* Precompensation enabled */
-	unsigned int hold_mcs:1;/* Hold Margin Control Settings */
-	unsigned int initial_dv:1; /* DV done to this target yet  */
+	unsigned int width;	/* 0 - narrow, 1 - wide */
+	unsigned int max_width;
+	unsigned int iu;	/* Information Units enabled */
+	unsigned int max_iu;
+	unsigned int dt;	/* DT clocking enabled */
+	unsigned int qas;	/* Quick Arbitration and Selection enabled */
+	unsigned int max_qas;
+	unsigned int wr_flow;	/* Write Flow control enabled */
+	unsigned int rd_strm;	/* Read streaming enabled */
+	unsigned int rti;	/* Retain Training Information */
+	unsigned int pcomp_en;/* Precompensation enabled */
+	unsigned int hold_mcs;/* Hold Margin Control Settings */
+	unsigned int initial_dv; /* DV done to this target yet  */
 	unsigned long flags;	/* flags field for drivers to use */
 	/* Device Properties fields */
-	unsigned int support_sync:1; /* synchronous support */
-	unsigned int support_wide:1; /* wide support */
-	unsigned int support_dt:1; /* allows DT phases */
+	unsigned int support_sync; /* synchronous support */
+	unsigned int support_wide; /* wide support */
+	unsigned int support_dt; /* allows DT phases */
 	unsigned int support_dt_only; /* disallows ST phases */
 	unsigned int support_ius; /* support Information Units */
 	unsigned int support_qas; /* supports quick arbitration and selection */
 	/* Private Fields */
-	unsigned int dv_pending:1; /* Internal flag: DV Requested */
-	unsigned int dv_in_progress:1;	/* Internal: DV started */
+	unsigned int dv_pending; /* Internal flag: DV Requested */
+	unsigned int dv_in_progress;	/* Internal: DV started */
 	struct mutex dv_mutex; /* semaphore to serialise dv */
 };
 
@@ -134,17 +134,17 @@ struct spi_function_template {
 	 * wants the attributes displayed in sysfs.  If the show_ flag
 	 * is not set, the attribute will be private to the transport
 	 * class */
-	unsigned long	show_period:1;
-	unsigned long	show_offset:1;
-	unsigned long	show_width:1;
-	unsigned long	show_iu:1;
-	unsigned long	show_dt:1;
-	unsigned long	show_qas:1;
-	unsigned long	show_wr_flow:1;
-	unsigned long	show_rd_strm:1;
-	unsigned long	show_rti:1;
-	unsigned long	show_pcomp_en:1;
-	unsigned long	show_hold_mcs:1;
+	unsigned long	show_period;
+	unsigned long	show_offset;
+	unsigned long	show_width;
+	unsigned long	show_iu;
+	unsigned long	show_dt;
+	unsigned long	show_qas;
+	unsigned long	show_wr_flow;
+	unsigned long	show_rd_strm;
+	unsigned long	show_rti;
+	unsigned long	show_pcomp_en;
+	unsigned long	show_hold_mcs;
 };
 
 struct scsi_transport_template *spi_attach_transport(struct spi_function_template *);

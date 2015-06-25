@@ -195,16 +195,16 @@ struct kvm_mmu_memory_cache {
 union kvm_mmu_page_role {
 	unsigned word;
 	struct {
-		unsigned level:4;
-		unsigned cr4_pae:1;
-		unsigned quadrant:2;
-		unsigned pad_for_nice_hex_output:6;
-		unsigned direct:1;
-		unsigned access:3;
-		unsigned invalid:1;
-		unsigned nxe:1;
-		unsigned cr0_wp:1;
-		unsigned smep_andnot_wp:1;
+		unsigned level;
+		unsigned cr4_pae;
+		unsigned quadrant;
+		unsigned pad_for_nice_hex_output;
+		unsigned direct;
+		unsigned access;
+		unsigned invalid;
+		unsigned nxe;
+		unsigned cr0_wp;
+		unsigned smep_andnot_wp;
 	};
 };
 
