@@ -61,6 +61,30 @@ fw-shipped-$(CONFIG_DRM_RADEON) += radeon/R100_cp.bin radeon/R200_cp.bin \
 				   radeon/RV770_pfp.bin radeon/RV770_me.bin \
 				   radeon/RV730_pfp.bin radeon/RV730_me.bin \
 				   radeon/RV710_pfp.bin radeon/RV710_me.bin
+fw-shipped-$(CONFIG_DRM_NOUVEAU) += nvidia/gm200/acr/bl.bin nvidia/gm200/acr/ucode_load.bin \
+				    nvidia/gm200/acr/ucode_unload.bin nvidia/gm200/gr/fecs_bl.bin \
+				    nvidia/gm200/gr/fecs_data.bin nvidia/gm200/gr/fecs_inst.bin \
+				    nvidia/gm200/gr/fecs_sig.bin nvidia/gm200/gr/gpccs_bl.bin \
+				    nvidia/gm200/gr/gpccs_data.bin nvidia/gm200/gr/gpccs_inst.bin \
+				    nvidia/gm200/gr/gpccs_sig.bin nvidia/gm200/gr/sw_bundle_init.bin \
+				    nvidia/gm200/gr/sw_ctx.bin nvidia/gm200/gr/sw_method_init.bin \
+				    nvidia/gm200/gr/sw_nonctx.bin \
+				    nvidia/gm204/acr/bl.bin nvidia/gm204/acr/ucode_load.bin \
+				    nvidia/gm204/acr/ucode_unload.bin nvidia/gm204/gr/fecs_bl.bin \
+				    nvidia/gm204/gr/fecs_data.bin nvidia/gm204/gr/fecs_inst.bin \
+				    nvidia/gm204/gr/fecs_sig.bin nvidia/gm204/gr/gpccs_bl.bin \
+				    nvidia/gm204/gr/gpccs_data.bin nvidia/gm204/gr/gpccs_inst.bin \
+				    nvidia/gm204/gr/gpccs_sig.bin nvidia/gm204/gr/sw_bundle_init.bin \
+				    nvidia/gm204/gr/sw_ctx.bin nvidia/gm204/gr/sw_method_init.bin \
+				    nvidia/gm204/gr/sw_nonctx.bin \
+				    nvidia/gm206/acr/bl.bin nvidia/gm206/acr/ucode_load.bin \
+				    nvidia/gm206/acr/ucode_unload.bin nvidia/gm206/gr/fecs_bl.bin \
+				    nvidia/gm206/gr/fecs_data.bin nvidia/gm206/gr/fecs_inst.bin \
+				    nvidia/gm206/gr/fecs_sig.bin  nvidia/gm206/gr/gpccs_bl.bin \
+				    nvidia/gm206/gr/gpccs_data.bin nvidia/gm206/gr/gpccs_inst.bin \
+				    nvidia/gm206/gr/gpccs_sig.bin nvidia/gm206/gr/sw_bundle_init.bin \
+				    nvidia/gm206/gr/sw_ctx.bin nvidia/gm206/gr/sw_method_init.bin \
+				    nvidia/gm206/gr/sw_nonctx.bin
 fw-shipped-$(CONFIG_DVB_AV7110) += av7110/bootcode.bin
 fw-shipped-$(CONFIG_DVB_TTUSB_BUDGET) += ttusb-budget/dspbootcode.bin
 fw-shipped-$(CONFIG_E100) += e100/d101m_ucode.bin e100/d101s_ucode.bin \
