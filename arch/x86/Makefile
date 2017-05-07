@@ -87,7 +87,7 @@ else
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
 
-+ifneq ($(cc-name),clang)
+ifneq ($(cc-name),clang)
         # Align jump targets to 1 byte, not the default 16 bytes:
         KBUILD_CFLAGS += $(call cc-option,-falign-jumps=1)
 
