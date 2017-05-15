@@ -647,6 +647,10 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 		purge_fragmented_blocks_allcpus();
 
 	valist = llist_del_all(&vmap_purge_list);
+        //for llvm/clang-3.6~4.0, 5.0 's "-O2" compiling bug for llist_for_each_entry
+        if (valist == NULL)
+                goto end;
+
 	llist_for_each_entry(va, valist, purge_list) {
 		if (va->va_start < *start)
 			*start = va->va_start;
@@ -667,6 +671,8 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 			__free_vmap_area(va);
 		spin_unlock(&vmap_area_lock);
 	}
+//for llvm/clang-3.6~4.0, 5.0 's "-O2" compiling bug for llist_for_each_entry
+end:
 	spin_unlock(&purge_lock);
 }
 
