@@ -105,7 +105,7 @@ struct maxlatproc_data {
 	int current_prio;
 	long latency;
 	long timeroffset;
-	cycle_t timestamp;
+	u64 timestamp;
 };
 #endif
 
@@ -156,7 +156,7 @@ static DEFINE_PER_CPU(struct maxlatproc_data, timerandwakeup_maxlatproc);
 #endif
 
 void notrace latency_hist(int latency_type, int cpu, long latency,
-			  long timeroffset, cycle_t stop,
+			  long timeroffset, u64 stop,
 			  struct task_struct *p)
 {
 	struct hist_data *my_hist;
@@ -747,7 +747,7 @@ static notrace void probe_preemptirqsoff_hist(void *v, int reason,
 	int time_set = 0;
 
 	if (starthist) {
-		cycle_t uninitialized_var(start);
+		u64 uninitialized_var(start);
 
 		if (!preempt_count() && !irqs_disabled())
 			return;
@@ -783,12 +783,12 @@ static notrace void probe_preemptirqsoff_hist(void *v, int reason,
 		}
 #endif
 	} else {
-		cycle_t uninitialized_var(stop);
+		u64 uninitialized_var(stop);
 
 #ifdef CONFIG_INTERRUPT_OFF_HIST
 		if ((reason == IRQS_ON || reason == TRACE_STOP) &&
 		    per_cpu(hist_irqsoff_counting, cpu)) {
-			cycle_t start = per_cpu(hist_irqsoff_start, cpu);
+			u64 start = per_cpu(hist_irqsoff_start, cpu);
 
 			stop = ftrace_now(cpu);
 			time_set++;
@@ -806,7 +806,7 @@ static notrace void probe_preemptirqsoff_hist(void *v, int reason,
 #ifdef CONFIG_PREEMPT_OFF_HIST
 		if ((reason == PREEMPT_ON || reason == TRACE_STOP) &&
 		    per_cpu(hist_preemptoff_counting, cpu)) {
-			cycle_t start = per_cpu(hist_preemptoff_start, cpu);
+			u64 start = per_cpu(hist_preemptoff_start, cpu);
 
 			if (!(time_set++))
 				stop = ftrace_now(cpu);
@@ -825,7 +825,7 @@ static notrace void probe_preemptirqsoff_hist(void *v, int reason,
 		if ((!per_cpu(hist_irqsoff_counting, cpu) ||
 		     !per_cpu(hist_preemptoff_counting, cpu)) &&
 		   per_cpu(hist_preemptirqsoff_counting, cpu)) {
-			cycle_t start = per_cpu(hist_preemptirqsoff_start, cpu);
+			u64 start = per_cpu(hist_preemptirqsoff_start, cpu);
 
 			if (!time_set)
 				stop = ftrace_now(cpu);
@@ -912,7 +912,7 @@ static notrace void probe_wakeup_latency_hist_stop(void *v,
 	unsigned long flags;
 	int cpu = task_cpu(next);
 	long latency;
-	cycle_t stop;
+	u64 stop;
 	struct task_struct *cpu_wakeup_task;
 
 	raw_spin_lock_irqsave(&wakeup_lock, flags);
@@ -984,7 +984,7 @@ static notrace void probe_hrtimer_interrupt(void *v, int cpu,
 	    (task->prio == curr->prio &&
 	    !cpumask_test_cpu(cpu, &task->cpus_allowed)))) {
 		long latency;
-		cycle_t now;
+		u64 now;
 
 		if (missed_timer_offsets_pid) {
 			if (likely(missed_timer_offsets_pid !=
