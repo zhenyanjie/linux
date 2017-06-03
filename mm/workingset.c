@@ -10,6 +10,7 @@
 #include <linux/atomic.h>
 #include <linux/module.h>
 #include <linux/swap.h>
+#include <linux/locallock.h>
 #include <linux/dax.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
@@ -355,13 +356,17 @@ void workingset_update_node(struct radix_tree_node *node, void *private)
 	 * as node->private_list is protected by &mapping->tree_lock.
 	 */
 	if (node->count && node->count == node->exceptional) {
+	    local_lock_irq(shadow_lock);
 		if (list_empty(&node->private_list)) {
 			node->private_data = mapping;
-			list_lru_add(&shadow_nodes, &node->private_list);
+			list_lru_add(&__shadow_nodes, &node->private_list);
 		}
+	    local_unlock_irq(shadow_lock);
 	} else {
+	    local_lock_irq(shadow_lock);
 		if (!list_empty(&node->private_list))
-			list_lru_del(&shadow_nodes, &node->private_list);
+			list_lru_del(&__shadow_nodes, &node->private_list);
+	    local_unlock_irq(shadow_lock);
 	}
 }
 
@@ -480,9 +485,9 @@ out_invalid:
 	spin_unlock(&mapping->tree_lock);
 	ret = LRU_REMOVED_RETRY;
 out:
-	local_unlock_irq(workingset_shadow_lock);
+	local_unlock_irq(shadow_lock);
 	cond_resched();
-	local_lock_irq(workingset_shadow_lock);
+	local_lock_irq(shadow_lock);
 	spin_lock(lru_lock);
 	return ret;
 }
@@ -494,7 +499,7 @@ static unsigned long scan_shadow_nodes(struct shrinker *shrinker,
 
 	/* list_lru lock nests inside IRQ-safe mapping->tree_lock */
 	local_lock_irq(shadow_lock);
-	ret = list_lru_shrink_walk(&shadow_nodes, sc, shadow_lru_isolate, NULL);
+	ret = list_lru_shrink_walk(&__shadow_nodes, sc, shadow_lru_isolate, NULL);
 	local_unlock_irq(shadow_lock);
 	return ret;
 }
