@@ -96,9 +96,6 @@ static inline void cpu_maps_update_done(void)
 #endif /* CONFIG_SMP */
 extern struct bus_type cpu_subsys;
 
-static inline void pin_current_cpu(void) { }
-static inline void unpin_current_cpu(void) { }
-
 #ifdef CONFIG_HOTPLUG_CPU
 /* Stop CPUs going up and down. */
 
@@ -108,6 +105,8 @@ extern void get_online_cpus(void);
 extern void put_online_cpus(void);
 extern void cpu_hotplug_disable(void);
 extern void cpu_hotplug_enable(void);
+extern void pin_current_cpu(void);
+extern void unpin_current_cpu(void);
 void clear_tasks_mm_cpumask(int cpu);
 int cpu_down(unsigned int cpu);
 
@@ -119,6 +118,8 @@ static inline void cpu_hotplug_done(void) {}
 #define put_online_cpus()	do { } while (0)
 #define cpu_hotplug_disable()	do { } while (0)
 #define cpu_hotplug_enable()	do { } while (0)
+static inline void pin_current_cpu(void) { }
+static inline void unpin_current_cpu(void) { }
 #endif		/* CONFIG_HOTPLUG_CPU */
 
 #ifdef CONFIG_PM_SLEEP_SMP
