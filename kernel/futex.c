@@ -1300,7 +1300,8 @@ static int wake_futex_pi(u32 __user *uaddr, u32 uval, struct futex_q *this,
 	struct task_struct *new_owner;
 	struct futex_pi_state *pi_state = this->pi_state;
 	u32 uninitialized_var(curval), newval;
-    DEFINE_WAKE_Q(wake_sleeper_q);
+        DEFINE_WAKE_Q(wake_q);
+        DEFINE_WAKE_Q(wake_sleeper_q);
 	bool deboost;
 	int ret = 0;
 
