@@ -1819,14 +1819,6 @@ static void mce_start_timer(unsigned int cpu, struct hrtimer *t)
 			0, HRTIMER_MODE_REL_PINNED);
 }
 
-static void __mcheck_cpu_setup_timer(void)
-{
-	struct timer_list *t = this_cpu_ptr(&mce_timer);
-	unsigned int cpu = smp_processor_id();
-
-	setup_pinned_timer(t, mce_timer_fn, cpu);
-}
-
 static void __mcheck_cpu_init_timer(void)
 {
         struct hrtimer *t = this_cpu_ptr(&mce_timer);
@@ -1879,7 +1871,7 @@ void mcheck_cpu_init(struct cpuinfo_x86 *c)
 	__mcheck_cpu_init_generic();
 	__mcheck_cpu_init_vendor(c);
 	__mcheck_cpu_init_clear_banks();
-	__mcheck_cpu_setup_timer();
+	__mcheck_cpu_init_timer();
 }
 
 /*
@@ -2597,7 +2589,7 @@ static int mce_cpu_dead(unsigned int cpu)
 
 static int mce_cpu_online(unsigned int cpu)
 {
-	struct timer_list *t = &per_cpu(mce_timer, cpu);
+	struct hrtimer *t = &per_cpu(mce_timer, cpu);
 	int ret;
 
 	mce_device_create(cpu);
@@ -2614,10 +2606,10 @@ static int mce_cpu_online(unsigned int cpu)
 
 static int mce_cpu_pre_down(unsigned int cpu)
 {
-	struct timer_list *t = &per_cpu(mce_timer, cpu);
+	struct hrtimer *t = &per_cpu(mce_timer, cpu);
 
 	mce_disable_cpu();
-	del_timer_sync(t);
+	hrtimer_cancel(t);
 	mce_threshold_remove_device(cpu);
 	mce_device_remove(cpu);
 	return 0;
