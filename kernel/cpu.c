@@ -1054,6 +1054,7 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
 	bool hasdied = false;
 	int mycpu;
 	cpumask_var_t cpumask;
+	cpumask_var_t cpumask_org;
 
 	if (num_online_cpus() == 1)
 		return -EBUSY;
@@ -1064,6 +1065,12 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
 	/* Move the downtaker off the unplug cpu */
 	if (!alloc_cpumask_var(&cpumask, GFP_KERNEL))
 		return -ENOMEM;
+	if (!alloc_cpumask_var(&cpumask_org, GFP_KERNEL))  {
+		free_cpumask_var(cpumask);
+		return -ENOMEM;
+	}
+
+	cpumask_copy(cpumask_org, tsk_cpus_allowed(current));
 	cpumask_andnot(cpumask, cpu_online_mask, cpumask_of(cpu));
 	set_cpus_allowed_ptr(current, cpumask);
 	free_cpumask_var(cpumask);
@@ -1072,7 +1079,8 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
 	if (mycpu == cpu) {
 		printk(KERN_ERR "Yuck! Still on unplug CPU\n!");
 		migrate_enable();
-		return -EBUSY;
+		ret = -EBUSY;
+		goto restore_cpus;
 	}
 
 	cpu_hotplug_begin();
@@ -1122,7 +1130,10 @@ out:
 	cpu_unplug_done(cpu);
 out_cancel:
 	cpu_hotplug_done();
-    migrate_enable();
+        migrate_enable();
+restore_cpus:
+	set_cpus_allowed_ptr(current, cpumask_org);
+	free_cpumask_var(cpumask_org);
 	return ret;
 }
 
