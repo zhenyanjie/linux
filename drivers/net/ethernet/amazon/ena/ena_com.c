@@ -36,9 +36,9 @@
 /*****************************************************************************/
 
 /* Timeout in micro-sec */
-#define ADMIN_CMD_TIMEOUT_US (1000000)
+#define ADMIN_CMD_TIMEOUT_US (3000000)
 
-#define ENA_ASYNC_QUEUE_DEPTH 4
+#define ENA_ASYNC_QUEUE_DEPTH 16
 #define ENA_ADMIN_QUEUE_DEPTH 32
 
 #define MIN_ENA_VER (((ENA_COMMON_SPEC_VERSION_MAJOR) << \
@@ -60,6 +60,8 @@
 #define ENA_DMA_ADDR_TO_UINT32_HIGH(x)	((u32)(((u64)(x)) >> 32))
 
 #define ENA_MMIO_READ_TIMEOUT 0xFFFFFFFF
+
+#define ENA_REGS_ADMIN_INTR_MASK 1
 
 /*****************************************************************************/
 /*****************************************************************************/
@@ -232,11 +234,9 @@ static struct ena_comp_ctx *__ena_com_submit_admin_cmd(struct ena_com_admin_queu
 	tail_masked = admin_queue->sq.tail & queue_size_mask;
 
 	/* In case of queue FULL */
-	cnt = admin_queue->sq.tail - admin_queue->sq.head;
+	cnt = atomic_read(&admin_queue->outstanding_cmds);
 	if (cnt >= admin_queue->q_depth) {
-		pr_debug("admin queue is FULL (tail %d head %d depth: %d)\n",
-			 admin_queue->sq.tail, admin_queue->sq.head,
-			 admin_queue->q_depth);
+		pr_debug("admin queue is full.\n");
 		admin_queue->stats.out_of_space++;
 		return ERR_PTR(-ENOSPC);
 	}
@@ -508,15 +508,20 @@ static int ena_com_comp_status_to_errno(u8 comp_status)
 static int ena_com_wait_and_process_admin_cq_polling(struct ena_comp_ctx *comp_ctx,
 						     struct ena_com_admin_queue *admin_queue)
 {
-	unsigned long flags;
-	u32 start_time;
+	unsigned long flags, timeout;
 	int ret;
 
-	start_time = ((u32)jiffies_to_usecs(jiffies));
+	timeout = jiffies + ADMIN_CMD_TIMEOUT_US;
 
-	while (comp_ctx->status == ENA_CMD_SUBMITTED) {
-		if ((((u32)jiffies_to_usecs(jiffies)) - start_time) >
-		    ADMIN_CMD_TIMEOUT_US) {
+	while (1) {
+		spin_lock_irqsave(&admin_queue->q_lock, flags);
+		ena_com_handle_admin_completion(admin_queue);
+		spin_unlock_irqrestore(&admin_queue->q_lock, flags);
+
+		if (comp_ctx->status != ENA_CMD_SUBMITTED)
+			break;
+
+		if (time_is_before_jiffies(timeout)) {
 			pr_err("Wait for completion (polling) timeout\n");
 			/* ENA didn't have any completion */
 			spin_lock_irqsave(&admin_queue->q_lock, flags);
@@ -527,10 +532,6 @@ static int ena_com_wait_and_process_admin_cq_polling(struct ena_comp_ctx *comp_c
 			ret = -ETIME;
 			goto err;
 		}
-
-		spin_lock_irqsave(&admin_queue->q_lock, flags);
-		ena_com_handle_admin_completion(admin_queue);
-		spin_unlock_irqrestore(&admin_queue->q_lock, flags);
 
 		msleep(100);
 	}
@@ -784,7 +785,7 @@ static int ena_com_get_feature_ex(struct ena_com_dev *ena_dev,
 	int ret;
 
 	if (!ena_com_check_supported_feature_id(ena_dev, feature_id)) {
-		pr_info("Feature %d isn't supported\n", feature_id);
+		pr_debug("Feature %d isn't supported\n", feature_id);
 		return -EPERM;
 	}
 
@@ -1126,7 +1127,13 @@ int ena_com_execute_admin_command(struct ena_com_admin_queue *admin_queue,
 	comp_ctx = ena_com_submit_admin_cmd(admin_queue, cmd, cmd_size,
 					    comp, comp_size);
 	if (unlikely(IS_ERR(comp_ctx))) {
-		pr_err("Failed to submit command [%ld]\n", PTR_ERR(comp_ctx));
+		if (comp_ctx == ERR_PTR(-ENODEV))
+			pr_debug("Failed to submit command [%ld]\n",
+				 PTR_ERR(comp_ctx));
+		else
+			pr_err("Failed to submit command [%ld]\n",
+			       PTR_ERR(comp_ctx));
+
 		return PTR_ERR(comp_ctx);
 	}
 
@@ -1449,6 +1456,12 @@ void ena_com_admin_destroy(struct ena_com_dev *ena_dev)
 
 void ena_com_set_admin_polling_mode(struct ena_com_dev *ena_dev, bool polling)
 {
+	u32 mask_value = 0;
+
+	if (polling)
+		mask_value = ENA_REGS_ADMIN_INTR_MASK;
+
+	writel(mask_value, ena_dev->reg_bar + ENA_REGS_INTR_MASK_OFF);
 	ena_dev->admin_queue.polling = polling;
 }
 
@@ -1895,7 +1908,7 @@ int ena_com_set_dev_mtu(struct ena_com_dev *ena_dev, int mtu)
 	int ret;
 
 	if (!ena_com_check_supported_feature_id(ena_dev, ENA_ADMIN_MTU)) {
-		pr_info("Feature %d isn't supported\n", ENA_ADMIN_MTU);
+		pr_debug("Feature %d isn't supported\n", ENA_ADMIN_MTU);
 		return -EPERM;
 	}
 
@@ -1948,8 +1961,8 @@ int ena_com_set_hash_function(struct ena_com_dev *ena_dev)
 
 	if (!ena_com_check_supported_feature_id(ena_dev,
 						ENA_ADMIN_RSS_HASH_FUNCTION)) {
-		pr_info("Feature %d isn't supported\n",
-			ENA_ADMIN_RSS_HASH_FUNCTION);
+		pr_debug("Feature %d isn't supported\n",
+			 ENA_ADMIN_RSS_HASH_FUNCTION);
 		return -EPERM;
 	}
 
@@ -2112,7 +2125,8 @@ int ena_com_set_hash_ctrl(struct ena_com_dev *ena_dev)
 
 	if (!ena_com_check_supported_feature_id(ena_dev,
 						ENA_ADMIN_RSS_HASH_INPUT)) {
-		pr_info("Feature %d isn't supported\n", ENA_ADMIN_RSS_HASH_INPUT);
+		pr_debug("Feature %d isn't supported\n",
+			 ENA_ADMIN_RSS_HASH_INPUT);
 		return -EPERM;
 	}
 
@@ -2184,7 +2198,7 @@ int ena_com_set_default_hash_ctrl(struct ena_com_dev *ena_dev)
 	hash_ctrl->selected_fields[ENA_ADMIN_RSS_IP4_FRAG].fields =
 		ENA_ADMIN_RSS_L3_SA | ENA_ADMIN_RSS_L3_DA;
 
-	hash_ctrl->selected_fields[ENA_ADMIN_RSS_IP4_FRAG].fields =
+	hash_ctrl->selected_fields[ENA_ADMIN_RSS_NOT_IP].fields =
 		ENA_ADMIN_RSS_L2_DA | ENA_ADMIN_RSS_L2_SA;
 
 	for (i = 0; i < ENA_ADMIN_RSS_PROTO_NUM; i++) {
@@ -2270,8 +2284,8 @@ int ena_com_indirect_table_set(struct ena_com_dev *ena_dev)
 
 	if (!ena_com_check_supported_feature_id(
 		    ena_dev, ENA_ADMIN_RSS_REDIRECTION_TABLE_CONFIG)) {
-		pr_info("Feature %d isn't supported\n",
-			ENA_ADMIN_RSS_REDIRECTION_TABLE_CONFIG);
+		pr_debug("Feature %d isn't supported\n",
+			 ENA_ADMIN_RSS_REDIRECTION_TABLE_CONFIG);
 		return -EPERM;
 	}
 
@@ -2444,11 +2458,9 @@ int ena_com_set_host_attributes(struct ena_com_dev *ena_dev)
 
 	int ret;
 
-	if (!ena_com_check_supported_feature_id(ena_dev,
-						ENA_ADMIN_HOST_ATTR_CONFIG)) {
-		pr_warn("Set host attribute isn't supported\n");
-		return -EPERM;
-	}
+	/* Host attribute config is called before ena_com_get_dev_attr_feat
+	 * so ena_com can't check if the feature is supported.
+	 */
 
 	memset(&cmd, 0x0, sizeof(cmd));
 	admin_queue = &ena_dev->admin_queue;
@@ -2542,8 +2554,8 @@ int ena_com_init_interrupt_moderation(struct ena_com_dev *ena_dev)
 
 	if (rc) {
 		if (rc == -EPERM) {
-			pr_info("Feature %d isn't supported\n",
-				ENA_ADMIN_INTERRUPT_MODERATION);
+			pr_debug("Feature %d isn't supported\n",
+				 ENA_ADMIN_INTERRUPT_MODERATION);
 			rc = 0;
 		} else {
 			pr_err("Failed to get interrupt moderation admin cmd. rc: %d\n",

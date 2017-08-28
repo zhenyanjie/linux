@@ -9,7 +9,7 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
 #include <linux/list.h>
@@ -753,6 +753,10 @@ static int caif_connect(struct socket *sock, struct sockaddr *uaddr,
 	struct net_device *dev;
 
 	lock_sock(sk);
+
+	err = -EINVAL;
+	if (addr_len < offsetofend(struct sockaddr, sa_family))
+		goto out;
 
 	err = -EAFNOSUPPORT;
 	if (uaddr->sa_family != AF_CAIF)

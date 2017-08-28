@@ -79,6 +79,7 @@ struct amd_nb {
 
 /* The maximal number of PEBS events: */
 #define MAX_PEBS_EVENTS		8
+#define PEBS_COUNTER_MASK	((1ULL << MAX_PEBS_EVENTS) - 1)
 
 /*
  * Flags PEBS can handle without an PMI.
@@ -604,7 +605,7 @@ struct x86_pmu {
 	u64		lbr_sel_mask;		   /* LBR_SELECT valid bits */
 	const int	*lbr_sel_map;		   /* lbr_select mappings */
 	bool		lbr_double_abort;	   /* duplicated lbr aborts */
-	bool		lbr_pt_coexist;		   /* LBR may coexist with PT */
+	bool		lbr_pt_coexist;		   /* (LBR|BTS) may coexist with PT */
 
 	/*
 	 * Intel PT/LBR/BTS are exclusive

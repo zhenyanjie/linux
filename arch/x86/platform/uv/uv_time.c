@@ -30,7 +30,7 @@
 
 #define RTC_NAME		"sgi_rtc"
 
-static cycle_t uv_read_rtc(struct clocksource *cs);
+static u64 uv_read_rtc(struct clocksource *cs);
 static int uv_rtc_next_event(unsigned long, struct clock_event_device *);
 static int uv_rtc_shutdown(struct clock_event_device *evt);
 
@@ -38,7 +38,7 @@ static struct clocksource clocksource_uv = {
 	.name		= RTC_NAME,
 	.rating		= 299,
 	.read		= uv_read_rtc,
-	.mask		= (cycle_t)UVH_RTC_REAL_TIME_CLOCK_MASK,
+	.mask		= (u64)UVH_RTC_REAL_TIME_CLOCK_MASK,
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
@@ -296,10 +296,10 @@ static int uv_rtc_unset_timer(int cpu, int force)
  * cachelines of it's own page.  This allows faster simultaneous reads
  * from a given socket.
  */
-static cycle_t uv_read_rtc(struct clocksource *cs)
+static u64 uv_read_rtc(struct clocksource *cs)
 {
 	unsigned long offset;
-	cycle_t cycles;
+	u64 cycles;
 
 	preempt_disable();
 	if (uv_get_min_hub_revision_id() == 1)
@@ -307,9 +307,8 @@ static cycle_t uv_read_rtc(struct clocksource *cs)
 	else
 		offset = (uv_blade_processor_id() * L1_CACHE_BYTES) % PAGE_SIZE;
 
-	cycles = (cycle_t)uv_read_local_mmr(UVH_RTC | offset);
+	cycles = (u64)uv_read_local_mmr(UVH_RTC | offset);
 	preempt_enable();
-
 	return cycles;
 }
 
@@ -395,9 +394,11 @@ static __init int uv_rtc_setup_clock(void)
 
 	clock_event_device_uv.min_delta_ns = NSEC_PER_SEC /
 						sn_rtc_cycles_per_second;
+	clock_event_device_uv.min_delta_ticks = 1;
 
 	clock_event_device_uv.max_delta_ns = clocksource_uv.mask *
 				(NSEC_PER_SEC / sn_rtc_cycles_per_second);
+	clock_event_device_uv.max_delta_ticks = clocksource_uv.mask;
 
 	rc = schedule_on_each_cpu(uv_rtc_register_clockevents);
 	if (rc) {

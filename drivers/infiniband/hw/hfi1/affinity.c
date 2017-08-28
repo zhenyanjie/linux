@@ -125,6 +125,7 @@ int node_affinity_init(void)
 				cpumask_weight(topology_sibling_cpumask(
 					cpumask_first(&node_affinity.proc.mask)
 					));
+	node_affinity.num_possible_nodes = num_possible_nodes();
 	node_affinity.num_online_nodes = num_online_nodes();
 	node_affinity.num_online_cpus = num_online_cpus();
 
@@ -135,7 +136,7 @@ int node_affinity_init(void)
 	 */
 	init_real_cpu_mask();
 
-	hfi1_per_node_cntr = kcalloc(num_possible_nodes(),
+	hfi1_per_node_cntr = kcalloc(node_affinity.num_possible_nodes,
 				     sizeof(*hfi1_per_node_cntr), GFP_KERNEL);
 	if (!hfi1_per_node_cntr)
 		return -ENOMEM;
@@ -575,7 +576,7 @@ int hfi1_get_proc_affinity(int node)
 	struct hfi1_affinity_node *entry;
 	cpumask_var_t diff, hw_thread_mask, available_mask, intrs_mask;
 	const struct cpumask *node_mask,
-		*proc_mask = tsk_cpus_allowed(current);
+		*proc_mask = current->cpus_ptr;
 	struct hfi1_affinity_node_list *affinity = &node_affinity;
 	struct cpu_mask_set *set = &affinity->proc;
 
@@ -583,7 +584,7 @@ int hfi1_get_proc_affinity(int node)
 	 * check whether process/context affinity has already
 	 * been set
 	 */
-	if (cpumask_weight(proc_mask) == 1) {
+	if (current->nr_cpus_allowed == 1) {
 		hfi1_cdbg(PROC, "PID %u %s affinity set to CPU %*pbl",
 			  current->pid, current->comm,
 			  cpumask_pr_args(proc_mask));
@@ -594,7 +595,7 @@ int hfi1_get_proc_affinity(int node)
 		cpu = cpumask_first(proc_mask);
 		cpumask_set_cpu(cpu, &set->used);
 		goto done;
-	} else if (cpumask_weight(proc_mask) < cpumask_weight(&set->mask)) {
+	} else if (current->nr_cpus_allowed < cpumask_weight(&set->mask)) {
 		hfi1_cdbg(PROC, "PID %u %s affinity set to CPU set(s) %*pbl",
 			  current->pid, current->comm,
 			  cpumask_pr_args(proc_mask));

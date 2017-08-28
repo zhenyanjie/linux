@@ -7,7 +7,7 @@
  * Copyright (C) 2001 MIPS Technologies, Inc.
  */
 #include <linux/kernel.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/signal.h>
 #include <linux/export.h>
 #include <asm/branch.h>
@@ -18,7 +18,7 @@
 #include <asm/inst.h>
 #include <asm/mips-r2-to-r6-emul.h>
 #include <asm/ptrace.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /*
  * Calculate and return exception PC in case of branch delay slot
@@ -804,8 +804,10 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 			break;
 		}
 		/* Compact branch: BNEZC || JIALC */
-		if (insn.i_format.rs)
+		if (!insn.i_format.rs) {
+			/* JIALC: set $31/ra */
 			regs->regs[31] = epc + 4;
+		}
 		regs->cp0_epc += 8;
 		break;
 #endif

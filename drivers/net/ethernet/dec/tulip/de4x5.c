@@ -472,7 +472,7 @@
 #include <asm/dma.h>
 #include <asm/byteorder.h>
 #include <asm/unaligned.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #ifdef CONFIG_PPC_PMAC
 #include <asm/machdep.h>
 #endif /* CONFIG_PPC_PMAC */
@@ -1015,7 +1015,7 @@ static int     compact_infoblock(struct net_device *dev, u_char count, u_char *p
 
 static int io=0x0;/* EDIT THIS LINE FOR YOUR CONFIGURATION IF NEEDED        */
 
-module_param(io, int, 0);
+module_param_hw(io, int, ioport, 0);
 module_param(de4x5_debug, int, 0);
 module_param(dec_only, int, 0);
 module_param(args, charp, 0);
@@ -1085,7 +1085,6 @@ static const struct net_device_ops de4x5_netdev_ops = {
     .ndo_get_stats	= de4x5_get_stats,
     .ndo_set_rx_mode	= set_multicast_list,
     .ndo_do_ioctl	= de4x5_ioctl,
-    .ndo_change_mtu	= eth_change_mtu,
     .ndo_set_mac_address= eth_mac_addr,
     .ndo_validate_addr	= eth_validate_addr,
 };

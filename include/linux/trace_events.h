@@ -23,6 +23,10 @@ const char *trace_print_symbols_seq(struct trace_seq *p, unsigned long val,
 				    const struct trace_print_flags *symbol_array);
 
 #if BITS_PER_LONG == 32
+const char *trace_print_flags_seq_u64(struct trace_seq *p, const char *delim,
+		      unsigned long long flags,
+		      const struct trace_print_flags_u64 *flag_array);
+
 const char *trace_print_symbols_seq_u64(struct trace_seq *p,
 					unsigned long long val,
 					const struct trace_print_flags_u64
@@ -33,7 +37,8 @@ const char *trace_print_bitmask_seq(struct trace_seq *p, void *bitmask_ptr,
 				    unsigned int bitmask_size);
 
 const char *trace_print_hex_seq(struct trace_seq *p,
-				const unsigned char *buf, int len);
+				const unsigned char *buf, int len,
+				bool concatenate);
 
 const char *trace_print_array_seq(struct trace_seq *p,
 				   const void *buf, int count,
@@ -136,16 +141,7 @@ enum print_line_t {
 	TRACE_TYPE_NO_CONSUME	= 3	/* Handled but ask to not consume */
 };
 
-/*
- * Several functions return TRACE_TYPE_PARTIAL_LINE if the trace_seq
- * overflowed, and TRACE_TYPE_HANDLED otherwise. This helper function
- * simplifies those functions and keeps them in sync.
- */
-static inline enum print_line_t trace_handle_return(struct trace_seq *s)
-{
-	return trace_seq_has_overflowed(s) ?
-		TRACE_TYPE_PARTIAL_LINE : TRACE_TYPE_HANDLED;
-}
+enum print_line_t trace_handle_return(struct trace_seq *s);
 
 void tracing_generic_entry_update(struct trace_entry *entry,
 				  unsigned long flags,
@@ -304,6 +300,7 @@ enum {
 	EVENT_FILE_FL_TRIGGER_MODE_BIT,
 	EVENT_FILE_FL_TRIGGER_COND_BIT,
 	EVENT_FILE_FL_PID_FILTER_BIT,
+	EVENT_FILE_FL_NO_DISCARD_BIT,
 };
 
 /*
@@ -318,6 +315,7 @@ enum {
  *  TRIGGER_MODE  - When set, invoke the triggers associated with the event
  *  TRIGGER_COND  - When set, one or more triggers has an associated filter
  *  PID_FILTER    - When set, the event is filtered based on pid
+ *  NO_DISCARD    - When set, do not discard events, something needs them later
  */
 enum {
 	EVENT_FILE_FL_ENABLED		= (1 << EVENT_FILE_FL_ENABLED_BIT),
@@ -329,6 +327,7 @@ enum {
 	EVENT_FILE_FL_TRIGGER_MODE	= (1 << EVENT_FILE_FL_TRIGGER_MODE_BIT),
 	EVENT_FILE_FL_TRIGGER_COND	= (1 << EVENT_FILE_FL_TRIGGER_COND_BIT),
 	EVENT_FILE_FL_PID_FILTER	= (1 << EVENT_FILE_FL_PID_FILTER_BIT),
+	EVENT_FILE_FL_NO_DISCARD	= (1 << EVENT_FILE_FL_NO_DISCARD_BIT),
 };
 
 struct trace_event_file {
@@ -398,11 +397,13 @@ enum event_trigger_type {
 
 extern int filter_match_preds(struct event_filter *filter, void *rec);
 
-extern enum event_trigger_type event_triggers_call(struct trace_event_file *file,
-						   void *rec);
-extern void event_triggers_post_call(struct trace_event_file *file,
-				     enum event_trigger_type tt,
-				     void *rec);
+extern enum event_trigger_type
+event_triggers_call(struct trace_event_file *file, void *rec,
+		    struct ring_buffer_event *event);
+extern void
+event_triggers_post_call(struct trace_event_file *file,
+			 enum event_trigger_type tt,
+			 void *rec, struct ring_buffer_event *event);
 
 bool trace_event_ignore_this_pid(struct trace_event_file *trace_file);
 
@@ -422,7 +423,7 @@ trace_trigger_soft_disabled(struct trace_event_file *file)
 
 	if (!(eflags & EVENT_FILE_FL_TRIGGER_COND)) {
 		if (eflags & EVENT_FILE_FL_TRIGGER_MODE)
-			event_triggers_call(file, NULL);
+			event_triggers_call(file, NULL, NULL);
 		if (eflags & EVENT_FILE_FL_SOFT_DISABLED)
 			return true;
 		if (eflags & EVENT_FILE_FL_PID_FILTER)

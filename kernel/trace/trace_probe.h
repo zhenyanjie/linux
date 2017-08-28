@@ -42,7 +42,6 @@
 
 #define MAX_TRACE_ARGS		128
 #define MAX_ARGSTR_LEN		63
-#define MAX_EVENT_NAME_LEN	64
 #define MAX_STRING_SIZE		PATH_MAX
 
 /* Reserved field names */
@@ -248,7 +247,7 @@ ASSIGN_FETCH_FUNC(file_offset, ftype),			\
 #define FETCH_TYPE_STRING	0
 #define FETCH_TYPE_STRSIZE	1
 
-#ifdef CONFIG_KPROBE_EVENT
+#ifdef CONFIG_KPROBE_EVENTS
 struct symbol_cache;
 unsigned long update_symbol_cache(struct symbol_cache *sc);
 void free_symbol_cache(struct symbol_cache *sc);
@@ -278,7 +277,7 @@ alloc_symbol_cache(const char *sym, long offset)
 {
 	return NULL;
 }
-#endif /* CONFIG_KPROBE_EVENT */
+#endif /* CONFIG_KPROBE_EVENTS */
 
 struct probe_arg {
 	struct fetch_param	fetch;
@@ -355,12 +354,6 @@ extern void traceprobe_update_arg(struct probe_arg *arg);
 extern void traceprobe_free_probe_arg(struct probe_arg *arg);
 
 extern int traceprobe_split_symbol_offset(char *symbol, unsigned long *offset);
-
-extern ssize_t traceprobe_probes_write(struct file *file,
-		const char __user *buffer, size_t count, loff_t *ppos,
-		int (*createfn)(int, char**));
-
-extern int traceprobe_command(const char *buf, int (*createfn)(int, char**));
 
 /* Sum up total data length for dynamic arraies (strings) */
 static nokprobe_inline int

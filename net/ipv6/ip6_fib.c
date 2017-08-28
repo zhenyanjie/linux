@@ -289,8 +289,7 @@ struct dst_entry *fib6_rule_lookup(struct net *net, struct flowi6 *fl6,
 	struct rt6_info *rt;
 
 	rt = lookup(net, net->ipv6.fib6_main_tbl, fl6, flags);
-	if (rt->rt6i_flags & RTF_REJECT &&
-	    rt->dst.error == -EAGAIN) {
+	if (rt->dst.error == -EAGAIN) {
 		ip6_rt_put(rt);
 		rt = net->ipv6.ip6_null_entry;
 		dst_hold(&rt->dst);
@@ -318,6 +317,16 @@ static int fib6_dump_node(struct fib6_walker *w)
 			w->leaf = rt;
 			return 1;
 		}
+
+		/* Multipath routes are dumped in one route with the
+		 * RTA_MULTIPATH attribute. Jump 'rt' to point to the
+		 * last sibling of this route (no need to dump the
+		 * sibling routes again)
+		 */
+		if (rt->rt6i_nsiblings)
+			rt = list_last_entry(&rt->rt6i_siblings,
+					     struct rt6_info,
+					     rt6i_siblings);
 	}
 	w->leaf = NULL;
 	return 0;
@@ -746,6 +755,9 @@ static int fib6_add_rt2node(struct fib6_node *fn, struct rt6_info *rt,
 	u16 nlflags = NLM_F_EXCL;
 	int err;
 
+	if (info->nlh && (info->nlh->nlmsg_flags & NLM_F_APPEND))
+		nlflags |= NLM_F_APPEND;
+
 	ins = &fn->leaf;
 
 	for (iter = fn->leaf; iter; iter = iter->dst.rt6_next) {
@@ -868,7 +880,8 @@ add:
 		*ins = rt;
 		rt->rt6i_node = fn;
 		atomic_inc(&rt->rt6i_ref);
-		inet6_rt_notify(RTM_NEWROUTE, rt, info, nlflags);
+		if (!info->skip_notify)
+			inet6_rt_notify(RTM_NEWROUTE, rt, info, nlflags);
 		info->nl_net->ipv6.rt6_stats->fib_rt_entries++;
 
 		if (!(fn->fn_flags & RTN_RTINFO)) {
@@ -894,7 +907,8 @@ add:
 		rt->rt6i_node = fn;
 		rt->dst.rt6_next = iter->dst.rt6_next;
 		atomic_inc(&rt->rt6i_ref);
-		inet6_rt_notify(RTM_NEWROUTE, rt, info, NLM_F_REPLACE);
+		if (!info->skip_notify)
+			inet6_rt_notify(RTM_NEWROUTE, rt, info, NLM_F_REPLACE);
 		if (!(fn->fn_flags & RTN_RTINFO)) {
 			info->nl_net->ipv6.rt6_stats->fib_route_nodes++;
 			fn->fn_flags |= RTN_RTINFO;
@@ -908,6 +922,8 @@ add:
 			ins = &rt->dst.rt6_next;
 			iter = *ins;
 			while (iter) {
+				if (iter->rt6i_metric > rt->rt6i_metric)
+					break;
 				if (rt6_qualify_for_ecmp(iter)) {
 					*ins = iter->dst.rt6_next;
 					fib6_purge_rt(iter, fn, info->nl_net);
@@ -1439,7 +1455,8 @@ static void fib6_del_route(struct fib6_node *fn, struct rt6_info **rtp,
 
 	fib6_purge_rt(rt, fn, net);
 
-	inet6_rt_notify(RTM_DELROUTE, rt, info, 0);
+	if (!info->skip_notify)
+		inet6_rt_notify(RTM_DELROUTE, rt, info, 0);
 	rt6_release(rt);
 }
 

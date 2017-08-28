@@ -120,7 +120,7 @@ extern void srcu_init_notifier_head(struct srcu_notifier_head *nh);
 		RAW_NOTIFIER_INIT(name)
 
 #define _SRCU_NOTIFIER_HEAD(name, mod)				\
-	static DEFINE_PER_CPU(struct srcu_struct_array,		\
+	static DEFINE_PER_CPU(struct srcu_array,		\
 			name##_head_srcu_array);		\
 	mod struct srcu_notifier_head name =			\
 			SRCU_NOTIFIER_INIT(name, name##_head_srcu_array)

@@ -6,6 +6,7 @@
 #include <linux/list.h>
 #include <linux/stddef.h>
 #include <linux/spinlock.h>
+
 #include <asm/current.h>
 #include <uapi/linux/wait.h>
 #include <linux/atomic.h>
@@ -511,7 +512,7 @@ do {									\
 	hrtimer_init_on_stack(&__t.timer, CLOCK_MONOTONIC,		\
 			      HRTIMER_MODE_REL);			\
 	hrtimer_init_sleeper(&__t, current);				\
-	if ((timeout).tv64 != KTIME_MAX)				\
+	if ((timeout) != KTIME_MAX)				\
 		hrtimer_start_range_ns(&__t.timer, timeout,		\
 				       current->timer_slack_ns,		\
 				       HRTIMER_MODE_REL);		\
@@ -620,30 +621,19 @@ do {									\
 	__ret;								\
 })
 
+extern int do_wait_intr(wait_queue_head_t *, wait_queue_t *);
+extern int do_wait_intr_irq(wait_queue_head_t *, wait_queue_t *);
 
-#define __wait_event_interruptible_locked(wq, condition, exclusive, irq) \
+#define __wait_event_interruptible_locked(wq, condition, exclusive, fn) \
 ({									\
-	int __ret = 0;							\
+	int __ret;							\
 	DEFINE_WAIT(__wait);						\
 	if (exclusive)							\
 		__wait.flags |= WQ_FLAG_EXCLUSIVE;			\
 	do {								\
-		if (likely(list_empty(&__wait.task_list)))		\
-			__add_wait_queue_tail(&(wq), &__wait);		\
-		set_current_state(TASK_INTERRUPTIBLE);			\
-		if (signal_pending(current)) {				\
-			__ret = -ERESTARTSYS;				\
+		__ret = fn(&(wq), &__wait);				\
+		if (__ret)						\
 			break;						\
-		}							\
-		if (irq)						\
-			spin_unlock_irq(&(wq).lock);			\
-		else							\
-			spin_unlock(&(wq).lock);			\
-		schedule();						\
-		if (irq)						\
-			spin_lock_irq(&(wq).lock);			\
-		else							\
-			spin_lock(&(wq).lock);				\
 	} while (!(condition));						\
 	__remove_wait_queue(&(wq), &__wait);				\
 	__set_current_state(TASK_RUNNING);				\
@@ -676,7 +666,7 @@ do {									\
  */
 #define wait_event_interruptible_locked(wq, condition)			\
 	((condition)							\
-	 ? 0 : __wait_event_interruptible_locked(wq, condition, 0, 0))
+	 ? 0 : __wait_event_interruptible_locked(wq, condition, 0, do_wait_intr))
 
 /**
  * wait_event_interruptible_locked_irq - sleep until a condition gets true
@@ -703,7 +693,7 @@ do {									\
  */
 #define wait_event_interruptible_locked_irq(wq, condition)		\
 	((condition)							\
-	 ? 0 : __wait_event_interruptible_locked(wq, condition, 0, 1))
+	 ? 0 : __wait_event_interruptible_locked(wq, condition, 0, do_wait_intr_irq))
 
 /**
  * wait_event_interruptible_exclusive_locked - sleep exclusively until a condition gets true
@@ -734,7 +724,7 @@ do {									\
  */
 #define wait_event_interruptible_exclusive_locked(wq, condition)	\
 	((condition)							\
-	 ? 0 : __wait_event_interruptible_locked(wq, condition, 1, 0))
+	 ? 0 : __wait_event_interruptible_locked(wq, condition, 1, do_wait_intr))
 
 /**
  * wait_event_interruptible_exclusive_locked_irq - sleep until a condition gets true
@@ -765,7 +755,7 @@ do {									\
  */
 #define wait_event_interruptible_exclusive_locked_irq(wq, condition)	\
 	((condition)							\
-	 ? 0 : __wait_event_interruptible_locked(wq, condition, 1, 1))
+	 ? 0 : __wait_event_interruptible_locked(wq, condition, 1, do_wait_intr_irq))
 
 
 #define __wait_event_killable(wq, condition)				\

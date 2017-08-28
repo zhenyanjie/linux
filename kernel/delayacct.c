@@ -14,6 +14,8 @@
  */
 
 #include <linux/sched.h>
+#include <linux/sched/task.h>
+#include <linux/sched/cputime.h>
 #include <linux/slab.h>
 #include <linux/taskstats.h>
 #include <linux/time.h>
@@ -42,7 +44,7 @@ void __delayacct_tsk_init(struct task_struct *tsk)
 {
 	tsk->delays = kmem_cache_zalloc(delayacct_cache, GFP_KERNEL);
 	if (tsk->delays)
-		spin_lock_init(&tsk->delays->lock);
+		raw_spin_lock_init(&tsk->delays->lock);
 }
 
 /*
@@ -55,10 +57,10 @@ static void delayacct_end(u64 *start, u64 *total, u32 *count)
 	unsigned long flags;
 
 	if (ns > 0) {
-		spin_lock_irqsave(&current->delays->lock, flags);
+		raw_spin_lock_irqsave(&current->delays->lock, flags);
 		*total += ns;
 		(*count)++;
-		spin_unlock_irqrestore(&current->delays->lock, flags);
+		raw_spin_unlock_irqrestore(&current->delays->lock, flags);
 	}
 }
 
@@ -82,19 +84,19 @@ void __delayacct_blkio_end(void)
 
 int __delayacct_add_tsk(struct taskstats *d, struct task_struct *tsk)
 {
-	cputime_t utime, stime, stimescaled, utimescaled;
+	u64 utime, stime, stimescaled, utimescaled;
 	unsigned long long t2, t3;
 	unsigned long flags, t1;
 	s64 tmp;
 
 	task_cputime(tsk, &utime, &stime);
 	tmp = (s64)d->cpu_run_real_total;
-	tmp += cputime_to_nsecs(utime + stime);
+	tmp += utime + stime;
 	d->cpu_run_real_total = (tmp < (s64)d->cpu_run_real_total) ? 0 : tmp;
 
 	task_cputime_scaled(tsk, &utimescaled, &stimescaled);
 	tmp = (s64)d->cpu_scaled_run_real_total;
-	tmp += cputime_to_nsecs(utimescaled + stimescaled);
+	tmp += utimescaled + stimescaled;
 	d->cpu_scaled_run_real_total =
 		(tmp < (s64)d->cpu_scaled_run_real_total) ? 0 : tmp;
 
@@ -117,7 +119,7 @@ int __delayacct_add_tsk(struct taskstats *d, struct task_struct *tsk)
 
 	/* zero XXX_total, non-zero XXX_count implies XXX stat overflowed */
 
-	spin_lock_irqsave(&tsk->delays->lock, flags);
+	raw_spin_lock_irqsave(&tsk->delays->lock, flags);
 	tmp = d->blkio_delay_total + tsk->delays->blkio_delay;
 	d->blkio_delay_total = (tmp < d->blkio_delay_total) ? 0 : tmp;
 	tmp = d->swapin_delay_total + tsk->delays->swapin_delay;
@@ -127,7 +129,7 @@ int __delayacct_add_tsk(struct taskstats *d, struct task_struct *tsk)
 	d->blkio_count += tsk->delays->blkio_count;
 	d->swapin_count += tsk->delays->swapin_count;
 	d->freepages_count += tsk->delays->freepages_count;
-	spin_unlock_irqrestore(&tsk->delays->lock, flags);
+	raw_spin_unlock_irqrestore(&tsk->delays->lock, flags);
 
 	return 0;
 }
@@ -137,10 +139,10 @@ __u64 __delayacct_blkio_ticks(struct task_struct *tsk)
 	__u64 ret;
 	unsigned long flags;
 
-	spin_lock_irqsave(&tsk->delays->lock, flags);
+	raw_spin_lock_irqsave(&tsk->delays->lock, flags);
 	ret = nsec_to_clock_t(tsk->delays->blkio_delay +
 				tsk->delays->swapin_delay);
-	spin_unlock_irqrestore(&tsk->delays->lock, flags);
+	raw_spin_unlock_irqrestore(&tsk->delays->lock, flags);
 	return ret;
 }
 

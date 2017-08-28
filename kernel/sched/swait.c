@@ -1,4 +1,4 @@
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/swait.h>
 #include <linux/suspend.h>
 

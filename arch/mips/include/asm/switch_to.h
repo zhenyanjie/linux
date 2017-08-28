@@ -42,7 +42,7 @@ extern struct task_struct *ll_task;
  * inline to try to keep the overhead down. If we have been forced to run on
  * a "CPU" with an FPU because of a previous high level of FP computation,
  * but did not actually use the FPU during the most recent time-slice (CU1
- * isn't set), we undo the restriction on cpus_allowed.
+ * isn't set), we undo the restriction on cpus_mask.
  *
  * We're not calling set_cpus_allowed() here, because we have no need to
  * force prompt migration - we're already switching the current CPU to a
@@ -57,7 +57,7 @@ do {									\
 	    test_ti_thread_flag(__prev_ti, TIF_FPUBOUND) &&		\
 	    (!(KSTK_STATUS(prev) & ST0_CU1))) {				\
 		clear_ti_thread_flag(__prev_ti, TIF_FPUBOUND);		\
-		prev->cpus_allowed = prev->thread.user_cpus_allowed;	\
+		prev->cpus_mask = prev->thread.user_cpus_allowed;	\
 	}								\
 	next->thread.emulated_fp = 0;					\
 } while(0)
@@ -66,13 +66,18 @@ do {									\
 #define __mips_mt_fpaff_switch_to(prev) do { (void) (prev); } while (0)
 #endif
 
-#define __clear_software_ll_bit()					\
-do {	if (cpu_has_rw_llb) {						\
+/*
+ * Clear LLBit during context switches on MIPSr6 such that eretnc can be used
+ * unconditionally when returning to userland in entry.S.
+ */
+#define __clear_r6_hw_ll_bit() do {					\
+	if (cpu_has_mips_r6)						\
 		write_c0_lladdr(0);					\
-	} else {							\
-		if (!__builtin_constant_p(cpu_has_llsc) || !cpu_has_llsc)\
-			ll_bit = 0;					\
-	}								\
+} while (0)
+
+#define __clear_software_ll_bit() do {					\
+	if (!__builtin_constant_p(cpu_has_llsc) || !cpu_has_llsc)	\
+		ll_bit = 0;						\
 } while (0)
 
 /*
@@ -120,6 +125,7 @@ do {									\
 		}							\
 		clear_c0_status(ST0_CU2);				\
 	}								\
+	__clear_r6_hw_ll_bit();						\
 	__clear_software_ll_bit();					\
 	if (cpu_has_userlocal)						\
 		write_c0_userlocal(task_thread_info(next)->tp_value);	\

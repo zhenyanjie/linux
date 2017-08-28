@@ -7,7 +7,9 @@
 #include <linux/smp.h>
 #include <linux/init.h>
 #include <linux/notifier.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/hotplug.h>
+#include <linux/sched/task.h>
 #include <linux/unistd.h>
 #include <linux/cpu.h>
 #include <linux/oom.h>
@@ -25,6 +27,7 @@
 #include <linux/smpboot.h>
 #include <linux/relay.h>
 #include <linux/slab.h>
+#include <linux/percpu-rwsem.h>
 
 #include <trace/events/power.h>
 #define CREATE_TRACE_POINTS
@@ -62,6 +65,17 @@ struct cpuhp_cpu_state {
 };
 
 static DEFINE_PER_CPU(struct cpuhp_cpu_state, cpuhp_state);
+
+#if defined(CONFIG_HOTPLUG_CPU) && defined(CONFIG_PREEMPT_RT_FULL)
+static DEFINE_PER_CPU(struct rt_rw_lock, cpuhp_pin_lock) = \
+	__RWLOCK_RT_INITIALIZER(cpuhp_pin_lock);
+#endif
+
+#if defined(CONFIG_LOCKDEP) && defined(CONFIG_SMP)
+static struct lock_class_key cpuhp_state_key;
+static struct lockdep_map cpuhp_state_lock_map =
+	STATIC_LOCKDEP_MAP_INIT("cpuhp_state", &cpuhp_state_key);
+#endif
 
 /**
  * cpuhp_step - Hotplug state machine step
@@ -183,422 +197,101 @@ EXPORT_SYMBOL_GPL(cpuhp_tasks_frozen);
 /*
  * The following two APIs (cpu_maps_update_begin/done) must be used when
  * attempting to serialize the updates to cpu_online_mask & cpu_present_mask.
- * The APIs cpu_notifier_register_begin/done() must be used to protect CPU
- * hotplug callback (un)registration performed using __register_cpu_notifier()
- * or __unregister_cpu_notifier().
  */
 void cpu_maps_update_begin(void)
 {
 	mutex_lock(&cpu_add_remove_lock);
 }
-EXPORT_SYMBOL(cpu_notifier_register_begin);
 
 void cpu_maps_update_done(void)
 {
 	mutex_unlock(&cpu_add_remove_lock);
 }
-EXPORT_SYMBOL(cpu_notifier_register_done);
 
-static RAW_NOTIFIER_HEAD(cpu_chain);
-
-/* If set, cpu_up and cpu_down will return -EBUSY and do nothing.
+/*
+ * If set, cpu_up and cpu_down will return -EBUSY and do nothing.
  * Should always be manipulated under cpu_add_remove_lock
  */
 static int cpu_hotplug_disabled;
 
 #ifdef CONFIG_HOTPLUG_CPU
 
-static struct {
-	struct task_struct *active_writer;
-	/* wait queue to wake up the active_writer */
-	wait_queue_head_t wq;
-	/* verifies that no writer will get active while readers are active */
-	struct mutex lock;
-	/*
-	 * Also blocks the new readers during
-	 * an ongoing cpu hotplug operation.
-	 */
-	atomic_t refcount;
-
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-	struct lockdep_map dep_map;
-#endif
-} cpu_hotplug = {
-	.active_writer = NULL,
-	.wq = __WAIT_QUEUE_HEAD_INITIALIZER(cpu_hotplug.wq),
-	.lock = __MUTEX_INITIALIZER(cpu_hotplug.lock),
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-	.dep_map = STATIC_LOCKDEP_MAP_INIT("cpu_hotplug.dep_map", &cpu_hotplug.dep_map),
-#endif
-};
-
-/* Lockdep annotations for get/put_online_cpus() and cpu_hotplug_begin/end() */
-#define cpuhp_lock_acquire_read() lock_map_acquire_read(&cpu_hotplug.dep_map)
-#define cpuhp_lock_acquire_tryread() \
-				  lock_map_acquire_tryread(&cpu_hotplug.dep_map)
-#define cpuhp_lock_acquire()      lock_map_acquire(&cpu_hotplug.dep_map)
-#define cpuhp_lock_release()      lock_map_release(&cpu_hotplug.dep_map)
-
-/**
- * hotplug_pcp	- per cpu hotplug descriptor
- * @unplug:	set when pin_current_cpu() needs to sync tasks
- * @sync_tsk:	the task that waits for tasks to finish pinned sections
- * @refcount:	counter of tasks in pinned sections
- * @grab_lock:	set when the tasks entering pinned sections should wait
- * @synced:	notifier for @sync_tsk to tell cpu_down it's finished
- * @mutex:	the mutex to make tasks wait (used when @grab_lock is true)
- * @mutex_init:	zero if the mutex hasn't been initialized yet.
- *
- * Although @unplug and @sync_tsk may point to the same task, the @unplug
- * is used as a flag and still exists after @sync_tsk has exited and
- * @sync_tsk set to NULL.
- */
-struct hotplug_pcp {
-	struct task_struct *unplug;
-	struct task_struct *sync_tsk;
-	int refcount;
-	int grab_lock;
-	struct completion synced;
-	struct completion unplug_wait;
-#ifdef CONFIG_PREEMPT_RT_FULL
-	/*
-	 * Note, on PREEMPT_RT, the hotplug lock must save the state of
-	 * the task, otherwise the mutex will cause the task to fail
-	 * to sleep when required. (Because it's called from migrate_disable())
-	 *
-	 * The spinlock_t on PREEMPT_RT is a mutex that saves the task's
-	 * state.
-	 */
-	spinlock_t lock;
-#else
-	struct mutex mutex;
-#endif
-	int mutex_init;
-};
-
-#ifdef CONFIG_PREEMPT_RT_FULL
-# define hotplug_lock(hp) rt_spin_lock__no_mg(&(hp)->lock)
-# define hotplug_unlock(hp) rt_spin_unlock__no_mg(&(hp)->lock)
-#else
-# define hotplug_lock(hp) mutex_lock(&(hp)->mutex)
-# define hotplug_unlock(hp) mutex_unlock(&(hp)->mutex)
-#endif
-
-static DEFINE_PER_CPU(struct hotplug_pcp, hotplug_pcp);
-
 /**
  * pin_current_cpu - Prevent the current cpu from being unplugged
- *
- * Lightweight version of get_online_cpus() to prevent cpu from being
- * unplugged when code runs in a migration disabled region.
- *
- * Must be called with preemption disabled (preempt_count = 1)!
  */
 void pin_current_cpu(void)
 {
-	struct hotplug_pcp *hp;
-	int force = 0;
+#ifdef CONFIG_PREEMPT_RT_FULL
+	struct rt_rw_lock *cpuhp_pin;
+	unsigned int cpu;
+	int ret;
 
-retry:
-	hp = this_cpu_ptr(&hotplug_pcp);
-
-	if (!hp->unplug || hp->refcount || force || preempt_count() > 1 ||
-	    hp->unplug == current) {
-		hp->refcount++;
+again:
+	cpuhp_pin = this_cpu_ptr(&cpuhp_pin_lock);
+	ret = __read_rt_trylock(cpuhp_pin);
+	if (ret) {
+		current->pinned_on_cpu = smp_processor_id();
 		return;
 	}
-	if (hp->grab_lock) {
-		preempt_enable();
-		hotplug_lock(hp);
-		hotplug_unlock(hp);
-	} else {
-		preempt_enable();
-		/*
-		 * Try to push this task off of this CPU.
-		 */
-		if (!migrate_me()) {
-			preempt_disable();
-			hp = this_cpu_ptr(&hotplug_pcp);
-			if (!hp->grab_lock) {
-				/*
-				 * Just let it continue it's already pinned
-				 * or about to sleep.
-				 */
-				force = 1;
-				goto retry;
-			}
-			preempt_enable();
-		}
-	}
+	cpu = smp_processor_id();
+	preempt_lazy_enable();
+	preempt_enable();
+
+	__read_rt_lock(cpuhp_pin);
+
 	preempt_disable();
-	goto retry;
+	preempt_lazy_disable();
+	if (cpu != smp_processor_id()) {
+		__read_rt_unlock(cpuhp_pin);
+		goto again;
+	}
+	current->pinned_on_cpu = cpu;
+#endif
 }
 
 /**
  * unpin_current_cpu - Allow unplug of current cpu
- *
- * Must be called with preemption or interrupts disabled!
  */
 void unpin_current_cpu(void)
 {
-	struct hotplug_pcp *hp = this_cpu_ptr(&hotplug_pcp);
-
-	WARN_ON(hp->refcount <= 0);
-
-	/* This is safe. sync_unplug_thread is pinned to this cpu */
-	if (!--hp->refcount && hp->unplug && hp->unplug != current)
-		wake_up_process(hp->unplug);
-}
-
-static void wait_for_pinned_cpus(struct hotplug_pcp *hp)
-{
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	while (hp->refcount) {
-		schedule_preempt_disabled();
-		set_current_state(TASK_UNINTERRUPTIBLE);
-	}
-}
-
-static int sync_unplug_thread(void *data)
-{
-	struct hotplug_pcp *hp = data;
-
-	wait_for_completion(&hp->unplug_wait);
-	preempt_disable();
-	hp->unplug = current;
-	wait_for_pinned_cpus(hp);
-
-	/*
-	 * This thread will synchronize the cpu_down() with threads
-	 * that have pinned the CPU. When the pinned CPU count reaches
-	 * zero, we inform the cpu_down code to continue to the next step.
-	 */
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	preempt_enable();
-	complete(&hp->synced);
-
-	/*
-	 * If all succeeds, the next step will need tasks to wait till
-	 * the CPU is offline before continuing. To do this, the grab_lock
-	 * is set and tasks going into pin_current_cpu() will block on the
-	 * mutex. But we still need to wait for those that are already in
-	 * pinned CPU sections. If the cpu_down() failed, the kthread_should_stop()
-	 * will kick this thread out.
-	 */
-	while (!hp->grab_lock && !kthread_should_stop()) {
-		schedule();
-		set_current_state(TASK_UNINTERRUPTIBLE);
-	}
-
-	/* Make sure grab_lock is seen before we see a stale completion */
-	smp_mb();
-
-	/*
-	 * Now just before cpu_down() enters stop machine, we need to make
-	 * sure all tasks that are in pinned CPU sections are out, and new
-	 * tasks will now grab the lock, keeping them from entering pinned
-	 * CPU sections.
-	 */
-	if (!kthread_should_stop()) {
-		preempt_disable();
-		wait_for_pinned_cpus(hp);
-		preempt_enable();
-		complete(&hp->synced);
-	}
-
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	while (!kthread_should_stop()) {
-		schedule();
-		set_current_state(TASK_UNINTERRUPTIBLE);
-	}
-	set_current_state(TASK_RUNNING);
-
-	/*
-	 * Force this thread off this CPU as it's going down and
-	 * we don't want any more work on this CPU.
-	 */
-	current->flags &= ~PF_NO_SETAFFINITY;
-	set_cpus_allowed_ptr(current, cpu_present_mask);
-	migrate_me();
-	return 0;
-}
-
-static void __cpu_unplug_sync(struct hotplug_pcp *hp)
-{
-	wake_up_process(hp->sync_tsk);
-	wait_for_completion(&hp->synced);
-}
-
-static void __cpu_unplug_wait(unsigned int cpu)
-{
-	struct hotplug_pcp *hp = &per_cpu(hotplug_pcp, cpu);
-
-	complete(&hp->unplug_wait);
-	wait_for_completion(&hp->synced);
-}
-
-/*
- * Start the sync_unplug_thread on the target cpu and wait for it to
- * complete.
- */
-static int cpu_unplug_begin(unsigned int cpu)
-{
-	struct hotplug_pcp *hp = &per_cpu(hotplug_pcp, cpu);
-	int err;
-
-	/* Protected by cpu_hotplug.lock */
-	if (!hp->mutex_init) {
 #ifdef CONFIG_PREEMPT_RT_FULL
-		spin_lock_init(&hp->lock);
-#else
-		mutex_init(&hp->mutex);
+	struct rt_rw_lock *cpuhp_pin = this_cpu_ptr(&cpuhp_pin_lock);
+
+	if (WARN_ON(current->pinned_on_cpu != smp_processor_id()))
+		cpuhp_pin = per_cpu_ptr(&cpuhp_pin_lock, current->pinned_on_cpu);
+
+	current->pinned_on_cpu = -1;
+	__read_rt_unlock(cpuhp_pin);
 #endif
-		hp->mutex_init = 1;
-	}
-
-	/* Inform the scheduler to migrate tasks off this CPU */
-	tell_sched_cpu_down_begin(cpu);
-
-	init_completion(&hp->synced);
-	init_completion(&hp->unplug_wait);
-
-	hp->sync_tsk = kthread_create(sync_unplug_thread, hp, "sync_unplug/%d", cpu);
-	if (IS_ERR(hp->sync_tsk)) {
-		err = PTR_ERR(hp->sync_tsk);
-		hp->sync_tsk = NULL;
-		return err;
-	}
-	kthread_bind(hp->sync_tsk, cpu);
-
-	/*
-	 * Wait for tasks to get out of the pinned sections,
-	 * it's still OK if new tasks enter. Some CPU notifiers will
-	 * wait for tasks that are going to enter these sections and
-	 * we must not have them block.
-	 */
-	wake_up_process(hp->sync_tsk);
-	return 0;
 }
 
-static void cpu_unplug_sync(unsigned int cpu)
+DEFINE_STATIC_PERCPU_RWSEM(cpu_hotplug_lock);
+
+void cpus_read_lock(void)
 {
-	struct hotplug_pcp *hp = &per_cpu(hotplug_pcp, cpu);
+	percpu_down_read(&cpu_hotplug_lock);
+}
+EXPORT_SYMBOL_GPL(cpus_read_lock);
 
-	init_completion(&hp->synced);
-	/* The completion needs to be initialzied before setting grab_lock */
-	smp_wmb();
+void cpus_read_unlock(void)
+{
+	percpu_up_read(&cpu_hotplug_lock);
+}
+EXPORT_SYMBOL_GPL(cpus_read_unlock);
 
-	/* Grab the mutex before setting grab_lock */
-	hotplug_lock(hp);
-	hp->grab_lock = 1;
-
-	/*
-	 * The CPU notifiers have been completed.
-	 * Wait for tasks to get out of pinned CPU sections and have new
-	 * tasks block until the CPU is completely down.
-	 */
-	__cpu_unplug_sync(hp);
-
-	/* All done with the sync thread */
-	kthread_stop(hp->sync_tsk);
-	hp->sync_tsk = NULL;
+void cpus_write_lock(void)
+{
+	percpu_down_write(&cpu_hotplug_lock);
 }
 
-static void cpu_unplug_done(unsigned int cpu)
+void cpus_write_unlock(void)
 {
-	struct hotplug_pcp *hp = &per_cpu(hotplug_pcp, cpu);
-
-	hp->unplug = NULL;
-	/* Let all tasks know cpu unplug is finished before cleaning up */
-	smp_wmb();
-
-	if (hp->sync_tsk)
-		kthread_stop(hp->sync_tsk);
-
-	if (hp->grab_lock) {
-		hotplug_unlock(hp);
-		/* protected by cpu_hotplug.lock */
-		hp->grab_lock = 0;
-	}
-	tell_sched_cpu_down_done(cpu);
+	percpu_up_write(&cpu_hotplug_lock);
 }
 
-void get_online_cpus(void)
+void lockdep_assert_cpus_held(void)
 {
-	might_sleep();
-	if (cpu_hotplug.active_writer == current)
-		return;
-	cpuhp_lock_acquire_read();
-	mutex_lock(&cpu_hotplug.lock);
-	atomic_inc(&cpu_hotplug.refcount);
-	mutex_unlock(&cpu_hotplug.lock);
-}
-EXPORT_SYMBOL_GPL(get_online_cpus);
-
-void put_online_cpus(void)
-{
-	int refcount;
-
-	if (cpu_hotplug.active_writer == current)
-		return;
-
-	refcount = atomic_dec_return(&cpu_hotplug.refcount);
-	if (WARN_ON(refcount < 0)) /* try to fix things up */
-		atomic_inc(&cpu_hotplug.refcount);
-
-	if (refcount <= 0 && waitqueue_active(&cpu_hotplug.wq))
-		wake_up(&cpu_hotplug.wq);
-
-	cpuhp_lock_release();
-
-}
-EXPORT_SYMBOL_GPL(put_online_cpus);
-
-/*
- * This ensures that the hotplug operation can begin only when the
- * refcount goes to zero.
- *
- * Note that during a cpu-hotplug operation, the new readers, if any,
- * will be blocked by the cpu_hotplug.lock
- *
- * Since cpu_hotplug_begin() is always called after invoking
- * cpu_maps_update_begin(), we can be sure that only one writer is active.
- *
- * Note that theoretically, there is a possibility of a livelock:
- * - Refcount goes to zero, last reader wakes up the sleeping
- *   writer.
- * - Last reader unlocks the cpu_hotplug.lock.
- * - A new reader arrives at this moment, bumps up the refcount.
- * - The writer acquires the cpu_hotplug.lock finds the refcount
- *   non zero and goes to sleep again.
- *
- * However, this is very difficult to achieve in practice since
- * get_online_cpus() not an api which is called all that often.
- *
- */
-void cpu_hotplug_begin(void)
-{
-	DEFINE_WAIT(wait);
-
-	cpu_hotplug.active_writer = current;
-	cpuhp_lock_acquire();
-
-	for (;;) {
-		mutex_lock(&cpu_hotplug.lock);
-		prepare_to_wait(&cpu_hotplug.wq, &wait, TASK_UNINTERRUPTIBLE);
-		if (likely(!atomic_read(&cpu_hotplug.refcount)))
-				break;
-		mutex_unlock(&cpu_hotplug.lock);
-		schedule();
-	}
-	finish_wait(&cpu_hotplug.wq, &wait);
-}
-
-void cpu_hotplug_done(void)
-{
-	cpu_hotplug.active_writer = NULL;
-	mutex_unlock(&cpu_hotplug.lock);
-	cpuhp_lock_release();
+	percpu_rwsem_assert_held(&cpu_hotplug_lock);
 }
 
 /*
@@ -632,72 +325,25 @@ void cpu_hotplug_enable(void)
 EXPORT_SYMBOL_GPL(cpu_hotplug_enable);
 #endif	/* CONFIG_HOTPLUG_CPU */
 
-/* Need to know about CPUs going up/down? */
-int register_cpu_notifier(struct notifier_block *nb)
-{
-	int ret;
-	cpu_maps_update_begin();
-	ret = raw_notifier_chain_register(&cpu_chain, nb);
-	cpu_maps_update_done();
-	return ret;
-}
-
-int __register_cpu_notifier(struct notifier_block *nb)
-{
-	return raw_notifier_chain_register(&cpu_chain, nb);
-}
-
-static int __cpu_notify(unsigned long val, unsigned int cpu, int nr_to_call,
-			int *nr_calls)
-{
-	unsigned long mod = cpuhp_tasks_frozen ? CPU_TASKS_FROZEN : 0;
-	void *hcpu = (void *)(long)cpu;
-
-	int ret;
-
-	ret = __raw_notifier_call_chain(&cpu_chain, val | mod, hcpu, nr_to_call,
-					nr_calls);
-
-	return notifier_to_errno(ret);
-}
-
-static int cpu_notify(unsigned long val, unsigned int cpu)
-{
-	return __cpu_notify(val, cpu, -1, NULL);
-}
-
-static void cpu_notify_nofail(unsigned long val, unsigned int cpu)
-{
-	BUG_ON(cpu_notify(val, cpu));
-}
-
-/* Notifier wrappers for transitioning to state machine */
-static int notify_prepare(unsigned int cpu)
-{
-	int nr_calls = 0;
-	int ret;
-
-	ret = __cpu_notify(CPU_UP_PREPARE, cpu, -1, &nr_calls);
-	if (ret) {
-		nr_calls--;
-		printk(KERN_WARNING "%s: attempt to bring up CPU %u failed\n",
-				__func__, cpu);
-		__cpu_notify(CPU_UP_CANCELED, cpu, nr_calls, NULL);
-	}
-	return ret;
-}
-
-static int notify_online(unsigned int cpu)
-{
-	cpu_notify(CPU_ONLINE, cpu);
-	return 0;
-}
+static void __cpuhp_kick_ap_work(struct cpuhp_cpu_state *st);
 
 static int bringup_wait_for_ap(unsigned int cpu)
 {
 	struct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);
 
+	/* Wait for the CPU to reach CPUHP_AP_ONLINE_IDLE */
 	wait_for_completion(&st->done);
+	BUG_ON(!cpu_online(cpu));
+
+	/* Unpark the stopper thread and the hotplug thread of the target cpu */
+	stop_machine_unpark(cpu);
+	kthread_unpark(st->thread);
+
+	/* Should we go further up ? */
+	if (st->target > CPUHP_AP_ONLINE_IDLE) {
+		__cpuhp_kick_ap_work(st);
+		wait_for_completion(&st->done);
+	}
 	return st->result;
 }
 
@@ -716,13 +362,9 @@ static int bringup_cpu(unsigned int cpu)
 	/* Arch-specific enabling code. */
 	ret = __cpu_up(cpu, idle);
 	irq_unlock_sparse();
-	if (ret) {
-		cpu_notify(CPU_UP_CANCELED, cpu);
+	if (ret)
 		return ret;
-	}
-	ret = bringup_wait_for_ap(cpu);
-	BUG_ON(!cpu_online(cpu));
-	return ret;
+	return bringup_wait_for_ap(cpu);
 }
 
 /*
@@ -833,6 +475,7 @@ static void cpuhp_thread_fun(unsigned int cpu)
 
 	st->should_run = false;
 
+	lock_map_acquire(&cpuhp_state_lock_map);
 	/* Single callback invocation for [un]install ? */
 	if (st->single) {
 		if (st->cb_state < CPUHP_AP_ONLINE) {
@@ -848,11 +491,6 @@ static void cpuhp_thread_fun(unsigned int cpu)
 		BUG_ON(st->state < CPUHP_AP_ONLINE_IDLE);
 
 		undo_cpu_down(cpu, st);
-		/*
-		 * This is a momentary workaround to keep the notifier users
-		 * happy. Will go away once we got rid of the notifiers.
-		 */
-		cpu_notify_nofail(CPU_DOWN_FAILED, cpu);
 		st->rollback = false;
 	} else {
 		/* Cannot happen .... */
@@ -864,6 +502,7 @@ static void cpuhp_thread_fun(unsigned int cpu)
 		else if (st->state > st->target)
 			ret = cpuhp_ap_offline(cpu, st);
 	}
+	lock_map_release(&cpuhp_state_lock_map);
 	st->result = ret;
 	complete(&st->done);
 }
@@ -877,6 +516,9 @@ cpuhp_invoke_ap_callback(int cpu, enum cpuhp_state state, bool bringup,
 
 	if (!cpu_online(cpu))
 		return 0;
+
+	lock_map_acquire(&cpuhp_state_lock_map);
+	lock_map_release(&cpuhp_state_lock_map);
 
 	/*
 	 * If we are up and running, use the hotplug thread. For early calls
@@ -921,6 +563,8 @@ static int cpuhp_kick_ap_work(unsigned int cpu)
 	enum cpuhp_state state = st->state;
 
 	trace_cpuhp_enter(cpu, st->target, state, cpuhp_kick_ap_work);
+	lock_map_acquire(&cpuhp_state_lock_map);
+	lock_map_release(&cpuhp_state_lock_map);
 	__cpuhp_kick_ap_work(st);
 	wait_for_completion(&st->done);
 	trace_cpuhp_exit(cpu, st->state, state, st->result);
@@ -943,22 +587,6 @@ void __init cpuhp_threads_init(void)
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
-EXPORT_SYMBOL(register_cpu_notifier);
-EXPORT_SYMBOL(__register_cpu_notifier);
-void unregister_cpu_notifier(struct notifier_block *nb)
-{
-	cpu_maps_update_begin();
-	raw_notifier_chain_unregister(&cpu_chain, nb);
-	cpu_maps_update_done();
-}
-EXPORT_SYMBOL(unregister_cpu_notifier);
-
-void __unregister_cpu_notifier(struct notifier_block *nb)
-{
-	raw_notifier_chain_unregister(&cpu_chain, nb);
-}
-EXPORT_SYMBOL(__unregister_cpu_notifier);
-
 /**
  * clear_tasks_mm_cpumask - Safely clear tasks' mm_cpumask for a CPU
  * @cpu: a CPU id
@@ -1024,20 +652,6 @@ static inline void check_for_tasks(int dead_cpu)
 	read_unlock(&tasklist_lock);
 }
 
-static int notify_down_prepare(unsigned int cpu)
-{
-	int err, nr_calls = 0;
-
-	err = __cpu_notify(CPU_DOWN_PREPARE, cpu, -1, &nr_calls);
-	if (err) {
-		nr_calls--;
-		__cpu_notify(CPU_DOWN_FAILED, cpu, nr_calls, NULL);
-		pr_warn("%s: attempt to take down CPU %u failed\n",
-				__func__, cpu);
-	}
-	return err;
-}
-
 /* Take this CPU down. */
 static int take_cpu_down(void *_param)
 {
@@ -1069,16 +683,15 @@ static int take_cpu_down(void *_param)
 
 static int takedown_cpu(unsigned int cpu)
 {
+#ifdef CONFIG_PREEMPT_RT_FULL
+	struct rt_rw_lock *cpuhp_pin = per_cpu_ptr(&cpuhp_pin_lock, cpu);
+#endif
 	struct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);
 	int err;
 
-	__cpu_unplug_wait(cpu);
 	/* Park the smpboot threads */
 	kthread_park(per_cpu_ptr(&cpuhp_state, cpu)->thread);
 	smpboot_park_threads(cpu);
-
-	/* Notifiers are done. Don't let any more tasks pin this CPU. */
-	cpu_unplug_sync(cpu);
 
 	/*
 	 * Prevent irq alloc/free while the dying cpu reorganizes the
@@ -1086,11 +699,18 @@ static int takedown_cpu(unsigned int cpu)
 	 */
 	irq_lock_sparse();
 
+#ifdef CONFIG_PREEMPT_RT_FULL
+	__write_rt_lock(cpuhp_pin);
+#endif
+
 	/*
 	 * So now all preempt/rcu users must observe !cpu_active().
 	 */
-	err = stop_machine(take_cpu_down, NULL, cpumask_of(cpu));
+	err = stop_machine_cpuslocked(take_cpu_down, NULL, cpumask_of(cpu));
 	if (err) {
+#ifdef CONFIG_PREEMPT_RT_FULL
+		__write_rt_unlock(cpuhp_pin);
+#endif
 		/* CPU refused to die */
 		irq_unlock_sparse();
 		/* Unpark the hotplug thread so we can rollback there */
@@ -1109,6 +729,9 @@ static int takedown_cpu(unsigned int cpu)
 	wait_for_completion(&st->done);
 	BUG_ON(st->state != CPUHP_AP_IDLE_DEAD);
 
+#ifdef CONFIG_PREEMPT_RT_FULL
+	__write_rt_unlock(cpuhp_pin);
+#endif
 	/* Interrupts are moved away from the dying cpu, reenable alloc/free */
 	irq_unlock_sparse();
 
@@ -1117,13 +740,6 @@ static int takedown_cpu(unsigned int cpu)
 	__cpu_die(cpu);
 
 	tick_cleanup_dead_cpu(cpu);
-	return 0;
-}
-
-static int notify_dead(unsigned int cpu)
-{
-	cpu_notify_nofail(CPU_DEAD, cpu);
-	check_for_tasks(cpu);
 	return 0;
 }
 
@@ -1150,9 +766,7 @@ void cpuhp_report_idle_dead(void)
 }
 
 #else
-#define notify_down_prepare	NULL
 #define takedown_cpu		NULL
-#define notify_dead		NULL
 #endif
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -1163,10 +777,6 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
 {
 	struct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);
 	int prev_state, ret = 0;
-	bool hasdied = false;
-	int mycpu;
-	cpumask_var_t cpumask;
-	cpumask_var_t cpumask_org;
 
 	if (num_online_cpus() == 1)
 		return -EBUSY;
@@ -1174,34 +784,7 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
 	if (!cpu_present(cpu))
 		return -EINVAL;
 
-	/* Move the downtaker off the unplug cpu */
-	if (!alloc_cpumask_var(&cpumask, GFP_KERNEL))
-		return -ENOMEM;
-	if (!alloc_cpumask_var(&cpumask_org, GFP_KERNEL))  {
-		free_cpumask_var(cpumask);
-		return -ENOMEM;
-	}
-
-	cpumask_copy(cpumask_org, tsk_cpus_allowed(current));
-	cpumask_andnot(cpumask, cpu_online_mask, cpumask_of(cpu));
-	set_cpus_allowed_ptr(current, cpumask);
-	free_cpumask_var(cpumask);
-	migrate_disable();
-	mycpu = smp_processor_id();
-	if (mycpu == cpu) {
-		printk(KERN_ERR "Yuck! Still on unplug CPU\n!");
-		migrate_enable();
-		ret = -EBUSY;
-		goto restore_cpus;
-	}
-
-	migrate_enable();
-	cpu_hotplug_begin();
-	ret = cpu_unplug_begin(cpu);
-	if (ret) {
-		printk("cpu_unplug_begin(%d) failed\n", cpu);
-		goto out_cancel;
-	}
+	cpus_write_lock();
 
 	cpuhp_tasks_frozen = tasks_frozen;
 
@@ -1238,17 +821,8 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
 		cpuhp_kick_ap_work(cpu);
 	}
 
-	hasdied = prev_state != st->state && st->state == CPUHP_OFFLINE;
 out:
-	cpu_unplug_done(cpu);
-out_cancel:
-	cpu_hotplug_done();
-	/* This post dead nonsense must die */
-	if (!ret && hasdied)
-		cpu_notify_nofail(CPU_POST_DEAD, cpu);
-restore_cpus:
-	set_cpus_allowed_ptr(current, cpumask_org);
-	free_cpumask_var(cpumask_org);
+	cpus_write_unlock();
 	return ret;
 }
 
@@ -1296,31 +870,20 @@ void notify_cpu_starting(unsigned int cpu)
 }
 
 /*
- * Called from the idle task. We need to set active here, so we can kick off
- * the stopper thread and unpark the smpboot threads. If the target state is
- * beyond CPUHP_AP_ONLINE_IDLE we kick cpuhp thread and let it bring up the
- * cpu further.
+ * Called from the idle task. Wake up the controlling task which brings the
+ * stopper and the hotplug thread of the upcoming CPU up and then delegates
+ * the rest of the online bringup to the hotplug thread.
  */
 void cpuhp_online_idle(enum cpuhp_state state)
 {
 	struct cpuhp_cpu_state *st = this_cpu_ptr(&cpuhp_state);
-	unsigned int cpu = smp_processor_id();
 
 	/* Happens for the boot cpu */
 	if (state != CPUHP_AP_ONLINE_IDLE)
 		return;
 
 	st->state = CPUHP_AP_ONLINE_IDLE;
-
-	/* Unpark the stopper thread and the hotplug thread of this cpu */
-	stop_machine_unpark(cpu);
-	kthread_unpark(st->thread);
-
-	/* Should we go further up ? */
-	if (st->target > CPUHP_AP_ONLINE_IDLE)
-		__cpuhp_kick_ap_work(st);
-	else
-		complete(&st->done);
+	complete(&st->done);
 }
 
 /* Requires cpu_add_remove_lock to be held */
@@ -1330,7 +893,7 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen, enum cpuhp_state target)
 	struct task_struct *idle;
 	int ret = 0;
 
-	cpu_hotplug_begin();
+	cpus_write_lock();
 
 	if (!cpu_present(cpu)) {
 		ret = -EINVAL;
@@ -1378,7 +941,7 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen, enum cpuhp_state target)
 	target = min((int)target, CPUHP_BRINGUP_CPU);
 	ret = cpuhp_up_callbacks(cpu, st, target);
 out:
-	cpu_hotplug_done();
+	cpus_write_unlock();
 	return ret;
 }
 
@@ -1562,6 +1125,10 @@ core_initcall(cpu_hotplug_pm_sync_init);
 
 #endif /* CONFIG_PM_SLEEP_SMP */
 
+int __boot_cpu_id;
+
+int __boot_cpu_id;
+
 #endif /* CONFIG_SMP */
 
 /* Boot processor state steps */
@@ -1612,17 +1179,6 @@ static struct cpuhp_step cpuhp_bp_states[] = {
 		.name			= "RCU/tree:prepare",
 		.startup.single		= rcutree_prepare_cpu,
 		.teardown.single	= rcutree_dead_cpu,
-	},
-	/*
-	 * Preparatory and dead notifiers. Will be replaced once the notifiers
-	 * are converted to states.
-	 */
-	[CPUHP_NOTIFY_PREPARE] = {
-		.name			= "notify:prepare",
-		.startup.single		= notify_prepare,
-		.teardown.single	= notify_dead,
-		.skip_onerr		= true,
-		.cant_stop		= true,
 	},
 	/*
 	 * On the tear-down path, timers_dead_cpu() must be invoked
@@ -1713,17 +1269,6 @@ static struct cpuhp_step cpuhp_ap_states[] = {
 		.startup.single		= rcutree_online_cpu,
 		.teardown.single	= rcutree_offline_cpu,
 	},
-
-	/*
-	 * Online/down_prepare notifiers. Will be removed once the notifiers
-	 * are converted to states.
-	 */
-	[CPUHP_AP_NOTIFY_ONLINE] = {
-		.name			= "notify:online",
-		.startup.single		= notify_online,
-		.teardown.single	= notify_down_prepare,
-		.skip_onerr		= true,
-	},
 #endif
 	/*
 	 * The dynamically registered state space is here
@@ -1754,23 +1299,62 @@ static int cpuhp_cb_check(enum cpuhp_state state)
 	return 0;
 }
 
-static void cpuhp_store_callbacks(enum cpuhp_state state,
-				  const char *name,
-				  int (*startup)(unsigned int cpu),
-				  int (*teardown)(unsigned int cpu),
-				  bool multi_instance)
+/*
+ * Returns a free for dynamic slot assignment of the Online state. The states
+ * are protected by the cpuhp_slot_states mutex and an empty slot is identified
+ * by having no name assigned.
+ */
+static int cpuhp_reserve_state(enum cpuhp_state state)
+{
+	enum cpuhp_state i, end;
+	struct cpuhp_step *step;
+
+	switch (state) {
+	case CPUHP_AP_ONLINE_DYN:
+		step = cpuhp_ap_states + CPUHP_AP_ONLINE_DYN;
+		end = CPUHP_AP_ONLINE_DYN_END;
+		break;
+	case CPUHP_BP_PREPARE_DYN:
+		step = cpuhp_bp_states + CPUHP_BP_PREPARE_DYN;
+		end = CPUHP_BP_PREPARE_DYN_END;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	for (i = state; i <= end; i++, step++) {
+		if (!step->name)
+			return i;
+	}
+	WARN(1, "No more dynamic states available for CPU hotplug\n");
+	return -ENOSPC;
+}
+
+static int cpuhp_store_callbacks(enum cpuhp_state state, const char *name,
+				 int (*startup)(unsigned int cpu),
+				 int (*teardown)(unsigned int cpu),
+				 bool multi_instance)
 {
 	/* (Un)Install the callbacks for further cpu hotplug operations */
 	struct cpuhp_step *sp;
+	int ret = 0;
 
-	mutex_lock(&cpuhp_state_mutex);
+	if (state == CPUHP_AP_ONLINE_DYN || state == CPUHP_BP_PREPARE_DYN) {
+		ret = cpuhp_reserve_state(state);
+		if (ret < 0)
+			return ret;
+		state = ret;
+	}
 	sp = cpuhp_get_step(state);
+	if (name && sp->name)
+		return -EBUSY;
+
 	sp->startup.single = startup;
 	sp->teardown.single = teardown;
 	sp->name = name;
 	sp->multi_instance = multi_instance;
 	INIT_HLIST_HEAD(&sp->list);
-	mutex_unlock(&cpuhp_state_mutex);
+	return ret;
 }
 
 static void *cpuhp_get_teardown_cb(enum cpuhp_state state)
@@ -1831,41 +1415,21 @@ static void cpuhp_rollback_install(int failedcpu, enum cpuhp_state state,
 	}
 }
 
-/*
- * Returns a free for dynamic slot assignment of the Online state. The states
- * are protected by the cpuhp_slot_states mutex and an empty slot is identified
- * by having no name assigned.
- */
-static int cpuhp_reserve_state(enum cpuhp_state state)
-{
-	enum cpuhp_state i;
-
-	mutex_lock(&cpuhp_state_mutex);
-	for (i = CPUHP_AP_ONLINE_DYN; i <= CPUHP_AP_ONLINE_DYN_END; i++) {
-		if (cpuhp_ap_states[i].name)
-			continue;
-
-		cpuhp_ap_states[i].name = "Reserved";
-		mutex_unlock(&cpuhp_state_mutex);
-		return i;
-	}
-	mutex_unlock(&cpuhp_state_mutex);
-	WARN(1, "No more dynamic states available for CPU hotplug\n");
-	return -ENOSPC;
-}
-
-int __cpuhp_state_add_instance(enum cpuhp_state state, struct hlist_node *node,
-			       bool invoke)
+int __cpuhp_state_add_instance_cpuslocked(enum cpuhp_state state,
+					  struct hlist_node *node,
+					  bool invoke)
 {
 	struct cpuhp_step *sp;
 	int cpu;
 	int ret;
 
+	lockdep_assert_cpus_held();
+
 	sp = cpuhp_get_step(state);
 	if (sp->multi_instance == false)
 		return -EINVAL;
 
-	get_online_cpus();
+	mutex_lock(&cpuhp_state_mutex);
 
 	if (!invoke || !sp->startup.multi)
 		goto add_node;
@@ -1885,57 +1449,72 @@ int __cpuhp_state_add_instance(enum cpuhp_state state, struct hlist_node *node,
 		if (ret) {
 			if (sp->teardown.multi)
 				cpuhp_rollback_install(cpu, state, node);
-			goto err;
+			goto unlock;
 		}
 	}
 add_node:
 	ret = 0;
-	mutex_lock(&cpuhp_state_mutex);
 	hlist_add_head(node, &sp->list);
+unlock:
 	mutex_unlock(&cpuhp_state_mutex);
+	return ret;
+}
 
-err:
-	put_online_cpus();
+int __cpuhp_state_add_instance(enum cpuhp_state state, struct hlist_node *node,
+			       bool invoke)
+{
+	int ret;
+
+	cpus_read_lock();
+	ret = __cpuhp_state_add_instance_cpuslocked(state, node, invoke);
+	cpus_read_unlock();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(__cpuhp_state_add_instance);
 
 /**
- * __cpuhp_setup_state - Setup the callbacks for an hotplug machine state
- * @state:	The state to setup
- * @invoke:	If true, the startup function is invoked for cpus where
- *		cpu state >= @state
- * @startup:	startup callback function
- * @teardown:	teardown callback function
+ * __cpuhp_setup_state_cpuslocked - Setup the callbacks for an hotplug machine state
+ * @state:		The state to setup
+ * @invoke:		If true, the startup function is invoked for cpus where
+ *			cpu state >= @state
+ * @startup:		startup callback function
+ * @teardown:		teardown callback function
+ * @multi_instance:	State is set up for multiple instances which get
+ *			added afterwards.
  *
- * Returns 0 if successful, otherwise a proper error code
+ * The caller needs to hold cpus read locked while calling this function.
+ * Returns:
+ *   On success:
+ *      Positive state number if @state is CPUHP_AP_ONLINE_DYN
+ *      0 for all other states
+ *   On failure: proper (negative) error code
  */
-int __cpuhp_setup_state(enum cpuhp_state state,
-			const char *name, bool invoke,
-			int (*startup)(unsigned int cpu),
-			int (*teardown)(unsigned int cpu),
-			bool multi_instance)
+int __cpuhp_setup_state_cpuslocked(enum cpuhp_state state,
+				   const char *name, bool invoke,
+				   int (*startup)(unsigned int cpu),
+				   int (*teardown)(unsigned int cpu),
+				   bool multi_instance)
 {
 	int cpu, ret = 0;
-	int dyn_state = 0;
+	bool dynstate;
+
+	lockdep_assert_cpus_held();
 
 	if (cpuhp_cb_check(state) || !name)
 		return -EINVAL;
 
-	get_online_cpus();
+	mutex_lock(&cpuhp_state_mutex);
 
-	/* currently assignments for the ONLINE state are possible */
-	if (state == CPUHP_AP_ONLINE_DYN) {
-		dyn_state = 1;
-		ret = cpuhp_reserve_state(state);
-		if (ret < 0)
-			goto out;
+	ret = cpuhp_store_callbacks(state, name, startup, teardown,
+				    multi_instance);
+
+	dynstate = state == CPUHP_AP_ONLINE_DYN;
+	if (ret > 0 && dynstate) {
 		state = ret;
+		ret = 0;
 	}
 
-	cpuhp_store_callbacks(state, name, startup, teardown, multi_instance);
-
-	if (!invoke || !startup)
+	if (ret || !invoke || !startup)
 		goto out;
 
 	/*
@@ -1958,9 +1537,29 @@ int __cpuhp_setup_state(enum cpuhp_state state,
 		}
 	}
 out:
-	put_online_cpus();
-	if (!ret && dyn_state)
+	mutex_unlock(&cpuhp_state_mutex);
+	/*
+	 * If the requested state is CPUHP_AP_ONLINE_DYN, return the
+	 * dynamically allocated state in case of success.
+	 */
+	if (!ret && dynstate)
 		return state;
+	return ret;
+}
+EXPORT_SYMBOL(__cpuhp_setup_state_cpuslocked);
+
+int __cpuhp_setup_state(enum cpuhp_state state,
+			const char *name, bool invoke,
+			int (*startup)(unsigned int cpu),
+			int (*teardown)(unsigned int cpu),
+			bool multi_instance)
+{
+	int ret;
+
+	cpus_read_lock();
+	ret = __cpuhp_setup_state_cpuslocked(state, name, invoke, startup,
+					     teardown, multi_instance);
+	cpus_read_unlock();
 	return ret;
 }
 EXPORT_SYMBOL(__cpuhp_setup_state);
@@ -1976,7 +1575,9 @@ int __cpuhp_state_remove_instance(enum cpuhp_state state,
 	if (!sp->multi_instance)
 		return -EINVAL;
 
-	get_online_cpus();
+	cpus_read_lock();
+	mutex_lock(&cpuhp_state_mutex);
+
 	if (!invoke || !cpuhp_get_teardown_cb(state))
 		goto remove;
 	/*
@@ -1993,32 +1594,34 @@ int __cpuhp_state_remove_instance(enum cpuhp_state state,
 	}
 
 remove:
-	mutex_lock(&cpuhp_state_mutex);
 	hlist_del(node);
 	mutex_unlock(&cpuhp_state_mutex);
-	put_online_cpus();
+	cpus_read_unlock();
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(__cpuhp_state_remove_instance);
+
 /**
- * __cpuhp_remove_state - Remove the callbacks for an hotplug machine state
+ * __cpuhp_remove_state_cpuslocked - Remove the callbacks for an hotplug machine state
  * @state:	The state to remove
  * @invoke:	If true, the teardown function is invoked for cpus where
  *		cpu state >= @state
  *
+ * The caller needs to hold cpus read locked while calling this function.
  * The teardown callback is currently not allowed to fail. Think
  * about module removal!
  */
-void __cpuhp_remove_state(enum cpuhp_state state, bool invoke)
+void __cpuhp_remove_state_cpuslocked(enum cpuhp_state state, bool invoke)
 {
 	struct cpuhp_step *sp = cpuhp_get_step(state);
 	int cpu;
 
 	BUG_ON(cpuhp_cb_check(state));
 
-	get_online_cpus();
+	lockdep_assert_cpus_held();
 
+	mutex_lock(&cpuhp_state_mutex);
 	if (sp->multi_instance) {
 		WARN(!hlist_empty(&sp->list),
 		     "Error: Removing state %d which has instances left.\n",
@@ -2043,7 +1646,15 @@ void __cpuhp_remove_state(enum cpuhp_state state, bool invoke)
 	}
 remove:
 	cpuhp_store_callbacks(state, NULL, NULL, NULL, false);
-	put_online_cpus();
+	mutex_unlock(&cpuhp_state_mutex);
+}
+EXPORT_SYMBOL(__cpuhp_remove_state_cpuslocked);
+
+void __cpuhp_remove_state(enum cpuhp_state state, bool invoke)
+{
+	cpus_read_lock();
+	__cpuhp_remove_state_cpuslocked(state, invoke);
+	cpus_read_unlock();
 }
 EXPORT_SYMBOL(__cpuhp_remove_state);
 
@@ -2086,13 +1697,13 @@ static ssize_t write_cpuhp_target(struct device *dev,
 	ret = !sp->name || sp->cant_stop ? -EINVAL : 0;
 	mutex_unlock(&cpuhp_state_mutex);
 	if (ret)
-		return ret;
+		goto out;
 
 	if (st->state < target)
 		ret = do_cpu_up(dev->id, target);
 	else
 		ret = do_cpu_down(dev->id, target);
-
+out:
 	unlock_device_hotplug();
 	return ret ? ret : count;
 }
@@ -2245,6 +1856,14 @@ void __init boot_cpu_init(void)
 	set_cpu_active(cpu, true);
 	set_cpu_present(cpu, true);
 	set_cpu_possible(cpu, true);
+
+#ifdef CONFIG_SMP
+	__boot_cpu_id = cpu;
+#endif
+
+#ifdef CONFIG_SMP
+	__boot_cpu_id = cpu;
+#endif
 }
 
 /*

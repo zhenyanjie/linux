@@ -37,9 +37,12 @@ extern int
 tracepoint_probe_register(struct tracepoint *tp, void *probe, void *data);
 extern int
 tracepoint_probe_register_prio(struct tracepoint *tp, void *probe, void *data,
-			       int prio);
+			       int prio, bool dynamic);
+extern int dynamic_tracepoint_probe_register(struct tracepoint *tp,
+					     void *probe, void *data);
 extern int
-tracepoint_probe_unregister(struct tracepoint *tp, void *probe, void *data);
+tracepoint_probe_unregister(struct tracepoint *tp, void *probe, void *data,
+			    bool dynamic);
 extern void
 for_each_kernel_tracepoint(void (*fct)(struct tracepoint *tp, void *priv),
 		void *priv);
@@ -81,7 +84,7 @@ static inline void tracepoint_synchronize_unregister(void)
 }
 
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
-extern void syscall_regfunc(void);
+extern int syscall_regfunc(void);
 extern void syscall_unregfunc(void);
 #endif /* CONFIG_HAVE_SYSCALL_TRACEPOINTS */
 
@@ -128,7 +131,7 @@ extern void syscall_unregfunc(void);
  * as "(void *, void)". The DECLARE_TRACE_NOARGS() will pass in just
  * "void *data", where as the DECLARE_TRACE() will pass in "void *data, proto".
  */
-#define __DO_TRACE(tp, proto, args, cond, prercu, postrcu)		\
+#define __DO_TRACE(tp, proto, args, cond, rcucheck)			\
 	do {								\
 		struct tracepoint_func *it_func_ptr;			\
 		void *it_func;						\
@@ -136,7 +139,11 @@ extern void syscall_unregfunc(void);
 									\
 		if (!(cond))						\
 			return;						\
-		prercu;							\
+		if (rcucheck) {						\
+			if (WARN_ON_ONCE(rcu_irq_enter_disabled()))	\
+				return;					\
+			rcu_irq_enter_irqson();				\
+		}							\
 		rcu_read_lock_sched_notrace();				\
 		it_func_ptr = rcu_dereference_sched((tp)->funcs);	\
 		if (it_func_ptr) {					\
@@ -147,20 +154,19 @@ extern void syscall_unregfunc(void);
 			} while ((++it_func_ptr)->func);		\
 		}							\
 		rcu_read_unlock_sched_notrace();			\
-		postrcu;						\
+		if (rcucheck)						\
+			rcu_irq_exit_irqson();				\
 	} while (0)
 
 #ifndef MODULE
-#define __DECLARE_TRACE_RCU(name, proto, args, cond, data_proto, data_args)	\
+#define __DECLARE_TRACE_RCU(name, proto, args, cond, data_proto, data_args) \
 	static inline void trace_##name##_rcuidle(proto)		\
 	{								\
 		if (static_key_false(&__tracepoint_##name.key))		\
 			__DO_TRACE(&__tracepoint_##name,		\
 				TP_PROTO(data_proto),			\
 				TP_ARGS(data_args),			\
-				TP_CONDITION(cond),			\
-				rcu_irq_enter_irqson(),			\
-				rcu_irq_exit_irqson());			\
+				TP_CONDITION(cond), 1);			\
 	}
 #else
 #define __DECLARE_TRACE_RCU(name, proto, args, cond, data_proto, data_args)
@@ -186,7 +192,7 @@ extern void syscall_unregfunc(void);
 			__DO_TRACE(&__tracepoint_##name,		\
 				TP_PROTO(data_proto),			\
 				TP_ARGS(data_args),			\
-				TP_CONDITION(cond),,);			\
+				TP_CONDITION(cond), 0);			\
 		if (IS_ENABLED(CONFIG_LOCKDEP) && (cond)) {		\
 			rcu_read_lock_sched_notrace();			\
 			rcu_dereference_sched(__tracepoint_##name.funcs);\
@@ -206,13 +212,13 @@ extern void syscall_unregfunc(void);
 				   int prio)				\
 	{								\
 		return tracepoint_probe_register_prio(&__tracepoint_##name, \
-					      (void *)probe, data, prio); \
+				      (void *)probe, data, prio, false); \
 	}								\
 	static inline int						\
 	unregister_trace_##name(void (*probe)(data_proto), void *data)	\
 	{								\
 		return tracepoint_probe_unregister(&__tracepoint_##name,\
-						(void *)probe, data);	\
+					   (void *)probe, data, false); \
 	}								\
 	static inline void						\
 	check_trace_callback_type_##name(void (*cb)(data_proto))	\

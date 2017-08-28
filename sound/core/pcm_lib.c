@@ -21,6 +21,7 @@
  */
 
 #include <linux/slab.h>
+#include <linux/sched/signal.h>
 #include <linux/time.h>
 #include <linux/math64.h>
 #include <linux/export.h>
@@ -2491,7 +2492,7 @@ static int pcm_chmap_ctl_get(struct snd_kcontrol *kcontrol,
 	struct snd_pcm_substream *substream;
 	const struct snd_pcm_chmap_elem *map;
 
-	if (snd_BUG_ON(!info->chmap))
+	if (!info->chmap)
 		return -EINVAL;
 	substream = snd_pcm_chmap_substream(info, idx);
 	if (!substream)
@@ -2523,7 +2524,7 @@ static int pcm_chmap_ctl_tlv(struct snd_kcontrol *kcontrol, int op_flag,
 	unsigned int __user *dst;
 	int c, count = 0;
 
-	if (snd_BUG_ON(!info->chmap))
+	if (!info->chmap)
 		return -EINVAL;
 	if (size < 8)
 		return -ENOMEM;

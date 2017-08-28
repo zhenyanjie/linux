@@ -523,7 +523,7 @@ static int acpi_pci_root_add(struct acpi_device *device,
 	struct acpi_pci_root *root;
 	acpi_handle handle = device->handle;
 	int no_aspm = 0;
-	bool hotadd = system_state != SYSTEM_BOOTING;
+	bool hotadd = system_state == SYSTEM_RUNNING;
 
 	root = kzalloc(sizeof(struct acpi_pci_root), GFP_KERNEL);
 	if (!root)
@@ -648,12 +648,12 @@ static void acpi_pci_root_remove(struct acpi_device *device)
 
 	pci_stop_root_bus(root->bus);
 
-	WARN_ON(acpi_ioapic_remove(root));
-
+	pci_ioapic_remove(root);
 	device_set_run_wake(root->bus->bridge, false);
 	pci_acpi_remove_bus_pm_notifier(device);
 
 	pci_remove_root_bus(root->bus);
+	WARN_ON(acpi_ioapic_remove(root));
 
 	dmar_device_remove(device->handle);
 

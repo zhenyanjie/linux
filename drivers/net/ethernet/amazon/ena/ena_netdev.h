@@ -44,8 +44,8 @@
 #include "ena_eth_com.h"
 
 #define DRV_MODULE_VER_MAJOR	1
-#define DRV_MODULE_VER_MINOR	0
-#define DRV_MODULE_VER_SUBMINOR 2
+#define DRV_MODULE_VER_MINOR	1
+#define DRV_MODULE_VER_SUBMINOR 7
 
 #define DRV_MODULE_NAME		"ena"
 #ifndef DRV_MODULE_VERSION
@@ -100,7 +100,7 @@
 /* Number of queues to check for missing queues per timer service */
 #define ENA_MONITORED_TX_QUEUES	4
 /* Max timeout packets before device reset */
-#define MAX_NUM_OF_TIMEOUTED_PACKETS 32
+#define MAX_NUM_OF_TIMEOUTED_PACKETS 128
 
 #define ENA_TX_RING_IDX_NEXT(idx, ring_size) (((idx) + 1) & ((ring_size) - 1))
 
@@ -116,9 +116,9 @@
 #define ENA_IO_IRQ_IDX(q)		(ENA_IO_IRQ_FIRST_IDX + (q))
 
 /* ENA device should send keep alive msg every 1 sec.
- * We wait for 3 sec just to be on the safe side.
+ * We wait for 6 sec just to be on the safe side.
  */
-#define ENA_DEVICE_KALIVE_TIMEOUT	(3 * HZ)
+#define ENA_DEVICE_KALIVE_TIMEOUT	(6 * HZ)
 
 #define ENA_MMIO_DISABLE_REG_READ	BIT(0)
 
@@ -146,7 +146,18 @@ struct ena_tx_buffer {
 	u32 tx_descs;
 	/* num of buffers used by this skb */
 	u32 num_of_bufs;
-	/* Save the last jiffies to detect missing tx packets */
+
+	/* Used for detect missing tx packets to limit the number of prints */
+	u32 print_once;
+	/* Save the last jiffies to detect missing tx packets
+	 *
+	 * sets to non zero value on ena_start_xmit and set to zero on
+	 * napi and timer_Service_routine.
+	 *
+	 * while this value is not protected by lock,
+	 * a given packet is not expected to be handled by ena_start_xmit
+	 * and by napi/timer_service at the same time.
+	 */
 	unsigned long last_jiffies;
 	struct ena_com_buf bufs[ENA_PKT_MAX_BUFS];
 } ____cacheline_aligned;
@@ -170,7 +181,6 @@ struct ena_stats_tx {
 	u64 napi_comp;
 	u64 tx_poll;
 	u64 doorbells;
-	u64 missing_tx_comp;
 	u64 bad_req_id;
 };
 
@@ -184,6 +194,7 @@ struct ena_stats_rx {
 	u64 dma_mapping_err;
 	u64 bad_desc_num;
 	u64 rx_copybreak_pkt;
+	u64 empty_rx_ring;
 };
 
 struct ena_ring {
@@ -231,6 +242,7 @@ struct ena_ring {
 		struct ena_stats_tx tx_stats;
 		struct ena_stats_rx rx_stats;
 	};
+	int empty_rx_queue;
 } ____cacheline_aligned;
 
 struct ena_stats_dev {
@@ -241,13 +253,13 @@ struct ena_stats_dev {
 	u64 interface_up;
 	u64 interface_down;
 	u64 admin_q_pause;
+	u64 rx_drops;
 };
 
 enum ena_flags_t {
 	ENA_FLAG_DEVICE_RUNNING,
 	ENA_FLAG_DEV_UP,
 	ENA_FLAG_LINK_UP,
-	ENA_FLAG_MSIX_ENABLED,
 	ENA_FLAG_TRIGGER_RESET
 };
 
@@ -266,7 +278,6 @@ struct ena_adapter {
 
 	int num_queues;
 
-	struct msix_entry *msix_entries;
 	int msix_vecs;
 
 	u32 tx_usecs, rx_usecs; /* interrupt moderation */

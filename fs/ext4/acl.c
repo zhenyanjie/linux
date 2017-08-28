@@ -4,6 +4,7 @@
  * Copyright (C) 2001-2003 Andreas Gruenbacher, <agruen@suse.de>
  */
 
+#include <linux/quotaops.h>
 #include "ext4_jbd2.h"
 #include "ext4.h"
 #include "xattr.h"
@@ -196,7 +197,7 @@ __ext4_set_acl(handle_t *handle, struct inode *inode, int type,
 			error = posix_acl_update_mode(inode, &inode->i_mode, &acl);
 			if (error)
 				return error;
-			inode->i_ctime = ext4_current_time(inode);
+			inode->i_ctime = current_time(inode);
 			ext4_mark_inode_dirty(handle, inode);
 		}
 		break;
@@ -232,6 +233,9 @@ ext4_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 	handle_t *handle;
 	int error, retries = 0;
 
+	error = dquot_initialize(inode);
+	if (error)
+		return error;
 retry:
 	handle = ext4_journal_start(inode, EXT4_HT_XATTR,
 				    ext4_jbd2_credits_xattr(inode));

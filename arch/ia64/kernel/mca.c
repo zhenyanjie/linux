@@ -72,7 +72,9 @@
 #include <linux/jiffies.h>
 #include <linux/types.h>
 #include <linux/init.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/task.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/bootmem.h>
@@ -1822,7 +1824,7 @@ format_mca_init_stack(void *mca_data, unsigned long offset,
 	ti->cpu = cpu;
 	p->stack = ti;
 	p->state = TASK_UNINTERRUPTIBLE;
-	cpumask_set_cpu(cpu, &p->cpus_allowed);
+	cpumask_set_cpu(cpu, &p->cpus_mask);
 	INIT_LIST_HEAD(&p->tasks);
 	p->parent = p->real_parent = p->group_leader = p;
 	INIT_LIST_HEAD(&p->children);
