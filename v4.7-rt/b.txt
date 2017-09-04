@@ -1,0 +1,73 @@
+patching file arch/x86/include/asm/uv/uv_hub.h
+Hunk #1 FAILED at 492.
+1 out of 1 hunk FAILED -- saving rejects to file arch/x86/include/asm/uv/uv_hub.h.rej
+patching file arch/x86/kernel/apic/x2apic_uv_x.c
+Hunk #3 FAILED at 950.
+1 out of 3 hunks FAILED -- saving rejects to file arch/x86/kernel/apic/x2apic_uv_x.c.rej
+patching file arch/x86/kernel/dumpstack_64.c
+Hunk #1 FAILED at 152.
+Hunk #2 FAILED at 241.
+2 out of 4 hunks FAILED -- saving rejects to file arch/x86/kernel/dumpstack_64.c.rej
+patching file drivers/crypto/ccp/ccp-dev.c
+Hunk #1 FAILED at 16.
+1 out of 1 hunk FAILED -- saving rejects to file drivers/crypto/ccp/ccp-dev.c.rej
+patching file drivers/net/ethernet/atheros/atl1c/atl1c_main.c
+Hunk #1 FAILED at 2217.
+1 out of 1 hunk FAILED -- saving rejects to file drivers/net/ethernet/atheros/atl1c/atl1c_main.c.rej
+patching file drivers/net/ethernet/atheros/atl1e/atl1e_main.c
+Hunk #1 FAILED at 1880.
+1 out of 1 hunk FAILED -- saving rejects to file drivers/net/ethernet/atheros/atl1e/atl1e_main.c.rej
+patching file drivers/net/ethernet/oki-semi/pch_gbe/pch_gbe_main.c
+Hunk #1 FAILED at 2137.
+1 out of 1 hunk FAILED -- saving rejects to file drivers/net/ethernet/oki-semi/pch_gbe/pch_gbe_main.c.rej
+patching file drivers/net/ethernet/tehuti/tehuti.c
+Hunk #1 FAILED at 1629.
+1 out of 1 hunk FAILED -- saving rejects to file drivers/net/ethernet/tehuti/tehuti.c.rej
+patching file fs/dcache.c
+Hunk #3 FAILED at 786.
+1 out of 4 hunks FAILED -- saving rejects to file fs/dcache.c.rej
+patching file include/linux/rcutree.h
+Hunk #3 FAILED at 93.
+1 out of 4 hunks FAILED -- saving rejects to file include/linux/rcutree.h.rej
+patching file include/linux/sched.h
+Hunk #11 FAILED at 1916.
+Hunk #18 FAILED at 2677.
+2 out of 22 hunks FAILED -- saving rejects to file include/linux/sched.h.rej
+patching file include/linux/timer.h
+Hunk #6 FAILED at 156.
+1 out of 8 hunks FAILED -- saving rejects to file include/linux/timer.h.rej
+patching file kernel/sched/core.c
+Hunk #14 FAILED at 1656.
+Hunk #17 FAILED at 2138.
+Hunk #22 FAILED at 3434.
+Hunk #36 FAILED at 5737.
+4 out of 37 hunks FAILED -- saving rejects to file kernel/sched/core.c.rej
+patching file kernel/sched/rt.c
+Hunk #3 FAILED at 336.
+Hunk #4 FAILED at 353.
+Hunk #5 FAILED at 1326.
+Hunk #6 FAILED at 1415.
+Hunk #7 FAILED at 1439.
+Hunk #8 FAILED at 1447.
+Hunk #9 FAILED at 1581.
+Hunk #10 FAILED at 1631.
+Hunk #11 FAILED at 1764.
+Hunk #12 FAILED at 2124.
+Hunk #13 FAILED at 2199.
+11 out of 13 hunks FAILED -- saving rejects to file kernel/sched/rt.c.rej
+patching file mm/page_alloc.c
+Hunk #4 FAILED at 840.
+Hunk #6 FAILED at 875.
+Hunk #15 FAILED at 2396.
+Hunk #17 FAILED at 2430.
+4 out of 22 hunks FAILED -- saving rejects to file mm/page_alloc.c.rej
+patching file mm/swap.c
+Hunk #11 FAILED at 709.
+1 out of 11 hunks FAILED -- saving rejects to file mm/swap.c.rej
+patching file mm/truncate.c
+Hunk #1 FAILED at 63.
+1 out of 1 hunk FAILED -- saving rejects to file mm/truncate.c.rej
+patching file net/ipv4/tcp_ipv4.c
+Hunk #3 FAILED at 691.
+Hunk #4 FAILED at 776.
+2 out of 4 hunks FAILED -- saving rejects to file net/ipv4/tcp_ipv4.c.rej

@@ -1,0 +1,23 @@
+--- include/linux/timer.h
++++ include/linux/timer.h
+@@ -156,10 +167,20 @@ static inline void init_timer_on_stack_key(struct timer_list *timer,
+ 
+ #define setup_timer(timer, fn, data)					\
+ 	__setup_timer((timer), (fn), (data), 0)
++#define setup_pinned_timer(timer, fn, data)				\
++	__setup_timer((timer), (fn), (data), TIMER_PINNED)
++#define setup_deferrable_timer(timer, fn, data)				\
++	__setup_timer((timer), (fn), (data), TIMER_DEFERRABLE)
++#define setup_pinned_deferrable_timer(timer, fn, data)			\
++	__setup_timer((timer), (fn), (data), TIMER_DEFERRABLE | TIMER_PINNED)
+ #define setup_timer_on_stack(timer, fn, data)				\
+ 	__setup_timer_on_stack((timer), (fn), (data), 0)
++#define setup_pinned_timer_on_stack(timer, fn, data)			\
++	__setup_timer_on_stack((timer), (fn), (data), TIMER_PINNED)
+ #define setup_deferrable_timer_on_stack(timer, fn, data)		\
+ 	__setup_timer_on_stack((timer), (fn), (data), TIMER_DEFERRABLE)
++#define setup_pinned_deferrable_timer_on_stack(timer, fn, data)		\
++	__setup_timer_on_stack((timer), (fn), (data), TIMER_DEFERRABLE | TIMER_PINNED)
+ 
+ /**
+  * timer_pending - is a timer pending?

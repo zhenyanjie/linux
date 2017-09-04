@@ -1,0 +1,37 @@
+--- include/linux/sched.h
++++ include/linux/sched.h
+@@ -1916,9 +1964,6 @@ extern int arch_task_struct_size __read_mostly;
+ # define arch_task_struct_size (sizeof(struct task_struct))
+ #endif
+ 
+-/* Future-safe accessor for struct task_struct's cpus_allowed. */
+-#define tsk_cpus_allowed(tsk) (&(tsk)->cpus_allowed)
+-
+ #define TNF_MIGRATED	0x01
+ #define TNF_NO_GROUP	0x02
+ #define TNF_SHARED	0x04
+@@ -2677,12 +2741,24 @@ extern struct mm_struct * mm_alloc(void);
+ 
+ /* mmdrop drops the mm and the page tables */
+ extern void __mmdrop(struct mm_struct *);
++
+ static inline void mmdrop(struct mm_struct * mm)
+ {
+ 	if (unlikely(atomic_dec_and_test(&mm->mm_count)))
+ 		__mmdrop(mm);
+ }
+ 
++#ifdef CONFIG_PREEMPT_RT_BASE
++extern void __mmdrop_delayed(struct rcu_head *rhp);
++static inline void mmdrop_delayed(struct mm_struct *mm)
++{
++	if (atomic_dec_and_test(&mm->mm_count))
++		call_rcu(&mm->delayed_drop, __mmdrop_delayed);
++}
++#else
++# define mmdrop_delayed(mm)	mmdrop(mm)
++#endif
++
+ /* mmput gets rid of the mappings and all user-space */
+ extern void mmput(struct mm_struct *);
+ /* Grab a reference to a task's mm, if it is not already going away */
