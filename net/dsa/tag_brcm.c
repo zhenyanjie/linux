@@ -12,7 +12,6 @@
 #include <linux/etherdevice.h>
 #include <linux/list.h>
 #include <linux/slab.h>
-#include <net/dsa.h>
 #include "dsa_priv.h"
 
 /* This tag length is 4 bytes, older ones were 6 bytes, we do not
@@ -81,9 +80,9 @@ static struct sk_buff *brcm_tag_xmit(struct sk_buff *skb, struct net_device *dev
 			((skb->priority << BRCM_IG_TC_SHIFT) & BRCM_IG_TC_MASK);
 	brcm_tag[1] = 0;
 	brcm_tag[2] = 0;
-	if (p->dp->index == 8)
+	if (p->port == 8)
 		brcm_tag[2] = BRCM_IG_DSTMAP2_MASK;
-	brcm_tag[3] = (1 << p->dp->index) & BRCM_IG_DSTMAP1_MASK;
+	brcm_tag[3] = (1 << p->port) & BRCM_IG_DSTMAP1_MASK;
 
 	return skb;
 
@@ -92,16 +91,22 @@ out_free:
 	return NULL;
 }
 
-static struct sk_buff *brcm_tag_rcv(struct sk_buff *skb, struct net_device *dev,
-				    struct packet_type *pt,
-				    struct net_device *orig_dev)
+static int brcm_tag_rcv(struct sk_buff *skb, struct net_device *dev,
+			struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct dsa_switch_tree *dst = dev->dsa_ptr;
 	struct dsa_switch *ds;
 	int source_port;
 	u8 *brcm_tag;
 
-	ds = dst->cpu_switch;
+	if (unlikely(dst == NULL))
+		goto out_drop;
+
+	ds = dst->ds[0];
+
+	skb = skb_unshare(skb, GFP_ATOMIC);
+	if (skb == NULL)
+		goto out;
 
 	if (unlikely(!pskb_may_pull(skb, BRCM_TAG_LEN)))
 		goto out_drop;
@@ -116,14 +121,13 @@ static struct sk_buff *brcm_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 	/* We should never see a reserved reason code without knowing how to
 	 * handle it
 	 */
-	if (unlikely(brcm_tag[2] & BRCM_EG_RC_RSVD))
-		goto out_drop;
+	WARN_ON(brcm_tag[2] & BRCM_EG_RC_RSVD);
 
 	/* Locate which port this is coming from */
 	source_port = brcm_tag[3] & BRCM_EG_PID_MASK;
 
 	/* Validate port against switch setup, either the port is totally */
-	if (source_port >= ds->num_ports || !ds->ports[source_port].netdev)
+	if (source_port >= DSA_MAX_PORTS || ds->ports[source_port] == NULL)
 		goto out_drop;
 
 	/* Remove Broadcom tag and update checksum */
@@ -134,12 +138,22 @@ static struct sk_buff *brcm_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 		skb->data - ETH_HLEN - BRCM_TAG_LEN,
 		2 * ETH_ALEN);
 
-	skb->dev = ds->ports[source_port].netdev;
+	skb_push(skb, ETH_HLEN);
+	skb->pkt_type = PACKET_HOST;
+	skb->dev = ds->ports[source_port];
+	skb->protocol = eth_type_trans(skb, skb->dev);
 
-	return skb;
+	skb->dev->stats.rx_packets++;
+	skb->dev->stats.rx_bytes += skb->len;
+
+	netif_receive_skb(skb);
+
+	return 0;
 
 out_drop:
-	return NULL;
+	kfree_skb(skb);
+out:
+	return 0;
 }
 
 const struct dsa_device_ops brcm_netdev_ops = {

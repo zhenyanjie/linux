@@ -3,8 +3,6 @@
  *
  *  Copyright (c) 2010, 2011 Intel Corporation
  *
- *  Author: Hans J. Koch <hjk@linutronix.de>
- *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License 2 as published
  *  by the Free Software Foundation.
@@ -17,6 +15,7 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/of_irq.h>
@@ -135,8 +134,7 @@ static int sdv_register_irqsupport(struct sdv_gpio_chip_data *sd,
 	struct irq_chip_type *ct;
 	int ret;
 
-	sd->irq_base = devm_irq_alloc_descs(&pdev->dev, -1, 0,
-					    SDV_NUM_PUB_GPIOS, -1);
+	sd->irq_base = irq_alloc_descs(-1, 0, SDV_NUM_PUB_GPIOS, -1);
 	if (sd->irq_base < 0)
 		return sd->irq_base;
 
@@ -144,11 +142,10 @@ static int sdv_register_irqsupport(struct sdv_gpio_chip_data *sd,
 	writel(0, sd->gpio_pub_base + GPIO_INT);
 	writel((1 << 11) - 1, sd->gpio_pub_base + GPSTR);
 
-	ret = devm_request_irq(&pdev->dev, pdev->irq,
-			       sdv_gpio_pub_irq_handler, IRQF_SHARED,
-			       "sdv_gpio", sd);
+	ret = request_irq(pdev->irq, sdv_gpio_pub_irq_handler, IRQF_SHARED,
+			"sdv_gpio", sd);
 	if (ret)
-		return ret;
+		goto out_free_desc;
 
 	/*
 	 * This gpio irq controller latches level irqs. Testing shows that if
@@ -157,8 +154,10 @@ static int sdv_register_irqsupport(struct sdv_gpio_chip_data *sd,
 	 */
 	sd->gc = irq_alloc_generic_chip("sdv-gpio", 1, sd->irq_base,
 			sd->gpio_pub_base, handle_fasteoi_irq);
-	if (!sd->gc)
-		return -ENOMEM;
+	if (!sd->gc) {
+		ret = -ENOMEM;
+		goto out_free_irq;
+	}
 
 	sd->gc->private = sd;
 	ct = sd->gc->chip_types;
@@ -176,10 +175,16 @@ static int sdv_register_irqsupport(struct sdv_gpio_chip_data *sd,
 
 	sd->id = irq_domain_add_legacy(pdev->dev.of_node, SDV_NUM_PUB_GPIOS,
 				sd->irq_base, 0, &irq_domain_sdv_ops, sd);
-	if (!sd->id)
-		return -ENODEV;
-
+	if (!sd->id) {
+		ret = -ENODEV;
+		goto out_free_irq;
+	}
 	return 0;
+out_free_irq:
+	free_irq(pdev->irq, sd);
+out_free_desc:
+	irq_free_descs(sd->irq_base, SDV_NUM_PUB_GPIOS);
+	return ret;
 }
 
 static int sdv_gpio_probe(struct pci_dev *pdev,
@@ -252,17 +257,34 @@ done:
 	return ret;
 }
 
+static void sdv_gpio_remove(struct pci_dev *pdev)
+{
+	struct sdv_gpio_chip_data *sd = pci_get_drvdata(pdev);
+
+	free_irq(pdev->irq, sd);
+	irq_free_descs(sd->irq_base, SDV_NUM_PUB_GPIOS);
+
+	gpiochip_remove(&sd->chip);
+	pci_release_region(pdev, GPIO_BAR);
+	iounmap(sd->gpio_pub_base);
+	pci_disable_device(pdev);
+	kfree(sd);
+}
+
 static const struct pci_device_id sdv_gpio_pci_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_SDV_GPIO) },
 	{ 0, },
 };
 
 static struct pci_driver sdv_gpio_driver = {
-	.driver = {
-		.suppress_bind_attrs = true,
-	},
 	.name = DRV_NAME,
 	.id_table = sdv_gpio_pci_ids,
 	.probe = sdv_gpio_probe,
+	.remove = sdv_gpio_remove,
 };
-builtin_pci_driver(sdv_gpio_driver);
+
+module_pci_driver(sdv_gpio_driver);
+
+MODULE_AUTHOR("Hans J. Koch <hjk@linutronix.de>");
+MODULE_DESCRIPTION("GPIO interface for Intel Sodaville SoCs");
+MODULE_LICENSE("GPL v2");

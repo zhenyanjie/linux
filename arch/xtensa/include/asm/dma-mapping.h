@@ -18,11 +18,14 @@
 
 #define DMA_ERROR_CODE		(~(dma_addr_t)0x0)
 
-extern const struct dma_map_ops xtensa_dma_map_ops;
+extern struct dma_map_ops xtensa_dma_map_ops;
 
-static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
-	return &xtensa_dma_map_ops;
+	if (dev && dev->archdata.dma_ops)
+		return dev->archdata.dma_ops;
+	else
+		return &xtensa_dma_map_ops;
 }
 
 void dma_cache_sync(struct device *dev, void *vaddr, size_t size,

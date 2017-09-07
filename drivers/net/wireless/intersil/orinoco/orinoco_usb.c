@@ -403,7 +403,8 @@ static void ezusb_ctx_complete(struct request_context *ctx)
 
 		if ((ctx->out_rid == EZUSB_RID_TX) && upriv->dev) {
 			struct net_device *dev = upriv->dev;
-			struct net_device_stats *stats = &dev->stats;
+			struct orinoco_private *priv = ndev_priv(dev);
+			struct net_device_stats *stats = &priv->stats;
 
 			if (ctx->state != EZUSB_CTX_COMPLETE)
 				stats->tx_errors++;
@@ -696,7 +697,7 @@ static void ezusb_req_ctx_wait(struct ezusb_priv *upriv,
 			while (!ctx->done.done && msecs--)
 				udelay(1000);
 		} else {
-			wait_event_interruptible(ctx->done.wait,
+			swait_event_interruptible(ctx->done.wait,
 						 ctx->done.done);
 		}
 		break;
@@ -769,31 +770,18 @@ static int ezusb_submit_in_urb(struct ezusb_priv *upriv)
 
 static inline int ezusb_8051_cpucs(struct ezusb_priv *upriv, int reset)
 {
-	int ret;
-	u8 *res_val = NULL;
+	u8 res_val = reset;	/* avoid argument promotion */
 
 	if (!upriv->udev) {
 		err("%s: !upriv->udev", __func__);
 		return -EFAULT;
 	}
-
-	res_val = kmalloc(sizeof(*res_val), GFP_KERNEL);
-
-	if (!res_val)
-		return -ENOMEM;
-
-	*res_val = reset;	/* avoid argument promotion */
-
-	ret =  usb_control_msg(upriv->udev,
+	return usb_control_msg(upriv->udev,
 			       usb_sndctrlpipe(upriv->udev, 0),
 			       EZUSB_REQUEST_FW_TRANS,
 			       USB_TYPE_VENDOR | USB_RECIP_DEVICE |
-			       USB_DIR_OUT, EZUSB_CPUCS_REG, 0, res_val,
-			       sizeof(*res_val), DEF_TIMEOUT);
-
-	kfree(res_val);
-
-	return ret;
+			       USB_DIR_OUT, EZUSB_CPUCS_REG, 0, &res_val,
+			       sizeof(res_val), DEF_TIMEOUT);
 }
 
 static int ezusb_firmware_download(struct ezusb_priv *upriv,
@@ -1195,7 +1183,7 @@ static int ezusb_program(struct hermes *hw, const char *buf,
 static netdev_tx_t ezusb_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct orinoco_private *priv = ndev_priv(dev);
-	struct net_device_stats *stats = &dev->stats;
+	struct net_device_stats *stats = &priv->stats;
 	struct ezusb_priv *upriv = priv->card;
 	u8 mic[MICHAEL_MIC_LEN + 1];
 	int err = 0;
@@ -1287,7 +1275,7 @@ static netdev_tx_t ezusb_xmit(struct sk_buff *skb, struct net_device *dev)
 		goto busy;
 	}
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	stats->tx_bytes += skb->len;
 	goto ok;
 
@@ -1568,6 +1556,7 @@ static const struct net_device_ops ezusb_netdev_ops = {
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_tx_timeout		= orinoco_tx_timeout,
+	.ndo_get_stats		= orinoco_get_stats,
 };
 
 static int ezusb_probe(struct usb_interface *interface,
@@ -1624,8 +1613,10 @@ static int ezusb_probe(struct usb_interface *interface,
 			}
 
 			upriv->read_urb = usb_alloc_urb(0, GFP_KERNEL);
-			if (!upriv->read_urb)
+			if (!upriv->read_urb) {
+				err("No free urbs available");
 				goto error;
+			}
 			if (le16_to_cpu(ep->wMaxPacketSize) != 64)
 				pr_warn("bulk in: wMaxPacketSize!= 64\n");
 			if (ep->bEndpointAddress != (2 | USB_DIR_IN))

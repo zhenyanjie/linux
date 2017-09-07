@@ -17,19 +17,17 @@
 #include <linux/smp.h>
 #include <linux/ptrace.h>
 #include <linux/slab.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task.h>
 #include <linux/thread_info.h>
 #include <linux/uaccess.h>
 #include <linux/mman.h>
 #include <linux/types.h>
 #include <linux/err.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/compat.h>
 #include <linux/prctl.h>
 #include <asm/cacheflush.h>
 #include <asm/traps.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unaligned.h>
 #include <arch/abi.h>
 #include <arch/spr_def.h>
@@ -190,7 +188,7 @@ static void find_regs(tilegx_bundle_bits bundle, uint64_t *rd, uint64_t *ra,
 	 * Parse fault bundle, find potential used registers and mark
 	 * corresponding bits in reg_map and alias_map. These 2 bit maps
 	 * are used to find the scratch registers and determine if there
-	 * is register alias.
+	 * is register alais.
 	 */
 	if (bundle & TILEGX_BUNDLE_MODE_MASK) {  /* Y Mode Bundle. */
 
@@ -1531,7 +1529,7 @@ void do_unaligned(struct pt_regs *regs, int vecnum)
 	}
 
 
-	/* Read the bundle caused the exception! */
+	/* Read the bundle casued the exception! */
 	pc = (tilegx_bundle_bits __user *)(regs->pc);
 	if (get_user(bundle, pc) != 0) {
 		/* Probably never be here since pc is valid user address.*/

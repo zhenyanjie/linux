@@ -59,7 +59,8 @@ static void soc_ac97_device_release(struct device *dev)
 #ifdef CONFIG_GPIOLIB
 static inline struct snd_soc_codec *gpio_to_codec(struct gpio_chip *chip)
 {
-	struct snd_ac97_gpio_priv *gpio_priv = gpiochip_get_data(chip);
+	struct snd_ac97_gpio_priv *gpio_priv =
+		container_of(chip, struct snd_ac97_gpio_priv, gpio_chip);
 
 	return gpio_priv->codec;
 }
@@ -97,7 +98,8 @@ static int snd_soc_ac97_gpio_get(struct gpio_chip *chip, unsigned offset)
 static void snd_soc_ac97_gpio_set(struct gpio_chip *chip, unsigned offset,
 				  int value)
 {
-	struct snd_ac97_gpio_priv *gpio_priv = gpiochip_get_data(chip);
+	struct snd_ac97_gpio_priv *gpio_priv =
+		container_of(chip, struct snd_ac97_gpio_priv, gpio_chip);
 	struct snd_soc_codec *codec = gpio_to_codec(chip);
 
 	gpio_priv->gpios_set &= ~(1 << offset);
@@ -116,7 +118,7 @@ static int snd_soc_ac97_gpio_direction_out(struct gpio_chip *chip,
 	return snd_soc_update_bits(codec, AC97_GPIO_CFG, 1 << offset, 0);
 }
 
-static const struct gpio_chip snd_soc_ac97_gpio_chip = {
+static struct gpio_chip snd_soc_ac97_gpio_chip = {
 	.label			= "snd_soc_ac97",
 	.owner			= THIS_MODULE,
 	.request		= snd_soc_ac97_gpio_request,
@@ -143,7 +145,7 @@ static int snd_soc_ac97_init_gpio(struct snd_ac97 *ac97,
 	gpio_priv->gpio_chip.parent = codec->dev;
 	gpio_priv->gpio_chip.base = -1;
 
-	ret = gpiochip_add_data(&gpio_priv->gpio_chip, gpio_priv);
+	ret = gpiochip_add(&gpio_priv->gpio_chip);
 	if (ret != 0)
 		dev_err(codec->dev, "Failed to add GPIOs: %d\n", ret);
 	return ret;
@@ -251,7 +253,7 @@ EXPORT_SYMBOL_GPL(snd_soc_new_ac97_codec);
 
 /**
  * snd_soc_free_ac97_codec - free AC97 codec device
- * @ac97: snd_ac97 device to be freed
+ * @codec: audio codec
  *
  * Frees AC97 codec device resources.
  */

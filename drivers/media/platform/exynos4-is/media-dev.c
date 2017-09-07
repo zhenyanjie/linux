@@ -389,23 +389,15 @@ static int fimc_md_parse_port_node(struct fimc_md *fmd,
 	struct fimc_source_info *pd = &fmd->sensor[index].pdata;
 	struct device_node *rem, *ep, *np;
 	struct v4l2_of_endpoint endpoint;
-	int ret;
 
 	/* Assume here a port node can have only one endpoint node. */
 	ep = of_get_next_child(port, NULL);
 	if (!ep)
 		return 0;
 
-	ret = v4l2_of_parse_endpoint(ep, &endpoint);
-	if (ret) {
-		of_node_put(ep);
-		return ret;
-	}
-
-	if (WARN_ON(endpoint.base.port == 0) || index >= FIMC_MAX_SENSORS) {
-		of_node_put(ep);
+	v4l2_of_parse_endpoint(ep, &endpoint);
+	if (WARN_ON(endpoint.base.port == 0) || index >= FIMC_MAX_SENSORS)
 		return -EINVAL;
-	}
 
 	pd->mux_id = (endpoint.base.port - 1) & 0x1;
 
@@ -448,10 +440,8 @@ static int fimc_md_parse_port_node(struct fimc_md *fmd,
 	else
 		pd->fimc_bus_type = pd->sensor_bus_type;
 
-	if (WARN_ON(index >= ARRAY_SIZE(fmd->sensor))) {
-		of_node_put(rem);
+	if (WARN_ON(index >= ARRAY_SIZE(fmd->sensor)))
 		return -EINVAL;
-	}
 
 	fmd->sensor[index].asd.match_type = V4L2_ASYNC_MATCH_OF;
 	fmd->sensor[index].asd.match.of.node = rem;
@@ -496,10 +486,8 @@ static int fimc_md_register_sensor_entities(struct fimc_md *fmd)
 			continue;
 
 		ret = fimc_md_parse_port_node(fmd, port, index);
-		if (ret < 0) {
-			of_node_put(node);
+		if (ret < 0)
 			goto rpm_put;
-		}
 		index++;
 	}
 
@@ -510,10 +498,8 @@ static int fimc_md_register_sensor_entities(struct fimc_md *fmd)
 
 	for_each_child_of_node(ports, node) {
 		ret = fimc_md_parse_port_node(fmd, node, index);
-		if (ret < 0) {
-			of_node_put(node);
+		if (ret < 0)
 			break;
-		}
 		index++;
 	}
 rpm_put:
@@ -721,10 +707,8 @@ static int fimc_md_register_platform_entities(struct fimc_md *fmd,
 			ret = fimc_md_register_platform_entity(fmd, pdev,
 							plat_entity);
 		put_device(&pdev->dev);
-		if (ret < 0) {
-			of_node_put(node);
+		if (ret < 0)
 			break;
-		}
 	}
 
 	return ret;
@@ -940,7 +924,8 @@ static int fimc_md_create_links(struct fimc_md *fmd)
 
 			csis = fmd->csis[pdata->mux_id].sd;
 			if (WARN(csis == NULL,
-				 "MIPI-CSI interface specified but s5p-csis module is not loaded!\n"))
+				 "MIPI-CSI interface specified "
+				 "but s5p-csis module is not loaded!\n"))
 				return -EINVAL;
 
 			pad = sensor->entity.num_pads - 1;
@@ -1119,7 +1104,7 @@ static int __fimc_md_modify_pipeline(struct media_entity *entity, bool enable)
 
 /* Locking: called with entity->graph_obj.mdev->graph_mutex mutex held. */
 static int __fimc_md_modify_pipelines(struct media_entity *entity, bool enable,
-				      struct media_graph *graph)
+				      struct media_entity_graph *graph)
 {
 	struct media_entity *entity_err = entity;
 	int ret;
@@ -1130,10 +1115,10 @@ static int __fimc_md_modify_pipelines(struct media_entity *entity, bool enable,
 	 * through active links. This is needed as we cannot power on/off the
 	 * subdevs in random order.
 	 */
-	media_graph_walk_start(graph, entity);
+	media_entity_graph_walk_start(graph, entity);
 
-	while ((entity = media_graph_walk_next(graph))) {
-		if (!is_media_entity_v4l2_video_device(entity))
+	while ((entity = media_entity_graph_walk_next(graph))) {
+		if (!is_media_entity_v4l2_io(entity))
 			continue;
 
 		ret  = __fimc_md_modify_pipeline(entity, enable);
@@ -1145,10 +1130,10 @@ static int __fimc_md_modify_pipelines(struct media_entity *entity, bool enable,
 	return 0;
 
 err:
-	media_graph_walk_start(graph, entity_err);
+	media_entity_graph_walk_start(graph, entity_err);
 
-	while ((entity_err = media_graph_walk_next(graph))) {
-		if (!is_media_entity_v4l2_video_device(entity_err))
+	while ((entity_err = media_entity_graph_walk_next(graph))) {
+		if (!is_media_entity_v4l2_io(entity_err))
 			continue;
 
 		__fimc_md_modify_pipeline(entity_err, !enable);
@@ -1163,7 +1148,7 @@ err:
 static int fimc_md_link_notify(struct media_link *link, unsigned int flags,
 				unsigned int notification)
 {
-	struct media_graph *graph =
+	struct media_entity_graph *graph =
 		&container_of(link->graph_obj.mdev, struct fimc_md,
 			      media_dev)->link_setup_graph;
 	struct media_entity *sink = link->sink->entity;
@@ -1171,7 +1156,7 @@ static int fimc_md_link_notify(struct media_link *link, unsigned int flags,
 
 	/* Before link disconnection */
 	if (notification == MEDIA_DEV_NOTIFY_PRE_LINK_CH) {
-		ret = media_graph_walk_init(graph,
+		ret = media_entity_graph_walk_init(graph,
 						   link->graph_obj.mdev);
 		if (ret)
 			return ret;
@@ -1185,15 +1170,11 @@ static int fimc_md_link_notify(struct media_link *link, unsigned int flags,
 	} else if (notification == MEDIA_DEV_NOTIFY_POST_LINK_CH) {
 		if (link->flags & MEDIA_LNK_FL_ENABLED)
 			ret = __fimc_md_modify_pipelines(sink, true, graph);
-		media_graph_walk_cleanup(graph);
+		media_entity_graph_walk_cleanup(graph);
 	}
 
 	return ret ? -EPIPE : 0;
 }
-
-static const struct media_device_ops fimc_md_ops = {
-	.link_notify = fimc_md_link_notify,
-};
 
 static ssize_t fimc_md_sysfs_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
@@ -1421,7 +1402,7 @@ static int fimc_md_probe(struct platform_device *pdev)
 
 	strlcpy(fmd->media_dev.model, "SAMSUNG S5P FIMC",
 		sizeof(fmd->media_dev.model));
-	fmd->media_dev.ops = &fimc_md_ops;
+	fmd->media_dev.link_notify = fimc_md_link_notify;
 	fmd->media_dev.dev = dev;
 
 	v4l2_dev = &fmd->v4l2_dev;
@@ -1453,13 +1434,22 @@ static int fimc_md_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, fmd);
 
+	/* Protect the media graph while we're registering entities */
+	mutex_lock(&fmd->media_dev.graph_mutex);
+
 	ret = fimc_md_register_platform_entities(fmd, dev->of_node);
-	if (ret)
+	if (ret) {
+		mutex_unlock(&fmd->media_dev.graph_mutex);
 		goto err_clk;
+	}
 
 	ret = fimc_md_register_sensor_entities(fmd);
-	if (ret)
+	if (ret) {
+		mutex_unlock(&fmd->media_dev.graph_mutex);
 		goto err_m_ent;
+	}
+
+	mutex_unlock(&fmd->media_dev.graph_mutex);
 
 	ret = device_create_file(&pdev->dev, &dev_attr_subdev_conf_mode);
 	if (ret)

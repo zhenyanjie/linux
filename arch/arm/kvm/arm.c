@@ -16,11 +16,11 @@
  * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#include <linux/cpu.h>
 #include <linux/cpu_pm.h>
 #include <linux/errno.h>
 #include <linux/err.h>
 #include <linux/kvm_host.h>
-#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
@@ -28,12 +28,11 @@
 #include <linux/sched.h>
 #include <linux/kvm.h>
 #include <trace/events/kvm.h>
-#include <kvm/arm_pmu.h>
 
 #define CREATE_TRACE_POINTS
 #include "trace.h"
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/ptrace.h>
 #include <asm/mman.h>
 #include <asm/tlbflush.h>
@@ -66,8 +65,6 @@ static DEFINE_SPINLOCK(kvm_vmid_lock);
 
 static bool vgic_present;
 
-static DEFINE_PER_CPU(unsigned char, kvm_arm_hardware_enabled);
-
 static void kvm_arm_set_running_vcpu(struct kvm_vcpu *vcpu)
 {
 	BUG_ON(preemptible());
@@ -92,6 +89,11 @@ struct kvm_vcpu * __percpu *kvm_get_running_vcpus(void)
 	return &kvm_arm_running_vcpu;
 }
 
+int kvm_arch_hardware_enable(void)
+{
+	return 0;
+}
+
 int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
 {
 	return kvm_vcpu_exiting_guest_mode(vcpu) == IN_GUEST_MODE;
@@ -114,27 +116,21 @@ void kvm_arch_check_processor_compat(void *rtn)
  */
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 {
-	int ret, cpu;
+	int ret = 0;
 
 	if (type)
 		return -EINVAL;
-
-	kvm->arch.last_vcpu_ran = alloc_percpu(typeof(*kvm->arch.last_vcpu_ran));
-	if (!kvm->arch.last_vcpu_ran)
-		return -ENOMEM;
-
-	for_each_possible_cpu(cpu)
-		*per_cpu_ptr(kvm->arch.last_vcpu_ran, cpu) = -1;
 
 	ret = kvm_alloc_stage2_pgd(kvm);
 	if (ret)
 		goto out_fail_alloc;
 
-	ret = create_hyp_mappings(kvm, kvm + 1, PAGE_HYP);
+	ret = create_hyp_mappings(kvm, kvm + 1);
 	if (ret)
 		goto out_free_stage2_pgd;
 
 	kvm_vgic_early_init(kvm);
+	kvm_timer_init(kvm);
 
 	/* Mark the initial VMID generation invalid */
 	kvm->arch.vmid_gen = 0;
@@ -147,19 +143,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 out_free_stage2_pgd:
 	kvm_free_stage2_pgd(kvm);
 out_fail_alloc:
-	free_percpu(kvm->arch.last_vcpu_ran);
-	kvm->arch.last_vcpu_ran = NULL;
 	return ret;
-}
-
-bool kvm_arch_has_vcpu_debugfs(void)
-{
-	return false;
-}
-
-int kvm_arch_create_vcpu_debugfs(struct kvm_vcpu *vcpu)
-{
-	return 0;
 }
 
 int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf)
@@ -176,8 +160,7 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 {
 	int i;
 
-	free_percpu(kvm->arch.last_vcpu_ran);
-	kvm->arch.last_vcpu_ran = NULL;
+	kvm_free_stage2_pgd(kvm);
 
 	for (i = 0; i < KVM_MAX_VCPUS; ++i) {
 		if (kvm->vcpus[i]) {
@@ -206,7 +189,6 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_ARM_PSCI_0_2:
 	case KVM_CAP_READONLY_MEM:
 	case KVM_CAP_MP_STATE:
-	case KVM_CAP_IMMEDIATE_EXIT:
 		r = 1;
 		break;
 	case KVM_CAP_COALESCED_MMIO:
@@ -221,17 +203,8 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_MAX_VCPUS:
 		r = KVM_MAX_VCPUS;
 		break;
-	case KVM_CAP_NR_MEMSLOTS:
-		r = KVM_USER_MEM_SLOTS;
-		break;
-	case KVM_CAP_MSI_DEVID:
-		if (!kvm)
-			r = -EINVAL;
-		else
-			r = kvm->arch.vgic.msis_require_devid;
-		break;
 	default:
-		r = kvm_arch_dev_ioctl_check_extension(kvm, ext);
+		r = kvm_arch_dev_ioctl_check_extension(ext);
 		break;
 	}
 	return r;
@@ -269,7 +242,7 @@ struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm, unsigned int id)
 	if (err)
 		goto free_vcpu;
 
-	err = create_hyp_mappings(vcpu, vcpu + 1, PAGE_HYP);
+	err = create_hyp_mappings(vcpu, vcpu + 1);
 	if (err)
 		goto vcpu_uninit;
 
@@ -292,8 +265,6 @@ void kvm_arch_vcpu_free(struct kvm_vcpu *vcpu)
 	kvm_mmu_free_memory_caches(vcpu);
 	kvm_timer_vcpu_terminate(vcpu);
 	kvm_vgic_vcpu_destroy(vcpu);
-	kvm_pmu_vcpu_destroy(vcpu);
-	kvm_vcpu_uninit(vcpu);
 	kmem_cache_free(kvm_vcpu_cache, vcpu);
 }
 
@@ -304,8 +275,7 @@ void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu)
 {
-	return kvm_timer_should_fire(vcpu_vtimer(vcpu)) ||
-	       kvm_timer_should_fire(vcpu_ptimer(vcpu));
+	return kvm_timer_should_fire(vcpu);
 }
 
 void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu)
@@ -334,19 +304,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 
 void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 {
-	int *last_ran;
-
-	last_ran = this_cpu_ptr(vcpu->kvm->arch.last_vcpu_ran);
-
-	/*
-	 * We might get preempted before the vCPU actually runs, but
-	 * over-invalidation doesn't affect correctness.
-	 */
-	if (*last_ran != vcpu->vcpu_id) {
-		kvm_call_hyp(__kvm_tlb_flush_local_vmid, vcpu);
-		*last_ran = vcpu->vcpu_id;
-	}
-
 	vcpu->cpu = cpu;
 	vcpu->arch.host_cpu_context = this_cpu_ptr(kvm_host_cpu_state);
 
@@ -363,7 +320,6 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
 	vcpu->cpu = -1;
 
 	kvm_arm_set_running_vcpu(NULL);
-	kvm_timer_vcpu_put(vcpu);
 }
 
 int kvm_arch_vcpu_ioctl_get_mpstate(struct kvm_vcpu *vcpu,
@@ -414,14 +370,12 @@ static void exit_vm_noop(void *info)
 
 void force_vm_exit(const cpumask_t *mask)
 {
-	preempt_disable();
 	smp_call_function_many(mask, exit_vm_noop, NULL, true);
-	preempt_enable();
 }
 
 /**
  * need_new_vmid_gen - check that the VMID is still valid
- * @kvm: The VM's VMID to check
+ * @kvm: The VM's VMID to checkt
  *
  * return true if there is a new generation of VMIDs being used
  *
@@ -489,7 +443,7 @@ static void update_vttbr(struct kvm *kvm)
 	kvm_next_vmid &= (1 << kvm_vmid_bits) - 1;
 
 	/* update vttbr to be used with the new vmid */
-	pgd_phys = virt_to_phys(kvm->arch.pgd);
+	pgd_phys = virt_to_phys(kvm_get_hwpgd(kvm));
 	BUG_ON(pgd_phys & ~VTTBR_BADDR_MASK);
 	vmid = ((u64)(kvm->arch.vmid) << VTTBR_VMID_SHIFT) & VTTBR_VMID_MASK(kvm_vmid_bits);
 	kvm->arch.vttbr = pgd_phys | vmid;
@@ -500,7 +454,7 @@ static void update_vttbr(struct kvm *kvm)
 static int kvm_vcpu_first_run_init(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
-	int ret = 0;
+	int ret;
 
 	if (likely(vcpu->arch.has_run_once))
 		return 0;
@@ -523,9 +477,9 @@ static int kvm_vcpu_first_run_init(struct kvm_vcpu *vcpu)
 	 * interrupts from the virtual timer with a userspace gic.
 	 */
 	if (irqchip_in_kernel(kvm) && vgic_initialized(kvm))
-		ret = kvm_timer_enable(vcpu);
+		kvm_timer_enable(kvm);
 
-	return ret;
+	return 0;
 }
 
 bool kvm_arch_intc_initialized(struct kvm *kvm)
@@ -533,37 +487,30 @@ bool kvm_arch_intc_initialized(struct kvm *kvm)
 	return vgic_initialized(kvm);
 }
 
-void kvm_arm_halt_guest(struct kvm *kvm)
+static void kvm_arm_halt_guest(struct kvm *kvm) __maybe_unused;
+static void kvm_arm_resume_guest(struct kvm *kvm) __maybe_unused;
+
+static void kvm_arm_halt_guest(struct kvm *kvm)
 {
 	int i;
 	struct kvm_vcpu *vcpu;
 
 	kvm_for_each_vcpu(i, vcpu, kvm)
 		vcpu->arch.pause = true;
-	kvm_make_all_cpus_request(kvm, KVM_REQ_VCPU_EXIT);
+	force_vm_exit(cpu_all_mask);
 }
 
-void kvm_arm_halt_vcpu(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.pause = true;
-	kvm_vcpu_kick(vcpu);
-}
-
-void kvm_arm_resume_vcpu(struct kvm_vcpu *vcpu)
-{
-	struct swait_queue_head *wq = kvm_arch_vcpu_wq(vcpu);
-
-	vcpu->arch.pause = false;
-	swake_up(wq);
-}
-
-void kvm_arm_resume_guest(struct kvm *kvm)
+static void kvm_arm_resume_guest(struct kvm *kvm)
 {
 	int i;
 	struct kvm_vcpu *vcpu;
 
-	kvm_for_each_vcpu(i, vcpu, kvm)
-		kvm_arm_resume_vcpu(vcpu);
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		struct swait_queue_head *wq = kvm_arch_vcpu_wq(vcpu);
+
+		vcpu->arch.pause = false;
+		swake_up(wq);
+	}
 }
 
 static void vcpu_sleep(struct kvm_vcpu *vcpu)
@@ -608,9 +555,6 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 			return ret;
 	}
 
-	if (run->immediate_exit)
-		return -EINTR;
-
 	if (vcpu->sigset_active)
 		sigprocmask(SIG_SETMASK, &vcpu->sigset, &sigsaved);
 
@@ -632,8 +576,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		 * involves poking the GIC, which must be done in a
 		 * non-preemptible context.
 		 */
-		preempt_disable();
-		kvm_pmu_flush_hwstate(vcpu);
+		migrate_disable();
 		kvm_timer_flush_hwstate(vcpu);
 		kvm_vgic_flush_hwstate(vcpu);
 
@@ -650,10 +593,9 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		if (ret <= 0 || need_new_vmid_gen(vcpu->kvm) ||
 			vcpu->arch.power_off || vcpu->arch.pause) {
 			local_irq_enable();
-			kvm_pmu_sync_hwstate(vcpu);
 			kvm_timer_sync_hwstate(vcpu);
 			kvm_vgic_sync_hwstate(vcpu);
-			preempt_enable();
+			migrate_enable();
 			continue;
 		}
 
@@ -663,7 +605,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		 * Enter the guest
 		 */
 		trace_kvm_entry(*vcpu_pc(vcpu));
-		guest_enter_irqoff();
+		__kvm_guest_enter();
 		vcpu->mode = IN_GUEST_MODE;
 
 		ret = kvm_call_hyp(__kvm_vcpu_run, vcpu);
@@ -689,27 +631,26 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		local_irq_enable();
 
 		/*
-		 * We do local_irq_enable() before calling guest_exit() so
+		 * We do local_irq_enable() before calling kvm_guest_exit() so
 		 * that if a timer interrupt hits while running the guest we
 		 * account that tick as being spent in the guest.  We enable
-		 * preemption after calling guest_exit() so that if we get
+		 * preemption after calling kvm_guest_exit() so that if we get
 		 * preempted we make sure ticks after that is not counted as
 		 * guest time.
 		 */
-		guest_exit();
+		kvm_guest_exit();
 		trace_kvm_exit(ret, kvm_vcpu_trap_get_class(vcpu), *vcpu_pc(vcpu));
 
 		/*
-		 * We must sync the PMU and timer state before the vgic state so
-		 * that the vgic can properly sample the updated state of the
+		 * We must sync the timer state before the vgic state so that
+		 * the vgic can properly sample the updated state of the
 		 * interrupt line.
 		 */
-		kvm_pmu_sync_hwstate(vcpu);
 		kvm_timer_sync_hwstate(vcpu);
 
 		kvm_vgic_sync_hwstate(vcpu);
 
-		preempt_enable();
+		migrate_enable();
 
 		ret = handle_exit(vcpu, run, ret);
 	}
@@ -882,54 +823,11 @@ static int kvm_arch_vcpu_ioctl_vcpu_init(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-static int kvm_arm_vcpu_set_attr(struct kvm_vcpu *vcpu,
-				 struct kvm_device_attr *attr)
-{
-	int ret = -ENXIO;
-
-	switch (attr->group) {
-	default:
-		ret = kvm_arm_vcpu_arch_set_attr(vcpu, attr);
-		break;
-	}
-
-	return ret;
-}
-
-static int kvm_arm_vcpu_get_attr(struct kvm_vcpu *vcpu,
-				 struct kvm_device_attr *attr)
-{
-	int ret = -ENXIO;
-
-	switch (attr->group) {
-	default:
-		ret = kvm_arm_vcpu_arch_get_attr(vcpu, attr);
-		break;
-	}
-
-	return ret;
-}
-
-static int kvm_arm_vcpu_has_attr(struct kvm_vcpu *vcpu,
-				 struct kvm_device_attr *attr)
-{
-	int ret = -ENXIO;
-
-	switch (attr->group) {
-	default:
-		ret = kvm_arm_vcpu_arch_has_attr(vcpu, attr);
-		break;
-	}
-
-	return ret;
-}
-
 long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg)
 {
 	struct kvm_vcpu *vcpu = filp->private_data;
 	void __user *argp = (void __user *)arg;
-	struct kvm_device_attr attr;
 
 	switch (ioctl) {
 	case KVM_ARM_VCPU_INIT: {
@@ -971,21 +869,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		if (n < reg_list.n)
 			return -E2BIG;
 		return kvm_arm_copy_reg_indices(vcpu, user_list->reg);
-	}
-	case KVM_SET_DEVICE_ATTR: {
-		if (copy_from_user(&attr, argp, sizeof(attr)))
-			return -EFAULT;
-		return kvm_arm_vcpu_set_attr(vcpu, &attr);
-	}
-	case KVM_GET_DEVICE_ATTR: {
-		if (copy_from_user(&attr, argp, sizeof(attr)))
-			return -EFAULT;
-		return kvm_arm_vcpu_get_attr(vcpu, &attr);
-	}
-	case KVM_HAS_DEVICE_ATTR: {
-		if (copy_from_user(&attr, argp, sizeof(attr)))
-			return -EFAULT;
-		return kvm_arm_vcpu_has_attr(vcpu, &attr);
 	}
 	default:
 		return -EINVAL;
@@ -1055,13 +938,9 @@ long kvm_arch_vm_ioctl(struct file *filp,
 
 	switch (ioctl) {
 	case KVM_CREATE_IRQCHIP: {
-		int ret;
 		if (!vgic_present)
 			return -ENXIO;
-		mutex_lock(&kvm->lock);
-		ret = kvm_vgic_create(kvm, KVM_DEV_TYPE_ARM_VGIC_V2);
-		mutex_unlock(&kvm->lock);
-		return ret;
+		return kvm_vgic_create(kvm, KVM_DEV_TYPE_ARM_VGIC_V2);
 	}
 	case KVM_ARM_SET_DEVICE_ADDR: {
 		struct kvm_arm_device_addr dev_addr;
@@ -1090,6 +969,7 @@ long kvm_arch_vm_ioctl(struct file *filp,
 
 static void cpu_init_hyp_mode(void *dummy)
 {
+	phys_addr_t boot_pgd_ptr;
 	phys_addr_t pgd_ptr;
 	unsigned long hyp_stack_ptr;
 	unsigned long stack_page;
@@ -1098,102 +978,47 @@ static void cpu_init_hyp_mode(void *dummy)
 	/* Switch from the HYP stub to our own HYP init vector */
 	__hyp_set_vectors(kvm_get_idmap_vector());
 
+	boot_pgd_ptr = kvm_mmu_get_boot_httbr();
 	pgd_ptr = kvm_mmu_get_httbr();
 	stack_page = __this_cpu_read(kvm_arm_hyp_stack_page);
 	hyp_stack_ptr = stack_page + PAGE_SIZE;
-	vector_ptr = (unsigned long)kvm_ksym_ref(__kvm_hyp_vector);
+	vector_ptr = (unsigned long)__kvm_hyp_vector;
 
-	__cpu_init_hyp_mode(pgd_ptr, hyp_stack_ptr, vector_ptr);
-	__cpu_init_stage2();
-
-	if (is_kernel_in_hyp_mode())
-		kvm_timer_init_vhe();
+	__cpu_init_hyp_mode(boot_pgd_ptr, pgd_ptr, hyp_stack_ptr, vector_ptr);
 
 	kvm_arm_init_debug();
 }
 
-static void cpu_hyp_reinit(void)
+static int hyp_init_cpu_notify(struct notifier_block *self,
+			       unsigned long action, void *cpu)
 {
-	if (is_kernel_in_hyp_mode()) {
-		/*
-		 * __cpu_init_stage2() is safe to call even if the PM
-		 * event was cancelled before the CPU was reset.
-		 */
-		__cpu_init_stage2();
-	} else {
+	switch (action) {
+	case CPU_STARTING:
+	case CPU_STARTING_FROZEN:
 		if (__hyp_get_vectors() == hyp_default_vectors)
 			cpu_init_hyp_mode(NULL);
+		break;
 	}
 
-	if (vgic_present)
-		kvm_vgic_init_cpu_hardware();
+	return NOTIFY_OK;
 }
 
-static void cpu_hyp_reset(void)
-{
-	if (!is_kernel_in_hyp_mode())
-		__cpu_reset_hyp_mode(hyp_default_vectors,
-				     kvm_get_idmap_start());
-}
-
-static void _kvm_arch_hardware_enable(void *discard)
-{
-	if (!__this_cpu_read(kvm_arm_hardware_enabled)) {
-		cpu_hyp_reinit();
-		__this_cpu_write(kvm_arm_hardware_enabled, 1);
-	}
-}
-
-int kvm_arch_hardware_enable(void)
-{
-	_kvm_arch_hardware_enable(NULL);
-	return 0;
-}
-
-static void _kvm_arch_hardware_disable(void *discard)
-{
-	if (__this_cpu_read(kvm_arm_hardware_enabled)) {
-		cpu_hyp_reset();
-		__this_cpu_write(kvm_arm_hardware_enabled, 0);
-	}
-}
-
-void kvm_arch_hardware_disable(void)
-{
-	_kvm_arch_hardware_disable(NULL);
-}
+static struct notifier_block hyp_init_cpu_nb = {
+	.notifier_call = hyp_init_cpu_notify,
+};
 
 #ifdef CONFIG_CPU_PM
 static int hyp_init_cpu_pm_notifier(struct notifier_block *self,
 				    unsigned long cmd,
 				    void *v)
 {
-	/*
-	 * kvm_arm_hardware_enabled is left with its old value over
-	 * PM_ENTER->PM_EXIT. It is used to indicate PM_EXIT should
-	 * re-enable hyp.
-	 */
-	switch (cmd) {
-	case CPU_PM_ENTER:
-		if (__this_cpu_read(kvm_arm_hardware_enabled))
-			/*
-			 * don't update kvm_arm_hardware_enabled here
-			 * so that the hardware will be re-enabled
-			 * when we resume. See below.
-			 */
-			cpu_hyp_reset();
-
+	if (cmd == CPU_PM_EXIT &&
+	    __hyp_get_vectors() == hyp_default_vectors) {
+		cpu_init_hyp_mode(NULL);
 		return NOTIFY_OK;
-	case CPU_PM_EXIT:
-		if (__this_cpu_read(kvm_arm_hardware_enabled))
-			/* The hardware was enabled before suspend. */
-			cpu_hyp_reinit();
-
-		return NOTIFY_OK;
-
-	default:
-		return NOTIFY_DONE;
 	}
+
+	return NOTIFY_DONE;
 }
 
 static struct notifier_block hyp_init_cpu_pm_nb = {
@@ -1204,104 +1029,11 @@ static void __init hyp_cpu_pm_init(void)
 {
 	cpu_pm_register_notifier(&hyp_init_cpu_pm_nb);
 }
-static void __init hyp_cpu_pm_exit(void)
-{
-	cpu_pm_unregister_notifier(&hyp_init_cpu_pm_nb);
-}
 #else
 static inline void hyp_cpu_pm_init(void)
 {
 }
-static inline void hyp_cpu_pm_exit(void)
-{
-}
 #endif
-
-static void teardown_common_resources(void)
-{
-	free_percpu(kvm_host_cpu_state);
-}
-
-static int init_common_resources(void)
-{
-	kvm_host_cpu_state = alloc_percpu(kvm_cpu_context_t);
-	if (!kvm_host_cpu_state) {
-		kvm_err("Cannot allocate host CPU state\n");
-		return -ENOMEM;
-	}
-
-	/* set size of VMID supported by CPU */
-	kvm_vmid_bits = kvm_get_vmid_bits();
-	kvm_info("%d-bit VMID\n", kvm_vmid_bits);
-
-	return 0;
-}
-
-static int init_subsystems(void)
-{
-	int err = 0;
-
-	/*
-	 * Enable hardware so that subsystem initialisation can access EL2.
-	 */
-	on_each_cpu(_kvm_arch_hardware_enable, NULL, 1);
-
-	/*
-	 * Register CPU lower-power notifier
-	 */
-	hyp_cpu_pm_init();
-
-	/*
-	 * Init HYP view of VGIC
-	 */
-	err = kvm_vgic_hyp_init();
-	switch (err) {
-	case 0:
-		vgic_present = true;
-		break;
-	case -ENODEV:
-	case -ENXIO:
-		vgic_present = false;
-		err = 0;
-		break;
-	default:
-		goto out;
-	}
-
-	/*
-	 * Init HYP architected timer support
-	 */
-	err = kvm_timer_hyp_init();
-	if (err)
-		goto out;
-
-	kvm_perf_init();
-	kvm_coproc_table_init();
-
-out:
-	on_each_cpu(_kvm_arch_hardware_disable, NULL, 1);
-
-	return err;
-}
-
-static void teardown_hyp_mode(void)
-{
-	int cpu;
-
-	if (is_kernel_in_hyp_mode())
-		return;
-
-	free_hyp_pgds();
-	for_each_possible_cpu(cpu)
-		free_page(per_cpu(kvm_arm_hyp_stack_page, cpu));
-	hyp_cpu_pm_exit();
-}
-
-static int init_vhe_mode(void)
-{
-	kvm_info("VHE mode initialized successfully\n");
-	return 0;
-}
 
 /**
  * Inits Hyp-mode on all online CPUs
@@ -1333,7 +1065,7 @@ static int init_hyp_mode(void)
 		stack_page = __get_free_page(GFP_KERNEL);
 		if (!stack_page) {
 			err = -ENOMEM;
-			goto out_err;
+			goto out_free_stack_pages;
 		}
 
 		per_cpu(kvm_arm_hyp_stack_page, cpu) = stack_page;
@@ -1342,25 +1074,16 @@ static int init_hyp_mode(void)
 	/*
 	 * Map the Hyp-code called directly from the host
 	 */
-	err = create_hyp_mappings(kvm_ksym_ref(__hyp_text_start),
-				  kvm_ksym_ref(__hyp_text_end), PAGE_HYP_EXEC);
+	err = create_hyp_mappings(__kvm_hyp_code_start, __kvm_hyp_code_end);
 	if (err) {
 		kvm_err("Cannot map world-switch code\n");
-		goto out_err;
+		goto out_free_mappings;
 	}
 
-	err = create_hyp_mappings(kvm_ksym_ref(__start_rodata),
-				  kvm_ksym_ref(__end_rodata), PAGE_HYP_RO);
+	err = create_hyp_mappings(__start_rodata, __end_rodata);
 	if (err) {
 		kvm_err("Cannot map rodata section\n");
-		goto out_err;
-	}
-
-	err = create_hyp_mappings(kvm_ksym_ref(__bss_start),
-				  kvm_ksym_ref(__bss_stop), PAGE_HYP_RO);
-	if (err) {
-		kvm_err("Cannot map bss section\n");
-		goto out_err;
+		goto out_free_mappings;
 	}
 
 	/*
@@ -1368,33 +1091,85 @@ static int init_hyp_mode(void)
 	 */
 	for_each_possible_cpu(cpu) {
 		char *stack_page = (char *)per_cpu(kvm_arm_hyp_stack_page, cpu);
-		err = create_hyp_mappings(stack_page, stack_page + PAGE_SIZE,
-					  PAGE_HYP);
+		err = create_hyp_mappings(stack_page, stack_page + PAGE_SIZE);
 
 		if (err) {
 			kvm_err("Cannot map hyp stack\n");
-			goto out_err;
+			goto out_free_mappings;
 		}
+	}
+
+	/*
+	 * Map the host CPU structures
+	 */
+	kvm_host_cpu_state = alloc_percpu(kvm_cpu_context_t);
+	if (!kvm_host_cpu_state) {
+		err = -ENOMEM;
+		kvm_err("Cannot allocate host CPU state\n");
+		goto out_free_mappings;
 	}
 
 	for_each_possible_cpu(cpu) {
 		kvm_cpu_context_t *cpu_ctxt;
 
 		cpu_ctxt = per_cpu_ptr(kvm_host_cpu_state, cpu);
-		err = create_hyp_mappings(cpu_ctxt, cpu_ctxt + 1, PAGE_HYP);
+		err = create_hyp_mappings(cpu_ctxt, cpu_ctxt + 1);
 
 		if (err) {
 			kvm_err("Cannot map host CPU state: %d\n", err);
-			goto out_err;
+			goto out_free_context;
 		}
 	}
+
+	/*
+	 * Execute the init code on each CPU.
+	 */
+	on_each_cpu(cpu_init_hyp_mode, NULL, 1);
+
+	/*
+	 * Init HYP view of VGIC
+	 */
+	err = kvm_vgic_hyp_init();
+	switch (err) {
+	case 0:
+		vgic_present = true;
+		break;
+	case -ENODEV:
+	case -ENXIO:
+		vgic_present = false;
+		break;
+	default:
+		goto out_free_context;
+	}
+
+	/*
+	 * Init HYP architected timer support
+	 */
+	err = kvm_timer_hyp_init();
+	if (err)
+		goto out_free_context;
+
+#ifndef CONFIG_HOTPLUG_CPU
+	free_boot_hyp_pgd();
+#endif
+
+	kvm_perf_init();
+
+	/* set size of VMID supported by CPU */
+	kvm_vmid_bits = kvm_get_vmid_bits();
+	kvm_info("%d-bit VMID\n", kvm_vmid_bits);
 
 	kvm_info("Hyp mode initialized successfully\n");
 
 	return 0;
-
+out_free_context:
+	free_percpu(kvm_host_cpu_state);
+out_free_mappings:
+	free_hyp_pgds();
+out_free_stack_pages:
+	for_each_possible_cpu(cpu)
+		free_page(per_cpu(kvm_arm_hyp_stack_page, cpu));
 out_err:
-	teardown_hyp_mode();
 	kvm_err("error initializing Hyp mode: %d\n", err);
 	return err;
 }
@@ -1438,27 +1213,26 @@ int kvm_arch_init(void *opaque)
 		}
 	}
 
-	err = init_common_resources();
-	if (err)
-		return err;
+	cpu_notifier_register_begin();
 
-	if (is_kernel_in_hyp_mode())
-		err = init_vhe_mode();
-	else
-		err = init_hyp_mode();
+	err = init_hyp_mode();
 	if (err)
 		goto out_err;
 
-	err = init_subsystems();
-	if (err)
-		goto out_hyp;
+	err = __register_cpu_notifier(&hyp_init_cpu_nb);
+	if (err) {
+		kvm_err("Cannot register HYP init CPU notifier (%d)\n", err);
+		goto out_err;
+	}
 
+	cpu_notifier_register_done();
+
+	hyp_cpu_pm_init();
+
+	kvm_coproc_table_init();
 	return 0;
-
-out_hyp:
-	teardown_hyp_mode();
 out_err:
-	teardown_common_resources();
+	cpu_notifier_register_done();
 	return err;
 }
 

@@ -60,8 +60,16 @@ static DEFINE_SPINLOCK(zpci_domain_lock);
 static struct airq_iv *zpci_aisb_iv;
 static struct airq_iv *zpci_aibv[ZPCI_NR_DEVICES];
 
+/* Adapter interrupt definitions */
+static void zpci_irq_handler(struct airq_struct *airq);
+
+static struct airq_struct zpci_airq = {
+	.handler = zpci_irq_handler,
+	.isc = PCI_ISC,
+};
+
 #define ZPCI_IOMAP_ENTRIES						\
-	min(((unsigned long) ZPCI_NR_DEVICES * PCI_BAR_COUNT / 2),	\
+	min(((unsigned long) CONFIG_PCI_NR_FUNCTIONS * PCI_BAR_COUNT),	\
 	    ZPCI_IOMAP_MAX_ENTRIES)
 
 static DEFINE_SPINLOCK(zpci_iomap_lock);
@@ -172,7 +180,7 @@ int zpci_fmb_enable_device(struct zpci_dev *zdev)
 {
 	struct mod_pci_args args = { 0, 0, 0, 0 };
 
-	if (zdev->fmb || sizeof(*zdev->fmb) < zdev->fmb_length)
+	if (zdev->fmb)
 		return -EINVAL;
 
 	zdev->fmb = kmem_cache_zalloc(zdev_fmb_cache, GFP_KERNEL);
@@ -206,6 +214,8 @@ int zpci_fmb_disable_device(struct zpci_dev *zdev)
 	return rc;
 }
 
+#define ZPCI_PCIAS_CFGSPC	15
+
 static int zpci_cfg_load(struct zpci_dev *zdev, int offset, u32 *val, u8 len)
 {
 	u64 req = ZPCI_CREATE_REQ(zdev->fh, ZPCI_PCIAS_CFGSPC, len);
@@ -214,8 +224,8 @@ static int zpci_cfg_load(struct zpci_dev *zdev, int offset, u32 *val, u8 len)
 
 	rc = zpci_load(&data, req, offset);
 	if (!rc) {
-		data = le64_to_cpu((__force __le64) data);
-		data >>= (8 - len) * 8;
+		data = data << ((8 - len) * 8);
+		data = le64_to_cpu(data);
 		*val = (u32) data;
 	} else
 		*val = 0xffffffff;
@@ -228,8 +238,8 @@ static int zpci_cfg_store(struct zpci_dev *zdev, int offset, u32 val, u8 len)
 	u64 data = val;
 	int rc;
 
-	data <<= (8 - len) * 8;
-	data = (__force u64) cpu_to_le64(data);
+	data = cpu_to_le64(data);
+	data = data >> ((8 - len) * 8);
 	rc = zpci_store(data, req, offset);
 	return rc;
 }
@@ -497,11 +507,6 @@ static void zpci_unmap_resources(struct pci_dev *pdev)
 	}
 }
 
-static struct airq_struct zpci_airq = {
-	.handler = zpci_irq_handler,
-	.isc = PCI_ISC,
-};
-
 static int __init zpci_irq_init(void)
 {
 	int rc;
@@ -632,11 +637,12 @@ static void zpci_cleanup_bus_resources(struct zpci_dev *zdev)
 
 int pcibios_add_device(struct pci_dev *pdev)
 {
+	struct zpci_dev *zdev = to_zpci(pdev);
 	struct resource *res;
 	int i;
 
+	zdev->pdev = pdev;
 	pdev->dev.groups = zpci_attr_groups;
-	pdev->dev.dma_ops = &s390_pci_dma_ops;
 	zpci_map_resources(pdev);
 
 	for (i = 0; i < PCI_BAR_COUNT; i++) {
@@ -658,7 +664,8 @@ int pcibios_enable_device(struct pci_dev *pdev, int mask)
 {
 	struct zpci_dev *zdev = to_zpci(pdev);
 
-	zpci_debug_init_device(zdev, dev_name(&pdev->dev));
+	zdev->pdev = pdev;
+	zpci_debug_init_device(zdev);
 	zpci_fmb_enable_device(zdev);
 
 	return pci_enable_resources(pdev, mask);
@@ -670,6 +677,7 @@ void pcibios_disable_device(struct pci_dev *pdev)
 
 	zpci_fmb_disable_device(zdev);
 	zpci_debug_exit_device(zdev);
+	zdev->pdev = NULL;
 }
 
 #ifdef CONFIG_HIBERNATE_CALLBACKS
@@ -717,11 +725,6 @@ struct dev_pm_ops pcibios_pm_ops = {
 
 static int zpci_alloc_domain(struct zpci_dev *zdev)
 {
-	if (zpci_unique_uid) {
-		zdev->domain = (u16) zdev->uid;
-		return 0;
-	}
-
 	spin_lock(&zpci_domain_lock);
 	zdev->domain = find_first_zero_bit(zpci_domain, ZPCI_NR_DEVICES);
 	if (zdev->domain == ZPCI_NR_DEVICES) {
@@ -735,9 +738,6 @@ static int zpci_alloc_domain(struct zpci_dev *zdev)
 
 static void zpci_free_domain(struct zpci_dev *zdev)
 {
-	if (zpci_unique_uid)
-		return;
-
 	spin_lock(&zpci_domain_lock);
 	clear_bit(zdev->domain, zpci_domain);
 	spin_unlock(&zpci_domain_lock);
@@ -857,22 +857,15 @@ void zpci_stop_device(struct zpci_dev *zdev)
 }
 EXPORT_SYMBOL_GPL(zpci_stop_device);
 
-int zpci_report_error(struct pci_dev *pdev,
-		      struct zpci_report_error_header *report)
+static inline int barsize(u8 size)
 {
-	struct zpci_dev *zdev = to_zpci(pdev);
-
-	return sclp_pci_report(report, zdev->fh, zdev->fid);
+	return (size) ? (1 << size) >> 10 : 0;
 }
-EXPORT_SYMBOL(zpci_report_error);
 
 static int zpci_mem_init(void)
 {
-	BUILD_BUG_ON(!is_power_of_2(__alignof__(struct zpci_fmb)) ||
-		     __alignof__(struct zpci_fmb) < sizeof(struct zpci_fmb));
-
 	zdev_fmb_cache = kmem_cache_create("PCI_FMB_cache", sizeof(struct zpci_fmb),
-					   __alignof__(struct zpci_fmb), 0, NULL);
+				16, 0, NULL);
 	if (!zdev_fmb_cache)
 		goto error_fmb;
 

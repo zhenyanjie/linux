@@ -7,8 +7,6 @@
 #define __UM_MMU_CONTEXT_H
 
 #include <linux/sched.h>
-#include <linux/mm_types.h>
-
 #include <asm/mmu.h>
 
 extern void uml_setup_stubs(struct mm_struct *mm);
@@ -29,14 +27,6 @@ static inline void arch_bprm_mm_init(struct mm_struct *mm,
 				     struct vm_area_struct *vma)
 {
 }
-
-static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,
-		bool write, bool execute, bool foreign)
-{
-	/* by default, allow everything */
-	return true;
-}
-
 /*
  * end asm-generic/mm_hooks.h functions
  */

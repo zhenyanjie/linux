@@ -751,7 +751,9 @@ static unsigned int img_i2c_atomic(struct img_i2c *i2c,
 	switch (i2c->at_cur_cmd) {
 	case CMD_GEN_START:
 		next_cmd = CMD_GEN_DATA;
-		next_data = i2c_8bit_addr_from_msg(&i2c->msg);
+		next_data = (i2c->msg.addr << 1);
+		if (i2c->msg.flags & I2C_M_RD)
+			next_data |= 0x1;
 		break;
 	case CMD_GEN_DATA:
 		if (i2c->line_status & LINESTAT_INPUT_HELD_V)
@@ -1362,8 +1364,9 @@ static int img_i2c_probe(struct platform_device *pdev)
 	}
 
 	/* Set up the exception check timer */
-	setup_timer(&i2c->check_timer, img_i2c_check_timer,
-		    (unsigned long)i2c);
+	init_timer(&i2c->check_timer);
+	i2c->check_timer.function = img_i2c_check_timer;
+	i2c->check_timer.data = (unsigned long)i2c;
 
 	i2c->bitrate = timings[0].max_bitrate;
 	if (!of_property_read_u32(node, "clock-frequency", &val))
@@ -1393,8 +1396,10 @@ static int img_i2c_probe(struct platform_device *pdev)
 		goto disable_clk;
 
 	ret = i2c_add_numbered_adapter(&i2c->adap);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to add adapter\n");
 		goto disable_clk;
+	}
 
 	return 0;
 

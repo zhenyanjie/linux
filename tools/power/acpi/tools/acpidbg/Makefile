@@ -17,7 +17,9 @@ vpath %.c \
 	../../os_specific/service_layers\
 	.
 CFLAGS += -DACPI_APPLICATION -DACPI_SINGLE_THREAD -DACPI_DEBUGGER\
-	-I.
+	-I.\
+	-I../../../../../drivers/acpi/acpica\
+	-I../../../../../include
 LDFLAGS += -lpthread
 TOOL_OBJS = \
 	acpidbg.o

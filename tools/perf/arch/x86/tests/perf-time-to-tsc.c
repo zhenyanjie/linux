@@ -1,5 +1,3 @@
-#include <errno.h>
-#include <inttypes.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <linux/types.h>
@@ -73,7 +71,7 @@ int test__perf_time_to_tsc(int subtest __maybe_unused)
 
 	CHECK__(parse_events(evlist, "cycles:u", NULL));
 
-	perf_evlist__config(evlist, &opts, NULL);
+	perf_evlist__config(evlist, &opts);
 
 	evsel = perf_evlist__first(evlist);
 
@@ -156,6 +154,10 @@ next_event:
 	err = 0;
 
 out_err:
-	perf_evlist__delete(evlist);
+	if (evlist) {
+		perf_evlist__disable(evlist);
+		perf_evlist__delete(evlist);
+	}
+
 	return err;
 }

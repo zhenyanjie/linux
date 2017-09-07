@@ -32,11 +32,11 @@
 
 
 static int
-xfs_xattr_get(const struct xattr_handler *handler, struct dentry *unused,
-		struct inode *inode, const char *name, void *value, size_t size)
+xfs_xattr_get(const struct xattr_handler *handler, struct dentry *dentry,
+		const char *name, void *value, size_t size)
 {
 	int xflags = handler->flags;
-	struct xfs_inode *ip = XFS_I(inode);
+	struct xfs_inode *ip = XFS_I(d_inode(dentry));
 	int error, asize = size;
 
 	/* Convert Linux syscall to XFS internal ATTR flags */
@@ -74,12 +74,11 @@ xfs_forget_acl(
 }
 
 static int
-xfs_xattr_set(const struct xattr_handler *handler, struct dentry *unused,
-		struct inode *inode, const char *name, const void *value,
-		size_t size, int flags)
+xfs_xattr_set(const struct xattr_handler *handler, struct dentry *dentry,
+		const char *name, const void *value, size_t size, int flags)
 {
 	int			xflags = handler->flags;
-	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_inode	*ip = XFS_I(d_inode(dentry));
 	int			error;
 
 	/* Convert Linux syscall to XFS internal ATTR flags */
@@ -93,7 +92,7 @@ xfs_xattr_set(const struct xattr_handler *handler, struct dentry *unused,
 	error = xfs_attr_set(ip, (unsigned char *)name,
 				(void *)value, size, xflags);
 	if (!error)
-		xfs_forget_acl(inode, name, xflags);
+		xfs_forget_acl(d_inode(dentry), name, xflags);
 
 	return error;
 }
@@ -130,7 +129,7 @@ const struct xattr_handler *xfs_xattr_handlers[] = {
 	NULL
 };
 
-static void
+static int
 __xfs_xattr_put_listent(
 	struct xfs_attr_list_context *context,
 	char *prefix,
@@ -147,8 +146,7 @@ __xfs_xattr_put_listent(
 	arraytop = context->count + prefix_len + namelen + 1;
 	if (arraytop > context->firstu) {
 		context->count = -1;	/* insufficient space */
-		context->seen_enough = 1;
-		return;
+		return 1;
 	}
 	offset = (char *)context->alist + context->count;
 	strncpy(offset, prefix, prefix_len);
@@ -159,16 +157,17 @@ __xfs_xattr_put_listent(
 
 compute_size:
 	context->count += prefix_len + namelen + 1;
-	return;
+	return 0;
 }
 
-static void
+static int
 xfs_xattr_put_listent(
 	struct xfs_attr_list_context *context,
 	int		flags,
 	unsigned char	*name,
 	int		namelen,
-	int		valuelen)
+	int		valuelen,
+	unsigned char	*value)
 {
 	char *prefix;
 	int prefix_len;
@@ -180,19 +179,23 @@ xfs_xattr_put_listent(
 		if (namelen == SGI_ACL_FILE_SIZE &&
 		    strncmp(name, SGI_ACL_FILE,
 			    SGI_ACL_FILE_SIZE) == 0) {
-			__xfs_xattr_put_listent(
+			int ret = __xfs_xattr_put_listent(
 					context, XATTR_SYSTEM_PREFIX,
 					XATTR_SYSTEM_PREFIX_LEN,
 					XATTR_POSIX_ACL_ACCESS,
 					strlen(XATTR_POSIX_ACL_ACCESS));
+			if (ret)
+				return ret;
 		} else if (namelen == SGI_ACL_DEFAULT_SIZE &&
 			 strncmp(name, SGI_ACL_DEFAULT,
 				 SGI_ACL_DEFAULT_SIZE) == 0) {
-			__xfs_xattr_put_listent(
+			int ret = __xfs_xattr_put_listent(
 					context, XATTR_SYSTEM_PREFIX,
 					XATTR_SYSTEM_PREFIX_LEN,
 					XATTR_POSIX_ACL_DEFAULT,
 					strlen(XATTR_POSIX_ACL_DEFAULT));
+			if (ret)
+				return ret;
 		}
 #endif
 
@@ -201,7 +204,7 @@ xfs_xattr_put_listent(
 		 * see them.
 		 */
 		if (!capable(CAP_SYS_ADMIN))
-			return;
+			return 0;
 
 		prefix = XATTR_TRUSTED_PREFIX;
 		prefix_len = XATTR_TRUSTED_PREFIX_LEN;
@@ -213,21 +216,16 @@ xfs_xattr_put_listent(
 		prefix_len = XATTR_USER_PREFIX_LEN;
 	}
 
-	__xfs_xattr_put_listent(context, prefix, prefix_len, name,
-				namelen);
-	return;
+	return __xfs_xattr_put_listent(context, prefix, prefix_len, name,
+				       namelen);
 }
 
 ssize_t
-xfs_vn_listxattr(
-	struct dentry	*dentry,
-	char		*data,
-	size_t		size)
+xfs_vn_listxattr(struct dentry *dentry, char *data, size_t size)
 {
 	struct xfs_attr_list_context context;
 	struct attrlist_cursor_kern cursor = { 0 };
-	struct inode	*inode = d_inode(dentry);
-	int		error;
+	struct inode		*inode = d_inode(dentry);
 
 	/*
 	 * First read the regular on-disk attributes.
@@ -241,9 +239,7 @@ xfs_vn_listxattr(
 	context.firstu = context.bufsize;
 	context.put_listent = xfs_xattr_put_listent;
 
-	error = xfs_attr_list_int(&context);
-	if (error)
-		return error;
+	xfs_attr_list_int(&context);
 	if (context.count < 0)
 		return -ERANGE;
 

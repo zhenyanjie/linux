@@ -43,7 +43,6 @@ acpi-y +=		\
 	evxfregn.o
 
 acpi-y +=		\
-	exconcat.o	\
 	exconfig.o	\
 	exconvrt.o	\
 	excreate.o	\
@@ -150,7 +149,6 @@ acpi-y +=		\
 acpi-y +=		\
 	utaddress.o	\
 	utalloc.o	\
-	utascii.o	\
 	utbuffer.o	\
 	utcopy.o	\
 	utexcep.o	\
@@ -175,7 +173,6 @@ acpi-y +=		\
 	utresrc.o	\
 	utstate.o	\
 	utstring.o	\
-	utstrtoul64.o	\
 	utxface.o	\
 	utxfinit.o	\
 	utxferror.o	\

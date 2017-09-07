@@ -9,8 +9,6 @@ CC = $(CROSS_COMPILE)gcc
 CFLAGS = -Wall -Wextra -I../lib/
 LDFLAGS = $(LIBS)
 
-all: $(TARGETS)
-
 $(TARGETS): $(LIBS)
 
 $(LIBS):
@@ -22,9 +20,3 @@ $(LIBS):
 clean:
 	$(RM) page-types slabinfo page_owner_sort
 	make -C $(LIB_DIR) clean
-
-sbindir ?= /usr/sbin
-
-install: all
-	install -d $(DESTDIR)$(sbindir)
-	install -m 755 -p $(TARGETS) $(DESTDIR)$(sbindir)

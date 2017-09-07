@@ -123,7 +123,8 @@ void mwifiex_11h_process_join(struct mwifiex_private *priv, u8 **buffer,
 void mwifiex_dfs_cac_work_queue(struct work_struct *work)
 {
 	struct cfg80211_chan_def chandef;
-	struct delayed_work *delayed_work = to_delayed_work(work);
+	struct delayed_work *delayed_work =
+			container_of(work, struct delayed_work, work);
 	struct mwifiex_private *priv =
 			container_of(delayed_work, struct mwifiex_private,
 				     dfs_cac_work);
@@ -153,8 +154,7 @@ int mwifiex_cmd_issue_chan_report_request(struct mwifiex_private *priv,
 
 	cmd->command = cpu_to_le16(HostCmd_CMD_CHAN_REPORT_REQUEST);
 	cmd->size = cpu_to_le16(S_DS_GEN);
-	le16_unaligned_add_cpu(&cmd->size,
-			       sizeof(struct host_cmd_ds_chan_rpt_req));
+	le16_add_cpu(&cmd->size, sizeof(struct host_cmd_ds_chan_rpt_req));
 
 	cr_req->chan_desc.start_freq = cpu_to_le16(MWIFIEX_A_BAND_START_FREQ);
 	cr_req->chan_desc.chan_num = radar_params->chandef->chan->hw_value;
@@ -261,17 +261,22 @@ int mwifiex_11h_handle_radar_detected(struct mwifiex_private *priv,
 
 	rdr_event = (void *)(skb->data + sizeof(u32));
 
-	mwifiex_dbg(priv->adapter, MSG,
-		    "radar detected; indicating kernel\n");
-	if (mwifiex_stop_radar_detection(priv, &priv->dfs_chandef))
-		mwifiex_dbg(priv->adapter, ERROR,
-			    "Failed to stop CAC in FW\n");
-	cfg80211_radar_event(priv->adapter->wiphy, &priv->dfs_chandef,
-			     GFP_KERNEL);
-	mwifiex_dbg(priv->adapter, MSG, "regdomain: %d\n",
-		    rdr_event->reg_domain);
-	mwifiex_dbg(priv->adapter, MSG, "radar detection type: %d\n",
-		    rdr_event->det_type);
+	if (le32_to_cpu(rdr_event->passed)) {
+		mwifiex_dbg(priv->adapter, MSG,
+			    "radar detected; indicating kernel\n");
+		if (mwifiex_stop_radar_detection(priv, &priv->dfs_chandef))
+			mwifiex_dbg(priv->adapter, ERROR,
+				    "Failed to stop CAC in FW\n");
+		cfg80211_radar_event(priv->adapter->wiphy, &priv->dfs_chandef,
+				     GFP_KERNEL);
+		mwifiex_dbg(priv->adapter, MSG, "regdomain: %d\n",
+			    rdr_event->reg_domain);
+		mwifiex_dbg(priv->adapter, MSG, "radar detection type: %d\n",
+			    rdr_event->det_type);
+	} else {
+		mwifiex_dbg(priv->adapter, MSG,
+			    "false radar detection event!\n");
+	}
 
 	return 0;
 }
@@ -284,7 +289,8 @@ int mwifiex_11h_handle_radar_detected(struct mwifiex_private *priv,
 void mwifiex_dfs_chan_sw_work_queue(struct work_struct *work)
 {
 	struct mwifiex_uap_bss_param *bss_cfg;
-	struct delayed_work *delayed_work = to_delayed_work(work);
+	struct delayed_work *delayed_work =
+			container_of(work, struct delayed_work, work);
 	struct mwifiex_private *priv =
 			container_of(delayed_work, struct mwifiex_private,
 				     dfs_chan_sw_work);

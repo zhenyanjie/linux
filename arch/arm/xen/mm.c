@@ -98,11 +98,11 @@ static void __xen_dma_page_cpu_to_dev(struct device *hwdev, dma_addr_t handle,
 
 void __xen_dma_map_page(struct device *hwdev, struct page *page,
 	     dma_addr_t dev_addr, unsigned long offset, size_t size,
-	     enum dma_data_direction dir, unsigned long attrs)
+	     enum dma_data_direction dir, struct dma_attrs *attrs)
 {
 	if (is_device_dma_coherent(hwdev))
 		return;
-	if (attrs & DMA_ATTR_SKIP_CPU_SYNC)
+	if (dma_get_attr(DMA_ATTR_SKIP_CPU_SYNC, attrs))
 		return;
 
 	__xen_dma_page_cpu_to_dev(hwdev, dev_addr, size, dir);
@@ -110,12 +110,12 @@ void __xen_dma_map_page(struct device *hwdev, struct page *page,
 
 void __xen_dma_unmap_page(struct device *hwdev, dma_addr_t handle,
 		size_t size, enum dma_data_direction dir,
-		unsigned long attrs)
+		struct dma_attrs *attrs)
 
 {
 	if (is_device_dma_coherent(hwdev))
 		return;
-	if (attrs & DMA_ATTR_SKIP_CPU_SYNC)
+	if (dma_get_attr(DMA_ATTR_SKIP_CPU_SYNC, attrs))
 		return;
 
 	__xen_dma_page_dev_to_cpu(hwdev, handle, size, dir);
@@ -182,10 +182,11 @@ void xen_destroy_contiguous_region(phys_addr_t pstart, unsigned int order)
 }
 EXPORT_SYMBOL_GPL(xen_destroy_contiguous_region);
 
-const struct dma_map_ops *xen_dma_ops;
+struct dma_map_ops *xen_dma_ops;
 EXPORT_SYMBOL(xen_dma_ops);
 
-static const struct dma_map_ops xen_swiotlb_dma_ops = {
+static struct dma_map_ops xen_swiotlb_dma_ops = {
+	.mapping_error = xen_swiotlb_dma_mapping_error,
 	.alloc = xen_swiotlb_alloc_coherent,
 	.free = xen_swiotlb_free_coherent,
 	.sync_single_for_cpu = xen_swiotlb_sync_single_for_cpu,
@@ -198,8 +199,6 @@ static const struct dma_map_ops xen_swiotlb_dma_ops = {
 	.unmap_page = xen_swiotlb_unmap_page,
 	.dma_supported = xen_swiotlb_dma_supported,
 	.set_dma_mask = xen_swiotlb_set_dma_mask,
-	.mmap = xen_swiotlb_dma_mmap,
-	.get_sgtable = xen_swiotlb_get_sgtable,
 };
 
 int __init xen_mm_init(void)

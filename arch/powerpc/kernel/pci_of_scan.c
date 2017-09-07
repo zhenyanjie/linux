@@ -178,7 +178,7 @@ struct pci_dev *of_create_pci_dev(struct device_node *node,
 		dev->hdr_type = PCI_HEADER_TYPE_NORMAL;
 		dev->rom_base_reg = PCI_ROM_ADDRESS;
 		/* Maybe do a default OF mapping here */
-		dev->irq = 0;
+		dev->irq = NO_IRQ;
 	}
 
 	of_pci_parse_addrs(node, dev);

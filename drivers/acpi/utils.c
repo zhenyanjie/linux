@@ -201,6 +201,10 @@ acpi_extract_package(union acpi_object *package,
 		u8 **pointer = NULL;
 		union acpi_object *element = &(package->package.elements[i]);
 
+		if (!element) {
+			return AE_BAD_DATA;
+		}
+
 		switch (element->type) {
 
 		case ACPI_TYPE_INTEGER:
@@ -625,7 +629,7 @@ acpi_status acpi_evaluate_lck(acpi_handle handle, int lock)
  * some old BIOSes do expect a buffer or an integer etc.
  */
 union acpi_object *
-acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 func,
+acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid, int rev, int func,
 		  union acpi_object *argv4)
 {
 	acpi_status ret;
@@ -674,7 +678,7 @@ EXPORT_SYMBOL(acpi_evaluate_dsm);
  * functions. Currently only support 64 functions at maximum, should be
  * enough for now.
  */
-bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 funcs)
+bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, int rev, u64 funcs)
 {
 	int i;
 	u64 mask = 0;
@@ -692,7 +696,7 @@ bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 funcs)
 		mask = obj->integer.value;
 	else if (obj->type == ACPI_TYPE_BUFFER)
 		for (i = 0; i < obj->buffer.length && i < 8; i++)
-			mask |= (((u64)obj->buffer.pointer[i]) << (i * 8));
+			mask |= (((u8)obj->buffer.pointer[i]) << (i * 8));
 	ACPI_FREE(obj);
 
 	/*
@@ -707,7 +711,7 @@ bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 funcs)
 EXPORT_SYMBOL(acpi_check_dsm);
 
 /**
- * acpi_dev_found - Detect presence of a given ACPI device in the namespace.
+ * acpi_dev_present - Detect presence of a given ACPI device in the system.
  * @hid: Hardware ID of the device.
  *
  * Return %true if the device was present at the moment of invocation.
@@ -719,7 +723,7 @@ EXPORT_SYMBOL(acpi_check_dsm);
  * instead). Calling from module_init() is fine (which is synonymous
  * with device_initcall()).
  */
-bool acpi_dev_found(const char *hid)
+bool acpi_dev_present(const char *hid)
 {
 	struct acpi_device_bus_id *acpi_device_bus_id;
 	bool found = false;
@@ -733,72 +737,6 @@ bool acpi_dev_found(const char *hid)
 	mutex_unlock(&acpi_device_lock);
 
 	return found;
-}
-EXPORT_SYMBOL(acpi_dev_found);
-
-struct acpi_dev_present_info {
-	struct acpi_device_id hid[2];
-	const char *uid;
-	s64 hrv;
-};
-
-static int acpi_dev_present_cb(struct device *dev, void *data)
-{
-	struct acpi_device *adev = to_acpi_device(dev);
-	struct acpi_dev_present_info *match = data;
-	unsigned long long hrv;
-	acpi_status status;
-
-	if (acpi_match_device_ids(adev, match->hid))
-		return 0;
-
-	if (match->uid && (!adev->pnp.unique_id ||
-	    strcmp(adev->pnp.unique_id, match->uid)))
-		return 0;
-
-	if (match->hrv == -1)
-		return 1;
-
-	status = acpi_evaluate_integer(adev->handle, "_HRV", NULL, &hrv);
-	if (ACPI_FAILURE(status))
-		return 0;
-
-	return hrv == match->hrv;
-}
-
-/**
- * acpi_dev_present - Detect that a given ACPI device is present
- * @hid: Hardware ID of the device.
- * @uid: Unique ID of the device, pass NULL to not check _UID
- * @hrv: Hardware Revision of the device, pass -1 to not check _HRV
- *
- * Return %true if a matching device was present at the moment of invocation.
- * Note that if the device is pluggable, it may since have disappeared.
- *
- * Note that unlike acpi_dev_found() this function checks the status
- * of the device. So for devices which are present in the dsdt, but
- * which are disabled (their _STA callback returns 0) this function
- * will return false.
- *
- * For this function to work, acpi_bus_scan() must have been executed
- * which happens in the subsys_initcall() subsection. Hence, do not
- * call from a subsys_initcall() or earlier (use acpi_get_devices()
- * instead). Calling from module_init() is fine (which is synonymous
- * with device_initcall()).
- */
-bool acpi_dev_present(const char *hid, const char *uid, s64 hrv)
-{
-	struct acpi_dev_present_info match = {};
-	struct device *dev;
-
-	strlcpy(match.hid[0].id, hid, sizeof(match.hid[0].id));
-	match.uid = uid;
-	match.hrv = hrv;
-
-	dev = bus_find_device(&acpi_bus_type, NULL, &match,
-			      acpi_dev_present_cb);
-
-	return !!dev;
 }
 EXPORT_SYMBOL(acpi_dev_present);
 

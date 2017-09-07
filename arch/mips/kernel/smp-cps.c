@@ -11,8 +11,7 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/irqchip/mips-gic.h>
-#include <linux/sched/task_stack.h>
-#include <linux/sched/hotplug.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/smp.h>
 #include <linux/types.h>
@@ -28,27 +27,15 @@
 #include <asm/time.h>
 #include <asm/uasm.h>
 
-static bool threads_disabled;
 static DECLARE_BITMAP(core_power, NR_CPUS);
 
 struct core_boot_config *mips_cps_core_bootcfg;
-
-static int __init setup_nothreads(char *s)
-{
-	threads_disabled = true;
-	return 0;
-}
-early_param("nothreads", setup_nothreads);
 
 static unsigned core_vpe_count(unsigned core)
 {
 	unsigned cfg;
 
-	if (threads_disabled)
-		return 1;
-
-	if ((!IS_ENABLED(CONFIG_MIPS_MT_SMP) || !cpu_has_mipsmt)
-		&& (!IS_ENABLED(CONFIG_CPU_MIPSR6) || !cpu_has_vp))
+	if (!config_enabled(CONFIG_MIPS_MT_SMP) || !cpu_has_mipsmt)
 		return 1;
 
 	mips_cm_lock_other(core, 0);
@@ -60,12 +47,11 @@ static unsigned core_vpe_count(unsigned core)
 static void __init cps_smp_setup(void)
 {
 	unsigned int ncores, nvpes, core_vpes;
-	unsigned long core_entry;
 	int c, v;
 
 	/* Detect & record VPE topology */
 	ncores = mips_cm_numcores();
-	pr_info("%s topology ", cpu_has_mips_r6 ? "VP" : "VPE");
+	pr_info("VPE topology ");
 	for (c = nvpes = 0; c < ncores; c++) {
 		core_vpes = core_vpe_count(c);
 		pr_cont("%c%u", c ? ',' : '{', core_vpes);
@@ -76,7 +62,7 @@ static void __init cps_smp_setup(void)
 
 		for (v = 0; v < min_t(int, core_vpes, NR_CPUS - nvpes); v++) {
 			cpu_data[nvpes + v].core = c;
-#if defined(CONFIG_MIPS_MT_SMP) || defined(CONFIG_CPU_MIPSR6)
+#ifdef CONFIG_MIPS_MT_SMP
 			cpu_data[nvpes + v].vpe_id = v;
 #endif
 		}
@@ -104,11 +90,6 @@ static void __init cps_smp_setup(void)
 
 	/* Make core 0 coherent with everything */
 	write_gcr_cl_coherence(0xff);
-
-	if (mips_cm_revision() >= CM_REV_CM3) {
-		core_entry = CKSEG1ADDR((unsigned long)mips_cps_core_entry);
-		write_gcr_bev_base(core_entry);
-	}
 
 #ifdef CONFIG_MIPS_MT_FPAFF
 	/* If we have an FPU, enroll ourselves in the FPU-full mask */
@@ -207,7 +188,7 @@ err_out:
 	}
 }
 
-static void boot_core(unsigned int core, unsigned int vpe_id)
+static void boot_core(unsigned core)
 {
 	u32 access, stat, seq_state;
 	unsigned timeout;
@@ -232,19 +213,6 @@ static void boot_core(unsigned int core, unsigned int vpe_id)
 	if (mips_cpc_present()) {
 		/* Reset the core */
 		mips_cpc_lock_other(core);
-
-		if (mips_cm_revision() >= CM_REV_CM3) {
-			/* Run only the requested VP following the reset */
-			write_cpc_co_vp_stop(0xf);
-			write_cpc_co_vp_run(1 << vpe_id);
-
-			/*
-			 * Ensure that the VP_RUN register is written before the
-			 * core leaves reset.
-			 */
-			wmb();
-		}
-
 		write_cpc_co_cmd(CPC_Cx_CMD_RESET);
 
 		timeout = 100;
@@ -282,10 +250,7 @@ static void boot_core(unsigned int core, unsigned int vpe_id)
 
 static void remote_vpe_boot(void *dummy)
 {
-	unsigned core = current_cpu_data.core;
-	struct core_boot_config *core_cfg = &mips_cps_core_bootcfg[core];
-
-	mips_cps_boot_vpes(core_cfg, cpu_vpe_id(&current_cpu_data));
+	mips_cps_boot_vpes();
 }
 
 static void cps_boot_secondary(int cpu, struct task_struct *idle)
@@ -294,7 +259,6 @@ static void cps_boot_secondary(int cpu, struct task_struct *idle)
 	unsigned vpe_id = cpu_vpe_id(&cpu_data[cpu]);
 	struct core_boot_config *core_cfg = &mips_cps_core_bootcfg[core];
 	struct vpe_boot_config *vpe_cfg = &core_cfg->vpe_config[vpe_id];
-	unsigned long core_entry;
 	unsigned int remote;
 	int err;
 
@@ -308,15 +272,8 @@ static void cps_boot_secondary(int cpu, struct task_struct *idle)
 
 	if (!test_bit(core, core_power)) {
 		/* Boot a VPE on a powered down core */
-		boot_core(core, vpe_id);
+		boot_core(core);
 		goto out;
-	}
-
-	if (cpu_has_vp) {
-		mips_cm_lock_other(core, vpe_id);
-		core_entry = CKSEG1ADDR((unsigned long)mips_cps_core_entry);
-		write_gcr_co_reset_base(core_entry);
-		mips_cm_unlock_other();
 	}
 
 	if (core != current_cpu_data.core) {
@@ -327,11 +284,7 @@ static void cps_boot_secondary(int cpu, struct task_struct *idle)
 			if (cpu_online(remote))
 				break;
 		}
-		if (remote >= NR_CPUS) {
-			pr_crit("No online CPU in core %u to start CPU%d\n",
-				core, cpu);
-			goto out;
-		}
+		BUG_ON(remote >= NR_CPUS);
 
 		err = smp_call_function_single(remote, remote_vpe_boot,
 					       NULL, 1);
@@ -340,10 +293,10 @@ static void cps_boot_secondary(int cpu, struct task_struct *idle)
 		goto out;
 	}
 
-	BUG_ON(!cpu_has_mipsmt && !cpu_has_vp);
+	BUG_ON(!cpu_has_mipsmt);
 
 	/* Boot a VPE on this core */
-	mips_cps_boot_vpes(core_cfg, vpe_id);
+	mips_cps_boot_vpes();
 out:
 	preempt_enable();
 }
@@ -354,23 +307,8 @@ static void cps_init_secondary(void)
 	if (cpu_has_mipsmt)
 		dmt();
 
-	if (mips_cm_revision() >= CM_REV_CM3) {
-		unsigned ident = gic_read_local_vp_id();
-
-		/*
-		 * Ensure that our calculation of the VP ID matches up with
-		 * what the GIC reports, otherwise we'll have configured
-		 * interrupts incorrectly.
-		 */
-		BUG_ON(ident != mips_cm_vp_id(smp_processor_id()));
-	}
-
-	if (cpu_has_veic)
-		clear_c0_status(ST0_IM);
-	else
-		change_c0_status(ST0_IM, STATUSF_IP2 | STATUSF_IP3 |
-					 STATUSF_IP4 | STATUSF_IP5 |
-					 STATUSF_IP6 | STATUSF_IP7);
+	change_c0_status(ST0_IM, STATUSF_IP2 | STATUSF_IP3 | STATUSF_IP4 |
+				 STATUSF_IP5 | STATUSF_IP6 | STATUSF_IP7);
 }
 
 static void cps_smp_finish(void)
@@ -403,7 +341,7 @@ static int cps_cpu_disable(void)
 	atomic_sub(1 << cpu_vpe_id(&current_cpu_data), &core_cfg->vpe_mask);
 	smp_mb__after_atomic();
 	set_cpu_online(cpu, false);
-	calculate_cpu_foreign_map();
+	cpumask_clear_cpu(cpu, &cpu_callin_map);
 
 	return 0;
 }
@@ -417,17 +355,16 @@ static enum {
 
 void play_dead(void)
 {
-	unsigned int cpu, core, vpe_id;
+	unsigned cpu, core;
 
 	local_irq_disable();
 	idle_task_exit();
 	cpu = smp_processor_id();
-	core = cpu_data[cpu].core;
 	cpu_death = CPU_DEATH_POWER;
 
-	pr_debug("CPU%d going offline\n", cpu);
+	if (cpu_has_mipsmt) {
+		core = cpu_data[cpu].core;
 
-	if (cpu_has_mipsmt || cpu_has_vp) {
 		/* Look for another online VPE within the core */
 		for_each_online_cpu(cpu_death_sibling) {
 			if (cpu_data[cpu_death_sibling].core != core)
@@ -446,21 +383,10 @@ void play_dead(void)
 	complete(&cpu_death_chosen);
 
 	if (cpu_death == CPU_DEATH_HALT) {
-		vpe_id = cpu_vpe_id(&cpu_data[cpu]);
-
-		pr_debug("Halting core %d VP%d\n", core, vpe_id);
-		if (cpu_has_mipsmt) {
-			/* Halt this TC */
-			write_c0_tchalt(TCHALT_H);
-			instruction_hazard();
-		} else if (cpu_has_vp) {
-			write_cpc_cl_vp_stop(1 << vpe_id);
-
-			/* Ensure that the VP_STOP register is written */
-			wmb();
-		}
+		/* Halt this TC */
+		write_c0_tchalt(TCHALT_H);
+		instruction_hazard();
 	} else {
-		pr_debug("Gating power to core %d\n", core);
 		/* Power down the core */
 		cps_pm_enter_state(CPS_PM_POWER_GATED);
 	}
@@ -487,7 +413,6 @@ static void wait_for_sibling_halt(void *ptr_cpu)
 static void cps_cpu_die(unsigned int cpu)
 {
 	unsigned core = cpu_data[cpu].core;
-	unsigned int vpe_id = cpu_vpe_id(&cpu_data[cpu]);
 	unsigned stat;
 	int err;
 
@@ -516,12 +441,10 @@ static void cps_cpu_die(unsigned int cpu)
 		 * in which case the CPC will refuse to power down the core.
 		 */
 		do {
-			mips_cm_lock_other(core, 0);
 			mips_cpc_lock_other(core);
 			stat = read_cpc_co_stat_conf();
 			stat &= CPC_Cx_STAT_CONF_SEQSTATE_MSK;
 			mips_cpc_unlock_other();
-			mips_cm_unlock_other();
 		} while (stat != CPC_Cx_STAT_CONF_SEQSTATE_D0 &&
 			 stat != CPC_Cx_STAT_CONF_SEQSTATE_D2 &&
 			 stat != CPC_Cx_STAT_CONF_SEQSTATE_U2);
@@ -538,12 +461,6 @@ static void cps_cpu_die(unsigned int cpu)
 					       (void *)(unsigned long)cpu, 1);
 		if (err)
 			panic("Failed to call remote sibling CPU\n");
-	} else if (cpu_has_vp) {
-		do {
-			mips_cm_lock_other(core, vpe_id);
-			stat = read_cpc_co_vp_running();
-			mips_cm_unlock_other();
-		} while (stat & (1 << vpe_id));
 	}
 }
 
@@ -555,8 +472,8 @@ static struct plat_smp_ops cps_smp_ops = {
 	.boot_secondary		= cps_boot_secondary,
 	.init_secondary		= cps_init_secondary,
 	.smp_finish		= cps_smp_finish,
-	.send_ipi_single	= mips_smp_send_ipi_single,
-	.send_ipi_mask		= mips_smp_send_ipi_mask,
+	.send_ipi_single	= gic_send_ipi_single,
+	.send_ipi_mask		= gic_send_ipi_mask,
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_disable		= cps_cpu_disable,
 	.cpu_die		= cps_cpu_die,

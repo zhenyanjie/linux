@@ -88,8 +88,7 @@ static int iser_create_device_ib_res(struct iser_device *device)
 		  device->comps_used, ib_dev->name,
 		  ib_dev->num_comp_vectors, max_cqe);
 
-	device->pd = ib_alloc_pd(ib_dev,
-		iser_always_reg ? 0 : IB_PD_UNSAFE_GLOBAL_RKEY);
+	device->pd = ib_alloc_pd(ib_dev);
 	if (IS_ERR(device->pd))
 		goto pd_err;
 
@@ -104,13 +103,26 @@ static int iser_create_device_ib_res(struct iser_device *device)
 		}
 	}
 
+	if (!iser_always_reg) {
+		int access = IB_ACCESS_LOCAL_WRITE |
+			     IB_ACCESS_REMOTE_WRITE |
+			     IB_ACCESS_REMOTE_READ;
+
+		device->mr = ib_get_dma_mr(device->pd, access);
+		if (IS_ERR(device->mr))
+			goto cq_err;
+	}
+
 	INIT_IB_EVENT_HANDLER(&device->event_handler, ib_dev,
 			      iser_event_handler);
 	if (ib_register_event_handler(&device->event_handler))
-		goto cq_err;
+		goto handler_err;
 
 	return 0;
 
+handler_err:
+	if (device->mr)
+		ib_dereg_mr(device->mr);
 cq_err:
 	for (i = 0; i < device->comps_used; i++) {
 		struct iser_comp *comp = &device->comps[i];
@@ -142,10 +154,14 @@ static void iser_free_device_ib_res(struct iser_device *device)
 	}
 
 	(void)ib_unregister_event_handler(&device->event_handler);
+	if (device->mr)
+		(void)ib_dereg_mr(device->mr);
 	ib_dealloc_pd(device->pd);
 
 	kfree(device->comps);
 	device->comps = NULL;
+
+	device->mr = NULL;
 	device->pd = NULL;
 }
 
@@ -236,21 +252,14 @@ void iser_free_fmr_pool(struct ib_conn *ib_conn)
 }
 
 static int
-iser_alloc_reg_res(struct iser_device *device,
+iser_alloc_reg_res(struct ib_device *ib_device,
 		   struct ib_pd *pd,
 		   struct iser_reg_resources *res,
 		   unsigned int size)
 {
-	struct ib_device *ib_dev = device->ib_device;
-	enum ib_mr_type mr_type;
 	int ret;
 
-	if (ib_dev->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG)
-		mr_type = IB_MR_TYPE_SG_GAPS;
-	else
-		mr_type = IB_MR_TYPE_MEM_REG;
-
-	res->mr = ib_alloc_mr(pd, mr_type, size);
+	res->mr = ib_alloc_mr(pd, IB_MR_TYPE_MEM_REG, size);
 	if (IS_ERR(res->mr)) {
 		ret = PTR_ERR(res->mr);
 		iser_err("Failed to allocate ib_fast_reg_mr err=%d\n", ret);
@@ -268,7 +277,7 @@ iser_free_reg_res(struct iser_reg_resources *rsc)
 }
 
 static int
-iser_alloc_pi_ctx(struct iser_device *device,
+iser_alloc_pi_ctx(struct ib_device *ib_device,
 		  struct ib_pd *pd,
 		  struct iser_fr_desc *desc,
 		  unsigned int size)
@@ -282,7 +291,7 @@ iser_alloc_pi_ctx(struct iser_device *device,
 
 	pi_ctx = desc->pi_ctx;
 
-	ret = iser_alloc_reg_res(device, pd, &pi_ctx->rsc, size);
+	ret = iser_alloc_reg_res(ib_device, pd, &pi_ctx->rsc, size);
 	if (ret) {
 		iser_err("failed to allocate reg_resources\n");
 		goto alloc_reg_res_err;
@@ -315,7 +324,7 @@ iser_free_pi_ctx(struct iser_pi_context *pi_ctx)
 }
 
 static struct iser_fr_desc *
-iser_create_fastreg_desc(struct iser_device *device,
+iser_create_fastreg_desc(struct ib_device *ib_device,
 			 struct ib_pd *pd,
 			 bool pi_enable,
 			 unsigned int size)
@@ -327,12 +336,12 @@ iser_create_fastreg_desc(struct iser_device *device,
 	if (!desc)
 		return ERR_PTR(-ENOMEM);
 
-	ret = iser_alloc_reg_res(device, pd, &desc->rsc, size);
+	ret = iser_alloc_reg_res(ib_device, pd, &desc->rsc, size);
 	if (ret)
 		goto reg_res_alloc_failure;
 
 	if (pi_enable) {
-		ret = iser_alloc_pi_ctx(device, pd, desc, size);
+		ret = iser_alloc_pi_ctx(ib_device, pd, desc, size);
 		if (ret)
 			goto pi_ctx_alloc_failure;
 	}
@@ -362,11 +371,10 @@ int iser_alloc_fastreg_pool(struct ib_conn *ib_conn,
 	int i, ret;
 
 	INIT_LIST_HEAD(&fr_pool->list);
-	INIT_LIST_HEAD(&fr_pool->all_list);
 	spin_lock_init(&fr_pool->lock);
 	fr_pool->size = 0;
 	for (i = 0; i < cmds_max; i++) {
-		desc = iser_create_fastreg_desc(device, device->pd,
+		desc = iser_create_fastreg_desc(device->ib_device, device->pd,
 						ib_conn->pi_support, size);
 		if (IS_ERR(desc)) {
 			ret = PTR_ERR(desc);
@@ -374,7 +382,6 @@ int iser_alloc_fastreg_pool(struct ib_conn *ib_conn,
 		}
 
 		list_add_tail(&desc->list, &fr_pool->list);
-		list_add_tail(&desc->all_list, &fr_pool->all_list);
 		fr_pool->size++;
 	}
 
@@ -394,13 +401,13 @@ void iser_free_fastreg_pool(struct ib_conn *ib_conn)
 	struct iser_fr_desc *desc, *tmp;
 	int i = 0;
 
-	if (list_empty(&fr_pool->all_list))
+	if (list_empty(&fr_pool->list))
 		return;
 
 	iser_info("freeing conn %p fr pool\n", ib_conn);
 
-	list_for_each_entry_safe(desc, tmp, &fr_pool->all_list, all_list) {
-		list_del(&desc->all_list);
+	list_for_each_entry_safe(desc, tmp, &fr_pool->list, list) {
+		list_del(&desc->list);
 		iser_free_reg_res(&desc->rsc);
 		if (desc->pi_ctx)
 			iser_free_pi_ctx(desc->pi_ctx);
@@ -599,9 +606,7 @@ static void iser_free_ib_conn_res(struct iser_conn *iser_conn,
 		  iser_conn, ib_conn->cma_id, ib_conn->qp);
 
 	if (ib_conn->qp != NULL) {
-		mutex_lock(&ig.connlist_mutex);
 		ib_conn->comp->active_qps--;
-		mutex_unlock(&ig.connlist_mutex);
 		rdma_destroy_qp(ib_conn->cma_id);
 		ib_conn->qp = NULL;
 	}
@@ -658,6 +663,7 @@ void iser_conn_release(struct iser_conn *iser_conn)
 int iser_conn_terminate(struct iser_conn *iser_conn)
 {
 	struct ib_conn *ib_conn = &iser_conn->ib_conn;
+	struct ib_send_wr *bad_wr;
 	int err = 0;
 
 	/* terminate the iser conn only if the conn state is UP */
@@ -682,8 +688,14 @@ int iser_conn_terminate(struct iser_conn *iser_conn)
 			iser_err("Failed to disconnect, conn: 0x%p err %d\n",
 				 iser_conn, err);
 
-		/* block until all flush errors are consumed */
-		ib_drain_sq(ib_conn->qp);
+		/* post an indication that all flush errors were consumed */
+		err = ib_post_send(ib_conn->qp, &ib_conn->last, &bad_wr);
+		if (err) {
+			iser_err("conn %p failed to post last wr", ib_conn);
+			return 1;
+		}
+
+		wait_for_completion(&ib_conn->last_comp);
 	}
 
 	return 1;
@@ -711,7 +723,18 @@ iser_calc_scsi_params(struct iser_conn *iser_conn,
 	sup_sg_tablesize = min_t(unsigned, ISCSI_ISER_MAX_SG_TABLESIZE,
 				 device->ib_device->attrs.max_fast_reg_page_list_len);
 
-	iser_conn->scsi_sg_tablesize = min(sg_tablesize, sup_sg_tablesize);
+	if (sg_tablesize > sup_sg_tablesize) {
+		sg_tablesize = sup_sg_tablesize;
+		iser_conn->scsi_max_sectors = sg_tablesize * SIZE_4K / 512;
+	} else {
+		iser_conn->scsi_max_sectors = max_sectors;
+	}
+
+	iser_conn->scsi_sg_tablesize = sg_tablesize;
+
+	iser_dbg("iser_conn %p, sg_tablesize %u, max_sectors %u\n",
+		 iser_conn, iser_conn->scsi_sg_tablesize,
+		 iser_conn->scsi_max_sectors);
 }
 
 /**
@@ -883,14 +906,11 @@ static int iser_cma_handler(struct rdma_cm_id *cma_id, struct rdma_cm_event *eve
 	case RDMA_CM_EVENT_ESTABLISHED:
 		iser_connected_handler(cma_id, event->param.conn.private_data);
 		break;
-	case RDMA_CM_EVENT_REJECTED:
-		iser_info("Connection rejected: %s\n",
-			 rdma_reject_msg(cma_id, event->status));
-		/* FALLTHROUGH */
 	case RDMA_CM_EVENT_ADDR_ERROR:
 	case RDMA_CM_EVENT_ROUTE_ERROR:
 	case RDMA_CM_EVENT_CONNECT_ERROR:
 	case RDMA_CM_EVENT_UNREACHABLE:
+	case RDMA_CM_EVENT_REJECTED:
 		iser_connect_error(cma_id);
 		break;
 	case RDMA_CM_EVENT_DISCONNECTED:
@@ -934,6 +954,10 @@ void iser_conn_init(struct iser_conn *iser_conn)
 
 	ib_conn->post_recv_buf_count = 0;
 	ib_conn->reg_cqe.done = iser_reg_comp;
+	ib_conn->last_cqe.done = iser_last_comp;
+	ib_conn->last.wr_cqe = &ib_conn->last_cqe;
+	ib_conn->last.opcode = IB_WR_SEND;
+	init_completion(&ib_conn->last_comp);
 }
 
  /**

@@ -13,7 +13,8 @@
 #include <linux/gfp.h>
 #include <linux/init.h>
 
-#include <asm/page-states.h>
+#define ESSA_SET_STABLE		1
+#define ESSA_SET_UNUSED		2
 
 static int cmma_flag = 1;
 
@@ -33,25 +34,20 @@ static int __init cmma(char *str)
 }
 __setup("cmma=", cmma);
 
-static inline int cmma_test_essa(void)
+void __init cmma_init(void)
 {
 	register unsigned long tmp asm("0") = 0;
 	register int rc asm("1") = -EOPNOTSUPP;
 
+	if (!cmma_flag)
+		return;
 	asm volatile(
 		"       .insn rrf,0xb9ab0000,%1,%1,0,0\n"
 		"0:     la      %0,0\n"
 		"1:\n"
 		EX_TABLE(0b,1b)
 		: "+&d" (rc), "+&d" (tmp));
-	return rc;
-}
-
-void __init cmma_init(void)
-{
-	if (!cmma_flag)
-		return;
-	if (cmma_test_essa())
+	if (rc)
 		cmma_flag = 0;
 }
 

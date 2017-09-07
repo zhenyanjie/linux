@@ -7,7 +7,6 @@
  */
 
 #include <linux/export.h>
-#include <linux/sched/loadavg.h>
 
 #include "sched.h"
 
@@ -79,11 +78,11 @@ void get_avenrun(unsigned long *loads, unsigned long offset, int shift)
 	loads[2] = (avenrun[2] + offset) << shift;
 }
 
-long calc_load_fold_active(struct rq *this_rq, long adjust)
+long calc_load_fold_active(struct rq *this_rq)
 {
 	long nr_active, delta = 0;
 
-	nr_active = this_rq->nr_running - adjust;
+	nr_active = this_rq->nr_running;
 	nr_active += (long)this_rq->nr_uninterruptible;
 
 	if (nr_active != this_rq->calc_load_active) {
@@ -100,13 +99,10 @@ long calc_load_fold_active(struct rq *this_rq, long adjust)
 static unsigned long
 calc_load(unsigned long load, unsigned long exp, unsigned long active)
 {
-	unsigned long newload;
-
-	newload = load * exp + active * (FIXED_1 - exp);
-	if (active >= load)
-		newload += FIXED_1-1;
-
-	return newload / FIXED_1;
+	load *= exp;
+	load += active * (FIXED_1 - exp);
+	load += 1UL << (FSHIFT - 1);
+	return load >> FSHIFT;
 }
 
 #ifdef CONFIG_NO_HZ_COMMON
@@ -169,7 +165,7 @@ static inline int calc_load_write_idx(void)
 	 * If the folding window started, make sure we start writing in the
 	 * next idle-delta.
 	 */
-	if (!time_before(jiffies, READ_ONCE(calc_load_update)))
+	if (!time_before(jiffies, calc_load_update))
 		idx++;
 
 	return idx & 1;
@@ -189,7 +185,7 @@ void calc_load_enter_idle(void)
 	 * We're going into NOHZ mode, if there's any pending delta, fold it
 	 * into the pending idle delta.
 	 */
-	delta = calc_load_fold_active(this_rq, 0);
+	delta = calc_load_fold_active(this_rq);
 	if (delta) {
 		int idx = calc_load_write_idx();
 
@@ -202,9 +198,8 @@ void calc_load_exit_idle(void)
 	struct rq *this_rq = this_rq();
 
 	/*
-	 * If we're still before the pending sample window, we're done.
+	 * If we're still before the sample window, we're done.
 	 */
-	this_rq->calc_load_update = READ_ONCE(calc_load_update);
 	if (time_before(jiffies, this_rq->calc_load_update))
 		return;
 
@@ -213,6 +208,7 @@ void calc_load_exit_idle(void)
 	 * accounted through the nohz accounting, so skip the entire deal and
 	 * sync up for the next window.
 	 */
+	this_rq->calc_load_update = calc_load_update;
 	if (time_before(jiffies, this_rq->calc_load_update + 10))
 		this_rq->calc_load_update += LOAD_FREQ;
 }
@@ -308,15 +304,13 @@ calc_load_n(unsigned long load, unsigned long exp,
  */
 static void calc_global_nohz(void)
 {
-	unsigned long sample_window;
 	long delta, active, n;
 
-	sample_window = READ_ONCE(calc_load_update);
-	if (!time_before(jiffies, sample_window + 10)) {
+	if (!time_before(jiffies, calc_load_update + 10)) {
 		/*
 		 * Catch-up, fold however many we are behind still
 		 */
-		delta = jiffies - sample_window - 10;
+		delta = jiffies - calc_load_update - 10;
 		n = 1 + (delta / LOAD_FREQ);
 
 		active = atomic_long_read(&calc_load_tasks);
@@ -326,7 +320,7 @@ static void calc_global_nohz(void)
 		avenrun[1] = calc_load_n(avenrun[1], EXP_5, active, n);
 		avenrun[2] = calc_load_n(avenrun[2], EXP_15, active, n);
 
-		WRITE_ONCE(calc_load_update, sample_window + n * LOAD_FREQ);
+		calc_load_update += n * LOAD_FREQ;
 	}
 
 	/*
@@ -354,11 +348,9 @@ static inline void calc_global_nohz(void) { }
  */
 void calc_global_load(unsigned long ticks)
 {
-	unsigned long sample_window;
 	long active, delta;
 
-	sample_window = READ_ONCE(calc_load_update);
-	if (time_before(jiffies, sample_window + 10))
+	if (time_before(jiffies, calc_load_update + 10))
 		return;
 
 	/*
@@ -375,7 +367,7 @@ void calc_global_load(unsigned long ticks)
 	avenrun[1] = calc_load(avenrun[1], EXP_5, active);
 	avenrun[2] = calc_load(avenrun[2], EXP_15, active);
 
-	WRITE_ONCE(calc_load_update, sample_window + LOAD_FREQ);
+	calc_load_update += LOAD_FREQ;
 
 	/*
 	 * In case we idled for multiple LOAD_FREQ intervals, catch up in bulk.
@@ -394,7 +386,7 @@ void calc_global_load_tick(struct rq *this_rq)
 	if (time_before(jiffies, this_rq->calc_load_update))
 		return;
 
-	delta  = calc_load_fold_active(this_rq, 0);
+	delta  = calc_load_fold_active(this_rq);
 	if (delta)
 		atomic_long_add(delta, &calc_load_tasks);
 

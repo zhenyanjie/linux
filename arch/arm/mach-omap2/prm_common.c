@@ -295,8 +295,10 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 		GFP_KERNEL);
 
 	if (!prcm_irq_chips || !prcm_irq_setup->saved_mask ||
-	    !prcm_irq_setup->priority_mask)
+	    !prcm_irq_setup->priority_mask) {
+		pr_err("PRCM: kzalloc failed\n");
 		goto err;
+	}
 
 	memset(mask, 0, sizeof(mask));
 

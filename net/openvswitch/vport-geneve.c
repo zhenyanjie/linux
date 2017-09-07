@@ -93,14 +93,7 @@ static struct vport *geneve_tnl_create(const struct vport_parms *parms)
 		return ERR_CAST(dev);
 	}
 
-	err = dev_change_flags(dev, dev->flags | IFF_UP);
-	if (err < 0) {
-		rtnl_delete_link(dev);
-		rtnl_unlock();
-		ovs_vport_free(vport);
-		goto error;
-	}
-
+	dev_change_flags(dev, dev->flags | IFF_UP);
 	rtnl_unlock();
 	return vport;
 error:
@@ -139,6 +132,6 @@ static void __exit ovs_geneve_tnl_exit(void)
 module_init(ovs_geneve_tnl_init);
 module_exit(ovs_geneve_tnl_exit);
 
-MODULE_DESCRIPTION("OVS: Geneve switching port");
+MODULE_DESCRIPTION("OVS: Geneve swiching port");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("vport-type-5");

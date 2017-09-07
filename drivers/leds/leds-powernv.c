@@ -118,7 +118,7 @@ static int powernv_led_set(struct powernv_led_data *powernv_led,
 		goto out_token;
 	}
 
-	rc = opal_get_async_rc(msg);
+	rc = be64_to_cpu(msg.params[1]);
 	if (rc != OPAL_SUCCESS)
 		dev_err(dev, "%s : OAPL async call returned failed [rc=%d]\n",
 			__func__, rc);

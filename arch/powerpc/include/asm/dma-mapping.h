@@ -13,6 +13,7 @@
 /* need struct page definitions */
 #include <linux/mm.h>
 #include <linux/scatterlist.h>
+#include <linux/dma-attrs.h>
 #include <linux/dma-debug.h>
 #include <asm/io.h>
 #include <asm/swiotlb.h>
@@ -24,14 +25,14 @@
 /* Some dma direct funcs must be visible for use in other dma_ops */
 extern void *__dma_direct_alloc_coherent(struct device *dev, size_t size,
 					 dma_addr_t *dma_handle, gfp_t flag,
-					 unsigned long attrs);
+					 struct dma_attrs *attrs);
 extern void __dma_direct_free_coherent(struct device *dev, size_t size,
 				       void *vaddr, dma_addr_t dma_handle,
-				       unsigned long attrs);
+				       struct dma_attrs *attrs);
 extern int dma_direct_mmap_coherent(struct device *dev,
 				    struct vm_area_struct *vma,
 				    void *cpu_addr, dma_addr_t handle,
-				    size_t size, unsigned long attrs);
+				    size_t size, struct dma_attrs *attrs);
 
 #ifdef CONFIG_NOT_COHERENT_CACHE
 /*
@@ -76,16 +77,24 @@ static inline unsigned long device_to_mask(struct device *dev)
 #ifdef CONFIG_PPC64
 extern struct dma_map_ops dma_iommu_ops;
 #endif
-extern const struct dma_map_ops dma_direct_ops;
+extern struct dma_map_ops dma_direct_ops;
 
-static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
 	/* We don't handle the NULL dev case for ISA for now. We could
 	 * do it via an out of line call but it is not needed for now. The
 	 * only ISA DMA device we support is the floppy and we have a hack
 	 * in the floppy driver directly to get a device for us.
 	 */
-	return NULL;
+	if (unlikely(dev == NULL))
+		return NULL;
+
+	return dev->archdata.dma_ops;
+}
+
+static inline void set_dma_ops(struct device *dev, struct dma_map_ops *ops)
+{
+	dev->archdata.dma_ops = ops;
 }
 
 /*

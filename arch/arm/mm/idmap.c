@@ -1,7 +1,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include <linux/mm_types.h>
 
 #include <asm/cputype.h>
 #include <asm/idmap.h>
@@ -16,7 +15,7 @@
  * page tables.
  */
 pgd_t *idmap_pgd;
-long long arch_phys_to_idmap_offset;
+phys_addr_t (*arch_virt_to_idmap) (unsigned long x);
 
 #ifdef CONFIG_ARM_LPAE
 static void idmap_add_pmd(pud_t *pud, unsigned long addr, unsigned long end,

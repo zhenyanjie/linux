@@ -102,7 +102,7 @@ enum skb_frame_desc_flags {
  *	of the scope of the skb->data pointer.
  * @iv: IV/EIV data used during encryption/decryption.
  * @skb_dma: (PCI-only) the DMA address associated with the sk buffer.
- * @sta: The station where sk buffer was sent.
+ * @entry: The entry to which this sk buffer belongs.
  */
 struct skb_frame_desc {
 	u8 flags;
@@ -116,7 +116,8 @@ struct skb_frame_desc {
 	__le32 iv[2];
 
 	dma_addr_t skb_dma;
-	struct ieee80211_sta *sta;
+
+	struct queue_entry *entry;
 };
 
 /**
@@ -184,9 +185,6 @@ struct rxdone_entry_desc {
 	int flags;
 	int dev_flags;
 	u16 rate_mode;
-	u16 enc_flags;
-	enum mac80211_rx_encoding encoding;
-	enum rate_info_bw bw;
 	u8 cipher;
 	u8 cipher_status;
 
@@ -218,7 +216,6 @@ enum txdone_entry_desc_flags {
 	TXDONE_FAILURE,
 	TXDONE_EXCESSIVE_RETRY,
 	TXDONE_AMPDU,
-	TXDONE_NO_ACK_REQ,
 };
 
 /**

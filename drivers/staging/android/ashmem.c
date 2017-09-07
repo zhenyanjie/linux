@@ -100,44 +100,27 @@ static DEFINE_MUTEX(ashmem_mutex);
 static struct kmem_cache *ashmem_area_cachep __read_mostly;
 static struct kmem_cache *ashmem_range_cachep __read_mostly;
 
-static inline unsigned long range_size(struct ashmem_range *range)
-{
-	return range->pgend - range->pgstart + 1;
-}
+#define range_size(range) \
+	((range)->pgend - (range)->pgstart + 1)
 
-static inline bool range_on_lru(struct ashmem_range *range)
-{
-	return range->purged == ASHMEM_NOT_PURGED;
-}
+#define range_on_lru(range) \
+	((range)->purged == ASHMEM_NOT_PURGED)
 
-static inline bool page_range_subsumes_range(struct ashmem_range *range,
-					     size_t start, size_t end)
-{
-	return (range->pgstart >= start) && (range->pgend <= end);
-}
+#define page_range_subsumes_range(range, start, end) \
+	(((range)->pgstart >= (start)) && ((range)->pgend <= (end)))
 
-static inline bool page_range_subsumed_by_range(struct ashmem_range *range,
-						size_t start, size_t end)
-{
-	return (range->pgstart <= start) && (range->pgend >= end);
-}
+#define page_range_subsumed_by_range(range, start, end) \
+	(((range)->pgstart <= (start)) && ((range)->pgend >= (end)))
 
-static inline bool page_in_range(struct ashmem_range *range, size_t page)
-{
-	return (range->pgstart <= page) && (range->pgend >= page);
-}
+#define page_in_range(range, page) \
+	(((range)->pgstart <= (page)) && ((range)->pgend >= (page)))
 
-static inline bool page_range_in_range(struct ashmem_range *range,
-				       size_t start, size_t end)
-{
-	return page_in_range(range, start) || page_in_range(range, end) ||
-		page_range_subsumes_range(range, start, end);
-}
+#define page_range_in_range(range, start, end) \
+	(page_in_range(range, start) || page_in_range(range, end) || \
+		page_range_subsumes_range(range, start, end))
 
-static inline bool range_before_page(struct ashmem_range *range, size_t page)
-{
-	return range->pgend < page;
-}
+#define range_before_page(range, page) \
+	((range)->pgend < (page))
 
 #define PROT_MASK		(PROT_EXEC | PROT_READ | PROT_WRITE)
 
@@ -389,8 +372,8 @@ static int ashmem_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	/* requested protection bits must match our allowed protection mask */
-	if (unlikely((vma->vm_flags & ~calc_vm_prot_bits(asma->prot_mask, 0)) &
-		     calc_vm_prot_bits(PROT_MASK, 0))) {
+	if (unlikely((vma->vm_flags & ~calc_vm_prot_bits(asma->prot_mask)) &
+		     calc_vm_prot_bits(PROT_MASK))) {
 		ret = -EPERM;
 		goto out;
 	}
@@ -409,7 +392,6 @@ static int ashmem_mmap(struct file *file, struct vm_area_struct *vma)
 			ret = PTR_ERR(vmfile);
 			goto out;
 		}
-		vmfile->f_mode |= FMODE_LSEEK;
 		asma->file = vmfile;
 	}
 	get_file(asma->file);
@@ -459,9 +441,7 @@ ashmem_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 	if (!(sc->gfp_mask & __GFP_FS))
 		return SHRINK_STOP;
 
-	if (!mutex_trylock(&ashmem_mutex))
-		return -1;
-
+	mutex_lock(&ashmem_mutex);
 	list_for_each_entry_safe(range, next, &ashmem_lru_list, lru) {
 		loff_t start = range->pgstart * PAGE_SIZE;
 		loff_t end = (range->pgend + 1) * PAGE_SIZE;
@@ -681,8 +661,8 @@ restart:
 		if (page_range_subsumed_by_range(range, pgstart, pgend))
 			return 0;
 		if (page_range_in_range(range, pgstart, pgend)) {
-			pgstart = min(range->pgstart, pgstart);
-			pgend = max(range->pgend, pgend);
+			pgstart = min_t(size_t, range->pgstart, pgstart);
+			pgend = max_t(size_t, range->pgend, pgend);
 			purged |= range->purged;
 			range_del(range);
 			goto restart;

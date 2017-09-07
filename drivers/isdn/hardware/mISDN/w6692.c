@@ -848,12 +848,13 @@ dbusy_timer_handler(struct dchannel *dch)
 	}
 }
 
-static void initW6692(struct w6692_hw *card)
+void initW6692(struct w6692_hw *card)
 {
 	u8	val;
 
-	setup_timer(&card->dch.timer, (void *)dbusy_timer_handler,
-		    (u_long)&card->dch);
+	card->dch.timer.function = (void *)dbusy_timer_handler;
+	card->dch.timer.data = (u_long)&card->dch;
+	init_timer(&card->dch.timer);
 	w6692_mode(&card->bc[0], ISDN_P_NONE);
 	w6692_mode(&card->bc[1], ISDN_P_NONE);
 	WriteW6692(card, W_D_CTL, 0x00);

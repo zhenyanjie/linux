@@ -40,7 +40,6 @@ struct perf_tool {
 	event_op	mmap,
 			mmap2,
 			comm,
-			namespaces,
 			fork,
 			exit,
 			lost,
@@ -58,7 +57,6 @@ struct perf_tool {
 			id_index,
 			auxtrace_info,
 			auxtrace_error,
-			time_conv,
 			thread_map,
 			cpu_map,
 			stat_config,
@@ -67,7 +65,6 @@ struct perf_tool {
 	event_op3	auxtrace;
 	bool		ordered_events;
 	bool		ordering_requires_timestamps;
-	bool		namespace_events;
 };
 
 #endif /* __PERF_TOOL_H */

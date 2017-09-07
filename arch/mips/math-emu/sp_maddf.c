@@ -14,12 +14,8 @@
 
 #include "ieee754sp.h"
 
-enum maddf_flags {
-	maddf_negate_product	= 1 << 0,
-};
-
-static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
-				 union ieee754sp y, enum maddf_flags flags)
+union ieee754sp ieee754sp_maddf(union ieee754sp z, union ieee754sp x,
+				union ieee754sp y)
 {
 	int re;
 	int rs;
@@ -36,15 +32,15 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 
 	COMPXSP;
 	COMPYSP;
-	COMPZSP;
+	u32 zm; int ze; int zs __maybe_unused; int zc;
 
 	EXPLODEXSP;
 	EXPLODEYSP;
-	EXPLODEZSP;
+	EXPLODESP(z, zc, zs, ze, zm)
 
 	FLUSHXSP;
 	FLUSHYSP;
-	FLUSHZSP;
+	FLUSHSP(z, zc, zs, ze, zm);
 
 	ieee754_clearcx();
 
@@ -53,7 +49,7 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 		ieee754_setcx(IEEE754_INVALID_OPERATION);
 		return ieee754sp_nanxcpt(z);
 	case IEEE754_CLASS_DNORM:
-		SPDNORMZ;
+		SPDNORMx(zm, ze);
 	/* QNAN is handled separately below */
 	}
 
@@ -158,8 +154,6 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 
 	re = xe + ye;
 	rs = xs ^ ys;
-	if (flags & maddf_negate_product)
-		rs ^= 1;
 
 	/* shunt to top of word */
 	xm <<= 32 - (SP_FBITS + 1);
@@ -214,18 +208,16 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 
 	if (ze > re) {
 		/*
-		 * Have to shift r fraction right to align.
+		 * Have to shift y fraction right to align.
 		 */
 		s = ze - re;
-		rm = XSPSRS(rm, s);
-		re += s;
+		SPXSRSYn(s);
 	} else if (re > ze) {
 		/*
-		 * Have to shift z fraction right to align.
+		 * Have to shift x fraction right to align.
 		 */
 		s = re - ze;
-		zm = XSPSRS(zm, s);
-		ze += s;
+		SPXSRSYn(s);
 	}
 	assert(ze == re);
 	assert(ze <= SP_EMAX);
@@ -238,8 +230,7 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 		zm = zm + rm;
 
 		if (zm >> (SP_FBITS + 1 + 3)) { /* carry out */
-			zm = XSPSRS1(zm);
-			ze++;
+			SPXSRSX1();
 		}
 	} else {
 		if (zm >= rm) {
@@ -261,16 +252,4 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 
 	}
 	return ieee754sp_format(zs, ze, zm);
-}
-
-union ieee754sp ieee754sp_maddf(union ieee754sp z, union ieee754sp x,
-				union ieee754sp y)
-{
-	return _sp_maddf(z, x, y, 0);
-}
-
-union ieee754sp ieee754sp_msubf(union ieee754sp z, union ieee754sp x,
-				union ieee754sp y)
-{
-	return _sp_maddf(z, x, y, maddf_negate_product);
 }

@@ -26,7 +26,6 @@
 #include <asm/machdep.h>
 #include <asm/msi_bitmap.h>
 #include <asm/ppc-pci.h>
-#include <asm/pnv-pci.h>
 #include <asm/opal.h>
 #include <asm/iommu.h>
 #include <asm/tce.h>
@@ -37,124 +36,11 @@
 #include "powernv.h"
 #include "pci.h"
 
-int pnv_pci_get_slot_id(struct device_node *np, uint64_t *id)
-{
-	struct device_node *parent = np;
-	u32 bdfn;
-	u64 phbid;
-	int ret;
+/* Delay in usec */
+#define PCI_RESET_DELAY_US	3000000
 
-	ret = of_property_read_u32(np, "reg", &bdfn);
-	if (ret)
-		return -ENXIO;
-
-	bdfn = ((bdfn & 0x00ffff00) >> 8);
-	while ((parent = of_get_parent(parent))) {
-		if (!PCI_DN(parent)) {
-			of_node_put(parent);
-			break;
-		}
-
-		if (!of_device_is_compatible(parent, "ibm,ioda2-phb")) {
-			of_node_put(parent);
-			continue;
-		}
-
-		ret = of_property_read_u64(parent, "ibm,opal-phbid", &phbid);
-		if (ret) {
-			of_node_put(parent);
-			return -ENXIO;
-		}
-
-		*id = PCI_SLOT_ID(phbid, bdfn);
-		return 0;
-	}
-
-	return -ENODEV;
-}
-EXPORT_SYMBOL_GPL(pnv_pci_get_slot_id);
-
-int pnv_pci_get_device_tree(uint32_t phandle, void *buf, uint64_t len)
-{
-	int64_t rc;
-
-	if (!opal_check_token(OPAL_GET_DEVICE_TREE))
-		return -ENXIO;
-
-	rc = opal_get_device_tree(phandle, (uint64_t)buf, len);
-	if (rc < OPAL_SUCCESS)
-		return -EIO;
-
-	return rc;
-}
-EXPORT_SYMBOL_GPL(pnv_pci_get_device_tree);
-
-int pnv_pci_get_presence_state(uint64_t id, uint8_t *state)
-{
-	int64_t rc;
-
-	if (!opal_check_token(OPAL_PCI_GET_PRESENCE_STATE))
-		return -ENXIO;
-
-	rc = opal_pci_get_presence_state(id, (uint64_t)state);
-	if (rc != OPAL_SUCCESS)
-		return -EIO;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pnv_pci_get_presence_state);
-
-int pnv_pci_get_power_state(uint64_t id, uint8_t *state)
-{
-	int64_t rc;
-
-	if (!opal_check_token(OPAL_PCI_GET_POWER_STATE))
-		return -ENXIO;
-
-	rc = opal_pci_get_power_state(id, (uint64_t)state);
-	if (rc != OPAL_SUCCESS)
-		return -EIO;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pnv_pci_get_power_state);
-
-int pnv_pci_set_power_state(uint64_t id, uint8_t state, struct opal_msg *msg)
-{
-	struct opal_msg m;
-	int token, ret;
-	int64_t rc;
-
-	if (!opal_check_token(OPAL_PCI_SET_POWER_STATE))
-		return -ENXIO;
-
-	token = opal_async_get_token_interruptible();
-	if (unlikely(token < 0))
-		return token;
-
-	rc = opal_pci_set_power_state(token, id, (uint64_t)&state);
-	if (rc == OPAL_SUCCESS) {
-		ret = 0;
-		goto exit;
-	} else if (rc != OPAL_ASYNC_COMPLETION) {
-		ret = -EIO;
-		goto exit;
-	}
-
-	ret = opal_async_wait_response(token, &m);
-	if (ret < 0)
-		goto exit;
-
-	if (msg) {
-		ret = 1;
-		memcpy(msg, &m, sizeof(m));
-	}
-
-exit:
-	opal_async_release_token(token);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(pnv_pci_set_power_state);
+#define cfg_dbg(fmt...)	do { } while(0)
+//#define cfg_dbg(fmt...)	printk(fmt)
 
 #ifdef CONFIG_PCI_MSI
 int pnv_setup_msi_irqs(struct pci_dev *pdev, int nvec, int type)
@@ -186,7 +72,7 @@ int pnv_setup_msi_irqs(struct pci_dev *pdev, int nvec, int type)
 			return -ENOSPC;
 		}
 		virq = irq_create_mapping(NULL, phb->msi_base + hwirq);
-		if (!virq) {
+		if (virq == NO_IRQ) {
 			pr_warn("%s: Failed to map MSI to linux irq\n",
 				pci_name(pdev));
 			msi_bitmap_free_hwirqs(&phb->msi_bmp, hwirq, 1);
@@ -217,7 +103,7 @@ void pnv_teardown_msi_irqs(struct pci_dev *pdev)
 		return;
 
 	for_each_pci_msi_entry(entry, pdev) {
-		if (!entry->irq)
+		if (entry->irq == NO_IRQ)
 			continue;
 		hwirq = virq_to_hw(entry->irq);
 		irq_set_msi_desc(entry->irq, NULL);
@@ -234,7 +120,7 @@ static void pnv_pci_dump_p7ioc_diag_data(struct pci_controller *hose,
 	int i;
 
 	data = (struct OpalIoP7IOCPhbErrorData *)common;
-	pr_info("P7IOC PHB#%x Diag-data (Version: %d)\n",
+	pr_info("P7IOC PHB#%d Diag-data (Version: %d)\n",
 		hose->global_number, be32_to_cpu(common->version));
 
 	if (data->brdgCtl)
@@ -309,8 +195,8 @@ static void pnv_pci_dump_p7ioc_diag_data(struct pci_controller *hose,
 			be64_to_cpu(data->dma1ErrorLog1));
 
 	for (i = 0; i < OPAL_P7IOC_NUM_PEST_REGS; i++) {
-		if ((be64_to_cpu(data->pestA[i]) >> 63) == 0 &&
-		    (be64_to_cpu(data->pestB[i]) >> 63) == 0)
+		if ((data->pestA[i] >> 63) == 0 &&
+		    (data->pestB[i] >> 63) == 0)
 			continue;
 
 		pr_info("PE[%3d] A/B: %016llx %016llx\n",
@@ -326,7 +212,7 @@ static void pnv_pci_dump_phb3_diag_data(struct pci_controller *hose,
 	int i;
 
 	data = (struct OpalIoPhb3ErrorData*)common;
-	pr_info("PHB3 PHB#%x Diag-data (Version: %d)\n",
+	pr_info("PHB3 PHB#%d Diag-data (Version: %d)\n",
 		hose->global_number, be32_to_cpu(common->version));
 	if (data->brdgCtl)
 		pr_info("brdgCtl:     %08x\n",
@@ -484,7 +370,7 @@ static void pnv_pci_config_check_eeh(struct pci_dn *pdn)
 	struct pnv_phb *phb = pdn->phb->private_data;
 	u8	fstate;
 	__be16	pcierr;
-	unsigned int pe_no;
+	int	pe_no;
 	s64	rc;
 
 	/*
@@ -494,7 +380,10 @@ static void pnv_pci_config_check_eeh(struct pci_dn *pdn)
 	 */
 	pe_no = pdn->pe_number;
 	if (pe_no == IODA_INVALID_PE) {
-		pe_no = phb->ioda.reserved_pe_idx;
+		if (phb->type == PNV_PHB_P5IOC2)
+			pe_no = 0;
+		else
+			pe_no = phb->ioda.reserved_pe;
 	}
 
 	/*
@@ -516,8 +405,8 @@ static void pnv_pci_config_check_eeh(struct pci_dn *pdn)
 		}
 	}
 
-	pr_devel(" -> EEH check, bdfn=%04x PE#%x fstate=%x\n",
-		 (pdn->busno << 8) | (pdn->devfn), pe_no, fstate);
+	cfg_dbg(" -> EEH check, bdfn=%04x PE#%d fstate=%x\n",
+		(pdn->busno << 8) | (pdn->devfn), pe_no, fstate);
 
 	/* Clear the frozen state if applicable */
 	if (fstate == OPAL_EEH_STOPPED_MMIO_FREEZE ||
@@ -565,8 +454,8 @@ int pnv_pci_cfg_read(struct pci_dn *pdn,
 		return PCIBIOS_FUNC_NOT_SUPPORTED;
 	}
 
-	pr_devel("%s: bus: %x devfn: %x +%x/%x -> %08x\n",
-		 __func__, pdn->busno, pdn->devfn, where, size, *val);
+	cfg_dbg("%s: bus: %x devfn: %x +%x/%x -> %08x\n",
+		__func__, pdn->busno, pdn->devfn, where, size, *val);
 	return PCIBIOS_SUCCESSFUL;
 }
 
@@ -576,8 +465,8 @@ int pnv_pci_cfg_write(struct pci_dn *pdn,
 	struct pnv_phb *phb = pdn->phb->private_data;
 	u32 bdfn = (pdn->busno << 8) | pdn->devfn;
 
-	pr_devel("%s: bus: %x devfn: %x +%x/%x -> %08x\n",
-		 __func__, pdn->busno, pdn->devfn, where, size, val);
+	cfg_dbg("%s: bus: %x devfn: %x +%x/%x -> %08x\n",
+		pdn->busno, pdn->devfn, where, size, val);
 	switch (size) {
 	case 1:
 		opal_pci_config_write_byte(phb->opal_id, bdfn, where, val);
@@ -704,7 +593,7 @@ static __be64 *pnv_tce(struct iommu_table *tbl, long idx)
 
 int pnv_tce_build(struct iommu_table *tbl, long index, long npages,
 		unsigned long uaddr, enum dma_data_direction direction,
-		unsigned long attrs)
+		struct dma_attrs *attrs)
 {
 	u64 proto_tce = iommu_direction_to_tce_perm(direction);
 	u64 rpn = __pa(uaddr) >> tbl->it_page_shift;
@@ -737,8 +626,8 @@ int pnv_tce_xchg(struct iommu_table *tbl, long index,
 	if (newtce & TCE_PCI_WRITE)
 		newtce |= TCE_PCI_READ;
 
-	oldtce = be64_to_cpu(xchg(pnv_tce(tbl, idx), cpu_to_be64(newtce)));
-	*hpa = oldtce & ~(TCE_PCI_READ | TCE_PCI_WRITE);
+	oldtce = xchg(pnv_tce(tbl, idx), cpu_to_be64(newtce));
+	*hpa = be64_to_cpu(oldtce) & ~(TCE_PCI_READ | TCE_PCI_WRITE);
 	*direction = iommu_tce_direction(oldtce);
 
 	return 0;
@@ -758,7 +647,7 @@ void pnv_tce_free(struct iommu_table *tbl, long index, long npages)
 
 unsigned long pnv_tce_get(struct iommu_table *tbl, long index)
 {
-	return be64_to_cpu(*(pnv_tce(tbl, index - tbl->it_offset)));
+	return *(pnv_tce(tbl, index - tbl->it_offset));
 }
 
 struct iommu_table *pnv_pci_table_alloc(int nid)
@@ -766,11 +655,7 @@ struct iommu_table *pnv_pci_table_alloc(int nid)
 	struct iommu_table *tbl;
 
 	tbl = kzalloc_node(sizeof(struct iommu_table), GFP_KERNEL, nid);
-	if (!tbl)
-		return NULL;
-
 	INIT_LIST_HEAD_RCU(&tbl->it_group_list);
-	kref_init(&tbl->it_kref);
 
 	return tbl;
 }
@@ -920,6 +805,7 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_IBM, 0x3b9, pnv_p7ioc_rc_quirk);
 void __init pnv_pci_init(void)
 {
 	struct device_node *np;
+	bool found_ioda = false;
 
 	pci_add_flags(PCI_CAN_SKIP_ISA_ALIGN);
 
@@ -927,29 +813,30 @@ void __init pnv_pci_init(void)
 	if (!firmware_has_feature(FW_FEATURE_OPAL))
 		return;
 
-	/* Look for IODA IO-Hubs. */
+	/* Look for IODA IO-Hubs. We don't support mixing IODA
+	 * and p5ioc2 due to the need to change some global
+	 * probing flags
+	 */
 	for_each_compatible_node(np, NULL, "ibm,ioda-hub") {
 		pnv_pci_init_ioda_hub(np);
+		found_ioda = true;
 	}
+
+	/* Look for p5ioc2 IO-Hubs */
+	if (!found_ioda)
+		for_each_compatible_node(np, NULL, "ibm,p5ioc2")
+			pnv_pci_init_p5ioc2_hub(np);
 
 	/* Look for ioda2 built-in PHB3's */
 	for_each_compatible_node(np, NULL, "ibm,ioda2-phb")
-		pnv_pci_init_ioda2_phb(np);
-
-	/* Look for ioda3 built-in PHB4's, we treat them as IODA2 */
-	for_each_compatible_node(np, NULL, "ibm,ioda3-phb")
 		pnv_pci_init_ioda2_phb(np);
 
 	/* Look for NPU PHBs */
 	for_each_compatible_node(np, NULL, "ibm,ioda2-npu-phb")
 		pnv_pci_init_npu_phb(np);
 
-	/*
-	 * Look for NPU2 PHBs which we treat mostly as NPU PHBs with
-	 * the exception of TCE kill which requires an OPAL call.
-	 */
-	for_each_compatible_node(np, NULL, "ibm,ioda2-npu2-phb")
-		pnv_pci_init_npu_phb(np);
+	/* Setup the linkage between OF nodes and PHBs */
+	pci_devs_phb_init();
 
 	/* Configure IOMMU DMA hooks */
 	set_pci_dma_ops(&dma_iommu_ops);

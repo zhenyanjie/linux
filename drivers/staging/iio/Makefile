@@ -10,6 +10,7 @@ obj-y += frequency/
 obj-y += gyro/
 obj-y += impedance-analyzer/
 obj-y += light/
+obj-y += magnetometer/
 obj-y += meter/
 obj-y += resolver/
 obj-y += trigger/

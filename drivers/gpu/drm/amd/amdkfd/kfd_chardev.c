@@ -107,9 +107,9 @@ static int kfd_open(struct inode *inode, struct file *filep)
 	if (iminor(inode) != 0)
 		return -ENODEV;
 
-	is_32bit_user_mode = in_compat_syscall();
+	is_32bit_user_mode = is_compat_task();
 
-	if (is_32bit_user_mode) {
+	if (is_32bit_user_mode == true) {
 		dev_warn(kfd_device,
 			"Process %d (32-bit) failed to open /dev/kfd\n"
 			"32-bit processes are not supported by amdkfd\n",
@@ -131,11 +131,12 @@ static int kfd_ioctl_get_version(struct file *filep, struct kfd_process *p,
 					void *data)
 {
 	struct kfd_ioctl_get_version_args *args = data;
+	int err = 0;
 
 	args->major_version = KFD_IOCTL_MAJOR_VERSION;
 	args->minor_version = KFD_IOCTL_MINOR_VERSION;
 
-	return 0;
+	return err;
 }
 
 static int set_queue_properties_from_user(struct queue_properties *q_properties,
@@ -486,7 +487,7 @@ static int kfd_ioctl_dbg_register(struct file *filep,
 	return status;
 }
 
-static int kfd_ioctl_dbg_unregister(struct file *filep,
+static int kfd_ioctl_dbg_unrgesiter(struct file *filep,
 				struct kfd_process *p, void *data)
 {
 	struct kfd_ioctl_dbg_unregister_args *args = data;
@@ -498,7 +499,7 @@ static int kfd_ioctl_dbg_unregister(struct file *filep,
 		return -EINVAL;
 
 	if (dev->device_info->asic_family == CHIP_CARRIZO) {
-		pr_debug("kfd_ioctl_dbg_unregister not supported on CZ\n");
+		pr_debug("kfd_ioctl_dbg_unrgesiter not supported on CZ\n");
 		return -EINVAL;
 	}
 
@@ -892,7 +893,7 @@ static const struct amdkfd_ioctl_desc amdkfd_ioctls[] = {
 			kfd_ioctl_dbg_register, 0),
 
 	AMDKFD_IOCTL_DEF(AMDKFD_IOC_DBG_UNREGISTER,
-			kfd_ioctl_dbg_unregister, 0),
+			kfd_ioctl_dbg_unrgesiter, 0),
 
 	AMDKFD_IOCTL_DEF(AMDKFD_IOC_DBG_ADDRESS_WATCH,
 			kfd_ioctl_dbg_address_watch, 0),

@@ -25,7 +25,6 @@
 
 #define PCI_DEVICE_ID_IBM_CORSA		0x04F0
 #define PCI_DEVICE_ID_IBM_FLASH_GT	0x0600
-#define PCI_DEVICE_ID_IBM_BRIARD	0x0624
 
 /* Since there is only one target, make it 0 */
 #define CXLFLASH_TARGET		0
@@ -36,6 +35,8 @@
 #define CXLFLASH_MAX_NUM_LUNS_PER_TARGET	65536
 
 #define CXLFLASH_PCI_ERROR_RECOVERY_TIMEOUT	(120 * HZ)
+
+#define NUM_FC_PORTS	CXLFLASH_NUM_FC_PORTS	/* ports per AFU */
 
 /* FC defines */
 #define FC_MTIP_CMDCONFIG 0x010
@@ -78,17 +79,16 @@
 #define WWPN_BUF_LEN	(WWPN_LEN + 1)
 
 enum undo_level {
-	UNDO_NOOP = 0,
+	RELEASE_CONTEXT = 0,
 	FREE_IRQ,
 	UNMAP_ONE,
 	UNMAP_TWO,
-	UNMAP_THREE
+	UNMAP_THREE,
+	UNDO_START
 };
 
 struct dev_dependent_vals {
 	u64 max_sectors;
-	u64 flags;
-#define CXLFLASH_NOTIFY_SHUTDOWN   0x0000000000000001ULL
 };
 
 struct asyc_intr_info {
@@ -100,5 +100,9 @@ struct asyc_intr_info {
 #define LINK_RESET	0x02
 #define SCAN_HOST	0x04
 };
+
+#ifndef CONFIG_CXL_EEH
+#define cxl_perst_reloads_same_image(_a, _b) do { } while (0)
+#endif
 
 #endif /* _CXLFLASH_MAIN_H */

@@ -36,7 +36,7 @@ struct cpuidle_ops {
 
 struct of_cpuidle_method {
 	const char *method;
-	const struct cpuidle_ops *ops;
+	struct cpuidle_ops *ops;
 };
 
 #define CPUIDLE_METHOD_OF_DECLARE(name, _method, _ops)			\

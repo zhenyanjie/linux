@@ -23,7 +23,8 @@
 #include <xen/grant_table.h>
 #include "common.h"
 
-/* On the XenBus the max length of 'ring-ref%u'. */
+/* Enlarge the array size in order to fully show blkback name. */
+#define BLKBACK_NAME_LEN (20)
 #define RINGREF_NAME_LEN (20)
 
 struct backend_info {
@@ -38,8 +39,8 @@ struct backend_info {
 static struct kmem_cache *xen_blkif_cachep;
 static void connect(struct backend_info *);
 static int connect_ring(struct backend_info *);
-static void backend_changed(struct xenbus_watch *, const char *,
-			    const char *);
+static void backend_changed(struct xenbus_watch *, const char **,
+			    unsigned int);
 static void xen_blkif_free(struct xen_blkif *blkif);
 static void xen_vbd_free(struct xen_vbd *vbd);
 
@@ -75,7 +76,7 @@ static int blkback_name(struct xen_blkif *blkif, char *buf)
 	else
 		devname  = devpath;
 
-	snprintf(buf, TASK_COMM_LEN, "%d.%s", blkif->domid, devname);
+	snprintf(buf, BLKBACK_NAME_LEN, "blkback.%d.%s", blkif->domid, devname);
 	kfree(devpath);
 
 	return 0;
@@ -84,7 +85,7 @@ static int blkback_name(struct xen_blkif *blkif, char *buf)
 static void xen_update_blkif_status(struct xen_blkif *blkif)
 {
 	int err;
-	char name[TASK_COMM_LEN];
+	char name[BLKBACK_NAME_LEN];
 	struct xen_blkif_ring *ring;
 	int i;
 
@@ -379,7 +380,7 @@ static struct attribute *xen_vbdstat_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group xen_vbdstat_group = {
+static struct attribute_group xen_vbdstat_group = {
 	.name = "statistics",
 	.attrs = xen_vbdstat_attrs,
 };
@@ -477,10 +478,10 @@ static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 		vbd->type |= VDISK_REMOVABLE;
 
 	q = bdev_get_queue(bdev);
-	if (q && test_bit(QUEUE_FLAG_WC, &q->queue_flags))
+	if (q && q->flush_flags)
 		vbd->flush_support = true;
 
-	if (q && blk_queue_secure_erase(q))
+	if (q && blk_queue_secdiscard(q))
 		vbd->discard_secure = true;
 
 	pr_debug("Successful creation of handle=%04x (dom=%u)\n",
@@ -533,11 +534,13 @@ static void xen_blkbk_discard(struct xenbus_transaction xbt, struct backend_info
 	struct xenbus_device *dev = be->dev;
 	struct xen_blkif *blkif = be->blkif;
 	int err;
-	int state = 0;
+	int state = 0, discard_enable;
 	struct block_device *bdev = be->blkif->vbd.bdev;
 	struct request_queue *q = bdev_get_queue(bdev);
 
-	if (!xenbus_read_unsigned(dev->nodename, "discard-enable", 1))
+	err = xenbus_scanf(XBT_NIL, dev->nodename, "discard-enable", "%d",
+			   &discard_enable);
+	if (err == 1 && !discard_enable)
 		return;
 
 	if (blk_queue_discard(q)) {
@@ -615,14 +618,6 @@ static int xen_blkbk_probe(struct xenbus_device *dev,
 		goto fail;
 	}
 
-	err = xenbus_printf(XBT_NIL, dev->nodename,
-			    "feature-max-indirect-segments", "%u",
-			    MAX_INDIRECT_SEGMENTS);
-	if (err)
-		dev_warn(&dev->dev,
-			 "writing %s/feature-max-indirect-segments (%d)",
-			 dev->nodename, err);
-
 	/* Multi-queue: advertise how many queues are supported by us.*/
 	err = xenbus_printf(XBT_NIL, dev->nodename,
 			    "multi-queue-max-queues", "%u", xenblk_max_queues);
@@ -661,7 +656,7 @@ fail:
  * ready, connect.
  */
 static void backend_changed(struct xenbus_watch *watch,
-			    const char *path, const char *token)
+			    const char **vec, unsigned int len)
 {
 	int err;
 	unsigned major;
@@ -713,11 +708,8 @@ static void backend_changed(struct xenbus_watch *watch,
 
 	/* Front end dir is a number, which is used as the handle. */
 	err = kstrtoul(strrchr(dev->otherend, '/') + 1, 0, &handle);
-	if (err) {
-		kfree(be->mode);
-		be->mode = NULL;
+	if (err)
 		return;
-	}
 
 	be->major = major;
 	be->minor = minor;
@@ -857,6 +849,11 @@ again:
 				 dev->nodename);
 		goto abort;
 	}
+	err = xenbus_printf(xbt, dev->nodename, "feature-max-indirect-segments", "%u",
+			    MAX_INDIRECT_SEGMENTS);
+	if (err)
+		dev_warn(&dev->dev, "writing %s/feature-max-indirect-segments (%d)",
+			 dev->nodename, err);
 
 	err = xenbus_printf(xbt, dev->nodename, "sectors", "%llu",
 			    (unsigned long long)vbd_sz(&be->blkif->vbd));
@@ -1023,9 +1020,9 @@ static int connect_ring(struct backend_info *be)
 	pr_debug("%s %s\n", __func__, dev->otherend);
 
 	be->blkif->blk_protocol = BLKIF_PROTOCOL_DEFAULT;
-	err = xenbus_scanf(XBT_NIL, dev->otherend, "protocol",
-			   "%63s", protocol);
-	if (err <= 0)
+	err = xenbus_gather(XBT_NIL, dev->otherend, "protocol",
+			    "%63s", protocol, NULL);
+	if (err)
 		strcpy(protocol, "unspecified, assuming default");
 	else if (0 == strcmp(protocol, XEN_IO_PROTO_ABI_NATIVE))
 		be->blkif->blk_protocol = BLKIF_PROTOCOL_NATIVE;
@@ -1037,24 +1034,31 @@ static int connect_ring(struct backend_info *be)
 		xenbus_dev_fatal(dev, err, "unknown fe protocol %s", protocol);
 		return -ENOSYS;
 	}
-	pers_grants = xenbus_read_unsigned(dev->otherend, "feature-persistent",
-					   0);
+	err = xenbus_gather(XBT_NIL, dev->otherend,
+			    "feature-persistent", "%u",
+			    &pers_grants, NULL);
+	if (err)
+		pers_grants = 0;
+
 	be->blkif->vbd.feature_gnt_persistent = pers_grants;
 	be->blkif->vbd.overflow_max_grants = 0;
 
 	/*
 	 * Read the number of hardware queues from frontend.
 	 */
-	requested_num_queues = xenbus_read_unsigned(dev->otherend,
-						    "multi-queue-num-queues",
-						    1);
-	if (requested_num_queues > xenblk_max_queues
-	    || requested_num_queues == 0) {
-		/* Buggy or malicious guest. */
-		xenbus_dev_fatal(dev, err,
-				"guest requested %u queues, exceeding the maximum of %u.",
-				requested_num_queues, xenblk_max_queues);
-		return -ENOSYS;
+	err = xenbus_scanf(XBT_NIL, dev->otherend, "multi-queue-num-queues",
+			   "%u", &requested_num_queues);
+	if (err < 0) {
+		requested_num_queues = 1;
+	} else {
+		if (requested_num_queues > xenblk_max_queues
+		    || requested_num_queues == 0) {
+			/* Buggy or malicious guest. */
+			xenbus_dev_fatal(dev, err,
+					"guest requested %u queues, exceeding the maximum of %u.",
+					requested_num_queues, xenblk_max_queues);
+			return -ENOSYS;
+		}
 	}
 	be->blkif->nr_rings = requested_num_queues;
 	if (xen_blkif_alloc_rings(be->blkif))

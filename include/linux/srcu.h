@@ -33,9 +33,9 @@
 #include <linux/rcupdate.h>
 #include <linux/workqueue.h>
 
-struct srcu_array {
-	unsigned long lock_count[2];
-	unsigned long unlock_count[2];
+struct srcu_struct_array {
+	unsigned long c[2];
+	unsigned long seq[2];
 };
 
 struct rcu_batch {
@@ -46,7 +46,7 @@ struct rcu_batch {
 
 struct srcu_struct {
 	unsigned long completed;
-	struct srcu_array __percpu *per_cpu_ref;
+	struct srcu_struct_array __percpu *per_cpu_ref;
 	spinlock_t queue_lock; /* protect ->batch_queue, ->running */
 	bool running;
 	/* callbacks just queued */
@@ -84,10 +84,10 @@ int init_srcu_struct(struct srcu_struct *sp);
 
 void process_srcu(struct work_struct *work);
 
-#define __SRCU_STRUCT_INIT(name)					\
+#define __SRCU_STRUCT_INIT(name, pcpu_name)				\
 	{								\
 		.completed = -300,					\
-		.per_cpu_ref = &name##_srcu_array,			\
+		.per_cpu_ref = &pcpu_name,				\
 		.queue_lock = __SPIN_LOCK_UNLOCKED(name.queue_lock),	\
 		.running = false,					\
 		.batch_queue = RCU_BATCH_INIT(name.batch_queue),	\
@@ -99,27 +99,12 @@ void process_srcu(struct work_struct *work);
 	}
 
 /*
- * Define and initialize a srcu struct at build time.
- * Do -not- call init_srcu_struct() nor cleanup_srcu_struct() on it.
- *
- * Note that although DEFINE_STATIC_SRCU() hides the name from other
- * files, the per-CPU variable rules nevertheless require that the
- * chosen name be globally unique.  These rules also prohibit use of
- * DEFINE_STATIC_SRCU() within a function.  If these rules are too
- * restrictive, declare the srcu_struct manually.  For example, in
- * each file:
- *
- *	static struct srcu_struct my_srcu;
- *
- * Then, before the first use of each my_srcu, manually initialize it:
- *
- *	init_srcu_struct(&my_srcu);
- *
- * See include/linux/percpu-defs.h for the rules on per-CPU variables.
+ * define and init a srcu struct at build time.
+ * dont't call init_srcu_struct() nor cleanup_srcu_struct() on it.
  */
 #define __DEFINE_SRCU(name, is_static)					\
-	static DEFINE_PER_CPU(struct srcu_array, name##_srcu_array);\
-	is_static struct srcu_struct name = __SRCU_STRUCT_INIT(name)
+	static DEFINE_PER_CPU(struct srcu_struct_array, name##_srcu_array);\
+	is_static struct srcu_struct name = __SRCU_STRUCT_INIT(name, name##_srcu_array)
 #define DEFINE_SRCU(name)		__DEFINE_SRCU(name, /* not static */)
 #define DEFINE_STATIC_SRCU(name)	__DEFINE_SRCU(name, static)
 

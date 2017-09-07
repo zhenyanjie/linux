@@ -13,7 +13,17 @@
 #include <linux/bug.h>
 #include <linux/types.h>
 #include <linux/cpumask.h>
-#include <asm/frame.h>
+
+static inline int paravirt_enabled(void)
+{
+	return pv_info.paravirt_enabled;
+}
+
+static inline int paravirt_has_feature(unsigned int feature)
+{
+	WARN_ON_ONCE(!pv_info.paravirt_enabled);
+	return (pv_info.features & feature);
+}
 
 static inline void load_sp0(struct tss_struct *tss,
 			     struct thread_struct *thread)
@@ -39,6 +49,11 @@ static inline unsigned long paravirt_get_debugreg(int reg)
 static inline void set_debugreg(unsigned long val, int reg)
 {
 	PVOP_VCALL2(pv_cpu_ops.set_debugreg, reg, val);
+}
+
+static inline void clts(void)
+{
+	PVOP_VCALL0(pv_cpu_ops.clts);
 }
 
 static inline unsigned long read_cr0(void)
@@ -75,6 +90,10 @@ static inline unsigned long __read_cr4(void)
 {
 	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4);
 }
+static inline unsigned long __read_cr4_safe(void)
+{
+	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4_safe);
+}
 
 static inline void __write_cr4(unsigned long x)
 {
@@ -110,31 +129,21 @@ static inline void wbinvd(void)
 
 #define get_kernel_rpl()  (pv_info.kernel_rpl)
 
-static inline u64 paravirt_read_msr(unsigned msr)
+static inline u64 paravirt_read_msr(unsigned msr, int *err)
 {
-	return PVOP_CALL1(u64, pv_cpu_ops.read_msr, msr);
+	return PVOP_CALL2(u64, pv_cpu_ops.read_msr, msr, err);
 }
 
-static inline void paravirt_write_msr(unsigned msr,
-				      unsigned low, unsigned high)
+static inline int paravirt_write_msr(unsigned msr, unsigned low, unsigned high)
 {
-	return PVOP_VCALL3(pv_cpu_ops.write_msr, msr, low, high);
+	return PVOP_CALL3(int, pv_cpu_ops.write_msr, msr, low, high);
 }
 
-static inline u64 paravirt_read_msr_safe(unsigned msr, int *err)
-{
-	return PVOP_CALL2(u64, pv_cpu_ops.read_msr_safe, msr, err);
-}
-
-static inline int paravirt_write_msr_safe(unsigned msr,
-					  unsigned low, unsigned high)
-{
-	return PVOP_CALL3(int, pv_cpu_ops.write_msr_safe, msr, low, high);
-}
-
+/* These should all do BUG_ON(_err), but our headers are too tangled. */
 #define rdmsr(msr, val1, val2)			\
 do {						\
-	u64 _l = paravirt_read_msr(msr);	\
+	int _err;				\
+	u64 _l = paravirt_read_msr(msr, &_err);	\
 	val1 = (u32)_l;				\
 	val2 = _l >> 32;			\
 } while (0)
@@ -146,7 +155,8 @@ do {						\
 
 #define rdmsrl(msr, val)			\
 do {						\
-	val = paravirt_read_msr(msr);		\
+	int _err;				\
+	val = paravirt_read_msr(msr, &_err);	\
 } while (0)
 
 static inline void wrmsrl(unsigned msr, u64 val)
@@ -154,23 +164,23 @@ static inline void wrmsrl(unsigned msr, u64 val)
 	wrmsr(msr, (u32)val, (u32)(val>>32));
 }
 
-#define wrmsr_safe(msr, a, b)	paravirt_write_msr_safe(msr, a, b)
+#define wrmsr_safe(msr, a, b)	paravirt_write_msr(msr, a, b)
 
 /* rdmsr with exception handling */
-#define rdmsr_safe(msr, a, b)				\
-({							\
-	int _err;					\
-	u64 _l = paravirt_read_msr_safe(msr, &_err);	\
-	(*a) = (u32)_l;					\
-	(*b) = _l >> 32;				\
-	_err;						\
+#define rdmsr_safe(msr, a, b)			\
+({						\
+	int _err;				\
+	u64 _l = paravirt_read_msr(msr, &_err);	\
+	(*a) = (u32)_l;				\
+	(*b) = _l >> 32;			\
+	_err;					\
 })
 
 static inline int rdmsrl_safe(unsigned msr, unsigned long long *p)
 {
 	int err;
 
-	*p = paravirt_read_msr_safe(msr, &err);
+	*p = paravirt_read_msr(msr, &err);
 	return err;
 }
 
@@ -357,16 +367,6 @@ static inline void paravirt_release_pud(unsigned long pfn)
 	PVOP_VCALL1(pv_mmu_ops.release_pud, pfn);
 }
 
-static inline void paravirt_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
-{
-	PVOP_VCALL2(pv_mmu_ops.alloc_p4d, mm, pfn);
-}
-
-static inline void paravirt_release_p4d(unsigned long pfn)
-{
-	PVOP_VCALL1(pv_mmu_ops.release_p4d, pfn);
-}
-
 static inline void pte_update(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep)
 {
@@ -485,17 +485,6 @@ static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 			    native_pmd_val(pmd));
 }
 
-static inline void set_pud_at(struct mm_struct *mm, unsigned long addr,
-			      pud_t *pudp, pud_t pud)
-{
-	if (sizeof(pudval_t) > sizeof(long))
-		/* 5 arg words */
-		pv_mmu_ops.set_pud_at(mm, addr, pudp, pud);
-	else
-		PVOP_VCALL4(pv_mmu_ops.set_pud_at, mm, addr, pudp,
-			    native_pud_val(pud));
-}
-
 static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
 	pmdval_t val = native_pmd_val(pmd);
@@ -546,7 +535,7 @@ static inline void set_pud(pud_t *pudp, pud_t pud)
 		PVOP_VCALL2(pv_mmu_ops.set_pud, pudp,
 			    val);
 }
-#if CONFIG_PGTABLE_LEVELS >= 4
+#if CONFIG_PGTABLE_LEVELS == 4
 static inline pud_t __pud(pudval_t val)
 {
 	pudval_t ret;
@@ -575,42 +564,16 @@ static inline pudval_t pud_val(pud_t pud)
 	return ret;
 }
 
-static inline void pud_clear(pud_t *pudp)
-{
-	set_pud(pudp, __pud(0));
-}
-
-static inline void set_p4d(p4d_t *p4dp, p4d_t p4d)
-{
-	p4dval_t val = native_p4d_val(p4d);
-
-	if (sizeof(p4dval_t) > sizeof(long))
-		PVOP_VCALL3(pv_mmu_ops.set_p4d, p4dp,
-			    val, (u64)val >> 32);
-	else
-		PVOP_VCALL2(pv_mmu_ops.set_p4d, p4dp,
-			    val);
-}
-
-#if CONFIG_PGTABLE_LEVELS >= 5
-
-static inline p4d_t __p4d(p4dval_t val)
-{
-	p4dval_t ret = PVOP_CALLEE1(p4dval_t, pv_mmu_ops.make_p4d, val);
-
-	return (p4d_t) { ret };
-}
-
-static inline p4dval_t p4d_val(p4d_t p4d)
-{
-	return PVOP_CALLEE1(p4dval_t, pv_mmu_ops.p4d_val, p4d.p4d);
-}
-
 static inline void set_pgd(pgd_t *pgdp, pgd_t pgd)
 {
 	pgdval_t val = native_pgd_val(pgd);
 
-	PVOP_VCALL2(pv_mmu_ops.set_pgd, pgdp, val);
+	if (sizeof(pgdval_t) > sizeof(long))
+		PVOP_VCALL3(pv_mmu_ops.set_pgd, pgdp,
+			    val, (u64)val >> 32);
+	else
+		PVOP_VCALL2(pv_mmu_ops.set_pgd, pgdp,
+			    val);
 }
 
 static inline void pgd_clear(pgd_t *pgdp)
@@ -618,11 +581,9 @@ static inline void pgd_clear(pgd_t *pgdp)
 	set_pgd(pgdp, __pgd(0));
 }
 
-#endif  /* CONFIG_PGTABLE_LEVELS == 5 */
-
-static inline void p4d_clear(p4d_t *p4dp)
+static inline void pud_clear(pud_t *pudp)
 {
-	set_p4d(p4dp, __p4d(0));
+	set_pud(pudp, __pud(0));
 }
 
 #endif	/* CONFIG_PGTABLE_LEVELS == 4 */
@@ -701,6 +662,8 @@ static inline void __set_fixmap(unsigned /* enum fixed_addresses */ idx,
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PARAVIRT_SPINLOCKS)
 
+#ifdef CONFIG_QUEUED_SPINLOCKS
+
 static __always_inline void pv_queued_spin_lock_slowpath(struct qspinlock *lock,
 							u32 val)
 {
@@ -722,10 +685,21 @@ static __always_inline void pv_kick(int cpu)
 	PVOP_VCALL1(pv_lock_ops.kick, cpu);
 }
 
-static __always_inline bool pv_vcpu_is_preempted(long cpu)
+#else /* !CONFIG_QUEUED_SPINLOCKS */
+
+static __always_inline void __ticket_lock_spinning(struct arch_spinlock *lock,
+							__ticket_t ticket)
 {
-	return PVOP_CALLEE1(bool, pv_lock_ops.vcpu_is_preempted, cpu);
+	PVOP_VCALLEE2(pv_lock_ops.lock_spinning, lock, ticket);
 }
+
+static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
+							__ticket_t ticket)
+{
+	PVOP_VCALL2(pv_lock_ops.unlock_kick, lock, ticket);
+}
+
+#endif /* CONFIG_QUEUED_SPINLOCKS */
 
 #endif /* SMP && PARAVIRT_SPINLOCKS */
 
@@ -782,19 +756,15 @@ static __always_inline bool pv_vcpu_is_preempted(long cpu)
  * call. The return value in rax/eax will not be saved, even for void
  * functions.
  */
-#define PV_THUNK_NAME(func) "__raw_callee_save_" #func
 #define PV_CALLEE_SAVE_REGS_THUNK(func)					\
 	extern typeof(func) __raw_callee_save_##func;			\
 									\
 	asm(".pushsection .text;"					\
-	    ".globl " PV_THUNK_NAME(func) ";"				\
-	    ".type " PV_THUNK_NAME(func) ", @function;"			\
-	    PV_THUNK_NAME(func) ":"					\
-	    FRAME_BEGIN							\
+	    ".globl __raw_callee_save_" #func " ; "			\
+	    "__raw_callee_save_" #func ": "				\
 	    PV_SAVE_ALL_CALLER_REGS					\
 	    "call " #func ";"						\
 	    PV_RESTORE_ALL_CALLER_REGS					\
-	    FRAME_END							\
 	    "ret;"							\
 	    ".popsection")
 

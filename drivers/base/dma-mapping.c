@@ -108,13 +108,13 @@ void dmam_free_coherent(struct device *dev, size_t size, void *vaddr,
 EXPORT_SYMBOL(dmam_free_coherent);
 
 /**
- * dmam_alloc_non_coherent - Managed dma_alloc_noncoherent()
+ * dmam_alloc_non_coherent - Managed dma_alloc_non_coherent()
  * @dev: Device to allocate non_coherent memory for
  * @size: Size of allocation
  * @dma_handle: Out argument for allocated DMA handle
  * @gfp: Allocation flags
  *
- * Managed dma_alloc_noncoherent().  Memory allocated using this
+ * Managed dma_alloc_non_coherent().  Memory allocated using this
  * function will be automatically released on driver detach.
  *
  * RETURNS:
@@ -198,13 +198,10 @@ int dmam_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
 
 	rc = dma_declare_coherent_memory(dev, phys_addr, device_addr, size,
 					 flags);
-	if (rc) {
+	if (rc == 0)
 		devres_add(dev, res);
-		rc = 0;
-	} else {
+	else
 		devres_free(res);
-		rc = -ENOMEM;
-	}
 
 	return rc;
 }
@@ -250,7 +247,7 @@ int dma_common_mmap(struct device *dev, struct vm_area_struct *vma,
 {
 	int ret = -ENXIO;
 #if defined(CONFIG_MMU) && !defined(CONFIG_ARCH_NO_COHERENT_DMA_MMAP)
-	unsigned long user_count = vma_pages(vma);
+	unsigned long user_count = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 	unsigned long count = PAGE_ALIGN(size) >> PAGE_SHIFT;
 	unsigned long pfn = page_to_pfn(virt_to_page(cpu_addr));
 	unsigned long off = vma->vm_pgoff;
@@ -309,13 +306,14 @@ void *dma_common_contiguous_remap(struct page *page, size_t size,
 	int i;
 	struct page **pages;
 	void *ptr;
+	unsigned long pfn;
 
 	pages = kmalloc(sizeof(struct page *) << get_order(size), GFP_KERNEL);
 	if (!pages)
 		return NULL;
 
-	for (i = 0; i < (size >> PAGE_SHIFT); i++)
-		pages[i] = nth_page(page, i);
+	for (i = 0, pfn = page_to_pfn(page); i < (size >> PAGE_SHIFT); i++)
+		pages[i] = pfn_to_page(pfn + i);
 
 	ptr = dma_common_pages_remap(pages, size, vm_flags, prot, caller);
 
@@ -336,7 +334,7 @@ void dma_common_free_remap(void *cpu_addr, size_t size, unsigned long vm_flags)
 		return;
 	}
 
-	unmap_kernel_range((unsigned long)cpu_addr, PAGE_ALIGN(size));
+	unmap_kernel_range((unsigned long)cpu_addr, size);
 	vunmap(cpu_addr);
 }
 #endif

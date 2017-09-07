@@ -1,7 +1,9 @@
-#ifndef _IR_RX51_H
-#define _IR_RX51_H
+#ifndef _LIRC_RX51_H
+#define _LIRC_RX51_H
 
-struct ir_rx51_platform_data {
+struct lirc_rx51_platform_data {
+	int pwm_timer;
+
 	int(*set_max_mpu_wakeup_lat)(struct device *dev, long t);
 };
 

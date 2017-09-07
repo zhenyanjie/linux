@@ -19,7 +19,7 @@ static DEFINE_SPINLOCK(percpu_counters_lock);
 
 static struct debug_obj_descr percpu_counter_debug_descr;
 
-static bool percpu_counter_fixup_free(void *addr, enum debug_obj_state state)
+static int percpu_counter_fixup_free(void *addr, enum debug_obj_state state)
 {
 	struct percpu_counter *fbc = addr;
 
@@ -27,9 +27,9 @@ static bool percpu_counter_fixup_free(void *addr, enum debug_obj_state state)
 	case ODEBUG_STATE_ACTIVE:
 		percpu_counter_destroy(fbc);
 		debug_object_free(fbc, &percpu_counter_debug_descr);
-		return true;
+		return 1;
 	default:
-		return false;
+		return 0;
 	}
 }
 
@@ -158,34 +158,39 @@ EXPORT_SYMBOL(percpu_counter_destroy);
 int percpu_counter_batch __read_mostly = 32;
 EXPORT_SYMBOL(percpu_counter_batch);
 
-static int compute_batch_value(unsigned int cpu)
+static void compute_batch_value(void)
 {
 	int nr = num_online_cpus();
 
 	percpu_counter_batch = max(32, nr*2);
-	return 0;
 }
 
-static int percpu_counter_cpu_dead(unsigned int cpu)
+static int percpu_counter_hotcpu_callback(struct notifier_block *nb,
+					unsigned long action, void *hcpu)
 {
 #ifdef CONFIG_HOTPLUG_CPU
+	unsigned int cpu;
 	struct percpu_counter *fbc;
 
-	compute_batch_value(cpu);
+	compute_batch_value();
+	if (action != CPU_DEAD && action != CPU_DEAD_FROZEN)
+		return NOTIFY_OK;
 
+	cpu = (unsigned long)hcpu;
 	spin_lock_irq(&percpu_counters_lock);
 	list_for_each_entry(fbc, &percpu_counters, list) {
 		s32 *pcount;
+		unsigned long flags;
 
-		raw_spin_lock(&fbc->lock);
+		raw_spin_lock_irqsave(&fbc->lock, flags);
 		pcount = per_cpu_ptr(fbc->counters, cpu);
 		fbc->count += *pcount;
 		*pcount = 0;
-		raw_spin_unlock(&fbc->lock);
+		raw_spin_unlock_irqrestore(&fbc->lock, flags);
 	}
 	spin_unlock_irq(&percpu_counters_lock);
 #endif
-	return 0;
+	return NOTIFY_OK;
 }
 
 /*
@@ -217,15 +222,8 @@ EXPORT_SYMBOL(__percpu_counter_compare);
 
 static int __init percpu_counter_startup(void)
 {
-	int ret;
-
-	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "lib/percpu_cnt:online",
-				compute_batch_value, NULL);
-	WARN_ON(ret < 0);
-	ret = cpuhp_setup_state_nocalls(CPUHP_PERCPU_CNT_DEAD,
-					"lib/percpu_cnt:dead", NULL,
-					percpu_counter_cpu_dead);
-	WARN_ON(ret < 0);
+	compute_batch_value();
+	hotcpu_notifier(percpu_counter_hotcpu_callback, 0);
 	return 0;
 }
 module_init(percpu_counter_startup);

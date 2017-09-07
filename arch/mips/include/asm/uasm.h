@@ -9,9 +9,6 @@
  * Copyright (C) 2012, 2013  MIPS Technologies, Inc.  All rights reserved.
  */
 
-#ifndef __ASM_UASM_H
-#define __ASM_UASM_H
-
 #include <linux/types.h>
 
 #ifdef CONFIG_EXPORT_UASM
@@ -107,13 +104,8 @@ Ip_u1s2(_bltz);
 Ip_u1s2(_bltzl);
 Ip_u1u2s3(_bne);
 Ip_u2s3u1(_cache);
-Ip_u1u2(_cfc1);
-Ip_u2u1(_cfcmsa);
-Ip_u1u2(_ctc1);
-Ip_u2u1(_ctcmsa);
 Ip_u2u1s3(_daddiu);
 Ip_u3u1u2(_daddu);
-Ip_u1(_di);
 Ip_u2u1msbu3(_dins);
 Ip_u2u1msbu3(_dinsm);
 Ip_u1u2(_divu);
@@ -149,8 +141,6 @@ Ip_u1(_mfhi);
 Ip_u1(_mflo);
 Ip_u1u2u3(_mtc0);
 Ip_u1u2u3(_mthc0);
-Ip_u1(_mthi);
-Ip_u1(_mtlo);
 Ip_u3u1u2(_mul);
 Ip_u3u1u2(_or);
 Ip_u2u1u3(_ori);
@@ -181,8 +171,7 @@ Ip_u2u1(_wsbh);
 Ip_u3u1u2(_xor);
 Ip_u2u1u3(_xori);
 Ip_u2u1(_yield);
-Ip_u1u2(_ldpte);
-Ip_u2u1u3(_lddir);
+
 
 /* Handle labels. */
 struct uasm_label {
@@ -312,5 +301,3 @@ void uasm_il_bltz(u32 **p, struct uasm_reloc **r, unsigned int reg, int lid);
 void uasm_il_bne(u32 **p, struct uasm_reloc **r, unsigned int reg1,
 		 unsigned int reg2, int lid);
 void uasm_il_bnez(u32 **p, struct uasm_reloc **r, unsigned int reg, int lid);
-
-#endif /* __ASM_UASM_H */

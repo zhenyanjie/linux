@@ -48,10 +48,7 @@
 #define CFG_CAMERA_BIT	(19)
 
 #if IS_ENABLED(CONFIG_ACPI_WMI)
-static const char *const ideapad_wmi_fnesc_events[] = {
-	"26CAB2E5-5CF1-46AE-AAC3-4A12B6BA50E6", /* Yoga 3 */
-	"56322276-8493-4CE8-A783-98C991274F5E", /* Yoga 700 */
-};
+static const char ideapad_wmi_fnesc_event[] = "26CAB2E5-5CF1-46AE-AAC3-4A12B6BA50E6";
 #endif
 
 enum {
@@ -96,7 +93,6 @@ struct ideapad_private {
 	struct dentry *debug;
 	unsigned long cfg;
 	bool has_hw_rfkill_switch;
-	const char *fnesc_guid;
 };
 
 static bool no_bt_rfkill;
@@ -567,7 +563,6 @@ static void ideapad_sysfs_exit(struct ideapad_private *priv)
 static const struct key_entry ideapad_keymap[] = {
 	{ KE_KEY, 6,  { KEY_SWITCHVIDEOMODE } },
 	{ KE_KEY, 7,  { KEY_CAMERA } },
-	{ KE_KEY, 8,  { KEY_MICMUTE } },
 	{ KE_KEY, 11, { KEY_F16 } },
 	{ KE_KEY, 13, { KEY_WLAN } },
 	{ KE_KEY, 16, { KEY_PROG1 } },
@@ -604,12 +599,14 @@ static int ideapad_input_init(struct ideapad_private *priv)
 	error = input_register_device(inputdev);
 	if (error) {
 		pr_err("Unable to register input device\n");
-		goto err_free_dev;
+		goto err_free_keymap;
 	}
 
 	priv->inputdev = inputdev;
 	return 0;
 
+err_free_keymap:
+	sparse_keymap_free(inputdev);
 err_free_dev:
 	input_free_device(inputdev);
 	return error;
@@ -617,6 +614,7 @@ err_free_dev:
 
 static void ideapad_input_exit(struct ideapad_private *priv)
 {
+	sparse_keymap_free(priv->inputdev);
 	input_unregister_device(priv->inputdev);
 	priv->inputdev = NULL;
 }
@@ -807,10 +805,8 @@ static void ideapad_acpi_notify(acpi_handle handle, u32 event, void *data)
 				break;
 			case 13:
 			case 11:
-			case 8:
 			case 7:
 			case 6:
-			case 1:
 				ideapad_input_report(priv, vpc_bit);
 				break;
 			case 5:
@@ -869,41 +865,6 @@ static const struct dmi_system_id no_hw_rfkill_list[] = {
 		},
 	},
 	{
-		.ident = "Lenovo V310-15ISK",
-		.matches = {
-		        DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-		        DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo V310-15ISK"),
-		},
-	},
-	{
-		.ident = "Lenovo ideapad 310-15IKB",
-		.matches = {
-		        DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-		        DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo ideapad 310-15IKB"),
-		},
-	},
-	{
-		.ident = "Lenovo ideapad Y700-15ACZ",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo ideapad Y700-15ACZ"),
-		},
-	},
-	{
-		.ident = "Lenovo ideapad Y700-15ISK",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo ideapad Y700-15ISK"),
-		},
-	},
-	{
-		.ident = "Lenovo ideapad Y700 Touch-15ISK",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo ideapad Y700 Touch-15ISK"),
-		},
-	},
-	{
 		.ident = "Lenovo ideapad Y700-17ISK",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
@@ -950,20 +911,6 @@ static const struct dmi_system_id no_hw_rfkill_list[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo YOGA 900"),
-		},
-	},
-	{
-		.ident = "Lenovo Yoga 900",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_BOARD_NAME, "VIUU4"),
-		},
-	},
-	{
-		.ident = "Lenovo YOGA 910-13IKB",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo YOGA 910-13IKB"),
 		},
 	},
 	{}
@@ -1028,16 +975,8 @@ static int ideapad_acpi_add(struct platform_device *pdev)
 		ACPI_DEVICE_NOTIFY, ideapad_acpi_notify, priv);
 	if (ret)
 		goto notification_failed;
-
 #if IS_ENABLED(CONFIG_ACPI_WMI)
-	for (i = 0; i < ARRAY_SIZE(ideapad_wmi_fnesc_events); i++) {
-		ret = wmi_install_notify_handler(ideapad_wmi_fnesc_events[i],
-						 ideapad_wmi_notify, priv);
-		if (ret == AE_OK) {
-			priv->fnesc_guid = ideapad_wmi_fnesc_events[i];
-			break;
-		}
-	}
+	ret = wmi_install_notify_handler(ideapad_wmi_fnesc_event, ideapad_wmi_notify, priv);
 	if (ret != AE_OK && ret != AE_NOT_EXIST)
 		goto notification_failed_wmi;
 #endif
@@ -1067,8 +1006,7 @@ static int ideapad_acpi_remove(struct platform_device *pdev)
 	int i;
 
 #if IS_ENABLED(CONFIG_ACPI_WMI)
-	if (priv->fnesc_guid)
-		wmi_remove_notify_handler(priv->fnesc_guid);
+	wmi_remove_notify_handler(ideapad_wmi_fnesc_event);
 #endif
 	acpi_remove_notify_handler(priv->adev->handle,
 		ACPI_DEVICE_NOTIFY, ideapad_acpi_notify);

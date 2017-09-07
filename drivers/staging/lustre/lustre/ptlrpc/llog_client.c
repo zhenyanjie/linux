@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -71,8 +75,7 @@
 } while (0)
 
 /* This is a callback from the llog_* functions.
- * Assumes caller has already pushed us into the kernel context.
- */
+ * Assumes caller has already pushed us into the kernel context. */
 static int llog_client_open(const struct lu_env *env,
 			    struct llog_handle *lgh, struct llog_logid *logid,
 			    char *name, enum llog_open_param open_param)
@@ -90,7 +93,7 @@ static int llog_client_open(const struct lu_env *env,
 	LASSERT(lgh);
 
 	req = ptlrpc_request_alloc(imp, &RQF_LLOG_ORIGIN_HANDLE_CREATE);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto out;
 	}
@@ -127,7 +130,7 @@ static int llog_client_open(const struct lu_env *env,
 		goto out;
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_LLOGD_BODY);
-	if (!body) {
+	if (body == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -155,7 +158,7 @@ static int llog_client_next_block(const struct lu_env *env,
 	req = ptlrpc_request_alloc_pack(imp, &RQF_LLOG_ORIGIN_HANDLE_NEXT_BLOCK,
 					LUSTRE_LOG_VERSION,
 					LLOG_ORIGIN_HANDLE_NEXT_BLOCK);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto err_exit;
 	}
@@ -176,14 +179,14 @@ static int llog_client_next_block(const struct lu_env *env,
 		goto out;
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_LLOGD_BODY);
-	if (!body) {
+	if (body == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
 
 	/* The log records are swabbed as they are processed */
 	ptr = req_capsule_server_get(&req->rq_pill, &RMF_EADATA);
-	if (!ptr) {
+	if (ptr == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -213,7 +216,7 @@ static int llog_client_prev_block(const struct lu_env *env,
 	req = ptlrpc_request_alloc_pack(imp, &RQF_LLOG_ORIGIN_HANDLE_PREV_BLOCK,
 					LUSTRE_LOG_VERSION,
 					LLOG_ORIGIN_HANDLE_PREV_BLOCK);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto err_exit;
 	}
@@ -233,13 +236,13 @@ static int llog_client_prev_block(const struct lu_env *env,
 		goto out;
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_LLOGD_BODY);
-	if (!body) {
+	if (body == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
 
 	ptr = req_capsule_server_get(&req->rq_pill, &RMF_EADATA);
-	if (!ptr) {
+	if (ptr == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -266,7 +269,7 @@ static int llog_client_read_header(const struct lu_env *env,
 	req = ptlrpc_request_alloc_pack(imp, &RQF_LLOG_ORIGIN_HANDLE_READ_HEADER,
 					LUSTRE_LOG_VERSION,
 					LLOG_ORIGIN_HANDLE_READ_HEADER);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto err_exit;
 	}
@@ -282,18 +285,13 @@ static int llog_client_read_header(const struct lu_env *env,
 		goto out;
 
 	hdr = req_capsule_server_get(&req->rq_pill, &RMF_LLOG_LOG_HDR);
-	if (!hdr) {
+	if (hdr == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
 
-	if (handle->lgh_hdr_size < hdr->llh_hdr.lrh_len) {
-		rc = -EFAULT;
-		goto out;
-	}
-
-	memcpy(handle->lgh_hdr, hdr, hdr->llh_hdr.lrh_len);
-	handle->lgh_last_idx = LLOG_HDR_TAIL(handle->lgh_hdr)->lrt_index;
+	memcpy(handle->lgh_hdr, hdr, sizeof(*hdr));
+	handle->lgh_last_idx = handle->lgh_hdr->llh_tail.lrt_index;
 
 	/* sanity checks */
 	llh_hdr = &handle->lgh_hdr->llh_hdr;
@@ -301,14 +299,9 @@ static int llog_client_read_header(const struct lu_env *env,
 		CERROR("bad log header magic: %#x (expecting %#x)\n",
 		       llh_hdr->lrh_type, LLOG_HDR_MAGIC);
 		rc = -EIO;
-	} else if (llh_hdr->lrh_len !=
-		   LLOG_HDR_TAIL(handle->lgh_hdr)->lrt_len ||
-		   (llh_hdr->lrh_len & (llh_hdr->lrh_len - 1)) ||
-		   llh_hdr->lrh_len < LLOG_MIN_CHUNK_SIZE ||
-		   llh_hdr->lrh_len > handle->lgh_hdr_size) {
-		CERROR("incorrectly sized log header: %#x (expecting %#x) (power of two > 8192)\n",
-		       llh_hdr->lrh_len,
-		       LLOG_HDR_TAIL(handle->lgh_hdr)->lrt_len);
+	} else if (llh_hdr->lrh_len != LLOG_CHUNK_SIZE) {
+		CERROR("incorrectly sized log header: %#x (expecting %#x)\n",
+		       llh_hdr->lrh_len, LLOG_CHUNK_SIZE);
 		CERROR("you may need to re-run lconf --write_conf.\n");
 		rc = -EIO;
 	}
@@ -323,9 +316,8 @@ static int llog_client_close(const struct lu_env *env,
 			     struct llog_handle *handle)
 {
 	/* this doesn't call LLOG_ORIGIN_HANDLE_CLOSE because
-	 *  the servers all close the file at the end of every
-	 * other LLOG_ RPC.
-	 */
+	   the servers all close the file at the end of every
+	   other LLOG_ RPC. */
 	return 0;
 }
 

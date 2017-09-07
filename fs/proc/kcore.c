@@ -23,12 +23,11 @@
 #include <linux/bootmem.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <linux/list.h>
 #include <linux/ioport.h>
 #include <linux/memory.h>
-#include <linux/sched/task.h>
 #include <asm/sections.h>
 #include "internal.h"
 
@@ -374,10 +373,7 @@ static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 		phdr->p_flags	= PF_R|PF_W|PF_X;
 		phdr->p_offset	= kc_vaddr_to_offset(m->addr) + dataoff;
 		phdr->p_vaddr	= (size_t)m->addr;
-		if (m->type == KCORE_RAM || m->type == KCORE_TEXT)
-			phdr->p_paddr	= __pa(m->addr);
-		else
-			phdr->p_paddr	= (elf_addr_t)-1;
+		phdr->p_paddr	= 0;
 		phdr->p_filesz	= phdr->p_memsz	= m->size;
 		phdr->p_align	= PAGE_SIZE;
 	}
@@ -434,7 +430,6 @@ static void elf_kcore_store_hdr(char *bufp, int nphdr, int dataoff)
 static ssize_t
 read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 {
-	char *buf = file->private_data;
 	ssize_t acc = 0;
 	size_t size, tsz;
 	size_t elf_buflen;
@@ -505,20 +500,23 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 			if (clear_user(buffer, tsz))
 				return -EFAULT;
 		} else if (is_vmalloc_or_module_addr((void *)start)) {
-			vread(buf, (char *)start, tsz);
+			char * elf_buf;
+
+			elf_buf = kzalloc(tsz, GFP_KERNEL);
+			if (!elf_buf)
+				return -ENOMEM;
+			vread(elf_buf, (char *)start, tsz);
 			/* we have to zero-fill user buffer even if no read */
-			if (copy_to_user(buffer, buf, tsz))
+			if (copy_to_user(buffer, elf_buf, tsz)) {
+				kfree(elf_buf);
 				return -EFAULT;
+			}
+			kfree(elf_buf);
 		} else {
 			if (kern_addr_valid(start)) {
 				unsigned long n;
 
-				/*
-				 * Using bounce buffer to bypass the
-				 * hardened user copy kernel text checks.
-				 */
-				memcpy(buf, (char *) start, tsz);
-				n = copy_to_user(buffer, buf, tsz);
+				n = copy_to_user(buffer, (char *)start, tsz);
 				/*
 				 * We cannot distinguish between fault on source
 				 * and fault on destination. When this happens
@@ -551,11 +549,6 @@ static int open_kcore(struct inode *inode, struct file *filp)
 {
 	if (!capable(CAP_SYS_RAWIO))
 		return -EPERM;
-
-	filp->private_data = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!filp->private_data)
-		return -ENOMEM;
-
 	if (kcore_need_update)
 		kcore_update_ram();
 	if (i_size_read(inode) != proc_root_kcore->size) {
@@ -566,16 +559,10 @@ static int open_kcore(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static int release_kcore(struct inode *inode, struct file *file)
-{
-	kfree(file->private_data);
-	return 0;
-}
 
 static const struct file_operations proc_kcore_operations = {
 	.read		= read_kcore,
 	.open		= open_kcore,
-	.release	= release_kcore,
 	.llseek		= default_llseek,
 };
 

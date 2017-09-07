@@ -33,6 +33,7 @@
 #include <linux/tty.h>
 #include <linux/sysrq.h>
 #include <linux/delay.h>
+#include <linux/fb.h>
 #include <linux/init.h>
 
 
@@ -49,7 +50,7 @@ static void ast_dirty_update(struct ast_fbdev *afbdev,
 	struct drm_gem_object *obj;
 	struct ast_bo *bo;
 	int src_offset, dst_offset;
-	int bpp = afbdev->afb.base.format->cpp[0];
+	int bpp = (afbdev->afb.base.bits_per_pixel + 7)/8;
 	int ret = -EBUSY;
 	bool unmap = false;
 	bool store_for_later = false;
@@ -166,9 +167,12 @@ static int astfb_create_object(struct ast_fbdev *afbdev,
 			       struct drm_gem_object **gobj_p)
 {
 	struct drm_device *dev = afbdev->helper.dev;
+	u32 bpp, depth;
 	u32 size;
 	struct drm_gem_object *gobj;
+
 	int ret = 0;
+	drm_fb_get_bpp_depth(mode_cmd->pixel_format, &depth, &bpp);
 
 	size = mode_cmd->pitches[0] * mode_cmd->height;
 	ret = ast_gem_create(dev, size, true, &gobj);
@@ -215,13 +219,13 @@ static int astfb_create(struct drm_fb_helper *helper,
 	info = drm_fb_helper_alloc_fbi(helper);
 	if (IS_ERR(info)) {
 		ret = PTR_ERR(info);
-		goto out;
+		goto err_free_vram;
 	}
 	info->par = afbdev;
 
 	ret = ast_framebuffer_init(dev, &afbdev->afb, &mode_cmd, gobj);
 	if (ret)
-		goto out;
+		goto err_release_fbi;
 
 	afbdev->sysram = sysram;
 	afbdev->size = size;
@@ -237,7 +241,7 @@ static int astfb_create(struct drm_fb_helper *helper,
 	info->apertures->ranges[0].base = pci_resource_start(dev->pdev, 0);
 	info->apertures->ranges[0].size = pci_resource_len(dev->pdev, 0);
 
-	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->format->depth);
+	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->depth);
 	drm_fb_helper_fill_var(info, &afbdev->helper, sizes->fb_width, sizes->fb_height);
 
 	info->screen_base = sysram;
@@ -250,8 +254,10 @@ static int astfb_create(struct drm_fb_helper *helper,
 
 	return 0;
 
-out:
-	vfree(sysram);
+err_release_fbi:
+	drm_fb_helper_release_fbi(helper);
+err_free_vram:
+	vfree(afbdev->sysram);
 	return ret;
 }
 
@@ -285,6 +291,7 @@ static void ast_fbdev_destroy(struct drm_device *dev,
 	struct ast_framebuffer *afb = &afbdev->afb;
 
 	drm_fb_helper_unregister_fbi(&afbdev->helper);
+	drm_fb_helper_release_fbi(&afbdev->helper);
 
 	if (afb->obj) {
 		drm_gem_object_unreference_unlocked(afb->obj);
@@ -312,7 +319,8 @@ int ast_fbdev_init(struct drm_device *dev)
 
 	drm_fb_helper_prepare(dev, &afbdev->helper, &ast_fb_helper_funcs);
 
-	ret = drm_fb_helper_init(dev, &afbdev->helper, 1);
+	ret = drm_fb_helper_init(dev, &afbdev->helper,
+				 1, 1);
 	if (ret)
 		goto free;
 

@@ -292,7 +292,7 @@ static struct dma_async_tx_descriptor *mdc_prep_dma_memcpy(
 	struct mdc_dma *mdma = mchan->mdma;
 	struct mdc_tx_desc *mdesc;
 	struct mdc_hw_list_desc *curr, *prev = NULL;
-	dma_addr_t curr_phys;
+	dma_addr_t curr_phys, prev_phys;
 
 	if (!len)
 		return NULL;
@@ -324,6 +324,7 @@ static struct dma_async_tx_descriptor *mdc_prep_dma_memcpy(
 				     xfer_size);
 
 		prev = curr;
+		prev_phys = curr_phys;
 
 		mdesc->list_len++;
 		src += xfer_size;
@@ -374,7 +375,7 @@ static struct dma_async_tx_descriptor *mdc_prep_dma_cyclic(
 	struct mdc_dma *mdma = mchan->mdma;
 	struct mdc_tx_desc *mdesc;
 	struct mdc_hw_list_desc *curr, *prev = NULL;
-	dma_addr_t curr_phys;
+	dma_addr_t curr_phys, prev_phys;
 
 	if (!buf_len && !period_len)
 		return NULL;
@@ -429,6 +430,7 @@ static struct dma_async_tx_descriptor *mdc_prep_dma_cyclic(
 			}
 
 			prev = curr;
+			prev_phys = curr_phys;
 
 			mdesc->list_len++;
 			buf_addr += xfer_size;
@@ -456,7 +458,7 @@ static struct dma_async_tx_descriptor *mdc_prep_slave_sg(
 	struct mdc_tx_desc *mdesc;
 	struct scatterlist *sg;
 	struct mdc_hw_list_desc *curr, *prev = NULL;
-	dma_addr_t curr_phys;
+	dma_addr_t curr_phys, prev_phys;
 	unsigned int i;
 
 	if (!sgl)
@@ -507,6 +509,7 @@ static struct dma_async_tx_descriptor *mdc_prep_slave_sg(
 			}
 
 			prev = curr;
+			prev_phys = curr_phys;
 
 			mdesc->list_len++;
 			mdesc->list_xfer_size += xfer_size;
@@ -858,6 +861,7 @@ static int mdc_dma_probe(struct platform_device *pdev)
 {
 	struct mdc_dma *mdma;
 	struct resource *res;
+	const struct of_device_id *match;
 	unsigned int i;
 	u32 val;
 	int ret;
@@ -867,7 +871,8 @@ static int mdc_dma_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	platform_set_drvdata(pdev, mdma);
 
-	mdma->soc = of_device_get_match_data(&pdev->dev);
+	match = of_match_device(mdc_dma_of_match, &pdev->dev);
+	mdma->soc = match->data;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	mdma->regs = devm_ioremap_resource(&pdev->dev, res);

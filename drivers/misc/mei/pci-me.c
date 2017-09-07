@@ -85,15 +85,8 @@ static const struct pci_device_id mei_me_pci_tbl[] = {
 
 	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT, mei_me_pch8_cfg)},
 	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_2, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H, mei_me_pch8_sps_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H_2, mei_me_pch8_sps_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_LBG, mei_me_pch8_cfg)},
-
-	{MEI_PCI_DEVICE(MEI_DEV_ID_BXT_M, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_APL_I, mei_me_pch8_cfg)},
-
-	{MEI_PCI_DEVICE(MEI_DEV_ID_KBP, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_KBP_2, mei_me_pch8_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H, mei_me_pch8_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H_2, mei_me_pch8_cfg)},
 
 	/* required last entry */
 	{0, }
@@ -149,18 +142,18 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return -ENODEV;
 
 	/* enable pci dev */
-	err = pcim_enable_device(pdev);
+	err = pci_enable_device(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "failed to enable pci device.\n");
 		goto end;
 	}
 	/* set PCI host mastering  */
 	pci_set_master(pdev);
-	/* pci request regions and mapping IO device memory for mei driver */
-	err = pcim_iomap_regions(pdev, BIT(0), KBUILD_MODNAME);
+	/* pci request regions for mei driver */
+	err = pci_request_regions(pdev, KBUILD_MODNAME);
 	if (err) {
 		dev_err(&pdev->dev, "failed to get pci regions.\n");
-		goto end;
+		goto disable_device;
 	}
 
 	if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(64)) ||
@@ -173,18 +166,24 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	if (err) {
 		dev_err(&pdev->dev, "No usable DMA configuration, aborting\n");
-		goto end;
+		goto release_regions;
 	}
+
 
 	/* allocates and initializes the mei dev structure */
 	dev = mei_me_dev_init(pdev, cfg);
 	if (!dev) {
 		err = -ENOMEM;
-		goto end;
+		goto release_regions;
 	}
 	hw = to_me_hw(dev);
-	hw->mem_addr = pcim_iomap_table(pdev)[0];
-
+	/* mapping  IO device memory */
+	hw->mem_addr = pci_iomap(pdev, 0, 0);
+	if (!hw->mem_addr) {
+		dev_err(&pdev->dev, "mapping I/O device memory failure.\n");
+		err = -ENOMEM;
+		goto free_device;
+	}
 	pci_enable_msi(pdev);
 
 	 /* request and enable interrupt */
@@ -197,7 +196,7 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err) {
 		dev_err(&pdev->dev, "request_threaded_irq failure. irq = %d\n",
 		       pdev->irq);
-		goto end;
+		goto disable_msi;
 	}
 
 	if (mei_start(dev)) {
@@ -211,9 +210,11 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	err = mei_register(dev, &pdev->dev);
 	if (err)
-		goto stop;
+		goto release_irq;
 
 	pci_set_drvdata(pdev, dev);
+
+	schedule_delayed_work(&dev->timer_work, HZ);
 
 	/*
 	* For not wake-able HW runtime pm framework
@@ -230,42 +231,22 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	return 0;
 
-stop:
-	mei_stop(dev);
 release_irq:
 	mei_cancel_work(dev);
 	mei_disable_interrupts(dev);
 	free_irq(pdev->irq, dev);
+disable_msi:
+	pci_disable_msi(pdev);
+	pci_iounmap(pdev, hw->mem_addr);
+free_device:
+	kfree(dev);
+release_regions:
+	pci_release_regions(pdev);
+disable_device:
+	pci_disable_device(pdev);
 end:
 	dev_err(&pdev->dev, "initialization failed.\n");
 	return err;
-}
-
-/**
- * mei_me_shutdown - Device Removal Routine
- *
- * @pdev: PCI device structure
- *
- * mei_me_shutdown is called from the reboot notifier
- * it's a simplified version of remove so we go down
- * faster.
- */
-static void mei_me_shutdown(struct pci_dev *pdev)
-{
-	struct mei_device *dev;
-
-	dev = pci_get_drvdata(pdev);
-	if (!dev)
-		return;
-
-	dev_dbg(&pdev->dev, "shutdown\n");
-	mei_stop(dev);
-
-	if (!pci_dev_run_wake(pdev))
-		mei_me_unset_pm_domain(dev);
-
-	mei_disable_interrupts(dev);
-	free_irq(pdev->irq, dev);
 }
 
 /**
@@ -273,12 +254,13 @@ static void mei_me_shutdown(struct pci_dev *pdev)
  *
  * @pdev: PCI device structure
  *
- * mei_me_remove is called by the PCI subsystem to alert the driver
+ * mei_remove is called by the PCI subsystem to alert the driver
  * that it should release a PCI device.
  */
 static void mei_me_remove(struct pci_dev *pdev)
 {
 	struct mei_device *dev;
+	struct mei_me_hw *hw;
 
 	dev = pci_get_drvdata(pdev);
 	if (!dev)
@@ -287,19 +269,33 @@ static void mei_me_remove(struct pci_dev *pdev)
 	if (mei_pg_is_enabled(dev))
 		pm_runtime_get_noresume(&pdev->dev);
 
+	hw = to_me_hw(dev);
+
+
 	dev_dbg(&pdev->dev, "stop\n");
 	mei_stop(dev);
 
 	if (!pci_dev_run_wake(pdev))
 		mei_me_unset_pm_domain(dev);
 
+	/* disable interrupts */
 	mei_disable_interrupts(dev);
 
 	free_irq(pdev->irq, dev);
+	pci_disable_msi(pdev);
+
+	if (hw->mem_addr)
+		pci_iounmap(pdev, hw->mem_addr);
 
 	mei_deregister(dev);
-}
 
+	kfree(dev);
+
+	pci_release_regions(pdev);
+	pci_disable_device(pdev);
+
+
+}
 #ifdef CONFIG_PM_SLEEP
 static int mei_me_pci_suspend(struct device *device)
 {
@@ -399,9 +395,6 @@ static int mei_me_pm_runtime_suspend(struct device *device)
 
 	dev_dbg(&pdev->dev, "rpm: me: runtime suspend ret=%d\n", ret);
 
-	if (ret && ret != -EAGAIN)
-		schedule_work(&dev->reset_work);
-
 	return ret;
 }
 
@@ -424,9 +417,6 @@ static int mei_me_pm_runtime_resume(struct device *device)
 	mutex_unlock(&dev->device_lock);
 
 	dev_dbg(&pdev->dev, "rpm: me: runtime resume ret = %d\n", ret);
-
-	if (ret)
-		schedule_work(&dev->reset_work);
 
 	return ret;
 }
@@ -483,7 +473,7 @@ static struct pci_driver mei_me_driver = {
 	.id_table = mei_me_pci_tbl,
 	.probe = mei_me_probe,
 	.remove = mei_me_remove,
-	.shutdown = mei_me_shutdown,
+	.shutdown = mei_me_remove,
 	.driver.pm = MEI_ME_PM_OPS,
 };
 

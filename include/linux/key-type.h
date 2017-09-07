@@ -45,6 +45,7 @@ struct key_preparsed_payload {
 	size_t		datalen;	/* Raw datalen */
 	size_t		quotalen;	/* Quota length for proposed payload */
 	time_t		expiry;		/* Expiry time of key */
+	bool		trusted;	/* True if key is trusted */
 };
 
 typedef int (*request_key_actor_t)(struct key_construction *key,
@@ -146,14 +147,6 @@ struct key_type {
 	 *   its course
 	 */
 	request_key_actor_t request_key;
-
-	/* Look up a keyring access restriction (optional)
-	 *
-	 * - NULL is a valid return value (meaning the requested restriction
-	 *   is known but will never block addition of a key)
-	 * - should return -EINVAL if the restriction is unknown
-	 */
-	struct key_restriction *(*lookup_restriction)(const char *params);
 
 	/* internal fields */
 	struct list_head	link;		/* link in types list */

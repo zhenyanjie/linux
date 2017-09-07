@@ -93,24 +93,18 @@ static int cls_cgroup_change(struct net *net, struct sk_buff *in_skb,
 	if (!new)
 		return -ENOBUFS;
 
-	err = tcf_exts_init(&new->exts, TCA_CGROUP_ACT, TCA_CGROUP_POLICE);
-	if (err < 0)
-		goto errout;
+	tcf_exts_init(&new->exts, TCA_CGROUP_ACT, TCA_CGROUP_POLICE);
 	new->handle = handle;
 	new->tp = tp;
 	err = nla_parse_nested(tb, TCA_CGROUP_MAX, tca[TCA_OPTIONS],
-			       cgroup_policy, NULL);
+			       cgroup_policy);
 	if (err < 0)
 		goto errout;
 
-	err = tcf_exts_init(&e, TCA_CGROUP_ACT, TCA_CGROUP_POLICE);
+	tcf_exts_init(&e, TCA_CGROUP_ACT, TCA_CGROUP_POLICE);
+	err = tcf_exts_validate(net, tp, tb, tca[TCA_RATE], &e, ovr);
 	if (err < 0)
 		goto errout;
-	err = tcf_exts_validate(net, tp, tb, tca[TCA_RATE], &e, ovr);
-	if (err < 0) {
-		tcf_exts_destroy(&e);
-		goto errout;
-	}
 
 	err = tcf_em_tree_validate(tp, tb[TCA_CGROUP_EMATCHES], &t);
 	if (err < 0) {
@@ -126,21 +120,25 @@ static int cls_cgroup_change(struct net *net, struct sk_buff *in_skb,
 		call_rcu(&head->rcu, cls_cgroup_destroy_rcu);
 	return 0;
 errout:
-	tcf_exts_destroy(&new->exts);
 	kfree(new);
 	return err;
 }
 
-static void cls_cgroup_destroy(struct tcf_proto *tp)
+static bool cls_cgroup_destroy(struct tcf_proto *tp, bool force)
 {
 	struct cls_cgroup_head *head = rtnl_dereference(tp->root);
 
-	/* Head can still be NULL due to cls_cgroup_init(). */
-	if (head)
+	if (!force)
+		return false;
+
+	if (head) {
+		RCU_INIT_POINTER(tp->root, NULL);
 		call_rcu(&head->rcu, cls_cgroup_destroy_rcu);
+	}
+	return true;
 }
 
-static int cls_cgroup_delete(struct tcf_proto *tp, unsigned long arg, bool *last)
+static int cls_cgroup_delete(struct tcf_proto *tp, unsigned long arg)
 {
 	return -EOPNOTSUPP;
 }

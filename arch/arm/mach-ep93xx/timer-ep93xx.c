@@ -59,13 +59,13 @@ static u64 notrace ep93xx_read_sched_clock(void)
 	return ret;
 }
 
-u64 ep93xx_clocksource_read(struct clocksource *c)
+cycle_t ep93xx_clocksource_read(struct clocksource *c)
 {
 	u64 ret;
 
 	ret = readl(EP93XX_TIMER4_VALUE_LOW);
 	ret |= ((u64) (readl(EP93XX_TIMER4_VALUE_HIGH) & 0xff) << 32);
-	return (u64) ret;
+	return (cycle_t) ret;
 }
 
 static int ep93xx_clkevt_set_next_event(unsigned long next,

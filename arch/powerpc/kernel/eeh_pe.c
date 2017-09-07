@@ -104,7 +104,7 @@ int eeh_phb_pe_create(struct pci_controller *phb)
 	/* Put it into the list */
 	list_add_tail(&pe->child, &eeh_phb_pe);
 
-	pr_debug("EEH: Add PE for PHB#%x\n", phb->global_number);
+	pr_debug("EEH: Add PE for PHB#%d\n", phb->global_number);
 
 	return 0;
 }
@@ -249,7 +249,7 @@ static void *__eeh_pe_get(void *data, void *flag)
 	} else {
 		if (edev->pe_config_addr &&
 		    (edev->pe_config_addr == pe->addr))
-			return pe;
+		return pe;
 	}
 
 	/* Try BDF address */
@@ -299,10 +299,7 @@ static struct eeh_pe *eeh_pe_get_parent(struct eeh_dev *edev)
 	 * EEH device already having associated PE, but
 	 * the direct parent EEH device doesn't have yet.
 	 */
-	if (edev->physfn)
-		pdn = pci_get_pdn(edev->physfn);
-	else
-		pdn = pdn ? pdn->parent : NULL;
+	pdn = pdn ? pdn->parent : NULL;
 	while (pdn) {
 		/* We're poking out of PCI territory */
 		parent = pdn_to_eeh_dev(pdn);
@@ -333,7 +330,7 @@ int eeh_add_to_parent_pe(struct eeh_dev *edev)
 
 	/* Check if the PE number is valid */
 	if (!eeh_has_flag(EEH_VALID_PE_ZERO) && !edev->pe_config_addr) {
-		pr_err("%s: Invalid PE#0 for edev 0x%x on PHB#%x\n",
+		pr_err("%s: Invalid PE#0 for edev 0x%x on PHB#%d\n",
 		       __func__, edev->config_addr, edev->phb->global_number);
 		return -EINVAL;
 	}
@@ -385,10 +382,7 @@ int eeh_add_to_parent_pe(struct eeh_dev *edev)
 	}
 
 	/* Create a new EEH PE */
-	if (edev->physfn)
-		pe = eeh_pe_alloc(edev->phb, EEH_PE_VF);
-	else
-		pe = eeh_pe_alloc(edev->phb, EEH_PE_DEVICE);
+	pe = eeh_pe_alloc(edev->phb, EEH_PE_DEVICE);
 	if (!pe) {
 		pr_err("%s: out of memory!\n", __func__);
 		return -ENOMEM;
@@ -581,7 +575,6 @@ void eeh_pe_state_mark(struct eeh_pe *pe, int state)
 {
 	eeh_pe_traverse(pe, __eeh_pe_state_mark, &state);
 }
-EXPORT_SYMBOL_GPL(eeh_pe_state_mark);
 
 static void *__eeh_pe_dev_mode_mark(void *data, void *flag)
 {
@@ -927,21 +920,25 @@ const char *eeh_pe_loc_get(struct eeh_pe *pe)
  */
 struct pci_bus *eeh_pe_bus_get(struct eeh_pe *pe)
 {
+	struct pci_bus *bus = NULL;
 	struct eeh_dev *edev;
 	struct pci_dev *pdev;
 
-	if (pe->type & EEH_PE_PHB)
-		return pe->phb->bus;
+	if (pe->type & EEH_PE_PHB) {
+		bus = pe->phb->bus;
+	} else if (pe->type & EEH_PE_BUS ||
+		   pe->type & EEH_PE_DEVICE) {
+		if (pe->state & EEH_PE_PRI_BUS) {
+			bus = pe->bus;
+			goto out;
+		}
 
-	/* The primary bus might be cached during probe time */
-	if (pe->state & EEH_PE_PRI_BUS)
-		return pe->bus;
+		edev = list_first_entry(&pe->edevs, struct eeh_dev, list);
+		pdev = eeh_dev_to_pci_dev(edev);
+		if (pdev)
+			bus = pdev->bus;
+	}
 
-	/* Retrieve the parent PCI bus of first (top) PCI device */
-	edev = list_first_entry_or_null(&pe->edevs, struct eeh_dev, list);
-	pdev = eeh_dev_to_pci_dev(edev);
-	if (pdev)
-		return pdev->bus;
-
-	return NULL;
+out:
+	return bus;
 }

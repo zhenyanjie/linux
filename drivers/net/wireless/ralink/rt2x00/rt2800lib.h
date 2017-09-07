@@ -20,34 +20,6 @@
 #ifndef RT2800LIB_H
 #define RT2800LIB_H
 
-/*
- * Hardware has 255 WCID table entries. First 32 entries are reserved for
- * shared keys. Since parts of the pairwise key table might be shared with
- * the beacon frame buffers 6 & 7 we could only use the first 222 entries.
- */
-#define WCID_START	33
-#define WCID_END	222
-#define STA_IDS_SIZE	(WCID_END - WCID_START + 2)
-
-/* RT2800 driver data structure */
-struct rt2800_drv_data {
-	u8 calibration_bw20;
-	u8 calibration_bw40;
-	char rx_calibration_bw20;
-	char rx_calibration_bw40;
-	char tx_calibration_bw20;
-	char tx_calibration_bw40;
-	u8 bbp25;
-	u8 bbp26;
-	u8 txmixer_gain_24g;
-	u8 txmixer_gain_5g;
-	u8 max_psdu;
-	unsigned int tbtt_tick;
-	unsigned int ampdu_factor_cnt[4];
-	DECLARE_BITMAP(sta_ids, STA_IDS_SIZE);
-	struct ieee80211_sta *wcid_to_sta[STA_IDS_SIZE];
-};
-
 struct rt2800_ops {
 	void (*register_read)(struct rt2x00_dev *rt2x00dev,
 			      const unsigned int offset, u32 *value);
@@ -195,8 +167,7 @@ void rt2800_write_tx_data(struct queue_entry *entry,
 			  struct txentry_desc *txdesc);
 void rt2800_process_rxwi(struct queue_entry *entry, struct rxdone_entry_desc *txdesc);
 
-void rt2800_txdone_entry(struct queue_entry *entry, u32 status, __le32 *txwi,
-			 bool match);
+void rt2800_txdone_entry(struct queue_entry *entry, u32 status, __le32* txwi);
 
 void rt2800_write_beacon(struct queue_entry *entry, struct txentry_desc *txdesc);
 void rt2800_clear_beacon(struct queue_entry *entry);
@@ -212,7 +183,7 @@ int rt2800_config_pairwise_key(struct rt2x00_dev *rt2x00dev,
 			       struct ieee80211_key_conf *key);
 int rt2800_sta_add(struct rt2x00_dev *rt2x00dev, struct ieee80211_vif *vif,
 		   struct ieee80211_sta *sta);
-int rt2800_sta_remove(struct rt2x00_dev *rt2x00dev, struct ieee80211_sta *sta);
+int rt2800_sta_remove(struct rt2x00_dev *rt2x00dev, int wcid);
 void rt2800_config_filter(struct rt2x00_dev *rt2x00dev,
 			  const unsigned int filter_flags);
 void rt2800_config_intf(struct rt2x00_dev *rt2x00dev, struct rt2x00_intf *intf,
@@ -247,7 +218,9 @@ int rt2800_conf_tx(struct ieee80211_hw *hw,
 		   const struct ieee80211_tx_queue_params *params);
 u64 rt2800_get_tsf(struct ieee80211_hw *hw, struct ieee80211_vif *vif);
 int rt2800_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-			struct ieee80211_ampdu_params *params);
+			enum ieee80211_ampdu_mlme_action action,
+			struct ieee80211_sta *sta, u16 tid, u16 *ssn,
+			u8 buf_size, bool amsdu);
 int rt2800_get_survey(struct ieee80211_hw *hw, int idx,
 		      struct survey_info *survey);
 void rt2800_disable_wpdma(struct rt2x00_dev *rt2x00dev);

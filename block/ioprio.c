@@ -23,11 +23,8 @@
 #include <linux/kernel.h>
 #include <linux/export.h>
 #include <linux/ioprio.h>
-#include <linux/cred.h>
 #include <linux/blkdev.h>
 #include <linux/capability.h>
-#include <linux/sched/user.h>
-#include <linux/sched/task.h>
 #include <linux/syscalls.h>
 #include <linux/security.h>
 #include <linux/pid_namespace.h>
@@ -125,14 +122,14 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 			if (!user)
 				break;
 
-			for_each_process_thread(g, p) {
+			do_each_thread(g, p) {
 				if (!uid_eq(task_uid(p), uid) ||
 				    !task_pid_vnr(p))
 					continue;
 				ret = set_task_ioprio(p, ioprio);
 				if (ret)
 					goto free_uid;
-			}
+			} while_each_thread(g, p);
 free_uid:
 			if (who)
 				free_uid(user);
@@ -153,22 +150,30 @@ static int get_task_ioprio(struct task_struct *p)
 	if (ret)
 		goto out;
 	ret = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, IOPRIO_NORM);
-	task_lock(p);
 	if (p->io_context)
 		ret = p->io_context->ioprio;
-	task_unlock(p);
 out:
 	return ret;
 }
 
 int ioprio_best(unsigned short aprio, unsigned short bprio)
 {
+	unsigned short aclass;
+	unsigned short bclass;
+
 	if (!ioprio_valid(aprio))
 		aprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, IOPRIO_NORM);
 	if (!ioprio_valid(bprio))
 		bprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, IOPRIO_NORM);
 
-	return min(aprio, bprio);
+	aclass = IOPRIO_PRIO_CLASS(aprio);
+	bclass = IOPRIO_PRIO_CLASS(bprio);
+	if (aclass == bclass)
+		return min(aprio, bprio);
+	if (aclass > bclass)
+		return bprio;
+	else
+		return aprio;
 }
 
 SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
@@ -215,7 +220,7 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
 			if (!user)
 				break;
 
-			for_each_process_thread(g, p) {
+			do_each_thread(g, p) {
 				if (!uid_eq(task_uid(p), user->uid) ||
 				    !task_pid_vnr(p))
 					continue;
@@ -226,7 +231,7 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
 					ret = tmpio;
 				else
 					ret = ioprio_best(ret, tmpio);
-			}
+			} while_each_thread(g, p);
 
 			if (who)
 				free_uid(user);

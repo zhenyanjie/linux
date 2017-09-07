@@ -20,6 +20,7 @@
  *
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
@@ -327,4 +328,9 @@ static int __init platform_msic_gpio_init(void)
 {
 	return platform_driver_register(&platform_msic_gpio_driver);
 }
+
 subsys_initcall(platform_msic_gpio_init);
+
+MODULE_AUTHOR("Mathias Nyman <mathias.nyman@linux.intel.com>");
+MODULE_DESCRIPTION("Intel Medfield MSIC GPIO driver");
+MODULE_LICENSE("GPL v2");

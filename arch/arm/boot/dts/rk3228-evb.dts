@@ -40,31 +40,25 @@
 
 /dts-v1/;
 
-#include "rk322x.dtsi"
+#include "rk3228.dtsi"
 
 / {
 	model = "Rockchip RK3228 Evaluation board";
 	compatible = "rockchip,rk3228-evb", "rockchip,rk3228";
 
-	memory@60000000 {
+	memory {
 		device_type = "memory";
 		reg = <0x60000000 0x40000000>;
 	};
 };
 
 &emmc {
+	broken-cd;
 	cap-mmc-highspeed;
 	mmc-ddr-1_8v;
 	disable-wp;
 	non-removable;
 	status = "okay";
-};
-
-&tsadc {
-	status = "okay";
-
-	rockchip,hw-tshut-mode = <0>; /* tshut mode 0:CRU 1:GPIO */
-	rockchip,hw-tshut-polarity = <1>; /* tshut polarity 0:LOW 1:HIGH */
 };
 
 &uart2 {

@@ -40,7 +40,6 @@
 #include <linux/moduleparam.h>
 
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
 #include <linux/ktime.h>
 #include <linux/types.h>
 #include <linux/time.h>
@@ -719,7 +718,7 @@ static void stir_send(struct stir_cb *stir, struct sk_buff *skb)
 
 	stir->netdev->stats.tx_packets++;
 	stir->netdev->stats.tx_bytes += skb->len;
-	netif_trans_update(stir->netdev);
+	stir->netdev->trans_start = jiffies;
 	pr_debug("send %d (%d)\n", skb->len, wraplen);
 
 	if (usb_bulk_msg(stir->usbdev, usb_sndbulkpipe(stir->usbdev, 1),

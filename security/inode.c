@@ -20,7 +20,6 @@
 #include <linux/init.h>
 #include <linux/namei.h>
 #include <linux/security.h>
-#include <linux/lsm_hooks.h>
 #include <linux/magic.h>
 
 static struct vfsmount *mount;
@@ -118,7 +117,7 @@ struct dentry *securityfs_create_file(const char *name, umode_t mode,
 
 	inode->i_ino = get_next_ino();
 	inode->i_mode = mode;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	inode->i_private = data;
 	if (is_dir) {
 		inode->i_op = &simple_dir_inode_operations;
@@ -157,11 +156,12 @@ EXPORT_SYMBOL_GPL(securityfs_create_file);
  * This function returns a pointer to a dentry if it succeeds.  This
  * pointer must be passed to the securityfs_remove() function when the file is
  * to be removed (no automatic cleanup happens if your module is unloaded,
- * you are responsible here).  If an error occurs, the function will return
- * the error value (via ERR_PTR).
+ * you are responsible here).  If an error occurs, %NULL will be returned.
  *
  * If securityfs is not enabled in the kernel, the value %-ENODEV is
- * returned.
+ * returned.  It is not wise to check for this value, but rather, check for
+ * %NULL or !%NULL instead as to eliminate the need for #ifdef in the calling
+ * code.
  */
 struct dentry *securityfs_create_dir(const char *name, struct dentry *parent)
 {
@@ -186,39 +186,27 @@ EXPORT_SYMBOL_GPL(securityfs_create_dir);
  */
 void securityfs_remove(struct dentry *dentry)
 {
-	struct inode *dir;
+	struct dentry *parent;
 
 	if (!dentry || IS_ERR(dentry))
 		return;
 
-	dir = d_inode(dentry->d_parent);
-	inode_lock(dir);
+	parent = dentry->d_parent;
+	if (!parent || d_really_is_negative(parent))
+		return;
+
+	inode_lock(d_inode(parent));
 	if (simple_positive(dentry)) {
 		if (d_is_dir(dentry))
-			simple_rmdir(dir, dentry);
+			simple_rmdir(d_inode(parent), dentry);
 		else
-			simple_unlink(dir, dentry);
+			simple_unlink(d_inode(parent), dentry);
 		dput(dentry);
 	}
-	inode_unlock(dir);
+	inode_unlock(d_inode(parent));
 	simple_release_fs(&mount, &mount_count);
 }
 EXPORT_SYMBOL_GPL(securityfs_remove);
-
-#ifdef CONFIG_SECURITY
-static struct dentry *lsm_dentry;
-static ssize_t lsm_read(struct file *filp, char __user *buf, size_t count,
-			loff_t *ppos)
-{
-	return simple_read_from_buffer(buf, count, ppos, lsm_names,
-		strlen(lsm_names));
-}
-
-static const struct file_operations lsm_ops = {
-	.read = lsm_read,
-	.llseek = generic_file_llseek,
-};
-#endif
 
 static int __init securityfs_init(void)
 {
@@ -229,15 +217,9 @@ static int __init securityfs_init(void)
 		return retval;
 
 	retval = register_filesystem(&fs_type);
-	if (retval) {
+	if (retval)
 		sysfs_remove_mount_point(kernel_kobj, "security");
-		return retval;
-	}
-#ifdef CONFIG_SECURITY
-	lsm_dentry = securityfs_create_file("lsm", 0444, NULL, NULL,
-						&lsm_ops);
-#endif
-	return 0;
+	return retval;
 }
 
 core_initcall(securityfs_init);

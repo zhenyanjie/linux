@@ -7,9 +7,7 @@
 
 #include <linux/errno.h>
 #include <linux/types.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/debug.h>
+#include <linux/sched.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/mm.h>
@@ -28,7 +26,7 @@
 #include <linux/export.h>
 #include <linux/context_tracking.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/utrap.h>
 #include <asm/unistd.h>
 
@@ -339,10 +337,10 @@ SYSCALL_DEFINE6(sparc_ipc, unsigned int, call, int, first, unsigned long, second
 		switch (call) {
 		case SEMOP:
 			err = sys_semtimedop(first, ptr,
-					     (unsigned int)second, NULL);
+					     (unsigned)second, NULL);
 			goto out;
 		case SEMTIMEDOP:
-			err = sys_semtimedop(first, ptr, (unsigned int)second,
+			err = sys_semtimedop(first, ptr, (unsigned)second,
 				(const struct timespec __user *)
 					     (unsigned long) fifth);
 			goto out;

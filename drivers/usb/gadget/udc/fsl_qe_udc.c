@@ -421,8 +421,10 @@ static int qe_ep_rxbd_update(struct qe_ep *ep)
 	bd = ep->rxbase;
 
 	ep->rxframe = kmalloc(sizeof(*ep->rxframe), GFP_ATOMIC);
-	if (!ep->rxframe)
+	if (ep->rxframe == NULL) {
+		dev_err(ep->udc->dev, "malloc rxframe failed\n");
 		return -ENOMEM;
+	}
 
 	qe_frame_init(ep->rxframe);
 
@@ -433,7 +435,9 @@ static int qe_ep_rxbd_update(struct qe_ep *ep)
 
 	size = (ep->ep.maxpacket + USB_CRC_SIZE + 2) * (bdring_len + 1);
 	ep->rxbuffer = kzalloc(size, GFP_ATOMIC);
-	if (!ep->rxbuffer) {
+	if (ep->rxbuffer == NULL) {
+		dev_err(ep->udc->dev, "malloc rxbuffer failed,size=%d\n",
+				size);
 		kfree(ep->rxframe);
 		return -ENOMEM;
 	}
@@ -664,8 +668,10 @@ static int qe_ep_init(struct qe_udc *udc,
 
 	if ((ep->tm == USBP_TM_CTL) || (ep->dir == USB_DIR_IN)) {
 		ep->txframe = kmalloc(sizeof(*ep->txframe), GFP_ATOMIC);
-		if (!ep->txframe)
+		if (ep->txframe == NULL) {
+			dev_err(udc->dev, "malloc txframe failed\n");
 			goto en_done2;
+		}
 		qe_frame_init(ep->txframe);
 	}
 
@@ -1847,7 +1853,7 @@ out:
 	return status;
 }
 
-static const struct usb_ep_ops qe_ep_ops = {
+static struct usb_ep_ops qe_ep_ops = {
 	.enable = qe_ep_enable,
 	.disable = qe_ep_disable,
 
@@ -1872,8 +1878,11 @@ static int qe_get_frame(struct usb_gadget *gadget)
 
 	tmp = in_be16(&udc->usb_param->frame_n);
 	if (tmp & 0x8000)
-		return tmp & 0x07ff;
-	return -EINVAL;
+		tmp = tmp & 0x07ff;
+	else
+		tmp = -EINVAL;
+
+	return (int)tmp;
 }
 
 static int fsl_qe_start(struct usb_gadget *gadget,
@@ -2044,7 +2053,7 @@ static void setup_received_handle(struct qe_udc *udc,
 			struct qe_ep *ep;
 
 			if (wValue != 0 || wLength != 0
-				|| pipe >= USB_MAX_ENDPOINTS)
+				|| pipe > USB_MAX_ENDPOINTS)
 				break;
 			ep = &udc->eps[pipe];
 
@@ -2338,8 +2347,10 @@ static struct qe_udc *qe_udc_config(struct platform_device *ofdev)
 	u32 offset;
 
 	udc = kzalloc(sizeof(*udc), GFP_KERNEL);
-	if (!udc)
+	if (udc == NULL) {
+		dev_err(&ofdev->dev, "malloc udc failed\n");
 		goto cleanup;
+	}
 
 	udc->dev = &ofdev->dev;
 

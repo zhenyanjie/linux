@@ -201,7 +201,7 @@ xt_osf_match_packet(const struct sk_buff *skb, struct xt_action_param *p)
 	unsigned char opts[MAX_IPOPTLEN];
 	const struct xt_osf_finger *kf;
 	const struct xt_osf_user_finger *f;
-	struct net *net = xt_net(p);
+	struct net *net = p->net;
 
 	if (!info)
 		return false;
@@ -262,6 +262,7 @@ xt_osf_match_packet(const struct sk_buff *skb, struct xt_action_param *p)
 			if (f->opt[optnum].kind == (*optp)) {
 				__u32 len = f->opt[optnum].length;
 				const __u8 *optend = optp + len;
+				int loop_cont = 0;
 
 				fmatch = FMATCH_OK;
 
@@ -274,6 +275,7 @@ xt_osf_match_packet(const struct sk_buff *skb, struct xt_action_param *p)
 					mss = ntohs((__force __be16)mss);
 					break;
 				case OSFOPT_TS:
+					loop_cont = 1;
 					break;
 				}
 
@@ -326,8 +328,8 @@ xt_osf_match_packet(const struct sk_buff *skb, struct xt_action_param *p)
 		fcount++;
 
 		if (info->flags & XT_OSF_LOG)
-			nf_log_packet(net, xt_family(p), xt_hooknum(p), skb,
-				      xt_in(p), xt_out(p), NULL,
+			nf_log_packet(net, p->family, p->hooknum, skb,
+				      p->in, p->out, NULL,
 				      "%s [%s:%s] : %pI4:%d -> %pI4:%d hops=%d\n",
 				      f->genre, f->version, f->subtype,
 				      &ip->saddr, ntohs(tcp->source),
@@ -341,8 +343,8 @@ xt_osf_match_packet(const struct sk_buff *skb, struct xt_action_param *p)
 	rcu_read_unlock();
 
 	if (!fcount && (info->flags & XT_OSF_LOG))
-		nf_log_packet(net, xt_family(p), xt_hooknum(p), skb, xt_in(p),
-			      xt_out(p), NULL,
+		nf_log_packet(net, p->family, p->hooknum, skb, p->in,
+			      p->out, NULL,
 			"Remote OS is not known: %pI4:%u -> %pI4:%u\n",
 				&ip->saddr, ntohs(tcp->source),
 				&ip->daddr, ntohs(tcp->dest));

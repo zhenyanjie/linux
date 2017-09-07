@@ -73,13 +73,6 @@ MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started."
 /*
  * Some TCO specific functions
  */
-
-static bool tco_has_sp5100_reg_layout(struct pci_dev *dev)
-{
-	return dev->device == PCI_DEVICE_ID_ATI_SBX00_SMBUS &&
-	       dev->revision < 0x40;
-}
-
 static void tco_timer_start(void)
 {
 	u32 val;
@@ -136,7 +129,7 @@ static void tco_timer_enable(void)
 {
 	int val;
 
-	if (!tco_has_sp5100_reg_layout(sp5100_tco_pci)) {
+	if (sp5100_tco_pci->revision >= 0x40) {
 		/* For SB800 or later */
 		/* Set the Watchdog timer resolution to 1 sec */
 		outb(SB800_PM_WATCHDOG_CONFIG, SB800_IO_PM_INDEX_REG);
@@ -349,7 +342,8 @@ static unsigned char sp5100_tco_setupdevice(void)
 	/*
 	 * Determine type of southbridge chipset.
 	 */
-	if (tco_has_sp5100_reg_layout(sp5100_tco_pci)) {
+	if (sp5100_tco_pci->device == PCI_DEVICE_ID_ATI_SBX00_SMBUS &&
+	    sp5100_tco_pci->revision < 0x40) {
 		dev_name = SP5100_DEVNAME;
 		index_reg = SP5100_IO_PM_INDEX_REG;
 		data_reg = SP5100_IO_PM_DATA_REG;
@@ -394,7 +388,8 @@ static unsigned char sp5100_tco_setupdevice(void)
 	 * Secondly, Find the watchdog timer MMIO address
 	 * from SBResource_MMIO register.
 	 */
-	if (tco_has_sp5100_reg_layout(sp5100_tco_pci)) {
+	if (sp5100_tco_pci->device == PCI_DEVICE_ID_ATI_SBX00_SMBUS &&
+	    sp5100_tco_pci->revision < 0x40) {
 		/* Read SBResource_MMIO from PCI config(PCI_Reg: 9Ch) */
 		pci_read_config_dword(sp5100_tco_pci,
 				      SP5100_SB_RESOURCE_MMIO_BASE, &val);

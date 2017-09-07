@@ -73,8 +73,8 @@ struct kvm_pic {
 	unsigned long irq_states[PIC_NUM_PINS];
 };
 
-int kvm_pic_init(struct kvm *kvm);
-void kvm_pic_destroy(struct kvm *kvm);
+struct kvm_pic *kvm_create_pic(struct kvm *kvm);
+void kvm_destroy_pic(struct kvm_pic *vpic);
 int kvm_pic_read_irq(struct kvm *kvm);
 void kvm_pic_update_irq(struct kvm_pic *s);
 
@@ -93,21 +93,28 @@ static inline int pic_in_kernel(struct kvm *kvm)
 
 static inline int irqchip_split(struct kvm *kvm)
 {
-	return kvm->arch.irqchip_mode == KVM_IRQCHIP_SPLIT;
-}
-
-static inline int irqchip_kernel(struct kvm *kvm)
-{
-	return kvm->arch.irqchip_mode == KVM_IRQCHIP_KERNEL;
+	return kvm->arch.irqchip_split;
 }
 
 static inline int irqchip_in_kernel(struct kvm *kvm)
 {
-	bool ret = kvm->arch.irqchip_mode != KVM_IRQCHIP_NONE;
+	struct kvm_pic *vpic = pic_irqchip(kvm);
+	bool ret;
 
-	/* Matches with wmb after initializing kvm->irq_routing. */
+	ret = (vpic != NULL);
+	ret |= irqchip_split(kvm);
+
+	/* Read vpic before kvm->irq_routing.  */
 	smp_rmb();
 	return ret;
+}
+
+static inline int lapic_in_kernel(struct kvm_vcpu *vcpu)
+{
+	/* Same as irqchip_in_kernel(vcpu->kvm), but with less
+	 * pointer chasing and no unnecessary memory barriers.
+	 */
+	return vcpu->arch.apic != NULL;
 }
 
 void kvm_pic_reset(struct kvm_kpic_state *s);
@@ -120,8 +127,5 @@ void __kvm_migrate_pit_timer(struct kvm_vcpu *vcpu);
 void __kvm_migrate_timers(struct kvm_vcpu *vcpu);
 
 int apic_has_pending_timer(struct kvm_vcpu *vcpu);
-
-int kvm_setup_default_irq_routing(struct kvm *kvm);
-int kvm_setup_empty_irq_routing(struct kvm *kvm);
 
 #endif

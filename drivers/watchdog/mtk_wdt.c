@@ -64,8 +64,7 @@ struct mtk_wdt_dev {
 	void __iomem *wdt_base;
 };
 
-static int mtk_wdt_restart(struct watchdog_device *wdt_dev,
-			   unsigned long action, void *data)
+static int mtk_wdt_restart(struct watchdog_device *wdt_dev)
 {
 	struct mtk_wdt_dev *mtk_wdt = watchdog_get_drvdata(wdt_dev);
 	void __iomem *wdt_base;

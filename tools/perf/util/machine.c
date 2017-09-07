@@ -1,7 +1,3 @@
-#include <dirent.h>
-#include <errno.h>
-#include <inttypes.h>
-#include <regex.h>
 #include "callchain.h"
 #include "debug.h"
 #include "event.h"
@@ -14,15 +10,9 @@
 #include "thread.h"
 #include "vdso.h"
 #include <stdbool.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <symbol/kallsyms.h>
 #include "unwind.h"
 #include "linux/hash.h"
-#include "asm/bug.h"
-
-#include "sane_ctype.h"
-#include <symbol/kallsyms.h>
 
 static void __machine__remove_thread(struct machine *machine, struct thread *th, bool lock);
 
@@ -42,7 +32,6 @@ int machine__init(struct machine *machine, const char *root_dir, pid_t pid)
 
 	machine->threads = RB_ROOT;
 	pthread_rwlock_init(&machine->threads_lock, NULL);
-	machine->nr_threads = 0;
 	INIT_LIST_HEAD(&machine->dead_threads);
 	machine->last_match = NULL;
 
@@ -51,8 +40,8 @@ int machine__init(struct machine *machine, const char *root_dir, pid_t pid)
 
 	machine->pid = pid;
 
+	machine->symbol_filter = NULL;
 	machine->id_hdr_size = 0;
-	machine->kptr_restrict_warned = false;
 	machine->comm_exec = false;
 	machine->kernel_start = 0;
 
@@ -95,25 +84,6 @@ struct machine *machine__new_host(void)
 out_delete:
 	free(machine);
 	return NULL;
-}
-
-struct machine *machine__new_kallsyms(void)
-{
-	struct machine *machine = machine__new_host();
-	/*
-	 * FIXME:
-	 * 1) MAP__FUNCTION will go away when we stop loading separate maps for
-	 *    functions and data objects.
-	 * 2) We should switch to machine__load_kallsyms(), i.e. not explicitely
-	 *    ask for not using the kcore parsing code, once this one is fixed
-	 *    to create a map per module.
-	 */
-	if (machine && __machine__load_kallsyms(machine, "/proc/kallsyms", MAP__FUNCTION, true) <= 0) {
-		machine__delete(machine);
-		machine = NULL;
-	}
-
-	return machine;
 }
 
 static void dsos__purge(struct dsos *dsos)
@@ -166,16 +136,15 @@ void machine__exit(struct machine *machine)
 
 void machine__delete(struct machine *machine)
 {
-	if (machine) {
-		machine__exit(machine);
-		free(machine);
-	}
+	machine__exit(machine);
+	free(machine);
 }
 
 void machines__init(struct machines *machines)
 {
 	machine__init(&machines->host, "", HOST_KERNEL_ID);
 	machines->guests = RB_ROOT;
+	machines->symbol_filter = NULL;
 }
 
 void machines__exit(struct machines *machines)
@@ -199,6 +168,8 @@ struct machine *machines__add(struct machines *machines, pid_t pid,
 		return NULL;
 	}
 
+	machine->symbol_filter = machines->symbol_filter;
+
 	while (*p != NULL) {
 		parent = *p;
 		pos = rb_entry(parent, struct machine, rb_node);
@@ -212,6 +183,21 @@ struct machine *machines__add(struct machines *machines, pid_t pid,
 	rb_insert_color(&machine->rb_node, &machines->guests);
 
 	return machine;
+}
+
+void machines__set_symbol_filter(struct machines *machines,
+				 symbol_filter_t symbol_filter)
+{
+	struct rb_node *nd;
+
+	machines->symbol_filter = symbol_filter;
+	machines->host.symbol_filter = symbol_filter;
+
+	for (nd = rb_first(&machines->guests); nd; nd = rb_next(nd)) {
+		struct machine *machine = rb_entry(nd, struct machine, rb_node);
+
+		machine->symbol_filter = symbol_filter;
+	}
 }
 
 void machines__set_comm_exec(struct machines *machines, bool comm_exec)
@@ -375,7 +361,7 @@ out_err:
 }
 
 /*
- * Caller must eventually drop thread->refcnt returned with a successful
+ * Caller must eventually drop thread->refcnt returned with a successfull
  * lookup/new thread inserted.
  */
 static struct thread *____machine__findnew_thread(struct machine *machine,
@@ -444,7 +430,6 @@ static struct thread *____machine__findnew_thread(struct machine *machine,
 		 */
 		thread__get(th);
 		machine->last_match = th;
-		++machine->nr_threads;
 	}
 
 	return th;
@@ -503,37 +488,6 @@ int machine__process_comm_event(struct machine *machine, union perf_event *event
 	if (thread == NULL ||
 	    __thread__set_comm(thread, event->comm.comm, sample->time, exec)) {
 		dump_printf("problem processing PERF_RECORD_COMM, skipping event.\n");
-		err = -1;
-	}
-
-	thread__put(thread);
-
-	return err;
-}
-
-int machine__process_namespaces_event(struct machine *machine __maybe_unused,
-				      union perf_event *event,
-				      struct perf_sample *sample __maybe_unused)
-{
-	struct thread *thread = machine__findnew_thread(machine,
-							event->namespaces.pid,
-							event->namespaces.tid);
-	int err = 0;
-
-	WARN_ONCE(event->namespaces.nr_namespaces > NR_NAMESPACES,
-		  "\nWARNING: kernel seems to support more namespaces than perf"
-		  " tool.\nTry updating the perf tool..\n\n");
-
-	WARN_ONCE(event->namespaces.nr_namespaces < NR_NAMESPACES,
-		  "\nWARNING: perf tool seems to support more namespaces than"
-		  " the kernel.\nTry updating the kernel..\n\n");
-
-	if (dump_trace)
-		perf_event__fprintf_namespaces(event, stdout);
-
-	if (thread == NULL ||
-	    thread__set_namespaces(thread, sample->time, &event->namespaces)) {
-		dump_printf("problem processing PERF_RECORD_NAMESPACES, skipping event.\n");
 		err = -1;
 	}
 
@@ -727,12 +681,10 @@ size_t machine__fprintf_vmlinux_path(struct machine *machine, FILE *fp)
 
 size_t machine__fprintf(struct machine *machine, FILE *fp)
 {
-	size_t ret;
+	size_t ret = 0;
 	struct rb_node *nd;
 
 	pthread_rwlock_rdlock(&machine->threads_lock);
-
-	ret = fprintf(fp, "Threads: %u\n", machine->nr_threads);
 
 	for (nd = rb_first(&machine->threads); nd; nd = rb_next(nd)) {
 		struct thread *pos = rb_entry(nd, struct thread, rb_node);
@@ -753,7 +705,7 @@ static struct dso *machine__get_kernel(struct machine *machine)
 	if (machine__is_host(machine)) {
 		vmlinux_name = symbol_conf.vmlinux_name;
 		if (!vmlinux_name)
-			vmlinux_name = DSO__NAME_KALLSYMS;
+			vmlinux_name = "[kernel.kallsyms]";
 
 		kernel = machine__findnew_kernel(machine, vmlinux_name,
 						 "[kernel]", DSO_TYPE_KERNEL);
@@ -823,7 +775,7 @@ static u64 machine__get_running_kernel_start(struct machine *machine,
 
 int __machine__create_kernel_maps(struct machine *machine, struct dso *kernel)
 {
-	int type;
+	enum map_type type;
 	u64 start = machine__get_running_kernel_start(machine, NULL);
 
 	/* In case of renewal the kernel map, destroy previous one */
@@ -854,7 +806,7 @@ int __machine__create_kernel_maps(struct machine *machine, struct dso *kernel)
 
 void machine__destroy_kernel_maps(struct machine *machine)
 {
-	int type;
+	enum map_type type;
 
 	for (type = 0; type < MAP__NR_TYPES; ++type) {
 		struct kmap *kmap;
@@ -956,11 +908,11 @@ int machines__create_kernel_maps(struct machines *machines, pid_t pid)
 	return machine__create_kernel_maps(machine);
 }
 
-int __machine__load_kallsyms(struct machine *machine, const char *filename,
-			     enum map_type type, bool no_kcore)
+int machine__load_kallsyms(struct machine *machine, const char *filename,
+			   enum map_type type, symbol_filter_t filter)
 {
 	struct map *map = machine__kernel_map(machine);
-	int ret = __dso__load_kallsyms(map->dso, filename, map, no_kcore);
+	int ret = dso__load_kallsyms(map->dso, filename, map, filter);
 
 	if (ret > 0) {
 		dso__set_loaded(map->dso, type);
@@ -975,16 +927,11 @@ int __machine__load_kallsyms(struct machine *machine, const char *filename,
 	return ret;
 }
 
-int machine__load_kallsyms(struct machine *machine, const char *filename,
-			   enum map_type type)
-{
-	return __machine__load_kallsyms(machine, filename, type, false);
-}
-
-int machine__load_vmlinux_path(struct machine *machine, enum map_type type)
+int machine__load_vmlinux_path(struct machine *machine, enum map_type type,
+			       symbol_filter_t filter)
 {
 	struct map *map = machine__kernel_map(machine);
-	int ret = dso__load_vmlinux_path(map->dso, map);
+	int ret = dso__load_vmlinux_path(map->dso, map, filter);
 
 	if (ret > 0)
 		dso__set_loaded(map->dso, type);
@@ -1133,19 +1080,11 @@ static int machine__set_modules_path(struct machine *machine)
 
 	return map_groups__set_modules_path_dir(&machine->kmaps, modules_path, 0);
 }
-int __weak arch__fix_module_text_start(u64 *start __maybe_unused,
-				const char *name __maybe_unused)
-{
-	return 0;
-}
 
 static int machine__create_module(void *arg, const char *name, u64 start)
 {
 	struct machine *machine = arg;
 	struct map *map;
-
-	if (arch__fix_module_text_start(&start, name) < 0)
-		return -1;
 
 	map = machine__findnew_module_map(machine, start, name);
 	if (map == NULL)
@@ -1186,10 +1125,10 @@ int machine__create_kernel_maps(struct machine *machine)
 {
 	struct dso *kernel = machine__get_kernel(machine);
 	const char *name;
-	u64 addr;
+	u64 addr = machine__get_running_kernel_start(machine, &name);
 	int ret;
 
-	if (kernel == NULL)
+	if (!addr || kernel == NULL)
 		return -1;
 
 	ret = __machine__create_kernel_maps(machine, kernel);
@@ -1211,9 +1150,8 @@ int machine__create_kernel_maps(struct machine *machine)
 	 */
 	map_groups__fixup_end(&machine->kmaps);
 
-	addr = machine__get_running_kernel_start(machine, &name);
-	if (!addr) {
-	} else if (maps__set_kallsyms_ref_reloc_sym(machine->vmlinux_maps, name, addr)) {
+	if (maps__set_kallsyms_ref_reloc_sym(machine->vmlinux_maps, name,
+					     addr)) {
 		machine__destroy_kernel_maps(machine);
 		return -1;
 	}
@@ -1353,7 +1291,7 @@ static int machine__process_kernel_mmap_event(struct machine *machine,
 			/*
 			 * preload dso of guest kernel and modules
 			 */
-			dso__load(kernel, machine__kernel_map(machine));
+			dso__load(kernel, machine__kernel_map(machine), NULL);
 		}
 	}
 	return 0;
@@ -1363,8 +1301,9 @@ out_problem:
 
 int machine__process_mmap2_event(struct machine *machine,
 				 union perf_event *event,
-				 struct perf_sample *sample)
+				 struct perf_sample *sample __maybe_unused)
 {
+	u8 cpumode = event->header.misc & PERF_RECORD_MISC_CPUMODE_MASK;
 	struct thread *thread;
 	struct map *map;
 	enum map_type type;
@@ -1373,8 +1312,8 @@ int machine__process_mmap2_event(struct machine *machine,
 	if (dump_trace)
 		perf_event__fprintf_mmap2(event, stdout);
 
-	if (sample->cpumode == PERF_RECORD_MISC_GUEST_KERNEL ||
-	    sample->cpumode == PERF_RECORD_MISC_KERNEL) {
+	if (cpumode == PERF_RECORD_MISC_GUEST_KERNEL ||
+	    cpumode == PERF_RECORD_MISC_KERNEL) {
 		ret = machine__process_kernel_mmap_event(machine, event);
 		if (ret < 0)
 			goto out_problem;
@@ -1403,16 +1342,11 @@ int machine__process_mmap2_event(struct machine *machine,
 	if (map == NULL)
 		goto out_problem_map;
 
-	ret = thread__insert_map(thread, map);
-	if (ret)
-		goto out_problem_insert;
-
+	thread__insert_map(thread, map);
 	thread__put(thread);
 	map__put(map);
 	return 0;
 
-out_problem_insert:
-	map__put(map);
 out_problem_map:
 	thread__put(thread);
 out_problem:
@@ -1421,8 +1355,9 @@ out_problem:
 }
 
 int machine__process_mmap_event(struct machine *machine, union perf_event *event,
-				struct perf_sample *sample)
+				struct perf_sample *sample __maybe_unused)
 {
+	u8 cpumode = event->header.misc & PERF_RECORD_MISC_CPUMODE_MASK;
 	struct thread *thread;
 	struct map *map;
 	enum map_type type;
@@ -1431,8 +1366,8 @@ int machine__process_mmap_event(struct machine *machine, union perf_event *event
 	if (dump_trace)
 		perf_event__fprintf_mmap(event, stdout);
 
-	if (sample->cpumode == PERF_RECORD_MISC_GUEST_KERNEL ||
-	    sample->cpumode == PERF_RECORD_MISC_KERNEL) {
+	if (cpumode == PERF_RECORD_MISC_GUEST_KERNEL ||
+	    cpumode == PERF_RECORD_MISC_KERNEL) {
 		ret = machine__process_kernel_mmap_event(machine, event);
 		if (ret < 0)
 			goto out_problem;
@@ -1458,16 +1393,11 @@ int machine__process_mmap_event(struct machine *machine, union perf_event *event
 	if (map == NULL)
 		goto out_problem_map;
 
-	ret = thread__insert_map(thread, map);
-	if (ret)
-		goto out_problem_insert;
-
+	thread__insert_map(thread, map);
 	thread__put(thread);
 	map__put(map);
 	return 0;
 
-out_problem_insert:
-	map__put(map);
 out_problem_map:
 	thread__put(thread);
 out_problem:
@@ -1480,12 +1410,11 @@ static void __machine__remove_thread(struct machine *machine, struct thread *th,
 	if (machine->last_match == th)
 		machine->last_match = NULL;
 
-	BUG_ON(refcount_read(&th->refcnt) == 0);
+	BUG_ON(atomic_read(&th->refcnt) == 0);
 	if (lock)
 		pthread_rwlock_wrlock(&machine->threads_lock);
 	rb_erase_init(&th->rb_node, &machine->threads);
 	RB_CLEAR_NODE(&th->rb_node);
-	--machine->nr_threads;
 	/*
 	 * Move it first to the dead_threads list, then drop the reference,
 	 * if this is the last reference, then the thread__delete destructor
@@ -1579,8 +1508,6 @@ int machine__process_event(struct machine *machine, union perf_event *event,
 		ret = machine__process_comm_event(machine, event, sample); break;
 	case PERF_RECORD_MMAP:
 		ret = machine__process_mmap_event(machine, event, sample); break;
-	case PERF_RECORD_NAMESPACES:
-		ret = machine__process_namespaces_event(machine, event, sample); break;
 	case PERF_RECORD_MMAP2:
 		ret = machine__process_mmap2_event(machine, event, sample); break;
 	case PERF_RECORD_FORK:
@@ -1608,7 +1535,7 @@ int machine__process_event(struct machine *machine, union perf_event *event,
 
 static bool symbol__match_regex(struct symbol *sym, regex_t *regex)
 {
-	if (!regexec(regex, sym->name, 0, NULL, 0))
+	if (sym->name && !regexec(regex, sym->name, 0, NULL, 0))
 		return 1;
 	return 0;
 }
@@ -1674,15 +1601,10 @@ struct mem_info *sample__resolve_mem(struct perf_sample *sample,
 }
 
 static int add_callchain_ip(struct thread *thread,
-			    struct callchain_cursor *cursor,
 			    struct symbol **parent,
 			    struct addr_location *root_al,
 			    u8 *cpumode,
-			    u64 ip,
-			    bool branch,
-			    struct branch_flags *flags,
-			    int nr_loop_iter,
-			    int samples)
+			    u64 ip)
 {
 	struct addr_location al;
 
@@ -1710,7 +1632,7 @@ static int add_callchain_ip(struct thread *thread,
 				 * It seems the callchain is corrupted.
 				 * Discard all.
 				 */
-				callchain_cursor_reset(cursor);
+				callchain_cursor_reset(&callchain_cursor);
 				return 1;
 			}
 			return 0;
@@ -1720,7 +1642,7 @@ static int add_callchain_ip(struct thread *thread,
 	}
 
 	if (al.sym != NULL) {
-		if (perf_hpp_list.parent && !*parent &&
+		if (sort__has_parent && !*parent &&
 		    symbol__match_regex(al.sym, &parent_regex))
 			*parent = al.sym;
 		else if (have_ignore_callees && root_al &&
@@ -1728,14 +1650,13 @@ static int add_callchain_ip(struct thread *thread,
 			/* Treat this symbol as the root,
 			   forgetting its callees. */
 			*root_al = al;
-			callchain_cursor_reset(cursor);
+			callchain_cursor_reset(&callchain_cursor);
 		}
 	}
 
 	if (symbol_conf.hide_unresolved && al.sym == NULL)
 		return 0;
-	return callchain_cursor_append(cursor, al.addr, al.map, al.sym,
-				       branch, flags, nr_loop_iter, samples);
+	return callchain_cursor_append(&callchain_cursor, al.addr, al.map, al.sym);
 }
 
 struct branch_info *sample__resolve_bstack(struct perf_sample *sample,
@@ -1805,15 +1726,15 @@ static int remove_loops(struct branch_entry *l, int nr)
  * negative error code on other errors.
  */
 static int resolve_lbr_callchain_sample(struct thread *thread,
-					struct callchain_cursor *cursor,
 					struct perf_sample *sample,
 					struct symbol **parent,
 					struct addr_location *root_al,
 					int max_stack)
 {
 	struct ip_callchain *chain = sample->callchain;
-	int chain_nr = min(max_stack, (int)chain->nr), i;
+	int chain_nr = min(max_stack, (int)chain->nr);
 	u8 cpumode = PERF_RECORD_MISC_USER;
+	int i, j, err;
 	u64 ip;
 
 	for (i = 0; i < chain_nr; i++) {
@@ -1824,9 +1745,7 @@ static int resolve_lbr_callchain_sample(struct thread *thread,
 	/* LBR only affects the user callchain */
 	if (i != chain_nr) {
 		struct branch_stack *lbr_stack = sample->branch_stack;
-		int lbr_nr = lbr_stack->nr, j, k;
-		bool branch;
-		struct branch_flags *flags;
+		int lbr_nr = lbr_stack->nr;
 		/*
 		 * LBR callstack can only get user call chain.
 		 * The mix_chain_nr is kernel call chain
@@ -1839,43 +1758,29 @@ static int resolve_lbr_callchain_sample(struct thread *thread,
 		 */
 		int mix_chain_nr = i + 1 + lbr_nr + 1;
 
-		for (j = 0; j < mix_chain_nr; j++) {
-			int err;
-			branch = false;
-			flags = NULL;
+		if (mix_chain_nr > PERF_MAX_STACK_DEPTH + PERF_MAX_BRANCH_DEPTH) {
+			pr_warning("corrupted callchain. skipping...\n");
+			return 0;
+		}
 
+		for (j = 0; j < mix_chain_nr; j++) {
 			if (callchain_param.order == ORDER_CALLEE) {
 				if (j < i + 1)
 					ip = chain->ips[j];
-				else if (j > i + 1) {
-					k = j - i - 2;
-					ip = lbr_stack->entries[k].from;
-					branch = true;
-					flags = &lbr_stack->entries[k].flags;
-				} else {
+				else if (j > i + 1)
+					ip = lbr_stack->entries[j - i - 2].from;
+				else
 					ip = lbr_stack->entries[0].to;
-					branch = true;
-					flags = &lbr_stack->entries[0].flags;
-				}
 			} else {
-				if (j < lbr_nr) {
-					k = lbr_nr - j - 1;
-					ip = lbr_stack->entries[k].from;
-					branch = true;
-					flags = &lbr_stack->entries[k].flags;
-				}
+				if (j < lbr_nr)
+					ip = lbr_stack->entries[lbr_nr - j - 1].from;
 				else if (j > lbr_nr)
 					ip = chain->ips[i + 1 - (j - lbr_nr)];
-				else {
+				else
 					ip = lbr_stack->entries[0].to;
-					branch = true;
-					flags = &lbr_stack->entries[0].flags;
-				}
 			}
 
-			err = add_callchain_ip(thread, cursor, parent,
-					       root_al, &cpumode, ip,
-					       branch, flags, 0, 0);
+			err = add_callchain_ip(thread, parent, root_al, &cpumode, ip);
 			if (err)
 				return (err < 0) ? err : 0;
 		}
@@ -1886,7 +1791,6 @@ static int resolve_lbr_callchain_sample(struct thread *thread,
 }
 
 static int thread__resolve_callchain_sample(struct thread *thread,
-					    struct callchain_cursor *cursor,
 					    struct perf_evsel *evsel,
 					    struct perf_sample *sample,
 					    struct symbol **parent,
@@ -1895,15 +1799,16 @@ static int thread__resolve_callchain_sample(struct thread *thread,
 {
 	struct branch_stack *branch = sample->branch_stack;
 	struct ip_callchain *chain = sample->callchain;
-	int chain_nr = chain->nr;
+	int chain_nr = min(max_stack, (int)chain->nr);
 	u8 cpumode = PERF_RECORD_MISC_USER;
-	int i, j, err, nr_entries;
+	int i, j, err;
 	int skip_idx = -1;
 	int first_call = 0;
-	int nr_loop_iter;
 
-	if (perf_evsel__has_branch_callstack(evsel)) {
-		err = resolve_lbr_callchain_sample(thread, cursor, sample, parent,
+	callchain_cursor_reset(&callchain_cursor);
+
+	if (has_branch_callstack(evsel)) {
+		err = resolve_lbr_callchain_sample(thread, sample, parent,
 						   root_al, max_stack);
 		if (err)
 			return (err < 0) ? err : 0;
@@ -1913,7 +1818,8 @@ static int thread__resolve_callchain_sample(struct thread *thread,
 	 * Based on DWARF debug information, some architectures skip
 	 * a callchain entry saved by the kernel.
 	 */
-	skip_idx = arch_skip_callchain_idx(thread, chain);
+	if (chain->nr < PERF_MAX_STACK_DEPTH)
+		skip_idx = arch_skip_callchain_idx(thread, chain);
 
 	/*
 	 * Add branches to call stack for easier browsing. This gives
@@ -1956,37 +1862,14 @@ static int thread__resolve_callchain_sample(struct thread *thread,
 				be[i] = branch->entries[branch->nr - i - 1];
 		}
 
-		nr_loop_iter = nr;
 		nr = remove_loops(be, nr);
 
-		/*
-		 * Get the number of iterations.
-		 * It's only approximation, but good enough in practice.
-		 */
-		if (nr_loop_iter > nr)
-			nr_loop_iter = nr_loop_iter - nr + 1;
-		else
-			nr_loop_iter = 0;
-
 		for (i = 0; i < nr; i++) {
-			if (i == nr - 1)
-				err = add_callchain_ip(thread, cursor, parent,
-						       root_al,
-						       NULL, be[i].to,
-						       true, &be[i].flags,
-						       nr_loop_iter, 1);
-			else
-				err = add_callchain_ip(thread, cursor, parent,
-						       root_al,
-						       NULL, be[i].to,
-						       true, &be[i].flags,
-						       0, 0);
-
+			err = add_callchain_ip(thread, parent, root_al,
+					       NULL, be[i].to);
 			if (!err)
-				err = add_callchain_ip(thread, cursor, parent, root_al,
-						       NULL, be[i].from,
-						       true, &be[i].flags,
-						       0, 0);
+				err = add_callchain_ip(thread, parent, root_al,
+						       NULL, be[i].from);
 			if (err == -EINVAL)
 				break;
 			if (err)
@@ -1996,8 +1879,12 @@ static int thread__resolve_callchain_sample(struct thread *thread,
 	}
 
 check_calls:
-	for (i = first_call, nr_entries = 0;
-	     i < chain_nr && nr_entries < max_stack; i++) {
+	if (chain->nr > PERF_MAX_STACK_DEPTH && (int)chain->nr > max_stack) {
+		pr_warning("corrupted callchain. skipping...\n");
+		return 0;
+	}
+
+	for (i = first_call; i < chain_nr; i++) {
 		u64 ip;
 
 		if (callchain_param.order == ORDER_CALLEE)
@@ -2011,12 +1898,7 @@ check_calls:
 #endif
 		ip = chain->ips[j];
 
-		if (ip < PERF_CONTEXT_MAX)
-                       ++nr_entries;
-
-		err = add_callchain_ip(thread, cursor, parent,
-				       root_al, &cpumode, ip,
-				       false, NULL, 0, 0);
+		err = add_callchain_ip(thread, parent, root_al, &cpumode, ip);
 
 		if (err)
 			return (err < 0) ? err : 0;
@@ -2032,16 +1914,22 @@ static int unwind_entry(struct unwind_entry *entry, void *arg)
 	if (symbol_conf.hide_unresolved && entry->sym == NULL)
 		return 0;
 	return callchain_cursor_append(cursor, entry->ip,
-				       entry->map, entry->sym,
-				       false, NULL, 0, 0);
+				       entry->map, entry->sym);
 }
 
-static int thread__resolve_callchain_unwind(struct thread *thread,
-					    struct callchain_cursor *cursor,
-					    struct perf_evsel *evsel,
-					    struct perf_sample *sample,
-					    int max_stack)
+int thread__resolve_callchain(struct thread *thread,
+			      struct perf_evsel *evsel,
+			      struct perf_sample *sample,
+			      struct symbol **parent,
+			      struct addr_location *root_al,
+			      int max_stack)
 {
+	int ret = thread__resolve_callchain_sample(thread, evsel,
+						   sample, parent,
+						   root_al, max_stack);
+	if (ret)
+		return ret;
+
 	/* Can we do dwarf post unwind? */
 	if (!((evsel->attr.sample_type & PERF_SAMPLE_REGS_USER) &&
 	      (evsel->attr.sample_type & PERF_SAMPLE_STACK_USER)))
@@ -2052,45 +1940,9 @@ static int thread__resolve_callchain_unwind(struct thread *thread,
 	    (!sample->user_stack.size))
 		return 0;
 
-	return unwind__get_entries(unwind_entry, cursor,
+	return unwind__get_entries(unwind_entry, &callchain_cursor,
 				   thread, sample, max_stack);
-}
 
-int thread__resolve_callchain(struct thread *thread,
-			      struct callchain_cursor *cursor,
-			      struct perf_evsel *evsel,
-			      struct perf_sample *sample,
-			      struct symbol **parent,
-			      struct addr_location *root_al,
-			      int max_stack)
-{
-	int ret = 0;
-
-	callchain_cursor_reset(&callchain_cursor);
-
-	if (callchain_param.order == ORDER_CALLEE) {
-		ret = thread__resolve_callchain_sample(thread, cursor,
-						       evsel, sample,
-						       parent, root_al,
-						       max_stack);
-		if (ret)
-			return ret;
-		ret = thread__resolve_callchain_unwind(thread, cursor,
-						       evsel, sample,
-						       max_stack);
-	} else {
-		ret = thread__resolve_callchain_unwind(thread, cursor,
-						       evsel, sample,
-						       max_stack);
-		if (ret)
-			return ret;
-		ret = thread__resolve_callchain_sample(thread, cursor,
-						       evsel, sample,
-						       parent, root_al,
-						       max_stack);
-	}
-
-	return ret;
 }
 
 int machine__for_each_thread(struct machine *machine,
@@ -2209,7 +2061,7 @@ int machine__get_kernel_start(struct machine *machine)
 	 */
 	machine->kernel_start = 1ULL << 63;
 	if (map) {
-		err = map__load(map);
+		err = map__load(map, machine->symbol_filter);
 		if (map->start)
 			machine->kernel_start = map->start;
 	}
@@ -2225,7 +2077,7 @@ char *machine__resolve_kernel_addr(void *vmachine, unsigned long long *addrp, ch
 {
 	struct machine *machine = vmachine;
 	struct map *map;
-	struct symbol *sym = map_groups__find_symbol(&machine->kmaps, MAP__FUNCTION, *addrp, &map);
+	struct symbol *sym = map_groups__find_symbol(&machine->kmaps, MAP__FUNCTION, *addrp, &map,  NULL);
 
 	if (sym == NULL)
 		return NULL;

@@ -10,6 +10,7 @@
  * for more details.
  */
 
+#include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -300,6 +301,8 @@ static irqreturn_t pcie_pme_irq(int irq, void *context)
  */
 static int pcie_pme_set_native(struct pci_dev *dev, void *ign)
 {
+	dev_info(&dev->dev, "Signaling PME through PCIe PME interrupt\n");
+
 	device_set_run_wake(&dev->dev, true);
 	dev->pme_interrupt = true;
 	return 0;
@@ -317,8 +320,23 @@ static int pcie_pme_set_native(struct pci_dev *dev, void *ign)
 static void pcie_pme_mark_devices(struct pci_dev *port)
 {
 	pcie_pme_set_native(port, NULL);
-	if (port->subordinate)
+	if (port->subordinate) {
 		pci_walk_bus(port->subordinate, pcie_pme_set_native, NULL);
+	} else {
+		struct pci_bus *bus = port->bus;
+		struct pci_dev *dev;
+
+		/* Check if this is a root port event collector. */
+		if (pci_pcie_type(port) != PCI_EXP_TYPE_RC_EC || !bus)
+			return;
+
+		down_read(&pci_bus_sem);
+		list_for_each_entry(dev, &bus->devices, bus_list)
+			if (pci_is_pcie(dev)
+			    && pci_pcie_type(dev) == PCI_EXP_TYPE_RC_END)
+				pcie_pme_set_native(dev, NULL);
+		up_read(&pci_bus_sem);
+	}
 }
 
 /**
@@ -347,14 +365,12 @@ static int pcie_pme_probe(struct pcie_device *srv)
 	ret = request_irq(srv->irq, pcie_pme_irq, IRQF_SHARED, "PCIe PME", srv);
 	if (ret) {
 		kfree(data);
-		return ret;
+	} else {
+		pcie_pme_mark_devices(port);
+		pcie_pme_interrupt_enable(port, true);
 	}
 
-	dev_info(&port->dev, "Signaling PME with IRQ %d\n", srv->irq);
-
-	pcie_pme_mark_devices(port);
-	pcie_pme_interrupt_enable(port, true);
-	return 0;
+	return ret;
 }
 
 static bool pcie_pme_check_wakeup(struct pci_bus *bus)
@@ -380,7 +396,7 @@ static int pcie_pme_suspend(struct pcie_device *srv)
 {
 	struct pcie_pme_service_data *data = get_service_data(srv);
 	struct pci_dev *port = srv->port;
-	bool wakeup, wake_irq_enabled = false;
+	bool wakeup;
 	int ret;
 
 	if (device_may_wakeup(&port->dev)) {
@@ -393,12 +409,11 @@ static int pcie_pme_suspend(struct pcie_device *srv)
 	spin_lock_irq(&data->lock);
 	if (wakeup) {
 		ret = enable_irq_wake(srv->irq);
-		if (ret == 0) {
-			data->suspend_level = PME_SUSPEND_WAKEUP;
-			wake_irq_enabled = true;
-		}
+		data->suspend_level = PME_SUSPEND_WAKEUP;
 	}
-	if (!wake_irq_enabled) {
+	if (!wakeup || ret) {
+		struct pci_dev *port = srv->port;
+
 		pcie_pme_interrupt_enable(port, false);
 		pcie_clear_root_pme_status(port);
 		data->suspend_level = PME_SUSPEND_NOIRQ;
@@ -462,4 +477,5 @@ static int __init pcie_pme_service_init(void)
 {
 	return pcie_port_service_register(&pcie_pme_driver);
 }
-device_initcall(pcie_pme_service_init);
+
+module_init(pcie_pme_service_init);

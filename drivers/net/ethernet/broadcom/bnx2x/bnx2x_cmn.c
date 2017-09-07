@@ -549,7 +549,14 @@ static int bnx2x_alloc_rx_sge(struct bnx2x *bp, struct bnx2x_fastpath *fp,
 	struct bnx2x_alloc_pool *pool = &fp->page_pool;
 	dma_addr_t mapping;
 
-	if (!pool->page) {
+	if (!pool->page || (PAGE_SIZE - pool->offset) < SGE_PAGE_SIZE) {
+
+		/* put page reference used by the memory pool, since we
+		 * won't be using this page as the mempool anymore.
+		 */
+		if (pool->page)
+			put_page(pool->page);
+
 		pool->page = alloc_pages(gfp_mask, PAGES_PER_SGE_SHIFT);
 		if (unlikely(!pool->page))
 			return -ENOMEM;
@@ -564,6 +571,7 @@ static int bnx2x_alloc_rx_sge(struct bnx2x *bp, struct bnx2x_fastpath *fp,
 		return -ENOMEM;
 	}
 
+	get_page(pool->page);
 	sw_buf->page = pool->page;
 	sw_buf->offset = pool->offset;
 
@@ -573,10 +581,7 @@ static int bnx2x_alloc_rx_sge(struct bnx2x *bp, struct bnx2x_fastpath *fp,
 	sge->addr_lo = cpu_to_le32(U64_LO(mapping));
 
 	pool->offset += SGE_PAGE_SIZE;
-	if (PAGE_SIZE - pool->offset >= SGE_PAGE_SIZE)
-		get_page(pool->page);
-	else
-		pool->page = NULL;
+
 	return 0;
 }
 
@@ -719,7 +724,7 @@ static void bnx2x_gro_ipv6_csum(struct bnx2x *bp, struct sk_buff *skb)
 static void bnx2x_gro_csum(struct bnx2x *bp, struct sk_buff *skb,
 			    void (*gro_func)(struct bnx2x*, struct sk_buff*))
 {
-	skb_reset_network_header(skb);
+	skb_set_network_header(skb, 0);
 	gro_func(bp, skb);
 	tcp_gro_complete(skb);
 }
@@ -2018,10 +2023,9 @@ static void bnx2x_set_rx_buf_size(struct bnx2x *bp)
 			mtu = bp->dev->mtu;
 		fp->rx_buf_size = BNX2X_FW_RX_ALIGN_START +
 				  IP_HEADER_ALIGNMENT_PADDING +
-				  ETH_OVERHEAD +
+				  ETH_OVREHEAD +
 				  mtu +
 				  BNX2X_FW_RX_ALIGN_END;
-		fp->rx_buf_size = SKB_DATA_ALIGN(fp->rx_buf_size);
 		/* Note : rx_buf_size doesn't take into account NET_SKB_PAD */
 		if (fp->rx_buf_size + NET_SKB_PAD <= PAGE_SIZE)
 			fp->rx_frag_size = fp->rx_buf_size + NET_SKB_PAD;
@@ -3038,12 +3042,8 @@ int bnx2x_nic_unload(struct bnx2x *bp, int unload_mode, bool keep_link)
 		bnx2x_save_statistics(bp);
 	}
 
-	/* wait till consumers catch up with producers in all queues.
-	 * If we're recovering, FW can't write to host so no reason
-	 * to wait for the queues to complete all Tx.
-	 */
-	if (unload_mode != UNLOAD_RECOVERY)
-		bnx2x_drain_tx_queues(bp);
+	/* wait till consumers catch up with producers in all queues */
+	bnx2x_drain_tx_queues(bp);
 
 	/* if VF indicate to PF this function is going down (PF will delete sp
 	 * elements and clear initializations
@@ -3225,7 +3225,7 @@ static int bnx2x_poll(struct napi_struct *napi, int budget)
 		 * has been updated when NAPI was scheduled.
 		 */
 		if (IS_FCOE_FP(fp)) {
-			napi_complete_done(napi, rx_work_done);
+			napi_complete(napi);
 		} else {
 			bnx2x_update_fpsb_idx(fp);
 			/* bnx2x_has_rx_work() reads the status block,
@@ -3244,14 +3244,13 @@ static int bnx2x_poll(struct napi_struct *napi, int budget)
 			rmb();
 
 			if (!(bnx2x_has_rx_work(fp) || bnx2x_has_tx_work(fp))) {
-				if (napi_complete_done(napi, rx_work_done)) {
-					/* Re-enable interrupts */
-					DP(NETIF_MSG_RX_STATUS,
-					   "Update index to %d\n", fp->fp_hc_idx);
-					bnx2x_ack_sb(bp, fp->igu_sb_id, USTORM_ID,
-						     le16_to_cpu(fp->fp_hc_idx),
-						     IGU_INT_ENABLE, 1);
-				}
+				napi_complete(napi);
+				/* Re-enable interrupts */
+				DP(NETIF_MSG_RX_STATUS,
+				   "Update index to %d\n", fp->fp_hc_idx);
+				bnx2x_ack_sb(bp, fp->igu_sb_id, USTORM_ID,
+					     le16_to_cpu(fp->fp_hc_idx),
+					     IGU_INT_ENABLE, 1);
 			} else {
 				rx_work_done = budget;
 			}
@@ -4273,17 +4272,6 @@ int bnx2x_setup_tc(struct net_device *dev, u8 num_tc)
 	return 0;
 }
 
-int __bnx2x_setup_tc(struct net_device *dev, u32 handle, __be16 proto,
-		     struct tc_to_netdev *tc)
-{
-	if (tc->type != TC_SETUP_MQPRIO)
-		return -EINVAL;
-
-	tc->mqprio->hw = TC_MQPRIO_HW_OFFLOAD_TCS;
-
-	return bnx2x_setup_tc(dev, tc->mqprio->num_tc);
-}
-
 /* called with rtnl_lock */
 int bnx2x_change_mac_addr(struct net_device *dev, void *p)
 {
@@ -4855,6 +4843,12 @@ int bnx2x_change_mtu(struct net_device *dev, int new_mtu)
 		return -EAGAIN;
 	}
 
+	if ((new_mtu > ETH_MAX_JUMBO_PACKET_SIZE) ||
+	    ((new_mtu + ETH_HLEN) < ETH_MIN_PACKET_SIZE)) {
+		BNX2X_ERR("Can't support requested MTU size\n");
+		return -EINVAL;
+	}
+
 	/* This does not race with packet allocation
 	 * because the actual alloc size is
 	 * only updated as part of load
@@ -5092,3 +5086,4 @@ void bnx2x_schedule_sp_rtnl(struct bnx2x *bp, enum sp_rtnl_flag flag,
 	   flag);
 	schedule_delayed_work(&bp->sp_rtnl_task, 0);
 }
+EXPORT_SYMBOL(bnx2x_schedule_sp_rtnl);

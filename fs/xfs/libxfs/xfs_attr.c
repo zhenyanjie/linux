@@ -23,7 +23,6 @@
 #include "xfs_trans_resv.h"
 #include "xfs_bit.h"
 #include "xfs_mount.h"
-#include "xfs_defer.h"
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
 #include "xfs_attr_sf.h"
@@ -131,6 +130,9 @@ xfs_attr_get(
 	if (XFS_FORCED_SHUTDOWN(ip->i_mount))
 		return -EIO;
 
+	if (!xfs_inode_hasattr(ip))
+		return -ENOATTR;
+
 	error = xfs_attr_args_init(&args, ip, name, flags);
 	if (error)
 		return error;
@@ -201,7 +203,7 @@ xfs_attr_set(
 {
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_da_args	args;
-	struct xfs_defer_ops	dfops;
+	struct xfs_bmap_free	flist;
 	struct xfs_trans_res	tres;
 	xfs_fsblock_t		firstblock;
 	int			rsvd = (flags & ATTR_ROOT) != 0;
@@ -219,7 +221,7 @@ xfs_attr_set(
 	args.value = value;
 	args.valuelen = valuelen;
 	args.firstblock = &firstblock;
-	args.dfops = &dfops;
+	args.flist = &flist;
 	args.op_flags = XFS_DA_OP_ADDNAME | XFS_DA_OP_OKNOENT;
 	args.total = xfs_attr_calc_size(&args, &local);
 
@@ -240,21 +242,37 @@ xfs_attr_set(
 			return error;
 	}
 
-	tres.tr_logres = M_RES(mp)->tr_attrsetm.tr_logres +
-			 M_RES(mp)->tr_attrsetrt.tr_logres * args.total;
-	tres.tr_logcount = XFS_ATTRSET_LOG_COUNT;
-	tres.tr_logflags = XFS_TRANS_PERM_LOG_RES;
+	/*
+	 * Start our first transaction of the day.
+	 *
+	 * All future transactions during this code must be "chained" off
+	 * this one via the trans_dup() call.  All transactions will contain
+	 * the inode, and the inode will always be marked with trans_ihold().
+	 * Since the inode will be locked in all transactions, we must log
+	 * the inode in every transaction to let it float upward through
+	 * the log.
+	 */
+	args.trans = xfs_trans_alloc(mp, XFS_TRANS_ATTR_SET);
 
 	/*
 	 * Root fork attributes can use reserved data blocks for this
 	 * operation if necessary
 	 */
-	error = xfs_trans_alloc(mp, &tres, args.total, 0,
-			rsvd ? XFS_TRANS_RESERVE : 0, &args.trans);
-	if (error)
-		return error;
 
+	if (rsvd)
+		args.trans->t_flags |= XFS_TRANS_RESERVE;
+
+	tres.tr_logres = M_RES(mp)->tr_attrsetm.tr_logres +
+			 M_RES(mp)->tr_attrsetrt.tr_logres * args.total;
+	tres.tr_logcount = XFS_ATTRSET_LOG_COUNT;
+	tres.tr_logflags = XFS_TRANS_PERM_LOG_RES;
+	error = xfs_trans_reserve(args.trans, &tres, args.total, 0);
+	if (error) {
+		xfs_trans_cancel(args.trans);
+		return error;
+	}
 	xfs_ilock(dp, XFS_ILOCK_EXCL);
+
 	error = xfs_trans_reserve_quota_nblks(args.trans, dp, args.total, 0,
 				rsvd ? XFS_QMOPT_RES_REGBLKS | XFS_QMOPT_FORCE_RES :
 				       XFS_QMOPT_RES_REGBLKS);
@@ -314,13 +332,13 @@ xfs_attr_set(
 		 * It won't fit in the shortform, transform to a leaf block.
 		 * GROT: another possible req'mt for a double-split btree op.
 		 */
-		xfs_defer_init(args.dfops, args.firstblock);
+		xfs_bmap_init(args.flist, args.firstblock);
 		error = xfs_attr_shortform_to_leaf(&args);
 		if (!error)
-			error = xfs_defer_finish(&args.trans, args.dfops, dp);
+			error = xfs_bmap_finish(&args.trans, args.flist, dp);
 		if (error) {
 			args.trans = NULL;
-			xfs_defer_cancel(&dfops);
+			xfs_bmap_cancel(&flist);
 			goto out;
 		}
 
@@ -380,7 +398,7 @@ xfs_attr_remove(
 {
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_da_args	args;
-	struct xfs_defer_ops	dfops;
+	struct xfs_bmap_free	flist;
 	xfs_fsblock_t		firstblock;
 	int			error;
 
@@ -389,12 +407,15 @@ xfs_attr_remove(
 	if (XFS_FORCED_SHUTDOWN(dp->i_mount))
 		return -EIO;
 
+	if (!xfs_inode_hasattr(dp))
+		return -ENOATTR;
+
 	error = xfs_attr_args_init(&args, dp, name, flags);
 	if (error)
 		return error;
 
 	args.firstblock = &firstblock;
-	args.dfops = &dfops;
+	args.flist = &flist;
 
 	/*
 	 * we have no control over the attribute names that userspace passes us
@@ -408,15 +429,31 @@ xfs_attr_remove(
 		return error;
 
 	/*
+	 * Start our first transaction of the day.
+	 *
+	 * All future transactions during this code must be "chained" off
+	 * this one via the trans_dup() call.  All transactions will contain
+	 * the inode, and the inode will always be marked with trans_ihold().
+	 * Since the inode will be locked in all transactions, we must log
+	 * the inode in every transaction to let it float upward through
+	 * the log.
+	 */
+	args.trans = xfs_trans_alloc(mp, XFS_TRANS_ATTR_RM);
+
+	/*
 	 * Root fork attributes can use reserved data blocks for this
 	 * operation if necessary
 	 */
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_attrrm,
-			XFS_ATTRRM_SPACE_RES(mp), 0,
-			(flags & ATTR_ROOT) ? XFS_TRANS_RESERVE : 0,
-			&args.trans);
-	if (error)
+
+	if (flags & ATTR_ROOT)
+		args.trans->t_flags |= XFS_TRANS_RESERVE;
+
+	error = xfs_trans_reserve(args.trans, &M_RES(mp)->tr_attrrm,
+				  XFS_ATTRRM_SPACE_RES(mp), 0);
+	if (error) {
+		xfs_trans_cancel(args.trans);
 		return error;
+	}
 
 	xfs_ilock(dp, XFS_ILOCK_EXCL);
 	/*
@@ -579,13 +616,13 @@ xfs_attr_leaf_addname(xfs_da_args_t *args)
 		 * Commit that transaction so that the node_addname() call
 		 * can manage its own transactions.
 		 */
-		xfs_defer_init(args->dfops, args->firstblock);
+		xfs_bmap_init(args->flist, args->firstblock);
 		error = xfs_attr3_leaf_to_node(args);
 		if (!error)
-			error = xfs_defer_finish(&args->trans, args->dfops, dp);
+			error = xfs_bmap_finish(&args->trans, args->flist, dp);
 		if (error) {
 			args->trans = NULL;
-			xfs_defer_cancel(args->dfops);
+			xfs_bmap_cancel(args->flist);
 			return error;
 		}
 
@@ -669,15 +706,15 @@ xfs_attr_leaf_addname(xfs_da_args_t *args)
 		 * If the result is small enough, shrink it all into the inode.
 		 */
 		if ((forkoff = xfs_attr_shortform_allfit(bp, dp))) {
-			xfs_defer_init(args->dfops, args->firstblock);
+			xfs_bmap_init(args->flist, args->firstblock);
 			error = xfs_attr3_leaf_to_shortform(bp, args, forkoff);
 			/* bp is gone due to xfs_da_shrink_inode */
 			if (!error)
-				error = xfs_defer_finish(&args->trans,
-							args->dfops, dp);
+				error = xfs_bmap_finish(&args->trans,
+							args->flist, dp);
 			if (error) {
 				args->trans = NULL;
-				xfs_defer_cancel(args->dfops);
+				xfs_bmap_cancel(args->flist);
 				return error;
 			}
 		}
@@ -732,14 +769,14 @@ xfs_attr_leaf_removename(xfs_da_args_t *args)
 	 * If the result is small enough, shrink it all into the inode.
 	 */
 	if ((forkoff = xfs_attr_shortform_allfit(bp, dp))) {
-		xfs_defer_init(args->dfops, args->firstblock);
+		xfs_bmap_init(args->flist, args->firstblock);
 		error = xfs_attr3_leaf_to_shortform(bp, args, forkoff);
 		/* bp is gone due to xfs_da_shrink_inode */
 		if (!error)
-			error = xfs_defer_finish(&args->trans, args->dfops, dp);
+			error = xfs_bmap_finish(&args->trans, args->flist, dp);
 		if (error) {
 			args->trans = NULL;
-			xfs_defer_cancel(args->dfops);
+			xfs_bmap_cancel(args->flist);
 			return error;
 		}
 	}
@@ -858,14 +895,14 @@ restart:
 			 */
 			xfs_da_state_free(state);
 			state = NULL;
-			xfs_defer_init(args->dfops, args->firstblock);
+			xfs_bmap_init(args->flist, args->firstblock);
 			error = xfs_attr3_leaf_to_node(args);
 			if (!error)
-				error = xfs_defer_finish(&args->trans,
-							args->dfops, dp);
+				error = xfs_bmap_finish(&args->trans,
+							args->flist, dp);
 			if (error) {
 				args->trans = NULL;
-				xfs_defer_cancel(args->dfops);
+				xfs_bmap_cancel(args->flist);
 				goto out;
 			}
 
@@ -886,13 +923,13 @@ restart:
 		 * in the index/blkno/rmtblkno/rmtblkcnt fields and
 		 * in the index2/blkno2/rmtblkno2/rmtblkcnt2 fields.
 		 */
-		xfs_defer_init(args->dfops, args->firstblock);
+		xfs_bmap_init(args->flist, args->firstblock);
 		error = xfs_da3_split(state);
 		if (!error)
-			error = xfs_defer_finish(&args->trans, args->dfops, dp);
+			error = xfs_bmap_finish(&args->trans, args->flist, dp);
 		if (error) {
 			args->trans = NULL;
-			xfs_defer_cancel(args->dfops);
+			xfs_bmap_cancel(args->flist);
 			goto out;
 		}
 	} else {
@@ -985,14 +1022,14 @@ restart:
 		 * Check to see if the tree needs to be collapsed.
 		 */
 		if (retval && (state->path.active > 1)) {
-			xfs_defer_init(args->dfops, args->firstblock);
+			xfs_bmap_init(args->flist, args->firstblock);
 			error = xfs_da3_join(state);
 			if (!error)
-				error = xfs_defer_finish(&args->trans,
-							args->dfops, dp);
+				error = xfs_bmap_finish(&args->trans,
+							args->flist, dp);
 			if (error) {
 				args->trans = NULL;
-				xfs_defer_cancel(args->dfops);
+				xfs_bmap_cancel(args->flist);
 				goto out;
 			}
 		}
@@ -1108,13 +1145,13 @@ xfs_attr_node_removename(xfs_da_args_t *args)
 	 * Check to see if the tree needs to be collapsed.
 	 */
 	if (retval && (state->path.active > 1)) {
-		xfs_defer_init(args->dfops, args->firstblock);
+		xfs_bmap_init(args->flist, args->firstblock);
 		error = xfs_da3_join(state);
 		if (!error)
-			error = xfs_defer_finish(&args->trans, args->dfops, dp);
+			error = xfs_bmap_finish(&args->trans, args->flist, dp);
 		if (error) {
 			args->trans = NULL;
-			xfs_defer_cancel(args->dfops);
+			xfs_bmap_cancel(args->flist);
 			goto out;
 		}
 		/*
@@ -1141,15 +1178,15 @@ xfs_attr_node_removename(xfs_da_args_t *args)
 			goto out;
 
 		if ((forkoff = xfs_attr_shortform_allfit(bp, dp))) {
-			xfs_defer_init(args->dfops, args->firstblock);
+			xfs_bmap_init(args->flist, args->firstblock);
 			error = xfs_attr3_leaf_to_shortform(bp, args, forkoff);
 			/* bp is gone due to xfs_da_shrink_inode */
 			if (!error)
-				error = xfs_defer_finish(&args->trans,
-							args->dfops, dp);
+				error = xfs_bmap_finish(&args->trans,
+							args->flist, dp);
 			if (error) {
 				args->trans = NULL;
-				xfs_defer_cancel(args->dfops);
+				xfs_bmap_cancel(args->flist);
 				goto out;
 			}
 		} else

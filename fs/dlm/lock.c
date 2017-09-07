@@ -1395,6 +1395,7 @@ static int nodeid_warned(int nodeid, int num_nodes, int *warned)
 void dlm_scan_waiters(struct dlm_ls *ls)
 {
 	struct dlm_lkb *lkb;
+	ktime_t zero = ktime_set(0, 0);
 	s64 us;
 	s64 debug_maxus = 0;
 	u32 debug_scanned = 0;
@@ -1408,7 +1409,7 @@ void dlm_scan_waiters(struct dlm_ls *ls)
 	mutex_lock(&ls->ls_waiters_mutex);
 
 	list_for_each_entry(lkb, &ls->ls_waiters, lkb_wait_reply) {
-		if (!lkb->lkb_wait_time)
+		if (ktime_equal(lkb->lkb_wait_time, zero))
 			continue;
 
 		debug_scanned++;
@@ -1418,7 +1419,7 @@ void dlm_scan_waiters(struct dlm_ls *ls)
 		if (us < dlm_config.ci_waitwarn_us)
 			continue;
 
-		lkb->lkb_wait_time = 0;
+		lkb->lkb_wait_time = zero;
 
 		debug_expired++;
 		if (us > debug_maxus)

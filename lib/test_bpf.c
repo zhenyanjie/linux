@@ -434,41 +434,6 @@ loop:
 	return 0;
 }
 
-static int __bpf_fill_stxdw(struct bpf_test *self, int size)
-{
-	unsigned int len = BPF_MAXINSNS;
-	struct bpf_insn *insn;
-	int i;
-
-	insn = kmalloc_array(len, sizeof(*insn), GFP_KERNEL);
-	if (!insn)
-		return -ENOMEM;
-
-	insn[0] = BPF_ALU32_IMM(BPF_MOV, R0, 1);
-	insn[1] = BPF_ST_MEM(size, R10, -40, 42);
-
-	for (i = 2; i < len - 2; i++)
-		insn[i] = BPF_STX_XADD(size, R10, R0, -40);
-
-	insn[len - 2] = BPF_LDX_MEM(size, R0, R10, -40);
-	insn[len - 1] = BPF_EXIT_INSN();
-
-	self->u.ptr.insns = insn;
-	self->u.ptr.len = len;
-
-	return 0;
-}
-
-static int bpf_fill_stxw(struct bpf_test *self)
-{
-	return __bpf_fill_stxdw(self, BPF_W);
-}
-
-static int bpf_fill_stxdw(struct bpf_test *self)
-{
-	return __bpf_fill_stxdw(self, BPF_DW);
-}
-
 static struct bpf_test tests[] = {
 	{
 		"TAX",
@@ -2479,22 +2444,6 @@ static struct bpf_test tests[] = {
 		{ { 0, 4294967295U } },
 	},
 	{
-		"ALU_ADD_X: 2 + 4294967294 = 0",
-		.u.insns_int = {
-			BPF_LD_IMM64(R0, 2),
-			BPF_LD_IMM64(R1, 4294967294U),
-			BPF_ALU32_REG(BPF_ADD, R0, R1),
-			BPF_JMP_IMM(BPF_JEQ, R0, 0, 2),
-			BPF_ALU32_IMM(BPF_MOV, R0, 0),
-			BPF_EXIT_INSN(),
-			BPF_ALU32_IMM(BPF_MOV, R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 1 } },
-	},
-	{
 		"ALU64_ADD_X: 1 + 2 = 3",
 		.u.insns_int = {
 			BPF_LD_IMM64(R0, 1),
@@ -2517,23 +2466,6 @@ static struct bpf_test tests[] = {
 		INTERNAL,
 		{ },
 		{ { 0, 4294967295U } },
-	},
-	{
-		"ALU64_ADD_X: 2 + 4294967294 = 4294967296",
-		.u.insns_int = {
-			BPF_LD_IMM64(R0, 2),
-			BPF_LD_IMM64(R1, 4294967294U),
-			BPF_LD_IMM64(R2, 4294967296ULL),
-			BPF_ALU64_REG(BPF_ADD, R0, R1),
-			BPF_JMP_REG(BPF_JEQ, R0, R2, 2),
-			BPF_MOV32_IMM(R0, 0),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 1 } },
 	},
 	/* BPF_ALU | BPF_ADD | BPF_K */
 	{
@@ -2570,90 +2502,11 @@ static struct bpf_test tests[] = {
 		{ { 0, 4294967295U } },
 	},
 	{
-		"ALU_ADD_K: 4294967294 + 2 = 0",
-		.u.insns_int = {
-			BPF_LD_IMM64(R0, 4294967294U),
-			BPF_ALU32_IMM(BPF_ADD, R0, 2),
-			BPF_JMP_IMM(BPF_JEQ, R0, 0, 2),
-			BPF_ALU32_IMM(BPF_MOV, R0, 0),
-			BPF_EXIT_INSN(),
-			BPF_ALU32_IMM(BPF_MOV, R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 1 } },
-	},
-	{
 		"ALU_ADD_K: 0 + (-1) = 0x00000000ffffffff",
 		.u.insns_int = {
 			BPF_LD_IMM64(R2, 0x0),
 			BPF_LD_IMM64(R3, 0x00000000ffffffff),
 			BPF_ALU32_IMM(BPF_ADD, R2, 0xffffffff),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU_ADD_K: 0 + 0xffff = 0xffff",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0xffff),
-			BPF_ALU32_IMM(BPF_ADD, R2, 0xffff),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU_ADD_K: 0 + 0x7fffffff = 0x7fffffff",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0x7fffffff),
-			BPF_ALU32_IMM(BPF_ADD, R2, 0x7fffffff),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU_ADD_K: 0 + 0x80000000 = 0x80000000",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0x80000000),
-			BPF_ALU32_IMM(BPF_ADD, R2, 0x80000000),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU_ADD_K: 0 + 0x80008000 = 0x80008000",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0x80008000),
-			BPF_ALU32_IMM(BPF_ADD, R2, 0x80008000),
 			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
 			BPF_MOV32_IMM(R0, 2),
 			BPF_EXIT_INSN(),
@@ -2698,22 +2551,6 @@ static struct bpf_test tests[] = {
 		{ { 0, 2147483647 } },
 	},
 	{
-		"ALU64_ADD_K: 4294967294 + 2 = 4294967296",
-		.u.insns_int = {
-			BPF_LD_IMM64(R0, 4294967294U),
-			BPF_LD_IMM64(R1, 4294967296ULL),
-			BPF_ALU64_IMM(BPF_ADD, R0, 2),
-			BPF_JMP_REG(BPF_JEQ, R0, R1, 2),
-			BPF_ALU32_IMM(BPF_MOV, R0, 0),
-			BPF_EXIT_INSN(),
-			BPF_ALU32_IMM(BPF_MOV, R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 1 } },
-	},
-	{
 		"ALU64_ADD_K: 2147483646 + -2147483647 = -1",
 		.u.insns_int = {
 			BPF_LD_IMM64(R0, 2147483646),
@@ -2746,70 +2583,6 @@ static struct bpf_test tests[] = {
 			BPF_LD_IMM64(R2, 0x0),
 			BPF_LD_IMM64(R3, 0xffffffffffffffffLL),
 			BPF_ALU64_IMM(BPF_ADD, R2, 0xffffffff),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU64_ADD_K: 0 + 0xffff = 0xffff",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0xffff),
-			BPF_ALU64_IMM(BPF_ADD, R2, 0xffff),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU64_ADD_K: 0 + 0x7fffffff = 0x7fffffff",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0x7fffffff),
-			BPF_ALU64_IMM(BPF_ADD, R2, 0x7fffffff),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU64_ADD_K: 0 + 0x80000000 = 0xffffffff80000000",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0xffffffff80000000LL),
-			BPF_ALU64_IMM(BPF_ADD, R2, 0x80000000),
-			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
-			BPF_MOV32_IMM(R0, 2),
-			BPF_EXIT_INSN(),
-			BPF_MOV32_IMM(R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x1 } },
-	},
-	{
-		"ALU_ADD_K: 0 + 0x80008000 = 0xffffffff80008000",
-		.u.insns_int = {
-			BPF_LD_IMM64(R2, 0x0),
-			BPF_LD_IMM64(R3, 0xffffffff80008000LL),
-			BPF_ALU64_IMM(BPF_ADD, R2, 0x80008000),
 			BPF_JMP_REG(BPF_JEQ, R2, R3, 2),
 			BPF_MOV32_IMM(R0, 2),
 			BPF_EXIT_INSN(),
@@ -4338,41 +4111,6 @@ static struct bpf_test tests[] = {
 		{ { 0, 0x22 } },
 	},
 	{
-		"STX_XADD_W: Test side-effects, r10: 0x12 + 0x10 = 0x22",
-		.u.insns_int = {
-			BPF_ALU64_REG(BPF_MOV, R1, R10),
-			BPF_ALU32_IMM(BPF_MOV, R0, 0x12),
-			BPF_ST_MEM(BPF_W, R10, -40, 0x10),
-			BPF_STX_XADD(BPF_W, R10, R0, -40),
-			BPF_ALU64_REG(BPF_MOV, R0, R10),
-			BPF_ALU64_REG(BPF_SUB, R0, R1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0 } },
-	},
-	{
-		"STX_XADD_W: Test side-effects, r0: 0x12 + 0x10 = 0x22",
-		.u.insns_int = {
-			BPF_ALU32_IMM(BPF_MOV, R0, 0x12),
-			BPF_ST_MEM(BPF_W, R10, -40, 0x10),
-			BPF_STX_XADD(BPF_W, R10, R0, -40),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x12 } },
-	},
-	{
-		"STX_XADD_W: X + 1 + 1 + 1 + ...",
-		{ },
-		INTERNAL,
-		{ },
-		{ { 0, 4134 } },
-		.fill_helper = bpf_fill_stxw,
-	},
-	{
 		"STX_XADD_DW: Test: 0x12 + 0x10 = 0x22",
 		.u.insns_int = {
 			BPF_ALU32_IMM(BPF_MOV, R0, 0x12),
@@ -4384,41 +4122,6 @@ static struct bpf_test tests[] = {
 		INTERNAL,
 		{ },
 		{ { 0, 0x22 } },
-	},
-	{
-		"STX_XADD_DW: Test side-effects, r10: 0x12 + 0x10 = 0x22",
-		.u.insns_int = {
-			BPF_ALU64_REG(BPF_MOV, R1, R10),
-			BPF_ALU32_IMM(BPF_MOV, R0, 0x12),
-			BPF_ST_MEM(BPF_DW, R10, -40, 0x10),
-			BPF_STX_XADD(BPF_DW, R10, R0, -40),
-			BPF_ALU64_REG(BPF_MOV, R0, R10),
-			BPF_ALU64_REG(BPF_SUB, R0, R1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0 } },
-	},
-	{
-		"STX_XADD_DW: Test side-effects, r0: 0x12 + 0x10 = 0x22",
-		.u.insns_int = {
-			BPF_ALU32_IMM(BPF_MOV, R0, 0x12),
-			BPF_ST_MEM(BPF_DW, R10, -40, 0x10),
-			BPF_STX_XADD(BPF_DW, R10, R0, -40),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0x12 } },
-	},
-	{
-		"STX_XADD_DW: X + 1 + 1 + 1 + ...",
-		{ },
-		INTERNAL,
-		{ },
-		{ { 0, 4134 } },
-		.fill_helper = bpf_fill_stxdw,
 	},
 	/* BPF_JMP | BPF_EXIT */
 	{
@@ -4519,20 +4222,6 @@ static struct bpf_test tests[] = {
 		{ },
 		{ { 0, 1 } },
 	},
-	{
-		"JMP_JGT_K: Unsigned jump: if (-1 > 1) return 1",
-		.u.insns_int = {
-			BPF_ALU32_IMM(BPF_MOV, R0, 0),
-			BPF_LD_IMM64(R1, -1),
-			BPF_JMP_IMM(BPF_JGT, R1, 1, 1),
-			BPF_EXIT_INSN(),
-			BPF_ALU32_IMM(BPF_MOV, R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 1 } },
-	},
 	/* BPF_JMP | BPF_JGE | BPF_K */
 	{
 		"JMP_JGE_K: if (3 >= 2) return 1",
@@ -4614,7 +4303,7 @@ static struct bpf_test tests[] = {
 		.u.insns_int = {
 			BPF_ALU32_IMM(BPF_MOV, R0, 0),
 			BPF_LD_IMM64(R1, 3),
-			BPF_JMP_IMM(BPF_JSET, R1, 2, 1),
+			BPF_JMP_IMM(BPF_JNE, R1, 2, 1),
 			BPF_EXIT_INSN(),
 			BPF_ALU32_IMM(BPF_MOV, R0, 1),
 			BPF_EXIT_INSN(),
@@ -4628,7 +4317,7 @@ static struct bpf_test tests[] = {
 		.u.insns_int = {
 			BPF_ALU32_IMM(BPF_MOV, R0, 0),
 			BPF_LD_IMM64(R1, 3),
-			BPF_JMP_IMM(BPF_JSET, R1, 0xffffffff, 1),
+			BPF_JMP_IMM(BPF_JNE, R1, 0xffffffff, 1),
 			BPF_EXIT_INSN(),
 			BPF_ALU32_IMM(BPF_MOV, R0, 1),
 			BPF_EXIT_INSN(),
@@ -4715,21 +4404,6 @@ static struct bpf_test tests[] = {
 		{ },
 		{ { 0, 1 } },
 	},
-	{
-		"JMP_JGT_X: Unsigned jump: if (-1 > 1) return 1",
-		.u.insns_int = {
-			BPF_ALU32_IMM(BPF_MOV, R0, 0),
-			BPF_LD_IMM64(R1, -1),
-			BPF_LD_IMM64(R2, 1),
-			BPF_JMP_REG(BPF_JGT, R1, R2, 1),
-			BPF_EXIT_INSN(),
-			BPF_ALU32_IMM(BPF_MOV, R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 1 } },
-	},
 	/* BPF_JMP | BPF_JGE | BPF_X */
 	{
 		"JMP_JGE_X: if (3 >= 2) return 1",
@@ -4755,51 +4429,6 @@ static struct bpf_test tests[] = {
 			BPF_JMP_REG(BPF_JGE, R1, R2, 1),
 			BPF_EXIT_INSN(),
 			BPF_ALU32_IMM(BPF_MOV, R0, 1),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 1 } },
-	},
-	{
-		/* Mainly testing JIT + imm64 here. */
-		"JMP_JGE_X: ldimm64 test 1",
-		.u.insns_int = {
-			BPF_ALU32_IMM(BPF_MOV, R0, 0),
-			BPF_LD_IMM64(R1, 3),
-			BPF_LD_IMM64(R2, 2),
-			BPF_JMP_REG(BPF_JGE, R1, R2, 2),
-			BPF_LD_IMM64(R0, 0xffffffffffffffffULL),
-			BPF_LD_IMM64(R0, 0xeeeeeeeeeeeeeeeeULL),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0xeeeeeeeeU } },
-	},
-	{
-		"JMP_JGE_X: ldimm64 test 2",
-		.u.insns_int = {
-			BPF_ALU32_IMM(BPF_MOV, R0, 0),
-			BPF_LD_IMM64(R1, 3),
-			BPF_LD_IMM64(R2, 2),
-			BPF_JMP_REG(BPF_JGE, R1, R2, 0),
-			BPF_LD_IMM64(R0, 0xffffffffffffffffULL),
-			BPF_EXIT_INSN(),
-		},
-		INTERNAL,
-		{ },
-		{ { 0, 0xffffffffU } },
-	},
-	{
-		"JMP_JGE_X: ldimm64 test 3",
-		.u.insns_int = {
-			BPF_ALU32_IMM(BPF_MOV, R0, 1),
-			BPF_LD_IMM64(R1, 3),
-			BPF_LD_IMM64(R2, 2),
-			BPF_JMP_REG(BPF_JGE, R1, R2, 4),
-			BPF_LD_IMM64(R0, 0xffffffffffffffffULL),
-			BPF_LD_IMM64(R0, 0xeeeeeeeeeeeeeeeeULL),
 			BPF_EXIT_INSN(),
 		},
 		INTERNAL,
@@ -4845,7 +4474,7 @@ static struct bpf_test tests[] = {
 			BPF_ALU32_IMM(BPF_MOV, R0, 0),
 			BPF_LD_IMM64(R1, 3),
 			BPF_LD_IMM64(R2, 2),
-			BPF_JMP_REG(BPF_JSET, R1, R2, 1),
+			BPF_JMP_REG(BPF_JNE, R1, R2, 1),
 			BPF_EXIT_INSN(),
 			BPF_ALU32_IMM(BPF_MOV, R0, 1),
 			BPF_EXIT_INSN(),
@@ -4860,7 +4489,7 @@ static struct bpf_test tests[] = {
 			BPF_ALU32_IMM(BPF_MOV, R0, 0),
 			BPF_LD_IMM64(R1, 3),
 			BPF_LD_IMM64(R2, 0xffffffff),
-			BPF_JMP_REG(BPF_JSET, R1, R2, 1),
+			BPF_JMP_REG(BPF_JNE, R1, R2, 1),
 			BPF_EXIT_INSN(),
 			BPF_ALU32_IMM(BPF_MOV, R0, 1),
 			BPF_EXIT_INSN(),
@@ -4981,7 +4610,7 @@ static struct bpf_test tests[] = {
 		{ },
 		INTERNAL,
 		{ 0x34 },
-		{ { ETH_HLEN, 0xbef } },
+		{ { 1, 0xbef } },
 		.fill_helper = bpf_fill_ld_abs_vlan_push_pop,
 	},
 	/*
@@ -5635,7 +5264,6 @@ static struct sk_buff *populate_skb(char *buf, int size)
 	skb->hash = SKB_HASH;
 	skb->queue_mapping = SKB_QUEUE_MAP;
 	skb->vlan_tci = SKB_VLAN_TCI;
-	skb->vlan_proto = htons(ETH_P_IP);
 	skb->dev = &dev;
 	skb->dev->ifindex = SKB_DEV_IFINDEX;
 	skb->dev->type = SKB_DEV_TYPE;
@@ -5772,10 +5400,7 @@ static struct bpf_prog *generate_filter(int which, int *err)
 		fp->type = BPF_PROG_TYPE_SOCKET_FILTER;
 		memcpy(fp->insnsi, fptr, fp->len * sizeof(struct bpf_insn));
 
-		/* We cannot error here as we don't need type compatibility
-		 * checks.
-		 */
-		fp = bpf_prog_select_runtime(fp, err);
+		bpf_prog_select_runtime(fp);
 		break;
 	}
 

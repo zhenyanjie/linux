@@ -303,7 +303,8 @@ static int __init txx9ndfmc_probe(struct platform_device *dev)
 	dev_info(&dev->dev, "CLK:%ldMHz HOLD:%d SPW:%d\n",
 		 (gbusclk + 500000) / 1000000, hold, spw);
 
-	nand_hw_control_init(&drvdata->hw_control);
+	spin_lock_init(&drvdata->hw_control.lock);
+	init_waitqueue_head(&drvdata->hw_control.wq);
 
 	platform_set_drvdata(dev, drvdata);
 	txx9ndfmc_initialize(dev);

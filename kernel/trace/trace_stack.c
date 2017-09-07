@@ -2,7 +2,6 @@
  * Copyright (C) 2008 Steven Rostedt <srostedt@redhat.com>
  *
  */
-#include <linux/sched/task_stack.h>
 #include <linux/stacktrace.h>
 #include <linux/kallsyms.h>
 #include <linux/seq_file.h>
@@ -35,7 +34,7 @@ unsigned long stack_trace_max_size;
 arch_spinlock_t stack_trace_max_lock =
 	(arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED;
 
-DEFINE_PER_CPU(int, disable_stack_tracer);
+static DEFINE_PER_CPU(int, trace_active);
 static DEFINE_MUTEX(stack_sysctl_mutex);
 
 int stack_tracer_enabled;
@@ -65,7 +64,7 @@ void stack_trace_print(void)
 }
 
 /*
- * When arch-specific code overrides this function, the following
+ * When arch-specific code overides this function, the following
  * data should be filled up, assuming stack_trace_max_lock is held to
  * prevent concurrent updates.
  *     stack_trace_index[]
@@ -94,14 +93,6 @@ check_stack(unsigned long ip, unsigned long *stack)
 
 	/* Can't do this from NMI context (can cause deadlocks) */
 	if (in_nmi())
-		return;
-
-	/*
-	 * There's a slight chance that we are tracing inside the
-	 * RCU infrastructure, and rcu_irq_enter() will not work
-	 * as expected.
-	 */
-	if (unlikely(rcu_irq_enter_disabled()))
 		return;
 
 	local_irq_save(flags);
@@ -215,12 +206,13 @@ stack_trace_call(unsigned long ip, unsigned long parent_ip,
 		 struct ftrace_ops *op, struct pt_regs *pt_regs)
 {
 	unsigned long stack;
+	int cpu;
 
 	preempt_disable_notrace();
 
+	cpu = raw_smp_processor_id();
 	/* no atomic needed, we only modify this variable by this cpu */
-	__this_cpu_inc(disable_stack_tracer);
-	if (__this_cpu_read(disable_stack_tracer) != 1)
+	if (per_cpu(trace_active, cpu)++ != 0)
 		goto out;
 
 	ip += MCOUNT_INSN_SIZE;
@@ -228,7 +220,7 @@ stack_trace_call(unsigned long ip, unsigned long parent_ip,
 	check_stack(ip, &stack);
 
  out:
-	__this_cpu_dec(disable_stack_tracer);
+	per_cpu(trace_active, cpu)--;
 	/* prevent recursion in schedule */
 	preempt_enable_notrace();
 }
@@ -260,6 +252,7 @@ stack_max_size_write(struct file *filp, const char __user *ubuf,
 	long *ptr = filp->private_data;
 	unsigned long val, flags;
 	int ret;
+	int cpu;
 
 	ret = kstrtoul_from_user(ubuf, count, 10, &val);
 	if (ret)
@@ -270,15 +263,16 @@ stack_max_size_write(struct file *filp, const char __user *ubuf,
 	/*
 	 * In case we trace inside arch_spin_lock() or after (NMI),
 	 * we will cause circular lock, so we also need to increase
-	 * the percpu disable_stack_tracer here.
+	 * the percpu trace_active here.
 	 */
-	__this_cpu_inc(disable_stack_tracer);
+	cpu = smp_processor_id();
+	per_cpu(trace_active, cpu)++;
 
 	arch_spin_lock(&stack_trace_max_lock);
 	*ptr = val;
 	arch_spin_unlock(&stack_trace_max_lock);
 
-	__this_cpu_dec(disable_stack_tracer);
+	per_cpu(trace_active, cpu)--;
 	local_irq_restore(flags);
 
 	return count;
@@ -312,9 +306,12 @@ t_next(struct seq_file *m, void *v, loff_t *pos)
 
 static void *t_start(struct seq_file *m, loff_t *pos)
 {
+	int cpu;
+
 	local_irq_disable();
 
-	__this_cpu_inc(disable_stack_tracer);
+	cpu = smp_processor_id();
+	per_cpu(trace_active, cpu)++;
 
 	arch_spin_lock(&stack_trace_max_lock);
 
@@ -326,9 +323,12 @@ static void *t_start(struct seq_file *m, loff_t *pos)
 
 static void t_stop(struct seq_file *m, void *p)
 {
+	int cpu;
+
 	arch_spin_unlock(&stack_trace_max_lock);
 
-	__this_cpu_dec(disable_stack_tracer);
+	cpu = smp_processor_id();
+	per_cpu(trace_active, cpu)--;
 
 	local_irq_enable();
 }

@@ -188,8 +188,6 @@ int ocfs2_truncate_log_append(struct ocfs2_super *osb,
 			      u64 start_blk,
 			      unsigned int num_clusters);
 int __ocfs2_flush_truncate_log(struct ocfs2_super *osb);
-int ocfs2_try_to_free_truncate_log(struct ocfs2_super *osb,
-				   unsigned int needed);
 
 /*
  * Process local structure which describes the block unlinks done

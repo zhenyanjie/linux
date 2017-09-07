@@ -4,7 +4,6 @@
  * Support for backward direction RPCs on RPC/RDMA (server-side).
  */
 
-#include <linux/module.h>
 #include <linux/sunrpc/svc_rdma.h>
 #include "xprt_rdma.h"
 
@@ -108,18 +107,26 @@ static int svc_rdma_bc_sendto(struct svcxprt_rdma *rdma,
 	int ret;
 
 	vec = svc_rdma_get_req_map(rdma);
-	ret = svc_rdma_map_xdr(rdma, sndbuf, vec, false);
+	ret = svc_rdma_map_xdr(rdma, sndbuf, vec);
 	if (ret)
 		goto out_err;
 
-	ret = svc_rdma_repost_recv(rdma, GFP_NOIO);
-	if (ret)
+	/* Post a recv buffer to handle the reply for this request. */
+	ret = svc_rdma_post_recv(rdma, GFP_NOIO);
+	if (ret) {
+		pr_err("svcrdma: Failed to post bc receive buffer, err=%d.\n",
+		       ret);
+		pr_err("svcrdma: closing transport %p.\n", rdma);
+		set_bit(XPT_CLOSE, &rdma->sc_xprt.xpt_flags);
+		ret = -ENOTCONN;
 		goto out_err;
+	}
 
 	ctxt = svc_rdma_get_context(rdma);
 	ctxt->pages[0] = virt_to_page(rqst->rq_buffer);
 	ctxt->count = 1;
 
+	ctxt->wr_op = IB_WR_SEND;
 	ctxt->direction = DMA_TO_DEVICE;
 	ctxt->sge[0].lkey = rdma->sc_pd->local_dma_lkey;
 	ctxt->sge[0].length = sndbuf->len;
@@ -130,11 +137,10 @@ static int svc_rdma_bc_sendto(struct svcxprt_rdma *rdma,
 		ret = -EIO;
 		goto out_unmap;
 	}
-	svc_rdma_count_mappings(rdma, ctxt);
+	atomic_inc(&rdma->sc_dma_used);
 
 	memset(&send_wr, 0, sizeof(send_wr));
-	ctxt->cqe.done = svc_rdma_wc_send;
-	send_wr.wr_cqe = &ctxt->cqe;
+	send_wr.wr_id = (unsigned long)ctxt;
 	send_wr.sg_list = ctxt->sge;
 	send_wr.num_sge = 1;
 	send_wr.opcode = IB_WR_SEND;
@@ -160,40 +166,35 @@ out_unmap:
 /* Server-side transport endpoint wants a whole page for its send
  * buffer. The client RPC code constructs the RPC header in this
  * buffer before it invokes ->send_request.
+ *
+ * Returns NULL if there was a temporary allocation failure.
  */
-static int
-xprt_rdma_bc_allocate(struct rpc_task *task)
+static void *
+xprt_rdma_bc_allocate(struct rpc_task *task, size_t size)
 {
 	struct rpc_rqst *rqst = task->tk_rqstp;
-	size_t size = rqst->rq_callsize;
+	struct svc_xprt *sxprt = rqst->rq_xprt->bc_xprt;
+	struct svcxprt_rdma *rdma;
 	struct page *page;
 
-	if (size > PAGE_SIZE) {
+	rdma = container_of(sxprt, struct svcxprt_rdma, sc_xprt);
+
+	/* Prevent an infinite loop: try to make this case work */
+	if (size > PAGE_SIZE)
 		WARN_ONCE(1, "svcrdma: large bc buffer request (size %zu)\n",
 			  size);
-		return -EINVAL;
-	}
 
-	/* svc_rdma_sendto releases this page */
 	page = alloc_page(RPCRDMA_DEF_GFP);
 	if (!page)
-		return -ENOMEM;
-	rqst->rq_buffer = page_address(page);
+		return NULL;
 
-	rqst->rq_rbuffer = kmalloc(rqst->rq_rcvsize, RPCRDMA_DEF_GFP);
-	if (!rqst->rq_rbuffer) {
-		put_page(page);
-		return -ENOMEM;
-	}
-	return 0;
+	return page_address(page);
 }
 
 static void
-xprt_rdma_bc_free(struct rpc_task *task)
+xprt_rdma_bc_free(void *buffer)
 {
-	struct rpc_rqst *rqst = task->tk_rqstp;
-
-	kfree(rqst->rq_rbuffer);
+	/* No-op: ctxt and page have already been freed. */
 }
 
 static int
@@ -201,20 +202,19 @@ rpcrdma_bc_send_request(struct svcxprt_rdma *rdma, struct rpc_rqst *rqst)
 {
 	struct rpc_xprt *xprt = rqst->rq_xprt;
 	struct rpcrdma_xprt *r_xprt = rpcx_to_rdmax(xprt);
-	__be32 *p;
+	struct rpcrdma_msg *headerp = (struct rpcrdma_msg *)rqst->rq_buffer;
 	int rc;
 
 	/* Space in the send buffer for an RPC/RDMA header is reserved
 	 * via xprt->tsh_size.
 	 */
-	p = rqst->rq_buffer;
-	*p++ = rqst->rq_xid;
-	*p++ = rpcrdma_version;
-	*p++ = cpu_to_be32(r_xprt->rx_buf.rb_bc_max_requests);
-	*p++ = rdma_msg;
-	*p++ = xdr_zero;
-	*p++ = xdr_zero;
-	*p   = xdr_zero;
+	headerp->rm_xid = rqst->rq_xid;
+	headerp->rm_vers = rpcrdma_version;
+	headerp->rm_credit = cpu_to_be32(r_xprt->rx_buf.rb_bc_max_requests);
+	headerp->rm_type = rdma_msg;
+	headerp->rm_body.rm_chunks[0] = xdr_zero;
+	headerp->rm_body.rm_chunks[1] = xdr_zero;
+	headerp->rm_body.rm_chunks[2] = xdr_zero;
 
 #ifdef SVCRDMA_BACKCHANNEL_DEBUG
 	pr_info("%s: %*ph\n", __func__, 64, rqst->rq_buffer);
@@ -357,7 +357,6 @@ xprt_setup_rdma_bc(struct xprt_create *args)
 out_fail:
 	xprt_rdma_free_addresses(xprt);
 	args->bc_xprt->xpt_bc_xprt = NULL;
-	args->bc_xprt->xpt_bc_xps = NULL;
 	xprt_put(xprt);
 	xprt_free(xprt);
 	return ERR_PTR(-EINVAL);

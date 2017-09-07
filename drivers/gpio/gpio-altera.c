@@ -17,7 +17,6 @@
  */
 
 #include <linux/io.h>
-#include <linux/module.h>
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 
@@ -38,7 +37,7 @@
 */
 struct altera_gpio_chip {
 	struct of_mm_gpio_chip mmchip;
-	raw_spinlock_t gpio_lock;
+	spinlock_t gpio_lock;
 	int interrupt_trigger;
 	int mapped_irq;
 };
@@ -53,12 +52,12 @@ static void altera_gpio_irq_unmask(struct irq_data *d)
 	altera_gc = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 	mm_gc = &altera_gc->mmchip;
 
-	raw_spin_lock_irqsave(&altera_gc->gpio_lock, flags);
+	spin_lock_irqsave(&altera_gc->gpio_lock, flags);
 	intmask = readl(mm_gc->regs + ALTERA_GPIO_IRQ_MASK);
 	/* Set ALTERA_GPIO_IRQ_MASK bit to unmask */
 	intmask |= BIT(irqd_to_hwirq(d));
 	writel(intmask, mm_gc->regs + ALTERA_GPIO_IRQ_MASK);
-	raw_spin_unlock_irqrestore(&altera_gc->gpio_lock, flags);
+	spin_unlock_irqrestore(&altera_gc->gpio_lock, flags);
 }
 
 static void altera_gpio_irq_mask(struct irq_data *d)
@@ -71,12 +70,12 @@ static void altera_gpio_irq_mask(struct irq_data *d)
 	altera_gc = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 	mm_gc = &altera_gc->mmchip;
 
-	raw_spin_lock_irqsave(&altera_gc->gpio_lock, flags);
+	spin_lock_irqsave(&altera_gc->gpio_lock, flags);
 	intmask = readl(mm_gc->regs + ALTERA_GPIO_IRQ_MASK);
 	/* Clear ALTERA_GPIO_IRQ_MASK bit to mask */
 	intmask &= ~BIT(irqd_to_hwirq(d));
 	writel(intmask, mm_gc->regs + ALTERA_GPIO_IRQ_MASK);
-	raw_spin_unlock_irqrestore(&altera_gc->gpio_lock, flags);
+	spin_unlock_irqrestore(&altera_gc->gpio_lock, flags);
 }
 
 /**
@@ -90,18 +89,21 @@ static int altera_gpio_irq_set_type(struct irq_data *d,
 
 	altera_gc = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 
-	if (type == IRQ_TYPE_NONE) {
-		irq_set_handler_locked(d, handle_bad_irq);
+	if (type == IRQ_TYPE_NONE)
 		return 0;
-	}
-	if (type == altera_gc->interrupt_trigger) {
-		if (type == IRQ_TYPE_LEVEL_HIGH)
-			irq_set_handler_locked(d, handle_level_irq);
-		else
-			irq_set_handler_locked(d, handle_simple_irq);
+	if (type == IRQ_TYPE_LEVEL_HIGH &&
+		altera_gc->interrupt_trigger == IRQ_TYPE_LEVEL_HIGH)
 		return 0;
-	}
-	irq_set_handler_locked(d, handle_bad_irq);
+	if (type == IRQ_TYPE_EDGE_RISING &&
+		altera_gc->interrupt_trigger == IRQ_TYPE_EDGE_RISING)
+		return 0;
+	if (type == IRQ_TYPE_EDGE_FALLING &&
+		altera_gc->interrupt_trigger == IRQ_TYPE_EDGE_FALLING)
+		return 0;
+	if (type == IRQ_TYPE_EDGE_BOTH &&
+		altera_gc->interrupt_trigger == IRQ_TYPE_EDGE_BOTH)
+		return 0;
+
 	return -EINVAL;
 }
 
@@ -140,14 +142,14 @@ static void altera_gpio_set(struct gpio_chip *gc, unsigned offset, int value)
 	mm_gc = to_of_mm_gpio_chip(gc);
 	chip = gpiochip_get_data(gc);
 
-	raw_spin_lock_irqsave(&chip->gpio_lock, flags);
+	spin_lock_irqsave(&chip->gpio_lock, flags);
 	data_reg = readl(mm_gc->regs + ALTERA_GPIO_DATA);
 	if (value)
 		data_reg |= BIT(offset);
 	else
 		data_reg &= ~BIT(offset);
 	writel(data_reg, mm_gc->regs + ALTERA_GPIO_DATA);
-	raw_spin_unlock_irqrestore(&chip->gpio_lock, flags);
+	spin_unlock_irqrestore(&chip->gpio_lock, flags);
 }
 
 static int altera_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
@@ -160,12 +162,12 @@ static int altera_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 	mm_gc = to_of_mm_gpio_chip(gc);
 	chip = gpiochip_get_data(gc);
 
-	raw_spin_lock_irqsave(&chip->gpio_lock, flags);
+	spin_lock_irqsave(&chip->gpio_lock, flags);
 	/* Set pin as input, assumes software controlled IP */
 	gpio_ddr = readl(mm_gc->regs + ALTERA_GPIO_DIR);
 	gpio_ddr &= ~BIT(offset);
 	writel(gpio_ddr, mm_gc->regs + ALTERA_GPIO_DIR);
-	raw_spin_unlock_irqrestore(&chip->gpio_lock, flags);
+	spin_unlock_irqrestore(&chip->gpio_lock, flags);
 
 	return 0;
 }
@@ -181,7 +183,7 @@ static int altera_gpio_direction_output(struct gpio_chip *gc,
 	mm_gc = to_of_mm_gpio_chip(gc);
 	chip = gpiochip_get_data(gc);
 
-	raw_spin_lock_irqsave(&chip->gpio_lock, flags);
+	spin_lock_irqsave(&chip->gpio_lock, flags);
 	/* Sets the GPIO value */
 	data_reg = readl(mm_gc->regs + ALTERA_GPIO_DATA);
 	if (value)
@@ -194,7 +196,7 @@ static int altera_gpio_direction_output(struct gpio_chip *gc,
 	gpio_ddr = readl(mm_gc->regs + ALTERA_GPIO_DIR);
 	gpio_ddr |= BIT(offset);
 	writel(gpio_ddr, mm_gc->regs + ALTERA_GPIO_DIR);
-	raw_spin_unlock_irqrestore(&chip->gpio_lock, flags);
+	spin_unlock_irqrestore(&chip->gpio_lock, flags);
 
 	return 0;
 }
@@ -226,6 +228,7 @@ static void altera_gpio_irq_edge_handler(struct irq_desc *desc)
 
 	chained_irq_exit(chip, desc);
 }
+
 
 static void altera_gpio_irq_leveL_high_handler(struct irq_desc *desc)
 {
@@ -262,7 +265,7 @@ static int altera_gpio_probe(struct platform_device *pdev)
 	if (!altera_gc)
 		return -ENOMEM;
 
-	raw_spin_lock_init(&altera_gc->gpio_lock);
+	spin_lock_init(&altera_gc->gpio_lock);
 
 	if (of_property_read_u32(node, "altr,ngpio", &reg))
 		/* By default assume maximum ngpio */
@@ -306,7 +309,7 @@ static int altera_gpio_probe(struct platform_device *pdev)
 	altera_gc->interrupt_trigger = reg;
 
 	ret = gpiochip_irqchip_add(&altera_gc->mmchip.gc, &altera_irq_chip, 0,
-		handle_bad_irq, IRQ_TYPE_NONE);
+		handle_simple_irq, IRQ_TYPE_NONE);
 
 	if (ret) {
 		dev_err(&pdev->dev, "could not add irqchip\n");

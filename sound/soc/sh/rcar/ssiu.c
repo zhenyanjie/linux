@@ -27,31 +27,11 @@ static int rsnd_ssiu_init(struct rsnd_mod *mod,
 			  struct rsnd_priv *priv)
 {
 	struct rsnd_dai *rdai = rsnd_io_to_rdai(io);
-	u32 multi_ssi_slaves = rsnd_ssi_multi_slaves_runtime(io);
+	u32 multi_ssi_slaves = rsnd_ssi_multi_slaves(io);
 	int use_busif = rsnd_ssi_use_busif(io);
 	int id = rsnd_mod_id(mod);
 	u32 mask1, val1;
 	u32 mask2, val2;
-
-	/* clear status */
-	switch (id) {
-	case 0:
-	case 1:
-	case 2:
-	case 3:
-	case 4:
-		rsnd_mod_write(mod, SSI_SYS_STATUS0, 0xf << (id * 4));
-		rsnd_mod_write(mod, SSI_SYS_STATUS2, 0xf << (id * 4));
-		rsnd_mod_write(mod, SSI_SYS_STATUS4, 0xf << (id * 4));
-		rsnd_mod_write(mod, SSI_SYS_STATUS6, 0xf << (id * 4));
-		break;
-	case 9:
-		rsnd_mod_write(mod, SSI_SYS_STATUS1, 0xf << 4);
-		rsnd_mod_write(mod, SSI_SYS_STATUS3, 0xf << 4);
-		rsnd_mod_write(mod, SSI_SYS_STATUS5, 0xf << 4);
-		rsnd_mod_write(mod, SSI_SYS_STATUS7, 0xf << 4);
-		break;
-	}
 
 	/*
 	 * SSI_MODE0
@@ -64,11 +44,7 @@ static int rsnd_ssiu_init(struct rsnd_mod *mod,
 	mask1 = (1 << 4) | (1 << 20);	/* mask sync bit */
 	mask2 = (1 << 4);		/* mask sync bit */
 	val1  = val2  = 0;
-	if (id == 8) {
-		/*
-		 * SSI8 pin is sharing with SSI7, nothing to do.
-		 */
-	} else if (rsnd_ssi_is_pin_sharing(io)) {
+	if (rsnd_ssi_is_pin_sharing(io)) {
 		int shift = -1;
 
 		switch (id) {
@@ -129,7 +105,7 @@ static int rsnd_ssiu_init_gen2(struct rsnd_mod *mod,
 	if (ret < 0)
 		return ret;
 
-	if (rsnd_runtime_is_ssi_tdm(io)) {
+	if (rsnd_get_slot_width(io) >= 6) {
 		/*
 		 * TDM Extend Mode
 		 * see
@@ -139,14 +115,13 @@ static int rsnd_ssiu_init_gen2(struct rsnd_mod *mod,
 	}
 
 	if (rsnd_ssi_use_busif(io)) {
+		u32 val = rsnd_get_dalign(mod, io);
+
 		rsnd_mod_write(mod, SSI_BUSIF_ADINR,
 			       rsnd_get_adinr_bit(mod, io) |
-			       (rsnd_io_is_play(io) ?
-				rsnd_runtime_channel_after_ctu(io) :
-				rsnd_runtime_channel_original(io)));
+			       rsnd_get_adinr_chan(mod, io));
 		rsnd_mod_write(mod, SSI_BUSIF_MODE,  1);
-		rsnd_mod_write(mod, SSI_BUSIF_DALIGN,
-			       rsnd_get_dalign(mod, io));
+		rsnd_mod_write(mod, SSI_BUSIF_DALIGN, val);
 	}
 
 	return 0;
@@ -161,7 +136,7 @@ static int rsnd_ssiu_start_gen2(struct rsnd_mod *mod,
 
 	rsnd_mod_write(mod, SSI_CTRL, 0x1);
 
-	if (rsnd_ssi_multi_slaves_runtime(io))
+	if (rsnd_ssi_multi_slaves(io))
 		rsnd_mod_write(mod, SSI_CONTROL, 0x1);
 
 	return 0;
@@ -176,7 +151,7 @@ static int rsnd_ssiu_stop_gen2(struct rsnd_mod *mod,
 
 	rsnd_mod_write(mod, SSI_CTRL, 0);
 
-	if (rsnd_ssi_multi_slaves_runtime(io))
+	if (rsnd_ssi_multi_slaves(io))
 		rsnd_mod_write(mod, SSI_CONTROL, 0);
 
 	return 0;
@@ -231,8 +206,7 @@ int rsnd_ssiu_probe(struct rsnd_priv *priv)
 
 	for_each_rsnd_ssiu(ssiu, priv, i) {
 		ret = rsnd_mod_init(priv, rsnd_mod_get(ssiu),
-				    ops, NULL, rsnd_mod_get_status,
-				    RSND_MOD_SSIU, i);
+				    ops, NULL, RSND_MOD_SSIU, i);
 		if (ret)
 			return ret;
 	}

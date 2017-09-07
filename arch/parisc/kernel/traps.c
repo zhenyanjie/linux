@@ -11,7 +11,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/errno.h>
@@ -285,8 +284,11 @@ void die_if_kernel(char *str, struct pt_regs *regs, long err)
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
-	if (panic_on_oops)
+	if (panic_on_oops) {
+		printk(KERN_EMERG "Fatal exception: panic in 5 seconds\n");
+		ssleep(5);
 		panic("Fatal exception");
+	}
 
 	oops_exit();
 	do_exit(SIGSEGV);
@@ -459,8 +461,8 @@ void parisc_terminate(char *msg, struct pt_regs *regs, int code, unsigned long o
 	}
 
 	printk("\n");
-	pr_crit("%s: Code=%d (%s) regs=%p (Addr=" RFMT ")\n",
-		msg, code, trap_name(code), regs, offset);
+	printk(KERN_CRIT "%s: Code=%d regs=%p (Addr=" RFMT ")\n",
+			msg, code, regs, offset);
 	show_regs(regs);
 
 	spin_unlock(&terminate_lock);
@@ -796,9 +798,6 @@ void notrace handle_interruption(int code, struct pt_regs *regs)
 
 	    if (fault_space == 0 && !faulthandler_disabled())
 	    {
-		/* Clean up and return if in exception table. */
-		if (fixup_exception(regs))
-			return;
 		pdc_chassis_send_status(PDC_CHASSIS_DIRECT_PANIC);
 		parisc_terminate("Kernel Fault", regs, code, fault_address);
 	    }

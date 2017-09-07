@@ -65,11 +65,6 @@ struct spu_queue {
 	struct list_head	list;
 };
 
-struct spu_qreg {
-	struct spu_queue	*queue;
-	unsigned long		type;
-};
-
 static struct spu_queue **cpu_to_cwq;
 static struct spu_queue **cpu_to_mau;
 
@@ -1603,7 +1598,7 @@ static void *new_queue(unsigned long q_type)
 
 static void free_queue(void *p, unsigned long q_type)
 {
-	kmem_cache_free(queue_cache[q_type - 1], p);
+	return kmem_cache_free(queue_cache[q_type - 1], p);
 }
 
 static int queue_cache_init(void)
@@ -1636,27 +1631,31 @@ static void queue_cache_destroy(void)
 	kmem_cache_destroy(queue_cache[HV_NCS_QTYPE_CWQ - 1]);
 }
 
-static long spu_queue_register_workfn(void *arg)
+static int spu_queue_register(struct spu_queue *p, unsigned long q_type)
 {
-	struct spu_qreg *qr = arg;
-	struct spu_queue *p = qr->queue;
-	unsigned long q_type = qr->type;
+	cpumask_var_t old_allowed;
 	unsigned long hv_ret;
+
+	if (cpumask_empty(&p->sharing))
+		return -EINVAL;
+
+	if (!alloc_cpumask_var(&old_allowed, GFP_KERNEL))
+		return -ENOMEM;
+
+	cpumask_copy(old_allowed, &current->cpus_allowed);
+
+	set_cpus_allowed_ptr(current, &p->sharing);
 
 	hv_ret = sun4v_ncs_qconf(q_type, __pa(p->q),
 				 CWQ_NUM_ENTRIES, &p->qhandle);
 	if (!hv_ret)
 		sun4v_ncs_sethead_marker(p->qhandle, 0);
 
-	return hv_ret ? -EINVAL : 0;
-}
+	set_cpus_allowed_ptr(current, old_allowed);
 
-static int spu_queue_register(struct spu_queue *p, unsigned long q_type)
-{
-	int cpu = cpumask_any_and(&p->sharing, cpu_online_mask);
-	struct spu_qreg qr = { .queue = p, .type = q_type };
+	free_cpumask_var(old_allowed);
 
-	return work_on_cpu_safe(cpu, spu_queue_register_workfn, &qr);
+	return (hv_ret ? -EINVAL : 0);
 }
 
 static int spu_queue_setup(struct spu_queue *p)

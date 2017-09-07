@@ -72,9 +72,7 @@
 
 int selinux_policycap_netpeer;
 int selinux_policycap_openperm;
-int selinux_policycap_extsockclass;
 int selinux_policycap_alwaysnetwork;
-int selinux_policycap_cgroupseclabel;
 
 static DEFINE_RWLOCK(policy_rwlock);
 
@@ -157,7 +155,7 @@ static int selinux_set_mapping(struct policydb *pol,
 		}
 
 		k = 0;
-		while (p_in->perms[k]) {
+		while (p_in->perms && p_in->perms[k]) {
 			/* An empty permission string skips ahead */
 			if (!*p_in->perms[k]) {
 				k++;
@@ -545,7 +543,7 @@ static void type_attribute_bounds_av(struct context *scontext,
 				     struct av_decision *avd)
 {
 	struct context lo_scontext;
-	struct context lo_tcontext, *tcontextp = tcontext;
+	struct context lo_tcontext;
 	struct av_decision lo_avd;
 	struct type_datum *source;
 	struct type_datum *target;
@@ -555,41 +553,67 @@ static void type_attribute_bounds_av(struct context *scontext,
 				    scontext->type - 1);
 	BUG_ON(!source);
 
-	if (!source->bounds)
-		return;
-
 	target = flex_array_get_ptr(policydb.type_val_to_struct_array,
 				    tcontext->type - 1);
 	BUG_ON(!target);
 
-	memset(&lo_avd, 0, sizeof(lo_avd));
+	if (source->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
 
-	memcpy(&lo_scontext, scontext, sizeof(lo_scontext));
-	lo_scontext.type = source->bounds;
+		memcpy(&lo_scontext, scontext, sizeof(lo_scontext));
+		lo_scontext.type = source->bounds;
 
-	if (target->bounds) {
-		memcpy(&lo_tcontext, tcontext, sizeof(lo_tcontext));
-		lo_tcontext.type = target->bounds;
-		tcontextp = &lo_tcontext;
+		context_struct_compute_av(&lo_scontext,
+					  tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
 	}
 
-	context_struct_compute_av(&lo_scontext,
-				  tcontextp,
-				  tclass,
-				  &lo_avd,
-				  NULL);
+	if (target->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
 
-	masked = ~lo_avd.allowed & avd->allowed;
+		memcpy(&lo_tcontext, tcontext, sizeof(lo_tcontext));
+		lo_tcontext.type = target->bounds;
 
-	if (likely(!masked))
-		return;		/* no masked permission */
+		context_struct_compute_av(scontext,
+					  &lo_tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
+	}
 
-	/* mask violated permissions */
-	avd->allowed &= ~masked;
+	if (source->bounds && target->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
+		/*
+		 * lo_scontext and lo_tcontext are already
+		 * set up.
+		 */
 
-	/* audit masked permissions */
-	security_dump_masked_av(scontext, tcontext,
-				tclass, masked, "bounds");
+		context_struct_compute_av(&lo_scontext,
+					  &lo_tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
+	}
+
+	if (masked) {
+		/* mask violated permissions */
+		avd->allowed &= ~masked;
+
+		/* audit masked permissions */
+		security_dump_masked_av(scontext, tcontext,
+					tclass, masked, "bounds");
+	}
 }
 
 /*
@@ -1990,13 +2014,8 @@ static void security_load_policycaps(void)
 						  POLICYDB_CAPABILITY_NETPEER);
 	selinux_policycap_openperm = ebitmap_get_bit(&policydb.policycaps,
 						  POLICYDB_CAPABILITY_OPENPERM);
-	selinux_policycap_extsockclass = ebitmap_get_bit(&policydb.policycaps,
-					  POLICYDB_CAPABILITY_EXTSOCKCLASS);
 	selinux_policycap_alwaysnetwork = ebitmap_get_bit(&policydb.policycaps,
 						  POLICYDB_CAPABILITY_ALWAYSNETWORK);
-	selinux_policycap_cgroupseclabel =
-		ebitmap_get_bit(&policydb.policycaps,
-				POLICYDB_CAPABILITY_CGROUPSECLABEL);
 }
 
 static int security_preserve_bools(struct policydb *p);
@@ -2677,7 +2696,7 @@ out:
 	return rc;
 }
 
-int security_get_bool_value(int index)
+int security_get_bool_value(int bool)
 {
 	int rc;
 	int len;
@@ -2686,10 +2705,10 @@ int security_get_bool_value(int index)
 
 	rc = -EFAULT;
 	len = policydb.p_bools.nprim;
-	if (index >= len)
+	if (bool >= len)
 		goto out;
 
-	rc = policydb.bool_val_to_struct[index]->state;
+	rc = policydb.bool_val_to_struct[bool]->state;
 out:
 	read_unlock(&policy_rwlock);
 	return rc;

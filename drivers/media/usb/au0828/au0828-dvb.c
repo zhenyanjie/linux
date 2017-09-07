@@ -13,6 +13,10 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *
  *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include "au0828.h"
@@ -177,7 +181,7 @@ static int stop_urb_transfer(struct au0828_dev *dev)
 static int start_urb_transfer(struct au0828_dev *dev)
 {
 	struct urb *purb;
-	int i, ret;
+	int i, ret = -ENOMEM;
 
 	dprintk(2, "%s()\n", __func__);
 
@@ -190,7 +194,7 @@ static int start_urb_transfer(struct au0828_dev *dev)
 
 		dev->urbs[i] = usb_alloc_urb(0, GFP_KERNEL);
 		if (!dev->urbs[i])
-			return -ENOMEM;
+			goto err;
 
 		purb = dev->urbs[i];
 
@@ -203,10 +207,9 @@ static int start_urb_transfer(struct au0828_dev *dev)
 		if (!purb->transfer_buffer) {
 			usb_free_urb(purb);
 			dev->urbs[i] = NULL;
-			ret = -ENOMEM;
 			pr_err("%s: failed big buffer allocation, err = %d\n",
 			       __func__, ret);
-			return ret;
+			goto err;
 		}
 
 		purb->status = -EINPROGRESS;
@@ -232,7 +235,10 @@ static int start_urb_transfer(struct au0828_dev *dev)
 	}
 
 	dev->urb_streaming = true;
-	return 0;
+	ret = 0;
+
+err:
+	return ret;
 }
 
 static void au0828_start_transport(struct au0828_dev *dev)

@@ -35,168 +35,214 @@
 #include <linux/mtd/partitions.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <linux/mtd/fsmc.h>
 #include <linux/amba/bus.h>
 #include <mtd/mtd-abi.h>
 
-#define FSMC_NAND_BW8		1
-#define FSMC_NAND_BW16		2
-
-#define FSMC_MAX_NOR_BANKS	4
-#define FSMC_MAX_NAND_BANKS	4
-
-#define FSMC_FLASH_WIDTH8	1
-#define FSMC_FLASH_WIDTH16	2
-
-/* fsmc controller registers for NOR flash */
-#define CTRL			0x0
-	/* ctrl register definitions */
-	#define BANK_ENABLE		(1 << 0)
-	#define MUXED			(1 << 1)
-	#define NOR_DEV			(2 << 2)
-	#define WIDTH_8			(0 << 4)
-	#define WIDTH_16		(1 << 4)
-	#define RSTPWRDWN		(1 << 6)
-	#define WPROT			(1 << 7)
-	#define WRT_ENABLE		(1 << 12)
-	#define WAIT_ENB		(1 << 13)
-
-#define CTRL_TIM		0x4
-	/* ctrl_tim register definitions */
-
-#define FSMC_NOR_BANK_SZ	0x8
-#define FSMC_NOR_REG_SIZE	0x40
-
-#define FSMC_NOR_REG(base, bank, reg)		(base + \
-						FSMC_NOR_BANK_SZ * (bank) + \
-						reg)
-
-/* fsmc controller registers for NAND flash */
-#define PC			0x00
-	/* pc register definitions */
-	#define FSMC_RESET		(1 << 0)
-	#define FSMC_WAITON		(1 << 1)
-	#define FSMC_ENABLE		(1 << 2)
-	#define FSMC_DEVTYPE_NAND	(1 << 3)
-	#define FSMC_DEVWID_8		(0 << 4)
-	#define FSMC_DEVWID_16		(1 << 4)
-	#define FSMC_ECCEN		(1 << 6)
-	#define FSMC_ECCPLEN_512	(0 << 7)
-	#define FSMC_ECCPLEN_256	(1 << 7)
-	#define FSMC_TCLR_1		(1)
-	#define FSMC_TCLR_SHIFT		(9)
-	#define FSMC_TCLR_MASK		(0xF)
-	#define FSMC_TAR_1		(1)
-	#define FSMC_TAR_SHIFT		(13)
-	#define FSMC_TAR_MASK		(0xF)
-#define STS			0x04
-	/* sts register definitions */
-	#define FSMC_CODE_RDY		(1 << 15)
-#define COMM			0x08
-	/* comm register definitions */
-	#define FSMC_TSET_0		0
-	#define FSMC_TSET_SHIFT		0
-	#define FSMC_TSET_MASK		0xFF
-	#define FSMC_TWAIT_6		6
-	#define FSMC_TWAIT_SHIFT	8
-	#define FSMC_TWAIT_MASK		0xFF
-	#define FSMC_THOLD_4		4
-	#define FSMC_THOLD_SHIFT	16
-	#define FSMC_THOLD_MASK		0xFF
-	#define FSMC_THIZ_1		1
-	#define FSMC_THIZ_SHIFT		24
-	#define FSMC_THIZ_MASK		0xFF
-#define ATTRIB			0x0C
-#define IOATA			0x10
-#define ECC1			0x14
-#define ECC2			0x18
-#define ECC3			0x1C
-#define FSMC_NAND_BANK_SZ	0x20
-
-#define FSMC_NAND_REG(base, bank, reg)		(base + FSMC_NOR_REG_SIZE + \
-						(FSMC_NAND_BANK_SZ * (bank)) + \
-						reg)
-
-#define FSMC_BUSY_WAIT_TIMEOUT	(1 * HZ)
-
-struct fsmc_nand_timings {
-	uint8_t tclr;
-	uint8_t tar;
-	uint8_t thiz;
-	uint8_t thold;
-	uint8_t twait;
-	uint8_t tset;
+static struct nand_ecclayout fsmc_ecc1_128_layout = {
+	.eccbytes = 24,
+	.eccpos = {2, 3, 4, 18, 19, 20, 34, 35, 36, 50, 51, 52,
+		66, 67, 68, 82, 83, 84, 98, 99, 100, 114, 115, 116},
+	.oobfree = {
+		{.offset = 8, .length = 8},
+		{.offset = 24, .length = 8},
+		{.offset = 40, .length = 8},
+		{.offset = 56, .length = 8},
+		{.offset = 72, .length = 8},
+		{.offset = 88, .length = 8},
+		{.offset = 104, .length = 8},
+		{.offset = 120, .length = 8}
+	}
 };
 
-enum access_mode {
-	USE_DMA_ACCESS = 1,
-	USE_WORD_ACCESS,
+static struct nand_ecclayout fsmc_ecc1_64_layout = {
+	.eccbytes = 12,
+	.eccpos = {2, 3, 4, 18, 19, 20, 34, 35, 36, 50, 51, 52},
+	.oobfree = {
+		{.offset = 8, .length = 8},
+		{.offset = 24, .length = 8},
+		{.offset = 40, .length = 8},
+		{.offset = 56, .length = 8},
+	}
 };
 
-/**
- * fsmc_nand_platform_data - platform specific NAND controller config
- * @nand_timings: timing setup for the physical NAND interface
- * @partitions: partition table for the platform, use a default fallback
- * if this is NULL
- * @nr_partitions: the number of partitions in the previous entry
- * @options: different options for the driver
- * @width: bus width
- * @bank: default bank
- * @select_bank: callback to select a certain bank, this is
- * platform-specific. If the controller only supports one bank
- * this may be set to NULL
+static struct nand_ecclayout fsmc_ecc1_16_layout = {
+	.eccbytes = 3,
+	.eccpos = {2, 3, 4},
+	.oobfree = {
+		{.offset = 8, .length = 8},
+	}
+};
+
+/*
+ * ECC4 layout for NAND of pagesize 8192 bytes & OOBsize 256 bytes. 13*16 bytes
+ * of OB size is reserved for ECC, Byte no. 0 & 1 reserved for bad block and 46
+ * bytes are free for use.
  */
-struct fsmc_nand_platform_data {
-	struct fsmc_nand_timings *nand_timings;
-	struct mtd_partition	*partitions;
-	unsigned int		nr_partitions;
-	unsigned int		options;
-	unsigned int		width;
-	unsigned int		bank;
-
-	enum access_mode	mode;
-
-	void			(*select_bank)(uint32_t bank, uint32_t busw);
-
-	/* priv structures for dma accesses */
-	void			*read_dma_priv;
-	void			*write_dma_priv;
+static struct nand_ecclayout fsmc_ecc4_256_layout = {
+	.eccbytes = 208,
+	.eccpos = {  2,   3,   4,   5,   6,   7,   8,
+		9,  10,  11,  12,  13,  14,
+		18,  19,  20,  21,  22,  23,  24,
+		25,  26,  27,  28,  29,  30,
+		34,  35,  36,  37,  38,  39,  40,
+		41,  42,  43,  44,  45,  46,
+		50,  51,  52,  53,  54,  55,  56,
+		57,  58,  59,  60,  61,  62,
+		66,  67,  68,  69,  70,  71,  72,
+		73,  74,  75,  76,  77,  78,
+		82,  83,  84,  85,  86,  87,  88,
+		89,  90,  91,  92,  93,  94,
+		98,  99, 100, 101, 102, 103, 104,
+		105, 106, 107, 108, 109, 110,
+		114, 115, 116, 117, 118, 119, 120,
+		121, 122, 123, 124, 125, 126,
+		130, 131, 132, 133, 134, 135, 136,
+		137, 138, 139, 140, 141, 142,
+		146, 147, 148, 149, 150, 151, 152,
+		153, 154, 155, 156, 157, 158,
+		162, 163, 164, 165, 166, 167, 168,
+		169, 170, 171, 172, 173, 174,
+		178, 179, 180, 181, 182, 183, 184,
+		185, 186, 187, 188, 189, 190,
+		194, 195, 196, 197, 198, 199, 200,
+		201, 202, 203, 204, 205, 206,
+		210, 211, 212, 213, 214, 215, 216,
+		217, 218, 219, 220, 221, 222,
+		226, 227, 228, 229, 230, 231, 232,
+		233, 234, 235, 236, 237, 238,
+		242, 243, 244, 245, 246, 247, 248,
+		249, 250, 251, 252, 253, 254
+	},
+	.oobfree = {
+		{.offset = 15, .length = 3},
+		{.offset = 31, .length = 3},
+		{.offset = 47, .length = 3},
+		{.offset = 63, .length = 3},
+		{.offset = 79, .length = 3},
+		{.offset = 95, .length = 3},
+		{.offset = 111, .length = 3},
+		{.offset = 127, .length = 3},
+		{.offset = 143, .length = 3},
+		{.offset = 159, .length = 3},
+		{.offset = 175, .length = 3},
+		{.offset = 191, .length = 3},
+		{.offset = 207, .length = 3},
+		{.offset = 223, .length = 3},
+		{.offset = 239, .length = 3},
+		{.offset = 255, .length = 1}
+	}
 };
 
-static int fsmc_ecc1_ooblayout_ecc(struct mtd_info *mtd, int section,
-				   struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
+/*
+ * ECC4 layout for NAND of pagesize 4096 bytes & OOBsize 224 bytes. 13*8 bytes
+ * of OOB size is reserved for ECC, Byte no. 0 & 1 reserved for bad block & 118
+ * bytes are free for use.
+ */
+static struct nand_ecclayout fsmc_ecc4_224_layout = {
+	.eccbytes = 104,
+	.eccpos = {  2,   3,   4,   5,   6,   7,   8,
+		9,  10,  11,  12,  13,  14,
+		18,  19,  20,  21,  22,  23,  24,
+		25,  26,  27,  28,  29,  30,
+		34,  35,  36,  37,  38,  39,  40,
+		41,  42,  43,  44,  45,  46,
+		50,  51,  52,  53,  54,  55,  56,
+		57,  58,  59,  60,  61,  62,
+		66,  67,  68,  69,  70,  71,  72,
+		73,  74,  75,  76,  77,  78,
+		82,  83,  84,  85,  86,  87,  88,
+		89,  90,  91,  92,  93,  94,
+		98,  99, 100, 101, 102, 103, 104,
+		105, 106, 107, 108, 109, 110,
+		114, 115, 116, 117, 118, 119, 120,
+		121, 122, 123, 124, 125, 126
+	},
+	.oobfree = {
+		{.offset = 15, .length = 3},
+		{.offset = 31, .length = 3},
+		{.offset = 47, .length = 3},
+		{.offset = 63, .length = 3},
+		{.offset = 79, .length = 3},
+		{.offset = 95, .length = 3},
+		{.offset = 111, .length = 3},
+		{.offset = 127, .length = 97}
+	}
+};
 
-	if (section >= chip->ecc.steps)
-		return -ERANGE;
+/*
+ * ECC4 layout for NAND of pagesize 4096 bytes & OOBsize 128 bytes. 13*8 bytes
+ * of OOB size is reserved for ECC, Byte no. 0 & 1 reserved for bad block & 22
+ * bytes are free for use.
+ */
+static struct nand_ecclayout fsmc_ecc4_128_layout = {
+	.eccbytes = 104,
+	.eccpos = {  2,   3,   4,   5,   6,   7,   8,
+		9,  10,  11,  12,  13,  14,
+		18,  19,  20,  21,  22,  23,  24,
+		25,  26,  27,  28,  29,  30,
+		34,  35,  36,  37,  38,  39,  40,
+		41,  42,  43,  44,  45,  46,
+		50,  51,  52,  53,  54,  55,  56,
+		57,  58,  59,  60,  61,  62,
+		66,  67,  68,  69,  70,  71,  72,
+		73,  74,  75,  76,  77,  78,
+		82,  83,  84,  85,  86,  87,  88,
+		89,  90,  91,  92,  93,  94,
+		98,  99, 100, 101, 102, 103, 104,
+		105, 106, 107, 108, 109, 110,
+		114, 115, 116, 117, 118, 119, 120,
+		121, 122, 123, 124, 125, 126
+	},
+	.oobfree = {
+		{.offset = 15, .length = 3},
+		{.offset = 31, .length = 3},
+		{.offset = 47, .length = 3},
+		{.offset = 63, .length = 3},
+		{.offset = 79, .length = 3},
+		{.offset = 95, .length = 3},
+		{.offset = 111, .length = 3},
+		{.offset = 127, .length = 1}
+	}
+};
 
-	oobregion->offset = (section * 16) + 2;
-	oobregion->length = 3;
+/*
+ * ECC4 layout for NAND of pagesize 2048 bytes & OOBsize 64 bytes. 13*4 bytes of
+ * OOB size is reserved for ECC, Byte no. 0 & 1 reserved for bad block and 10
+ * bytes are free for use.
+ */
+static struct nand_ecclayout fsmc_ecc4_64_layout = {
+	.eccbytes = 52,
+	.eccpos = {  2,   3,   4,   5,   6,   7,   8,
+		9,  10,  11,  12,  13,  14,
+		18,  19,  20,  21,  22,  23,  24,
+		25,  26,  27,  28,  29,  30,
+		34,  35,  36,  37,  38,  39,  40,
+		41,  42,  43,  44,  45,  46,
+		50,  51,  52,  53,  54,  55,  56,
+		57,  58,  59,  60,  61,  62,
+	},
+	.oobfree = {
+		{.offset = 15, .length = 3},
+		{.offset = 31, .length = 3},
+		{.offset = 47, .length = 3},
+		{.offset = 63, .length = 1},
+	}
+};
 
-	return 0;
-}
-
-static int fsmc_ecc1_ooblayout_free(struct mtd_info *mtd, int section,
-				    struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
-
-	if (section >= chip->ecc.steps)
-		return -ERANGE;
-
-	oobregion->offset = (section * 16) + 8;
-
-	if (section < chip->ecc.steps - 1)
-		oobregion->length = 8;
-	else
-		oobregion->length = mtd->oobsize - oobregion->offset;
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops fsmc_ecc1_ooblayout_ops = {
-	.ecc = fsmc_ecc1_ooblayout_ecc,
-	.free = fsmc_ecc1_ooblayout_free,
+/*
+ * ECC4 layout for NAND of pagesize 512 bytes & OOBsize 16 bytes. 13 bytes of
+ * OOB size is reserved for ECC, Byte no. 4 & 5 reserved for bad block and One
+ * byte is free for use.
+ */
+static struct nand_ecclayout fsmc_ecc4_16_layout = {
+	.eccbytes = 13,
+	.eccpos = { 0,  1,  2,  3,  6,  7, 8,
+		9, 10, 11, 12, 13, 14
+	},
+	.oobfree = {
+		{.offset = 15, .length = 1},
+	}
 };
 
 /*
@@ -204,46 +250,28 @@ static const struct mtd_ooblayout_ops fsmc_ecc1_ooblayout_ops = {
  * There are 13 bytes of ecc for every 512 byte block and it has to be read
  * consecutively and immediately after the 512 byte data block for hardware to
  * generate the error bit offsets in 512 byte data.
+ * Managing the ecc bytes in the following way makes it easier for software to
+ * read ecc bytes consecutive to data bytes. This way is similar to
+ * oobfree structure maintained already in generic nand driver
  */
-static int fsmc_ecc4_ooblayout_ecc(struct mtd_info *mtd, int section,
-				   struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
+static struct fsmc_eccplace fsmc_ecc4_lp_place = {
+	.eccplace = {
+		{.offset = 2, .length = 13},
+		{.offset = 18, .length = 13},
+		{.offset = 34, .length = 13},
+		{.offset = 50, .length = 13},
+		{.offset = 66, .length = 13},
+		{.offset = 82, .length = 13},
+		{.offset = 98, .length = 13},
+		{.offset = 114, .length = 13}
+	}
+};
 
-	if (section >= chip->ecc.steps)
-		return -ERANGE;
-
-	oobregion->length = chip->ecc.bytes;
-
-	if (!section && mtd->writesize <= 512)
-		oobregion->offset = 0;
-	else
-		oobregion->offset = (section * 16) + 2;
-
-	return 0;
-}
-
-static int fsmc_ecc4_ooblayout_free(struct mtd_info *mtd, int section,
-				    struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
-
-	if (section >= chip->ecc.steps)
-		return -ERANGE;
-
-	oobregion->offset = (section * 16) + 15;
-
-	if (section < chip->ecc.steps - 1)
-		oobregion->length = 3;
-	else
-		oobregion->length = mtd->oobsize - oobregion->offset;
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops fsmc_ecc4_ooblayout_ops = {
-	.ecc = fsmc_ecc4_ooblayout_ecc,
-	.free = fsmc_ecc4_ooblayout_free,
+static struct fsmc_eccplace fsmc_ecc4_sp_place = {
+	.eccplace = {
+		{.offset = 0, .length = 4},
+		{.offset = 6, .length = 9}
+	}
 };
 
 /**
@@ -255,6 +283,7 @@ static const struct mtd_ooblayout_ops fsmc_ecc4_ooblayout_ops = {
  * @partitions:		Partition info for a NAND Flash.
  * @nr_partitions:	Total number of partition of a NAND flash.
  *
+ * @ecc_place:		ECC placing locations in oobfree type format.
  * @bank:		Bank number for probed device.
  * @clk:		Clock structure for FSMC.
  *
@@ -274,6 +303,7 @@ struct fsmc_nand_data {
 	struct mtd_partition	*partitions;
 	unsigned int		nr_partitions;
 
+	struct fsmc_eccplace	*ecc_place;
 	unsigned int		bank;
 	struct device		*dev;
 	enum access_mode	mode;
@@ -680,6 +710,8 @@ static void fsmc_write_buf_dma(struct mtd_info *mtd, const uint8_t *buf,
 static int fsmc_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip,
 				 uint8_t *buf, int oob_required, int page)
 {
+	struct fsmc_nand_data *host = mtd_to_fsmc(mtd);
+	struct fsmc_eccplace *ecc_place = host->ecc_place;
 	int i, j, s, stat, eccsize = chip->ecc.size;
 	int eccbytes = chip->ecc.bytes;
 	int eccsteps = chip->ecc.steps;
@@ -702,15 +734,9 @@ static int fsmc_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip,
 		chip->read_buf(mtd, p, eccsize);
 
 		for (j = 0; j < eccbytes;) {
-			struct mtd_oob_region oobregion;
-			int ret;
-
-			ret = mtd_ooblayout_ecc(mtd, group++, &oobregion);
-			if (ret)
-				return ret;
-
-			off = oobregion.offset;
-			len = oobregion.length;
+			off = ecc_place->eccplace[group].offset;
+			len = ecc_place->eccplace[group].length;
+			group++;
 
 			/*
 			 * length is intentionally kept a higher multiple of 2
@@ -837,6 +863,7 @@ static bool filter(struct dma_chan *chan, void *slave)
 	return true;
 }
 
+#ifdef CONFIG_OF
 static int fsmc_nand_probe_config_dt(struct platform_device *pdev,
 				     struct device_node *np)
 {
@@ -879,6 +906,13 @@ static int fsmc_nand_probe_config_dt(struct platform_device *pdev,
 	}
 	return 0;
 }
+#else
+static int fsmc_nand_probe_config_dt(struct platform_device *pdev,
+				     struct device_node *np)
+{
+	return -ENOSYS;
+}
+#endif
 
 /*
  * fsmc_nand_probe - Probe function
@@ -897,15 +931,19 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 	u32 pid;
 	int i;
 
-	pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
-	if (!pdata)
-		return -ENOMEM;
+	if (np) {
+		pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
+		pdev->dev.platform_data = pdata;
+		ret = fsmc_nand_probe_config_dt(pdev, np);
+		if (ret) {
+			dev_err(&pdev->dev, "no platform data\n");
+			return -ENODEV;
+		}
+	}
 
-	pdev->dev.platform_data = pdata;
-	ret = fsmc_nand_probe_config_dt(pdev, np);
-	if (ret) {
-		dev_err(&pdev->dev, "no platform data\n");
-		return -ENODEV;
+	if (!pdata) {
+		dev_err(&pdev->dev, "platform data is NULL\n");
+		return -EINVAL;
 	}
 
 	/* Allocate memory for the device structure (and zero it) */
@@ -1037,8 +1075,8 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 	/*
 	 * Scan to find existence of the device
 	 */
-	ret = nand_scan_ident(mtd, 1, NULL);
-	if (ret) {
+	if (nand_scan_ident(mtd, 1, NULL)) {
+		ret = -ENXIO;
 		dev_err(&pdev->dev, "No NAND Device found!\n");
 		goto err_scan_ident;
 	}
@@ -1046,10 +1084,24 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 	if (AMBA_REV_BITS(host->pid) >= 8) {
 		switch (mtd->oobsize) {
 		case 16:
+			nand->ecc.layout = &fsmc_ecc4_16_layout;
+			host->ecc_place = &fsmc_ecc4_sp_place;
+			break;
 		case 64:
+			nand->ecc.layout = &fsmc_ecc4_64_layout;
+			host->ecc_place = &fsmc_ecc4_lp_place;
+			break;
 		case 128:
+			nand->ecc.layout = &fsmc_ecc4_128_layout;
+			host->ecc_place = &fsmc_ecc4_lp_place;
+			break;
 		case 224:
+			nand->ecc.layout = &fsmc_ecc4_224_layout;
+			host->ecc_place = &fsmc_ecc4_lp_place;
+			break;
 		case 256:
+			nand->ecc.layout = &fsmc_ecc4_256_layout;
+			host->ecc_place = &fsmc_ecc4_lp_place;
 			break;
 		default:
 			dev_warn(&pdev->dev, "No oob scheme defined for oobsize %d\n",
@@ -1057,8 +1109,6 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 			ret = -EINVAL;
 			goto err_probe;
 		}
-
-		mtd_set_ooblayout(mtd, &fsmc_ecc4_ooblayout_ops);
 	} else {
 		switch (nand->ecc.mode) {
 		case NAND_ECC_HW:
@@ -1069,11 +1119,9 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 			nand->ecc.strength = 1;
 			break;
 
-		case NAND_ECC_SOFT:
-			if (nand->ecc.algo == NAND_ECC_BCH) {
-				dev_info(&pdev->dev, "Using 4-bit SW BCH ECC scheme\n");
-				break;
-			}
+		case NAND_ECC_SOFT_BCH:
+			dev_info(&pdev->dev, "Using 4-bit SW BCH ECC scheme\n");
+			break;
 
 		default:
 			dev_err(&pdev->dev, "Unsupported ECC mode!\n");
@@ -1084,13 +1132,16 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 		 * Don't set layout for BCH4 SW ECC. This will be
 		 * generated later in nand_bch_init() later.
 		 */
-		if (nand->ecc.mode == NAND_ECC_HW) {
+		if (nand->ecc.mode != NAND_ECC_SOFT_BCH) {
 			switch (mtd->oobsize) {
 			case 16:
+				nand->ecc.layout = &fsmc_ecc1_16_layout;
+				break;
 			case 64:
+				nand->ecc.layout = &fsmc_ecc1_64_layout;
+				break;
 			case 128:
-				mtd_set_ooblayout(mtd,
-						  &fsmc_ecc1_ooblayout_ops);
+				nand->ecc.layout = &fsmc_ecc1_128_layout;
 				break;
 			default:
 				dev_warn(&pdev->dev,
@@ -1103,9 +1154,10 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 	}
 
 	/* Second stage of scan to fill MTD data-structures */
-	ret = nand_scan_tail(mtd);
-	if (ret)
+	if (nand_scan_tail(mtd)) {
+		ret = -ENXIO;
 		goto err_probe;
+	}
 
 	/*
 	 * The partition information can is accessed by (in the same precedence)

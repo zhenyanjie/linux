@@ -1,4 +1,3 @@
-#include <inttypes.h>
 #include "perf.h"
 #include "util/debug.h"
 #include "util/symbol.h"
@@ -8,7 +7,6 @@
 #include "util/machine.h"
 #include "util/thread.h"
 #include "tests/hists_common.h"
-#include <linux/kernel.h>
 
 static struct {
 	u32 pid;
@@ -102,11 +100,9 @@ struct machine *setup_fake_machine(struct machines *machines)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(fake_mmap_info); i++) {
-		struct perf_sample sample = {
-			.cpumode = PERF_RECORD_MISC_USER,
-		};
 		union perf_event fake_mmap_event = {
 			.mmap = {
+				.header = { .misc = PERF_RECORD_MISC_USER, },
 				.pid = fake_mmap_info[i].pid,
 				.tid = fake_mmap_info[i].pid,
 				.start = fake_mmap_info[i].start,
@@ -118,7 +114,7 @@ struct machine *setup_fake_machine(struct machines *machines)
 		strcpy(fake_mmap_event.mmap.filename,
 		       fake_mmap_info[i].filename);
 
-		machine__process_mmap_event(machine, &fake_mmap_event, &sample);
+		machine__process_mmap_event(machine, &fake_mmap_event, NULL);
 	}
 
 	for (i = 0; i < ARRAY_SIZE(fake_symbols); i++) {
@@ -163,7 +159,7 @@ void print_hists_in(struct hists *hists)
 	struct rb_root *root;
 	struct rb_node *node;
 
-	if (hists__has(hists, need_collapse))
+	if (sort__need_collapse)
 		root = &hists->entries_collapsed;
 	else
 		root = hists->entries_in;

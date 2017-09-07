@@ -39,14 +39,13 @@
  *     OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include "skeleton.dtsi"
 #include <dt-bindings/clock/berlin2.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
 	model = "Marvell Armada 1500 (BG2) SoC";
 	compatible = "marvell,berlin2", "marvell,berlin";
-	#address-cells = <1>;
-	#size-cells = <1>;
 
 	aliases {
 		serial0 = &uart0;
@@ -90,7 +89,7 @@
 		clock-frequency = <25000000>;
 	};
 
-	soc@f7000000 {
+	soc {
 		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -448,6 +447,7 @@
 				reg = <0x2000 0x100>;
 				clocks = <&refclk>;
 				interrupts = <1>;
+				status = "disabled";
 			};
 
 			wdt2: watchdog@3000 {
@@ -455,6 +455,7 @@
 				reg = <0x3000 0x100>;
 				clocks = <&refclk>;
 				interrupts = <2>;
+				status = "disabled";
 			};
 
 			sm_gpio1: gpio@5000 {

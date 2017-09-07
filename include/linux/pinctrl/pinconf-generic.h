@@ -12,6 +12,12 @@
 #ifndef __LINUX_PINCTRL_PINCONF_GENERIC_H
 #define __LINUX_PINCTRL_PINCONF_GENERIC_H
 
+/*
+ * You shouldn't even be able to compile with these enums etc unless you're
+ * using generic pin config. That is why this is defined out.
+ */
+#ifdef CONFIG_GENERIC_PINCONF
+
 /**
  * enum pin_config_param - possible pin configuration parameters
  * @PIN_CONFIG_BIAS_BUS_HOLD: the pin will be set to weakly latch so that it
@@ -42,8 +48,6 @@
  * @PIN_CONFIG_BIAS_PULL_UP: the pin will be pulled up (usually with high
  *	impedance to VDD). If the argument is != 0 pull-up is enabled,
  *	if it is 0, pull-up is total, i.e. the pin is connected to VDD.
- * @PIN_CONFIG_BIDIRECTIONAL: the pin will be configured to allow simultaneous
- *	input and output operations.
  * @PIN_CONFIG_DRIVE_OPEN_DRAIN: the pin will be driven with open drain (open
  *	collector) which means it is usually wired with other output ports
  *	which are then pulled up with an external resistor. Setting this
@@ -88,8 +92,6 @@
  * @PIN_CONFIG_END: this is the last enumerator for pin configurations, if
  *	you need to pass in custom configurations to the pin controller, use
  *	PIN_CONFIG_END+1 as the base offset.
- * @PIN_CONFIG_MAX: this is the maximum configuration value that can be
- *	presented using the packed format.
  */
 enum pin_config_param {
 	PIN_CONFIG_BIAS_BUS_HOLD,
@@ -98,7 +100,6 @@ enum pin_config_param {
 	PIN_CONFIG_BIAS_PULL_DOWN,
 	PIN_CONFIG_BIAS_PULL_PIN_DEFAULT,
 	PIN_CONFIG_BIAS_PULL_UP,
-	PIN_CONFIG_BIDIRECTIONAL,
 	PIN_CONFIG_DRIVE_OPEN_DRAIN,
 	PIN_CONFIG_DRIVE_OPEN_SOURCE,
 	PIN_CONFIG_DRIVE_PUSH_PULL,
@@ -111,44 +112,12 @@ enum pin_config_param {
 	PIN_CONFIG_OUTPUT,
 	PIN_CONFIG_POWER_SOURCE,
 	PIN_CONFIG_SLEW_RATE,
-	PIN_CONFIG_END = 0x7F,
-	PIN_CONFIG_MAX = 0xFF,
+	PIN_CONFIG_END = 0x7FFF,
 };
 
-/*
- * Helpful configuration macro to be used in tables etc.
- */
-#define PIN_CONF_PACKED(p, a) ((a << 8) | ((unsigned long) p & 0xffUL))
-
-/*
- * The following inlines stuffs a configuration parameter and data value
- * into and out of an unsigned long argument, as used by the generic pin config
- * system. We put the parameter in the lower 8 bits and the argument in the
- * upper 24 bits.
- */
-
-static inline enum pin_config_param pinconf_to_config_param(unsigned long config)
-{
-	return (enum pin_config_param) (config & 0xffUL);
-}
-
-static inline u32 pinconf_to_config_argument(unsigned long config)
-{
-	return (u32) ((config >> 8) & 0xffffffUL);
-}
-
-static inline unsigned long pinconf_to_config_packed(enum pin_config_param param,
-						     u32 argument)
-{
-	return PIN_CONF_PACKED(param, argument);
-}
-
-#ifdef CONFIG_GENERIC_PINCONF
-
 #ifdef CONFIG_DEBUG_FS
-#define PCONFDUMP(a, b, c, d) {					\
-	.param = a, .display = b, .format = c, .has_arg = d	\
-	}
+#define PCONFDUMP(a, b, c, d) { .param = a, .display = b, .format = c, \
+				.has_arg = d }
 
 struct pin_config_item {
 	const enum pin_config_param param;
@@ -157,6 +126,34 @@ struct pin_config_item {
 	bool has_arg;
 };
 #endif /* CONFIG_DEBUG_FS */
+
+/*
+ * Helpful configuration macro to be used in tables etc.
+ */
+#define PIN_CONF_PACKED(p, a) ((a << 16) | ((unsigned long) p & 0xffffUL))
+
+/*
+ * The following inlines stuffs a configuration parameter and data value
+ * into and out of an unsigned long argument, as used by the generic pin config
+ * system. We put the parameter in the lower 16 bits and the argument in the
+ * upper 16 bits.
+ */
+
+static inline enum pin_config_param pinconf_to_config_param(unsigned long config)
+{
+	return (enum pin_config_param) (config & 0xffffUL);
+}
+
+static inline u16 pinconf_to_config_argument(unsigned long config)
+{
+	return (enum pin_config_param) ((config >> 16) & 0xffffUL);
+}
+
+static inline unsigned long pinconf_to_config_packed(enum pin_config_param param,
+						     u16 argument)
+{
+	return PIN_CONF_PACKED(param, argument);
+}
 
 #ifdef CONFIG_OF
 
@@ -178,8 +175,6 @@ int pinconf_generic_dt_subnode_to_map(struct pinctrl_dev *pctldev,
 int pinconf_generic_dt_node_to_map(struct pinctrl_dev *pctldev,
 		struct device_node *np_config, struct pinctrl_map **map,
 		unsigned *num_maps, enum pinctrl_map_type type);
-void pinconf_generic_dt_free_map(struct pinctrl_dev *pctldev,
-		struct pinctrl_map *map, unsigned num_maps);
 
 static inline int pinconf_generic_dt_node_to_map_group(
 		struct pinctrl_dev *pctldev, struct device_node *np_config,

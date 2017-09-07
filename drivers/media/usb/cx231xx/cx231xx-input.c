@@ -72,7 +72,7 @@ int cx231xx_ir_init(struct cx231xx *dev)
 
 	memset(&info, 0, sizeof(struct i2c_board_info));
 	memset(&dev->init_data, 0, sizeof(dev->init_data));
-	dev->init_data.rc_dev = rc_allocate_device(RC_DRIVER_SCANCODE);
+	dev->init_data.rc_dev = rc_allocate_device();
 	if (!dev->init_data.rc_dev)
 		return -ENOMEM;
 

@@ -87,8 +87,7 @@ static int bcm47xx_wdt_hard_set_timeout(struct watchdog_device *wdd,
 	return 0;
 }
 
-static int bcm47xx_wdt_restart(struct watchdog_device *wdd,
-			       unsigned long action, void *data)
+static int bcm47xx_wdt_restart(struct watchdog_device *wdd)
 {
 	struct bcm47xx_wdt *wdt = bcm47xx_wdt_get(wdd);
 
@@ -225,6 +224,9 @@ err_timer:
 static int bcm47xx_wdt_remove(struct platform_device *pdev)
 {
 	struct bcm47xx_wdt *wdt = dev_get_platdata(&pdev->dev);
+
+	if (!wdt)
+		return -ENXIO;
 
 	watchdog_unregister_device(&wdt->wdd);
 

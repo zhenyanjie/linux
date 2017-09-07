@@ -47,7 +47,6 @@ set_idx_reg(struct net2280_regs __iomem *regs, u32 index, u32 value)
 #define PLX_LEGACY		BIT(0)
 #define PLX_2280		BIT(1)
 #define PLX_SUPERSPEED		BIT(2)
-#define PLX_PCIE		BIT(3)
 
 #define REG_DIAG		0x0
 #define     RETRY_COUNTER                                       16
@@ -187,7 +186,7 @@ struct net2280 {
 	struct usb338x_ll_chi_regs	__iomem *ll_chicken_reg;
 	struct usb338x_pl_regs		__iomem *plregs;
 
-	struct dma_pool			*requests;
+	struct pci_pool			*requests;
 	/* statistics...*/
 };
 

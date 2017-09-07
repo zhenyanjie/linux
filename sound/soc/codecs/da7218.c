@@ -1634,8 +1634,7 @@ static const struct snd_soc_dapm_widget da7218_dapm_widgets[] = {
 			    SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
 
 	/* DAI */
-	SND_SOC_DAPM_AIF_OUT("DAIOUT", "Capture", 0, DA7218_DAI_TDM_CTRL,
-			     DA7218_DAI_OE_SHIFT, DA7218_NO_INVERT),
+	SND_SOC_DAPM_AIF_OUT("DAIOUT", "Capture", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("DAIIN", "Playback", 0, SND_SOC_NOPM, 0, 0),
 
 	/* Output Mixers */
@@ -1820,7 +1819,7 @@ static int da7218_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 	if (da7218->mclk_rate == freq)
 		return 0;
 
-	if ((freq < 2000000) || (freq > 54000000)) {
+	if (((freq < 2000000) && (freq != 32768)) || (freq > 54000000)) {
 		dev_err(codec_dai->dev, "Unsupported MCLK value %d\n",
 			freq);
 		return -EINVAL;
@@ -1867,26 +1866,29 @@ static int da7218_set_dai_pll(struct snd_soc_dai *codec_dai, int pll_id,
 	u32 freq_ref;
 	u64 frac_div;
 
-	/* Verify 2MHz - 54MHz MCLK provided, and set input divider */
-	if (da7218->mclk_rate < 2000000) {
+	/* Verify 32KHz, 2MHz - 54MHz MCLK provided, and set input divider */
+	if (da7218->mclk_rate == 32768) {
+		indiv_bits = DA7218_PLL_INDIV_2_5_MHZ;
+		indiv = DA7218_PLL_INDIV_2_10_MHZ_VAL;
+	} else if (da7218->mclk_rate < 2000000) {
 		dev_err(codec->dev, "PLL input clock %d below valid range\n",
 			da7218->mclk_rate);
 		return -EINVAL;
-	} else if (da7218->mclk_rate <= 4500000) {
-		indiv_bits = DA7218_PLL_INDIV_2_TO_4_5_MHZ;
-		indiv = DA7218_PLL_INDIV_2_TO_4_5_MHZ_VAL;
-	} else if (da7218->mclk_rate <= 9000000) {
-		indiv_bits = DA7218_PLL_INDIV_4_5_TO_9_MHZ;
-		indiv = DA7218_PLL_INDIV_4_5_TO_9_MHZ_VAL;
-	} else if (da7218->mclk_rate <= 18000000) {
-		indiv_bits = DA7218_PLL_INDIV_9_TO_18_MHZ;
-		indiv = DA7218_PLL_INDIV_9_TO_18_MHZ_VAL;
-	} else if (da7218->mclk_rate <= 36000000) {
-		indiv_bits = DA7218_PLL_INDIV_18_TO_36_MHZ;
-		indiv = DA7218_PLL_INDIV_18_TO_36_MHZ_VAL;
+	} else if (da7218->mclk_rate <= 5000000) {
+		indiv_bits = DA7218_PLL_INDIV_2_5_MHZ;
+		indiv = DA7218_PLL_INDIV_2_10_MHZ_VAL;
+	} else if (da7218->mclk_rate <= 10000000) {
+		indiv_bits = DA7218_PLL_INDIV_5_10_MHZ;
+		indiv = DA7218_PLL_INDIV_2_10_MHZ_VAL;
+	} else if (da7218->mclk_rate <= 20000000) {
+		indiv_bits = DA7218_PLL_INDIV_10_20_MHZ;
+		indiv = DA7218_PLL_INDIV_10_20_MHZ_VAL;
+	} else if (da7218->mclk_rate <= 40000000) {
+		indiv_bits = DA7218_PLL_INDIV_20_40_MHZ;
+		indiv = DA7218_PLL_INDIV_20_40_MHZ_VAL;
 	} else if (da7218->mclk_rate <= 54000000) {
-		indiv_bits = DA7218_PLL_INDIV_36_TO_54_MHZ;
-		indiv = DA7218_PLL_INDIV_36_TO_54_MHZ_VAL;
+		indiv_bits = DA7218_PLL_INDIV_40_54_MHZ;
+		indiv = DA7218_PLL_INDIV_40_54_MHZ_VAL;
 	} else {
 		dev_err(codec->dev, "PLL input clock %d above valid range\n",
 			da7218->mclk_rate);
@@ -1908,6 +1910,9 @@ static int da7218_set_dai_pll(struct snd_soc_dai *codec_dai, int pll_id,
 		break;
 	case DA7218_SYSCLK_PLL_SRM:
 		pll_ctrl |= DA7218_PLL_MODE_SRM;
+		break;
+	case DA7218_SYSCLK_PLL_32KHZ:
+		pll_ctrl |= DA7218_PLL_MODE_32KHZ;
 		break;
 	default:
 		dev_err(codec->dev, "Invalid PLL config\n");
@@ -2584,22 +2589,20 @@ static int da7218_set_bias_level(struct snd_soc_codec *codec,
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
-		break;
 	case SND_SOC_BIAS_PREPARE:
-		/* Enable MCLK for transition to ON state */
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_STANDBY) {
-			if (da7218->mclk) {
-				ret = clk_prepare_enable(da7218->mclk);
-				if (ret) {
-					dev_err(codec->dev, "Failed to enable mclk\n");
-					return ret;
-				}
-			}
-		}
-
 		break;
 	case SND_SOC_BIAS_STANDBY:
 		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+			/* MCLK */
+			if (da7218->mclk) {
+				ret = clk_prepare_enable(da7218->mclk);
+				if (ret) {
+					dev_err(codec->dev,
+						"Failed to enable mclk\n");
+					return ret;
+				}
+			}
+
 			/* Master bias */
 			snd_soc_update_bits(codec, DA7218_REFERENCES,
 					    DA7218_BIAS_EN_MASK,
@@ -2609,10 +2612,6 @@ static int da7218_set_bias_level(struct snd_soc_codec *codec,
 			snd_soc_update_bits(codec, DA7218_LDO_CTRL,
 					    DA7218_LDO_EN_MASK,
 					    DA7218_LDO_EN_MASK);
-		} else {
-			/* Remove MCLK */
-			if (da7218->mclk)
-				clk_disable_unprepare(da7218->mclk);
 		}
 		break;
 	case SND_SOC_BIAS_OFF:
@@ -2626,6 +2625,10 @@ static int da7218_set_bias_level(struct snd_soc_codec *codec,
 			snd_soc_update_bits(codec, DA7218_REFERENCES,
 					    DA7218_BIAS_EN_MASK, 0);
 		}
+
+		/* MCLK */
+		if (da7218->mclk)
+			clk_disable_unprepare(da7218->mclk);
 		break;
 	}
 
@@ -3042,14 +3045,13 @@ static struct snd_soc_codec_driver soc_codec_dev_da7218 = {
 	.resume			= da7218_resume,
 	.set_bias_level		= da7218_set_bias_level,
 
-	.component_driver = {
-		.controls		= da7218_snd_controls,
-		.num_controls		= ARRAY_SIZE(da7218_snd_controls),
-		.dapm_widgets		= da7218_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(da7218_dapm_widgets),
-		.dapm_routes		= da7218_audio_map,
-		.num_dapm_routes	= ARRAY_SIZE(da7218_audio_map),
-	},
+	.controls		= da7218_snd_controls,
+	.num_controls		= ARRAY_SIZE(da7218_snd_controls),
+
+	.dapm_widgets		= da7218_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(da7218_dapm_widgets),
+	.dapm_routes		= da7218_audio_map,
+	.num_dapm_routes	= ARRAY_SIZE(da7218_audio_map),
 };
 
 

@@ -22,8 +22,7 @@
 #include <linux/mman.h>
 #include <linux/export.h>
 #include <linux/shm.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/io.h>
 #include <linux/personality.h>
 #include <linux/random.h>
@@ -96,6 +95,8 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
 	}
 }
+EXPORT_SYMBOL_GPL(arch_pick_mmap_layout);
+
 
 /*
  * You really shouldn't be using read() or write() on /dev/mem.  This might go

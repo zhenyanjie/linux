@@ -209,9 +209,7 @@ static const struct i2c_board_info wm1277_devs[] = {
 };
 
 static struct arizona_pdata wm5102_reva_pdata = {
-	.ldo1 = {
-		.ldoena = S3C64XX_GPN(7),
-	},
+	.ldoena = S3C64XX_GPN(7),
 	.gpio_base = CODEC_GPIO_BASE,
 	.irq_flags = IRQF_TRIGGER_HIGH,
 	.micd_pol_gpio = CODEC_GPIO_BASE + 4,
@@ -241,9 +239,7 @@ static struct spi_board_info wm5102_reva_spi_devs[] = {
 };
 
 static struct arizona_pdata wm5102_pdata = {
-	.ldo1 = {
-		.ldoena = S3C64XX_GPN(7),
-	},
+	.ldoena = S3C64XX_GPN(7),
 	.gpio_base = CODEC_GPIO_BASE,
 	.irq_flags = IRQF_TRIGGER_HIGH,
 	.micd_pol_gpio = CODEC_GPIO_BASE + 2,
@@ -397,7 +393,8 @@ static const struct i2c_device_id wlf_gf_module_id[] = {
 
 static struct i2c_driver wlf_gf_module_driver = {
 	.driver = {
-		.name = "wlf-gf-module"
+		.name = "wlf-gf-module",
+		.owner = THIS_MODULE,
 	},
 	.probe = wlf_gf_module_probe,
 	.id_table = wlf_gf_module_id,

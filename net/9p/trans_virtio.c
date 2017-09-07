@@ -507,8 +507,8 @@ err_out:
 		/* wakeup anybody waiting for slots to pin pages */
 		wake_up(&vp_wq);
 	}
-	kvfree(in_pages);
-	kvfree(out_pages);
+	kfree(in_pages);
+	kfree(out_pages);
 	return err;
 }
 

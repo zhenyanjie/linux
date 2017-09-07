@@ -11,7 +11,7 @@
  *
  * Contact Information:
  * wlanfae <wlanfae@realtek.com>
- *****************************************************************************/
+******************************************************************************/
 #include "rtl_core.h"
 #include "rtl_dm.h"
 #include "r8192E_hw.h"
@@ -268,8 +268,8 @@ void rtl92e_dm_watchdog(struct net_device *dev)
 static void _rtl92e_dm_check_ac_dc_power(struct net_device *dev)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
-	static char const ac_dc_script[] = "/etc/acpi/wireless-rtl-ac-dc-power.sh";
-	char *argv[] = {(char *)ac_dc_script, DRV_NAME, NULL};
+	static char *ac_dc_script = "/etc/acpi/wireless-rtl-ac-dc-power.sh";
+	char *argv[] = {ac_dc_script, DRV_NAME, NULL};
 	static char *envp[] = {"HOME=/",
 			"TERM=linux",
 			"PATH=/usr/bin:/bin",
@@ -886,14 +886,11 @@ static void _rtl92e_dm_tx_power_tracking_cb_thermal(struct net_device *dev)
 		if (tmpCCK40Mindex >= CCK_Table_length)
 			tmpCCK40Mindex = CCK_Table_length-1;
 	} else {
-		tmpval = (u8)tmpRegA - priv->ThermalMeter[0];
-		if (tmpval >= 6) {
-			tmpOFDMindex = 0;
-			tmpCCK20Mindex = 0;
-		} else {
-			tmpOFDMindex = 6 - tmpval;
-			tmpCCK20Mindex = 6 - tmpval;
-		}
+		tmpval = ((u8)tmpRegA - priv->ThermalMeter[0]);
+		if (tmpval >= 6)
+			tmpOFDMindex = tmpCCK20Mindex = 0;
+		else
+			tmpOFDMindex = tmpCCK20Mindex = 6 - tmpval;
 		tmpCCK40Mindex = 0;
 	}
 	if (priv->CurrentChannelBW != HT_CHANNEL_WIDTH_20)
@@ -997,7 +994,8 @@ static void _rtl92e_dm_check_tx_power_tracking_tssi(struct net_device *dev)
 
 
 	 if (tx_power_track_counter >= 180) {
-		schedule_delayed_work(&priv->txpower_tracking_wq, 0);
+		queue_delayed_work_rsl(priv->priv_wq,
+				       &priv->txpower_tracking_wq, 0);
 		tx_power_track_counter = 0;
 	}
 
@@ -1030,7 +1028,7 @@ static void _rtl92e_dm_check_tx_power_tracking_thermal(struct net_device *dev)
 		return;
 	}
 	netdev_info(dev, "===============>Schedule TxPowerTrackingWorkItem\n");
-	schedule_delayed_work(&priv->txpower_tracking_wq, 0);
+	queue_delayed_work_rsl(priv->priv_wq, &priv->txpower_tracking_wq, 0);
 	TM_Trigger = 0;
 
 }
@@ -1333,7 +1331,7 @@ static void _rtl92e_dm_ctrl_initgain_byrssi(struct net_device *dev)
  *	When		Who		Remark
  *	03/04/2009	hpfan	Create Version 0.
  *
- ******************************************************************************/
+ *---------------------------------------------------------------------------*/
 
 static void _rtl92e_dm_ctrl_initgain_byrssi_driver(struct net_device *dev)
 {
@@ -1826,7 +1824,7 @@ static void _rtl92e_dm_check_rf_ctrl_gpio(void *data)
 	enum rt_rf_power_state eRfPowerStateToSet;
 	bool bActuallySet = false;
 	char *argv[3];
-	static char const RadioPowerPath[] = "/etc/acpi/events/RadioPower.sh";
+	static char *RadioPowerPath = "/etc/acpi/events/RadioPower.sh";
 	static char *envp[] = {"HOME=/", "TERM=linux", "PATH=/usr/bin:/bin",
 			       NULL};
 
@@ -1865,7 +1863,7 @@ static void _rtl92e_dm_check_rf_ctrl_gpio(void *data)
 		else
 			argv[1] = "RFON";
 
-		argv[0] = (char *)RadioPowerPath;
+		argv[0] = RadioPowerPath;
 		argv[2] = NULL;
 		call_usermodehelper(RadioPowerPath, argv, envp, UMH_WAIT_PROC);
 	}
@@ -1877,7 +1875,7 @@ void rtl92e_dm_rf_pathcheck_wq(void *data)
 				  struct r8192_priv,
 				  rfpath_check_wq);
 	struct net_device *dev = priv->rtllib->dev;
-	u8 rfpath, i;
+	u8 rfpath = 0, i;
 
 	rfpath = rtl92e_readb(dev, 0xc04);
 
@@ -2123,7 +2121,7 @@ static void _rtl92e_dm_check_rx_path_selection(struct net_device *dev)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 
-	schedule_delayed_work(&priv->rfpath_check_wq, 0);
+	queue_delayed_work_rsl(priv->priv_wq, &priv->rfpath_check_wq, 0);
 }
 
 

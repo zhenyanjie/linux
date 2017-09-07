@@ -4,11 +4,10 @@
  */
 
 #include <linux/mm.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/hardirq.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
-#include <linux/sched/debug.h>
 #include <asm/current.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -74,7 +73,7 @@ good_area:
 	do {
 		int fault;
 
-		fault = handle_mm_fault(vma, address, flags);
+		fault = handle_mm_fault(mm, vma, address, flags);
 
 		if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
 			goto out_nosemaphore;

@@ -24,6 +24,7 @@
 
 #include "regs-i2s-v2.h"
 #include "s3c-i2s-v2.h"
+#include "dma.h"
 
 #undef S3C_IIS_V2_SUPPORTED
 
@@ -71,6 +72,7 @@ static inline void dbg_showcon(const char *fn, u32 con)
 {
 }
 #endif
+
 
 /* Turn on or off the transmission path. */
 static void s3c2412_snd_txctrl(struct s3c_i2sv2_info *i2s, int on)
@@ -266,7 +268,7 @@ static int s3c2412_i2s_set_fmt(struct snd_soc_dai *cpu_dai,
 		iismod &= ~S3C2412_IISMOD_SLAVE;
 		break;
 	default:
-		pr_err("unknown master/slave format\n");
+		pr_err("unknwon master/slave format\n");
 		return -EINVAL;
 	}
 
@@ -300,7 +302,7 @@ static int s3c_i2sv2_hw_params(struct snd_pcm_substream *substream,
 				 struct snd_soc_dai *dai)
 {
 	struct s3c_i2sv2_info *i2s = to_info(dai);
-	struct snd_dmaengine_dai_dma_data *dma_data;
+	struct s3c_dma_params *dma_data;
 	u32 iismod;
 
 	pr_debug("Entered %s\n", __func__);
@@ -707,7 +709,7 @@ static int s3c2412_i2s_resume(struct snd_soc_dai *dai)
 #endif
 
 int s3c_i2sv2_register_component(struct device *dev, int id,
-			   const struct snd_soc_component_driver *cmp_drv,
+			   struct snd_soc_component_driver *cmp_drv,
 			   struct snd_soc_dai_driver *dai_drv)
 {
 	struct snd_soc_dai_ops *ops = (struct snd_soc_dai_ops *)dai_drv->ops;

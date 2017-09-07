@@ -17,9 +17,7 @@
 #include <linux/suspend.h>
 #include <linux/cpu_pm.h>
 #include <linux/io.h>
-#include <linux/of.h>
-#include <linux/soc/samsung/exynos-regs-pmu.h>
-#include <linux/soc/samsung/exynos-pmu.h>
+#include <linux/err.h>
 
 #include <asm/firmware.h>
 #include <asm/smp_scu.h>
@@ -28,7 +26,11 @@
 
 #include <mach/map.h>
 
+#include <plat/pm-common.h>
+
 #include "common.h"
+#include "exynos-pmu.h"
+#include "regs-pmu.h"
 
 static inline void __iomem *exynos_boot_vector_addr(void)
 {
@@ -132,9 +134,9 @@ static void exynos_set_wakeupmask(long mask)
 
 static void exynos_cpu_set_boot_vector(long flags)
 {
-	writel_relaxed(__pa_symbol(exynos_cpu_resume),
-		       exynos_boot_vector_addr());
-	writel_relaxed(flags, exynos_boot_vector_flag());
+	__raw_writel(virt_to_phys(exynos_cpu_resume),
+		     exynos_boot_vector_addr());
+	__raw_writel(flags, exynos_boot_vector_flag());
 }
 
 static int exynos_aftr_finisher(unsigned long flags)
@@ -238,7 +240,7 @@ static int exynos_cpu0_enter_aftr(void)
 
 abort:
 	if (cpu_online(1)) {
-		unsigned long boot_addr = __pa_symbol(exynos_cpu_resume);
+		unsigned long boot_addr = virt_to_phys(exynos_cpu_resume);
 
 		/*
 		 * Set the boot vector to something non-zero
@@ -330,7 +332,7 @@ cpu1_aborted:
 
 static void exynos_pre_enter_aftr(void)
 {
-	unsigned long boot_addr = __pa_symbol(exynos_cpu_resume);
+	unsigned long boot_addr = virt_to_phys(exynos_cpu_resume);
 
 	(void)exynos_set_boot_addr(1, boot_addr);
 }

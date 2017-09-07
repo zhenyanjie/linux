@@ -9,9 +9,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task.h>
-#include <linux/sched/task_stack.h>
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/fs.h>
@@ -36,9 +33,9 @@ void default_idle(void)
  */
 
 extern void deconfigure_bp(long pid);
-void exit_thread(struct task_struct *tsk)
+void exit_thread(void)
 {
-	deconfigure_bp(tsk->pid);
+	deconfigure_bp(current->pid);
 }
 
 /*

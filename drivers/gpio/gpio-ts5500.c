@@ -409,7 +409,7 @@ static int ts5500_dio_probe(struct platform_device *pdev)
 		break;
 	}
 
-	ret = devm_gpiochip_add_data(dev, &priv->gpio_chip, priv);
+	ret = gpiochip_add_data(&priv->gpio_chip, priv);
 	if (ret) {
 		dev_err(dev, "failed to register the gpio chip\n");
 		return ret;
@@ -418,10 +418,13 @@ static int ts5500_dio_probe(struct platform_device *pdev)
 	ret = ts5500_enable_irq(priv);
 	if (ret) {
 		dev_err(dev, "invalid interrupt %d\n", priv->hwirq);
-		return ret;
+		goto cleanup;
 	}
 
 	return 0;
+cleanup:
+	gpiochip_remove(&priv->gpio_chip);
+	return ret;
 }
 
 static int ts5500_dio_remove(struct platform_device *pdev)
@@ -429,7 +432,7 @@ static int ts5500_dio_remove(struct platform_device *pdev)
 	struct ts5500_priv *priv = platform_get_drvdata(pdev);
 
 	ts5500_disable_irq(priv);
-
+	gpiochip_remove(&priv->gpio_chip);
 	return 0;
 }
 

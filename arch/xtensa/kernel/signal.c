@@ -20,10 +20,9 @@
 #include <linux/ptrace.h>
 #include <linux/personality.h>
 #include <linux/tracehook.h>
-#include <linux/sched/task_stack.h>
 
 #include <asm/ucontext.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/cacheflush.h>
 #include <asm/coprocessor.h>
 #include <asm/unistd.h>

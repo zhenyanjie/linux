@@ -130,7 +130,10 @@ static void __init mpc83xx_km_setup_arch(void)
 	struct device_node *np;
 #endif
 
-	mpc83xx_setup_arch();
+	if (ppc_md.progress)
+		ppc_md.progress("kmpbec83xx_setup_arch()", 0);
+
+	mpc83xx_setup_pci();
 
 #ifdef CONFIG_QUICC_ENGINE
 	np = of_find_node_by_name(NULL, "par_io");
@@ -168,10 +171,11 @@ static char *board[] __initdata = {
  */
 static int __init mpc83xx_km_probe(void)
 {
+	unsigned long node = of_get_flat_dt_root();
 	int i = 0;
 
 	while (board[i]) {
-		if (of_machine_is_compatible(board[i]))
+		if (of_flat_dt_is_compatible(node, board[i]))
 			break;
 		i++;
 	}

@@ -1492,21 +1492,6 @@ __releases(&info->lock)
 	return 0;
 }
 
-#ifdef CONFIG_FB_PROVIDE_GET_FB_UNMAPPED_AREA
-unsigned long get_fb_unmapped_area(struct file *filp,
-				   unsigned long addr, unsigned long len,
-				   unsigned long pgoff, unsigned long flags)
-{
-	struct fb_info * const info = filp->private_data;
-	unsigned long fb_size = PAGE_ALIGN(info->fix.smem_len);
-
-	if (pgoff > fb_size || len > fb_size - pgoff)
-		return -EINVAL;
-
-	return (unsigned long)info->screen_base + pgoff;
-}
-#endif
-
 static const struct file_operations fb_fops = {
 	.owner =	THIS_MODULE,
 	.read =		fb_read,
@@ -1518,8 +1503,7 @@ static const struct file_operations fb_fops = {
 	.mmap =		fb_mmap,
 	.open =		fb_open,
 	.release =	fb_release,
-#if defined(HAVE_ARCH_FB_UNMAPPED_AREA) || \
-    defined(CONFIG_FB_PROVIDE_GET_FB_UNMAPPED_AREA)
+#ifdef HAVE_ARCH_FB_UNMAPPED_AREA
 	.get_unmapped_area = get_fb_unmapped_area,
 #endif
 #ifdef CONFIG_FB_DEFERRED_IO
@@ -1870,31 +1854,17 @@ EXPORT_SYMBOL(fb_set_suspend);
 static int __init
 fbmem_init(void)
 {
-	int ret;
+	proc_create("fb", 0, NULL, &fb_proc_fops);
 
-	if (!proc_create("fb", 0, NULL, &fb_proc_fops))
-		return -ENOMEM;
-
-	ret = register_chrdev(FB_MAJOR, "fb", &fb_fops);
-	if (ret) {
+	if (register_chrdev(FB_MAJOR,"fb",&fb_fops))
 		printk("unable to get major %d for fb devs\n", FB_MAJOR);
-		goto err_chrdev;
-	}
 
 	fb_class = class_create(THIS_MODULE, "graphics");
 	if (IS_ERR(fb_class)) {
-		ret = PTR_ERR(fb_class);
-		pr_warn("Unable to create fb class; errno = %d\n", ret);
+		printk(KERN_WARNING "Unable to create fb class; errno = %ld\n", PTR_ERR(fb_class));
 		fb_class = NULL;
-		goto err_class;
 	}
 	return 0;
-
-err_class:
-	unregister_chrdev(FB_MAJOR, "fb");
-err_chrdev:
-	remove_proc_entry("fb", NULL);
-	return ret;
 }
 
 #ifdef MODULE

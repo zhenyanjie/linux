@@ -7,8 +7,6 @@
 
 #define LOCK_PREFIX "\n\tlock; "
 
-#include <asm/cmpxchg.h>
-
 /*
  * Atomic operations that C can't guarantee us.  Useful for
  * resource counting etc..
@@ -62,11 +60,6 @@ static inline void atomic_inc(atomic_t *v)
 static inline int atomic_dec_and_test(atomic_t *v)
 {
 	GEN_UNARY_RMWcc(LOCK_PREFIX "decl", v->counter, "%0", "e");
-}
-
-static __always_inline int atomic_cmpxchg(atomic_t *v, int old, int new)
-{
-	return cmpxchg(&v->counter, old, new);
 }
 
 #endif /* _TOOLS_LINUX_ASM_X86_ATOMIC_H */

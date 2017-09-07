@@ -18,7 +18,7 @@
 #include <linux/of.h>
 #include <linux/seq_file.h>
 
-#include <video/omapfb_dss.h>
+#include <video/omapdss.h>
 
 #include "dss.h"
 

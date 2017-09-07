@@ -67,7 +67,6 @@ enum smk_inos {
 /*
  * List locks
  */
-static DEFINE_MUTEX(smack_master_list_lock);
 static DEFINE_MUTEX(smack_cipso_lock);
 static DEFINE_MUTEX(smack_ambient_lock);
 static DEFINE_MUTEX(smk_net4addr_lock);
@@ -263,16 +262,12 @@ static int smk_set_access(struct smack_parsed_rule *srp,
 		 * it needs to get added for reporting.
 		 */
 		if (global) {
-			mutex_unlock(rule_lock);
 			smlp = kzalloc(sizeof(*smlp), GFP_KERNEL);
 			if (smlp != NULL) {
 				smlp->smk_rule = sp;
-				mutex_lock(&smack_master_list_lock);
 				list_add_rcu(&smlp->list, &smack_rule_list);
-				mutex_unlock(&smack_master_list_lock);
 			} else
 				rc = -ENOMEM;
-			return rc;
 		}
 	}
 
@@ -2528,9 +2523,14 @@ static ssize_t smk_write_revoke_subj(struct file *file, const char __user *buf,
 	if (count == 0 || count > SMK_LONGLABEL)
 		return -EINVAL;
 
-	data = memdup_user(buf, count);
-	if (IS_ERR(data))
-		return PTR_ERR(data);
+	data = kzalloc(count, GFP_KERNEL);
+	if (data == NULL)
+		return -ENOMEM;
+
+	if (copy_from_user(data, buf, count) != 0) {
+		rc = -EFAULT;
+		goto out_data;
+	}
 
 	cp = smk_parse_smack(data, count);
 	if (IS_ERR(cp)) {
@@ -3001,6 +3001,9 @@ static int __init init_smk_fs(void)
 	if (err == 0 && rc < 0)
 		err = rc;
 	rc = smk_preset_netlabel(&smack_known_huh);
+	if (err == 0 && rc < 0)
+		err = rc;
+	rc = smk_preset_netlabel(&smack_known_invalid);
 	if (err == 0 && rc < 0)
 		err = rc;
 	rc = smk_preset_netlabel(&smack_known_star);

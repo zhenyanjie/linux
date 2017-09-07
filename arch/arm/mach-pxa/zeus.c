@@ -13,7 +13,6 @@
 
 #include <linux/cpufreq.h>
 #include <linux/interrupt.h>
-#include <linux/leds.h>
 #include <linux/irq.h>
 #include <linux/pm.h>
 #include <linux/gpio.h>
@@ -911,7 +910,7 @@ static void __init zeus_map_io(void)
 	PMCR = PSPR = 0;
 
 	/* enable internal 32.768Khz oscillator (ignore OSCC_OOK) */
-	writel(readl(OSCC) | OSCC_OON, OSCC);
+	OSCC |= OSCC_OON;
 
 	/* Some clock cycles later (from OSCC_ON), programme PCFR (OPDE...).
 	 * float chip selects and PCMCIA */

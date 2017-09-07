@@ -29,7 +29,7 @@ struct of_serial_info {
 };
 
 #ifdef CONFIG_ARCH_TEGRA
-static void tegra_serial_handle_break(struct uart_port *p)
+void tegra_serial_handle_break(struct uart_port *p)
 {
 	unsigned int status, tmout = 10000;
 
@@ -172,8 +172,7 @@ static int of_platform_serial_probe(struct platform_device *ofdev)
 {
 	const struct of_device_id *match;
 	struct of_serial_info *info;
-	struct uart_8250_port port8250;
-	u32 tx_threshold;
+	struct uart_port port;
 	int port_type;
 	int ret;
 
@@ -189,24 +188,34 @@ static int of_platform_serial_probe(struct platform_device *ofdev)
 		return -ENOMEM;
 
 	port_type = (unsigned long)match->data;
-	memset(&port8250, 0, sizeof(port8250));
-	ret = of_platform_serial_setup(ofdev, port_type, &port8250.port, info);
+	ret = of_platform_serial_setup(ofdev, port_type, &port, info);
 	if (ret)
 		goto out;
 
-	if (port8250.port.fifosize)
-		port8250.capabilities = UART_CAP_FIFO;
+	switch (port_type) {
+	case PORT_8250 ... PORT_MAX_8250:
+	{
+		struct uart_8250_port port8250;
+		memset(&port8250, 0, sizeof(port8250));
+		port8250.port = port;
 
-	/* Check for TX FIFO threshold & set tx_loadsz */
-	if ((of_property_read_u32(ofdev->dev.of_node, "tx-threshold",
-				  &tx_threshold) == 0) &&
-	    (tx_threshold < port8250.port.fifosize))
-		port8250.tx_loadsz = port8250.port.fifosize - tx_threshold;
+		if (port.fifosize)
+			port8250.capabilities = UART_CAP_FIFO;
 
-	if (of_property_read_bool(ofdev->dev.of_node, "auto-flow-control"))
-		port8250.capabilities |= UART_CAP_AFE;
+		if (of_property_read_bool(ofdev->dev.of_node,
+					  "auto-flow-control"))
+			port8250.capabilities |= UART_CAP_AFE;
 
-	ret = serial8250_register_8250_port(&port8250);
+		ret = serial8250_register_8250_port(&port8250);
+		break;
+	}
+	default:
+		/* need to add code for these */
+	case PORT_UNKNOWN:
+		dev_info(&ofdev->dev, "Unknown serial port found, ignored\n");
+		ret = -ENODEV;
+		break;
+	}
 	if (ret < 0)
 		goto out;
 
@@ -216,7 +225,7 @@ static int of_platform_serial_probe(struct platform_device *ofdev)
 	return 0;
 out:
 	kfree(info);
-	irq_dispose_mapping(port8250.port.irq);
+	irq_dispose_mapping(port.irq);
 	return ret;
 }
 
@@ -226,8 +235,14 @@ out:
 static int of_platform_serial_remove(struct platform_device *ofdev)
 {
 	struct of_serial_info *info = platform_get_drvdata(ofdev);
-
-	serial8250_unregister_port(info->line);
+	switch (info->type) {
+	case PORT_8250 ... PORT_MAX_8250:
+		serial8250_unregister_port(info->line);
+		break;
+	default:
+		/* need to add code for these */
+		break;
+	}
 
 	if (info->clk)
 		clk_disable_unprepare(info->clk);
@@ -236,23 +251,18 @@ static int of_platform_serial_remove(struct platform_device *ofdev)
 }
 
 #ifdef CONFIG_PM_SLEEP
-static int of_serial_suspend(struct device *dev)
+static void of_serial_suspend_8250(struct of_serial_info *info)
 {
-	struct of_serial_info *info = dev_get_drvdata(dev);
 	struct uart_8250_port *port8250 = serial8250_get_port(info->line);
 	struct uart_port *port = &port8250->port;
 
 	serial8250_suspend_port(info->line);
-
 	if (info->clk && (!uart_console(port) || console_suspend_enabled))
 		clk_disable_unprepare(info->clk);
-
-	return 0;
 }
 
-static int of_serial_resume(struct device *dev)
+static void of_serial_resume_8250(struct of_serial_info *info)
 {
-	struct of_serial_info *info = dev_get_drvdata(dev);
 	struct uart_8250_port *port8250 = serial8250_get_port(info->line);
 	struct uart_port *port = &port8250->port;
 
@@ -260,6 +270,34 @@ static int of_serial_resume(struct device *dev)
 		clk_prepare_enable(info->clk);
 
 	serial8250_resume_port(info->line);
+}
+
+static int of_serial_suspend(struct device *dev)
+{
+	struct of_serial_info *info = dev_get_drvdata(dev);
+
+	switch (info->type) {
+	case PORT_8250 ... PORT_MAX_8250:
+		of_serial_suspend_8250(info);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int of_serial_resume(struct device *dev)
+{
+	struct of_serial_info *info = dev_get_drvdata(dev);
+
+	switch (info->type) {
+	case PORT_8250 ... PORT_MAX_8250:
+		of_serial_resume_8250(info);
+		break;
+	default:
+		break;
+	}
 
 	return 0;
 }
@@ -287,7 +325,8 @@ static const struct of_device_id of_platform_serial_table[] = {
 		.data = (void *)PORT_ALTR_16550_F128, },
 	{ .compatible = "mrvl,mmp-uart",
 		.data = (void *)PORT_XSCALE, },
-	{ .compatible = "ti,da830-uart", .data = (void *)PORT_DA830, },
+	{ .compatible = "mrvl,pxa-uart",
+		.data = (void *)PORT_XSCALE, },
 	{ /* end of list */ },
 };
 MODULE_DEVICE_TABLE(of, of_platform_serial_table);
@@ -296,7 +335,6 @@ static struct platform_driver of_platform_serial_driver = {
 	.driver = {
 		.name = "of_serial",
 		.of_match_table = of_platform_serial_table,
-		.pm = &of_serial_pm_ops,
 	},
 	.probe = of_platform_serial_probe,
 	.remove = of_platform_serial_remove,

@@ -7,7 +7,7 @@
  *
  * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
- * Copyright(c) 2015 - 2016 Intel Deutschland GmbH
+ * Copyright(c) 2015        Intel Deutschland GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -34,7 +34,7 @@
  *
  * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
- * Copyright(c) 2015 - 2016 Intel Deutschland GmbH
+ * Copyright(c) 2015        Intel Deutschland GmbH
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -174,14 +174,6 @@ static void iwl_mvm_power_configure_uapsd(struct iwl_mvm *mvm,
 	enum ieee80211_ac_numbers ac;
 	bool tid_found = false;
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
-	/* set advanced pm flag with no uapsd ACs to enable ps-poll */
-	if (mvmvif->dbgfs_pm.use_ps_poll) {
-		cmd->flags |= cpu_to_le16(POWER_FLAGS_ADVANCE_PM_ENA_MSK);
-		return;
-	}
-#endif
-
 	for (ac = IEEE80211_AC_VO; ac <= IEEE80211_AC_BK; ac++) {
 		if (!mvmvif->queue_params[ac].uapsd)
 			continue;
@@ -212,6 +204,16 @@ static void iwl_mvm_power_configure_uapsd(struct iwl_mvm *mvm,
 		}
 	}
 
+	if (!(cmd->flags & cpu_to_le16(POWER_FLAGS_ADVANCE_PM_ENA_MSK))) {
+#ifdef CONFIG_IWLWIFI_DEBUGFS
+		/* set advanced pm flag with no uapsd ACs to enable ps-poll */
+		if (mvmvif->dbgfs_pm.use_ps_poll)
+			cmd->flags |=
+				cpu_to_le16(POWER_FLAGS_ADVANCE_PM_ENA_MSK);
+#endif
+		return;
+	}
+
 	cmd->flags |= cpu_to_le16(POWER_FLAGS_UAPSD_MISBEHAVING_ENA_MSK);
 
 	if (cmd->uapsd_ac_flags == (BIT(IEEE80211_AC_VO) |
@@ -225,7 +227,7 @@ static void iwl_mvm_power_configure_uapsd(struct iwl_mvm *mvm,
 			cpu_to_le16(IWL_MVM_PS_SNOOZE_WINDOW);
 	}
 
-	cmd->uapsd_max_sp = mvm->hw->uapsd_max_sp_len;
+	cmd->uapsd_max_sp = IWL_UAPSD_MAX_SP;
 
 	if (mvm->cur_ucode == IWL_UCODE_WOWLAN || cmd->flags &
 	    cpu_to_le16(POWER_FLAGS_SNOOZE_ENA_MSK)) {
@@ -257,26 +259,6 @@ static void iwl_mvm_power_configure_uapsd(struct iwl_mvm *mvm,
 		IWL_MVM_PS_HEAVY_RX_THLD_PERCENT;
 }
 
-static void iwl_mvm_p2p_standalone_iterator(void *_data, u8 *mac,
-					    struct ieee80211_vif *vif)
-{
-	bool *is_p2p_standalone = _data;
-
-	switch (ieee80211_vif_type_p2p(vif)) {
-	case NL80211_IFTYPE_P2P_GO:
-	case NL80211_IFTYPE_AP:
-		*is_p2p_standalone = false;
-		break;
-	case NL80211_IFTYPE_STATION:
-		if (vif->bss_conf.assoc)
-			*is_p2p_standalone = false;
-		break;
-
-	default:
-		break;
-	}
-}
-
 static bool iwl_mvm_power_allow_uapsd(struct iwl_mvm *mvm,
 				       struct ieee80211_vif *vif)
 {
@@ -286,6 +268,9 @@ static bool iwl_mvm_power_allow_uapsd(struct iwl_mvm *mvm,
 		    ETH_ALEN))
 		return false;
 
+	if (vif->p2p &&
+	    !(mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_P2P_PS_UAPSD))
+		return false;
 	/*
 	 * Avoid using uAPSD if P2P client is associated to GO that uses
 	 * opportunistic power save. This is due to current FW limitation.
@@ -301,22 +286,6 @@ static bool iwl_mvm_power_allow_uapsd(struct iwl_mvm *mvm,
 	 */
 	if (iwl_mvm_phy_ctx_count(mvm) >= 2)
 		return false;
-
-	if (vif->p2p) {
-		/* Allow U-APSD only if p2p is stand alone */
-		bool is_p2p_standalone = true;
-
-		if (!iwl_mvm_is_p2p_scm_uapsd_supported(mvm))
-			return false;
-
-		ieee80211_iterate_active_interfaces_atomic(mvm->hw,
-					IEEE80211_IFACE_ITER_NORMAL,
-					iwl_mvm_p2p_standalone_iterator,
-					&is_p2p_standalone);
-
-		if (!is_p2p_standalone)
-			return false;
-	}
 
 	return true;
 }
@@ -575,6 +544,7 @@ void iwl_mvm_power_uapsd_misbehaving_ap_notif(struct iwl_mvm *mvm,
 
 struct iwl_power_vifs {
 	struct iwl_mvm *mvm;
+	struct ieee80211_vif *bf_vif;
 	struct ieee80211_vif *bss_vif;
 	struct ieee80211_vif *p2p_vif;
 	struct ieee80211_vif *ap_vif;
@@ -599,8 +569,9 @@ static void iwl_mvm_power_ps_disabled_iterator(void *_data, u8* mac,
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
 	bool *disable_ps = _data;
 
-	if (mvmvif->phy_ctxt && mvmvif->phy_ctxt->id < NUM_PHY_CTX)
-		*disable_ps |= mvmvif->ps_disabled;
+	if (mvmvif->phy_ctxt)
+		if (mvmvif->phy_ctxt->id < MAX_PHYS)
+			*disable_ps |= mvmvif->ps_disabled;
 }
 
 static void iwl_mvm_power_get_vifs_iterator(void *_data, u8 *mac,
@@ -608,7 +579,6 @@ static void iwl_mvm_power_get_vifs_iterator(void *_data, u8 *mac,
 {
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
 	struct iwl_power_vifs *power_iterator = _data;
-	bool active = mvmvif->phy_ctxt && mvmvif->phy_ctxt->id < NUM_PHY_CTX;
 
 	switch (ieee80211_vif_type_p2p(vif)) {
 	case NL80211_IFTYPE_P2P_DEVICE:
@@ -619,30 +589,39 @@ static void iwl_mvm_power_get_vifs_iterator(void *_data, u8 *mac,
 		/* only a single MAC of the same type */
 		WARN_ON(power_iterator->ap_vif);
 		power_iterator->ap_vif = vif;
-		if (active)
-			power_iterator->ap_active = true;
+		if (mvmvif->phy_ctxt)
+			if (mvmvif->phy_ctxt->id < MAX_PHYS)
+				power_iterator->ap_active = true;
 		break;
 
 	case NL80211_IFTYPE_MONITOR:
 		/* only a single MAC of the same type */
 		WARN_ON(power_iterator->monitor_vif);
 		power_iterator->monitor_vif = vif;
-		if (active)
-			power_iterator->monitor_active = true;
+		if (mvmvif->phy_ctxt)
+			if (mvmvif->phy_ctxt->id < MAX_PHYS)
+				power_iterator->monitor_active = true;
 		break;
 
 	case NL80211_IFTYPE_P2P_CLIENT:
 		/* only a single MAC of the same type */
 		WARN_ON(power_iterator->p2p_vif);
 		power_iterator->p2p_vif = vif;
-		if (active)
-			power_iterator->p2p_active = true;
+		if (mvmvif->phy_ctxt)
+			if (mvmvif->phy_ctxt->id < MAX_PHYS)
+				power_iterator->p2p_active = true;
 		break;
 
 	case NL80211_IFTYPE_STATION:
 		power_iterator->bss_vif = vif;
-		if (active)
-			power_iterator->bss_active = true;
+		if (mvmvif->phy_ctxt)
+			if (mvmvif->phy_ctxt->id < MAX_PHYS)
+				power_iterator->bss_active = true;
+
+		if (mvmvif->bf_data.bf_enabled &&
+		    !WARN_ON(power_iterator->bf_vif))
+			power_iterator->bf_vif = vif;
+
 		break;
 
 	default:
@@ -688,7 +667,8 @@ static void iwl_mvm_power_set_pm(struct iwl_mvm *mvm,
 
 	/* enable PM on p2p if p2p stand alone */
 	if (vifs->p2p_active && !vifs->bss_active && !vifs->ap_active) {
-		p2p_mvmvif->pm_enabled = true;
+		if (mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_P2P_PM)
+			p2p_mvmvif->pm_enabled = true;
 		return;
 	}
 
@@ -700,10 +680,12 @@ static void iwl_mvm_power_set_pm(struct iwl_mvm *mvm,
 				   ap_mvmvif->phy_ctxt->id);
 
 	/* clients are not stand alone: enable PM if DCM */
-	if (!(client_same_channel || ap_same_channel)) {
+	if (!(client_same_channel || ap_same_channel) &&
+	    (mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_BSS_P2P_PS_DCM)) {
 		if (vifs->bss_active)
 			bss_mvmvif->pm_enabled = true;
-		if (vifs->p2p_active)
+		if (vifs->p2p_active &&
+		    (mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_P2P_PM))
 			p2p_mvmvif->pm_enabled = true;
 		return;
 	}
@@ -712,10 +694,12 @@ static void iwl_mvm_power_set_pm(struct iwl_mvm *mvm,
 	 * There is only one channel in the system and there are only
 	 * bss and p2p clients that share it
 	 */
-	if (client_same_channel && !vifs->ap_active) {
+	if (client_same_channel && !vifs->ap_active &&
+	    (mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_BSS_P2P_PS_SCM)) {
 		/* share same channel*/
 		bss_mvmvif->pm_enabled = true;
-		p2p_mvmvif->pm_enabled = true;
+		if (mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_P2P_PM)
+			p2p_mvmvif->pm_enabled = true;
 	}
 }
 
@@ -866,9 +850,29 @@ int iwl_mvm_enable_beacon_filter(struct iwl_mvm *mvm,
 	return _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd, flags, false);
 }
 
-static int _iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
-					  struct ieee80211_vif *vif,
-					  u32 flags, bool d0i3)
+static int iwl_mvm_update_beacon_abort(struct iwl_mvm *mvm,
+				       struct ieee80211_vif *vif,
+				       bool enable)
+{
+	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
+	struct iwl_beacon_filter_cmd cmd = {
+		IWL_BF_CMD_CONFIG_DEFAULTS,
+		.bf_enable_beacon_filter = cpu_to_le32(1),
+	};
+
+	if (!mvmvif->bf_data.bf_enabled)
+		return 0;
+
+	if (mvm->cur_ucode == IWL_UCODE_WOWLAN)
+		cmd.ba_escape_timer = cpu_to_le32(IWL_BA_ESCAPE_TIMER_D3);
+
+	mvmvif->bf_data.ba_enabled = enable;
+	return _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd, 0, false);
+}
+
+int iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
+				  struct ieee80211_vif *vif,
+				  u32 flags)
 {
 	struct iwl_beacon_filter_cmd cmd = {};
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
@@ -879,18 +883,10 @@ static int _iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
 
 	ret = iwl_mvm_beacon_filter_send_cmd(mvm, &cmd, flags);
 
-	/* don't change bf_enabled in case of temporary d0i3 configuration */
-	if (!ret && !d0i3)
+	if (!ret)
 		mvmvif->bf_data.bf_enabled = false;
 
 	return ret;
-}
-
-int iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
-				  struct ieee80211_vif *vif,
-				  u32 flags)
-{
-	return _iwl_mvm_disable_beacon_filter(mvm, vif, flags, false);
 }
 
 static int iwl_mvm_power_set_ps(struct iwl_mvm *mvm)
@@ -922,26 +918,21 @@ static int iwl_mvm_power_set_ps(struct iwl_mvm *mvm)
 }
 
 static int iwl_mvm_power_set_ba(struct iwl_mvm *mvm,
-				struct ieee80211_vif *vif)
+				struct iwl_power_vifs *vifs)
 {
-	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
-	struct iwl_beacon_filter_cmd cmd = {
-		IWL_BF_CMD_CONFIG_DEFAULTS,
-		.bf_enable_beacon_filter = cpu_to_le32(1),
-	};
+	struct iwl_mvm_vif *mvmvif;
+	bool ba_enable;
 
-	if (!mvmvif->bf_data.bf_enabled)
+	if (!vifs->bf_vif)
 		return 0;
 
-	if (mvm->cur_ucode == IWL_UCODE_WOWLAN)
-		cmd.ba_escape_timer = cpu_to_le32(IWL_BA_ESCAPE_TIMER_D3);
+	mvmvif = iwl_mvm_vif_from_mac80211(vifs->bf_vif);
 
-	mvmvif->bf_data.ba_enabled = !(!mvmvif->pm_enabled ||
-				       mvm->ps_disabled ||
-				       !vif->bss_conf.ps ||
-				       iwl_mvm_vif_low_latency(mvmvif));
+	ba_enable = !(!mvmvif->pm_enabled || mvm->ps_disabled ||
+		      !vifs->bf_vif->bss_conf.ps ||
+		      iwl_mvm_vif_low_latency(mvmvif));
 
-	return _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd, 0, false);
+	return iwl_mvm_update_beacon_abort(mvm, vifs->bf_vif, ba_enable);
 }
 
 int iwl_mvm_power_update_ps(struct iwl_mvm *mvm)
@@ -962,10 +953,7 @@ int iwl_mvm_power_update_ps(struct iwl_mvm *mvm)
 	if (ret)
 		return ret;
 
-	if (vifs.bss_vif)
-		return iwl_mvm_power_set_ba(mvm, vifs.bss_vif);
-
-	return 0;
+	return iwl_mvm_power_set_ba(mvm, &vifs);
 }
 
 int iwl_mvm_power_update_mac(struct iwl_mvm *mvm)
@@ -1000,10 +988,7 @@ int iwl_mvm_power_update_mac(struct iwl_mvm *mvm)
 			return ret;
 	}
 
-	if (vifs.bss_vif)
-		return iwl_mvm_power_set_ba(mvm, vifs.bss_vif);
-
-	return 0;
+	return iwl_mvm_power_set_ba(mvm, &vifs);
 }
 
 int iwl_mvm_update_d0i3_power_mode(struct iwl_mvm *mvm,
@@ -1040,17 +1025,8 @@ int iwl_mvm_update_d0i3_power_mode(struct iwl_mvm *mvm,
 			IWL_BF_CMD_CONFIG_D0I3,
 			.bf_enable_beacon_filter = cpu_to_le32(1),
 		};
-		/*
-		 * When beacon storing is supported - disable beacon filtering
-		 * altogether - the latest beacon will be sent when exiting d0i3
-		 */
-		if (fw_has_capa(&mvm->fw->ucode_capa,
-				IWL_UCODE_TLV_CAPA_BEACON_STORING))
-			ret = _iwl_mvm_disable_beacon_filter(mvm, vif, flags,
-							     true);
-		else
-			ret = _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd_bf,
-							    flags, true);
+		ret = _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd_bf,
+						    flags, true);
 	} else {
 		if (mvmvif->bf_data.bf_enabled)
 			ret = iwl_mvm_enable_beacon_filter(mvm, vif, flags);

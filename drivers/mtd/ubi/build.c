@@ -149,8 +149,6 @@ static struct device_attribute dev_bgt_enabled =
 	__ATTR(bgt_enabled, S_IRUGO, dev_attribute_show, NULL);
 static struct device_attribute dev_mtd_num =
 	__ATTR(mtd_num, S_IRUGO, dev_attribute_show, NULL);
-static struct device_attribute dev_ro_mode =
-	__ATTR(ro_mode, S_IRUGO, dev_attribute_show, NULL);
 
 /**
  * ubi_volume_notify - send a volume change notification.
@@ -387,8 +385,6 @@ static ssize_t dev_attribute_show(struct device *dev,
 		ret = sprintf(buf, "%d\n", ubi->thread_enabled);
 	else if (attr == &dev_mtd_num)
 		ret = sprintf(buf, "%d\n", ubi->mtd->index);
-	else if (attr == &dev_ro_mode)
-		ret = sprintf(buf, "%d\n", ubi->ro_mode);
 	else
 		ret = -EINVAL;
 
@@ -408,7 +404,6 @@ static struct attribute *ubi_dev_attrs[] = {
 	&dev_min_io_size.attr,
 	&dev_bgt_enabled.attr,
 	&dev_mtd_num.attr,
-	&dev_ro_mode.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(ubi_dev);
@@ -418,6 +413,41 @@ static void dev_release(struct device *dev)
 	struct ubi_device *ubi = container_of(dev, struct ubi_device, dev);
 
 	kfree(ubi);
+}
+
+/**
+ * ubi_sysfs_init - initialize sysfs for an UBI device.
+ * @ubi: UBI device description object
+ * @ref: set to %1 on exit in case of failure if a reference to @ubi->dev was
+ *       taken
+ *
+ * This function returns zero in case of success and a negative error code in
+ * case of failure.
+ */
+static int ubi_sysfs_init(struct ubi_device *ubi, int *ref)
+{
+	int err;
+
+	ubi->dev.release = dev_release;
+	ubi->dev.devt = ubi->cdev.dev;
+	ubi->dev.class = &ubi_class;
+	ubi->dev.groups = ubi_dev_groups;
+	dev_set_name(&ubi->dev, UBI_NAME_STR"%d", ubi->ubi_num);
+	err = device_register(&ubi->dev);
+	if (err)
+		return err;
+
+	*ref = 1;
+	return 0;
+}
+
+/**
+ * ubi_sysfs_close - close sysfs for an UBI device.
+ * @ubi: UBI device description object
+ */
+static void ubi_sysfs_close(struct ubi_device *ubi)
+{
+	device_unregister(&ubi->dev);
 }
 
 /**
@@ -436,19 +466,27 @@ static void kill_volumes(struct ubi_device *ubi)
 /**
  * uif_init - initialize user interfaces for an UBI device.
  * @ubi: UBI device description object
+ * @ref: set to %1 on exit in case of failure if a reference to @ubi->dev was
+ *       taken, otherwise set to %0
  *
  * This function initializes various user interfaces for an UBI device. If the
  * initialization fails at an early stage, this function frees all the
- * resources it allocated, returns an error.
+ * resources it allocated, returns an error, and @ref is set to %0. However,
+ * if the initialization fails after the UBI device was registered in the
+ * driver core subsystem, this function takes a reference to @ubi->dev, because
+ * otherwise the release function ('dev_release()') would free whole @ubi
+ * object. The @ref argument is set to %1 in this case. The caller has to put
+ * this reference.
  *
  * This function returns zero in case of success and a negative error code in
  * case of failure.
  */
-static int uif_init(struct ubi_device *ubi)
+static int uif_init(struct ubi_device *ubi, int *ref)
 {
 	int i, err;
 	dev_t dev;
 
+	*ref = 0;
 	sprintf(ubi->ubi_name, UBI_NAME_STR "%d", ubi->ubi_num);
 
 	/*
@@ -465,17 +503,20 @@ static int uif_init(struct ubi_device *ubi)
 		return err;
 	}
 
-	ubi->dev.devt = dev;
-
 	ubi_assert(MINOR(dev) == 0);
 	cdev_init(&ubi->cdev, &ubi_cdev_operations);
 	dbg_gen("%s major is %u", ubi->ubi_name, MAJOR(dev));
 	ubi->cdev.owner = THIS_MODULE;
 
-	dev_set_name(&ubi->dev, UBI_NAME_STR "%d", ubi->ubi_num);
-	err = cdev_device_add(&ubi->cdev, &ubi->dev);
-	if (err)
+	err = cdev_add(&ubi->cdev, dev, 1);
+	if (err) {
+		ubi_err(ubi, "cannot add character device");
 		goto out_unreg;
+	}
+
+	err = ubi_sysfs_init(ubi, ref);
+	if (err)
+		goto out_sysfs;
 
 	for (i = 0; i < ubi->vtbl_slots; i++)
 		if (ubi->volumes[i]) {
@@ -490,7 +531,11 @@ static int uif_init(struct ubi_device *ubi)
 
 out_volumes:
 	kill_volumes(ubi);
-	cdev_device_del(&ubi->cdev, &ubi->dev);
+out_sysfs:
+	if (*ref)
+		get_device(&ubi->dev);
+	ubi_sysfs_close(ubi);
+	cdev_del(&ubi->cdev);
 out_unreg:
 	unregister_chrdev_region(ubi->cdev.dev, ubi->vtbl_slots + 1);
 	ubi_err(ubi, "cannot initialize UBI %s, error %d",
@@ -509,7 +554,8 @@ out_unreg:
 static void uif_close(struct ubi_device *ubi)
 {
 	kill_volumes(ubi);
-	cdev_device_del(&ubi->cdev, &ubi->dev);
+	ubi_sysfs_close(ubi);
+	cdev_del(&ubi->cdev);
 	unregister_chrdev_region(ubi->cdev.dev, ubi->vtbl_slots + 1);
 }
 
@@ -523,7 +569,7 @@ void ubi_free_internal_volumes(struct ubi_device *ubi)
 
 	for (i = ubi->vtbl_slots;
 	     i < ubi->vtbl_slots + UBI_INT_VOL_COUNT; i++) {
-		ubi_eba_replace_table(ubi->volumes[i], NULL);
+		kfree(ubi->volumes[i]->eba_tbl);
 		kfree(ubi->volumes[i]);
 	}
 }
@@ -806,7 +852,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 		       int vid_hdr_offset, int max_beb_per1024)
 {
 	struct ubi_device *ubi;
-	int i, err;
+	int i, err, ref = 0;
 
 	if (max_beb_per1024 < 0 || max_beb_per1024 > MAX_MTD_UBI_BEB_LIMIT)
 		return -EINVAL;
@@ -823,7 +869,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 	for (i = 0; i < UBI_MAX_DEVICES; i++) {
 		ubi = ubi_devices[i];
 		if (ubi && mtd->index == ubi->mtd->index) {
-			pr_err("ubi: mtd%d is already attached to ubi%d",
+			ubi_err(ubi, "mtd%d is already attached to ubi%d",
 				mtd->index, i);
 			return -EEXIST;
 		}
@@ -838,7 +884,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 	 * no sense to attach emulated MTD devices, so we prohibit this.
 	 */
 	if (mtd->type == MTD_UBIVOLUME) {
-		pr_err("ubi: refuse attaching mtd%d - it is already emulated on top of UBI",
+		ubi_err(ubi, "refuse attaching mtd%d - it is already emulated on top of UBI",
 			mtd->index);
 		return -EINVAL;
 	}
@@ -849,7 +895,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 			if (!ubi_devices[ubi_num])
 				break;
 		if (ubi_num == UBI_MAX_DEVICES) {
-			pr_err("ubi: only %d UBI devices may be created",
+			ubi_err(ubi, "only %d UBI devices may be created",
 				UBI_MAX_DEVICES);
 			return -ENFILE;
 		}
@@ -859,7 +905,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 
 		/* Make sure ubi_num is not busy */
 		if (ubi_devices[ubi_num]) {
-			pr_err("ubi: ubi%i already exists", ubi_num);
+			ubi_err(ubi, "already exists");
 			return -EEXIST;
 		}
 	}
@@ -867,11 +913,6 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 	ubi = kzalloc(sizeof(struct ubi_device), GFP_KERNEL);
 	if (!ubi)
 		return -ENOMEM;
-
-	device_initialize(&ubi->dev);
-	ubi->dev.release = dev_release;
-	ubi->dev.class = &ubi_class;
-	ubi->dev.groups = ubi_dev_groups;
 
 	ubi->mtd = mtd;
 	ubi->ubi_num = ubi_num;
@@ -946,10 +987,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 			goto out_detach;
 	}
 
-	/* Make device "available" before it becomes accessible via sysfs */
-	ubi_devices[ubi_num] = ubi;
-
-	err = uif_init(ubi);
+	err = uif_init(ubi, &ref);
 	if (err)
 		goto out_detach;
 
@@ -993,22 +1031,27 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 	wake_up_process(ubi->bgt_thread);
 	spin_unlock(&ubi->wl_lock);
 
+	ubi_devices[ubi_num] = ubi;
 	ubi_notify_all(ubi, UBI_VOLUME_ADDED, NULL);
 	return ubi_num;
 
 out_debugfs:
 	ubi_debugfs_exit_dev(ubi);
 out_uif:
+	get_device(&ubi->dev);
+	ubi_assert(ref);
 	uif_close(ubi);
 out_detach:
-	ubi_devices[ubi_num] = NULL;
 	ubi_wl_close(ubi);
 	ubi_free_internal_volumes(ubi);
 	vfree(ubi->vtbl);
 out_free:
 	vfree(ubi->peb_buf);
 	vfree(ubi->fm_buf);
-	put_device(&ubi->dev);
+	if (ref)
+		put_device(&ubi->dev);
+	else
+		kfree(ubi);
 	return err;
 }
 
@@ -1069,6 +1112,12 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
 	if (ubi->bgt_thread)
 		kthread_stop(ubi->bgt_thread);
 
+	/*
+	 * Get a reference to the device in order to prevent 'dev_release()'
+	 * from freeing the @ubi object.
+	 */
+	get_device(&ubi->dev);
+
 	ubi_debugfs_exit_dev(ubi);
 	uif_close(ubi);
 
@@ -1093,25 +1142,21 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
  */
 static struct mtd_info * __init open_mtd_by_chdev(const char *mtd_dev)
 {
-	int err, minor;
+	int err, major, minor, mode;
 	struct path path;
-	struct kstat stat;
 
 	/* Probably this is an MTD character device node path */
 	err = kern_path(mtd_dev, LOOKUP_FOLLOW, &path);
 	if (err)
 		return ERR_PTR(err);
 
-	err = vfs_getattr(&path, &stat, STATX_TYPE, AT_STATX_SYNC_AS_STAT);
-	path_put(&path);
-	if (err)
-		return ERR_PTR(err);
-
 	/* MTD device number is defined by the major / minor numbers */
-	if (MAJOR(stat.rdev) != MTD_CHAR_MAJOR || !S_ISCHR(stat.mode))
+	major = imajor(d_backing_inode(path.dentry));
+	minor = iminor(d_backing_inode(path.dentry));
+	mode = d_backing_inode(path.dentry)->i_mode;
+	path_put(&path);
+	if (major != MTD_CHAR_MAJOR || !S_ISCHR(mode))
 		return ERR_PTR(-EINVAL);
-
-	minor = MINOR(stat.rdev);
 
 	if (minor & 1)
 		/*

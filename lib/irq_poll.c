@@ -36,6 +36,7 @@ void irq_poll_sched(struct irq_poll *iop)
 	list_add_tail(&iop->list, this_cpu_ptr(&blk_cpu_iopoll));
 	__raise_softirq_irqoff(IRQ_POLL_SOFTIRQ);
 	local_irq_restore(flags);
+	preempt_check_resched_rt();
 }
 EXPORT_SYMBOL(irq_poll_sched);
 
@@ -74,7 +75,7 @@ void irq_poll_complete(struct irq_poll *iop)
 }
 EXPORT_SYMBOL(irq_poll_complete);
 
-static void __latent_entropy irq_poll_softirq(struct softirq_action *h)
+static void irq_poll_softirq(struct softirq_action *h)
 {
 	struct list_head *list = this_cpu_ptr(&blk_cpu_iopoll);
 	int rearm = 0, budget = irq_poll_budget;
@@ -132,6 +133,7 @@ static void __latent_entropy irq_poll_softirq(struct softirq_action *h)
 		__raise_softirq_irqoff(IRQ_POLL_SOFTIRQ);
 
 	local_irq_enable();
+	preempt_check_resched_rt();
 }
 
 /**
@@ -184,20 +186,30 @@ void irq_poll_init(struct irq_poll *iop, int weight, irq_poll_fn *poll_fn)
 }
 EXPORT_SYMBOL(irq_poll_init);
 
-static int irq_poll_cpu_dead(unsigned int cpu)
+static int irq_poll_cpu_notify(struct notifier_block *self,
+				 unsigned long action, void *hcpu)
 {
 	/*
 	 * If a CPU goes away, splice its entries to the current CPU
 	 * and trigger a run of the softirq
 	 */
-	local_irq_disable();
-	list_splice_init(&per_cpu(blk_cpu_iopoll, cpu),
-			 this_cpu_ptr(&blk_cpu_iopoll));
-	__raise_softirq_irqoff(IRQ_POLL_SOFTIRQ);
-	local_irq_enable();
+	if (action == CPU_DEAD || action == CPU_DEAD_FROZEN) {
+		int cpu = (unsigned long) hcpu;
 
-	return 0;
+		local_irq_disable();
+		list_splice_init(&per_cpu(blk_cpu_iopoll, cpu),
+				 this_cpu_ptr(&blk_cpu_iopoll));
+		__raise_softirq_irqoff(IRQ_POLL_SOFTIRQ);
+		local_irq_enable();
+		preempt_check_resched_rt();
+	}
+
+	return NOTIFY_OK;
 }
+
+static struct notifier_block irq_poll_cpu_notifier = {
+	.notifier_call	= irq_poll_cpu_notify,
+};
 
 static __init int irq_poll_setup(void)
 {
@@ -207,8 +219,7 @@ static __init int irq_poll_setup(void)
 		INIT_LIST_HEAD(&per_cpu(blk_cpu_iopoll, i));
 
 	open_softirq(IRQ_POLL_SOFTIRQ, irq_poll_softirq);
-	cpuhp_setup_state_nocalls(CPUHP_IRQ_POLL_DEAD, "irq_poll:dead", NULL,
-				  irq_poll_cpu_dead);
+	register_hotcpu_notifier(&irq_poll_cpu_notifier);
 	return 0;
 }
 subsys_initcall(irq_poll_setup);

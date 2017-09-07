@@ -1395,25 +1395,23 @@ static void wbsd_request_dma(struct wbsd_host *host, int dma)
 	 */
 	host->dma_addr = dma_map_single(mmc_dev(host->mmc), host->dma_buffer,
 		WBSD_DMA_SIZE, DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(mmc_dev(host->mmc), host->dma_addr))
-		goto kfree;
 
 	/*
 	 * ISA DMA must be aligned on a 64k basis.
 	 */
 	if ((host->dma_addr & 0xffff) != 0)
-		goto unmap;
+		goto kfree;
 	/*
 	 * ISA cannot access memory above 16 MB.
 	 */
 	else if (host->dma_addr >= 0x1000000)
-		goto unmap;
+		goto kfree;
 
 	host->dma = dma;
 
 	return;
 
-unmap:
+kfree:
 	/*
 	 * If we've gotten here then there is some kind of alignment bug
 	 */
@@ -1423,7 +1421,6 @@ unmap:
 		WBSD_DMA_SIZE, DMA_BIDIRECTIONAL);
 	host->dma_addr = 0;
 
-kfree:
 	kfree(host->dma_buffer);
 	host->dma_buffer = NULL;
 
@@ -1437,14 +1434,11 @@ err:
 
 static void wbsd_release_dma(struct wbsd_host *host)
 {
-	/*
-	 * host->dma_addr is valid here iff host->dma_buffer is not NULL.
-	 */
-	if (host->dma_buffer) {
+	if (host->dma_addr) {
 		dma_unmap_single(mmc_dev(host->mmc), host->dma_addr,
 			WBSD_DMA_SIZE, DMA_BIDIRECTIONAL);
-		kfree(host->dma_buffer);
 	}
+	kfree(host->dma_buffer);
 	if (host->dma >= 0)
 		free_dma(host->dma);
 

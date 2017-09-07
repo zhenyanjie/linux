@@ -6,9 +6,8 @@
  *	- Copyright 2011 Fenghua Yu <fenghua.yu@intel.com>
  */
 #include <linux/linkage.h>
-#include <asm/cpufeatures.h>
+#include <asm/cpufeature.h>
 #include <asm/alternative-asm.h>
-#include <asm/export.h>
 
 #undef memmove
 
@@ -208,5 +207,3 @@ ENTRY(__memmove)
 	retq
 ENDPROC(__memmove)
 ENDPROC(memmove)
-EXPORT_SYMBOL(__memmove)
-EXPORT_SYMBOL(memmove)

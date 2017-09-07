@@ -75,12 +75,6 @@
 #define DFS_DOUBLE_SPEED	(1 << 2)
 #define DFS_QUAD_SPEED		(2 << 2)
 
-/* ICTRL */
-#define ICTRL_MASK	(0x3)
-
-/* OCTRL */
-#define OCTRL_MASK	(0x3F)
-
 struct ak4613_formats {
 	unsigned int width;
 	unsigned int fmt;
@@ -152,7 +146,6 @@ static const struct regmap_config ak4613_regmap_cfg = {
 	.max_register		= 0x16,
 	.reg_defaults		= ak4613_reg,
 	.num_reg_defaults	= ARRAY_SIZE(ak4613_reg),
-	.cache_type		= REGCACHE_RBTREE,
 };
 
 static const struct of_device_id ak4613_of_match[] = {
@@ -371,8 +364,8 @@ static int ak4613_dai_hw_params(struct snd_pcm_substream *substream,
 	snd_soc_update_bits(codec, CTRL1, FMT_MASK, fmt_ctrl);
 	snd_soc_update_bits(codec, CTRL2, DFS_MASK, ctrl2);
 
-	snd_soc_update_bits(codec, ICTRL, ICTRL_MASK, priv->ic);
-	snd_soc_update_bits(codec, OCTRL, OCTRL_MASK, priv->oc);
+	snd_soc_write(codec, ICTRL, priv->ic);
+	snd_soc_write(codec, OCTRL, priv->oc);
 
 hw_params_end:
 	if (ret < 0)
@@ -443,35 +436,23 @@ static struct snd_soc_dai_driver ak4613_dai = {
 	.symmetric_rates = 1,
 };
 
-static int ak4613_suspend(struct snd_soc_codec *codec)
-{
-	struct regmap *regmap = dev_get_regmap(codec->dev, NULL);
-
-	regcache_cache_only(regmap, true);
-	regcache_mark_dirty(regmap);
-	return 0;
-}
-
 static int ak4613_resume(struct snd_soc_codec *codec)
 {
 	struct regmap *regmap = dev_get_regmap(codec->dev, NULL);
 
-	regcache_cache_only(regmap, false);
+	regcache_mark_dirty(regmap);
 	return regcache_sync(regmap);
 }
 
 static struct snd_soc_codec_driver soc_codec_dev_ak4613 = {
-	.suspend		= ak4613_suspend,
 	.resume			= ak4613_resume,
 	.set_bias_level		= ak4613_set_bias_level,
-	.component_driver = {
-		.controls		= ak4613_snd_controls,
-		.num_controls		= ARRAY_SIZE(ak4613_snd_controls),
-		.dapm_widgets		= ak4613_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(ak4613_dapm_widgets),
-		.dapm_routes		= ak4613_intercon,
-		.num_dapm_routes	= ARRAY_SIZE(ak4613_intercon),
-	},
+	.controls		= ak4613_snd_controls,
+	.num_controls		= ARRAY_SIZE(ak4613_snd_controls),
+	.dapm_widgets		= ak4613_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(ak4613_dapm_widgets),
+	.dapm_routes		= ak4613_intercon,
+	.num_dapm_routes	= ARRAY_SIZE(ak4613_intercon),
 };
 
 static void ak4613_parse_of(struct ak4613_priv *priv,
@@ -549,6 +530,7 @@ static int ak4613_i2c_remove(struct i2c_client *client)
 static struct i2c_driver ak4613_i2c_driver = {
 	.driver = {
 		.name = "ak4613-codec",
+		.owner = THIS_MODULE,
 		.of_match_table = ak4613_of_match,
 	},
 	.probe		= ak4613_i2c_probe,

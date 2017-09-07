@@ -176,6 +176,10 @@ static struct at24_platform_data eeprom_info = {
 	.context	= (void *)0x7f00,
 };
 
+static struct snd_platform_data dm365_evm_snd_data __maybe_unused = {
+	.asp_chan_q = EVENTQ_3,
+};
+
 static struct i2c_board_info i2c_info[] = {
 	{
 		I2C_BOARD_INFO("24c256", 0x50),
@@ -759,9 +763,9 @@ static __init void dm365_evm_init(void)
 	evm_init_cpld();
 
 #ifdef CONFIG_SND_DM365_AIC3X_CODEC
-	dm365_init_asp();
+	dm365_init_asp(&dm365_evm_snd_data);
 #elif defined(CONFIG_SND_DM365_VOICE_CODEC)
-	dm365_init_vc();
+	dm365_init_vc(&dm365_evm_snd_data);
 #endif
 	dm365_init_rtc();
 	dm365_init_ks(&dm365evm_ks_data);

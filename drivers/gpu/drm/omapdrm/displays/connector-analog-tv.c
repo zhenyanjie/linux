@@ -14,9 +14,8 @@
 #include <linux/platform_device.h>
 #include <linux/of.h>
 
+#include <video/omapdss.h>
 #include <video/omap-panel-data.h>
-
-#include "../dss/omapdss.h"
 
 struct panel_drv_data {
 	struct omap_dss_device dssdev;
@@ -24,27 +23,31 @@ struct panel_drv_data {
 
 	struct device *dev;
 
-	struct videomode vm;
+	struct omap_video_timings timings;
 
+	enum omap_dss_venc_type connector_type;
 	bool invert_polarity;
 };
 
-static const struct videomode tvc_pal_vm = {
-	.hactive	= 720,
-	.vactive	= 574,
+static const struct omap_video_timings tvc_pal_timings = {
+	.x_res		= 720,
+	.y_res		= 574,
 	.pixelclock	= 13500000,
-	.hsync_len	= 64,
-	.hfront_porch	= 12,
-	.hback_porch	= 68,
-	.vsync_len	= 5,
-	.vfront_porch	= 5,
-	.vback_porch	= 41,
+	.hsw		= 64,
+	.hfp		= 12,
+	.hbp		= 68,
+	.vsw		= 5,
+	.vfp		= 5,
+	.vbp		= 41,
 
-	.flags		= DISPLAY_FLAGS_INTERLACED | DISPLAY_FLAGS_HSYNC_LOW |
-			  DISPLAY_FLAGS_VSYNC_LOW,
+	.interlace	= true,
 };
 
 static const struct of_device_id tvc_of_match[];
+
+struct tvc_of_data {
+	enum omap_dss_venc_type connector_type;
+};
 
 #define to_panel_data(x) container_of(x, struct panel_drv_data, dssdev)
 
@@ -93,10 +96,10 @@ static int tvc_enable(struct omap_dss_device *dssdev)
 	if (omapdss_device_is_enabled(dssdev))
 		return 0;
 
-	in->ops.atv->set_timings(in, &ddata->vm);
+	in->ops.atv->set_timings(in, &ddata->timings);
 
 	if (!ddata->dev->of_node) {
-		in->ops.atv->set_type(in, OMAP_DSS_VENC_TYPE_COMPOSITE);
+		in->ops.atv->set_type(in, ddata->connector_type);
 
 		in->ops.atv->invert_vid_out_polarity(in,
 			ddata->invert_polarity);
@@ -127,32 +130,32 @@ static void tvc_disable(struct omap_dss_device *dssdev)
 }
 
 static void tvc_set_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
 
-	ddata->vm = *vm;
-	dssdev->panel.vm = *vm;
+	ddata->timings = *timings;
+	dssdev->panel.timings = *timings;
 
-	in->ops.atv->set_timings(in, vm);
+	in->ops.atv->set_timings(in, timings);
 }
 
 static void tvc_get_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 
-	*vm = ddata->vm;
+	*timings = ddata->timings;
 }
 
 static int tvc_check_timings(struct omap_dss_device *dssdev,
-			     struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
 
-	return in->ops.atv->check_timings(in, vm);
+	return in->ops.atv->check_timings(in, timings);
 }
 
 static u32 tvc_get_wss(struct omap_dss_device *dssdev)
@@ -204,6 +207,7 @@ static int tvc_probe_pdata(struct platform_device *pdev)
 
 	ddata->in = in;
 
+	ddata->connector_type = pdata->connector_type;
 	ddata->invert_polarity = pdata->invert_polarity;
 
 	dssdev = &ddata->dssdev;
@@ -254,14 +258,14 @@ static int tvc_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	ddata->vm = tvc_pal_vm;
+	ddata->timings = tvc_pal_timings;
 
 	dssdev = &ddata->dssdev;
 	dssdev->driver = &tvc_driver;
 	dssdev->dev = &pdev->dev;
 	dssdev->type = OMAP_DISPLAY_TYPE_VENC;
 	dssdev->owner = THIS_MODULE;
-	dssdev->panel.vm = tvc_pal_vm;
+	dssdev->panel.timings = tvc_pal_timings;
 
 	r = omapdss_register_display(dssdev);
 	if (r) {

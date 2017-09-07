@@ -17,9 +17,10 @@
 #include <linux/notifier.h>
 
 struct device;
+
 struct clk;
-struct device_node;
-struct of_phandle_args;
+
+#ifdef CONFIG_COMMON_CLK
 
 /**
  * DOC: clk notifier callback types
@@ -77,8 +78,6 @@ struct clk_notifier_data {
 	unsigned long		new_rate;
 };
 
-#ifdef CONFIG_COMMON_CLK
-
 /**
  * clk_notifier_register: register a clock rate-change notifier callback
  * @clk: clock whose rate we are interested in
@@ -132,26 +131,14 @@ int clk_get_phase(struct clk *clk);
  * @q: clk compared against p
  *
  * Returns true if the two struct clk pointers both point to the same hardware
- * clock node. Put differently, returns true if @p and @q
- * share the same &struct clk_core object.
+ * clock node. Put differently, returns true if struct clk *p and struct clk *q
+ * share the same struct clk_core object.
  *
  * Returns false otherwise. Note that two NULL clks are treated as matching.
  */
 bool clk_is_match(const struct clk *p, const struct clk *q);
 
 #else
-
-static inline int clk_notifier_register(struct clk *clk,
-					struct notifier_block *nb)
-{
-	return -ENOTSUPP;
-}
-
-static inline int clk_notifier_unregister(struct clk *clk,
-					  struct notifier_block *nb)
-{
-	return -ENOTSUPP;
-}
 
 static inline long clk_get_accuracy(struct clk *clk)
 {
@@ -248,23 +235,6 @@ struct clk *clk_get(struct device *dev, const char *id);
  * from the bus.
  */
 struct clk *devm_clk_get(struct device *dev, const char *id);
-
-/**
- * devm_get_clk_from_child - lookup and obtain a managed reference to a
- *			     clock producer from child node.
- * @dev: device for clock "consumer"
- * @np: pointer to clock consumer node
- * @con_id: clock consumer ID
- *
- * This function parses the clocks, and uses them to look up the
- * struct clk from the registered list of clock providers by using
- * @np and @con_id
- *
- * The clock will automatically be freed when the device is unbound
- * from the bus.
- */
-struct clk *devm_get_clk_from_child(struct device *dev,
-				    struct device_node *np, const char *con_id);
 
 /**
  * clk_enable - inform the system when the clock source should be running.
@@ -450,12 +420,6 @@ static inline struct clk *devm_clk_get(struct device *dev, const char *id)
 	return NULL;
 }
 
-static inline struct clk *devm_get_clk_from_child(struct device *dev,
-				struct device_node *np, const char *con_id)
-{
-	return NULL;
-}
-
 static inline void clk_put(struct clk *clk) {}
 
 static inline void devm_clk_put(struct device *dev, struct clk *clk) {}
@@ -497,10 +461,6 @@ static inline struct clk *clk_get_parent(struct clk *clk)
 	return NULL;
 }
 
-static inline struct clk *clk_get_sys(const char *dev_id, const char *con_id)
-{
-	return NULL;
-}
 #endif
 
 /* clk_prepare_enable helps cases using clk_enable in non-atomic context. */
@@ -524,6 +484,9 @@ static inline void clk_disable_unprepare(struct clk *clk)
 	clk_disable(clk);
 	clk_unprepare(clk);
 }
+
+struct device_node;
+struct of_phandle_args;
 
 #if defined(CONFIG_OF) && defined(CONFIG_COMMON_CLK)
 struct clk *of_clk_get(struct device_node *np, int index);

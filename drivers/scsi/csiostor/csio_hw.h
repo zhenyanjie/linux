@@ -95,6 +95,7 @@ enum {
 };
 
 struct csio_msix_entries {
+	unsigned short	vector;		/* Assigned MSI-X vector */
 	void		*dev_id;	/* Priv object associated w/ this msix*/
 	char		desc[24];	/* Description of this vector */
 };

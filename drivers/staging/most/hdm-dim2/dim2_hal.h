@@ -16,7 +16,10 @@
 #define _DIM2_HAL_H
 
 #include <linux/types.h>
-#include "dim2_reg.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * The values below are specified in the hardware specification.
@@ -38,12 +41,14 @@ struct dim_ch_state_t {
 	u16 done_buffers; /* Number of completed buffers */
 };
 
+typedef int atomic_counter_t;
+
 struct int_ch_state {
 	/* changed only in interrupt context */
-	volatile int request_counter;
+	volatile atomic_counter_t request_counter;
 
 	/* changed only in task context */
-	volatile int service_counter;
+	volatile atomic_counter_t service_counter;
 
 	u8 idx1;
 	u8 idx2;
@@ -60,8 +65,7 @@ struct dim_channel {
 	u16 done_sw_buffers_number; /*< Done software buffers number. */
 };
 
-u8 dim_startup(struct dim2_regs __iomem *dim_base_address, u32 mlb_clock,
-	       u32 fcnt);
+u8 dim_startup(void *dim_base_address, u32 mlb_clock);
 
 void dim_shutdown(void);
 
@@ -87,26 +91,26 @@ u8 dim_init_sync(struct dim_channel *ch, u8 is_tx, u16 ch_address,
 
 u8 dim_destroy_channel(struct dim_channel *ch);
 
-void dim_service_mlb_int_irq(void);
-
-void dim_service_ahb_int_irq(struct dim_channel *const *channels);
+void dim_service_irq(struct dim_channel *const *channels);
 
 u8 dim_service_channel(struct dim_channel *ch);
 
 struct dim_ch_state_t *dim_get_channel_state(struct dim_channel *ch,
 					     struct dim_ch_state_t *state_ptr);
 
-u16 dim_dbr_space(struct dim_channel *ch);
-
 bool dim_enqueue_buffer(struct dim_channel *ch, u32 buffer_addr,
 			u16 buffer_size);
 
 bool dim_detach_buffers(struct dim_channel *ch, u16 buffers_number);
 
-u32 dimcb_io_read(u32 __iomem *ptr32);
+u32 dimcb_io_read(u32 *ptr32);
 
-void dimcb_io_write(u32 __iomem *ptr32, u32 value);
+void dimcb_io_write(u32 *ptr32, u32 value);
 
 void dimcb_on_error(u8 error_id, const char *error_message);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _DIM2_HAL_H */

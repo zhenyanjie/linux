@@ -23,6 +23,7 @@
 
 #include <linux/rbtree_augmented.h>
 #include <linux/export.h>
+#include <linux/rcupdate.h>
 
 /*
  * red-black trees properties:  http://en.wikipedia.org/wiki/Rbtree
@@ -296,26 +297,11 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 				 *
 				 *   (p)           (p)
 				 *   / \           / \
-				 *  N   S    -->  N   sl
+				 *  N   S    -->  N   Sl
 				 *     / \             \
-				 *    sl  Sr            S
+				 *    sl  Sr            s
 				 *                       \
 				 *                        Sr
-				 *
-				 * Note: p might be red, and then both
-				 * p and sl are red after rotation(which
-				 * breaks property 4). This is fixed in
-				 * Case 4 (in __rb_rotate_set_parents()
-				 *         which set sl the color of p
-				 *         and set p RB_BLACK)
-				 *
-				 *   (p)            (sl)
-				 *   / \            /  \
-				 *  N   sl   -->   P    S
-				 *       \        /      \
-				 *        S      N        Sr
-				 *         \
-				 *          Sr
 				 */
 				tmp1 = tmp2->rb_right;
 				WRITE_ONCE(sibling->rb_left, tmp1);
@@ -380,7 +366,7 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 					}
 					break;
 				}
-				/* Case 3 - left rotate at sibling */
+				/* Case 3 - right rotate at sibling */
 				tmp1 = tmp2->rb_left;
 				WRITE_ONCE(sibling->rb_right, tmp1);
 				WRITE_ONCE(tmp2->rb_left, sibling);
@@ -392,7 +378,7 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 				tmp1 = sibling;
 				sibling = tmp2;
 			}
-			/* Case 4 - right rotate at parent + color flips */
+			/* Case 4 - left rotate at parent + color flips */
 			tmp2 = sibling->rb_right;
 			WRITE_ONCE(parent->rb_left, tmp2);
 			WRITE_ONCE(sibling->rb_right, parent);
@@ -427,9 +413,7 @@ static inline void dummy_copy(struct rb_node *old, struct rb_node *new) {}
 static inline void dummy_rotate(struct rb_node *old, struct rb_node *new) {}
 
 static const struct rb_augment_callbacks dummy_callbacks = {
-	.propagate = dummy_propagate,
-	.copy = dummy_copy,
-	.rotate = dummy_rotate
+	dummy_propagate, dummy_copy, dummy_rotate
 };
 
 void rb_insert_color(struct rb_node *node, struct rb_root *root)
@@ -556,39 +540,17 @@ void rb_replace_node(struct rb_node *victim, struct rb_node *new,
 {
 	struct rb_node *parent = rb_parent(victim);
 
-	/* Copy the pointers/colour from the victim to the replacement */
-	*new = *victim;
-
 	/* Set the surrounding nodes to point to the replacement */
+	__rb_change_child(victim, new, parent, root);
 	if (victim->rb_left)
 		rb_set_parent(victim->rb_left, new);
 	if (victim->rb_right)
 		rb_set_parent(victim->rb_right, new);
-	__rb_change_child(victim, new, parent, root);
+
+	/* Copy the pointers/colour from the victim to the replacement */
+	*new = *victim;
 }
 EXPORT_SYMBOL(rb_replace_node);
-
-void rb_replace_node_rcu(struct rb_node *victim, struct rb_node *new,
-			 struct rb_root *root)
-{
-	struct rb_node *parent = rb_parent(victim);
-
-	/* Copy the pointers/colour from the victim to the replacement */
-	*new = *victim;
-
-	/* Set the surrounding nodes to point to the replacement */
-	if (victim->rb_left)
-		rb_set_parent(victim->rb_left, new);
-	if (victim->rb_right)
-		rb_set_parent(victim->rb_right, new);
-
-	/* Set the parent's pointer to the new node last after an RCU barrier
-	 * so that the pointers onwards are seen to be set correctly when doing
-	 * an RCU walk over the tree.
-	 */
-	__rb_change_child_rcu(victim, new, parent, root);
-}
-EXPORT_SYMBOL(rb_replace_node_rcu);
 
 static struct rb_node *rb_left_deepest_node(const struct rb_node *node)
 {
@@ -629,3 +591,13 @@ struct rb_node *rb_first_postorder(const struct rb_root *root)
 	return rb_left_deepest_node(root->rb_node);
 }
 EXPORT_SYMBOL(rb_first_postorder);
+
+void rb_link_node_rcu(struct rb_node *node, struct rb_node *parent,
+				    struct rb_node **rb_link)
+{
+	node->__rb_parent_color = (unsigned long)parent;
+	node->rb_left = node->rb_right = NULL;
+
+	rcu_assign_pointer(*rb_link, node);
+}
+EXPORT_SYMBOL(rb_link_node_rcu);

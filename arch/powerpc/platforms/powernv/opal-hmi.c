@@ -150,17 +150,15 @@ static void print_nx_checkstop_reason(const char *level,
 static void print_checkstop_reason(const char *level,
 					struct OpalHMIEvent *hmi_evt)
 {
-	uint8_t type = hmi_evt->u.xstop_error.xstop_type;
-	switch (type) {
+	switch (hmi_evt->u.xstop_error.xstop_type) {
 	case CHECKSTOP_TYPE_CORE:
 		print_core_checkstop_reason(level, hmi_evt);
 		break;
 	case CHECKSTOP_TYPE_NX:
 		print_nx_checkstop_reason(level, hmi_evt);
 		break;
-	default:
-		printk("%s	Unknown Malfunction Alert of type %d\n",
-		       level, type);
+	case CHECKSTOP_TYPE_UNKNOWN:
+		printk("%s	Unknown Malfunction Alert.\n", level);
 		break;
 	}
 }
@@ -180,8 +178,7 @@ static void print_hmi_event_info(struct OpalHMIEvent *hmi_evt)
 		"An XSCOM operation completed",
 		"SCOM has set a reserved FIR bit to cause recovery",
 		"Debug trigger has set a reserved FIR bit to cause recovery",
-		"A hypervisor resource error occurred",
-		"CAPP recovery process is in progress",
+		"A hypervisor resource error occurred"
 	};
 
 	/* Print things out */

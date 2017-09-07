@@ -24,6 +24,11 @@ config HAVE_FUNCTION_GRAPH_TRACER
 	help
 	  See Documentation/trace/ftrace-design.txt
 
+config HAVE_FUNCTION_GRAPH_FP_TEST
+	bool
+	help
+	  See Documentation/trace/ftrace-design.txt
+
 config HAVE_DYNAMIC_FTRACE
 	bool
 	help
@@ -70,7 +75,6 @@ config FTRACE_NMI_ENTER
 
 config EVENT_TRACING
 	select CONTEXT_SWITCH_TRACER
-        select GLOB
 	bool
 
 config CONTEXT_SWITCH_TRACER
@@ -134,8 +138,6 @@ config FUNCTION_TRACER
 	select KALLSYMS
 	select GENERIC_TRACER
 	select CONTEXT_SWITCH_TRACER
-	select GLOB
-	select TASKS_RCU if PREEMPT
 	help
 	  Enable the kernel to trace every kernel function. This is done
 	  by using a compiler feature to insert a small, 5-byte No-Operation
@@ -185,6 +187,24 @@ config IRQSOFF_TRACER
 	  enabled. This option and the preempt-off timing option can be
 	  used together or separately.)
 
+config INTERRUPT_OFF_HIST
+	bool "Interrupts-off Latency Histogram"
+	depends on IRQSOFF_TRACER
+	help
+	  This option generates continuously updated histograms (one per cpu)
+	  of the duration of time periods with interrupts disabled. The
+	  histograms are disabled by default. To enable them, write a non-zero
+	  number to
+
+	      /sys/kernel/debug/tracing/latency_hist/enable/preemptirqsoff
+
+	  If PREEMPT_OFF_HIST is also selected, additional histograms (one
+	  per cpu) are generated that accumulate the duration of time periods
+	  when both interrupts and preemption are disabled. The histogram data
+	  will be located in the debug file system at
+
+	      /sys/kernel/debug/tracing/latency_hist/irqsoff
+
 config PREEMPT_TRACER
 	bool "Preemption-off Latency Tracer"
 	default n
@@ -209,6 +229,24 @@ config PREEMPT_TRACER
 	  enabled. This option and the irqs-off timing option can be
 	  used together or separately.)
 
+config PREEMPT_OFF_HIST
+	bool "Preemption-off Latency Histogram"
+	depends on PREEMPT_TRACER
+	help
+	  This option generates continuously updated histograms (one per cpu)
+	  of the duration of time periods with preemption disabled. The
+	  histograms are disabled by default. To enable them, write a non-zero
+	  number to
+
+	      /sys/kernel/debug/tracing/latency_hist/enable/preemptirqsoff
+
+	  If INTERRUPT_OFF_HIST is also selected, additional histograms (one
+	  per cpu) are generated that accumulate the duration of time periods
+	  when both interrupts and preemption are disabled. The histogram data
+	  will be located in the debug file system at
+
+	      /sys/kernel/debug/tracing/latency_hist/preemptoff
+
 config SCHED_TRACER
 	bool "Scheduling Latency Tracer"
 	select GENERIC_TRACER
@@ -219,40 +257,73 @@ config SCHED_TRACER
 	  This tracer tracks the latency of the highest priority task
 	  to be scheduled in, starting from the point it has woken up.
 
-config HWLAT_TRACER
-	bool "Tracer to detect hardware latencies (like SMIs)"
-	select GENERIC_TRACER
+config WAKEUP_LATENCY_HIST
+	bool "Scheduling Latency Histogram"
+	depends on SCHED_TRACER
 	help
-	 This tracer, when enabled will create one or more kernel threads,
-	 depening on what the cpumask file is set to, which each thread
-	 spinning in a loop looking for interruptions caused by
-	 something other than the kernel. For example, if a
-	 System Management Interrupt (SMI) takes a noticeable amount of
-	 time, this tracer will detect it. This is useful for testing
-	 if a system is reliable for Real Time tasks.
+	  This option generates continuously updated histograms (one per cpu)
+	  of the scheduling latency of the highest priority task.
+	  The histograms are disabled by default. To enable them, write a
+	  non-zero number to
 
-	 Some files are created in the tracing directory when this
-	 is enabled:
+	      /sys/kernel/debug/tracing/latency_hist/enable/wakeup
 
-	   hwlat_detector/width   - time in usecs for how long to spin for
-	   hwlat_detector/window  - time in usecs between the start of each
-				     iteration
+	  Two different algorithms are used, one to determine the latency of
+	  processes that exclusively use the highest priority of the system and
+	  another one to determine the latency of processes that share the
+	  highest system priority with other processes. The former is used to
+	  improve hardware and system software, the latter to optimize the
+	  priority design of a given system. The histogram data will be
+	  located in the debug file system at
 
-	 A kernel thread is created that will spin with interrupts disabled
-	 for "width" microseconds in every "widow" cycle. It will not spin
-	 for "window - width" microseconds, where the system can
-	 continue to operate.
+	      /sys/kernel/debug/tracing/latency_hist/wakeup
 
-	 The output will appear in the trace and trace_pipe files.
+	  and
 
-	 When the tracer is not running, it has no affect on the system,
-	 but when it is running, it can cause the system to be
-	 periodically non responsive. Do not run this tracer on a
-	 production system.
+	      /sys/kernel/debug/tracing/latency_hist/wakeup/sharedprio
 
-	 To enable this tracer, echo in "hwlat" into the current_tracer
-	 file. Every time a latency is greater than tracing_thresh, it will
-	 be recorded into the ring buffer.
+	  If both Scheduling Latency Histogram and Missed Timer Offsets
+	  Histogram are selected, additional histogram data will be collected
+	  that contain, in addition to the wakeup latency, the timer latency, in
+	  case the wakeup was triggered by an expired timer. These histograms
+	  are available in the
+
+	      /sys/kernel/debug/tracing/latency_hist/timerandwakeup
+
+	  directory. They reflect the apparent interrupt and scheduling latency
+	  and are best suitable to determine the worst-case latency of a given
+	  system. To enable these histograms, write a non-zero number to
+
+	      /sys/kernel/debug/tracing/latency_hist/enable/timerandwakeup
+
+config MISSED_TIMER_OFFSETS_HIST
+	depends on HIGH_RES_TIMERS
+	select GENERIC_TRACER
+	bool "Missed Timer Offsets Histogram"
+	help
+	  Generate a histogram of missed timer offsets in microseconds. The
+	  histograms are disabled by default. To enable them, write a non-zero
+	  number to
+
+	      /sys/kernel/debug/tracing/latency_hist/enable/missed_timer_offsets
+
+	  The histogram data will be located in the debug file system at
+
+	      /sys/kernel/debug/tracing/latency_hist/missed_timer_offsets
+
+	  If both Scheduling Latency Histogram and Missed Timer Offsets
+	  Histogram are selected, additional histogram data will be collected
+	  that contain, in addition to the wakeup latency, the timer latency, in
+	  case the wakeup was triggered by an expired timer. These histograms
+	  are available in the
+
+	      /sys/kernel/debug/tracing/latency_hist/timerandwakeup
+
+	  directory. They reflect the apparent interrupt and scheduling latency
+	  and are best suitable to determine the worst-case latency of a given
+	  system. To enable these histograms, write a non-zero number to
+
+	      /sys/kernel/debug/tracing/latency_hist/enable/timerandwakeup
 
 config ENABLE_DEFAULT_TRACERS
 	bool "Trace process context switches and events"
@@ -430,7 +501,7 @@ config BLK_DEV_IO_TRACE
 
 	  If unsure, say N.
 
-config KPROBE_EVENTS
+config KPROBE_EVENT
 	depends on KPROBES
 	depends on HAVE_REGS_AND_STACK_ACCESS_API
 	bool "Enable kprobes-based dynamic events"
@@ -448,7 +519,7 @@ config KPROBE_EVENTS
 	  This option is also required by perf-probe subcommand of perf tools.
 	  If you want to use perf tools, this option is strongly recommended.
 
-config UPROBE_EVENTS
+config UPROBE_EVENT
 	bool "Enable uprobes-based dynamic events"
 	depends on ARCH_SUPPORTS_UPROBES
 	depends on MMU
@@ -456,7 +527,7 @@ config UPROBE_EVENTS
 	select UPROBES
 	select PROBE_EVENTS
 	select TRACING
-	default y
+	default n
 	help
 	  This allows the user to add tracing events on top of userspace
 	  dynamic events (similar to tracepoints) on the fly via the trace
@@ -467,7 +538,7 @@ config UPROBE_EVENTS
 
 config BPF_EVENTS
 	depends on BPF_SYSCALL
-	depends on (KPROBE_EVENTS || UPROBE_EVENTS) && PERF_EVENTS
+	depends on (KPROBE_EVENT || UPROBE_EVENT) && PERF_EVENTS
 	bool
 	default y
 	help
@@ -560,33 +631,6 @@ config MMIOTRACE
 
 	  See Documentation/trace/mmiotrace.txt.
 	  If you are not helping to develop drivers, say N.
-
-config TRACING_MAP
-	bool
-	depends on ARCH_HAVE_NMI_SAFE_CMPXCHG
-	help
-	  tracing_map is a special-purpose lock-free map for tracing,
-	  separated out as a stand-alone facility in order to allow it
-	  to be shared between multiple tracers.  It isn't meant to be
-	  generally used outside of that context, and is normally
-	  selected by tracers that use it.
-
-config HIST_TRIGGERS
-	bool "Histogram triggers"
-	depends on ARCH_HAVE_NMI_SAFE_CMPXCHG
-	select TRACING_MAP
-	select TRACING
-	default n
-	help
-	  Hist triggers allow one or more arbitrary trace event fields
-	  to be aggregated into hash tables and dumped to stdout by
-	  reading a debugfs/tracefs file.  They're useful for
-	  gathering quick and dirty (though precise) summaries of
-	  event activity as an initial guide for further investigation
-	  using more advanced tools.
-
-	  See Documentation/trace/events.txt.
-	  If in doubt, say N.
 
 config MMIOTRACE_TEST
 	tristate "Test module for mmiotrace"

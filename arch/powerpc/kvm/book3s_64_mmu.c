@@ -26,7 +26,7 @@
 #include <asm/tlbflush.h>
 #include <asm/kvm_ppc.h>
 #include <asm/kvm_book3s.h>
-#include <asm/book3s/64/mmu-hash.h>
+#include <asm/mmu-hash64.h>
 
 /* #define DEBUG_MMU */
 
@@ -265,8 +265,7 @@ do_second:
 		goto no_page_found;
 
 	if(copy_from_user(pteg, (void __user *)ptegp, sizeof(pteg))) {
-		printk_ratelimited(KERN_ERR
-			"KVM: Can't copy data from 0x%lx!\n", ptegp);
+		printk(KERN_ERR "KVM can't copy data from 0x%lx!\n", ptegp);
 		goto no_page_found;
 	}
 

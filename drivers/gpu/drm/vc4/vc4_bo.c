@@ -6,8 +6,7 @@
  * published by the Free Software Foundation.
  */
 
-/**
- * DOC: VC4 GEM BO management support
+/* DOC: VC4 GEM BO management support.
  *
  * The VC4 GPU architecture (both scanout and rendering) has direct
  * access to system memory with no MMU in between.  To support it, we
@@ -145,7 +144,7 @@ static struct list_head *vc4_get_cache_list_for_size(struct drm_device *dev,
 	return &vc4->bo_cache.size_list[page_index];
 }
 
-static void vc4_bo_cache_purge(struct drm_device *dev)
+void vc4_bo_cache_purge(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
@@ -187,8 +186,6 @@ out:
 
 /**
  * vc4_gem_create_object - Implementation of driver->gem_create_object.
- * @dev: DRM device
- * @size: Size in bytes of the memory the object will reference
  *
  * This lets the CMA helpers allocate object structs for us, and keep
  * our BO stats correct.
@@ -211,22 +208,21 @@ struct drm_gem_object *vc4_create_object(struct drm_device *dev, size_t size)
 }
 
 struct vc4_bo *vc4_bo_create(struct drm_device *dev, size_t unaligned_size,
-			     bool allow_unzeroed)
+			     bool from_cache)
 {
 	size_t size = roundup(unaligned_size, PAGE_SIZE);
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	struct drm_gem_cma_object *cma_obj;
-	struct vc4_bo *bo;
 
 	if (size == 0)
 		return ERR_PTR(-EINVAL);
 
 	/* First, try to get a vc4_bo from the kernel BO cache. */
-	bo = vc4_bo_get_from_cache(dev, size);
-	if (bo) {
-		if (!allow_unzeroed)
-			memset(bo->base.vaddr, 0, bo->base.base.size);
-		return bo;
+	if (from_cache) {
+		struct vc4_bo *bo = vc4_bo_get_from_cache(dev, size);
+
+		if (bo)
+			return bo;
 	}
 
 	cma_obj = drm_gem_cma_create(dev, size);
@@ -295,6 +291,8 @@ static void vc4_bo_cache_free_old(struct drm_device *dev)
 
 /* Called on the last userspace/kernel unreference of the BO.  Returns
  * it to the BO cache if possible, otherwise frees it.
+ *
+ * Note that this is called with the struct_mutex held.
  */
 void vc4_free_object(struct drm_gem_object *gem_bo)
 {
@@ -313,14 +311,6 @@ void vc4_free_object(struct drm_gem_object *gem_bo)
 
 	/* Don't cache if it was publicly named. */
 	if (gem_bo->name) {
-		vc4_bo_destroy(bo);
-		goto out;
-	}
-
-	/* If this object was partially constructed but CMA allocation
-	 * had failed, just free it.
-	 */
-	if (!bo->base.vaddr) {
 		vc4_bo_destroy(bo);
 		goto out;
 	}
@@ -408,8 +398,9 @@ int vc4_mmap(struct file *filp, struct vm_area_struct *vma)
 	vma->vm_flags &= ~VM_PFNMAP;
 	vma->vm_pgoff = 0;
 
-	ret = dma_mmap_wc(bo->base.base.dev->dev, vma, bo->base.vaddr,
-			  bo->base.paddr, vma->vm_end - vma->vm_start);
+	ret = dma_mmap_writecombine(bo->base.base.dev->dev, vma,
+				    bo->base.vaddr, bo->base.paddr,
+				    vma->vm_end - vma->vm_start);
 	if (ret)
 		drm_gem_vm_close(vma);
 
@@ -467,7 +458,7 @@ int vc4_mmap_bo_ioctl(struct drm_device *dev, void *data,
 	struct drm_vc4_mmap_bo *args = data;
 	struct drm_gem_object *gem_obj;
 
-	gem_obj = drm_gem_object_lookup(file_priv, args->handle);
+	gem_obj = drm_gem_object_lookup(dev, file_priv, args->handle);
 	if (!gem_obj) {
 		DRM_ERROR("Failed to look up GEM BO %d\n", args->handle);
 		return -EINVAL;
@@ -508,12 +499,11 @@ vc4_create_shader_bo_ioctl(struct drm_device *dev, void *data,
 	if (IS_ERR(bo))
 		return PTR_ERR(bo);
 
-	if (copy_from_user(bo->base.vaddr,
+	ret = copy_from_user(bo->base.vaddr,
 			     (void __user *)(uintptr_t)args->data,
-			     args->size)) {
-		ret = -EFAULT;
+			     args->size);
+	if (ret != 0)
 		goto fail;
-	}
 	/* Clear the rest of the memory from allocating from the BO
 	 * cache.
 	 */

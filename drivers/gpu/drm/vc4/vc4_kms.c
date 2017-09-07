@@ -26,7 +26,8 @@ static void vc4_output_poll_changed(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
-	drm_fbdev_cma_hotplug_event(vc4->fbdev);
+	if (vc4->fbdev)
+		drm_fbdev_cma_hotplug_event(vc4->fbdev);
 }
 
 struct vc4_commit {
@@ -44,24 +45,15 @@ vc4_atomic_complete_commit(struct vc4_commit *c)
 
 	drm_atomic_helper_commit_modeset_disables(dev, state);
 
-	drm_atomic_helper_commit_planes(dev, state, 0);
+	drm_atomic_helper_commit_planes(dev, state, false);
 
 	drm_atomic_helper_commit_modeset_enables(dev, state);
-
-	/* Make sure that drm_atomic_helper_wait_for_vblanks()
-	 * actually waits for vblank.  If we're doing a full atomic
-	 * modeset (as opposed to a vc4_update_plane() short circuit),
-	 * then we need to wait for scanout to be done with our
-	 * display lists before we free it and potentially reallocate
-	 * and overwrite the dlist memory with a new modeset.
-	 */
-	state->legacy_cursor_update = false;
 
 	drm_atomic_helper_wait_for_vblanks(dev, state);
 
 	drm_atomic_helper_cleanup_planes(dev, state);
 
-	drm_atomic_state_put(state);
+	drm_atomic_state_free(state);
 
 	up(&vc4->async_modeset);
 
@@ -92,7 +84,7 @@ static struct vc4_commit *commit_init(struct drm_atomic_state *state)
  * vc4_atomic_commit - commit validated state object
  * @dev: DRM device
  * @state: the driver state object
- * @nonblock: nonblocking commit
+ * @async: asynchronous commit
  *
  * This function commits a with drm_atomic_helper_check() pre-validated state
  * object. This can still fail when e.g. the framebuffer reservation fails. For
@@ -103,46 +95,19 @@ static struct vc4_commit *commit_init(struct drm_atomic_state *state)
  */
 static int vc4_atomic_commit(struct drm_device *dev,
 			     struct drm_atomic_state *state,
-			     bool nonblock)
+			     bool async)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	int ret;
 	int i;
 	uint64_t wait_seqno = 0;
 	struct vc4_commit *c;
-	struct drm_plane *plane;
-	struct drm_plane_state *new_state;
 
 	c = commit_init(state);
 	if (!c)
 		return -ENOMEM;
 
 	/* Make sure that any outstanding modesets have finished. */
-	if (nonblock) {
-		struct drm_crtc *crtc;
-		struct drm_crtc_state *crtc_state;
-		unsigned long flags;
-		bool busy = false;
-
-		/*
-		 * If there's an undispatched event to send then we're
-		 * obviously still busy.  If there isn't, then we can
-		 * unconditionally wait for the semaphore because it
-		 * shouldn't be contended (for long).
-		 *
-		 * This is to prevent a race where queuing a new flip
-		 * from userspace immediately on receipt of an event
-		 * beats our clean-up and returns EBUSY.
-		 */
-		spin_lock_irqsave(&dev->event_lock, flags);
-		for_each_crtc_in_state(state, crtc, crtc_state, i)
-			busy |= vc4_event_pending(crtc);
-		spin_unlock_irqrestore(&dev->event_lock, flags);
-		if (busy) {
-			kfree(c);
-			return -EBUSY;
-		}
-	}
 	ret = down_interruptible(&vc4->async_modeset);
 	if (ret) {
 		kfree(c);
@@ -156,7 +121,13 @@ static int vc4_atomic_commit(struct drm_device *dev,
 		return ret;
 	}
 
-	for_each_plane_in_state(state, plane, new_state, i) {
+	for (i = 0; i < dev->mode_config.num_total_plane; i++) {
+		struct drm_plane *plane = state->planes[i];
+		struct drm_plane_state *new_state = state->plane_states[i];
+
+		if (!plane)
+			continue;
+
 		if ((plane->state->fb != new_state->fb) && new_state->fb) {
 			struct drm_gem_cma_object *cma_bo =
 				drm_fb_cma_get_gem_obj(new_state->fb, 0);
@@ -172,7 +143,7 @@ static int vc4_atomic_commit(struct drm_device *dev,
 	 * the software side now.
 	 */
 
-	drm_atomic_helper_swap_state(state, true);
+	drm_atomic_helper_swap_state(dev, state);
 
 	/*
 	 * Everything below can be run asynchronously without the need to grab
@@ -190,8 +161,7 @@ static int vc4_atomic_commit(struct drm_device *dev,
 	 * current layout.
 	 */
 
-	drm_atomic_state_get(state);
-	if (nonblock) {
+	if (async) {
 		vc4_queue_seqno_cb(dev, &c->cb, wait_seqno,
 				   vc4_atomic_complete_commit_seqno_cb);
 	} else {
@@ -228,9 +198,12 @@ int vc4_kms_load(struct drm_device *dev)
 	dev->mode_config.preferred_depth = 24;
 	dev->mode_config.async_page_flip = true;
 
+	dev->vblank_disable_allowed = true;
+
 	drm_mode_config_reset(dev);
 
 	vc4->fbdev = drm_fbdev_cma_init(dev, 32,
+					dev->mode_config.num_crtc,
 					dev->mode_config.num_connector);
 	if (IS_ERR(vc4->fbdev))
 		vc4->fbdev = NULL;

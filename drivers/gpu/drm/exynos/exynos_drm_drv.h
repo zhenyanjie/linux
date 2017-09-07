@@ -64,6 +64,7 @@ struct exynos_drm_plane_state {
 	struct exynos_drm_rect src;
 	unsigned int h_ratio;
 	unsigned int v_ratio;
+	unsigned int zpos;
 };
 
 static inline struct exynos_drm_plane_state *
@@ -86,6 +87,7 @@ struct exynos_drm_plane {
 	struct drm_plane base;
 	const struct exynos_drm_plane_config *config;
 	unsigned int index;
+	struct drm_framebuffer *pending_fb;
 };
 
 #define EXYNOS_DRM_PLANE_CAP_DOUBLE	(1 << 0)
@@ -118,6 +120,8 @@ struct exynos_drm_plane_config {
  * @commit: set current hw specific display mode to hw.
  * @enable_vblank: specific driver callback for enabling vblank interrupt.
  * @disable_vblank: specific driver callback for disabling vblank interrupt.
+ * @wait_for_vblank: wait for vblank interrupt to make sure that
+ *	hardware overlay is updated.
  * @atomic_check: validate state
  * @atomic_begin: prepare device to receive an update
  * @atomic_flush: mark the end of device update
@@ -125,6 +129,10 @@ struct exynos_drm_plane_config {
  * @disable_plane: disable hardware specific overlay.
  * @te_handler: trigger to transfer video image at the tearing effect
  *	synchronization signal if there is a page flip request.
+ * @clock_enable: optional function enabling/disabling display domain clock,
+ *	called from exynos-dp driver before powering up (with
+ *	'enable' argument as true) and after powering down (with
+ *	'enable' as false).
  */
 struct exynos_drm_crtc;
 struct exynos_drm_crtc_ops {
@@ -133,6 +141,7 @@ struct exynos_drm_crtc_ops {
 	void (*commit)(struct exynos_drm_crtc *crtc);
 	int (*enable_vblank)(struct exynos_drm_crtc *crtc);
 	void (*disable_vblank)(struct exynos_drm_crtc *crtc);
+	void (*wait_for_vblank)(struct exynos_drm_crtc *crtc);
 	int (*atomic_check)(struct exynos_drm_crtc *crtc,
 			    struct drm_crtc_state *state);
 	void (*atomic_begin)(struct exynos_drm_crtc *crtc);
@@ -142,10 +151,7 @@ struct exynos_drm_crtc_ops {
 			      struct exynos_drm_plane *plane);
 	void (*atomic_flush)(struct exynos_drm_crtc *crtc);
 	void (*te_handler)(struct exynos_drm_crtc *crtc);
-};
-
-struct exynos_drm_clk {
-	void (*enable)(struct exynos_drm_clk *clk, bool enable);
+	void (*clock_enable)(struct exynos_drm_crtc *crtc, bool enable);
 };
 
 /*
@@ -171,17 +177,12 @@ struct exynos_drm_crtc {
 	struct drm_crtc			base;
 	enum exynos_drm_output_type	type;
 	unsigned int			pipe;
+	struct drm_pending_vblank_event	*event;
+	wait_queue_head_t		wait_update;
+	atomic_t			pending_update;
 	const struct exynos_drm_crtc_ops	*ops;
 	void				*ctx;
-	struct exynos_drm_clk		*pipe_clk;
 };
-
-static inline void exynos_drm_pipe_clk_enable(struct exynos_drm_crtc *crtc,
-					      bool enable)
-{
-	if (crtc->pipe_clk)
-		crtc->pipe_clk->enable(crtc->pipe_clk, enable);
-}
 
 struct exynos_drm_g2d_private {
 	struct device		*dev;
@@ -211,8 +212,15 @@ struct drm_exynos_file_private {
 struct exynos_drm_private {
 	struct drm_fb_helper *fb_helper;
 
-	struct device *dma_dev;
-	void *mapping;
+	/*
+	 * created crtc object would be contained at this array and
+	 * this array is used to be aware of which crtc did it request vblank.
+	 */
+	struct drm_crtc *crtc[MAX_CRTC];
+	struct drm_property *plane_zpos_property;
+
+	unsigned long da_start;
+	unsigned long da_space_size;
 
 	unsigned int pipe;
 
@@ -221,13 +229,6 @@ struct exynos_drm_private {
 	spinlock_t		lock;
 	wait_queue_head_t	wait;
 };
-
-static inline struct device *to_dma_dev(struct drm_device *dev)
-{
-	struct exynos_drm_private *priv = dev->dev_private;
-
-	return priv->dma_dev;
-}
 
 /*
  * Exynos drm sub driver structure.
@@ -286,8 +287,7 @@ static inline int exynos_dpi_bind(struct drm_device *dev,
 #endif
 
 int exynos_atomic_commit(struct drm_device *dev, struct drm_atomic_state *state,
-			 bool nonblock);
-int exynos_atomic_check(struct drm_device *dev, struct drm_atomic_state *state);
+			 bool async);
 
 
 extern struct platform_driver fimd_driver;
@@ -297,6 +297,7 @@ extern struct platform_driver dp_driver;
 extern struct platform_driver dsi_driver;
 extern struct platform_driver mixer_driver;
 extern struct platform_driver hdmi_driver;
+extern struct platform_driver exynos_drm_common_hdmi_driver;
 extern struct platform_driver vidi_driver;
 extern struct platform_driver g2d_driver;
 extern struct platform_driver fimc_driver;

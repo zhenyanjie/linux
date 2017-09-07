@@ -42,11 +42,6 @@ static int qla82xx_crb_table_initialized;
 	(crb_addr_xform[QLA82XX_HW_PX_MAP_CRB_##name] = \
 	QLA82XX_HW_CRB_HUB_AGT_ADR_##name << 20)
 
-const int MD_MIU_TEST_AGT_RDDATA[] = {
-	0x410000A8, 0x410000AC,
-	0x410000B8, 0x410000BC
-};
-
 static void qla82xx_crb_addr_transform_setup(void)
 {
 	qla82xx_crb_addr_transform(XDMA);
@@ -1234,7 +1229,7 @@ qla82xx_pinit_from_rom(scsi_qla_host_t *vha)
 	if (buf == NULL) {
 		ql_log(ql_log_fatal, vha, 0x010c,
 		    "Unable to allocate memory.\n");
-		return -ENOMEM;
+		return -1;
 	}
 
 	for (i = 0; i < n; i++) {

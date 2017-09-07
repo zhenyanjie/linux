@@ -29,13 +29,14 @@
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
+#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/nfc.h>
 #include <linux/gpio/consumer.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 #include <linux/platform_data/nxp-nci.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned/access_ok.h>
 
 #include <net/nfc/nfc.h>
 
@@ -85,7 +86,7 @@ static int nxp_nci_i2c_write(void *phy_id, struct sk_buff *skb)
 	r = i2c_master_send(client, skb->data, skb->len);
 	if (r < 0) {
 		/* Retry, chip was in standby */
-		msleep(110);
+		usleep_range(110000, 120000);
 		r = i2c_master_send(client, skb->data, skb->len);
 	}
 
@@ -126,7 +127,7 @@ static int nxp_nci_i2c_fw_read(struct nxp_nci_i2c_phy *phy,
 		goto fw_read_exit;
 	}
 
-	frame_len = (be16_to_cpu(header) & NXP_NCI_FW_FRAME_LEN_MASK) +
+	frame_len = (get_unaligned_be16(&header) & NXP_NCI_FW_FRAME_LEN_MASK) +
 		    NXP_NCI_FW_CRC_LEN;
 
 	*skb = alloc_skb(NXP_NCI_FW_HDR_LEN + frame_len, GFP_KERNEL);
@@ -417,6 +418,7 @@ MODULE_DEVICE_TABLE(acpi, acpi_id);
 static struct i2c_driver nxp_nci_i2c_driver = {
 	.driver = {
 		   .name = NXP_NCI_I2C_DRIVER_NAME,
+		   .owner  = THIS_MODULE,
 		   .acpi_match_table = ACPI_PTR(acpi_id),
 		   .of_match_table = of_match_ptr(of_nxp_nci_i2c_match),
 		  },

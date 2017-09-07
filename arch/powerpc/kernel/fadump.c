@@ -30,16 +30,17 @@
 #include <linux/string.h>
 #include <linux/memblock.h>
 #include <linux/delay.h>
+#include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/crash_dump.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
 
-#include <asm/debugfs.h>
 #include <asm/page.h>
 #include <asm/prom.h>
 #include <asm/rtas.h>
 #include <asm/fadump.h>
+#include <asm/debug.h>
 #include <asm/setup.h>
 
 static struct fw_dump fw_dump;
@@ -318,42 +319,18 @@ int __init fadump_reserve_mem(void)
 		pr_debug("fadumphdr_addr = %p\n",
 				(void *) fw_dump.fadumphdr_addr);
 	} else {
+		/* Reserve the memory at the top of memory. */
 		size = get_fadump_area_size();
-
-		/*
-		 * Reserve memory at an offset closer to bottom of the RAM to
-		 * minimize the impact of memory hot-remove operation. We can't
-		 * use memblock_find_in_range() here since it doesn't allocate
-		 * from bottom to top.
-		 */
-		for (base = fw_dump.boot_memory_size;
-		     base <= (memory_boundary - size);
-		     base += size) {
-			if (memblock_is_region_memory(base, size) &&
-			    !memblock_is_region_reserved(base, size))
-				break;
-		}
-		if ((base > (memory_boundary - size)) ||
-		    memblock_reserve(base, size)) {
-			pr_err("Failed to reserve memory\n");
-			return 0;
-		}
-
-		pr_info("Reserved %ldMB of memory at %ldMB for firmware-"
-			"assisted dump (System RAM: %ldMB)\n",
-			(unsigned long)(size >> 20),
-			(unsigned long)(base >> 20),
-			(unsigned long)(memblock_phys_mem_size() >> 20));
+		base = memory_boundary - size;
+		memblock_reserve(base, size);
+		printk(KERN_INFO "Reserved %ldMB of memory at %ldMB "
+				"for firmware-assisted dump\n",
+				(unsigned long)(size >> 20),
+				(unsigned long)(base >> 20));
 	}
-
 	fw_dump.reserve_dump_area_start = base;
 	fw_dump.reserve_dump_area_size = size;
 	return 1;
-}
-
-unsigned long __init arch_reserved_kernel_pages(void)
-{
-	return memblock_reserved_size() / PAGE_SIZE;
 }
 
 /* Look for fadump= cmdline option. */
@@ -424,35 +401,12 @@ static void register_fw_dump(struct fadump_mem_struct *fdm)
 void crash_fadump(struct pt_regs *regs, const char *str)
 {
 	struct fadump_crash_info_header *fdh = NULL;
-	int old_cpu, this_cpu;
 
 	if (!fw_dump.dump_registered || !fw_dump.fadumphdr_addr)
 		return;
 
-	/*
-	 * old_cpu == -1 means this is the first CPU which has come here,
-	 * go ahead and trigger fadump.
-	 *
-	 * old_cpu != -1 means some other CPU has already on it's way
-	 * to trigger fadump, just keep looping here.
-	 */
-	this_cpu = smp_processor_id();
-	old_cpu = cmpxchg(&crashing_cpu, -1, this_cpu);
-
-	if (old_cpu != -1) {
-		/*
-		 * We can't loop here indefinitely. Wait as long as fadump
-		 * is in force. If we race with fadump un-registration this
-		 * loop will break and then we go down to normal panic path
-		 * and reboot. If fadump is in force the first crashing
-		 * cpu will definitely trigger fadump.
-		 */
-		while (fw_dump.dump_registered)
-			cpu_relax();
-		return;
-	}
-
 	fdh = __va(fw_dump.fadumphdr_addr);
+	crashing_cpu = smp_processor_id();
 	fdh->crashing_cpu = crashing_cpu;
 	crash_save_vmcoreinfo();
 
@@ -824,11 +778,7 @@ static int fadump_init_elfcore_header(char *bufp)
 	elf->e_entry = 0;
 	elf->e_phoff = sizeof(struct elfhdr);
 	elf->e_shoff = 0;
-#if defined(_CALL_ELF)
-	elf->e_flags = _CALL_ELF;
-#else
-	elf->e_flags = 0;
-#endif
+	elf->e_flags = ELF_CORE_EFLAGS;
 	elf->e_ehsize = sizeof(struct elfhdr);
 	elf->e_phentsize = sizeof(struct elf_phdr);
 	elf->e_phnum = 0;
@@ -1059,7 +1009,8 @@ static int fadump_invalidate_dump(struct fadump_mem_struct *fdm)
 	} while (wait_time);
 
 	if (rc) {
-		pr_err("Failed to invalidate firmware-assisted dump registration. Unexpected error (%d).\n", rc);
+		printk(KERN_ERR "Failed to invalidate firmware-assisted dump "
+			"rgistration. unexpected error(%d).\n", rc);
 		return rc;
 	}
 	fw_dump.dump_active = 0;
@@ -1154,9 +1105,7 @@ static ssize_t fadump_release_memory_store(struct kobject *kobj,
 		 * Take away the '/proc/vmcore'. We are releasing the dump
 		 * memory, hence it will not be valid anymore.
 		 */
-#ifdef CONFIG_PROC_VMCORE
 		vmcore_cleanup();
-#endif
 		fadump_invalidate_release_mem();
 
 	} else

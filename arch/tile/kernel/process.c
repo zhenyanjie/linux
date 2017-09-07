@@ -13,9 +13,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task.h>
-#include <linux/sched/task_stack.h>
 #include <linux/preempt.h>
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -25,7 +22,7 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/compat.h>
-#include <linux/nmi.h>
+#include <linux/hardirq.h>
 #include <linux/syscalls.h>
 #include <linux/kernel.h>
 #include <linux/tracehook.h>
@@ -38,7 +35,7 @@
 #include <asm/syscalls.h>
 #include <asm/traps.h>
 #include <asm/setup.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #ifdef CONFIG_HARDWALL
 #include <asm/hardwall.h>
 #endif
@@ -76,9 +73,8 @@ void arch_cpu_idle(void)
 /*
  * Release a thread_info structure
  */
-void arch_release_thread_stack(unsigned long *stack)
+void arch_release_thread_info(struct thread_info *info)
 {
-	struct thread_info *info = (void *)stack;
 	struct single_step_state *step_state = info->step_state;
 
 	if (step_state) {
@@ -545,7 +541,7 @@ void flush_thread(void)
 /*
  * Free current thread data structures etc..
  */
-void exit_thread(struct task_struct *tsk)
+void exit_thread(void)
 {
 #ifdef CONFIG_HARDWALL
 	/*
@@ -554,7 +550,7 @@ void exit_thread(struct task_struct *tsk)
 	 * the last reference to a hardwall fd, it would already have
 	 * been released and deactivated at this point.)
 	 */
-	hardwall_deactivate_all(tsk);
+	hardwall_deactivate_all(current);
 #endif
 }
 
@@ -597,18 +593,66 @@ void show_regs(struct pt_regs *regs)
 	tile_show_stack(&kbt);
 }
 
+/* To ensure stack dump on tiles occurs one by one. */
+static DEFINE_SPINLOCK(backtrace_lock);
+/* To ensure no backtrace occurs before all of the stack dump are done. */
+static atomic_t backtrace_cpus;
+/* The cpu mask to avoid reentrance. */
+static struct cpumask backtrace_mask;
+
+void do_nmi_dump_stack(struct pt_regs *regs)
+{
+	int is_idle = is_idle_task(current) && !in_interrupt();
+	int cpu;
+
+	nmi_enter();
+	cpu = smp_processor_id();
+	if (WARN_ON_ONCE(!cpumask_test_and_clear_cpu(cpu, &backtrace_mask)))
+		goto done;
+
+	spin_lock(&backtrace_lock);
+	if (is_idle)
+		pr_info("CPU: %d idle\n", cpu);
+	else
+		show_regs(regs);
+	spin_unlock(&backtrace_lock);
+	atomic_dec(&backtrace_cpus);
+done:
+	nmi_exit();
+}
+
 #ifdef __tilegx__
-void nmi_raise_cpu_backtrace(struct cpumask *in_mask)
+void arch_trigger_all_cpu_backtrace(bool self)
 {
 	struct cpumask mask;
 	HV_Coord tile;
 	unsigned int timeout;
 	int cpu;
+	int ongoing;
 	HV_NMI_Info info[NR_CPUS];
+
+	ongoing = atomic_cmpxchg(&backtrace_cpus, 0, num_online_cpus() - 1);
+	if (ongoing != 0) {
+		pr_err("Trying to do all-cpu backtrace.\n");
+		pr_err("But another all-cpu backtrace is ongoing (%d cpus left)\n",
+		       ongoing);
+		if (self) {
+			pr_err("Reporting the stack on this cpu only.\n");
+			dump_stack();
+		}
+		return;
+	}
+
+	cpumask_copy(&mask, cpu_online_mask);
+	cpumask_clear_cpu(smp_processor_id(), &mask);
+	cpumask_copy(&backtrace_mask, &mask);
+
+	/* Backtrace for myself first. */
+	if (self)
+		dump_stack();
 
 	/* Tentatively dump stack on remote tiles via NMI. */
 	timeout = 100;
-	cpumask_copy(&mask, in_mask);
 	while (!cpumask_empty(&mask) && timeout) {
 		for_each_cpu(cpu, &mask) {
 			tile.x = cpu_x(cpu);
@@ -619,17 +663,12 @@ void nmi_raise_cpu_backtrace(struct cpumask *in_mask)
 		}
 
 		mdelay(10);
-		touch_softlockup_watchdog();
 		timeout--;
 	}
 
-	/* Warn about cpus stuck in ICS. */
+	/* Warn about cpus stuck in ICS and decrement their counts here. */
 	if (!cpumask_empty(&mask)) {
 		for_each_cpu(cpu, &mask) {
-
-			/* Clear the bit as if nmi_cpu_backtrace() ran. */
-			cpumask_clear_cpu(cpu, in_mask);
-
 			switch (info[cpu].result) {
 			case HV_NMI_RESULT_FAIL_ICS:
 				pr_warn("Skipping stack dump of cpu %d in ICS at pc %#llx\n",
@@ -640,20 +679,16 @@ void nmi_raise_cpu_backtrace(struct cpumask *in_mask)
 					cpu);
 				break;
 			case HV_ENOSYS:
-				WARN_ONCE(1, "Hypervisor too old to allow remote stack dumps.\n");
-				break;
+				pr_warn("Hypervisor too old to allow remote stack dumps.\n");
+				goto skip_for_each;
 			default:  /* should not happen */
 				pr_warn("Skipping stack dump of cpu %d [%d,%#llx]\n",
 					cpu, info[cpu].result, info[cpu].pc);
 				break;
 			}
 		}
+skip_for_each:
+		atomic_sub(cpumask_weight(&mask), &backtrace_cpus);
 	}
-}
-
-void arch_trigger_cpumask_backtrace(const cpumask_t *mask, bool exclude_self)
-{
-	nmi_trigger_cpumask_backtrace(mask, exclude_self,
-				      nmi_raise_cpu_backtrace);
 }
 #endif /* __tilegx_ */

@@ -848,7 +848,9 @@ static u32 atmci_prepare_command(struct mmc_host *mmc,
 		if (cmd->opcode == SD_IO_RW_EXTENDED) {
 			cmdr |= ATMCI_CMDR_SDIO_BLOCK;
 		} else {
-			if (data->blocks > 1)
+			if (data->flags & MMC_DATA_STREAM)
+				cmdr |= ATMCI_CMDR_STREAM;
+			else if (data->blocks > 1)
 				cmdr |= ATMCI_CMDR_MULTI_BLOCK;
 			else
 				cmdr |= ATMCI_CMDR_BLOCK;
@@ -954,7 +956,8 @@ static void atmci_pdc_cleanup(struct atmel_mci *host)
 	if (data)
 		dma_unmap_sg(&host->pdev->dev,
 				data->sg, data->sg_len,
-				mmc_get_dma_dir(data));
+				((data->flags & MMC_DATA_WRITE)
+				 ? DMA_TO_DEVICE : DMA_FROM_DEVICE));
 }
 
 /*
@@ -992,7 +995,8 @@ static void atmci_dma_cleanup(struct atmel_mci *host)
 	if (data)
 		dma_unmap_sg(host->dma.chan->device->dev,
 				data->sg, data->sg_len,
-				mmc_get_dma_dir(data));
+				((data->flags & MMC_DATA_WRITE)
+				 ? DMA_TO_DEVICE : DMA_FROM_DEVICE));
 }
 
 /*
@@ -1093,6 +1097,7 @@ atmci_prepare_data_pdc(struct atmel_mci *host, struct mmc_data *data)
 {
 	u32 iflags, tmp;
 	unsigned int sg_len;
+	enum dma_data_direction dir;
 	int i;
 
 	data->error = -EINPROGRESS;
@@ -1104,10 +1109,13 @@ atmci_prepare_data_pdc(struct atmel_mci *host, struct mmc_data *data)
 	/* Enable pdc mode */
 	atmci_writel(host, ATMCI_MR, host->mode_reg | ATMCI_MR_PDCMODE);
 
-	if (data->flags & MMC_DATA_READ)
+	if (data->flags & MMC_DATA_READ) {
+		dir = DMA_FROM_DEVICE;
 		iflags |= ATMCI_ENDRX | ATMCI_RXBUFF;
-	else
+	} else {
+		dir = DMA_TO_DEVICE;
 		iflags |= ATMCI_ENDTX | ATMCI_TXBUFE | ATMCI_BLKE;
+	}
 
 	/* Set BLKLEN */
 	tmp = atmci_readl(host, ATMCI_MR);
@@ -1117,8 +1125,7 @@ atmci_prepare_data_pdc(struct atmel_mci *host, struct mmc_data *data)
 
 	/* Configure PDC */
 	host->data_size = data->blocks * data->blksz;
-	sg_len = dma_map_sg(&host->pdev->dev, data->sg, data->sg_len,
-			    mmc_get_dma_dir(data));
+	sg_len = dma_map_sg(&host->pdev->dev, data->sg, data->sg_len, dir);
 
 	if ((!host->caps.has_rwproof)
 	    && (host->data->flags & MMC_DATA_WRITE)) {
@@ -1130,8 +1137,9 @@ atmci_prepare_data_pdc(struct atmel_mci *host, struct mmc_data *data)
 	}
 
 	if (host->data_size)
-		atmci_pdc_set_both_buf(host, data->flags & MMC_DATA_READ ?
-				       XFER_RECEIVE : XFER_TRANSMIT);
+		atmci_pdc_set_both_buf(host,
+			((dir == DMA_FROM_DEVICE) ? XFER_RECEIVE : XFER_TRANSMIT));
+
 	return iflags;
 }
 
@@ -1142,6 +1150,7 @@ atmci_prepare_data_dma(struct atmel_mci *host, struct mmc_data *data)
 	struct dma_async_tx_descriptor	*desc;
 	struct scatterlist		*sg;
 	unsigned int			i;
+	enum dma_data_direction		direction;
 	enum dma_transfer_direction	slave_dirn;
 	unsigned int			sglen;
 	u32				maxburst;
@@ -1179,10 +1188,12 @@ atmci_prepare_data_dma(struct atmel_mci *host, struct mmc_data *data)
 		return -ENODEV;
 
 	if (data->flags & MMC_DATA_READ) {
+		direction = DMA_FROM_DEVICE;
 		host->dma_conf.direction = slave_dirn = DMA_DEV_TO_MEM;
 		maxburst = atmci_convert_chksize(host,
 						 host->dma_conf.src_maxburst);
 	} else {
+		direction = DMA_TO_DEVICE;
 		host->dma_conf.direction = slave_dirn = DMA_MEM_TO_DEV;
 		maxburst = atmci_convert_chksize(host,
 						 host->dma_conf.dst_maxburst);
@@ -1193,7 +1204,7 @@ atmci_prepare_data_dma(struct atmel_mci *host, struct mmc_data *data)
 			ATMCI_DMAEN);
 
 	sglen = dma_map_sg(chan->device->dev, data->sg,
-			data->sg_len, mmc_get_dma_dir(data));
+			data->sg_len, direction);
 
 	dmaengine_slave_config(chan, &host->dma_conf);
 	desc = dmaengine_prep_slave_sg(chan,
@@ -1208,8 +1219,7 @@ atmci_prepare_data_dma(struct atmel_mci *host, struct mmc_data *data)
 
 	return iflags;
 unmap_exit:
-	dma_unmap_sg(chan->device->dev, data->sg, data->sg_len,
-		     mmc_get_dma_dir(data));
+	dma_unmap_sg(chan->device->dev, data->sg, data->sg_len, direction);
 	return -ENOMEM;
 }
 
@@ -1361,7 +1371,10 @@ static void atmci_start_request(struct atmel_mci *host,
 		host->stop_cmdr |= ATMCI_CMDR_STOP_XFER;
 		if (!(data->flags & MMC_DATA_WRITE))
 			host->stop_cmdr |= ATMCI_CMDR_TRDIR_READ;
-		host->stop_cmdr |= ATMCI_CMDR_MULTI_BLOCK;
+		if (data->flags & MMC_DATA_STREAM)
+			host->stop_cmdr |= ATMCI_CMDR_STREAM;
+		else
+			host->stop_cmdr |= ATMCI_CMDR_MULTI_BLOCK;
 	}
 
 	/*
@@ -1402,6 +1415,8 @@ static void atmci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	WARN_ON(slot->mrq);
 	dev_dbg(&host->pdev->dev, "MRQ: cmd %u\n", mrq->cmd->opcode);
 
+	pm_runtime_get_sync(&host->pdev->dev);
+
 	/*
 	 * We may "know" the card is gone even though there's still an
 	 * electrical connection. If so, we really need to communicate
@@ -1431,6 +1446,8 @@ static void atmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	struct atmel_mci_slot	*slot = mmc_priv(mmc);
 	struct atmel_mci	*host = slot->host;
 	unsigned int		i;
+
+	pm_runtime_get_sync(&host->pdev->dev);
 
 	slot->sdc_reg &= ~ATMCI_SDCBUS_MASK;
 	switch (ios->bus_width) {
@@ -1564,6 +1581,8 @@ static void atmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 		break;
 	}
 
+	pm_runtime_mark_last_busy(&host->pdev->dev);
+	pm_runtime_put_autosuspend(&host->pdev->dev);
 }
 
 static int atmci_get_ro(struct mmc_host *mmc)
@@ -1655,6 +1674,9 @@ static void atmci_request_end(struct atmel_mci *host, struct mmc_request *mrq)
 	spin_unlock(&host->lock);
 	mmc_request_done(prev_mmc, mrq);
 	spin_lock(&host->lock);
+
+	pm_runtime_mark_last_busy(&host->pdev->dev);
+	pm_runtime_put_autosuspend(&host->pdev->dev);
 }
 
 static void atmci_command_complete(struct atmel_mci *host,
@@ -2421,7 +2443,7 @@ static int atmci_configure_dma(struct atmel_mci *host)
 		struct mci_platform_data *pdata = host->pdev->dev.platform_data;
 		dma_cap_mask_t mask;
 
-		if (!pdata || !pdata->dma_filter)
+		if (!pdata->dma_filter)
 			return -ENODEV;
 
 		dma_cap_zero(mask);

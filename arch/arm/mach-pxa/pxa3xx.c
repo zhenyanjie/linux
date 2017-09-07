@@ -19,7 +19,6 @@
 #include <linux/pm.h>
 #include <linux/platform_device.h>
 #include <linux/irq.h>
-#include <linux/irqchip.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/syscore_ops.h>
@@ -69,6 +68,7 @@ static unsigned long wakeup_src;
  */
 static void pxa3xx_cpu_standby(unsigned int pwrmode)
 {
+	extern const char pm_enter_standby_start[], pm_enter_standby_end[];
 	void (*fn)(unsigned int) = (void __force *)(sram + 0x8000);
 
 	memcpy_toio(sram + 0x8000, pm_enter_standby_start,
@@ -103,9 +103,10 @@ static void pxa3xx_cpu_pm_suspend(void)
 #ifndef CONFIG_IWMMXT
 	u64 acc0;
 
-	asm volatile(".arch_extension xscale\n\t"
-		     "mra %Q0, %R0, acc0" : "=r" (acc0));
+	asm volatile("mra %Q0, %R0, acc0" : "=r" (acc0));
 #endif
+
+	extern int pxa3xx_finish_suspend(unsigned long);
 
 	/* resuming from D2 requires the HSIO2/BOOT/TPM clocks enabled */
 	CKENA |= (1 << CKEN_BOOT) | (1 << CKEN_TPM);
@@ -123,7 +124,7 @@ static void pxa3xx_cpu_pm_suspend(void)
 	PSPR = 0x5c014000;
 
 	/* overwrite with the resume address */
-	*p = __pa_symbol(cpu_resume);
+	*p = virt_to_phys(cpu_resume);
 
 	cpu_suspend(0, pxa3xx_finish_suspend);
 
@@ -132,8 +133,7 @@ static void pxa3xx_cpu_pm_suspend(void)
 	AD3ER = 0;
 
 #ifndef CONFIG_IWMMXT
-	asm volatile(".arch_extension xscale\n\t"
-		     "mar acc0, %Q0, %R0" : "=r" (acc0));
+	asm volatile("mar acc0, %Q0, %R0" : "=r" (acc0));
 #endif
 }
 
@@ -357,16 +357,11 @@ void __init pxa3xx_init_irq(void)
 }
 
 #ifdef CONFIG_OF
-static int __init __init
-pxa3xx_dt_init_irq(struct device_node *node, struct device_node *parent)
+void __init pxa3xx_dt_init_irq(void)
 {
 	__pxa3xx_init_irq();
 	pxa_dt_irq_init(pxa3xx_set_wake);
-	set_handle_irq(ichp_handle_irq);
-
-	return 0;
 }
-IRQCHIP_DECLARE(pxa3xx_intc, "marvell,pxa-intc", pxa3xx_dt_init_irq);
 #endif	/* CONFIG_OF */
 
 static struct map_desc pxa3xx_io_desc[] __initdata = {
@@ -444,6 +439,9 @@ static int __init pxa3xx_init(void)
 		 */
 		NDCR = (NDCR & ~NDCR_ND_ARB_EN) | NDCR_ND_ARB_CNTL;
 
+		if ((ret = pxa_init_dma(IRQ_DMA, 32)))
+			return ret;
+
 		pxa3xx_init_pm();
 
 		register_syscore_ops(&pxa_irq_syscore_ops);
@@ -452,7 +450,7 @@ static int __init pxa3xx_init(void)
 		if (of_have_populated_dt())
 			return 0;
 
-		pxa2xx_set_dmac_info(32, 100);
+		pxa2xx_set_dmac_info(32);
 		ret = platform_add_devices(devices, ARRAY_SIZE(devices));
 		if (ret)
 			return ret;

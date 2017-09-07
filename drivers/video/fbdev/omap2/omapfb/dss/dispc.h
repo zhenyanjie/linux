@@ -915,5 +915,4 @@ static inline u16 DISPC_MFLAG_THRESHOLD_OFFSET(enum omap_plane plane)
 		return 0;
 	}
 }
-
 #endif

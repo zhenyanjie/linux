@@ -272,16 +272,12 @@ static int dln2_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
 	return dln2_gpio_set_direction(chip, offset, DLN2_GPIO_DIRECTION_OUT);
 }
 
-static int dln2_gpio_set_config(struct gpio_chip *chip, unsigned offset,
-				unsigned long config)
+static int dln2_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
+				  unsigned debounce)
 {
 	struct dln2_gpio *dln2 = gpiochip_get_data(chip);
-	__le32 duration;
+	__le32 duration = cpu_to_le32(debounce);
 
-	if (pinconf_to_config_param(config) != PIN_CONFIG_INPUT_DEBOUNCE)
-		return -ENOTSUPP;
-
-	duration = cpu_to_le32(pinconf_to_config_argument(config));
 	return dln2_transfer_tx(dln2->pdev, DLN2_GPIO_SET_DEBOUNCE,
 				&duration, sizeof(duration));
 }
@@ -471,6 +467,7 @@ static int dln2_gpio_probe(struct platform_device *pdev)
 	dln2->gpio.base = -1;
 	dln2->gpio.ngpio = pins;
 	dln2->gpio.can_sleep = true;
+	dln2->gpio.irq_not_threaded = true;
 	dln2->gpio.set = dln2_gpio_set;
 	dln2->gpio.get = dln2_gpio_get;
 	dln2->gpio.request = dln2_gpio_request;
@@ -478,36 +475,44 @@ static int dln2_gpio_probe(struct platform_device *pdev)
 	dln2->gpio.get_direction = dln2_gpio_get_direction;
 	dln2->gpio.direction_input = dln2_gpio_direction_input;
 	dln2->gpio.direction_output = dln2_gpio_direction_output;
-	dln2->gpio.set_config = dln2_gpio_set_config;
+	dln2->gpio.set_debounce = dln2_gpio_set_debounce;
 
 	platform_set_drvdata(pdev, dln2);
 
-	ret = devm_gpiochip_add_data(dev, &dln2->gpio, dln2);
+	ret = gpiochip_add_data(&dln2->gpio, dln2);
 	if (ret < 0) {
 		dev_err(dev, "failed to add gpio chip: %d\n", ret);
-		return ret;
+		goto out;
 	}
 
 	ret = gpiochip_irqchip_add(&dln2->gpio, &dln2_gpio_irqchip, 0,
 				   handle_simple_irq, IRQ_TYPE_NONE);
 	if (ret < 0) {
 		dev_err(dev, "failed to add irq chip: %d\n", ret);
-		return ret;
+		goto out_gpiochip_remove;
 	}
 
 	ret = dln2_register_event_cb(pdev, DLN2_GPIO_CONDITION_MET_EV,
 				     dln2_gpio_event);
 	if (ret) {
 		dev_err(dev, "failed to register event cb: %d\n", ret);
-		return ret;
+		goto out_gpiochip_remove;
 	}
 
 	return 0;
+
+out_gpiochip_remove:
+	gpiochip_remove(&dln2->gpio);
+out:
+	return ret;
 }
 
 static int dln2_gpio_remove(struct platform_device *pdev)
 {
+	struct dln2_gpio *dln2 = platform_get_drvdata(pdev);
+
 	dln2_unregister_event_cb(pdev, DLN2_GPIO_CONDITION_MET_EV);
+	gpiochip_remove(&dln2->gpio);
 
 	return 0;
 }

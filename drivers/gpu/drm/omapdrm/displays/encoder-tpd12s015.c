@@ -13,20 +13,22 @@
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/gpio.h>
 #include <linux/platform_device.h>
-#include <linux/gpio/consumer.h>
+#include <linux/of_gpio.h>
 
-#include "../dss/omapdss.h"
+#include <video/omapdss.h>
+#include <video/omap-panel-data.h>
 
 struct panel_drv_data {
 	struct omap_dss_device dssdev;
 	struct omap_dss_device *in;
 
-	struct gpio_desc *ct_cp_hpd_gpio;
-	struct gpio_desc *ls_oe_gpio;
-	struct gpio_desc *hpd_gpio;
+	int ct_cp_hpd_gpio;
+	int ls_oe_gpio;
+	int hpd_gpio;
 
-	struct videomode vm;
+	struct omap_video_timings timings;
 };
 
 #define to_panel_data(x) container_of(x, struct panel_drv_data, dssdev)
@@ -45,7 +47,7 @@ static int tpd_connect(struct omap_dss_device *dssdev,
 	dst->src = dssdev;
 	dssdev->dst = dst;
 
-	gpiod_set_value_cansleep(ddata->ct_cp_hpd_gpio, 1);
+	gpio_set_value_cansleep(ddata->ct_cp_hpd_gpio, 1);
 	/* DC-DC converter needs at max 300us to get to 90% of 5V */
 	udelay(300);
 
@@ -63,7 +65,7 @@ static void tpd_disconnect(struct omap_dss_device *dssdev,
 	if (dst != dssdev->dst)
 		return;
 
-	gpiod_set_value_cansleep(ddata->ct_cp_hpd_gpio, 0);
+	gpio_set_value_cansleep(ddata->ct_cp_hpd_gpio, 0);
 
 	dst->src = NULL;
 	dssdev->dst = NULL;
@@ -80,7 +82,7 @@ static int tpd_enable(struct omap_dss_device *dssdev)
 	if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)
 		return 0;
 
-	in->ops.hdmi->set_timings(in, &ddata->vm);
+	in->ops.hdmi->set_timings(in, &ddata->timings);
 
 	r = in->ops.hdmi->enable(in);
 	if (r)
@@ -105,33 +107,33 @@ static void tpd_disable(struct omap_dss_device *dssdev)
 }
 
 static void tpd_set_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
 
-	ddata->vm = *vm;
-	dssdev->panel.vm = *vm;
+	ddata->timings = *timings;
+	dssdev->panel.timings = *timings;
 
-	in->ops.hdmi->set_timings(in, vm);
+	in->ops.hdmi->set_timings(in, timings);
 }
 
 static void tpd_get_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 
-	*vm = ddata->vm;
+	*timings = ddata->timings;
 }
 
 static int tpd_check_timings(struct omap_dss_device *dssdev,
-			     struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
 	int r;
 
-	r = in->ops.hdmi->check_timings(in, vm);
+	r = in->ops.hdmi->check_timings(in, timings);
 
 	return r;
 }
@@ -143,14 +145,16 @@ static int tpd_read_edid(struct omap_dss_device *dssdev,
 	struct omap_dss_device *in = ddata->in;
 	int r;
 
-	if (!gpiod_get_value_cansleep(ddata->hpd_gpio))
+	if (!gpio_get_value_cansleep(ddata->hpd_gpio))
 		return -ENODEV;
 
-	gpiod_set_value_cansleep(ddata->ls_oe_gpio, 1);
+	if (gpio_is_valid(ddata->ls_oe_gpio))
+		gpio_set_value_cansleep(ddata->ls_oe_gpio, 1);
 
 	r = in->ops.hdmi->read_edid(in, edid, len);
 
-	gpiod_set_value_cansleep(ddata->ls_oe_gpio, 0);
+	if (gpio_is_valid(ddata->ls_oe_gpio))
+		gpio_set_value_cansleep(ddata->ls_oe_gpio, 0);
 
 	return r;
 }
@@ -159,7 +163,7 @@ static bool tpd_detect(struct omap_dss_device *dssdev)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 
-	return gpiod_get_value_cansleep(ddata->hpd_gpio);
+	return gpio_get_value_cansleep(ddata->hpd_gpio);
 }
 
 static int tpd_set_infoframe(struct omap_dss_device *dssdev,
@@ -197,11 +201,63 @@ static const struct omapdss_hdmi_ops tpd_hdmi_ops = {
 	.set_hdmi_mode		= tpd_set_hdmi_mode,
 };
 
+static int tpd_probe_pdata(struct platform_device *pdev)
+{
+	struct panel_drv_data *ddata = platform_get_drvdata(pdev);
+	struct encoder_tpd12s015_platform_data *pdata;
+	struct omap_dss_device *dssdev, *in;
+
+	pdata = dev_get_platdata(&pdev->dev);
+
+	ddata->ct_cp_hpd_gpio = pdata->ct_cp_hpd_gpio;
+	ddata->ls_oe_gpio = pdata->ls_oe_gpio;
+	ddata->hpd_gpio = pdata->hpd_gpio;
+
+	in = omap_dss_find_output(pdata->source);
+	if (in == NULL) {
+		dev_err(&pdev->dev, "Failed to find video source\n");
+		return -ENODEV;
+	}
+
+	ddata->in = in;
+
+	dssdev = &ddata->dssdev;
+	dssdev->name = pdata->name;
+
+	return 0;
+}
+
 static int tpd_probe_of(struct platform_device *pdev)
 {
 	struct panel_drv_data *ddata = platform_get_drvdata(pdev);
 	struct device_node *node = pdev->dev.of_node;
 	struct omap_dss_device *in;
+	int gpio;
+
+	/* CT CP HPD GPIO */
+	gpio = of_get_gpio(node, 0);
+	if (!gpio_is_valid(gpio)) {
+		dev_err(&pdev->dev, "failed to parse CT CP HPD gpio\n");
+		return gpio;
+	}
+	ddata->ct_cp_hpd_gpio = gpio;
+
+	/* LS OE GPIO */
+	gpio = of_get_gpio(node, 1);
+	if (gpio_is_valid(gpio) || gpio == -ENOENT) {
+		ddata->ls_oe_gpio = gpio;
+	} else {
+		dev_err(&pdev->dev, "failed to parse LS OE gpio\n");
+		return gpio;
+	}
+
+	/* HPD GPIO */
+	gpio = of_get_gpio(node, 2);
+	if (!gpio_is_valid(gpio)) {
+		dev_err(&pdev->dev, "failed to parse HPD gpio\n");
+		return gpio;
+	}
+	ddata->hpd_gpio = gpio;
 
 	in = omapdss_of_find_source_for_first_ep(node);
 	if (IS_ERR(in)) {
@@ -219,7 +275,6 @@ static int tpd_probe(struct platform_device *pdev)
 	struct omap_dss_device *in, *dssdev;
 	struct panel_drv_data *ddata;
 	int r;
-	struct gpio_desc *gpio;
 
 	ddata = devm_kzalloc(&pdev->dev, sizeof(*ddata), GFP_KERNEL);
 	if (!ddata)
@@ -227,39 +282,34 @@ static int tpd_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, ddata);
 
-	if (!pdev->dev.of_node)
+	if (dev_get_platdata(&pdev->dev)) {
+		r = tpd_probe_pdata(pdev);
+		if (r)
+			return r;
+	} else if (pdev->dev.of_node) {
+		r = tpd_probe_of(pdev);
+		if (r)
+			return r;
+	} else {
 		return -ENODEV;
+	}
 
-	r = tpd_probe_of(pdev);
+	r = devm_gpio_request_one(&pdev->dev, ddata->ct_cp_hpd_gpio,
+			GPIOF_OUT_INIT_LOW, "hdmi_ct_cp_hpd");
 	if (r)
-		return r;
-
-	gpio = devm_gpiod_get_index_optional(&pdev->dev, NULL, 0,
-		 GPIOD_OUT_LOW);
-	if (IS_ERR(gpio)) {
-		r = PTR_ERR(gpio);
 		goto err_gpio;
+
+	if (gpio_is_valid(ddata->ls_oe_gpio)) {
+		r = devm_gpio_request_one(&pdev->dev, ddata->ls_oe_gpio,
+				GPIOF_OUT_INIT_LOW, "hdmi_ls_oe");
+		if (r)
+			goto err_gpio;
 	}
 
-	ddata->ct_cp_hpd_gpio = gpio;
-
-	gpio = devm_gpiod_get_index_optional(&pdev->dev, NULL, 1,
-		 GPIOD_OUT_LOW);
-	if (IS_ERR(gpio)) {
-		r = PTR_ERR(gpio);
+	r = devm_gpio_request_one(&pdev->dev, ddata->hpd_gpio,
+			GPIOF_DIR_IN, "hdmi_hpd");
+	if (r)
 		goto err_gpio;
-	}
-
-	ddata->ls_oe_gpio = gpio;
-
-	gpio = devm_gpiod_get_index(&pdev->dev, NULL, 2,
-		GPIOD_IN);
-	if (IS_ERR(gpio)) {
-		r = PTR_ERR(gpio);
-		goto err_gpio;
-	}
-
-	ddata->hpd_gpio = gpio;
 
 	dssdev = &ddata->dssdev;
 	dssdev->ops.hdmi = &tpd_hdmi_ops;

@@ -21,8 +21,6 @@
 #include <linux/i8253.h>
 #include <linux/init.h>
 #include <linux/kernel_stat.h>
-#include <linux/libfdt.h>
-#include <linux/math64.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
@@ -74,9 +72,7 @@ static void __init estimate_frequencies(void)
 {
 	unsigned long flags;
 	unsigned int count, start;
-	unsigned char secs1, secs2, ctrl;
-	int secs;
-	u64 giccount = 0, gicstart = 0;
+	cycle_t giccount = 0, gicstart = 0;
 
 #if defined(CONFIG_KVM_GUEST) && CONFIG_KVM_GUEST_TIMER_FREQ
 	mips_hpt_frequency = CONFIG_KVM_GUEST_TIMER_FREQ * 1000000;
@@ -85,51 +81,32 @@ static void __init estimate_frequencies(void)
 
 	local_irq_save(flags);
 
-	if (gic_present)
-		gic_start_count();
-
-	/*
-	 * Read counters exactly on rising edge of update flag.
-	 * This helps get an accurate reading under virtualisation.
-	 */
+	/* Start counter exactly on falling edge of update flag. */
 	while (CMOS_READ(RTC_REG_A) & RTC_UIP);
 	while (!(CMOS_READ(RTC_REG_A) & RTC_UIP));
+
+	/* Initialize counters. */
 	start = read_c0_count();
-	if (gic_present)
+	if (gic_present) {
+		gic_start_count();
 		gicstart = gic_read_count();
+	}
 
-	/* Wait for falling edge before reading RTC. */
+	/* Read counter exactly on falling edge of update flag. */
 	while (CMOS_READ(RTC_REG_A) & RTC_UIP);
-	secs1 = CMOS_READ(RTC_SECONDS);
-
-	/* Read counters again exactly on rising edge of update flag. */
 	while (!(CMOS_READ(RTC_REG_A) & RTC_UIP));
+
 	count = read_c0_count();
 	if (gic_present)
 		giccount = gic_read_count();
 
-	/* Wait for falling edge before reading RTC again. */
-	while (CMOS_READ(RTC_REG_A) & RTC_UIP);
-	secs2 = CMOS_READ(RTC_SECONDS);
-
-	ctrl = CMOS_READ(RTC_CONTROL);
-
 	local_irq_restore(flags);
 
-	if (!(ctrl & RTC_DM_BINARY) || RTC_ALWAYS_BCD) {
-		secs1 = bcd2bin(secs1);
-		secs2 = bcd2bin(secs2);
-	}
-	secs = secs2 - secs1;
-	if (secs < 1)
-		secs += 60;
-
 	count -= start;
-	count /= secs;
 	mips_hpt_frequency = count;
 
 	if (gic_present) {
-		giccount = div_u64(giccount - gicstart, secs);
+		giccount -= gicstart;
 		gic_frequency = giccount;
 	}
 }
@@ -208,33 +185,6 @@ static void __init init_rtc(void)
 		CMOS_WRITE(ctrl & ~RTC_SET, RTC_CONTROL);
 }
 
-#ifdef CONFIG_CLKSRC_MIPS_GIC
-static u32 gic_frequency_dt;
-
-static struct property gic_frequency_prop = {
-	.name = "clock-frequency",
-	.length = sizeof(u32),
-	.value = &gic_frequency_dt,
-};
-
-static void update_gic_frequency_dt(void)
-{
-	struct device_node *node;
-
-	gic_frequency_dt = cpu_to_be32(gic_frequency);
-
-	node = of_find_compatible_node(NULL, NULL, "mti,gic-timer");
-	if (!node) {
-		pr_err("mti,gic-timer device node not found\n");
-		return;
-	}
-
-	if (of_update_property(node, &gic_frequency_prop) < 0)
-		pr_err("error updating gic frequency property\n");
-}
-
-#endif
-
 void __init plat_time_init(void)
 {
 	unsigned int prid = read_c0_prid() & (PRID_COMP_MASK | PRID_IMP_MASK);
@@ -264,8 +214,7 @@ void __init plat_time_init(void)
 		printk("GIC frequency %d.%02d MHz\n", freq/1000000,
 		       (freq%1000000)*100/1000000);
 #ifdef CONFIG_CLKSRC_MIPS_GIC
-		update_gic_frequency_dt();
-		clocksource_probe();
+		gic_clocksource_init(gic_frequency);
 #endif
 	}
 #endif

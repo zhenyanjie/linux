@@ -20,8 +20,6 @@
 #include <linux/mmc/host.h>
 
 #include "core.h"
-#include "card.h"
-#include "host.h"
 #include "mmc_ops.h"
 
 #ifdef CONFIG_FAIL_MMC_REQUEST
@@ -150,8 +148,7 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 		str = "mmc HS200";
 		break;
 	case MMC_TIMING_MMC_HS400:
-		str = mmc_card_hs400es(host->card) ?
-			"mmc HS400 enhanced strobe" : "mmc HS400";
+		str = "mmc HS400";
 		break;
 	default:
 		str = "invalid";
@@ -223,7 +220,7 @@ static int mmc_clock_opt_set(void *data, u64 val)
 	struct mmc_host *host = data;
 
 	/* We need this check due to input value is u64 */
-	if (val != 0 && (val > host->f_max || val < host->f_min))
+	if (val > host->f_max)
 		return -EINVAL;
 
 	mmc_claim_host(host);
@@ -323,11 +320,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 	for (i = 0; i < 512; i++)
 		n += sprintf(buf + n, "%02x", ext_csd[i]);
 	n += sprintf(buf + n, "\n");
-
-	if (n != EXT_CSD_STR_LEN) {
-		err = -EINVAL;
-		goto out_free;
-	}
+	BUG_ON(n != EXT_CSD_STR_LEN);
 
 	filp->private_data = buf;
 	kfree(ext_csd);

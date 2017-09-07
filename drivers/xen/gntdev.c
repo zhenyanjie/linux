@@ -32,11 +32,9 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/sched.h>
-#include <linux/sched/mm.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/highmem.h>
-#include <linux/refcount.h>
 
 #include <xen/xen.h>
 #include <xen/grant_table.h>
@@ -87,7 +85,7 @@ struct grant_map {
 	int index;
 	int count;
 	int flags;
-	refcount_t users;
+	atomic_t users;
 	struct unmap_notify notify;
 	struct ioctl_gntdev_grant_ref *grants;
 	struct gnttab_map_grant_ref   *map_ops;
@@ -167,7 +165,7 @@ static struct grant_map *gntdev_alloc_map(struct gntdev_priv *priv, int count)
 
 	add->index = 0;
 	add->count = count;
-	refcount_set(&add->users, 1);
+	atomic_set(&add->users, 1);
 
 	return add;
 
@@ -213,7 +211,7 @@ static void gntdev_put_map(struct gntdev_priv *priv, struct grant_map *map)
 	if (!map)
 		return;
 
-	if (!refcount_dec_and_test(&map->users))
+	if (!atomic_dec_and_test(&map->users))
 		return;
 
 	atomic_sub(map->count, &pages_mapped);
@@ -401,7 +399,7 @@ static void gntdev_vma_open(struct vm_area_struct *vma)
 	struct grant_map *map = vma->vm_private_data;
 
 	pr_debug("gntdev_vma_open %p\n", vma);
-	refcount_inc(&map->users);
+	atomic_inc(&map->users);
 }
 
 static void gntdev_vma_close(struct vm_area_struct *vma)
@@ -750,7 +748,7 @@ static long gntdev_ioctl_notify(struct gntdev_priv *priv, void __user *u)
 	return rc;
 }
 
-#define GNTDEV_COPY_BATCH 16
+#define GNTDEV_COPY_BATCH 24
 
 struct gntdev_copy_batch {
 	struct gnttab_copy ops[GNTDEV_COPY_BATCH];
@@ -984,7 +982,7 @@ static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 {
 	struct gntdev_priv *priv = flip->private_data;
 	int index = vma->vm_pgoff;
-	int count = vma_pages(vma);
+	int count = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 	struct grant_map *map;
 	int i, err = -EINVAL;
 
@@ -1005,11 +1003,11 @@ static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 		goto unlock_out;
 	}
 
-	refcount_inc(&map->users);
+	atomic_inc(&map->users);
 
 	vma->vm_ops = &gntdev_vmops;
 
-	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP | VM_MIXEDMAP;
+	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP | VM_IO;
 
 	if (use_ptemod)
 		vma->vm_flags |= VM_DONTCOPY;

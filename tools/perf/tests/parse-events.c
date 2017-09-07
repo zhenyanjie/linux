@@ -1,3 +1,4 @@
+
 #include "parse-events.h"
 #include "evsel.h"
 #include "evlist.h"
@@ -5,15 +6,8 @@
 #include "tests.h"
 #include "debug.h"
 #include "util.h"
-#include <dirent.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <linux/kernel.h>
 #include <linux/hw_breakpoint.h>
 #include <api/fs/fs.h>
-#include <api/fs/tracing_path.h>
 
 #define PERF_TP_SAMPLE_TYPE (PERF_SAMPLE_RAW | PERF_SAMPLE_TIME | \
 			     PERF_SAMPLE_CPU | PERF_SAMPLE_PERIOD)
@@ -38,7 +32,7 @@ static int test__checkevent_tracepoint_multi(struct perf_evlist *evlist)
 	TEST_ASSERT_VAL("wrong number of entries", evlist->nr_entries > 1);
 	TEST_ASSERT_VAL("wrong number of groups", 0 == evlist->nr_groups);
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		TEST_ASSERT_VAL("wrong type",
 			PERF_TYPE_TRACEPOINT == evsel->attr.type);
 		TEST_ASSERT_VAL("wrong sample_type",
@@ -213,7 +207,7 @@ test__checkevent_tracepoint_multi_modifier(struct perf_evlist *evlist)
 
 	TEST_ASSERT_VAL("wrong number of entries", evlist->nr_entries > 1);
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		TEST_ASSERT_VAL("wrong exclude_user",
 				!evsel->attr.exclude_user);
 		TEST_ASSERT_VAL("wrong exclude_kernel",
@@ -1277,38 +1271,6 @@ static int test__checkevent_precise_max_modifier(struct perf_evlist *evlist)
 	return 0;
 }
 
-static int test__checkevent_config_symbol(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "insn") == 0);
-	return 0;
-}
-
-static int test__checkevent_config_raw(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "rawpmu") == 0);
-	return 0;
-}
-
-static int test__checkevent_config_num(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "numpmu") == 0);
-	return 0;
-}
-
-static int test__checkevent_config_cache(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "cachepmu") == 0);
-	return 0;
-}
-
 static int count_tracepoints(void)
 {
 	struct dirent *events_ent;
@@ -1617,26 +1579,6 @@ static struct evlist_test test__events[] = {
 		.check = test__checkevent_precise_max_modifier,
 		.id    = 47,
 	},
-	{
-		.name  = "instructions/name=insn/",
-		.check = test__checkevent_config_symbol,
-		.id    = 48,
-	},
-	{
-		.name  = "r1234/name=rawpmu/",
-		.check = test__checkevent_config_raw,
-		.id    = 49,
-	},
-	{
-		.name  = "4:0x6530160/name=numpmu/",
-		.check = test__checkevent_config_num,
-		.id    = 50,
-	},
-	{
-		.name  = "L1-dcache-misses/name=cachepmu/",
-		.check = test__checkevent_config_cache,
-		.id    = 51,
-	},
 };
 
 static struct evlist_test test__events_pmu[] = {
@@ -1724,7 +1666,7 @@ static int test_term(struct terms_test *t)
 	}
 
 	ret = t->check(&terms);
-	parse_events_terms__purge(&terms);
+	parse_events__free_terms(&terms);
 
 	return ret;
 }
@@ -1785,14 +1727,15 @@ static int test_pmu_events(void)
 	}
 
 	while (!ret && (ent = readdir(dir))) {
+#define MAX_NAME 100
 		struct evlist_test e;
-		char name[2 * NAME_MAX + 1 + 12 + 3];
+		char name[MAX_NAME];
 
-		/* Names containing . are special and cannot be used directly */
-		if (strchr(ent->d_name, '.'))
+		if (!strcmp(ent->d_name, ".") ||
+		    !strcmp(ent->d_name, ".."))
 			continue;
 
-		snprintf(name, sizeof(name), "cpu/event=%s/u", ent->d_name);
+		snprintf(name, MAX_NAME, "cpu/event=%s/u", ent->d_name);
 
 		e.name  = name;
 		e.check = test__checkevent_pmu_events;
@@ -1800,10 +1743,11 @@ static int test_pmu_events(void)
 		ret = test_event(&e);
 		if (ret)
 			break;
-		snprintf(name, sizeof(name), "%s:u,cpu/event=%s/u", ent->d_name, ent->d_name);
+		snprintf(name, MAX_NAME, "%s:u,cpu/event=%s/u", ent->d_name, ent->d_name);
 		e.name  = name;
 		e.check = test__checkevent_pmu_events_mix;
 		ret = test_event(&e);
+#undef MAX_NAME
 	}
 
 	closedir(dir);
@@ -1814,7 +1758,7 @@ static void debug_warn(const char *warn, va_list params)
 {
 	char msg[1024];
 
-	if (verbose <= 0)
+	if (!verbose)
 		return;
 
 	vsnprintf(msg, sizeof(msg), warn, params);

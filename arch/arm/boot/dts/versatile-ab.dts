@@ -119,9 +119,8 @@
 	};
 
 	flash@34000000 {
-		/* 64 MiB NOR flash in non-interleaved chips */
-		compatible = "arm,versatile-flash", "cfi-flash";
-		reg = <0x34000000 0x04000000>;
+		compatible = "arm,versatile-flash";
+		reg = <0x34000000 0x4000000>;
 		bank-width = <4>;
 	};
 
@@ -149,7 +148,7 @@
 	};
 
 	amba {
-		compatible = "simple-bus";
+		compatible = "arm,amba-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;

@@ -62,7 +62,7 @@ int drv_add_interface(struct ieee80211_local *local,
 	if (WARN_ON(sdata->vif.type == NL80211_IFTYPE_AP_VLAN ||
 		    (sdata->vif.type == NL80211_IFTYPE_MONITOR &&
 		     !ieee80211_hw_check(&local->hw, WANT_MONITOR_VIF) &&
-		     !(sdata->u.mntr.flags & MONITOR_FLAG_ACTIVE))))
+		     !(sdata->u.mntr_flags & MONITOR_FLAG_ACTIVE))))
 		return -EINVAL;
 
 	trace_drv_add_interface(local, sdata);
@@ -215,21 +215,6 @@ void drv_set_tsf(struct ieee80211_local *local,
 	trace_drv_return_void(local);
 }
 
-void drv_offset_tsf(struct ieee80211_local *local,
-		    struct ieee80211_sub_if_data *sdata,
-		    s64 offset)
-{
-	might_sleep();
-
-	if (!check_sdata_in_driver(sdata))
-		return;
-
-	trace_drv_offset_tsf(local, sdata, offset);
-	if (local->ops->offset_tsf)
-		local->ops->offset_tsf(&local->hw, &sdata->vif, offset);
-	trace_drv_return_void(local);
-}
-
 void drv_reset_tsf(struct ieee80211_local *local,
 		   struct ieee80211_sub_if_data *sdata)
 {
@@ -299,7 +284,9 @@ int drv_switch_vif_chanctx(struct ieee80211_local *local,
 
 int drv_ampdu_action(struct ieee80211_local *local,
 		     struct ieee80211_sub_if_data *sdata,
-		     struct ieee80211_ampdu_params *params)
+		     enum ieee80211_ampdu_mlme_action action,
+		     struct ieee80211_sta *sta, u16 tid,
+		     u16 *ssn, u8 buf_size, bool amsdu)
 {
 	int ret = -EOPNOTSUPP;
 
@@ -309,10 +296,12 @@ int drv_ampdu_action(struct ieee80211_local *local,
 	if (!check_sdata_in_driver(sdata))
 		return -EIO;
 
-	trace_drv_ampdu_action(local, sdata, params);
+	trace_drv_ampdu_action(local, sdata, action, sta, tid,
+			       ssn, buf_size, amsdu);
 
 	if (local->ops->ampdu_action)
-		ret = local->ops->ampdu_action(&local->hw, &sdata->vif, params);
+		ret = local->ops->ampdu_action(&local->hw, &sdata->vif, action,
+					       sta, tid, ssn, buf_size, amsdu);
 
 	trace_drv_return_int(local, ret);
 

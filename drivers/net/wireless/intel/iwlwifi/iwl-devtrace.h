@@ -1,7 +1,6 @@
 /******************************************************************************
  *
  * Copyright(c) 2009 - 2014 Intel Corporation. All rights reserved.
- * Copyright(C) 2016 Intel Deutschland GmbH
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -34,29 +33,11 @@
 static inline bool iwl_trace_data(struct sk_buff *skb)
 {
 	struct ieee80211_hdr *hdr = (void *)skb->data;
-	__le16 fc = hdr->frame_control;
-	int offs = 24; /* start with normal header length */
+	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 
-	if (!ieee80211_is_data(fc))
+	if (!ieee80211_is_data(hdr->frame_control))
 		return false;
-
-	/* Try to determine if the frame is EAPOL. This might have false
-	 * positives (if there's no RFC 1042 header and we compare to some
-	 * payload instead) but since we're only doing tracing that's not
-	 * a problem.
-	 */
-
-	if (ieee80211_has_a4(fc))
-		offs += 6;
-	if (ieee80211_is_data_qos(fc))
-		offs += 2;
-	/* don't account for crypto - these are unencrypted */
-
-	/* also account for the RFC 1042 header, of course */
-	offs += 6;
-
-	return skb->len > offs + 2 &&
-	       *(__be16 *)(skb->data + offs) == cpu_to_be16(ETH_P_PAE);
+	return !(info->control.flags & IEEE80211_TX_CTRL_PORT_CTRL_PROTO);
 }
 
 static inline size_t iwl_rx_trace_len(const struct iwl_trans *trans,

@@ -25,7 +25,7 @@
  *        David S. Miller (davem@caip.rutgers.edu), 1995
  */
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -293,7 +293,7 @@ ufs_inode_getfrag(struct inode *inode, unsigned index,
 
 	if (new)
 		*new = 1;
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	if (IS_SYNC(inode))
 		ufs_sync_inode (inode);
 	mark_inode_dirty(inode);
@@ -375,7 +375,7 @@ ufs_inode_getblock(struct inode *inode, u64 ind_block,
 	mark_buffer_dirty(bh);
 	if (IS_SYNC(inode))
 		sync_dirty_buffer(bh);
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
 out:
 	brelse (bh);
@@ -1051,13 +1051,13 @@ static int ufs_alloc_lastblock(struct inode *inode, loff_t size)
 	lastfrag--;
 
 	lastpage = ufs_get_locked_page(mapping, lastfrag >>
-				       (PAGE_SHIFT - inode->i_blkbits));
+				       (PAGE_CACHE_SHIFT - inode->i_blkbits));
        if (IS_ERR(lastpage)) {
                err = -EIO;
                goto out;
        }
 
-       end = lastfrag & ((1 << (PAGE_SHIFT - inode->i_blkbits)) - 1);
+       end = lastfrag & ((1 << (PAGE_CACHE_SHIFT - inode->i_blkbits)) - 1);
        bh = page_buffers(lastpage);
        for (i = 0; i < end; ++i)
                bh = bh->b_this_page;
@@ -1070,7 +1070,8 @@ static int ufs_alloc_lastblock(struct inode *inode, loff_t size)
 
        if (buffer_new(bh)) {
 	       clear_buffer_new(bh);
-	       clean_bdev_bh_alias(bh);
+	       unmap_underlying_metadata(bh->b_bdev,
+					 bh->b_blocknr);
 	       /*
 		* we do not zeroize fragment, because of
 		* if it maped to hole, it already contains zeroes
@@ -1184,14 +1185,14 @@ static int ufs_truncate(struct inode *inode, loff_t size)
 	truncate_setsize(inode, size);
 
 	__ufs_truncate_blocks(inode);
-	inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
 out:
 	UFSD("EXIT: err %d\n", err);
 	return err;
 }
 
-static void ufs_truncate_blocks(struct inode *inode)
+void ufs_truncate_blocks(struct inode *inode)
 {
 	if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
 	      S_ISLNK(inode->i_mode)))
@@ -1207,7 +1208,7 @@ int ufs_setattr(struct dentry *dentry, struct iattr *attr)
 	unsigned int ia_valid = attr->ia_valid;
 	int error;
 
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode, attr);
 	if (error)
 		return error;
 

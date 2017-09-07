@@ -64,19 +64,13 @@
 #define __fw_api_mac_h__
 
 /*
- * The first MAC indices (starting from 0) are available to the driver,
- * AUX indices follows - 1 for non-CDB, 2 for CDB.
+ * The first MAC indices (starting from 0)
+ * are available to the driver, AUX follows
  */
 #define MAC_INDEX_AUX		4
 #define MAC_INDEX_MIN_DRIVER	0
 #define NUM_MAC_INDEX_DRIVER	MAC_INDEX_AUX
-#define NUM_MAC_INDEX		(NUM_MAC_INDEX_DRIVER + 1)
-#define NUM_MAC_INDEX_CDB	(NUM_MAC_INDEX_DRIVER + 2)
-
-#define IWL_MVM_STATION_COUNT		16
-#define IWL_MVM_INVALID_STA		0xFF
-
-#define IWL_MVM_TDLS_STA_COUNT	4
+#define NUM_MAC_INDEX		(MAC_INDEX_AUX + 1)
 
 enum iwl_ac {
 	AC_BK,
@@ -157,8 +151,7 @@ enum iwl_tsf_id {
  * @bi_reciprocal: 2^32 / bi
  * @dtim_interval: dtim transmit time in TU
  * @dtim_reciprocal: 2^32 / dtim_interval
- * @mcast_qid: queue ID for multicast traffic.
- *	NOTE: obsolete from VER2 and on
+ * @mcast_qid: queue ID for multicast traffic
  * @beacon_template: beacon template ID
  */
 struct iwl_mac_data_ap {
@@ -170,7 +163,7 @@ struct iwl_mac_data_ap {
 	__le32 dtim_reciprocal;
 	__le32 mcast_qid;
 	__le32 beacon_template;
-} __packed; /* AP_MAC_DATA_API_S_VER_2 */
+} __packed; /* AP_MAC_DATA_API_S_VER_1 */
 
 /**
  * struct iwl_mac_data_ibss - configuration data for IBSS MAC context

@@ -1,9 +1,5 @@
-#include "string2.h"
-#include <linux/kernel.h>
-#include <linux/string.h>
-#include <stdlib.h>
-
-#include "sane_ctype.h"
+#include "util.h"
+#include "linux/string.h"
 
 #define K 1024LL
 /*
@@ -25,8 +21,6 @@ s64 perf_atoll(const char *str)
 		case 'b': case 'B':
 			if (*p)
 				goto out_err;
-
-			__fallthrough;
 		case '\0':
 			return length;
 		default:
@@ -103,10 +97,8 @@ static int count_argc(const char *str)
 void argv_free(char **argv)
 {
 	char **p;
-	for (p = argv; *p; p++) {
-		free(*p);
-		*p = NULL;
-	}
+	for (p = argv; *p; p++)
+		zfree(p);
 
 	free(argv);
 }
@@ -126,7 +118,7 @@ void argv_free(char **argv)
 char **argv_split(const char *str, int *argcp)
 {
 	int argc = count_argc(str);
-	char **argv = calloc(argc + 1, sizeof(*argv));
+	char **argv = zalloc(sizeof(*argv) * (argc+1));
 	char **argvp;
 
 	if (argv == NULL)
@@ -201,8 +193,7 @@ error:
 }
 
 /* Glob/lazy pattern matching */
-static bool __match_glob(const char *str, const char *pat, bool ignore_space,
-			bool case_ins)
+static bool __match_glob(const char *str, const char *pat, bool ignore_space)
 {
 	while (*str && *pat && *pat != '*') {
 		if (ignore_space) {
@@ -228,13 +219,8 @@ static bool __match_glob(const char *str, const char *pat, bool ignore_space,
 				return false;
 		else if (*pat == '\\') /* Escaped char match as normal char */
 			pat++;
-		if (case_ins) {
-			if (tolower(*str) != tolower(*pat))
-				return false;
-		} else if (*str != *pat)
+		if (*str++ != *pat++)
 			return false;
-		str++;
-		pat++;
 	}
 	/* Check wild card */
 	if (*pat == '*') {
@@ -243,7 +229,7 @@ static bool __match_glob(const char *str, const char *pat, bool ignore_space,
 		if (!*pat)	/* Tail wild card matches all */
 			return true;
 		while (*str)
-			if (__match_glob(str++, pat, ignore_space, case_ins))
+			if (__match_glob(str++, pat, ignore_space))
 				return true;
 	}
 	return !*str && !*pat;
@@ -263,12 +249,7 @@ static bool __match_glob(const char *str, const char *pat, bool ignore_space,
  */
 bool strglobmatch(const char *str, const char *pat)
 {
-	return __match_glob(str, pat, false, false);
-}
-
-bool strglobmatch_nocase(const char *str, const char *pat)
-{
-	return __match_glob(str, pat, false, true);
+	return __match_glob(str, pat, false);
 }
 
 /**
@@ -281,7 +262,7 @@ bool strglobmatch_nocase(const char *str, const char *pat)
  */
 bool strlazymatch(const char *str, const char *pat)
 {
-	return __match_glob(str, pat, true, false);
+	return __match_glob(str, pat, true);
 }
 
 /**
@@ -328,8 +309,12 @@ char *strxfrchar(char *s, char from, char to)
  */
 char *ltrim(char *s)
 {
-	while (isspace(*s))
+	int len = strlen(s);
+
+	while (len && isspace(*s)) {
+		len--;
 		s++;
+	}
 
 	return s;
 }
@@ -383,7 +368,7 @@ char *asprintf_expr_inout_ints(const char *var, bool in, size_t nints, int *ints
 				goto out_err_overflow;
 
 			if (i > 0)
-				printed += scnprintf(e + printed, size - printed, " %s ", or_and);
+				printed += snprintf(e + printed, size - printed, " %s ", or_and);
 			printed += scnprintf(e + printed, size - printed,
 					     "%s %s %d", var, eq_neq, ints[i]);
 		}

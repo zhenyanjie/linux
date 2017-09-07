@@ -1,5 +1,5 @@
 /*
- * Dynamic function tracing support.
+ * Code for replacing ftrace calls with jumps.
  *
  * Copyright (C) 2007-2008 Steven Rostedt <srostedt@redhat.com>
  *
@@ -81,9 +81,9 @@ within(unsigned long addr, unsigned long start, unsigned long end)
 static unsigned long text_ip_addr(unsigned long ip)
 {
 	/*
-	 * On x86_64, kernel text mappings are mapped read-only, so we use
-	 * the kernel identity mapping instead of the kernel text mapping
-	 * to modify the kernel text.
+	 * On x86_64, kernel text mappings are mapped read-only with
+	 * CONFIG_DEBUG_RODATA. So we use the kernel identity mapping instead
+	 * of the kernel text mapping to modify the kernel text.
 	 *
 	 * For 32bit kernels, these mappings are same and we can use
 	 * kernel identity mapping to modify code.
@@ -533,15 +533,9 @@ static void do_sync_core(void *data)
 
 static void run_sync(void)
 {
-	int enable_irqs;
+	int enable_irqs = irqs_disabled();
 
-	/* No need to sync if there's only one CPU */
-	if (num_online_cpus() == 1)
-		return;
-
-	enable_irqs = irqs_disabled();
-
-	/* We may be called with interrupts disabled (on bootup). */
+	/* We may be called with interrupts disbled (on bootup). */
 	if (enable_irqs)
 		local_irq_enable();
 	on_each_cpu(do_sync_core, NULL, 1);
@@ -703,8 +697,9 @@ static inline void tramp_free(void *tramp) { }
 #endif
 
 /* Defined as markers to the end of the ftrace default trampolines */
+extern void ftrace_caller_end(void);
 extern void ftrace_regs_caller_end(void);
-extern void ftrace_epilogue(void);
+extern void ftrace_return(void);
 extern void ftrace_caller_op_ptr(void);
 extern void ftrace_regs_caller_op_ptr(void);
 
@@ -751,7 +746,7 @@ create_trampoline(struct ftrace_ops *ops, unsigned int *tramp_size)
 		op_offset = (unsigned long)ftrace_regs_caller_op_ptr;
 	} else {
 		start_offset = (unsigned long)ftrace_caller;
-		end_offset = (unsigned long)ftrace_epilogue;
+		end_offset = (unsigned long)ftrace_caller_end;
 		op_offset = (unsigned long)ftrace_caller_op_ptr;
 	}
 
@@ -759,7 +754,7 @@ create_trampoline(struct ftrace_ops *ops, unsigned int *tramp_size)
 
 	/*
 	 * Allocate enough size to store the ftrace_caller code,
-	 * the jmp to ftrace_epilogue, as well as the address of
+	 * the jmp to ftrace_return, as well as the address of
 	 * the ftrace_ops this trampoline is used for.
 	 */
 	trampoline = alloc_tramp(size + MCOUNT_INSN_SIZE + sizeof(void *));
@@ -777,8 +772,8 @@ create_trampoline(struct ftrace_ops *ops, unsigned int *tramp_size)
 
 	ip = (unsigned long)trampoline + size;
 
-	/* The trampoline ends with a jmp to ftrace_epilogue */
-	jmp = ftrace_jmp_replace(ip, (unsigned long)ftrace_epilogue);
+	/* The trampoline ends with a jmp to ftrace_return */
+	jmp = ftrace_jmp_replace(ip, (unsigned long)ftrace_return);
 	memcpy(trampoline + size, jmp, MCOUNT_INSN_SIZE);
 
 	/*
@@ -989,18 +984,6 @@ void prepare_ftrace_return(unsigned long self_addr, unsigned long *parent,
 	unsigned long return_hooker = (unsigned long)
 				&return_to_handler;
 
-	/*
-	 * When resuming from suspend-to-ram, this function can be indirectly
-	 * called from early CPU startup code while the CPU is in real mode,
-	 * which would fail miserably.  Make sure the stack pointer is a
-	 * virtual address.
-	 *
-	 * This check isn't as accurate as virt_addr_valid(), but it should be
-	 * good enough for this purpose, and it's fast.
-	 */
-	if (unlikely((long)__builtin_frame_address(0) >= 0))
-		return;
-
 	if (unlikely(ftrace_graph_is_dead()))
 		return;
 
@@ -1047,7 +1030,7 @@ void prepare_ftrace_return(unsigned long self_addr, unsigned long *parent,
 	}
 
 	if (ftrace_push_return_trace(old, self_addr, &trace.depth,
-				     frame_pointer, parent) == -EBUSY) {
+		    frame_pointer) == -EBUSY) {
 		*parent = old;
 		return;
 	}

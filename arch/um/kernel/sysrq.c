@@ -11,9 +11,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task_stack.h>
-
 #include <asm/sysrq.h>
 #include <asm/stacktrace.h>
 #include <os.h>

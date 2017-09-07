@@ -89,16 +89,10 @@ static void virtio_gpu_unref_list(struct list_head *head)
 	}
 }
 
-/*
- * Usage of execbuffer:
- * Relocations need to take into account the full VIRTIO_GPUDrawable size.
- * However, the command as passed from user space must *not* contain the initial
- * VIRTIO_GPUReleaseInfo struct (first XXX bytes)
- */
-static int virtio_gpu_execbuffer_ioctl(struct drm_device *dev, void *data,
+static int virtio_gpu_execbuffer(struct drm_device *dev,
+				 struct drm_virtgpu_execbuffer *exbuf,
 				 struct drm_file *drm_file)
 {
-	struct drm_virtgpu_execbuffer *exbuf = data;
 	struct virtio_gpu_device *vgdev = dev->dev_private;
 	struct virtio_gpu_fpriv *vfpriv = drm_file->driver_priv;
 	struct drm_gem_object *gobj;
@@ -139,7 +133,8 @@ static int virtio_gpu_execbuffer_ioctl(struct drm_device *dev, void *data,
 		}
 
 		for (i = 0; i < exbuf->num_bo_handles; i++) {
-			gobj = drm_gem_object_lookup(drm_file, bo_handles[i]);
+			gobj = drm_gem_object_lookup(dev,
+						     drm_file, bo_handles[i]);
 			if (!gobj) {
 				drm_free_large(bo_handles);
 				drm_free_large(buflist);
@@ -158,10 +153,15 @@ static int virtio_gpu_execbuffer_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		goto out_free;
 
-	buf = memdup_user((void __user *)(uintptr_t)exbuf->command,
-			  exbuf->size);
-	if (IS_ERR(buf)) {
-		ret = PTR_ERR(buf);
+	buf = kmalloc(exbuf->size, GFP_KERNEL);
+	if (!buf) {
+		ret = -ENOMEM;
+		goto out_unresv;
+	}
+	if (copy_from_user(buf, (void __user *)(uintptr_t)exbuf->command,
+			   exbuf->size)) {
+		kfree(buf);
+		ret = -EFAULT;
 		goto out_unresv;
 	}
 	virtio_gpu_cmd_submit(vgdev, buf, exbuf->size,
@@ -172,7 +172,7 @@ static int virtio_gpu_execbuffer_ioctl(struct drm_device *dev, void *data,
 	/* fence the command bo */
 	virtio_gpu_unref_list(&validate_list);
 	drm_free_large(buflist);
-	dma_fence_put(&fence->f);
+	fence_put(&fence->f);
 	return 0;
 
 out_unresv:
@@ -182,6 +182,20 @@ out_free:
 	drm_free_large(buflist);
 	return ret;
 }
+
+/*
+ * Usage of execbuffer:
+ * Relocations need to take into account the full VIRTIO_GPUDrawable size.
+ * However, the command as passed from user space must *not* contain the initial
+ * VIRTIO_GPUReleaseInfo struct (first XXX bytes)
+ */
+static int virtio_gpu_execbuffer_ioctl(struct drm_device *dev, void *data,
+				       struct drm_file *file_priv)
+{
+	struct drm_virtgpu_execbuffer *execbuffer = data;
+	return virtio_gpu_execbuffer(dev, execbuffer, file_priv);
+}
+
 
 static int virtio_gpu_getparam_ioctl(struct drm_device *dev, void *data,
 				     struct drm_file *file_priv)
@@ -298,7 +312,7 @@ static int virtio_gpu_resource_create_ioctl(struct drm_device *dev, void *data,
 		drm_gem_object_release(obj);
 		if (vgdev->has_virgl_3d) {
 			virtio_gpu_unref_list(&validate_list);
-			dma_fence_put(&fence->f);
+			fence_put(&fence->f);
 		}
 		return ret;
 	}
@@ -309,13 +323,13 @@ static int virtio_gpu_resource_create_ioctl(struct drm_device *dev, void *data,
 
 	if (vgdev->has_virgl_3d) {
 		virtio_gpu_unref_list(&validate_list);
-		dma_fence_put(&fence->f);
+		fence_put(&fence->f);
 	}
 	return 0;
 fail_unref:
 	if (vgdev->has_virgl_3d) {
 		virtio_gpu_unref_list(&validate_list);
-		dma_fence_put(&fence->f);
+		fence_put(&fence->f);
 	}
 //fail_obj:
 //	drm_gem_object_handle_unreference_unlocked(obj);
@@ -331,7 +345,7 @@ static int virtio_gpu_resource_info_ioctl(struct drm_device *dev, void *data,
 	struct drm_gem_object *gobj = NULL;
 	struct virtio_gpu_object *qobj = NULL;
 
-	gobj = drm_gem_object_lookup(file_priv, ri->bo_handle);
+	gobj = drm_gem_object_lookup(dev, file_priv, ri->bo_handle);
 	if (gobj == NULL)
 		return -ENOENT;
 
@@ -360,7 +374,7 @@ static int virtio_gpu_transfer_from_host_ioctl(struct drm_device *dev,
 	if (vgdev->has_virgl_3d == false)
 		return -ENOSYS;
 
-	gobj = drm_gem_object_lookup(file, args->bo_handle);
+	gobj = drm_gem_object_lookup(dev, file, args->bo_handle);
 	if (gobj == NULL)
 		return -ENOENT;
 
@@ -383,7 +397,7 @@ static int virtio_gpu_transfer_from_host_ioctl(struct drm_device *dev,
 	reservation_object_add_excl_fence(qobj->tbo.resv,
 					  &fence->f);
 
-	dma_fence_put(&fence->f);
+	fence_put(&fence->f);
 out_unres:
 	virtio_gpu_object_unreserve(qobj);
 out:
@@ -404,7 +418,7 @@ static int virtio_gpu_transfer_to_host_ioctl(struct drm_device *dev, void *data,
 	int ret;
 	u32 offset = args->offset;
 
-	gobj = drm_gem_object_lookup(file, args->bo_handle);
+	gobj = drm_gem_object_lookup(dev, file, args->bo_handle);
 	if (gobj == NULL)
 		return -ENOENT;
 
@@ -431,7 +445,7 @@ static int virtio_gpu_transfer_to_host_ioctl(struct drm_device *dev, void *data,
 			 args->level, &box, &fence);
 		reservation_object_add_excl_fence(qobj->tbo.resv,
 						  &fence->f);
-		dma_fence_put(&fence->f);
+		fence_put(&fence->f);
 	}
 
 out_unres:
@@ -450,7 +464,7 @@ static int virtio_gpu_wait_ioctl(struct drm_device *dev, void *data,
 	int ret;
 	bool nowait = false;
 
-	gobj = drm_gem_object_lookup(file, args->handle);
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
 	if (gobj == NULL)
 		return -ENOENT;
 

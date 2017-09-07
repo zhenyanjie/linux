@@ -2805,10 +2805,8 @@ static int set_next_request(void)
 			fdc_queue = 0;
 		if (q) {
 			current_req = blk_fetch_request(q);
-			if (current_req) {
-				current_req->error_count = 0;
+			if (current_req)
 				break;
-			}
 		}
 	} while (fdc_queue != old_pos);
 
@@ -2868,7 +2866,7 @@ do_request:
 		_floppy = floppy_type + DP->autodetect[DRS->probed_format];
 	} else
 		probing = 0;
-	errors = &(current_req->error_count);
+	errors = &(current_req->errors);
 	tmp = make_raw_rw_request();
 	if (tmp < 2) {
 		request_done(tmp);
@@ -2902,8 +2900,8 @@ static void do_fd_request(struct request_queue *q)
 		return;
 
 	if (WARN(atomic_read(&usage_count) == 0,
-		 "warning: usage count=0, current_req=%p sect=%ld flags=%llx\n",
-		 current_req, (long)blk_rq_pos(current_req),
+		 "warning: usage count=0, current_req=%p sect=%ld type=%x flags=%llx\n",
+		 current_req, (long)blk_rq_pos(current_req), current_req->cmd_type,
 		 (unsigned long long) current_req->cmd_flags))
 		return;
 
@@ -3121,7 +3119,7 @@ static int raw_cmd_copyin(int cmd, void __user *param,
 	*rcmd = NULL;
 
 loop:
-	ptr = kmalloc(sizeof(struct floppy_raw_cmd), GFP_KERNEL);
+	ptr = kmalloc(sizeof(struct floppy_raw_cmd), GFP_USER);
 	if (!ptr)
 		return -ENOMEM;
 	*rcmd = ptr;
@@ -3665,6 +3663,11 @@ static int floppy_open(struct block_device *bdev, fmode_t mode)
 
 	opened_bdev[drive] = bdev;
 
+	if (!(mode & (FMODE_READ|FMODE_WRITE))) {
+		res = -EINVAL;
+		goto out;
+	}
+
 	res = -ENXIO;
 
 	if (!floppy_track_buffer) {
@@ -3708,21 +3711,20 @@ static int floppy_open(struct block_device *bdev, fmode_t mode)
 	if (UFDCS->rawcmd == 1)
 		UFDCS->rawcmd = 2;
 
-	if (!(mode & FMODE_NDELAY)) {
-		if (mode & (FMODE_READ|FMODE_WRITE)) {
-			UDRS->last_checked = 0;
-			clear_bit(FD_OPEN_SHOULD_FAIL_BIT, &UDRS->flags);
-			check_disk_change(bdev);
-			if (test_bit(FD_DISK_CHANGED_BIT, &UDRS->flags))
-				goto out;
-			if (test_bit(FD_OPEN_SHOULD_FAIL_BIT, &UDRS->flags))
-				goto out;
-		}
-		res = -EROFS;
-		if ((mode & FMODE_WRITE) &&
-		    !test_bit(FD_DISK_WRITABLE_BIT, &UDRS->flags))
-			goto out;
-	}
+	UDRS->last_checked = 0;
+	clear_bit(FD_OPEN_SHOULD_FAIL_BIT, &UDRS->flags);
+	check_disk_change(bdev);
+	if (test_bit(FD_DISK_CHANGED_BIT, &UDRS->flags))
+		goto out;
+	if (test_bit(FD_OPEN_SHOULD_FAIL_BIT, &UDRS->flags))
+		goto out;
+
+	res = -EROFS;
+
+	if ((mode & FMODE_WRITE) &&
+			!test_bit(FD_DISK_WRITABLE_BIT, &UDRS->flags))
+		goto out;
+
 	mutex_unlock(&open_lock);
 	mutex_unlock(&floppy_mutex);
 	return 0;
@@ -3808,17 +3810,20 @@ static int __floppy_read_block_0(struct block_device *bdev, int drive)
 
 	cbdata.drive = drive;
 
-	bio_init(&bio, &bio_vec, 1);
+	bio_init(&bio);
+	bio.bi_io_vec = &bio_vec;
+	bio_vec.bv_page = page;
+	bio_vec.bv_len = size;
+	bio_vec.bv_offset = 0;
+	bio.bi_vcnt = 1;
+	bio.bi_iter.bi_size = size;
 	bio.bi_bdev = bdev;
-	bio_add_page(&bio, page, size, 0);
-
 	bio.bi_iter.bi_sector = 0;
 	bio.bi_flags |= (1 << BIO_QUIET);
 	bio.bi_private = &cbdata;
 	bio.bi_end_io = floppy_rb0_cb;
-	bio_set_op_attrs(&bio, REQ_OP_READ, 0);
 
-	submit_bio(&bio);
+	submit_bio(READ, &bio);
 	process_fd_request();
 
 	init_completion(&cbdata.complete);
@@ -4209,7 +4214,9 @@ static int __init do_floppy_init(void)
 		disks[drive]->fops = &floppy_fops;
 		sprintf(disks[drive]->disk_name, "fd%d", drive);
 
-		setup_timer(&motor_off_timer[drive], motor_off_callback, drive);
+		init_timer(&motor_off_timer[drive]);
+		motor_off_timer[drive].data = drive;
+		motor_off_timer[drive].function = motor_off_callback;
 	}
 
 	err = register_blkdev(FLOPPY_MAJOR, "fd");
@@ -4342,7 +4349,8 @@ static int __init do_floppy_init(void)
 		/* to be cleaned up... */
 		disks[drive]->private_data = (void *)(long)drive;
 		disks[drive]->flags |= GENHD_FL_REMOVABLE;
-		device_add_disk(&floppy_device[drive].dev, disks[drive]);
+		disks[drive]->driverfs_dev = &floppy_device[drive].dev;
+		add_disk(disks[drive]);
 	}
 
 	return 0;

@@ -612,7 +612,7 @@ iser_check_remote_inv(struct iser_conn *iser_conn,
 			 iser_conn, rkey);
 
 		if (unlikely(!iser_conn->snd_w_inv)) {
-			iser_err("conn %p: unexpected remote invalidation, "
+			iser_err("conn %p: unexepected remote invalidation, "
 				 "terminating connection\n", iser_conn);
 			return -EPROTO;
 		}
@@ -727,6 +727,13 @@ void iser_dataout_comp(struct ib_cq *cq, struct ib_wc *wc)
 	ib_dma_unmap_single(device->ib_device, desc->dma_addr,
 			    ISER_HEADERS_LEN, DMA_TO_DEVICE);
 	kmem_cache_free(ig.desc_cache, desc);
+}
+
+void iser_last_comp(struct ib_cq *cq, struct ib_wc *wc)
+{
+	struct ib_conn *ib_conn = wc->qp->qp_context;
+
+	complete(&ib_conn->last_comp);
 }
 
 void iser_task_rdma_init(struct iscsi_iser_task *iser_task)

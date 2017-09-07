@@ -157,7 +157,6 @@ struct kvm_s390_skeys {
 
 struct kvm_hyperv_exit {
 #define KVM_EXIT_HYPERV_SYNIC          1
-#define KVM_EXIT_HYPERV_HCALL          2
 	__u32 type;
 	union {
 		struct {
@@ -166,11 +165,6 @@ struct kvm_hyperv_exit {
 			__u64 evt_page;
 			__u64 msg_page;
 		} synic;
-		struct {
-			__u64 input;
-			__u64 result;
-			__u64 params[2];
-		} hcall;
 	} u;
 };
 
@@ -218,8 +212,7 @@ struct kvm_hyperv_exit {
 struct kvm_run {
 	/* in */
 	__u8 request_interrupt_window;
-	__u8 immediate_exit;
-	__u8 padding1[6];
+	__u8 padding1[7];
 
 	/* out */
 	__u32 exit_reason;
@@ -548,13 +541,7 @@ struct kvm_s390_pgm_info {
 	__u8 exc_access_id;
 	__u8 per_access_id;
 	__u8 op_access_id;
-#define KVM_S390_PGM_FLAGS_ILC_VALID	0x01
-#define KVM_S390_PGM_FLAGS_ILC_0	0x02
-#define KVM_S390_PGM_FLAGS_ILC_1	0x04
-#define KVM_S390_PGM_FLAGS_ILC_MASK	0x06
-#define KVM_S390_PGM_FLAGS_NO_REWIND	0x08
-	__u8 flags;
-	__u8 pad[2];
+	__u8 pad[3];
 };
 
 struct kvm_s390_prefix_info {
@@ -652,9 +639,6 @@ struct kvm_enable_cap {
 };
 
 /* for KVM_PPC_GET_PVINFO */
-
-#define KVM_PPC_PVINFO_FLAGS_EV_IDLE   (1<<0)
-
 struct kvm_ppc_pvinfo {
 	/* out */
 	__u32 flags;
@@ -686,12 +670,7 @@ struct kvm_ppc_smmu_info {
 	struct kvm_ppc_one_seg_page_size sps[KVM_PPC_PAGE_SIZES_MAX_SZ];
 };
 
-/* for KVM_PPC_RESIZE_HPT_{PREPARE,COMMIT} */
-struct kvm_ppc_resize_hpt {
-	__u64 flags;
-	__u32 shift;
-	__u32 pad;
-};
+#define KVM_PPC_PVINFO_FLAGS_EV_IDLE   (1<<0)
 
 #define KVMIO 0xAE
 
@@ -871,18 +850,6 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_IOEVENTFD_ANY_LENGTH 122
 #define KVM_CAP_HYPERV_SYNIC 123
 #define KVM_CAP_S390_RI 124
-#define KVM_CAP_SPAPR_TCE_64 125
-#define KVM_CAP_ARM_PMU_V3 126
-#define KVM_CAP_VCPU_ATTRIBUTES 127
-#define KVM_CAP_MAX_VCPU_ID 128
-#define KVM_CAP_X2APIC_API 129
-#define KVM_CAP_S390_USER_INSTR0 130
-#define KVM_CAP_MSI_DEVID 131
-#define KVM_CAP_PPC_HTM 132
-#define KVM_CAP_SPAPR_RESIZE_HPT 133
-#define KVM_CAP_PPC_MMU_RADIX 134
-#define KVM_CAP_PPC_MMU_HASH_V3 135
-#define KVM_CAP_IMMEDIATE_EXIT 136
 
 #ifdef KVM_CAP_IRQ_ROUTING
 
@@ -895,10 +862,7 @@ struct kvm_irq_routing_msi {
 	__u32 address_lo;
 	__u32 address_hi;
 	__u32 data;
-	union {
-		__u32 pad;
-		__u32 devid;
-	};
+	__u32 pad;
 };
 
 struct kvm_irq_routing_s390_adapter {
@@ -985,18 +949,11 @@ struct kvm_irqfd {
 	__u8  pad[16];
 };
 
-/* For KVM_CAP_ADJUST_CLOCK */
-
-/* Do not use 1, KVM_CHECK_EXTENSION returned it before we had flags.  */
-#define KVM_CLOCK_TSC_STABLE		2
-
 struct kvm_clock_data {
 	__u64 clock;
 	__u32 flags;
 	__u32 pad[9];
 };
-
-/* For KVM_CAP_SW_TLB */
 
 #define KVM_MMU_FSL_BOOKE_NOHV		0
 #define KVM_MMU_FSL_BOOKE_HV		1
@@ -1051,14 +1008,12 @@ struct kvm_one_reg {
 	__u64 addr;
 };
 
-#define KVM_MSI_VALID_DEVID	(1U << 0)
 struct kvm_msi {
 	__u32 address_lo;
 	__u32 address_hi;
 	__u32 data;
 	__u32 flags;
-	__u32 devid;
-	__u8  pad[12];
+	__u8  pad[16];
 };
 
 struct kvm_arm_device_addr {
@@ -1103,8 +1058,6 @@ enum kvm_device_type {
 #define KVM_DEV_TYPE_FLIC		KVM_DEV_TYPE_FLIC
 	KVM_DEV_TYPE_ARM_VGIC_V3,
 #define KVM_DEV_TYPE_ARM_VGIC_V3	KVM_DEV_TYPE_ARM_VGIC_V3
-	KVM_DEV_TYPE_ARM_VGIC_ITS,
-#define KVM_DEV_TYPE_ARM_VGIC_ITS	KVM_DEV_TYPE_ARM_VGIC_ITS
 	KVM_DEV_TYPE_MAX,
 };
 
@@ -1189,8 +1142,6 @@ struct kvm_s390_ucas_mapping {
 /* Available with KVM_CAP_PPC_ALLOC_HTAB */
 #define KVM_PPC_ALLOCATE_HTAB	  _IOWR(KVMIO, 0xa7, __u32)
 #define KVM_CREATE_SPAPR_TCE	  _IOW(KVMIO,  0xa8, struct kvm_create_spapr_tce)
-#define KVM_CREATE_SPAPR_TCE_64	  _IOW(KVMIO,  0xa8, \
-				       struct kvm_create_spapr_tce_64)
 /* Available with KVM_CAP_RMA */
 #define KVM_ALLOCATE_RMA	  _IOR(KVMIO,  0xa9, struct kvm_allocate_rma)
 /* Available with KVM_CAP_PPC_HTAB_FD */
@@ -1199,13 +1150,6 @@ struct kvm_s390_ucas_mapping {
 #define KVM_ARM_SET_DEVICE_ADDR	  _IOW(KVMIO,  0xab, struct kvm_arm_device_addr)
 /* Available with KVM_CAP_PPC_RTAS */
 #define KVM_PPC_RTAS_DEFINE_TOKEN _IOW(KVMIO,  0xac, struct kvm_rtas_token_args)
-/* Available with KVM_CAP_SPAPR_RESIZE_HPT */
-#define KVM_PPC_RESIZE_HPT_PREPARE _IOR(KVMIO, 0xad, struct kvm_ppc_resize_hpt)
-#define KVM_PPC_RESIZE_HPT_COMMIT  _IOR(KVMIO, 0xae, struct kvm_ppc_resize_hpt)
-/* Available with KVM_CAP_PPC_RADIX_MMU or KVM_CAP_PPC_HASH_MMU_V3 */
-#define KVM_PPC_CONFIGURE_V3_MMU  _IOW(KVMIO,  0xaf, struct kvm_ppc_mmuv3_cfg)
-/* Available with KVM_CAP_PPC_RADIX_MMU */
-#define KVM_PPC_GET_RMMU_INFO	  _IOW(KVMIO,  0xb0, struct kvm_ppc_rmmu_info)
 
 /* ioctl for vm fd */
 #define KVM_CREATE_DEVICE	  _IOWR(KVMIO,  0xe0, struct kvm_create_device)
@@ -1350,8 +1294,5 @@ struct kvm_assigned_msix_entry {
 	__u16 entry; /* The index of entry in the MSI-X table */
 	__u16 padding[3];
 };
-
-#define KVM_X2APIC_API_USE_32BIT_IDS            (1ULL << 0)
-#define KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK  (1ULL << 1)
 
 #endif /* __LINUX_KVM_H */

@@ -28,9 +28,9 @@
 
 #define DMA_ERROR_CODE		(~(dma_addr_t)0x0)
 
-extern const struct dma_map_ops or1k_dma_map_ops;
+extern struct dma_map_ops or1k_dma_map_ops;
 
-static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
 	return &or1k_dma_map_ops;
 }

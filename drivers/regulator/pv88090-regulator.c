@@ -14,6 +14,7 @@
  */
 
 #include <linux/err.h>
+#include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -24,6 +25,8 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/regulator/of_regulator.h>
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
 #include "pv88090-regulator.h"
 
 #define PV88090_MAX_REGULATORS	5
@@ -184,7 +187,7 @@ static int pv88090_get_current_limit(struct regulator_dev *rdev)
 	return info->current_limits[data];
 }
 
-static const struct regulator_ops pv88090_buck_ops = {
+static struct regulator_ops pv88090_buck_ops = {
 	.get_mode = pv88090_buck_get_mode,
 	.set_mode = pv88090_buck_set_mode,
 	.enable = regulator_enable_regmap,
@@ -197,7 +200,7 @@ static const struct regulator_ops pv88090_buck_ops = {
 	.get_current_limit = pv88090_get_current_limit,
 };
 
-static const struct regulator_ops pv88090_ldo_ops = {
+static struct regulator_ops pv88090_ldo_ops = {
 	.enable = regulator_enable_regmap,
 	.disable = regulator_disable_regmap,
 	.is_enabled = regulator_is_enabled_regmap,
@@ -280,8 +283,8 @@ static irqreturn_t pv88090_irq_handler(int irq, void *data)
 			}
 		}
 
-		err = regmap_write(chip->regmap, PV88090_REG_EVENT_A,
-			PV88090_E_VDD_FLT);
+		err = regmap_update_bits(chip->regmap, PV88090_REG_EVENT_A,
+			PV88090_E_VDD_FLT, PV88090_E_VDD_FLT);
 		if (err < 0)
 			goto error_i2c;
 
@@ -297,8 +300,8 @@ static irqreturn_t pv88090_irq_handler(int irq, void *data)
 			}
 		}
 
-		err = regmap_write(chip->regmap, PV88090_REG_EVENT_A,
-			PV88090_E_OVER_TEMP);
+		err = regmap_update_bits(chip->regmap, PV88090_REG_EVENT_A,
+			PV88090_E_OVER_TEMP, PV88090_E_OVER_TEMP);
 		if (err < 0)
 			goto error_i2c;
 

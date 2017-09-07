@@ -95,7 +95,6 @@
 #include <linux/genhd.h>
 #include <linux/blkdev.h>
 #include <linux/vmalloc.h>
-#include <linux/string.h>
 #include "ctree.h"
 #include "disk-io.h"
 #include "hash.h"
@@ -106,7 +105,6 @@
 #include "locking.h"
 #include "check-integrity.h"
 #include "rcu-string.h"
-#include "compression.h"
 
 #define BTRFSIC_BLOCK_HASHTABLE_SIZE 0x10000
 #define BTRFSIC_BLOCK_LINK_HASHTABLE_SIZE 0x10000
@@ -178,7 +176,7 @@ struct btrfsic_block {
  * Elements of this type are allocated dynamically and required because
  * each block object can refer to and can be ref from multiple blocks.
  * The key to lookup them in the hashtable is the dev_bytenr of
- * the block ref to plus the one from the block referred from.
+ * the block ref to plus the one from the block refered from.
  * The fact that they are searchable via a hashtable and that a
  * ref_cnt is maintained is not required for the btrfs integrity
  * check algorithm itself, it is only used to make the output more
@@ -254,7 +252,7 @@ struct btrfsic_state {
 	struct list_head all_blocks_list;
 	struct btrfsic_block_hashtable block_hashtable;
 	struct btrfsic_block_link_hashtable block_link_hashtable;
-	struct btrfs_fs_info *fs_info;
+	struct btrfs_root *root;
 	u64 max_superblock_generation;
 	struct btrfsic_block *latest_superblock;
 	u32 metablock_size;
@@ -646,18 +644,17 @@ static struct btrfsic_dev_state *btrfsic_dev_state_hashtable_lookup(
 static int btrfsic_process_superblock(struct btrfsic_state *state,
 				      struct btrfs_fs_devices *fs_devices)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
+	int ret = 0;
 	struct btrfs_super_block *selected_super;
 	struct list_head *dev_head = &fs_devices->devices;
 	struct btrfs_device *device;
 	struct btrfsic_dev_state *selected_dev_state = NULL;
-	int ret = 0;
 	int pass;
 
 	BUG_ON(NULL == state);
 	selected_super = kzalloc(sizeof(*selected_super), GFP_NOFS);
 	if (NULL == selected_super) {
-		pr_info("btrfsic: error, kmalloc failed!\n");
+		printk(KERN_INFO "btrfsic: error, kmalloc failed!\n");
 		return -ENOMEM;
 	}
 
@@ -682,7 +679,7 @@ static int btrfsic_process_superblock(struct btrfsic_state *state,
 	}
 
 	if (NULL == state->latest_superblock) {
-		pr_info("btrfsic: no superblock found!\n");
+		printk(KERN_INFO "btrfsic: no superblock found!\n");
 		kfree(selected_super);
 		return -1;
 	}
@@ -699,13 +696,13 @@ static int btrfsic_process_superblock(struct btrfsic_state *state,
 			next_bytenr = btrfs_super_root(selected_super);
 			if (state->print_mask &
 			    BTRFSIC_PRINT_MASK_ROOT_CHUNK_LOG_TREE_LOCATION)
-				pr_info("root@%llu\n", next_bytenr);
+				printk(KERN_INFO "root@%llu\n", next_bytenr);
 			break;
 		case 1:
 			next_bytenr = btrfs_super_chunk_root(selected_super);
 			if (state->print_mask &
 			    BTRFSIC_PRINT_MASK_ROOT_CHUNK_LOG_TREE_LOCATION)
-				pr_info("chunk@%llu\n", next_bytenr);
+				printk(KERN_INFO "chunk@%llu\n", next_bytenr);
 			break;
 		case 2:
 			next_bytenr = btrfs_super_log_root(selected_super);
@@ -713,14 +710,15 @@ static int btrfsic_process_superblock(struct btrfsic_state *state,
 				continue;
 			if (state->print_mask &
 			    BTRFSIC_PRINT_MASK_ROOT_CHUNK_LOG_TREE_LOCATION)
-				pr_info("log@%llu\n", next_bytenr);
+				printk(KERN_INFO "log@%llu\n", next_bytenr);
 			break;
 		}
 
-		num_copies = btrfs_num_copies(fs_info, next_bytenr,
-					      state->metablock_size);
+		num_copies =
+		    btrfs_num_copies(state->root->fs_info,
+				     next_bytenr, state->metablock_size);
 		if (state->print_mask & BTRFSIC_PRINT_MASK_NUM_COPIES)
-			pr_info("num_copies(log_bytenr=%llu) = %d\n",
+			printk(KERN_INFO "num_copies(log_bytenr=%llu) = %d\n",
 			       next_bytenr, num_copies);
 
 		for (mirror_num = 1; mirror_num <= num_copies; mirror_num++) {
@@ -733,7 +731,9 @@ static int btrfsic_process_superblock(struct btrfsic_state *state,
 						&tmp_next_block_ctx,
 						mirror_num);
 			if (ret) {
-				pr_info("btrfsic: btrfsic_map_block(root @%llu, mirror %d) failed!\n",
+				printk(KERN_INFO "btrfsic:"
+				       " btrfsic_map_block(root @%llu,"
+				       " mirror %d) failed!\n",
 				       next_bytenr, mirror_num);
 				kfree(selected_super);
 				return -1;
@@ -755,8 +755,9 @@ static int btrfsic_process_superblock(struct btrfsic_state *state,
 			BUG_ON(NULL == l);
 
 			ret = btrfsic_read_block(state, &tmp_next_block_ctx);
-			if (ret < (int)PAGE_SIZE) {
-				pr_info("btrfsic: read @logical %llu failed!\n",
+			if (ret < (int)PAGE_CACHE_SIZE) {
+				printk(KERN_INFO
+				       "btrfsic: read @logical %llu failed!\n",
 				       tmp_next_block_ctx.start);
 				btrfsic_release_block_ctx(&tmp_next_block_ctx);
 				kfree(selected_super);
@@ -783,7 +784,6 @@ static int btrfsic_process_superblock_dev_mirror(
 		struct btrfsic_dev_state **selected_dev_state,
 		struct btrfs_super_block *selected_super)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
 	struct btrfs_super_block *super_tmp;
 	u64 dev_bytenr;
 	struct buffer_head *bh;
@@ -818,7 +818,7 @@ static int btrfsic_process_superblock_dev_mirror(
 	if (NULL == superblock_tmp) {
 		superblock_tmp = btrfsic_block_alloc();
 		if (NULL == superblock_tmp) {
-			pr_info("btrfsic: error, kmalloc failed!\n");
+			printk(KERN_INFO "btrfsic: error, kmalloc failed!\n");
 			brelse(bh);
 			return -1;
 		}
@@ -833,7 +833,7 @@ static int btrfsic_process_superblock_dev_mirror(
 		superblock_tmp->never_written = 0;
 		superblock_tmp->mirror_num = 1 + superblock_mirror_num;
 		if (state->print_mask & BTRFSIC_PRINT_MASK_SUPERBLOCK_WRITE)
-			btrfs_info_in_rcu(fs_info,
+			btrfs_info_in_rcu(device->dev_root->fs_info,
 				"new initial S-block (bdev %p, %s) @%llu (%s/%llu/%d)",
 				     superblock_bdev,
 				     rcu_str_deref(device->name), dev_bytenr,
@@ -888,10 +888,11 @@ static int btrfsic_process_superblock_dev_mirror(
 			break;
 		}
 
-		num_copies = btrfs_num_copies(fs_info, next_bytenr,
-					      state->metablock_size);
+		num_copies =
+		    btrfs_num_copies(state->root->fs_info,
+				     next_bytenr, state->metablock_size);
 		if (state->print_mask & BTRFSIC_PRINT_MASK_NUM_COPIES)
-			pr_info("num_copies(log_bytenr=%llu) = %d\n",
+			printk(KERN_INFO "num_copies(log_bytenr=%llu) = %d\n",
 			       next_bytenr, num_copies);
 		for (mirror_num = 1; mirror_num <= num_copies; mirror_num++) {
 			struct btrfsic_block *next_block;
@@ -902,7 +903,8 @@ static int btrfsic_process_superblock_dev_mirror(
 					      state->metablock_size,
 					      &tmp_next_block_ctx,
 					      mirror_num)) {
-				pr_info("btrfsic: btrfsic_map_block(bytenr @%llu, mirror %d) failed!\n",
+				printk(KERN_INFO "btrfsic: btrfsic_map_block("
+				       "bytenr @%llu, mirror %d) failed!\n",
 				       next_bytenr, mirror_num);
 				brelse(bh);
 				return -1;
@@ -944,7 +946,7 @@ static struct btrfsic_stack_frame *btrfsic_stack_frame_alloc(void)
 
 	sf = kzalloc(sizeof(*sf), GFP_NOFS);
 	if (NULL == sf)
-		pr_info("btrfsic: alloc memory failed!\n");
+		printk(KERN_INFO "btrfsic: alloc memory failed!\n");
 	else
 		sf->magic = BTRFSIC_BLOCK_STACK_FRAME_MAGIC_NUMBER;
 	return sf;
@@ -990,7 +992,9 @@ continue_with_new_stack_frame:
 			sf->nr = btrfs_stack_header_nritems(&leafhdr->header);
 
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-				pr_info("leaf %llu items %d generation %llu owner %llu\n",
+				printk(KERN_INFO
+				       "leaf %llu items %d generation %llu"
+				       " owner %llu\n",
 				       sf->block_ctx->start, sf->nr,
 				       btrfs_stack_header_generation(
 					       &leafhdr->header),
@@ -1017,7 +1021,8 @@ continue_with_current_leaf_stack_frame:
 			if (disk_item_offset + sizeof(struct btrfs_item) >
 			    sf->block_ctx->len) {
 leaf_item_out_of_bounce_error:
-				pr_info("btrfsic: leaf item out of bounce at logical %llu, dev %s\n",
+				printk(KERN_INFO
+				       "btrfsic: leaf item out of bounce at logical %llu, dev %s\n",
 				       sf->block_ctx->start,
 				       sf->block_ctx->dev->name);
 				goto one_stack_frame_backwards;
@@ -1113,7 +1118,8 @@ leaf_item_out_of_bounce_error:
 			sf->nr = btrfs_stack_header_nritems(&nodehdr->header);
 
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-				pr_info("node %llu level %d items %d generation %llu owner %llu\n",
+				printk(KERN_INFO "node %llu level %d items %d"
+				       " generation %llu owner %llu\n",
 				       sf->block_ctx->start,
 				       nodehdr->header.level, sf->nr,
 				       btrfs_stack_header_generation(
@@ -1137,7 +1143,8 @@ continue_with_current_node_stack_frame:
 					  (uintptr_t)nodehdr;
 			if (key_ptr_offset + sizeof(struct btrfs_key_ptr) >
 			    sf->block_ctx->len) {
-				pr_info("btrfsic: node item out of bounce at logical %llu, dev %s\n",
+				printk(KERN_INFO
+				       "btrfsic: node item out of bounce at logical %llu, dev %s\n",
 				       sf->block_ctx->start,
 				       sf->block_ctx->dev->name);
 				goto one_stack_frame_backwards;
@@ -1222,15 +1229,15 @@ static void btrfsic_read_from_block_data(
 	size_t offset_in_page;
 	char *kaddr;
 	char *dst = (char *)dstv;
-	size_t start_offset = block_ctx->start & ((u64)PAGE_SIZE - 1);
-	unsigned long i = (start_offset + offset) >> PAGE_SHIFT;
+	size_t start_offset = block_ctx->start & ((u64)PAGE_CACHE_SIZE - 1);
+	unsigned long i = (start_offset + offset) >> PAGE_CACHE_SHIFT;
 
 	WARN_ON(offset + len > block_ctx->len);
-	offset_in_page = (start_offset + offset) & (PAGE_SIZE - 1);
+	offset_in_page = (start_offset + offset) & (PAGE_CACHE_SIZE - 1);
 
 	while (len > 0) {
-		cur = min(len, ((size_t)PAGE_SIZE - offset_in_page));
-		BUG_ON(i >= DIV_ROUND_UP(block_ctx->len, PAGE_SIZE));
+		cur = min(len, ((size_t)PAGE_CACHE_SIZE - offset_in_page));
+		BUG_ON(i >= DIV_ROUND_UP(block_ctx->len, PAGE_CACHE_SIZE));
 		kaddr = block_ctx->datav[i];
 		memcpy(dst, kaddr + offset_in_page, cur);
 
@@ -1254,7 +1261,6 @@ static int btrfsic_create_link_to_next_block(
 		struct btrfs_disk_key *disk_key,
 		u64 parent_generation)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
 	struct btrfsic_block *next_block = NULL;
 	int ret;
 	struct btrfsic_block_link *l;
@@ -1263,10 +1269,11 @@ static int btrfsic_create_link_to_next_block(
 
 	*next_blockp = NULL;
 	if (0 == *num_copiesp) {
-		*num_copiesp = btrfs_num_copies(fs_info, next_bytenr,
-						state->metablock_size);
+		*num_copiesp =
+		    btrfs_num_copies(state->root->fs_info,
+				     next_bytenr, state->metablock_size);
 		if (state->print_mask & BTRFSIC_PRINT_MASK_NUM_COPIES)
-			pr_info("num_copies(log_bytenr=%llu) = %d\n",
+			printk(KERN_INFO "num_copies(log_bytenr=%llu) = %d\n",
 			       next_bytenr, *num_copiesp);
 		*mirror_nump = 1;
 	}
@@ -1275,13 +1282,15 @@ static int btrfsic_create_link_to_next_block(
 		return 0;
 
 	if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-		pr_info("btrfsic_create_link_to_next_block(mirror_num=%d)\n",
+		printk(KERN_INFO
+		       "btrfsic_create_link_to_next_block(mirror_num=%d)\n",
 		       *mirror_nump);
 	ret = btrfsic_map_block(state, next_bytenr,
 				state->metablock_size,
 				next_block_ctx, *mirror_nump);
 	if (ret) {
-		pr_info("btrfsic: btrfsic_map_block(@%llu, mirror=%d) failed!\n",
+		printk(KERN_INFO
+		       "btrfsic: btrfsic_map_block(@%llu, mirror=%d) failed!\n",
 		       next_bytenr, *mirror_nump);
 		btrfsic_release_block_ctx(next_block_ctx);
 		*next_blockp = NULL;
@@ -1307,14 +1316,16 @@ static int btrfsic_create_link_to_next_block(
 			if (next_block->logical_bytenr != next_bytenr &&
 			    !(!next_block->is_metadata &&
 			      0 == next_block->logical_bytenr))
-				pr_info("Referenced block @%llu (%s/%llu/%d) found in hash table, %c, bytenr mismatch (!= stored %llu).\n",
+				printk(KERN_INFO
+				       "Referenced block @%llu (%s/%llu/%d) found in hash table, %c, bytenr mismatch (!= stored %llu).\n",
 				       next_bytenr, next_block_ctx->dev->name,
 				       next_block_ctx->dev_bytenr, *mirror_nump,
 				       btrfsic_get_block_type(state,
 							      next_block),
 				       next_block->logical_bytenr);
 			else
-				pr_info("Referenced block @%llu (%s/%llu/%d) found in hash table, %c.\n",
+				printk(KERN_INFO
+				       "Referenced block @%llu (%s/%llu/%d) found in hash table, %c.\n",
 				       next_bytenr, next_block_ctx->dev->name,
 				       next_block_ctx->dev_bytenr, *mirror_nump,
 				       btrfsic_get_block_type(state,
@@ -1335,7 +1346,7 @@ static int btrfsic_create_link_to_next_block(
 	if (NULL == l) {
 		l = btrfsic_block_link_alloc();
 		if (NULL == l) {
-			pr_info("btrfsic: error, kmalloc failed!\n");
+			printk(KERN_INFO "btrfsic: error, kmalloc failed!\n");
 			btrfsic_release_block_ctx(next_block_ctx);
 			*next_blockp = NULL;
 			return -1;
@@ -1368,7 +1379,8 @@ static int btrfsic_create_link_to_next_block(
 	if (limit_nesting > 0 && did_alloc_block_link) {
 		ret = btrfsic_read_block(state, next_block_ctx);
 		if (ret < (int)next_block_ctx->len) {
-			pr_info("btrfsic: read block @logical %llu failed!\n",
+			printk(KERN_INFO
+			       "btrfsic: read block @logical %llu failed!\n",
 			       next_bytenr);
 			btrfsic_release_block_ctx(next_block_ctx);
 			*next_blockp = NULL;
@@ -1390,21 +1402,21 @@ static int btrfsic_handle_extent_data(
 		struct btrfsic_block_data_ctx *block_ctx,
 		u32 item_offset, int force_iodone_flag)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
+	int ret;
 	struct btrfs_file_extent_item file_extent_item;
 	u64 file_extent_item_offset;
 	u64 next_bytenr;
 	u64 num_bytes;
 	u64 generation;
 	struct btrfsic_block_link *l;
-	int ret;
 
 	file_extent_item_offset = offsetof(struct btrfs_leaf, items) +
 				  item_offset;
 	if (file_extent_item_offset +
 	    offsetof(struct btrfs_file_extent_item, disk_num_bytes) >
 	    block_ctx->len) {
-		pr_info("btrfsic: file item out of bounce at logical %llu, dev %s\n",
+		printk(KERN_INFO
+		       "btrfsic: file item out of bounce at logical %llu, dev %s\n",
 		       block_ctx->start, block_ctx->dev->name);
 		return -1;
 	}
@@ -1415,7 +1427,7 @@ static int btrfsic_handle_extent_data(
 	if (BTRFS_FILE_EXTENT_REG != file_extent_item.type ||
 	    btrfs_stack_file_extent_disk_bytenr(&file_extent_item) == 0) {
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERY_VERBOSE)
-			pr_info("extent_data: type %u, disk_bytenr = %llu\n",
+			printk(KERN_INFO "extent_data: type %u, disk_bytenr = %llu\n",
 			       file_extent_item.type,
 			       btrfs_stack_file_extent_disk_bytenr(
 			       &file_extent_item));
@@ -1424,7 +1436,8 @@ static int btrfsic_handle_extent_data(
 
 	if (file_extent_item_offset + sizeof(struct btrfs_file_extent_item) >
 	    block_ctx->len) {
-		pr_info("btrfsic: file item out of bounce at logical %llu, dev %s\n",
+		printk(KERN_INFO
+		       "btrfsic: file item out of bounce at logical %llu, dev %s\n",
 		       block_ctx->start, block_ctx->dev->name);
 		return -1;
 	}
@@ -1442,7 +1455,8 @@ static int btrfsic_handle_extent_data(
 	generation = btrfs_stack_file_extent_generation(&file_extent_item);
 
 	if (state->print_mask & BTRFSIC_PRINT_MASK_VERY_VERBOSE)
-		pr_info("extent_data: type %u, disk_bytenr = %llu, offset = %llu, num_bytes = %llu\n",
+		printk(KERN_INFO "extent_data: type %u, disk_bytenr = %llu,"
+		       " offset = %llu, num_bytes = %llu\n",
 		       file_extent_item.type,
 		       btrfs_stack_file_extent_disk_bytenr(&file_extent_item),
 		       btrfs_stack_file_extent_offset(&file_extent_item),
@@ -1457,10 +1471,11 @@ static int btrfsic_handle_extent_data(
 		else
 			chunk_len = num_bytes;
 
-		num_copies = btrfs_num_copies(fs_info, next_bytenr,
-					      state->datablock_size);
+		num_copies =
+		    btrfs_num_copies(state->root->fs_info,
+				     next_bytenr, state->datablock_size);
 		if (state->print_mask & BTRFSIC_PRINT_MASK_NUM_COPIES)
-			pr_info("num_copies(log_bytenr=%llu) = %d\n",
+			printk(KERN_INFO "num_copies(log_bytenr=%llu) = %d\n",
 			       next_bytenr, num_copies);
 		for (mirror_num = 1; mirror_num <= num_copies; mirror_num++) {
 			struct btrfsic_block_data_ctx next_block_ctx;
@@ -1468,16 +1483,19 @@ static int btrfsic_handle_extent_data(
 			int block_was_created;
 
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-				pr_info("btrfsic_handle_extent_data(mirror_num=%d)\n",
-					mirror_num);
+				printk(KERN_INFO "btrfsic_handle_extent_data("
+				       "mirror_num=%d)\n", mirror_num);
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERY_VERBOSE)
-				pr_info("\tdisk_bytenr = %llu, num_bytes %u\n",
+				printk(KERN_INFO
+				       "\tdisk_bytenr = %llu, num_bytes %u\n",
 				       next_bytenr, chunk_len);
 			ret = btrfsic_map_block(state, next_bytenr,
 						chunk_len, &next_block_ctx,
 						mirror_num);
 			if (ret) {
-				pr_info("btrfsic: btrfsic_map_block(@%llu, mirror=%d) failed!\n",
+				printk(KERN_INFO
+				       "btrfsic: btrfsic_map_block(@%llu,"
+				       " mirror=%d) failed!\n",
 				       next_bytenr, mirror_num);
 				return -1;
 			}
@@ -1492,7 +1510,8 @@ static int btrfsic_handle_extent_data(
 					mirror_num,
 					&block_was_created);
 			if (NULL == next_block) {
-				pr_info("btrfsic: error, kmalloc failed!\n");
+				printk(KERN_INFO
+				       "btrfsic: error, kmalloc failed!\n");
 				btrfsic_release_block_ctx(&next_block_ctx);
 				return -1;
 			}
@@ -1502,7 +1521,12 @@ static int btrfsic_handle_extent_data(
 				    next_block->logical_bytenr != next_bytenr &&
 				    !(!next_block->is_metadata &&
 				      0 == next_block->logical_bytenr)) {
-					pr_info("Referenced block @%llu (%s/%llu/%d) found in hash table, D, bytenr mismatch (!= stored %llu).\n",
+					printk(KERN_INFO
+					       "Referenced block"
+					       " @%llu (%s/%llu/%d)"
+					       " found in hash table, D,"
+					       " bytenr mismatch"
+					       " (!= stored %llu).\n",
 					       next_bytenr,
 					       next_block_ctx.dev->name,
 					       next_block_ctx.dev_bytenr,
@@ -1533,14 +1557,13 @@ static int btrfsic_map_block(struct btrfsic_state *state, u64 bytenr, u32 len,
 			     struct btrfsic_block_data_ctx *block_ctx_out,
 			     int mirror_num)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
 	int ret;
 	u64 length;
 	struct btrfs_bio *multi = NULL;
 	struct btrfs_device *device;
 
 	length = len;
-	ret = btrfs_map_block(fs_info, BTRFS_MAP_READ,
+	ret = btrfs_map_block(state->root->fs_info, READ,
 			      bytenr, &length, &multi, mirror_num);
 
 	if (ret) {
@@ -1567,7 +1590,7 @@ static int btrfsic_map_block(struct btrfsic_state *state, u64 bytenr, u32 len,
 	kfree(multi);
 	if (NULL == block_ctx_out->dev) {
 		ret = -ENXIO;
-		pr_info("btrfsic: error, cannot lookup dev (#1)!\n");
+		printk(KERN_INFO "btrfsic: error, cannot lookup dev (#1)!\n");
 	}
 
 	return ret;
@@ -1580,8 +1603,8 @@ static void btrfsic_release_block_ctx(struct btrfsic_block_data_ctx *block_ctx)
 
 		BUG_ON(!block_ctx->datav);
 		BUG_ON(!block_ctx->pagev);
-		num_pages = (block_ctx->len + (u64)PAGE_SIZE - 1) >>
-			    PAGE_SHIFT;
+		num_pages = (block_ctx->len + (u64)PAGE_CACHE_SIZE - 1) >>
+			    PAGE_CACHE_SHIFT;
 		while (num_pages > 0) {
 			num_pages--;
 			if (block_ctx->datav[num_pages]) {
@@ -1612,14 +1635,15 @@ static int btrfsic_read_block(struct btrfsic_state *state,
 	BUG_ON(block_ctx->datav);
 	BUG_ON(block_ctx->pagev);
 	BUG_ON(block_ctx->mem_to_free);
-	if (block_ctx->dev_bytenr & ((u64)PAGE_SIZE - 1)) {
-		pr_info("btrfsic: read_block() with unaligned bytenr %llu\n",
+	if (block_ctx->dev_bytenr & ((u64)PAGE_CACHE_SIZE - 1)) {
+		printk(KERN_INFO
+		       "btrfsic: read_block() with unaligned bytenr %llu\n",
 		       block_ctx->dev_bytenr);
 		return -1;
 	}
 
-	num_pages = (block_ctx->len + (u64)PAGE_SIZE - 1) >>
-		    PAGE_SHIFT;
+	num_pages = (block_ctx->len + (u64)PAGE_CACHE_SIZE - 1) >>
+		    PAGE_CACHE_SHIFT;
 	block_ctx->mem_to_free = kzalloc((sizeof(*block_ctx->datav) +
 					  sizeof(*block_ctx->pagev)) *
 					 num_pages, GFP_NOFS);
@@ -1640,38 +1664,40 @@ static int btrfsic_read_block(struct btrfsic_state *state,
 
 		bio = btrfs_io_bio_alloc(GFP_NOFS, num_pages - i);
 		if (!bio) {
-			pr_info("btrfsic: bio_alloc() for %u pages failed!\n",
+			printk(KERN_INFO
+			       "btrfsic: bio_alloc() for %u pages failed!\n",
 			       num_pages - i);
 			return -1;
 		}
 		bio->bi_bdev = block_ctx->dev->bdev;
 		bio->bi_iter.bi_sector = dev_bytenr >> 9;
-		bio_set_op_attrs(bio, REQ_OP_READ, 0);
 
 		for (j = i; j < num_pages; j++) {
 			ret = bio_add_page(bio, block_ctx->pagev[j],
-					   PAGE_SIZE, 0);
-			if (PAGE_SIZE != ret)
+					   PAGE_CACHE_SIZE, 0);
+			if (PAGE_CACHE_SIZE != ret)
 				break;
 		}
 		if (j == i) {
-			pr_info("btrfsic: error, failed to add a single page!\n");
+			printk(KERN_INFO
+			       "btrfsic: error, failed to add a single page!\n");
 			return -1;
 		}
-		if (submit_bio_wait(bio)) {
-			pr_info("btrfsic: read error at logical %llu dev %s!\n",
+		if (submit_bio_wait(READ, bio)) {
+			printk(KERN_INFO
+			       "btrfsic: read error at logical %llu dev %s!\n",
 			       block_ctx->start, block_ctx->dev->name);
 			bio_put(bio);
 			return -1;
 		}
 		bio_put(bio);
-		dev_bytenr += (j - i) * PAGE_SIZE;
+		dev_bytenr += (j - i) * PAGE_CACHE_SIZE;
 		i = j;
 	}
 	for (i = 0; i < num_pages; i++) {
 		block_ctx->datav[i] = kmap(block_ctx->pagev[i]);
 		if (!block_ctx->datav[i]) {
-			pr_info("btrfsic: kmap() failed (dev %s)!\n",
+			printk(KERN_INFO "btrfsic: kmap() failed (dev %s)!\n",
 			       block_ctx->dev->name);
 			return -1;
 		}
@@ -1686,17 +1712,19 @@ static void btrfsic_dump_database(struct btrfsic_state *state)
 
 	BUG_ON(NULL == state);
 
-	pr_info("all_blocks_list:\n");
+	printk(KERN_INFO "all_blocks_list:\n");
 	list_for_each_entry(b_all, &state->all_blocks_list, all_blocks_node) {
 		const struct btrfsic_block_link *l;
 
-		pr_info("%c-block @%llu (%s/%llu/%d)\n",
+		printk(KERN_INFO "%c-block @%llu (%s/%llu/%d)\n",
 		       btrfsic_get_block_type(state, b_all),
 		       b_all->logical_bytenr, b_all->dev_state->name,
 		       b_all->dev_bytenr, b_all->mirror_num);
 
 		list_for_each_entry(l, &b_all->ref_to_list, node_ref_to) {
-			pr_info(" %c @%llu (%s/%llu/%d) refers %u* to %c @%llu (%s/%llu/%d)\n",
+			printk(KERN_INFO " %c @%llu (%s/%llu/%d)"
+			       " refers %u* to"
+			       " %c @%llu (%s/%llu/%d)\n",
 			       btrfsic_get_block_type(state, b_all),
 			       b_all->logical_bytenr, b_all->dev_state->name,
 			       b_all->dev_bytenr, b_all->mirror_num,
@@ -1709,7 +1737,9 @@ static void btrfsic_dump_database(struct btrfsic_state *state)
 		}
 
 		list_for_each_entry(l, &b_all->ref_from_list, node_ref_from) {
-			pr_info(" %c @%llu (%s/%llu/%d) is ref %u* from %c @%llu (%s/%llu/%d)\n",
+			printk(KERN_INFO " %c @%llu (%s/%llu/%d)"
+			       " is ref %u* from"
+			       " %c @%llu (%s/%llu/%d)\n",
 			       btrfsic_get_block_type(state, b_all),
 			       b_all->logical_bytenr, b_all->dev_state->name,
 			       b_all->dev_bytenr, b_all->mirror_num,
@@ -1721,7 +1751,7 @@ static void btrfsic_dump_database(struct btrfsic_state *state)
 			       l->block_ref_from->mirror_num);
 		}
 
-		pr_info("\n");
+		printk(KERN_INFO "\n");
 	}
 }
 
@@ -1732,24 +1762,23 @@ static void btrfsic_dump_database(struct btrfsic_state *state)
 static int btrfsic_test_for_metadata(struct btrfsic_state *state,
 				     char **datav, unsigned int num_pages)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
 	struct btrfs_header *h;
 	u8 csum[BTRFS_CSUM_SIZE];
 	u32 crc = ~(u32)0;
 	unsigned int i;
 
-	if (num_pages * PAGE_SIZE < state->metablock_size)
+	if (num_pages * PAGE_CACHE_SIZE < state->metablock_size)
 		return 1; /* not metadata */
-	num_pages = state->metablock_size >> PAGE_SHIFT;
+	num_pages = state->metablock_size >> PAGE_CACHE_SHIFT;
 	h = (struct btrfs_header *)datav[0];
 
-	if (memcmp(h->fsid, fs_info->fsid, BTRFS_UUID_SIZE))
+	if (memcmp(h->fsid, state->root->fs_info->fsid, BTRFS_UUID_SIZE))
 		return 1;
 
 	for (i = 0; i < num_pages; i++) {
 		u8 *data = i ? datav[i] : (datav[i] + BTRFS_CSUM_SIZE);
-		size_t sublen = i ? PAGE_SIZE :
-				    (PAGE_SIZE - BTRFS_CSUM_SIZE);
+		size_t sublen = i ? PAGE_CACHE_SIZE :
+				    (PAGE_CACHE_SIZE - BTRFS_CSUM_SIZE);
 
 		crc = btrfs_crc32c(crc, data, sublen);
 	}
@@ -1795,25 +1824,28 @@ again:
 		if (block->is_superblock) {
 			bytenr = btrfs_super_bytenr((struct btrfs_super_block *)
 						    mapped_datav[0]);
-			if (num_pages * PAGE_SIZE <
+			if (num_pages * PAGE_CACHE_SIZE <
 			    BTRFS_SUPER_INFO_SIZE) {
-				pr_info("btrfsic: cannot work with too short bios!\n");
+				printk(KERN_INFO
+				       "btrfsic: cannot work with too short bios!\n");
 				return;
 			}
 			is_metadata = 1;
-			BUG_ON(BTRFS_SUPER_INFO_SIZE & (PAGE_SIZE - 1));
+			BUG_ON(BTRFS_SUPER_INFO_SIZE & (PAGE_CACHE_SIZE - 1));
 			processed_len = BTRFS_SUPER_INFO_SIZE;
 			if (state->print_mask &
 			    BTRFSIC_PRINT_MASK_TREE_BEFORE_SB_WRITE) {
-				pr_info("[before new superblock is written]:\n");
+				printk(KERN_INFO
+				       "[before new superblock is written]:\n");
 				btrfsic_dump_tree_sub(state, block, 0);
 			}
 		}
 		if (is_metadata) {
 			if (!block->is_superblock) {
-				if (num_pages * PAGE_SIZE <
+				if (num_pages * PAGE_CACHE_SIZE <
 				    state->metablock_size) {
-					pr_info("btrfsic: cannot work with too short bios!\n");
+					printk(KERN_INFO
+					       "btrfsic: cannot work with too short bios!\n");
 					return;
 				}
 				processed_len = state->metablock_size;
@@ -1828,7 +1860,8 @@ again:
 				if (block->logical_bytenr != bytenr &&
 				    !(!block->is_metadata &&
 				      block->logical_bytenr == 0))
-					pr_info("Written block @%llu (%s/%llu/%d) found in hash table, %c, bytenr mismatch (!= stored %llu).\n",
+					printk(KERN_INFO
+					       "Written block @%llu (%s/%llu/%d) found in hash table, %c, bytenr mismatch (!= stored %llu).\n",
 					       bytenr, dev_state->name,
 					       dev_bytenr,
 					       block->mirror_num,
@@ -1836,7 +1869,8 @@ again:
 								      block),
 					       block->logical_bytenr);
 				else
-					pr_info("Written block @%llu (%s/%llu/%d) found in hash table, %c.\n",
+					printk(KERN_INFO
+					       "Written block @%llu (%s/%llu/%d) found in hash table, %c.\n",
 					       bytenr, dev_state->name,
 					       dev_bytenr, block->mirror_num,
 					       btrfsic_get_block_type(state,
@@ -1844,26 +1878,35 @@ again:
 			}
 			block->logical_bytenr = bytenr;
 		} else {
-			if (num_pages * PAGE_SIZE <
+			if (num_pages * PAGE_CACHE_SIZE <
 			    state->datablock_size) {
-				pr_info("btrfsic: cannot work with too short bios!\n");
+				printk(KERN_INFO
+				       "btrfsic: cannot work with too short bios!\n");
 				return;
 			}
 			processed_len = state->datablock_size;
 			bytenr = block->logical_bytenr;
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-				pr_info("Written block @%llu (%s/%llu/%d) found in hash table, %c.\n",
+				printk(KERN_INFO
+				       "Written block @%llu (%s/%llu/%d)"
+				       " found in hash table, %c.\n",
 				       bytenr, dev_state->name, dev_bytenr,
 				       block->mirror_num,
 				       btrfsic_get_block_type(state, block));
 		}
 
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-			pr_info("ref_to_list: %cE, ref_from_list: %cE\n",
+			printk(KERN_INFO
+			       "ref_to_list: %cE, ref_from_list: %cE\n",
 			       list_empty(&block->ref_to_list) ? ' ' : '!',
 			       list_empty(&block->ref_from_list) ? ' ' : '!');
 		if (btrfsic_is_block_ref_by_superblock(state, block, 0)) {
-			pr_info("btrfs: attempt to overwrite %c-block @%llu (%s/%llu/%d), old(gen=%llu, objectid=%llu, type=%d, offset=%llu), new(gen=%llu), which is referenced by most recent superblock (superblockgen=%llu)!\n",
+			printk(KERN_INFO "btrfs: attempt to overwrite %c-block"
+			       " @%llu (%s/%llu/%d), old(gen=%llu,"
+			       " objectid=%llu, type=%d, offset=%llu),"
+			       " new(gen=%llu),"
+			       " which is referenced by most recent superblock"
+			       " (superblockgen=%llu)!\n",
 			       btrfsic_get_block_type(state, block), bytenr,
 			       dev_state->name, dev_bytenr, block->mirror_num,
 			       block->generation,
@@ -1877,7 +1920,9 @@ again:
 		}
 
 		if (!block->is_iodone && !block->never_written) {
-			pr_info("btrfs: attempt to overwrite %c-block @%llu (%s/%llu/%d), oldgen=%llu, newgen=%llu, which is not yet iodone!\n",
+			printk(KERN_INFO "btrfs: attempt to overwrite %c-block"
+			       " @%llu (%s/%llu/%d), oldgen=%llu, newgen=%llu,"
+			       " which is not yet iodone!\n",
 			       btrfsic_get_block_type(state, block), bytenr,
 			       dev_state->name, dev_bytenr, block->mirror_num,
 			       block->generation,
@@ -1892,7 +1937,7 @@ again:
 		/*
 		 * Clear all references of this block. Do not free
 		 * the block itself even if is not referenced anymore
-		 * because it still carries valuable information
+		 * because it still carries valueable information
 		 * like whether it was ever written and IO completed.
 		 */
 		list_for_each_entry_safe(l, tmp, &block->ref_to_list,
@@ -1966,7 +2011,7 @@ again:
 			block->logical_bytenr = bytenr;
 			block->is_metadata = 1;
 			if (block->is_superblock) {
-				BUG_ON(PAGE_SIZE !=
+				BUG_ON(PAGE_CACHE_SIZE !=
 				       BTRFS_SUPER_INFO_SIZE);
 				ret = btrfsic_process_written_superblock(
 						state,
@@ -1975,7 +2020,8 @@ again:
 						mapped_datav[0]);
 				if (state->print_mask &
 				    BTRFSIC_PRINT_MASK_TREE_AFTER_SB_WRITE) {
-					pr_info("[after new superblock is written]:\n");
+					printk(KERN_INFO
+					"[after new superblock is written]:\n");
 					btrfsic_dump_tree_sub(state, block, 0);
 				}
 			} else {
@@ -1987,7 +2033,9 @@ again:
 						0, 0);
 			}
 			if (ret)
-				pr_info("btrfsic: btrfsic_process_metablock(root @%llu) failed!\n",
+				printk(KERN_INFO
+				       "btrfsic: btrfsic_process_metablock"
+				       "(root @%llu) failed!\n",
 				       dev_bytenr);
 		} else {
 			block->is_metadata = 0;
@@ -2014,7 +2062,8 @@ again:
 		if (!is_metadata) {
 			processed_len = state->datablock_size;
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-				pr_info("Written block (%s/%llu/?) !found in hash table, D.\n",
+				printk(KERN_INFO "Written block (%s/%llu/?)"
+				       " !found in hash table, D.\n",
 				       dev_state->name, dev_bytenr);
 			if (!state->include_extent_data) {
 				/* ignore that written D block */
@@ -2032,7 +2081,9 @@ again:
 			btrfsic_cmp_log_and_dev_bytenr(state, bytenr, dev_state,
 						       dev_bytenr);
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-				pr_info("Written block @%llu (%s/%llu/?) !found in hash table, M.\n",
+				printk(KERN_INFO
+				       "Written block @%llu (%s/%llu/?)"
+				       " !found in hash table, M.\n",
 				       bytenr, dev_state->name, dev_bytenr);
 		}
 
@@ -2046,7 +2097,7 @@ again:
 
 		block = btrfsic_block_alloc();
 		if (NULL == block) {
-			pr_info("btrfsic: error, kmalloc failed!\n");
+			printk(KERN_INFO "btrfsic: error, kmalloc failed!\n");
 			btrfsic_release_block_ctx(&block_ctx);
 			goto continue_loop;
 		}
@@ -2096,7 +2147,8 @@ again:
 			block->next_in_same_bio = NULL;
 		}
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-			pr_info("New written %c-block @%llu (%s/%llu/%d)\n",
+			printk(KERN_INFO
+			       "New written %c-block @%llu (%s/%llu/%d)\n",
 			       is_metadata ? 'M' : 'D',
 			       block->logical_bytenr, block->dev_state->name,
 			       block->dev_bytenr, block->mirror_num);
@@ -2107,7 +2159,9 @@ again:
 			ret = btrfsic_process_metablock(state, block,
 							&block_ctx, 0, 0);
 			if (ret)
-				pr_info("btrfsic: process_metablock(root @%llu) failed!\n",
+				printk(KERN_INFO
+				       "btrfsic: process_metablock(root @%llu)"
+				       " failed!\n",
 				       dev_bytenr);
 		}
 		btrfsic_release_block_ctx(&block_ctx);
@@ -2116,8 +2170,8 @@ again:
 continue_loop:
 	BUG_ON(!processed_len);
 	dev_bytenr += processed_len;
-	mapped_datav += processed_len >> PAGE_SHIFT;
-	num_pages -= processed_len >> PAGE_SHIFT;
+	mapped_datav += processed_len >> PAGE_CACHE_SHIFT;
+	num_pages -= processed_len >> PAGE_CACHE_SHIFT;
 	goto again;
 }
 
@@ -2142,18 +2196,20 @@ static void btrfsic_bio_end_io(struct bio *bp)
 
 		if ((dev_state->state->print_mask &
 		     BTRFSIC_PRINT_MASK_END_IO_BIO_BH))
-			pr_info("bio_end_io(err=%d) for %c @%llu (%s/%llu/%d)\n",
+			printk(KERN_INFO
+			       "bio_end_io(err=%d) for %c @%llu (%s/%llu/%d)\n",
 			       bp->bi_error,
 			       btrfsic_get_block_type(dev_state->state, block),
 			       block->logical_bytenr, dev_state->name,
 			       block->dev_bytenr, block->mirror_num);
 		next_block = block->next_in_same_bio;
 		block->iodone_w_error = iodone_w_error;
-		if (block->submit_bio_bh_rw & REQ_PREFLUSH) {
+		if (block->submit_bio_bh_rw & REQ_FLUSH) {
 			dev_state->last_flush_gen++;
 			if ((dev_state->state->print_mask &
 			     BTRFSIC_PRINT_MASK_END_IO_BIO_BH))
-				pr_info("bio_end_io() new %s flush_gen=%llu\n",
+				printk(KERN_INFO
+				       "bio_end_io() new %s flush_gen=%llu\n",
 				       dev_state->name,
 				       dev_state->last_flush_gen);
 		}
@@ -2176,18 +2232,20 @@ static void btrfsic_bh_end_io(struct buffer_head *bh, int uptodate)
 	BUG_ON(NULL == block);
 	dev_state = block->dev_state;
 	if ((dev_state->state->print_mask & BTRFSIC_PRINT_MASK_END_IO_BIO_BH))
-		pr_info("bh_end_io(error=%d) for %c @%llu (%s/%llu/%d)\n",
+		printk(KERN_INFO
+		       "bh_end_io(error=%d) for %c @%llu (%s/%llu/%d)\n",
 		       iodone_w_error,
 		       btrfsic_get_block_type(dev_state->state, block),
 		       block->logical_bytenr, block->dev_state->name,
 		       block->dev_bytenr, block->mirror_num);
 
 	block->iodone_w_error = iodone_w_error;
-	if (block->submit_bio_bh_rw & REQ_PREFLUSH) {
+	if (block->submit_bio_bh_rw & REQ_FLUSH) {
 		dev_state->last_flush_gen++;
 		if ((dev_state->state->print_mask &
 		     BTRFSIC_PRINT_MASK_END_IO_BIO_BH))
-			pr_info("bh_end_io() new %s flush_gen=%llu\n",
+			printk(KERN_INFO
+			       "bh_end_io() new %s flush_gen=%llu\n",
 			       dev_state->name, dev_state->last_flush_gen);
 	}
 	if (block->submit_bio_bh_rw & REQ_FUA)
@@ -2204,14 +2262,15 @@ static int btrfsic_process_written_superblock(
 		struct btrfsic_block *const superblock,
 		struct btrfs_super_block *const super_hdr)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
 	int pass;
 
 	superblock->generation = btrfs_super_generation(super_hdr);
 	if (!(superblock->generation > state->max_superblock_generation ||
 	      0 == state->max_superblock_generation)) {
 		if (state->print_mask & BTRFSIC_PRINT_MASK_SUPERBLOCK_WRITE)
-			pr_info("btrfsic: superblock @%llu (%s/%llu/%d) with old gen %llu <= %llu\n",
+			printk(KERN_INFO
+			       "btrfsic: superblock @%llu (%s/%llu/%d)"
+			       " with old gen %llu <= %llu\n",
 			       superblock->logical_bytenr,
 			       superblock->dev_state->name,
 			       superblock->dev_bytenr, superblock->mirror_num,
@@ -2219,7 +2278,9 @@ static int btrfsic_process_written_superblock(
 			       state->max_superblock_generation);
 	} else {
 		if (state->print_mask & BTRFSIC_PRINT_MASK_SUPERBLOCK_WRITE)
-			pr_info("btrfsic: got new superblock @%llu (%s/%llu/%d) with new gen %llu > %llu\n",
+			printk(KERN_INFO
+			       "btrfsic: got new superblock @%llu (%s/%llu/%d)"
+			       " with new gen %llu > %llu\n",
 			       superblock->logical_bytenr,
 			       superblock->dev_state->name,
 			       superblock->dev_bytenr, superblock->mirror_num,
@@ -2254,7 +2315,7 @@ static int btrfsic_process_written_superblock(
 			next_bytenr = btrfs_super_root(super_hdr);
 			if (state->print_mask &
 			    BTRFSIC_PRINT_MASK_ROOT_CHUNK_LOG_TREE_LOCATION)
-				pr_info("root@%llu\n", next_bytenr);
+				printk(KERN_INFO "root@%llu\n", next_bytenr);
 			break;
 		case 1:
 			btrfs_set_disk_key_objectid(&tmp_disk_key,
@@ -2263,7 +2324,7 @@ static int btrfsic_process_written_superblock(
 			next_bytenr = btrfs_super_chunk_root(super_hdr);
 			if (state->print_mask &
 			    BTRFSIC_PRINT_MASK_ROOT_CHUNK_LOG_TREE_LOCATION)
-				pr_info("chunk@%llu\n", next_bytenr);
+				printk(KERN_INFO "chunk@%llu\n", next_bytenr);
 			break;
 		case 2:
 			btrfs_set_disk_key_objectid(&tmp_disk_key,
@@ -2274,26 +2335,31 @@ static int btrfsic_process_written_superblock(
 				continue;
 			if (state->print_mask &
 			    BTRFSIC_PRINT_MASK_ROOT_CHUNK_LOG_TREE_LOCATION)
-				pr_info("log@%llu\n", next_bytenr);
+				printk(KERN_INFO "log@%llu\n", next_bytenr);
 			break;
 		}
 
-		num_copies = btrfs_num_copies(fs_info, next_bytenr,
-					      BTRFS_SUPER_INFO_SIZE);
+		num_copies =
+		    btrfs_num_copies(state->root->fs_info,
+				     next_bytenr, BTRFS_SUPER_INFO_SIZE);
 		if (state->print_mask & BTRFSIC_PRINT_MASK_NUM_COPIES)
-			pr_info("num_copies(log_bytenr=%llu) = %d\n",
+			printk(KERN_INFO "num_copies(log_bytenr=%llu) = %d\n",
 			       next_bytenr, num_copies);
 		for (mirror_num = 1; mirror_num <= num_copies; mirror_num++) {
 			int was_created;
 
 			if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-				pr_info("btrfsic_process_written_superblock(mirror_num=%d)\n", mirror_num);
+				printk(KERN_INFO
+				       "btrfsic_process_written_superblock("
+				       "mirror_num=%d)\n", mirror_num);
 			ret = btrfsic_map_block(state, next_bytenr,
 						BTRFS_SUPER_INFO_SIZE,
 						&tmp_next_block_ctx,
 						mirror_num);
 			if (ret) {
-				pr_info("btrfsic: btrfsic_map_block(@%llu, mirror=%d) failed!\n",
+				printk(KERN_INFO
+				       "btrfsic: btrfsic_map_block(@%llu,"
+				       " mirror=%d) failed!\n",
 				       next_bytenr, mirror_num);
 				return -1;
 			}
@@ -2306,7 +2372,8 @@ static int btrfsic_process_written_superblock(
 					mirror_num,
 					&was_created);
 			if (NULL == next_block) {
-				pr_info("btrfsic: error, kmalloc failed!\n");
+				printk(KERN_INFO
+				       "btrfsic: error, kmalloc failed!\n");
 				btrfsic_release_block_ctx(&tmp_next_block_ctx);
 				return -1;
 			}
@@ -2355,7 +2422,8 @@ static int btrfsic_check_all_ref_blocks(struct btrfsic_state *state,
 		 * by the most recent super block.
 		 */
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-			pr_info("btrfsic: abort cyclic linkage (case 1).\n");
+			printk(KERN_INFO
+			       "btrfsic: abort cyclic linkage (case 1).\n");
 
 		return ret;
 	}
@@ -2366,7 +2434,9 @@ static int btrfsic_check_all_ref_blocks(struct btrfsic_state *state,
 	 */
 	list_for_each_entry(l, &block->ref_to_list, node_ref_to) {
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-			pr_info("rl=%d, %c @%llu (%s/%llu/%d) %u* refers to %c @%llu (%s/%llu/%d)\n",
+			printk(KERN_INFO
+			       "rl=%d, %c @%llu (%s/%llu/%d)"
+			       " %u* refers to %c @%llu (%s/%llu/%d)\n",
 			       recursion_level,
 			       btrfsic_get_block_type(state, block),
 			       block->logical_bytenr, block->dev_state->name,
@@ -2378,7 +2448,9 @@ static int btrfsic_check_all_ref_blocks(struct btrfsic_state *state,
 			       l->block_ref_to->dev_bytenr,
 			       l->block_ref_to->mirror_num);
 		if (l->block_ref_to->never_written) {
-			pr_info("btrfs: attempt to write superblock which references block %c @%llu (%s/%llu/%d) which is never written!\n",
+			printk(KERN_INFO "btrfs: attempt to write superblock"
+			       " which references block %c @%llu (%s/%llu/%d)"
+			       " which is never written!\n",
 			       btrfsic_get_block_type(state, l->block_ref_to),
 			       l->block_ref_to->logical_bytenr,
 			       l->block_ref_to->dev_state->name,
@@ -2386,7 +2458,9 @@ static int btrfsic_check_all_ref_blocks(struct btrfsic_state *state,
 			       l->block_ref_to->mirror_num);
 			ret = -1;
 		} else if (!l->block_ref_to->is_iodone) {
-			pr_info("btrfs: attempt to write superblock which references block %c @%llu (%s/%llu/%d) which is not yet iodone!\n",
+			printk(KERN_INFO "btrfs: attempt to write superblock"
+			       " which references block %c @%llu (%s/%llu/%d)"
+			       " which is not yet iodone!\n",
 			       btrfsic_get_block_type(state, l->block_ref_to),
 			       l->block_ref_to->logical_bytenr,
 			       l->block_ref_to->dev_state->name,
@@ -2394,7 +2468,9 @@ static int btrfsic_check_all_ref_blocks(struct btrfsic_state *state,
 			       l->block_ref_to->mirror_num);
 			ret = -1;
 		} else if (l->block_ref_to->iodone_w_error) {
-			pr_info("btrfs: attempt to write superblock which references block %c @%llu (%s/%llu/%d) which has write error!\n",
+			printk(KERN_INFO "btrfs: attempt to write superblock"
+			       " which references block %c @%llu (%s/%llu/%d)"
+			       " which has write error!\n",
 			       btrfsic_get_block_type(state, l->block_ref_to),
 			       l->block_ref_to->logical_bytenr,
 			       l->block_ref_to->dev_state->name,
@@ -2407,7 +2483,10 @@ static int btrfsic_check_all_ref_blocks(struct btrfsic_state *state,
 			   l->parent_generation &&
 			   BTRFSIC_GENERATION_UNKNOWN !=
 			   l->block_ref_to->generation) {
-			pr_info("btrfs: attempt to write superblock which references block %c @%llu (%s/%llu/%d) with generation %llu != parent generation %llu!\n",
+			printk(KERN_INFO "btrfs: attempt to write superblock"
+			       " which references block %c @%llu (%s/%llu/%d)"
+			       " with generation %llu !="
+			       " parent generation %llu!\n",
 			       btrfsic_get_block_type(state, l->block_ref_to),
 			       l->block_ref_to->logical_bytenr,
 			       l->block_ref_to->dev_state->name,
@@ -2418,7 +2497,11 @@ static int btrfsic_check_all_ref_blocks(struct btrfsic_state *state,
 			ret = -1;
 		} else if (l->block_ref_to->flush_gen >
 			   l->block_ref_to->dev_state->last_flush_gen) {
-			pr_info("btrfs: attempt to write superblock which references block %c @%llu (%s/%llu/%d) which is not flushed out of disk's write cache (block flush_gen=%llu, dev->flush_gen=%llu)!\n",
+			printk(KERN_INFO "btrfs: attempt to write superblock"
+			       " which references block %c @%llu (%s/%llu/%d)"
+			       " which is not flushed out of disk's write cache"
+			       " (block flush_gen=%llu,"
+			       " dev->flush_gen=%llu)!\n",
 			       btrfsic_get_block_type(state, l->block_ref_to),
 			       l->block_ref_to->logical_bytenr,
 			       l->block_ref_to->dev_state->name,
@@ -2447,7 +2530,8 @@ static int btrfsic_is_block_ref_by_superblock(
 	if (recursion_level >= 3 + BTRFS_MAX_LEVEL) {
 		/* refer to comment at "abort cyclic linkage (case 1)" */
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-			pr_info("btrfsic: abort cyclic linkage (case 2).\n");
+			printk(KERN_INFO
+			       "btrfsic: abort cyclic linkage (case 2).\n");
 
 		return 0;
 	}
@@ -2458,7 +2542,9 @@ static int btrfsic_is_block_ref_by_superblock(
 	 */
 	list_for_each_entry(l, &block->ref_from_list, node_ref_from) {
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-			pr_info("rl=%d, %c @%llu (%s/%llu/%d) is ref %u* from %c @%llu (%s/%llu/%d)\n",
+			printk(KERN_INFO
+			       "rl=%d, %c @%llu (%s/%llu/%d)"
+			       " is ref %u* from %c @%llu (%s/%llu/%d)\n",
 			       recursion_level,
 			       btrfsic_get_block_type(state, block),
 			       block->logical_bytenr, block->dev_state->name,
@@ -2488,7 +2574,9 @@ static int btrfsic_is_block_ref_by_superblock(
 static void btrfsic_print_add_link(const struct btrfsic_state *state,
 				   const struct btrfsic_block_link *l)
 {
-	pr_info("Add %u* link from %c @%llu (%s/%llu/%d) to %c @%llu (%s/%llu/%d).\n",
+	printk(KERN_INFO
+	       "Add %u* link from %c @%llu (%s/%llu/%d)"
+	       " to %c @%llu (%s/%llu/%d).\n",
 	       l->ref_cnt,
 	       btrfsic_get_block_type(state, l->block_ref_from),
 	       l->block_ref_from->logical_bytenr,
@@ -2503,7 +2591,9 @@ static void btrfsic_print_add_link(const struct btrfsic_state *state,
 static void btrfsic_print_rem_link(const struct btrfsic_state *state,
 				   const struct btrfsic_block_link *l)
 {
-	pr_info("Rem %u* link from %c @%llu (%s/%llu/%d) to %c @%llu (%s/%llu/%d).\n",
+	printk(KERN_INFO
+	       "Rem %u* link from %c @%llu (%s/%llu/%d)"
+	       " to %c @%llu (%s/%llu/%d).\n",
 	       l->ref_cnt,
 	       btrfsic_get_block_type(state, l->block_ref_from),
 	       l->block_ref_from->logical_bytenr,
@@ -2553,7 +2643,7 @@ static void btrfsic_dump_tree_sub(const struct btrfsic_state *state,
 	 * This algorithm is recursive because the amount of used stack space
 	 * is very small and the max recursion depth is limited.
 	 */
-	indent_add = sprintf(buf, "%c-%llu(%s/%llu/%u)",
+	indent_add = sprintf(buf, "%c-%llu(%s/%llu/%d)",
 			     btrfsic_get_block_type(state, block),
 			     block->logical_bytenr, block->dev_state->name,
 			     block->dev_bytenr, block->mirror_num);
@@ -2615,7 +2705,8 @@ static struct btrfsic_block_link *btrfsic_block_link_lookup_or_add(
 	if (NULL == l) {
 		l = btrfsic_block_link_alloc();
 		if (NULL == l) {
-			pr_info("btrfsic: error, kmalloc failed!\n");
+			printk(KERN_INFO
+			       "btrfsic: error, kmalloc" " failed!\n");
 			return NULL;
 		}
 
@@ -2662,12 +2753,13 @@ static struct btrfsic_block *btrfsic_block_lookup_or_add(
 
 		block = btrfsic_block_alloc();
 		if (NULL == block) {
-			pr_info("btrfsic: error, kmalloc failed!\n");
+			printk(KERN_INFO "btrfsic: error, kmalloc failed!\n");
 			return NULL;
 		}
 		dev_state = btrfsic_dev_state_lookup(block_ctx->dev->bdev);
 		if (NULL == dev_state) {
-			pr_info("btrfsic: error, lookup dev_state failed!\n");
+			printk(KERN_INFO
+			       "btrfsic: error, lookup dev_state failed!\n");
 			btrfsic_block_free(block);
 			return NULL;
 		}
@@ -2679,7 +2771,8 @@ static struct btrfsic_block *btrfsic_block_lookup_or_add(
 		block->never_written = never_written;
 		block->mirror_num = mirror_num;
 		if (state->print_mask & BTRFSIC_PRINT_MASK_VERBOSE)
-			pr_info("New %s%c-block @%llu (%s/%llu/%d)\n",
+			printk(KERN_INFO
+			       "New %s%c-block @%llu (%s/%llu/%d)\n",
 			       additional_string,
 			       btrfsic_get_block_type(state, block),
 			       block->logical_bytenr, dev_state->name,
@@ -2701,20 +2794,22 @@ static void btrfsic_cmp_log_and_dev_bytenr(struct btrfsic_state *state,
 					   struct btrfsic_dev_state *dev_state,
 					   u64 dev_bytenr)
 {
-	struct btrfs_fs_info *fs_info = state->fs_info;
-	struct btrfsic_block_data_ctx block_ctx;
 	int num_copies;
 	int mirror_num;
-	int match = 0;
 	int ret;
+	struct btrfsic_block_data_ctx block_ctx;
+	int match = 0;
 
-	num_copies = btrfs_num_copies(fs_info, bytenr, state->metablock_size);
+	num_copies = btrfs_num_copies(state->root->fs_info,
+				      bytenr, state->metablock_size);
 
 	for (mirror_num = 1; mirror_num <= num_copies; mirror_num++) {
 		ret = btrfsic_map_block(state, bytenr, state->metablock_size,
 					&block_ctx, mirror_num);
 		if (ret) {
-			pr_info("btrfsic: btrfsic_map_block(logical @%llu, mirror %d) failed!\n",
+			printk(KERN_INFO "btrfsic:"
+			       " btrfsic_map_block(logical @%llu,"
+			       " mirror %d) failed!\n",
 			       bytenr, mirror_num);
 			continue;
 		}
@@ -2729,7 +2824,9 @@ static void btrfsic_cmp_log_and_dev_bytenr(struct btrfsic_state *state,
 	}
 
 	if (WARN_ON(!match)) {
-		pr_info("btrfs: attempt to write M-block which contains logical bytenr that doesn't map to dev+physical bytenr of submit_bio, buffer->log_bytenr=%llu, submit_bio(bdev=%s, phys_bytenr=%llu)!\n",
+		printk(KERN_INFO "btrfs: attempt to write M-block which contains logical bytenr that doesn't map to dev+physical bytenr of submit_bio,"
+		       " buffer->log_bytenr=%llu, submit_bio(bdev=%s,"
+		       " phys_bytenr=%llu)!\n",
 		       bytenr, dev_state->name, dev_bytenr);
 		for (mirror_num = 1; mirror_num <= num_copies; mirror_num++) {
 			ret = btrfsic_map_block(state, bytenr,
@@ -2738,7 +2835,8 @@ static void btrfsic_cmp_log_and_dev_bytenr(struct btrfsic_state *state,
 			if (ret)
 				continue;
 
-			pr_info("Read logical bytenr @%llu maps to (%s/%llu/%d)\n",
+			printk(KERN_INFO "Read logical bytenr @%llu maps to"
+			       " (%s/%llu/%d)\n",
 			       bytenr, block_ctx.dev->name,
 			       block_ctx.dev_bytenr, mirror_num);
 		}
@@ -2748,16 +2846,19 @@ static void btrfsic_cmp_log_and_dev_bytenr(struct btrfsic_state *state,
 static struct btrfsic_dev_state *btrfsic_dev_state_lookup(
 		struct block_device *bdev)
 {
-	return btrfsic_dev_state_hashtable_lookup(bdev,
-						  &btrfsic_dev_state_hashtable);
+	struct btrfsic_dev_state *ds;
+
+	ds = btrfsic_dev_state_hashtable_lookup(bdev,
+						&btrfsic_dev_state_hashtable);
+	return ds;
 }
 
-int btrfsic_submit_bh(int op, int op_flags, struct buffer_head *bh)
+int btrfsic_submit_bh(int rw, struct buffer_head *bh)
 {
 	struct btrfsic_dev_state *dev_state;
 
 	if (!btrfsic_is_initialized)
-		return submit_bh(op, op_flags, bh);
+		return submit_bh(rw, bh);
 
 	mutex_lock(&btrfsic_mutex);
 	/* since btrfsic_submit_bh() might also be called before
@@ -2766,28 +2867,34 @@ int btrfsic_submit_bh(int op, int op_flags, struct buffer_head *bh)
 
 	/* Only called to write the superblock (incl. FLUSH/FUA) */
 	if (NULL != dev_state &&
-	    (op == REQ_OP_WRITE) && bh->b_size > 0) {
+	    (rw & WRITE) && bh->b_size > 0) {
 		u64 dev_bytenr;
 
 		dev_bytenr = 4096 * bh->b_blocknr;
 		if (dev_state->state->print_mask &
 		    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH)
-			pr_info("submit_bh(op=0x%x,0x%x, blocknr=%llu (bytenr %llu), size=%zu, data=%p, bdev=%p)\n",
-			       op, op_flags, (unsigned long long)bh->b_blocknr,
+			printk(KERN_INFO
+			       "submit_bh(rw=0x%x, blocknr=%llu (bytenr %llu),"
+			       " size=%zu, data=%p, bdev=%p)\n",
+			       rw, (unsigned long long)bh->b_blocknr,
 			       dev_bytenr, bh->b_size, bh->b_data, bh->b_bdev);
 		btrfsic_process_written_block(dev_state, dev_bytenr,
 					      &bh->b_data, 1, NULL,
-					      NULL, bh, op_flags);
-	} else if (NULL != dev_state && (op_flags & REQ_PREFLUSH)) {
+					      NULL, bh, rw);
+	} else if (NULL != dev_state && (rw & REQ_FLUSH)) {
 		if (dev_state->state->print_mask &
 		    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH)
-			pr_info("submit_bh(op=0x%x,0x%x FLUSH, bdev=%p)\n",
-			       op, op_flags, bh->b_bdev);
+			printk(KERN_INFO
+			       "submit_bh(rw=0x%x FLUSH, bdev=%p)\n",
+			       rw, bh->b_bdev);
 		if (!dev_state->dummy_block_for_bio_bh_flush.is_iodone) {
 			if ((dev_state->state->print_mask &
 			     (BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH |
 			      BTRFSIC_PRINT_MASK_VERBOSE)))
-				pr_info("btrfsic_submit_bh(%s) with FLUSH but dummy block already in use (ignored)!\n",
+				printk(KERN_INFO
+				       "btrfsic_submit_bh(%s) with FLUSH"
+				       " but dummy block already in use"
+				       " (ignored)!\n",
 				       dev_state->name);
 		} else {
 			struct btrfsic_block *const block =
@@ -2797,7 +2904,7 @@ int btrfsic_submit_bh(int op, int op_flags, struct buffer_head *bh)
 			block->never_written = 0;
 			block->iodone_w_error = 0;
 			block->flush_gen = dev_state->last_flush_gen + 1;
-			block->submit_bio_bh_rw = op_flags;
+			block->submit_bio_bh_rw = rw;
 			block->orig_bio_bh_private = bh->b_private;
 			block->orig_bio_bh_end_io.bh = bh->b_end_io;
 			block->next_in_same_bio = NULL;
@@ -2806,10 +2913,10 @@ int btrfsic_submit_bh(int op, int op_flags, struct buffer_head *bh)
 		}
 	}
 	mutex_unlock(&btrfsic_mutex);
-	return submit_bh(op, op_flags, bh);
+	return submit_bh(rw, bh);
 }
 
-static void __btrfsic_submit_bio(struct bio *bio)
+static void __btrfsic_submit_bio(int rw, struct bio *bio)
 {
 	struct btrfsic_dev_state *dev_state;
 
@@ -2821,11 +2928,10 @@ static void __btrfsic_submit_bio(struct bio *bio)
 	 * btrfsic_mount(), this might return NULL */
 	dev_state = btrfsic_dev_state_lookup(bio->bi_bdev);
 	if (NULL != dev_state &&
-	    (bio_op(bio) == REQ_OP_WRITE) && bio_has_data(bio)) {
+	    (rw & WRITE) && NULL != bio->bi_io_vec) {
 		unsigned int i;
 		u64 dev_bytenr;
 		u64 cur_bytenr;
-		struct bio_vec *bvec;
 		int bio_is_patched;
 		char **mapped_datav;
 
@@ -2833,8 +2939,10 @@ static void __btrfsic_submit_bio(struct bio *bio)
 		bio_is_patched = 0;
 		if (dev_state->state->print_mask &
 		    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH)
-			pr_info("submit_bio(rw=%d,0x%x, bi_vcnt=%u, bi_sector=%llu (bytenr %llu), bi_bdev=%p)\n",
-			       bio_op(bio), bio->bi_opf, bio->bi_vcnt,
+			printk(KERN_INFO
+			       "submit_bio(rw=0x%x, bi_vcnt=%u,"
+			       " bi_sector=%llu (bytenr %llu), bi_bdev=%p)\n",
+			       rw, bio->bi_vcnt,
 			       (unsigned long long)bio->bi_iter.bi_sector,
 			       dev_bytenr, bio->bi_bdev);
 
@@ -2843,34 +2951,48 @@ static void __btrfsic_submit_bio(struct bio *bio)
 		if (!mapped_datav)
 			goto leave;
 		cur_bytenr = dev_bytenr;
-
-		bio_for_each_segment_all(bvec, bio, i) {
-			BUG_ON(bvec->bv_len != PAGE_SIZE);
-			mapped_datav[i] = kmap(bvec->bv_page);
-
+		for (i = 0; i < bio->bi_vcnt; i++) {
+			BUG_ON(bio->bi_io_vec[i].bv_len != PAGE_CACHE_SIZE);
+			mapped_datav[i] = kmap(bio->bi_io_vec[i].bv_page);
+			if (!mapped_datav[i]) {
+				while (i > 0) {
+					i--;
+					kunmap(bio->bi_io_vec[i].bv_page);
+				}
+				kfree(mapped_datav);
+				goto leave;
+			}
 			if (dev_state->state->print_mask &
 			    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH_VERBOSE)
-				pr_info("#%u: bytenr=%llu, len=%u, offset=%u\n",
-				       i, cur_bytenr, bvec->bv_len, bvec->bv_offset);
-			cur_bytenr += bvec->bv_len;
+				printk(KERN_INFO
+				       "#%u: bytenr=%llu, len=%u, offset=%u\n",
+				       i, cur_bytenr, bio->bi_io_vec[i].bv_len,
+				       bio->bi_io_vec[i].bv_offset);
+			cur_bytenr += bio->bi_io_vec[i].bv_len;
 		}
 		btrfsic_process_written_block(dev_state, dev_bytenr,
 					      mapped_datav, bio->bi_vcnt,
 					      bio, &bio_is_patched,
-					      NULL, bio->bi_opf);
-		bio_for_each_segment_all(bvec, bio, i)
-			kunmap(bvec->bv_page);
+					      NULL, rw);
+		while (i > 0) {
+			i--;
+			kunmap(bio->bi_io_vec[i].bv_page);
+		}
 		kfree(mapped_datav);
-	} else if (NULL != dev_state && (bio->bi_opf & REQ_PREFLUSH)) {
+	} else if (NULL != dev_state && (rw & REQ_FLUSH)) {
 		if (dev_state->state->print_mask &
 		    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH)
-			pr_info("submit_bio(rw=%d,0x%x FLUSH, bdev=%p)\n",
-			       bio_op(bio), bio->bi_opf, bio->bi_bdev);
+			printk(KERN_INFO
+			       "submit_bio(rw=0x%x FLUSH, bdev=%p)\n",
+			       rw, bio->bi_bdev);
 		if (!dev_state->dummy_block_for_bio_bh_flush.is_iodone) {
 			if ((dev_state->state->print_mask &
 			     (BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH |
 			      BTRFSIC_PRINT_MASK_VERBOSE)))
-				pr_info("btrfsic_submit_bio(%s) with FLUSH but dummy block already in use (ignored)!\n",
+				printk(KERN_INFO
+				       "btrfsic_submit_bio(%s) with FLUSH"
+				       " but dummy block already in use"
+				       " (ignored)!\n",
 				       dev_state->name);
 		} else {
 			struct btrfsic_block *const block =
@@ -2880,7 +3002,7 @@ static void __btrfsic_submit_bio(struct bio *bio)
 			block->never_written = 0;
 			block->iodone_w_error = 0;
 			block->flush_gen = dev_state->last_flush_gen + 1;
-			block->submit_bio_bh_rw = bio->bi_opf;
+			block->submit_bio_bh_rw = rw;
 			block->orig_bio_bh_private = bio->bi_private;
 			block->orig_bio_bh_end_io.bio = bio->bi_end_io;
 			block->next_in_same_bio = NULL;
@@ -2892,19 +3014,19 @@ leave:
 	mutex_unlock(&btrfsic_mutex);
 }
 
-void btrfsic_submit_bio(struct bio *bio)
+void btrfsic_submit_bio(int rw, struct bio *bio)
 {
-	__btrfsic_submit_bio(bio);
-	submit_bio(bio);
+	__btrfsic_submit_bio(rw, bio);
+	submit_bio(rw, bio);
 }
 
-int btrfsic_submit_bio_wait(struct bio *bio)
+int btrfsic_submit_bio_wait(int rw, struct bio *bio)
 {
-	__btrfsic_submit_bio(bio);
-	return submit_bio_wait(bio);
+	__btrfsic_submit_bio(rw, bio);
+	return submit_bio_wait(rw, bio);
 }
 
-int btrfsic_mount(struct btrfs_fs_info *fs_info,
+int btrfsic_mount(struct btrfs_root *root,
 		  struct btrfs_fs_devices *fs_devices,
 		  int including_extent_data, u32 print_mask)
 {
@@ -2913,21 +3035,23 @@ int btrfsic_mount(struct btrfs_fs_info *fs_info,
 	struct list_head *dev_head = &fs_devices->devices;
 	struct btrfs_device *device;
 
-	if (fs_info->nodesize & ((u64)PAGE_SIZE - 1)) {
-		pr_info("btrfsic: cannot handle nodesize %d not being a multiple of PAGE_SIZE %ld!\n",
-		       fs_info->nodesize, PAGE_SIZE);
+	if (root->nodesize & ((u64)PAGE_CACHE_SIZE - 1)) {
+		printk(KERN_INFO
+		       "btrfsic: cannot handle nodesize %d not being a multiple of PAGE_CACHE_SIZE %ld!\n",
+		       root->nodesize, PAGE_CACHE_SIZE);
 		return -1;
 	}
-	if (fs_info->sectorsize & ((u64)PAGE_SIZE - 1)) {
-		pr_info("btrfsic: cannot handle sectorsize %d not being a multiple of PAGE_SIZE %ld!\n",
-		       fs_info->sectorsize, PAGE_SIZE);
+	if (root->sectorsize & ((u64)PAGE_CACHE_SIZE - 1)) {
+		printk(KERN_INFO
+		       "btrfsic: cannot handle sectorsize %d not being a multiple of PAGE_CACHE_SIZE %ld!\n",
+		       root->sectorsize, PAGE_CACHE_SIZE);
 		return -1;
 	}
 	state = kzalloc(sizeof(*state), GFP_KERNEL | __GFP_NOWARN | __GFP_REPEAT);
 	if (!state) {
 		state = vzalloc(sizeof(*state));
 		if (!state) {
-			pr_info("btrfs check-integrity: vzalloc() failed!\n");
+			printk(KERN_INFO "btrfs check-integrity: vzalloc() failed!\n");
 			return -1;
 		}
 	}
@@ -2938,12 +3062,12 @@ int btrfsic_mount(struct btrfs_fs_info *fs_info,
 		btrfsic_is_initialized = 1;
 	}
 	mutex_lock(&btrfsic_mutex);
-	state->fs_info = fs_info;
+	state->root = root;
 	state->print_mask = print_mask;
 	state->include_extent_data = including_extent_data;
 	state->csum_size = 0;
-	state->metablock_size = fs_info->nodesize;
-	state->datablock_size = fs_info->sectorsize;
+	state->metablock_size = root->nodesize;
+	state->datablock_size = root->sectorsize;
 	INIT_LIST_HEAD(&state->all_blocks_list);
 	btrfsic_block_hashtable_init(&state->block_hashtable);
 	btrfsic_block_link_hashtable_init(&state->block_link_hashtable);
@@ -2952,14 +3076,15 @@ int btrfsic_mount(struct btrfs_fs_info *fs_info,
 
 	list_for_each_entry(device, dev_head, dev_list) {
 		struct btrfsic_dev_state *ds;
-		const char *p;
+		char *p;
 
 		if (!device->bdev || !device->name)
 			continue;
 
 		ds = btrfsic_dev_state_alloc();
 		if (NULL == ds) {
-			pr_info("btrfs check-integrity: kmalloc() failed!\n");
+			printk(KERN_INFO
+			       "btrfs check-integrity: kmalloc() failed!\n");
 			mutex_unlock(&btrfsic_mutex);
 			return -1;
 		}
@@ -2967,7 +3092,11 @@ int btrfsic_mount(struct btrfs_fs_info *fs_info,
 		ds->state = state;
 		bdevname(ds->bdev, ds->name);
 		ds->name[BDEVNAME_SIZE - 1] = '\0';
-		p = kbasename(ds->name);
+		for (p = ds->name; *p != '\0'; p++);
+		while (p > ds->name && *p != '/')
+			p--;
+		if (*p == '/')
+			p++;
 		strlcpy(ds->name, p, sizeof(ds->name));
 		btrfsic_dev_state_hashtable_add(ds,
 						&btrfsic_dev_state_hashtable);
@@ -2976,7 +3105,7 @@ int btrfsic_mount(struct btrfs_fs_info *fs_info,
 	ret = btrfsic_process_superblock(state, fs_devices);
 	if (0 != ret) {
 		mutex_unlock(&btrfsic_mutex);
-		btrfsic_unmount(fs_devices);
+		btrfsic_unmount(root, fs_devices);
 		return ret;
 	}
 
@@ -2989,7 +3118,8 @@ int btrfsic_mount(struct btrfs_fs_info *fs_info,
 	return 0;
 }
 
-void btrfsic_unmount(struct btrfs_fs_devices *fs_devices)
+void btrfsic_unmount(struct btrfs_root *root,
+		     struct btrfs_fs_devices *fs_devices)
 {
 	struct btrfsic_block *b_all, *tmp_all;
 	struct btrfsic_state *state;
@@ -3019,7 +3149,9 @@ void btrfsic_unmount(struct btrfs_fs_devices *fs_devices)
 	}
 
 	if (NULL == state) {
-		pr_info("btrfsic: error, cannot find state information on umount!\n");
+		printk(KERN_INFO
+		       "btrfsic: error, cannot find state information"
+		       " on umount!\n");
 		mutex_unlock(&btrfsic_mutex);
 		return;
 	}
@@ -3046,7 +3178,9 @@ void btrfsic_unmount(struct btrfs_fs_devices *fs_devices)
 		if (b_all->is_iodone || b_all->never_written)
 			btrfsic_block_free(b_all);
 		else
-			pr_info("btrfs: attempt to free %c-block @%llu (%s/%llu/%d) on umount which is not yet iodone!\n",
+			printk(KERN_INFO "btrfs: attempt to free %c-block"
+			       " @%llu (%s/%llu/%d) on umount which is"
+			       " not yet iodone!\n",
 			       btrfsic_get_block_type(state, b_all),
 			       b_all->logical_bytenr, b_all->dev_state->name,
 			       b_all->dev_bytenr, b_all->mirror_num);

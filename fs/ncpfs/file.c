@@ -8,7 +8,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <linux/time.h>
 #include <linux/kernel.h>
@@ -203,7 +203,7 @@ ncp_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 				      bufsize - (pos % bufsize),
 				      iov_iter_count(from));
 
-		if (!copy_from_iter_full(bouncebuffer, to_write, from)) {
+		if (copy_from_iter(bouncebuffer, to_write, from) != to_write) {
 			errno = -EFAULT;
 			break;
 		}

@@ -48,6 +48,8 @@
 #include "t4_regs.h"
 #include "t4_values.h"
 
+#define VLAN_NONE 0xfff
+
 /* identifies sync vs async L2T_WRITE_REQs */
 #define SYNC_WR_S    12
 #define SYNC_WR_V(x) ((x) << SYNC_WR_S)
@@ -432,7 +434,7 @@ struct l2t_entry *cxgb4_l2t_get(struct l2t_data *d, struct neighbour *neigh,
 	else
 		lport = netdev2pinfo(physdev)->lport;
 
-	if (is_vlan_dev(neigh->dev))
+	if (neigh->dev->priv_flags & IFF_802_1Q_VLAN)
 		vlan = vlan_dev_vlan_id(neigh->dev);
 	else
 		vlan = VLAN_NONE;

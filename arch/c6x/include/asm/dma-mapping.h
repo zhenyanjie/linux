@@ -17,17 +17,17 @@
  */
 #define DMA_ERROR_CODE ~0
 
-extern const struct dma_map_ops c6x_dma_ops;
+extern struct dma_map_ops c6x_dma_ops;
 
-static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
 	return &c6x_dma_ops;
 }
 
 extern void coherent_mem_init(u32 start, u32 size);
 void *c6x_dma_alloc(struct device *dev, size_t size, dma_addr_t *handle,
-		gfp_t gfp, unsigned long attrs);
+		gfp_t gfp, struct dma_attrs *attrs);
 void c6x_dma_free(struct device *dev, size_t size, void *vaddr,
-		dma_addr_t dma_handle, unsigned long attrs);
+		dma_addr_t dma_handle, struct dma_attrs *attrs);
 
 #endif	/* _ASM_C6X_DMA_MAPPING_H */

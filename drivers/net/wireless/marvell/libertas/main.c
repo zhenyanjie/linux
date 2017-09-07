@@ -945,6 +945,7 @@ static const struct net_device_ops lbs_netdev_ops = {
 	.ndo_start_xmit		= lbs_hard_start_xmit,
 	.ndo_set_mac_address	= lbs_set_mac_address,
 	.ndo_set_rx_mode	= lbs_set_multicast_list,
+	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
@@ -1059,12 +1060,7 @@ void lbs_remove_card(struct lbs_private *priv)
 
 	if (priv->psmode == LBS802_11POWERMODEMAX_PSP) {
 		priv->psmode = LBS802_11POWERMODECAM;
-		/* no need to wakeup if already woken up,
-		 * on suspend, this exit ps command is not processed
-		 * the driver hangs
-		 */
-		if (priv->psstate != PS_STATE_FULL_POWER)
-			lbs_set_ps_mode(priv, PS_MODE_ACTION_EXIT_PS, true);
+		lbs_set_ps_mode(priv, PS_MODE_ACTION_EXIT_PS, true);
 	}
 
 	if (priv->is_deep_sleep) {
@@ -1117,8 +1113,7 @@ int lbs_start_card(struct lbs_private *priv)
 	else
 		pr_info("%s: mesh disabled\n", dev->name);
 
-	ret = lbs_cfg_register(priv);
-	if (ret) {
+	if (lbs_cfg_register(priv)) {
 		pr_err("cannot register device\n");
 		goto done;
 	}

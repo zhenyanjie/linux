@@ -50,7 +50,7 @@
 #include <linux/slab.h>
 #include <linux/idr.h>
 #include <asm/io.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/atomic.h>
 #include <linux/etherdevice.h>
 #include "nicstar.h"
@@ -370,8 +370,7 @@ static int ns_init_card(int i, struct pci_dev *pcidev)
 		return error;
         }
 
-	card = kmalloc(sizeof(*card), GFP_KERNEL);
-	if (!card) {
+	if ((card = kmalloc(sizeof(ns_dev), GFP_KERNEL)) == NULL) {
 		printk
 		    ("nicstar%d: can't allocate memory for device structure.\n",
 		     i);
@@ -612,7 +611,7 @@ static int ns_init_card(int i, struct pci_dev *pcidev)
 	for (j = 0; j < card->rct_size; j++)
 		ns_write_sram(card, j * 4, u32d, 4);
 
-	memset(card->vcmap, 0, sizeof(card->vcmap));
+	memset(card->vcmap, 0, NS_MAX_RCTSIZE * sizeof(vc_map));
 
 	for (j = 0; j < NS_FRSCD_NUM; j++)
 		card->scd2vc[j] = NULL;
@@ -863,7 +862,7 @@ static scq_info *get_scq(ns_dev *card, int size, u32 scd)
 	if (size != VBR_SCQSIZE && size != CBR_SCQSIZE)
 		return NULL;
 
-	scq = kmalloc(sizeof(*scq), GFP_KERNEL);
+	scq = kmalloc(sizeof(scq_info), GFP_KERNEL);
 	if (!scq)
 		return NULL;
         scq->org = dma_alloc_coherent(&card->pcidev->dev,
@@ -872,12 +871,10 @@ static scq_info *get_scq(ns_dev *card, int size, u32 scd)
 		kfree(scq);
 		return NULL;
 	}
-	scq->skb = kmalloc_array(size / NS_SCQE_SIZE,
-				 sizeof(*scq->skb),
-				 GFP_KERNEL);
+	scq->skb = kmalloc(sizeof(struct sk_buff *) *
+			   (size / NS_SCQE_SIZE), GFP_KERNEL);
 	if (!scq->skb) {
-		dma_free_coherent(&card->pcidev->dev,
-				  2 * size, scq->org, scq->dma);
+		kfree(scq->org);
 		kfree(scq);
 		return NULL;
 	}
@@ -1980,12 +1977,13 @@ static void dequeue_rx(ns_dev * card, ns_rsqe * rsqe)
 	card->lbfqc = ns_stat_lfbqc_get(stat);
 
 	id = le32_to_cpu(rsqe->buffer_handle);
-	skb = idr_remove(&card->idr, id);
+	skb = idr_find(&card->idr, id);
 	if (!skb) {
 		RXPRINTK(KERN_ERR
-			 "nicstar%d: skb not found!\n", card->index);
+			 "nicstar%d: idr_find() failed!\n", card->index);
 		return;
 	}
+	idr_remove(&card->idr, id);
 	dma_sync_single_for_cpu(&card->pcidev->dev,
 				NS_PRV_DMA(skb),
 				(NS_PRV_BUFTYPE(skb) == BUF_SM
@@ -2022,8 +2020,7 @@ static void dequeue_rx(ns_dev * card, ns_rsqe * rsqe)
 
 		cell = skb->data;
 		for (i = ns_rsqe_cellcount(rsqe); i; i--) {
-			sb = dev_alloc_skb(NS_SMSKBSIZE);
-			if (!sb) {
+			if ((sb = dev_alloc_skb(NS_SMSKBSIZE)) == NULL) {
 				printk
 				    ("nicstar%d: Can't allocate buffers for aal0.\n",
 				     card->index);

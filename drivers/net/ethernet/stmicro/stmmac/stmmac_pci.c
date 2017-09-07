@@ -12,6 +12,10 @@
   FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
   more details.
 
+  You should have received a copy of the GNU General Public License along with
+  this program; if not, write to the Free Software Foundation, Inc.,
+  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
+
   The full GNU General Public License is included in this distribution in
   the file called "COPYING".
 
@@ -32,7 +36,6 @@
  */
 struct stmmac_pci_dmi_data {
 	const char *name;
-	const char *asset_tag;
 	unsigned int func;
 	int phy_addr;
 };
@@ -47,7 +50,6 @@ struct stmmac_pci_info {
 static int stmmac_pci_find_phy_addr(struct stmmac_pci_info *info)
 {
 	const char *name = dmi_get_system_info(DMI_BOARD_NAME);
-	const char *asset_tag = dmi_get_system_info(DMI_BOARD_ASSET_TAG);
 	unsigned int func = PCI_FUNC(info->pdev->devfn);
 	struct stmmac_pci_dmi_data *dmi;
 
@@ -59,12 +61,8 @@ static int stmmac_pci_find_phy_addr(struct stmmac_pci_info *info)
 		return 1;
 
 	for (dmi = info->dmi; dmi->name && *dmi->name; dmi++) {
-		if (!strcmp(dmi->name, name) && dmi->func == func) {
-			/* If asset tag is provided, match on it as well. */
-			if (dmi->asset_tag && strcmp(dmi->asset_tag, asset_tag))
-				continue;
+		if (!strcmp(dmi->name, name) && dmi->func == func)
 			return dmi->phy_addr;
-		}
 	}
 
 	return -ENODEV;
@@ -83,28 +81,13 @@ static void stmmac_default_data(struct plat_stmmacenet_data *plat)
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 32;
-	plat->dma_cfg->pblx8 = true;
-	/* TODO: AXI */
+	plat->dma_cfg->burst_len = DMA_AXI_BLEN_256;
 
 	/* Set default value for multicast hash bins */
 	plat->multicast_filter_bins = HASH_TABLE_SIZE;
 
 	/* Set default value for unicast filter entries */
 	plat->unicast_filter_entries = 1;
-
-	/* Set the maxmtu to a default of JUMBO_LEN */
-	plat->maxmtu = JUMBO_LEN;
-
-	/* Set default number of RX and TX queues to use */
-	plat->tx_queues_to_use = 1;
-	plat->rx_queues_to_use = 1;
-
-	/* Disable Priority config by default */
-	plat->tx_queues_cfg[0].use_prio = false;
-	plat->rx_queues_cfg[0].use_prio = false;
-
-	/* Disable RX queues routing by default */
-	plat->rx_queues_cfg[0].pkt_route = 0x0;
 }
 
 static int quark_default_data(struct plat_stmmacenet_data *plat,
@@ -132,18 +115,14 @@ static int quark_default_data(struct plat_stmmacenet_data *plat,
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 16;
-	plat->dma_cfg->pblx8 = true;
+	plat->dma_cfg->burst_len = DMA_AXI_BLEN_256;
 	plat->dma_cfg->fixed_burst = 1;
-	/* AXI (TODO) */
 
 	/* Set default value for multicast hash bins */
 	plat->multicast_filter_bins = HASH_TABLE_SIZE;
 
 	/* Set default value for unicast filter entries */
 	plat->unicast_filter_entries = 1;
-
-	/* Set the maxmtu to a default of JUMBO_LEN */
-	plat->maxmtu = JUMBO_LEN;
 
 	return 0;
 }
@@ -157,24 +136,6 @@ static struct stmmac_pci_dmi_data quark_pci_dmi_data[] = {
 	{
 		.name = "GalileoGen2",
 		.func = 6,
-		.phy_addr = 1,
-	},
-	{
-		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-0YA2",
-		.func = 6,
-		.phy_addr = 1,
-	},
-	{
-		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-1YA2",
-		.func = 6,
-		.phy_addr = 1,
-	},
-	{
-		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-1YA2",
-		.func = 7,
 		.phy_addr = 1,
 	},
 	{}
@@ -270,10 +231,30 @@ static int stmmac_pci_probe(struct pci_dev *pdev,
  */
 static void stmmac_pci_remove(struct pci_dev *pdev)
 {
-	stmmac_dvr_remove(&pdev->dev);
+	struct net_device *ndev = pci_get_drvdata(pdev);
+
+	stmmac_dvr_remove(ndev);
 }
 
-static SIMPLE_DEV_PM_OPS(stmmac_pm_ops, stmmac_suspend, stmmac_resume);
+#ifdef CONFIG_PM_SLEEP
+static int stmmac_pci_suspend(struct device *dev)
+{
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct net_device *ndev = pci_get_drvdata(pdev);
+
+	return stmmac_suspend(ndev);
+}
+
+static int stmmac_pci_resume(struct device *dev)
+{
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct net_device *ndev = pci_get_drvdata(pdev);
+
+	return stmmac_resume(ndev);
+}
+#endif
+
+static SIMPLE_DEV_PM_OPS(stmmac_pm_ops, stmmac_pci_suspend, stmmac_pci_resume);
 
 #define STMMAC_VENDOR_ID 0x700
 #define STMMAC_QUARK_ID  0x0937

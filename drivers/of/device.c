@@ -88,7 +88,7 @@ void of_dma_configure(struct device *dev, struct device_node *np)
 	int ret;
 	bool coherent;
 	unsigned long offset;
-	const struct iommu_ops *iommu;
+	struct iommu_ops *iommu;
 
 	/*
 	 * Set default coherent_dma_mask to 32 bit.  Drivers are expected to
@@ -176,7 +176,7 @@ const void *of_device_get_match_data(const struct device *dev)
 }
 EXPORT_SYMBOL(of_device_get_match_data);
 
-static ssize_t of_device_get_modalias(struct device *dev, char *str, ssize_t len)
+ssize_t of_device_get_modalias(struct device *dev, char *str, ssize_t len)
 {
 	const char *compat;
 	int cplen, i;
@@ -223,46 +223,8 @@ static ssize_t of_device_get_modalias(struct device *dev, char *str, ssize_t len
 			str[i] = '_';
 	}
 
-	return repend;
+	return tsize;
 }
-
-int of_device_request_module(struct device *dev)
-{
-	char *str;
-	ssize_t size;
-	int ret;
-
-	size = of_device_get_modalias(dev, NULL, 0);
-	if (size < 0)
-		return size;
-
-	str = kmalloc(size + 1, GFP_KERNEL);
-	if (!str)
-		return -ENOMEM;
-
-	of_device_get_modalias(dev, str, size);
-	str[size] = '\0';
-	ret = request_module(str);
-	kfree(str);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(of_device_request_module);
-
-/**
- * of_device_modalias - Fill buffer with newline terminated modalias string
- */
-ssize_t of_device_modalias(struct device *dev, char *str, ssize_t len)
-{
-	ssize_t sl = of_device_get_modalias(dev, str, len - 2);
-	if (sl < 0)
-		return sl;
-
-	str[sl++] = '\n';
-	str[sl] = 0;
-	return sl;
-}
-EXPORT_SYMBOL_GPL(of_device_modalias);
 
 /**
  * of_device_uevent - Display OF related uevent information
@@ -325,4 +287,3 @@ int of_device_uevent_modalias(struct device *dev, struct kobj_uevent_env *env)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(of_device_uevent_modalias);

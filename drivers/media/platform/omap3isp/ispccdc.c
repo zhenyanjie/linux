@@ -151,8 +151,8 @@ static int ccdc_lsc_validate_config(struct isp_ccdc_device *ccdc,
 	}
 
 	if (lsc_cfg->offset & 3) {
-		dev_dbg(isp->dev,
-			"CCDC: LSC: Offset must be a multiple of 4\n");
+		dev_dbg(isp->dev, "CCDC: LSC: Offset must be a multiple of "
+			"4\n");
 		return -EINVAL;
 	}
 
@@ -416,9 +416,8 @@ static int ccdc_lsc_config(struct isp_ccdc_device *ccdc,
 		return 0;
 
 	if (update != (OMAP3ISP_CCDC_CONFIG_LSC | OMAP3ISP_CCDC_TBL_LSC)) {
-		dev_dbg(to_device(ccdc),
-			"%s: Both LSC configuration and table need to be supplied\n",
-			__func__);
+		dev_dbg(to_device(ccdc), "%s: Both LSC configuration and table "
+			"need to be supplied\n", __func__);
 		return -EINVAL;
 	}
 
@@ -2422,7 +2421,7 @@ static int ccdc_link_validate(struct v4l2_subdev *sd,
 			&((struct isp_bus_cfg *)
 			  media_entity_to_v4l2_subdev(link->source->entity)
 			  ->host_priv)->bus.parallel;
-		parallel_shift = parcfg->data_lane_shift;
+		parallel_shift = parcfg->data_lane_shift * 2;
 	} else {
 		parallel_shift = 0;
 	}

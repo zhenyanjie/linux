@@ -617,7 +617,7 @@ const struct i2c_algorithm i2c_bit_algo = {
 };
 EXPORT_SYMBOL(i2c_bit_algo);
 
-static const struct i2c_adapter_quirks i2c_bit_quirk_no_clk_stretch = {
+const struct i2c_adapter_quirks i2c_bit_quirk_no_clk_stretch = {
 	.flags = I2C_AQ_NO_CLK_STRETCH,
 };
 

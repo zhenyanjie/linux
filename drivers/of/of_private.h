@@ -55,18 +55,6 @@ static inline int of_property_notify(int action, struct device_node *np,
 }
 #endif /* CONFIG_OF_DYNAMIC */
 
-#if defined(CONFIG_OF_UNITTEST) && defined(CONFIG_OF_OVERLAY)
-extern void __init unittest_unflatten_overlay_base(void);
-#else
-static inline void unittest_unflatten_overlay_base(void) {};
-#endif
-
-extern void *__unflatten_device_tree(const void *blob,
-			      struct device_node *dad,
-			      struct device_node **mynodes,
-			      void *(*dt_alloc)(u64 size, u64 align),
-			      bool detached);
-
 /**
  * General utilities for working with live trees.
  *
@@ -94,9 +82,6 @@ extern void __of_attach_node(struct device_node *np);
 extern int __of_attach_node_sysfs(struct device_node *np);
 extern void __of_detach_node(struct device_node *np);
 extern void __of_detach_node_sysfs(struct device_node *np);
-
-extern void __of_sysfs_remove_bin_file(struct device_node *np,
-				       struct property *prop);
 
 /* iterators for transactions, used for overlays */
 /* forward iterator */

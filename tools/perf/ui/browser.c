@@ -1,6 +1,5 @@
 #include "../util.h"
-#include "../string2.h"
-#include "../config.h"
+#include "../cache.h"
 #include "../../perf.h"
 #include "libslang.h"
 #include "ui.h"
@@ -14,7 +13,6 @@
 #include "helpline.h"
 #include "keysyms.h"
 #include "../color.h"
-#include "sane_ctype.h"
 
 static int ui_browser__percent_color(struct ui_browser *browser,
 				     double percent, bool current)
@@ -533,8 +531,8 @@ static struct ui_browser_colorset {
 		.bg	  = "yellow",
 	},
 	{
-		.colorset = HE_COLORSET_JUMP_ARROWS,
-		.name	  = "jump_arrows",
+		.colorset = HE_COLORSET_CODE,
+		.name	  = "code",
 		.fg	  = "blue",
 		.bg	  = "default",
 	},
@@ -581,7 +579,7 @@ static int ui_browser__color_config(const char *var, const char *value,
 			break;
 
 		*bg = '\0';
-		bg = ltrim(++bg);
+		while (isspace(*++bg));
 		ui_browser__colorsets[i].bg = bg;
 		ui_browser__colorsets[i].fg = fg;
 		return 0;

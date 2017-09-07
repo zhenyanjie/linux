@@ -15,7 +15,6 @@
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
 #include <linux/wait.h>
-#include <linux/sched/signal.h>
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/suspend.h>
@@ -353,7 +352,7 @@ static int pmc_probe(struct platform_device *ofdev)
 		return -ENODEV;
 
 	pmc_irq = irq_of_parse_and_map(np, 0);
-	if (pmc_irq) {
+	if (pmc_irq != NO_IRQ) {
 		ret = request_irq(pmc_irq, pmc_irq_handler, IRQF_SHARED,
 		                  "pmc", ofdev);
 
@@ -401,7 +400,7 @@ out_syscr:
 out_pmc:
 	iounmap(pmc_regs);
 out:
-	if (pmc_irq)
+	if (pmc_irq != NO_IRQ)
 		free_irq(pmc_irq, ofdev);
 
 	return ret;
@@ -442,4 +441,8 @@ static struct platform_driver pmc_driver = {
 	.remove = pmc_remove
 };
 
-builtin_platform_driver(pmc_driver);
+static int pmc_init(void)
+{
+	return platform_driver_register(&pmc_driver);
+}
+device_initcall(pmc_init);

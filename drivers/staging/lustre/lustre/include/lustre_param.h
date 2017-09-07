@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -38,9 +42,6 @@
 
 #ifndef _LUSTRE_PARAM_H
 #define _LUSTRE_PARAM_H
-
-#include "../../include/linux/libcfs/libcfs.h"
-#include "../../include/linux/lnet/types.h"
 
 /** \defgroup param param
  *
@@ -88,7 +89,6 @@ int class_parse_nid_quiet(char *buf, lnet_nid_t *nid, char **endh);
 
 /* Prefixes for parameters handled by obd's proc methods (XXX_process_config) */
 #define PARAM_OST		  "ost."
-#define PARAM_OSD		"osd."
 #define PARAM_OSC		  "osc."
 #define PARAM_MDT		  "mdt."
 #define PARAM_MDD		  "mdd."

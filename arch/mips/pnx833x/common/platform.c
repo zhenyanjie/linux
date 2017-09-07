@@ -232,8 +232,12 @@ static struct platform_device *pnx833x_platform_devices[] __initdata = {
 
 static int __init pnx833x_platform_init(void)
 {
-	return platform_add_devices(pnx833x_platform_devices,
-				    ARRAY_SIZE(pnx833x_platform_devices));
+	int res;
+
+	res = platform_add_devices(pnx833x_platform_devices,
+				   ARRAY_SIZE(pnx833x_platform_devices));
+
+	return res;
 }
 
 arch_initcall(pnx833x_platform_init);

@@ -11,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
+ *
  ******************************************************************************/
 #define _RTW_PWRCTRL_C_
 
@@ -38,7 +43,7 @@ static int rtw_hw_suspend(struct adapter *padapter)
 	LeaveAllPowerSaveMode(padapter);
 
 	DBG_88E("==> rtw_hw_suspend\n");
-	mutex_lock(&pwrpriv->mutex_lock);
+	_enter_pwrlock(&pwrpriv->lock);
 	pwrpriv->bips_processing = true;
 	/* s1. */
 	if (pnetdev) {
@@ -56,7 +61,7 @@ static int rtw_hw_suspend(struct adapter *padapter)
 		if (check_fwstate(pmlmepriv, _FW_LINKED)) {
 			_clr_fwstate_(pmlmepriv, _FW_LINKED);
 
-			LedControl8188eu(padapter, LED_CTL_NO_LINK);
+			rtw_led_control(padapter, LED_CTL_NO_LINK);
 
 			rtw_os_indicate_disconnect(padapter);
 
@@ -73,7 +78,7 @@ static int rtw_hw_suspend(struct adapter *padapter)
 	pwrpriv->rf_pwrstate = rf_off;
 	pwrpriv->bips_processing = false;
 
-	mutex_unlock(&pwrpriv->mutex_lock);
+	_exit_pwrlock(&pwrpriv->lock);
 
 	return 0;
 
@@ -90,12 +95,12 @@ static int rtw_hw_resume(struct adapter *padapter)
 
 	/* system resume */
 	DBG_88E("==> rtw_hw_resume\n");
-	mutex_lock(&pwrpriv->mutex_lock);
+	_enter_pwrlock(&pwrpriv->lock);
 	pwrpriv->bips_processing = true;
 	rtw_reset_drv_sw(padapter);
 
-	if (ips_netdrv_open((struct adapter *)rtw_netdev_priv(pnetdev)) != _SUCCESS) {
-		mutex_unlock(&pwrpriv->mutex_lock);
+	if (pm_netdev_open(pnetdev, false) != 0) {
+		_exit_pwrlock(&pwrpriv->lock);
 		goto error_exit;
 	}
 
@@ -113,7 +118,7 @@ static int rtw_hw_resume(struct adapter *padapter)
 	pwrpriv->rf_pwrstate = rf_on;
 	pwrpriv->bips_processing = false;
 
-	mutex_unlock(&pwrpriv->mutex_lock);
+	_exit_pwrlock(&pwrpriv->lock);
 
 
 	return 0;
@@ -138,7 +143,7 @@ void ips_enter(struct adapter *padapter)
 		return;
 	}
 
-	mutex_lock(&pwrpriv->mutex_lock);
+	_enter_pwrlock(&pwrpriv->lock);
 
 	pwrpriv->bips_processing = true;
 
@@ -159,7 +164,7 @@ void ips_enter(struct adapter *padapter)
 	}
 	pwrpriv->bips_processing = false;
 
-	mutex_unlock(&pwrpriv->mutex_lock);
+	_exit_pwrlock(&pwrpriv->lock);
 }
 
 int ips_leave(struct adapter *padapter)
@@ -171,7 +176,7 @@ int ips_leave(struct adapter *padapter)
 	int keyid;
 
 
-	mutex_lock(&pwrpriv->mutex_lock);
+	_enter_pwrlock(&pwrpriv->lock);
 
 	if ((pwrpriv->rf_pwrstate == rf_off) && (!pwrpriv->bips_processing)) {
 		pwrpriv->bips_processing = true;
@@ -180,9 +185,9 @@ int ips_leave(struct adapter *padapter)
 		DBG_88E("==>ips_leave cnts:%d\n", pwrpriv->ips_leave_cnts);
 
 		result = rtw_ips_pwr_up(padapter);
-		if (result == _SUCCESS)
+		if (result == _SUCCESS) {
 			pwrpriv->rf_pwrstate = rf_on;
-
+		}
 		DBG_88E_LEVEL(_drv_info_, "nolinked power save leave\n");
 
 		if ((_WEP40_ == psecuritypriv->dot11PrivacyAlgrthm) || (_WEP104_ == psecuritypriv->dot11PrivacyAlgrthm)) {
@@ -205,7 +210,7 @@ int ips_leave(struct adapter *padapter)
 		pwrpriv->bpower_saving = false;
 	}
 
-	mutex_unlock(&pwrpriv->mutex_lock);
+	_exit_pwrlock(&pwrpriv->lock);
 
 	return result;
 }
@@ -279,7 +284,6 @@ exit:
 static void pwr_state_check_handler(unsigned long data)
 {
 	struct adapter *padapter = (struct adapter *)data;
-
 	rtw_ps_cmd(padapter);
 }
 
@@ -505,7 +509,7 @@ void rtw_init_pwrctrl_priv(struct adapter *padapter)
 {
 	struct pwrctrl_priv *pwrctrlpriv = &padapter->pwrctrlpriv;
 
-	mutex_init(&pwrctrlpriv->mutex_lock);
+	_init_pwrlock(&pwrctrlpriv->lock);
 	pwrctrlpriv->rf_pwrstate = rf_on;
 	pwrctrlpriv->ips_enter_cnts = 0;
 	pwrctrlpriv->ips_leave_cnts = 0;

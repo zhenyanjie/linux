@@ -677,7 +677,7 @@ int bdisp_debugfs_create(struct bdisp_dev *bdisp)
 
 err:
 	bdisp_debugfs_remove(bdisp);
-	return -ENOMEM;
+	return 0;
 }
 
 void bdisp_debugfs_remove(struct bdisp_dev *bdisp)

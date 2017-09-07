@@ -48,8 +48,8 @@ static void mvs_94xx_detect_porttype(struct mvs_info *mvi, int i)
 	}
 }
 
-static void set_phy_tuning(struct mvs_info *mvi, int phy_id,
-			   struct phy_tuning phy_tuning)
+void set_phy_tuning(struct mvs_info *mvi, int phy_id,
+			struct phy_tuning phy_tuning)
 {
 	u32 tmp, setting_0 = 0, setting_1 = 0;
 	u8 i;
@@ -110,8 +110,8 @@ static void set_phy_tuning(struct mvs_info *mvi, int phy_id,
 	}
 }
 
-static void set_phy_ffe_tuning(struct mvs_info *mvi, int phy_id,
-			       struct ffe_control ffe)
+void set_phy_ffe_tuning(struct mvs_info *mvi, int phy_id,
+				struct ffe_control ffe)
 {
 	u32 tmp;
 
@@ -177,7 +177,7 @@ static void set_phy_ffe_tuning(struct mvs_info *mvi, int phy_id,
 }
 
 /*Notice: this function must be called when phy is disabled*/
-static void set_phy_rate(struct mvs_info *mvi, int phy_id, u8 rate)
+void set_phy_rate(struct mvs_info *mvi, int phy_id, u8 rate)
 {
 	union reg_phy_cfg phy_cfg, phy_cfg_tmp;
 	mvs_write_port_vsr_addr(mvi, phy_id, VSR_PHY_MODE2);
@@ -668,7 +668,7 @@ static void mvs_94xx_command_active(struct mvs_info *mvi, u32 slot_idx)
 {
 	u32 tmp;
 	tmp = mvs_cr32(mvi, MVS_COMMAND_ACTIVE+(slot_idx >> 3));
-	if (tmp & 1 << (slot_idx % 32)) {
+	if (tmp && 1 << (slot_idx % 32)) {
 		mv_printk("command active %08X,  slot [%x].\n", tmp, slot_idx);
 		mvs_cw32(mvi, MVS_COMMAND_ACTIVE + (slot_idx >> 3),
 			1 << (slot_idx % 32));
@@ -679,8 +679,7 @@ static void mvs_94xx_command_active(struct mvs_info *mvi, u32 slot_idx)
 	}
 }
 
-static void
-mvs_94xx_clear_srs_irq(struct mvs_info *mvi, u8 reg_set, u8 clear_all)
+void mvs_94xx_clear_srs_irq(struct mvs_info *mvi, u8 reg_set, u8 clear_all)
 {
 	void __iomem *regs = mvi->regs;
 	u32 tmp;
@@ -907,8 +906,8 @@ static void mvs_94xx_fix_phy_info(struct mvs_info *mvi, int i,
 
 }
 
-static void mvs_94xx_phy_set_link_rate(struct mvs_info *mvi, u32 phy_id,
-				       struct sas_phy_linkrates *rates)
+void mvs_94xx_phy_set_link_rate(struct mvs_info *mvi, u32 phy_id,
+			struct sas_phy_linkrates *rates)
 {
 	u32 lrmax = 0;
 	u32 tmp;
@@ -937,25 +936,25 @@ static void mvs_94xx_clear_active_cmds(struct mvs_info *mvi)
 }
 
 
-static u32 mvs_94xx_spi_read_data(struct mvs_info *mvi)
+u32 mvs_94xx_spi_read_data(struct mvs_info *mvi)
 {
 	void __iomem *regs = mvi->regs_ex - 0x10200;
 	return mr32(SPI_RD_DATA_REG_94XX);
 }
 
-static void mvs_94xx_spi_write_data(struct mvs_info *mvi, u32 data)
+void mvs_94xx_spi_write_data(struct mvs_info *mvi, u32 data)
 {
 	void __iomem *regs = mvi->regs_ex - 0x10200;
 	 mw32(SPI_RD_DATA_REG_94XX, data);
 }
 
 
-static int mvs_94xx_spi_buildcmd(struct mvs_info *mvi,
-				 u32      *dwCmd,
-				 u8       cmd,
-				 u8       read,
-				 u8       length,
-				 u32      addr
+int mvs_94xx_spi_buildcmd(struct mvs_info *mvi,
+				u32      *dwCmd,
+				u8       cmd,
+				u8       read,
+				u8       length,
+				u32      addr
 				)
 {
 	void __iomem *regs = mvi->regs_ex - 0x10200;
@@ -975,7 +974,7 @@ static int mvs_94xx_spi_buildcmd(struct mvs_info *mvi,
 }
 
 
-static int mvs_94xx_spi_issuecmd(struct mvs_info *mvi, u32 cmd)
+int mvs_94xx_spi_issuecmd(struct mvs_info *mvi, u32 cmd)
 {
 	void __iomem *regs = mvi->regs_ex - 0x10200;
 	mw32(SPI_CTRL_REG_94XX, cmd | SPI_CTRL_SpiStart_94XX);
@@ -983,7 +982,7 @@ static int mvs_94xx_spi_issuecmd(struct mvs_info *mvi, u32 cmd)
 	return 0;
 }
 
-static int mvs_94xx_spi_waitdataready(struct mvs_info *mvi, u32 timeout)
+int mvs_94xx_spi_waitdataready(struct mvs_info *mvi, u32 timeout)
 {
 	void __iomem *regs = mvi->regs_ex - 0x10200;
 	u32   i, dwTmp;
@@ -998,8 +997,8 @@ static int mvs_94xx_spi_waitdataready(struct mvs_info *mvi, u32 timeout)
 	return -1;
 }
 
-static void mvs_94xx_fix_dma(struct mvs_info *mvi, u32 phy_mask,
-			     int buf_len, int from, void *prd)
+void mvs_94xx_fix_dma(struct mvs_info *mvi, u32 phy_mask,
+				int buf_len, int from, void *prd)
 {
 	int i;
 	struct mvs_prd *buf_prd = prd;

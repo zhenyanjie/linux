@@ -80,7 +80,7 @@ config ARCH_PUV3
 	select CPU_UCV2
 	select GENERIC_CLOCKEVENTS
 	select HAVE_CLK
-	select GPIOLIB
+	select ARCH_REQUIRE_GPIOLIB
 
 # CONFIGs for ARCH_PUV3
 

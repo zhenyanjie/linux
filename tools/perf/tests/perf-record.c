@@ -1,8 +1,3 @@
-#include <errno.h>
-#include <inttypes.h>
-/* For the CLR_() macros */
-#include <pthread.h>
-
 #include <sched.h>
 #include "evlist.h"
 #include "evsel.h"
@@ -68,7 +63,7 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 	if (evlist == NULL) /* Fallback for kernels lacking PERF_COUNT_SW_DUMMY */
 		evlist = perf_evlist__new_default();
 
-	if (evlist == NULL) {
+	if (evlist == NULL || argv == NULL) {
 		pr_debug("Not enough memory to create evlist\n");
 		goto out;
 	}
@@ -104,12 +99,12 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 	perf_evsel__set_sample_bit(evsel, CPU);
 	perf_evsel__set_sample_bit(evsel, TID);
 	perf_evsel__set_sample_bit(evsel, TIME);
-	perf_evlist__config(evlist, &opts, NULL);
+	perf_evlist__config(evlist, &opts);
 
 	err = sched__get_first_possible_cpu(evlist->workload.pid, &cpu_mask);
 	if (err < 0) {
 		pr_debug("sched__get_first_possible_cpu: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 
@@ -120,7 +115,7 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 	 */
 	if (sched_setaffinity(evlist->workload.pid, cpu_mask_size, &cpu_mask) < 0) {
 		pr_debug("sched_setaffinity: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 
@@ -131,7 +126,7 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 	err = perf_evlist__open(evlist);
 	if (err < 0) {
 		pr_debug("perf_evlist__open: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 
@@ -143,7 +138,7 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 	err = perf_evlist__mmap(evlist, opts.mmap_pages, false);
 	if (err < 0) {
 		pr_debug("perf_evlist__mmap: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 
@@ -174,13 +169,13 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 
 				err = perf_evlist__parse_sample(evlist, event, &sample);
 				if (err < 0) {
-					if (verbose > 0)
+					if (verbose)
 						perf_event__fprintf(event, stderr);
 					pr_debug("Couldn't parse sample\n");
 					goto out_delete_evlist;
 				}
 
-				if (verbose > 0) {
+				if (verbose) {
 					pr_info("%" PRIu64" %d ", sample.time, sample.cpu);
 					perf_event__fprintf(event, stderr);
 				}

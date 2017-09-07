@@ -18,9 +18,6 @@
 
 #include "hnae.h"
 
-#define HNS_DEBUG_OFFSET	6
-#define HNS_SRV_OFFSET		2
-
 enum hns_nic_state {
 	NIC_STATE_TESTING = 0,
 	NIC_STATE_RESETTING,
@@ -37,11 +34,10 @@ enum hns_nic_state {
 struct hns_nic_ring_data {
 	struct hnae_ring *ring;
 	struct napi_struct napi;
-	cpumask_t mask; /* affinity mask */
 	int queue_index;
 	int (*poll_one)(struct hns_nic_ring_data *, int, void *);
 	void (*ex_process)(struct hns_nic_ring_data *, struct sk_buff *);
-	bool (*fini_process)(struct hns_nic_ring_data *);
+	void (*fini_process)(struct hns_nic_ring_data *);
 };
 
 /* compatible the difference between two versions */
@@ -55,11 +51,12 @@ struct hns_nic_ops {
 };
 
 struct hns_nic_priv {
-	const struct fwnode_handle      *fwnode;
+	const struct device_node *ae_node;
 	u32 enet_ver;
 	u32 port_id;
 	int phy_mode;
 	int phy_led_val;
+	struct phy_device *phy;
 	struct net_device *netdev;
 	struct device *dev;
 	struct hnae_handle *ae_handle;

@@ -185,6 +185,7 @@ enum {
 #define OMAP_I2C_IP_V2_INTERRUPTS_MASK	0x6FFF
 
 struct omap_i2c_dev {
+	spinlock_t		lock;		/* IRQ synchronization */
 	struct device		*dev;
 	void __iomem		*base;		/* virtual */
 	int			irq;
@@ -1007,10 +1008,12 @@ static irqreturn_t
 omap_i2c_isr_thread(int this_irq, void *dev_id)
 {
 	struct omap_i2c_dev *omap = dev_id;
+	unsigned long flags;
 	u16 bits;
 	u16 stat;
 	int err = 0, count = 0;
 
+	spin_lock_irqsave(&omap->lock, flags);
 	do {
 		bits = omap_i2c_read_reg(omap, OMAP_I2C_IE_REG);
 		stat = omap_i2c_read_reg(omap, OMAP_I2C_STAT_REG);
@@ -1136,6 +1139,8 @@ omap_i2c_isr_thread(int this_irq, void *dev_id)
 	omap_i2c_complete_cmd(omap, err);
 
 out:
+	spin_unlock_irqrestore(&omap->lock, flags);
+
 	return IRQ_HANDLED;
 }
 
@@ -1322,6 +1327,8 @@ omap_i2c_probe(struct platform_device *pdev)
 	omap->dev = &pdev->dev;
 	omap->irq = irq;
 
+	spin_lock_init(&omap->lock);
+
 	platform_set_drvdata(pdev, omap);
 	init_completion(&omap->cmd_complete);
 
@@ -1425,8 +1432,10 @@ omap_i2c_probe(struct platform_device *pdev)
 	/* i2c device drivers may be active on return from add_adapter() */
 	adap->nr = pdev->id;
 	r = i2c_add_numbered_adapter(adap);
-	if (r)
+	if (r) {
+		dev_err(omap->dev, "failure adding adapter\n");
 		goto err_unuse_clocks;
+	}
 
 	dev_info(omap->dev, "bus %d rev%d.%d at %d kHz\n", adap->nr,
 		 major, minor, omap->speed);
@@ -1504,7 +1513,7 @@ static int omap_i2c_runtime_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops omap_i2c_pm_ops = {
+static struct dev_pm_ops omap_i2c_pm_ops = {
 	SET_RUNTIME_PM_OPS(omap_i2c_runtime_suspend,
 			   omap_i2c_runtime_resume, NULL)
 };

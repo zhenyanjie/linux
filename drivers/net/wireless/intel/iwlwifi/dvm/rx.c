@@ -686,7 +686,7 @@ static void iwlagn_pass_packet_to_mac80211(struct iwl_priv *priv,
 
 	memcpy(IEEE80211_SKB_RXCB(skb), stats, sizeof(*stats));
 
-	ieee80211_rx_napi(priv->hw, NULL, skb, priv->napi);
+	ieee80211_rx_napi(priv->hw, skb, priv->napi);
 }
 
 static u32 iwlagn_translate_rx_status(struct iwl_priv *priv, u32 decrypt_in)
@@ -834,7 +834,7 @@ static void iwlagn_rx_reply_rx(struct iwl_priv *priv,
 	/* rx_status carries information about the packet to mac80211 */
 	rx_status.mactime = le64_to_cpu(phy_res->timestamp);
 	rx_status.band = (phy_res->phy_flags & RX_RES_PHY_FLAGS_BAND_24_MSK) ?
-				NL80211_BAND_2GHZ : NL80211_BAND_5GHZ;
+				IEEE80211_BAND_2GHZ : IEEE80211_BAND_5GHZ;
 	rx_status.freq =
 		ieee80211_channel_to_frequency(le16_to_cpu(phy_res->channel),
 					       rx_status.band);
@@ -873,7 +873,7 @@ static void iwlagn_rx_reply_rx(struct iwl_priv *priv,
 
 	/* set the preamble flag if appropriate */
 	if (phy_res->phy_flags & RX_RES_PHY_FLAGS_SHORT_PREAMBLE_MSK)
-		rx_status.enc_flags |= RX_ENC_FLAG_SHORTPRE;
+		rx_status.flag |= RX_FLAG_SHORTPRE;
 
 	if (phy_res->phy_flags & RX_RES_PHY_FLAGS_AGG_MSK) {
 		/*
@@ -887,13 +887,13 @@ static void iwlagn_rx_reply_rx(struct iwl_priv *priv,
 
 	/* Set up the HT phy flags */
 	if (rate_n_flags & RATE_MCS_HT_MSK)
-		rx_status.encoding = RX_ENC_HT;
+		rx_status.flag |= RX_FLAG_HT;
 	if (rate_n_flags & RATE_MCS_HT40_MSK)
-		rx_status.enc_flags |= RX_ENC_FLAG_40MHZ;
+		rx_status.flag |= RX_FLAG_40MHZ;
 	if (rate_n_flags & RATE_MCS_SGI_MSK)
-		rx_status.enc_flags |= RX_ENC_FLAG_SHORT_GI;
+		rx_status.flag |= RX_FLAG_SHORT_GI;
 	if (rate_n_flags & RATE_MCS_GF_MSK)
-		rx_status.enc_flags |= RX_ENC_FLAG_HT_GF;
+		rx_status.flag |= RX_FLAG_HT_GF;
 
 	iwlagn_pass_packet_to_mac80211(priv, header, len, ampdu_status,
 				    rxb, &rx_status);

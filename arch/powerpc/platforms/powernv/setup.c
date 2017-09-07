@@ -32,7 +32,6 @@
 #include <asm/machdep.h>
 #include <asm/firmware.h>
 #include <asm/xics.h>
-#include <asm/xive.h>
 #include <asm/opal.h>
 #include <asm/kexec.h>
 #include <asm/smp.h>
@@ -59,7 +58,7 @@ static void __init pnv_setup_arch(void)
 	/* XXX PMCS */
 }
 
-static void __init pnv_init(void)
+static void __init pnv_init_early(void)
 {
 	/*
 	 * Initialize the LPC bus now so that legacy serial
@@ -77,9 +76,7 @@ static void __init pnv_init(void)
 
 static void __init pnv_init_IRQ(void)
 {
-	/* Try using a XIVE if available, otherwise use a XICS */
-	if (!xive_native_init())
-		xics_init();
+	xics_init();
 
 	WARN_ON(!ppc_md.get_irq);
 }
@@ -98,10 +95,6 @@ static void pnv_show_cpuinfo(struct seq_file *m)
 	else
 		seq_printf(m, "firmware\t: BML\n");
 	of_node_put(root);
-	if (radix_enabled())
-		seq_printf(m, "MMU\t\t: Radix\n");
-	else
-		seq_printf(m, "MMU\t\t: Hash\n");
 }
 
 static void pnv_prepare_going_down(void)
@@ -181,7 +174,7 @@ static void pnv_shutdown(void)
 	opal_shutdown();
 }
 
-#ifdef CONFIG_KEXEC_CORE
+#ifdef CONFIG_KEXEC
 static void pnv_kexec_wait_secondaries_down(void)
 {
 	int my_cpu, i, notified = -1;
@@ -225,12 +218,10 @@ static void pnv_kexec_wait_secondaries_down(void)
 
 static void pnv_kexec_cpu_down(int crash_shutdown, int secondary)
 {
-	if (xive_enabled())
-		xive_kexec_teardown_cpu(secondary);
-	else
-		xics_kexec_teardown_cpu(secondary);
+	xics_kexec_teardown_cpu(secondary);
 
 	/* On OPAL, we return all CPUs to firmware */
+
 	if (!firmware_has_feature(FW_FEATURE_OPAL))
 		return;
 
@@ -246,10 +237,6 @@ static void pnv_kexec_cpu_down(int crash_shutdown, int secondary)
 		/* Primary waits for the secondaries to have reached OPAL */
 		pnv_kexec_wait_secondaries_down();
 
-		/* Switch XIVE back to emulation mode */
-		if (xive_enabled())
-			xive_shutdown();
-
 		/*
 		 * We might be running as little-endian - now that interrupts
 		 * are disabled, reset the HILE bit to big-endian so we don't
@@ -258,7 +245,7 @@ static void pnv_kexec_cpu_down(int crash_shutdown, int secondary)
 		opal_reinit_cpus(OPAL_REINIT_CPUS_HILE_BE);
 	}
 }
-#endif /* CONFIG_KEXEC_CORE */
+#endif /* CONFIG_KEXEC */
 
 #ifdef CONFIG_MEMORY_HOTPLUG_SPARSE
 static unsigned long pnv_memory_block_size(void)
@@ -281,15 +268,17 @@ static void __init pnv_setup_machdep_opal(void)
 
 static int __init pnv_probe(void)
 {
-	if (!of_machine_is_compatible("ibm,powernv"))
+	unsigned long root = of_get_flat_dt_root();
+
+	if (!of_flat_dt_is_compatible(root, "ibm,powernv"))
 		return 0;
+
+	hpte_init_native();
 
 	if (firmware_has_feature(FW_FEATURE_OPAL))
 		pnv_setup_machdep_opal();
 
 	pr_debug("PowerNV detected !\n");
-
-	pnv_init();
 
 	return 1;
 }
@@ -316,15 +305,16 @@ static unsigned long pnv_get_proc_freq(unsigned int cpu)
 define_machine(powernv) {
 	.name			= "PowerNV",
 	.probe			= pnv_probe,
+	.init_early		= pnv_init_early,
 	.setup_arch		= pnv_setup_arch,
 	.init_IRQ		= pnv_init_IRQ,
 	.show_cpuinfo		= pnv_show_cpuinfo,
 	.get_proc_freq          = pnv_get_proc_freq,
 	.progress		= pnv_progress,
 	.machine_shutdown	= pnv_shutdown,
-	.power_save             = NULL,
+	.power_save             = power7_idle,
 	.calibrate_decr		= generic_calibrate_decr,
-#ifdef CONFIG_KEXEC_CORE
+#ifdef CONFIG_KEXEC
 	.kexec_cpu_down		= pnv_kexec_cpu_down,
 #endif
 #ifdef CONFIG_MEMORY_HOTPLUG_SPARSE

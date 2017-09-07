@@ -33,12 +33,15 @@
 
 #define cls_dev_to_mmc_host(d)	container_of(d, struct mmc_host, class_dev)
 
-static DEFINE_IDA(mmc_host_ida);
+static DEFINE_IDR(mmc_host_idr);
+static DEFINE_SPINLOCK(mmc_host_lock);
 
 static void mmc_host_classdev_release(struct device *dev)
 {
 	struct mmc_host *host = cls_dev_to_mmc_host(dev);
-	ida_simple_remove(&mmc_host_ida, host->index);
+	spin_lock(&mmc_host_lock);
+	idr_remove(&mmc_host_idr, host->index);
+	spin_unlock(&mmc_host_lock);
 	kfree(host);
 }
 
@@ -65,32 +68,8 @@ void mmc_retune_enable(struct mmc_host *host)
 			  jiffies + host->retune_period * HZ);
 }
 
-/*
- * Pause re-tuning for a small set of operations.  The pause begins after the
- * next command and after first doing re-tuning.
- */
-void mmc_retune_pause(struct mmc_host *host)
-{
-	if (!host->retune_paused) {
-		host->retune_paused = 1;
-		mmc_retune_needed(host);
-		mmc_retune_hold(host);
-	}
-}
-EXPORT_SYMBOL(mmc_retune_pause);
-
-void mmc_retune_unpause(struct mmc_host *host)
-{
-	if (host->retune_paused) {
-		host->retune_paused = 0;
-		mmc_retune_release(host);
-	}
-}
-EXPORT_SYMBOL(mmc_retune_unpause);
-
 void mmc_retune_disable(struct mmc_host *host)
 {
-	mmc_retune_unpause(host);
 	host->can_retune = 0;
 	del_timer_sync(&host->retune_timer);
 	host->retune_now = 0;
@@ -298,8 +277,6 @@ int mmc_of_parse(struct mmc_host *host)
 	if (of_property_read_bool(np, "wakeup-source") ||
 	    of_property_read_bool(np, "enable-sdio-wakeup")) /* legacy */
 		host->pm_caps |= MMC_PM_WAKE_SDIO_IRQ;
-	if (of_property_read_bool(np, "mmc-ddr-3_3v"))
-		host->caps |= MMC_CAP_3_3V_DDR;
 	if (of_property_read_bool(np, "mmc-ddr-1_8v"))
 		host->caps |= MMC_CAP_1_8V_DDR;
 	if (of_property_read_bool(np, "mmc-ddr-1_2v"))
@@ -312,14 +289,6 @@ int mmc_of_parse(struct mmc_host *host)
 		host->caps2 |= MMC_CAP2_HS400_1_8V | MMC_CAP2_HS200_1_8V_SDR;
 	if (of_property_read_bool(np, "mmc-hs400-1_2v"))
 		host->caps2 |= MMC_CAP2_HS400_1_2V | MMC_CAP2_HS200_1_2V_SDR;
-	if (of_property_read_bool(np, "mmc-hs400-enhanced-strobe"))
-		host->caps2 |= MMC_CAP2_HS400_ES;
-	if (of_property_read_bool(np, "no-sdio"))
-		host->caps2 |= MMC_CAP2_NO_SDIO;
-	if (of_property_read_bool(np, "no-sd"))
-		host->caps2 |= MMC_CAP2_NO_SD;
-	if (of_property_read_bool(np, "no-mmc"))
-		host->caps2 |= MMC_CAP2_NO_MMC;
 
 	host->dsr_req = !of_property_read_u32(np, "dsr", &host->dsr);
 	if (host->dsr_req && (host->dsr & ~0xffff)) {
@@ -352,14 +321,17 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 
 	/* scanning will be enabled when we're ready */
 	host->rescan_disable = 1;
-
-	err = ida_simple_get(&mmc_host_ida, 0, 0, GFP_KERNEL);
+	idr_preload(GFP_KERNEL);
+	spin_lock(&mmc_host_lock);
+	err = idr_alloc(&mmc_host_idr, host, 0, 0, GFP_NOWAIT);
+	if (err >= 0)
+		host->index = err;
+	spin_unlock(&mmc_host_lock);
+	idr_preload_end();
 	if (err < 0) {
 		kfree(host);
 		return NULL;
 	}
-
-	host->index = err;
 
 	dev_set_name(&host->class_dev, "mmc%d", host->index);
 
@@ -367,12 +339,9 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 	host->class_dev.parent = dev;
 	host->class_dev.class = &mmc_host_class;
 	device_initialize(&host->class_dev);
-	device_enable_async_suspend(&host->class_dev);
 
 	if (mmc_gpio_alloc(host)) {
 		put_device(&host->class_dev);
-		ida_simple_remove(&mmc_host_ida, host->index);
-		kfree(host);
 		return NULL;
 	}
 
@@ -386,11 +355,11 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 	 * They have to set these according to their abilities.
 	 */
 	host->max_segs = 1;
-	host->max_seg_size = PAGE_SIZE;
+	host->max_seg_size = PAGE_CACHE_SIZE;
 
-	host->max_req_size = PAGE_SIZE;
+	host->max_req_size = PAGE_CACHE_SIZE;
 	host->max_blk_size = 512;
-	host->max_blk_count = PAGE_SIZE / 512;
+	host->max_blk_count = PAGE_CACHE_SIZE / 512;
 
 	return host;
 }

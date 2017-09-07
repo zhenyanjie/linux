@@ -1,7 +1,7 @@
 #ifndef __PERF_MAP_H
 #define __PERF_MAP_H
 
-#include <linux/refcount.h>
+#include <linux/atomic.h>
 #include <linux/compiler.h>
 #include <linux/list.h>
 #include <linux/rbtree.h>
@@ -51,7 +51,7 @@ struct map {
 
 	struct dso		*dso;
 	struct map_groups	*groups;
-	refcount_t		refcnt;
+	atomic_t		refcnt;
 };
 
 struct kmap {
@@ -67,7 +67,7 @@ struct maps {
 struct map_groups {
 	struct maps	 maps[MAP__NR_TYPES];
 	struct machine	 *machine;
-	refcount_t	 refcnt;
+	atomic_t	 refcnt;
 };
 
 struct map_groups *map_groups__new(struct machine *machine);
@@ -77,7 +77,7 @@ bool map_groups__empty(struct map_groups *mg);
 static inline struct map_groups *map_groups__get(struct map_groups *mg)
 {
 	if (mg)
-		refcount_inc(&mg->refcnt);
+		atomic_inc(&mg->refcnt);
 	return mg;
 }
 
@@ -127,14 +127,17 @@ struct thread;
  * @map: the 'struct map *' in which symbols itereated
  * @sym_name: the symbol name
  * @pos: the 'struct symbol *' to use as a loop cursor
+ * @filter: to use when loading the DSO
  */
-#define __map__for_each_symbol_by_name(map, sym_name, pos)	\
-	for (pos = map__find_symbol_by_name(map, sym_name);	\
+#define __map__for_each_symbol_by_name(map, sym_name, pos, filter)	\
+	for (pos = map__find_symbol_by_name(map, sym_name, filter);	\
 	     pos && arch__compare_symbol_names(pos->name, sym_name) == 0;	\
 	     pos = symbol__next_by_name(pos))
 
 #define map__for_each_symbol_by_name(map, sym_name, pos)		\
-	__map__for_each_symbol_by_name(map, sym_name, (pos))
+	__map__for_each_symbol_by_name(map, sym_name, (pos), NULL)
+
+typedef int (*symbol_filter_t)(struct map *map, struct symbol *sym);
 
 int arch__compare_symbol_names(const char *namea, const char *nameb);
 void map__init(struct map *map, enum map_type type,
@@ -150,7 +153,7 @@ struct map *map__clone(struct map *map);
 static inline struct map *map__get(struct map *map)
 {
 	if (map)
-		refcount_inc(&map->refcnt);
+		atomic_inc(&map->refcnt);
 	return map;
 }
 
@@ -170,9 +173,11 @@ size_t map__fprintf_dsoname(struct map *map, FILE *fp);
 int map__fprintf_srcline(struct map *map, u64 addr, const char *prefix,
 			 FILE *fp);
 
-int map__load(struct map *map);
-struct symbol *map__find_symbol(struct map *map, u64 addr);
-struct symbol *map__find_symbol_by_name(struct map *map, const char *name);
+int map__load(struct map *map, symbol_filter_t filter);
+struct symbol *map__find_symbol(struct map *map,
+				u64 addr, symbol_filter_t filter);
+struct symbol *map__find_symbol_by_name(struct map *map, const char *name,
+					symbol_filter_t filter);
 void map__fixup_start(struct map *map);
 void map__fixup_end(struct map *map);
 
@@ -186,10 +191,10 @@ struct map *maps__find(struct maps *maps, u64 addr);
 struct map *maps__first(struct maps *maps);
 struct map *map__next(struct map *map);
 struct symbol *maps__find_symbol_by_name(struct maps *maps, const char *name,
-                                         struct map **mapp);
+                                         struct map **mapp, symbol_filter_t filter);
 void map_groups__init(struct map_groups *mg, struct machine *machine);
 void map_groups__exit(struct map_groups *mg);
-int map_groups__clone(struct thread *thread,
+int map_groups__clone(struct map_groups *mg,
 		      struct map_groups *parent, enum map_type type);
 size_t map_groups__fprintf(struct map_groups *mg, FILE *fp);
 
@@ -226,22 +231,25 @@ static inline struct map *map_groups__next(struct map *map)
 
 struct symbol *map_groups__find_symbol(struct map_groups *mg,
 				       enum map_type type, u64 addr,
-				       struct map **mapp);
+				       struct map **mapp,
+				       symbol_filter_t filter);
 
 struct symbol *map_groups__find_symbol_by_name(struct map_groups *mg,
 					       enum map_type type,
 					       const char *name,
-					       struct map **mapp);
+					       struct map **mapp,
+					       symbol_filter_t filter);
 
 struct addr_map_symbol;
 
-int map_groups__find_ams(struct addr_map_symbol *ams);
+int map_groups__find_ams(struct addr_map_symbol *ams, symbol_filter_t filter);
 
 static inline
 struct symbol *map_groups__find_function_by_name(struct map_groups *mg,
-						 const char *name, struct map **mapp)
+						 const char *name, struct map **mapp,
+						 symbol_filter_t filter)
 {
-	return map_groups__find_symbol_by_name(mg, MAP__FUNCTION, name, mapp);
+	return map_groups__find_symbol_by_name(mg, MAP__FUNCTION, name, mapp, filter);
 }
 
 int map_groups__fixup_overlappings(struct map_groups *mg, struct map *map,

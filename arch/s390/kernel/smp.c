@@ -19,8 +19,7 @@
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
 #include <linux/workqueue.h>
-#include <linux/bootmem.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/err.h>
@@ -31,8 +30,6 @@
 #include <linux/irqflags.h>
 #include <linux/cpu.h>
 #include <linux/slab.h>
-#include <linux/sched/hotplug.h>
-#include <linux/sched/task_stack.h>
 #include <linux/crash_dump.h>
 #include <linux/memblock.h>
 #include <asm/asm-offsets.h>
@@ -51,7 +48,6 @@
 #include <asm/os_info.h>
 #include <asm/sigp.h>
 #include <asm/idle.h>
-#include <asm/nmi.h>
 #include "entry.h"
 
 enum {
@@ -78,8 +74,6 @@ struct pcpu {
 
 static u8 boot_core_type;
 static struct pcpu pcpu_devices[NR_CPUS];
-
-static struct kmem_cache *pcpu_mcesa_cache;
 
 unsigned int smp_cpu_mt_shift;
 EXPORT_SYMBOL(smp_cpu_mt_shift);
@@ -191,10 +185,8 @@ static void pcpu_ec_call(struct pcpu *pcpu, int ec_bit)
 static int pcpu_alloc_lowcore(struct pcpu *pcpu, int cpu)
 {
 	unsigned long async_stack, panic_stack;
-	unsigned long mcesa_origin, mcesa_bits;
 	struct lowcore *lc;
 
-	mcesa_origin = mcesa_bits = 0;
 	if (pcpu != &pcpu_devices[0]) {
 		pcpu->lowcore =	(struct lowcore *)
 			__get_free_pages(GFP_KERNEL | GFP_DMA, LC_ORDER);
@@ -202,27 +194,20 @@ static int pcpu_alloc_lowcore(struct pcpu *pcpu, int cpu)
 		panic_stack = __get_free_page(GFP_KERNEL);
 		if (!pcpu->lowcore || !panic_stack || !async_stack)
 			goto out;
-		if (MACHINE_HAS_VX || MACHINE_HAS_GS) {
-			mcesa_origin = (unsigned long)
-				kmem_cache_alloc(pcpu_mcesa_cache, GFP_KERNEL);
-			if (!mcesa_origin)
-				goto out;
-			mcesa_bits = MACHINE_HAS_GS ? 11 : 0;
-		}
 	} else {
 		async_stack = pcpu->lowcore->async_stack - ASYNC_FRAME_OFFSET;
 		panic_stack = pcpu->lowcore->panic_stack - PANIC_FRAME_OFFSET;
-		mcesa_origin = pcpu->lowcore->mcesad & MCESA_ORIGIN_MASK;
-		mcesa_bits = pcpu->lowcore->mcesad & MCESA_LC_MASK;
 	}
 	lc = pcpu->lowcore;
 	memcpy(lc, &S390_lowcore, 512);
 	memset((char *) lc + 512, 0, sizeof(*lc) - 512);
 	lc->async_stack = async_stack + ASYNC_FRAME_OFFSET;
 	lc->panic_stack = panic_stack + PANIC_FRAME_OFFSET;
-	lc->mcesad = mcesa_origin | mcesa_bits;
 	lc->cpu_nr = cpu;
 	lc->spinlock_lockval = arch_spin_lockval(cpu);
+	if (MACHINE_HAS_VX)
+		lc->vector_save_area_addr =
+			(unsigned long) &lc->vector_save_area;
 	if (vdso_alloc_per_cpu(lc))
 		goto out;
 	lowcore_ptr[cpu] = lc;
@@ -230,9 +215,6 @@ static int pcpu_alloc_lowcore(struct pcpu *pcpu, int cpu)
 	return 0;
 out:
 	if (pcpu != &pcpu_devices[0]) {
-		if (mcesa_origin)
-			kmem_cache_free(pcpu_mcesa_cache,
-					(void *) mcesa_origin);
 		free_page(panic_stack);
 		free_pages(async_stack, ASYNC_ORDER);
 		free_pages((unsigned long) pcpu->lowcore, LC_ORDER);
@@ -244,17 +226,11 @@ out:
 
 static void pcpu_free_lowcore(struct pcpu *pcpu)
 {
-	unsigned long mcesa_origin;
-
 	pcpu_sigp_retry(pcpu, SIGP_SET_PREFIX, 0);
 	lowcore_ptr[pcpu - pcpu_devices] = NULL;
 	vdso_free_per_cpu(pcpu->lowcore);
 	if (pcpu == &pcpu_devices[0])
 		return;
-	if (MACHINE_HAS_VX || MACHINE_HAS_GS) {
-		mcesa_origin = pcpu->lowcore->mcesad & MCESA_ORIGIN_MASK;
-		kmem_cache_free(pcpu_mcesa_cache, (void *) mcesa_origin);
-	}
 	free_page(pcpu->lowcore->panic_stack-PANIC_FRAME_OFFSET);
 	free_pages(pcpu->lowcore->async_stack-ASYNC_FRAME_OFFSET, ASYNC_ORDER);
 	free_pages((unsigned long) pcpu->lowcore, LC_ORDER);
@@ -266,8 +242,10 @@ static void pcpu_prepare_secondary(struct pcpu *pcpu, int cpu)
 {
 	struct lowcore *lc = pcpu->lowcore;
 
-	cpumask_set_cpu(cpu, &init_mm.context.cpu_attach_mask);
+	if (MACHINE_HAS_TLB_LC)
+		cpumask_set_cpu(cpu, &init_mm.context.cpu_attach_mask);
 	cpumask_set_cpu(cpu, mm_cpumask(&init_mm));
+	atomic_inc(&init_mm.context.attach_count);
 	lc->cpu_nr = cpu;
 	lc->spinlock_lockval = arch_spin_lockval(cpu);
 	lc->percpu_offset = __per_cpu_offset[cpu];
@@ -283,14 +261,16 @@ static void pcpu_prepare_secondary(struct pcpu *pcpu, int cpu)
 static void pcpu_attach_task(struct pcpu *pcpu, struct task_struct *tsk)
 {
 	struct lowcore *lc = pcpu->lowcore;
+	struct thread_info *ti = task_thread_info(tsk);
 
 	lc->kernel_stack = (unsigned long) task_stack_page(tsk)
 		+ THREAD_SIZE - STACK_FRAME_OVERHEAD - sizeof(struct pt_regs);
+	lc->thread_info = (unsigned long) task_thread_info(tsk);
 	lc->current_task = (unsigned long) tsk;
 	lc->lpp = LPP_MAGIC;
 	lc->current_pid = tsk->pid;
-	lc->user_timer = tsk->thread.user_timer;
-	lc->system_timer = tsk->thread.system_timer;
+	lc->user_timer = ti->user_timer;
+	lc->system_timer = ti->system_timer;
 	lc->steal_timer = 0;
 }
 
@@ -340,11 +320,17 @@ static void pcpu_delegate(struct pcpu *pcpu, void (*func)(void *),
  */
 static int pcpu_set_smt(unsigned int mtid)
 {
+	register unsigned long reg1 asm ("1") = (unsigned long) mtid;
 	int cc;
 
 	if (smp_cpu_mtid == mtid)
 		return 0;
-	cc = __pcpu_sigp(0, SIGP_SET_MULTI_THREADING, mtid, NULL);
+	asm volatile(
+		"	sigp	%1,0,%2	# sigp set multi-threading\n"
+		"	ipm	%0\n"
+		"	srl	%0,28\n"
+		: "=d" (cc) : "d" (reg1), "K" (SIGP_SET_MULTI_THREADING)
+		: "cc");
 	if (cc == 0) {
 		smp_cpu_mtid = mtid;
 		smp_cpu_mt_shift = 0;
@@ -390,15 +376,10 @@ int smp_find_processor_id(u16 address)
 	return -1;
 }
 
-bool arch_vcpu_is_preempted(int cpu)
+int smp_vcpu_scheduled(int cpu)
 {
-	if (test_cpu_flag_of(CIF_ENABLED_WAIT, cpu))
-		return false;
-	if (pcpu_running(pcpu_devices + cpu))
-		return false;
-	return true;
+	return pcpu_running(pcpu_devices + cpu);
 }
-EXPORT_SYMBOL(arch_vcpu_is_preempted);
 
 void smp_yield_cpu(int cpu)
 {
@@ -571,11 +552,9 @@ int smp_store_status(int cpu)
 	if (__pcpu_sigp_relax(pcpu->address, SIGP_STORE_STATUS_AT_ADDRESS,
 			      pa) != SIGP_CC_ORDER_CODE_ACCEPTED)
 		return -EIO;
-	if (!MACHINE_HAS_VX && !MACHINE_HAS_GS)
+	if (!MACHINE_HAS_VX)
 		return 0;
-	pa = __pa(pcpu->lowcore->mcesad & MCESA_ORIGIN_MASK);
-	if (MACHINE_HAS_GS)
-		pa |= pcpu->lowcore->mcesad & MCESA_LC_MASK;
+	pa = __pa(pcpu->lowcore->vector_save_area_addr);
 	if (__pcpu_sigp_relax(pcpu->address, SIGP_STORE_ADDITIONAL_STATUS,
 			      pa) != SIGP_CC_ORDER_CODE_ACCEPTED)
 		return -EIO;
@@ -686,12 +665,14 @@ int smp_cpu_get_polarization(int cpu)
 	return pcpu_devices[cpu].polarization;
 }
 
-static void __ref smp_get_core_info(struct sclp_core_info *info, int early)
+static struct sclp_core_info *smp_get_core_info(void)
 {
 	static int use_sigp_detection;
+	struct sclp_core_info *info;
 	int address;
 
-	if (use_sigp_detection || sclp_get_core_info(info, early)) {
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (info && (use_sigp_detection || sclp_get_core_info(info))) {
 		use_sigp_detection = 1;
 		for (address = 0;
 		     address < (SCLP_MAX_CORES << smp_cpu_mt_shift);
@@ -705,6 +686,7 @@ static void __ref smp_get_core_info(struct sclp_core_info *info, int early)
 		}
 		info->combined = info->configured;
 	}
+	return info;
 }
 
 static int smp_add_present_cpu(int cpu);
@@ -745,15 +727,17 @@ static int __smp_rescan_cpus(struct sclp_core_info *info, int sysfs_add)
 	return nr;
 }
 
-void __init smp_detect_cpus(void)
+static void __init smp_detect_cpus(void)
 {
 	unsigned int cpu, mtid, c_cpus, s_cpus;
 	struct sclp_core_info *info;
 	u16 address;
 
 	/* Get CPU information */
-	info = memblock_virt_alloc(sizeof(*info), 8);
-	smp_get_core_info(info, 1);
+	info = smp_get_core_info();
+	if (!info)
+		panic("smp_detect_cpus failed to allocate memory\n");
+
 	/* Find boot CPU type */
 	if (sclp.has_core_type) {
 		address = stap();
@@ -789,7 +773,7 @@ void __init smp_detect_cpus(void)
 	get_online_cpus();
 	__smp_rescan_cpus(info, 0);
 	put_online_cpus();
-	memblock_free_early((unsigned long)info, sizeof(*info));
+	kfree(info);
 }
 
 /*
@@ -814,7 +798,7 @@ static void smp_start_secondary(void *cpuvoid)
 	set_cpu_online(smp_processor_id(), true);
 	inc_irq_stat(CPU_RST);
 	local_irq_enable();
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 }
 
 /* Upping and downing of CPUs */
@@ -826,7 +810,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 	pcpu = pcpu_devices + cpu;
 	if (pcpu->state != CPU_STATE_CONFIGURED)
 		return -EIO;
-	base = smp_get_base_cpu(cpu);
+	base = cpu - (cpu % (smp_cpu_mtid + 1));
 	for (i = 0; i <= smp_cpu_mtid; i++) {
 		if (base + i < nr_cpu_ids)
 			if (cpu_online(base + i))
@@ -848,7 +832,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 	pcpu_attach_task(pcpu, tidle);
 	pcpu_start_fn(pcpu, smp_start_secondary, NULL);
 	/* Wait until cpu puts itself in the online & active maps */
-	while (!cpu_online(cpu))
+	while (!cpu_online(cpu) || !cpu_active(cpu))
 		cpu_relax();
 	return 0;
 }
@@ -892,8 +876,10 @@ void __cpu_die(unsigned int cpu)
 	while (!pcpu_stopped(pcpu))
 		cpu_relax();
 	pcpu_free_lowcore(pcpu);
+	atomic_dec(&init_mm.context.attach_count);
 	cpumask_clear_cpu(cpu, mm_cpumask(&init_mm));
-	cpumask_clear_cpu(cpu, &init_mm.context.cpu_attach_mask);
+	if (MACHINE_HAS_TLB_LC)
+		cpumask_clear_cpu(cpu, &init_mm.context.cpu_attach_mask);
 }
 
 void __noreturn cpu_die(void)
@@ -911,7 +897,7 @@ void __init smp_fill_possible_mask(void)
 
 	sclp_max = max(sclp.mtid, sclp.mtid_cp) + 1;
 	sclp_max = min(smp_max_threads, sclp_max);
-	sclp_max = (sclp.max_cores * sclp_max) ?: nr_cpu_ids;
+	sclp_max = sclp.max_cores * sclp_max ?: nr_cpu_ids;
 	possible = setup_possible_cpus ?: nr_cpu_ids;
 	possible = min(possible, sclp_max);
 	for (cpu = 0; cpu < possible && cpu < nr_cpu_ids; cpu++)
@@ -920,33 +906,26 @@ void __init smp_fill_possible_mask(void)
 
 void __init smp_prepare_cpus(unsigned int max_cpus)
 {
-	unsigned long size;
-
 	/* request the 0x1201 emergency signal external interrupt */
 	if (register_external_irq(EXT_IRQ_EMERGENCY_SIG, do_ext_call_interrupt))
 		panic("Couldn't request external interrupt 0x1201");
 	/* request the 0x1202 external call external interrupt */
 	if (register_external_irq(EXT_IRQ_EXTERNAL_CALL, do_ext_call_interrupt))
 		panic("Couldn't request external interrupt 0x1202");
-	/* create slab cache for the machine-check-extended-save-areas */
-	if (MACHINE_HAS_VX || MACHINE_HAS_GS) {
-		size = 1UL << (MACHINE_HAS_GS ? 11 : 10);
-		pcpu_mcesa_cache = kmem_cache_create("nmi_save_areas",
-						     size, size, 0, NULL);
-		if (!pcpu_mcesa_cache)
-			panic("Couldn't create nmi save area cache");
-	}
+	smp_detect_cpus();
 }
 
 void __init smp_prepare_boot_cpu(void)
 {
 	struct pcpu *pcpu = pcpu_devices;
 
-	WARN_ON(!cpu_present(0) || !cpu_online(0));
 	pcpu->state = CPU_STATE_CONFIGURED;
+	pcpu->address = stap();
 	pcpu->lowcore = (struct lowcore *)(unsigned long) store_prefix();
 	S390_lowcore.percpu_offset = __per_cpu_offset[0];
 	smp_cpu_set_polarization(0, POLARIZATION_UNKNOWN);
+	set_cpu_present(0, true);
+	set_cpu_online(0, true);
 }
 
 void __init smp_cpus_done(unsigned int max_cpus)
@@ -955,7 +934,6 @@ void __init smp_cpus_done(unsigned int max_cpus)
 
 void __init smp_setup_processor_id(void)
 {
-	pcpu_devices[0].address = stap();
 	S390_lowcore.cpu_nr = 0;
 	S390_lowcore.spinlock_lockval = arch_spin_lockval(0);
 }
@@ -1000,7 +978,7 @@ static ssize_t cpu_configure_store(struct device *dev,
 	rc = -EBUSY;
 	/* disallow configuration changes of online cpus and cpu 0 */
 	cpu = dev->id;
-	cpu = smp_get_base_cpu(cpu);
+	cpu -= cpu % (smp_cpu_mtid + 1);
 	if (cpu == 0)
 		goto out;
 	for (i = 0; i <= smp_cpu_mtid; i++)
@@ -1079,18 +1057,22 @@ static struct attribute_group cpu_online_attr_group = {
 	.attrs = cpu_online_attrs,
 };
 
-static int smp_cpu_online(unsigned int cpu)
+static int smp_cpu_notify(struct notifier_block *self, unsigned long action,
+			  void *hcpu)
 {
+	unsigned int cpu = (unsigned int)(long)hcpu;
 	struct device *s = &per_cpu(cpu_device, cpu)->dev;
+	int err = 0;
 
-	return sysfs_create_group(&s->kobj, &cpu_online_attr_group);
-}
-static int smp_cpu_pre_down(unsigned int cpu)
-{
-	struct device *s = &per_cpu(cpu_device, cpu)->dev;
-
-	sysfs_remove_group(&s->kobj, &cpu_online_attr_group);
-	return 0;
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_ONLINE:
+		err = sysfs_create_group(&s->kobj, &cpu_online_attr_group);
+		break;
+	case CPU_DEAD:
+		sysfs_remove_group(&s->kobj, &cpu_online_attr_group);
+		break;
+	}
+	return notifier_from_errno(err);
 }
 
 static int smp_add_present_cpu(int cpu)
@@ -1111,12 +1093,20 @@ static int smp_add_present_cpu(int cpu)
 	rc = sysfs_create_group(&s->kobj, &cpu_common_attr_group);
 	if (rc)
 		goto out_cpu;
+	if (cpu_online(cpu)) {
+		rc = sysfs_create_group(&s->kobj, &cpu_online_attr_group);
+		if (rc)
+			goto out_online;
+	}
 	rc = topology_cpu_init(c);
 	if (rc)
 		goto out_topology;
 	return 0;
 
 out_topology:
+	if (cpu_online(cpu))
+		sysfs_remove_group(&s->kobj, &cpu_online_attr_group);
+out_online:
 	sysfs_remove_group(&s->kobj, &cpu_common_attr_group);
 out_cpu:
 #ifdef CONFIG_HOTPLUG_CPU
@@ -1133,10 +1123,9 @@ int __ref smp_rescan_cpus(void)
 	struct sclp_core_info *info;
 	int nr;
 
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = smp_get_core_info();
 	if (!info)
 		return -ENOMEM;
-	smp_get_core_info(info, 0);
 	get_online_cpus();
 	mutex_lock(&smp_cpu_state_mutex);
 	nr = __smp_rescan_cpus(info, 1);
@@ -1170,15 +1159,17 @@ static int __init s390_smp_init(void)
 	if (rc)
 		return rc;
 #endif
+	cpu_notifier_register_begin();
 	for_each_present_cpu(cpu) {
 		rc = smp_add_present_cpu(cpu);
 		if (rc)
 			goto out;
 	}
 
-	rc = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "s390/smp:online",
-			       smp_cpu_online, smp_cpu_pre_down);
+	__hotcpu_notifier(smp_cpu_notify, 0);
+
 out:
+	cpu_notifier_register_done();
 	return rc;
 }
 subsys_initcall(s390_smp_init);

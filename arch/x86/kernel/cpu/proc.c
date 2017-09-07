@@ -31,13 +31,14 @@ static void show_cpuinfo_misc(struct seq_file *m, struct cpuinfo_x86 *c)
 		   "fpu\t\t: %s\n"
 		   "fpu_exception\t: %s\n"
 		   "cpuid level\t: %d\n"
-		   "wp\t\t: yes\n",
+		   "wp\t\t: %s\n",
 		   static_cpu_has_bug(X86_BUG_FDIV) ? "yes" : "no",
 		   static_cpu_has_bug(X86_BUG_F00F) ? "yes" : "no",
 		   static_cpu_has_bug(X86_BUG_COMA) ? "yes" : "no",
 		   static_cpu_has(X86_FEATURE_FPU) ? "yes" : "no",
 		   static_cpu_has(X86_FEATURE_FPU) ? "yes" : "no",
-		   c->cpuid_level);
+		   c->cpuid_level,
+		   c->wp_works_ok ? "yes" : "no");
 }
 #else
 static void show_cpuinfo_misc(struct seq_file *m, struct cpuinfo_x86 *c)

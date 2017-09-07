@@ -32,23 +32,6 @@
 #include <nvif/cl906f.h>
 #include <nvif/unpack.h>
 
-int
-gf100_fifo_chan_ntfy(struct nvkm_fifo_chan *chan, u32 type,
-		     struct nvkm_event **pevent)
-{
-	switch (type) {
-	case NV906F_V0_NTFY_NON_STALL_INTERRUPT:
-		*pevent = &chan->fifo->uevent;
-		return 0;
-	case NV906F_V0_NTFY_KILLED:
-		*pevent = &chan->fifo->kevent;
-		return 0;
-	default:
-		break;
-	}
-	return -EINVAL;
-}
-
 static u32
 gf100_fifo_gpfifo_engine_addr(struct nvkm_engine *engine)
 {
@@ -77,7 +60,6 @@ gf100_fifo_gpfifo_engine_fini(struct nvkm_fifo_chan *base,
 	struct nvkm_gpuobj *inst = chan->base.inst;
 	int ret = 0;
 
-	mutex_lock(&subdev->mutex);
 	nvkm_wr32(device, 0x002634, chan->base.chid);
 	if (nvkm_msec(device, 2000,
 		if (nvkm_rd32(device, 0x002634) == chan->base.chid)
@@ -85,12 +67,10 @@ gf100_fifo_gpfifo_engine_fini(struct nvkm_fifo_chan *base,
 	) < 0) {
 		nvkm_error(subdev, "channel %d [%s] kick timeout\n",
 			   chan->base.chid, chan->base.object.client->name);
-		ret = -ETIMEDOUT;
+		ret = -EBUSY;
+		if (suspend)
+			return ret;
 	}
-	mutex_unlock(&subdev->mutex);
-
-	if (ret && suspend)
-		return ret;
 
 	if (offset) {
 		nvkm_kmap(inst);
@@ -201,7 +181,7 @@ gf100_fifo_gpfifo_func = {
 	.dtor = gf100_fifo_gpfifo_dtor,
 	.init = gf100_fifo_gpfifo_init,
 	.fini = gf100_fifo_gpfifo_fini,
-	.ntfy = gf100_fifo_chan_ntfy,
+	.ntfy = g84_fifo_chan_ntfy,
 	.engine_ctor = gf100_fifo_gpfifo_engine_ctor,
 	.engine_dtor = gf100_fifo_gpfifo_engine_dtor,
 	.engine_init = gf100_fifo_gpfifo_engine_init,

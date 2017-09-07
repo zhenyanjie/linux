@@ -56,7 +56,7 @@ static void _rtl8723be_query_rxphystatus(struct ieee80211_hw *hw,
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct phy_status_rpt *p_phystrpt = (struct phy_status_rpt *)p_drvinfo;
-	s8 rx_pwr_all = 0, rx_pwr[4];
+	char rx_pwr_all = 0, rx_pwr[4];
 	u8 rf_rx_num = 0, evm, pwdb_all, pwdb_all_bt = 0;
 	u8 i, max_spatial_stream;
 	u32 rssi, total_rssi = 0;
@@ -373,10 +373,10 @@ bool rtl8723be_rx_query_desc(struct ieee80211_hw *hw,
 		rx_status->flag |= RX_FLAG_FAILED_FCS_CRC;
 
 	if (status->rx_is40Mhzpacket)
-		rx_status->bw = RATE_INFO_BW_40;
+		rx_status->flag |= RX_FLAG_40MHZ;
 
 	if (status->is_ht)
-		rx_status->encoding = RX_ENC_HT;
+		rx_status->flag |= RX_FLAG_HT;
 
 	rx_status->flag |= RX_FLAG_MACTIME_START;
 
@@ -464,7 +464,7 @@ void rtl8723be_tx_fill_desc(struct ieee80211_hw *hw,
 	mapping = pci_map_single(rtlpci->pdev, skb->data, skb->len,
 				 PCI_DMA_TODEVICE);
 	if (pci_dma_mapping_error(rtlpci->pdev, mapping)) {
-		RT_TRACE(rtlpriv, COMP_SEND, DBG_TRACE, "DMA mapping error\n");
+		RT_TRACE(rtlpriv, COMP_SEND, DBG_TRACE, "DMA mapping error");
 		return;
 	}
 	CLEAR_PCI_TX_DESC_CONTENT(pdesc, sizeof(struct tx_desc_8723be));
@@ -616,7 +616,7 @@ void rtl8723be_tx_fill_cmddesc(struct ieee80211_hw *hw, u8 *pdesc,
 
 	if (pci_dma_mapping_error(rtlpci->pdev, mapping)) {
 		RT_TRACE(rtlpriv, COMP_SEND, DBG_TRACE,
-			 "DMA mapping error\n");
+			 "DMA mapping error");
 		return;
 	}
 	CLEAR_PCI_TX_DESC_CONTENT(pdesc, TX_DESC_SIZE);
@@ -666,8 +666,8 @@ void rtl8723be_set_desc(struct ieee80211_hw *hw, u8 *pdesc,
 			SET_TX_DESC_NEXT_DESC_ADDRESS(pdesc, *(u32 *)val);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8723be: ERR txdesc :%d not processed\n",
-				  desc_name);
+			RT_ASSERT(false, "ERR txdesc :%d not process\n",
+					  desc_name);
 			break;
 		}
 	} else {
@@ -685,8 +685,8 @@ void rtl8723be_set_desc(struct ieee80211_hw *hw, u8 *pdesc,
 			SET_RX_DESC_EOR(pdesc, 1);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8723be: ERR rxdesc :%d not process\n",
-				  desc_name);
+			RT_ASSERT(false, "ERR rxdesc :%d not process\n",
+					  desc_name);
 			break;
 		}
 	}
@@ -705,8 +705,8 @@ u32 rtl8723be_get_desc(u8 *pdesc, bool istx, u8 desc_name)
 			ret = GET_TX_DESC_TX_BUFFER_ADDRESS(pdesc);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8723be: ERR txdesc :%d not process\n",
-				  desc_name);
+			RT_ASSERT(false, "ERR txdesc :%d not process\n",
+					  desc_name);
 			break;
 		}
 	} else {
@@ -721,7 +721,7 @@ u32 rtl8723be_get_desc(u8 *pdesc, bool istx, u8 desc_name)
 			ret = GET_RX_DESC_BUFF_ADDR(pdesc);
 			break;
 		default:
-			WARN_ONCE(true, "rtl8723be: ERR rxdesc :%d not processed\n",
+			RT_ASSERT(false, "ERR rxdesc :%d not process\n",
 				  desc_name);
 			break;
 		}
@@ -758,13 +758,13 @@ void rtl8723be_tx_polling(struct ieee80211_hw *hw, u8 hw_queue)
 }
 
 u32 rtl8723be_rx_command_packet(struct ieee80211_hw *hw,
-				const struct rtl_stats *status,
+				struct rtl_stats status,
 				struct sk_buff *skb)
 {
 	u32 result = 0;
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 
-	switch (status->packet_report_type) {
+	switch (status.packet_report_type) {
 	case NORMAL_RX:
 			result = 0;
 			break;

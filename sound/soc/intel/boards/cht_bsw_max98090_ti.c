@@ -204,11 +204,11 @@ static int cht_max98090_headset_init(struct snd_soc_component *component)
 	return ts3a227e_enable_jack_detect(component, &ctx->jack);
 }
 
-static const struct snd_soc_ops cht_aif1_ops = {
+static struct snd_soc_ops cht_aif1_ops = {
 	.startup = cht_aif1_startup,
 };
 
-static const struct snd_soc_ops cht_be_ssp2_ops = {
+static struct snd_soc_ops cht_be_ssp2_ops = {
 	.hw_params = cht_aif1_hw_params,
 };
 
@@ -255,7 +255,7 @@ static struct snd_soc_dai_link cht_dailink[] = {
 	/* back ends */
 	{
 		.name = "SSP2-Codec",
-		.id = 1,
+		.be_id = 1,
 		.cpu_dai_name = "ssp2-port",
 		.platform_name = "sst-mfld-platform",
 		.no_pcm = 1,
@@ -287,20 +287,33 @@ static struct snd_soc_card snd_soc_card_cht = {
 	.num_controls = ARRAY_SIZE(cht_mc_controls),
 };
 
+static acpi_status snd_acpi_codec_match(acpi_handle handle, u32 level,
+						void *context, void **ret)
+{
+	*(bool *)context = true;
+	return AE_OK;
+}
+
 static int snd_cht_mc_probe(struct platform_device *pdev)
 {
 	int ret_val = 0;
+	bool found = false;
 	struct cht_mc_private *drv;
 
 	drv = devm_kzalloc(&pdev->dev, sizeof(*drv), GFP_ATOMIC);
 	if (!drv)
 		return -ENOMEM;
 
-	drv->ts3a227e_present = acpi_dev_found("104C227E");
-	if (!drv->ts3a227e_present) {
+	if (ACPI_SUCCESS(acpi_get_devices(
+					"104C227E",
+					snd_acpi_codec_match,
+					&found, NULL)) && found) {
+		drv->ts3a227e_present = true;
+	} else {
 		/* no need probe TI jack detection chip */
 		snd_soc_card_cht.aux_dev = NULL;
 		snd_soc_card_cht.num_aux_devs = 0;
+		drv->ts3a227e_present = false;
 	}
 
 	/* register the soc card */

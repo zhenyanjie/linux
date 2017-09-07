@@ -307,7 +307,7 @@ static dma_addr_t iommu_alloc(struct device *dev, struct iommu_table *tbl,
 			      void *page, unsigned int npages,
 			      enum dma_data_direction direction,
 			      unsigned long mask, unsigned int align_order,
-			      unsigned long attrs)
+			      struct dma_attrs *attrs)
 {
 	unsigned long entry;
 	dma_addr_t ret = DMA_ERROR_CODE;
@@ -431,7 +431,7 @@ static void iommu_free(struct iommu_table *tbl, dma_addr_t dma_addr,
 int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 		     struct scatterlist *sglist, int nelems,
 		     unsigned long mask, enum dma_data_direction direction,
-		     unsigned long attrs)
+		     struct dma_attrs *attrs)
 {
 	dma_addr_t dma_next = 0, dma_addr;
 	struct scatterlist *s, *outs, *segstart;
@@ -479,8 +479,7 @@ int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 
 		/* Handle failure */
 		if (unlikely(entry == DMA_ERROR_CODE)) {
-			if (!(attrs & DMA_ATTR_NO_WARN) &&
-			    printk_ratelimit())
+			if (printk_ratelimit())
 				dev_info(dev, "iommu_alloc failed, tbl %p "
 					 "vaddr %lx npages %lu\n", tbl, vaddr,
 					 npages);
@@ -575,7 +574,7 @@ int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 
 void ppc_iommu_unmap_sg(struct iommu_table *tbl, struct scatterlist *sglist,
 			int nelems, enum dma_data_direction direction,
-			unsigned long attrs)
+			struct dma_attrs *attrs)
 {
 	struct scatterlist *sg;
 
@@ -711,16 +710,13 @@ struct iommu_table *iommu_init_table(struct iommu_table *tbl, int nid)
 	return tbl;
 }
 
-static void iommu_table_free(struct kref *kref)
+void iommu_free_table(struct iommu_table *tbl, const char *node_name)
 {
 	unsigned long bitmap_sz;
 	unsigned int order;
-	struct iommu_table *tbl;
 
-	tbl = container_of(kref, struct iommu_table, it_kref);
-
-	if (tbl->it_ops->free)
-		tbl->it_ops->free(tbl);
+	if (!tbl)
+		return;
 
 	if (!tbl->it_map) {
 		kfree(tbl);
@@ -736,7 +732,7 @@ static void iommu_table_free(struct kref *kref)
 
 	/* verify that table contains no entries */
 	if (!bitmap_empty(tbl->it_map, tbl->it_size))
-		pr_warn("%s: Unexpected TCEs\n", __func__);
+		pr_warn("%s: Unexpected TCEs for %s\n", __func__, node_name);
 
 	/* calculate bitmap size in bytes */
 	bitmap_sz = BITS_TO_LONGS(tbl->it_size) * sizeof(unsigned long);
@@ -749,24 +745,6 @@ static void iommu_table_free(struct kref *kref)
 	kfree(tbl);
 }
 
-struct iommu_table *iommu_tce_table_get(struct iommu_table *tbl)
-{
-	if (kref_get_unless_zero(&tbl->it_kref))
-		return tbl;
-
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(iommu_tce_table_get);
-
-int iommu_tce_table_put(struct iommu_table *tbl)
-{
-	if (WARN_ON(!tbl))
-		return 0;
-
-	return kref_put(&tbl->it_kref, iommu_table_free);
-}
-EXPORT_SYMBOL_GPL(iommu_tce_table_put);
-
 /* Creates TCEs for a user provided buffer.  The user buffer must be
  * contiguous real kernel storage (not vmalloc).  The address passed here
  * comprises a page address and offset into that page. The dma_addr_t
@@ -775,7 +753,7 @@ EXPORT_SYMBOL_GPL(iommu_tce_table_put);
 dma_addr_t iommu_map_page(struct device *dev, struct iommu_table *tbl,
 			  struct page *page, unsigned long offset, size_t size,
 			  unsigned long mask, enum dma_data_direction direction,
-			  unsigned long attrs)
+			  struct dma_attrs *attrs)
 {
 	dma_addr_t dma_handle = DMA_ERROR_CODE;
 	void *vaddr;
@@ -798,8 +776,7 @@ dma_addr_t iommu_map_page(struct device *dev, struct iommu_table *tbl,
 					 mask >> tbl->it_page_shift, align,
 					 attrs);
 		if (dma_handle == DMA_ERROR_CODE) {
-			if (!(attrs & DMA_ATTR_NO_WARN) &&
-			    printk_ratelimit())  {
+			if (printk_ratelimit())  {
 				dev_info(dev, "iommu_alloc failed, tbl %p "
 					 "vaddr %p npages %d\n", tbl, vaddr,
 					 npages);
@@ -813,7 +790,7 @@ dma_addr_t iommu_map_page(struct device *dev, struct iommu_table *tbl,
 
 void iommu_unmap_page(struct iommu_table *tbl, dma_addr_t dma_handle,
 		      size_t size, enum dma_data_direction direction,
-		      unsigned long attrs)
+		      struct dma_attrs *attrs)
 {
 	unsigned int npages;
 
@@ -868,7 +845,7 @@ void *iommu_alloc_coherent(struct device *dev, struct iommu_table *tbl,
 	nio_pages = size >> tbl->it_page_shift;
 	io_order = get_iommu_order(size, tbl);
 	mapping = iommu_alloc(dev, tbl, ret, nio_pages, DMA_BIDIRECTIONAL,
-			      mask >> tbl->it_page_shift, io_order, 0);
+			      mask >> tbl->it_page_shift, io_order, NULL);
 	if (mapping == DMA_ERROR_CODE) {
 		free_pages((unsigned long)ret, order);
 		return NULL;
@@ -1024,31 +1001,6 @@ long iommu_tce_xchg(struct iommu_table *tbl, unsigned long entry,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_tce_xchg);
-
-#ifdef CONFIG_PPC_BOOK3S_64
-long iommu_tce_xchg_rm(struct iommu_table *tbl, unsigned long entry,
-		unsigned long *hpa, enum dma_data_direction *direction)
-{
-	long ret;
-
-	ret = tbl->it_ops->exchange_rm(tbl, entry, hpa, direction);
-
-	if (!ret && ((*direction == DMA_FROM_DEVICE) ||
-			(*direction == DMA_BIDIRECTIONAL))) {
-		struct page *pg = realmode_pfn_to_page(*hpa >> PAGE_SHIFT);
-
-		if (likely(pg)) {
-			SetPageDirty(pg);
-		} else {
-			tbl->it_ops->exchange_rm(tbl, entry, hpa, direction);
-			ret = -EFAULT;
-		}
-	}
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(iommu_tce_xchg_rm);
-#endif
 
 int iommu_take_ownership(struct iommu_table *tbl)
 {

@@ -15,6 +15,7 @@
 #include <linux/debugfs.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/ptrace.h>
 #include <linux/seq_file.h>
 
@@ -27,9 +28,8 @@
 #include <asm/inst.h>
 #include <asm/mips-r2-to-r6-emul.h>
 #include <asm/local.h>
-#include <asm/mipsregs.h>
 #include <asm/ptrace.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #ifdef CONFIG_64BIT
 #define ADDIU	"daddiu "
@@ -83,7 +83,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 				(s32)MIPSInst_SIMM(ir);
 		return 0;
 	case daddiu_op:
-		if (IS_ENABLED(CONFIG_32BIT))
+		if (config_enabled(CONFIG_32BIT))
 			break;
 
 		if (MIPSInst_RT(ir))
@@ -142,7 +142,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 					      (u32)regs->regs[MIPSInst_RT(ir)]);
 			return 0;
 		case dsll_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_RS(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_RS(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -151,7 +151,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 						MIPSInst_FD(ir));
 			return 0;
 		case dsrl_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_RS(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_RS(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -160,7 +160,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 						MIPSInst_FD(ir));
 			return 0;
 		case daddu_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_FD(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_FD(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -169,7 +169,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 					(u64)regs->regs[MIPSInst_RT(ir)];
 			return 0;
 		case dsubu_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_FD(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_FD(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -282,7 +282,7 @@ static int jr_func(struct pt_regs *regs, u32 ir)
 		err = mipsr6_emul(regs, nir);
 		if (err > 0) {
 			regs->cp0_epc = nepc;
-			err = mips_dsemul(regs, nir, epc, cepc);
+			err = mips_dsemul(regs, nir, cepc);
 			if (err == SIGILL)
 				err = SIGEMT;
 			MIPS_R2_STATS(dsemul);
@@ -433,8 +433,8 @@ static int multu_func(struct pt_regs *regs, u32 ir)
 	rs = regs->regs[MIPSInst_RS(ir)];
 	res = (u64)rt * (u64)rs;
 	rt = res;
-	regs->lo = (s64)(s32)rt;
-	regs->hi = (s64)(s32)(res >> 32);
+	regs->lo = (s64)rt;
+	regs->hi = (s64)(res >> 32);
 
 	MIPS_R2_STATS(muls);
 
@@ -497,7 +497,7 @@ static int dmult_func(struct pt_regs *regs, u32 ir)
 	s64 res;
 	s64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -529,7 +529,7 @@ static int dmultu_func(struct pt_regs *regs, u32 ir)
 	u64 res;
 	u64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -560,7 +560,7 @@ static int ddiv_func(struct pt_regs *regs, u32 ir)
 {
 	s64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -585,7 +585,7 @@ static int ddivu_func(struct pt_regs *regs, u32 ir)
 {
 	u64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -670,9 +670,9 @@ static int maddu_func(struct pt_regs *regs, u32 ir)
 	res += ((((s64)rt) << 32) | (u32)rs);
 
 	rt = res;
-	regs->lo = (s64)(s32)rt;
+	regs->lo = (s64)rt;
 	rs = res >> 32;
-	regs->hi = (s64)(s32)rs;
+	regs->hi = (s64)rs;
 
 	MIPS_R2_STATS(dsps);
 
@@ -728,9 +728,9 @@ static int msubu_func(struct pt_regs *regs, u32 ir)
 	res = ((((s64)rt) << 32) | (u32)rs) - res;
 
 	rt = res;
-	regs->lo = (s64)(s32)rt;
+	regs->lo = (s64)rt;
 	rs = res >> 32;
-	regs->hi = (s64)(s32)rs;
+	regs->hi = (s64)rs;
 
 	MIPS_R2_STATS(dsps);
 
@@ -824,7 +824,7 @@ static int dclz_func(struct pt_regs *regs, u32 ir)
 	u64 res;
 	u64 rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	if (!MIPSInst_RD(ir))
@@ -851,7 +851,7 @@ static int dclo_func(struct pt_regs *regs, u32 ir)
 	u64 res;
 	u64 rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	if (!MIPSInst_RD(ir))
@@ -899,7 +899,7 @@ static inline int mipsr2_find_op_func(struct pt_regs *regs, u32 inst,
  * mipsr2_decoder: Decode and emulate a MIPS R2 instruction
  * @regs: Process register set
  * @inst: Instruction to decode and emulate
- * @fcr31: Floating Point Control and Status Register Cause bits returned
+ * @fcr31: Floating Point Control and Status Register returned
  */
 int mipsr2_decoder(struct pt_regs *regs, u32 inst, unsigned long *fcr31)
 {
@@ -940,42 +940,42 @@ repeat:
 		switch (rt) {
 		case tgei_op:
 			if ((long)regs->regs[rs] >= MIPSInst_SIMM(inst))
-				do_trap_or_bp(regs, 0, 0, "TGEI");
+				do_trap_or_bp(regs, 0, "TGEI");
 
 			MIPS_R2_STATS(traps);
 
 			break;
 		case tgeiu_op:
 			if (regs->regs[rs] >= MIPSInst_UIMM(inst))
-				do_trap_or_bp(regs, 0, 0, "TGEIU");
+				do_trap_or_bp(regs, 0, "TGEIU");
 
 			MIPS_R2_STATS(traps);
 
 			break;
 		case tlti_op:
 			if ((long)regs->regs[rs] < MIPSInst_SIMM(inst))
-				do_trap_or_bp(regs, 0, 0, "TLTI");
+				do_trap_or_bp(regs, 0, "TLTI");
 
 			MIPS_R2_STATS(traps);
 
 			break;
 		case tltiu_op:
 			if (regs->regs[rs] < MIPSInst_UIMM(inst))
-				do_trap_or_bp(regs, 0, 0, "TLTIU");
+				do_trap_or_bp(regs, 0, "TLTIU");
 
 			MIPS_R2_STATS(traps);
 
 			break;
 		case teqi_op:
 			if (regs->regs[rs] == MIPSInst_SIMM(inst))
-				do_trap_or_bp(regs, 0, 0, "TEQI");
+				do_trap_or_bp(regs, 0, "TEQI");
 
 			MIPS_R2_STATS(traps);
 
 			break;
 		case tnei_op:
 			if (regs->regs[rs] != MIPSInst_SIMM(inst))
-				do_trap_or_bp(regs, 0, 0, "TNEI");
+				do_trap_or_bp(regs, 0, "TNEI");
 
 			MIPS_R2_STATS(traps);
 
@@ -1032,7 +1032,7 @@ repeat:
 			if (nir) {
 				err = mipsr6_emul(regs, nir);
 				if (err > 0) {
-					err = mips_dsemul(regs, nir, epc, cpc);
+					err = mips_dsemul(regs, nir, cpc);
 					if (err == SIGILL)
 						err = SIGEMT;
 					MIPS_R2_STATS(dsemul);
@@ -1081,7 +1081,7 @@ repeat:
 			if (nir) {
 				err = mipsr6_emul(regs, nir);
 				if (err > 0) {
-					err = mips_dsemul(regs, nir, epc, cpc);
+					err = mips_dsemul(regs, nir, cpc);
 					if (err == SIGILL)
 						err = SIGEMT;
 					MIPS_R2_STATS(dsemul);
@@ -1148,7 +1148,7 @@ repeat:
 		if (nir) {
 			err = mipsr6_emul(regs, nir);
 			if (err > 0) {
-				err = mips_dsemul(regs, nir, epc, cpc);
+				err = mips_dsemul(regs, nir, cpc);
 				if (err == SIGILL)
 					err = SIGEMT;
 				MIPS_R2_STATS(dsemul);
@@ -1163,22 +1163,20 @@ fpu_emul:
 		regs->regs[31] = r31;
 		regs->cp0_epc = epc;
 		if (!used_math()) {     /* First time FPU user.  */
-			preempt_disable();
 			err = init_fpu();
-			preempt_enable();
 			set_used_math();
 		}
 		lose_fpu(1);    /* Save FPU state for the emulator. */
 
 		err = fpu_emulator_cop1Handler(regs, &current->thread.fpu, 0,
 					       &fault_addr);
+		*fcr31 = current->thread.fpu.fcr31;
 
 		/*
-		 * We can't allow the emulated instruction to leave any
-		 * enabled Cause bits set in $fcr31.
+		 * We can't allow the emulated instruction to leave any of
+		 * the cause bits set in $fcr31.
 		 */
-		*fcr31 = res = mask_fcr31_x(current->thread.fpu.fcr31);
-		current->thread.fpu.fcr31 &= ~res;
+		current->thread.fpu.fcr31 &= ~FPU_CSR_ALL_X;
 
 		/*
 		 * this is a tricky issue - lose_fpu() uses LL/SC atomics
@@ -1200,7 +1198,7 @@ fpu_emul:
 	case lwl_op:
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_READ, (void __user *)vaddr, 4)) {
+		if (!access_ok(VERIFY_READ, vaddr, 4)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1253,10 +1251,10 @@ fpu_emul:
 			"	j	10b\n"
 			"	.previous\n"
 			"	.section	__ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
+			"	.word	1b,8b\n"
+			"	.word	2b,8b\n"
+			"	.word	3b,8b\n"
+			"	.word	4b,8b\n"
 			"	.previous\n"
 			"	.set	pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1273,7 +1271,7 @@ fpu_emul:
 	case lwr_op:
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_READ, (void __user *)vaddr, 4)) {
+		if (!access_ok(VERIFY_READ, vaddr, 4)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1328,10 +1326,10 @@ fpu_emul:
 			"	j	10b\n"
 			"       .previous\n"
 			"	.section	__ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
+			"	.word	1b,8b\n"
+			"	.word	2b,8b\n"
+			"	.word	3b,8b\n"
+			"	.word	4b,8b\n"
 			"	.previous\n"
 			"	.set	pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1347,7 +1345,7 @@ fpu_emul:
 	case swl_op:
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_WRITE, (void __user *)vaddr, 4)) {
+		if (!access_ok(VERIFY_WRITE, vaddr, 4)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1399,10 +1397,10 @@ fpu_emul:
 			"	j	9b\n"
 			"	.previous\n"
 			"	.section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
+			"	.word	1b,8b\n"
+			"	.word	2b,8b\n"
+			"	.word	3b,8b\n"
+			"	.word	4b,8b\n"
 			"	.previous\n"
 			"	.set	pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1417,7 +1415,7 @@ fpu_emul:
 	case swr_op:
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_WRITE, (void __user *)vaddr, 4)) {
+		if (!access_ok(VERIFY_WRITE, vaddr, 4)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1469,10 +1467,10 @@ fpu_emul:
 			"	j	9b\n"
 			"	.previous\n"
 			"	.section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
+			"	.word	1b,8b\n"
+			"	.word	2b,8b\n"
+			"	.word	3b,8b\n"
+			"	.word	4b,8b\n"
 			"	.previous\n"
 			"	.set	pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1485,14 +1483,14 @@ fpu_emul:
 		break;
 
 	case ldl_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
 
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_READ, (void __user *)vaddr, 8)) {
+		if (!access_ok(VERIFY_READ, vaddr, 8)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1584,14 +1582,14 @@ fpu_emul:
 			"	j	9b\n"
 			"	.previous\n"
 			"	.section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
-			STR(PTR) " 5b,8b\n"
-			STR(PTR) " 6b,8b\n"
-			STR(PTR) " 7b,8b\n"
-			STR(PTR) " 0b,8b\n"
+			"	.word	1b,8b\n"
+			"	.word	2b,8b\n"
+			"	.word	3b,8b\n"
+			"	.word	4b,8b\n"
+			"	.word	5b,8b\n"
+			"	.word	6b,8b\n"
+			"	.word	7b,8b\n"
+			"	.word	0b,8b\n"
 			"	.previous\n"
 			"	.set	pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1604,14 +1602,14 @@ fpu_emul:
 		break;
 
 	case ldr_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
 
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_READ, (void __user *)vaddr, 8)) {
+		if (!access_ok(VERIFY_READ, vaddr, 8)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1703,14 +1701,14 @@ fpu_emul:
 			"	j      9b\n"
 			"	.previous\n"
 			"	.section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
-			STR(PTR) " 5b,8b\n"
-			STR(PTR) " 6b,8b\n"
-			STR(PTR) " 7b,8b\n"
-			STR(PTR) " 0b,8b\n"
+			"	.word  1b,8b\n"
+			"	.word  2b,8b\n"
+			"	.word  3b,8b\n"
+			"	.word  4b,8b\n"
+			"	.word  5b,8b\n"
+			"	.word  6b,8b\n"
+			"	.word  7b,8b\n"
+			"	.word  0b,8b\n"
 			"	.previous\n"
 			"	.set    pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1723,14 +1721,14 @@ fpu_emul:
 		break;
 
 	case sdl_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
 
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_WRITE, (void __user *)vaddr, 8)) {
+		if (!access_ok(VERIFY_WRITE, vaddr, 8)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1822,14 +1820,14 @@ fpu_emul:
 			"	j	9b\n"
 			"	.previous\n"
 			"	.section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
-			STR(PTR) " 5b,8b\n"
-			STR(PTR) " 6b,8b\n"
-			STR(PTR) " 7b,8b\n"
-			STR(PTR) " 0b,8b\n"
+			"	.word	1b,8b\n"
+			"	.word	2b,8b\n"
+			"	.word	3b,8b\n"
+			"	.word	4b,8b\n"
+			"	.word	5b,8b\n"
+			"	.word	6b,8b\n"
+			"	.word	7b,8b\n"
+			"	.word	0b,8b\n"
 			"	.previous\n"
 			"	.set	pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1841,14 +1839,14 @@ fpu_emul:
 		break;
 
 	case sdr_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
 
 		rt = regs->regs[MIPSInst_RT(inst)];
 		vaddr = regs->regs[MIPSInst_RS(inst)] + MIPSInst_SIMM(inst);
-		if (!access_ok(VERIFY_WRITE, (void __user *)vaddr, 8)) {
+		if (!access_ok(VERIFY_WRITE, vaddr, 8)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGSEGV;
 			break;
@@ -1940,14 +1938,14 @@ fpu_emul:
 			"       j	9b\n"
 			"       .previous\n"
 			"       .section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,8b\n"
-			STR(PTR) " 2b,8b\n"
-			STR(PTR) " 3b,8b\n"
-			STR(PTR) " 4b,8b\n"
-			STR(PTR) " 5b,8b\n"
-			STR(PTR) " 6b,8b\n"
-			STR(PTR) " 7b,8b\n"
-			STR(PTR) " 0b,8b\n"
+			"       .word	1b,8b\n"
+			"       .word	2b,8b\n"
+			"       .word	3b,8b\n"
+			"       .word	4b,8b\n"
+			"       .word	5b,8b\n"
+			"       .word	6b,8b\n"
+			"       .word	7b,8b\n"
+			"       .word	0b,8b\n"
 			"       .previous\n"
 			"       .set	pop\n"
 			: "+&r"(rt), "=&r"(rs),
@@ -1965,7 +1963,7 @@ fpu_emul:
 			err = SIGBUS;
 			break;
 		}
-		if (!access_ok(VERIFY_READ, (void __user *)vaddr, 4)) {
+		if (!access_ok(VERIFY_READ, vaddr, 4)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGBUS;
 			break;
@@ -2002,7 +2000,7 @@ fpu_emul:
 			"j	2b\n"
 			".previous\n"
 			".section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,3b\n"
+			".word  1b, 3b\n"
 			".previous\n"
 			: "=&r"(res), "+&r"(err)
 			: "r"(vaddr), "i"(SIGSEGV)
@@ -2021,7 +2019,7 @@ fpu_emul:
 			err = SIGBUS;
 			break;
 		}
-		if (!access_ok(VERIFY_WRITE, (void __user *)vaddr, 4)) {
+		if (!access_ok(VERIFY_WRITE, vaddr, 4)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGBUS;
 			break;
@@ -2060,7 +2058,7 @@ fpu_emul:
 			"j	2b\n"
 			".previous\n"
 			".section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,3b\n"
+			".word	1b, 3b\n"
 			".previous\n"
 			: "+&r"(res), "+&r"(err)
 			: "r"(vaddr), "i"(SIGSEGV));
@@ -2073,7 +2071,7 @@ fpu_emul:
 		break;
 
 	case lld_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
@@ -2084,7 +2082,7 @@ fpu_emul:
 			err = SIGBUS;
 			break;
 		}
-		if (!access_ok(VERIFY_READ, (void __user *)vaddr, 8)) {
+		if (!access_ok(VERIFY_READ, vaddr, 8)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGBUS;
 			break;
@@ -2121,7 +2119,7 @@ fpu_emul:
 			"j	2b\n"
 			".previous\n"
 			".section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,3b\n"
+			".word  1b, 3b\n"
 			".previous\n"
 			: "=&r"(res), "+&r"(err)
 			: "r"(vaddr), "i"(SIGSEGV)
@@ -2134,7 +2132,7 @@ fpu_emul:
 		break;
 
 	case scd_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
@@ -2145,7 +2143,7 @@ fpu_emul:
 			err = SIGBUS;
 			break;
 		}
-		if (!access_ok(VERIFY_WRITE, (void __user *)vaddr, 8)) {
+		if (!access_ok(VERIFY_WRITE, vaddr, 8)) {
 			current->thread.cp0_baduaddr = vaddr;
 			err = SIGBUS;
 			break;
@@ -2184,7 +2182,7 @@ fpu_emul:
 			"j	2b\n"
 			".previous\n"
 			".section        __ex_table,\"a\"\n"
-			STR(PTR) " 1b,3b\n"
+			".word	1b, 3b\n"
 			".previous\n"
 			: "+&r"(res), "+&r"(err)
 			: "r"(vaddr), "i"(SIGSEGV));
@@ -2203,7 +2201,7 @@ fpu_emul:
 	}
 
 	/*
-	 * Let's not return to userland just yet. It's costly and
+	 * Lets not return to userland just yet. It's constly and
 	 * it's likely we have more R2 instructions to emulate
 	 */
 	if (!err && (pass++ < MIPS_R2_EMUL_TOTAL_PASS)) {

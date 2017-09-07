@@ -8,29 +8,6 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
-/*
- * Playback Volume
- *	amixer set "DVC Out" 100%
- *
- * Capture Volume
- *	amixer set "DVC In" 100%
- *
- * Playback Mute
- *	amixer set "DVC Out Mute" on
- *
- * Capture Mute
- *	amixer set "DVC In Mute" on
- *
- * Volume Ramp
- *	amixer set "DVC Out Ramp Up Rate"   "0.125 dB/64 steps"
- *	amixer set "DVC Out Ramp Down Rate" "0.125 dB/512 steps"
- *	amixer set "DVC Out Ramp" on
- *	aplay xxx.wav &
- *	amixer set "DVC Out"  80%  // Volume Down
- *	amixer set "DVC Out" 100%  // Volume Up
- */
-
 #include "rsnd.h"
 
 #define RSND_DVC_NAME_SIZE	16
@@ -48,6 +25,8 @@ struct rsnd_dvc {
 
 #define rsnd_dvc_get(priv, id) ((struct rsnd_dvc *)(priv->dvc) + id)
 #define rsnd_dvc_nr(priv) ((priv)->dvc_nr)
+#define rsnd_dvc_of_node(priv) \
+	of_get_child_by_name(rsnd_priv_to_dev(priv)->of_node, "rcar_sound,dvc")
 
 #define rsnd_mod_to_dvc(_mod)	\
 	container_of((_mod), struct rsnd_dvc, mod)
@@ -104,15 +83,15 @@ static void rsnd_dvc_volume_parameter(struct rsnd_dai_stream *io,
 					      struct rsnd_mod *mod)
 {
 	struct rsnd_dvc *dvc = rsnd_mod_to_dvc(mod);
-	u32 val[RSND_MAX_CHANNELS];
+	u32 val[RSND_DVC_CHANNELS];
 	int i;
 
 	/* Enable Ramp */
 	if (dvc->ren.val)
-		for (i = 0; i < RSND_MAX_CHANNELS; i++)
+		for (i = 0; i < RSND_DVC_CHANNELS; i++)
 			val[i] = dvc->volume.cfg.max;
 	else
-		for (i = 0; i < RSND_MAX_CHANNELS; i++)
+		for (i = 0; i < RSND_DVC_CHANNELS; i++)
 			val[i] = dvc->volume.val[i];
 
 	/* Enable Digital Volume */
@@ -137,7 +116,7 @@ static void rsnd_dvc_volume_init(struct rsnd_dai_stream *io,
 	u32 vrdbr = 0;
 
 	adinr = rsnd_get_adinr_bit(mod, io) |
-		rsnd_runtime_channel_after_ctu(io);
+		rsnd_get_adinr_chan(mod, io);
 
 	/* Enable Digital Volume, Zero Cross Mute Mode */
 	dvucr |= 0x101;
@@ -218,6 +197,21 @@ static int rsnd_dvc_probe_(struct rsnd_mod *mod,
 	return rsnd_cmd_attach(io, rsnd_mod_id(mod));
 }
 
+static int rsnd_dvc_remove_(struct rsnd_mod *mod,
+			    struct rsnd_dai_stream *io,
+			    struct rsnd_priv *priv)
+{
+	struct rsnd_dvc *dvc = rsnd_mod_to_dvc(mod);
+
+	rsnd_kctrl_remove(dvc->volume);
+	rsnd_kctrl_remove(dvc->mute);
+	rsnd_kctrl_remove(dvc->ren);
+	rsnd_kctrl_remove(dvc->rup);
+	rsnd_kctrl_remove(dvc->rdown);
+
+	return 0;
+}
+
 static int rsnd_dvc_init(struct rsnd_mod *mod,
 			 struct rsnd_dai_stream *io,
 			 struct rsnd_priv *priv)
@@ -285,18 +279,18 @@ static int rsnd_dvc_pcm_new(struct rsnd_mod *mod,
 	ret = rsnd_kctrl_new_e(mod, io, rtd,
 			is_play ?
 			"DVC Out Ramp Up Rate" : "DVC In Ramp Up Rate",
-			rsnd_dvc_volume_update,
 			&dvc->rup,
-			dvc_ramp_rate);
+			rsnd_dvc_volume_update,
+			dvc_ramp_rate, ARRAY_SIZE(dvc_ramp_rate));
 	if (ret < 0)
 		return ret;
 
 	ret = rsnd_kctrl_new_e(mod, io, rtd,
 			is_play ?
 			"DVC Out Ramp Down Rate" : "DVC In Ramp Down Rate",
-			rsnd_dvc_volume_update,
 			&dvc->rdown,
-			dvc_ramp_rate);
+			rsnd_dvc_volume_update,
+			dvc_ramp_rate, ARRAY_SIZE(dvc_ramp_rate));
 
 	if (ret < 0)
 		return ret;
@@ -317,6 +311,7 @@ static struct rsnd_mod_ops rsnd_dvc_ops = {
 	.name		= DVC_NAME,
 	.dma_req	= rsnd_dvc_dma_req,
 	.probe		= rsnd_dvc_probe_,
+	.remove		= rsnd_dvc_remove_,
 	.init		= rsnd_dvc_init,
 	.quit		= rsnd_dvc_quit,
 	.pcm_new	= rsnd_dvc_pcm_new,
@@ -378,7 +373,7 @@ int rsnd_dvc_probe(struct rsnd_priv *priv)
 		}
 
 		ret = rsnd_mod_init(priv, rsnd_mod_get(dvc), &rsnd_dvc_ops,
-				    clk, rsnd_mod_get_status, RSND_MOD_DVC, i);
+			      clk, RSND_MOD_DVC, i);
 		if (ret)
 			goto rsnd_dvc_probe_done;
 

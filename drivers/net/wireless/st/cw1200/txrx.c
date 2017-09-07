@@ -1079,13 +1079,13 @@ void cw1200_rx_cb(struct cw1200_common *priv,
 
 	hdr->band = ((arg->channel_number & 0xff00) ||
 		     (arg->channel_number > 14)) ?
-			NL80211_BAND_5GHZ : NL80211_BAND_2GHZ;
+			IEEE80211_BAND_5GHZ : IEEE80211_BAND_2GHZ;
 	hdr->freq = ieee80211_channel_to_frequency(
 			arg->channel_number,
 			hdr->band);
 
 	if (arg->rx_rate >= 14) {
-		hdr->encoding = RX_ENC_HT;
+		hdr->flag |= RX_FLAG_HT;
 		hdr->rate_idx = arg->rx_rate - 14;
 	} else if (arg->rx_rate >= 4) {
 		hdr->rate_idx = arg->rx_rate - 2;

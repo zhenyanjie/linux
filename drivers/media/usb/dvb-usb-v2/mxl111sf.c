@@ -29,7 +29,8 @@
 
 int dvb_usb_mxl111sf_debug;
 module_param_named(debug, dvb_usb_mxl111sf_debug, int, 0644);
-MODULE_PARM_DESC(debug, "set debugging level (1=info, 2=xfer, 4=i2c, 8=reg, 16=adv (or-able)).");
+MODULE_PARM_DESC(debug, "set debugging level "
+		 "(1=info, 2=xfer, 4=i2c, 8=reg, 16=adv (or-able)).");
 
 static int dvb_usb_mxl111sf_isoc;
 module_param_named(isoc, dvb_usb_mxl111sf_isoc, int, 0644);
@@ -136,8 +137,8 @@ int mxl111sf_write_reg_mask(struct mxl111sf_state *state,
 #if 1
 		/* dont know why this usually errors out on the first try */
 		if (mxl_fail(ret))
-			pr_err("error writing addr: 0x%02x, mask: 0x%02x, data: 0x%02x, retrying...",
-			       addr, mask, data);
+			pr_err("error writing addr: 0x%02x, mask: 0x%02x, "
+			    "data: 0x%02x, retrying...", addr, mask, data);
 
 		ret = mxl111sf_read_reg(state, addr, &val);
 #endif
@@ -855,7 +856,7 @@ static int mxl111sf_ant_hunt(struct dvb_frontend *fe)
 	return 0;
 }
 
-static const struct mxl111sf_tuner_config mxl_tuner_config = {
+static struct mxl111sf_tuner_config mxl_tuner_config = {
 	.if_freq         = MXL_IF_6_0, /* applies to external IF output, only */
 	.invert_spectrum = 0,
 	.read_reg        = mxl111sf_read_reg,
@@ -887,7 +888,7 @@ static int mxl111sf_attach_tuner(struct dvb_usb_adapter *adap)
 	state->tuner.function = MEDIA_ENT_F_TUNER;
 	state->tuner.name = "mxl111sf tuner";
 	state->tuner_pads[TUNER_PAD_RF_INPUT].flags = MEDIA_PAD_FL_SINK;
-	state->tuner_pads[TUNER_PAD_OUTPUT].flags = MEDIA_PAD_FL_SOURCE;
+	state->tuner_pads[TUNER_PAD_IF_OUTPUT].flags = MEDIA_PAD_FL_SOURCE;
 
 	ret = media_entity_pads_init(&state->tuner,
 				     TUNER_NUM_PADS, state->tuner_pads);
@@ -919,12 +920,7 @@ static int mxl111sf_init(struct dvb_usb_device *d)
 	struct mxl111sf_state *state = d_to_priv(d);
 	int ret;
 	static u8 eeprom[256];
-	u8 reg = 0;
-	struct i2c_msg msg[2] = {
-		{ .addr = 0xa0 >> 1, .len = 1, .buf = &reg },
-		{ .addr = 0xa0 >> 1, .flags = I2C_M_RD,
-		  .len = sizeof(eeprom), .buf = eeprom },
-	};
+	struct i2c_client c;
 
 	ret = get_chip_info(state);
 	if (mxl_fail(ret))
@@ -935,11 +931,14 @@ static int mxl111sf_init(struct dvb_usb_device *d)
 	if (state->chip_rev > MXL111SF_V6)
 		mxl111sf_config_pin_mux_modes(state, PIN_MUX_TS_SPI_IN_MODE_1);
 
-	ret = i2c_transfer(&d->i2c_adap, msg, 2);
+	c.adapter = &d->i2c_adap;
+	c.addr = 0xa0 >> 1;
+
+	ret = tveeprom_read(&c, eeprom, sizeof(eeprom));
 	if (mxl_fail(ret))
 		return 0;
-	tveeprom_hauppauge_analog(&state->tv, (0x84 == eeprom[0xa0]) ?
-				  eeprom + 0xa0 : eeprom + 0x80);
+	tveeprom_hauppauge_analog(&c, &state->tv, (0x84 == eeprom[0xa0]) ?
+			eeprom + 0xa0 : eeprom + 0x80);
 #if 0
 	switch (state->tv.model) {
 	case 117001:
@@ -947,7 +946,8 @@ static int mxl111sf_init(struct dvb_usb_device *d)
 	case 138001:
 		break;
 	default:
-		printk(KERN_WARNING "%s: warning: unknown hauppauge model #%d\n",
+		printk(KERN_WARNING "%s: warning: "
+		       "unknown hauppauge model #%d\n",
 		       __func__, state->tv.model);
 	}
 #endif

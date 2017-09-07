@@ -22,25 +22,21 @@
  */
 
 /**
- * DOC: Command list validator for VC4.
+ * Command list validator for VC4.
  *
- * Since the VC4 has no IOMMU between it and system memory, a user
- * with access to execute command lists could escalate privilege by
+ * The VC4 has no IOMMU between it and system memory.  So, a user with
+ * access to execute command lists could escalate privilege by
  * overwriting system memory (drawing to it as a framebuffer) or
- * reading system memory it shouldn't (reading it as a vertex buffer
- * or index buffer)
+ * reading system memory it shouldn't (reading it as a texture, or
+ * uniform data, or vertex data).
  *
- * We validate binner command lists to ensure that all accesses are
- * within the bounds of the GEM objects referenced by the submitted
- * job.  It explicitly whitelists packets, and looks at the offsets in
- * any address fields to make sure they're contained within the BOs
- * they reference.
+ * This validates command lists to ensure that all accesses are within
+ * the bounds of the GEM objects referenced.  It explicitly whitelists
+ * packets, and looks at the offsets in any address fields to make
+ * sure they're constrained within the BOs they reference.
  *
- * Note that because CL validation is already reading the
- * user-submitted CL and writing the validated copy out to the memory
- * that the GPU will actually read, this is also where GEM relocation
- * processing (turning BO references into actual addresses for the GPU
- * to use) happens.
+ * Note that because of the validation that's happening anyway, this
+ * is where GEM relocation processing happens.
  */
 
 #include "uapi/drm/vc4_drm.h"
@@ -88,12 +84,8 @@ utile_height(int cpp)
 }
 
 /**
- * size_is_lt() - Returns whether a miplevel of the given size will
- * use the lineartile (LT) tiling layout rather than the normal T
- * tiling layout.
- * @width: Width in pixels of the miplevel
- * @height: Height in pixels of the miplevel
- * @cpp: Bytes per pixel of the pixel format
+ * The texture unit decides what tiling format a particular miplevel is using
+ * this function, so we lay out our miptrees accordingly.
  */
 static bool
 size_is_lt(uint32_t width, uint32_t height, int cpp)
@@ -274,9 +266,6 @@ validate_indexed_prim_list(VALIDATE_ARGS)
 	ib = vc4_use_handle(exec, 0);
 	if (!ib)
 		return -EINVAL;
-
-	exec->bin_dep_seqno = max(exec->bin_dep_seqno,
-				  to_vc4_bo(&ib->base)->write_seqno);
 
 	if (offset > ib->base.size ||
 	    (ib->base.size - offset) / index_size < length) {
@@ -566,7 +555,8 @@ static bool
 reloc_tex(struct vc4_exec_info *exec,
 	  void *uniform_data_u,
 	  struct vc4_texture_sample_info *sample,
-	  uint32_t texture_handle_index, bool is_cs)
+	  uint32_t texture_handle_index)
+
 {
 	struct drm_gem_cma_object *tex;
 	uint32_t p0 = *(uint32_t *)(uniform_data_u + sample->p_offset[0]);
@@ -652,13 +642,6 @@ reloc_tex(struct vc4_exec_info *exec,
 		cpp = 1;
 		break;
 	case VC4_TEXTURE_TYPE_ETC1:
-		/* ETC1 is arranged as 64-bit blocks, where each block is 4x4
-		 * pixels.
-		 */
-		cpp = 8;
-		width = (width + 3) >> 2;
-		height = (height + 3) >> 2;
-		break;
 	case VC4_TEXTURE_TYPE_BW1:
 	case VC4_TEXTURE_TYPE_A4:
 	case VC4_TEXTURE_TYPE_A1:
@@ -731,11 +714,6 @@ reloc_tex(struct vc4_exec_info *exec,
 
 	*validated_p0 = tex->paddr + p0;
 
-	if (is_cs) {
-		exec->bin_dep_seqno = max(exec->bin_dep_seqno,
-					  to_vc4_bo(&tex->base)->write_seqno);
-	}
-
 	return true;
  fail:
 	DRM_INFO("Texture p0 at %d: 0x%08x\n", sample->p_offset[0], p0);
@@ -797,6 +775,11 @@ validate_gl_shader_rec(struct drm_device *dev,
 	exec->shader_rec_v += roundup(packet_size, 16);
 	exec->shader_rec_size -= packet_size;
 
+	if (!(*(uint16_t *)pkt_u & VC4_SHADER_FLAG_FS_SINGLE_THREAD)) {
+		DRM_ERROR("Multi-threaded fragment shaders not supported.\n");
+		return -EINVAL;
+	}
+
 	for (i = 0; i < shader_reloc_count; i++) {
 		if (src_handles[i] > exec->bo_count) {
 			DRM_ERROR("Shader handle %d too big\n", src_handles[i]);
@@ -813,25 +796,13 @@ validate_gl_shader_rec(struct drm_device *dev,
 			return -EINVAL;
 	}
 
-	if (((*(uint16_t *)pkt_u & VC4_SHADER_FLAG_FS_SINGLE_THREAD) == 0) !=
-	    to_vc4_bo(&bo[0]->base)->validated_shader->is_threaded) {
-		DRM_ERROR("Thread mode of CL and FS do not match\n");
-		return -EINVAL;
-	}
-
-	if (to_vc4_bo(&bo[1]->base)->validated_shader->is_threaded ||
-	    to_vc4_bo(&bo[2]->base)->validated_shader->is_threaded) {
-		DRM_ERROR("cs and vs cannot be threaded\n");
-		return -EINVAL;
-	}
-
 	for (i = 0; i < shader_reloc_count; i++) {
 		struct vc4_validated_shader_info *validated_shader;
 		uint32_t o = shader_reloc_offsets[i];
 		uint32_t src_offset = *(uint32_t *)(pkt_u + o);
 		uint32_t *texture_handles_u;
 		void *uniform_data_u;
-		uint32_t tex, uni;
+		uint32_t tex;
 
 		*(uint32_t *)(pkt_v + o) = bo[i]->paddr + src_offset;
 
@@ -864,21 +835,9 @@ validate_gl_shader_rec(struct drm_device *dev,
 			if (!reloc_tex(exec,
 				       uniform_data_u,
 				       &validated_shader->texture_samples[tex],
-				       texture_handles_u[tex],
-				       i == 2)) {
+				       texture_handles_u[tex])) {
 				return -EINVAL;
 			}
-		}
-
-		/* Fill in the uniform slots that need this shader's
-		 * start-of-uniforms address (used for resetting the uniform
-		 * stream in the presence of control flow).
-		 */
-		for (uni = 0;
-		     uni < validated_shader->num_uniform_addr_offsets;
-		     uni++) {
-			uint32_t o = validated_shader->uniform_addr_offsets[uni];
-			((uint32_t *)exec->uniforms_v)[o] = exec->uniforms_p;
 		}
 
 		*(uint32_t *)(pkt_v + o + 4) = exec->uniforms_p;
@@ -896,9 +855,6 @@ validate_gl_shader_rec(struct drm_device *dev,
 		uint32_t attr_size = *(uint8_t *)(pkt_u + o + 4) + 1;
 		uint32_t stride = *(uint8_t *)(pkt_u + o + 5);
 		uint32_t max_index;
-
-		exec->bin_dep_seqno = max(exec->bin_dep_seqno,
-					  to_vc4_bo(&vbo->base)->write_seqno);
 
 		if (state->addr & 0x8)
 			stride |= (*(uint32_t *)(pkt_u + 100 + i * 4)) & ~0xff;

@@ -55,7 +55,6 @@
 #include <xen/xen.h>
 #include <xen/events.h>
 #include <xen/evtchn.h>
-#include <xen/xen-ops.h>
 #include <asm/xen/hypervisor.h>
 
 struct per_user_data {
@@ -74,11 +73,7 @@ struct per_user_data {
 	wait_queue_head_t evtchn_wait;
 	struct fasync_struct *evtchn_async_queue;
 	const char *name;
-
-	domid_t restrict_domid;
 };
-
-#define UNRESTRICTED_DOMID ((domid_t)-1)
 
 struct user_evtchn {
 	struct rb_node node;
@@ -125,7 +120,7 @@ static int add_evtchn(struct per_user_data *u, struct user_evtchn *evtchn)
 	while (*new) {
 		struct user_evtchn *this;
 
-		this = rb_entry(*new, struct user_evtchn, node);
+		this = container_of(*new, struct user_evtchn, node);
 
 		parent = *new;
 		if (this->port < evtchn->port)
@@ -157,7 +152,7 @@ static struct user_evtchn *find_evtchn(struct per_user_data *u, unsigned port)
 	while (node) {
 		struct user_evtchn *evtchn;
 
-		evtchn = rb_entry(node, struct user_evtchn, node);
+		evtchn = container_of(node, struct user_evtchn, node);
 
 		if (evtchn->port < port)
 			node = node->rb_left;
@@ -321,6 +316,7 @@ static int evtchn_resize_ring(struct per_user_data *u)
 {
 	unsigned int new_size;
 	evtchn_port_t *new_ring, *old_ring;
+	unsigned int p, c;
 
 	/*
 	 * Ensure the ring is large enough to capture all possible
@@ -350,17 +346,20 @@ static int evtchn_resize_ring(struct per_user_data *u)
 	/*
 	 * Copy the old ring contents to the new ring.
 	 *
-	 * To take care of wrapping, a full ring, and the new index
-	 * pointing into the second half, simply copy the old contents
-	 * twice.
+	 * If the ring contents crosses the end of the current ring,
+	 * it needs to be copied in two chunks.
 	 *
 	 * +---------+    +------------------+
-	 * |34567  12| -> |34567  1234567  12|
-	 * +-----p-c-+    +-------c------p---+
+	 * |34567  12| -> |       1234567    |
+	 * +-----p-c-+    +------------------+
 	 */
-	memcpy(new_ring, old_ring, u->ring_size * sizeof(*u->ring));
-	memcpy(new_ring + u->ring_size, old_ring,
-	       u->ring_size * sizeof(*u->ring));
+	p = evtchn_ring_offset(u, u->ring_prod);
+	c = evtchn_ring_offset(u, u->ring_cons);
+	if (p < c) {
+		memcpy(new_ring + c, u->ring + c, (u->ring_size - c) * sizeof(*u->ring));
+		memcpy(new_ring + u->ring_size, u->ring, p * sizeof(*u->ring));
+	} else
+		memcpy(new_ring + c, u->ring + c, (p - c) * sizeof(*u->ring));
 
 	u->ring = new_ring;
 	u->ring_size = new_size;
@@ -448,16 +447,12 @@ static long evtchn_ioctl(struct file *file,
 		struct ioctl_evtchn_bind_virq bind;
 		struct evtchn_bind_virq bind_virq;
 
-		rc = -EACCES;
-		if (u->restrict_domid != UNRESTRICTED_DOMID)
-			break;
-
 		rc = -EFAULT;
 		if (copy_from_user(&bind, uarg, sizeof(bind)))
 			break;
 
 		bind_virq.virq = bind.virq;
-		bind_virq.vcpu = xen_vcpu_nr(0);
+		bind_virq.vcpu = 0;
 		rc = HYPERVISOR_event_channel_op(EVTCHNOP_bind_virq,
 						 &bind_virq);
 		if (rc != 0)
@@ -477,11 +472,6 @@ static long evtchn_ioctl(struct file *file,
 		if (copy_from_user(&bind, uarg, sizeof(bind)))
 			break;
 
-		rc = -EACCES;
-		if (u->restrict_domid != UNRESTRICTED_DOMID &&
-		    u->restrict_domid != bind.remote_domain)
-			break;
-
 		bind_interdomain.remote_dom  = bind.remote_domain;
 		bind_interdomain.remote_port = bind.remote_port;
 		rc = HYPERVISOR_event_channel_op(EVTCHNOP_bind_interdomain,
@@ -498,10 +488,6 @@ static long evtchn_ioctl(struct file *file,
 	case IOCTL_EVTCHN_BIND_UNBOUND_PORT: {
 		struct ioctl_evtchn_bind_unbound_port bind;
 		struct evtchn_alloc_unbound alloc_unbound;
-
-		rc = -EACCES;
-		if (u->restrict_domid != UNRESTRICTED_DOMID)
-			break;
 
 		rc = -EFAULT;
 		if (copy_from_user(&bind, uarg, sizeof(bind)))
@@ -571,27 +557,6 @@ static long evtchn_ioctl(struct file *file,
 		break;
 	}
 
-	case IOCTL_EVTCHN_RESTRICT_DOMID: {
-		struct ioctl_evtchn_restrict_domid ierd;
-
-		rc = -EACCES;
-		if (u->restrict_domid != UNRESTRICTED_DOMID)
-			break;
-
-		rc = -EFAULT;
-		if (copy_from_user(&ierd, uarg, sizeof(ierd)))
-		    break;
-
-		rc = -EINVAL;
-		if (ierd.domid == 0 || ierd.domid >= DOMID_FIRST_RESERVED)
-			break;
-
-		u->restrict_domid = ierd.domid;
-		rc = 0;
-
-		break;
-	}
-
 	default:
 		rc = -ENOSYS;
 		break;
@@ -639,8 +604,6 @@ static int evtchn_open(struct inode *inode, struct file *filp)
 	mutex_init(&u->bind_mutex);
 	mutex_init(&u->ring_cons_mutex);
 	spin_lock_init(&u->ring_prod_lock);
-
-	u->restrict_domid = UNRESTRICTED_DOMID;
 
 	filp->private_data = u;
 

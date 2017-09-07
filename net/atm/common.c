@@ -13,7 +13,7 @@
 #include <linux/errno.h>	/* error codes */
 #include <linux/capability.h>
 #include <linux/mm.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/time.h>		/* struct timeval */
 #include <linux/skbuff.h>
 #include <linux/bitops.h>
@@ -62,16 +62,21 @@ static void vcc_remove_socket(struct sock *sk)
 	write_unlock_irq(&vcc_sklist_lock);
 }
 
-static bool vcc_tx_ready(struct atm_vcc *vcc, unsigned int size)
+static struct sk_buff *alloc_tx(struct atm_vcc *vcc, unsigned int size)
 {
+	struct sk_buff *skb;
 	struct sock *sk = sk_atm(vcc);
 
 	if (sk_wmem_alloc_get(sk) && !atm_may_send(vcc, size)) {
 		pr_debug("Sorry: wmem_alloc = %d, size = %d, sndbuf = %d\n",
 			 sk_wmem_alloc_get(sk), size, sk->sk_sndbuf);
-		return false;
+		return NULL;
 	}
-	return true;
+	while (!(skb = alloc_skb(size, GFP_KERNEL)))
+		schedule();
+	pr_debug("%d += %d\n", sk_wmem_alloc_get(sk), skb->truesize);
+	atomic_add(skb->truesize, &sk->sk_wmem_alloc);
+	return skb;
 }
 
 static void vcc_sock_destruct(struct sock *sk)
@@ -601,7 +606,7 @@ int vcc_sendmsg(struct socket *sock, struct msghdr *m, size_t size)
 	eff = (size+3) & ~3; /* align to word boundary */
 	prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 	error = 0;
-	while (!vcc_tx_ready(vcc, eff)) {
+	while (!(skb = alloc_tx(vcc, eff))) {
 		if (m->msg_flags & MSG_DONTWAIT) {
 			error = -EAGAIN;
 			break;
@@ -623,18 +628,9 @@ int vcc_sendmsg(struct socket *sock, struct msghdr *m, size_t size)
 	finish_wait(sk_sleep(sk), &wait);
 	if (error)
 		goto out;
-
-	skb = alloc_skb(eff, GFP_KERNEL);
-	if (!skb) {
-		error = -ENOMEM;
-		goto out;
-	}
-	pr_debug("%d += %d\n", sk_wmem_alloc_get(sk), skb->truesize);
-	atomic_add(skb->truesize, &sk->sk_wmem_alloc);
-
 	skb->dev = NULL; /* for paths shared with net_device interfaces */
 	ATM_SKB(skb)->atm_options = vcc->atm_options;
-	if (!copy_from_iter_full(skb_put(skb, size), size, &m->msg_iter)) {
+	if (copy_from_iter(skb_put(skb, size), size, &m->msg_iter) != size) {
 		kfree_skb(skb);
 		error = -EFAULT;
 		goto out;

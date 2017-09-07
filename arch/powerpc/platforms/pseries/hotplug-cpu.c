@@ -24,7 +24,6 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/sched.h>	/* for idle_task_exit */
-#include <linux/sched/hotplug.h>
 #include <linux/cpu.h>
 #include <linux/of.h>
 #include <linux/slab.h>
@@ -48,14 +47,20 @@ static DEFINE_PER_CPU(enum cpu_state_vals, current_state) = CPU_STATE_OFFLINE;
 
 static enum cpu_state_vals default_offline_state = CPU_STATE_OFFLINE;
 
-static bool cede_offline_enabled __read_mostly = true;
+static int cede_offline_enabled __read_mostly = 1;
 
 /*
  * Enable/disable cede_offline when available.
  */
 static int __init setup_cede_offline(char *str)
 {
-	return (kstrtobool(str, &cede_offline_enabled) == 0);
+	if (!strcmp(str, "off"))
+		cede_offline_enabled = 0;
+	else if (!strcmp(str, "on"))
+		cede_offline_enabled = 1;
+	else
+		return 0;
+	return 1;
 }
 
 __setup("cede_offline=", setup_cede_offline);
@@ -904,6 +909,8 @@ static int parse_cede_parameters(void)
 
 static int __init pseries_cpu_hotplug_init(void)
 {
+	struct device_node *np;
+	const char *typep;
 	int cpu;
 	int qcss_tok;
 
@@ -911,6 +918,17 @@ static int __init pseries_cpu_hotplug_init(void)
 	ppc_md.cpu_probe = dlpar_cpu_probe;
 	ppc_md.cpu_release = dlpar_cpu_release;
 #endif /* CONFIG_ARCH_CPU_PROBE_RELEASE */
+
+	for_each_node_by_name(np, "interrupt-controller") {
+		typep = of_get_property(np, "compatible", NULL);
+		if (strstr(typep, "open-pic")) {
+			of_node_put(np);
+
+			printk(KERN_INFO "CPU Hotplug not supported on "
+				"systems using MPIC\n");
+			return 0;
+		}
+	}
 
 	rtas_stop_self_token = rtas_token("stop-self");
 	qcss_tok = rtas_token("query-cpu-stopped-state");

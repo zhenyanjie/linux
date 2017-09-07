@@ -695,8 +695,9 @@ static int bluecard_open(struct bluecard_info *info)
 
 	spin_lock_init(&(info->lock));
 
-	setup_timer(&(info->timer), &bluecard_activity_led_timeout,
-		    (u_long)info);
+	init_timer(&(info->timer));
+	info->timer.function = &bluecard_activity_led_timeout;
+	info->timer.data = (u_long)info;
 
 	skb_queue_head_init(&(info->txq));
 

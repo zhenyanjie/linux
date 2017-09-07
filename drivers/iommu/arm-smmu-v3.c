@@ -20,10 +20,7 @@
  * This driver is powered by bad coffee and bombay mix.
  */
 
-#include <linux/acpi.h>
-#include <linux/acpi_iort.h>
 #include <linux/delay.h>
-#include <linux/dma-iommu.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
 #include <linux/iommu.h>
@@ -32,12 +29,9 @@
 #include <linux/msi.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_iommu.h>
 #include <linux/of_platform.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
-
-#include <linux/amba/bus.h>
 
 #include "io-pgtable.h"
 
@@ -127,10 +121,6 @@
 #define CR2_PTM				(1 << 2)
 #define CR2_RECINVSID			(1 << 1)
 #define CR2_E2H				(1 << 0)
-
-#define ARM_SMMU_GBPA			0x44
-#define GBPA_ABORT			(1 << 20)
-#define GBPA_UPDATE			(1 << 31)
 
 #define ARM_SMMU_IRQ_CTRL		0x50
 #define IRQ_CTRL_EVTQ_IRQEN		(1 << 2)
@@ -409,9 +399,6 @@
 /* High-level queue structures */
 #define ARM_SMMU_POLL_TIMEOUT_US	100
 
-#define MSI_IOVA_BASE			0x8000000
-#define MSI_IOVA_LENGTH			0x100000
-
 static bool disable_bypass;
 module_param_named(disable_bypass, disable_bypass, bool, S_IRUGO);
 MODULE_PARM_DESC(disable_bypass,
@@ -602,7 +589,6 @@ struct arm_smmu_device {
 
 	unsigned long			ias; /* IPA */
 	unsigned long			oas; /* PA */
-	unsigned long			pgsize_bitmap;
 
 #define ARM_SMMU_MAX_ASIDS		(1 << 16)
 	unsigned int			asid_bits;
@@ -616,14 +602,14 @@ struct arm_smmu_device {
 	unsigned int			sid_bits;
 
 	struct arm_smmu_strtab_cfg	strtab_cfg;
-
-	/* IOMMU core code handle */
-	struct iommu_device		iommu;
 };
 
-/* SMMU private data for each master */
-struct arm_smmu_master_data {
+/* SMMU private data for an IOMMU group */
+struct arm_smmu_group {
 	struct arm_smmu_device		*smmu;
+	struct arm_smmu_domain		*domain;
+	int				num_sids;
+	u32				*sids;
 	struct arm_smmu_strtab_ent	ste;
 };
 
@@ -725,15 +711,19 @@ static void queue_inc_prod(struct arm_smmu_queue *q)
 	writel(q->prod, q->prod_reg);
 }
 
-/*
- * Wait for the SMMU to consume items. If drain is true, wait until the queue
- * is empty. Otherwise, wait until there is at least one free slot.
- */
-static int queue_poll_cons(struct arm_smmu_queue *q, bool drain, bool wfe)
+static bool __queue_cons_before(struct arm_smmu_queue *q, u32 until)
+{
+	if (Q_WRP(q, q->cons) == Q_WRP(q, until))
+		return Q_IDX(q, q->cons) < Q_IDX(q, until);
+
+	return Q_IDX(q, q->cons) >= Q_IDX(q, until);
+}
+
+static int queue_poll_cons(struct arm_smmu_queue *q, u32 until, bool wfe)
 {
 	ktime_t timeout = ktime_add_us(ktime_get(), ARM_SMMU_POLL_TIMEOUT_US);
 
-	while (queue_sync_cons(q), (drain ? !queue_empty(q) : queue_full(q))) {
+	while (queue_sync_cons(q), __queue_cons_before(q, until)) {
 		if (ktime_compare(ktime_get(), timeout) > 0)
 			return -ETIMEDOUT;
 
@@ -887,7 +877,7 @@ static void arm_smmu_cmdq_skip_err(struct arm_smmu_device *smmu)
 	 * We may have concurrent producers, so we need to be careful
 	 * not to touch any of the shadow cmdq state.
 	 */
-	queue_read(cmd, Q_ENT(q, cons), q->ent_dwords);
+	queue_read(cmd, Q_ENT(q, idx), q->ent_dwords);
 	dev_err(smmu->dev, "skipping command in error state:\n");
 	for (i = 0; i < ARRAY_SIZE(cmd); ++i)
 		dev_err(smmu->dev, "\t0x%016llx\n", (unsigned long long)cmd[i]);
@@ -898,14 +888,14 @@ static void arm_smmu_cmdq_skip_err(struct arm_smmu_device *smmu)
 		return;
 	}
 
-	queue_write(Q_ENT(q, cons), cmd, q->ent_dwords);
+	queue_write(cmd, Q_ENT(q, idx), q->ent_dwords);
 }
 
 static void arm_smmu_cmdq_issue_cmd(struct arm_smmu_device *smmu,
 				    struct arm_smmu_cmdq_ent *ent)
 {
+	u32 until;
 	u64 cmd[CMDQ_ENT_DWORDS];
-	unsigned long flags;
 	bool wfe = !!(smmu->features & ARM_SMMU_FEAT_SEV);
 	struct arm_smmu_queue *q = &smmu->cmdq.q;
 
@@ -915,15 +905,20 @@ static void arm_smmu_cmdq_issue_cmd(struct arm_smmu_device *smmu,
 		return;
 	}
 
-	spin_lock_irqsave(&smmu->cmdq.lock, flags);
-	while (queue_insert_raw(q, cmd) == -ENOSPC) {
-		if (queue_poll_cons(q, false, wfe))
+	spin_lock(&smmu->cmdq.lock);
+	while (until = q->prod + 1, queue_insert_raw(q, cmd) == -ENOSPC) {
+		/*
+		 * Keep the queue locked, otherwise the producer could wrap
+		 * twice and we could see a future consumer pointer that looks
+		 * like it's behind us.
+		 */
+		if (queue_poll_cons(q, until, wfe))
 			dev_err_ratelimited(smmu->dev, "CMDQ timeout\n");
 	}
 
-	if (ent->opcode == CMDQ_OP_CMD_SYNC && queue_poll_cons(q, true, wfe))
+	if (ent->opcode == CMDQ_OP_CMD_SYNC && queue_poll_cons(q, until, wfe))
 		dev_err_ratelimited(smmu->dev, "CMD_SYNC timeout\n");
-	spin_unlock_irqrestore(&smmu->cmdq.lock, flags);
+	spin_unlock(&smmu->cmdq.lock);
 }
 
 /* Context descriptor manipulation functions */
@@ -1037,16 +1032,18 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_device *smmu, u32 sid,
 		case STRTAB_STE_0_CFG_S2_TRANS:
 			ste_live = true;
 			break;
-		case STRTAB_STE_0_CFG_ABORT:
-			if (disable_bypass)
-				break;
 		default:
 			BUG(); /* STE corruption */
 		}
 	}
 
-	/* Nuke the existing STE_0 value, as we're going to rewrite it */
-	val = ste->valid ? STRTAB_STE_0_V : 0;
+	/* Nuke the existing Config, as we're going to rewrite it */
+	val &= ~(STRTAB_STE_0_CFG_MASK << STRTAB_STE_0_CFG_SHIFT);
+
+	if (ste->valid)
+		val |= STRTAB_STE_0_V;
+	else
+		val &= ~STRTAB_STE_0_V;
 
 	if (ste->bypass) {
 		val |= disable_bypass ? STRTAB_STE_0_CFG_ABORT
@@ -1079,6 +1076,7 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_device *smmu, u32 sid,
 		val |= (ste->s1_cfg->cdptr_dma & STRTAB_STE_0_S1CTXPTR_MASK
 		        << STRTAB_STE_0_S1CTXPTR_SHIFT) |
 			STRTAB_STE_0_CFG_S1_TRANS;
+
 	}
 
 	if (ste->s2_cfg) {
@@ -1158,66 +1156,36 @@ static irqreturn_t arm_smmu_evtq_thread(int irq, void *dev)
 	struct arm_smmu_queue *q = &smmu->evtq.q;
 	u64 evt[EVTQ_ENT_DWORDS];
 
-	do {
-		while (!queue_remove_raw(q, evt)) {
-			u8 id = evt[0] >> EVTQ_0_ID_SHIFT & EVTQ_0_ID_MASK;
+	while (!queue_remove_raw(q, evt)) {
+		u8 id = evt[0] >> EVTQ_0_ID_SHIFT & EVTQ_0_ID_MASK;
 
-			dev_info(smmu->dev, "event 0x%02x received:\n", id);
-			for (i = 0; i < ARRAY_SIZE(evt); ++i)
-				dev_info(smmu->dev, "\t0x%016llx\n",
-					 (unsigned long long)evt[i]);
-
-		}
-
-		/*
-		 * Not much we can do on overflow, so scream and pretend we're
-		 * trying harder.
-		 */
-		if (queue_sync_prod(q) == -EOVERFLOW)
-			dev_err(smmu->dev, "EVTQ overflow detected -- events lost\n");
-	} while (!queue_empty(q));
+		dev_info(smmu->dev, "event 0x%02x received:\n", id);
+		for (i = 0; i < ARRAY_SIZE(evt); ++i)
+			dev_info(smmu->dev, "\t0x%016llx\n",
+				 (unsigned long long)evt[i]);
+	}
 
 	/* Sync our overflow flag, as we believe we're up to speed */
 	q->cons = Q_OVF(q, q->prod) | Q_WRP(q, q->cons) | Q_IDX(q, q->cons);
 	return IRQ_HANDLED;
 }
 
-static void arm_smmu_handle_ppr(struct arm_smmu_device *smmu, u64 *evt)
+static irqreturn_t arm_smmu_evtq_handler(int irq, void *dev)
 {
-	u32 sid, ssid;
-	u16 grpid;
-	bool ssv, last;
+	irqreturn_t ret = IRQ_WAKE_THREAD;
+	struct arm_smmu_device *smmu = dev;
+	struct arm_smmu_queue *q = &smmu->evtq.q;
 
-	sid = evt[0] >> PRIQ_0_SID_SHIFT & PRIQ_0_SID_MASK;
-	ssv = evt[0] & PRIQ_0_SSID_V;
-	ssid = ssv ? evt[0] >> PRIQ_0_SSID_SHIFT & PRIQ_0_SSID_MASK : 0;
-	last = evt[0] & PRIQ_0_PRG_LAST;
-	grpid = evt[1] >> PRIQ_1_PRG_IDX_SHIFT & PRIQ_1_PRG_IDX_MASK;
+	/*
+	 * Not much we can do on overflow, so scream and pretend we're
+	 * trying harder.
+	 */
+	if (queue_sync_prod(q) == -EOVERFLOW)
+		dev_err(smmu->dev, "EVTQ overflow detected -- events lost\n");
+	else if (queue_empty(q))
+		ret = IRQ_NONE;
 
-	dev_info(smmu->dev, "unexpected PRI request received:\n");
-	dev_info(smmu->dev,
-		 "\tsid 0x%08x.0x%05x: [%u%s] %sprivileged %s%s%s access at iova 0x%016llx\n",
-		 sid, ssid, grpid, last ? "L" : "",
-		 evt[0] & PRIQ_0_PERM_PRIV ? "" : "un",
-		 evt[0] & PRIQ_0_PERM_READ ? "R" : "",
-		 evt[0] & PRIQ_0_PERM_WRITE ? "W" : "",
-		 evt[0] & PRIQ_0_PERM_EXEC ? "X" : "",
-		 evt[1] & PRIQ_1_ADDR_MASK << PRIQ_1_ADDR_SHIFT);
-
-	if (last) {
-		struct arm_smmu_cmdq_ent cmd = {
-			.opcode			= CMDQ_OP_PRI_RESP,
-			.substream_valid	= ssv,
-			.pri			= {
-				.sid	= sid,
-				.ssid	= ssid,
-				.grpid	= grpid,
-				.resp	= PRI_RESP_DENY,
-			},
-		};
-
-		arm_smmu_cmdq_issue_cmd(smmu, &cmd);
-	}
+	return ret;
 }
 
 static irqreturn_t arm_smmu_priq_thread(int irq, void *dev)
@@ -1226,17 +1194,61 @@ static irqreturn_t arm_smmu_priq_thread(int irq, void *dev)
 	struct arm_smmu_queue *q = &smmu->priq.q;
 	u64 evt[PRIQ_ENT_DWORDS];
 
-	do {
-		while (!queue_remove_raw(q, evt))
-			arm_smmu_handle_ppr(smmu, evt);
+	while (!queue_remove_raw(q, evt)) {
+		u32 sid, ssid;
+		u16 grpid;
+		bool ssv, last;
 
-		if (queue_sync_prod(q) == -EOVERFLOW)
-			dev_err(smmu->dev, "PRIQ overflow detected -- requests lost\n");
-	} while (!queue_empty(q));
+		sid = evt[0] >> PRIQ_0_SID_SHIFT & PRIQ_0_SID_MASK;
+		ssv = evt[0] & PRIQ_0_SSID_V;
+		ssid = ssv ? evt[0] >> PRIQ_0_SSID_SHIFT & PRIQ_0_SSID_MASK : 0;
+		last = evt[0] & PRIQ_0_PRG_LAST;
+		grpid = evt[1] >> PRIQ_1_PRG_IDX_SHIFT & PRIQ_1_PRG_IDX_MASK;
+
+		dev_info(smmu->dev, "unexpected PRI request received:\n");
+		dev_info(smmu->dev,
+			 "\tsid 0x%08x.0x%05x: [%u%s] %sprivileged %s%s%s access at iova 0x%016llx\n",
+			 sid, ssid, grpid, last ? "L" : "",
+			 evt[0] & PRIQ_0_PERM_PRIV ? "" : "un",
+			 evt[0] & PRIQ_0_PERM_READ ? "R" : "",
+			 evt[0] & PRIQ_0_PERM_WRITE ? "W" : "",
+			 evt[0] & PRIQ_0_PERM_EXEC ? "X" : "",
+			 evt[1] & PRIQ_1_ADDR_MASK << PRIQ_1_ADDR_SHIFT);
+
+		if (last) {
+			struct arm_smmu_cmdq_ent cmd = {
+				.opcode			= CMDQ_OP_PRI_RESP,
+				.substream_valid	= ssv,
+				.pri			= {
+					.sid	= sid,
+					.ssid	= ssid,
+					.grpid	= grpid,
+					.resp	= PRI_RESP_DENY,
+				},
+			};
+
+			arm_smmu_cmdq_issue_cmd(smmu, &cmd);
+		}
+	}
 
 	/* Sync our overflow flag, as we believe we're up to speed */
 	q->cons = Q_OVF(q, q->prod) | Q_WRP(q, q->cons) | Q_IDX(q, q->cons);
 	return IRQ_HANDLED;
+}
+
+static irqreturn_t arm_smmu_priq_handler(int irq, void *dev)
+{
+	irqreturn_t ret = IRQ_WAKE_THREAD;
+	struct arm_smmu_device *smmu = dev;
+	struct arm_smmu_queue *q = &smmu->priq.q;
+
+	/* PRIQ overflow indicates a programming error */
+	if (queue_sync_prod(q) == -EOVERFLOW)
+		dev_err(smmu->dev, "PRIQ overflow detected -- requests lost\n");
+	else if (queue_empty(q))
+		ret = IRQ_NONE;
+
+	return ret;
 }
 
 static irqreturn_t arm_smmu_cmdq_sync_handler(int irq, void *dev)
@@ -1271,11 +1283,15 @@ static irqreturn_t arm_smmu_gerror_handler(int irq, void *dev)
 	if (active & GERROR_MSI_GERROR_ABT_ERR)
 		dev_warn(smmu->dev, "GERROR MSI write aborted\n");
 
-	if (active & GERROR_MSI_PRIQ_ABT_ERR)
+	if (active & GERROR_MSI_PRIQ_ABT_ERR) {
 		dev_warn(smmu->dev, "PRIQ MSI write aborted\n");
+		arm_smmu_priq_handler(irq, smmu->dev);
+	}
 
-	if (active & GERROR_MSI_EVTQ_ABT_ERR)
+	if (active & GERROR_MSI_EVTQ_ABT_ERR) {
 		dev_warn(smmu->dev, "EVTQ MSI write aborted\n");
+		arm_smmu_evtq_handler(irq, smmu->dev);
+	}
 
 	if (active & GERROR_MSI_CMDQ_ABT_ERR) {
 		dev_warn(smmu->dev, "CMDQ MSI write aborted\n");
@@ -1355,7 +1371,7 @@ static void arm_smmu_tlb_inv_range_nosync(unsigned long iova, size_t size,
 	} while (size -= granule);
 }
 
-static const struct iommu_gather_ops arm_smmu_gather_ops = {
+static struct iommu_gather_ops arm_smmu_gather_ops = {
 	.tlb_flush_all	= arm_smmu_tlb_inv_context,
 	.tlb_add_flush	= arm_smmu_tlb_inv_range_nosync,
 	.tlb_sync	= arm_smmu_tlb_sync,
@@ -1367,6 +1383,8 @@ static bool arm_smmu_capable(enum iommu_cap cap)
 	switch (cap) {
 	case IOMMU_CAP_CACHE_COHERENCY:
 		return true;
+	case IOMMU_CAP_INTR_REMAP:
+		return true; /* MSIs are just memory writes */
 	case IOMMU_CAP_NOEXEC:
 		return true;
 	default:
@@ -1378,7 +1396,7 @@ static struct iommu_domain *arm_smmu_domain_alloc(unsigned type)
 {
 	struct arm_smmu_domain *smmu_domain;
 
-	if (type != IOMMU_DOMAIN_UNMANAGED && type != IOMMU_DOMAIN_DMA)
+	if (type != IOMMU_DOMAIN_UNMANAGED)
 		return NULL;
 
 	/*
@@ -1389,12 +1407,6 @@ static struct iommu_domain *arm_smmu_domain_alloc(unsigned type)
 	smmu_domain = kzalloc(sizeof(*smmu_domain), GFP_KERNEL);
 	if (!smmu_domain)
 		return NULL;
-
-	if (type == IOMMU_DOMAIN_DMA &&
-	    iommu_get_dma_cookie(&smmu_domain->domain)) {
-		kfree(smmu_domain);
-		return NULL;
-	}
 
 	mutex_init(&smmu_domain->init_mutex);
 	spin_lock_init(&smmu_domain->pgtbl_lock);
@@ -1424,7 +1436,6 @@ static void arm_smmu_domain_free(struct iommu_domain *domain)
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
 
-	iommu_put_dma_cookie(domain);
 	free_io_pgtable_ops(smmu_domain->pgtbl_ops);
 
 	/* Free the CD and ASID, if we allocated them */
@@ -1457,7 +1468,7 @@ static int arm_smmu_domain_finalise_s1(struct arm_smmu_domain *smmu_domain,
 	struct arm_smmu_s1_cfg *cfg = &smmu_domain->s1_cfg;
 
 	asid = arm_smmu_bitmap_alloc(smmu->asid_map, smmu->asid_bits);
-	if (asid < 0)
+	if (IS_ERR_VALUE(asid))
 		return asid;
 
 	cfg->cdptr = dmam_alloc_coherent(smmu->dev, CTXDESC_CD_DWORDS << 3,
@@ -1488,7 +1499,7 @@ static int arm_smmu_domain_finalise_s2(struct arm_smmu_domain *smmu_domain,
 	struct arm_smmu_s2_cfg *cfg = &smmu_domain->s2_cfg;
 
 	vmid = arm_smmu_bitmap_alloc(smmu->vmid_map, smmu->vmid_bits);
-	if (vmid < 0)
+	if (IS_ERR_VALUE(vmid))
 		return vmid;
 
 	cfg->vmid	= (u16)vmid;
@@ -1496,6 +1507,8 @@ static int arm_smmu_domain_finalise_s2(struct arm_smmu_domain *smmu_domain,
 	cfg->vtcr	= pgtbl_cfg->arm_lpae_s2_cfg.vtcr;
 	return 0;
 }
+
+static struct iommu_ops arm_smmu_ops;
 
 static int arm_smmu_domain_finalise(struct iommu_domain *domain)
 {
@@ -1534,7 +1547,7 @@ static int arm_smmu_domain_finalise(struct iommu_domain *domain)
 	}
 
 	pgtbl_cfg = (struct io_pgtable_cfg) {
-		.pgsize_bitmap	= smmu->pgsize_bitmap,
+		.pgsize_bitmap	= arm_smmu_ops.pgsize_bitmap,
 		.ias		= ias,
 		.oas		= oas,
 		.tlb		= &arm_smmu_gather_ops,
@@ -1545,16 +1558,28 @@ static int arm_smmu_domain_finalise(struct iommu_domain *domain)
 	if (!pgtbl_ops)
 		return -ENOMEM;
 
-	domain->pgsize_bitmap = pgtbl_cfg.pgsize_bitmap;
-	domain->geometry.aperture_end = (1UL << ias) - 1;
-	domain->geometry.force_aperture = true;
+	arm_smmu_ops.pgsize_bitmap = pgtbl_cfg.pgsize_bitmap;
 	smmu_domain->pgtbl_ops = pgtbl_ops;
 
 	ret = finalise_stage_fn(smmu_domain, &pgtbl_cfg);
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		free_io_pgtable_ops(pgtbl_ops);
 
 	return ret;
+}
+
+static struct arm_smmu_group *arm_smmu_group_get(struct device *dev)
+{
+	struct iommu_group *group;
+	struct arm_smmu_group *smmu_group;
+
+	group = iommu_group_get(dev);
+	if (!group)
+		return NULL;
+
+	smmu_group = iommu_group_get_iommudata(group);
+	iommu_group_put(group);
+	return smmu_group;
 }
 
 static __le64 *arm_smmu_get_step_for_sid(struct arm_smmu_device *smmu, u32 sid)
@@ -1579,29 +1604,30 @@ static __le64 *arm_smmu_get_step_for_sid(struct arm_smmu_device *smmu, u32 sid)
 	return step;
 }
 
-static int arm_smmu_install_ste_for_dev(struct iommu_fwspec *fwspec)
+static int arm_smmu_install_ste_for_group(struct arm_smmu_group *smmu_group)
 {
 	int i;
-	struct arm_smmu_master_data *master = fwspec->iommu_priv;
-	struct arm_smmu_device *smmu = master->smmu;
+	struct arm_smmu_domain *smmu_domain = smmu_group->domain;
+	struct arm_smmu_strtab_ent *ste = &smmu_group->ste;
+	struct arm_smmu_device *smmu = smmu_group->smmu;
 
-	for (i = 0; i < fwspec->num_ids; ++i) {
-		u32 sid = fwspec->ids[i];
+	if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1) {
+		ste->s1_cfg = &smmu_domain->s1_cfg;
+		ste->s2_cfg = NULL;
+		arm_smmu_write_ctx_desc(smmu, ste->s1_cfg);
+	} else {
+		ste->s1_cfg = NULL;
+		ste->s2_cfg = &smmu_domain->s2_cfg;
+	}
+
+	for (i = 0; i < smmu_group->num_sids; ++i) {
+		u32 sid = smmu_group->sids[i];
 		__le64 *step = arm_smmu_get_step_for_sid(smmu, sid);
 
-		arm_smmu_write_strtab_ent(smmu, sid, step, &master->ste);
+		arm_smmu_write_strtab_ent(smmu, sid, step, ste);
 	}
 
 	return 0;
-}
-
-static void arm_smmu_detach_dev(struct device *dev)
-{
-	struct arm_smmu_master_data *master = dev->iommu_fwspec->iommu_priv;
-
-	master->ste.bypass = true;
-	if (arm_smmu_install_ste_for_dev(dev->iommu_fwspec) < 0)
-		dev_warn(dev, "failed to install bypass STE\n");
 }
 
 static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
@@ -1609,20 +1635,16 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 	int ret = 0;
 	struct arm_smmu_device *smmu;
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
-	struct arm_smmu_master_data *master;
-	struct arm_smmu_strtab_ent *ste;
+	struct arm_smmu_group *smmu_group = arm_smmu_group_get(dev);
 
-	if (!dev->iommu_fwspec)
+	if (!smmu_group)
 		return -ENOENT;
 
-	master = dev->iommu_fwspec->iommu_priv;
-	smmu = master->smmu;
-	ste = &master->ste;
-
 	/* Already attached to a different domain? */
-	if (!ste->bypass)
-		arm_smmu_detach_dev(dev);
+	if (smmu_group->domain && smmu_group->domain != smmu_domain)
+		return -EEXIST;
 
+	smmu = smmu_group->smmu;
 	mutex_lock(&smmu_domain->init_mutex);
 
 	if (!smmu_domain->smmu) {
@@ -1641,25 +1663,39 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		goto out_unlock;
 	}
 
-	ste->bypass = false;
-	ste->valid = true;
+	/* Group already attached to this domain? */
+	if (smmu_group->domain)
+		goto out_unlock;
 
-	if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1) {
-		ste->s1_cfg = &smmu_domain->s1_cfg;
-		ste->s2_cfg = NULL;
-		arm_smmu_write_ctx_desc(smmu, ste->s1_cfg);
-	} else {
-		ste->s1_cfg = NULL;
-		ste->s2_cfg = &smmu_domain->s2_cfg;
-	}
+	smmu_group->domain	= smmu_domain;
+	smmu_group->ste.bypass	= false;
 
-	ret = arm_smmu_install_ste_for_dev(dev->iommu_fwspec);
-	if (ret < 0)
-		ste->valid = false;
+	ret = arm_smmu_install_ste_for_group(smmu_group);
+	if (IS_ERR_VALUE(ret))
+		smmu_group->domain = NULL;
 
 out_unlock:
 	mutex_unlock(&smmu_domain->init_mutex);
 	return ret;
+}
+
+static void arm_smmu_detach_dev(struct iommu_domain *domain, struct device *dev)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	struct arm_smmu_group *smmu_group = arm_smmu_group_get(dev);
+
+	BUG_ON(!smmu_domain);
+	BUG_ON(!smmu_group);
+
+	mutex_lock(&smmu_domain->init_mutex);
+	BUG_ON(smmu_group->domain != smmu_domain);
+
+	smmu_group->ste.bypass = true;
+	if (IS_ERR_VALUE(arm_smmu_install_ste_for_group(smmu_group)))
+		dev_warn(dev, "failed to install bypass STE\n");
+
+	smmu_group->domain = NULL;
+	mutex_unlock(&smmu_domain->init_mutex);
 }
 
 static int arm_smmu_map(struct iommu_domain *domain, unsigned long iova,
@@ -1714,20 +1750,40 @@ arm_smmu_iova_to_phys(struct iommu_domain *domain, dma_addr_t iova)
 	return ret;
 }
 
-static struct platform_driver arm_smmu_driver;
-
-static int arm_smmu_match_node(struct device *dev, void *data)
+static int __arm_smmu_get_pci_sid(struct pci_dev *pdev, u16 alias, void *sidp)
 {
-	return dev->fwnode == data;
+	*(u32 *)sidp = alias;
+	return 0; /* Continue walking */
 }
 
-static
-struct arm_smmu_device *arm_smmu_get_by_fwnode(struct fwnode_handle *fwnode)
+static void __arm_smmu_release_pci_iommudata(void *data)
 {
-	struct device *dev = driver_find_device(&arm_smmu_driver.driver, NULL,
-						fwnode, arm_smmu_match_node);
-	put_device(dev);
-	return dev ? dev_get_drvdata(dev) : NULL;
+	kfree(data);
+}
+
+static struct arm_smmu_device *arm_smmu_get_for_pci_dev(struct pci_dev *pdev)
+{
+	struct device_node *of_node;
+	struct platform_device *smmu_pdev;
+	struct arm_smmu_device *smmu = NULL;
+	struct pci_bus *bus = pdev->bus;
+
+	/* Walk up to the root bus */
+	while (!pci_is_root_bus(bus))
+		bus = bus->parent;
+
+	/* Follow the "iommus" phandle from the host controller */
+	of_node = of_parse_phandle(bus->bridge->parent->of_node, "iommus", 0);
+	if (!of_node)
+		return NULL;
+
+	/* See if we can find an SMMU corresponding to the phandle */
+	smmu_pdev = of_find_device_by_node(of_node);
+	if (smmu_pdev)
+		smmu = platform_get_drvdata(smmu_pdev);
+
+	of_node_put(of_node);
+	return smmu;
 }
 
 static bool arm_smmu_sid_in_range(struct arm_smmu_device *smmu, u32 sid)
@@ -1740,96 +1796,94 @@ static bool arm_smmu_sid_in_range(struct arm_smmu_device *smmu, u32 sid)
 	return sid < limit;
 }
 
-static struct iommu_ops arm_smmu_ops;
-
 static int arm_smmu_add_device(struct device *dev)
 {
 	int i, ret;
-	struct arm_smmu_device *smmu;
-	struct arm_smmu_master_data *master;
-	struct iommu_fwspec *fwspec = dev->iommu_fwspec;
+	u32 sid, *sids;
+	struct pci_dev *pdev;
 	struct iommu_group *group;
+	struct arm_smmu_group *smmu_group;
+	struct arm_smmu_device *smmu;
 
-	if (!fwspec || fwspec->ops != &arm_smmu_ops)
+	/* We only support PCI, for now */
+	if (!dev_is_pci(dev))
 		return -ENODEV;
-	/*
-	 * We _can_ actually withstand dodgy bus code re-calling add_device()
-	 * without an intervening remove_device()/of_xlate() sequence, but
-	 * we're not going to do so quietly...
-	 */
-	if (WARN_ON_ONCE(fwspec->iommu_priv)) {
-		master = fwspec->iommu_priv;
-		smmu = master->smmu;
-	} else {
-		smmu = arm_smmu_get_by_fwnode(fwspec->iommu_fwnode);
-		if (!smmu)
-			return -ENODEV;
-		master = kzalloc(sizeof(*master), GFP_KERNEL);
-		if (!master)
-			return -ENOMEM;
 
-		master->smmu = smmu;
-		fwspec->iommu_priv = master;
-	}
-
-	/* Check the SIDs are in range of the SMMU and our stream table */
-	for (i = 0; i < fwspec->num_ids; i++) {
-		u32 sid = fwspec->ids[i];
-
-		if (!arm_smmu_sid_in_range(smmu, sid))
-			return -ERANGE;
-
-		/* Ensure l2 strtab is initialised */
-		if (smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB) {
-			ret = arm_smmu_init_l2_strtab(smmu, sid);
-			if (ret)
-				return ret;
-		}
-	}
-
+	pdev = to_pci_dev(dev);
 	group = iommu_group_get_for_dev(dev);
-	if (!IS_ERR(group)) {
-		iommu_group_put(group);
-		iommu_device_link(&smmu->iommu, dev);
+	if (IS_ERR(group))
+		return PTR_ERR(group);
+
+	smmu_group = iommu_group_get_iommudata(group);
+	if (!smmu_group) {
+		smmu = arm_smmu_get_for_pci_dev(pdev);
+		if (!smmu) {
+			ret = -ENOENT;
+			goto out_remove_dev;
+		}
+
+		smmu_group = kzalloc(sizeof(*smmu_group), GFP_KERNEL);
+		if (!smmu_group) {
+			ret = -ENOMEM;
+			goto out_remove_dev;
+		}
+
+		smmu_group->ste.valid	= true;
+		smmu_group->smmu	= smmu;
+		iommu_group_set_iommudata(group, smmu_group,
+					  __arm_smmu_release_pci_iommudata);
+	} else {
+		smmu = smmu_group->smmu;
 	}
 
-	return PTR_ERR_OR_ZERO(group);
+	/* Assume SID == RID until firmware tells us otherwise */
+	pci_for_each_dma_alias(pdev, __arm_smmu_get_pci_sid, &sid);
+	for (i = 0; i < smmu_group->num_sids; ++i) {
+		/* If we already know about this SID, then we're done */
+		if (smmu_group->sids[i] == sid)
+			goto out_put_group;
+	}
+
+	/* Check the SID is in range of the SMMU and our stream table */
+	if (!arm_smmu_sid_in_range(smmu, sid)) {
+		ret = -ERANGE;
+		goto out_remove_dev;
+	}
+
+	/* Ensure l2 strtab is initialised */
+	if (smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB) {
+		ret = arm_smmu_init_l2_strtab(smmu, sid);
+		if (ret)
+			goto out_remove_dev;
+	}
+
+	/* Resize the SID array for the group */
+	smmu_group->num_sids++;
+	sids = krealloc(smmu_group->sids, smmu_group->num_sids * sizeof(*sids),
+			GFP_KERNEL);
+	if (!sids) {
+		smmu_group->num_sids--;
+		ret = -ENOMEM;
+		goto out_remove_dev;
+	}
+
+	/* Add the new SID */
+	sids[smmu_group->num_sids - 1] = sid;
+	smmu_group->sids = sids;
+
+out_put_group:
+	iommu_group_put(group);
+	return 0;
+
+out_remove_dev:
+	iommu_group_remove_device(dev);
+	iommu_group_put(group);
+	return ret;
 }
 
 static void arm_smmu_remove_device(struct device *dev)
 {
-	struct iommu_fwspec *fwspec = dev->iommu_fwspec;
-	struct arm_smmu_master_data *master;
-	struct arm_smmu_device *smmu;
-
-	if (!fwspec || fwspec->ops != &arm_smmu_ops)
-		return;
-
-	master = fwspec->iommu_priv;
-	smmu = master->smmu;
-	if (master && master->ste.valid)
-		arm_smmu_detach_dev(dev);
 	iommu_group_remove_device(dev);
-	iommu_device_unlink(&smmu->iommu, dev);
-	kfree(master);
-	iommu_fwspec_free(dev);
-}
-
-static struct iommu_group *arm_smmu_device_group(struct device *dev)
-{
-	struct iommu_group *group;
-
-	/*
-	 * We don't support devices sharing stream IDs other than PCI RID
-	 * aliases, since the necessary ID-to-device lookup becomes rather
-	 * impractical given a potential sparse 32-bit stream ID space.
-	 */
-	if (dev_is_pci(dev))
-		group = pci_device_group(dev);
-	else
-		group = generic_device_group(dev);
-
-	return group;
 }
 
 static int arm_smmu_domain_get_attr(struct iommu_domain *domain,
@@ -1876,51 +1930,20 @@ out_unlock:
 	return ret;
 }
 
-static int arm_smmu_of_xlate(struct device *dev, struct of_phandle_args *args)
-{
-	return iommu_fwspec_add_ids(dev, args->args, 1);
-}
-
-static void arm_smmu_get_resv_regions(struct device *dev,
-				      struct list_head *head)
-{
-	struct iommu_resv_region *region;
-	int prot = IOMMU_WRITE | IOMMU_NOEXEC | IOMMU_MMIO;
-
-	region = iommu_alloc_resv_region(MSI_IOVA_BASE, MSI_IOVA_LENGTH,
-					 prot, IOMMU_RESV_SW_MSI);
-	if (!region)
-		return;
-
-	list_add_tail(&region->list, head);
-}
-
-static void arm_smmu_put_resv_regions(struct device *dev,
-				      struct list_head *head)
-{
-	struct iommu_resv_region *entry, *next;
-
-	list_for_each_entry_safe(entry, next, head, list)
-		kfree(entry);
-}
-
 static struct iommu_ops arm_smmu_ops = {
 	.capable		= arm_smmu_capable,
 	.domain_alloc		= arm_smmu_domain_alloc,
 	.domain_free		= arm_smmu_domain_free,
 	.attach_dev		= arm_smmu_attach_dev,
+	.detach_dev		= arm_smmu_detach_dev,
 	.map			= arm_smmu_map,
 	.unmap			= arm_smmu_unmap,
-	.map_sg			= default_iommu_map_sg,
 	.iova_to_phys		= arm_smmu_iova_to_phys,
 	.add_device		= arm_smmu_add_device,
 	.remove_device		= arm_smmu_remove_device,
-	.device_group		= arm_smmu_device_group,
+	.device_group		= pci_device_group,
 	.domain_get_attr	= arm_smmu_domain_get_attr,
 	.domain_set_attr	= arm_smmu_domain_set_attr,
-	.of_xlate		= arm_smmu_of_xlate,
-	.get_resv_regions	= arm_smmu_get_resv_regions,
-	.put_resv_regions	= arm_smmu_put_resv_regions,
 	.pgsize_bitmap		= -1UL, /* Restricted during device attach */
 };
 
@@ -2006,9 +2029,17 @@ static int arm_smmu_init_strtab_2lvl(struct arm_smmu_device *smmu)
 	u32 size, l1size;
 	struct arm_smmu_strtab_cfg *cfg = &smmu->strtab_cfg;
 
-	/* Calculate the L1 size, capped to the SIDSIZE. */
-	size = STRTAB_L1_SZ_SHIFT - (ilog2(STRTAB_L1_DESC_DWORDS) + 3);
-	size = min(size, smmu->sid_bits - STRTAB_SPLIT);
+	/*
+	 * If we can resolve everything with a single L2 table, then we
+	 * just need a single L1 descriptor. Otherwise, calculate the L1
+	 * size, capped to the SIDSIZE.
+	 */
+	if (smmu->sid_bits < STRTAB_SPLIT) {
+		size = 0;
+	} else {
+		size = STRTAB_L1_SZ_SHIFT - (ilog2(STRTAB_L1_DESC_DWORDS) + 3);
+		size = min(size, smmu->sid_bits - STRTAB_SPLIT);
+	}
 	cfg->num_l1_ents = 1 << size;
 
 	size += STRTAB_SPLIT;
@@ -2113,24 +2144,6 @@ static int arm_smmu_write_reg_sync(struct arm_smmu_device *smmu, u32 val,
 					  1, ARM_SMMU_POLL_TIMEOUT_US);
 }
 
-/* GBPA is "special" */
-static int arm_smmu_update_gbpa(struct arm_smmu_device *smmu, u32 set, u32 clr)
-{
-	int ret;
-	u32 reg, __iomem *gbpa = smmu->base + ARM_SMMU_GBPA;
-
-	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
-					 1, ARM_SMMU_POLL_TIMEOUT_US);
-	if (ret)
-		return ret;
-
-	reg &= ~clr;
-	reg |= set;
-	writel_relaxed(reg | GBPA_UPDATE, gbpa);
-	return readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
-					  1, ARM_SMMU_POLL_TIMEOUT_US);
-}
-
 static void arm_smmu_free_msis(void *data)
 {
 	struct device *dev = data;
@@ -2215,11 +2228,11 @@ static int arm_smmu_setup_irqs(struct arm_smmu_device *smmu)
 	/* Request interrupt lines */
 	irq = smmu->evtq.q.irq;
 	if (irq) {
-		ret = devm_request_threaded_irq(smmu->dev, irq, NULL,
+		ret = devm_request_threaded_irq(smmu->dev, irq,
+						arm_smmu_evtq_handler,
 						arm_smmu_evtq_thread,
-						IRQF_ONESHOT,
-						"arm-smmu-v3-evtq", smmu);
-		if (ret < 0)
+						0, "arm-smmu-v3-evtq", smmu);
+		if (IS_ERR_VALUE(ret))
 			dev_warn(smmu->dev, "failed to enable evtq irq\n");
 	}
 
@@ -2228,7 +2241,7 @@ static int arm_smmu_setup_irqs(struct arm_smmu_device *smmu)
 		ret = devm_request_irq(smmu->dev, irq,
 				       arm_smmu_cmdq_sync_handler, 0,
 				       "arm-smmu-v3-cmdq-sync", smmu);
-		if (ret < 0)
+		if (IS_ERR_VALUE(ret))
 			dev_warn(smmu->dev, "failed to enable cmdq-sync irq\n");
 	}
 
@@ -2236,19 +2249,19 @@ static int arm_smmu_setup_irqs(struct arm_smmu_device *smmu)
 	if (irq) {
 		ret = devm_request_irq(smmu->dev, irq, arm_smmu_gerror_handler,
 				       0, "arm-smmu-v3-gerror", smmu);
-		if (ret < 0)
+		if (IS_ERR_VALUE(ret))
 			dev_warn(smmu->dev, "failed to enable gerror irq\n");
 	}
 
 	if (smmu->features & ARM_SMMU_FEAT_PRI) {
 		irq = smmu->priq.q.irq;
 		if (irq) {
-			ret = devm_request_threaded_irq(smmu->dev, irq, NULL,
+			ret = devm_request_threaded_irq(smmu->dev, irq,
+							arm_smmu_priq_handler,
 							arm_smmu_priq_thread,
-							IRQF_ONESHOT,
-							"arm-smmu-v3-priq",
+							0, "arm-smmu-v3-priq",
 							smmu);
-			if (ret < 0)
+			if (IS_ERR_VALUE(ret))
 				dev_warn(smmu->dev,
 					 "failed to enable priq irq\n");
 			else
@@ -2276,7 +2289,7 @@ static int arm_smmu_device_disable(struct arm_smmu_device *smmu)
 	return ret;
 }
 
-static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
+static int arm_smmu_device_reset(struct arm_smmu_device *smmu)
 {
 	int ret;
 	u32 reg, enables;
@@ -2377,17 +2390,8 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 		return ret;
 	}
 
-
-	/* Enable the SMMU interface, or ensure bypass */
-	if (!bypass || disable_bypass) {
-		enables |= CR0_SMMUEN;
-	} else {
-		ret = arm_smmu_update_gbpa(smmu, 0, GBPA_ABORT);
-		if (ret) {
-			dev_err(smmu->dev, "GBPA not responding to update\n");
-			return ret;
-		}
-	}
+	/* Enable the SMMU interface */
+	enables |= CR0_SMMUEN;
 	ret = arm_smmu_write_reg_sync(smmu, enables, ARM_SMMU_CR0,
 				      ARM_SMMU_CR0ACK);
 	if (ret) {
@@ -2398,10 +2402,11 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	return 0;
 }
 
-static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
+static int arm_smmu_device_probe(struct arm_smmu_device *smmu)
 {
 	u32 reg;
-	bool coherent = smmu->features & ARM_SMMU_FEAT_COHERENCY;
+	bool coherent;
+	unsigned long pgsize_bitmap = 0;
 
 	/* IDR0 */
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR0);
@@ -2453,9 +2458,13 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 		smmu->features |= ARM_SMMU_FEAT_HYP;
 
 	/*
-	 * The coherency feature as set by FW is used in preference to the ID
+	 * The dma-coherent property is used in preference to the ID
 	 * register, but warn on mismatch.
 	 */
+	coherent = of_dma_is_coherent(smmu->dev->of_node);
+	if (coherent)
+		smmu->features |= ARM_SMMU_FEAT_COHERENCY;
+
 	if (!!(reg & IDR0_COHACC) != coherent)
 		dev_warn(smmu->dev, "IDR0.COHACC overridden by dma-coherent property (%s)\n",
 			 coherent ? "true" : "false");
@@ -2519,13 +2528,6 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	smmu->ssid_bits = reg >> IDR1_SSID_SHIFT & IDR1_SSID_MASK;
 	smmu->sid_bits = reg >> IDR1_SID_SHIFT & IDR1_SID_MASK;
 
-	/*
-	 * If the SMMU supports fewer bits than would fill a single L2 stream
-	 * table, use a linear table instead.
-	 */
-	if (smmu->sid_bits <= STRTAB_SPLIT)
-		smmu->features &= ~ARM_SMMU_FEAT_2_LVL_STRTAB;
-
 	/* IDR5 */
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR5);
 
@@ -2535,16 +2537,13 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 
 	/* Page sizes */
 	if (reg & IDR5_GRAN64K)
-		smmu->pgsize_bitmap |= SZ_64K | SZ_512M;
+		pgsize_bitmap |= SZ_64K | SZ_512M;
 	if (reg & IDR5_GRAN16K)
-		smmu->pgsize_bitmap |= SZ_16K | SZ_32M;
+		pgsize_bitmap |= SZ_16K | SZ_32M;
 	if (reg & IDR5_GRAN4K)
-		smmu->pgsize_bitmap |= SZ_4K | SZ_2M | SZ_1G;
+		pgsize_bitmap |= SZ_4K | SZ_2M | SZ_1G;
 
-	if (arm_smmu_ops.pgsize_bitmap == -1UL)
-		arm_smmu_ops.pgsize_bitmap = smmu->pgsize_bitmap;
-	else
-		arm_smmu_ops.pgsize_bitmap |= smmu->pgsize_bitmap;
+	arm_smmu_ops.pgsize_bitmap &= pgsize_bitmap;
 
 	/* Output address size */
 	switch (reg & IDR5_OAS_MASK << IDR5_OAS_SHIFT) {
@@ -2583,62 +2582,12 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	return 0;
 }
 
-#ifdef CONFIG_ACPI
-static int arm_smmu_device_acpi_probe(struct platform_device *pdev,
-				      struct arm_smmu_device *smmu)
-{
-	struct acpi_iort_smmu_v3 *iort_smmu;
-	struct device *dev = smmu->dev;
-	struct acpi_iort_node *node;
-
-	node = *(struct acpi_iort_node **)dev_get_platdata(dev);
-
-	/* Retrieve SMMUv3 specific data */
-	iort_smmu = (struct acpi_iort_smmu_v3 *)node->node_data;
-
-	if (iort_smmu->flags & ACPI_IORT_SMMU_V3_COHACC_OVERRIDE)
-		smmu->features |= ARM_SMMU_FEAT_COHERENCY;
-
-	return 0;
-}
-#else
-static inline int arm_smmu_device_acpi_probe(struct platform_device *pdev,
-					     struct arm_smmu_device *smmu)
-{
-	return -ENODEV;
-}
-#endif
-
-static int arm_smmu_device_dt_probe(struct platform_device *pdev,
-				    struct arm_smmu_device *smmu)
-{
-	struct device *dev = &pdev->dev;
-	u32 cells;
-	int ret = -EINVAL;
-
-	if (of_property_read_u32(dev->of_node, "#iommu-cells", &cells))
-		dev_err(dev, "missing #iommu-cells property\n");
-	else if (cells != 1)
-		dev_err(dev, "invalid #iommu-cells value (%d)\n", cells);
-	else
-		ret = 0;
-
-	parse_driver_options(smmu);
-
-	if (of_dma_is_coherent(dev->of_node))
-		smmu->features |= ARM_SMMU_FEAT_COHERENCY;
-
-	return ret;
-}
-
-static int arm_smmu_device_probe(struct platform_device *pdev)
+static int arm_smmu_device_dt_probe(struct platform_device *pdev)
 {
 	int irq, ret;
 	struct resource *res;
-	resource_size_t ioaddr;
 	struct arm_smmu_device *smmu;
 	struct device *dev = &pdev->dev;
-	bool bypass;
 
 	smmu = devm_kzalloc(dev, sizeof(*smmu), GFP_KERNEL);
 	if (!smmu) {
@@ -2653,7 +2602,6 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 		dev_err(dev, "MMIO region too small (%pr)\n", res);
 		return -EINVAL;
 	}
-	ioaddr = res->start;
 
 	smmu->base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(smmu->base))
@@ -2676,19 +2624,10 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 	if (irq > 0)
 		smmu->gerr_irq = irq;
 
-	if (dev->of_node) {
-		ret = arm_smmu_device_dt_probe(pdev, smmu);
-	} else {
-		ret = arm_smmu_device_acpi_probe(pdev, smmu);
-		if (ret == -ENODEV)
-			return ret;
-	}
-
-	/* Set bypass mode according to firmware probing result */
-	bypass = !!ret;
+	parse_driver_options(smmu);
 
 	/* Probe the h/w */
-	ret = arm_smmu_device_hw_probe(smmu);
+	ret = arm_smmu_device_probe(smmu);
 	if (ret)
 		return ret;
 
@@ -2701,42 +2640,7 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, smmu);
 
 	/* Reset the device */
-	ret = arm_smmu_device_reset(smmu, bypass);
-	if (ret)
-		return ret;
-
-	/* And we're up. Go go go! */
-	ret = iommu_device_sysfs_add(&smmu->iommu, dev, NULL,
-				     "smmu3.%pa", &ioaddr);
-	if (ret)
-		return ret;
-
-	iommu_device_set_ops(&smmu->iommu, &arm_smmu_ops);
-	iommu_device_set_fwnode(&smmu->iommu, dev->fwnode);
-
-	ret = iommu_device_register(&smmu->iommu);
-
-#ifdef CONFIG_PCI
-	if (pci_bus_type.iommu_ops != &arm_smmu_ops) {
-		pci_request_acs();
-		ret = bus_set_iommu(&pci_bus_type, &arm_smmu_ops);
-		if (ret)
-			return ret;
-	}
-#endif
-#ifdef CONFIG_ARM_AMBA
-	if (amba_bustype.iommu_ops != &arm_smmu_ops) {
-		ret = bus_set_iommu(&amba_bustype, &arm_smmu_ops);
-		if (ret)
-			return ret;
-	}
-#endif
-	if (platform_bus_type.iommu_ops != &arm_smmu_ops) {
-		ret = bus_set_iommu(&platform_bus_type, &arm_smmu_ops);
-		if (ret)
-			return ret;
-	}
-	return 0;
+	return arm_smmu_device_reset(smmu);
 }
 
 static int arm_smmu_device_remove(struct platform_device *pdev)
@@ -2758,20 +2662,26 @@ static struct platform_driver arm_smmu_driver = {
 		.name		= "arm-smmu-v3",
 		.of_match_table	= of_match_ptr(arm_smmu_of_match),
 	},
-	.probe	= arm_smmu_device_probe,
+	.probe	= arm_smmu_device_dt_probe,
 	.remove	= arm_smmu_device_remove,
 };
 
 static int __init arm_smmu_init(void)
 {
-	static bool registered;
-	int ret = 0;
+	struct device_node *np;
+	int ret;
 
-	if (!registered) {
-		ret = platform_driver_register(&arm_smmu_driver);
-		registered = !ret;
-	}
-	return ret;
+	np = of_find_matching_node(NULL, arm_smmu_of_match);
+	if (!np)
+		return 0;
+
+	of_node_put(np);
+
+	ret = platform_driver_register(&arm_smmu_driver);
+	if (ret)
+		return ret;
+
+	return bus_set_iommu(&pci_bus_type, &arm_smmu_ops);
 }
 
 static void __exit arm_smmu_exit(void)
@@ -2781,31 +2691,6 @@ static void __exit arm_smmu_exit(void)
 
 subsys_initcall(arm_smmu_init);
 module_exit(arm_smmu_exit);
-
-static int __init arm_smmu_of_init(struct device_node *np)
-{
-	int ret = arm_smmu_init();
-
-	if (ret)
-		return ret;
-
-	if (!of_platform_device_create(np, NULL, platform_bus_type.dev_root))
-		return -ENODEV;
-
-	return 0;
-}
-IOMMU_OF_DECLARE(arm_smmuv3, "arm,smmu-v3", arm_smmu_of_init);
-
-#ifdef CONFIG_ACPI
-static int __init acpi_smmu_v3_init(struct acpi_table_header *table)
-{
-	if (iort_node_match(ACPI_IORT_NODE_SMMU_V3))
-		return arm_smmu_init();
-
-	return 0;
-}
-IORT_ACPI_DECLARE(arm_smmu_v3, ACPI_SIG_IORT, acpi_smmu_v3_init);
-#endif
 
 MODULE_DESCRIPTION("IOMMU API for ARM architected SMMUv3 implementations");
 MODULE_AUTHOR("Will Deacon <will.deacon@arm.com>");

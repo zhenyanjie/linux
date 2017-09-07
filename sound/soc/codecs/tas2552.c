@@ -611,7 +611,7 @@ probe_fail:
 
 	regulator_bulk_disable(ARRAY_SIZE(tas2552->supplies),
 					tas2552->supplies);
-	return ret;
+	return -EIO;
 }
 
 static int tas2552_codec_remove(struct snd_soc_codec *codec)
@@ -637,7 +637,7 @@ static int tas2552_suspend(struct snd_soc_codec *codec)
 	if (ret != 0)
 		dev_err(codec->dev, "Failed to disable supplies: %d\n",
 			ret);
-	return ret;
+	return 0;
 }
 
 static int tas2552_resume(struct snd_soc_codec *codec)
@@ -653,7 +653,7 @@ static int tas2552_resume(struct snd_soc_codec *codec)
 			ret);
 	}
 
-	return ret;
+	return 0;
 }
 #else
 #define tas2552_suspend NULL
@@ -667,14 +667,12 @@ static struct snd_soc_codec_driver soc_codec_dev_tas2552 = {
 	.resume = tas2552_resume,
 	.ignore_pmdown_time = true,
 
-	.component_driver = {
-		.controls		= tas2552_snd_controls,
-		.num_controls		= ARRAY_SIZE(tas2552_snd_controls),
-		.dapm_widgets		= tas2552_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(tas2552_dapm_widgets),
-		.dapm_routes		= tas2552_audio_map,
-		.num_dapm_routes	= ARRAY_SIZE(tas2552_audio_map),
-	},
+	.controls = tas2552_snd_controls,
+	.num_controls = ARRAY_SIZE(tas2552_snd_controls),
+	.dapm_widgets = tas2552_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(tas2552_dapm_widgets),
+	.dapm_routes = tas2552_audio_map,
+	.num_dapm_routes = ARRAY_SIZE(tas2552_audio_map),
 };
 
 static const struct regmap_config tas2552_regmap_config = {

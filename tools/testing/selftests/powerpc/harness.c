@@ -19,9 +19,9 @@
 #include "subunit.h"
 #include "utils.h"
 
+#define TIMEOUT		120
 #define KILL_TIMEOUT	5
 
-static uint64_t timeout = 120;
 
 int run_test(int (test_function)(void), char *name)
 {
@@ -44,7 +44,7 @@ int run_test(int (test_function)(void), char *name)
 	setpgid(pid, pid);
 
 	/* Wake us up in timeout seconds */
-	alarm(timeout);
+	alarm(TIMEOUT);
 	terminated = false;
 
 wait:
@@ -94,11 +94,6 @@ static struct sigaction alarm_action = {
 	.sa_handler = alarm_handler,
 };
 
-void test_harness_set_timeout(uint64_t time)
-{
-	timeout = time;
-}
-
 int test_harness(int (test_function)(void), char *name)
 {
 	int rc;
@@ -114,11 +109,9 @@ int test_harness(int (test_function)(void), char *name)
 
 	rc = run_test(test_function, name);
 
-	if (rc == MAGIC_SKIP_RETURN_VALUE) {
+	if (rc == MAGIC_SKIP_RETURN_VALUE)
 		test_skip(name);
-		/* so that skipped test is not marked as failed */
-		rc = 0;
-	} else
+	else
 		test_finish(name, rc);
 
 	return rc;

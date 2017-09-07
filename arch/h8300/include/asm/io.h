@@ -3,8 +3,6 @@
 
 #ifdef __KERNEL__
 
-#include <linux/types.h>
-
 /* H8/300 internal I/O functions */
 
 #define __raw_readb __raw_readb

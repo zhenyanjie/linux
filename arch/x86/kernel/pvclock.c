@@ -21,8 +21,6 @@
 #include <linux/sched.h>
 #include <linux/gfp.h>
 #include <linux/bootmem.h>
-#include <linux/nmi.h>
-
 #include <asm/fixmap.h>
 #include <asm/pvclock.h>
 
@@ -63,28 +61,26 @@ void pvclock_resume(void)
 u8 pvclock_read_flags(struct pvclock_vcpu_time_info *src)
 {
 	unsigned version;
+	cycle_t ret;
 	u8 flags;
 
 	do {
-		version = pvclock_read_begin(src);
-		flags = src->flags;
-	} while (pvclock_read_retry(src, version));
+		version = __pvclock_read_cycles(src, &ret, &flags);
+	} while ((src->version & 1) || version != src->version);
 
 	return flags & valid_flags;
 }
 
-u64 pvclock_clocksource_read(struct pvclock_vcpu_time_info *src)
+cycle_t pvclock_clocksource_read(struct pvclock_vcpu_time_info *src)
 {
 	unsigned version;
-	u64 ret;
+	cycle_t ret;
 	u64 last;
 	u8 flags;
 
 	do {
-		version = pvclock_read_begin(src);
-		ret = __pvclock_read_cycles(src, rdtsc_ordered());
-		flags = src->flags;
-	} while (pvclock_read_retry(src, version));
+		version = __pvclock_read_cycles(src, &ret, &flags);
+	} while ((src->version & 1) || version != src->version);
 
 	if (unlikely((flags & PVCLOCK_GUEST_STOPPED) != 0)) {
 		src->flags &= ~PVCLOCK_GUEST_STOPPED;

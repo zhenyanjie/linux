@@ -20,7 +20,6 @@
 #include <linux/irq.h>
 #include <linux/clk.h>
 #include <linux/gpio.h>
-#include <linux/interrupt.h>
 
 #include <linux/of.h>
 #include <linux/of_address.h>

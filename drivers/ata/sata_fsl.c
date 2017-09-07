@@ -1612,7 +1612,7 @@ static int sata_fsl_resume(struct platform_device *op)
 }
 #endif
 
-static const struct of_device_id fsl_sata_match[] = {
+static struct of_device_id fsl_sata_match[] = {
 	{
 		.compatible = "fsl,pq-sata",
 	},

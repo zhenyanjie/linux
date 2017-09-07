@@ -29,6 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/list.h>
+#include <linux/init.h>
 #include <linux/major.h>
 #include <linux/atomic.h>
 #include <linux/sysrq.h>
@@ -41,7 +42,7 @@
 #include <linux/slab.h>
 #include <linux/serial_core.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "hvc_console.h"
 
@@ -631,7 +632,7 @@ int hvc_poll(struct hvc_struct *hp)
 		goto bail;
 
 	/* Now check if we can get data (are we throttled ?) */
-	if (tty_throttled(tty))
+	if (test_bit(TTY_THROTTLED, &tty->flags))
 		goto throttled;
 
 	/* If we aren't notifier driven and aren't throttled, we always
@@ -813,7 +814,7 @@ static int hvc_poll_get_char(struct tty_driver *driver, int line)
 
 	n = hp->ops->get_chars(hp->vtermno, &ch, 1);
 
-	if (n <= 0)
+	if (n == 0)
 		return NO_POLL_CHAR;
 
 	return ch;

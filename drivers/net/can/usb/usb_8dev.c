@@ -623,8 +623,10 @@ static netdev_tx_t usb_8dev_start_xmit(struct sk_buff *skb,
 
 	/* create a URB, and a buffer for it, and copy the data to the URB */
 	urb = usb_alloc_urb(0, GFP_ATOMIC);
-	if (!urb)
+	if (!urb) {
+		netdev_err(netdev, "No memory left for URBs\n");
 		goto nomem;
+	}
 
 	buf = usb_alloc_coherent(priv->udev, size, GFP_ATOMIC,
 				 &urb->transfer_dma);
@@ -746,6 +748,7 @@ static int usb_8dev_start(struct usb_8dev_priv *priv)
 		/* create a URB, and a buffer for it */
 		urb = usb_alloc_urb(0, GFP_KERNEL);
 		if (!urb) {
+			netdev_err(netdev, "No memory left for URBs\n");
 			err = -ENOMEM;
 			break;
 		}
@@ -951,8 +954,8 @@ static int usb_8dev_probe(struct usb_interface *intf,
 	for (i = 0; i < MAX_TX_URBS; i++)
 		priv->tx_contexts[i].echo_index = MAX_TX_URBS;
 
-	priv->cmd_msg_buffer = devm_kzalloc(&intf->dev, sizeof(struct usb_8dev_cmd_msg),
-					    GFP_KERNEL);
+	priv->cmd_msg_buffer = kzalloc(sizeof(struct usb_8dev_cmd_msg),
+				      GFP_KERNEL);
 	if (!priv->cmd_msg_buffer)
 		goto cleanup_candev;
 
@@ -966,7 +969,7 @@ static int usb_8dev_probe(struct usb_interface *intf,
 	if (err) {
 		netdev_err(netdev,
 			"couldn't register CAN device: %d\n", err);
-		goto cleanup_candev;
+		goto cleanup_cmd_msg_buffer;
 	}
 
 	err = usb_8dev_cmd_version(priv, &version);
@@ -986,6 +989,9 @@ static int usb_8dev_probe(struct usb_interface *intf,
 
 cleanup_unregister_candev:
 	unregister_netdev(priv->netdev);
+
+cleanup_cmd_msg_buffer:
+	kfree(priv->cmd_msg_buffer);
 
 cleanup_candev:
 	free_candev(netdev);

@@ -2,7 +2,6 @@
 #define _LINUX_IRQDESC_H
 
 #include <linux/rcupdate.h>
-#include <linux/kobject.h>
 
 /*
  * Core internal functions to deal with irq descriptors
@@ -44,7 +43,6 @@ struct pt_regs;
  * @force_resume_depth:	number of irqactions on a irq descriptor with
  *			IRQF_FORCE_RESUME set
  * @rcu:		rcu head for delayed free
- * @kobj:		kobject used to represent this struct in sysfs
  * @dir:		/proc/irq/ procfs entry
  * @name:		flow handler name for /proc/interrupts output
  */
@@ -66,9 +64,9 @@ struct irq_desc {
 	unsigned int		irqs_unhandled;
 	atomic_t		threads_handled;
 	int			threads_handled_last;
+	u64			random_ip;
 	raw_spinlock_t		lock;
 	struct cpumask		*percpu_enabled;
-	const struct cpumask	*percpu_affinity;
 #ifdef CONFIG_SMP
 	const struct cpumask	*affinity_hint;
 	struct irq_affinity_notify *affinity_notify;
@@ -90,7 +88,6 @@ struct irq_desc {
 #endif
 #ifdef CONFIG_SPARSE_IRQ
 	struct rcu_head		rcu;
-	struct kobject		kobj;
 #endif
 	int			parent_irq;
 	struct module		*owner;

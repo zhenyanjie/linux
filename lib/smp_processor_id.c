@@ -22,7 +22,7 @@ notrace static unsigned int check_preemption_disabled(const char *what1,
 	 * Kernel threads bound to a single CPU can safely use
 	 * smp_processor_id():
 	 */
-	if (cpumask_equal(&current->cpus_allowed, cpumask_of(this_cpu)))
+	if (cpumask_equal(tsk_cpus_allowed(current), cpumask_of(this_cpu)))
 		goto out;
 
 	/*
@@ -39,8 +39,9 @@ notrace static unsigned int check_preemption_disabled(const char *what1,
 	if (!printk_ratelimit())
 		goto out_enable;
 
-	printk(KERN_ERR "BUG: using %s%s() in preemptible [%08x] code: %s/%d\n",
-		what1, what2, preempt_count() - 1, current->comm, current->pid);
+	printk(KERN_ERR "BUG: using %s%s() in preemptible [%08x %08x] code: %s/%d\n",
+		what1, what2, preempt_count() - 1, __migrate_disabled(current),
+		current->comm, current->pid);
 
 	print_symbol("caller is %s\n", (long)__builtin_return_address(0));
 	dump_stack();

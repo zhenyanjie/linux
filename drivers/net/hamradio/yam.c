@@ -68,7 +68,7 @@
 #include <linux/seq_file.h>
 #include <net/net_namespace.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/init.h>
 
 #include <linux/yam.h>
@@ -601,7 +601,7 @@ static netdev_tx_t yam_send_packet(struct sk_buff *skb,
 		return ax25_ip_xmit(skb);
 
 	skb_queue_tail(&yp->send_queue, skb);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	return NETDEV_TX_OK;
 }
 

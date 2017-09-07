@@ -65,9 +65,7 @@ static struct clock_event_device timer_clockevent = {
 	.set_next_event		= itimer_next_event,
 	.shift			= 0,
 	.max_delta_ns		= 0xffffffff,
-	.max_delta_ticks	= 0xffffffff,
-	.min_delta_ns		= TIMER_MIN_DELTA,
-	.min_delta_ticks	= TIMER_MIN_DELTA, // microsecond resolution should be enough for anyone, same as 640K RAM
+	.min_delta_ns		= TIMER_MIN_DELTA, //microsecond resolution should be enough for anyone, same as 640K RAM
 	.irq			= 0,
 	.mult			= 1,
 };
@@ -85,7 +83,7 @@ static irqreturn_t um_timer(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static u64 timer_read(struct clocksource *cs)
+static cycle_t timer_read(struct clocksource *cs)
 {
 	return os_nsecs() / TIMER_MULTIPLIER;
 }

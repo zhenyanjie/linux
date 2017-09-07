@@ -29,7 +29,6 @@
 #include <linux/spinlock.h>
 #include <linux/reboot.h>
 #include <linux/pm.h>
-#include <linux/log2.h>
 
 #include "../core.h"
 #include "../pinconf.h"
@@ -102,7 +101,7 @@ static const struct pinctrl_ops msm_pinctrl_ops = {
 	.get_group_name		= msm_get_group_name,
 	.get_group_pins		= msm_get_group_pins,
 	.dt_node_to_map		= pinconf_generic_dt_node_to_map_group,
-	.dt_free_map		= pinctrl_utils_free_map,
+	.dt_free_map		= pinctrl_utils_dt_free_map,
 };
 
 static int msm_get_functions_count(struct pinctrl_dev *pctldev)
@@ -139,11 +138,10 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
 	const struct msm_pingroup *g;
 	unsigned long flags;
-	u32 val, mask;
+	u32 val;
 	int i;
 
 	g = &pctrl->soc->groups[group];
-	mask = GENMASK(g->mux_bit + order_base_2(g->nfuncs) - 1, g->mux_bit);
 
 	for (i = 0; i < g->nfuncs; i++) {
 		if (g->funcs[i] == function)
@@ -156,7 +154,7 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
 
 	val = readl(pctrl->regs + g->ctl_reg);
-	val &= ~mask;
+	val &= ~(0x7 << g->mux_bit);
 	val |= i << g->mux_bit;
 	writel(val, pctrl->regs + g->ctl_reg);
 
@@ -422,20 +420,6 @@ static int msm_gpio_direction_output(struct gpio_chip *chip, unsigned offset, in
 	return 0;
 }
 
-static int msm_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
-{
-	struct msm_pinctrl *pctrl = gpiochip_get_data(chip);
-	const struct msm_pingroup *g;
-	u32 val;
-
-	g = &pctrl->soc->groups[offset];
-
-	val = readl(pctrl->regs + g->ctl_reg);
-
-	/* 0 = output, 1 = input */
-	return val & BIT(g->oe_bit) ? 0 : 1;
-}
-
 static int msm_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
 	const struct msm_pingroup *g;
@@ -524,7 +508,6 @@ static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 static struct gpio_chip msm_gpio_template = {
 	.direction_input  = msm_gpio_direction_input,
 	.direction_output = msm_gpio_direction_output,
-	.get_direction    = msm_gpio_get_direction,
 	.get              = msm_gpio_get,
 	.set              = msm_gpio_set,
 	.request          = gpiochip_generic_request,
@@ -608,6 +591,10 @@ static void msm_gpio_irq_unmask(struct irq_data *d)
 	g = &pctrl->soc->groups[d->hwirq];
 
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
+
+	val = readl(pctrl->regs + g->intr_status_reg);
+	val &= ~BIT(g->intr_status_bit);
+	writel(val, pctrl->regs + g->intr_status_reg);
 
 	val = readl(pctrl->regs + g->intr_cfg_reg);
 	val |= BIT(g->intr_enable_bit);
@@ -911,16 +898,17 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 	msm_pinctrl_desc.name = dev_name(&pdev->dev);
 	msm_pinctrl_desc.pins = pctrl->soc->pins;
 	msm_pinctrl_desc.npins = pctrl->soc->npins;
-	pctrl->pctrl = devm_pinctrl_register(&pdev->dev, &msm_pinctrl_desc,
-					     pctrl);
+	pctrl->pctrl = pinctrl_register(&msm_pinctrl_desc, &pdev->dev, pctrl);
 	if (IS_ERR(pctrl->pctrl)) {
 		dev_err(&pdev->dev, "Couldn't register pinctrl driver\n");
 		return PTR_ERR(pctrl->pctrl);
 	}
 
 	ret = msm_gpio_init(pctrl);
-	if (ret)
+	if (ret) {
+		pinctrl_unregister(pctrl->pctrl);
 		return ret;
+	}
 
 	platform_set_drvdata(pdev, pctrl);
 
@@ -935,6 +923,7 @@ int msm_pinctrl_remove(struct platform_device *pdev)
 	struct msm_pinctrl *pctrl = platform_get_drvdata(pdev);
 
 	gpiochip_remove(&pctrl->chip);
+	pinctrl_unregister(pctrl->pctrl);
 
 	unregister_restart_handler(&pctrl->restart_nb);
 

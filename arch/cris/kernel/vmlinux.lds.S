@@ -43,7 +43,6 @@ SECTIONS
 		HEAD_TEXT
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		*(.fixup)
 		*(.text.__*)
@@ -67,8 +66,6 @@ SECTIONS
 	}
 	__edata = . ;			/* End of data section. */
 	_edata = . ;
-
-	BUG_TABLE
 
 	INIT_TASK_DATA_SECTION(PAGE_SIZE)
 

@@ -599,18 +599,18 @@ static int journal_list_still_alive(struct super_block *s,
  * This does a check to see if the buffer belongs to one of these
  * lost pages before doing the final put_bh.  If page->mapping was
  * null, it tries to free buffers on the page, which should make the
- * final put_page drop the page from the lru.
+ * final page_cache_release drop the page from the lru.
  */
 static void release_buffer_page(struct buffer_head *bh)
 {
 	struct page *page = bh->b_page;
 	if (!page->mapping && trylock_page(page)) {
-		get_page(page);
+		page_cache_get(page);
 		put_bh(bh);
 		if (!page->mapping)
 			try_to_free_buffers(page);
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 	} else {
 		put_bh(bh);
 	}
@@ -652,7 +652,7 @@ static void submit_logged_buffer(struct buffer_head *bh)
 		BUG();
 	if (!buffer_uptodate(bh))
 		BUG();
-	submit_bh(REQ_OP_WRITE, 0, bh);
+	submit_bh(WRITE, bh);
 }
 
 static void submit_ordered_buffer(struct buffer_head *bh)
@@ -662,7 +662,7 @@ static void submit_ordered_buffer(struct buffer_head *bh)
 	clear_buffer_dirty(bh);
 	if (!buffer_uptodate(bh))
 		BUG();
-	submit_bh(REQ_OP_WRITE, 0, bh);
+	submit_bh(WRITE, bh);
 }
 
 #define CHUNK_SIZE 32
@@ -870,7 +870,7 @@ loop_next:
 		 */
 		if (buffer_dirty(bh) && unlikely(bh->b_page->mapping == NULL)) {
 			spin_unlock(lock);
-			ll_rw_block(REQ_OP_WRITE, 0, 1, &bh);
+			ll_rw_block(WRITE, 1, &bh);
 			spin_lock(lock);
 		}
 		put_bh(bh);
@@ -1057,7 +1057,7 @@ static int flush_commit_list(struct super_block *s,
 		if (tbh) {
 			if (buffer_dirty(tbh)) {
 		            depth = reiserfs_write_unlock_nested(s);
-			    ll_rw_block(REQ_OP_WRITE, 0, 1, &tbh);
+			    ll_rw_block(WRITE, 1, &tbh);
 			    reiserfs_write_lock_nested(s, depth);
 			}
 			put_bh(tbh) ;
@@ -1111,8 +1111,7 @@ static int flush_commit_list(struct super_block *s,
 		mark_buffer_dirty(jl->j_commit_bh) ;
 		depth = reiserfs_write_unlock_nested(s);
 		if (reiserfs_barrier_flush(s))
-			__sync_dirty_buffer(jl->j_commit_bh,
-					REQ_PREFLUSH | REQ_FUA);
+			__sync_dirty_buffer(jl->j_commit_bh, WRITE_FLUSH_FUA);
 		else
 			sync_dirty_buffer(jl->j_commit_bh);
 		reiserfs_write_lock_nested(s, depth);
@@ -1270,8 +1269,7 @@ static int _update_journal_header_block(struct super_block *sb,
 		depth = reiserfs_write_unlock_nested(sb);
 
 		if (reiserfs_barrier_flush(sb))
-			__sync_dirty_buffer(journal->j_header_bh,
-					REQ_PREFLUSH | REQ_FUA);
+			__sync_dirty_buffer(journal->j_header_bh, WRITE_FLUSH_FUA);
 		else
 			sync_dirty_buffer(journal->j_header_bh);
 
@@ -1961,7 +1959,7 @@ static int do_journal_release(struct reiserfs_transaction_handle *th,
 	 * will be requeued because superblock is being shutdown and doesn't
 	 * have MS_ACTIVE set.
 	 */
-	reiserfs_cancel_old_flush(sb);
+	cancel_delayed_work_sync(&REISERFS_SB(sb)->old_work);
 	/* wait for all commits to finish */
 	cancel_delayed_work_sync(&SB_JOURNAL(sb)->j_work);
 
@@ -2246,7 +2244,7 @@ abort_replay:
 		}
 	}
 	/* read in the log blocks, memcpy to the corresponding real block */
-	ll_rw_block(REQ_OP_READ, 0, get_desc_trans_len(desc), log_blocks);
+	ll_rw_block(READ, get_desc_trans_len(desc), log_blocks);
 	for (i = 0; i < get_desc_trans_len(desc); i++) {
 
 		wait_on_buffer(log_blocks[i]);
@@ -2271,7 +2269,7 @@ abort_replay:
 	/* flush out the real blocks */
 	for (i = 0; i < get_desc_trans_len(desc); i++) {
 		set_buffer_dirty(real_blocks[i]);
-		write_dirty_buffer(real_blocks[i], 0);
+		write_dirty_buffer(real_blocks[i], WRITE);
 	}
 	for (i = 0; i < get_desc_trans_len(desc); i++) {
 		wait_on_buffer(real_blocks[i]);
@@ -2348,7 +2346,7 @@ static struct buffer_head *reiserfs_breada(struct block_device *dev,
 		} else
 			bhlist[j++] = bh;
 	}
-	ll_rw_block(REQ_OP_READ, 0, j, bhlist);
+	ll_rw_block(READ, j, bhlist);
 	for (i = 1; i < j; i++)
 		brelse(bhlist[i]);
 	bh = bhlist[0];

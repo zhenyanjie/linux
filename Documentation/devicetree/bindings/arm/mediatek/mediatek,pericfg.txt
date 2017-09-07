@@ -6,8 +6,7 @@ outputs to the system.
 
 Required Properties:
 
-- compatible: Should be one of:
-	- "mediatek,mt2701-pericfg", "syscon"
+- compatible: Should be:
 	- "mediatek,mt8135-pericfg", "syscon"
 	- "mediatek,mt8173-pericfg", "syscon"
 - #clock-cells: Must be 1

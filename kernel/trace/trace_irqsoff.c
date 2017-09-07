@@ -13,6 +13,7 @@
 #include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/ftrace.h>
+#include <trace/events/hist.h>
 
 #include "trace.h"
 
@@ -109,12 +110,8 @@ static int func_prolog_dec(struct trace_array *tr,
 		return 0;
 
 	local_save_flags(*flags);
-	/*
-	 * Slight chance to get a false positive on tracing_cpu,
-	 * although I'm starting to think there isn't a chance.
-	 * Leave this for now just to be paranoid.
-	 */
-	if (!irqs_disabled_flags(*flags) && !preempt_count())
+	/* slight chance to get a false positive on tracing_cpu */
+	if (!irqs_disabled_flags(*flags))
 		return 0;
 
 	*data = per_cpu_ptr(tr->trace_buffer.data, cpu);
@@ -174,18 +171,6 @@ static int irqsoff_graph_entry(struct ftrace_graph_ent *trace)
 	unsigned long flags;
 	int ret;
 	int pc;
-
-	if (ftrace_graph_ignore_func(trace))
-		return 0;
-	/*
-	 * Do not trace a function if it's filtered by set_graph_notrace.
-	 * Make the index of ret stack negative to indicate that it should
-	 * ignore further functions.  But it needs its own ret stack entry
-	 * to recover the original index in order to continue tracing after
-	 * returning from the function.
-	 */
-	if (ftrace_graph_notrace_addr(trace->func))
-		return 1;
 
 	if (!func_prolog_dec(tr, &data, &flags))
 		return 0;
@@ -298,7 +283,7 @@ static void irqsoff_print_header(struct seq_file *s)
 /*
  * Should this new latency be reported/recorded?
  */
-static bool report_latency(struct trace_array *tr, u64 delta)
+static bool report_latency(struct trace_array *tr, cycle_t delta)
 {
 	if (tracing_thresh) {
 		if (delta < tracing_thresh)
@@ -316,7 +301,7 @@ check_critical_timing(struct trace_array *tr,
 		      unsigned long parent_ip,
 		      int cpu)
 {
-	u64 T0, T1, delta;
+	cycle_t T0, T1, delta;
 	unsigned long flags;
 	int pc;
 
@@ -436,11 +421,13 @@ void start_critical_timings(void)
 {
 	if (preempt_trace() || irq_trace())
 		start_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
+	trace_preemptirqsoff_hist_rcuidle(TRACE_START, 1);
 }
 EXPORT_SYMBOL_GPL(start_critical_timings);
 
 void stop_critical_timings(void)
 {
+	trace_preemptirqsoff_hist_rcuidle(TRACE_STOP, 0);
 	if (preempt_trace() || irq_trace())
 		stop_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
@@ -450,6 +437,7 @@ EXPORT_SYMBOL_GPL(stop_critical_timings);
 #ifdef CONFIG_PROVE_LOCKING
 void time_hardirqs_on(unsigned long a0, unsigned long a1)
 {
+	trace_preemptirqsoff_hist_rcuidle(IRQS_ON, 0);
 	if (!preempt_trace() && irq_trace())
 		stop_critical_timing(a0, a1);
 }
@@ -458,6 +446,7 @@ void time_hardirqs_off(unsigned long a0, unsigned long a1)
 {
 	if (!preempt_trace() && irq_trace())
 		start_critical_timing(a0, a1);
+	trace_preemptirqsoff_hist_rcuidle(IRQS_OFF, 1);
 }
 
 #else /* !CONFIG_PROVE_LOCKING */
@@ -483,6 +472,7 @@ inline void print_irqtrace_events(struct task_struct *curr)
  */
 void trace_hardirqs_on(void)
 {
+	trace_preemptirqsoff_hist(IRQS_ON, 0);
 	if (!preempt_trace() && irq_trace())
 		stop_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
@@ -492,11 +482,13 @@ void trace_hardirqs_off(void)
 {
 	if (!preempt_trace() && irq_trace())
 		start_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
+	trace_preemptirqsoff_hist(IRQS_OFF, 1);
 }
 EXPORT_SYMBOL(trace_hardirqs_off);
 
 __visible void trace_hardirqs_on_caller(unsigned long caller_addr)
 {
+	trace_preemptirqsoff_hist(IRQS_ON, 0);
 	if (!preempt_trace() && irq_trace())
 		stop_critical_timing(CALLER_ADDR0, caller_addr);
 }
@@ -506,6 +498,7 @@ __visible void trace_hardirqs_off_caller(unsigned long caller_addr)
 {
 	if (!preempt_trace() && irq_trace())
 		start_critical_timing(CALLER_ADDR0, caller_addr);
+	trace_preemptirqsoff_hist(IRQS_OFF, 1);
 }
 EXPORT_SYMBOL(trace_hardirqs_off_caller);
 
@@ -515,12 +508,14 @@ EXPORT_SYMBOL(trace_hardirqs_off_caller);
 #ifdef CONFIG_PREEMPT_TRACER
 void trace_preempt_on(unsigned long a0, unsigned long a1)
 {
+	trace_preemptirqsoff_hist(PREEMPT_ON, 0);
 	if (preempt_trace() && !irq_trace())
 		stop_critical_timing(a0, a1);
 }
 
 void trace_preempt_off(unsigned long a0, unsigned long a1)
 {
+	trace_preemptirqsoff_hist(PREEMPT_ON, 1);
 	if (preempt_trace() && !irq_trace())
 		start_critical_timing(a0, a1);
 }
@@ -638,6 +633,7 @@ static int __irqsoff_tracer_init(struct trace_array *tr)
 	irqsoff_trace = tr;
 	/* make sure that the tracer is visible */
 	smp_wmb();
+	tracing_reset_online_cpus(&tr->trace_buffer);
 
 	ftrace_init_array_ops(tr, irqsoff_tracer_call);
 

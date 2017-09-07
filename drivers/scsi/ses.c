@@ -548,6 +548,7 @@ static void ses_enclosure_data_process(struct enclosure_device *edev,
 					ecomp = &edev->component[components++];
 
 				if (!IS_ERR(ecomp)) {
+					ses_get_power_status(edev, ecomp);
 					if (addl_desc_ptr)
 						ses_process_descriptor(
 							ecomp,
@@ -586,7 +587,7 @@ static void ses_match_to_enclosure(struct enclosure_device *edev,
 
 	ses_enclosure_data_process(edev, to_scsi_device(edev->edev.parent), 0);
 
-	if (scsi_is_sas_rphy(sdev->sdev_target->dev.parent))
+	if (is_sas_attached(sdev))
 		efd.addr = sas_get_address(sdev);
 
 	if (efd.addr) {
@@ -777,8 +778,6 @@ static void ses_intf_remove_enclosure(struct scsi_device *sdev)
 	if (!edev)
 		return;
 
-	enclosure_unregister(edev);
-
 	ses_dev = edev->scratch;
 	edev->scratch = NULL;
 
@@ -790,6 +789,7 @@ static void ses_intf_remove_enclosure(struct scsi_device *sdev)
 	kfree(edev->component[0].scratch);
 
 	put_device(&edev->edev);
+	enclosure_unregister(edev);
 }
 
 static void ses_intf_remove(struct device *cdev,

@@ -2,8 +2,7 @@
  * MXC GPIO support. (c) 2008 Daniel Mack <daniel@caiaq.de>
  * Copyright 2008 Juergen Beisert, kernel@pengutronix.de
  *
- * Based on code from Freescale Semiconductor,
- * Authors: Daniel Mack, Juergen Beisert.
+ * Based on code from Freescale,
  * Copyright (C) 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -34,6 +33,7 @@
 #include <linux/gpio.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/module.h>
 #include <linux/bug.h>
 
 enum mxc_gpio_hwtype {
@@ -458,30 +458,25 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 	if (err)
 		goto out_bgio;
 
-	if (of_property_read_bool(np, "gpio-ranges")) {
-		port->gc.request = gpiochip_generic_request;
-		port->gc.free = gpiochip_generic_free;
-	}
-
 	port->gc.to_irq = mxc_gpio_to_irq;
 	port->gc.base = (pdev->id < 0) ? of_alias_get_id(np, "gpio") * 32 :
 					     pdev->id * 32;
 
-	err = devm_gpiochip_add_data(&pdev->dev, &port->gc, port);
+	err = gpiochip_add_data(&port->gc, port);
 	if (err)
 		goto out_bgio;
 
-	irq_base = devm_irq_alloc_descs(&pdev->dev, -1, 0, 32, numa_node_id());
+	irq_base = irq_alloc_descs(-1, 0, 32, numa_node_id());
 	if (irq_base < 0) {
 		err = irq_base;
-		goto out_bgio;
+		goto out_gpiochip_remove;
 	}
 
 	port->domain = irq_domain_add_legacy(np, 32, irq_base, 0,
 					     &irq_domain_simple_ops, NULL);
 	if (!port->domain) {
 		err = -ENODEV;
-		goto out_bgio;
+		goto out_irqdesc_free;
 	}
 
 	/* gpio-mxc can be a generic irq chip */
@@ -495,6 +490,10 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 
 out_irqdomain_remove:
 	irq_domain_remove(port->domain);
+out_irqdesc_free:
+	irq_free_descs(irq_base, 32);
+out_gpiochip_remove:
+	gpiochip_remove(&port->gc);
 out_bgio:
 	dev_info(&pdev->dev, "%s failed with errno %d\n", __func__, err);
 	return err;
@@ -513,4 +512,10 @@ static int __init gpio_mxc_init(void)
 {
 	return platform_driver_register(&mxc_gpio_driver);
 }
-subsys_initcall(gpio_mxc_init);
+postcore_initcall(gpio_mxc_init);
+
+MODULE_AUTHOR("Freescale Semiconductor, "
+	      "Daniel Mack <danielncaiaq.de>, "
+	      "Juergen Beisert <kernel@pengutronix.de>");
+MODULE_DESCRIPTION("Freescale MXC GPIO");
+MODULE_LICENSE("GPL");

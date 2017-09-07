@@ -178,7 +178,7 @@ const u32 qlcnic_83xx_reg_tbl[] = {
 	0x3540,		/* Device state, DRV_REG1 */
 	0x3544,		/* Driver state, DRV_REG2 */
 	0x3548,		/* Driver scratch, DRV_REG3 */
-	0x354C,		/* Device partition info, DRV_REG4 */
+	0x354C,		/* Device partiton info, DRV_REG4 */
 	0x3524,		/* Driver IDC ver, DRV_REG5 */
 	0x3550,		/* FW_VER_MAJOR */
 	0x3554,		/* FW_VER_MINOR */
@@ -491,7 +491,7 @@ irqreturn_t qlcnic_83xx_clear_legacy_intr(struct qlcnic_adapter *adapter)
 
 static inline void qlcnic_83xx_notify_mbx_response(struct qlcnic_mailbox *mbx)
 {
-	mbx->rsp_status = QLC_83XX_MBX_RESPONSE_ARRIVED;
+	atomic_set(&mbx->rsp_status, QLC_83XX_MBX_RESPONSE_ARRIVED);
 	complete(&mbx->completion);
 }
 
@@ -510,7 +510,7 @@ static void qlcnic_83xx_poll_process_aen(struct qlcnic_adapter *adapter)
 	if (event &  QLCNIC_MBX_ASYNC_EVENT) {
 		__qlcnic_83xx_process_aen(adapter);
 	} else {
-		if (mbx->rsp_status != rsp_status)
+		if (atomic_read(&mbx->rsp_status) != rsp_status)
 			qlcnic_83xx_notify_mbx_response(mbx);
 	}
 out:
@@ -1023,7 +1023,7 @@ static void qlcnic_83xx_process_aen(struct qlcnic_adapter *adapter)
 		if (event &  QLCNIC_MBX_ASYNC_EVENT) {
 			__qlcnic_83xx_process_aen(adapter);
 		} else {
-			if (mbx->rsp_status != rsp_status)
+			if (atomic_read(&mbx->rsp_status) != rsp_status)
 				qlcnic_83xx_notify_mbx_response(mbx);
 		}
 	}
@@ -2159,6 +2159,7 @@ int qlcnic_83xx_get_mac_address(struct qlcnic_adapter *adapter, u8 *mac,
 	struct qlcnic_cmd_args cmd;
 	u32 mac_low, mac_high;
 
+	function = 0;
 	err = qlcnic_alloc_mbx_args(&cmd, adapter, QLCNIC_CMD_MAC_ADDRESS);
 	if (err)
 		return err;
@@ -2337,9 +2338,9 @@ static void qlcnic_83xx_handle_link_aen(struct qlcnic_adapter *adapter,
 
 static irqreturn_t qlcnic_83xx_handle_aen(int irq, void *data)
 {
-	u32 mask, resp, event, rsp_status = QLC_83XX_MBX_RESPONSE_ARRIVED;
 	struct qlcnic_adapter *adapter = data;
 	struct qlcnic_mailbox *mbx;
+	u32 mask, resp, event;
 	unsigned long flags;
 
 	mbx = adapter->ahw->mailbox;
@@ -2349,14 +2350,10 @@ static irqreturn_t qlcnic_83xx_handle_aen(int irq, void *data)
 		goto out;
 
 	event = readl(QLCNIC_MBX_FW(adapter->ahw, 0));
-	if (event &  QLCNIC_MBX_ASYNC_EVENT) {
+	if (event &  QLCNIC_MBX_ASYNC_EVENT)
 		__qlcnic_83xx_process_aen(adapter);
-	} else {
-		if (mbx->rsp_status != rsp_status)
-			qlcnic_83xx_notify_mbx_response(mbx);
-		else
-			adapter->stats.mbx_spurious_intr++;
-	}
+	else
+		qlcnic_83xx_notify_mbx_response(mbx);
 
 out:
 	mask = QLCRDX(adapter->ahw, QLCNIC_DEF_INT_MASK);
@@ -3252,13 +3249,12 @@ out:
 	return config;
 }
 
-int qlcnic_83xx_get_link_ksettings(struct qlcnic_adapter *adapter,
-				   struct ethtool_link_ksettings *ecmd)
+int qlcnic_83xx_get_settings(struct qlcnic_adapter *adapter,
+			     struct ethtool_cmd *ecmd)
 {
 	struct qlcnic_hardware_context *ahw = adapter->ahw;
 	u32 config = 0;
 	int status = 0;
-	u32 supported, advertising;
 
 	if (!test_bit(__QLCNIC_MAINTENANCE_MODE, &adapter->state)) {
 		/* Get port configuration info */
@@ -3272,48 +3268,45 @@ int qlcnic_83xx_get_link_ksettings(struct qlcnic_adapter *adapter,
 	ahw->board_type = QLCNIC_BRDTYPE_83XX_10G;
 
 	if (netif_running(adapter->netdev) && ahw->has_link_events) {
-		ecmd->base.speed = ahw->link_speed;
-		ecmd->base.duplex = ahw->link_duplex;
-		ecmd->base.autoneg = ahw->link_autoneg;
+		ethtool_cmd_speed_set(ecmd, ahw->link_speed);
+		ecmd->duplex = ahw->link_duplex;
+		ecmd->autoneg = ahw->link_autoneg;
 	} else {
-		ecmd->base.speed = SPEED_UNKNOWN;
-		ecmd->base.duplex = DUPLEX_UNKNOWN;
-		ecmd->base.autoneg = AUTONEG_DISABLE;
+		ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
+		ecmd->duplex = DUPLEX_UNKNOWN;
+		ecmd->autoneg = AUTONEG_DISABLE;
 	}
 
-	supported = (SUPPORTED_10baseT_Full |
+	ecmd->supported = (SUPPORTED_10baseT_Full |
 			   SUPPORTED_100baseT_Full |
 			   SUPPORTED_1000baseT_Full |
 			   SUPPORTED_10000baseT_Full |
 			   SUPPORTED_Autoneg);
 
-	ethtool_convert_link_mode_to_legacy_u32(&advertising,
-						ecmd->link_modes.advertising);
-
-	if (ecmd->base.autoneg == AUTONEG_ENABLE) {
+	if (ecmd->autoneg == AUTONEG_ENABLE) {
 		if (ahw->port_config & QLC_83XX_10_CAPABLE)
-			advertising |= SUPPORTED_10baseT_Full;
+			ecmd->advertising |= SUPPORTED_10baseT_Full;
 		if (ahw->port_config & QLC_83XX_100_CAPABLE)
-			advertising |= SUPPORTED_100baseT_Full;
+			ecmd->advertising |= SUPPORTED_100baseT_Full;
 		if (ahw->port_config & QLC_83XX_1G_CAPABLE)
-			advertising |= SUPPORTED_1000baseT_Full;
+			ecmd->advertising |= SUPPORTED_1000baseT_Full;
 		if (ahw->port_config & QLC_83XX_10G_CAPABLE)
-			advertising |= SUPPORTED_10000baseT_Full;
+			ecmd->advertising |= SUPPORTED_10000baseT_Full;
 		if (ahw->port_config & QLC_83XX_AUTONEG_ENABLE)
-			advertising |= ADVERTISED_Autoneg;
+			ecmd->advertising |= ADVERTISED_Autoneg;
 	} else {
 		switch (ahw->link_speed) {
 		case SPEED_10:
-			advertising = SUPPORTED_10baseT_Full;
+			ecmd->advertising = SUPPORTED_10baseT_Full;
 			break;
 		case SPEED_100:
-			advertising = SUPPORTED_100baseT_Full;
+			ecmd->advertising = SUPPORTED_100baseT_Full;
 			break;
 		case SPEED_1000:
-			advertising = SUPPORTED_1000baseT_Full;
+			ecmd->advertising = SUPPORTED_1000baseT_Full;
 			break;
 		case SPEED_10000:
-			advertising = SUPPORTED_10000baseT_Full;
+			ecmd->advertising = SUPPORTED_10000baseT_Full;
 			break;
 		default:
 			break;
@@ -3323,58 +3316,56 @@ int qlcnic_83xx_get_link_ksettings(struct qlcnic_adapter *adapter,
 
 	switch (ahw->supported_type) {
 	case PORT_FIBRE:
-		supported |= SUPPORTED_FIBRE;
-		advertising |= ADVERTISED_FIBRE;
-		ecmd->base.port = PORT_FIBRE;
+		ecmd->supported |= SUPPORTED_FIBRE;
+		ecmd->advertising |= ADVERTISED_FIBRE;
+		ecmd->port = PORT_FIBRE;
+		ecmd->transceiver = XCVR_EXTERNAL;
 		break;
 	case PORT_TP:
-		supported |= SUPPORTED_TP;
-		advertising |= ADVERTISED_TP;
-		ecmd->base.port = PORT_TP;
+		ecmd->supported |= SUPPORTED_TP;
+		ecmd->advertising |= ADVERTISED_TP;
+		ecmd->port = PORT_TP;
+		ecmd->transceiver = XCVR_INTERNAL;
 		break;
 	case PORT_DA:
-		supported |= SUPPORTED_FIBRE;
-		advertising |= ADVERTISED_FIBRE;
-		ecmd->base.port = PORT_DA;
+		ecmd->supported |= SUPPORTED_FIBRE;
+		ecmd->advertising |= ADVERTISED_FIBRE;
+		ecmd->port = PORT_DA;
+		ecmd->transceiver = XCVR_EXTERNAL;
 		break;
 	default:
-		supported |= SUPPORTED_FIBRE;
-		advertising |= ADVERTISED_FIBRE;
-		ecmd->base.port = PORT_OTHER;
+		ecmd->supported |= SUPPORTED_FIBRE;
+		ecmd->advertising |= ADVERTISED_FIBRE;
+		ecmd->port = PORT_OTHER;
+		ecmd->transceiver = XCVR_EXTERNAL;
 		break;
 	}
-	ecmd->base.phy_address = ahw->physical_port;
-
-	ethtool_convert_legacy_u32_to_link_mode(ecmd->link_modes.supported,
-						supported);
-	ethtool_convert_legacy_u32_to_link_mode(ecmd->link_modes.advertising,
-						advertising);
-
+	ecmd->phy_address = ahw->physical_port;
 	return status;
 }
 
-int qlcnic_83xx_set_link_ksettings(struct qlcnic_adapter *adapter,
-				   const struct ethtool_link_ksettings *ecmd)
+int qlcnic_83xx_set_settings(struct qlcnic_adapter *adapter,
+			     struct ethtool_cmd *ecmd)
 {
 	struct qlcnic_hardware_context *ahw = adapter->ahw;
 	u32 config = adapter->ahw->port_config;
 	int status = 0;
 
 	/* 83xx devices do not support Half duplex */
-	if (ecmd->base.duplex == DUPLEX_HALF) {
-		netdev_info(adapter->netdev,
-			    "Half duplex mode not supported\n");
-		return -EINVAL;
+	if (ecmd->duplex == DUPLEX_HALF) {
+			netdev_info(adapter->netdev,
+				    "Half duplex mode not supported\n");
+			return -EINVAL;
 	}
 
-	if (ecmd->base.autoneg) {
+	if (ecmd->autoneg) {
 		ahw->port_config |= QLC_83XX_AUTONEG_ENABLE;
 		ahw->port_config |= (QLC_83XX_100_CAPABLE |
 				     QLC_83XX_1G_CAPABLE |
 				     QLC_83XX_10G_CAPABLE);
 	} else { /* force speed */
 		ahw->port_config &= ~QLC_83XX_AUTONEG_ENABLE;
-		switch (ecmd->base.speed) {
+		switch (ethtool_cmd_speed(ecmd)) {
 		case SPEED_10:
 			ahw->port_config &= ~(QLC_83XX_100_CAPABLE |
 					      QLC_83XX_1G_CAPABLE |
@@ -4059,10 +4050,10 @@ static void qlcnic_83xx_mailbox_worker(struct work_struct *work)
 	struct qlcnic_adapter *adapter = mbx->adapter;
 	const struct qlcnic_mbx_ops *mbx_ops = mbx->ops;
 	struct device *dev = &adapter->pdev->dev;
+	atomic_t *rsp_status = &mbx->rsp_status;
 	struct list_head *head = &mbx->cmd_q;
 	struct qlcnic_hardware_context *ahw;
 	struct qlcnic_cmd_args *cmd = NULL;
-	unsigned long flags;
 
 	ahw = adapter->ahw;
 
@@ -4072,9 +4063,7 @@ static void qlcnic_83xx_mailbox_worker(struct work_struct *work)
 			return;
 		}
 
-		spin_lock_irqsave(&mbx->aen_lock, flags);
-		mbx->rsp_status = QLC_83XX_MBX_RESPONSE_WAIT;
-		spin_unlock_irqrestore(&mbx->aen_lock, flags);
+		atomic_set(rsp_status, QLC_83XX_MBX_RESPONSE_WAIT);
 
 		spin_lock(&mbx->queue_lock);
 

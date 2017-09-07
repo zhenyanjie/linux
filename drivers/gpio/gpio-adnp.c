@@ -265,7 +265,7 @@ static int adnp_gpio_setup(struct adnp *adnp, unsigned int num_gpios)
 	chip->of_node = chip->parent->of_node;
 	chip->owner = THIS_MODULE;
 
-	err = devm_gpiochip_add_data(&adnp->client->dev, chip, adnp);
+	err = gpiochip_add_data(chip, adnp);
 	if (err)
 		return err;
 
@@ -468,18 +468,16 @@ static int adnp_irq_setup(struct adnp *adnp)
 		return err;
 	}
 
-	err = gpiochip_irqchip_add_nested(chip,
-					  &adnp_irq_chip,
-					  0,
-					  handle_simple_irq,
-					  IRQ_TYPE_NONE);
+	err = gpiochip_irqchip_add(chip,
+				   &adnp_irq_chip,
+				   0,
+				   handle_simple_irq,
+				   IRQ_TYPE_NONE);
 	if (err) {
 		dev_err(chip->parent,
 			"could not connect irqchip to gpiochip\n");
 		return err;
 	}
-
-	gpiochip_set_nested_irqchip(chip, &adnp_irq_chip, adnp->client->irq);
 
 	return 0;
 }
@@ -522,6 +520,14 @@ static int adnp_i2c_probe(struct i2c_client *client,
 	return 0;
 }
 
+static int adnp_i2c_remove(struct i2c_client *client)
+{
+	struct adnp *adnp = i2c_get_clientdata(client);
+
+	gpiochip_remove(&adnp->gpio);
+	return 0;
+}
+
 static const struct i2c_device_id adnp_i2c_id[] = {
 	{ "gpio-adnp" },
 	{ },
@@ -540,6 +546,7 @@ static struct i2c_driver adnp_i2c_driver = {
 		.of_match_table = adnp_of_match,
 	},
 	.probe = adnp_i2c_probe,
+	.remove = adnp_i2c_remove,
 	.id_table = adnp_i2c_id,
 };
 module_i2c_driver(adnp_i2c_driver);

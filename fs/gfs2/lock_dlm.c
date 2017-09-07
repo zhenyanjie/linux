@@ -15,7 +15,6 @@
 #include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/gfs2_ondisk.h>
-#include <linux/sched/signal.h>
 
 #include "incore.h"
 #include "glock.h"

@@ -73,9 +73,6 @@
   */
 #define HV_X64_MSR_STAT_PAGES_AVAILABLE		(1 << 8)
 
-/* Crash MSR available */
-#define HV_FEATURE_GUEST_CRASH_MSR_AVAILABLE (1 << 10)
-
 /*
  * Feature identification: EBX indicates which flags were specified at
  * partition creation. The format is the same as the partition creation
@@ -124,7 +121,7 @@
   * Recommend using hypercall for address space switches rather
   * than MOV to CR3 instruction
   */
-#define HV_X64_AS_SWITCH_RECOMMENDED		(1 << 0)
+#define HV_X64_MWAIT_RECOMMENDED		(1 << 0)
 /* Recommend using hypercall for local TLB flushes rather
  * than INVLPG or MOV to CR3 instructions */
 #define HV_X64_LOCAL_TLB_FLUSH_RECOMMENDED	(1 << 1)
@@ -146,16 +143,6 @@
  * timely delivery of external interrupts
  */
 #define HV_X64_RELAXED_TIMING_RECOMMENDED	(1 << 5)
-
-/*
- * Virtual APIC support
- */
-#define HV_X64_DEPRECATING_AEOI_RECOMMENDED	(1 << 9)
-
-/*
- * Crash notification flag.
- */
-#define HV_CRASH_CTL_CRASH_NOTIFY (1ULL << 63)
 
 /* MSR used to identify the guest OS. */
 #define HV_X64_MSR_GUEST_OS_ID			0x40000000
@@ -239,9 +226,7 @@
 		(~((1ull << HV_X64_MSR_HYPERCALL_PAGE_ADDRESS_SHIFT) - 1))
 
 /* Declare the various hypercall operations. */
-#define HVCALL_NOTIFY_LONG_SPIN_WAIT		0x0008
-#define HVCALL_POST_MESSAGE			0x005c
-#define HVCALL_SIGNAL_EVENT			0x005d
+#define HV_X64_HV_NOTIFY_LONG_SPIN_WAIT		0x0008
 
 #define HV_X64_MSR_APIC_ASSIST_PAGE_ENABLE		0x00000001
 #define HV_X64_MSR_APIC_ASSIST_PAGE_ADDRESS_SHIFT	12

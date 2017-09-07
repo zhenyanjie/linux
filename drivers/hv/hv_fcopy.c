@@ -31,16 +31,6 @@
 #define WIN8_SRV_MINOR		1
 #define WIN8_SRV_VERSION	(WIN8_SRV_MAJOR << 16 | WIN8_SRV_MINOR)
 
-#define FCOPY_VER_COUNT 1
-static const int fcopy_versions[] = {
-	WIN8_SRV_VERSION
-};
-
-#define FW_VER_COUNT 1
-static const int fw_versions[] = {
-	UTIL_FW_VERSION
-};
-
 /*
  * Global state maintained for transaction that is being processed.
  * For a class of integration services, including the "file copy service",
@@ -93,12 +83,6 @@ static void fcopy_timeout_func(struct work_struct *dummy)
 	hv_poll_channel(fcopy_transaction.recv_channel, fcopy_poll_wrapper);
 }
 
-static void fcopy_register_done(void)
-{
-	pr_debug("FCP: userspace daemon registered\n");
-	hv_poll_channel(fcopy_transaction.recv_channel, fcopy_poll_wrapper);
-}
-
 static int fcopy_handle_handshake(u32 version)
 {
 	u32 our_ver = FCOPY_CURRENT_VERSION;
@@ -110,8 +94,7 @@ static int fcopy_handle_handshake(u32 version)
 		break;
 	case FCOPY_VERSION_1:
 		/* Daemon expects us to reply with our own version */
-		if (hvutil_transport_send(hvt, &our_ver, sizeof(our_ver),
-		    fcopy_register_done))
+		if (hvutil_transport_send(hvt, &our_ver, sizeof(our_ver)))
 			return -EFAULT;
 		dm_reg_value = version;
 		break;
@@ -124,7 +107,8 @@ static int fcopy_handle_handshake(u32 version)
 		 */
 		return -EINVAL;
 	}
-	pr_debug("FCP: userspace daemon ver. %d connected\n", version);
+	pr_debug("FCP: userspace daemon ver. %d registered\n", version);
+	hv_poll_channel(fcopy_transaction.recv_channel, fcopy_poll_wrapper);
 	return 0;
 }
 
@@ -177,7 +161,7 @@ static void fcopy_send_data(struct work_struct *dummy)
 	}
 
 	fcopy_transaction.state = HVUTIL_USERSPACE_REQ;
-	rc = hvutil_transport_send(hvt, out_src, out_len, NULL);
+	rc = hvutil_transport_send(hvt, out_src, out_len);
 	if (rc) {
 		pr_debug("FCP: failed to communicate to the daemon: %d\n", rc);
 		if (cancel_delayed_work_sync(&fcopy_timeout_work)) {
@@ -186,6 +170,8 @@ static void fcopy_send_data(struct work_struct *dummy)
 		}
 	}
 	kfree(smsg_out);
+
+	return;
 }
 
 /*
@@ -235,6 +221,8 @@ void hv_fcopy_onchannelcallback(void *context)
 	u64 requestid;
 	struct hv_fcopy_hdr *fcopy_msg;
 	struct icmsg_hdr *icmsghdr;
+	struct icmsg_negotiate *negop = NULL;
+	int util_fw_version;
 	int fcopy_srv_version;
 
 	if (fcopy_transaction.state > HVUTIL_READY)
@@ -248,15 +236,10 @@ void hv_fcopy_onchannelcallback(void *context)
 	icmsghdr = (struct icmsg_hdr *)&recv_buffer[
 			sizeof(struct vmbuspipe_hdr)];
 	if (icmsghdr->icmsgtype == ICMSGTYPE_NEGOTIATE) {
-		if (vmbus_prep_negotiate_resp(icmsghdr, recv_buffer,
-				fw_versions, FW_VER_COUNT,
-				fcopy_versions, FCOPY_VER_COUNT,
-				NULL, &fcopy_srv_version)) {
-
-			pr_info("FCopy IC version %d.%d\n",
-				fcopy_srv_version >> 16,
-				fcopy_srv_version & 0xFFFF);
-		}
+		util_fw_version = UTIL_FW_VERSION;
+		fcopy_srv_version = WIN8_SRV_VERSION;
+		vmbus_prep_negotiate_resp(icmsghdr, negop, recv_buffer,
+				util_fw_version, fcopy_srv_version);
 	} else {
 		fcopy_msg = (struct hv_fcopy_hdr *)&recv_buffer[
 				sizeof(struct vmbuspipe_hdr) +
@@ -268,6 +251,7 @@ void hv_fcopy_onchannelcallback(void *context)
 		 */
 
 		fcopy_transaction.recv_len = recvlen;
+		fcopy_transaction.recv_channel = channel;
 		fcopy_transaction.recv_req_id = requestid;
 		fcopy_transaction.fcopy_msg = fcopy_msg;
 
@@ -333,7 +317,6 @@ static void fcopy_on_reset(void)
 int hv_fcopy_init(struct hv_util_service *srv)
 {
 	recv_buffer = srv->recv_buffer;
-	fcopy_transaction.recv_channel = srv->channel;
 
 	/*
 	 * When this driver loads, the user level daemon that

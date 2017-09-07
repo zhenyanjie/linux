@@ -58,8 +58,7 @@ struct mac_device {
 	bool tx_pause_active;
 	bool promisc;
 
-	struct phy_device *(*init_phy)(struct net_device *net_dev,
-				       struct mac_device *mac_dev);
+	int (*init_phy)(struct net_device *net_dev, struct mac_device *mac_dev);
 	int (*init)(struct mac_device *mac_dev);
 	int (*start)(struct mac_device *mac_dev);
 	int (*stop)(struct mac_device *mac_dev);

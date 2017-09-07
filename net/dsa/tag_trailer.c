@@ -11,7 +11,6 @@
 #include <linux/etherdevice.h>
 #include <linux/list.h>
 #include <linux/slab.h>
-#include <net/dsa.h>
 #include "dsa_priv.h"
 
 static struct sk_buff *trailer_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -51,23 +50,28 @@ static struct sk_buff *trailer_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	trailer = skb_put(nskb, 4);
 	trailer[0] = 0x80;
-	trailer[1] = 1 << p->dp->index;
+	trailer[1] = 1 << p->port;
 	trailer[2] = 0x10;
 	trailer[3] = 0x00;
 
 	return nskb;
 }
 
-static struct sk_buff *trailer_rcv(struct sk_buff *skb, struct net_device *dev,
-				   struct packet_type *pt,
-				   struct net_device *orig_dev)
+static int trailer_rcv(struct sk_buff *skb, struct net_device *dev,
+		       struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct dsa_switch_tree *dst = dev->dsa_ptr;
 	struct dsa_switch *ds;
 	u8 *trailer;
 	int source_port;
 
-	ds = dst->cpu_switch;
+	if (unlikely(dst == NULL))
+		goto out_drop;
+	ds = dst->ds[0];
+
+	skb = skb_unshare(skb, GFP_ATOMIC);
+	if (skb == NULL)
+		goto out;
 
 	if (skb_linearize(skb))
 		goto out_drop;
@@ -78,17 +82,27 @@ static struct sk_buff *trailer_rcv(struct sk_buff *skb, struct net_device *dev,
 		goto out_drop;
 
 	source_port = trailer[1] & 7;
-	if (source_port >= ds->num_ports || !ds->ports[source_port].netdev)
+	if (source_port >= DSA_MAX_PORTS || ds->ports[source_port] == NULL)
 		goto out_drop;
 
 	pskb_trim_rcsum(skb, skb->len - 4);
 
-	skb->dev = ds->ports[source_port].netdev;
+	skb->dev = ds->ports[source_port];
+	skb_push(skb, ETH_HLEN);
+	skb->pkt_type = PACKET_HOST;
+	skb->protocol = eth_type_trans(skb, skb->dev);
 
-	return skb;
+	skb->dev->stats.rx_packets++;
+	skb->dev->stats.rx_bytes += skb->len;
+
+	netif_receive_skb(skb);
+
+	return 0;
 
 out_drop:
-	return NULL;
+	kfree_skb(skb);
+out:
+	return 0;
 }
 
 const struct dsa_device_ops trailer_netdev_ops = {

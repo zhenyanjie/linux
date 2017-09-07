@@ -222,7 +222,7 @@ static void b43_led_get_sprominfo(struct b43_wldev *dev,
 	sprom[2] = dev->dev->bus_sprom->gpio2;
 	sprom[3] = dev->dev->bus_sprom->gpio3;
 
-	if ((sprom[0] & sprom[1] & sprom[2] & sprom[3]) == 0xff) {
+	if (sprom[led_index] == 0xFF) {
 		/* There is no LED information in the SPROM
 		 * for this LED. Hardcode it here. */
 		*activelow = false;
@@ -250,11 +250,7 @@ static void b43_led_get_sprominfo(struct b43_wldev *dev,
 			return;
 		}
 	} else {
-		/* keep LED disabled if no mapping is defined */
-		if (sprom[led_index] == 0xff)
-			*behaviour = B43_LED_OFF;
-		else
-			*behaviour = sprom[led_index] & B43_LED_BEHAVIOUR;
+		*behaviour = sprom[led_index] & B43_LED_BEHAVIOUR;
 		*activelow = !!(sprom[led_index] & B43_LED_ACTIVELOW);
 	}
 }

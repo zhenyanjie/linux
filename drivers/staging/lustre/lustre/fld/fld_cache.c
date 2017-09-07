@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -61,7 +65,7 @@ struct fld_cache *fld_cache_init(const char *name,
 {
 	struct fld_cache *cache;
 
-	LASSERT(name);
+	LASSERT(name != NULL);
 	LASSERT(cache_threshold < cache_size);
 
 	cache = kzalloc(sizeof(*cache), GFP_NOFS);
@@ -96,7 +100,7 @@ void fld_cache_fini(struct fld_cache *cache)
 {
 	__u64 pct;
 
-	LASSERT(cache);
+	LASSERT(cache != NULL);
 	fld_cache_flush(cache);
 
 	if (cache->fci_stat.fst_count > 0) {
@@ -143,7 +147,7 @@ restart_fixup:
 		c_range = &f_curr->fce_range;
 		n_range = &f_next->fce_range;
 
-		LASSERT(lu_seq_range_is_sane(c_range));
+		LASSERT(range_is_sane(c_range));
 		if (&f_next->fce_list == head)
 			break;
 
@@ -174,14 +178,12 @@ restart_fixup:
 				if (n_range->lsr_end <= c_range->lsr_end) {
 					*n_range = *c_range;
 					fld_cache_entry_delete(cache, f_curr);
-				} else {
+				} else
 					n_range->lsr_start = c_range->lsr_end;
-				}
 			}
 
 			/* we could have overlap over next
-			 * range too. better restart.
-			 */
+			 * range too. better restart. */
 			goto restart_fixup;
 		}
 
@@ -216,6 +218,8 @@ static int fld_cache_shrink(struct fld_cache *cache)
 	struct list_head *curr;
 	int num = 0;
 
+	LASSERT(cache != NULL);
+
 	if (cache->fci_cache_count < cache->fci_cache_size)
 		return 0;
 
@@ -230,7 +234,7 @@ static int fld_cache_shrink(struct fld_cache *cache)
 	}
 
 	CDEBUG(D_INFO, "%s: FLD cache - Shrunk by %d entries\n",
-	       cache->fci_name, num);
+			cache->fci_name, num);
 
 	return 0;
 }
@@ -291,8 +295,8 @@ static void fld_cache_punch_hole(struct fld_cache *cache,
  * handle range overlap in fld cache.
  */
 static void fld_cache_overlap_handle(struct fld_cache *cache,
-				     struct fld_cache_entry *f_curr,
-				     struct fld_cache_entry *f_new)
+				struct fld_cache_entry *f_curr,
+				struct fld_cache_entry *f_new)
 {
 	const struct lu_seq_range *range = &f_new->fce_range;
 	const u64 new_start  = range->lsr_start;
@@ -300,8 +304,7 @@ static void fld_cache_overlap_handle(struct fld_cache *cache,
 	const u32 mdt = range->lsr_index;
 
 	/* this is overlap case, these case are checking overlapping with
-	 * prev range only. fixup will handle overlapping with next range.
-	 */
+	 * prev range only. fixup will handle overlapping with next range. */
 
 	if (f_curr->fce_range.lsr_index == mdt) {
 		f_curr->fce_range.lsr_start = min(f_curr->fce_range.lsr_start,
@@ -316,8 +319,7 @@ static void fld_cache_overlap_handle(struct fld_cache *cache,
 	} else if (new_start <= f_curr->fce_range.lsr_start &&
 			f_curr->fce_range.lsr_end <= new_end) {
 		/* case 1: new range completely overshadowed existing range.
-		 *	 e.g. whole range migrated. update fld cache entry
-		 */
+		 *	 e.g. whole range migrated. update fld cache entry */
 
 		f_curr->fce_range = *range;
 		kfree(f_new);
@@ -358,7 +360,7 @@ struct fld_cache_entry
 {
 	struct fld_cache_entry *f_new;
 
-	LASSERT(lu_seq_range_is_sane(range));
+	LASSERT(range_is_sane(range));
 
 	f_new = kzalloc(sizeof(*f_new), GFP_NOFS);
 	if (!f_new)
@@ -399,8 +401,8 @@ static int fld_cache_insert_nolock(struct fld_cache *cache,
 	list_for_each_entry_safe(f_curr, n, head, fce_list) {
 		/* add list if next is end of list */
 		if (new_end < f_curr->fce_range.lsr_start ||
-		    (new_end == f_curr->fce_range.lsr_start &&
-		     new_flags != f_curr->fce_range.lsr_flags))
+		   (new_end == f_curr->fce_range.lsr_start &&
+		    new_flags != f_curr->fce_range.lsr_flags))
 			break;
 
 		prev = &f_curr->fce_list;
@@ -412,7 +414,7 @@ static int fld_cache_insert_nolock(struct fld_cache *cache,
 		}
 	}
 
-	if (!prev)
+	if (prev == NULL)
 		prev = head;
 
 	CDEBUG(D_INFO, "insert range "DRANGE"\n", PRANGE(&f_new->fce_range));
@@ -457,8 +459,8 @@ struct fld_cache_entry
 	head = &cache->fci_entries_head;
 	list_for_each_entry(flde, head, fce_list) {
 		if (range->lsr_start == flde->fce_range.lsr_start ||
-		    (range->lsr_end == flde->fce_range.lsr_end &&
-		     range->lsr_flags == flde->fce_range.lsr_flags)) {
+		   (range->lsr_end == flde->fce_range.lsr_end &&
+		    range->lsr_flags == flde->fce_range.lsr_flags)) {
 			got = flde;
 			break;
 		}
@@ -497,13 +499,13 @@ int fld_cache_lookup(struct fld_cache *cache,
 	cache->fci_stat.fst_count++;
 	list_for_each_entry(flde, head, fce_list) {
 		if (flde->fce_range.lsr_start > seq) {
-			if (prev)
+			if (prev != NULL)
 				*range = prev->fce_range;
 			break;
 		}
 
 		prev = flde;
-		if (lu_seq_range_within(&flde->fce_range, seq)) {
+		if (range_within(&flde->fce_range, seq)) {
 			*range = flde->fce_range;
 
 			cache->fci_stat.fst_cache++;

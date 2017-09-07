@@ -27,6 +27,7 @@
 #include <linux/pfn.h>
 #include <linux/poison.h>
 #include <linux/dma-mapping.h>
+#include <linux/module.h>
 #include <linux/memory.h>
 #include <linux/memory_hotplug.h>
 #include <linux/memremap.h>
@@ -36,12 +37,12 @@
 
 #include <asm/processor.h>
 #include <asm/bios_ebda.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/dma.h>
 #include <asm/fixmap.h>
-#include <asm/e820/api.h>
+#include <asm/e820.h>
 #include <asm/apic.h>
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
@@ -52,12 +53,83 @@
 #include <asm/numa.h>
 #include <asm/cacheflush.h>
 #include <asm/init.h>
-#include <asm/uv/uv.h>
 #include <asm/setup.h>
 
 #include "mm_internal.h"
 
-#include "ident_map.c"
+static void ident_pmd_init(unsigned long pmd_flag, pmd_t *pmd_page,
+			   unsigned long addr, unsigned long end)
+{
+	addr &= PMD_MASK;
+	for (; addr < end; addr += PMD_SIZE) {
+		pmd_t *pmd = pmd_page + pmd_index(addr);
+
+		if (!pmd_present(*pmd))
+			set_pmd(pmd, __pmd(addr | pmd_flag));
+	}
+}
+static int ident_pud_init(struct x86_mapping_info *info, pud_t *pud_page,
+			  unsigned long addr, unsigned long end)
+{
+	unsigned long next;
+
+	for (; addr < end; addr = next) {
+		pud_t *pud = pud_page + pud_index(addr);
+		pmd_t *pmd;
+
+		next = (addr & PUD_MASK) + PUD_SIZE;
+		if (next > end)
+			next = end;
+
+		if (pud_present(*pud)) {
+			pmd = pmd_offset(pud, 0);
+			ident_pmd_init(info->pmd_flag, pmd, addr, next);
+			continue;
+		}
+		pmd = (pmd_t *)info->alloc_pgt_page(info->context);
+		if (!pmd)
+			return -ENOMEM;
+		ident_pmd_init(info->pmd_flag, pmd, addr, next);
+		set_pud(pud, __pud(__pa(pmd) | _KERNPG_TABLE));
+	}
+
+	return 0;
+}
+
+int kernel_ident_mapping_init(struct x86_mapping_info *info, pgd_t *pgd_page,
+			      unsigned long addr, unsigned long end)
+{
+	unsigned long next;
+	int result;
+	int off = info->kernel_mapping ? pgd_index(__PAGE_OFFSET) : 0;
+
+	for (; addr < end; addr = next) {
+		pgd_t *pgd = pgd_page + pgd_index(addr) + off;
+		pud_t *pud;
+
+		next = (addr & PGDIR_MASK) + PGDIR_SIZE;
+		if (next > end)
+			next = end;
+
+		if (pgd_present(*pgd)) {
+			pud = pud_offset(pgd, 0);
+			result = ident_pud_init(info, pud, addr, next);
+			if (result)
+				return result;
+			continue;
+		}
+
+		pud = (pud_t *)info->alloc_pgt_page(info->context);
+		if (!pud)
+			return -ENOMEM;
+		result = ident_pud_init(info, pud, addr, next);
+		if (result)
+			return result;
+		set_pgd(pgd, __pgd(__pa(pud) | _KERNPG_TABLE));
+	}
+
+	return 0;
+}
 
 /*
  * NOTE: pagetable_init alloc all the fixmap pagetables contiguous on the
@@ -89,46 +161,46 @@ static int __init nonx32_setup(char *str)
 __setup("noexec32=", nonx32_setup);
 
 /*
- * When memory was added make sure all the processes MM have
+ * When memory was added/removed make sure all the processes MM have
  * suitable PGD entries in the local PGD level page.
  */
-void sync_global_pgds(unsigned long start, unsigned long end)
+void sync_global_pgds(unsigned long start, unsigned long end, int removed)
 {
 	unsigned long address;
 
 	for (address = start; address <= end; address += PGDIR_SIZE) {
-		pgd_t *pgd_ref = pgd_offset_k(address);
-		const p4d_t *p4d_ref;
+		const pgd_t *pgd_ref = pgd_offset_k(address);
 		struct page *page;
 
 		/*
-		 * With folded p4d, pgd_none() is always false, we need to
-		 * handle synchonization on p4d level.
+		 * When it is called after memory hot remove, pgd_none()
+		 * returns true. In this case (removed == 1), we must clear
+		 * the PGD entries in the local PGD level page.
 		 */
-		BUILD_BUG_ON(pgd_none(*pgd_ref));
-		p4d_ref = p4d_offset(pgd_ref, address);
-
-		if (p4d_none(*p4d_ref))
+		if (pgd_none(*pgd_ref) && !removed)
 			continue;
 
 		spin_lock(&pgd_lock);
 		list_for_each_entry(page, &pgd_list, lru) {
 			pgd_t *pgd;
-			p4d_t *p4d;
 			spinlock_t *pgt_lock;
 
 			pgd = (pgd_t *)page_address(page) + pgd_index(address);
-			p4d = p4d_offset(pgd, address);
 			/* the pgt_lock only for Xen */
 			pgt_lock = &pgd_page_get_mm(page)->page_table_lock;
 			spin_lock(pgt_lock);
 
-			if (!p4d_none(*p4d_ref) && !p4d_none(*p4d))
-				BUG_ON(p4d_page_vaddr(*p4d)
-				       != p4d_page_vaddr(*p4d_ref));
+			if (!pgd_none(*pgd_ref) && !pgd_none(*pgd))
+				BUG_ON(pgd_page_vaddr(*pgd)
+				       != pgd_page_vaddr(*pgd_ref));
 
-			if (p4d_none(*p4d))
-				set_p4d(p4d, *p4d_ref);
+			if (removed) {
+				if (pgd_none(*pgd_ref) && !pgd_none(*pgd))
+					pgd_clear(pgd);
+			} else {
+				if (pgd_none(*pgd))
+					set_pgd(pgd, *pgd_ref);
+			}
 
 			spin_unlock(pgt_lock);
 		}
@@ -159,28 +231,16 @@ static __ref void *spp_getpage(void)
 	return ptr;
 }
 
-static p4d_t *fill_p4d(pgd_t *pgd, unsigned long vaddr)
+static pud_t *fill_pud(pgd_t *pgd, unsigned long vaddr)
 {
 	if (pgd_none(*pgd)) {
-		p4d_t *p4d = (p4d_t *)spp_getpage();
-		pgd_populate(&init_mm, pgd, p4d);
-		if (p4d != p4d_offset(pgd, 0))
-			printk(KERN_ERR "PAGETABLE BUG #00! %p <-> %p\n",
-			       p4d, p4d_offset(pgd, 0));
-	}
-	return p4d_offset(pgd, vaddr);
-}
-
-static pud_t *fill_pud(p4d_t *p4d, unsigned long vaddr)
-{
-	if (p4d_none(*p4d)) {
 		pud_t *pud = (pud_t *)spp_getpage();
-		p4d_populate(&init_mm, p4d, pud);
-		if (pud != pud_offset(p4d, 0))
-			printk(KERN_ERR "PAGETABLE BUG #01! %p <-> %p\n",
-			       pud, pud_offset(p4d, 0));
+		pgd_populate(&init_mm, pgd, pud);
+		if (pud != pud_offset(pgd, 0))
+			printk(KERN_ERR "PAGETABLE BUG #00! %p <-> %p\n",
+			       pud, pud_offset(pgd, 0));
 	}
-	return pud_offset(p4d, vaddr);
+	return pud_offset(pgd, vaddr);
 }
 
 static pmd_t *fill_pmd(pud_t *pud, unsigned long vaddr)
@@ -189,7 +249,7 @@ static pmd_t *fill_pmd(pud_t *pud, unsigned long vaddr)
 		pmd_t *pmd = (pmd_t *) spp_getpage();
 		pud_populate(&init_mm, pud, pmd);
 		if (pmd != pmd_offset(pud, 0))
-			printk(KERN_ERR "PAGETABLE BUG #02! %p <-> %p\n",
+			printk(KERN_ERR "PAGETABLE BUG #01! %p <-> %p\n",
 			       pmd, pmd_offset(pud, 0));
 	}
 	return pmd_offset(pud, vaddr);
@@ -201,15 +261,20 @@ static pte_t *fill_pte(pmd_t *pmd, unsigned long vaddr)
 		pte_t *pte = (pte_t *) spp_getpage();
 		pmd_populate_kernel(&init_mm, pmd, pte);
 		if (pte != pte_offset_kernel(pmd, 0))
-			printk(KERN_ERR "PAGETABLE BUG #03!\n");
+			printk(KERN_ERR "PAGETABLE BUG #02!\n");
 	}
 	return pte_offset_kernel(pmd, vaddr);
 }
 
-static void __set_pte_vaddr(pud_t *pud, unsigned long vaddr, pte_t new_pte)
+void set_pte_vaddr_pud(pud_t *pud_page, unsigned long vaddr, pte_t new_pte)
 {
-	pmd_t *pmd = fill_pmd(pud, vaddr);
-	pte_t *pte = fill_pte(pmd, vaddr);
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	pud = pud_page + pud_index(vaddr);
+	pmd = fill_pmd(pud, vaddr);
+	pte = fill_pte(pmd, vaddr);
 
 	set_pte(pte, new_pte);
 
@@ -220,25 +285,10 @@ static void __set_pte_vaddr(pud_t *pud, unsigned long vaddr, pte_t new_pte)
 	__flush_tlb_one(vaddr);
 }
 
-void set_pte_vaddr_p4d(p4d_t *p4d_page, unsigned long vaddr, pte_t new_pte)
-{
-	p4d_t *p4d = p4d_page + p4d_index(vaddr);
-	pud_t *pud = fill_pud(p4d, vaddr);
-
-	__set_pte_vaddr(pud, vaddr, new_pte);
-}
-
-void set_pte_vaddr_pud(pud_t *pud_page, unsigned long vaddr, pte_t new_pte)
-{
-	pud_t *pud = pud_page + pud_index(vaddr);
-
-	__set_pte_vaddr(pud, vaddr, new_pte);
-}
-
 void set_pte_vaddr(unsigned long vaddr, pte_t pteval)
 {
 	pgd_t *pgd;
-	p4d_t *p4d_page;
+	pud_t *pud_page;
 
 	pr_debug("set_pte_vaddr %lx to %lx\n", vaddr, native_pte_val(pteval));
 
@@ -248,20 +298,17 @@ void set_pte_vaddr(unsigned long vaddr, pte_t pteval)
 			"PGD FIXMAP MISSING, it should be setup in head.S!\n");
 		return;
 	}
-
-	p4d_page = p4d_offset(pgd, 0);
-	set_pte_vaddr_p4d(p4d_page, vaddr, pteval);
+	pud_page = (pud_t*)pgd_page_vaddr(*pgd);
+	set_pte_vaddr_pud(pud_page, vaddr, pteval);
 }
 
 pmd_t * __init populate_extra_pmd(unsigned long vaddr)
 {
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 
 	pgd = pgd_offset_k(vaddr);
-	p4d = fill_p4d(pgd, vaddr);
-	pud = fill_pud(p4d, vaddr);
+	pud = fill_pud(pgd, vaddr);
 	return fill_pmd(pud, vaddr);
 }
 
@@ -280,7 +327,6 @@ static void __init __init_extra_mapping(unsigned long phys, unsigned long size,
 					enum page_cache_mode cache)
 {
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pgprot_t prot;
@@ -291,17 +337,11 @@ static void __init __init_extra_mapping(unsigned long phys, unsigned long size,
 	for (; size; phys += PMD_SIZE, size -= PMD_SIZE) {
 		pgd = pgd_offset_k((unsigned long)__va(phys));
 		if (pgd_none(*pgd)) {
-			p4d = (p4d_t *) spp_getpage();
-			set_pgd(pgd, __pgd(__pa(p4d) | _KERNPG_TABLE |
-						_PAGE_USER));
-		}
-		p4d = p4d_offset(pgd, (unsigned long)__va(phys));
-		if (p4d_none(*p4d)) {
 			pud = (pud_t *) spp_getpage();
-			set_p4d(p4d, __p4d(__pa(pud) | _KERNPG_TABLE |
+			set_pgd(pgd, __pgd(__pa(pud) | _KERNPG_TABLE |
 						_PAGE_USER));
 		}
-		pud = pud_offset(p4d, (unsigned long)__va(phys));
+		pud = pud_offset(pgd, (unsigned long)__va(phys));
 		if (pud_none(*pud)) {
 			pmd = (pmd_t *) spp_getpage();
 			set_pud(pud, __pud(__pa(pmd) | _KERNPG_TABLE |
@@ -359,30 +399,22 @@ void __init cleanup_highmap(void)
 	}
 }
 
-/*
- * Create PTE level page table mapping for physical addresses.
- * It returns the last physical address mapped.
- */
 static unsigned long __meminit
-phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
+phys_pte_init(pte_t *pte_page, unsigned long addr, unsigned long end,
 	      pgprot_t prot)
 {
-	unsigned long pages = 0, paddr_next;
-	unsigned long paddr_last = paddr_end;
-	pte_t *pte;
+	unsigned long pages = 0, next;
+	unsigned long last_map_addr = end;
 	int i;
 
-	pte = pte_page + pte_index(paddr);
-	i = pte_index(paddr);
+	pte_t *pte = pte_page + pte_index(addr);
 
-	for (; i < PTRS_PER_PTE; i++, paddr = paddr_next, pte++) {
-		paddr_next = (paddr & PAGE_MASK) + PAGE_SIZE;
-		if (paddr >= paddr_end) {
+	for (i = pte_index(addr); i < PTRS_PER_PTE; i++, addr = next, pte++) {
+		next = (addr & PAGE_MASK) + PAGE_SIZE;
+		if (addr >= end) {
 			if (!after_bootmem &&
-			    !e820__mapped_any(paddr & PAGE_MASK, paddr_next,
-					     E820_TYPE_RAM) &&
-			    !e820__mapped_any(paddr & PAGE_MASK, paddr_next,
-					     E820_TYPE_RESERVED_KERN))
+			    !e820_any_mapped(addr & PAGE_MASK, next, E820_RAM) &&
+			    !e820_any_mapped(addr & PAGE_MASK, next, E820_RESERVED_KERN))
 				set_pte(pte, __pte(0));
 			continue;
 		}
@@ -393,61 +425,54 @@ phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
 		 * pagetable pages as RO. So assume someone who pre-setup
 		 * these mappings are more intelligent.
 		 */
-		if (!pte_none(*pte)) {
+		if (pte_val(*pte)) {
 			if (!after_bootmem)
 				pages++;
 			continue;
 		}
 
 		if (0)
-			pr_info("   pte=%p addr=%lx pte=%016lx\n", pte, paddr,
-				pfn_pte(paddr >> PAGE_SHIFT, PAGE_KERNEL).pte);
+			printk("   pte=%p addr=%lx pte=%016lx\n",
+			       pte, addr, pfn_pte(addr >> PAGE_SHIFT, PAGE_KERNEL).pte);
 		pages++;
-		set_pte(pte, pfn_pte(paddr >> PAGE_SHIFT, prot));
-		paddr_last = (paddr & PAGE_MASK) + PAGE_SIZE;
+		set_pte(pte, pfn_pte(addr >> PAGE_SHIFT, prot));
+		last_map_addr = (addr & PAGE_MASK) + PAGE_SIZE;
 	}
 
 	update_page_count(PG_LEVEL_4K, pages);
 
-	return paddr_last;
+	return last_map_addr;
 }
 
-/*
- * Create PMD level page table mapping for physical addresses. The virtual
- * and physical address have to be aligned at this level.
- * It returns the last physical address mapped.
- */
 static unsigned long __meminit
-phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
+phys_pmd_init(pmd_t *pmd_page, unsigned long address, unsigned long end,
 	      unsigned long page_size_mask, pgprot_t prot)
 {
-	unsigned long pages = 0, paddr_next;
-	unsigned long paddr_last = paddr_end;
+	unsigned long pages = 0, next;
+	unsigned long last_map_addr = end;
 
-	int i = pmd_index(paddr);
+	int i = pmd_index(address);
 
-	for (; i < PTRS_PER_PMD; i++, paddr = paddr_next) {
-		pmd_t *pmd = pmd_page + pmd_index(paddr);
+	for (; i < PTRS_PER_PMD; i++, address = next) {
+		pmd_t *pmd = pmd_page + pmd_index(address);
 		pte_t *pte;
 		pgprot_t new_prot = prot;
 
-		paddr_next = (paddr & PMD_MASK) + PMD_SIZE;
-		if (paddr >= paddr_end) {
+		next = (address & PMD_MASK) + PMD_SIZE;
+		if (address >= end) {
 			if (!after_bootmem &&
-			    !e820__mapped_any(paddr & PMD_MASK, paddr_next,
-					     E820_TYPE_RAM) &&
-			    !e820__mapped_any(paddr & PMD_MASK, paddr_next,
-					     E820_TYPE_RESERVED_KERN))
+			    !e820_any_mapped(address & PMD_MASK, next, E820_RAM) &&
+			    !e820_any_mapped(address & PMD_MASK, next, E820_RESERVED_KERN))
 				set_pmd(pmd, __pmd(0));
 			continue;
 		}
 
-		if (!pmd_none(*pmd)) {
+		if (pmd_val(*pmd)) {
 			if (!pmd_large(*pmd)) {
 				spin_lock(&init_mm.page_table_lock);
 				pte = (pte_t *)pmd_page_vaddr(*pmd);
-				paddr_last = phys_pte_init(pte, paddr,
-							   paddr_end, prot);
+				last_map_addr = phys_pte_init(pte, address,
+								end, prot);
 				spin_unlock(&init_mm.page_table_lock);
 				continue;
 			}
@@ -466,7 +491,7 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
 			if (page_size_mask & (1 << PG_LEVEL_2M)) {
 				if (!after_bootmem)
 					pages++;
-				paddr_last = paddr_next;
+				last_map_addr = next;
 				continue;
 			}
 			new_prot = pte_pgprot(pte_clrhuge(*(pte_t *)pmd));
@@ -476,65 +501,51 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
 			pages++;
 			spin_lock(&init_mm.page_table_lock);
 			set_pte((pte_t *)pmd,
-				pfn_pte((paddr & PMD_MASK) >> PAGE_SHIFT,
+				pfn_pte((address & PMD_MASK) >> PAGE_SHIFT,
 					__pgprot(pgprot_val(prot) | _PAGE_PSE)));
 			spin_unlock(&init_mm.page_table_lock);
-			paddr_last = paddr_next;
+			last_map_addr = next;
 			continue;
 		}
 
 		pte = alloc_low_page();
-		paddr_last = phys_pte_init(pte, paddr, paddr_end, new_prot);
+		last_map_addr = phys_pte_init(pte, address, end, new_prot);
 
 		spin_lock(&init_mm.page_table_lock);
 		pmd_populate_kernel(&init_mm, pmd, pte);
 		spin_unlock(&init_mm.page_table_lock);
 	}
 	update_page_count(PG_LEVEL_2M, pages);
-	return paddr_last;
+	return last_map_addr;
 }
 
-/*
- * Create PUD level page table mapping for physical addresses. The virtual
- * and physical address do not have to be aligned at this level. KASLR can
- * randomize virtual addresses up to this level.
- * It returns the last physical address mapped.
- */
 static unsigned long __meminit
-phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
-	      unsigned long page_size_mask)
+phys_pud_init(pud_t *pud_page, unsigned long addr, unsigned long end,
+			 unsigned long page_size_mask)
 {
-	unsigned long pages = 0, paddr_next;
-	unsigned long paddr_last = paddr_end;
-	unsigned long vaddr = (unsigned long)__va(paddr);
-	int i = pud_index(vaddr);
+	unsigned long pages = 0, next;
+	unsigned long last_map_addr = end;
+	int i = pud_index(addr);
 
-	for (; i < PTRS_PER_PUD; i++, paddr = paddr_next) {
-		pud_t *pud;
+	for (; i < PTRS_PER_PUD; i++, addr = next) {
+		pud_t *pud = pud_page + pud_index(addr);
 		pmd_t *pmd;
 		pgprot_t prot = PAGE_KERNEL;
 
-		vaddr = (unsigned long)__va(paddr);
-		pud = pud_page + pud_index(vaddr);
-		paddr_next = (paddr & PUD_MASK) + PUD_SIZE;
-
-		if (paddr >= paddr_end) {
+		next = (addr & PUD_MASK) + PUD_SIZE;
+		if (addr >= end) {
 			if (!after_bootmem &&
-			    !e820__mapped_any(paddr & PUD_MASK, paddr_next,
-					     E820_TYPE_RAM) &&
-			    !e820__mapped_any(paddr & PUD_MASK, paddr_next,
-					     E820_TYPE_RESERVED_KERN))
+			    !e820_any_mapped(addr & PUD_MASK, next, E820_RAM) &&
+			    !e820_any_mapped(addr & PUD_MASK, next, E820_RESERVED_KERN))
 				set_pud(pud, __pud(0));
 			continue;
 		}
 
-		if (!pud_none(*pud)) {
+		if (pud_val(*pud)) {
 			if (!pud_large(*pud)) {
 				pmd = pmd_offset(pud, 0);
-				paddr_last = phys_pmd_init(pmd, paddr,
-							   paddr_end,
-							   page_size_mask,
-							   prot);
+				last_map_addr = phys_pmd_init(pmd, addr, end,
+							 page_size_mask, prot);
 				__flush_tlb_all();
 				continue;
 			}
@@ -553,7 +564,7 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
 			if (page_size_mask & (1 << PG_LEVEL_1G)) {
 				if (!after_bootmem)
 					pages++;
-				paddr_last = paddr_next;
+				last_map_addr = next;
 				continue;
 			}
 			prot = pte_pgprot(pte_clrhuge(*(pte_t *)pud));
@@ -563,16 +574,16 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
 			pages++;
 			spin_lock(&init_mm.page_table_lock);
 			set_pte((pte_t *)pud,
-				pfn_pte((paddr & PUD_MASK) >> PAGE_SHIFT,
+				pfn_pte((addr & PUD_MASK) >> PAGE_SHIFT,
 					PAGE_KERNEL_LARGE));
 			spin_unlock(&init_mm.page_table_lock);
-			paddr_last = paddr_next;
+			last_map_addr = next;
 			continue;
 		}
 
 		pmd = alloc_low_page();
-		paddr_last = phys_pmd_init(pmd, paddr, paddr_end,
-					   page_size_mask, prot);
+		last_map_addr = phys_pmd_init(pmd, addr, end, page_size_mask,
+					      prot);
 
 		spin_lock(&init_mm.page_table_lock);
 		pud_populate(&init_mm, pud, pmd);
@@ -582,60 +593,51 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
 
 	update_page_count(PG_LEVEL_1G, pages);
 
-	return paddr_last;
+	return last_map_addr;
 }
 
-/*
- * Create page table mapping for the physical memory for specific physical
- * addresses. The virtual and physical addresses have to be aligned on PMD level
- * down. It returns the last physical address mapped.
- */
 unsigned long __meminit
-kernel_physical_mapping_init(unsigned long paddr_start,
-			     unsigned long paddr_end,
+kernel_physical_mapping_init(unsigned long start,
+			     unsigned long end,
 			     unsigned long page_size_mask)
 {
 	bool pgd_changed = false;
-	unsigned long vaddr, vaddr_start, vaddr_end, vaddr_next, paddr_last;
+	unsigned long next, last_map_addr = end;
+	unsigned long addr;
 
-	paddr_last = paddr_end;
-	vaddr = (unsigned long)__va(paddr_start);
-	vaddr_end = (unsigned long)__va(paddr_end);
-	vaddr_start = vaddr;
+	start = (unsigned long)__va(start);
+	end = (unsigned long)__va(end);
+	addr = start;
 
-	for (; vaddr < vaddr_end; vaddr = vaddr_next) {
-		pgd_t *pgd = pgd_offset_k(vaddr);
-		p4d_t *p4d;
+	for (; start < end; start = next) {
+		pgd_t *pgd = pgd_offset_k(start);
 		pud_t *pud;
 
-		vaddr_next = (vaddr & PGDIR_MASK) + PGDIR_SIZE;
+		next = (start & PGDIR_MASK) + PGDIR_SIZE;
 
-		BUILD_BUG_ON(pgd_none(*pgd));
-		p4d = p4d_offset(pgd, vaddr);
-		if (p4d_val(*p4d)) {
-			pud = (pud_t *)p4d_page_vaddr(*p4d);
-			paddr_last = phys_pud_init(pud, __pa(vaddr),
-						   __pa(vaddr_end),
-						   page_size_mask);
+		if (pgd_val(*pgd)) {
+			pud = (pud_t *)pgd_page_vaddr(*pgd);
+			last_map_addr = phys_pud_init(pud, __pa(start),
+						 __pa(end), page_size_mask);
 			continue;
 		}
 
 		pud = alloc_low_page();
-		paddr_last = phys_pud_init(pud, __pa(vaddr), __pa(vaddr_end),
-					   page_size_mask);
+		last_map_addr = phys_pud_init(pud, __pa(start), __pa(end),
+						 page_size_mask);
 
 		spin_lock(&init_mm.page_table_lock);
-		p4d_populate(&init_mm, p4d, pud);
+		pgd_populate(&init_mm, pgd, pud);
 		spin_unlock(&init_mm.page_table_lock);
 		pgd_changed = true;
 	}
 
 	if (pgd_changed)
-		sync_global_pgds(vaddr_start, vaddr_end - 1);
+		sync_global_pgds(addr, end - 1, 0);
 
 	__flush_tlb_all();
 
-	return paddr_last;
+	return last_map_addr;
 }
 
 #ifndef CONFIG_NUMA
@@ -724,7 +726,7 @@ static void __meminit free_pagetable(struct page *page, int order)
 	if (PageReserved(page)) {
 		__ClearPageReserved(page);
 
-		magic = (unsigned long)page->freelist;
+		magic = (unsigned long)page->lru.next;
 		if (magic == SECTION_INFO || magic == MIX_SECTION_INFO) {
 			while (nr_pages--)
 				put_page_bootmem(page++);
@@ -742,7 +744,7 @@ static void __meminit free_pte_table(pte_t *pte_start, pmd_t *pmd)
 
 	for (i = 0; i < PTRS_PER_PTE; i++) {
 		pte = pte_start + i;
-		if (!pte_none(*pte))
+		if (pte_val(*pte))
 			return;
 	}
 
@@ -760,7 +762,7 @@ static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud)
 
 	for (i = 0; i < PTRS_PER_PMD; i++) {
 		pmd = pmd_start + i;
-		if (!pmd_none(*pmd))
+		if (pmd_val(*pmd))
 			return;
 	}
 
@@ -771,22 +773,25 @@ static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud)
 	spin_unlock(&init_mm.page_table_lock);
 }
 
-static void __meminit free_pud_table(pud_t *pud_start, p4d_t *p4d)
+/* Return true if pgd is changed, otherwise return false. */
+static bool __meminit free_pud_table(pud_t *pud_start, pgd_t *pgd)
 {
 	pud_t *pud;
 	int i;
 
 	for (i = 0; i < PTRS_PER_PUD; i++) {
 		pud = pud_start + i;
-		if (!pud_none(*pud))
-			return;
+		if (pud_val(*pud))
+			return false;
 	}
 
-	/* free a pud talbe */
-	free_pagetable(p4d_page(*p4d), 0);
+	/* free a pud table */
+	free_pagetable(pgd_page(*pgd), 0);
 	spin_lock(&init_mm.page_table_lock);
-	p4d_clear(p4d);
+	pgd_clear(pgd);
 	spin_unlock(&init_mm.page_table_lock);
+
+	return true;
 }
 
 static void __meminit
@@ -962,39 +967,13 @@ remove_pud_table(pud_t *pud_start, unsigned long addr, unsigned long end,
 			continue;
 		}
 
-		pmd_base = pmd_offset(pud, 0);
+		pmd_base = (pmd_t *)pud_page_vaddr(*pud);
 		remove_pmd_table(pmd_base, addr, next, direct);
 		free_pmd_table(pmd_base, pud);
 	}
 
 	if (direct)
 		update_page_count(PG_LEVEL_1G, -pages);
-}
-
-static void __meminit
-remove_p4d_table(p4d_t *p4d_start, unsigned long addr, unsigned long end,
-		 bool direct)
-{
-	unsigned long next, pages = 0;
-	pud_t *pud_base;
-	p4d_t *p4d;
-
-	p4d = p4d_start + p4d_index(addr);
-	for (; addr < end; addr = next, p4d++) {
-		next = p4d_addr_end(addr, end);
-
-		if (!p4d_present(*p4d))
-			continue;
-
-		BUILD_BUG_ON(p4d_large(*p4d));
-
-		pud_base = pud_offset(p4d, 0);
-		remove_pud_table(pud_base, addr, next, direct);
-		free_pud_table(pud_base, p4d);
-	}
-
-	if (direct)
-		update_page_count(PG_LEVEL_512G, -pages);
 }
 
 /* start and end are both virtual address. */
@@ -1004,7 +983,8 @@ remove_pagetable(unsigned long start, unsigned long end, bool direct)
 	unsigned long next;
 	unsigned long addr;
 	pgd_t *pgd;
-	p4d_t *p4d;
+	pud_t *pud;
+	bool pgd_changed = false;
 
 	for (addr = start; addr < end; addr = next) {
 		next = pgd_addr_end(addr, end);
@@ -1013,9 +993,14 @@ remove_pagetable(unsigned long start, unsigned long end, bool direct)
 		if (!pgd_present(*pgd))
 			continue;
 
-		p4d = p4d_offset(pgd, 0);
-		remove_p4d_table(p4d, addr, next, direct);
+		pud = (pud_t *)pgd_page_vaddr(*pgd);
+		remove_pud_table(pud, addr, next, direct);
+		if (free_pud_table(pud, pgd))
+			pgd_changed = true;
 	}
+
+	if (pgd_changed)
+		sync_global_pgds(start, end - 1, 1);
 
 	flush_tlb_all();
 }
@@ -1089,6 +1074,10 @@ void __init mem_init(void)
 	mem_init_print_info(NULL);
 }
 
+#ifdef CONFIG_DEBUG_RODATA
+const int rodata_test_data = 0xC3;
+EXPORT_SYMBOL_GPL(rodata_test_data);
+
 int kernel_set_to_readonly;
 
 void set_kernel_text_rw(void)
@@ -1157,6 +1146,8 @@ void mark_rodata_ro(void)
 	all_end = roundup((unsigned long)_brk_end, PMD_SIZE);
 	set_memory_nx(text_end, (all_end - text_end) >> PAGE_SHIFT);
 
+	rodata_test();
+
 #ifdef CONFIG_CPA_DEBUG
 	printk(KERN_INFO "Testing CPA: undo %lx-%lx\n", start, end);
 	set_memory_rw(start, (end-start) >> PAGE_SHIFT);
@@ -1175,11 +1166,12 @@ void mark_rodata_ro(void)
 	debug_checkwx();
 }
 
+#endif
+
 int kern_addr_valid(unsigned long addr)
 {
 	unsigned long above = ((long)addr) >> __VIRTUAL_MASK_SHIFT;
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
@@ -1191,11 +1183,7 @@ int kern_addr_valid(unsigned long addr)
 	if (pgd_none(*pgd))
 		return 0;
 
-	p4d = p4d_offset(pgd, addr);
-	if (p4d_none(*p4d))
-		return 0;
-
-	pud = pud_offset(p4d, addr);
+	pud = pud_offset(pgd, addr);
 	if (pud_none(*pud))
 		return 0;
 
@@ -1218,13 +1206,26 @@ int kern_addr_valid(unsigned long addr)
 
 static unsigned long probe_memory_block_size(void)
 {
-	unsigned long bz = MIN_MEMORY_BLOCK_SIZE;
+	/* start from 2g */
+	unsigned long bz = 1UL<<31;
 
-	/* if system is UV or has 64GB of RAM or more, use large blocks */
-	if (is_uv_system() || ((max_pfn << PAGE_SHIFT) >= (64UL << 30)))
-		bz = 2UL << 30; /* 2GB */
+	if (totalram_pages >= (64ULL << (30 - PAGE_SHIFT))) {
+		pr_info("Using 2GB memory block size for large-memory system\n");
+		return 2UL * 1024 * 1024 * 1024;
+	}
 
-	pr_info("x86/mm: Memory block size: %ldMB\n", bz >> 20);
+	/* less than 64g installed */
+	if ((max_pfn << PAGE_SHIFT) < (16UL << 32))
+		return MIN_MEMORY_BLOCK_SIZE;
+
+	/* get the tail size */
+	while (bz > MIN_MEMORY_BLOCK_SIZE) {
+		if (!((max_pfn << PAGE_SHIFT) & (bz - 1)))
+			break;
+		bz >>= 1;
+	}
+
+	printk(KERN_DEBUG "memory block size : %ldMB\n", bz >> 20);
 
 	return bz;
 }
@@ -1252,7 +1253,6 @@ static int __meminit vmemmap_populate_hugepages(unsigned long start,
 	unsigned long addr;
 	unsigned long next;
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 
@@ -1263,11 +1263,7 @@ static int __meminit vmemmap_populate_hugepages(unsigned long start,
 		if (!pgd)
 			return -ENOMEM;
 
-		p4d = vmemmap_p4d_populate(pgd, addr, node);
-		if (!p4d)
-			return -ENOMEM;
-
-		pud = vmemmap_pud_populate(p4d, addr, node);
+		pud = vmemmap_pud_populate(pgd, addr, node);
 		if (!pud)
 			return -ENOMEM;
 
@@ -1314,7 +1310,7 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
 	struct vmem_altmap *altmap = to_vmem_altmap(start);
 	int err;
 
-	if (boot_cpu_has(X86_FEATURE_PSE))
+	if (cpu_has_pse)
 		err = vmemmap_populate_hugepages(start, end, node, altmap);
 	else if (altmap) {
 		pr_err_once("%s: no cpu support for altmap allocations\n",
@@ -1323,7 +1319,7 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
 	} else
 		err = vmemmap_populate_basepages(start, end, node);
 	if (!err)
-		sync_global_pgds(start, end - 1);
+		sync_global_pgds(start, end - 1, 0);
 	return err;
 }
 
@@ -1335,7 +1331,6 @@ void register_page_bootmem_memmap(unsigned long section_nr,
 	unsigned long end = (unsigned long)(start_page + size);
 	unsigned long next;
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	unsigned int nr_pages;
@@ -1351,21 +1346,14 @@ void register_page_bootmem_memmap(unsigned long section_nr,
 		}
 		get_page_bootmem(section_nr, pgd_page(*pgd), MIX_SECTION_INFO);
 
-		p4d = p4d_offset(pgd, addr);
-		if (p4d_none(*p4d)) {
-			next = (addr + PAGE_SIZE) & PAGE_MASK;
-			continue;
-		}
-		get_page_bootmem(section_nr, p4d_page(*p4d), MIX_SECTION_INFO);
-
-		pud = pud_offset(p4d, addr);
+		pud = pud_offset(pgd, addr);
 		if (pud_none(*pud)) {
 			next = (addr + PAGE_SIZE) & PAGE_MASK;
 			continue;
 		}
 		get_page_bootmem(section_nr, pud_page(*pud), MIX_SECTION_INFO);
 
-		if (!boot_cpu_has(X86_FEATURE_PSE)) {
+		if (!cpu_has_pse) {
 			next = (addr + PAGE_SIZE) & PAGE_MASK;
 			pmd = pmd_offset(pud, addr);
 			if (pmd_none(*pmd))

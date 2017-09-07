@@ -13,7 +13,6 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/compat.h>
-#include <linux/sched/signal.h>
 
 #include <sound/control.h>
 #include <sound/core.h>
@@ -37,11 +36,9 @@
 struct snd_oxfw {
 	struct snd_card *card;
 	struct fw_unit *unit;
+	const struct device_info *device_info;
 	struct mutex mutex;
 	spinlock_t lock;
-
-	bool registered;
-	struct delayed_work dwork;
 
 	bool wrong_dbs;
 	bool has_output;

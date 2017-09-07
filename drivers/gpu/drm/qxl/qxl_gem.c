@@ -111,9 +111,10 @@ void qxl_gem_object_close(struct drm_gem_object *obj,
 {
 }
 
-void qxl_gem_init(struct qxl_device *qdev)
+int qxl_gem_init(struct qxl_device *qdev)
 {
 	INIT_LIST_HEAD(&qdev->gem.objects);
+	return 0;
 }
 
 void qxl_gem_fini(struct qxl_device *qdev)

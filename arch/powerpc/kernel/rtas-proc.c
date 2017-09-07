@@ -24,7 +24,7 @@
 #include <linux/bitops.h>
 #include <linux/rtc.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/processor.h>
 #include <asm/io.h>
 #include <asm/prom.h>
@@ -698,7 +698,7 @@ static void check_location(struct seq_file *m, const char *c)
 /* 
  * Format: 
  * ${LETTER}${NUMBER}[[-/]${LETTER}${NUMBER} [ ... ] ]
- * the '.' may be an abbreviation
+ * the '.' may be an abbrevation
  */
 static void check_location_string(struct seq_file *m, const char *c)
 {

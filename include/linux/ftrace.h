@@ -42,10 +42,8 @@
 /* Main tracing buffer and events set up */
 #ifdef CONFIG_TRACING
 void trace_init(void);
-void early_trace_init(void);
 #else
 static inline void trace_init(void) { }
-static inline void early_trace_init(void) { }
 #endif
 
 struct module;
@@ -146,10 +144,6 @@ struct ftrace_ops_hash {
 	struct ftrace_hash		*filter_hash;
 	struct mutex			regex_lock;
 };
-
-void ftrace_free_init_mem(void);
-#else
-static inline void ftrace_free_init_mem(void) { }
 #endif
 
 /*
@@ -266,7 +260,6 @@ static inline int ftrace_nr_registered_ops(void)
 }
 static inline void clear_ftrace_function(void) { }
 static inline void ftrace_kill(void) { }
-static inline void ftrace_free_init_mem(void) { }
 #endif /* CONFIG_FUNCTION_TRACER */
 
 #ifdef CONFIG_STACK_TRACER
@@ -286,45 +279,15 @@ int
 stack_trace_sysctl(struct ctl_table *table, int write,
 		   void __user *buffer, size_t *lenp,
 		   loff_t *ppos);
-
-/* DO NOT MODIFY THIS VARIABLE DIRECTLY! */
-DECLARE_PER_CPU(int, disable_stack_tracer);
-
-/**
- * stack_tracer_disable - temporarily disable the stack tracer
- *
- * There's a few locations (namely in RCU) where stack tracing
- * cannot be executed. This function is used to disable stack
- * tracing during those critical sections.
- *
- * This function must be called with preemption or interrupts
- * disabled and stack_tracer_enable() must be called shortly after
- * while preemption or interrupts are still disabled.
- */
-static inline void stack_tracer_disable(void)
-{
-	/* Preemption or interupts must be disabled */
-	if (IS_ENABLED(CONFIG_PREEMPT_DEBUG))
-		WARN_ON_ONCE(!preempt_count() || !irqs_disabled());
-	this_cpu_inc(disable_stack_tracer);
-}
-
-/**
- * stack_tracer_enable - re-enable the stack tracer
- *
- * After stack_tracer_disable() is called, stack_tracer_enable()
- * must be called shortly afterward.
- */
-static inline void stack_tracer_enable(void)
-{
-	if (IS_ENABLED(CONFIG_PREEMPT_DEBUG))
-		WARN_ON_ONCE(!preempt_count() || !irqs_disabled());
-	this_cpu_dec(disable_stack_tracer);
-}
-#else
-static inline void stack_tracer_disable(void) { }
-static inline void stack_tracer_enable(void) { }
 #endif
+
+struct ftrace_func_command {
+	struct list_head	list;
+	char			*name;
+	int			(*func)(struct ftrace_hash *hash,
+					char *func, char *cmd,
+					char *params, int enable);
+};
 
 #ifdef CONFIG_DYNAMIC_FTRACE
 
@@ -351,6 +314,30 @@ extern const void *ftrace_expected;
 void ftrace_bug(int err, struct dyn_ftrace *rec);
 
 struct seq_file;
+
+struct ftrace_probe_ops {
+	void			(*func)(unsigned long ip,
+					unsigned long parent_ip,
+					void **data);
+	int			(*init)(struct ftrace_probe_ops *ops,
+					unsigned long ip, void **data);
+	void			(*free)(struct ftrace_probe_ops *ops,
+					unsigned long ip, void **data);
+	int			(*print)(struct seq_file *m,
+					 unsigned long ip,
+					 struct ftrace_probe_ops *ops,
+					 void *data);
+};
+
+extern int
+register_ftrace_function_probe(char *glob, struct ftrace_probe_ops *ops,
+			      void *data);
+extern void
+unregister_ftrace_function_probe(char *glob, struct ftrace_probe_ops *ops,
+				void *data);
+extern void
+unregister_ftrace_function_probe_func(char *glob, struct ftrace_probe_ops *ops);
+extern void unregister_ftrace_function_probe_all(char *glob);
 
 extern int ftrace_text_reserved(const void *start, const void *end);
 
@@ -411,7 +398,9 @@ int ftrace_set_notrace(struct ftrace_ops *ops, unsigned char *buf,
 void ftrace_set_global_filter(unsigned char *buf, int len, int reset);
 void ftrace_set_global_notrace(unsigned char *buf, int len, int reset);
 void ftrace_free_filter(struct ftrace_ops *ops);
-void ftrace_ops_set_global_filter(struct ftrace_ops *ops);
+
+int register_ftrace_command(struct ftrace_func_command *cmd);
+int unregister_ftrace_command(struct ftrace_func_command *cmd);
 
 enum {
 	FTRACE_UPDATE_CALLS		= (1 << 0),
@@ -443,8 +432,8 @@ enum {
 	FTRACE_ITER_FILTER	= (1 << 0),
 	FTRACE_ITER_NOTRACE	= (1 << 1),
 	FTRACE_ITER_PRINTALL	= (1 << 2),
-	FTRACE_ITER_DO_PROBES	= (1 << 3),
-	FTRACE_ITER_PROBE	= (1 << 4),
+	FTRACE_ITER_DO_HASH	= (1 << 3),
+	FTRACE_ITER_HASH	= (1 << 4),
 	FTRACE_ITER_ENABLED	= (1 << 5),
 };
 
@@ -466,7 +455,6 @@ int ftrace_update_record(struct dyn_ftrace *rec, int enable);
 int ftrace_test_record(struct dyn_ftrace *rec, int enable);
 void ftrace_run_stop_machine(int command);
 unsigned long ftrace_location(unsigned long ip);
-unsigned long ftrace_location_range(unsigned long start, unsigned long end);
 unsigned long ftrace_get_addr_new(struct dyn_ftrace *rec);
 unsigned long ftrace_get_addr_curr(struct dyn_ftrace *rec);
 
@@ -628,6 +616,14 @@ static inline void ftrace_enable_daemon(void) { }
 static inline void ftrace_module_init(struct module *mod) { }
 static inline void ftrace_module_enable(struct module *mod) { }
 static inline void ftrace_release_mod(struct module *mod) { }
+static inline __init int register_ftrace_command(struct ftrace_func_command *cmd)
+{
+	return -EINVAL;
+}
+static inline __init int unregister_ftrace_command(char *cmd_name)
+{
+	return -EINVAL;
+}
 static inline int ftrace_text_reserved(const void *start, const void *end)
 {
 	return 0;
@@ -648,7 +644,6 @@ static inline unsigned long ftrace_location(unsigned long ip)
 #define ftrace_set_filter(ops, buf, len, reset) ({ -ENODEV; })
 #define ftrace_set_notrace(ops, buf, len, reset) ({ -ENODEV; })
 #define ftrace_free_filter(ops) do { } while (0)
-#define ftrace_ops_set_global_filter(ops) do { } while (0)
 
 static inline ssize_t ftrace_filter_write(struct file *file, const char __user *ubuf,
 			    size_t cnt, loff_t *ppos) { return -ENODEV; }
@@ -758,27 +753,23 @@ static inline void ftrace_init(void) { }
 
 /*
  * Structure that defines an entry function trace.
- * It's already packed but the attribute "packed" is needed
- * to remove extra padding at the end.
  */
 struct ftrace_graph_ent {
 	unsigned long func; /* Current function */
 	int depth;
-} __packed;
+};
 
 /*
  * Structure that defines a return function trace.
- * It's already packed but the attribute "packed" is needed
- * to remove extra padding at the end.
  */
 struct ftrace_graph_ret {
 	unsigned long func; /* Current function */
-	/* Number of functions that overran the depth limit for current task */
-	unsigned long overrun;
 	unsigned long long calltime;
 	unsigned long long rettime;
+	/* Number of functions that overran the depth limit for current task */
+	unsigned long overrun;
 	int depth;
-} __packed;
+};
 
 /* Type of the callback handlers for tracing function graph*/
 typedef void (*trace_func_graph_ret_t)(struct ftrace_graph_ret *); /* return */
@@ -798,15 +789,8 @@ struct ftrace_ret_stack {
 	unsigned long ret;
 	unsigned long func;
 	unsigned long long calltime;
-#ifdef CONFIG_FUNCTION_PROFILER
 	unsigned long long subtime;
-#endif
-#ifdef HAVE_FUNCTION_GRAPH_FP_TEST
 	unsigned long fp;
-#endif
-#ifdef HAVE_FUNCTION_GRAPH_RET_ADDR_PTR
-	unsigned long *retp;
-#endif
 };
 
 /*
@@ -818,10 +802,7 @@ extern void return_to_handler(void);
 
 extern int
 ftrace_push_return_trace(unsigned long ret, unsigned long func, int *depth,
-			 unsigned long frame_pointer, unsigned long *retp);
-
-unsigned long ftrace_graph_ret_addr(struct task_struct *task, int *idx,
-				    unsigned long ret, unsigned long *retp);
+			 unsigned long frame_pointer);
 
 /*
  * Sometimes we don't want to trace a function with the function
@@ -829,6 +810,16 @@ unsigned long ftrace_graph_ret_addr(struct task_struct *task, int *idx,
  * tracer if the function graph tracer is not configured.
  */
 #define __notrace_funcgraph		notrace
+
+/*
+ * We want to which function is an entrypoint of a hardirq.
+ * That will help us to put a signal on output.
+ */
+#define __irq_entry		 __attribute__((__section__(".irqentry.text")))
+
+/* Limits of hardirq entrypoints */
+extern char __irqentry_text_start[];
+extern char __irqentry_text_end[];
 
 #define FTRACE_NOTRACE_DEPTH 65536
 #define FTRACE_RETFUNC_DEPTH 50
@@ -866,6 +857,7 @@ static inline void unpause_graph_tracing(void)
 #else /* !CONFIG_FUNCTION_GRAPH_TRACER */
 
 #define __notrace_funcgraph
+#define __irq_entry
 #define INIT_FTRACE_GRAPH
 
 static inline void ftrace_graph_init_task(struct task_struct *t) { }
@@ -882,13 +874,6 @@ static inline void unregister_ftrace_graph(void) { }
 static inline int task_curr_ret_stack(struct task_struct *tsk)
 {
 	return -1;
-}
-
-static inline unsigned long
-ftrace_graph_ret_addr(struct task_struct *task, int *idx, unsigned long ret,
-		      unsigned long *retp)
-{
-	return ret;
 }
 
 static inline void pause_graph_tracing(void) { }
@@ -948,10 +933,6 @@ extern int __disable_trace_on_warning;
 #ifdef CONFIG_PREEMPT
 #define INIT_TRACE_RECURSION		.trace_recursion = 0,
 #endif
-
-int tracepoint_printk_sysctl(struct ctl_table *table, int write,
-			     void __user *buffer, size_t *lenp,
-			     loff_t *ppos);
 
 #else /* CONFIG_TRACING */
 static inline void  disable_trace_on_warning(void) { }

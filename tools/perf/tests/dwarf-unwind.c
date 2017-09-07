@@ -1,6 +1,5 @@
 #include <linux/compiler.h>
 #include <linux/types.h>
-#include <inttypes.h>
 #include <unistd.h>
 #include "tests.h"
 #include "debug.h"
@@ -12,7 +11,7 @@
 #include "thread.h"
 #include "callchain.h"
 
-#if defined (__x86_64__) || defined (__i386__) || defined (__powerpc__)
+#if defined (__x86_64__) || defined (__i386__)
 #include "arch-tests.h"
 #endif
 
@@ -21,10 +20,10 @@
 
 static int mmap_handler(struct perf_tool *tool __maybe_unused,
 			union perf_event *event,
-			struct perf_sample *sample,
+			struct perf_sample *sample __maybe_unused,
 			struct machine *machine)
 {
-	return machine__process_mmap2_event(machine, event, sample);
+	return machine__process_mmap2_event(machine, event, NULL);
 }
 
 static int init_live_machine(struct machine *machine)

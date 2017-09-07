@@ -218,7 +218,8 @@ static int ndfc_probe(struct platform_device *ofdev)
 	ndfc = &ndfc_ctrl[cs];
 	ndfc->chip_select = cs;
 
-	nand_hw_control_init(&ndfc->ndfc_control);
+	spin_lock_init(&ndfc->ndfc_control.lock);
+	init_waitqueue_head(&ndfc->ndfc_control.wq);
 	ndfc->ofdev = ofdev;
 	dev_set_drvdata(&ofdev->dev, ndfc);
 

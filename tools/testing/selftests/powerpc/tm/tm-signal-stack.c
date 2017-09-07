@@ -60,9 +60,9 @@ int tm_signal_stack()
 		exit(1);
 	asm volatile("li 1, 0 ;"		/* stack ptr == NULL */
 		     "1:"
-		     "tbegin.;"
+		     ".long 0x7C00051D ;"	/* tbegin */
 		     "beq 1b ;"			/* retry forever */
-		     "tsuspend.;"
+		     ".long 0x7C0005DD ; ;"	/* tsuspend */
 		     "ld 2, 0(1) ;"		/* trigger segv" */
 		     : : : "memory");
 

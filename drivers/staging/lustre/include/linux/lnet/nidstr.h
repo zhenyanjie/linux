@@ -34,10 +34,8 @@
  *  Lustre Network Driver types.
  */
 enum {
-	/*
-	 * Only add to these values (i.e. don't ever change or redefine them):
-	 * network addresses depend on them...
-	 */
+	/* Only add to these values (i.e. don't ever change or redefine them):
+	 * network addresses depend on them... */
 	QSWLND		= 1,
 	SOCKLND		= 2,
 	GMLND		= 3,
@@ -69,7 +67,6 @@ static inline char *libcfs_lnd2str(__u32 lnd)
 	return libcfs_lnd2str_r(lnd, libcfs_next_nidstring(),
 				LNET_NIDSTR_SIZE);
 }
-
 int libcfs_str2lnd(const char *str);
 char *libcfs_net2str_r(__u32 net, char *buf, size_t buf_size);
 static inline char *libcfs_net2str(__u32 net)
@@ -77,18 +74,16 @@ static inline char *libcfs_net2str(__u32 net)
 	return libcfs_net2str_r(net, libcfs_next_nidstring(),
 				LNET_NIDSTR_SIZE);
 }
-
 char *libcfs_nid2str_r(lnet_nid_t nid, char *buf, size_t buf_size);
 static inline char *libcfs_nid2str(lnet_nid_t nid)
 {
 	return libcfs_nid2str_r(nid, libcfs_next_nidstring(),
 				LNET_NIDSTR_SIZE);
 }
-
 __u32 libcfs_str2net(const char *str);
 lnet_nid_t libcfs_str2nid(const char *str);
 int libcfs_str2anynid(lnet_nid_t *nid, const char *str);
-char *libcfs_id2str(struct lnet_process_id id);
+char *libcfs_id2str(lnet_process_id_t id);
 void cfs_free_nidlist(struct list_head *list);
 int cfs_parse_nidlist(char *str, int len, struct list_head *list);
 int cfs_print_nidlist(char *buffer, int count, struct list_head *list);

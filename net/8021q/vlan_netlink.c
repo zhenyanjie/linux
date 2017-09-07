@@ -35,8 +35,7 @@ static inline int vlan_validate_qos_map(struct nlattr *attr)
 {
 	if (!attr)
 		return 0;
-	return nla_validate_nested(attr, IFLA_VLAN_QOS_MAX, vlan_map_policy,
-				   NULL);
+	return nla_validate_nested(attr, IFLA_VLAN_QOS_MAX, vlan_map_policy);
 }
 
 static int vlan_validate(struct nlattr *tb[], struct nlattr *data[])
@@ -119,7 +118,6 @@ static int vlan_newlink(struct net *src_net, struct net_device *dev,
 {
 	struct vlan_dev_priv *vlan = vlan_dev_priv(dev);
 	struct net_device *real_dev;
-	unsigned int max_mtu;
 	__be16 proto;
 	int err;
 
@@ -146,11 +144,9 @@ static int vlan_newlink(struct net *src_net, struct net_device *dev,
 	if (err < 0)
 		return err;
 
-	max_mtu = netif_reduces_vlan_mtu(real_dev) ? real_dev->mtu - VLAN_HLEN :
-						     real_dev->mtu;
 	if (!tb[IFLA_MTU])
-		dev->mtu = max_mtu;
-	else if (dev->mtu > max_mtu)
+		dev->mtu = real_dev->mtu;
+	else if (dev->mtu > real_dev->mtu)
 		return -EINVAL;
 
 	err = vlan_changelink(dev, tb, data);

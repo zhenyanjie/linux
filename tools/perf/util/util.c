@@ -3,11 +3,10 @@
 #include "debug.h"
 #include <api/fs/fs.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/utsname.h>
-#include <dirent.h>
-#include <inttypes.h>
-#include <signal.h>
+#ifdef HAVE_BACKTRACE_SUPPORT
+#include <execinfo.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,19 +14,23 @@
 #include <limits.h>
 #include <byteswap.h>
 #include <linux/kernel.h>
-#include <linux/log2.h>
-#include <linux/time64.h>
 #include <unistd.h>
+#include "callchain.h"
 #include "strlist.h"
+
+struct callchain_param	callchain_param = {
+	.mode	= CHAIN_GRAPH_ABS,
+	.min_percent = 0.5,
+	.order  = ORDER_CALLEE,
+	.key	= CCKEY_FUNCTION,
+	.value	= CCVAL_PERCENT,
+};
 
 /*
  * XXX We need to find a better place for these things...
  */
 unsigned int page_size;
 int cacheline_size;
-
-int sysctl_perf_event_max_stack = PERF_MAX_STACK_DEPTH;
-int sysctl_perf_event_max_contexts_per_stack = PERF_MAX_CONTEXTS_PER_STACK;
 
 bool test_attr__enabled;
 
@@ -70,7 +73,7 @@ int mkdir_p(char *path, mode_t mode)
 	return (stat(path, &st) && mkdir(path, mode)) ? -1 : 0;
 }
 
-int rm_rf(const char *path)
+int rm_rf(char *path)
 {
 	DIR *dir;
 	int ret = 0;
@@ -90,17 +93,20 @@ int rm_rf(const char *path)
 		scnprintf(namebuf, sizeof(namebuf), "%s/%s",
 			  path, d->d_name);
 
-		/* We have to check symbolic link itself */
-		ret = lstat(namebuf, &statbuf);
+		ret = stat(namebuf, &statbuf);
 		if (ret < 0) {
 			pr_debug("stat failed: %s\n", namebuf);
 			break;
 		}
 
-		if (S_ISDIR(statbuf.st_mode))
-			ret = rm_rf(namebuf);
-		else
+		if (S_ISREG(statbuf.st_mode))
 			ret = unlink(namebuf);
+		else if (S_ISDIR(statbuf.st_mode))
+			ret = rm_rf(namebuf);
+		else {
+			pr_debug("unknown file: %s\n", namebuf);
+			ret = -1;
+		}
 	}
 	closedir(dir);
 
@@ -108,40 +114,6 @@ int rm_rf(const char *path)
 		return ret;
 
 	return rmdir(path);
-}
-
-/* A filter which removes dot files */
-bool lsdir_no_dot_filter(const char *name __maybe_unused, struct dirent *d)
-{
-	return d->d_name[0] != '.';
-}
-
-/* lsdir reads a directory and store it in strlist */
-struct strlist *lsdir(const char *name,
-		      bool (*filter)(const char *, struct dirent *))
-{
-	struct strlist *list = NULL;
-	DIR *dir;
-	struct dirent *d;
-
-	dir = opendir(name);
-	if (!dir)
-		return NULL;
-
-	list = strlist__new(NULL, NULL);
-	if (!list) {
-		errno = ENOMEM;
-		goto out;
-	}
-
-	while ((d = readdir(dir)) != NULL) {
-		if (!filter || filter(name, d))
-			strlist__add(list, d->d_name);
-	}
-
-out:
-	closedir(dir);
-	return list;
 }
 
 static int slow_copyfile(const char *from, const char *to)
@@ -254,6 +226,28 @@ int copyfile(const char *from, const char *to)
 	return copyfile_mode(from, to, 0755);
 }
 
+unsigned long convert_unit(unsigned long value, char *unit)
+{
+	*unit = ' ';
+
+	if (value > 1000) {
+		value /= 1000;
+		*unit = 'K';
+	}
+
+	if (value > 1000) {
+		value /= 1000;
+		*unit = 'M';
+	}
+
+	if (value > 1000) {
+		value /= 1000;
+		*unit = 'G';
+	}
+
+	return value;
+}
+
 static ssize_t ion(bool is_read, int fd, void *buf, size_t n)
 {
 	void *buf_start = buf;
@@ -335,6 +329,67 @@ int hex2u64(const char *ptr, u64 *long_val)
 	return p - ptr;
 }
 
+/* Obtain a backtrace and print it to stdout. */
+#ifdef HAVE_BACKTRACE_SUPPORT
+void dump_stack(void)
+{
+	void *array[16];
+	size_t size = backtrace(array, ARRAY_SIZE(array));
+	char **strings = backtrace_symbols(array, size);
+	size_t i;
+
+	printf("Obtained %zd stack frames.\n", size);
+
+	for (i = 0; i < size; i++)
+		printf("%s\n", strings[i]);
+
+	free(strings);
+}
+#else
+void dump_stack(void) {}
+#endif
+
+void sighandler_dump_stack(int sig)
+{
+	psignal(sig, "perf");
+	dump_stack();
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+
+int parse_nsec_time(const char *str, u64 *ptime)
+{
+	u64 time_sec, time_nsec;
+	char *end;
+
+	time_sec = strtoul(str, &end, 10);
+	if (*end != '.' && *end != '\0')
+		return -1;
+
+	if (*end == '.') {
+		int i;
+		char nsec_buf[10];
+
+		if (strlen(++end) > 9)
+			return -1;
+
+		strncpy(nsec_buf, end, 9);
+		nsec_buf[9] = '\0';
+
+		/* make it nsec precision */
+		for (i = strlen(nsec_buf); i < 9; i++)
+			nsec_buf[i] = '0';
+
+		time_nsec = strtoul(nsec_buf, &end, 10);
+		if (*end != '\0')
+			return -1;
+	} else
+		time_nsec = 0;
+
+	*ptime = time_sec * NSEC_PER_SEC + time_nsec;
+	return 0;
+}
+
 unsigned long parse_tag_value(const char *str, struct parse_tag *tags)
 {
 	struct parse_tag *i = tags;
@@ -360,6 +415,158 @@ unsigned long parse_tag_value(const char *str, struct parse_tag *tags)
 	}
 
 	return (unsigned long) -1;
+}
+
+int get_stack_size(const char *str, unsigned long *_size)
+{
+	char *endptr;
+	unsigned long size;
+	unsigned long max_size = round_down(USHRT_MAX, sizeof(u64));
+
+	size = strtoul(str, &endptr, 0);
+
+	do {
+		if (*endptr)
+			break;
+
+		size = round_up(size, sizeof(u64));
+		if (!size || size > max_size)
+			break;
+
+		*_size = size;
+		return 0;
+
+	} while (0);
+
+	pr_err("callchain: Incorrect stack dump size (max %ld): %s\n",
+	       max_size, str);
+	return -1;
+}
+
+int parse_callchain_record(const char *arg, struct callchain_param *param)
+{
+	char *tok, *name, *saveptr = NULL;
+	char *buf;
+	int ret = -1;
+
+	/* We need buffer that we know we can write to. */
+	buf = malloc(strlen(arg) + 1);
+	if (!buf)
+		return -ENOMEM;
+
+	strcpy(buf, arg);
+
+	tok = strtok_r((char *)buf, ",", &saveptr);
+	name = tok ? : (char *)buf;
+
+	do {
+		/* Framepointer style */
+		if (!strncmp(name, "fp", sizeof("fp"))) {
+			if (!strtok_r(NULL, ",", &saveptr)) {
+				param->record_mode = CALLCHAIN_FP;
+				ret = 0;
+			} else
+				pr_err("callchain: No more arguments "
+				       "needed for --call-graph fp\n");
+			break;
+
+#ifdef HAVE_DWARF_UNWIND_SUPPORT
+		/* Dwarf style */
+		} else if (!strncmp(name, "dwarf", sizeof("dwarf"))) {
+			const unsigned long default_stack_dump_size = 8192;
+
+			ret = 0;
+			param->record_mode = CALLCHAIN_DWARF;
+			param->dump_size = default_stack_dump_size;
+
+			tok = strtok_r(NULL, ",", &saveptr);
+			if (tok) {
+				unsigned long size = 0;
+
+				ret = get_stack_size(tok, &size);
+				param->dump_size = size;
+			}
+#endif /* HAVE_DWARF_UNWIND_SUPPORT */
+		} else if (!strncmp(name, "lbr", sizeof("lbr"))) {
+			if (!strtok_r(NULL, ",", &saveptr)) {
+				param->record_mode = CALLCHAIN_LBR;
+				ret = 0;
+			} else
+				pr_err("callchain: No more arguments "
+					"needed for --call-graph lbr\n");
+			break;
+		} else {
+			pr_err("callchain: Unknown --call-graph option "
+			       "value: %s\n", arg);
+			break;
+		}
+
+	} while (0);
+
+	free(buf);
+	return ret;
+}
+
+int filename__read_str(const char *filename, char **buf, size_t *sizep)
+{
+	size_t size = 0, alloc_size = 0;
+	void *bf = NULL, *nbf;
+	int fd, n, err = 0;
+	char sbuf[STRERR_BUFSIZE];
+
+	fd = open(filename, O_RDONLY);
+	if (fd < 0)
+		return -errno;
+
+	do {
+		if (size == alloc_size) {
+			alloc_size += BUFSIZ;
+			nbf = realloc(bf, alloc_size);
+			if (!nbf) {
+				err = -ENOMEM;
+				break;
+			}
+
+			bf = nbf;
+		}
+
+		n = read(fd, bf + size, alloc_size - size);
+		if (n < 0) {
+			if (size) {
+				pr_warning("read failed %d: %s\n", errno,
+					 strerror_r(errno, sbuf, sizeof(sbuf)));
+				err = 0;
+			} else
+				err = -errno;
+
+			break;
+		}
+
+		size += n;
+	} while (n > 0);
+
+	if (!err) {
+		*sizep = size;
+		*buf   = bf;
+	} else
+		free(bf);
+
+	close(fd);
+	return err;
+}
+
+const char *get_filename_for_perf_kvm(void)
+{
+	const char *filename;
+
+	if (perf_host && !perf_guest)
+		filename = strdup("perf.data.host");
+	else if (!perf_host && perf_guest)
+		filename = strdup("perf.data.guest");
+	else
+		filename = strdup("perf.data.kvm");
+
+	return filename;
 }
 
 int perf_event_paranoid(void)
@@ -429,63 +636,12 @@ bool find_process(const char *name)
 	return ret ? false : true;
 }
 
-static int
-fetch_ubuntu_kernel_version(unsigned int *puint)
-{
-	ssize_t len;
-	size_t line_len = 0;
-	char *ptr, *line = NULL;
-	int version, patchlevel, sublevel, err;
-	FILE *vsig = fopen("/proc/version_signature", "r");
-
-	if (!vsig) {
-		pr_debug("Open /proc/version_signature failed: %s\n",
-			 strerror(errno));
-		return -1;
-	}
-
-	len = getline(&line, &line_len, vsig);
-	fclose(vsig);
-	err = -1;
-	if (len <= 0) {
-		pr_debug("Reading from /proc/version_signature failed: %s\n",
-			 strerror(errno));
-		goto errout;
-	}
-
-	ptr = strrchr(line, ' ');
-	if (!ptr) {
-		pr_debug("Parsing /proc/version_signature failed: %s\n", line);
-		goto errout;
-	}
-
-	err = sscanf(ptr + 1, "%d.%d.%d",
-		     &version, &patchlevel, &sublevel);
-	if (err != 3) {
-		pr_debug("Unable to get kernel version from /proc/version_signature '%s'\n",
-			 line);
-		goto errout;
-	}
-
-	if (puint)
-		*puint = (version << 16) + (patchlevel << 8) + sublevel;
-	err = 0;
-errout:
-	free(line);
-	return err;
-}
-
 int
 fetch_kernel_version(unsigned int *puint, char *str,
 		     size_t str_size)
 {
 	struct utsname utsname;
 	int version, patchlevel, sublevel, err;
-	bool int_ver_ready = false;
-
-	if (access("/proc/version_signature", R_OK) == 0)
-		if (!fetch_ubuntu_kernel_version(puint))
-			int_ver_ready = true;
 
 	if (uname(&utsname))
 		return -1;
@@ -499,12 +655,12 @@ fetch_kernel_version(unsigned int *puint, char *str,
 		     &version, &patchlevel, &sublevel);
 
 	if (err != 3) {
-		pr_debug("Unable to get kernel version from uname '%s'\n",
+		pr_debug("Unablt to get kernel version from uname '%s'\n",
 			 utsname.release);
 		return -1;
 	}
 
-	if (puint && !int_ver_ready)
+	if (puint)
 		*puint = (version << 16) + (patchlevel << 8) + sublevel;
 	return 0;
 }
@@ -521,8 +677,7 @@ const char *perf_tip(const char *dirpath)
 
 	tips = strlist__new("tips.txt", &conf);
 	if (tips == NULL)
-		return errno == ENOENT ? NULL :
-			"Tip: check path of tips.txt or get more memory! ;-p";
+		return errno == ENOENT ? NULL : "Tip: get more memory! ;-p";
 
 	if (strlist__nr_entries(tips) == 0)
 		goto out;

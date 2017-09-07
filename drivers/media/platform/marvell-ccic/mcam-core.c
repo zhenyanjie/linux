@@ -49,17 +49,24 @@
 static bool alloc_bufs_at_read;
 module_param(alloc_bufs_at_read, bool, 0444);
 MODULE_PARM_DESC(alloc_bufs_at_read,
-		"Non-zero value causes DMA buffers to be allocated when the video capture device is read, rather than at module load time.  This saves memory, but decreases the chances of successfully getting those buffers.  This parameter is only used in the vmalloc buffer mode");
+		"Non-zero value causes DMA buffers to be allocated when the "
+		"video capture device is read, rather than at module load "
+		"time.  This saves memory, but decreases the chances of "
+		"successfully getting those buffers.  This parameter is "
+		"only used in the vmalloc buffer mode");
 
 static int n_dma_bufs = 3;
 module_param(n_dma_bufs, uint, 0644);
 MODULE_PARM_DESC(n_dma_bufs,
-		"The number of DMA buffers to allocate.  Can be either two (saves memory, makes timing tighter) or three.");
+		"The number of DMA buffers to allocate.  Can be either two "
+		"(saves memory, makes timing tighter) or three.");
 
 static int dma_buf_size = VGA_WIDTH * VGA_HEIGHT * 2;  /* Worst case */
 module_param(dma_buf_size, uint, 0444);
 MODULE_PARM_DESC(dma_buf_size,
-		"The size of the allocated DMA buffers.  If actual operating parameters require larger buffers, an attempt to reallocate will be made.");
+		"The size of the allocated DMA buffers.  If actual operating "
+		"parameters require larger buffers, an attempt to reallocate "
+		"will be made.");
 #else /* MCAM_MODE_VMALLOC */
 static const bool alloc_bufs_at_read;
 static const int n_dma_bufs = 3;  /* Used by S/G_PARM */
@@ -68,12 +75,15 @@ static const int n_dma_bufs = 3;  /* Used by S/G_PARM */
 static bool flip;
 module_param(flip, bool, 0444);
 MODULE_PARM_DESC(flip,
-		"If set, the sensor will be instructed to flip the image vertically.");
+		"If set, the sensor will be instructed to flip the image "
+		"vertically.");
 
 static int buffer_mode = -1;
 module_param(buffer_mode, int, 0444);
 MODULE_PARM_DESC(buffer_mode,
-		"Set the buffer mode to be used; default is to go with what the platform driver asks for.  Set to 0 for vmalloc, 1 for DMA contiguous.");
+		"Set the buffer mode to be used; default is to go with what "
+		"the platform driver asks for.  Set to 0 for vmalloc, 1 for "
+		"DMA contiguous.");
 
 /*
  * Status flags.  Always manipulated with bit operations.
@@ -963,7 +973,7 @@ static int mcam_cam_set_flip(struct mcam_camera *cam)
 	memset(&ctrl, 0, sizeof(ctrl));
 	ctrl.id = V4L2_CID_VFLIP;
 	ctrl.value = flip;
-	return v4l2_s_ctrl(NULL, cam->sensor->ctrl_handler, &ctrl);
+	return sensor_call(cam, core, s_ctrl, &ctrl);
 }
 
 
@@ -1041,7 +1051,7 @@ static int mcam_read_setup(struct mcam_camera *cam)
 static int mcam_vb_queue_setup(struct vb2_queue *vq,
 		unsigned int *nbufs,
 		unsigned int *num_planes, unsigned int sizes[],
-		struct device *alloc_devs[])
+		void *alloc_ctxs[])
 {
 	struct mcam_camera *cam = vb2_get_drv_priv(vq);
 	int minbufs = (cam->buffer_mode == B_DMA_contig) ? 3 : 2;
@@ -1049,6 +1059,10 @@ static int mcam_vb_queue_setup(struct vb2_queue *vq,
 
 	if (*nbufs < minbufs)
 		*nbufs = minbufs;
+	if (cam->buffer_mode == B_DMA_contig)
+		alloc_ctxs[0] = cam->vb_alloc_ctx;
+	else if (cam->buffer_mode == B_DMA_sg)
+		alloc_ctxs[0] = cam->vb_alloc_ctx_sg;
 
 	if (*num_planes)
 		return sizes[0] < size ? -EINVAL : 0;
@@ -1257,7 +1271,6 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 	vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	vq->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF | VB2_READ;
 	vq->buf_struct_size = sizeof(struct mcam_vb_buffer);
-	vq->dev = cam->dev;
 	INIT_LIST_HEAD(&cam->buffers);
 	switch (cam->buffer_mode) {
 	case B_DMA_contig:
@@ -1266,6 +1279,9 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 		vq->mem_ops = &vb2_dma_contig_memops;
 		cam->dma_setup = mcam_ctlr_dma_contig;
 		cam->frame_complete = mcam_dma_contig_done;
+		cam->vb_alloc_ctx = vb2_dma_contig_init_ctx(cam->dev);
+		if (IS_ERR(cam->vb_alloc_ctx))
+			return PTR_ERR(cam->vb_alloc_ctx);
 #endif
 		break;
 	case B_DMA_sg:
@@ -1274,6 +1290,9 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 		vq->mem_ops = &vb2_dma_sg_memops;
 		cam->dma_setup = mcam_ctlr_dma_sg;
 		cam->frame_complete = mcam_dma_sg_done;
+		cam->vb_alloc_ctx_sg = vb2_dma_sg_init_ctx(cam->dev);
+		if (IS_ERR(cam->vb_alloc_ctx_sg))
+			return PTR_ERR(cam->vb_alloc_ctx_sg);
 #endif
 		break;
 	case B_vmalloc:
@@ -1288,6 +1307,18 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 		break;
 	}
 	return vb2_queue_init(vq);
+}
+
+static void mcam_cleanup_vb2(struct mcam_camera *cam)
+{
+#ifdef MCAM_MODE_DMA_CONTIG
+	if (cam->buffer_mode == B_DMA_contig)
+		vb2_dma_contig_cleanup_ctx(cam->vb_alloc_ctx);
+#endif
+#ifdef MCAM_MODE_DMA_SG
+	if (cam->buffer_mode == B_DMA_sg)
+		vb2_dma_sg_cleanup_ctx(cam->vb_alloc_ctx_sg);
+#endif
 }
 
 
@@ -1749,7 +1780,8 @@ int mccic_register(struct mcam_camera *cam)
 		cam->buffer_mode = buffer_mode;
 	if (cam->buffer_mode == B_DMA_sg &&
 			cam->chip_id == MCAM_CAFE) {
-		printk(KERN_ERR "marvell-cam: Cafe can't do S/G I/O, attempting vmalloc mode instead\n");
+		printk(KERN_ERR "marvell-cam: Cafe can't do S/G I/O, "
+			"attempting vmalloc mode instead\n");
 		cam->buffer_mode = B_vmalloc;
 	}
 	if (!mcam_buffer_mode_supported(cam->buffer_mode)) {
@@ -1817,7 +1849,8 @@ int mccic_register(struct mcam_camera *cam)
 	 */
 	if (cam->buffer_mode == B_vmalloc && !alloc_bufs_at_read) {
 		if (mcam_alloc_dma_bufs(cam, 1))
-			cam_warn(cam, "Unable to alloc DMA buffers at load will try again later.");
+			cam_warn(cam, "Unable to alloc DMA buffers at load"
+					" will try again later.");
 	}
 
 	mutex_unlock(&cam->s_mutex);
@@ -1842,6 +1875,7 @@ void mccic_shutdown(struct mcam_camera *cam)
 		cam_warn(cam, "Removing a device with users!\n");
 		mcam_ctlr_power_down(cam);
 	}
+	mcam_cleanup_vb2(cam);
 	if (cam->buffer_mode == B_vmalloc)
 		mcam_free_dma_bufs(cam);
 	video_unregister_device(&cam->vdev);

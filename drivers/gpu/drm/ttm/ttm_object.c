@@ -179,7 +179,7 @@ int ttm_base_object_init(struct ttm_object_file *tfile,
 	if (unlikely(ret != 0))
 		goto out_err0;
 
-	ret = ttm_ref_object_add(tfile, base, TTM_REF_USAGE, NULL, false);
+	ret = ttm_ref_object_add(tfile, base, TTM_REF_USAGE, NULL);
 	if (unlikely(ret != 0))
 		goto out_err1;
 
@@ -304,7 +304,7 @@ bool ttm_ref_object_exists(struct ttm_object_file *tfile,
 	 * Verify that the ref->obj pointer was actually valid!
 	 */
 	rmb();
-	if (unlikely(kref_read(&ref->kref) == 0))
+	if (unlikely(atomic_read(&ref->kref.refcount) == 0))
 		goto out_false;
 
 	rcu_read_unlock();
@@ -318,8 +318,7 @@ EXPORT_SYMBOL(ttm_ref_object_exists);
 
 int ttm_ref_object_add(struct ttm_object_file *tfile,
 		       struct ttm_base_object *base,
-		       enum ttm_ref_type ref_type, bool *existed,
-		       bool require_existed)
+		       enum ttm_ref_type ref_type, bool *existed)
 {
 	struct drm_open_hash *ht = &tfile->ref_hash[ref_type];
 	struct ttm_ref_object *ref;
@@ -346,9 +345,6 @@ int ttm_ref_object_add(struct ttm_object_file *tfile,
 		}
 
 		rcu_read_unlock();
-		if (require_existed)
-			return -EPERM;
-
 		ret = ttm_mem_global_alloc(mem_glob, sizeof(*ref),
 					   false, false);
 		if (unlikely(ret != 0))
@@ -453,10 +449,10 @@ void ttm_object_file_release(struct ttm_object_file **p_tfile)
 		ttm_ref_object_release(&ref->kref);
 	}
 
-	spin_unlock(&tfile->lock);
 	for (i = 0; i < TTM_REF_NUM; ++i)
 		drm_ht_remove(&tfile->ref_hash[i]);
 
+	spin_unlock(&tfile->lock);
 	ttm_object_file_unref(&tfile);
 }
 EXPORT_SYMBOL(ttm_object_file_release);
@@ -533,7 +529,9 @@ void ttm_object_device_release(struct ttm_object_device **p_tdev)
 
 	*p_tdev = NULL;
 
+	spin_lock(&tdev->object_lock);
 	drm_ht_remove(&tdev->object_hash);
+	spin_unlock(&tdev->object_lock);
 
 	kfree(tdev);
 }
@@ -637,7 +635,7 @@ int ttm_prime_fd_to_handle(struct ttm_object_file *tfile,
 	prime = (struct ttm_prime_object *) dma_buf->priv;
 	base = &prime->base;
 	*handle = base->hash.key;
-	ret = ttm_ref_object_add(tfile, base, TTM_REF_USAGE, NULL, false);
+	ret = ttm_ref_object_add(tfile, base, TTM_REF_USAGE, NULL);
 
 	dma_buf_put(dma_buf);
 

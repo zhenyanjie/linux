@@ -6,10 +6,9 @@ struct nvkm_vma;
 struct nvkm_vm;
 
 enum nvkm_memory_target {
-	NVKM_MEM_TARGET_INST, /* instance memory */
-	NVKM_MEM_TARGET_VRAM, /* video memory */
-	NVKM_MEM_TARGET_HOST, /* coherent system memory */
-	NVKM_MEM_TARGET_NCOH, /* non-coherent system memory */
+	NVKM_MEM_TARGET_INST,
+	NVKM_MEM_TARGET_VRAM,
+	NVKM_MEM_TARGET_HOST,
 };
 
 struct nvkm_memory {

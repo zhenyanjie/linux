@@ -10,8 +10,6 @@
 #include <linux/nsproxy.h>
 #include <linux/security.h>
 #include <linux/fs_struct.h>
-#include <linux/sched/task.h>
-
 #include "proc/internal.h" /* only for get_proc_task() in ->open() */
 
 #include "pnode.h"
@@ -201,8 +199,6 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	if (sb->s_op->show_devname) {
 		seq_puts(m, "device ");
 		err = sb->s_op->show_devname(m, mnt_path.dentry);
-		if (err)
-			goto out;
 	} else {
 		if (r->mnt_devname) {
 			seq_puts(m, "device ");

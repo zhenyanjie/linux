@@ -225,11 +225,8 @@ struct nbpf_channel {
 struct nbpf_device {
 	struct dma_device dma_dev;
 	void __iomem *base;
-	u32 max_burst_mem_read;
-	u32 max_burst_mem_write;
 	struct clk *clk;
 	const struct nbpf_config *config;
-	unsigned int eirq;
 	struct nbpf_channel chan[];
 };
 
@@ -427,33 +424,10 @@ static void nbpf_chan_configure(struct nbpf_channel *chan)
 	nbpf_chan_write(chan, NBPF_CHAN_CFG, NBPF_CHAN_CFG_DMS | chan->dmarq_cfg);
 }
 
-static u32 nbpf_xfer_ds(struct nbpf_device *nbpf, size_t size,
-			enum dma_transfer_direction direction)
+static u32 nbpf_xfer_ds(struct nbpf_device *nbpf, size_t size)
 {
-	int max_burst = nbpf->config->buffer_size * 8;
-
-	if (nbpf->max_burst_mem_read || nbpf->max_burst_mem_write) {
-		switch (direction) {
-		case DMA_MEM_TO_MEM:
-			max_burst = min_not_zero(nbpf->max_burst_mem_read,
-						 nbpf->max_burst_mem_write);
-			break;
-		case DMA_MEM_TO_DEV:
-			if (nbpf->max_burst_mem_read)
-				max_burst = nbpf->max_burst_mem_read;
-			break;
-		case DMA_DEV_TO_MEM:
-			if (nbpf->max_burst_mem_write)
-				max_burst = nbpf->max_burst_mem_write;
-			break;
-		case DMA_DEV_TO_DEV:
-		default:
-			break;
-		}
-	}
-
 	/* Maximum supported bursts depend on the buffer size */
-	return min_t(int, __ffs(size), ilog2(max_burst));
+	return min_t(int, __ffs(size), ilog2(nbpf->config->buffer_size * 8));
 }
 
 static size_t nbpf_xfer_size(struct nbpf_device *nbpf,
@@ -483,7 +457,7 @@ static size_t nbpf_xfer_size(struct nbpf_device *nbpf,
 		size = burst;
 	}
 
-	return nbpf_xfer_ds(nbpf, size, DMA_TRANS_NONE);
+	return nbpf_xfer_ds(nbpf, size);
 }
 
 /*
@@ -532,7 +506,7 @@ static int nbpf_prep_one(struct nbpf_link_desc *ldesc,
 	 * transfers we enable the SBE bit and terminate the transfer in our
 	 * .device_pause handler.
 	 */
-	mem_xfer = nbpf_xfer_ds(chan->nbpf, size, direction);
+	mem_xfer = nbpf_xfer_ds(chan->nbpf, size);
 
 	switch (direction) {
 	case DMA_DEV_TO_MEM:
@@ -1127,7 +1101,8 @@ static void nbpf_chan_tasklet(unsigned long data)
 {
 	struct nbpf_channel *chan = (struct nbpf_channel *)data;
 	struct nbpf_desc *desc, *tmp;
-	struct dmaengine_desc_callback cb;
+	dma_async_tx_callback callback;
+	void *param;
 
 	while (!list_empty(&chan->done)) {
 		bool found = false, must_put, recycling = false;
@@ -1175,12 +1150,14 @@ static void nbpf_chan_tasklet(unsigned long data)
 			must_put = false;
 		}
 
-		dmaengine_desc_get_callback(&desc->async_tx, &cb);
+		callback = desc->async_tx.callback;
+		param = desc->async_tx.callback_param;
 
 		/* ack and callback completed descriptor */
 		spin_unlock_irq(&chan->lock);
 
-		dmaengine_desc_callback_invoke(&cb, NULL);
+		if (callback)
+			callback(param);
 
 		if (must_put)
 			nbpf_desc_put(desc);
@@ -1323,9 +1300,10 @@ static int nbpf_probe(struct platform_device *pdev)
 
 	nbpf = devm_kzalloc(dev, sizeof(*nbpf) + num_channels *
 			    sizeof(nbpf->chan[0]), GFP_KERNEL);
-	if (!nbpf)
+	if (!nbpf) {
+		dev_err(dev, "Memory allocation failed\n");
 		return -ENOMEM;
-
+	}
 	dma_dev = &nbpf->dma_dev;
 	dma_dev->dev = dev;
 
@@ -1337,11 +1315,6 @@ static int nbpf_probe(struct platform_device *pdev)
 	nbpf->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(nbpf->clk))
 		return PTR_ERR(nbpf->clk);
-
-	of_property_read_u32(np, "max-burst-mem-read",
-			     &nbpf->max_burst_mem_read);
-	of_property_read_u32(np, "max-burst-mem-write",
-			     &nbpf->max_burst_mem_write);
 
 	nbpf->config = cfg;
 
@@ -1403,7 +1376,6 @@ static int nbpf_probe(struct platform_device *pdev)
 			       IRQF_SHARED, "dma error", nbpf);
 	if (ret < 0)
 		return ret;
-	nbpf->eirq = eirq;
 
 	INIT_LIST_HEAD(&dma_dev->channels);
 
@@ -1475,17 +1447,6 @@ e_clk_off:
 static int nbpf_remove(struct platform_device *pdev)
 {
 	struct nbpf_device *nbpf = platform_get_drvdata(pdev);
-	int i;
-
-	devm_free_irq(&pdev->dev, nbpf->eirq, nbpf);
-
-	for (i = 0; i < nbpf->config->num_channels; i++) {
-		struct nbpf_channel *chan = nbpf->chan + i;
-
-		devm_free_irq(&pdev->dev, chan->irq, chan);
-
-		tasklet_kill(&chan->tasklet);
-	}
 
 	of_dma_controller_free(pdev->dev.of_node);
 	dma_async_device_unregister(&nbpf->dma_dev);

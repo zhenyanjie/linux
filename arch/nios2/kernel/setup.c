@@ -14,12 +14,10 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
-#include <linux/sched/task.h>
 #include <linux/console.h>
 #include <linux/bootmem.h>
 #include <linux/initrd.h>
 #include <linux/of_fdt.h>
-#include <linux/screen_info.h>
 
 #include <asm/mmu_context.h>
 #include <asm/sections.h>
@@ -37,10 +35,6 @@ unsigned long memory_size;
 static struct pt_regs fake_regs = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 					0, 0, 0, 0, 0, 0,
 					0};
-
-#ifdef CONFIG_VT
-struct screen_info screen_info;
-#endif
 
 /* Copy a short hook instruction sequence to the exception address */
 static inline void copy_exception_handler(unsigned int addr)
@@ -200,9 +194,6 @@ void __init setup_arch(char **cmdline_p)
 				initrd_end - initrd_start, BOOTMEM_DEFAULT);
 	}
 #endif /* CONFIG_BLK_DEV_INITRD */
-
-	early_init_fdt_reserve_self();
-	early_init_fdt_scan_reserved_mem();
 
 	unflatten_and_copy_device_tree();
 

@@ -111,6 +111,13 @@ static inline void release_thread(struct task_struct *dead_task)
 }
 
 /*
+ * Free current thread data structures etc..
+ */
+static inline void exit_thread(void)
+{
+}
+
+/*
  * Return saved PC of a blocked thread.
  */
 unsigned long thread_saved_pc(struct task_struct *tsk);
@@ -127,6 +134,7 @@ unsigned long get_wchan(struct task_struct *p);
 #define	KSTK_ESP(tsk)	((tsk) == current ? rdusp() : (tsk)->thread.usp)
 
 #define cpu_relax()    barrier()
+#define cpu_relax_lowlatency()	cpu_relax()
 
 #define HARD_RESET_NOW() ({		\
 	local_irq_disable();		\

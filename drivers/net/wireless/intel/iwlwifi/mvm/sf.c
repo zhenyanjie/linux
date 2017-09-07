@@ -193,7 +193,7 @@ static void iwl_mvm_fill_sf_command(struct iwl_mvm *mvm,
 		}
 	}
 
-	if (sta) {
+	if (sta || IWL_UCODE_API(mvm->fw->ucode_ver) < 13) {
 		BUILD_BUG_ON(sizeof(sf_full_timeout) !=
 			     sizeof(__le32) * SF_NUM_SCENARIO *
 			     SF_NUM_TIMEOUT_TYPES);
@@ -215,10 +215,13 @@ static int iwl_mvm_sf_config(struct iwl_mvm *mvm, u8 sta_id,
 			     enum iwl_sf_state new_state)
 {
 	struct iwl_sf_cfg_cmd sf_cmd = {
-		.state = cpu_to_le32(new_state),
+		.state = cpu_to_le32(SF_FULL_ON),
 	};
 	struct ieee80211_sta *sta;
 	int ret = 0;
+
+	if (IWL_UCODE_API(mvm->fw->ucode_ver) < 13)
+		sf_cmd.state = cpu_to_le32(new_state);
 
 	if (mvm->cfg->disable_dummy_notification)
 		sf_cmd.state |= cpu_to_le32(SF_CFG_DUMMY_NOTIF_OFF);
@@ -232,10 +235,11 @@ static int iwl_mvm_sf_config(struct iwl_mvm *mvm, u8 sta_id,
 
 	switch (new_state) {
 	case SF_UNINIT:
-		iwl_mvm_fill_sf_command(mvm, &sf_cmd, NULL);
+		if (IWL_UCODE_API(mvm->fw->ucode_ver) >= 13)
+			iwl_mvm_fill_sf_command(mvm, &sf_cmd, NULL);
 		break;
 	case SF_FULL_ON:
-		if (sta_id == IWL_MVM_INVALID_STA) {
+		if (sta_id == IWL_MVM_STATION_COUNT) {
 			IWL_ERR(mvm,
 				"No station: Cannot switch SF to FULL_ON\n");
 			return -EINVAL;
@@ -276,12 +280,12 @@ int iwl_mvm_sf_update(struct iwl_mvm *mvm, struct ieee80211_vif *changed_vif,
 		      bool remove_vif)
 {
 	enum iwl_sf_state new_state;
-	u8 sta_id = IWL_MVM_INVALID_STA;
+	u8 sta_id = IWL_MVM_STATION_COUNT;
 	struct iwl_mvm_vif *mvmvif = NULL;
 	struct iwl_mvm_active_iface_iterator_data data = {
 		.ignore_vif = changed_vif,
 		.sta_vif_state = SF_UNINIT,
-		.sta_vif_ap_sta_id = IWL_MVM_INVALID_STA,
+		.sta_vif_ap_sta_id = IWL_MVM_STATION_COUNT,
 	};
 
 	/*

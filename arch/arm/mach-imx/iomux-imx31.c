@@ -57,10 +57,10 @@ void mxc_iomux_mode(unsigned int pin_mode)
 
 	spin_lock(&gpio_mux_lock);
 
-	l = imx_readl(reg);
+	l = __raw_readl(reg);
 	l &= ~(0xff << (field * 8));
 	l |= mode << (field * 8);
-	imx_writel(l, reg);
+	__raw_writel(l, reg);
 
 	spin_unlock(&gpio_mux_lock);
 }
@@ -82,10 +82,10 @@ void mxc_iomux_set_pad(enum iomux_pins pin, u32 config)
 
 	spin_lock(&gpio_mux_lock);
 
-	l = imx_readl(reg);
+	l = __raw_readl(reg);
 	l &= ~(0x1ff << (field * 10));
 	l |= config << (field * 10);
-	imx_writel(l, reg);
+	__raw_writel(l, reg);
 
 	spin_unlock(&gpio_mux_lock);
 }
@@ -163,12 +163,12 @@ void mxc_iomux_set_gpr(enum iomux_gp_func gp, bool en)
 	u32 l;
 
 	spin_lock(&gpio_mux_lock);
-	l = imx_readl(IOMUXGPR);
+	l = __raw_readl(IOMUXGPR);
 	if (en)
 		l |= gp;
 	else
 		l &= ~gp;
 
-	imx_writel(l, IOMUXGPR);
+	__raw_writel(l, IOMUXGPR);
 	spin_unlock(&gpio_mux_lock);
 }

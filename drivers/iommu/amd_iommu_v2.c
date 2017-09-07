@@ -22,7 +22,6 @@
 #include <linux/profile.h>
 #include <linux/module.h>
 #include <linux/sched.h>
-#include <linux/sched/mm.h>
 #include <linux/iommu.h>
 #include <linux/wait.h>
 #include <linux/pci.h>
@@ -527,7 +526,6 @@ static void do_fault(struct work_struct *work)
 		flags |= FAULT_FLAG_USER;
 	if (fault->flags & PPR_FAULT_WRITE)
 		flags |= FAULT_FLAG_WRITE;
-	flags |= FAULT_FLAG_REMOTE;
 
 	down_read(&mm->mmap_sem);
 	vma = find_extend_vma(mm, address);
@@ -539,7 +537,8 @@ static void do_fault(struct work_struct *work)
 	if (access_error(vma, fault))
 		goto out;
 
-	ret = handle_mm_fault(vma, address, flags);
+	ret = handle_mm_fault(mm, vma, address, flags);
+
 out:
 	up_read(&mm->mmap_sem);
 
@@ -806,10 +805,8 @@ int amd_iommu_init_device(struct pci_dev *pdev, int pasids)
 		goto out_free_domain;
 
 	group = iommu_group_get(&pdev->dev);
-	if (!group) {
-		ret = -EINVAL;
+	if (!group)
 		goto out_free_domain;
-	}
 
 	ret = iommu_attach_group(dev_state->domain, group);
 	if (ret != 0)
@@ -963,7 +960,7 @@ static int __init amd_iommu_v2_init(void)
 	spin_lock_init(&state_lock);
 
 	ret = -ENOMEM;
-	iommu_wq = alloc_workqueue("amd_iommu_v2", WQ_MEM_RECLAIM, 0);
+	iommu_wq = create_workqueue("amd_iommu_v2");
 	if (iommu_wq == NULL)
 		goto out;
 

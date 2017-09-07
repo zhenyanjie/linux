@@ -3,9 +3,9 @@
 
 #include <limits.h>
 #include <stdio.h>
-#include <linux/kernel.h>
 
 #include "../perf.h"
+#include "map.h"
 #include "build-id.h"
 #include "perf_regs.h"
 
@@ -37,13 +37,6 @@ struct comm_event {
 	struct perf_event_header header;
 	u32 pid, tid;
 	char comm[16];
-};
-
-struct namespaces_event {
-	struct perf_event_header header;
-	u32 pid, tid;
-	u64 nr_namespaces;
-	struct perf_ns_link_info link_info[];
 };
 
 struct fork_event {
@@ -184,8 +177,6 @@ enum {
 	PERF_IP_FLAG_TRACE_BEGIN	|\
 	PERF_IP_FLAG_TRACE_END)
 
-#define MAX_INSN 16
-
 struct perf_sample {
 	u64 ip;
 	u32 pid, tid;
@@ -201,8 +192,6 @@ struct perf_sample {
 	u64 data_src;
 	u32 flags;
 	u16 insn_len;
-	u8  cpumode;
-	char insn[MAX_INSN];
 	void *raw_data;
 	struct ip_callchain *callchain;
 	struct branch_stack *branch_stack;
@@ -243,7 +232,6 @@ enum perf_user_event_type { /* above any possible kernel type */
 	PERF_RECORD_STAT			= 76,
 	PERF_RECORD_STAT_ROUND			= 77,
 	PERF_RECORD_EVENT_UPDATE		= 78,
-	PERF_RECORD_TIME_CONV			= 79,
 	PERF_RECORD_HEADER_MAX
 };
 
@@ -276,7 +264,6 @@ struct events_stats {
 	u64 total_lost;
 	u64 total_lost_samples;
 	u64 total_aux_lost;
-	u64 total_aux_partial;
 	u64 total_invalid_chains;
 	u32 nr_events[PERF_RECORD_HEADER_MAX];
 	u32 nr_non_filtered_samples;
@@ -481,19 +468,11 @@ struct stat_round_event {
 	u64				time;
 };
 
-struct time_conv_event {
-	struct perf_event_header header;
-	u64 time_shift;
-	u64 time_mult;
-	u64 time_zero;
-};
-
 union perf_event {
 	struct perf_event_header	header;
 	struct mmap_event		mmap;
 	struct mmap2_event		mmap2;
 	struct comm_event		comm;
-	struct namespaces_event		namespaces;
 	struct fork_event		fork;
 	struct lost_event		lost;
 	struct lost_samples_event	lost_samples;
@@ -517,7 +496,6 @@ union perf_event {
 	struct stat_config_event	stat_config;
 	struct stat_event		stat;
 	struct stat_round_event		stat_round;
-	struct time_conv_event		time_conv;
 };
 
 void perf_event__print_totals(void);
@@ -596,10 +574,6 @@ int perf_event__process_switch(struct perf_tool *tool,
 			       union perf_event *event,
 			       struct perf_sample *sample,
 			       struct machine *machine);
-int perf_event__process_namespaces(struct perf_tool *tool,
-				   union perf_event *event,
-				   struct perf_sample *sample,
-				   struct machine *machine);
 int perf_event__process_mmap(struct perf_tool *tool,
 			     union perf_event *event,
 			     struct perf_sample *sample,
@@ -623,8 +597,10 @@ int perf_event__process(struct perf_tool *tool,
 
 struct addr_location;
 
-int machine__resolve(struct machine *machine, struct addr_location *al,
-		     struct perf_sample *sample);
+int perf_event__preprocess_sample(const union perf_event *event,
+				  struct machine *machine,
+				  struct addr_location *al,
+				  struct perf_sample *sample);
 
 void addr_location__put(struct addr_location *al);
 
@@ -632,8 +608,10 @@ struct thread;
 
 bool is_bts_event(struct perf_event_attr *attr);
 bool sample_addr_correlates_sym(struct perf_event_attr *attr);
-void thread__resolve(struct thread *thread, struct addr_location *al,
-		     struct perf_sample *sample);
+void perf_event__preprocess_sample_addr(union perf_event *event,
+					struct perf_sample *sample,
+					struct thread *thread,
+					struct addr_location *al);
 
 const char *perf_event__name(unsigned int id);
 
@@ -648,12 +626,6 @@ pid_t perf_event__synthesize_comm(struct perf_tool *tool,
 				  union perf_event *event, pid_t pid,
 				  perf_event__handler_t process,
 				  struct machine *machine);
-
-int perf_event__synthesize_namespaces(struct perf_tool *tool,
-				      union perf_event *event,
-				      pid_t pid, pid_t tgid,
-				      perf_event__handler_t process,
-				      struct machine *machine);
 
 int perf_event__synthesize_mmap_events(struct perf_tool *tool,
 				       union perf_event *event,
@@ -672,7 +644,6 @@ size_t perf_event__fprintf_itrace_start(union perf_event *event, FILE *fp);
 size_t perf_event__fprintf_switch(union perf_event *event, FILE *fp);
 size_t perf_event__fprintf_thread_map(union perf_event *event, FILE *fp);
 size_t perf_event__fprintf_cpu_map(union perf_event *event, FILE *fp);
-size_t perf_event__fprintf_namespaces(union perf_event *event, FILE *fp);
 size_t perf_event__fprintf(union perf_event *event, FILE *fp);
 
 u64 kallsyms__get_function_start(const char *kallsyms_filename,

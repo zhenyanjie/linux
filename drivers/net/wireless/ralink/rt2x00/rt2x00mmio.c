@@ -101,7 +101,7 @@ void rt2x00mmio_flush_queue(struct data_queue *queue, bool drop)
 	unsigned int i;
 
 	for (i = 0; !rt2x00queue_empty(queue) && i < 10; i++)
-		msleep(50);
+		msleep(10);
 }
 EXPORT_SYMBOL_GPL(rt2x00mmio_flush_queue);
 

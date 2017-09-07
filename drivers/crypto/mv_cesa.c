@@ -1073,7 +1073,7 @@ static int mv_probe(struct platform_device *pdev)
 	if (!res)
 		return -ENXIO;
 
-	cp = devm_kzalloc(&pdev->dev, sizeof(*cp), GFP_KERNEL);
+	cp = kzalloc(sizeof(*cp), GFP_KERNEL);
 	if (!cp)
 		return -ENOMEM;
 
@@ -1091,8 +1091,11 @@ static int mv_probe(struct platform_device *pdev)
 
 	cp->max_req_size = cp->sram_size - SRAM_CFG_SPACE;
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
+	if (pdev->dev.of_node)
+		irq = irq_of_parse_and_map(pdev->dev.of_node, 0);
+	else
+		irq = platform_get_irq(pdev, 0);
+	if (irq < 0 || irq == NO_IRQ) {
 		ret = irq;
 		goto err;
 	}
@@ -1163,6 +1166,7 @@ err_irq:
 err_thread:
 	kthread_stop(cp->queue_th);
 err:
+	kfree(cp);
 	cpg = NULL;
 	return ret;
 }
@@ -1186,6 +1190,7 @@ static int mv_remove(struct platform_device *pdev)
 		clk_put(cp->clk);
 	}
 
+	kfree(cp);
 	cpg = NULL;
 	return 0;
 }

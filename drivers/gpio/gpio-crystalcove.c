@@ -345,26 +345,28 @@ static int crystalcove_gpio_probe(struct platform_device *pdev)
 	cg->chip.dbg_show = crystalcove_gpio_dbg_show;
 	cg->regmap = pmic->regmap;
 
-	retval = devm_gpiochip_add_data(&pdev->dev, &cg->chip, cg);
+	retval = gpiochip_add_data(&cg->chip, cg);
 	if (retval) {
 		dev_warn(&pdev->dev, "add gpio chip error: %d\n", retval);
 		return retval;
 	}
 
-	gpiochip_irqchip_add_nested(&cg->chip, &crystalcove_irqchip, 0,
-				    handle_simple_irq, IRQ_TYPE_NONE);
+	gpiochip_irqchip_add(&cg->chip, &crystalcove_irqchip, 0,
+			     handle_simple_irq, IRQ_TYPE_NONE);
 
 	retval = request_threaded_irq(irq, NULL, crystalcove_gpio_irq_handler,
 				      IRQF_ONESHOT, KBUILD_MODNAME, cg);
 
 	if (retval) {
 		dev_warn(&pdev->dev, "request irq failed: %d\n", retval);
-		return retval;
+		goto out_remove_gpio;
 	}
 
-	gpiochip_set_nested_irqchip(&cg->chip, &crystalcove_irqchip, irq);
-
 	return 0;
+
+out_remove_gpio:
+	gpiochip_remove(&cg->chip);
+	return retval;
 }
 
 static int crystalcove_gpio_remove(struct platform_device *pdev)
@@ -372,6 +374,7 @@ static int crystalcove_gpio_remove(struct platform_device *pdev)
 	struct crystalcove_gpio *cg = platform_get_drvdata(pdev);
 	int irq = platform_get_irq(pdev, 0);
 
+	gpiochip_remove(&cg->chip);
 	if (irq >= 0)
 		free_irq(irq, cg);
 	return 0;

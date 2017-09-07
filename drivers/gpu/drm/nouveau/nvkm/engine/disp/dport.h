@@ -1,6 +1,6 @@
 #ifndef __NVKM_DISP_DPORT_H__
 #define __NVKM_DISP_DPORT_H__
-struct nvkm_output_dp;
+#include <core/os.h>
 
 /* DPCD Receiver Capabilities */
 #define DPCD_RC00_DPCD_REV                                              0x00000
@@ -77,5 +77,5 @@ struct nvkm_output_dp;
 #define DPCD_SC00_SET_POWER_D0                                             0x01
 #define DPCD_SC00_SET_POWER_D3                                             0x03
 
-void nvkm_dp_train(struct nvkm_output_dp *);
+void nvkm_dp_train(struct work_struct *);
 #endif

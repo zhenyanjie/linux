@@ -13,11 +13,12 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/acpi.h>
 #include <linux/mfd/axp20x.h>
 #include <linux/regmap.h>
 #include <linux/platform_device.h>
+#include <linux/iio/consumer.h>
 #include "intel_pmic.h"
 
 #define XPOWER_GPADC_LOW	0x5b
@@ -185,16 +186,28 @@ static int intel_xpower_pmic_update_power(struct regmap *regmap, int reg,
  * @regmap: regmap of the PMIC device
  * @reg: register to get the reading
  *
+ * We could get the sensor value by manipulating the HW regs here, but since
+ * the axp288 IIO driver may also access the same regs at the same time, the
+ * APIs provided by IIO subsystem are used here instead to avoid problems. As
+ * a result, the two passed in params are of no actual use.
+ *
  * Return a positive value on success, errno on failure.
  */
 static int intel_xpower_pmic_get_raw_temp(struct regmap *regmap, int reg)
 {
-	u8 buf[2];
+	struct iio_channel *gpadc_chan;
+	int ret, val;
 
-	if (regmap_bulk_read(regmap, AXP288_GP_ADC_H, buf, 2))
-		return -EIO;
+	gpadc_chan = iio_channel_get(NULL, "axp288-system-temp");
+	if (IS_ERR_OR_NULL(gpadc_chan))
+		return -EACCES;
 
-	return (buf[0] << 4) + ((buf[1] >> 4) & 0x0F);
+	ret = iio_read_channel_raw(gpadc_chan, &val);
+	if (ret < 0)
+		val = ret;
+
+	iio_channel_release(gpadc_chan);
+	return val;
 }
 
 static struct intel_pmic_opregion_data intel_xpower_pmic_opregion_data = {
@@ -249,4 +262,7 @@ static int __init intel_xpower_pmic_opregion_driver_init(void)
 {
 	return platform_driver_register(&intel_xpower_pmic_opregion_driver);
 }
-device_initcall(intel_xpower_pmic_opregion_driver_init);
+module_init(intel_xpower_pmic_opregion_driver_init);
+
+MODULE_DESCRIPTION("XPower AXP288 ACPI operation region driver");
+MODULE_LICENSE("GPL");

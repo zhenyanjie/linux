@@ -1,6 +1,5 @@
 dts-dirs	+= brcm
 dts-dirs	+= cavium-octeon
-dts-dirs	+= img
 dts-dirs	+= ingenic
 dts-dirs	+= lantiq
 dts-dirs	+= mti

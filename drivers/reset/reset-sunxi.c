@@ -13,7 +13,7 @@
 
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
@@ -70,7 +70,7 @@ static int sunxi_reset_deassert(struct reset_controller_dev *rcdev,
 	return 0;
 }
 
-static const struct reset_control_ops sunxi_reset_ops = {
+static struct reset_control_ops sunxi_reset_ops = {
 	.assert		= sunxi_reset_assert,
 	.deassert	= sunxi_reset_deassert,
 };
@@ -142,6 +142,7 @@ static const struct of_device_id sunxi_reset_dt_ids[] = {
 	 { .compatible = "allwinner,sun6i-a31-clock-reset", },
 	 { /* sentinel */ },
 };
+MODULE_DEVICE_TABLE(of, sunxi_reset_dt_ids);
 
 static int sunxi_reset_probe(struct platform_device *pdev)
 {
@@ -164,14 +165,28 @@ static int sunxi_reset_probe(struct platform_device *pdev)
 	data->rcdev.ops = &sunxi_reset_ops;
 	data->rcdev.of_node = pdev->dev.of_node;
 
-	return devm_reset_controller_register(&pdev->dev, &data->rcdev);
+	return reset_controller_register(&data->rcdev);
+}
+
+static int sunxi_reset_remove(struct platform_device *pdev)
+{
+	struct sunxi_reset_data *data = platform_get_drvdata(pdev);
+
+	reset_controller_unregister(&data->rcdev);
+
+	return 0;
 }
 
 static struct platform_driver sunxi_reset_driver = {
 	.probe	= sunxi_reset_probe,
+	.remove	= sunxi_reset_remove,
 	.driver = {
 		.name		= "sunxi-reset",
 		.of_match_table	= sunxi_reset_dt_ids,
 	},
 };
-builtin_platform_driver(sunxi_reset_driver);
+module_platform_driver(sunxi_reset_driver);
+
+MODULE_AUTHOR("Maxime Ripard <maxime.ripard@free-electrons.com");
+MODULE_DESCRIPTION("Allwinner SoCs Reset Controller Driver");
+MODULE_LICENSE("GPL");

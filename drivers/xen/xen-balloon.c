@@ -33,9 +33,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/mm_types.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/capability.h>
 
 #include <xen/xen.h>
@@ -55,7 +53,7 @@ static int register_balloon(struct device *dev);
 
 /* React to a change in the target key */
 static void watch_target(struct xenbus_watch *watch,
-			 const char *path, const char *token)
+			 const char **vec, unsigned int len)
 {
 	unsigned long long new_target;
 	int err;
@@ -110,6 +108,14 @@ static int __init balloon_init(void)
 	return 0;
 }
 subsys_initcall(balloon_init);
+
+static void balloon_exit(void)
+{
+    /* XXX - release balloon here */
+    return;
+}
+
+module_exit(balloon_exit);
 
 #define BALLOON_SHOW(name, format, args...)				\
 	static ssize_t show_##name(struct device *dev,			\
@@ -244,3 +250,5 @@ static int register_balloon(struct device *dev)
 
 	return 0;
 }
+
+MODULE_LICENSE("GPL");

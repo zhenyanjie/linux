@@ -13,12 +13,13 @@
 #include <linux/compat.h>
 #include <linux/mount.h>
 #include <linux/file.h>
+#include <linux/random.h>
 #include <linux/quotaops.h>
-#include <linux/uuid.h>
-#include <linux/uaccess.h>
-#include <linux/delay.h>
+#include <asm/uaccess.h>
 #include "ext4_jbd2.h"
 #include "ext4.h"
+
+#define MAX_32_NUM ((((unsigned long long) 1) << 32) - 1)
 
 /**
  * Swap memory between @a and @b for @len bytes.
@@ -154,7 +155,7 @@ static long swap_inode_boot_loader(struct super_block *sb,
 
 	swap_inode_data(inode, inode_bl);
 
-	inode->i_ctime = inode_bl->i_ctime = current_time(inode);
+	inode->i_ctime = inode_bl->i_ctime = ext4_current_time(inode);
 
 	spin_lock(&sbi->s_next_gen_lock);
 	inode->i_generation = sbi->s_next_generation++;
@@ -192,7 +193,6 @@ journal_err_out:
 	return err;
 }
 
-#ifdef CONFIG_EXT4_FS_ENCRYPTION
 static int uuid_is_zero(__u8 u[16])
 {
 	int	i;
@@ -202,7 +202,6 @@ static int uuid_is_zero(__u8 u[16])
 			return 0;
 	return 1;
 }
-#endif
 
 static int ext4_ioctl_setflags(struct inode *inode,
 			       unsigned int flags)
@@ -251,11 +250,8 @@ static int ext4_ioctl_setflags(struct inode *inode,
 			err = -EOPNOTSUPP;
 			goto flags_out;
 		}
-	} else if (oldflags & EXT4_EOFBLOCKS_FL) {
-		err = ext4_truncate(inode);
-		if (err)
-			goto flags_out;
-	}
+	} else if (oldflags & EXT4_EOFBLOCKS_FL)
+		ext4_truncate(inode);
 
 	handle = ext4_journal_start(inode, EXT4_HT_INODE, 1);
 	if (IS_ERR(handle)) {
@@ -271,9 +267,6 @@ static int ext4_ioctl_setflags(struct inode *inode,
 	for (i = 0, mask = 1; i < 32; i++, mask <<= 1) {
 		if (!(mask & EXT4_FL_USER_MODIFIABLE))
 			continue;
-		/* These flags get special treatment later */
-		if (mask == EXT4_JOURNAL_DATA_FL || mask == EXT4_EXTENTS_FL)
-			continue;
 		if (mask & flags)
 			ext4_set_inode_flag(inode, i);
 		else
@@ -281,7 +274,7 @@ static int ext4_ioctl_setflags(struct inode *inode,
 	}
 
 	ext4_set_inode_flags(inode);
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = ext4_current_time(inode);
 
 	err = ext4_mark_iloc_dirty(handle, inode, &iloc);
 flags_err:
@@ -315,9 +308,9 @@ static int ext4_ioctl_setproject(struct file *filp, __u32 projid)
 	kprojid_t kprojid;
 	struct ext4_iloc iloc;
 	struct ext4_inode *raw_inode;
-	struct dquot *transfer_to[MAXQUOTAS] = { };
 
-	if (!ext4_has_feature_project(sb)) {
+	if (!EXT4_HAS_RO_COMPAT_FEATURE(sb,
+			EXT4_FEATURE_RO_COMPAT_PROJECT)) {
 		if (projid != EXT4_DEF_PROJID)
 			return -EOPNOTSUPP;
 		else
@@ -368,16 +361,19 @@ static int ext4_ioctl_setproject(struct file *filp, __u32 projid)
 	if (err)
 		goto out_stop;
 
-	transfer_to[PRJQUOTA] = dqget(sb, make_kqid_projid(kprojid));
-	if (!IS_ERR(transfer_to[PRJQUOTA])) {
-		err = __dquot_transfer(inode, transfer_to);
-		dqput(transfer_to[PRJQUOTA]);
-		if (err)
-			goto out_dirty;
-	}
+	if (sb_has_quota_limits_enabled(sb, PRJQUOTA)) {
+		struct dquot *transfer_to[MAXQUOTAS] = { };
 
+		transfer_to[PRJQUOTA] = dqget(sb, make_kqid_projid(kprojid));
+		if (transfer_to[PRJQUOTA]) {
+			err = __dquot_transfer(inode, transfer_to);
+			dqput(transfer_to[PRJQUOTA]);
+			if (err)
+				goto out_dirty;
+		}
+	}
 	EXT4_I(inode)->i_projid = kprojid;
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = ext4_current_time(inode);
 out_dirty:
 	rc = ext4_mark_iloc_dirty(handle, inode, &iloc);
 	if (!err)
@@ -418,10 +414,6 @@ static inline __u32 ext4_iflags_to_xflags(unsigned long iflags)
 	return xflags;
 }
 
-#define EXT4_SUPPORTED_FS_XFLAGS (FS_XFLAG_SYNC | FS_XFLAG_IMMUTABLE | \
-				  FS_XFLAG_APPEND | FS_XFLAG_NODUMP | \
-				  FS_XFLAG_NOATIME | FS_XFLAG_PROJINHERIT)
-
 /* Transfer xflags flags to internal */
 static inline unsigned long ext4_xflags_to_iflags(__u32 xflags)
 {
@@ -443,52 +435,6 @@ static inline unsigned long ext4_xflags_to_iflags(__u32 xflags)
 	return iflags;
 }
 
-int ext4_shutdown(struct super_block *sb, unsigned long arg)
-{
-	struct ext4_sb_info *sbi = EXT4_SB(sb);
-	__u32 flags;
-
-	if (!capable(CAP_SYS_ADMIN))
-		return -EPERM;
-
-	if (get_user(flags, (__u32 __user *)arg))
-		return -EFAULT;
-
-	if (flags > EXT4_GOING_FLAGS_NOLOGFLUSH)
-		return -EINVAL;
-
-	if (ext4_forced_shutdown(sbi))
-		return 0;
-
-	ext4_msg(sb, KERN_ALERT, "shut down requested (%d)", flags);
-
-	switch (flags) {
-	case EXT4_GOING_FLAGS_DEFAULT:
-		freeze_bdev(sb->s_bdev);
-		set_bit(EXT4_FLAGS_SHUTDOWN, &sbi->s_ext4_flags);
-		thaw_bdev(sb->s_bdev, sb);
-		break;
-	case EXT4_GOING_FLAGS_LOGFLUSH:
-		set_bit(EXT4_FLAGS_SHUTDOWN, &sbi->s_ext4_flags);
-		if (sbi->s_journal && !is_journal_aborted(sbi->s_journal)) {
-			(void) ext4_force_commit(sb);
-			jbd2_journal_abort(sbi->s_journal, 0);
-		}
-		break;
-	case EXT4_GOING_FLAGS_NOLOGFLUSH:
-		set_bit(EXT4_FLAGS_SHUTDOWN, &sbi->s_ext4_flags);
-		if (sbi->s_journal && !is_journal_aborted(sbi->s_journal)) {
-			msleep(100);
-			jbd2_journal_abort(sbi->s_journal, 0);
-		}
-		break;
-	default:
-		return -EINVAL;
-	}
-	clear_opt(sb, DISCARD);
-	return 0;
-}
-
 long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
@@ -500,6 +446,7 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case EXT4_IOC_GETFLAGS:
+		ext4_get_inode_flags(ei);
 		flags = ei->i_flags & EXT4_FL_USER_VISIBLE;
 		return put_user(flags, (int __user *) arg);
 	case EXT4_IOC_SETFLAGS: {
@@ -511,21 +458,11 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		if (get_user(flags, (int __user *) arg))
 			return -EFAULT;
 
-		if (flags & ~EXT4_FL_USER_VISIBLE)
-			return -EOPNOTSUPP;
-		/*
-		 * chattr(1) grabs flags via GETFLAGS, modifies the result and
-		 * passes that to SETFLAGS. So we cannot easily make SETFLAGS
-		 * more restrictive than just silently masking off visible but
-		 * not settable flags as we always did.
-		 */
-		flags &= EXT4_FL_USER_MODIFIABLE;
-		if (ext4_mask_flags(inode->i_mode, flags) != flags)
-			return -EOPNOTSUPP;
-
 		err = mnt_want_write_file(filp);
 		if (err)
 			return err;
+
+		flags = ext4_mask_flags(inode->i_mode, flags);
 
 		inode_lock(inode);
 		err = ext4_ioctl_setflags(inode, flags);
@@ -568,7 +505,7 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		err = ext4_reserve_inode_write(handle, inode, &iloc);
 		if (err == 0) {
-			inode->i_ctime = current_time(inode);
+			inode->i_ctime = ext4_current_time(inode);
 			inode->i_generation = generation;
 			err = ext4_mark_iloc_dirty(handle, inode, &iloc);
 		}
@@ -833,19 +770,31 @@ resizefs_out:
 	}
 	case EXT4_IOC_PRECACHE_EXTENTS:
 		return ext4_ext_precache(inode);
-
-	case EXT4_IOC_SET_ENCRYPTION_POLICY:
-		if (!ext4_has_feature_encrypt(sb))
-			return -EOPNOTSUPP;
-		return fscrypt_ioctl_set_policy(filp, (const void __user *)arg);
-
-	case EXT4_IOC_GET_ENCRYPTION_PWSALT: {
+	case EXT4_IOC_SET_ENCRYPTION_POLICY: {
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
+		struct ext4_encryption_policy policy;
+		int err = 0;
+
+		if (copy_from_user(&policy,
+				   (struct ext4_encryption_policy __user *)arg,
+				   sizeof(policy))) {
+			err = -EFAULT;
+			goto encryption_policy_out;
+		}
+
+		err = ext4_process_policy(&policy, inode);
+encryption_policy_out:
+		return err;
+#else
+		return -EOPNOTSUPP;
+#endif
+	}
+	case EXT4_IOC_GET_ENCRYPTION_PWSALT: {
 		int err, err2;
 		struct ext4_sb_info *sbi = EXT4_SB(sb);
 		handle_t *handle;
 
-		if (!ext4_has_feature_encrypt(sb))
+		if (!ext4_sb_has_crypto(sb))
 			return -EOPNOTSUPP;
 		if (uuid_is_zero(sbi->s_es->s_encrypt_pw_salt)) {
 			err = mnt_want_write_file(filp);
@@ -875,21 +824,34 @@ resizefs_out:
 				 sbi->s_es->s_encrypt_pw_salt, 16))
 			return -EFAULT;
 		return 0;
+	}
+	case EXT4_IOC_GET_ENCRYPTION_POLICY: {
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+		struct ext4_encryption_policy policy;
+		int err = 0;
+
+		if (!ext4_encrypted_inode(inode))
+			return -ENOENT;
+		err = ext4_get_policy(inode, &policy);
+		if (err)
+			return err;
+		if (copy_to_user((void __user *)arg, &policy, sizeof(policy)))
+			return -EFAULT;
+		return 0;
 #else
 		return -EOPNOTSUPP;
 #endif
 	}
-	case EXT4_IOC_GET_ENCRYPTION_POLICY:
-		return fscrypt_ioctl_get_policy(filp, (void __user *)arg);
-
 	case EXT4_IOC_FSGETXATTR:
 	{
 		struct fsxattr fa;
 
 		memset(&fa, 0, sizeof(struct fsxattr));
+		ext4_get_inode_flags(ei);
 		fa.fsx_xflags = ext4_iflags_to_xflags(ei->i_flags & EXT4_FL_USER_VISIBLE);
 
-		if (ext4_has_feature_project(inode->i_sb)) {
+		if (EXT4_HAS_RO_COMPAT_FEATURE(inode->i_sb,
+				EXT4_FEATURE_RO_COMPAT_PROJECT)) {
 			fa.fsx_projid = (__u32)from_kprojid(&init_user_ns,
 				EXT4_I(inode)->i_projid);
 		}
@@ -912,16 +874,12 @@ resizefs_out:
 		if (!inode_owner_or_capable(inode))
 			return -EACCES;
 
-		if (fa.fsx_xflags & ~EXT4_SUPPORTED_FS_XFLAGS)
-			return -EOPNOTSUPP;
-
-		flags = ext4_xflags_to_iflags(fa.fsx_xflags);
-		if (ext4_mask_flags(inode->i_mode, flags) != flags)
-			return -EOPNOTSUPP;
-
 		err = mnt_want_write_file(filp);
 		if (err)
 			return err;
+
+		flags = ext4_xflags_to_iflags(fa.fsx_xflags);
+		flags = ext4_mask_flags(inode->i_mode, flags);
 
 		inode_lock(inode);
 		flags = (ei->i_flags & ~EXT4_FL_XFLAG_VISIBLE) |
@@ -938,8 +896,6 @@ resizefs_out:
 
 		return 0;
 	}
-	case EXT4_IOC_SHUTDOWN:
-		return ext4_shutdown(sb, arg);
 	default:
 		return -ENOTTY;
 	}
@@ -1006,7 +962,6 @@ long ext4_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case EXT4_IOC_SET_ENCRYPTION_POLICY:
 	case EXT4_IOC_GET_ENCRYPTION_PWSALT:
 	case EXT4_IOC_GET_ENCRYPTION_POLICY:
-	case EXT4_IOC_SHUTDOWN:
 		break;
 	default:
 		return -ENOIOCTLCMD;

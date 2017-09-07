@@ -8,6 +8,7 @@
 #include <linux/pci.h>
 #include <linux/iommu.h>
 #include <linux/iommu-helper.h>
+#include <linux/pci.h>
 #include <linux/sizes.h>
 #include <asm/pci_dma.h>
 
@@ -100,7 +101,8 @@ static int s390_iommu_attach_device(struct iommu_domain *domain,
 		zpci_dma_exit_device(zdev);
 
 	zdev->dma_table = s390_domain->dma_table;
-	rc = zpci_register_ioat(zdev, 0, zdev->start_dma, zdev->end_dma,
+	rc = zpci_register_ioat(zdev, 0, zdev->start_dma + PAGE_OFFSET,
+				zdev->start_dma + zdev->iommu_size - 1,
 				(u64) zdev->dma_table);
 	if (rc)
 		goto out_restore;

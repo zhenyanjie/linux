@@ -9,9 +9,9 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
-#include <linux/of.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+
 #include "hnae.h"
 
 #define cls_to_ae_dev(dev) container_of(dev, struct hnae_ae_dev, cls_dev)
@@ -57,15 +57,11 @@ static int hnae_alloc_buffer(struct hnae_ring *ring, struct hnae_desc_cb *cb)
 
 static void hnae_free_buffer(struct hnae_ring *ring, struct hnae_desc_cb *cb)
 {
-	if (unlikely(!cb->priv))
-		return;
-
 	if (cb->type == DESC_TYPE_SKB)
 		dev_kfree_skb_any((struct sk_buff *)cb->priv);
 	else if (unlikely(is_rx_ring(ring)))
 		put_page((struct page *)cb->priv);
-
-	cb->priv = NULL;
+	memset(cb, 0, sizeof(*cb));
 }
 
 static int hnae_map_buffer(struct hnae_ring *ring, struct hnae_desc_cb *cb)
@@ -100,22 +96,16 @@ static int __ae_match(struct device *dev, const void *data)
 {
 	struct hnae_ae_dev *hdev = cls_to_ae_dev(dev);
 
-	if (dev_of_node(hdev->dev))
-		return (data == &hdev->dev->of_node->fwnode);
-	else if (is_acpi_node(hdev->dev->fwnode))
-		return (data == hdev->dev->fwnode);
-
-	dev_err(dev, "__ae_match cannot read cfg data from OF or acpi\n");
-	return 0;
+	return hdev->dev->of_node == data;
 }
 
-static struct hnae_ae_dev *find_ae(const struct fwnode_handle *fwnode)
+static struct hnae_ae_dev *find_ae(const struct device_node *ae_node)
 {
 	struct device *dev;
 
-	WARN_ON(!fwnode);
+	WARN_ON(!ae_node);
 
-	dev = class_find_device(hnae_class, NULL, fwnode, __ae_match);
+	dev = class_find_device(hnae_class, NULL, ae_node, __ae_match);
 
 	return dev ? cls_to_ae_dev(dev) : NULL;
 }
@@ -201,7 +191,6 @@ hnae_init_ring(struct hnae_queue *q, struct hnae_ring *ring, int flags)
 
 	ring->q = q;
 	ring->flags = flags;
-	spin_lock_init(&ring->lock);
 	assert(!ring->desc && !ring->desc_cb && !ring->desc_dma_addr);
 
 	/* not matter for tx or rx ring, the ntc and ntc start from 0 */
@@ -323,7 +312,7 @@ EXPORT_SYMBOL(hnae_reinit_handle);
  * return handle ptr or ERR_PTR
  */
 struct hnae_handle *hnae_get_handle(struct device *owner_dev,
-				    const struct fwnode_handle	*fwnode,
+				    const struct device_node *ae_node,
 				    u32 port_id,
 				    struct hnae_buf_ops *bops)
 {
@@ -332,15 +321,13 @@ struct hnae_handle *hnae_get_handle(struct device *owner_dev,
 	int i, j;
 	int ret;
 
-	dev = find_ae(fwnode);
+	dev = find_ae(ae_node);
 	if (!dev)
 		return ERR_PTR(-ENODEV);
 
 	handle = dev->ops->get_handle(dev, port_id);
-	if (IS_ERR(handle)) {
-		put_device(&dev->cls_dev);
+	if (IS_ERR(handle))
 		return handle;
-	}
 
 	handle->dev = dev;
 	handle->owner_dev = owner_dev;
@@ -363,8 +350,6 @@ out_when_init_queue:
 	for (j = i - 1; j >= 0; j--)
 		hnae_fini_queue(handle->qs[j]);
 
-	put_device(&dev->cls_dev);
-
 	return ERR_PTR(-ENOMEM);
 }
 EXPORT_SYMBOL(hnae_get_handle);
@@ -386,8 +371,6 @@ void hnae_put_handle(struct hnae_handle *h)
 		dev->ops->put_handle(h);
 
 	module_put(dev->owner);
-
-	put_device(&dev->cls_dev);
 }
 EXPORT_SYMBOL(hnae_put_handle);
 
@@ -411,6 +394,7 @@ int hnae_ae_register(struct hnae_ae_dev *hdev, struct module *owner)
 
 	if (!hdev->ops || !hdev->ops->get_handle ||
 	    !hdev->ops->toggle_ring_irq ||
+	    !hdev->ops->toggle_queue_status ||
 	    !hdev->ops->get_status || !hdev->ops->adjust_link)
 		return -EINVAL;
 

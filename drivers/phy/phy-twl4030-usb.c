@@ -172,7 +172,6 @@ struct twl4030_usb {
 	int			irq;
 	enum musb_vbus_id_status linkstat;
 	bool			vbus_supplied;
-	bool			musb_mailbox_pending;
 
 	struct delayed_work	id_workaround_work;
 };
@@ -317,9 +316,6 @@ static enum musb_vbus_id_status
 			linkstat = MUSB_VBUS_OFF;
 	}
 
-	kobject_uevent(&twl->dev->kobj, linkstat == MUSB_VBUS_VALID
-					? KOBJ_ONLINE : KOBJ_OFFLINE);
-
 	dev_dbg(twl->dev, "HW_CONDITIONS 0x%02x/%d; link %d\n",
 			status, status, linkstat);
 
@@ -395,7 +391,7 @@ static void __twl4030_phy_power(struct twl4030_usb *twl, int on)
 	WARN_ON(twl4030_usb_write_verify(twl, PHY_PWR_CTRL, pwr) < 0);
 }
 
-static int __maybe_unused twl4030_usb_runtime_suspend(struct device *dev)
+static int twl4030_usb_runtime_suspend(struct device *dev)
 {
 	struct twl4030_usb *twl = dev_get_drvdata(dev);
 
@@ -409,7 +405,7 @@ static int __maybe_unused twl4030_usb_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused twl4030_usb_runtime_resume(struct device *dev)
+static int twl4030_usb_runtime_resume(struct device *dev)
 {
 	struct twl4030_usb *twl = dev_get_drvdata(dev);
 	int res;
@@ -443,17 +439,6 @@ static int __maybe_unused twl4030_usb_runtime_resume(struct device *dev)
 			  (PHY_CLK_CTRL_CLOCKGATING_EN |
 			   PHY_CLK_CTRL_CLK32K_EN));
 
-	twl4030_i2c_access(twl, 1);
-	twl4030_usb_set_mode(twl, twl->usb_mode);
-	if (twl->usb_mode == T2_USB_MODE_ULPI)
-		twl4030_i2c_access(twl, 0);
-	/*
-	 * According to the TPS65950 TRM, there has to be at least 50ms
-	 * delay between setting POWER_CTRL_OTG_ENAB and enabling charging
-	 * so wait here so that a fully enabled phy can be expected after
-	 * resume
-	 */
-	msleep(50);
 	return 0;
 }
 
@@ -462,6 +447,8 @@ static int twl4030_phy_power_off(struct phy *phy)
 	struct twl4030_usb *twl = phy_get_drvdata(phy);
 
 	dev_dbg(twl->dev, "%s\n", __func__);
+	pm_runtime_mark_last_busy(twl->dev);
+	pm_runtime_put_autosuspend(twl->dev);
 
 	return 0;
 }
@@ -472,9 +459,11 @@ static int twl4030_phy_power_on(struct phy *phy)
 
 	dev_dbg(twl->dev, "%s\n", __func__);
 	pm_runtime_get_sync(twl->dev);
-	schedule_delayed_work(&twl->id_workaround_work, HZ);
-	pm_runtime_mark_last_busy(twl->dev);
-	pm_runtime_put_autosuspend(twl->dev);
+	twl4030_i2c_access(twl, 1);
+	twl4030_usb_set_mode(twl, twl->usb_mode);
+	if (twl->usb_mode == T2_USB_MODE_ULPI)
+		twl4030_i2c_access(twl, 0);
+	schedule_delayed_work(&twl->id_workaround_work, 0);
 
 	return 0;
 }
@@ -548,7 +537,6 @@ static irqreturn_t twl4030_usb_irq(int irq, void *_twl)
 	struct twl4030_usb *twl = _twl;
 	enum musb_vbus_id_status status;
 	bool status_changed = false;
-	int err;
 
 	status = twl4030_usb_linkstat(twl);
 
@@ -579,12 +567,7 @@ static irqreturn_t twl4030_usb_irq(int irq, void *_twl)
 			pm_runtime_mark_last_busy(twl->dev);
 			pm_runtime_put_autosuspend(twl->dev);
 		}
-		twl->musb_mailbox_pending = true;
-	}
-	if (twl->musb_mailbox_pending) {
-		err = musb_mailbox(status);
-		if (!err)
-			twl->musb_mailbox_pending = false;
+		musb_mailbox(status);
 	}
 
 	/* don't schedule during sleep - irq works right then */
@@ -612,8 +595,7 @@ static int twl4030_phy_init(struct phy *phy)
 	struct twl4030_usb *twl = phy_get_drvdata(phy);
 
 	pm_runtime_get_sync(twl->dev);
-	twl->linkstat = MUSB_UNKNOWN;
-	schedule_delayed_work(&twl->id_workaround_work, HZ);
+	schedule_delayed_work(&twl->id_workaround_work, 0);
 	pm_runtime_mark_last_busy(twl->dev);
 	pm_runtime_put_autosuspend(twl->dev);
 
@@ -689,7 +671,6 @@ static int twl4030_usb_probe(struct platform_device *pdev)
 	twl->irq		= platform_get_irq(pdev, 0);
 	twl->vbus_supplied	= false;
 	twl->linkstat		= MUSB_UNKNOWN;
-	twl->musb_mailbox_pending = false;
 
 	twl->phy.dev		= twl->dev;
 	twl->phy.label		= "twl4030";
@@ -782,8 +763,7 @@ static int twl4030_usb_remove(struct platform_device *pdev)
 	if (cable_present(twl->linkstat))
 		pm_runtime_put_noidle(twl->dev);
 	pm_runtime_mark_last_busy(twl->dev);
-	pm_runtime_dont_use_autosuspend(&pdev->dev);
-	pm_runtime_put_sync(twl->dev);
+	pm_runtime_put_sync_suspend(twl->dev);
 	pm_runtime_disable(twl->dev);
 
 	/* autogate 60MHz ULPI clock,

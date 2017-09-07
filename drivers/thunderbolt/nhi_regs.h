@@ -1,11 +1,11 @@
 /*
- * Thunderbolt driver - NHI registers
+ * Thunderbolt Cactus Ridge driver - NHI registers
  *
  * Copyright (c) 2014 Andreas Noever <andreas.noever@gmail.com>
  */
 
-#ifndef NHI_REGS_H_
-#define NHI_REGS_H_
+#ifndef DSL3510_REGS_H_
+#define DSL3510_REGS_H_
 
 #include <linux/types.h>
 

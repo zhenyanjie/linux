@@ -342,11 +342,8 @@ static void fnic_fcoe_send_vlan_req(struct fnic *fnic)
 
 	fnic_fcoe_reset_vlans(fnic);
 	fnic->set_vlan(fnic, 0);
-
-	if (printk_ratelimit())
-		FNIC_FCS_DBG(KERN_INFO, fnic->lport->host,
-			  "Sending VLAN request...\n");
-
+	FNIC_FCS_DBG(KERN_INFO, fnic->lport->host,
+		  "Sending VLAN request...\n");
 	skb = dev_alloc_skb(sizeof(struct fip_vlan));
 	if (!skb)
 		return;
@@ -554,7 +551,7 @@ static int fnic_fcoe_handle_fip_frame(struct fnic *fnic, struct sk_buff *skb)
 			goto drop;
 		/* pass it on to fcoe */
 		ret = 1;
-	} else if (op == FIP_OP_VLAN && sub == FIP_SC_VL_NOTE) {
+	} else if (op == FIP_OP_VLAN && sub == FIP_SC_VL_REP) {
 		/* set the vlan as used */
 		fnic_fcoe_process_vlan_resp(fnic, skb);
 		ret = 0;
@@ -957,8 +954,8 @@ int fnic_alloc_rq_frame(struct vnic_rq *rq)
 	skb_put(skb, len);
 	pa = pci_map_single(fnic->pdev, skb->data, len, PCI_DMA_FROMDEVICE);
 
-	if (pci_dma_mapping_error(fnic->pdev, pa)) {
-		r = -ENOMEM;
+	r = pci_dma_mapping_error(fnic->pdev, pa);
+	if (r) {
 		printk(KERN_ERR "PCI mapping failed with error %d\n", r);
 		goto free_skb;
 	}
@@ -1096,8 +1093,8 @@ static int fnic_send_frame(struct fnic *fnic, struct fc_frame *fp)
 
 	pa = pci_map_single(fnic->pdev, eth_hdr, tot_len, PCI_DMA_TODEVICE);
 
-	if (pci_dma_mapping_error(fnic->pdev, pa)) {
-		ret = -ENOMEM;
+	ret = pci_dma_mapping_error(fnic->pdev, pa);
+	if (ret) {
 		printk(KERN_ERR "DMA map failed with error %d\n", ret);
 		goto free_skb_on_err;
 	}
@@ -1311,16 +1308,15 @@ void fnic_handle_fip_timer(struct fnic *fnic)
 	}
 	spin_unlock_irqrestore(&fnic->fnic_lock, flags);
 
-	if (fnic->ctlr.mode == FIP_MODE_NON_FIP)
+	if (fnic->ctlr.mode == FIP_ST_NON_FIP)
 		return;
 
 	spin_lock_irqsave(&fnic->vlans_lock, flags);
 	if (list_empty(&fnic->vlans)) {
-		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
 		/* no vlans available, try again */
-		if (printk_ratelimit())
-			FNIC_FCS_DBG(KERN_DEBUG, fnic->lport->host,
-				  "Start VLAN Discovery\n");
+		FNIC_FCS_DBG(KERN_DEBUG, fnic->lport->host,
+			  "Start VLAN Discovery\n");
+		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
 		fnic_event_enq(fnic, FNIC_EVT_START_VLAN_DISC);
 		return;
 	}
@@ -1336,11 +1332,10 @@ void fnic_handle_fip_timer(struct fnic *fnic)
 		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
 		break;
 	case FIP_VLAN_FAILED:
-		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
 		/* if all vlans are in failed state, restart vlan disc */
-		if (printk_ratelimit())
-			FNIC_FCS_DBG(KERN_DEBUG, fnic->lport->host,
-				  "Start VLAN Discovery\n");
+		FNIC_FCS_DBG(KERN_DEBUG, fnic->lport->host,
+			  "Start VLAN Discovery\n");
+		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
 		fnic_event_enq(fnic, FNIC_EVT_START_VLAN_DISC);
 		break;
 	case FIP_VLAN_SENT:

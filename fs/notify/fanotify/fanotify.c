@@ -6,7 +6,6 @@
 #include <linux/kernel.h> /* UINT_MAX */
 #include <linux/mount.h>
 #include <linux/sched.h>
-#include <linux/sched/user.h>
 #include <linux/types.h>
 #include <linux/wait.h>
 
@@ -32,6 +31,7 @@ static bool should_merge(struct fsnotify_event *old_fsn,
 static int fanotify_merge(struct list_head *list, struct fsnotify_event *event)
 {
 	struct fsnotify_event *test_event;
+	bool do_merge = false;
 
 	pr_debug("%s: list=%p event=%p\n", __func__, list, event);
 
@@ -47,36 +47,39 @@ static int fanotify_merge(struct list_head *list, struct fsnotify_event *event)
 
 	list_for_each_entry_reverse(test_event, list, list) {
 		if (should_merge(test_event, event)) {
-			test_event->mask |= event->mask;
-			return 1;
+			do_merge = true;
+			break;
 		}
 	}
 
-	return 0;
+	if (!do_merge)
+		return 0;
+
+	test_event->mask |= event->mask;
+	return 1;
 }
 
 #ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
 static int fanotify_get_response(struct fsnotify_group *group,
-				 struct fanotify_perm_event_info *event,
-				 struct fsnotify_iter_info *iter_info)
+				 struct fanotify_perm_event_info *event)
 {
 	int ret;
 
 	pr_debug("%s: group=%p event=%p\n", __func__, group, event);
 
-	/*
-	 * fsnotify_prepare_user_wait() fails if we race with mark deletion.
-	 * Just let the operation pass in that case.
-	 */
-	if (!fsnotify_prepare_user_wait(iter_info)) {
-		event->response = FAN_ALLOW;
-		goto out;
+	wait_event(group->fanotify_data.access_waitq, event->response ||
+				atomic_read(&group->fanotify_data.bypass_perm));
+
+	if (!event->response) {	/* bypass_perm set */
+		/*
+		 * Event was canceled because group is being destroyed. Remove
+		 * it from group's event list because we are responsible for
+		 * freeing the permission event.
+		 */
+		fsnotify_remove_event(group, &event->fae.fse);
+		return 0;
 	}
 
-	wait_event(group->fanotify_data.access_waitq, event->response);
-
-	fsnotify_finish_user_wait(iter_info);
-out:
 	/* userspace responded, convert to something usable */
 	switch (event->response) {
 	case FAN_ALLOW:
@@ -98,10 +101,10 @@ out:
 static bool fanotify_should_send_event(struct fsnotify_mark *inode_mark,
 				       struct fsnotify_mark *vfsmnt_mark,
 				       u32 event_mask,
-				       const void *data, int data_type)
+				       void *data, int data_type)
 {
 	__u32 marks_mask, marks_ignored_mask;
-	const struct path *path = data;
+	struct path *path = data;
 
 	pr_debug("%s: inode_mark=%p vfsmnt_mark=%p mask=%x data=%p"
 		 " data_type=%d\n", __func__, inode_mark, vfsmnt_mark,
@@ -148,7 +151,7 @@ static bool fanotify_should_send_event(struct fsnotify_mark *inode_mark,
 }
 
 struct fanotify_event_info *fanotify_alloc_event(struct inode *inode, u32 mask,
-						 const struct path *path)
+						 struct path *path)
 {
 	struct fanotify_event_info *event;
 
@@ -185,9 +188,8 @@ static int fanotify_handle_event(struct fsnotify_group *group,
 				 struct inode *inode,
 				 struct fsnotify_mark *inode_mark,
 				 struct fsnotify_mark *fanotify_mark,
-				 u32 mask, const void *data, int data_type,
-				 const unsigned char *file_name, u32 cookie,
-				 struct fsnotify_iter_info *iter_info)
+				 u32 mask, void *data, int data_type,
+				 const unsigned char *file_name, u32 cookie)
 {
 	int ret = 0;
 	struct fanotify_event_info *event;
@@ -228,8 +230,7 @@ static int fanotify_handle_event(struct fsnotify_group *group,
 
 #ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
 	if (mask & FAN_ALL_PERM_EVENTS) {
-		ret = fanotify_get_response(group, FANOTIFY_PE(fsn_event),
-					    iter_info);
+		ret = fanotify_get_response(group, FANOTIFY_PE(fsn_event));
 		fsnotify_destroy_event(group, fsn_event);
 	}
 #endif
@@ -262,14 +263,8 @@ static void fanotify_free_event(struct fsnotify_event *fsn_event)
 	kmem_cache_free(fanotify_event_cachep, event);
 }
 
-static void fanotify_free_mark(struct fsnotify_mark *fsn_mark)
-{
-	kmem_cache_free(fanotify_mark_cache, fsn_mark);
-}
-
 const struct fsnotify_ops fanotify_fsnotify_ops = {
 	.handle_event = fanotify_handle_event,
 	.free_group_priv = fanotify_free_group_priv,
 	.free_event = fanotify_free_event,
-	.free_mark = fanotify_free_mark,
 };

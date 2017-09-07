@@ -27,8 +27,6 @@
 #include <linux/kernel.h>
 #include <linux/net.h>
 #include <linux/poll.h>
-#include <linux/sched/signal.h>
-
 #include <net/sock.h>
 #include <net/tcp_states.h>
 
@@ -142,15 +140,13 @@ void pn_deliver_sock_broadcast(struct net *net, struct sk_buff *skb)
 	rcu_read_unlock();
 }
 
-int pn_sock_hash(struct sock *sk)
+void pn_sock_hash(struct sock *sk)
 {
 	struct hlist_head *hlist = pn_hash_list(pn_sk(sk)->sobject);
 
 	mutex_lock(&pnsocks.lock);
 	sk_add_node_rcu(sk, hlist);
 	mutex_unlock(&pnsocks.lock);
-
-	return 0;
 }
 EXPORT_SYMBOL(pn_sock_hash);
 
@@ -204,7 +200,7 @@ static int pn_socket_bind(struct socket *sock, struct sockaddr *addr, int len)
 	pn->resource = spn->spn_resource;
 
 	/* Enable RX on the socket */
-	err = sk->sk_prot->hash(sk);
+	sk->sk_prot->hash(sk);
 out_port:
 	mutex_unlock(&port_mutex);
 out:
@@ -305,7 +301,7 @@ out:
 }
 
 static int pn_socket_accept(struct socket *sock, struct socket *newsock,
-			    int flags, bool kern)
+				int flags)
 {
 	struct sock *sk = sock->sk;
 	struct sock *newsk;
@@ -314,7 +310,7 @@ static int pn_socket_accept(struct socket *sock, struct socket *newsock,
 	if (unlikely(sk->sk_state != TCP_LISTEN))
 		return -EINVAL;
 
-	newsk = sk->sk_prot->accept(sk, flags, &err, kern);
+	newsk = sk->sk_prot->accept(sk, flags, &err);
 	if (!newsk)
 		return err;
 

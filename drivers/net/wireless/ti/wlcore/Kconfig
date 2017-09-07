@@ -13,7 +13,7 @@ config WLCORE
 
 config WLCORE_SPI
 	tristate "TI wlcore SPI support"
-	depends on WLCORE && SPI_MASTER && OF
+	depends on WLCORE && SPI_MASTER
 	select CRC7
 	---help---
 	  This module adds support for the SPI interface of adapters using

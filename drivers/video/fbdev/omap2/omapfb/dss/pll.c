@@ -22,7 +22,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/sched.h>
 
-#include <video/omapfb_dss.h>
+#include <video/omapdss.h>
 
 #include "dss.h"
 

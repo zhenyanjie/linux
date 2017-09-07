@@ -7,7 +7,6 @@
  *
  * Copyright(c) 2008 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016        Intel Deutschland GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -34,7 +33,6 @@
  *
  * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016        Intel Deutschland GmbH
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -67,6 +65,7 @@
 #ifndef __iwl_fw_h__
 #define __iwl_fw_h__
 #include <linux/types.h>
+#include <net/mac80211.h>
 
 #include "iwl-fw-file.h"
 #include "iwl-fw-error-dump.h"
@@ -132,8 +131,7 @@ struct fw_desc {
 };
 
 struct fw_img {
-	struct fw_desc *sec;
-	int num_sec;
+	struct fw_desc sec[IWL_UCODE_SECTION_MAX];
 	bool is_dual_cpus;
 	u32 paging_mem_size;
 };
@@ -207,12 +205,6 @@ struct iwl_fw_cscheme_list {
  *	change APs.
  * @max_bssid_history_entries: number of BSSID/RSSI entries that the device can
  *	hold.
- * @max_hotlist_ssids: maximum number of entries for hotlist SSIDs.
- * @max_number_epno_networks: max number of epno entries.
- * @max_number_epno_networks_by_ssid: max number of epno entries if ssid is
- *	specified.
- * @max_number_of_white_listed_ssid: max number of white listed SSIDs.
- * @max_number_of_black_listed_ssid: max number of black listed SSIDs.
  */
 struct iwl_gscan_capabilities {
 	u32 max_scan_cache_size;
@@ -223,21 +215,6 @@ struct iwl_gscan_capabilities {
 	u32 max_hotlist_aps;
 	u32 max_significant_change_aps;
 	u32 max_bssid_history_entries;
-	u32 max_hotlist_ssids;
-	u32 max_number_epno_networks;
-	u32 max_number_epno_networks_by_ssid;
-	u32 max_number_of_white_listed_ssid;
-	u32 max_number_of_black_listed_ssid;
-};
-
-/**
- * enum iwl_fw_type - iwlwifi firmware type
- * @IWL_FW_DVM: DVM firmware
- * @IWL_FW_MVM: MVM firmware
- */
-enum iwl_fw_type {
-	IWL_FW_DVM,
-	IWL_FW_MVM,
 };
 
 /**
@@ -254,7 +231,7 @@ enum iwl_fw_type {
  * @inst_evtlog_ptr: event log offset for runtime ucode.
  * @inst_evtlog_size: event log size for runtime ucode.
  * @inst_errlog_ptr: error log offfset for runtime ucode.
- * @type: firmware type (&enum iwl_fw_type)
+ * @mvm_fw: indicates this is MVM firmware
  * @cipher_scheme: optional external cipher scheme.
  * @human_readable: human readable version
  * @sdio_adma_addr: the default address to set for the ADMA in SDIO mode until
@@ -285,9 +262,9 @@ struct iwl_fw {
 	u8 valid_tx_ant;
 	u8 valid_rx_ant;
 
-	enum iwl_fw_type type;
+	bool mvm_fw;
 
-	struct iwl_fw_cipher_scheme cs[IWL_UCODE_MAX_CS];
+	struct ieee80211_cipher_scheme cs[IWL_UCODE_MAX_CS];
 	u8 human_readable[FW_VER_HUMAN_READABLE_SZ];
 
 	u32 sdio_adma_addr;
@@ -296,8 +273,6 @@ struct iwl_fw {
 	struct iwl_fw_dbg_conf_tlv *dbg_conf_tlv[FW_DBG_CONF_MAX];
 	size_t dbg_conf_tlv_len[FW_DBG_CONF_MAX];
 	struct iwl_fw_dbg_trigger_tlv *dbg_trigger_tlv[FW_DBG_TRIGGER_MAX];
-	struct iwl_fw_dbg_mem_seg_tlv *dbg_mem_tlv;
-	size_t n_dbg_mem_tlv;
 	size_t dbg_trigger_tlv_len[FW_DBG_TRIGGER_MAX];
 	u8 dbg_dest_reg_num;
 	struct iwl_gscan_capabilities gscan_capa;
@@ -328,15 +303,6 @@ iwl_fw_dbg_conf_usniffer(const struct iwl_fw *fw, u8 id)
 		return false;
 
 	return conf_tlv->usniffer;
-}
-
-static inline const struct fw_img *
-iwl_get_ucode_image(const struct iwl_fw *fw, enum iwl_ucode_type ucode_type)
-{
-	if (ucode_type >= IWL_UCODE_TYPE_MAX)
-		return NULL;
-
-	return &fw->img[ucode_type];
 }
 
 #endif  /* __iwl_fw_h__ */

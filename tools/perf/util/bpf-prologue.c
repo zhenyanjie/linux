@@ -12,7 +12,6 @@
 #include "bpf-loader.h"
 #include "bpf-prologue.h"
 #include "probe-finder.h"
-#include <errno.h>
 #include <dwarf-regs.h>
 #include <linux/filter.h>
 

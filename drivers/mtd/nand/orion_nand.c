@@ -130,7 +130,6 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	nc->cmd_ctrl = orion_nand_cmd_ctrl;
 	nc->read_buf = orion_nand_read_buf;
 	nc->ecc.mode = NAND_ECC_SOFT;
-	nc->ecc.algo = NAND_ECC_HAMMING;
 
 	if (board->chip_delay)
 		nc->chip_delay = board->chip_delay;
@@ -155,9 +154,10 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 		clk_put(clk);
 	}
 
-	ret = nand_scan(mtd, 1);
-	if (ret)
+	if (nand_scan(mtd, 1)) {
+		ret = -ENXIO;
 		goto no_dev;
+	}
 
 	mtd->name = "orion_nand";
 	ret = mtd_device_register(mtd, board->parts, board->nr_parts);

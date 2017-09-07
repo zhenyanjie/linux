@@ -72,10 +72,7 @@ void rtl_btc_init_hal_vars(struct rtl_priv *rtlpriv)
 		 __func__, bt_type);
 	exhalbtc_set_chip_type(bt_type);
 
-	if (rtlpriv->cfg->mod_params->ant_sel == 1)
-		exhalbtc_set_ant_num(rtlpriv, BT_COEX_ANT_TYPE_DETECTED, 1);
-	else
-		exhalbtc_set_ant_num(rtlpriv, BT_COEX_ANT_TYPE_PG, ant_num);
+	exhalbtc_set_ant_num(BT_COEX_ANT_TYPE_PG, ant_num);
 }
 
 void rtl_btc_init_hw_config(struct rtl_priv *rtlpriv)
@@ -178,6 +175,17 @@ struct rtl_btc_ops *rtl_btc_get_ops_pointer(void)
 }
 EXPORT_SYMBOL(rtl_btc_get_ops_pointer);
 
+u8 rtl_get_hwpg_ant_num(struct rtl_priv *rtlpriv)
+{
+	u8 num;
+
+	if (rtlpriv->btcoexist.btc_info.ant_num == ANT_X2)
+		num = 2;
+	else
+		num = 1;
+
+	return num;
+}
 
 enum rt_media_status mgnt_link_status_query(struct ieee80211_hw *hw)
 {
@@ -196,6 +204,11 @@ enum rt_media_status mgnt_link_status_query(struct ieee80211_hw *hw)
 u8 rtl_get_hwpg_bt_exist(struct rtl_priv *rtlpriv)
 {
 	return rtlpriv->btcoexist.btc_info.btcoexist;
+}
+
+u8 rtl_get_hwpg_bt_type(struct rtl_priv *rtlpriv)
+{
+	return rtlpriv->btcoexist.btc_info.bt_type;
 }
 
 MODULE_AUTHOR("Page He	<page_he@realsil.com.cn>");

@@ -911,7 +911,6 @@ static void snd_usbmidi_us122l_output(struct snd_usb_midi_out_endpoint *ep,
 	switch (snd_usb_get_speed(ep->umidi->dev)) {
 	case USB_SPEED_HIGH:
 	case USB_SPEED_SUPER:
-	case USB_SPEED_SUPER_PLUS:
 		count = 1;
 		break;
 	default:
@@ -1234,14 +1233,14 @@ static void snd_usbmidi_input_trigger(struct snd_rawmidi_substream *substream,
 		clear_bit(substream->number, &umidi->input_triggered);
 }
 
-static const struct snd_rawmidi_ops snd_usbmidi_output_ops = {
+static struct snd_rawmidi_ops snd_usbmidi_output_ops = {
 	.open = snd_usbmidi_output_open,
 	.close = snd_usbmidi_output_close,
 	.trigger = snd_usbmidi_output_trigger,
 	.drain = snd_usbmidi_output_drain,
 };
 
-static const struct snd_rawmidi_ops snd_usbmidi_input_ops = {
+static struct snd_rawmidi_ops snd_usbmidi_input_ops = {
 	.open = snd_usbmidi_input_open,
 	.close = snd_usbmidi_input_close,
 	.trigger = snd_usbmidi_input_trigger
@@ -1922,7 +1921,7 @@ static int roland_load_put(struct snd_kcontrol *kcontrol,
 	return changed;
 }
 
-static const struct snd_kcontrol_new roland_load_ctl = {
+static struct snd_kcontrol_new roland_load_ctl = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "MIDI Input Mode",
 	.info = roland_load_info,
@@ -2321,11 +2320,10 @@ EXPORT_SYMBOL(snd_usbmidi_resume);
 /*
  * Creates and registers everything needed for a MIDI streaming interface.
  */
-int __snd_usbmidi_create(struct snd_card *card,
-			 struct usb_interface *iface,
-			 struct list_head *midi_list,
-			 const struct snd_usb_audio_quirk *quirk,
-			 unsigned int usb_id)
+int snd_usbmidi_create(struct snd_card *card,
+		       struct usb_interface *iface,
+		       struct list_head *midi_list,
+		       const struct snd_usb_audio_quirk *quirk)
 {
 	struct snd_usb_midi *umidi;
 	struct snd_usb_midi_endpoint_info endpoints[MIDI_MAX_ENDPOINTS];
@@ -2343,10 +2341,8 @@ int __snd_usbmidi_create(struct snd_card *card,
 	spin_lock_init(&umidi->disc_lock);
 	init_rwsem(&umidi->disc_rwsem);
 	mutex_init(&umidi->mutex);
-	if (!usb_id)
-		usb_id = USB_ID(le16_to_cpu(umidi->dev->descriptor.idVendor),
+	umidi->usb_id = USB_ID(le16_to_cpu(umidi->dev->descriptor.idVendor),
 			       le16_to_cpu(umidi->dev->descriptor.idProduct));
-	umidi->usb_id = usb_id;
 	setup_timer(&umidi->error_timer, snd_usbmidi_error_timer,
 		    (unsigned long)umidi);
 
@@ -2467,4 +2463,4 @@ int __snd_usbmidi_create(struct snd_card *card,
 	list_add_tail(&umidi->list, midi_list);
 	return 0;
 }
-EXPORT_SYMBOL(__snd_usbmidi_create);
+EXPORT_SYMBOL(snd_usbmidi_create);

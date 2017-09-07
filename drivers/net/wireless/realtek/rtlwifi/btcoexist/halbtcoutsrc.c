@@ -141,38 +141,9 @@ static u8 halbtc_get_wifi_central_chnl(struct btc_coexist *btcoexist)
 
 	if (rtlphy->current_channel != 0)
 		chnl = rtlphy->current_channel;
-	RT_TRACE(rtlpriv, COMP_BT_COEXIST, DBG_LOUD,
-		 "static halbtc_get_wifi_central_chnl:%d\n", chnl);
+	BTC_PRINT(BTC_MSG_ALGORITHM, ALGO_TRACE,
+		  "static halbtc_get_wifi_central_chnl:%d\n", chnl);
 	return chnl;
-}
-
-u8 rtl_get_hwpg_single_ant_path(struct rtl_priv *rtlpriv)
-{
-	return rtlpriv->btcoexist.btc_info.single_ant_path;
-}
-
-u8 rtl_get_hwpg_bt_type(struct rtl_priv *rtlpriv)
-{
-	return rtlpriv->btcoexist.btc_info.bt_type;
-}
-
-u8 rtl_get_hwpg_ant_num(struct rtl_priv *rtlpriv)
-{
-	u8 num;
-
-	if (rtlpriv->btcoexist.btc_info.ant_num == ANT_X2)
-		num = 2;
-	else
-		num = 1;
-
-	return num;
-}
-
-u8 rtl_get_hwpg_package_type(struct rtl_priv *rtlpriv)
-{
-	struct rtl_hal *rtlhal = rtl_hal(rtlpriv);
-
-	return rtlhal->package_type;
 }
 
 static void halbtc_leave_lps(struct btc_coexist *btcoexist)
@@ -364,9 +335,6 @@ static bool halbtc_get(void *void_btcoexist, u8 get_type, void *out_buf)
 	case BTC_GET_U4_BT_PATCH_VER:
 		*u32_tmp = halbtc_get_bt_patch_version(btcoexist);
 		break;
-	case BTC_GET_U4_VENDOR:
-		*u32_tmp = BTC_VENDOR_OTHER;
-		break;
 	case BTC_GET_U1_WIFI_DOT11_CHNL:
 		*u8_tmp = rtlphy->current_channel;
 		break;
@@ -466,7 +434,7 @@ static bool halbtc_set(void *void_btcoexist, u8 set_type, void *in_buf)
 	case BTC_SET_ACT_DISABLE_LOW_POWER:
 		halbtc_disable_low_power();
 		break;
-	case BTC_SET_ACT_UPDATE_RAMASK:
+	case BTC_SET_ACT_UPDATE_ra_mask:
 		btcoexist->bt_info.ra_mask = *u32_tmp;
 		break;
 	case BTC_SET_ACT_SEND_MIMO_PS:
@@ -933,7 +901,7 @@ void exhalbtc_stack_update_profile_info(void)
 {
 }
 
-void exhalbtc_update_min_bt_rssi(s8 bt_rssi)
+void exhalbtc_update_min_bt_rssi(char bt_rssi)
 {
 	struct btc_coexist *btcoexist = &gl_bt_coexist;
 
@@ -997,38 +965,13 @@ void exhalbtc_set_chip_type(u8 chip_type)
 	}
 }
 
-void exhalbtc_set_ant_num(struct rtl_priv *rtlpriv, u8 type, u8 ant_num)
+void exhalbtc_set_ant_num(u8 type, u8 ant_num)
 {
 	if (BT_COEX_ANT_TYPE_PG == type) {
 		gl_bt_coexist.board_info.pg_ant_num = ant_num;
 		gl_bt_coexist.board_info.btdm_ant_num = ant_num;
-		/* The antenna position:
-		 * Main (default) or Aux for pgAntNum=2 && btdmAntNum =1.
-		 * The antenna position should be determined by
-		 * auto-detect mechanism.
-		 * The following is assumed to main,
-		 * and those must be modified
-		 * if y auto-detect mechanism is ready
-		 */
-		if ((gl_bt_coexist.board_info.pg_ant_num == 2) &&
-		    (gl_bt_coexist.board_info.btdm_ant_num == 1))
-			gl_bt_coexist.board_info.btdm_ant_pos =
-						       BTC_ANTENNA_AT_MAIN_PORT;
-		else
-			gl_bt_coexist.board_info.btdm_ant_pos =
-						       BTC_ANTENNA_AT_MAIN_PORT;
 	} else if (BT_COEX_ANT_TYPE_ANTDIV == type) {
 		gl_bt_coexist.board_info.btdm_ant_num = ant_num;
-		gl_bt_coexist.board_info.btdm_ant_pos =
-						       BTC_ANTENNA_AT_MAIN_PORT;
-	} else if (type == BT_COEX_ANT_TYPE_DETECTED) {
-		gl_bt_coexist.board_info.btdm_ant_num = ant_num;
-		if (rtlpriv->cfg->mod_params->ant_sel == 1)
-			gl_bt_coexist.board_info.btdm_ant_pos =
-				BTC_ANTENNA_AT_AUX_PORT;
-		else
-			gl_bt_coexist.board_info.btdm_ant_pos =
-				BTC_ANTENNA_AT_MAIN_PORT;
 	}
 }
 

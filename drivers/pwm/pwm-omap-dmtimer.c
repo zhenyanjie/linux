@@ -31,7 +31,6 @@
 #include <linux/time.h>
 
 #define DM_TIMER_LOAD_MIN 0xfffffffe
-#define DM_TIMER_MAX      0xffffffff
 
 struct pwm_omap_dmtimer_chip {
 	struct pwm_chip chip;
@@ -47,9 +46,13 @@ to_pwm_omap_dmtimer_chip(struct pwm_chip *chip)
 	return container_of(chip, struct pwm_omap_dmtimer_chip, chip);
 }
 
-static u32 pwm_omap_dmtimer_get_clock_cycles(unsigned long clk_rate, int ns)
+static int pwm_omap_dmtimer_calc_value(unsigned long clk_rate, int ns)
 {
-	return DIV_ROUND_CLOSEST_ULL((u64)clk_rate * ns, NSEC_PER_SEC);
+	u64 c = (u64)clk_rate * ns;
+
+	do_div(c, NSEC_PER_SEC);
+
+	return DM_TIMER_LOAD_MIN - c;
 }
 
 static void pwm_omap_dmtimer_start(struct pwm_omap_dmtimer_chip *omap)
@@ -96,14 +99,12 @@ static int pwm_omap_dmtimer_config(struct pwm_chip *chip,
 				   int duty_ns, int period_ns)
 {
 	struct pwm_omap_dmtimer_chip *omap = to_pwm_omap_dmtimer_chip(chip);
-	u32 period_cycles, duty_cycles;
-	u32 load_value, match_value;
+	int load_value, match_value;
 	struct clk *fclk;
 	unsigned long clk_rate;
 	bool timer_active;
 
-	dev_dbg(chip->dev, "requested duty cycle: %d ns, period: %d ns\n",
-		duty_ns, period_ns);
+	dev_dbg(chip->dev, "duty cycle: %d, period %d\n", duty_ns, period_ns);
 
 	mutex_lock(&omap->mutex);
 	if (duty_ns == pwm_get_duty_cycle(pwm) &&
@@ -116,13 +117,15 @@ static int pwm_omap_dmtimer_config(struct pwm_chip *chip,
 	fclk = omap->pdata->get_fclk(omap->dm_timer);
 	if (!fclk) {
 		dev_err(chip->dev, "invalid pmtimer fclk\n");
-		goto err_einval;
+		mutex_unlock(&omap->mutex);
+		return -EINVAL;
 	}
 
 	clk_rate = clk_get_rate(fclk);
 	if (!clk_rate) {
 		dev_err(chip->dev, "invalid pmtimer fclk rate\n");
-		goto err_einval;
+		mutex_unlock(&omap->mutex);
+		return -EINVAL;
 	}
 
 	dev_dbg(chip->dev, "clk rate: %luHz\n", clk_rate);
@@ -130,51 +133,11 @@ static int pwm_omap_dmtimer_config(struct pwm_chip *chip,
 	/*
 	 * Calculate the appropriate load and match values based on the
 	 * specified period and duty cycle. The load value determines the
-	 * period time and the match value determines the duty time.
-	 *
-	 * The period lasts for (DM_TIMER_MAX-load_value+1) clock cycles.
-	 * Similarly, the active time lasts (match_value-load_value+1) cycles.
-	 * The non-active time is the remainder: (DM_TIMER_MAX-match_value)
-	 * clock cycles.
-	 *
-	 * NOTE: It is required that: load_value <= match_value < DM_TIMER_MAX
-	 *
-	 * References:
-	 *   OMAP4430/60/70 TRM sections 22.2.4.10 and 22.2.4.11
-	 *   AM335x Sitara TRM sections 20.1.3.5 and 20.1.3.6
+	 * cycle time and the match value determines the duty cycle.
 	 */
-	period_cycles = pwm_omap_dmtimer_get_clock_cycles(clk_rate, period_ns);
-	duty_cycles = pwm_omap_dmtimer_get_clock_cycles(clk_rate, duty_ns);
-
-	if (period_cycles < 2) {
-		dev_info(chip->dev,
-			 "period %d ns too short for clock rate %lu Hz\n",
-			 period_ns, clk_rate);
-		goto err_einval;
-	}
-
-	if (duty_cycles < 1) {
-		dev_dbg(chip->dev,
-			"duty cycle %d ns is too short for clock rate %lu Hz\n",
-			duty_ns, clk_rate);
-		dev_dbg(chip->dev, "using minimum of 1 clock cycle\n");
-		duty_cycles = 1;
-	} else if (duty_cycles >= period_cycles) {
-		dev_dbg(chip->dev,
-			"duty cycle %d ns is too long for period %d ns at clock rate %lu Hz\n",
-			duty_ns, period_ns, clk_rate);
-		dev_dbg(chip->dev, "using maximum of 1 clock cycle less than period\n");
-		duty_cycles = period_cycles - 1;
-	}
-
-	dev_dbg(chip->dev, "effective duty cycle: %lld ns, period: %lld ns\n",
-		DIV_ROUND_CLOSEST_ULL((u64)NSEC_PER_SEC * duty_cycles,
-				      clk_rate),
-		DIV_ROUND_CLOSEST_ULL((u64)NSEC_PER_SEC * period_cycles,
-				      clk_rate));
-
-	load_value = (DM_TIMER_MAX - period_cycles) + 1;
-	match_value = load_value + duty_cycles - 1;
+	load_value = pwm_omap_dmtimer_calc_value(clk_rate, period_ns);
+	match_value = pwm_omap_dmtimer_calc_value(clk_rate,
+						  period_ns - duty_ns);
 
 	/*
 	 * We MUST stop the associated dual-mode timer before attempting to
@@ -192,7 +155,7 @@ static int pwm_omap_dmtimer_config(struct pwm_chip *chip,
 		load_value, load_value,	match_value, match_value);
 
 	omap->pdata->set_pwm(omap->dm_timer,
-			      pwm_get_polarity(pwm) == PWM_POLARITY_INVERSED,
+			      pwm->polarity == PWM_POLARITY_INVERSED,
 			      true,
 			      PWM_OMAP_DMTIMER_TRIGGER_OVERFLOW_AND_COMPARE);
 
@@ -203,11 +166,6 @@ static int pwm_omap_dmtimer_config(struct pwm_chip *chip,
 	mutex_unlock(&omap->mutex);
 
 	return 0;
-
-err_einval:
-	mutex_unlock(&omap->mutex);
-
-	return -EINVAL;
 }
 
 static int pwm_omap_dmtimer_set_polarity(struct pwm_chip *chip,
@@ -245,7 +203,7 @@ static int pwm_omap_dmtimer_probe(struct platform_device *pdev)
 	struct pwm_omap_dmtimer_chip *omap;
 	struct pwm_omap_dmtimer_pdata *pdata;
 	pwm_omap_dmtimer *dm_timer;
-	u32 v;
+	u32 prescaler;
 	int status;
 
 	pdata = dev_get_platdata(&pdev->dev);
@@ -306,12 +264,10 @@ static int pwm_omap_dmtimer_probe(struct platform_device *pdev)
 	if (pm_runtime_active(&omap->dm_timer_pdev->dev))
 		omap->pdata->stop(omap->dm_timer);
 
-	if (!of_property_read_u32(pdev->dev.of_node, "ti,prescaler", &v))
-		omap->pdata->set_prescaler(omap->dm_timer, v);
-
-	/* setup dmtimer clock source */
-	if (!of_property_read_u32(pdev->dev.of_node, "ti,clock-source", &v))
-		omap->pdata->set_source(omap->dm_timer, v);
+	/* setup dmtimer prescaler */
+	if (!of_property_read_u32(pdev->dev.of_node, "ti,prescaler",
+				&prescaler))
+		omap->pdata->set_prescaler(omap->dm_timer, prescaler);
 
 	omap->chip.dev = &pdev->dev;
 	omap->chip.ops = &pwm_omap_dmtimer_ops;

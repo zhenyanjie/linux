@@ -177,6 +177,7 @@ static int sdhci_pxav2_probe(struct platform_device *pdev)
 		return PTR_ERR(host);
 
 	pltfm_host = sdhci_priv(host);
+	pltfm_host->priv = NULL;
 
 	clk = clk_get(dev, "PXA-SDHCLK");
 	if (IS_ERR(clk)) {
@@ -185,11 +186,7 @@ static int sdhci_pxav2_probe(struct platform_device *pdev)
 		goto err_clk_get;
 	}
 	pltfm_host->clk = clk;
-	ret = clk_prepare_enable(clk);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to enable io clock\n");
-		goto err_clk_enable;
-	}
+	clk_prepare_enable(clk);
 
 	host->quirks = SDHCI_QUIRK_BROKEN_ADMA
 		| SDHCI_QUIRK_BROKEN_TIMEOUT_VAL
@@ -226,11 +223,12 @@ static int sdhci_pxav2_probe(struct platform_device *pdev)
 		goto err_add_host;
 	}
 
+	platform_set_drvdata(pdev, host);
+
 	return 0;
 
 err_add_host:
 	clk_disable_unprepare(clk);
-err_clk_enable:
 	clk_put(clk);
 err_clk_get:
 	sdhci_pltfm_free(pdev);
@@ -255,7 +253,7 @@ static struct platform_driver sdhci_pxav2_driver = {
 	.driver		= {
 		.name	= "sdhci-pxav2",
 		.of_match_table = of_match_ptr(sdhci_pxav2_of_match),
-		.pm	= &sdhci_pltfm_pmops,
+		.pm	= SDHCI_PLTFM_PMOPS,
 	},
 	.probe		= sdhci_pxav2_probe,
 	.remove		= sdhci_pxav2_remove,

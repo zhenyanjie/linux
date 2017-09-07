@@ -56,6 +56,7 @@ struct tusb_omap_dma_ch {
 
 struct tusb_omap_dma {
 	struct dma_controller		controller;
+	struct musb			*musb;
 	void __iomem			*tbase;
 
 	int				ch;
@@ -309,9 +310,9 @@ static int tusb_omap_dma_program(struct dma_channel *channel, u16 packet_sz,
 
 	dma_params.frame_count	= chdat->transfer_len / 32; /* Burst sz frame */
 
-	dev_dbg(musb->controller, "ep%i %s dma ch%i dma: %pad len: %u(%u) packet_sz: %i(%i)\n",
+	dev_dbg(musb->controller, "ep%i %s dma ch%i dma: %08x len: %u(%u) packet_sz: %i(%i)\n",
 		chdat->epnum, chdat->tx ? "tx" : "rx",
-		ch, &dma_addr, chdat->transfer_len, len,
+		ch, dma_addr, chdat->transfer_len, len,
 		chdat->transfer_packet_sz, packet_sz);
 
 	/*
@@ -496,7 +497,7 @@ tusb_omap_dma_allocate(struct dma_controller *c,
 	u32			reg;
 
 	tusb_dma = container_of(c, struct tusb_omap_dma, controller);
-	musb = tusb_dma->controller.musb;
+	musb = tusb_dma->musb;
 	tbase = musb->ctrl_base;
 
 	reg = musb_readl(tbase, TUSB_DMA_INT_MASK);
@@ -533,7 +534,7 @@ tusb_omap_dma_allocate(struct dma_controller *c,
 		dev_name = "TUSB receive";
 	}
 
-	chdat->musb = tusb_dma->controller.musb;
+	chdat->musb = tusb_dma->musb;
 	chdat->tbase = tusb_dma->tbase;
 	chdat->hw_ep = hw_ep;
 	chdat->epnum = hw_ep->epnum;
@@ -666,7 +667,7 @@ tusb_dma_controller_create(struct musb *musb, void __iomem *base)
 	if (!tusb_dma)
 		goto out;
 
-	tusb_dma->controller.musb = musb;
+	tusb_dma->musb = musb;
 	tusb_dma->tbase = musb->ctrl_base;
 
 	tusb_dma->ch = -1;

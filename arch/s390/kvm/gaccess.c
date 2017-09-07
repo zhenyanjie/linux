@@ -6,11 +6,8 @@
  */
 
 #include <linux/vmalloc.h>
-#include <linux/mm_types.h>
 #include <linux/err.h>
-
 #include <asm/pgtable.h>
-#include <asm/gmap.h>
 #include "kvm-s390.h"
 #include "gaccess.h"
 #include <asm/switch_to.h>
@@ -168,7 +165,8 @@ union page_table_entry {
 		unsigned long z  : 1; /* Zero Bit */
 		unsigned long i  : 1; /* Page-Invalid Bit */
 		unsigned long p  : 1; /* DAT-Protection Bit */
-		unsigned long	 : 9;
+		unsigned long co : 1; /* Change-Recording Override */
+		unsigned long	 : 8;
 	};
 };
 
@@ -374,8 +372,8 @@ void ipte_unlock(struct kvm_vcpu *vcpu)
 		ipte_unlock_simple(vcpu);
 }
 
-static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, u8 ar,
-			  enum gacc_mode mode)
+static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, ar_t ar,
+			  int write)
 {
 	union alet alet;
 	struct ale ale;
@@ -456,7 +454,7 @@ static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, u8 ar,
 		}
 	}
 
-	if (ale.fo == 1 && mode == GACC_STORE)
+	if (ale.fo == 1 && write)
 		return PGM_PROTECTION;
 
 	asce->val = aste.asce;
@@ -466,9 +464,7 @@ static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, u8 ar,
 struct trans_exc_code_bits {
 	unsigned long addr : 52; /* Translation-exception Address */
 	unsigned long fsi  : 2;  /* Access Exception Fetch/Store Indication */
-	unsigned long	   : 2;
-	unsigned long b56  : 1;
-	unsigned long	   : 3;
+	unsigned long	   : 6;
 	unsigned long b60  : 1;
 	unsigned long b61  : 1;
 	unsigned long as   : 2;  /* ASCE Identifier */
@@ -480,87 +476,26 @@ enum {
 	FSI_FETCH   = 2  /* Exception was due to fetch operation */
 };
 
-enum prot_type {
-	PROT_TYPE_LA   = 0,
-	PROT_TYPE_KEYC = 1,
-	PROT_TYPE_ALC  = 2,
-	PROT_TYPE_DAT  = 3,
-};
-
-static int trans_exc(struct kvm_vcpu *vcpu, int code, unsigned long gva,
-		     u8 ar, enum gacc_mode mode, enum prot_type prot)
-{
-	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
-	struct trans_exc_code_bits *tec;
-
-	memset(pgm, 0, sizeof(*pgm));
-	pgm->code = code;
-	tec = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
-
-	switch (code) {
-	case PGM_PROTECTION:
-		switch (prot) {
-		case PROT_TYPE_LA:
-			tec->b56 = 1;
-			break;
-		case PROT_TYPE_KEYC:
-			tec->b60 = 1;
-			break;
-		case PROT_TYPE_ALC:
-			tec->b60 = 1;
-			/* FALL THROUGH */
-		case PROT_TYPE_DAT:
-			tec->b61 = 1;
-			break;
-		}
-		/* FALL THROUGH */
-	case PGM_ASCE_TYPE:
-	case PGM_PAGE_TRANSLATION:
-	case PGM_REGION_FIRST_TRANS:
-	case PGM_REGION_SECOND_TRANS:
-	case PGM_REGION_THIRD_TRANS:
-	case PGM_SEGMENT_TRANSLATION:
-		/*
-		 * op_access_id only applies to MOVE_PAGE -> set bit 61
-		 * exc_access_id has to be set to 0 for some instructions. Both
-		 * cases have to be handled by the caller.
-		 */
-		tec->addr = gva >> PAGE_SHIFT;
-		tec->fsi = mode == GACC_STORE ? FSI_STORE : FSI_FETCH;
-		tec->as = psw_bits(vcpu->arch.sie_block->gpsw).as;
-		/* FALL THROUGH */
-	case PGM_ALEN_TRANSLATION:
-	case PGM_ALE_SEQUENCE:
-	case PGM_ASTE_VALIDITY:
-	case PGM_ASTE_SEQUENCE:
-	case PGM_EXTENDED_AUTHORITY:
-		/*
-		 * We can always store exc_access_id, as it is
-		 * undefined for non-ar cases. It is undefined for
-		 * most DAT protection exceptions.
-		 */
-		pgm->exc_access_id = ar;
-		break;
-	}
-	return code;
-}
-
 static int get_vcpu_asce(struct kvm_vcpu *vcpu, union asce *asce,
-			 unsigned long ga, u8 ar, enum gacc_mode mode)
+			 ar_t ar, int write)
 {
 	int rc;
-	struct psw_bits psw = psw_bits(vcpu->arch.sie_block->gpsw);
+	psw_t *psw = &vcpu->arch.sie_block->gpsw;
+	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
+	struct trans_exc_code_bits *tec_bits;
 
-	if (!psw.t) {
+	memset(pgm, 0, sizeof(*pgm));
+	tec_bits = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
+	tec_bits->fsi = write ? FSI_STORE : FSI_FETCH;
+	tec_bits->as = psw_bits(*psw).as;
+
+	if (!psw_bits(*psw).t) {
 		asce->val = 0;
 		asce->r = 1;
 		return 0;
 	}
 
-	if (mode == GACC_IFETCH)
-		psw.as = psw.as == PSW_AS_HOME ? PSW_AS_HOME : PSW_AS_PRIMARY;
-
-	switch (psw.as) {
+	switch (psw_bits(vcpu->arch.sie_block->gpsw).as) {
 	case PSW_AS_PRIMARY:
 		asce->val = vcpu->arch.sie_block->gcr[1];
 		return 0;
@@ -571,9 +506,22 @@ static int get_vcpu_asce(struct kvm_vcpu *vcpu, union asce *asce,
 		asce->val = vcpu->arch.sie_block->gcr[13];
 		return 0;
 	case PSW_AS_ACCREG:
-		rc = ar_translation(vcpu, asce, ar, mode);
+		rc = ar_translation(vcpu, asce, ar, write);
+		switch (rc) {
+		case PGM_ALEN_TRANSLATION:
+		case PGM_ALE_SEQUENCE:
+		case PGM_ASTE_VALIDITY:
+		case PGM_ASTE_SEQUENCE:
+		case PGM_EXTENDED_AUTHORITY:
+			vcpu->arch.pgm.exc_access_id = ar;
+			break;
+		case PGM_PROTECTION:
+			tec_bits->b60 = 1;
+			tec_bits->b61 = 1;
+			break;
+		}
 		if (rc > 0)
-			return trans_exc(vcpu, rc, ga, ar, mode, PROT_TYPE_ALC);
+			pgm->code = rc;
 		return rc;
 	}
 	return 0;
@@ -590,7 +538,7 @@ static int deref_table(struct kvm *kvm, unsigned long gpa, unsigned long *val)
  * @gva: guest virtual address
  * @gpa: points to where guest physical (absolute) address should be stored
  * @asce: effective asce
- * @mode: indicates the access mode to be used
+ * @write: indicates if access is a write access
  *
  * Translate a guest virtual address into a guest absolute address by means
  * of dynamic address translation as specified by the architecture.
@@ -606,7 +554,7 @@ static int deref_table(struct kvm *kvm, unsigned long gpa, unsigned long *val)
  */
 static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 				     unsigned long *gpa, const union asce asce,
-				     enum gacc_mode mode)
+				     int write)
 {
 	union vaddress vaddr = {.addr = gva};
 	union raddress raddr = {.addr = gva};
@@ -744,12 +692,14 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 		return PGM_PAGE_TRANSLATION;
 	if (pte.z)
 		return PGM_TRANSLATION_SPEC;
+	if (pte.co && !edat1)
+		return PGM_TRANSLATION_SPEC;
 	dat_protection |= pte.p;
 	raddr.pfra = pte.pfra;
 real_address:
 	raddr.addr = kvm_s390_real_to_abs(vcpu, raddr.addr);
 absolute_address:
-	if (mode == GACC_STORE && dat_protection)
+	if (write && dat_protection)
 		return PGM_PROTECTION;
 	if (kvm_is_error_gpa(vcpu->kvm, raddr.addr))
 		return PGM_ADDRESSING;
@@ -776,31 +726,40 @@ static int low_address_protection_enabled(struct kvm_vcpu *vcpu,
 	return 1;
 }
 
-static int guest_page_range(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar,
+static int guest_page_range(struct kvm_vcpu *vcpu, unsigned long ga,
 			    unsigned long *pages, unsigned long nr_pages,
-			    const union asce asce, enum gacc_mode mode)
+			    const union asce asce, int write)
 {
+	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
-	int lap_enabled, rc = 0;
+	struct trans_exc_code_bits *tec_bits;
+	int lap_enabled, rc;
 
+	tec_bits = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
 	lap_enabled = low_address_protection_enabled(vcpu, asce);
 	while (nr_pages) {
 		ga = kvm_s390_logical_to_effective(vcpu, ga);
-		if (mode == GACC_STORE && lap_enabled && is_low_address(ga))
-			return trans_exc(vcpu, PGM_PROTECTION, ga, ar, mode,
-					 PROT_TYPE_LA);
+		tec_bits->addr = ga >> PAGE_SHIFT;
+		if (write && lap_enabled && is_low_address(ga)) {
+			pgm->code = PGM_PROTECTION;
+			return pgm->code;
+		}
 		ga &= PAGE_MASK;
 		if (psw_bits(*psw).t) {
-			rc = guest_translate(vcpu, ga, pages, asce, mode);
+			rc = guest_translate(vcpu, ga, pages, asce, write);
 			if (rc < 0)
 				return rc;
+			if (rc == PGM_PROTECTION)
+				tec_bits->b61 = 1;
+			if (rc)
+				pgm->code = rc;
 		} else {
 			*pages = kvm_s390_real_to_abs(vcpu, ga);
 			if (kvm_is_error_gpa(vcpu->kvm, *pages))
-				rc = PGM_ADDRESSING;
+				pgm->code = PGM_ADDRESSING;
 		}
-		if (rc)
-			return trans_exc(vcpu, rc, ga, ar, mode, PROT_TYPE_DAT);
+		if (pgm->code)
+			return pgm->code;
 		ga += PAGE_SIZE;
 		pages++;
 		nr_pages--;
@@ -808,8 +767,8 @@ static int guest_page_range(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar,
 	return 0;
 }
 
-int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar, void *data,
-		 unsigned long len, enum gacc_mode mode)
+int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, ar_t ar, void *data,
+		 unsigned long len, int write)
 {
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
 	unsigned long _len, nr_pages, gpa, idx;
@@ -821,8 +780,7 @@ int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar, void *data,
 
 	if (!len)
 		return 0;
-	ga = kvm_s390_logical_to_effective(vcpu, ga);
-	rc = get_vcpu_asce(vcpu, &asce, ga, ar, mode);
+	rc = get_vcpu_asce(vcpu, &asce, ar, write);
 	if (rc)
 		return rc;
 	nr_pages = (((ga & ~PAGE_MASK) + len - 1) >> PAGE_SHIFT) + 1;
@@ -834,11 +792,11 @@ int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar, void *data,
 	need_ipte_lock = psw_bits(*psw).t && !asce.r;
 	if (need_ipte_lock)
 		ipte_lock(vcpu);
-	rc = guest_page_range(vcpu, ga, ar, pages, nr_pages, asce, mode);
+	rc = guest_page_range(vcpu, ga, pages, nr_pages, asce, write);
 	for (idx = 0; idx < nr_pages && !rc; idx++) {
 		gpa = *(pages + idx) + (ga & ~PAGE_MASK);
 		_len = min(PAGE_SIZE - (gpa & ~PAGE_MASK), len);
-		if (mode == GACC_STORE)
+		if (write)
 			rc = kvm_write_guest(vcpu->kvm, gpa, data, _len);
 		else
 			rc = kvm_read_guest(vcpu->kvm, gpa, data, _len);
@@ -854,7 +812,7 @@ int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar, void *data,
 }
 
 int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
-		      void *data, unsigned long len, enum gacc_mode mode)
+		      void *data, unsigned long len, int write)
 {
 	unsigned long _len, gpa;
 	int rc = 0;
@@ -862,7 +820,7 @@ int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
 	while (len && !rc) {
 		gpa = kvm_s390_real_to_abs(vcpu, gra);
 		_len = min(PAGE_SIZE - (gpa & ~PAGE_MASK), len);
-		if (mode)
+		if (write)
 			rc = write_guest_abs(vcpu, gpa, data, _len);
 		else
 			rc = read_guest_abs(vcpu, gpa, data, _len);
@@ -882,31 +840,40 @@ int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
  * Note: The IPTE lock is not taken during this function, so the caller
  * has to take care of this.
  */
-int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
-			    unsigned long *gpa, enum gacc_mode mode)
+int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, ar_t ar,
+			    unsigned long *gpa, int write)
 {
+	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
+	struct trans_exc_code_bits *tec;
 	union asce asce;
 	int rc;
 
 	gva = kvm_s390_logical_to_effective(vcpu, gva);
-	rc = get_vcpu_asce(vcpu, &asce, gva, ar, mode);
+	tec = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
+	rc = get_vcpu_asce(vcpu, &asce, ar, write);
+	tec->addr = gva >> PAGE_SHIFT;
 	if (rc)
 		return rc;
 	if (is_low_address(gva) && low_address_protection_enabled(vcpu, asce)) {
-		if (mode == GACC_STORE)
-			return trans_exc(vcpu, PGM_PROTECTION, gva, 0,
-					 mode, PROT_TYPE_LA);
+		if (write) {
+			rc = pgm->code = PGM_PROTECTION;
+			return rc;
+		}
 	}
 
 	if (psw_bits(*psw).t && !asce.r) {	/* Use DAT? */
-		rc = guest_translate(vcpu, gva, gpa, asce, mode);
-		if (rc > 0)
-			return trans_exc(vcpu, rc, gva, 0, mode, PROT_TYPE_DAT);
+		rc = guest_translate(vcpu, gva, gpa, asce, write);
+		if (rc > 0) {
+			if (rc == PGM_PROTECTION)
+				tec->b61 = 1;
+			pgm->code = rc;
+		}
 	} else {
+		rc = 0;
 		*gpa = kvm_s390_real_to_abs(vcpu, gva);
 		if (kvm_is_error_gpa(vcpu->kvm, *gpa))
-			return trans_exc(vcpu, rc, gva, PGM_ADDRESSING, mode, 0);
+			rc = pgm->code = PGM_ADDRESSING;
 	}
 
 	return rc;
@@ -915,8 +882,8 @@ int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
 /**
  * check_gva_range - test a range of guest virtual addresses for accessibility
  */
-int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
-		    unsigned long length, enum gacc_mode mode)
+int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, ar_t ar,
+		    unsigned long length, int is_write)
 {
 	unsigned long gpa;
 	unsigned long currlen;
@@ -925,7 +892,7 @@ int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
 	ipte_lock(vcpu);
 	while (length > 0 && !rc) {
 		currlen = min(length, PAGE_SIZE - (gva % PAGE_SIZE));
-		rc = guest_translate_address(vcpu, gva, ar, &gpa, mode);
+		rc = guest_translate_address(vcpu, gva, ar, &gpa, is_write);
 		gva += currlen;
 		length -= currlen;
 	}
@@ -945,247 +912,20 @@ int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
  */
 int kvm_s390_check_low_addr_prot_real(struct kvm_vcpu *vcpu, unsigned long gra)
 {
+	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
+	psw_t *psw = &vcpu->arch.sie_block->gpsw;
+	struct trans_exc_code_bits *tec_bits;
 	union ctlreg0 ctlreg0 = {.val = vcpu->arch.sie_block->gcr[0]};
 
 	if (!ctlreg0.lap || !is_low_address(gra))
 		return 0;
-	return trans_exc(vcpu, PGM_PROTECTION, gra, 0, GACC_STORE, PROT_TYPE_LA);
-}
 
-/**
- * kvm_s390_shadow_tables - walk the guest page table and create shadow tables
- * @sg: pointer to the shadow guest address space structure
- * @saddr: faulting address in the shadow gmap
- * @pgt: pointer to the page table address result
- * @fake: pgt references contiguous guest memory block, not a pgtable
- */
-static int kvm_s390_shadow_tables(struct gmap *sg, unsigned long saddr,
-				  unsigned long *pgt, int *dat_protection,
-				  int *fake)
-{
-	struct gmap *parent;
-	union asce asce;
-	union vaddress vaddr;
-	unsigned long ptr;
-	int rc;
+	memset(pgm, 0, sizeof(*pgm));
+	tec_bits = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
+	tec_bits->fsi = FSI_STORE;
+	tec_bits->as = psw_bits(*psw).as;
+	tec_bits->addr = gra >> PAGE_SHIFT;
+	pgm->code = PGM_PROTECTION;
 
-	*fake = 0;
-	*dat_protection = 0;
-	parent = sg->parent;
-	vaddr.addr = saddr;
-	asce.val = sg->orig_asce;
-	ptr = asce.origin * 4096;
-	if (asce.r) {
-		*fake = 1;
-		asce.dt = ASCE_TYPE_REGION1;
-	}
-	switch (asce.dt) {
-	case ASCE_TYPE_REGION1:
-		if (vaddr.rfx01 > asce.tl && !asce.r)
-			return PGM_REGION_FIRST_TRANS;
-		break;
-	case ASCE_TYPE_REGION2:
-		if (vaddr.rfx)
-			return PGM_ASCE_TYPE;
-		if (vaddr.rsx01 > asce.tl)
-			return PGM_REGION_SECOND_TRANS;
-		break;
-	case ASCE_TYPE_REGION3:
-		if (vaddr.rfx || vaddr.rsx)
-			return PGM_ASCE_TYPE;
-		if (vaddr.rtx01 > asce.tl)
-			return PGM_REGION_THIRD_TRANS;
-		break;
-	case ASCE_TYPE_SEGMENT:
-		if (vaddr.rfx || vaddr.rsx || vaddr.rtx)
-			return PGM_ASCE_TYPE;
-		if (vaddr.sx01 > asce.tl)
-			return PGM_SEGMENT_TRANSLATION;
-		break;
-	}
-
-	switch (asce.dt) {
-	case ASCE_TYPE_REGION1: {
-		union region1_table_entry rfte;
-
-		if (*fake) {
-			/* offset in 16EB guest memory block */
-			ptr = ptr + ((unsigned long) vaddr.rsx << 53UL);
-			rfte.val = ptr;
-			goto shadow_r2t;
-		}
-		rc = gmap_read_table(parent, ptr + vaddr.rfx * 8, &rfte.val);
-		if (rc)
-			return rc;
-		if (rfte.i)
-			return PGM_REGION_FIRST_TRANS;
-		if (rfte.tt != TABLE_TYPE_REGION1)
-			return PGM_TRANSLATION_SPEC;
-		if (vaddr.rsx01 < rfte.tf || vaddr.rsx01 > rfte.tl)
-			return PGM_REGION_SECOND_TRANS;
-		if (sg->edat_level >= 1)
-			*dat_protection |= rfte.p;
-		ptr = rfte.rto << 12UL;
-shadow_r2t:
-		rc = gmap_shadow_r2t(sg, saddr, rfte.val, *fake);
-		if (rc)
-			return rc;
-		/* fallthrough */
-	}
-	case ASCE_TYPE_REGION2: {
-		union region2_table_entry rste;
-
-		if (*fake) {
-			/* offset in 8PB guest memory block */
-			ptr = ptr + ((unsigned long) vaddr.rtx << 42UL);
-			rste.val = ptr;
-			goto shadow_r3t;
-		}
-		rc = gmap_read_table(parent, ptr + vaddr.rsx * 8, &rste.val);
-		if (rc)
-			return rc;
-		if (rste.i)
-			return PGM_REGION_SECOND_TRANS;
-		if (rste.tt != TABLE_TYPE_REGION2)
-			return PGM_TRANSLATION_SPEC;
-		if (vaddr.rtx01 < rste.tf || vaddr.rtx01 > rste.tl)
-			return PGM_REGION_THIRD_TRANS;
-		if (sg->edat_level >= 1)
-			*dat_protection |= rste.p;
-		ptr = rste.rto << 12UL;
-shadow_r3t:
-		rste.p |= *dat_protection;
-		rc = gmap_shadow_r3t(sg, saddr, rste.val, *fake);
-		if (rc)
-			return rc;
-		/* fallthrough */
-	}
-	case ASCE_TYPE_REGION3: {
-		union region3_table_entry rtte;
-
-		if (*fake) {
-			/* offset in 4TB guest memory block */
-			ptr = ptr + ((unsigned long) vaddr.sx << 31UL);
-			rtte.val = ptr;
-			goto shadow_sgt;
-		}
-		rc = gmap_read_table(parent, ptr + vaddr.rtx * 8, &rtte.val);
-		if (rc)
-			return rc;
-		if (rtte.i)
-			return PGM_REGION_THIRD_TRANS;
-		if (rtte.tt != TABLE_TYPE_REGION3)
-			return PGM_TRANSLATION_SPEC;
-		if (rtte.cr && asce.p && sg->edat_level >= 2)
-			return PGM_TRANSLATION_SPEC;
-		if (rtte.fc && sg->edat_level >= 2) {
-			*dat_protection |= rtte.fc0.p;
-			*fake = 1;
-			ptr = rtte.fc1.rfaa << 31UL;
-			rtte.val = ptr;
-			goto shadow_sgt;
-		}
-		if (vaddr.sx01 < rtte.fc0.tf || vaddr.sx01 > rtte.fc0.tl)
-			return PGM_SEGMENT_TRANSLATION;
-		if (sg->edat_level >= 1)
-			*dat_protection |= rtte.fc0.p;
-		ptr = rtte.fc0.sto << 12UL;
-shadow_sgt:
-		rtte.fc0.p |= *dat_protection;
-		rc = gmap_shadow_sgt(sg, saddr, rtte.val, *fake);
-		if (rc)
-			return rc;
-		/* fallthrough */
-	}
-	case ASCE_TYPE_SEGMENT: {
-		union segment_table_entry ste;
-
-		if (*fake) {
-			/* offset in 2G guest memory block */
-			ptr = ptr + ((unsigned long) vaddr.sx << 20UL);
-			ste.val = ptr;
-			goto shadow_pgt;
-		}
-		rc = gmap_read_table(parent, ptr + vaddr.sx * 8, &ste.val);
-		if (rc)
-			return rc;
-		if (ste.i)
-			return PGM_SEGMENT_TRANSLATION;
-		if (ste.tt != TABLE_TYPE_SEGMENT)
-			return PGM_TRANSLATION_SPEC;
-		if (ste.cs && asce.p)
-			return PGM_TRANSLATION_SPEC;
-		*dat_protection |= ste.fc0.p;
-		if (ste.fc && sg->edat_level >= 1) {
-			*fake = 1;
-			ptr = ste.fc1.sfaa << 20UL;
-			ste.val = ptr;
-			goto shadow_pgt;
-		}
-		ptr = ste.fc0.pto << 11UL;
-shadow_pgt:
-		ste.fc0.p |= *dat_protection;
-		rc = gmap_shadow_pgt(sg, saddr, ste.val, *fake);
-		if (rc)
-			return rc;
-	}
-	}
-	/* Return the parent address of the page table */
-	*pgt = ptr;
-	return 0;
-}
-
-/**
- * kvm_s390_shadow_fault - handle fault on a shadow page table
- * @vcpu: virtual cpu
- * @sg: pointer to the shadow guest address space structure
- * @saddr: faulting address in the shadow gmap
- *
- * Returns: - 0 if the shadow fault was successfully resolved
- *	    - > 0 (pgm exception code) on exceptions while faulting
- *	    - -EAGAIN if the caller can retry immediately
- *	    - -EFAULT when accessing invalid guest addresses
- *	    - -ENOMEM if out of memory
- */
-int kvm_s390_shadow_fault(struct kvm_vcpu *vcpu, struct gmap *sg,
-			  unsigned long saddr)
-{
-	union vaddress vaddr;
-	union page_table_entry pte;
-	unsigned long pgt;
-	int dat_protection, fake;
-	int rc;
-
-	down_read(&sg->mm->mmap_sem);
-	/*
-	 * We don't want any guest-2 tables to change - so the parent
-	 * tables/pointers we read stay valid - unshadowing is however
-	 * always possible - only guest_table_lock protects us.
-	 */
-	ipte_lock(vcpu);
-
-	rc = gmap_shadow_pgt_lookup(sg, saddr, &pgt, &dat_protection, &fake);
-	if (rc)
-		rc = kvm_s390_shadow_tables(sg, saddr, &pgt, &dat_protection,
-					    &fake);
-
-	vaddr.addr = saddr;
-	if (fake) {
-		/* offset in 1MB guest memory block */
-		pte.val = pgt + ((unsigned long) vaddr.px << 12UL);
-		goto shadow_page;
-	}
-	if (!rc)
-		rc = gmap_read_table(sg->parent, pgt + vaddr.px * 8, &pte.val);
-	if (!rc && pte.i)
-		rc = PGM_PAGE_TRANSLATION;
-	if (!rc && pte.z)
-		rc = PGM_TRANSLATION_SPEC;
-shadow_page:
-	pte.p |= dat_protection;
-	if (!rc)
-		rc = gmap_shadow_page(sg, saddr, __pte(pte.val));
-	ipte_unlock(vcpu);
-	up_read(&sg->mm->mmap_sem);
-	return rc;
+	return pgm->code;
 }

@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2017, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -44,33 +44,31 @@
 #ifndef _ACAPPS
 #define _ACAPPS
 
-#ifdef ACPI_USE_STANDARD_HEADERS
-#include <sys/stat.h>
-#endif				/* ACPI_USE_STANDARD_HEADERS */
+#include <stdio.h>
 
 /* Common info for tool signons */
 
 #define ACPICA_NAME                 "Intel ACPI Component Architecture"
-#define ACPICA_COPYRIGHT            "Copyright (c) 2000 - 2017 Intel Corporation"
+#define ACPICA_COPYRIGHT            "Copyright (c) 2000 - 2016 Intel Corporation"
 
 #if ACPI_MACHINE_WIDTH == 64
-#define ACPI_WIDTH          " (64-bit version)"
+#define ACPI_WIDTH          "-64"
 
 #elif ACPI_MACHINE_WIDTH == 32
-#define ACPI_WIDTH          " (32-bit version)"
+#define ACPI_WIDTH          "-32"
 
 #else
 #error unknown ACPI_MACHINE_WIDTH
-#define ACPI_WIDTH          " (unknown bit width, not 32 or 64)"
+#define ACPI_WIDTH          "-??"
 
 #endif
 
 /* Macros for signons and file headers */
 
 #define ACPI_COMMON_SIGNON(utility_name) \
-	"\n%s\n%s version %8.8X\n%s\n\n", \
+	"\n%s\n%s version %8.8X%s\n%s\n\n", \
 	ACPICA_NAME, \
-	utility_name, ((u32) ACPI_CA_VERSION), \
+	utility_name, ((u32) ACPI_CA_VERSION), ACPI_WIDTH, \
 	ACPICA_COPYRIGHT
 
 #define ACPI_COMMON_HEADER(utility_name, prefix) \
@@ -83,13 +81,13 @@
 /* Macros for usage messages */
 
 #define ACPI_USAGE_HEADER(usage) \
-	printf ("Usage: %s\nOptions:\n", usage);
+	acpi_os_printf ("Usage: %s\nOptions:\n", usage);
 
 #define ACPI_USAGE_TEXT(description) \
-	printf (description);
+	acpi_os_printf (description);
 
 #define ACPI_OPTION(name, description) \
-	printf ("  %-20s%s\n", name, description);
+	acpi_os_printf (" %-20s%s\n", name, description);
 
 /* Check for unexpected exceptions */
 

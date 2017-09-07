@@ -42,7 +42,7 @@ struct amdgpu_cgs_device {
 	struct amdgpu_device *adev =					\
 		((struct amdgpu_cgs_device *)cgs_device)->adev
 
-static int amdgpu_cgs_gpu_mem_info(struct cgs_device *cgs_device, enum cgs_gpu_mem_type type,
+static int amdgpu_cgs_gpu_mem_info(void *cgs_device, enum cgs_gpu_mem_type type,
 				   uint64_t *mc_start, uint64_t *mc_size,
 				   uint64_t *mem_size)
 {
@@ -73,7 +73,7 @@ static int amdgpu_cgs_gpu_mem_info(struct cgs_device *cgs_device, enum cgs_gpu_m
 	return 0;
 }
 
-static int amdgpu_cgs_gmap_kmem(struct cgs_device *cgs_device, void *kmem,
+static int amdgpu_cgs_gmap_kmem(void *cgs_device, void *kmem,
 				uint64_t size,
 				uint64_t min_offset, uint64_t max_offset,
 				cgs_handle_t *kmem_handle, uint64_t *mcaddr)
@@ -102,7 +102,7 @@ static int amdgpu_cgs_gmap_kmem(struct cgs_device *cgs_device, void *kmem,
 	return ret;
 }
 
-static int amdgpu_cgs_gunmap_kmem(struct cgs_device *cgs_device, cgs_handle_t kmem_handle)
+static int amdgpu_cgs_gunmap_kmem(void *cgs_device, cgs_handle_t kmem_handle)
 {
 	struct amdgpu_bo *obj = (struct amdgpu_bo *)kmem_handle;
 
@@ -118,7 +118,7 @@ static int amdgpu_cgs_gunmap_kmem(struct cgs_device *cgs_device, cgs_handle_t km
 	return 0;
 }
 
-static int amdgpu_cgs_alloc_gpu_mem(struct cgs_device *cgs_device,
+static int amdgpu_cgs_alloc_gpu_mem(void *cgs_device,
 				    enum cgs_gpu_mem_type type,
 				    uint64_t size, uint64_t align,
 				    uint64_t min_offset, uint64_t max_offset,
@@ -146,8 +146,7 @@ static int amdgpu_cgs_alloc_gpu_mem(struct cgs_device *cgs_device,
 	switch(type) {
 	case CGS_GPU_MEM_TYPE__VISIBLE_CONTIG_FB:
 	case CGS_GPU_MEM_TYPE__VISIBLE_FB:
-		flags = AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED |
-			AMDGPU_GEM_CREATE_VRAM_CONTIGUOUS;
+		flags = AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED;
 		domain = AMDGPU_GEM_DOMAIN_VRAM;
 		if (max_offset > adev->mc.real_vram_size)
 			return -EINVAL;
@@ -158,8 +157,7 @@ static int amdgpu_cgs_alloc_gpu_mem(struct cgs_device *cgs_device,
 		break;
 	case CGS_GPU_MEM_TYPE__INVISIBLE_CONTIG_FB:
 	case CGS_GPU_MEM_TYPE__INVISIBLE_FB:
-		flags = AMDGPU_GEM_CREATE_NO_CPU_ACCESS |
-			AMDGPU_GEM_CREATE_VRAM_CONTIGUOUS;
+		flags = AMDGPU_GEM_CREATE_NO_CPU_ACCESS;
 		domain = AMDGPU_GEM_DOMAIN_VRAM;
 		if (adev->mc.visible_vram_size < adev->mc.real_vram_size) {
 			place.fpfn =
@@ -210,7 +208,7 @@ static int amdgpu_cgs_alloc_gpu_mem(struct cgs_device *cgs_device,
 	return ret;
 }
 
-static int amdgpu_cgs_free_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t handle)
+static int amdgpu_cgs_free_gpu_mem(void *cgs_device, cgs_handle_t handle)
 {
 	struct amdgpu_bo *obj = (struct amdgpu_bo *)handle;
 
@@ -227,7 +225,7 @@ static int amdgpu_cgs_free_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t h
 	return 0;
 }
 
-static int amdgpu_cgs_gmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t handle,
+static int amdgpu_cgs_gmap_gpu_mem(void *cgs_device, cgs_handle_t handle,
 				   uint64_t *mcaddr)
 {
 	int r;
@@ -242,13 +240,13 @@ static int amdgpu_cgs_gmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t h
 	r = amdgpu_bo_reserve(obj, false);
 	if (unlikely(r != 0))
 		return r;
-	r = amdgpu_bo_pin_restricted(obj, obj->prefered_domains,
+	r = amdgpu_bo_pin_restricted(obj, AMDGPU_GEM_DOMAIN_GTT,
 				     min_offset, max_offset, mcaddr);
 	amdgpu_bo_unreserve(obj);
 	return r;
 }
 
-static int amdgpu_cgs_gunmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t handle)
+static int amdgpu_cgs_gunmap_gpu_mem(void *cgs_device, cgs_handle_t handle)
 {
 	int r;
 	struct amdgpu_bo *obj = (struct amdgpu_bo *)handle;
@@ -260,7 +258,7 @@ static int amdgpu_cgs_gunmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t
 	return r;
 }
 
-static int amdgpu_cgs_kmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t handle,
+static int amdgpu_cgs_kmap_gpu_mem(void *cgs_device, cgs_handle_t handle,
 				   void **map)
 {
 	int r;
@@ -273,7 +271,7 @@ static int amdgpu_cgs_kmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t h
 	return r;
 }
 
-static int amdgpu_cgs_kunmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t handle)
+static int amdgpu_cgs_kunmap_gpu_mem(void *cgs_device, cgs_handle_t handle)
 {
 	int r;
 	struct amdgpu_bo *obj = (struct amdgpu_bo *)handle;
@@ -285,20 +283,20 @@ static int amdgpu_cgs_kunmap_gpu_mem(struct cgs_device *cgs_device, cgs_handle_t
 	return r;
 }
 
-static uint32_t amdgpu_cgs_read_register(struct cgs_device *cgs_device, unsigned offset)
+static uint32_t amdgpu_cgs_read_register(void *cgs_device, unsigned offset)
 {
 	CGS_FUNC_ADEV;
 	return RREG32(offset);
 }
 
-static void amdgpu_cgs_write_register(struct cgs_device *cgs_device, unsigned offset,
+static void amdgpu_cgs_write_register(void *cgs_device, unsigned offset,
 				      uint32_t value)
 {
 	CGS_FUNC_ADEV;
 	WREG32(offset, value);
 }
 
-static uint32_t amdgpu_cgs_read_ind_register(struct cgs_device *cgs_device,
+static uint32_t amdgpu_cgs_read_ind_register(void *cgs_device,
 					     enum cgs_ind_reg space,
 					     unsigned index)
 {
@@ -314,8 +312,6 @@ static uint32_t amdgpu_cgs_read_ind_register(struct cgs_device *cgs_device,
 		return RREG32_UVD_CTX(index);
 	case CGS_IND_REG__DIDT:
 		return RREG32_DIDT(index);
-	case CGS_IND_REG_GC_CAC:
-		return RREG32_GC_CAC(index);
 	case CGS_IND_REG__AUDIO_ENDPT:
 		DRM_ERROR("audio endpt register access not implemented.\n");
 		return 0;
@@ -324,7 +320,7 @@ static uint32_t amdgpu_cgs_read_ind_register(struct cgs_device *cgs_device,
 	return 0;
 }
 
-static void amdgpu_cgs_write_ind_register(struct cgs_device *cgs_device,
+static void amdgpu_cgs_write_ind_register(void *cgs_device,
 					  enum cgs_ind_reg space,
 					  unsigned index, uint32_t value)
 {
@@ -340,8 +336,6 @@ static void amdgpu_cgs_write_ind_register(struct cgs_device *cgs_device,
 		return WREG32_UVD_CTX(index, value);
 	case CGS_IND_REG__DIDT:
 		return WREG32_DIDT(index, value);
-	case CGS_IND_REG_GC_CAC:
-		return WREG32_GC_CAC(index, value);
 	case CGS_IND_REG__AUDIO_ENDPT:
 		DRM_ERROR("audio endpt register access not implemented.\n");
 		return;
@@ -349,7 +343,7 @@ static void amdgpu_cgs_write_ind_register(struct cgs_device *cgs_device,
 	WARN(1, "Invalid indirect register space");
 }
 
-static uint8_t amdgpu_cgs_read_pci_config_byte(struct cgs_device *cgs_device, unsigned addr)
+static uint8_t amdgpu_cgs_read_pci_config_byte(void *cgs_device, unsigned addr)
 {
 	CGS_FUNC_ADEV;
 	uint8_t val;
@@ -359,7 +353,7 @@ static uint8_t amdgpu_cgs_read_pci_config_byte(struct cgs_device *cgs_device, un
 	return val;
 }
 
-static uint16_t amdgpu_cgs_read_pci_config_word(struct cgs_device *cgs_device, unsigned addr)
+static uint16_t amdgpu_cgs_read_pci_config_word(void *cgs_device, unsigned addr)
 {
 	CGS_FUNC_ADEV;
 	uint16_t val;
@@ -369,7 +363,7 @@ static uint16_t amdgpu_cgs_read_pci_config_word(struct cgs_device *cgs_device, u
 	return val;
 }
 
-static uint32_t amdgpu_cgs_read_pci_config_dword(struct cgs_device *cgs_device,
+static uint32_t amdgpu_cgs_read_pci_config_dword(void *cgs_device,
 						 unsigned addr)
 {
 	CGS_FUNC_ADEV;
@@ -380,7 +374,7 @@ static uint32_t amdgpu_cgs_read_pci_config_dword(struct cgs_device *cgs_device,
 	return val;
 }
 
-static void amdgpu_cgs_write_pci_config_byte(struct cgs_device *cgs_device, unsigned addr,
+static void amdgpu_cgs_write_pci_config_byte(void *cgs_device, unsigned addr,
 					     uint8_t value)
 {
 	CGS_FUNC_ADEV;
@@ -388,7 +382,7 @@ static void amdgpu_cgs_write_pci_config_byte(struct cgs_device *cgs_device, unsi
 	WARN(ret, "pci_write_config_byte error");
 }
 
-static void amdgpu_cgs_write_pci_config_word(struct cgs_device *cgs_device, unsigned addr,
+static void amdgpu_cgs_write_pci_config_word(void *cgs_device, unsigned addr,
 					     uint16_t value)
 {
 	CGS_FUNC_ADEV;
@@ -396,7 +390,7 @@ static void amdgpu_cgs_write_pci_config_word(struct cgs_device *cgs_device, unsi
 	WARN(ret, "pci_write_config_word error");
 }
 
-static void amdgpu_cgs_write_pci_config_dword(struct cgs_device *cgs_device, unsigned addr,
+static void amdgpu_cgs_write_pci_config_dword(void *cgs_device, unsigned addr,
 					      uint32_t value)
 {
 	CGS_FUNC_ADEV;
@@ -405,7 +399,7 @@ static void amdgpu_cgs_write_pci_config_dword(struct cgs_device *cgs_device, uns
 }
 
 
-static int amdgpu_cgs_get_pci_resource(struct cgs_device *cgs_device,
+static int amdgpu_cgs_get_pci_resource(void *cgs_device,
 				       enum cgs_resource_type resource_type,
 				       uint64_t size,
 				       uint64_t offset,
@@ -439,7 +433,7 @@ static int amdgpu_cgs_get_pci_resource(struct cgs_device *cgs_device,
 	}
 }
 
-static const void *amdgpu_cgs_atom_get_data_table(struct cgs_device *cgs_device,
+static const void *amdgpu_cgs_atom_get_data_table(void *cgs_device,
 						  unsigned table, uint16_t *size,
 						  uint8_t *frev, uint8_t *crev)
 {
@@ -455,7 +449,7 @@ static const void *amdgpu_cgs_atom_get_data_table(struct cgs_device *cgs_device,
 	return NULL;
 }
 
-static int amdgpu_cgs_atom_get_cmd_table_revs(struct cgs_device *cgs_device, unsigned table,
+static int amdgpu_cgs_atom_get_cmd_table_revs(void *cgs_device, unsigned table,
 					      uint8_t *frev, uint8_t *crev)
 {
 	CGS_FUNC_ADEV;
@@ -468,7 +462,7 @@ static int amdgpu_cgs_atom_get_cmd_table_revs(struct cgs_device *cgs_device, uns
 	return -EINVAL;
 }
 
-static int amdgpu_cgs_atom_exec_cmd_table(struct cgs_device *cgs_device, unsigned table,
+static int amdgpu_cgs_atom_exec_cmd_table(void *cgs_device, unsigned table,
 					  void *args)
 {
 	CGS_FUNC_ADEV;
@@ -477,33 +471,33 @@ static int amdgpu_cgs_atom_exec_cmd_table(struct cgs_device *cgs_device, unsigne
 		adev->mode_info.atom_context, table, args);
 }
 
-static int amdgpu_cgs_create_pm_request(struct cgs_device *cgs_device, cgs_handle_t *request)
+static int amdgpu_cgs_create_pm_request(void *cgs_device, cgs_handle_t *request)
 {
 	/* TODO */
 	return 0;
 }
 
-static int amdgpu_cgs_destroy_pm_request(struct cgs_device *cgs_device, cgs_handle_t request)
+static int amdgpu_cgs_destroy_pm_request(void *cgs_device, cgs_handle_t request)
 {
 	/* TODO */
 	return 0;
 }
 
-static int amdgpu_cgs_set_pm_request(struct cgs_device *cgs_device, cgs_handle_t request,
+static int amdgpu_cgs_set_pm_request(void *cgs_device, cgs_handle_t request,
 				     int active)
 {
 	/* TODO */
 	return 0;
 }
 
-static int amdgpu_cgs_pm_request_clock(struct cgs_device *cgs_device, cgs_handle_t request,
+static int amdgpu_cgs_pm_request_clock(void *cgs_device, cgs_handle_t request,
 				       enum cgs_clock clock, unsigned freq)
 {
 	/* TODO */
 	return 0;
 }
 
-static int amdgpu_cgs_pm_request_engine(struct cgs_device *cgs_device, cgs_handle_t request,
+static int amdgpu_cgs_pm_request_engine(void *cgs_device, cgs_handle_t request,
 					enum cgs_engine engine, int powered)
 {
 	/* TODO */
@@ -512,7 +506,7 @@ static int amdgpu_cgs_pm_request_engine(struct cgs_device *cgs_device, cgs_handl
 
 
 
-static int amdgpu_cgs_pm_query_clock_limits(struct cgs_device *cgs_device,
+static int amdgpu_cgs_pm_query_clock_limits(void *cgs_device,
 					    enum cgs_clock clock,
 					    struct cgs_clock_limits *limits)
 {
@@ -520,7 +514,7 @@ static int amdgpu_cgs_pm_query_clock_limits(struct cgs_device *cgs_device,
 	return 0;
 }
 
-static int amdgpu_cgs_set_camera_voltages(struct cgs_device *cgs_device, uint32_t mask,
+static int amdgpu_cgs_set_camera_voltages(void *cgs_device, uint32_t mask,
 					  const uint32_t *voltages)
 {
 	DRM_ERROR("not implemented");
@@ -571,9 +565,7 @@ static const struct amdgpu_irq_src_funcs cgs_irq_funcs = {
 	.process = cgs_process_irq,
 };
 
-static int amdgpu_cgs_add_irq_source(void *cgs_device,
-				     unsigned client_id,
-				     unsigned src_id,
+static int amdgpu_cgs_add_irq_source(void *cgs_device, unsigned src_id,
 				     unsigned num_types,
 				     cgs_irq_source_set_func_t set,
 				     cgs_irq_handler_func_t handler,
@@ -599,7 +591,7 @@ static int amdgpu_cgs_add_irq_source(void *cgs_device,
 	irq_params->handler = handler;
 	irq_params->private_data = private_data;
 	source->data = (void *)irq_params;
-	ret = amdgpu_irq_add_id(adev, client_id, src_id, source);
+	ret = amdgpu_irq_add_id(adev, src_id, source);
 	if (ret) {
 		kfree(irq_params);
 		kfree(source);
@@ -608,29 +600,19 @@ static int amdgpu_cgs_add_irq_source(void *cgs_device,
 	return ret;
 }
 
-static int amdgpu_cgs_irq_get(void *cgs_device, unsigned client_id,
-			      unsigned src_id, unsigned type)
+static int amdgpu_cgs_irq_get(void *cgs_device, unsigned src_id, unsigned type)
 {
 	CGS_FUNC_ADEV;
-
-	if (!adev->irq.client[client_id].sources)
-		return -EINVAL;
-
-	return amdgpu_irq_get(adev, adev->irq.client[client_id].sources[src_id], type);
+	return amdgpu_irq_get(adev, adev->irq.sources[src_id], type);
 }
 
-static int amdgpu_cgs_irq_put(void *cgs_device, unsigned client_id,
-			      unsigned src_id, unsigned type)
+static int amdgpu_cgs_irq_put(void *cgs_device, unsigned src_id, unsigned type)
 {
 	CGS_FUNC_ADEV;
-
-	if (!adev->irq.client[client_id].sources)
-		return -EINVAL;
-
-	return amdgpu_irq_put(adev, adev->irq.client[client_id].sources[src_id], type);
+	return amdgpu_irq_put(adev, adev->irq.sources[src_id], type);
 }
 
-static int amdgpu_cgs_set_clockgating_state(struct cgs_device *cgs_device,
+int amdgpu_cgs_set_clockgating_state(void *cgs_device,
 				  enum amd_ip_block_type block_type,
 				  enum amd_clockgating_state state)
 {
@@ -638,11 +620,11 @@ static int amdgpu_cgs_set_clockgating_state(struct cgs_device *cgs_device,
 	int i, r = -1;
 
 	for (i = 0; i < adev->num_ip_blocks; i++) {
-		if (!adev->ip_blocks[i].status.valid)
+		if (!adev->ip_block_status[i].valid)
 			continue;
 
-		if (adev->ip_blocks[i].version->type == block_type) {
-			r = adev->ip_blocks[i].version->funcs->set_clockgating_state(
+		if (adev->ip_blocks[i].type == block_type) {
+			r = adev->ip_blocks[i].funcs->set_clockgating_state(
 								(void *)adev,
 									state);
 			break;
@@ -651,7 +633,7 @@ static int amdgpu_cgs_set_clockgating_state(struct cgs_device *cgs_device,
 	return r;
 }
 
-static int amdgpu_cgs_set_powergating_state(struct cgs_device *cgs_device,
+int amdgpu_cgs_set_powergating_state(void *cgs_device,
 				  enum amd_ip_block_type block_type,
 				  enum amd_powergating_state state)
 {
@@ -659,11 +641,11 @@ static int amdgpu_cgs_set_powergating_state(struct cgs_device *cgs_device,
 	int i, r = -1;
 
 	for (i = 0; i < adev->num_ip_blocks; i++) {
-		if (!adev->ip_blocks[i].status.valid)
+		if (!adev->ip_block_status[i].valid)
 			continue;
 
-		if (adev->ip_blocks[i].version->type == block_type) {
-			r = adev->ip_blocks[i].version->funcs->set_powergating_state(
+		if (adev->ip_blocks[i].type == block_type) {
+			r = adev->ip_blocks[i].funcs->set_powergating_state(
 								(void *)adev,
 									state);
 			break;
@@ -673,7 +655,7 @@ static int amdgpu_cgs_set_powergating_state(struct cgs_device *cgs_device,
 }
 
 
-static uint32_t fw_type_convert(struct cgs_device *cgs_device, uint32_t fw_type)
+static uint32_t fw_type_convert(void *cgs_device, uint32_t fw_type)
 {
 	CGS_FUNC_ADEV;
 	enum AMDGPU_UCODE_ID result = AMDGPU_UCODE_ID_MAXIMUM;
@@ -699,20 +681,13 @@ static uint32_t fw_type_convert(struct cgs_device *cgs_device, uint32_t fw_type)
 		result = AMDGPU_UCODE_ID_CP_MEC1;
 		break;
 	case CGS_UCODE_ID_CP_MEC_JT2:
-		/* for VI. JT2 should be the same as JT1, because:
-			1, MEC2 and MEC1 use exactly same FW.
-			2, JT2 is not pached but JT1 is.
-		*/
-		if (adev->asic_type >= CHIP_TOPAZ)
-			result = AMDGPU_UCODE_ID_CP_MEC1;
-		else
+		if (adev->asic_type == CHIP_TONGA)
 			result = AMDGPU_UCODE_ID_CP_MEC2;
+		else if (adev->asic_type == CHIP_CARRIZO)
+			result = AMDGPU_UCODE_ID_CP_MEC1;
 		break;
 	case CGS_UCODE_ID_RLC_G:
 		result = AMDGPU_UCODE_ID_RLC_G;
-		break;
-	case CGS_UCODE_ID_STORAGE:
-		result = AMDGPU_UCODE_ID_STORAGE;
 		break;
 	default:
 		DRM_ERROR("Firmware type not supported\n");
@@ -720,85 +695,13 @@ static uint32_t fw_type_convert(struct cgs_device *cgs_device, uint32_t fw_type)
 	return result;
 }
 
-static int amdgpu_cgs_rel_firmware(struct cgs_device *cgs_device, enum cgs_ucode_id type)
-{
-	CGS_FUNC_ADEV;
-	if ((CGS_UCODE_ID_SMU == type) || (CGS_UCODE_ID_SMU_SK == type)) {
-		release_firmware(adev->pm.fw);
-		adev->pm.fw = NULL;
-		return 0;
-	}
-	/* cannot release other firmware because they are not created by cgs */
-	return -EINVAL;
-}
-
-static uint16_t amdgpu_get_firmware_version(struct cgs_device *cgs_device,
-					enum cgs_ucode_id type)
-{
-	CGS_FUNC_ADEV;
-	uint16_t fw_version = 0;
-
-	switch (type) {
-		case CGS_UCODE_ID_SDMA0:
-			fw_version = adev->sdma.instance[0].fw_version;
-			break;
-		case CGS_UCODE_ID_SDMA1:
-			fw_version = adev->sdma.instance[1].fw_version;
-			break;
-		case CGS_UCODE_ID_CP_CE:
-			fw_version = adev->gfx.ce_fw_version;
-			break;
-		case CGS_UCODE_ID_CP_PFP:
-			fw_version = adev->gfx.pfp_fw_version;
-			break;
-		case CGS_UCODE_ID_CP_ME:
-			fw_version = adev->gfx.me_fw_version;
-			break;
-		case CGS_UCODE_ID_CP_MEC:
-			fw_version = adev->gfx.mec_fw_version;
-			break;
-		case CGS_UCODE_ID_CP_MEC_JT1:
-			fw_version = adev->gfx.mec_fw_version;
-			break;
-		case CGS_UCODE_ID_CP_MEC_JT2:
-			fw_version = adev->gfx.mec_fw_version;
-			break;
-		case CGS_UCODE_ID_RLC_G:
-			fw_version = adev->gfx.rlc_fw_version;
-			break;
-		case CGS_UCODE_ID_STORAGE:
-			break;
-		default:
-			DRM_ERROR("firmware type %d do not have version\n", type);
-			break;
-	}
-	return fw_version;
-}
-
-static int amdgpu_cgs_enter_safe_mode(struct cgs_device *cgs_device,
-					bool en)
-{
-	CGS_FUNC_ADEV;
-
-	if (adev->gfx.rlc.funcs->enter_safe_mode == NULL ||
-		adev->gfx.rlc.funcs->exit_safe_mode == NULL)
-		return 0;
-
-	if (en)
-		adev->gfx.rlc.funcs->enter_safe_mode(adev);
-	else
-		adev->gfx.rlc.funcs->exit_safe_mode(adev);
-
-	return 0;
-}
-
-static int amdgpu_cgs_get_firmware_info(struct cgs_device *cgs_device,
+static int amdgpu_cgs_get_firmware_info(void *cgs_device,
 					enum cgs_ucode_id type,
 					struct cgs_firmware_info *info)
 {
 	CGS_FUNC_ADEV;
 
-	if ((CGS_UCODE_ID_SMU != type) && (CGS_UCODE_ID_SMU_SK != type)) {
+	if (CGS_UCODE_ID_SMU != type) {
 		uint64_t gpu_addr;
 		uint32_t data_size;
 		const struct gfx_firmware_header_v1_0 *header;
@@ -816,19 +719,12 @@ static int amdgpu_cgs_get_firmware_info(struct cgs_device *cgs_device,
 
 		if ((type == CGS_UCODE_ID_CP_MEC_JT1) ||
 		    (type == CGS_UCODE_ID_CP_MEC_JT2)) {
-			gpu_addr += ALIGN(le32_to_cpu(header->header.ucode_size_bytes), PAGE_SIZE);
+			gpu_addr += le32_to_cpu(header->jt_offset) << 2;
 			data_size = le32_to_cpu(header->jt_size) << 2;
 		}
-
-		info->kptr = ucode->kaddr;
-		info->image_size = data_size;
 		info->mc_addr = gpu_addr;
+		info->image_size = data_size;
 		info->version = (uint16_t)le32_to_cpu(header->header.ucode_version);
-
-		if (CGS_UCODE_ID_CP_MEC == type)
-			info->image_size = (header->jt_offset) << 2;
-
-		info->fw_version = amdgpu_get_firmware_version(cgs_device, type);
 		info->feature_version = (uint16_t)le32_to_cpu(header->ucode_feature_version);
 	} else {
 		char fw_name[30] = {0};
@@ -837,103 +733,34 @@ static int amdgpu_cgs_get_firmware_info(struct cgs_device *cgs_device,
 		uint32_t ucode_start_address;
 		const uint8_t *src;
 		const struct smc_firmware_header_v1_0 *hdr;
-		const struct common_firmware_header *header;
-		struct amdgpu_firmware_info *ucode = NULL;
 
-		if (!adev->pm.fw) {
-			switch (adev->asic_type) {
-			case CHIP_TOPAZ:
-				if (((adev->pdev->device == 0x6900) && (adev->pdev->revision == 0x81)) ||
-				    ((adev->pdev->device == 0x6900) && (adev->pdev->revision == 0x83)) ||
-				    ((adev->pdev->device == 0x6907) && (adev->pdev->revision == 0x87))) {
-					info->is_kicker = true;
-					strcpy(fw_name, "amdgpu/topaz_k_smc.bin");
-				} else
-					strcpy(fw_name, "amdgpu/topaz_smc.bin");
-				break;
-			case CHIP_TONGA:
-				if (((adev->pdev->device == 0x6939) && (adev->pdev->revision == 0xf1)) ||
-				    ((adev->pdev->device == 0x6938) && (adev->pdev->revision == 0xf1))) {
-					info->is_kicker = true;
-					strcpy(fw_name, "amdgpu/tonga_k_smc.bin");
-				} else
-					strcpy(fw_name, "amdgpu/tonga_smc.bin");
-				break;
-			case CHIP_FIJI:
-				strcpy(fw_name, "amdgpu/fiji_smc.bin");
-				break;
-			case CHIP_POLARIS11:
-				if (type == CGS_UCODE_ID_SMU) {
-					if (((adev->pdev->device == 0x67ef) &&
-					     ((adev->pdev->revision == 0xe0) ||
-					      (adev->pdev->revision == 0xe2) ||
-					      (adev->pdev->revision == 0xe5))) ||
-					    ((adev->pdev->device == 0x67ff) &&
-					     ((adev->pdev->revision == 0xcf) ||
-					      (adev->pdev->revision == 0xef) ||
-					      (adev->pdev->revision == 0xff)))) {
-						info->is_kicker = true;
-						strcpy(fw_name, "amdgpu/polaris11_k_smc.bin");
-					} else
-						strcpy(fw_name, "amdgpu/polaris11_smc.bin");
-				} else if (type == CGS_UCODE_ID_SMU_SK) {
-					strcpy(fw_name, "amdgpu/polaris11_smc_sk.bin");
-				}
-				break;
-			case CHIP_POLARIS10:
-				if (type == CGS_UCODE_ID_SMU) {
-					if ((adev->pdev->device == 0x67df) &&
-					    ((adev->pdev->revision == 0xe0) ||
-					     (adev->pdev->revision == 0xe3) ||
-					     (adev->pdev->revision == 0xe4) ||
-					     (adev->pdev->revision == 0xe5) ||
-					     (adev->pdev->revision == 0xe7) ||
-					     (adev->pdev->revision == 0xef))) {
-						info->is_kicker = true;
-						strcpy(fw_name, "amdgpu/polaris10_k_smc.bin");
-					} else
-						strcpy(fw_name, "amdgpu/polaris10_smc.bin");
-				} else if (type == CGS_UCODE_ID_SMU_SK) {
-					strcpy(fw_name, "amdgpu/polaris10_smc_sk.bin");
-				}
-				break;
-			case CHIP_POLARIS12:
-				strcpy(fw_name, "amdgpu/polaris12_smc.bin");
-				break;
-			case CHIP_VEGA10:
-				strcpy(fw_name, "amdgpu/vega10_smc.bin");
-				break;
-			default:
-				DRM_ERROR("SMC firmware not supported\n");
-				return -EINVAL;
-			}
+		switch (adev->asic_type) {
+		case CHIP_TONGA:
+			strcpy(fw_name, "amdgpu/tonga_smc.bin");
+			break;
+		case CHIP_FIJI:
+			strcpy(fw_name, "amdgpu/fiji_smc.bin");
+			break;
+		default:
+			DRM_ERROR("SMC firmware not supported\n");
+			return -EINVAL;
+		}
 
-			err = request_firmware(&adev->pm.fw, fw_name, adev->dev);
-			if (err) {
-				DRM_ERROR("Failed to request firmware\n");
-				return err;
-			}
+		err = request_firmware(&adev->pm.fw, fw_name, adev->dev);
+		if (err) {
+			DRM_ERROR("Failed to request firmware\n");
+			return err;
+		}
 
-			err = amdgpu_ucode_validate(adev->pm.fw);
-			if (err) {
-				DRM_ERROR("Failed to load firmware \"%s\"", fw_name);
-				release_firmware(adev->pm.fw);
-				adev->pm.fw = NULL;
-				return err;
-			}
-
-			if (adev->firmware.load_type == AMDGPU_FW_LOAD_PSP) {
-				ucode = &adev->firmware.ucode[AMDGPU_UCODE_ID_SMC];
-				ucode->ucode_id = AMDGPU_UCODE_ID_SMC;
-				ucode->fw = adev->pm.fw;
-				header = (const struct common_firmware_header *)ucode->fw->data;
-				adev->firmware.fw_size +=
-					ALIGN(le32_to_cpu(header->ucode_size_bytes), PAGE_SIZE);
-			}
+		err = amdgpu_ucode_validate(adev->pm.fw);
+		if (err) {
+			DRM_ERROR("Failed to load firmware \"%s\"", fw_name);
+			release_firmware(adev->pm.fw);
+			adev->pm.fw = NULL;
+			return err;
 		}
 
 		hdr = (const struct smc_firmware_header_v1_0 *)	adev->pm.fw->data;
-		amdgpu_ucode_print_smc_hdr(&hdr->header);
 		adev->pm.fw_version = le32_to_cpu(hdr->header.ucode_version);
 		ucode_size = le32_to_cpu(hdr->header.ucode_size_bytes);
 		ucode_start_address = le32_to_cpu(hdr->ucode_start_addr);
@@ -942,20 +769,13 @@ static int amdgpu_cgs_get_firmware_info(struct cgs_device *cgs_device,
 
 		info->version = adev->pm.fw_version;
 		info->image_size = ucode_size;
-		info->ucode_start_address = ucode_start_address;
 		info->kptr = (void *)src;
 	}
 	return 0;
 }
 
-static int amdgpu_cgs_is_virtualization_enabled(void *cgs_device)
-{
-	CGS_FUNC_ADEV;
-	return amdgpu_sriov_vf(adev);
-}
-
-static int amdgpu_cgs_query_system_info(struct cgs_device *cgs_device,
-					struct cgs_system_info *sys_info)
+static int amdgpu_cgs_query_system_info(void *cgs_device,
+				struct cgs_system_info *sys_info)
 {
 	CGS_FUNC_ADEV;
 
@@ -975,29 +795,11 @@ static int amdgpu_cgs_query_system_info(struct cgs_device *cgs_device,
 	case CGS_SYSTEM_INFO_PCIE_MLW:
 		sys_info->value = adev->pm.pcie_mlw_mask;
 		break;
-	case CGS_SYSTEM_INFO_PCIE_DEV:
-		sys_info->value = adev->pdev->device;
-		break;
-	case CGS_SYSTEM_INFO_PCIE_REV:
-		sys_info->value = adev->pdev->revision;
-		break;
 	case CGS_SYSTEM_INFO_CG_FLAGS:
 		sys_info->value = adev->cg_flags;
 		break;
 	case CGS_SYSTEM_INFO_PG_FLAGS:
 		sys_info->value = adev->pg_flags;
-		break;
-	case CGS_SYSTEM_INFO_GFX_CU_INFO:
-		sys_info->value = adev->gfx.cu_info.number;
-		break;
-	case CGS_SYSTEM_INFO_GFX_SE_INFO:
-		sys_info->value = adev->gfx.config.max_shader_engines;
-		break;
-	case CGS_SYSTEM_INFO_PCIE_SUB_SYS_ID:
-		sys_info->value = adev->pdev->subsystem_device;
-		break;
-	case CGS_SYSTEM_INFO_PCIE_SUB_SYS_VENDOR_ID:
-		sys_info->value = adev->pdev->subsystem_vendor;
 		break;
 	default:
 		return -ENODEV;
@@ -1006,7 +808,7 @@ static int amdgpu_cgs_query_system_info(struct cgs_device *cgs_device,
 	return 0;
 }
 
-static int amdgpu_cgs_get_active_displays_info(struct cgs_device *cgs_device,
+static int amdgpu_cgs_get_active_displays_info(void *cgs_device,
 					  struct cgs_display_info *info)
 {
 	CGS_FUNC_ADEV;
@@ -1014,12 +816,9 @@ static int amdgpu_cgs_get_active_displays_info(struct cgs_device *cgs_device,
 	struct drm_device *ddev = adev->ddev;
 	struct drm_crtc *crtc;
 	uint32_t line_time_us, vblank_lines;
-	struct cgs_mode_info *mode_info;
 
 	if (info == NULL)
 		return -EINVAL;
-
-	mode_info = info->mode_info;
 
 	if (adev->mode_info.num_crtc && adev->mode_info.mode_config_initialized) {
 		list_for_each_entry(crtc,
@@ -1029,7 +828,7 @@ static int amdgpu_cgs_get_active_displays_info(struct cgs_device *cgs_device,
 				info->active_display_mask |= (1 << amdgpu_crtc->crtc_id);
 				info->display_count++;
 			}
-			if (mode_info != NULL &&
+			if (info->mode_info != NULL &&
 				crtc->enabled && amdgpu_crtc->enabled &&
 				amdgpu_crtc->hw_mode.clock) {
 				line_time_us = (amdgpu_crtc->hw_mode.crtc_htotal * 1000) /
@@ -1037,23 +836,13 @@ static int amdgpu_cgs_get_active_displays_info(struct cgs_device *cgs_device,
 				vblank_lines = amdgpu_crtc->hw_mode.crtc_vblank_end -
 							amdgpu_crtc->hw_mode.crtc_vdisplay +
 							(amdgpu_crtc->v_border * 2);
-				mode_info->vblank_time_us = vblank_lines * line_time_us;
-				mode_info->refresh_rate = drm_mode_vrefresh(&amdgpu_crtc->hw_mode);
-				mode_info->ref_clock = adev->clock.spll.reference_freq;
-				mode_info = NULL;
+				info->mode_info->vblank_time_us = vblank_lines * line_time_us;
+				info->mode_info->refresh_rate = drm_mode_vrefresh(&amdgpu_crtc->hw_mode);
+				info->mode_info->ref_clock = adev->clock.spll.reference_freq;
+				info->mode_info++;
 			}
 		}
 	}
-
-	return 0;
-}
-
-
-static int amdgpu_cgs_notify_dpm_enabled(struct cgs_device *cgs_device, bool enabled)
-{
-	CGS_FUNC_ADEV;
-
-	adev->pm.dpm_enabled = enabled;
 
 	return 0;
 }
@@ -1065,19 +854,21 @@ static int amdgpu_cgs_notify_dpm_enabled(struct cgs_device *cgs_device, bool ena
  */
 
 #if defined(CONFIG_ACPI)
-static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
+static int amdgpu_cgs_acpi_eval_object(void *cgs_device,
 				    struct cgs_acpi_method_info *info)
 {
 	CGS_FUNC_ADEV;
 	acpi_handle handle;
 	struct acpi_object_list input;
 	struct acpi_buffer output = { ACPI_ALLOCATE_BUFFER, NULL };
-	union acpi_object *params, *obj;
+	union acpi_object *params = NULL;
+	union acpi_object *obj = NULL;
 	uint8_t name[5] = {'\0'};
-	struct cgs_acpi_method_argument *argument;
+	struct cgs_acpi_method_argument *argument = NULL;
 	uint32_t i, count;
 	acpi_status status;
 	int result;
+	uint32_t func_no = 0xFFFFFFFF;
 
 	handle = ACPI_HANDLE(&adev->pdev->dev);
 	if (!handle)
@@ -1094,6 +885,7 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 		if (info->pinput_argument == NULL)
 			return -EINVAL;
 		argument = info->pinput_argument;
+		func_no = argument->value;
 		for (i = 0; i < info->input_count; i++) {
 			if (((argument->type == ACPI_TYPE_STRING) ||
 			     (argument->type == ACPI_TYPE_BUFFER)) &&
@@ -1138,11 +930,11 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 				params->integer.value = argument->value;
 				break;
 			case ACPI_TYPE_STRING:
-				params->string.length = argument->data_length;
+				params->string.length = argument->method_length;
 				params->string.pointer = argument->pointer;
 				break;
 			case ACPI_TYPE_BUFFER:
-				params->buffer.length = argument->data_length;
+				params->buffer.length = argument->method_length;
 				params->buffer.pointer = argument->pointer;
 				break;
 			default:
@@ -1162,7 +954,7 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 
 	if (ACPI_FAILURE(status)) {
 		result = -EIO;
-		goto free_input;
+		goto error;
 	}
 
 	/* return the output info */
@@ -1172,7 +964,7 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 		if ((obj->type != ACPI_TYPE_PACKAGE) ||
 			(obj->package.count != count)) {
 			result = -EIO;
-			goto free_obj;
+			goto error;
 		}
 		params = obj->package.elements;
 	} else
@@ -1180,13 +972,13 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 
 	if (params == NULL) {
 		result = -EIO;
-		goto free_obj;
+		goto error;
 	}
 
 	for (i = 0; i < count; i++) {
 		if (argument->type != params->type) {
 			result = -EIO;
-			goto free_obj;
+			goto error;
 		}
 		switch (params->type) {
 		case ACPI_TYPE_INTEGER:
@@ -1196,7 +988,7 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 			if ((params->string.length != argument->data_length) ||
 				(params->string.pointer == NULL)) {
 				result = -EIO;
-				goto free_obj;
+				goto error;
 			}
 			strncpy(argument->pointer,
 				params->string.pointer,
@@ -1205,7 +997,7 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 		case ACPI_TYPE_BUFFER:
 			if (params->buffer.pointer == NULL) {
 				result = -EIO;
-				goto free_obj;
+				goto error;
 			}
 			memcpy(argument->pointer,
 				params->buffer.pointer,
@@ -1218,22 +1010,21 @@ static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
 		params++;
 	}
 
-	result = 0;
-free_obj:
-	kfree(obj);
-free_input:
+error:
+	if (obj != NULL)
+		kfree(obj);
 	kfree((void *)input.pointer);
 	return result;
 }
 #else
-static int amdgpu_cgs_acpi_eval_object(struct cgs_device *cgs_device,
+static int amdgpu_cgs_acpi_eval_object(void *cgs_device,
 				struct cgs_acpi_method_info *info)
 {
 	return -EIO;
 }
 #endif
 
-static int amdgpu_cgs_call_acpi_method(struct cgs_device *cgs_device,
+int amdgpu_cgs_call_acpi_method(void *cgs_device,
 					uint32_t acpi_method,
 					uint32_t acpi_function,
 					void *pinput, void *poutput,
@@ -1246,14 +1037,17 @@ static int amdgpu_cgs_call_acpi_method(struct cgs_device *cgs_device,
 	struct cgs_acpi_method_info info = {0};
 
 	acpi_input[0].type = CGS_ACPI_TYPE_INTEGER;
+	acpi_input[0].method_length = sizeof(uint32_t);
 	acpi_input[0].data_length = sizeof(uint32_t);
 	acpi_input[0].value = acpi_function;
 
 	acpi_input[1].type = CGS_ACPI_TYPE_BUFFER;
+	acpi_input[1].method_length = CGS_ACPI_MAX_BUFFER_SIZE;
 	acpi_input[1].data_length = input_size;
 	acpi_input[1].pointer = pinput;
 
 	acpi_output.type = CGS_ACPI_TYPE_BUFFER;
+	acpi_output.method_length = CGS_ACPI_MAX_BUFFER_SIZE;
 	acpi_output.data_length = output_size;
 	acpi_output.pointer = poutput;
 
@@ -1269,55 +1063,51 @@ static int amdgpu_cgs_call_acpi_method(struct cgs_device *cgs_device,
 }
 
 static const struct cgs_ops amdgpu_cgs_ops = {
-	.gpu_mem_info = amdgpu_cgs_gpu_mem_info,
-	.gmap_kmem = amdgpu_cgs_gmap_kmem,
-	.gunmap_kmem = amdgpu_cgs_gunmap_kmem,
-	.alloc_gpu_mem = amdgpu_cgs_alloc_gpu_mem,
-	.free_gpu_mem = amdgpu_cgs_free_gpu_mem,
-	.gmap_gpu_mem = amdgpu_cgs_gmap_gpu_mem,
-	.gunmap_gpu_mem = amdgpu_cgs_gunmap_gpu_mem,
-	.kmap_gpu_mem = amdgpu_cgs_kmap_gpu_mem,
-	.kunmap_gpu_mem = amdgpu_cgs_kunmap_gpu_mem,
-	.read_register = amdgpu_cgs_read_register,
-	.write_register = amdgpu_cgs_write_register,
-	.read_ind_register = amdgpu_cgs_read_ind_register,
-	.write_ind_register = amdgpu_cgs_write_ind_register,
-	.read_pci_config_byte = amdgpu_cgs_read_pci_config_byte,
-	.read_pci_config_word = amdgpu_cgs_read_pci_config_word,
-	.read_pci_config_dword = amdgpu_cgs_read_pci_config_dword,
-	.write_pci_config_byte = amdgpu_cgs_write_pci_config_byte,
-	.write_pci_config_word = amdgpu_cgs_write_pci_config_word,
-	.write_pci_config_dword = amdgpu_cgs_write_pci_config_dword,
-	.get_pci_resource = amdgpu_cgs_get_pci_resource,
-	.atom_get_data_table = amdgpu_cgs_atom_get_data_table,
-	.atom_get_cmd_table_revs = amdgpu_cgs_atom_get_cmd_table_revs,
-	.atom_exec_cmd_table = amdgpu_cgs_atom_exec_cmd_table,
-	.create_pm_request = amdgpu_cgs_create_pm_request,
-	.destroy_pm_request = amdgpu_cgs_destroy_pm_request,
-	.set_pm_request = amdgpu_cgs_set_pm_request,
-	.pm_request_clock = amdgpu_cgs_pm_request_clock,
-	.pm_request_engine = amdgpu_cgs_pm_request_engine,
-	.pm_query_clock_limits = amdgpu_cgs_pm_query_clock_limits,
-	.set_camera_voltages = amdgpu_cgs_set_camera_voltages,
-	.get_firmware_info = amdgpu_cgs_get_firmware_info,
-	.rel_firmware = amdgpu_cgs_rel_firmware,
-	.set_powergating_state = amdgpu_cgs_set_powergating_state,
-	.set_clockgating_state = amdgpu_cgs_set_clockgating_state,
-	.get_active_displays_info = amdgpu_cgs_get_active_displays_info,
-	.notify_dpm_enabled = amdgpu_cgs_notify_dpm_enabled,
-	.call_acpi_method = amdgpu_cgs_call_acpi_method,
-	.query_system_info = amdgpu_cgs_query_system_info,
-	.is_virtualization_enabled = amdgpu_cgs_is_virtualization_enabled,
-	.enter_safe_mode = amdgpu_cgs_enter_safe_mode,
+	amdgpu_cgs_gpu_mem_info,
+	amdgpu_cgs_gmap_kmem,
+	amdgpu_cgs_gunmap_kmem,
+	amdgpu_cgs_alloc_gpu_mem,
+	amdgpu_cgs_free_gpu_mem,
+	amdgpu_cgs_gmap_gpu_mem,
+	amdgpu_cgs_gunmap_gpu_mem,
+	amdgpu_cgs_kmap_gpu_mem,
+	amdgpu_cgs_kunmap_gpu_mem,
+	amdgpu_cgs_read_register,
+	amdgpu_cgs_write_register,
+	amdgpu_cgs_read_ind_register,
+	amdgpu_cgs_write_ind_register,
+	amdgpu_cgs_read_pci_config_byte,
+	amdgpu_cgs_read_pci_config_word,
+	amdgpu_cgs_read_pci_config_dword,
+	amdgpu_cgs_write_pci_config_byte,
+	amdgpu_cgs_write_pci_config_word,
+	amdgpu_cgs_write_pci_config_dword,
+	amdgpu_cgs_get_pci_resource,
+	amdgpu_cgs_atom_get_data_table,
+	amdgpu_cgs_atom_get_cmd_table_revs,
+	amdgpu_cgs_atom_exec_cmd_table,
+	amdgpu_cgs_create_pm_request,
+	amdgpu_cgs_destroy_pm_request,
+	amdgpu_cgs_set_pm_request,
+	amdgpu_cgs_pm_request_clock,
+	amdgpu_cgs_pm_request_engine,
+	amdgpu_cgs_pm_query_clock_limits,
+	amdgpu_cgs_set_camera_voltages,
+	amdgpu_cgs_get_firmware_info,
+	amdgpu_cgs_set_powergating_state,
+	amdgpu_cgs_set_clockgating_state,
+	amdgpu_cgs_get_active_displays_info,
+	amdgpu_cgs_call_acpi_method,
+	amdgpu_cgs_query_system_info,
 };
 
 static const struct cgs_os_ops amdgpu_cgs_os_ops = {
-	.add_irq_source = amdgpu_cgs_add_irq_source,
-	.irq_get = amdgpu_cgs_irq_get,
-	.irq_put = amdgpu_cgs_irq_put
+	amdgpu_cgs_add_irq_source,
+	amdgpu_cgs_irq_get,
+	amdgpu_cgs_irq_put
 };
 
-struct cgs_device *amdgpu_cgs_create_device(struct amdgpu_device *adev)
+void *amdgpu_cgs_create_device(struct amdgpu_device *adev)
 {
 	struct amdgpu_cgs_device *cgs_device =
 		kmalloc(sizeof(*cgs_device), GFP_KERNEL);
@@ -1331,10 +1121,10 @@ struct cgs_device *amdgpu_cgs_create_device(struct amdgpu_device *adev)
 	cgs_device->base.os_ops = &amdgpu_cgs_os_ops;
 	cgs_device->adev = adev;
 
-	return (struct cgs_device *)cgs_device;
+	return cgs_device;
 }
 
-void amdgpu_cgs_destroy_device(struct cgs_device *cgs_device)
+void amdgpu_cgs_destroy_device(void *cgs_device)
 {
 	kfree(cgs_device);
 }

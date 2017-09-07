@@ -27,31 +27,32 @@
 
 static struct dentry *root_folder;
 
-int brcmf_debug_create_memdump(struct brcmf_bus *bus, const void *data,
-			       size_t len)
+static int brcmf_debug_create_memdump(struct brcmf_bus *bus, const void *data,
+				      size_t len)
 {
 	void *dump;
 	size_t ramsize;
-	int err;
 
 	ramsize = brcmf_bus_get_ramsize(bus);
-	if (!ramsize)
-		return -ENOTSUPP;
-
-	dump = vzalloc(len + ramsize);
-	if (!dump)
-		return -ENOMEM;
-
-	memcpy(dump, data, len);
-	err = brcmf_bus_get_memdump(bus, dump + len, ramsize);
-	if (err) {
-		vfree(dump);
-		return err;
+	if (ramsize) {
+		dump = vzalloc(len + ramsize);
+		if (!dump)
+			return -ENOMEM;
+		memcpy(dump, data, len);
+		brcmf_bus_get_memdump(bus, dump + len, ramsize);
+		dev_coredumpv(bus->dev, dump, len + ramsize, GFP_KERNEL);
 	}
-
-	dev_coredumpv(bus->dev, dump, len + ramsize, GFP_KERNEL);
-
 	return 0;
+}
+
+static int brcmf_debug_psm_watchdog_notify(struct brcmf_if *ifp,
+					   const struct brcmf_event_msg *evtmsg,
+					   void *data)
+{
+	brcmf_dbg(TRACE, "enter: bsscfgidx=%d\n", ifp->bsscfgidx);
+
+	return brcmf_debug_create_memdump(ifp->drvr->bus_if, data,
+					  evtmsg->datalen);
 }
 
 void brcmf_debugfs_init(void)
@@ -81,7 +82,9 @@ int brcmf_debug_attach(struct brcmf_pub *drvr)
 	if (IS_ERR(drvr->dbgfs_dir))
 		return PTR_ERR(drvr->dbgfs_dir);
 
-	return 0;
+
+	return brcmf_fweh_register(drvr, BRCMF_E_PSM_WATCHDOG,
+				   brcmf_debug_psm_watchdog_notify);
 }
 
 void brcmf_debug_detach(struct brcmf_pub *drvr)

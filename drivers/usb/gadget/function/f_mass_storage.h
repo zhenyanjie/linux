@@ -100,7 +100,6 @@ struct fsg_lun_config {
 	char removable;
 	char cdrom;
 	char nofua;
-	char inquiry_string[INQUIRY_STRING_LEN];
 };
 
 struct fsg_config {
@@ -153,6 +152,8 @@ int fsg_common_create_luns(struct fsg_common *common, struct fsg_config *cfg);
 
 void fsg_common_set_inquiry_string(struct fsg_common *common, const char *vn,
 				   const char *pn);
+
+int fsg_common_run_thread(struct fsg_common *common);
 
 void fsg_config_from_params(struct fsg_config *cfg,
 			    const struct fsg_module_parameters *params,

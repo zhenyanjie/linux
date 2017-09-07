@@ -14,8 +14,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/task.h>
-#include <linux/sched/cputime.h>
 #include <linux/slab.h>
 #include <linux/taskstats.h>
 #include <linux/time.h>
@@ -84,19 +82,19 @@ void __delayacct_blkio_end(void)
 
 int __delayacct_add_tsk(struct taskstats *d, struct task_struct *tsk)
 {
-	u64 utime, stime, stimescaled, utimescaled;
+	cputime_t utime, stime, stimescaled, utimescaled;
 	unsigned long long t2, t3;
 	unsigned long flags, t1;
 	s64 tmp;
 
 	task_cputime(tsk, &utime, &stime);
 	tmp = (s64)d->cpu_run_real_total;
-	tmp += utime + stime;
+	tmp += cputime_to_nsecs(utime + stime);
 	d->cpu_run_real_total = (tmp < (s64)d->cpu_run_real_total) ? 0 : tmp;
 
 	task_cputime_scaled(tsk, &utimescaled, &stimescaled);
 	tmp = (s64)d->cpu_scaled_run_real_total;
-	tmp += utimescaled + stimescaled;
+	tmp += cputime_to_nsecs(utimescaled + stimescaled);
 	d->cpu_scaled_run_real_total =
 		(tmp < (s64)d->cpu_scaled_run_real_total) ? 0 : tmp;
 

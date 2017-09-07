@@ -1,10 +1,5 @@
-#include <errno.h>
-#include <inttypes.h>
 #include <api/fs/tracing_path.h>
 #include <linux/err.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include "thread_map.h"
 #include "evsel.h"
 #include "debug.h"
@@ -34,7 +29,7 @@ int test__openat_syscall_event(int subtest __maybe_unused)
 	if (perf_evsel__open_per_thread(evsel, threads) < 0) {
 		pr_debug("failed to open counter: %s, "
 			 "tweak /proc/sys/kernel/perf_event_paranoid?\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_evsel_delete;
 	}
 

@@ -52,8 +52,6 @@ extern u8 acpi_sci_flags;
 extern int acpi_sci_override_gsi;
 void acpi_pic_sci_set_trigger(unsigned int, u16);
 
-struct device;
-
 extern int (*__acpi_register_gsi)(struct device *dev, u32 gsi,
 				  int trigger, int polarity);
 extern void (*__acpi_unregister_gsi)(u32 gsi);
@@ -96,7 +94,7 @@ static inline unsigned int acpi_processor_cstate_check(unsigned int max_cstate)
 	    boot_cpu_data.x86_model <= 0x05 &&
 	    boot_cpu_data.x86_mask < 0x0A)
 		return 1;
-	else if (boot_cpu_has(X86_BUG_AMD_APIC_C1E))
+	else if (amd_e400_c1e_detected)
 		return 1;
 	else
 		return max_cstate;
@@ -147,6 +145,7 @@ static inline void disable_acpi(void) { }
 #define ARCH_HAS_POWER_INIT	1
 
 #ifdef CONFIG_ACPI_NUMA
+extern int acpi_numa;
 extern int x86_acpi_numa_init(void);
 #endif /* CONFIG_ACPI_NUMA */
 
@@ -170,7 +169,5 @@ static inline pgprot_t arch_apei_get_mem_attribute(phys_addr_t addr)
 	 return PAGE_KERNEL;
 }
 #endif
-
-#define ACPI_TABLE_UPGRADE_MAX_PHYS (max_low_pfn_mapped << PAGE_SHIFT)
 
 #endif /* _ASM_X86_ACPI_H */

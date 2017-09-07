@@ -16,7 +16,6 @@
 #include <linux/parser.h>
 #include <linux/magic.h>
 #include <linux/sched.h>
-#include <linux/cred.h>
 #include <linux/slab.h>
 #include <linux/writeback.h>
 #include <linux/blkdev.h>
@@ -33,7 +32,7 @@ affs_commit_super(struct super_block *sb, int wait)
 	struct affs_root_tail *tail = AFFS_ROOT_TAIL(sb, bh);
 
 	lock_buffer(bh);
-	affs_secs_to_datestamp(ktime_get_real_seconds(), &tail->disk_change);
+	secs_to_datestamp(ktime_get_real_seconds(), &tail->disk_change);
 	affs_fix_checksum(sb, bh);
 	unlock_buffer(bh);
 
@@ -508,7 +507,6 @@ got_root:
 		return -ENOMEM;
 	}
 
-	sb->s_export_op = &affs_export_ops;
 	pr_debug("s_flags=%lX\n", sb->s_flags);
 	return 0;
 }
@@ -530,7 +528,7 @@ affs_remount(struct super_block *sb, int *flags, char *data)
 	char			*prefix = NULL;
 
 	new_opts = kstrdup(data, GFP_KERNEL);
-	if (data && !new_opts)
+	if (!new_opts)
 		return -ENOMEM;
 
 	pr_debug("%s(flags=0x%x,opts=\"%s\")\n", __func__, *flags, data);
@@ -548,8 +546,7 @@ affs_remount(struct super_block *sb, int *flags, char *data)
 	}
 
 	flush_delayed_work(&sbi->sb_work);
-	if (new_opts)
-		replace_mount_options(sb, new_opts);
+	replace_mount_options(sb, new_opts);
 
 	sbi->s_flags = mount_flags;
 	sbi->s_mode  = mode;

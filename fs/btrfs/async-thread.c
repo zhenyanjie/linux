@@ -34,10 +34,6 @@
 
 struct __btrfs_workqueue {
 	struct workqueue_struct *normal_wq;
-
-	/* File system this workqueue services */
-	struct btrfs_fs_info *fs_info;
-
 	/* List head pointing to ordered work list */
 	struct list_head ordered_list;
 
@@ -74,32 +70,6 @@ void btrfs_##name(struct work_struct *arg)				\
 	normal_work_helper(work);					\
 }
 
-struct btrfs_fs_info *
-btrfs_workqueue_owner(struct __btrfs_workqueue *wq)
-{
-	return wq->fs_info;
-}
-
-struct btrfs_fs_info *
-btrfs_work_owner(struct btrfs_work *work)
-{
-	return work->wq->fs_info;
-}
-
-bool btrfs_workqueue_normal_congested(struct btrfs_workqueue *wq)
-{
-	/*
-	 * We could compare wq->normal->pending with num_online_cpus()
-	 * to support "thresh == NO_THRESHOLD" case, but it requires
-	 * moving up atomic_inc/dec in thresh_queue/exec_hook. Let's
-	 * postpone it until someone needs the support of that case.
-	 */
-	if (wq->normal->thresh == NO_THRESHOLD)
-		return false;
-
-	return atomic_read(&wq->normal->pending) > wq->normal->thresh * 2;
-}
-
 BTRFS_WORK_HELPER(worker_helper);
 BTRFS_WORK_HELPER(delalloc_helper);
 BTRFS_WORK_HELPER(flush_delalloc_helper);
@@ -124,15 +94,14 @@ BTRFS_WORK_HELPER(scrubnc_helper);
 BTRFS_WORK_HELPER(scrubparity_helper);
 
 static struct __btrfs_workqueue *
-__btrfs_alloc_workqueue(struct btrfs_fs_info *fs_info, const char *name,
-			unsigned int flags, int limit_active, int thresh)
+__btrfs_alloc_workqueue(const char *name, unsigned int flags, int limit_active,
+			 int thresh)
 {
 	struct __btrfs_workqueue *ret = kzalloc(sizeof(*ret), GFP_KERNEL);
 
 	if (!ret)
 		return NULL;
 
-	ret->fs_info = fs_info;
 	ret->limit_active = limit_active;
 	atomic_set(&ret->pending, 0);
 	if (thresh == 0)
@@ -174,8 +143,7 @@ __btrfs_alloc_workqueue(struct btrfs_fs_info *fs_info, const char *name,
 static inline void
 __btrfs_destroy_workqueue(struct __btrfs_workqueue *wq);
 
-struct btrfs_workqueue *btrfs_alloc_workqueue(struct btrfs_fs_info *fs_info,
-					      const char *name,
+struct btrfs_workqueue *btrfs_alloc_workqueue(const char *name,
 					      unsigned int flags,
 					      int limit_active,
 					      int thresh)
@@ -185,8 +153,7 @@ struct btrfs_workqueue *btrfs_alloc_workqueue(struct btrfs_fs_info *fs_info,
 	if (!ret)
 		return NULL;
 
-	ret->normal = __btrfs_alloc_workqueue(fs_info, name,
-					      flags & ~WQ_HIGHPRI,
+	ret->normal = __btrfs_alloc_workqueue(name, flags & ~WQ_HIGHPRI,
 					      limit_active, thresh);
 	if (!ret->normal) {
 		kfree(ret);
@@ -194,8 +161,8 @@ struct btrfs_workqueue *btrfs_alloc_workqueue(struct btrfs_fs_info *fs_info,
 	}
 
 	if (flags & WQ_HIGHPRI) {
-		ret->high = __btrfs_alloc_workqueue(fs_info, name, flags,
-						    limit_active, thresh);
+		ret->high = __btrfs_alloc_workqueue(name, flags, limit_active,
+						    thresh);
 		if (!ret->high) {
 			__btrfs_destroy_workqueue(ret->normal);
 			kfree(ret);
@@ -273,8 +240,6 @@ static void run_ordered_work(struct __btrfs_workqueue *wq)
 	unsigned long flags;
 
 	while (1) {
-		void *wtag;
-
 		spin_lock_irqsave(lock, flags);
 		if (list_empty(list))
 			break;
@@ -301,13 +266,11 @@ static void run_ordered_work(struct __btrfs_workqueue *wq)
 		spin_unlock_irqrestore(lock, flags);
 
 		/*
-		 * We don't want to call the ordered free functions with the
-		 * lock held though. Save the work as tag for the trace event,
-		 * because the callback could free the structure.
+		 * we don't want to call the ordered free functions
+		 * with the lock held though
 		 */
-		wtag = work;
 		work->ordered_free(work);
-		trace_btrfs_all_work_done(wq->fs_info, wtag);
+		trace_btrfs_all_work_done(work);
 	}
 	spin_unlock_irqrestore(lock, flags);
 }
@@ -315,7 +278,6 @@ static void run_ordered_work(struct __btrfs_workqueue *wq)
 static void normal_work_helper(struct btrfs_work *work)
 {
 	struct __btrfs_workqueue *wq;
-	void *wtag;
 	int need_order = 0;
 
 	/*
@@ -329,8 +291,6 @@ static void normal_work_helper(struct btrfs_work *work)
 	if (work->ordered_func)
 		need_order = 1;
 	wq = work->wq;
-	/* Safe for tracepoints in case work gets freed by the callback */
-	wtag = work;
 
 	trace_btrfs_work_sched(work);
 	thresh_exec_hook(wq);
@@ -340,7 +300,7 @@ static void normal_work_helper(struct btrfs_work *work)
 		run_ordered_work(wq);
 	}
 	if (!need_order)
-		trace_btrfs_all_work_done(wq->fs_info, wtag);
+		trace_btrfs_all_work_done(work);
 }
 
 void btrfs_init_work(struct btrfs_work *work, btrfs_work_func_t uniq_func,

@@ -46,8 +46,6 @@
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_cmnd.h>
 #include <linux/libata.h>
-#include <linux/ahci-remap.h>
-#include <linux/io-64-nonatomic-lo-hi.h>
 #include "ahci.h"
 
 #define DRV_NAME	"ahci"
@@ -87,7 +85,6 @@ enum board_ids {
 };
 
 static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent);
-static void ahci_remove_one(struct pci_dev *dev);
 static int ahci_vt8251_hardreset(struct ata_link *link, unsigned int *class,
 				 unsigned long deadline);
 static int ahci_avn_hardreset(struct ata_link *link, unsigned int *class,
@@ -97,13 +94,9 @@ static bool is_mcp89_apple(struct pci_dev *pdev);
 static int ahci_p5wdh_hardreset(struct ata_link *link, unsigned int *class,
 				unsigned long deadline);
 #ifdef CONFIG_PM
-static int ahci_pci_device_runtime_suspend(struct device *dev);
-static int ahci_pci_device_runtime_resume(struct device *dev);
-#ifdef CONFIG_PM_SLEEP
-static int ahci_pci_device_suspend(struct device *dev);
-static int ahci_pci_device_resume(struct device *dev);
+static int ahci_pci_device_suspend(struct pci_dev *pdev, pm_message_t mesg);
+static int ahci_pci_device_resume(struct pci_dev *pdev);
 #endif
-#endif /* CONFIG_PM */
 
 static struct scsi_host_template ahci_sht = {
 	AHCI_SHT("ahci"),
@@ -378,11 +371,15 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, 0x2826), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0x2827), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa182), board_ahci }, /* Lewisburg AHCI*/
+	{ PCI_VDEVICE(INTEL, 0xa184), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa186), board_ahci }, /* Lewisburg RAID*/
+	{ PCI_VDEVICE(INTEL, 0xa18e), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa1d2), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa1d6), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa202), board_ahci }, /* Lewisburg AHCI*/
+	{ PCI_VDEVICE(INTEL, 0xa204), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa206), board_ahci }, /* Lewisburg RAID*/
+	{ PCI_VDEVICE(INTEL, 0xa20e), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa252), board_ahci }, /* Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0xa256), board_ahci }, /* Lewisburg RAID*/
 
@@ -566,23 +563,19 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	{ }	/* terminate list */
 };
 
-static const struct dev_pm_ops ahci_pci_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(ahci_pci_device_suspend, ahci_pci_device_resume)
-	SET_RUNTIME_PM_OPS(ahci_pci_device_runtime_suspend,
-			   ahci_pci_device_runtime_resume, NULL)
-};
 
 static struct pci_driver ahci_pci_driver = {
 	.name			= DRV_NAME,
 	.id_table		= ahci_pci_tbl,
 	.probe			= ahci_init_one,
-	.remove			= ahci_remove_one,
-	.driver = {
-		.pm		= &ahci_pci_pm_ops,
-	},
+	.remove			= ata_pci_remove_one,
+#ifdef CONFIG_PM
+	.suspend		= ahci_pci_device_suspend,
+	.resume			= ahci_pci_device_resume,
+#endif
 };
 
-#if IS_ENABLED(CONFIG_PATA_MARVELL)
+#if defined(CONFIG_PATA_MARVELL) || defined(CONFIG_PATA_MARVELL_MODULE)
 static int marvell_enable;
 #else
 static int marvell_enable = 1;
@@ -808,66 +801,42 @@ static int ahci_avn_hardreset(struct ata_link *link, unsigned int *class,
 
 
 #ifdef CONFIG_PM
-static void ahci_pci_disable_interrupts(struct ata_host *host)
+static int ahci_pci_device_suspend(struct pci_dev *pdev, pm_message_t mesg)
 {
+	struct ata_host *host = pci_get_drvdata(pdev);
 	struct ahci_host_priv *hpriv = host->private_data;
 	void __iomem *mmio = hpriv->mmio;
 	u32 ctl;
 
-	/* AHCI spec rev1.1 section 8.3.3:
-	 * Software must disable interrupts prior to requesting a
-	 * transition of the HBA to D3 state.
-	 */
-	ctl = readl(mmio + HOST_CTL);
-	ctl &= ~HOST_IRQ_EN;
-	writel(ctl, mmio + HOST_CTL);
-	readl(mmio + HOST_CTL); /* flush */
-}
-
-static int ahci_pci_device_runtime_suspend(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct ata_host *host = pci_get_drvdata(pdev);
-
-	ahci_pci_disable_interrupts(host);
-	return 0;
-}
-
-static int ahci_pci_device_runtime_resume(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct ata_host *host = pci_get_drvdata(pdev);
-	int rc;
-
-	rc = ahci_pci_reset_controller(host);
-	if (rc)
-		return rc;
-	ahci_pci_init_controller(host);
-	return 0;
-}
-
-#ifdef CONFIG_PM_SLEEP
-static int ahci_pci_device_suspend(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct ata_host *host = pci_get_drvdata(pdev);
-	struct ahci_host_priv *hpriv = host->private_data;
-
-	if (hpriv->flags & AHCI_HFLAG_NO_SUSPEND) {
+	if (mesg.event & PM_EVENT_SUSPEND &&
+	    hpriv->flags & AHCI_HFLAG_NO_SUSPEND) {
 		dev_err(&pdev->dev,
 			"BIOS update required for suspend/resume\n");
 		return -EIO;
 	}
 
-	ahci_pci_disable_interrupts(host);
-	return ata_host_suspend(host, PMSG_SUSPEND);
+	if (mesg.event & PM_EVENT_SLEEP) {
+		/* AHCI spec rev1.1 section 8.3.3:
+		 * Software must disable interrupts prior to requesting a
+		 * transition of the HBA to D3 state.
+		 */
+		ctl = readl(mmio + HOST_CTL);
+		ctl &= ~HOST_IRQ_EN;
+		writel(ctl, mmio + HOST_CTL);
+		readl(mmio + HOST_CTL); /* flush */
+	}
+
+	return ata_pci_device_suspend(pdev, mesg);
 }
 
-static int ahci_pci_device_resume(struct device *dev)
+static int ahci_pci_device_resume(struct pci_dev *pdev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
 	struct ata_host *host = pci_get_drvdata(pdev);
 	int rc;
+
+	rc = ata_pci_device_do_resume(pdev);
+	if (rc)
+		return rc;
 
 	/* Apple BIOS helpfully mangles the registers on resume */
 	if (is_mcp89_apple(pdev))
@@ -886,8 +855,6 @@ static int ahci_pci_device_resume(struct device *dev)
 	return 0;
 }
 #endif
-
-#endif /* CONFIG_PM */
 
 static int ahci_configure_dma_masks(struct pci_dev *pdev, int using_dac)
 {
@@ -1402,86 +1369,142 @@ static irqreturn_t ahci_thunderx_irq_handler(int irq, void *dev_instance)
 }
 #endif
 
-static void ahci_remap_check(struct pci_dev *pdev, int bar,
-		struct ahci_host_priv *hpriv)
+/*
+ * ahci_init_msix() - optionally enable per-port MSI-X otherwise defer
+ * to single msi.
+ */
+static int ahci_init_msix(struct pci_dev *pdev, unsigned int n_ports,
+			  struct ahci_host_priv *hpriv, unsigned long flags)
 {
-	int i, count = 0;
-	u32 cap;
+	int nvec, i, rc;
+
+	/* Do not init MSI-X if MSI is disabled for the device */
+	if (hpriv->flags & AHCI_HFLAG_NO_MSI)
+		return -ENODEV;
+
+	nvec = pci_msix_vec_count(pdev);
+	if (nvec < 0)
+		return nvec;
 
 	/*
-	 * Check if this device might have remapped nvme devices.
+	 * Proper MSI-X implementations will have a vector per-port.
+	 * Barring that, we prefer single-MSI over single-MSIX.  If this
+	 * check fails (not enough MSI-X vectors for all ports) we will
+	 * be called again with the flag clear iff ahci_init_msi()
+	 * fails.
 	 */
-	if (pdev->vendor != PCI_VENDOR_ID_INTEL ||
-	    pci_resource_len(pdev, bar) < SZ_512K ||
-	    bar != AHCI_PCI_BAR_STANDARD ||
-	    !(readl(hpriv->mmio + AHCI_VSCAP) & 1))
-		return;
-
-	cap = readq(hpriv->mmio + AHCI_REMAP_CAP);
-	for (i = 0; i < AHCI_MAX_REMAP; i++) {
-		if ((cap & (1 << i)) == 0)
-			continue;
-		if (readl(hpriv->mmio + ahci_remap_dcc(i))
-				!= PCI_CLASS_STORAGE_EXPRESS)
-			continue;
-
-		/* We've found a remapped device */
-		count++;
+	if (flags & AHCI_HFLAG_MULTI_MSIX) {
+		if (nvec < n_ports)
+			return -ENODEV;
+		nvec = n_ports;
+	} else if (nvec) {
+		nvec = 1;
+	} else {
+		/*
+		 * Emit dev_err() since this was the non-legacy irq
+		 * method of last resort.
+		 */
+		rc = -ENODEV;
+		goto fail;
 	}
 
-	if (!count)
-		return;
+	for (i = 0; i < nvec; i++)
+		hpriv->msix[i].entry = i;
+	rc = pci_enable_msix_exact(pdev, hpriv->msix, nvec);
+	if (rc < 0)
+		goto fail;
 
-	dev_warn(&pdev->dev, "Found %d remapped NVMe devices.\n", count);
-	dev_warn(&pdev->dev, "Switch your BIOS from RAID to AHCI mode to use them.\n");
-}
+	if (nvec > 1)
+		hpriv->flags |= AHCI_HFLAG_MULTI_MSIX;
+	hpriv->irq = hpriv->msix[0].vector; /* for single msi-x */
 
-static int ahci_get_irq_vector(struct ata_host *host, int port)
-{
-	return pci_irq_vector(to_pci_dev(host->dev), port);
+	return nvec;
+fail:
+	dev_err(&pdev->dev,
+		"failed to enable MSI-X with error %d, # of vectors: %d\n",
+		rc, nvec);
+
+	return rc;
 }
 
 static int ahci_init_msi(struct pci_dev *pdev, unsigned int n_ports,
 			struct ahci_host_priv *hpriv)
 {
-	int nvec;
+	int rc, nvec;
 
 	if (hpriv->flags & AHCI_HFLAG_NO_MSI)
 		return -ENODEV;
+
+	nvec = pci_msi_vec_count(pdev);
+	if (nvec < 0)
+		return nvec;
 
 	/*
 	 * If number of MSIs is less than number of ports then Sharing Last
 	 * Message mode could be enforced. In this case assume that advantage
 	 * of multipe MSIs is negated and use single MSI mode instead.
 	 */
-	if (n_ports > 1) {
-		nvec = pci_alloc_irq_vectors(pdev, n_ports, INT_MAX,
-				PCI_IRQ_MSIX | PCI_IRQ_MSI);
-		if (nvec > 0) {
-			if (!(readl(hpriv->mmio + HOST_CTL) & HOST_MRSM)) {
-				hpriv->get_irq_vector = ahci_get_irq_vector;
-				hpriv->flags |= AHCI_HFLAG_MULTI_MSI;
-				return nvec;
-			}
+	if (nvec < n_ports)
+		goto single_msi;
 
-			/*
-			 * Fallback to single MSI mode if the controller
-			 * enforced MRSM mode.
-			 */
-			printk(KERN_INFO
-				"ahci: MRSM is on, fallback to single MSI\n");
-			pci_free_irq_vectors(pdev);
-		}
+	rc = pci_enable_msi_exact(pdev, nvec);
+	if (rc == -ENOSPC)
+		goto single_msi;
+	if (rc < 0)
+		return rc;
+
+	/* fallback to single MSI mode if the controller enforced MRSM mode */
+	if (readl(hpriv->mmio + HOST_CTL) & HOST_MRSM) {
+		pci_disable_msi(pdev);
+		printk(KERN_INFO "ahci: MRSM is on, fallback to single MSI\n");
+		goto single_msi;
 	}
 
+	if (nvec > 1)
+		hpriv->flags |= AHCI_HFLAG_MULTI_MSI;
+
+	goto out;
+
+single_msi:
+	nvec = 1;
+
+	rc = pci_enable_msi(pdev);
+	if (rc < 0)
+		return rc;
+out:
+	hpriv->irq = pdev->irq;
+
+	return nvec;
+}
+
+static int ahci_init_interrupts(struct pci_dev *pdev, unsigned int n_ports,
+				struct ahci_host_priv *hpriv)
+{
+	int nvec;
+
 	/*
-	 * If the host is not capable of supporting per-port vectors, fall
-	 * back to single MSI before finally attempting single MSI-X.
+	 * Try to enable per-port MSI-X.  If the host is not capable
+	 * fall back to single MSI before finally attempting single
+	 * MSI-X.
 	 */
-	nvec = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_MSI);
-	if (nvec == 1)
+	nvec = ahci_init_msix(pdev, n_ports, hpriv, AHCI_HFLAG_MULTI_MSIX);
+	if (nvec >= 0)
 		return nvec;
-	return pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_MSIX);
+
+	nvec = ahci_init_msi(pdev, n_ports, hpriv);
+	if (nvec >= 0)
+		return nvec;
+
+	/* try single-msix */
+	nvec = ahci_init_msix(pdev, n_ports, hpriv, 0);
+	if (nvec >= 0)
+		return nvec;
+
+	/* legacy intx interrupts */
+	pci_intx(pdev, 1);
+	hpriv->irq = pdev->irq;
+
+	return 0;
 }
 
 static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -1577,9 +1600,6 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	hpriv->mmio = pcim_iomap_table(pdev)[ahci_pci_bar];
 
-	/* detect remapped nvme devices */
-	ahci_remap_check(pdev, ahci_pci_bar, hpriv);
-
 	/* must set flag prior to save config in order to take effect */
 	if (ahci_broken_devslp(pdev))
 		hpriv->flags |= AHCI_HFLAG_NO_DEVSLP;
@@ -1647,12 +1667,11 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (!host)
 		return -ENOMEM;
 	host->private_data = hpriv;
-
-	if (ahci_init_msi(pdev, n_ports, hpriv) < 0) {
-		/* legacy intx interrupts */
-		pci_intx(pdev, 1);
-	}
-	hpriv->irq = pci_irq_vector(pdev, 0);
+	hpriv->msix = devm_kzalloc(&pdev->dev,
+			sizeof(struct msix_entry) * n_ports, GFP_KERNEL);
+	if (!hpriv->msix)
+		return -ENOMEM;
+	ahci_init_interrupts(pdev, n_ports, hpriv);
 
 	if (!(hpriv->cap & HOST_CAP_SSS) || ahci_ignore_sss)
 		host->flags |= ATA_HOST_PARALLEL_SCAN;
@@ -1699,18 +1718,7 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	pci_set_master(pdev);
 
-	rc = ahci_host_activate(host, &ahci_sht);
-	if (rc)
-		return rc;
-
-	pm_runtime_put_noidle(&pdev->dev);
-	return 0;
-}
-
-static void ahci_remove_one(struct pci_dev *pdev)
-{
-	pm_runtime_get_noresume(&pdev->dev);
-	ata_pci_remove_one(pdev);
+	return ahci_host_activate(host, &ahci_sht);
 }
 
 module_pci_driver(ahci_pci_driver);

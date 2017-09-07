@@ -3,10 +3,8 @@
  *
  * Builtin regression testing command: ever growing number of sanity tests
  */
-#include <errno.h>
 #include <unistd.h>
 #include <string.h>
-#include <sys/wait.h>
 #include "builtin.h"
 #include "hist.h"
 #include "intlist.h"
@@ -15,9 +13,6 @@
 #include "color.h"
 #include <subcmd/parse-options.h>
 #include "symbol.h"
-#include <linux/kernel.h>
-
-static bool dont_fork;
 
 struct test __weak arch_tests[] = {
 	{
@@ -31,123 +26,119 @@ static struct test generic_tests[] = {
 		.func = test__vmlinux_matches_kallsyms,
 	},
 	{
-		.desc = "Detect openat syscall event",
+		.desc = "detect openat syscall event",
 		.func = test__openat_syscall_event,
 	},
 	{
-		.desc = "Detect openat syscall event on all cpus",
+		.desc = "detect openat syscall event on all cpus",
 		.func = test__openat_syscall_event_on_all_cpus,
 	},
 	{
-		.desc = "Read samples using the mmap interface",
+		.desc = "read samples using the mmap interface",
 		.func = test__basic_mmap,
 	},
 	{
-		.desc = "Parse event definition strings",
+		.desc = "parse events tests",
 		.func = test__parse_events,
 	},
 	{
-		.desc = "Simple expression parser",
-		.func = test__expr,
-	},
-	{
-		.desc = "PERF_RECORD_* events & perf_sample fields",
+		.desc = "Validate PERF_RECORD_* events & perf_sample fields",
 		.func = test__PERF_RECORD,
 	},
 	{
-		.desc = "Parse perf pmu format",
+		.desc = "Test perf pmu format parsing",
 		.func = test__pmu,
 	},
 	{
-		.desc = "DSO data read",
+		.desc = "Test dso data read",
 		.func = test__dso_data,
 	},
 	{
-		.desc = "DSO data cache",
+		.desc = "Test dso data cache",
 		.func = test__dso_data_cache,
 	},
 	{
-		.desc = "DSO data reopen",
+		.desc = "Test dso data reopen",
 		.func = test__dso_data_reopen,
 	},
 	{
-		.desc = "Roundtrip evsel->name",
+		.desc = "roundtrip evsel->name check",
 		.func = test__perf_evsel__roundtrip_name_test,
 	},
 	{
-		.desc = "Parse sched tracepoints fields",
+		.desc = "Check parsing of sched tracepoints fields",
 		.func = test__perf_evsel__tp_sched_test,
 	},
 	{
-		.desc = "syscalls:sys_enter_openat event fields",
+		.desc = "Generate and check syscalls:sys_enter_openat event fields",
 		.func = test__syscall_openat_tp_fields,
 	},
 	{
-		.desc = "Setup struct perf_event_attr",
+		.desc = "struct perf_event_attr setup",
 		.func = test__attr,
 	},
 	{
-		.desc = "Match and link multiple hists",
+		.desc = "Test matching and linking multiple hists",
 		.func = test__hists_link,
 	},
 	{
-		.desc = "'import perf' in python",
+		.desc = "Try 'import perf' in python, checking link problems",
 		.func = test__python_use,
 	},
 	{
-		.desc = "Breakpoint overflow signal handler",
+		.desc = "Test breakpoint overflow signal handler",
 		.func = test__bp_signal,
 	},
 	{
-		.desc = "Breakpoint overflow sampling",
+		.desc = "Test breakpoint overflow sampling",
 		.func = test__bp_signal_overflow,
 	},
 	{
-		.desc = "Number of exit events of a simple workload",
+		.desc = "Test number of exit event of a simple workload",
 		.func = test__task_exit,
 	},
 	{
-		.desc = "Software clock events period values",
+		.desc = "Test software clock events have valid period values",
 		.func = test__sw_clock_freq,
 	},
 	{
-		.desc = "Object code reading",
+		.desc = "Test object code reading",
 		.func = test__code_reading,
 	},
 	{
-		.desc = "Sample parsing",
+		.desc = "Test sample parsing",
 		.func = test__sample_parsing,
 	},
 	{
-		.desc = "Use a dummy software event to keep tracking",
+		.desc = "Test using a dummy software event to keep tracking",
 		.func = test__keep_tracking,
 	},
 	{
-		.desc = "Parse with no sample_id_all bit set",
+		.desc = "Test parsing with no sample_id_all bit set",
 		.func = test__parse_no_sample_id_all,
 	},
 	{
-		.desc = "Filter hist entries",
+		.desc = "Test filtering hist entries",
 		.func = test__hists_filter,
 	},
 	{
-		.desc = "Lookup mmap thread",
+		.desc = "Test mmap thread lookup",
 		.func = test__mmap_thread_lookup,
 	},
 	{
-		.desc = "Share thread mg",
+		.desc = "Test thread mg sharing",
 		.func = test__thread_mg_share,
 	},
 	{
-		.desc = "Sort output of hist entries",
+		.desc = "Test output sorting of hist entries",
 		.func = test__hists_output,
 	},
 	{
-		.desc = "Cumulate child hist entries",
+		.desc = "Test cumulation of child hist entries",
 		.func = test__hists_cumulate,
 	},
 	{
-		.desc = "Track with sched_switch",
+		.desc = "Test tracking with sched_switch",
 		.func = test__switch_tracking,
 	},
 	{
@@ -159,15 +150,15 @@ static struct test generic_tests[] = {
 		.func = test__fdarray__add,
 	},
 	{
-		.desc = "kmod_path__parse",
+		.desc = "Test kmod_path__parse function",
 		.func = test__kmod_path__parse,
 	},
 	{
-		.desc = "Thread map",
+		.desc = "Test thread map",
 		.func = test__thread_map,
 	},
 	{
-		.desc = "LLVM search and compile",
+		.desc = "Test LLVM searching and compiling",
 		.func = test__llvm,
 		.subtest = {
 			.skip_if_fail	= true,
@@ -176,11 +167,11 @@ static struct test generic_tests[] = {
 		},
 	},
 	{
-		.desc = "Session topology",
+		.desc = "Test topology in session",
 		.func = test_session_topology,
 	},
 	{
-		.desc = "BPF filter",
+		.desc = "Test BPF filter",
 		.func = test__bpf,
 		.subtest = {
 			.skip_if_fail	= true,
@@ -189,73 +180,28 @@ static struct test generic_tests[] = {
 		},
 	},
 	{
-		.desc = "Synthesize thread map",
+		.desc = "Test thread map synthesize",
 		.func = test__thread_map_synthesize,
 	},
 	{
-		.desc = "Remove thread map",
-		.func = test__thread_map_remove,
-	},
-	{
-		.desc = "Synthesize cpu map",
+		.desc = "Test cpu map synthesize",
 		.func = test__cpu_map_synthesize,
 	},
 	{
-		.desc = "Synthesize stat config",
+		.desc = "Test stat config synthesize",
 		.func = test__synthesize_stat_config,
 	},
 	{
-		.desc = "Synthesize stat",
+		.desc = "Test stat synthesize",
 		.func = test__synthesize_stat,
 	},
 	{
-		.desc = "Synthesize stat round",
+		.desc = "Test stat round synthesize",
 		.func = test__synthesize_stat_round,
 	},
 	{
-		.desc = "Synthesize attr update",
+		.desc = "Test attr update synthesize",
 		.func = test__event_update,
-	},
-	{
-		.desc = "Event times",
-		.func = test__event_times,
-	},
-	{
-		.desc = "Read backward ring buffer",
-		.func = test__backward_ring_buffer,
-	},
-	{
-		.desc = "Print cpu map",
-		.func = test__cpu_map_print,
-	},
-	{
-		.desc = "Probe SDT events",
-		.func = test__sdt_event,
-	},
-	{
-		.desc = "is_printable_array",
-		.func = test__is_printable_array,
-	},
-	{
-		.desc = "Print bitmap",
-		.func = test__bitmap_print,
-	},
-	{
-		.desc = "perf hooks",
-		.func = test__perf_hooks,
-	},
-	{
-		.desc = "builtin clang support",
-		.func = test__clang,
-		.subtest = {
-			.skip_if_fail	= true,
-			.get_nr		= test__clang_subtest_get_nr,
-			.get_desc	= test__clang_subtest_get_desc,
-		}
-	},
-	{
-		.desc = "unit_number__scnprintf",
-		.func = test__unit_number__scnprint,
 	},
 	{
 		.func = NULL,
@@ -293,51 +239,44 @@ static bool perf_test__matches(struct test *test, int curr, int argc, const char
 
 static int run_test(struct test *test, int subtest)
 {
-	int status, err = -1, child = dont_fork ? 0 : fork();
+	int status, err = -1, child = fork();
 	char sbuf[STRERR_BUFSIZE];
 
 	if (child < 0) {
 		pr_err("failed to fork test: %s\n",
-			str_error_r(errno, sbuf, sizeof(sbuf)));
+			strerror_r(errno, sbuf, sizeof(sbuf)));
 		return -1;
 	}
 
 	if (!child) {
-		if (!dont_fork) {
-			pr_debug("test child forked, pid %d\n", getpid());
+		pr_debug("test child forked, pid %d\n", getpid());
+		if (!verbose) {
+			int nullfd = open("/dev/null", O_WRONLY);
+			if (nullfd >= 0) {
+				close(STDERR_FILENO);
+				close(STDOUT_FILENO);
 
-			if (verbose <= 0) {
-				int nullfd = open("/dev/null", O_WRONLY);
-
-				if (nullfd >= 0) {
-					close(STDERR_FILENO);
-					close(STDOUT_FILENO);
-
-					dup2(nullfd, STDOUT_FILENO);
-					dup2(STDOUT_FILENO, STDERR_FILENO);
-					close(nullfd);
-				}
-			} else {
-				signal(SIGSEGV, sighandler_dump_stack);
-				signal(SIGFPE, sighandler_dump_stack);
+				dup2(nullfd, STDOUT_FILENO);
+				dup2(STDOUT_FILENO, STDERR_FILENO);
+				close(nullfd);
 			}
+		} else {
+			signal(SIGSEGV, sighandler_dump_stack);
+			signal(SIGFPE, sighandler_dump_stack);
 		}
 
 		err = test->func(subtest);
-		if (!dont_fork)
-			exit(err);
+		exit(err);
 	}
 
-	if (!dont_fork) {
-		wait(&status);
+	wait(&status);
 
-		if (WIFEXITED(status)) {
-			err = (signed char)WEXITSTATUS(status);
-			pr_debug("test child finished with %d\n", err);
-		} else if (WIFSIGNALED(status)) {
-			err = -1;
-			pr_debug("test child interrupted\n");
-		}
+	if (WIFEXITED(status)) {
+		err = (signed char)WEXITSTATUS(status);
+		pr_debug("test child finished with %d\n", err);
+	} else if (WIFSIGNALED(status)) {
+		err = -1;
+		pr_debug("test child interrupted\n");
 	}
 
 	return err;
@@ -467,7 +406,7 @@ static int perf_test__list(int argc, const char **argv)
 	return 0;
 }
 
-int cmd_test(int argc, const char **argv)
+int cmd_test(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	const char *test_usage[] = {
 	"perf test [<options>] [{list <test-name-fragment>|[<test-name-fragments>|<test-numbers>]}]",
@@ -478,8 +417,6 @@ int cmd_test(int argc, const char **argv)
 	OPT_STRING('s', "skip", &skip, "tests", "tests to skip"),
 	OPT_INCR('v', "verbose", &verbose,
 		    "be more verbose (show symbol address, etc)"),
-	OPT_BOOLEAN('F', "dont-fork", &dont_fork,
-		    "Do not fork for testcase"),
 	OPT_END()
 	};
 	const char * const test_subcommands[] = { "list", NULL };

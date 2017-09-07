@@ -20,7 +20,6 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  *
  */
-#include "pp_debug.h"
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -28,6 +27,7 @@
 #include "processpptables.h"
 #include <atom-types.h>
 #include <atombios.h>
+#include "pp_debug.h"
 #include "pptable.h"
 #include "power_state.h"
 #include "hwmgr.h"
@@ -794,35 +794,19 @@ static const ATOM_PPLIB_STATE_V2 *get_state_entry_v2(
 static const ATOM_PPLIB_POWERPLAYTABLE *get_powerplay_table(
 				     struct pp_hwmgr *hwmgr)
 {
-	const void *table_addr = hwmgr->soft_pp_table;
+	const void *table_addr = NULL;
 	uint8_t frev, crev;
 	uint16_t size;
 
-	if (!table_addr) {
-		table_addr = cgs_atom_get_data_table(hwmgr->device,
-				GetIndexIntoMasterTable(DATA, PowerPlayInfo),
-				&size, &frev, &crev);
+	table_addr = cgs_atom_get_data_table(hwmgr->device,
+			GetIndexIntoMasterTable(DATA, PowerPlayInfo),
+			&size, &frev, &crev);
 
-		hwmgr->soft_pp_table = table_addr;
-		hwmgr->soft_pp_table_size = size;
-	}
+	hwmgr->soft_pp_table = table_addr;
 
 	return (const ATOM_PPLIB_POWERPLAYTABLE *)table_addr;
 }
 
-int pp_tables_get_response_times(struct pp_hwmgr *hwmgr,
-				uint32_t *vol_rep_time, uint32_t *bb_rep_time)
-{
-	const ATOM_PPLIB_POWERPLAYTABLE *powerplay_tab = get_powerplay_table(hwmgr);
-
-	PP_ASSERT_WITH_CODE(NULL != powerplay_tab,
-			    "Missing PowerPlay Table!", return -EINVAL);
-
-	*vol_rep_time = (uint32_t)le16_to_cpu(powerplay_tab->usVoltageTime);
-	*bb_rep_time = (uint32_t)le16_to_cpu(powerplay_tab->usBackbiasTime);
-
-	return 0;
-}
 
 int pp_tables_get_num_of_entries(struct pp_hwmgr *hwmgr,
 				     unsigned long *num_of_entries)
@@ -1507,7 +1491,7 @@ static int init_phase_shedding_table(struct pp_hwmgr *hwmgr,
 	return 0;
 }
 
-static int get_number_of_vce_state_table_entries(
+int get_number_of_vce_state_table_entries(
 						  struct pp_hwmgr *hwmgr)
 {
 	const ATOM_PPLIB_POWERPLAYTABLE *table =
@@ -1515,15 +1499,15 @@ static int get_number_of_vce_state_table_entries(
 	const ATOM_PPLIB_VCE_State_Table *vce_table =
 				    get_vce_state_table(hwmgr, table);
 
-	if (vce_table)
+	if (vce_table > 0)
 		return vce_table->numEntries;
 
 	return 0;
 }
 
-static int get_vce_state_table_entry(struct pp_hwmgr *hwmgr,
+int get_vce_state_table_entry(struct pp_hwmgr *hwmgr,
 							unsigned long i,
-							struct amd_vce_state *vce_state,
+							struct PP_VCEState *vce_state,
 							void **clock_info,
 							unsigned long *flag)
 {
@@ -1605,6 +1589,11 @@ static int pp_tables_initialize(struct pp_hwmgr *hwmgr)
 
 static int pp_tables_uninitialize(struct pp_hwmgr *hwmgr)
 {
+	if (NULL != hwmgr->soft_pp_table) {
+		kfree(hwmgr->soft_pp_table);
+		hwmgr->soft_pp_table = NULL;
+	}
+
 	if (NULL != hwmgr->dyn_state.vddc_dependency_on_sclk) {
 		kfree(hwmgr->dyn_state.vddc_dependency_on_sclk);
 		hwmgr->dyn_state.vddc_dependency_on_sclk = NULL;

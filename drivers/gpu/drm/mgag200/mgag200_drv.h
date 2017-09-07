@@ -15,7 +15,6 @@
 
 #include <video/vga.h>
 
-#include <drm/drm_encoder.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/ttm/ttm_bo_api.h>
 #include <drm/ttm/ttm_bo_driver.h>
@@ -180,7 +179,6 @@ enum mga_type {
 	G200_WB,
 	G200_EV,
 	G200_EH,
-	G200_EH3,
 	G200_ER,
 	G200_EW3,
 };
@@ -259,7 +257,7 @@ int mgag200_framebuffer_init(struct drm_device *dev,
 
 
 int mgag200_driver_load(struct drm_device *dev, unsigned long flags);
-void mgag200_driver_unload(struct drm_device *dev);
+int mgag200_driver_unload(struct drm_device *dev);
 int mgag200_gem_create(struct drm_device *dev,
 		   u32 size, bool iskernel,
 		       struct drm_gem_object **obj);
@@ -283,7 +281,7 @@ static inline int mgag200_bo_reserve(struct mgag200_bo *bo, bool no_wait)
 {
 	int ret;
 
-	ret = ttm_bo_reserve(&bo->bo, true, no_wait, NULL);
+	ret = ttm_bo_reserve(&bo->bo, true, no_wait, false, NULL);
 	if (ret) {
 		if (ret != -ERESTARTSYS && ret != -EBUSY)
 			DRM_ERROR("reserve failed %p\n", bo);

@@ -14,10 +14,7 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/dma-fence-array.h>
 #include <linux/reservation.h>
-#include <linux/sync_file.h>
-#include "etnaviv_cmdbuf.h"
 #include "etnaviv_drv.h"
 #include "etnaviv_gpu.h"
 #include "etnaviv_gem.h"
@@ -30,6 +27,11 @@
 /* make sure these don't conflict w/ ETNAVIV_SUBMIT_BO_x */
 #define BO_LOCKED   0x4000
 #define BO_PINNED   0x2000
+
+static inline void __user *to_user_ptr(u64 address)
+{
+	return (void __user *)(uintptr_t)address;
+}
 
 static struct etnaviv_gem_submit *submit_create(struct drm_device *dev,
 		struct etnaviv_gpu *gpu, size_t nr)
@@ -171,10 +173,8 @@ static int submit_fence_sync(const struct etnaviv_gem_submit *submit)
 	for (i = 0; i < submit->nr_bos; i++) {
 		struct etnaviv_gem_object *etnaviv_obj = submit->bos[i].obj;
 		bool write = submit->bos[i].flags & ETNA_SUBMIT_BO_WRITE;
-		bool explicit = !(submit->flags & ETNA_SUBMIT_NO_IMPLICIT);
 
-		ret = etnaviv_gpu_fence_sync_obj(etnaviv_obj, context, write,
-						 explicit);
+		ret = etnaviv_gpu_fence_sync_obj(etnaviv_obj, context, write);
 		if (ret)
 			break;
 	}
@@ -187,10 +187,12 @@ static void submit_unpin_objects(struct etnaviv_gem_submit *submit)
 	int i;
 
 	for (i = 0; i < submit->nr_bos; i++) {
-		if (submit->bos[i].flags & BO_PINNED)
-			etnaviv_gem_mapping_unreference(submit->bos[i].mapping);
+		struct etnaviv_gem_object *etnaviv_obj = submit->bos[i].obj;
 
-		submit->bos[i].mapping = NULL;
+		if (submit->bos[i].flags & BO_PINNED)
+			etnaviv_gem_put_iova(submit->gpu, &etnaviv_obj->base);
+
+		submit->bos[i].iova = 0;
 		submit->bos[i].flags &= ~BO_PINNED;
 	}
 }
@@ -201,24 +203,22 @@ static int submit_pin_objects(struct etnaviv_gem_submit *submit)
 
 	for (i = 0; i < submit->nr_bos; i++) {
 		struct etnaviv_gem_object *etnaviv_obj = submit->bos[i].obj;
-		struct etnaviv_vram_mapping *mapping;
+		u32 iova;
 
-		mapping = etnaviv_gem_mapping_get(&etnaviv_obj->base,
-						  submit->gpu);
-		if (IS_ERR(mapping)) {
-			ret = PTR_ERR(mapping);
+		ret = etnaviv_gem_get_iova(submit->gpu, &etnaviv_obj->base,
+					   &iova);
+		if (ret)
 			break;
-		}
 
 		submit->bos[i].flags |= BO_PINNED;
-		submit->bos[i].mapping = mapping;
+		submit->bos[i].iova = iova;
 	}
 
 	return ret;
 }
 
 static int submit_bo(struct etnaviv_gem_submit *submit, u32 idx,
-	struct etnaviv_gem_submit_bo **bo)
+		struct etnaviv_gem_object **obj, u32 *iova)
 {
 	if (idx >= submit->nr_bos) {
 		DRM_ERROR("invalid buffer index: %u (out of %u)\n",
@@ -226,7 +226,10 @@ static int submit_bo(struct etnaviv_gem_submit *submit, u32 idx,
 		return -EINVAL;
 	}
 
-	*bo = &submit->bos[idx];
+	if (obj)
+		*obj = submit->bos[idx].obj;
+	if (iova)
+		*iova = submit->bos[idx].iova;
 
 	return 0;
 }
@@ -242,8 +245,8 @@ static int submit_reloc(struct etnaviv_gem_submit *submit, void *stream,
 
 	for (i = 0; i < nr_relocs; i++) {
 		const struct drm_etnaviv_gem_submit_reloc *r = relocs + i;
-		struct etnaviv_gem_submit_bo *bo;
-		u32 off;
+		struct etnaviv_gem_object *bobj;
+		u32 iova, off;
 
 		if (unlikely(r->flags)) {
 			DRM_ERROR("invalid reloc flags\n");
@@ -265,16 +268,17 @@ static int submit_reloc(struct etnaviv_gem_submit *submit, void *stream,
 			return -EINVAL;
 		}
 
-		ret = submit_bo(submit, r->reloc_idx, &bo);
+		ret = submit_bo(submit, r->reloc_idx, &bobj, &iova);
 		if (ret)
 			return ret;
 
-		if (r->reloc_offset >= bo->obj->base.size - sizeof(*ptr)) {
+		if (r->reloc_offset >=
+		    bobj->base.size - sizeof(*ptr)) {
 			DRM_ERROR("relocation %u outside object", i);
 			return -EINVAL;
 		}
 
-		ptr[off] = bo->mapping->iova + r->reloc_offset;
+		ptr[off] = iova + r->reloc_offset;
 
 		last_offset = off;
 	}
@@ -294,7 +298,6 @@ static void submit_cleanup(struct etnaviv_gem_submit *submit)
 	}
 
 	ww_acquire_fini(&submit->ticket);
-	dma_fence_put(submit->fence);
 	kfree(submit);
 }
 
@@ -308,9 +311,6 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 	struct etnaviv_gem_submit *submit;
 	struct etnaviv_cmdbuf *cmdbuf;
 	struct etnaviv_gpu *gpu;
-	struct dma_fence *in_fence = NULL;
-	struct sync_file *sync_file = NULL;
-	int out_fence_fd = -1;
 	void *stream;
 	int ret;
 
@@ -334,11 +334,6 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 		return -EINVAL;
 	}
 
-	if (args->flags & ~ETNA_SUBMIT_FLAGS) {
-		DRM_ERROR("invalid flags: 0x%x\n", args->flags);
-		return -EINVAL;
-	}
-
 	/*
 	 * Copy the command submission and bo array to kernel space in
 	 * one go, and do this outside of any locks.
@@ -346,9 +341,8 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 	bos = drm_malloc_ab(args->nr_bos, sizeof(*bos));
 	relocs = drm_malloc_ab(args->nr_relocs, sizeof(*relocs));
 	stream = drm_malloc_ab(1, args->stream_size);
-	cmdbuf = etnaviv_cmdbuf_new(gpu->cmdbuf_suballoc,
-				    ALIGN(args->stream_size, 8) + 8,
-				    args->nr_bos);
+	cmdbuf = etnaviv_gpu_cmdbuf_new(gpu, ALIGN(args->stream_size, 8) + 8,
+					args->nr_bos);
 	if (!bos || !relocs || !stream || !cmdbuf) {
 		ret = -ENOMEM;
 		goto err_submit_cmds;
@@ -357,33 +351,25 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 	cmdbuf->exec_state = args->exec_state;
 	cmdbuf->ctx = file->driver_priv;
 
-	ret = copy_from_user(bos, u64_to_user_ptr(args->bos),
+	ret = copy_from_user(bos, to_user_ptr(args->bos),
 			     args->nr_bos * sizeof(*bos));
 	if (ret) {
 		ret = -EFAULT;
 		goto err_submit_cmds;
 	}
 
-	ret = copy_from_user(relocs, u64_to_user_ptr(args->relocs),
+	ret = copy_from_user(relocs, to_user_ptr(args->relocs),
 			     args->nr_relocs * sizeof(*relocs));
 	if (ret) {
 		ret = -EFAULT;
 		goto err_submit_cmds;
 	}
 
-	ret = copy_from_user(stream, u64_to_user_ptr(args->stream),
+	ret = copy_from_user(stream, to_user_ptr(args->stream),
 			     args->stream_size);
 	if (ret) {
 		ret = -EFAULT;
 		goto err_submit_cmds;
-	}
-
-	if (args->flags & ETNA_SUBMIT_FENCE_FD_OUT) {
-		out_fence_fd = get_unused_fd_flags(O_CLOEXEC);
-		if (out_fence_fd < 0) {
-			ret = out_fence_fd;
-			goto err_submit_cmds;
-		}
 	}
 
 	submit = submit_create(dev, gpu, args->nr_bos);
@@ -391,8 +377,6 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 		ret = -ENOMEM;
 		goto err_submit_cmds;
 	}
-
-	submit->flags = args->flags;
 
 	ret = submit_lookup_objects(submit, file, bos, args->nr_bos);
 	if (ret)
@@ -406,24 +390,6 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 				      relocs, args->nr_relocs)) {
 		ret = -EINVAL;
 		goto err_submit_objects;
-	}
-
-	if (args->flags & ETNA_SUBMIT_FENCE_FD_IN) {
-		in_fence = sync_file_get_fence(args->fence_fd);
-		if (!in_fence) {
-			ret = -EINVAL;
-			goto err_submit_objects;
-		}
-
-		/*
-		 * Wait if the fence is from a foreign context, or if the fence
-		 * array contains any fence from a foreign context.
-		 */
-		if (!dma_fence_match_context(in_fence, gpu->fence_context)) {
-			ret = dma_fence_wait(in_fence, true);
-			if (ret)
-				goto err_submit_objects;
-		}
 	}
 
 	ret = submit_fence_sync(submit);
@@ -446,23 +412,7 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 	if (ret == 0)
 		cmdbuf = NULL;
 
-	if (args->flags & ETNA_SUBMIT_FENCE_FD_OUT) {
-		/*
-		 * This can be improved: ideally we want to allocate the sync
-		 * file before kicking off the GPU job and just attach the
-		 * fence to the sync file here, eliminating the ENOMEM
-		 * possibility at this stage.
-		 */
-		sync_file = sync_file_create(submit->fence);
-		if (!sync_file) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		fd_install(out_fence_fd, sync_file->file);
-	}
-
-	args->fence_fd = out_fence_fd;
-	args->fence = submit->fence->seqno;
+	args->fence = submit->fence;
 
 out:
 	submit_unpin_objects(submit);
@@ -476,16 +426,12 @@ out:
 		flush_workqueue(priv->wq);
 
 err_submit_objects:
-	if (in_fence)
-		dma_fence_put(in_fence);
 	submit_cleanup(submit);
 
 err_submit_cmds:
-	if (ret && (out_fence_fd >= 0))
-		put_unused_fd(out_fence_fd);
 	/* if we still own the cmdbuf */
 	if (cmdbuf)
-		etnaviv_cmdbuf_free(cmdbuf);
+		etnaviv_gpu_cmdbuf_free(cmdbuf);
 	if (stream)
 		drm_free_large(stream);
 	if (bos)

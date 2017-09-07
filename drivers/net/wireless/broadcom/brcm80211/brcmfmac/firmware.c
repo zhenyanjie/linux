@@ -29,7 +29,6 @@
 #define BRCMF_FW_MAX_NVRAM_SIZE			64000
 #define BRCMF_FW_NVRAM_DEVPATH_LEN		19	/* devpath0=pcie/1/4/ */
 #define BRCMF_FW_NVRAM_PCIEDEV_LEN		10	/* pcie/1/4/ + \0 */
-#define BRCMF_FW_DEFAULT_BOARDREV		"boardrev=0xff"
 
 enum nvram_parser_state {
 	IDLE,
@@ -52,7 +51,6 @@ enum nvram_parser_state {
  * @entry: start position of key,value entry.
  * @multi_dev_v1: detect pcie multi device v1 (compressed).
  * @multi_dev_v2: detect pcie multi device v2.
- * @boardrev_found: nvram contains boardrev information.
  */
 struct nvram_parser {
 	enum nvram_parser_state state;
@@ -65,7 +63,6 @@ struct nvram_parser {
 	u32 entry;
 	bool multi_dev_v1;
 	bool multi_dev_v2;
-	bool boardrev_found;
 };
 
 /**
@@ -96,7 +93,7 @@ static enum nvram_parser_state brcmf_nvram_handle_idle(struct nvram_parser *nvp)
 	c = nvp->data[nvp->pos];
 	if (c == '\n')
 		return COMMENT;
-	if (is_whitespace(c) || c == '\0')
+	if (is_whitespace(c))
 		goto proceed;
 	if (c == '#')
 		return COMMENT;
@@ -128,8 +125,6 @@ static enum nvram_parser_state brcmf_nvram_handle_key(struct nvram_parser *nvp)
 			nvp->multi_dev_v1 = true;
 		if (strncmp(&nvp->data[nvp->entry], "pcie/", 5) == 0)
 			nvp->multi_dev_v2 = true;
-		if (strncmp(&nvp->data[nvp->entry], "boardrev", 8) == 0)
-			nvp->boardrev_found = true;
 	} else if (!is_nvram_char(c) || c == ' ') {
 		brcmf_dbg(INFO, "warning: ln=%d:col=%d: '=' expected, skip invalid key entry\n",
 			  nvp->line, nvp->column);
@@ -289,8 +284,6 @@ static void brcmf_fw_strip_multi_v1(struct nvram_parser *nvp, u16 domain_nr,
 	while (i < nvp->nvram_len) {
 		if ((nvp->nvram[i] - '0' == id) && (nvp->nvram[i + 1] == ':')) {
 			i += 2;
-			if (strncmp(&nvp->nvram[i], "boardrev", 8) == 0)
-				nvp->boardrev_found = true;
 			while (nvp->nvram[i] != 0) {
 				nvram[j] = nvp->nvram[i];
 				i++;
@@ -342,8 +335,6 @@ static void brcmf_fw_strip_multi_v2(struct nvram_parser *nvp, u16 domain_nr,
 	while (i < nvp->nvram_len - len) {
 		if (strncmp(&nvp->nvram[i], prefix, len) == 0) {
 			i += len;
-			if (strncmp(&nvp->nvram[i], "boardrev", 8) == 0)
-				nvp->boardrev_found = true;
 			while (nvp->nvram[i] != 0) {
 				nvram[j] = nvp->nvram[i];
 				i++;
@@ -363,18 +354,6 @@ static void brcmf_fw_strip_multi_v2(struct nvram_parser *nvp, u16 domain_nr,
 fail:
 	kfree(nvram);
 	nvp->nvram_len = 0;
-}
-
-static void brcmf_fw_add_defaults(struct nvram_parser *nvp)
-{
-	if (nvp->boardrev_found)
-		return;
-
-	memcpy(&nvp->nvram[nvp->nvram_len], &BRCMF_FW_DEFAULT_BOARDREV,
-	       strlen(BRCMF_FW_DEFAULT_BOARDREV));
-	nvp->nvram_len += strlen(BRCMF_FW_DEFAULT_BOARDREV);
-	nvp->nvram[nvp->nvram_len] = '\0';
-	nvp->nvram_len++;
 }
 
 /* brcmf_nvram_strip :Takes a buffer of "<var>=<value>\n" lines read from a fil
@@ -398,20 +377,15 @@ static void *brcmf_fw_nvram_strip(const u8 *data, size_t data_len,
 		if (nvp.state == END)
 			break;
 	}
-	if (nvp.multi_dev_v1) {
-		nvp.boardrev_found = false;
+	if (nvp.multi_dev_v1)
 		brcmf_fw_strip_multi_v1(&nvp, domain_nr, bus_nr);
-	} else if (nvp.multi_dev_v2) {
-		nvp.boardrev_found = false;
+	else if (nvp.multi_dev_v2)
 		brcmf_fw_strip_multi_v2(&nvp, domain_nr, bus_nr);
-	}
 
 	if (nvp.nvram_len == 0) {
 		kfree(nvp.nvram);
 		return NULL;
 	}
-
-	brcmf_fw_add_defaults(&nvp);
 
 	pad = nvp.nvram_len;
 	*new_length = roundup(nvp.nvram_len + 1, 4);

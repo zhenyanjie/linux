@@ -20,8 +20,8 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
+#include <linux/of_graph.h>
 
-#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 
 #include "drm_crtc.h"
@@ -235,14 +235,34 @@ out:
 	return num_modes;
 }
 
+static struct drm_encoder *ptn3460_best_encoder(struct drm_connector *connector)
+{
+	struct ptn3460_bridge *ptn_bridge = connector_to_ptn3460(connector);
+
+	return ptn_bridge->bridge.encoder;
+}
+
 static const struct drm_connector_helper_funcs ptn3460_connector_helper_funcs = {
 	.get_modes = ptn3460_get_modes,
+	.best_encoder = ptn3460_best_encoder,
 };
+
+static enum drm_connector_status ptn3460_detect(struct drm_connector *connector,
+		bool force)
+{
+	return connector_status_connected;
+}
+
+static void ptn3460_connector_destroy(struct drm_connector *connector)
+{
+	drm_connector_cleanup(connector);
+}
 
 static const struct drm_connector_funcs ptn3460_connector_funcs = {
 	.dpms = drm_atomic_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
-	.destroy = drm_connector_cleanup,
+	.detect = ptn3460_detect,
+	.destroy = ptn3460_connector_destroy,
 	.reset = drm_atomic_helper_connector_reset,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
@@ -292,6 +312,7 @@ static int ptn3460_probe(struct i2c_client *client,
 {
 	struct device *dev = &client->dev;
 	struct ptn3460_bridge *ptn_bridge;
+	struct device_node *endpoint, *panel_node;
 	int ret;
 
 	ptn_bridge = devm_kzalloc(dev, sizeof(*ptn_bridge), GFP_KERNEL);
@@ -299,9 +320,16 @@ static int ptn3460_probe(struct i2c_client *client,
 		return -ENOMEM;
 	}
 
-	ret = drm_of_find_panel_or_bridge(dev->of_node, 0, 0, &ptn_bridge->panel, NULL);
-	if (ret)
-		return ret;
+	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (endpoint) {
+		panel_node = of_graph_get_remote_port_parent(endpoint);
+		if (panel_node) {
+			ptn_bridge->panel = of_drm_find_panel(panel_node);
+			of_node_put(panel_node);
+			if (!ptn_bridge->panel)
+				return -EPROBE_DEFER;
+		}
+	}
 
 	ptn_bridge->client = client;
 

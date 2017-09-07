@@ -33,6 +33,7 @@
 
 #define pr_fmt(fmt) "xen:" KBUILD_MODNAME ": " fmt
 
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -1146,12 +1147,12 @@ EXPORT_SYMBOL_GPL(gnttab_init);
 
 static int __gnttab_init(void)
 {
-	if (!xen_domain())
-		return -ENODEV;
-
 	/* Delay grant-table initialization in the PV on HVM case */
-	if (xen_hvm_domain() && !xen_pvh_domain())
+	if (xen_hvm_domain())
 		return 0;
+
+	if (!xen_pv_domain())
+		return -ENODEV;
 
 	return gnttab_init();
 }

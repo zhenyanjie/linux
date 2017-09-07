@@ -18,7 +18,6 @@
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/net.h>
@@ -200,26 +199,26 @@ static void skcipher_free_sgl(struct sock *sk)
 
 static int skcipher_wait_for_wmem(struct sock *sk, unsigned flags)
 {
-	DEFINE_WAIT_FUNC(wait, woken_wake_function);
-	int err = -ERESTARTSYS;
 	long timeout;
+	DEFINE_WAIT(wait);
+	int err = -ERESTARTSYS;
 
 	if (flags & MSG_DONTWAIT)
 		return -EAGAIN;
 
 	sk_set_bit(SOCKWQ_ASYNC_NOSPACE, sk);
 
-	add_wait_queue(sk_sleep(sk), &wait);
 	for (;;) {
 		if (signal_pending(current))
 			break;
+		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 		timeout = MAX_SCHEDULE_TIMEOUT;
-		if (sk_wait_event(sk, &timeout, skcipher_writable(sk), &wait)) {
+		if (sk_wait_event(sk, &timeout, skcipher_writable(sk))) {
 			err = 0;
 			break;
 		}
 	}
-	remove_wait_queue(sk_sleep(sk), &wait);
+	finish_wait(sk_sleep(sk), &wait);
 
 	return err;
 }
@@ -243,10 +242,10 @@ static void skcipher_wmem_wakeup(struct sock *sk)
 
 static int skcipher_wait_for_data(struct sock *sk, unsigned flags)
 {
-	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	struct alg_sock *ask = alg_sk(sk);
 	struct skcipher_ctx *ctx = ask->private;
 	long timeout;
+	DEFINE_WAIT(wait);
 	int err = -ERESTARTSYS;
 
 	if (flags & MSG_DONTWAIT) {
@@ -255,17 +254,17 @@ static int skcipher_wait_for_data(struct sock *sk, unsigned flags)
 
 	sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk);
 
-	add_wait_queue(sk_sleep(sk), &wait);
 	for (;;) {
 		if (signal_pending(current))
 			break;
+		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 		timeout = MAX_SCHEDULE_TIMEOUT;
-		if (sk_wait_event(sk, &timeout, ctx->used, &wait)) {
+		if (sk_wait_event(sk, &timeout, ctx->used)) {
 			err = 0;
 			break;
 		}
 	}
-	remove_wait_queue(sk_sleep(sk), &wait);
+	finish_wait(sk_sleep(sk), &wait);
 
 	sk_clear_bit(SOCKWQ_ASYNC_WAITDATA, sk);
 
@@ -567,10 +566,8 @@ static int skcipher_recvmsg_async(struct socket *sock, struct msghdr *msg,
 			 * need to expand */
 			tmp = kcalloc(tx_nents * 2, sizeof(*tmp),
 				      GFP_KERNEL);
-			if (!tmp) {
-				err = -ENOMEM;
+			if (!tmp)
 				goto free;
-			}
 
 			sg_init_table(tmp, tx_nents * 2);
 			for (x = 0; x < tx_nents; x++)

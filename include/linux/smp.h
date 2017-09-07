@@ -120,13 +120,6 @@ extern unsigned int setup_max_cpus;
 extern void __init setup_nr_cpu_ids(void);
 extern void __init smp_init(void);
 
-extern int __boot_cpu_id;
-
-static inline int get_boot_cpu_id(void)
-{
-	return __boot_cpu_id;
-}
-
 #else /* !SMP */
 
 static inline void smp_send_stop(void) { }
@@ -165,11 +158,6 @@ static inline void smp_init(void) { up_late_init(); }
 static inline void smp_init(void) { }
 #endif
 
-static inline int get_boot_cpu_id(void)
-{
-	return 0;
-}
-
 #endif /* !SMP */
 
 /*
@@ -197,6 +185,9 @@ static inline int get_boot_cpu_id(void)
 #define get_cpu()		({ preempt_disable(); smp_processor_id(); })
 #define put_cpu()		preempt_enable()
 
+#define get_cpu_light()		({ migrate_disable(); smp_processor_id(); })
+#define put_cpu_light()		migrate_enable()
+
 /*
  * Callback to arch code if there's nosmp or maxcpus=0 on the
  * boot command line:
@@ -207,13 +198,5 @@ extern void arch_enable_nonboot_cpus_begin(void);
 extern void arch_enable_nonboot_cpus_end(void);
 
 void smp_setup_processor_id(void);
-
-int smp_call_on_cpu(unsigned int cpu, int (*func)(void *), void *par,
-		    bool phys);
-
-/* SMP core functions */
-int smpcfd_prepare_cpu(unsigned int cpu);
-int smpcfd_dead_cpu(unsigned int cpu);
-int smpcfd_dying_cpu(unsigned int cpu);
 
 #endif /* __LINUX_SMP_H */
