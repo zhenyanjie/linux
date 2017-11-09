@@ -430,23 +430,23 @@ static __always_inline __pure bool __static_cpu_has(u16 bit)
 
 		u8 flag;
 		/* Open-coded due to __stringify() in ALTERNATIVE() */
-		asm volatile("1: movb $0,%0\n"
-			     "2:\n"
-			     ".section .altinstructions,\"a\"\n"
-			     " .long 1b - .\n"
-			     " .long 3f - .\n"
-			     " .word %P1\n"		/* feature bit */
-			     " .byte 2b - 1b\n"		/* source len */
-			     " .byte 4f - 3f\n"		/* replacement len */
-			     ".previous\n"
-			     ".section .discard,\"aw\",@progbits\n"
-			     " .byte 0xff + (4f-3f) - (2b-1b)\n" /* size check */
-			     ".previous\n"
-			     ".section .altinstr_replacement,\"ax\"\n"
-			     "3: movb $1,%0\n"
-			     "4:\n"
-			     ".previous\n"
-			     : "=qm" (flag) : "i" (bit));
+		/* asm volatile("1: movb $0,%0\n" */
+		/* 	     "2:\n" */
+		/* 	     ".section .altinstructions,\"a\"\n" */
+		/* 	     " .long 1b - .\n" */
+		/* 	     " .long 3f - .\n" */
+		/* 	     " .word %P1\n"		/\* feature bit *\/ */
+		/* 	     " .byte 2b - 1b\n"		/\* source len *\/ */
+		/* 	     " .byte 4f - 3f\n"		/\* replacement len *\/ */
+		/* 	     ".previous\n" */
+		/* 	     ".section .discard,\"aw\",@progbits\n" */
+		/* 	     " .byte 0xff + (4f-3f) - (2b-1b)\n" /\* size check *\/ */
+		/* 	     ".previous\n" */
+		/* 	     ".section .altinstr_replacement,\"ax\"\n" */
+		/* 	     "3: movb $1,%0\n" */
+		/* 	     "4:\n" */
+		/* 	     ".previous\n" */
+		/* 	     : "=qm" (flag) : "i" (bit)); */
 		return flag;
 
 #endif /* CC_HAVE_ASM_GOTO */
@@ -500,38 +500,38 @@ static __always_inline __pure bool _static_cpu_has_safe(u16 bit)
 #else
 		u8 flag;
 		/* Open-coded due to __stringify() in ALTERNATIVE() */
-		asm volatile("1: movb $2,%0\n"
-			     "2:\n"
-			     ".section .altinstructions,\"a\"\n"
-			     " .long 1b - .\n"		/* src offset */
-			     " .long 3f - .\n"		/* repl offset */
-			     " .word %P2\n"		/* always replace */
-			     " .byte 2b - 1b\n"		/* source len */
-			     " .byte 4f - 3f\n"		/* replacement len */
-			     ".previous\n"
-			     ".section .discard,\"aw\",@progbits\n"
-			     " .byte 0xff + (4f-3f) - (2b-1b)\n" /* size check */
-			     ".previous\n"
-			     ".section .altinstr_replacement,\"ax\"\n"
-			     "3: movb $0,%0\n"
-			     "4:\n"
-			     ".previous\n"
-			     ".section .altinstructions,\"a\"\n"
-			     " .long 1b - .\n"		/* src offset */
-			     " .long 5f - .\n"		/* repl offset */
-			     " .word %P1\n"		/* feature bit */
-			     " .byte 4b - 3b\n"		/* src len */
-			     " .byte 6f - 5f\n"		/* repl len */
-			     ".previous\n"
-			     ".section .discard,\"aw\",@progbits\n"
-			     " .byte 0xff + (6f-5f) - (4b-3b)\n" /* size check */
-			     ".previous\n"
-			     ".section .altinstr_replacement,\"ax\"\n"
-			     "5: movb $1,%0\n"
-			     "6:\n"
-			     ".previous\n"
-			     : "=qm" (flag)
-			     : "i" (bit), "i" (X86_FEATURE_ALWAYS));
+		/* asm volatile("1: movb $2,%0\n" */
+		/* 	     "2:\n" */
+		/* 	     ".section .altinstructions,\"a\"\n" */
+		/* 	     " .long 1b - .\n"		/\* src offset *\/ */
+		/* 	     " .long 3f - .\n"		/\* repl offset *\/ */
+		/* 	     " .word %P2\n"		/\* always replace *\/ */
+		/* 	     " .byte 2b - 1b\n"		/\* source len *\/ */
+		/* 	     " .byte 4f - 3f\n"		/\* replacement len *\/ */
+		/* 	     ".previous\n" */
+		/* 	     ".section .discard,\"aw\",@progbits\n" */
+		/* 	     " .byte 0xff + (4f-3f) - (2b-1b)\n" /\* size check *\/ */
+		/* 	     ".previous\n" */
+		/* 	     ".section .altinstr_replacement,\"ax\"\n" */
+		/* 	     "3: movb $0,%0\n" */
+		/* 	     "4:\n" */
+		/* 	     ".previous\n" */
+		/* 	     ".section .altinstructions,\"a\"\n" */
+		/* 	     " .long 1b - .\n"		/\* src offset *\/ */
+		/* 	     " .long 5f - .\n"		/\* repl offset *\/ */
+		/* 	     " .word %P1\n"		/\* feature bit *\/ */
+		/* 	     " .byte 4b - 3b\n"		/\* src len *\/ */
+		/* 	     " .byte 6f - 5f\n"		/\* repl len *\/ */
+		/* 	     ".previous\n" */
+		/* 	     ".section .discard,\"aw\",@progbits\n" */
+		/* 	     " .byte 0xff + (6f-5f) - (4b-3b)\n" /\* size check *\/ */
+		/* 	     ".previous\n" */
+		/* 	     ".section .altinstr_replacement,\"ax\"\n" */
+		/* 	     "5: movb $1,%0\n" */
+		/* 	     "6:\n" */
+		/* 	     ".previous\n" */
+		/* 	     : "=qm" (flag) */
+		/* 	     : "i" (bit), "i" (X86_FEATURE_ALWAYS)); */
 		return (flag == 2 ? __static_cpu_has_safe(bit) : flag);
 #endif /* CC_HAVE_ASM_GOTO */
 }

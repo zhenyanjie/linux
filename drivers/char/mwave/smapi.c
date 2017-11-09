@@ -74,38 +74,38 @@ static int smapi_request(unsigned short inBX, unsigned short inCX,
 	PRINTK_5(TRACE_SMAPI, "inBX %x inCX %x inDI %x inSI %x\n",
 		inBX, inCX, inDI, inSI);
 
-	__asm__ __volatile__("movw  $0x5380,%%ax\n\t"
-			    "movl  %7,%%ebx\n\t"
-			    "shrl  $16, %%ebx\n\t"
-			    "movw  %7,%%cx\n\t"
-			    "movl  %8,%%edi\n\t"
-			    "shrl  $16,%%edi\n\t"
-			    "movw  %8,%%si\n\t"
-			    "movw  %9,%%dx\n\t"
-			    "out   %%al,%%dx\n\t"
-			    "out   %%al,$0x4F\n\t"
-			    "cmpb  $0x53,%%ah\n\t"
-			    "je    2f\n\t"
-			    "1:\n\t"
-			    "orb   %%ah,%%ah\n\t"
-			    "jnz   2f\n\t"
-			    "movw  %%ax,%0\n\t"
-			    "movw  %%bx,%1\n\t"
-			    "movw  %%cx,%2\n\t"
-			    "movw  %%dx,%3\n\t"
-			    "movw  %%di,%4\n\t"
-			    "movw  %%si,%5\n\t"
-			    "movw  $1,%6\n\t"
-			    "2:\n\t":"=m"(*(unsigned short *) pmyoutAX),
-			    "=m"(*(unsigned short *) pmyoutBX),
-			    "=m"(*(unsigned short *) pmyoutCX),
-			    "=m"(*(unsigned short *) pmyoutDX),
-			    "=m"(*(unsigned short *) pmyoutDI),
-			    "=m"(*(unsigned short *) pmyoutSI),
-			    "=m"(*(unsigned short *) pusSmapiOK)
-			    :"m"(inBXCX), "m"(inDISI), "m"(g_usSmapiPort)
-			    :"%eax", "%ebx", "%ecx", "%edx", "%edi",
-			    "%esi");
+	/* __asm__ __volatile__("movw  $0x5380,%%ax\n\t" */
+	/* 		    "movl  %7,%%ebx\n\t" */
+	/* 		    "shrl  $16, %%ebx\n\t" */
+	/* 		    "movw  %7,%%cx\n\t" */
+	/* 		    "movl  %8,%%edi\n\t" */
+	/* 		    "shrl  $16,%%edi\n\t" */
+	/* 		    "movw  %8,%%si\n\t" */
+	/* 		    "movw  %9,%%dx\n\t" */
+	/* 		    "out   %%al,%%dx\n\t" */
+	/* 		    "out   %%al,$0x4F\n\t" */
+	/* 		    "cmpb  $0x53,%%ah\n\t" */
+	/* 		    "je    2f\n\t" */
+	/* 		    "1:\n\t" */
+	/* 		    "orb   %%ah,%%ah\n\t" */
+	/* 		    "jnz   2f\n\t" */
+	/* 		    "movw  %%ax,%0\n\t" */
+	/* 		    "movw  %%bx,%1\n\t" */
+	/* 		    "movw  %%cx,%2\n\t" */
+	/* 		    "movw  %%dx,%3\n\t" */
+	/* 		    "movw  %%di,%4\n\t" */
+	/* 		    "movw  %%si,%5\n\t" */
+	/* 		    "movw  $1,%6\n\t" */
+	/* 		    "2:\n\t":"=m"(*(unsigned short *) pmyoutAX), */
+	/* 		    "=m"(*(unsigned short *) pmyoutBX), */
+	/* 		    "=m"(*(unsigned short *) pmyoutCX), */
+	/* 		    "=m"(*(unsigned short *) pmyoutDX), */
+	/* 		    "=m"(*(unsigned short *) pmyoutDI), */
+	/* 		    "=m"(*(unsigned short *) pmyoutSI), */
+	/* 		    "=m"(*(unsigned short *) pusSmapiOK) */
+	/* 		    :"m"(inBXCX), "m"(inDISI), "m"(g_usSmapiPort) */
+	/* 		    :"%eax", "%ebx", "%ecx", "%edx", "%edi", */
+	/* 		    "%esi"); */
 
 	PRINTK_8(TRACE_SMAPI,
 		"myoutAX %x myoutBX %x myoutCX %x myoutDX %x myoutDI %x myoutSI %x usSmapiOK %x\n",
@@ -160,7 +160,7 @@ int smapi_query_DSP_cfg(SMAPI_DSP_SETTINGS * pSettings)
 		pSettings->usDspBaseIO);
 
 	/* check for illegal values */
-	if ( pSettings->usDspBaseIO == 0 ) 
+	if ( pSettings->usDspBaseIO == 0 )
 		PRINTK_ERROR(KERN_ERR_MWAVE "smapi::smapi_query_DSP_cfg: Worry: DSP base I/O address is 0\n");
 	if ( pSettings->usDspIRQ == 0 )
 		PRINTK_ERROR(KERN_ERR_MWAVE "smapi::smapi_query_DSP_cfg: Worry: DSP IRQ line is 0\n");
@@ -170,7 +170,7 @@ int smapi_query_DSP_cfg(SMAPI_DSP_SETTINGS * pSettings)
 	if (bRC) {
 		PRINTK_ERROR("smapi::smapi_query_DSP_cfg: Error: Could not get DSP modem settings. Aborting.\n");
 		return bRC;
-	} 
+	}
 
 	PRINTK_1(TRACE_SMAPI, "smapi::smapi_query_DSP_cfg, smapi_request OK\n");
 
@@ -189,7 +189,7 @@ int smapi_query_DSP_cfg(SMAPI_DSP_SETTINGS * pSettings)
 		pSettings->usUartBaseIO);
 
 	/* check for illegal values */
-	if ( pSettings->usUartBaseIO == 0 ) 
+	if ( pSettings->usUartBaseIO == 0 )
 		PRINTK_ERROR(KERN_ERR_MWAVE "smapi::smapi_query_DSP_cfg: Worry: UART base I/O address is 0\n");
 	if ( pSettings->usUartIRQ == 0 )
 		PRINTK_ERROR(KERN_ERR_MWAVE "smapi::smapi_query_DSP_cfg: Worry: UART IRQ line is 0\n");

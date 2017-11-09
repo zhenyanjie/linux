@@ -75,7 +75,8 @@
  *
  * (asm goto is automatically volatile - the naming reflects this.)
  */
-#define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0)
+/* #define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0) */
+#define asm_volatile_goto(x...) do {} while (0)
 
 #ifdef CONFIG_ARCH_USE_BUILTIN_BSWAP
 #if GCC_VERSION >= 40400

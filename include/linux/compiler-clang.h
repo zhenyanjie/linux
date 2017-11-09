@@ -10,3 +10,16 @@
 #undef uninitialized_var
 #define uninitialized_var(x) x = *(&(x))
 #endif
+
+#ifdef noinline
+#undef noinline
+#endif
+
+#undef inline
+#define inline		__attribute__((noinline)) notrace __maybe_unused
+
+#undef __inline__
+#define __inline__	__attribute__((noinline)) notrace __maybe_unused
+
+#undef __inline
+#define __inline	__attribute__((noinline)) notrace __maybe_unused
