@@ -573,7 +573,7 @@ static void fc_disc_gpn_ft_resp(struct fc_seq *sp, struct fc_frame *fp,
 		event = DISC_EV_FAILED;
 	}
 	if (error)
-		fc_disc_error(disc, ERR_PTR(error));
+		fc_disc_error(disc, fp);
 	else if (event != DISC_EV_NONE)
 		fc_disc_done(disc, event);
 	fc_frame_free(fp);
@@ -731,7 +731,7 @@ static void fc_disc_stop_final(struct fc_lport *lport)
  */
 void fc_disc_config(struct fc_lport *lport, void *priv)
 {
-	struct fc_disc *disc;
+	struct fc_disc *disc = &lport->disc;
 
 	if (!lport->tt.disc_start)
 		lport->tt.disc_start = fc_disc_start;

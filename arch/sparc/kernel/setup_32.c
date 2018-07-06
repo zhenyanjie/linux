@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/sparc/kernel/setup.c
  *
@@ -86,7 +85,7 @@ static void prom_sync_me(void)
 	show_free_areas(0, NULL);
 	if (!is_idle_task(current)) {
 		local_irq_enable();
-		ksys_sync();
+		sys_sync();
 		local_irq_disable();
 	}
 	prom_printf("Returning to prom\n");

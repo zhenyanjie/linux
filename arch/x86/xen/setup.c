@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Machine specific setup for xen
  *
@@ -341,6 +340,8 @@ static void __init xen_do_set_identity_and_remap_chunk(
 
 	WARN_ON(size == 0);
 
+	BUG_ON(xen_feature(XENFEAT_auto_translated_physmap));
+
 	mfn_save = virt_to_mfn(buf);
 
 	for (ident_pfn_iter = start_pfn, remap_pfn_iter = remap_pfn;
@@ -498,7 +499,7 @@ static unsigned long __init xen_foreach_remap_area(unsigned long nr_pages,
 void __init xen_remap_memory(void)
 {
 	unsigned long buf = (unsigned long)&xen_remap_buf;
-	unsigned long mfn_save, pfn;
+	unsigned long mfn_save, mfn, pfn;
 	unsigned long remapped = 0;
 	unsigned int i;
 	unsigned long pfn_s = ~0UL;
@@ -514,7 +515,8 @@ void __init xen_remap_memory(void)
 
 		pfn = xen_remap_buf.target_pfn;
 		for (i = 0; i < xen_remap_buf.size; i++) {
-			xen_update_mem_tables(pfn, xen_remap_buf.mfns[i]);
+			mfn = xen_remap_buf.mfns[i];
+			xen_update_mem_tables(pfn, mfn);
 			remapped++;
 			pfn++;
 		}
@@ -528,6 +530,8 @@ void __init xen_remap_memory(void)
 			pfn_s = xen_remap_buf.target_pfn;
 			len = xen_remap_buf.size;
 		}
+
+		mfn = xen_remap_mfn;
 		xen_remap_mfn = xen_remap_buf.next_area_mfn;
 	}
 
@@ -808,6 +812,7 @@ char * __init xen_memory_setup(void)
 	addr = xen_e820_table.entries[0].addr;
 	size = xen_e820_table.entries[0].size;
 	while (i < xen_e820_table.nr_entries) {
+		bool discard = false;
 
 		chunk_size = size;
 		type = xen_e820_table.entries[i].type;
@@ -823,10 +828,11 @@ char * __init xen_memory_setup(void)
 				xen_add_extra_mem(pfn_s, n_pfns);
 				xen_max_p2m_pfn = pfn_s + n_pfns;
 			} else
-				type = E820_TYPE_UNUSABLE;
+				discard = true;
 		}
 
-		xen_align_and_add_e820_region(addr, chunk_size, type);
+		if (!discard)
+			xen_align_and_add_e820_region(addr, chunk_size, type);
 
 		addr += chunk_size;
 		size -= chunk_size;
@@ -1021,7 +1027,8 @@ void __init xen_pvmmu_arch_setup(void)
 void __init xen_arch_setup(void)
 {
 	xen_panic_handler_init();
-	xen_pvmmu_arch_setup();
+	if (!xen_feature(XENFEAT_auto_translated_physmap))
+		xen_pvmmu_arch_setup();
 
 #ifdef CONFIG_ACPI
 	if (!(xen_start_info->flags & SIF_INITDOMAIN)) {

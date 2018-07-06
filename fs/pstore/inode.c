@@ -36,6 +36,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
+#include <linux/syslog.h>
 
 #include "internal.h"
 
@@ -131,6 +132,18 @@ static const struct seq_operations pstore_ftrace_seq_ops = {
 	.show	= pstore_ftrace_seq_show,
 };
 
+static int pstore_check_syslog_permissions(struct pstore_private *ps)
+{
+	switch (ps->record->type) {
+	case PSTORE_TYPE_DMESG:
+	case PSTORE_TYPE_CONSOLE:
+		return check_syslog_permissions(SYSLOG_ACTION_READ_ALL,
+			SYSLOG_FROM_READER);
+	default:
+		return 0;
+	}
+}
+
 static ssize_t pstore_file_read(struct file *file, char __user *userbuf,
 						size_t count, loff_t *ppos)
 {
@@ -149,6 +162,10 @@ static int pstore_file_open(struct inode *inode, struct file *file)
 	struct seq_file *sf;
 	int err;
 	const struct seq_operations *sops = NULL;
+
+	err = pstore_check_syslog_permissions(ps);
+	if (err)
+		return err;
 
 	if (ps->record->type == PSTORE_TYPE_FTRACE)
 		sops = &pstore_ftrace_seq_ops;
@@ -187,6 +204,11 @@ static int pstore_unlink(struct inode *dir, struct dentry *dentry)
 {
 	struct pstore_private *p = d_inode(dentry)->i_private;
 	struct pstore_record *record = p->record;
+	int err;
+
+	err = pstore_check_syslog_permissions(p);
+	if (err)
+		return err;
 
 	if (!record->psi->erase)
 		return -EPERM;
@@ -261,16 +283,6 @@ static void parse_options(char *options)
 	}
 }
 
-/*
- * Display the mount options in /proc/mounts.
- */
-static int pstore_show_options(struct seq_file *m, struct dentry *root)
-{
-	if (kmsg_bytes != PSTORE_DEFAULT_KMSG_BYTES)
-		seq_printf(m, ",kmsg_bytes=%lu", kmsg_bytes);
-	return 0;
-}
-
 static int pstore_remount(struct super_block *sb, int *flags, char *data)
 {
 	sync_filesystem(sb);
@@ -284,7 +296,7 @@ static const struct super_operations pstore_ops = {
 	.drop_inode	= generic_delete_inode,
 	.evict_inode	= pstore_evict_inode,
 	.remount_fs	= pstore_remount,
-	.show_options	= pstore_show_options,
+	.show_options	= generic_show_options,
 };
 
 static struct super_block *pstore_sb;
@@ -337,48 +349,48 @@ int pstore_mkfile(struct dentry *root, struct pstore_record *record)
 
 	switch (record->type) {
 	case PSTORE_TYPE_DMESG:
-		scnprintf(name, sizeof(name), "dmesg-%s-%llu%s",
+		scnprintf(name, sizeof(name), "dmesg-%s-%lld%s",
 			  record->psi->name, record->id,
 			  record->compressed ? ".enc.z" : "");
 		break;
 	case PSTORE_TYPE_CONSOLE:
-		scnprintf(name, sizeof(name), "console-%s-%llu",
+		scnprintf(name, sizeof(name), "console-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_FTRACE:
-		scnprintf(name, sizeof(name), "ftrace-%s-%llu",
+		scnprintf(name, sizeof(name), "ftrace-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_MCE:
-		scnprintf(name, sizeof(name), "mce-%s-%llu",
+		scnprintf(name, sizeof(name), "mce-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_PPC_RTAS:
-		scnprintf(name, sizeof(name), "rtas-%s-%llu",
+		scnprintf(name, sizeof(name), "rtas-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_PPC_OF:
-		scnprintf(name, sizeof(name), "powerpc-ofw-%s-%llu",
+		scnprintf(name, sizeof(name), "powerpc-ofw-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_PPC_COMMON:
-		scnprintf(name, sizeof(name), "powerpc-common-%s-%llu",
+		scnprintf(name, sizeof(name), "powerpc-common-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_PMSG:
-		scnprintf(name, sizeof(name), "pmsg-%s-%llu",
+		scnprintf(name, sizeof(name), "pmsg-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_PPC_OPAL:
-		scnprintf(name, sizeof(name), "powerpc-opal-%s-%llu",
+		scnprintf(name, sizeof(name), "powerpc-opal-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	case PSTORE_TYPE_UNKNOWN:
-		scnprintf(name, sizeof(name), "unknown-%s-%llu",
+		scnprintf(name, sizeof(name), "unknown-%s-%lld",
 			  record->psi->name, record->id);
 		break;
 	default:
-		scnprintf(name, sizeof(name), "type%d-%s-%llu",
+		scnprintf(name, sizeof(name), "type%d-%s-%lld",
 			  record->type, record->psi->name, record->id);
 		break;
 	}
@@ -436,6 +448,8 @@ static int pstore_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct inode *inode;
 
+	save_mount_options(sb, data);
+
 	pstore_sb = sb;
 
 	sb->s_maxbytes		= MAX_LFS_FILESIZE;
@@ -449,7 +463,7 @@ static int pstore_fill_super(struct super_block *sb, void *data, int silent)
 
 	inode = pstore_get_inode(sb);
 	if (inode) {
-		inode->i_mode = S_IFDIR | 0750;
+		inode->i_mode = S_IFDIR | 0755;
 		inode->i_op = &pstore_dir_inode_operations;
 		inode->i_fop = &simple_dir_operations;
 		inc_nlink(inode);
@@ -485,8 +499,6 @@ static struct file_system_type pstore_fs_type = {
 static int __init init_pstore_fs(void)
 {
 	int err;
-
-	pstore_choose_compression();
 
 	/* Create a convenient mount point for people to access pstore */
 	err = sysfs_create_mount_point(fs_kobj, "pstore");

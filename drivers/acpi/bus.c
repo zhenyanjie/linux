@@ -66,37 +66,10 @@ static int set_copy_dsdt(const struct dmi_system_id *id)
 	return 0;
 }
 #endif
-static int set_gbl_term_list(const struct dmi_system_id *id)
-{
-	acpi_gbl_execute_tables_as_methods = 1;
-	return 0;
-}
 
-static const struct dmi_system_id acpi_quirks_dmi_table[] __initconst = {
-	/*
-	 * Touchpad on Dell XPS 9570/Precision M5530 doesn't work under I2C
-	 * mode.
-	 * https://bugzilla.kernel.org/show_bug.cgi?id=198515
-	 */
-	{
-		.callback = set_gbl_term_list,
-		.ident = "Dell Precision M5530",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "Precision M5530"),
-		},
-	},
-	{
-		.callback = set_gbl_term_list,
-		.ident = "Dell XPS 15 9570",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "XPS 15 9570"),
-		},
-	},
+static struct dmi_system_id dsdt_dmi_table[] __initdata = {
 	/*
 	 * Invoke DSDT corruption work-around on all Toshiba Satellite.
-	 * DSDT will be copied to memory.
 	 * https://bugzilla.kernel.org/show_bug.cgi?id=14679
 	 */
 	{
@@ -110,7 +83,7 @@ static const struct dmi_system_id acpi_quirks_dmi_table[] __initconst = {
 	{}
 };
 #else
-static const struct dmi_system_id acpi_quirks_dmi_table[] __initconst = {
+static struct dmi_system_id dsdt_dmi_table[] __initdata = {
 	{}
 };
 #endif
@@ -135,7 +108,6 @@ acpi_status acpi_bus_get_status_handle(acpi_handle handle,
 	}
 	return status;
 }
-EXPORT_SYMBOL_GPL(acpi_bus_get_status_handle);
 
 int acpi_bus_get_status(struct acpi_device *device)
 {
@@ -144,12 +116,6 @@ int acpi_bus_get_status(struct acpi_device *device)
 
 	if (acpi_device_always_present(device)) {
 		acpi_set_device_status(device, ACPI_STA_DEFAULT);
-		return 0;
-	}
-
-	/* Battery devices must have their deps met before calling _STA */
-	if (acpi_device_is_battery(device) && device->dep_unmet) {
-		acpi_set_device_status(device, 0);
 		return 0;
 	}
 
@@ -230,19 +196,42 @@ static void acpi_print_osc_error(acpi_handle handle,
 	pr_debug("\n");
 }
 
+acpi_status acpi_str_to_uuid(char *str, u8 *uuid)
+{
+	int i;
+	static int opc_map_to_uuid[16] = {6, 4, 2, 0, 11, 9, 16, 14, 19, 21,
+		24, 26, 28, 30, 32, 34};
+
+	if (strlen(str) != 36)
+		return AE_BAD_PARAMETER;
+	for (i = 0; i < 36; i++) {
+		if (i == 8 || i == 13 || i == 18 || i == 23) {
+			if (str[i] != '-')
+				return AE_BAD_PARAMETER;
+		} else if (!isxdigit(str[i]))
+			return AE_BAD_PARAMETER;
+	}
+	for (i = 0; i < 16; i++) {
+		uuid[i] = hex_to_bin(str[opc_map_to_uuid[i]]) << 4;
+		uuid[i] |= hex_to_bin(str[opc_map_to_uuid[i] + 1]);
+	}
+	return AE_OK;
+}
+EXPORT_SYMBOL_GPL(acpi_str_to_uuid);
+
 acpi_status acpi_run_osc(acpi_handle handle, struct acpi_osc_context *context)
 {
 	acpi_status status;
 	struct acpi_object_list input;
 	union acpi_object in_params[4];
 	union acpi_object *out_obj;
-	guid_t guid;
+	u8 uuid[16];
 	u32 errors;
 	struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
 
 	if (!context)
 		return AE_ERROR;
-	if (guid_parse(context->uuid_str, &guid))
+	if (ACPI_FAILURE(acpi_str_to_uuid(context->uuid_str, uuid)))
 		return AE_ERROR;
 	context->ret.length = ACPI_ALLOCATE_BUFFER;
 	context->ret.pointer = NULL;
@@ -252,7 +241,7 @@ acpi_status acpi_run_osc(acpi_handle handle, struct acpi_osc_context *context)
 	input.pointer = in_params;
 	in_params[0].type 		= ACPI_TYPE_BUFFER;
 	in_params[0].buffer.length 	= 16;
-	in_params[0].buffer.pointer	= (u8 *)&guid;
+	in_params[0].buffer.pointer	= uuid;
 	in_params[1].type 		= ACPI_TYPE_INTEGER;
 	in_params[1].integer.value 	= context->rev;
 	in_params[2].type 		= ACPI_TYPE_INTEGER;
@@ -443,15 +432,11 @@ static void acpi_bus_notify(acpi_handle handle, u32 type, void *data)
 	    (driver->flags & ACPI_DRIVER_ALL_NOTIFY_EVENTS))
 		driver->ops.notify(adev, type);
 
-	if (!hotplug_event) {
-		acpi_bus_put_acpi_device(adev);
-		return;
-	}
-
-	if (ACPI_SUCCESS(acpi_hotplug_schedule(adev, type)))
+	if (hotplug_event && ACPI_SUCCESS(acpi_hotplug_schedule(adev, type)))
 		return;
 
 	acpi_bus_put_acpi_device(adev);
+	return;
 
  err:
 	acpi_evaluate_ost(handle, type, ost_code, NULL);
@@ -660,15 +645,13 @@ struct acpi_device *acpi_companion_match(const struct device *dev)
  * acpi_of_match_device - Match device object using the "compatible" property.
  * @adev: ACPI device object to match.
  * @of_match_table: List of device IDs to match against.
- * @of_id: OF ID if matched
  *
  * If @dev has an ACPI companion which has ACPI_DT_NAMESPACE_HID in its list of
  * identifiers and a _DSD object with the "compatible" property, use that
  * property to match against the given list of identifiers.
  */
 static bool acpi_of_match_device(struct acpi_device *adev,
-				 const struct of_device_id *of_match_table,
-				 const struct of_device_id **of_id)
+				 const struct of_device_id *of_match_table)
 {
 	const union acpi_object *of_compatible, *obj;
 	int i, nval;
@@ -692,11 +675,8 @@ static bool acpi_of_match_device(struct acpi_device *adev,
 		const struct of_device_id *id;
 
 		for (id = of_match_table; id->compatible[0]; id++)
-			if (!strcasecmp(obj->string.pointer, id->compatible)) {
-				if (of_id)
-					*of_id = id;
+			if (!strcasecmp(obj->string.pointer, id->compatible))
 				return true;
-			}
 	}
 
 	return false;
@@ -767,11 +747,10 @@ static bool __acpi_match_device_cls(const struct acpi_device_id *id,
 	return true;
 }
 
-static bool __acpi_match_device(struct acpi_device *device,
-				const struct acpi_device_id *acpi_ids,
-				const struct of_device_id *of_ids,
-				const struct acpi_device_id **acpi_id,
-				const struct of_device_id **of_id)
+static const struct acpi_device_id *__acpi_match_device(
+	struct acpi_device *device,
+	const struct acpi_device_id *ids,
+	const struct of_device_id *of_ids)
 {
 	const struct acpi_device_id *id;
 	struct acpi_hardware_id *hwid;
@@ -781,32 +760,30 @@ static bool __acpi_match_device(struct acpi_device *device,
 	 * driver for it.
 	 */
 	if (!device || !device->status.present)
-		return false;
+		return NULL;
 
 	list_for_each_entry(hwid, &device->pnp.ids, list) {
 		/* First, check the ACPI/PNP IDs provided by the caller. */
-		if (acpi_ids) {
-			for (id = acpi_ids; id->id[0] || id->cls; id++) {
-				if (id->id[0] && !strcmp((char *)id->id, hwid->id))
-					goto out_acpi_match;
-				if (id->cls && __acpi_match_device_cls(id, hwid))
-					goto out_acpi_match;
-			}
+		for (id = ids; id->id[0] || id->cls; id++) {
+			if (id->id[0] && !strcmp((char *) id->id, hwid->id))
+				return id;
+			else if (id->cls && __acpi_match_device_cls(id, hwid))
+				return id;
 		}
 
 		/*
 		 * Next, check ACPI_DT_NAMESPACE_HID and try to match the
 		 * "compatible" property if found.
+		 *
+		 * The id returned by the below is not valid, but the only
+		 * caller passing non-NULL of_ids here is only interested in
+		 * whether or not the return value is NULL.
 		 */
-		if (!strcmp(ACPI_DT_NAMESPACE_HID, hwid->id))
-			return acpi_of_match_device(device, of_ids, of_id);
+		if (!strcmp(ACPI_DT_NAMESPACE_HID, hwid->id)
+		    && acpi_of_match_device(device, of_ids))
+			return id;
 	}
-	return false;
-
-out_acpi_match:
-	if (acpi_id)
-		*acpi_id = id;
-	return true;
+	return NULL;
 }
 
 /**
@@ -823,29 +800,14 @@ out_acpi_match:
 const struct acpi_device_id *acpi_match_device(const struct acpi_device_id *ids,
 					       const struct device *dev)
 {
-	const struct acpi_device_id *id = NULL;
-
-	__acpi_match_device(acpi_companion_match(dev), ids, NULL, &id, NULL);
-	return id;
+	return __acpi_match_device(acpi_companion_match(dev), ids, NULL);
 }
 EXPORT_SYMBOL_GPL(acpi_match_device);
-
-const void *acpi_device_get_match_data(const struct device *dev)
-{
-	const struct acpi_device_id *match;
-
-	match = acpi_match_device(dev->driver->acpi_match_table, dev);
-	if (!match)
-		return NULL;
-
-	return (const void *)match->driver_data;
-}
-EXPORT_SYMBOL_GPL(acpi_device_get_match_data);
 
 int acpi_match_device_ids(struct acpi_device *device,
 			  const struct acpi_device_id *ids)
 {
-	return __acpi_match_device(device, ids, NULL, NULL, NULL) ? 0 : -ENOENT;
+	return __acpi_match_device(device, ids, NULL) ? 0 : -ENOENT;
 }
 EXPORT_SYMBOL(acpi_match_device_ids);
 
@@ -854,12 +816,10 @@ bool acpi_driver_match_device(struct device *dev,
 {
 	if (!drv->acpi_match_table)
 		return acpi_of_match_device(ACPI_COMPANION(dev),
-					    drv->of_match_table,
-					    NULL);
+					    drv->of_match_table);
 
-	return __acpi_match_device(acpi_companion_match(dev),
-				   drv->acpi_match_table, drv->of_match_table,
-				   NULL, NULL);
+	return !!__acpi_match_device(acpi_companion_match(dev),
+				     drv->acpi_match_table, drv->of_match_table);
 }
 EXPORT_SYMBOL_GPL(acpi_driver_match_device);
 
@@ -1054,14 +1014,20 @@ void __init acpi_early_init(void)
 
 	printk(KERN_INFO PREFIX "Core revision %08x\n", ACPI_CA_VERSION);
 
+	/* It's safe to verify table checksums during late stage */
+	acpi_gbl_verify_table_checksum = TRUE;
+
 	/* enable workarounds, unless strict ACPI spec. compliance */
 	if (!acpi_strict)
 		acpi_gbl_enable_interpreter_slack = TRUE;
 
 	acpi_permanent_mmap = true;
 
-	/* Check machine-specific quirks */
-	dmi_check_system(acpi_quirks_dmi_table);
+	/*
+	 * If the machine falls into the DMI check table,
+	 * DSDT will be copied to memory
+	 */
+	dmi_check_system(dsdt_dmi_table);
 
 	status = acpi_reallocate_root_table();
 	if (ACPI_FAILURE(status)) {
@@ -1077,7 +1043,7 @@ void __init acpi_early_init(void)
 		goto error0;
 	}
 
-	if (!acpi_gbl_execute_tables_as_methods &&
+	if (!acpi_gbl_parse_table_as_term_list &&
 	    acpi_gbl_group_module_level_code) {
 		status = acpi_load_tables();
 		if (ACPI_FAILURE(status)) {
@@ -1167,7 +1133,7 @@ static int __init acpi_bus_init(void)
 	status = acpi_ec_ecdt_probe();
 	/* Ignore result. Not having an ECDT is not fatal. */
 
-	if (acpi_gbl_execute_tables_as_methods ||
+	if (acpi_gbl_parse_table_as_term_list ||
 	    !acpi_gbl_group_module_level_code) {
 		status = acpi_load_tables();
 		if (ACPI_FAILURE(status)) {

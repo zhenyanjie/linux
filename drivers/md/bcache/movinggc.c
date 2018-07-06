@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Moving/copying garbage collector
  *
@@ -64,14 +63,14 @@ static void read_moving_endio(struct bio *bio)
 	struct moving_io *io = container_of(bio->bi_private,
 					    struct moving_io, cl);
 
-	if (bio->bi_status)
-		io->op.status = bio->bi_status;
+	if (bio->bi_error)
+		io->op.error = bio->bi_error;
 	else if (!KEY_DIRTY(&b->key) &&
 		 ptr_stale(io->op.c, &b->key, 0)) {
-		io->op.status = BLK_STS_IOERR;
+		io->op.error = -EINTR;
 	}
 
-	bch_bbio_endio(io->op.c, bio, bio->bi_status, "reading data to move");
+	bch_bbio_endio(io->op.c, bio, bio->bi_error, "reading data to move");
 }
 
 static void moving_init(struct moving_io *io)
@@ -93,7 +92,7 @@ static void write_moving(struct closure *cl)
 	struct moving_io *io = container_of(cl, struct moving_io, cl);
 	struct data_insert_op *op = &io->op;
 
-	if (!op->status) {
+	if (!op->error) {
 		moving_init(io);
 
 		io->bio.bio.bi_iter.bi_sector = KEY_START(&io->w->key);
@@ -162,7 +161,7 @@ static void read_moving(struct cache_set *c)
 		bio_set_op_attrs(bio, REQ_OP_READ, 0);
 		bio->bi_end_io	= read_moving_endio;
 
-		if (bch_bio_alloc_pages(bio, GFP_KERNEL))
+		if (bio_alloc_pages(bio, GFP_KERNEL))
 			goto err;
 
 		trace_bcache_gc_copy(&w->key);

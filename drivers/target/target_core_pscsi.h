@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef TARGET_CORE_PSCSI_H
 #define TARGET_CORE_PSCSI_H
 
@@ -24,6 +23,10 @@ struct scsi_device;
 struct Scsi_Host;
 
 struct pscsi_plugin_task {
+	unsigned char pscsi_sense[TRANSPORT_SENSE_BUFFER];
+	int	pscsi_direction;
+	int	pscsi_result;
+	u32	pscsi_resid;
 	unsigned char pscsi_cdb[0];
 } ____cacheline_aligned;
 

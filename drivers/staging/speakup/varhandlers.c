@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/ctype.h>
 #include "spk_types.h"
 #include "spk_priv.h"
@@ -45,7 +44,6 @@ static struct st_var_header var_headers[] = {
 	{ "lang", LANG, VAR_NUM, NULL, NULL },
 	{ "chartab", CHARTAB, VAR_PROC, NULL, NULL },
 	{ "direct", DIRECT, VAR_NUM, NULL, NULL },
-	{ "pause", PAUSE, VAR_STRING, spk_str_pause, NULL },
 };
 
 static struct st_var_header *var_ptrs[MAXVARS] = { NULL, NULL, NULL };

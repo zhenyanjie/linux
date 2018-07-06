@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-1.0+
 /*
  * OHCI HCD (Host Controller Driver) for USB.
  *
@@ -275,16 +274,14 @@ extern void pxa27x_clear_otgph(void);
 
 static int pxa27x_start_hc(struct pxa27x_ohci *pxa_ohci, struct device *dev)
 {
-	int retval;
+	int retval = 0;
 	struct pxaohci_platform_data *inf;
 	uint32_t uhchr;
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
 
 	inf = dev_get_platdata(dev);
 
-	retval = clk_prepare_enable(pxa_ohci->clk);
-	if (retval)
-		return retval;
+	clk_prepare_enable(pxa_ohci->clk);
 
 	pxa27x_reset_hc(pxa_ohci);
 
@@ -299,10 +296,8 @@ static int pxa27x_start_hc(struct pxa27x_ohci *pxa_ohci, struct device *dev)
 	if (inf->init)
 		retval = inf->init(dev);
 
-	if (retval < 0) {
-		clk_disable_unprepare(pxa_ohci->clk);
+	if (retval < 0)
 		return retval;
-	}
 
 	if (cpu_is_pxa3xx())
 		pxa3xx_u2d_start_hc(&hcd->self);

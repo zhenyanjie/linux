@@ -173,6 +173,7 @@ struct tegra_i2c_hw_feature {
  * @msg_buf_remaining: size of unsent data in the message buffer
  * @msg_read: identifies read transfers
  * @bus_clk_rate: current i2c bus clock rate
+ * @is_suspended: prevents i2c controller accesses after suspend is called
  */
 struct tegra_i2c_dev {
 	struct device *dev;
@@ -193,6 +194,7 @@ struct tegra_i2c_dev {
 	int msg_read;
 	u32 bus_clk_rate;
 	u16 clk_divisor_non_hs_mode;
+	bool is_suspended;
 	bool is_multimaster_mode;
 	spinlock_t xfer_lock;
 };
@@ -732,6 +734,9 @@ static int tegra_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
 	int i;
 	int ret = 0;
 
+	if (i2c_dev->is_suspended)
+		return -EBUSY;
+
 	ret = pm_runtime_get_sync(i2c_dev->dev);
 	if (ret < 0) {
 		dev_err(i2c_dev->dev, "runtime resume failed %d\n", ret);
@@ -788,7 +793,7 @@ static const struct i2c_algorithm tegra_i2c_algo = {
 };
 
 /* payload size is only 12 bit */
-static const struct i2c_adapter_quirks tegra_i2c_quirks = {
+static struct i2c_adapter_quirks tegra_i2c_quirks = {
 	.max_read_len = 4096,
 	.max_write_len = 4096,
 };
@@ -906,7 +911,7 @@ static int tegra_i2c_probe(struct platform_device *pdev)
 	i2c_dev->cont_id = pdev->id;
 	i2c_dev->dev = &pdev->dev;
 
-	i2c_dev->rst = devm_reset_control_get_exclusive(&pdev->dev, "i2c");
+	i2c_dev->rst = devm_reset_control_get(&pdev->dev, "i2c");
 	if (IS_ERR(i2c_dev->rst)) {
 		dev_err(&pdev->dev, "missing controller reset\n");
 		return PTR_ERR(i2c_dev->rst);
@@ -1046,9 +1051,37 @@ static int tegra_i2c_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM_SLEEP
+static int tegra_i2c_suspend(struct device *dev)
+{
+	struct tegra_i2c_dev *i2c_dev = dev_get_drvdata(dev);
+
+	i2c_lock_adapter(&i2c_dev->adapter);
+	i2c_dev->is_suspended = true;
+	i2c_unlock_adapter(&i2c_dev->adapter);
+
+	return 0;
+}
+
+static int tegra_i2c_resume(struct device *dev)
+{
+	struct tegra_i2c_dev *i2c_dev = dev_get_drvdata(dev);
+	int ret;
+
+	i2c_lock_adapter(&i2c_dev->adapter);
+
+	ret = tegra_i2c_init(i2c_dev);
+	if (!ret)
+		i2c_dev->is_suspended = false;
+
+	i2c_unlock_adapter(&i2c_dev->adapter);
+
+	return ret;
+}
+
 static const struct dev_pm_ops tegra_i2c_pm = {
 	SET_RUNTIME_PM_OPS(tegra_i2c_runtime_suspend, tegra_i2c_runtime_resume,
 			   NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(tegra_i2c_suspend, tegra_i2c_resume)
 };
 #define TEGRA_I2C_PM	(&tegra_i2c_pm)
 #else

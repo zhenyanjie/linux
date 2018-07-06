@@ -27,6 +27,7 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/pstore.h>
+#include <linux/time.h>
 #include <linux/io.h>
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
@@ -153,23 +154,21 @@ ramoops_get_next_prz(struct persistent_ram_zone *przs[], uint *c, uint max,
 	return prz;
 }
 
-static int ramoops_read_kmsg_hdr(char *buffer, struct timespec64 *time,
+static int ramoops_read_kmsg_hdr(char *buffer, struct timespec *time,
 				  bool *compressed)
 {
 	char data_type;
 	int header_length = 0;
 
-	if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lld.%lu-%c\n%n",
-		   (time64_t *)&time->tv_sec, &time->tv_nsec, &data_type,
-		   &header_length) == 3) {
+	if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lu.%lu-%c\n%n", &time->tv_sec,
+			&time->tv_nsec, &data_type, &header_length) == 3) {
 		if (data_type == 'C')
 			*compressed = true;
 		else
 			*compressed = false;
-	} else if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lld.%lu\n%n",
-			  (time64_t *)&time->tv_sec, &time->tv_nsec,
-			  &header_length) == 2) {
-		*compressed = false;
+	} else if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lu.%lu\n%n",
+			&time->tv_sec, &time->tv_nsec, &header_length) == 2) {
+			*compressed = false;
 	} else {
 		time->tv_sec = 0;
 		time->tv_nsec = 0;
@@ -357,15 +356,20 @@ out:
 }
 
 static size_t ramoops_write_kmsg_hdr(struct persistent_ram_zone *prz,
-				     struct pstore_record *record)
+				     bool compressed)
 {
 	char *hdr;
+	struct timespec timestamp;
 	size_t len;
 
-	hdr = kasprintf(GFP_ATOMIC, RAMOOPS_KERNMSG_HDR "%lld.%06lu-%c\n",
-		(time64_t)record->time.tv_sec,
-		record->time.tv_nsec / 1000,
-		record->compressed ? 'C' : 'D');
+	/* Report zeroed timestamp if called before timekeeping has resumed. */
+	if (__getnstimeofday(&timestamp)) {
+		timestamp.tv_sec = 0;
+		timestamp.tv_nsec = 0;
+	}
+	hdr = kasprintf(GFP_ATOMIC, RAMOOPS_KERNMSG_HDR "%lu.%lu-%c\n",
+		(long)timestamp.tv_sec, (long)(timestamp.tv_nsec / 1000),
+		compressed ? 'C' : 'D');
 	WARN_ON_ONCE(!hdr);
 	len = hdr ? strlen(hdr) : 0;
 	persistent_ram_write(prz, hdr, len);
@@ -436,7 +440,7 @@ static int notrace ramoops_pstore_write(struct pstore_record *record)
 	prz = cxt->dprzs[cxt->dump_write_cnt];
 
 	/* Build header and append record contents. */
-	hlen = ramoops_write_kmsg_hdr(prz, record);
+	hlen = ramoops_write_kmsg_hdr(prz, record->compressed);
 	size = record->size;
 	if (size + hlen > prz->buffer_size)
 		size = prz->buffer_size - hlen;
@@ -940,7 +944,7 @@ static int __init ramoops_init(void)
 	ramoops_register_dummy();
 	return platform_driver_register(&ramoops_driver);
 }
-late_initcall(ramoops_init);
+postcore_initcall(ramoops_init);
 
 static void __exit ramoops_exit(void)
 {

@@ -111,8 +111,10 @@ static struct drm_encoder *tfp410_encoder_create(struct drm_device *dev,
 
 	tfp410_encoder = devm_kzalloc(dev->dev, sizeof(*tfp410_encoder),
 				      GFP_KERNEL);
-	if (!tfp410_encoder)
+	if (!tfp410_encoder) {
+		dev_err(dev->dev, "allocation failed\n");
 		return NULL;
+	}
 
 	tfp410_encoder->dpms = DRM_MODE_DPMS_OFF;
 	tfp410_encoder->mod = mod;
@@ -200,6 +202,7 @@ static struct drm_encoder *tfp410_connector_best_encoder(
 
 static const struct drm_connector_funcs tfp410_connector_funcs = {
 	.destroy            = tfp410_connector_destroy,
+	.dpms               = drm_atomic_helper_connector_dpms,
 	.detect             = tfp410_connector_detect,
 	.fill_modes         = drm_helper_probe_single_connector_modes,
 	.reset              = drm_atomic_helper_connector_reset,
@@ -222,8 +225,10 @@ static struct drm_connector *tfp410_connector_create(struct drm_device *dev,
 
 	tfp410_connector = devm_kzalloc(dev->dev, sizeof(*tfp410_connector),
 					GFP_KERNEL);
-	if (!tfp410_connector)
+	if (!tfp410_connector) {
+		dev_err(dev->dev, "allocation failed\n");
 		return NULL;
+	}
 
 	tfp410_connector->encoder = encoder;
 	tfp410_connector->mod = mod;
@@ -284,6 +289,8 @@ static const struct tilcdc_module_ops tfp410_module_ops = {
 /*
  * Device:
  */
+
+static struct of_device_id tfp410_of_match[];
 
 static int tfp410_probe(struct platform_device *pdev)
 {
@@ -369,7 +376,7 @@ static int tfp410_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id tfp410_of_match[] = {
+static struct of_device_id tfp410_of_match[] = {
 		{ .compatible = "ti,tilcdc,tfp410", },
 		{ },
 };

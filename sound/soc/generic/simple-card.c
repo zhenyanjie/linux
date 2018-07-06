@@ -104,6 +104,12 @@ static int asoc_simple_card_init_jack(struct snd_soc_card *card,
 	return 0;
 }
 
+static void asoc_simple_card_remove_jack(struct asoc_simple_jack *sjack)
+{
+	if (gpio_is_valid(sjack->gpio.gpio))
+		snd_soc_jack_free_gpios(&sjack->jack, 1, &sjack->gpio);
+}
+
 static int asoc_simple_card_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -112,13 +118,13 @@ static int asoc_simple_card_startup(struct snd_pcm_substream *substream)
 		simple_priv_to_props(priv, rtd->num);
 	int ret;
 
-	ret = asoc_simple_card_clk_enable(&dai_props->cpu_dai);
+	ret = clk_prepare_enable(dai_props->cpu_dai.clk);
 	if (ret)
 		return ret;
 
-	ret = asoc_simple_card_clk_enable(&dai_props->codec_dai);
+	ret = clk_prepare_enable(dai_props->codec_dai.clk);
 	if (ret)
-		asoc_simple_card_clk_disable(&dai_props->cpu_dai);
+		clk_disable_unprepare(dai_props->cpu_dai.clk);
 
 	return ret;
 }
@@ -130,21 +136,9 @@ static void asoc_simple_card_shutdown(struct snd_pcm_substream *substream)
 	struct simple_dai_props *dai_props =
 		simple_priv_to_props(priv, rtd->num);
 
-	asoc_simple_card_clk_disable(&dai_props->cpu_dai);
+	clk_disable_unprepare(dai_props->cpu_dai.clk);
 
-	asoc_simple_card_clk_disable(&dai_props->codec_dai);
-}
-
-static int asoc_simple_set_clk_rate(struct asoc_simple_dai *simple_dai,
-				    unsigned long rate)
-{
-	if (!simple_dai->clk)
-		return 0;
-
-	if (clk_get_rate(simple_dai->clk) == rate)
-		return 0;
-
-	return clk_set_rate(simple_dai->clk, rate);
+	clk_disable_unprepare(dai_props->codec_dai.clk);
 }
 
 static int asoc_simple_card_hw_params(struct snd_pcm_substream *substream,
@@ -166,15 +160,6 @@ static int asoc_simple_card_hw_params(struct snd_pcm_substream *substream,
 
 	if (mclk_fs) {
 		mclk = params_rate(params) * mclk_fs;
-
-		ret = asoc_simple_set_clk_rate(&dai_props->codec_dai, mclk);
-		if (ret < 0)
-			return ret;
-
-		ret = asoc_simple_set_clk_rate(&dai_props->cpu_dai, mclk);
-		if (ret < 0)
-			return ret;
-
 		ret = snd_soc_dai_set_sysclk(codec_dai, 0, mclk,
 					     SND_SOC_CLOCK_IN);
 		if (ret && ret != -ENOTSUPP)
@@ -248,19 +233,13 @@ static int asoc_simple_card_dai_link_of(struct device_node *node,
 	snprintf(prop, sizeof(prop), "%scpu", prefix);
 	cpu = of_get_child_by_name(node, prop);
 
-	if (!cpu) {
-		ret = -EINVAL;
-		dev_err(dev, "%s: Can't find %s DT node\n", __func__, prop);
-		goto dai_link_of_err;
-	}
-
 	snprintf(prop, sizeof(prop), "%splat", prefix);
 	plat = of_get_child_by_name(node, prop);
 
 	snprintf(prop, sizeof(prop), "%scodec", prefix);
 	codec = of_get_child_by_name(node, prop);
 
-	if (!codec) {
+	if (!cpu || !codec) {
 		ret = -EINVAL;
 		dev_err(dev, "%s: Can't find %s DT node\n", __func__, prop);
 		goto dai_link_of_err;
@@ -286,11 +265,17 @@ static int asoc_simple_card_dai_link_of(struct device_node *node,
 	if (ret < 0)
 		goto dai_link_of_err;
 
-	ret = asoc_simple_card_of_parse_tdm(cpu, cpu_dai);
+	ret = snd_soc_of_parse_tdm_slot(cpu,	&cpu_dai->tx_slot_mask,
+						&cpu_dai->rx_slot_mask,
+						&cpu_dai->slots,
+						&cpu_dai->slot_width);
 	if (ret < 0)
 		goto dai_link_of_err;
 
-	ret = asoc_simple_card_of_parse_tdm(codec, codec_dai);
+	ret = snd_soc_of_parse_tdm_slot(codec,	&codec_dai->tx_slot_mask,
+						&codec_dai->rx_slot_mask,
+						&codec_dai->slots,
+						&codec_dai->slot_width);
 	if (ret < 0)
 		goto dai_link_of_err;
 
@@ -316,6 +301,15 @@ static int asoc_simple_card_dai_link_of(struct device_node *node,
 	dai_link->ops = &asoc_simple_card_ops;
 	dai_link->init = asoc_simple_card_dai_init;
 
+	dev_dbg(dev, "\tname : %s\n", dai_link->stream_name);
+	dev_dbg(dev, "\tformat : %04x\n", dai_link->dai_fmt);
+	dev_dbg(dev, "\tcpu : %s / %d\n",
+		dai_link->cpu_dai_name,
+		dai_props->cpu_dai.sysclk);
+	dev_dbg(dev, "\tcodec : %s / %d\n",
+		dai_link->codec_dai_name,
+		dai_props->codec_dai.sysclk);
+
 	asoc_simple_card_canonicalize_cpu(dai_link, single_cpu);
 
 dai_link_of_err:
@@ -340,8 +334,8 @@ static int asoc_simple_card_parse_aux_devs(struct device_node *node,
 	if (n <= 0)
 		return -EINVAL;
 
-	card->aux_dev = devm_kcalloc(dev,
-			n, sizeof(*card->aux_dev), GFP_KERNEL);
+	card->aux_dev = devm_kzalloc(dev,
+			n * sizeof(*card->aux_dev), GFP_KERNEL);
 	if (!card->aux_dev)
 		return -ENOMEM;
 
@@ -356,12 +350,12 @@ static int asoc_simple_card_parse_aux_devs(struct device_node *node,
 	return 0;
 }
 
-static int asoc_simple_card_parse_of(struct simple_card_data *priv)
+static int asoc_simple_card_parse_of(struct device_node *node,
+				     struct simple_card_data *priv)
 {
 	struct device *dev = simple_priv_to_dev(priv);
 	struct snd_soc_card *card = simple_priv_to_card(priv);
 	struct device_node *dai_link;
-	struct device_node *node = dev->of_node;
 	int ret;
 
 	if (!node)
@@ -369,13 +363,21 @@ static int asoc_simple_card_parse_of(struct simple_card_data *priv)
 
 	dai_link = of_get_child_by_name(node, PREFIX "dai-link");
 
-	ret = asoc_simple_card_of_parse_widgets(card, PREFIX);
-	if (ret < 0)
-		goto card_parse_end;
+	/* The off-codec widgets */
+	if (of_property_read_bool(node, PREFIX "widgets")) {
+		ret = snd_soc_of_parse_audio_simple_widgets(card,
+					PREFIX "widgets");
+		if (ret)
+			goto card_parse_end;
+	}
 
-	ret = asoc_simple_card_of_parse_routing(card, PREFIX, 1);
-	if (ret < 0)
-		goto card_parse_end;
+	/* DAPM routes */
+	if (of_property_read_bool(node, PREFIX "routing")) {
+		ret = snd_soc_of_parse_audio_routing(card,
+					PREFIX "routing");
+		if (ret)
+			goto card_parse_end;
+	}
 
 	/* Factor to mclk, used in hw_params() */
 	of_property_read_u32(node, PREFIX "mclk-fs", &priv->mclk_fs);
@@ -435,8 +437,8 @@ static int asoc_simple_card_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	dai_props = devm_kcalloc(dev, num, sizeof(*dai_props), GFP_KERNEL);
-	dai_link  = devm_kcalloc(dev, num, sizeof(*dai_link), GFP_KERNEL);
+	dai_props = devm_kzalloc(dev, sizeof(*dai_props) * num, GFP_KERNEL);
+	dai_link  = devm_kzalloc(dev, sizeof(*dai_link)  * num, GFP_KERNEL);
 	if (!dai_props || !dai_link)
 		return -ENOMEM;
 
@@ -452,7 +454,7 @@ static int asoc_simple_card_probe(struct platform_device *pdev)
 
 	if (np && of_device_is_available(np)) {
 
-		ret = asoc_simple_card_parse_of(priv);
+		ret = asoc_simple_card_parse_of(np, priv);
 		if (ret < 0) {
 			if (ret != -EPROBE_DEFER)
 				dev_err(dev, "parse error %d\n", ret);
@@ -495,10 +497,8 @@ static int asoc_simple_card_probe(struct platform_device *pdev)
 	snd_soc_card_set_drvdata(card, priv);
 
 	ret = devm_snd_soc_register_card(dev, card);
-	if (ret < 0)
-		goto err;
-
-	return 0;
+	if (ret >= 0)
+		return ret;
 err:
 	asoc_simple_card_clean_reference(card);
 
@@ -508,6 +508,10 @@ err:
 static int asoc_simple_card_remove(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = platform_get_drvdata(pdev);
+	struct simple_card_data *priv = snd_soc_card_get_drvdata(card);
+
+	asoc_simple_card_remove_jack(&priv->hp_jack);
+	asoc_simple_card_remove_jack(&priv->mic_jack);
 
 	return asoc_simple_card_clean_reference(card);
 }

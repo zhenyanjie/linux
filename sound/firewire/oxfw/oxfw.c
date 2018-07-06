@@ -49,6 +49,7 @@ static bool detect_loud_models(struct fw_unit *unit)
 		"Tapco LINK.firewire 4x6",
 		"U.420"};
 	char model[32];
+	unsigned int i;
 	int err;
 
 	err = fw_csr_string(unit->directory, CSR_MODEL,
@@ -56,7 +57,12 @@ static bool detect_loud_models(struct fw_unit *unit)
 	if (err < 0)
 		return false;
 
-	return match_string(models, ARRAY_SIZE(models), model) >= 0;
+	for (i = 0; i < ARRAY_SIZE(models); i++) {
+		if (strcmp(models[i], model) == 0)
+			break;
+	}
+
+	return (i < ARRAY_SIZE(models));
 }
 
 static int name_card(struct snd_oxfw *oxfw)

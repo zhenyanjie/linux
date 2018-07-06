@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  mm/mprotect.c
  *
@@ -27,7 +26,6 @@
 #include <linux/pkeys.h>
 #include <linux/ksm.h>
 #include <linux/uaccess.h>
-#include <linux/mm_inline.h>
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
@@ -60,6 +58,8 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 	 * reading.
 	 */
 	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
+	if (!pte)
+		return 0;
 
 	/* Get target node for single threaded private VMAs */
 	if (prot_numa && !(vma->vm_flags & VM_SHARED) &&
@@ -83,19 +83,6 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 
 				page = vm_normal_page(vma, addr, oldpte);
 				if (!page || PageKsm(page))
-					continue;
-
-				/* Also skip shared copy-on-write pages */
-				if (is_cow_mapping(vma->vm_flags) &&
-				    page_mapcount(page) != 1)
-					continue;
-
-				/*
-				 * While migration can move some dirty pages,
-				 * it cannot move them all from MIGRATE_ASYNC
-				 * context.
-				 */
-				if (page_is_file_cache(page) && PageDirty(page))
 					continue;
 
 				/* Avoid TLB flush if possible */
@@ -140,20 +127,6 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 
 				pages++;
 			}
-
-			if (is_write_device_private_entry(entry)) {
-				pte_t newpte;
-
-				/*
-				 * We do not preserve soft-dirtiness. See
-				 * copy_one_pte() for explanation.
-				 */
-				make_device_private_entry_read(&entry);
-				newpte = swp_entry_to_pte(entry);
-				set_pte_at(mm, addr, pte, newpte);
-
-				pages++;
-			}
 		}
 	} while (pte++, addr += PAGE_SIZE, addr != end);
 	arch_leave_lazy_mmu_mode();
@@ -178,9 +151,9 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 		unsigned long this_pages;
 
 		next = pmd_addr_end(addr, end);
-		if (!is_swap_pmd(*pmd) && !pmd_trans_huge(*pmd) && !pmd_devmap(*pmd)
+		if (!pmd_trans_huge(*pmd) && !pmd_devmap(*pmd)
 				&& pmd_none_or_clear_bad(pmd))
-			goto next;
+			continue;
 
 		/* invoke the mmu notifier if the pmd is populated */
 		if (!mni_start) {
@@ -188,7 +161,7 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 			mmu_notifier_invalidate_range_start(mm, mni_start, end);
 		}
 
-		if (is_swap_pmd(*pmd) || pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
+		if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
 			if (next - addr != HPAGE_PMD_SIZE) {
 				__split_huge_pmd(vma, pmd, addr, false, NULL);
 			} else {
@@ -202,7 +175,7 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 					}
 
 					/* huge pmd was handled */
-					goto next;
+					continue;
 				}
 			}
 			/* fall through, the trans huge pmd just split */
@@ -210,8 +183,6 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 		this_pages = change_pte_range(vma, pmd, addr, next, newprot,
 				 dirty_accountable, prot_numa);
 		pages += this_pages;
-next:
-		cond_resched();
 	} while (pmd++, addr = next, addr != end);
 
 	if (mni_start)
@@ -275,7 +246,7 @@ static unsigned long change_protection_range(struct vm_area_struct *vma,
 	BUG_ON(addr >= end);
 	pgd = pgd_offset(mm, addr);
 	flush_cache_range(vma, addr, end);
-	inc_tlb_flush_pending(mm);
+	set_tlb_flush_pending(mm);
 	do {
 		next = pgd_addr_end(addr, end);
 		if (pgd_none_or_clear_bad(pgd))
@@ -287,7 +258,7 @@ static unsigned long change_protection_range(struct vm_area_struct *vma,
 	/* Only flush the TLB if we actually modified any entries: */
 	if (pages)
 		flush_tlb_range(vma, start, end);
-	dec_tlb_flush_pending(mm);
+	clear_tlb_flush_pending(mm);
 
 	return pages;
 }
@@ -426,7 +397,7 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 	end = start + len;
 	if (end <= start)
 		return -ENOMEM;
-	if (!arch_validate_prot(prot, start))
+	if (!arch_validate_prot(prot))
 		return -EINVAL;
 
 	reqprot = prot;
@@ -484,7 +455,7 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		 * cleared from the VMA.
 		 */
 		mask_off_old_flags = VM_READ | VM_WRITE | VM_EXEC |
-					VM_FLAGS_CLEAR;
+					ARCH_VM_PKEY_FLAGS;
 
 		new_vma_pkey = arch_override_mprotect_pkey(vma, prot, pkey);
 		newflags = calc_vm_prot_bits(prot, new_vma_pkey);

@@ -130,24 +130,6 @@
 	}							\
 }
 
-static int copyout(void __user *to, const void *from, size_t n)
-{
-	if (access_ok(VERIFY_WRITE, to, n)) {
-		kasan_check_read(from, n);
-		n = raw_copy_to_user(to, from, n);
-	}
-	return n;
-}
-
-static int copyin(void *to, const void __user *from, size_t n)
-{
-	if (access_ok(VERIFY_READ, from, n)) {
-		kasan_check_write(to, n);
-		n = raw_copy_from_user(to, from, n);
-	}
-	return n;
-}
-
 static size_t copy_page_to_iter_iovec(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i)
 {
@@ -162,7 +144,6 @@ static size_t copy_page_to_iter_iovec(struct page *page, size_t offset, size_t b
 	if (unlikely(!bytes))
 		return 0;
 
-	might_fault();
 	wanted = bytes;
 	iov = i->iov;
 	skip = i->iov_offset;
@@ -174,7 +155,7 @@ static size_t copy_page_to_iter_iovec(struct page *page, size_t offset, size_t b
 		from = kaddr + offset;
 
 		/* first chunk, usually the only one */
-		left = copyout(buf, from, copy);
+		left = __copy_to_user_inatomic(buf, from, copy);
 		copy -= left;
 		skip += copy;
 		from += copy;
@@ -184,7 +165,7 @@ static size_t copy_page_to_iter_iovec(struct page *page, size_t offset, size_t b
 			iov++;
 			buf = iov->iov_base;
 			copy = min(bytes, iov->iov_len);
-			left = copyout(buf, from, copy);
+			left = __copy_to_user_inatomic(buf, from, copy);
 			copy -= left;
 			skip = copy;
 			from += copy;
@@ -203,7 +184,7 @@ static size_t copy_page_to_iter_iovec(struct page *page, size_t offset, size_t b
 
 	kaddr = kmap(page);
 	from = kaddr + offset;
-	left = copyout(buf, from, copy);
+	left = __copy_to_user(buf, from, copy);
 	copy -= left;
 	skip += copy;
 	from += copy;
@@ -212,7 +193,7 @@ static size_t copy_page_to_iter_iovec(struct page *page, size_t offset, size_t b
 		iov++;
 		buf = iov->iov_base;
 		copy = min(bytes, iov->iov_len);
-		left = copyout(buf, from, copy);
+		left = __copy_to_user(buf, from, copy);
 		copy -= left;
 		skip = copy;
 		from += copy;
@@ -246,7 +227,6 @@ static size_t copy_page_from_iter_iovec(struct page *page, size_t offset, size_t
 	if (unlikely(!bytes))
 		return 0;
 
-	might_fault();
 	wanted = bytes;
 	iov = i->iov;
 	skip = i->iov_offset;
@@ -258,7 +238,7 @@ static size_t copy_page_from_iter_iovec(struct page *page, size_t offset, size_t
 		to = kaddr + offset;
 
 		/* first chunk, usually the only one */
-		left = copyin(to, buf, copy);
+		left = __copy_from_user_inatomic(to, buf, copy);
 		copy -= left;
 		skip += copy;
 		to += copy;
@@ -268,7 +248,7 @@ static size_t copy_page_from_iter_iovec(struct page *page, size_t offset, size_t
 			iov++;
 			buf = iov->iov_base;
 			copy = min(bytes, iov->iov_len);
-			left = copyin(to, buf, copy);
+			left = __copy_from_user_inatomic(to, buf, copy);
 			copy -= left;
 			skip = copy;
 			to += copy;
@@ -287,7 +267,7 @@ static size_t copy_page_from_iter_iovec(struct page *page, size_t offset, size_t
 
 	kaddr = kmap(page);
 	to = kaddr + offset;
-	left = copyin(to, buf, copy);
+	left = __copy_from_user(to, buf, copy);
 	copy -= left;
 	skip += copy;
 	to += copy;
@@ -296,7 +276,7 @@ static size_t copy_page_from_iter_iovec(struct page *page, size_t offset, size_t
 		iov++;
 		buf = iov->iov_base;
 		copy = min(bytes, iov->iov_len);
-		left = copyin(to, buf, copy);
+		left = __copy_from_user(to, buf, copy);
 		copy -= left;
 		skip = copy;
 		to += copy;
@@ -555,15 +535,14 @@ static size_t copy_pipe_to_iter(const void *addr, size_t bytes,
 	return bytes;
 }
 
-size_t _copy_to_iter(const void *addr, size_t bytes, struct iov_iter *i)
+size_t copy_to_iter(const void *addr, size_t bytes, struct iov_iter *i)
 {
 	const char *from = addr;
 	if (unlikely(i->type & ITER_PIPE))
 		return copy_pipe_to_iter(addr, bytes, i);
-	if (iter_is_iovec(i))
-		might_fault();
 	iterate_and_advance(i, bytes, v,
-		copyout(v.iov_base, (from += v.iov_len) - v.iov_len, v.iov_len),
+		__copy_to_user(v.iov_base, (from += v.iov_len) - v.iov_len,
+			       v.iov_len),
 		memcpy_to_page(v.bv_page, v.bv_offset,
 			       (from += v.bv_len) - v.bv_len, v.bv_len),
 		memcpy(v.iov_base, (from += v.iov_len) - v.iov_len, v.iov_len)
@@ -571,80 +550,18 @@ size_t _copy_to_iter(const void *addr, size_t bytes, struct iov_iter *i)
 
 	return bytes;
 }
-EXPORT_SYMBOL(_copy_to_iter);
+EXPORT_SYMBOL(copy_to_iter);
 
-#ifdef CONFIG_ARCH_HAS_UACCESS_MCSAFE
-static int copyout_mcsafe(void __user *to, const void *from, size_t n)
-{
-	if (access_ok(VERIFY_WRITE, to, n)) {
-		kasan_check_read(from, n);
-		n = copy_to_user_mcsafe((__force void *) to, from, n);
-	}
-	return n;
-}
-
-static unsigned long memcpy_mcsafe_to_page(struct page *page, size_t offset,
-		const char *from, size_t len)
-{
-	unsigned long ret;
-	char *to;
-
-	to = kmap_atomic(page);
-	ret = memcpy_mcsafe(to + offset, from, len);
-	kunmap_atomic(to);
-
-	return ret;
-}
-
-size_t _copy_to_iter_mcsafe(const void *addr, size_t bytes, struct iov_iter *i)
-{
-	const char *from = addr;
-	unsigned long rem, curr_addr, s_addr = (unsigned long) addr;
-
-	if (unlikely(i->type & ITER_PIPE)) {
-		WARN_ON(1);
-		return 0;
-	}
-	if (iter_is_iovec(i))
-		might_fault();
-	iterate_and_advance(i, bytes, v,
-		copyout_mcsafe(v.iov_base, (from += v.iov_len) - v.iov_len, v.iov_len),
-		({
-		rem = memcpy_mcsafe_to_page(v.bv_page, v.bv_offset,
-                               (from += v.bv_len) - v.bv_len, v.bv_len);
-		if (rem) {
-			curr_addr = (unsigned long) from;
-			bytes = curr_addr - s_addr - rem;
-			return bytes;
-		}
-		}),
-		({
-		rem = memcpy_mcsafe(v.iov_base, (from += v.iov_len) - v.iov_len,
-				v.iov_len);
-		if (rem) {
-			curr_addr = (unsigned long) from;
-			bytes = curr_addr - s_addr - rem;
-			return bytes;
-		}
-		})
-	)
-
-	return bytes;
-}
-EXPORT_SYMBOL_GPL(_copy_to_iter_mcsafe);
-#endif /* CONFIG_ARCH_HAS_UACCESS_MCSAFE */
-
-size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
+size_t copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
 {
 	char *to = addr;
 	if (unlikely(i->type & ITER_PIPE)) {
 		WARN_ON(1);
 		return 0;
 	}
-	if (iter_is_iovec(i))
-		might_fault();
 	iterate_and_advance(i, bytes, v,
-		copyin((to += v.iov_len) - v.iov_len, v.iov_base, v.iov_len),
+		__copy_from_user((to += v.iov_len) - v.iov_len, v.iov_base,
+				 v.iov_len),
 		memcpy_from_page((to += v.bv_len) - v.bv_len, v.bv_page,
 				 v.bv_offset, v.bv_len),
 		memcpy((to += v.iov_len) - v.iov_len, v.iov_base, v.iov_len)
@@ -652,9 +569,9 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
 
 	return bytes;
 }
-EXPORT_SYMBOL(_copy_from_iter);
+EXPORT_SYMBOL(copy_from_iter);
 
-bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
+bool copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 {
 	char *to = addr;
 	if (unlikely(i->type & ITER_PIPE)) {
@@ -664,10 +581,8 @@ bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 	if (unlikely(i->count < bytes))
 		return false;
 
-	if (iter_is_iovec(i))
-		might_fault();
 	iterate_all_kinds(i, bytes, v, ({
-		if (copyin((to += v.iov_len) - v.iov_len,
+		if (__copy_from_user((to += v.iov_len) - v.iov_len,
 				      v.iov_base, v.iov_len))
 			return false;
 		0;}),
@@ -679,9 +594,9 @@ bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 	iov_iter_advance(i, bytes);
 	return true;
 }
-EXPORT_SYMBOL(_copy_from_iter_full);
+EXPORT_SYMBOL(copy_from_iter_full);
 
-size_t _copy_from_iter_nocache(void *addr, size_t bytes, struct iov_iter *i)
+size_t copy_from_iter_nocache(void *addr, size_t bytes, struct iov_iter *i)
 {
 	char *to = addr;
 	if (unlikely(i->type & ITER_PIPE)) {
@@ -698,31 +613,9 @@ size_t _copy_from_iter_nocache(void *addr, size_t bytes, struct iov_iter *i)
 
 	return bytes;
 }
-EXPORT_SYMBOL(_copy_from_iter_nocache);
+EXPORT_SYMBOL(copy_from_iter_nocache);
 
-#ifdef CONFIG_ARCH_HAS_UACCESS_FLUSHCACHE
-size_t _copy_from_iter_flushcache(void *addr, size_t bytes, struct iov_iter *i)
-{
-	char *to = addr;
-	if (unlikely(i->type & ITER_PIPE)) {
-		WARN_ON(1);
-		return 0;
-	}
-	iterate_and_advance(i, bytes, v,
-		__copy_from_user_flushcache((to += v.iov_len) - v.iov_len,
-					 v.iov_base, v.iov_len),
-		memcpy_page_flushcache((to += v.bv_len) - v.bv_len, v.bv_page,
-				 v.bv_offset, v.bv_len),
-		memcpy_flushcache((to += v.iov_len) - v.iov_len, v.iov_base,
-			v.iov_len)
-	)
-
-	return bytes;
-}
-EXPORT_SYMBOL_GPL(_copy_from_iter_flushcache);
-#endif
-
-bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
+bool copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 {
 	char *to = addr;
 	if (unlikely(i->type & ITER_PIPE)) {
@@ -744,24 +637,11 @@ bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 	iov_iter_advance(i, bytes);
 	return true;
 }
-EXPORT_SYMBOL(_copy_from_iter_full_nocache);
-
-static inline bool page_copy_sane(struct page *page, size_t offset, size_t n)
-{
-	struct page *head = compound_head(page);
-	size_t v = n + offset + page_address(page) - page_address(head);
-
-	if (likely(n <= v && v <= (PAGE_SIZE << compound_order(head))))
-		return true;
-	WARN_ON(1);
-	return false;
-}
+EXPORT_SYMBOL(copy_from_iter_full_nocache);
 
 size_t copy_page_to_iter(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i)
 {
-	if (unlikely(!page_copy_sane(page, offset, bytes)))
-		return 0;
 	if (i->type & (ITER_BVEC|ITER_KVEC)) {
 		void *kaddr = kmap_atomic(page);
 		size_t wanted = copy_to_iter(kaddr + offset, bytes, i);
@@ -777,15 +657,13 @@ EXPORT_SYMBOL(copy_page_to_iter);
 size_t copy_page_from_iter(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i)
 {
-	if (unlikely(!page_copy_sane(page, offset, bytes)))
-		return 0;
 	if (unlikely(i->type & ITER_PIPE)) {
 		WARN_ON(1);
 		return 0;
 	}
 	if (i->type & (ITER_BVEC|ITER_KVEC)) {
 		void *kaddr = kmap_atomic(page);
-		size_t wanted = _copy_from_iter(kaddr + offset, bytes, i);
+		size_t wanted = copy_from_iter(kaddr + offset, bytes, i);
 		kunmap_atomic(kaddr);
 		return wanted;
 	} else
@@ -822,7 +700,7 @@ size_t iov_iter_zero(size_t bytes, struct iov_iter *i)
 	if (unlikely(i->type & ITER_PIPE))
 		return pipe_zero(bytes, i);
 	iterate_and_advance(i, bytes, v,
-		clear_user(v.iov_base, v.iov_len),
+		__clear_user(v.iov_base, v.iov_len),
 		memzero_page(v.bv_page, v.bv_offset, v.bv_len),
 		memset(v.iov_base, 0, v.iov_len)
 	)
@@ -835,17 +713,14 @@ size_t iov_iter_copy_from_user_atomic(struct page *page,
 		struct iov_iter *i, unsigned long offset, size_t bytes)
 {
 	char *kaddr = kmap_atomic(page), *p = kaddr + offset;
-	if (unlikely(!page_copy_sane(page, offset, bytes))) {
-		kunmap_atomic(kaddr);
-		return 0;
-	}
 	if (unlikely(i->type & ITER_PIPE)) {
 		kunmap_atomic(kaddr);
 		WARN_ON(1);
 		return 0;
 	}
 	iterate_all_kinds(i, bytes, v,
-		copyin((p += v.iov_len) - v.iov_len, v.iov_base, v.iov_len),
+		__copy_from_user_inatomic((p += v.iov_len) - v.iov_len,
+					  v.iov_base, v.iov_len),
 		memcpy_from_page((p += v.bv_len) - v.bv_len, v.bv_page,
 				 v.bv_offset, v.bv_len),
 		memcpy((p += v.iov_len) - v.iov_len, v.iov_base, v.iov_len)
@@ -1073,7 +948,7 @@ unsigned long iov_iter_gap_alignment(const struct iov_iter *i)
 }
 EXPORT_SYMBOL(iov_iter_gap_alignment);
 
-static inline ssize_t __pipe_get_pages(struct iov_iter *i,
+static inline size_t __pipe_get_pages(struct iov_iter *i,
 				size_t maxsize,
 				struct page **pages,
 				int idx,
@@ -1163,7 +1038,7 @@ static ssize_t pipe_get_pages_alloc(struct iov_iter *i,
 		   size_t *start)
 {
 	struct page **p;
-	ssize_t n;
+	size_t n;
 	int idx;
 	int npages;
 
@@ -1507,25 +1382,3 @@ int import_single_range(int rw, void __user *buf, size_t len,
 	return 0;
 }
 EXPORT_SYMBOL(import_single_range);
-
-int iov_iter_for_each_range(struct iov_iter *i, size_t bytes,
-			    int (*f)(struct kvec *vec, void *context),
-			    void *context)
-{
-	struct kvec w;
-	int err = -EINVAL;
-	if (!bytes)
-		return 0;
-
-	iterate_all_kinds(i, bytes, v, -EINVAL, ({
-		w.iov_base = kmap(v.bv_page) + v.bv_offset;
-		w.iov_len = v.bv_len;
-		err = f(&w, context);
-		kunmap(v.bv_page);
-		err;}), ({
-		w = v;
-		err = f(&w, context);})
-	)
-	return err;
-}
-EXPORT_SYMBOL(iov_iter_for_each_range);

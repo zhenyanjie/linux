@@ -659,9 +659,9 @@ static void terminate_monitor(struct cm4000_dev *dev)
  * is already doing that for you.
  */
 
-static void monitor_card(struct timer_list *t)
+static void monitor_card(unsigned long p)
 {
-	struct cm4000_dev *dev = from_timer(dev, t, timer);
+	struct cm4000_dev *dev = (struct cm4000_dev *) p;
 	unsigned int iobase = dev->p_dev->resource[0]->start;
 	unsigned short s;
 	struct ptsreq ptsreq;
@@ -1374,7 +1374,7 @@ static void start_monitor(struct cm4000_dev *dev)
 	DEBUGP(3, dev, "-> start_monitor\n");
 	if (!dev->monitor_running) {
 		DEBUGP(5, dev, "create, init and add timer\n");
-		timer_setup(&dev->timer, monitor_card, 0);
+		setup_timer(&dev->timer, monitor_card, (unsigned long)dev);
 		dev->monitor_running = 1;
 		mod_timer(&dev->timer, jiffies);
 	} else

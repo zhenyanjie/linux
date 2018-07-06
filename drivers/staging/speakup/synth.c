@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/types.h>
 #include <linux/ctype.h>	/* for isdigit() and friends */
 #include <linux/fs.h>
@@ -52,9 +51,9 @@ static int do_synth_init(struct spk_synth *in_synth);
  * For devices that have a "full" notification mechanism, the driver can
  * adapt the loop the way they prefer.
  */
-static void _spk_do_catch_up(struct spk_synth *synth, int unicode)
+void spk_do_catch_up(struct spk_synth *synth)
 {
-	u16 ch;
+	u_char ch;
 	unsigned long flags;
 	unsigned long jiff_max;
 	struct var_t *delay_time;
@@ -63,7 +62,6 @@ static void _spk_do_catch_up(struct spk_synth *synth, int unicode)
 	int jiffy_delta_val;
 	int delay_time_val;
 	int full_time_val;
-	int ret;
 
 	jiffy_delta = spk_get_var(JIFFY);
 	full_time = spk_get_var(FULL);
@@ -82,8 +80,7 @@ static void _spk_do_catch_up(struct spk_synth *synth, int unicode)
 			synth->flush(synth);
 			continue;
 		}
-		if (!unicode)
-			synth_buffer_skip_nonlatin1();
+		synth_buffer_skip_nonlatin1();
 		if (synth_buffer_empty()) {
 			spin_unlock_irqrestore(&speakup_info.spinlock, flags);
 			break;
@@ -94,11 +91,7 @@ static void _spk_do_catch_up(struct spk_synth *synth, int unicode)
 		spin_unlock_irqrestore(&speakup_info.spinlock, flags);
 		if (ch == '\n')
 			ch = synth->procspeech;
-		if (unicode)
-			ret = synth->io_ops->synth_out_unicode(synth, ch);
-		else
-			ret = synth->io_ops->synth_out(synth, ch);
-		if (!ret) {
+		if (!synth->io_ops->synth_out(synth, ch)) {
 			schedule_timeout(msecs_to_jiffies(full_time_val));
 			continue;
 		}
@@ -123,31 +116,13 @@ static void _spk_do_catch_up(struct spk_synth *synth, int unicode)
 	}
 	synth->io_ops->synth_out(synth, synth->procspeech);
 }
-
-void spk_do_catch_up(struct spk_synth *synth)
-{
-	_spk_do_catch_up(synth, 0);
-}
 EXPORT_SYMBOL_GPL(spk_do_catch_up);
-
-void spk_do_catch_up_unicode(struct spk_synth *synth)
-{
-	_spk_do_catch_up(synth, 1);
-}
-EXPORT_SYMBOL_GPL(spk_do_catch_up_unicode);
 
 void spk_synth_flush(struct spk_synth *synth)
 {
-	synth->io_ops->flush_buffer();
 	synth->io_ops->synth_out(synth, synth->clear);
 }
 EXPORT_SYMBOL_GPL(spk_synth_flush);
-
-unsigned char spk_synth_get_index(struct spk_synth *synth)
-{
-	return synth->io_ops->synth_in_nowait();
-}
-EXPORT_SYMBOL_GPL(spk_synth_get_index);
 
 int spk_synth_is_alive_nop(struct spk_synth *synth)
 {
@@ -171,12 +146,12 @@ int spk_synth_is_alive_restart(struct spk_synth *synth)
 }
 EXPORT_SYMBOL_GPL(spk_synth_is_alive_restart);
 
-static void thread_wake_up(struct timer_list *unused)
+static void thread_wake_up(u_long data)
 {
 	wake_up_interruptible_all(&speakup_event);
 }
 
-static DEFINE_TIMER(thread_timer, thread_wake_up);
+static DEFINE_TIMER(thread_timer, thread_wake_up, 0, 0);
 
 void synth_start(void)
 {
@@ -274,7 +249,7 @@ void spk_reset_index_count(int sc)
 	if (first)
 		first = 0;
 	else
-		synth->get_index(synth);
+		synth->get_index();
 	index_count = 0;
 	sentence_count = sc;
 }
@@ -307,7 +282,7 @@ void synth_insert_next_index(int sent_num)
 
 void spk_get_index_count(int *linecount, int *sentcount)
 {
-	int ind = synth->get_index(synth);
+	int ind = synth->get_index();
 
 	if (ind) {
 		sentence_count = ind % 10;
@@ -463,15 +438,10 @@ int synth_add(struct spk_synth *in_synth)
 		mutex_unlock(&spk_mutex);
 		return -1;
 	}
-
+	synths[i++] = in_synth;
+	synths[i] = NULL;
 	if (in_synth->startup)
 		status = do_synth_init(in_synth);
-
-	if (!status) {
-		synths[i++] = in_synth;
-		synths[i] = NULL;
-	}
-
 	mutex_unlock(&spk_mutex);
 	return status;
 }

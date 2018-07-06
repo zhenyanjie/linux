@@ -1,8 +1,20 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2006 Silicon Graphics, Inc.
  * Copyright (c) 2012-2013 Red Hat, Inc.
  * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it would be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write the Free Software Foundation,
+ * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 #include "xfs.h"
 #include "xfs_shared.h"
@@ -31,8 +43,8 @@
 #include "xfs_log.h"
 
 /* ----- Kernel only functions below ----- */
-int
-xfs_readlink_bmap_ilocked(
+STATIC int
+xfs_readlink_bmap(
 	struct xfs_inode	*ip,
 	char			*link)
 {
@@ -48,8 +60,6 @@ xfs_readlink_bmap_ilocked(
 	int			error = 0;
 	int			fsblocks = 0;
 	int			offset;
-
-	ASSERT(xfs_isilocked(ip, XFS_ILOCK_SHARED | XFS_ILOCK_EXCL));
 
 	fsblocks = xfs_symlink_blocks(mp, pathlen);
 	error = xfs_bmapi_read(ip, 0, fsblocks, mval, &nmaps, 0);
@@ -133,7 +143,7 @@ xfs_readlink(
 	if (!pathlen)
 		goto out;
 
-	if (pathlen < 0 || pathlen > XFS_SYMLINK_MAXLEN) {
+	if (pathlen < 0 || pathlen > MAXPATHLEN) {
 		xfs_alert(mp, "%s: inode (%llu) bad symlink length (%lld)",
 			 __func__, (unsigned long long) ip->i_ino,
 			 (long long) pathlen);
@@ -143,7 +153,7 @@ xfs_readlink(
 	}
 
 
-	error = xfs_readlink_bmap_ilocked(ip, link);
+	error = xfs_readlink_bmap(ip, link);
 
  out:
 	xfs_iunlock(ip, XFS_ILOCK_SHARED);
@@ -192,7 +202,7 @@ xfs_symlink(
 	 * Check component lengths of the target path name.
 	 */
 	pathlen = strlen(target_path);
-	if (pathlen >= XFS_SYMLINK_MAXLEN)      /* total string too long */
+	if (pathlen >= MAXPATHLEN)      /* total string too long */
 		return -ENAMETOOLONG;
 
 	udqp = gdqp = NULL;
@@ -220,6 +230,11 @@ xfs_symlink(
 	resblks = XFS_SYMLINK_SPACE_RES(mp, link_name->len, fs_blocks);
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_symlink, resblks, 0, 0, &tp);
+	if (error == -ENOSPC && fs_blocks == 0) {
+		resblks = 0;
+		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_symlink, 0, 0, 0,
+				&tp);
+	}
 	if (error)
 		goto out_release_inode;
 
@@ -243,17 +258,24 @@ xfs_symlink(
 		goto out_trans_cancel;
 
 	/*
+	 * Check for ability to enter directory entry, if no space reserved.
+	 */
+	if (!resblks) {
+		error = xfs_dir_canenter(tp, dp, link_name);
+		if (error)
+			goto out_trans_cancel;
+	}
+	/*
 	 * Initialize the bmap freelist prior to calling either
 	 * bmapi or the directory create code.
 	 */
 	xfs_defer_init(&dfops, &first_block);
-	tp->t_agfl_dfops = &dfops;
 
 	/*
 	 * Allocate an inode for the symlink.
 	 */
 	error = xfs_dir_ialloc(&tp, dp, S_IFLNK | (mode & ~S_IFMT), 1, 0,
-			       prid, &ip);
+			       prid, resblks > 0, &ip, NULL);
 	if (error)
 		goto out_trans_cancel;
 
@@ -354,7 +376,7 @@ xfs_symlink(
 		xfs_trans_set_sync(tp);
 	}
 
-	error = xfs_defer_finish(&tp, &dfops);
+	error = xfs_defer_finish(&tp, &dfops, NULL);
 	if (error)
 		goto out_bmap_cancel;
 
@@ -473,15 +495,19 @@ xfs_inactive_symlink_rmt(
 	/*
 	 * Commit the first transaction.  This logs the EFI and the inode.
 	 */
-	xfs_defer_ijoin(&dfops, ip);
-	error = xfs_defer_finish(&tp, &dfops);
+	error = xfs_defer_finish(&tp, &dfops, ip);
 	if (error)
 		goto error_bmap_cancel;
-
+	/*
+	 * The first xact was committed, so add the inode to the new one.
+	 * Mark it dirty so it will be logged and moved forward in the log as
+	 * part of every commit.
+	 */
+	xfs_trans_ijoin(tp, ip, 0);
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 	/*
 	 * Commit the transaction containing extent freeing and EFDs.
 	 */
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 	error = xfs_trans_commit(tp);
 	if (error) {
 		ASSERT(XFS_FORCED_SHUTDOWN(mp));
@@ -533,7 +559,7 @@ xfs_inactive_symlink(
 		return 0;
 	}
 
-	if (pathlen < 0 || pathlen > XFS_SYMLINK_MAXLEN) {
+	if (pathlen < 0 || pathlen > MAXPATHLEN) {
 		xfs_alert(mp, "%s: inode (0x%llx) bad symlink length (%d)",
 			 __func__, (unsigned long long)ip->i_ino, pathlen);
 		xfs_iunlock(ip, XFS_ILOCK_EXCL);

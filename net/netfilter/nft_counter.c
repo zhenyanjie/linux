@@ -96,8 +96,7 @@ static void nft_counter_do_destroy(struct nft_counter_percpu_priv *priv)
 	free_percpu(priv->counter);
 }
 
-static void nft_counter_obj_destroy(const struct nft_ctx *ctx,
-				    struct nft_object *obj)
+static void nft_counter_obj_destroy(struct nft_object *obj)
 {
 	struct nft_counter_percpu_priv *priv = nft_obj_data(obj);
 
@@ -176,21 +175,15 @@ static const struct nla_policy nft_counter_policy[NFTA_COUNTER_MAX + 1] = {
 	[NFTA_COUNTER_BYTES]	= { .type = NLA_U64 },
 };
 
-static struct nft_object_type nft_counter_obj_type;
-static const struct nft_object_ops nft_counter_obj_ops = {
-	.type		= &nft_counter_obj_type,
+static struct nft_object_type nft_counter_obj __read_mostly = {
+	.type		= NFT_OBJECT_COUNTER,
 	.size		= sizeof(struct nft_counter_percpu_priv),
+	.maxattr	= NFTA_COUNTER_MAX,
+	.policy		= nft_counter_policy,
 	.eval		= nft_counter_obj_eval,
 	.init		= nft_counter_obj_init,
 	.destroy	= nft_counter_obj_destroy,
 	.dump		= nft_counter_obj_dump,
-};
-
-static struct nft_object_type nft_counter_obj_type __read_mostly = {
-	.type		= NFT_OBJECT_COUNTER,
-	.ops		= &nft_counter_obj_ops,
-	.maxattr	= NFTA_COUNTER_MAX,
-	.policy		= nft_counter_policy,
 	.owner		= THIS_MODULE,
 };
 
@@ -258,7 +251,6 @@ static const struct nft_expr_ops nft_counter_ops = {
 	.eval		= nft_counter_eval,
 	.init		= nft_counter_init,
 	.destroy	= nft_counter_destroy,
-	.destroy_clone	= nft_counter_destroy,
 	.dump		= nft_counter_dump,
 	.clone		= nft_counter_clone,
 };
@@ -279,7 +271,7 @@ static int __init nft_counter_module_init(void)
 	for_each_possible_cpu(cpu)
 		seqcount_init(per_cpu_ptr(&nft_counter_seq, cpu));
 
-	err = nft_register_obj(&nft_counter_obj_type);
+	err = nft_register_obj(&nft_counter_obj);
 	if (err < 0)
 		return err;
 
@@ -289,14 +281,14 @@ static int __init nft_counter_module_init(void)
 
 	return 0;
 err1:
-	nft_unregister_obj(&nft_counter_obj_type);
+	nft_unregister_obj(&nft_counter_obj);
 	return err;
 }
 
 static void __exit nft_counter_module_exit(void)
 {
 	nft_unregister_expr(&nft_counter_type);
-	nft_unregister_obj(&nft_counter_obj_type);
+	nft_unregister_obj(&nft_counter_obj);
 }
 
 module_init(nft_counter_module_init);

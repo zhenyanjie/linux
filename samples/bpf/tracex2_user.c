@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -7,7 +6,7 @@
 #include <string.h>
 #include <sys/resource.h>
 
-#include <bpf/bpf.h>
+#include "libbpf.h"
 #include "bpf_load.h"
 #include "bpf_util.h"
 

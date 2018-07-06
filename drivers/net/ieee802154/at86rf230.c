@@ -723,7 +723,7 @@ at86rf230_rx_read_frame_complete(void *context)
 		return;
 	}
 
-	skb_put_data(skb, buf + 2, len);
+	memcpy(skb_put(skb, len), buf + 2, len);
 	ieee802154_rx_irqsafe(lp->hw, skb, lqi);
 	kfree(ctx);
 }
@@ -1661,7 +1661,7 @@ static int at86rf230_debugfs_init(struct at86rf230_local *lp)
 	if (!at86rf230_debugfs_root)
 		return -ENOMEM;
 
-	stats = debugfs_create_file("trac_stats", 0444,
+	stats = debugfs_create_file("trac_stats", S_IRUGO,
 				    at86rf230_debugfs_root, lp,
 				    &at86rf230_stats_fops);
 	if (!stats)

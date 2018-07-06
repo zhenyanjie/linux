@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright 1996, 1997, 1998 Hans Reiser, see reiserfs/README for
  * licensing and copyright details
@@ -1916,7 +1915,7 @@ struct reiserfs_de_head {
 
 /* empty directory contains two entries "." and ".." and their headers */
 #define EMPTY_DIR_SIZE \
-(DEH_SIZE * 2 + ROUND_UP (sizeof(".") - 1) + ROUND_UP (sizeof("..") - 1))
+(DEH_SIZE * 2 + ROUND_UP (strlen (".")) + ROUND_UP (strlen ("..")))
 
 /* old format directories have this size when empty */
 #define EMPTY_DIR_SIZE_V1 (DEH_SIZE * 2 + 3)

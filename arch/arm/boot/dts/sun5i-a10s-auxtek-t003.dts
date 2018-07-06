@@ -93,7 +93,8 @@
 	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin_t003>;
 	vmmc-supply = <&reg_vcc3v3>;
 	bus-width = <4>;
-	cd-gpios = <&pio 6 1 GPIO_ACTIVE_LOW>; /* PG1 */
+	cd-gpios = <&pio 6 1 GPIO_ACTIVE_HIGH>; /* PG1 */
+	cd-inverted;
 	status = "okay";
 };
 
@@ -133,6 +134,14 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart0_pins_a>;
 	status = "okay";
+};
+
+&usb0_vbus_pin_a {
+	pins = "PG13";
+};
+
+&usb1_vbus_pin_a {
+	pins = "PB10";
 };
 
 &usb_otg {

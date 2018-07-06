@@ -214,29 +214,40 @@ static struct dentry *ubifs_lookup(struct inode *dir, struct dentry *dentry,
 	int err;
 	union ubifs_key key;
 	struct inode *inode = NULL;
-	struct ubifs_dent_node *dent = NULL;
+	struct ubifs_dent_node *dent;
 	struct ubifs_info *c = dir->i_sb->s_fs_info;
 	struct fscrypt_name nm;
 
 	dbg_gen("'%pd' in dir ino %lu", dentry, dir->i_ino);
 
-	err = fscrypt_prepare_lookup(dir, dentry, flags);
-	if (err)
-		return ERR_PTR(err);
+	if (ubifs_crypt_is_encrypted(dir)) {
+		err = fscrypt_get_encryption_info(dir);
+
+		/*
+		 * DCACHE_ENCRYPTED_WITH_KEY is set if the dentry is
+		 * created while the directory was encrypted and we
+		 * have access to the key.
+		 */
+		if (fscrypt_has_encryption_key(dir))
+			fscrypt_set_encrypted_dentry(dentry);
+		fscrypt_set_d_op(dentry);
+		if (err && err != -ENOKEY)
+			return ERR_PTR(err);
+	}
 
 	err = fscrypt_setup_filename(dir, &dentry->d_name, 1, &nm);
 	if (err)
 		return ERR_PTR(err);
 
 	if (fname_len(&nm) > UBIFS_MAX_NLEN) {
-		inode = ERR_PTR(-ENAMETOOLONG);
-		goto done;
+		err = -ENAMETOOLONG;
+		goto out_fname;
 	}
 
 	dent = kmalloc(UBIFS_MAX_DENT_NODE_SZ, GFP_NOFS);
 	if (!dent) {
-		inode = ERR_PTR(-ENOMEM);
-		goto done;
+		err = -ENOMEM;
+		goto out_fname;
 	}
 
 	if (nm.hash) {
@@ -250,16 +261,16 @@ static struct dentry *ubifs_lookup(struct inode *dir, struct dentry *dentry,
 	}
 
 	if (err) {
-		if (err == -ENOENT)
+		if (err == -ENOENT) {
 			dbg_gen("not found");
-		else
-			inode = ERR_PTR(err);
-		goto done;
+			goto done;
+		}
+		goto out_dent;
 	}
 
 	if (dbg_check_name(c, dent, &nm)) {
-		inode = ERR_PTR(-EINVAL);
-		goto done;
+		err = -EINVAL;
+		goto out_dent;
 	}
 
 	inode = ubifs_iget(dir->i_sb, le64_to_cpu(dent->inum));
@@ -272,7 +283,7 @@ static struct dentry *ubifs_lookup(struct inode *dir, struct dentry *dentry,
 		ubifs_err(c, "dead directory entry '%pd', error %d",
 			  dentry, err);
 		ubifs_ro_mode(c, err);
-		goto done;
+		goto out_dent;
 	}
 
 	if (ubifs_crypt_is_encrypted(dir) &&
@@ -280,14 +291,27 @@ static struct dentry *ubifs_lookup(struct inode *dir, struct dentry *dentry,
 	    !fscrypt_has_permitted_context(dir, inode)) {
 		ubifs_warn(c, "Inconsistent encryption contexts: %lu/%lu",
 			   dir->i_ino, inode->i_ino);
-		iput(inode);
-		inode = ERR_PTR(-EPERM);
+		err = -EPERM;
+		goto out_inode;
 	}
 
 done:
 	kfree(dent);
 	fscrypt_free_filename(&nm);
-	return d_splice_alias(inode, dentry);
+	/*
+	 * Note, d_splice_alias() would be required instead if we supported
+	 * NFS.
+	 */
+	d_add(dentry, inode);
+	return NULL;
+
+out_inode:
+	iput(inode);
+out_dent:
+	kfree(dent);
+out_fname:
+	fscrypt_free_filename(&nm);
+	return ERR_PTR(err);
 }
 
 static int ubifs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
@@ -719,9 +743,9 @@ static int ubifs_link(struct dentry *old_dentry, struct inode *dir,
 	ubifs_assert(inode_is_locked(dir));
 	ubifs_assert(inode_is_locked(inode));
 
-	err = fscrypt_prepare_link(old_dentry, dir, dentry);
-	if (err)
-		return err;
+	if (ubifs_crypt_is_encrypted(dir) &&
+	    !fscrypt_has_permitted_context(dir, inode))
+		return -EPERM;
 
 	err = fscrypt_setup_filename(dir, &dentry->d_name, 0, &nm);
 	if (err)
@@ -1038,6 +1062,7 @@ static int ubifs_mknod(struct inode *dir, struct dentry *dentry,
 	int sz_change;
 	int err, devlen = 0;
 	struct ubifs_budget_req req = { .new_ino = 1, .new_dent = 1,
+					.new_ino_d = ALIGN(devlen, 8),
 					.dirtied_ino = 1 };
 	struct fscrypt_name nm;
 
@@ -1055,7 +1080,6 @@ static int ubifs_mknod(struct inode *dir, struct dentry *dentry,
 		devlen = ubifs_encode_dev(dev, rdev);
 	}
 
-	req.new_ino_d = ALIGN(devlen, 8);
 	err = ubifs_budget_space(c, &req);
 	if (err) {
 		kfree(dev);
@@ -1125,24 +1149,38 @@ static int ubifs_symlink(struct inode *dir, struct dentry *dentry,
 	struct ubifs_info *c = dir->i_sb->s_fs_info;
 	int err, len = strlen(symname);
 	int sz_change = CALC_DENT_SIZE(len);
-	struct fscrypt_str disk_link;
+	struct fscrypt_str disk_link = FSTR_INIT((char *)symname, len + 1);
+	struct fscrypt_symlink_data *sd = NULL;
 	struct ubifs_budget_req req = { .new_ino = 1, .new_dent = 1,
 					.new_ino_d = ALIGN(len, 8),
 					.dirtied_ino = 1 };
 	struct fscrypt_name nm;
 
-	dbg_gen("dent '%pd', target '%s' in dir ino %lu", dentry,
-		symname, dir->i_ino);
+	if (ubifs_crypt_is_encrypted(dir)) {
+		err = fscrypt_get_encryption_info(dir);
+		if (err)
+			goto out_budg;
 
-	err = fscrypt_prepare_symlink(dir, symname, len, UBIFS_MAX_INO_DATA,
-				      &disk_link);
-	if (err)
-		return err;
+		if (!fscrypt_has_encryption_key(dir)) {
+			err = -EPERM;
+			goto out_budg;
+		}
+
+		disk_link.len = (fscrypt_fname_encrypted_size(dir, len) +
+				sizeof(struct fscrypt_symlink_data));
+	}
 
 	/*
 	 * Budget request settings: new inode, new direntry and changing parent
 	 * directory inode.
 	 */
+
+	dbg_gen("dent '%pd', target '%s' in dir ino %lu", dentry,
+		symname, dir->i_ino);
+
+	if (disk_link.len > UBIFS_MAX_INO_DATA)
+		return -ENAMETOOLONG;
+
 	err = ubifs_budget_space(c, &req);
 	if (err)
 		return err;
@@ -1164,20 +1202,38 @@ static int ubifs_symlink(struct inode *dir, struct dentry *dentry,
 		goto out_inode;
 	}
 
-	if (IS_ENCRYPTED(inode)) {
-		disk_link.name = ui->data; /* encrypt directly into ui->data */
-		err = fscrypt_encrypt_symlink(inode, symname, len, &disk_link);
-		if (err)
+	if (ubifs_crypt_is_encrypted(dir)) {
+		struct qstr istr = QSTR_INIT(symname, len);
+		struct fscrypt_str ostr;
+
+		sd = kzalloc(disk_link.len, GFP_NOFS);
+		if (!sd) {
+			err = -ENOMEM;
 			goto out_inode;
+		}
+
+		ostr.name = sd->encrypted_path;
+		ostr.len = disk_link.len;
+
+		err = fscrypt_fname_usr_to_disk(inode, &istr, &ostr);
+		if (err) {
+			kfree(sd);
+			goto out_inode;
+		}
+
+		sd->len = cpu_to_le16(ostr.len);
+		disk_link.name = (char *)sd;
 	} else {
-		memcpy(ui->data, disk_link.name, disk_link.len);
 		inode->i_link = ui->data;
 	}
+
+	memcpy(ui->data, disk_link.name, disk_link.len);
+	((char *)ui->data)[disk_link.len - 1] = '\0';
 
 	/*
 	 * The terminating zero byte is not written to the flash media and it
 	 * is put just to make later in-memory string processing simpler. Thus,
-	 * data length is @disk_link.len - 1, not @disk_link.len.
+	 * data length is @len, not @len + %1.
 	 */
 	ui->data_len = disk_link.len - 1;
 	inode->i_size = ubifs_inode(inode)->ui_size = disk_link.len - 1;
@@ -1195,10 +1251,11 @@ static int ubifs_symlink(struct inode *dir, struct dentry *dentry,
 		goto out_cancel;
 	mutex_unlock(&dir_ui->ui_mutex);
 
+	ubifs_release_budget(c, &req);
 	insert_inode_hash(inode);
 	d_instantiate(dentry, inode);
-	err = 0;
-	goto out_fname;
+	fscrypt_free_filename(&nm);
+	return 0;
 
 out_cancel:
 	dir->i_size -= sz_change;
@@ -1276,7 +1333,7 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
 					.dirtied_ino = 3 };
 	struct ubifs_budget_req ino_req = { .dirtied_ino = 1,
 			.dirtied_ino_d = ALIGN(old_inode_ui->data_len, 8) };
-	struct timespec64 time;
+	struct timespec time;
 	unsigned int uninitialized_var(saved_nlink);
 	struct fscrypt_name old_nm, new_nm;
 
@@ -1295,6 +1352,12 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	if (unlink)
 		ubifs_assert(inode_is_locked(new_inode));
+
+	if (old_dir != new_dir) {
+		if (ubifs_crypt_is_encrypted(new_dir) &&
+		    !fscrypt_has_permitted_context(new_dir, old_inode))
+			return -EPERM;
+	}
 
 	if (unlink && is_dir) {
 		err = ubifs_check_dir_empty(new_inode);
@@ -1334,14 +1397,17 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 		dev = kmalloc(sizeof(union ubifs_dev_desc), GFP_NOFS);
 		if (!dev) {
-			err = -ENOMEM;
-			goto out_release;
+			ubifs_release_budget(c, &req);
+			ubifs_release_budget(c, &ino_req);
+			return -ENOMEM;
 		}
 
 		err = do_tmpfile(old_dir, old_dentry, S_IFCHR | WHITEOUT_MODE, &whiteout);
 		if (err) {
+			ubifs_release_budget(c, &req);
+			ubifs_release_budget(c, &ino_req);
 			kfree(dev);
-			goto out_release;
+			return err;
 		}
 
 		whiteout->i_state |= I_LINKABLE;
@@ -1429,10 +1495,12 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 		err = ubifs_budget_space(c, &wht_req);
 		if (err) {
+			ubifs_release_budget(c, &req);
+			ubifs_release_budget(c, &ino_req);
 			kfree(whiteout_ui->data);
 			whiteout_ui->data_len = 0;
 			iput(whiteout);
-			goto out_release;
+			return err;
 		}
 
 		inc_nlink(whiteout);
@@ -1487,7 +1555,6 @@ out_cancel:
 		iput(whiteout);
 	}
 	unlock_4_inodes(old_dir, new_dir, new_inode, whiteout);
-out_release:
 	ubifs_release_budget(c, &ino_req);
 	ubifs_release_budget(c, &req);
 	fscrypt_free_filename(&old_nm);
@@ -1504,11 +1571,18 @@ static int ubifs_xrename(struct inode *old_dir, struct dentry *old_dentry,
 	int sync = IS_DIRSYNC(old_dir) || IS_DIRSYNC(new_dir);
 	struct inode *fst_inode = d_inode(old_dentry);
 	struct inode *snd_inode = d_inode(new_dentry);
-	struct timespec64 time;
+	struct timespec time;
 	int err;
 	struct fscrypt_name fst_nm, snd_nm;
 
 	ubifs_assert(fst_inode && snd_inode);
+
+	if ((ubifs_crypt_is_encrypted(old_dir) ||
+	    ubifs_crypt_is_encrypted(new_dir)) &&
+	    (old_dir != new_dir) &&
+	    (!fscrypt_has_permitted_context(new_dir, fst_inode) ||
+	     !fscrypt_has_permitted_context(old_dir, snd_inode)))
+		return -EPERM;
 
 	err = fscrypt_setup_filename(old_dir, &old_dentry->d_name, 0, &fst_nm);
 	if (err)
@@ -1554,18 +1628,11 @@ static int ubifs_rename(struct inode *old_dir, struct dentry *old_dentry,
 			struct inode *new_dir, struct dentry *new_dentry,
 			unsigned int flags)
 {
-	int err;
-
 	if (flags & ~(RENAME_NOREPLACE | RENAME_WHITEOUT | RENAME_EXCHANGE))
 		return -EINVAL;
 
 	ubifs_assert(inode_is_locked(old_dir));
 	ubifs_assert(inode_is_locked(new_dir));
-
-	err = fscrypt_prepare_rename(old_dir, old_dentry, new_dir, new_dentry,
-				     flags);
-	if (err)
-		return err;
 
 	if (flags & RENAME_EXCHANGE)
 		return ubifs_xrename(old_dir, old_dentry, new_dir, new_dentry);
@@ -1581,21 +1648,6 @@ int ubifs_getattr(const struct path *path, struct kstat *stat,
 	struct ubifs_inode *ui = ubifs_inode(inode);
 
 	mutex_lock(&ui->ui_mutex);
-
-	if (ui->flags & UBIFS_APPEND_FL)
-		stat->attributes |= STATX_ATTR_APPEND;
-	if (ui->flags & UBIFS_COMPR_FL)
-		stat->attributes |= STATX_ATTR_COMPRESSED;
-	if (ui->flags & UBIFS_CRYPT_FL)
-		stat->attributes |= STATX_ATTR_ENCRYPTED;
-	if (ui->flags & UBIFS_IMMUTABLE_FL)
-		stat->attributes |= STATX_ATTR_IMMUTABLE;
-
-	stat->attributes_mask |= (STATX_ATTR_APPEND |
-				STATX_ATTR_COMPRESSED |
-				STATX_ATTR_ENCRYPTED |
-				STATX_ATTR_IMMUTABLE);
-
 	generic_fillattr(inode, stat);
 	stat->blksize = UBIFS_BLOCK_SIZE;
 	stat->size = ui->ui_size;

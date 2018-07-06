@@ -404,7 +404,6 @@ static const struct v4l2_file_operations vip_fops = {
  * vidioc_querycap - return capabilities of device
  * @file: descriptor of device
  * @cap: contains return values
- * @priv: unused
  *
  * the capabilities of the device are returned
  *
@@ -430,7 +429,6 @@ static int vidioc_querycap(struct file *file, void *priv,
  * vidioc_s_std - set video standard
  * @file: descriptor of device
  * @std: contains standard to be set
- * @priv: unused
  *
  * the video standard is set
  *
@@ -468,7 +466,6 @@ static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id std)
 /**
  * vidioc_g_std - get video standard
  * @file: descriptor of device
- * @priv: unused
  * @std: contains return values
  *
  * the current video standard is returned
@@ -486,7 +483,6 @@ static int vidioc_g_std(struct file *file, void *priv, v4l2_std_id *std)
 /**
  * vidioc_querystd - get possible video standards
  * @file: descriptor of device
- * @priv: unused
  * @std: contains return values
  *
  * all possible video standards are returned
@@ -516,7 +512,6 @@ static int vidioc_enum_input(struct file *file, void *priv,
 /**
  * vidioc_s_input - set input line
  * @file: descriptor of device
- * @priv: unused
  * @i: new input line number
  *
  * the current active input line is set
@@ -543,7 +538,6 @@ static int vidioc_s_input(struct file *file, void *priv, unsigned int i)
 /**
  * vidioc_g_input - return input line
  * @file: descriptor of device
- * @priv: unused
  * @i: returned input line number
  *
  * the current active input line is returned
@@ -560,8 +554,6 @@ static int vidioc_g_input(struct file *file, void *priv, unsigned int *i)
 
 /**
  * vidioc_enum_fmt_vid_cap - return video capture format
- * @file: descriptor of device
- * @priv: unused
  * @f: returned format information
  *
  * returns name and format of video capture
@@ -585,7 +577,6 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void *priv,
 /**
  * vidioc_try_fmt_vid_cap - set video capture format
  * @file: descriptor of device
- * @priv: unused
  * @f: new format
  *
  * new video format is set which includes width and
@@ -648,7 +639,6 @@ static int vidioc_try_fmt_vid_cap(struct file *file, void *priv,
 /**
  * vidioc_s_fmt_vid_cap - set current video format parameters
  * @file: descriptor of device
- * @priv: unused
  * @f: returned format information
  *
  * set new capture format
@@ -716,7 +706,6 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 /**
  * vidioc_g_fmt_vid_cap - get current video format parameters
  * @file: descriptor of device
- * @priv: unused
  * @f: contains format information
  *
  * returns current video format parameters
@@ -765,7 +754,7 @@ static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
 };
 
-static const struct video_device video_dev_template = {
+static struct video_device video_dev_template = {
 	.name = KBUILD_MODNAME,
 	.release = video_device_release_empty,
 	.fops = &vip_fops,
@@ -908,10 +897,10 @@ static int sta2x11_vip_init_controls(struct sta2x11_vip *vip)
 static int vip_gpio_reserve(struct device *dev, int pin, int dir,
 			    const char *name)
 {
-	int ret = -ENODEV;
+	int ret;
 
-	if (!gpio_is_valid(pin))
-		return ret;
+	if (pin == -1)
+		return 0;
 
 	ret = gpio_request(pin, name);
 	if (ret) {
@@ -946,7 +935,7 @@ static int vip_gpio_reserve(struct device *dev, int pin, int dir,
  */
 static void vip_gpio_release(struct device *dev, int pin, const char *name)
 {
-	if (gpio_is_valid(pin)) {
+	if (pin != -1) {
 		dev_dbg(dev, "releasing pin %d (%s)\n",	pin, name);
 		gpio_unexport(pin);
 		gpio_free(pin);
@@ -1003,24 +992,25 @@ static int sta2x11_vip_init_one(struct pci_dev *pdev,
 	if (ret)
 		goto disable;
 
-	ret = vip_gpio_reserve(&pdev->dev, config->reset_pin, 0,
-			       config->reset_name);
-	if (ret) {
-		vip_gpio_release(&pdev->dev, config->pwr_pin,
-				 config->pwr_name);
-		goto disable;
+	if (config->reset_pin >= 0) {
+		ret = vip_gpio_reserve(&pdev->dev, config->reset_pin, 0,
+				       config->reset_name);
+		if (ret) {
+			vip_gpio_release(&pdev->dev, config->pwr_pin,
+					 config->pwr_name);
+			goto disable;
+		}
 	}
-
-	if (gpio_is_valid(config->pwr_pin)) {
+	if (config->pwr_pin != -1) {
 		/* Datasheet says 5ms between PWR and RST */
 		usleep_range(5000, 25000);
-		gpio_direction_output(config->pwr_pin, 1);
+		ret = gpio_direction_output(config->pwr_pin, 1);
 	}
 
-	if (gpio_is_valid(config->reset_pin)) {
+	if (config->reset_pin != -1) {
 		/* Datasheet says 5ms between PWR and RST */
 		usleep_range(5000, 25000);
-		gpio_direction_output(config->reset_pin, 1);
+		ret = gpio_direction_output(config->reset_pin, 1);
 	}
 	usleep_range(5000, 25000);
 

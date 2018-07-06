@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "ddk750_reg.h"
 #include "ddk750_chip.h"
 #include "ddk750_display.h"
@@ -111,7 +110,7 @@ static void swPanelPowerSequence(int disp, int delay)
 	primary_wait_vertical_sync(delay);
 }
 
-void ddk750_setLogicalDispOut(enum disp_output output)
+void ddk750_setLogicalDispOut(disp_output_t output)
 {
 	unsigned int reg;
 

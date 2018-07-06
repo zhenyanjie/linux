@@ -278,7 +278,7 @@ static void mtk_vdec_flush_decoder(struct mtk_vcodec_ctx *ctx)
 	clean_free_buffer(ctx);
 }
 
-static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
+static void mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 {
 	unsigned int dpbsize = 0;
 	int ret;
@@ -288,7 +288,7 @@ static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 				&ctx->last_decoded_picinfo)) {
 		mtk_v4l2_err("[%d]Error!! Cannot get param : GET_PARAM_PICTURE_INFO ERR",
 				ctx->id);
-		return -EINVAL;
+		return;
 	}
 
 	if (ctx->last_decoded_picinfo.pic_w == 0 ||
@@ -296,12 +296,12 @@ static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 		ctx->last_decoded_picinfo.buf_w == 0 ||
 		ctx->last_decoded_picinfo.buf_h == 0) {
 		mtk_v4l2_err("Cannot get correct pic info");
-		return -EINVAL;
+		return;
 	}
 
 	if ((ctx->last_decoded_picinfo.pic_w == ctx->picinfo.pic_w) ||
 	    (ctx->last_decoded_picinfo.pic_h == ctx->picinfo.pic_h))
-		return 0;
+		return;
 
 	mtk_v4l2_debug(1,
 			"[%d]-> new(%d,%d), old(%d,%d), real(%d,%d)",
@@ -316,8 +316,6 @@ static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 		mtk_v4l2_err("Incorrect dpb size, ret=%d", ret);
 
 	ctx->dpb_size = dpbsize;
-
-	return ret;
 }
 
 static void mtk_vdec_worker(struct work_struct *work)
@@ -1224,8 +1222,6 @@ static void vb2ops_vdec_buf_queue(struct vb2_buffer *vb)
 	ctx->dpb_size = dpbsize;
 	ctx->state = MTK_STATE_HEADER;
 	mtk_v4l2_debug(1, "[%d] dpbsize=%d", ctx->id, ctx->dpb_size);
-
-	mtk_vdec_queue_res_chg_event(ctx);
 }
 
 static void vb2ops_vdec_buf_finish(struct vb2_buffer *vb)

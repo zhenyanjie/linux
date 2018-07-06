@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/ceph/ceph_debug.h>
 
 #include <linux/device.h>
@@ -25,7 +24,7 @@ static int mdsmap_show(struct seq_file *s, void *p)
 	struct ceph_fs_client *fsc = s->private;
 	struct ceph_mdsmap *mdsmap;
 
-	if (!fsc->mdsc || !fsc->mdsc->mdsmap)
+	if (fsc->mdsc == NULL || fsc->mdsc->mdsmap == NULL)
 		return 0;
 	mdsmap = fsc->mdsc->mdsmap;
 	seq_printf(s, "epoch %d\n", mdsmap->m_epoch);
@@ -260,7 +259,7 @@ int ceph_fs_debugfs_init(struct ceph_fs_client *fsc)
 		goto out;
 
 	fsc->debugfs_mdsmap = debugfs_create_file("mdsmap",
-					0400,
+					0600,
 					fsc->client->debugfs_dir,
 					fsc,
 					&mdsmap_show_fops);
@@ -268,7 +267,7 @@ int ceph_fs_debugfs_init(struct ceph_fs_client *fsc)
 		goto out;
 
 	fsc->debugfs_mds_sessions = debugfs_create_file("mds_sessions",
-					0400,
+					0600,
 					fsc->client->debugfs_dir,
 					fsc,
 					&mds_sessions_show_fops);
@@ -276,7 +275,7 @@ int ceph_fs_debugfs_init(struct ceph_fs_client *fsc)
 		goto out;
 
 	fsc->debugfs_mdsc = debugfs_create_file("mdsc",
-						0400,
+						0600,
 						fsc->client->debugfs_dir,
 						fsc,
 						&mdsc_show_fops);
@@ -292,7 +291,7 @@ int ceph_fs_debugfs_init(struct ceph_fs_client *fsc)
 		goto out;
 
 	fsc->debugfs_dentry_lru = debugfs_create_file("dentry_lru",
-					0400,
+					0600,
 					fsc->client->debugfs_dir,
 					fsc,
 					&dentry_lru_show_fops);

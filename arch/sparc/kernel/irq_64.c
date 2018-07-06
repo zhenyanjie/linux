@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* irq.c: UltraSparc IRQ handling/init/registry.
  *
  * Copyright (C) 1997, 2007, 2008 David S. Miller (davem@davemloft.net)
@@ -22,6 +21,7 @@
 #include <linux/seq_file.h>
 #include <linux/ftrace.h>
 #include <linux/irq.h>
+#include <linux/kmemleak.h>
 
 #include <asm/ptrace.h>
 #include <asm/processor.h>

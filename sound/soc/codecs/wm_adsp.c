@@ -482,6 +482,8 @@ struct wm_coeff_ctl_ops {
 		    struct snd_ctl_elem_value *ucontrol);
 	int (*xput)(struct snd_kcontrol *kcontrol,
 		    struct snd_ctl_elem_value *ucontrol);
+	int (*xinfo)(struct snd_kcontrol *kcontrol,
+		     struct snd_ctl_elem_info *uinfo);
 };
 
 struct wm_coeff_ctl {
@@ -605,13 +607,13 @@ static const struct {
 };
 
 static void wm_adsp2_init_debugfs(struct wm_adsp *dsp,
-				  struct snd_soc_component *component)
+				  struct snd_soc_codec *codec)
 {
 	struct dentry *root = NULL;
 	char *root_name;
 	int i;
 
-	if (!component->debugfs_root) {
+	if (!codec->component.debugfs_root) {
 		adsp_err(dsp, "No codec debugfs root\n");
 		goto err;
 	}
@@ -621,27 +623,28 @@ static void wm_adsp2_init_debugfs(struct wm_adsp *dsp,
 		goto err;
 
 	snprintf(root_name, PAGE_SIZE, "dsp%d", dsp->num);
-	root = debugfs_create_dir(root_name, component->debugfs_root);
+	root = debugfs_create_dir(root_name, codec->component.debugfs_root);
 	kfree(root_name);
 
 	if (!root)
 		goto err;
 
-	if (!debugfs_create_bool("booted", 0444, root, &dsp->booted))
+	if (!debugfs_create_bool("booted", S_IRUGO, root, &dsp->booted))
 		goto err;
 
-	if (!debugfs_create_bool("running", 0444, root, &dsp->running))
+	if (!debugfs_create_bool("running", S_IRUGO, root, &dsp->running))
 		goto err;
 
-	if (!debugfs_create_x32("fw_id", 0444, root, &dsp->fw_id))
+	if (!debugfs_create_x32("fw_id", S_IRUGO, root, &dsp->fw_id))
 		goto err;
 
-	if (!debugfs_create_x32("fw_version", 0444, root, &dsp->fw_id_version))
+	if (!debugfs_create_x32("fw_version", S_IRUGO, root,
+				&dsp->fw_id_version))
 		goto err;
 
 	for (i = 0; i < ARRAY_SIZE(wm_adsp_debugfs_fops); ++i) {
 		if (!debugfs_create_file(wm_adsp_debugfs_fops[i].name,
-					 0444, root, dsp,
+					 S_IRUGO, root, dsp,
 					 &wm_adsp_debugfs_fops[i].fops))
 			goto err;
 	}
@@ -661,7 +664,7 @@ static void wm_adsp2_cleanup_debugfs(struct wm_adsp *dsp)
 }
 #else
 static inline void wm_adsp2_init_debugfs(struct wm_adsp *dsp,
-					 struct snd_soc_component *component)
+					 struct snd_soc_codec *codec)
 {
 }
 
@@ -687,9 +690,9 @@ static inline void wm_adsp_debugfs_clear(struct wm_adsp *dsp)
 static int wm_adsp_fw_get(struct snd_kcontrol *kcontrol,
 			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
-	struct wm_adsp *dsp = snd_soc_component_get_drvdata(component);
+	struct wm_adsp *dsp = snd_soc_codec_get_drvdata(codec);
 
 	ucontrol->value.enumerated.item[0] = dsp[e->shift_l].fw;
 
@@ -699,9 +702,9 @@ static int wm_adsp_fw_get(struct snd_kcontrol *kcontrol,
 static int wm_adsp_fw_put(struct snd_kcontrol *kcontrol,
 			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
-	struct wm_adsp *dsp = snd_soc_component_get_drvdata(component);
+	struct wm_adsp *dsp = snd_soc_codec_get_drvdata(codec);
 	int ret = 0;
 
 	if (ucontrol->value.enumerated.item[0] == dsp[e->shift_l].fw)
@@ -1203,18 +1206,16 @@ static int wmfw_add_ctl(struct wm_adsp *dsp, struct wm_coeff_ctl *ctl)
 		kcontrol->put = wm_coeff_put_acked;
 		break;
 	default:
-		if (kcontrol->access & SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK) {
-			ctl->bytes_ext.max = ctl->len;
-			ctl->bytes_ext.get = wm_coeff_tlv_get;
-			ctl->bytes_ext.put = wm_coeff_tlv_put;
-		} else {
-			kcontrol->get = wm_coeff_get;
-			kcontrol->put = wm_coeff_put;
-		}
+		kcontrol->get = wm_coeff_get;
+		kcontrol->put = wm_coeff_put;
+
+		ctl->bytes_ext.max = ctl->len;
+		ctl->bytes_ext.get = wm_coeff_tlv_get;
+		ctl->bytes_ext.put = wm_coeff_tlv_put;
 		break;
 	}
 
-	ret = snd_soc_add_component_controls(dsp->component, kcontrol, 1);
+	ret = snd_soc_add_codec_controls(dsp->codec, kcontrol, 1);
 	if (ret < 0)
 		goto err_kcontrol;
 
@@ -1238,16 +1239,9 @@ static int wm_coeff_init_control_caches(struct wm_adsp *dsp)
 		if (ctl->flags & WMFW_CTL_FLAG_VOLATILE)
 			continue;
 
-		/*
-		 * For readable controls populate the cache from the DSP memory.
-		 * For non-readable controls the cache was zero-filled when
-		 * created so we don't need to do anything.
-		 */
-		if (!ctl->flags || (ctl->flags & WMFW_CTL_FLAG_READABLE)) {
-			ret = wm_coeff_read_control(ctl, ctl->cache, ctl->len);
-			if (ret < 0)
-				return ret;
-		}
+		ret = wm_coeff_read_control(ctl, ctl->cache, ctl->len);
+		if (ret < 0)
+			return ret;
 	}
 
 	return 0;
@@ -1741,7 +1735,7 @@ static int wm_adsp_load(struct wm_adsp *dsp)
 		 le64_to_cpu(footer->timestamp));
 
 	while (pos < firmware->size &&
-	       sizeof(*region) < firmware->size - pos) {
+	       pos - firmware->size > sizeof(*region)) {
 		region = (void *)&(firmware->data[pos]);
 		region_name = "Unknown";
 		reg = 0;
@@ -1790,8 +1784,8 @@ static int wm_adsp_load(struct wm_adsp *dsp)
 			 regions, le32_to_cpu(region->len), offset,
 			 region_name);
 
-		if (le32_to_cpu(region->len) >
-		    firmware->size - pos - sizeof(*region)) {
+		if ((pos + le32_to_cpu(region->len) + sizeof(*region)) >
+		    firmware->size) {
 			adsp_err(dsp,
 				 "%s.%d: %s region len %d bytes exceeds file length %zu\n",
 				 file, regions, region_name,
@@ -1896,10 +1890,10 @@ static void *wm_adsp_read_algs(struct wm_adsp *dsp, size_t n_algs,
 	}
 
 	if (be32_to_cpu(val) != 0xbedead)
-		adsp_warn(dsp, "Algorithm list end %x 0x%x != 0xbedead\n",
+		adsp_warn(dsp, "Algorithm list end %x 0x%x != 0xbeadead\n",
 			  pos + len, be32_to_cpu(val));
 
-	alg = kcalloc(len, 2, GFP_KERNEL | GFP_DMA);
+	alg = kzalloc(len * 2, GFP_KERNEL | GFP_DMA);
 	if (!alg)
 		return ERR_PTR(-ENOMEM);
 
@@ -2261,7 +2255,7 @@ static int wm_adsp_load_coeff(struct wm_adsp *dsp)
 
 	blocks = 0;
 	while (pos < firmware->size &&
-	       sizeof(*blk) < firmware->size - pos) {
+	       pos - firmware->size > sizeof(*blk)) {
 		blk = (void *)(&firmware->data[pos]);
 
 		type = le16_to_cpu(blk->type);
@@ -2335,8 +2329,8 @@ static int wm_adsp_load_coeff(struct wm_adsp *dsp)
 		}
 
 		if (reg) {
-			if (le32_to_cpu(blk->len) >
-			    firmware->size - pos - sizeof(*blk)) {
+			if ((pos + le32_to_cpu(blk->len) + sizeof(*blk)) >
+			    firmware->size) {
 				adsp_err(dsp,
 					 "%s.%d: %s region len %d bytes exceeds file length %zu\n",
 					 file, blocks, region_name,
@@ -2404,14 +2398,14 @@ int wm_adsp1_event(struct snd_soc_dapm_widget *w,
 		   struct snd_kcontrol *kcontrol,
 		   int event)
 {
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-	struct wm_adsp *dsps = snd_soc_component_get_drvdata(component);
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct wm_adsp *dsps = snd_soc_codec_get_drvdata(codec);
 	struct wm_adsp *dsp = &dsps[w->shift];
 	struct wm_coeff_ctl *ctl;
 	int ret;
 	unsigned int val;
 
-	dsp->component = component;
+	dsp->codec = codec;
 
 	mutex_lock(&dsp->pwr_lock);
 
@@ -2641,8 +2635,8 @@ static void wm_adsp2_set_dspclk(struct wm_adsp *dsp, unsigned int freq)
 int wm_adsp2_preloader_get(struct snd_kcontrol *kcontrol,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
-	struct wm_adsp *dsp = snd_soc_component_get_drvdata(component);
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct wm_adsp *dsp = snd_soc_codec_get_drvdata(codec);
 
 	ucontrol->value.integer.value[0] = dsp->preloaded;
 
@@ -2653,21 +2647,21 @@ EXPORT_SYMBOL_GPL(wm_adsp2_preloader_get);
 int wm_adsp2_preloader_put(struct snd_kcontrol *kcontrol,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
-	struct wm_adsp *dsp = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct wm_adsp *dsp = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	char preload[32];
 
-	snprintf(preload, ARRAY_SIZE(preload), "DSP%u Preload", mc->shift);
+	snprintf(preload, ARRAY_SIZE(preload), "DSP%d Preload", mc->shift);
 
 	dsp->preloaded = ucontrol->value.integer.value[0];
 
 	if (ucontrol->value.integer.value[0])
-		snd_soc_component_force_enable_pin(component, preload);
+		snd_soc_dapm_force_enable_pin(dapm, preload);
 	else
-		snd_soc_component_disable_pin(component, preload);
+		snd_soc_dapm_disable_pin(dapm, preload);
 
 	snd_soc_dapm_sync(dapm);
 
@@ -2691,8 +2685,8 @@ int wm_adsp2_early_event(struct snd_soc_dapm_widget *w,
 			 struct snd_kcontrol *kcontrol, int event,
 			 unsigned int freq)
 {
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-	struct wm_adsp *dsps = snd_soc_component_get_drvdata(component);
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct wm_adsp *dsps = snd_soc_codec_get_drvdata(codec);
 	struct wm_adsp *dsp = &dsps[w->shift];
 	struct wm_coeff_ctl *ctl;
 
@@ -2734,8 +2728,8 @@ EXPORT_SYMBOL_GPL(wm_adsp2_early_event);
 int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 		   struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-	struct wm_adsp *dsps = snd_soc_component_get_drvdata(component);
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct wm_adsp *dsps = snd_soc_codec_get_drvdata(codec);
 	struct wm_adsp *dsp = &dsps[w->shift];
 	int ret;
 
@@ -2849,31 +2843,31 @@ err:
 }
 EXPORT_SYMBOL_GPL(wm_adsp2_event);
 
-int wm_adsp2_component_probe(struct wm_adsp *dsp, struct snd_soc_component *component)
+int wm_adsp2_codec_probe(struct wm_adsp *dsp, struct snd_soc_codec *codec)
 {
+	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 	char preload[32];
 
 	snprintf(preload, ARRAY_SIZE(preload), "DSP%d Preload", dsp->num);
+	snd_soc_dapm_disable_pin(dapm, preload);
 
-	snd_soc_component_disable_pin(component, preload);
+	wm_adsp2_init_debugfs(dsp, codec);
 
-	wm_adsp2_init_debugfs(dsp, component);
+	dsp->codec = codec;
 
-	dsp->component = component;
-
-	return snd_soc_add_component_controls(component,
+	return snd_soc_add_codec_controls(codec,
 					  &wm_adsp_fw_controls[dsp->num - 1],
 					  1);
 }
-EXPORT_SYMBOL_GPL(wm_adsp2_component_probe);
+EXPORT_SYMBOL_GPL(wm_adsp2_codec_probe);
 
-int wm_adsp2_component_remove(struct wm_adsp *dsp, struct snd_soc_component *component)
+int wm_adsp2_codec_remove(struct wm_adsp *dsp, struct snd_soc_codec *codec)
 {
 	wm_adsp2_cleanup_debugfs(dsp);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(wm_adsp2_component_remove);
+EXPORT_SYMBOL_GPL(wm_adsp2_codec_remove);
 
 int wm_adsp2_init(struct wm_adsp *dsp)
 {
@@ -3259,13 +3253,6 @@ static int wm_adsp_buffer_populate(struct wm_adsp_compr_buf *buf)
 	return 0;
 }
 
-static void wm_adsp_buffer_clear(struct wm_adsp_compr_buf *buf)
-{
-	buf->irq_count = 0xFFFFFFFF;
-	buf->read_index = -1;
-	buf->avail = 0;
-}
-
 static int wm_adsp_buffer_init(struct wm_adsp *dsp)
 {
 	struct wm_adsp_compr_buf *buf;
@@ -3276,8 +3263,8 @@ static int wm_adsp_buffer_init(struct wm_adsp *dsp)
 		return -ENOMEM;
 
 	buf->dsp = dsp;
-
-	wm_adsp_buffer_clear(buf);
+	buf->read_index = -1;
+	buf->irq_count = 0xFFFFFFFF;
 
 	ret = wm_adsp_buffer_locate(buf);
 	if (ret < 0) {
@@ -3335,16 +3322,15 @@ int wm_adsp_compr_trigger(struct snd_compr_stream *stream, int cmd)
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
-		if (!wm_adsp_compr_attached(compr)) {
-			ret = wm_adsp_compr_attach(compr);
-			if (ret < 0) {
-				adsp_err(dsp, "Failed to link buffer and stream: %d\n",
-					 ret);
-				break;
-			}
-		}
+		if (wm_adsp_compr_attached(compr))
+			break;
 
-		wm_adsp_buffer_clear(compr->buf);
+		ret = wm_adsp_compr_attach(compr);
+		if (ret < 0) {
+			adsp_err(dsp, "Failed to link buffer and stream: %d\n",
+				 ret);
+			break;
+		}
 
 		/* Trigger the IRQ at one fragment of data */
 		ret = wm_adsp_buffer_write(compr->buf,

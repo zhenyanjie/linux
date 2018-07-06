@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _UAPI_INET_DIAG_H_
 #define _UAPI_INET_DIAG_H_
 
@@ -92,8 +91,6 @@ enum {
 	INET_DIAG_BC_D_COND,
 	INET_DIAG_BC_DEV_COND,   /* u32 ifindex */
 	INET_DIAG_BC_MARK_COND,
-	INET_DIAG_BC_S_EQ,
-	INET_DIAG_BC_D_EQ,
 };
 
 struct inet_diag_hostcond {
@@ -145,8 +142,6 @@ enum {
 	INET_DIAG_PAD,
 	INET_DIAG_MARK,
 	INET_DIAG_BBRINFO,
-	INET_DIAG_CLASS_ID,
-	INET_DIAG_MD5SIG,
 	__INET_DIAG_MAX,
 };
 

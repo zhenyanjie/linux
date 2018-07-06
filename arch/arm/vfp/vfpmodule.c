@@ -218,7 +218,8 @@ static void vfp_raise_sigfpe(unsigned int sicode, struct pt_regs *regs)
 {
 	siginfo_t info;
 
-	clear_siginfo(&info);
+	memset(&info, 0, sizeof(info));
+
 	info.si_signo = SIGFPE;
 	info.si_code = sicode;
 	info.si_addr = (void __user *)(instruction_pointer(regs) - 4);
@@ -256,7 +257,7 @@ static void vfp_raise_exceptions(u32 exceptions, u32 inst, u32 fpscr, struct pt_
 
 	if (exceptions == VFP_EXCEPTION_ERROR) {
 		vfp_panic("unhandled bounce", inst);
-		vfp_raise_sigfpe(FPE_FLTINV, regs);
+		vfp_raise_sigfpe(0, regs);
 		return;
 	}
 
@@ -647,7 +648,7 @@ int vfp_restore_user_hwstate(struct user_vfp __user *ufp,
  */
 static int vfp_dying_cpu(unsigned int cpu)
 {
-	vfp_current_hw_state[cpu] = NULL;
+	vfp_force_reload(cpu, current_thread_info());
 	return 0;
 }
 

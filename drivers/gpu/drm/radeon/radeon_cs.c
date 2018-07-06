@@ -87,8 +87,7 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 	p->dma_reloc_idx = 0;
 	/* FIXME: we assume that each relocs use 4 dwords */
 	p->nrelocs = chunk->length_dw / 4;
-	p->relocs = kvmalloc_array(p->nrelocs, sizeof(struct radeon_bo_list),
-			GFP_KERNEL | __GFP_ZERO);
+	p->relocs = drm_calloc_large(p->nrelocs, sizeof(struct radeon_bo_list));
 	if (p->relocs == NULL) {
 		return -ENOMEM;
 	}
@@ -130,7 +129,7 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 		     p->rdev->family == CHIP_RS880)) {
 
 			/* TODO: is this still needed for NI+ ? */
-			p->relocs[i].preferred_domains =
+			p->relocs[i].prefered_domains =
 				RADEON_GEM_DOMAIN_VRAM;
 
 			p->relocs[i].allowed_domains =
@@ -148,14 +147,14 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 				return -EINVAL;
 			}
 
-			p->relocs[i].preferred_domains = domain;
+			p->relocs[i].prefered_domains = domain;
 			if (domain == RADEON_GEM_DOMAIN_VRAM)
 				domain |= RADEON_GEM_DOMAIN_GTT;
 			p->relocs[i].allowed_domains = domain;
 		}
 
 		if (radeon_ttm_tt_has_userptr(p->relocs[i].robj->tbo.ttm)) {
-			uint32_t domain = p->relocs[i].preferred_domains;
+			uint32_t domain = p->relocs[i].prefered_domains;
 			if (!(domain & RADEON_GEM_DOMAIN_GTT)) {
 				DRM_ERROR("Only RADEON_GEM_DOMAIN_GTT is "
 					  "allowed for userptr BOs\n");
@@ -163,7 +162,7 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 			}
 			need_mmap_lock = true;
 			domain = RADEON_GEM_DOMAIN_GTT;
-			p->relocs[i].preferred_domains = domain;
+			p->relocs[i].prefered_domains = domain;
 			p->relocs[i].allowed_domains = domain;
 		}
 
@@ -342,7 +341,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 				continue;
 		}
 
-		p->chunks[i].kdata = kvmalloc_array(size, sizeof(uint32_t), GFP_KERNEL);
+		p->chunks[i].kdata = drm_malloc_ab(size, sizeof(uint32_t));
 		size *= sizeof(uint32_t);
 		if (p->chunks[i].kdata == NULL) {
 			return -ENOMEM;
@@ -437,14 +436,14 @@ static void radeon_cs_parser_fini(struct radeon_cs_parser *parser, int error, bo
 			if (bo == NULL)
 				continue;
 
-			drm_gem_object_put_unlocked(&bo->gem_base);
+			drm_gem_object_unreference_unlocked(&bo->gem_base);
 		}
 	}
 	kfree(parser->track);
-	kvfree(parser->relocs);
-	kvfree(parser->vm_bos);
+	drm_free_large(parser->relocs);
+	drm_free_large(parser->vm_bos);
 	for (i = 0; i < parser->nchunks; i++)
-		kvfree(parser->chunks[i].kdata);
+		drm_free_large(parser->chunks[i].kdata);
 	kfree(parser->chunks);
 	kfree(parser->chunks_array);
 	radeon_ib_free(parser->rdev, &parser->ib);

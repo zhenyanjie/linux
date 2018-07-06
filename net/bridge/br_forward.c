@@ -30,8 +30,7 @@ static inline int should_deliver(const struct net_bridge_port *p,
 	vg = nbp_vlan_group_rcu(p);
 	return ((p->flags & BR_HAIRPIN_MODE) || skb->dev != p->dev) &&
 		br_allowed_egress(vg, skb) && p->state == BR_STATE_FORWARDING &&
-		nbp_switchdev_allowed_egress(p, skb) &&
-		!br_skb_isolated(p, skb);
+		nbp_switchdev_allowed_egress(p, skb);
 }
 
 int br_dev_queue_push_xmit(struct net *net, struct sock *sk, struct sk_buff *skb)
@@ -205,7 +204,7 @@ void br_flood(struct net_bridge *br, struct sk_buff *skb,
 		/* Do not flood to ports that enable proxy ARP */
 		if (p->flags & BR_PROXYARP)
 			continue;
-		if ((p->flags & (BR_PROXYARP_WIFI | BR_NEIGH_SUPPRESS)) &&
+		if ((p->flags & BR_PROXYARP_WIFI) &&
 		    BR_INPUT_SKB_CB(skb)->proxyarp_replied)
 			continue;
 
@@ -275,7 +274,8 @@ void br_multicast_flood(struct net_bridge_mdb_entry *mdst,
 		struct net_bridge_port *port, *lport, *rport;
 
 		lport = p ? p->port : NULL;
-		rport = hlist_entry_safe(rp, struct net_bridge_port, rlist);
+		rport = rp ? hlist_entry(rp, struct net_bridge_port, rlist) :
+			     NULL;
 
 		if ((unsigned long)lport > (unsigned long)rport) {
 			port = lport;

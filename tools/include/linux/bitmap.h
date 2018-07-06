@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _PERF_BITOPS_H
 #define _PERF_BITOPS_H
 
@@ -98,7 +97,7 @@ static inline int test_and_set_bit(int nr, unsigned long *addr)
 
 /**
  * bitmap_alloc - Allocate bitmap
- * @nbits: Number of bits
+ * @nr: Bit to set
  */
 static inline unsigned long *bitmap_alloc(int nbits)
 {

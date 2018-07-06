@@ -1,5 +1,18 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
  * Clean ups from Moschip version and a few ioctl implementations by:
  *	Paul B Schroeder <pschroeder "at" uplogix "dot" com>
  *
@@ -555,9 +568,9 @@ static void mos7840_set_led_sync(struct usb_serial_port *port, __u16 reg,
 			val, reg, NULL, 0, MOS_WDR_TIMEOUT);
 }
 
-static void mos7840_led_off(struct timer_list *t)
+static void mos7840_led_off(unsigned long arg)
 {
-	struct moschip_port *mcs = from_timer(mcs, t, led_timer1);
+	struct moschip_port *mcs = (struct moschip_port *) arg;
 
 	/* Turn off LED */
 	mos7840_set_led_async(mcs, 0x0300, MODEM_CONTROL_REGISTER);
@@ -565,9 +578,9 @@ static void mos7840_led_off(struct timer_list *t)
 				jiffies + msecs_to_jiffies(LED_OFF_MS));
 }
 
-static void mos7840_led_flag_off(struct timer_list *t)
+static void mos7840_led_flag_off(unsigned long arg)
 {
-	struct moschip_port *mcs = from_timer(mcs, t, led_timer2);
+	struct moschip_port *mcs = (struct moschip_port *) arg;
 
 	clear_bit_unlock(MOS7840_FLAG_LED_BUSY, &mcs->flags);
 }
@@ -2289,11 +2302,12 @@ static int mos7840_port_probe(struct usb_serial_port *port)
 			goto error;
 		}
 
-		timer_setup(&mos7840_port->led_timer1, mos7840_led_off, 0);
+		setup_timer(&mos7840_port->led_timer1, mos7840_led_off,
+			    (unsigned long)mos7840_port);
 		mos7840_port->led_timer1.expires =
 			jiffies + msecs_to_jiffies(LED_ON_MS);
-		timer_setup(&mos7840_port->led_timer2, mos7840_led_flag_off,
-			    0);
+		setup_timer(&mos7840_port->led_timer2, mos7840_led_flag_off,
+			    (unsigned long)mos7840_port);
 		mos7840_port->led_timer2.expires =
 			jiffies + msecs_to_jiffies(LED_OFF_MS);
 

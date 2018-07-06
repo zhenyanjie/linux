@@ -342,7 +342,6 @@ static int fc0011_set_params(struct dvb_frontend *fe)
 	switch (vco_sel) {
 	default:
 		WARN_ON(1);
-		return -EINVAL;
 	case 0:
 		if (vco_cal < 8) {
 			regs[FC11_REG_VCOSEL] &= ~(FC11_VCOSEL_1 | FC11_VCOSEL_2);

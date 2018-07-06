@@ -167,11 +167,6 @@ Lotus Notes (GUI)
 
 Run away from it.
 
-IBM Verse (Web GUI)
-*******************
-
-See Lotus Notes.
-
 Mutt (TUI)
 **********
 

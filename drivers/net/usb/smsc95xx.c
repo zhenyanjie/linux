@@ -526,7 +526,7 @@ static void smsc95xx_set_multicast(struct net_device *netdev)
 static int smsc95xx_phy_update_flowcontrol(struct usbnet *dev, u8 duplex,
 					   u16 lcladv, u16 rmtadv)
 {
-	u32 flow = 0, afc_cfg;
+	u32 flow, afc_cfg = 0;
 
 	int ret = smsc95xx_read_reg(dev, AFC_CFG, &afc_cfg);
 	if (ret < 0)
@@ -537,19 +537,20 @@ static int smsc95xx_phy_update_flowcontrol(struct usbnet *dev, u8 duplex,
 
 		if (cap & FLOW_CTRL_RX)
 			flow = 0xFFFF0002;
+		else
+			flow = 0;
 
-		if (cap & FLOW_CTRL_TX) {
+		if (cap & FLOW_CTRL_TX)
 			afc_cfg |= 0xF;
-			flow |= 0xFFFF0000;
-		} else {
+		else
 			afc_cfg &= ~0xF;
-		}
 
 		netif_dbg(dev, link, dev->net, "rx pause %s, tx pause %s\n",
 				   cap & FLOW_CTRL_RX ? "enabled" : "disabled",
 				   cap & FLOW_CTRL_TX ? "enabled" : "disabled");
 	} else {
 		netif_dbg(dev, link, dev->net, "half duplex\n");
+		flow = 0;
 		afc_cfg |= 0xF;
 	}
 
@@ -897,7 +898,6 @@ static const struct ethtool_ops smsc95xx_ethtool_ops = {
 	.set_wol	= smsc95xx_ethtool_set_wol,
 	.get_link_ksettings	= smsc95xx_get_link_ksettings,
 	.set_link_ksettings	= smsc95xx_set_link_ksettings,
-	.get_ts_info	= ethtool_op_get_ts_info,
 };
 
 static int smsc95xx_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
@@ -1661,7 +1661,7 @@ static int smsc95xx_suspend(struct usb_interface *intf, pm_message_t message)
 	}
 
 	if (pdata->wolopts & (WAKE_BCAST | WAKE_MCAST | WAKE_ARP | WAKE_UCAST)) {
-		u32 *filter_mask = kcalloc(32, sizeof(u32), GFP_KERNEL);
+		u32 *filter_mask = kzalloc(sizeof(u32) * 32, GFP_KERNEL);
 		u32 command[2];
 		u32 offset[2];
 		u32 crc[4];

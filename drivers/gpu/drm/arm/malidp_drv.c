@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/console.h>
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/of_reserved_mem.h>
@@ -23,11 +24,8 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_helper.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
-#include <drm/drm_modeset_helper.h>
 #include <drm/drm_of.h>
 
 #include "malidp_drv.h"
@@ -48,10 +46,10 @@ static void malidp_write_gamma_table(struct malidp_hw_device *hwdev,
 	 * directly.
 	 */
 	malidp_hw_write(hwdev, gamma_write_mask,
-			hwdev->hw->map.coeffs_base + MALIDP_COEF_TABLE_ADDR);
+			hwdev->map.coeffs_base + MALIDP_COEF_TABLE_ADDR);
 	for (i = 0; i < MALIDP_COEFFTAB_NUM_COEFFS; ++i)
 		malidp_hw_write(hwdev, data[i],
-				hwdev->hw->map.coeffs_base +
+				hwdev->map.coeffs_base +
 				MALIDP_COEF_TABLE_DATA);
 }
 
@@ -104,7 +102,7 @@ void malidp_atomic_commit_update_coloradj(struct drm_crtc *crtc,
 			for (i = 0; i < MALIDP_COLORADJ_NUM_COEFFS; ++i)
 				malidp_hw_write(hwdev,
 						mc->coloradj_coeffs[i],
-						hwdev->hw->map.coeffs_base +
+						hwdev->map.coeffs_base +
 						MALIDP_COLOR_ADJ_COEF + 4 * i);
 
 		malidp_hw_setbits(hwdev, MALIDP_DISP_FUNC_CADJ,
@@ -121,8 +119,8 @@ static void malidp_atomic_commit_se_config(struct drm_crtc *crtc,
 	struct malidp_hw_device *hwdev = malidp->dev;
 	struct malidp_se_config *s = &cs->scaler_config;
 	struct malidp_se_config *old_s = &old_cs->scaler_config;
-	u32 se_control = hwdev->hw->map.se_base +
-			 ((hwdev->hw->map.features & MALIDP_REGMAP_HAS_CLEARIRQ) ?
+	u32 se_control = hwdev->map.se_base +
+			 ((hwdev->map.features & MALIDP_REGMAP_HAS_CLEARIRQ) ?
 			 0x10 : 0xC);
 	u32 layer_control = se_control + MALIDP_SE_LAYER_CONTROL;
 	u32 scr = se_control + MALIDP_SE_SCALING_CONTROL;
@@ -136,7 +134,7 @@ static void malidp_atomic_commit_se_config(struct drm_crtc *crtc,
 		return;
 	}
 
-	hwdev->hw->se_set_scaling_coeffs(hwdev, s, old_s);
+	hwdev->se_set_scaling_coeffs(hwdev, s, old_s);
 	val = malidp_hw_read(hwdev, se_control);
 	val |= MALIDP_SE_SCALING_EN | MALIDP_SE_ALPHA_EN;
 
@@ -171,9 +169,9 @@ static int malidp_set_and_wait_config_valid(struct drm_device *drm)
 	int ret;
 
 	atomic_set(&malidp->config_valid, 0);
-	hwdev->hw->set_config_valid(hwdev);
+	hwdev->set_config_valid(hwdev);
 	/* don't wait for config_valid flag if we are in config mode */
-	if (hwdev->hw->in_config_mode(hwdev))
+	if (hwdev->in_config_mode(hwdev))
 		return 0;
 
 	ret = wait_event_interruptible_timeout(malidp->wq,
@@ -183,31 +181,34 @@ static int malidp_set_and_wait_config_valid(struct drm_device *drm)
 	return (ret > 0) ? 0 : -ETIMEDOUT;
 }
 
+static void malidp_output_poll_changed(struct drm_device *drm)
+{
+	struct malidp_drm *malidp = drm->dev_private;
+
+	drm_fbdev_cma_hotplug_event(malidp->fbdev);
+}
+
 static void malidp_atomic_commit_hw_done(struct drm_atomic_state *state)
 {
+	struct drm_pending_vblank_event *event;
 	struct drm_device *drm = state->dev;
 	struct malidp_drm *malidp = drm->dev_private;
 
-	malidp->event = malidp->crtc.state->event;
-	malidp->crtc.state->event = NULL;
-
-	if (malidp->crtc.state->active) {
-		/*
-		 * if we have an event to deliver to userspace, make sure
-		 * the vblank is enabled as we are sending it from the IRQ
-		 * handler.
-		 */
-		if (malidp->event)
-			drm_crtc_vblank_get(&malidp->crtc);
-
+	if (malidp->crtc.enabled) {
 		/* only set config_valid if the CRTC is enabled */
-		if (malidp_set_and_wait_config_valid(drm) < 0)
+		if (malidp_set_and_wait_config_valid(drm))
 			DRM_DEBUG_DRIVER("timed out waiting for updated configuration\n");
-	} else if (malidp->event) {
-		/* CRTC inactive means vblank IRQ is disabled, send event directly */
+	}
+
+	event = malidp->crtc.state->event;
+	if (event) {
+		malidp->crtc.state->event = NULL;
+
 		spin_lock_irq(&drm->event_lock);
-		drm_crtc_send_vblank_event(&malidp->crtc, malidp->event);
-		malidp->event = NULL;
+		if (drm_crtc_vblank_get(&malidp->crtc) == 0)
+			drm_crtc_arm_vblank_event(&malidp->crtc, event);
+		else
+			drm_crtc_send_vblank_event(&malidp->crtc, event);
 		spin_unlock_irq(&drm->event_lock);
 	}
 	drm_atomic_helper_commit_hw_done(state);
@@ -224,7 +225,7 @@ static void malidp_atomic_commit_tail(struct drm_atomic_state *state)
 
 	drm_atomic_helper_commit_modeset_disables(drm, state);
 
-	for_each_old_crtc_in_state(state, crtc, old_crtc_state, i) {
+	for_each_crtc_in_state(state, crtc, old_crtc_state, i) {
 		malidp_atomic_commit_update_gamma(crtc, old_crtc_state);
 		malidp_atomic_commit_update_coloradj(crtc, old_crtc_state);
 		malidp_atomic_commit_se_config(crtc, old_crtc_state);
@@ -236,6 +237,8 @@ static void malidp_atomic_commit_tail(struct drm_atomic_state *state)
 
 	malidp_atomic_commit_hw_done(state);
 
+	drm_atomic_helper_wait_for_vblanks(drm, state);
+
 	pm_runtime_put(drm->dev);
 
 	drm_atomic_helper_cleanup_planes(drm, state);
@@ -246,8 +249,8 @@ static const struct drm_mode_config_helper_funcs malidp_mode_config_helpers = {
 };
 
 static const struct drm_mode_config_funcs malidp_mode_config_funcs = {
-	.fb_create = drm_gem_fb_create,
-	.output_poll_changed = drm_fb_helper_output_poll_changed,
+	.fb_create = drm_fb_cma_create,
+	.output_poll_changed = malidp_output_poll_changed,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
@@ -278,6 +281,7 @@ static int malidp_init(struct drm_device *drm)
 
 static void malidp_fini(struct drm_device *drm)
 {
+	malidp_de_planes_destroy(drm);
 	drm_mode_config_cleanup(drm);
 }
 
@@ -311,28 +315,24 @@ static int malidp_irq_init(struct platform_device *pdev)
 	return 0;
 }
 
-DEFINE_DRM_GEM_CMA_FOPS(fops);
-
-static int malidp_dumb_create(struct drm_file *file_priv,
-			      struct drm_device *drm,
-			      struct drm_mode_create_dumb *args)
+static void malidp_lastclose(struct drm_device *drm)
 {
 	struct malidp_drm *malidp = drm->dev_private;
-	/* allocate for the worst case scenario, i.e. rotated buffers */
-	u8 alignment = malidp_hw_get_pitch_align(malidp->dev, 1);
 
-	args->pitch = ALIGN(DIV_ROUND_UP(args->width * args->bpp, 8), alignment);
-
-	return drm_gem_cma_dumb_create_internal(file_priv, drm, args);
+	drm_fbdev_cma_restore_mode(malidp->fbdev);
 }
+
+DEFINE_DRM_GEM_CMA_FOPS(fops);
 
 static struct drm_driver malidp_driver = {
 	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC |
 			   DRIVER_PRIME,
-	.lastclose = drm_fb_helper_lastclose,
+	.lastclose = malidp_lastclose,
 	.gem_free_object_unlocked = drm_gem_cma_free_object,
 	.gem_vm_ops = &drm_gem_cma_vm_ops,
-	.dumb_create = malidp_dumb_create,
+	.dumb_create = drm_gem_cma_dumb_create,
+	.dumb_map_offset = drm_gem_cma_dumb_map_offset,
+	.dumb_destroy = drm_gem_dumb_destroy,
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 	.gem_prime_export = drm_gem_prime_export,
@@ -456,7 +456,7 @@ static int malidp_runtime_pm_suspend(struct device *dev)
 	struct malidp_hw_device *hwdev = malidp->dev;
 
 	/* we can only suspend if the hardware is in config mode */
-	WARN_ON(!hwdev->hw->in_config_mode(hwdev));
+	WARN_ON(!hwdev->in_config_mode(hwdev));
 
 	hwdev->pm_suspended = true;
 	clk_disable_unprepare(hwdev->mclk);
@@ -501,7 +501,11 @@ static int malidp_bind(struct device *dev)
 	if (!hwdev)
 		return -ENOMEM;
 
-	hwdev->hw = (struct malidp_hw *)of_device_get_match_data(dev);
+	/*
+	 * copy the associated data from malidp_drm_of_match to avoid
+	 * having to keep a reference to the OF node after binding
+	 */
+	memcpy(hwdev, of_device_get_match_data(dev), sizeof(*hwdev));
 	malidp->dev = hwdev;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -565,13 +569,13 @@ static int malidp_bind(struct device *dev)
 		goto query_hw_fail;
 	}
 
-	ret = hwdev->hw->query_hw(hwdev);
+	ret = hwdev->query_hw(hwdev);
 	if (ret) {
 		DRM_ERROR("Invalid HW configuration\n");
 		goto query_hw_fail;
 	}
 
-	version = malidp_hw_read(hwdev, hwdev->hw->map.dc_base + MALIDP_DE_CORE_ID);
+	version = malidp_hw_read(hwdev, hwdev->map.dc_base + MALIDP_DE_CORE_ID);
 	DRM_INFO("found ARM Mali-DP%3x version r%dp%d\n", version >> 16,
 		 (version >> 12) & 0xf, (version >> 8) & 0xf);
 
@@ -586,7 +590,7 @@ static int malidp_bind(struct device *dev)
 
 	for (i = 0; i < MAX_OUTPUT_CHANNELS; i++)
 		out_depth = (out_depth << 8) | (output_width[i] & 0xf);
-	malidp_hw_write(hwdev, out_depth, hwdev->hw->map.out_depth_base);
+	malidp_hw_write(hwdev, out_depth, hwdev->map.out_depth_base);
 
 	atomic_set(&malidp->config_valid, 0);
 	init_waitqueue_head(&malidp->wq);
@@ -623,9 +627,14 @@ static int malidp_bind(struct device *dev)
 
 	drm_mode_config_reset(drm);
 
-	ret = drm_fb_cma_fbdev_init(drm, 32, 0);
-	if (ret)
+	malidp->fbdev = drm_fbdev_cma_init(drm, 32,
+					   drm->mode_config.num_connector);
+
+	if (IS_ERR(malidp->fbdev)) {
+		ret = PTR_ERR(malidp->fbdev);
+		malidp->fbdev = NULL;
 		goto fbdev_fail;
+	}
 
 	drm_kms_helper_poll_init(drm);
 
@@ -636,16 +645,19 @@ static int malidp_bind(struct device *dev)
 	return 0;
 
 register_fail:
-	drm_fb_cma_fbdev_fini(drm);
+	if (malidp->fbdev) {
+		drm_fbdev_cma_fini(malidp->fbdev);
+		malidp->fbdev = NULL;
+	}
 	drm_kms_helper_poll_fini(drm);
 fbdev_fail:
 	pm_runtime_get_sync(dev);
+	drm_vblank_cleanup(drm);
 vblank_fail:
 	malidp_se_irq_fini(drm);
 	malidp_de_irq_fini(drm);
 	drm->irq_enabled = false;
 irq_init_fail:
-	drm_atomic_helper_shutdown(drm);
 	component_unbind_all(dev, drm);
 bind_fail:
 	of_node_put(malidp->crtc.port);
@@ -661,7 +673,7 @@ query_hw_fail:
 		malidp_runtime_pm_suspend(dev);
 	drm->dev_private = NULL;
 	dev_set_drvdata(dev, NULL);
-	drm_dev_put(drm);
+	drm_dev_unref(drm);
 alloc_fail:
 	of_reserved_mem_device_release(dev);
 
@@ -674,14 +686,15 @@ static void malidp_unbind(struct device *dev)
 	struct malidp_drm *malidp = drm->dev_private;
 
 	drm_dev_unregister(drm);
-	drm_fb_cma_fbdev_fini(drm);
+	if (malidp->fbdev) {
+		drm_fbdev_cma_fini(malidp->fbdev);
+		malidp->fbdev = NULL;
+	}
 	drm_kms_helper_poll_fini(drm);
 	pm_runtime_get_sync(dev);
-	drm_crtc_vblank_off(&malidp->crtc);
+	drm_vblank_cleanup(drm);
 	malidp_se_irq_fini(drm);
 	malidp_de_irq_fini(drm);
-	drm->irq_enabled = false;
-	drm_atomic_helper_shutdown(drm);
 	component_unbind_all(dev, drm);
 	of_node_put(malidp->crtc.port);
 	malidp->crtc.port = NULL;
@@ -694,7 +707,7 @@ static void malidp_unbind(struct device *dev)
 		malidp_runtime_pm_suspend(dev);
 	drm->dev_private = NULL;
 	dev_set_drvdata(dev, NULL);
-	drm_dev_put(drm);
+	drm_dev_unref(drm);
 	of_reserved_mem_device_release(dev);
 }
 
@@ -739,15 +752,34 @@ static int malidp_platform_remove(struct platform_device *pdev)
 static int __maybe_unused malidp_pm_suspend(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
+	struct malidp_drm *malidp = drm->dev_private;
 
-	return drm_mode_config_helper_suspend(drm);
+	drm_kms_helper_poll_disable(drm);
+	console_lock();
+	drm_fbdev_cma_set_suspend(malidp->fbdev, 1);
+	console_unlock();
+	malidp->pm_state = drm_atomic_helper_suspend(drm);
+	if (IS_ERR(malidp->pm_state)) {
+		console_lock();
+		drm_fbdev_cma_set_suspend(malidp->fbdev, 0);
+		console_unlock();
+		drm_kms_helper_poll_enable(drm);
+		return PTR_ERR(malidp->pm_state);
+	}
+
+	return 0;
 }
 
 static int __maybe_unused malidp_pm_resume(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
+	struct malidp_drm *malidp = drm->dev_private;
 
-	drm_mode_config_helper_resume(drm);
+	drm_atomic_helper_resume(drm, malidp->pm_state);
+	console_lock();
+	drm_fbdev_cma_set_suspend(malidp->fbdev, 0);
+	console_unlock();
+	drm_kms_helper_poll_enable(drm);
 
 	return 0;
 }

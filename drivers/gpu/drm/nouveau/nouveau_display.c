@@ -29,7 +29,6 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_helper.h>
 
 #include <nvif/class.h>
 
@@ -99,7 +98,7 @@ calc(int blanks, int blanke, int total, int line)
 	return line;
 }
 
-static bool
+static int
 nouveau_display_scanoutpos_head(struct drm_crtc *crtc, int *vpos, int *hpos,
 				ktime_t *stime, ktime_t *etime)
 {
@@ -112,16 +111,16 @@ nouveau_display_scanoutpos_head(struct drm_crtc *crtc, int *vpos, int *hpos,
 	};
 	struct nouveau_display *disp = nouveau_display(crtc->dev);
 	struct drm_vblank_crtc *vblank = &crtc->dev->vblank[drm_crtc_index(crtc)];
-	int retry = 20;
-	bool ret = false;
+	int ret, retry = 20;
 
 	do {
-		ret = nvif_mthd(&disp->disp.object, 0, &args, sizeof(args));
+		ret = nvif_mthd(&disp->disp, 0, &args, sizeof(args));
 		if (ret != 0)
-			return false;
+			return 0;
 
 		if (args.scan.vline) {
-			ret = true;
+			ret |= DRM_SCANOUTPOS_ACCURATE;
+			ret |= DRM_SCANOUTPOS_VALID;
 			break;
 		}
 
@@ -134,12 +133,14 @@ nouveau_display_scanoutpos_head(struct drm_crtc *crtc, int *vpos, int *hpos,
 	if (stime) *stime = ns_to_ktime(args.scan.time[0]);
 	if (etime) *etime = ns_to_ktime(args.scan.time[1]);
 
+	if (*vpos < 0)
+		ret |= DRM_SCANOUTPOS_IN_VBLANK;
 	return ret;
 }
 
-bool
+int
 nouveau_display_scanoutpos(struct drm_device *dev, unsigned int pipe,
-			   bool in_vblank_irq, int *vpos, int *hpos,
+			   unsigned int flags, int *vpos, int *hpos,
 			   ktime_t *stime, ktime_t *etime,
 			   const struct drm_display_mode *mode)
 {
@@ -152,13 +153,36 @@ nouveau_display_scanoutpos(struct drm_device *dev, unsigned int pipe,
 		}
 	}
 
-	return false;
+	return 0;
+}
+
+int
+nouveau_display_vblstamp(struct drm_device *dev, unsigned int pipe,
+			 int *max_error, struct timeval *time, unsigned flags)
+{
+	struct drm_crtc *crtc;
+
+	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
+		if (nouveau_crtc(crtc)->index == pipe) {
+			struct drm_display_mode *mode;
+			if (drm_drv_uses_atomic_modeset(dev))
+				mode = &crtc->state->adjusted_mode;
+			else
+				mode = &crtc->hwmode;
+			return drm_calc_vbltimestamp_from_scanoutpos(dev,
+					pipe, max_error, time, flags, mode);
+		}
+	}
+
+	return -EINVAL;
 }
 
 static void
 nouveau_display_vblank_fini(struct drm_device *dev)
 {
 	struct drm_crtc *crtc;
+
+	drm_vblank_cleanup(dev);
 
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
 		struct nouveau_crtc *nv_crtc = nouveau_crtc(crtc);
@@ -175,7 +199,7 @@ nouveau_display_vblank_init(struct drm_device *dev)
 
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
 		struct nouveau_crtc *nv_crtc = nouveau_crtc(crtc);
-		ret = nvif_notify_init(&disp->disp.object,
+		ret = nvif_notify_init(&disp->disp,
 				       nouveau_display_vblank_handler, false,
 				       NV04_DISP_NTFY_VBLANK,
 				       &(struct nvif_notify_head_req_v0) {
@@ -232,29 +256,8 @@ nouveau_framebuffer_new(struct drm_device *dev,
 			struct nouveau_bo *nvbo,
 			struct nouveau_framebuffer **pfb)
 {
-	struct nouveau_drm *drm = nouveau_drm(dev);
 	struct nouveau_framebuffer *fb;
 	int ret;
-
-        /* YUV overlays have special requirements pre-NV50 */
-	if (drm->client.device.info.family < NV_DEVICE_INFO_V0_TESLA &&
-
-	    (mode_cmd->pixel_format == DRM_FORMAT_YUYV ||
-	     mode_cmd->pixel_format == DRM_FORMAT_UYVY ||
-	     mode_cmd->pixel_format == DRM_FORMAT_NV12 ||
-	     mode_cmd->pixel_format == DRM_FORMAT_NV21) &&
-	    (mode_cmd->pitches[0] & 0x3f || /* align 64 */
-	     mode_cmd->pitches[0] >= 0x10000 || /* at most 64k pitch */
-	     (mode_cmd->pitches[1] && /* pitches for planes must match */
-	      mode_cmd->pitches[0] != mode_cmd->pitches[1]))) {
-		struct drm_format_name_buf format_name;
-		DRM_DEBUG_KMS("Unsuitable framebuffer: format: %s; pitches: 0x%x\n 0x%x\n",
-			      drm_get_format_name(mode_cmd->pixel_format,
-						  &format_name),
-			      mode_cmd->pitches[0],
-			      mode_cmd->pitches[1]);
-		return -EINVAL;
-	}
 
 	if (!(fb = *pfb = kzalloc(sizeof(*fb), GFP_KERNEL)))
 		return -ENOMEM;
@@ -293,7 +296,7 @@ nouveau_user_framebuffer_create(struct drm_device *dev,
 
 static const struct drm_mode_config_funcs nouveau_mode_config_funcs = {
 	.fb_create = nouveau_user_framebuffer_create,
-	.output_poll_changed = drm_fb_helper_output_poll_changed,
+	.output_poll_changed = nouveau_fbcon_output_poll_changed,
 };
 
 
@@ -338,9 +341,11 @@ static struct nouveau_drm_prop_enum_list dither_depth[] = {
 	if (c) {                                                               \
 		p = drm_property_create(dev, DRM_MODE_PROP_ENUM, n, c);        \
 		l = (list);                                                    \
+		c = 0;                                                         \
 		while (p && l->gen_mask) {                                     \
 			if (l->gen_mask & (1 << (gen))) {                      \
-				drm_property_add_enum(p, l->type, l->name);    \
+				drm_property_add_enum(p, c, l->type, l->name); \
+				c++;                                           \
 			}                                                      \
 			l++;                                                   \
 		}                                                              \
@@ -427,6 +432,7 @@ nouveau_display_fini(struct drm_device *dev, bool suspend)
 	struct nouveau_display *disp = nouveau_display(dev);
 	struct nouveau_drm *drm = nouveau_drm(dev);
 	struct drm_connector *connector;
+	struct drm_crtc *crtc;
 
 	if (!suspend) {
 		if (drm_drv_uses_atomic_modeset(dev))
@@ -434,6 +440,10 @@ nouveau_display_fini(struct drm_device *dev, bool suspend)
 		else
 			drm_crtc_force_disable_all(dev);
 	}
+
+	/* Make sure that drm and hw vblank irqs get properly disabled. */
+	drm_for_each_crtc(crtc, dev)
+		drm_crtc_vblank_off(crtc);
 
 	/* disable flip completion events */
 	nvif_notify_put(&drm->flip);
@@ -454,10 +464,10 @@ nouveau_display_create_properties(struct drm_device *dev)
 	struct nouveau_display *disp = nouveau_display(dev);
 	int gen;
 
-	if (disp->disp.object.oclass < NV50_DISP)
+	if (disp->disp.oclass < NV50_DISP)
 		gen = 0;
 	else
-	if (disp->disp.object.oclass < GF110_DISP)
+	if (disp->disp.oclass < GF110_DISP)
 		gen = 1;
 	else
 		gen = 2;
@@ -533,10 +543,31 @@ nouveau_display_create(struct drm_device *dev)
 	drm_kms_helper_poll_disable(dev);
 
 	if (nouveau_modeset != 2 && drm->vbios.dcb.entries) {
-		ret = nvif_disp_ctor(&drm->client.device, 0, &disp->disp);
+		static const u16 oclass[] = {
+			GP102_DISP,
+			GP100_DISP,
+			GM200_DISP,
+			GM107_DISP,
+			GK110_DISP,
+			GK104_DISP,
+			GF110_DISP,
+			GT214_DISP,
+			GT206_DISP,
+			GT200_DISP,
+			G82_DISP,
+			NV50_DISP,
+			NV04_DISP,
+		};
+		int i;
+
+		for (i = 0, ret = -ENODEV; ret && i < ARRAY_SIZE(oclass); i++) {
+			ret = nvif_object_init(&drm->client.device.object, 0,
+					       oclass[i], NULL, 0, &disp->disp);
+		}
+
 		if (ret == 0) {
 			nouveau_display_create_properties(dev);
-			if (disp->disp.object.oclass < NV50_DISP)
+			if (disp->disp.oclass < NV50_DISP)
 				ret = nv04_display_create(dev);
 			else
 				ret = nv50_display_create(dev);
@@ -590,7 +621,7 @@ nouveau_display_destroy(struct drm_device *dev)
 	if (disp->dtor)
 		disp->dtor(dev);
 
-	nvif_disp_dtor(&disp->disp);
+	nvif_object_fini(&disp->disp);
 
 	nouveau_drm(dev)->display = NULL;
 	kfree(disp);

@@ -305,7 +305,7 @@ static int em_sti_probe(struct platform_device *pdev)
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		dev_err(&pdev->dev, "failed to get irq\n");
-		return irq;
+		return -EINVAL;
 	}
 
 	/* map memory, let base point to the STI instance */
@@ -314,12 +314,11 @@ static int em_sti_probe(struct platform_device *pdev)
 	if (IS_ERR(p->base))
 		return PTR_ERR(p->base);
 
-	ret = devm_request_irq(&pdev->dev, irq, em_sti_interrupt,
-			       IRQF_TIMER | IRQF_IRQPOLL | IRQF_NOBALANCING,
-			       dev_name(&pdev->dev), p);
-	if (ret) {
+	if (devm_request_irq(&pdev->dev, irq, em_sti_interrupt,
+			     IRQF_TIMER | IRQF_IRQPOLL | IRQF_NOBALANCING,
+			     dev_name(&pdev->dev), p)) {
 		dev_err(&pdev->dev, "failed to request low IRQ\n");
-		return ret;
+		return -ENOENT;
 	}
 
 	/* get hold of clock */

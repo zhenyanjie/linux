@@ -57,6 +57,10 @@ struct memblock {
 
 extern struct memblock memblock;
 extern int memblock_debug;
+#ifdef CONFIG_MOVABLE_NODE
+/* If movable_node boot option specified */
+extern bool movable_node_enabled;
+#endif /* CONFIG_MOVABLE_NODE */
 
 #ifdef CONFIG_ARCH_DISCARD_MEMBLOCK
 #define __init_memblock __meminit
@@ -167,10 +171,26 @@ void __memblock_free_late(phys_addr_t base, phys_addr_t size);
 	     i != (u64)ULLONG_MAX;					\
 	     __next_reserved_mem_region(&i, p_start, p_end))
 
+#ifdef CONFIG_MOVABLE_NODE
 static inline bool memblock_is_hotpluggable(struct memblock_region *m)
 {
 	return m->flags & MEMBLOCK_HOTPLUG;
 }
+
+static inline bool __init_memblock movable_node_is_enabled(void)
+{
+	return movable_node_enabled;
+}
+#else
+static inline bool memblock_is_hotpluggable(struct memblock_region *m)
+{
+	return false;
+}
+static inline bool movable_node_is_enabled(void)
+{
+	return false;
+}
+#endif
 
 static inline bool memblock_is_mirror(struct memblock_region *m)
 {
@@ -187,6 +207,7 @@ int memblock_search_pfn_nid(unsigned long pfn, unsigned long *start_pfn,
 			    unsigned long  *end_pfn);
 void __next_mem_pfn_range(int *idx, int nid, unsigned long *out_start_pfn,
 			  unsigned long *out_end_pfn, int *out_nid);
+unsigned long memblock_next_valid_pfn(unsigned long pfn, unsigned long max_pfn);
 
 /**
  * for_each_mem_pfn_range - early memory pfn range iterator
@@ -236,22 +257,6 @@ void __next_mem_pfn_range(int *idx, int nid, unsigned long *out_start_pfn,
 	for_each_mem_range_rev(i, &memblock.memory, &memblock.reserved,	\
 			       nid, flags, p_start, p_end, p_nid)
 
-/**
- * for_each_resv_unavail_range - iterate through reserved and unavailable memory
- * @i: u64 used as loop variable
- * @flags: pick from blocks based on memory attributes
- * @p_start: ptr to phys_addr_t for start address of the range, can be %NULL
- * @p_end: ptr to phys_addr_t for end address of the range, can be %NULL
- *
- * Walks over unavailable but reserved (reserved && !memory) areas of memblock.
- * Available as soon as memblock is initialized.
- * Note: because this memory does not belong to any physical node, flags and
- * nid arguments do not make sense and thus not exported as arguments.
- */
-#define for_each_resv_unavail_range(i, p_start, p_end)			\
-	for_each_mem_range(i, &memblock.reserved, &memblock.memory,	\
-			   NUMA_NO_NODE, MEMBLOCK_NONE, p_start, p_end, NULL)
-
 static inline void memblock_set_region_flags(struct memblock_region *r,
 					     unsigned long flags)
 {
@@ -293,6 +298,7 @@ phys_addr_t memblock_alloc_try_nid(phys_addr_t size, phys_addr_t align, int nid)
 
 phys_addr_t memblock_alloc(phys_addr_t size, phys_addr_t align);
 
+#ifdef CONFIG_MOVABLE_NODE
 /*
  * Set the allocation direction to bottom-up or top-down.
  */
@@ -310,6 +316,10 @@ static inline bool memblock_bottom_up(void)
 {
 	return memblock.bottom_up;
 }
+#else
+static inline void __init memblock_set_bottom_up(bool enable) {}
+static inline bool memblock_bottom_up(void) { return false; }
+#endif
 
 /* Flags for memblock_alloc_base() amd __memblock_alloc_base() */
 #define MEMBLOCK_ALLOC_ANYWHERE	(~(phys_addr_t)0)
@@ -318,9 +328,6 @@ static inline bool memblock_bottom_up(void)
 phys_addr_t __init memblock_alloc_range(phys_addr_t size, phys_addr_t align,
 					phys_addr_t start, phys_addr_t end,
 					ulong flags);
-phys_addr_t memblock_alloc_base_nid(phys_addr_t size,
-					phys_addr_t align, phys_addr_t max_addr,
-					int nid, ulong flags);
 phys_addr_t memblock_alloc_base(phys_addr_t size, phys_addr_t align,
 				phys_addr_t max_addr);
 phys_addr_t __memblock_alloc_base(phys_addr_t size, phys_addr_t align,
@@ -334,8 +341,8 @@ void memblock_enforce_memory_limit(phys_addr_t memory_limit);
 void memblock_cap_memory_range(phys_addr_t base, phys_addr_t size);
 void memblock_mem_limit_remove_map(phys_addr_t limit);
 bool memblock_is_memory(phys_addr_t addr);
-bool memblock_is_map_memory(phys_addr_t addr);
-bool memblock_is_region_memory(phys_addr_t base, phys_addr_t size);
+int memblock_is_map_memory(phys_addr_t addr);
+int memblock_is_region_memory(phys_addr_t base, phys_addr_t size);
 bool memblock_is_reserved(phys_addr_t addr);
 bool memblock_is_region_reserved(phys_addr_t base, phys_addr_t size);
 
@@ -407,10 +414,10 @@ static inline unsigned long memblock_region_reserved_end_pfn(const struct memblo
 	     region < (memblock.memblock_type.regions + memblock.memblock_type.cnt);	\
 	     region++)
 
-#define for_each_memblock_type(i, memblock_type, rgn)			\
-	for (i = 0, rgn = &memblock_type->regions[0];			\
-	     i < memblock_type->cnt;					\
-	     i++, rgn = &memblock_type->regions[i])
+#define for_each_memblock_type(memblock_type, rgn)			\
+	for (idx = 0, rgn = &memblock_type->regions[0];			\
+	     idx < memblock_type->cnt;					\
+	     idx++, rgn = &memblock_type->regions[idx])
 
 #ifdef CONFIG_MEMTEST
 extern void early_memtest(phys_addr_t start, phys_addr_t end);
@@ -419,11 +426,21 @@ static inline void early_memtest(phys_addr_t start, phys_addr_t end)
 {
 }
 #endif
+
+extern unsigned long memblock_reserved_memory_within(phys_addr_t start_addr,
+		phys_addr_t end_addr);
 #else
 static inline phys_addr_t memblock_alloc(phys_addr_t size, phys_addr_t align)
 {
 	return 0;
 }
+
+static inline unsigned long memblock_reserved_memory_within(phys_addr_t start_addr,
+		phys_addr_t end_addr)
+{
+	return 0;
+}
+
 #endif /* CONFIG_HAVE_MEMBLOCK */
 
 #endif /* __KERNEL__ */

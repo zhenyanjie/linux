@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/bad_inode.c
  *
@@ -126,7 +125,7 @@ static int bad_inode_fiemap(struct inode *inode,
 	return -EIO;
 }
 
-static int bad_inode_update_time(struct inode *inode, struct timespec64 *time,
+static int bad_inode_update_time(struct inode *inode, struct timespec *time,
 				 int flags)
 {
 	return -EIO;

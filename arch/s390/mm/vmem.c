@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *    Copyright IBM Corp. 2006
  *    Author(s): Heiko Carstens <heiko.carstens@de.ibm.com>
@@ -39,14 +38,26 @@ static void __ref *vmem_alloc_pages(unsigned int order)
 	return (void *) memblock_alloc(size, size);
 }
 
-void *vmem_crst_alloc(unsigned long val)
+static inline pud_t *vmem_pud_alloc(void)
 {
-	unsigned long *table;
+	pud_t *pud = NULL;
 
-	table = vmem_alloc_pages(CRST_ALLOC_ORDER);
-	if (table)
-		crst_table_init(table, val);
-	return table;
+	pud = vmem_alloc_pages(2);
+	if (!pud)
+		return NULL;
+	clear_table((unsigned long *) pud, _REGION3_ENTRY_EMPTY, PAGE_SIZE * 4);
+	return pud;
+}
+
+pmd_t *vmem_pmd_alloc(void)
+{
+	pmd_t *pmd = NULL;
+
+	pmd = vmem_alloc_pages(2);
+	if (!pmd)
+		return NULL;
+	clear_table((unsigned long *) pmd, _SEGMENT_ENTRY_EMPTY, PAGE_SIZE * 4);
+	return pmd;
 }
 
 pte_t __ref *vmem_pte_alloc(void)
@@ -60,7 +71,7 @@ pte_t __ref *vmem_pte_alloc(void)
 		pte = (pte_t *) memblock_alloc(size, size);
 	if (!pte)
 		return NULL;
-	memset64((u64 *)pte, _PAGE_INVALID, PTRS_PER_PTE);
+	clear_table((unsigned long *) pte, _PAGE_INVALID, size);
 	return pte;
 }
 
@@ -74,7 +85,6 @@ static int vmem_add_mem(unsigned long start, unsigned long size)
 	unsigned long end = start + size;
 	unsigned long address = start;
 	pgd_t *pg_dir;
-	p4d_t *p4_dir;
 	pud_t *pu_dir;
 	pmd_t *pm_dir;
 	pte_t *pt_dir;
@@ -92,19 +102,12 @@ static int vmem_add_mem(unsigned long start, unsigned long size)
 	while (address < end) {
 		pg_dir = pgd_offset_k(address);
 		if (pgd_none(*pg_dir)) {
-			p4_dir = vmem_crst_alloc(_REGION2_ENTRY_EMPTY);
-			if (!p4_dir)
-				goto out;
-			pgd_populate(&init_mm, pg_dir, p4_dir);
-		}
-		p4_dir = p4d_offset(pg_dir, address);
-		if (p4d_none(*p4_dir)) {
-			pu_dir = vmem_crst_alloc(_REGION3_ENTRY_EMPTY);
+			pu_dir = vmem_pud_alloc();
 			if (!pu_dir)
 				goto out;
-			p4d_populate(&init_mm, p4_dir, pu_dir);
+			pgd_populate(&init_mm, pg_dir, pu_dir);
 		}
-		pu_dir = pud_offset(p4_dir, address);
+		pu_dir = pud_offset(pg_dir, address);
 		if (MACHINE_HAS_EDAT2 && pud_none(*pu_dir) && address &&
 		    !(address & ~PUD_MASK) && (address + PUD_SIZE <= end) &&
 		     !debug_pagealloc_enabled()) {
@@ -114,7 +117,7 @@ static int vmem_add_mem(unsigned long start, unsigned long size)
 			continue;
 		}
 		if (pud_none(*pu_dir)) {
-			pm_dir = vmem_crst_alloc(_SEGMENT_ENTRY_EMPTY);
+			pm_dir = vmem_pmd_alloc();
 			if (!pm_dir)
 				goto out;
 			pud_populate(&init_mm, pu_dir, pm_dir);
@@ -158,7 +161,6 @@ static void vmem_remove_range(unsigned long start, unsigned long size)
 	unsigned long end = start + size;
 	unsigned long address = start;
 	pgd_t *pg_dir;
-	p4d_t *p4_dir;
 	pud_t *pu_dir;
 	pmd_t *pm_dir;
 	pte_t *pt_dir;
@@ -170,12 +172,7 @@ static void vmem_remove_range(unsigned long start, unsigned long size)
 			address += PGDIR_SIZE;
 			continue;
 		}
-		p4_dir = p4d_offset(pg_dir, address);
-		if (p4d_none(*p4_dir)) {
-			address += P4D_SIZE;
-			continue;
-		}
-		pu_dir = pud_offset(p4_dir, address);
+		pu_dir = pud_offset(pg_dir, address);
 		if (pud_none(*pu_dir)) {
 			address += PUD_SIZE;
 			continue;
@@ -211,13 +208,11 @@ static void vmem_remove_range(unsigned long start, unsigned long size)
 /*
  * Add a backed mem_map array to the virtual mem_map array.
  */
-int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
-		struct vmem_altmap *altmap)
+int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
 {
 	unsigned long pgt_prot, sgt_prot;
 	unsigned long address = start;
 	pgd_t *pg_dir;
-	p4d_t *p4_dir;
 	pud_t *pu_dir;
 	pmd_t *pm_dir;
 	pte_t *pt_dir;
@@ -232,23 +227,15 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 	for (address = start; address < end;) {
 		pg_dir = pgd_offset_k(address);
 		if (pgd_none(*pg_dir)) {
-			p4_dir = vmem_crst_alloc(_REGION2_ENTRY_EMPTY);
-			if (!p4_dir)
-				goto out;
-			pgd_populate(&init_mm, pg_dir, p4_dir);
-		}
-
-		p4_dir = p4d_offset(pg_dir, address);
-		if (p4d_none(*p4_dir)) {
-			pu_dir = vmem_crst_alloc(_REGION3_ENTRY_EMPTY);
+			pu_dir = vmem_pud_alloc();
 			if (!pu_dir)
 				goto out;
-			p4d_populate(&init_mm, p4_dir, pu_dir);
+			pgd_populate(&init_mm, pg_dir, pu_dir);
 		}
 
-		pu_dir = pud_offset(p4_dir, address);
+		pu_dir = pud_offset(pg_dir, address);
 		if (pud_none(*pu_dir)) {
-			pm_dir = vmem_crst_alloc(_SEGMENT_ENTRY_EMPTY);
+			pm_dir = vmem_pmd_alloc();
 			if (!pm_dir)
 				goto out;
 			pud_populate(&init_mm, pu_dir, pm_dir);
@@ -297,8 +284,7 @@ out:
 	return ret;
 }
 
-void vmemmap_free(unsigned long start, unsigned long end,
-		struct vmem_altmap *altmap)
+void vmemmap_free(unsigned long start, unsigned long end)
 {
 }
 
@@ -405,17 +391,17 @@ void __init vmem_map_init(void)
 
 	for_each_memblock(memory, reg)
 		vmem_add_mem(reg->base, reg->size);
-	__set_memory((unsigned long)_stext,
-		     (unsigned long)(_etext - _stext) >> PAGE_SHIFT,
+	__set_memory((unsigned long) _stext,
+		     (_etext - _stext) >> PAGE_SHIFT,
 		     SET_MEMORY_RO | SET_MEMORY_X);
-	__set_memory((unsigned long)_etext,
-		     (unsigned long)(__end_rodata - _etext) >> PAGE_SHIFT,
+	__set_memory((unsigned long) _etext,
+		     (_eshared - _etext) >> PAGE_SHIFT,
 		     SET_MEMORY_RO);
-	__set_memory((unsigned long)_sinittext,
-		     (unsigned long)(_einittext - _sinittext) >> PAGE_SHIFT,
+	__set_memory((unsigned long) _sinittext,
+		     (_einittext - _sinittext) >> PAGE_SHIFT,
 		     SET_MEMORY_RO | SET_MEMORY_X);
 	pr_info("Write protected kernel read-only data: %luk\n",
-		(unsigned long)(__end_rodata - _stext) >> 10);
+		(_eshared - _stext) >> 10);
 }
 
 /*

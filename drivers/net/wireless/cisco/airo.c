@@ -3066,7 +3066,7 @@ static int airo_thread(void *data) {
 		if (ai->jobs) {
 			locked = down_interruptible(&ai->sem);
 		} else {
-			wait_queue_entry_t wait;
+			wait_queue_t wait;
 
 			init_waitqueue_entry(&wait, current);
 			add_wait_queue(&ai->thr_wait, &wait);
@@ -3330,7 +3330,7 @@ static void airo_handle_rx(struct airo_info *ai)
 	}
 
 	skb_reserve(skb, 2); /* This way the IP header is aligned */
-	buffer = skb_put(skb, len + hdrlen);
+	buffer = (__le16 *) skb_put(skb, len + hdrlen);
 	if (test_bit(FLAG_802_11, &ai->flags)) {
 		buffer[0] = fc;
 		bap_read(ai, buffer + 1, hdrlen - 2, BAP0);
@@ -3734,7 +3734,7 @@ static void mpi_receive_802_11(struct airo_info *ai)
 		ai->dev->stats.rx_dropped++;
 		goto badrx;
 	}
-	buffer = skb_put(skb, len + hdrlen);
+	buffer = (u16*)skb_put (skb, len + hdrlen);
 	memcpy ((char *)buffer, ptr, hdrlen);
 	ptr += hdrlen;
 	if (hdrlen == 24)
@@ -4519,21 +4519,21 @@ static int setup_proc_entry( struct net_device *dev,
 	proc_set_user(apriv->proc_entry, proc_kuid, proc_kgid);
 
 	/* Setup the StatsDelta */
-	entry = proc_create_data("StatsDelta", 0444 & proc_perm,
+	entry = proc_create_data("StatsDelta", S_IRUGO & proc_perm,
 				 apriv->proc_entry, &proc_statsdelta_ops, dev);
 	if (!entry)
 		goto fail;
 	proc_set_user(entry, proc_kuid, proc_kgid);
 
 	/* Setup the Stats */
-	entry = proc_create_data("Stats", 0444 & proc_perm,
+	entry = proc_create_data("Stats", S_IRUGO & proc_perm,
 				 apriv->proc_entry, &proc_stats_ops, dev);
 	if (!entry)
 		goto fail;
 	proc_set_user(entry, proc_kuid, proc_kgid);
 
 	/* Setup the Status */
-	entry = proc_create_data("Status", 0444 & proc_perm,
+	entry = proc_create_data("Status", S_IRUGO & proc_perm,
 				 apriv->proc_entry, &proc_status_ops, dev);
 	if (!entry)
 		goto fail;
@@ -7127,7 +7127,7 @@ static int airo_get_aplist(struct net_device *dev,
 	int i;
 	int loseSync = capable(CAP_NET_ADMIN) ? 1: -1;
 
-	qual = kmalloc_array(IW_MAX_AP, sizeof(*qual), GFP_KERNEL);
+	qual = kmalloc(IW_MAX_AP * sizeof(*qual), GFP_KERNEL);
 	if (!qual)
 		return -ENOMEM;
 
@@ -7837,7 +7837,7 @@ static int writerids(struct net_device *dev, aironet_ioctl *comp) {
 	struct airo_info *ai = dev->ml_priv;
 	int  ridcode;
         int  enabled;
-	int (*writer)(struct airo_info *, u16 rid, const void *, int, int);
+	static int (* writer)(struct airo_info *, u16 rid, const void *, int, int);
 	unsigned char *iobuf;
 
 	/* Only super-user can write RIDs */

@@ -12,7 +12,7 @@
  */
 
 #include <linux/etherdevice.h>
-
+#include <net/dsa.h>
 #include "dsa_priv.h"
 
 #define QCA_HDR_LEN	2
@@ -38,14 +38,14 @@
 
 static struct sk_buff *qca_tag_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_slave_priv *p = netdev_priv(dev);
 	u16 *phdr, hdr;
 
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += skb->len;
 
 	if (skb_cow_head(skb, 0) < 0)
-		return NULL;
+		goto out_free;
 
 	skb_push(skb, QCA_HDR_LEN);
 
@@ -54,22 +54,30 @@ static struct sk_buff *qca_tag_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	/* Set the version field, and set destination port information */
 	hdr = QCA_HDR_VERSION << QCA_HDR_XMIT_VERSION_S |
-		QCA_HDR_XMIT_FROM_CPU | BIT(dp->index);
+		QCA_HDR_XMIT_FROM_CPU |
+		BIT(p->dp->index);
 
 	*phdr = htons(hdr);
 
 	return skb;
+
+out_free:
+	kfree_skb(skb);
+	return NULL;
 }
 
 static struct sk_buff *qca_tag_rcv(struct sk_buff *skb, struct net_device *dev,
-				   struct packet_type *pt)
+				   struct packet_type *pt,
+				   struct net_device *orig_dev)
 {
+	struct dsa_switch_tree *dst = dev->dsa_ptr;
+	struct dsa_switch *ds;
 	u8 ver;
 	int port;
 	__be16 *phdr, hdr;
 
 	if (unlikely(!pskb_may_pull(skb, QCA_HDR_LEN)))
-		return NULL;
+		goto out_drop;
 
 	/* The QCA header is added by the switch between src addr and Ethertype
 	 * At this point, skb->data points to ethertype so header should be
@@ -81,21 +89,32 @@ static struct sk_buff *qca_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 	/* Make sure the version is correct */
 	ver = (hdr & QCA_HDR_RECV_VERSION_MASK) >> QCA_HDR_RECV_VERSION_S;
 	if (unlikely(ver != QCA_HDR_VERSION))
-		return NULL;
+		goto out_drop;
 
 	/* Remove QCA tag and recalculate checksum */
 	skb_pull_rcsum(skb, QCA_HDR_LEN);
 	memmove(skb->data - ETH_HLEN, skb->data - ETH_HLEN - QCA_HDR_LEN,
 		ETH_HLEN - QCA_HDR_LEN);
 
+	/* This protocol doesn't support cascading multiple switches so it's
+	 * safe to assume the switch is first in the tree
+	 */
+	ds = dst->cpu_switch;
+	if (!ds)
+		goto out_drop;
+
 	/* Get source port information */
 	port = (hdr & QCA_HDR_RECV_SOURCE_PORT_MASK);
+	if (!ds->ports[port].netdev)
+		goto out_drop;
 
-	skb->dev = dsa_master_find_slave(dev, 0, port);
-	if (!skb->dev)
-		return NULL;
+	/* Update skb & forward the frame accordingly */
+	skb->dev = ds->ports[port].netdev;
 
 	return skb;
+
+out_drop:
+	return NULL;
 }
 
 const struct dsa_device_ops qca_netdev_ops = {

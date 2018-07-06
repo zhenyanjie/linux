@@ -60,6 +60,7 @@ static atomic_t vp_pinned = ATOMIC_INIT(0);
 
 /**
  * struct virtio_chan - per-instance transport information
+ * @initialized: whether the channel is initialized
  * @inuse: whether the channel is in use
  * @lock: protects multiple elements within this structure
  * @client: client instance
@@ -159,8 +160,7 @@ static void req_done(struct virtqueue *vq)
 		spin_unlock_irqrestore(&chan->lock, flags);
 		/* Wakeup if anyone waiting for VirtIO ring space. */
 		wake_up(chan->vc_wq);
-		if (len)
-			p9_client_cb(chan->client, req, REQ_STATUS_RCVD);
+		p9_client_cb(chan->client, req, REQ_STATUS_RCVD);
 	}
 }
 
@@ -286,8 +286,8 @@ req_retry:
 		if (err == -ENOSPC) {
 			chan->ring_bufs_avail = 0;
 			spin_unlock_irqrestore(&chan->lock, flags);
-			err = wait_event_killable(*chan->vc_wq,
-						  chan->ring_bufs_avail);
+			err = wait_event_interruptible(*chan->vc_wq,
+							chan->ring_bufs_avail);
 			if (err  == -ERESTARTSYS)
 				return err;
 
@@ -327,7 +327,7 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
 		 * Other zc request to finish here
 		 */
 		if (atomic_read(&vp_pinned) >= chan->p9_max_pages) {
-			err = wait_event_killable(vp_wq,
+			err = wait_event_interruptible(vp_wq,
 			      (atomic_read(&vp_pinned) < chan->p9_max_pages));
 			if (err == -ERESTARTSYS)
 				return err;
@@ -360,8 +360,7 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
 		nr_pages = DIV_ROUND_UP((unsigned long)p + len, PAGE_SIZE) -
 			   (unsigned long)p / PAGE_SIZE;
 
-		*pages = kmalloc_array(nr_pages, sizeof(struct page *),
-				       GFP_NOFS);
+		*pages = kmalloc(sizeof(struct page *) * nr_pages, GFP_NOFS);
 		if (!*pages)
 			return -ENOMEM;
 
@@ -385,8 +384,8 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
  * @uidata: user bffer that should be ued for zero copy read
  * @uodata: user buffer that shoud be user for zero copy write
  * @inlen: read buffer size
- * @outlen: write buffer size
- * @in_hdr_len: reader header size, This is the size of response protocol data
+ * @olen: write buffer size
+ * @hdrlen: reader header size, This is the size of response protocol data
  *
  */
 static int
@@ -472,8 +471,8 @@ req_retry_pinned:
 		if (err == -ENOSPC) {
 			chan->ring_bufs_avail = 0;
 			spin_unlock_irqrestore(&chan->lock, flags);
-			err = wait_event_killable(*chan->vc_wq,
-						  chan->ring_bufs_avail);
+			err = wait_event_interruptible(*chan->vc_wq,
+						       chan->ring_bufs_avail);
 			if (err  == -ERESTARTSYS)
 				goto err_out;
 
@@ -490,7 +489,8 @@ req_retry_pinned:
 	virtqueue_kick(chan->vq);
 	spin_unlock_irqrestore(&chan->lock, flags);
 	p9_debug(P9_DEBUG_TRANS, "virtio request kicked\n");
-	err = wait_event_killable(*req->wq, req->status >= REQ_STATUS_RCVD);
+	err = wait_event_interruptible(*req->wq,
+				       req->status >= REQ_STATUS_RCVD);
 	/*
 	 * Non kernel buffers are pinned, unpin them
 	 */

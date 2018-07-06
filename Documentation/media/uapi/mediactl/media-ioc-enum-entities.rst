@@ -51,7 +51,7 @@ id's until they get an error.
 
 .. c:type:: media_entity_desc
 
-.. tabularcolumns:: |p{1.5cm}|p{1.7cm}|p{1.6cm}|p{1.5cm}|p{11.2cm}|
+.. tabularcolumns:: |p{1.5cm}|p{1.5cm}|p{1.5cm}|p{1.5cm}|p{11.5cm}|
 
 .. flat-table:: struct media_entity_desc
     :header-rows:  0
@@ -89,7 +89,7 @@ id's until they get an error.
 
        -
        -
-       -  Entity type, see :ref:`media-entity-functions` for details.
+       -  Entity type, see :ref:`media-entity-type` for details.
 
     -  .. row 4
 
@@ -144,20 +144,9 @@ id's until they get an error.
 
     -  .. row 9
 
-       -  __u32
-
-       -  ``reserved[4]``
-
-       -
-       -
-       -  Reserved for future extensions. Drivers and applications must set
-          the array to zero.
-
-    -  .. row 10
-
        -  union
 
-    -  .. row 11
+    -  .. row 10
 
        -
        -  struct
@@ -167,7 +156,7 @@ id's until they get an error.
        -
        -  Valid for (sub-)devices that create a single device node.
 
-    -  .. row 12
+    -  .. row 11
 
        -
        -
@@ -177,7 +166,7 @@ id's until they get an error.
 
        -  Device node major number.
 
-    -  .. row 13
+    -  .. row 12
 
        -
        -
@@ -187,7 +176,7 @@ id's until they get an error.
 
        -  Device node minor number.
 
-    -  .. row 14
+    -  .. row 13
 
        -
        -  __u8

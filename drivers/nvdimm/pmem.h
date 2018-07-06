@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NVDIMM_PMEM_H__
 #define __NVDIMM_PMEM_H__
 #include <linux/badblocks.h>
@@ -18,11 +17,9 @@ struct pmem_device {
 	size_t			size;
 	/* trim size when namespace capacity has been section aligned */
 	u32			pfn_pad;
-	struct kernfs_node	*bb_state;
 	struct badblocks	bb;
 	struct dax_device	*dax_dev;
 	struct gendisk		*disk;
-	struct dev_pagemap	pgmap;
 };
 
 long __pmem_direct_access(struct pmem_device *pmem, pgoff_t pgoff,

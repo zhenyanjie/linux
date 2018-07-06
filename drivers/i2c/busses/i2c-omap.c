@@ -36,7 +36,7 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/slab.h>
-#include <linux/platform_data/i2c-omap.h>
+#include <linux/i2c-omap.h>
 #include <linux/pm_runtime.h>
 #include <linux/pinctrl/consumer.h>
 
@@ -360,7 +360,6 @@ static int omap_i2c_init(struct omap_i2c_dev *omap)
 	unsigned long fclk_rate = 12000000;
 	unsigned long internal_clk = 0;
 	struct clk *fclk;
-	int error;
 
 	if (omap->rev >= OMAP_I2C_REV_ON_3430_3530) {
 		/*
@@ -379,13 +378,6 @@ static int omap_i2c_init(struct omap_i2c_dev *omap)
 		 * do this bit unconditionally.
 		 */
 		fclk = clk_get(omap->dev, "fck");
-		if (IS_ERR(fclk)) {
-			error = PTR_ERR(fclk);
-			dev_err(omap->dev, "could not get fck: %i\n", error);
-
-			return error;
-		}
-
 		fclk_rate = clk_get_rate(fclk);
 		clk_put(fclk);
 
@@ -418,12 +410,6 @@ static int omap_i2c_init(struct omap_i2c_dev *omap)
 		else
 			internal_clk = 4000;
 		fclk = clk_get(omap->dev, "fck");
-		if (IS_ERR(fclk)) {
-			error = PTR_ERR(fclk);
-			dev_err(omap->dev, "could not get fck: %i\n", error);
-
-			return error;
-		}
 		fclk_rate = clk_get_rate(fclk) / 1000;
 		clk_put(fclk);
 
@@ -487,22 +473,6 @@ static int omap_i2c_init(struct omap_i2c_dev *omap)
 }
 
 /*
- * Try bus recovery, but only if SDA is actually low.
- */
-static int omap_i2c_recover_bus(struct omap_i2c_dev *omap)
-{
-	u16 systest;
-
-	systest = omap_i2c_read_reg(omap, OMAP_I2C_SYSTEST_REG);
-	if ((systest & OMAP_I2C_SYSTEST_SCL_I_FUNC) &&
-	    (systest & OMAP_I2C_SYSTEST_SDA_I_FUNC))
-		return 0; /* bus seems to already be fine */
-	if (!(systest & OMAP_I2C_SYSTEST_SCL_I_FUNC))
-		return -EBUSY; /* recovery would not fix SCL */
-	return i2c_recover_bus(&omap->adapter);
-}
-
-/*
  * Waiting on Bus Busy
  */
 static int omap_i2c_wait_for_bb(struct omap_i2c_dev *omap)
@@ -512,7 +482,7 @@ static int omap_i2c_wait_for_bb(struct omap_i2c_dev *omap)
 	timeout = jiffies + OMAP_I2C_TIMEOUT;
 	while (omap_i2c_read_reg(omap, OMAP_I2C_STAT_REG) & OMAP_I2C_STAT_BB) {
 		if (time_after(jiffies, timeout))
-			return omap_i2c_recover_bus(omap);
+			return i2c_recover_bus(&omap->adapter);
 		msleep(1);
 	}
 
@@ -593,13 +563,8 @@ static int omap_i2c_wait_for_bb_valid(struct omap_i2c_dev *omap)
 		}
 
 		if (time_after(jiffies, timeout)) {
-			/*
-			 * SDA or SCL were low for the entire timeout without
-			 * any activity detected. Most likely, a slave is
-			 * locking up the bus with no master driving the clock.
-			 */
 			dev_warn(omap->dev, "timeout waiting for bus ready\n");
-			return omap_i2c_recover_bus(omap);
+			return -ETIMEDOUT;
 		}
 
 		msleep(1);

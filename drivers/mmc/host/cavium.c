@@ -957,17 +957,19 @@ static int cvm_mmc_of_parse(struct device *dev, struct cvm_mmc_slot *slot)
 
 	ret = of_property_read_u32(node, "reg", &id);
 	if (ret) {
-		dev_err(dev, "Missing or invalid reg property on %pOF\n", node);
+		dev_err(dev, "Missing or invalid reg property on %s\n",
+			of_node_full_name(node));
 		return ret;
 	}
 
 	if (id >= CAVIUM_MAX_MMC || slot->host->slot[id]) {
-		dev_err(dev, "Invalid reg property on %pOF\n", node);
+		dev_err(dev, "Invalid reg property on %s\n",
+			of_node_full_name(node));
 		return -EINVAL;
 	}
 
 	ret = mmc_regulator_get_supply(mmc);
-	if (ret)
+	if (ret == -EPROBE_DEFER)
 		return ret;
 	/*
 	 * Legacy Octeon firmware has no regulator entry, fall-back to
@@ -1033,8 +1035,6 @@ int cvm_mmc_of_slot_probe(struct device *dev, struct cvm_mmc_host *host)
 	 * We only have a 3.3v supply, we cannot support any
 	 * of the UHS modes. We do support the high speed DDR
 	 * modes up to 52MHz.
-	 *
-	 * Disable bounce buffers for max_segs = 1
 	 */
 	mmc->caps |= MMC_CAP_MMC_HIGHSPEED | MMC_CAP_SD_HIGHSPEED |
 		     MMC_CAP_ERASE | MMC_CAP_CMD23 | MMC_CAP_POWER_OFF_CARD |

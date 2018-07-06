@@ -119,28 +119,26 @@ ip_vs_in_stats(struct ip_vs_conn *cp, struct sk_buff *skb)
 		struct ip_vs_cpu_stats *s;
 		struct ip_vs_service *svc;
 
-		local_bh_disable();
-
 		s = this_cpu_ptr(dest->stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.inpkts++;
 		s->cnt.inbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
 
+		rcu_read_lock();
 		svc = rcu_dereference(dest->svc);
 		s = this_cpu_ptr(svc->stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.inpkts++;
 		s->cnt.inbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
+		rcu_read_unlock();
 
 		s = this_cpu_ptr(ipvs->tot_stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.inpkts++;
 		s->cnt.inbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
-
-		local_bh_enable();
 	}
 }
 
@@ -155,28 +153,26 @@ ip_vs_out_stats(struct ip_vs_conn *cp, struct sk_buff *skb)
 		struct ip_vs_cpu_stats *s;
 		struct ip_vs_service *svc;
 
-		local_bh_disable();
-
 		s = this_cpu_ptr(dest->stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.outpkts++;
 		s->cnt.outbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
 
+		rcu_read_lock();
 		svc = rcu_dereference(dest->svc);
 		s = this_cpu_ptr(svc->stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.outpkts++;
 		s->cnt.outbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
+		rcu_read_unlock();
 
 		s = this_cpu_ptr(ipvs->tot_stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.outpkts++;
 		s->cnt.outbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
-
-		local_bh_enable();
 	}
 }
 
@@ -186,8 +182,6 @@ ip_vs_conn_stats(struct ip_vs_conn *cp, struct ip_vs_service *svc)
 {
 	struct netns_ipvs *ipvs = svc->ipvs;
 	struct ip_vs_cpu_stats *s;
-
-	local_bh_disable();
 
 	s = this_cpu_ptr(cp->dest->stats.cpustats);
 	u64_stats_update_begin(&s->syncp);
@@ -203,8 +197,6 @@ ip_vs_conn_stats(struct ip_vs_conn *cp, struct ip_vs_service *svc)
 	u64_stats_update_begin(&s->syncp);
 	s->cnt.conns++;
 	u64_stats_update_end(&s->syncp);
-
-	local_bh_enable();
 }
 
 
@@ -445,7 +437,7 @@ ip_vs_schedule(struct ip_vs_service *svc, struct sk_buff *skb,
 	/*
 	 * IPv6 frags, only the first hit here.
 	 */
-	pptr = frag_safe_skb_hp(skb, iph->len, sizeof(_ports), _ports);
+	pptr = frag_safe_skb_hp(skb, iph->len, sizeof(_ports), _ports, iph);
 	if (pptr == NULL)
 		return NULL;
 
@@ -578,7 +570,7 @@ int ip_vs_leave(struct ip_vs_service *svc, struct sk_buff *skb,
 	struct netns_ipvs *ipvs = svc->ipvs;
 	struct net *net = ipvs->net;
 
-	pptr = frag_safe_skb_hp(skb, iph->len, sizeof(_ports), _ports);
+	pptr = frag_safe_skb_hp(skb, iph->len, sizeof(_ports), _ports, iph);
 	if (!pptr)
 		return NF_DROP;
 	dport = likely(!ip_vs_iph_inverse(iph)) ? pptr[1] : pptr[0];
@@ -994,7 +986,7 @@ static int ip_vs_out_icmp_v6(struct netns_ipvs *ipvs, struct sk_buff *skb,
 	unsigned int offset;
 
 	*related = 1;
-	ic = frag_safe_skb_hp(skb, ipvsh->len, sizeof(_icmph), &_icmph);
+	ic = frag_safe_skb_hp(skb, ipvsh->len, sizeof(_icmph), &_icmph, ipvsh);
 	if (ic == NULL)
 		return NF_DROP;
 
@@ -1045,9 +1037,9 @@ static int ip_vs_out_icmp_v6(struct netns_ipvs *ipvs, struct sk_buff *skb,
  */
 static inline int is_sctp_abort(const struct sk_buff *skb, int nh_len)
 {
-	struct sctp_chunkhdr *sch, schunk;
-	sch = skb_header_pointer(skb, nh_len + sizeof(struct sctphdr),
-				 sizeof(schunk), &schunk);
+	sctp_chunkhdr_t *sch, schunk;
+	sch = skb_header_pointer(skb, nh_len + sizeof(sctp_sctphdr_t),
+			sizeof(schunk), &schunk);
 	if (sch == NULL)
 		return 0;
 	if (sch->type == SCTP_CID_ABORT)
@@ -1078,9 +1070,9 @@ static inline bool is_new_conn(const struct sk_buff *skb,
 		return th->syn;
 	}
 	case IPPROTO_SCTP: {
-		struct sctp_chunkhdr *sch, schunk;
+		sctp_chunkhdr_t *sch, schunk;
 
-		sch = skb_header_pointer(skb, iph->len + sizeof(struct sctphdr),
+		sch = skb_header_pointer(skb, iph->len + sizeof(sctp_sctphdr_t),
 					 sizeof(schunk), &schunk);
 		if (sch == NULL)
 			return false;
@@ -1226,10 +1218,11 @@ static struct ip_vs_conn *__ip_vs_rs_conn_out(unsigned int hooknum,
 		return NULL;
 
 	pptr = frag_safe_skb_hp(skb, iph->len,
-				sizeof(_ports), _ports);
+				sizeof(_ports), _ports, iph);
 	if (!pptr)
 		return NULL;
 
+	rcu_read_lock();
 	dest = ip_vs_find_real_service(ipvs, af, iph->protocol,
 				       &iph->saddr, pptr[0]);
 	if (dest) {
@@ -1244,6 +1237,7 @@ static struct ip_vs_conn *__ip_vs_rs_conn_out(unsigned int hooknum,
 						  pptr[0], pptr[1]);
 		}
 	}
+	rcu_read_unlock();
 
 	return cp;
 }
@@ -1419,7 +1413,7 @@ ip_vs_out(struct netns_ipvs *ipvs, unsigned int hooknum, struct sk_buff *skb, in
 		__be16 _ports[2], *pptr;
 
 		pptr = frag_safe_skb_hp(skb, iph.len,
-					 sizeof(_ports), _ports);
+					 sizeof(_ports), _ports, &iph);
 		if (pptr == NULL)
 			return NF_ACCEPT;	/* Not for me */
 		if (ip_vs_has_real_service(ipvs, af, iph.protocol, &iph.saddr,
@@ -1695,9 +1689,11 @@ ip_vs_in_icmp(struct netns_ipvs *ipvs, struct sk_buff *skb, int *related,
 			if (dest) {
 				struct ip_vs_dest_dst *dest_dst;
 
+				rcu_read_lock();
 				dest_dst = rcu_dereference(dest->dest_dst);
 				if (dest_dst)
 					mtu = dst_mtu(dest_dst->dst_cache);
+				rcu_read_unlock();
 			}
 			if (mtu > 68 + sizeof(struct iphdr))
 				mtu -= sizeof(struct iphdr);
@@ -1753,7 +1749,7 @@ static int ip_vs_in_icmp_v6(struct netns_ipvs *ipvs, struct sk_buff *skb,
 
 	*related = 1;
 
-	ic = frag_safe_skb_hp(skb, iph->len, sizeof(_icmph), &_icmph);
+	ic = frag_safe_skb_hp(skb, iph->len, sizeof(_icmph), &_icmph, iph);
 	if (ic == NULL)
 		return NF_DROP;
 
@@ -2113,7 +2109,7 @@ ip_vs_forward_icmp_v6(void *priv, struct sk_buff *skb,
 #endif
 
 
-static const struct nf_hook_ops ip_vs_ops[] = {
+static struct nf_hook_ops ip_vs_ops[] __read_mostly = {
 	/* After packet filtering, change source only for VS/NAT */
 	{
 		.hook		= ip_vs_reply4,

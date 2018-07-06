@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_IA64_TLB_H
 #define _ASM_IA64_TLB_H
 /*
@@ -169,8 +168,7 @@ static inline void __tlb_alloc_page(struct mmu_gather *tlb)
 
 
 static inline void
-arch_tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm,
-			unsigned long start, unsigned long end)
+tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm, unsigned long start, unsigned long end)
 {
 	tlb->mm = mm;
 	tlb->max = ARRAY_SIZE(tlb->local);
@@ -187,11 +185,8 @@ arch_tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm,
  * collected.
  */
 static inline void
-arch_tlb_finish_mmu(struct mmu_gather *tlb,
-			unsigned long start, unsigned long end, bool force)
+tlb_finish_mmu(struct mmu_gather *tlb, unsigned long start, unsigned long end)
 {
-	if (force)
-		tlb->need_flush = 1;
 	/*
 	 * Note: tlb->nr may be 0 at this point, so we can't rely on tlb->start_addr and
 	 * tlb->end_addr.

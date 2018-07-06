@@ -1,7 +1,7 @@
 /*
  * AMD Cryptographic Coprocessor (CCP) SHA crypto API support
  *
- * Copyright (C) 2013,2017 Advanced Micro Devices, Inc.
+ * Copyright (C) 2013,2016 Advanced Micro Devices, Inc.
  *
  * Author: Tom Lendacky <thomas.lendacky@amd.com>
  * Author: Gary R Hook <gary.hook@amd.com>
@@ -18,7 +18,6 @@
 #include <linux/crypto.h>
 #include <crypto/algapi.h>
 #include <crypto/hash.h>
-#include <crypto/hmac.h>
 #include <crypto/internal/hash.h>
 #include <crypto/sha.h>
 #include <crypto/scatterwalk.h>
@@ -47,7 +46,7 @@ static int ccp_sha_complete(struct crypto_async_request *async_req, int ret)
 	}
 
 	/* Update result area if supplied */
-	if (req->result && rctx->final)
+	if (req->result)
 		memcpy(req->result, rctx->ctx, digest_size);
 
 e_free:
@@ -309,8 +308,8 @@ static int ccp_sha_setkey(struct crypto_ahash *tfm, const u8 *key,
 	}
 
 	for (i = 0; i < block_size; i++) {
-		ctx->u.sha.ipad[i] = ctx->u.sha.key[i] ^ HMAC_IPAD_VALUE;
-		ctx->u.sha.opad[i] = ctx->u.sha.key[i] ^ HMAC_OPAD_VALUE;
+		ctx->u.sha.ipad[i] = ctx->u.sha.key[i] ^ 0x36;
+		ctx->u.sha.opad[i] = ctx->u.sha.key[i] ^ 0x5c;
 	}
 
 	sg_init_one(&ctx->u.sha.opad_sg, ctx->u.sha.opad, block_size);

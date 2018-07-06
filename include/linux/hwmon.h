@@ -29,7 +29,6 @@ enum hwmon_sensor_types {
 	hwmon_humidity,
 	hwmon_fan,
 	hwmon_pwm,
-	hwmon_max,
 };
 
 enum hwmon_chip_attributes {

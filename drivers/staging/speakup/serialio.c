@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 
@@ -29,17 +28,11 @@ static int timeouts;
 static int spk_serial_out(struct spk_synth *in_synth, const char ch);
 static void spk_serial_send_xchar(char ch);
 static void spk_serial_tiocmset(unsigned int set, unsigned int clear);
-static unsigned char spk_serial_in(void);
-static unsigned char spk_serial_in_nowait(void);
-static void spk_serial_flush_buffer(void);
 
 struct spk_io_ops spk_serial_io_ops = {
 	.synth_out = spk_serial_out,
 	.send_xchar = spk_serial_send_xchar,
 	.tiocmset = spk_serial_tiocmset,
-	.synth_in = spk_serial_in,
-	.synth_in_nowait = spk_serial_in_nowait,
-	.flush_buffer = spk_serial_flush_buffer,
 };
 EXPORT_SYMBOL_GPL(spk_serial_io_ops);
 
@@ -139,8 +132,8 @@ static void start_serial_interrupt(int irq)
 	outb(UART_MCR_DTR | UART_MCR_RTS | UART_MCR_OUT2,
 	     speakup_info.port_tts + UART_MCR);
 	/* Turn on Interrupts */
-	outb(UART_IER_MSI | UART_IER_RLSI | UART_IER_RDI,
-	     speakup_info.port_tts + UART_IER);
+	outb(UART_IER_MSI|UART_IER_RLSI|UART_IER_RDI,
+			speakup_info.port_tts + UART_IER);
 	inb(speakup_info.port_tts + UART_LSR);
 	inb(speakup_info.port_tts + UART_RX);
 	inb(speakup_info.port_tts + UART_IIR);
@@ -163,7 +156,6 @@ static void spk_serial_send_xchar(char ch)
 static void spk_serial_tiocmset(unsigned int set, unsigned int clear)
 {
 	int old = inb(speakup_info.port_tts + UART_MCR);
-
 	outb((old & ~clear) | set, speakup_info.port_tts + UART_MCR);
 }
 
@@ -229,8 +221,7 @@ int spk_wait_for_xmitr(struct spk_synth *in_synth)
 	}
 	while (spk_serial_tx_busy()) {
 		if (--tmout == 0) {
-			pr_warn("%s: timed out (tx busy)\n",
-				in_synth->long_name);
+			pr_warn("%s: timed out (tx busy)\n", in_synth->long_name);
 			timeouts++;
 			return 0;
 		}
@@ -249,7 +240,7 @@ int spk_wait_for_xmitr(struct spk_synth *in_synth)
 	return 1;
 }
 
-static unsigned char spk_serial_in(void)
+unsigned char spk_serial_in(void)
 {
 	int tmout = SPK_SERIAL_TIMEOUT;
 
@@ -262,8 +253,9 @@ static unsigned char spk_serial_in(void)
 	}
 	return inb_p(speakup_info.port_tts + UART_RX);
 }
+EXPORT_SYMBOL_GPL(spk_serial_in);
 
-static unsigned char spk_serial_in_nowait(void)
+unsigned char spk_serial_in_nowait(void)
 {
 	unsigned char lsr;
 
@@ -272,11 +264,7 @@ static unsigned char spk_serial_in_nowait(void)
 		return 0;
 	return inb_p(speakup_info.port_tts + UART_RX);
 }
-
-static void spk_serial_flush_buffer(void)
-{
-	/* TODO: flush the UART 16550 buffer */
-}
+EXPORT_SYMBOL_GPL(spk_serial_in_nowait);
 
 static int spk_serial_out(struct spk_synth *in_synth, const char ch)
 {
@@ -287,8 +275,7 @@ static int spk_serial_out(struct spk_synth *in_synth, const char ch)
 	return 0;
 }
 
-const char *spk_serial_synth_immediate(struct spk_synth *synth,
-				       const char *buff)
+const char *spk_serial_synth_immediate(struct spk_synth *synth, const char *buff)
 {
 	u_char ch;
 

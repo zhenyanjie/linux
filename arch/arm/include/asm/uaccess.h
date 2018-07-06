@@ -17,6 +17,13 @@
 #include <asm/unified.h>
 #include <asm/compiler.h>
 
+#ifndef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+#include <asm-generic/uaccess-unaligned.h>
+#else
+#define __get_user_unaligned __get_user
+#define __put_user_unaligned __put_user
+#endif
+
 #include <asm/extable.h>
 
 /*
@@ -152,7 +159,7 @@ extern int __get_user_64t_4(void *);
 #define __get_user_check(x, p)						\
 	({								\
 		unsigned long __limit = current_thread_info()->addr_limit - 1; \
-		register typeof(*(p)) __user *__p asm("r0") = (p);	\
+		register const typeof(*(p)) __user *__p asm("r0") = (p);\
 		register typeof(x) __r2 asm("r2");			\
 		register unsigned long __l asm("r1") = __limit;		\
 		register int __e asm("r0");				\
@@ -519,6 +526,7 @@ static inline unsigned long __must_check clear_user(void __user *to, unsigned lo
 /* These are from lib/ code, and use __get_user() and friends */
 extern long strncpy_from_user(char *dest, const char __user *src, long count);
 
+extern __must_check long strlen_user(const char __user *str);
 extern __must_check long strnlen_user(const char __user *str, long n);
 
 #endif /* _ASMARM_UACCESS_H */

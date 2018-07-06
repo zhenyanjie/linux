@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "builtin.h"
 #include "perf.h"
 
@@ -628,6 +627,7 @@ static const struct {
 	{ "GFP_HIGHUSER_MOVABLE",	"HUM" },
 	{ "GFP_HIGHUSER",		"HU" },
 	{ "GFP_USER",			"U" },
+	{ "GFP_TEMPORARY",		"TMP" },
 	{ "GFP_KERNEL_ACCOUNT",		"KAC" },
 	{ "GFP_KERNEL",			"K" },
 	{ "GFP_NOFS",			"NF" },
@@ -641,8 +641,9 @@ static const struct {
 	{ "__GFP_ATOMIC",		"_A" },
 	{ "__GFP_IO",			"I" },
 	{ "__GFP_FS",			"F" },
+	{ "__GFP_COLD",			"CO" },
 	{ "__GFP_NOWARN",		"NWR" },
-	{ "__GFP_RETRY_MAYFAIL",	"R" },
+	{ "__GFP_REPEAT",		"R" },
 	{ "__GFP_NOFAIL",		"NF" },
 	{ "__GFP_NORETRY",		"NR" },
 	{ "__GFP_COMP",			"C" },
@@ -654,6 +655,7 @@ static const struct {
 	{ "__GFP_RECLAIMABLE",		"RC" },
 	{ "__GFP_MOVABLE",		"M" },
 	{ "__GFP_ACCOUNT",		"AC" },
+	{ "__GFP_NOTRACK",		"NT" },
 	{ "__GFP_WRITE",		"WR" },
 	{ "__GFP_RECLAIM",		"R" },
 	{ "__GFP_DIRECT_RECLAIM",	"DR" },
@@ -1004,7 +1006,7 @@ static void __print_slab_result(struct rb_root *root,
 		if (is_caller) {
 			addr = data->call_site;
 			if (!raw_ip)
-				sym = machine__find_kernel_symbol(machine, addr, &map);
+				sym = machine__find_kernel_function(machine, addr, &map);
 		} else
 			addr = data->ptr;
 
@@ -1068,7 +1070,7 @@ static void __print_page_alloc_result(struct perf_session *session, int n_lines)
 		char *caller = buf;
 
 		data = rb_entry(next, struct page_stat, node);
-		sym = machine__find_kernel_symbol(machine, data->callsite, &map);
+		sym = machine__find_kernel_function(machine, data->callsite, &map);
 		if (sym)
 			caller = sym->name;
 		else
@@ -1110,7 +1112,7 @@ static void __print_page_caller_result(struct perf_session *session, int n_lines
 		char *caller = buf;
 
 		data = rb_entry(next, struct page_stat, node);
-		sym = machine__find_kernel_symbol(machine, data->callsite, &map);
+		sym = machine__find_kernel_function(machine, data->callsite, &map);
 		if (sym)
 			caller = sym->name;
 		else
@@ -1713,7 +1715,7 @@ static int setup_slab_sorting(struct list_head *sort_list, const char *arg)
 		if (!tok)
 			break;
 		if (slab_sort_dimension__add(tok, sort_list) < 0) {
-			pr_err("Unknown slab --sort key: '%s'", tok);
+			error("Unknown slab --sort key: '%s'", tok);
 			free(str);
 			return -1;
 		}
@@ -1739,7 +1741,7 @@ static int setup_page_sorting(struct list_head *sort_list, const char *arg)
 		if (!tok)
 			break;
 		if (page_sort_dimension__add(tok, sort_list) < 0) {
-			pr_err("Unknown page --sort key: '%s'", tok);
+			error("Unknown page --sort key: '%s'", tok);
 			free(str);
 			return -1;
 		}
@@ -1892,7 +1894,7 @@ int cmd_kmem(int argc, const char **argv)
 {
 	const char * const default_slab_sort = "frag,hit,bytes";
 	const char * const default_page_sort = "bytes,hit";
-	struct perf_data data = {
+	struct perf_data_file file = {
 		.mode = PERF_DATA_MODE_READ,
 	};
 	const struct option kmem_options[] = {
@@ -1908,7 +1910,7 @@ int cmd_kmem(int argc, const char **argv)
 		     "page, order, migtype, gfp", parse_sort_opt),
 	OPT_CALLBACK('l', "line", NULL, "num", "show n lines", parse_line_opt),
 	OPT_BOOLEAN(0, "raw-ip", &raw_ip, "show raw ip instead of symbol"),
-	OPT_BOOLEAN('f', "force", &data.force, "don't complain, do it"),
+	OPT_BOOLEAN('f', "force", &file.force, "don't complain, do it"),
 	OPT_CALLBACK_NOOPT(0, "slab", NULL, NULL, "Analyze slab allocator",
 			   parse_slab_opt),
 	OPT_CALLBACK_NOOPT(0, "page", NULL, NULL, "Analyze page allocator",
@@ -1948,9 +1950,9 @@ int cmd_kmem(int argc, const char **argv)
 		return __cmd_record(argc, argv);
 	}
 
-	data.file.path = input_name;
+	file.path = input_name;
 
-	kmem_session = session = perf_session__new(&data, false, &perf_kmem);
+	kmem_session = session = perf_session__new(&file, false, &perf_kmem);
 	if (session == NULL)
 		return -1;
 
@@ -1982,8 +1984,7 @@ int cmd_kmem(int argc, const char **argv)
 
 	if (perf_time__parse_str(&ptime, time_str) != 0) {
 		pr_err("Invalid time string\n");
-		ret = -EINVAL;
-		goto out_delete;
+		return -EINVAL;
 	}
 
 	if (!strcmp(argv[0], "stat")) {

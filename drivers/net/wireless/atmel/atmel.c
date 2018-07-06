@@ -586,7 +586,7 @@ static int atmel_validate_channel(struct atmel_private *priv, int channel);
 static void atmel_management_frame(struct atmel_private *priv,
 				   struct ieee80211_hdr *header,
 				   u16 frame_len, u8 rssi);
-static void atmel_management_timer(struct timer_list *t);
+static void atmel_management_timer(u_long a);
 static void atmel_send_command(struct atmel_private *priv, int command,
 			       void *cmd, int cmd_size);
 static int atmel_send_command_wait(struct atmel_private *priv, int command,
@@ -1036,8 +1036,9 @@ static void frag_rx_path(struct atmel_private *priv,
 				priv->dev->stats.rx_dropped++;
 			} else {
 				skb_reserve(skb, 2);
-				skb_put_data(skb, priv->rx_buf,
-				             priv->frag_len + 12);
+				memcpy(skb_put(skb, priv->frag_len + 12),
+				       priv->rx_buf,
+				       priv->frag_len + 12);
 				skb->protocol = eth_type_trans(skb, priv->dev);
 				skb->ip_summed = CHECKSUM_NONE;
 				netif_rx(skb);
@@ -1482,6 +1483,18 @@ static int atmel_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static int atmel_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, atmel_proc_show, PDE_DATA(inode));
+}
+
+static const struct file_operations atmel_proc_fops = {
+	.open		= atmel_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static const struct net_device_ops atmel_netdev_ops = {
 	.ndo_open 		= atmel_open,
 	.ndo_stop		= atmel_close,
@@ -1567,9 +1580,11 @@ struct net_device *init_atmel_card(unsigned short irq, unsigned long port,
 	priv->default_beacon_period = priv->beacon_period = 100;
 	priv->listen_interval = 1;
 
-	timer_setup(&priv->management_timer, atmel_management_timer, 0);
+	init_timer(&priv->management_timer);
 	spin_lock_init(&priv->irqlock);
 	spin_lock_init(&priv->timerlock);
+	priv->management_timer.function = atmel_management_timer;
+	priv->management_timer.data = (unsigned long) dev;
 
 	dev->netdev_ops = &atmel_netdev_ops;
 	dev->wireless_handlers = &atmel_handler_def;
@@ -1602,8 +1617,7 @@ struct net_device *init_atmel_card(unsigned short irq, unsigned long port,
 
 	netif_carrier_off(dev);
 
-	if (!proc_create_single_data("driver/atmel", 0, NULL, atmel_proc_show,
-			priv))
+	if (!proc_create_data("driver/atmel", 0, NULL, &atmel_proc_fops, priv))
 		printk(KERN_WARNING "atmel: unable to create /proc entry.\n");
 
 	printk(KERN_INFO "%s: Atmel at76c50x. Version %d.%d. MAC %pM\n",
@@ -3422,9 +3436,10 @@ static void atmel_management_frame(struct atmel_private *priv,
 }
 
 /* run when timer expires */
-static void atmel_management_timer(struct timer_list *t)
+static void atmel_management_timer(u_long a)
 {
-	struct atmel_private *priv = from_timer(priv, t, management_timer);
+	struct net_device *dev = (struct net_device *) a;
+	struct atmel_private *priv = netdev_priv(dev);
 	unsigned long flags;
 
 	/* Check if the card has been yanked. */
@@ -3850,7 +3865,7 @@ static int reset_atmel_card(struct net_device *dev)
 
 	   set all the Mib values which matter in the card to match
 	   their settings in the atmel_private structure. Some of these
-	   can be altered on the fly, but many (WEP, infrastructure or ad-hoc)
+	   can be altered on the fly, but many (WEP, infrastucture or ad-hoc)
 	   can only be changed by tearing down the world and coming back through
 	   here.
 

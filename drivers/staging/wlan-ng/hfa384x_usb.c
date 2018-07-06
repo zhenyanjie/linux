@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: (GPL-2.0 OR MPL-1.1)
 /* src/prism2/driver/hfa384x_usb.c
  *
  * Functions that talk to the USB variantof the Intersil hfa384x MAC
@@ -185,11 +184,11 @@ static void hfa384x_usbin_ctlx(struct hfa384x *hw, union hfa384x_usbin *usbin,
 
 static void hfa384x_usbctlxq_run(struct hfa384x *hw);
 
-static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t);
+static void hfa384x_usbctlx_reqtimerfn(unsigned long data);
 
-static void hfa384x_usbctlx_resptimerfn(struct timer_list *t);
+static void hfa384x_usbctlx_resptimerfn(unsigned long data);
 
-static void hfa384x_usb_throttlefn(struct timer_list *t);
+static void hfa384x_usb_throttlefn(unsigned long data);
 
 static void hfa384x_usbctlx_completion_task(unsigned long data);
 
@@ -202,7 +201,7 @@ static void unlocked_usbctlx_complete(struct hfa384x *hw,
 				      struct hfa384x_usbctlx *ctlx);
 
 struct usbctlx_completor {
-	int (*complete)(struct usbctlx_completor *completor);
+	int (*complete)(struct usbctlx_completor *);
 };
 
 static int
@@ -559,11 +558,13 @@ void hfa384x_create(struct hfa384x *hw, struct usb_device *usb)
 	INIT_WORK(&hw->link_bh, prism2sta_processing_defer);
 	INIT_WORK(&hw->usb_work, hfa384x_usb_defer);
 
-	timer_setup(&hw->throttle, hfa384x_usb_throttlefn, 0);
+	setup_timer(&hw->throttle, hfa384x_usb_throttlefn, (unsigned long)hw);
 
-	timer_setup(&hw->resptimer, hfa384x_usbctlx_resptimerfn, 0);
+	setup_timer(&hw->resptimer, hfa384x_usbctlx_resptimerfn,
+		    (unsigned long)hw);
 
-	timer_setup(&hw->reqtimer, hfa384x_usbctlx_reqtimerfn, 0);
+	setup_timer(&hw->reqtimer, hfa384x_usbctlx_reqtimerfn,
+		    (unsigned long)hw);
 
 	usb_init_urb(&hw->rx_urb);
 	usb_init_urb(&hw->tx_urb);
@@ -573,7 +574,8 @@ void hfa384x_create(struct hfa384x *hw, struct usb_device *usb)
 	hw->state = HFA384x_STATE_INIT;
 
 	INIT_WORK(&hw->commsqual_bh, prism2sta_commsqual_defer);
-	timer_setup(&hw->commsqual_timer, prism2sta_commsqual_timer, 0);
+	setup_timer(&hw->commsqual_timer, prism2sta_commsqual_timer,
+		    (unsigned long)hw);
 }
 
 /*----------------------------------------------------------------
@@ -1342,14 +1344,16 @@ hfa384x_docmd(struct hfa384x *hw,
 	if (result != 0) {
 		kfree(ctlx);
 	} else if (mode == DOWAIT) {
-		struct usbctlx_cmd_completor cmd_completor;
-		struct usbctlx_completor *completor;
+		struct usbctlx_cmd_completor completor;
 
-		completor = init_cmd_completor(&cmd_completor,
-					       &ctlx->inbuf.cmdresp,
-					       &cmd->result);
-
-		result = hfa384x_usbctlx_complete_sync(hw, ctlx, completor);
+		result =
+		    hfa384x_usbctlx_complete_sync(hw, ctlx,
+						  init_cmd_completor(&completor,
+								     &ctlx->
+								     inbuf.
+								     cmdresp,
+								     &cmd->
+								     result));
 	}
 
 done:
@@ -1836,15 +1840,15 @@ int hfa384x_drvr_flashdl_enable(struct hfa384x *hw)
 	if (result)
 		return result;
 
-	le16_to_cpus(&hw->bufinfo.page);
-	le16_to_cpus(&hw->bufinfo.offset);
-	le16_to_cpus(&hw->bufinfo.len);
+	hw->bufinfo.page = le16_to_cpu(hw->bufinfo.page);
+	hw->bufinfo.offset = le16_to_cpu(hw->bufinfo.offset);
+	hw->bufinfo.len = le16_to_cpu(hw->bufinfo.len);
 	result = hfa384x_drvr_getconfig16(hw, HFA384x_RID_MAXLOADTIME,
 					  &hw->dltimeout);
 	if (result)
 		return result;
 
-	le16_to_cpus(&hw->dltimeout);
+	hw->dltimeout = le16_to_cpu(hw->dltimeout);
 
 	pr_debug("flashdl_enable\n");
 
@@ -2458,8 +2462,7 @@ int hfa384x_drvr_start(struct hfa384x *hw)
 	 * ok
 	 */
 	result =
-	    usb_get_std_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_in,
-			       &status);
+	    usb_get_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_in, &status);
 	if (result < 0) {
 		netdev_err(hw->wlandev->netdev, "Cannot get bulk in endpoint status.\n");
 		goto done;
@@ -2468,8 +2471,7 @@ int hfa384x_drvr_start(struct hfa384x *hw)
 		netdev_err(hw->wlandev->netdev, "Failed to reset bulk in endpoint.\n");
 
 	result =
-	    usb_get_std_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_out,
-			       &status);
+	    usb_get_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_out, &status);
 	if (result < 0) {
 		netdev_err(hw->wlandev->netdev, "Cannot get bulk out endpoint status.\n");
 		goto done;
@@ -2642,7 +2644,8 @@ int hfa384x_drvr_txframe(struct hfa384x *hw, struct sk_buff *skb,
 	    HFA384x_TX_MACPORT_SET(0) | HFA384x_TX_STRUCTYPE_SET(1) |
 	    HFA384x_TX_TXEX_SET(0) | HFA384x_TX_TXOK_SET(0);
 #endif
-	cpu_to_le16s(&hw->txbuff.txfrm.desc.tx_control);
+	hw->txbuff.txfrm.desc.tx_control =
+	    cpu_to_le16(hw->txbuff.txfrm.desc.tx_control);
 
 	/* copy the header over to the txdesc */
 	memcpy(&hw->txbuff.txfrm.desc.frame_control, p80211_hdr,
@@ -3377,8 +3380,8 @@ static void hfa384x_usbin_rx(struct wlandevice *wlandev, struct sk_buff *skb)
 	u16 fc;
 
 	/* Byte order convert once up front. */
-	le16_to_cpus(&usbin->rxfrm.desc.status);
-	le32_to_cpus(&usbin->rxfrm.desc.time);
+	usbin->rxfrm.desc.status = le16_to_cpu(usbin->rxfrm.desc.status);
+	usbin->rxfrm.desc.time = le32_to_cpu(usbin->rxfrm.desc.time);
 
 	/* Now handle frame based on port# */
 	switch (HFA384x_RXSTATUS_MACPORT_GET(usbin->rxfrm.desc.status)) {
@@ -3417,7 +3420,7 @@ static void hfa384x_usbin_rx(struct wlandevice *wlandev, struct sk_buff *skb)
 
 		/* Attach the rxmeta, set some stuff */
 		p80211skb_rxmeta_attach(wlandev, skb);
-		rxmeta = p80211skb_rxmeta(skb);
+		rxmeta = P80211SKB_RXMETA(skb);
 		rxmeta->mactime = usbin->rxfrm.desc.time;
 		rxmeta->rxrate = usbin->rxfrm.desc.rate;
 		rxmeta->signal = usbin->rxfrm.desc.signal - hw->dbmadjust;
@@ -3439,7 +3442,8 @@ static void hfa384x_usbin_rx(struct wlandevice *wlandev, struct sk_buff *skb)
 
 	default:
 		netdev_warn(hw->wlandev->netdev, "Received frame on unsupported port=%d\n",
-			    HFA384x_RXSTATUS_MACPORT_GET(usbin->rxfrm.desc.status));
+			    HFA384x_RXSTATUS_MACPORT_GET(
+				    usbin->rxfrm.desc.status));
 		break;
 	}
 }
@@ -3526,11 +3530,13 @@ static void hfa384x_int_rxmonitor(struct wlandevice *wlandev,
 	/* Copy the 802.11 header to the skb
 	 * (ctl frames may be less than a full header)
 	 */
-	skb_put_data(skb, &rxdesc->frame_control, hdrlen);
+	datap = skb_put(skb, hdrlen);
+	memcpy(datap, &rxdesc->frame_control, hdrlen);
 
 	/* If any, copy the data from the card to the skb */
 	if (datalen > 0) {
-		datap = skb_put_data(skb, rxfrm->data, datalen);
+		datap = skb_put(skb, datalen);
+		memcpy(datap, rxfrm->data, datalen);
 
 		/* check for unencrypted stuff if WEP bit set. */
 		if (*(datap - hdrlen + 1) & 0x40)	/* wep set */
@@ -3570,7 +3576,8 @@ static void hfa384x_int_rxmonitor(struct wlandevice *wlandev,
 static void hfa384x_usbin_info(struct wlandevice *wlandev,
 			       union hfa384x_usbin *usbin)
 {
-	le16_to_cpus(&usbin->infofrm.info.framelen);
+	usbin->infofrm.info.framelen =
+	    le16_to_cpu(usbin->infofrm.info.framelen);
 	prism2sta_ev_info(wlandev, &usbin->infofrm.info);
 }
 
@@ -3799,9 +3806,9 @@ delresp:
  *	interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t)
+static void hfa384x_usbctlx_reqtimerfn(unsigned long data)
 {
-	struct hfa384x *hw = from_timer(hw, t, reqtimer);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -3858,9 +3865,9 @@ static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t)
  *	interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usbctlx_resptimerfn(struct timer_list *t)
+static void hfa384x_usbctlx_resptimerfn(unsigned long data)
 {
-	struct hfa384x *hw = from_timer(hw, t, resptimer);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -3898,9 +3905,9 @@ static void hfa384x_usbctlx_resptimerfn(struct timer_list *t)
  *	Interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usb_throttlefn(struct timer_list *t)
+static void hfa384x_usb_throttlefn(unsigned long data)
 {
-	struct hfa384x *hw = from_timer(hw, t, throttle);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);

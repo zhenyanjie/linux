@@ -519,7 +519,9 @@ static int bit_doAddress(struct i2c_adapter *i2c_adap, struct i2c_msg *msg)
 			}
 		}
 	} else {		/* normal 7bit address	*/
-		addr = i2c_8bit_addr_from_msg(msg);
+		addr = msg->addr << 1;
+		if (flags & I2C_M_RD)
+			addr |= 1;
 		if (flags & I2C_M_REV_DIR_ADDR)
 			addr ^= 1;
 		ret = try_address(i2c_adap, addr, retries);
@@ -551,16 +553,9 @@ static int bit_xfer(struct i2c_adapter *i2c_adap,
 		nak_ok = pmsg->flags & I2C_M_IGNORE_NAK;
 		if (!(pmsg->flags & I2C_M_NOSTART)) {
 			if (i) {
-				if (msgs[i - 1].flags & I2C_M_STOP) {
-					bit_dbg(3, &i2c_adap->dev,
-						"emitting enforced stop/start condition\n");
-					i2c_stop(adap);
-					i2c_start(adap);
-				} else {
-					bit_dbg(3, &i2c_adap->dev,
-						"emitting repeated start condition\n");
-					i2c_repstart(adap);
-				}
+				bit_dbg(3, &i2c_adap->dev, "emitting "
+					"repeated start condition\n");
+				i2c_repstart(adap);
 			}
 			ret = bit_doAddress(i2c_adap, pmsg);
 			if ((ret != 0) && !nak_ok) {
@@ -646,11 +641,6 @@ static int __i2c_bit_add_bus(struct i2c_adapter *adap,
 	adap->retries = 3;
 	if (bit_adap->getscl == NULL)
 		adap->quirks = &i2c_bit_quirk_no_clk_stretch;
-
-	/*
-	 * We tried forcing SCL/SDA to an initial state here. But that caused a
-	 * regression, sadly. Check Bugzilla #200045 for details.
-	 */
 
 	ret = add_adapter(adap);
 	if (ret < 0)

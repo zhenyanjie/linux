@@ -266,7 +266,7 @@ struct goldfish_pipe_dev {
 	unsigned char __iomem *base;
 };
 
-static struct goldfish_pipe_dev pipe_dev[1] = {};
+struct goldfish_pipe_dev pipe_dev[1] = {};
 
 static int goldfish_cmd_locked(struct goldfish_pipe *pipe, enum PipeCmdCode cmd)
 {
@@ -536,10 +536,10 @@ static ssize_t goldfish_pipe_write(struct file *filp,
 			/* is_write */ 1);
 }
 
-static __poll_t goldfish_pipe_poll(struct file *filp, poll_table *wait)
+static unsigned int goldfish_pipe_poll(struct file *filp, poll_table *wait)
 {
 	struct goldfish_pipe *pipe = filp->private_data;
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 	int status;
 
 	poll_wait(filp, &pipe->wake_queue, wait);
@@ -549,13 +549,13 @@ static __poll_t goldfish_pipe_poll(struct file *filp, poll_table *wait)
 		return -ERESTARTSYS;
 
 	if (status & PIPE_POLL_IN)
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 	if (status & PIPE_POLL_OUT)
-		mask |= EPOLLOUT | EPOLLWRNORM;
+		mask |= POLLOUT | POLLWRNORM;
 	if (status & PIPE_POLL_HUP)
-		mask |= EPOLLHUP;
+		mask |= POLLHUP;
 	if (test_bit(BIT_CLOSED_ON_HOST, &pipe->flags))
-		mask |= EPOLLERR;
+		mask |= POLLERR;
 
 	return mask;
 }

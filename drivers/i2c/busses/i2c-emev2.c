@@ -149,7 +149,7 @@ static int __em_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msg,
 	em_clear_set_bit(priv, 0, I2C_BIT_STT0, I2C_OFS_IICC0);
 
 	/* Send slave address and R/W type */
-	writeb(i2c_8bit_addr_from_msg(msg), priv->base + I2C_OFS_IIC0);
+	writeb((msg->addr << 1) | read, priv->base + I2C_OFS_IIC0);
 
 	/* Wait for transaction */
 	status = em_i2c_wait_for_event(priv);
@@ -375,9 +375,7 @@ static int em_i2c_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->sclk))
 		return PTR_ERR(priv->sclk);
 
-	ret = clk_prepare_enable(priv->sclk);
-	if (ret)
-		return ret;
+	clk_prepare_enable(priv->sclk);
 
 	priv->adap.timeout = msecs_to_jiffies(100);
 	priv->adap.retries = 5;

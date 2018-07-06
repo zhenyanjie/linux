@@ -365,10 +365,15 @@ static unsigned vce_v3_0_get_harvest_config(struct amdgpu_device *adev)
 {
 	u32 tmp;
 
+	/* Fiji, Stoney, Polaris10, Polaris11, Polaris12 are single pipe */
 	if ((adev->asic_type == CHIP_FIJI) ||
-	    (adev->asic_type == CHIP_STONEY))
+	    (adev->asic_type == CHIP_STONEY) ||
+	    (adev->asic_type == CHIP_POLARIS10) ||
+	    (adev->asic_type == CHIP_POLARIS11) ||
+	    (adev->asic_type == CHIP_POLARIS12))
 		return AMDGPU_VCE_HARVEST_VCE1;
 
+	/* Tonga and CZ are dual or single pipe */
 	if (adev->flags & AMD_IS_APU)
 		tmp = (RREG32_SMC(ixVCE_HARVEST_FUSE_MACRO__ADDRESS) &
 		       VCE_HARVEST_FUSE_MACRO__MASK) >>
@@ -386,12 +391,6 @@ static unsigned vce_v3_0_get_harvest_config(struct amdgpu_device *adev)
 	case 3:
 		return AMDGPU_VCE_HARVEST_VCE0 | AMDGPU_VCE_HARVEST_VCE1;
 	default:
-		if ((adev->asic_type == CHIP_POLARIS10) ||
-		    (adev->asic_type == CHIP_POLARIS11) ||
-		    (adev->asic_type == CHIP_POLARIS12) ||
-		    (adev->asic_type == CHIP_VEGAM))
-			return AMDGPU_VCE_HARVEST_VCE1;
-
 		return 0;
 	}
 }
@@ -468,8 +467,8 @@ static int vce_v3_0_hw_init(void *handle)
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
 	vce_v3_0_override_vce_clock_gating(adev, true);
-
-	amdgpu_asic_set_vce_clocks(adev, 10000, 10000);
+	if (!(adev->flags & AMD_IS_APU))
+		amdgpu_asic_set_vce_clocks(adev, 10000, 10000);
 
 	for (i = 0; i < adev->vce.num_rings; i++)
 		adev->vce.ring[i].ready = false;
@@ -835,24 +834,24 @@ out:
 }
 
 static void vce_v3_0_ring_emit_ib(struct amdgpu_ring *ring,
-		struct amdgpu_ib *ib, unsigned int vmid, bool ctx_switch)
+		struct amdgpu_ib *ib, unsigned int vm_id, bool ctx_switch)
 {
 	amdgpu_ring_write(ring, VCE_CMD_IB_VM);
-	amdgpu_ring_write(ring, vmid);
+	amdgpu_ring_write(ring, vm_id);
 	amdgpu_ring_write(ring, lower_32_bits(ib->gpu_addr));
 	amdgpu_ring_write(ring, upper_32_bits(ib->gpu_addr));
 	amdgpu_ring_write(ring, ib->length_dw);
 }
 
 static void vce_v3_0_emit_vm_flush(struct amdgpu_ring *ring,
-				   unsigned int vmid, uint64_t pd_addr)
+			 unsigned int vm_id, uint64_t pd_addr)
 {
 	amdgpu_ring_write(ring, VCE_CMD_UPDATE_PTB);
-	amdgpu_ring_write(ring, vmid);
+	amdgpu_ring_write(ring, vm_id);
 	amdgpu_ring_write(ring, pd_addr >> 12);
 
 	amdgpu_ring_write(ring, VCE_CMD_FLUSH_TLB);
-	amdgpu_ring_write(ring, vmid);
+	amdgpu_ring_write(ring, vm_id);
 	amdgpu_ring_write(ring, VCE_CMD_END);
 }
 

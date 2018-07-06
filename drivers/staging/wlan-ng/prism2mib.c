@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: (GPL-2.0 OR MPL-1.1)
 /* src/prism2/driver/prism2mib.c
  *
  * Management request for mibset/mibget
@@ -775,7 +774,7 @@ void prism2mgmt_pstr2bytestr(struct hfa384x_bytestr *bytestr,
 void prism2mgmt_bytestr2pstr(struct hfa384x_bytestr *bytestr,
 			     struct p80211pstrd *pstr)
 {
-	pstr->len = (u8)(le16_to_cpu(bytestr->len));
+	pstr->len = (u8)(le16_to_cpu((u16)(bytestr->len)));
 	memcpy(pstr->data, bytestr->data, pstr->len);
 }
 

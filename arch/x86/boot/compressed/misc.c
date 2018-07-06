@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * misc.c
  *
@@ -14,7 +13,6 @@
 
 #include "misc.h"
 #include "error.h"
-#include "pgtable.h"
 #include "../string.h"
 #include "../voffset.h"
 
@@ -118,7 +116,8 @@ void __putstr(const char *s)
 		}
 	}
 
-	if (lines == 0 || cols == 0)
+	if (boot_params->screen_info.orig_video_mode == 0 &&
+	    lines == 0 && cols == 0)
 		return;
 
 	x = boot_params->screen_info.orig_x;
@@ -300,10 +299,6 @@ static void parse_elf(void *output)
 
 		switch (phdr->p_type) {
 		case PT_LOAD:
-#ifdef CONFIG_X86_64
-			if ((phdr->p_align % 0x200000) != 0)
-				error("Alignment of LOAD segment isn't multiple of 2MB");
-#endif
 #ifdef CONFIG_RELOCATABLE
 			dest = output;
 			dest += (phdr->p_paddr - LOAD_PHYSICAL_ADDR);
@@ -377,11 +372,6 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 	debug_putaddr(output_len);
 	debug_putaddr(kernel_total_size);
 
-#ifdef CONFIG_X86_64
-	/* Report address of 32-bit trampoline */
-	debug_putaddr(trampoline_32bit);
-#endif
-
 	/*
 	 * The memory hole needed for the kernel is the larger of either
 	 * the entire decompressed kernel plus relocation table, or the
@@ -420,9 +410,4 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 	handle_relocations(output, output_len, virt_addr);
 	debug_putstr("done.\nBooting the kernel.\n");
 	return output;
-}
-
-void fortify_panic(const char *name)
-{
-	error("detected buffer overflow");
 }

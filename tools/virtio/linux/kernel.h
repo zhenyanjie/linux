@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef KERNEL_H
 #define KERNEL_H
 #include <stdbool.h>
@@ -118,7 +117,7 @@ static inline void free_page(unsigned long addr)
 #define dev_err(dev, format, ...) fprintf (stderr, format, ## __VA_ARGS__)
 #define dev_warn(dev, format, ...) fprintf (stderr, format, ## __VA_ARGS__)
 
-#define WARN_ON_ONCE(cond) ((cond) ? fprintf (stderr, "WARNING\n") : 0)
+#define WARN_ON_ONCE(cond) ((cond) && fprintf (stderr, "WARNING\n"))
 
 #define min(x, y) ({				\
 	typeof(x) _min1 = (x);			\

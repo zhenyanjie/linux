@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <dt-bindings/input/input.h>
 #include "tegra30.dtsi"
 
@@ -215,7 +214,7 @@
 	};
 
 	hdmiddc: i2c@7000c700 {
-		clock-frequency = <10000>;
+		clock-frequency = <100000>;
 	};
 
 	/*
@@ -363,6 +362,7 @@
 
 			stmpe_touchscreen {
 				compatible = "st,stmpe-ts";
+				reg = <0>;
 				/* 3.25 MHz ADC clock speed */
 				st,adc-freq = <1>;
 				/* 8 sample average control */

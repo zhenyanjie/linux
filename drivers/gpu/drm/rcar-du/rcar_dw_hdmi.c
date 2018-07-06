@@ -45,7 +45,7 @@ static int rcar_hdmi_phy_configure(struct dw_hdmi *hdmi,
 {
 	const struct rcar_hdmi_phy_params *params = rcar_hdmi_phy_params;
 
-	for (; params->mpixelclock != ~0UL; ++params) {
+	for (; params && params->mpixelclock != ~0UL; ++params) {
 		if (mpixelclock <= params->mpixelclock)
 			break;
 	}
@@ -68,22 +68,12 @@ static const struct dw_hdmi_plat_data rcar_dw_hdmi_plat_data = {
 
 static int rcar_dw_hdmi_probe(struct platform_device *pdev)
 {
-	struct dw_hdmi *hdmi;
-
-	hdmi = dw_hdmi_probe(pdev, &rcar_dw_hdmi_plat_data);
-	if (IS_ERR(hdmi))
-		return PTR_ERR(hdmi);
-
-	platform_set_drvdata(pdev, hdmi);
-
-	return 0;
+	return dw_hdmi_probe(pdev, &rcar_dw_hdmi_plat_data);
 }
 
 static int rcar_dw_hdmi_remove(struct platform_device *pdev)
 {
-	struct dw_hdmi *hdmi = platform_get_drvdata(pdev);
-
-	dw_hdmi_remove(hdmi);
+	dw_hdmi_remove(pdev);
 
 	return 0;
 }

@@ -301,7 +301,7 @@ struct dma_buf {
 		struct dma_fence_cb cb;
 		wait_queue_head_t *poll;
 
-		__poll_t active;
+		unsigned long active;
 	} cb_excl, cb_shared;
 };
 

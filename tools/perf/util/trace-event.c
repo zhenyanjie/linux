@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 
 #include <stdio.h>
 #include <unistd.h>
@@ -75,7 +74,6 @@ void trace_event__cleanup(struct trace_event *t)
 static struct event_format*
 tp_format(const char *sys, const char *name)
 {
-	char *tp_dir = get_events_file(sys);
 	struct pevent *pevent = tevent.pevent;
 	struct event_format *event = NULL;
 	char path[PATH_MAX];
@@ -83,11 +81,8 @@ tp_format(const char *sys, const char *name)
 	char *data;
 	int err;
 
-	if (!tp_dir)
-		return ERR_PTR(-errno);
-
-	scnprintf(path, PATH_MAX, "%s/%s/format", tp_dir, name);
-	put_events_file(tp_dir);
+	scnprintf(path, PATH_MAX, "%s/%s/%s/format",
+		  tracing_events_path, sys, name);
 
 	err = filename__read_str(path, &data, &size);
 	if (err)

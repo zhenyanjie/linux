@@ -155,8 +155,6 @@ static ssize_t target_core_item_dbroot_store(struct config_item *item,
 
 	mutex_unlock(&g_tf_lock);
 
-	pr_debug("Target_Core_ConfigFS: db_root set to %s\n", db_root);
-
 	return read_bytes;
 }
 
@@ -309,7 +307,7 @@ static struct configfs_attribute *target_core_fabric_item_attrs[] = {
 /*
  * Provides Fabrics Groups and Item Attributes for /sys/kernel/config/target/
  */
-static const struct config_item_type target_core_fabrics_item = {
+static struct config_item_type target_core_fabrics_item = {
 	.ct_group_ops	= &target_core_fabric_group_ops,
 	.ct_attrs	= target_core_fabric_item_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -1087,24 +1085,6 @@ static ssize_t block_size_store(struct config_item *item,
 	return count;
 }
 
-static ssize_t alua_support_show(struct config_item *item, char *page)
-{
-	struct se_dev_attrib *da = to_attrib(item);
-	u8 flags = da->da_dev->transport->transport_flags;
-
-	return snprintf(page, PAGE_SIZE, "%d\n",
-			flags & TRANSPORT_FLAG_PASSTHROUGH_ALUA ? 0 : 1);
-}
-
-static ssize_t pgr_support_show(struct config_item *item, char *page)
-{
-	struct se_dev_attrib *da = to_attrib(item);
-	u8 flags = da->da_dev->transport->transport_flags;
-
-	return snprintf(page, PAGE_SIZE, "%d\n",
-			flags & TRANSPORT_FLAG_PASSTHROUGH_PGR ? 0 : 1);
-}
-
 CONFIGFS_ATTR(, emulate_model_alias);
 CONFIGFS_ATTR(, emulate_dpo);
 CONFIGFS_ATTR(, emulate_fua_write);
@@ -1136,8 +1116,6 @@ CONFIGFS_ATTR(, unmap_granularity);
 CONFIGFS_ATTR(, unmap_granularity_alignment);
 CONFIGFS_ATTR(, unmap_zeroes_data);
 CONFIGFS_ATTR(, max_write_same_len);
-CONFIGFS_ATTR_RO(, alua_support);
-CONFIGFS_ATTR_RO(, pgr_support);
 
 /*
  * dev_attrib attributes for devices using the target core SBC/SPC
@@ -1176,8 +1154,6 @@ struct configfs_attribute *sbc_attrib_attrs[] = {
 	&attr_unmap_granularity_alignment,
 	&attr_unmap_zeroes_data,
 	&attr_max_write_same_len,
-	&attr_alua_support,
-	&attr_pgr_support,
 	NULL,
 };
 EXPORT_SYMBOL(sbc_attrib_attrs);
@@ -1192,14 +1168,11 @@ struct configfs_attribute *passthrough_attrib_attrs[] = {
 	&attr_hw_block_size,
 	&attr_hw_max_sectors,
 	&attr_hw_queue_depth,
-	&attr_alua_support,
-	&attr_pgr_support,
 	NULL,
 };
 EXPORT_SYMBOL(passthrough_attrib_attrs);
 
 TB_CIT_SETUP_DRV(dev_attrib, NULL, NULL);
-TB_CIT_SETUP_DRV(dev_action, NULL, NULL);
 
 /* End functions for struct config_item_type tb_dev_attrib_cit */
 
@@ -1614,12 +1587,12 @@ static match_table_t tokens = {
 	{Opt_res_type, "res_type=%d"},
 	{Opt_res_scope, "res_scope=%d"},
 	{Opt_res_all_tg_pt, "res_all_tg_pt=%d"},
-	{Opt_mapped_lun, "mapped_lun=%u"},
+	{Opt_mapped_lun, "mapped_lun=%lld"},
 	{Opt_target_fabric, "target_fabric=%s"},
 	{Opt_target_node, "target_node=%s"},
 	{Opt_tpgt, "tpgt=%d"},
 	{Opt_port_rtpi, "port_rtpi=%d"},
-	{Opt_target_lun, "target_lun=%u"},
+	{Opt_target_lun, "target_lun=%lld"},
 	{Opt_err, NULL}
 };
 
@@ -1696,7 +1669,7 @@ static ssize_t target_pr_res_aptpl_metadata_store(struct config_item *item,
 			}
 			break;
 		case Opt_sa_res_key:
-			ret = match_u64(args,  &tmp_ll);
+			ret = kstrtoull(args->from, 0, &tmp_ll);
 			if (ret < 0) {
 				pr_err("kstrtoull() failed for sa_res_key=\n");
 				goto out;
@@ -1730,10 +1703,10 @@ static ssize_t target_pr_res_aptpl_metadata_store(struct config_item *item,
 			all_tg_pt = (int)arg;
 			break;
 		case Opt_mapped_lun:
-			ret = match_u64(args, &tmp_ll);
+			ret = match_int(args, &arg);
 			if (ret)
 				goto out;
-			mapped_lun = (u64)tmp_ll;
+			mapped_lun = (u64)arg;
 			break;
 		/*
 		 * PR APTPL Metadata for Target Port
@@ -1771,10 +1744,10 @@ static ssize_t target_pr_res_aptpl_metadata_store(struct config_item *item,
 				goto out;
 			break;
 		case Opt_target_lun:
-			ret = match_u64(args, &tmp_ll);
+			ret = match_int(args, &arg);
 			if (ret)
 				goto out;
-			target_lun = (u64)tmp_ll;
+			target_lun = (u64)arg;
 			break;
 		default:
 			break;
@@ -2263,11 +2236,7 @@ static void target_core_dev_release(struct config_item *item)
 	target_free_device(dev);
 }
 
-/*
- * Used in target_core_fabric_configfs.c to verify valid se_device symlink
- * within target_fabric_port_link()
- */
-struct configfs_item_operations target_core_dev_item_ops = {
+static struct configfs_item_operations target_core_dev_item_ops = {
 	.release		= target_core_dev_release,
 };
 
@@ -2379,7 +2348,7 @@ static struct configfs_item_operations target_core_alua_lu_gp_ops = {
 	.release		= target_core_alua_lu_gp_release,
 };
 
-static const struct config_item_type target_core_alua_lu_gp_cit = {
+static struct config_item_type target_core_alua_lu_gp_cit = {
 	.ct_item_ops		= &target_core_alua_lu_gp_ops,
 	.ct_attrs		= target_core_alua_lu_gp_attrs,
 	.ct_owner		= THIS_MODULE,
@@ -2437,7 +2406,7 @@ static struct configfs_group_operations target_core_alua_lu_gps_group_ops = {
 	.drop_item		= &target_core_alua_drop_lu_gp,
 };
 
-static const struct config_item_type target_core_alua_lu_gps_cit = {
+static struct config_item_type target_core_alua_lu_gps_cit = {
 	.ct_item_ops		= NULL,
 	.ct_group_ops		= &target_core_alua_lu_gps_group_ops,
 	.ct_owner		= THIS_MODULE,
@@ -2816,7 +2785,7 @@ static struct configfs_item_operations target_core_alua_tg_pt_gp_ops = {
 	.release		= target_core_alua_tg_pt_gp_release,
 };
 
-static const struct config_item_type target_core_alua_tg_pt_gp_cit = {
+static struct config_item_type target_core_alua_tg_pt_gp_cit = {
 	.ct_item_ops		= &target_core_alua_tg_pt_gp_ops,
 	.ct_attrs		= target_core_alua_tg_pt_gp_attrs,
 	.ct_owner		= THIS_MODULE,
@@ -2887,7 +2856,7 @@ TB_CIT_SETUP(dev_alua_tg_pt_gps, NULL, &target_core_alua_tg_pt_gps_group_ops, NU
  * core/alua/lu_gps and core/alua/tg_pt_gps that are attached to
  * target_core_alua_cit in target_core_init_configfs() below.
  */
-static const struct config_item_type target_core_alua_cit = {
+static struct config_item_type target_core_alua_cit = {
 	.ct_item_ops		= NULL,
 	.ct_attrs		= NULL,
 	.ct_owner		= THIS_MODULE,
@@ -2942,10 +2911,6 @@ static struct config_group *target_core_make_subdev(
 		goto out_unlock;
 
 	config_group_init_type_name(&dev->dev_group, name, &tb->tb_dev_cit);
-
-	config_group_init_type_name(&dev->dev_action_group, "action",
-			&tb->tb_dev_action_cit);
-	configfs_add_default_group(&dev->dev_action_group, &dev->dev_group);
 
 	config_group_init_type_name(&dev->dev_attrib.da_group, "attrib",
 			&tb->tb_dev_attrib_cit);
@@ -3112,7 +3077,7 @@ static struct configfs_item_operations target_core_hba_item_ops = {
 	.release		= target_core_hba_release,
 };
 
-static const struct config_item_type target_core_hba_cit = {
+static struct config_item_type target_core_hba_cit = {
 	.ct_item_ops		= &target_core_hba_item_ops,
 	.ct_group_ops		= &target_core_hba_group_ops,
 	.ct_attrs		= target_core_hba_attrs,
@@ -3195,7 +3160,7 @@ static struct configfs_group_operations target_core_group_ops = {
 	.drop_item	= target_core_call_delhbafromtarget,
 };
 
-static const struct config_item_type target_core_cit = {
+static struct config_item_type target_core_cit = {
 	.ct_item_ops	= NULL,
 	.ct_group_ops	= &target_core_group_ops,
 	.ct_attrs	= NULL,
@@ -3207,33 +3172,11 @@ static const struct config_item_type target_core_cit = {
 void target_setup_backend_cits(struct target_backend *tb)
 {
 	target_core_setup_dev_cit(tb);
-	target_core_setup_dev_action_cit(tb);
 	target_core_setup_dev_attrib_cit(tb);
 	target_core_setup_dev_pr_cit(tb);
 	target_core_setup_dev_wwn_cit(tb);
 	target_core_setup_dev_alua_tg_pt_gps_cit(tb);
 	target_core_setup_dev_stat_cit(tb);
-}
-
-static void target_init_dbroot(void)
-{
-	struct file *fp;
-
-	snprintf(db_root_stage, DB_ROOT_LEN, DB_ROOT_PREFERRED);
-	fp = filp_open(db_root_stage, O_RDONLY, 0);
-	if (IS_ERR(fp)) {
-		pr_err("db_root: cannot open: %s\n", db_root_stage);
-		return;
-	}
-	if (!S_ISDIR(file_inode(fp)->i_mode)) {
-		filp_close(fp, NULL);
-		pr_err("db_root: not a valid directory: %s\n", db_root_stage);
-		return;
-	}
-	filp_close(fp, NULL);
-
-	strncpy(db_root, db_root_stage, DB_ROOT_LEN);
-	pr_debug("Target_Core_ConfigFS: db_root set to %s\n", db_root);
 }
 
 static int __init target_core_init_configfs(void)
@@ -3315,8 +3258,6 @@ static int __init target_core_init_configfs(void)
 	ret = target_xcopy_setup_pt();
 	if (ret < 0)
 		goto out;
-
-	target_init_dbroot();
 
 	return 0;
 

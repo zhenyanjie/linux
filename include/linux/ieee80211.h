@@ -8,7 +8,6 @@
  * Copyright (c) 2006, Michael Wu <flamingice@sourmilk.net>
  * Copyright (c) 2013 - 2014 Intel Mobile Communications GmbH
  * Copyright (c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright (c) 2018        Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -2112,45 +2111,12 @@ enum ieee80211_key_len {
 #define FILS_ERP_MAX_REALM_LEN		253
 #define FILS_ERP_MAX_RRK_LEN		64
 
-#define PMK_MAX_LEN			64
+#define PMK_MAX_LEN			48
 
-/* Public action codes (IEEE Std 802.11-2016, 9.6.8.1, Table 9-307) */
+/* Public action codes */
 enum ieee80211_pub_actioncode {
-	WLAN_PUB_ACTION_20_40_BSS_COEX = 0,
-	WLAN_PUB_ACTION_DSE_ENABLEMENT = 1,
-	WLAN_PUB_ACTION_DSE_DEENABLEMENT = 2,
-	WLAN_PUB_ACTION_DSE_REG_LOC_ANN = 3,
 	WLAN_PUB_ACTION_EXT_CHANSW_ANN = 4,
-	WLAN_PUB_ACTION_DSE_MSMT_REQ = 5,
-	WLAN_PUB_ACTION_DSE_MSMT_RESP = 6,
-	WLAN_PUB_ACTION_MSMT_PILOT = 7,
-	WLAN_PUB_ACTION_DSE_PC = 8,
-	WLAN_PUB_ACTION_VENDOR_SPECIFIC = 9,
-	WLAN_PUB_ACTION_GAS_INITIAL_REQ = 10,
-	WLAN_PUB_ACTION_GAS_INITIAL_RESP = 11,
-	WLAN_PUB_ACTION_GAS_COMEBACK_REQ = 12,
-	WLAN_PUB_ACTION_GAS_COMEBACK_RESP = 13,
 	WLAN_PUB_ACTION_TDLS_DISCOVER_RES = 14,
-	WLAN_PUB_ACTION_LOC_TRACK_NOTI = 15,
-	WLAN_PUB_ACTION_QAB_REQUEST_FRAME = 16,
-	WLAN_PUB_ACTION_QAB_RESPONSE_FRAME = 17,
-	WLAN_PUB_ACTION_QMF_POLICY = 18,
-	WLAN_PUB_ACTION_QMF_POLICY_CHANGE = 19,
-	WLAN_PUB_ACTION_QLOAD_REQUEST = 20,
-	WLAN_PUB_ACTION_QLOAD_REPORT = 21,
-	WLAN_PUB_ACTION_HCCA_TXOP_ADVERT = 22,
-	WLAN_PUB_ACTION_HCCA_TXOP_RESPONSE = 23,
-	WLAN_PUB_ACTION_PUBLIC_KEY = 24,
-	WLAN_PUB_ACTION_CHANNEL_AVAIL_QUERY = 25,
-	WLAN_PUB_ACTION_CHANNEL_SCHEDULE_MGMT = 26,
-	WLAN_PUB_ACTION_CONTACT_VERI_SIGNAL = 27,
-	WLAN_PUB_ACTION_GDD_ENABLEMENT_REQ = 28,
-	WLAN_PUB_ACTION_GDD_ENABLEMENT_RESP = 29,
-	WLAN_PUB_ACTION_NETWORK_CHANNEL_CONTROL = 30,
-	WLAN_PUB_ACTION_WHITE_SPACE_MAP_ANN = 31,
-	WLAN_PUB_ACTION_FTM_REQUEST = 32,
-	WLAN_PUB_ACTION_FTM = 33,
-	WLAN_PUB_ACTION_FILS_DISCOVERY = 34,
 };
 
 /* TDLS action codes */
@@ -2434,11 +2400,7 @@ enum ieee80211_sa_query_action {
 
 #define WLAN_MAX_KEY_LEN		32
 
-#define WLAN_PMK_NAME_LEN		16
 #define WLAN_PMKID_LEN			16
-#define WLAN_PMK_LEN_EAP_LEAP		16
-#define WLAN_PMK_LEN			32
-#define WLAN_PMK_LEN_SUITE_B_192	48
 
 #define WLAN_OUI_WFA			0x506f9a
 #define WLAN_OUI_TYPE_WFA_P2P		9
@@ -2446,7 +2408,6 @@ enum ieee80211_sa_query_action {
 #define WLAN_OUI_TYPE_MICROSOFT_WPA	1
 #define WLAN_OUI_TYPE_MICROSOFT_WMM	2
 #define WLAN_OUI_TYPE_MICROSOFT_WPS	4
-#define WLAN_OUI_TYPE_MICROSOFT_TPC	8
 
 /*
  * WMM/802.11e Tspec Element
@@ -2500,17 +2461,6 @@ static inline u8 *ieee80211_get_qos_ctl(struct ieee80211_hdr *hdr)
 		return (u8 *)hdr + 30;
 	else
 		return (u8 *)hdr + 24;
-}
-
-/**
- * ieee80211_get_tid - get qos TID
- * @hdr: the frame
- */
-static inline u8 ieee80211_get_tid(struct ieee80211_hdr *hdr)
-{
-	u8 *qc = ieee80211_get_qos_ctl(hdr);
-
-	return qc[0] & IEEE80211_QOS_CTL_TID_MASK;
 }
 
 /**

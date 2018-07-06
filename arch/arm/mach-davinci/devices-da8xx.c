@@ -11,6 +11,7 @@
  * (at your option) any later version.
  */
 #include <linux/init.h>
+#include <linux/platform_data/syscon.h>
 #include <linux/platform_device.h>
 #include <linux/dma-contiguous.h>
 #include <linux/serial_8250.h>
@@ -251,7 +252,7 @@ int __init da830_register_edma(struct edma_rsv_info *rsv)
 	da8xx_edma0_pdata.slavecnt = ARRAY_SIZE(da830_edma_map);
 
 	edma_pdev = platform_device_register_full(&da8xx_edma0_device);
-	return PTR_ERR_OR_ZERO(edma_pdev);
+	return IS_ERR(edma_pdev) ? PTR_ERR(edma_pdev) : 0;
 }
 
 static const struct dma_slave_map da850_edma0_map[] = {
@@ -296,7 +297,7 @@ int __init da850_register_edma(struct edma_rsv_info *rsv[2])
 	da850_edma1_pdata.slavecnt = ARRAY_SIZE(da850_edma1_map);
 
 	edma_pdev = platform_device_register_full(&da850_edma1_device);
-	return PTR_ERR_OR_ZERO(edma_pdev);
+	return IS_ERR(edma_pdev) ? PTR_ERR(edma_pdev) : 0;
 }
 
 static struct resource da8xx_i2c_resources0[] = {
@@ -369,6 +370,19 @@ static struct platform_device da8xx_wdt_device = {
 	.num_resources	= ARRAY_SIZE(da8xx_watchdog_resources),
 	.resource	= da8xx_watchdog_resources,
 };
+
+void da8xx_restart(enum reboot_mode mode, const char *cmd)
+{
+	struct device *dev;
+
+	dev = bus_find_device_by_name(&platform_bus_type, NULL, "davinci-wdt");
+	if (!dev) {
+		pr_err("%s: failed to find watchdog device\n", __func__);
+		return;
+	}
+
+	davinci_watchdog_reset(to_platform_device(dev));
+}
 
 int __init da8xx_register_watchdog(void)
 {
@@ -775,33 +789,13 @@ int __init da850_register_mmcsd1(struct davinci_mmc_config *config)
 
 static struct resource da8xx_rproc_resources[] = {
 	{ /* DSP boot address */
-		.name		= "host1cfg",
 		.start		= DA8XX_SYSCFG0_BASE + DA8XX_HOST1CFG_REG,
 		.end		= DA8XX_SYSCFG0_BASE + DA8XX_HOST1CFG_REG + 3,
 		.flags		= IORESOURCE_MEM,
 	},
 	{ /* DSP interrupt registers */
-		.name		= "chipsig",
 		.start		= DA8XX_SYSCFG0_BASE + DA8XX_CHIPSIG_REG,
 		.end		= DA8XX_SYSCFG0_BASE + DA8XX_CHIPSIG_REG + 7,
-		.flags		= IORESOURCE_MEM,
-	},
-	{ /* DSP L2 RAM */
-		.name		= "l2sram",
-		.start		= DA8XX_DSP_L2_RAM_BASE,
-		.end		= DA8XX_DSP_L2_RAM_BASE + SZ_256K - 1,
-		.flags		= IORESOURCE_MEM,
-	},
-	{ /* DSP L1P RAM */
-		.name		= "l1pram",
-		.start		= DA8XX_DSP_L1P_RAM_BASE,
-		.end		= DA8XX_DSP_L1P_RAM_BASE + SZ_32K - 1,
-		.flags		= IORESOURCE_MEM,
-	},
-	{ /* DSP L1D RAM */
-		.name		= "l1dram",
-		.start		= DA8XX_DSP_L1D_RAM_BASE,
-		.end		= DA8XX_DSP_L1D_RAM_BASE + SZ_32K - 1,
 		.flags		= IORESOURCE_MEM,
 	},
 	{ /* dsp irq */
@@ -819,8 +813,6 @@ static struct platform_device da8xx_dsp = {
 	.num_resources	= ARRAY_SIZE(da8xx_rproc_resources),
 	.resource	= da8xx_rproc_resources,
 };
-
-static bool rproc_mem_inited __initdata;
 
 #if IS_ENABLED(CONFIG_DA8XX_REMOTEPROC)
 
@@ -860,8 +852,6 @@ void __init da8xx_rproc_reserve_cma(void)
 	ret = dma_declare_contiguous(&da8xx_dsp.dev, rproc_size, rproc_base, 0);
 	if (ret)
 		pr_err("%s: dma_declare_contiguous failed %d\n", __func__, ret);
-	else
-		rproc_mem_inited = true;
 }
 
 #else
@@ -875,12 +865,6 @@ void __init da8xx_rproc_reserve_cma(void)
 int __init da8xx_register_rproc(void)
 {
 	int ret;
-
-	if (!rproc_mem_inited) {
-		pr_warn("%s: memory not reserved for DSP, not registering DSP device\n",
-			__func__);
-		return -ENOMEM;
-	}
 
 	ret = platform_device_register(&da8xx_dsp);
 	if (ret)
@@ -1104,30 +1088,29 @@ int __init da850_register_sata(unsigned long refclkpn)
 }
 #endif
 
-static struct regmap *da8xx_cfgchip;
-
-static const struct regmap_config da8xx_cfgchip_config __initconst = {
-	.name		= "cfgchip",
-	.reg_bits	= 32,
-	.val_bits	= 32,
-	.reg_stride	= 4,
-	.max_register	= DA8XX_CFGCHIP4_REG - DA8XX_CFGCHIP0_REG,
+static struct syscon_platform_data da8xx_cfgchip_platform_data = {
+	.label	= "cfgchip",
 };
 
-/**
- * da8xx_get_cfgchip - Lazy gets CFGCHIP as regmap
- *
- * This is for use on non-DT boards only. For DT boards, use
- * syscon_regmap_lookup_by_compatible("ti,da830-cfgchip")
- *
- * Returns: Pointer to the CFGCHIP regmap or negative error code.
- */
-struct regmap * __init da8xx_get_cfgchip(void)
-{
-	if (IS_ERR_OR_NULL(da8xx_cfgchip))
-		da8xx_cfgchip = regmap_init_mmio(NULL,
-					DA8XX_SYSCFG0_VIRT(DA8XX_CFGCHIP0_REG),
-					&da8xx_cfgchip_config);
+static struct resource da8xx_cfgchip_resources[] = {
+	{
+		.start	= DA8XX_SYSCFG0_BASE + DA8XX_CFGCHIP0_REG,
+		.end	= DA8XX_SYSCFG0_BASE + DA8XX_CFGCHIP4_REG + 3,
+		.flags	= IORESOURCE_MEM,
+	},
+};
 
-	return da8xx_cfgchip;
+static struct platform_device da8xx_cfgchip_device = {
+	.name	= "syscon",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &da8xx_cfgchip_platform_data,
+	},
+	.num_resources	= ARRAY_SIZE(da8xx_cfgchip_resources),
+	.resource	= da8xx_cfgchip_resources,
+};
+
+int __init da8xx_register_cfgchip(void)
+{
+	return platform_device_register(&da8xx_cfgchip_device);
 }

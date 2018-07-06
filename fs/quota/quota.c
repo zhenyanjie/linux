@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Quota code necessary even when VFS quota support is not compiled
  * into the kernel.  The interesting stuff is over in dquot.c, here
@@ -754,7 +753,7 @@ static int do_quotactl(struct super_block *sb, int type, int cmd, qid_t id,
 	case Q_XGETNEXTQUOTA:
 		return quota_getnextxquota(sb, type, id, addr);
 	case Q_XQUOTASYNC:
-		if (sb_rdonly(sb))
+		if (sb->s_flags & MS_RDONLY)
 			return -EROFS;
 		/* XFS quotas are fully coherent now, making this call a noop */
 		return 0;
@@ -833,8 +832,8 @@ static struct super_block *quotactl_block(const char __user *special, int cmd)
  * calls. Maybe we need to add the process quotas etc. in the future,
  * but we probably should use rlimits for that.
  */
-int kernel_quotactl(unsigned int cmd, const char __user *special,
-		    qid_t id, void __user *addr)
+SYSCALL_DEFINE4(quotactl, unsigned int, cmd, const char __user *, special,
+		qid_t, id, void __user *, addr)
 {
 	uint cmds, type;
 	struct super_block *sb = NULL;
@@ -884,10 +883,4 @@ out:
 	if (pathp && !IS_ERR(pathp))
 		path_put(pathp);
 	return ret;
-}
-
-SYSCALL_DEFINE4(quotactl, unsigned int, cmd, const char __user *, special,
-		qid_t, id, void __user *, addr)
-{
-	return kernel_quotactl(cmd, special, id, addr);
 }

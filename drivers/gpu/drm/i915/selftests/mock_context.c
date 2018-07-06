@@ -40,13 +40,10 @@ mock_context(struct drm_i915_private *i915,
 	INIT_LIST_HEAD(&ctx->link);
 	ctx->i915 = i915;
 
-	INIT_RADIX_TREE(&ctx->handles_vma, GFP_KERNEL);
-	INIT_LIST_HEAD(&ctx->handles_list);
-
-	ret = ida_simple_get(&i915->contexts.hw_ida,
+	ret = ida_simple_get(&i915->context_hw_ida,
 			     0, MAX_CONTEXT_HW_ID, GFP_KERNEL);
 	if (ret < 0)
-		goto err_handles;
+		goto err_free;
 	ctx->hw_id = ret;
 
 	if (name) {
@@ -61,7 +58,7 @@ mock_context(struct drm_i915_private *i915,
 
 	return ctx;
 
-err_handles:
+err_free:
 	kfree(ctx);
 	return NULL;
 
@@ -73,33 +70,9 @@ err_put:
 
 void mock_context_close(struct i915_gem_context *ctx)
 {
-	context_close(ctx);
-}
+	i915_gem_context_set_closed(ctx);
 
-void mock_init_contexts(struct drm_i915_private *i915)
-{
-	INIT_LIST_HEAD(&i915->contexts.list);
-	ida_init(&i915->contexts.hw_ida);
+	i915_ppgtt_close(&ctx->ppgtt->base);
 
-	INIT_WORK(&i915->contexts.free_work, contexts_free_worker);
-	init_llist_head(&i915->contexts.free_list);
-}
-
-struct i915_gem_context *
-live_context(struct drm_i915_private *i915, struct drm_file *file)
-{
-	lockdep_assert_held(&i915->drm.struct_mutex);
-
-	return i915_gem_create_context(i915, file->driver_priv);
-}
-
-struct i915_gem_context *
-kernel_context(struct drm_i915_private *i915)
-{
-	return i915_gem_context_create_kernel(i915, I915_PRIORITY_NORMAL);
-}
-
-void kernel_context_close(struct i915_gem_context *ctx)
-{
-	context_close(ctx);
+	i915_gem_context_put(ctx);
 }

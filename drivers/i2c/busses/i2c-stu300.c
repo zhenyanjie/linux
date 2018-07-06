@@ -602,24 +602,20 @@ static int stu300_send_address(struct stu300_dev *dev,
 	u32 val;
 	int ret;
 
-	if (msg->flags & I2C_M_TEN) {
+	if (msg->flags & I2C_M_TEN)
 		/* This is probably how 10 bit addresses look */
 		val = (0xf0 | (((u32) msg->addr & 0x300) >> 7)) &
 			I2C_DR_D_MASK;
-		if (msg->flags & I2C_M_RD)
-			/* This is the direction bit */
-			val |= 0x01;
-	} else {
-		val = i2c_8bit_addr_from_msg(msg);
-	}
+	else
+		val = ((msg->addr << 1) & I2C_DR_D_MASK);
 
-	if (resend) {
-		if (msg->flags & I2C_M_RD)
+	if (msg->flags & I2C_M_RD) {
+		/* This is the direction bit */
+		val |= 0x01;
+		if (resend)
 			dev_dbg(&dev->pdev->dev, "read resend\n");
-		else
-			dev_dbg(&dev->pdev->dev, "write resend\n");
-	}
-
+	} else if (resend)
+		dev_dbg(&dev->pdev->dev, "write resend\n");
 	stu300_wr8(val, dev->virtbase + I2C_DR);
 
 	/* For 10bit addressing, await 10bit request (EVENT 9) */

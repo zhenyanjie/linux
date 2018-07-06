@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  IBM System z Huge TLB Page Support for Kernel.
  *
@@ -163,42 +162,33 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
 			unsigned long addr, unsigned long sz)
 {
 	pgd_t *pgdp;
-	p4d_t *p4dp;
 	pud_t *pudp;
 	pmd_t *pmdp = NULL;
 
 	pgdp = pgd_offset(mm, addr);
-	p4dp = p4d_alloc(mm, pgdp, addr);
-	if (p4dp) {
-		pudp = pud_alloc(mm, p4dp, addr);
-		if (pudp) {
-			if (sz == PUD_SIZE)
-				return (pte_t *) pudp;
-			else if (sz == PMD_SIZE)
-				pmdp = pmd_alloc(mm, pudp, addr);
-		}
+	pudp = pud_alloc(mm, pgdp, addr);
+	if (pudp) {
+		if (sz == PUD_SIZE)
+			return (pte_t *) pudp;
+		else if (sz == PMD_SIZE)
+			pmdp = pmd_alloc(mm, pudp, addr);
 	}
 	return (pte_t *) pmdp;
 }
 
-pte_t *huge_pte_offset(struct mm_struct *mm,
-		       unsigned long addr, unsigned long sz)
+pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgdp;
-	p4d_t *p4dp;
 	pud_t *pudp;
 	pmd_t *pmdp = NULL;
 
 	pgdp = pgd_offset(mm, addr);
 	if (pgd_present(*pgdp)) {
-		p4dp = p4d_offset(pgdp, addr);
-		if (p4d_present(*p4dp)) {
-			pudp = pud_offset(p4dp, addr);
-			if (pud_present(*pudp)) {
-				if (pud_large(*pudp))
-					return (pte_t *) pudp;
-				pmdp = pmd_offset(pudp, addr);
-			}
+		pudp = pud_offset(pgdp, addr);
+		if (pud_present(*pudp)) {
+			if (pud_large(*pudp))
+				return (pte_t *) pudp;
+			pmdp = pmd_offset(pudp, addr);
 		}
 	}
 	return (pte_t *) pmdp;

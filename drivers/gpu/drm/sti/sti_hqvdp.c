@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Authors: Fabien Dessenne <fabien.dessenne@st.com> for STMicroelectronics.
+ * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/component.h>
@@ -625,7 +625,8 @@ static int hqvdp_dbg_show(struct seq_file *s, void *data)
 		hqvdp_dbg_dump_cmd(s, (struct sti_hqvdp_cmd *)virt);
 	}
 
-	seq_putc(s, '\n');
+	seq_puts(s, "\n");
+
 	return 0;
 }
 
@@ -958,7 +959,6 @@ static void sti_hqvdp_start_xp70(struct sti_hqvdp *hqvdp)
 	}
 	if (i == POLL_MAX_ATTEMPT) {
 		DRM_ERROR("Could not reset\n");
-		clk_disable_unprepare(hqvdp->clk);
 		goto out;
 	}
 
@@ -995,7 +995,6 @@ static void sti_hqvdp_start_xp70(struct sti_hqvdp *hqvdp)
 	}
 	if (i == POLL_MAX_ATTEMPT) {
 		DRM_ERROR("Could not boot\n");
-		clk_disable_unprepare(hqvdp->clk);
 		goto out;
 	}
 
@@ -1083,7 +1082,6 @@ static int sti_hqvdp_atomic_check(struct drm_plane *drm_plane,
 					    &hqvdp->vtg_nb,
 					    crtc)) {
 			DRM_ERROR("Cannot register VTG notifier\n");
-			clk_disable_unprepare(hqvdp->clk_pix_main);
 			return -EINVAL;
 		}
 		hqvdp->vtg_registered = true;
@@ -1276,6 +1274,7 @@ static const struct drm_plane_funcs sti_hqvdp_plane_helpers_funcs = {
 	.update_plane = drm_atomic_helper_update_plane,
 	.disable_plane = drm_atomic_helper_disable_plane,
 	.destroy = sti_hqvdp_destroy,
+	.set_property = drm_atomic_helper_plane_set_property,
 	.reset = sti_plane_reset,
 	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
@@ -1297,7 +1296,7 @@ static struct drm_plane *sti_hqvdp_create(struct drm_device *drm_dev,
 				       &sti_hqvdp_plane_helpers_funcs,
 				       hqvdp_supported_formats,
 				       ARRAY_SIZE(hqvdp_supported_formats),
-				       NULL, DRM_PLANE_TYPE_OVERLAY, NULL);
+				       DRM_PLANE_TYPE_OVERLAY, NULL);
 	if (res) {
 		DRM_ERROR("Failed to initialize universal plane\n");
 		return NULL;
@@ -1358,12 +1357,12 @@ static int sti_hqvdp_probe(struct platform_device *pdev)
 
 	/* Get Memory resources */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
+	if (res == NULL) {
 		DRM_ERROR("Get memory resource failed\n");
 		return -ENXIO;
 	}
 	hqvdp->regs = devm_ioremap(dev, res->start, resource_size(res));
-	if (!hqvdp->regs) {
+	if (hqvdp->regs == NULL) {
 		DRM_ERROR("Register mapping failed\n");
 		return -ENXIO;
 	}
@@ -1397,7 +1396,7 @@ static int sti_hqvdp_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id hqvdp_of_match[] = {
+static struct of_device_id hqvdp_of_match[] = {
 	{ .compatible = "st,stih407-hqvdp", },
 	{ /* end node */ }
 };

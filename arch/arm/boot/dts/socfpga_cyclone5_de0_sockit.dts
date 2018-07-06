@@ -86,7 +86,7 @@
 
 &i2c0 {
 	status = "okay";
-	clock-frequency = <100000>;
+	speed-mode = <0>;
 
 	adxl345: adxl345@0 {
 		compatible = "adi,adxl345";

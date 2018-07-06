@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0
-//
-// Samsung's S3C64XX generic DMA support using amba-pl08x driver.
-//
-// Copyright (c) 2013 Tomasz Figa <tomasz.figa@gmail.com>
+/*
+ * Samsung's S3C64XX generic DMA support using amba-pl08x driver.
+ *
+ * Copyright (c) 2013 Tomasz Figa <tomasz.figa@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
 
 #include <linux/kernel.h>
 #include <linux/amba/bus.h>
@@ -133,10 +137,16 @@ static const struct dma_slave_map s3c64xx_dma0_slave_map[] = {
 };
 
 struct pl08x_platform_data s3c64xx_dma0_plat_data = {
-	.memcpy_burst_size = PL08X_BURST_SZ_4,
-	.memcpy_bus_width = PL08X_BUS_WIDTH_32_BITS,
-	.memcpy_prot_buff = true,
-	.memcpy_prot_cache = true,
+	.memcpy_channel = {
+		.bus_id = "memcpy",
+		.cctl_memcpy =
+			(PL080_BSIZE_4 << PL080_CONTROL_SB_SIZE_SHIFT |
+			PL080_BSIZE_4 << PL080_CONTROL_DB_SIZE_SHIFT |
+			PL080_WIDTH_32BIT << PL080_CONTROL_SWIDTH_SHIFT |
+			PL080_WIDTH_32BIT << PL080_CONTROL_DWIDTH_SHIFT |
+			PL080_CONTROL_PROT_BUFF | PL080_CONTROL_PROT_CACHE |
+			PL080_CONTROL_PROT_SYS),
+	},
 	.lli_buses = PL08X_AHB1,
 	.mem_buses = PL08X_AHB1,
 	.get_xfer_signal = pl08x_get_xfer_signal,
@@ -228,10 +238,16 @@ static const struct dma_slave_map s3c64xx_dma1_slave_map[] = {
 };
 
 struct pl08x_platform_data s3c64xx_dma1_plat_data = {
-	.memcpy_burst_size = PL08X_BURST_SZ_4,
-	.memcpy_bus_width = PL08X_BUS_WIDTH_32_BITS,
-	.memcpy_prot_buff = true,
-	.memcpy_prot_cache = true,
+	.memcpy_channel = {
+		.bus_id = "memcpy",
+		.cctl_memcpy =
+			(PL080_BSIZE_4 << PL080_CONTROL_SB_SIZE_SHIFT |
+			PL080_BSIZE_4 << PL080_CONTROL_DB_SIZE_SHIFT |
+			PL080_WIDTH_32BIT << PL080_CONTROL_SWIDTH_SHIFT |
+			PL080_WIDTH_32BIT << PL080_CONTROL_DWIDTH_SHIFT |
+			PL080_CONTROL_PROT_BUFF | PL080_CONTROL_PROT_CACHE |
+			PL080_CONTROL_PROT_SYS),
+	},
 	.lli_buses = PL08X_AHB1,
 	.mem_buses = PL08X_AHB1,
 	.get_xfer_signal = pl08x_get_xfer_signal,

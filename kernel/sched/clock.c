@@ -1,5 +1,5 @@
 /*
- * sched_clock() for unstable CPU clocks
+ * sched_clock for unstable cpu clocks
  *
  *  Copyright (C) 2008 Red Hat, Inc., Peter Zijlstra
  *
@@ -11,7 +11,7 @@
  *   Guillaume Chazarain <guichaz@gmail.com>
  *
  *
- * What this file implements:
+ * What:
  *
  * cpu_clock(i) provides a fast (execution time) high resolution
  * clock with bounded drift between CPUs. The value of cpu_clock(i)
@@ -26,11 +26,11 @@
  * at 0 on boot (but people really shouldn't rely on that).
  *
  * cpu_clock(i)       -- can be used from any context, including NMI.
- * local_clock()      -- is cpu_clock() on the current CPU.
+ * local_clock()      -- is cpu_clock() on the current cpu.
  *
  * sched_clock_cpu(i)
  *
- * How it is implemented:
+ * How:
  *
  * The implementation either uses sched_clock() when
  * !CONFIG_HAVE_UNSTABLE_SCHED_CLOCK, which means in that case the
@@ -52,7 +52,18 @@
  * that is otherwise invisible (TSC gets stopped).
  *
  */
-#include "sched.h"
+#include <linux/spinlock.h>
+#include <linux/hardirq.h>
+#include <linux/export.h>
+#include <linux/percpu.h>
+#include <linux/ktime.h>
+#include <linux/sched.h>
+#include <linux/nmi.h>
+#include <linux/sched/clock.h>
+#include <linux/static_key.h>
+#include <linux/workqueue.h>
+#include <linux/compiler.h>
+#include <linux/tick.h>
 
 /*
  * Scheduler clock - returns current time in nanosec units.
@@ -113,27 +124,14 @@ int sched_clock_stable(void)
 	return static_branch_likely(&__sched_clock_stable);
 }
 
-static void __scd_stamp(struct sched_clock_data *scd)
-{
-	scd->tick_gtod = ktime_get_ns();
-	scd->tick_raw = sched_clock();
-}
-
 static void __set_sched_clock_stable(void)
 {
-	struct sched_clock_data *scd;
+	struct sched_clock_data *scd = this_scd();
 
-	/*
-	 * Since we're still unstable and the tick is already running, we have
-	 * to disable IRQs in order to get a consistent scd->tick* reading.
-	 */
-	local_irq_disable();
-	scd = this_scd();
 	/*
 	 * Attempt to make the (initial) unstable->stable transition continuous.
 	 */
 	__sched_clock_offset = (scd->tick_gtod + __gtod_offset) - (scd->tick_raw);
-	local_irq_enable();
 
 	printk(KERN_INFO "sched_clock: Marking stable (%lld, %lld)->(%lld, %lld)\n",
 			scd->tick_gtod, __gtod_offset,
@@ -143,38 +141,8 @@ static void __set_sched_clock_stable(void)
 	tick_dep_clear(TICK_DEP_BIT_CLOCK_UNSTABLE);
 }
 
-/*
- * If we ever get here, we're screwed, because we found out -- typically after
- * the fact -- that TSC wasn't good. This means all our clocksources (including
- * ktime) could have reported wrong values.
- *
- * What we do here is an attempt to fix up and continue sort of where we left
- * off in a coherent manner.
- *
- * The only way to fully avoid random clock jumps is to boot with:
- * "tsc=unstable".
- */
 static void __sched_clock_work(struct work_struct *work)
 {
-	struct sched_clock_data *scd;
-	int cpu;
-
-	/* take a current timestamp and set 'now' */
-	preempt_disable();
-	scd = this_scd();
-	__scd_stamp(scd);
-	scd->clock = scd->tick_gtod + __gtod_offset;
-	preempt_enable();
-
-	/* clone to all CPUs */
-	for_each_possible_cpu(cpu)
-		per_cpu(sched_clock_data, cpu) = *scd;
-
-	printk(KERN_WARNING "TSC found unstable after boot, most likely due to broken BIOS. Use 'tsc=unstable'.\n");
-	printk(KERN_INFO "sched_clock: Marking unstable (%lld, %lld)<-(%lld, %lld)\n",
-			scd->tick_gtod, __gtod_offset,
-			scd->tick_raw,  __sched_clock_offset);
-
 	static_branch_disable(&__sched_clock_stable);
 }
 
@@ -182,11 +150,27 @@ static DECLARE_WORK(sched_clock_work, __sched_clock_work);
 
 static void __clear_sched_clock_stable(void)
 {
-	if (!sched_clock_stable())
-		return;
+	struct sched_clock_data *scd = this_scd();
+
+	/*
+	 * Attempt to make the stable->unstable transition continuous.
+	 *
+	 * Trouble is, this is typically called from the TSC watchdog
+	 * timer, which is late per definition. This means the tick
+	 * values can already be screwy.
+	 *
+	 * Still do what we can.
+	 */
+	__gtod_offset = (scd->tick_raw + __sched_clock_offset) - (scd->tick_gtod);
+
+	printk(KERN_INFO "sched_clock: Marking unstable (%lld, %lld)<-(%lld, %lld)\n",
+			scd->tick_gtod, __gtod_offset,
+			scd->tick_raw,  __sched_clock_offset);
 
 	tick_dep_set(TICK_DEP_BIT_CLOCK_UNSTABLE);
-	schedule_work(&sched_clock_work);
+
+	if (sched_clock_stable())
+		schedule_work(&sched_clock_work);
 }
 
 void clear_sched_clock_stable(void)
@@ -199,11 +183,7 @@ void clear_sched_clock_stable(void)
 		__clear_sched_clock_stable();
 }
 
-/*
- * We run this as late_initcall() such that it runs after all built-in drivers,
- * notably: acpi_processor and intel_idle, which can mark the TSC as unstable.
- */
-static int __init sched_clock_init_late(void)
+void sched_clock_init_late(void)
 {
 	sched_clock_running = 2;
 	/*
@@ -217,10 +197,7 @@ static int __init sched_clock_init_late(void)
 
 	if (__sched_clock_stable_early)
 		__set_sched_clock_stable();
-
-	return 0;
 }
-late_initcall(sched_clock_init_late);
 
 /*
  * min, max except they take wrapping into account
@@ -290,21 +267,21 @@ again:
 	 * cmpxchg64 below only protects one readout.
 	 *
 	 * We must reread via sched_clock_local() in the retry case on
-	 * 32-bit kernels as an NMI could use sched_clock_local() via the
+	 * 32bit as an NMI could use sched_clock_local() via the
 	 * tracer and hit between the readout of
-	 * the low 32-bit and the high 32-bit portion.
+	 * the low32bit and the high 32bit portion.
 	 */
 	this_clock = sched_clock_local(my_scd);
 	/*
-	 * We must enforce atomic readout on 32-bit, otherwise the
-	 * update on the remote CPU can hit inbetween the readout of
-	 * the low 32-bit and the high 32-bit portion.
+	 * We must enforce atomic readout on 32bit, otherwise the
+	 * update on the remote cpu can hit inbetween the readout of
+	 * the low32bit and the high 32bit portion.
 	 */
 	remote_clock = cmpxchg64(&scd->clock, 0, 0);
 #else
 	/*
-	 * On 64-bit kernels the read of [my]scd->clock is atomic versus the
-	 * update, so we can avoid the above 32-bit dance.
+	 * On 64bit the read of [my]scd->clock is atomic versus the
+	 * update, so we can avoid the above 32bit dance.
 	 */
 	sched_clock_local(my_scd);
 again:
@@ -370,38 +347,21 @@ void sched_clock_tick(void)
 {
 	struct sched_clock_data *scd;
 
-	if (sched_clock_stable())
-		return;
-
-	if (unlikely(!sched_clock_running))
-		return;
-
-	lockdep_assert_irqs_disabled();
-
-	scd = this_scd();
-	__scd_stamp(scd);
-	sched_clock_local(scd);
-}
-
-void sched_clock_tick_stable(void)
-{
-	u64 gtod, clock;
-
-	if (!sched_clock_stable())
-		return;
+	WARN_ON_ONCE(!irqs_disabled());
 
 	/*
-	 * Called under watchdog_lock.
+	 * Update these values even if sched_clock_stable(), because it can
+	 * become unstable at any point in time at which point we need some
+	 * values to fall back on.
 	 *
-	 * The watchdog just found this TSC to (still) be stable, so now is a
-	 * good moment to update our __gtod_offset. Because once we find the
-	 * TSC to be unstable, any computation will be computing crap.
+	 * XXX arguably we can skip this if we expose tsc_clocksource_reliable
 	 */
-	local_irq_disable();
-	gtod = ktime_get_ns();
-	clock = sched_clock();
-	__gtod_offset = (clock + __sched_clock_offset) - gtod;
-	local_irq_enable();
+	scd = this_scd();
+	scd->tick_raw  = sched_clock();
+	scd->tick_gtod = ktime_get_ns();
+
+	if (!sched_clock_stable() && likely(sched_clock_running))
+		sched_clock_local(scd);
 }
 
 /*
@@ -414,21 +374,15 @@ void sched_clock_idle_sleep_event(void)
 EXPORT_SYMBOL_GPL(sched_clock_idle_sleep_event);
 
 /*
- * We just idled; resync with ktime.
+ * We just idled delta nanoseconds (called with irqs disabled):
  */
-void sched_clock_idle_wakeup_event(void)
+void sched_clock_idle_wakeup_event(u64 delta_ns)
 {
-	unsigned long flags;
-
-	if (sched_clock_stable())
+	if (timekeeping_suspended)
 		return;
 
-	if (unlikely(timekeeping_suspended))
-		return;
-
-	local_irq_save(flags);
 	sched_clock_tick();
-	local_irq_restore(flags);
+	touch_softlockup_watchdog_sched();
 }
 EXPORT_SYMBOL_GPL(sched_clock_idle_wakeup_event);
 

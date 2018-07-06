@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_PTRACE_H
 #define _LINUX_PTRACE_H
 
@@ -345,6 +344,7 @@ extern void user_single_step_siginfo(struct task_struct *tsk,
 static inline void user_single_step_siginfo(struct task_struct *tsk,
 				struct pt_regs *regs, siginfo_t *info)
 {
+	memset(info, 0, sizeof(*info));
 	info->si_signo = SIGTRAP;
 }
 #endif
@@ -389,6 +389,10 @@ static inline void user_single_step_siginfo(struct task_struct *tsk,
 
 #ifndef current_pt_regs
 #define current_pt_regs() task_pt_regs(current)
+#endif
+
+#ifndef ptrace_signal_deliver
+#define ptrace_signal_deliver() ((void)0)
 #endif
 
 /*

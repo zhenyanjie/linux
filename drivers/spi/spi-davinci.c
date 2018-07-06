@@ -873,8 +873,9 @@ static int spi_davinci_get_pdata(struct platform_device *pdev,
 	return 0;
 }
 #else
-static int spi_davinci_get_pdata(struct platform_device *pdev,
-			struct davinci_spi *dspi)
+static struct davinci_spi_platform_data
+	*spi_davinci_get_pdata(struct platform_device *pdev,
+		struct davinci_spi *dspi)
 {
 	return -ENODEV;
 }
@@ -923,10 +924,9 @@ static int davinci_spi_probe(struct platform_device *pdev)
 	/* pdata in dspi is now updated and point pdata to that */
 	pdata = &dspi->pdata;
 
-	dspi->bytes_per_word = devm_kcalloc(&pdev->dev,
-					    pdata->num_chipselect,
-					    sizeof(*dspi->bytes_per_word),
-					    GFP_KERNEL);
+	dspi->bytes_per_word = devm_kzalloc(&pdev->dev,
+					    sizeof(*dspi->bytes_per_word) *
+					    pdata->num_chipselect, GFP_KERNEL);
 	if (dspi->bytes_per_word == NULL) {
 		ret = -ENOMEM;
 		goto free_master;
@@ -945,8 +945,6 @@ static int davinci_spi_probe(struct platform_device *pdev)
 		ret = PTR_ERR(dspi->base);
 		goto free_master;
 	}
-
-	init_completion(&dspi->done);
 
 	ret = platform_get_irq(pdev, 0);
 	if (ret == 0)
@@ -967,9 +965,7 @@ static int davinci_spi_probe(struct platform_device *pdev)
 		ret = -ENODEV;
 		goto free_master;
 	}
-	ret = clk_prepare_enable(dspi->clk);
-	if (ret)
-		goto free_master;
+	clk_prepare_enable(dspi->clk);
 
 	master->dev.of_node = pdev->dev.of_node;
 	master->bus_num = pdev->id;
@@ -1023,6 +1019,8 @@ static int davinci_spi_probe(struct platform_device *pdev)
 
 	dspi->get_rx = davinci_spi_rx_buf_u8;
 	dspi->get_tx = davinci_spi_tx_buf_u8;
+
+	init_completion(&dspi->done);
 
 	/* Reset In/OUT SPI module */
 	iowrite32(0, dspi->base + SPIGCR0);

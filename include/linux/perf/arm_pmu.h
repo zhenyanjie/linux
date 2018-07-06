@@ -14,9 +14,21 @@
 
 #include <linux/interrupt.h>
 #include <linux/perf_event.h>
-#include <linux/platform_device.h>
 #include <linux/sysfs.h>
 #include <asm/cputype.h>
+
+/*
+ * struct arm_pmu_platdata - ARM PMU platform data
+ *
+ * @handle_irq: an optional handler which will be called from the
+ *	interrupt and passed the address of the low level handler,
+ *	and can be used to implement any platform specific handling
+ *	before or after calling it.
+ */
+struct arm_pmu_platdata {
+	irqreturn_t (*handle_irq)(int irq, void *dev,
+				  irq_handler_t pmu_handler);
+};
 
 #ifdef CONFIG_ARM_PMU
 
@@ -76,9 +88,10 @@ enum armpmu_attr_groups {
 
 struct arm_pmu {
 	struct pmu	pmu;
+	cpumask_t	active_irqs;
 	cpumask_t	supported_cpus;
 	char		*name;
-	irqreturn_t	(*handle_irq)(struct arm_pmu *pmu);
+	irqreturn_t	(*handle_irq)(int irq_num, void *dev);
 	void		(*enable)(struct perf_event *event);
 	void		(*disable)(struct perf_event *event);
 	int		(*get_event_idx)(struct pmu_hw_events *hw_events,
@@ -157,11 +170,12 @@ static inline int arm_pmu_acpi_probe(armpmu_init_fn init_fn) { return 0; }
 
 /* Internal functions only for core arm_pmu code */
 struct arm_pmu *armpmu_alloc(void);
-struct arm_pmu *armpmu_alloc_atomic(void);
 void armpmu_free(struct arm_pmu *pmu);
 int armpmu_register(struct arm_pmu *pmu);
-int armpmu_request_irq(int irq, int cpu);
-void armpmu_free_irq(int irq, int cpu);
+int armpmu_request_irqs(struct arm_pmu *armpmu);
+void armpmu_free_irqs(struct arm_pmu *armpmu);
+int armpmu_request_irq(struct arm_pmu *armpmu, int cpu);
+void armpmu_free_irq(struct arm_pmu *armpmu, int cpu);
 
 #define ARMV8_PMU_PDEV_NAME "armv8-pmu"
 

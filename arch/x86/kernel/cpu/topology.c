@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Check for extended topology enumeration cpuid leaf 0xb and if it
  * exists, use it for populating initial_apicid and cpu topology
@@ -27,7 +26,7 @@
  * exists, use it for populating initial_apicid and cpu topology
  * detection.
  */
-int detect_extended_topology(struct cpuinfo_x86 *c)
+void detect_extended_topology(struct cpuinfo_x86 *c)
 {
 #ifdef CONFIG_SMP
 	unsigned int eax, ebx, ecx, edx, sub_index;
@@ -36,7 +35,7 @@ int detect_extended_topology(struct cpuinfo_x86 *c)
 	static bool printed;
 
 	if (c->cpuid_level < 0xb)
-		return -1;
+		return;
 
 	cpuid_count(0xb, SMT_LEVEL, &eax, &ebx, &ecx, &edx);
 
@@ -44,7 +43,7 @@ int detect_extended_topology(struct cpuinfo_x86 *c)
 	 * check if the cpuid leaf 0xb is actually implemented.
 	 */
 	if (ebx == 0 || (LEAFB_SUBTYPE(ecx) != SMT_TYPE))
-		return -1;
+		return;
 
 	set_cpu_cap(c, X86_FEATURE_XTOPOLOGY);
 
@@ -95,6 +94,6 @@ int detect_extended_topology(struct cpuinfo_x86 *c)
 			       c->cpu_core_id);
 		printed = 1;
 	}
+	return;
 #endif
-	return 0;
 }

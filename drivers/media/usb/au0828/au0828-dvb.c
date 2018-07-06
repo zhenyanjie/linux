@@ -105,15 +105,6 @@ static struct tda18271_config hauppauge_woodbury_tunerconfig = {
 
 static void au0828_restart_dvb_streaming(struct work_struct *work);
 
-static void au0828_bulk_timeout(struct timer_list *t)
-{
-	struct au0828_dev *dev = from_timer(dev, t, bulk_timeout);
-
-	dprintk(1, "%s called\n", __func__);
-	dev->bulk_timeout_running = 0;
-	schedule_work(&dev->restart_streaming);
-}
-
 /*-------------------------------------------------------------------*/
 static void urb_completion(struct urb *purb)
 {
@@ -147,13 +138,6 @@ static void urb_completion(struct urb *purb)
 			ptr[0], purb->actual_length);
 		schedule_work(&dev->restart_streaming);
 		return;
-	} else if (dev->bulk_timeout_running == 1) {
-		/* The URB handler has fired, so cancel timer which would
-		 * restart endpoint if we hadn't
-		 */
-		dprintk(1, "%s cancelling bulk timeout\n", __func__);
-		dev->bulk_timeout_running = 0;
-		del_timer(&dev->bulk_timeout);
 	}
 
 	/* Feed the transport payload into the kernel demux */
@@ -175,11 +159,6 @@ static int stop_urb_transfer(struct au0828_dev *dev)
 
 	if (!dev->urb_streaming)
 		return 0;
-
-	if (dev->bulk_timeout_running == 1) {
-		dev->bulk_timeout_running = 0;
-		del_timer(&dev->bulk_timeout);
-	}
 
 	dev->urb_streaming = false;
 	for (i = 0; i < URB_COUNT; i++) {
@@ -253,11 +232,6 @@ static int start_urb_transfer(struct au0828_dev *dev)
 	}
 
 	dev->urb_streaming = true;
-
-	/* If we don't valid data within 1 second, restart stream */
-	mod_timer(&dev->bulk_timeout, jiffies + (HZ));
-	dev->bulk_timeout_running = 1;
-
 	return 0;
 }
 
@@ -647,8 +621,6 @@ int au0828_dvb_register(struct au0828_dev *dev)
 		dvb->frontend = NULL;
 		return ret;
 	}
-
-	timer_setup(&dev->bulk_timeout, au0828_bulk_timeout, 0);
 
 	return 0;
 }

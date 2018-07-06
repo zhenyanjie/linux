@@ -93,18 +93,6 @@ void arch_report_meminfo(struct seq_file *m)
 static inline void split_page_count(int level) { }
 #endif
 
-static inline int
-within(unsigned long addr, unsigned long start, unsigned long end)
-{
-	return addr >= start && addr < end;
-}
-
-static inline int
-within_inclusive(unsigned long addr, unsigned long start, unsigned long end)
-{
-	return addr >= start && addr <= end;
-}
-
 #ifdef CONFIG_X86_64
 
 static inline unsigned long highmap_start_pfn(void)
@@ -118,24 +106,19 @@ static inline unsigned long highmap_end_pfn(void)
 	return __pa_symbol(roundup(_brk_end, PMD_SIZE) - 1) >> PAGE_SHIFT;
 }
 
-static bool __cpa_pfn_in_highmap(unsigned long pfn)
-{
-	/*
-	 * Kernel text has an alias mapping at a high address, known
-	 * here as "highmap".
-	 */
-	return within_inclusive(pfn, highmap_start_pfn(), highmap_end_pfn());
-}
-
-#else
-
-static bool __cpa_pfn_in_highmap(unsigned long pfn)
-{
-	/* There is no highmap on 32-bit */
-	return false;
-}
-
 #endif
+
+static inline int
+within(unsigned long addr, unsigned long start, unsigned long end)
+{
+	return addr >= start && addr < end;
+}
+
+static inline int
+within_inclusive(unsigned long addr, unsigned long start, unsigned long end)
+{
+	return addr >= start && addr <= end;
+}
 
 /*
  * Flushing functions
@@ -167,12 +150,6 @@ void clflush_cache_range(void *vaddr, unsigned int size)
 }
 EXPORT_SYMBOL_GPL(clflush_cache_range);
 
-void arch_invalidate_pmem(void *addr, size_t size)
-{
-	clflush_cache_range(addr, size);
-}
-EXPORT_SYMBOL_GPL(arch_invalidate_pmem);
-
 static void __cpa_flush_all(void *arg)
 {
 	unsigned long cache = (unsigned long)arg;
@@ -189,7 +166,7 @@ static void __cpa_flush_all(void *arg)
 
 static void cpa_flush_all(unsigned long cache)
 {
-	BUG_ON(irqs_disabled() && !early_boot_irqs_disabled);
+	BUG_ON(irqs_disabled());
 
 	on_each_cpu(__cpa_flush_all, (void *) cache, 1);
 }
@@ -253,7 +230,7 @@ static void cpa_flush_array(unsigned long *start, int numpages, int cache,
 	unsigned long do_wbinvd = cache && numpages >= 1024; /* 4M threshold */
 #endif
 
-	BUG_ON(irqs_disabled() && !early_boot_irqs_disabled);
+	BUG_ON(irqs_disabled());
 
 	on_each_cpu(__cpa_flush_all, (void *) do_wbinvd, 1);
 
@@ -315,11 +292,9 @@ static inline pgprot_t static_protections(pgprot_t prot, unsigned long address,
 
 	/*
 	 * The .rodata section needs to be read-only. Using the pfn
-	 * catches all aliases.  This also includes __ro_after_init,
-	 * so do not enforce until kernel_set_to_readonly is true.
+	 * catches all aliases.
 	 */
-	if (kernel_set_to_readonly &&
-	    within(pfn, __pa_symbol(__start_rodata) >> PAGE_SHIFT,
+	if (within(pfn, __pa_symbol(__start_rodata) >> PAGE_SHIFT,
 		   __pa_symbol(__end_rodata) >> PAGE_SHIFT))
 		pgprot_val(forbidden) |= _PAGE_RW;
 
@@ -531,23 +506,6 @@ static void __set_pmd_pte(pte_t *kpte, unsigned long address, pte_t pte)
 #endif
 }
 
-static pgprot_t pgprot_clear_protnone_bits(pgprot_t prot)
-{
-	/*
-	 * _PAGE_GLOBAL means "global page" for present PTEs.
-	 * But, it is also used to indicate _PAGE_PROTNONE
-	 * for non-present PTEs.
-	 *
-	 * This ensures that a _PAGE_GLOBAL PTE going from
-	 * present to non-present is not confused as
-	 * _PAGE_PROTNONE.
-	 */
-	if (!(pgprot_val(prot) & _PAGE_PRESENT))
-		pgprot_val(prot) &= ~_PAGE_GLOBAL;
-
-	return prot;
-}
-
 static int
 try_preserve_large_page(pte_t *kpte, unsigned long address,
 			struct cpa_data *cpa)
@@ -602,7 +560,6 @@ try_preserve_large_page(pte_t *kpte, unsigned long address,
 	 * up accordingly.
 	 */
 	old_pte = *kpte;
-	/* Clear PSE (aka _PAGE_PAT) and move PAT bit to correct position */
 	req_prot = pgprot_large_2_4k(old_prot);
 
 	pgprot_val(req_prot) &= ~pgprot_val(cpa->mask_clr);
@@ -614,9 +571,19 @@ try_preserve_large_page(pte_t *kpte, unsigned long address,
 	 * different bit positions in the two formats.
 	 */
 	req_prot = pgprot_4k_2_large(req_prot);
-	req_prot = pgprot_clear_protnone_bits(req_prot);
+
+	/*
+	 * Set the PSE and GLOBAL flags only if the PRESENT flag is
+	 * set otherwise pmd_present/pmd_huge will return true even on
+	 * a non present pmd. The canon_pgprot will clear _PAGE_GLOBAL
+	 * for the ancient hardware that doesn't support it.
+	 */
 	if (pgprot_val(req_prot) & _PAGE_PRESENT)
-		pgprot_val(req_prot) |= _PAGE_PSE;
+		pgprot_val(req_prot) |= _PAGE_PSE | _PAGE_GLOBAL;
+	else
+		pgprot_val(req_prot) &= ~(_PAGE_PSE | _PAGE_GLOBAL);
+
+	req_prot = canon_pgprot(req_prot);
 
 	/*
 	 * old_pfn points to the large page base pfn. So we need
@@ -701,12 +668,8 @@ __split_large_page(struct cpa_data *cpa, pte_t *kpte, unsigned long address,
 	switch (level) {
 	case PG_LEVEL_2M:
 		ref_prot = pmd_pgprot(*(pmd_t *)kpte);
-		/*
-		 * Clear PSE (aka _PAGE_PAT) and move
-		 * PAT bit to correct position.
-		 */
+		/* clear PSE and promote PAT bit to correct position */
 		ref_prot = pgprot_large_2_4k(ref_prot);
-
 		ref_pfn = pmd_pfn(*(pmd_t *)kpte);
 		break;
 
@@ -729,14 +692,23 @@ __split_large_page(struct cpa_data *cpa, pte_t *kpte, unsigned long address,
 		return 1;
 	}
 
-	ref_prot = pgprot_clear_protnone_bits(ref_prot);
+	/*
+	 * Set the GLOBAL flags only if the PRESENT flag is set
+	 * otherwise pmd/pte_present will return true even on a non
+	 * present pmd/pte. The canon_pgprot will clear _PAGE_GLOBAL
+	 * for the ancient hardware that doesn't support it.
+	 */
+	if (pgprot_val(ref_prot) & _PAGE_PRESENT)
+		pgprot_val(ref_prot) |= _PAGE_GLOBAL;
+	else
+		pgprot_val(ref_prot) &= ~_PAGE_GLOBAL;
 
 	/*
 	 * Get the target pfn from the original entry:
 	 */
 	pfn = ref_pfn;
 	for (i = 0; i < PTRS_PER_PTE; i++, pfn += pfninc)
-		set_pte(&pbase[i], pfn_pte(pfn, ref_prot));
+		set_pte(&pbase[i], pfn_pte(pfn, canon_pgprot(ref_prot)));
 
 	if (virt_addr_valid(address)) {
 		unsigned long pfn = PFN_DOWN(__pa(address));
@@ -775,7 +747,7 @@ static int split_large_page(struct cpa_data *cpa, pte_t *kpte,
 
 	if (!debug_pagealloc_enabled())
 		spin_unlock(&cpa_lock);
-	base = alloc_pages(GFP_KERNEL, 0);
+	base = alloc_pages(GFP_KERNEL | __GFP_NOTRACK, 0);
 	if (!debug_pagealloc_enabled())
 		spin_lock(&cpa_lock);
 	if (!base)
@@ -926,7 +898,7 @@ static void unmap_pud_range(p4d_t *p4d, unsigned long start, unsigned long end)
 
 static int alloc_pte_page(pmd_t *pmd)
 {
-	pte_t *pte = (pte_t *)get_zeroed_page(GFP_KERNEL);
+	pte_t *pte = (pte_t *)get_zeroed_page(GFP_KERNEL | __GFP_NOTRACK);
 	if (!pte)
 		return -1;
 
@@ -936,7 +908,7 @@ static int alloc_pte_page(pmd_t *pmd)
 
 static int alloc_pmd_page(pud_t *pud)
 {
-	pmd_t *pmd = (pmd_t *)get_zeroed_page(GFP_KERNEL);
+	pmd_t *pmd = (pmd_t *)get_zeroed_page(GFP_KERNEL | __GFP_NOTRACK);
 	if (!pmd)
 		return -1;
 
@@ -952,7 +924,19 @@ static void populate_pte(struct cpa_data *cpa,
 
 	pte = pte_offset_kernel(pmd, start);
 
-	pgprot = pgprot_clear_protnone_bits(pgprot);
+	/*
+	 * Set the GLOBAL flags only if the PRESENT flag is
+	 * set otherwise pte_present will return true even on
+	 * a non present pte. The canon_pgprot will clear
+	 * _PAGE_GLOBAL for the ancient hardware that doesn't
+	 * support it.
+	 */
+	if (pgprot_val(pgprot) & _PAGE_PRESENT)
+		pgprot_val(pgprot) |= _PAGE_GLOBAL;
+	else
+		pgprot_val(pgprot) &= ~_PAGE_GLOBAL;
+
+	pgprot = canon_pgprot(pgprot);
 
 	while (num_pages-- && start < end) {
 		set_pte(pte, pfn_pte(cpa->pfn, pgprot));
@@ -1130,7 +1114,7 @@ static int populate_pgd(struct cpa_data *cpa, unsigned long addr)
 	pgd_entry = cpa->pgd + pgd_index(addr);
 
 	if (pgd_none(*pgd_entry)) {
-		p4d = (p4d_t *)get_zeroed_page(GFP_KERNEL);
+		p4d = (p4d_t *)get_zeroed_page(GFP_KERNEL | __GFP_NOTRACK);
 		if (!p4d)
 			return -1;
 
@@ -1142,7 +1126,7 @@ static int populate_pgd(struct cpa_data *cpa, unsigned long addr)
 	 */
 	p4d = p4d_offset(pgd_entry, addr);
 	if (p4d_none(*p4d)) {
-		pud = (pud_t *)get_zeroed_page(GFP_KERNEL);
+		pud = (pud_t *)get_zeroed_page(GFP_KERNEL | __GFP_NOTRACK);
 		if (!pud)
 			return -1;
 
@@ -1200,10 +1184,6 @@ static int __cpa_process_fault(struct cpa_data *cpa, unsigned long vaddr,
 		cpa->numpages = 1;
 		cpa->pfn = __pa(vaddr) >> PAGE_SHIFT;
 		return 0;
-
-	} else if (__cpa_pfn_in_highmap(cpa->pfn)) {
-		/* Faults in the highmap are OK, so do not warn: */
-		return -EFAULT;
 	} else {
 		WARN(1, KERN_WARNING "CPA: called for zero pte. "
 			"vaddr = %lx cpa->vaddr = %lx\n", vaddr,
@@ -1248,14 +1228,24 @@ repeat:
 
 		new_prot = static_protections(new_prot, address, pfn);
 
-		new_prot = pgprot_clear_protnone_bits(new_prot);
+		/*
+		 * Set the GLOBAL flags only if the PRESENT flag is
+		 * set otherwise pte_present will return true even on
+		 * a non present pte. The canon_pgprot will clear
+		 * _PAGE_GLOBAL for the ancient hardware that doesn't
+		 * support it.
+		 */
+		if (pgprot_val(new_prot) & _PAGE_PRESENT)
+			pgprot_val(new_prot) |= _PAGE_GLOBAL;
+		else
+			pgprot_val(new_prot) &= ~_PAGE_GLOBAL;
 
 		/*
 		 * We need to keep the pfn from the existing PTE,
 		 * after all we're only going to change it's attributes
 		 * not the memory it points to
 		 */
-		new_pte = pfn_pte(pfn, new_prot);
+		new_pte = pfn_pte(pfn, canon_pgprot(new_prot));
 		cpa->pfn = pfn;
 		/*
 		 * Do we really change anything ?
@@ -1356,7 +1346,8 @@ static int cpa_process_alias(struct cpa_data *cpa)
 	 * to touch the high mapped kernel as well:
 	 */
 	if (!within(vaddr, (unsigned long)_text, _brk_end) &&
-	    __cpa_pfn_in_highmap(cpa->pfn)) {
+	    within_inclusive(cpa->pfn, highmap_start_pfn(),
+			     highmap_end_pfn())) {
 		unsigned long temp_cpa_vaddr = (cpa->pfn << PAGE_SHIFT) +
 					       __START_KERNEL_map - phys_base;
 		alias_cpa = *cpa;
@@ -1431,11 +1422,11 @@ static int change_page_attr_set_clr(unsigned long *addr, int numpages,
 	memset(&cpa, 0, sizeof(cpa));
 
 	/*
-	 * Check, if we are requested to set a not supported
-	 * feature.  Clearing non-supported features is OK.
+	 * Check, if we are requested to change a not supported
+	 * feature:
 	 */
 	mask_set = canon_pgprot(mask_set);
-
+	mask_clr = canon_pgprot(mask_clr);
 	if (!pgprot_val(mask_set) && !pgprot_val(mask_clr) && !force_split)
 		return 0;
 
@@ -1778,76 +1769,6 @@ int set_memory_4k(unsigned long addr, int numpages)
 					__pgprot(0), 1, 0, NULL);
 }
 
-int set_memory_nonglobal(unsigned long addr, int numpages)
-{
-	return change_page_attr_clear(&addr, numpages,
-				      __pgprot(_PAGE_GLOBAL), 0);
-}
-
-static int __set_memory_enc_dec(unsigned long addr, int numpages, bool enc)
-{
-	struct cpa_data cpa;
-	unsigned long start;
-	int ret;
-
-	/* Nothing to do if memory encryption is not active */
-	if (!mem_encrypt_active())
-		return 0;
-
-	/* Should not be working on unaligned addresses */
-	if (WARN_ONCE(addr & ~PAGE_MASK, "misaligned address: %#lx\n", addr))
-		addr &= PAGE_MASK;
-
-	start = addr;
-
-	memset(&cpa, 0, sizeof(cpa));
-	cpa.vaddr = &addr;
-	cpa.numpages = numpages;
-	cpa.mask_set = enc ? __pgprot(_PAGE_ENC) : __pgprot(0);
-	cpa.mask_clr = enc ? __pgprot(0) : __pgprot(_PAGE_ENC);
-	cpa.pgd = init_mm.pgd;
-
-	/* Must avoid aliasing mappings in the highmem code */
-	kmap_flush_unused();
-	vm_unmap_aliases();
-
-	/*
-	 * Before changing the encryption attribute, we need to flush caches.
-	 */
-	if (static_cpu_has(X86_FEATURE_CLFLUSH))
-		cpa_flush_range(start, numpages, 1);
-	else
-		cpa_flush_all(1);
-
-	ret = __change_page_attr_set_clr(&cpa, 1);
-
-	/*
-	 * After changing the encryption attribute, we need to flush TLBs
-	 * again in case any speculative TLB caching occurred (but no need
-	 * to flush caches again).  We could just use cpa_flush_all(), but
-	 * in case TLB flushing gets optimized in the cpa_flush_range()
-	 * path use the same logic as above.
-	 */
-	if (static_cpu_has(X86_FEATURE_CLFLUSH))
-		cpa_flush_range(start, numpages, 0);
-	else
-		cpa_flush_all(0);
-
-	return ret;
-}
-
-int set_memory_encrypted(unsigned long addr, int numpages)
-{
-	return __set_memory_enc_dec(addr, numpages, true);
-}
-EXPORT_SYMBOL_GPL(set_memory_encrypted);
-
-int set_memory_decrypted(unsigned long addr, int numpages)
-{
-	return __set_memory_enc_dec(addr, numpages, false);
-}
-EXPORT_SYMBOL_GPL(set_memory_decrypted);
-
 int set_pages_uc(struct page *page, int numpages)
 {
 	unsigned long addr = (unsigned long)page_address(page);
@@ -2092,9 +2013,6 @@ int kernel_map_pages_in_pgd(pgd_t *pgd, u64 pfn, unsigned long address,
 
 	if (!(page_flags & _PAGE_RW))
 		cpa.mask_clr = __pgprot(_PAGE_RW);
-
-	if (!(page_flags & _PAGE_ENC))
-		cpa.mask_clr = pgprot_encrypted(cpa.mask_clr);
 
 	cpa.mask_set = __pgprot(_PAGE_PRESENT | page_flags);
 

@@ -55,6 +55,20 @@ enum {
 	BXT_DPCM_AUDIO_HDMI3_PB,
 };
 
+static inline struct snd_soc_dai *bxt_get_codec_dai(struct snd_soc_card *card)
+{
+	struct snd_soc_pcm_runtime *rtd;
+
+	list_for_each_entry(rtd, &card->rtd_list, list) {
+
+		if (!strncmp(rtd->codec_dai->name, BXT_DIALOG_CODEC_DAI,
+			     strlen(BXT_DIALOG_CODEC_DAI)))
+			return rtd->codec_dai;
+	}
+
+	return NULL;
+}
+
 static int platform_clock_control(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *k, int  event)
 {
@@ -63,7 +77,7 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = dapm->card;
 	struct snd_soc_dai *codec_dai;
 
-	codec_dai = snd_soc_card_get_codec_dai(card, BXT_DIALOG_CODEC_DAI);
+	codec_dai = bxt_get_codec_dai(card);
 	if (!codec_dai) {
 		dev_err(card->dev, "Codec dai not found; Unable to set/unset codec pll\n");
 		return -EIO;
@@ -75,6 +89,11 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 		if (ret)
 			dev_err(card->dev, "failed to stop PLL: %d\n", ret);
 	} else if(SND_SOC_DAPM_EVENT_ON(event)) {
+		ret = snd_soc_dai_set_sysclk(codec_dai,
+                        DA7219_CLKSRC_MCLK, 19200000, SND_SOC_CLOCK_IN);
+		if (ret)
+			dev_err(card->dev, "can't set codec sysclk configuration\n");
+
 		ret = snd_soc_dai_set_pll(codec_dai, 0,
 			DA7219_SYSCLK_PLL_SRM, 0, DA7219_PLL_FREQ_OUT_98304);
 		if (ret)
@@ -168,16 +187,7 @@ static int broxton_ssp_fixup(struct snd_soc_pcm_runtime *rtd,
 static int broxton_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
 	int ret;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_component *component = rtd->codec_dai->component;
-
-	/* Configure sysclk for codec */
-	ret = snd_soc_dai_set_sysclk(codec_dai, DA7219_CLKSRC_MCLK, 19200000,
-				     SND_SOC_CLOCK_IN);
-	if (ret) {
-		dev_err(rtd->dev, "can't set codec sysclk configuration\n");
-		return ret;
-	}
+	struct snd_soc_codec *codec = rtd->codec;
 
 	/*
 	 * Headset buttons map to the google Reference headset.
@@ -192,7 +202,7 @@ static int broxton_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 	}
 
-	da7219_aad_jack_det(component, &broxton_headset);
+	da7219_aad_jack_det(codec, &broxton_headset);
 
 	snd_soc_dapm_ignore_suspend(&rtd->card->dapm, "SoC DMIC");
 
@@ -228,31 +238,31 @@ static int broxton_da7219_fe_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
-static const unsigned int rates[] = {
+static unsigned int rates[] = {
 	48000,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_rates = {
+static struct snd_pcm_hw_constraint_list constraints_rates = {
 	.count = ARRAY_SIZE(rates),
 	.list  = rates,
 	.mask = 0,
 };
 
-static const unsigned int channels[] = {
+static unsigned int channels[] = {
 	DUAL_CHANNEL,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_channels = {
+static struct snd_pcm_hw_constraint_list constraints_channels = {
 	.count = ARRAY_SIZE(channels),
 	.list = channels,
 	.mask = 0,
 };
 
-static const unsigned int channels_quad[] = {
+static unsigned int channels_quad[] = {
 	QUAD_CHANNEL,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_channels_quad = {
+static struct snd_pcm_hw_constraint_list constraints_channels_quad = {
 	.count = ARRAY_SIZE(channels_quad),
 	.list = channels_quad,
 	.mask = 0,
@@ -522,12 +532,12 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 {
 	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(card);
 	struct bxt_hdmi_pcm *pcm;
-	struct snd_soc_component *component = NULL;
+	struct snd_soc_codec *codec = NULL;
 	int err, i = 0;
 	char jack_name[NAME_SIZE];
 
 	list_for_each_entry(pcm, &ctx->hdmi_pcm_list, head) {
-		component = pcm->codec_dai->component;
+		codec = pcm->codec_dai->codec;
 		snprintf(jack_name, sizeof(jack_name),
 			"HDMI/DP, pcm=%d Jack", pcm->device);
 		err = snd_soc_card_jack_new(card, jack_name,
@@ -545,10 +555,10 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 		i++;
 	}
 
-	if (!component)
+	if (!codec)
 		return -EINVAL;
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(codec, &card->dapm);
 }
 
 /* broxton audio machine driver for SPT + da7219 */
@@ -571,7 +581,7 @@ static int broxton_audio_probe(struct platform_device *pdev)
 {
 	struct bxt_card_private *ctx;
 
-	ctx = devm_kzalloc(&pdev->dev, sizeof(*ctx), GFP_KERNEL);
+	ctx = devm_kzalloc(&pdev->dev, sizeof(*ctx), GFP_ATOMIC);
 	if (!ctx)
 		return -ENOMEM;
 

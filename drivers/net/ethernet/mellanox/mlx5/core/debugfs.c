@@ -168,6 +168,7 @@ static ssize_t average_read(struct file *filp, char __user *buf, size_t count,
 	return ret;
 }
 
+
 static ssize_t average_write(struct file *filp, const char __user *buf,
 			     size_t count, loff_t *pos)
 {
@@ -404,7 +405,7 @@ static u64 cq_read_field(struct mlx5_core_dev *dev, struct mlx5_core_cq *cq,
 	u32 *out;
 	int err;
 
-	out = kvzalloc(outlen, GFP_KERNEL);
+	out = mlx5_vzalloc(outlen);
 	if (!out)
 		return param;
 
@@ -465,6 +466,7 @@ static ssize_t dbg_read(struct file *filp, char __user *buf, size_t count,
 		return -EINVAL;
 	}
 
+
 	if (is_str)
 		ret = snprintf(tbuf, sizeof(tbuf), "%s\n", (const char *)(unsigned long)field);
 	else
@@ -494,7 +496,7 @@ static int add_res_tree(struct mlx5_core_dev *dev, enum dbg_rsc_type type,
 	int err;
 	int i;
 
-	d = kzalloc(struct_size(d, fields, nfile), GFP_KERNEL);
+	d = kzalloc(sizeof(*d) + nfile * sizeof(d->fields[0]), GFP_KERNEL);
 	if (!d)
 		return -ENOMEM;
 
@@ -559,6 +561,7 @@ void mlx5_debug_qp_remove(struct mlx5_core_dev *dev, struct mlx5_core_qp *qp)
 	if (qp->dbg)
 		rem_res_tree(qp->dbg);
 }
+
 
 int mlx5_debug_eq_add(struct mlx5_core_dev *dev, struct mlx5_eq *eq)
 {

@@ -26,33 +26,20 @@
 #include <linux/of_fdt.h>
 #include <linux/of_platform.h>
 #include <asm/mach/arch.h>
-#include <asm/secure_cntvoff.h>
 #include "common.h"
 #include "rcar-gen2.h"
 
-static const struct of_device_id cpg_matches[] __initconst = {
-	{ .compatible = "renesas,rcar-gen2-cpg-clocks", },
-	{ .compatible = "renesas,r8a7743-cpg-mssr", .data = "extal" },
-	{ .compatible = "renesas,r8a7790-cpg-mssr", .data = "extal" },
-	{ .compatible = "renesas,r8a7791-cpg-mssr", .data = "extal" },
-	{ .compatible = "renesas,r8a7793-cpg-mssr", .data = "extal" },
-	{ /* sentinel */ }
-};
-
 static unsigned int __init get_extal_freq(void)
 {
-	const struct of_device_id *match;
 	struct device_node *cpg, *extal;
 	u32 freq = 20000000;
-	int idx = 0;
 
-	cpg = of_find_matching_node_and_match(NULL, cpg_matches, &match);
+	cpg = of_find_compatible_node(NULL, NULL,
+				      "renesas,rcar-gen2-cpg-clocks");
 	if (!cpg)
 		return freq;
 
-	if (match->data)
-		idx = of_property_match_string(cpg, "clock-names", match->data);
-	extal = of_parse_phandle(cpg, "clocks", idx);
+	extal = of_parse_phandle(cpg, "clocks", 0);
 	of_node_put(cpg);
 	if (!extal)
 		return freq;
@@ -71,13 +58,27 @@ void __init rcar_gen2_timer_init(void)
 	void __iomem *base;
 	u32 freq;
 
-	secure_cntvoff_init();
-
-	if (of_machine_is_compatible("renesas,r8a7745") ||
-	    of_machine_is_compatible("renesas,r8a77470") ||
-	    of_machine_is_compatible("renesas,r8a7792") ||
+	if (of_machine_is_compatible("renesas,r8a7792") ||
 	    of_machine_is_compatible("renesas,r8a7794")) {
 		freq = 260000000 / 8;	/* ZS / 8 */
+		/* CNTVOFF has to be initialized either from non-secure
+		 * Hypervisor mode or secure Monitor mode with SCR.NS==1.
+		 * If TrustZone is enabled then it should be handled by the
+		 * secure code.
+		 */
+		asm volatile(
+		"	cps	0x16\n"
+		"	mrc	p15, 0, r1, c1, c1, 0\n"
+		"	orr	r0, r1, #1\n"
+		"	mcr	p15, 0, r0, c1, c1, 0\n"
+		"	isb\n"
+		"	mov	r0, #0\n"
+		"	mcrr	p15, 4, r0, r0, c14\n"
+		"	isb\n"
+		"	mcr	p15, 0, r1, c1, c1, 0\n"
+		"	isb\n"
+		"	cps	0x13\n"
+			: : : "r0", "r1");
 	} else {
 		/* At Linux boot time the r8a7790 arch timer comes up
 		 * with the counter disabled. Moreover, it may also report
@@ -112,7 +113,7 @@ void __init rcar_gen2_timer_init(void)
 #endif /* CONFIG_ARM_ARCH_TIMER */
 
 	of_clk_init(NULL);
-	timer_probe();
+	clocksource_probe();
 }
 
 struct memory_reserve_config {
@@ -207,7 +208,6 @@ MACHINE_END
 static const char * const rz_g1_boards_compat_dt[] __initconst = {
 	"renesas,r8a7743",
 	"renesas,r8a7745",
-	"renesas,r8a77470",
 	NULL,
 };
 

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  Copyright IBM Corp. 2001, 2009
  *  Author(s): Ulrich Weigand <Ulrich.Weigand@de.ibm.com>,
@@ -89,8 +88,6 @@ static void stsi_1_1_1(struct seq_file *m, struct sysinfo_1_1_1 *info)
 	EBCASC(info->model_temp_cap, sizeof(info->model_temp_cap));
 	seq_printf(m, "Manufacturer:         %-16.16s\n", info->manufacturer);
 	seq_printf(m, "Type:                 %-4.4s\n", info->type);
-	if (info->lic)
-		seq_printf(m, "LIC Identifier:       %016lx\n", info->lic);
 	/*
 	 * Sigh: the model field has been renamed with System z9
 	 * to model_capacity and a new model field has been added
@@ -245,7 +242,7 @@ static void print_ext_name(struct seq_file *m, int lvl,
 
 static void print_uuid(struct seq_file *m, int i, struct sysinfo_3_2_2 *info)
 {
-	if (uuid_is_null(&info->vm[i].uuid))
+	if (!memcmp(&info->vm[i].uuid, &NULL_UUID_BE, sizeof(uuid_be)))
 		return;
 	seq_printf(m, "VM%02d UUID:            %pUb\n", i, &info->vm[i].uuid);
 }
@@ -294,9 +291,21 @@ static int sysinfo_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static int sysinfo_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, sysinfo_show, NULL);
+}
+
+static const struct file_operations sysinfo_fops = {
+	.open		= sysinfo_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int __init sysinfo_create_proc(void)
 {
-	proc_create_single("sysinfo", 0444, NULL, sysinfo_show);
+	proc_create("sysinfo", 0444, NULL, &sysinfo_fops);
 	return 0;
 }
 device_initcall(sysinfo_create_proc);
@@ -374,6 +383,18 @@ static const struct seq_operations service_level_seq_ops = {
 	.show		= service_level_show
 };
 
+static int service_level_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &service_level_seq_ops);
+}
+
+static const struct file_operations service_level_ops = {
+	.open		= service_level_open,
+	.read		= seq_read,
+	.llseek 	= seq_lseek,
+	.release	= seq_release
+};
+
 static void service_level_vm_print(struct seq_file *m,
 				   struct service_level *slr)
 {
@@ -396,7 +417,7 @@ static struct service_level service_level_vm = {
 
 static __init int create_proc_service_level(void)
 {
-	proc_create_seq("service_levels", 0, NULL, &service_level_seq_ops);
+	proc_create("service_levels", 0, NULL, &service_level_ops);
 	if (MACHINE_IS_VM)
 		register_service_level(&service_level_vm);
 	return 0;

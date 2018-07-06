@@ -115,18 +115,8 @@ unsigned paravirt_patch_jmp(void *insnbuf, const void *target,
 	return 5;
 }
 
-DEFINE_STATIC_KEY_TRUE(virt_spin_lock_key);
-
-void __init native_pv_lock_init(void)
-{
-	if (!static_cpu_has(X86_FEATURE_HYPERVISOR))
-		static_branch_disable(&virt_spin_lock_key);
-}
-
-/*
- * Neat trick to map patch type back to the call within the
- * corresponding structure.
- */
+/* Neat trick to map patch type back to the call within the
+ * corresponding structure. */
 static void *get_call_destination(u8 type)
 {
 	struct paravirt_patch_template tmpl = {
@@ -200,9 +190,9 @@ static void native_flush_tlb_global(void)
 	__native_flush_tlb_global();
 }
 
-static void native_flush_tlb_one_user(unsigned long addr)
+static void native_flush_tlb_single(unsigned long addr)
 {
-	__native_flush_tlb_one_user(addr);
+	__native_flush_tlb_single(addr);
 }
 
 struct static_key paravirt_steal_enabled;
@@ -329,6 +319,9 @@ __visible struct pv_irq_ops pv_irq_ops = {
 	.irq_enable = __PV_IS_CALLEE_SAVE(native_irq_enable),
 	.safe_halt = native_safe_halt,
 	.halt = native_halt,
+#ifdef CONFIG_X86_64
+	.adjust_exception_frame = paravirt_nop,
+#endif
 };
 
 __visible struct pv_cpu_ops pv_cpu_ops = {
@@ -337,6 +330,7 @@ __visible struct pv_cpu_ops pv_cpu_ops = {
 	.set_debugreg = native_set_debugreg,
 	.read_cr0 = native_read_cr0,
 	.write_cr0 = native_write_cr0,
+	.read_cr4 = native_read_cr4,
 	.write_cr4 = native_write_cr4,
 #ifdef CONFIG_X86_64
 	.read_cr8 = native_read_cr8,
@@ -352,6 +346,7 @@ __visible struct pv_cpu_ops pv_cpu_ops = {
 	.set_ldt = native_set_ldt,
 	.load_gdt = native_load_gdt,
 	.load_idt = native_load_idt,
+	.store_idt = native_store_idt,
 	.store_tr = native_store_tr,
 	.load_tls = native_load_tls,
 #ifdef CONFIG_X86_64
@@ -396,12 +391,12 @@ struct pv_mmu_ops pv_mmu_ops __ro_after_init = {
 
 	.read_cr2 = native_read_cr2,
 	.write_cr2 = native_write_cr2,
-	.read_cr3 = __native_read_cr3,
+	.read_cr3 = native_read_cr3,
 	.write_cr3 = native_write_cr3,
 
 	.flush_tlb_user = native_flush_tlb,
 	.flush_tlb_kernel = native_flush_tlb_global,
-	.flush_tlb_one_user = native_flush_tlb_one_user,
+	.flush_tlb_single = native_flush_tlb_single,
 	.flush_tlb_others = native_flush_tlb_others,
 
 	.pgd_alloc = __paravirt_pgd_alloc,
@@ -419,6 +414,8 @@ struct pv_mmu_ops pv_mmu_ops __ro_after_init = {
 	.set_pte = native_set_pte,
 	.set_pte_at = native_set_pte_at,
 	.set_pmd = native_set_pmd,
+	.set_pmd_at = native_set_pmd_at,
+	.pte_update = paravirt_nop,
 
 	.ptep_modify_prot_start = __ptep_modify_prot_start,
 	.ptep_modify_prot_commit = __ptep_modify_prot_commit,
@@ -430,6 +427,7 @@ struct pv_mmu_ops pv_mmu_ops __ro_after_init = {
 	.pmd_clear = native_pmd_clear,
 #endif
 	.set_pud = native_set_pud,
+	.set_pud_at = native_set_pud_at,
 
 	.pmd_val = PTE_IDENT,
 	.make_pmd = PTE_IDENT,

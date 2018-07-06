@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  Copyright (C) 1991, 1992  Linus Torvalds
  *  Copyright (C) 2000, 2001, 2002 Andi Kleen SuSE Labs
@@ -25,7 +24,6 @@
 #include <linux/user-return-notifier.h>
 #include <linux/uprobes.h>
 #include <linux/context_tracking.h>
-#include <linux/syscalls.h>
 
 #include <asm/processor.h>
 #include <asm/ucontext.h>
@@ -258,14 +256,14 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 			sp = current->sas_ss_sp + current->sas_ss_size;
 	} else if (IS_ENABLED(CONFIG_X86_32) &&
 		   !onsigstack &&
-		   regs->ss != __USER_DS &&
+		   (regs->ss & 0xffff) != __USER_DS &&
 		   !(ka->sa.sa_flags & SA_RESTORER) &&
 		   ka->sa.sa_restorer) {
 		/* This is the legacy signal stack switching. */
 		sp = (unsigned long) ka->sa.sa_restorer;
 	}
 
-	if (fpu->initialized) {
+	if (fpu->fpstate_active) {
 		sp = fpu__alloc_mathframe(sp, IS_ENABLED(CONFIG_X86_32),
 					  &buf_fx, &math_size);
 		*fpstate = (void __user *)sp;
@@ -281,7 +279,7 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 		return (void __user *)-1L;
 
 	/* save i387 and extended state */
-	if (fpu->initialized &&
+	if (fpu->fpstate_active &&
 	    copy_fpstate_to_sigframe(*fpstate, (void __user *)buf_fx, math_size) < 0)
 		return (void __user *)-1L;
 
@@ -602,7 +600,7 @@ static int x32_setup_rt_frame(struct ksignal *ksig,
  * Do a signal return; undo the signal stack.
  */
 #ifdef CONFIG_X86_32
-SYSCALL_DEFINE0(sigreturn)
+asmlinkage unsigned long sys_sigreturn(void)
 {
 	struct pt_regs *regs = current_pt_regs();
 	struct sigframe __user *frame;
@@ -634,7 +632,7 @@ badframe:
 }
 #endif /* CONFIG_X86_32 */
 
-SYSCALL_DEFINE0(rt_sigreturn)
+asmlinkage long sys_rt_sigreturn(void)
 {
 	struct pt_regs *regs = current_pt_regs();
 	struct rt_sigframe __user *frame;
@@ -687,12 +685,6 @@ setup_rt_frame(struct ksignal *ksig, struct pt_regs *regs)
 	int usig = ksig->sig;
 	sigset_t *set = sigmask_to_save();
 	compat_sigset_t *cset = (compat_sigset_t *) set;
-
-	/*
-	 * Increment event counter and perform fixup for the pre-signal
-	 * frame.
-	 */
-	rseq_signal_deliver(ksig, regs);
 
 	/* Set up the stack frame */
 	if (is_ia32_frame(ksig)) {
@@ -763,7 +755,7 @@ handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 		/*
 		 * Ensure the signal handler starts with the new fpu state.
 		 */
-		if (fpu->initialized)
+		if (fpu->fpstate_active)
 			fpu__clear(fpu);
 	}
 	signal_setup_done(failed, ksig, stepping);
@@ -794,7 +786,7 @@ static inline unsigned long get_nr_restart_syscall(const struct pt_regs *regs)
 	 * than the tracee.
 	 */
 #ifdef CONFIG_IA32_EMULATION
-	if (current_thread_info()->status & (TS_COMPAT|TS_I386_REGS_POKED))
+	if (current->thread.status & (TS_COMPAT|TS_I386_REGS_POKED))
 		return __NR_ia32_restart_syscall;
 #endif
 #ifdef CONFIG_X86_X32_ABI

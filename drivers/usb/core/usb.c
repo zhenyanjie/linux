@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/usb/core/usb.c
  *
@@ -14,6 +13,7 @@
  * (C) Copyright Greg Kroah-Hartman 2002-2003
  *
  * Released under the GPLv2 only.
+ * SPDX-License-Identifier: GPL-2.0
  *
  * NOTE! This is not actually a driver at all, rather this is
  * just a collection of helper routines that implement the
@@ -416,7 +416,8 @@ static void usb_release_dev(struct device *dev)
 
 	usb_destroy_configuration(udev);
 	usb_release_bos_descriptor(udev);
-	of_node_put(dev->of_node);
+	if (udev->parent)
+		of_node_put(dev->of_node);
 	usb_put_hcd(hcd);
 	kfree(udev->product);
 	kfree(udev->manufacturer);
@@ -615,7 +616,6 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 		dev->route = 0;
 
 		dev->dev.parent = bus->controller;
-		device_set_of_node_from_dev(&dev->dev, bus->sysdev);
 		dev_set_name(&dev->dev, "usb%d", bus->busnum);
 		root_hub = 1;
 	} else {
@@ -645,7 +645,8 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 			raw_port = usb_hcd_find_raw_port_number(usb_hcd,
 				port1);
 		}
-		dev->dev.of_node = usb_of_get_device_node(parent, raw_port);
+		dev->dev.of_node = usb_of_get_child_node(parent->dev.of_node,
+				raw_port);
 
 		/* hub driver sets up TT records */
 	}
@@ -1167,16 +1168,30 @@ static struct notifier_block usb_bus_nb = {
 struct dentry *usb_debug_root;
 EXPORT_SYMBOL_GPL(usb_debug_root);
 
-static void usb_debugfs_init(void)
+static struct dentry *usb_debug_devices;
+
+static int usb_debugfs_init(void)
 {
 	usb_debug_root = debugfs_create_dir("usb", NULL);
-	debugfs_create_file("devices", 0444, usb_debug_root, NULL,
-			    &usbfs_devices_fops);
+	if (!usb_debug_root)
+		return -ENOENT;
+
+	usb_debug_devices = debugfs_create_file("devices", 0444,
+						usb_debug_root, NULL,
+						&usbfs_devices_fops);
+	if (!usb_debug_devices) {
+		debugfs_remove(usb_debug_root);
+		usb_debug_root = NULL;
+		return -ENOENT;
+	}
+
+	return 0;
 }
 
 static void usb_debugfs_cleanup(void)
 {
-	debugfs_remove_recursive(usb_debug_root);
+	debugfs_remove(usb_debug_devices);
+	debugfs_remove(usb_debug_root);
 }
 
 /*
@@ -1191,7 +1206,9 @@ static int __init usb_init(void)
 	}
 	usb_init_pool_max();
 
-	usb_debugfs_init();
+	retval = usb_debugfs_init();
+	if (retval)
+		goto out;
 
 	usb_acpi_register();
 	retval = bus_register(&usb_bus_type);
@@ -1243,7 +1260,6 @@ static void __exit usb_exit(void)
 	if (usb_disabled())
 		return;
 
-	usb_release_quirk_list();
 	usb_deregister_device_driver(&usb_generic_driver);
 	usb_major_cleanup();
 	usb_deregister(&usbfs_driver);

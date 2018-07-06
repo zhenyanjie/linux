@@ -57,10 +57,6 @@
 	status = "ok";
 };
 
-&ipmi0 {
-	status = "ok";
-};
-
 &usb_ohci {
 	status = "ok";
 };
@@ -86,9 +82,5 @@
 };
 
 &sas1 {
-	status = "ok";
-};
-
-&p0_pcie2_a {
 	status = "ok";
 };

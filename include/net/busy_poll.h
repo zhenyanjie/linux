@@ -29,17 +29,17 @@
 #include <linux/sched/signal.h>
 #include <net/ip.h>
 
-/*		0 - Reserved to indicate value not set
- *     1..NR_CPUS - Reserved for sender_cpu
- *  NR_CPUS+1..~0 - Region available for NAPI IDs
- */
-#define MIN_NAPI_ID ((unsigned int)(NR_CPUS + 1))
-
 #ifdef CONFIG_NET_RX_BUSY_POLL
 
 struct napi_struct;
 extern unsigned int sysctl_net_busy_read __read_mostly;
 extern unsigned int sysctl_net_busy_poll __read_mostly;
+
+/*		0 - Reserved to indicate value not set
+ *     1..NR_CPUS - Reserved for sender_cpu
+ *  NR_CPUS+1..~0 - Region available for NAPI IDs
+ */
+#define MIN_NAPI_ID ((unsigned int)(NR_CPUS + 1))
 
 static inline bool net_busy_loop_on(void)
 {
@@ -119,21 +119,6 @@ static inline void sk_busy_loop(struct sock *sk, int nonblock)
 	if (napi_id >= MIN_NAPI_ID)
 		napi_busy_loop(napi_id, nonblock ? NULL : sk_busy_loop_end, sk);
 #endif
-}
-
-static inline void sock_poll_busy_loop(struct socket *sock, __poll_t events)
-{
-	if (sk_can_busy_loop(sock->sk) &&
-	    events && (events & POLL_BUSY_LOOP)) {
-		/* once, only if requested by syscall */
-		sk_busy_loop(sock->sk, 1);
-	}
-}
-
-/* if this socket can poll_ll, tell the system call */
-static inline __poll_t sock_poll_busy_flag(struct socket *sock)
-{
-	return sk_can_busy_loop(sock->sk) ? POLL_BUSY_LOOP : 0;
 }
 
 /* used in the NIC receive handler to mark the skb */

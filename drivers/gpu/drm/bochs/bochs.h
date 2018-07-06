@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/io.h>
 #include <linux/console.h>
 
@@ -10,8 +9,8 @@
 
 #include <drm/drm_gem.h>
 
-#include <drm/ttm/ttm_bo_driver.h>
-#include <drm/ttm/ttm_page_alloc.h>
+#include <ttm/ttm_bo_driver.h>
+#include <ttm/ttm_page_alloc.h>
 
 /* ---------------------------------------------------------------------- */
 

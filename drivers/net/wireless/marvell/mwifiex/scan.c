@@ -482,8 +482,7 @@ mwifiex_scan_create_channel_list(struct mwifiex_private *priv,
 				scan_chan_list[chan_idx].max_scan_time =
 					cpu_to_le16((u16) user_scan_in->
 					chan_list[0].scan_time);
-			else if ((ch->flags & IEEE80211_CHAN_NO_IR) ||
-				 (ch->flags & IEEE80211_CHAN_RADAR))
+			else if (ch->flags & IEEE80211_CHAN_NO_IR)
 				scan_chan_list[chan_idx].max_scan_time =
 					cpu_to_le16(adapter->passive_scan_time);
 			else
@@ -503,12 +502,10 @@ mwifiex_scan_create_channel_list(struct mwifiex_private *priv,
 			scan_chan_list[chan_idx].chan_scan_mode_bitmap
 					|= MWIFIEX_DISABLE_CHAN_FILT;
 
-			if (filtered_scan &&
-			    !((ch->flags & IEEE80211_CHAN_NO_IR) ||
-			      (ch->flags & IEEE80211_CHAN_RADAR)))
+			if (filtered_scan) {
 				scan_chan_list[chan_idx].max_scan_time =
 				cpu_to_le16(adapter->specific_scan_time);
-
+			}
 			chan_idx++;
 		}
 
@@ -1311,7 +1308,6 @@ int mwifiex_update_bss_desc_with_ie(struct mwifiex_adapter *adapter,
 
 		case WLAN_EID_CHANNEL_SWITCH:
 			bss_entry->chan_sw_ie_present = true;
-			/* fall through */
 		case WLAN_EID_PWR_CAPABILITY:
 		case WLAN_EID_TPC_REPORT:
 		case WLAN_EID_QUIET:
@@ -1538,7 +1534,8 @@ int mwifiex_scan_networks(struct mwifiex_private *priv,
 			list_del(&cmd_node->list);
 			spin_unlock_irqrestore(&adapter->scan_pending_q_lock,
 					       flags);
-			mwifiex_insert_cmd_to_pending_q(adapter, cmd_node);
+			mwifiex_insert_cmd_to_pending_q(adapter, cmd_node,
+							true);
 			queue_work(adapter->workqueue, &adapter->main_work);
 
 			/* Perform internal scan synchronously */
@@ -1940,6 +1937,8 @@ mwifiex_active_scan_req_for_passive_chan(struct mwifiex_private *priv)
 	if (!user_scan_cfg)
 		return -ENOMEM;
 
+	memset(user_scan_cfg, 0, sizeof(*user_scan_cfg));
+
 	for (id = 0; id < MWIFIEX_USER_SCAN_CHAN_MAX; id++) {
 		if (!priv->hidden_chan[id].chan_number)
 			break;
@@ -1949,9 +1948,7 @@ mwifiex_active_scan_req_for_passive_chan(struct mwifiex_private *priv)
 	}
 
 	adapter->active_scan_triggered = true;
-	if (priv->scan_request->flags & NL80211_SCAN_FLAG_RANDOM_ADDR)
-		ether_addr_copy(user_scan_cfg->random_mac,
-				priv->scan_request->mac_addr);
+	ether_addr_copy(user_scan_cfg->random_mac, priv->random_mac);
 	user_scan_cfg->num_ssids = priv->scan_request->n_ssids;
 	user_scan_cfg->ssid_list = priv->scan_request->ssids;
 
@@ -2036,7 +2033,7 @@ static void mwifiex_check_next_scan_command(struct mwifiex_private *priv)
 					    struct cmd_ctrl_node, list);
 		list_del(&cmd_node->list);
 		spin_unlock_irqrestore(&adapter->scan_pending_q_lock, flags);
-		mwifiex_insert_cmd_to_pending_q(adapter, cmd_node);
+		mwifiex_insert_cmd_to_pending_q(adapter, cmd_node, true);
 	}
 
 	return;
@@ -2794,6 +2791,7 @@ static int mwifiex_scan_specific_ssid(struct mwifiex_private *priv,
 	if (!scan_cfg)
 		return -ENOMEM;
 
+	ether_addr_copy(scan_cfg->random_mac, priv->random_mac);
 	scan_cfg->ssid_list = req_ssid;
 	scan_cfg->num_ssids = 1;
 
@@ -2817,7 +2815,7 @@ int mwifiex_request_scan(struct mwifiex_private *priv,
 {
 	int ret;
 
-	if (mutex_lock_interruptible(&priv->async_mutex)) {
+	if (down_interruptible(&priv->async_sem)) {
 		mwifiex_dbg(priv->adapter, ERROR,
 			    "%s: acquire semaphore fail\n",
 			    __func__);
@@ -2833,7 +2831,7 @@ int mwifiex_request_scan(struct mwifiex_private *priv,
 		/* Normal scan */
 		ret = mwifiex_scan_networks(priv, NULL);
 
-	mutex_unlock(&priv->async_mutex);
+	up(&priv->async_sem);
 
 	return ret;
 }

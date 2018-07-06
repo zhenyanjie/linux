@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * NUMA memory policies for Linux.
  * Copyright 2003,2004 Andi Kleen SuSE Labs
@@ -143,10 +142,11 @@ bool vma_policy_mof(struct vm_area_struct *vma);
 
 extern void numa_default_policy(void);
 extern void numa_policy_init(void);
-extern void mpol_rebind_task(struct task_struct *tsk, const nodemask_t *new);
+extern void mpol_rebind_task(struct task_struct *tsk, const nodemask_t *new,
+				enum mpol_rebind_step step);
 extern void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new);
 
-extern int huge_node(struct vm_area_struct *vma,
+extern struct zonelist *huge_zonelist(struct vm_area_struct *vma,
 				unsigned long addr, gfp_t gfp_flags,
 				struct mempolicy **mpol, nodemask_t **nodemask);
 extern bool init_nodemask_of_mempolicy(nodemask_t *mask);
@@ -260,7 +260,8 @@ static inline void numa_default_policy(void)
 }
 
 static inline void mpol_rebind_task(struct task_struct *tsk,
-				const nodemask_t *new)
+				const nodemask_t *new,
+				enum mpol_rebind_step step)
 {
 }
 
@@ -268,13 +269,13 @@ static inline void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new)
 {
 }
 
-static inline int huge_node(struct vm_area_struct *vma,
+static inline struct zonelist *huge_zonelist(struct vm_area_struct *vma,
 				unsigned long addr, gfp_t gfp_flags,
 				struct mempolicy **mpol, nodemask_t **nodemask)
 {
 	*mpol = NULL;
 	*nodemask = NULL;
-	return 0;
+	return node_zonelist(0, gfp_flags);
 }
 
 static inline bool init_nodemask_of_mempolicy(nodemask_t *m)

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *    Copyright IBM Corp. 2004, 2011
  *    Author(s): Martin Schwidefsky <schwidefsky@de.ibm.com>,
@@ -106,8 +105,7 @@ void do_IRQ(struct pt_regs *regs, int irq)
 
 	old_regs = set_irq_regs(regs);
 	irq_enter();
-	if (tod_after_eq(S390_lowcore.int_clock,
-			 S390_lowcore.clock_comparator))
+	if (S390_lowcore.int_clock >= S390_lowcore.clock_comparator)
 		/* Serve timer interrupts first. */
 		clock_comparator_work();
 	generic_handle_irq(irq);
@@ -176,9 +174,10 @@ void do_softirq_own_stack(void)
 		new -= STACK_FRAME_OVERHEAD;
 		((struct stack_frame *) new)->back_chain = old;
 		asm volatile("   la    15,0(%0)\n"
-			     "   brasl 14,__do_softirq\n"
+			     "   basr  14,%2\n"
 			     "   la    15,0(%1)\n"
-			     : : "a" (new), "a" (old)
+			     : : "a" (new), "a" (old),
+			         "a" (__do_softirq)
 			     : "0", "1", "2", "3", "4", "5", "14",
 			       "cc", "memory" );
 	} else {

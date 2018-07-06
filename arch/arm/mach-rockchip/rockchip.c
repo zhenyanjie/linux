@@ -55,7 +55,7 @@ static void __init rockchip_timer_init(void)
 	}
 
 	of_clk_init(NULL);
-	timer_probe();
+	clocksource_probe();
 }
 
 static void __init rockchip_dt_init(void)
@@ -70,7 +70,6 @@ static const char * const rockchip_board_dt_compat[] = {
 	"rockchip,rk3188",
 	"rockchip,rk3228",
 	"rockchip,rk3288",
-	"rockchip,rv1108",
 	NULL,
 };
 

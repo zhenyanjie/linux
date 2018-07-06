@@ -19,7 +19,7 @@
  *
  *
  *  libata documentation is available via 'make {ps|pdf}docs',
- *  as Documentation/driver-api/libata.rst
+ *  as Documentation/DocBook/libata.*
  *
  */
 
@@ -125,8 +125,9 @@ enum {
 	LIBATA_MAX_PRD		= ATA_MAX_PRD / 2,
 	LIBATA_DUMB_MAX_PRD	= ATA_MAX_PRD / 4,	/* Worst case */
 	ATA_DEF_QUEUE		= 1,
+	/* tag ATA_MAX_QUEUE - 1 is reserved for internal commands */
 	ATA_MAX_QUEUE		= 32,
-	ATA_TAG_INTERNAL	= ATA_MAX_QUEUE,
+	ATA_TAG_INTERNAL	= ATA_MAX_QUEUE - 1,
 	ATA_SHORT_PAUSE		= 16,
 
 	ATAPI_MAX_DRAIN		= 16 << 10,
@@ -155,7 +156,6 @@ enum {
 	ATA_DFLAG_ACPI_PENDING	= (1 << 5), /* ACPI resume action pending */
 	ATA_DFLAG_ACPI_FAILED	= (1 << 6), /* ACPI on devcfg has failed */
 	ATA_DFLAG_AN		= (1 << 7), /* AN configured */
-	ATA_DFLAG_TRUSTED	= (1 << 8), /* device supports trusted send/recv */
 	ATA_DFLAG_DMADIR	= (1 << 10), /* device requires DMADIR */
 	ATA_DFLAG_CFG_MASK	= (1 << 12) - 1,
 
@@ -434,7 +434,7 @@ enum {
 	ATA_HORKAGE_NOLPM	= (1 << 20),	/* don't use LPM */
 	ATA_HORKAGE_WD_BROKEN_LPM = (1 << 21),	/* some WDs have broken LPM */
 	ATA_HORKAGE_ZERO_AFTER_TRIM = (1 << 22),/* guarantees zero after trim */
-	ATA_HORKAGE_NO_DMA_LOG	= (1 << 23),	/* don't use DMA for log read */
+	ATA_HORKAGE_NO_NCQ_LOG	= (1 << 23),	/* don't use NCQ for log read */
 	ATA_HORKAGE_NOTRIM	= (1 << 24),	/* don't use TRIM */
 	ATA_HORKAGE_MAX_SEC_1024 = (1 << 25),	/* Limit max sects to 1024 */
 
@@ -521,7 +521,6 @@ enum ata_lpm_policy {
 	ATA_LPM_UNKNOWN,
 	ATA_LPM_MAX_POWER,
 	ATA_LPM_MED_POWER,
-	ATA_LPM_MED_POWER_WITH_DIPM, /* Med power + DIPM as win IRST does */
 	ATA_LPM_MIN_POWER,
 };
 
@@ -616,7 +615,6 @@ struct ata_host {
 	void			*private_data;
 	struct ata_port_operations *ops;
 	unsigned long		flags;
-	struct kref		kref;
 
 	struct mutex		eh_mutex;
 	struct task_struct	*eh_owner;
@@ -636,8 +634,7 @@ struct ata_queued_cmd {
 	u8			cdb[ATAPI_CDB_LEN];
 
 	unsigned long		flags;		/* ATA_QCFLAG_xxx */
-	unsigned int		tag;		/* libata core tag */
-	unsigned int		hw_tag;		/* driver tag */
+	unsigned int		tag;
 	unsigned int		n_elem;
 	unsigned int		orig_n_elem;
 
@@ -849,9 +846,9 @@ struct ata_port {
 	unsigned int		udma_mask;
 	unsigned int		cbl;	/* cable type; ATA_CBL_xxx */
 
-	struct ata_queued_cmd	qcmd[ATA_MAX_QUEUE + 1];
+	struct ata_queued_cmd	qcmd[ATA_MAX_QUEUE];
 	unsigned long		sas_tag_allocated; /* for sas tag allocation only */
-	u64			qc_active;
+	unsigned int		qc_active;
 	int			nr_active_links; /* #links with active qcs */
 	unsigned int		sas_last_tag;	/* track next tag hw expects */
 
@@ -1130,11 +1127,10 @@ extern void ata_sas_async_probe(struct ata_port *ap);
 extern int ata_sas_sync_probe(struct ata_port *ap);
 extern int ata_sas_port_init(struct ata_port *);
 extern int ata_sas_port_start(struct ata_port *ap);
-extern int ata_sas_tport_add(struct device *parent, struct ata_port *ap);
-extern void ata_sas_tport_delete(struct ata_port *ap);
 extern void ata_sas_port_stop(struct ata_port *ap);
 extern int ata_sas_slave_configure(struct scsi_device *, struct ata_port *);
 extern int ata_sas_queuecmd(struct scsi_cmnd *cmd, struct ata_port *ap);
+extern enum blk_eh_timer_return ata_scsi_timed_out(struct scsi_cmnd *cmd);
 extern int sata_scr_valid(struct ata_link *link);
 extern int sata_scr_read(struct ata_link *link, int reg, u32 *val);
 extern int sata_scr_write(struct ata_link *link, int reg, u32 val);
@@ -1185,7 +1181,7 @@ extern void ata_id_c_string(const u16 *id, unsigned char *s,
 extern unsigned int ata_do_dev_read_id(struct ata_device *dev,
 					struct ata_taskfile *tf, u16 *id);
 extern void ata_qc_complete(struct ata_queued_cmd *qc);
-extern int ata_qc_complete_multiple(struct ata_port *ap, u64 qc_active);
+extern int ata_qc_complete_multiple(struct ata_port *ap, u32 qc_active);
 extern void ata_scsi_simulate(struct ata_device *dev, struct scsi_cmnd *cmd);
 extern int ata_std_bios_param(struct scsi_device *sdev,
 			      struct block_device *bdev,
@@ -1360,6 +1356,7 @@ extern struct device_attribute *ata_common_sdev_attrs[];
 	.proc_name		= drv_name,			\
 	.slave_configure	= ata_scsi_slave_config,	\
 	.slave_destroy		= ata_scsi_slave_destroy,	\
+	.eh_timed_out		= ata_scsi_timed_out,		\
 	.bios_param		= ata_std_bios_param,		\
 	.unlock_native_capacity	= ata_scsi_unlock_native_capacity, \
 	.sdev_attrs		= ata_common_sdev_attrs
@@ -1485,14 +1482,14 @@ extern void ata_port_pbar_desc(struct ata_port *ap, int bar, ssize_t offset,
 			       const char *name);
 #endif
 
-static inline bool ata_tag_internal(unsigned int tag)
+static inline unsigned int ata_tag_valid(unsigned int tag)
 {
-	return tag == ATA_TAG_INTERNAL;
+	return (tag < ATA_MAX_QUEUE) ? 1 : 0;
 }
 
-static inline bool ata_tag_valid(unsigned int tag)
+static inline unsigned int ata_tag_internal(unsigned int tag)
 {
-	return tag < ATA_MAX_QUEUE || ata_tag_internal(tag);
+	return tag == ATA_TAG_INTERNAL;
 }
 
 /*
@@ -1655,7 +1652,7 @@ static inline void ata_qc_set_polling(struct ata_queued_cmd *qc)
 static inline struct ata_queued_cmd *__ata_qc_from_tag(struct ata_port *ap,
 						       unsigned int tag)
 {
-	if (ata_tag_valid(tag))
+	if (likely(ata_tag_valid(tag)))
 		return &ap->qcmd[tag];
 	return NULL;
 }

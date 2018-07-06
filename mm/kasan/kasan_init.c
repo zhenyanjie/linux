@@ -31,7 +31,7 @@
 unsigned char kasan_zero_page[PAGE_SIZE] __page_aligned_bss;
 
 #if CONFIG_PGTABLE_LEVELS > 4
-p4d_t kasan_zero_p4d[MAX_PTRS_PER_P4D] __page_aligned_bss;
+p4d_t kasan_zero_p4d[PTRS_PER_P4D] __page_aligned_bss;
 #endif
 #if CONFIG_PGTABLE_LEVELS > 3
 pud_t kasan_zero_pud[PTRS_PER_PUD] __page_aligned_bss;
@@ -118,18 +118,6 @@ static void __init zero_p4d_populate(pgd_t *pgd, unsigned long addr,
 
 	do {
 		next = p4d_addr_end(addr, end);
-		if (IS_ALIGNED(addr, P4D_SIZE) && end - addr >= P4D_SIZE) {
-			pud_t *pud;
-			pmd_t *pmd;
-
-			p4d_populate(&init_mm, p4d, lm_alias(kasan_zero_pud));
-			pud = pud_offset(p4d, addr);
-			pud_populate(&init_mm, pud, lm_alias(kasan_zero_pmd));
-			pmd = pmd_offset(pud, addr);
-			pmd_populate_kernel(&init_mm, pmd,
-						lm_alias(kasan_zero_pte));
-			continue;
-		}
 
 		if (p4d_none(*p4d)) {
 			p4d_populate(&init_mm, p4d,

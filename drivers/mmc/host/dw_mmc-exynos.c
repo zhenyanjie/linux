@@ -157,23 +157,17 @@ static void dw_mci_exynos_set_clksel_timing(struct dw_mci *host, u32 timing)
 	 * HOLD register should be bypassed in case there is no phase shift
 	 * applied on CMD/DATA that is sent to the card.
 	 */
-	if (!SDMMC_CLKSEL_GET_DRV_WD3(clksel) && host->slot)
-		set_bit(DW_MMC_CARD_NO_USE_HOLD, &host->slot->flags);
+	if (!SDMMC_CLKSEL_GET_DRV_WD3(clksel) && host->cur_slot)
+		set_bit(DW_MMC_CARD_NO_USE_HOLD, &host->cur_slot->flags);
 }
 
 #ifdef CONFIG_PM
 static int dw_mci_exynos_runtime_resume(struct device *dev)
 {
 	struct dw_mci *host = dev_get_drvdata(dev);
-	int ret;
-
-	ret = dw_mci_runtime_resume(dev);
-	if (ret)
-		return ret;
 
 	dw_mci_exynos_config_smu(host);
-
-	return ret;
+	return dw_mci_runtime_resume(dev);
 }
 
 /**
@@ -493,7 +487,6 @@ static unsigned long exynos_dwmmc_caps[4] = {
 
 static const struct dw_mci_drv_data exynos_drv_data = {
 	.caps			= exynos_dwmmc_caps,
-	.num_caps		= ARRAY_SIZE(exynos_dwmmc_caps),
 	.init			= dw_mci_exynos_priv_init,
 	.set_ios		= dw_mci_exynos_set_ios,
 	.parse_dt		= dw_mci_exynos_parse_dt,

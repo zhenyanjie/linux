@@ -276,6 +276,7 @@ static void rxe_rcv_mcast_pkt(struct rxe_dev *rxe, struct sk_buff *skb)
 {
 	struct rxe_pkt_info *pkt = SKB_TO_PKT(skb);
 	struct rxe_mc_grp *mcg;
+	struct sk_buff *skb_copy;
 	struct rxe_mc_elem *mce;
 	struct rxe_qp *qp;
 	union ib_gid dgid;
@@ -308,14 +309,18 @@ static void rxe_rcv_mcast_pkt(struct rxe_dev *rxe, struct sk_buff *skb)
 			continue;
 
 		/* if *not* the last qp in the list
-		 * increase the users of the skb then post to the next qp
+		 * make a copy of the skb to post to the next qp
 		 */
-		if (mce->qp_list.next != &mcg->qp_list)
-			skb_get(skb);
+		skb_copy = (mce->qp_list.next != &mcg->qp_list) ?
+				skb_clone(skb, GFP_ATOMIC) : NULL;
 
 		pkt->qp = qp;
 		rxe_add_ref(qp);
 		rxe_rcv_pkt(rxe, pkt, skb);
+
+		skb = skb_copy;
+		if (!skb)
+			break;
 	}
 
 	spin_unlock_bh(&mcg->mcg_lock);
@@ -323,13 +328,15 @@ static void rxe_rcv_mcast_pkt(struct rxe_dev *rxe, struct sk_buff *skb)
 	rxe_drop_ref(mcg);	/* drop ref from rxe_pool_get_key. */
 
 err1:
-	kfree_skb(skb);
+	if (skb)
+		kfree_skb(skb);
 }
 
 static int rxe_match_dgid(struct rxe_dev *rxe, struct sk_buff *skb)
 {
 	union ib_gid dgid;
 	union ib_gid *pdgid;
+	u16 index;
 
 	if (skb->protocol == htons(ETH_P_IP)) {
 		ipv6_addr_set_v4mapped(ip_hdr(skb)->daddr,
@@ -341,11 +348,11 @@ static int rxe_match_dgid(struct rxe_dev *rxe, struct sk_buff *skb)
 
 	return ib_find_cached_gid_by_port(&rxe->ib_dev, pdgid,
 					  IB_GID_TYPE_ROCE_UDP_ENCAP,
-					  1, skb->dev, NULL);
+					  1, rxe->ndev, &index);
 }
 
 /* rxe_rcv is called from the interface driver */
-void rxe_rcv(struct sk_buff *skb)
+int rxe_rcv(struct sk_buff *skb)
 {
 	int err;
 	struct rxe_pkt_info *pkt = SKB_TO_PKT(skb);
@@ -403,11 +410,12 @@ void rxe_rcv(struct sk_buff *skb)
 	else
 		rxe_rcv_pkt(rxe, pkt, skb);
 
-	return;
+	return 0;
 
 drop:
 	if (pkt->qp)
 		rxe_drop_ref(pkt->qp);
 
 	kfree_skb(skb);
+	return 0;
 }

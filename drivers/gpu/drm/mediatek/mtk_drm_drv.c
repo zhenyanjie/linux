@@ -48,11 +48,11 @@ static void mtk_atomic_schedule(struct mtk_drm_private *private,
 static void mtk_atomic_wait_for_fences(struct drm_atomic_state *state)
 {
 	struct drm_plane *plane;
-	struct drm_plane_state *new_plane_state;
+	struct drm_plane_state *plane_state;
 	int i;
 
-	for_each_new_plane_in_state(state, plane, new_plane_state, i)
-		mtk_fb_wait(new_plane_state->fb);
+	for_each_plane_in_state(state, plane, plane_state, i)
+		mtk_fb_wait(plane->state->fb);
 }
 
 static void mtk_atomic_complete(struct mtk_drm_private *private,
@@ -109,12 +109,7 @@ static int mtk_atomic_commit(struct drm_device *drm,
 	mutex_lock(&private->commit.lock);
 	flush_work(&private->commit.work);
 
-	ret = drm_atomic_helper_swap_state(state, true);
-	if (ret) {
-		mutex_unlock(&private->commit.lock);
-		drm_atomic_helper_cleanup_planes(drm, state);
-		return ret;
-	}
+	drm_atomic_helper_swap_state(state, true);
 
 	drm_atomic_state_get(state);
 	if (async)
@@ -192,8 +187,8 @@ static int mtk_drm_kms_init(struct drm_device *drm)
 
 	pdev = of_find_device_by_node(private->mutex_node);
 	if (!pdev) {
-		dev_err(drm->dev, "Waiting for disp-mutex device %pOF\n",
-			private->mutex_node);
+		dev_err(drm->dev, "Waiting for disp-mutex device %s\n",
+			private->mutex_node->full_name);
 		of_node_put(private->mutex_node);
 		return -EPROBE_DEFER;
 	}
@@ -271,6 +266,7 @@ static void mtk_drm_kms_deinit(struct drm_device *drm)
 {
 	drm_kms_helper_poll_fini(drm);
 
+	drm_vblank_cleanup(drm);
 	component_unbind_all(drm->dev, drm);
 	drm_mode_config_cleanup(drm);
 }
@@ -293,6 +289,8 @@ static struct drm_driver mtk_drm_driver = {
 	.gem_free_object_unlocked = mtk_drm_gem_free_object,
 	.gem_vm_ops = &drm_gem_cma_vm_ops,
 	.dumb_create = mtk_drm_gem_dumb_create,
+	.dumb_map_offset = mtk_drm_gem_dumb_map_offset,
+	.dumb_destroy = drm_gem_dumb_destroy,
 
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
@@ -419,8 +417,8 @@ static int mtk_drm_probe(struct platform_device *pdev)
 			continue;
 
 		if (!of_device_is_available(node)) {
-			dev_dbg(dev, "Skipping disabled component %pOF\n",
-				node);
+			dev_dbg(dev, "Skipping disabled component %s\n",
+				node->full_name);
 			continue;
 		}
 
@@ -433,25 +431,24 @@ static int mtk_drm_probe(struct platform_device *pdev)
 
 		comp_id = mtk_ddp_comp_get_id(node, comp_type);
 		if (comp_id < 0) {
-			dev_warn(dev, "Skipping unknown component %pOF\n",
-				 node);
+			dev_warn(dev, "Skipping unknown component %s\n",
+				 node->full_name);
 			continue;
 		}
 
 		private->comp_node[comp_id] = of_node_get(node);
 
 		/*
-		 * Currently only the COLOR, OVL, RDMA, DSI, and DPI blocks have
+		 * Currently only the OVL, RDMA, DSI, and DPI blocks have
 		 * separate component platform drivers and initialize their own
 		 * DDP component structure. The others are initialized here.
 		 */
-		if (comp_type == MTK_DISP_COLOR ||
-		    comp_type == MTK_DISP_OVL ||
+		if (comp_type == MTK_DISP_OVL ||
 		    comp_type == MTK_DISP_RDMA ||
 		    comp_type == MTK_DSI ||
 		    comp_type == MTK_DPI) {
-			dev_info(dev, "Adding component match for %pOF\n",
-				 node);
+			dev_info(dev, "Adding component match for %s\n",
+				 node->full_name);
 			drm_of_component_match_add(dev, &match, compare_of,
 						   node);
 		} else {
@@ -569,7 +566,6 @@ static struct platform_driver mtk_drm_platform_driver = {
 
 static struct platform_driver * const mtk_drm_drivers[] = {
 	&mtk_ddp_driver,
-	&mtk_disp_color_driver,
 	&mtk_disp_ovl_driver,
 	&mtk_disp_rdma_driver,
 	&mtk_dpi_driver,
@@ -580,14 +576,33 @@ static struct platform_driver * const mtk_drm_drivers[] = {
 
 static int __init mtk_drm_init(void)
 {
-	return platform_register_drivers(mtk_drm_drivers,
-					 ARRAY_SIZE(mtk_drm_drivers));
+	int ret;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(mtk_drm_drivers); i++) {
+		ret = platform_driver_register(mtk_drm_drivers[i]);
+		if (ret < 0) {
+			pr_err("Failed to register %s driver: %d\n",
+			       mtk_drm_drivers[i]->driver.name, ret);
+			goto err;
+		}
+	}
+
+	return 0;
+
+err:
+	while (--i >= 0)
+		platform_driver_unregister(mtk_drm_drivers[i]);
+
+	return ret;
 }
 
 static void __exit mtk_drm_exit(void)
 {
-	platform_unregister_drivers(mtk_drm_drivers,
-				    ARRAY_SIZE(mtk_drm_drivers));
+	int i;
+
+	for (i = ARRAY_SIZE(mtk_drm_drivers) - 1; i >= 0; i--)
+		platform_driver_unregister(mtk_drm_drivers[i]);
 }
 
 module_init(mtk_drm_init);

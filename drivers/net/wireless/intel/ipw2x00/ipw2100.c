@@ -340,7 +340,7 @@ static int ipw2100_ucode_download(struct ipw2100_priv *priv,
 				  struct ipw2100_fw *fw);
 static void ipw2100_wx_event_work(struct work_struct *work);
 static struct iw_statistics *ipw2100_wx_wireless_stats(struct net_device *dev);
-static const struct iw_handler_def ipw2100_wx_handler_def;
+static struct iw_handler_def ipw2100_wx_handler_def;
 
 static inline void read_register(struct net_device *dev, u32 reg, u32 * val)
 {
@@ -1724,7 +1724,7 @@ static const struct libipw_geo ipw_geos[] = {
 static int ipw2100_up(struct ipw2100_priv *priv, int deferred)
 {
 	unsigned long flags;
-	int err = 0;
+	int rc = 0;
 	u32 lock;
 	u32 ord_len = sizeof(lock);
 
@@ -1757,33 +1757,33 @@ static int ipw2100_up(struct ipw2100_priv *priv, int deferred)
 	if (priv->status & STATUS_POWERED ||
 	    (priv->status & STATUS_RESET_PENDING)) {
 		/* Power cycle the card ... */
-		err = ipw2100_power_cycle_adapter(priv);
-		if (err) {
+		if (ipw2100_power_cycle_adapter(priv)) {
 			printk(KERN_WARNING DRV_NAME
 			       ": %s: Could not cycle adapter.\n",
 			       priv->net_dev->name);
+			rc = 1;
 			goto exit;
 		}
 	} else
 		priv->status |= STATUS_POWERED;
 
 	/* Load the firmware, start the clocks, etc. */
-	err = ipw2100_start_adapter(priv);
-	if (err) {
+	if (ipw2100_start_adapter(priv)) {
 		printk(KERN_ERR DRV_NAME
 		       ": %s: Failed to start the firmware.\n",
 		       priv->net_dev->name);
+		rc = 1;
 		goto exit;
 	}
 
 	ipw2100_initialize_ordinals(priv);
 
 	/* Determine capabilities of this particular HW configuration */
-	err = ipw2100_get_hw_features(priv);
-	if (err) {
+	if (ipw2100_get_hw_features(priv)) {
 		printk(KERN_ERR DRV_NAME
 		       ": %s: Failed to determine HW features.\n",
 		       priv->net_dev->name);
+		rc = 1;
 		goto exit;
 	}
 
@@ -1792,11 +1792,11 @@ static int ipw2100_up(struct ipw2100_priv *priv, int deferred)
 	priv->ieee->freq_band = LIBIPW_24GHZ_BAND;
 
 	lock = LOCK_NONE;
-	err = ipw2100_set_ordinal(priv, IPW_ORD_PERS_DB_LOCK, &lock, &ord_len);
-	if (err) {
+	if (ipw2100_set_ordinal(priv, IPW_ORD_PERS_DB_LOCK, &lock, &ord_len)) {
 		printk(KERN_ERR DRV_NAME
 		       ": %s: Failed to clear ordinal lock.\n",
 		       priv->net_dev->name);
+		rc = 1;
 		goto exit;
 	}
 
@@ -1820,21 +1820,21 @@ static int ipw2100_up(struct ipw2100_priv *priv, int deferred)
 
 	/* Send all of the commands that must be sent prior to
 	 * HOST_COMPLETE */
-	err = ipw2100_adapter_setup(priv);
-	if (err) {
+	if (ipw2100_adapter_setup(priv)) {
 		printk(KERN_ERR DRV_NAME ": %s: Failed to start the card.\n",
 		       priv->net_dev->name);
+		rc = 1;
 		goto exit;
 	}
 
 	if (!deferred) {
 		/* Enable the adapter - sends HOST_COMPLETE */
-		err = ipw2100_enable_adapter(priv);
-		if (err) {
+		if (ipw2100_enable_adapter(priv)) {
 			printk(KERN_ERR DRV_NAME ": "
 			       "%s: failed in call to enable adapter.\n",
 			       priv->net_dev->name);
 			ipw2100_hw_stop_adapter(priv);
+			rc = 1;
 			goto exit;
 		}
 
@@ -1844,7 +1844,7 @@ static int ipw2100_up(struct ipw2100_priv *priv, int deferred)
 	}
 
       exit:
-	return err;
+	return rc;
 }
 
 static void ipw2100_down(struct ipw2100_priv *priv)
@@ -3445,9 +3445,8 @@ static int ipw2100_msg_allocate(struct ipw2100_priv *priv)
 	dma_addr_t p;
 
 	priv->msg_buffers =
-	    kmalloc_array(IPW_COMMAND_POOL_SIZE,
-			  sizeof(struct ipw2100_tx_packet),
-			  GFP_KERNEL);
+	    kmalloc(IPW_COMMAND_POOL_SIZE * sizeof(struct ipw2100_tx_packet),
+		    GFP_KERNEL);
 	if (!priv->msg_buffers)
 		return -ENOMEM;
 
@@ -3539,7 +3538,7 @@ static ssize_t show_pci(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(pci, 0444, show_pci, NULL);
+static DEVICE_ATTR(pci, S_IRUGO, show_pci, NULL);
 
 static ssize_t show_cfg(struct device *d, struct device_attribute *attr,
 			char *buf)
@@ -3548,7 +3547,7 @@ static ssize_t show_cfg(struct device *d, struct device_attribute *attr,
 	return sprintf(buf, "0x%08x\n", (int)p->config);
 }
 
-static DEVICE_ATTR(cfg, 0444, show_cfg, NULL);
+static DEVICE_ATTR(cfg, S_IRUGO, show_cfg, NULL);
 
 static ssize_t show_status(struct device *d, struct device_attribute *attr,
 			   char *buf)
@@ -3557,7 +3556,7 @@ static ssize_t show_status(struct device *d, struct device_attribute *attr,
 	return sprintf(buf, "0x%08x\n", (int)p->status);
 }
 
-static DEVICE_ATTR(status, 0444, show_status, NULL);
+static DEVICE_ATTR(status, S_IRUGO, show_status, NULL);
 
 static ssize_t show_capability(struct device *d, struct device_attribute *attr,
 			       char *buf)
@@ -3566,7 +3565,7 @@ static ssize_t show_capability(struct device *d, struct device_attribute *attr,
 	return sprintf(buf, "0x%08x\n", (int)p->capability);
 }
 
-static DEVICE_ATTR(capability, 0444, show_capability, NULL);
+static DEVICE_ATTR(capability, S_IRUGO, show_capability, NULL);
 
 #define IPW2100_REG(x) { IPW_ ##x, #x }
 static const struct {
@@ -3733,7 +3732,7 @@ IPW2100_ORD(STAT_TX_HOST_REQUESTS, "requested Host Tx's (MSDU)"),
 	    IPW2100_ORD(ASSOCIATED_AP_PTR,
 				"0 if not associated, else pointer to AP table entry"),
 	    IPW2100_ORD(AVAILABLE_AP_CNT,
-				"AP's described in the AP table"),
+				"AP's decsribed in the AP table"),
 	    IPW2100_ORD(AP_LIST_PTR, "Ptr to list of available APs"),
 	    IPW2100_ORD(STAT_AP_ASSNS, "associations"),
 	    IPW2100_ORD(STAT_ASSN_FAIL, "association failures"),
@@ -3823,7 +3822,7 @@ static ssize_t show_registers(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(registers, 0444, show_registers, NULL);
+static DEVICE_ATTR(registers, S_IRUGO, show_registers, NULL);
 
 static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 			     char *buf)
@@ -3864,7 +3863,7 @@ static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(hardware, 0444, show_hardware, NULL);
+static DEVICE_ATTR(hardware, S_IRUGO, show_hardware, NULL);
 
 static ssize_t show_memory(struct device *d, struct device_attribute *attr,
 			   char *buf)
@@ -3958,7 +3957,7 @@ static ssize_t store_memory(struct device *d, struct device_attribute *attr,
 	return count;
 }
 
-static DEVICE_ATTR(memory, 0644, show_memory, store_memory);
+static DEVICE_ATTR(memory, S_IWUSR | S_IRUGO, show_memory, store_memory);
 
 static ssize_t show_ordinals(struct device *d, struct device_attribute *attr,
 			     char *buf)
@@ -3994,7 +3993,7 @@ static ssize_t show_ordinals(struct device *d, struct device_attribute *attr,
 	return len;
 }
 
-static DEVICE_ATTR(ordinals, 0444, show_ordinals, NULL);
+static DEVICE_ATTR(ordinals, S_IRUGO, show_ordinals, NULL);
 
 static ssize_t show_stats(struct device *d, struct device_attribute *attr,
 			  char *buf)
@@ -4015,7 +4014,7 @@ static ssize_t show_stats(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(stats, 0444, show_stats, NULL);
+static DEVICE_ATTR(stats, S_IRUGO, show_stats, NULL);
 
 static int ipw2100_switch_mode(struct ipw2100_priv *priv, u32 mode)
 {
@@ -4113,7 +4112,7 @@ static ssize_t show_internals(struct device *d, struct device_attribute *attr,
 	return len;
 }
 
-static DEVICE_ATTR(internals, 0444, show_internals, NULL);
+static DEVICE_ATTR(internals, S_IRUGO, show_internals, NULL);
 
 static ssize_t show_bssinfo(struct device *d, struct device_attribute *attr,
 			    char *buf)
@@ -4158,15 +4157,15 @@ static ssize_t show_bssinfo(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(bssinfo, 0444, show_bssinfo, NULL);
+static DEVICE_ATTR(bssinfo, S_IRUGO, show_bssinfo, NULL);
 
 #ifdef CONFIG_IPW2100_DEBUG
-static ssize_t debug_level_show(struct device_driver *d, char *buf)
+static ssize_t show_debug_level(struct device_driver *d, char *buf)
 {
 	return sprintf(buf, "0x%08X\n", ipw2100_debug_level);
 }
 
-static ssize_t debug_level_store(struct device_driver *d,
+static ssize_t store_debug_level(struct device_driver *d,
 				 const char *buf, size_t count)
 {
 	u32 val;
@@ -4180,7 +4179,9 @@ static ssize_t debug_level_store(struct device_driver *d,
 
 	return strnlen(buf, count);
 }
-static DRIVER_ATTR_RW(debug_level);
+
+static DRIVER_ATTR(debug_level, S_IWUSR | S_IRUGO, show_debug_level,
+		   store_debug_level);
 #endif				/* CONFIG_IPW2100_DEBUG */
 
 static ssize_t show_fatal_error(struct device *d,
@@ -4217,7 +4218,8 @@ static ssize_t store_fatal_error(struct device *d,
 	return count;
 }
 
-static DEVICE_ATTR(fatal_error, 0644, show_fatal_error, store_fatal_error);
+static DEVICE_ATTR(fatal_error, S_IWUSR | S_IRUGO, show_fatal_error,
+		   store_fatal_error);
 
 static ssize_t show_scan_age(struct device *d, struct device_attribute *attr,
 			     char *buf)
@@ -4250,7 +4252,7 @@ static ssize_t store_scan_age(struct device *d, struct device_attribute *attr,
 	return strnlen(buf, count);
 }
 
-static DEVICE_ATTR(scan_age, 0644, show_scan_age, store_scan_age);
+static DEVICE_ATTR(scan_age, S_IWUSR | S_IRUGO, show_scan_age, store_scan_age);
 
 static ssize_t show_rf_kill(struct device *d, struct device_attribute *attr,
 			    char *buf)
@@ -4304,7 +4306,7 @@ static ssize_t store_rf_kill(struct device *d, struct device_attribute *attr,
 	return count;
 }
 
-static DEVICE_ATTR(rf_kill, 0644, show_rf_kill, store_rf_kill);
+static DEVICE_ATTR(rf_kill, S_IWUSR | S_IRUGO, show_rf_kill, store_rf_kill);
 
 static struct attribute *ipw2100_sysfs_entries[] = {
 	&dev_attr_hardware.attr,
@@ -4324,7 +4326,7 @@ static struct attribute *ipw2100_sysfs_entries[] = {
 	NULL,
 };
 
-static const struct attribute_group ipw2100_attribute_group = {
+static struct attribute_group ipw2100_attribute_group = {
 	.attrs = ipw2100_sysfs_entries,
 };
 
@@ -4588,9 +4590,9 @@ static int ipw2100_rx_allocate(struct ipw2100_priv *priv)
 	/*
 	 * allocate packets
 	 */
-	priv->rx_buffers = kmalloc_array(RX_QUEUE_LENGTH,
-					 sizeof(struct ipw2100_rx_packet),
-					 GFP_KERNEL);
+	priv->rx_buffers = kmalloc(RX_QUEUE_LENGTH *
+				   sizeof(struct ipw2100_rx_packet),
+				   GFP_KERNEL);
 	if (!priv->rx_buffers) {
 		IPW_DEBUG_INFO("can't allocate rx packet buffer table\n");
 
@@ -8273,7 +8275,7 @@ static struct iw_statistics *ipw2100_wx_wireless_stats(struct net_device *dev)
 	return (struct iw_statistics *)NULL;
 }
 
-static const struct iw_handler_def ipw2100_wx_handler_def = {
+static struct iw_handler_def ipw2100_wx_handler_def = {
 	.standard = ipw2100_wx_handlers,
 	.num_standard = ARRAY_SIZE(ipw2100_wx_handlers),
 	.num_private = ARRAY_SIZE(ipw2100_private_handler),

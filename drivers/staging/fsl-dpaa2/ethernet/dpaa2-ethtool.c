@@ -30,48 +30,45 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <linux/net_tstamp.h>
-
 #include "dpni.h"	/* DPNI_LINK_OPT_* */
 #include "dpaa2-eth.h"
 
 /* To be kept in sync with DPNI statistics */
-static char dpaa2_ethtool_stats[][ETH_GSTRING_LEN] = {
-	"[hw] rx frames",
-	"[hw] rx bytes",
-	"[hw] rx mcast frames",
-	"[hw] rx mcast bytes",
-	"[hw] rx bcast frames",
-	"[hw] rx bcast bytes",
-	"[hw] tx frames",
-	"[hw] tx bytes",
-	"[hw] tx mcast frames",
-	"[hw] tx mcast bytes",
-	"[hw] tx bcast frames",
-	"[hw] tx bcast bytes",
-	"[hw] rx filtered frames",
-	"[hw] rx discarded frames",
-	"[hw] rx nobuffer discards",
-	"[hw] tx discarded frames",
-	"[hw] tx confirmed frames",
+char dpaa2_ethtool_stats[][ETH_GSTRING_LEN] = {
+	"rx frames",
+	"rx bytes",
+	"rx mcast frames",
+	"rx mcast bytes",
+	"rx bcast frames",
+	"rx bcast bytes",
+	"tx frames",
+	"tx bytes",
+	"tx mcast frames",
+	"tx mcast bytes",
+	"tx bcast frames",
+	"tx bcast bytes",
+	"rx filtered frames",
+	"rx discarded frames",
+	"rx nobuffer discards",
+	"tx discarded frames",
+	"tx confirmed frames",
 };
 
 #define DPAA2_ETH_NUM_STATS	ARRAY_SIZE(dpaa2_ethtool_stats)
 
-static char dpaa2_ethtool_extras[][ETH_GSTRING_LEN] = {
+char dpaa2_ethtool_extras[][ETH_GSTRING_LEN] = {
 	/* per-cpu stats */
-	"[drv] tx conf frames",
-	"[drv] tx conf bytes",
-	"[drv] tx sg frames",
-	"[drv] tx sg bytes",
-	"[drv] tx realloc frames",
-	"[drv] rx sg frames",
-	"[drv] rx sg bytes",
-	"[drv] enqueue portal busy",
+	"tx conf frames",
+	"tx conf bytes",
+	"tx sg frames",
+	"tx sg bytes",
+	"rx sg frames",
+	"rx sg bytes",
+	"enqueue portal busy",
 	/* Channel stats */
-	"[drv] dequeue portal busy",
-	"[drv] channel pull errors",
-	"[drv] cdan",
+	"dequeue portal busy",
+	"channel pull errors",
+	"cdan",
 };
 
 #define DPAA2_ETH_NUM_EXTRA_STATS	ARRAY_SIZE(dpaa2_ethtool_extras)
@@ -79,15 +76,10 @@ static char dpaa2_ethtool_extras[][ETH_GSTRING_LEN] = {
 static void dpaa2_eth_get_drvinfo(struct net_device *net_dev,
 				  struct ethtool_drvinfo *drvinfo)
 {
-	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
-
 	strlcpy(drvinfo->driver, KBUILD_MODNAME, sizeof(drvinfo->driver));
 	strlcpy(drvinfo->version, dpaa2_eth_drv_version,
 		sizeof(drvinfo->version));
-
-	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
-		 "%u.%u", priv->dpni_ver_major, priv->dpni_ver_minor);
-
+	strlcpy(drvinfo->fw_version, "N/A", sizeof(drvinfo->fw_version));
 	strlcpy(drvinfo->bus_info, dev_name(net_dev->dev.parent->parent),
 		sizeof(drvinfo->bus_info));
 }
@@ -102,7 +94,7 @@ dpaa2_eth_get_link_ksettings(struct net_device *net_dev,
 
 	err = dpni_get_link_state(priv->mc_io, 0, priv->mc_token, &state);
 	if (err) {
-		netdev_err(net_dev, "ERROR %d getting link state\n", err);
+		netdev_err(net_dev, "ERROR %d getting link state", err);
 		goto out;
 	}
 
@@ -121,8 +113,6 @@ out:
 	return err;
 }
 
-#define DPNI_DYNAMIC_LINK_SET_VER_MAJOR		7
-#define DPNI_DYNAMIC_LINK_SET_VER_MINOR		1
 static int
 dpaa2_eth_set_link_ksettings(struct net_device *net_dev,
 			     const struct ethtool_link_ksettings *link_settings)
@@ -131,16 +121,15 @@ dpaa2_eth_set_link_ksettings(struct net_device *net_dev,
 	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
 	int err = 0;
 
-	/* If using an older MC version, the DPNI must be down
+	netdev_dbg(net_dev, "Setting link parameters...");
+
+	/* Due to a temporary MC limitation, the DPNI must be down
 	 * in order to be able to change link settings. Taking steps to let
 	 * the user know that.
 	 */
-	if (dpaa2_eth_cmp_dpni_ver(priv, DPNI_DYNAMIC_LINK_SET_VER_MAJOR,
-				   DPNI_DYNAMIC_LINK_SET_VER_MINOR) < 0) {
-		if (netif_running(net_dev)) {
-			netdev_info(net_dev, "Interface must be brought down first.\n");
-			return -EACCES;
-		}
+	if (netif_running(net_dev)) {
+		netdev_info(net_dev, "Sorry, interface must be brought down first.\n");
+		return -EACCES;
 	}
 
 	cfg.rate = link_settings->base.speed;
@@ -158,7 +147,7 @@ dpaa2_eth_set_link_ksettings(struct net_device *net_dev,
 		/* ethtool will be loud enough if we return an error; no point
 		 * in putting our own error message on the console by default
 		 */
-		netdev_dbg(net_dev, "ERROR %d setting link cfg\n", err);
+		netdev_dbg(net_dev, "ERROR %d setting link cfg", err);
 
 	return err;
 }
@@ -217,7 +206,7 @@ static void dpaa2_eth_get_ethtool_stats(struct net_device *net_dev,
 		err = dpni_get_statistics(priv->mc_io, 0, priv->mc_token,
 					  j, &dpni_stats);
 		if (err != 0)
-			netdev_warn(net_dev, "dpni_get_stats(%d) failed\n", j);
+			netdev_warn(net_dev, "dpni_get_stats(%d) failed", j);
 		switch (j) {
 		case 0:
 			num_cnt = sizeof(dpni_stats.page_0) / sizeof(u64);
@@ -227,6 +216,8 @@ static void dpaa2_eth_get_ethtool_stats(struct net_device *net_dev,
 			break;
 		case 2:
 			num_cnt = sizeof(dpni_stats.page_2) / sizeof(u64);
+			break;
+		default:
 			break;
 		}
 		for (k = 0; k < num_cnt; k++)
@@ -276,26 +267,6 @@ static int dpaa2_eth_get_rxnfc(struct net_device *net_dev,
 	return 0;
 }
 
-int dpaa2_phc_index = -1;
-EXPORT_SYMBOL(dpaa2_phc_index);
-
-static int dpaa2_eth_get_ts_info(struct net_device *dev,
-				 struct ethtool_ts_info *info)
-{
-	info->so_timestamping = SOF_TIMESTAMPING_TX_HARDWARE |
-				SOF_TIMESTAMPING_RX_HARDWARE |
-				SOF_TIMESTAMPING_RAW_HARDWARE;
-
-	info->phc_index = dpaa2_phc_index;
-
-	info->tx_types = (1 << HWTSTAMP_TX_OFF) |
-			 (1 << HWTSTAMP_TX_ON);
-
-	info->rx_filters = (1 << HWTSTAMP_FILTER_NONE) |
-			   (1 << HWTSTAMP_FILTER_ALL);
-	return 0;
-}
-
 const struct ethtool_ops dpaa2_ethtool_ops = {
 	.get_drvinfo = dpaa2_eth_get_drvinfo,
 	.get_link = ethtool_op_get_link,
@@ -305,5 +276,4 @@ const struct ethtool_ops dpaa2_ethtool_ops = {
 	.get_ethtool_stats = dpaa2_eth_get_ethtool_stats,
 	.get_strings = dpaa2_eth_get_strings,
 	.get_rxnfc = dpaa2_eth_get_rxnfc,
-	.get_ts_info = dpaa2_eth_get_ts_info,
 };

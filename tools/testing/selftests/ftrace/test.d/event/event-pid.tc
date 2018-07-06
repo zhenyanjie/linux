@@ -1,5 +1,4 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-2.0
 # description: event tracing - restricts events based on pid
 # flags: instance
 
@@ -13,7 +12,7 @@ do_reset() {
 fail() { #msg
     do_reset
     echo $1
-    exit_fail
+    exit $FAIL
 }
 
 yield() {

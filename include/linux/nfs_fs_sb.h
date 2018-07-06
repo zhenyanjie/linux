@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NFS_FS_SB
 #define _NFS_FS_SB
 
@@ -10,7 +9,6 @@
 #include <linux/sunrpc/xprt.h>
 
 #include <linux/atomic.h>
-#include <linux/refcount.h>
 
 struct nfs4_session;
 struct nfs_iostats;
@@ -26,9 +24,8 @@ struct nfs41_impl_id;
  * The nfs_client identifies our client state to the server.
  */
 struct nfs_client {
-	refcount_t		cl_count;
+	atomic_t		cl_count;
 	atomic_t		cl_mds_count;
-	seqcount_t		cl_callback_count;
 	int			cl_cons_state;	/* current construction state (-ve: init error) */
 #define NFS_CS_READY		0		/* ready to be used */
 #define NFS_CS_INITING		1		/* busy initialising */
@@ -45,7 +42,6 @@ struct nfs_client {
 #define NFS_CS_MIGRATION	2		/* - transparent state migr */
 #define NFS_CS_INFINITE_SLOTS	3		/* - don't limit TCP slots */
 #define NFS_CS_NO_RETRANS_TIMEOUT	4	/* - Disable retransmit timeouts */
-#define NFS_CS_TSM_POSSIBLE	5		/* - Maybe state migration */
 	struct sockaddr_storage	cl_addr;	/* server identifier */
 	size_t			cl_addrlen;
 	char *			cl_hostname;	/* hostname of server */
@@ -214,7 +210,6 @@ struct nfs_server {
 	unsigned long		mig_status;
 #define NFS_MIG_IN_TRANSITION		(1)
 #define NFS_MIG_FAILED			(2)
-#define NFS_MIG_TSM_POSSIBLE		(3)
 
 	void (*destroy)(struct nfs_server *);
 
@@ -236,7 +231,6 @@ struct nfs_server {
 #define NFS_CAP_ACLS		(1U << 3)
 #define NFS_CAP_ATOMIC_OPEN	(1U << 4)
 /* #define NFS_CAP_CHANGE_ATTR	(1U << 5) */
-#define NFS_CAP_LGOPEN		(1U << 5)
 #define NFS_CAP_FILEID		(1U << 6)
 #define NFS_CAP_MODE		(1U << 7)
 #define NFS_CAP_NLINK		(1U << 8)

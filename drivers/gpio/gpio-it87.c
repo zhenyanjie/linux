@@ -2,7 +2,6 @@
  *  GPIO interface for IT87xx Super I/O chips
  *
  *  Author: Diego Elio Pettenò <flameeyes@flameeyes.eu>
- *  Copyright (c) 2017 Google, Inc.
  *
  *  Based on it87_wdt.c     by Oliver Schuster
  *           gpio-it8761e.c by Denis Turischev
@@ -31,7 +30,7 @@
 #include <linux/errno.h>
 #include <linux/ioport.h>
 #include <linux/slab.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 
 /* Chip Id numbers */
 #define NO_DEV_ID	0xffff
@@ -40,7 +39,6 @@
 #define IT8728_ID	0x8728
 #define IT8732_ID	0x8732
 #define IT8761_ID	0x8761
-#define IT8772_ID	0x8772
 
 /* IO Ports */
 #define REG		0x2e
@@ -316,7 +314,6 @@ static int __init it87_gpio_init(void)
 		break;
 	case IT8728_ID:
 	case IT8732_ID:
-	case IT8772_ID:
 		gpio_ba_reg = 0x62;
 		it87_gpio->io_size = 8;
 		it87_gpio->output_base = 0xc8;
@@ -414,6 +411,6 @@ static void __exit it87_gpio_exit(void)
 module_init(it87_gpio_init);
 module_exit(it87_gpio_exit);
 
-MODULE_AUTHOR("Diego Elio Pettenò <flameeyes@flameeyes.eu>");
+MODULE_AUTHOR("Diego Elio PettenÃ² <flameeyes@flameeyes.eu>");
 MODULE_DESCRIPTION("GPIO interface for IT87xx Super I/O chips");
 MODULE_LICENSE("GPL");

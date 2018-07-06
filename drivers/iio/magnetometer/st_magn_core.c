@@ -315,18 +315,7 @@ static const struct st_sensor_settings st_magn_sensors_settings[] = {
 				},
 			},
 		},
-		.drdy_irq = {
-			/* drdy line is routed drdy pin */
-			.stat_drdy = {
-				.addr = ST_SENSORS_DEFAULT_STAT_ADDR,
-				.mask = 0x07,
-			},
-		},
-		.sim = {
-			.addr = 0x22,
-			.value = BIT(2),
-		},
-		.multi_read_bit = true,
+		.multi_read_bit = false,
 		.bootime = 2,
 	},
 	{
@@ -334,7 +323,6 @@ static const struct st_sensor_settings st_magn_sensors_settings[] = {
 		.wai_addr = 0x4f,
 		.sensors_supported = {
 			[0] = LSM303AGR_MAGN_DEV_NAME,
-			[1] = LIS2MDL_MAGN_DEV_NAME,
 		},
 		.ch = (struct iio_chan_spec *)st_magn_3_16bit_channels,
 		.odr = {
@@ -366,14 +354,9 @@ static const struct st_sensor_settings st_magn_sensors_settings[] = {
 			.mask = 0x10,
 		},
 		.drdy_irq = {
-			.int1 = {
-				.addr = 0x62,
-				.mask = 0x01,
-			},
-			.stat_drdy = {
-				.addr = 0x67,
-				.mask = 0x07,
-			},
+			.addr = 0x62,
+			.mask_int1 = 0x01,
+			.addr_stat_drdy = 0x67,
 		},
 		.multi_read_bit = false,
 		.bootime = 2,
@@ -450,6 +433,7 @@ static const struct attribute_group st_magn_attribute_group = {
 };
 
 static const struct iio_info magn_info = {
+	.driver_module = THIS_MODULE,
 	.attrs = &st_magn_attribute_group,
 	.read_raw = &st_magn_read_raw,
 	.write_raw = &st_magn_write_raw,
@@ -458,6 +442,7 @@ static const struct iio_info magn_info = {
 
 #ifdef CONFIG_IIO_TRIGGER
 static const struct iio_trigger_ops st_magn_trigger_ops = {
+	.owner = THIS_MODULE,
 	.set_trigger_state = ST_MAGN_TRIGGER_SET_STATE,
 	.validate_device = st_sensors_validate_device,
 };

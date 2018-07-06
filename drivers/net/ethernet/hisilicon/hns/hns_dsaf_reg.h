@@ -1034,9 +1034,12 @@ static inline void dsaf_write_syscon(struct regmap *base, u32 reg, u32 value)
 	regmap_write(base, reg, value);
 }
 
-static inline int dsaf_read_syscon(struct regmap *base, u32 reg, u32 *val)
+static inline u32 dsaf_read_syscon(struct regmap *base, u32 reg)
 {
-	return regmap_read(base, reg, val);
+	unsigned int val;
+
+	regmap_read(base, reg, &val);
+	return val;
 }
 
 #define dsaf_read_dev(a, reg) \

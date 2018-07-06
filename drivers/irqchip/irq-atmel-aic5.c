@@ -305,9 +305,9 @@ static const struct irq_domain_ops aic5_irq_ops = {
 	.xlate	= aic5_irq_domain_xlate,
 };
 
-static void __init sama5d3_aic_irq_fixup(void)
+static void __init sama5d3_aic_irq_fixup(struct device_node *root)
 {
-	aic_common_rtc_irq_fixup();
+	aic_common_rtc_irq_fixup(root);
 }
 
 static const struct of_device_id aic5_irq_fixups[] __initconst = {

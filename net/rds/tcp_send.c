@@ -86,7 +86,7 @@ int rds_tcp_xmit(struct rds_connection *conn, struct rds_message *rm,
 		 * m_ack_seq is set to the sequence number of the last byte of
 		 * header and data.  see rds_tcp_is_acked().
 		 */
-		tc->t_last_sent_nxt = rds_tcp_write_seq(tc);
+		tc->t_last_sent_nxt = rds_tcp_snd_nxt(tc);
 		rm->m_ack_seq = tc->t_last_sent_nxt +
 				sizeof(struct rds_header) +
 				be32_to_cpu(rm->m_inc.i_hdr.h_len) - 1;
@@ -98,7 +98,7 @@ int rds_tcp_xmit(struct rds_connection *conn, struct rds_message *rm,
 			rm->m_inc.i_hdr.h_flags |= RDS_FLAG_RETRANSMITTED;
 
 		rdsdebug("rm %p tcp nxt %u ack_seq %llu\n",
-			 rm, rds_tcp_write_seq(tc),
+			 rm, rds_tcp_snd_nxt(tc),
 			 (unsigned long long)rm->m_ack_seq);
 	}
 
@@ -157,7 +157,7 @@ out:
 					"returned %d, "
 					"disconnecting and reconnecting\n",
 					&conn->c_faddr, cp->cp_index, ret);
-				rds_conn_path_drop(cp, false);
+				rds_conn_path_drop(cp);
 			}
 		}
 	}
@@ -202,11 +202,8 @@ void rds_tcp_write_space(struct sock *sk)
 	tc->t_last_seen_una = rds_tcp_snd_una(tc);
 	rds_send_path_drop_acked(cp, rds_tcp_snd_una(tc), rds_tcp_is_acked);
 
-	rcu_read_lock();
-	if ((refcount_read(&sk->sk_wmem_alloc) << 1) <= sk->sk_sndbuf &&
-	    !rds_destroy_pending(cp->cp_conn))
+	if ((atomic_read(&sk->sk_wmem_alloc) << 1) <= sk->sk_sndbuf)
 		queue_delayed_work(rds_wq, &cp->cp_send_w, 0);
-	rcu_read_unlock();
 
 out:
 	read_unlock_bh(&sk->sk_callback_lock);

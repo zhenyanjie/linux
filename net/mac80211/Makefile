@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 obj-$(CONFIG_MAC80211) += mac80211.o
 
 # mac80211 objects
@@ -7,7 +6,6 @@ mac80211-y := \
 	driver-ops.o \
 	sta_info.o \
 	wep.o \
-	aead_api.o \
 	wpa.o \
 	scan.o offchannel.o \
 	ht.o agg-tx.o agg-rx.o \
@@ -17,6 +15,8 @@ mac80211-y := \
 	rate.o \
 	michael.o \
 	tkip.o \
+	aes_ccm.o \
+	aes_gcm.o \
 	aes_cmac.o \
 	aes_gmac.o \
 	fils_aead.o \

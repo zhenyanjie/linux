@@ -212,11 +212,8 @@ static int check_partial_mapping(struct drm_i915_gem_object *obj,
 		return -EINTR;
 
 	err = i915_gem_object_set_tiling(obj, tile->tiling, tile->stride);
-	if (err) {
-		pr_err("Failed to set tiling mode=%u, stride=%u, err=%d\n",
-		       tile->tiling, tile->stride, err);
+	if (err)
 		return err;
-	}
 
 	GEM_BUG_ON(i915_gem_object_get_tiling(obj) != tile->tiling);
 	GEM_BUG_ON(i915_gem_object_get_stride(obj) != tile->stride);
@@ -233,16 +230,13 @@ static int check_partial_mapping(struct drm_i915_gem_object *obj,
 		GEM_BUG_ON(view.partial.size > nreal);
 
 		err = i915_gem_object_set_to_gtt_domain(obj, true);
-		if (err) {
-			pr_err("Failed to flush to GTT write domain; err=%d\n",
-			       err);
+		if (err)
 			return err;
-		}
 
 		vma = i915_gem_object_ggtt_pin(obj, &view, 0, 0, PIN_MAPPABLE);
 		if (IS_ERR(vma)) {
-			pr_err("Failed to pin partial view: offset=%lu; err=%d\n",
-			       page, (int)PTR_ERR(vma));
+			pr_err("Failed to pin partial view: offset=%lu\n",
+			       page);
 			return PTR_ERR(vma);
 		}
 
@@ -252,9 +246,17 @@ static int check_partial_mapping(struct drm_i915_gem_object *obj,
 		io = i915_vma_pin_iomap(vma);
 		i915_vma_unpin(vma);
 		if (IS_ERR(io)) {
-			pr_err("Failed to iomap partial view: offset=%lu; err=%d\n",
-			       page, (int)PTR_ERR(io));
+			pr_err("Failed to iomap partial view: offset=%lu\n",
+			       page);
 			return PTR_ERR(io);
+		}
+
+		err = i915_vma_get_fence(vma);
+		if (err) {
+			pr_err("Failed to get fence for partial view: offset=%lu\n",
+			       page);
+			i915_vma_unpin_iomap(vma);
+			return err;
 		}
 
 		iowrite32(page, io + n * PAGE_SIZE/sizeof(*io));
@@ -264,7 +266,7 @@ static int check_partial_mapping(struct drm_i915_gem_object *obj,
 		if (offset >= obj->base.size)
 			continue;
 
-		flush_write_domain(obj, ~I915_GEM_DOMAIN_CPU);
+		i915_gem_object_flush_gtt_write_domain(obj);
 
 		p = i915_gem_object_get_page(obj, offset >> PAGE_SHIFT);
 		cpu = kmap(p) + offset_in_page(offset);
@@ -323,7 +325,6 @@ static int igt_partial_tiling(void *arg)
 	}
 
 	mutex_lock(&i915->drm.struct_mutex);
-	intel_runtime_pm_get(i915);
 
 	if (1) {
 		IGT_TIMEOUT(end);
@@ -425,7 +426,6 @@ next_tiling: ;
 	}
 
 out_unlock:
-	intel_runtime_pm_put(i915);
 	mutex_unlock(&i915->drm.struct_mutex);
 	i915_gem_object_unpin_pages(obj);
 out:
@@ -436,7 +436,7 @@ out:
 static int make_obj_busy(struct drm_i915_gem_object *obj)
 {
 	struct drm_i915_private *i915 = to_i915(obj->base.dev);
-	struct i915_request *rq;
+	struct drm_i915_gem_request *rq;
 	struct i915_vma *vma;
 	int err;
 
@@ -448,14 +448,14 @@ static int make_obj_busy(struct drm_i915_gem_object *obj)
 	if (err)
 		return err;
 
-	rq = i915_request_alloc(i915->engine[RCS], i915->kernel_context);
+	rq = i915_gem_request_alloc(i915->engine[RCS], i915->kernel_context);
 	if (IS_ERR(rq)) {
 		i915_vma_unpin(vma);
 		return PTR_ERR(rq);
 	}
 
 	i915_vma_move_to_active(vma, rq, 0);
-	i915_request_add(rq);
+	i915_add_request(rq);
 
 	i915_gem_object_set_active_reference(obj);
 	i915_vma_unpin(vma);
@@ -545,9 +545,7 @@ static int igt_mmap_offset_exhaustion(void *arg)
 		}
 
 		mutex_lock(&i915->drm.struct_mutex);
-		intel_runtime_pm_get(i915);
 		err = make_obj_busy(obj);
-		intel_runtime_pm_put(i915);
 		mutex_unlock(&i915->drm.struct_mutex);
 		if (err) {
 			pr_err("[loop %d] Failed to busy the object\n", loop);

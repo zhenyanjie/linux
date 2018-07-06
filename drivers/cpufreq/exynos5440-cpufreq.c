@@ -115,10 +115,10 @@ static struct cpufreq_freqs freqs;
 static int init_div_table(void)
 {
 	struct cpufreq_frequency_table *pos, *freq_tbl = dvfs_info->freq_table;
-	unsigned int tmp, clk_div, ema_div, freq, volt_id, idx;
+	unsigned int tmp, clk_div, ema_div, freq, volt_id;
 	struct dev_pm_opp *opp;
 
-	cpufreq_for_each_entry_idx(pos, freq_tbl, idx) {
+	cpufreq_for_each_entry(pos, freq_tbl) {
 		opp = dev_pm_opp_find_freq_exact(dvfs_info->dev,
 					pos->frequency * 1000, true);
 		if (IS_ERR(opp)) {
@@ -154,7 +154,8 @@ static int init_div_table(void)
 		tmp = (clk_div | ema_div | (volt_id << P0_7_VDD_SHIFT)
 			| ((freq / FREQ_UNIT) << P0_7_FREQ_SHIFT));
 
-		__raw_writel(tmp, dvfs_info->base + XMU_PMU_P0_7 + 4 * idx);
+		__raw_writel(tmp, dvfs_info->base + XMU_PMU_P0_7 + 4 *
+						(pos - freq_tbl));
 		dev_pm_opp_put(opp);
 	}
 
@@ -172,12 +173,12 @@ static void exynos_enable_dvfs(unsigned int cur_frequency)
 	/* Enable PSTATE Change Event */
 	tmp = __raw_readl(dvfs_info->base + XMU_PMUEVTEN);
 	tmp |= (1 << PSTATE_CHANGED_EVTEN_SHIFT);
-	__raw_writel(tmp, dvfs_info->base + XMU_PMUEVTEN);
+	 __raw_writel(tmp, dvfs_info->base + XMU_PMUEVTEN);
 
 	/* Enable PSTATE Change IRQ */
 	tmp = __raw_readl(dvfs_info->base + XMU_PMUIRQEN);
 	tmp |= (1 << PSTATE_CHANGED_IRQEN_SHIFT);
-	__raw_writel(tmp, dvfs_info->base + XMU_PMUIRQEN);
+	 __raw_writel(tmp, dvfs_info->base + XMU_PMUIRQEN);
 
 	/* Set initial performance index */
 	cpufreq_for_each_entry(pos, freq_table)
@@ -329,7 +330,7 @@ static int exynos_cpufreq_probe(struct platform_device *pdev)
 	struct resource res;
 	unsigned int cur_frequency;
 
-	np = pdev->dev.of_node;
+	np =  pdev->dev.of_node;
 	if (!np)
 		return -ENODEV;
 

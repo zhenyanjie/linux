@@ -6,6 +6,7 @@ Contents:
 
 .. toctree::
    :maxdepth: 2
+   :numbered:
 
    input_uapi
    input_kapi

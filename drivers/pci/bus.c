@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
+ *	drivers/pci/bus.c
+ *
  * From setup-res.c, by:
  *	Dave Rusling (david.rusling@reo.mts.dec.com)
  *	David Mosberger (davidm@cs.arizona.edu)
@@ -120,7 +121,7 @@ int devm_request_pci_bus_resources(struct device *dev,
 EXPORT_SYMBOL_GPL(devm_request_pci_bus_resources);
 
 static struct pci_bus_region pci_32_bit = {0, 0xffffffffULL};
-#ifdef CONFIG_ARCH_DMA_ADDR_T_64BIT
+#ifdef CONFIG_PCI_BUS_ADDR_T_64BIT
 static struct pci_bus_region pci_64_bit = {0,
 				(pci_bus_addr_t) 0xffffffffffffffffULL};
 static struct pci_bus_region pci_high = {(pci_bus_addr_t) 0x100000000ULL,
@@ -230,7 +231,7 @@ int pci_bus_alloc_resource(struct pci_bus *bus, struct resource *res,
 					  resource_size_t),
 		void *alignf_data)
 {
-#ifdef CONFIG_ARCH_DMA_ADDR_T_64BIT
+#ifdef CONFIG_PCI_BUS_ADDR_T_64BIT
 	int rc;
 
 	if (res->flags & IORESOURCE_MEM_64) {
@@ -288,7 +289,7 @@ bool pci_bus_clip_resource(struct pci_dev *dev, int idx)
 		res->end = end;
 		res->flags &= ~IORESOURCE_UNSET;
 		orig_res.flags &= ~IORESOURCE_UNSET;
-		pci_printk(KERN_DEBUG, dev, "%pR clipped to %pR\n",
+		dev_printk(KERN_DEBUG, &dev->dev, "%pR clipped to %pR\n",
 				 &orig_res, res);
 
 		return true;
@@ -324,7 +325,7 @@ void pci_bus_add_device(struct pci_dev *dev)
 	dev->match_driver = true;
 	retval = device_attach(&dev->dev);
 	if (retval < 0 && retval != -EPROBE_DEFER) {
-		pci_warn(dev, "device attach failed (%d)\n", retval);
+		dev_warn(&dev->dev, "device attach failed (%d)\n", retval);
 		pci_proc_detach_device(dev);
 		pci_remove_sysfs_dev_files(dev);
 		return;

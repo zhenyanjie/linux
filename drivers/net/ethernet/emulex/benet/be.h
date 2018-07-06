@@ -37,7 +37,7 @@
 #include "be_hw.h"
 #include "be_roce.h"
 
-#define DRV_VER			"11.4.0.0"
+#define DRV_VER			"11.1.0.0"
 #define DRV_NAME		"be2net"
 #define BE_NAME			"Emulex BladeEngine2"
 #define BE3_NAME		"Emulex BladeEngine3"
@@ -248,7 +248,6 @@ struct be_tx_stats {
 	u32 tx_spoof_check_err;
 	u32 tx_qinq_err;
 	u32 tx_internal_parity_err;
-	u32 tx_sge_err;
 	struct u64_stats_sync sync;
 	struct u64_stats_sync sync_compl;
 };
@@ -931,24 +930,14 @@ static inline bool is_ipv4_pkt(struct sk_buff *skb)
 	return skb->protocol == htons(ETH_P_IP) && ip_hdr(skb)->version == 4;
 }
 
-static inline bool is_ipv6_ext_hdr(struct sk_buff *skb)
-{
-	if (ip_hdr(skb)->version == 6)
-		return ipv6_ext_hdr(ipv6_hdr(skb)->nexthdr);
-	else
-		return false;
-}
-
 #define be_error_recovering(adapter)	\
 		(adapter->flags & BE_FLAGS_TRY_RECOVERY)
 
 #define BE_ERROR_EEH		1
 #define BE_ERROR_UE		BIT(1)
 #define BE_ERROR_FW		BIT(2)
-#define BE_ERROR_TX		BIT(3)
-#define BE_ERROR_HW		(BE_ERROR_EEH | BE_ERROR_UE | BE_ERROR_TX)
-#define BE_ERROR_ANY		(BE_ERROR_EEH | BE_ERROR_UE | BE_ERROR_FW | \
-				 BE_ERROR_TX)
+#define BE_ERROR_HW		(BE_ERROR_EEH | BE_ERROR_UE)
+#define BE_ERROR_ANY		(BE_ERROR_EEH | BE_ERROR_UE | BE_ERROR_FW)
 #define BE_CLEAR_ALL		0xFF
 
 static inline u8 be_check_error(struct be_adapter *adapter, u32 err_type)

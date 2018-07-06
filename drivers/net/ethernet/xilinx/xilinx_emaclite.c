@@ -123,6 +123,7 @@
  * @phy_node:		pointer to the PHY device node
  * @mii_bus:		pointer to the MII bus
  * @last_link:		last link status
+ * @has_mdio:		indicates whether MDIO is included in the HW
  */
 struct net_local {
 
@@ -143,6 +144,7 @@ struct net_local {
 	struct mii_bus *mii_bus;
 
 	int last_link;
+	bool has_mdio;
 };
 
 
@@ -861,13 +863,13 @@ static int xemaclite_mdio_setup(struct net_local *lp, struct device *dev)
 	bus->write = xemaclite_mdio_write;
 	bus->parent = dev;
 
+	lp->mii_bus = bus;
+
 	rc = of_mdiobus_register(bus, np);
 	if (rc) {
 		dev_err(dev, "Failed to register mdio bus.\n");
 		goto err_register;
 	}
-
-	lp->mii_bus = bus;
 
 	return 0;
 
@@ -1143,7 +1145,9 @@ static int xemaclite_of_probe(struct platform_device *ofdev)
 	xemaclite_update_address(lp, ndev->dev_addr);
 
 	lp->phy_node = of_parse_phandle(ofdev->dev.of_node, "phy-handle", 0);
-	xemaclite_mdio_setup(lp, &ofdev->dev);
+	rc = xemaclite_mdio_setup(lp, &ofdev->dev);
+	if (rc)
+		dev_warn(&ofdev->dev, "error registering MDIO bus\n");
 
 	dev_info(dev, "MAC address is now %pM\n", ndev->dev_addr);
 
@@ -1187,7 +1191,7 @@ static int xemaclite_of_remove(struct platform_device *of_dev)
 	struct net_local *lp = netdev_priv(ndev);
 
 	/* Un-register the mii_bus, if configured */
-	if (lp->mii_bus) {
+	if (lp->has_mdio) {
 		mdiobus_unregister(lp->mii_bus);
 		mdiobus_free(lp->mii_bus);
 		lp->mii_bus = NULL;

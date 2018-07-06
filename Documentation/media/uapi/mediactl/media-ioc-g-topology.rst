@@ -46,7 +46,7 @@ other values untouched.
 If the ``topology_version`` remains the same, the ioctl should fill the
 desired arrays with the media graph elements.
 
-.. tabularcolumns:: |p{1.6cm}|p{3.4cm}|p{12.5cm}|
+.. tabularcolumns:: |p{1.6cm}|p{3.2cm}|p{12.7cm}|
 
 .. c:type:: media_v2_topology
 
@@ -68,21 +68,13 @@ desired arrays with the media graph elements.
 
     -  .. row 2
 
-       -  __u32
+       -  __u64
 
        -  ``num_entities``
 
        -  Number of entities in the graph
 
     -  .. row 3
-
-       -  __u32
-
-       -  ``reserved1``
-
-       -  Applications and drivers shall set this to 0.
-
-    -  .. row 4
 
        -  __u64
 
@@ -93,23 +85,15 @@ desired arrays with the media graph elements.
 	  the ioctl won't store the entities. It will just update
 	  ``num_entities``
 
-    -  .. row 5
+    -  .. row 4
 
-       -  __u32
+       -  __u64
 
        -  ``num_interfaces``
 
        -  Number of interfaces in the graph
 
-    -  .. row 6
-
-       -  __u32
-
-       -  ``reserved2``
-
-       -  Applications and drivers shall set this to 0.
-
-    -  .. row 7
+    -  .. row 5
 
        -  __u64
 
@@ -120,23 +104,15 @@ desired arrays with the media graph elements.
 	  the ioctl won't store the interfaces. It will just update
 	  ``num_interfaces``
 
-    -  .. row 8
+    -  .. row 6
 
-       -  __u32
+       -  __u64
 
        -  ``num_pads``
 
        -  Total number of pads in the graph
 
-    -  .. row 9
-
-       -  __u32
-
-       -  ``reserved3``
-
-       -  Applications and drivers shall set this to 0.
-
-    -  .. row 10
+    -  .. row 7
 
        -  __u64
 
@@ -146,23 +122,15 @@ desired arrays with the media graph elements.
 	  converted to a 64-bits integer. It can be zero. if zero, the ioctl
 	  won't store the pads. It will just update ``num_pads``
 
-    -  .. row 11
+    -  .. row 8
 
-       -  __u32
+       -  __u64
 
        -  ``num_links``
 
        -  Total number of data and interface links in the graph
 
-    -  .. row 12
-
-       -  __u32
-
-       -  ``reserved4``
-
-       -  Applications and drivers shall set this to 0.
-
-    -  .. row 13
+    -  .. row 9
 
        -  __u64
 
@@ -205,13 +173,13 @@ desired arrays with the media graph elements.
 
        -  ``function``
 
-       -  Entity main function, see :ref:`media-entity-functions` for details.
+       -  Entity main function, see :ref:`media-entity-type` for details.
 
     -  .. row 4
 
        -  __u32
 
-       -  ``reserved``\ [6]
+       -  ``reserved``\ [12]
 
        -  Reserved for future extensions. Drivers and applications must set
 	  this array to zero.
@@ -273,7 +241,7 @@ desired arrays with the media graph elements.
 
 .. c:type:: media_v2_intf_devnode
 
-.. flat-table:: struct media_v2_intf_devnode
+.. flat-table:: struct media_v2_interface
     :header-rows:  0
     :stub-columns: 0
     :widths: 1 2 8
@@ -334,7 +302,7 @@ desired arrays with the media graph elements.
 
        -  __u32
 
-       -  ``reserved``\ [5]
+       -  ``reserved``\ [9]
 
        -  Reserved for future extensions. Drivers and applications must set
 	  this array to zero.
@@ -344,7 +312,7 @@ desired arrays with the media graph elements.
 
 .. c:type:: media_v2_link
 
-.. flat-table:: struct media_v2_link
+.. flat-table:: struct media_v2_pad
     :header-rows:  0
     :stub-columns: 0
     :widths: 1 2 8
@@ -356,7 +324,7 @@ desired arrays with the media graph elements.
 
        -  ``id``
 
-       -  Unique ID for the link.
+       -  Unique ID for the pad.
 
     -  .. row 2
 
@@ -390,7 +358,7 @@ desired arrays with the media graph elements.
 
        -  __u32
 
-       -  ``reserved``\ [6]
+       -  ``reserved``\ [5]
 
        -  Reserved for future extensions. Drivers and applications must set
 	  this array to zero.

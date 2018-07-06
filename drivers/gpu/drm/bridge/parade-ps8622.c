@@ -24,12 +24,14 @@
 #include <linux/of_device.h>
 #include <linux/pm.h>
 #include <linux/regulator/consumer.h>
-#include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
+
 #include <drm/drm_of.h>
 #include <drm/drm_panel.h>
-#include <drm/drmP.h>
+
+#include "drmP.h"
+#include "drm_crtc.h"
+#include "drm_crtc_helper.h"
+#include "drm_atomic_helper.h"
 
 /* Brightness scale on the Parade chip */
 #define PS8622_MAX_BRIGHTNESS 0xff
@@ -476,6 +478,7 @@ static const struct drm_connector_helper_funcs ps8622_connector_helper_funcs = {
 };
 
 static const struct drm_connector_funcs ps8622_connector_funcs = {
+	.dpms = drm_atomic_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = drm_connector_cleanup,
 	.reset = drm_atomic_helper_connector_reset,
@@ -597,7 +600,11 @@ static int ps8622_probe(struct i2c_client *client,
 
 	ps8622->bridge.funcs = &ps8622_bridge_funcs;
 	ps8622->bridge.of_node = dev->of_node;
-	drm_bridge_add(&ps8622->bridge);
+	ret = drm_bridge_add(&ps8622->bridge);
+	if (ret) {
+		DRM_ERROR("Failed to add bridge\n");
+		return ret;
+	}
 
 	i2c_set_clientdata(client, ps8622);
 

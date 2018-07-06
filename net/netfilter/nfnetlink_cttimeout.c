@@ -47,43 +47,33 @@ static const struct nla_policy cttimeout_nla_policy[CTA_TIMEOUT_MAX+1] = {
 };
 
 static int
-ctnl_timeout_parse_policy(void *timeouts,
-			  const struct nf_conntrack_l4proto *l4proto,
+ctnl_timeout_parse_policy(void *timeouts, struct nf_conntrack_l4proto *l4proto,
 			  struct net *net, const struct nlattr *attr)
 {
-	struct nlattr **tb;
 	int ret = 0;
 
-	if (!l4proto->ctnl_timeout.nlattr_to_obj)
-		return 0;
+	if (likely(l4proto->ctnl_timeout.nlattr_to_obj)) {
+		struct nlattr *tb[l4proto->ctnl_timeout.nlattr_max+1];
 
-	tb = kcalloc(l4proto->ctnl_timeout.nlattr_max + 1, sizeof(*tb),
-		     GFP_KERNEL);
+		ret = nla_parse_nested(tb, l4proto->ctnl_timeout.nlattr_max,
+				       attr, l4proto->ctnl_timeout.nla_policy,
+				       NULL);
+		if (ret < 0)
+			return ret;
 
-	if (!tb)
-		return -ENOMEM;
-
-	ret = nla_parse_nested(tb, l4proto->ctnl_timeout.nlattr_max, attr,
-			       l4proto->ctnl_timeout.nla_policy, NULL);
-	if (ret < 0)
-		goto err;
-
-	ret = l4proto->ctnl_timeout.nlattr_to_obj(tb, net, timeouts);
-
-err:
-	kfree(tb);
+		ret = l4proto->ctnl_timeout.nlattr_to_obj(tb, net, timeouts);
+	}
 	return ret;
 }
 
 static int cttimeout_new_timeout(struct net *net, struct sock *ctnl,
 				 struct sk_buff *skb,
 				 const struct nlmsghdr *nlh,
-				 const struct nlattr * const cda[],
-				 struct netlink_ext_ack *extack)
+				 const struct nlattr * const cda[])
 {
 	__u16 l3num;
 	__u8 l4num;
-	const struct nf_conntrack_l4proto *l4proto;
+	struct nf_conntrack_l4proto *l4proto;
 	struct ctnl_timeout *timeout, *matching = NULL;
 	char *name;
 	int ret;
@@ -167,7 +157,7 @@ ctnl_timeout_fill_info(struct sk_buff *skb, u32 portid, u32 seq, u32 type,
 	struct nlmsghdr *nlh;
 	struct nfgenmsg *nfmsg;
 	unsigned int flags = portid ? NLM_F_MULTI : 0;
-	const struct nf_conntrack_l4proto *l4proto = timeout->l4proto;
+	struct nf_conntrack_l4proto *l4proto = timeout->l4proto;
 
 	event = nfnl_msg_type(NFNL_SUBSYS_CTNETLINK_TIMEOUT, event);
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*nfmsg), flags);
@@ -249,8 +239,7 @@ ctnl_timeout_dump(struct sk_buff *skb, struct netlink_callback *cb)
 static int cttimeout_get_timeout(struct net *net, struct sock *ctnl,
 				 struct sk_buff *skb,
 				 const struct nlmsghdr *nlh,
-				 const struct nlattr * const cda[],
-				 struct netlink_ext_ack *extack)
+				 const struct nlattr * const cda[])
 {
 	int ret = -ENOENT;
 	char *name;
@@ -298,20 +287,49 @@ static int cttimeout_get_timeout(struct net *net, struct sock *ctnl,
 	return ret;
 }
 
-static int untimeout(struct nf_conn *ct, void *timeout)
+static void untimeout(struct nf_conntrack_tuple_hash *i,
+		      struct ctnl_timeout *timeout)
 {
+	struct nf_conn *ct = nf_ct_tuplehash_to_ctrack(i);
 	struct nf_conn_timeout *timeout_ext = nf_ct_timeout_find(ct);
 
 	if (timeout_ext && (!timeout || timeout_ext->timeout == timeout))
 		RCU_INIT_POINTER(timeout_ext->timeout, NULL);
-
-	/* We are not intended to delete this conntrack. */
-	return 0;
 }
 
 static void ctnl_untimeout(struct net *net, struct ctnl_timeout *timeout)
 {
-	nf_ct_iterate_cleanup_net(net, untimeout, timeout, 0, 0);
+	struct nf_conntrack_tuple_hash *h;
+	const struct hlist_nulls_node *nn;
+	unsigned int last_hsize;
+	spinlock_t *lock;
+	int i, cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct ct_pcpu *pcpu = per_cpu_ptr(net->ct.pcpu_lists, cpu);
+
+		spin_lock_bh(&pcpu->lock);
+		hlist_nulls_for_each_entry(h, nn, &pcpu->unconfirmed, hnnode)
+			untimeout(h, timeout);
+		spin_unlock_bh(&pcpu->lock);
+	}
+
+	local_bh_disable();
+restart:
+	last_hsize = nf_conntrack_htable_size;
+	for (i = 0; i < last_hsize; i++) {
+		lock = &nf_conntrack_locks[i % CONNTRACK_LOCKS];
+		nf_conntrack_lock(lock);
+		if (last_hsize != nf_conntrack_htable_size) {
+			spin_unlock(lock);
+			goto restart;
+		}
+
+		hlist_nulls_for_each_entry(h, nn, &nf_conntrack_hash[i], hnnode)
+			untimeout(h, timeout);
+		spin_unlock(lock);
+	}
+	local_bh_enable();
 }
 
 /* try to delete object, fail if it is still in use. */
@@ -337,8 +355,7 @@ static int ctnl_timeout_try_del(struct net *net, struct ctnl_timeout *timeout)
 static int cttimeout_del_timeout(struct net *net, struct sock *ctnl,
 				 struct sk_buff *skb,
 				 const struct nlmsghdr *nlh,
-				 const struct nlattr * const cda[],
-				 struct netlink_ext_ack *extack)
+				 const struct nlattr * const cda[])
 {
 	struct ctnl_timeout *cur, *tmp;
 	int ret = -ENOENT;
@@ -369,13 +386,12 @@ static int cttimeout_del_timeout(struct net *net, struct sock *ctnl,
 static int cttimeout_default_set(struct net *net, struct sock *ctnl,
 				 struct sk_buff *skb,
 				 const struct nlmsghdr *nlh,
-				 const struct nlattr * const cda[],
-				 struct netlink_ext_ack *extack)
+				 const struct nlattr * const cda[])
 {
-	const struct nf_conntrack_l4proto *l4proto;
-	unsigned int *timeouts;
 	__u16 l3num;
 	__u8 l4num;
+	struct nf_conntrack_l4proto *l4proto;
+	unsigned int *timeouts;
 	int ret;
 
 	if (!cda[CTA_TIMEOUT_L3PROTO] ||
@@ -410,7 +426,7 @@ err:
 static int
 cttimeout_default_fill_info(struct net *net, struct sk_buff *skb, u32 portid,
 			    u32 seq, u32 type, int event,
-			    const struct nf_conntrack_l4proto *l4proto)
+			    struct nf_conntrack_l4proto *l4proto)
 {
 	struct nlmsghdr *nlh;
 	struct nfgenmsg *nfmsg;
@@ -459,14 +475,13 @@ nla_put_failure:
 static int cttimeout_default_get(struct net *net, struct sock *ctnl,
 				 struct sk_buff *skb,
 				 const struct nlmsghdr *nlh,
-				 const struct nlattr * const cda[],
-				 struct netlink_ext_ack *extack)
+				 const struct nlattr * const cda[])
 {
-	const struct nf_conntrack_l4proto *l4proto;
-	struct sk_buff *skb2;
-	int ret, err;
 	__u16 l3num;
 	__u8 l4num;
+	struct nf_conntrack_l4proto *l4proto;
+	struct sk_buff *skb2;
+	int ret, err;
 
 	if (!cda[CTA_TIMEOUT_L3PROTO] || !cda[CTA_TIMEOUT_L4PROTO])
 		return -EINVAL;
@@ -514,6 +529,7 @@ ctnl_timeout_find_get(struct net *net, const char *name)
 {
 	struct ctnl_timeout *timeout, *matching = NULL;
 
+	rcu_read_lock();
 	list_for_each_entry_rcu(timeout, &net->nfct_timeout_list, head) {
 		if (strncmp(timeout->name, name, CTNL_TIMEOUT_NAME_MAX) != 0)
 			continue;
@@ -529,6 +545,7 @@ ctnl_timeout_find_get(struct net *net, const char *name)
 		break;
 	}
 err:
+	rcu_read_unlock();
 	return matching;
 }
 
@@ -579,7 +596,6 @@ static void __net_exit cttimeout_net_exit(struct net *net)
 {
 	struct ctnl_timeout *cur, *tmp;
 
-	nf_ct_unconfirmed_destroy(net);
 	ctnl_untimeout(net, NULL);
 
 	list_for_each_entry_safe(cur, tmp, &net->nfct_timeout_list, head) {
@@ -623,6 +639,8 @@ err_out:
 
 static void __exit cttimeout_exit(void)
 {
+	pr_info("cttimeout: unregistering from nfnetlink.\n");
+
 	nfnetlink_subsys_unregister(&cttimeout_subsys);
 
 	unregister_pernet_subsys(&cttimeout_ops);

@@ -139,7 +139,7 @@ static int create_xattr(struct ubifs_info *c, struct inode *host,
 	inode->i_op = &empty_iops;
 	inode->i_fop = &empty_fops;
 
-	inode->i_flags |= S_SYNC | S_NOATIME | S_NOCMTIME;
+	inode->i_flags |= S_SYNC | S_NOATIME | S_NOCMTIME | S_NOQUOTA;
 	ui = ubifs_inode(inode);
 	ui->xattr = 1;
 	ui->flags |= UBIFS_XATTR_FL;
@@ -170,7 +170,6 @@ static int create_xattr(struct ubifs_info *c, struct inode *host,
 	err = ubifs_jnl_update(c, host, nm, inode, 0, 1);
 	if (err)
 		goto out_cancel;
-	ubifs_set_inode_flags(host);
 	mutex_unlock(&host_ui->ui_mutex);
 
 	ubifs_release_budget(c, &req);
@@ -281,7 +280,7 @@ static struct inode *iget_xattr(struct ubifs_info *c, ino_t inum)
 }
 
 int ubifs_xattr_set(struct inode *host, const char *name, const void *value,
-		    size_t size, int flags, bool check_lock)
+		    size_t size, int flags)
 {
 	struct inode *inode;
 	struct ubifs_info *c = host->i_sb->s_fs_info;
@@ -290,7 +289,12 @@ int ubifs_xattr_set(struct inode *host, const char *name, const void *value,
 	union ubifs_key key;
 	int err;
 
-	if (check_lock)
+	/*
+	 * Creating an encryption context is done unlocked since we
+	 * operate on a new inode which is not visible to other users
+	 * at this point.
+	 */
+	if (strcmp(name, UBIFS_XATTR_NAME_ENCRYPTION_CONTEXT) != 0)
 		ubifs_assert(inode_is_locked(host));
 
 	if (size > UBIFS_MAX_INO_DATA)
@@ -381,6 +385,8 @@ ssize_t ubifs_xattr_get(struct inode *host, const char *name, void *buf,
 	if (buf) {
 		/* If @buf is %NULL we are supposed to return the length */
 		if (ui->data_len > size) {
+			ubifs_err(c, "buffer size %zd, xattr len %d",
+				  size, ui->data_len);
 			err = -ERANGE;
 			goto out_iput;
 		}
@@ -592,12 +598,8 @@ static int init_xattrs(struct inode *inode, const struct xattr *xattr_array,
 		}
 		strcpy(name, XATTR_SECURITY_PREFIX);
 		strcpy(name + XATTR_SECURITY_PREFIX_LEN, xattr->name);
-		/*
-		 * creating a new inode without holding the inode rwsem,
-		 * no need to check whether inode is locked.
-		 */
 		err = ubifs_xattr_set(inode, name, xattr->value,
-				      xattr->value_len, 0, false);
+				      xattr->value_len, 0);
 		kfree(name);
 		if (err < 0)
 			break;
@@ -644,7 +646,7 @@ static int xattr_set(const struct xattr_handler *handler,
 	name = xattr_full_name(handler, name);
 
 	if (value)
-		return ubifs_xattr_set(inode, name, value, size, flags, true);
+		return ubifs_xattr_set(inode, name, value, size, flags);
 	else
 		return ubifs_xattr_remove(inode, name);
 }

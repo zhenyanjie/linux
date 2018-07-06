@@ -19,7 +19,6 @@
 #include <linux/preempt.h>
 #include <linux/msi.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
 #include <linux/rcupdate.h>
 #include <linux/ratelimit.h>
 #include <linux/err.h>
@@ -127,13 +126,6 @@ static inline bool is_error_page(struct page *page)
 #define KVM_REQ_MMU_RELOAD        (1 | KVM_REQUEST_WAIT | KVM_REQUEST_NO_WAKEUP)
 #define KVM_REQ_PENDING_TIMER     2
 #define KVM_REQ_UNHALT            3
-#define KVM_REQUEST_ARCH_BASE     8
-
-#define KVM_ARCH_REQ_FLAGS(nr, flags) ({ \
-	BUILD_BUG_ON((unsigned)(nr) >= 32 - KVM_REQUEST_ARCH_BASE); \
-	(unsigned)(((nr) + KVM_REQUEST_ARCH_BASE) | (flags)); \
-})
-#define KVM_ARCH_REQ(nr)           KVM_ARCH_REQ_FLAGS(nr, 0)
 
 #define KVM_USERSPACE_IRQ_SOURCE_ID		0
 #define KVM_IRQFD_RESAMPLE_IRQ_SOURCE_ID	1
@@ -233,9 +225,9 @@ struct kvm_vcpu {
 	struct mutex mutex;
 	struct kvm_run *run;
 
-	int guest_xcr0_loaded;
+	int guest_fpu_loaded, guest_xcr0_loaded;
 	struct swait_queue_head wq;
-	struct pid __rcu *pid;
+	struct pid *pid;
 	int sigset_active;
 	sigset_t sigset;
 	struct kvm_vcpu_stat stat;
@@ -391,7 +383,7 @@ struct kvm {
 	spinlock_t mmu_lock;
 	struct mutex slots_lock;
 	struct mm_struct *mm; /* userspace tied to this vm */
-	struct kvm_memslots __rcu *memslots[KVM_ADDRESS_SPACE_NUM];
+	struct kvm_memslots *memslots[KVM_ADDRESS_SPACE_NUM];
 	struct kvm_vcpu *vcpus[KVM_MAX_VCPUS];
 
 	/*
@@ -405,7 +397,7 @@ struct kvm {
 	int last_boosted_vcpu;
 	struct list_head vm_list;
 	struct mutex lock;
-	struct kvm_io_bus __rcu *buses[KVM_NR_BUSES];
+	struct kvm_io_bus *buses[KVM_NR_BUSES];
 #ifdef CONFIG_HAVE_KVM_EVENTFD
 	struct {
 		spinlock_t        lock;
@@ -446,7 +438,6 @@ struct kvm {
 	struct kvm_stat_data **debugfs_stat_data;
 	struct srcu_struct srcu;
 	struct srcu_struct irq_srcu;
-	pid_t userspace_pid;
 };
 
 #define kvm_err(fmt, ...) \
@@ -474,13 +465,6 @@ struct kvm {
 			      ## __VA_ARGS__)
 #define vcpu_err(vcpu, fmt, ...)					\
 	kvm_err("vcpu%i " fmt, (vcpu)->vcpu_id, ## __VA_ARGS__)
-
-static inline struct kvm_io_bus *kvm_get_bus(struct kvm *kvm, enum kvm_bus idx)
-{
-	return srcu_dereference_check(kvm->buses[idx], &kvm->srcu,
-				      lockdep_is_held(&kvm->slots_lock) ||
-				      !refcount_read(&kvm->users_count));
-}
 
 static inline struct kvm_vcpu *kvm_get_vcpu(struct kvm *kvm, int i)
 {
@@ -534,7 +518,7 @@ static inline int kvm_vcpu_get_idx(struct kvm_vcpu *vcpu)
 int kvm_vcpu_init(struct kvm_vcpu *vcpu, struct kvm *kvm, unsigned id);
 void kvm_vcpu_uninit(struct kvm_vcpu *vcpu);
 
-void vcpu_load(struct kvm_vcpu *vcpu);
+int __must_check vcpu_load(struct kvm_vcpu *vcpu);
 void vcpu_put(struct kvm_vcpu *vcpu);
 
 #ifdef __KVM_HAVE_IOAPIC
@@ -571,9 +555,9 @@ void kvm_put_kvm(struct kvm *kvm);
 
 static inline struct kvm_memslots *__kvm_memslots(struct kvm *kvm, int as_id)
 {
-	return srcu_dereference_check(kvm->memslots[as_id], &kvm->srcu,
-			lockdep_is_held(&kvm->slots_lock) ||
-			!refcount_read(&kvm->users_count));
+	return rcu_dereference_check(kvm->memslots[as_id],
+			srcu_read_lock_held(&kvm->srcu)
+			|| lockdep_is_held(&kvm->slots_lock));
 }
 
 static inline struct kvm_memslots *kvm_memslots(struct kvm *kvm)
@@ -668,7 +652,6 @@ kvm_pfn_t __gfn_to_pfn_memslot(struct kvm_memory_slot *slot, gfn_t gfn,
 			       bool *writable);
 
 void kvm_release_pfn_clean(kvm_pfn_t pfn);
-void kvm_release_pfn_dirty(kvm_pfn_t pfn);
 void kvm_set_pfn_dirty(kvm_pfn_t pfn);
 void kvm_set_pfn_accessed(kvm_pfn_t pfn);
 void kvm_get_pfn(kvm_pfn_t pfn);
@@ -716,31 +699,25 @@ int kvm_vcpu_write_guest(struct kvm_vcpu *vcpu, gpa_t gpa, const void *data,
 			 unsigned long len);
 void kvm_vcpu_mark_page_dirty(struct kvm_vcpu *vcpu, gfn_t gfn);
 
-void kvm_sigset_activate(struct kvm_vcpu *vcpu);
-void kvm_sigset_deactivate(struct kvm_vcpu *vcpu);
-
 void kvm_vcpu_block(struct kvm_vcpu *vcpu);
 void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu);
 void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu);
 bool kvm_vcpu_wake_up(struct kvm_vcpu *vcpu);
 void kvm_vcpu_kick(struct kvm_vcpu *vcpu);
 int kvm_vcpu_yield_to(struct kvm_vcpu *target);
-void kvm_vcpu_on_spin(struct kvm_vcpu *vcpu, bool usermode_vcpu_not_eligible);
+void kvm_vcpu_on_spin(struct kvm_vcpu *vcpu);
 void kvm_load_guest_fpu(struct kvm_vcpu *vcpu);
 void kvm_put_guest_fpu(struct kvm_vcpu *vcpu);
 
 void kvm_flush_remote_tlbs(struct kvm *kvm);
 void kvm_reload_remote_mmus(struct kvm *kvm);
-
-bool kvm_make_vcpus_request_mask(struct kvm *kvm, unsigned int req,
-				 unsigned long *vcpu_bitmap, cpumask_var_t tmp);
 bool kvm_make_all_cpus_request(struct kvm *kvm, unsigned int req);
 
 long kvm_arch_dev_ioctl(struct file *filp,
 			unsigned int ioctl, unsigned long arg);
 long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg);
-vm_fault_t kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf);
+int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf);
 
 int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext);
 
@@ -808,14 +785,9 @@ int kvm_arch_hardware_setup(void);
 void kvm_arch_hardware_unsetup(void);
 void kvm_arch_check_processor_compat(void *rtn);
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu);
-bool kvm_arch_vcpu_in_kernel(struct kvm_vcpu *vcpu);
 int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu);
 
 #ifndef __KVM_HAVE_ARCH_VM_ALLOC
-/*
- * All architectures that want to use vzalloc currently also
- * need their own kvm_arch_alloc_vm implementation.
- */
 static inline struct kvm *kvm_arch_alloc_vm(void)
 {
 	return kzalloc(sizeof(struct kvm), GFP_KERNEL);
@@ -998,12 +970,6 @@ static inline hpa_t pfn_to_hpa(kvm_pfn_t pfn)
 	return (hpa_t)pfn << PAGE_SHIFT;
 }
 
-static inline struct page *kvm_vcpu_gpa_to_page(struct kvm_vcpu *vcpu,
-						gpa_t gpa)
-{
-	return kvm_vcpu_gfn_to_page(vcpu, gpa_to_gfn(gpa));
-}
-
 static inline bool kvm_is_error_gpa(struct kvm *kvm, gpa_t gpa)
 {
 	unsigned long hva = gfn_to_hva(kvm, gpa_to_gfn(gpa));
@@ -1053,7 +1019,13 @@ static inline int mmu_notifier_retry(struct kvm *kvm, unsigned long mmu_seq)
 
 #ifdef CONFIG_HAVE_KVM_IRQ_ROUTING
 
-#define KVM_MAX_IRQ_ROUTES 4096 /* might need extension/rework in the future */
+#ifdef CONFIG_S390
+#define KVM_MAX_IRQ_ROUTES 4096 //FIXME: we can have more than that...
+#elif defined(CONFIG_ARM64)
+#define KVM_MAX_IRQ_ROUTES 4096
+#else
+#define KVM_MAX_IRQ_ROUTES 1024
+#endif
 
 bool kvm_arch_can_set_irq_routing(struct kvm *kvm);
 int kvm_set_irq_routing(struct kvm *kvm,
@@ -1107,6 +1079,7 @@ static inline void kvm_irq_routing_update(struct kvm *kvm)
 {
 }
 #endif
+void kvm_arch_irq_routing_update(struct kvm *kvm);
 
 static inline int kvm_ioeventfd(struct kvm *kvm, struct kvm_ioeventfd *args)
 {
@@ -1114,8 +1087,6 @@ static inline int kvm_ioeventfd(struct kvm *kvm, struct kvm_ioeventfd *args)
 }
 
 #endif /* CONFIG_HAVE_KVM_EVENTFD */
-
-void kvm_arch_irq_routing_update(struct kvm *kvm);
 
 static inline void kvm_make_request(int req, struct kvm_vcpu *vcpu)
 {
@@ -1125,11 +1096,6 @@ static inline void kvm_make_request(int req, struct kvm_vcpu *vcpu)
 	 */
 	smp_wmb();
 	set_bit(req & KVM_REQUEST_MASK, &vcpu->requests);
-}
-
-static inline bool kvm_request_pending(struct kvm_vcpu *vcpu)
-{
-	return READ_ONCE(vcpu->requests);
 }
 
 static inline bool kvm_test_request(int req, struct kvm_vcpu *vcpu)
@@ -1262,29 +1228,5 @@ static inline bool vcpu_valid_wakeup(struct kvm_vcpu *vcpu)
 	return true;
 }
 #endif /* CONFIG_HAVE_KVM_INVALID_WAKEUPS */
-
-#ifdef CONFIG_HAVE_KVM_VCPU_ASYNC_IOCTL
-long kvm_arch_vcpu_async_ioctl(struct file *filp,
-			       unsigned int ioctl, unsigned long arg);
-#else
-static inline long kvm_arch_vcpu_async_ioctl(struct file *filp,
-					     unsigned int ioctl,
-					     unsigned long arg)
-{
-	return -ENOIOCTLCMD;
-}
-#endif /* CONFIG_HAVE_KVM_VCPU_ASYNC_IOCTL */
-
-void kvm_arch_mmu_notifier_invalidate_range(struct kvm *kvm,
-		unsigned long start, unsigned long end);
-
-#ifdef CONFIG_HAVE_KVM_VCPU_RUN_PID_CHANGE
-int kvm_arch_vcpu_run_pid_change(struct kvm_vcpu *vcpu);
-#else
-static inline int kvm_arch_vcpu_run_pid_change(struct kvm_vcpu *vcpu)
-{
-	return 0;
-}
-#endif /* CONFIG_HAVE_KVM_VCPU_RUN_PID_CHANGE */
 
 #endif

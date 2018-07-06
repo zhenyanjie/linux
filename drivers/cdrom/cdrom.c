@@ -1152,6 +1152,9 @@ int cdrom_open(struct cdrom_device_info *cdi, struct block_device *bdev,
 
 	cd_dbg(CD_OPEN, "entering cdrom_open\n");
 
+	/* open is event synchronization point, check events first */
+	check_disk_change(bdev);
+
 	/* if this was a O_NONBLOCK open and we should honor the flags,
 	 * do a quick open without drive/disc integrity checks. */
 	cdi->use_count++;
@@ -2132,7 +2135,7 @@ static int cdrom_read_cdda_old(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 	 */
 	nr = nframes;
 	do {
-		cgc.buffer = kmalloc_array(nr, CD_FRAMESIZE_RAW, GFP_KERNEL);
+		cgc.buffer = kmalloc(CD_FRAMESIZE_RAW * nr, GFP_KERNEL);
 		if (cgc.buffer)
 			break;
 
@@ -2175,12 +2178,6 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 	if (!q)
 		return -ENXIO;
 
-	if (!blk_queue_scsi_passthrough(q)) {
-		WARN_ONCE(true,
-			  "Attempt read CDDA info through a non-SCSI queue\n");
-		return -EINVAL;
-	}
-
 	cdi->last_sense = 0;
 
 	while (nframes) {
@@ -2192,12 +2189,13 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 
 		len = nr * CD_FRAMESIZE_RAW;
 
-		rq = blk_get_request(q, REQ_OP_SCSI_IN, 0);
+		rq = blk_get_request(q, REQ_OP_SCSI_IN, GFP_KERNEL);
 		if (IS_ERR(rq)) {
 			ret = PTR_ERR(rq);
 			break;
 		}
 		req = scsi_req(rq);
+		scsi_req_init(rq);
 
 		ret = blk_rq_map_user(q, rq, NULL, ubuf, len, GFP_KERNEL);
 		if (ret) {
@@ -2371,7 +2369,7 @@ static int cdrom_ioctl_media_changed(struct cdrom_device_info *cdi,
 	if (!CDROM_CAN(CDC_SELECT_DISC) || arg == CDSL_CURRENT)
 		return media_changed(cdi, 1);
 
-	if (arg >= cdi->capacity)
+	if ((unsigned int)arg >= cdi->capacity)
 		return -EINVAL;
 
 	info = kmalloc(sizeof(*info), GFP_KERNEL);

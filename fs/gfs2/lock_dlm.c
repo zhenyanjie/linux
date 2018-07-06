@@ -23,6 +23,8 @@
 #include "sys.h"
 #include "trace_gfs2.h"
 
+extern struct workqueue_struct *gfs2_control_wq;
+
 /**
  * gfs2_update_stats - Update time based stats
  * @mv: Pointer to mean/variance structure to update
@@ -1057,7 +1059,6 @@ static void free_recover_size(struct lm_lockstruct *ls)
 	ls->ls_recover_submit = NULL;
 	ls->ls_recover_result = NULL;
 	ls->ls_recover_size = 0;
-	ls->ls_lvb_bits = NULL;
 }
 
 /* dlm calls before it does lock recovery */
@@ -1091,7 +1092,7 @@ static void gdlm_recover_slot(void *arg, struct dlm_slot *slot)
 
 	spin_lock(&ls->ls_recover_spin);
 	if (ls->ls_recover_size < jid + 1) {
-		fs_err(sdp, "recover_slot jid %d gen %u short size %d\n",
+		fs_err(sdp, "recover_slot jid %d gen %u short size %d",
 		       jid, ls->ls_recover_block, ls->ls_recover_size);
 		spin_unlock(&ls->ls_recover_spin);
 		return;
@@ -1153,7 +1154,7 @@ static void gdlm_recovery_result(struct gfs2_sbd *sdp, unsigned int jid,
 		return;
 	}
 	if (ls->ls_recover_size < jid + 1) {
-		fs_err(sdp, "recovery_result jid %d short size %d\n",
+		fs_err(sdp, "recovery_result jid %d short size %d",
 		       jid, ls->ls_recover_size);
 		spin_unlock(&ls->ls_recover_spin);
 		return;
@@ -1174,7 +1175,7 @@ static void gdlm_recovery_result(struct gfs2_sbd *sdp, unsigned int jid,
 	spin_unlock(&ls->ls_recover_spin);
 }
 
-static const struct dlm_lockspace_ops gdlm_lockspace_ops = {
+const struct dlm_lockspace_ops gdlm_lockspace_ops = {
 	.recover_prep = gdlm_recover_prep,
 	.recover_slot = gdlm_recover_slot,
 	.recover_done = gdlm_recover_done,

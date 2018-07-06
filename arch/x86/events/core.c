@@ -27,7 +27,6 @@
 #include <linux/cpu.h>
 #include <linux/bitops.h>
 #include <linux/device.h>
-#include <linux/nospec.h>
 
 #include <asm/apic.h>
 #include <asm/stacktrace.h>
@@ -49,7 +48,7 @@ DEFINE_PER_CPU(struct cpu_hw_events, cpu_hw_events) = {
 	.enabled = 1,
 };
 
-DEFINE_STATIC_KEY_FALSE(rdpmc_always_available_key);
+struct static_key rdpmc_always_available = STATIC_KEY_INIT_FALSE;
 
 u64 __read_mostly hw_cache_event_ids
 				[PERF_COUNT_HW_CACHE_MAX]
@@ -192,8 +191,8 @@ static void release_pmc_hardware(void) {}
 
 static bool check_hw_exists(void)
 {
-	u64 val, val_fail = -1, val_new= ~0;
-	int i, reg, reg_fail = -1, ret = 0;
+	u64 val, val_fail, val_new= ~0;
+	int i, reg, reg_fail, ret = 0;
 	int bios_fail = 0;
 	int reg_safe = -1;
 
@@ -305,20 +304,17 @@ set_ext_hw_attr(struct hw_perf_event *hwc, struct perf_event *event)
 
 	config = attr->config;
 
-	cache_type = (config >> 0) & 0xff;
+	cache_type = (config >>  0) & 0xff;
 	if (cache_type >= PERF_COUNT_HW_CACHE_MAX)
 		return -EINVAL;
-	cache_type = array_index_nospec(cache_type, PERF_COUNT_HW_CACHE_MAX);
 
 	cache_op = (config >>  8) & 0xff;
 	if (cache_op >= PERF_COUNT_HW_CACHE_OP_MAX)
 		return -EINVAL;
-	cache_op = array_index_nospec(cache_op, PERF_COUNT_HW_CACHE_OP_MAX);
 
 	cache_result = (config >> 16) & 0xff;
 	if (cache_result >= PERF_COUNT_HW_CACHE_RESULT_MAX)
 		return -EINVAL;
-	cache_result = array_index_nospec(cache_result, PERF_COUNT_HW_CACHE_RESULT_MAX);
 
 	val = hw_cache_event_ids[cache_type][cache_op][cache_result];
 
@@ -425,8 +421,6 @@ int x86_setup_perfctr(struct perf_event *event)
 	if (attr->config >= x86_pmu.max_events)
 		return -EINVAL;
 
-	attr->config = array_index_nospec((unsigned long)attr->config, x86_pmu.max_events);
-
 	/*
 	 * The generic map:
 	 */
@@ -493,28 +487,22 @@ static inline int precise_br_compat(struct perf_event *event)
 	return m == b;
 }
 
-int x86_pmu_max_precise(void)
-{
-	int precise = 0;
-
-	/* Support for constant skid */
-	if (x86_pmu.pebs_active && !x86_pmu.pebs_broken) {
-		precise++;
-
-		/* Support for IP fixup */
-		if (x86_pmu.lbr_nr || x86_pmu.intel_cap.pebs_format >= 2)
-			precise++;
-
-		if (x86_pmu.pebs_prec_dist)
-			precise++;
-	}
-	return precise;
-}
-
 int x86_pmu_hw_config(struct perf_event *event)
 {
 	if (event->attr.precise_ip) {
-		int precise = x86_pmu_max_precise();
+		int precise = 0;
+
+		/* Support for constant skid */
+		if (x86_pmu.pebs_active && !x86_pmu.pebs_broken) {
+			precise++;
+
+			/* Support for IP fixup */
+			if (x86_pmu.lbr_nr || x86_pmu.intel_cap.pebs_format >= 2)
+				precise++;
+
+			if (x86_pmu.pebs_prec_dist)
+				precise++;
+		}
 
 		if (event->attr.precise_ip > precise)
 			return -EOPNOTSUPP;
@@ -996,7 +984,7 @@ static int collect_events(struct cpu_hw_events *cpuc, struct perf_event *leader,
 	if (!dogrp)
 		return n;
 
-	for_each_sibling_event(event, leader) {
+	list_for_each_entry(event, &leader->sibling_list, group_entry) {
 		if (!is_x86_event(event) ||
 		    event->state <= PERF_EVENT_STATE_OFF)
 			continue;
@@ -1162,13 +1150,16 @@ int x86_perf_event_set_period(struct perf_event *event)
 
 	per_cpu(pmc_prev_left[idx], smp_processor_id()) = left;
 
-	/*
-	 * The hw event starts counting from this event offset,
-	 * mark it to be able to extra future deltas:
-	 */
-	local64_set(&hwc->prev_count, (u64)-left);
+	if (!(hwc->flags & PERF_X86_EVENT_AUTO_RELOAD) ||
+	    local64_read(&hwc->prev_count) != (u64)-left) {
+		/*
+		 * The hw event starts counting from this event offset,
+		 * mark it to be able to extra future deltas:
+		 */
+		local64_set(&hwc->prev_count, (u64)-left);
 
-	wrmsrl(hwc->event_base, (u64)(-left) & x86_pmu.cntval_mask);
+		wrmsrl(hwc->event_base, (u64)(-left) & x86_pmu.cntval_mask);
+	}
 
 	/*
 	 * Due to erratum on certan cpu we need
@@ -1637,7 +1628,7 @@ __init struct attribute **merge_attr(struct attribute **a, struct attribute **b)
 		j++;
 	j++;
 
-	new = kmalloc_array(j, sizeof(struct attribute *), GFP_KERNEL);
+	new = kmalloc(sizeof(struct attribute *) * j, GFP_KERNEL);
 	if (!new)
 		return NULL;
 
@@ -1759,9 +1750,6 @@ ssize_t x86_event_sysfs_show(char *page, u64 config, u64 event)
 	return ret;
 }
 
-static struct attribute_group x86_pmu_attr_group;
-static struct attribute_group x86_pmu_caps_group;
-
 static int __init init_hw_perf_events(void)
 {
 	struct x86_pmu_quirk *quirk;
@@ -1809,14 +1797,6 @@ static int __init init_hw_perf_events(void)
 
 	x86_pmu_format_group.attrs = x86_pmu.format_attrs;
 
-	if (x86_pmu.caps_attrs) {
-		struct attribute **tmp;
-
-		tmp = merge_attr(x86_pmu_caps_group.attrs, x86_pmu.caps_attrs);
-		if (!WARN_ON(!tmp))
-			x86_pmu_caps_group.attrs = tmp;
-	}
-
 	if (x86_pmu.event_attrs)
 		x86_pmu_events_group.attrs = x86_pmu.event_attrs;
 
@@ -1831,14 +1811,6 @@ static int __init init_hw_perf_events(void)
 		tmp = merge_attr(x86_pmu_events_group.attrs, x86_pmu.cpu_events);
 		if (!WARN_ON(!tmp))
 			x86_pmu_events_group.attrs = tmp;
-	}
-
-	if (x86_pmu.attrs) {
-		struct attribute **tmp;
-
-		tmp = merge_attr(x86_pmu_attr_group.attrs, x86_pmu.attrs);
-		if (!WARN_ON(!tmp))
-			x86_pmu_attr_group.attrs = tmp;
 	}
 
 	pr_info("... version:                %d\n",     x86_pmu.version);
@@ -1887,8 +1859,6 @@ early_initcall(init_hw_perf_events);
 
 static inline void x86_pmu_read(struct perf_event *event)
 {
-	if (x86_pmu.read)
-		return x86_pmu.read(event);
 	x86_perf_event_update(event);
 }
 
@@ -2123,8 +2093,7 @@ static int x86_pmu_event_init(struct perf_event *event)
 			event->destroy(event);
 	}
 
-	if (READ_ONCE(x86_pmu.attr_rdpmc) &&
-	    !(event->hw.flags & PERF_X86_EVENT_LARGE_PEBS))
+	if (ACCESS_ONCE(x86_pmu.attr_rdpmc))
 		event->hw.flags |= PERF_X86_EVENT_RDPMC_ALLOWED;
 
 	return err;
@@ -2132,7 +2101,8 @@ static int x86_pmu_event_init(struct perf_event *event)
 
 static void refresh_pce(void *ignored)
 {
-	load_mm_cr4(this_cpu_read(cpu_tlbstate.loaded_mm));
+	if (current->active_mm)
+		load_mm_cr4(current->active_mm);
 }
 
 static void x86_pmu_event_mapped(struct perf_event *event, struct mm_struct *mm)
@@ -2212,9 +2182,9 @@ static ssize_t set_attr_rdpmc(struct device *cdev,
 		 * but only root can trigger it, so it's okay.
 		 */
 		if (val == 2)
-			static_branch_inc(&rdpmc_always_available_key);
+			static_key_slow_inc(&rdpmc_always_available);
 		else
-			static_branch_dec(&rdpmc_always_available_key);
+			static_key_slow_dec(&rdpmc_always_available);
 		on_each_cpu(refresh_pce, NULL, 1);
 	}
 
@@ -2234,30 +2204,10 @@ static struct attribute_group x86_pmu_attr_group = {
 	.attrs = x86_pmu_attrs,
 };
 
-static ssize_t max_precise_show(struct device *cdev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%d\n", x86_pmu_max_precise());
-}
-
-static DEVICE_ATTR_RO(max_precise);
-
-static struct attribute *x86_pmu_caps_attrs[] = {
-	&dev_attr_max_precise.attr,
-	NULL
-};
-
-static struct attribute_group x86_pmu_caps_group = {
-	.name = "caps",
-	.attrs = x86_pmu_caps_attrs,
-};
-
 static const struct attribute_group *x86_pmu_attr_groups[] = {
 	&x86_pmu_attr_group,
 	&x86_pmu_format_group,
 	&x86_pmu_events_group,
-	&x86_pmu_caps_group,
 	NULL,
 };
 
@@ -2272,6 +2222,7 @@ void perf_check_microcode(void)
 	if (x86_pmu.check_microcode)
 		x86_pmu.check_microcode();
 }
+EXPORT_SYMBOL_GPL(perf_check_microcode);
 
 static struct pmu pmu = {
 	.pmu_enable		= x86_pmu_enable,
@@ -2302,7 +2253,7 @@ static struct pmu pmu = {
 void arch_perf_update_userpage(struct perf_event *event,
 			       struct perf_event_mmap_page *userpg, u64 now)
 {
-	struct cyc2ns_data data;
+	struct cyc2ns_data *data;
 	u64 offset;
 
 	userpg->cap_user_time = 0;
@@ -2314,17 +2265,17 @@ void arch_perf_update_userpage(struct perf_event *event,
 	if (!using_native_sched_clock() || !sched_clock_stable())
 		return;
 
-	cyc2ns_read_begin(&data);
+	data = cyc2ns_read_begin();
 
-	offset = data.cyc2ns_offset + __sched_clock_offset;
+	offset = data->cyc2ns_offset + __sched_clock_offset;
 
 	/*
 	 * Internal timekeeping for enabled/running/stopped times
 	 * is always in the local_clock domain.
 	 */
 	userpg->cap_user_time = 1;
-	userpg->time_mult = data.cyc2ns_mul;
-	userpg->time_shift = data.cyc2ns_shift;
+	userpg->time_mult = data->cyc2ns_mul;
+	userpg->time_shift = data->cyc2ns_shift;
 	userpg->time_offset = offset - now;
 
 	/*
@@ -2336,7 +2287,7 @@ void arch_perf_update_userpage(struct perf_event *event,
 		userpg->time_zero = offset;
 	}
 
-	cyc2ns_read_end();
+	cyc2ns_read_end(data);
 }
 
 void
@@ -2376,9 +2327,12 @@ static unsigned long get_segment_base(unsigned int segment)
 #ifdef CONFIG_MODIFY_LDT_SYSCALL
 		struct ldt_struct *ldt;
 
+		if (idx > LDT_ENTRIES)
+			return 0;
+
 		/* IRQs are off, so this synchronizes with smp_store_release */
-		ldt = READ_ONCE(current->active_mm->context.ldt);
-		if (!ldt || idx >= ldt->nr_entries)
+		ldt = lockless_dereference(current->active_mm->context.ldt);
+		if (!ldt || idx > ldt->size)
 			return 0;
 
 		desc = &ldt->entries[idx];
@@ -2386,7 +2340,7 @@ static unsigned long get_segment_base(unsigned int segment)
 		return 0;
 #endif
 	} else {
-		if (idx >= GDT_ENTRIES)
+		if (idx > GDT_ENTRIES)
 			return 0;
 
 		desc = raw_cpu_ptr(gdt_page.gdt) + idx;
@@ -2397,7 +2351,7 @@ static unsigned long get_segment_base(unsigned int segment)
 
 #ifdef CONFIG_IA32_EMULATION
 
-#include <linux/compat.h>
+#include <asm/compat.h>
 
 static inline int
 perf_callchain_user32(struct pt_regs *regs, struct perf_callchain_entry_ctx *entry)

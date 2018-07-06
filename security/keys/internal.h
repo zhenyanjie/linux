@@ -13,7 +13,6 @@
 #define _INTERNAL_H
 
 #include <linux/sched.h>
-#include <linux/wait_bit.h>
 #include <linux/cred.h>
 #include <linux/key-type.h>
 #include <linux/task_work.h>
@@ -130,7 +129,7 @@ struct keyring_search_context {
 	int			skipped_ret;
 	bool			possessed;
 	key_ref_t		result;
-	time64_t		now;
+	struct timespec		now;
 };
 
 extern bool key_default_cmp(const struct key *key,
@@ -141,7 +140,7 @@ extern key_ref_t keyring_search_aux(key_ref_t keyring_ref,
 extern key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx);
 extern key_ref_t search_process_keyrings(struct keyring_search_context *ctx);
 
-extern struct key *find_keyring_by_name(const char *name, bool uid_keyring);
+extern struct key *find_keyring_by_name(const char *name, bool skip_perm_check);
 
 extern int install_user_keyrings(void);
 extern int install_thread_keyring_to_cred(struct cred *);
@@ -169,10 +168,10 @@ extern void key_change_session_keyring(struct callback_head *twork);
 
 extern struct work_struct key_gc_work;
 extern unsigned key_gc_delay;
-extern void keyring_gc(struct key *keyring, time64_t limit);
+extern void keyring_gc(struct key *keyring, time_t limit);
 extern void keyring_restriction_gc(struct key *keyring,
 				   struct key_type *dead_type);
-extern void key_schedule_gc(time64_t gc_at);
+extern void key_schedule_gc(time_t gc_at);
 extern void key_schedule_gc_links(void);
 extern void key_gc_keytype(struct key_type *ktype);
 
@@ -198,7 +197,7 @@ struct request_key_auth {
 	void			*callout_info;
 	size_t			callout_len;
 	pid_t			pid;
-} __randomize_layout;
+};
 
 extern struct key_type key_type_request_key_auth;
 extern struct key *request_key_auth_new(struct key *target,
@@ -211,7 +210,7 @@ extern struct key *key_get_instantiation_authkey(key_serial_t target_id);
 /*
  * Determine whether a key is dead.
  */
-static inline bool key_is_dead(const struct key *key, time64_t limit)
+static inline bool key_is_dead(const struct key *key, time_t limit)
 {
 	return
 		key->flags & ((1 << KEY_FLAG_DEAD) |

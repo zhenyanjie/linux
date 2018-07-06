@@ -48,11 +48,11 @@
 	compatible = "boundary,imx6sx-nitrogen6sx", "fsl,imx6sx";
 
 	aliases {
-		fb-lcd = &lcdif1;
-		t-lcd = &t_lcd;
+		fb_lcd = &lcdif1;
+		t_lcd = &t_lcd;
 	};
 
-	memory@80000000 {
+	memory {
 		reg = <0x80000000 0x40000000>;
 	};
 
@@ -231,7 +231,7 @@
 	pinctrl-0 = <&pinctrl_i2c1>;
 	status = "okay";
 
-	codec: sgtl5000@a {
+	codec: sgtl5000@0a {
 		compatible = "fsl,sgtl5000";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_sgtl5000>;
@@ -296,7 +296,7 @@
 &pcie {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie>;
-	reset-gpio = <&gpio4 10 GPIO_ACTIVE_LOW>;
+	reset-gpio = <&gpio4 10 GPIO_ACTIVE_HIGH>;
 	status = "okay";
 };
 
@@ -374,7 +374,7 @@
 	cap-sdio-irq;
 	status = "okay";
 
-	brcmf: wifi@1 {
+	brcmf: bcrmf@1 {
 		reg = <1>;
 		compatible = "brcm,bcm4329-fmac";
 		interrupt-parent = <&gpio7>;

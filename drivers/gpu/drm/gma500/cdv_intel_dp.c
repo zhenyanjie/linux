@@ -505,7 +505,7 @@ static void cdv_intel_edp_backlight_off (struct gma_encoder *intel_encoder)
 	msleep(intel_dp->backlight_off_delay);
 }
 
-static enum drm_mode_status
+static int
 cdv_intel_dp_mode_valid(struct drm_connector *connector,
 		    struct drm_display_mode *mode)
 {
@@ -1901,8 +1901,10 @@ cdv_intel_dp_destroy(struct drm_connector *connector)
 
 	if (is_edp(gma_encoder)) {
 	/*	cdv_intel_panel_destroy_backlight(connector->dev); */
-		kfree(intel_dp->panel_fixed_mode);
-		intel_dp->panel_fixed_mode = NULL;
+		if (intel_dp->panel_fixed_mode) {
+			kfree(intel_dp->panel_fixed_mode);
+			intel_dp->panel_fixed_mode = NULL;
+		}
 	}
 	i2c_del_adapter(&intel_dp->adapter);
 	drm_connector_unregister(connector);

@@ -460,7 +460,7 @@ static int load_firmware(struct snd_cs46xx *chip,
 		entry->size = le32_to_cpu(fwdat[fwlen++]);
 		if (fwlen + entry->size > fwsize)
 			goto error_inval;
-		entry->data = kmalloc_array(entry->size, 4, GFP_KERNEL);
+		entry->data = kmalloc(entry->size * 4, GFP_KERNEL);
 		if (!entry->data)
 			goto error;
 		memcpy_le32(entry->data, &fwdat[fwlen], entry->size * 4);
@@ -887,8 +887,8 @@ static int snd_cs46xx_playback_transfer(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_cs46xx_pcm * cpcm = runtime->private_data;
-	return snd_pcm_indirect_playback_transfer(substream, &cpcm->pcm_rec,
-						  snd_cs46xx_pb_trans_copy);
+	snd_pcm_indirect_playback_transfer(substream, &cpcm->pcm_rec, snd_cs46xx_pb_trans_copy);
+	return 0;
 }
 
 static void snd_cs46xx_cp_trans_copy(struct snd_pcm_substream *substream,
@@ -903,8 +903,8 @@ static void snd_cs46xx_cp_trans_copy(struct snd_pcm_substream *substream,
 static int snd_cs46xx_capture_transfer(struct snd_pcm_substream *substream)
 {
 	struct snd_cs46xx *chip = snd_pcm_substream_chip(substream);
-	return snd_pcm_indirect_capture_transfer(substream, &chip->capt.pcm_rec,
-						 snd_cs46xx_cp_trans_copy);
+	snd_pcm_indirect_capture_transfer(substream, &chip->capt.pcm_rec, snd_cs46xx_cp_trans_copy);
+	return 0;
 }
 
 static snd_pcm_uframes_t snd_cs46xx_playback_direct_pointer(struct snd_pcm_substream *substream)
@@ -1438,7 +1438,7 @@ static irqreturn_t snd_cs46xx_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static const struct snd_pcm_hardware snd_cs46xx_playback =
+static struct snd_pcm_hardware snd_cs46xx_playback =
 {
 	.info =			(SNDRV_PCM_INFO_MMAP |
 				 SNDRV_PCM_INFO_INTERLEAVED | 
@@ -1460,7 +1460,7 @@ static const struct snd_pcm_hardware snd_cs46xx_playback =
 	.fifo_size =		0,
 };
 
-static const struct snd_pcm_hardware snd_cs46xx_capture =
+static struct snd_pcm_hardware snd_cs46xx_capture =
 {
 	.info =			(SNDRV_PCM_INFO_MMAP |
 				 SNDRV_PCM_INFO_INTERLEAVED |
@@ -1482,9 +1482,9 @@ static const struct snd_pcm_hardware snd_cs46xx_capture =
 
 #ifdef CONFIG_SND_CS46XX_NEW_DSP
 
-static const unsigned int period_sizes[] = { 32, 64, 128, 256, 512, 1024, 2048 };
+static unsigned int period_sizes[] = { 32, 64, 128, 256, 512, 1024, 2048 };
 
-static const struct snd_pcm_hw_constraint_list hw_constraints_period_sizes = {
+static struct snd_pcm_hw_constraint_list hw_constraints_period_sizes = {
 	.count = ARRAY_SIZE(period_sizes),
 	.list = period_sizes,
 	.mask = 0
@@ -2371,7 +2371,7 @@ static int snd_cs46xx_front_dup_put(struct snd_kcontrol *kcontrol,
 				    ucontrol->value.integer.value[0] ? 0 : 0x200);
 }
 
-static const struct snd_kcontrol_new snd_cs46xx_front_dup_ctl = {
+static struct snd_kcontrol_new snd_cs46xx_front_dup_ctl = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "Duplicate Front",
 	.info = snd_mixer_boolean_info,
@@ -2849,7 +2849,7 @@ static int snd_cs46xx_proc_init(struct snd_card *card, struct snd_cs46xx *chip)
 			entry->private_data = chip;
 			entry->c.ops = &snd_cs46xx_proc_io_ops;
 			entry->size = region->size;
-			entry->mode = S_IFREG | 0400;
+			entry->mode = S_IFREG | S_IRUSR;
 		}
 	}
 #ifdef CONFIG_SND_CS46XX_NEW_DSP
@@ -4036,9 +4036,8 @@ int snd_cs46xx_create(struct snd_card *card,
 	snd_cs46xx_proc_init(card, chip);
 
 #ifdef CONFIG_PM_SLEEP
-	chip->saved_regs = kmalloc_array(ARRAY_SIZE(saved_regs),
-					 sizeof(*chip->saved_regs),
-					 GFP_KERNEL);
+	chip->saved_regs = kmalloc(sizeof(*chip->saved_regs) *
+				   ARRAY_SIZE(saved_regs), GFP_KERNEL);
 	if (!chip->saved_regs) {
 		snd_cs46xx_free(chip);
 		return -ENOMEM;

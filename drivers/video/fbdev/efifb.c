@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Framebuffer driver for EFI/UEFI based system
  *
@@ -16,11 +15,8 @@
 #include <linux/screen_info.h>
 #include <video/vga.h>
 #include <asm/efi.h>
-#include <drm/drm_utils.h> /* For drm_get_panel_orientation_quirk */
-#include <drm/drm_connector.h>  /* For DRM_MODE_PANEL_ORIENTATION_* */
 
 static bool request_mem_succeeded = false;
-static bool nowc = false;
 
 static struct fb_var_screeninfo efifb_defined = {
 	.activate		= FB_ACTIVATE_NOW,
@@ -103,8 +99,6 @@ static int efifb_setup(char *options)
 				screen_info.lfb_height = simple_strtoul(this_opt+7, NULL, 0);
 			else if (!strncmp(this_opt, "width:", 6))
 				screen_info.lfb_width = simple_strtoul(this_opt+6, NULL, 0);
-			else if (!strcmp(this_opt, "nowc"))
-				nowc = true;
 		}
 	}
 
@@ -152,14 +146,10 @@ ATTRIBUTE_GROUPS(efifb);
 
 static bool pci_dev_disabled;	/* FB base matches BAR of a disabled device */
 
-static struct pci_dev *efifb_pci_dev;	/* dev with BAR covering the efifb */
-static struct resource *bar_resource;
-static u64 bar_offset;
-
 static int efifb_probe(struct platform_device *dev)
 {
 	struct fb_info *info;
-	int err, orientation;
+	int err;
 	unsigned int size_vmode;
 	unsigned int size_remap;
 	unsigned int size_total;
@@ -208,13 +198,6 @@ static int efifb_probe(struct platform_device *dev)
 
 		ext_lfb_base = (u64)(unsigned long)screen_info.ext_lfb_base << 32;
 		efifb_fix.smem_start |= ext_lfb_base;
-	}
-
-	if (bar_resource &&
-	    bar_resource->start + bar_offset != efifb_fix.smem_start) {
-		dev_info(&efifb_pci_dev->dev,
-			 "BAR has moved, updating efifb address\n");
-		efifb_fix.smem_start = bar_resource->start + bar_offset;
 	}
 
 	efifb_defined.bits_per_pixel = screen_info.lfb_depth;
@@ -272,10 +255,7 @@ static int efifb_probe(struct platform_device *dev)
 	info->apertures->ranges[0].base = efifb_fix.smem_start;
 	info->apertures->ranges[0].size = size_remap;
 
-	if (nowc)
-		info->screen_base = ioremap(efifb_fix.smem_start, efifb_fix.smem_len);
-	else
-		info->screen_base = ioremap_wc(efifb_fix.smem_start, efifb_fix.smem_len);
+	info->screen_base = ioremap_wc(efifb_fix.smem_start, efifb_fix.smem_len);
 	if (!info->screen_base) {
 		pr_err("efifb: abort, cannot ioremap video memory 0x%x @ 0x%lx\n",
 			efifb_fix.smem_len, efifb_fix.smem_start);
@@ -331,23 +311,6 @@ static int efifb_probe(struct platform_device *dev)
 	info->fix = efifb_fix;
 	info->flags = FBINFO_FLAG_DEFAULT | FBINFO_MISC_FIRMWARE;
 
-	orientation = drm_get_panel_orientation_quirk(efifb_defined.xres,
-						      efifb_defined.yres);
-	switch (orientation) {
-	default:
-		info->fbcon_rotate_hint = FB_ROTATE_UR;
-		break;
-	case DRM_MODE_PANEL_ORIENTATION_BOTTOM_UP:
-		info->fbcon_rotate_hint = FB_ROTATE_UD;
-		break;
-	case DRM_MODE_PANEL_ORIENTATION_LEFT_UP:
-		info->fbcon_rotate_hint = FB_ROTATE_CCW;
-		break;
-	case DRM_MODE_PANEL_ORIENTATION_RIGHT_UP:
-		info->fbcon_rotate_hint = FB_ROTATE_CW;
-		break;
-	}
-
 	err = sysfs_create_groups(&dev->dev.kobj, efifb_groups);
 	if (err) {
 		pr_err("efifb: cannot add sysfs attrs\n");
@@ -401,13 +364,15 @@ static struct platform_driver efifb_driver = {
 
 builtin_platform_driver(efifb_driver);
 
-#if defined(CONFIG_PCI)
+#if defined(CONFIG_PCI) && !defined(CONFIG_X86)
 
-static void record_efifb_bar_resource(struct pci_dev *dev, int idx, u64 offset)
+static bool pci_bar_found;	/* did we find a BAR matching the efifb base? */
+
+static void claim_efifb_bar(struct pci_dev *dev, int idx)
 {
 	u16 word;
 
-	efifb_pci_dev = dev;
+	pci_bar_found = true;
 
 	pci_read_config_word(dev, PCI_COMMAND, &word);
 	if (!(word & PCI_COMMAND_MEMORY)) {
@@ -418,8 +383,12 @@ static void record_efifb_bar_resource(struct pci_dev *dev, int idx, u64 offset)
 		return;
 	}
 
-	bar_resource = &dev->resource[idx];
-	bar_offset = offset;
+	if (pci_claim_resource(dev, idx)) {
+		pci_dev_disabled = true;
+		dev_err(&dev->dev,
+			"BAR %d: failed to claim resource for efifb!\n", idx);
+		return;
+	}
 
 	dev_info(&dev->dev, "BAR %d: assigned to efifb\n", idx);
 }
@@ -430,7 +399,7 @@ static void efifb_fixup_resources(struct pci_dev *dev)
 	u64 size = screen_info.lfb_size;
 	int i;
 
-	if (efifb_pci_dev || screen_info.orig_video_isVGA != VIDEO_TYPE_EFI)
+	if (pci_bar_found || screen_info.orig_video_isVGA != VIDEO_TYPE_EFI)
 		return;
 
 	if (screen_info.capabilities & VIDEO_CAPABILITY_64BIT_BASE)
@@ -439,14 +408,14 @@ static void efifb_fixup_resources(struct pci_dev *dev)
 	if (!base)
 		return;
 
-	for (i = 0; i <= PCI_STD_RESOURCE_END; i++) {
+	for (i = 0; i < PCI_STD_RESOURCE_END; i++) {
 		struct resource *res = &dev->resource[i];
 
 		if (!(res->flags & IORESOURCE_MEM))
 			continue;
 
 		if (res->start <= base && res->end >= base + size - 1) {
-			record_efifb_bar_resource(dev, i, base - res->start);
+			claim_efifb_bar(dev, i);
 			break;
 		}
 	}

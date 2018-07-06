@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Operations on the network namespace
  */
@@ -6,7 +5,6 @@
 #define __NET_NET_NAMESPACE_H
 
 #include <linux/atomic.h>
-#include <linux/refcount.h>
 #include <linux/workqueue.h>
 #include <linux/list.h>
 #include <linux/sysctl.h>
@@ -40,7 +38,7 @@ struct net_device;
 struct sock;
 struct ctl_table_header;
 struct net_generic;
-struct uevent_sock;
+struct sock;
 struct netns_ipvs;
 
 
@@ -48,10 +46,10 @@ struct netns_ipvs;
 #define NETDEV_HASHENTRIES (1 << NETDEV_HASHBITS)
 
 struct net {
-	refcount_t		passive;	/* To decided when the network
+	atomic_t		passive;	/* To decided when the network
 						 * namespace should be freed.
 						 */
-	refcount_t		count;		/* To decided when the network
+	atomic_t		count;		/* To decided when the network
 						 *  namespace should be shut down.
 						 */
 	spinlock_t		rules_mod_lock;
@@ -59,13 +57,8 @@ struct net {
 	atomic64_t		cookie_gen;
 
 	struct list_head	list;		/* list of network namespaces */
-	struct list_head	exit_list;	/* To linked to call pernet exit
-						 * methods on dead net (
-						 * pernet_ops_rwsem read locked),
-						 * or to unregister pernet ops
-						 * (pernet_ops_rwsem write locked).
-						 */
-	struct llist_node	cleanup_list;	/* namespaces on death row */
+	struct list_head	cleanup_list;	/* namespaces on death row */
+	struct list_head	exit_list;	/* Use only net_mutex */
 
 	struct user_namespace   *user_ns;	/* Owning user namespace */
 	struct ucounts		*ucounts;
@@ -84,8 +77,6 @@ struct net {
 	struct sock 		*rtnl;			/* rtnetlink socket */
 	struct sock		*genl_sock;
 
-	struct uevent_sock	*uevent_sock;		/* uevent socket */
-
 	struct list_head 	dev_base_head;
 	struct hlist_head 	*dev_name_head;
 	struct hlist_head	*dev_index_head;
@@ -96,9 +87,7 @@ struct net {
 	/* core fib_rules */
 	struct list_head	rules_ops;
 
-	struct list_head	fib_notifier_ops;  /* Populated by
-						    * register_pernet_subsys()
-						    */
+
 	struct net_device       *loopback_dev;          /* The loopback */
 	struct netns_core	core;
 	struct netns_mib	mib;
@@ -128,7 +117,6 @@ struct net {
 #endif
 #if IS_ENABLED(CONFIG_NF_DEFRAG_IPV6)
 	struct netns_nf_frag	nf_frag;
-	struct ctl_table_header *nf_frag_frags_hdr;
 #endif
 	struct sock		*nfnl;
 	struct sock		*nfnl_stash;
@@ -159,7 +147,7 @@ struct net {
 #endif
 	struct sock		*diag_nlsk;
 	atomic_t		fnhe_genid;
-} __randomize_layout;
+};
 
 #include <linux/seq_file_net.h>
 
@@ -170,7 +158,6 @@ extern struct net init_net;
 struct net *copy_net_ns(unsigned long flags, struct user_namespace *user_ns,
 			struct net *old_net);
 
-void net_ns_barrier(void);
 #else /* CONFIG_NET_NS */
 #include <linux/sched.h>
 #include <linux/nsproxy.h>
@@ -181,8 +168,6 @@ static inline struct net *copy_net_ns(unsigned long flags,
 		return ERR_PTR(-EINVAL);
 	return old_net;
 }
-
-static inline void net_ns_barrier(void) {}
 #endif /* CONFIG_NET_NS */
 
 
@@ -204,7 +189,7 @@ void __put_net(struct net *net);
 
 static inline struct net *get_net(struct net *net)
 {
-	refcount_inc(&net->count);
+	atomic_inc(&net->count);
 	return net;
 }
 
@@ -215,14 +200,14 @@ static inline struct net *maybe_get_net(struct net *net)
 	 * exists.  If the reference count is zero this
 	 * function fails and returns NULL.
 	 */
-	if (!refcount_inc_not_zero(&net->count))
+	if (!atomic_inc_not_zero(&net->count))
 		net = NULL;
 	return net;
 }
 
 static inline void put_net(struct net *net)
 {
-	if (refcount_dec_and_test(&net->count))
+	if (atomic_dec_and_test(&net->count))
 		__put_net(net);
 }
 
@@ -230,11 +215,6 @@ static inline
 int net_eq(const struct net *net1, const struct net *net2)
 {
 	return net1 == net2;
-}
-
-static inline int check_net(const struct net *net)
-{
-	return refcount_read(&net->count) != 0;
 }
 
 void net_drop_ns(void *);
@@ -257,11 +237,6 @@ static inline struct net *maybe_get_net(struct net *net)
 
 static inline
 int net_eq(const struct net *net1, const struct net *net2)
-{
-	return 1;
-}
-
-static inline int check_net(const struct net *net)
 {
 	return 1;
 }
@@ -292,7 +267,6 @@ static inline struct net *read_pnet(const possible_net_t *pnet)
 #endif
 }
 
-/* Protected by net_rwsem */
 #define for_each_net(VAR)				\
 	list_for_each_entry(VAR, &net_namespace_list, list)
 
@@ -318,24 +292,6 @@ struct net *get_net_ns_by_id(struct net *net, int id);
 
 struct pernet_operations {
 	struct list_head list;
-	/*
-	 * Below methods are called without any exclusive locks.
-	 * More than one net may be constructed and destructed
-	 * in parallel on several cpus. Every pernet_operations
-	 * have to keep in mind all other pernet_operations and
-	 * to introduce a locking, if they share common resources.
-	 *
-	 * The only time they are called with exclusive lock is
-	 * from register_pernet_subsys(), unregister_pernet_subsys()
-	 * register_pernet_device() and unregister_pernet_device().
-	 *
-	 * Exit methods using blocking RCU primitives, such as
-	 * synchronize_rcu(), should be implemented via exit_batch.
-	 * Then, destruction of a group of net requires single
-	 * synchronize_rcu() related to these pernet_operations,
-	 * instead of separate synchronize_rcu() for every net.
-	 * Please, avoid synchronize_rcu() at all, where it's possible.
-	 */
 	int (*init)(struct net *net);
 	void (*exit)(struct net *net);
 	void (*exit_batch)(struct list_head *net_exit_list);

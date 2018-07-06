@@ -211,7 +211,6 @@ static int vgic_debug_show(struct seq_file *s, void *v)
 	struct vgic_state_iter *iter = (struct vgic_state_iter *)v;
 	struct vgic_irq *irq;
 	struct kvm_vcpu *vcpu = NULL;
-	unsigned long flags;
 
 	if (iter->dist_id == 0) {
 		print_dist_state(s, &kvm->arch.vgic);
@@ -228,14 +227,14 @@ static int vgic_debug_show(struct seq_file *s, void *v)
 		irq = &kvm->arch.vgic.spis[iter->intid - VGIC_NR_PRIVATE_IRQS];
 	}
 
-	spin_lock_irqsave(&irq->irq_lock, flags);
+	spin_lock(&irq->irq_lock);
 	print_irq_state(s, irq, vcpu);
-	spin_unlock_irqrestore(&irq->irq_lock, flags);
+	spin_unlock(&irq->irq_lock);
 
 	return 0;
 }
 
-static const struct seq_operations vgic_debug_seq_ops = {
+static struct seq_operations vgic_debug_seq_ops = {
 	.start = vgic_debug_start,
 	.next  = vgic_debug_next,
 	.stop  = vgic_debug_stop,
@@ -256,7 +255,7 @@ static int debug_open(struct inode *inode, struct file *file)
 	return ret;
 };
 
-static const struct file_operations vgic_debug_fops = {
+static struct file_operations vgic_debug_fops = {
 	.owner   = THIS_MODULE,
 	.open    = debug_open,
 	.read    = seq_read,
@@ -264,12 +263,21 @@ static const struct file_operations vgic_debug_fops = {
 	.release = seq_release
 };
 
-void vgic_debug_init(struct kvm *kvm)
+int vgic_debug_init(struct kvm *kvm)
 {
-	debugfs_create_file("vgic-state", 0444, kvm->debugfs_dentry, kvm,
-			    &vgic_debug_fops);
+	if (!kvm->debugfs_dentry)
+		return -ENOENT;
+
+	if (!debugfs_create_file("vgic-state", 0444,
+				 kvm->debugfs_dentry,
+				 kvm,
+				 &vgic_debug_fops))
+		return -ENOMEM;
+
+	return 0;
 }
 
-void vgic_debug_destroy(struct kvm *kvm)
+int vgic_debug_destroy(struct kvm *kvm)
 {
+	return 0;
 }

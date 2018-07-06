@@ -228,6 +228,10 @@ struct pcc_acpi {
 	struct backlight_device	*backlight;
 };
 
+struct pcc_keyinput {
+	struct acpi_hotkey      *hotkey;
+};
+
 /* method access functions */
 static int acpi_pcc_write_sset(struct pcc_acpi *pcc, int func, int val)
 {
@@ -437,7 +441,7 @@ static struct attribute *pcc_sysfs_entries[] = {
 	NULL,
 };
 
-static const struct attribute_group pcc_attr_group = {
+static struct attribute_group pcc_attr_group = {
 	.name	= NULL,		/* put in device directory */
 	.attrs	= pcc_sysfs_entries,
 };
@@ -571,7 +575,7 @@ static int acpi_pcc_hotkey_add(struct acpi_device *device)
 		return -ENOMEM;
 	}
 
-	pcc->sinf = kcalloc(num_sifr + 1, sizeof(u32), GFP_KERNEL);
+	pcc->sinf = kzalloc(sizeof(u32) * (num_sifr + 1), GFP_KERNEL);
 	if (!pcc->sinf) {
 		result = -ENOMEM;
 		goto out_hotkey;

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright IBM Corp. 1999, 2010
  *
@@ -22,13 +21,13 @@ ENTRY(startup_continue)
 	xc	__LC_LPP+1(7,0),__LC_LPP+1	# clear lpp and current_pid
 	mvi	__LC_LPP,0x80			#   and set LPP_MAGIC
 	.insn	s,0xb2800000,__LC_LPP		# load program parameter
-0:	larl	%r1,tod_clock_base
-	mvc	0(16,%r1),__LC_BOOT_CLOCK
+0:	larl	%r1,sched_clock_base_cc
+	mvc	0(8,%r1),__LC_LAST_UPDATE_CLOCK
 	larl	%r13,.LPG1		# get base
 	lctlg	%c0,%c15,.Lctl-.LPG1(%r13)	# load control registers
 	lg	%r12,.Lparmaddr-.LPG1(%r13)	# pointer to parameter area
 					# move IPL device to lowcore
-	larl	%r0,boot_vdso_data
+	lghi	%r0,__LC_PASTE
 	stg	%r0,__LC_VDSO_PER_CPU
 #
 # Setup stack
@@ -40,12 +39,8 @@ ENTRY(startup_continue)
 	stg	%r15,__LC_KERNEL_STACK	# set end of kernel stack
 	aghi	%r15,-160
 #
-# Early setup functions that may not rely on an initialized bss section,
-# like moving the initrd. Returns with an initialized bss section.
-#
-	brasl	%r14,startup_init_nobss
-#
-# Early machine initialization and detection functions.
+# Save ipl parameters, clear bss memory, initialize storage key for kernel pages,
+# and create a kernel NSS if the SAVESYS= parm is defined
 #
 	brasl	%r14,startup_init
 	lpswe	.Lentry-.LPG1(13)	# jump to _stext in primary-space,

@@ -1006,12 +1006,13 @@ struct platform_device dm355_serial_device[] = {
 	}
 };
 
-static const struct davinci_soc_info davinci_soc_info_dm355 = {
+static struct davinci_soc_info davinci_soc_info_dm355 = {
 	.io_desc		= dm355_io_desc,
 	.io_desc_num		= ARRAY_SIZE(dm355_io_desc),
 	.jtag_id_reg		= 0x01c40028,
 	.ids			= dm355_ids,
 	.ids_num		= ARRAY_SIZE(dm355_ids),
+	.cpu_clks		= dm355_clks,
 	.psc_bases		= dm355_psc_bases,
 	.psc_bases_num		= ARRAY_SIZE(dm355_psc_bases),
 	.pinmux_base		= DAVINCI_SYSTEM_MODULE_BASE,
@@ -1042,12 +1043,7 @@ void __init dm355_init(void)
 {
 	davinci_common_init(&davinci_soc_info_dm355);
 	davinci_map_sysmod();
-}
-
-void __init dm355_init_time(void)
-{
-	davinci_clk_init(dm355_clks);
-	davinci_timer_init();
+	davinci_clk_init(davinci_soc_info_dm355.cpu_clks);
 }
 
 int __init dm355_init_video(struct vpfe_config *vpfe_cfg,

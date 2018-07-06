@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/semaphore.h>
@@ -402,10 +401,8 @@ static int device_open(struct inode *inode, struct file *file)
 	if (down_interruptible(&sem) != 0)
 		return -EPERM;
 
-	if (!(adapter = get_cxl_adapter(adapter_num))) {
-		rc = -ENODEV;
-		goto err_unlock;
-	}
+	if (!(adapter = get_cxl_adapter(adapter_num)))
+		return -ENODEV;
 
 	file->private_data = adapter;
 	continue_token = 0;
@@ -449,8 +446,6 @@ err1:
 		free_page((unsigned long) le);
 err:
 	put_device(&adapter->dev);
-err_unlock:
-	up(&sem);
 
 	return rc;
 }

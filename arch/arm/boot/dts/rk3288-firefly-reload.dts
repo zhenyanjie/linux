@@ -48,19 +48,6 @@
 	model = "Firefly-RK3288-reload";
 	compatible = "firefly,firefly-rk3288-reload", "rockchip,rk3288";
 
-	adc-keys {
-		compatible = "adc-keys";
-		io-channels = <&saradc 1>;
-		io-channel-names = "buttons";
-		keyup-threshold-microvolt = <1800000>;
-
-		button-recovery {
-			label = "Recovery";
-			linux,code = <KEY_VENDOR>;
-			press-threshold-microvolt = <0>;
-		};
-	};
-
 	gpio-keys {
 		compatible = "gpio-keys";
 
@@ -226,13 +213,6 @@
 	};
 };
 
-&hdmi {
-	ddc-i2c-bus = <&i2c5>;
-	pinctrl-names = "default";
-	pinctrl-0 = <&hdmi_cec_c0>;
-	status = "okay";
-};
-
 &i2c0 {
 	hym8563: hym8563@51 {
 		compatible = "haoyu,hym8563";
@@ -262,15 +242,7 @@
 	};
 };
 
-&i2c5 {
-	status = "okay";
-};
-
 &i2s {
-	status = "okay";
-};
-
-&saradc {
 	status = "okay";
 };
 
@@ -280,6 +252,7 @@
 	cap-sd-highspeed;
 	card-detect-delay = <200>;
 	disable-wp;
+	num-slots = <1>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdmmc_clk>, <&sdmmc_cmd>, <&sdmmc_cd>, <&sdmmc_bus4>;
 	vmmc-supply = <&vcc_sd>;
@@ -294,6 +267,7 @@
 	disable-wp;
 	mmc-pwrseq = <&sdio_pwrseq>;
 	non-removable;
+	num-slots = <1>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdio0_bus4>, <&sdio0_cmd>, <&sdio0_clk>, <&sdio0_int>;
 	sd-uhs-sdr12;

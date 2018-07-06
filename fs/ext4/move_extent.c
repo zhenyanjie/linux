@@ -1,8 +1,16 @@
-// SPDX-License-Identifier: LGPL-2.1
 /*
  * Copyright (c) 2008,2009 NEC Software Tohoku, Ltd.
  * Written by Takashi Sato <t-sato@yk.jp.nec.com>
  *            Akira Fujita <a-fujita@rs.jp.nec.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2.1 of the GNU Lesser General Public License
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/fs.h>
@@ -476,7 +484,7 @@ mext_check_arguments(struct inode *orig_inode,
 		return -EBUSY;
 	}
 
-	if (ext4_is_quota_file(orig_inode) && ext4_is_quota_file(donor_inode)) {
+	if (IS_NOQUOTA(orig_inode) || IS_NOQUOTA(donor_inode)) {
 		ext4_debug("ext4 move extent: The argument files should "
 			"not be quota files [ino:orig %lu, donor %lu]\n",
 			orig_inode->i_ino, donor_inode->i_ino);
@@ -601,6 +609,8 @@ ext4_move_extents(struct file *o_filp, struct file *d_filp, __u64 orig_blk,
 	lock_two_nondirectories(orig_inode, donor_inode);
 
 	/* Wait for all existing dio workers */
+	ext4_inode_block_unlocked_dio(orig_inode);
+	ext4_inode_block_unlocked_dio(donor_inode);
 	inode_dio_wait(orig_inode);
 	inode_dio_wait(donor_inode);
 
@@ -691,6 +701,8 @@ out:
 	ext4_ext_drop_refs(path);
 	kfree(path);
 	ext4_double_up_write_data_sem(orig_inode, donor_inode);
+	ext4_inode_resume_unlocked_dio(orig_inode);
+	ext4_inode_resume_unlocked_dio(donor_inode);
 	unlock_two_nondirectories(orig_inode, donor_inode);
 
 	return ret;

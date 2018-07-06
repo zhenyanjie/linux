@@ -181,7 +181,6 @@ read the file /proc/PID/status:
   VmPTE:        20 kb
   VmSwap:        0 kB
   HugetlbPages:          0 kB
-  CoreDumping:    0
   Threads:        1
   SigQ:   0/28578
   SigPnd: 0000000000000000
@@ -251,11 +250,10 @@ Table 1-2: Contents of the status files (as of 4.8)
  VmExe                       size of text segment
  VmLib                       size of shared library code
  VmPTE                       size of page table entries
+ VmPMD                       size of second level page tables
  VmSwap                      amount of swap used by anonymous private data
                              (shmem swap usage is not included)
  HugetlbPages                size of hugetlb memory portions
- CoreDumping                 process's memory is currently being dumped
-                             (killing the process may lead to a corrupted core)
  Threads                     number of threads
  SigQ                        number of signals queued/max. number for queue
  SigPnd                      bitmap of pending signals for the thread
@@ -515,8 +513,7 @@ guarantees:
 
 The /proc/PID/clear_refs is used to reset the PG_Referenced and ACCESSED/YOUNG
 bits on both physical and virtual pages associated with a process, and the
-soft-dirty bit on pte (see Documentation/admin-guide/mm/soft-dirty.rst
-for details).
+soft-dirty bit on pte (see Documentation/vm/soft-dirty.txt for details).
 To clear the bits for all the pages associated with the process
     > echo 1 > /proc/PID/clear_refs
 
@@ -537,8 +534,7 @@ Any other value written to /proc/PID/clear_refs will have no effect.
 
 The /proc/pid/pagemap gives the PFN, which can be used to find the pageflags
 using /proc/kpageflags and number of times a page is mapped using
-/proc/kpagecount. For detailed explanation, see
-Documentation/admin-guide/mm/pagemap.rst.
+/proc/kpagecount. For detailed explanation, see Documentation/vm/pagemap.txt.
 
 The /proc/pid/numa_maps is an extension based on maps, showing the memory
 locality and binding policy, as well as the memory usage (in pages) of
@@ -566,7 +562,7 @@ address   policy    mapping details
 
 Where:
 "address" is the starting address for the mapping;
-"policy" reports the NUMA memory policy set for the mapping (see Documentation/admin-guide/mm/numa_memory_policy.rst);
+"policy" reports the NUMA memory policy set for the mapping (see vm/numa_memory_policy.txt);
 "mapping details" summarizes mapping data such as mapping type, page usage counters,
 node locality page counters (N0 == node0, N1 == node1, ...) and the kernel page
 size, in KB, that is backing the mapping up.
@@ -1790,15 +1786,11 @@ pair provide additional information particular to the objects they represent.
 	pos:	0
 	flags:	02
 	mnt_id:	9
-	tfd:        5 events:       1d data: ffffffffffffffff pos:0 ino:61af sdev:7
+	tfd:        5 events:       1d data: ffffffffffffffff
 
 	where 'tfd' is a target file descriptor number in decimal form,
 	'events' is events mask being watched and the 'data' is data
 	associated with a target [see epoll(7) for more details].
-
-	The 'pos' is current offset of the target file in decimal form
-	[see lseek(2)], 'ino' and 'sdev' are inode and device numbers
-	where target file resides, all in hex format.
 
 	Fsnotify files
 	~~~~~~~~~~~~~~

@@ -18,7 +18,6 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_seqadj.h>
 #include <net/netfilter/nf_conntrack_synproxy.h>
-#include <net/netfilter/nf_conntrack_ecache.h>
 
 static struct ipv6hdr *
 synproxy_build_ip(struct net *net, struct sk_buff *skb,
@@ -28,7 +27,7 @@ synproxy_build_ip(struct net *net, struct sk_buff *skb,
 	struct ipv6hdr *iph;
 
 	skb_reset_network_header(skb);
-	iph = skb_put(skb, sizeof(*iph));
+	iph = (struct ipv6hdr *)skb_put(skb, sizeof(*iph));
 	ip6_flow_hdr(iph, 0, 0);
 	iph->hop_limit	= net->ipv6.devconf_all->hop_limit;
 	iph->nexthdr	= IPPROTO_TCP;
@@ -106,7 +105,7 @@ synproxy_send_client_synack(struct net *net,
 	niph = synproxy_build_ip(net, nskb, &iph->daddr, &iph->saddr);
 
 	skb_reset_transport_header(nskb);
-	nth = skb_put(nskb, tcp_hdr_size);
+	nth = (struct tcphdr *)skb_put(nskb, tcp_hdr_size);
 	nth->source	= th->dest;
 	nth->dest	= th->source;
 	nth->seq	= htonl(__cookie_v6_init_sequence(iph, th, &mss));
@@ -148,7 +147,7 @@ synproxy_send_server_syn(struct net *net,
 	niph = synproxy_build_ip(net, nskb, &iph->saddr, &iph->daddr);
 
 	skb_reset_transport_header(nskb);
-	nth = skb_put(nskb, tcp_hdr_size);
+	nth = (struct tcphdr *)skb_put(nskb, tcp_hdr_size);
 	nth->source	= th->source;
 	nth->dest	= th->dest;
 	nth->seq	= htonl(recv_seq - 1);
@@ -193,7 +192,7 @@ synproxy_send_server_ack(struct net *net,
 	niph = synproxy_build_ip(net, nskb, &iph->daddr, &iph->saddr);
 
 	skb_reset_transport_header(nskb);
-	nth = skb_put(nskb, tcp_hdr_size);
+	nth = (struct tcphdr *)skb_put(nskb, tcp_hdr_size);
 	nth->source	= th->dest;
 	nth->dest	= th->source;
 	nth->seq	= htonl(ntohl(th->ack_seq));
@@ -231,7 +230,7 @@ synproxy_send_client_ack(struct net *net,
 	niph = synproxy_build_ip(net, nskb, &iph->saddr, &iph->daddr);
 
 	skb_reset_transport_header(nskb);
-	nth = skb_put(nskb, tcp_hdr_size);
+	nth = (struct tcphdr *)skb_put(nskb, tcp_hdr_size);
 	nth->source	= th->source;
 	nth->dest	= th->dest;
 	nth->seq	= htonl(ntohl(th->seq) + 1);
@@ -354,7 +353,7 @@ static unsigned int ipv6_synproxy_hook(void *priv,
 	nexthdr = ipv6_hdr(skb)->nexthdr;
 	thoff = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &nexthdr,
 				 &frag_off);
-	if (thoff < 0 || nexthdr != IPPROTO_TCP)
+	if (thoff < 0)
 		return NF_ACCEPT;
 
 	th = skb_header_pointer(skb, thoff, sizeof(_th), &_th);
@@ -406,8 +405,6 @@ static unsigned int ipv6_synproxy_hook(void *priv,
 		synproxy->isn = ntohl(th->ack_seq);
 		if (opts.options & XT_SYNPROXY_OPT_TIMESTAMP)
 			synproxy->its = opts.tsecr;
-
-		nf_conntrack_event_cache(IPCT_SYNPROXY, ct);
 		break;
 	case TCP_CONNTRACK_SYN_RECV:
 		if (!th->syn || !th->ack)
@@ -416,10 +413,8 @@ static unsigned int ipv6_synproxy_hook(void *priv,
 		if (!synproxy_parse_options(skb, thoff, th, &opts))
 			return NF_DROP;
 
-		if (opts.options & XT_SYNPROXY_OPT_TIMESTAMP) {
+		if (opts.options & XT_SYNPROXY_OPT_TIMESTAMP)
 			synproxy->tsoff = opts.tsval - synproxy->its;
-			nf_conntrack_event_cache(IPCT_SYNPROXY, ct);
-		}
 
 		opts.options &= ~(XT_SYNPROXY_OPT_MSS |
 				  XT_SYNPROXY_OPT_WSCALE |
@@ -429,7 +424,6 @@ static unsigned int ipv6_synproxy_hook(void *priv,
 		synproxy_send_server_ack(net, state, skb, th, &opts);
 
 		nf_ct_seqadj_init(ct, ctinfo, synproxy->isn - ntohl(th->seq));
-		nf_conntrack_event_cache(IPCT_SEQADJ, ct);
 
 		swap(opts.tsval, opts.tsecr);
 		synproxy_send_client_ack(net, skb, th, &opts);
@@ -444,7 +438,7 @@ static unsigned int ipv6_synproxy_hook(void *priv,
 	return NF_ACCEPT;
 }
 
-static const struct nf_hook_ops ipv6_synproxy_ops[] = {
+static struct nf_hook_ops ipv6_synproxy_ops[] __read_mostly = {
 	{
 		.hook		= ipv6_synproxy_hook,
 		.pf		= NFPROTO_IPV6,

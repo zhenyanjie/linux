@@ -735,7 +735,6 @@ static int ubifs_do_bulk_read(struct ubifs_info *c, struct bu_info *bu,
 	int err, page_idx, page_cnt, ret = 0, n = 0;
 	int allocate = bu->buf ? 0 : 1;
 	loff_t isize;
-	gfp_t ra_gfp_mask = readahead_gfp_mask(mapping) & ~__GFP_FS;
 
 	err = ubifs_tnc_get_bu_keys(c, bu);
 	if (err)
@@ -797,7 +796,8 @@ static int ubifs_do_bulk_read(struct ubifs_info *c, struct bu_info *bu,
 
 		if (page_offset > end_index)
 			break;
-		page = find_or_create_page(mapping, page_offset, ra_gfp_mask);
+		page = find_or_create_page(mapping, page_offset,
+					   GFP_NOFS | __GFP_COLD);
 		if (!page)
 			break;
 		if (!PageUptodate(page))
@@ -1089,14 +1089,14 @@ static void do_attr_changes(struct inode *inode, const struct iattr *attr)
 	if (attr->ia_valid & ATTR_GID)
 		inode->i_gid = attr->ia_gid;
 	if (attr->ia_valid & ATTR_ATIME)
-		inode->i_atime = timespec64_trunc(attr->ia_atime,
-						  inode->i_sb->s_time_gran);
+		inode->i_atime = timespec_trunc(attr->ia_atime,
+						inode->i_sb->s_time_gran);
 	if (attr->ia_valid & ATTR_MTIME)
-		inode->i_mtime = timespec64_trunc(attr->ia_mtime,
-						  inode->i_sb->s_time_gran);
+		inode->i_mtime = timespec_trunc(attr->ia_mtime,
+						inode->i_sb->s_time_gran);
 	if (attr->ia_valid & ATTR_CTIME)
-		inode->i_ctime = timespec64_trunc(attr->ia_ctime,
-						  inode->i_sb->s_time_gran);
+		inode->i_ctime = timespec_trunc(attr->ia_ctime,
+						inode->i_sb->s_time_gran);
 	if (attr->ia_valid & ATTR_MODE) {
 		umode_t mode = attr->ia_mode;
 
@@ -1256,7 +1256,7 @@ static int do_setattr(struct ubifs_info *c, struct inode *inode,
 		 * Inode length changed, so we have to make sure
 		 * @I_DIRTY_DATASYNC is set.
 		 */
-		 __mark_inode_dirty(inode, I_DIRTY_DATASYNC);
+		 __mark_inode_dirty(inode, I_DIRTY_SYNC | I_DIRTY_DATASYNC);
 	else
 		mark_inode_dirty_sync(inode);
 	mutex_unlock(&ui->ui_mutex);
@@ -1281,10 +1281,6 @@ int ubifs_setattr(struct dentry *dentry, struct iattr *attr)
 		return err;
 
 	err = dbg_check_synced_i_size(c, inode);
-	if (err)
-		return err;
-
-	err = fscrypt_prepare_setattr(dentry, attr);
 	if (err)
 		return err;
 
@@ -1333,7 +1329,7 @@ int ubifs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 		 */
 		return 0;
 
-	err = file_write_and_wait_range(file, start, end);
+	err = filemap_write_and_wait_range(inode->i_mapping, start, end);
 	if (err)
 		return err;
 	inode_lock(inode);
@@ -1367,9 +1363,8 @@ out:
 static inline int mctime_update_needed(const struct inode *inode,
 				       const struct timespec *now)
 {
-	struct timespec64 now64 = timespec_to_timespec64(*now);
-	if (!timespec64_equal(&inode->i_mtime, &now64) ||
-	    !timespec64_equal(&inode->i_ctime, &now64))
+	if (!timespec_equal(&inode->i_mtime, now) ||
+	    !timespec_equal(&inode->i_ctime, now))
 		return 1;
 	return 0;
 }
@@ -1381,7 +1376,7 @@ static inline int mctime_update_needed(const struct inode *inode,
  *
  * This function updates time of the inode.
  */
-int ubifs_update_time(struct inode *inode, struct timespec64 *time,
+int ubifs_update_time(struct inode *inode, struct timespec *time,
 			     int flags)
 {
 	struct ubifs_inode *ui = ubifs_inode(inode);
@@ -1403,7 +1398,7 @@ int ubifs_update_time(struct inode *inode, struct timespec64 *time,
 	if (flags & S_MTIME)
 		inode->i_mtime = *time;
 
-	if (!(inode->i_sb->s_flags & SB_LAZYTIME))
+	if (!(inode->i_sb->s_flags & MS_LAZYTIME))
 		iflags |= I_DIRTY_SYNC;
 
 	release = ui->dirty;
@@ -1425,7 +1420,7 @@ int ubifs_update_time(struct inode *inode, struct timespec64 *time,
  */
 static int update_mctime(struct inode *inode)
 {
-	struct timespec now = timespec64_to_timespec(current_time(inode));
+	struct timespec now = current_time(inode);
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 
@@ -1487,10 +1482,7 @@ static int ubifs_migrate_page(struct address_space *mapping,
 		SetPagePrivate(newpage);
 	}
 
-	if (mode != MIGRATE_SYNC_NO_COPY)
-		migrate_page_copy(newpage, page);
-	else
-		migrate_page_states(newpage, page);
+	migrate_page_copy(newpage, page);
 	return MIGRATEPAGE_SUCCESS;
 }
 #endif
@@ -1514,12 +1506,12 @@ static int ubifs_releasepage(struct page *page, gfp_t unused_gfp_flags)
  * mmap()d file has taken write protection fault and is being made writable.
  * UBIFS must ensure page is budgeted for.
  */
-static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
+static int ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 {
 	struct page *page = vmf->page;
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
-	struct timespec now = timespec64_to_timespec(current_time(inode));
+	struct timespec now = current_time(inode);
 	struct ubifs_budget_req req = { .new_page = 1 };
 	int err, update_time;
 
@@ -1568,7 +1560,8 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 	if (unlikely(page->mapping != inode->i_mapping ||
 		     page_offset(page) > i_size_read(inode))) {
 		/* Page got truncated out from underneath us */
-		goto sigbus;
+		err = -EINVAL;
+		goto out_unlock;
 	}
 
 	if (PagePrivate(page))
@@ -1597,10 +1590,12 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 	wait_for_stable_page(page);
 	return VM_FAULT_LOCKED;
 
-sigbus:
+out_unlock:
 	unlock_page(page);
 	ubifs_release_budget(c, &req);
-	return VM_FAULT_SIGBUS;
+	if (err)
+		err = VM_FAULT_SIGBUS;
+	return err;
 }
 
 static const struct vm_operations_struct ubifs_file_vm_ops = {
@@ -1612,6 +1607,15 @@ static const struct vm_operations_struct ubifs_file_vm_ops = {
 static int ubifs_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	int err;
+	struct inode *inode = file->f_mapping->host;
+
+	if (ubifs_crypt_is_encrypted(inode)) {
+		err = fscrypt_get_encryption_info(inode);
+		if (err)
+			return -EACCES;
+		if (!fscrypt_has_encryption_key(inode))
+			return -ENOKEY;
+	}
 
 	err = generic_file_mmap(file, vma);
 	if (err)
@@ -1623,20 +1627,87 @@ static int ubifs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
+static int ubifs_file_open(struct inode *inode, struct file *filp)
+{
+	int ret;
+	struct dentry *dir;
+	struct ubifs_info *c = inode->i_sb->s_fs_info;
+
+	if (ubifs_crypt_is_encrypted(inode)) {
+		ret = fscrypt_get_encryption_info(inode);
+		if (ret)
+			return -EACCES;
+		if (!fscrypt_has_encryption_key(inode))
+			return -ENOKEY;
+	}
+
+	dir = dget_parent(file_dentry(filp));
+	if (ubifs_crypt_is_encrypted(d_inode(dir)) &&
+			!fscrypt_has_permitted_context(d_inode(dir), inode)) {
+		ubifs_err(c, "Inconsistent encryption contexts: %lu/%lu",
+			  (unsigned long) d_inode(dir)->i_ino,
+			  (unsigned long) inode->i_ino);
+		dput(dir);
+		ubifs_ro_mode(c, -EPERM);
+		return -EPERM;
+	}
+	dput(dir);
+
+	return 0;
+}
+
 static const char *ubifs_get_link(struct dentry *dentry,
 					    struct inode *inode,
 					    struct delayed_call *done)
 {
+	int err;
+	struct fscrypt_symlink_data *sd;
 	struct ubifs_inode *ui = ubifs_inode(inode);
+	struct fscrypt_str cstr;
+	struct fscrypt_str pstr;
 
-	if (!IS_ENCRYPTED(inode))
+	if (!ubifs_crypt_is_encrypted(inode))
 		return ui->data;
 
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
 
-	return fscrypt_get_symlink(inode, ui->data, ui->data_len, done);
+	err = fscrypt_get_encryption_info(inode);
+	if (err)
+		return ERR_PTR(err);
+
+	sd = (struct fscrypt_symlink_data *)ui->data;
+	cstr.name = sd->encrypted_path;
+	cstr.len = le16_to_cpu(sd->len);
+
+	if (cstr.len == 0)
+		return ERR_PTR(-ENOENT);
+
+	if ((cstr.len + sizeof(struct fscrypt_symlink_data) - 1) > ui->data_len)
+		return ERR_PTR(-EIO);
+
+	err = fscrypt_fname_alloc_buffer(inode, cstr.len, &pstr);
+	if (err)
+		return ERR_PTR(err);
+
+	err = fscrypt_fname_disk_to_usr(inode, 0, 0, &cstr, &pstr);
+	if (err) {
+		fscrypt_fname_free_buffer(&pstr);
+		return ERR_PTR(err);
+	}
+
+	pstr.name[pstr.len] = '\0';
+
+	// XXX this probably won't happen anymore...
+	if (pstr.name[0] == '\0') {
+		fscrypt_fname_free_buffer(&pstr);
+		return ERR_PTR(-ENOENT);
+	}
+
+	set_delayed_call(done, kfree_link, pstr.name);
+	return pstr.name;
 }
+
 
 const struct address_space_operations ubifs_file_address_operations = {
 	.readpage       = ubifs_readpage,
@@ -1679,7 +1750,7 @@ const struct file_operations ubifs_file_operations = {
 	.unlocked_ioctl = ubifs_ioctl,
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= iter_file_splice_write,
-	.open		= fscrypt_file_open,
+	.open		= ubifs_file_open,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl   = ubifs_compat_ioctl,
 #endif

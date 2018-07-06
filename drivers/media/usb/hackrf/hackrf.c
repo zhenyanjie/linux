@@ -909,15 +909,18 @@ static int hackrf_querycap(struct file *file, void *fh,
 
 	dev_dbg(&intf->dev, "\n");
 
-	cap->device_caps = V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
 	if (vdev->vfl_dir == VFL_DIR_RX)
-		cap->device_caps |= V4L2_CAP_SDR_CAPTURE | V4L2_CAP_TUNER;
+		cap->device_caps = V4L2_CAP_SDR_CAPTURE | V4L2_CAP_TUNER |
+				   V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
+
 	else
-		cap->device_caps |= V4L2_CAP_SDR_OUTPUT | V4L2_CAP_MODULATOR;
+		cap->device_caps = V4L2_CAP_SDR_OUTPUT | V4L2_CAP_MODULATOR |
+				   V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
 
 	cap->capabilities = V4L2_CAP_SDR_CAPTURE | V4L2_CAP_TUNER |
 			    V4L2_CAP_SDR_OUTPUT | V4L2_CAP_MODULATOR |
-			    V4L2_CAP_DEVICE_CAPS | cap->device_caps;
+			    V4L2_CAP_STREAMING | V4L2_CAP_READWRITE |
+			    V4L2_CAP_DEVICE_CAPS;
 	strlcpy(cap->driver, KBUILD_MODNAME, sizeof(cap->driver));
 	strlcpy(cap->card, dev->rx_vdev.name, sizeof(cap->card));
 	usb_make_path(dev->udev, cap->bus_info, sizeof(cap->bus_info));
@@ -1260,7 +1263,7 @@ static const struct v4l2_file_operations hackrf_fops = {
 	.unlocked_ioctl           = video_ioctl2,
 };
 
-static const struct video_device hackrf_template = {
+static struct video_device hackrf_template = {
 	.name                     = "HackRF One",
 	.release                  = video_device_release_empty,
 	.fops                     = &hackrf_fops,
@@ -1542,7 +1545,7 @@ err:
 }
 
 /* USB device ID list */
-static const struct usb_device_id hackrf_id_table[] = {
+static struct usb_device_id hackrf_id_table[] = {
 	{ USB_DEVICE(0x1d50, 0x6089) }, /* HackRF One */
 	{ }
 };

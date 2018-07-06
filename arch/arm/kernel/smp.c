@@ -31,7 +31,6 @@
 #include <linux/irq_work.h>
 
 #include <linux/atomic.h>
-#include <asm/bugs.h>
 #include <asm/smp.h>
 #include <asm/cacheflush.h>
 #include <asm/cpu.h>
@@ -115,7 +114,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	 */
 	secondary_data.stack = task_stack_page(idle) + THREAD_START_SP;
 #ifdef CONFIG_ARM_MPU
-	secondary_data.mpu_rgn_info = &mpu_rgn_info;
+	secondary_data.mpu_rgn_szr = mpu_rgn_info.rgns[MPU_RAM_REGION].drsr;
 #endif
 
 #ifdef CONFIG_MMU
@@ -237,6 +236,8 @@ int __cpu_disable(void)
 	flush_cache_louis();
 	local_flush_tlb_all();
 
+	clear_tasks_mm_cpumask(cpu);
+
 	return 0;
 }
 
@@ -254,7 +255,6 @@ void __cpu_die(unsigned int cpu)
 	}
 	pr_debug("CPU%u: shutdown\n", cpu);
 
-	clear_tasks_mm_cpumask(cpu);
 	/*
 	 * platform_cpu_kill() is generally expected to do the powering off
 	 * and/or cutting of clocks to the dying CPU.  Optionally, this may
@@ -379,9 +379,6 @@ asmlinkage void secondary_start_kernel(void)
 
 	cpu_init();
 
-#ifndef CONFIG_MMU
-	setup_vectors_base();
-#endif
 	pr_debug("CPU%u: Booted secondary processor\n", cpu);
 
 	preempt_disable();
@@ -405,9 +402,6 @@ asmlinkage void secondary_start_kernel(void)
 	 * before we continue - which happens after __cpu_up returns.
 	 */
 	set_cpu_online(cpu, true);
-
-	check_other_bugs();
-
 	complete(&cpu_running);
 
 	local_irq_enable();
@@ -561,7 +555,8 @@ static DEFINE_RAW_SPINLOCK(stop_lock);
  */
 static void ipi_cpu_stop(unsigned int cpu)
 {
-	if (system_state <= SYSTEM_RUNNING) {
+	if (system_state == SYSTEM_BOOTING ||
+	    system_state == SYSTEM_RUNNING) {
 		raw_spin_lock(&stop_lock);
 		pr_crit("CPU%u: stopping\n", cpu);
 		dump_stack();

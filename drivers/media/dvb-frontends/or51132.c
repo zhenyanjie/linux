@@ -38,8 +38,8 @@
 #include <linux/slab.h>
 #include <asm/byteorder.h>
 
-#include <media/dvb_math.h>
-#include <media/dvb_frontend.h>
+#include "dvb_math.h"
+#include "dvb_frontend.h"
 #include "or51132.h"
 
 static int debug;
@@ -493,8 +493,8 @@ start:
 	switch (reg&0xff) {
 	case 0x06:
 		if (reg & 0x1000) usK = 3 << 24;
-		/* fall through */
-	case 0x43: /* QAM64 */
+		/* Fall through to QAM64 case */
+	case 0x43:
 		c = 150204167;
 		break;
 	case 0x45:

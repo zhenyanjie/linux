@@ -44,7 +44,7 @@ static void spufs_handle_event(struct spu_context *ctx,
 		return;
 	}
 
-	clear_siginfo(&info);
+	memset(&info, 0, sizeof(info));
 
 	switch (type) {
 	case SPE_EVENT_INVALID_DMA:

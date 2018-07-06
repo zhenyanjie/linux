@@ -1,7 +1,21 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2016 Oracle.  All Rights Reserved.
+ *
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it would be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write the Free Software Foundation,
+ * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 #include "xfs.h"
 #include "xfs_fs.h"
@@ -206,7 +220,7 @@ xfs_defer_trans_abort(
 {
 	struct xfs_defer_pending	*dfp;
 
-	trace_xfs_defer_trans_abort(tp->t_mountp, dop, _RET_IP_);
+	trace_xfs_defer_trans_abort(tp->t_mountp, dop);
 
 	/* Abort intent items that don't have a done item. */
 	list_for_each_entry(dfp, &dop->dop_pending, dfp_list) {
@@ -226,23 +240,23 @@ xfs_defer_trans_abort(
 STATIC int
 xfs_defer_trans_roll(
 	struct xfs_trans		**tp,
-	struct xfs_defer_ops		*dop)
+	struct xfs_defer_ops		*dop,
+	struct xfs_inode		*ip)
 {
 	int				i;
 	int				error;
 
-	/* Log all the joined inodes. */
-	for (i = 0; i < XFS_DEFER_OPS_NR_INODES && dop->dop_inodes[i]; i++)
+	/* Log all the joined inodes except the one we passed in. */
+	for (i = 0; i < XFS_DEFER_OPS_NR_INODES && dop->dop_inodes[i]; i++) {
+		if (dop->dop_inodes[i] == ip)
+			continue;
 		xfs_trans_log_inode(*tp, dop->dop_inodes[i], XFS_ILOG_CORE);
+	}
 
-	/* Hold the (previously bjoin'd) buffer locked across the roll. */
-	for (i = 0; i < XFS_DEFER_OPS_NR_BUFS && dop->dop_bufs[i]; i++)
-		xfs_trans_dirty_buf(*tp, dop->dop_bufs[i]);
-
-	trace_xfs_defer_trans_roll((*tp)->t_mountp, dop, _RET_IP_);
+	trace_xfs_defer_trans_roll((*tp)->t_mountp, dop);
 
 	/* Roll the transaction. */
-	error = xfs_trans_roll(tp);
+	error = xfs_trans_roll(tp, ip);
 	if (error) {
 		trace_xfs_defer_trans_roll_error((*tp)->t_mountp, dop, error);
 		xfs_defer_trans_abort(*tp, dop, error);
@@ -250,14 +264,11 @@ xfs_defer_trans_roll(
 	}
 	dop->dop_committed = true;
 
-	/* Rejoin the joined inodes. */
-	for (i = 0; i < XFS_DEFER_OPS_NR_INODES && dop->dop_inodes[i]; i++)
+	/* Rejoin the joined inodes except the one we passed in. */
+	for (i = 0; i < XFS_DEFER_OPS_NR_INODES && dop->dop_inodes[i]; i++) {
+		if (dop->dop_inodes[i] == ip)
+			continue;
 		xfs_trans_ijoin(*tp, dop->dop_inodes[i], 0);
-
-	/* Rejoin the buffers and dirty them so the log moves forward. */
-	for (i = 0; i < XFS_DEFER_OPS_NR_BUFS && dop->dop_bufs[i]; i++) {
-		xfs_trans_bjoin(*tp, dop->dop_bufs[i]);
-		xfs_trans_bhold(*tp, dop->dop_bufs[i]);
 	}
 
 	return error;
@@ -273,10 +284,11 @@ xfs_defer_has_unfinished_work(
 
 /*
  * Add this inode to the deferred op.  Each joined inode is relogged
- * each time we roll the transaction.
+ * each time we roll the transaction, in addition to any inode passed
+ * to xfs_defer_finish().
  */
 int
-xfs_defer_ijoin(
+xfs_defer_join(
 	struct xfs_defer_ops		*dop,
 	struct xfs_inode		*ip)
 {
@@ -291,31 +303,6 @@ xfs_defer_ijoin(
 		}
 	}
 
-	ASSERT(0);
-	return -EFSCORRUPTED;
-}
-
-/*
- * Add this buffer to the deferred op.  Each joined buffer is relogged
- * each time we roll the transaction.
- */
-int
-xfs_defer_bjoin(
-	struct xfs_defer_ops		*dop,
-	struct xfs_buf			*bp)
-{
-	int				i;
-
-	for (i = 0; i < XFS_DEFER_OPS_NR_BUFS; i++) {
-		if (dop->dop_bufs[i] == bp)
-			return 0;
-		else if (dop->dop_bufs[i] == NULL) {
-			dop->dop_bufs[i] = bp;
-			return 0;
-		}
-	}
-
-	ASSERT(0);
 	return -EFSCORRUPTED;
 }
 
@@ -330,7 +317,8 @@ xfs_defer_bjoin(
 int
 xfs_defer_finish(
 	struct xfs_trans		**tp,
-	struct xfs_defer_ops		*dop)
+	struct xfs_defer_ops		*dop,
+	struct xfs_inode		*ip)
 {
 	struct xfs_defer_pending	*dfp;
 	struct list_head		*li;
@@ -338,21 +326,10 @@ xfs_defer_finish(
 	void				*state;
 	int				error = 0;
 	void				(*cleanup_fn)(struct xfs_trans *, void *, int);
-	struct xfs_defer_ops		*orig_dop;
 
 	ASSERT((*tp)->t_flags & XFS_TRANS_PERM_LOG_RES);
 
-	trace_xfs_defer_finish((*tp)->t_mountp, dop, _RET_IP_);
-
-	/*
-	 * Attach dfops to the transaction during deferred ops processing. This
-	 * explicitly causes calls into the allocator to defer AGFL block frees.
-	 * Note that this code can go away once all dfops users attach to the
-	 * associated tp.
-	 */
-	ASSERT(!(*tp)->t_agfl_dfops || ((*tp)->t_agfl_dfops == dop));
-	orig_dop = (*tp)->t_agfl_dfops;
-	(*tp)->t_agfl_dfops = dop;
+	trace_xfs_defer_finish((*tp)->t_mountp, dop);
 
 	/* Until we run out of pending work to finish... */
 	while (xfs_defer_has_unfinished_work(dop)) {
@@ -360,7 +337,7 @@ xfs_defer_finish(
 		xfs_defer_intake_work(*tp, dop);
 
 		/* Roll the transaction. */
-		error = xfs_defer_trans_roll(tp, dop);
+		error = xfs_defer_trans_roll(tp, dop, ip);
 		if (error)
 			goto out;
 
@@ -425,11 +402,10 @@ xfs_defer_finish(
 	}
 
 out:
-	(*tp)->t_agfl_dfops = orig_dop;
 	if (error)
 		trace_xfs_defer_finish_error((*tp)->t_mountp, dop, error);
 	else
-		trace_xfs_defer_finish_done((*tp)->t_mountp, dop, _RET_IP_);
+		trace_xfs_defer_finish_done((*tp)->t_mountp, dop);
 	return error;
 }
 
@@ -445,7 +421,7 @@ xfs_defer_cancel(
 	struct list_head		*pwi;
 	struct list_head		*n;
 
-	trace_xfs_defer_cancel(NULL, dop, _RET_IP_);
+	trace_xfs_defer_cancel(NULL, dop);
 
 	/*
 	 * Free the pending items.  Caller should already have arranged
@@ -526,9 +502,11 @@ xfs_defer_init(
 	struct xfs_defer_ops		*dop,
 	xfs_fsblock_t			*fbp)
 {
-	memset(dop, 0, sizeof(struct xfs_defer_ops));
+	dop->dop_committed = false;
+	dop->dop_low = false;
+	memset(&dop->dop_inodes, 0, sizeof(dop->dop_inodes));
 	*fbp = NULLFSBLOCK;
 	INIT_LIST_HEAD(&dop->dop_intake);
 	INIT_LIST_HEAD(&dop->dop_pending);
-	trace_xfs_defer_init(NULL, dop, _RET_IP_);
+	trace_xfs_defer_init(NULL, dop);
 }

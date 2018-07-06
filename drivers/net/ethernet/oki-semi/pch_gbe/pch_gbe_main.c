@@ -781,8 +781,11 @@ static void pch_gbe_free_irq(struct pch_gbe_adapter *adapter)
 {
 	struct net_device *netdev = adapter->netdev;
 
-	free_irq(adapter->irq, netdev);
-	pci_free_irq_vectors(adapter->pdev);
+	free_irq(adapter->pdev->irq, netdev);
+	if (adapter->have_msi) {
+		pci_disable_msi(adapter->pdev);
+		netdev_dbg(netdev, "call pci_disable_msi\n");
+	}
 }
 
 /**
@@ -796,7 +799,7 @@ static void pch_gbe_irq_disable(struct pch_gbe_adapter *adapter)
 	atomic_inc(&adapter->irq_sem);
 	iowrite32(0, &hw->reg->INT_EN);
 	ioread32(&hw->reg->INT_ST);
-	synchronize_irq(adapter->irq);
+	synchronize_irq(adapter->pdev->irq);
 
 	netdev_dbg(adapter->netdev, "INT_EN reg : 0x%08x\n",
 		   ioread32(&hw->reg->INT_EN));
@@ -1089,10 +1092,9 @@ static void pch_gbe_set_mode(struct pch_gbe_adapter *adapter, u16 speed,
  * pch_gbe_watchdog - Watchdog process
  * @data:  Board private structure
  */
-static void pch_gbe_watchdog(struct timer_list *t)
+static void pch_gbe_watchdog(unsigned long data)
 {
-	struct pch_gbe_adapter *adapter = from_timer(adapter, t,
-						     watchdog_timer);
+	struct pch_gbe_adapter *adapter = (struct pch_gbe_adapter *)data;
 	struct net_device *netdev = adapter->netdev;
 	struct pch_gbe_hw *hw = &adapter->hw;
 
@@ -1901,22 +1903,29 @@ static int pch_gbe_request_irq(struct pch_gbe_adapter *adapter)
 {
 	struct net_device *netdev = adapter->netdev;
 	int err;
+	int flags;
 
-	err = pci_alloc_irq_vectors(adapter->pdev, 1, 1, PCI_IRQ_ALL_TYPES);
-	if (err < 0)
-		return err;
-
-	adapter->irq = pci_irq_vector(adapter->pdev, 0);
-
-	err = request_irq(adapter->irq, &pch_gbe_intr, IRQF_SHARED,
-			  netdev->name, netdev);
+	flags = IRQF_SHARED;
+	adapter->have_msi = false;
+	err = pci_enable_msi(adapter->pdev);
+	netdev_dbg(netdev, "call pci_enable_msi\n");
+	if (err) {
+		netdev_dbg(netdev, "call pci_enable_msi - Error: %d\n", err);
+	} else {
+		flags = 0;
+		adapter->have_msi = true;
+	}
+	err = request_irq(adapter->pdev->irq, &pch_gbe_intr,
+			  flags, netdev->name, netdev);
 	if (err)
 		netdev_err(netdev, "Unable to allocate interrupt Error: %d\n",
 			   err);
-	netdev_dbg(netdev, "have_msi : %d  return : 0x%04x\n",
-		   pci_dev_msi_enabled(adapter->pdev), err);
+	netdev_dbg(netdev,
+		   "adapter->have_msi : %d  flags : 0x%04x  return : 0x%04x\n",
+		   adapter->have_msi, flags, err);
 	return err;
 }
+
 
 /**
  * pch_gbe_up - Up GbE network device
@@ -2178,7 +2187,7 @@ static void pch_gbe_set_multi(struct net_device *netdev)
 
 	if (mc_count >= PCH_GBE_MAR_ENTRIES)
 		return;
-	mta_list = kmalloc_array(ETH_ALEN, mc_count, GFP_ATOMIC);
+	mta_list = kmalloc(mc_count * ETH_ALEN, GFP_ATOMIC);
 	if (!mta_list)
 		return;
 
@@ -2390,9 +2399,9 @@ static void pch_gbe_netpoll(struct net_device *netdev)
 {
 	struct pch_gbe_adapter *adapter = netdev_priv(netdev);
 
-	disable_irq(adapter->irq);
-	pch_gbe_intr(adapter->irq, netdev);
-	enable_irq(adapter->irq);
+	disable_irq(adapter->pdev->irq);
+	pch_gbe_intr(adapter->pdev->irq, netdev);
+	enable_irq(adapter->pdev->irq);
 }
 #endif
 
@@ -2594,10 +2603,8 @@ static int pch_gbe_probe(struct pci_dev *pdev,
 	if (adapter->pdata && adapter->pdata->platform_init)
 		adapter->pdata->platform_init(pdev);
 
-	adapter->ptp_pdev =
-		pci_get_domain_bus_and_slot(pci_domain_nr(adapter->pdev->bus),
-					    adapter->pdev->bus->number,
-					    PCI_DEVFN(12, 4));
+	adapter->ptp_pdev = pci_get_bus_and_slot(adapter->pdev->bus->number,
+					       PCI_DEVFN(12, 4));
 
 	netdev->netdev_ops = &pch_gbe_netdev_ops;
 	netdev->watchdog_timeo = PCH_GBE_WATCHDOG_PERIOD;
@@ -2647,7 +2654,8 @@ static int pch_gbe_probe(struct pci_dev *pdev,
 		dev_err(&pdev->dev, "Invalid MAC address, "
 		                    "interface disabled.\n");
 	}
-	timer_setup(&adapter->watchdog_timer, pch_gbe_watchdog, 0);
+	setup_timer(&adapter->watchdog_timer, pch_gbe_watchdog,
+		    (unsigned long)adapter);
 
 	INIT_WORK(&adapter->reset_task, pch_gbe_reset_task);
 

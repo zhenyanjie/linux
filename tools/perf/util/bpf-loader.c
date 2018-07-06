@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * bpf-loader.c
  *
@@ -66,7 +65,7 @@ bpf__prepare_load_buffer(void *obj_buf, size_t obj_buf_sz, const char *name)
 	}
 
 	obj = bpf_object__open_buffer(obj_buf, obj_buf_sz, name);
-	if (IS_ERR_OR_NULL(obj)) {
+	if (IS_ERR(obj)) {
 		pr_debug("bpf: failed to load buffer\n");
 		return ERR_PTR(-EINVAL);
 	}
@@ -94,7 +93,7 @@ struct bpf_object *bpf__prepare_load(const char *filename, bool source)
 		err = perf_clang__compile_bpf(filename, &obj_buf, &obj_buf_sz);
 		perf_clang__cleanup();
 		if (err) {
-			pr_debug("bpf: builtin compilation failed: %d, try external compiler\n", err);
+			pr_warning("bpf: builtin compilation failed: %d, try external compiler\n", err);
 			err = llvm__compile_bpf(filename, &obj_buf, &obj_buf_sz);
 			if (err)
 				return ERR_PTR(-BPF_LOADER_ERRNO__COMPILE);
@@ -102,14 +101,14 @@ struct bpf_object *bpf__prepare_load(const char *filename, bool source)
 			pr_debug("bpf: successfull builtin compilation\n");
 		obj = bpf_object__open_buffer(obj_buf, obj_buf_sz, filename);
 
-		if (!IS_ERR_OR_NULL(obj) && llvm_param.dump_obj)
+		if (!IS_ERR(obj) && llvm_param.dump_obj)
 			llvm__dump_obj(filename, obj_buf, obj_buf_sz);
 
 		free(obj_buf);
 	} else
 		obj = bpf_object__open(filename);
 
-	if (IS_ERR_OR_NULL(obj)) {
+	if (IS_ERR(obj)) {
 		pr_debug("bpf: failed to load %s\n", filename);
 		return obj;
 	}
@@ -1247,7 +1246,7 @@ int bpf__config_obj(struct bpf_object *obj,
 	if (!obj || !term || !term->config)
 		return -EINVAL;
 
-	if (strstarts(term->config, "map:")) {
+	if (!prefixcmp(term->config, "map:")) {
 		key_scan_pos = sizeof("map:") - 1;
 		err = bpf__obj_config_map(obj, term, evlist, &key_scan_pos);
 		goto out;
@@ -1533,7 +1532,7 @@ int bpf__apply_obj_config(void)
 			(strcmp("__bpf_stdout__", 	\
 				bpf_map__name(pos)) == 0))
 
-int bpf__setup_stdout(struct perf_evlist *evlist)
+int bpf__setup_stdout(struct perf_evlist *evlist __maybe_unused)
 {
 	struct bpf_map_priv *tmpl_priv = NULL;
 	struct bpf_object *obj, *tmp;

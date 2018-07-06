@@ -16,6 +16,7 @@
 #include <linux/userfaultfd_k.h>
 #include <linux/mmu_notifier.h>
 #include <linux/hugetlb.h>
+#include <linux/pagemap.h>
 #include <linux/shmem_fs.h>
 #include <asm/tlbflush.h>
 #include "internal.h"
@@ -370,42 +371,11 @@ extern ssize_t __mcopy_atomic_hugetlb(struct mm_struct *dst_mm,
 				      bool zeropage);
 #endif /* CONFIG_HUGETLB_PAGE */
 
-static __always_inline ssize_t mfill_atomic_pte(struct mm_struct *dst_mm,
-						pmd_t *dst_pmd,
-						struct vm_area_struct *dst_vma,
-						unsigned long dst_addr,
-						unsigned long src_addr,
-						struct page **page,
-						bool zeropage)
-{
-	ssize_t err;
-
-	if (vma_is_anonymous(dst_vma)) {
-		if (!zeropage)
-			err = mcopy_atomic_pte(dst_mm, dst_pmd, dst_vma,
-					       dst_addr, src_addr, page);
-		else
-			err = mfill_zeropage_pte(dst_mm, dst_pmd,
-						 dst_vma, dst_addr);
-	} else {
-		if (!zeropage)
-			err = shmem_mcopy_atomic_pte(dst_mm, dst_pmd,
-						     dst_vma, dst_addr,
-						     src_addr, page);
-		else
-			err = shmem_mfill_zeropage_pte(dst_mm, dst_pmd,
-						       dst_vma, dst_addr);
-	}
-
-	return err;
-}
-
 static __always_inline ssize_t __mcopy_atomic(struct mm_struct *dst_mm,
 					      unsigned long dst_start,
 					      unsigned long src_start,
 					      unsigned long len,
-					      bool zeropage,
-					      bool *mmap_changing)
+					      bool zeropage)
 {
 	struct vm_area_struct *dst_vma;
 	ssize_t err;
@@ -430,15 +400,6 @@ static __always_inline ssize_t __mcopy_atomic(struct mm_struct *dst_mm,
 	page = NULL;
 retry:
 	down_read(&dst_mm->mmap_sem);
-
-	/*
-	 * If memory mappings are changing because of non-cooperative
-	 * operation (e.g. mremap) running in parallel, bail out and
-	 * request the user to retry later
-	 */
-	err = -EAGAIN;
-	if (mmap_changing && READ_ONCE(*mmap_changing))
-		goto out_unlock;
 
 	/*
 	 * Make sure the vma is not shared, that the dst range is
@@ -526,8 +487,22 @@ retry:
 		BUG_ON(pmd_none(*dst_pmd));
 		BUG_ON(pmd_trans_huge(*dst_pmd));
 
-		err = mfill_atomic_pte(dst_mm, dst_pmd, dst_vma, dst_addr,
-				       src_addr, &page, zeropage);
+		if (vma_is_anonymous(dst_vma)) {
+			if (!zeropage)
+				err = mcopy_atomic_pte(dst_mm, dst_pmd, dst_vma,
+						       dst_addr, src_addr,
+						       &page);
+			else
+				err = mfill_zeropage_pte(dst_mm, dst_pmd,
+							 dst_vma, dst_addr);
+		} else {
+			err = -EINVAL; /* if zeropage is true return -EINVAL */
+			if (likely(!zeropage))
+				err = shmem_mcopy_atomic_pte(dst_mm, dst_pmd,
+							     dst_vma, dst_addr,
+							     src_addr, &page);
+		}
+
 		cond_resched();
 
 		if (unlikely(err == -EFAULT)) {
@@ -573,15 +548,13 @@ out:
 }
 
 ssize_t mcopy_atomic(struct mm_struct *dst_mm, unsigned long dst_start,
-		     unsigned long src_start, unsigned long len,
-		     bool *mmap_changing)
+		     unsigned long src_start, unsigned long len)
 {
-	return __mcopy_atomic(dst_mm, dst_start, src_start, len, false,
-			      mmap_changing);
+	return __mcopy_atomic(dst_mm, dst_start, src_start, len, false);
 }
 
 ssize_t mfill_zeropage(struct mm_struct *dst_mm, unsigned long start,
-		       unsigned long len, bool *mmap_changing)
+		       unsigned long len)
 {
-	return __mcopy_atomic(dst_mm, start, 0, len, true, mmap_changing);
+	return __mcopy_atomic(dst_mm, start, 0, len, true);
 }

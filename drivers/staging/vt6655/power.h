@@ -1,7 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
  * File: power.h
  *
@@ -22,10 +31,20 @@
 #define PS_FAST_INTERVAL         1       /* Fast power saving listen interval */
 #define PS_MAX_INTERVAL          4       /* MAX power saving listen interval */
 
-void PSvDisablePowerSaving(struct vnt_private *priv);
+void
+PSvDisablePowerSaving(
+	struct vnt_private *
+);
 
-void PSvEnablePowerSaving(struct vnt_private *priv, unsigned short wListenInterval);
+void
+PSvEnablePowerSaving(
+	struct vnt_private *,
+	unsigned short wListenInterval
+);
 
-bool PSbIsNextTBTTWakeUp(struct vnt_private *priv);
+bool
+PSbIsNextTBTTWakeUp(
+	struct vnt_private *
+);
 
 #endif /* __POWER_H__ */

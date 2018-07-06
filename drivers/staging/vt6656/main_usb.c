@@ -1,7 +1,17 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
  *
  * File: main_usb.c
  *
@@ -409,7 +419,8 @@ static bool vnt_alloc_bufs(struct vnt_private *priv)
 	int ii;
 
 	for (ii = 0; ii < priv->num_tx_context; ii++) {
-		tx_context = kmalloc(sizeof(*tx_context), GFP_KERNEL);
+		tx_context = kmalloc(sizeof(struct vnt_usb_send_context),
+				     GFP_KERNEL);
 		if (!tx_context)
 			goto free_tx;
 
@@ -426,9 +437,12 @@ static bool vnt_alloc_bufs(struct vnt_private *priv)
 	}
 
 	for (ii = 0; ii < priv->num_rcb; ii++) {
-		priv->rcb[ii] = kzalloc(sizeof(*priv->rcb[ii]), GFP_KERNEL);
-		if (!priv->rcb[ii])
+		priv->rcb[ii] = kzalloc(sizeof(struct vnt_rcb), GFP_KERNEL);
+		if (!priv->rcb[ii]) {
+			dev_err(&priv->usb->dev,
+				"failed to allocate rcb no %d\n", ii);
 			goto free_rx_tx;
+		}
 
 		rcb = priv->rcb[ii];
 
@@ -623,6 +637,7 @@ static int vnt_config(struct ieee80211_hw *hw, u32 changed)
 {
 	struct vnt_private *priv = hw->priv;
 	struct ieee80211_conf *conf = &hw->conf;
+	u8 bb_type;
 
 	if (changed & IEEE80211_CONF_CHANGE_PS) {
 		if (conf->flags & IEEE80211_CONF_PS)
@@ -636,9 +651,15 @@ static int vnt_config(struct ieee80211_hw *hw, u32 changed)
 		vnt_set_channel(priv, conf->chandef.chan->hw_value);
 
 		if (conf->chandef.chan->band == NL80211_BAND_5GHZ)
-			priv->bb_type = BB_TYPE_11A;
+			bb_type = BB_TYPE_11A;
 		else
-			priv->bb_type = BB_TYPE_11G;
+			bb_type = BB_TYPE_11G;
+
+		if (priv->bb_type != bb_type) {
+			priv->bb_type = bb_type;
+
+			vnt_set_bss_mode(priv);
+		}
 	}
 
 	if (changed & IEEE80211_CONF_CHANGE_POWER) {
@@ -669,7 +690,6 @@ static void vnt_bss_info_changed(struct ieee80211_hw *hw,
 		priv->basic_rates = conf->basic_rates;
 
 		vnt_update_top_rates(priv);
-		vnt_set_bss_mode(priv);
 
 		dev_dbg(&priv->usb->dev, "basic rates %x\n", conf->basic_rates);
 	}
@@ -698,7 +718,6 @@ static void vnt_bss_info_changed(struct ieee80211_hw *hw,
 			priv->short_slot_time = false;
 
 		vnt_set_short_slot_time(priv);
-		vnt_update_ifs(priv);
 		vnt_set_vga_gain_offset(priv, priv->bb_vga[0]);
 		vnt_update_pre_ed_threshold(priv, false);
 	}
@@ -830,6 +849,7 @@ static void vnt_sw_scan_start(struct ieee80211_hw *hw,
 {
 	struct vnt_private *priv = hw->priv;
 
+	vnt_set_bss_mode(priv);
 	/* Set max sensitivity*/
 	vnt_update_pre_ed_threshold(priv, true);
 }

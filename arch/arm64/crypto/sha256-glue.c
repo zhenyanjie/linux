@@ -29,7 +29,6 @@ MODULE_ALIAS_CRYPTO("sha256");
 
 asmlinkage void sha256_block_data_order(u32 *digest, const void *data,
 					unsigned int num_blks);
-EXPORT_SYMBOL(sha256_block_data_order);
 
 asmlinkage void sha256_block_neon(u32 *digest, const void *data,
 				  unsigned int num_blks);
@@ -89,32 +88,21 @@ static struct shash_alg algs[] = { {
 static int sha256_update_neon(struct shash_desc *desc, const u8 *data,
 			      unsigned int len)
 {
-	struct sha256_state *sctx = shash_desc_ctx(desc);
-
+	/*
+	 * Stacking and unstacking a substantial slice of the NEON register
+	 * file may significantly affect performance for small updates when
+	 * executing in interrupt context, so fall back to the scalar code
+	 * in that case.
+	 */
 	if (!may_use_simd())
 		return sha256_base_do_update(desc, data, len,
 				(sha256_block_fn *)sha256_block_data_order);
 
-	while (len > 0) {
-		unsigned int chunk = len;
+	kernel_neon_begin();
+	sha256_base_do_update(desc, data, len,
+				(sha256_block_fn *)sha256_block_neon);
+	kernel_neon_end();
 
-		/*
-		 * Don't hog the CPU for the entire time it takes to process all
-		 * input when running on a preemptible kernel, but process the
-		 * data block by block instead.
-		 */
-		if (IS_ENABLED(CONFIG_PREEMPT) &&
-		    chunk + sctx->count % SHA256_BLOCK_SIZE > SHA256_BLOCK_SIZE)
-			chunk = SHA256_BLOCK_SIZE -
-				sctx->count % SHA256_BLOCK_SIZE;
-
-		kernel_neon_begin();
-		sha256_base_do_update(desc, data, chunk,
-				      (sha256_block_fn *)sha256_block_neon);
-		kernel_neon_end();
-		data += chunk;
-		len -= chunk;
-	}
 	return 0;
 }
 
@@ -128,9 +116,10 @@ static int sha256_finup_neon(struct shash_desc *desc, const u8 *data,
 		sha256_base_do_finalize(desc,
 				(sha256_block_fn *)sha256_block_data_order);
 	} else {
-		if (len)
-			sha256_update_neon(desc, data, len);
 		kernel_neon_begin();
+		if (len)
+			sha256_base_do_update(desc, data, len,
+				(sha256_block_fn *)sha256_block_neon);
 		sha256_base_do_finalize(desc,
 				(sha256_block_fn *)sha256_block_neon);
 		kernel_neon_end();

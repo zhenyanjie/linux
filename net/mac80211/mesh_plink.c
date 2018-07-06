@@ -220,7 +220,8 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 	bool include_plid = false;
 	u16 peering_proto = 0;
 	u8 *pos, ie_len = 4;
-	int hdr_len = offsetofend(struct ieee80211_mgmt, u.action.u.self_prot);
+	int hdr_len = offsetof(struct ieee80211_mgmt, u.action.u.self_prot) +
+		      sizeof(mgmt->u.action.u.self_prot);
 	int err = -ENOMEM;
 
 	skb = dev_alloc_skb(local->tx_headroom +
@@ -241,7 +242,8 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 		return err;
 	info = IEEE80211_SKB_CB(skb);
 	skb_reserve(skb, local->tx_headroom);
-	mgmt = skb_put_zero(skb, hdr_len);
+	mgmt = (struct ieee80211_mgmt *) skb_put(skb, hdr_len);
+	memset(mgmt, 0, hdr_len);
 	mgmt->frame_control = cpu_to_le16(IEEE80211_FTYPE_MGMT |
 					  IEEE80211_STYPE_ACTION);
 	memcpy(mgmt->da, da, ETH_ALEN);
@@ -262,7 +264,8 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 		band = sband->band;
 
 		/* capability info */
-		pos = skb_put_zero(skb, 2);
+		pos = skb_put(skb, 2);
+		memset(pos, 0, 2);
 		if (action == WLAN_SP_MESH_PEERING_CONFIRM) {
 			/* AID */
 			pos = skb_put(skb, 2);
@@ -401,7 +404,7 @@ u32 mesh_plink_deactivate(struct sta_info *sta)
 
 static void mesh_sta_info_init(struct ieee80211_sub_if_data *sdata,
 			       struct sta_info *sta,
-			       struct ieee802_11_elems *elems)
+			       struct ieee802_11_elems *elems, bool insert)
 {
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_supported_band *sband;
@@ -447,7 +450,7 @@ static void mesh_sta_info_init(struct ieee80211_sub_if_data *sdata,
 		sta->sta.bandwidth = IEEE80211_STA_RX_BW_20;
 	}
 
-	if (!test_sta_flag(sta, WLAN_STA_RATE_CONTROL))
+	if (insert)
 		rate_control_rate_init(sta);
 	else
 		rate_control_rate_update(local, sband, sta, changed);
@@ -551,7 +554,7 @@ mesh_sta_info_get(struct ieee80211_sub_if_data *sdata,
 	rcu_read_lock();
 	sta = sta_info_get(sdata, addr);
 	if (sta) {
-		mesh_sta_info_init(sdata, sta, elems);
+		mesh_sta_info_init(sdata, sta, elems, false);
 	} else {
 		rcu_read_unlock();
 		/* can't run atomic */
@@ -561,7 +564,7 @@ mesh_sta_info_get(struct ieee80211_sub_if_data *sdata,
 			return NULL;
 		}
 
-		mesh_sta_info_init(sdata, sta, elems);
+		mesh_sta_info_init(sdata, sta, elems, true);
 
 		if (sta_info_insert_rcu(sta))
 			return NULL;
@@ -603,9 +606,8 @@ out:
 	ieee80211_mbss_info_change_notify(sdata, changed);
 }
 
-void mesh_plink_timer(struct timer_list *t)
+static void mesh_plink_timer(unsigned long data)
 {
-	struct mesh_sta *mesh = from_timer(mesh, t, plink_timer);
 	struct sta_info *sta;
 	u16 reason = 0;
 	struct ieee80211_sub_if_data *sdata;
@@ -617,7 +619,7 @@ void mesh_plink_timer(struct timer_list *t)
 	 * del_timer_sync() this timer after having made sure
 	 * it cannot be readded (by deleting the plink.)
 	 */
-	sta = mesh->plink_sta;
+	sta = (struct sta_info *) data;
 
 	if (sta->sdata->local->quiescing)
 		return;
@@ -672,7 +674,7 @@ void mesh_plink_timer(struct timer_list *t)
 			break;
 		}
 		reason = WLAN_REASON_MESH_MAX_RETRIES;
-		/* fall through */
+		/* fall through on else */
 	case NL80211_PLINK_CNF_RCVD:
 		/* confirm timer */
 		if (!reason)
@@ -697,8 +699,11 @@ void mesh_plink_timer(struct timer_list *t)
 
 static inline void mesh_plink_timer_set(struct sta_info *sta, u32 timeout)
 {
+	sta->mesh->plink_timer.expires = jiffies + msecs_to_jiffies(timeout);
+	sta->mesh->plink_timer.data = (unsigned long) sta;
+	sta->mesh->plink_timer.function = mesh_plink_timer;
 	sta->mesh->plink_timeout = timeout;
-	mod_timer(&sta->mesh->plink_timer, jiffies + msecs_to_jiffies(timeout));
+	add_timer(&sta->mesh->plink_timer);
 }
 
 static bool llid_in_use(struct ieee80211_sub_if_data *sdata,

@@ -8,42 +8,144 @@
  */
 
 #include <drm/drmP.h>
-#include <drm/drm_bridge.h>
+#include <drm/drm_atomic_helper.h>
+#include <drm/drm_connector.h>
+#include <drm/drm_crtc_helper.h>
+#include <drm/drm_encoder.h>
+#include <drm/drm_modeset_helper_vtables.h>
 #include <drm/drm_panel.h>
 
 #include <linux/of_graph.h>
 
 struct lvds_encoder {
+	struct device *dev;
+
 	struct drm_bridge bridge;
-	struct drm_bridge *panel_bridge;
+	struct drm_connector connector;
+	struct drm_panel *panel;
+};
+
+static inline struct lvds_encoder *
+drm_bridge_to_lvds_encoder(struct drm_bridge *bridge)
+{
+	return container_of(bridge, struct lvds_encoder, bridge);
+}
+
+static inline struct lvds_encoder *
+drm_connector_to_lvds_encoder(struct drm_connector *connector)
+{
+	return container_of(connector, struct lvds_encoder, connector);
+}
+
+static int lvds_connector_get_modes(struct drm_connector *connector)
+{
+	struct lvds_encoder *lvds = drm_connector_to_lvds_encoder(connector);
+
+	return drm_panel_get_modes(lvds->panel);
+}
+
+static const struct drm_connector_helper_funcs lvds_connector_helper_funcs = {
+	.get_modes = lvds_connector_get_modes,
+};
+
+static const struct drm_connector_funcs lvds_connector_funcs = {
+	.dpms = drm_atomic_helper_connector_dpms,
+	.reset = drm_atomic_helper_connector_reset,
+	.fill_modes = drm_helper_probe_single_connector_modes,
+	.destroy = drm_connector_cleanup,
+	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
+	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
 };
 
 static int lvds_encoder_attach(struct drm_bridge *bridge)
 {
-	struct lvds_encoder *lvds_encoder = container_of(bridge,
-							 struct lvds_encoder,
-							 bridge);
+	struct lvds_encoder *lvds = drm_bridge_to_lvds_encoder(bridge);
+	struct drm_connector *connector = &lvds->connector;
+	int ret;
 
-	return drm_bridge_attach(bridge->encoder, lvds_encoder->panel_bridge,
-				 bridge);
+	if (!bridge->encoder) {
+		DRM_ERROR("Missing encoder\n");
+		return -ENODEV;
+	}
+
+	drm_connector_helper_add(connector, &lvds_connector_helper_funcs);
+
+	ret = drm_connector_init(bridge->dev, connector, &lvds_connector_funcs,
+				 DRM_MODE_CONNECTOR_LVDS);
+	if (ret) {
+		DRM_ERROR("Failed to initialize connector\n");
+		return ret;
+	}
+
+	drm_mode_connector_attach_encoder(&lvds->connector, bridge->encoder);
+
+	ret = drm_panel_attach(lvds->panel, &lvds->connector);
+	if (ret < 0)
+		return ret;
+
+	return 0;
 }
 
-static struct drm_bridge_funcs funcs = {
+static void lvds_encoder_detach(struct drm_bridge *bridge)
+{
+	struct lvds_encoder *lvds = drm_bridge_to_lvds_encoder(bridge);
+
+	drm_panel_detach(lvds->panel);
+}
+
+static void lvds_encoder_pre_enable(struct drm_bridge *bridge)
+{
+	struct lvds_encoder *lvds = drm_bridge_to_lvds_encoder(bridge);
+
+	drm_panel_prepare(lvds->panel);
+}
+
+static void lvds_encoder_enable(struct drm_bridge *bridge)
+{
+	struct lvds_encoder *lvds = drm_bridge_to_lvds_encoder(bridge);
+
+	drm_panel_enable(lvds->panel);
+}
+
+static void lvds_encoder_disable(struct drm_bridge *bridge)
+{
+	struct lvds_encoder *lvds = drm_bridge_to_lvds_encoder(bridge);
+
+	drm_panel_disable(lvds->panel);
+}
+
+static void lvds_encoder_post_disable(struct drm_bridge *bridge)
+{
+	struct lvds_encoder *lvds = drm_bridge_to_lvds_encoder(bridge);
+
+	drm_panel_unprepare(lvds->panel);
+}
+
+static const struct drm_bridge_funcs lvds_encoder_bridge_funcs = {
 	.attach = lvds_encoder_attach,
+	.detach = lvds_encoder_detach,
+	.pre_enable = lvds_encoder_pre_enable,
+	.enable = lvds_encoder_enable,
+	.disable = lvds_encoder_disable,
+	.post_disable = lvds_encoder_post_disable,
 };
 
 static int lvds_encoder_probe(struct platform_device *pdev)
 {
+	struct lvds_encoder *lvds;
 	struct device_node *port;
 	struct device_node *endpoint;
-	struct device_node *panel_node;
-	struct drm_panel *panel;
-	struct lvds_encoder *lvds_encoder;
+	struct device_node *panel;
 
-	lvds_encoder = devm_kzalloc(&pdev->dev, sizeof(*lvds_encoder),
-				    GFP_KERNEL);
-	if (!lvds_encoder)
+	lvds = devm_kzalloc(&pdev->dev, sizeof(*lvds), GFP_KERNEL);
+	if (!lvds)
 		return -ENOMEM;
+
+	lvds->dev = &pdev->dev;
+	platform_set_drvdata(pdev, lvds);
+
+	lvds->bridge.funcs = &lvds_encoder_bridge_funcs;
+	lvds->bridge.of_node = pdev->dev.of_node;
 
 	/* Locate the panel DT node. */
 	port = of_graph_get_port_by_id(pdev->dev.of_node, 1);
@@ -59,44 +161,29 @@ static int lvds_encoder_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	panel_node = of_graph_get_remote_port_parent(endpoint);
+	panel = of_graph_get_remote_port_parent(endpoint);
 	of_node_put(endpoint);
-	if (!panel_node) {
+	if (!panel) {
 		dev_dbg(&pdev->dev, "no remote endpoint for port 1\n");
 		return -ENXIO;
 	}
 
-	panel = of_drm_find_panel(panel_node);
-	of_node_put(panel_node);
-	if (!panel) {
+	lvds->panel = of_drm_find_panel(panel);
+	of_node_put(panel);
+	if (!lvds->panel) {
 		dev_dbg(&pdev->dev, "panel not found, deferring probe\n");
 		return -EPROBE_DEFER;
 	}
 
-	lvds_encoder->panel_bridge =
-		devm_drm_panel_bridge_add(&pdev->dev,
-					  panel, DRM_MODE_CONNECTOR_LVDS);
-	if (IS_ERR(lvds_encoder->panel_bridge))
-		return PTR_ERR(lvds_encoder->panel_bridge);
-
-	/* The panel_bridge bridge is attached to the panel's of_node,
-	 * but we need a bridge attached to our of_node for our user
-	 * to look up.
-	 */
-	lvds_encoder->bridge.of_node = pdev->dev.of_node;
-	lvds_encoder->bridge.funcs = &funcs;
-	drm_bridge_add(&lvds_encoder->bridge);
-
-	platform_set_drvdata(pdev, lvds_encoder);
-
-	return 0;
+	/* Register the bridge. */
+	return drm_bridge_add(&lvds->bridge);
 }
 
 static int lvds_encoder_remove(struct platform_device *pdev)
 {
-	struct lvds_encoder *lvds_encoder = platform_get_drvdata(pdev);
+	struct lvds_encoder *encoder = platform_get_drvdata(pdev);
 
-	drm_bridge_remove(&lvds_encoder->bridge);
+	drm_bridge_remove(&encoder->bridge);
 
 	return 0;
 }

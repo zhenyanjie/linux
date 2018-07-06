@@ -99,7 +99,6 @@ struct hnae_handle *hns_ae_get_handle(struct hnae_ae_dev *dev,
 	ae_handle->owner_dev = dsaf_dev->dev;
 	ae_handle->dev = dev;
 	ae_handle->q_num = qnum_per_vf;
-	ae_handle->coal_param = HNAE_LOWEST_LATENCY_COAL_PARAM;
 
 	/* find ring pair, and set vf id*/
 	for (ae_handle->vf_id = 0;
@@ -777,9 +776,8 @@ void hns_ae_update_led_status(struct hnae_handle *handle)
 
 	assert(handle);
 	mac_cb = hns_get_mac_cb(handle);
-	if (mac_cb->media_type != HNAE_MEDIA_TYPE_FIBER)
+	if (!mac_cb->cpld_ctrl)
 		return;
-
 	hns_set_led_opt(mac_cb);
 }
 

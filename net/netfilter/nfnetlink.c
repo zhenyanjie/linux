@@ -25,7 +25,6 @@
 #include <linux/uaccess.h>
 #include <net/sock.h>
 #include <linux/init.h>
-#include <linux/sched/signal.h>
 
 #include <net/netlink.h>
 #include <linux/netfilter/nfnetlink.h>
@@ -38,7 +37,7 @@ MODULE_ALIAS_NET_PF_PROTO(PF_NETLINK, NETLINK_NETFILTER);
 	rcu_dereference_protected(table[(id)].subsys, \
 				  lockdep_nfnl_is_held((id)))
 
-#define NFNL_MAX_ATTR_COUNT	32
+static char __initdata nfversion[] = "0.30";
 
 static struct {
 	struct mutex				mutex;
@@ -79,13 +78,6 @@ EXPORT_SYMBOL_GPL(lockdep_nfnl_is_held);
 
 int nfnetlink_subsys_register(const struct nfnetlink_subsystem *n)
 {
-	u8 cb_id;
-
-	/* Sanity-check attr_count size to avoid stack buffer overflow. */
-	for (cb_id = 0; cb_id < n->cb_count; cb_id++)
-		if (WARN_ON(n->cb[cb_id].attr_count > NFNL_MAX_ATTR_COUNT))
-			return -EINVAL;
-
 	nfnl_lock(n->subsys_id);
 	if (table[n->subsys_id].subsys) {
 		nfnl_unlock(n->subsys_id);
@@ -195,16 +187,10 @@ replay:
 	{
 		int min_len = nlmsg_total_size(sizeof(struct nfgenmsg));
 		u8 cb_id = NFNL_MSG_TYPE(nlh->nlmsg_type);
-		struct nlattr *cda[NFNL_MAX_ATTR_COUNT + 1];
+		struct nlattr *cda[ss->cb[cb_id].attr_count + 1];
 		struct nlattr *attr = (void *)nlh + min_len;
 		int attrlen = nlh->nlmsg_len - min_len;
 		__u8 subsys_id = NFNL_SUBSYS_ID(type);
-
-		/* Sanity-check NFNL_MAX_ATTR_COUNT */
-		if (ss->cb[cb_id].attr_count > NFNL_MAX_ATTR_COUNT) {
-			rcu_read_unlock();
-			return -ENOMEM;
-		}
 
 		err = nla_parse(cda, ss->cb[cb_id].attr_count, attr, attrlen,
 				ss->cb[cb_id].policy, extack);
@@ -215,8 +201,7 @@ replay:
 
 		if (nc->call_rcu) {
 			err = nc->call_rcu(net, net->nfnl, skb, nlh,
-					   (const struct nlattr **)cda,
-					   extack);
+					   (const struct nlattr **)cda);
 			rcu_read_unlock();
 		} else {
 			rcu_read_unlock();
@@ -226,8 +211,7 @@ replay:
 				err = -EAGAIN;
 			else if (nc->call)
 				err = nc->call(net, net->nfnl, skb, nlh,
-					       (const struct nlattr **)cda,
-					       extack);
+					       (const struct nlattr **)cda);
 			else
 				err = -EINVAL;
 			nfnl_unlock(subsys_id);
@@ -242,11 +226,9 @@ struct nfnl_err {
 	struct list_head	head;
 	struct nlmsghdr		*nlh;
 	int			err;
-	struct netlink_ext_ack	extack;
 };
 
-static int nfnl_err_add(struct list_head *list, struct nlmsghdr *nlh, int err,
-			const struct netlink_ext_ack *extack)
+static int nfnl_err_add(struct list_head *list, struct nlmsghdr *nlh, int err)
 {
 	struct nfnl_err *nfnl_err;
 
@@ -256,7 +238,6 @@ static int nfnl_err_add(struct list_head *list, struct nlmsghdr *nlh, int err,
 
 	nfnl_err->nlh = nlh;
 	nfnl_err->err = err;
-	nfnl_err->extack = *extack;
 	list_add_tail(&nfnl_err->head, list);
 
 	return 0;
@@ -281,8 +262,7 @@ static void nfnl_err_deliver(struct list_head *err_list, struct sk_buff *skb)
 	struct nfnl_err *nfnl_err, *next;
 
 	list_for_each_entry_safe(nfnl_err, next, err_list, head) {
-		netlink_ack(skb, nfnl_err->nlh, nfnl_err->err,
-			    &nfnl_err->extack);
+		netlink_ack(skb, nfnl_err->nlh, nfnl_err->err, NULL);
 		nfnl_err_del(nfnl_err);
 	}
 }
@@ -300,7 +280,6 @@ static void nfnetlink_rcv_batch(struct sk_buff *skb, struct nlmsghdr *nlh,
 	struct net *net = sock_net(skb->sk);
 	const struct nfnetlink_subsystem *ss;
 	const struct nfnl_callback *nc;
-	struct netlink_ext_ack extack;
 	LIST_HEAD(err_list);
 	u32 status;
 	int err;
@@ -346,14 +325,6 @@ replay:
 	while (skb->len >= nlmsg_total_size(0)) {
 		int msglen, type;
 
-		if (fatal_signal_pending(current)) {
-			nfnl_err_reset(&err_list);
-			err = -EINTR;
-			status = NFNL_BATCH_FAILURE;
-			goto done;
-		}
-
-		memset(&extack, 0, sizeof(extack));
 		nlh = nlmsg_hdr(skb);
 		err = 0;
 
@@ -402,15 +373,9 @@ replay:
 		{
 			int min_len = nlmsg_total_size(sizeof(struct nfgenmsg));
 			u8 cb_id = NFNL_MSG_TYPE(nlh->nlmsg_type);
-			struct nlattr *cda[NFNL_MAX_ATTR_COUNT + 1];
+			struct nlattr *cda[ss->cb[cb_id].attr_count + 1];
 			struct nlattr *attr = (void *)nlh + min_len;
 			int attrlen = nlh->nlmsg_len - min_len;
-
-			/* Sanity-check NFTA_MAX_ATTR */
-			if (ss->cb[cb_id].attr_count > NFNL_MAX_ATTR_COUNT) {
-				err = -ENOMEM;
-				goto ack;
-			}
 
 			err = nla_parse(cda, ss->cb[cb_id].attr_count, attr,
 					attrlen, ss->cb[cb_id].policy, NULL);
@@ -419,8 +384,7 @@ replay:
 
 			if (nc->call_batch) {
 				err = nc->call_batch(net, net->nfnl, skb, nlh,
-						     (const struct nlattr **)cda,
-						     &extack);
+						     (const struct nlattr **)cda);
 			}
 
 			/* The lock was released to autoload some module, we
@@ -429,7 +393,7 @@ replay:
 			 */
 			if (err == -EAGAIN) {
 				status |= NFNL_BATCH_REPLAY;
-				goto done;
+				goto next;
 			}
 		}
 ack:
@@ -438,7 +402,7 @@ ack:
 			 * processed, this avoids that the same error is
 			 * reported several times when replaying the batch.
 			 */
-			if (nfnl_err_add(&err_list, nlh, err, &extack) < 0) {
+			if (nfnl_err_add(&err_list, nlh, err) < 0) {
 				/* We failed to enqueue an error, reset the
 				 * list of errors and send OOM to userspace
 				 * pointing to the batch header.
@@ -456,7 +420,7 @@ ack:
 			if (err)
 				status |= NFNL_BATCH_FAILURE;
 		}
-
+next:
 		msglen = NLMSG_ALIGN(nlh->nlmsg_len);
 		if (msglen > skb->len)
 			msglen = skb->len;
@@ -464,29 +428,16 @@ ack:
 	}
 done:
 	if (status & NFNL_BATCH_REPLAY) {
-		const struct nfnetlink_subsystem *ss2;
-
-		ss2 = nfnl_dereference_protected(subsys_id);
-		if (ss2 == ss)
-			ss->abort(net, oskb);
+		ss->abort(net, oskb);
 		nfnl_err_reset(&err_list);
 		nfnl_unlock(subsys_id);
 		kfree_skb(skb);
 		goto replay;
 	} else if (status == NFNL_BATCH_DONE) {
-		err = ss->commit(net, oskb);
-		if (err == -EAGAIN) {
-			status |= NFNL_BATCH_REPLAY;
-			goto done;
-		} else if (err) {
-			ss->abort(net, oskb);
-			netlink_ack(oskb, nlmsg_hdr(oskb), err, NULL);
-		}
+		ss->commit(net, oskb);
 	} else {
 		ss->abort(net, oskb);
 	}
-	if (ss->cleanup)
-		ss->cleanup(net);
 
 	nfnl_err_deliver(&err_list, oskb);
 	nfnl_unlock(subsys_id);
@@ -620,11 +571,13 @@ static int __init nfnetlink_init(void)
 	for (i=0; i<NFNL_SUBSYS_COUNT; i++)
 		mutex_init(&table[i].mutex);
 
+	pr_info("Netfilter messages via NETLINK v%s.\n", nfversion);
 	return register_pernet_subsys(&nfnetlink_net_ops);
 }
 
 static void __exit nfnetlink_exit(void)
 {
+	pr_info("Removing netfilter NETLINK layer.\n");
 	unregister_pernet_subsys(&nfnetlink_net_ops);
 }
 module_init(nfnetlink_init);

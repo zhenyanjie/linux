@@ -204,7 +204,6 @@ int stmmac_mdio_register(struct net_device *ndev)
 	struct stmmac_priv *priv = netdev_priv(ndev);
 	struct stmmac_mdio_bus_data *mdio_bus_data = priv->plat->mdio_bus_data;
 	struct device_node *mdio_node = priv->plat->mdio_node;
-	struct device *dev = ndev->dev.parent;
 	int addr, found;
 
 	if (!mdio_bus_data)
@@ -233,9 +232,12 @@ int stmmac_mdio_register(struct net_device *ndev)
 	new_bus->phy_mask = mdio_bus_data->phy_mask;
 	new_bus->parent = priv->device;
 
-	err = of_mdiobus_register(new_bus, mdio_node);
+	if (mdio_node)
+		err = of_mdiobus_register(new_bus, mdio_node);
+	else
+		err = mdiobus_register(new_bus);
 	if (err != 0) {
-		dev_err(dev, "Cannot register the MDIO bus\n");
+		netdev_err(ndev, "Cannot register the MDIO bus\n");
 		goto bus_register_fail;
 	}
 
@@ -245,6 +247,9 @@ int stmmac_mdio_register(struct net_device *ndev)
 	found = 0;
 	for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
 		struct phy_device *phydev = mdiobus_get_phy(new_bus, addr);
+		int act = 0;
+		char irq_num[4];
+		char *irq_str;
 
 		if (!phydev)
 			continue;
@@ -267,12 +272,27 @@ int stmmac_mdio_register(struct net_device *ndev)
 		if (priv->plat->phy_addr == -1)
 			priv->plat->phy_addr = addr;
 
-		phy_attached_info(phydev);
+		act = (priv->plat->phy_addr == addr);
+		switch (phydev->irq) {
+		case PHY_POLL:
+			irq_str = "POLL";
+			break;
+		case PHY_IGNORE_INTERRUPT:
+			irq_str = "IGNORE";
+			break;
+		default:
+			sprintf(irq_num, "%d", phydev->irq);
+			irq_str = irq_num;
+			break;
+		}
+		netdev_info(ndev, "PHY ID %08x at %d IRQ %s (%s)%s\n",
+			    phydev->phy_id, addr, irq_str, phydev_name(phydev),
+			    act ? " active" : "");
 		found = 1;
 	}
 
 	if (!found && !mdio_node) {
-		dev_warn(dev, "No PHY found\n");
+		netdev_warn(ndev, "No PHY found\n");
 		mdiobus_unregister(new_bus);
 		mdiobus_free(new_bus);
 		return -ENODEV;

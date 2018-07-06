@@ -84,7 +84,7 @@ static struct rds_mr *rds_mr_tree_walk(struct rb_root *root, u64 key,
 	if (insert) {
 		rb_link_node(&insert->r_rb_node, parent, p);
 		rb_insert_color(&insert->r_rb_node, root);
-		refcount_inc(&insert->r_refcount);
+		atomic_inc(&insert->r_refcount);
 	}
 	return NULL;
 }
@@ -99,7 +99,7 @@ static void rds_destroy_mr(struct rds_mr *mr)
 	unsigned long flags;
 
 	rdsdebug("RDS: destroy mr key is %x refcnt %u\n",
-			mr->r_key, refcount_read(&mr->r_refcount));
+			mr->r_key, atomic_read(&mr->r_refcount));
 
 	if (test_and_set_bit(RDS_MR_DEAD, &mr->r_state))
 		return;
@@ -183,7 +183,7 @@ static int __rds_rdma_map(struct rds_sock *rs, struct rds_get_mr_args *args,
 	long i;
 	int ret;
 
-	if (rs->rs_bound_addr == 0 || !rs->rs_transport) {
+	if (rs->rs_bound_addr == 0) {
 		ret = -ENOTCONN; /* XXX not a great errno */
 		goto out;
 	}
@@ -223,7 +223,7 @@ static int __rds_rdma_map(struct rds_sock *rs, struct rds_get_mr_args *args,
 		goto out;
 	}
 
-	refcount_set(&mr->r_refcount, 1);
+	atomic_set(&mr->r_refcount, 1);
 	RB_CLEAR_NODE(&mr->r_rb_node);
 	mr->r_trans = rs->rs_transport;
 	mr->r_sock = rs;
@@ -307,7 +307,7 @@ static int __rds_rdma_map(struct rds_sock *rs, struct rds_get_mr_args *args,
 
 	rdsdebug("RDS: get_mr key is %x\n", mr->r_key);
 	if (mr_ret) {
-		refcount_inc(&mr->r_refcount);
+		atomic_inc(&mr->r_refcount);
 		*mr_ret = mr;
 	}
 
@@ -524,9 +524,6 @@ int rds_rdma_extra_size(struct rds_rdma_args *args)
 	unsigned int i;
 
 	local_vec = (struct rds_iovec __user *)(unsigned long) args->local_vec_addr;
-
-	if (args->nr_local == 0)
-		return -EINVAL;
 
 	/* figure out the number of pages in the vector */
 	for (i = 0; i < args->nr_local; i++) {
@@ -759,7 +756,7 @@ int rds_cmsg_rdma_dest(struct rds_sock *rs, struct rds_message *rm,
 	if (!mr)
 		err = -EINVAL;	/* invalid r_key */
 	else
-		refcount_inc(&mr->r_refcount);
+		atomic_inc(&mr->r_refcount);
 	spin_unlock_irqrestore(&rs->rs_rdma_lock, flags);
 
 	if (mr) {
@@ -877,7 +874,6 @@ int rds_cmsg_atomic(struct rds_sock *rs, struct rds_message *rm,
 err:
 	if (page)
 		put_page(page);
-	rm->atomic.op_active = 0;
 	kfree(rm->atomic.op_notifier);
 
 	return ret;

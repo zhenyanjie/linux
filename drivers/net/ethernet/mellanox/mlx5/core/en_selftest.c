@@ -100,7 +100,7 @@ static int mlx5e_test_link_speed(struct mlx5e_priv *priv)
 
 #ifdef CONFIG_INET
 /* loopback test */
-#define MLX5E_TEST_PKT_SIZE (MLX5E_RX_MAX_HEAD - NET_IP_ALIGN)
+#define MLX5E_TEST_PKT_SIZE (MLX5_MPWRQ_SMALL_PACKET_THRESHOLD - NET_IP_ALIGN)
 static const char mlx5e_test_text[ETH_GSTRING_LEN] = "MLX5E SELF TEST";
 #define MLX5E_TEST_MAGIC 0x5AEED15C001ULL
 
@@ -132,14 +132,14 @@ static struct sk_buff *mlx5e_test_get_udp_skb(struct mlx5e_priv *priv)
 	skb_reserve(skb, NET_IP_ALIGN);
 
 	/*  Reserve for ethernet and IP header  */
-	ethh = skb_push(skb, ETH_HLEN);
+	ethh = (struct ethhdr *)skb_push(skb, ETH_HLEN);
 	skb_reset_mac_header(skb);
 
 	skb_set_network_header(skb, skb->len);
-	iph = skb_put(skb, sizeof(struct iphdr));
+	iph = (struct iphdr *)skb_put(skb, sizeof(struct iphdr));
 
 	skb_set_transport_header(skb, skb->len);
-	udph = skb_put(skb, sizeof(struct udphdr));
+	udph = (struct udphdr *)skb_put(skb, sizeof(struct udphdr));
 
 	/* Fill ETH header */
 	ether_addr_copy(ethh->h_dest, priv->netdev->dev_addr);
@@ -167,12 +167,12 @@ static struct sk_buff *mlx5e_test_get_udp_skb(struct mlx5e_priv *priv)
 	ip_send_check(iph);
 
 	/* Fill test header and data */
-	mlxh = skb_put(skb, sizeof(*mlxh));
+	mlxh = (struct mlx5ehdr *)skb_put(skb, sizeof(*mlxh));
 	mlxh->version = 0;
 	mlxh->magic = cpu_to_be64(MLX5E_TEST_MAGIC);
 	strlcpy(mlxh->text, mlx5e_test_text, sizeof(mlxh->text));
 	datalen -= sizeof(*mlxh);
-	skb_put_zero(skb, datalen);
+	memset(skb_put(skb, datalen), 0, datalen);
 
 	skb->csum = 0;
 	skb->ip_summed = CHECKSUM_PARTIAL;
@@ -189,7 +189,6 @@ struct mlx5e_lbt_priv {
 	struct packet_type pt;
 	struct completion comp;
 	bool loopback_ok;
-	bool local_lb;
 };
 
 static int
@@ -216,8 +215,7 @@ mlx5e_test_loopback_validate(struct sk_buff *skb,
 	if (iph->protocol != IPPROTO_UDP)
 		goto out;
 
-	/* Don't assume skb_transport_header() was set */
-	udph = (struct udphdr *)((u8 *)iph + 4 * iph->ihl);
+	udph = udp_hdr(skb);
 	if (udph->dest != htons(9))
 		goto out;
 
@@ -238,20 +236,9 @@ static int mlx5e_test_loopback_setup(struct mlx5e_priv *priv,
 {
 	int err = 0;
 
-	/* Temporarily enable local_lb */
-	err = mlx5_nic_vport_query_local_lb(priv->mdev, &lbtp->local_lb);
-	if (err)
-		return err;
-
-	if (!lbtp->local_lb) {
-		err = mlx5_nic_vport_update_local_lb(priv->mdev, true);
-		if (err)
-			return err;
-	}
-
 	err = mlx5e_refresh_tirs(priv, true);
 	if (err)
-		goto out;
+		return err;
 
 	lbtp->loopback_ok = false;
 	init_completion(&lbtp->comp);
@@ -261,22 +248,12 @@ static int mlx5e_test_loopback_setup(struct mlx5e_priv *priv,
 	lbtp->pt.dev = priv->netdev;
 	lbtp->pt.af_packet_priv = lbtp;
 	dev_add_pack(&lbtp->pt);
-
-	return 0;
-
-out:
-	if (!lbtp->local_lb)
-		mlx5_nic_vport_update_local_lb(priv->mdev, false);
-
 	return err;
 }
 
 static void mlx5e_test_loopback_cleanup(struct mlx5e_priv *priv,
 					struct mlx5e_lbt_priv *lbtp)
 {
-	if (!lbtp->local_lb)
-		mlx5_nic_vport_update_local_lb(priv->mdev, false);
-
 	dev_remove_pack(&lbtp->pt);
 	mlx5e_refresh_tirs(priv, false);
 }
@@ -290,7 +267,7 @@ static int mlx5e_test_loopback(struct mlx5e_priv *priv)
 
 	if (!test_bit(MLX5E_STATE_OPENED, &priv->state)) {
 		netdev_err(priv->netdev,
-			   "\tCan't perform loopback test while device is down\n");
+			   "\tCan't perform loobpack test while device is down\n");
 		return -ENODEV;
 	}
 

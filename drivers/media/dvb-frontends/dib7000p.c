@@ -16,8 +16,8 @@
 #include <linux/mutex.h>
 #include <asm/div64.h>
 
-#include <media/dvb_math.h>
-#include <media/dvb_frontend.h>
+#include "dvb_math.h"
+#include "dvb_frontend.h"
 
 #include "dib7000p.h"
 
@@ -279,10 +279,10 @@ static int dib7000p_set_power_mode(struct dib7000p_state *state, enum dib7000p_p
 		if (state->version != SOC7090)
 			reg_1280 &= ~((1 << 11));
 		reg_1280 &= ~(1 << 6);
-		/* fall-through */
-	case DIB7000P_POWER_INTERFACE_ONLY:
+		/* fall through wanted to enable the interfaces */
+
 		/* just leave power on the control-interfaces: GPIO and (I2C or SDIO) */
-		/* TODO power up either SDIO or I2C */
+	case DIB7000P_POWER_INTERFACE_ONLY:	/* TODO power up either SDIO or I2C */
 		if (state->version == SOC7090)
 			reg_1280 &= ~((1 << 7) | (1 << 5));
 		else
@@ -809,7 +809,7 @@ static int dib7000p_set_dds(struct dib7000p_state *state, s32 offset_khz)
 {
 	u32 internal = dib7000p_get_internal_freq(state);
 	s32 unit_khz_dds_val;
-	u32 abs_offset_khz = abs(offset_khz);
+	u32 abs_offset_khz = ABS(offset_khz);
 	u32 dds = state->cfg.bw->ifreq & 0x1ffffff;
 	u8 invert = !!(state->cfg.bw->ifreq & (1 << 25));
 	if (internal == 0) {
@@ -2018,10 +2018,10 @@ static int dib7000pc_detection(struct i2c_adapter *i2c_adap)
 	};
 	int ret = 0;
 
-	tx = kzalloc(2, GFP_KERNEL);
+	tx = kzalloc(2*sizeof(u8), GFP_KERNEL);
 	if (!tx)
 		return -ENOMEM;
-	rx = kzalloc(2, GFP_KERNEL);
+	rx = kzalloc(2*sizeof(u8), GFP_KERNEL);
 	if (!rx) {
 		ret = -ENOMEM;
 		goto rx_memory_error;
@@ -2388,7 +2388,7 @@ static u32 dib7000p_i2c_func(struct i2c_adapter *adapter)
 	return I2C_FUNC_I2C;
 }
 
-static const struct i2c_algorithm dib7090_tuner_xfer_algo = {
+static struct i2c_algorithm dib7090_tuner_xfer_algo = {
 	.master_xfer = dib7090_tuner_xfer,
 	.functionality = dib7000p_i2c_func,
 };

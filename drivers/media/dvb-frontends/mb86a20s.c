@@ -17,7 +17,7 @@
 #include <linux/kernel.h>
 #include <asm/div64.h>
 
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 #include "mb86a20s.h"
 
 #define NUM_LAYERS 3
@@ -2055,9 +2055,9 @@ static void mb86a20s_release(struct dvb_frontend *fe)
 	kfree(state);
 }
 
-static enum dvbfe_algo mb86a20s_get_frontend_algo(struct dvb_frontend *fe)
+static int mb86a20s_get_frontend_algo(struct dvb_frontend *fe)
 {
-	return DVBFE_ALGO_HW;
+        return DVBFE_ALGO_HW;
 }
 
 static const struct dvb_frontend_ops mb86a20s_ops;
@@ -2071,9 +2071,12 @@ struct dvb_frontend *mb86a20s_attach(const struct mb86a20s_config *config,
 	dev_dbg(&i2c->dev, "%s called.\n", __func__);
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
-	if (!state)
-		return NULL;
+	state = kzalloc(sizeof(struct mb86a20s_state), GFP_KERNEL);
+	if (state == NULL) {
+		dev_err(&i2c->dev,
+			"%s: unable to allocate memory for state\n", __func__);
+		goto error;
+	}
 
 	/* setup the state */
 	state->config = config;
@@ -2086,16 +2089,22 @@ struct dvb_frontend *mb86a20s_attach(const struct mb86a20s_config *config,
 
 	/* Check if it is a mb86a20s frontend */
 	rev = mb86a20s_readreg(state, 0);
-	if (rev != 0x13) {
-		kfree(state);
+
+	if (rev == 0x13) {
+		dev_info(&i2c->dev,
+			 "Detected a Fujitsu mb86a20s frontend\n");
+	} else {
 		dev_dbg(&i2c->dev,
 			"Frontend revision %d is unknown - aborting.\n",
 		       rev);
-		return NULL;
+		goto error;
 	}
 
-	dev_info(&i2c->dev, "Detected a Fujitsu mb86a20s frontend\n");
 	return &state->frontend;
+
+error:
+	kfree(state);
+	return NULL;
 }
 EXPORT_SYMBOL(mb86a20s_attach);
 

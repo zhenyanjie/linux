@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/hfsplus/dir.c
  *
@@ -122,7 +121,8 @@ again:
 	if (S_ISREG(inode->i_mode))
 		HFSPLUS_I(inode)->linkid = linkid;
 out:
-	return d_splice_alias(inode, dentry);
+	d_add(dentry, inode);
+	return NULL;
 fail:
 	hfs_find_exit(&fd);
 	return ERR_PTR(err);
@@ -443,7 +443,7 @@ static int hfsplus_symlink(struct inode *dir, struct dentry *dentry,
 	int res = -ENOMEM;
 
 	mutex_lock(&sbi->vh_mutex);
-	inode = hfsplus_new_inode(dir->i_sb, dir, S_IFLNK | S_IRWXUGO);
+	inode = hfsplus_new_inode(dir->i_sb, S_IFLNK | S_IRWXUGO);
 	if (!inode)
 		goto out;
 
@@ -485,7 +485,7 @@ static int hfsplus_mknod(struct inode *dir, struct dentry *dentry,
 	int res = -ENOMEM;
 
 	mutex_lock(&sbi->vh_mutex);
-	inode = hfsplus_new_inode(dir->i_sb, dir, mode);
+	inode = hfsplus_new_inode(dir->i_sb, mode);
 	if (!inode)
 		goto out;
 

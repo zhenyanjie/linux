@@ -21,7 +21,7 @@
  *
  *
  *  libata documentation is available via 'make {ps|pdf}docs',
- *  as Documentation/driver-api/libata.rst
+ *  as Documentation/DocBook/libata.*
  *
  */
 
@@ -51,7 +51,7 @@ extern int atapi_passthru16;
 extern int libata_fua;
 extern int libata_noacpi;
 extern int libata_allow_tpm;
-extern const struct device_type ata_port_type;
+extern struct device_type ata_port_type;
 extern struct ata_link *ata_dev_phys_link(struct ata_device *dev);
 extern void ata_force_cbl(struct ata_port *ap);
 extern u64 ata_tf_to_lba(const struct ata_taskfile *tf);
@@ -98,10 +98,6 @@ extern struct ata_port *ata_port_alloc(struct ata_host *host);
 extern const char *sata_spd_string(unsigned int spd);
 extern int ata_port_probe(struct ata_port *ap);
 extern void __ata_port_probe(struct ata_port *ap);
-extern unsigned int ata_read_log_page(struct ata_device *dev, u8 log,
-				      u8 page, void *buf, unsigned int sectors);
-extern void ata_host_get(struct ata_host *host);
-extern void ata_host_put(struct ata_host *host);
 
 #define to_ata_port(d) container_of(d, struct ata_port, tdev)
 
@@ -156,7 +152,7 @@ extern void ata_internal_cmd_timed_out(struct ata_device *dev, u8 cmd);
 extern void ata_eh_acquire(struct ata_port *ap);
 extern void ata_eh_release(struct ata_port *ap);
 extern void ata_scsi_error(struct Scsi_Host *host);
-extern void ata_eh_fastdrain_timerfn(struct timer_list *t);
+extern void ata_eh_fastdrain_timerfn(unsigned long arg);
 extern void ata_qc_schedule_eh(struct ata_queued_cmd *qc);
 extern void ata_dev_disable(struct ata_device *dev);
 extern void ata_eh_detach_dev(struct ata_device *dev);
@@ -164,6 +160,8 @@ extern void ata_eh_about_to_do(struct ata_link *link, struct ata_device *dev,
 			       unsigned int action);
 extern void ata_eh_done(struct ata_link *link, struct ata_device *dev,
 			unsigned int action);
+extern unsigned int ata_read_log_page(struct ata_device *dev, u8 log,
+				      u8 page, void *buf, unsigned int sectors);
 extern void ata_eh_autopsy(struct ata_port *ap);
 const char *ata_get_cmd_descript(u8 command);
 extern void ata_eh_report(struct ata_port *ap);

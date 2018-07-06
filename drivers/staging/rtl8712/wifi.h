@@ -170,10 +170,8 @@ enum WIFI_REG_DOMAIN {
 	*(__le16 *)(pbuf) &= (~cpu_to_le16(_FROM_DS_)); \
 })
 
-static inline unsigned char get_tofr_ds(unsigned char *pframe)
-{
-	return ((GetToDs(pframe) << 1) | GetFrDs(pframe));
-}
+#define get_tofr_ds(pframe)	((GetToDs(pframe) << 1) | GetFrDs(pframe))
+
 
 #define SetMFrag(pbuf) ({ \
 	*(__le16 *)(pbuf) |= cpu_to_le16(_MORE_FRAG_); \

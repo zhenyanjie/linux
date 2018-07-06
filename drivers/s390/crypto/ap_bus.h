@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright IBM Corp. 2006, 2012
  * Author(s): Cornelia Huck <cornelia.huck@de.ibm.com>
@@ -8,6 +7,20 @@
  *	      Holger Dengler <hd@linux.vnet.ibm.com>
  *
  * Adjunct processor bus header file.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #ifndef _AP_BUS_H_
@@ -15,9 +28,8 @@
 
 #include <linux/device.h>
 #include <linux/types.h>
-#include <asm/ap.h>
 
-#define AP_DEVICES 256		/* Number of AP devices. */
+#define AP_DEVICES 64		/* Number of AP devices. */
 #define AP_DOMAINS 256		/* Number of AP domains. */
 #define AP_RESET_TIMEOUT (HZ*0.7)	/* Time in ticks for reset timeouts. */
 #define AP_CONFIG_TIME 30	/* Time in seconds between AP bus rescans. */
@@ -27,6 +39,41 @@ extern int ap_domain_index;
 
 extern spinlock_t ap_list_lock;
 extern struct list_head ap_card_list;
+
+/**
+ * The ap_qid_t identifier of an ap queue. It contains a
+ * 6 bit card index and a 4 bit queue index (domain).
+ */
+typedef unsigned int ap_qid_t;
+
+#define AP_MKQID(_card, _queue) (((_card) & 63) << 8 | ((_queue) & 255))
+#define AP_QID_CARD(_qid) (((_qid) >> 8) & 63)
+#define AP_QID_QUEUE(_qid) ((_qid) & 255)
+
+/**
+ * structy ap_queue_status - Holds the AP queue status.
+ * @queue_empty: Shows if queue is empty
+ * @replies_waiting: Waiting replies
+ * @queue_full: Is 1 if the queue is full
+ * @pad: A 4 bit pad
+ * @int_enabled: Shows if interrupts are enabled for the AP
+ * @response_code: Holds the 8 bit response code
+ * @pad2: A 16 bit pad
+ *
+ * The ap queue status word is returned by all three AP functions
+ * (PQAP, NQAP and DQAP).  There's a set of flags in the first
+ * byte, followed by a 1 byte response code.
+ */
+struct ap_queue_status {
+	unsigned int queue_empty	: 1;
+	unsigned int replies_waiting	: 1;
+	unsigned int queue_full		: 1;
+	unsigned int pad1		: 4;
+	unsigned int int_enabled	: 1;
+	unsigned int response_code	: 8;
+	unsigned int pad2		: 16;
+} __packed;
+
 
 static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 {
@@ -191,6 +238,17 @@ struct ap_message {
 			struct ap_message *);
 };
 
+struct ap_config_info {
+	unsigned int special_command:1;
+	unsigned int ap_extended:1;
+	unsigned char reserved1:6;
+	unsigned char reserved2[15];
+	unsigned int apm[8];		/* AP ID mask */
+	unsigned int aqm[8];		/* AP queue mask */
+	unsigned int adm[8];		/* AP domain mask */
+	unsigned char reserved4[16];
+} __packed;
+
 /**
  * ap_init_message() - Initialize ap_message.
  * Initialize a message before using. Otherwise this might result in
@@ -198,18 +256,11 @@ struct ap_message {
  */
 static inline void ap_init_message(struct ap_message *ap_msg)
 {
-	memset(ap_msg, 0, sizeof(*ap_msg));
-}
-
-/**
- * ap_release_message() - Release ap_message.
- * Releases all memory used internal within the ap_message struct
- * Currently this is the message and private field.
- */
-static inline void ap_release_message(struct ap_message *ap_msg)
-{
-	kzfree(ap_msg->message);
-	kzfree(ap_msg->private);
+	ap_msg->psmid = 0;
+	ap_msg->length = 0;
+	ap_msg->rc = 0;
+	ap_msg->special = 0;
+	ap_msg->receive = NULL;
 }
 
 #define for_each_ap_card(_ac) \
@@ -235,7 +286,7 @@ void ap_flush_queue(struct ap_queue *aq);
 
 void *ap_airq_ptr(void);
 void ap_wait(enum ap_wait wait);
-void ap_request_timeout(struct timer_list *t);
+void ap_request_timeout(unsigned long data);
 void ap_bus_force_rescan(void);
 
 void ap_queue_init_reply(struct ap_queue *aq, struct ap_message *ap_msg);
@@ -244,7 +295,10 @@ void ap_queue_remove(struct ap_queue *aq);
 void ap_queue_suspend(struct ap_device *ap_dev);
 void ap_queue_resume(struct ap_device *ap_dev);
 
-struct ap_card *ap_card_create(int id, int queue_depth, int raw_device_type,
-			       int comp_device_type, unsigned int functions);
+struct ap_card *ap_card_create(int id, int queue_depth, int device_type,
+			       unsigned int device_functions);
+
+int ap_module_init(void);
+void ap_module_exit(void);
 
 #endif /* _AP_BUS_H_ */

@@ -20,18 +20,6 @@
 
 static bool msm_gem_shrinker_lock(struct drm_device *dev, bool *unlock)
 {
-	/* NOTE: we are *closer* to being able to get rid of
-	 * mutex_trylock_recursive().. the msm_gem code itself does
-	 * not need struct_mutex, although codepaths that can trigger
-	 * shrinker are still called in code-paths that hold the
-	 * struct_mutex.
-	 *
-	 * Also, msm_obj->madv is protected by struct_mutex.
-	 *
-	 * The next step is probably split out a seperate lock for
-	 * protecting inactive_list, so that shrinker does not need
-	 * struct_mutex.
-	 */
 	switch (mutex_trylock_recursive(&dev->struct_mutex)) {
 	case MUTEX_TRYLOCK_FAILED:
 		return false;
@@ -89,7 +77,7 @@ msm_gem_shrinker_scan(struct shrinker *shrinker, struct shrink_control *sc)
 		if (freed >= sc->nr_to_scan)
 			break;
 		if (is_purgeable(msm_obj)) {
-			msm_gem_purge(&msm_obj->base, OBJ_LOCK_SHRINKER);
+			msm_gem_purge(&msm_obj->base);
 			freed += msm_obj->base.size >> PAGE_SHIFT;
 		}
 	}
@@ -118,7 +106,7 @@ msm_gem_shrinker_vmap(struct notifier_block *nb, unsigned long event, void *ptr)
 
 	list_for_each_entry(msm_obj, &priv->inactive_list, mm_list) {
 		if (is_vunmapable(msm_obj)) {
-			msm_gem_vunmap(&msm_obj->base, OBJ_LOCK_SHRINKER);
+			msm_gem_vunmap(&msm_obj->base);
 			/* since we don't know any better, lets bail after a few
 			 * and if necessary the shrinker will be invoked again.
 			 * Seems better than unmapping *everything*

@@ -51,8 +51,7 @@ static u32 seq_scale(u32 seq)
 #endif
 
 #if IS_ENABLED(CONFIG_IPV6)
-u32 secure_tcpv6_ts_off(const struct net *net,
-			const __be32 *saddr, const __be32 *daddr)
+u32 secure_tcpv6_ts_off(const __be32 *saddr, const __be32 *daddr)
 {
 	const struct {
 		struct in6_addr saddr;
@@ -62,7 +61,7 @@ u32 secure_tcpv6_ts_off(const struct net *net,
 		.daddr = *(struct in6_addr *)daddr,
 	};
 
-	if (net->ipv4.sysctl_tcp_timestamps != 1)
+	if (sysctl_tcp_timestamps != 1)
 		return 0;
 
 	ts_secret_init();
@@ -114,9 +113,9 @@ EXPORT_SYMBOL(secure_ipv6_port_ephemeral);
 #endif
 
 #ifdef CONFIG_INET
-u32 secure_tcp_ts_off(const struct net *net, __be32 saddr, __be32 daddr)
+u32 secure_tcp_ts_off(__be32 saddr, __be32 daddr)
 {
-	if (net->ipv4.sysctl_tcp_timestamps != 1)
+	if (sysctl_tcp_timestamps != 1)
 		return 0;
 
 	ts_secret_init();

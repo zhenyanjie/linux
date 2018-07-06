@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2016, Linaro Ltd.
  * Copyright (c) 2012, Michal Simek <monstr@monstr.eu>
@@ -8,6 +7,15 @@
  *
  * Based on rpmsg performance statistics driver by Michal Simek, which in turn
  * was based on TI & Google OMX rpmsg driver.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 #include <linux/cdev.h>
 #include <linux/device.h>
@@ -108,7 +116,7 @@ static int rpmsg_ept_cb(struct rpmsg_device *rpdev, void *buf, int len,
 	if (!skb)
 		return -ENOMEM;
 
-	skb_put_data(skb, buf, len);
+	memcpy(skb_put(skb, len), buf, len);
 
 	spin_lock(&eptdev->queue_lock);
 	skb_queue_tail(&eptdev->queue, skb);
@@ -248,18 +256,18 @@ free_kbuf:
 	return ret < 0 ? ret : len;
 }
 
-static __poll_t rpmsg_eptdev_poll(struct file *filp, poll_table *wait)
+static unsigned int rpmsg_eptdev_poll(struct file *filp, poll_table *wait)
 {
 	struct rpmsg_eptdev *eptdev = filp->private_data;
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 
 	if (!eptdev->ept)
-		return EPOLLERR;
+		return POLLERR;
 
 	poll_wait(filp, &eptdev->readq, wait);
 
 	if (!skb_queue_empty(&eptdev->queue))
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 
 	mask |= rpmsg_poll(eptdev->ept, filp, wait);
 
@@ -382,7 +390,7 @@ static int rpmsg_eptdev_create(struct rpmsg_ctrldev *ctrldev,
 
 	ret = device_add(dev);
 	if (ret) {
-		dev_err(dev, "device_add failed: %d\n", ret);
+		dev_err(dev, "device_register failed: %d\n", ret);
 		put_device(dev);
 	}
 
@@ -497,7 +505,7 @@ static int rpmsg_chrdev_probe(struct rpmsg_device *rpdev)
 
 	ret = device_add(dev);
 	if (ret) {
-		dev_err(&rpdev->dev, "device_add failed: %d\n", ret);
+		dev_err(&rpdev->dev, "device_register failed: %d\n", ret);
 		put_device(dev);
 	}
 
@@ -573,6 +581,4 @@ static void rpmsg_chrdev_exit(void)
 	unregister_chrdev_region(rpmsg_major, RPMSG_DEV_MAX);
 }
 module_exit(rpmsg_chrdev_exit);
-
-MODULE_ALIAS("rpmsg:rpmsg_chrdev");
 MODULE_LICENSE("GPL v2");

@@ -28,9 +28,6 @@
 #ifdef CONFIG_MIPS_MALTA
 #undef CONFIG_CPU_HAS_PREFETCH
 #endif
-#ifdef CONFIG_CPU_MIPSR6
-#undef CONFIG_CPU_HAS_PREFETCH
-#endif
 
 #include <asm/asm.h>
 #include <asm/asm-offsets.h>

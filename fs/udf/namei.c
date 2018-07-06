@@ -164,8 +164,7 @@ static struct fileIdentDesc *udf_find_entry(struct inode *dir,
 {
 	struct fileIdentDesc *fi = NULL;
 	loff_t f_pos;
-	udf_pblk_t block;
-	int flen;
+	int block, flen;
 	unsigned char *fname = NULL, *copy_name = NULL;
 	unsigned char *nameptr;
 	uint8_t lfi;
@@ -351,7 +350,9 @@ static struct fileIdentDesc *udf_add_entry(struct inode *dir,
 	loff_t f_pos;
 	loff_t size = udf_ext0_offset(dir) + dir->i_size;
 	int nfidlen;
-	udf_pblk_t block;
+	uint8_t lfi;
+	uint16_t liu;
+	int block;
 	struct kernel_lb_addr eloc;
 	uint32_t elen = 0;
 	sector_t offset;
@@ -381,7 +382,7 @@ static struct fileIdentDesc *udf_add_entry(struct inode *dir,
 		namelen = 0;
 	}
 
-	nfidlen = ALIGN(sizeof(struct fileIdentDesc) + namelen, UDF_NAME_PAD);
+	nfidlen = (sizeof(struct fileIdentDesc) + namelen + 3) & ~3;
 
 	f_pos = udf_ext0_offset(dir);
 
@@ -422,8 +423,12 @@ static struct fileIdentDesc *udf_add_entry(struct inode *dir,
 			goto out_err;
 		}
 
+		liu = le16_to_cpu(cfi->lengthOfImpUse);
+		lfi = cfi->lengthFileIdent;
+
 		if ((cfi->fileCharacteristics & FID_FILE_CHAR_DELETED) != 0) {
-			if (udf_dir_entry_len(cfi) == nfidlen) {
+			if (((sizeof(struct fileIdentDesc) +
+					liu + lfi + 3) & ~3) == nfidlen) {
 				cfi->descTag.tagSerialNum = cpu_to_le16(1);
 				cfi->fileVersionNum = cpu_to_le16(1);
 				cfi->fileCharacteristics = 0;
@@ -616,7 +621,8 @@ static int udf_add_nondir(struct dentry *dentry, struct inode *inode)
 	if (fibh.sbh != fibh.ebh)
 		brelse(fibh.ebh);
 	brelse(fibh.sbh);
-	d_instantiate_new(dentry, inode);
+	unlock_new_inode(inode);
+	d_instantiate(dentry, inode);
 
 	return 0;
 }
@@ -726,7 +732,8 @@ static int udf_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	inc_nlink(dir);
 	dir->i_ctime = dir->i_mtime = current_time(dir);
 	mark_inode_dirty(dir);
-	d_instantiate_new(dentry, inode);
+	unlock_new_inode(inode);
+	d_instantiate(dentry, inode);
 	if (fibh.sbh != fibh.ebh)
 		brelse(fibh.ebh);
 	brelse(fibh.sbh);
@@ -742,7 +749,7 @@ static int empty_dir(struct inode *dir)
 	struct udf_fileident_bh fibh;
 	loff_t f_pos;
 	loff_t size = udf_ext0_offset(dir) + dir->i_size;
-	udf_pblk_t block;
+	int block;
 	struct kernel_lb_addr eloc;
 	uint32_t elen;
 	sector_t offset;
@@ -832,7 +839,7 @@ static int udf_rmdir(struct inode *dir, struct dentry *dentry)
 	if (retval)
 		goto end_rmdir;
 	if (inode->i_nlink != 2)
-		udf_warn(inode->i_sb, "empty directory has nlink != 2 (%u)\n",
+		udf_warn(inode->i_sb, "empty directory has nlink != 2 (%d)\n",
 			 inode->i_nlink);
 	clear_nlink(inode);
 	inode->i_size = 0;
@@ -874,7 +881,7 @@ static int udf_unlink(struct inode *dir, struct dentry *dentry)
 		goto end_unlink;
 
 	if (!inode->i_nlink) {
-		udf_debug("Deleting nonexistent file (%lu), %u\n",
+		udf_debug("Deleting nonexistent file (%lu), %d\n",
 			  inode->i_ino, inode->i_nlink);
 		set_nlink(inode, 1);
 	}
@@ -906,7 +913,7 @@ static int udf_symlink(struct inode *dir, struct dentry *dentry,
 	int eoffset, elen = 0;
 	uint8_t *ea;
 	int err;
-	udf_pblk_t block;
+	int block;
 	unsigned char *name = NULL;
 	int namelen;
 	struct udf_inode_info *iinfo;
@@ -1177,7 +1184,7 @@ static int udf_rename(struct inode *old_dir, struct dentry *old_dentry,
 	 */
 	ncfi.fileVersionNum = ocfi.fileVersionNum;
 	ncfi.fileCharacteristics = ocfi.fileCharacteristics;
-	memcpy(&(ncfi.icb), &(ocfi.icb), sizeof(ocfi.icb));
+	memcpy(&(ncfi.icb), &(ocfi.icb), sizeof(struct long_ad));
 	udf_write_fi(new_dir, &ncfi, nfi, &nfibh, NULL, NULL);
 
 	/* The old fid may have moved - find it again */
@@ -1195,7 +1202,9 @@ static int udf_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	if (dir_fi) {
 		dir_fi->icb.extLocation = cpu_to_lelb(UDF_I(new_dir)->i_location);
-		udf_update_tag((char *)dir_fi, udf_dir_entry_len(dir_fi));
+		udf_update_tag((char *)dir_fi,
+				(sizeof(struct fileIdentDesc) +
+				le16_to_cpu(dir_fi->lengthOfImpUse) + 3) & ~3);
 		if (old_iinfo->i_alloc_type == ICBTAG_FLAG_AD_IN_ICB)
 			mark_inode_dirty(old_inode);
 		else

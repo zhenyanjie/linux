@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2013 Trond Myklebust <Trond.Myklebust@netapp.com>
  */
@@ -202,13 +201,17 @@ DECLARE_EVENT_CLASS(nfs4_clientid_event,
 		TP_ARGS(clp, error),
 
 		TP_STRUCT__entry(
-			__string(dstaddr, clp->cl_hostname)
+			__string(dstaddr,
+				rpc_peeraddr2str(clp->cl_rpcclient,
+					RPC_DISPLAY_ADDR))
 			__field(int, error)
 		),
 
 		TP_fast_assign(
 			__entry->error = error;
-			__assign_str(dstaddr, clp->cl_hostname);
+			__assign_str(dstaddr,
+				rpc_peeraddr2str(clp->cl_rpcclient,
+						RPC_DISPLAY_ADDR));
 		),
 
 		TP_printk(
@@ -888,35 +891,6 @@ DEFINE_NFS4_LOOKUP_EVENT(nfs4_remove);
 DEFINE_NFS4_LOOKUP_EVENT(nfs4_get_fs_locations);
 DEFINE_NFS4_LOOKUP_EVENT(nfs4_secinfo);
 
-TRACE_EVENT(nfs4_lookupp,
-		TP_PROTO(
-			const struct inode *inode,
-			int error
-		),
-
-		TP_ARGS(inode, error),
-
-		TP_STRUCT__entry(
-			__field(dev_t, dev)
-			__field(u64, ino)
-			__field(int, error)
-		),
-
-		TP_fast_assign(
-			__entry->dev = inode->i_sb->s_dev;
-			__entry->ino = NFS_FILEID(inode);
-			__entry->error = error;
-		),
-
-		TP_printk(
-			"error=%d (%s) inode=%02x:%02x:%llu",
-			__entry->error,
-			show_nfsv4_errors(__entry->error),
-			MAJOR(__entry->dev), MINOR(__entry->dev),
-			(unsigned long long)__entry->ino
-		)
-);
-
 TRACE_EVENT(nfs4_rename,
 		TP_PROTO(
 			const struct inode *olddir,
@@ -1062,8 +1036,6 @@ DECLARE_EVENT_CLASS(nfs4_inode_stateid_event,
 
 DEFINE_NFS4_INODE_STATEID_EVENT(nfs4_setattr);
 DEFINE_NFS4_INODE_STATEID_EVENT(nfs4_delegreturn);
-DEFINE_NFS4_INODE_STATEID_EVENT(nfs4_open_stateid_update);
-DEFINE_NFS4_INODE_STATEID_EVENT(nfs4_open_stateid_update_wait);
 
 DECLARE_EVENT_CLASS(nfs4_getattr_event,
 		TP_PROTO(
@@ -1131,7 +1103,9 @@ DECLARE_EVENT_CLASS(nfs4_inode_callback_event,
 			__field(dev_t, dev)
 			__field(u32, fhandle)
 			__field(u64, fileid)
-			__string(dstaddr, clp ? clp->cl_hostname : "unknown")
+			__string(dstaddr, clp ?
+				rpc_peeraddr2str(clp->cl_rpcclient,
+					RPC_DISPLAY_ADDR) : "unknown")
 		),
 
 		TP_fast_assign(
@@ -1144,7 +1118,9 @@ DECLARE_EVENT_CLASS(nfs4_inode_callback_event,
 				__entry->fileid = 0;
 				__entry->dev = 0;
 			}
-			__assign_str(dstaddr, clp ? clp->cl_hostname : "unknown")
+			__assign_str(dstaddr, clp ?
+				rpc_peeraddr2str(clp->cl_rpcclient,
+					RPC_DISPLAY_ADDR) : "unknown")
 		),
 
 		TP_printk(
@@ -1186,7 +1162,9 @@ DECLARE_EVENT_CLASS(nfs4_inode_stateid_callback_event,
 			__field(dev_t, dev)
 			__field(u32, fhandle)
 			__field(u64, fileid)
-			__string(dstaddr, clp ? clp->cl_hostname : "unknown")
+			__string(dstaddr, clp ?
+				rpc_peeraddr2str(clp->cl_rpcclient,
+					RPC_DISPLAY_ADDR) : "unknown")
 			__field(int, stateid_seq)
 			__field(u32, stateid_hash)
 		),
@@ -1201,7 +1179,9 @@ DECLARE_EVENT_CLASS(nfs4_inode_stateid_callback_event,
 				__entry->fileid = 0;
 				__entry->dev = 0;
 			}
-			__assign_str(dstaddr, clp ? clp->cl_hostname : "unknown")
+			__assign_str(dstaddr, clp ?
+				rpc_peeraddr2str(clp->cl_rpcclient,
+					RPC_DISPLAY_ADDR) : "unknown")
 			__entry->stateid_seq =
 				be32_to_cpu(stateid->seqid);
 			__entry->stateid_hash =

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_MMZONE_H
 #define _LINUX_MMZONE_H
 
@@ -115,20 +114,6 @@ struct zone_padding {
 #define ZONE_PADDING(name)
 #endif
 
-#ifdef CONFIG_NUMA
-enum numa_stat_item {
-	NUMA_HIT,		/* allocated in intended node */
-	NUMA_MISS,		/* allocated in non intended node */
-	NUMA_FOREIGN,		/* was intended here, hit elsewhere */
-	NUMA_INTERLEAVE_HIT,	/* interleaver preferred this zone */
-	NUMA_LOCAL,		/* allocation from local node */
-	NUMA_OTHER,		/* allocation from other node */
-	NR_VM_NUMA_STAT_ITEMS
-};
-#else
-#define NR_VM_NUMA_STAT_ITEMS 0
-#endif
-
 enum zone_stat_item {
 	/* First 128 byte cacheline (assuming 64 bit words) */
 	NR_FREE_PAGES,
@@ -140,12 +125,22 @@ enum zone_stat_item {
 	NR_ZONE_UNEVICTABLE,
 	NR_ZONE_WRITE_PENDING,	/* Count of dirty, writeback and unstable pages */
 	NR_MLOCK,		/* mlock()ed pages found and moved off LRU */
+	NR_SLAB_RECLAIMABLE,
+	NR_SLAB_UNRECLAIMABLE,
 	NR_PAGETABLE,		/* used for pagetables */
 	NR_KERNEL_STACK_KB,	/* measured in KiB */
 	/* Second 128 byte cacheline */
 	NR_BOUNCE,
 #if IS_ENABLED(CONFIG_ZSMALLOC)
 	NR_ZSPAGES,		/* allocated in zsmalloc */
+#endif
+#ifdef CONFIG_NUMA
+	NUMA_HIT,		/* allocated in intended node */
+	NUMA_MISS,		/* allocated in non intended node */
+	NUMA_FOREIGN,		/* was intended here, hit elsewhere */
+	NUMA_INTERLEAVE_HIT,	/* interleaver preferred this zone */
+	NUMA_LOCAL,		/* allocation from local node */
+	NUMA_OTHER,		/* allocation from other node */
 #endif
 	NR_FREE_CMA_PAGES,
 	NR_VM_ZONE_STAT_ITEMS };
@@ -157,8 +152,6 @@ enum node_stat_item {
 	NR_INACTIVE_FILE,	/*  "     "     "   "       "         */
 	NR_ACTIVE_FILE,		/*  "     "     "   "       "         */
 	NR_UNEVICTABLE,		/*  "     "     "   "       "         */
-	NR_SLAB_RECLAIMABLE,
-	NR_SLAB_UNRECLAIMABLE,
 	NR_ISOLATED_ANON,	/* Temporary isolated pages from anon lru */
 	NR_ISOLATED_FILE,	/* Temporary isolated pages from file lru */
 	WORKINGSET_REFAULT,
@@ -180,7 +173,6 @@ enum node_stat_item {
 	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
 	NR_DIRTIED,		/* page dirtyings since bootup */
 	NR_WRITTEN,		/* page writings since bootup */
-	NR_INDIRECTLY_RECLAIMABLE_BYTES, /* measured in bytes */
 	NR_VM_NODE_STAT_ITEMS
 };
 
@@ -284,7 +276,6 @@ struct per_cpu_pageset {
 	struct per_cpu_pages pcp;
 #ifdef CONFIG_NUMA
 	s8 expire;
-	u16 vm_numa_stat_diff[NR_VM_NUMA_STAT_ITEMS];
 #endif
 #ifdef CONFIG_SMP
 	s8 stat_threshold;
@@ -505,7 +496,6 @@ struct zone {
 	ZONE_PADDING(_pad3_)
 	/* Zone statistics */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
-	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
 } ____cacheline_internodealigned_in_smp;
 
 enum pgdat_flags {
@@ -540,22 +530,6 @@ static inline bool zone_is_initialized(struct zone *zone)
 static inline bool zone_is_empty(struct zone *zone)
 {
 	return zone->spanned_pages == 0;
-}
-
-/*
- * Return true if [start_pfn, start_pfn + nr_pages) range has a non-empty
- * intersection with the given zone
- */
-static inline bool zone_intersects(struct zone *zone,
-		unsigned long start_pfn, unsigned long nr_pages)
-{
-	if (zone_is_empty(zone))
-		return false;
-	if (start_pfn >= zone_end_pfn(zone) ||
-	    start_pfn + nr_pages <= zone->zone_start_pfn)
-		return false;
-
-	return true;
 }
 
 /*
@@ -613,9 +587,12 @@ extern struct page *mem_map;
 #endif
 
 /*
+ * The pg_data_t structure is used in machines with CONFIG_DISCONTIGMEM
+ * (mostly NUMA machines?) to denote a higher-level memory zone than the
+ * zone denotes.
+ *
  * On NUMA machines, each NUMA node would have a pg_data_t to describe
- * it's memory layout. On UMA machines there is a single pglist_data which
- * describes the whole memory.
+ * it's memory layout.
  *
  * Memory statistics and page replacement data structures are maintained on a
  * per-zone basis.
@@ -634,15 +611,14 @@ typedef struct pglist_data {
 #ifndef CONFIG_NO_BOOTMEM
 	struct bootmem_data *bdata;
 #endif
-#if defined(CONFIG_MEMORY_HOTPLUG) || defined(CONFIG_DEFERRED_STRUCT_PAGE_INIT)
+#ifdef CONFIG_MEMORY_HOTPLUG
 	/*
 	 * Must be held any time you expect node_start_pfn, node_present_pages
 	 * or node_spanned_pages stay constant.  Holding this will also
 	 * guarantee that any pfn_valid() stays that way.
 	 *
 	 * pgdat_resize_lock() and pgdat_resize_unlock() are provided to
-	 * manipulate node_size_lock without checking for CONFIG_MEMORY_HOTPLUG
-	 * or CONFIG_DEFERRED_STRUCT_PAGE_INIT.
+	 * manipulate node_size_lock without checking for CONFIG_MEMORY_HOTPLUG.
 	 *
 	 * Nests above zone->lock and zone->span_seqlock
 	 */
@@ -702,8 +678,7 @@ typedef struct pglist_data {
 	 * is the first PFN that needs to be initialised.
 	 */
 	unsigned long first_deferred_pfn;
-	/* Number of non-deferred pages */
-	unsigned long static_init_pgcnt;
+	unsigned long static_init_size;
 #endif /* CONFIG_DEFERRED_STRUCT_PAGE_INIT */
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
@@ -714,6 +689,12 @@ typedef struct pglist_data {
 
 	/* Fields commonly accessed by the page reclaim scanner */
 	struct lruvec		lruvec;
+
+	/*
+	 * The target ratio of ACTIVE_ANON to INACTIVE_ANON pages on
+	 * this node's LRU.  Maintained by the pageout code.
+	 */
+	unsigned int inactive_ratio;
 
 	unsigned long		flags;
 
@@ -776,9 +757,9 @@ static inline bool is_dev_zone(const struct zone *zone)
 
 #include <linux/memory_hotplug.h>
 
-void build_all_zonelists(pg_data_t *pgdat);
-void wakeup_kswapd(struct zone *zone, gfp_t gfp_mask, int order,
-		   enum zone_type classzone_idx);
+extern struct mutex zonelists_mutex;
+void build_all_zonelists(pg_data_t *pgdat, struct zone *zone);
+void wakeup_kswapd(struct zone *zone, int order, enum zone_type classzone_idx);
 bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 			 int classzone_idx, unsigned int alloc_flags,
 			 long free_pages);
@@ -791,7 +772,7 @@ enum memmap_context {
 	MEMMAP_EARLY,
 	MEMMAP_HOTPLUG,
 };
-extern void init_currently_empty_zone(struct zone *zone, unsigned long start_pfn,
+extern int init_currently_empty_zone(struct zone *zone, unsigned long start_pfn,
 				     unsigned long size);
 
 extern void lruvec_init(struct lruvec *lruvec);
@@ -817,6 +798,10 @@ static inline void memory_present(int nid, unsigned long start, unsigned long en
 int local_memory_node(int node_id);
 #else
 static inline int local_memory_node(int node_id) { return node_id; };
+#endif
+
+#ifdef CONFIG_NEED_NODE_MEMMAP_SIZE
+unsigned long __init node_memmap_size_bytes(int, unsigned long, unsigned long);
 #endif
 
 /*
@@ -885,7 +870,7 @@ int min_free_kbytes_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
 int watermark_scale_factor_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
-extern int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES];
+extern int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES-1];
 int lowmem_reserve_ratio_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
 int percpu_pagelist_fraction_sysctl_handler(struct ctl_table *, int,
@@ -898,7 +883,7 @@ int sysctl_min_slab_ratio_sysctl_handler(struct ctl_table *, int,
 extern int numa_zonelist_order_handler(struct ctl_table *, int,
 			void __user *, size_t *, loff_t *);
 extern char numa_zonelist_order[];
-#define NUMA_ZONELIST_ORDER_LEN	16
+#define NUMA_ZONELIST_ORDER_LEN 16	/* string buffer size */
 
 #ifndef CONFIG_NEED_MULTIPLE_NODES
 
@@ -1057,7 +1042,6 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 	!defined(CONFIG_HAVE_MEMBLOCK_NODE_MAP)
 static inline unsigned long early_pfn_to_nid(unsigned long pfn)
 {
-	BUILD_BUG_ON(IS_ENABLED(CONFIG_NUMA));
 	return 0;
 }
 #endif
@@ -1089,14 +1073,8 @@ static inline unsigned long early_pfn_to_nid(unsigned long pfn)
 #error Allocator MAX_ORDER exceeds SECTION_SIZE
 #endif
 
-static inline unsigned long pfn_to_section_nr(unsigned long pfn)
-{
-	return pfn >> PFN_SECTION_SHIFT;
-}
-static inline unsigned long section_nr_to_pfn(unsigned long sec)
-{
-	return sec << PFN_SECTION_SHIFT;
-}
+#define pfn_to_section_nr(pfn) ((pfn) >> PFN_SECTION_SHIFT)
+#define section_nr_to_pfn(sec) ((sec) << PFN_SECTION_SHIFT)
 
 #define SECTION_ALIGN_UP(pfn)	(((pfn) + PAGES_PER_SECTION - 1) & PAGE_SECTION_MASK)
 #define SECTION_ALIGN_DOWN(pfn)	((pfn) & PAGE_SECTION_MASK)
@@ -1145,17 +1123,13 @@ struct mem_section {
 #define SECTION_ROOT_MASK	(SECTIONS_PER_ROOT - 1)
 
 #ifdef CONFIG_SPARSEMEM_EXTREME
-extern struct mem_section **mem_section;
+extern struct mem_section *mem_section[NR_SECTION_ROOTS];
 #else
 extern struct mem_section mem_section[NR_SECTION_ROOTS][SECTIONS_PER_ROOT];
 #endif
 
 static inline struct mem_section *__nr_to_section(unsigned long nr)
 {
-#ifdef CONFIG_SPARSEMEM_EXTREME
-	if (!mem_section)
-		return NULL;
-#endif
 	if (!mem_section[SECTION_NR_TO_ROOT(nr)])
 		return NULL;
 	return &mem_section[SECTION_NR_TO_ROOT(nr)][nr & SECTION_ROOT_MASK];
@@ -1165,23 +1139,14 @@ extern unsigned long usemap_size(void);
 
 /*
  * We use the lower bits of the mem_map pointer to store
- * a little bit of information.  The pointer is calculated
- * as mem_map - section_nr_to_pfn(pnum).  The result is
- * aligned to the minimum alignment of the two values:
- *   1. All mem_map arrays are page-aligned.
- *   2. section_nr_to_pfn() always clears PFN_SECTION_SHIFT
- *      lowest bits.  PFN_SECTION_SHIFT is arch-specific
- *      (equal SECTION_SIZE_BITS - PAGE_SHIFT), and the
- *      worst combination is powerpc with 256k pages,
- *      which results in PFN_SECTION_SHIFT equal 6.
- * To sum it up, at least 6 bits are available.
+ * a little bit of information.  There should be at least
+ * 3 bits here due to 32-bit alignment.
  */
 #define	SECTION_MARKED_PRESENT	(1UL<<0)
 #define SECTION_HAS_MEM_MAP	(1UL<<1)
-#define SECTION_IS_ONLINE	(1UL<<2)
-#define SECTION_MAP_LAST_BIT	(1UL<<3)
+#define SECTION_MAP_LAST_BIT	(1UL<<2)
 #define SECTION_MAP_MASK	(~(SECTION_MAP_LAST_BIT-1))
-#define SECTION_NID_SHIFT	3
+#define SECTION_NID_SHIFT	2
 
 static inline struct page *__section_mem_map_addr(struct mem_section *section)
 {
@@ -1210,29 +1175,10 @@ static inline int valid_section_nr(unsigned long nr)
 	return valid_section(__nr_to_section(nr));
 }
 
-static inline int online_section(struct mem_section *section)
-{
-	return (section && (section->section_mem_map & SECTION_IS_ONLINE));
-}
-
-static inline int online_section_nr(unsigned long nr)
-{
-	return online_section(__nr_to_section(nr));
-}
-
-#ifdef CONFIG_MEMORY_HOTPLUG
-void online_mem_sections(unsigned long start_pfn, unsigned long end_pfn);
-#ifdef CONFIG_MEMORY_HOTREMOVE
-void offline_mem_sections(unsigned long start_pfn, unsigned long end_pfn);
-#endif
-#endif
-
 static inline struct mem_section *__pfn_to_section(unsigned long pfn)
 {
 	return __nr_to_section(pfn_to_section_nr(pfn));
 }
-
-extern int __highest_present_section_nr;
 
 #ifndef CONFIG_HAVE_ARCH_PFN_VALID
 static inline int pfn_valid(unsigned long pfn)
@@ -1288,6 +1234,7 @@ struct mminit_pfnnid_cache {
 #endif
 
 void memory_present(int nid, unsigned long start, unsigned long end);
+unsigned long __init node_memmap_size_bytes(int, unsigned long, unsigned long);
 
 /*
  * If it is possible to have holes within a MAX_ORDER_NR_PAGES, then we
@@ -1304,15 +1251,10 @@ void memory_present(int nid, unsigned long start, unsigned long end);
 #ifdef CONFIG_ARCH_HAS_HOLES_MEMORYMODEL
 /*
  * pfn_valid() is meant to be able to tell if a given PFN has valid memmap
- * associated with it or not. This means that a struct page exists for this
- * pfn. The caller cannot assume the page is fully initialized in general.
- * Hotplugable pages might not have been onlined yet. pfn_to_online_page()
- * will ensure the struct page is fully online and initialized. Special pages
- * (e.g. ZONE_DEVICE) are never onlined and should be treated accordingly.
- *
- * In FLATMEM, it is expected that holes always have valid memmap as long as
- * there is valid PFNs either side of the hole. In SPARSEMEM, it is assumed
- * that a valid section has a memmap for the entire section.
+ * associated with it or not. In FLATMEM, it is expected that holes always
+ * have valid memmap as long as there is valid PFNs either side of the hole.
+ * In SPARSEMEM, it is assumed that a valid section has a memmap for the
+ * entire section.
  *
  * However, an ARM, and maybe other embedded architectures in the future
  * free memmap backing holes to save memory on the assumption the memmap is

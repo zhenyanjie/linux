@@ -267,8 +267,8 @@ extern int arch_init_kprobes(void);
 extern void show_registers(struct pt_regs *regs);
 extern void kprobes_inc_nmissed_count(struct kprobe *p);
 extern bool arch_within_kprobe_blacklist(unsigned long addr);
-extern bool arch_kprobe_on_func_entry(unsigned long offset);
-extern bool kprobe_on_func_entry(kprobe_opcode_t *addr, const char *sym, unsigned long offset);
+extern bool arch_function_offset_within_entry(unsigned long offset);
+extern bool function_offset_within_entry(kprobe_opcode_t *addr, const char *sym, unsigned long offset);
 
 extern bool within_kprobe_blacklist(unsigned long addr);
 
@@ -391,6 +391,10 @@ int register_kprobes(struct kprobe **kps, int num);
 void unregister_kprobes(struct kprobe **kps, int num);
 int setjmp_pre_handler(struct kprobe *, struct pt_regs *);
 int longjmp_break_handler(struct kprobe *, struct pt_regs *);
+int register_jprobe(struct jprobe *p);
+void unregister_jprobe(struct jprobe *p);
+int register_jprobes(struct jprobe **jps, int num);
+void unregister_jprobes(struct jprobe **jps, int num);
 void jprobe_return(void);
 unsigned long arch_deref_entry_point(void *);
 
@@ -439,6 +443,20 @@ static inline void unregister_kprobe(struct kprobe *p)
 static inline void unregister_kprobes(struct kprobe **kps, int num)
 {
 }
+static inline int register_jprobe(struct jprobe *p)
+{
+	return -ENOSYS;
+}
+static inline int register_jprobes(struct jprobe **jps, int num)
+{
+	return -ENOSYS;
+}
+static inline void unregister_jprobe(struct jprobe *p)
+{
+}
+static inline void unregister_jprobes(struct jprobe **jps, int num)
+{
+}
 static inline void jprobe_return(void)
 {
 }
@@ -468,20 +486,6 @@ static inline int enable_kprobe(struct kprobe *kp)
 	return -ENOSYS;
 }
 #endif /* CONFIG_KPROBES */
-static inline int register_jprobe(struct jprobe *p)
-{
-	return -ENOSYS;
-}
-static inline int register_jprobes(struct jprobe **jps, int num)
-{
-	return -ENOSYS;
-}
-static inline void unregister_jprobe(struct jprobe *p)
-{
-}
-static inline void unregister_jprobes(struct jprobe **jps, int num)
-{
-}
 static inline int disable_kretprobe(struct kretprobe *rp)
 {
 	return disable_kprobe(&rp->kp);
@@ -492,11 +496,11 @@ static inline int enable_kretprobe(struct kretprobe *rp)
 }
 static inline int disable_jprobe(struct jprobe *jp)
 {
-	return -ENOSYS;
+	return disable_kprobe(&jp->kp);
 }
 static inline int enable_jprobe(struct jprobe *jp)
 {
-	return -ENOSYS;
+	return enable_kprobe(&jp->kp);
 }
 
 #ifndef CONFIG_KPROBES

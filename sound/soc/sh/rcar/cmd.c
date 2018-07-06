@@ -31,7 +31,7 @@ static int rsnd_cmd_init(struct rsnd_mod *mod,
 	struct rsnd_mod *mix = rsnd_io_to_mod_mix(io);
 	struct device *dev = rsnd_priv_to_dev(priv);
 	u32 data;
-	static const u32 path[] = {
+	u32 path[] = {
 		[1] = 1 << 0,
 		[5] = 1 << 8,
 		[6] = 1 << 12,
@@ -71,7 +71,7 @@ static int rsnd_cmd_init(struct rsnd_mod *mod,
 	} else {
 		struct rsnd_mod *src = rsnd_io_to_mod_src(io);
 
-		static const u8 cmd_case[] = {
+		u8 cmd_case[] = {
 			[0] = 0x3,
 			[1] = 0x3,
 			[2] = 0x4,
@@ -81,9 +81,6 @@ static int rsnd_cmd_init(struct rsnd_mod *mod,
 			[6] = 0x1,
 			[9] = 0x2,
 		};
-
-		if (unlikely(!src))
-			return -EIO;
 
 		data = path[rsnd_mod_id(src)] |
 			cmd_case[rsnd_mod_id(src)] << 16;
@@ -125,19 +122,20 @@ static struct rsnd_mod_ops rsnd_cmd_ops = {
 	.stop	= rsnd_cmd_stop,
 };
 
-static struct rsnd_mod *rsnd_cmd_mod_get(struct rsnd_priv *priv, int id)
-{
-	if (WARN_ON(id < 0 || id >= rsnd_cmd_nr(priv)))
-		id = 0;
-
-	return rsnd_mod_get((struct rsnd_cmd *)(priv->cmd) + id);
-}
 int rsnd_cmd_attach(struct rsnd_dai_stream *io, int id)
 {
 	struct rsnd_priv *priv = rsnd_io_to_priv(io);
 	struct rsnd_mod *mod = rsnd_cmd_mod_get(priv, id);
 
 	return rsnd_dai_connect(mod, io, mod->type);
+}
+
+struct rsnd_mod *rsnd_cmd_mod_get(struct rsnd_priv *priv, int id)
+{
+	if (WARN_ON(id < 0 || id >= rsnd_cmd_nr(priv)))
+		id = 0;
+
+	return rsnd_mod_get((struct rsnd_cmd *)(priv->cmd) + id);
 }
 
 int rsnd_cmd_probe(struct rsnd_priv *priv)
@@ -155,7 +153,7 @@ int rsnd_cmd_probe(struct rsnd_priv *priv)
 	if (!nr)
 		return 0;
 
-	cmd = devm_kcalloc(dev, nr, sizeof(*cmd), GFP_KERNEL);
+	cmd = devm_kzalloc(dev, sizeof(*cmd) * nr, GFP_KERNEL);
 	if (!cmd)
 		return -ENOMEM;
 

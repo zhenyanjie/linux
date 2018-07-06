@@ -387,11 +387,11 @@ tree for more details.
 
 =head1 BUGS
 
-Report bugs to Mauro Carvalho Chehab <mchehab@kernel.org>
+Report bugs to Mauro Carvalho Chehab <mchehab@s-opensource.com>
 
 =head1 COPYRIGHT
 
-Copyright (c) 2016 by Mauro Carvalho Chehab <mchehab+samsung@kernel.org>.
+Copyright (c) 2016 by Mauro Carvalho Chehab <mchehab@s-opensource.com>.
 
 License GPLv2: GNU GPL version 2 <http://gnu.org/licenses/gpl.html>.
 

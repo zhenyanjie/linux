@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/fcntl.c
  *
@@ -23,10 +22,10 @@
 #include <linux/rcupdate.h>
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
-#include <linux/memfd.h>
+#include <linux/shmem_fs.h>
 #include <linux/compat.h>
 
-#include <linux/poll.h>
+#include <asm/poll.h>
 #include <asm/siginfo.h>
 #include <linux/uaccess.h>
 
@@ -110,34 +109,20 @@ void __f_setown(struct file *filp, struct pid *pid, enum pid_type type,
 }
 EXPORT_SYMBOL(__f_setown);
 
-int f_setown(struct file *filp, unsigned long arg, int force)
+void f_setown(struct file *filp, unsigned long arg, int force)
 {
 	enum pid_type type;
-	struct pid *pid = NULL;
-	int who = arg, ret = 0;
-
+	struct pid *pid;
+	int who = arg;
 	type = PIDTYPE_PID;
 	if (who < 0) {
-		/* avoid overflow below */
-		if (who == INT_MIN)
-			return -EINVAL;
-
 		type = PIDTYPE_PGID;
 		who = -who;
 	}
-
 	rcu_read_lock();
-	if (who) {
-		pid = find_vpid(who);
-		if (!pid)
-			ret = -ESRCH;
-	}
-
-	if (!ret)
-		__f_setown(filp, pid, type, force);
+	pid = find_vpid(who);
+	__f_setown(filp, pid, type, force);
 	rcu_read_unlock();
-
-	return ret;
 }
 EXPORT_SYMBOL(f_setown);
 
@@ -258,72 +243,9 @@ static int f_getowner_uids(struct file *filp, unsigned long arg)
 }
 #endif
 
-static bool rw_hint_valid(enum rw_hint hint)
-{
-	switch (hint) {
-	case RWF_WRITE_LIFE_NOT_SET:
-	case RWH_WRITE_LIFE_NONE:
-	case RWH_WRITE_LIFE_SHORT:
-	case RWH_WRITE_LIFE_MEDIUM:
-	case RWH_WRITE_LIFE_LONG:
-	case RWH_WRITE_LIFE_EXTREME:
-		return true;
-	default:
-		return false;
-	}
-}
-
-static long fcntl_rw_hint(struct file *file, unsigned int cmd,
-			  unsigned long arg)
-{
-	struct inode *inode = file_inode(file);
-	u64 *argp = (u64 __user *)arg;
-	enum rw_hint hint;
-	u64 h;
-
-	switch (cmd) {
-	case F_GET_FILE_RW_HINT:
-		h = file_write_hint(file);
-		if (copy_to_user(argp, &h, sizeof(*argp)))
-			return -EFAULT;
-		return 0;
-	case F_SET_FILE_RW_HINT:
-		if (copy_from_user(&h, argp, sizeof(h)))
-			return -EFAULT;
-		hint = (enum rw_hint) h;
-		if (!rw_hint_valid(hint))
-			return -EINVAL;
-
-		spin_lock(&file->f_lock);
-		file->f_write_hint = hint;
-		spin_unlock(&file->f_lock);
-		return 0;
-	case F_GET_RW_HINT:
-		h = inode->i_write_hint;
-		if (copy_to_user(argp, &h, sizeof(*argp)))
-			return -EFAULT;
-		return 0;
-	case F_SET_RW_HINT:
-		if (copy_from_user(&h, argp, sizeof(h)))
-			return -EFAULT;
-		hint = (enum rw_hint) h;
-		if (!rw_hint_valid(hint))
-			return -EINVAL;
-
-		inode_lock(inode);
-		inode->i_write_hint = hint;
-		inode_unlock(inode);
-		return 0;
-	default:
-		return -EINVAL;
-	}
-}
-
 static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		struct file *filp)
 {
-	void __user *argp = (void __user *)arg;
-	struct flock flock;
 	long err = -EINVAL;
 
 	switch (cmd) {
@@ -351,11 +273,7 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 	case F_OFD_GETLK:
 #endif
 	case F_GETLK:
-		if (copy_from_user(&flock, argp, sizeof(flock)))
-			return -EFAULT;
-		err = fcntl_getlk(filp, cmd, &flock);
-		if (!err && copy_to_user(argp, &flock, sizeof(flock)))
-			return -EFAULT;
+		err = fcntl_getlk(filp, cmd, (struct flock __user *) arg);
 		break;
 #if BITS_PER_LONG != 32
 	/* 32-bit arches must use fcntl64() */
@@ -365,9 +283,7 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		/* Fallthrough */
 	case F_SETLK:
 	case F_SETLKW:
-		if (copy_from_user(&flock, argp, sizeof(flock)))
-			return -EFAULT;
-		err = fcntl_setlk(fd, filp, cmd, &flock);
+		err = fcntl_setlk(fd, filp, cmd, (struct flock __user *) arg);
 		break;
 	case F_GETOWN:
 		/*
@@ -381,7 +297,8 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		force_successful_syscall_return();
 		break;
 	case F_SETOWN:
-		err = f_setown(filp, arg, 1);
+		f_setown(filp, arg, 1);
+		err = 0;
 		break;
 	case F_GETOWN_EX:
 		err = f_getown_ex(filp, arg);
@@ -418,13 +335,7 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		break;
 	case F_ADD_SEALS:
 	case F_GET_SEALS:
-		err = memfd_fcntl(filp, cmd, arg);
-		break;
-	case F_GET_RW_HINT:
-	case F_SET_RW_HINT:
-	case F_GET_FILE_RW_HINT:
-	case F_SET_FILE_RW_HINT:
-		err = fcntl_rw_hint(filp, cmd, arg);
+		err = shmem_fcntl(filp, cmd, arg);
 		break;
 	default:
 		break;
@@ -472,9 +383,7 @@ out:
 SYSCALL_DEFINE3(fcntl64, unsigned int, fd, unsigned int, cmd,
 		unsigned long, arg)
 {	
-	void __user *argp = (void __user *)arg;
 	struct fd f = fdget_raw(fd);
-	struct flock64 flock;
 	long err = -EBADF;
 
 	if (!f.file)
@@ -492,21 +401,14 @@ SYSCALL_DEFINE3(fcntl64, unsigned int, fd, unsigned int, cmd,
 	switch (cmd) {
 	case F_GETLK64:
 	case F_OFD_GETLK:
-		err = -EFAULT;
-		if (copy_from_user(&flock, argp, sizeof(flock)))
-			break;
-		err = fcntl_getlk64(f.file, cmd, &flock);
-		if (!err && copy_to_user(argp, &flock, sizeof(flock)))
-			err = -EFAULT;
+		err = fcntl_getlk64(f.file, cmd, (struct flock64 __user *) arg);
 		break;
 	case F_SETLK64:
 	case F_SETLKW64:
 	case F_OFD_SETLK:
 	case F_OFD_SETLKW:
-		err = -EFAULT;
-		if (copy_from_user(&flock, argp, sizeof(flock)))
-			break;
-		err = fcntl_setlk64(fd, f.file, cmd, &flock);
+		err = fcntl_setlk64(fd, f.file, cmd,
+				(struct flock64 __user *) arg);
 		break;
 	default:
 		err = do_fcntl(fd, cmd, arg, f.file);
@@ -520,59 +422,57 @@ out:
 #endif
 
 #ifdef CONFIG_COMPAT
-/* careful - don't use anywhere else */
-#define copy_flock_fields(dst, src)		\
-	(dst)->l_type = (src)->l_type;		\
-	(dst)->l_whence = (src)->l_whence;	\
-	(dst)->l_start = (src)->l_start;	\
-	(dst)->l_len = (src)->l_len;		\
-	(dst)->l_pid = (src)->l_pid;
-
-static int get_compat_flock(struct flock *kfl, const struct compat_flock __user *ufl)
+static int get_compat_flock(struct flock *kfl, struct compat_flock __user *ufl)
 {
-	struct compat_flock fl;
-
-	if (copy_from_user(&fl, ufl, sizeof(struct compat_flock)))
-		return -EFAULT;
-	copy_flock_fields(kfl, &fl);
-	return 0;
-}
-
-static int get_compat_flock64(struct flock *kfl, const struct compat_flock64 __user *ufl)
-{
-	struct compat_flock64 fl;
-
-	if (copy_from_user(&fl, ufl, sizeof(struct compat_flock64)))
-		return -EFAULT;
-	copy_flock_fields(kfl, &fl);
-	return 0;
-}
-
-static int put_compat_flock(const struct flock *kfl, struct compat_flock __user *ufl)
-{
-	struct compat_flock fl;
-
-	memset(&fl, 0, sizeof(struct compat_flock));
-	copy_flock_fields(&fl, kfl);
-	if (copy_to_user(ufl, &fl, sizeof(struct compat_flock)))
+	if (!access_ok(VERIFY_READ, ufl, sizeof(*ufl)) ||
+	    __get_user(kfl->l_type, &ufl->l_type) ||
+	    __get_user(kfl->l_whence, &ufl->l_whence) ||
+	    __get_user(kfl->l_start, &ufl->l_start) ||
+	    __get_user(kfl->l_len, &ufl->l_len) ||
+	    __get_user(kfl->l_pid, &ufl->l_pid))
 		return -EFAULT;
 	return 0;
 }
 
-static int put_compat_flock64(const struct flock *kfl, struct compat_flock64 __user *ufl)
+static int put_compat_flock(struct flock *kfl, struct compat_flock __user *ufl)
 {
-	struct compat_flock64 fl;
-
-	BUILD_BUG_ON(sizeof(kfl->l_start) > sizeof(ufl->l_start));
-	BUILD_BUG_ON(sizeof(kfl->l_len) > sizeof(ufl->l_len));
-
-	memset(&fl, 0, sizeof(struct compat_flock64));
-	copy_flock_fields(&fl, kfl);
-	if (copy_to_user(ufl, &fl, sizeof(struct compat_flock64)))
+	if (!access_ok(VERIFY_WRITE, ufl, sizeof(*ufl)) ||
+	    __put_user(kfl->l_type, &ufl->l_type) ||
+	    __put_user(kfl->l_whence, &ufl->l_whence) ||
+	    __put_user(kfl->l_start, &ufl->l_start) ||
+	    __put_user(kfl->l_len, &ufl->l_len) ||
+	    __put_user(kfl->l_pid, &ufl->l_pid))
 		return -EFAULT;
 	return 0;
 }
-#undef copy_flock_fields
+
+#ifndef HAVE_ARCH_GET_COMPAT_FLOCK64
+static int get_compat_flock64(struct flock *kfl, struct compat_flock64 __user *ufl)
+{
+	if (!access_ok(VERIFY_READ, ufl, sizeof(*ufl)) ||
+	    __get_user(kfl->l_type, &ufl->l_type) ||
+	    __get_user(kfl->l_whence, &ufl->l_whence) ||
+	    __get_user(kfl->l_start, &ufl->l_start) ||
+	    __get_user(kfl->l_len, &ufl->l_len) ||
+	    __get_user(kfl->l_pid, &ufl->l_pid))
+		return -EFAULT;
+	return 0;
+}
+#endif
+
+#ifndef HAVE_ARCH_PUT_COMPAT_FLOCK64
+static int put_compat_flock64(struct flock *kfl, struct compat_flock64 __user *ufl)
+{
+	if (!access_ok(VERIFY_WRITE, ufl, sizeof(*ufl)) ||
+	    __put_user(kfl->l_type, &ufl->l_type) ||
+	    __put_user(kfl->l_whence, &ufl->l_whence) ||
+	    __put_user(kfl->l_start, &ufl->l_start) ||
+	    __put_user(kfl->l_len, &ufl->l_len) ||
+	    __put_user(kfl->l_pid, &ufl->l_pid))
+		return -EFAULT;
+	return 0;
+}
+#endif
 
 static unsigned int
 convert_fcntl_cmd(unsigned int cmd)
@@ -589,93 +489,76 @@ convert_fcntl_cmd(unsigned int cmd)
 	return cmd;
 }
 
-/*
- * GETLK was successful and we need to return the data, but it needs to fit in
- * the compat structure.
- * l_start shouldn't be too big, unless the original start + end is greater than
- * COMPAT_OFF_T_MAX, in which case the app was asking for trouble, so we return
- * -EOVERFLOW in that case.  l_len could be too big, in which case we just
- * truncate it, and only allow the app to see that part of the conflicting lock
- * that might make sense to it anyway
- */
-static int fixup_compat_flock(struct flock *flock)
-{
-	if (flock->l_start > COMPAT_OFF_T_MAX)
-		return -EOVERFLOW;
-	if (flock->l_len > COMPAT_OFF_T_MAX)
-		flock->l_len = COMPAT_OFF_T_MAX;
-	return 0;
-}
-
-static long do_compat_fcntl64(unsigned int fd, unsigned int cmd,
-			     compat_ulong_t arg)
-{
-	struct fd f = fdget_raw(fd);
-	struct flock flock;
-	long err = -EBADF;
-
-	if (!f.file)
-		return err;
-
-	if (unlikely(f.file->f_mode & FMODE_PATH)) {
-		if (!check_fcntl_cmd(cmd))
-			goto out_put;
-	}
-
-	err = security_file_fcntl(f.file, cmd, arg);
-	if (err)
-		goto out_put;
-
-	switch (cmd) {
-	case F_GETLK:
-		err = get_compat_flock(&flock, compat_ptr(arg));
-		if (err)
-			break;
-		err = fcntl_getlk(f.file, convert_fcntl_cmd(cmd), &flock);
-		if (err)
-			break;
-		err = fixup_compat_flock(&flock);
-		if (!err)
-			err = put_compat_flock(&flock, compat_ptr(arg));
-		break;
-	case F_GETLK64:
-	case F_OFD_GETLK:
-		err = get_compat_flock64(&flock, compat_ptr(arg));
-		if (err)
-			break;
-		err = fcntl_getlk(f.file, convert_fcntl_cmd(cmd), &flock);
-		if (!err)
-			err = put_compat_flock64(&flock, compat_ptr(arg));
-		break;
-	case F_SETLK:
-	case F_SETLKW:
-		err = get_compat_flock(&flock, compat_ptr(arg));
-		if (err)
-			break;
-		err = fcntl_setlk(fd, f.file, convert_fcntl_cmd(cmd), &flock);
-		break;
-	case F_SETLK64:
-	case F_SETLKW64:
-	case F_OFD_SETLK:
-	case F_OFD_SETLKW:
-		err = get_compat_flock64(&flock, compat_ptr(arg));
-		if (err)
-			break;
-		err = fcntl_setlk(fd, f.file, convert_fcntl_cmd(cmd), &flock);
-		break;
-	default:
-		err = do_fcntl(fd, cmd, arg, f.file);
-		break;
-	}
-out_put:
-	fdput(f);
-	return err;
-}
-
 COMPAT_SYSCALL_DEFINE3(fcntl64, unsigned int, fd, unsigned int, cmd,
 		       compat_ulong_t, arg)
 {
-	return do_compat_fcntl64(fd, cmd, arg);
+	mm_segment_t old_fs;
+	struct flock f;
+	long ret;
+	unsigned int conv_cmd;
+
+	switch (cmd) {
+	case F_GETLK:
+	case F_SETLK:
+	case F_SETLKW:
+		ret = get_compat_flock(&f, compat_ptr(arg));
+		if (ret != 0)
+			break;
+		old_fs = get_fs();
+		set_fs(KERNEL_DS);
+		ret = sys_fcntl(fd, cmd, (unsigned long)&f);
+		set_fs(old_fs);
+		if (cmd == F_GETLK && ret == 0) {
+			/* GETLK was successful and we need to return the data...
+			 * but it needs to fit in the compat structure.
+			 * l_start shouldn't be too big, unless the original
+			 * start + end is greater than COMPAT_OFF_T_MAX, in which
+			 * case the app was asking for trouble, so we return
+			 * -EOVERFLOW in that case.
+			 * l_len could be too big, in which case we just truncate it,
+			 * and only allow the app to see that part of the conflicting
+			 * lock that might make sense to it anyway
+			 */
+
+			if (f.l_start > COMPAT_OFF_T_MAX)
+				ret = -EOVERFLOW;
+			if (f.l_len > COMPAT_OFF_T_MAX)
+				f.l_len = COMPAT_OFF_T_MAX;
+			if (ret == 0)
+				ret = put_compat_flock(&f, compat_ptr(arg));
+		}
+		break;
+
+	case F_GETLK64:
+	case F_SETLK64:
+	case F_SETLKW64:
+	case F_OFD_GETLK:
+	case F_OFD_SETLK:
+	case F_OFD_SETLKW:
+		ret = get_compat_flock64(&f, compat_ptr(arg));
+		if (ret != 0)
+			break;
+		old_fs = get_fs();
+		set_fs(KERNEL_DS);
+		conv_cmd = convert_fcntl_cmd(cmd);
+		ret = sys_fcntl(fd, conv_cmd, (unsigned long)&f);
+		set_fs(old_fs);
+		if ((conv_cmd == F_GETLK || conv_cmd == F_OFD_GETLK) && ret == 0) {
+			/* need to return lock information - see above for commentary */
+			if (f.l_start > COMPAT_LOFF_T_MAX)
+				ret = -EOVERFLOW;
+			if (f.l_len > COMPAT_LOFF_T_MAX)
+				f.l_len = COMPAT_LOFF_T_MAX;
+			if (ret == 0)
+				ret = put_compat_flock64(&f, compat_ptr(arg));
+		}
+		break;
+
+	default:
+		ret = sys_fcntl(fd, cmd, arg);
+		break;
+	}
+	return ret;
 }
 
 COMPAT_SYSCALL_DEFINE3(fcntl, unsigned int, fd, unsigned int, cmd,
@@ -690,19 +573,19 @@ COMPAT_SYSCALL_DEFINE3(fcntl, unsigned int, fd, unsigned int, cmd,
 	case F_OFD_SETLKW:
 		return -EINVAL;
 	}
-	return do_compat_fcntl64(fd, cmd, arg);
+	return compat_sys_fcntl64(fd, cmd, arg);
 }
 #endif
 
 /* Table to convert sigio signal codes into poll band bitmaps */
 
-static const __poll_t band_table[NSIGPOLL] = {
-	EPOLLIN | EPOLLRDNORM,			/* POLL_IN */
-	EPOLLOUT | EPOLLWRNORM | EPOLLWRBAND,	/* POLL_OUT */
-	EPOLLIN | EPOLLRDNORM | EPOLLMSG,		/* POLL_MSG */
-	EPOLLERR,				/* POLL_ERR */
-	EPOLLPRI | EPOLLRDBAND,			/* POLL_PRI */
-	EPOLLHUP | EPOLLERR			/* POLL_HUP */
+static const long band_table[NSIGPOLL] = {
+	POLLIN | POLLRDNORM,			/* POLL_IN */
+	POLLOUT | POLLWRNORM | POLLWRBAND,	/* POLL_OUT */
+	POLLIN | POLLRDNORM | POLLMSG,		/* POLL_MSG */
+	POLLERR,				/* POLL_ERR */
+	POLLPRI | POLLRDBAND,			/* POLL_PRI */
+	POLLHUP | POLLERR			/* POLL_HUP */
 };
 
 static inline int sigio_perm(struct task_struct *p,
@@ -729,7 +612,7 @@ static void send_sigio_to_task(struct task_struct *p,
 	 * F_SETSIG can change ->signum lockless in parallel, make
 	 * sure we read it once and use the same value throughout.
 	 */
-	int signum = READ_ONCE(fown->signum);
+	int signum = ACCESS_ONCE(fown->signum);
 
 	if (!sigio_perm(p, fown, signum))
 		return;
@@ -743,29 +626,17 @@ static void send_sigio_to_task(struct task_struct *p,
 			   delivered even if we can't queue.  Failure to
 			   queue in this case _should_ be reported; we fall
 			   back to SIGIO in that case. --sct */
-			clear_siginfo(&si);
 			si.si_signo = signum;
 			si.si_errno = 0;
 		        si.si_code  = reason;
-			/*
-			 * Posix definies POLL_IN and friends to be signal
-			 * specific si_codes for SIG_POLL.  Linux extended
-			 * these si_codes to other signals in a way that is
-			 * ambiguous if other signals also have signal
-			 * specific si_codes.  In that case use SI_SIGIO instead
-			 * to remove the ambiguity.
-			 */
-			if ((signum != SIGPOLL) && sig_specific_sicodes(signum))
-				si.si_code = SI_SIGIO;
-
 			/* Make sure we are called with one of the POLL_*
 			   reasons, otherwise we could leak kernel stack into
 			   userspace.  */
-			BUG_ON((reason < POLL_IN) || ((reason - POLL_IN) >= NSIGPOLL));
+			BUG_ON((reason & __SI_MASK) != __SI_POLL);
 			if (reason - POLL_IN >= NSIGPOLL)
 				si.si_band  = ~0L;
 			else
-				si.si_band = mangle_poll(band_table[reason - POLL_IN]);
+				si.si_band = band_table[reason - POLL_IN];
 			si.si_fd    = fd;
 			if (!do_send_sig_info(signum, &si, p, group))
 				break;
@@ -871,9 +742,9 @@ int fasync_remove_entry(struct file *filp, struct fasync_struct **fapp)
 		if (fa->fa_file != filp)
 			continue;
 
-		write_lock_irq(&fa->fa_lock);
+		spin_lock_irq(&fa->fa_lock);
 		fa->fa_file = NULL;
-		write_unlock_irq(&fa->fa_lock);
+		spin_unlock_irq(&fa->fa_lock);
 
 		*fp = fa->fa_next;
 		call_rcu(&fa->fa_rcu, fasync_free_rcu);
@@ -918,13 +789,13 @@ struct fasync_struct *fasync_insert_entry(int fd, struct file *filp, struct fasy
 		if (fa->fa_file != filp)
 			continue;
 
-		write_lock_irq(&fa->fa_lock);
+		spin_lock_irq(&fa->fa_lock);
 		fa->fa_fd = fd;
-		write_unlock_irq(&fa->fa_lock);
+		spin_unlock_irq(&fa->fa_lock);
 		goto out;
 	}
 
-	rwlock_init(&new->fa_lock);
+	spin_lock_init(&new->fa_lock);
 	new->magic = FASYNC_MAGIC;
 	new->fa_file = filp;
 	new->fa_fd = fd;
@@ -987,13 +858,14 @@ static void kill_fasync_rcu(struct fasync_struct *fa, int sig, int band)
 {
 	while (fa) {
 		struct fown_struct *fown;
+		unsigned long flags;
 
 		if (fa->magic != FASYNC_MAGIC) {
 			printk(KERN_ERR "kill_fasync: bad magic number in "
 			       "fasync_struct!\n");
 			return;
 		}
-		read_lock(&fa->fa_lock);
+		spin_lock_irqsave(&fa->fa_lock, flags);
 		if (fa->fa_file) {
 			fown = &fa->fa_file->f_owner;
 			/* Don't send SIGURG to processes which have not set a
@@ -1002,7 +874,7 @@ static void kill_fasync_rcu(struct fasync_struct *fa, int sig, int band)
 			if (!(sig == SIGURG && fown->signum == 0))
 				send_sigio(fown, fa->fa_fd, band);
 		}
-		read_unlock(&fa->fa_lock);
+		spin_unlock_irqrestore(&fa->fa_lock, flags);
 		fa = rcu_dereference(fa->fa_next);
 	}
 }

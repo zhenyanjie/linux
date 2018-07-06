@@ -1436,10 +1436,7 @@ static void pxafb_enable_controller(struct pxafb_info *fbi)
 	pr_debug("reg_lccr3 0x%08x\n", (unsigned int) fbi->reg_lccr3);
 
 	/* enable LCD controller clock */
-	if (clk_prepare_enable(fbi->clk)) {
-		pr_err("%s: Failed to prepare clock\n", __func__);
-		return;
-	}
+	clk_prepare_enable(fbi->clk);
 
 	if (fbi->lccr0 & LCCR0_LCDT)
 		return;
@@ -2115,10 +2112,12 @@ static int of_get_pxafb_display(struct device *dev, struct device_node *disp,
 	if (ret)
 		s = "color-tft";
 
-	i = match_string(lcd_types, -1, s);
-	if (i < 0) {
+	for (i = 0; lcd_types[i]; i++)
+		if (!strcmp(s, lcd_types[i]))
+			break;
+	if (!i || !lcd_types[i]) {
 		dev_err(dev, "lcd-type %s is unknown\n", s);
-		return i;
+		return -EINVAL;
 	}
 	info->lcd_conn |= LCD_CONN_TYPE(i);
 	info->lcd_conn |= LCD_CONN_WIDTH(bus_width);

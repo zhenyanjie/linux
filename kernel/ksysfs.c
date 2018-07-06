@@ -134,7 +134,7 @@ static ssize_t vmcoreinfo_show(struct kobject *kobj,
 {
 	phys_addr_t vmcore_base = paddr_vmcoreinfo_note();
 	return sprintf(buf, "%pa %x\n", &vmcore_base,
-			(unsigned int)VMCOREINFO_NOTE_SIZE);
+		       (unsigned int)sizeof(vmcoreinfo_note));
 }
 KERNEL_ATTR_RO(vmcoreinfo);
 
@@ -234,7 +234,7 @@ static struct attribute * kernel_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group kernel_attr_group = {
+static struct attribute_group kernel_attr_group = {
 	.attrs = kernel_attrs,
 };
 

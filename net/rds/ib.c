@@ -48,7 +48,6 @@
 static unsigned int rds_ib_mr_1m_pool_size = RDS_MR_1M_POOL_SIZE;
 static unsigned int rds_ib_mr_8k_pool_size = RDS_MR_8K_POOL_SIZE;
 unsigned int rds_ib_retry_count = RDS_IB_DEFAULT_RETRY_COUNT;
-static atomic_t rds_ib_unloading;
 
 module_param(rds_ib_mr_1m_pool_size, int, 0444);
 MODULE_PARM_DESC(rds_ib_mr_1m_pool_size, " Max number of 1M mr per HCA");
@@ -119,15 +118,14 @@ static void rds_ib_dev_free(struct work_struct *work)
 
 void rds_ib_dev_put(struct rds_ib_device *rds_ibdev)
 {
-	BUG_ON(refcount_read(&rds_ibdev->refcount) == 0);
-	if (refcount_dec_and_test(&rds_ibdev->refcount))
+	BUG_ON(atomic_read(&rds_ibdev->refcount) <= 0);
+	if (atomic_dec_and_test(&rds_ibdev->refcount))
 		queue_work(rds_wq, &rds_ibdev->free_work);
 }
 
 static void rds_ib_add_one(struct ib_device *device)
 {
 	struct rds_ib_device *rds_ibdev;
-	bool has_fr, has_fmr;
 
 	/* Only handle IB (no iWARP) devices */
 	if (device->node_type != RDMA_NODE_IB_CA)
@@ -139,17 +137,17 @@ static void rds_ib_add_one(struct ib_device *device)
 		return;
 
 	spin_lock_init(&rds_ibdev->spinlock);
-	refcount_set(&rds_ibdev->refcount, 1);
+	atomic_set(&rds_ibdev->refcount, 1);
 	INIT_WORK(&rds_ibdev->free_work, rds_ib_dev_free);
 
 	rds_ibdev->max_wrs = device->attrs.max_qp_wr;
 	rds_ibdev->max_sge = min(device->attrs.max_sge, RDS_IB_MAX_SGE);
 
-	has_fr = (device->attrs.device_cap_flags &
-		  IB_DEVICE_MEM_MGT_EXTENSIONS);
-	has_fmr = (device->alloc_fmr && device->dealloc_fmr &&
-		   device->map_phys_fmr && device->unmap_fmr);
-	rds_ibdev->use_fastreg = (has_fr && !has_fmr);
+	rds_ibdev->has_fr = (device->attrs.device_cap_flags &
+				  IB_DEVICE_MEM_MGT_EXTENSIONS);
+	rds_ibdev->has_fmr = (device->alloc_fmr && device->dealloc_fmr &&
+			    device->map_phys_fmr && device->unmap_fmr);
+	rds_ibdev->use_fastreg = (rds_ibdev->has_fr && !rds_ibdev->has_fmr);
 
 	rds_ibdev->fmr_max_remaps = device->attrs.max_map_per_fmr?: 32;
 	rds_ibdev->max_1m_mrs = device->attrs.max_mr ?
@@ -163,8 +161,7 @@ static void rds_ib_add_one(struct ib_device *device)
 	rds_ibdev->max_initiator_depth = device->attrs.max_qp_init_rd_atom;
 	rds_ibdev->max_responder_resources = device->attrs.max_qp_rd_atom;
 
-	rds_ibdev->vector_load = kcalloc(device->num_comp_vectors,
-					 sizeof(int),
+	rds_ibdev->vector_load = kzalloc(sizeof(int) * device->num_comp_vectors,
 					 GFP_KERNEL);
 	if (!rds_ibdev->vector_load) {
 		pr_err("RDS/IB: %s failed to allocate vector memory\n",
@@ -208,10 +205,10 @@ static void rds_ib_add_one(struct ib_device *device)
 	down_write(&rds_ib_devices_lock);
 	list_add_tail_rcu(&rds_ibdev->list, &rds_ib_devices);
 	up_write(&rds_ib_devices_lock);
-	refcount_inc(&rds_ibdev->refcount);
+	atomic_inc(&rds_ibdev->refcount);
 
 	ib_set_client_data(device, &rds_ib_client, rds_ibdev);
-	refcount_inc(&rds_ibdev->refcount);
+	atomic_inc(&rds_ibdev->refcount);
 
 	rds_ib_nodev_connect();
 
@@ -242,7 +239,7 @@ struct rds_ib_device *rds_ib_get_client_data(struct ib_device *device)
 	rcu_read_lock();
 	rds_ibdev = ib_get_client_data(device, &rds_ib_client);
 	if (rds_ibdev)
-		refcount_inc(&rds_ibdev->refcount);
+		atomic_inc(&rds_ibdev->refcount);
 	rcu_read_unlock();
 	return rds_ibdev;
 }
@@ -303,11 +300,13 @@ static int rds_ib_conn_info_visitor(struct rds_connection *conn,
 	memset(&iinfo->dst_gid, 0, sizeof(iinfo->dst_gid));
 	if (rds_conn_state(conn) == RDS_CONN_UP) {
 		struct rds_ib_device *rds_ibdev;
+		struct rdma_dev_addr *dev_addr;
 
 		ic = conn->c_transport_data;
+		dev_addr = &ic->i_cm_id->route.addr.dev_addr;
 
-		rdma_read_gids(ic->i_cm_id, (union ib_gid *)&iinfo->src_gid,
-			       (union ib_gid *)&iinfo->dst_gid);
+		rdma_addr_get_sgid(dev_addr, (union ib_gid *) &iinfo->src_gid);
+		rdma_addr_get_dgid(dev_addr, (union ib_gid *) &iinfo->dst_gid);
 
 		rds_ibdev = ic->rds_ibdev;
 		iinfo->max_send_wr = ic->i_send_ring.w_nr;
@@ -322,11 +321,8 @@ static void rds_ib_ic_info(struct socket *sock, unsigned int len,
 			   struct rds_info_iterator *iter,
 			   struct rds_info_lengths *lens)
 {
-	u64 buffer[(sizeof(struct rds_info_rdma_connection) + 7) / 8];
-
 	rds_for_each_conn_info(sock, len, iter, lens,
 				rds_ib_conn_info_visitor,
-				buffer,
 				sizeof(struct rds_info_rdma_connection));
 }
 
@@ -350,8 +346,7 @@ static int rds_ib_laddr_check(struct net *net, __be32 addr)
 	/* Create a CMA ID and try to bind it. This catches both
 	 * IB and iWARP capable NICs.
 	 */
-	cm_id = rdma_create_id(&init_net, rds_rdma_cm_event_handler,
-			       NULL, RDMA_PS_TCP, IB_QPT_RC);
+	cm_id = rdma_create_id(&init_net, NULL, NULL, RDMA_PS_TCP, IB_QPT_RC);
 	if (IS_ERR(cm_id))
 		return PTR_ERR(cm_id);
 
@@ -383,23 +378,8 @@ static void rds_ib_unregister_client(void)
 	flush_workqueue(rds_wq);
 }
 
-static void rds_ib_set_unloading(void)
-{
-	atomic_set(&rds_ib_unloading, 1);
-}
-
-static bool rds_ib_is_unloading(struct rds_connection *conn)
-{
-	struct rds_conn_path *cp = &conn->c_path[0];
-
-	return (test_bit(RDS_DESTROY_PENDING, &cp->cp_flags) ||
-		atomic_read(&rds_ib_unloading) != 0);
-}
-
 void rds_ib_exit(void)
 {
-	rds_ib_set_unloading();
-	synchronize_rcu();
 	rds_info_deregister_func(RDS_INFO_IB_CONNECTIONS, rds_ib_ic_info);
 	rds_ib_unregister_client();
 	rds_ib_destroy_nodev_conns();
@@ -433,7 +413,6 @@ struct rds_transport rds_ib_transport = {
 	.flush_mrs		= rds_ib_flush_mrs,
 	.t_owner		= THIS_MODULE,
 	.t_name			= "infiniband",
-	.t_unloading		= rds_ib_is_unloading,
 	.t_type			= RDS_TRANS_IB
 };
 

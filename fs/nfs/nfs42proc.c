@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2014 Anna Schumaker <Anna.Schumaker@Netapp.com>
  */
@@ -147,7 +146,7 @@ static ssize_t _nfs42_proc_copy(struct file *src,
 	loff_t pos_src = args->src_pos;
 	loff_t pos_dst = args->dst_pos;
 	size_t count = args->count;
-	ssize_t status;
+	int status;
 
 	status = nfs4_set_rw_stateid(&args->src_stateid, src_lock->open_context,
 				     src_lock, FMODE_READ);
@@ -370,10 +369,6 @@ nfs42_layoutstat_done(struct rpc_task *task, void *calldata)
 	switch (task->tk_status) {
 	case 0:
 		break;
-	case -NFS4ERR_BADHANDLE:
-	case -ESTALE:
-		pnfs_destroy_layout(NFS_I(inode));
-		break;
 	case -NFS4ERR_EXPIRED:
 	case -NFS4ERR_ADMIN_REVOKED:
 	case -NFS4ERR_DELEG_REVOKED:
@@ -466,7 +461,7 @@ int nfs42_proc_layoutstats_generic(struct nfs_server *server,
 		nfs42_layoutstat_release(data);
 		return -EAGAIN;
 	}
-	nfs4_init_sequence(&data->args.seq_args, &data->res.seq_res, 0, 0);
+	nfs4_init_sequence(&data->args.seq_args, &data->res.seq_res, 0);
 	task = rpc_run_task(&task_setup);
 	if (IS_ERR(task))
 		return PTR_ERR(task);

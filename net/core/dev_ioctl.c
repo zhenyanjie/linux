@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/kmod.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -18,10 +17,26 @@
  *	match.  --pb
  */
 
-static int dev_ifname(struct net *net, struct ifreq *ifr)
+static int dev_ifname(struct net *net, struct ifreq __user *arg)
 {
-	ifr->ifr_name[IFNAMSIZ-1] = 0;
-	return netdev_get_name(net, ifr->ifr_name, ifr->ifr_ifindex);
+	struct ifreq ifr;
+	int error;
+
+	/*
+	 *	Fetch the caller's info block.
+	 */
+
+	if (copy_from_user(&ifr, arg, sizeof(struct ifreq)))
+		return -EFAULT;
+	ifr.ifr_name[IFNAMSIZ-1] = 0;
+
+	error = netdev_get_name(net, ifr.ifr_name, ifr.ifr_ifindex);
+	if (error)
+		return error;
+
+	if (copy_to_user(arg, &ifr, sizeof(struct ifreq)))
+		return -EFAULT;
+	return 0;
 }
 
 static gifconf_func_t *gifconf_list[NPROTO];
@@ -50,8 +65,9 @@ EXPORT_SYMBOL(register_gifconf);
  *	Thus we will need a 'compatibility mode'.
  */
 
-int dev_ifconf(struct net *net, struct ifconf *ifc, int size)
+static int dev_ifconf(struct net *net, char __user *arg)
 {
+	struct ifconf ifc;
 	struct net_device *dev;
 	char __user *pos;
 	int len;
@@ -62,8 +78,11 @@ int dev_ifconf(struct net *net, struct ifconf *ifc, int size)
 	 *	Fetch the caller's info block.
 	 */
 
-	pos = ifc->ifc_buf;
-	len = ifc->ifc_len;
+	if (copy_from_user(&ifc, arg, sizeof(struct ifconf)))
+		return -EFAULT;
+
+	pos = ifc.ifc_buf;
+	len = ifc.ifc_len;
 
 	/*
 	 *	Loop over the interfaces, and write an info block for each.
@@ -75,10 +94,10 @@ int dev_ifconf(struct net *net, struct ifconf *ifc, int size)
 			if (gifconf_list[i]) {
 				int done;
 				if (!pos)
-					done = gifconf_list[i](dev, NULL, 0, size);
+					done = gifconf_list[i](dev, NULL, 0);
 				else
 					done = gifconf_list[i](dev, pos + total,
-							       len - total, size);
+							       len - total);
 				if (done < 0)
 					return -EFAULT;
 				total += done;
@@ -89,12 +108,12 @@ int dev_ifconf(struct net *net, struct ifconf *ifc, int size)
 	/*
 	 *	All done.  Write the updated control block back to the caller.
 	 */
-	ifc->ifc_len = total;
+	ifc.ifc_len = total;
 
 	/*
 	 * 	Both BSD and Solaris return 0 here, so we do too.
 	 */
-	return 0;
+	return copy_to_user(arg, &ifc, sizeof(struct ifconf)) ? -EFAULT : 0;
 }
 
 /*
@@ -207,7 +226,6 @@ static int net_hwtstamp_validate(struct ifreq *ifr)
 	case HWTSTAMP_FILTER_PTP_V2_EVENT:
 	case HWTSTAMP_FILTER_PTP_V2_SYNC:
 	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
-	case HWTSTAMP_FILTER_NTP_ALL:
 		rx_filter_valid = 1;
 		break;
 	}
@@ -244,8 +262,6 @@ static int dev_ifsioc(struct net *net, struct ifreq *ifr, unsigned int cmd)
 		return dev_set_mtu(dev, ifr->ifr_mtu);
 
 	case SIOCSIFHWADDR:
-		if (dev->addr_len > sizeof(struct sockaddr))
-			return -EINVAL;
 		return dev_set_mac_address(dev, &ifr->ifr_hwaddr);
 
 	case SIOCSIFHWBROADCAST:
@@ -284,11 +300,7 @@ static int dev_ifsioc(struct net *net, struct ifreq *ifr, unsigned int cmd)
 	case SIOCSIFTXQLEN:
 		if (ifr->ifr_qlen < 0)
 			return -EINVAL;
-		if (dev->tx_queue_len ^ ifr->ifr_qlen) {
-			err = dev_change_tx_queue_len(dev, ifr->ifr_qlen);
-			if (err)
-				return err;
-		}
+		dev->tx_queue_len = ifr->ifr_qlen;
 		return 0;
 
 	case SIOCSIFNAME:
@@ -379,19 +391,50 @@ EXPORT_SYMBOL(dev_load);
  *	positive or a negative errno code on error.
  */
 
-int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_copyout)
+int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 {
+	struct ifreq ifr;
 	int ret;
 	char *colon;
 
-	if (need_copyout)
-		*need_copyout = true;
+	/* One special case: SIOCGIFCONF takes ifconf argument
+	   and requires shared lock, because it sleeps writing
+	   to user space.
+	 */
+
+	if (cmd == SIOCGIFCONF) {
+		rtnl_lock();
+		ret = dev_ifconf(net, (char __user *) arg);
+		rtnl_unlock();
+		return ret;
+	}
 	if (cmd == SIOCGIFNAME)
-		return dev_ifname(net, ifr);
+		return dev_ifname(net, (struct ifreq __user *)arg);
 
-	ifr->ifr_name[IFNAMSIZ-1] = 0;
+	/*
+	 * Take care of Wireless Extensions. Unfortunately struct iwreq
+	 * isn't a proper subset of struct ifreq (it's 8 byte shorter)
+	 * so we need to treat it specially, otherwise applications may
+	 * fault if the struct they're passing happens to land at the
+	 * end of a mapped page.
+	 */
+	if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
+		struct iwreq iwr;
 
-	colon = strchr(ifr->ifr_name, ':');
+		if (copy_from_user(&iwr, arg, sizeof(iwr)))
+			return -EFAULT;
+
+		iwr.ifr_name[sizeof(iwr.ifr_name) - 1] = 0;
+
+		return wext_handle_ioctl(net, &iwr, cmd, arg);
+	}
+
+	if (copy_from_user(&ifr, arg, sizeof(struct ifreq)))
+		return -EFAULT;
+
+	ifr.ifr_name[IFNAMSIZ-1] = 0;
+
+	colon = strchr(ifr.ifr_name, ':');
 	if (colon)
 		*colon = 0;
 
@@ -414,21 +457,31 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 	case SIOCGIFMAP:
 	case SIOCGIFINDEX:
 	case SIOCGIFTXQLEN:
-		dev_load(net, ifr->ifr_name);
+		dev_load(net, ifr.ifr_name);
 		rcu_read_lock();
-		ret = dev_ifsioc_locked(net, ifr, cmd);
+		ret = dev_ifsioc_locked(net, &ifr, cmd);
 		rcu_read_unlock();
-		if (colon)
-			*colon = ':';
+		if (!ret) {
+			if (colon)
+				*colon = ':';
+			if (copy_to_user(arg, &ifr,
+					 sizeof(struct ifreq)))
+				ret = -EFAULT;
+		}
 		return ret;
 
 	case SIOCETHTOOL:
-		dev_load(net, ifr->ifr_name);
+		dev_load(net, ifr.ifr_name);
 		rtnl_lock();
-		ret = dev_ethtool(net, ifr);
+		ret = dev_ethtool(net, &ifr);
 		rtnl_unlock();
-		if (colon)
-			*colon = ':';
+		if (!ret) {
+			if (colon)
+				*colon = ':';
+			if (copy_to_user(arg, &ifr,
+					 sizeof(struct ifreq)))
+				ret = -EFAULT;
+		}
 		return ret;
 
 	/*
@@ -440,14 +493,19 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 	case SIOCGMIIPHY:
 	case SIOCGMIIREG:
 	case SIOCSIFNAME:
-		dev_load(net, ifr->ifr_name);
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
+		dev_load(net, ifr.ifr_name);
 		rtnl_lock();
-		ret = dev_ifsioc(net, ifr, cmd);
+		ret = dev_ifsioc(net, &ifr, cmd);
 		rtnl_unlock();
-		if (colon)
-			*colon = ':';
+		if (!ret) {
+			if (colon)
+				*colon = ':';
+			if (copy_to_user(arg, &ifr,
+					 sizeof(struct ifreq)))
+				ret = -EFAULT;
+		}
 		return ret;
 
 	/*
@@ -488,12 +546,10 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 		/* fall through */
 	case SIOCBONDSLAVEINFOQUERY:
 	case SIOCBONDINFOQUERY:
-		dev_load(net, ifr->ifr_name);
+		dev_load(net, ifr.ifr_name);
 		rtnl_lock();
-		ret = dev_ifsioc(net, ifr, cmd);
+		ret = dev_ifsioc(net, &ifr, cmd);
 		rtnl_unlock();
-		if (need_copyout)
-			*need_copyout = false;
 		return ret;
 
 	case SIOCGIFMEM:
@@ -513,10 +569,13 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 		    cmd == SIOCGHWTSTAMP ||
 		    (cmd >= SIOCDEVPRIVATE &&
 		     cmd <= SIOCDEVPRIVATE + 15)) {
-			dev_load(net, ifr->ifr_name);
+			dev_load(net, ifr.ifr_name);
 			rtnl_lock();
-			ret = dev_ifsioc(net, ifr, cmd);
+			ret = dev_ifsioc(net, &ifr, cmd);
 			rtnl_unlock();
+			if (!ret && copy_to_user(arg, &ifr,
+						 sizeof(struct ifreq)))
+				ret = -EFAULT;
 			return ret;
 		}
 		return -ENOTTY;

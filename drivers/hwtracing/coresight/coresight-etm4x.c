@@ -1,6 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
-/*
- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -217,10 +224,6 @@ static int etm4_parse_event_config(struct etmv4_drvdata *drvdata,
 	if (attr->config & BIT(ETM_OPT_TS))
 		/* bit[11], Global timestamp tracing bit */
 		config->cfg |= BIT(11);
-	/* return stack - enable if selected and supported */
-	if ((attr->config & BIT(ETM_OPT_RETSTK)) && drvdata->retstack)
-		/* bit[12], Return stack enable bit */
-		config->cfg |= BIT(12);
 
 out:
 	return ret;
@@ -368,7 +371,7 @@ static void etm4_disable_sysfs(struct coresight_device *csdev)
 	 * after cpu online mask indicates the cpu is offline but before the
 	 * DYING hotplug callback is serviced by the ETM driver.
 	 */
-	cpus_read_lock();
+	get_online_cpus();
 	spin_lock(&drvdata->spinlock);
 
 	/*
@@ -378,7 +381,7 @@ static void etm4_disable_sysfs(struct coresight_device *csdev)
 	smp_call_function_single(drvdata->cpu, etm4_disable_hw, drvdata, 1);
 
 	spin_unlock(&drvdata->spinlock);
-	cpus_read_unlock();
+	put_online_cpus();
 
 	dev_info(drvdata->dev, "ETM tracing disabled\n");
 }
@@ -979,7 +982,7 @@ static int etm4_probe(struct amba_device *adev, const struct amba_id *id)
 
 	drvdata->cpu = pdata ? pdata->cpu : 0;
 
-	cpus_read_lock();
+	get_online_cpus();
 	etmdrvdata[drvdata->cpu] = drvdata;
 
 	if (smp_call_function_single(drvdata->cpu,
@@ -987,18 +990,18 @@ static int etm4_probe(struct amba_device *adev, const struct amba_id *id)
 		dev_err(dev, "ETM arch init failed\n");
 
 	if (!etm4_count++) {
-		cpuhp_setup_state_nocalls_cpuslocked(CPUHP_AP_ARM_CORESIGHT_STARTING,
-						     "arm/coresight4:starting",
-						     etm4_starting_cpu, etm4_dying_cpu);
-		ret = cpuhp_setup_state_nocalls_cpuslocked(CPUHP_AP_ONLINE_DYN,
-							   "arm/coresight4:online",
-							   etm4_online_cpu, NULL);
+		cpuhp_setup_state_nocalls(CPUHP_AP_ARM_CORESIGHT_STARTING,
+					  "arm/coresight4:starting",
+					  etm4_starting_cpu, etm4_dying_cpu);
+		ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+						"arm/coresight4:online",
+						etm4_online_cpu, NULL);
 		if (ret < 0)
 			goto err_arch_supported;
 		hp_online = ret;
 	}
 
-	cpus_read_unlock();
+	put_online_cpus();
 
 	if (etm4_arch_supported(drvdata->arch) == false) {
 		ret = -EINVAL;
@@ -1045,7 +1048,7 @@ err_arch_supported:
 	return ret;
 }
 
-static const struct amba_id etm4_ids[] = {
+static struct amba_id etm4_ids[] = {
 	{       /* ETM 4.0 - Cortex-A53  */
 		.id	= 0x000bb95d,
 		.mask	= 0x000fffff,

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Stage 1 of the trace events.
  *
@@ -36,28 +35,15 @@ TRACE_MAKE_SYSTEM_STR();
 
 #undef TRACE_DEFINE_ENUM
 #define TRACE_DEFINE_ENUM(a)				\
-	static struct trace_eval_map __used __initdata	\
+	static struct trace_enum_map __used __initdata	\
 	__##TRACE_SYSTEM##_##a =			\
 	{						\
 		.system = TRACE_SYSTEM_STRING,		\
-		.eval_string = #a,			\
-		.eval_value = a				\
+		.enum_string = #a,			\
+		.enum_value = a				\
 	};						\
-	static struct trace_eval_map __used		\
-	__attribute__((section("_ftrace_eval_map")))	\
-	*TRACE_SYSTEM##_##a = &__##TRACE_SYSTEM##_##a
-
-#undef TRACE_DEFINE_SIZEOF
-#define TRACE_DEFINE_SIZEOF(a)				\
-	static struct trace_eval_map __used __initdata	\
-	__##TRACE_SYSTEM##_##a =			\
-	{						\
-		.system = TRACE_SYSTEM_STRING,		\
-		.eval_string = "sizeof(" #a ")",	\
-		.eval_value = sizeof(a)			\
-	};						\
-	static struct trace_eval_map __used		\
-	__attribute__((section("_ftrace_eval_map")))	\
+	static struct trace_enum_map __used		\
+	__attribute__((section("_ftrace_enum_map")))	\
 	*TRACE_SYSTEM##_##a = &__##TRACE_SYSTEM##_##a
 
 /*
@@ -171,9 +157,6 @@ TRACE_MAKE_SYSTEM_STR();
 
 #undef TRACE_DEFINE_ENUM
 #define TRACE_DEFINE_ENUM(a)
-
-#undef TRACE_DEFINE_SIZEOF
-#define TRACE_DEFINE_SIZEOF(a)
 
 #undef __field
 #define __field(type, item)
@@ -422,7 +405,6 @@ static struct trace_event_functions trace_event_type_funcs_##call = {	\
 	do {								\
 		char *type_str = #type"["__stringify(len)"]";		\
 		BUILD_BUG_ON(len > MAX_FILTER_STR_VAL);			\
-		BUILD_BUG_ON(len <= 0);					\
 		ret = trace_define_field(event_call, type_str, #item,	\
 				 offsetof(typeof(field), item),		\
 				 sizeof(field.item),			\

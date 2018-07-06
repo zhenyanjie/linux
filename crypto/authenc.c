@@ -108,7 +108,6 @@ static int crypto_authenc_setkey(struct crypto_aead *authenc, const u8 *key,
 				       CRYPTO_TFM_RES_MASK);
 
 out:
-	memzero_explicit(&keys, sizeof(keys));
 	return err;
 
 badkey:
@@ -330,7 +329,7 @@ static int crypto_authenc_init_tfm(struct crypto_aead *tfm)
 	if (IS_ERR(enc))
 		goto err_free_ahash;
 
-	null = crypto_get_default_null_skcipher();
+	null = crypto_get_default_null_skcipher2();
 	err = PTR_ERR(null);
 	if (IS_ERR(null))
 		goto err_free_skcipher;
@@ -364,7 +363,7 @@ static void crypto_authenc_exit_tfm(struct crypto_aead *tfm)
 
 	crypto_free_ahash(ctx->auth);
 	crypto_free_skcipher(ctx->enc);
-	crypto_put_default_null_skcipher();
+	crypto_put_default_null_skcipher2();
 }
 
 static void crypto_authenc_free(struct aead_instance *inst)

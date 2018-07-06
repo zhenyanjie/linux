@@ -2014,7 +2014,7 @@ static const struct snd_pcm_hardware snd_azf3328_hardware =
 };
 
 
-static const unsigned int snd_azf3328_fixed_rates[] = {
+static unsigned int snd_azf3328_fixed_rates[] = {
 	AZF_FREQ_4000,
 	AZF_FREQ_4800,
 	AZF_FREQ_5512,
@@ -2031,7 +2031,7 @@ static const unsigned int snd_azf3328_fixed_rates[] = {
 	AZF_FREQ_66200
 };
 
-static const struct snd_pcm_hw_constraint_list snd_azf3328_hw_constraints_rates = {
+static struct snd_pcm_hw_constraint_list snd_azf3328_hw_constraints_rates = {
 	.count = ARRAY_SIZE(snd_azf3328_fixed_rates),
 	.list = snd_azf3328_fixed_rates,
 	.mask = 0,

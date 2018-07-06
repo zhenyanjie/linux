@@ -24,9 +24,8 @@
 #include <linux/string.h>
 #include <linux/types.h>
 
-#include <linux/w1.h>
-
-#define W1_FAMILY_DS2405	0x05
+#include "../w1.h"
+#include "../w1_family.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Maciej S. Szmigiero <mail@maciej.szmigiero.name>");

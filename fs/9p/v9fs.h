@@ -67,7 +67,6 @@ enum p9_cache_modes {
 	CACHE_MMAP,
 	CACHE_LOOSE,
 	CACHE_FSCACHE,
-	nr__p9_cache_modes
 };
 
 /**
@@ -137,8 +136,6 @@ static inline struct v9fs_inode *V9FS_I(const struct inode *inode)
 {
 	return container_of(inode, struct v9fs_inode, vfs_inode);
 }
-
-extern int v9fs_show_options(struct seq_file *m, struct dentry *root);
 
 struct p9_fid *v9fs_session_init(struct v9fs_session_info *, const char *,
 									char *);

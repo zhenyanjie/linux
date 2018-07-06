@@ -12,7 +12,6 @@
  * Some ideas are from atmel-sha.c and omap-sham.c drivers.
  */
 
-#include <crypto/hmac.h>
 #include <crypto/sha.h>
 #include "mtk-platform.h"
 
@@ -826,8 +825,8 @@ static int mtk_sha_setkey(struct crypto_ahash *tfm, const u8 *key,
 	memcpy(bctx->opad, bctx->ipad, bs);
 
 	for (i = 0; i < bs; i++) {
-		bctx->ipad[i] ^= HMAC_IPAD_VALUE;
-		bctx->opad[i] ^= HMAC_OPAD_VALUE;
+		bctx->ipad[i] ^= 0x36;
+		bctx->opad[i] ^= 0x5c;
 	}
 
 	return 0;

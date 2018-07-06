@@ -445,7 +445,7 @@ static struct attribute *platform_attributes[] = {
 	NULL
 };
 
-static const struct attribute_group platform_attribute_group = {
+static struct attribute_group platform_attribute_group = {
 	.attrs = platform_attributes
 };
 
@@ -492,7 +492,7 @@ static void eeepc_platform_exit(struct eeepc_laptop *eeepc)
  * potentially bad time, such as a timer interrupt.
  */
 static void tpd_led_update(struct work_struct *work)
-{
+ {
 	struct eeepc_laptop *eeepc;
 
 	eeepc = container_of(work, struct eeepc_laptop, tpd_led_work);

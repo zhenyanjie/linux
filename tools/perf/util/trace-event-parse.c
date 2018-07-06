@@ -24,7 +24,7 @@
 #include <errno.h>
 
 #include "../perf.h"
-#include "debug.h"
+#include "util.h"
 #include "trace-event.h"
 
 #include "sane_ctype.h"
@@ -150,7 +150,7 @@ void parse_ftrace_printk(struct pevent *pevent,
 	while (line) {
 		addr_str = strtok_r(line, ":", &fmt);
 		if (!addr_str) {
-			pr_warning("printk format with empty entry");
+			warning("printk format with empty entry");
 			break;
 		}
 		addr = strtoull(addr_str, NULL, 16);

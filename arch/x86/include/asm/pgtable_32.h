@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_PGTABLE_32_H
 #define _ASM_X86_PGTABLE_32_H
 
@@ -32,9 +31,6 @@ extern pmd_t initial_pg_pmd[];
 static inline void pgtable_cache_init(void) { }
 static inline void check_pgt_cache(void) { }
 void paging_init(void);
-void sync_initial_page_table(void);
-
-static inline int pgd_large(pgd_t pgd) { return 0; }
 
 /*
  * Define this if things work differently on an i386 and an i486:
@@ -64,7 +60,7 @@ static inline int pgd_large(pgd_t pgd) { return 0; }
 #define kpte_clear_flush(ptep, vaddr)		\
 do {						\
 	pte_clear(&init_mm, (vaddr), (ptep));	\
-	__flush_tlb_one_kernel((vaddr));		\
+	__flush_tlb_one((vaddr));		\
 } while (0)
 
 #endif /* !__ASSEMBLY__ */

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/kprobes.h>
@@ -125,5 +124,5 @@ void __kprobes patch_text(void *addr, unsigned int insn)
 		.insn = insn,
 	};
 
-	stop_machine_cpuslocked(patch_text_stop_machine, &patch, NULL);
+	stop_machine(patch_text_stop_machine, &patch, NULL);
 }

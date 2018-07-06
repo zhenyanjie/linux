@@ -19,7 +19,6 @@
 #include <linux/jump_label.h>
 #include <linux/export.h>
 #include <linux/rbtree_latch.h>
-#include <linux/error-injection.h>
 
 #include <linux/percpu.h>
 #include <asm/module.h>
@@ -46,7 +45,7 @@ struct module_kobject {
 	struct kobject *drivers_dir;
 	struct module_param_attrs *mp;
 	struct completion *kobj_completion;
-} __randomize_layout;
+};
 
 struct module_attribute {
 	struct attribute attr;
@@ -210,7 +209,7 @@ extern void cleanup_module(void);
 #ifdef MODULE
 /* Creates an alias so file2alias.c can find device table. */
 #define MODULE_DEVICE_TABLE(type, name)					\
-extern typeof(name) __mod_##type##__##name##_device_table		\
+extern const typeof(name) __mod_##type##__##name##_device_table		\
   __attribute__ ((unused, alias(__stringify(name))))
 #else  /* !MODULE */
 #define MODULE_DEVICE_TABLE(type, name)
@@ -443,8 +442,8 @@ struct module {
 #ifdef CONFIG_EVENT_TRACING
 	struct trace_event_call **trace_events;
 	unsigned int num_trace_events;
-	struct trace_eval_map **trace_evals;
-	unsigned int num_trace_evals;
+	struct trace_enum_map **trace_enums;
+	unsigned int num_trace_enums;
 #endif
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD
 	unsigned int num_ftrace_callsites;
@@ -476,12 +475,7 @@ struct module {
 	ctor_fn_t *ctors;
 	unsigned int num_ctors;
 #endif
-
-#ifdef CONFIG_FUNCTION_ERROR_INJECTION
-	struct error_injection_entry *ei_funcs;
-	unsigned int num_ei_funcs;
-#endif
-} ____cacheline_aligned __randomize_layout;
+} ____cacheline_aligned;
 #ifndef MODULE_ARCH_INIT
 #define MODULE_ARCH_INIT {}
 #endif
@@ -491,7 +485,7 @@ extern struct mutex module_mutex;
 /* FIXME: It'd be nice to isolate modules during init, too, so they
    aren't used before they (may) fail.  But presently too much code
    (IDE & SCSI) require entry into the module during init.*/
-static inline bool module_is_live(struct module *mod)
+static inline int module_is_live(struct module *mod)
 {
 	return mod->state != MODULE_STATE_GOING;
 }
@@ -612,9 +606,6 @@ int ref_module(struct module *a, struct module *b);
 	__mod ? __mod->name : "kernel";		\
 })
 
-/* Dereference module function descriptor */
-void *dereference_module_function_descriptor(struct module *mod, void *ptr);
-
 /* For kallsyms to ask for address resolution.  namebuf should be at
  * least KSYM_NAME_LEN long: a pointer to namebuf is returned if
  * found, otherwise NULL. */
@@ -647,8 +638,6 @@ static inline bool is_livepatch_module(struct module *mod)
 	return false;
 }
 #endif /* CONFIG_LIVEPATCH */
-
-bool is_module_sig_enforced(void);
 
 #else /* !CONFIG_MODULES... */
 
@@ -764,18 +753,6 @@ static inline bool module_requested_async_probing(struct module *module)
 	return false;
 }
 
-static inline bool is_module_sig_enforced(void)
-{
-	return false;
-}
-
-/* Dereference module function descriptor */
-static inline
-void *dereference_module_function_descriptor(struct module *mod, void *ptr)
-{
-	return ptr;
-}
-
 #endif /* CONFIG_MODULES */
 
 #ifdef CONFIG_SYSFS
@@ -816,15 +793,6 @@ static inline void module_bug_finalize(const Elf_Ehdr *hdr,
 }
 static inline void module_bug_cleanup(struct module *mod) {}
 #endif	/* CONFIG_GENERIC_BUG */
-
-#ifdef RETPOLINE
-extern bool retpoline_module_ok(bool has_retpoline);
-#else
-static inline bool retpoline_module_ok(bool has_retpoline)
-{
-	return true;
-}
-#endif
 
 #ifdef CONFIG_MODULE_SIG
 static inline bool module_sig_ok(struct module *module)

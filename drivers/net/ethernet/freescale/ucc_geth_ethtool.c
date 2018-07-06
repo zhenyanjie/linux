@@ -61,7 +61,7 @@ static const char hw_stat_gstrings[][ETH_GSTRING_LEN] = {
 static const char tx_fw_stat_gstrings[][ETH_GSTRING_LEN] = {
 	"tx-single-collision",
 	"tx-multiple-collision",
-	"tx-late-collision",
+	"tx-late-collsion",
 	"tx-aborted-frames",
 	"tx-lost-frames",
 	"tx-carrier-sense-errors",
@@ -113,9 +113,7 @@ uec_get_ksettings(struct net_device *netdev, struct ethtool_link_ksettings *cmd)
 	if (!phydev)
 		return -ENODEV;
 
-	phy_ethtool_ksettings_get(phydev, cmd);
-
-	return 0;
+	return phy_ethtool_ksettings_get(phydev, cmd);
 }
 
 static int

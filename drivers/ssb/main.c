@@ -480,6 +480,7 @@ static int ssb_devices_register(struct ssb_bus *bus)
 
 		devwrap = kzalloc(sizeof(*devwrap), GFP_KERNEL);
 		if (!devwrap) {
+			ssb_err("Could not allocate device\n");
 			err = -ENOMEM;
 			goto error;
 		}
@@ -522,7 +523,7 @@ static int ssb_devices_register(struct ssb_bus *bus)
 			/* Set dev to NULL to not unregister
 			 * dev on error unwinding. */
 			sdev->dev = NULL;
-			put_device(dev);
+			kfree(devwrap);
 			goto error;
 		}
 		dev_idx++;
@@ -1116,7 +1117,7 @@ static bool ssb_dma_translation_special_bit(struct ssb_device *dev)
 			chip_id == 43231 || chip_id == 43222);
 	}
 
-	return false;
+	return 0;
 }
 
 u32 ssb_dma_translation(struct ssb_device *dev)

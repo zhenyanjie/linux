@@ -119,49 +119,31 @@ u8 drm_dp_get_adjust_request_pre_emphasis(const u8 link_status[DP_LINK_STATUS_SI
 EXPORT_SYMBOL(drm_dp_get_adjust_request_pre_emphasis);
 
 void drm_dp_link_train_clock_recovery_delay(const u8 dpcd[DP_RECEIVER_CAP_SIZE]) {
-	int rd_interval = dpcd[DP_TRAINING_AUX_RD_INTERVAL] &
-			  DP_TRAINING_AUX_RD_MASK;
-
-	if (rd_interval > 4)
-		DRM_DEBUG_KMS("AUX interval %d, out of range (max 4)\n",
-			      rd_interval);
-
-	if (rd_interval == 0 || dpcd[DP_DPCD_REV] >= DP_DPCD_REV_14)
+	if (dpcd[DP_TRAINING_AUX_RD_INTERVAL] == 0)
 		udelay(100);
 	else
-		mdelay(rd_interval * 4);
+		mdelay(dpcd[DP_TRAINING_AUX_RD_INTERVAL] * 4);
 }
 EXPORT_SYMBOL(drm_dp_link_train_clock_recovery_delay);
 
 void drm_dp_link_train_channel_eq_delay(const u8 dpcd[DP_RECEIVER_CAP_SIZE]) {
-	int rd_interval = dpcd[DP_TRAINING_AUX_RD_INTERVAL] &
-			  DP_TRAINING_AUX_RD_MASK;
-
-	if (rd_interval > 4)
-		DRM_DEBUG_KMS("AUX interval %d, out of range (max 4)\n",
-			      rd_interval);
-
-	if (rd_interval == 0)
+	if (dpcd[DP_TRAINING_AUX_RD_INTERVAL] == 0)
 		udelay(400);
 	else
-		mdelay(rd_interval * 4);
+		mdelay(dpcd[DP_TRAINING_AUX_RD_INTERVAL] * 4);
 }
 EXPORT_SYMBOL(drm_dp_link_train_channel_eq_delay);
 
 u8 drm_dp_link_rate_to_bw_code(int link_rate)
 {
 	switch (link_rate) {
-	default:
-		WARN(1, "unknown DP link rate %d, using %x\n", link_rate,
-		     DP_LINK_BW_1_62);
 	case 162000:
+	default:
 		return DP_LINK_BW_1_62;
 	case 270000:
 		return DP_LINK_BW_2_7;
 	case 540000:
 		return DP_LINK_BW_5_4;
-	case 810000:
-		return DP_LINK_BW_8_1;
 	}
 }
 EXPORT_SYMBOL(drm_dp_link_rate_to_bw_code);
@@ -169,16 +151,13 @@ EXPORT_SYMBOL(drm_dp_link_rate_to_bw_code);
 int drm_dp_bw_code_to_link_rate(u8 link_bw)
 {
 	switch (link_bw) {
-	default:
-		WARN(1, "unknown DP link BW code %x, using 162000\n", link_bw);
 	case DP_LINK_BW_1_62:
+	default:
 		return 162000;
 	case DP_LINK_BW_2_7:
 		return 270000;
 	case DP_LINK_BW_5_4:
 		return 540000;
-	case DP_LINK_BW_8_1:
-		return 810000;
 	}
 }
 EXPORT_SYMBOL(drm_dp_bw_code_to_link_rate);
@@ -565,7 +544,7 @@ void drm_dp_downstream_debug(struct seq_file *m,
 				 DP_DETAILED_CAP_INFO_AVAILABLE;
 	int clk;
 	int bpc;
-	char id[7];
+	char id[6];
 	int len;
 	uint8_t rev[2];
 	int type = port_cap[0] & DP_DS_PORT_TYPE_MASK;
@@ -604,7 +583,6 @@ void drm_dp_downstream_debug(struct seq_file *m,
 		seq_puts(m, "\t\tType: N/A\n");
 	}
 
-	memset(id, 0, sizeof(id));
 	drm_dp_downstream_id(aux, id);
 	seq_printf(m, "\t\tID: %s\n", id);
 
@@ -613,7 +591,7 @@ void drm_dp_downstream_debug(struct seq_file *m,
 		seq_printf(m, "\t\tHW: %d.%d\n",
 			   (rev[0] & 0xf0) >> 4, rev[0] & 0xf);
 
-	len = drm_dp_dpcd_read(aux, DP_BRANCH_SW_REV, rev, 2);
+	len = drm_dp_dpcd_read(aux, DP_BRANCH_SW_REV, &rev, 2);
 	if (len > 0)
 		seq_printf(m, "\t\tSW: %d.%d\n", rev[0], rev[1]);
 
@@ -1115,6 +1093,7 @@ int drm_dp_aux_register(struct drm_dp_aux *aux)
 	aux->ddc.class = I2C_CLASS_DDC;
 	aux->ddc.owner = THIS_MODULE;
 	aux->ddc.dev.parent = aux->dev;
+	aux->ddc.dev.of_node = aux->dev->of_node;
 
 	strlcpy(aux->ddc.name, aux->name ? aux->name : dev_name(aux->dev),
 		sizeof(aux->ddc.name));
@@ -1159,7 +1138,6 @@ int drm_dp_psr_setup_time(const u8 psr_cap[EDP_PSR_RECEIVER_CAP_SIZE])
 	static const u16 psr_setup_time_us[] = {
 		PSR_SETUP_TIME(330),
 		PSR_SETUP_TIME(275),
-		PSR_SETUP_TIME(220),
 		PSR_SETUP_TIME(165),
 		PSR_SETUP_TIME(110),
 		PSR_SETUP_TIME(55),

@@ -264,7 +264,7 @@ out:
 	return status;
 }
 
-static const struct cache_detail rsi_cache_template = {
+static struct cache_detail rsi_cache_template = {
 	.owner		= THIS_MODULE,
 	.hash_size	= RSI_HASHMAX,
 	.name           = "auth.rpcsec.init",
@@ -481,7 +481,6 @@ static int rsc_parse(struct cache_detail *cd,
 				goto out;
 			rsci.cred.cr_group_info->gid[i] = kgid;
 		}
-		groups_sort(rsci.cred.cr_group_info);
 
 		/* mech name */
 		len = qword_get(&mesg, buf, mlen);
@@ -525,7 +524,7 @@ out:
 	return status;
 }
 
-static const struct cache_detail rsc_cache_template = {
+static struct cache_detail rsc_cache_template = {
 	.owner		= THIS_MODULE,
 	.hash_size	= RSC_HASHMAX,
 	.name		= "auth.rpcsec.context",
@@ -839,14 +838,6 @@ unwrap_integ_data(struct svc_rqst *rqstp, struct xdr_buf *buf, u32 seq, struct g
 	struct xdr_netobj mic;
 	struct xdr_buf integ_buf;
 
-	/* NFS READ normally uses splice to send data in-place. However
-	 * the data in cache can change after the reply's MIC is computed
-	 * but before the RPC reply is sent. To prevent the client from
-	 * rejecting the server-computed MIC in this somewhat rare case,
-	 * do not use splice with the GSS integrity service.
-	 */
-	clear_bit(RQ_SPLICE_OK, &rqstp->rq_flags);
-
 	/* Did we already verify the signature on the original pass through? */
 	if (rqstp->rq_deferred)
 		return 0;
@@ -856,13 +847,11 @@ unwrap_integ_data(struct svc_rqst *rqstp, struct xdr_buf *buf, u32 seq, struct g
 		return stat;
 	if (integ_len > buf->len)
 		return stat;
-	if (xdr_buf_subsegment(buf, &integ_buf, 0, integ_len)) {
-		WARN_ON_ONCE(1);
-		return stat;
-	}
+	if (xdr_buf_subsegment(buf, &integ_buf, 0, integ_len))
+		BUG();
 	/* copy out mic... */
 	if (read_u32_from_xdr_buf(buf, integ_len, &mic.len))
-		return stat;
+		BUG();
 	if (mic.len > RPC_MAX_AUTH_SIZE)
 		return stat;
 	mic.data = kmalloc(mic.len, GFP_KERNEL);
@@ -1375,7 +1364,7 @@ static int create_use_gss_proxy_proc_entry(struct net *net)
 	struct proc_dir_entry **p = &sn->use_gssp_proc;
 
 	sn->use_gss_proxy = -1;
-	*p = proc_create_data("use-gss-proxy", S_IFREG | 0600,
+	*p = proc_create_data("use-gss-proxy", S_IFREG|S_IRUSR|S_IWUSR,
 			      sn->proc_net_rpc,
 			      &use_gss_proxy_ops, net);
 	if (!*p)
@@ -1614,10 +1603,8 @@ svcauth_gss_wrap_resp_integ(struct svc_rqst *rqstp)
 	BUG_ON(integ_len % 4);
 	*p++ = htonl(integ_len);
 	*p++ = htonl(gc->gc_seq);
-	if (xdr_buf_subsegment(resbuf, &integ_buf, integ_offset, integ_len)) {
-		WARN_ON_ONCE(1);
-		goto out_err;
-	}
+	if (xdr_buf_subsegment(resbuf, &integ_buf, integ_offset, integ_len))
+		BUG();
 	if (resbuf->tail[0].iov_base == NULL) {
 		if (resbuf->head[0].iov_len + RPC_MAX_AUTH_SIZE > PAGE_SIZE)
 			goto out_err;

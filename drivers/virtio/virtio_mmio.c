@@ -493,16 +493,7 @@ static const struct virtio_config_ops virtio_mmio_config_ops = {
 };
 
 
-static void virtio_mmio_release_dev(struct device *_d)
-{
-	struct virtio_device *vdev =
-			container_of(_d, struct virtio_device, dev);
-	struct virtio_mmio_device *vm_dev =
-			container_of(vdev, struct virtio_mmio_device, vdev);
-	struct platform_device *pdev = vm_dev->pdev;
-
-	devm_kfree(&pdev->dev, vm_dev);
-}
+static void virtio_mmio_release_dev_empty(struct device *_d) {}
 
 /* Platform device */
 
@@ -523,10 +514,10 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 
 	vm_dev = devm_kzalloc(&pdev->dev, sizeof(*vm_dev), GFP_KERNEL);
 	if (!vm_dev)
-		return -ENOMEM;
+		return  -ENOMEM;
 
 	vm_dev->vdev.dev.parent = &pdev->dev;
-	vm_dev->vdev.dev.release = virtio_mmio_release_dev;
+	vm_dev->vdev.dev.release = virtio_mmio_release_dev_empty;
 	vm_dev->vdev.config = &virtio_mmio_config_ops;
 	vm_dev->pdev = pdev;
 	INIT_LIST_HEAD(&vm_dev->virtqueues);
@@ -582,16 +573,13 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, vm_dev);
 
-	rc = register_virtio_device(&vm_dev->vdev);
-	if (rc)
-		put_device(&vm_dev->vdev.dev);
-
-	return rc;
+	return register_virtio_device(&vm_dev->vdev);
 }
 
 static int virtio_mmio_remove(struct platform_device *pdev)
 {
 	struct virtio_mmio_device *vm_dev = platform_get_drvdata(pdev);
+
 	unregister_virtio_device(&vm_dev->vdev);
 
 	return 0;
@@ -662,8 +650,10 @@ static int vm_cmdline_set(const char *device,
 	pdev = platform_device_register_resndata(&vm_cmdline_parent,
 			"virtio-mmio", vm_cmdline_id++,
 			resources, ARRAY_SIZE(resources), NULL, 0);
+	if (IS_ERR(pdev))
+		return PTR_ERR(pdev);
 
-	return PTR_ERR_OR_ZERO(pdev);
+	return 0;
 }
 
 static int vm_cmdline_get_device(struct device *dev, void *data)
@@ -723,7 +713,7 @@ static void vm_unregister_cmdline_devices(void)
 
 /* Platform driver */
 
-static const struct of_device_id virtio_mmio_match[] = {
+static struct of_device_id virtio_mmio_match[] = {
 	{ .compatible = "virtio,mmio", },
 	{},
 };

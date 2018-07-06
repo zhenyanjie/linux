@@ -33,15 +33,13 @@
 #include "rcu_segcblist.h"
 #include "rcu.h"
 
-int rcu_scheduler_active __read_mostly;
-
 static int init_srcu_struct_fields(struct srcu_struct *sp)
 {
 	sp->srcu_lock_nesting[0] = 0;
 	sp->srcu_lock_nesting[1] = 0;
 	init_swait_queue_head(&sp->srcu_wq);
-	sp->srcu_cb_head = NULL;
-	sp->srcu_cb_tail = &sp->srcu_cb_head;
+	sp->srcu_gp_seq = 0;
+	rcu_segcblist_init(&sp->srcu_cblist);
 	sp->srcu_gp_running = false;
 	sp->srcu_gp_waiting = false;
 	sp->srcu_idx = 0;
@@ -86,19 +84,32 @@ EXPORT_SYMBOL_GPL(init_srcu_struct);
  * Must invoke this after you are finished using a given srcu_struct that
  * was initialized via init_srcu_struct(), else you leak memory.
  */
-void _cleanup_srcu_struct(struct srcu_struct *sp, bool quiesced)
+void cleanup_srcu_struct(struct srcu_struct *sp)
 {
 	WARN_ON(sp->srcu_lock_nesting[0] || sp->srcu_lock_nesting[1]);
-	if (quiesced)
-		WARN_ON(work_pending(&sp->srcu_work));
-	else
-		flush_work(&sp->srcu_work);
+	flush_work(&sp->srcu_work);
+	WARN_ON(rcu_seq_state(sp->srcu_gp_seq));
 	WARN_ON(sp->srcu_gp_running);
 	WARN_ON(sp->srcu_gp_waiting);
-	WARN_ON(sp->srcu_cb_head);
-	WARN_ON(&sp->srcu_cb_head != sp->srcu_cb_tail);
+	WARN_ON(!rcu_segcblist_empty(&sp->srcu_cblist));
 }
-EXPORT_SYMBOL_GPL(_cleanup_srcu_struct);
+EXPORT_SYMBOL_GPL(cleanup_srcu_struct);
+
+/*
+ * Counts the new reader in the appropriate per-CPU element of the
+ * srcu_struct.  Can be invoked from irq/bh handlers, but the matching
+ * __srcu_read_unlock() must be in the same handler instance.  Returns an
+ * index that must be passed to the matching srcu_read_unlock().
+ */
+int __srcu_read_lock(struct srcu_struct *sp)
+{
+	int idx;
+
+	idx = READ_ONCE(sp->srcu_idx);
+	WRITE_ONCE(sp->srcu_lock_nesting[idx], sp->srcu_lock_nesting[idx] + 1);
+	return idx;
+}
+EXPORT_SYMBOL_GPL(__srcu_read_lock);
 
 /*
  * Removes the count for the old reader from the appropriate element of
@@ -122,44 +133,52 @@ EXPORT_SYMBOL_GPL(__srcu_read_unlock);
 void srcu_drive_gp(struct work_struct *wp)
 {
 	int idx;
-	struct rcu_head *lh;
-	struct rcu_head *rhp;
+	struct rcu_cblist ready_cbs;
 	struct srcu_struct *sp;
+	struct rcu_head *rhp;
 
 	sp = container_of(wp, struct srcu_struct, srcu_work);
-	if (sp->srcu_gp_running || !READ_ONCE(sp->srcu_cb_head))
+	if (sp->srcu_gp_running || rcu_segcblist_empty(&sp->srcu_cblist))
 		return; /* Already running or nothing to do. */
 
-	/* Remove recently arrived callbacks and wait for readers. */
+	/* Tag recently arrived callbacks and wait for readers. */
 	WRITE_ONCE(sp->srcu_gp_running, true);
-	local_irq_disable();
-	lh = sp->srcu_cb_head;
-	sp->srcu_cb_head = NULL;
-	sp->srcu_cb_tail = &sp->srcu_cb_head;
-	local_irq_enable();
+	rcu_segcblist_accelerate(&sp->srcu_cblist,
+				 rcu_seq_snap(&sp->srcu_gp_seq));
+	rcu_seq_start(&sp->srcu_gp_seq);
 	idx = sp->srcu_idx;
 	WRITE_ONCE(sp->srcu_idx, !sp->srcu_idx);
 	WRITE_ONCE(sp->srcu_gp_waiting, true);  /* srcu_read_unlock() wakes! */
 	swait_event(sp->srcu_wq, !READ_ONCE(sp->srcu_lock_nesting[idx]));
 	WRITE_ONCE(sp->srcu_gp_waiting, false); /* srcu_read_unlock() cheap. */
+	rcu_seq_end(&sp->srcu_gp_seq);
 
-	/* Invoke the callbacks we removed above. */
-	while (lh) {
-		rhp = lh;
-		lh = lh->next;
-		local_bh_disable();
-		rhp->func(rhp);
-		local_bh_enable();
+	/* Update callback list based on GP, and invoke ready callbacks. */
+	rcu_segcblist_advance(&sp->srcu_cblist,
+			      rcu_seq_current(&sp->srcu_gp_seq));
+	if (rcu_segcblist_ready_cbs(&sp->srcu_cblist)) {
+		rcu_cblist_init(&ready_cbs);
+		local_irq_disable();
+		rcu_segcblist_extract_done_cbs(&sp->srcu_cblist, &ready_cbs);
+		local_irq_enable();
+		rhp = rcu_cblist_dequeue(&ready_cbs);
+		for (; rhp != NULL; rhp = rcu_cblist_dequeue(&ready_cbs)) {
+			local_bh_disable();
+			rhp->func(rhp);
+			local_bh_enable();
+		}
+		local_irq_disable();
+		rcu_segcblist_insert_count(&sp->srcu_cblist, &ready_cbs);
+		local_irq_enable();
 	}
+	WRITE_ONCE(sp->srcu_gp_running, false);
 
 	/*
-	 * Enable rescheduling, and if there are more callbacks,
-	 * reschedule ourselves.  This can race with a call_srcu()
-	 * at interrupt level, but the ->srcu_gp_running checks will
-	 * straighten that out.
+	 * If more callbacks, reschedule ourselves.  This can race with
+	 * a call_srcu() at interrupt level, but the ->srcu_gp_running
+	 * checks will straighten that out.
 	 */
-	WRITE_ONCE(sp->srcu_gp_running, false);
-	if (READ_ONCE(sp->srcu_cb_head))
+	if (!rcu_segcblist_empty(&sp->srcu_cblist))
 		schedule_work(&sp->srcu_work);
 }
 EXPORT_SYMBOL_GPL(srcu_drive_gp);
@@ -168,16 +187,14 @@ EXPORT_SYMBOL_GPL(srcu_drive_gp);
  * Enqueue an SRCU callback on the specified srcu_struct structure,
  * initiating grace-period processing if it is not already running.
  */
-void call_srcu(struct srcu_struct *sp, struct rcu_head *rhp,
+void call_srcu(struct srcu_struct *sp, struct rcu_head *head,
 	       rcu_callback_t func)
 {
 	unsigned long flags;
 
-	rhp->func = func;
-	rhp->next = NULL;
+	head->func = func;
 	local_irq_save(flags);
-	*sp->srcu_cb_tail = rhp;
-	sp->srcu_cb_tail = &rhp->next;
+	rcu_segcblist_enqueue(&sp->srcu_cblist, head, false);
 	local_irq_restore(flags);
 	if (!READ_ONCE(sp->srcu_gp_running))
 		schedule_work(&sp->srcu_work);
@@ -198,9 +215,3 @@ void synchronize_srcu(struct srcu_struct *sp)
 	destroy_rcu_head_on_stack(&rs.head);
 }
 EXPORT_SYMBOL_GPL(synchronize_srcu);
-
-/* Lockdep diagnostics.  */
-void __init rcu_scheduler_starting(void)
-{
-	rcu_scheduler_active = RCU_SCHEDULER_RUNNING;
-}

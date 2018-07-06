@@ -146,7 +146,6 @@
 enum sata_rcar_type {
 	RCAR_GEN1_SATA,
 	RCAR_GEN2_SATA,
-	RCAR_GEN3_SATA,
 	RCAR_R8A7790_ES1_SATA,
 };
 
@@ -785,10 +784,25 @@ static void sata_rcar_setup_port(struct ata_host *host)
 	ioaddr->command_addr	= ioaddr->cmd_addr + (ATA_REG_CMD << 2);
 }
 
-static void sata_rcar_init_module(struct sata_rcar_priv *priv)
+static void sata_rcar_init_controller(struct ata_host *host)
 {
+	struct sata_rcar_priv *priv = host->private_data;
 	void __iomem *base = priv->base;
 	u32 val;
+
+	/* reset and setup phy */
+	switch (priv->type) {
+	case RCAR_GEN1_SATA:
+		sata_rcar_gen1_phy_init(priv);
+		break;
+	case RCAR_GEN2_SATA:
+	case RCAR_R8A7790_ES1_SATA:
+		sata_rcar_gen2_phy_init(priv);
+		break;
+	default:
+		dev_warn(host->dev, "SATA phy is not initialized\n");
+		break;
+	}
 
 	/* SATA-IP reset state */
 	val = ioread32(base + ATAPI_CONTROL1_REG);
@@ -810,34 +824,11 @@ static void sata_rcar_init_module(struct sata_rcar_priv *priv)
 	/* ack and mask */
 	iowrite32(0, base + SATAINTSTAT_REG);
 	iowrite32(0x7ff, base + SATAINTMASK_REG);
-
 	/* enable interrupts */
 	iowrite32(ATAPI_INT_ENABLE_SATAINT, base + ATAPI_INT_ENABLE_REG);
 }
 
-static void sata_rcar_init_controller(struct ata_host *host)
-{
-	struct sata_rcar_priv *priv = host->private_data;
-
-	/* reset and setup phy */
-	switch (priv->type) {
-	case RCAR_GEN1_SATA:
-		sata_rcar_gen1_phy_init(priv);
-		break;
-	case RCAR_GEN2_SATA:
-	case RCAR_GEN3_SATA:
-	case RCAR_R8A7790_ES1_SATA:
-		sata_rcar_gen2_phy_init(priv);
-		break;
-	default:
-		dev_warn(host->dev, "SATA phy is not initialized\n");
-		break;
-	}
-
-	sata_rcar_init_module(priv);
-}
-
-static const struct of_device_id sata_rcar_match[] = {
+static struct of_device_id sata_rcar_match[] = {
 	{
 		/* Deprecated by "renesas,sata-r8a7779" */
 		.compatible = "renesas,rcar-sata",
@@ -865,15 +856,7 @@ static const struct of_device_id sata_rcar_match[] = {
 	},
 	{
 		.compatible = "renesas,sata-r8a7795",
-		.data = (void *)RCAR_GEN3_SATA
-	},
-	{
-		.compatible = "renesas,rcar-gen2-sata",
 		.data = (void *)RCAR_GEN2_SATA
-	},
-	{
-		.compatible = "renesas,rcar-gen3-sata",
-		.data = (void *)RCAR_GEN3_SATA
 	},
 	{ },
 };
@@ -881,6 +864,7 @@ MODULE_DEVICE_TABLE(of, sata_rcar_match);
 
 static int sata_rcar_probe(struct platform_device *pdev)
 {
+	const struct of_device_id *of_id;
 	struct ata_host *host;
 	struct sata_rcar_priv *priv;
 	struct resource *mem;
@@ -896,7 +880,11 @@ static int sata_rcar_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	priv->type = (enum sata_rcar_type)of_device_get_match_data(&pdev->dev);
+	of_id = of_match_device(sata_rcar_match, &pdev->dev);
+	if (!of_id)
+		return -ENODEV;
+
+	priv->type = (enum sata_rcar_type)of_id->data;
 	priv->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(priv->clk)) {
 		dev_err(&pdev->dev, "failed to get access to sata clock\n");
@@ -991,18 +979,11 @@ static int sata_rcar_resume(struct device *dev)
 	if (ret)
 		return ret;
 
-	if (priv->type == RCAR_GEN3_SATA) {
-		sata_rcar_gen2_phy_init(priv);
-		sata_rcar_init_module(priv);
-	} else {
-		/* ack and mask */
-		iowrite32(0, base + SATAINTSTAT_REG);
-		iowrite32(0x7ff, base + SATAINTMASK_REG);
-
-		/* enable interrupts */
-		iowrite32(ATAPI_INT_ENABLE_SATAINT,
-			  base + ATAPI_INT_ENABLE_REG);
-	}
+	/* ack and mask */
+	iowrite32(0, base + SATAINTSTAT_REG);
+	iowrite32(0x7ff, base + SATAINTMASK_REG);
+	/* enable interrupts */
+	iowrite32(ATAPI_INT_ENABLE_SATAINT, base + ATAPI_INT_ENABLE_REG);
 
 	ata_host_resume(host);
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NVKM_MC_PRIV_H__
 #define __NVKM_MC_PRIV_H__
 #define nvkm_mc(p) container_of((p), struct nvkm_mc, subdev)
@@ -57,6 +56,4 @@ int gp100_mc_new_(const struct nvkm_mc_func *, struct nvkm_device *, int,
 
 extern const struct nvkm_mc_map gk104_mc_intr[];
 extern const struct nvkm_mc_map gk104_mc_reset[];
-
-extern const struct nvkm_mc_map gp100_mc_intr[];
 #endif

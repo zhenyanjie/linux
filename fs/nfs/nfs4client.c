@@ -404,21 +404,16 @@ struct nfs_client *nfs4_init_client(struct nfs_client *clp,
 	if (error < 0)
 		goto error;
 
+	if (!nfs4_has_session(clp))
+		nfs_mark_client_ready(clp, NFS_CS_READY);
+
 	error = nfs4_discover_server_trunking(clp, &old);
 	if (error < 0)
 		goto error;
 
-	if (clp != old) {
+	if (clp != old)
 		clp->cl_preserve_clid = true;
-		/*
-		 * Mark the client as having failed initialization so other
-		 * processes walking the nfs_client_list in nfs_match_client()
-		 * won't try to use it.
-		 */
-		nfs_mark_client_ready(clp, -EPERM);
-	}
 	nfs_put_client(clp);
-	clear_bit(NFS_CS_TSM_POSSIBLE, &clp->cl_flags);
 	return old;
 
 error:
@@ -487,7 +482,7 @@ static int nfs4_match_client(struct nfs_client  *pos,  struct nfs_client *new,
 	 * ID and serverowner fields.  Wait for CREATE_SESSION
 	 * to finish. */
 	if (pos->cl_cons_state > NFS_CS_READY) {
-		refcount_inc(&pos->cl_count);
+		atomic_inc(&pos->cl_count);
 		spin_unlock(&nn->nfs_client_lock);
 
 		nfs_put_client(*prev);
@@ -543,9 +538,6 @@ int nfs40_walk_client_list(struct nfs_client *new,
 	spin_lock(&nn->nfs_client_lock);
 	list_for_each_entry(pos, &nn->nfs_client_list, cl_share_link) {
 
-		if (pos == new)
-			goto found;
-
 		status = nfs4_match_client(pos, new, &prev, nn);
 		if (status < 0)
 			goto out_unlock;
@@ -566,8 +558,7 @@ int nfs40_walk_client_list(struct nfs_client *new,
 		 * way that a SETCLIENTID_CONFIRM to pos can succeed is
 		 * if new and pos point to the same server:
 		 */
-found:
-		refcount_inc(&pos->cl_count);
+		atomic_inc(&pos->cl_count);
 		spin_unlock(&nn->nfs_client_lock);
 
 		nfs_put_client(prev);
@@ -580,7 +571,6 @@ found:
 		case 0:
 			nfs4_swap_callback_idents(pos, new);
 			pos->cl_confirm = new->cl_confirm;
-			nfs_mark_client_ready(pos, NFS_CS_READY);
 
 			prev = NULL;
 			*result = pos;
@@ -669,6 +659,9 @@ int nfs4_detect_session_trunking(struct nfs_client *clp,
 	if (!nfs4_check_server_scope(clp->cl_serverscope, res->server_scope))
 		goto out_err;
 
+	/* Session trunking passed, add the xprt */
+	rpc_clnt_xprt_switch_add_xprt(clp->cl_rpcclient, xprt);
+
 	pr_info("NFS:  %s: Session trunking succeeded for %s\n",
 		clp->cl_hostname,
 		xprt->address_strings[RPC_DISPLAY_ADDR]);
@@ -724,7 +717,7 @@ int nfs41_walk_client_list(struct nfs_client *new,
 			continue;
 
 found:
-		refcount_inc(&pos->cl_count);
+		atomic_inc(&pos->cl_count);
 		*result = pos;
 		status = 0;
 		break;
@@ -758,7 +751,7 @@ nfs4_find_client_ident(struct net *net, int cb_ident)
 	spin_lock(&nn->nfs_client_lock);
 	clp = idr_find(&nn->cb_ident_idr, cb_ident);
 	if (clp)
-		refcount_inc(&clp->cl_count);
+		atomic_inc(&clp->cl_count);
 	spin_unlock(&nn->nfs_client_lock);
 	return clp;
 }
@@ -802,7 +795,7 @@ nfs4_find_client_sessionid(struct net *net, const struct sockaddr *addr,
 
 	spin_lock(&nn->nfs_client_lock);
 	list_for_each_entry(clp, &nn->nfs_client_list, cl_share_link) {
-		if (!nfs4_cb_match_client(addr, clp, minorversion))
+		if (nfs4_cb_match_client(addr, clp, minorversion) == false)
 			continue;
 
 		if (!nfs4_has_session(clp))
@@ -813,7 +806,7 @@ nfs4_find_client_sessionid(struct net *net, const struct sockaddr *addr,
 		    sid->data, NFS4_MAX_SESSIONID_LEN) != 0)
 			continue;
 
-		refcount_inc(&clp->cl_count);
+		atomic_inc(&clp->cl_count);
 		spin_unlock(&nn->nfs_client_lock);
 		return clp;
 	}
@@ -859,19 +852,14 @@ static int nfs4_set_client(struct nfs_server *server,
 		set_bit(NFS_CS_NORESVPORT, &cl_init.init_flags);
 	if (server->options & NFS_OPTION_MIGRATION)
 		set_bit(NFS_CS_MIGRATION, &cl_init.init_flags);
-	if (test_bit(NFS_MIG_TSM_POSSIBLE, &server->mig_status))
-		set_bit(NFS_CS_TSM_POSSIBLE, &cl_init.init_flags);
-	server->port = rpc_get_port(addr);
 
 	/* Allocate or find a client reference we can use */
 	clp = nfs_get_client(&cl_init);
 	if (IS_ERR(clp))
 		return PTR_ERR(clp);
 
-	if (server->nfs_client == clp) {
-		nfs_put_client(clp);
+	if (server->nfs_client == clp)
 		return -ELOOP;
-	}
 
 	/*
 	 * Query for the lease time on clientid setup or renewal
@@ -1126,36 +1114,19 @@ struct nfs_server *nfs4_create_referral_server(struct nfs_clone_mount *data,
 	/* Initialise the client representation from the parent server */
 	nfs_server_copy_userdata(server, parent_server);
 
-	/* Get a client representation */
-#ifdef CONFIG_SUNRPC_XPRT_RDMA
-	rpc_set_port(data->addr, NFS_RDMA_PORT);
+	/* Get a client representation.
+	 * Note: NFSv4 always uses TCP, */
 	error = nfs4_set_client(server, data->hostname,
 				data->addr,
 				data->addrlen,
 				parent_client->cl_ipaddr,
-				XPRT_TRANSPORT_RDMA,
-				parent_server->client->cl_timeout,
-				parent_client->cl_mvops->minor_version,
-				parent_client->cl_net);
-	if (!error)
-		goto init_server;
-#endif	/* CONFIG_SUNRPC_XPRT_RDMA */
-
-	rpc_set_port(data->addr, NFS_PORT);
-	error = nfs4_set_client(server, data->hostname,
-				data->addr,
-				data->addrlen,
-				parent_client->cl_ipaddr,
-				XPRT_TRANSPORT_TCP,
+				rpc_protocol(parent_server->client),
 				parent_server->client->cl_timeout,
 				parent_client->cl_mvops->minor_version,
 				parent_client->cl_net);
 	if (error < 0)
 		goto error;
 
-#ifdef CONFIG_SUNRPC_XPRT_RDMA
-init_server:
-#endif
 	error = nfs_init_server_rpcclient(server, parent_server->client->cl_timeout, data->authflavor);
 	if (error < 0)
 		goto error;
@@ -1241,16 +1212,14 @@ int nfs4_update_server(struct nfs_server *server, const char *hostname,
 		return -EAFNOSUPPORT;
 
 	nfs_server_remove_lists(server);
-	set_bit(NFS_MIG_TSM_POSSIBLE, &server->mig_status);
 	error = nfs4_set_client(server, hostname, sap, salen, buf,
 				clp->cl_proto, clnt->cl_timeout,
 				clp->cl_minorversion, net);
-	clear_bit(NFS_MIG_TSM_POSSIBLE, &server->mig_status);
+	nfs_put_client(clp);
 	if (error != 0) {
 		nfs_server_insert_lists(server);
 		return error;
 	}
-	nfs_put_client(clp);
 
 	if (server->nfs_client->cl_hostname == NULL)
 		server->nfs_client->cl_hostname = kstrdup(hostname, GFP_KERNEL);

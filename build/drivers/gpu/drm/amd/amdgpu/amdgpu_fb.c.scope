@@ -1,0 +1,17 @@
+R amdgpu_fbdev 45 -1 49
+V amdgpufb_ops 51 51 63
+F amdgpu_align_pitch 66 67 87
+F amdgpufb_destroy_pinned_object 89 90 101
+F amdgpufb_create_pinned_object 103 106 169
+F amdgpufb_create 171 173 272
+F amdgpu_fb_output_poll_changed 274 275 278
+F amdgpu_fbdev_destroy 280 281 296
+F amdgpu_crtc_fb_gamma_set 299 301 307
+F amdgpu_crtc_fb_gamma_get 310 312 318
+V amdgpu_fb_helper_funcs 320 320 324
+F amdgpu_fbdev_init 326 327 365
+F amdgpu_fbdev_fini 367 368 375
+F amdgpu_fbdev_set_suspend 377 378 382
+F amdgpu_fbdev_total_size 384 385 395
+F amdgpu_fbdev_robj_is_fb 397 398 404
+F amdgpu_fbdev_restore_mode 406 407 420

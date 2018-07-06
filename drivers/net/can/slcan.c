@@ -216,7 +216,8 @@ static void slc_bump(struct slcan *sl)
 	can_skb_prv(skb)->ifindex = sl->dev->ifindex;
 	can_skb_prv(skb)->skbcnt = 0;
 
-	skb_put_data(skb, &cf, sizeof(struct can_frame));
+	memcpy(skb_put(skb, sizeof(struct can_frame)),
+	       &cf, sizeof(struct can_frame));
 
 	sl->dev->stats.rx_packets++;
 	sl->dev->stats.rx_bytes += cf.can_dlc;
@@ -508,7 +509,7 @@ static void slc_sync(void)
 }
 
 /* Find a free SLCAN channel, and link in this `tty' line. */
-static struct slcan *slc_alloc(void)
+static struct slcan *slc_alloc(dev_t line)
 {
 	int i;
 	char name[IFNAMSIZ];
@@ -583,7 +584,7 @@ static int slcan_open(struct tty_struct *tty)
 
 	/* OK.  Find a free SLCAN channel to use. */
 	err = -ENFILE;
-	sl = slc_alloc();
+	sl = slc_alloc(tty_devnum(tty));
 	if (sl == NULL)
 		goto err_exit;
 
@@ -703,7 +704,7 @@ static int __init slcan_init(void)
 	pr_info("slcan: serial line CAN interface driver\n");
 	pr_info("slcan: %d dynamic interface channels.\n", maxdev);
 
-	slcan_devs = kcalloc(maxdev, sizeof(struct net_device *), GFP_KERNEL);
+	slcan_devs = kzalloc(sizeof(struct net_device *)*maxdev, GFP_KERNEL);
 	if (!slcan_devs)
 		return -ENOMEM;
 

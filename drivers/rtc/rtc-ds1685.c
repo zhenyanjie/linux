@@ -267,7 +267,8 @@ ds1685_rtc_get_ssn(struct ds1685_priv *rtc, u8 *ssn)
 static int
 ds1685_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
-	struct ds1685_priv *rtc = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 ctrlb, century;
 	u8 seconds, minutes, hours, wday, mday, month, years;
 
@@ -305,7 +306,7 @@ ds1685_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	tm->tm_yday  = rtc_year_days(tm->tm_mday, tm->tm_mon, tm->tm_year);
 	tm->tm_isdst = 0; /* RTC has hardcoded timezone, so don't use. */
 
-	return 0;
+	return rtc_valid_tm(tm);
 }
 
 /**
@@ -316,7 +317,8 @@ ds1685_rtc_read_time(struct device *dev, struct rtc_time *tm)
 static int
 ds1685_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
-	struct ds1685_priv *rtc = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 ctrlb, seconds, minutes, hours, wday, mday, month, years, century;
 
 	/* Fetch the time info from rtc_time. */
@@ -392,7 +394,8 @@ ds1685_rtc_set_time(struct device *dev, struct rtc_time *tm)
 static int
 ds1685_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct ds1685_priv *rtc = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 seconds, minutes, hours, mday, ctrlb, ctrlc;
 	int ret;
 
@@ -450,7 +453,8 @@ ds1685_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 static int
 ds1685_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct ds1685_priv *rtc = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 ctrlb, seconds, minutes, hours, mday;
 	int ret;
 
@@ -1115,7 +1119,8 @@ static ssize_t
 ds1685_rtc_sysfs_battery_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
-	struct ds1685_priv *rtc = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 ctrld;
 
 	ctrld = rtc->read(rtc, RTC_CTRL_D);
@@ -1135,7 +1140,8 @@ static ssize_t
 ds1685_rtc_sysfs_auxbatt_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
-	struct ds1685_priv *rtc = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 ctrl4a;
 
 	ds1685_rtc_switch_to_bank1(rtc);
@@ -1157,7 +1163,8 @@ static ssize_t
 ds1685_rtc_sysfs_serial_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
-	struct ds1685_priv *rtc = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ds1685_priv *rtc = platform_get_drvdata(pdev);
 	u8 ssn[8];
 
 	ds1685_rtc_switch_to_bank1(rtc);
@@ -2037,26 +2044,6 @@ ds1685_rtc_probe(struct platform_device *pdev)
 	rtc->write(rtc, RTC_EXT_CTRL_4B,
 		   (rtc->read(rtc, RTC_EXT_CTRL_4B) | RTC_CTRL_4B_KSE));
 
-	rtc_dev = devm_rtc_allocate_device(&pdev->dev);
-	if (IS_ERR(rtc_dev))
-		return PTR_ERR(rtc_dev);
-
-	rtc_dev->ops = &ds1685_rtc_ops;
-
-	/* Century bit is useless because leap year fails in 1900 and 2100 */
-	rtc_dev->range_min = RTC_TIMESTAMP_BEGIN_2000;
-	rtc_dev->range_max = RTC_TIMESTAMP_END_2099;
-
-	/* Maximum periodic rate is 8192Hz (0.122070ms). */
-	rtc_dev->max_user_freq = RTC_MAX_USER_FREQ;
-
-	/* See if the platform doesn't support UIE. */
-	if (pdata->uie_unsupported)
-		rtc_dev->uie_unsupported = 1;
-	rtc->uie_unsupported = pdata->uie_unsupported;
-
-	rtc->dev = rtc_dev;
-
 	/*
 	 * Fetch the IRQ and setup the interrupt handler.
 	 *
@@ -2089,13 +2076,32 @@ ds1685_rtc_probe(struct platform_device *pdev)
 	/* Setup complete. */
 	ds1685_rtc_switch_to_bank0(rtc);
 
+	/* Register the device as an RTC. */
+	rtc_dev = rtc_device_register(pdev->name, &pdev->dev,
+				      &ds1685_rtc_ops, THIS_MODULE);
+
+	/* Success? */
+	if (IS_ERR(rtc_dev))
+		return PTR_ERR(rtc_dev);
+
+	/* Maximum periodic rate is 8192Hz (0.122070ms). */
+	rtc_dev->max_user_freq = RTC_MAX_USER_FREQ;
+
+	/* See if the platform doesn't support UIE. */
+	if (pdata->uie_unsupported)
+		rtc_dev->uie_unsupported = 1;
+	rtc->uie_unsupported = pdata->uie_unsupported;
+
+	rtc->dev = rtc_dev;
+
 #ifdef CONFIG_SYSFS
 	ret = ds1685_rtc_sysfs_register(&pdev->dev);
 	if (ret)
-		return ret;
+		rtc_device_unregister(rtc->dev);
 #endif
 
-	return rtc_register_device(rtc_dev);
+	/* Done! */
+	return ret;
 }
 
 /**
@@ -2110,6 +2116,8 @@ ds1685_rtc_remove(struct platform_device *pdev)
 #ifdef CONFIG_SYSFS
 	ds1685_rtc_sysfs_unregister(&pdev->dev);
 #endif
+
+	rtc_device_unregister(rtc->dev);
 
 	/* Read Ctrl B and clear PIE/AIE/UIE. */
 	rtc->write(rtc, RTC_CTRL_B,

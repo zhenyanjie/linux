@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * builtin-help.c
  *
@@ -91,7 +90,7 @@ static int check_emacsclient_version(void)
 	 */
 	finish_command(&ec_process);
 
-	if (!strstarts(buffer.buf, "emacsclient")) {
+	if (prefixcmp(buffer.buf, "emacsclient")) {
 		fprintf(stderr, "Failed to parse emacsclient version.\n");
 		goto out;
 	}
@@ -109,14 +108,10 @@ out:
 	return ret;
 }
 
-static void exec_failed(const char *cmd)
-{
-	char sbuf[STRERR_BUFSIZE];
-	pr_warning("failed to exec '%s': %s", cmd, str_error_r(errno, sbuf, sizeof(sbuf)));
-}
-
 static void exec_woman_emacs(const char *path, const char *page)
 {
+	char sbuf[STRERR_BUFSIZE];
+
 	if (!check_emacsclient_version()) {
 		/* This works only with emacsclient version >= 22. */
 		char *man_page;
@@ -127,7 +122,8 @@ static void exec_woman_emacs(const char *path, const char *page)
 			execlp(path, "emacsclient", "-e", man_page, NULL);
 			free(man_page);
 		}
-		exec_failed(path);
+		warning("failed to exec '%s': %s", path,
+			str_error_r(errno, sbuf, sizeof(sbuf)));
 	}
 }
 
@@ -138,6 +134,7 @@ static void exec_man_konqueror(const char *path, const char *page)
 	if (display && *display) {
 		char *man_page;
 		const char *filename = "kfmclient";
+		char sbuf[STRERR_BUFSIZE];
 
 		/* It's simpler to launch konqueror using kfmclient. */
 		if (path) {
@@ -158,27 +155,33 @@ static void exec_man_konqueror(const char *path, const char *page)
 			execlp(path, filename, "newTab", man_page, NULL);
 			free(man_page);
 		}
-		exec_failed(path);
+		warning("failed to exec '%s': %s", path,
+			str_error_r(errno, sbuf, sizeof(sbuf)));
 	}
 }
 
 static void exec_man_man(const char *path, const char *page)
 {
+	char sbuf[STRERR_BUFSIZE];
+
 	if (!path)
 		path = "man";
 	execlp(path, "man", page, NULL);
-	exec_failed(path);
+	warning("failed to exec '%s': %s", path,
+		str_error_r(errno, sbuf, sizeof(sbuf)));
 }
 
 static void exec_man_cmd(const char *cmd, const char *page)
 {
+	char sbuf[STRERR_BUFSIZE];
 	char *shell_cmd;
 
 	if (asprintf(&shell_cmd, "%s %s", cmd, page) > 0) {
 		execl("/bin/sh", "sh", "-c", shell_cmd, NULL);
 		free(shell_cmd);
 	}
-	exec_failed(cmd);
+	warning("failed to exec '%s': %s", cmd,
+		str_error_r(errno, sbuf, sizeof(sbuf)));
 }
 
 static void add_man_viewer(const char *name)
@@ -211,12 +214,6 @@ static void do_add_man_viewer_info(const char *name,
 	man_viewer_info_list = new;
 }
 
-static void unsupported_man_viewer(const char *name, const char *var)
-{
-	pr_warning("'%s': path for unsupported man viewer.\n"
-		   "Please consider using 'man.<tool>.%s' instead.", name, var);
-}
-
 static int add_man_viewer_path(const char *name,
 			       size_t len,
 			       const char *value)
@@ -224,7 +221,9 @@ static int add_man_viewer_path(const char *name,
 	if (supported_man_viewer(name, len))
 		do_add_man_viewer_info(name, len, value);
 	else
-		unsupported_man_viewer(name, "cmd");
+		warning("'%s': path for unsupported man viewer.\n"
+			"Please consider using 'man.<tool>.cmd' instead.",
+			name);
 
 	return 0;
 }
@@ -234,7 +233,9 @@ static int add_man_viewer_cmd(const char *name,
 			      const char *value)
 {
 	if (supported_man_viewer(name, len))
-		unsupported_man_viewer(name, "path");
+		warning("'%s': cmd for supported man viewer.\n"
+			"Please consider using 'man.<tool>.path' instead.",
+			name);
 	else
 		do_add_man_viewer_info(name, len, value);
 
@@ -246,10 +247,8 @@ static int add_man_viewer_info(const char *var, const char *value)
 	const char *name = var + 4;
 	const char *subkey = strrchr(name, '.');
 
-	if (!subkey) {
-		pr_err("Config with no key for man viewer: %s", name);
-		return -1;
-	}
+	if (!subkey)
+		return error("Config with no key for man viewer: %s", name);
 
 	if (!strcmp(subkey, ".path")) {
 		if (!value)
@@ -262,7 +261,7 @@ static int add_man_viewer_info(const char *var, const char *value)
 		return add_man_viewer_cmd(name, subkey - name, value);
 	}
 
-	pr_warning("'%s': unsupported man viewer sub key.", subkey);
+	warning("'%s': unsupported man viewer sub key.", subkey);
 	return 0;
 }
 
@@ -284,7 +283,7 @@ static int perf_help_config(const char *var, const char *value, void *cb)
 		add_man_viewer(value);
 		return 0;
 	}
-	if (strstarts(var, "man."))
+	if (!prefixcmp(var, "man."))
 		return add_man_viewer_info(var, value);
 
 	return 0;
@@ -314,7 +313,7 @@ static const char *cmd_to_page(const char *perf_cmd)
 
 	if (!perf_cmd)
 		return "perf";
-	else if (strstarts(perf_cmd, "perf"))
+	else if (!prefixcmp(perf_cmd, "perf"))
 		return perf_cmd;
 
 	return asprintf(&s, "perf-%s", perf_cmd) < 0 ? NULL : s;
@@ -333,7 +332,7 @@ static void setup_man_path(void)
 		setenv("MANPATH", new_path, 1);
 		free(new_path);
 	} else {
-		pr_err("Unable to setup man path");
+		error("Unable to setup man path");
 	}
 }
 
@@ -350,7 +349,7 @@ static void exec_viewer(const char *name, const char *page)
 	else if (info)
 		exec_man_cmd(info, page);
 	else
-		pr_warning("'%s': unknown man viewer.", name);
+		warning("'%s': unknown man viewer.", name);
 }
 
 static int show_man_page(const char *perf_cmd)
@@ -439,7 +438,7 @@ int cmd_help(int argc, const char **argv)
 #ifdef HAVE_LIBELF_SUPPORT
 		"probe",
 #endif
-#if defined(HAVE_LIBAUDIT_SUPPORT) || defined(HAVE_SYSCALL_TABLE_SUPPORT)
+#ifdef HAVE_LIBAUDIT_SUPPORT
 		"trace",
 #endif
 	NULL };

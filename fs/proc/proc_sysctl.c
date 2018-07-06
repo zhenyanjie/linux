@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * /proc/sys support
  */
@@ -554,8 +553,9 @@ static struct dentry *proc_sys_lookup(struct inode *dir, struct dentry *dentry,
 	if (!inode)
 		goto out;
 
+	err = NULL;
 	d_set_d_op(dentry, &proc_sys_dentry_operations);
-	err = d_splice_alias(inode, dentry);
+	d_add(dentry, inode);
 
 out:
 	if (h)
@@ -629,17 +629,17 @@ static int proc_sys_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static __poll_t proc_sys_poll(struct file *filp, poll_table *wait)
+static unsigned int proc_sys_poll(struct file *filp, poll_table *wait)
 {
 	struct inode *inode = file_inode(filp);
 	struct ctl_table_header *head = grab_header(inode);
 	struct ctl_table *table = PROC_I(inode)->sysctl_entry;
-	__poll_t ret = DEFAULT_POLLMASK;
+	unsigned int ret = DEFAULT_POLLMASK;
 	unsigned long event;
 
 	/* sysctl was unregistered */
 	if (IS_ERR(head))
-		return EPOLLERR | EPOLLHUP;
+		return POLLERR | POLLHUP;
 
 	if (!table->proc_handler)
 		goto out;
@@ -652,7 +652,7 @@ static __poll_t proc_sys_poll(struct file *filp, poll_table *wait)
 
 	if (event != atomic_read(&table->poll->event)) {
 		filp->private_data = proc_sys_poll_event(table->poll);
-		ret = EPOLLIN | EPOLLRDNORM | EPOLLERR | EPOLLPRI;
+		ret = POLLIN | POLLRDNORM | POLLERR | POLLPRI;
 	}
 
 out:
@@ -683,7 +683,6 @@ static bool proc_sys_fill_cache(struct file *file,
 		if (IS_ERR(child))
 			return false;
 		if (d_in_lookup(child)) {
-			struct dentry *res;
 			inode = proc_sys_make_inode(dir->d_sb, head, table);
 			if (!inode) {
 				d_lookup_done(child);
@@ -691,16 +690,7 @@ static bool proc_sys_fill_cache(struct file *file,
 				return false;
 			}
 			d_set_d_op(child, &proc_sys_dentry_operations);
-			res = d_splice_alias(inode, child);
-			d_lookup_done(child);
-			if (unlikely(res)) {
-				if (IS_ERR(res)) {
-					dput(child);
-					return false;
-				}
-				dput(child);
-				child = res;
-			}
+			d_add(child, inode);
 		}
 	}
 	inode = d_inode(child);
@@ -716,14 +706,14 @@ static bool proc_sys_link_fill_cache(struct file *file,
 				    struct ctl_table *table)
 {
 	bool ret = true;
-
 	head = sysctl_head_grab(head);
-	if (IS_ERR(head))
-		return false;
 
-	/* It is not an error if we can not follow the link ignore it */
-	if (sysctl_follow_link(&head, &table))
-		goto out;
+	if (S_ISLNK(table->mode)) {
+		/* It is not an error if we can not follow the link ignore it */
+		int err = sysctl_follow_link(&head, &table);
+		if (err)
+			goto out;
+	}
 
 	ret = proc_sys_fill_cache(file, ctx, head, table);
 out:
@@ -1088,30 +1078,16 @@ static int sysctl_err(const char *path, struct ctl_table *table, char *fmt, ...)
 	return -EINVAL;
 }
 
-static int sysctl_check_table_array(const char *path, struct ctl_table *table)
-{
-	int err = 0;
-
-	if ((table->proc_handler == proc_douintvec) ||
-	    (table->proc_handler == proc_douintvec_minmax)) {
-		if (table->maxlen != sizeof(unsigned int))
-			err |= sysctl_err(path, table, "array not allowed");
-	}
-
-	return err;
-}
-
 static int sysctl_check_table(const char *path, struct ctl_table *table)
 {
 	int err = 0;
 	for (; table->procname; table++) {
 		if (table->child)
-			err |= sysctl_err(path, table, "Not a file");
+			err = sysctl_err(path, table, "Not a file");
 
 		if ((table->proc_handler == proc_dostring) ||
 		    (table->proc_handler == proc_dointvec) ||
 		    (table->proc_handler == proc_douintvec) ||
-		    (table->proc_handler == proc_douintvec_minmax) ||
 		    (table->proc_handler == proc_dointvec_minmax) ||
 		    (table->proc_handler == proc_dointvec_jiffies) ||
 		    (table->proc_handler == proc_dointvec_userhz_jiffies) ||
@@ -1119,17 +1095,15 @@ static int sysctl_check_table(const char *path, struct ctl_table *table)
 		    (table->proc_handler == proc_doulongvec_minmax) ||
 		    (table->proc_handler == proc_doulongvec_ms_jiffies_minmax)) {
 			if (!table->data)
-				err |= sysctl_err(path, table, "No data");
+				err = sysctl_err(path, table, "No data");
 			if (!table->maxlen)
-				err |= sysctl_err(path, table, "No maxlen");
-			else
-				err |= sysctl_check_table_array(path, table);
+				err = sysctl_err(path, table, "No maxlen");
 		}
 		if (!table->proc_handler)
-			err |= sysctl_err(path, table, "No proc_handler");
+			err = sysctl_err(path, table, "No proc_handler");
 
 		if ((table->mode & (S_IRUGO|S_IWUGO)) != table->mode)
-			err |= sysctl_err(path, table, "bogus .mode 0%o",
+			err = sysctl_err(path, table, "bogus .mode 0%o",
 				table->mode);
 	}
 	return err;
@@ -1426,7 +1400,7 @@ static int register_leaf_sysctl_tables(const char *path, char *pos,
 	/* If there are mixed files and directories we need a new table */
 	if (nr_dirs && nr_files) {
 		struct ctl_table *new;
-		files = kcalloc(nr_files + 1, sizeof(struct ctl_table),
+		files = kzalloc(sizeof(struct ctl_table) * (nr_files + 1),
 				GFP_KERNEL);
 		if (!files)
 			goto out;

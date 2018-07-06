@@ -21,7 +21,6 @@
 #include <linux/smpboot.h>
 #include <linux/atomic.h>
 #include <linux/nmi.h>
-#include <linux/sched/wake_q.h>
 
 /*
  * Structure to determine completion condition and record errors.  May
@@ -37,7 +36,7 @@ struct cpu_stop_done {
 struct cpu_stopper {
 	struct task_struct	*thread;
 
-	raw_spinlock_t		lock;
+	spinlock_t		lock;
 	bool			enabled;	/* is this stopper enabled? */
 	struct list_head	works;		/* list of pending works */
 
@@ -66,30 +65,26 @@ static void cpu_stop_signal_done(struct cpu_stop_done *done)
 }
 
 static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
-					struct cpu_stop_work *work,
-					struct wake_q_head *wakeq)
+					struct cpu_stop_work *work)
 {
 	list_add_tail(&work->list, &stopper->works);
-	wake_q_add(wakeq, stopper->thread);
+	wake_up_process(stopper->thread);
 }
 
 /* queue @work to @stopper.  if offline, @work is completed immediately */
 static bool cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
 {
 	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
-	DEFINE_WAKE_Q(wakeq);
 	unsigned long flags;
 	bool enabled;
 
-	raw_spin_lock_irqsave(&stopper->lock, flags);
+	spin_lock_irqsave(&stopper->lock, flags);
 	enabled = stopper->enabled;
 	if (enabled)
-		__cpu_stop_queue_work(stopper, work, &wakeq);
+		__cpu_stop_queue_work(stopper, work);
 	else if (work->done)
 		cpu_stop_signal_done(work->done);
-	raw_spin_unlock_irqrestore(&stopper->lock, flags);
-
-	wake_up_q(&wakeq);
+	spin_unlock_irqrestore(&stopper->lock, flags);
 
 	return enabled;
 }
@@ -234,11 +229,10 @@ static int cpu_stop_queue_two_works(int cpu1, struct cpu_stop_work *work1,
 {
 	struct cpu_stopper *stopper1 = per_cpu_ptr(&cpu_stopper, cpu1);
 	struct cpu_stopper *stopper2 = per_cpu_ptr(&cpu_stopper, cpu2);
-	DEFINE_WAKE_Q(wakeq);
 	int err;
 retry:
-	raw_spin_lock_irq(&stopper1->lock);
-	raw_spin_lock_nested(&stopper2->lock, SINGLE_DEPTH_NESTING);
+	spin_lock_irq(&stopper1->lock);
+	spin_lock_nested(&stopper2->lock, SINGLE_DEPTH_NESTING);
 
 	err = -ENOENT;
 	if (!stopper1->enabled || !stopper2->enabled)
@@ -258,20 +252,17 @@ retry:
 			goto unlock;
 
 	err = 0;
-	__cpu_stop_queue_work(stopper1, work1, &wakeq);
-	__cpu_stop_queue_work(stopper2, work2, &wakeq);
+	__cpu_stop_queue_work(stopper1, work1);
+	__cpu_stop_queue_work(stopper2, work2);
 unlock:
-	raw_spin_unlock(&stopper2->lock);
-	raw_spin_unlock_irq(&stopper1->lock);
+	spin_unlock(&stopper2->lock);
+	spin_unlock_irq(&stopper1->lock);
 
 	if (unlikely(err == -EDEADLK)) {
 		while (stop_cpus_in_progress)
 			cpu_relax();
 		goto retry;
 	}
-
-	wake_up_q(&wakeq);
-
 	return err;
 }
 /**
@@ -457,9 +448,9 @@ static int cpu_stop_should_run(unsigned int cpu)
 	unsigned long flags;
 	int run;
 
-	raw_spin_lock_irqsave(&stopper->lock, flags);
+	spin_lock_irqsave(&stopper->lock, flags);
 	run = !list_empty(&stopper->works);
-	raw_spin_unlock_irqrestore(&stopper->lock, flags);
+	spin_unlock_irqrestore(&stopper->lock, flags);
 	return run;
 }
 
@@ -470,13 +461,13 @@ static void cpu_stopper_thread(unsigned int cpu)
 
 repeat:
 	work = NULL;
-	raw_spin_lock_irq(&stopper->lock);
+	spin_lock_irq(&stopper->lock);
 	if (!list_empty(&stopper->works)) {
 		work = list_first_entry(&stopper->works,
 					struct cpu_stop_work, list);
 		list_del_init(&work->list);
 	}
-	raw_spin_unlock_irq(&stopper->lock);
+	spin_unlock_irq(&stopper->lock);
 
 	if (work) {
 		cpu_stop_fn_t fn = work->fn;
@@ -550,7 +541,7 @@ static int __init cpu_stop_init(void)
 	for_each_possible_cpu(cpu) {
 		struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
 
-		raw_spin_lock_init(&stopper->lock);
+		spin_lock_init(&stopper->lock);
 		INIT_LIST_HEAD(&stopper->works);
 	}
 
@@ -561,8 +552,7 @@ static int __init cpu_stop_init(void)
 }
 early_initcall(cpu_stop_init);
 
-int stop_machine_cpuslocked(cpu_stop_fn_t fn, void *data,
-			    const struct cpumask *cpus)
+static int __stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cpus)
 {
 	struct multi_stop_data msdata = {
 		.fn = fn,
@@ -570,8 +560,6 @@ int stop_machine_cpuslocked(cpu_stop_fn_t fn, void *data,
 		.num_threads = num_online_cpus(),
 		.active_cpus = cpus,
 	};
-
-	lockdep_assert_cpus_held();
 
 	if (!stop_machine_initialized) {
 		/*
@@ -602,9 +590,9 @@ int stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cpus)
 	int ret;
 
 	/* No CPUs can come up or down during this. */
-	cpus_read_lock();
-	ret = stop_machine_cpuslocked(fn, data, cpus);
-	cpus_read_unlock();
+	get_online_cpus();
+	ret = __stop_machine(fn, data, cpus);
+	put_online_cpus();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(stop_machine);

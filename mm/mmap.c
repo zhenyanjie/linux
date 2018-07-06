@@ -44,7 +44,6 @@
 #include <linux/userfaultfd_k.h>
 #include <linux/moduleparam.h>
 #include <linux/pkeys.h>
-#include <linux/oom.h>
 
 #include <linux/uaccess.h>
 #include <asm/cacheflush.h>
@@ -95,25 +94,16 @@ static void unmap_region(struct mm_struct *mm,
  *								w: (no) no
  *								x: (yes) yes
  */
-pgprot_t protection_map[16] __ro_after_init = {
+pgprot_t protection_map[16] = {
 	__P000, __P001, __P010, __P011, __P100, __P101, __P110, __P111,
 	__S000, __S001, __S010, __S011, __S100, __S101, __S110, __S111
 };
 
-#ifndef CONFIG_ARCH_HAS_FILTER_PGPROT
-static inline pgprot_t arch_filter_pgprot(pgprot_t prot)
-{
-	return prot;
-}
-#endif
-
 pgprot_t vm_get_page_prot(unsigned long vm_flags)
 {
-	pgprot_t ret = __pgprot(pgprot_val(protection_map[vm_flags &
+	return __pgprot(pgprot_val(protection_map[vm_flags &
 				(VM_READ|VM_WRITE|VM_EXEC|VM_SHARED)]) |
 			pgprot_val(arch_vm_get_page_prot(vm_flags)));
-
-	return arch_filter_pgprot(ret);
 }
 EXPORT_SYMBOL(vm_get_page_prot);
 
@@ -694,7 +684,7 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 	struct mm_struct *mm = vma->vm_mm;
 	struct vm_area_struct *next = vma->vm_next, *orig_vma = vma;
 	struct address_space *mapping = NULL;
-	struct rb_root_cached *root = NULL;
+	struct rb_root *root = NULL;
 	struct anon_vma *anon_vma = NULL;
 	struct file *file = vma->vm_file;
 	bool start_changed = false, end_changed = false;
@@ -1324,35 +1314,6 @@ static inline int mlock_future_check(struct mm_struct *mm,
 	return 0;
 }
 
-static inline u64 file_mmap_size_max(struct file *file, struct inode *inode)
-{
-	if (S_ISREG(inode->i_mode))
-		return MAX_LFS_FILESIZE;
-
-	if (S_ISBLK(inode->i_mode))
-		return MAX_LFS_FILESIZE;
-
-	/* Special "we do even unsigned file positions" case */
-	if (file->f_mode & FMODE_UNSIGNED_OFFSET)
-		return 0;
-
-	/* Yes, random drivers might want more. But I'm tired of buggy drivers */
-	return ULONG_MAX;
-}
-
-static inline bool file_mmap_ok(struct file *file, struct inode *inode,
-				unsigned long pgoff, unsigned long len)
-{
-	u64 maxsize = file_mmap_size_max(file, inode);
-
-	if (maxsize && len > maxsize)
-		return false;
-	maxsize -= len;
-	if (pgoff > maxsize >> PAGE_SHIFT)
-		return false;
-	return true;
-}
-
 /*
  * The caller must hold down_write(&current->mm->mmap_sem).
  */
@@ -1380,10 +1341,6 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 		if (!(file && path_noexec(&file->f_path)))
 			prot |= PROT_EXEC;
 
-	/* force arch specific MAP_FIXED handling in get_unmapped_area */
-	if (flags & MAP_FIXED_NOREPLACE)
-		flags |= MAP_FIXED;
-
 	if (!(flags & MAP_FIXED))
 		addr = round_hint_to_min(addr);
 
@@ -1407,13 +1364,6 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	if (offset_in_page(addr))
 		return addr;
 
-	if (flags & MAP_FIXED_NOREPLACE) {
-		struct vm_area_struct *vma = find_vma(mm, addr);
-
-		if (vma && vma->vm_start <= addr)
-			return -EEXIST;
-	}
-
 	if (prot == PROT_EXEC) {
 		pkey = execute_only_pkey(mm);
 		if (pkey < 0)
@@ -1436,27 +1386,9 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	if (file) {
 		struct inode *inode = file_inode(file);
-		unsigned long flags_mask;
-
-		if (!file_mmap_ok(file, inode, pgoff, len))
-			return -EOVERFLOW;
-
-		flags_mask = LEGACY_MAP_MASK | file->f_op->mmap_supported_flags;
 
 		switch (flags & MAP_TYPE) {
 		case MAP_SHARED:
-			/*
-			 * Force use of MAP_SHARED_VALIDATE with non-legacy
-			 * flags. E.g. MAP_SYNC is dangerous to use with
-			 * MAP_SHARED as you don't know which consistency model
-			 * you will get. We silently ignore unsupported flags
-			 * with MAP_SHARED to preserve backward compatibility.
-			 */
-			flags &= LEGACY_MAP_MASK;
-			/* fall through */
-		case MAP_SHARED_VALIDATE:
-			if (flags & ~flags_mask)
-				return -EOPNOTSUPP;
 			if ((prot&PROT_WRITE) && !(file->f_mode&FMODE_WRITE))
 				return -EACCES;
 
@@ -1540,9 +1472,9 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	return addr;
 }
 
-unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
-			      unsigned long prot, unsigned long flags,
-			      unsigned long fd, unsigned long pgoff)
+SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
+		unsigned long, prot, unsigned long, flags,
+		unsigned long, fd, unsigned long, pgoff)
 {
 	struct file *file = NULL;
 	unsigned long retval;
@@ -1589,13 +1521,6 @@ out_fput:
 	return retval;
 }
 
-SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
-		unsigned long, prot, unsigned long, flags,
-		unsigned long, fd, unsigned long, pgoff)
-{
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, pgoff);
-}
-
 #ifdef __ARCH_WANT_SYS_OLD_MMAP
 struct mmap_arg_struct {
 	unsigned long addr;
@@ -1615,8 +1540,8 @@ SYSCALL_DEFINE1(old_mmap, struct mmap_arg_struct __user *, arg)
 	if (offset_in_page(a.offset))
 		return -EINVAL;
 
-	return ksys_mmap_pgoff(a.addr, a.len, a.prot, a.flags, a.fd,
-			       a.offset >> PAGE_SHIFT);
+	return sys_mmap_pgoff(a.addr, a.len, a.prot, a.flags, a.fd,
+			      a.offset >> PAGE_SHIFT);
 }
 #endif /* __ARCH_WANT_SYS_OLD_MMAP */
 
@@ -2252,6 +2177,7 @@ static int acct_stack_growth(struct vm_area_struct *vma,
 			     unsigned long size, unsigned long grow)
 {
 	struct mm_struct *mm = vma->vm_mm;
+	struct rlimit *rlim = current->signal->rlim;
 	unsigned long new_start;
 
 	/* address space limit tests */
@@ -2259,7 +2185,7 @@ static int acct_stack_growth(struct vm_area_struct *vma,
 		return -ENOMEM;
 
 	/* Stack limit test */
-	if (size > rlimit(RLIMIT_STACK))
+	if (size > READ_ONCE(rlim[RLIMIT_STACK].rlim_cur))
 		return -ENOMEM;
 
 	/* mlock limit tests */
@@ -2267,7 +2193,7 @@ static int acct_stack_growth(struct vm_area_struct *vma,
 		unsigned long locked;
 		unsigned long limit;
 		locked = mm->locked_vm + grow;
-		limit = rlimit(RLIMIT_MEMLOCK);
+		limit = READ_ONCE(rlim[RLIMIT_MEMLOCK].rlim_cur);
 		limit >>= PAGE_SHIFT;
 		if (locked > limit && !capable(CAP_IPC_LOCK))
 			return -ENOMEM;
@@ -2318,8 +2244,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 		gap_addr = TASK_SIZE;
 
 	next = vma->vm_next;
-	if (next && next->vm_start < gap_addr &&
-			(next->vm_flags & (VM_WRITE|VM_READ|VM_EXEC))) {
+	if (next && next->vm_start < gap_addr) {
 		if (!(next->vm_flags & VM_GROWSUP))
 			return -ENOMEM;
 		/* Check that both stack segments have the same anon_vma? */
@@ -2390,6 +2315,7 @@ int expand_downwards(struct vm_area_struct *vma,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	struct vm_area_struct *prev;
+	unsigned long gap_addr;
 	int error;
 
 	address &= PAGE_MASK;
@@ -2398,12 +2324,14 @@ int expand_downwards(struct vm_area_struct *vma,
 		return error;
 
 	/* Enforce stack_guard_gap */
+	gap_addr = address - stack_guard_gap;
+	if (gap_addr > address)
+		return -ENOMEM;
 	prev = vma->vm_prev;
-	/* Check that both stack segments have the same anon_vma? */
-	if (prev && !(prev->vm_flags & VM_GROWSDOWN) &&
-			(prev->vm_flags & (VM_WRITE|VM_READ|VM_EXEC))) {
-		if (address - prev->vm_end < stack_guard_gap)
+	if (prev && prev->vm_end > gap_addr) {
+		if (!(prev->vm_flags & VM_GROWSDOWN))
 			return -ENOMEM;
+		/* Check that both stack segments have the same anon_vma? */
 	}
 
 	/* We must make sure the anon_vma is allocated. */
@@ -2614,11 +2542,9 @@ int __split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *new;
 	int err;
 
-	if (vma->vm_ops && vma->vm_ops->split) {
-		err = vma->vm_ops->split(vma, addr);
-		if (err)
-			return err;
-	}
+	if (is_vm_hugetlb_page(vma) && (addr &
+					~(huge_page_mask(hstate_vma(vma)))))
+		return -EINVAL;
 
 	new = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	if (!new)
@@ -2716,6 +2642,13 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 	if (vma->vm_start >= end)
 		return 0;
 
+	if (uf) {
+		int error = userfaultfd_unmap_prep(vma, start, end, uf);
+
+		if (error)
+			return error;
+	}
+
 	/*
 	 * If we need to split any vma, do it now to save pain later.
 	 *
@@ -2748,21 +2681,6 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 			return error;
 	}
 	vma = prev ? prev->vm_next : mm->mmap;
-
-	if (unlikely(uf)) {
-		/*
-		 * If userfaultfd_unmap_prep returns an error the vmas
-		 * will remain splitted, but userland will get a
-		 * highly unexpected error anyway. This is no
-		 * different than the case where the first of the two
-		 * __split_vma fails, but we don't undo the first
-		 * split, despite we could. This is unlikely enough
-		 * failure that it's not worth optimizing it for.
-		 */
-		int error = userfaultfd_unmap_prep(vma, start, end, uf);
-		if (error)
-			return error;
-	}
 
 	/*
 	 * unlock any mlock()ed ranges before detaching vmas
@@ -2828,7 +2746,7 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 	unsigned long ret = -EINVAL;
 	struct file *file;
 
-	pr_warn_once("%s (%d) uses deprecated remap_file_pages() syscall. See Documentation/vm/remap_file_pages.rst.\n",
+	pr_warn_once("%s (%d) uses deprecated remap_file_pages() syscall. See Documentation/vm/remap_file_pages.txt.\n",
 		     current->comm, current->pid);
 
 	if (prot)
@@ -3056,32 +2974,6 @@ void exit_mmap(struct mm_struct *mm)
 	/* mm's last user has gone, and its about to be pulled down */
 	mmu_notifier_release(mm);
 
-	if (unlikely(mm_is_oom_victim(mm))) {
-		/*
-		 * Manually reap the mm to free as much memory as possible.
-		 * Then, as the oom reaper does, set MMF_OOM_SKIP to disregard
-		 * this mm from further consideration.  Taking mm->mmap_sem for
-		 * write after setting MMF_OOM_SKIP will guarantee that the oom
-		 * reaper will not run on this mm again after mmap_sem is
-		 * dropped.
-		 *
-		 * Nothing can be holding mm->mmap_sem here and the above call
-		 * to mmu_notifier_release(mm) ensures mmu notifier callbacks in
-		 * __oom_reap_task_mm() will not block.
-		 *
-		 * This needs to be done before calling munlock_vma_pages_all(),
-		 * which clears VM_LOCKED, otherwise the oom reaper cannot
-		 * reliably test it.
-		 */
-		mutex_lock(&oom_lock);
-		__oom_reap_task_mm(mm);
-		mutex_unlock(&oom_lock);
-
-		set_bit(MMF_OOM_SKIP, &mm->flags);
-		down_write(&mm->mmap_sem);
-		up_write(&mm->mmap_sem);
-	}
-
 	if (mm->locked_vm) {
 		vma = mm->mmap;
 		while (vma) {
@@ -3103,6 +2995,7 @@ void exit_mmap(struct mm_struct *mm)
 	/* update_hiwater_rss(mm) here? but nobody should be looking */
 	/* Use -1 here to ensure all VMAs in the mm are unmapped */
 	unmap_vmas(&tlb, vma, 0, -1);
+
 	free_pgtables(&tlb, vma, FIRST_USER_ADDRESS, USER_PGTABLES_CEILING);
 	tlb_finish_mmu(&tlb, 0, -1);
 
@@ -3251,15 +3144,13 @@ bool may_expand_vm(struct mm_struct *mm, vm_flags_t flags, unsigned long npages)
 		if (rlimit(RLIMIT_DATA) == 0 &&
 		    mm->data_vm + npages <= rlimit_max(RLIMIT_DATA) >> PAGE_SHIFT)
 			return true;
-
-		pr_warn_once("%s (%d): VmData %lu exceed data ulimit %lu. Update limits%s.\n",
-			     current->comm, current->pid,
-			     (mm->data_vm + npages) << PAGE_SHIFT,
-			     rlimit(RLIMIT_DATA),
-			     ignore_rlimit_data ? "" : " or use boot option ignore_rlimit_data");
-
-		if (!ignore_rlimit_data)
+		if (!ignore_rlimit_data) {
+			pr_warn_once("%s (%d): VmData %lu exceed data ulimit %lu. Update limits or use boot option ignore_rlimit_data.\n",
+				     current->comm, current->pid,
+				     (mm->data_vm + npages) << PAGE_SHIFT,
+				     rlimit(RLIMIT_DATA));
 			return false;
+		}
 	}
 
 	return true;
@@ -3277,7 +3168,7 @@ void vm_stat_account(struct mm_struct *mm, vm_flags_t flags, long npages)
 		mm->data_vm += npages;
 }
 
-static vm_fault_t special_mapping_fault(struct vm_fault *vmf);
+static int special_mapping_fault(struct vm_fault *vmf);
 
 /*
  * Having a close hook prevents vma merging regardless of flags.
@@ -3295,12 +3186,8 @@ static int special_mapping_mremap(struct vm_area_struct *new_vma)
 {
 	struct vm_special_mapping *sm = new_vma->vm_private_data;
 
-	if (WARN_ON_ONCE(current->mm != new_vma->vm_mm))
-		return -EFAULT;
-
 	if (sm->mremap)
 		return sm->mremap(sm, new_vma);
-
 	return 0;
 }
 
@@ -3316,7 +3203,7 @@ static const struct vm_operations_struct legacy_special_mapping_vmops = {
 	.fault = special_mapping_fault,
 };
 
-static vm_fault_t special_mapping_fault(struct vm_fault *vmf)
+static int special_mapping_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	pgoff_t pgoff;
@@ -3426,7 +3313,7 @@ static DEFINE_MUTEX(mm_all_locks_mutex);
 
 static void vm_lock_anon_vma(struct mm_struct *mm, struct anon_vma *anon_vma)
 {
-	if (!test_bit(0, (unsigned long *) &anon_vma->root->rb_root.rb_root.rb_node)) {
+	if (!test_bit(0, (unsigned long *) &anon_vma->root->rb_root.rb_node)) {
 		/*
 		 * The LSB of head.next can't change from under us
 		 * because we hold the mm_all_locks_mutex.
@@ -3442,7 +3329,7 @@ static void vm_lock_anon_vma(struct mm_struct *mm, struct anon_vma *anon_vma)
 		 * anon_vma->root->rwsem.
 		 */
 		if (__test_and_set_bit(0, (unsigned long *)
-				       &anon_vma->root->rb_root.rb_root.rb_node))
+				       &anon_vma->root->rb_root.rb_node))
 			BUG();
 	}
 }
@@ -3544,7 +3431,7 @@ out_unlock:
 
 static void vm_unlock_anon_vma(struct anon_vma *anon_vma)
 {
-	if (test_bit(0, (unsigned long *) &anon_vma->root->rb_root.rb_root.rb_node)) {
+	if (test_bit(0, (unsigned long *) &anon_vma->root->rb_root.rb_node)) {
 		/*
 		 * The LSB of head.next can't change to 0 from under
 		 * us because we hold the mm_all_locks_mutex.
@@ -3558,7 +3445,7 @@ static void vm_unlock_anon_vma(struct anon_vma *anon_vma)
 		 * anon_vma->root->rwsem.
 		 */
 		if (!__test_and_clear_bit(0, (unsigned long *)
-					  &anon_vma->root->rb_root.rb_root.rb_node))
+					  &anon_vma->root->rb_root.rb_node))
 			BUG();
 		anon_vma_unlock_write(anon_vma);
 	}
@@ -3626,7 +3513,7 @@ static int init_user_reserve(void)
 {
 	unsigned long free_kbytes;
 
-	free_kbytes = global_zone_page_state(NR_FREE_PAGES) << (PAGE_SHIFT - 10);
+	free_kbytes = global_page_state(NR_FREE_PAGES) << (PAGE_SHIFT - 10);
 
 	sysctl_user_reserve_kbytes = min(free_kbytes / 32, 1UL << 17);
 	return 0;
@@ -3647,7 +3534,7 @@ static int init_admin_reserve(void)
 {
 	unsigned long free_kbytes;
 
-	free_kbytes = global_zone_page_state(NR_FREE_PAGES) << (PAGE_SHIFT - 10);
+	free_kbytes = global_page_state(NR_FREE_PAGES) << (PAGE_SHIFT - 10);
 
 	sysctl_admin_reserve_kbytes = min(free_kbytes / 32, 1UL << 13);
 	return 0;
@@ -3691,7 +3578,7 @@ static int reserve_mem_notifier(struct notifier_block *nb,
 
 		break;
 	case MEM_OFFLINE:
-		free_kbytes = global_zone_page_state(NR_FREE_PAGES) << (PAGE_SHIFT - 10);
+		free_kbytes = global_page_state(NR_FREE_PAGES) << (PAGE_SHIFT - 10);
 
 		if (sysctl_user_reserve_kbytes > free_kbytes) {
 			init_user_reserve();

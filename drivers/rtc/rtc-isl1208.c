@@ -459,11 +459,6 @@ isl1208_i2c_set_time(struct i2c_client *client, struct rtc_time const *tm)
 	}
 
 	/* clear WRTC again */
-	sr = isl1208_i2c_get_sr(client);
-	if (sr < 0) {
-		dev_err(&client->dev, "%s: reading SR failed\n", __func__);
-		return sr;
-	}
 	sr = i2c_smbus_write_byte_data(client, ISL1208_REG_SR,
 				       sr & ~ISL1208_REG_SR_WRTC);
 	if (sr < 0) {
@@ -635,28 +630,6 @@ isl1208_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (isl1208_i2c_validate_client(client) < 0)
 		return -ENODEV;
 
-	rtc = devm_rtc_allocate_device(&client->dev);
-	if (IS_ERR(rtc))
-		return PTR_ERR(rtc);
-
-	rtc->ops = &isl1208_rtc_ops;
-
-	i2c_set_clientdata(client, rtc);
-
-	rc = isl1208_i2c_get_sr(client);
-	if (rc < 0) {
-		dev_err(&client->dev, "reading status failed\n");
-		return rc;
-	}
-
-	if (rc & ISL1208_REG_SR_RTCF)
-		dev_warn(&client->dev, "rtc power failure detected, "
-			 "please set clock.\n");
-
-	rc = sysfs_create_group(&client->dev.kobj, &isl1208_rtc_sysfs_files);
-	if (rc)
-		return rc;
-
 	if (client->irq > 0) {
 		rc = devm_request_threaded_irq(&client->dev, client->irq, NULL,
 					       isl1208_rtc_interrupt,
@@ -674,7 +647,29 @@ isl1208_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		}
 	}
 
-	return rtc_register_device(rtc);
+	rtc = devm_rtc_device_register(&client->dev, isl1208_driver.driver.name,
+				  &isl1208_rtc_ops,
+				  THIS_MODULE);
+	if (IS_ERR(rtc))
+		return PTR_ERR(rtc);
+
+	i2c_set_clientdata(client, rtc);
+
+	rc = isl1208_i2c_get_sr(client);
+	if (rc < 0) {
+		dev_err(&client->dev, "reading status failed\n");
+		return rc;
+	}
+
+	if (rc & ISL1208_REG_SR_RTCF)
+		dev_warn(&client->dev, "rtc power failure detected, "
+			 "please set clock.\n");
+
+	rc = sysfs_create_group(&client->dev.kobj, &isl1208_rtc_sysfs_files);
+	if (rc)
+		return rc;
+
+	return 0;
 }
 
 static int

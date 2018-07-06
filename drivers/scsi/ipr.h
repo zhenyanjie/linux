@@ -1454,7 +1454,7 @@ struct ipr_sglist {
 	u32 num_sg;
 	u32 num_dma_sg;
 	u32 buffer_len;
-	struct scatterlist *scatterlist;
+	struct scatterlist scatterlist[1];
 };
 
 enum ipr_sdt_state {
@@ -1488,8 +1488,6 @@ struct ipr_ioa_cfg {
 	u8 cfg_locked:1;
 	u8 clear_isr:1;
 	u8 probe_done:1;
-	u8 scsi_unblock:1;
-	u8 scsi_blocked:1;
 
 	u8 revid;
 

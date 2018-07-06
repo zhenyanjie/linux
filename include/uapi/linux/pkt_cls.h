@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef __LINUX_PKT_CLS_H
 #define __LINUX_PKT_CLS_H
 
@@ -38,13 +37,6 @@ enum {
 #define TC_ACT_QUEUED		5
 #define TC_ACT_REPEAT		6
 #define TC_ACT_REDIRECT		7
-#define TC_ACT_TRAP		8 /* For hw path, this means "trap to cpu"
-				   * and don't further process the frame
-				   * in hardware. For sw path, this is
-				   * equivalent of TC_ACT_STOLEN - drop
-				   * the skb and act like everything
-				   * is alright.
-				   */
 
 /* There is a special kind of actions called "extended actions",
  * which need a value parameter. These have a local opcode located in
@@ -59,7 +51,6 @@ enum {
 	(((combined) & (~TC_ACT_EXT_VAL_MASK)) == opcode)
 
 #define TC_ACT_JUMP __TC_ACT_EXT(1)
-#define TC_ACT_GOTO_CHAIN __TC_ACT_EXT(2)
 
 /* Action type identifiers*/
 enum {
@@ -129,7 +120,6 @@ enum {
 #define TCA_CLS_FLAGS_SKIP_SW	(1 << 1) /* don't use filter in SW */
 #define TCA_CLS_FLAGS_IN_HW	(1 << 2) /* filter is offloaded to HW */
 #define TCA_CLS_FLAGS_NOT_IN_HW (1 << 3) /* filter isn't offloaded to HW */
-#define TCA_CLS_FLAGS_VERBOSE	(1 << 4) /* verbose logging */
 
 /* U32 filters */
 
@@ -371,7 +361,6 @@ enum {
 	TCA_BPF_FLAGS,
 	TCA_BPF_FLAGS_GEN,
 	TCA_BPF_TAG,
-	TCA_BPF_ID,
 	__TCA_BPF_MAX,
 };
 
@@ -461,14 +450,6 @@ enum {
 	TCA_FLOWER_KEY_MPLS_TC,		/* u8 - 3 bits */
 	TCA_FLOWER_KEY_MPLS_LABEL,	/* be32 - 20 bits */
 
-	TCA_FLOWER_KEY_TCP_FLAGS,	/* be16 */
-	TCA_FLOWER_KEY_TCP_FLAGS_MASK,	/* be16 */
-
-	TCA_FLOWER_KEY_IP_TOS,		/* u8 */
-	TCA_FLOWER_KEY_IP_TOS_MASK,	/* u8 */
-	TCA_FLOWER_KEY_IP_TTL,		/* u8 */
-	TCA_FLOWER_KEY_IP_TTL_MASK,	/* u8 */
-
 	__TCA_FLOWER_MAX,
 };
 
@@ -476,7 +457,6 @@ enum {
 
 enum {
 	TCA_FLOWER_KEY_FLAGS_IS_FRAGMENT = (1 << 0),
-	TCA_FLOWER_KEY_FLAGS_FRAG_IS_FIRST = (1 << 1),
 };
 
 /* Match-all classifier */
@@ -557,8 +537,7 @@ enum {
 #define	TCF_EM_VLAN		6
 #define	TCF_EM_CANID		7
 #define	TCF_EM_IPSET		8
-#define	TCF_EM_IPT		9
-#define	TCF_EM_MAX		9
+#define	TCF_EM_MAX		8
 
 enum {
 	TCF_EM_PROG_TC

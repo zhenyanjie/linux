@@ -11,10 +11,7 @@
  * (at your option) any later version.
  */
 
-#include <linux/interrupt.h>
-#include <linux/irqdomain.h>
-
-#include "chip.h"
+#include "mv88e6xxx.h"
 #include "global1.h"
 
 /* Offset 0x02: VTU FID Register */
@@ -25,11 +22,11 @@ static int mv88e6xxx_g1_vtu_fid_read(struct mv88e6xxx_chip *chip,
 	u16 val;
 	int err;
 
-	err = mv88e6xxx_g1_read(chip, MV88E6352_G1_VTU_FID, &val);
+	err = mv88e6xxx_g1_read(chip, GLOBAL_VTU_FID, &val);
 	if (err)
 		return err;
 
-	entry->fid = val & MV88E6352_G1_VTU_FID_MASK;
+	entry->fid = val & GLOBAL_VTU_FID_MASK;
 
 	return 0;
 }
@@ -37,9 +34,9 @@ static int mv88e6xxx_g1_vtu_fid_read(struct mv88e6xxx_chip *chip,
 static int mv88e6xxx_g1_vtu_fid_write(struct mv88e6xxx_chip *chip,
 				      struct mv88e6xxx_vtu_entry *entry)
 {
-	u16 val = entry->fid & MV88E6352_G1_VTU_FID_MASK;
+	u16 val = entry->fid & GLOBAL_VTU_FID_MASK;
 
-	return mv88e6xxx_g1_write(chip, MV88E6352_G1_VTU_FID, val);
+	return mv88e6xxx_g1_write(chip, GLOBAL_VTU_FID, val);
 }
 
 /* Offset 0x03: VTU SID Register */
@@ -50,11 +47,11 @@ static int mv88e6xxx_g1_vtu_sid_read(struct mv88e6xxx_chip *chip,
 	u16 val;
 	int err;
 
-	err = mv88e6xxx_g1_read(chip, MV88E6352_G1_VTU_SID, &val);
+	err = mv88e6xxx_g1_read(chip, GLOBAL_VTU_SID, &val);
 	if (err)
 		return err;
 
-	entry->sid = val & MV88E6352_G1_VTU_SID_MASK;
+	entry->sid = val & GLOBAL_VTU_SID_MASK;
 
 	return 0;
 }
@@ -62,25 +59,23 @@ static int mv88e6xxx_g1_vtu_sid_read(struct mv88e6xxx_chip *chip,
 static int mv88e6xxx_g1_vtu_sid_write(struct mv88e6xxx_chip *chip,
 				      struct mv88e6xxx_vtu_entry *entry)
 {
-	u16 val = entry->sid & MV88E6352_G1_VTU_SID_MASK;
+	u16 val = entry->sid & GLOBAL_VTU_SID_MASK;
 
-	return mv88e6xxx_g1_write(chip, MV88E6352_G1_VTU_SID, val);
+	return mv88e6xxx_g1_write(chip, GLOBAL_VTU_SID, val);
 }
 
 /* Offset 0x05: VTU Operation Register */
 
 static int mv88e6xxx_g1_vtu_op_wait(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g1_wait(chip, MV88E6XXX_G1_VTU_OP,
-				 MV88E6XXX_G1_VTU_OP_BUSY);
+	return mv88e6xxx_g1_wait(chip, GLOBAL_VTU_OP, GLOBAL_VTU_OP_BUSY);
 }
 
 static int mv88e6xxx_g1_vtu_op(struct mv88e6xxx_chip *chip, u16 op)
 {
 	int err;
 
-	err = mv88e6xxx_g1_write(chip, MV88E6XXX_G1_VTU_OP,
-				 MV88E6XXX_G1_VTU_OP_BUSY | op);
+	err = mv88e6xxx_g1_write(chip, GLOBAL_VTU_OP, op);
 	if (err)
 		return err;
 
@@ -95,16 +90,16 @@ static int mv88e6xxx_g1_vtu_vid_read(struct mv88e6xxx_chip *chip,
 	u16 val;
 	int err;
 
-	err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_VTU_VID, &val);
+	err = mv88e6xxx_g1_read(chip, GLOBAL_VTU_VID, &val);
 	if (err)
 		return err;
 
 	entry->vid = val & 0xfff;
 
-	if (val & MV88E6390_G1_VTU_VID_PAGE)
+	if (val & GLOBAL_VTU_VID_PAGE)
 		entry->vid |= 0x1000;
 
-	entry->valid = !!(val & MV88E6XXX_G1_VTU_VID_VALID);
+	entry->valid = !!(val & GLOBAL_VTU_VID_VALID);
 
 	return 0;
 }
@@ -115,12 +110,12 @@ static int mv88e6xxx_g1_vtu_vid_write(struct mv88e6xxx_chip *chip,
 	u16 val = entry->vid & 0xfff;
 
 	if (entry->vid & 0x1000)
-		val |= MV88E6390_G1_VTU_VID_PAGE;
+		val |= GLOBAL_VTU_VID_PAGE;
 
 	if (entry->valid)
-		val |= MV88E6XXX_G1_VTU_VID_VALID;
+		val |= GLOBAL_VTU_VID_VALID;
 
-	return mv88e6xxx_g1_write(chip, MV88E6XXX_G1_VTU_VID, val);
+	return mv88e6xxx_g1_write(chip, GLOBAL_VTU_VID, val);
 }
 
 /* Offset 0x07: VTU/STU Data Register 1
@@ -139,7 +134,7 @@ static int mv88e6185_g1_vtu_data_read(struct mv88e6xxx_chip *chip,
 		u16 *reg = &regs[i];
 		int err;
 
-		err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_VTU_DATA1 + i, reg);
+		err = mv88e6xxx_g1_read(chip, GLOBAL_VTU_DATA_0_3 + i, reg);
 		if (err)
 			return err;
 	}
@@ -176,7 +171,7 @@ static int mv88e6185_g1_vtu_data_write(struct mv88e6xxx_chip *chip,
 		u16 reg = regs[i];
 		int err;
 
-		err = mv88e6xxx_g1_write(chip, MV88E6XXX_G1_VTU_DATA1 + i, reg);
+		err = mv88e6xxx_g1_write(chip, GLOBAL_VTU_DATA_0_3 + i, reg);
 		if (err)
 			return err;
 	}
@@ -194,7 +189,7 @@ static int mv88e6390_g1_vtu_data_read(struct mv88e6xxx_chip *chip, u8 *data)
 		u16 *reg = &regs[i];
 		int err;
 
-		err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_VTU_DATA1 + i, reg);
+		err = mv88e6xxx_g1_read(chip, GLOBAL_VTU_DATA_0_3 + i, reg);
 		if (err)
 			return err;
 	}
@@ -226,7 +221,7 @@ static int mv88e6390_g1_vtu_data_write(struct mv88e6xxx_chip *chip, u8 *data)
 		u16 reg = regs[i];
 		int err;
 
-		err = mv88e6xxx_g1_write(chip, MV88E6XXX_G1_VTU_DATA1 + i, reg);
+		err = mv88e6xxx_g1_write(chip, GLOBAL_VTU_DATA_0_3 + i, reg);
 		if (err)
 			return err;
 	}
@@ -245,7 +240,7 @@ static int mv88e6xxx_g1_vtu_stu_getnext(struct mv88e6xxx_chip *chip,
 	if (err)
 		return err;
 
-	err = mv88e6xxx_g1_vtu_op(chip, MV88E6XXX_G1_VTU_OP_STU_GET_NEXT);
+	err = mv88e6xxx_g1_vtu_op(chip, GLOBAL_VTU_OP_STU_GET_NEXT);
 	if (err)
 		return err;
 
@@ -300,7 +295,7 @@ static int mv88e6xxx_g1_vtu_getnext(struct mv88e6xxx_chip *chip,
 			return err;
 	}
 
-	err = mv88e6xxx_g1_vtu_op(chip, MV88E6XXX_G1_VTU_OP_VTU_GET_NEXT);
+	err = mv88e6xxx_g1_vtu_op(chip, GLOBAL_VTU_OP_VTU_GET_NEXT);
 	if (err)
 		return err;
 
@@ -325,7 +320,7 @@ int mv88e6185_g1_vtu_getnext(struct mv88e6xxx_chip *chip,
 		/* VTU DBNum[3:0] are located in VTU Operation 3:0
 		 * VTU DBNum[7:4] are located in VTU Operation 11:8
 		 */
-		err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_VTU_OP, &val);
+		err = mv88e6xxx_g1_read(chip, GLOBAL_VTU_OP, &val);
 		if (err)
 			return err;
 
@@ -399,7 +394,7 @@ int mv88e6390_g1_vtu_getnext(struct mv88e6xxx_chip *chip,
 int mv88e6185_g1_vtu_loadpurge(struct mv88e6xxx_chip *chip,
 			       struct mv88e6xxx_vtu_entry *entry)
 {
-	u16 op = MV88E6XXX_G1_VTU_OP_VTU_LOAD_PURGE;
+	u16 op = GLOBAL_VTU_OP_VTU_LOAD_PURGE;
 	int err;
 
 	err = mv88e6xxx_g1_vtu_op_wait(chip);
@@ -449,8 +444,7 @@ int mv88e6352_g1_vtu_loadpurge(struct mv88e6xxx_chip *chip,
 			return err;
 
 		/* Load STU entry */
-		err = mv88e6xxx_g1_vtu_op(chip,
-					  MV88E6XXX_G1_VTU_OP_STU_LOAD_PURGE);
+		err = mv88e6xxx_g1_vtu_op(chip, GLOBAL_VTU_OP_STU_LOAD_PURGE);
 		if (err)
 			return err;
 
@@ -460,7 +454,7 @@ int mv88e6352_g1_vtu_loadpurge(struct mv88e6xxx_chip *chip,
 	}
 
 	/* Load/Purge VTU entry */
-	return mv88e6xxx_g1_vtu_op(chip, MV88E6XXX_G1_VTU_OP_VTU_LOAD_PURGE);
+	return mv88e6xxx_g1_vtu_op(chip, GLOBAL_VTU_OP_VTU_LOAD_PURGE);
 }
 
 int mv88e6390_g1_vtu_loadpurge(struct mv88e6xxx_chip *chip,
@@ -487,8 +481,7 @@ int mv88e6390_g1_vtu_loadpurge(struct mv88e6xxx_chip *chip,
 			return err;
 
 		/* Load STU entry */
-		err = mv88e6xxx_g1_vtu_op(chip,
-					  MV88E6XXX_G1_VTU_OP_STU_LOAD_PURGE);
+		err = mv88e6xxx_g1_vtu_op(chip, GLOBAL_VTU_OP_STU_LOAD_PURGE);
 		if (err)
 			return err;
 
@@ -503,7 +496,7 @@ int mv88e6390_g1_vtu_loadpurge(struct mv88e6xxx_chip *chip,
 	}
 
 	/* Load/Purge VTU entry */
-	return mv88e6xxx_g1_vtu_op(chip, MV88E6XXX_G1_VTU_OP_VTU_LOAD_PURGE);
+	return mv88e6xxx_g1_vtu_op(chip, GLOBAL_VTU_OP_VTU_LOAD_PURGE);
 }
 
 int mv88e6xxx_g1_vtu_flush(struct mv88e6xxx_chip *chip)
@@ -514,79 +507,5 @@ int mv88e6xxx_g1_vtu_flush(struct mv88e6xxx_chip *chip)
 	if (err)
 		return err;
 
-	return mv88e6xxx_g1_vtu_op(chip, MV88E6XXX_G1_VTU_OP_FLUSH_ALL);
-}
-
-static irqreturn_t mv88e6xxx_g1_vtu_prob_irq_thread_fn(int irq, void *dev_id)
-{
-	struct mv88e6xxx_chip *chip = dev_id;
-	struct mv88e6xxx_vtu_entry entry;
-	int spid;
-	int err;
-	u16 val;
-
-	mutex_lock(&chip->reg_lock);
-
-	err = mv88e6xxx_g1_vtu_op(chip, MV88E6XXX_G1_VTU_OP_GET_CLR_VIOLATION);
-	if (err)
-		goto out;
-
-	err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_VTU_OP, &val);
-	if (err)
-		goto out;
-
-	err = mv88e6xxx_g1_vtu_vid_read(chip, &entry);
-	if (err)
-		goto out;
-
-	spid = val & MV88E6XXX_G1_VTU_OP_SPID_MASK;
-
-	if (val & MV88E6XXX_G1_VTU_OP_MEMBER_VIOLATION) {
-		dev_err_ratelimited(chip->dev, "VTU member violation for vid %d, source port %d\n",
-				    entry.vid, spid);
-		chip->ports[spid].vtu_member_violation++;
-	}
-
-	if (val & MV88E6XXX_G1_VTU_OP_MISS_VIOLATION) {
-		dev_dbg_ratelimited(chip->dev, "VTU miss violation for vid %d, source port %d\n",
-				    entry.vid, spid);
-		chip->ports[spid].vtu_miss_violation++;
-	}
-
-	mutex_unlock(&chip->reg_lock);
-
-	return IRQ_HANDLED;
-
-out:
-	mutex_unlock(&chip->reg_lock);
-
-	dev_err(chip->dev, "VTU problem: error %d while handling interrupt\n",
-		err);
-
-	return IRQ_HANDLED;
-}
-
-int mv88e6xxx_g1_vtu_prob_irq_setup(struct mv88e6xxx_chip *chip)
-{
-	int err;
-
-	chip->vtu_prob_irq = irq_find_mapping(chip->g1_irq.domain,
-					      MV88E6XXX_G1_STS_IRQ_VTU_PROB);
-	if (chip->vtu_prob_irq < 0)
-		return chip->vtu_prob_irq;
-
-	err = request_threaded_irq(chip->vtu_prob_irq, NULL,
-				   mv88e6xxx_g1_vtu_prob_irq_thread_fn,
-				   IRQF_ONESHOT, "mv88e6xxx-g1-vtu-prob",
-				   chip);
-	if (err)
-		irq_dispose_mapping(chip->vtu_prob_irq);
-
-	return err;
-}
-
-void mv88e6xxx_g1_vtu_prob_irq_free(struct mv88e6xxx_chip *chip)
-{
-	free_irq(chip->vtu_prob_irq, chip);
-	irq_dispose_mapping(chip->vtu_prob_irq);
+	return mv88e6xxx_g1_vtu_op(chip, GLOBAL_VTU_OP_FLUSH_ALL);
 }

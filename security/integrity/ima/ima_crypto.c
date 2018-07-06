@@ -27,6 +27,11 @@
 
 #include "ima.h"
 
+struct ahash_completion {
+	struct completion completion;
+	int err;
+};
+
 /* minimum file size for ahash use */
 static unsigned long ima_ahash_minsize;
 module_param_named(ahash_minsize, ima_ahash_minsize, ulong, 0644);
@@ -73,8 +78,6 @@ int __init ima_init_crypto(void)
 		       hash_algo_name[ima_hash_algo], rc);
 		return rc;
 	}
-	pr_info("Allocated hash algorithm: %s\n",
-		hash_algo_name[ima_hash_algo]);
 	return 0;
 }
 
@@ -193,13 +196,30 @@ static void ima_free_atfm(struct crypto_ahash *tfm)
 		crypto_free_ahash(tfm);
 }
 
-static inline int ahash_wait(int err, struct crypto_wait *wait)
+static void ahash_complete(struct crypto_async_request *req, int err)
 {
+	struct ahash_completion *res = req->data;
 
-	err = crypto_wait_req(err, wait);
+	if (err == -EINPROGRESS)
+		return;
+	res->err = err;
+	complete(&res->completion);
+}
 
-	if (err)
+static int ahash_wait(int err, struct ahash_completion *res)
+{
+	switch (err) {
+	case 0:
+		break;
+	case -EINPROGRESS:
+	case -EBUSY:
+		wait_for_completion(&res->completion);
+		reinit_completion(&res->completion);
+		err = res->err;
+		/* fall through */
+	default:
 		pr_crit_ratelimited("ahash calculation failed: err: %d\n", err);
+	}
 
 	return err;
 }
@@ -213,7 +233,7 @@ static int ima_calc_file_hash_atfm(struct file *file,
 	int rc, read = 0, rbuf_len, active = 0, ahash_rc = 0;
 	struct ahash_request *req;
 	struct scatterlist sg[1];
-	struct crypto_wait wait;
+	struct ahash_completion res;
 	size_t rbuf_size[2];
 
 	hash->length = crypto_ahash_digestsize(tfm);
@@ -222,12 +242,12 @@ static int ima_calc_file_hash_atfm(struct file *file,
 	if (!req)
 		return -ENOMEM;
 
-	crypto_init_wait(&wait);
+	init_completion(&res.completion);
 	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG |
 				   CRYPTO_TFM_REQ_MAY_SLEEP,
-				   crypto_req_done, &wait);
+				   ahash_complete, &res);
 
-	rc = ahash_wait(crypto_ahash_init(req), &wait);
+	rc = ahash_wait(crypto_ahash_init(req), &res);
 	if (rc)
 		goto out1;
 
@@ -268,7 +288,7 @@ static int ima_calc_file_hash_atfm(struct file *file,
 			 * read/request, wait for the completion of the
 			 * previous ahash_update() request.
 			 */
-			rc = ahash_wait(ahash_rc, &wait);
+			rc = ahash_wait(ahash_rc, &res);
 			if (rc)
 				goto out3;
 		}
@@ -284,7 +304,7 @@ static int ima_calc_file_hash_atfm(struct file *file,
 			 * read/request, wait for the completion of the
 			 * previous ahash_update() request.
 			 */
-			rc = ahash_wait(ahash_rc, &wait);
+			rc = ahash_wait(ahash_rc, &res);
 			if (rc)
 				goto out3;
 		}
@@ -298,7 +318,7 @@ static int ima_calc_file_hash_atfm(struct file *file,
 			active = !active; /* swap buffers, if we use two */
 	}
 	/* wait for the last update request to complete */
-	rc = ahash_wait(ahash_rc, &wait);
+	rc = ahash_wait(ahash_rc, &res);
 out3:
 	if (read)
 		file->f_mode &= ~FMODE_READ;
@@ -307,7 +327,7 @@ out3:
 out2:
 	if (!rc) {
 		ahash_request_set_crypt(req, NULL, hash->digest, 0);
-		rc = ahash_wait(crypto_ahash_final(req), &wait);
+		rc = ahash_wait(crypto_ahash_final(req), &res);
 	}
 out1:
 	ahash_request_free(req);
@@ -421,16 +441,6 @@ int ima_calc_file_hash(struct file *file, struct ima_digest_data *hash)
 	loff_t i_size;
 	int rc;
 
-	/*
-	 * For consistency, fail file's opened with the O_DIRECT flag on
-	 * filesystems mounted with/without DAX option.
-	 */
-	if (file->f_flags & O_DIRECT) {
-		hash->length = hash_digest_size[ima_hash_algo];
-		hash->algo = ima_hash_algo;
-		return -EINVAL;
-	}
-
 	i_size = i_size_read(file_inode(file));
 
 	if (ima_ahash_minsize && i_size >= ima_ahash_minsize) {
@@ -517,7 +527,7 @@ static int calc_buffer_ahash_atfm(const void *buf, loff_t len,
 {
 	struct ahash_request *req;
 	struct scatterlist sg;
-	struct crypto_wait wait;
+	struct ahash_completion res;
 	int rc, ahash_rc = 0;
 
 	hash->length = crypto_ahash_digestsize(tfm);
@@ -526,12 +536,12 @@ static int calc_buffer_ahash_atfm(const void *buf, loff_t len,
 	if (!req)
 		return -ENOMEM;
 
-	crypto_init_wait(&wait);
+	init_completion(&res.completion);
 	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG |
 				   CRYPTO_TFM_REQ_MAY_SLEEP,
-				   crypto_req_done, &wait);
+				   ahash_complete, &res);
 
-	rc = ahash_wait(crypto_ahash_init(req), &wait);
+	rc = ahash_wait(crypto_ahash_init(req), &res);
 	if (rc)
 		goto out;
 
@@ -541,10 +551,10 @@ static int calc_buffer_ahash_atfm(const void *buf, loff_t len,
 	ahash_rc = crypto_ahash_update(req);
 
 	/* wait for the update request to complete */
-	rc = ahash_wait(ahash_rc, &wait);
+	rc = ahash_wait(ahash_rc, &res);
 	if (!rc) {
 		ahash_request_set_crypt(req, NULL, hash->digest, 0);
-		rc = ahash_wait(crypto_ahash_final(req), &wait);
+		rc = ahash_wait(crypto_ahash_final(req), &res);
 	}
 out:
 	ahash_request_free(req);
@@ -634,7 +644,7 @@ static void __init ima_pcrread(int idx, u8 *pcr)
 	if (!ima_used_chip)
 		return;
 
-	if (tpm_pcr_read(NULL, idx, pcr) != 0)
+	if (tpm_pcr_read(TPM_ANY_NUM, idx, pcr) != 0)
 		pr_err("Error Communicating to TPM chip\n");
 }
 

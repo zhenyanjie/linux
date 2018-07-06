@@ -60,16 +60,6 @@ static void regmap_irq_lock(struct irq_data *data)
 	mutex_lock(&d->lock);
 }
 
-static int regmap_irq_update_bits(struct regmap_irq_chip_data *d,
-				  unsigned int reg, unsigned int mask,
-				  unsigned int val)
-{
-	if (d->chip->mask_writeonly)
-		return regmap_write_bits(d->map, reg, mask, val);
-	else
-		return regmap_update_bits(d->map, reg, mask, val);
-}
-
 static void regmap_irq_sync_unlock(struct irq_data *data)
 {
 	struct regmap_irq_chip_data *d = irq_data_get_irq_chip_data(data);
@@ -94,11 +84,11 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 		reg = d->chip->mask_base +
 			(i * map->reg_stride * d->irq_reg_stride);
 		if (d->chip->mask_invert) {
-			ret = regmap_irq_update_bits(d, reg,
+			ret = regmap_update_bits(d->map, reg,
 					 d->mask_buf_def[i], ~d->mask_buf[i]);
 		} else if (d->chip->unmask_base) {
 			/* set mask with mask_base register */
-			ret = regmap_irq_update_bits(d, reg,
+			ret = regmap_update_bits(d->map, reg,
 					d->mask_buf_def[i], ~d->mask_buf[i]);
 			if (ret < 0)
 				dev_err(d->map->dev,
@@ -107,12 +97,12 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 			unmask_offset = d->chip->unmask_base -
 							d->chip->mask_base;
 			/* clear mask with unmask_base register */
-			ret = regmap_irq_update_bits(d,
+			ret = regmap_update_bits(d->map,
 					reg + unmask_offset,
 					d->mask_buf_def[i],
 					d->mask_buf[i]);
 		} else {
-			ret = regmap_irq_update_bits(d, reg,
+			ret = regmap_update_bits(d->map, reg,
 					 d->mask_buf_def[i], d->mask_buf[i]);
 		}
 		if (ret != 0)
@@ -123,11 +113,11 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 			(i * map->reg_stride * d->irq_reg_stride);
 		if (d->wake_buf) {
 			if (d->chip->wake_invert)
-				ret = regmap_irq_update_bits(d, reg,
+				ret = regmap_update_bits(d->map, reg,
 							 d->mask_buf_def[i],
 							 ~d->wake_buf[i]);
 			else
-				ret = regmap_irq_update_bits(d, reg,
+				ret = regmap_update_bits(d->map, reg,
 							 d->mask_buf_def[i],
 							 d->wake_buf[i]);
 			if (ret != 0)
@@ -163,10 +153,10 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 		reg = d->chip->type_base +
 			(i * map->reg_stride * d->type_reg_stride);
 		if (d->chip->type_invert)
-			ret = regmap_irq_update_bits(d, reg,
+			ret = regmap_update_bits(d->map, reg,
 				d->type_buf_def[i], ~d->type_buf[i]);
 		else
-			ret = regmap_irq_update_bits(d, reg,
+			ret = regmap_update_bits(d->map, reg,
 				d->type_buf_def[i], d->type_buf[i]);
 		if (ret != 0)
 			dev_err(d->map->dev, "Failed to sync type in %x\n",
@@ -404,7 +394,7 @@ static int regmap_irq_map(struct irq_domain *h, unsigned int virq,
 
 static const struct irq_domain_ops regmap_domain_ops = {
 	.map	= regmap_irq_map,
-	.xlate	= irq_domain_xlate_onetwocell,
+	.xlate	= irq_domain_xlate_twocell,
 };
 
 /**
@@ -529,17 +519,17 @@ int regmap_add_irq_chip(struct regmap *map, int irq, int irq_flags,
 		reg = chip->mask_base +
 			(i * map->reg_stride * d->irq_reg_stride);
 		if (chip->mask_invert)
-			ret = regmap_irq_update_bits(d, reg,
+			ret = regmap_update_bits(map, reg,
 					 d->mask_buf[i], ~d->mask_buf[i]);
 		else if (d->chip->unmask_base) {
 			unmask_offset = d->chip->unmask_base -
 					d->chip->mask_base;
-			ret = regmap_irq_update_bits(d,
+			ret = regmap_update_bits(d->map,
 					reg + unmask_offset,
 					d->mask_buf[i],
 					d->mask_buf[i]);
 		} else
-			ret = regmap_irq_update_bits(d, reg,
+			ret = regmap_update_bits(map, reg,
 					 d->mask_buf[i], d->mask_buf[i]);
 		if (ret != 0) {
 			dev_err(map->dev, "Failed to set masks in 0x%x: %d\n",
@@ -585,11 +575,11 @@ int regmap_add_irq_chip(struct regmap *map, int irq, int irq_flags,
 				(i * map->reg_stride * d->irq_reg_stride);
 
 			if (chip->wake_invert)
-				ret = regmap_irq_update_bits(d, reg,
+				ret = regmap_update_bits(map, reg,
 							 d->mask_buf_def[i],
 							 0);
 			else
-				ret = regmap_irq_update_bits(d, reg,
+				ret = regmap_update_bits(map, reg,
 							 d->mask_buf_def[i],
 							 d->wake_buf[i]);
 			if (ret != 0) {
@@ -613,10 +603,10 @@ int regmap_add_irq_chip(struct regmap *map, int irq, int irq_flags,
 			reg = chip->type_base +
 				(i * map->reg_stride * d->type_reg_stride);
 			if (chip->type_invert)
-				ret = regmap_irq_update_bits(d, reg,
+				ret = regmap_update_bits(map, reg,
 					d->type_buf_def[i], 0xFF);
 			else
-				ret = regmap_irq_update_bits(d, reg,
+				ret = regmap_update_bits(map, reg,
 					d->type_buf_def[i], 0x0);
 			if (ret != 0) {
 				dev_err(map->dev,

@@ -1,7 +1,18 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright(C) 2016 Linaro Limited. All rights reserved.
  * Author: Mathieu Poirier <mathieu.poirier@linaro.org>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published by
+ * the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/coresight.h>
@@ -11,7 +22,7 @@
 
 static void tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 {
-	u32 axictl, sts;
+	u32 axictl;
 
 	/* Zero out the memory to help with debug */
 	memset(drvdata->vaddr, 0, drvdata->size);
@@ -25,29 +36,17 @@ static void tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 	writel_relaxed(TMC_MODE_CIRCULAR_BUFFER, drvdata->base + TMC_MODE);
 
 	axictl = readl_relaxed(drvdata->base + TMC_AXICTL);
-	axictl &= ~TMC_AXICTL_CLEAR_MASK;
-	axictl |= (TMC_AXICTL_PROT_CTL_B1 | TMC_AXICTL_WR_BURST_16);
-	axictl |= TMC_AXICTL_AXCACHE_OS;
-
-	if (tmc_etr_has_cap(drvdata, TMC_ETR_AXI_ARCACHE)) {
-		axictl &= ~TMC_AXICTL_ARCACHE_MASK;
-		axictl |= TMC_AXICTL_ARCACHE_OS;
-	}
-
+	axictl |= TMC_AXICTL_WR_BURST_16;
 	writel_relaxed(axictl, drvdata->base + TMC_AXICTL);
-	tmc_write_dba(drvdata, drvdata->paddr);
-	/*
-	 * If the TMC pointers must be programmed before the session,
-	 * we have to set it properly (i.e, RRP/RWP to base address and
-	 * STS to "not full").
-	 */
-	if (tmc_etr_has_cap(drvdata, TMC_ETR_SAVE_RESTORE)) {
-		tmc_write_rrp(drvdata, drvdata->paddr);
-		tmc_write_rwp(drvdata, drvdata->paddr);
-		sts = readl_relaxed(drvdata->base + TMC_STS) & ~TMC_STS_FULL;
-		writel_relaxed(sts, drvdata->base + TMC_STS);
-	}
+	axictl &= ~TMC_AXICTL_SCT_GAT_MODE;
+	writel_relaxed(axictl, drvdata->base + TMC_AXICTL);
+	axictl = (axictl &
+		  ~(TMC_AXICTL_PROT_CTL_B0 | TMC_AXICTL_PROT_CTL_B1)) |
+		  TMC_AXICTL_PROT_CTL_B1;
+	writel_relaxed(axictl, drvdata->base + TMC_AXICTL);
 
+	writel_relaxed(drvdata->paddr, drvdata->base + TMC_DBALO);
+	writel_relaxed(0x0, drvdata->base + TMC_DBAHI);
 	writel_relaxed(TMC_FFCR_EN_FMT | TMC_FFCR_EN_TI |
 		       TMC_FFCR_FON_FLIN | TMC_FFCR_FON_TRIG_EVT |
 		       TMC_FFCR_TRIGON_TRIGIN,
@@ -60,12 +59,9 @@ static void tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 
 static void tmc_etr_dump_hw(struct tmc_drvdata *drvdata)
 {
-	const u32 *barrier;
-	u32 val;
-	u32 *temp;
-	u64 rwp;
+	u32 rwp, val;
 
-	rwp = tmc_read_rwp(drvdata);
+	rwp = readl_relaxed(drvdata->base + TMC_RWP);
 	val = readl_relaxed(drvdata->base + TMC_STS);
 
 	/*
@@ -75,16 +71,6 @@ static void tmc_etr_dump_hw(struct tmc_drvdata *drvdata)
 	if (val & TMC_STS_FULL) {
 		drvdata->buf = drvdata->vaddr + rwp - drvdata->paddr;
 		drvdata->len = drvdata->size;
-
-		barrier = barrier_pkt;
-		temp = (u32 *)drvdata->buf;
-
-		while (*barrier) {
-			*temp = *barrier;
-			temp++;
-			barrier++;
-		}
-
 	} else {
 		drvdata->buf = drvdata->vaddr;
 		drvdata->len = rwp - drvdata->paddr;
@@ -113,8 +99,9 @@ static int tmc_enable_etr_sink_sysfs(struct coresight_device *csdev)
 	bool used = false;
 	unsigned long flags;
 	void __iomem *vaddr = NULL;
-	dma_addr_t paddr = 0;
+	dma_addr_t paddr;
 	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
+
 
 	/*
 	 * If we don't have a buffer release the lock and allocate memory.
@@ -152,11 +139,11 @@ static int tmc_enable_etr_sink_sysfs(struct coresight_device *csdev)
 		goto out;
 
 	/*
-	 * If drvdata::vaddr == NULL, use the memory allocated above.
+	 * If drvdata::buf == NULL, use the memory allocated above.
 	 * Otherwise a buffer still exists from a previous session, so
 	 * simply use that.
 	 */
-	if (drvdata->vaddr == NULL) {
+	if (drvdata->buf == NULL) {
 		used = true;
 		drvdata->vaddr = vaddr;
 		drvdata->paddr = paddr;

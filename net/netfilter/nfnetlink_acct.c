@@ -49,8 +49,7 @@ struct nfacct_filter {
 
 static int nfnl_acct_new(struct net *net, struct sock *nfnl,
 			 struct sk_buff *skb, const struct nlmsghdr *nlh,
-			 const struct nlattr * const tb[],
-			 struct netlink_ext_ack *extack)
+			 const struct nlattr * const tb[])
 {
 	struct nf_acct *nfacct, *matching = NULL;
 	char *acct_name;
@@ -115,7 +114,7 @@ static int nfnl_acct_new(struct net *net, struct sock *nfnl,
 		nfacct->flags = flags;
 	}
 
-	nla_strlcpy(nfacct->name, tb[NFACCT_NAME], NFACCT_NAME_MAX);
+	strncpy(nfacct->name, nla_data(tb[NFACCT_NAME]), NFACCT_NAME_MAX);
 
 	if (tb[NFACCT_BYTES]) {
 		atomic64_set(&nfacct->bytes,
@@ -265,8 +264,7 @@ nfacct_filter_alloc(const struct nlattr * const attr)
 
 static int nfnl_acct_get(struct net *net, struct sock *nfnl,
 			 struct sk_buff *skb, const struct nlmsghdr *nlh,
-			 const struct nlattr * const tb[],
-			 struct netlink_ext_ack *extack)
+			 const struct nlattr * const tb[])
 {
 	int ret = -ENOENT;
 	struct nf_acct *cur;
@@ -345,8 +343,7 @@ static int nfnl_acct_try_del(struct nf_acct *cur)
 
 static int nfnl_acct_del(struct net *net, struct sock *nfnl,
 			 struct sk_buff *skb, const struct nlmsghdr *nlh,
-			 const struct nlattr * const tb[],
-			 struct netlink_ext_ack *extack)
+			 const struct nlattr * const tb[])
 {
 	struct nf_acct *cur, *tmp;
 	int ret = -ENOENT;
@@ -467,7 +464,8 @@ static void nfnl_overquota_report(struct net *net, struct nf_acct *nfacct)
 			  GFP_ATOMIC);
 }
 
-int nfnl_acct_overquota(struct net *net, struct nf_acct *nfacct)
+int nfnl_acct_overquota(struct net *net, const struct sk_buff *skb,
+			struct nf_acct *nfacct)
 {
 	u64 now;
 	u64 *quota;
@@ -526,6 +524,7 @@ static int __init nfnl_acct_init(void)
 		goto err_out;
 	}
 
+	pr_info("nfnl_acct: registering with nfnetlink.\n");
 	ret = nfnetlink_subsys_register(&nfnl_acct_subsys);
 	if (ret < 0) {
 		pr_err("nfnl_acct_init: cannot register with nfnetlink.\n");
@@ -541,6 +540,7 @@ err_out:
 
 static void __exit nfnl_acct_exit(void)
 {
+	pr_info("nfnl_acct: unregistering from nfnetlink.\n");
 	nfnetlink_subsys_unregister(&nfnl_acct_subsys);
 	unregister_pernet_subsys(&nfnl_acct_ops);
 }

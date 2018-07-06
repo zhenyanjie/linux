@@ -1,13 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NOUVEAU_DISPLAY_H__
 #define __NOUVEAU_DISPLAY_H__
+
+#include <subdev/mmu.h>
+
 #include "nouveau_drv.h"
-#include <nvif/disp.h>
 
 struct nouveau_framebuffer {
 	struct drm_framebuffer base;
 	struct nouveau_bo *nvbo;
-	struct nouveau_vma *vma;
+	struct nvkm_vma vma;
 	u32 r_handle;
 	u32 r_format;
 	u32 r_pitch;
@@ -39,7 +40,7 @@ struct nouveau_display {
 	int  (*init)(struct drm_device *);
 	void (*fini)(struct drm_device *);
 
-	struct nvif_disp disp;
+	struct nvif_object disp;
 
 	struct drm_property *dithering_mode;
 	struct drm_property *dithering_depth;
@@ -67,9 +68,11 @@ int  nouveau_display_suspend(struct drm_device *dev, bool runtime);
 void nouveau_display_resume(struct drm_device *dev, bool runtime);
 int  nouveau_display_vblank_enable(struct drm_device *, unsigned int);
 void nouveau_display_vblank_disable(struct drm_device *, unsigned int);
-bool  nouveau_display_scanoutpos(struct drm_device *, unsigned int,
-				 bool, int *, int *, ktime_t *,
-				 ktime_t *, const struct drm_display_mode *);
+int  nouveau_display_scanoutpos(struct drm_device *, unsigned int,
+				unsigned int, int *, int *, ktime_t *,
+				ktime_t *, const struct drm_display_mode *);
+int  nouveau_display_vblstamp(struct drm_device *, unsigned int, int *,
+			      struct timeval *, unsigned);
 
 int  nouveau_crtc_page_flip(struct drm_crtc *crtc, struct drm_framebuffer *fb,
 			    struct drm_pending_vblank_event *event,

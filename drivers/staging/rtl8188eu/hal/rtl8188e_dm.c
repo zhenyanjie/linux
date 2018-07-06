@@ -182,7 +182,7 @@ void rtw_hal_dm_init(struct adapter *Adapter)
 /*  Compare RSSI for deciding antenna */
 void rtw_hal_antdiv_rssi_compared(struct adapter *Adapter, struct wlan_bssid_ex *dst, struct wlan_bssid_ex *src)
 {
-	if (Adapter->HalData->AntDivCfg != 0) {
+	if (0 != Adapter->HalData->AntDivCfg) {
 		/* select optimum_antenna for before linked =>For antenna diversity */
 		if (dst->Rssi >=  src->Rssi) {/* keep org parameter */
 			src->Rssi = dst->Rssi;

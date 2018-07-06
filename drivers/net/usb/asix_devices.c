@@ -626,7 +626,7 @@ static int asix_suspend(struct usb_interface *intf, pm_message_t message)
 	struct usbnet *dev = usb_get_intfdata(intf);
 	struct asix_common_private *priv = dev->driver_priv;
 
-	if (priv && priv->suspend)
+	if (priv->suspend)
 		priv->suspend(dev);
 
 	return usbnet_suspend(intf, message);
@@ -678,7 +678,7 @@ static int asix_resume(struct usb_interface *intf)
 	struct usbnet *dev = usb_get_intfdata(intf);
 	struct asix_common_private *priv = dev->driver_priv;
 
-	if (priv && priv->resume)
+	if (priv->resume)
 		priv->resume(dev);
 
 	return usbnet_resume(intf);
@@ -764,7 +764,6 @@ static int ax88772_bind(struct usbnet *dev, struct usb_interface *intf)
 
 static void ax88772_unbind(struct usbnet *dev, struct usb_interface *intf)
 {
-	asix_rx_fixup_common_free(dev->driver_priv);
 	kfree(dev->driver_priv);
 }
 

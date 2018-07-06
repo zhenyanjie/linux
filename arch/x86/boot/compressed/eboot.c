@@ -109,34 +109,23 @@ void efi_char16_printk(efi_system_table_t *table, efi_char16_t *str)
 }
 
 static efi_status_t
-__setup_efi_pci(efi_pci_io_protocol_t *pci, struct pci_setup_rom **__rom)
+__setup_efi_pci32(efi_pci_io_protocol_32 *pci, struct pci_setup_rom **__rom)
 {
 	struct pci_setup_rom *rom = NULL;
 	efi_status_t status;
 	unsigned long size;
-	uint64_t attributes, romsize;
-	void *romimage;
+	uint64_t attributes;
 
-	status = efi_call_proto(efi_pci_io_protocol, attributes, pci,
-				EfiPciIoAttributeOperationGet, 0ULL,
-				&attributes);
+	status = efi_early->call(pci->attributes, pci,
+				 EfiPciIoAttributeOperationGet, 0, 0,
+				 &attributes);
 	if (status != EFI_SUCCESS)
 		return status;
 
-	/*
-	 * Some firmware images contain EFI function pointers at the place where the
-	 * romimage and romsize fields are supposed to be. Typically the EFI
-	 * code is mapped at high addresses, translating to an unrealistically
-	 * large romsize. The UEFI spec limits the size of option ROMs to 16
-	 * MiB so we reject any ROMs over 16 MiB in size to catch this.
-	 */
-	romimage = (void *)(unsigned long)efi_table_attr(efi_pci_io_protocol,
-							 romimage, pci);
-	romsize = efi_table_attr(efi_pci_io_protocol, romsize, pci);
-	if (!romimage || !romsize || romsize > SZ_16M)
+	if (!pci->romimage || !pci->romsize)
 		return EFI_INVALID_PARAMETER;
 
-	size = romsize + sizeof(*rom);
+	size = pci->romsize + sizeof(*rom);
 
 	status = efi_call_early(allocate_pool, EFI_LOADER_DATA, size, &rom);
 	if (status != EFI_SUCCESS) {
@@ -152,32 +141,29 @@ __setup_efi_pci(efi_pci_io_protocol_t *pci, struct pci_setup_rom **__rom)
 	rom->pcilen = pci->romsize;
 	*__rom = rom;
 
-	status = efi_call_proto(efi_pci_io_protocol, pci.read, pci,
-				EfiPciIoWidthUint16, PCI_VENDOR_ID, 1,
-				&rom->vendor);
+	status = efi_early->call(pci->pci.read, pci, EfiPciIoWidthUint16,
+				 PCI_VENDOR_ID, 1, &(rom->vendor));
 
 	if (status != EFI_SUCCESS) {
 		efi_printk(sys_table, "Failed to read rom->vendor\n");
 		goto free_struct;
 	}
 
-	status = efi_call_proto(efi_pci_io_protocol, pci.read, pci,
-				EfiPciIoWidthUint16, PCI_DEVICE_ID, 1,
-				&rom->devid);
+	status = efi_early->call(pci->pci.read, pci, EfiPciIoWidthUint16,
+				 PCI_DEVICE_ID, 1, &(rom->devid));
 
 	if (status != EFI_SUCCESS) {
 		efi_printk(sys_table, "Failed to read rom->devid\n");
 		goto free_struct;
 	}
 
-	status = efi_call_proto(efi_pci_io_protocol, get_location, pci,
-				&rom->segment, &rom->bus, &rom->device,
-				&rom->function);
+	status = efi_early->call(pci->get_location, pci, &(rom->segment),
+				 &(rom->bus), &(rom->device), &(rom->function));
 
 	if (status != EFI_SUCCESS)
 		goto free_struct;
 
-	memcpy(rom->romdata, romimage, romsize);
+	memcpy(rom->romdata, pci->romimage, pci->romsize);
 	return status;
 
 free_struct:
@@ -189,7 +175,7 @@ static void
 setup_efi_pci32(struct boot_params *params, void **pci_handle,
 		unsigned long size)
 {
-	efi_pci_io_protocol_t *pci = NULL;
+	efi_pci_io_protocol_32 *pci = NULL;
 	efi_guid_t pci_proto = EFI_PCI_IO_PROTOCOL_GUID;
 	u32 *handles = (u32 *)(unsigned long)pci_handle;
 	efi_status_t status;
@@ -216,7 +202,7 @@ setup_efi_pci32(struct boot_params *params, void **pci_handle,
 		if (!pci)
 			continue;
 
-		status = __setup_efi_pci(pci, &rom);
+		status = __setup_efi_pci32(pci, &rom);
 		if (status != EFI_SUCCESS)
 			continue;
 
@@ -230,11 +216,73 @@ setup_efi_pci32(struct boot_params *params, void **pci_handle,
 	}
 }
 
+static efi_status_t
+__setup_efi_pci64(efi_pci_io_protocol_64 *pci, struct pci_setup_rom **__rom)
+{
+	struct pci_setup_rom *rom;
+	efi_status_t status;
+	unsigned long size;
+	uint64_t attributes;
+
+	status = efi_early->call(pci->attributes, pci,
+				 EfiPciIoAttributeOperationGet, 0,
+				 &attributes);
+	if (status != EFI_SUCCESS)
+		return status;
+
+	if (!pci->romimage || !pci->romsize)
+		return EFI_INVALID_PARAMETER;
+
+	size = pci->romsize + sizeof(*rom);
+
+	status = efi_call_early(allocate_pool, EFI_LOADER_DATA, size, &rom);
+	if (status != EFI_SUCCESS) {
+		efi_printk(sys_table, "Failed to alloc mem for rom\n");
+		return status;
+	}
+
+	rom->data.type = SETUP_PCI;
+	rom->data.len = size - sizeof(struct setup_data);
+	rom->data.next = 0;
+	rom->pcilen = pci->romsize;
+	*__rom = rom;
+
+	status = efi_early->call(pci->pci.read, pci, EfiPciIoWidthUint16,
+				 PCI_VENDOR_ID, 1, &(rom->vendor));
+
+	if (status != EFI_SUCCESS) {
+		efi_printk(sys_table, "Failed to read rom->vendor\n");
+		goto free_struct;
+	}
+
+	status = efi_early->call(pci->pci.read, pci, EfiPciIoWidthUint16,
+				 PCI_DEVICE_ID, 1, &(rom->devid));
+
+	if (status != EFI_SUCCESS) {
+		efi_printk(sys_table, "Failed to read rom->devid\n");
+		goto free_struct;
+	}
+
+	status = efi_early->call(pci->get_location, pci, &(rom->segment),
+				 &(rom->bus), &(rom->device), &(rom->function));
+
+	if (status != EFI_SUCCESS)
+		goto free_struct;
+
+	memcpy(rom->romdata, pci->romimage, pci->romsize);
+	return status;
+
+free_struct:
+	efi_call_early(free_pool, rom);
+	return status;
+
+}
+
 static void
 setup_efi_pci64(struct boot_params *params, void **pci_handle,
 		unsigned long size)
 {
-	efi_pci_io_protocol_t *pci = NULL;
+	efi_pci_io_protocol_64 *pci = NULL;
 	efi_guid_t pci_proto = EFI_PCI_IO_PROTOCOL_GUID;
 	u64 *handles = (u64 *)(unsigned long)pci_handle;
 	efi_status_t status;
@@ -261,7 +309,7 @@ setup_efi_pci64(struct boot_params *params, void **pci_handle,
 		if (!pci)
 			continue;
 
-		status = __setup_efi_pci(pci, &rom);
+		status = __setup_efi_pci64(pci, &rom);
 		if (status != EFI_SUCCESS)
 			continue;
 
@@ -373,10 +421,9 @@ static void retrieve_apple_device_properties(struct boot_params *boot_params)
 	}
 }
 
-static const efi_char16_t apple[] = L"Apple";
-
 static void setup_quirks(struct boot_params *boot_params)
 {
+	efi_char16_t const apple[] = { 'A', 'p', 'p', 'l', 'e', 0 };
 	efi_char16_t *fw_vendor = (efi_char16_t *)(unsigned long)
 		efi_table_attr(efi_system_table, fw_vendor, sys_table);
 
@@ -392,7 +439,7 @@ setup_uga32(void **uga_handle, unsigned long size, u32 *width, u32 *height)
 	struct efi_uga_draw_protocol *uga = NULL, *first_uga;
 	efi_guid_t uga_proto = EFI_UGA_PROTOCOL_GUID;
 	unsigned long nr_ugas;
-	u32 *handles = (u32 *)uga_handle;
+	u32 *handles = (u32 *)uga_handle;;
 	efi_status_t status = EFI_INVALID_PARAMETER;
 	int i;
 
@@ -437,7 +484,7 @@ setup_uga64(void **uga_handle, unsigned long size, u32 *width, u32 *height)
 	struct efi_uga_draw_protocol *uga = NULL, *first_uga;
 	efi_guid_t uga_proto = EFI_UGA_PROTOCOL_GUID;
 	unsigned long nr_ugas;
-	u64 *handles = (u64 *)uga_handle;
+	u64 *handles = (u64 *)uga_handle;;
 	efi_status_t status = EFI_INVALID_PARAMETER;
 	int i;
 
@@ -720,7 +767,7 @@ static efi_status_t setup_e820(struct boot_params *params,
 		m |= (u64)efi->efi_memmap_hi << 32;
 #endif
 
-		d = efi_early_memdesc_ptr(m, efi->efi_memdesc_size, i);
+		d = (efi_memory_desc_t *)(m + (i * efi->efi_memdesc_size));
 		switch (d->type) {
 		case EFI_RESERVED_TYPE:
 		case EFI_RUNTIME_SERVICES_CODE:
@@ -950,10 +997,6 @@ struct boot_params *efi_main(struct efi_config *c,
 	if (boot_params->secure_boot == efi_secureboot_mode_unset)
 		boot_params->secure_boot = efi_get_secureboot(sys_table);
 
-	/* Ask the firmware to clear memory on unclean shutdown */
-	efi_enable_reset_attack_mitigation(sys_table);
-	efi_retrieve_tpm2_eventlog(sys_table);
-
 	setup_graphics(boot_params);
 
 	setup_efi_pci(boot_params);
@@ -1003,31 +1046,9 @@ struct boot_params *efi_main(struct efi_config *c,
 	memset((char *)gdt->address, 0x0, gdt->size);
 	desc = (struct desc_struct *)gdt->address;
 
-	/* The first GDT is a dummy. */
-	desc++;
+	/* The first GDT is a dummy and the second is unused. */
+	desc += 2;
 
-	if (IS_ENABLED(CONFIG_X86_64)) {
-		/* __KERNEL32_CS */
-		desc->limit0 = 0xffff;
-		desc->base0 = 0x0000;
-		desc->base1 = 0x0000;
-		desc->type = SEG_TYPE_CODE | SEG_TYPE_EXEC_READ;
-		desc->s = DESC_TYPE_CODE_DATA;
-		desc->dpl = 0;
-		desc->p = 1;
-		desc->limit1 = 0xf;
-		desc->avl = 0;
-		desc->l = 0;
-		desc->d = SEG_OP_SIZE_32BIT;
-		desc->g = SEG_GRANULARITY_4KB;
-		desc->base2 = 0x00;
-		desc++;
-	} else {
-		/* Second entry is unused on 32-bit */
-		desc++;
-	}
-
-	/* __KERNEL_CS */
 	desc->limit0 = 0xffff;
 	desc->base0 = 0x0000;
 	desc->base1 = 0x0000;
@@ -1035,20 +1056,14 @@ struct boot_params *efi_main(struct efi_config *c,
 	desc->s = DESC_TYPE_CODE_DATA;
 	desc->dpl = 0;
 	desc->p = 1;
-	desc->limit1 = 0xf;
+	desc->limit = 0xf;
 	desc->avl = 0;
-	if (IS_ENABLED(CONFIG_X86_64)) {
-		desc->l = 1;
-		desc->d = 0;
-	} else {
-		desc->l = 0;
-		desc->d = SEG_OP_SIZE_32BIT;
-	}
+	desc->l = 0;
+	desc->d = SEG_OP_SIZE_32BIT;
 	desc->g = SEG_GRANULARITY_4KB;
 	desc->base2 = 0x00;
-	desc++;
 
-	/* __KERNEL_DS */
+	desc++;
 	desc->limit0 = 0xffff;
 	desc->base0 = 0x0000;
 	desc->base1 = 0x0000;
@@ -1056,31 +1071,30 @@ struct boot_params *efi_main(struct efi_config *c,
 	desc->s = DESC_TYPE_CODE_DATA;
 	desc->dpl = 0;
 	desc->p = 1;
-	desc->limit1 = 0xf;
+	desc->limit = 0xf;
 	desc->avl = 0;
 	desc->l = 0;
 	desc->d = SEG_OP_SIZE_32BIT;
 	desc->g = SEG_GRANULARITY_4KB;
 	desc->base2 = 0x00;
-	desc++;
 
-	if (IS_ENABLED(CONFIG_X86_64)) {
-		/* Task segment value */
-		desc->limit0 = 0x0000;
-		desc->base0 = 0x0000;
-		desc->base1 = 0x0000;
-		desc->type = SEG_TYPE_TSS;
-		desc->s = 0;
-		desc->dpl = 0;
-		desc->p = 1;
-		desc->limit1 = 0x0;
-		desc->avl = 0;
-		desc->l = 0;
-		desc->d = 0;
-		desc->g = SEG_GRANULARITY_4KB;
-		desc->base2 = 0x00;
-		desc++;
-	}
+#ifdef CONFIG_X86_64
+	/* Task segment value */
+	desc++;
+	desc->limit0 = 0x0000;
+	desc->base0 = 0x0000;
+	desc->base1 = 0x0000;
+	desc->type = SEG_TYPE_TSS;
+	desc->s = 0;
+	desc->dpl = 0;
+	desc->p = 1;
+	desc->limit = 0x0;
+	desc->avl = 0;
+	desc->l = 0;
+	desc->d = 0;
+	desc->g = SEG_GRANULARITY_4KB;
+	desc->base2 = 0x00;
+#endif /* CONFIG_X86_64 */
 
 	asm volatile("cli");
 	asm volatile ("lgdt %0" : : "m" (*gdt));

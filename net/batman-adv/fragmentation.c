@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
-/* Copyright (C) 2013-2018  B.A.T.M.A.N. contributors:
+/* Copyright (C) 2013-2017  B.A.T.M.A.N. contributors:
  *
  * Martin Hundebøll <martin@hundeboll.net>
  *
@@ -23,7 +22,7 @@
 #include <linux/byteorder/generic.h>
 #include <linux/errno.h>
 #include <linux/etherdevice.h>
-#include <linux/gfp.h>
+#include <linux/fs.h>
 #include <linux/if_ether.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
@@ -33,16 +32,16 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
-#include <uapi/linux/batadv_packet.h>
 
 #include "hard-interface.h"
 #include "originator.h"
+#include "packet.h"
 #include "routing.h"
 #include "send.h"
 #include "soft-interface.h"
 
 /**
- * batadv_frag_clear_chain() - delete entries in the fragment buffer chain
+ * batadv_frag_clear_chain - delete entries in the fragment buffer chain
  * @head: head of chain with entries.
  * @dropped: whether the chain is cleared because all fragments are dropped
  *
@@ -66,7 +65,7 @@ static void batadv_frag_clear_chain(struct hlist_head *head, bool dropped)
 }
 
 /**
- * batadv_frag_purge_orig() - free fragments associated to an orig
+ * batadv_frag_purge_orig - free fragments associated to an orig
  * @orig_node: originator to free fragments from
  * @check_cb: optional function to tell if an entry should be purged
  */
@@ -90,7 +89,7 @@ void batadv_frag_purge_orig(struct batadv_orig_node *orig_node,
 }
 
 /**
- * batadv_frag_size_limit() - maximum possible size of packet to be fragmented
+ * batadv_frag_size_limit - maximum possible size of packet to be fragmented
  *
  * Return: the maximum size of payload that can be fragmented.
  */
@@ -105,7 +104,7 @@ static int batadv_frag_size_limit(void)
 }
 
 /**
- * batadv_frag_init_chain() - check and prepare fragment chain for new fragment
+ * batadv_frag_init_chain - check and prepare fragment chain for new fragment
  * @chain: chain in fragments table to init
  * @seqno: sequence number of the received fragment
  *
@@ -135,7 +134,7 @@ static bool batadv_frag_init_chain(struct batadv_frag_table_entry *chain,
 }
 
 /**
- * batadv_frag_insert_packet() - insert a fragment into a fragment chain
+ * batadv_frag_insert_packet - insert a fragment into a fragment chain
  * @orig_node: originator that the fragment was received from
  * @skb: skb to insert
  * @chain_out: list head to attach complete chains of fragments to
@@ -249,7 +248,7 @@ err:
 }
 
 /**
- * batadv_frag_merge_packets() - merge a chain of fragments
+ * batadv_frag_merge_packets - merge a chain of fragments
  * @chain: head of chain with fragments
  *
  * Expand the first skb in the chain and copy the content of the remaining
@@ -288,8 +287,7 @@ batadv_frag_merge_packets(struct hlist_head *chain)
 	/* Move the existing MAC header to just before the payload. (Override
 	 * the fragment header.)
 	 */
-	skb_pull(skb_out, hdr_size);
-	skb_out->ip_summed = CHECKSUM_NONE;
+	skb_pull_rcsum(skb_out, hdr_size);
 	memmove(skb_out->data - ETH_HLEN, skb_mac_header(skb_out), ETH_HLEN);
 	skb_set_mac_header(skb_out, -ETH_HLEN);
 	skb_reset_network_header(skb_out);
@@ -298,7 +296,8 @@ batadv_frag_merge_packets(struct hlist_head *chain)
 	/* Copy the payload of the each fragment into the last skb */
 	hlist_for_each_entry(entry, chain, list) {
 		size = entry->skb->len - hdr_size;
-		skb_put_data(skb_out, entry->skb->data + hdr_size, size);
+		memcpy(skb_put(skb_out, size), entry->skb->data + hdr_size,
+		       size);
 	}
 
 free:
@@ -308,7 +307,7 @@ free:
 }
 
 /**
- * batadv_frag_skb_buffer() - buffer fragment for later merge
+ * batadv_frag_skb_buffer - buffer fragment for later merge
  * @skb: skb to buffer
  * @orig_node_src: originator that the skb is received from
  *
@@ -348,7 +347,7 @@ out_err:
 }
 
 /**
- * batadv_frag_skb_fwd() - forward fragments that would exceed MTU when merged
+ * batadv_frag_skb_fwd - forward fragments that would exceed MTU when merged
  * @skb: skb to forward
  * @recv_if: interface that the skb is received on
  * @orig_node_src: originator that the skb is received from
@@ -402,7 +401,7 @@ out:
 }
 
 /**
- * batadv_frag_create() - create a fragment from skb
+ * batadv_frag_create - create a fragment from skb
  * @skb: skb to create fragment from
  * @frag_head: header to use in new fragment
  * @fragment_size: size of new fragment
@@ -440,7 +439,7 @@ err:
 }
 
 /**
- * batadv_frag_send_packet() - create up to 16 fragments from the passed skb
+ * batadv_frag_send_packet - create up to 16 fragments from the passed skb
  * @skb: skb to create fragments from
  * @orig_node: final destination of the created fragments
  * @neigh_node: next-hop of the created fragments
@@ -501,8 +500,6 @@ int batadv_frag_send_packet(struct sk_buff *skb,
 	 */
 	if (skb->priority >= 256 && skb->priority <= 263)
 		frag_header.priority = skb->priority - 256;
-	else
-		frag_header.priority = 0;
 
 	ether_addr_copy(frag_header.orig, primary_if->net_dev->dev_addr);
 	ether_addr_copy(frag_header.dest, orig_node->orig);

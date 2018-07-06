@@ -257,7 +257,7 @@ static struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
 		 *    to work from.
 		 */
 		limit = _STK_LIM / 4 * 3;
-		limit = min(limit, bprm->rlim_stack.rlim_cur / 4);
+		limit = min(limit, rlimit(RLIMIT_STACK) / 4);
 		if (size > limit)
 			goto fail;
 	}
@@ -410,11 +410,6 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	err = -ENOMEM;
 	if (!mm)
 		goto err;
-
-	/* Save current stack limit for all calculations made during exec. */
-	task_lock(current->group_leader);
-	bprm->rlim_stack = current->signal->rlim[RLIMIT_STACK];
-	task_unlock(current->group_leader);
 
 	err = __bprm_mm_init(bprm);
 	if (err)
@@ -702,7 +697,7 @@ int setup_arg_pages(struct linux_binprm *bprm,
 
 #ifdef CONFIG_STACK_GROWSUP
 	/* Limit stack size */
-	stack_base = bprm->rlim_stack.rlim_max;
+	stack_base = rlimit_max(RLIMIT_STACK);
 	if (stack_base > STACK_SIZE_MAX)
 		stack_base = STACK_SIZE_MAX;
 
@@ -775,7 +770,7 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	 * Align this down to a page boundary as expand_stack
 	 * will align it up.
 	 */
-	rlim_stack = bprm->rlim_stack.rlim_cur & PAGE_MASK;
+	rlim_stack = rlimit(RLIMIT_STACK) & PAGE_MASK;
 #ifdef CONFIG_STACK_GROWSUP
 	if (stack_size + stack_expand > rlim_stack)
 		stack_base = vma->vm_start + rlim_stack;
@@ -890,6 +885,23 @@ struct file *open_exec(const char *name)
 }
 EXPORT_SYMBOL(open_exec);
 
+int kernel_read(struct file *file, loff_t offset,
+		char *addr, unsigned long count)
+{
+	mm_segment_t old_fs;
+	loff_t pos = offset;
+	int result;
+
+	old_fs = get_fs();
+	set_fs(get_ds());
+	/* The cast to a user pointer is valid due to the set_fs() */
+	result = vfs_read(file, (void __user *)addr, count, &pos);
+	set_fs(old_fs);
+	return result;
+}
+
+EXPORT_SYMBOL(kernel_read);
+
 int kernel_read_file(struct file *file, void **buf, loff_t *size,
 		     loff_t max_size, enum kernel_read_file_id id)
 {
@@ -900,13 +912,13 @@ int kernel_read_file(struct file *file, void **buf, loff_t *size,
 	if (!S_ISREG(file_inode(file)->i_mode) || max_size < 0)
 		return -EINVAL;
 
-	ret = deny_write_access(file);
+	ret = security_kernel_read_file(file, id);
 	if (ret)
 		return ret;
 
-	ret = security_kernel_read_file(file, id);
+	ret = deny_write_access(file);
 	if (ret)
-		goto out;
+		return ret;
 
 	i_size = i_size_read(file_inode(file));
 	if (max_size > 0 && i_size > max_size) {
@@ -927,7 +939,8 @@ int kernel_read_file(struct file *file, void **buf, loff_t *size,
 
 	pos = 0;
 	while (pos < i_size) {
-		bytes = kernel_read(file, *buf + pos, i_size - pos, &pos);
+		bytes = kernel_read(file, pos, (char *)(*buf) + pos,
+				    i_size - pos);
 		if (bytes < 0) {
 			ret = bytes;
 			goto out;
@@ -935,6 +948,7 @@ int kernel_read_file(struct file *file, void **buf, loff_t *size,
 
 		if (bytes == 0)
 			break;
+		pos += bytes;
 	}
 
 	if (pos != i_size) {
@@ -960,7 +974,7 @@ out:
 }
 EXPORT_SYMBOL_GPL(kernel_read_file);
 
-int kernel_read_file_from_path(const char *path, void **buf, loff_t *size,
+int kernel_read_file_from_path(char *path, void **buf, loff_t *size,
 			       loff_t max_size, enum kernel_read_file_id id)
 {
 	struct file *file;
@@ -1221,14 +1235,15 @@ killed:
 	return -EAGAIN;
 }
 
-char *__get_task_comm(char *buf, size_t buf_size, struct task_struct *tsk)
+char *get_task_comm(char *buf, struct task_struct *tsk)
 {
+	/* buf must be at least sizeof(tsk->comm) in size */
 	task_lock(tsk);
-	strncpy(buf, tsk->comm, buf_size);
+	strncpy(buf, tsk->comm, sizeof(tsk->comm));
 	task_unlock(tsk);
 	return buf;
 }
-EXPORT_SYMBOL_GPL(__get_task_comm);
+EXPORT_SYMBOL_GPL(get_task_comm);
 
 /*
  * These functions flushes out all traces of the currently running executable
@@ -1244,12 +1259,6 @@ void __set_task_comm(struct task_struct *tsk, const char *buf, bool exec)
 	perf_event_comm(tsk, exec);
 }
 
-/*
- * Calling this is the point of no return. None of the failures will be
- * seen by userspace since either the process is already taking a fatal
- * signal (via de_thread() or coredump), or will have SEGV raised
- * (after exec_mmap()) by search_binary_handlers (see below).
- */
 int flush_old_exec(struct linux_binprm * bprm)
 {
 	int retval;
@@ -1277,13 +1286,7 @@ int flush_old_exec(struct linux_binprm * bprm)
 	if (retval)
 		goto out;
 
-	/*
-	 * After clearing bprm->mm (to mark that current is using the
-	 * prepared mm now), we have nothing left of the original
-	 * process. If anything from here on returns an error, the check
-	 * in search_binary_handler() will SEGV current.
-	 */
-	bprm->mm = NULL;
+	bprm->mm = NULL;		/* We're using it now */
 
 	set_fs(USER_DS);
 	current->flags &= ~(PF_RANDOMIZE | PF_FORKNOEXEC | PF_KTHREAD |
@@ -1328,43 +1331,15 @@ EXPORT_SYMBOL(would_dump);
 
 void setup_new_exec(struct linux_binprm * bprm)
 {
-	/*
-	 * Once here, prepare_binrpm() will not be called any more, so
-	 * the final state of setuid/setgid/fscaps can be merged into the
-	 * secureexec flag.
-	 */
-	bprm->secureexec |= bprm->cap_elevated;
+	arch_pick_mmap_layout(current->mm);
 
-	if (bprm->secureexec) {
-		/* Make sure parent cannot signal privileged process. */
-		current->pdeath_signal = 0;
-
-		/*
-		 * For secureexec, reset the stack limit to sane default to
-		 * avoid bad behavior from the prior rlimits. This has to
-		 * happen before arch_pick_mmap_layout(), which examines
-		 * RLIMIT_STACK, but after the point of no return to avoid
-		 * needing to clean up the change on failure.
-		 */
-		if (bprm->rlim_stack.rlim_cur > _STK_LIM)
-			bprm->rlim_stack.rlim_cur = _STK_LIM;
-	}
-
-	arch_pick_mmap_layout(current->mm, &bprm->rlim_stack);
-
+	/* This is the point of no return */
 	current->sas_ss_sp = current->sas_ss_size = 0;
 
-	/*
-	 * Figure out dumpability. Note that this checking only of current
-	 * is wrong, but userspace depends on it. This should be testing
-	 * bprm->secureexec instead.
-	 */
-	if (bprm->interp_flags & BINPRM_FLAGS_ENFORCE_NONDUMP ||
-	    !(uid_eq(current_euid(), current_uid()) &&
-	      gid_eq(current_egid(), current_gid())))
-		set_dumpable(current->mm, suid_dumpable);
-	else
+	if (uid_eq(current_euid(), current_uid()) && gid_eq(current_egid(), current_gid()))
 		set_dumpable(current->mm, SUID_DUMP_USER);
+	else
+		set_dumpable(current->mm, suid_dumpable);
 
 	arch_setup_new_exec();
 	perf_event_exec();
@@ -1376,22 +1351,21 @@ void setup_new_exec(struct linux_binprm * bprm)
 	 */
 	current->mm->task_size = TASK_SIZE;
 
+	/* install the new credentials */
+	if (!uid_eq(bprm->cred->uid, current_euid()) ||
+	    !gid_eq(bprm->cred->gid, current_egid())) {
+		current->pdeath_signal = 0;
+	} else {
+		if (bprm->interp_flags & BINPRM_FLAGS_ENFORCE_NONDUMP)
+			set_dumpable(current->mm, suid_dumpable);
+	}
+
 	/* An exec changes our domain. We are no longer part of the thread
 	   group */
 	current->self_exec_id++;
 	flush_signal_handlers(current, 0);
 }
 EXPORT_SYMBOL(setup_new_exec);
-
-/* Runs immediately before start_thread() takes over. */
-void finalize_exec(struct linux_binprm *bprm)
-{
-	/* Store any stack rlimit changes before starting thread. */
-	task_lock(current->group_leader);
-	current->signal->rlim[RLIMIT_STACK] = bprm->rlim_stack;
-	task_unlock(current->group_leader);
-}
-EXPORT_SYMBOL(finalize_exec);
 
 /*
  * Prepare credentials and lock ->cred_guard_mutex.
@@ -1429,7 +1403,7 @@ static void free_bprm(struct linux_binprm *bprm)
 	kfree(bprm);
 }
 
-int bprm_change_interp(const char *interp, struct linux_binprm *bprm)
+int bprm_change_interp(char *interp, struct linux_binprm *bprm)
 {
 	/* If a binfmt changed the interp, free it first. */
 	if (bprm->interp != bprm->filename)
@@ -1567,7 +1541,6 @@ static void bprm_fill_uid(struct linux_binprm *bprm)
 int prepare_binprm(struct linux_binprm *bprm)
 {
 	int retval;
-	loff_t pos = 0;
 
 	bprm_fill_uid(bprm);
 
@@ -1575,10 +1548,10 @@ int prepare_binprm(struct linux_binprm *bprm)
 	retval = security_bprm_set_creds(bprm);
 	if (retval)
 		return retval;
-	bprm->called_set_creds = 1;
+	bprm->cred_prepared = 1;
 
 	memset(bprm->buf, 0, BINPRM_BUF_SIZE);
-	return kernel_read(bprm->file, bprm->buf, BINPRM_BUF_SIZE, &pos);
+	return kernel_read(bprm->file, 0, bprm->buf, BINPRM_BUF_SIZE);
 }
 
 EXPORT_SYMBOL(prepare_binprm);
@@ -1706,13 +1679,14 @@ static int exec_binprm(struct linux_binprm *bprm)
 /*
  * sys_execve() executes a new program.
  */
-static int __do_execve_file(int fd, struct filename *filename,
-			    struct user_arg_ptr argv,
-			    struct user_arg_ptr envp,
-			    int flags, struct file *file)
+static int do_execveat_common(int fd, struct filename *filename,
+			      struct user_arg_ptr argv,
+			      struct user_arg_ptr envp,
+			      int flags)
 {
 	char *pathbuf = NULL;
 	struct linux_binprm *bprm;
+	struct file *file;
 	struct files_struct *displaced;
 	int retval;
 
@@ -1751,8 +1725,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 	check_unsafe_exec(bprm);
 	current->in_execve = 1;
 
-	if (!file)
-		file = do_open_execat(fd, filename, flags);
+	file = do_open_execat(fd, filename, flags);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		goto out_unmark;
@@ -1760,15 +1733,13 @@ static int __do_execve_file(int fd, struct filename *filename,
 	sched_exec();
 
 	bprm->file = file;
-	if (!filename) {
-		bprm->filename = "none";
-	} else if (fd == AT_FDCWD || filename->name[0] == '/') {
+	if (fd == AT_FDCWD || filename->name[0] == '/') {
 		bprm->filename = filename->name;
 	} else {
 		if (filename->name[0] == '\0')
-			pathbuf = kasprintf(GFP_KERNEL, "/dev/fd/%d", fd);
+			pathbuf = kasprintf(GFP_TEMPORARY, "/dev/fd/%d", fd);
 		else
-			pathbuf = kasprintf(GFP_KERNEL, "/dev/fd/%d/%s",
+			pathbuf = kasprintf(GFP_TEMPORARY, "/dev/fd/%d/%s",
 					    fd, filename->name);
 		if (!pathbuf) {
 			retval = -ENOMEM;
@@ -1823,14 +1794,11 @@ static int __do_execve_file(int fd, struct filename *filename,
 	/* execve succeeded */
 	current->fs->in_exec = 0;
 	current->in_execve = 0;
-	membarrier_execve(current);
-	rseq_execve(current);
 	acct_update_integrals(current);
 	task_numa_free(current);
 	free_bprm(bprm);
 	kfree(pathbuf);
-	if (filename)
-		putname(filename);
+	putname(filename);
 	if (displaced)
 		put_files_struct(displaced);
 	return retval;
@@ -1853,25 +1821,8 @@ out_files:
 	if (displaced)
 		reset_files_struct(displaced);
 out_ret:
-	if (filename)
-		putname(filename);
+	putname(filename);
 	return retval;
-}
-
-static int do_execveat_common(int fd, struct filename *filename,
-			      struct user_arg_ptr argv,
-			      struct user_arg_ptr envp,
-			      int flags)
-{
-	return __do_execve_file(fd, filename, argv, envp, flags, NULL);
-}
-
-int do_execve_file(struct file *file, void *__argv, void *__envp)
-{
-	struct user_arg_ptr argv = { .ptr.native = __argv };
-	struct user_arg_ptr envp = { .ptr.native = __envp };
-
-	return __do_execve_file(AT_FDCWD, NULL, argv, envp, 0, file);
 }
 
 int do_execve(struct filename *filename,
@@ -1951,7 +1902,7 @@ void set_dumpable(struct mm_struct *mm, int value)
 		return;
 
 	do {
-		old = READ_ONCE(mm->flags);
+		old = ACCESS_ONCE(mm->flags);
 		new = (old & ~MMF_DUMPABLE_MASK) | value;
 	} while (cmpxchg(&mm->flags, old, new) != old);
 }

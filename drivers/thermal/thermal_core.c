@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  thermal.c - Generic Thermal Management Sysfs support.
  *
  *  Copyright (C) 2008 Intel Corp
  *  Copyright (C) 2008 Zhang Rui <rui.zhang@intel.com>
  *  Copyright (C) 2008 Sujith Thomas <sujith.thomas@intel.com>
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; version 2 of the License.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -387,7 +390,7 @@ static void handle_critical_trips(struct thermal_zone_device *tz,
 
 	if (trip_type == THERMAL_TRIP_CRITICAL) {
 		dev_emerg(&tz->device,
-			  "critical temperature reached (%d C), shutting down\n",
+			  "critical temperature reached(%d C),shutting down\n",
 			  tz->temperature / 1000);
 		mutex_lock(&poweroff_lock);
 		if (!power_off_triggered) {
@@ -733,7 +736,7 @@ int thermal_zone_bind_cooling_device(struct thermal_zone_device *tz,
 	sysfs_attr_init(&dev->attr.attr);
 	dev->attr.attr.name = dev->attr_name;
 	dev->attr.attr.mode = 0444;
-	dev->attr.show = trip_point_show;
+	dev->attr.show = thermal_cooling_device_trip_point_show;
 	result = device_create_file(&tz->device, &dev->attr);
 	if (result)
 		goto remove_symbol_link;
@@ -742,8 +745,8 @@ int thermal_zone_bind_cooling_device(struct thermal_zone_device *tz,
 	sysfs_attr_init(&dev->weight_attr.attr);
 	dev->weight_attr.attr.name = dev->weight_attr_name;
 	dev->weight_attr.attr.mode = S_IWUSR | S_IRUGO;
-	dev->weight_attr.show = weight_show;
-	dev->weight_attr.store = weight_store;
+	dev->weight_attr.show = thermal_cooling_device_weight_show;
+	dev->weight_attr.store = thermal_cooling_device_weight_store;
 	result = device_create_file(&tz->device, &dev->weight_attr);
 	if (result)
 		goto remove_trip_file;
@@ -833,7 +836,11 @@ static void thermal_release(struct device *dev)
 	if (!strncmp(dev_name(dev), "thermal_zone",
 		     sizeof("thermal_zone") - 1)) {
 		tz = to_thermal_zone(dev);
-		thermal_zone_destroy_device_groups(tz);
+		kfree(tz->trip_type_attrs);
+		kfree(tz->trip_temp_attrs);
+		kfree(tz->trip_hyst_attrs);
+		kfree(tz->trips_attribute_group.attrs);
+		kfree(tz->device.groups);
 		kfree(tz);
 	} else if (!strncmp(dev_name(dev), "cooling_device",
 			    sizeof("cooling_device") - 1)) {
@@ -969,8 +976,8 @@ __thermal_cooling_device_register(struct device_node *np,
 	cdev->ops = ops;
 	cdev->updated = false;
 	cdev->device.class = &thermal_class;
-	cdev->devdata = devdata;
 	thermal_cooling_device_setup_sysfs(cdev);
+	cdev->devdata = devdata;
 	dev_set_name(&cdev->device, "cooling_device%d", cdev->id);
 	result = device_register(&cdev->device);
 	if (result) {
@@ -1103,7 +1110,6 @@ void thermal_cooling_device_unregister(struct thermal_cooling_device *cdev)
 
 	ida_simple_remove(&thermal_cdev_ida, cdev->id);
 	device_unregister(&cdev->device);
-	thermal_cooling_device_destroy_sysfs(cdev);
 }
 EXPORT_SYMBOL_GPL(thermal_cooling_device_unregister);
 
@@ -1207,8 +1213,10 @@ thermal_zone_device_register(const char *type, int trips, int mask,
 	ida_init(&tz->ida);
 	mutex_init(&tz->lock);
 	result = ida_simple_get(&thermal_tz_ida, 0, 0, GFP_KERNEL);
-	if (result < 0)
-		goto free_tz;
+	if (result < 0) {
+		kfree(tz);
+		return ERR_PTR(result);
+	}
 
 	tz->id = result;
 	strlcpy(tz->type, type, sizeof(tz->type));
@@ -1224,15 +1232,18 @@ thermal_zone_device_register(const char *type, int trips, int mask,
 	/* Add nodes that are always present via .groups */
 	result = thermal_zone_create_device_groups(tz, mask);
 	if (result)
-		goto remove_id;
+		goto unregister;
 
 	/* A new thermal zone needs to be updated anyway. */
 	atomic_set(&tz->need_update, 1);
 
 	dev_set_name(&tz->device, "thermal_zone%d", tz->id);
 	result = device_register(&tz->device);
-	if (result)
-		goto remove_device_groups;
+	if (result) {
+		ida_simple_remove(&thermal_tz_ida, tz->id);
+		kfree(tz);
+		return ERR_PTR(result);
+	}
 
 	for (count = 0; count < trips; count++) {
 		if (tz->ops->get_trip_type(tz, count, &trip_type))
@@ -1285,14 +1296,6 @@ thermal_zone_device_register(const char *type, int trips, int mask,
 unregister:
 	ida_simple_remove(&thermal_tz_ida, tz->id);
 	device_unregister(&tz->device);
-	return ERR_PTR(result);
-
-remove_device_groups:
-	thermal_zone_destroy_device_groups(tz);
-remove_id:
-	ida_simple_remove(&thermal_tz_ida, tz->id);
-free_tz:
-	kfree(tz);
 	return ERR_PTR(result);
 }
 EXPORT_SYMBOL_GPL(thermal_zone_device_register);

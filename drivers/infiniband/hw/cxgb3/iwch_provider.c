@@ -440,9 +440,7 @@ static struct ib_pd *iwch_allocate_pd(struct ib_device *ibdev,
 	php->pdid = pdid;
 	php->rhp = rhp;
 	if (context) {
-		struct iwch_alloc_pd_resp resp = {.pdid = php->pdid};
-
-		if (ib_copy_to_udata(udata, &resp, sizeof(resp))) {
+		if (ib_copy_to_udata(udata, &php->pdid, sizeof (__u32))) {
 			iwch_deallocate_pd(&php->ibpd);
 			return ERR_PTR(-EFAULT);
 		}
@@ -720,7 +718,7 @@ static struct ib_mr *iwch_alloc_mr(struct ib_pd *pd,
 	struct iwch_mr *mhp;
 	u32 mmid;
 	u32 stag = 0;
-	int ret = -ENOMEM;
+	int ret = 0;
 
 	if (mr_type != IB_MR_TYPE_MEM_REG ||
 	    max_num_sg > T3_MAX_FASTREG_DEPTH)
@@ -733,8 +731,10 @@ static struct ib_mr *iwch_alloc_mr(struct ib_pd *pd,
 		goto err;
 
 	mhp->pages = kcalloc(max_num_sg, sizeof(u64), GFP_KERNEL);
-	if (!mhp->pages)
+	if (!mhp->pages) {
+		ret = -ENOMEM;
 		goto pl_err;
+	}
 
 	mhp->rhp = rhp;
 	ret = iwch_alloc_pbl(mhp, max_num_sg);
@@ -751,8 +751,7 @@ static struct ib_mr *iwch_alloc_mr(struct ib_pd *pd,
 	mhp->attr.state = 1;
 	mmid = (stag) >> 8;
 	mhp->ibmr.rkey = mhp->ibmr.lkey = stag;
-	ret = insert_handle(rhp, &rhp->mmidr, mhp, mmid);
-	if (ret)
+	if (insert_handle(rhp, &rhp->mmidr, mhp, mmid))
 		goto err3;
 
 	pr_debug("%s mmid 0x%x mhp %p stag 0x%x\n", __func__, mmid, mhp, stag);
@@ -971,6 +970,7 @@ static struct ib_qp *iwch_create_qp(struct ib_pd *pd,
 		insert_mmap(ucontext, mm2);
 	}
 	qhp->ibqp.qp_num = qhp->wq.qpid;
+	init_timer(&(qhp->timer));
 	pr_debug("%s sq_num_entries %d, rq_num_entries %d qpid 0x%0x qhp %p dma_addr 0x%llx size %d rq_addr 0x%x\n",
 		 __func__, qhp->attr.sq_num_entries, qhp->attr.rq_num_entries,
 		 qhp->wq.qpid, qhp, (unsigned long long)qhp->wq.dma_addr,
@@ -1337,7 +1337,8 @@ static int iwch_port_immutable(struct ib_device *ibdev, u8 port_num,
 	return 0;
 }
 
-static void get_dev_fw_ver_str(struct ib_device *ibdev, char *str)
+static void get_dev_fw_ver_str(struct ib_device *ibdev, char *str,
+			       size_t str_len)
 {
 	struct iwch_dev *iwch_dev = to_iwch_dev(ibdev);
 	struct ethtool_drvinfo info;
@@ -1345,7 +1346,7 @@ static void get_dev_fw_ver_str(struct ib_device *ibdev, char *str)
 
 	pr_debug("%s dev 0x%p\n", __func__, iwch_dev);
 	lldev->ethtool_ops->get_drvinfo(lldev, &info);
-	snprintf(str, IB_FW_VERSION_NAME_MAX, "%s", info.fw_version);
+	snprintf(str, str_len, "%s", info.fw_version);
 }
 
 int iwch_register_device(struct iwch_dev *dev)
@@ -1441,7 +1442,6 @@ int iwch_register_device(struct iwch_dev *dev)
 	memcpy(dev->ibdev.iwcm->ifname, dev->rdev.t3cdev_p->lldev->name,
 	       sizeof(dev->ibdev.iwcm->ifname));
 
-	dev->ibdev.driver_id = RDMA_DRIVER_CXGB3;
 	ret = ib_register_device(&dev->ibdev, NULL);
 	if (ret)
 		goto bail1;

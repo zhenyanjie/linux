@@ -24,7 +24,7 @@
  *
  *
  * libata documentation is available via 'make {ps|pdf}docs',
- * as Documentation/driver-api/libata.rst
+ * as Documentation/DocBook/libata.*
  *
  * AHCI hardware documentation:
  * http://www.intel.com/technology/serialata/pdf/rev1_0.pdf
@@ -248,12 +248,6 @@ enum {
 	AHCI_HFLAG_MULTI_MSI		= 0,
 #endif
 	AHCI_HFLAG_WAKE_BEFORE_STOP	= (1 << 22), /* wake before DMA stop */
-	AHCI_HFLAG_YES_ALPM		= (1 << 23), /* force ALPM cap on */
-	AHCI_HFLAG_NO_WRITE_TO_RO	= (1 << 24), /* don't write to read
-							only registers */
-	AHCI_HFLAG_IS_MOBILE		= (1 << 25), /* mobile chipset, use
-							SATA_MOBILE_LPM_POLICY
-							as default lpm_policy */
 
 	/* ap->flags bits */
 
@@ -306,7 +300,6 @@ struct ahci_em_priv {
 	unsigned long saved_activity;
 	unsigned long activity;
 	unsigned long led_state;
-	struct ata_link *link;
 };
 
 struct ahci_port_priv {
@@ -365,13 +358,6 @@ struct ahci_host_priv {
 	 * be overridden anytime before the host is activated.
 	 */
 	void			(*start_engine)(struct ata_port *ap);
-	/*
-	 * Optional ahci_stop_engine override, if not set this gets set to the
-	 * default ahci_stop_engine during ahci_save_initial_config, this can
-	 * be overridden anytime before the host is activated.
-	 */
-	int			(*stop_engine)(struct ata_port *ap);
-
 	irqreturn_t 		(*irq_handler)(int irq, void *dev_instance);
 
 	/* only required for per-port MSI(-X) support */
@@ -390,7 +376,7 @@ extern struct device_attribute *ahci_sdev_attrs[];
  */
 #define AHCI_SHT(drv_name)						\
 	ATA_NCQ_SHT(drv_name),						\
-	.can_queue		= AHCI_MAX_CMDS,			\
+	.can_queue		= AHCI_MAX_CMDS - 1,			\
 	.sg_tablesize		= AHCI_MAX_SG,				\
 	.dma_boundary		= AHCI_DMA_BOUNDARY,			\
 	.shost_attrs		= ahci_shost_attrs,			\

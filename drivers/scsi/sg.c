@@ -66,6 +66,7 @@ static int sg_version_num = 30536;	/* 2 digits for each component */
 static char *sg_version_date = "20140603";
 
 static int sg_proc_init(void);
+static void sg_proc_cleanup(void);
 #endif
 
 #define SG_ALLOW_DIO_DEF 0
@@ -176,7 +177,7 @@ typedef struct sg_device { /* holds the state of each scsi generic device */
 } Sg_device;
 
 /* tasklet or soft irq callback */
-static void sg_rq_end_io(struct request *rq, blk_status_t status);
+static void sg_rq_end_io(struct request *rq, int uptodate);
 static int sg_start_req(Sg_request *srp, unsigned char *cmd);
 static int sg_finish_rem_req(Sg_request * srp);
 static int sg_build_indirect(Sg_scatter_hold * schp, Sg_fd * sfp, int buff_size);
@@ -216,7 +217,7 @@ static int sg_allow_access(struct file *filp, unsigned char *cmd)
 	if (sfp->parentdp->device->type == TYPE_SCANNER)
 		return 0;
 
-	return blk_verify_command(cmd, filp->f_mode);
+	return blk_verify_command(cmd, filp->f_mode & FMODE_WRITE);
 }
 
 static int
@@ -784,7 +785,7 @@ sg_common_write(Sg_fd * sfp, Sg_request * srp,
 	if (atomic_read(&sdp->detaching)) {
 		if (srp->bio) {
 			scsi_req_free_cmd(scsi_req(srp->rq));
-			blk_end_request_all(srp->rq, BLK_STS_IOERR);
+			blk_end_request_all(srp->rq, -EIO);
 			srp->rq = NULL;
 		}
 
@@ -825,39 +826,6 @@ static int max_sectors_bytes(struct request_queue *q)
 	max_sectors = min_t(unsigned int, max_sectors, INT_MAX >> 9);
 
 	return max_sectors << 9;
-}
-
-static void
-sg_fill_request_table(Sg_fd *sfp, sg_req_info_t *rinfo)
-{
-	Sg_request *srp;
-	int val;
-	unsigned int ms;
-
-	val = 0;
-	list_for_each_entry(srp, &sfp->rq_list, entry) {
-		if (val >= SG_MAX_QUEUE)
-			break;
-		rinfo[val].req_state = srp->done + 1;
-		rinfo[val].problem =
-			srp->header.masked_status &
-			srp->header.host_status &
-			srp->header.driver_status;
-		if (srp->done)
-			rinfo[val].duration =
-				srp->header.duration;
-		else {
-			ms = jiffies_to_msecs(jiffies);
-			rinfo[val].duration =
-				(ms > srp->header.duration) ?
-				(ms - srp->header.duration) : 0;
-		}
-		rinfo[val].orphan = srp->orphan;
-		rinfo[val].sg_io_owned = srp->sg_io_owned;
-		rinfo[val].pack_id = srp->header.pack_id;
-		rinfo[val].usr_ptr = srp->header.usr_ptr;
-		val++;
-	}
 }
 
 static long
@@ -1044,13 +1012,38 @@ sg_ioctl(struct file *filp, unsigned int cmd_in, unsigned long arg)
 			return -EFAULT;
 		else {
 			sg_req_info_t *rinfo;
+			unsigned int ms;
 
-			rinfo = kcalloc(SG_MAX_QUEUE, SZ_SG_REQ_INFO,
-					GFP_KERNEL);
+			rinfo = kmalloc(SZ_SG_REQ_INFO * SG_MAX_QUEUE,
+								GFP_KERNEL);
 			if (!rinfo)
 				return -ENOMEM;
 			read_lock_irqsave(&sfp->rq_list_lock, iflags);
-			sg_fill_request_table(sfp, rinfo);
+			val = 0;
+			list_for_each_entry(srp, &sfp->rq_list, entry) {
+				if (val > SG_MAX_QUEUE)
+					break;
+				memset(&rinfo[val], 0, SZ_SG_REQ_INFO);
+				rinfo[val].req_state = srp->done + 1;
+				rinfo[val].problem =
+					srp->header.masked_status &
+					srp->header.host_status &
+					srp->header.driver_status;
+				if (srp->done)
+					rinfo[val].duration =
+						srp->header.duration;
+				else {
+					ms = jiffies_to_msecs(jiffies);
+					rinfo[val].duration =
+						(ms > srp->header.duration) ?
+						(ms - srp->header.duration) : 0;
+				}
+				rinfo[val].orphan = srp->orphan;
+				rinfo[val].sg_io_owned = srp->sg_io_owned;
+				rinfo[val].pack_id = srp->header.pack_id;
+				rinfo[val].usr_ptr = srp->header.usr_ptr;
+				val++;
+			}
 			read_unlock_irqrestore(&sfp->rq_list_lock, iflags);
 			result = __copy_to_user(p, rinfo,
 						SZ_SG_REQ_INFO * SG_MAX_QUEUE);
@@ -1088,7 +1081,8 @@ sg_ioctl(struct file *filp, unsigned int cmd_in, unsigned long arg)
 		return blk_trace_setup(sdp->device->request_queue,
 				       sdp->disk->disk_name,
 				       MKDEV(SCSI_GENERIC_MAJOR, sdp->index),
-				       NULL, p);
+				       NULL,
+				       (char *)arg);
 	case BLKTRACESTART:
 		return blk_trace_startstop(sdp->device->request_queue, 1);
 	case BLKTRACESTOP:
@@ -1139,10 +1133,10 @@ static long sg_compat_ioctl(struct file *filp, unsigned int cmd_in, unsigned lon
 }
 #endif
 
-static __poll_t
+static unsigned int
 sg_poll(struct file *filp, poll_table * wait)
 {
-	__poll_t res = 0;
+	unsigned int res = 0;
 	Sg_device *sdp;
 	Sg_fd *sfp;
 	Sg_request *srp;
@@ -1151,29 +1145,29 @@ sg_poll(struct file *filp, poll_table * wait)
 
 	sfp = filp->private_data;
 	if (!sfp)
-		return EPOLLERR;
+		return POLLERR;
 	sdp = sfp->parentdp;
 	if (!sdp)
-		return EPOLLERR;
+		return POLLERR;
 	poll_wait(filp, &sfp->read_wait, wait);
 	read_lock_irqsave(&sfp->rq_list_lock, iflags);
 	list_for_each_entry(srp, &sfp->rq_list, entry) {
 		/* if any read waiting, flag it */
 		if ((0 == res) && (1 == srp->done) && (!srp->sg_io_owned))
-			res = EPOLLIN | EPOLLRDNORM;
+			res = POLLIN | POLLRDNORM;
 		++count;
 	}
 	read_unlock_irqrestore(&sfp->rq_list_lock, iflags);
 
 	if (atomic_read(&sdp->detaching))
-		res |= EPOLLHUP;
+		res |= POLLHUP;
 	else if (!sfp->cmd_q) {
 		if (0 == count)
-			res |= EPOLLOUT | EPOLLWRNORM;
+			res |= POLLOUT | POLLWRNORM;
 	} else if (count < SG_MAX_QUEUE)
-		res |= EPOLLOUT | EPOLLWRNORM;
+		res |= POLLOUT | POLLWRNORM;
 	SCSI_LOG_TIMEOUT(3, sg_printk(KERN_INFO, sdp,
-				      "sg_poll: res=0x%x\n", (__force u32) res));
+				      "sg_poll: res=0x%x\n", (int) res));
 	return res;
 }
 
@@ -1191,7 +1185,7 @@ sg_fasync(int fd, struct file *filp, int mode)
 	return fasync_helper(fd, filp, mode, &sfp->async_qp);
 }
 
-static vm_fault_t
+static int
 sg_vma_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
@@ -1289,7 +1283,7 @@ sg_rq_end_io_usercontext(struct work_struct *work)
  * level when a command is completed (or has failed).
  */
 static void
-sg_rq_end_io(struct request *rq, blk_status_t status)
+sg_rq_end_io(struct request *rq, int uptodate)
 {
 	struct sg_request *srp = rq->end_io_data;
 	struct scsi_request *req = scsi_req(rq);
@@ -1660,7 +1654,7 @@ static void __exit
 exit_sg(void)
 {
 #ifdef CONFIG_SCSI_PROC_FS
-	remove_proc_subtree("scsi/sg", NULL);
+	sg_proc_cleanup();
 #endif				/* CONFIG_SCSI_PROC_FS */
 	scsi_unregister_interface(&sg_interface);
 	class_destroy(sg_sysfs_class);
@@ -1714,12 +1708,14 @@ sg_start_req(Sg_request *srp, unsigned char *cmd)
 	 * does not sleep except under memory pressure.
 	 */
 	rq = blk_get_request(q, hp->dxfer_direction == SG_DXFER_TO_DEV ?
-			REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN, 0);
+			REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN, GFP_KERNEL);
 	if (IS_ERR(rq)) {
 		kfree(long_cmdp);
 		return PTR_ERR(rq);
 	}
 	req = scsi_req(rq);
+
+	scsi_req_init(rq);
 
 	if (hp->cmd_len > BLK_MAX_CDB)
 		req->cmd = long_cmdp;
@@ -1893,7 +1889,7 @@ retry:
 		num = (rem_sz > scatter_elem_sz_prev) ?
 			scatter_elem_sz_prev : rem_sz;
 
-		schp->pages[k] = alloc_pages(gfp_mask | __GFP_ZERO, order);
+		schp->pages[k] = alloc_pages(gfp_mask, order);
 		if (!schp->pages[k])
 			goto out;
 
@@ -2273,6 +2269,11 @@ sg_get_dev(int dev)
 }
 
 #ifdef CONFIG_SCSI_PROC_FS
+
+static struct proc_dir_entry *sg_proc_sgp = NULL;
+
+static char sg_proc_sg_dirname[] = "scsi/sg";
+
 static int sg_proc_seq_show_int(struct seq_file *s, void *v);
 
 static int sg_proc_single_open_adio(struct inode *inode, struct file *file);
@@ -2300,11 +2301,37 @@ static const struct file_operations dressz_fops = {
 };
 
 static int sg_proc_seq_show_version(struct seq_file *s, void *v);
+static int sg_proc_single_open_version(struct inode *inode, struct file *file);
+static const struct file_operations version_fops = {
+	.owner = THIS_MODULE,
+	.open = sg_proc_single_open_version,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static int sg_proc_seq_show_devhdr(struct seq_file *s, void *v);
+static int sg_proc_single_open_devhdr(struct inode *inode, struct file *file);
+static const struct file_operations devhdr_fops = {
+	.owner = THIS_MODULE,
+	.open = sg_proc_single_open_devhdr,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static int sg_proc_seq_show_dev(struct seq_file *s, void *v);
+static int sg_proc_open_dev(struct inode *inode, struct file *file);
 static void * dev_seq_start(struct seq_file *s, loff_t *pos);
 static void * dev_seq_next(struct seq_file *s, void *v, loff_t *pos);
 static void dev_seq_stop(struct seq_file *s, void *v);
+static const struct file_operations dev_fops = {
+	.owner = THIS_MODULE,
+	.open = sg_proc_open_dev,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
 static const struct seq_operations dev_seq_ops = {
 	.start = dev_seq_start,
 	.next  = dev_seq_next,
@@ -2313,6 +2340,14 @@ static const struct seq_operations dev_seq_ops = {
 };
 
 static int sg_proc_seq_show_devstrs(struct seq_file *s, void *v);
+static int sg_proc_open_devstrs(struct inode *inode, struct file *file);
+static const struct file_operations devstrs_fops = {
+	.owner = THIS_MODULE,
+	.open = sg_proc_open_devstrs,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
 static const struct seq_operations devstrs_seq_ops = {
 	.start = dev_seq_start,
 	.next  = dev_seq_next,
@@ -2321,6 +2356,14 @@ static const struct seq_operations devstrs_seq_ops = {
 };
 
 static int sg_proc_seq_show_debug(struct seq_file *s, void *v);
+static int sg_proc_open_debug(struct inode *inode, struct file *file);
+static const struct file_operations debug_fops = {
+	.owner = THIS_MODULE,
+	.open = sg_proc_open_debug,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
 static const struct seq_operations debug_seq_ops = {
 	.start = dev_seq_start,
 	.next  = dev_seq_next,
@@ -2328,23 +2371,50 @@ static const struct seq_operations debug_seq_ops = {
 	.show  = sg_proc_seq_show_debug,
 };
 
+
+struct sg_proc_leaf {
+	const char * name;
+	const struct file_operations * fops;
+};
+
+static const struct sg_proc_leaf sg_proc_leaf_arr[] = {
+	{"allow_dio", &adio_fops},
+	{"debug", &debug_fops},
+	{"def_reserved_size", &dressz_fops},
+	{"device_hdr", &devhdr_fops},
+	{"devices", &dev_fops},
+	{"device_strs", &devstrs_fops},
+	{"version", &version_fops}
+};
+
 static int
 sg_proc_init(void)
 {
-	struct proc_dir_entry *p;
+	int num_leaves = ARRAY_SIZE(sg_proc_leaf_arr);
+	int k;
 
-	p = proc_mkdir("scsi/sg", NULL);
-	if (!p)
+	sg_proc_sgp = proc_mkdir(sg_proc_sg_dirname, NULL);
+	if (!sg_proc_sgp)
 		return 1;
-
-	proc_create("allow_dio", S_IRUGO | S_IWUSR, p, &adio_fops);
-	proc_create_seq("debug", S_IRUGO, p, &debug_seq_ops);
-	proc_create("def_reserved_size", S_IRUGO | S_IWUSR, p, &dressz_fops);
-	proc_create_single("device_hdr", S_IRUGO, p, sg_proc_seq_show_devhdr);
-	proc_create_seq("devices", S_IRUGO, p, &dev_seq_ops);
-	proc_create_seq("device_strs", S_IRUGO, p, &devstrs_seq_ops);
-	proc_create_single("version", S_IRUGO, p, sg_proc_seq_show_version);
+	for (k = 0; k < num_leaves; ++k) {
+		const struct sg_proc_leaf *leaf = &sg_proc_leaf_arr[k];
+		umode_t mask = leaf->fops->write ? S_IRUGO | S_IWUSR : S_IRUGO;
+		proc_create(leaf->name, mask, sg_proc_sgp, leaf->fops);
+	}
 	return 0;
+}
+
+static void
+sg_proc_cleanup(void)
+{
+	int k;
+	int num_leaves = ARRAY_SIZE(sg_proc_leaf_arr);
+
+	if (!sg_proc_sgp)
+		return;
+	for (k = 0; k < num_leaves; ++k)
+		remove_proc_entry(sg_proc_leaf_arr[k].name, sg_proc_sgp);
+	remove_proc_entry(sg_proc_sg_dirname, NULL);
 }
 
 
@@ -2407,10 +2477,20 @@ static int sg_proc_seq_show_version(struct seq_file *s, void *v)
 	return 0;
 }
 
+static int sg_proc_single_open_version(struct inode *inode, struct file *file)
+{
+	return single_open(file, sg_proc_seq_show_version, NULL);
+}
+
 static int sg_proc_seq_show_devhdr(struct seq_file *s, void *v)
 {
 	seq_puts(s, "host\tchan\tid\tlun\ttype\topens\tqdepth\tbusy\tonline\n");
 	return 0;
+}
+
+static int sg_proc_single_open_devhdr(struct inode *inode, struct file *file)
+{
+	return single_open(file, sg_proc_seq_show_devhdr, NULL);
 }
 
 struct sg_proc_deviter {
@@ -2446,6 +2526,11 @@ static void dev_seq_stop(struct seq_file *s, void *v)
 	kfree(s->private);
 }
 
+static int sg_proc_open_dev(struct inode *inode, struct file *file)
+{
+        return seq_open(file, &dev_seq_ops);
+}
+
 static int sg_proc_seq_show_dev(struct seq_file *s, void *v)
 {
 	struct sg_proc_deviter * it = (struct sg_proc_deviter *) v;
@@ -2470,6 +2555,11 @@ static int sg_proc_seq_show_dev(struct seq_file *s, void *v)
 	}
 	read_unlock_irqrestore(&sg_index_lock, iflags);
 	return 0;
+}
+
+static int sg_proc_open_devstrs(struct inode *inode, struct file *file)
+{
+        return seq_open(file, &devstrs_seq_ops);
 }
 
 static int sg_proc_seq_show_devstrs(struct seq_file *s, void *v)
@@ -2553,6 +2643,11 @@ static void sg_proc_debug_helper(struct seq_file *s, Sg_device * sdp)
 			seq_puts(s, "     No requests active\n");
 		read_unlock(&fp->rq_list_lock);
 	}
+}
+
+static int sg_proc_open_debug(struct inode *inode, struct file *file)
+{
+        return seq_open(file, &debug_seq_ops);
 }
 
 static int sg_proc_seq_show_debug(struct seq_file *s, void *v)

@@ -42,7 +42,7 @@ void
 msm_gem_unmap_vma(struct msm_gem_address_space *aspace,
 		struct msm_gem_vma *vma, struct sg_table *sgt)
 {
-	if (!aspace || !vma->iova)
+	if (!vma->iova)
 		return;
 
 	if (aspace->mmu) {
@@ -50,9 +50,7 @@ msm_gem_unmap_vma(struct msm_gem_address_space *aspace,
 		aspace->mmu->funcs->unmap(aspace->mmu, vma->iova, sgt, size);
 	}
 
-	spin_lock(&aspace->lock);
 	drm_mm_remove_node(&vma->node);
-	spin_unlock(&aspace->lock);
 
 	vma->iova = 0;
 
@@ -65,15 +63,10 @@ msm_gem_map_vma(struct msm_gem_address_space *aspace,
 {
 	int ret;
 
-	spin_lock(&aspace->lock);
-	if (WARN_ON(drm_mm_node_allocated(&vma->node))) {
-		spin_unlock(&aspace->lock);
+	if (WARN_ON(drm_mm_node_allocated(&vma->node)))
 		return 0;
-	}
 
 	ret = drm_mm_insert_node(&aspace->mm, &vma->node, npages);
-	spin_unlock(&aspace->lock);
-
 	if (ret)
 		return ret;
 
@@ -96,19 +89,16 @@ msm_gem_address_space_create(struct device *dev, struct iommu_domain *domain,
 		const char *name)
 {
 	struct msm_gem_address_space *aspace;
-	u64 size = domain->geometry.aperture_end -
-		domain->geometry.aperture_start;
 
 	aspace = kzalloc(sizeof(*aspace), GFP_KERNEL);
 	if (!aspace)
 		return ERR_PTR(-ENOMEM);
 
-	spin_lock_init(&aspace->lock);
 	aspace->name = name;
 	aspace->mmu = msm_iommu_new(dev, domain);
 
 	drm_mm_init(&aspace->mm, (domain->geometry.aperture_start >> PAGE_SHIFT),
-		size >> PAGE_SHIFT);
+			(domain->geometry.aperture_end >> PAGE_SHIFT) - 1);
 
 	kref_init(&aspace->kref);
 

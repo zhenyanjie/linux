@@ -267,6 +267,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.flags          = PHY_HAS_INTERRUPT,
 	.config_init    = &vsc824x_config_init,
 	.config_aneg    = &vsc82x4_config_aneg,
+	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
 }, {
@@ -277,6 +278,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.flags		= PHY_HAS_INTERRUPT,
 	.config_init	= &vsc824x_config_init,
 	.config_aneg	= &vsc82x4_config_aneg,
+	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
 }, {
@@ -287,6 +289,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.flags		= PHY_HAS_INTERRUPT,
 	.config_init	= &vsc824x_config_init,
 	.config_aneg	= &vsc82x4_config_aneg,
+	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
 }, {
@@ -297,6 +300,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.flags          = PHY_HAS_INTERRUPT,
 	.config_init    = &vsc824x_config_init,
 	.config_aneg    = &vsc82x4_config_aneg,
+	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
 }, {
@@ -307,6 +311,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.flags          = PHY_HAS_INTERRUPT,
 	.config_init    = &vsc824x_config_init,
 	.config_aneg    = &vsc82x4_config_aneg,
+	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
 }, {
@@ -316,6 +321,8 @@ static struct phy_driver vsc82xx_driver[] = {
 	.features       = PHY_GBIT_FEATURES,
 	.flags          = PHY_HAS_INTERRUPT,
 	.config_init    = &vsc8601_config_init,
+	.config_aneg    = &genphy_config_aneg,
+	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
 }, {
@@ -326,6 +333,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.flags          = PHY_HAS_INTERRUPT,
 	.config_init    = &vsc824x_config_init,
 	.config_aneg    = &vsc82x4_config_aneg,
+	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
 }, {
@@ -336,6 +344,8 @@ static struct phy_driver vsc82xx_driver[] = {
 	.features	= PHY_GBIT_FEATURES,
 	.flags		= PHY_HAS_INTERRUPT,
 	.config_init	= &vsc8221_config_init,
+	.config_aneg	= &genphy_config_aneg,
+	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
 }, {
@@ -346,6 +356,8 @@ static struct phy_driver vsc82xx_driver[] = {
 	.features	= PHY_GBIT_FEATURES,
 	.flags		= PHY_HAS_INTERRUPT,
 	.config_init	= &vsc8221_config_init,
+	.config_aneg	= &genphy_config_aneg,
+	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
 } };

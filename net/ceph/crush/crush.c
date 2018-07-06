@@ -1,8 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
 #ifdef __KERNEL__
 # include <linux/slab.h>
 # include <linux/crush/crush.h>
-void clear_choose_args(struct crush_map *c);
 #else
 # include "crush_compat.h"
 # include "crush.h"
@@ -129,8 +127,6 @@ void crush_destroy(struct crush_map *map)
 
 #ifndef __KERNEL__
 	kfree(map->choose_tries);
-#else
-	clear_choose_args(map);
 #endif
 	kfree(map);
 }

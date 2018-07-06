@@ -156,6 +156,9 @@ static inline void timer_ack(void)
 static irqreturn_t timer_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *evt = &clockevent_xilinx_timer;
+#ifdef CONFIG_HEART_BEAT
+	microblaze_heartbeat();
+#endif
 	timer_ack();
 	evt->event_handler(evt);
 	return IRQ_HANDLED;
@@ -175,10 +178,8 @@ static __init int xilinx_clockevent_init(void)
 				clockevent_xilinx_timer.shift);
 	clockevent_xilinx_timer.max_delta_ns =
 		clockevent_delta2ns((u32)~0, &clockevent_xilinx_timer);
-	clockevent_xilinx_timer.max_delta_ticks = (u32)~0;
 	clockevent_xilinx_timer.min_delta_ns =
 		clockevent_delta2ns(1, &clockevent_xilinx_timer);
-	clockevent_xilinx_timer.min_delta_ticks = 1;
 	clockevent_xilinx_timer.cpumask = cpumask_of(0);
 	clockevents_register_device(&clockevent_xilinx_timer);
 
@@ -290,7 +291,7 @@ static int __init xilinx_timer_init(struct device_node *timer)
 		return -EINVAL;
 	}
 
-	pr_info("%pOF: irq=%d\n", timer, irq);
+	pr_info("%s: irq=%d\n", timer->full_name, irq);
 
 	clk = of_clk_get(timer, 0);
 	if (IS_ERR(clk)) {
@@ -315,6 +316,10 @@ static int __init xilinx_timer_init(struct device_node *timer)
 		return ret;
 	}
 
+#ifdef CONFIG_HEART_BEAT
+	microblaze_setup_heartbeat();
+#endif
+
 	ret = xilinx_clocksource_init();
 	if (ret)
 		return ret;
@@ -328,5 +333,5 @@ static int __init xilinx_timer_init(struct device_node *timer)
 	return 0;
 }
 
-TIMER_OF_DECLARE(xilinx_timer, "xlnx,xps-timer-1.00.a",
+CLOCKSOURCE_OF_DECLARE(xilinx_timer, "xlnx,xps-timer-1.00.a",
 		       xilinx_timer_init);

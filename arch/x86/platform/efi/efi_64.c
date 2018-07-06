@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * x86_64 specific EFI support functions
  * Based on Extensible Firmware Interface Specification version 1.0
@@ -25,16 +24,14 @@
 #include <linux/spinlock.h>
 #include <linux/bootmem.h>
 #include <linux/ioport.h>
+#include <linux/init.h>
 #include <linux/mc146818rtc.h>
 #include <linux/efi.h>
-#include <linux/export.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
 #include <linux/reboot.h>
 #include <linux/slab.h>
 #include <linux/ucs2_string.h>
-#include <linux/mem_encrypt.h>
-#include <linux/sched/task.h>
 
 #include <asm/setup.h>
 #include <asm/page.h>
@@ -83,8 +80,9 @@ pgd_t * __init efi_call_phys_prolog(void)
 	int n_pgds, i, j;
 
 	if (!efi_enabled(EFI_OLD_MEMMAP)) {
-		efi_switch_mm(&efi_mm);
-		return NULL;
+		save_pgd = (pgd_t *)read_cr3();
+		write_cr3((unsigned long)efi_scratch.efi_pgt);
+		goto out;
 	}
 
 	early_code_mapping_set_exec(1);
@@ -135,9 +133,7 @@ pgd_t * __init efi_call_phys_prolog(void)
 				pud[j] = *pud_offset(p4d_k, vaddr);
 			}
 		}
-		pgd_offset_k(pgd * PGDIR_SIZE)->pgd &= ~_PAGE_NX;
 	}
-
 out:
 	__flush_tlb_all();
 
@@ -156,7 +152,8 @@ void __init efi_call_phys_epilog(pgd_t *save_pgd)
 	pud_t *pud;
 
 	if (!efi_enabled(EFI_OLD_MEMMAP)) {
-		efi_switch_mm(efi_scratch.prev_mm);
+		write_cr3((unsigned long)save_pgd);
+		__flush_tlb_all();
 		return;
 	}
 
@@ -166,14 +163,14 @@ void __init efi_call_phys_epilog(pgd_t *save_pgd)
 		pgd = pgd_offset_k(pgd_idx * PGDIR_SIZE);
 		set_pgd(pgd_offset_k(pgd_idx * PGDIR_SIZE), save_pgd[pgd_idx]);
 
-		if (!pgd_present(*pgd))
+		if (!(pgd_val(*pgd) & _PAGE_PRESENT))
 			continue;
 
 		for (i = 0; i < PTRS_PER_P4D; i++) {
 			p4d = p4d_offset(pgd,
 					 pgd_idx * PGDIR_SIZE + i * P4D_SIZE);
 
-			if (!p4d_present(*p4d))
+			if (!(p4d_val(*p4d) & _PAGE_PRESENT))
 				continue;
 
 			pud = (pud_t *)p4d_page_vaddr(*p4d);
@@ -190,20 +187,17 @@ void __init efi_call_phys_epilog(pgd_t *save_pgd)
 	early_code_mapping_set_exec(0);
 }
 
-EXPORT_SYMBOL_GPL(efi_mm);
+static pgd_t *efi_pgd;
 
 /*
  * We need our own copy of the higher levels of the page tables
  * because we want to avoid inserting EFI region mappings (EFI_VA_END
  * to EFI_VA_START) into the standard kernel page tables. Everything
  * else can be shared, see efi_sync_low_kernel_mappings().
- *
- * We don't want the pgd on the pgd_list and cannot use pgd_alloc() for the
- * allocation.
  */
 int __init efi_alloc_page_tables(void)
 {
-	pgd_t *pgd, *efi_pgd;
+	pgd_t *pgd;
 	p4d_t *p4d;
 	pud_t *pud;
 	gfp_t gfp_mask;
@@ -211,8 +205,8 @@ int __init efi_alloc_page_tables(void)
 	if (efi_enabled(EFI_OLD_MEMMAP))
 		return 0;
 
-	gfp_mask = GFP_KERNEL | __GFP_ZERO;
-	efi_pgd = (pgd_t *)__get_free_pages(gfp_mask, PGD_ALLOCATION_ORDER);
+	gfp_mask = GFP_KERNEL | __GFP_NOTRACK | __GFP_ZERO;
+	efi_pgd = (pgd_t *)__get_free_page(gfp_mask);
 	if (!efi_pgd)
 		return -ENOMEM;
 
@@ -225,15 +219,11 @@ int __init efi_alloc_page_tables(void)
 
 	pud = pud_alloc(&init_mm, p4d, EFI_VA_END);
 	if (!pud) {
-		if (pgtable_l5_enabled())
+		if (CONFIG_PGTABLE_LEVELS > 4)
 			free_page((unsigned long) pgd_page_vaddr(*pgd));
-		free_pages((unsigned long)efi_pgd, PGD_ALLOCATION_ORDER);
+		free_page((unsigned long)efi_pgd);
 		return -ENOMEM;
 	}
-
-	efi_mm.pgd = efi_pgd;
-	mm_init_cpumask(&efi_mm);
-	init_new_context(NULL, &efi_mm);
 
 	return 0;
 }
@@ -247,7 +237,6 @@ void efi_sync_low_kernel_mappings(void)
 	pgd_t *pgd_k, *pgd_efi;
 	p4d_t *p4d_k, *p4d_efi;
 	pud_t *pud_k, *pud_efi;
-	pgd_t *efi_pgd = efi_mm.pgd;
 
 	if (efi_enabled(EFI_OLD_MEMMAP))
 		return;
@@ -260,8 +249,8 @@ void efi_sync_low_kernel_mappings(void)
 	 * only span a single PGD entry and that the entry also maps
 	 * other important kernel regions.
 	 */
-	MAYBE_BUILD_BUG_ON(pgd_index(EFI_VA_END) != pgd_index(MODULES_END));
-	MAYBE_BUILD_BUG_ON((EFI_VA_START & PGDIR_MASK) !=
+	BUILD_BUG_ON(pgd_index(EFI_VA_END) != pgd_index(MODULES_END));
+	BUILD_BUG_ON((EFI_VA_START & PGDIR_MASK) !=
 			(EFI_VA_END & PGDIR_MASK));
 
 	pgd_efi = efi_pgd + pgd_index(PAGE_OFFSET);
@@ -338,13 +327,16 @@ virt_to_phys_or_null_size(void *va, unsigned long size)
 
 int __init efi_setup_page_tables(unsigned long pa_memmap, unsigned num_pages)
 {
-	unsigned long pfn, text, pf;
+	unsigned long pfn, text;
 	struct page *page;
 	unsigned npages;
-	pgd_t *pgd = efi_mm.pgd;
+	pgd_t *pgd;
 
 	if (efi_enabled(EFI_OLD_MEMMAP))
 		return 0;
+
+	efi_scratch.efi_pgt = (pgd_t *)__pa(efi_pgd);
+	pgd = efi_pgd;
 
 	/*
 	 * It can happen that the physical address of new_memmap lands in memory
@@ -353,11 +345,12 @@ int __init efi_setup_page_tables(unsigned long pa_memmap, unsigned num_pages)
 	 * phys_efi_set_virtual_address_map().
 	 */
 	pfn = pa_memmap >> PAGE_SHIFT;
-	pf = _PAGE_NX | _PAGE_RW | _PAGE_ENC;
-	if (kernel_map_pages_in_pgd(pgd, pfn, pa_memmap, num_pages, pf)) {
+	if (kernel_map_pages_in_pgd(pgd, pfn, pa_memmap, num_pages, _PAGE_NX | _PAGE_RW)) {
 		pr_err("Error ident-mapping new memmap (0x%lx)!\n", pa_memmap);
 		return 1;
 	}
+
+	efi_scratch.use_pgd = true;
 
 	/*
 	 * Certain firmware versions are way too sentimential and still believe
@@ -370,11 +363,7 @@ int __init efi_setup_page_tables(unsigned long pa_memmap, unsigned num_pages)
 	 * as trim_bios_range() will reserve the first page and isolate it away
 	 * from memory allocators anyway.
 	 */
-	pf = _PAGE_RW;
-	if (sev_active())
-		pf |= _PAGE_ENC;
-
-	if (kernel_map_pages_in_pgd(pgd, 0x0, 0x0, 1, pf)) {
+	if (kernel_map_pages_in_pgd(pgd, 0x0, 0x0, 1, _PAGE_RW)) {
 		pr_err("Failed to create 1:1 mapping for the first page!\n");
 		return 1;
 	}
@@ -399,8 +388,7 @@ int __init efi_setup_page_tables(unsigned long pa_memmap, unsigned num_pages)
 	text = __pa(_text);
 	pfn = text >> PAGE_SHIFT;
 
-	pf = _PAGE_RW | _PAGE_ENC;
-	if (kernel_map_pages_in_pgd(pgd, pfn, text, npages, pf)) {
+	if (kernel_map_pages_in_pgd(pgd, pfn, text, npages, _PAGE_RW)) {
 		pr_err("Failed to map kernel text 1:1\n");
 		return 1;
 	}
@@ -412,13 +400,10 @@ static void __init __map_region(efi_memory_desc_t *md, u64 va)
 {
 	unsigned long flags = _PAGE_RW;
 	unsigned long pfn;
-	pgd_t *pgd = efi_mm.pgd;
+	pgd_t *pgd = efi_pgd;
 
 	if (!(md->attribute & EFI_MEMORY_WB))
 		flags |= _PAGE_PCD;
-
-	if (sev_active())
-		flags |= _PAGE_ENC;
 
 	pfn = md->phys_addr >> PAGE_SHIFT;
 	if (kernel_map_pages_in_pgd(pgd, pfn, va, md->num_pages, flags))
@@ -516,7 +501,7 @@ void __init parse_efi_setup(u64 phys_addr, u32 data_len)
 static int __init efi_update_mappings(efi_memory_desc_t *md, unsigned long pf)
 {
 	unsigned long pfn;
-	pgd_t *pgd = efi_mm.pgd;
+	pgd_t *pgd = efi_pgd;
 	int err1, err2;
 
 	/* Update the 1:1 mapping */
@@ -545,9 +530,6 @@ static int __init efi_update_mem_attr(struct mm_struct *mm, efi_memory_desc_t *m
 
 	if (!(md->attribute & EFI_MEMORY_RO))
 		pf |= _PAGE_RW;
-
-	if (sev_active())
-		pf |= _PAGE_ENC;
 
 	return efi_update_mappings(md, pf);
 }
@@ -600,9 +582,6 @@ void __init efi_runtime_update_mappings(void)
 			(md->type != EFI_RUNTIME_SERVICES_CODE))
 			pf |= _PAGE_RW;
 
-		if (sev_active())
-			pf |= _PAGE_ENC;
-
 		efi_update_mappings(md, pf);
 	}
 }
@@ -610,27 +589,8 @@ void __init efi_runtime_update_mappings(void)
 void __init efi_dump_pagetable(void)
 {
 #ifdef CONFIG_EFI_PGT_DUMP
-	if (efi_enabled(EFI_OLD_MEMMAP))
-		ptdump_walk_pgd_level(NULL, swapper_pg_dir);
-	else
-		ptdump_walk_pgd_level(NULL, efi_mm.pgd);
+	ptdump_walk_pgd_level(NULL, efi_pgd);
 #endif
-}
-
-/*
- * Makes the calling thread switch to/from efi_mm context. Can be used
- * for SetVirtualAddressMap() i.e. current->active_mm == init_mm as well
- * as during efi runtime calls i.e current->active_mm == current_mm.
- * We are not mm_dropping()/mm_grabbing() any mm, because we are not
- * losing/creating any references.
- */
-void efi_switch_mm(struct mm_struct *mm)
-{
-	task_lock(current);
-	efi_scratch.prev_mm = current->active_mm;
-	current->active_mm = mm;
-	switch_mm(efi_scratch.prev_mm, mm, NULL);
-	task_unlock(current);
 }
 
 #ifdef CONFIG_EFI_MIXED
@@ -686,13 +646,16 @@ efi_status_t efi_thunk_set_virtual_address_map(
 	efi_sync_low_kernel_mappings();
 	local_irq_save(flags);
 
-	efi_switch_mm(&efi_mm);
+	efi_scratch.prev_cr3 = read_cr3();
+	write_cr3((unsigned long)efi_scratch.efi_pgt);
+	__flush_tlb_all();
 
 	func = (u32)(unsigned long)phys_set_virtual_address_map;
 	status = efi64_thunk(func, memory_map_size, descriptor_size,
 			     descriptor_version, virtual_map);
 
-	efi_switch_mm(efi_scratch.prev_mm);
+	write_cr3(efi_scratch.prev_cr3);
+	__flush_tlb_all();
 	local_irq_restore(flags);
 
 	return status;

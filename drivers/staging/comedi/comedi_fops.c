@@ -1,10 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/comedi_fops.c
  * comedi kernel module
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 1997-2000 David A. Schleef <ds@schleef.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -736,7 +745,7 @@ static void do_become_nonbusy(struct comedi_device *dev,
 		wake_up_interruptible_all(&async->wait_head);
 	} else {
 		dev_err(dev->class_dev,
-			"BUG: (?) %s called with async=NULL\n", __func__);
+			"BUG: (?) do_become_nonbusy called with async=NULL\n");
 		s->busy = NULL;
 	}
 }
@@ -2267,9 +2276,9 @@ done:
 	return retval;
 }
 
-static __poll_t comedi_poll(struct file *file, poll_table *wait)
+static unsigned int comedi_poll(struct file *file, poll_table *wait)
 {
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 	struct comedi_file *cfp = file->private_data;
 	struct comedi_device *dev = cfp->dev;
 	struct comedi_subdevice *s, *s_read;
@@ -2288,7 +2297,7 @@ static __poll_t comedi_poll(struct file *file, poll_table *wait)
 		if (s->busy != file || !comedi_is_subdevice_running(s) ||
 		    (s->async->cmd.flags & CMDF_WRITE) ||
 		    comedi_buf_read_n_available(s) > 0)
-			mask |= EPOLLIN | EPOLLRDNORM;
+			mask |= POLLIN | POLLRDNORM;
 	}
 
 	s = comedi_file_write_subdevice(file);
@@ -2300,7 +2309,7 @@ static __poll_t comedi_poll(struct file *file, poll_table *wait)
 		if (s->busy != file || !comedi_is_subdevice_running(s) ||
 		    !(s->async->cmd.flags & CMDF_WRITE) ||
 		    comedi_buf_write_n_available(s) >= bps)
-			mask |= EPOLLOUT | EPOLLWRNORM;
+			mask |= POLLOUT | POLLWRNORM;
 	}
 
 done:
@@ -2875,25 +2884,29 @@ static int __init comedi_init(void)
 	retval = register_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
 					COMEDI_NUM_MINORS, "comedi");
 	if (retval)
-		return retval;
-
+		return -EIO;
 	cdev_init(&comedi_cdev, &comedi_fops);
 	comedi_cdev.owner = THIS_MODULE;
 
 	retval = kobject_set_name(&comedi_cdev.kobj, "comedi");
-	if (retval)
-		goto out_unregister_chrdev_region;
+	if (retval) {
+		unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+					 COMEDI_NUM_MINORS);
+		return retval;
+	}
 
-	retval = cdev_add(&comedi_cdev, MKDEV(COMEDI_MAJOR, 0),
-			  COMEDI_NUM_MINORS);
-	if (retval)
-		goto out_unregister_chrdev_region;
-
+	if (cdev_add(&comedi_cdev, MKDEV(COMEDI_MAJOR, 0), COMEDI_NUM_MINORS)) {
+		unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+					 COMEDI_NUM_MINORS);
+		return -EIO;
+	}
 	comedi_class = class_create(THIS_MODULE, "comedi");
 	if (IS_ERR(comedi_class)) {
-		retval = PTR_ERR(comedi_class);
 		pr_err("failed to create class\n");
-		goto out_cdev_del;
+		cdev_del(&comedi_cdev);
+		unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+					 COMEDI_NUM_MINORS);
+		return PTR_ERR(comedi_class);
 	}
 
 	comedi_class->dev_groups = comedi_dev_groups;
@@ -2904,8 +2917,12 @@ static int __init comedi_init(void)
 
 		dev = comedi_alloc_board_minor(NULL);
 		if (IS_ERR(dev)) {
-			retval = PTR_ERR(dev);
-			goto out_cleanup_board_minors;
+			comedi_cleanup_board_minors();
+			class_destroy(comedi_class);
+			cdev_del(&comedi_cdev);
+			unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
+						 COMEDI_NUM_MINORS);
+			return PTR_ERR(dev);
 		}
 		/* comedi_alloc_board_minor() locked the mutex */
 		mutex_unlock(&dev->mutex);
@@ -2915,15 +2932,6 @@ static int __init comedi_init(void)
 	comedi_proc_init();
 
 	return 0;
-
-out_cleanup_board_minors:
-	comedi_cleanup_board_minors();
-	class_destroy(comedi_class);
-out_cdev_del:
-	cdev_del(&comedi_cdev);
-out_unregister_chrdev_region:
-	unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0), COMEDI_NUM_MINORS);
-	return retval;
 }
 module_init(comedi_init);
 

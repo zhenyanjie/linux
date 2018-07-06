@@ -1,15 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/err.h>
 #include <linux/pci.h>
 #include <linux/io.h>
 #include <linux/gfp.h>
 #include <linux/export.h>
-
-enum devm_ioremap_type {
-	DEVM_IOREMAP = 0,
-	DEVM_IOREMAP_NC,
-	DEVM_IOREMAP_WC,
-};
 
 void devm_ioremap_release(struct device *dev, void *res)
 {
@@ -19,37 +12,6 @@ void devm_ioremap_release(struct device *dev, void *res)
 static int devm_ioremap_match(struct device *dev, void *res, void *match_data)
 {
 	return *(void **)res == match_data;
-}
-
-static void __iomem *__devm_ioremap(struct device *dev, resource_size_t offset,
-				    resource_size_t size,
-				    enum devm_ioremap_type type)
-{
-	void __iomem **ptr, *addr = NULL;
-
-	ptr = devres_alloc(devm_ioremap_release, sizeof(*ptr), GFP_KERNEL);
-	if (!ptr)
-		return NULL;
-
-	switch (type) {
-	case DEVM_IOREMAP:
-		addr = ioremap(offset, size);
-		break;
-	case DEVM_IOREMAP_NC:
-		addr = ioremap_nocache(offset, size);
-		break;
-	case DEVM_IOREMAP_WC:
-		addr = ioremap_wc(offset, size);
-		break;
-	}
-
-	if (addr) {
-		*ptr = addr;
-		devres_add(dev, ptr);
-	} else
-		devres_free(ptr);
-
-	return addr;
 }
 
 /**
@@ -63,7 +25,20 @@ static void __iomem *__devm_ioremap(struct device *dev, resource_size_t offset,
 void __iomem *devm_ioremap(struct device *dev, resource_size_t offset,
 			   resource_size_t size)
 {
-	return __devm_ioremap(dev, offset, size, DEVM_IOREMAP);
+	void __iomem **ptr, *addr;
+
+	ptr = devres_alloc(devm_ioremap_release, sizeof(*ptr), GFP_KERNEL);
+	if (!ptr)
+		return NULL;
+
+	addr = ioremap(offset, size);
+	if (addr) {
+		*ptr = addr;
+		devres_add(dev, ptr);
+	} else
+		devres_free(ptr);
+
+	return addr;
 }
 EXPORT_SYMBOL(devm_ioremap);
 
@@ -79,7 +54,20 @@ EXPORT_SYMBOL(devm_ioremap);
 void __iomem *devm_ioremap_nocache(struct device *dev, resource_size_t offset,
 				   resource_size_t size)
 {
-	return __devm_ioremap(dev, offset, size, DEVM_IOREMAP_NC);
+	void __iomem **ptr, *addr;
+
+	ptr = devres_alloc(devm_ioremap_release, sizeof(*ptr), GFP_KERNEL);
+	if (!ptr)
+		return NULL;
+
+	addr = ioremap_nocache(offset, size);
+	if (addr) {
+		*ptr = addr;
+		devres_add(dev, ptr);
+	} else
+		devres_free(ptr);
+
+	return addr;
 }
 EXPORT_SYMBOL(devm_ioremap_nocache);
 
@@ -94,7 +82,20 @@ EXPORT_SYMBOL(devm_ioremap_nocache);
 void __iomem *devm_ioremap_wc(struct device *dev, resource_size_t offset,
 			      resource_size_t size)
 {
-	return __devm_ioremap(dev, offset, size, DEVM_IOREMAP_WC);
+	void __iomem **ptr, *addr;
+
+	ptr = devres_alloc(devm_ioremap_release, sizeof(*ptr), GFP_KERNEL);
+	if (!ptr)
+		return NULL;
+
+	addr = ioremap_wc(offset, size);
+	if (addr) {
+		*ptr = addr;
+		devres_add(dev, ptr);
+	} else
+		devres_free(ptr);
+
+	return addr;
 }
 EXPORT_SYMBOL(devm_ioremap_wc);
 

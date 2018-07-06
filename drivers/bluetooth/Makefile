@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the Linux Bluetooth HCI device drivers.
 #
@@ -11,6 +10,7 @@ obj-$(CONFIG_BT_HCIBFUSB)	+= bfusb.o
 obj-$(CONFIG_BT_HCIDTL1)	+= dtl1_cs.o
 obj-$(CONFIG_BT_HCIBT3C)	+= bt3c_cs.o
 obj-$(CONFIG_BT_HCIBLUECARD)	+= bluecard_cs.o
+obj-$(CONFIG_BT_HCIBTUART)	+= btuart_cs.o
 
 obj-$(CONFIG_BT_HCIBTUSB)	+= btusb.o
 obj-$(CONFIG_BT_HCIBTSDIO)	+= btsdio.o
@@ -26,8 +26,6 @@ obj-$(CONFIG_BT_RTL)		+= btrtl.o
 obj-$(CONFIG_BT_QCA)		+= btqca.o
 
 obj-$(CONFIG_BT_HCIUART_NOKIA)	+= hci_nokia.o
-
-obj-$(CONFIG_BT_HCIRSI)		+= btrsi.o
 
 btmrvl-y			:= btmrvl_main.o
 btmrvl-$(CONFIG_DEBUG_FS)	+= btmrvl_debugfs.o

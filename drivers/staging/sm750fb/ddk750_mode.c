@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 
 #include "ddk750_reg.h"
 #include "ddk750_mode.h"
@@ -206,7 +205,7 @@ static int programModeRegisters(struct mode_parameter *pModeParam,
 	return ret;
 }
 
-int ddk750_setModeTiming(struct mode_parameter *parm, enum clock_type clock)
+int ddk750_setModeTiming(struct mode_parameter *parm, clock_type_t clock)
 {
 	struct pll_value pll;
 	unsigned int uiActualPixelClk;

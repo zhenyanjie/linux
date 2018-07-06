@@ -26,7 +26,7 @@ MODULE_AUTHOR("Ondrej Zary <linux@rainbow-software.org>");
 MODULE_DESCRIPTION("C-Media CMI8328");
 MODULE_LICENSE("GPL");
 
-#if IS_ENABLED(CONFIG_GAMEPORT)
+#if defined(CONFIG_GAMEPORT) || defined(CONFIG_GAMEPORT_MODULE)
 #define SUPPORT_JOYSTICK 1
 #endif
 
@@ -192,7 +192,7 @@ static int snd_cmi8328_mixer(struct snd_wss *chip)
 }
 
 /* find index of an item in "-1"-ended array */
-static int array_find(int array[], int item)
+int array_find(int array[], int item)
 {
 	int i;
 
@@ -203,7 +203,7 @@ static int array_find(int array[], int item)
 	return -1;
 }
 /* the same for long */
-static int array_find_l(long array[], long item)
+int array_find_l(long array[], long item)
 {
 	int i;
 

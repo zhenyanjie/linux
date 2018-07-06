@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-The Linux Kernel documentation
-==============================
+Welcome to The Linux Kernel's documentation
+===========================================
 
 This is the top level of the kernel's documentation tree.  Kernel
 documentation, like the kernel itself, is very much a work in progress;
@@ -12,18 +12,6 @@ that is especially true as we work to integrate our many scattered
 documents into a coherent whole.  Please note that improvements to the
 documentation are welcome; join the linux-doc list at vger.kernel.org if
 you want to help out.
-
-Licensing documentation
------------------------
-
-The following describes the license of the Linux kernel source code
-(GPLv2), how to properly mark the license of individual files in the source
-tree, as well as links to the full license text.
-
-.. toctree::
-   :maxdepth: 2
-
-   process/license-rules.rst
 
 User-oriented documentation
 ---------------------------
@@ -45,7 +33,7 @@ the kernel interface as seen by application developers.
 .. toctree::
    :maxdepth: 2
 
-   userspace-api/index
+   userspace-api/index	      
 
 
 Introduction to kernel development
@@ -63,9 +51,6 @@ merged much easier.
    process/index
    dev-tools/index
    doc-guide/index
-   kernel-hacking/index
-   trace/index
-   maintainer/index
 
 Kernel API documentation
 ------------------------
@@ -82,25 +67,11 @@ needed).
    driver-api/index
    core-api/index
    media/index
-   networking/index
    input/index
    gpu/index
    security/index
    sound/index
    crypto/index
-   filesystems/index
-   vm/index
-
-Architecture-specific documentation
------------------------------------
-
-These books provide programming details about architecture-specific
-implementation.
-
-.. toctree::
-   :maxdepth: 2
-
-   sh/index
 
 Korean translations
 -------------------

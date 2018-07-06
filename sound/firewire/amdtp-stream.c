@@ -148,26 +148,7 @@ EXPORT_SYMBOL(amdtp_rate_table);
 int amdtp_stream_add_pcm_hw_constraints(struct amdtp_stream *s,
 					struct snd_pcm_runtime *runtime)
 {
-	struct snd_pcm_hardware *hw = &runtime->hw;
 	int err;
-
-	hw->info = SNDRV_PCM_INFO_BATCH |
-		   SNDRV_PCM_INFO_BLOCK_TRANSFER |
-		   SNDRV_PCM_INFO_INTERLEAVED |
-		   SNDRV_PCM_INFO_JOINT_DUPLEX |
-		   SNDRV_PCM_INFO_MMAP |
-		   SNDRV_PCM_INFO_MMAP_VALID;
-
-	/* SNDRV_PCM_INFO_BATCH */
-	hw->periods_min = 2;
-	hw->periods_max = UINT_MAX;
-
-	/* bytes for a frame */
-	hw->period_bytes_min = 4 * hw->channels_max;
-
-	/* Just to prevent from allocating much pages. */
-	hw->period_bytes_max = hw->period_bytes_min * 2048;
-	hw->buffer_bytes_max = hw->period_bytes_max * hw->periods_min;
 
 	/*
 	 * Currently firewire-lib processes 16 packets in one software
@@ -376,7 +357,7 @@ static void update_pcm_pointers(struct amdtp_stream *s,
 	ptr = s->pcm_buffer_pointer + frames;
 	if (ptr >= pcm->runtime->buffer_size)
 		ptr -= pcm->runtime->buffer_size;
-	WRITE_ONCE(s->pcm_buffer_pointer, ptr);
+	ACCESS_ONCE(s->pcm_buffer_pointer) = ptr;
 
 	s->pcm_period_pointer += frames;
 	if (s->pcm_period_pointer >= pcm->runtime->period_size) {
@@ -388,7 +369,7 @@ static void update_pcm_pointers(struct amdtp_stream *s,
 static void pcm_period_tasklet(unsigned long data)
 {
 	struct amdtp_stream *s = (void *)data;
-	struct snd_pcm_substream *pcm = READ_ONCE(s->pcm);
+	struct snd_pcm_substream *pcm = ACCESS_ONCE(s->pcm);
 
 	if (pcm)
 		snd_pcm_period_elapsed(pcm);
@@ -453,7 +434,7 @@ static int handle_out_packet(struct amdtp_stream *s,
 		s->data_block_counter =
 				(s->data_block_counter + data_blocks) & 0xff;
 
-	buffer[0] = cpu_to_be32(READ_ONCE(s->source_node_id_field) |
+	buffer[0] = cpu_to_be32(ACCESS_ONCE(s->source_node_id_field) |
 				(s->data_block_quadlets << CIP_DBS_SHIFT) |
 				((s->sph << CIP_SPH_SHIFT) & CIP_SPH_MASK) |
 				s->data_block_counter);
@@ -472,7 +453,7 @@ static int handle_out_packet(struct amdtp_stream *s,
 	if (queue_out_packet(s, payload_length) < 0)
 		return -EIO;
 
-	pcm = READ_ONCE(s->pcm);
+	pcm = ACCESS_ONCE(s->pcm);
 	if (pcm && pcm_frames > 0)
 		update_pcm_pointers(s, pcm, pcm_frames);
 
@@ -504,7 +485,7 @@ static int handle_out_packet_without_header(struct amdtp_stream *s,
 	if (queue_out_packet(s, payload_length) < 0)
 		return -EIO;
 
-	pcm = READ_ONCE(s->pcm);
+	pcm = ACCESS_ONCE(s->pcm);
 	if (pcm && pcm_frames > 0)
 		update_pcm_pointers(s, pcm, pcm_frames);
 
@@ -621,7 +602,7 @@ end:
 	if (queue_in_packet(s) < 0)
 		return -EIO;
 
-	pcm = READ_ONCE(s->pcm);
+	pcm = ACCESS_ONCE(s->pcm);
 	if (pcm && pcm_frames > 0)
 		update_pcm_pointers(s, pcm, pcm_frames);
 
@@ -649,7 +630,7 @@ static int handle_in_packet_without_header(struct amdtp_stream *s,
 	if (queue_in_packet(s) < 0)
 		return -EIO;
 
-	pcm = READ_ONCE(s->pcm);
+	pcm = ACCESS_ONCE(s->pcm);
 	if (pcm && pcm_frames > 0)
 		update_pcm_pointers(s, pcm, pcm_frames);
 
@@ -773,6 +754,8 @@ static void amdtp_stream_first_callback(struct fw_iso_context *context,
 	u32 cycle;
 	unsigned int packets;
 
+	s->max_payload_length = amdtp_stream_get_max_payload(s);
+
 	/*
 	 * For in-stream, first packet has come.
 	 * For out-stream, prepared to transmit first packet
@@ -877,9 +860,6 @@ int amdtp_stream_start(struct amdtp_stream *s, int channel, int speed)
 
 	amdtp_stream_update(s);
 
-	if (s->direction == AMDTP_IN_STREAM)
-		s->max_payload_length = amdtp_stream_get_max_payload(s);
-
 	if (s->flags & CIP_NO_HEADER)
 		s->tag = TAG_NO_CIP_HEADER;
 	else
@@ -948,28 +928,9 @@ unsigned long amdtp_stream_pcm_pointer(struct amdtp_stream *s)
 	if (!in_interrupt() && amdtp_stream_running(s))
 		fw_iso_context_flush_completions(s->context);
 
-	return READ_ONCE(s->pcm_buffer_pointer);
+	return ACCESS_ONCE(s->pcm_buffer_pointer);
 }
 EXPORT_SYMBOL(amdtp_stream_pcm_pointer);
-
-/**
- * amdtp_stream_pcm_ack - acknowledge queued PCM frames
- * @s: the AMDTP stream that transfers the PCM frames
- *
- * Returns zero always.
- */
-int amdtp_stream_pcm_ack(struct amdtp_stream *s)
-{
-	/*
-	 * Process isochronous packets for recent isochronous cycle to handle
-	 * queued PCM frames.
-	 */
-	if (amdtp_stream_running(s))
-		fw_iso_context_flush_completions(s->context);
-
-	return 0;
-}
-EXPORT_SYMBOL(amdtp_stream_pcm_ack);
 
 /**
  * amdtp_stream_update - update the stream after a bus reset
@@ -978,8 +939,9 @@ EXPORT_SYMBOL(amdtp_stream_pcm_ack);
 void amdtp_stream_update(struct amdtp_stream *s)
 {
 	/* Precomputing. */
-	WRITE_ONCE(s->source_node_id_field,
-                   (fw_parent_device(s->unit)->card->node_id << CIP_SID_SHIFT) & CIP_SID_MASK);
+	ACCESS_ONCE(s->source_node_id_field) =
+		(fw_parent_device(s->unit)->card->node_id << CIP_SID_SHIFT) &
+								CIP_SID_MASK;
 }
 EXPORT_SYMBOL(amdtp_stream_update);
 
@@ -1022,7 +984,7 @@ void amdtp_stream_pcm_abort(struct amdtp_stream *s)
 {
 	struct snd_pcm_substream *pcm;
 
-	pcm = READ_ONCE(s->pcm);
+	pcm = ACCESS_ONCE(s->pcm);
 	if (pcm)
 		snd_pcm_stop_xrun(pcm);
 }

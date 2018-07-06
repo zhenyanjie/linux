@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef SPEAKUP_TYPES_H
 #define SPEAKUP_TYPES_H
 
@@ -42,7 +41,7 @@ enum var_id_t {
 	SAY_CONTROL, SAY_WORD_CTL, NO_INTERRUPT, KEY_ECHO,
 	SPELL_DELAY, PUNC_LEVEL, READING_PUNC,
 	ATTRIB_BLEEP, BLEEPS,
-	RATE, PITCH, VOL, TONE, PUNCT, VOICE, FREQUENCY, LANG, DIRECT, PAUSE,
+	RATE, PITCH, VOL, TONE, PUNCT, VOICE, FREQUENCY, LANG, DIRECT,
 	CAPS_START, CAPS_STOP, CHARTAB,
 	MAXVARS
 };
@@ -151,12 +150,8 @@ struct spk_synth;
 
 struct spk_io_ops {
 	int (*synth_out)(struct spk_synth *synth, const char ch);
-	int (*synth_out_unicode)(struct spk_synth *synth, u16 ch);
 	void (*send_xchar)(char ch);
 	void (*tiocmset)(unsigned int set, unsigned int clear);
-	unsigned char (*synth_in)(void);
-	unsigned char (*synth_in_nowait)(void);
-	void (*flush_buffer)(void);
 };
 
 struct spk_synth {
@@ -171,7 +166,6 @@ struct spk_synth {
 	int jiffies;
 	int full;
 	int ser;
-	char *dev_name;
 	short flags;
 	short startup;
 	const int checkval; /* for validating a proper synth module */
@@ -188,7 +182,7 @@ struct spk_synth {
 	int (*is_alive)(struct spk_synth *synth);
 	int (*synth_adjust)(struct st_var_header *var);
 	void (*read_buff_add)(u_char);
-	unsigned char (*get_index)(struct spk_synth *synth);
+	unsigned char (*get_index)(void);
 	struct synth_indexing indexing;
 	int alive;
 	struct attribute_group attributes;

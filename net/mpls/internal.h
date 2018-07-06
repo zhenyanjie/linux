@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef MPLS_INTERNAL_H
 #define MPLS_INTERNAL_H
 #include <net/mpls.h>
@@ -204,7 +203,9 @@ static inline struct mpls_dev *mpls_dev_get(const struct net_device *dev)
 int nla_put_labels(struct sk_buff *skb, int attrtype,  u8 labels,
 		   const u32 label[]);
 int nla_get_labels(const struct nlattr *nla, u8 max_labels, u8 *labels,
-		   u32 label[], struct netlink_ext_ack *extack);
+		   u32 label[]);
+int nla_get_via(const struct nlattr *nla, u8 *via_alen, u8 *via_table,
+		u8 via[]);
 bool mpls_output_possible(const struct net_device *dev);
 unsigned int mpls_dev_mtu(const struct net_device *dev);
 bool mpls_pkt_too_big(const struct sk_buff *skb, unsigned int mtu);

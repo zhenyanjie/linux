@@ -23,6 +23,8 @@
  */
 
 
+#ifdef CONFIG_SND_SEQUENCER_OSS
+
 #include <linux/export.h>
 #include <linux/uaccess.h>
 #include <sound/core.h>
@@ -430,6 +432,7 @@ gusspec_control(struct snd_emux *emu, struct snd_emux_port *port, int cmd,
 {
 	int voice;
 	unsigned short p1;
+	short p2;
 	int plong;
 	struct snd_midi_channel *chan;
 
@@ -444,6 +447,7 @@ gusspec_control(struct snd_emux *emu, struct snd_emux_port *port, int cmd,
 	chan = &port->chset.channels[voice];
 
 	p1 = *(unsigned short *) &event[4];
+	p2 = *(short *) &event[6];
 	plong = *(int*) &event[4];
 
 	switch (cmd) {
@@ -501,3 +505,5 @@ fake_event(struct snd_emux *emu, struct snd_emux_port *port, int ch, int param, 
 	ev.data.control.value = val;
 	snd_emux_event_input(&ev, 0, port, atomic, hop);
 }
+
+#endif /* CONFIG_SND_SEQUENCER_OSS */

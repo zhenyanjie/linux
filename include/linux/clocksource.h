@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*  linux/include/linux/clocksource.h
  *
  *  This file contains the structure definitions for clocksources.
@@ -97,7 +96,6 @@ struct clocksource {
 	void (*suspend)(struct clocksource *cs);
 	void (*resume)(struct clocksource *cs);
 	void (*mark_unstable)(struct clocksource *cs);
-	void (*tick_stable)(struct clocksource *cs);
 
 	/* private: */
 #ifdef CONFIG_CLOCKSOURCE_WATCHDOG
@@ -251,19 +249,16 @@ extern int clocksource_mmio_init(void __iomem *, const char *,
 
 extern int clocksource_i8253_init(void);
 
-#define TIMER_OF_DECLARE(name, compat, fn) \
-	OF_DECLARE_1_RET(timer, name, compat, fn)
-
 #define CLOCKSOURCE_OF_DECLARE(name, compat, fn) \
-	TIMER_OF_DECLARE(name, compat, fn)
+	OF_DECLARE_1_RET(clksrc, name, compat, fn)
 
-#ifdef CONFIG_TIMER_PROBE
-extern void timer_probe(void);
+#ifdef CONFIG_CLKSRC_PROBE
+extern void clocksource_probe(void);
 #else
-static inline void timer_probe(void) {}
+static inline void clocksource_probe(void) {}
 #endif
 
-#define TIMER_ACPI_DECLARE(name, table_id, fn)		\
-	ACPI_DECLARE_PROBE_ENTRY(timer, name, table_id, 0, NULL, 0, fn)
+#define CLOCKSOURCE_ACPI_DECLARE(name, table_id, fn)		\
+	ACPI_DECLARE_PROBE_ENTRY(clksrc, name, table_id, 0, NULL, 0, fn)
 
 #endif /* _LINUX_CLOCKSOURCE_H */

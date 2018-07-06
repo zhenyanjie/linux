@@ -54,6 +54,18 @@ struct block_device *I_BDEV(struct inode *inode)
 }
 EXPORT_SYMBOL(I_BDEV);
 
+void __vfs_msg(struct super_block *sb, const char *prefix, const char *fmt, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	va_start(args, fmt);
+	vaf.fmt = fmt;
+	vaf.va = &args;
+	printk_ratelimited("%sVFS (%s): %pV\n", prefix, sb->s_id, &vaf);
+	va_end(args);
+}
+
 static void bdev_write_inode(struct block_device *bdev)
 {
 	struct inode *inode = bdev->bd_inode;
@@ -205,19 +217,16 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 	if (nr_pages <= DIO_INLINE_BIO_VECS)
 		vecs = inline_vecs;
 	else {
-		vecs = kmalloc_array(nr_pages, sizeof(struct bio_vec),
-				     GFP_KERNEL);
+		vecs = kmalloc(nr_pages * sizeof(struct bio_vec), GFP_KERNEL);
 		if (!vecs)
 			return -ENOMEM;
 	}
 
 	bio_init(&bio, vecs, nr_pages);
-	bio_set_dev(&bio, bdev);
+	bio.bi_bdev = bdev;
 	bio.bi_iter.bi_sector = pos >> 9;
-	bio.bi_write_hint = iocb->ki_hint;
 	bio.bi_private = current;
 	bio.bi_end_io = blkdev_bio_end_io_simple;
-	bio.bi_ioprio = iocb->ki_ioprio;
 
 	ret = bio_iov_iter_get_pages(&bio, iter);
 	if (unlikely(ret))
@@ -239,7 +248,7 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 		if (!READ_ONCE(bio.bi_private))
 			break;
 		if (!(iocb->ki_flags & IOCB_HIPRI) ||
-		    !blk_poll(bdev_get_queue(bdev), qc))
+		    !blk_mq_poll(bdev_get_queue(bdev), qc))
 			io_schedule();
 	}
 	__set_current_state(TASK_RUNNING);
@@ -253,8 +262,8 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 	if (vecs != inline_vecs)
 		kfree(vecs);
 
-	if (unlikely(bio.bi_status))
-		ret = blk_status_to_errno(bio.bi_status);
+	if (unlikely(bio.bi_error))
+		ret = bio.bi_error;
 
 	bio_uninit(&bio);
 
@@ -274,7 +283,7 @@ struct blkdev_dio {
 	struct bio		bio;
 };
 
-static struct bio_set blkdev_dio_pool;
+static struct bio_set *blkdev_dio_pool __read_mostly;
 
 static void blkdev_bio_end_io(struct bio *bio)
 {
@@ -282,18 +291,16 @@ static void blkdev_bio_end_io(struct bio *bio)
 	bool should_dirty = dio->should_dirty;
 
 	if (dio->multi_bio && !atomic_dec_and_test(&dio->ref)) {
-		if (bio->bi_status && !dio->bio.bi_status)
-			dio->bio.bi_status = bio->bi_status;
+		if (bio->bi_error && !dio->bio.bi_error)
+			dio->bio.bi_error = bio->bi_error;
 	} else {
 		if (!dio->is_sync) {
 			struct kiocb *iocb = dio->iocb;
-			ssize_t ret;
+			ssize_t ret = dio->bio.bi_error;
 
-			if (likely(!dio->bio.bi_status)) {
+			if (likely(!ret)) {
 				ret = dio->size;
 				iocb->ki_pos += ret;
-			} else {
-				ret = blk_status_to_errno(dio->bio.bi_status);
 			}
 
 			dio->iocb->ki_complete(iocb, ret, 0);
@@ -330,13 +337,13 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 	bool is_read = (iov_iter_rw(iter) == READ), is_sync;
 	loff_t pos = iocb->ki_pos;
 	blk_qc_t qc = BLK_QC_T_NONE;
-	int ret = 0;
+	int ret;
 
 	if ((pos | iov_iter_alignment(iter)) &
 	    (bdev_logical_block_size(bdev) - 1))
 		return -EINVAL;
 
-	bio = bio_alloc_bioset(GFP_KERNEL, nr_pages, &blkdev_dio_pool);
+	bio = bio_alloc_bioset(GFP_KERNEL, nr_pages, blkdev_dio_pool);
 	bio_get(bio); /* extra ref for the completion handler */
 
 	dio = container_of(bio, struct blkdev_dio, bio);
@@ -352,16 +359,14 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 
 	blk_start_plug(&plug);
 	for (;;) {
-		bio_set_dev(bio, bdev);
+		bio->bi_bdev = bdev;
 		bio->bi_iter.bi_sector = pos >> 9;
-		bio->bi_write_hint = iocb->ki_hint;
 		bio->bi_private = dio;
 		bio->bi_end_io = blkdev_bio_end_io;
-		bio->bi_ioprio = iocb->ki_ioprio;
 
 		ret = bio_iov_iter_get_pages(bio, iter);
 		if (unlikely(ret)) {
-			bio->bi_status = BLK_STS_IOERR;
+			bio->bi_error = ret;
 			bio_endio(bio);
 			break;
 		}
@@ -405,13 +410,12 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 			break;
 
 		if (!(iocb->ki_flags & IOCB_HIPRI) ||
-		    !blk_poll(bdev_get_queue(bdev), qc))
+		    !blk_mq_poll(bdev_get_queue(bdev), qc))
 			io_schedule();
 	}
 	__set_current_state(TASK_RUNNING);
 
-	if (!ret)
-		ret = blk_status_to_errno(dio->bio.bi_status);
+	ret = dio->bio.bi_error;
 	if (likely(!ret))
 		ret = dio->size;
 
@@ -435,7 +439,10 @@ blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 
 static __init int blkdev_init(void)
 {
-	return bioset_init(&blkdev_dio_pool, 4, offsetof(struct blkdev_dio, bio), BIOSET_NEED_BVECS);
+	blkdev_dio_pool = bioset_create(4, offsetof(struct blkdev_dio, bio));
+	if (!blkdev_dio_pool)
+		return -ENOMEM;
+	return 0;
 }
 module_init(blkdev_init);
 
@@ -620,7 +627,7 @@ int blkdev_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
 	struct block_device *bdev = I_BDEV(bd_inode);
 	int error;
 	
-	error = file_write_and_wait_range(filp, start, end);
+	error = filemap_write_and_wait_range(filp->f_mapping, start, end);
 	if (error)
 		return error;
 
@@ -662,7 +669,7 @@ int bdev_read_page(struct block_device *bdev, sector_t sector,
 	if (!ops->rw_page || bdev_get_integrity(bdev))
 		return result;
 
-	result = blk_queue_enter(bdev->bd_queue, 0);
+	result = blk_queue_enter(bdev->bd_queue, false);
 	if (result)
 		return result;
 	result = ops->rw_page(bdev, sector + get_start_sect(bdev), page, false);
@@ -698,18 +705,16 @@ int bdev_write_page(struct block_device *bdev, sector_t sector,
 
 	if (!ops->rw_page || bdev_get_integrity(bdev))
 		return -EOPNOTSUPP;
-	result = blk_queue_enter(bdev->bd_queue, 0);
+	result = blk_queue_enter(bdev->bd_queue, false);
 	if (result)
 		return result;
 
 	set_page_writeback(page);
 	result = ops->rw_page(bdev, sector + get_start_sect(bdev), page, true);
-	if (result) {
+	if (result)
 		end_page_writeback(page);
-	} else {
-		clean_page_buffers(page);
+	else
 		unlock_page(page);
-	}
 	blk_queue_exit(bdev->bd_queue);
 	return result;
 }
@@ -1058,27 +1063,6 @@ retry:
 	return 0;
 }
 
-static struct gendisk *bdev_get_gendisk(struct block_device *bdev, int *partno)
-{
-	struct gendisk *disk = get_gendisk(bdev->bd_dev, partno);
-
-	if (!disk)
-		return NULL;
-	/*
-	 * Now that we hold gendisk reference we make sure bdev we looked up is
-	 * not stale. If it is, it means device got removed and created before
-	 * we looked up gendisk and we fail open in such case. Associating
-	 * unhashed bdev with newly created gendisk could lead to two bdevs
-	 * (and thus two independent caches) being associated with one device
-	 * which is bad.
-	 */
-	if (inode_unhashed(bdev->bd_inode)) {
-		put_disk_and_module(disk);
-		return NULL;
-	}
-	return disk;
-}
-
 /**
  * bd_start_claiming - start claiming a block device
  * @bdev: block device of interest
@@ -1115,7 +1099,7 @@ static struct block_device *bd_start_claiming(struct block_device *bdev,
 	 * @bdev might not have been initialized properly yet, look up
 	 * and grab the outer block device the hard way.
 	 */
-	disk = bdev_get_gendisk(bdev, &partno);
+	disk = get_gendisk(bdev->bd_dev, &partno);
 	if (!disk)
 		return ERR_PTR(-ENXIO);
 
@@ -1132,7 +1116,8 @@ static struct block_device *bd_start_claiming(struct block_device *bdev,
 	else
 		whole = bdgrab(bdev);
 
-	put_disk_and_module(disk);
+	module_put(disk->fops->owner);
+	put_disk(disk);
 	if (!whole)
 		return ERR_PTR(-ENOMEM);
 
@@ -1322,30 +1307,25 @@ static void flush_disk(struct block_device *bdev, bool kill_dirty)
  * check_disk_size_change - checks for disk size change and adjusts bdev size.
  * @disk: struct gendisk to check
  * @bdev: struct bdev to adjust.
- * @verbose: if %true log a message about a size change if there is any
  *
  * This routine checks to see if the bdev size does not match the disk size
- * and adjusts it if it differs. When shrinking the bdev size, its all caches
- * are freed.
+ * and adjusts it if it differs.
  */
-void check_disk_size_change(struct gendisk *disk, struct block_device *bdev,
-		bool verbose)
+void check_disk_size_change(struct gendisk *disk, struct block_device *bdev)
 {
 	loff_t disk_size, bdev_size;
 
 	disk_size = (loff_t)get_capacity(disk) << 9;
 	bdev_size = i_size_read(bdev->bd_inode);
 	if (disk_size != bdev_size) {
-		if (verbose) {
-			printk(KERN_INFO
-			       "%s: detected capacity change from %lld to %lld\n",
-			       disk->disk_name, bdev_size, disk_size);
-		}
+		printk(KERN_INFO
+		       "%s: detected capacity change from %lld to %lld\n",
+		       disk->disk_name, bdev_size, disk_size);
 		i_size_write(bdev->bd_inode, disk_size);
-		if (bdev_size > disk_size)
-			flush_disk(bdev, false);
+		flush_disk(bdev, false);
 	}
 }
+EXPORT_SYMBOL(check_disk_size_change);
 
 /**
  * revalidate_disk - wrapper for lower-level driver's revalidate_disk call-back
@@ -1367,7 +1347,7 @@ int revalidate_disk(struct gendisk *disk)
 		return ret;
 
 	mutex_lock(&bdev->bd_mutex);
-	check_disk_size_change(disk, bdev, ret == 0);
+	check_disk_size_change(disk, bdev);
 	bdev->bd_invalidated = 0;
 	mutex_unlock(&bdev->bd_mutex);
 	bdput(bdev);
@@ -1432,10 +1412,10 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part);
 static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 {
 	struct gendisk *disk;
+	struct module *owner;
 	int ret;
 	int partno;
 	int perm = 0;
-	bool first_open = false;
 
 	if (mode & FMODE_READ)
 		perm |= MAY_READ;
@@ -1455,18 +1435,17 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
  restart:
 
 	ret = -ENXIO;
-	disk = bdev_get_gendisk(bdev, &partno);
+	disk = get_gendisk(bdev->bd_dev, &partno);
 	if (!disk)
 		goto out;
+	owner = disk->fops->owner;
 
 	disk_block_events(disk);
 	mutex_lock_nested(&bdev->bd_mutex, for_part);
 	if (!bdev->bd_openers) {
-		first_open = true;
 		bdev->bd_disk = disk;
 		bdev->bd_queue = disk->queue;
 		bdev->bd_contains = bdev;
-		bdev->bd_partno = partno;
 
 		if (!partno) {
 			ret = -ENXIO;
@@ -1488,7 +1467,8 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 					bdev->bd_queue = NULL;
 					mutex_unlock(&bdev->bd_mutex);
 					disk_unblock_events(disk);
-					put_disk_and_module(disk);
+					put_disk(disk);
+					module_put(owner);
 					goto restart;
 				}
 			}
@@ -1548,15 +1528,15 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 			if (ret)
 				goto out_unlock_bdev;
 		}
+		/* only one opener holds refs to the module and disk */
+		put_disk(disk);
+		module_put(owner);
 	}
 	bdev->bd_openers++;
 	if (for_part)
 		bdev->bd_part_count++;
 	mutex_unlock(&bdev->bd_mutex);
 	disk_unblock_events(disk);
-	/* only one opener holds refs to the module and disk */
-	if (!first_open)
-		put_disk_and_module(disk);
 	return 0;
 
  out_clear:
@@ -1570,7 +1550,8 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
  out_unlock_bdev:
 	mutex_unlock(&bdev->bd_mutex);
 	disk_unblock_events(disk);
-	put_disk_and_module(disk);
+	put_disk(disk);
+	module_put(owner);
  out:
 	bdput(bdev);
 
@@ -1753,8 +1734,6 @@ static int blkdev_open(struct inode * inode, struct file * filp)
 	 */
 	filp->f_flags |= O_LARGEFILE;
 
-	filp->f_mode |= FMODE_NOWAIT;
-
 	if (filp->f_flags & O_NDELAY)
 		filp->f_mode |= FMODE_NDELAY;
 	if (filp->f_flags & O_EXCL)
@@ -1767,7 +1746,6 @@ static int blkdev_open(struct inode * inode, struct file * filp)
 		return -ENOMEM;
 
 	filp->f_mapping = bdev->bd_inode->i_mapping;
-	filp->f_wb_err = filemap_sample_wb_err(filp->f_mapping);
 
 	return blkdev_get(bdev, filp->f_mode, filp);
 }
@@ -1793,6 +1771,8 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part)
 			disk->fops->release(disk, mode);
 	}
 	if (!bdev->bd_openers) {
+		struct module *owner = disk->fops->owner;
+
 		disk_put_part(bdev->bd_part);
 		bdev->bd_part = NULL;
 		bdev->bd_disk = NULL;
@@ -1800,7 +1780,8 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part)
 			victim = bdev->bd_contains;
 		bdev->bd_contains = NULL;
 
-		put_disk_and_module(disk);
+		put_disk(disk);
+		module_put(owner);
 	}
 	mutex_unlock(&bdev->bd_mutex);
 	bdput(bdev);
@@ -1904,9 +1885,6 @@ ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (iocb->ki_pos >= size)
 		return -ENOSPC;
 
-	if ((iocb->ki_flags & (IOCB_NOWAIT | IOCB_DIRECT)) == IOCB_NOWAIT)
-		return -EOPNOTSUPP;
-
 	iov_iter_truncate(from, size - iocb->ki_pos);
 
 	blk_start_plug(&plug);
@@ -1951,6 +1929,11 @@ static int blkdev_releasepage(struct page *page, gfp_t wait)
 static int blkdev_writepages(struct address_space *mapping,
 			     struct writeback_control *wbc)
 {
+	if (dax_mapping(mapping)) {
+		struct block_device *bdev = I_BDEV(mapping->host);
+
+		return dax_writeback_mapping_range(mapping, bdev, wbc);
+	}
 	return generic_writepages(mapping, wbc);
 }
 

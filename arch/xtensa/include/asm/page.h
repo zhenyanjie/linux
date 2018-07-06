@@ -36,6 +36,8 @@
 #define MAX_LOW_PFN	PHYS_PFN(0xfffffffful)
 #endif
 
+#define PGTABLE_START	0x80000000
+
 /*
  * Cache aliasing:
  *

@@ -343,15 +343,6 @@ static int cs2000_set_rate(struct clk_hw *hw,
 	return __cs2000_set_rate(priv, ch, rate, parent_rate);
 }
 
-static int cs2000_set_saved_rate(struct cs2000_priv *priv)
-{
-	int ch = 0; /* it uses ch0 only at this point */
-
-	return __cs2000_set_rate(priv, ch,
-				 priv->saved_rate,
-				 priv->saved_parent_rate);
-}
-
 static int cs2000_enable(struct clk_hw *hw)
 {
 	struct cs2000_priv *priv = hw_to_priv(hw);
@@ -541,15 +532,18 @@ probe_err:
 	return ret;
 }
 
-static int __maybe_unused cs2000_resume(struct device *dev)
+static int cs2000_resume(struct device *dev)
 {
 	struct cs2000_priv *priv = dev_get_drvdata(dev);
+	int ch = 0; /* it uses ch0 only at this point */
 
-	return cs2000_set_saved_rate(priv);
+	return __cs2000_set_rate(priv, ch,
+				 priv->saved_rate,
+				 priv->saved_parent_rate);
 }
 
 static const struct dev_pm_ops cs2000_pm_ops = {
-	SET_LATE_SYSTEM_SLEEP_PM_OPS(NULL, cs2000_resume)
+	.resume_early	= cs2000_resume,
 };
 
 static struct i2c_driver cs2000_driver = {

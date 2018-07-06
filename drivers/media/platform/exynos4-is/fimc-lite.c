@@ -901,7 +901,7 @@ static int fimc_lite_g_selection(struct file *file, void *fh,
 	struct fimc_lite *fimc = video_drvdata(file);
 	struct flite_frame *f = &fimc->out_frame;
 
-	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
 		return -EINVAL;
 
 	switch (sel->target) {
@@ -929,7 +929,7 @@ static int fimc_lite_s_selection(struct file *file, void *fh,
 	struct v4l2_rect rect = sel->r;
 	unsigned long flags;
 
-	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ||
+	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||
 	    sel->target != V4L2_SEL_TGT_COMPOSE)
 		return -EINVAL;
 
@@ -1361,7 +1361,7 @@ static const struct v4l2_subdev_core_ops fimc_lite_core_ops = {
 	.log_status = fimc_lite_log_status,
 };
 
-static const struct v4l2_subdev_ops fimc_lite_subdev_ops = {
+static struct v4l2_subdev_ops fimc_lite_subdev_ops = {
 	.core = &fimc_lite_core_ops,
 	.video = &fimc_lite_subdev_video_ops,
 	.pad = &fimc_lite_subdev_pad_ops,
@@ -1462,7 +1462,10 @@ static void fimc_lite_clk_put(struct fimc_lite *fimc)
 static int fimc_lite_clk_get(struct fimc_lite *fimc)
 {
 	fimc->clock = clk_get(&fimc->pdev->dev, FLITE_CLK_NAME);
-	return PTR_ERR_OR_ZERO(fimc->clock);
+	if (IS_ERR(fimc->clock))
+		return PTR_ERR(fimc->clock);
+
+	return 0;
 }
 
 static const struct of_device_id flite_of_match[];
@@ -1490,7 +1493,8 @@ static int fimc_lite_probe(struct platform_device *pdev)
 
 	if (!drv_data || fimc->index >= drv_data->num_instances ||
 						fimc->index < 0) {
-		dev_err(dev, "Wrong %pOF node alias\n", dev->of_node);
+		dev_err(dev, "Wrong %s node alias\n",
+					dev->of_node->full_name);
 		return -EINVAL;
 	}
 
@@ -1643,7 +1647,7 @@ static const struct dev_pm_ops fimc_lite_pm_ops = {
 			   NULL)
 };
 
-/* EXYNOS4412 */
+/* EXYNOS4212, EXYNOS4412 */
 static struct flite_drvdata fimc_lite_drvdata_exynos4 = {
 	.max_width		= 8192,
 	.max_height		= 8192,

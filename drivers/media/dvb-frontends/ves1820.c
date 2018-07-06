@@ -27,7 +27,7 @@
 #include <linux/slab.h>
 #include <asm/div64.h>
 
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 #include "ves1820.h"
 
 
@@ -137,7 +137,7 @@ static int ves1820_set_symbolrate(struct ves1820_state *state, u32 symbolrate)
 		NDEC = 3;
 
 	/* yeuch! */
-	fpxin = state->config->xin * 10ULL;
+	fpxin = state->config->xin * 10;
 	fptmp = fpxin; do_div(fptmp, 123);
 	if (symbolrate < fptmp)
 		SFIL = 1;

@@ -78,8 +78,6 @@ static unsigned int ipv4_conntrack_defrag(void *priv,
 	if (skb_nfct(skb) && !nf_ct_is_template((struct nf_conn *)skb_nfct(skb)))
 		return NF_ACCEPT;
 #endif
-	if (skb->_nfct == IP_CT_UNTRACKED)
-		return NF_ACCEPT;
 #endif
 	/* Gather fragments. */
 	if (ip_is_fragment(ip_hdr(skb))) {
@@ -92,7 +90,7 @@ static unsigned int ipv4_conntrack_defrag(void *priv,
 	return NF_ACCEPT;
 }
 
-static const struct nf_hook_ops ipv4_defrag_ops[] = {
+static struct nf_hook_ops ipv4_defrag_ops[] = {
 	{
 		.hook		= ipv4_conntrack_defrag,
 		.pf		= NFPROTO_IPV4,

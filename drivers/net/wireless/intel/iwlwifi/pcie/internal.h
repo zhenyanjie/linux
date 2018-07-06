@@ -383,8 +383,6 @@ struct iwl_self_init_dram {
  * @hw_init_mask: initial unmasked hw causes
  * @fh_mask: current unmasked fh causes
  * @hw_mask: current unmasked hw causes
- * @in_rescan: true if we have triggered a device rescan
- * @scheduled_for_removal: true if we have scheduled a device removal
  */
 struct iwl_trans_pcie {
 	struct iwl_rxq *rxq;
@@ -405,8 +403,7 @@ struct iwl_trans_pcie {
 	dma_addr_t ict_tbl_dma;
 	int ict_index;
 	bool use_ict;
-	bool is_down, opmode_down;
-	bool debug_rfkill;
+	bool is_down;
 	struct isr_statistics isr_stats;
 
 	spinlock_t irq_lock;
@@ -444,7 +441,6 @@ struct iwl_trans_pcie {
 	bool bc_table_dword;
 	bool scd_set_active;
 	bool sw_csum_tx;
-	bool pcie_dbg_dumped_once;
 	u32 rx_page_order;
 
 	/*protect hw register */
@@ -466,9 +462,6 @@ struct iwl_trans_pcie {
 	u32 fh_mask;
 	u32 hw_mask;
 	cpumask_t affinity_mask[IWL_MAX_RX_HW_QUEUES];
-	u16 tx_cmd_queue_size;
-	bool in_rescan;
-	bool scheduled_for_removal;
 };
 
 static inline struct iwl_trans_pcie *
@@ -522,7 +515,7 @@ int iwl_pcie_gen2_tx_init(struct iwl_trans *trans);
 void iwl_pcie_tx_start(struct iwl_trans *trans, u32 scd_base_addr);
 int iwl_pcie_tx_stop(struct iwl_trans *trans);
 void iwl_pcie_tx_free(struct iwl_trans *trans);
-bool iwl_trans_pcie_txq_enable(struct iwl_trans *trans, int queue, u16 ssn,
+void iwl_trans_pcie_txq_enable(struct iwl_trans *trans, int queue, u16 ssn,
 			       const struct iwl_trans_txq_scd_cfg *cfg,
 			       unsigned int wdg_timeout);
 void iwl_trans_pcie_txq_disable(struct iwl_trans *trans, int queue,
@@ -660,19 +653,9 @@ static inline void iwl_enable_fw_load_int(struct iwl_trans *trans)
 	}
 }
 
-static inline u8 iwl_pcie_get_cmd_index(struct iwl_txq *q, u32 index)
-{
-	return index & (q->n_window - 1);
-}
-
-static inline void *iwl_pcie_get_tfd(struct iwl_trans *trans,
+static inline void *iwl_pcie_get_tfd(struct iwl_trans_pcie *trans_pcie,
 				     struct iwl_txq *txq, int idx)
 {
-	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-
-	if (trans->cfg->use_tfh)
-		idx = iwl_pcie_get_cmd_index(txq, idx);
-
 	return txq->tfds + trans_pcie->tfd_size * idx;
 }
 
@@ -690,19 +673,7 @@ static inline void iwl_enable_rfkill_int(struct iwl_trans *trans)
 		iwl_enable_hw_int_msk_msix(trans,
 					   MSIX_HW_INT_CAUSES_REG_RF_KILL);
 	}
-
-	if (trans->cfg->device_family == IWL_DEVICE_FAMILY_9000) {
-		/*
-		 * On 9000-series devices this bit isn't enabled by default, so
-		 * when we power down the device we need set the bit to allow it
-		 * to wake up the PCI-E bus for RF-kill interrupts.
-		 */
-		iwl_set_bit(trans, CSR_GP_CNTRL,
-			    CSR_GP_CNTRL_REG_FLAG_RFKILL_WAKE_L1A_EN);
-	}
 }
-
-void iwl_pcie_handle_rfkill_irq(struct iwl_trans *trans);
 
 static inline void iwl_wake_queue(struct iwl_trans *trans,
 				  struct iwl_txq *txq)
@@ -735,14 +706,14 @@ static inline bool iwl_queue_used(const struct iwl_txq *q, int i)
 		!(i < q->read_ptr && i >= q->write_ptr);
 }
 
+static inline u8 get_cmd_index(struct iwl_txq *q, u32 index)
+{
+	return index & (q->n_window - 1);
+}
+
 static inline bool iwl_is_rfkill_set(struct iwl_trans *trans)
 {
-	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-
-	lockdep_assert_held(&trans_pcie->mutex);
-
-	if (trans_pcie->debug_rfkill)
-		return true;
+	lockdep_assert_held(&IWL_TRANS_GET_PCIE_TRANS(trans)->mutex);
 
 	return !(iwl_read32(trans, CSR_GP_CNTRL) &
 		CSR_GP_CNTRL_REG_FLAG_HW_RF_KILL_SW);
@@ -791,18 +762,14 @@ int iwl_pci_fw_enter_d0i3(struct iwl_trans *trans);
 
 void iwl_pcie_enable_rx_wake(struct iwl_trans *trans, bool enable);
 
-void iwl_pcie_rx_allocator_work(struct work_struct *data);
-
 /* common functions that are used by gen2 transport */
 void iwl_pcie_apm_config(struct iwl_trans *trans);
 int iwl_pcie_prepare_card_hw(struct iwl_trans *trans);
 void iwl_pcie_synchronize_irqs(struct iwl_trans *trans);
-bool iwl_pcie_check_hw_rf_kill(struct iwl_trans *trans);
-void iwl_trans_pcie_handle_stop_rfkill(struct iwl_trans *trans,
-				       bool was_in_rfkill);
+bool iwl_trans_check_hw_rf_kill(struct iwl_trans *trans);
 void iwl_pcie_txq_free_tfd(struct iwl_trans *trans, struct iwl_txq *txq);
 int iwl_queue_space(const struct iwl_txq *q);
-void iwl_pcie_apm_stop_master(struct iwl_trans *trans);
+int iwl_pcie_apm_stop_master(struct iwl_trans *trans);
 void iwl_pcie_conf_msix_hw(struct iwl_trans_pcie *trans_pcie);
 int iwl_pcie_txq_init(struct iwl_trans *trans, struct iwl_txq *txq,
 		      int slots_num, bool cmd_queue);
@@ -812,11 +779,6 @@ int iwl_pcie_alloc_dma_ptr(struct iwl_trans *trans,
 			   struct iwl_dma_ptr *ptr, size_t size);
 void iwl_pcie_free_dma_ptr(struct iwl_trans *trans, struct iwl_dma_ptr *ptr);
 void iwl_pcie_apply_destination(struct iwl_trans *trans);
-void iwl_pcie_free_tso_page(struct iwl_trans_pcie *trans_pcie,
-			    struct sk_buff *skb);
-#ifdef CONFIG_INET
-struct iwl_tso_hdr_page *get_page_hdr(struct iwl_trans *trans, size_t len);
-#endif
 
 /* transport gen 2 exported functions */
 int iwl_trans_pcie_gen2_start_fw(struct iwl_trans *trans,
@@ -824,7 +786,7 @@ int iwl_trans_pcie_gen2_start_fw(struct iwl_trans *trans,
 void iwl_trans_pcie_gen2_fw_alive(struct iwl_trans *trans, u32 scd_addr);
 int iwl_trans_pcie_dyn_txq_alloc(struct iwl_trans *trans,
 				 struct iwl_tx_queue_cfg_cmd *cmd,
-				 int cmd_id, int size,
+				 int cmd_id,
 				 unsigned int timeout);
 void iwl_trans_pcie_dyn_txq_free(struct iwl_trans *trans, int queue);
 int iwl_trans_pcie_gen2_tx(struct iwl_trans *trans, struct sk_buff *skb,

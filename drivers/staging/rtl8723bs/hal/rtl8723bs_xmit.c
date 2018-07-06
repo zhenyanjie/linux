@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2012 Realtek Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
  *
  ******************************************************************************/
 #define _RTL8723BS_XMIT_C_
@@ -15,7 +23,8 @@ static u8 rtw_sdio_wait_enough_TxOQT_space(struct adapter *padapter, u8 agg_num)
 	u32 n = 0;
 	struct hal_com_data *pHalData = GET_HAL_DATA(padapter);
 
-	while (pHalData->SdioTxOQTFreeSpace < agg_num) {
+	while (pHalData->SdioTxOQTFreeSpace < agg_num)
+	{
 		if (
 			(padapter->bSurpriseRemoved == true) ||
 			(padapter->bDriverStopped == true)
@@ -50,7 +59,7 @@ static s32 rtl8723_dequeue_writeport(struct adapter *padapter)
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct dvobj_priv *pdvobjpriv = adapter_to_dvobj(padapter);
 	struct xmit_buf *pxmitbuf;
-	struct adapter *pri_padapter = padapter;
+	struct adapter * pri_padapter = padapter;
 	s32 ret = 0;
 	u8 PageIdx = 0;
 	u32 deviceId;
@@ -105,7 +114,7 @@ query_free_page:
 		RT_TRACE(
 			_module_hal_xmit_c_,
 			_drv_notice_,
-			("%s: bSurpriseRemoved(write port)\n", __func__)
+			("%s: bSurpriseRemoved(wirte port)\n", __func__)
 		);
 		goto free_xmitbuf;
 	}
@@ -222,7 +231,7 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 	pxmitbuf = NULL;
 
 	if (padapter->registrypriv.wifi_spec == 1) {
-		for (idx = 0; idx < 4; idx++)
+		for (idx = 0; idx<4; idx++)
 			inx[idx] = pxmitpriv->wmm_para_seq[idx];
 	} else {
 		inx[0] = 0;
@@ -290,10 +299,9 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 				) {
 					if (pxmitbuf) {
 						/* pxmitbuf->priv_data will be NULL, and will crash here */
-						if (pxmitbuf->len > 0 &&
-						    pxmitbuf->priv_data) {
+						if (pxmitbuf->len > 0 && pxmitbuf->priv_data) {
 							struct xmit_frame *pframe;
-							pframe = (struct xmit_frame *)pxmitbuf->priv_data;
+							pframe = (struct xmit_frame*)pxmitbuf->priv_data;
 							pframe->agg_num = k;
 							pxmitbuf->agg_num = k;
 							rtl8723b_update_txdesc(pframe, pframe->buf_addr);
@@ -384,7 +392,7 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 
 			if (pxmitbuf->len > 0) {
 				struct xmit_frame *pframe;
-				pframe = (struct xmit_frame *)pxmitbuf->priv_data;
+				pframe = (struct xmit_frame*)pxmitbuf->priv_data;
 				pframe->agg_num = k;
 				pxmitbuf->agg_num = k;
 				rtl8723b_update_txdesc(pframe, pframe->buf_addr);
@@ -392,7 +400,8 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 				pxmitbuf->priv_data = NULL;
 				enqueue_pending_xmitbuf(pxmitpriv, pxmitbuf);
 				yield();
-			} else
+			}
+			else
 				rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
 			pxmitbuf = NULL;
 		}
@@ -482,7 +491,7 @@ int rtl8723bs_xmit_thread(void *context)
 
 
 	ret = _SUCCESS;
-	padapter = context;
+	padapter = (struct adapter *)context;
 	pxmitpriv = &padapter->xmitpriv;
 
 	rtw_sprintf(thread_name, 20, "%s-"ADPT_FMT, thread_name, ADPT_ARG(padapter));
@@ -602,8 +611,7 @@ s32	rtl8723bs_hal_xmitframe_enqueue(
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	s32 err;
 
-	err = rtw_xmitframe_enqueue(padapter, pxmitframe);
-	if (err != _SUCCESS) {
+	if ((err = rtw_xmitframe_enqueue(padapter, pxmitframe)) != _SUCCESS) {
 		rtw_free_xmitframe(pxmitpriv, pxmitframe);
 
 		pxmitpriv->tx_drop++;

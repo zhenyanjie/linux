@@ -198,7 +198,7 @@ static const struct ati_receiver_type type_firefly	= {
 	.default_keymap = RC_MAP_SNAPSTREAM_FIREFLY
 };
 
-static const struct usb_device_id ati_remote_table[] = {
+static struct usb_device_id ati_remote_table[] = {
 	{
 		USB_DEVICE(ATI_REMOTE_VENDOR_ID, LOLA_REMOTE_PRODUCT_ID),
 		.driver_info = (unsigned long)&type_ati
@@ -622,8 +622,7 @@ static void ati_remote_input_report(struct urb *urb)
 				* it would cause ghost repeats which would be a
 				* regression for this driver.
 				*/
-				rc_keydown_notimeout(ati_remote->rdev,
-						     RC_PROTO_OTHER,
+				rc_keydown_notimeout(ati_remote->rdev, RC_TYPE_OTHER,
 						     scancode, data[2]);
 				rc_keyup(ati_remote->rdev);
 			}
@@ -761,13 +760,13 @@ static void ati_remote_rc_init(struct ati_remote *ati_remote)
 	struct rc_dev *rdev = ati_remote->rdev;
 
 	rdev->priv = ati_remote;
-	rdev->allowed_protocols = RC_PROTO_BIT_OTHER;
+	rdev->allowed_protocols = RC_BIT_OTHER;
 	rdev->driver_name = "ati_remote";
 
 	rdev->open = ati_remote_rc_open;
 	rdev->close = ati_remote_rc_close;
 
-	rdev->device_name = ati_remote->rc_name;
+	rdev->input_name = ati_remote->rc_name;
 	rdev->input_phys = ati_remote->rc_phys;
 
 	usb_to_input_id(ati_remote->udev, &rdev->input_id);
@@ -904,6 +903,9 @@ static int ati_remote_probe(struct usb_interface *interface,
 	err = rc_register_device(ati_remote->rdev);
 	if (err)
 		goto exit_kill_urbs;
+
+	/* use our delay for rc_dev */
+	ati_remote->rdev->input_dev->rep[REP_DELAY] = repeat_delay;
 
 	/* Set up and register mouse input device */
 	if (mouse) {

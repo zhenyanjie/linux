@@ -98,7 +98,7 @@ static void register_python_scripting(struct scripting_ops *scripting_ops)
 	}
 }
 
-#ifndef HAVE_LIBPYTHON_SUPPORT
+#ifdef NO_LIBPYTHON
 void setup_python_scripting(void)
 {
 	register_python_scripting(&python_scripting_unsupported_ops);
@@ -161,7 +161,7 @@ static void register_perl_scripting(struct scripting_ops *scripting_ops)
 	}
 }
 
-#ifndef HAVE_LIBPERL_SUPPORT
+#ifdef NO_LIBPERL
 void setup_perl_scripting(void)
 {
 	register_perl_scripting(&perl_scripting_unsupported_ops);

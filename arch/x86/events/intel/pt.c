@@ -471,9 +471,8 @@ static void pt_config(struct perf_event *event)
 	struct pt *pt = this_cpu_ptr(&pt_ctx);
 	u64 reg;
 
-	/* First round: clear STATUS, in particular the PSB byte counter. */
-	if (!event->hw.config) {
-		perf_event_itrace_started(event);
+	if (!event->hw.itrace_started) {
+		event->hw.itrace_started = 1;
 		wrmsrl(MSR_IA32_RTIT_STATUS, 0);
 	}
 
@@ -1186,15 +1185,11 @@ static int pt_event_addr_filters_validate(struct list_head *filters)
 	int range = 0;
 
 	list_for_each_entry(filter, filters, entry) {
-		/*
-		 * PT doesn't support single address triggers and
-		 * 'start' filters.
-		 */
-		if (!filter->size ||
-		    filter->action == PERF_ADDR_FILTER_ACTION_START)
+		/* PT doesn't support single address triggers */
+		if (!filter->range || !filter->size)
 			return -EOPNOTSUPP;
 
-		if (!filter->path.dentry) {
+		if (!filter->inode) {
 			if (!valid_kernel_ip(filter->offset))
 				return -EINVAL;
 
@@ -1221,7 +1216,7 @@ static void pt_event_addr_filters_sync(struct perf_event *event)
 		return;
 
 	list_for_each_entry(filter, &head->list, entry) {
-		if (filter->path.dentry && !offs[range]) {
+		if (filter->inode && !offs[range]) {
 			msr_a = msr_b = 0;
 		} else {
 			/* apply the offset */
@@ -1231,10 +1226,7 @@ static void pt_event_addr_filters_sync(struct perf_event *event)
 
 		filters->filter[range].msr_a  = msr_a;
 		filters->filter[range].msr_b  = msr_b;
-		if (filter->action == PERF_ADDR_FILTER_ACTION_FILTER)
-			filters->filter[range].config = 1;
-		else
-			filters->filter[range].config = 2;
+		filters->filter[range].config = filter->filter ? 1 : 2;
 		range++;
 	}
 

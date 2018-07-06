@@ -44,7 +44,6 @@
 #include <linux/slab.h>
 #include <linux/of_fdt.h>
 #include <linux/libfdt.h>
-#include <linux/memremap.h>
 
 #include <asm/pgalloc.h>
 #include <asm/page.h>
@@ -67,6 +66,12 @@
 #include <asm/vdso.h>
 
 #include "mmu_decl.h"
+
+#ifdef CONFIG_PPC_STD_MMU_64
+#if H_PGTABLE_RANGE > USER_VSID_RANGE
+#warning Limited user VSID range means pagetable space is wasted
+#endif
+#endif /* CONFIG_PPC_STD_MMU_64 */
 
 phys_addr_t memstart_addr = ~0;
 EXPORT_SYMBOL_GPL(memstart_addr);
@@ -105,29 +110,8 @@ static int __meminit vmemmap_populated(unsigned long start, int page_size)
 	return 0;
 }
 
-/*
- * vmemmap virtual address space management does not have a traditonal page
- * table to track which virtual struct pages are backed by physical mapping.
- * The virtual to physical mappings are tracked in a simple linked list
- * format. 'vmemmap_list' maintains the entire vmemmap physical mapping at
- * all times where as the 'next' list maintains the available
- * vmemmap_backing structures which have been deleted from the
- * 'vmemmap_global' list during system runtime (memory hotplug remove
- * operation). The freed 'vmemmap_backing' structures are reused later when
- * new requests come in without allocating fresh memory. This pointer also
- * tracks the allocated 'vmemmap_backing' structures as we allocate one
- * full page memory at a time when we dont have any.
- */
 struct vmemmap_backing *vmemmap_list;
 static struct vmemmap_backing *next;
-
-/*
- * The same pointer 'next' tracks individual chunks inside the allocated
- * full page during the boot time and again tracks the freeed nodes during
- * runtime. It is racy but it does not happen as they are separated by the
- * boot process. Will create problem if some how we have memory hotplug
- * operation during boot !!
- */
 static int num_left;
 static int num_freed;
 
@@ -177,8 +161,7 @@ static __meminit void vmemmap_list_populate(unsigned long phys,
 	vmemmap_list = vmem_back;
 }
 
-int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
-		struct vmem_altmap *altmap)
+int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
 {
 	unsigned long page_size = 1 << mmu_psize_defs[mmu_vmemmap_psize].shift;
 
@@ -194,10 +177,7 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 		if (vmemmap_populated(start, page_size))
 			continue;
 
-		if (altmap)
-			p = altmap_alloc_block_buf(page_size, altmap);
-		else
-			p = vmemmap_alloc_block_buf(page_size, node);
+		p = vmemmap_alloc_block(page_size, node);
 		if (!p)
 			return -ENOMEM;
 
@@ -208,8 +188,9 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 
 		rc = vmemmap_create_mapping(start, page_size, __pa(p));
 		if (rc < 0) {
-			pr_warn("%s: Unable to create vmemmap mapping: %d\n",
-				__func__, rc);
+			pr_warning(
+				"vmemmap_populate: Unable to create vmemmap mapping: %d\n",
+				rc);
 			return -EFAULT;
 		}
 	}
@@ -250,20 +231,16 @@ static unsigned long vmemmap_list_free(unsigned long start)
 	return vmem_back->phys;
 }
 
-void __ref vmemmap_free(unsigned long start, unsigned long end,
-		struct vmem_altmap *altmap)
+void __ref vmemmap_free(unsigned long start, unsigned long end)
 {
 	unsigned long page_size = 1 << mmu_psize_defs[mmu_vmemmap_psize].shift;
-	unsigned long page_order = get_order(page_size);
 
 	start = _ALIGN_DOWN(start, page_size);
 
 	pr_debug("vmemmap_free %lx...%lx\n", start, end);
 
 	for (; start < end; start += page_size) {
-		unsigned long nr_pages, addr;
-		struct page *section_base;
-		struct page *page;
+		unsigned long addr;
 
 		/*
 		 * the section has already be marked as invalid, so
@@ -274,32 +251,29 @@ void __ref vmemmap_free(unsigned long start, unsigned long end,
 			continue;
 
 		addr = vmemmap_list_free(start);
-		if (!addr)
-			continue;
+		if (addr) {
+			struct page *page = pfn_to_page(addr >> PAGE_SHIFT);
 
-		page = pfn_to_page(addr >> PAGE_SHIFT);
-		section_base = pfn_to_page(vmemmap_section_start(start));
-		nr_pages = 1 << page_order;
+			if (PageReserved(page)) {
+				/* allocated from bootmem */
+				if (page_size < PAGE_SIZE) {
+					/*
+					 * this shouldn't happen, but if it is
+					 * the case, leave the memory there
+					 */
+					WARN_ON_ONCE(1);
+				} else {
+					unsigned int nr_pages =
+						1 << get_order(page_size);
+					while (nr_pages--)
+						free_reserved_page(page++);
+				}
+			} else
+				free_pages((unsigned long)(__va(addr)),
+							get_order(page_size));
 
-		if (altmap) {
-			vmem_altmap_free(altmap, nr_pages);
-		} else if (PageReserved(page)) {
-			/* allocated from bootmem */
-			if (page_size < PAGE_SIZE) {
-				/*
-				 * this shouldn't happen, but if it is
-				 * the case, leave the memory there
-				 */
-				WARN_ON_ONCE(1);
-			} else {
-				while (nr_pages--)
-					free_reserved_page(page++);
-			}
-		} else {
-			free_pages((unsigned long)(__va(addr)), page_order);
+			vmemmap_remove_mapping(start, page_size);
 		}
-
-		vmemmap_remove_mapping(start, page_size);
 	}
 }
 #endif
@@ -348,7 +322,7 @@ struct page *realmode_pfn_to_page(unsigned long pfn)
 }
 EXPORT_SYMBOL_GPL(realmode_pfn_to_page);
 
-#else
+#elif defined(CONFIG_FLATMEM)
 
 struct page *realmode_pfn_to_page(unsigned long pfn)
 {
@@ -357,22 +331,13 @@ struct page *realmode_pfn_to_page(unsigned long pfn)
 }
 EXPORT_SYMBOL_GPL(realmode_pfn_to_page);
 
-#endif /* CONFIG_SPARSEMEM_VMEMMAP */
+#endif /* CONFIG_SPARSEMEM_VMEMMAP/CONFIG_FLATMEM */
 
-#ifdef CONFIG_PPC_BOOK3S_64
-static bool disable_radix = !IS_ENABLED(CONFIG_PPC_RADIX_MMU_DEFAULT);
-
+#ifdef CONFIG_PPC_STD_MMU_64
+static bool disable_radix;
 static int __init parse_disable_radix(char *p)
 {
-	bool val;
-
-	if (!p)
-		val = true;
-	else if (kstrtobool(p, &val))
-		return -EINVAL;
-
-	disable_radix = val;
-
+	disable_radix = true;
 	return 0;
 }
 early_param("disable_radix", parse_disable_radix);
@@ -382,7 +347,7 @@ early_param("disable_radix", parse_disable_radix);
  * /chosen/ibm,architecture-vec-5 to see if the hypervisor is willing to do
  * radix.  If not, we clear the radix feature bit so we fall back to hash.
  */
-static void __init early_check_vec5(void)
+static void early_check_vec5(void)
 {
 	unsigned long root, chosen;
 	int size;
@@ -445,4 +410,4 @@ void __init mmu_early_init_devtree(void)
 	else
 		hash__early_init_devtree();
 }
-#endif /* CONFIG_PPC_BOOK3S_64 */
+#endif /* CONFIG_PPC_STD_MMU_64 */

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
 * Host Controller Driver for the Elan Digital Systems U132 adapter
 *
@@ -7,6 +6,11 @@
 *
 * Author and Maintainer - Tony Olech - Elan Digital Systems
 * tony.olech@elandigitalsystems.com
+*
+* This program is free software;you can redistribute it and/or
+* modify it under the terms of the GNU General Public License as
+* published by the Free Software Foundation, version 2.
+*
 *
 * This driver was written by Tony Olech(tony.olech@elandigitalsystems.com)
 * based on various USB host drivers in the 2.6.15 linux kernel
@@ -2937,7 +2941,7 @@ static int u132_bus_resume(struct usb_hcd *hcd)
 #define u132_bus_suspend NULL
 #define u132_bus_resume NULL
 #endif
-static const struct hc_driver u132_hc_driver = {
+static struct hc_driver u132_hc_driver = {
 	.description = hcd_name,
 	.hcd_priv_size = sizeof(struct u132),
 	.irq = NULL,

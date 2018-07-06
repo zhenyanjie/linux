@@ -58,6 +58,7 @@
 #include "ocrdma_stats.h"
 #include <rdma/ocrdma-abi.h>
 
+MODULE_VERSION(OCRDMA_ROCE_DRV_VERSION);
 MODULE_DESCRIPTION(OCRDMA_ROCE_DRV_DESC " " OCRDMA_ROCE_DRV_VERSION);
 MODULE_AUTHOR("Emulex Corporation");
 MODULE_LICENSE("Dual BSD/GPL");
@@ -107,11 +108,12 @@ static int ocrdma_port_immutable(struct ib_device *ibdev, u8 port_num,
 	return 0;
 }
 
-static void get_dev_fw_str(struct ib_device *device, char *str)
+static void get_dev_fw_str(struct ib_device *device, char *str,
+			   size_t str_len)
 {
 	struct ocrdma_dev *dev = get_ocrdma_dev(device);
 
-	snprintf(str, IB_FW_VERSION_NAME_MAX, "%s", &dev->attr.fw_ver[0]);
+	snprintf(str, str_len, "%s", &dev->attr.fw_ver[0]);
 }
 
 static int ocrdma_register_device(struct ocrdma_dev *dev)
@@ -158,7 +160,10 @@ static int ocrdma_register_device(struct ocrdma_dev *dev)
 	dev->ibdev.query_device = ocrdma_query_device;
 	dev->ibdev.query_port = ocrdma_query_port;
 	dev->ibdev.modify_port = ocrdma_modify_port;
+	dev->ibdev.query_gid = ocrdma_query_gid;
 	dev->ibdev.get_netdev = ocrdma_get_netdev;
+	dev->ibdev.add_gid = ocrdma_add_gid;
+	dev->ibdev.del_gid = ocrdma_del_gid;
 	dev->ibdev.get_link_layer = ocrdma_link_layer;
 	dev->ibdev.alloc_pd = ocrdma_alloc_pd;
 	dev->ibdev.dealloc_pd = ocrdma_dealloc_pd;
@@ -214,27 +219,25 @@ static int ocrdma_register_device(struct ocrdma_dev *dev)
 		dev->ibdev.destroy_srq = ocrdma_destroy_srq;
 		dev->ibdev.post_srq_recv = ocrdma_post_srq_recv;
 	}
-	dev->ibdev.driver_id = RDMA_DRIVER_OCRDMA;
 	return ib_register_device(&dev->ibdev, NULL);
 }
 
 static int ocrdma_alloc_resources(struct ocrdma_dev *dev)
 {
 	mutex_init(&dev->dev_lock);
-	dev->cq_tbl = kcalloc(OCRDMA_MAX_CQ, sizeof(struct ocrdma_cq *),
-			      GFP_KERNEL);
+	dev->cq_tbl = kzalloc(sizeof(struct ocrdma_cq *) *
+			      OCRDMA_MAX_CQ, GFP_KERNEL);
 	if (!dev->cq_tbl)
 		goto alloc_err;
 
 	if (dev->attr.max_qp) {
-		dev->qp_tbl = kcalloc(OCRDMA_MAX_QP,
-				      sizeof(struct ocrdma_qp *),
-				      GFP_KERNEL);
+		dev->qp_tbl = kzalloc(sizeof(struct ocrdma_qp *) *
+				      OCRDMA_MAX_QP, GFP_KERNEL);
 		if (!dev->qp_tbl)
 			goto alloc_err;
 	}
 
-	dev->stag_arr = kcalloc(OCRDMA_MAX_STAG, sizeof(u64), GFP_KERNEL);
+	dev->stag_arr = kzalloc(sizeof(u64) * OCRDMA_MAX_STAG, GFP_KERNEL);
 	if (dev->stag_arr == NULL)
 		goto alloc_err;
 

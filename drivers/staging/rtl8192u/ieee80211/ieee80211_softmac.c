@@ -341,7 +341,7 @@ static inline struct sk_buff *ieee80211_probe_req(struct ieee80211_device *ieee)
 
 	skb_reserve(skb, ieee->tx_headroom);
 
-	req = skb_put(skb, sizeof(struct ieee80211_probe_request));
+	req = (struct ieee80211_probe_request *) skb_put(skb,sizeof(struct ieee80211_probe_request));
 	req->header.frame_ctl = cpu_to_le16(IEEE80211_STYPE_PROBE_REQ);
 	req->header.duration_id = 0; /* FIXME: is this OK? */
 
@@ -349,7 +349,7 @@ static inline struct sk_buff *ieee80211_probe_req(struct ieee80211_device *ieee)
 	memcpy(req->header.addr2, ieee->dev->dev_addr, ETH_ALEN);
 	eth_broadcast_addr(req->header.addr3);
 
-	tag = skb_put(skb, len + 2 + rate_len);
+	tag = (u8 *) skb_put(skb,len+2+rate_len);
 
 	*tag++ = MFIE_TYPE_SSID;
 	*tag++ = len;
@@ -391,10 +391,10 @@ static void ieee80211_send_beacon(struct ieee80211_device *ieee)
 }
 
 
-static void ieee80211_send_beacon_cb(struct timer_list *t)
+static void ieee80211_send_beacon_cb(unsigned long _ieee)
 {
 	struct ieee80211_device *ieee =
-		from_timer(ieee, t, beacon_timer);
+		(struct ieee80211_device *) _ieee;
 	unsigned long flags;
 
 	spin_lock_irqsave(&ieee->beacon_lock, flags);
@@ -659,7 +659,8 @@ ieee80211_authentication_req(struct ieee80211_network *beacon,
 	if (!skb) return NULL;
 
 	skb_reserve(skb, ieee->tx_headroom);
-	auth = skb_put(skb, sizeof(struct ieee80211_authentication));
+	auth = (struct ieee80211_authentication *)
+		skb_put(skb, sizeof(struct ieee80211_authentication));
 
 	if (challengelen)
 		auth->header.frame_ctl = cpu_to_le16(IEEE80211_STYPE_AUTH
@@ -767,7 +768,7 @@ static struct sk_buff *ieee80211_probe_resp(struct ieee80211_device *ieee, u8 *d
 	if (!skb)
 		return NULL;
 	skb_reserve(skb, ieee->tx_headroom);
-	beacon_buf = skb_put(skb, (beacon_size - ieee->tx_headroom));
+	beacon_buf = (struct ieee80211_probe_response *) skb_put(skb, (beacon_size - ieee->tx_headroom));
 	memcpy (beacon_buf->header.addr1, dest,ETH_ALEN);
 	memcpy (beacon_buf->header.addr2, ieee->dev->dev_addr, ETH_ALEN);
 	memcpy (beacon_buf->header.addr3, ieee->current_network.bssid, ETH_ALEN);
@@ -863,7 +864,8 @@ static struct sk_buff *ieee80211_assoc_resp(struct ieee80211_device *ieee,
 
 	skb_reserve(skb, ieee->tx_headroom);
 
-	assoc = skb_put(skb, sizeof(struct ieee80211_assoc_response_frame));
+	assoc = (struct ieee80211_assoc_response_frame *)
+		skb_put(skb, sizeof(struct ieee80211_assoc_response_frame));
 
 	assoc->header.frame_ctl = cpu_to_le16(IEEE80211_STYPE_ASSOC_RESP);
 	memcpy(assoc->header.addr1, dest,ETH_ALEN);
@@ -890,7 +892,7 @@ static struct sk_buff *ieee80211_assoc_resp(struct ieee80211_device *ieee,
 	if (ieee->assoc_id == 0x2007) ieee->assoc_id=0;
 	else ieee->assoc_id++;
 
-	tag = skb_put(skb, rate_len);
+	tag = (u8 *) skb_put(skb, rate_len);
 
 	ieee80211_MFIE_Brate(ieee, &tag);
 	ieee80211_MFIE_Grate(ieee, &tag);
@@ -938,7 +940,7 @@ static struct sk_buff *ieee80211_null_func(struct ieee80211_device *ieee,
 	if (!skb)
 		return NULL;
 
-	hdr = skb_put(skb, sizeof(struct rtl_80211_hdr_3addr));
+	hdr = (struct rtl_80211_hdr_3addr *)skb_put(skb,sizeof(struct rtl_80211_hdr_3addr));
 
 	memcpy(hdr->addr1, ieee->current_network.bssid, ETH_ALEN);
 	memcpy(hdr->addr2, ieee->dev->dev_addr, ETH_ALEN);
@@ -1084,7 +1086,8 @@ ieee80211_association_req(struct ieee80211_network *beacon,
 
 	skb_reserve(skb, ieee->tx_headroom);
 
-	hdr = skb_put(skb, sizeof(struct ieee80211_assoc_request_frame) + 2);
+	hdr = (struct ieee80211_assoc_request_frame *)
+		skb_put(skb, sizeof(struct ieee80211_assoc_request_frame)+2);
 
 
 	hdr->header.frame_ctl = IEEE80211_STYPE_ASSOC_REQ;
@@ -1112,7 +1115,8 @@ ieee80211_association_req(struct ieee80211_network *beacon,
 	hdr->info_element[0].id = MFIE_TYPE_SSID;
 
 	hdr->info_element[0].len = beacon->ssid_len;
-	skb_put_data(skb, beacon->ssid, beacon->ssid_len);
+	tag = skb_put(skb, beacon->ssid_len);
+	memcpy(tag, beacon->ssid, beacon->ssid_len);
 
 	tag = skb_put(skb, rate_len);
 
@@ -1184,17 +1188,18 @@ ieee80211_association_req(struct ieee80211_network *beacon,
 
 
 	//choose what wpa_supplicant gives to associate.
+	tag = skb_put(skb, wpa_ie_len);
 	if (wpa_ie_len) {
-		skb_put_data(skb, ieee->wpa_ie, wpa_ie_len);
+		memcpy(tag, ieee->wpa_ie, ieee->wpa_ie_len);
 	}
 
+	tag = skb_put(skb, wmm_info_len);
 	if (wmm_info_len) {
-		tag = skb_put(skb, wmm_info_len);
-		ieee80211_WMM_Info(ieee, &tag);
+	  ieee80211_WMM_Info(ieee, &tag);
 	}
 #ifdef THOMAS_TURBO
+	tag = skb_put(skb, turbo_info_len);
 	if (turbo_info_len) {
-		tag = skb_put(skb, turbo_info_len);
 		ieee80211_TURBO_Info(ieee, &tag);
 	}
 #endif
@@ -1251,11 +1256,9 @@ void ieee80211_associate_abort(struct ieee80211_device *ieee)
 	spin_unlock_irqrestore(&ieee->lock, flags);
 }
 
-static void ieee80211_associate_abort_cb(struct timer_list *t)
+static void ieee80211_associate_abort_cb(unsigned long dev)
 {
-	struct ieee80211_device *dev = from_timer(dev, t, associate_timer);
-
-	ieee80211_associate_abort(dev);
+	ieee80211_associate_abort((struct ieee80211_device *) dev);
 }
 
 
@@ -1725,7 +1728,7 @@ static void ieee80211_sta_ps_send_null_frame(struct ieee80211_device *ieee,
 static short ieee80211_sta_ps_sleep(struct ieee80211_device *ieee, u32 *time_h,
 				    u32 *time_l)
 {
-	int timeout;
+	int timeout = ieee->ps_timeout;
 	u8 dtim;
 	/*if(ieee->ps == IEEE80211_PS_DISABLED ||
 		ieee->iw_mode != IW_MODE_INFRA ||
@@ -2684,7 +2687,7 @@ void ieee80211_softmac_init(struct ieee80211_device *ieee)
 	for(i = 0; i < 5; i++) {
 	  ieee->seq_ctrl[i] = 0;
 	}
-	ieee->pDot11dInfo = kzalloc(sizeof(RT_DOT11D_INFO), GFP_KERNEL);
+	ieee->pDot11dInfo = kzalloc(sizeof(RT_DOT11D_INFO), GFP_ATOMIC);
 	if (!ieee->pDot11dInfo)
 		IEEE80211_DEBUG(IEEE80211_DL_ERR, "can't alloc memory for DOT11D\n");
 	//added for  AP roaming
@@ -2720,9 +2723,11 @@ void ieee80211_softmac_init(struct ieee80211_device *ieee)
 	ieee->enable_rx_imm_BA = true;
 	ieee->tx_pending.txb = NULL;
 
-	timer_setup(&ieee->associate_timer, ieee80211_associate_abort_cb, 0);
+	setup_timer(&ieee->associate_timer, ieee80211_associate_abort_cb,
+		    (unsigned long)ieee);
 
-	timer_setup(&ieee->beacon_timer, ieee80211_send_beacon_cb, 0);
+	setup_timer(&ieee->beacon_timer, ieee80211_send_beacon_cb,
+		    (unsigned long)ieee);
 
 
 	INIT_DELAYED_WORK(&ieee->start_ibss_wq, ieee80211_start_ibss_wq);
@@ -2948,9 +2953,8 @@ static int ieee80211_wpa_set_encryption(struct ieee80211_device *ieee,
 				  struct ieee_param *param, int param_len)
 {
 	int ret = 0;
-	const char *module = NULL;
 
-	struct ieee80211_crypto_ops *ops = NULL;
+	struct ieee80211_crypto_ops *ops;
 	struct ieee80211_crypt_data **crypt;
 
 	struct ieee80211_security sec = {
@@ -2996,17 +3000,19 @@ static int ieee80211_wpa_set_encryption(struct ieee80211_device *ieee,
 	    strcmp(param->u.crypt.alg, "TKIP"))
 		goto skip_host_crypt;
 
-	//set WEP40 first, it will be modified according to WEP104 or WEP40 at other place
-	if (!strcmp(param->u.crypt.alg, "WEP"))
-		module = "ieee80211_crypt_wep";
-	else if (!strcmp(param->u.crypt.alg, "TKIP"))
-		module = "ieee80211_crypt_tkip";
-	else if (!strcmp(param->u.crypt.alg, "CCMP"))
-		module = "ieee80211_crypt_ccmp";
-	if (module)
-		ops = try_then_request_module(ieee80211_get_crypto_ops(param->u.crypt.alg),
-					      module);
-	if (!ops) {
+	ops = ieee80211_get_crypto_ops(param->u.crypt.alg);
+	if (ops == NULL && strcmp(param->u.crypt.alg, "WEP") == 0) {
+		request_module("ieee80211_crypt_wep");
+		ops = ieee80211_get_crypto_ops(param->u.crypt.alg);
+		//set WEP40 first, it will be modified according to WEP104 or WEP40 at other place
+	} else if (ops == NULL && strcmp(param->u.crypt.alg, "TKIP") == 0) {
+		request_module("ieee80211_crypt_tkip");
+		ops = ieee80211_get_crypto_ops(param->u.crypt.alg);
+	} else if (ops == NULL && strcmp(param->u.crypt.alg, "CCMP") == 0) {
+		request_module("ieee80211_crypt_ccmp");
+		ops = ieee80211_get_crypto_ops(param->u.crypt.alg);
+	}
+	if (ops == NULL) {
 		printk("unknown crypto alg '%s'\n", param->u.crypt.alg);
 		param->u.crypt.err = IEEE_CRYPT_ERR_UNKNOWN_ALG;
 		ret = -EINVAL;
@@ -3105,7 +3111,7 @@ static inline struct sk_buff *ieee80211_disassociate_skb(
 	if (!skb)
 		return NULL;
 
-	disass = skb_put(skb, sizeof(struct ieee80211_disassoc));
+	disass = (struct ieee80211_disassoc *) skb_put(skb, sizeof(struct ieee80211_disassoc));
 	disass->header.frame_ctl = cpu_to_le16(IEEE80211_STYPE_DISASSOC);
 	disass->header.duration_id = 0;
 

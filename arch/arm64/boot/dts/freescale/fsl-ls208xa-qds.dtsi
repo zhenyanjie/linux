@@ -1,8 +1,7 @@
 /*
  * Device Tree file for Freescale LS2080A QDS Board.
  *
- * Copyright 2016 Freescale Semiconductor, Inc.
- * Copyright 2017 NXP
+ * Copyright (C) 2016-17, Freescale Semiconductor
  *
  * Abhimanyu Saini <abhimanyu.saini@nxp.com>
  *
@@ -46,7 +45,6 @@
  */
 
 &esdhc {
-	mmc-hs200-1_8v;
 	status = "okay";
 };
 
@@ -140,21 +138,21 @@
 
 &dspi {
 	status = "okay";
-	dflash0: n25q128a@0 {
+	dflash0: n25q128a {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "st,m25p80";
 		spi-max-frequency = <3000000>;
 		reg = <0>;
 	};
-	dflash1: sst25wf040b@1 {
+	dflash1: sst25wf040b {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "st,m25p80";
 		spi-max-frequency = <3000000>;
 		reg = <1>;
 	};
-	dflash2: en25s64@2 {
+	dflash2: en25s64 {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "st,m25p80";
@@ -177,7 +175,7 @@
 		#size-cells = <1>;
 		compatible = "st,m25p80";
 		spi-max-frequency = <20000000>;
-		reg = <2>;
+		reg = <0>;
 	};
 };
 

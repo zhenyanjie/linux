@@ -14,7 +14,6 @@
 #include <crypto/aes.h>
 #include <crypto/internal/simd.h>
 #include <crypto/internal/skcipher.h>
-#include <linux/cpufeature.h>
 #include <linux/module.h>
 #include <crypto/xts.h>
 
@@ -285,7 +284,9 @@ static int ctr_encrypt(struct skcipher_request *req)
 
 		ce_aes_ctr_encrypt(tail, NULL, (u8 *)ctx->key_enc,
 				   num_rounds(ctx), blocks, walk.iv);
-		crypto_xor_cpy(tdst, tsrc, tail, nbytes);
+		if (tdst != tsrc)
+			memcpy(tdst, tsrc, nbytes);
+		crypto_xor(tdst, tail, nbytes);
 		err = skcipher_walk_done(&walk, 0);
 	}
 	kernel_neon_end();
@@ -424,6 +425,9 @@ static int __init aes_init(void)
 	int err;
 	int i;
 
+	if (!(elf_hwcap2 & HWCAP2_AES))
+		return -ENODEV;
+
 	err = crypto_register_skciphers(aes_algs, ARRAY_SIZE(aes_algs));
 	if (err)
 		return err;
@@ -447,5 +451,5 @@ unregister_simds:
 	return err;
 }
 
-module_cpu_feature_match(AES, aes_init);
+module_init(aes_init);
 module_exit(aes_exit);

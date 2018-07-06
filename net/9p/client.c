@@ -37,7 +37,6 @@
 #include <linux/uio.h>
 #include <net/9p/9p.h>
 #include <linux/parser.h>
-#include <linux/seq_file.h>
 #include <net/9p/client.h>
 #include <net/9p/transport.h>
 #include "protocol.h"
@@ -77,30 +76,6 @@ inline int p9_is_proto_dotu(struct p9_client *clnt)
 	return clnt->proto_version == p9_proto_2000u;
 }
 EXPORT_SYMBOL(p9_is_proto_dotu);
-
-int p9_show_client_options(struct seq_file *m, struct p9_client *clnt)
-{
-	if (clnt->msize != 8192)
-		seq_printf(m, ",msize=%u", clnt->msize);
-	seq_printf(m, ",trans=%s", clnt->trans_mod->name);
-
-	switch (clnt->proto_version) {
-	case p9_proto_legacy:
-		seq_puts(m, ",noextend");
-		break;
-	case p9_proto_2000u:
-		seq_puts(m, ",version=9p2000.u");
-		break;
-	case p9_proto_2000L:
-		/* Default */
-		break;
-	}
-
-	if (clnt->trans_mod->show_options)
-		return clnt->trans_mod->show_options(m, clnt);
-	return 0;
-}
-EXPORT_SYMBOL(p9_show_client_options);
 
 /*
  * Some error codes are taken directly from the server replies,
@@ -190,14 +165,14 @@ static int parse_opts(char *opts, struct p9_client *clnt)
 				p9_debug(P9_DEBUG_ERROR,
 					 "problem allocating copy of trans arg\n");
 				goto free_and_return;
-			}
-
-			v9fs_put_trans(clnt->trans_mod);
+			 }
 			clnt->trans_mod = v9fs_get_trans_by_name(s);
 			if (clnt->trans_mod == NULL) {
 				pr_info("Could not find request transport: %s\n",
 					s);
 				ret = -EINVAL;
+				kfree(s);
+				goto free_and_return;
 			}
 			kfree(s);
 			break;
@@ -212,12 +187,13 @@ static int parse_opts(char *opts, struct p9_client *clnt)
 					 "problem allocating copy of version arg\n");
 				goto free_and_return;
 			}
-			r = get_protocol_version(s);
-			if (r < 0)
-				ret = r;
-			else
-				clnt->proto_version = r;
+			ret = get_protocol_version(s);
+			if (ret == -EINVAL) {
+				kfree(s);
+				goto free_and_return;
+			}
 			kfree(s);
+			clnt->proto_version = ret;
 			break;
 		default:
 			continue;
@@ -225,7 +201,6 @@ static int parse_opts(char *opts, struct p9_client *clnt)
 	}
 
 free_and_return:
-	v9fs_put_trans(clnt->trans_mod);
 	kfree(tmp_options);
 	return ret;
 }
@@ -769,11 +744,12 @@ p9_client_rpc(struct p9_client *c, int8_t type, const char *fmt, ...)
 	if (err < 0) {
 		if (err != -ERESTARTSYS && err != -EFAULT)
 			c->status = Disconnected;
-		goto recalc_sigpending;
+		goto reterr;
 	}
 again:
 	/* Wait for the response */
-	err = wait_event_killable(*req->wq, req->status >= REQ_STATUS_RCVD);
+	err = wait_event_interruptible(*req->wq,
+				       req->status >= REQ_STATUS_RCVD);
 
 	/*
 	 * Make sure our req is coherent with regard to updates in other
@@ -804,7 +780,6 @@ again:
 		if (req->status == REQ_STATUS_RCVD)
 			err = 0;
 	}
-recalc_sigpending:
 	if (sigpending) {
 		spin_lock_irqsave(&current->sighand->siglock, flags);
 		recalc_sigpending();
@@ -868,7 +843,7 @@ static struct p9_req_t *p9_client_zc_rpc(struct p9_client *c, int8_t type,
 		if (err == -EIO)
 			c->status = Disconnected;
 		if (err != -ERESTARTSYS)
-			goto recalc_sigpending;
+			goto reterr;
 	}
 	if (req->status == REQ_STATUS_ERROR) {
 		p9_debug(P9_DEBUG_ERROR, "req_status error %d\n", req->t_err);
@@ -886,7 +861,6 @@ static struct p9_req_t *p9_client_zc_rpc(struct p9_client *c, int8_t type,
 		if (req->status == REQ_STATUS_RCVD)
 			err = 0;
 	}
-recalc_sigpending:
 	if (sigpending) {
 		spin_lock_irqsave(&current->sighand->siglock, flags);
 		recalc_sigpending();

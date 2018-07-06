@@ -255,11 +255,12 @@ void arch_send_call_function_single_ipi(int cpu)
 static void __init
 smp_cpu_init(int cpunum)
 {
+	extern int init_per_cpu(int);  /* arch/parisc/kernel/processor.c */
 	extern void init_IRQ(void);    /* arch/parisc/kernel/irq.c */
 	extern void start_cpu_itimer(void); /* arch/parisc/kernel/time.c */
 
 	/* Set modes and Enable floating point coprocessor */
-	init_per_cpu(cpunum);
+	(void) init_per_cpu(cpunum);
 
 	disable_sr_hashing();
 
@@ -292,14 +293,9 @@ smp_cpu_init(int cpunum)
  * Slaves start using C here. Indirectly called from smp_slave_stext.
  * Do what start_kernel() and main() do for boot strap processor (aka monarch)
  */
-void __init smp_callin(unsigned long pdce_proc)
+void __init smp_callin(void)
 {
 	int slave_id = cpu_now_booting;
-
-#ifdef CONFIG_64BIT
-	WARN_ON(((unsigned long)(PAGE0->mem_pdc_hi) << 32
-			| PAGE0->mem_pdc) != pdce_proc);
-#endif
 
 	smp_cpu_init(slave_id);
 	preempt_disable();
@@ -423,7 +419,8 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 }
 
 #ifdef CONFIG_PROC_FS
-int setup_profiling_timer(unsigned int multiplier)
+int __init
+setup_profiling_timer(unsigned int multiplier)
 {
 	return -EINVAL;
 }

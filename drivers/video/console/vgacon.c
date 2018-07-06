@@ -398,8 +398,9 @@ static const char *vgacon_startup(void)
 #endif
 	}
 
-	/* boot_params.screen_info reasonably initialized? */
-	if ((screen_info.orig_video_lines == 0) ||
+	/* boot_params.screen_info initialized? */
+	if ((screen_info.orig_video_mode  == 0) &&
+	    (screen_info.orig_video_lines == 0) &&
 	    (screen_info.orig_video_cols  == 0))
 		goto no_vga;
 
@@ -422,10 +423,7 @@ static const char *vgacon_startup(void)
 		vga_video_port_val = VGA_CRT_DM;
 		if ((screen_info.orig_video_ega_bx & 0xff) != 0x10) {
 			static struct resource ega_console_resource =
-			    { .name	= "ega",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3B0,
-			      .end	= 0x3BF };
+			    { .name = "ega", .start = 0x3B0, .end = 0x3BF };
 			vga_video_type = VIDEO_TYPE_EGAM;
 			vga_vram_size = 0x8000;
 			display_desc = "EGA+";
@@ -433,15 +431,9 @@ static const char *vgacon_startup(void)
 					 &ega_console_resource);
 		} else {
 			static struct resource mda1_console_resource =
-			    { .name	= "mda",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3B0,
-			      .end	= 0x3BB };
+			    { .name = "mda", .start = 0x3B0, .end = 0x3BB };
 			static struct resource mda2_console_resource =
-			    { .name	= "mda",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3BF,
-			      .end	= 0x3BF };
+			    { .name = "mda", .start = 0x3BF, .end = 0x3BF };
 			vga_video_type = VIDEO_TYPE_MDA;
 			vga_vram_size = 0x2000;
 			display_desc = "*MDA";
@@ -463,21 +455,15 @@ static const char *vgacon_startup(void)
 			vga_vram_size = 0x8000;
 
 			if (!screen_info.orig_video_isVGA) {
-				static struct resource ega_console_resource =
-				    { .name	= "ega",
-				      .flags	= IORESOURCE_IO,
-				      .start	= 0x3C0,
-				      .end	= 0x3DF };
+				static struct resource ega_console_resource
+				    = { .name = "ega", .start = 0x3C0, .end = 0x3DF };
 				vga_video_type = VIDEO_TYPE_EGAC;
 				display_desc = "EGA";
 				request_resource(&ioport_resource,
 						 &ega_console_resource);
 			} else {
-				static struct resource vga_console_resource =
-				    { .name	= "vga+",
-				      .flags	= IORESOURCE_IO,
-				      .start	= 0x3C0,
-				      .end	= 0x3DF };
+				static struct resource vga_console_resource
+				    = { .name = "vga+", .start = 0x3C0, .end = 0x3DF };
 				vga_video_type = VIDEO_TYPE_VGAC;
 				display_desc = "VGA+";
 				request_resource(&ioport_resource,
@@ -509,10 +495,7 @@ static const char *vgacon_startup(void)
 			}
 		} else {
 			static struct resource cga_console_resource =
-			    { .name	= "cga",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3D4,
-			      .end	= 0x3D5 };
+			    { .name = "cga", .start = 0x3D4, .end = 0x3D5 };
 			vga_video_type = VIDEO_TYPE_CGA;
 			vga_vram_size = 0x2000;
 			display_desc = "*CGA";
@@ -1272,8 +1255,7 @@ static int vgacon_adjust_height(struct vc_data *vc, unsigned fontheight)
 	return 0;
 }
 
-static int vgacon_font_set(struct vc_data *c, struct console_font *font,
-			   unsigned int flags)
+static int vgacon_font_set(struct vc_data *c, struct console_font *font, unsigned flags)
 {
 	unsigned charcount = font->charcount;
 	int rc;
@@ -1408,20 +1390,21 @@ static bool vgacon_scroll(struct vc_data *c, unsigned int t, unsigned int b,
  *  The console `switch' structure for the VGA based console
  */
 
-static void vgacon_clear(struct vc_data *vc, int sy, int sx, int height,
-			 int width) { }
-static void vgacon_putc(struct vc_data *vc, int c, int ypos, int xpos) { }
-static void vgacon_putcs(struct vc_data *vc, const unsigned short *s,
-			 int count, int ypos, int xpos) { }
+static int vgacon_dummy(struct vc_data *c)
+{
+	return 0;
+}
+
+#define DUMMY (void *) vgacon_dummy
 
 const struct consw vga_con = {
 	.owner = THIS_MODULE,
 	.con_startup = vgacon_startup,
 	.con_init = vgacon_init,
 	.con_deinit = vgacon_deinit,
-	.con_clear = vgacon_clear,
-	.con_putc = vgacon_putc,
-	.con_putcs = vgacon_putcs,
+	.con_clear = DUMMY,
+	.con_putc = DUMMY,
+	.con_putcs = DUMMY,
 	.con_cursor = vgacon_cursor,
 	.con_scroll = vgacon_scroll,
 	.con_switch = vgacon_switch,

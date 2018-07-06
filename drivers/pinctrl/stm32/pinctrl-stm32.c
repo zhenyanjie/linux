@@ -1,8 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) Maxime Coquelin 2015
- * Copyright (C) STMicroelectronics 2017
  * Author:  Maxime Coquelin <mcoquelin.stm32@gmail.com>
+ * License terms:  GNU General Public License (GPL), version 2
  *
  * Heavily based on Mediatek's pinctrl driver
  */
@@ -151,12 +150,12 @@ static int stm32_gpio_request(struct gpio_chip *chip, unsigned offset)
 		return -EINVAL;
 	}
 
-	return pinctrl_gpio_request(chip->base + offset);
+	return pinctrl_request_gpio(chip->base + offset);
 }
 
 static void stm32_gpio_free(struct gpio_chip *chip, unsigned offset)
 {
-	pinctrl_gpio_free(chip->base + offset);
+	pinctrl_free_gpio(chip->base + offset);
 }
 
 static int stm32_gpio_get(struct gpio_chip *chip, unsigned offset)
@@ -210,24 +209,6 @@ static int stm32_gpio_to_irq(struct gpio_chip *chip, unsigned int offset)
 	return irq_create_fwspec_mapping(&fwspec);
 }
 
-static int stm32_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
-{
-	struct stm32_gpio_bank *bank = gpiochip_get_data(chip);
-	int pin = stm32_gpio_pin(offset);
-	int ret;
-	u32 mode, alt;
-
-	stm32_pmx_get_mode(bank, pin, &mode, &alt);
-	if ((alt == 0) && (mode == 0))
-		ret = 1;
-	else if ((alt == 0) && (mode == 1))
-		ret = 0;
-	else
-		ret = -EINVAL;
-
-	return ret;
-}
-
 static const struct gpio_chip stm32_gpio_template = {
 	.request		= stm32_gpio_request,
 	.free			= stm32_gpio_free,
@@ -236,46 +217,14 @@ static const struct gpio_chip stm32_gpio_template = {
 	.direction_input	= stm32_gpio_direction_input,
 	.direction_output	= stm32_gpio_direction_output,
 	.to_irq			= stm32_gpio_to_irq,
-	.get_direction		= stm32_gpio_get_direction,
 };
 
-static int stm32_gpio_irq_request_resources(struct irq_data *irq_data)
-{
-	struct stm32_gpio_bank *bank = irq_data->domain->host_data;
-	struct stm32_pinctrl *pctl = dev_get_drvdata(bank->gpio_chip.parent);
-	int ret;
-
-	ret = stm32_gpio_direction_input(&bank->gpio_chip, irq_data->hwirq);
-	if (ret)
-		return ret;
-
-	ret = gpiochip_lock_as_irq(&bank->gpio_chip, irq_data->hwirq);
-	if (ret) {
-		dev_err(pctl->dev, "unable to lock HW IRQ %lu for IRQ\n",
-			irq_data->hwirq);
-		return ret;
-	}
-
-	return 0;
-}
-
-static void stm32_gpio_irq_release_resources(struct irq_data *irq_data)
-{
-	struct stm32_gpio_bank *bank = irq_data->domain->host_data;
-
-	gpiochip_unlock_as_irq(&bank->gpio_chip, irq_data->hwirq);
-}
-
 static struct irq_chip stm32_gpio_irq_chip = {
-	.name		= "stm32gpio",
+	.name           = "stm32gpio",
 	.irq_eoi	= irq_chip_eoi_parent,
-	.irq_ack	= irq_chip_ack_parent,
-	.irq_mask	= irq_chip_mask_parent,
-	.irq_unmask	= irq_chip_unmask_parent,
-	.irq_set_type	= irq_chip_set_type_parent,
-	.irq_set_wake	= irq_chip_set_wake_parent,
-	.irq_request_resources = stm32_gpio_irq_request_resources,
-	.irq_release_resources = stm32_gpio_irq_release_resources,
+	.irq_mask       = irq_chip_mask_parent,
+	.irq_unmask     = irq_chip_unmask_parent,
+	.irq_set_type   = irq_chip_set_type_parent,
 };
 
 static int stm32_gpio_domain_translate(struct irq_domain *d,
@@ -292,14 +241,22 @@ static int stm32_gpio_domain_translate(struct irq_domain *d,
 	return 0;
 }
 
-static int stm32_gpio_domain_activate(struct irq_domain *d,
-				      struct irq_data *irq_data, bool reserve)
+static void stm32_gpio_domain_activate(struct irq_domain *d,
+				       struct irq_data *irq_data)
 {
 	struct stm32_gpio_bank *bank = d->host_data;
 	struct stm32_pinctrl *pctl = dev_get_drvdata(bank->gpio_chip.parent);
 
 	regmap_field_write(pctl->irqmux[irq_data->hwirq], bank->bank_nr);
-	return 0;
+	gpiochip_lock_as_irq(&bank->gpio_chip, irq_data->hwirq);
+}
+
+static void stm32_gpio_domain_deactivate(struct irq_domain *d,
+				       struct irq_data *irq_data)
+{
+	struct stm32_gpio_bank *bank = d->host_data;
+
+	gpiochip_unlock_as_irq(&bank->gpio_chip, irq_data->hwirq);
 }
 
 static int stm32_gpio_domain_alloc(struct irq_domain *d,
@@ -328,6 +285,7 @@ static const struct irq_domain_ops stm32_gpio_domain_ops = {
 	.alloc          = stm32_gpio_domain_alloc,
 	.free           = irq_domain_free_irqs_common,
 	.activate	= stm32_gpio_domain_activate,
+	.deactivate	= stm32_gpio_domain_deactivate,
 };
 
 /* Pinctrl functions */
@@ -452,6 +410,11 @@ static int stm32_pctrl_dt_subnode_to_map(struct pinctrl_dev *pctldev,
 
 		pin = STM32_GET_PIN_NO(pinfunc);
 		func = STM32_GET_PIN_FUNC(pinfunc);
+
+		if (pin >= pctl->match_data->npins) {
+			dev_err(pctl->dev, "invalid pin number.\n");
+			return -EINVAL;
+		}
 
 		if (!stm32_pctrl_is_function_valid(pctl, pin, func)) {
 			dev_err(pctl->dev, "invalid function.\n");
@@ -595,8 +558,8 @@ static void stm32_pmx_set_mode(struct stm32_gpio_bank *bank,
 	clk_disable(bank->clk);
 }
 
-void stm32_pmx_get_mode(struct stm32_gpio_bank *bank, int pin, u32 *mode,
-			u32 *alt)
+static void stm32_pmx_get_mode(struct stm32_gpio_bank *bank,
+		int pin, u32 *mode, u32 *alt)
 {
 	u32 val;
 	int alt_shift = (pin % 8) * 4;
@@ -956,7 +919,7 @@ static int stm32_gpiolib_register_bank(struct stm32_pinctrl *pctl,
 	int npins = STM32_GPIO_PINS_PER_BANK;
 	int bank_nr, err;
 
-	rstc = of_reset_control_get_exclusive(np, NULL);
+	rstc = of_reset_control_get(np, NULL);
 	if (!IS_ERR(rstc))
 		reset_control_deassert(rstc);
 

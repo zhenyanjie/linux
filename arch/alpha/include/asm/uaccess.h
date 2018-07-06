@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ALPHA_UACCESS_H
 #define __ALPHA_UACCESS_H
 
@@ -327,6 +326,7 @@ clear_user(void __user *to, long len)
         (uaccess_kernel() ? ~0UL : TASK_SIZE)
 
 extern long strncpy_from_user(char *dest, const char __user *src, long count);
+extern __must_check long strlen_user(const char __user *str);
 extern __must_check long strnlen_user(const char __user *str, long n);
 
 #include <asm/extable.h>

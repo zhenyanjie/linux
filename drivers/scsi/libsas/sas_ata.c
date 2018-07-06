@@ -343,7 +343,6 @@ static int smp_ata_check_ready(struct ata_link *link)
 	case SAS_END_DEVICE:
 		if (ex_phy->attached_sata_dev)
 			return sas_ata_clear_pending(dev, ex_phy);
-		/* fall through */
 	default:
 		return -ENODEV;
 	}
@@ -577,11 +576,6 @@ int sas_ata_init(struct domain_device *found_dev)
 		ata_sas_port_destroy(ap);
 		return rc;
 	}
-	rc = ata_sas_tport_add(found_dev->sata_dev.ata_host.dev, ap);
-	if (rc) {
-		ata_sas_port_destroy(ap);
-		return rc;
-	}
 	found_dev->sata_dev.ap = ap;
 
 	return 0;
@@ -714,7 +708,7 @@ void sas_resume_sata(struct asd_sas_port *port)
 }
 
 /**
- * sas_discover_sata - discover an STP/SATA domain device
+ * sas_discover_sata -- discover an STP/SATA domain device
  * @dev: pointer to struct domain_device of interest
  *
  * Devices directly attached to a HA port, have no parents.  All other
@@ -735,6 +729,7 @@ int sas_discover_sata(struct domain_device *dev)
 	if (res)
 		return res;
 
+	sas_discover_event(dev->port, DISCE_PROBE);
 	return 0;
 }
 

@@ -17,7 +17,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/slab.h>
@@ -331,19 +331,14 @@ static irqreturn_t pch_gpio_handler(int irq, void *dev_id)
 	return ret;
 }
 
-static int pch_gpio_alloc_generic_chip(struct pch_gpio *chip,
-				       unsigned int irq_start,
-				       unsigned int num)
+static void pch_gpio_alloc_generic_chip(struct pch_gpio *chip,
+				unsigned int irq_start, unsigned int num)
 {
 	struct irq_chip_generic *gc;
 	struct irq_chip_type *ct;
-	int rv;
 
-	gc = devm_irq_alloc_generic_chip(chip->dev, "pch_gpio", 1, irq_start,
-					 chip->base, handle_simple_irq);
-	if (!gc)
-		return -ENOMEM;
-
+	gc = irq_alloc_generic_chip("pch_gpio", 1, irq_start, chip->base,
+				    handle_simple_irq);
 	gc->private = chip;
 	ct = gc->chip_types;
 
@@ -352,11 +347,8 @@ static int pch_gpio_alloc_generic_chip(struct pch_gpio *chip,
 	ct->chip.irq_unmask = pch_irq_unmask;
 	ct->chip.irq_set_type = pch_irq_type;
 
-	rv = devm_irq_setup_generic_chip(chip->dev, gc, IRQ_MSK(num),
-					 IRQ_GC_INIT_MASK_CACHE,
-					 IRQ_NOREQUEST | IRQ_NOPROBE, 0);
-
-	return rv;
+	irq_setup_generic_chip(gc, IRQ_MSK(num), IRQ_GC_INIT_MASK_CACHE,
+			       IRQ_NOREQUEST | IRQ_NOPROBE, 0);
 }
 
 static int pch_gpio_probe(struct pci_dev *pdev,
@@ -433,10 +425,7 @@ static int pch_gpio_probe(struct pci_dev *pdev,
 		goto err_request_irq;
 	}
 
-	ret = pch_gpio_alloc_generic_chip(chip, irq_base,
-					  gpio_pins[chip->ioh]);
-	if (ret)
-		goto err_request_irq;
+	pch_gpio_alloc_generic_chip(chip, irq_base, gpio_pins[chip->ioh]);
 
 end:
 	return 0;

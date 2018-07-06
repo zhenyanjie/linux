@@ -134,12 +134,10 @@ struct metadata_dst *iptunnel_metadata_reply(struct metadata_dst *md,
 	struct metadata_dst *res;
 	struct ip_tunnel_info *dst, *src;
 
-	if (!md || md->type != METADATA_IP_TUNNEL ||
-	    md->u.tun_info.mode & IP_TUNNEL_INFO_TX)
-
+	if (!md || md->u.tun_info.mode & IP_TUNNEL_INFO_TX)
 		return NULL;
 
-	res = metadata_dst_alloc(0, METADATA_IP_TUNNEL, flags);
+	res = metadata_dst_alloc(0, flags);
 	if (!res)
 		return NULL;
 
@@ -230,16 +228,14 @@ static const struct nla_policy ip_tun_policy[LWTUNNEL_IP_MAX + 1] = {
 
 static int ip_tun_build_state(struct nlattr *attr,
 			      unsigned int family, const void *cfg,
-			      struct lwtunnel_state **ts,
-			      struct netlink_ext_ack *extack)
+			      struct lwtunnel_state **ts)
 {
 	struct ip_tunnel_info *tun_info;
 	struct lwtunnel_state *new_state;
 	struct nlattr *tb[LWTUNNEL_IP_MAX + 1];
 	int err;
 
-	err = nla_parse_nested(tb, LWTUNNEL_IP_MAX, attr, ip_tun_policy,
-			       extack);
+	err = nla_parse_nested(tb, LWTUNNEL_IP_MAX, attr, ip_tun_policy, NULL);
 	if (err < 0)
 		return err;
 
@@ -329,8 +325,7 @@ static const struct nla_policy ip6_tun_policy[LWTUNNEL_IP6_MAX + 1] = {
 
 static int ip6_tun_build_state(struct nlattr *attr,
 			       unsigned int family, const void *cfg,
-			       struct lwtunnel_state **ts,
-			       struct netlink_ext_ack *extack)
+			       struct lwtunnel_state **ts)
 {
 	struct ip_tunnel_info *tun_info;
 	struct lwtunnel_state *new_state;
@@ -338,7 +333,7 @@ static int ip6_tun_build_state(struct nlattr *attr,
 	int err;
 
 	err = nla_parse_nested(tb, LWTUNNEL_IP6_MAX, attr, ip6_tun_policy,
-			       extack);
+			       NULL);
 	if (err < 0)
 		return err;
 
@@ -423,17 +418,17 @@ void __init ip_tunnel_core_init(void)
 	lwtunnel_encap_add_ops(&ip6_tun_lwt_ops, LWTUNNEL_ENCAP_IP6);
 }
 
-DEFINE_STATIC_KEY_FALSE(ip_tunnel_metadata_cnt);
+struct static_key ip_tunnel_metadata_cnt = STATIC_KEY_INIT_FALSE;
 EXPORT_SYMBOL(ip_tunnel_metadata_cnt);
 
 void ip_tunnel_need_metadata(void)
 {
-	static_branch_inc(&ip_tunnel_metadata_cnt);
+	static_key_slow_inc(&ip_tunnel_metadata_cnt);
 }
 EXPORT_SYMBOL_GPL(ip_tunnel_need_metadata);
 
 void ip_tunnel_unneed_metadata(void)
 {
-	static_branch_dec(&ip_tunnel_metadata_cnt);
+	static_key_slow_dec(&ip_tunnel_metadata_cnt);
 }
 EXPORT_SYMBOL_GPL(ip_tunnel_unneed_metadata);

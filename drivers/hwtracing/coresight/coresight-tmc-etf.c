@@ -1,7 +1,18 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright(C) 2016 Linaro Limited. All rights reserved.
  * Author: Mathieu Poirier <mathieu.poirier@linaro.org>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published by
+ * the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/circ_buf.h>
@@ -32,34 +43,17 @@ static void tmc_etb_enable_hw(struct tmc_drvdata *drvdata)
 
 static void tmc_etb_dump_hw(struct tmc_drvdata *drvdata)
 {
-	bool lost = false;
 	char *bufp;
-	const u32 *barrier;
-	u32 read_data, status;
+	u32 read_data;
 	int i;
-
-	/*
-	 * Get a hold of the status register and see if a wrap around
-	 * has occurred.
-	 */
-	status = readl_relaxed(drvdata->base + TMC_STS);
-	if (status & TMC_STS_FULL)
-		lost = true;
 
 	bufp = drvdata->buf;
 	drvdata->len = 0;
-	barrier = barrier_pkt;
 	while (1) {
 		for (i = 0; i < drvdata->memwidth; i++) {
 			read_data = readl_relaxed(drvdata->base + TMC_RRD);
 			if (read_data == 0xFFFFFFFF)
 				return;
-
-			if (lost && *barrier) {
-				read_data = *barrier;
-				barrier++;
-			}
-
 			memcpy(bufp, &read_data, 4);
 			bufp += 4;
 			drvdata->len += 4;
@@ -172,6 +166,9 @@ out:
 	if (!used)
 		kfree(buf);
 
+	if (!ret)
+		dev_info(drvdata->dev, "TMC-ETB/ETF enabled\n");
+
 	return ret;
 }
 
@@ -207,27 +204,15 @@ out:
 
 static int tmc_enable_etf_sink(struct coresight_device *csdev, u32 mode)
 {
-	int ret;
-	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
-
 	switch (mode) {
 	case CS_MODE_SYSFS:
-		ret = tmc_enable_etf_sink_sysfs(csdev);
-		break;
+		return tmc_enable_etf_sink_sysfs(csdev);
 	case CS_MODE_PERF:
-		ret = tmc_enable_etf_sink_perf(csdev);
-		break;
-	/* We shouldn't be here */
-	default:
-		ret = -EINVAL;
-		break;
+		return tmc_enable_etf_sink_perf(csdev);
 	}
 
-	if (ret)
-		return ret;
-
-	dev_info(drvdata->dev, "TMC-ETB/ETF enabled\n");
-	return 0;
+	/* We shouldn't be here */
+	return -EINVAL;
 }
 
 static void tmc_disable_etf_sink(struct coresight_device *csdev)
@@ -288,7 +273,7 @@ static void tmc_disable_etf_link(struct coresight_device *csdev,
 	drvdata->mode = CS_MODE_DISABLED;
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
-	dev_info(drvdata->dev, "TMC-ETF disabled\n");
+	dev_info(drvdata->dev, "TMC disabled\n");
 }
 
 static void *tmc_alloc_etf_buffer(struct coresight_device *csdev, int cpu,
@@ -375,11 +360,9 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 				  struct perf_output_handle *handle,
 				  void *sink_config)
 {
-	bool lost = false;
 	int i, cur;
-	const u32 *barrier;
 	u32 *buf_ptr;
-	u64 read_ptr, write_ptr;
+	u32 read_ptr, write_ptr;
 	u32 status, to_read;
 	unsigned long offset;
 	struct cs_buffers *buf = sink_config;
@@ -396,8 +379,8 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 
 	tmc_flush_and_stop(drvdata);
 
-	read_ptr = tmc_read_rrp(drvdata);
-	write_ptr = tmc_read_rwp(drvdata);
+	read_ptr = readl_relaxed(drvdata->base + TMC_RRP);
+	write_ptr = readl_relaxed(drvdata->base + TMC_RWP);
 
 	/*
 	 * Get a hold of the status register and see if a wrap around
@@ -405,7 +388,7 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 	 */
 	status = readl_relaxed(drvdata->base + TMC_STS);
 	if (status & TMC_STS_FULL) {
-		lost = true;
+		perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED);
 		to_read = drvdata->size;
 	} else {
 		to_read = CIRC_CNT(write_ptr, read_ptr, drvdata->size);
@@ -449,26 +432,17 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 		if (read_ptr > (drvdata->size - 1))
 			read_ptr -= drvdata->size;
 		/* Tell the HW */
-		tmc_write_rrp(drvdata, read_ptr);
-		lost = true;
-	}
-
-	if (lost)
+		writel_relaxed(read_ptr, drvdata->base + TMC_RRP);
 		perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED);
+	}
 
 	cur = buf->cur;
 	offset = buf->offset;
-	barrier = barrier_pkt;
 
 	/* for every byte to read */
 	for (i = 0; i < to_read; i += 4) {
 		buf_ptr = buf->data_pages[cur] + offset;
 		*buf_ptr = readl_relaxed(drvdata->base + TMC_RRD);
-
-		if (lost && *barrier) {
-			*buf_ptr = *barrier;
-			barrier++;
-		}
 
 		offset += 4;
 		if (offset >= PAGE_SIZE) {

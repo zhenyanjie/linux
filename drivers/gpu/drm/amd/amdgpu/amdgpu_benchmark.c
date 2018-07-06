@@ -40,7 +40,7 @@ static int amdgpu_benchmark_do_move(struct amdgpu_device *adev, unsigned size,
 	for (i = 0; i < n; i++) {
 		struct amdgpu_ring *ring = adev->mman.buffer_funcs_ring;
 		r = amdgpu_copy_buffer(ring, saddr, daddr, size, NULL, &fence,
-				       false, false);
+				       false);
 		if (r)
 			goto exit_do_move;
 		r = dma_fence_wait(fence, false);
@@ -75,20 +75,13 @@ static void amdgpu_benchmark_move(struct amdgpu_device *adev, unsigned size,
 {
 	struct amdgpu_bo *dobj = NULL;
 	struct amdgpu_bo *sobj = NULL;
-	struct amdgpu_bo_param bp;
 	uint64_t saddr, daddr;
 	int r, n;
 	int time;
 
-	memset(&bp, 0, sizeof(bp));
-	bp.size = size;
-	bp.byte_align = PAGE_SIZE;
-	bp.domain = sdomain;
-	bp.flags = 0;
-	bp.type = ttm_bo_type_kernel;
-	bp.resv = NULL;
 	n = AMDGPU_BENCHMARK_ITERATIONS;
-	r = amdgpu_bo_create(adev, &bp, &sobj);
+	r = amdgpu_bo_create(adev, size, PAGE_SIZE, true, sdomain, 0, NULL,
+			     NULL, &sobj);
 	if (r) {
 		goto out_cleanup;
 	}
@@ -100,8 +93,8 @@ static void amdgpu_benchmark_move(struct amdgpu_device *adev, unsigned size,
 	if (r) {
 		goto out_cleanup;
 	}
-	bp.domain = ddomain;
-	r = amdgpu_bo_create(adev, &bp, &dobj);
+	r = amdgpu_bo_create(adev, size, PAGE_SIZE, true, ddomain, 0, NULL,
+			     NULL, &dobj);
 	if (r) {
 		goto out_cleanup;
 	}

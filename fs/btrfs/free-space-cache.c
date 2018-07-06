@@ -1,6 +1,19 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2008 Red Hat.  All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public
+ * License v2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public
+ * License along with this program; if not, write to the
+ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 021110-1307, USA.
  */
 
 #include <linux/pagemap.h>
@@ -9,7 +22,6 @@
 #include <linux/slab.h>
 #include <linux/math64.h>
 #include <linux/ratelimit.h>
-#include <linux/error-injection.h>
 #include "ctree.h"
 #include "free-space-cache.h"
 #include "transaction.h"
@@ -253,8 +265,10 @@ int btrfs_truncate_free_space_cache(struct btrfs_trans_handle *trans,
 	truncate_pagecache(inode, 0);
 
 	/*
-	 * We skip the throttling logic for free space cache inodes, so we don't
-	 * need to check for -EAGAIN.
+	 * We don't need an orphan item because truncating the free space cache
+	 * will never be split across transactions.
+	 * We don't need to check for -EAGAIN because we're a free space
+	 * cache inode
 	 */
 	ret = btrfs_truncate_inode_items(trans, root, inode,
 					 0, BTRFS_EXTENT_DATA_KEY);
@@ -318,7 +332,6 @@ static int io_ctl_init(struct btrfs_io_ctl *io_ctl, struct inode *inode,
 
 	return 0;
 }
-ALLOW_ERROR_INJECTION(io_ctl_init, ERRNO);
 
 static void io_ctl_free(struct btrfs_io_ctl *io_ctl)
 {
@@ -696,7 +709,7 @@ static int __load_free_space_cache(struct btrfs_root *root, struct inode *inode,
 
 	if (!BTRFS_I(inode)->generation) {
 		btrfs_info(fs_info,
-			   "the free space cache file (%llu) is invalid, skip it",
+			   "The free space cache file (%llu) is invalid. skip it\n",
 			   offset);
 		return 0;
 	}
@@ -980,7 +993,8 @@ update_cache_item(struct btrfs_trans_handle *trans,
 	ret = btrfs_search_slot(trans, root, &key, path, 0, 1);
 	if (ret < 0) {
 		clear_extent_bit(&BTRFS_I(inode)->io_tree, 0, inode->i_size - 1,
-				 EXTENT_DIRTY | EXTENT_DELALLOC, 0, 0, NULL);
+				 EXTENT_DIRTY | EXTENT_DELALLOC, 0, 0, NULL,
+				 GFP_NOFS);
 		goto fail;
 	}
 	leaf = path->nodes[0];
@@ -994,7 +1008,7 @@ update_cache_item(struct btrfs_trans_handle *trans,
 			clear_extent_bit(&BTRFS_I(inode)->io_tree, 0,
 					 inode->i_size - 1,
 					 EXTENT_DIRTY | EXTENT_DELALLOC, 0, 0,
-					 NULL);
+					 NULL, GFP_NOFS);
 			btrfs_release_path(path);
 			goto fail;
 		}
@@ -1091,7 +1105,8 @@ static int flush_dirty_cache(struct inode *inode)
 	ret = btrfs_wait_ordered_range(inode, 0, (u64)-1);
 	if (ret)
 		clear_extent_bit(&BTRFS_I(inode)->io_tree, 0, inode->i_size - 1,
-				 EXTENT_DIRTY | EXTENT_DELALLOC, 0, 0, NULL);
+				 EXTENT_DIRTY | EXTENT_DELALLOC, 0, 0, NULL,
+				 GFP_NOFS);
 
 	return ret;
 }
@@ -1112,7 +1127,8 @@ cleanup_write_cache_enospc(struct inode *inode,
 {
 	io_ctl_drop_pages(io_ctl);
 	unlock_extent_cached(&BTRFS_I(inode)->io_tree, 0,
-			     i_size_read(inode) - 1, cached_state);
+			     i_size_read(inode) - 1, cached_state,
+			     GFP_NOFS);
 }
 
 static int __btrfs_wait_cache_io(struct btrfs_root *root,
@@ -1248,7 +1264,7 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
 	/* Lock all pages first so we can lock the extent safely. */
 	ret = io_ctl_prepare_pages(io_ctl, inode, 0);
 	if (ret)
-		goto out_unlock;
+		goto out;
 
 	lock_extent_bits(&BTRFS_I(inode)->io_tree, 0, i_size_read(inode) - 1,
 			 &cached_state);
@@ -1306,7 +1322,7 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
 	io_ctl_drop_pages(io_ctl);
 
 	unlock_extent_cached(&BTRFS_I(inode)->io_tree, 0,
-			     i_size_read(inode) - 1, &cached_state);
+			     i_size_read(inode) - 1, &cached_state, GFP_NOFS);
 
 	/*
 	 * at this point the pages are under IO and we're happy,
@@ -1342,7 +1358,6 @@ out_nospc_locked:
 out_nospc:
 	cleanup_write_cache_enospc(inode, io_ctl, &cached_state);
 
-out_unlock:
 	if (block_group && (block_group->flags & BTRFS_BLOCK_GROUP_DATA))
 		up_write(&block_group->data_rwsem);
 
@@ -3532,7 +3547,7 @@ int btrfs_write_out_ino_cache(struct btrfs_root *root,
 	if (ret) {
 		if (release_metadata)
 			btrfs_delalloc_release_metadata(BTRFS_I(inode),
-					inode->i_size, true);
+					inode->i_size);
 #ifdef DEBUG
 		btrfs_err(fs_info,
 			  "failed to write free ino cache for root %llu",

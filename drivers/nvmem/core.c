@@ -135,7 +135,7 @@ static ssize_t bin_attr_nvmem_write(struct file *filp, struct kobject *kobj,
 
 	/* Stop the user from writing */
 	if (pos >= nvmem->size)
-		return -EFBIG;
+		return 0;
 
 	if (count < nvmem->word_size)
 		return -EINVAL;
@@ -287,15 +287,9 @@ static struct nvmem_cell *nvmem_find_cell(const char *cell_id)
 {
 	struct nvmem_cell *p;
 
-	mutex_lock(&nvmem_cells_mutex);
-
 	list_for_each_entry(p, &nvmem_cells, node)
-		if (!strcmp(p->name, cell_id)) {
-			mutex_unlock(&nvmem_cells_mutex);
+		if (p && !strcmp(p->name, cell_id))
 			return p;
-		}
-
-	mutex_unlock(&nvmem_cells_mutex);
 
 	return NULL;
 }
@@ -353,27 +347,18 @@ static int nvmem_cell_info_to_nvmem_cell(struct nvmem_device *nvmem,
 	return 0;
 }
 
-/**
- * nvmem_add_cells() - Add cell information to an nvmem device
- *
- * @nvmem: nvmem device to add cells to.
- * @info: nvmem cell info to add to the device
- * @ncells: number of cells in info
- *
- * Return: 0 or negative error code on failure.
- */
-int nvmem_add_cells(struct nvmem_device *nvmem,
-		    const struct nvmem_cell_info *info,
-		    int ncells)
+static int nvmem_add_cells(struct nvmem_device *nvmem,
+			   const struct nvmem_config *cfg)
 {
 	struct nvmem_cell **cells;
+	const struct nvmem_cell_info *info = cfg->cells;
 	int i, rval;
 
-	cells = kcalloc(ncells, sizeof(*cells), GFP_KERNEL);
+	cells = kcalloc(cfg->ncells, sizeof(*cells), GFP_KERNEL);
 	if (!cells)
 		return -ENOMEM;
 
-	for (i = 0; i < ncells; i++) {
+	for (i = 0; i < cfg->ncells; i++) {
 		cells[i] = kzalloc(sizeof(**cells), GFP_KERNEL);
 		if (!cells[i]) {
 			rval = -ENOMEM;
@@ -389,7 +374,7 @@ int nvmem_add_cells(struct nvmem_device *nvmem,
 		nvmem_cell_add(cells[i]);
 	}
 
-	nvmem->ncells = ncells;
+	nvmem->ncells = cfg->ncells;
 	/* remove tmp array */
 	kfree(cells);
 
@@ -402,7 +387,6 @@ err:
 
 	return rval;
 }
-EXPORT_SYMBOL_GPL(nvmem_add_cells);
 
 /*
  * nvmem_setup_compat() - Create an additional binary entry in
@@ -454,6 +438,7 @@ static int nvmem_setup_compat(struct nvmem_device *nvmem,
 struct nvmem_device *nvmem_register(const struct nvmem_config *config)
 {
 	struct nvmem_device *nvmem;
+	struct device_node *np;
 	int rval;
 
 	if (!config->dev)
@@ -471,10 +456,8 @@ struct nvmem_device *nvmem_register(const struct nvmem_config *config)
 
 	nvmem->id = rval;
 	nvmem->owner = config->owner;
-	if (!nvmem->owner && config->dev->driver)
-		nvmem->owner = config->dev->driver->owner;
-	nvmem->stride = config->stride ?: 1;
-	nvmem->word_size = config->word_size ?: 1;
+	nvmem->stride = config->stride;
+	nvmem->word_size = config->word_size;
 	nvmem->size = config->size;
 	nvmem->dev.type = &nvmem_provider_type;
 	nvmem->dev.bus = &nvmem_bus_type;
@@ -482,17 +465,13 @@ struct nvmem_device *nvmem_register(const struct nvmem_config *config)
 	nvmem->priv = config->priv;
 	nvmem->reg_read = config->reg_read;
 	nvmem->reg_write = config->reg_write;
-	nvmem->dev.of_node = config->dev->of_node;
+	np = config->dev->of_node;
+	nvmem->dev.of_node = np;
+	dev_set_name(&nvmem->dev, "%s%d",
+		     config->name ? : "nvmem",
+		     config->name ? config->id : nvmem->id);
 
-	if (config->id == -1 && config->name) {
-		dev_set_name(&nvmem->dev, "%s", config->name);
-	} else {
-		dev_set_name(&nvmem->dev, "%s%d",
-			     config->name ? : "nvmem",
-			     config->name ? config->id : nvmem->id);
-	}
-
-	nvmem->read_only = device_property_present(config->dev, "read-only") |
+	nvmem->read_only = of_property_read_bool(np, "read-only") |
 			   config->read_only;
 
 	if (config->root_only)
@@ -519,7 +498,7 @@ struct nvmem_device *nvmem_register(const struct nvmem_config *config)
 	}
 
 	if (config->cells)
-		nvmem_add_cells(nvmem, config->cells, config->ncells);
+		nvmem_add_cells(nvmem, config);
 
 	return nvmem;
 
@@ -553,72 +532,10 @@ int nvmem_unregister(struct nvmem_device *nvmem)
 
 	nvmem_device_remove_all_cells(nvmem);
 	device_del(&nvmem->dev);
-	put_device(&nvmem->dev);
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(nvmem_unregister);
-
-static void devm_nvmem_release(struct device *dev, void *res)
-{
-	WARN_ON(nvmem_unregister(*(struct nvmem_device **)res));
-}
-
-/**
- * devm_nvmem_register() - Register a managed nvmem device for given
- * nvmem_config.
- * Also creates an binary entry in /sys/bus/nvmem/devices/dev-name/nvmem
- *
- * @dev: Device that uses the nvmem device.
- * @config: nvmem device configuration with which nvmem device is created.
- *
- * Return: Will be an ERR_PTR() on error or a valid pointer to nvmem_device
- * on success.
- */
-struct nvmem_device *devm_nvmem_register(struct device *dev,
-					 const struct nvmem_config *config)
-{
-	struct nvmem_device **ptr, *nvmem;
-
-	ptr = devres_alloc(devm_nvmem_release, sizeof(*ptr), GFP_KERNEL);
-	if (!ptr)
-		return ERR_PTR(-ENOMEM);
-
-	nvmem = nvmem_register(config);
-
-	if (!IS_ERR(nvmem)) {
-		*ptr = nvmem;
-		devres_add(dev, ptr);
-	} else {
-		devres_free(ptr);
-	}
-
-	return nvmem;
-}
-EXPORT_SYMBOL_GPL(devm_nvmem_register);
-
-static int devm_nvmem_match(struct device *dev, void *res, void *data)
-{
-	struct nvmem_device **r = res;
-
-	return *r == data;
-}
-
-/**
- * devm_nvmem_unregister() - Unregister previously registered managed nvmem
- * device.
- *
- * @dev: Device that uses the nvmem device.
- * @nvmem: Pointer to previously registered nvmem device.
- *
- * Return: Will be an negative on error or a zero on success.
- */
-int devm_nvmem_unregister(struct device *dev, struct nvmem_device *nvmem)
-{
-	return devres_release(dev, devm_nvmem_release, devm_nvmem_match, nvmem);
-}
-EXPORT_SYMBOL(devm_nvmem_unregister);
-
 
 static struct nvmem_device *__nvmem_device_get(struct device_node *np,
 					       struct nvmem_cell **cellp,
@@ -674,11 +591,16 @@ static void __nvmem_device_put(struct nvmem_device *nvmem)
 	mutex_unlock(&nvmem_mutex);
 }
 
+static int nvmem_match(struct device *dev, void *data)
+{
+	return !strcmp(dev_name(dev), data);
+}
+
 static struct nvmem_device *nvmem_find(const char *name)
 {
 	struct device *d;
 
-	d = bus_find_device_by_name(&nvmem_bus_type, NULL, name);
+	d = bus_find_device(&nvmem_bus_type, NULL, (void *)name, nvmem_match);
 
 	if (!d)
 		return NULL;
@@ -686,7 +608,7 @@ static struct nvmem_device *nvmem_find(const char *name)
 	return to_nvmem_device(d);
 }
 
-#if IS_ENABLED(CONFIG_OF)
+#if IS_ENABLED(CONFIG_NVMEM) && IS_ENABLED(CONFIG_OF)
 /**
  * of_nvmem_device_get() - Get nvmem device from a given id
  *
@@ -824,7 +746,7 @@ static struct nvmem_cell *nvmem_cell_get_from_list(const char *cell_id)
 	return cell;
 }
 
-#if IS_ENABLED(CONFIG_OF)
+#if IS_ENABLED(CONFIG_NVMEM) && IS_ENABLED(CONFIG_OF)
 /**
  * of_nvmem_cell_get() - Get a nvmem cell from given device node and cell id
  *
@@ -860,14 +782,13 @@ struct nvmem_cell *of_nvmem_cell_get(struct device_node *np,
 		return ERR_PTR(-EINVAL);
 
 	nvmem = __nvmem_device_get(nvmem_np, NULL, NULL);
-	of_node_put(nvmem_np);
 	if (IS_ERR(nvmem))
 		return ERR_CAST(nvmem);
 
 	addr = of_get_property(cell_np, "reg", &len);
 	if (!addr || (len < 2 * sizeof(u32))) {
-		dev_err(&nvmem->dev, "nvmem: invalid reg on %pOF\n",
-			cell_np);
+		dev_err(&nvmem->dev, "nvmem: invalid reg on %s\n",
+			cell_np->full_name);
 		rval  = -EINVAL;
 		goto err_mem;
 	}
@@ -1017,7 +938,8 @@ void nvmem_cell_put(struct nvmem_cell *cell)
 }
 EXPORT_SYMBOL_GPL(nvmem_cell_put);
 
-static void nvmem_shift_read_buffer_in_place(struct nvmem_cell *cell, void *buf)
+static inline void nvmem_shift_read_buffer_in_place(struct nvmem_cell *cell,
+						    void *buf)
 {
 	u8 *p, *b;
 	int i, bit_offset = cell->bit_offset;
@@ -1098,8 +1020,8 @@ void *nvmem_cell_read(struct nvmem_cell *cell, size_t *len)
 }
 EXPORT_SYMBOL_GPL(nvmem_cell_read);
 
-static void *nvmem_cell_prepare_write_buffer(struct nvmem_cell *cell,
-					     u8 *_buf, int len)
+static inline void *nvmem_cell_prepare_write_buffer(struct nvmem_cell *cell,
+						    u8 *_buf, int len)
 {
 	struct nvmem_device *nvmem = cell->nvmem;
 	int i, rc, nbits, bit_offset = cell->bit_offset;
@@ -1119,8 +1041,6 @@ static void *nvmem_cell_prepare_write_buffer(struct nvmem_cell *cell,
 
 		/* setup the first byte with lsb bits from nvmem */
 		rc = nvmem_reg_read(nvmem, cell->offset, &v, 1);
-		if (rc)
-			goto err;
 		*b++ |= GENMASK(bit_offset - 1, 0) & v;
 
 		/* setup rest of the byte if any */
@@ -1139,16 +1059,11 @@ static void *nvmem_cell_prepare_write_buffer(struct nvmem_cell *cell,
 		/* setup the last byte with msb bits from nvmem */
 		rc = nvmem_reg_read(nvmem,
 				    cell->offset + cell->bytes - 1, &v, 1);
-		if (rc)
-			goto err;
 		*p |= GENMASK(7, (nbits + bit_offset) % BITS_PER_BYTE) & v;
 
 	}
 
 	return buf;
-err:
-	kfree(buf);
-	return ERR_PTR(rc);
 }
 
 /**
@@ -1187,43 +1102,6 @@ int nvmem_cell_write(struct nvmem_cell *cell, void *buf, size_t len)
 	return len;
 }
 EXPORT_SYMBOL_GPL(nvmem_cell_write);
-
-/**
- * nvmem_cell_read_u32() - Read a cell value as an u32
- *
- * @dev: Device that requests the nvmem cell.
- * @cell_id: Name of nvmem cell to read.
- * @val: pointer to output value.
- *
- * Return: 0 on success or negative errno.
- */
-int nvmem_cell_read_u32(struct device *dev, const char *cell_id, u32 *val)
-{
-	struct nvmem_cell *cell;
-	void *buf;
-	size_t len;
-
-	cell = nvmem_cell_get(dev, cell_id);
-	if (IS_ERR(cell))
-		return PTR_ERR(cell);
-
-	buf = nvmem_cell_read(cell, &len);
-	if (IS_ERR(buf)) {
-		nvmem_cell_put(cell);
-		return PTR_ERR(buf);
-	}
-	if (len != sizeof(*val)) {
-		kfree(buf);
-		nvmem_cell_put(cell);
-		return -EINVAL;
-	}
-	memcpy(val, buf, sizeof(*val));
-
-	kfree(buf);
-	nvmem_cell_put(cell);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(nvmem_cell_read_u32);
 
 /**
  * nvmem_device_cell_read() - Read a given nvmem device and cell

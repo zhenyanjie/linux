@@ -64,7 +64,6 @@
 #include <linux/etherdevice.h>
 #include <linux/wireless.h>
 #include <linux/firmware.h>
-#include <linux/refcount.h>
 
 #include "mic.h"
 #include "orinoco.h"
@@ -210,7 +209,7 @@ struct ezusb_packet {
 } __packed;
 
 /* Table of devices that work or may work with this driver */
-static const struct usb_device_id ezusb_table[] = {
+static struct usb_device_id ezusb_table[] = {
 	{USB_DEVICE(USB_COMPAQ_VENDOR_ID, USB_COMPAQ_WL215_ID)},
 	{USB_DEVICE(USB_COMPAQ_VENDOR_ID, USB_HP_WL215_ID)},
 	{USB_DEVICE(USB_COMPAQ_VENDOR_ID, USB_COMPAQ_W200_ID)},
@@ -269,7 +268,7 @@ enum ezusb_state {
 
 struct request_context {
 	struct list_head list;
-	refcount_t refcount;
+	atomic_t refcount;
 	struct completion done;	/* Signals that CTX is dead */
 	int killed;
 	struct urb *outurb;	/* OUT for req pkt */
@@ -299,7 +298,7 @@ static inline u8 ezusb_reply_inc(u8 count)
 
 static void ezusb_request_context_put(struct request_context *ctx)
 {
-	if (!refcount_dec_and_test(&ctx->refcount))
+	if (!atomic_dec_and_test(&ctx->refcount))
 		return;
 
 	WARN_ON(!ctx->done.done);
@@ -319,9 +318,9 @@ static inline void ezusb_mod_timer(struct ezusb_priv *upriv,
 	mod_timer(timer, expire);
 }
 
-static void ezusb_request_timerfn(struct timer_list *t)
+static void ezusb_request_timerfn(u_long _ctx)
 {
-	struct request_context *ctx = from_timer(ctx, t, timer);
+	struct request_context *ctx = (void *) _ctx;
 
 	ctx->outurb->transfer_flags |= URB_ASYNC_UNLINK;
 	if (usb_unlink_urb(ctx->outurb) == -EINPROGRESS) {
@@ -329,7 +328,7 @@ static void ezusb_request_timerfn(struct timer_list *t)
 	} else {
 		ctx->state = EZUSB_CTX_RESP_TIMEOUT;
 		dev_dbg(&ctx->outurb->dev->dev, "couldn't unlink\n");
-		refcount_inc(&ctx->refcount);
+		atomic_inc(&ctx->refcount);
 		ctx->killed = 1;
 		ezusb_ctx_complete(ctx);
 		ezusb_request_context_put(ctx);
@@ -362,10 +361,10 @@ static struct request_context *ezusb_alloc_ctx(struct ezusb_priv *upriv,
 	ctx->out_rid = out_rid;
 	ctx->in_rid = in_rid;
 
-	refcount_set(&ctx->refcount, 1);
+	atomic_set(&ctx->refcount, 1);
 	init_completion(&ctx->done);
 
-	timer_setup(&ctx->timer, ezusb_request_timerfn, 0);
+	setup_timer(&ctx->timer, ezusb_request_timerfn, (u_long)ctx);
 	return ctx;
 }
 
@@ -470,7 +469,7 @@ static void ezusb_req_queue_run(struct ezusb_priv *upriv)
 	list_move_tail(&ctx->list, &upriv->req_active);
 
 	if (ctx->state == EZUSB_CTX_QUEUED) {
-		refcount_inc(&ctx->refcount);
+		atomic_inc(&ctx->refcount);
 		result = usb_submit_urb(ctx->outurb, GFP_ATOMIC);
 		if (result) {
 			ctx->state = EZUSB_CTX_REQSUBMIT_FAIL;
@@ -508,7 +507,7 @@ static void ezusb_req_enqueue_run(struct ezusb_priv *upriv,
 		spin_unlock_irqrestore(&upriv->req_lock, flags);
 		goto done;
 	}
-	refcount_inc(&ctx->refcount);
+	atomic_inc(&ctx->refcount);
 	list_add_tail(&ctx->list, &upriv->req_pending);
 	spin_unlock_irqrestore(&upriv->req_lock, flags);
 
@@ -1457,6 +1456,7 @@ static void ezusb_bulk_in_callback(struct urb *urb)
 
 static inline void ezusb_delete(struct ezusb_priv *upriv)
 {
+	struct net_device *dev;
 	struct list_head *item;
 	struct list_head *tmp_item;
 	unsigned long flags;
@@ -1464,6 +1464,7 @@ static inline void ezusb_delete(struct ezusb_priv *upriv)
 	BUG_ON(in_interrupt());
 	BUG_ON(!upriv);
 
+	dev = upriv->dev;
 	mutex_lock(&upriv->mtx);
 
 	upriv->udev = NULL;	/* No timer will be rearmed from here */
@@ -1476,7 +1477,7 @@ static inline void ezusb_delete(struct ezusb_priv *upriv)
 		int err;
 
 		ctx = list_entry(item, struct request_context, list);
-		refcount_inc(&ctx->refcount);
+		atomic_inc(&ctx->refcount);
 
 		ctx->outurb->transfer_flags |= URB_ASYNC_UNLINK;
 		err = usb_unlink_urb(ctx->outurb);

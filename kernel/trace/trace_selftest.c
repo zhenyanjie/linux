@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* Include in trace.c */
 
 #include <uapi/linux/sched/types.h>
@@ -60,7 +59,7 @@ static int trace_test_buffer_cpu(struct trace_buffer *buf, int cpu)
  * Test the trace buffer to see if all the elements
  * are still sane.
  */
-static int __maybe_unused trace_test_buffer(struct trace_buffer *buf, unsigned long *count)
+static int trace_test_buffer(struct trace_buffer *buf, unsigned long *count)
 {
 	unsigned long flags, cnt = 0;
 	int cpu, ret = 0;
@@ -274,7 +273,7 @@ static int trace_selftest_ops(struct trace_array *tr, int cnt)
 		goto out_free;
 	if (cnt > 1) {
 		if (trace_selftest_test_global_cnt == 0)
-			goto out_free;
+			goto out;
 	}
 	if (trace_selftest_test_dyn_cnt == 0)
 		goto out_free;
@@ -1150,6 +1149,38 @@ trace_selftest_startup_wakeup(struct tracer *trace, struct trace_array *tr)
 	return ret;
 }
 #endif /* CONFIG_SCHED_TRACER */
+
+#ifdef CONFIG_CONTEXT_SWITCH_TRACER
+int
+trace_selftest_startup_sched_switch(struct tracer *trace, struct trace_array *tr)
+{
+	unsigned long count;
+	int ret;
+
+	/* start the tracing */
+	ret = tracer_init(trace, tr);
+	if (ret) {
+		warn_failed_init_tracer(trace, ret);
+		return ret;
+	}
+
+	/* Sleep for a 1/10 of a second */
+	msleep(100);
+	/* stop the tracing. */
+	tracing_stop();
+	/* check the trace buffer */
+	ret = trace_test_buffer(&tr->trace_buffer, &count);
+	trace->reset(tr);
+	tracing_start();
+
+	if (!ret && !count) {
+		printk(KERN_CONT ".. no entries found ..");
+		ret = -1;
+	}
+
+	return ret;
+}
+#endif /* CONFIG_CONTEXT_SWITCH_TRACER */
 
 #ifdef CONFIG_BRANCH_TRACER
 int

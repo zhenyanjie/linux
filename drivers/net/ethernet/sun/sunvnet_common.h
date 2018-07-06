@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _SUNVNETCOMMON_H
 #define _SUNVNETCOMMON_H
 
@@ -130,7 +129,7 @@ struct vnet {
 	((__port)->vsw ? (__port)->dev : (__port)->vp->dev)
 
 /* Common funcs */
-void sunvnet_clean_timer_expire_common(struct timer_list *t);
+void sunvnet_clean_timer_expire_common(unsigned long port0);
 int sunvnet_open_common(struct net_device *dev);
 int sunvnet_close_common(struct net_device *dev);
 void sunvnet_set_rx_mode_common(struct net_device *dev, struct vnet *vp);

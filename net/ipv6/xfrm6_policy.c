@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * xfrm6_policy.c: based on xfrm4_policy.c
  *
@@ -28,8 +27,7 @@
 
 static struct dst_entry *xfrm6_dst_lookup(struct net *net, int tos, int oif,
 					  const xfrm_address_t *saddr,
-					  const xfrm_address_t *daddr,
-					  u32 mark)
+					  const xfrm_address_t *daddr)
 {
 	struct flowi6 fl6;
 	struct dst_entry *dst;
@@ -38,7 +36,6 @@ static struct dst_entry *xfrm6_dst_lookup(struct net *net, int tos, int oif,
 	memset(&fl6, 0, sizeof(fl6));
 	fl6.flowi6_oif = l3mdev_master_ifindex_by_index(net, oif);
 	fl6.flowi6_flags = FLOWI_FLAG_SKIP_NH_OIF;
-	fl6.flowi6_mark = mark;
 	memcpy(&fl6.daddr, daddr, sizeof(fl6.daddr));
 	if (saddr)
 		memcpy(&fl6.saddr, saddr, sizeof(fl6.saddr));
@@ -55,13 +52,12 @@ static struct dst_entry *xfrm6_dst_lookup(struct net *net, int tos, int oif,
 }
 
 static int xfrm6_get_saddr(struct net *net, int oif,
-			   xfrm_address_t *saddr, xfrm_address_t *daddr,
-			   u32 mark)
+			   xfrm_address_t *saddr, xfrm_address_t *daddr)
 {
 	struct dst_entry *dst;
 	struct net_device *dev;
 
-	dst = xfrm6_dst_lookup(net, 0, oif, NULL, daddr, mark);
+	dst = xfrm6_dst_lookup(net, 0, oif, NULL, daddr);
 	if (IS_ERR(dst))
 		return -EHOSTUNREACH;
 
@@ -107,13 +103,12 @@ static int xfrm6_fill_dst(struct xfrm_dst *xdst, struct net_device *dev,
 	 * it was magically lost, so this code needs audit */
 	xdst->u.rt6.rt6i_flags = rt->rt6i_flags & (RTF_ANYCAST |
 						   RTF_LOCAL);
+	xdst->u.rt6.rt6i_metric = rt->rt6i_metric;
+	xdst->u.rt6.rt6i_node = rt->rt6i_node;
 	xdst->route_cookie = rt6_get_cookie(rt);
 	xdst->u.rt6.rt6i_gateway = rt->rt6i_gateway;
 	xdst->u.rt6.rt6i_dst = rt->rt6i_dst;
 	xdst->u.rt6.rt6i_src = rt->rt6i_src;
-	INIT_LIST_HEAD(&xdst->u.rt6.rt6i_uncached);
-	rt6_uncached_list_add(&xdst->u.rt6);
-	atomic_inc(&dev_net(dev)->ipv6.rt6_stats->fib_rt_uncache);
 
 	return 0;
 }
@@ -124,7 +119,7 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 	struct flowi6 *fl6 = &fl->u.ip6;
 	int onlyproto = 0;
 	const struct ipv6hdr *hdr = ipv6_hdr(skb);
-	u32 offset = sizeof(*hdr);
+	u16 offset = sizeof(*hdr);
 	struct ipv6_opt_hdr *exthdr;
 	const unsigned char *nh = skb_network_header(skb);
 	u16 nhoff = IP6CB(skb)->nhoff;
@@ -154,7 +149,6 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 		switch (nexthdr) {
 		case NEXTHDR_FRAGMENT:
 			onlyproto = 1;
-			/* fall through */
 		case NEXTHDR_ROUTING:
 		case NEXTHDR_HOP:
 		case NEXTHDR_DEST:
@@ -220,6 +214,14 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 	}
 }
 
+static inline int xfrm6_garbage_collect(struct dst_ops *ops)
+{
+	struct net *net = container_of(ops, struct net, xfrm.xfrm6_dst_ops);
+
+	xfrm_garbage_collect_deferred(net);
+	return dst_entries_get_fast(ops) > ops->gc_thresh * 2;
+}
+
 static void xfrm6_update_pmtu(struct dst_entry *dst, struct sock *sk,
 			      struct sk_buff *skb, u32 mtu)
 {
@@ -245,8 +247,6 @@ static void xfrm6_dst_destroy(struct dst_entry *dst)
 	if (likely(xdst->u.rt6.rt6i_idev))
 		in6_dev_put(xdst->u.rt6.rt6i_idev);
 	dst_destroy_metrics_generic(dst);
-	if (xdst->u.rt6.rt6i_uncached_list)
-		rt6_uncached_list_del(&xdst->u.rt6);
 	xfrm_dst_destroy(xdst);
 }
 
@@ -268,7 +268,7 @@ static void xfrm6_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 			in6_dev_put(xdst->u.rt6.rt6i_idev);
 			xdst->u.rt6.rt6i_idev = loopback_idev;
 			in6_dev_hold(loopback_idev);
-			xdst = (struct xfrm_dst *)xfrm_dst_child(&xdst->u.dst);
+			xdst = (struct xfrm_dst *)xdst->u.dst.child;
 		} while (xdst->u.dst.xfrm);
 
 		__in6_dev_put(loopback_idev);
@@ -279,13 +279,14 @@ static void xfrm6_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 
 static struct dst_ops xfrm6_dst_ops_template = {
 	.family =		AF_INET6,
+	.gc =			xfrm6_garbage_collect,
 	.update_pmtu =		xfrm6_update_pmtu,
 	.redirect =		xfrm6_redirect,
 	.cow_metrics =		dst_cow_metrics_generic,
 	.destroy =		xfrm6_dst_destroy,
 	.ifdown =		xfrm6_dst_ifdown,
 	.local_out =		__ip6_local_out,
-	.gc_thresh =		32768,
+	.gc_thresh =		INT_MAX,
 };
 
 static const struct xfrm_policy_afinfo xfrm6_policy_afinfo = {

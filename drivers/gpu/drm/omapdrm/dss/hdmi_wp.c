@@ -1,7 +1,7 @@
 /*
  * HDMI wrapper
  *
- * Copyright (C) 2013 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2013 Texas Instruments Incorporated
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -168,7 +168,7 @@ void hdmi_wp_video_config_timing(struct hdmi_wp_data *wp,
 {
 	u32 timing_h = 0;
 	u32 timing_v = 0;
-	unsigned int hsync_len_offset = 1;
+	unsigned hsync_len_offset = 1;
 
 	DSSDBG("Enter hdmi_wp_video_config_timing\n");
 
@@ -178,7 +178,9 @@ void hdmi_wp_video_config_timing(struct hdmi_wp_data *wp,
 	 * However, we don't support OMAP5 ES1 at all, so we can just check for
 	 * OMAP4 here.
 	 */
-	if (wp->version == 4)
+	if (omapdss_get_version() == OMAPDSS_VER_OMAP4430_ES1 ||
+	    omapdss_get_version() == OMAPDSS_VER_OMAP4430_ES2 ||
+	    omapdss_get_version() == OMAPDSS_VER_OMAP4)
 		hsync_len_offset = 0;
 
 	timing_h |= FLD_VAL(vm->hback_porch, 31, 20);
@@ -233,7 +235,9 @@ void hdmi_wp_audio_config_format(struct hdmi_wp_data *wp,
 	DSSDBG("Enter hdmi_wp_audio_config_format\n");
 
 	r = hdmi_read_reg(wp->base, HDMI_WP_AUDIO_CFG);
-	if (wp->version == 4) {
+	if (omapdss_get_version() == OMAPDSS_VER_OMAP4430_ES1 ||
+	    omapdss_get_version() == OMAPDSS_VER_OMAP4430_ES2 ||
+	    omapdss_get_version() == OMAPDSS_VER_OMAP4) {
 		r = FLD_MOD(r, aud_fmt->stereo_channels, 26, 24);
 		r = FLD_MOD(r, aud_fmt->active_chnnls_msk, 23, 16);
 	}
@@ -278,18 +282,22 @@ int hdmi_wp_audio_core_req_enable(struct hdmi_wp_data *wp, bool enable)
 	return 0;
 }
 
-int hdmi_wp_init(struct platform_device *pdev, struct hdmi_wp_data *wp,
-		 unsigned int version)
+int hdmi_wp_init(struct platform_device *pdev, struct hdmi_wp_data *wp)
 {
 	struct resource *res;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "wp");
-	wp->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(wp->base))
-		return PTR_ERR(wp->base);
-
+	if (!res) {
+		DSSERR("can't get WP mem resource\n");
+		return -EINVAL;
+	}
 	wp->phys_base = res->start;
-	wp->version = version;
+
+	wp->base = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(wp->base)) {
+		DSSERR("can't ioremap HDMI WP\n");
+		return PTR_ERR(wp->base);
+	}
 
 	return 0;
 }

@@ -624,12 +624,14 @@ static int isl29018_chip_init(struct isl29018_chip *chip)
 
 static const struct iio_info isl29018_info = {
 	.attrs = &isl29018_group,
+	.driver_module = THIS_MODULE,
 	.read_raw = isl29018_read_raw,
 	.write_raw = isl29018_write_raw,
 };
 
 static const struct iio_info isl29023_info = {
 	.attrs = &isl29023_group,
+	.driver_module = THIS_MODULE,
 	.read_raw = isl29018_read_raw,
 	.write_raw = isl29018_write_raw,
 };
@@ -805,7 +807,6 @@ static SIMPLE_DEV_PM_OPS(isl29018_pm_ops, isl29018_suspend, isl29018_resume);
 #define ISL29018_PM_OPS NULL
 #endif
 
-#ifdef CONFIG_ACPI
 static const struct acpi_device_id isl29018_acpi_match[] = {
 	{"ISL29018", isl29018},
 	{"ISL29023", isl29023},
@@ -813,7 +814,6 @@ static const struct acpi_device_id isl29018_acpi_match[] = {
 	{},
 };
 MODULE_DEVICE_TABLE(acpi, isl29018_acpi_match);
-#endif
 
 static const struct i2c_device_id isl29018_id[] = {
 	{"isl29018", isl29018},

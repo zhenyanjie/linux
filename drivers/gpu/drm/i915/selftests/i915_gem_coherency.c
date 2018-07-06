@@ -33,7 +33,7 @@ static int cpu_set(struct drm_i915_gem_object *obj,
 {
 	unsigned int needs_clflush;
 	struct page *page;
-	u32 *map;
+	typeof(v) *map;
 	int err;
 
 	err = i915_gem_obj_prepare_shmem_write(obj, &needs_clflush);
@@ -59,7 +59,7 @@ static int cpu_get(struct drm_i915_gem_object *obj,
 {
 	unsigned int needs_clflush;
 	struct page *page;
-	u32 *map;
+	typeof(v) map;
 	int err;
 
 	err = i915_gem_obj_prepare_shmem_read(obj, &needs_clflush);
@@ -82,7 +82,7 @@ static int gtt_set(struct drm_i915_gem_object *obj,
 		   u32 v)
 {
 	struct i915_vma *vma;
-	u32 __iomem *map;
+	typeof(v) *map;
 	int err;
 
 	err = i915_gem_object_set_to_gtt_domain(obj, true);
@@ -98,7 +98,7 @@ static int gtt_set(struct drm_i915_gem_object *obj,
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
-	iowrite32(v, &map[offset / sizeof(*map)]);
+	map[offset / sizeof(*map)] = v;
 	i915_vma_unpin_iomap(vma);
 
 	return 0;
@@ -109,7 +109,7 @@ static int gtt_get(struct drm_i915_gem_object *obj,
 		   u32 *v)
 {
 	struct i915_vma *vma;
-	u32 __iomem *map;
+	typeof(v) map;
 	int err;
 
 	err = i915_gem_object_set_to_gtt_domain(obj, false);
@@ -125,7 +125,7 @@ static int gtt_get(struct drm_i915_gem_object *obj,
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
-	*v = ioread32(&map[offset / sizeof(*map)]);
+	*v = map[offset / sizeof(*map)];
 	i915_vma_unpin_iomap(vma);
 
 	return 0;
@@ -135,10 +135,13 @@ static int wc_set(struct drm_i915_gem_object *obj,
 		  unsigned long offset,
 		  u32 v)
 {
-	u32 *map;
+	typeof(v) *map;
 	int err;
 
-	err = i915_gem_object_set_to_wc_domain(obj, true);
+	/* XXX GTT write followed by WC write go missing */
+	i915_gem_object_flush_gtt_write_domain(obj);
+
+	err = i915_gem_object_set_to_gtt_domain(obj, true);
 	if (err)
 		return err;
 
@@ -156,10 +159,13 @@ static int wc_get(struct drm_i915_gem_object *obj,
 		  unsigned long offset,
 		  u32 *v)
 {
-	u32 *map;
+	typeof(v) map;
 	int err;
 
-	err = i915_gem_object_set_to_wc_domain(obj, false);
+	/* XXX WC write followed by GTT write go missing */
+	i915_gem_object_flush_gtt_write_domain(obj);
+
+	err = i915_gem_object_set_to_gtt_domain(obj, false);
 	if (err)
 		return err;
 
@@ -178,7 +184,7 @@ static int gpu_set(struct drm_i915_gem_object *obj,
 		   u32 v)
 {
 	struct drm_i915_private *i915 = to_i915(obj->base.dev);
-	struct i915_request *rq;
+	struct drm_i915_gem_request *rq;
 	struct i915_vma *vma;
 	u32 *cs;
 	int err;
@@ -191,7 +197,7 @@ static int gpu_set(struct drm_i915_gem_object *obj,
 	if (IS_ERR(vma))
 		return PTR_ERR(vma);
 
-	rq = i915_request_alloc(i915->engine[RCS], i915->kernel_context);
+	rq = i915_gem_request_alloc(i915->engine[RCS], i915->kernel_context);
 	if (IS_ERR(rq)) {
 		i915_vma_unpin(vma);
 		return PTR_ERR(rq);
@@ -199,7 +205,7 @@ static int gpu_set(struct drm_i915_gem_object *obj,
 
 	cs = intel_ring_begin(rq, 4);
 	if (IS_ERR(cs)) {
-		__i915_request_add(rq, false);
+		__i915_add_request(rq, false);
 		i915_vma_unpin(vma);
 		return PTR_ERR(cs);
 	}
@@ -229,7 +235,7 @@ static int gpu_set(struct drm_i915_gem_object *obj,
 	reservation_object_add_excl_fence(obj->resv, &rq->fence);
 	reservation_object_unlock(obj->resv);
 
-	__i915_request_add(rq, true);
+	__i915_add_request(rq, true);
 
 	return 0;
 }
@@ -241,7 +247,7 @@ static bool always_valid(struct drm_i915_private *i915)
 
 static bool needs_mi_store_dword(struct drm_i915_private *i915)
 {
-	return intel_engine_can_store_dword(i915->engine[RCS]);
+	return igt_can_mi_store_dword_imm(i915);
 }
 
 static const struct igt_coherency_mode {

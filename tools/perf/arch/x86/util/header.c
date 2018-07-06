@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <sys/types.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -66,11 +65,11 @@ get_cpuid(char *buffer, size_t sz)
 }
 
 char *
-get_cpuid_str(struct perf_pmu *pmu __maybe_unused)
+get_cpuid_str(void)
 {
 	char *buf = malloc(128);
 
-	if (buf && __get_cpuid(buf, 128, "%s-%u-%X$") < 0) {
+	if (__get_cpuid(buf, 128, "%s-%u-%X$") < 0) {
 		free(buf);
 		return NULL;
 	}

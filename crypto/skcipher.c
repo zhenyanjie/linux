@@ -426,8 +426,13 @@ static int skcipher_copy_iv(struct skcipher_walk *walk)
 
 static int skcipher_walk_first(struct skcipher_walk *walk)
 {
+	walk->nbytes = 0;
+
 	if (WARN_ON_ONCE(in_irq()))
 		return -EDEADLK;
+
+	if (unlikely(!walk->total))
+		return 0;
 
 	walk->buffer = NULL;
 	if (unlikely(((unsigned long)walk->iv & walk->alignmask))) {
@@ -447,16 +452,12 @@ static int skcipher_walk_skcipher(struct skcipher_walk *walk,
 {
 	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
 
-	walk->total = req->cryptlen;
-	walk->nbytes = 0;
-	walk->iv = req->iv;
-	walk->oiv = req->iv;
-
-	if (unlikely(!walk->total))
-		return 0;
-
 	scatterwalk_start(&walk->in, req->src);
 	scatterwalk_start(&walk->out, req->dst);
+
+	walk->total = req->cryptlen;
+	walk->iv = req->iv;
+	walk->oiv = req->iv;
 
 	walk->flags &= ~SKCIPHER_WALK_SLEEP;
 	walk->flags |= req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP ?
@@ -508,13 +509,6 @@ static int skcipher_walk_aead_common(struct skcipher_walk *walk,
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	int err;
 
-	walk->nbytes = 0;
-	walk->iv = req->iv;
-	walk->oiv = req->iv;
-
-	if (unlikely(!walk->total))
-		return 0;
-
 	walk->flags &= ~SKCIPHER_WALK_PHYS;
 
 	scatterwalk_start(&walk->in, req->src);
@@ -523,8 +517,8 @@ static int skcipher_walk_aead_common(struct skcipher_walk *walk,
 	scatterwalk_copychunks(NULL, &walk->in, req->assoclen, 2);
 	scatterwalk_copychunks(NULL, &walk->out, req->assoclen, 2);
 
-	scatterwalk_done(&walk->in, 0, walk->total);
-	scatterwalk_done(&walk->out, 0, walk->total);
+	walk->iv = req->iv;
+	walk->oiv = req->iv;
 
 	if (req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP)
 		walk->flags |= SKCIPHER_WALK_SLEEP;
@@ -598,11 +592,8 @@ static int skcipher_setkey_blkcipher(struct crypto_skcipher *tfm,
 	err = crypto_blkcipher_setkey(blkcipher, key, keylen);
 	crypto_skcipher_set_flags(tfm, crypto_blkcipher_get_flags(blkcipher) &
 				       CRYPTO_TFM_RES_MASK);
-	if (err)
-		return err;
 
-	crypto_skcipher_clear_flags(tfm, CRYPTO_TFM_NEED_KEY);
-	return 0;
+	return err;
 }
 
 static int skcipher_crypt_blkcipher(struct skcipher_request *req,
@@ -677,9 +668,6 @@ static int crypto_init_skcipher_ops_blkcipher(struct crypto_tfm *tfm)
 	skcipher->ivsize = crypto_blkcipher_ivsize(blkcipher);
 	skcipher->keysize = calg->cra_blkcipher.max_keysize;
 
-	if (skcipher->keysize)
-		crypto_skcipher_set_flags(skcipher, CRYPTO_TFM_NEED_KEY);
-
 	return 0;
 }
 
@@ -698,11 +686,8 @@ static int skcipher_setkey_ablkcipher(struct crypto_skcipher *tfm,
 	crypto_skcipher_set_flags(tfm,
 				  crypto_ablkcipher_get_flags(ablkcipher) &
 				  CRYPTO_TFM_RES_MASK);
-	if (err)
-		return err;
 
-	crypto_skcipher_clear_flags(tfm, CRYPTO_TFM_NEED_KEY);
-	return 0;
+	return err;
 }
 
 static int skcipher_crypt_ablkcipher(struct skcipher_request *req,
@@ -776,9 +761,6 @@ static int crypto_init_skcipher_ops_ablkcipher(struct crypto_tfm *tfm)
 			    sizeof(struct ablkcipher_request);
 	skcipher->keysize = calg->cra_ablkcipher.max_keysize;
 
-	if (skcipher->keysize)
-		crypto_skcipher_set_flags(skcipher, CRYPTO_TFM_NEED_KEY);
-
 	return 0;
 }
 
@@ -808,7 +790,6 @@ static int skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
 {
 	struct skcipher_alg *cipher = crypto_skcipher_alg(tfm);
 	unsigned long alignmask = crypto_skcipher_alignmask(tfm);
-	int err;
 
 	if (keylen < cipher->min_keysize || keylen > cipher->max_keysize) {
 		crypto_skcipher_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
@@ -816,15 +797,9 @@ static int skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
 	}
 
 	if ((unsigned long)key & alignmask)
-		err = skcipher_setkey_unaligned(tfm, key, keylen);
-	else
-		err = cipher->setkey(tfm, key, keylen);
+		return skcipher_setkey_unaligned(tfm, key, keylen);
 
-	if (err)
-		return err;
-
-	crypto_skcipher_clear_flags(tfm, CRYPTO_TFM_NEED_KEY);
-	return 0;
+	return cipher->setkey(tfm, key, keylen);
 }
 
 static void crypto_skcipher_exit_tfm(struct crypto_tfm *tfm)
@@ -852,9 +827,6 @@ static int crypto_skcipher_init_tfm(struct crypto_tfm *tfm)
 	skcipher->decrypt = alg->decrypt;
 	skcipher->ivsize = alg->ivsize;
 	skcipher->keysize = alg->max_keysize;
-
-	if (skcipher->keysize)
-		crypto_skcipher_set_flags(skcipher, CRYPTO_TFM_NEED_KEY);
 
 	if (alg->exit)
 		skcipher->base.exit = crypto_skcipher_exit_tfm;

@@ -140,17 +140,16 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
 			   cfg);
 }
 
-static enum drm_mode_status
-atmel_hlcdc_crtc_mode_valid(struct drm_crtc *c,
-			    const struct drm_display_mode *mode)
+static bool atmel_hlcdc_crtc_mode_fixup(struct drm_crtc *c,
+					const struct drm_display_mode *mode,
+					struct drm_display_mode *adjusted_mode)
 {
 	struct atmel_hlcdc_crtc *crtc = drm_crtc_to_atmel_hlcdc_crtc(c);
 
-	return atmel_hlcdc_dc_mode_valid(crtc->dc, mode);
+	return atmel_hlcdc_dc_mode_valid(crtc->dc, adjusted_mode) == MODE_OK;
 }
 
-static void atmel_hlcdc_crtc_atomic_disable(struct drm_crtc *c,
-					    struct drm_crtc_state *old_state)
+static void atmel_hlcdc_crtc_disable(struct drm_crtc *c)
 {
 	struct drm_device *dev = c->dev;
 	struct atmel_hlcdc_crtc *crtc = drm_crtc_to_atmel_hlcdc_crtc(c);
@@ -184,8 +183,7 @@ static void atmel_hlcdc_crtc_atomic_disable(struct drm_crtc *c,
 	pm_runtime_put_sync(dev->dev);
 }
 
-static void atmel_hlcdc_crtc_atomic_enable(struct drm_crtc *c,
-					   struct drm_crtc_state *old_state)
+static void atmel_hlcdc_crtc_enable(struct drm_crtc *c)
 {
 	struct drm_device *dev = c->dev;
 	struct atmel_hlcdc_crtc *crtc = drm_crtc_to_atmel_hlcdc_crtc(c);
@@ -237,7 +235,7 @@ static int atmel_hlcdc_crtc_select_output_mode(struct drm_crtc_state *state)
 
 	crtc = drm_crtc_to_atmel_hlcdc_crtc(state->crtc);
 
-	for_each_new_connector_in_state(state->state, connector, cstate, i) {
+	for_each_connector_in_state(state->state, connector, cstate, i) {
 		struct drm_display_info *info = &connector->display_info;
 		unsigned int supported_fmts = 0;
 		int j;
@@ -317,15 +315,15 @@ static void atmel_hlcdc_crtc_atomic_flush(struct drm_crtc *crtc,
 }
 
 static const struct drm_crtc_helper_funcs lcdc_crtc_helper_funcs = {
-	.mode_valid = atmel_hlcdc_crtc_mode_valid,
+	.mode_fixup = atmel_hlcdc_crtc_mode_fixup,
 	.mode_set = drm_helper_crtc_mode_set,
 	.mode_set_nofb = atmel_hlcdc_crtc_mode_set_nofb,
 	.mode_set_base = drm_helper_crtc_mode_set_base,
+	.disable = atmel_hlcdc_crtc_disable,
+	.enable = atmel_hlcdc_crtc_enable,
 	.atomic_check = atmel_hlcdc_crtc_atomic_check,
 	.atomic_begin = atmel_hlcdc_crtc_atomic_begin,
 	.atomic_flush = atmel_hlcdc_crtc_atomic_flush,
-	.atomic_enable = atmel_hlcdc_crtc_atomic_enable,
-	.atomic_disable = atmel_hlcdc_crtc_atomic_disable,
 };
 
 static void atmel_hlcdc_crtc_destroy(struct drm_crtc *c)
@@ -431,7 +429,6 @@ static const struct drm_crtc_funcs atmel_hlcdc_crtc_funcs = {
 	.atomic_destroy_state = atmel_hlcdc_crtc_destroy_state,
 	.enable_vblank = atmel_hlcdc_crtc_enable_vblank,
 	.disable_vblank = atmel_hlcdc_crtc_disable_vblank,
-	.gamma_set = drm_atomic_helper_legacy_gamma_set,
 };
 
 int atmel_hlcdc_crtc_create(struct drm_device *dev)
@@ -486,10 +483,6 @@ int atmel_hlcdc_crtc_create(struct drm_device *dev)
 
 	drm_crtc_helper_add(&crtc->base, &lcdc_crtc_helper_funcs);
 	drm_crtc_vblank_reset(&crtc->base);
-
-	drm_mode_crtc_set_gamma_size(&crtc->base, ATMEL_HLCDC_CLUT_SIZE);
-	drm_crtc_enable_color_mgmt(&crtc->base, 0, false,
-				   ATMEL_HLCDC_CLUT_SIZE);
 
 	dc->crtc = &crtc->base;
 

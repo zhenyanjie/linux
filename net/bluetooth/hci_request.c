@@ -41,11 +41,6 @@ void hci_req_init(struct hci_request *req, struct hci_dev *hdev)
 	req->err = 0;
 }
 
-void hci_req_purge(struct hci_request *req)
-{
-	skb_queue_purge(&req->cmd_q);
-}
-
 static int req_run(struct hci_request *req, hci_req_complete_t complete,
 		   hci_req_complete_skb_t complete_skb)
 {
@@ -122,6 +117,7 @@ void hci_req_sync_cancel(struct hci_dev *hdev, int err)
 struct sk_buff *__hci_cmd_sync_ev(struct hci_dev *hdev, u16 opcode, u32 plen,
 				  const void *param, u8 event, u32 timeout)
 {
+	DECLARE_WAITQUEUE(wait, current);
 	struct hci_request req;
 	struct sk_buff *skb;
 	int err = 0;
@@ -134,14 +130,21 @@ struct sk_buff *__hci_cmd_sync_ev(struct hci_dev *hdev, u16 opcode, u32 plen,
 
 	hdev->req_status = HCI_REQ_PEND;
 
+	add_wait_queue(&hdev->req_wait_q, &wait);
+	set_current_state(TASK_INTERRUPTIBLE);
+
 	err = hci_req_run_skb(&req, hci_req_sync_complete);
-	if (err < 0)
+	if (err < 0) {
+		remove_wait_queue(&hdev->req_wait_q, &wait);
+		set_current_state(TASK_RUNNING);
 		return ERR_PTR(err);
+	}
 
-	err = wait_event_interruptible_timeout(hdev->req_wait_q,
-			hdev->req_status != HCI_REQ_PEND, timeout);
+	schedule_timeout(timeout);
 
-	if (err == -ERESTARTSYS)
+	remove_wait_queue(&hdev->req_wait_q, &wait);
+
+	if (signal_pending(current))
 		return ERR_PTR(-EINTR);
 
 	switch (hdev->req_status) {
@@ -189,6 +192,7 @@ int __hci_req_sync(struct hci_dev *hdev, int (*func)(struct hci_request *req,
 		   unsigned long opt, u32 timeout, u8 *hci_status)
 {
 	struct hci_request req;
+	DECLARE_WAITQUEUE(wait, current);
 	int err = 0;
 
 	BT_DBG("%s start", hdev->name);
@@ -204,9 +208,15 @@ int __hci_req_sync(struct hci_dev *hdev, int (*func)(struct hci_request *req,
 		return err;
 	}
 
+	add_wait_queue(&hdev->req_wait_q, &wait);
+	set_current_state(TASK_INTERRUPTIBLE);
+
 	err = hci_req_run_skb(&req, hci_req_sync_complete);
 	if (err < 0) {
 		hdev->req_status = 0;
+
+		remove_wait_queue(&hdev->req_wait_q, &wait);
+		set_current_state(TASK_RUNNING);
 
 		/* ENODATA means the HCI request command queue is empty.
 		 * This can happen when a request with conditionals doesn't
@@ -225,10 +235,11 @@ int __hci_req_sync(struct hci_dev *hdev, int (*func)(struct hci_request *req,
 		return err;
 	}
 
-	err = wait_event_interruptible_timeout(hdev->req_wait_q,
-			hdev->req_status != HCI_REQ_PEND, timeout);
+	schedule_timeout(timeout);
 
-	if (err == -ERESTARTSYS)
+	remove_wait_queue(&hdev->req_wait_q, &wait);
+
+	if (signal_pending(current))
 		return -EINTR;
 
 	switch (hdev->req_status) {
@@ -288,12 +299,12 @@ struct sk_buff *hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen,
 	if (!skb)
 		return NULL;
 
-	hdr = skb_put(skb, HCI_COMMAND_HDR_SIZE);
+	hdr = (struct hci_command_hdr *) skb_put(skb, HCI_COMMAND_HDR_SIZE);
 	hdr->opcode = cpu_to_le16(opcode);
 	hdr->plen   = plen;
 
 	if (plen)
-		skb_put_data(skb, param, plen);
+		memcpy(skb_put(skb, plen), param, plen);
 
 	BT_DBG("skb len %d", skb->len);
 
@@ -320,8 +331,8 @@ void hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen,
 
 	skb = hci_prepare_cmd(hdev, opcode, plen, param);
 	if (!skb) {
-		bt_dev_err(hdev, "no memory for command (opcode 0x%4.4x)",
-			   opcode);
+		BT_ERR("%s no memory for command (opcode 0x%4.4x)",
+		       hdev->name, opcode);
 		req->err = -ENOMEM;
 		return;
 	}
@@ -903,43 +914,6 @@ static bool adv_use_rpa(struct hci_dev *hdev, uint32_t flags)
 	return true;
 }
 
-static bool is_advertising_allowed(struct hci_dev *hdev, bool connectable)
-{
-	/* If there is no connection we are OK to advertise. */
-	if (hci_conn_num(hdev, LE_LINK) == 0)
-		return true;
-
-	/* Check le_states if there is any connection in slave role. */
-	if (hdev->conn_hash.le_num_slave > 0) {
-		/* Slave connection state and non connectable mode bit 20. */
-		if (!connectable && !(hdev->le_states[2] & 0x10))
-			return false;
-
-		/* Slave connection state and connectable mode bit 38
-		 * and scannable bit 21.
-		 */
-		if (connectable && (!(hdev->le_states[4] & 0x40) ||
-				    !(hdev->le_states[2] & 0x20)))
-			return false;
-	}
-
-	/* Check le_states if there is any connection in master role. */
-	if (hci_conn_num(hdev, LE_LINK) != hdev->conn_hash.le_num_slave) {
-		/* Master connection state and non connectable mode bit 18. */
-		if (!connectable && !(hdev->le_states[2] & 0x02))
-			return false;
-
-		/* Master connection state and connectable mode bit 35 and
-		 * scannable 19.
-		 */
-		if (connectable && (!(hdev->le_states[4] & 0x08) ||
-				    !(hdev->le_states[2] & 0x08)))
-			return false;
-	}
-
-	return true;
-}
-
 void __hci_req_enable_advertising(struct hci_request *req)
 {
 	struct hci_dev *hdev = req->hdev;
@@ -948,15 +922,7 @@ void __hci_req_enable_advertising(struct hci_request *req)
 	bool connectable;
 	u32 flags;
 
-	flags = get_adv_instance_flags(hdev, hdev->cur_adv_instance);
-
-	/* If the "connectable" instance flag was not set, then choose between
-	 * ADV_IND and ADV_NONCONN_IND based on the global connectable setting.
-	 */
-	connectable = (flags & MGMT_ADV_FLAG_CONNECTABLE) ||
-		      mgmt_get_connectable(hdev);
-
-	if (!is_advertising_allowed(hdev, connectable))
+	if (hci_conn_num(hdev, LE_LINK) > 0)
 		return;
 
 	if (hci_dev_test_flag(hdev, HCI_LE_ADV))
@@ -968,6 +934,14 @@ void __hci_req_enable_advertising(struct hci_request *req)
 	 * as soon as the SET_ADV_ENABLE HCI command completes.
 	 */
 	hci_dev_clear_flag(hdev, HCI_LE_ADV);
+
+	flags = get_adv_instance_flags(hdev, hdev->cur_adv_instance);
+
+	/* If the "connectable" instance flag was not set, then choose between
+	 * ADV_IND and ADV_NONCONN_IND based on the global connectable setting.
+	 */
+	connectable = (flags & MGMT_ADV_FLAG_CONNECTABLE) ||
+		      mgmt_get_connectable(hdev);
 
 	/* Set require_privacy to true only when non-connectable
 	 * advertising is used. In that case it is fine to use a
@@ -1447,7 +1421,7 @@ int hci_update_random_address(struct hci_request *req, bool require_privacy,
 
 		err = smp_generate_rpa(hdev, hdev->irk, &hdev->rpa);
 		if (err < 0) {
-			bt_dev_err(hdev, "failed to generate new RPA");
+			BT_ERR("%s failed to generate new RPA", hdev->name);
 			return err;
 		}
 
@@ -1809,7 +1783,7 @@ int hci_abort_conn(struct hci_conn *conn, u8 reason)
 
 	err = hci_req_run(&req, abort_conn_complete);
 	if (err && err != -ENODATA) {
-		bt_dev_err(conn->hdev, "failed to run HCI request: err %d", err);
+		BT_ERR("Failed to run HCI request: err %d", err);
 		return err;
 	}
 
@@ -1893,8 +1867,7 @@ static void le_scan_disable_work(struct work_struct *work)
 
 	hci_req_sync(hdev, le_scan_disable, 0, HCI_CMD_TIMEOUT, &status);
 	if (status) {
-		bt_dev_err(hdev, "failed to disable LE scan: status 0x%02x",
-			   status);
+		BT_ERR("Failed to disable LE scan: status 0x%02x", status);
 		return;
 	}
 
@@ -1925,7 +1898,7 @@ static void le_scan_disable_work(struct work_struct *work)
 	hci_req_sync(hdev, bredr_inquiry, DISCOV_INTERLEAVED_INQUIRY_LEN,
 		     HCI_CMD_TIMEOUT, &status);
 	if (status) {
-		bt_dev_err(hdev, "inquiry failed: status 0x%02x", status);
+		BT_ERR("Inquiry failed: status 0x%02x", status);
 		goto discov_stopped;
 	}
 
@@ -1967,8 +1940,7 @@ static void le_scan_restart_work(struct work_struct *work)
 
 	hci_req_sync(hdev, le_scan_restart, 0, HCI_CMD_TIMEOUT, &status);
 	if (status) {
-		bt_dev_err(hdev, "failed to restart LE scan: status %d",
-			   status);
+		BT_ERR("Failed to restart LE scan: status %d", status);
 		return;
 	}
 
@@ -2006,6 +1978,13 @@ unlock:
 	hci_dev_unlock(hdev);
 }
 
+static void disable_advertising(struct hci_request *req)
+{
+	u8 enable = 0x00;
+
+	hci_req_add(req, HCI_OP_LE_SET_ADV_ENABLE, sizeof(enable), &enable);
+}
+
 static int active_scan(struct hci_request *req, unsigned long opt)
 {
 	uint16_t interval = opt;
@@ -2031,7 +2010,7 @@ static int active_scan(struct hci_request *req, unsigned long opt)
 		cancel_adv_timeout(hdev);
 		hci_dev_unlock(hdev);
 
-		__hci_req_disable_advertising(req);
+		disable_advertising(req);
 	}
 
 	/* If controller is scanning, it means the background scanning is

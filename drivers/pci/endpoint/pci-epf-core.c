@@ -1,9 +1,20 @@
-// SPDX-License-Identifier: GPL-2.0
 /**
  * PCI Endpoint *Function* (EPF) library
  *
  * Copyright (C) 2017 Texas Instruments
  * Author: Kishon Vijay Abraham I <kishon@ti.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 of
+ * the License as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/device.h>
@@ -15,10 +26,8 @@
 #include <linux/pci-epf.h>
 #include <linux/pci-ep-cfs.h>
 
-static DEFINE_MUTEX(pci_epf_mutex);
-
 static struct bus_type pci_epf_bus_type;
-static const struct device_type pci_epf_type;
+static struct device_type pci_epf_type;
 
 /**
  * pci_epf_linkup() - Notify the function driver that EPC device has
@@ -90,7 +99,7 @@ EXPORT_SYMBOL_GPL(pci_epf_bind);
  */
 void pci_epf_free_space(struct pci_epf *epf, void *addr, enum pci_barno bar)
 {
-	struct device *dev = epf->epc->dev.parent;
+	struct device *dev = &epf->dev;
 
 	if (!addr)
 		return;
@@ -100,8 +109,6 @@ void pci_epf_free_space(struct pci_epf *epf, void *addr, enum pci_barno bar)
 
 	epf->bar[bar].phys_addr = 0;
 	epf->bar[bar].size = 0;
-	epf->bar[bar].barno = 0;
-	epf->bar[bar].flags = 0;
 }
 EXPORT_SYMBOL_GPL(pci_epf_free_space);
 
@@ -115,7 +122,7 @@ EXPORT_SYMBOL_GPL(pci_epf_free_space);
 void *pci_epf_alloc_space(struct pci_epf *epf, size_t size, enum pci_barno bar)
 {
 	void *space;
-	struct device *dev = epf->epc->dev.parent;
+	struct device *dev = &epf->dev;
 	dma_addr_t phys_addr;
 
 	if (size < 128)
@@ -130,8 +137,6 @@ void *pci_epf_alloc_space(struct pci_epf *epf, size_t size, enum pci_barno bar)
 
 	epf->bar[bar].phys_addr = phys_addr;
 	epf->bar[bar].size = size;
-	epf->bar[bar].barno = bar;
-	epf->bar[bar].flags = PCI_BASE_ADDRESS_SPACE_MEMORY;
 
 	return space;
 }
@@ -145,13 +150,7 @@ EXPORT_SYMBOL_GPL(pci_epf_alloc_space);
  */
 void pci_epf_unregister_driver(struct pci_epf_driver *driver)
 {
-	struct config_group *group;
-
-	mutex_lock(&pci_epf_mutex);
-	list_for_each_entry(group, &driver->epf_group, group_entry)
-		pci_ep_cfs_remove_epf_group(group);
-	list_del(&driver->epf_group);
-	mutex_unlock(&pci_epf_mutex);
+	pci_ep_cfs_remove_epf_group(driver->group);
 	driver_unregister(&driver->driver);
 }
 EXPORT_SYMBOL_GPL(pci_epf_unregister_driver);
@@ -167,8 +166,6 @@ int __pci_epf_register_driver(struct pci_epf_driver *driver,
 			      struct module *owner)
 {
 	int ret;
-	struct config_group *group;
-	const struct pci_epf_device_id *id;
 
 	if (!driver->ops)
 		return -EINVAL;
@@ -183,16 +180,7 @@ int __pci_epf_register_driver(struct pci_epf_driver *driver,
 	if (ret)
 		return ret;
 
-	INIT_LIST_HEAD(&driver->epf_group);
-
-	id = driver->id_table;
-	while (id->name[0]) {
-		group = pci_ep_cfs_add_epf_group(id->name);
-		mutex_lock(&pci_epf_mutex);
-		list_add_tail(&group->group_entry, &driver->epf_group);
-		mutex_unlock(&pci_epf_mutex);
-		id++;
-	}
+	driver->group = pci_ep_cfs_add_epf_group(driver->driver.name);
 
 	return 0;
 }
@@ -223,17 +211,29 @@ struct pci_epf *pci_epf_create(const char *name)
 	int ret;
 	struct pci_epf *epf;
 	struct device *dev;
-	int len;
+	char *func_name;
+	char *buf;
 
 	epf = kzalloc(sizeof(*epf), GFP_KERNEL);
-	if (!epf)
-		return ERR_PTR(-ENOMEM);
+	if (!epf) {
+		ret = -ENOMEM;
+		goto err_ret;
+	}
 
-	len = strchrnul(name, '.') - name;
-	epf->name = kstrndup(name, len, GFP_KERNEL);
+	buf = kstrdup(name, GFP_KERNEL);
+	if (!buf) {
+		ret = -ENOMEM;
+		goto free_epf;
+	}
+
+	func_name = buf;
+	buf = strchrnul(buf, '.');
+	*buf = '\0';
+
+	epf->name = kstrdup(func_name, GFP_KERNEL);
 	if (!epf->name) {
-		kfree(epf);
-		return ERR_PTR(-ENOMEM);
+		ret = -ENOMEM;
+		goto free_func_name;
 	}
 
 	dev = &epf->dev;
@@ -242,36 +242,30 @@ struct pci_epf *pci_epf_create(const char *name)
 	dev->type = &pci_epf_type;
 
 	ret = dev_set_name(dev, "%s", name);
-	if (ret) {
-		put_device(dev);
-		return ERR_PTR(ret);
-	}
+	if (ret)
+		goto put_dev;
 
 	ret = device_add(dev);
-	if (ret) {
-		put_device(dev);
-		return ERR_PTR(ret);
-	}
+	if (ret)
+		goto put_dev;
 
+	kfree(func_name);
 	return epf;
+
+put_dev:
+	put_device(dev);
+	kfree(epf->name);
+
+free_func_name:
+	kfree(func_name);
+
+free_epf:
+	kfree(epf);
+
+err_ret:
+	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(pci_epf_create);
-
-const struct pci_epf_device_id *
-pci_epf_match_device(const struct pci_epf_device_id *id, struct pci_epf *epf)
-{
-	if (!id || !epf)
-		return NULL;
-
-	while (*id->name) {
-		if (strcmp(epf->name, id->name) == 0)
-			return id;
-		id++;
-	}
-
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(pci_epf_match_device);
 
 static void pci_epf_dev_release(struct device *dev)
 {
@@ -281,7 +275,7 @@ static void pci_epf_dev_release(struct device *dev)
 	kfree(epf);
 }
 
-static const struct device_type pci_epf_type = {
+static struct device_type pci_epf_type = {
 	.release	= pci_epf_dev_release,
 };
 
@@ -323,12 +317,11 @@ static int pci_epf_device_probe(struct device *dev)
 
 static int pci_epf_device_remove(struct device *dev)
 {
-	int ret = 0;
+	int ret;
 	struct pci_epf *epf = to_pci_epf(dev);
 	struct pci_epf_driver *driver = to_pci_epf_driver(dev->driver);
 
-	if (driver->remove)
-		ret = driver->remove(epf);
+	ret = driver->remove(epf);
 	epf->driver = NULL;
 
 	return ret;

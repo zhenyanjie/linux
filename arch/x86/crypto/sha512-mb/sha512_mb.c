@@ -107,6 +107,15 @@ static asmlinkage struct job_sha512* (*sha512_job_mgr_flush)
 static asmlinkage struct job_sha512* (*sha512_job_mgr_get_comp_job)
 						(struct sha512_mb_mgr *state);
 
+inline void sha512_init_digest(uint64_t *digest)
+{
+	static const uint64_t initial_digest[SHA512_DIGEST_LENGTH] = {
+					SHA512_H0, SHA512_H1, SHA512_H2,
+					SHA512_H3, SHA512_H4, SHA512_H5,
+					SHA512_H6, SHA512_H7 };
+	memcpy(digest, initial_digest, sizeof(initial_digest));
+}
+
 inline uint32_t sha512_pad(uint8_t padblock[SHA512_BLOCK_SIZE * 2],
 			 uint64_t total_len)
 {
@@ -254,22 +263,37 @@ static struct sha512_hash_ctx
 
 	mgr = cstate->mgr;
 	spin_lock_irqsave(&cstate->work_lock, irqflags);
-	if (flags & ~(HASH_UPDATE | HASH_LAST)) {
-		/* User should not pass anything other than UPDATE or LAST */
+	if (flags & (~HASH_ENTIRE)) {
+		/*
+		 * User should not pass anything other than FIRST, UPDATE, or
+		 * LAST
+		 */
 		ctx->error = HASH_CTX_ERROR_INVALID_FLAGS;
-		goto unlock;
+		return ctx;
 	}
 
 	if (ctx->status & HASH_CTX_STS_PROCESSING) {
 		/* Cannot submit to a currently processing job. */
 		ctx->error = HASH_CTX_ERROR_ALREADY_PROCESSING;
-		goto unlock;
+		return ctx;
 	}
 
-	if (ctx->status & HASH_CTX_STS_COMPLETE) {
+	if ((ctx->status & HASH_CTX_STS_COMPLETE) && !(flags & HASH_FIRST)) {
 		/* Cannot update a finished job. */
 		ctx->error = HASH_CTX_ERROR_ALREADY_COMPLETED;
-		goto unlock;
+		return ctx;
+	}
+
+
+	if (flags & HASH_FIRST) {
+		/* Init digest */
+		sha512_init_digest(ctx->job.result_digest);
+
+		/* Reset byte counter */
+		ctx->total_length = 0;
+
+		/* Clear extra blocks */
+		ctx->partial_block_buffer_length = 0;
 	}
 
 	/*
@@ -339,7 +363,6 @@ static struct sha512_hash_ctx
 	}
 
 	ctx = sha512_ctx_mgr_resubmit(mgr, ctx);
-unlock:
 	spin_unlock_irqrestore(&cstate->work_lock, irqflags);
 	return ctx;
 }

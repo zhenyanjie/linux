@@ -287,9 +287,11 @@ find_event(struct pevent *pevent, struct event_list **events,
 		sys_name = NULL;
 	}
 
-	ret = asprintf(&reg, "^%s$", event_name);
-	if (ret < 0)
+	reg = malloc(strlen(event_name) + 3);
+	if (reg == NULL)
 		return PEVENT_ERRNO__MEM_ALLOC_FAILED;
+
+	sprintf(reg, "^%s$", event_name);
 
 	ret = regcomp(&ereg, reg, REG_ICASE|REG_NOSUB);
 	free(reg);
@@ -298,12 +300,13 @@ find_event(struct pevent *pevent, struct event_list **events,
 		return PEVENT_ERRNO__INVALID_EVENT_NAME;
 
 	if (sys_name) {
-		ret = asprintf(&reg, "^%s$", sys_name);
-		if (ret < 0) {
+		reg = malloc(strlen(sys_name) + 3);
+		if (reg == NULL) {
 			regfree(&ereg);
 			return PEVENT_ERRNO__MEM_ALLOC_FAILED;
 		}
 
+		sprintf(reg, "^%s$", sys_name);
 		ret = regcomp(&sreg, reg, REG_ICASE|REG_NOSUB);
 		free(reg);
 		if (ret) {
@@ -433,13 +436,13 @@ create_arg_exp(enum filter_exp_type etype)
 		return NULL;
 
 	arg->type = FILTER_ARG_EXP;
-	arg->exp.type = etype;
+	arg->op.type = etype;
 
 	return arg;
 }
 
 static struct filter_arg *
-create_arg_cmp(enum filter_cmp_type ctype)
+create_arg_cmp(enum filter_exp_type etype)
 {
 	struct filter_arg *arg;
 
@@ -449,7 +452,7 @@ create_arg_cmp(enum filter_cmp_type ctype)
 
 	/* Use NUM and change if necessary */
 	arg->type = FILTER_ARG_NUM;
-	arg->num.type = ctype;
+	arg->op.type = etype;
 
 	return arg;
 }
@@ -1631,7 +1634,6 @@ int pevent_filter_clear_trivial(struct event_filter *filter,
 		case FILTER_TRIVIAL_FALSE:
 			if (filter_type->filter->boolean.value)
 				continue;
-			break;
 		case FILTER_TRIVIAL_TRUE:
 			if (!filter_type->filter->boolean.value)
 				continue;
@@ -1877,25 +1879,17 @@ static const char *get_field_str(struct filter_arg *arg, struct pevent_record *r
 	struct pevent *pevent;
 	unsigned long long addr;
 	const char *val = NULL;
-	unsigned int size;
 	char hex[64];
 
 	/* If the field is not a string convert it */
 	if (arg->str.field->flags & FIELD_IS_STRING) {
 		val = record->data + arg->str.field->offset;
-		size = arg->str.field->size;
-
-		if (arg->str.field->flags & FIELD_IS_DYNAMIC) {
-			addr = *(unsigned int *)val;
-			val = record->data + (addr & 0xffff);
-			size = addr >> 16;
-		}
 
 		/*
 		 * We need to copy the data since we can't be sure the field
 		 * is null terminated.
 		 */
-		if (*(val + size - 1)) {
+		if (*(val + arg->str.field->size - 1)) {
 			/* copy it */
 			memcpy(arg->str.buffer, val, arg->str.field->size);
 			/* the buffer is already NULL terminated */

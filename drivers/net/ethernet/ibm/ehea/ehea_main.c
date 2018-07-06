@@ -2903,7 +2903,8 @@ static ssize_t ehea_show_port_id(struct device *dev,
 	return sprintf(buf, "%d", port->logical_port_id);
 }
 
-static DEVICE_ATTR(log_port_id, 0444, ehea_show_port_id, NULL);
+static DEVICE_ATTR(log_port_id, S_IRUSR | S_IRGRP | S_IROTH, ehea_show_port_id,
+		   NULL);
 
 static void logical_port_release(struct device *dev)
 {
@@ -3101,7 +3102,8 @@ static int ehea_setup_ports(struct ehea_adapter *adapter)
 		dn_log_port_id = of_get_property(eth_dn, "ibm,hea-port-no",
 						 NULL);
 		if (!dn_log_port_id) {
-			pr_err("bad device node: eth_dn name=%pOF\n", eth_dn);
+			pr_err("bad device node: eth_dn name=%s\n",
+			       eth_dn->full_name);
 			continue;
 		}
 
@@ -3234,8 +3236,8 @@ static ssize_t ehea_remove_port(struct device *dev,
 	return (ssize_t) count;
 }
 
-static DEVICE_ATTR(probe_port, 0200, NULL, ehea_probe_port);
-static DEVICE_ATTR(remove_port, 0200, NULL, ehea_remove_port);
+static DEVICE_ATTR(probe_port, S_IWUSR, NULL, ehea_probe_port);
+static DEVICE_ATTR(remove_port, S_IWUSR, NULL, ehea_remove_port);
 
 static int ehea_create_device_sysfs(struct platform_device *dev)
 {
@@ -3423,7 +3425,7 @@ static int ehea_probe_adapter(struct platform_device *dev)
 
 	if (!adapter->handle) {
 		dev_err(&dev->dev, "failed getting handle for adapter"
-			" '%pOF'\n", dev->dev.of_node);
+			" '%s'\n", dev->dev.of_node->full_name);
 		ret = -ENODEV;
 		goto out_free_ad;
 	}
@@ -3551,12 +3553,14 @@ static int check_module_parm(void)
 	return ret;
 }
 
-static ssize_t capabilities_show(struct device_driver *drv, char *buf)
+static ssize_t ehea_show_capabilities(struct device_driver *drv,
+				      char *buf)
 {
 	return sprintf(buf, "%d", EHEA_CAPABILITIES);
 }
 
-static DRIVER_ATTR_RO(capabilities);
+static DRIVER_ATTR(capabilities, S_IRUSR | S_IRGRP | S_IROTH,
+		   ehea_show_capabilities, NULL);
 
 static int __init ehea_module_init(void)
 {

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_BOOK3S_64_HASH_H
 #define _ASM_POWERPC_BOOK3S_64_HASH_H
 #ifdef __KERNEL__
@@ -9,6 +8,11 @@
  *
  */
 #define H_PTE_NONE_MASK		_PAGE_HPTEFLAGS
+#define H_PAGE_F_GIX_SHIFT	56
+#define H_PAGE_BUSY		_RPAGE_RSV1 /* software: PTE & hash are busy */
+#define H_PAGE_F_SECOND		_RPAGE_RSV2	/* HPTE is in 2ndary HPTEG */
+#define H_PAGE_F_GIX		(_RPAGE_RSV3 | _RPAGE_RSV4 | _RPAGE_RPN44)
+#define H_PAGE_HASHPTE		_RPAGE_RPN43	/* PTE has associated HPTE */
 
 #ifdef CONFIG_PPC_64K_PAGES
 #include <asm/book3s/64/hash-64k.h>
@@ -23,21 +27,20 @@
 				 H_PUD_INDEX_SIZE + H_PGD_INDEX_SIZE + PAGE_SHIFT)
 #define H_PGTABLE_RANGE		(ASM_CONST(1) << H_PGTABLE_EADDR_SIZE)
 
+#if defined(CONFIG_TRANSPARENT_HUGEPAGE) &&  defined(CONFIG_PPC_64K_PAGES)
 /*
- * We store the slot details in the second half of page table.
- * Increase the pud level table so that hugetlb ptes can be stored
- * at pud level.
+ * only with hash 64k we need to use the second half of pmd page table
+ * to store pointer to deposited pgtable_t
  */
-#if defined(CONFIG_HUGETLB_PAGE) &&  defined(CONFIG_PPC_64K_PAGES)
-#define H_PUD_CACHE_INDEX	(H_PUD_INDEX_SIZE + 1)
+#define H_PMD_CACHE_INDEX	(H_PMD_INDEX_SIZE + 1)
 #else
-#define H_PUD_CACHE_INDEX	(H_PUD_INDEX_SIZE)
+#define H_PMD_CACHE_INDEX	H_PMD_INDEX_SIZE
 #endif
 /*
  * Define the address range of the kernel non-linear virtual area
  */
 #define H_KERN_VIRT_START ASM_CONST(0xD000000000000000)
-#define H_KERN_VIRT_SIZE  ASM_CONST(0x0000400000000000) /* 64T */
+#define H_KERN_VIRT_SIZE	ASM_CONST(0x0000100000000000)
 
 /*
  * The vmalloc space starts at the beginning of that region, and
@@ -45,10 +48,8 @@
  * (we keep a quarter for the virtual memmap)
  */
 #define H_VMALLOC_START	H_KERN_VIRT_START
-#define H_VMALLOC_SIZE	ASM_CONST(0x380000000000) /* 56T */
+#define H_VMALLOC_SIZE	(H_KERN_VIRT_SIZE >> 1)
 #define H_VMALLOC_END	(H_VMALLOC_START + H_VMALLOC_SIZE)
-
-#define H_KERN_IO_START	H_VMALLOC_END
 
 /*
  * Region IDs
@@ -88,10 +89,6 @@ static inline int hash__pgd_bad(pgd_t pgd)
 {
 	return (pgd_val(pgd) == 0);
 }
-#ifdef CONFIG_STRICT_KERNEL_RWX
-extern void hash__mark_rodata_ro(void);
-extern void hash__mark_initmem_nx(void);
-#endif
 
 extern void hpte_need_flush(struct mm_struct *mm, unsigned long addr,
 			    pte_t *ptep, unsigned long pte, int huge);
@@ -163,9 +160,6 @@ static inline int hash__pte_none(pte_t pte)
 	return (pte_val(pte) & ~H_PTE_NONE_MASK) == 0;
 }
 
-unsigned long pte_get_hash_gslot(unsigned long vpn, unsigned long shift,
-		int ssize, real_pte_t rpte, unsigned int subpg_index);
-
 /* This low level function performs the actual PTE insertion
  * Setting the PTE depends on the MMU type and other factors. It's
  * an horrible mess that I'm not going to try to clean up now but
@@ -202,7 +196,7 @@ extern int __meminit hash__vmemmap_create_mapping(unsigned long start,
 extern void hash__vmemmap_remove_mapping(unsigned long start,
 				     unsigned long page_size);
 
-int hash__create_section_mapping(unsigned long start, unsigned long end, int nid);
+int hash__create_section_mapping(unsigned long start, unsigned long end);
 int hash__remove_section_mapping(unsigned long start, unsigned long end);
 
 #endif /* !__ASSEMBLY__ */

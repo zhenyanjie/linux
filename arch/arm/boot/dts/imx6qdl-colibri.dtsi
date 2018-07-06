@@ -167,7 +167,7 @@
 	pinctrl-0 = <&pinctrl_i2c2>;
 	status = "okay";
 
-	pmic: pfuze100@8 {
+	pmic: pfuze100@08 {
 		compatible = "fsl,pfuze100";
 		reg = <0x08>;
 
@@ -248,13 +248,12 @@
 		};
 	};
 
-	codec: sgtl5000@a {
+	codec: sgtl5000@0a {
 		compatible = "fsl,sgtl5000";
 		reg = <0x0a>;
 		clocks = <&clks IMX6QDL_CLK_CKO>;
 		VDDA-supply = <&reg_2p5v>;
 		VDDIO-supply = <&reg_3p3v>;
-		lrclk-strength = <3>;
 	};
 
 	/* STMPE811 touch screen controller */
@@ -262,6 +261,8 @@
 		compatible = "st,stmpe811";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_touch_int>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 		reg = <0x41>;
 		interrupts = <20 IRQ_TYPE_LEVEL_LOW>;
 		interrupt-parent = <&gpio6>;
@@ -272,6 +273,7 @@
 
 		stmpe_touchscreen {
 			compatible = "st,stmpe-ts";
+			reg = <0>;
 			/* 3.25 MHz ADC clock speed */
 			st,adc-freq = <1>;
 			/* 8 sample average control */

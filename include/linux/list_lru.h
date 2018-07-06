@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2013 Red Hat, Inc. and Parallels Inc. All rights reserved.
  * Authors: David Chinner and Glauber Costa
@@ -32,7 +31,6 @@ struct list_lru_one {
 };
 
 struct list_lru_memcg {
-	struct rcu_head		rcu;
 	/* array of per cgroup lists, indexed by memcg_cache_id */
 	struct list_lru_one	*lru[0];
 };
@@ -44,7 +42,7 @@ struct list_lru_node {
 	struct list_lru_one	lru;
 #if defined(CONFIG_MEMCG) && !defined(CONFIG_SLOB)
 	/* for cgroup aware lrus points to per cgroup lists, otherwise NULL */
-	struct list_lru_memcg	__rcu *memcg_lrus;
+	struct list_lru_memcg	*memcg_lrus;
 #endif
 	long nr_items;
 } ____cacheline_aligned_in_smp;

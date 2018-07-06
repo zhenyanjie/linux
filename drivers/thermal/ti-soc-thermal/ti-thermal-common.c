@@ -28,7 +28,6 @@
 #include <linux/kernel.h>
 #include <linux/workqueue.h>
 #include <linux/thermal.h>
-#include <linux/cpufreq.h>
 #include <linux/cpumask.h>
 #include <linux/cpu_cooling.h>
 #include <linux/of.h>
@@ -38,7 +37,6 @@
 
 /* common data structures */
 struct ti_thermal_data {
-	struct cpufreq_policy *policy;
 	struct thermal_zone_device *ti_thermal;
 	struct thermal_zone_device *pcb_tz;
 	struct thermal_cooling_device *cool_dev;
@@ -249,19 +247,15 @@ int ti_thermal_register_cpu_cooling(struct ti_bandgap *bgp, int id)
 	if (!data)
 		return -EINVAL;
 
-	data->policy = cpufreq_cpu_get(0);
-	if (!data->policy) {
-		pr_debug("%s: CPUFreq policy not found\n", __func__);
-		return -EPROBE_DEFER;
-	}
-
 	/* Register cooling device */
-	data->cool_dev = cpufreq_cooling_register(data->policy);
+	data->cool_dev = cpufreq_cooling_register(cpu_present_mask);
 	if (IS_ERR(data->cool_dev)) {
 		int ret = PTR_ERR(data->cool_dev);
-		dev_err(bgp->dev, "Failed to register cpu cooling device %d\n",
-			ret);
-		cpufreq_cpu_put(data->policy);
+
+		if (ret != -EPROBE_DEFER)
+			dev_err(bgp->dev,
+				"Failed to register cpu cooling device %d\n",
+				ret);
 
 		return ret;
 	}
@@ -276,11 +270,8 @@ int ti_thermal_unregister_cpu_cooling(struct ti_bandgap *bgp, int id)
 
 	data = ti_bandgap_get_sensor_data(bgp, id);
 
-	if (data) {
+	if (data)
 		cpufreq_cooling_unregister(data->cool_dev);
-		if (data->policy)
-			cpufreq_cpu_put(data->policy);
-	}
 
 	return 0;
 }

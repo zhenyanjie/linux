@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/readdir.c
  *
@@ -37,12 +36,13 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 	if (res)
 		goto out;
 
-	if (shared)
-		res = down_read_killable(&inode->i_rwsem);
-	else
+	if (shared) {
+		inode_lock_shared(inode);
+	} else {
 		res = down_write_killable(&inode->i_rwsem);
-	if (res)
-		goto out;
+		if (res)
+			goto out;
+	}
 
 	res = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
@@ -292,8 +292,8 @@ efault:
 	return -EFAULT;
 }
 
-int ksys_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent,
-		    unsigned int count)
+SYSCALL_DEFINE3(getdents64, unsigned int, fd,
+		struct linux_dirent64 __user *, dirent, unsigned int, count)
 {
 	struct fd f;
 	struct linux_dirent64 __user * lastdirent;
@@ -324,13 +324,6 @@ int ksys_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent,
 	}
 	fdput_pos(f);
 	return error;
-}
-
-
-SYSCALL_DEFINE3(getdents64, unsigned int, fd,
-		struct linux_dirent64 __user *, dirent, unsigned int, count)
-{
-	return ksys_getdents64(fd, dirent, count);
 }
 
 #ifdef CONFIG_COMPAT

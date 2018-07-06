@@ -191,7 +191,7 @@ static void cpdma_desc_pool_destroy(struct cpdma_ctlr *ctlr)
 		return;
 
 	WARN(gen_pool_size(pool->gen_pool) != gen_pool_avail(pool->gen_pool),
-	     "cpdma_desc_pool size %zd != avail %zd",
+	     "cpdma_desc_pool size %d != avail %d",
 	     gen_pool_size(pool->gen_pool),
 	     gen_pool_avail(pool->gen_pool));
 	if (pool->cpumap)
@@ -205,7 +205,7 @@ static void cpdma_desc_pool_destroy(struct cpdma_ctlr *ctlr)
  * devices (e.g. cpsw switches) use plain old memory.  Descriptor pools
  * abstract out these details
  */
-static int cpdma_desc_pool_create(struct cpdma_ctlr *ctlr)
+int cpdma_desc_pool_create(struct cpdma_ctlr *ctlr)
 {
 	struct cpdma_params *cpdma_params = &ctlr->params;
 	struct cpdma_desc_pool *pool;
@@ -645,13 +645,16 @@ EXPORT_SYMBOL_GPL(cpdma_ctlr_destroy);
 int cpdma_ctlr_int_ctrl(struct cpdma_ctlr *ctlr, bool enable)
 {
 	unsigned long flags;
-	int i;
+	int i, reg;
 
 	spin_lock_irqsave(&ctlr->lock, flags);
 	if (ctlr->state != CPDMA_STATE_ACTIVE) {
 		spin_unlock_irqrestore(&ctlr->lock, flags);
 		return -EINVAL;
 	}
+
+	reg = enable ? CPDMA_DMAINTMASKSET : CPDMA_DMAINTMASKCLEAR;
+	dma_reg_write(ctlr, reg, CPDMA_DMAINT_HOSTERR);
 
 	for (i = 0; i < ARRAY_SIZE(ctlr->channels); i++) {
 		if (ctlr->channels[i])
@@ -893,7 +896,7 @@ struct cpdma_chan *cpdma_chan_create(struct cpdma_ctlr *ctlr, int chan_num,
 	chan_num = rx_type ? rx_chan_num(chan_num) : tx_chan_num(chan_num);
 
 	if (__chan_linear(chan_num) >= ctlr->num_chan)
-		return ERR_PTR(-EINVAL);
+		return NULL;
 
 	chan = devm_kzalloc(ctlr->dev, sizeof(*chan), GFP_KERNEL);
 	if (!chan)
@@ -1080,7 +1083,7 @@ int cpdma_chan_submit(struct cpdma_chan *chan, void *token, void *data,
 	writel_relaxed(buffer, &desc->hw_buffer);
 	writel_relaxed(len, &desc->hw_len);
 	writel_relaxed(mode | len, &desc->hw_mode);
-	writel_relaxed((uintptr_t)token, &desc->sw_token);
+	writel_relaxed(token, &desc->sw_token);
 	writel_relaxed(buffer, &desc->sw_buffer);
 	writel_relaxed(len, &desc->sw_len);
 	desc_read(desc, sw_len);
@@ -1121,15 +1124,15 @@ static void __cpdma_chan_free(struct cpdma_chan *chan,
 	struct cpdma_desc_pool		*pool = ctlr->pool;
 	dma_addr_t			buff_dma;
 	int				origlen;
-	uintptr_t			token;
+	void				*token;
 
-	token      = desc_read(desc, sw_token);
+	token      = (void *)desc_read(desc, sw_token);
 	buff_dma   = desc_read(desc, sw_buffer);
 	origlen    = desc_read(desc, sw_len);
 
 	dma_unmap_single(ctlr->dev, buff_dma, origlen, chan->dir);
 	cpdma_desc_free(pool, desc, 1);
-	(*chan->handler)((void *)token, outlen, status);
+	(*chan->handler)(token, outlen, status);
 }
 
 static int __cpdma_chan_process(struct cpdma_chan *chan)
@@ -1164,7 +1167,7 @@ static int __cpdma_chan_process(struct cpdma_chan *chan)
 		outlen -= CPDMA_DESC_CRC_LEN;
 
 	status	= status & (CPDMA_DESC_EOQ | CPDMA_DESC_TD_COMPLETE |
-			    CPDMA_DESC_PORT_MASK | CPDMA_RX_VLAN_ENCAP);
+			    CPDMA_DESC_PORT_MASK);
 
 	chan->head = desc_from_phys(pool, desc_read(desc, hw_next));
 	chan_write(chan, cp, desc_dma);

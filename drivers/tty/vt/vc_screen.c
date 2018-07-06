@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Provide access to virtual console memory.
  * /dev/vcs0: the screen as it is being viewed right now (possibly scrolled)
@@ -559,11 +558,11 @@ unlock_out:
 	return ret;
 }
 
-static __poll_t
+static unsigned int
 vcs_poll(struct file *file, poll_table *wait)
 {
 	struct vcs_poll_data *poll = vcs_poll_data_get(file);
-	__poll_t ret = DEFAULT_POLLMASK|EPOLLERR|EPOLLPRI;
+	int ret = DEFAULT_POLLMASK|POLLERR|POLLPRI;
 
 	if (poll) {
 		poll_wait(file, &poll->waitq, wait);

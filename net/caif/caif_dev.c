@@ -334,8 +334,9 @@ void caif_enroll_dev(struct net_device *dev, struct caif_dev_common *caifdev,
 	mutex_lock(&caifdevs->lock);
 	list_add_rcu(&caifd->list, &caifdevs->list);
 
-	strlcpy(caifd->layer.name, dev->name,
-		sizeof(caifd->layer.name));
+	strncpy(caifd->layer.name, dev->name,
+		sizeof(caifd->layer.name) - 1);
+	caifd->layer.name[sizeof(caifd->layer.name) - 1] = 0;
 	caifd->layer.transmit = transmit;
 	cfcnfg_add_phy_layer(cfg,
 				dev,

@@ -1,14 +1,21 @@
-// SPDX-License-Identifier: GPL-2.0+
-//
-// drivers/dma/imx-sdma.c
-//
-// This file contains a driver for the Freescale Smart DMA engine
-//
-// Copyright 2010 Sascha Hauer, Pengutronix <s.hauer@pengutronix.de>
-//
-// Based on code from Freescale:
-//
-// Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+/*
+ * drivers/dma/imx-sdma.c
+ *
+ * This file contains a driver for the Freescale Smart DMA engine
+ *
+ * Copyright 2010 Sascha Hauer, Pengutronix <s.hauer@pengutronix.de>
+ *
+ * Based on code from Freescale:
+ *
+ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+ *
+ * The code contained herein is licensed under the GNU General Public
+ * License. You may obtain a copy of the GNU General Public License
+ * Version 2 or later at the following locations:
+ *
+ * http://www.opensource.org/licenses/gpl-license.html
+ * http://www.gnu.org/copyleft/gpl.html
+ */
 
 #include <linux/init.h>
 #include <linux/iopoll.h>
@@ -171,14 +178,6 @@
 #define SDMA_WATERMARK_LEVEL_HWE	BIT(29)
 #define SDMA_WATERMARK_LEVEL_CONT	BIT(31)
 
-#define SDMA_DMA_BUSWIDTHS	(BIT(DMA_SLAVE_BUSWIDTH_1_BYTE) | \
-				 BIT(DMA_SLAVE_BUSWIDTH_2_BYTES) | \
-				 BIT(DMA_SLAVE_BUSWIDTH_4_BYTES))
-
-#define SDMA_DMA_DIRECTIONS	(BIT(DMA_DEV_TO_MEM) | \
-				 BIT(DMA_MEM_TO_DEV) | \
-				 BIT(DMA_DEV_TO_DEV))
-
 /*
  * Mode/Count of data node descriptors - IPCv2
  */
@@ -331,7 +330,6 @@ struct sdma_channel {
 	unsigned int			chn_real_count;
 	struct tasklet_struct		tasklet;
 	struct imx_dma_data		data;
-	bool				enabled;
 };
 
 #define IMX_DMA_SG_LOOP		BIT(0)
@@ -590,14 +588,7 @@ static int sdma_config_ownership(struct sdma_channel *sdmac,
 
 static void sdma_enable_channel(struct sdma_engine *sdma, int channel)
 {
-	unsigned long flags;
-	struct sdma_channel *sdmac = &sdma->channel[channel];
-
 	writel(BIT(channel), sdma->regs + SDMA_H_START);
-
-	spin_lock_irqsave(&sdmac->lock, flags);
-	sdmac->enabled = true;
-	spin_unlock_irqrestore(&sdmac->lock, flags);
 }
 
 /*
@@ -686,14 +677,6 @@ static void sdma_update_channel_loop(struct sdma_channel *sdmac)
 	struct sdma_buffer_descriptor *bd;
 	int error = 0;
 	enum dma_status	old_status = sdmac->status;
-	unsigned long flags;
-
-	spin_lock_irqsave(&sdmac->lock, flags);
-	if (!sdmac->enabled) {
-		spin_unlock_irqrestore(&sdmac->lock, flags);
-		return;
-	}
-	spin_unlock_irqrestore(&sdmac->lock, flags);
 
 	/*
 	 * loop mode. Iterate over descriptors, re-setup them and
@@ -947,14 +930,9 @@ static int sdma_disable_channel(struct dma_chan *chan)
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
 	struct sdma_engine *sdma = sdmac->sdma;
 	int channel = sdmac->channel;
-	unsigned long flags;
 
 	writel_relaxed(BIT(channel), sdma->regs + SDMA_H_STATSTOP);
 	sdmac->status = DMA_ERROR;
-
-	spin_lock_irqsave(&sdmac->lock, flags);
-	sdmac->enabled = false;
-	spin_unlock_irqrestore(&sdmac->lock, flags);
 
 	return 0;
 }
@@ -1345,7 +1323,7 @@ static struct dma_async_tx_descriptor *sdma_prep_dma_cyclic(
 	}
 
 	if (period_len > 0xffff) {
-		dev_err(sdma->dev, "SDMA channel %d: maximum period size exceeded: %zu > %d\n",
+		dev_err(sdma->dev, "SDMA channel %d: maximum period size exceeded: %d > %d\n",
 				channel, period_len, 0xffff);
 		goto err_out;
 	}
@@ -1369,7 +1347,7 @@ static struct dma_async_tx_descriptor *sdma_prep_dma_cyclic(
 		if (i + 1 == num_periods)
 			param |= BD_WRAP;
 
-		dev_dbg(sdma->dev, "entry %d: count: %zu dma: %#llx %s%s\n",
+		dev_dbg(sdma->dev, "entry %d: count: %d dma: %#llx %s%s\n",
 				i, period_len, (u64)dma_addr,
 				param & BD_WRAP ? "wrap" : "",
 				param & BD_INTR ? " intr" : "");
@@ -1777,26 +1755,19 @@ static int sdma_probe(struct platform_device *pdev)
 	if (IS_ERR(sdma->clk_ahb))
 		return PTR_ERR(sdma->clk_ahb);
 
-	ret = clk_prepare(sdma->clk_ipg);
-	if (ret)
-		return ret;
-
-	ret = clk_prepare(sdma->clk_ahb);
-	if (ret)
-		goto err_clk;
+	clk_prepare(sdma->clk_ipg);
+	clk_prepare(sdma->clk_ahb);
 
 	ret = devm_request_irq(&pdev->dev, irq, sdma_int_handler, 0, "sdma",
 			       sdma);
 	if (ret)
-		goto err_irq;
+		return ret;
 
 	sdma->irq = irq;
 
 	sdma->script_addrs = kzalloc(sizeof(*sdma->script_addrs), GFP_KERNEL);
-	if (!sdma->script_addrs) {
-		ret = -ENOMEM;
-		goto err_irq;
-	}
+	if (!sdma->script_addrs)
+		return -ENOMEM;
 
 	/* initially no scripts available */
 	saddr_arr = (s32 *)sdma->script_addrs;
@@ -1873,9 +1844,9 @@ static int sdma_probe(struct platform_device *pdev)
 	sdma->dma_device.device_prep_dma_cyclic = sdma_prep_dma_cyclic;
 	sdma->dma_device.device_config = sdma_config;
 	sdma->dma_device.device_terminate_all = sdma_disable_channel_with_delay;
-	sdma->dma_device.src_addr_widths = SDMA_DMA_BUSWIDTHS;
-	sdma->dma_device.dst_addr_widths = SDMA_DMA_BUSWIDTHS;
-	sdma->dma_device.directions = SDMA_DMA_DIRECTIONS;
+	sdma->dma_device.src_addr_widths = BIT(DMA_SLAVE_BUSWIDTH_4_BYTES);
+	sdma->dma_device.dst_addr_widths = BIT(DMA_SLAVE_BUSWIDTH_4_BYTES);
+	sdma->dma_device.directions = BIT(DMA_DEV_TO_MEM) | BIT(DMA_MEM_TO_DEV);
 	sdma->dma_device.residue_granularity = DMA_RESIDUE_GRANULARITY_SEGMENT;
 	sdma->dma_device.device_issue_pending = sdma_issue_pending;
 	sdma->dma_device.dev->dma_parms = &sdma->dma_parms;
@@ -1911,10 +1882,6 @@ err_register:
 	dma_async_device_unregister(&sdma->dma_device);
 err_init:
 	kfree(sdma->script_addrs);
-err_irq:
-	clk_unprepare(sdma->clk_ahb);
-err_clk:
-	clk_unprepare(sdma->clk_ipg);
 	return ret;
 }
 
@@ -1926,8 +1893,6 @@ static int sdma_remove(struct platform_device *pdev)
 	devm_free_irq(&pdev->dev, sdma->irq, sdma);
 	dma_async_device_unregister(&sdma->dma_device);
 	kfree(sdma->script_addrs);
-	clk_unprepare(sdma->clk_ahb);
-	clk_unprepare(sdma->clk_ipg);
 	/* Kill the tasklet */
 	for (i = 0; i < MAX_DMA_CHANNELS; i++) {
 		struct sdma_channel *sdmac = &sdma->channel[i];
@@ -1953,10 +1918,4 @@ module_platform_driver(sdma_driver);
 
 MODULE_AUTHOR("Sascha Hauer, Pengutronix <s.hauer@pengutronix.de>");
 MODULE_DESCRIPTION("i.MX SDMA driver");
-#if IS_ENABLED(CONFIG_SOC_IMX6Q)
-MODULE_FIRMWARE("imx/sdma/sdma-imx6q.bin");
-#endif
-#if IS_ENABLED(CONFIG_SOC_IMX7D)
-MODULE_FIRMWARE("imx/sdma/sdma-imx7d.bin");
-#endif
 MODULE_LICENSE("GPL");

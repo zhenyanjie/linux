@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * USB Attached SCSI
  * Note that this is not the same as the USB Mass Storage driver
@@ -6,6 +5,8 @@
  * Copyright Hans de Goede <hdegoede@redhat.com> for Red Hat, Inc. 2013 - 2016
  * Copyright Matthew Wilcox for Intel Corp, 2010
  * Copyright Sarah Sharp for Intel Corp, 2010
+ *
+ * Distributed under the terms of the GNU GPL, version two.
  */
 
 #include <linux/blkdev.h>
@@ -667,7 +668,6 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd,
 		break;
 	case DMA_BIDIRECTIONAL:
 		cmdinfo->state |= ALLOC_DATA_IN_URB | SUBMIT_DATA_IN_URB;
-		/* fall through */
 	case DMA_TO_DEVICE:
 		cmdinfo->state |= ALLOC_DATA_OUT_URB | SUBMIT_DATA_OUT_URB;
 	case DMA_NONE:
@@ -737,7 +737,7 @@ static int uas_eh_abort_handler(struct scsi_cmnd *cmnd)
 	return FAILED;
 }
 
-static int uas_eh_device_reset_handler(struct scsi_cmnd *cmnd)
+static int uas_eh_bus_reset_handler(struct scsi_cmnd *cmnd)
 {
 	struct scsi_device *sdev = cmnd->device;
 	struct uas_dev_info *devinfo = sdev->hostdata;
@@ -836,12 +836,6 @@ static int uas_slave_configure(struct scsi_device *sdev)
 	if (devinfo->flags & US_FL_BROKEN_FUA)
 		sdev->broken_fua = 1;
 
-	/* UAS also needs to support FL_ALWAYS_SYNC */
-	if (devinfo->flags & US_FL_ALWAYS_SYNC) {
-		sdev->skip_ms_page_3f = 1;
-		sdev->skip_ms_page_8 = 1;
-		sdev->wce_default_on = 1;
-	}
 	scsi_change_queue_depth(sdev, devinfo->qdepth - 2);
 	return 0;
 }
@@ -854,7 +848,7 @@ static struct scsi_host_template uas_host_template = {
 	.slave_alloc = uas_slave_alloc,
 	.slave_configure = uas_slave_configure,
 	.eh_abort_handler = uas_eh_abort_handler,
-	.eh_device_reset_handler = uas_eh_device_reset_handler,
+	.eh_bus_reset_handler = uas_eh_bus_reset_handler,
 	.this_id = -1,
 	.sg_tablesize = SG_NONE,
 	.skip_settle_delay = 1,
@@ -879,14 +873,14 @@ MODULE_DEVICE_TABLE(usb, uas_usb_ids);
 static int uas_switch_interface(struct usb_device *udev,
 				struct usb_interface *intf)
 {
-	struct usb_host_interface *alt;
+	int alt;
 
 	alt = uas_find_uas_alt_setting(intf);
-	if (!alt)
-		return -ENODEV;
+	if (alt < 0)
+		return alt;
 
-	return usb_set_interface(udev, alt->desc.bInterfaceNumber,
-			alt->desc.bAlternateSetting);
+	return usb_set_interface(udev,
+			intf->altsetting[0].desc.bInterfaceNumber, alt);
 }
 
 static int uas_configure_endpoints(struct uas_dev_info *devinfo)
@@ -1082,19 +1076,20 @@ static int uas_post_reset(struct usb_interface *intf)
 		return 0;
 
 	err = uas_configure_endpoints(devinfo);
-	if (err && err != -ENODEV)
+	if (err) {
 		shost_printk(KERN_ERR, shost,
 			     "%s: alloc streams error %d after reset",
 			     __func__, err);
+		return 1;
+	}
 
-	/* we must unblock the host in every case lest we deadlock */
 	spin_lock_irqsave(shost->host_lock, flags);
 	scsi_report_bus_reset(shost, 0);
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
 	scsi_unblock_requests(shost);
 
-	return err ? 1 : 0;
+	return 0;
 }
 
 static int uas_suspend(struct usb_interface *intf, pm_message_t message)

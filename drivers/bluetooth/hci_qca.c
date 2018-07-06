@@ -29,12 +29,7 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/clk.h>
 #include <linux/debugfs.h>
-#include <linux/gpio/consumer.h>
-#include <linux/mod_devicetable.h>
-#include <linux/module.h>
-#include <linux/serdev.h>
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -54,9 +49,6 @@
 #define IBS_WAKE_RETRANS_TIMEOUT_MS	100
 #define IBS_TX_IDLE_TIMEOUT_MS		2000
 #define BAUDRATE_SETTLE_TIMEOUT_MS	300
-
-/* susclk rate */
-#define SUSCLK_RATE_32KHZ	32768
 
 /* HCI_IBS transmit side sleep protocol states */
 enum tx_ibs_states {
@@ -117,12 +109,6 @@ struct qca_data {
 	u64 rx_votes_off;
 	u64 votes_on;
 	u64 votes_off;
-};
-
-struct qca_serdev {
-	struct hci_uart	 serdev_hu;
-	struct gpio_desc *bt_en;
-	struct clk	 *susclk;
 };
 
 static void __serial_clock_on(struct tty_struct *tty)
@@ -229,7 +215,7 @@ static int send_hci_ibs_cmd(u8 cmd, struct hci_uart *hu)
 	}
 
 	/* Assign HCI_IBS type */
-	skb_put_u8(skb, cmd);
+	*skb_put(skb, 1) = cmd;
 
 	skb_queue_tail(&qca->txq, skb);
 
@@ -321,10 +307,10 @@ static void qca_wq_serial_tx_clock_vote_off(struct work_struct *work)
 	serial_clock_vote(HCI_IBS_TX_VOTE_CLOCK_OFF, hu);
 }
 
-static void hci_ibs_tx_idle_timeout(struct timer_list *t)
+static void hci_ibs_tx_idle_timeout(unsigned long arg)
 {
-	struct qca_data *qca = from_timer(qca, t, tx_idle_timer);
-	struct hci_uart *hu = qca->hu;
+	struct hci_uart *hu = (struct hci_uart *)arg;
+	struct qca_data *qca = hu->priv;
 	unsigned long flags;
 
 	BT_DBG("hu %p idle timeout in %d state", hu, qca->tx_ibs_state);
@@ -356,10 +342,10 @@ static void hci_ibs_tx_idle_timeout(struct timer_list *t)
 	spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
 }
 
-static void hci_ibs_wake_retrans_timeout(struct timer_list *t)
+static void hci_ibs_wake_retrans_timeout(unsigned long arg)
 {
-	struct qca_data *qca = from_timer(qca, t, wake_retrans_timer);
-	struct hci_uart *hu = qca->hu;
+	struct hci_uart *hu = (struct hci_uart *)arg;
+	struct qca_data *qca = hu->priv;
 	unsigned long flags, retrans_delay;
 	bool retransmit = false;
 
@@ -400,7 +386,6 @@ static void hci_ibs_wake_retrans_timeout(struct timer_list *t)
 /* Initialize protocol */
 static int qca_open(struct hci_uart *hu)
 {
-	struct qca_serdev *qcadev;
 	struct qca_data *qca;
 
 	BT_DBG("hu %p qca_open", hu);
@@ -453,18 +438,12 @@ static int qca_open(struct hci_uart *hu)
 
 	hu->priv = qca;
 
-	timer_setup(&qca->wake_retrans_timer, hci_ibs_wake_retrans_timeout, 0);
+	setup_timer(&qca->wake_retrans_timer, hci_ibs_wake_retrans_timeout,
+		    (u_long)hu);
 	qca->wake_retrans = IBS_WAKE_RETRANS_TIMEOUT_MS;
 
-	timer_setup(&qca->tx_idle_timer, hci_ibs_tx_idle_timeout, 0);
+	setup_timer(&qca->tx_idle_timer, hci_ibs_tx_idle_timeout, (u_long)hu);
 	qca->tx_idle_delay = IBS_TX_IDLE_TIMEOUT_MS;
-
-	if (hu->serdev) {
-		serdev_device_open(hu->serdev);
-
-		qcadev = serdev_device_get_drvdata(hu->serdev);
-		gpiod_set_value_cansleep(qcadev->bt_en, 1);
-	}
 
 	BT_DBG("HCI_UART_QCA open, tx_idle_delay=%u, wake_retrans=%u",
 	       qca->tx_idle_delay, qca->wake_retrans);
@@ -534,7 +513,6 @@ static int qca_flush(struct hci_uart *hu)
 /* Close protocol */
 static int qca_close(struct hci_uart *hu)
 {
-	struct qca_serdev *qcadev;
 	struct qca_data *qca = hu->priv;
 
 	BT_DBG("hu %p qca close", hu);
@@ -547,13 +525,6 @@ static int qca_close(struct hci_uart *hu)
 	del_timer(&qca->wake_retrans_timer);
 	destroy_workqueue(qca->workqueue);
 	qca->hu = NULL;
-
-	if (hu->serdev) {
-		serdev_device_close(hu->serdev);
-
-		qcadev = serdev_device_get_drvdata(hu->serdev);
-		gpiod_set_value_cansleep(qcadev->bt_en, 0);
-	}
 
 	kfree_skb(qca->rx_skb);
 
@@ -830,7 +801,7 @@ static int qca_recv(struct hci_uart *hu, const void *data, int count)
 				  qca_recv_pkts, ARRAY_SIZE(qca_recv_pkts));
 	if (IS_ERR(qca->rx_skb)) {
 		int err = PTR_ERR(qca->rx_skb);
-		bt_dev_err(hu->hdev, "Frame reassembly failed (%d)", err);
+		BT_ERR("%s: Frame reassembly failed (%d)", hu->hdev->name, err);
 		qca->rx_skb = NULL;
 		return err;
 	}
@@ -893,12 +864,12 @@ static int qca_set_baudrate(struct hci_dev *hdev, uint8_t baudrate)
 
 	skb = bt_skb_alloc(sizeof(cmd), GFP_ATOMIC);
 	if (!skb) {
-		bt_dev_err(hdev, "Failed to allocate baudrate packet");
+		BT_ERR("Failed to allocate memory for baudrate packet");
 		return -ENOMEM;
 	}
 
 	/* Assign commands to change baudrate and packet type. */
-	skb_put_data(skb, cmd, sizeof(cmd));
+	memcpy(skb_put(skb, sizeof(cmd)), cmd, sizeof(cmd));
 	hci_skb_pkt_type(skb) = HCI_COMMAND_PKT;
 
 	skb_queue_tail(&qca->txq, skb);
@@ -910,17 +881,9 @@ static int qca_set_baudrate(struct hci_dev *hdev, uint8_t baudrate)
 	 */
 	set_current_state(TASK_UNINTERRUPTIBLE);
 	schedule_timeout(msecs_to_jiffies(BAUDRATE_SETTLE_TIMEOUT_MS));
-	set_current_state(TASK_RUNNING);
+	set_current_state(TASK_INTERRUPTIBLE);
 
 	return 0;
-}
-
-static inline void host_set_baudrate(struct hci_uart *hu, unsigned int speed)
-{
-	if (hu->serdev)
-		serdev_device_set_baudrate(hu->serdev, speed);
-	else
-		hci_uart_set_baudrate(hu, speed);
 }
 
 static int qca_setup(struct hci_uart *hu)
@@ -930,7 +893,7 @@ static int qca_setup(struct hci_uart *hu)
 	unsigned int speed, qca_baudrate = QCA_BAUDRATE_115200;
 	int ret;
 
-	bt_dev_info(hdev, "ROME setup");
+	BT_INFO("%s: ROME setup", hdev->name);
 
 	/* Patch downloading has to be done without IBS mode */
 	clear_bit(STATE_IN_BAND_SLEEP_ENABLED, &qca->flags);
@@ -943,7 +906,7 @@ static int qca_setup(struct hci_uart *hu)
 		speed = hu->proto->init_speed;
 
 	if (speed)
-		host_set_baudrate(hu, speed);
+		hci_uart_set_baudrate(hu, speed);
 
 	/* Setup user speed if needed */
 	speed = 0;
@@ -955,14 +918,14 @@ static int qca_setup(struct hci_uart *hu)
 	if (speed) {
 		qca_baudrate = qca_get_baudrate_value(speed);
 
-		bt_dev_info(hdev, "Set UART speed to %d", speed);
+		BT_INFO("%s: Set UART speed to %d", hdev->name, speed);
 		ret = qca_set_baudrate(hdev, qca_baudrate);
 		if (ret) {
-			bt_dev_err(hdev, "Failed to change the baud rate (%d)",
-				   ret);
+			BT_ERR("%s: Failed to change the baud rate (%d)",
+			       hdev->name, ret);
 			return ret;
 		}
-		host_set_baudrate(hu, speed);
+		hci_uart_set_baudrate(hu, speed);
 	}
 
 	/* Setup patch / NVM configurations */
@@ -970,15 +933,6 @@ static int qca_setup(struct hci_uart *hu)
 	if (!ret) {
 		set_bit(STATE_IN_BAND_SLEEP_ENABLED, &qca->flags);
 		qca_debugfs_init(hdev);
-	} else if (ret == -ENOENT) {
-		/* No patch/nvm-config found, run with original fw/config */
-		ret = 0;
-	} else if (ret == -EAGAIN) {
-		/*
-		 * Userspace firmware loader will return -EAGAIN in case no
-		 * patch/nvm-config is found, so run with original fw/config.
-		 */
-		ret = 0;
 	}
 
 	/* Setup bdaddr */
@@ -1002,80 +956,12 @@ static struct hci_uart_proto qca_proto = {
 	.dequeue	= qca_dequeue,
 };
 
-static int qca_serdev_probe(struct serdev_device *serdev)
-{
-	struct qca_serdev *qcadev;
-	int err;
-
-	qcadev = devm_kzalloc(&serdev->dev, sizeof(*qcadev), GFP_KERNEL);
-	if (!qcadev)
-		return -ENOMEM;
-
-	qcadev->serdev_hu.serdev = serdev;
-	serdev_device_set_drvdata(serdev, qcadev);
-
-	qcadev->bt_en = devm_gpiod_get(&serdev->dev, "enable",
-				       GPIOD_OUT_LOW);
-	if (IS_ERR(qcadev->bt_en)) {
-		dev_err(&serdev->dev, "failed to acquire enable gpio\n");
-		return PTR_ERR(qcadev->bt_en);
-	}
-
-	qcadev->susclk = devm_clk_get(&serdev->dev, NULL);
-	if (IS_ERR(qcadev->susclk)) {
-		dev_err(&serdev->dev, "failed to acquire clk\n");
-		return PTR_ERR(qcadev->susclk);
-	}
-
-	err = clk_set_rate(qcadev->susclk, SUSCLK_RATE_32KHZ);
-	if (err)
-		return err;
-
-	err = clk_prepare_enable(qcadev->susclk);
-	if (err)
-		return err;
-
-	err = hci_uart_register_device(&qcadev->serdev_hu, &qca_proto);
-	if (err)
-		clk_disable_unprepare(qcadev->susclk);
-
-	return err;
-}
-
-static void qca_serdev_remove(struct serdev_device *serdev)
-{
-	struct qca_serdev *qcadev = serdev_device_get_drvdata(serdev);
-
-	hci_uart_unregister_device(&qcadev->serdev_hu);
-
-	clk_disable_unprepare(qcadev->susclk);
-}
-
-static const struct of_device_id qca_bluetooth_of_match[] = {
-	{ .compatible = "qcom,qca6174-bt" },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, qca_bluetooth_of_match);
-
-static struct serdev_device_driver qca_serdev_driver = {
-	.probe = qca_serdev_probe,
-	.remove = qca_serdev_remove,
-	.driver = {
-		.name = "hci_uart_qca",
-		.of_match_table = qca_bluetooth_of_match,
-	},
-};
-
 int __init qca_init(void)
 {
-	serdev_device_driver_register(&qca_serdev_driver);
-
 	return hci_uart_register_proto(&qca_proto);
 }
 
 int __exit qca_deinit(void)
 {
-	serdev_device_driver_unregister(&qca_serdev_driver);
-
 	return hci_uart_unregister_proto(&qca_proto);
 }

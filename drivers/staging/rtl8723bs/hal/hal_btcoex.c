@@ -1,7 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2013 Realtek Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
  *
  ******************************************************************************/
 #define __HAL_BTCOEX_C__
@@ -377,7 +385,7 @@ static s32 halbtcoutsrc_GetWifiRssi(struct adapter *padapter)
 static u8 halbtcoutsrc_GetWifiScanAPNum(struct adapter *padapter)
 {
 	struct mlme_ext_priv *pmlmeext;
-	static u8 scan_AP_num;
+	static u8 scan_AP_num = 0;
 
 	pmlmeext = &padapter->mlmeextpriv;
 
@@ -411,10 +419,10 @@ static u8 halbtcoutsrc_Get(void *pBtcContext, u8 getType, void *pOutBuf)
 	padapter = pBtCoexist->Adapter;
 	pHalData = GET_HAL_DATA(padapter);
 	mlmeext = &padapter->mlmeextpriv;
-	pu8 = pOutBuf;
-	pS4Tmp = pOutBuf;
-	pU4Tmp = pOutBuf;
-	pU1Tmp = pOutBuf;
+	pu8 = (u8 *)pOutBuf;
+	pS4Tmp = (s32 *)pOutBuf;
+	pU4Tmp = (u32 *)pOutBuf;
+	pU1Tmp = (u8 *)pOutBuf;
 	ret = true;
 
 	switch (getType) {
@@ -455,7 +463,7 @@ static u8 halbtcoutsrc_Get(void *pBtcContext, u8 getType, void *pOutBuf)
 		break;
 
 	case BTC_GET_BL_WIFI_UNDER_5G:
-		*pu8 = pHalData->CurrentBandType == 1;
+		*pu8 = (pHalData->CurrentBandType == 1) ? true : false;
 		break;
 
 	case BTC_GET_BL_WIFI_AP_MODE_ENABLE:
@@ -577,9 +585,9 @@ static u8 halbtcoutsrc_Set(void *pBtcContext, u8 setType, void *pInBuf)
 	pBtCoexist = (PBTC_COEXIST)pBtcContext;
 	padapter = pBtCoexist->Adapter;
 	pHalData = GET_HAL_DATA(padapter);
-	pu8 = pInBuf;
-	pU1Tmp = pInBuf;
-	pU4Tmp = pInBuf;
+	pu8 = (u8 *)pInBuf;
+	pU1Tmp = (u8 *)pInBuf;
+	pU4Tmp = (u32 *)pInBuf;
 	ret = true;
 
 	if (!halbtcoutsrc_IsBtCoexistAvailable(pBtCoexist))
@@ -1403,8 +1411,15 @@ void hal_btcoex_SetSingleAntPath(struct adapter *padapter, u8 singleAntPath)
 
 u8 hal_btcoex_Initialize(struct adapter *padapter)
 {
+	u8 ret1;
+	u8 ret2;
+
+
 	memset(&GLBtCoexist, 0, sizeof(GLBtCoexist));
-	return EXhalbtcoutsrc_InitlizeVariables((void *)padapter);
+	ret1 = EXhalbtcoutsrc_InitlizeVariables((void *)padapter);
+	ret2 = (ret1 == true) ? true : false;
+
+	return ret2;
 }
 
 void hal_btcoex_PowerOnSetting(struct adapter *padapter)

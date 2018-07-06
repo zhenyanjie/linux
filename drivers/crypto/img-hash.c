@@ -1054,7 +1054,7 @@ res_err:
 
 static int img_hash_remove(struct platform_device *pdev)
 {
-	struct img_hash_dev *hdev;
+	static struct img_hash_dev *hdev;
 
 	hdev = platform_get_drvdata(pdev);
 	spin_lock(&img_hash.lock);
@@ -1088,17 +1088,9 @@ static int img_hash_suspend(struct device *dev)
 static int img_hash_resume(struct device *dev)
 {
 	struct img_hash_dev *hdev = dev_get_drvdata(dev);
-	int ret;
 
-	ret = clk_prepare_enable(hdev->hash_clk);
-	if (ret)
-		return ret;
-
-	ret = clk_prepare_enable(hdev->sys_clk);
-	if (ret) {
-		clk_disable_unprepare(hdev->hash_clk);
-		return ret;
-	}
+	clk_prepare_enable(hdev->hash_clk);
+	clk_prepare_enable(hdev->sys_clk);
 
 	return 0;
 }

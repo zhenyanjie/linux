@@ -12,7 +12,6 @@
  * by the Free Software Foundation.
  */
 
-#include <crypto/hmac.h>
 #include <crypto/md5.h>
 #include <crypto/sha.h>
 
@@ -1165,8 +1164,8 @@ static int mv_cesa_ahmac_pad_init(struct ahash_request *req,
 	memcpy(opad, ipad, blocksize);
 
 	for (i = 0; i < blocksize; i++) {
-		ipad[i] ^= HMAC_IPAD_VALUE;
-		opad[i] ^= HMAC_OPAD_VALUE;
+		ipad[i] ^= 0x36;
+		opad[i] ^= 0x5c;
 	}
 
 	return 0;
@@ -1198,7 +1197,7 @@ static int mv_cesa_ahmac_setkey(const char *hash_alg_name,
 
 	blocksize = crypto_tfm_alg_blocksize(crypto_ahash_tfm(tfm));
 
-	ipad = kcalloc(2, blocksize, GFP_KERNEL);
+	ipad = kzalloc(2 * blocksize, GFP_KERNEL);
 	if (!ipad) {
 		ret = -ENOMEM;
 		goto free_req;

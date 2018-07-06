@@ -107,6 +107,19 @@ MODULE_DEVICE_TABLE(pci, pciidlist);
 static const struct drm_ioctl_desc psb_ioctls[] = {
 };
 
+static void psb_driver_lastclose(struct drm_device *dev)
+{
+	int ret;
+	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct psb_fbdev *fbdev = dev_priv->fbdev;
+
+	ret = drm_fb_helper_restore_fbdev_mode_unlocked(&fbdev->psb_fb_helper);
+	if (ret)
+		DRM_DEBUG("failed to restore crtc mode\n");
+
+	return;
+}
+
 static int psb_do_init(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
@@ -248,11 +261,7 @@ static int psb_driver_load(struct drm_device *dev, unsigned long flags)
 		goto out_err;
 
 	if (IS_MRST(dev)) {
-		int domain = pci_domain_nr(dev->pdev->bus);
-
-		dev_priv->aux_pdev =
-			pci_get_domain_bus_and_slot(domain, 0,
-						    PCI_DEVFN(3, 0));
+		dev_priv->aux_pdev = pci_get_bus_and_slot(0, PCI_DEVFN(3, 0));
 
 		if (dev_priv->aux_pdev) {
 			resource_start = pci_resource_start(dev_priv->aux_pdev,
@@ -272,9 +281,7 @@ static int psb_driver_load(struct drm_device *dev, unsigned long flags)
 		}
 		dev_priv->gmbus_reg = dev_priv->aux_reg;
 
-		dev_priv->lpc_pdev =
-			pci_get_domain_bus_and_slot(domain, 0,
-						    PCI_DEVFN(31, 0));
+		dev_priv->lpc_pdev = pci_get_bus_and_slot(0, PCI_DEVFN(31, 0));
 		if (dev_priv->lpc_pdev) {
 			pci_read_config_word(dev_priv->lpc_pdev, PSB_LPC_GBA,
 				&dev_priv->lpc_gpio_base);
@@ -472,7 +479,8 @@ static struct drm_driver driver = {
 			   DRIVER_MODESET | DRIVER_GEM,
 	.load = psb_driver_load,
 	.unload = psb_driver_unload,
-	.lastclose = drm_fb_helper_lastclose,
+	.lastclose = psb_driver_lastclose,
+	.set_busid = drm_pci_set_busid,
 
 	.num_ioctls = ARRAY_SIZE(psb_ioctls),
 	.irq_preinstall = psb_irq_preinstall,
@@ -487,6 +495,8 @@ static struct drm_driver driver = {
 	.gem_vm_ops = &psb_gem_vm_ops,
 
 	.dumb_create = psb_gem_dumb_create,
+	.dumb_map_offset = psb_gem_dumb_map_gtt,
+	.dumb_destroy = drm_gem_dumb_destroy,
 	.ioctls = psb_ioctls,
 	.fops = &psb_gem_fops,
 	.name = DRIVER_NAME,
@@ -507,12 +517,12 @@ static struct pci_driver psb_pci_driver = {
 
 static int __init psb_init(void)
 {
-	return pci_register_driver(&psb_pci_driver);
+	return drm_pci_init(&driver, &psb_pci_driver);
 }
 
 static void __exit psb_exit(void)
 {
-	pci_unregister_driver(&psb_pci_driver);
+	drm_pci_exit(&driver, &psb_pci_driver);
 }
 
 late_initcall(psb_init);
@@ -520,4 +530,4 @@ module_exit(psb_exit);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_LICENSE("GPL");
+MODULE_LICENSE(DRIVER_LICENSE);

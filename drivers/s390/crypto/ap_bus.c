@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright IBM Corp. 2006, 2012
  * Author(s): Cornelia Huck <cornelia.huck@de.ibm.com>
@@ -8,6 +7,20 @@
  *	      Holger Dengler <hd@linux.vnet.ibm.com>
  *
  * Adjunct processor bus.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define KMSG_COMPONENT "ap"
@@ -25,6 +38,7 @@
 #include <linux/kthread.h>
 #include <linux/mutex.h>
 #include <linux/suspend.h>
+#include <asm/reset.h>
 #include <asm/airq.h>
 #include <linux/atomic.h>
 #include <asm/isc.h>
@@ -152,63 +166,26 @@ static int ap_configuration_available(void)
 }
 
 /**
- * ap_apft_available(): Test if AP facilities test (APFT)
- * facility is available.
- *
- * Returns 1 if APFT is is available.
- */
-static int ap_apft_available(void)
-{
-	return test_facility(15);
-}
-
-/*
- * ap_qact_available(): Test if the PQAP(QACT) subfunction is available.
- *
- * Returns 1 if the QACT subfunction is available.
- */
-static inline int ap_qact_available(void)
-{
-	if (ap_configuration)
-		return ap_configuration->qact;
-	return 0;
-}
-
-/**
  * ap_test_queue(): Test adjunct processor queue.
  * @qid: The AP queue number
- * @tbit: Test facilities bit
  * @info: Pointer to queue descriptor
  *
  * Returns AP queue status structure.
  */
-struct ap_queue_status ap_test_queue(ap_qid_t qid,
-				     int tbit,
-				     unsigned long *info)
+static inline struct ap_queue_status
+ap_test_queue(ap_qid_t qid, unsigned long *info)
 {
-	if (tbit)
-		qid |= 1UL << 23; /* set T bit*/
+	if (test_facility(15))
+		qid |= 1UL << 23;		/* set APFT T bit*/
 	return ap_tapq(qid, info);
 }
-EXPORT_SYMBOL(ap_test_queue);
 
-/*
- * ap_query_configuration(): Fetch cryptographic config info
- *
- * Returns the ap configuration info fetched via PQAP(QCI).
- * On success 0 is returned, on failure a negative errno
- * is returned, e.g. if the PQAP(QCI) instruction is not
- * available, the return value will be -EOPNOTSUPP.
- */
-int ap_query_configuration(struct ap_config_info *info)
+static inline int ap_query_configuration(void)
 {
-	if (!ap_configuration_available())
+	if (!ap_configuration)
 		return -EOPNOTSUPP;
-	if (!info)
-		return -EINVAL;
-	return ap_qci(info);
+	return ap_qci(ap_configuration);
 }
-EXPORT_SYMBOL(ap_query_configuration);
 
 /**
  * ap_init_configuration(): Allocate and query configuration array.
@@ -221,7 +198,7 @@ static void ap_init_configuration(void)
 	ap_configuration = kzalloc(sizeof(*ap_configuration), GFP_KERNEL);
 	if (!ap_configuration)
 		return;
-	if (ap_query_configuration(ap_configuration) != 0) {
+	if (ap_query_configuration() != 0) {
 		kfree(ap_configuration);
 		ap_configuration = NULL;
 		return;
@@ -284,7 +261,7 @@ static int ap_query_queue(ap_qid_t qid, int *queue_depth, int *device_type,
 	if (!ap_test_config_card_id(AP_QID_CARD(qid)))
 		return -ENODEV;
 
-	status = ap_test_queue(qid, ap_apft_available(), &info);
+	status = ap_test_queue(qid, &info);
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
 		*queue_depth = (int)(info & 0xff);
@@ -360,13 +337,13 @@ void ap_wait(enum ap_wait wait)
 
 /**
  * ap_request_timeout(): Handling of request timeouts
- * @t: timer making this callback
+ * @data: Holds the AP device.
  *
  * Handles request timeouts.
  */
-void ap_request_timeout(struct timer_list *t)
+void ap_request_timeout(unsigned long data)
 {
-	struct ap_queue *aq = from_timer(aq, t, timeout);
+	struct ap_queue *aq = (struct ap_queue *) data;
 
 	if (ap_suspend_flag)
 		return;
@@ -789,7 +766,7 @@ static ssize_t ap_domain_store(struct bus_type *bus,
 	ap_domain_index = domain;
 	spin_unlock_bh(&ap_domain_lock);
 
-	AP_DBF(DBF_DEBUG, "stored new default domain=%d\n", domain);
+	AP_DBF(DBF_DEBUG, "store new default domain=%d\n", domain);
 
 	return count;
 }
@@ -963,9 +940,7 @@ static int ap_select_domain(void)
 		for (j = 0; j < AP_DEVICES; j++) {
 			if (!ap_test_config_card_id(j))
 				continue;
-			status = ap_test_queue(AP_MKQID(j, i),
-					       ap_apft_available(),
-					       NULL);
+			status = ap_test_queue(AP_MKQID(j, i), NULL);
 			if (status.response_code != AP_RESPONSE_NORMAL)
 				continue;
 			count++;
@@ -977,53 +952,11 @@ static int ap_select_domain(void)
 	}
 	if (best_domain >= 0){
 		ap_domain_index = best_domain;
-		AP_DBF(DBF_DEBUG, "new ap_domain_index=%d\n", ap_domain_index);
 		spin_unlock_bh(&ap_domain_lock);
 		return 0;
 	}
 	spin_unlock_bh(&ap_domain_lock);
 	return -ENODEV;
-}
-
-/*
- * This function checks the type and returns either 0 for not
- * supported or the highest compatible type value (which may
- * include the input type value).
- */
-static int ap_get_compatible_type(ap_qid_t qid, int rawtype, unsigned int func)
-{
-	int comp_type = 0;
-
-	/* < CEX2A is not supported */
-	if (rawtype < AP_DEVICE_TYPE_CEX2A)
-		return 0;
-	/* up to CEX6 known and fully supported */
-	if (rawtype <= AP_DEVICE_TYPE_CEX6)
-		return rawtype;
-	/*
-	 * unknown new type > CEX6, check for compatibility
-	 * to the highest known and supported type which is
-	 * currently CEX6 with the help of the QACT function.
-	 */
-	if (ap_qact_available()) {
-		struct ap_queue_status status;
-		union ap_qact_ap_info apinfo = {0};
-
-		apinfo.mode = (func >> 26) & 0x07;
-		apinfo.cat = AP_DEVICE_TYPE_CEX6;
-		status = ap_qact(qid, 0, &apinfo);
-		if (status.response_code == AP_RESPONSE_NORMAL
-		    && apinfo.cat >= AP_DEVICE_TYPE_CEX2A
-		    && apinfo.cat <= AP_DEVICE_TYPE_CEX6)
-			comp_type = apinfo.cat;
-	}
-	if (!comp_type)
-		AP_DBF(DBF_WARN, "queue=%02x.%04x unable to map type %d\n",
-		       AP_QID_CARD(qid), AP_QID_QUEUE(qid), rawtype);
-	else if (comp_type != rawtype)
-		AP_DBF(DBF_INFO, "queue=%02x.%04x map type %d to %d\n",
-		       AP_QID_CARD(qid), AP_QID_QUEUE(qid), rawtype, comp_type);
-	return comp_type;
 }
 
 /*
@@ -1053,13 +986,13 @@ static void ap_scan_bus(struct work_struct *unused)
 	struct ap_card *ac;
 	struct device *dev;
 	ap_qid_t qid;
-	int comp_type, depth = 0, type = 0;
-	unsigned int func = 0;
-	int rc, id, dom, borked, domains, defdomdevs = 0;
+	int depth = 0, type = 0;
+	unsigned int functions = 0;
+	int rc, id, dom, borked, domains;
 
 	AP_DBF(DBF_DEBUG, "ap_scan_bus running\n");
 
-	ap_query_configuration(ap_configuration);
+	ap_query_configuration();
 	if (ap_select_domain() != 0)
 		goto out;
 
@@ -1105,12 +1038,12 @@ static void ap_scan_bus(struct work_struct *unused)
 				}
 				continue;
 			}
-			rc = ap_query_queue(qid, &depth, &type, &func);
+			rc = ap_query_queue(qid, &depth, &type, &functions);
 			if (dev) {
 				spin_lock_bh(&aq->lock);
 				if (rc == -ENODEV ||
 				    /* adapter reconfiguration */
-				    (ac && ac->functions != func))
+				    (ac && ac->functions != functions))
 					aq->state = AP_STATE_BORKED;
 				borked = aq->state == AP_STATE_BORKED;
 				spin_unlock_bh(&aq->lock);
@@ -1119,21 +1052,16 @@ static void ap_scan_bus(struct work_struct *unused)
 				put_device(dev);
 				if (!borked) {
 					domains++;
-					if (dom == ap_domain_index)
-						defdomdevs++;
 					continue;
 				}
 			}
 			if (rc)
 				continue;
-			/* a new queue device is needed, check out comp type */
-			comp_type = ap_get_compatible_type(qid, type, func);
-			if (!comp_type)
-				continue;
-			/* maybe a card device needs to be created first */
+			/* new queue device needed */
 			if (!ac) {
-				ac = ap_card_create(id, depth, type,
-						    comp_type, func);
+				/* but first create the card device */
+				ac = ap_card_create(id, depth,
+						    type, functions);
 				if (!ac)
 					continue;
 				ac->ap_dev.device.bus = &ap_bus_type;
@@ -1151,7 +1079,7 @@ static void ap_scan_bus(struct work_struct *unused)
 				get_device(&ac->ap_dev.device);
 			}
 			/* now create the new queue device */
-			aq = ap_queue_create(qid, comp_type);
+			aq = ap_queue_create(qid, type);
 			if (!aq)
 				continue;
 			aq->card = ac;
@@ -1170,8 +1098,6 @@ static void ap_scan_bus(struct work_struct *unused)
 				continue;
 			}
 			domains++;
-			if (dom == ap_domain_index)
-				defdomdevs++;
 		} /* end domain loop */
 		if (ac) {
 			/* remove card dev if there are no queue devices */
@@ -1180,23 +1106,37 @@ static void ap_scan_bus(struct work_struct *unused)
 			put_device(&ac->ap_dev.device);
 		}
 	} /* end device loop */
-
-	if (defdomdevs < 1)
-		AP_DBF(DBF_INFO, "no queue device with default domain %d available\n",
-		       ap_domain_index);
-
 out:
 	mod_timer(&ap_config_timer, jiffies + ap_config_time * HZ);
 }
 
-static void ap_config_timeout(struct timer_list *unused)
+static void ap_config_timeout(unsigned long ptr)
 {
 	if (ap_suspend_flag)
 		return;
 	queue_work(system_long_wq, &ap_scan_work);
 }
 
-static int __init ap_debug_init(void)
+static void ap_reset_all(void)
+{
+	int i, j;
+
+	for (i = 0; i < AP_DOMAINS; i++) {
+		if (!ap_test_config_domain(i))
+			continue;
+		for (j = 0; j < AP_DEVICES; j++) {
+			if (!ap_test_config_card_id(j))
+				continue;
+			ap_rapq(AP_MKQID(j, i));
+		}
+	}
+}
+
+static struct reset_call ap_reset_call = {
+	.fn = ap_reset_all,
+};
+
+int __init ap_debug_init(void)
 {
 	ap_dbf_info = debug_register("ap", 1, 1,
 				     DBF_MAX_SPRINTF_ARGS * sizeof(long));
@@ -1206,12 +1146,17 @@ static int __init ap_debug_init(void)
 	return 0;
 }
 
+void ap_debug_exit(void)
+{
+	debug_unregister(ap_dbf_info);
+}
+
 /**
  * ap_module_init(): The module initialization code.
  *
  * Initializes the module.
  */
-static int __init ap_module_init(void)
+int __init ap_module_init(void)
 {
 	int max_domain_id;
 	int rc, i;
@@ -1229,14 +1174,14 @@ static int __init ap_module_init(void)
 	ap_init_configuration();
 
 	if (ap_configuration)
-		max_domain_id =
-			ap_max_domain_id ? ap_max_domain_id : AP_DOMAINS - 1;
+		max_domain_id = ap_max_domain_id ? : (AP_DOMAINS - 1);
 	else
 		max_domain_id = 15;
 	if (ap_domain_index < -1 || ap_domain_index > max_domain_id) {
 		pr_warn("%d is not a valid cryptographic domain\n",
 			ap_domain_index);
-		ap_domain_index = -1;
+		rc = -EINVAL;
+		goto out_free;
 	}
 	/* In resume callback we need to know if the user had set the domain.
 	 * If so, we can not just reset it.
@@ -1248,6 +1193,8 @@ static int __init ap_module_init(void)
 		rc = register_adapter_interrupt(&ap_airq);
 		ap_airq_flag = (rc == 0);
 	}
+
+	register_reset_call(&ap_reset_call);
 
 	/* Create /sys/bus/ap. */
 	rc = bus_register(&ap_bus_type);
@@ -1266,7 +1213,7 @@ static int __init ap_module_init(void)
 		goto out_bus;
 
 	/* Setup the AP bus rescan timer. */
-	timer_setup(&ap_config_timer, ap_config_timeout, 0);
+	setup_timer(&ap_config_timer, ap_config_timeout, 0);
 
 	/*
 	 * Setup the high resultion poll timer.
@@ -1304,8 +1251,10 @@ out_bus:
 		bus_remove_file(&ap_bus_type, ap_bus_attrs[i]);
 	bus_unregister(&ap_bus_type);
 out:
+	unregister_reset_call(&ap_reset_call);
 	if (ap_using_interrupts())
 		unregister_adapter_interrupt(&ap_airq);
+out_free:
 	kfree(ap_configuration);
 	return rc;
 }

@@ -173,9 +173,9 @@ static int cpcap_init_irq(struct cpcap_ddata *cpcap)
 	int ret;
 
 	cpcap->irqs = devm_kzalloc(&cpcap->spi->dev,
-				   array3_size(sizeof(*cpcap->irqs),
-					       CPCAP_NR_IRQ_REG_BANKS,
-					       cpcap->regmap_conf->val_bits),
+				   sizeof(*cpcap->irqs) *
+				   CPCAP_NR_IRQ_REG_BANKS *
+				   cpcap->regmap_conf->val_bits,
 				   GFP_KERNEL);
 	if (!cpcap->irqs)
 		return -ENOMEM;
@@ -260,7 +260,17 @@ static int cpcap_probe(struct spi_device *spi)
 	if (ret)
 		return ret;
 
-	return devm_of_platform_populate(&cpcap->spi->dev);
+	return of_platform_populate(spi->dev.of_node, NULL, NULL,
+				    &cpcap->spi->dev);
+}
+
+static int cpcap_remove(struct spi_device *pdev)
+{
+	struct cpcap_ddata *cpcap = spi_get_drvdata(pdev);
+
+	of_platform_depopulate(&cpcap->spi->dev);
+
+	return 0;
 }
 
 static struct spi_driver cpcap_driver = {
@@ -269,6 +279,7 @@ static struct spi_driver cpcap_driver = {
 		.of_match_table = cpcap_of_match,
 	},
 	.probe = cpcap_probe,
+	.remove = cpcap_remove,
 };
 module_spi_driver(cpcap_driver);
 

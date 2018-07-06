@@ -159,7 +159,7 @@ bool ip_call_ra_chain(struct sk_buff *skb)
 	struct net_device *dev = skb->dev;
 	struct net *net = dev_net(dev);
 
-	for (ra = rcu_dereference(net->ipv4.ra_chain); ra; ra = rcu_dereference(ra->next)) {
+	for (ra = rcu_dereference(ip_ra_chain); ra; ra = rcu_dereference(ra->next)) {
 		struct sock *sk = ra->sk;
 
 		/* If socket is bound to an interface, only report
@@ -167,7 +167,8 @@ bool ip_call_ra_chain(struct sk_buff *skb)
 		 */
 		if (sk && inet_sk(sk)->inet_num == protocol &&
 		    (!sk->sk_bound_dev_if ||
-		     sk->sk_bound_dev_if == dev->ifindex)) {
+		     sk->sk_bound_dev_if == dev->ifindex) &&
+		    net_eq(sock_net(sk), net)) {
 			if (ip_is_fragment(ip_hdr(skb))) {
 				if (ip_defrag(net, skb, IP_DEFRAG_CALL_RA_CHAIN))
 					return true;
@@ -310,10 +311,9 @@ drop:
 static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	const struct iphdr *iph = ip_hdr(skb);
-	int (*edemux)(struct sk_buff *skb);
-	struct net_device *dev = skb->dev;
 	struct rtable *rt;
-	int err;
+	struct net_device *dev = skb->dev;
+	void (*edemux)(struct sk_buff *skb);
 
 	/* if ingress device is enslaved to an L3 master device pass the
 	 * skb to its handler for processing
@@ -331,9 +331,7 @@ static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 
 		ipprot = rcu_dereference(inet_protos[protocol]);
 		if (ipprot && (edemux = READ_ONCE(ipprot->early_demux))) {
-			err = edemux(skb);
-			if (unlikely(err))
-				goto drop_error;
+			edemux(skb);
 			/* must reload iph, skb->head might have changed */
 			iph = ip_hdr(skb);
 		}
@@ -344,10 +342,13 @@ static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 	 *	how the packet travels inside Linux networking.
 	 */
 	if (!skb_valid_dst(skb)) {
-		err = ip_route_input_noref(skb, iph->daddr, iph->saddr,
-					   iph->tos, dev);
-		if (unlikely(err))
-			goto drop_error;
+		int err = ip_route_input_noref(skb, iph->daddr, iph->saddr,
+					       iph->tos, dev);
+		if (unlikely(err)) {
+			if (err == -EXDEV)
+				__NET_INC_STATS(net, LINUX_MIB_IPRPFILTER);
+			goto drop;
+		}
 	}
 
 #ifdef CONFIG_IP_ROUTE_CLASSID
@@ -398,11 +399,6 @@ static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 drop:
 	kfree_skb(skb);
 	return NET_RX_DROP;
-
-drop_error:
-	if (err == -EXDEV)
-		__NET_INC_STATS(net, LINUX_MIB_IPRPFILTER);
-	goto drop;
 }
 
 /*

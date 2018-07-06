@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/h8300/kernel/cpu/timer/timer8.c
  *
@@ -208,4 +207,4 @@ free_clk:
 	return ret;
 }
 
-TIMER_OF_DECLARE(h8300_8bit, "renesas,8bit-timer", h8300_8timer_init);
+CLOCKSOURCE_OF_DECLARE(h8300_8bit, "renesas,8bit-timer", h8300_8timer_init);

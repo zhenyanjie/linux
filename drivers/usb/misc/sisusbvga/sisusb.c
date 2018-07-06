@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause)
 /*
  * sisusb - usb kernel driver for SiS315(E) based USB2VGA dongles
  *
@@ -611,11 +610,13 @@ static int sisusb_write_memio_byte(struct sisusb_usb_data *sisusb, int type,
 		u32 addr, u8 data)
 {
 	struct sisusb_packet packet;
+	int ret;
 
 	packet.header  = (1 << (addr & 3)) | (type << 6);
 	packet.address = addr & ~3;
 	packet.data    = data << ((addr & 3) << 3);
-	return sisusb_send_packet(sisusb, 10, &packet);
+	ret = sisusb_send_packet(sisusb, 10, &packet);
+	return ret;
 }
 
 static int sisusb_write_memio_word(struct sisusb_usb_data *sisusb, int type,
@@ -1332,11 +1333,13 @@ static int sisusb_write_pci_config(struct sisusb_usb_data *sisusb,
 		int regnum, u32 data)
 {
 	struct sisusb_packet packet;
+	int ret;
 
 	packet.header = 0x008f;
 	packet.address = regnum | 0x10000;
 	packet.data = data;
-	return sisusb_send_packet(sisusb, 10, &packet);
+	ret = sisusb_send_packet(sisusb, 10, &packet);
+	return ret;
 }
 
 static int sisusb_read_pci_config(struct sisusb_usb_data *sisusb,
@@ -2107,7 +2110,7 @@ static void sisusb_get_ramconfig(struct sisusb_usb_data *sisusb)
 		bw = busSDR[(tmp8 & 0x03)];
 		break;
 	case 2:
-		ramtypetext1 = "asymmetric";
+		ramtypetext1 = "asymmeric";
 		sisusb->vramsize += sisusb->vramsize/2;
 		bw = busDDRA[(tmp8 & 0x03)];
 		break;
@@ -2979,11 +2982,14 @@ err_out:
 static long sisusb_compat_ioctl(struct file *f, unsigned int cmd,
 		unsigned long arg)
 {
+	long retval;
+
 	switch (cmd) {
 	case SISUSB_GET_CONFIG_SIZE:
 	case SISUSB_GET_CONFIG:
 	case SISUSB_COMMAND:
-		return sisusb_ioctl(f, cmd, arg);
+		retval = sisusb_ioctl(f, cmd, arg);
+		return retval;
 
 	default:
 		return -ENOIOCTLCMD;

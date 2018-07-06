@@ -17,7 +17,7 @@
  */
 
 #include <drm/drm_atomic_helper.h>
-#include <drm/ttm/ttm_page_alloc.h>
+#include <ttm/ttm_page_alloc.h>
 
 #include "hibmc_drm_drv.h"
 
@@ -200,8 +200,10 @@ static struct ttm_backend_func hibmc_tt_backend_func = {
 	.destroy = &hibmc_ttm_backend_destroy,
 };
 
-static struct ttm_tt *hibmc_ttm_tt_create(struct ttm_buffer_object *bo,
-					  u32 page_flags)
+static struct ttm_tt *hibmc_ttm_tt_create(struct ttm_bo_device *bdev,
+					  unsigned long size,
+					  u32 page_flags,
+					  struct page *dummy_read_page)
 {
 	struct ttm_tt *tt;
 	int ret;
@@ -212,7 +214,7 @@ static struct ttm_tt *hibmc_ttm_tt_create(struct ttm_buffer_object *bo,
 		return NULL;
 	}
 	tt->func = &hibmc_tt_backend_func;
-	ret = ttm_tt_init(tt, bo, page_flags);
+	ret = ttm_tt_init(tt, bdev, size, page_flags, dummy_read_page);
 	if (ret) {
 		DRM_ERROR("failed to initialize ttm_tt: %d\n", ret);
 		kfree(tt);
@@ -221,8 +223,20 @@ static struct ttm_tt *hibmc_ttm_tt_create(struct ttm_buffer_object *bo,
 	return tt;
 }
 
+static int hibmc_ttm_tt_populate(struct ttm_tt *ttm)
+{
+	return ttm_pool_populate(ttm);
+}
+
+static void hibmc_ttm_tt_unpopulate(struct ttm_tt *ttm)
+{
+	ttm_pool_unpopulate(ttm);
+}
+
 struct ttm_bo_driver hibmc_bo_driver = {
 	.ttm_tt_create		= hibmc_ttm_tt_create,
+	.ttm_tt_populate	= hibmc_ttm_tt_populate,
+	.ttm_tt_unpopulate	= hibmc_ttm_tt_unpopulate,
 	.init_mem_type		= hibmc_bo_init_mem_type,
 	.evict_flags		= hibmc_bo_evict_flags,
 	.move			= NULL,
@@ -316,7 +330,7 @@ int hibmc_bo_create(struct drm_device *dev, int size, int align,
 
 	ret = ttm_bo_init(&hibmc->bdev, &hibmcbo->bo, size,
 			  ttm_bo_type_device, &hibmcbo->placement,
-			  align >> PAGE_SHIFT, false, acc_size,
+			  align >> PAGE_SHIFT, false, NULL, acc_size,
 			  NULL, NULL, hibmc_bo_ttm_destroy);
 	if (ret) {
 		hibmc_bo_unref(&hibmcbo);
@@ -330,7 +344,6 @@ int hibmc_bo_create(struct drm_device *dev, int size, int align,
 
 int hibmc_bo_pin(struct hibmc_bo *bo, u32 pl_flag, u64 *gpu_addr)
 {
-	struct ttm_operation_ctx ctx = { false, false };
 	int i, ret;
 
 	if (bo->pin_count) {
@@ -343,7 +356,7 @@ int hibmc_bo_pin(struct hibmc_bo *bo, u32 pl_flag, u64 *gpu_addr)
 	hibmc_ttm_placement(bo, pl_flag);
 	for (i = 0; i < bo->placement.num_placement; i++)
 		bo->placements[i].flags |= TTM_PL_FLAG_NO_EVICT;
-	ret = ttm_bo_validate(&bo->bo, &bo->placement, &ctx);
+	ret = ttm_bo_validate(&bo->bo, &bo->placement, false, false);
 	if (ret)
 		return ret;
 
@@ -355,7 +368,6 @@ int hibmc_bo_pin(struct hibmc_bo *bo, u32 pl_flag, u64 *gpu_addr)
 
 int hibmc_bo_unpin(struct hibmc_bo *bo)
 {
-	struct ttm_operation_ctx ctx = { false, false };
 	int i, ret;
 
 	if (!bo->pin_count) {
@@ -368,7 +380,7 @@ int hibmc_bo_unpin(struct hibmc_bo *bo)
 
 	for (i = 0; i < bo->placement.num_placement ; i++)
 		bo->placements[i].flags &= ~TTM_PL_FLAG_NO_EVICT;
-	ret = ttm_bo_validate(&bo->bo, &bo->placement, &ctx);
+	ret = ttm_bo_validate(&bo->bo, &bo->placement, false, false);
 	if (ret) {
 		DRM_ERROR("validate failed for unpin: %d\n", ret);
 		return ret;
@@ -432,7 +444,7 @@ int hibmc_dumb_create(struct drm_file *file, struct drm_device *dev,
 	}
 
 	ret = drm_gem_handle_create(file, gobj, &handle);
-	drm_gem_object_put_unlocked(gobj);
+	drm_gem_object_unreference_unlocked(gobj);
 	if (ret) {
 		DRM_ERROR("failed to unreference GEM object: %d\n", ret);
 		return ret;
@@ -467,7 +479,7 @@ int hibmc_dumb_mmap_offset(struct drm_file *file, struct drm_device *dev,
 	bo = gem_to_hibmc_bo(obj);
 	*offset = hibmc_bo_mmap_offset(bo);
 
-	drm_gem_object_put_unlocked(obj);
+	drm_gem_object_unreference_unlocked(obj);
 	return 0;
 }
 
@@ -475,7 +487,7 @@ static void hibmc_user_framebuffer_destroy(struct drm_framebuffer *fb)
 {
 	struct hibmc_framebuffer *hibmc_fb = to_hibmc_framebuffer(fb);
 
-	drm_gem_object_put_unlocked(hibmc_fb->obj);
+	drm_gem_object_unreference_unlocked(hibmc_fb->obj);
 	drm_framebuffer_cleanup(fb);
 	kfree(hibmc_fb);
 }
@@ -531,7 +543,7 @@ hibmc_user_framebuffer_create(struct drm_device *dev,
 
 	hibmc_fb = hibmc_framebuffer_init(dev, mode_cmd, obj);
 	if (IS_ERR(hibmc_fb)) {
-		drm_gem_object_put_unlocked(obj);
+		drm_gem_object_unreference_unlocked(obj);
 		return ERR_PTR((long)hibmc_fb);
 	}
 	return &hibmc_fb->fb;

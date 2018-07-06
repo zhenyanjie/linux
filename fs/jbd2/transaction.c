@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * linux/fs/jbd2/transaction.c
  *
  * Written by Stephen C. Tweedie <sct@redhat.com>, 1998
  *
  * Copyright 1998 Red Hat corp --- All Rights Reserved
+ *
+ * This file is part of the Linux kernel and is made available under
+ * the terms of the GNU General Public License, version 2, or at your
+ * option, any later version, incorporated herein by reference.
  *
  * Generic filesystem transaction handling code; part of the ext2fs
  * journaling system.
@@ -49,8 +52,10 @@ int __init jbd2_journal_init_transaction_cache(void)
 
 void jbd2_journal_destroy_transaction_cache(void)
 {
-	kmem_cache_destroy(transaction_cache);
-	transaction_cache = NULL;
+	if (transaction_cache) {
+		kmem_cache_destroy(transaction_cache);
+		transaction_cache = NULL;
+	}
 }
 
 void jbd2_journal_free_transaction(transaction_t *transaction)
@@ -404,6 +409,25 @@ static handle_t *new_handle(int nblocks)
 	return handle;
 }
 
+/**
+ * handle_t *jbd2_journal_start() - Obtain a new handle.
+ * @journal: Journal to start transaction on.
+ * @nblocks: number of block buffer we might modify
+ *
+ * We make sure that the transaction can guarantee at least nblocks of
+ * modified buffers in the log.  We block until the log can guarantee
+ * that much space. Additionally, if rsv_blocks > 0, we also create another
+ * handle with rsv_blocks reserved blocks in the journal. This handle is
+ * is stored in h_rsv_handle. It is not attached to any particular transaction
+ * and thus doesn't block transaction commit. If the caller uses this reserved
+ * handle, it has to set h_rsv_handle to NULL as otherwise jbd2_journal_stop()
+ * on the parent handle will dispose the reserved one. Reserved handle has to
+ * be converted to a normal handle using jbd2_journal_start_reserved() before
+ * it can be used.
+ *
+ * Return a pointer to a newly allocated handle, or an ERR_PTR() value
+ * on failure.
+ */
 handle_t *jbd2__journal_start(journal_t *journal, int nblocks, int rsv_blocks,
 			      gfp_t gfp_mask, unsigned int type,
 			      unsigned int line_no)
@@ -454,25 +478,6 @@ handle_t *jbd2__journal_start(journal_t *journal, int nblocks, int rsv_blocks,
 EXPORT_SYMBOL(jbd2__journal_start);
 
 
-/**
- * handle_t *jbd2_journal_start() - Obtain a new handle.
- * @journal: Journal to start transaction on.
- * @nblocks: number of block buffer we might modify
- *
- * We make sure that the transaction can guarantee at least nblocks of
- * modified buffers in the log.  We block until the log can guarantee
- * that much space. Additionally, if rsv_blocks > 0, we also create another
- * handle with rsv_blocks reserved blocks in the journal. This handle is
- * is stored in h_rsv_handle. It is not attached to any particular transaction
- * and thus doesn't block transaction commit. If the caller uses this reserved
- * handle, it has to set h_rsv_handle to NULL as otherwise jbd2_journal_stop()
- * on the parent handle will dispose the reserved one. Reserved handle has to
- * be converted to a normal handle using jbd2_journal_start_reserved() before
- * it can be used.
- *
- * Return a pointer to a newly allocated handle, or an ERR_PTR() value
- * on failure.
- */
 handle_t *jbd2_journal_start(journal_t *journal, int nblocks)
 {
 	return jbd2__journal_start(journal, nblocks, 0, GFP_NOFS, 0, 0);
@@ -490,10 +495,8 @@ void jbd2_journal_free_reserved(handle_t *handle)
 EXPORT_SYMBOL(jbd2_journal_free_reserved);
 
 /**
- * int jbd2_journal_start_reserved() - start reserved handle
+ * int jbd2_journal_start_reserved(handle_t *handle) - start reserved handle
  * @handle: handle to start
- * @type: for handle statistics
- * @line_no: for handle statistics
  *
  * Start handle that has been previously reserved with jbd2_journal_reserve().
  * This attaches @handle to the running transaction (or creates one if there's
@@ -530,7 +533,6 @@ int jbd2_journal_start_reserved(handle_t *handle, unsigned int type,
 	 */
 	ret = start_this_handle(journal, handle, GFP_NOFS);
 	if (ret < 0) {
-		handle->h_journal = journal;
 		jbd2_journal_free_reserved(handle);
 		return ret;
 	}
@@ -624,7 +626,6 @@ error_out:
  * int jbd2_journal_restart() - restart a handle .
  * @handle:  handle to restart
  * @nblocks: nr credits requested
- * @gfp_mask: memory allocation flags (for start_this_handle)
  *
  * Restart a handle for a multi-transaction filesystem
  * operation.
@@ -1071,10 +1072,10 @@ out:
  * @handle: transaction to add buffer modifications to
  * @bh:     bh to be used for metadata writes
  *
- * Returns: error code or 0 on success.
+ * Returns an error code or 0 on success.
  *
  * In full data journalling mode the buffer may be of type BJ_AsyncData,
- * because we're ``write()ing`` a buffer which is also part of a shared mapping.
+ * because we're write()ing a buffer which is also part of a shared mapping.
  */
 
 int jbd2_journal_get_write_access(handle_t *handle, struct buffer_head *bh)

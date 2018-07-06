@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: (GPL-2.0 OR MPL-1.1)
 /* from src/prism2/download/prism2dl.c
  *
  * utility for downloading prism2 images moved into kernelspace
@@ -618,28 +617,28 @@ static int mkpdrlist(struct pda *pda)
 		    HFA384x_PDR_NICID) {
 			memcpy(&nicid, &pda->rec[pda->nrec]->data.nicid,
 			       sizeof(nicid));
-			le16_to_cpus(&nicid.id);
-			le16_to_cpus(&nicid.variant);
-			le16_to_cpus(&nicid.major);
-			le16_to_cpus(&nicid.minor);
+			nicid.id = le16_to_cpu(nicid.id);
+			nicid.variant = le16_to_cpu(nicid.variant);
+			nicid.major = le16_to_cpu(nicid.major);
+			nicid.minor = le16_to_cpu(nicid.minor);
 		}
 		if (le16_to_cpu(pda->rec[pda->nrec]->code) ==
 		    HFA384x_PDR_MFISUPRANGE) {
 			memcpy(&rfid, &pda->rec[pda->nrec]->data.mfisuprange,
 			       sizeof(rfid));
-			le16_to_cpus(&rfid.id);
-			le16_to_cpus(&rfid.variant);
-			le16_to_cpus(&rfid.bottom);
-			le16_to_cpus(&rfid.top);
+			rfid.id = le16_to_cpu(rfid.id);
+			rfid.variant = le16_to_cpu(rfid.variant);
+			rfid.bottom = le16_to_cpu(rfid.bottom);
+			rfid.top = le16_to_cpu(rfid.top);
 		}
 		if (le16_to_cpu(pda->rec[pda->nrec]->code) ==
 		    HFA384x_PDR_CFISUPRANGE) {
 			memcpy(&macid, &pda->rec[pda->nrec]->data.cfisuprange,
 			       sizeof(macid));
-			le16_to_cpus(&macid.id);
-			le16_to_cpus(&macid.variant);
-			le16_to_cpus(&macid.bottom);
-			le16_to_cpus(&macid.top);
+			macid.id = le16_to_cpu(macid.id);
+			macid.variant = le16_to_cpu(macid.variant);
+			macid.bottom = le16_to_cpu(macid.bottom);
+			macid.top = le16_to_cpu(macid.top);
 		}
 
 		(pda->nrec)++;
@@ -1017,8 +1016,7 @@ static int writeimage(struct wlandevice *wlandev, struct imgchunk *fchunk,
 		kfree(rstmsg);
 		kfree(rwrmsg);
 		netdev_err(wlandev->netdev,
-			   "%s: no memory for firmware download, aborting download\n",
-			   __func__);
+			   "writeimage: no memory for firmware download, aborting download\n");
 		return -ENOMEM;
 	}
 
@@ -1060,15 +1058,15 @@ static int writeimage(struct wlandevice *wlandev, struct imgchunk *fchunk,
 	result = prism2mgmt_ramdl_state(wlandev, rstmsg);
 	if (result) {
 		netdev_err(wlandev->netdev,
-			   "%s state enable failed w/ result=%d, aborting download\n",
-			   __func__, result);
+			   "writeimage state enable failed w/ result=%d, aborting download\n",
+			   result);
 		goto free_result;
 	}
 	resultcode = rstmsg->resultcode.data;
 	if (resultcode != P80211ENUM_resultcode_success) {
 		netdev_err(wlandev->netdev,
-			   "%s()->xxxdl_state msg indicates failure, w/ resultcode=%d, aborting download.\n",
-			   __func__, resultcode);
+			   "writeimage()->xxxdl_state msg indicates failure, w/ resultcode=%d, aborting download.\n",
+			   resultcode);
 		result = 1;
 		goto free_result;
 	}
@@ -1104,14 +1102,14 @@ static int writeimage(struct wlandevice *wlandev, struct imgchunk *fchunk,
 			/* Check the results */
 			if (result) {
 				netdev_err(wlandev->netdev,
-					   "%s chunk write failed w/ result=%d, aborting download\n",
-					   __func__, result);
+					   "writeimage chunk write failed w/ result=%d, aborting download\n",
+					   result);
 				goto free_result;
 			}
 			resultcode = rstmsg->resultcode.data;
 			if (resultcode != P80211ENUM_resultcode_success) {
-				pr_err("%s()->xxxdl_write msg indicates failure, w/ resultcode=%d, aborting download.\n",
-				       __func__, resultcode);
+				pr_err("writeimage()->xxxdl_write msg indicates failure, w/ resultcode=%d, aborting download.\n",
+				       resultcode);
 				result = 1;
 				goto free_result;
 			}
@@ -1126,15 +1124,15 @@ static int writeimage(struct wlandevice *wlandev, struct imgchunk *fchunk,
 	result = prism2mgmt_ramdl_state(wlandev, rstmsg);
 	if (result) {
 		netdev_err(wlandev->netdev,
-			   "%s state disable failed w/ result=%d, aborting download\n",
-			   __func__, result);
+			   "writeimage state disable failed w/ result=%d, aborting download\n",
+			   result);
 		goto free_result;
 	}
 	resultcode = rstmsg->resultcode.data;
 	if (resultcode != P80211ENUM_resultcode_success) {
 		netdev_err(wlandev->netdev,
-			   "%s()->xxxdl_state msg indicates failure, w/ resultcode=%d, aborting download.\n",
-			   __func__, resultcode);
+			   "writeimage()->xxxdl_state msg indicates failure, w/ resultcode=%d, aborting download.\n",
+			   resultcode);
 		result = 1;
 		goto free_result;
 	}

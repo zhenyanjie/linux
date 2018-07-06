@@ -21,7 +21,7 @@
 */
 /*
  * This driver needs external firmware. Please use the command
- * "<kerneldir>/scripts/get_dvb_firmware alps_tdlb7" to
+ * "<kerneldir>/Documentation/dvb/get_dvb_firmware alps_tdlb7" to
  * download/extract it, and then copy it to /usr/lib/hotplug/firmware
  * or /lib/firmware (depending on configuration of firmware hotplug).
  */
@@ -35,7 +35,7 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 #include "sp8870.h"
 
 

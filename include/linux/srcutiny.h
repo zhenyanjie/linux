@@ -27,14 +27,15 @@
 #include <linux/swait.h>
 
 struct srcu_struct {
-	short srcu_lock_nesting[2];	/* srcu_read_lock() nesting depth. */
-	short srcu_idx;			/* Current reader array element. */
-	u8 srcu_gp_running;		/* GP workqueue running? */
-	u8 srcu_gp_waiting;		/* GP waiting for readers? */
+	int srcu_lock_nesting[2];	/* srcu_read_lock() nesting depth. */
 	struct swait_queue_head srcu_wq;
 					/* Last srcu_read_unlock() wakes GP. */
-	struct rcu_head *srcu_cb_head;	/* Pending callbacks: Head. */
-	struct rcu_head **srcu_cb_tail;	/* Pending callbacks: Tail. */
+	unsigned long srcu_gp_seq;	/* GP seq # for callback tagging. */
+	struct rcu_segcblist srcu_cblist;
+					/* Pending SRCU callbacks. */
+	int srcu_idx;			/* Current reader array element. */
+	bool srcu_gp_running;		/* GP workqueue running? */
+	bool srcu_gp_waiting;		/* GP waiting for readers? */
 	struct work_struct srcu_work;	/* For driving grace periods. */
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	struct lockdep_map dep_map;
@@ -43,10 +44,10 @@ struct srcu_struct {
 
 void srcu_drive_gp(struct work_struct *wp);
 
-#define __SRCU_STRUCT_INIT(name, __ignored)				\
+#define __SRCU_STRUCT_INIT(name)					\
 {									\
 	.srcu_wq = __SWAIT_QUEUE_HEAD_INITIALIZER(name.srcu_wq),	\
-	.srcu_cb_tail = &name.srcu_cb_head,				\
+	.srcu_cblist = RCU_SEGCBLIST_INITIALIZER(name.srcu_cblist),	\
 	.srcu_work = __WORK_INITIALIZER(name.srcu_work, srcu_drive_gp),	\
 	__SRCU_DEP_MAP_INIT(name)					\
 }
@@ -56,26 +57,11 @@ void srcu_drive_gp(struct work_struct *wp);
  * Tree SRCU, which needs some per-CPU data.
  */
 #define DEFINE_SRCU(name) \
-	struct srcu_struct name = __SRCU_STRUCT_INIT(name, name)
+	struct srcu_struct name = __SRCU_STRUCT_INIT(name)
 #define DEFINE_STATIC_SRCU(name) \
-	static struct srcu_struct name = __SRCU_STRUCT_INIT(name, name)
+	static struct srcu_struct name = __SRCU_STRUCT_INIT(name)
 
 void synchronize_srcu(struct srcu_struct *sp);
-
-/*
- * Counts the new reader in the appropriate per-CPU element of the
- * srcu_struct.  Can be invoked from irq/bh handlers, but the matching
- * __srcu_read_unlock() must be in the same handler instance.  Returns an
- * index that must be passed to the matching srcu_read_unlock().
- */
-static inline int __srcu_read_lock(struct srcu_struct *sp)
-{
-	int idx;
-
-	idx = READ_ONCE(sp->srcu_idx);
-	WRITE_ONCE(sp->srcu_lock_nesting[idx], sp->srcu_lock_nesting[idx] + 1);
-	return idx;
-}
 
 static inline void synchronize_srcu_expedited(struct srcu_struct *sp)
 {
@@ -87,17 +73,21 @@ static inline void srcu_barrier(struct srcu_struct *sp)
 	synchronize_srcu(sp);
 }
 
-/* Defined here to avoid size increase for non-torture kernels. */
-static inline void srcu_torture_stats_print(struct srcu_struct *sp,
-					    char *tt, char *tf)
+static inline unsigned long srcu_batches_completed(struct srcu_struct *sp)
 {
-	int idx;
+	return 0;
+}
 
-	idx = READ_ONCE(sp->srcu_idx) & 0x1;
-	pr_alert("%s%s Tiny SRCU per-CPU(idx=%d): (%hd,%hd)\n",
-		 tt, tf, idx,
-		 READ_ONCE(sp->srcu_lock_nesting[!idx]),
-		 READ_ONCE(sp->srcu_lock_nesting[idx]));
+static inline void srcutorture_get_gp_data(enum rcutorture_type test_type,
+					   struct srcu_struct *sp, int *flags,
+					   unsigned long *gpnum,
+					   unsigned long *completed)
+{
+	if (test_type != SRCU_FLAVOR)
+		return;
+	*flags = 0;
+	*completed = sp->srcu_gp_seq;
+	*gpnum = *completed;
 }
 
 #endif

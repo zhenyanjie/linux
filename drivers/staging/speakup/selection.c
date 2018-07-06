@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/slab.h> /* for kmalloc */
 #include <linux/consolemap.h>
 #include <linux/interrupt.h>
@@ -64,8 +63,13 @@ int speakup_set_selection(struct tty_struct *tty)
 	ps = spk_ys * vc->vc_size_row + (spk_xs << 1);
 	pe = spk_ye * vc->vc_size_row + (spk_xe << 1);
 
-	if (ps > pe)	/* make sel_start <= sel_end */
-		swap(ps, pe);
+	if (ps > pe) {
+		/* make sel_start <= sel_end */
+		int tmp = ps;
+
+		ps = pe;
+		pe = tmp;
+	}
 
 	if (spk_sel_cons != vc_cons[fg_console].d) {
 		speakup_clear_selection();
