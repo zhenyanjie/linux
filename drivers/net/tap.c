@@ -517,6 +517,10 @@ static int tap_open(struct inode *inode, struct file *file)
 					     &tap_proto, 0);
 	if (!q)
 		goto err;
+	if (skb_array_init(&q->skb_array, tap->dev->tx_queue_len, GFP_KERNEL)) {
+		sk_free(&q->sk);
+		goto err;
+	}
 
 	RCU_INIT_POINTER(q->sock.wq, &q->wq);
 	init_waitqueue_head(&q->wq.wait);
@@ -540,22 +544,18 @@ static int tap_open(struct inode *inode, struct file *file)
 	if ((tap->dev->features & NETIF_F_HIGHDMA) && (tap->dev->features & NETIF_F_SG))
 		sock_set_flag(&q->sk, SOCK_ZEROCOPY);
 
-	err = -ENOMEM;
-	if (skb_array_init(&q->skb_array, tap->dev->tx_queue_len, GFP_KERNEL))
-		goto err_array;
-
 	err = tap_set_queue(tap, file, q);
-	if (err)
-		goto err_queue;
+	if (err) {
+		/* tap_sock_destruct() will take care of freeing skb_array */
+		goto err_put;
+	}
 
 	dev_put(tap->dev);
 
 	rtnl_unlock();
 	return err;
 
-err_queue:
-	skb_array_cleanup(&q->skb_array);
-err_array:
+err_put:
 	sock_put(&q->sk);
 err:
 	if (tap)
@@ -824,14 +824,16 @@ done:
 
 static ssize_t tap_do_read(struct tap_queue *q,
 			   struct iov_iter *to,
-			   int noblock)
+			   int noblock, struct sk_buff *skb)
 {
 	DEFINE_WAIT(wait);
-	struct sk_buff *skb;
 	ssize_t ret = 0;
 
 	if (!iov_iter_count(to))
 		return 0;
+
+	if (skb)
+		goto put;
 
 	while (1) {
 		if (!noblock)
@@ -856,6 +858,7 @@ static ssize_t tap_do_read(struct tap_queue *q,
 	if (!noblock)
 		finish_wait(sk_sleep(&q->sk), &wait);
 
+put:
 	if (skb) {
 		ret = tap_put_user(q, skb, to);
 		if (unlikely(ret < 0))
@@ -872,7 +875,7 @@ static ssize_t tap_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	struct tap_queue *q = file->private_data;
 	ssize_t len = iov_iter_count(to), ret;
 
-	ret = tap_do_read(q, to, file->f_flags & O_NONBLOCK);
+	ret = tap_do_read(q, to, file->f_flags & O_NONBLOCK, NULL);
 	ret = min_t(ssize_t, ret, len);
 	if (ret > 0)
 		iocb->ki_pos = ret;
@@ -1032,6 +1035,8 @@ static long tap_ioctl(struct file *file, unsigned int cmd,
 	case TUNSETSNDBUF:
 		if (get_user(s, sp))
 			return -EFAULT;
+		if (s <= 0)
+			return -EINVAL;
 
 		q->sk.sk_sndbuf = s;
 		return 0;
@@ -1155,7 +1160,8 @@ static int tap_recvmsg(struct socket *sock, struct msghdr *m,
 	int ret;
 	if (flags & ~(MSG_DONTWAIT|MSG_TRUNC))
 		return -EINVAL;
-	ret = tap_do_read(q, &m->msg_iter, flags & MSG_DONTWAIT);
+	ret = tap_do_read(q, &m->msg_iter, flags & MSG_DONTWAIT,
+			  m->msg_control);
 	if (ret > total_len) {
 		m->msg_flags |= MSG_TRUNC;
 		ret = flags & MSG_TRUNC ? ret : total_len;
@@ -1192,6 +1198,19 @@ struct socket *tap_get_socket(struct file *file)
 	return &q->sock;
 }
 EXPORT_SYMBOL_GPL(tap_get_socket);
+
+struct skb_array *tap_get_skb_array(struct file *file)
+{
+	struct tap_queue *q;
+
+	if (file->f_op != &tap_fops)
+		return ERR_PTR(-EINVAL);
+	q = file->private_data;
+	if (!q)
+		return ERR_PTR(-EBADFD);
+	return &q->skb_array;
+}
+EXPORT_SYMBOL_GPL(tap_get_skb_array);
 
 int tap_queue_resize(struct tap_dev *tap)
 {
@@ -1235,8 +1254,8 @@ static int tap_list_add(dev_t major, const char *device_name)
 	return 0;
 }
 
-int tap_create_cdev(struct cdev *tap_cdev,
-		    dev_t *tap_major, const char *device_name)
+int tap_create_cdev(struct cdev *tap_cdev, dev_t *tap_major,
+		    const char *device_name, struct module *module)
 {
 	int err;
 
@@ -1245,6 +1264,7 @@ int tap_create_cdev(struct cdev *tap_cdev,
 		goto out1;
 
 	cdev_init(tap_cdev, &tap_fops);
+	tap_cdev->owner = module;
 	err = cdev_add(tap_cdev, *tap_major, TAP_NUM_DEVS);
 	if (err)
 		goto out2;

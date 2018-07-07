@@ -11,6 +11,14 @@ else
         KBUILD_DEFCONFIG := $(ARCH)_defconfig
 endif
 
+# For gcc stack alignment is specified with -mpreferred-stack-boundary,
+# clang has the option -mstack-alignment for that purpose.
+ifneq ($(call cc-option, -mpreferred-stack-boundary=4),)
+        cc_stack_align_opt := -mpreferred-stack-boundary
+else ifneq ($(call cc-option, -mstack-alignment=4),)
+        cc_stack_align_opt := -mstack-alignment
+endif
+
 # How to compile the 16-bit code.  Note we always compile for -march=i386;
 # that way we can complain to the user if the CPU is insufficient.
 #
@@ -24,10 +32,11 @@ REALMODE_CFLAGS	:= $(M16_CFLAGS) -g -Os -D__KERNEL__ \
 		   -DDISABLE_BRANCH_PROFILING \
 		   -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
 		   -fno-strict-aliasing -fomit-frame-pointer -fno-pic \
-		   -mno-mmx -mno-sse \
-		   $(call cc-option, -ffreestanding) \
-		   $(call cc-option, -fno-stack-protector) \
-		   $(call cc-option, -mpreferred-stack-boundary=2)
+		   -mno-mmx -mno-sse
+
+REALMODE_CFLAGS += $(call __cc-option, $(CC), $(REALMODE_CFLAGS), -ffreestanding)
+REALMODE_CFLAGS += $(call __cc-option, $(CC), $(REALMODE_CFLAGS), -fno-stack-protector)
+REALMODE_CFLAGS += $(call __cc-option, $(CC), $(REALMODE_CFLAGS), $(cc_stack_align_opt)=2)
 export REALMODE_CFLAGS
 
 # BITS is used as extension for files which are available in a 32 bit
@@ -64,14 +73,16 @@ ifeq ($(CONFIG_X86_32),y)
         # with nonstandard options
         KBUILD_CFLAGS += -fno-pic
 
-        # prevent gcc from keeping the stack 16 byte aligned
-        KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=2)
+        # Align the stack to the register width instead of using the default
+        # alignment of 16 bytes. This reduces stack usage and the number of
+        # alignment instructions.
+        KBUILD_CFLAGS += $(call cc-option,$(cc_stack_align_opt)=2)
 
         # Disable unit-at-a-time mode on pre-gcc-4.0 compilers, it makes gcc use
         # a lot more stack due to the lack of sharing of stacklots:
         KBUILD_CFLAGS += $(call cc-ifversion, -lt, 0400, \
 				$(call cc-option,-fno-unit-at-a-time))
-		
+
         # CPU-specific tuning. Anything which can be shared with UML should go here.
         include arch/x86/Makefile_32.cpu
         KBUILD_CFLAGS += $(cflags-y)
@@ -87,19 +98,24 @@ else
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
 
-ifneq ($(cc-name),clang)
         # Align jump targets to 1 byte, not the default 16 bytes:
         KBUILD_CFLAGS += $(call cc-option,-falign-jumps=1)
 
         # Pack loops tightly as well:
         KBUILD_CFLAGS += $(call cc-option,-falign-loops=1)
-endif
+
         # Don't autogenerate traditional x87 instructions
         KBUILD_CFLAGS += $(call cc-option,-mno-80387)
         KBUILD_CFLAGS += $(call cc-option,-mno-fp-ret-in-387)
 
-	# Use -mpreferred-stack-boundary=3 if supported.
-	KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=3)
+        # By default gcc and clang use a stack alignment of 16 bytes for x86.
+        # However the standard kernel entry on x86-64 leaves the stack on an
+        # 8-byte boundary. If the compiler isn't informed about the actual
+        # alignment it will generate extra alignment instructions for the
+        # default alignment which keep the stack *mis*aligned.
+        # Furthermore an alignment to the register width reduces stack usage
+        # and the number of alignment instructions.
+        KBUILD_CFLAGS += $(call cc-option,$(cc_stack_align_opt)=3)
 
 	# Use -mskip-rax-setup if supported.
 	KBUILD_CFLAGS += $(call cc-option,-mskip-rax-setup)
@@ -180,10 +196,8 @@ ifdef CONFIG_JUMP_LABEL
 endif
 
 ifeq ($(ACCUMULATE_OUTGOING_ARGS), 1)
-# This compiler flag is not supported by Clang:
-  ifneq ($(cc-name),clang)
+	# This compiler flag is not supported by Clang:
 	KBUILD_CFLAGS += $(call cc-option,-maccumulate-outgoing-args,)
-  endif
 endif
 
 # Stackpointer is addressed different for 32 bit and 64 bit x86
@@ -259,8 +273,6 @@ drivers-$(CONFIG_OPROFILE) += arch/x86/oprofile/
 drivers-$(CONFIG_PM) += arch/x86/power/
 
 drivers-$(CONFIG_FB) += arch/x86/video/
-
-drivers-$(CONFIG_RAS) += arch/x86/ras/
 
 ####
 # boot loader support. Several targets are kept for legacy purposes

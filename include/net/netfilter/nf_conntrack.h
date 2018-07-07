@@ -17,7 +17,6 @@
 #include <linux/bitops.h>
 #include <linux/compiler.h>
 #include <linux/atomic.h>
-#include <linux/rhashtable.h>
 
 #include <linux/netfilter/nf_conntrack_tcp.h>
 #include <linux/netfilter/nf_conntrack_dccp.h>
@@ -83,7 +82,7 @@ struct nf_conn {
 	possible_net_t ct_net;
 
 #if IS_ENABLED(CONFIG_NF_NAT)
-	struct rhlist_head nat_bysource;
+	struct hlist_node	nat_bysource;
 #endif
 	/* all members below initialized via memset */
 	u8 __nfct_init_offset[0];
@@ -225,9 +224,13 @@ extern s32 (*nf_ct_nat_offset)(const struct nf_conn *ct,
 			       u32 seq);
 
 /* Iterate over all conntracks: if iter returns true, it's deleted. */
-void nf_ct_iterate_cleanup(struct net *net,
-			   int (*iter)(struct nf_conn *i, void *data),
-			   void *data, u32 portid, int report);
+void nf_ct_iterate_cleanup_net(struct net *net,
+			       int (*iter)(struct nf_conn *i, void *data),
+			       void *data, u32 portid, int report);
+
+/* also set unconfirmed conntracks as dying. Only use in module exit path. */
+void nf_ct_iterate_destroy(int (*iter)(struct nf_conn *i, void *data),
+			   void *data);
 
 struct nf_conntrack_zone;
 

@@ -101,7 +101,7 @@ static netdev_tx_t qmimux_start_xmit(struct sk_buff *skb, struct net_device *dev
 	unsigned int len = skb->len;
 	struct qmimux_hdr *hdr;
 
-	hdr = (struct qmimux_hdr *)skb_push(skb, sizeof(struct qmimux_hdr));
+	hdr = skb_push(skb, sizeof(struct qmimux_hdr));
 	hdr->pad = 0;
 	hdr->mux_id = priv->mux_id;
 	hdr->pkt_len = cpu_to_be16(len);
@@ -188,7 +188,7 @@ static int qmimux_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 			goto skip;
 		}
 
-		memcpy(skb_put(skbn, len), skb->data + offset, len);
+		skb_put_data(skbn, skb->data + offset, len);
 		if (netif_rx(skbn) != NET_RX_SUCCESS)
 			return 0;
 
@@ -499,6 +499,7 @@ static int qmi_wwan_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 		return 1;
 	}
 	if (rawip) {
+		skb_reset_mac_header(skb);
 		skb->dev = dev->net; /* normally set by eth_type_trans */
 		skb->protocol = proto;
 		return 1;
@@ -681,7 +682,7 @@ static int qmi_wwan_bind(struct usbnet *dev, struct usb_interface *intf)
 	}
 
 	/* errors aren't fatal - we can live with the dynamic address */
-	if (cdc_ether) {
+	if (cdc_ether && cdc_ether->wMaxSegmentSize) {
 		dev->hard_mtu = le16_to_cpu(cdc_ether->wMaxSegmentSize);
 		usbnet_get_ethernet_addr(dev, cdc_ether->iMACAddress);
 	}

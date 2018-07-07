@@ -192,7 +192,7 @@ STORE(__cached_dev)
 {
 	struct cached_dev *dc = container_of(kobj, struct cached_dev,
 					     disk.kobj);
-	unsigned v = size;
+	ssize_t v = size;
 	struct cache_set *c;
 	struct kobj_uevent_env *env;
 
@@ -227,7 +227,7 @@ STORE(__cached_dev)
 		bch_cached_dev_run(dc);
 
 	if (attr == &sysfs_cache_mode) {
-		ssize_t v = bch_read_string_list(buf, bch_cache_modes + 1);
+		v = bch_read_string_list(buf, bch_cache_modes + 1);
 
 		if (v < 0)
 			return v;
@@ -732,11 +732,6 @@ static struct attribute *bch_cache_set_internal_files[] = {
 };
 KTYPE(bch_cache_set_internal);
 
-static int __bch_cache_cmp(const void *l, const void *r)
-{
-	return *((uint16_t *) r) - *((uint16_t *) l);
-}
-
 SHOW(__bch_cache)
 {
 	struct cache *ca = container_of(kobj, struct cache, kobj);
@@ -761,6 +756,9 @@ SHOW(__bch_cache)
 					       CACHE_REPLACEMENT(&ca->sb));
 
 	if (attr == &sysfs_priority_stats) {
+		int cmp(const void *l, const void *r)
+		{	return *((uint16_t *) r) - *((uint16_t *) l); }
+
 		struct bucket *b;
 		size_t n = ca->sb.nbuckets, i;
 		size_t unused = 0, available = 0, dirty = 0, meta = 0;
@@ -789,7 +787,7 @@ SHOW(__bch_cache)
 			p[i] = ca->buckets[i].prio;
 		mutex_unlock(&ca->set->bucket_lock);
 
-		sort(p, n, sizeof(uint16_t), __bch_cache_cmp, NULL);
+		sort(p, n, sizeof(uint16_t), cmp, NULL);
 
 		while (n &&
 		       !cached[n - 1])

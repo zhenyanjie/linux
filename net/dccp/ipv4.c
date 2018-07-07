@@ -414,8 +414,7 @@ struct sock *dccp_v4_request_recv_sock(const struct sock *sk,
 	sk_daddr_set(newsk, ireq->ir_rmt_addr);
 	sk_rcv_saddr_set(newsk, ireq->ir_loc_addr);
 	newinet->inet_saddr	= ireq->ir_loc_addr;
-	newinet->inet_opt	= ireq->opt;
-	ireq->opt	   = NULL;
+	RCU_INIT_POINTER(newinet->inet_opt, rcu_dereference(ireq->ireq_opt));
 	newinet->mc_index  = inet_iif(skb);
 	newinet->mc_ttl	   = ip_hdr(skb)->ttl;
 	newinet->inet_id   = jiffies;
@@ -430,7 +429,10 @@ struct sock *dccp_v4_request_recv_sock(const struct sock *sk,
 	if (__inet_inherit_port(sk, newsk) < 0)
 		goto put_and_exit;
 	*own_req = inet_ehash_nolisten(newsk, req_to_sk(req_unhash));
-
+	if (*own_req)
+		ireq->ireq_opt = NULL;
+	else
+		newinet->inet_opt = NULL;
 	return newsk;
 
 exit_overflow:
@@ -441,6 +443,7 @@ exit:
 	__NET_INC_STATS(sock_net(sk), LINUX_MIB_LISTENDROPS);
 	return NULL;
 put_and_exit:
+	newinet->inet_opt = NULL;
 	inet_csk_prepare_forced_close(newsk);
 	dccp_done(newsk);
 	goto exit;
@@ -492,7 +495,7 @@ static int dccp_v4_send_response(const struct sock *sk, struct request_sock *req
 							      ireq->ir_rmt_addr);
 		err = ip_build_and_send_pkt(skb, sk, ireq->ir_loc_addr,
 					    ireq->ir_rmt_addr,
-					    ireq->opt);
+					    ireq_opt_deref(ireq));
 		err = net_xmit_eval(err);
 	}
 
@@ -548,7 +551,7 @@ out:
 static void dccp_v4_reqsk_destructor(struct request_sock *req)
 {
 	dccp_feat_list_purge(&dccp_rsk(req)->dreq_featneg);
-	kfree(inet_rsk(req)->opt);
+	kfree(rcu_dereference_protected(inet_rsk(req)->ireq_opt, 1));
 }
 
 void dccp_syn_ack_timeout(const struct request_sock *req)
@@ -1034,33 +1037,34 @@ static int __init dccp_v4_init(void)
 {
 	int err = proto_register(&dccp_v4_prot, 1);
 
-	if (err != 0)
+	if (err)
 		goto out;
-
-	err = inet_add_protocol(&dccp_v4_protocol, IPPROTO_DCCP);
-	if (err != 0)
-		goto out_proto_unregister;
 
 	inet_register_protosw(&dccp_v4_protosw);
 
 	err = register_pernet_subsys(&dccp_v4_ops);
 	if (err)
 		goto out_destroy_ctl_sock;
+
+	err = inet_add_protocol(&dccp_v4_protocol, IPPROTO_DCCP);
+	if (err)
+		goto out_proto_unregister;
+
 out:
 	return err;
+out_proto_unregister:
+	unregister_pernet_subsys(&dccp_v4_ops);
 out_destroy_ctl_sock:
 	inet_unregister_protosw(&dccp_v4_protosw);
-	inet_del_protocol(&dccp_v4_protocol, IPPROTO_DCCP);
-out_proto_unregister:
 	proto_unregister(&dccp_v4_prot);
 	goto out;
 }
 
 static void __exit dccp_v4_exit(void)
 {
+	inet_del_protocol(&dccp_v4_protocol, IPPROTO_DCCP);
 	unregister_pernet_subsys(&dccp_v4_ops);
 	inet_unregister_protosw(&dccp_v4_protosw);
-	inet_del_protocol(&dccp_v4_protocol, IPPROTO_DCCP);
 	proto_unregister(&dccp_v4_prot);
 }
 
