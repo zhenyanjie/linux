@@ -374,5 +374,13 @@
 #define __NR_ia32_userfaultfd 374
 #define __NR_ia32_membarrier 375
 #define __NR_ia32_mlock2 376
+#define __NR_ia32_copy_file_range 377
+#define __NR_ia32_preadv2 378
+#define __NR_ia32_pwritev2 379
+#define __NR_ia32_pkey_mprotect 380
+#define __NR_ia32_pkey_alloc 381
+#define __NR_ia32_pkey_free 382
+#define __NR_ia32_statx 383
+#define __NR_ia32_arch_prctl 384
 
 #endif /* _ASM_X86_UNISTD_32_IA32_H */

@@ -35,5 +35,7 @@
 #define __NR_x32_io_setup 543
 #define __NR_x32_io_submit 544
 #define __NR_x32_execveat 545
+#define __NR_x32_preadv2 546
+#define __NR_x32_pwritev2 547
 
 #endif /* _ASM_X86_UNISTD_64_X32_H */

@@ -71,7 +71,7 @@ ifeq ($(CONFIG_X86_32),y)
         # a lot more stack due to the lack of sharing of stacklots:
         KBUILD_CFLAGS += $(call cc-ifversion, -lt, 0400, \
 				$(call cc-option,-fno-unit-at-a-time))
-
+		
         # CPU-specific tuning. Anything which can be shared with UML should go here.
         include arch/x86/Makefile_32.cpu
         KBUILD_CFLAGS += $(cflags-y)
@@ -87,12 +87,13 @@ else
         KBUILD_AFLAGS += -m64
         KBUILD_CFLAGS += -m64
 
+ifneq ($(cc-name),clang)
         # Align jump targets to 1 byte, not the default 16 bytes:
         KBUILD_CFLAGS += $(call cc-option,-falign-jumps=1)
 
         # Pack loops tightly as well:
         KBUILD_CFLAGS += $(call cc-option,-falign-loops=1)
-
+endif
         # Don't autogenerate traditional x87 instructions
         KBUILD_CFLAGS += $(call cc-option,-mno-80387)
         KBUILD_CFLAGS += $(call cc-option,-mno-fp-ret-in-387)
@@ -179,8 +180,10 @@ ifdef CONFIG_JUMP_LABEL
 endif
 
 ifeq ($(ACCUMULATE_OUTGOING_ARGS), 1)
-	# This compiler flag is not supported by Clang:
+# This compiler flag is not supported by Clang:
+  ifneq ($(cc-name),clang)
 	KBUILD_CFLAGS += $(call cc-option,-maccumulate-outgoing-args,)
+  endif
 endif
 
 # Stackpointer is addressed different for 32 bit and 64 bit x86
