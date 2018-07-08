@@ -101,12 +101,12 @@ static void lec_vcc_close(struct lec_priv *priv, struct atm_vcc *vcc);
 /* must be done under lec_arp_lock */
 static inline void lec_arp_hold(struct lec_arp_table *entry)
 {
-	refcount_inc(&entry->usage);
+	atomic_inc(&entry->usage);
 }
 
 static inline void lec_arp_put(struct lec_arp_table *entry)
 {
-	if (refcount_dec_and_test(&entry->usage))
+	if (atomic_dec_and_test(&entry->usage))
 		kfree(entry);
 }
 
@@ -181,7 +181,7 @@ lec_send(struct atm_vcc *vcc, struct sk_buff *skb)
 	ATM_SKB(skb)->vcc = vcc;
 	ATM_SKB(skb)->atm_options = vcc->atm_options;
 
-	refcount_add(skb->truesize, &sk_atm(vcc)->sk_wmem_alloc);
+	atomic_add(skb->truesize, &sk_atm(vcc)->sk_wmem_alloc);
 	if (vcc->send(vcc, skb) < 0) {
 		dev->stats.tx_dropped++;
 		return;
@@ -345,7 +345,7 @@ static int lec_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 	int i;
 	char *tmp;		/* FIXME */
 
-	WARN_ON(refcount_sub_and_test(skb->truesize, &sk_atm(vcc)->sk_wmem_alloc));
+	atomic_sub(skb->truesize, &sk_atm(vcc)->sk_wmem_alloc);
 	mesg = (struct atmlec_msg *)skb->data;
 	tmp = skb->data;
 	tmp += sizeof(struct atmlec_msg);
@@ -1564,7 +1564,7 @@ static struct lec_arp_table *make_entry(struct lec_priv *priv,
 	to_return->last_used = jiffies;
 	to_return->priv = priv;
 	skb_queue_head_init(&to_return->tx_wait);
-	refcount_set(&to_return->usage, 1);
+	atomic_set(&to_return->usage, 1);
 	return to_return;
 }
 

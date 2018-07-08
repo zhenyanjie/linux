@@ -337,20 +337,11 @@ static int imx6ul_tsc_open(struct input_dev *input_dev)
 		dev_err(tsc->dev,
 			"Could not prepare or enable the tsc clock: %d\n",
 			err);
-		goto disable_adc_clk;
+		clk_disable_unprepare(tsc->adc_clk);
+		return err;
 	}
 
-	err = imx6ul_tsc_init(tsc);
-	if (err)
-		goto disable_tsc_clk;
-
-	return 0;
-
-disable_tsc_clk:
-	clk_disable_unprepare(tsc->tsc_clk);
-disable_adc_clk:
-	clk_disable_unprepare(tsc->adc_clk);
-	return err;
+	return imx6ul_tsc_init(tsc);
 }
 
 static void imx6ul_tsc_close(struct input_dev *input_dev)

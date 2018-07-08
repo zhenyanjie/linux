@@ -68,7 +68,6 @@
 #include <linux/debugfs.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/dax.h>
-#include <linux/oom.h>
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -216,8 +215,12 @@ static bool tlb_next_batch(struct mmu_gather *tlb)
 	return true;
 }
 
-void arch_tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm,
-				unsigned long start, unsigned long end)
+/* tlb_gather_mmu
+ *	Called to initialize an (on-stack) mmu_gather structure for page-table
+ *	tear-down from @mm. The @fullmm argument is used when @mm is without
+ *	users and we're going to destroy the full address space (exit/execve).
+ */
+void tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm, unsigned long start, unsigned long end)
 {
 	tlb->mm = mm;
 
@@ -272,13 +275,9 @@ void tlb_flush_mmu(struct mmu_gather *tlb)
  *	Called at the end of the shootdown operation to free up any resources
  *	that were required.
  */
-void arch_tlb_finish_mmu(struct mmu_gather *tlb,
-		unsigned long start, unsigned long end, bool force)
+void tlb_finish_mmu(struct mmu_gather *tlb, unsigned long start, unsigned long end)
 {
 	struct mmu_gather_batch *batch, *next;
-
-	if (force)
-		__tlb_adjust_range(tlb, start, end - start);
 
 	tlb_flush_mmu(tlb);
 
@@ -398,34 +397,6 @@ void tlb_remove_table(struct mmu_gather *tlb, void *table)
 }
 
 #endif /* CONFIG_HAVE_RCU_TABLE_FREE */
-
-/* tlb_gather_mmu
- *	Called to initialize an (on-stack) mmu_gather structure for page-table
- *	tear-down from @mm. The @fullmm argument is used when @mm is without
- *	users and we're going to destroy the full address space (exit/execve).
- */
-void tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm,
-			unsigned long start, unsigned long end)
-{
-	arch_tlb_gather_mmu(tlb, mm, start, end);
-	inc_tlb_flush_pending(tlb->mm);
-}
-
-void tlb_finish_mmu(struct mmu_gather *tlb,
-		unsigned long start, unsigned long end)
-{
-	/*
-	 * If there are parallel threads are doing PTE changes on same range
-	 * under non-exclusive lock(e.g., mmap_sem read-side) but defer TLB
-	 * flush by batching, a thread has stable TLB entry can fail to flush
-	 * the TLB by observing pte_none|!pte_dirty, for example so flush TLB
-	 * forcefully if we detect parallel PTE batching threads.
-	 */
-	bool force = mm_tlb_flush_nested(tlb->mm);
-
-	arch_tlb_finish_mmu(tlb, start, end, force);
-	dec_tlb_flush_pending(tlb->mm);
-}
 
 /*
  * Note: this doesn't free the actual pages themselves. That
@@ -1226,7 +1197,6 @@ again:
 	init_rss_vec(rss);
 	start_pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	pte = start_pte;
-	flush_tlb_batched_pending(mm);
 	arch_enter_lazy_mmu_mode();
 	do {
 		pte_t ptent = *pte;
@@ -2749,7 +2719,7 @@ int do_swap_page(struct vm_fault *vmf)
 		/* Had to read the page from swap area: Major fault */
 		ret = VM_FAULT_MAJOR;
 		count_vm_event(PGMAJFAULT);
-		count_memcg_event_mm(vma->vm_mm, PGMAJFAULT);
+		mem_cgroup_count_vm_event(vma->vm_mm, PGMAJFAULT);
 	} else if (PageHWPoison(page)) {
 		/*
 		 * hwpoisoned dirty swapcache pages are kept for killing
@@ -2894,7 +2864,6 @@ static int do_anonymous_page(struct vm_fault *vmf)
 	struct vm_area_struct *vma = vmf->vma;
 	struct mem_cgroup *memcg;
 	struct page *page;
-	int ret = 0;
 	pte_t entry;
 
 	/* File mapping without ->vm_ops ? */
@@ -2926,9 +2895,6 @@ static int do_anonymous_page(struct vm_fault *vmf)
 		vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
 				vmf->address, &vmf->ptl);
 		if (!pte_none(*vmf->pte))
-			goto unlock;
-		ret = check_stable_address_space(vma->vm_mm);
-		if (ret)
 			goto unlock;
 		/* Deliver the page fault to userland, check inside PT lock */
 		if (userfaultfd_missing(vma)) {
@@ -2964,10 +2930,6 @@ static int do_anonymous_page(struct vm_fault *vmf)
 	if (!pte_none(*vmf->pte))
 		goto release;
 
-	ret = check_stable_address_space(vma->vm_mm);
-	if (ret)
-		goto release;
-
 	/* Deliver the page fault to userland, check inside PT lock */
 	if (userfaultfd_missing(vma)) {
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
@@ -2987,7 +2949,7 @@ setpte:
 	update_mmu_cache(vma, vmf->address, vmf->pte);
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
-	return ret;
+	return 0;
 release:
 	mem_cgroup_cancel_charge(page, memcg, false);
 	put_page(page);
@@ -3261,7 +3223,7 @@ int alloc_set_pte(struct vm_fault *vmf, struct mem_cgroup *memcg,
 int finish_fault(struct vm_fault *vmf)
 {
 	struct page *page;
-	int ret = 0;
+	int ret;
 
 	/* Did we COW the page? */
 	if ((vmf->flags & FAULT_FLAG_WRITE) &&
@@ -3269,15 +3231,7 @@ int finish_fault(struct vm_fault *vmf)
 		page = vmf->cow_page;
 	else
 		page = vmf->page;
-
-	/*
-	 * check even for read faults because we might have lost our CoWed
-	 * page
-	 */
-	if (!(vmf->vma->vm_flags & VM_SHARED))
-		ret = check_stable_address_space(vmf->vma->vm_mm);
-	if (!ret)
-		ret = alloc_set_pte(vmf, vmf->memcg, page);
+	ret = alloc_set_pte(vmf, vmf->memcg, page);
 	if (vmf->pte)
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
 	return ret;
@@ -3308,14 +3262,14 @@ static int fault_around_bytes_set(void *data, u64 val)
 		fault_around_bytes = PAGE_SIZE; /* rounddown_pow_of_two(0) is undefined */
 	return 0;
 }
-DEFINE_DEBUGFS_ATTRIBUTE(fault_around_bytes_fops,
+DEFINE_SIMPLE_ATTRIBUTE(fault_around_bytes_fops,
 		fault_around_bytes_get, fault_around_bytes_set, "%llu\n");
 
 static int __init fault_around_debugfs(void)
 {
 	void *ret;
 
-	ret = debugfs_create_file_unsafe("fault_around_bytes", 0644, NULL, NULL,
+	ret = debugfs_create_file("fault_around_bytes", 0644, NULL, NULL,
 			&fault_around_bytes_fops);
 	if (!ret)
 		pr_warn("Failed to create fault_around_bytes in debugfs");
@@ -3637,7 +3591,7 @@ out:
 	return 0;
 }
 
-static inline int create_huge_pmd(struct vm_fault *vmf)
+static int create_huge_pmd(struct vm_fault *vmf)
 {
 	if (vma_is_anonymous(vmf->vma))
 		return do_huge_pmd_anonymous_page(vmf);
@@ -3883,15 +3837,10 @@ int handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	__set_current_state(TASK_RUNNING);
 
 	count_vm_event(PGFAULT);
-	count_memcg_event_mm(vma->vm_mm, PGFAULT);
+	mem_cgroup_count_vm_event(vma->vm_mm, PGFAULT);
 
 	/* do counter updates before entering really critical section. */
 	check_sync_rss_stat(current);
-
-	if (!arch_vma_access_permitted(vma, flags & FAULT_FLAG_WRITE,
-					    flags & FAULT_FLAG_INSTRUCTION,
-					    flags & FAULT_FLAG_REMOTE))
-		return VM_FAULT_SIGSEGV;
 
 	/*
 	 * Enable the memcg OOM handling for faults triggered in user
@@ -3899,6 +3848,11 @@ int handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	 */
 	if (flags & FAULT_FLAG_USER)
 		mem_cgroup_oom_enable();
+
+	if (!arch_vma_access_permitted(vma, flags & FAULT_FLAG_WRITE,
+					    flags & FAULT_FLAG_INSTRUCTION,
+					    flags & FAULT_FLAG_REMOTE))
+		return VM_FAULT_SIGSEGV;
 
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		ret = hugetlb_fault(vma->vm_mm, vma, address, flags);
@@ -3916,6 +3870,19 @@ int handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 		if (task_in_memcg_oom(current) && !(ret & VM_FAULT_OOM))
 			mem_cgroup_oom_synchronize(false);
 	}
+
+	/*
+	 * This mm has been already reaped by the oom reaper and so the
+	 * refault cannot be trusted in general. Anonymous refaults would
+	 * lose data and give a zero page instead e.g. This is especially
+	 * problem for use_mm() because regular tasks will just die and
+	 * the corrupted data will not be visible anywhere while kthread
+	 * will outlive the oom victim and potentially propagate the date
+	 * further.
+	 */
+	if (unlikely((current->flags & PF_KTHREAD) && !(ret & VM_FAULT_ERROR)
+				&& test_bit(MMF_UNSTABLE, &vma->vm_mm->flags)))
+		ret = VM_FAULT_SIGBUS;
 
 	return ret;
 }
@@ -4008,8 +3975,7 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 #endif /* __PAGETABLE_PMD_FOLDED */
 
 static int __follow_pte_pmd(struct mm_struct *mm, unsigned long address,
-			    unsigned long *start, unsigned long *end,
-			    pte_t **ptepp, pmd_t **pmdpp, spinlock_t **ptlp)
+		pte_t **ptepp, pmd_t **pmdpp, spinlock_t **ptlp)
 {
 	pgd_t *pgd;
 	p4d_t *p4d;
@@ -4036,38 +4002,26 @@ static int __follow_pte_pmd(struct mm_struct *mm, unsigned long address,
 		if (!pmdpp)
 			goto out;
 
-		if (start && end) {
-			*start = address & PMD_MASK;
-			*end = *start + PMD_SIZE;
-			mmu_notifier_invalidate_range_start(mm, *start, *end);
-		}
 		*ptlp = pmd_lock(mm, pmd);
 		if (pmd_huge(*pmd)) {
 			*pmdpp = pmd;
 			return 0;
 		}
 		spin_unlock(*ptlp);
-		if (start && end)
-			mmu_notifier_invalidate_range_end(mm, *start, *end);
 	}
 
 	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
 		goto out;
 
-	if (start && end) {
-		*start = address & PAGE_MASK;
-		*end = *start + PAGE_SIZE;
-		mmu_notifier_invalidate_range_start(mm, *start, *end);
-	}
 	ptep = pte_offset_map_lock(mm, pmd, address, ptlp);
+	if (!ptep)
+		goto out;
 	if (!pte_present(*ptep))
 		goto unlock;
 	*ptepp = ptep;
 	return 0;
 unlock:
 	pte_unmap_unlock(ptep, *ptlp);
-	if (start && end)
-		mmu_notifier_invalidate_range_end(mm, *start, *end);
 out:
 	return -EINVAL;
 }
@@ -4079,21 +4033,20 @@ static inline int follow_pte(struct mm_struct *mm, unsigned long address,
 
 	/* (void) is needed to make gcc happy */
 	(void) __cond_lock(*ptlp,
-			   !(res = __follow_pte_pmd(mm, address, NULL, NULL,
-						    ptepp, NULL, ptlp)));
+			   !(res = __follow_pte_pmd(mm, address, ptepp, NULL,
+					   ptlp)));
 	return res;
 }
 
 int follow_pte_pmd(struct mm_struct *mm, unsigned long address,
-			     unsigned long *start, unsigned long *end,
 			     pte_t **ptepp, pmd_t **pmdpp, spinlock_t **ptlp)
 {
 	int res;
 
 	/* (void) is needed to make gcc happy */
 	(void) __cond_lock(*ptlp,
-			   !(res = __follow_pte_pmd(mm, address, start, end,
-						    ptepp, pmdpp, ptlp)));
+			   !(res = __follow_pte_pmd(mm, address, ptepp, pmdpp,
+					   ptlp)));
 	return res;
 }
 EXPORT_SYMBOL(follow_pte_pmd);
@@ -4327,7 +4280,7 @@ void __might_fault(const char *file, int line)
 	 * get paged out, therefore we'll never actually fault, and the
 	 * below annotations will generate false positives.
 	 */
-	if (uaccess_kernel())
+	if (segment_eq(get_fs(), KERNEL_DS))
 		return;
 	if (pagefault_disabled())
 		return;

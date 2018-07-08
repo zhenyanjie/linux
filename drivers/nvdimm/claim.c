@@ -12,8 +12,8 @@
  */
 #include <linux/device.h>
 #include <linux/sizes.h>
+#include <linux/pmem.h>
 #include "nd-core.h"
-#include "pmem.h"
 #include "pfn.h"
 #include "btt.h"
 #include "nd.h"
@@ -184,35 +184,6 @@ ssize_t nd_namespace_store(struct device *dev,
 	}
 
 	ndns = to_ndns(found);
-
-	switch (ndns->claim_class) {
-	case NVDIMM_CCLASS_NONE:
-		break;
-	case NVDIMM_CCLASS_BTT:
-	case NVDIMM_CCLASS_BTT2:
-		if (!is_nd_btt(dev)) {
-			len = -EBUSY;
-			goto out_attach;
-		}
-		break;
-	case NVDIMM_CCLASS_PFN:
-		if (!is_nd_pfn(dev)) {
-			len = -EBUSY;
-			goto out_attach;
-		}
-		break;
-	case NVDIMM_CCLASS_DAX:
-		if (!is_nd_dax(dev)) {
-			len = -EBUSY;
-			goto out_attach;
-		}
-		break;
-	default:
-		len = -EBUSY;
-		goto out_attach;
-		break;
-	}
-
 	if (__nvdimm_namespace_capacity(ndns) < SZ_16M) {
 		dev_dbg(dev, "%s too small to host\n", name);
 		len = -ENXIO;
@@ -257,8 +228,7 @@ u64 nd_sb_checksum(struct nd_gen_sb *nd_gen_sb)
 EXPORT_SYMBOL(nd_sb_checksum);
 
 static int nsio_rw_bytes(struct nd_namespace_common *ndns,
-		resource_size_t offset, void *buf, size_t size, int rw,
-		unsigned long flags)
+		resource_size_t offset, void *buf, size_t size, int rw)
 {
 	struct nd_namespace_io *nsio = to_nd_namespace_io(&ndns->dev);
 	unsigned int sz_align = ALIGN(size + (offset & (512 - 1)), 512);
@@ -276,36 +246,34 @@ static int nsio_rw_bytes(struct nd_namespace_common *ndns,
 	if (rw == READ) {
 		if (unlikely(is_bad_pmem(&nsio->bb, sector, sz_align)))
 			return -EIO;
-		return memcpy_mcsafe(buf, nsio->addr + offset, size);
+		return memcpy_from_pmem(buf, nsio->addr + offset, size);
 	}
 
 	if (unlikely(is_bad_pmem(&nsio->bb, sector, sz_align))) {
 		/*
 		 * FIXME: nsio_rw_bytes() may be called from atomic
-		 * context in the btt case and the ACPI DSM path for
-		 * clearing the error takes sleeping locks and allocates
-		 * memory. An explicit error clearing path, and support
-		 * for tracking badblocks in BTT metadata is needed to
-		 * work around this collision.
+		 * context in the btt case and nvdimm_clear_poison()
+		 * takes a sleeping lock. Until the locking can be
+		 * reworked this capability requires that the namespace
+		 * is not claimed by btt.
 		 */
 		if (IS_ALIGNED(offset, 512) && IS_ALIGNED(size, 512)
-				&& !(flags & NVDIMM_IO_ATOMIC)) {
+				&& (!ndns->claim || !is_nd_btt(ndns->claim))) {
 			long cleared;
 
-			cleared = nvdimm_clear_poison(&ndns->dev,
-					nsio->res.start + offset, size);
+			cleared = nvdimm_clear_poison(&ndns->dev, offset, size);
 			if (cleared < size)
 				rc = -EIO;
 			if (cleared > 0 && cleared / 512) {
 				cleared /= 512;
 				badblocks_clear(&nsio->bb, sector, cleared);
 			}
-			arch_invalidate_pmem(nsio->addr + offset, size);
+			invalidate_pmem(nsio->addr + offset, size);
 		} else
 			rc = -EIO;
 	}
 
-	memcpy_flushcache(nsio->addr + offset, buf, size);
+	memcpy_to_pmem(nsio->addr + offset, buf, size);
 	nvdimm_flush(to_nd_region(ndns->dev.parent));
 
 	return rc;

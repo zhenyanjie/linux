@@ -138,7 +138,16 @@ enum print_line_t {
 	TRACE_TYPE_NO_CONSUME	= 3	/* Handled but ask to not consume */
 };
 
-enum print_line_t trace_handle_return(struct trace_seq *s);
+/*
+ * Several functions return TRACE_TYPE_PARTIAL_LINE if the trace_seq
+ * overflowed, and TRACE_TYPE_HANDLED otherwise. This helper function
+ * simplifies those functions and keeps them in sync.
+ */
+static inline enum print_line_t trace_handle_return(struct trace_seq *s)
+{
+	return trace_seq_has_overflowed(s) ?
+		TRACE_TYPE_PARTIAL_LINE : TRACE_TYPE_HANDLED;
+}
 
 void tracing_generic_entry_update(struct trace_entry *entry,
 				  unsigned long flags,
@@ -151,15 +160,7 @@ trace_event_buffer_lock_reserve(struct ring_buffer **current_buffer,
 				int type, unsigned long len,
 				unsigned long flags, int pc);
 
-#define TRACE_RECORD_CMDLINE	BIT(0)
-#define TRACE_RECORD_TGID	BIT(1)
-
-void tracing_record_taskinfo(struct task_struct *task, int flags);
-void tracing_record_taskinfo_sched_switch(struct task_struct *prev,
-					  struct task_struct *next, int flags);
-
-void tracing_record_cmdline(struct task_struct *task);
-void tracing_record_tgid(struct task_struct *task);
+void tracing_record_cmdline(struct task_struct *tsk);
 
 int trace_output_call(struct trace_iterator *iter, char *name, char *fmt, ...);
 
@@ -277,7 +278,6 @@ struct trace_event_call {
 	int				perf_refcount;
 	struct hlist_head __percpu	*perf_events;
 	struct bpf_prog			*prog;
-	struct perf_event		*bpf_prog_owner;
 
 	int	(*perf_perm)(struct trace_event_call *,
 			     struct perf_event *);
@@ -299,7 +299,6 @@ struct trace_subsystem_dir;
 enum {
 	EVENT_FILE_FL_ENABLED_BIT,
 	EVENT_FILE_FL_RECORDED_CMD_BIT,
-	EVENT_FILE_FL_RECORDED_TGID_BIT,
 	EVENT_FILE_FL_FILTERED_BIT,
 	EVENT_FILE_FL_NO_SET_FILTER_BIT,
 	EVENT_FILE_FL_SOFT_MODE_BIT,
@@ -313,7 +312,6 @@ enum {
  * Event file flags:
  *  ENABLED	  - The event is enabled
  *  RECORDED_CMD  - The comms should be recorded at sched_switch
- *  RECORDED_TGID - The tgids should be recorded at sched_switch
  *  FILTERED	  - The event has a filter attached
  *  NO_SET_FILTER - Set when filter has error and is to be ignored
  *  SOFT_MODE     - The event is enabled/disabled by SOFT_DISABLED
@@ -326,7 +324,6 @@ enum {
 enum {
 	EVENT_FILE_FL_ENABLED		= (1 << EVENT_FILE_FL_ENABLED_BIT),
 	EVENT_FILE_FL_RECORDED_CMD	= (1 << EVENT_FILE_FL_RECORDED_CMD_BIT),
-	EVENT_FILE_FL_RECORDED_TGID	= (1 << EVENT_FILE_FL_RECORDED_TGID_BIT),
 	EVENT_FILE_FL_FILTERED		= (1 << EVENT_FILE_FL_FILTERED_BIT),
 	EVENT_FILE_FL_NO_SET_FILTER	= (1 << EVENT_FILE_FL_NO_SET_FILTER_BIT),
 	EVENT_FILE_FL_SOFT_MODE		= (1 << EVENT_FILE_FL_SOFT_MODE_BIT),
@@ -339,7 +336,7 @@ enum {
 struct trace_event_file {
 	struct list_head		list;
 	struct trace_event_call		*event_call;
-	struct event_filter __rcu	*filter;
+	struct event_filter		*filter;
 	struct dentry			*dir;
 	struct trace_array		*tr;
 	struct trace_subsystem_dir	*system;
@@ -509,9 +506,9 @@ void perf_trace_run_bpf_submit(void *raw_data, int size, int rctx,
 static inline void
 perf_trace_buf_submit(void *raw_data, int size, int rctx, u16 type,
 		       u64 count, struct pt_regs *regs, void *head,
-		       struct task_struct *task, struct perf_event *event)
+		       struct task_struct *task)
 {
-	perf_tp_event(type, count, raw_data, size, regs, head, rctx, task, event);
+	perf_tp_event(type, count, raw_data, size, regs, head, rctx, task);
 }
 #endif
 

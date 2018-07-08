@@ -109,7 +109,7 @@ struct sysinfo_2_2_2 {
 	unsigned short cpus_shared;
 	char reserved_4[3];
 	unsigned char vsne;
-	uuid_t uuid;
+	uuid_be uuid;
 	char reserved_5[160];
 	char ext_name[256];
 };
@@ -134,7 +134,7 @@ struct sysinfo_3_2_2 {
 		char reserved_1[3];
 		unsigned char evmne;
 		unsigned int reserved_2;
-		uuid_t uuid;
+		uuid_be uuid;
 	} vm[8];
 	char reserved_3[1504];
 	char ext_names[8][256];
@@ -142,15 +142,7 @@ struct sysinfo_3_2_2 {
 
 extern int topology_max_mnest;
 
-/*
- * Returns the maximum nesting level supported by the cpu topology code.
- * The current maximum level is 4 which is the drawer level.
- */
-static inline unsigned char topology_mnest_limit(void)
-{
-	return min(topology_max_mnest, 4);
-}
-
+#define TOPOLOGY_CORE_BITS	64
 #define TOPOLOGY_NR_MAG		6
 
 struct topology_core {
@@ -160,7 +152,7 @@ struct topology_core {
 	unsigned char pp:2;
 	unsigned char reserved1;
 	unsigned short origin;
-	unsigned long mask;
+	unsigned long mask[TOPOLOGY_CORE_BITS / BITS_PER_LONG];
 };
 
 struct topology_container {

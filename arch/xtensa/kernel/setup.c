@@ -317,9 +317,8 @@ static inline int mem_reserve(unsigned long start, unsigned long end)
 
 void __init setup_arch(char **cmdline_p)
 {
+	strlcpy(boot_command_line, command_line, COMMAND_LINE_SIZE);
 	*cmdline_p = command_line;
-	platform_setup(cmdline_p);
-	strlcpy(boot_command_line, *cmdline_p, COMMAND_LINE_SIZE);
 
 	/* Reserve some memory regions */
 
@@ -382,6 +381,8 @@ void __init setup_arch(char **cmdline_p)
 	bootmem_init();
 
 	unflatten_and_copy_device_tree();
+
+	platform_setup(cmdline_p);
 
 #ifdef CONFIG_SMP
 	smp_init_cpus();
@@ -452,9 +453,9 @@ void cpu_reset(void)
 			tmpaddr += SZ_512M;
 
 		/* Invalidate mapping in the selected temporary area */
-		if (itlb_probe(tmpaddr) & BIT(ITLB_HIT_BIT))
+		if (itlb_probe(tmpaddr) & 0x8)
 			invalidate_itlb_entry(itlb_probe(tmpaddr));
-		if (itlb_probe(tmpaddr + PAGE_SIZE) & BIT(ITLB_HIT_BIT))
+		if (itlb_probe(tmpaddr + PAGE_SIZE) & 0x8)
 			invalidate_itlb_entry(itlb_probe(tmpaddr + PAGE_SIZE));
 
 		/*
@@ -593,7 +594,8 @@ c_show(struct seq_file *f, void *slot)
 		      (ccount_freq/10000) % 100,
 		      loops_per_jiffy/(500000/HZ),
 		      (loops_per_jiffy/(5000/HZ)) % 100);
-	seq_puts(f, "flags\t\t: "
+
+	seq_printf(f,"flags\t\t: "
 #if XCHAL_HAVE_NMI
 		     "nmi "
 #endif

@@ -48,7 +48,6 @@ enum {
 #define MLX5_UMR_ALIGN 2048
 
 static int clean_mr(struct mlx5_ib_mr *mr);
-static int max_umr_order(struct mlx5_ib_dev *dev);
 static int use_umr(struct mlx5_ib_dev *dev, int order);
 static int unreg_umr(struct mlx5_ib_dev *dev, struct mlx5_ib_mr *mr);
 
@@ -492,18 +491,16 @@ static struct mlx5_ib_mr *alloc_cached_mr(struct mlx5_ib_dev *dev, int order)
 	struct mlx5_mr_cache *cache = &dev->cache;
 	struct mlx5_ib_mr *mr = NULL;
 	struct mlx5_cache_ent *ent;
-	int last_umr_cache_entry;
 	int c;
 	int i;
 
 	c = order2idx(dev, order);
-	last_umr_cache_entry = order2idx(dev, max_umr_order(dev));
-	if (c < 0 || c > last_umr_cache_entry) {
+	if (c < 0 || c > MAX_UMR_CACHE_ENTRY) {
 		mlx5_ib_warn(dev, "order %d, cache index %d\n", order, c);
 		return NULL;
 	}
 
-	for (i = c; i <= last_umr_cache_entry; i++) {
+	for (i = c; i < MAX_UMR_CACHE_ENTRY; i++) {
 		ent = &cache->ent[i];
 
 		mlx5_ib_dbg(dev, "order %d, cache index %d\n", ent->order, i);
@@ -585,15 +582,6 @@ static void clean_keys(struct mlx5_ib_dev *dev, int c)
 	}
 }
 
-static void mlx5_mr_cache_debugfs_cleanup(struct mlx5_ib_dev *dev)
-{
-	if (!mlx5_debugfs_root)
-		return;
-
-	debugfs_remove_recursive(dev->cache.root);
-	dev->cache.root = NULL;
-}
-
 static int mlx5_mr_cache_debugfs_init(struct mlx5_ib_dev *dev)
 {
 	struct mlx5_mr_cache *cache = &dev->cache;
@@ -612,34 +600,38 @@ static int mlx5_mr_cache_debugfs_init(struct mlx5_ib_dev *dev)
 		sprintf(ent->name, "%d", ent->order);
 		ent->dir = debugfs_create_dir(ent->name,  cache->root);
 		if (!ent->dir)
-			goto err;
+			return -ENOMEM;
 
 		ent->fsize = debugfs_create_file("size", 0600, ent->dir, ent,
 						 &size_fops);
 		if (!ent->fsize)
-			goto err;
+			return -ENOMEM;
 
 		ent->flimit = debugfs_create_file("limit", 0600, ent->dir, ent,
 						  &limit_fops);
 		if (!ent->flimit)
-			goto err;
+			return -ENOMEM;
 
 		ent->fcur = debugfs_create_u32("cur", 0400, ent->dir,
 					       &ent->cur);
 		if (!ent->fcur)
-			goto err;
+			return -ENOMEM;
 
 		ent->fmiss = debugfs_create_u32("miss", 0600, ent->dir,
 						&ent->miss);
 		if (!ent->fmiss)
-			goto err;
+			return -ENOMEM;
 	}
 
 	return 0;
-err:
-	mlx5_mr_cache_debugfs_cleanup(dev);
+}
 
-	return -ENOMEM;
+static void mlx5_mr_cache_debugfs_cleanup(struct mlx5_ib_dev *dev)
+{
+	if (!mlx5_debugfs_root)
+		return;
+
+	debugfs_remove_recursive(dev->cache.root);
 }
 
 static void delay_time_func(unsigned long ctx)
@@ -699,11 +691,6 @@ int mlx5_mr_cache_init(struct mlx5_ib_dev *dev)
 	err = mlx5_mr_cache_debugfs_init(dev);
 	if (err)
 		mlx5_ib_warn(dev, "cache debugfs failure\n");
-
-	/*
-	 * We don't want to fail driver if debugfs failed to initialize,
-	 * so we are not forwarding error to the user.
-	 */
 
 	return 0;
 }
@@ -819,16 +806,11 @@ static int get_octo_len(u64 addr, u64 len, int page_size)
 	return (npages + 1) / 2;
 }
 
-static int max_umr_order(struct mlx5_ib_dev *dev)
-{
-	if (MLX5_CAP_GEN(dev->mdev, umr_extended_translation_offset))
-		return MAX_UMR_CACHE_ENTRY + 2;
-	return MLX5_MAX_UMR_SHIFT;
-}
-
 static int use_umr(struct mlx5_ib_dev *dev, int order)
 {
-	return order <= max_umr_order(dev);
+	if (MLX5_CAP_GEN(dev->mdev, umr_extended_translation_offset))
+		return order <= MAX_UMR_CACHE_ENTRY + 2;
+	return order <= MLX5_MAX_UMR_SHIFT;
 }
 
 static int mr_umem_get(struct ib_pd *pd, u64 start, u64 length,
@@ -843,7 +825,7 @@ static int mr_umem_get(struct ib_pd *pd, u64 start, u64 length,
 			    access_flags, 0);
 	err = PTR_ERR_OR_ZERO(*umem);
 	if (err < 0) {
-		mlx5_ib_err(dev, "umem get failed (%d)\n", err);
+		mlx5_ib_err(dev, "umem get failed (%ld)\n", PTR_ERR(umem));
 		return err;
 	}
 
@@ -1027,7 +1009,7 @@ int mlx5_ib_update_xlt(struct mlx5_ib_mr *mr, u64 idx, int npages,
 	}
 
 	if (!xlt) {
-		uctx = to_mucontext(mr->ibmr.pd->uobject->context);
+		uctx = to_mucontext(mr->ibmr.uobject->context);
 		mlx5_ib_warn(dev, "Using XLT emergency buffer\n");
 		size = PAGE_SIZE;
 		xlt = (void *)uctx->upd_xlt_page;
@@ -1063,9 +1045,8 @@ int mlx5_ib_update_xlt(struct mlx5_ib_mr *mr, u64 idx, int npages,
 	for (pages_mapped = 0;
 	     pages_mapped < pages_to_map && !err;
 	     pages_mapped += pages_iter, idx += pages_iter) {
-		npages = min_t(int, pages_iter, pages_to_map - pages_mapped);
 		dma_sync_single_for_cpu(ddev, dma, size, DMA_TO_DEVICE);
-		npages = populate_xlt(mr, idx, npages, xlt,
+		npages = populate_xlt(mr, idx, pages_iter, xlt,
 				      page_shift, size, flags);
 
 		dma_sync_single_for_device(ddev, dma, size, DMA_TO_DEVICE);
@@ -1128,7 +1109,7 @@ static struct mlx5_ib_mr *reg_create(struct ib_mr *ibmr, struct ib_pd *pd,
 
 	inlen = MLX5_ST_SZ_BYTES(create_mkey_in) +
 		sizeof(*pas) * ((npages + 1) / 2) * 2;
-	in = kvzalloc(inlen, GFP_KERNEL);
+	in = mlx5_vzalloc(inlen);
 	if (!in) {
 		err = -ENOMEM;
 		goto err_1;
@@ -1706,7 +1687,6 @@ struct ib_mw *mlx5_ib_alloc_mw(struct ib_pd *pd, enum ib_mw_type type,
 
 	mw->mmkey.type = MLX5_MKEY_MW;
 	mw->ibmw.rkey = mw->mmkey.key;
-	mw->ndescs = ndescs;
 
 	resp.response_length = min(offsetof(typeof(resp), response_length) +
 				   sizeof(resp.response_length), udata->outlen);
@@ -1797,7 +1777,7 @@ mlx5_ib_sg_to_klms(struct mlx5_ib_mr *mr,
 	mr->ndescs = sg_nents;
 
 	for_each_sg(sgl, sg, sg_nents, i) {
-		if (unlikely(i >= mr->max_descs))
+		if (unlikely(i > mr->max_descs))
 			break;
 		klms[i].va = cpu_to_be64(sg_dma_address(sg) + sg_offset);
 		klms[i].bcount = cpu_to_be32(sg_dma_len(sg) - sg_offset);

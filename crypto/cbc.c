@@ -10,7 +10,6 @@
  *
  */
 
-#include <crypto/algapi.h>
 #include <crypto/cbc.h>
 #include <crypto/internal/skcipher.h>
 #include <linux/err.h>
@@ -109,10 +108,8 @@ static void crypto_cbc_free(struct skcipher_instance *inst)
 static int crypto_cbc_create(struct crypto_template *tmpl, struct rtattr **tb)
 {
 	struct skcipher_instance *inst;
-	struct crypto_attr_type *algt;
 	struct crypto_spawn *spawn;
 	struct crypto_alg *alg;
-	u32 mask;
 	int err;
 
 	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_SKCIPHER);
@@ -123,16 +120,8 @@ static int crypto_cbc_create(struct crypto_template *tmpl, struct rtattr **tb)
 	if (!inst)
 		return -ENOMEM;
 
-	algt = crypto_get_attr_type(tb);
-	err = PTR_ERR(algt);
-	if (IS_ERR(algt))
-		goto err_free_inst;
-
-	mask = CRYPTO_ALG_TYPE_MASK |
-		crypto_requires_off(algt->type, algt->mask,
-				    CRYPTO_ALG_NEED_FALLBACK);
-
-	alg = crypto_get_attr_alg(tb, CRYPTO_ALG_TYPE_CIPHER, mask);
+	alg = crypto_get_attr_alg(tb, CRYPTO_ALG_TYPE_CIPHER,
+				  CRYPTO_ALG_TYPE_MASK);
 	err = PTR_ERR(alg);
 	if (IS_ERR(alg))
 		goto err_free_inst;

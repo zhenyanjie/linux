@@ -20,5 +20,4 @@ rdma_rxe-y := \
 	rxe_mcast.o \
 	rxe_task.o \
 	rxe_net.o \
-	rxe_sysfs.o \
-	rxe_hw_counters.o
+	rxe_sysfs.o

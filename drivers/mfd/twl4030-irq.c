@@ -638,10 +638,8 @@ int twl4030_sih_setup(struct device *dev, int module, int irq_base)
 		}
 	}
 
-	if (status < 0) {
-		dev_err(dev, "module to setup SIH for not found\n");
+	if (status < 0)
 		return status;
-	}
 
 	agent = kzalloc(sizeof(*agent), GFP_KERNEL);
 	if (!agent)

@@ -17,8 +17,6 @@
 #include <linux/memblock.h>
 #include <linux/bootmem.h>
 #include <linux/moduleparam.h>
-#include <linux/swap.h>
-#include <linux/swapops.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
@@ -34,7 +32,6 @@
 #define PAGE_SHIFT_16G	34
 
 unsigned int HPAGE_SHIFT;
-EXPORT_SYMBOL(HPAGE_SHIFT);
 
 /*
  * Tracks gpages after the device tree is scanned and before the
@@ -58,7 +55,7 @@ static unsigned nr_gpages;
 
 #define hugepd_none(hpd)	(hpd_val(hpd) == 0)
 
-pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr, unsigned long sz)
+pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
 {
 	/* Only called for hugetlbfs pages, hence can ignore THP */
 	return __find_linux_pte_or_hugepte(mm->pgd, addr, NULL, NULL);
@@ -80,7 +77,7 @@ static int __hugepte_alloc(struct mm_struct *mm, hugepd_t *hpdp,
 		num_hugepd = 1;
 	}
 
-	new = kmem_cache_zalloc(cachep, pgtable_gfp_flags(mm, GFP_KERNEL));
+	new = kmem_cache_zalloc(cachep, GFP_KERNEL);
 
 	BUG_ON(pshift > HUGEPD_SHIFT_MASK);
 	BUG_ON((unsigned long)new & HUGEPD_SHIFT_MASK);
@@ -620,37 +617,60 @@ void hugetlb_free_pgd_range(struct mmu_gather *tlb,
 	} while (addr = next, addr != end);
 }
 
-struct page *follow_huge_pd(struct vm_area_struct *vma,
-			    unsigned long address, hugepd_t hpd,
-			    int flags, int pdshift)
+/*
+ * We are holding mmap_sem, so a parallel huge page collapse cannot run.
+ * To prevent hugepage split, disable irq.
+ */
+struct page *
+follow_huge_addr(struct mm_struct *mm, unsigned long address, int write)
 {
-	pte_t *ptep;
-	spinlock_t *ptl;
-	struct page *page = NULL;
-	unsigned long mask;
-	int shift = hugepd_shift(hpd);
-	struct mm_struct *mm = vma->vm_mm;
+	bool is_thp;
+	pte_t *ptep, pte;
+	unsigned shift;
+	unsigned long mask, flags;
+	struct page *page = ERR_PTR(-EINVAL);
 
-retry:
-	ptl = &mm->page_table_lock;
-	spin_lock(ptl);
+	local_irq_save(flags);
+	ptep = find_linux_pte_or_hugepte(mm->pgd, address, &is_thp, &shift);
+	if (!ptep)
+		goto no_page;
+	pte = READ_ONCE(*ptep);
+	/*
+	 * Verify it is a huge page else bail.
+	 * Transparent hugepages are handled by generic code. We can skip them
+	 * here.
+	 */
+	if (!shift || is_thp)
+		goto no_page;
 
-	ptep = hugepte_offset(hpd, address, pdshift);
-	if (pte_present(*ptep)) {
-		mask = (1UL << shift) - 1;
-		page = pte_page(*ptep);
-		page += ((address & mask) >> PAGE_SHIFT);
-		if (flags & FOLL_GET)
-			get_page(page);
-	} else {
-		if (is_hugetlb_entry_migration(*ptep)) {
-			spin_unlock(ptl);
-			__migration_entry_wait(mm, ptep, ptl);
-			goto retry;
-		}
+	if (!pte_present(pte)) {
+		page = NULL;
+		goto no_page;
 	}
-	spin_unlock(ptl);
+	mask = (1UL << shift) - 1;
+	page = pte_page(pte);
+	if (page)
+		page += (address & mask) / PAGE_SIZE;
+
+no_page:
+	local_irq_restore(flags);
 	return page;
+}
+
+struct page *
+follow_huge_pmd(struct mm_struct *mm, unsigned long address,
+		pmd_t *pmd, int write)
+{
+	BUG();
+	return NULL;
+}
+
+struct page *
+follow_huge_pud(struct mm_struct *mm, unsigned long address,
+		pud_t *pud, int write)
+{
+	BUG();
+	return NULL;
 }
 
 static unsigned long hugepte_addr_end(unsigned long addr, unsigned long end,
@@ -732,27 +752,6 @@ static int __init add_huge_page_size(unsigned long long size)
 
 	if ((mmu_psize = shift_to_mmu_psize(shift)) < 0)
 		return -EINVAL;
-
-#ifdef CONFIG_PPC_BOOK3S_64
-	/*
-	 * We need to make sure that for different page sizes reported by
-	 * firmware we only add hugetlb support for page sizes that can be
-	 * supported by linux page table layout.
-	 * For now we have
-	 * Radix: 2M
-	 * Hash: 16M and 16G
-	 */
-	if (radix_enabled()) {
-		if (mmu_psize != MMU_PAGE_2M) {
-			if (cpu_has_feature(CPU_FTR_POWER9_DD1) ||
-			    (mmu_psize != MMU_PAGE_1G))
-				return -EINVAL;
-		}
-	} else {
-		if (mmu_psize != MMU_PAGE_16M && mmu_psize != MMU_PAGE_16G)
-			return -EINVAL;
-	}
-#endif
 
 	BUG_ON(mmu_psize_defs[mmu_psize].shift != shift);
 
@@ -946,7 +945,7 @@ pte_t *__find_linux_pte_or_hugepte(pgd_t *pgdir, unsigned long ea,
 			if (pmd_none(pmd))
 				return NULL;
 
-			if (pmd_trans_huge(pmd) || pmd_devmap(pmd)) {
+			if (pmd_trans_huge(pmd)) {
 				if (is_thp)
 					*is_thp = true;
 				ret_pte = (pte_t *) pmdp;

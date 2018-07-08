@@ -12,7 +12,6 @@
 
 #include <linux/dma-buf.h>
 #include <linux/module.h>
-#include <linux/refcount.h>
 #include <linux/scatterlist.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -35,7 +34,7 @@ struct vb2_dc_buf {
 
 	/* MMAP related */
 	struct vb2_vmarea_handler	handler;
-	refcount_t			refcount;
+	atomic_t			refcount;
 	struct sg_table			*sgt_base;
 
 	/* DMABUF related */
@@ -87,7 +86,7 @@ static unsigned int vb2_dc_num_users(void *buf_priv)
 {
 	struct vb2_dc_buf *buf = buf_priv;
 
-	return refcount_read(&buf->refcount);
+	return atomic_read(&buf->refcount);
 }
 
 static void vb2_dc_prepare(void *buf_priv)
@@ -123,7 +122,7 @@ static void vb2_dc_put(void *buf_priv)
 {
 	struct vb2_dc_buf *buf = buf_priv;
 
-	if (!refcount_dec_and_test(&buf->refcount))
+	if (!atomic_dec_and_test(&buf->refcount))
 		return;
 
 	if (buf->sgt_base) {
@@ -171,7 +170,7 @@ static void *vb2_dc_alloc(struct device *dev, unsigned long attrs,
 	buf->handler.put = vb2_dc_put;
 	buf->handler.arg = buf;
 
-	refcount_set(&buf->refcount, 1);
+	atomic_inc(&buf->refcount);
 
 	return buf;
 }
@@ -357,8 +356,8 @@ static struct dma_buf_ops vb2_dc_dmabuf_ops = {
 	.detach = vb2_dc_dmabuf_ops_detach,
 	.map_dma_buf = vb2_dc_dmabuf_ops_map,
 	.unmap_dma_buf = vb2_dc_dmabuf_ops_unmap,
-	.map = vb2_dc_dmabuf_ops_kmap,
-	.map_atomic = vb2_dc_dmabuf_ops_kmap,
+	.kmap = vb2_dc_dmabuf_ops_kmap,
+	.kmap_atomic = vb2_dc_dmabuf_ops_kmap,
 	.vmap = vb2_dc_dmabuf_ops_vmap,
 	.mmap = vb2_dc_dmabuf_ops_mmap,
 	.release = vb2_dc_dmabuf_ops_release,
@@ -408,7 +407,7 @@ static struct dma_buf *vb2_dc_get_dmabuf(void *buf_priv, unsigned long flags)
 		return NULL;
 
 	/* dmabuf keeps reference to vb2 buffer */
-	refcount_inc(&buf->refcount);
+	atomic_inc(&buf->refcount);
 
 	return dbuf;
 }

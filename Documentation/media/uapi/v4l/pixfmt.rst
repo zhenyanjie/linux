@@ -34,5 +34,4 @@ see also :ref:`VIDIOC_G_FBUF <VIDIOC_G_FBUF>`.)
     pixfmt-013
     sdr-formats
     tch-formats
-    meta-formats
     pixfmt-reserved

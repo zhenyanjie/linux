@@ -7,8 +7,6 @@
 
 #include "demangle-java.h"
 
-#include "sane_ctype.h"
-
 enum {
 	MODE_PREFIX = 0,
 	MODE_CLASS  = 1,

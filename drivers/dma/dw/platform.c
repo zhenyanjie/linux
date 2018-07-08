@@ -306,12 +306,8 @@ static int dw_resume_early(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct dw_dma_chip *chip = platform_get_drvdata(pdev);
-	int ret;
 
-	ret = clk_prepare_enable(chip->clk);
-	if (ret)
-		return ret;
-
+	clk_prepare_enable(chip->clk);
 	return dw_dma_enable(chip);
 }
 

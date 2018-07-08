@@ -327,10 +327,13 @@ snd_rme96_capture_ptr(struct rme96 *rme96)
 
 static int
 snd_rme96_playback_silence(struct snd_pcm_substream *substream,
-			   int channel, unsigned long pos, unsigned long count)
+			   int channel, /* not used (interleaved data) */
+			   snd_pcm_uframes_t pos,
+			   snd_pcm_uframes_t count)
 {
 	struct rme96 *rme96 = snd_pcm_substream_chip(substream);
-
+	count <<= rme96->playback_frlog;
+	pos <<= rme96->playback_frlog;
 	memset_io(rme96->iobase + RME96_IO_PLAY_BUFFER + pos,
 		  0, count);
 	return 0;
@@ -338,47 +341,30 @@ snd_rme96_playback_silence(struct snd_pcm_substream *substream,
 
 static int
 snd_rme96_playback_copy(struct snd_pcm_substream *substream,
-			int channel, unsigned long pos,
-			void __user *src, unsigned long count)
+			int channel, /* not used (interleaved data) */
+			snd_pcm_uframes_t pos,
+			void __user *src,
+			snd_pcm_uframes_t count)
 {
 	struct rme96 *rme96 = snd_pcm_substream_chip(substream);
-
-	return copy_from_user_toio(rme96->iobase + RME96_IO_PLAY_BUFFER + pos,
-				   src, count);
-}
-
-static int
-snd_rme96_playback_copy_kernel(struct snd_pcm_substream *substream,
-			       int channel, unsigned long pos,
-			       void *src, unsigned long count)
-{
-	struct rme96 *rme96 = snd_pcm_substream_chip(substream);
-
-	memcpy_toio(rme96->iobase + RME96_IO_PLAY_BUFFER + pos, src, count);
-	return 0;
-}
-
-static int
-snd_rme96_capture_copy(struct snd_pcm_substream *substream,
-		       int channel, unsigned long pos,
-		       void __user *dst, unsigned long count)
-{
-	struct rme96 *rme96 = snd_pcm_substream_chip(substream);
-
-	return copy_to_user_fromio(dst,
-				   rme96->iobase + RME96_IO_REC_BUFFER + pos,
+	count <<= rme96->playback_frlog;
+	pos <<= rme96->playback_frlog;
+	return copy_from_user_toio(rme96->iobase + RME96_IO_PLAY_BUFFER + pos, src,
 				   count);
 }
 
 static int
-snd_rme96_capture_copy_kernel(struct snd_pcm_substream *substream,
-			      int channel, unsigned long pos,
-			      void *dst, unsigned long count)
+snd_rme96_capture_copy(struct snd_pcm_substream *substream,
+		       int channel, /* not used (interleaved data) */
+		       snd_pcm_uframes_t pos,
+		       void __user *dst,
+		       snd_pcm_uframes_t count)
 {
 	struct rme96 *rme96 = snd_pcm_substream_chip(substream);
-
-	memcpy_fromio(dst, rme96->iobase + RME96_IO_REC_BUFFER + pos, count);
-	return 0;
+	count <<= rme96->capture_frlog;
+	pos <<= rme96->capture_frlog;
+	return copy_to_user_fromio(dst, rme96->iobase + RME96_IO_REC_BUFFER + pos,
+				   count);
 }
 
 /*
@@ -1163,9 +1149,9 @@ snd_rme96_interrupt(int irq,
 	return IRQ_HANDLED;
 }
 
-static const unsigned int period_bytes[] = { RME96_SMALL_BLOCK_SIZE, RME96_LARGE_BLOCK_SIZE };
+static unsigned int period_bytes[] = { RME96_SMALL_BLOCK_SIZE, RME96_LARGE_BLOCK_SIZE };
 
-static const struct snd_pcm_hw_constraint_list hw_constraints_period_bytes = {
+static struct snd_pcm_hw_constraint_list hw_constraints_period_bytes = {
 	.count = ARRAY_SIZE(period_bytes),
 	.list = period_bytes,
 	.mask = 0
@@ -1527,9 +1513,8 @@ static const struct snd_pcm_ops snd_rme96_playback_spdif_ops = {
 	.prepare =	snd_rme96_playback_prepare,
 	.trigger =	snd_rme96_playback_trigger,
 	.pointer =	snd_rme96_playback_pointer,
-	.copy_user =	snd_rme96_playback_copy,
-	.copy_kernel =	snd_rme96_playback_copy_kernel,
-	.fill_silence =	snd_rme96_playback_silence,
+	.copy =		snd_rme96_playback_copy,
+	.silence =	snd_rme96_playback_silence,
 	.mmap =		snd_pcm_lib_mmap_iomem,
 };
 
@@ -1541,8 +1526,7 @@ static const struct snd_pcm_ops snd_rme96_capture_spdif_ops = {
 	.prepare =	snd_rme96_capture_prepare,
 	.trigger =	snd_rme96_capture_trigger,
 	.pointer =	snd_rme96_capture_pointer,
-	.copy_user =	snd_rme96_capture_copy,
-	.copy_kernel =	snd_rme96_capture_copy_kernel,
+	.copy =		snd_rme96_capture_copy,
 	.mmap =		snd_pcm_lib_mmap_iomem,
 };
 
@@ -1554,9 +1538,8 @@ static const struct snd_pcm_ops snd_rme96_playback_adat_ops = {
 	.prepare =	snd_rme96_playback_prepare,
 	.trigger =	snd_rme96_playback_trigger,
 	.pointer =	snd_rme96_playback_pointer,
-	.copy_user =	snd_rme96_playback_copy,
-	.copy_kernel =	snd_rme96_playback_copy_kernel,
-	.fill_silence =	snd_rme96_playback_silence,
+	.copy =		snd_rme96_playback_copy,
+	.silence =	snd_rme96_playback_silence,
 	.mmap =		snd_pcm_lib_mmap_iomem,
 };
 
@@ -1568,8 +1551,7 @@ static const struct snd_pcm_ops snd_rme96_capture_adat_ops = {
 	.prepare =	snd_rme96_capture_prepare,
 	.trigger =	snd_rme96_capture_trigger,
 	.pointer =	snd_rme96_capture_pointer,
-	.copy_user =	snd_rme96_capture_copy,
-	.copy_kernel =	snd_rme96_capture_copy_kernel,
+	.copy =		snd_rme96_capture_copy,
 	.mmap =		snd_pcm_lib_mmap_iomem,
 };
 

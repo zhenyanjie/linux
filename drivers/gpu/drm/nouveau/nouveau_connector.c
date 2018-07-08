@@ -1045,9 +1045,6 @@ nouveau_connector_mode_valid(struct drm_connector *connector,
 		return MODE_BAD;
 	}
 
-	if ((mode->flags & DRM_MODE_FLAG_3D_MASK) == DRM_MODE_FLAG_3D_FRAME_PACKING)
-		clock *= 2;
-
 	if (clock < min_clock)
 		return MODE_CLOCK_LOW;
 
@@ -1150,7 +1147,6 @@ nouveau_connector_aux_xfer(struct drm_dp_aux *obj, struct drm_dp_aux_msg *msg)
 		container_of(obj, typeof(*nv_connector), aux);
 	struct nouveau_encoder *nv_encoder;
 	struct nvkm_i2c_aux *aux;
-	u8 size = msg->size;
 	int ret;
 
 	nv_encoder = find_encoder(&nv_connector->base, DCB_OUTPUT_DP);
@@ -1158,17 +1154,19 @@ nouveau_connector_aux_xfer(struct drm_dp_aux *obj, struct drm_dp_aux_msg *msg)
 		return -ENODEV;
 	if (WARN_ON(msg->size > 16))
 		return -E2BIG;
+	if (msg->size == 0)
+		return msg->size;
 
 	ret = nvkm_i2c_aux_acquire(aux);
 	if (ret)
 		return ret;
 
 	ret = nvkm_i2c_aux_xfer(aux, false, msg->request, msg->address,
-				msg->buffer, &size);
+				msg->buffer, msg->size);
 	nvkm_i2c_aux_release(aux);
 	if (ret >= 0) {
 		msg->reply = ret;
-		return size;
+		return msg->size;
 	}
 
 	return ret;
@@ -1321,13 +1319,6 @@ nouveau_connector_create(struct drm_device *dev, int index)
 		funcs = &nouveau_connector_funcs;
 		break;
 	}
-
-	/* HDMI 3D support */
-	if ((disp->disp.oclass >= G82_DISP)
-	    && ((type == DRM_MODE_CONNECTOR_DisplayPort)
-		|| (type == DRM_MODE_CONNECTOR_eDP)
-		|| (type == DRM_MODE_CONNECTOR_HDMIA)))
-		connector->stereo_allowed = true;
 
 	/* defaults, will get overridden in detect() */
 	connector->interlace_allowed = false;

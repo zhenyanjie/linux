@@ -4248,9 +4248,11 @@ static int nv_get_link_ksettings(struct net_device *dev,
 		/* We do not track link speed / duplex setting if the
 		 * interface is disabled. Force a link check */
 		if (nv_update_linkspeed(dev)) {
-			netif_carrier_on(dev);
+			if (!netif_carrier_ok(dev))
+				netif_carrier_on(dev);
 		} else {
-			netif_carrier_off(dev);
+			if (netif_carrier_ok(dev))
+				netif_carrier_off(dev);
 		}
 	}
 

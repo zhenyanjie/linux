@@ -49,21 +49,6 @@
 /* Base bits plus 1 bit for nulls marker */
 #define RHT_HASH_RESERVED_SPACE	(RHT_BASE_BITS + 1)
 
-/* Maximum chain length before rehash
- *
- * The maximum (not average) chain length grows with the size of the hash
- * table, at a rate of (log N)/(log log N).
- *
- * The value of 16 is selected so that even if the hash table grew to
- * 2^32 you would not expect the maximum chain length to exceed it
- * unless we are under attack (or extremely unlucky).
- *
- * As this limit is only to detect attacks, we don't need to set it to a
- * lower value as you'd need the chain length to vastly exceed 16 to have
- * any real effect on the system.
- */
-#define RHT_ELASTICITY	16u
-
 struct rhash_head {
 	struct rhash_head __rcu		*next;
 };
@@ -125,25 +110,29 @@ struct rhashtable;
  * @key_len: Length of key
  * @key_offset: Offset of key in struct to be hashed
  * @head_offset: Offset of rhash_head in struct to be hashed
+ * @insecure_max_entries: Maximum number of entries (may be exceeded)
  * @max_size: Maximum size while expanding
  * @min_size: Minimum size while shrinking
- * @locks_mul: Number of bucket locks to allocate per cpu (default: 128)
- * @automatic_shrinking: Enable automatic shrinking of tables
  * @nulls_base: Base value to generate nulls marker
+ * @insecure_elasticity: Set to true to disable chain length checks
+ * @automatic_shrinking: Enable automatic shrinking of tables
+ * @locks_mul: Number of bucket locks to allocate per cpu (default: 128)
  * @hashfn: Hash function (default: jhash2 if !(key_len % 4), or jhash)
  * @obj_hashfn: Function to hash object
  * @obj_cmpfn: Function to compare key with object
  */
 struct rhashtable_params {
-	u16			nelem_hint;
-	u16			key_len;
-	u16			key_offset;
-	u16			head_offset;
+	size_t			nelem_hint;
+	size_t			key_len;
+	size_t			key_offset;
+	size_t			head_offset;
+	unsigned int		insecure_max_entries;
 	unsigned int		max_size;
-	u16			min_size;
-	bool			automatic_shrinking;
-	u8			locks_mul;
+	unsigned int		min_size;
 	u32			nulls_base;
+	bool			insecure_elasticity;
+	bool			automatic_shrinking;
+	size_t			locks_mul;
 	rht_hashfn_t		hashfn;
 	rht_obj_hashfn_t	obj_hashfn;
 	rht_obj_cmpfn_t		obj_cmpfn;
@@ -154,8 +143,8 @@ struct rhashtable_params {
  * @tbl: Bucket table
  * @nelems: Number of elements in table
  * @key_len: Key length for hashfn
+ * @elasticity: Maximum chain length before rehash
  * @p: Configuration parameters
- * @max_elems: Maximum number of elements in table
  * @rhlist: True if this is an rhltable
  * @run_work: Deferred worker to expand/shrink asynchronously
  * @mutex: Mutex to protect current/future table swapping
@@ -165,8 +154,8 @@ struct rhashtable {
 	struct bucket_table __rcu	*tbl;
 	atomic_t			nelems;
 	unsigned int			key_len;
+	unsigned int			elasticity;
 	struct rhashtable_params	p;
-	unsigned int			max_elems;
 	bool				rhlist;
 	struct work_struct		run_work;
 	struct mutex                    mutex;
@@ -329,7 +318,8 @@ static inline bool rht_grow_above_100(const struct rhashtable *ht,
 static inline bool rht_grow_above_max(const struct rhashtable *ht,
 				      const struct bucket_table *tbl)
 {
-	return atomic_read(&ht->nelems) >= ht->max_elems;
+	return ht->p.insecure_max_entries &&
+	       atomic_read(&ht->nelems) >= ht->p.insecure_max_entries;
 }
 
 /* The bucket lock is selected based on the hash and protects mutations
@@ -736,7 +726,7 @@ slow_path:
 		return rhashtable_insert_slow(ht, key, obj);
 	}
 
-	elasticity = RHT_ELASTICITY;
+	elasticity = ht->elasticity;
 	pprev = rht_bucket_insert(ht, tbl, hash);
 	data = ERR_PTR(-ENOMEM);
 	if (!pprev)
@@ -923,28 +913,6 @@ static inline int rhashtable_lookup_insert_fast(
 		return PTR_ERR(ret);
 
 	return ret == NULL ? 0 : -EEXIST;
-}
-
-/**
- * rhashtable_lookup_get_insert_fast - lookup and insert object into hash table
- * @ht:		hash table
- * @obj:	pointer to hash head inside object
- * @params:	hash table parameters
- *
- * Just like rhashtable_lookup_insert_fast(), but this function returns the
- * object if it exists, NULL if it did not and the insertion was successful,
- * and an ERR_PTR otherwise.
- */
-static inline void *rhashtable_lookup_get_insert_fast(
-	struct rhashtable *ht, struct rhash_head *obj,
-	const struct rhashtable_params params)
-{
-	const char *key = rht_obj(ht, obj);
-
-	BUG_ON(ht->p.obj_hashfn);
-
-	return __rhashtable_insert_fast(ht, key + ht->p.key_offset, obj, params,
-					false);
 }
 
 /**

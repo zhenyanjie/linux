@@ -32,18 +32,18 @@ static struct cpuidle_driver powernv_idle_driver = {
 	.owner            = THIS_MODULE,
 };
 
-static int max_idle_state __read_mostly;
-static struct cpuidle_state *cpuidle_state_table __read_mostly;
+static int max_idle_state;
+static struct cpuidle_state *cpuidle_state_table;
 
 struct stop_psscr_table {
 	u64 val;
 	u64 mask;
 };
 
-static struct stop_psscr_table stop_psscr_table[CPUIDLE_STATE_MAX] __read_mostly;
+static struct stop_psscr_table stop_psscr_table[CPUIDLE_STATE_MAX];
 
-static u64 snooze_timeout __read_mostly;
-static bool snooze_timeout_en __read_mostly;
+static u64 snooze_timeout;
+static bool snooze_timeout_en;
 
 static int snooze_loop(struct cpuidle_device *dev,
 			struct cpuidle_driver *drv,
@@ -51,30 +51,22 @@ static int snooze_loop(struct cpuidle_device *dev,
 {
 	u64 snooze_exit_time;
 
-	set_thread_flag(TIF_POLLING_NRFLAG);
-
 	local_irq_enable();
+	set_thread_flag(TIF_POLLING_NRFLAG);
 
 	snooze_exit_time = get_tb() + snooze_timeout;
 	ppc64_runlatch_off();
-	HMT_very_low();
 	while (!need_resched()) {
-		if (likely(snooze_timeout_en) && get_tb() > snooze_exit_time) {
-			/*
-			 * Task has not woken up but we are exiting the polling
-			 * loop anyway. Require a barrier after polling is
-			 * cleared to order subsequent test of need_resched().
-			 */
-			clear_thread_flag(TIF_POLLING_NRFLAG);
-			smp_mb();
+		HMT_low();
+		HMT_very_low();
+		if (snooze_timeout_en && get_tb() > snooze_exit_time)
 			break;
-		}
 	}
 
 	HMT_medium();
 	ppc64_runlatch_on();
 	clear_thread_flag(TIF_POLLING_NRFLAG);
-
+	smp_mb();
 	return index;
 }
 
@@ -82,8 +74,9 @@ static int nap_loop(struct cpuidle_device *dev,
 			struct cpuidle_driver *drv,
 			int index)
 {
-	power7_idle_type(PNV_THREAD_NAP);
-
+	ppc64_runlatch_off();
+	power7_idle();
+	ppc64_runlatch_on();
 	return index;
 }
 
@@ -106,8 +99,7 @@ static int fastsleep_loop(struct cpuidle_device *dev,
 	new_lpcr &= ~LPCR_PECE1;
 
 	mtspr(SPRN_LPCR, new_lpcr);
-
-	power7_idle_type(PNV_THREAD_SLEEP);
+	power7_sleep();
 
 	mtspr(SPRN_LPCR, old_lpcr);
 
@@ -119,8 +111,10 @@ static int stop_loop(struct cpuidle_device *dev,
 		     struct cpuidle_driver *drv,
 		     int index)
 {
-	power9_idle_type(stop_psscr_table[index].val,
+	ppc64_runlatch_off();
+	power9_idle_stop(stop_psscr_table[index].val,
 			 stop_psscr_table[index].mask);
+	ppc64_runlatch_on();
 	return index;
 }
 
@@ -221,26 +215,11 @@ static inline void add_powernv_state(int index, const char *name,
 	stop_psscr_table[index].mask = psscr_mask;
 }
 
-/*
- * Returns 0 if prop1_len == prop2_len. Else returns -1
- */
-static inline int validate_dt_prop_sizes(const char *prop1, int prop1_len,
-					 const char *prop2, int prop2_len)
-{
-	if (prop1_len == prop2_len)
-		return 0;
-
-	pr_warn("cpuidle-powernv: array sizes don't match for %s and %s\n",
-		prop1, prop2);
-	return -1;
-}
-
-extern u32 pnv_get_supported_cpuidle_states(void);
 static int powernv_add_idle_states(void)
 {
 	struct device_node *power_mgt;
 	int nr_idle_states = 1; /* Snooze */
-	int dt_idle_states, count;
+	int dt_idle_states;
 	u32 latency_ns[CPUIDLE_STATE_MAX];
 	u32 residency_ns[CPUIDLE_STATE_MAX];
 	u32 flags[CPUIDLE_STATE_MAX];
@@ -249,8 +228,6 @@ static int powernv_add_idle_states(void)
 	const char *names[CPUIDLE_STATE_MAX];
 	u32 has_stop_states = 0;
 	int i, rc;
-	u32 supported_flags = pnv_get_supported_cpuidle_states();
-
 
 	/* Currently we have snooze statically defined */
 
@@ -266,21 +243,6 @@ static int powernv_add_idle_states(void)
 		pr_warn("cpuidle-powernv: no idle states found in the DT\n");
 		goto out;
 	}
-
-	count = of_property_count_u32_elems(power_mgt,
-					    "ibm,cpu-idle-state-latencies-ns");
-
-	if (validate_dt_prop_sizes("ibm,cpu-idle-state-flags", dt_idle_states,
-				   "ibm,cpu-idle-state-latencies-ns",
-				   count) != 0)
-		goto out;
-
-	count = of_property_count_strings(power_mgt,
-					  "ibm,cpu-idle-state-names");
-	if (validate_dt_prop_sizes("ibm,cpu-idle-state-flags", dt_idle_states,
-				   "ibm,cpu-idle-state-names",
-				   count) != 0)
-		goto out;
 
 	/*
 	 * Since snooze is used as first idle state, max idle states allowed is
@@ -316,22 +278,6 @@ static int powernv_add_idle_states(void)
 	has_stop_states = (flags[0] &
 			   (OPAL_PM_STOP_INST_FAST | OPAL_PM_STOP_INST_DEEP));
 	if (has_stop_states) {
-		count = of_property_count_u64_elems(power_mgt,
-						    "ibm,cpu-idle-state-psscr");
-		if (validate_dt_prop_sizes("ibm,cpu-idle-state-flags",
-					   dt_idle_states,
-					   "ibm,cpu-idle-state-psscr",
-					   count) != 0)
-			goto out;
-
-		count = of_property_count_u64_elems(power_mgt,
-						    "ibm,cpu-idle-state-psscr-mask");
-		if (validate_dt_prop_sizes("ibm,cpu-idle-state-flags",
-					   dt_idle_states,
-					   "ibm,cpu-idle-state-psscr-mask",
-					   count) != 0)
-			goto out;
-
 		if (of_property_read_u64_array(power_mgt,
 		    "ibm,cpu-idle-state-psscr", psscr_val, dt_idle_states)) {
 			pr_warn("cpuidle-powernv: missing ibm,cpu-idle-state-psscr in DT\n");
@@ -346,32 +292,11 @@ static int powernv_add_idle_states(void)
 		}
 	}
 
-	count = of_property_count_u32_elems(power_mgt,
-					    "ibm,cpu-idle-state-residency-ns");
-
-	if (count < 0) {
-		rc = count;
-	} else if (validate_dt_prop_sizes("ibm,cpu-idle-state-flags",
-					  dt_idle_states,
-					  "ibm,cpu-idle-state-residency-ns",
-					  count) != 0) {
-		goto out;
-	} else {
-		rc = of_property_read_u32_array(power_mgt,
-						"ibm,cpu-idle-state-residency-ns",
-						residency_ns, dt_idle_states);
-	}
+	rc = of_property_read_u32_array(power_mgt,
+		"ibm,cpu-idle-state-residency-ns", residency_ns, dt_idle_states);
 
 	for (i = 0; i < dt_idle_states; i++) {
 		unsigned int exit_latency, target_residency;
-		bool stops_timebase = false;
-
-		/*
-		 * Skip the platform idle state whose flag isn't in
-		 * the supported_cpuidle_states flag mask.
-		 */
-		if ((flags[i] & supported_flags) != flags[i])
-			continue;
 		/*
 		 * If an idle state has exit latency beyond
 		 * POWERNV_THRESHOLD_LATENCY_NS then don't use it
@@ -399,9 +324,6 @@ static int powernv_add_idle_states(void)
 			}
 		}
 
-		if (flags[i] & OPAL_PM_TIMEBASE_STOP)
-			stops_timebase = true;
-
 		/*
 		 * For nap and fastsleep, use default target_residency
 		 * values if f/w does not expose it.
@@ -413,7 +335,8 @@ static int powernv_add_idle_states(void)
 			add_powernv_state(nr_idle_states, "Nap",
 					  CPUIDLE_FLAG_NONE, nap_loop,
 					  target_residency, exit_latency, 0, 0);
-		} else if (has_stop_states && !stops_timebase) {
+		} else if ((flags[i] & OPAL_PM_STOP_INST_FAST) &&
+				!(flags[i] & OPAL_PM_TIMEBASE_STOP)) {
 			add_powernv_state(nr_idle_states, names[i],
 					  CPUIDLE_FLAG_NONE, stop_loop,
 					  target_residency, exit_latency,
@@ -425,8 +348,8 @@ static int powernv_add_idle_states(void)
 		 * within this config dependency check.
 		 */
 #ifdef CONFIG_TICK_ONESHOT
-		else if (flags[i] & OPAL_PM_SLEEP_ENABLED ||
-			 flags[i] & OPAL_PM_SLEEP_ENABLED_ER1) {
+		if (flags[i] & OPAL_PM_SLEEP_ENABLED ||
+			flags[i] & OPAL_PM_SLEEP_ENABLED_ER1) {
 			if (!rc)
 				target_residency = 300000;
 			/* Add FASTSLEEP state */
@@ -434,15 +357,14 @@ static int powernv_add_idle_states(void)
 					  CPUIDLE_FLAG_TIMER_STOP,
 					  fastsleep_loop,
 					  target_residency, exit_latency, 0, 0);
-		} else if (has_stop_states && stops_timebase) {
+		} else if ((flags[i] & OPAL_PM_STOP_INST_DEEP) &&
+				(flags[i] & OPAL_PM_TIMEBASE_STOP)) {
 			add_powernv_state(nr_idle_states, names[i],
 					  CPUIDLE_FLAG_TIMER_STOP, stop_loop,
 					  target_residency, exit_latency,
 					  psscr_val[i], psscr_mask[i]);
 		}
 #endif
-		else
-			continue;
 		nr_idle_states++;
 	}
 out:

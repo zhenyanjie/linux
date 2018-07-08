@@ -3,7 +3,7 @@
 
 #include <sys/types.h>
 #include <stdio.h>
-#include <linux/refcount.h>
+#include <linux/atomic.h>
 
 struct thread_map_data {
 	pid_t    pid;
@@ -11,7 +11,7 @@ struct thread_map_data {
 };
 
 struct thread_map {
-	refcount_t refcnt;
+	atomic_t refcnt;
 	int nr;
 	struct thread_map_data map[];
 };

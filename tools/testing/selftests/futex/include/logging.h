@@ -107,7 +107,7 @@ void log_verbosity(int level)
  *
  * print_result() is primarily intended for functional tests.
  */
-void print_result(const char *test_name, int ret)
+void print_result(int ret)
 {
 	const char *result = "Unknown return code";
 
@@ -124,7 +124,7 @@ void print_result(const char *test_name, int ret)
 		result = FAIL;
 		break;
 	}
-	printf("selftests: %s [%s]\n", test_name, result);
+	printf("Result: %s\n", result);
 }
 
 /* log level macros */

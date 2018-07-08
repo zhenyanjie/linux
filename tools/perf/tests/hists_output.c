@@ -1,6 +1,5 @@
 #include "perf.h"
 #include "util/debug.h"
-#include "util/event.h"
 #include "util/symbol.h"
 #include "util/sort.h"
 #include "util/evsel.h"
@@ -10,7 +9,6 @@
 #include "util/parse-events.h"
 #include "tests/tests.h"
 #include "tests/hists_common.h"
-#include <linux/kernel.h>
 
 struct sample {
 	u32 cpu;

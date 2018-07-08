@@ -541,3 +541,7 @@
 &serial_3 {
 	status = "okay";
 };
+
+&watchdog {
+	status = "okay";
+};

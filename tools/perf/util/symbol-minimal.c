@@ -1,7 +1,6 @@
 #include "symbol.h"
 #include "util.h"
 
-#include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
@@ -373,11 +372,4 @@ int kcore_copy(const char *from_dir __maybe_unused,
 
 void symbol__elf_init(void)
 {
-}
-
-char *dso__demangle_sym(struct dso *dso __maybe_unused,
-			int kmodule __maybe_unused,
-			char *elf_name __maybe_unused)
-{
-	return NULL;
 }

@@ -19,8 +19,6 @@
 #include "util/data.h"
 #include "util/config.h"
 
-#include <errno.h>
-#include <inttypes.h>
 #include <stdlib.h>
 #include <math.h>
 
@@ -366,7 +364,6 @@ static struct perf_tool tool = {
 	.exit	= perf_event__process_exit,
 	.fork	= perf_event__process_fork,
 	.lost	= perf_event__process_lost,
-	.namespaces = perf_event__process_namespaces,
 	.ordered_events = true,
 	.ordering_requires_timestamps = true,
 };
@@ -1302,10 +1299,7 @@ static int diff__config(const char *var, const char *value,
 			void *cb __maybe_unused)
 {
 	if (!strcmp(var, "diff.order")) {
-		int ret;
-		if (perf_config_int(&ret, var, value) < 0)
-			return -1;
-		sort_compute = ret;
+		sort_compute = perf_config_int(var, value);
 		return 0;
 	}
 	if (!strcmp(var, "diff.compute")) {
@@ -1326,7 +1320,7 @@ static int diff__config(const char *var, const char *value,
 	return 0;
 }
 
-int cmd_diff(int argc, const char **argv)
+int cmd_diff(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	int ret = hists__init();
 

@@ -9,13 +9,10 @@
  *   Dick Fowles <fowles@inreach.com>
  *   Joe Mario <jmario@redhat.com>
  */
-#include <errno.h>
-#include <inttypes.h>
 #include <linux/compiler.h>
 #include <linux/kernel.h>
 #include <linux/stringify.h>
 #include <asm/bug.h>
-#include <sys/param.h>
 #include "util.h"
 #include "debug.h"
 #include "builtin.h"
@@ -27,13 +24,11 @@
 #include "tool.h"
 #include "data.h"
 #include "sort.h"
-#include "event.h"
 #include "evlist.h"
 #include "evsel.h"
 #include <asm/bug.h>
 #include "ui/browsers/hists.h"
 #include "evlist.h"
-#include "thread.h"
 
 struct c2c_hists {
 	struct hists		hists;
@@ -1725,10 +1720,10 @@ static int c2c_hists__init_sort(struct perf_hpp_list *hpp_list, char *name)
 				tok; tok = strtok_r(NULL, ", ", &tmp)) {	\
 			ret = _fn(hpp_list, tok);				\
 			if (ret == -EINVAL) {					\
-				pr_err("Invalid --fields key: `%s'", tok);	\
+				error("Invalid --fields key: `%s'", tok);	\
 				break;						\
 			} else if (ret == -ESRCH) {				\
-				pr_err("Unknown --fields key: `%s'", tok);	\
+				error("Unknown --fields key: `%s'", tok);	\
 				break;						\
 			}							\
 		}								\
@@ -2339,7 +2334,7 @@ out:
 
 static void perf_c2c_display(struct perf_session *session)
 {
-	if (use_browser == 0)
+	if (c2c.use_stdio)
 		perf_c2c__hists_fprintf(stdout, session);
 	else
 		perf_c2c__hists_browse(&c2c.hists.hists);
@@ -2541,7 +2536,7 @@ static int perf_c2c__report(int argc, const char **argv)
 	OPT_BOOLEAN(0, "stdio", &c2c.use_stdio, "Use the stdio interface"),
 #endif
 	OPT_BOOLEAN(0, "stats", &c2c.stats_only,
-		    "Display only statistic tables (implies --stdio)"),
+		    "Use the stdio interface"),
 	OPT_BOOLEAN(0, "full-symbols", &c2c.symbol_full,
 		    "Display full length of symbols"),
 	OPT_BOOLEAN(0, "no-source", &no_source,
@@ -2760,12 +2755,12 @@ static int perf_c2c__record(int argc, const char **argv)
 		pr_debug("\n");
 	}
 
-	ret = cmd_record(i, rec_argv);
+	ret = cmd_record(i, rec_argv, NULL);
 	free(rec_argv);
 	return ret;
 }
 
-int cmd_c2c(int argc, const char **argv)
+int cmd_c2c(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	argc = parse_options(argc, argv, c2c_options, c2c_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);

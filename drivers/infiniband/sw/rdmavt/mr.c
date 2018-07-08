@@ -191,9 +191,8 @@ static int rvt_alloc_lkey(struct rvt_mregion *mr, int dma_region)
 
 		tmr = rcu_access_pointer(dev->dma_mr);
 		if (!tmr) {
-			mr->lkey_published = 1;
-			/* Insure published written first */
 			rcu_assign_pointer(dev->dma_mr, mr);
+			mr->lkey_published = 1;
 			rvt_get_mr(mr);
 		}
 		goto success;
@@ -225,9 +224,8 @@ static int rvt_alloc_lkey(struct rvt_mregion *mr, int dma_region)
 		mr->lkey |= 1 << 8;
 		rkt->gen++;
 	}
-	mr->lkey_published = 1;
-	/* Insure published written first */
 	rcu_assign_pointer(rkt->table[r], mr);
+	mr->lkey_published = 1;
 success:
 	spin_unlock_irqrestore(&rkt->lock, flags);
 out:
@@ -255,24 +253,23 @@ static void rvt_free_lkey(struct rvt_mregion *mr)
 	spin_lock_irqsave(&rkt->lock, flags);
 	if (!lkey) {
 		if (mr->lkey_published) {
-			mr->lkey_published = 0;
-			/* insure published is written before pointer */
-			rcu_assign_pointer(dev->dma_mr, NULL);
+			RCU_INIT_POINTER(dev->dma_mr, NULL);
 			rvt_put_mr(mr);
 		}
 	} else {
 		if (!mr->lkey_published)
 			goto out;
 		r = lkey >> (32 - dev->dparms.lkey_table_size);
-		mr->lkey_published = 0;
-		/* insure published is written before pointer */
-		rcu_assign_pointer(rkt->table[r], NULL);
+		RCU_INIT_POINTER(rkt->table[r], NULL);
 	}
+	mr->lkey_published = 0;
 	freed++;
 out:
 	spin_unlock_irqrestore(&rkt->lock, flags);
-	if (freed)
+	if (freed) {
+		synchronize_rcu();
 		percpu_ref_kill(&mr->refcount);
+	}
 }
 
 static struct rvt_mr *__rvt_alloc_mr(int count, struct ib_pd *pd)
@@ -408,7 +405,8 @@ struct ib_mr *rvt_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 	mr->mr.access_flags = mr_access_flags;
 	mr->umem = umem;
 
-	mr->mr.page_shift = umem->page_shift;
+	if (is_power_of_2(umem->page_size))
+		mr->mr.page_shift = ilog2(umem->page_size);
 	m = 0;
 	n = 0;
 	for_each_sg(umem->sg_head.sgl, sg, umem->nmap, entry) {
@@ -420,9 +418,8 @@ struct ib_mr *rvt_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 			goto bail_inval;
 		}
 		mr->mr.map[m]->segs[n].vaddr = vaddr;
-		mr->mr.map[m]->segs[n].length = BIT(umem->page_shift);
-		trace_rvt_mr_user_seg(&mr->mr, m, n, vaddr,
-				      BIT(umem->page_shift));
+		mr->mr.map[m]->segs[n].length = umem->page_size;
+		trace_rvt_mr_user_seg(&mr->mr, m, n, vaddr, umem->page_size);
 		n++;
 		if (n == RVT_SEGSZ) {
 			m++;
@@ -825,21 +822,16 @@ int rvt_lkey_ok(struct rvt_lkey_table *rkt, struct rvt_pd *pd,
 		goto ok;
 	}
 	mr = rcu_dereference(rkt->table[sge->lkey >> rkt->shift]);
-	if (!mr)
-		goto bail;
-	rvt_get_mr(mr);
-	if (!READ_ONCE(mr->lkey_published))
-		goto bail_unref;
-
-	if (unlikely(atomic_read(&mr->lkey_invalid) ||
+	if (unlikely(!mr || atomic_read(&mr->lkey_invalid) ||
 		     mr->lkey != sge->lkey || mr->pd != &pd->ibpd))
-		goto bail_unref;
+		goto bail;
 
 	off = sge->addr - mr->user_base;
 	if (unlikely(sge->addr < mr->user_base ||
 		     off + sge->length > mr->length ||
 		     (mr->access_flags & acc) != acc))
-		goto bail_unref;
+		goto bail;
+	rvt_get_mr(mr);
 	rcu_read_unlock();
 
 	off += mr->offset;
@@ -875,8 +867,6 @@ int rvt_lkey_ok(struct rvt_lkey_table *rkt, struct rvt_pd *pd,
 	isge->n = n;
 ok:
 	return 1;
-bail_unref:
-	rvt_put_mr(mr);
 bail:
 	rcu_read_unlock();
 	return 0;
@@ -932,20 +922,15 @@ int rvt_rkey_ok(struct rvt_qp *qp, struct rvt_sge *sge,
 	}
 
 	mr = rcu_dereference(rkt->table[rkey >> rkt->shift]);
-	if (!mr)
-		goto bail;
-	rvt_get_mr(mr);
-	/* insure mr read is before test */
-	if (!READ_ONCE(mr->lkey_published))
-		goto bail_unref;
-	if (unlikely(atomic_read(&mr->lkey_invalid) ||
+	if (unlikely(!mr || atomic_read(&mr->lkey_invalid) ||
 		     mr->lkey != rkey || qp->ibqp.pd != mr->pd))
-		goto bail_unref;
+		goto bail;
 
 	off = vaddr - mr->iova;
 	if (unlikely(vaddr < mr->iova || off + len > mr->length ||
 		     (mr->access_flags & acc) == 0))
-		goto bail_unref;
+		goto bail;
+	rvt_get_mr(mr);
 	rcu_read_unlock();
 
 	off += mr->offset;
@@ -981,8 +966,6 @@ int rvt_rkey_ok(struct rvt_qp *qp, struct rvt_sge *sge,
 	sge->n = n;
 ok:
 	return 1;
-bail_unref:
-	rvt_put_mr(mr);
 bail:
 	rcu_read_unlock();
 	return 0;

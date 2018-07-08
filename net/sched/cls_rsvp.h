@@ -152,6 +152,8 @@ static int rsvp_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		return -1;
 	nhptr = ip_hdr(skb);
 #endif
+	if (unlikely(!head))
+		return -1;
 restart:
 
 #if RSVP_DST_LEN == 4
@@ -300,13 +302,22 @@ static void rsvp_delete_filter(struct tcf_proto *tp, struct rsvp_filter *f)
 	call_rcu(&f->rcu, rsvp_delete_filter_rcu);
 }
 
-static void rsvp_destroy(struct tcf_proto *tp)
+static bool rsvp_destroy(struct tcf_proto *tp, bool force)
 {
 	struct rsvp_head *data = rtnl_dereference(tp->root);
 	int h1, h2;
 
 	if (data == NULL)
-		return;
+		return true;
+
+	if (!force) {
+		for (h1 = 0; h1 < 256; h1++) {
+			if (rcu_access_pointer(data->ht[h1]))
+				return false;
+		}
+	}
+
+	RCU_INIT_POINTER(tp->root, NULL);
 
 	for (h1 = 0; h1 < 256; h1++) {
 		struct rsvp_session *s;
@@ -326,9 +337,10 @@ static void rsvp_destroy(struct tcf_proto *tp)
 		}
 	}
 	kfree_rcu(data, rcu);
+	return true;
 }
 
-static int rsvp_delete(struct tcf_proto *tp, unsigned long arg, bool *last)
+static int rsvp_delete(struct tcf_proto *tp, unsigned long arg)
 {
 	struct rsvp_head *head = rtnl_dereference(tp->root);
 	struct rsvp_filter *nfp, *f = (struct rsvp_filter *)arg;
@@ -336,7 +348,7 @@ static int rsvp_delete(struct tcf_proto *tp, unsigned long arg, bool *last)
 	unsigned int h = f->handle;
 	struct rsvp_session __rcu **sp;
 	struct rsvp_session *nsp, *s = f->sess;
-	int i, h1;
+	int i;
 
 	fp = &s->ht[(h >> 8) & 0xFF];
 	for (nfp = rtnl_dereference(*fp); nfp;
@@ -349,7 +361,7 @@ static int rsvp_delete(struct tcf_proto *tp, unsigned long arg, bool *last)
 
 			for (i = 0; i <= 16; i++)
 				if (s->ht[i])
-					goto out;
+					return 0;
 
 			/* OK, session has no flows */
 			sp = &head->ht[h & 0xFF];
@@ -358,23 +370,13 @@ static int rsvp_delete(struct tcf_proto *tp, unsigned long arg, bool *last)
 				if (nsp == s) {
 					RCU_INIT_POINTER(*sp, s->next);
 					kfree_rcu(s, rcu);
-					goto out;
+					return 0;
 				}
 			}
 
-			break;
+			return 0;
 		}
 	}
-
-out:
-	*last = true;
-	for (h1 = 0; h1 < 256; h1++) {
-		if (rcu_access_pointer(head->ht[h1])) {
-			*last = false;
-			break;
-		}
-	}
-
 	return 0;
 }
 
@@ -482,7 +484,7 @@ static int rsvp_change(struct net *net, struct sk_buff *in_skb,
 	if (opt == NULL)
 		return handle ? -EINVAL : 0;
 
-	err = nla_parse_nested(tb, TCA_RSVP_MAX, opt, rsvp_policy, NULL);
+	err = nla_parse_nested(tb, TCA_RSVP_MAX, opt, rsvp_policy);
 	if (err < 0)
 		return err;
 

@@ -678,9 +678,7 @@ struct pwm_device *of_pwm_get(struct device_node *np, const char *con_id)
 
 	pc = of_node_to_pwmchip(args.np);
 	if (IS_ERR(pc)) {
-		if (PTR_ERR(pc) != -EPROBE_DEFER)
-			pr_err("%s(): PWM chip not found\n", __func__);
-
+		pr_err("%s(): PWM chip not found\n", __func__);
 		pwm = ERR_CAST(pc);
 		goto put;
 	}

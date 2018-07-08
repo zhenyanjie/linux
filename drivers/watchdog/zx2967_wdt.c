@@ -154,7 +154,7 @@ static const struct watchdog_info zx2967_wdt_ident = {
 	.identity         =	"zx2967 watchdog",
 };
 
-static const struct watchdog_ops zx2967_wdt_ops = {
+static struct watchdog_ops zx2967_wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = zx2967_wdt_start,
 	.stop = zx2967_wdt_stop,
@@ -211,8 +211,10 @@ static int zx2967_wdt_probe(struct platform_device *pdev)
 
 	base = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	wdt->reg_base = devm_ioremap_resource(dev, base);
-	if (IS_ERR(wdt->reg_base))
+	if (IS_ERR(wdt->reg_base)) {
+		dev_err(dev, "ioremap failed\n");
 		return PTR_ERR(wdt->reg_base);
+	}
 
 	zx2967_wdt_reset_sysctrl(dev);
 

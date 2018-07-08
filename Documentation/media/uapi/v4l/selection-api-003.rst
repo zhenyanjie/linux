@@ -7,9 +7,9 @@ Selection targets
 
 .. _sel-targets-capture:
 
-.. kernel-figure:: selection.svg
-    :alt:   selection.svg
-    :align: center
+.. figure::  selection.*
+    :alt:    selection.pdf / selection.svg
+    :align:  center
 
     Cropping and composing targets
 

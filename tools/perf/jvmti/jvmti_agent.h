@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <jvmti.h>
 
+#define __unused __attribute__((unused))
+
 #if defined(__cplusplus)
 extern "C" {
 #endif

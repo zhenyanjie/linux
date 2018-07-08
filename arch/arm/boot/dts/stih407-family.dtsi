@@ -464,8 +464,6 @@
 			clock-names = "ssc";
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_spi1_default>;
-			#address-cells = <1>;
-			#size-cells = <0>;
 
 			status = "disabled";
 		};
@@ -478,8 +476,6 @@
 			clock-names = "ssc";
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_spi2_default>;
-			#address-cells = <1>;
-			#size-cells = <0>;
 
 			status = "disabled";
 		};
@@ -492,8 +488,6 @@
 			clock-names = "ssc";
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_spi3_default>;
-			#address-cells = <1>;
-			#size-cells = <0>;
 
 			status = "disabled";
 		};
@@ -506,8 +500,6 @@
 			clock-names = "ssc";
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_spi4_default>;
-			#address-cells = <1>;
-			#size-cells = <0>;
 
 			status = "disabled";
 		};
@@ -521,8 +513,6 @@
 			clock-names = "ssc";
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_spi10_default>;
-			#address-cells = <1>;
-			#size-cells = <0>;
 
 			status = "disabled";
 		};
@@ -535,8 +525,6 @@
 			clock-names = "ssc";
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_spi11_default>;
-			#address-cells = <1>;
-			#size-cells = <0>;
 
 			status = "disabled";
 		};
@@ -549,8 +537,6 @@
 			clock-names = "ssc";
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_spi12_default>;
-			#address-cells = <1>;
-			#size-cells = <0>;
 
 			status = "disabled";
 		};
@@ -756,6 +742,18 @@
 				 <&clk_s_c0_flexgen CLK_ETH_PHY>;
 		};
 
+		cec: sti-cec@094a087c {
+			compatible = "st,stih-cec";
+			reg = <0x94a087c 0x64>;
+			clocks = <&clk_sysin>;
+			clock-names = "cec-clk";
+			interrupts = <GIC_SPI 140 IRQ_TYPE_NONE>;
+			interrupt-names = "cec-irq";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl_cec0_default>;
+			resets = <&softreset STIH407_LPM_SOFTRESET>;
+		};
+
 		rng10: rng@08a89000 {
 			compatible      = "st,rng";
 			reg		= <0x08a89000 0x1000>;
@@ -803,7 +801,7 @@
 			status		= "okay";
 		};
 
-		st231_gp0: st231-gp0@0 {
+		st231_gp0: remote-processor {
 			compatible	= "st,st231-rproc";
 			memory-region	= <&gp0_reserved>;
 			resets		= <&softreset STIH407_ST231_GP0_SOFTRESET>;
@@ -816,7 +814,7 @@
 			mboxes = <&mailbox0 0 2>, <&mailbox2 0 1>, <&mailbox0 0 3>, <&mailbox2 0 0>;
 		};
 
-		st231_delta: st231-delta@0 {
+		st231_delta: remote-processor {
 			compatible	= "st,st231-rproc";
 			memory-region	= <&delta_reserved>;
 			resets		= <&softreset STIH407_ST231_DMU_SOFTRESET>;

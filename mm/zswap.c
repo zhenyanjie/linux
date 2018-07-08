@@ -371,9 +371,10 @@ static int zswap_dstmem_prepare(unsigned int cpu)
 	u8 *dst;
 
 	dst = kmalloc_node(PAGE_SIZE * 2, GFP_KERNEL, cpu_to_node(cpu));
-	if (!dst)
+	if (!dst) {
+		pr_err("can't allocate compressor buffer\n");
 		return -ENOMEM;
-
+	}
 	per_cpu(zswap_dstmem, cpu) = dst;
 	return 0;
 }
@@ -514,8 +515,10 @@ static struct zswap_pool *zswap_pool_create(char *type, char *compressor)
 	}
 
 	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
-	if (!pool)
+	if (!pool) {
+		pr_err("pool alloc failed\n");
 		return NULL;
+	}
 
 	/* unique name for each pool specifically required by zsmalloc */
 	snprintf(name, 38, "zswap%x", atomic_inc_return(&zswap_pools_count));
@@ -1155,7 +1158,7 @@ static void zswap_frontswap_init(unsigned type)
 {
 	struct zswap_tree *tree;
 
-	tree = kzalloc(sizeof(*tree), GFP_KERNEL);
+	tree = kzalloc(sizeof(struct zswap_tree), GFP_KERNEL);
 	if (!tree) {
 		pr_err("alloc failed, zswap disabled for swap type %d\n", type);
 		return;

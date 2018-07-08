@@ -60,22 +60,6 @@
 #define ALIGN_FUNCTION()  . = ALIGN(8)
 
 /*
- * LD_DEAD_CODE_DATA_ELIMINATION option enables -fdata-sections, which
- * generates .data.identifier sections, which need to be pulled in with
- * .data. We don't want to pull in .data..other sections, which Linux
- * has defined. Same for text and bss.
- */
-#ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
-#define TEXT_MAIN .text .text.[0-9a-zA-Z_]*
-#define DATA_MAIN .data .data.[0-9a-zA-Z_]*
-#define BSS_MAIN .bss .bss.[0-9a-zA-Z_]*
-#else
-#define TEXT_MAIN .text
-#define DATA_MAIN .data
-#define BSS_MAIN .bss
-#endif
-
-/*
  * Align to a 32 byte boundary equal to the
  * alignment gcc 4.5 uses for a struct
  */
@@ -141,9 +125,9 @@
 			VMLINUX_SYMBOL(__start_ftrace_events) = .;	\
 			KEEP(*(_ftrace_events))				\
 			VMLINUX_SYMBOL(__stop_ftrace_events) = .;	\
-			VMLINUX_SYMBOL(__start_ftrace_eval_maps) = .;	\
-			KEEP(*(_ftrace_eval_map))			\
-			VMLINUX_SYMBOL(__stop_ftrace_eval_maps) = .;
+			VMLINUX_SYMBOL(__start_ftrace_enum_maps) = .;	\
+			KEEP(*(_ftrace_enum_map))			\
+			VMLINUX_SYMBOL(__stop_ftrace_enum_maps) = .;
 #else
 #define FTRACE_EVENTS()
 #endif
@@ -188,7 +172,8 @@
 	KEEP(*(__##name##_of_table))					\
 	KEEP(*(__##name##_of_table_end))
 
-#define TIMER_OF_TABLES()	OF_TABLE(CONFIG_TIMER_OF, timer)
+#define CLKSRC_OF_TABLES()	OF_TABLE(CONFIG_CLKSRC_OF, clksrc)
+#define CLKEVT_OF_TABLES()	OF_TABLE(CONFIG_CLKEVT_OF, clkevt)
 #define IRQCHIP_OF_MATCH_TABLE() OF_TABLE(CONFIG_IRQCHIP, irqchip)
 #define CLK_OF_TABLES()		OF_TABLE(CONFIG_COMMON_CLK, clk)
 #define IOMMU_OF_TABLES()	OF_TABLE(CONFIG_OF_IOMMU, iommu)
@@ -214,9 +199,12 @@
 
 /*
  * .data section
+ * LD_DEAD_CODE_DATA_ELIMINATION option enables -fdata-sections generates
+ * .data.identifier which needs to be pulled in with .data, but don't want to
+ * pull in .data..stuff which has its own requirements. Same for bss.
  */
 #define DATA_DATA							\
-	*(DATA_MAIN)							\
+	*(.data .data.[0-9a-zA-Z_]*)					\
 	*(.ref.data)							\
 	*(.data..shared_aligned) /* percpu related */			\
 	MEM_KEEP(init.data)						\
@@ -298,6 +286,8 @@
 	.rodata1          : AT(ADDR(.rodata1) - LOAD_OFFSET) {		\
 		*(.rodata1)						\
 	}								\
+									\
+	BUG_TABLE							\
 									\
 	/* PCI quirks */						\
 	.pci_fixup        : AT(ADDR(.pci_fixup) - LOAD_OFFSET) {	\
@@ -447,17 +437,16 @@
 		VMLINUX_SYMBOL(__security_initcall_end) = .;		\
 	}
 
-/*
- * .text section. Map to function alignment to avoid address changes
+/* .text section. Map to function alignment to avoid address changes
  * during second ld run in second ld pass when generating System.map
- *
- * TEXT_MAIN here will match .text.fixup and .text.unlikely if dead
- * code elimination is enabled, so these sections should be converted
- * to use ".." first.
- */
+ * LD_DEAD_CODE_DATA_ELIMINATION option enables -ffunction-sections generates
+ * .text.identifier which needs to be pulled in with .text , but some
+ * architectures define .text.foo which is not intended to be pulled in here.
+ * Those enabling LD_DEAD_CODE_DATA_ELIMINATION must ensure they don't have
+ * conflicting section names, and must pull in .text.[0-9a-zA-Z_]* */
 #define TEXT_TEXT							\
 		ALIGN_FUNCTION();					\
-		*(.text.hot TEXT_MAIN .text.fixup .text.unlikely)	\
+		*(.text.hot .text .text.fixup .text.unlikely)		\
 		*(.ref.text)						\
 	MEM_KEEP(init.text)						\
 	MEM_KEEP(exit.text)						\
@@ -570,14 +559,15 @@
 	MEM_DISCARD(init.rodata)					\
 	CLK_OF_TABLES()							\
 	RESERVEDMEM_OF_TABLES()						\
-	TIMER_OF_TABLES()						\
+	CLKSRC_OF_TABLES()						\
+	CLKEVT_OF_TABLES()						\
 	IOMMU_OF_TABLES()						\
 	CPU_METHOD_OF_TABLES()						\
 	CPUIDLE_METHOD_OF_TABLES()					\
 	KERNEL_DTB()							\
 	IRQCHIP_OF_MATCH_TABLE()					\
 	ACPI_PROBE_TABLE(irqchip)					\
-	ACPI_PROBE_TABLE(timer)						\
+	ACPI_PROBE_TABLE(clksrc)					\
 	ACPI_PROBE_TABLE(iort)						\
 	EARLYCON_TABLE()
 
@@ -608,7 +598,6 @@
 #define SBSS(sbss_align)						\
 	. = ALIGN(sbss_align);						\
 	.sbss : AT(ADDR(.sbss) - LOAD_OFFSET) {				\
-		*(.dynsbss)						\
 		*(.sbss)						\
 		*(.scommon)						\
 	}
@@ -627,7 +616,7 @@
 		BSS_FIRST_SECTIONS					\
 		*(.bss..page_aligned)					\
 		*(.dynbss)						\
-		*(BSS_MAIN)						\
+		*(.bss .bss.[0-9a-zA-Z_]*)				\
 		*(COMMON)						\
 	}
 
@@ -655,22 +644,11 @@
 		.debug_str      0 : { *(.debug_str) }			\
 		.debug_loc      0 : { *(.debug_loc) }			\
 		.debug_macinfo  0 : { *(.debug_macinfo) }		\
-		.debug_pubtypes 0 : { *(.debug_pubtypes) }		\
-		/* DWARF 3 */						\
-		.debug_ranges	0 : { *(.debug_ranges) }		\
 		/* SGI/MIPS DWARF 2 extensions */			\
 		.debug_weaknames 0 : { *(.debug_weaknames) }		\
 		.debug_funcnames 0 : { *(.debug_funcnames) }		\
 		.debug_typenames 0 : { *(.debug_typenames) }		\
 		.debug_varnames  0 : { *(.debug_varnames) }		\
-		/* GNU DWARF 2 extensions */				\
-		.debug_gnu_pubnames 0 : { *(.debug_gnu_pubnames) }	\
-		.debug_gnu_pubtypes 0 : { *(.debug_gnu_pubtypes) }	\
-		/* DWARF 4 */						\
-		.debug_types	0 : { *(.debug_types) }			\
-		/* DWARF 5 */						\
-		.debug_macro	0 : { *(.debug_macro) }			\
-		.debug_addr	0 : { *(.debug_addr) }
 
 		/* Stabs debugging sections.  */
 #define STABS_DEBUG							\
@@ -879,8 +857,7 @@
 		READ_MOSTLY_DATA(cacheline)				\
 		DATA_DATA						\
 		CONSTRUCTORS						\
-	}								\
-	BUG_TABLE
+	}
 
 #define INIT_TEXT_SECTION(inittext_align)				\
 	. = ALIGN(inittext_align);					\

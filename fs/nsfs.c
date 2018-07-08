@@ -53,6 +53,7 @@ static void nsfs_evict(struct inode *inode)
 static void *__ns_get_path(struct path *path, struct ns_common *ns)
 {
 	struct vfsmount *mnt = nsfs_mnt;
+	struct qstr qname = { .name = "", };
 	struct dentry *dentry;
 	struct inode *inode;
 	unsigned long d;
@@ -84,7 +85,7 @@ slow:
 	inode->i_fop = &ns_file_operations;
 	inode->i_private = ns;
 
-	dentry = d_alloc_pseudo(mnt->mnt_sb, &empty_name);
+	dentry = d_alloc_pseudo(mnt->mnt_sb, &qname);
 	if (!dentry) {
 		iput(inode);
 		return ERR_PTR(-ENOMEM);
@@ -195,11 +196,9 @@ int ns_get_name(char *buf, size_t size, struct task_struct *task,
 {
 	struct ns_common *ns;
 	int res = -ENOENT;
-	const char *name;
 	ns = ns_ops->get(task);
 	if (ns) {
-		name = ns_ops->real_ns_name ? : ns_ops->name;
-		res = snprintf(buf, size, "%s:[%u]", name, ns->inum);
+		res = snprintf(buf, size, "%s:[%u]", ns_ops->name, ns->inum);
 		ns_ops->put(ns);
 	}
 	return res;

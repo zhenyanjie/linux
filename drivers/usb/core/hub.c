@@ -1661,28 +1661,10 @@ static void hub_disconnect(struct usb_interface *intf)
 	kref_put(&hub->kref, hub_release);
 }
 
-static bool hub_descriptor_is_sane(struct usb_host_interface *desc)
-{
-	/* Some hubs have a subclass of 1, which AFAICT according to the */
-	/*  specs is not defined, but it works */
-	if (desc->desc.bInterfaceSubClass != 0 &&
-	    desc->desc.bInterfaceSubClass != 1)
-		return false;
-
-	/* Multiple endpoints? What kind of mutant ninja-hub is this? */
-	if (desc->desc.bNumEndpoints != 1)
-		return false;
-
-	/* If the first endpoint is not interrupt IN, we'd better punt! */
-	if (!usb_endpoint_is_int_in(&desc->endpoint[0].desc))
-		return false;
-
-        return true;
-}
-
 static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
 	struct usb_host_interface *desc;
+	struct usb_endpoint_descriptor *endpoint;
 	struct usb_device *hdev;
 	struct usb_hub *hub;
 
@@ -1757,10 +1739,24 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	}
 #endif
 
-	if (!hub_descriptor_is_sane(desc)) {
+	/* Some hubs have a subclass of 1, which AFAICT according to the */
+	/*  specs is not defined, but it works */
+	if ((desc->desc.bInterfaceSubClass != 0) &&
+	    (desc->desc.bInterfaceSubClass != 1)) {
+descriptor_error:
 		dev_err(&intf->dev, "bad descriptor, ignoring hub\n");
 		return -EIO;
 	}
+
+	/* Multiple endpoints? What kind of mutant ninja-hub is this? */
+	if (desc->desc.bNumEndpoints != 1)
+		goto descriptor_error;
+
+	endpoint = &desc->endpoint[0].desc;
+
+	/* If it's not an interrupt in endpoint, we'd better punt! */
+	if (!usb_endpoint_is_int_in(endpoint))
+		goto descriptor_error;
 
 	/* We found a hub */
 	dev_info(&intf->dev, "USB hub found\n");
@@ -1788,7 +1784,7 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	if (id->driver_info & HUB_QUIRK_CHECK_PORT_AUTOSUSPEND)
 		hub->quirk_check_port_auto_suspend = 1;
 
-	if (hub_configure(hub, &desc->endpoint[0].desc) >= 0)
+	if (hub_configure(hub, endpoint) >= 0)
 		return 0;
 
 	hub_disconnect(intf);
@@ -2710,16 +2706,13 @@ static int hub_port_wait_reset(struct usb_hub *hub, int port1,
 	if (!(portstatus & USB_PORT_STAT_CONNECTION))
 		return -ENOTCONN;
 
-	/* Retry if connect change is set but status is still connected.
-	 * A USB 3.0 connection may bounce if multiple warm resets were issued,
+	/* bomb out completely if the connection bounced.  A USB 3.0
+	 * connection may bounce if multiple warm resets were issued,
 	 * but the device may have successfully re-connected. Ignore it.
 	 */
 	if (!hub_is_superspeed(hub->hdev) &&
-	    (portchange & USB_PORT_STAT_C_CONNECTION)) {
-		usb_clear_port_feature(hub->hdev, port1,
-				       USB_PORT_FEAT_C_CONNECTION);
-		return -EAGAIN;
-	}
+			(portchange & USB_PORT_STAT_C_CONNECTION))
+		return -ENOTCONN;
 
 	if (!(portstatus & USB_PORT_STAT_ENABLE))
 		return -EBUSY;
@@ -3162,6 +3155,12 @@ int usb_port_suspend(struct usb_device *udev, pm_message_t msg)
 		if (PMSG_IS_AUTO(msg))
 			goto err_ltm;
 	}
+	if (usb_unlocked_disable_lpm(udev)) {
+		dev_err(&udev->dev, "Failed to disable LPM before suspend\n.");
+		status = -ENOMEM;
+		if (PMSG_IS_AUTO(msg))
+			goto err_lpm3;
+	}
 
 	/* see 7.1.7.6 */
 	if (hub_is_superspeed(hub->hdev))
@@ -3188,7 +3187,9 @@ int usb_port_suspend(struct usb_device *udev, pm_message_t msg)
 	if (status) {
 		dev_dbg(&port_dev->dev, "can't suspend, status %d\n", status);
 
-		/* Try to enable USB3 LTM again */
+		/* Try to enable USB3 LPM and LTM again */
+		usb_unlocked_enable_lpm(udev);
+ err_lpm3:
 		usb_enable_ltm(udev);
  err_ltm:
 		/* Try to enable USB2 hardware LPM again */
@@ -3472,8 +3473,9 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 		if (udev->usb2_hw_lpm_capable == 1)
 			usb_set_usb2_hardware_lpm(udev, 1);
 
-		/* Try to enable USB3 LTM */
+		/* Try to enable USB3 LTM and LPM */
 		usb_enable_ltm(udev);
+		usb_unlocked_enable_lpm(udev);
 	}
 
 	usb_unlock_port(port_dev);
@@ -4728,8 +4730,7 @@ hub_power_remaining(struct usb_hub *hub)
 static void hub_port_connect(struct usb_hub *hub, int port1, u16 portstatus,
 		u16 portchange)
 {
-	int status = -ENODEV;
-	int i;
+	int status, i;
 	unsigned unit_load;
 	struct usb_device *hdev = hub->hdev;
 	struct usb_hcd *hcd = bus_to_hcd(hdev->bus);
@@ -4828,7 +4829,7 @@ static void hub_port_connect(struct usb_hub *hub, int port1, u16 portstatus,
 			goto loop;
 
 		if (udev->quirks & USB_QUIRK_DELAY_INIT)
-			msleep(2000);
+			msleep(1000);
 
 		/* consecutive bus-powered hubs aren't reliable; they can
 		 * violate the voltage drop budget.  if the new child has
@@ -4933,10 +4934,9 @@ loop:
 
 done:
 	hub_port_disable(hub, port1, 1);
-	if (hcd->driver->relinquish_port && !hub->hdev->parent) {
-		if (status != -ENOTCONN && status != -ENODEV)
-			hcd->driver->relinquish_port(hcd, port1);
-	}
+	if (hcd->driver->relinquish_port && !hub->hdev->parent)
+		hcd->driver->relinquish_port(hcd, port1);
+
 }
 
 /* Handle physical or logical connection change events.

@@ -18,22 +18,18 @@
  * permissions. All the event text files are stored there.
  */
 
-#include <debug.h>
-#include <errno.h>
-#include <inttypes.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include "../perf.h"
+#include "util.h"
 #include <subcmd/exec-cmd.h>
 #include "tests.h"
 
 #define ENV "PERF_TEST_ATTR"
+
+extern int verbose;
 
 static char *dir;
 
@@ -136,10 +132,8 @@ void test_attr__open(struct perf_event_attr *attr, pid_t pid, int cpu,
 {
 	int errno_saved = errno;
 
-	if (store_event(attr, pid, cpu, fd, group_fd, flags)) {
-		pr_err("test attr FAILED");
-		exit(128);
-	}
+	if (store_event(attr, pid, cpu, fd, group_fd, flags))
+		die("test attr FAILED");
 
 	errno = errno_saved;
 }

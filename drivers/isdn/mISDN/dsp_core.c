@@ -1092,7 +1092,9 @@ dspcreate(struct channel_req *crq)
 	ndsp->pcm_bank_tx = -1;
 	ndsp->hfc_conf = -1; /* current conference number */
 	/* set tone timer */
-	setup_timer(&ndsp->tone.tl, (void *)dsp_tone_timeout, (long)ndsp);
+	ndsp->tone.tl.function = (void *)dsp_tone_timeout;
+	ndsp->tone.tl.data = (long) ndsp;
+	init_timer(&ndsp->tone.tl);
 
 	if (dtmfthreshold < 20 || dtmfthreshold > 500)
 		dtmfthreshold = 200;

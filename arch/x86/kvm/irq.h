@@ -78,41 +78,39 @@ void kvm_pic_destroy(struct kvm *kvm);
 int kvm_pic_read_irq(struct kvm *kvm);
 void kvm_pic_update_irq(struct kvm_pic *s);
 
+static inline struct kvm_pic *pic_irqchip(struct kvm *kvm)
+{
+	return kvm->arch.vpic;
+}
+
 static inline int pic_in_kernel(struct kvm *kvm)
 {
-	int mode = kvm->arch.irqchip_mode;
+	int ret;
 
-	/* Matches smp_wmb() when setting irqchip_mode */
-	smp_rmb();
-	return mode == KVM_IRQCHIP_KERNEL;
+	ret = (pic_irqchip(kvm) != NULL);
+	return ret;
 }
 
 static inline int irqchip_split(struct kvm *kvm)
 {
-	int mode = kvm->arch.irqchip_mode;
-
-	/* Matches smp_wmb() when setting irqchip_mode */
-	smp_rmb();
-	return mode == KVM_IRQCHIP_SPLIT;
+	return kvm->arch.irqchip_mode == KVM_IRQCHIP_SPLIT;
 }
 
 static inline int irqchip_kernel(struct kvm *kvm)
 {
-	int mode = kvm->arch.irqchip_mode;
-
-	/* Matches smp_wmb() when setting irqchip_mode */
-	smp_rmb();
-	return mode == KVM_IRQCHIP_KERNEL;
+	return kvm->arch.irqchip_mode == KVM_IRQCHIP_KERNEL;
 }
 
 static inline int irqchip_in_kernel(struct kvm *kvm)
 {
-	int mode = kvm->arch.irqchip_mode;
+	bool ret = kvm->arch.irqchip_mode != KVM_IRQCHIP_NONE;
 
-	/* Matches smp_wmb() when setting irqchip_mode */
+	/* Matches with wmb after initializing kvm->irq_routing. */
 	smp_rmb();
-	return mode != KVM_IRQCHIP_NONE;
+	return ret;
 }
+
+void kvm_pic_reset(struct kvm_kpic_state *s);
 
 void kvm_inject_pending_timer_irqs(struct kvm_vcpu *vcpu);
 void kvm_inject_apic_timer_irqs(struct kvm_vcpu *vcpu);

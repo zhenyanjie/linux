@@ -293,7 +293,7 @@ qla2x00_process_els(struct bsg_job *bsg_job)
 	if (bsg_job->request_payload.sg_cnt > 1 ||
 		bsg_job->reply_payload.sg_cnt > 1) {
 		ql_dbg(ql_dbg_user, vha, 0x7002,
-		    "Multiple SG's are not supported for ELS requests, "
+		    "Multiple SG's are not suppored for ELS requests, "
 		    "request_sg_cnt=%x reply_sg_cnt=%x.\n",
 		    bsg_job->request_payload.sg_cnt,
 		    bsg_job->reply_payload.sg_cnt);
@@ -1823,7 +1823,7 @@ qla24xx_process_bidir_cmd(struct bsg_job *bsg_job)
 	/* Check if operating mode is P2P */
 	if (ha->operating_mode != P2P) {
 		ql_log(ql_log_warn, vha, 0x70a4,
-		    "Host operating mode is not P2p\n");
+		    "Host is operating mode is not P2p\n");
 		rval = EXT_STATUS_INVALID_CFG;
 		goto done;
 	}
@@ -2135,7 +2135,7 @@ qla8044_serdes_op(struct bsg_job *bsg_job)
 		bsg_reply->reply_payload_rcv_len = sizeof(sr);
 		break;
 	default:
-		ql_dbg(ql_dbg_user, vha, 0x7020,
+		ql_dbg(ql_dbg_user, vha, 0x70cf,
 		    "Unknown serdes cmd %x.\n", sr.cmd);
 		rval = -EINVAL;
 		break;
@@ -2554,13 +2554,13 @@ qla24xx_bsg_timeout(struct bsg_job *bsg_job)
 						ql_log(ql_log_warn, vha, 0x7089,
 						    "mbx abort_command "
 						    "failed.\n");
-						scsi_req(bsg_job->req)->result =
+						bsg_job->req->errors =
 						bsg_reply->result = -EIO;
 					} else {
 						ql_dbg(ql_dbg_user, vha, 0x708a,
 						    "mbx abort_command "
 						    "success.\n");
-						scsi_req(bsg_job->req)->result =
+						bsg_job->req->errors =
 						bsg_reply->result = 0;
 					}
 					spin_lock_irqsave(&ha->hardware_lock, flags);
@@ -2571,7 +2571,7 @@ qla24xx_bsg_timeout(struct bsg_job *bsg_job)
 	}
 	spin_unlock_irqrestore(&ha->hardware_lock, flags);
 	ql_log(ql_log_info, vha, 0x708b, "SRB not found to abort.\n");
-	scsi_req(bsg_job->req)->result = bsg_reply->result = -ENXIO;
+	bsg_job->req->errors = bsg_reply->result = -ENXIO;
 	return 0;
 
 done:

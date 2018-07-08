@@ -128,7 +128,6 @@ mempool_t *drbd_request_mempool;
 mempool_t *drbd_ee_mempool;
 mempool_t *drbd_md_io_page_pool;
 struct bio_set *drbd_md_io_bio_set;
-struct bio_set *drbd_io_bio_set;
 
 /* I do not use a standard mempool, because:
    1) I want to hand out the pre-allocated objects first.
@@ -932,6 +931,7 @@ void assign_p_sizes_qlim(struct drbd_device *device, struct p_sizes *p, struct r
 		p->qlim->io_min = cpu_to_be32(queue_io_min(q));
 		p->qlim->io_opt = cpu_to_be32(queue_io_opt(q));
 		p->qlim->discard_enabled = blk_queue_discard(q);
+		p->qlim->discard_zeroes_data = queue_discard_zeroes_data(q);
 		p->qlim->write_same_capable = !!q->limits.max_write_same_sectors;
 	} else {
 		q = device->rq_queue;
@@ -941,6 +941,7 @@ void assign_p_sizes_qlim(struct drbd_device *device, struct p_sizes *p, struct r
 		p->qlim->io_min = cpu_to_be32(queue_io_min(q));
 		p->qlim->io_opt = cpu_to_be32(queue_io_opt(q));
 		p->qlim->discard_enabled = 0;
+		p->qlim->discard_zeroes_data = 0;
 		p->qlim->write_same_capable = 0;
 	}
 }
@@ -1551,6 +1552,7 @@ static int _drbd_send_page(struct drbd_peer_device *peer_device, struct page *pa
 		    int offset, size_t size, unsigned msg_flags)
 {
 	struct socket *socket = peer_device->connection->data.socket;
+	mm_segment_t oldfs = get_fs();
 	int len = size;
 	int err = -EIO;
 
@@ -1565,6 +1567,7 @@ static int _drbd_send_page(struct drbd_peer_device *peer_device, struct page *pa
 
 	msg_flags |= MSG_NOSIGNAL;
 	drbd_update_congested(peer_device->connection);
+	set_fs(KERNEL_DS);
 	do {
 		int sent;
 
@@ -1584,6 +1587,7 @@ static int _drbd_send_page(struct drbd_peer_device *peer_device, struct page *pa
 		len    -= sent;
 		offset += sent;
 	} while (len > 0 /* THINK && device->cstate >= C_CONNECTED*/);
+	set_fs(oldfs);
 	clear_bit(NET_CONGESTED, &peer_device->connection->flags);
 
 	if (len == 0) {
@@ -1664,8 +1668,7 @@ static u32 bio_flags_to_wire(struct drbd_connection *connection,
 			(bio->bi_opf & REQ_FUA ? DP_FUA : 0) |
 			(bio->bi_opf & REQ_PREFLUSH ? DP_FLUSH : 0) |
 			(bio_op(bio) == REQ_OP_WRITE_SAME ? DP_WSAME : 0) |
-			(bio_op(bio) == REQ_OP_DISCARD ? DP_DISCARD : 0) |
-			(bio_op(bio) == REQ_OP_WRITE_ZEROES ? DP_DISCARD : 0);
+			(bio_op(bio) == REQ_OP_DISCARD ? DP_DISCARD : 0);
 	else
 		return bio->bi_opf & REQ_SYNC ? DP_RW_SYNC : 0;
 }
@@ -2096,8 +2099,6 @@ static void drbd_destroy_mempools(void)
 
 	/* D_ASSERT(device, atomic_read(&drbd_pp_vacant)==0); */
 
-	if (drbd_io_bio_set)
-		bioset_free(drbd_io_bio_set);
 	if (drbd_md_io_bio_set)
 		bioset_free(drbd_md_io_bio_set);
 	if (drbd_md_io_page_pool)
@@ -2115,7 +2116,6 @@ static void drbd_destroy_mempools(void)
 	if (drbd_al_ext_cache)
 		kmem_cache_destroy(drbd_al_ext_cache);
 
-	drbd_io_bio_set      = NULL;
 	drbd_md_io_bio_set   = NULL;
 	drbd_md_io_page_pool = NULL;
 	drbd_ee_mempool      = NULL;
@@ -2143,7 +2143,6 @@ static int drbd_create_mempools(void)
 	drbd_pp_pool         = NULL;
 	drbd_md_io_page_pool = NULL;
 	drbd_md_io_bio_set   = NULL;
-	drbd_io_bio_set      = NULL;
 
 	/* caches */
 	drbd_request_cache = kmem_cache_create(
@@ -2167,13 +2166,7 @@ static int drbd_create_mempools(void)
 		goto Enomem;
 
 	/* mempools */
-	drbd_io_bio_set = bioset_create(BIO_POOL_SIZE, 0, BIOSET_NEED_RESCUER);
-	if (drbd_io_bio_set == NULL)
-		goto Enomem;
-
-	drbd_md_io_bio_set = bioset_create(DRBD_MIN_POOL_PAGES, 0,
-					   BIOSET_NEED_BVECS |
-					   BIOSET_NEED_RESCUER);
+	drbd_md_io_bio_set = bioset_create(DRBD_MIN_POOL_PAGES, 0);
 	if (drbd_md_io_bio_set == NULL)
 		goto Enomem;
 
@@ -2847,6 +2840,7 @@ enum drbd_ret_code drbd_create_device(struct drbd_config_context *adm_ctx, unsig
 	/* Setting the max_hw_sectors to an odd value of 8kibyte here
 	   This triggers a max_bio_size message upon first attach or connect */
 	blk_queue_max_hw_sectors(q, DRBD_MAX_BIO_SIZE_SAFE >> 8);
+	blk_queue_bounce_limit(q, BLK_BOUNCE_ANY);
 	q->queue_lock = &resource->req_lock;
 
 	device->md_io.page = alloc_page(GFP_KERNEL);

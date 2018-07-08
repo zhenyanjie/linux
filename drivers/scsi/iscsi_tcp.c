@@ -30,7 +30,6 @@
 #include <linux/types.h>
 #include <linux/inet.h>
 #include <linux/slab.h>
-#include <linux/sched/mm.h>
 #include <linux/file.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
@@ -372,10 +371,10 @@ static inline int iscsi_sw_tcp_xmit_qlen(struct iscsi_conn *conn)
 static int iscsi_sw_tcp_pdu_xmit(struct iscsi_task *task)
 {
 	struct iscsi_conn *conn = task->conn;
-	unsigned int noreclaim_flag;
+	unsigned long pflags = current->flags;
 	int rc = 0;
 
-	noreclaim_flag = memalloc_noreclaim_save();
+	current->flags |= PF_MEMALLOC;
 
 	while (iscsi_sw_tcp_xmit_qlen(conn)) {
 		rc = iscsi_sw_tcp_xmit(conn);
@@ -388,7 +387,7 @@ static int iscsi_sw_tcp_pdu_xmit(struct iscsi_task *task)
 		rc = 0;
 	}
 
-	memalloc_noreclaim_restore(noreclaim_flag);
+	tsk_restore_flags(current, pflags, PF_MEMALLOC);
 	return rc;
 }
 

@@ -461,10 +461,6 @@ struct regmap *__regmap_init_spmi_ext(struct spmi_device *dev,
 				      const struct regmap_config *config,
 				      struct lock_class_key *lock_key,
 				      const char *lock_name);
-struct regmap *__regmap_init_w1(struct device *w1_dev,
-				 const struct regmap_config *config,
-				 struct lock_class_key *lock_key,
-				 const char *lock_name);
 struct regmap *__regmap_init_mmio_clk(struct device *dev, const char *clk_id,
 				      void __iomem *regs,
 				      const struct regmap_config *config,
@@ -497,10 +493,6 @@ struct regmap *__devm_regmap_init_spmi_ext(struct spmi_device *dev,
 					   const struct regmap_config *config,
 					   struct lock_class_key *lock_key,
 					   const char *lock_name);
-struct regmap *__devm_regmap_init_w1(struct device *w1_dev,
-				      const struct regmap_config *config,
-				      struct lock_class_key *lock_key,
-				      const char *lock_name);
 struct regmap *__devm_regmap_init_mmio_clk(struct device *dev,
 					   const char *clk_id,
 					   void __iomem *regs,
@@ -603,19 +595,6 @@ int regmap_attach_dev(struct device *dev, struct regmap *map,
 #define regmap_init_spmi_ext(dev, config)				\
 	__regmap_lockdep_wrapper(__regmap_init_spmi_ext, #config,	\
 				dev, config)
-
-/**
- * regmap_init_w1() - Initialise register map
- *
- * @w1_dev: Device that will be interacted with
- * @config: Configuration for register map
- *
- * The return value will be an ERR_PTR() on error or a valid pointer to
- * a struct regmap.
- */
-#define regmap_init_w1(w1_dev, config)					\
-	__regmap_lockdep_wrapper(__regmap_init_w1, #config,		\
-				w1_dev, config)
 
 /**
  * regmap_init_mmio_clk() - Initialise register map with register clock
@@ -732,19 +711,6 @@ bool regmap_ac97_default_volatile(struct device *dev, unsigned int reg);
 	__regmap_lockdep_wrapper(__devm_regmap_init_spmi_ext, #config,	\
 				dev, config)
 
-/**
- * devm_regmap_init_w1() - Initialise managed register map
- *
- * @w1_dev: Device that will be interacted with
- * @config: Configuration for register map
- *
- * The return value will be an ERR_PTR() on error or a valid pointer
- * to a struct regmap.  The regmap will be automatically freed by the
- * device management code.
- */
-#define devm_regmap_init_w1(w1_dev, config)				\
-	__regmap_lockdep_wrapper(__devm_regmap_init_w1, #config,	\
-				w1_dev, config)
 /**
  * devm_regmap_init_mmio_clk() - Initialise managed register map with clock
  *
@@ -918,7 +884,6 @@ struct regmap_irq {
  *
  * @status_base: Base status register address.
  * @mask_base:   Base mask register address.
- * @mask_writeonly: Base mask register is write only.
  * @unmask_base:  Base unmask register address. for chips who have
  *                separate mask and unmask registers
  * @ack_base:    Base ack address. If zero then the chip is clear on read.
@@ -962,7 +927,6 @@ struct regmap_irq_chip {
 	unsigned int wake_base;
 	unsigned int type_base;
 	unsigned int irq_reg_stride;
-	bool mask_writeonly:1;
 	bool init_ack_masked:1;
 	bool mask_invert:1;
 	bool use_ack:1;

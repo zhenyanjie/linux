@@ -2837,8 +2837,7 @@ ctrl_set_cfg_mpeg_output(struct drx_demod_instance *demod, struct drx_cfg_mpeg_o
 			/* coef = 188/204                          */
 			max_bit_rate =
 			    (ext_attr->curr_symbol_rate / 8) * nr_bits * 188;
-			/* pass through as b/c Annex A/c need following settings */
-			/* fall-through */
+			/* pass through b/c Annex A/c need following settings */
 		case DRX_STANDARD_ITU_B:
 			rc = drxj_dap_write_reg16(dev_addr, FEC_OC_FCT_USAGE__A, FEC_OC_FCT_USAGE__PRE, 0);
 			if (rc != 0) {
@@ -4777,9 +4776,9 @@ set_frequency(struct drx_demod_instance *demod,
 	   No need to account for mirroring on RF
 	 */
 	switch (ext_attr->standard) {
-	case DRX_STANDARD_ITU_A:
-	case DRX_STANDARD_ITU_C:
-	case DRX_STANDARD_PAL_SECAM_LP:
+	case DRX_STANDARD_ITU_A:	/* fallthrough */
+	case DRX_STANDARD_ITU_C:	/* fallthrough */
+	case DRX_STANDARD_PAL_SECAM_LP:	/* fallthrough */
 	case DRX_STANDARD_8VSB:
 		select_pos_image = true;
 		break;
@@ -4788,12 +4787,11 @@ set_frequency(struct drx_demod_instance *demod,
 		   Sound carrier is already 3Mhz above centre frequency due
 		   to tuner setting so now add an extra shift of 1MHz... */
 		fm_frequency_shift = 1000;
-		/*fall through */
-	case DRX_STANDARD_ITU_B:
-	case DRX_STANDARD_NTSC:
-	case DRX_STANDARD_PAL_SECAM_BG:
-	case DRX_STANDARD_PAL_SECAM_DK:
-	case DRX_STANDARD_PAL_SECAM_I:
+	case DRX_STANDARD_ITU_B:	/* fallthrough */
+	case DRX_STANDARD_NTSC:	/* fallthrough */
+	case DRX_STANDARD_PAL_SECAM_BG:	/* fallthrough */
+	case DRX_STANDARD_PAL_SECAM_DK:	/* fallthrough */
+	case DRX_STANDARD_PAL_SECAM_I:	/* fallthrough */
 	case DRX_STANDARD_PAL_SECAM_L:
 		select_pos_image = false;
 		break;

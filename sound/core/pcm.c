@@ -31,17 +31,13 @@
 #include <sound/control.h>
 #include <sound/info.h>
 
-#include "pcm_local.h"
-
 MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>, Abramo Bagnara <abramo@alsa-project.org>");
 MODULE_DESCRIPTION("Midlevel PCM code for ALSA.");
 MODULE_LICENSE("GPL");
 
 static LIST_HEAD(snd_pcm_devices);
-static DEFINE_MUTEX(register_mutex);
-#if IS_ENABLED(CONFIG_SND_PCM_OSS)
 static LIST_HEAD(snd_pcm_notify_list);
-#endif
+static DEFINE_MUTEX(register_mutex);
 
 static int snd_pcm_free(struct snd_pcm *pcm);
 static int snd_pcm_dev_free(struct snd_device *device);
@@ -888,23 +884,16 @@ static void snd_pcm_free_stream(struct snd_pcm_str * pstr)
 		put_device(&pstr->dev);
 }
 
-#if IS_ENABLED(CONFIG_SND_PCM_OSS)
-#define pcm_call_notify(pcm, call)					\
-	do {								\
-		struct snd_pcm_notify *_notify;				\
-		list_for_each_entry(_notify, &snd_pcm_notify_list, list) \
-			_notify->call(pcm);				\
-	} while (0)
-#else
-#define pcm_call_notify(pcm, call) do {} while (0)
-#endif
-
 static int snd_pcm_free(struct snd_pcm *pcm)
 {
+	struct snd_pcm_notify *notify;
+
 	if (!pcm)
 		return 0;
-	if (!pcm->internal)
-		pcm_call_notify(pcm, n_unregister);
+	if (!pcm->internal) {
+		list_for_each_entry(notify, &snd_pcm_notify_list, list)
+			notify->n_unregister(pcm);
+	}
 	if (pcm->private_free)
 		pcm->private_free(pcm);
 	snd_pcm_lib_preallocate_free_for_all(pcm);
@@ -1067,7 +1056,7 @@ static struct attribute *pcm_dev_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group pcm_dev_attr_group = {
+static struct attribute_group pcm_dev_attr_group = {
 	.attrs	= pcm_dev_attrs,
 };
 
@@ -1080,6 +1069,7 @@ static int snd_pcm_dev_register(struct snd_device *device)
 {
 	int cidx, err;
 	struct snd_pcm_substream *substream;
+	struct snd_pcm_notify *notify;
 	struct snd_pcm *pcm;
 
 	if (snd_BUG_ON(!device || !device->device_data))
@@ -1117,7 +1107,8 @@ static int snd_pcm_dev_register(struct snd_device *device)
 			snd_pcm_timer_init(substream);
 	}
 
-	pcm_call_notify(pcm, n_register);
+	list_for_each_entry(notify, &snd_pcm_notify_list, list)
+		notify->n_register(pcm);
 
  unlock:
 	mutex_unlock(&register_mutex);
@@ -1127,6 +1118,7 @@ static int snd_pcm_dev_register(struct snd_device *device)
 static int snd_pcm_dev_disconnect(struct snd_device *device)
 {
 	struct snd_pcm *pcm = device->device_data;
+	struct snd_pcm_notify *notify;
 	struct snd_pcm_substream *substream;
 	int cidx;
 
@@ -1146,7 +1138,8 @@ static int snd_pcm_dev_disconnect(struct snd_device *device)
 		}
 	}
 	if (!pcm->internal) {
-		pcm_call_notify(pcm, n_disconnect);
+		list_for_each_entry(notify, &snd_pcm_notify_list, list)
+			notify->n_disconnect(pcm);
 	}
 	for (cidx = 0; cidx < 2; cidx++) {
 		if (!pcm->internal)
@@ -1158,7 +1151,6 @@ static int snd_pcm_dev_disconnect(struct snd_device *device)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_SND_PCM_OSS)
 /**
  * snd_pcm_notify - Add/remove the notify list
  * @notify: PCM notify list
@@ -1191,7 +1183,6 @@ int snd_pcm_notify(struct snd_pcm_notify *notify, int nfree)
 	return 0;
 }
 EXPORT_SYMBOL(snd_pcm_notify);
-#endif /* CONFIG_SND_PCM_OSS */
 
 #ifdef CONFIG_SND_PROC_FS
 /*

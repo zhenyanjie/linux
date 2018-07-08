@@ -240,7 +240,7 @@ xfs_iomap_write_direct(
 	 */
 	if (IS_DAX(VFS_I(ip))) {
 		bmapi_flags = XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO;
-		if (imap->br_state == XFS_EXT_UNWRITTEN) {
+		if (ISUNWRITTEN(imap)) {
 			tflags |= XFS_TRANS_RESERVE;
 			resblks = XFS_DIOSTRAT_SPACE_RES(mp, 0) << 1;
 		}
@@ -543,7 +543,7 @@ xfs_file_iomap_begin_delay(
 	if (unlikely(XFS_TEST_ERROR(
 	    (XFS_IFORK_FORMAT(ip, XFS_DATA_FORK) != XFS_DINODE_FMT_EXTENTS &&
 	     XFS_IFORK_FORMAT(ip, XFS_DATA_FORK) != XFS_DINODE_FMT_BTREE),
-	     mp, XFS_ERRTAG_BMAPIFORMAT))) {
+	     mp, XFS_ERRTAG_BMAPIFORMAT, XFS_RANDOM_BMAPIFORMAT))) {
 		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
 		error = -EFSCORRUPTED;
 		goto out_unlock;
@@ -829,8 +829,7 @@ int
 xfs_iomap_write_unwritten(
 	xfs_inode_t	*ip,
 	xfs_off_t	offset,
-	xfs_off_t	count,
-	bool		update_isize)
+	xfs_off_t	count)
 {
 	xfs_mount_t	*mp = ip->i_mount;
 	xfs_fileoff_t	offset_fsb;
@@ -841,7 +840,6 @@ xfs_iomap_write_unwritten(
 	xfs_trans_t	*tp;
 	xfs_bmbt_irec_t imap;
 	struct xfs_defer_ops dfops;
-	struct inode	*inode = VFS_I(ip);
 	xfs_fsize_t	i_size;
 	uint		resblks;
 	int		error;
@@ -901,8 +899,7 @@ xfs_iomap_write_unwritten(
 		i_size = XFS_FSB_TO_B(mp, offset_fsb + count_fsb);
 		if (i_size > offset + count)
 			i_size = offset + count;
-		if (update_isize && i_size > i_size_read(inode))
-			i_size_write(inode, i_size);
+
 		i_size = xfs_new_eof(ip, i_size);
 		if (i_size) {
 			ip->i_d.di_size = i_size;
@@ -948,7 +945,7 @@ static inline bool imap_needs_alloc(struct inode *inode,
 	return !nimaps ||
 		imap->br_startblock == HOLESTARTBLOCK ||
 		imap->br_startblock == DELAYSTARTBLOCK ||
-		(IS_DAX(inode) && imap->br_state == XFS_EXT_UNWRITTEN);
+		(IS_DAX(inode) && ISUNWRITTEN(imap));
 }
 
 static inline bool need_excl_ilock(struct xfs_inode *ip, unsigned flags)
@@ -979,7 +976,6 @@ xfs_file_iomap_begin(
 	int			nimaps = 1, error = 0;
 	bool			shared = false, trimmed = false;
 	unsigned		lockmode;
-	struct block_device	*bdev;
 
 	if (XFS_FORCED_SHUTDOWN(mp))
 		return -EIO;
@@ -996,11 +992,6 @@ xfs_file_iomap_begin(
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
 	} else {
 		lockmode = xfs_ilock_data_map_shared(ip);
-	}
-
-	if ((flags & IOMAP_NOWAIT) && !(ip->i_df.if_flags & XFS_IFEXTENTS)) {
-		error = -EAGAIN;
-		goto out_unlock;
 	}
 
 	ASSERT(offset <= mp->m_super->s_maxbytes);
@@ -1024,15 +1015,6 @@ xfs_file_iomap_begin(
 
 	if ((flags & (IOMAP_WRITE | IOMAP_ZERO)) && xfs_is_reflink_inode(ip)) {
 		if (flags & IOMAP_DIRECT) {
-			/*
-			 * A reflinked inode will result in CoW alloc.
-			 * FIXME: It could still overwrite on unshared extents
-			 * and not need allocation.
-			 */
-			if (flags & IOMAP_NOWAIT) {
-				error = -EAGAIN;
-				goto out_unlock;
-			}
 			/* may drop and re-acquire the ilock */
 			error = xfs_reflink_allocate_cow(ip, &imap, &shared,
 					&lockmode);
@@ -1049,14 +1031,6 @@ xfs_file_iomap_begin(
 	}
 
 	if ((flags & IOMAP_WRITE) && imap_needs_alloc(inode, &imap, nimaps)) {
-		/*
-		 * If nowait is set bail since we are going to make
-		 * allocations.
-		 */
-		if (flags & IOMAP_NOWAIT) {
-			error = -EAGAIN;
-			goto out_unlock;
-		}
 		/*
 		 * We cap the maximum length we map here to MAX_WRITEBACK_PAGES
 		 * pages to keep the chunks of work done where somewhat symmetric
@@ -1089,14 +1063,6 @@ xfs_file_iomap_begin(
 	}
 
 	xfs_bmbt_to_iomap(ip, iomap, &imap);
-
-	/* optionally associate a dax device with the iomap bdev */
-	bdev = iomap->bdev;
-	if (blk_queue_dax(bdev->bd_queue))
-		iomap->dax_dev = fs_dax_get_by_host(bdev->bd_disk->disk_name);
-	else
-		iomap->dax_dev = NULL;
-
 	if (shared)
 		iomap->flags |= IOMAP_F_SHARED;
 	return 0;
@@ -1122,7 +1088,7 @@ xfs_file_iomap_end_delalloc(
 	 * Behave as if the write failed if drop writes is enabled. Set the NEW
 	 * flag to force delalloc cleanup.
 	 */
-	if (XFS_TEST_ERROR(false, mp, XFS_ERRTAG_DROP_WRITES)) {
+	if (xfs_mp_drop_writes(mp)) {
 		iomap->flags |= IOMAP_F_NEW;
 		written = 0;
 	}
@@ -1174,7 +1140,6 @@ xfs_file_iomap_end(
 	unsigned		flags,
 	struct iomap		*iomap)
 {
-	fs_put_dax(iomap->dax_dev);
 	if ((flags & IOMAP_WRITE) && iomap->type == IOMAP_DELALLOC)
 		return xfs_file_iomap_end_delalloc(XFS_I(inode), offset,
 				length, written, iomap);

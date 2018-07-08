@@ -37,12 +37,10 @@ Modeset Helper Reference for Common Vtables
 ===========================================
 
 .. kernel-doc:: include/drm/drm_modeset_helper_vtables.h
-   :doc: overview
-
-.. kernel-doc:: include/drm/drm_modeset_helper_vtables.h
    :internal:
 
-.. _drm_atomic_helper:
+.. kernel-doc:: include/drm/drm_modeset_helper_vtables.h
+   :doc: overview
 
 Atomic Modeset Helper Functions Reference
 =========================================
@@ -86,14 +84,14 @@ Legacy CRTC/Modeset Helper Functions Reference
 Simple KMS Helper Reference
 ===========================
 
-.. kernel-doc:: drivers/gpu/drm/drm_simple_kms_helper.c
-   :doc: overview
-
 .. kernel-doc:: include/drm/drm_simple_kms_helper.h
    :internal:
 
 .. kernel-doc:: drivers/gpu/drm/drm_simple_kms_helper.c
    :export:
+
+.. kernel-doc:: drivers/gpu/drm/drm_simple_kms_helper.c
+   :doc: overview
 
 fbdev Helper Functions Reference
 ================================
@@ -101,11 +99,11 @@ fbdev Helper Functions Reference
 .. kernel-doc:: drivers/gpu/drm/drm_fb_helper.c
    :doc: fbdev helpers
 
-.. kernel-doc:: include/drm/drm_fb_helper.h
-   :internal:
-
 .. kernel-doc:: drivers/gpu/drm/drm_fb_helper.c
    :export:
+
+.. kernel-doc:: include/drm/drm_fb_helper.h
+   :internal:
 
 Framebuffer CMA Helper Functions Reference
 ==========================================
@@ -115,8 +113,6 @@ Framebuffer CMA Helper Functions Reference
 
 .. kernel-doc:: drivers/gpu/drm/drm_fb_cma_helper.c
    :export:
-
-.. _drm_bridges:
 
 Bridges
 =======
@@ -143,25 +139,17 @@ Bridge Helper Reference
 .. kernel-doc:: drivers/gpu/drm/drm_bridge.c
    :export:
 
-Panel-Bridge Helper Reference
------------------------------
-
-.. kernel-doc:: drivers/gpu/drm/bridge/panel.c
-   :export:
-
-.. _drm_panel_helper:
-
 Panel Helper Reference
 ======================
-
-.. kernel-doc:: drivers/gpu/drm/drm_panel.c
-   :doc: drm panel
 
 .. kernel-doc:: include/drm/drm_panel.h
    :internal:
 
 .. kernel-doc:: drivers/gpu/drm/drm_panel.c
    :export:
+
+.. kernel-doc:: drivers/gpu/drm/drm_panel.c
+   :doc: drm panel
 
 Display Port Helper Functions Reference
 =======================================
@@ -227,18 +215,6 @@ EDID Helper Functions Reference
    :internal:
 
 .. kernel-doc:: drivers/gpu/drm/drm_edid.c
-   :export:
-
-SCDC Helper Functions Reference
-===============================
-
-.. kernel-doc:: drivers/gpu/drm/drm_scdc_helper.c
-   :doc: scdc helpers
-
-.. kernel-doc:: include/drm/drm_scdc_helper.h
-   :internal:
-
-.. kernel-doc:: drivers/gpu/drm/drm_scdc_helper.c
    :export:
 
 Rectangle Utilities Reference

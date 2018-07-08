@@ -149,21 +149,12 @@ struct qed_iov_vf_mbx {
 	struct vfpf_first_tlv first_tlv;
 };
 
-#define QED_IOV_LEGACY_QID_RX (0)
-#define QED_IOV_LEGACY_QID_TX (1)
-#define QED_IOV_QID_INVALID (0xFE)
-
-struct qed_vf_queue_cid {
-	bool b_is_tx;
-	struct qed_queue_cid *p_cid;
-};
-
-/* Describes a qzone associated with the VF */
-struct qed_vf_queue {
+struct qed_vf_q_info {
 	u16 fw_rx_qid;
+	struct qed_queue_cid *p_rx_cid;
 	u16 fw_tx_qid;
-
-	struct qed_vf_queue_cid cids[MAX_QUEUES_PER_QZONE];
+	struct qed_queue_cid *p_tx_cid;
+	u8 fw_cid;
 };
 
 enum vf_state {
@@ -221,8 +212,7 @@ struct qed_vf_info {
 
 	u8 num_mac_filters;
 	u8 num_vlan_filters;
-
-	struct qed_vf_queue vf_queues[QED_MAX_VF_CHAINS_PER_PF];
+	struct qed_vf_q_info vf_queues[QED_MAX_VF_CHAINS_PER_PF];
 	u16 igu_sbs[QED_MAX_VF_CHAINS_PER_PF];
 	u8 num_active_rxqs;
 	struct qed_public_vf_info p_vf_info;
@@ -280,9 +270,6 @@ enum qed_iov_wq_flag {
  */
 u16 qed_iov_get_next_active_vf(struct qed_hwfn *p_hwfn, u16 rel_vf_id);
 
-void qed_iov_bulletin_set_udp_ports(struct qed_hwfn *p_hwfn,
-				    int vfid, u16 vxlan_port, u16 geneve_port);
-
 /**
  * @brief Read sriov related information and allocated resources
  *  reads from configuraiton space, shmem, etc.
@@ -326,8 +313,9 @@ int qed_iov_alloc(struct qed_hwfn *p_hwfn);
  * @brief qed_iov_setup - setup sriov related resources
  *
  * @param p_hwfn
+ * @param p_ptt
  */
-void qed_iov_setup(struct qed_hwfn *p_hwfn);
+void qed_iov_setup(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt);
 
 /**
  * @brief qed_iov_free - free sriov related resources
@@ -344,14 +332,25 @@ void qed_iov_free(struct qed_hwfn *p_hwfn);
 void qed_iov_free_hw_info(struct qed_dev *cdev);
 
 /**
+ * @brief qed_sriov_eqe_event - handle async sriov event arrived on eqe.
+ *
+ * @param p_hwfn
+ * @param opcode
+ * @param echo
+ * @param data
+ */
+int qed_sriov_eqe_event(struct qed_hwfn *p_hwfn,
+			u8 opcode, __le16 echo, union event_ring_data *data);
+
+/**
  * @brief Mark structs of vfs that have been FLR-ed.
  *
  * @param p_hwfn
  * @param disabled_vfs - bitmask of all VFs on path that were FLRed
  *
- * @return true iff one of the PF's vfs got FLRed. false otherwise.
+ * @return 1 iff one of the PF's vfs got FLRed. 0 otherwise.
  */
-bool qed_iov_mark_vf_flr(struct qed_hwfn *p_hwfn, u32 *disabled_vfs);
+int qed_iov_mark_vf_flr(struct qed_hwfn *p_hwfn, u32 *disabled_vfs);
 
 /**
  * @brief Search extended TLVs in request/reply buffer.
@@ -379,12 +378,6 @@ static inline u16 qed_iov_get_next_active_vf(struct qed_hwfn *p_hwfn,
 	return MAX_NUM_VFS;
 }
 
-static inline void
-qed_iov_bulletin_set_udp_ports(struct qed_hwfn *p_hwfn, int vfid,
-			       u16 vxlan_port, u16 geneve_port)
-{
-}
-
 static inline int qed_iov_hw_info(struct qed_hwfn *p_hwfn)
 {
 	return 0;
@@ -395,7 +388,7 @@ static inline int qed_iov_alloc(struct qed_hwfn *p_hwfn)
 	return 0;
 }
 
-static inline void qed_iov_setup(struct qed_hwfn *p_hwfn)
+static inline void qed_iov_setup(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt)
 {
 }
 
@@ -407,10 +400,17 @@ static inline void qed_iov_free_hw_info(struct qed_dev *cdev)
 {
 }
 
-static inline bool qed_iov_mark_vf_flr(struct qed_hwfn *p_hwfn,
-				       u32 *disabled_vfs)
+static inline int qed_sriov_eqe_event(struct qed_hwfn *p_hwfn,
+				      u8 opcode,
+				      __le16 echo, union event_ring_data *data)
 {
-	return false;
+	return -EINVAL;
+}
+
+static inline int qed_iov_mark_vf_flr(struct qed_hwfn *p_hwfn,
+				      u32 *disabled_vfs)
+{
+	return 0;
 }
 
 static inline void qed_iov_wq_stop(struct qed_dev *cdev, bool schedule_first)

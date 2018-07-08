@@ -738,9 +738,10 @@ lpfc_vport_delete(struct fc_vport *fc_vport)
 		ndlp = lpfc_findnode_did(vport, Fabric_DID);
 		if (!ndlp) {
 			/* Cannot find existing Fabric ndlp, allocate one */
-			ndlp = lpfc_nlp_init(vport, Fabric_DID);
+			ndlp = mempool_alloc(phba->nlp_mem_pool, GFP_KERNEL);
 			if (!ndlp)
 				goto skip_logo;
+			lpfc_nlp_init(vport, ndlp, Fabric_DID);
 			/* Indicate free memory when release */
 			NLP_SET_FREE_REQ(ndlp);
 		} else {

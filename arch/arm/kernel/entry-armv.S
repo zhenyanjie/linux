@@ -797,10 +797,7 @@ ENTRY(__switch_to)
 #if defined(CONFIG_CC_STACKPROTECTOR) && !defined(CONFIG_SMP)
 	ldr	r7, [r2, #TI_TASK]
 	ldr	r8, =__stack_chk_guard
-	.if (TSK_STACK_CANARY > IMM12_MASK)
-	add	r7, r7, #TSK_STACK_CANARY & ~IMM12_MASK
-	.endif
-	ldr	r7, [r7, #TSK_STACK_CANARY & IMM12_MASK]
+	ldr	r7, [r7, #TSK_STACK_CANARY]
 #endif
 #ifdef CONFIG_CPU_USE_DOMAINS
 	mcr	p15, 0, r6, c3, c0, 0		@ Set domain register

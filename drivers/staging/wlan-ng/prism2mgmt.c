@@ -170,7 +170,7 @@ int prism2mgmt_scan(struct wlandevice *wlandev, void *msgp)
 				     hw->ident_sta_fw.variant) >
 	    HFA384x_FIRMWARE_VERSION(1, 5, 0)) {
 		if (msg->scantype.data != P80211ENUM_scantype_active)
-			word = msg->maxchanneltime.data;
+			word = cpu_to_le16(msg->maxchanneltime.data);
 		else
 			word = 0;
 
@@ -213,7 +213,7 @@ int prism2mgmt_scan(struct wlandevice *wlandev, void *msgp)
 		goto exit;
 	}
 	if (word == HFA384x_PORTSTATUS_DISABLED) {
-		__le16 wordbuf[17];
+		u16 wordbuf[17];
 
 		result = hfa384x_drvr_setconfig16(hw,
 					HFA384x_RID_CNFROAMINGMODE,
@@ -1168,6 +1168,7 @@ int prism2mgmt_wlansniff(struct wlandevice *wlandev, void *msgp)
 			}
 		} else {
 			result = hfa384x_drvr_disable(hw, 0);
+
 		}
 
 		netdev_info(wlandev->netdev, "monitor mode disabled\n");

@@ -319,7 +319,6 @@ do_second:
 		gpte->may_execute = true;
 	gpte->may_read = false;
 	gpte->may_write = false;
-	gpte->wimg = r & HPTE_R_WIMG;
 
 	switch (pp) {
 	case 0:

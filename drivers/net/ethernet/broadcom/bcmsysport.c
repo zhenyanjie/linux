@@ -22,7 +22,6 @@
 #include <linux/of_mdio.h>
 #include <linux/phy.h>
 #include <linux/phy_fixed.h>
-#include <net/dsa.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
 
@@ -285,7 +284,6 @@ static const struct bcm_sysport_stats bcm_sysport_gstrings_stats[] = {
 	STAT_MIB_SOFT("alloc_rx_buff_failed", mib.alloc_rx_buff_failed),
 	STAT_MIB_SOFT("rx_dma_failed", mib.rx_dma_failed),
 	STAT_MIB_SOFT("tx_dma_failed", mib.tx_dma_failed),
-	/* Per TX-queue statistics are dynamically appended */
 };
 
 #define BCM_SYSPORT_STATS_LEN	ARRAY_SIZE(bcm_sysport_gstrings_stats)
@@ -340,8 +338,7 @@ static int bcm_sysport_get_sset_count(struct net_device *dev, int string_set)
 				continue;
 			j++;
 		}
-		/* Include per-queue statistics */
-		return j + dev->num_tx_queues * NUM_SYSPORT_TXQ_STAT;
+		return j;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -352,7 +349,6 @@ static void bcm_sysport_get_strings(struct net_device *dev,
 {
 	struct bcm_sysport_priv *priv = netdev_priv(dev);
 	const struct bcm_sysport_stats *s;
-	char buf[128];
 	int i, j;
 
 	switch (stringset) {
@@ -364,18 +360,6 @@ static void bcm_sysport_get_strings(struct net_device *dev,
 				continue;
 
 			memcpy(data + j * ETH_GSTRING_LEN, s->stat_string,
-			       ETH_GSTRING_LEN);
-			j++;
-		}
-
-		for (i = 0; i < dev->num_tx_queues; i++) {
-			snprintf(buf, sizeof(buf), "txq%d_packets", i);
-			memcpy(data + j * ETH_GSTRING_LEN, buf,
-			       ETH_GSTRING_LEN);
-			j++;
-
-			snprintf(buf, sizeof(buf), "txq%d_bytes", i);
-			memcpy(data + j * ETH_GSTRING_LEN, buf,
 			       ETH_GSTRING_LEN);
 			j++;
 		}
@@ -434,7 +418,6 @@ static void bcm_sysport_get_stats(struct net_device *dev,
 				  struct ethtool_stats *stats, u64 *data)
 {
 	struct bcm_sysport_priv *priv = netdev_priv(dev);
-	struct bcm_sysport_tx_ring *ring;
 	int i, j;
 
 	if (netif_running(dev))
@@ -449,28 +432,8 @@ static void bcm_sysport_get_stats(struct net_device *dev,
 			p = (char *)&dev->stats;
 		else
 			p = (char *)priv;
-
-		if (priv->is_lite && !bcm_sysport_lite_stat_valid(s->type))
-			continue;
-
 		p += s->stat_offset;
 		data[j] = *(unsigned long *)p;
-		j++;
-	}
-
-	/* For SYSTEMPORT Lite since we have holes in our statistics, j would
-	 * be equal to BCM_SYSPORT_STATS_LEN at the end of the loop, but it
-	 * needs to point to how many total statistics we have minus the
-	 * number of per TX queue statistics
-	 */
-	j = bcm_sysport_get_sset_count(dev, ETH_SS_STATS) -
-	    dev->num_tx_queues * NUM_SYSPORT_TXQ_STAT;
-
-	for (i = 0; i < dev->num_tx_queues; i++) {
-		ring = &priv->tx_rings[i];
-		data[j] = ring->packets;
-		j++;
-		data[j] = ring->bytes;
 		j++;
 	}
 }
@@ -597,7 +560,7 @@ static int bcm_sysport_set_coalesce(struct net_device *dev,
 
 static void bcm_sysport_free_cb(struct bcm_sysport_cb *cb)
 {
-	dev_consume_skb_any(cb->skb);
+	dev_kfree_skb_any(cb->skb);
 	cb->skb = NULL;
 	dma_unmap_addr_set(cb, dma_addr, 0);
 }
@@ -674,9 +637,6 @@ static unsigned int bcm_sysport_desc_rx(struct bcm_sysport_priv *priv,
 	u16 len, status;
 	struct bcm_rsb *rsb;
 
-	/* Clear status before servicing to reduce spurious interrupts */
-	intrl2_0_writel(priv, INTRL2_0_RDMA_MBDONE, INTRL2_CPU_CLEAR);
-
 	/* Determine how much we should process since last call, SYSTEMPORT Lite
 	 * groups the producer and consumer indexes into the same 32-bit
 	 * which we access using RDMA_CONS_INDEX
@@ -687,7 +647,11 @@ static unsigned int bcm_sysport_desc_rx(struct bcm_sysport_priv *priv,
 		p_index = rdma_readl(priv, RDMA_CONS_INDEX);
 	p_index &= RDMA_PROD_INDEX_MASK;
 
-	to_process = (p_index - priv->rx_c_index) & RDMA_CONS_INDEX_MASK;
+	if (p_index < priv->rx_c_index)
+		to_process = (RDMA_CONS_INDEX_MASK + 1) -
+			priv->rx_c_index + p_index;
+	else
+		to_process = p_index - priv->rx_c_index;
 
 	netif_dbg(priv, rx_status, ndev,
 		  "p_index=%d rx_c_index=%d to_process=%d\n",
@@ -782,26 +746,26 @@ next:
 	return processed;
 }
 
-static void bcm_sysport_tx_reclaim_one(struct bcm_sysport_tx_ring *ring,
+static void bcm_sysport_tx_reclaim_one(struct bcm_sysport_priv *priv,
 				       struct bcm_sysport_cb *cb,
 				       unsigned int *bytes_compl,
 				       unsigned int *pkts_compl)
 {
-	struct bcm_sysport_priv *priv = ring->priv;
 	struct device *kdev = &priv->pdev->dev;
+	struct net_device *ndev = priv->netdev;
 
 	if (cb->skb) {
-		ring->bytes += cb->skb->len;
+		ndev->stats.tx_bytes += cb->skb->len;
 		*bytes_compl += cb->skb->len;
 		dma_unmap_single(kdev, dma_unmap_addr(cb, dma_addr),
 				 dma_unmap_len(cb, dma_len),
 				 DMA_TO_DEVICE);
-		ring->packets++;
+		ndev->stats.tx_packets++;
 		(*pkts_compl)++;
 		bcm_sysport_free_cb(cb);
 	/* SKB fragment */
 	} else if (dma_unmap_addr(cb, dma_addr)) {
-		ring->bytes += dma_unmap_len(cb, dma_len);
+		ndev->stats.tx_bytes += dma_unmap_len(cb, dma_len);
 		dma_unmap_page(kdev, dma_unmap_addr(cb, dma_addr),
 			       dma_unmap_len(cb, dma_len), DMA_TO_DEVICE);
 		dma_unmap_addr_set(cb, dma_addr, 0);
@@ -817,13 +781,6 @@ static unsigned int __bcm_sysport_tx_reclaim(struct bcm_sysport_priv *priv,
 	unsigned int pkts_compl = 0, bytes_compl = 0;
 	struct bcm_sysport_cb *cb;
 	u32 hw_ind;
-
-	/* Clear status before servicing to reduce spurious interrupts */
-	if (!ring->priv->is_lite)
-		intrl2_1_writel(ring->priv, BIT(ring->index), INTRL2_CPU_CLEAR);
-	else
-		intrl2_0_writel(ring->priv, BIT(ring->index +
-				INTRL2_0_TDMA_MBDONE_SHIFT), INTRL2_CPU_CLEAR);
 
 	/* Compute how many descriptors have been processed since last call */
 	hw_ind = tdma_readl(priv, TDMA_DESC_RING_PROD_CONS_INDEX(ring->index));
@@ -846,7 +803,7 @@ static unsigned int __bcm_sysport_tx_reclaim(struct bcm_sysport_priv *priv,
 
 	while (last_tx_cn-- > 0) {
 		cb = ring->cbs + last_c_index;
-		bcm_sysport_tx_reclaim_one(ring, cb, &bytes_compl, &pkts_compl);
+		bcm_sysport_tx_reclaim_one(priv, cb, &bytes_compl, &pkts_compl);
 
 		ring->desc_count++;
 		last_c_index++;
@@ -1103,7 +1060,7 @@ static struct sk_buff *bcm_sysport_insert_tsb(struct sk_buff *skb,
 		skb = nskb;
 	}
 
-	tsb = skb_push(skb, sizeof(*tsb));
+	tsb = (struct bcm_tsb *)skb_push(skb, sizeof(*tsb));
 	/* Zero-out TSB by default */
 	memset(tsb, 0, sizeof(*tsb));
 
@@ -1346,8 +1303,6 @@ static int bcm_sysport_init_tx_ring(struct bcm_sysport_priv *priv,
 
 	ring->cbs = kcalloc(size, sizeof(struct bcm_sysport_cb), GFP_KERNEL);
 	if (!ring->cbs) {
-		dma_free_coherent(kdev, sizeof(struct dma_desc),
-				  ring->desc_cpu, ring->desc_dma);
 		netif_err(priv, hw, priv->netdev, "CB allocation failed\n");
 		return -ENOMEM;
 	}
@@ -1677,24 +1632,6 @@ static int bcm_sysport_change_mac(struct net_device *dev, void *p)
 	return 0;
 }
 
-static struct net_device_stats *bcm_sysport_get_nstats(struct net_device *dev)
-{
-	struct bcm_sysport_priv *priv = netdev_priv(dev);
-	unsigned long tx_bytes = 0, tx_packets = 0;
-	struct bcm_sysport_tx_ring *ring;
-	unsigned int q;
-
-	for (q = 0; q < dev->num_tx_queues; q++) {
-		ring = &priv->tx_rings[q];
-		tx_bytes += ring->bytes;
-		tx_packets += ring->packets;
-	}
-
-	dev->stats.tx_bytes = tx_bytes;
-	dev->stats.tx_packets = tx_packets;
-	return &dev->stats;
-}
-
 static void bcm_sysport_netif_start(struct net_device *dev)
 {
 	struct bcm_sysport_priv *priv = netdev_priv(dev);
@@ -1743,17 +1680,15 @@ static inline void bcm_sysport_mask_all_intrs(struct bcm_sysport_priv *priv)
 
 static inline void gib_set_pad_extension(struct bcm_sysport_priv *priv)
 {
-	u32 reg;
+	u32 __maybe_unused reg;
 
-	reg = gib_readl(priv, GIB_CONTROL);
-	/* Include Broadcom tag in pad extension and fix up IPG_LENGTH */
+	/* Include Broadcom tag in pad extension */
 	if (netdev_uses_dsa(priv->netdev)) {
+		reg = gib_readl(priv, GIB_CONTROL);
 		reg &= ~(GIB_PAD_EXTENSION_MASK << GIB_PAD_EXTENSION_SHIFT);
 		reg |= ENET_BRCM_TAG_LEN << GIB_PAD_EXTENSION_SHIFT;
+		gib_writel(priv, reg, GIB_CONTROL);
 	}
-	reg &= ~(GIB_IPG_LEN_MASK << GIB_IPG_LEN_SHIFT);
-	reg |= 12 << GIB_IPG_LEN_SHIFT;
-	gib_writel(priv, reg, GIB_CONTROL);
 }
 
 static int bcm_sysport_open(struct net_device *dev)
@@ -1958,7 +1893,6 @@ static const struct net_device_ops bcm_sysport_netdev_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= bcm_sysport_poll_controller,
 #endif
-	.ndo_get_stats		= bcm_sysport_get_nstats,
 };
 
 #define REV_FMT	"v%2x.%02x"

@@ -50,7 +50,7 @@ static int tcf_nat_init(struct net *net, struct nlattr *nla, struct nlattr *est,
 	if (nla == NULL)
 		return -EINVAL;
 
-	err = nla_parse_nested(tb, TCA_NAT_MAX, nla, nat_policy, NULL);
+	err = nla_parse_nested(tb, TCA_NAT_MAX, nla, nat_policy);
 	if (err < 0)
 		return err;
 

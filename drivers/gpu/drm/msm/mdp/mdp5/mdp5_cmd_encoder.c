@@ -11,10 +11,10 @@
  * GNU General Public License for more details.
  */
 
-#include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
-
 #include "mdp5_kms.h"
+
+#include "drm_crtc.h"
+#include "drm_crtc_helper.h"
 
 static struct mdp5_kms *get_kms(struct drm_encoder *encoder)
 {
@@ -51,8 +51,7 @@ static int pingpong_tearcheck_setup(struct drm_encoder *encoder,
 	struct device *dev = encoder->dev->dev;
 	u32 total_lines_x100, vclks_line, cfg;
 	long vsync_clk_speed;
-	struct mdp5_hw_mixer *mixer = mdp5_crtc_get_mixer(encoder->crtc);
-	int pp_id = mixer->pp;
+	int pp_id = GET_PING_PONG_ID(mdp5_crtc_get_lm(encoder->crtc));
 
 	if (IS_ERR_OR_NULL(mdp5_kms->vsync_clk)) {
 		dev_err(dev, "vsync_clk is not initialized\n");
@@ -95,8 +94,7 @@ static int pingpong_tearcheck_setup(struct drm_encoder *encoder,
 static int pingpong_tearcheck_enable(struct drm_encoder *encoder)
 {
 	struct mdp5_kms *mdp5_kms = get_kms(encoder);
-	struct mdp5_hw_mixer *mixer = mdp5_crtc_get_mixer(encoder->crtc);
-	int pp_id = mixer->pp;
+	int pp_id = GET_PING_PONG_ID(mdp5_crtc_get_lm(encoder->crtc));
 	int ret;
 
 	ret = clk_set_rate(mdp5_kms->vsync_clk,
@@ -121,8 +119,7 @@ static int pingpong_tearcheck_enable(struct drm_encoder *encoder)
 static void pingpong_tearcheck_disable(struct drm_encoder *encoder)
 {
 	struct mdp5_kms *mdp5_kms = get_kms(encoder);
-	struct mdp5_hw_mixer *mixer = mdp5_crtc_get_mixer(encoder->crtc);
-	int pp_id = mixer->pp;
+	int pp_id = GET_PING_PONG_ID(mdp5_crtc_get_lm(encoder->crtc));
 
 	mdp5_write(mdp5_kms, REG_MDP5_PP_TEAR_CHECK_EN(pp_id), 0);
 	clk_disable_unprepare(mdp5_kms->vsync_clk);
@@ -132,6 +129,8 @@ void mdp5_cmd_encoder_mode_set(struct drm_encoder *encoder,
 			       struct drm_display_mode *mode,
 			       struct drm_display_mode *adjusted_mode)
 {
+	struct mdp5_encoder *mdp5_cmd_enc = to_mdp5_encoder(encoder);
+
 	mode = adjusted_mode;
 
 	DBG("set mode: %d:\"%s\" %d %d %d %d %d %d %d %d %d %d 0x%x 0x%x",
@@ -143,23 +142,23 @@ void mdp5_cmd_encoder_mode_set(struct drm_encoder *encoder,
 			mode->vsync_end, mode->vtotal,
 			mode->type, mode->flags);
 	pingpong_tearcheck_setup(encoder, mode);
-	mdp5_crtc_set_pipeline(encoder->crtc);
+	mdp5_crtc_set_pipeline(encoder->crtc, &mdp5_cmd_enc->intf,
+				mdp5_cmd_enc->ctl);
 }
 
 void mdp5_cmd_encoder_disable(struct drm_encoder *encoder)
 {
 	struct mdp5_encoder *mdp5_cmd_enc = to_mdp5_encoder(encoder);
 	struct mdp5_ctl *ctl = mdp5_cmd_enc->ctl;
-	struct mdp5_interface *intf = mdp5_cmd_enc->intf;
-	struct mdp5_pipeline *pipeline = mdp5_crtc_get_pipeline(encoder->crtc);
+	struct mdp5_interface *intf = &mdp5_cmd_enc->intf;
 
 	if (WARN_ON(!mdp5_cmd_enc->enabled))
 		return;
 
 	pingpong_tearcheck_disable(encoder);
 
-	mdp5_ctl_set_encoder_state(ctl, pipeline, false);
-	mdp5_ctl_commit(ctl, pipeline, mdp_ctl_flush_mask_encoder(intf));
+	mdp5_ctl_set_encoder_state(ctl, false);
+	mdp5_ctl_commit(ctl, mdp_ctl_flush_mask_encoder(intf));
 
 	bs_set(mdp5_cmd_enc, 0);
 
@@ -170,8 +169,7 @@ void mdp5_cmd_encoder_enable(struct drm_encoder *encoder)
 {
 	struct mdp5_encoder *mdp5_cmd_enc = to_mdp5_encoder(encoder);
 	struct mdp5_ctl *ctl = mdp5_cmd_enc->ctl;
-	struct mdp5_interface *intf = mdp5_cmd_enc->intf;
-	struct mdp5_pipeline *pipeline = mdp5_crtc_get_pipeline(encoder->crtc);
+	struct mdp5_interface *intf = &mdp5_cmd_enc->intf;
 
 	if (WARN_ON(mdp5_cmd_enc->enabled))
 		return;
@@ -180,9 +178,9 @@ void mdp5_cmd_encoder_enable(struct drm_encoder *encoder)
 	if (pingpong_tearcheck_enable(encoder))
 		return;
 
-	mdp5_ctl_commit(ctl, pipeline, mdp_ctl_flush_mask_encoder(intf));
+	mdp5_ctl_commit(ctl, mdp_ctl_flush_mask_encoder(intf));
 
-	mdp5_ctl_set_encoder_state(ctl, pipeline, true);
+	mdp5_ctl_set_encoder_state(ctl, true);
 
 	mdp5_cmd_enc->enabled = true;
 }
@@ -199,7 +197,7 @@ int mdp5_cmd_encoder_set_split_display(struct drm_encoder *encoder,
 		return -EINVAL;
 
 	mdp5_kms = get_kms(encoder);
-	intf_num = mdp5_cmd_enc->intf->num;
+	intf_num = mdp5_cmd_enc->intf.num;
 
 	/* Switch slave encoder's trigger MUX, to use the master's
 	 * start signal for the slave encoder

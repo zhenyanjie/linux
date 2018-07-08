@@ -333,7 +333,7 @@ struct uac_processing_unit_descriptor {
 	__u8 bDescriptorType;
 	__u8 bDescriptorSubtype;
 	__u8 bUnitID;
-	__le16 wProcessType;
+	__u16 wProcessType;
 	__u8 bNrInPins;
 	__u8 baSourceID[];
 } __attribute__ ((packed));
@@ -491,8 +491,8 @@ struct uac_format_type_ii_ext_descriptor {
 	__u8 bDescriptorType;
 	__u8 bDescriptorSubtype;
 	__u8 bFormatType;
-	__le16 wMaxBitRate;
-	__le16 wSamplesPerFrame;
+	__u16 wMaxBitRate;
+	__u16 wSamplesPerFrame;
 	__u8 bHeaderLength;
 	__u8 bSideBandProtocol;
 } __attribute__((packed));

@@ -582,10 +582,9 @@ cppi_next_tx_segment(struct musb *musb, struct cppi_channel *tx)
 		maxpacket = length;
 		n_bds = 1;
 	} else {
-		if (length)
-			n_bds = DIV_ROUND_UP(length, maxpacket);
-		else
-			n_bds = 1;
+		n_bds = length / maxpacket;
+		if (!length || (length % maxpacket))
+			n_bds++;
 		n_bds = min(n_bds, (unsigned) NUM_TXCHAN_BD);
 		length = min(n_bds * maxpacket, length);
 	}
@@ -791,7 +790,9 @@ cppi_next_rx_segment(struct musb *musb, struct cppi_channel *rx, int onepacket)
 			n_bds = 0xffff / maxpacket;
 			length = n_bds * maxpacket;
 		} else {
-			n_bds = DIV_ROUND_UP(length, maxpacket);
+			n_bds = length / maxpacket;
+			if (length % maxpacket)
+				n_bds++;
 		}
 		if (n_bds == 1)
 			onepacket = 1;

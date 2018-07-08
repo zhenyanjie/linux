@@ -14,9 +14,6 @@ struct mdio_board_entry {
 	struct mdio_board_info	board_info;
 };
 
-void mdiobus_setup_mdiodev_from_board_info(struct mii_bus *bus,
-					   int (*cb)
-					   (struct mii_bus *bus,
-					    struct mdio_board_info *bi));
+void mdiobus_setup_mdiodev_from_board_info(struct mii_bus *bus);
 
 #endif /* __MDIO_BOARD_INFO_H */

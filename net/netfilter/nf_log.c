@@ -71,6 +71,7 @@ void nf_log_unset(struct net *net, const struct nf_logger *logger)
 			RCU_INIT_POINTER(net->nf.nf_loggers[i], NULL);
 	}
 	mutex_unlock(&nf_log_mutex);
+	synchronize_rcu();
 }
 EXPORT_SYMBOL(nf_log_unset);
 
@@ -375,13 +376,13 @@ static int seq_show(struct seq_file *s, void *v)
 		logger = nft_log_dereference(loggers[*pos][i]);
 		seq_printf(s, "%s", logger->name);
 		if (i == 0 && loggers[*pos][i + 1] != NULL)
-			seq_puts(s, ",");
+			seq_printf(s, ",");
 
 		if (seq_has_overflowed(s))
 			return -ENOSPC;
 	}
 
-	seq_puts(s, ")\n");
+	seq_printf(s, ")\n");
 
 	if (seq_has_overflowed(s))
 		return -ENOSPC;

@@ -7,7 +7,7 @@
  *
  * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
+ * Copyright(c) 2016 Intel Deutschland GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -104,20 +104,7 @@ static void iwl_mvm_pass_packet_to_mac80211(struct iwl_mvm *mvm,
 					    u8 crypt_len,
 					    struct iwl_rx_cmd_buffer *rxb)
 {
-	unsigned int hdrlen = ieee80211_hdrlen(hdr->frame_control);
-	unsigned int fraglen;
-
-	/*
-	 * The 'hdrlen' (plus the 8 bytes for the SNAP and the crypt_len,
-	 * but those are all multiples of 4 long) all goes away, but we
-	 * want the *end* of it, which is going to be the start of the IP
-	 * header, to be aligned when it gets pulled in.
-	 * The beginning of the skb->data is aligned on at least a 4-byte
-	 * boundary after allocation. Everything here is aligned at least
-	 * on a 2-byte boundary so we can just take hdrlen & 3 and pad by
-	 * the result.
-	 */
-	skb_reserve(skb, hdrlen & 3);
+	unsigned int hdrlen, fraglen;
 
 	/* If frame is small enough to fit in skb->head, pull it completely.
 	 * If not, only pull ieee80211_hdr (including crypto if present, and
@@ -131,9 +118,10 @@ static void iwl_mvm_pass_packet_to_mac80211(struct iwl_mvm *mvm,
 	 * If the latter changes (there are efforts in the standards group
 	 * to do so) we should revisit this and ieee80211_data_to_8023().
 	 */
-	hdrlen = (len <= skb_tailroom(skb)) ? len : hdrlen + crypt_len + 8;
+	hdrlen = (len <= skb_tailroom(skb)) ? len :
+					      sizeof(*hdr) + crypt_len + 8;
 
-	skb_put_data(skb, hdr, hdrlen);
+	memcpy(skb_put(skb, hdrlen), hdr, hdrlen);
 	fraglen = len - hdrlen;
 
 	if (fraglen) {
@@ -351,7 +339,7 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 
 		id >>= RX_MDPU_RES_STATUS_STA_ID_SHIFT;
 
-		if (!WARN_ON_ONCE(id >= ARRAY_SIZE(mvm->fw_id_to_mac_id))) {
+		if (!WARN_ON_ONCE(id >= IWL_MVM_STATION_COUNT)) {
 			sta = rcu_dereference(mvm->fw_id_to_mac_id[id]);
 			if (IS_ERR(sta))
 				sta = NULL;
@@ -410,7 +398,7 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 
 	/* set the preamble flag if appropriate */
 	if (phy_info->phy_flags & cpu_to_le16(RX_RES_PHY_FLAGS_SHORT_PREAMBLE))
-		rx_status->enc_flags |= RX_ENC_FLAG_SHORTPRE;
+		rx_status->flag |= RX_FLAG_SHORTPRE;
 
 	if (phy_info->phy_flags & cpu_to_le16(RX_RES_PHY_FLAGS_AGG)) {
 		/*
@@ -427,49 +415,42 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 	case RATE_MCS_CHAN_WIDTH_20:
 		break;
 	case RATE_MCS_CHAN_WIDTH_40:
-		rx_status->bw = RATE_INFO_BW_40;
+		rx_status->flag |= RX_FLAG_40MHZ;
 		break;
 	case RATE_MCS_CHAN_WIDTH_80:
-		rx_status->bw = RATE_INFO_BW_80;
+		rx_status->vht_flag |= RX_VHT_FLAG_80MHZ;
 		break;
 	case RATE_MCS_CHAN_WIDTH_160:
-		rx_status->bw = RATE_INFO_BW_160;
+		rx_status->vht_flag |= RX_VHT_FLAG_160MHZ;
 		break;
 	}
 	if (rate_n_flags & RATE_MCS_SGI_MSK)
-		rx_status->enc_flags |= RX_ENC_FLAG_SHORT_GI;
+		rx_status->flag |= RX_FLAG_SHORT_GI;
 	if (rate_n_flags & RATE_HT_MCS_GF_MSK)
-		rx_status->enc_flags |= RX_ENC_FLAG_HT_GF;
+		rx_status->flag |= RX_FLAG_HT_GF;
 	if (rate_n_flags & RATE_MCS_LDPC_MSK)
-		rx_status->enc_flags |= RX_ENC_FLAG_LDPC;
+		rx_status->flag |= RX_FLAG_LDPC;
 	if (rate_n_flags & RATE_MCS_HT_MSK) {
-		u8 stbc = (rate_n_flags & RATE_MCS_STBC_MSK) >>
+		u8 stbc = (rate_n_flags & RATE_MCS_HT_STBC_MSK) >>
 				RATE_MCS_STBC_POS;
-		rx_status->encoding = RX_ENC_HT;
+		rx_status->flag |= RX_FLAG_HT;
 		rx_status->rate_idx = rate_n_flags & RATE_HT_MCS_INDEX_MSK;
-		rx_status->enc_flags |= stbc << RX_ENC_FLAG_STBC_SHIFT;
+		rx_status->flag |= stbc << RX_FLAG_STBC_SHIFT;
 	} else if (rate_n_flags & RATE_MCS_VHT_MSK) {
-		u8 stbc = (rate_n_flags & RATE_MCS_STBC_MSK) >>
+		u8 stbc = (rate_n_flags & RATE_MCS_VHT_STBC_MSK) >>
 				RATE_MCS_STBC_POS;
-		rx_status->nss =
+		rx_status->vht_nss =
 			((rate_n_flags & RATE_VHT_MCS_NSS_MSK) >>
 						RATE_VHT_MCS_NSS_POS) + 1;
 		rx_status->rate_idx = rate_n_flags & RATE_VHT_MCS_RATE_CODE_MSK;
-		rx_status->encoding = RX_ENC_VHT;
-		rx_status->enc_flags |= stbc << RX_ENC_FLAG_STBC_SHIFT;
+		rx_status->flag |= RX_FLAG_VHT;
+		rx_status->flag |= stbc << RX_FLAG_STBC_SHIFT;
 		if (rate_n_flags & RATE_MCS_BF_MSK)
-			rx_status->enc_flags |= RX_ENC_FLAG_BF;
+			rx_status->vht_flag |= RX_VHT_FLAG_BF;
 	} else {
-		int rate = iwl_mvm_legacy_rate_to_mac80211_idx(rate_n_flags,
-							       rx_status->band);
-
-		if (WARN(rate < 0 || rate > 0xFF,
-			 "Invalid rate flags 0x%x, band %d,\n",
-			 rate_n_flags, rx_status->band)) {
-			kfree_skb(skb);
-			return;
-		}
-		rx_status->rate_idx = rate;
+		rx_status->rate_idx =
+			iwl_mvm_legacy_rate_to_mac80211_idx(rate_n_flags,
+							    rx_status->band);
 	}
 
 #ifdef CONFIG_IWLWIFI_DEBUGFS
@@ -502,6 +483,14 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 
 	if (take_ref)
 		iwl_mvm_unref(mvm, IWL_MVM_REF_RX);
+}
+
+static void iwl_mvm_update_rx_statistics(struct iwl_mvm *mvm,
+					 struct mvm_statistics_rx *rx_stats)
+{
+	lockdep_assert_held(&mvm->mutex);
+
+	mvm->rx_stats = *rx_stats;
 }
 
 struct iwl_mvm_stat_data {
@@ -547,6 +536,7 @@ static void iwl_mvm_stat_iterator(void *_data, u8 *mac,
 			mvmvif->beacon_stats.avg_signal =
 				-general->beacon_average_energy[vif_id];
 		}
+
 	}
 
 	if (mvmvif->id != id)
@@ -642,72 +632,67 @@ iwl_mvm_rx_stats_check_trigger(struct iwl_mvm *mvm, struct iwl_rx_packet *pkt)
 void iwl_mvm_handle_rx_statistics(struct iwl_mvm *mvm,
 				  struct iwl_rx_packet *pkt)
 {
+	struct iwl_notif_statistics_cdb *stats = (void *)&pkt->data;
 	struct iwl_mvm_stat_data data = {
 		.mvm = mvm,
 	};
 	int expected_size;
-	int i;
-	u8 *energy;
-	__le32 *bytes, *air_time;
-	__le32 flags;
 
-	if (!iwl_mvm_has_new_rx_stats_api(mvm)) {
-		if (iwl_mvm_has_new_rx_api(mvm))
-			expected_size = sizeof(struct iwl_notif_statistics_v11);
-		else
-			expected_size = sizeof(struct iwl_notif_statistics_v10);
-	} else {
-		expected_size = sizeof(struct iwl_notif_statistics_cdb);
-	}
+	if (iwl_mvm_is_cdb_supported(mvm))
+		expected_size = sizeof(*stats);
+	else if (iwl_mvm_has_new_rx_api(mvm))
+		expected_size = sizeof(struct iwl_notif_statistics_v11);
+	else
+		expected_size = sizeof(struct iwl_notif_statistics_v10);
 
-	if (iwl_rx_packet_payload_len(pkt) != expected_size) {
-		IWL_ERR(mvm, "received invalid statistics size (%d)!\n",
-			iwl_rx_packet_payload_len(pkt));
-		return;
-	}
+	if (iwl_rx_packet_payload_len(pkt) != expected_size)
+		goto invalid;
 
-	if (!iwl_mvm_has_new_rx_stats_api(mvm)) {
-		struct iwl_notif_statistics_v11 *stats = (void *)&pkt->data;
+	data.mac_id = stats->rx.general.mac_id;
+	data.beacon_filter_average_energy =
+		stats->general.common.beacon_filter_average_energy;
 
-		data.mac_id = stats->rx.general.mac_id;
-		data.beacon_filter_average_energy =
-			stats->general.common.beacon_filter_average_energy;
+	iwl_mvm_update_rx_statistics(mvm, &stats->rx);
 
-		mvm->rx_stats_v3 = stats->rx;
+	mvm->radio_stats.rx_time = le64_to_cpu(stats->general.common.rx_time);
+	mvm->radio_stats.tx_time = le64_to_cpu(stats->general.common.tx_time);
+	mvm->radio_stats.on_time_rf =
+		le64_to_cpu(stats->general.common.on_time_rf);
+	mvm->radio_stats.on_time_scan =
+		le64_to_cpu(stats->general.common.on_time_scan);
 
-		mvm->radio_stats.rx_time =
-			le64_to_cpu(stats->general.common.rx_time);
-		mvm->radio_stats.tx_time =
-			le64_to_cpu(stats->general.common.tx_time);
-		mvm->radio_stats.on_time_rf =
-			le64_to_cpu(stats->general.common.on_time_rf);
-		mvm->radio_stats.on_time_scan =
-			le64_to_cpu(stats->general.common.on_time_scan);
+	data.general = &stats->general;
+	if (iwl_mvm_has_new_rx_api(mvm)) {
+		int i;
+		u8 *energy;
+		__le32 *bytes, *air_time;
 
-		data.general = &stats->general;
+		if (!iwl_mvm_is_cdb_supported(mvm)) {
+			struct iwl_notif_statistics_v11 *v11 =
+				(void *)&pkt->data;
 
-		flags = stats->flag;
-	} else {
-		struct iwl_notif_statistics_cdb *stats = (void *)&pkt->data;
+			energy = (void *)&v11->load_stats.avg_energy;
+			bytes = (void *)&v11->load_stats.byte_count;
+			air_time = (void *)&v11->load_stats.air_time;
+		} else {
+			energy = (void *)&stats->load_stats.avg_energy;
+			bytes = (void *)&stats->load_stats.byte_count;
+			air_time = (void *)&stats->load_stats.air_time;
+		}
 
-		data.mac_id = stats->rx.general.mac_id;
-		data.beacon_filter_average_energy =
-			stats->general.common.beacon_filter_average_energy;
+		rcu_read_lock();
+		for (i = 0; i < IWL_MVM_STATION_COUNT; i++) {
+			struct iwl_mvm_sta *sta;
 
-		mvm->rx_stats = stats->rx;
+			if (!energy[i])
+				continue;
 
-		mvm->radio_stats.rx_time =
-			le64_to_cpu(stats->general.common.rx_time);
-		mvm->radio_stats.tx_time =
-			le64_to_cpu(stats->general.common.tx_time);
-		mvm->radio_stats.on_time_rf =
-			le64_to_cpu(stats->general.common.on_time_rf);
-		mvm->radio_stats.on_time_scan =
-			le64_to_cpu(stats->general.common.on_time_scan);
-
-		data.general = &stats->general;
-
-		flags = stats->flag;
+			sta = iwl_mvm_sta_from_staid_rcu(mvm, i);
+			if (!sta)
+				continue;
+			sta->avg_energy = energy[i];
+		}
+		rcu_read_unlock();
 	}
 
 	iwl_mvm_rx_stats_check_trigger(mvm, pkt);
@@ -716,37 +701,10 @@ void iwl_mvm_handle_rx_statistics(struct iwl_mvm *mvm,
 					    IEEE80211_IFACE_ITER_NORMAL,
 					    iwl_mvm_stat_iterator,
 					    &data);
-
-	if (!iwl_mvm_has_new_rx_api(mvm))
-		return;
-
-	if (!iwl_mvm_has_new_rx_stats_api(mvm)) {
-		struct iwl_notif_statistics_v11 *v11 = (void *)&pkt->data;
-
-		energy = (void *)&v11->load_stats.avg_energy;
-		bytes = (void *)&v11->load_stats.byte_count;
-		air_time = (void *)&v11->load_stats.air_time;
-	} else {
-		struct iwl_notif_statistics_cdb *stats = (void *)&pkt->data;
-
-		energy = (void *)&stats->load_stats.avg_energy;
-		bytes = (void *)&stats->load_stats.byte_count;
-		air_time = (void *)&stats->load_stats.air_time;
-	}
-
-	rcu_read_lock();
-	for (i = 0; i < ARRAY_SIZE(mvm->fw_id_to_mac_id); i++) {
-		struct iwl_mvm_sta *sta;
-
-		if (!energy[i])
-			continue;
-
-		sta = iwl_mvm_sta_from_staid_rcu(mvm, i);
-		if (!sta)
-			continue;
-		sta->avg_energy = energy[i];
-	}
-	rcu_read_unlock();
+	return;
+ invalid:
+	IWL_ERR(mvm, "received invalid statistics size (%d)!\n",
+		iwl_rx_packet_payload_len(pkt));
 }
 
 void iwl_mvm_rx_statistics(struct iwl_mvm *mvm, struct iwl_rx_cmd_buffer *rxb)

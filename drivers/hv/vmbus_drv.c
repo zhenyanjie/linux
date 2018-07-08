@@ -608,6 +608,40 @@ static void vmbus_free_dynids(struct hv_driver *drv)
 	spin_unlock(&drv->dynids.lock);
 }
 
+/* Parse string of form: 1b4e28ba-2fa1-11d2-883f-b9a761bde3f */
+static int get_uuid_le(const char *str, uuid_le *uu)
+{
+	unsigned int b[16];
+	int i;
+
+	if (strlen(str) < 37)
+		return -1;
+
+	for (i = 0; i < 36; i++) {
+		switch (i) {
+		case 8: case 13: case 18: case 23:
+			if (str[i] != '-')
+				return -1;
+			break;
+		default:
+			if (!isxdigit(str[i]))
+				return -1;
+		}
+	}
+
+	/* unparse little endian output byte order */
+	if (sscanf(str,
+		   "%2x%2x%2x%2x-%2x%2x-%2x%2x-%2x%2x-%2x%2x%2x%2x%2x%2x",
+		   &b[3], &b[2], &b[1], &b[0],
+		   &b[5], &b[4], &b[7], &b[6], &b[8], &b[9],
+		   &b[10], &b[11], &b[12], &b[13], &b[14], &b[15]) != 16)
+		return -1;
+
+	for (i = 0; i < 16; i++)
+		uu->b[i] = b[i];
+	return 0;
+}
+
 /*
  * store_new_id - sysfs frontend to vmbus_add_dynid()
  *
@@ -617,12 +651,11 @@ static ssize_t new_id_store(struct device_driver *driver, const char *buf,
 			    size_t count)
 {
 	struct hv_driver *drv = drv_to_hv_drv(driver);
-	uuid_le guid;
+	uuid_le guid = NULL_UUID_LE;
 	ssize_t retval;
 
-	retval = uuid_le_to_bin(buf, &guid);
-	if (retval)
-		return retval;
+	if (get_uuid_le(buf, &guid) != 0)
+		return -EINVAL;
 
 	if (hv_vmbus_get_id(drv, &guid))
 		return -EEXIST;
@@ -644,14 +677,12 @@ static ssize_t remove_id_store(struct device_driver *driver, const char *buf,
 {
 	struct hv_driver *drv = drv_to_hv_drv(driver);
 	struct vmbus_dynid *dynid, *n;
-	uuid_le guid;
-	ssize_t retval;
+	uuid_le guid = NULL_UUID_LE;
+	size_t retval = -ENODEV;
 
-	retval = uuid_le_to_bin(buf, &guid);
-	if (retval)
-		return retval;
+	if (get_uuid_le(buf, &guid))
+		return -EINVAL;
 
-	retval = -ENODEV;
 	spin_lock(&drv->dynids.lock);
 	list_for_each_entry_safe(dynid, n, &drv->dynids.list, node) {
 		struct hv_vmbus_device_id *id = &dynid->id;
@@ -756,6 +787,8 @@ static void vmbus_shutdown(struct device *child_device)
 
 	if (drv->shutdown)
 		drv->shutdown(dev);
+
+	return;
 }
 
 
@@ -767,9 +800,8 @@ static void vmbus_device_release(struct device *device)
 	struct hv_device *hv_dev = device_to_hv_device(device);
 	struct vmbus_channel *channel = hv_dev->channel;
 
-	mutex_lock(&vmbus_connection.channel_mutex);
-	hv_process_channel_removal(channel->offermsg.child_relid);
-	mutex_unlock(&vmbus_connection.channel_mutex);
+	hv_process_channel_removal(channel,
+				   channel->offermsg.child_relid);
 	kfree(hv_dev);
 
 }
@@ -823,7 +855,7 @@ void vmbus_on_msg_dpc(unsigned long data)
 	struct hv_message *msg = (struct hv_message *)page_addr +
 				  VMBUS_MESSAGE_SINT;
 	struct vmbus_channel_message_header *hdr;
-	const struct vmbus_channel_message_table_entry *entry;
+	struct vmbus_channel_message_table_entry *entry;
 	struct onmessage_work_context *ctx;
 	u32 message_type = msg->header.message_type;
 
@@ -847,32 +879,7 @@ void vmbus_on_msg_dpc(unsigned long data)
 		INIT_WORK(&ctx->work, vmbus_onmessage_work);
 		memcpy(&ctx->msg, msg, sizeof(*msg));
 
-		/*
-		 * The host can generate a rescind message while we
-		 * may still be handling the original offer. We deal with
-		 * this condition by ensuring the processing is done on the
-		 * same CPU.
-		 */
-		switch (hdr->msgtype) {
-		case CHANNELMSG_RESCIND_CHANNELOFFER:
-			/*
-			 * If we are handling the rescind message;
-			 * schedule the work on the global work queue.
-			 */
-			schedule_work_on(vmbus_connection.connect_cpu,
-					 &ctx->work);
-			break;
-
-		case CHANNELMSG_OFFERCHANNEL:
-			atomic_inc(&vmbus_connection.offer_in_progress);
-			queue_work_on(vmbus_connection.connect_cpu,
-				      vmbus_connection.work_queue,
-				      &ctx->work);
-			break;
-
-		default:
-			queue_work(vmbus_connection.work_queue, &ctx->work);
-		}
+		queue_work(vmbus_connection.work_queue, &ctx->work);
 	} else
 		entry->message_handler(hdr);
 
@@ -937,9 +944,6 @@ static void vmbus_chan_sched(struct hv_per_cpu_context *hv_cpu)
 		/* Find channel based on relid */
 		list_for_each_entry_rcu(channel, &hv_cpu->chan_list, percpu_list) {
 			if (channel->offermsg.child_relid != relid)
-				continue;
-
-			if (channel->rescind)
 				continue;
 
 			switch (channel->callback_mode) {

@@ -497,8 +497,7 @@ static int genl_lock_done(struct netlink_callback *cb)
 
 static int genl_family_rcv_msg(const struct genl_family *family,
 			       struct sk_buff *skb,
-			       struct nlmsghdr *nlh,
-			       struct netlink_ext_ack *extack)
+			       struct nlmsghdr *nlh)
 {
 	const struct genl_ops *ops;
 	struct net *net = sock_net(skb->sk);
@@ -574,7 +573,7 @@ static int genl_family_rcv_msg(const struct genl_family *family,
 
 	if (attrbuf) {
 		err = nlmsg_parse(nlh, hdrlen, attrbuf, family->maxattr,
-				  ops->policy, extack);
+				  ops->policy);
 		if (err < 0)
 			goto out;
 	}
@@ -585,7 +584,6 @@ static int genl_family_rcv_msg(const struct genl_family *family,
 	info.genlhdr = nlmsg_data(nlh);
 	info.userhdr = nlmsg_data(nlh) + GENL_HDRLEN;
 	info.attrs = attrbuf;
-	info.extack = extack;
 	genl_info_net_set(&info, net);
 	memset(&info.user_ptr, 0, sizeof(info.user_ptr));
 
@@ -607,8 +605,7 @@ out:
 	return err;
 }
 
-static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
-			struct netlink_ext_ack *extack)
+static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	const struct genl_family *family;
 	int err;
@@ -620,7 +617,7 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 	if (!family->parallel_ops)
 		genl_lock();
 
-	err = genl_family_rcv_msg(family, skb, nlh, extack);
+	err = genl_family_rcv_msg(family, skb, nlh);
 
 	if (!family->parallel_ops)
 		genl_unlock();

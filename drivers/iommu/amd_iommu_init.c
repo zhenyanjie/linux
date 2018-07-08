@@ -29,7 +29,6 @@
 #include <linux/export.h>
 #include <linux/iommu.h>
 #include <linux/kmemleak.h>
-#include <linux/crash_dump.h>
 #include <asm/pci-direct.h>
 #include <asm/iommu.h>
 #include <asm/gart.h>
@@ -168,9 +167,7 @@ LIST_HEAD(amd_iommu_list);		/* list of all AMD IOMMUs in the
 
 /* Array to assign indices to IOMMUs*/
 struct amd_iommu *amd_iommus[MAX_IOMMUS];
-
-/* Number of IOMMUs present in the system */
-static int amd_iommus_present;
+int amd_iommus_present;
 
 /* IOMMUs have a non-present cache? */
 bool amd_iommu_np_cache __read_mostly;
@@ -237,7 +234,6 @@ enum iommu_init_state {
 	IOMMU_INITIALIZED,
 	IOMMU_NOT_FOUND,
 	IOMMU_INIT_ERROR,
-	IOMMU_CMDLINE_DISABLED,
 };
 
 /* Early ioapic and hpet maps from kernel command line */
@@ -258,6 +254,10 @@ static int amd_iommu_enable_interrupts(void);
 static int __init iommu_go_to_state(enum iommu_init_state state);
 static void init_device_table_dma(void);
 
+static int iommu_pc_get_set_reg_val(struct amd_iommu *iommu,
+				    u8 bank, u8 cntr, u8 fxn,
+				    u64 *value, bool is_write);
+
 static inline void update_last_devid(u16 devid)
 {
 	if (devid > amd_iommu_last_bdf)
@@ -270,11 +270,6 @@ static inline unsigned long tbl_size(int entry_size)
 			 get_order(((int)amd_iommu_last_bdf + 1) * entry_size);
 
 	return 1UL << shift;
-}
-
-int amd_iommu_get_num_iommus(void)
-{
-	return amd_iommus_present;
 }
 
 /* Access to l1 and l2 indexed register spaces */
@@ -590,8 +585,6 @@ void amd_iommu_reset_cmd_buffer(struct amd_iommu *iommu)
 
 	writel(0x00, iommu->mmio_base + MMIO_CMD_HEAD_OFFSET);
 	writel(0x00, iommu->mmio_base + MMIO_CMD_TAIL_OFFSET);
-	iommu->cmd_buf_head = 0;
-	iommu->cmd_buf_tail = 0;
 
 	iommu_feature_enable(iommu, CONTROL_CMDBUF_EN);
 }
@@ -1343,7 +1336,7 @@ static int __init init_iommu_one(struct amd_iommu *iommu, struct ivhd_header *h)
 
 	/* Add IOMMU to internal data structures */
 	list_add_tail(&iommu->list, &amd_iommu_list);
-	iommu->index = amd_iommus_present++;
+	iommu->index             = amd_iommus_present++;
 
 	if (unlikely(iommu->index >= MAX_IOMMUS)) {
 		WARN(1, "AMD-Vi: System has more IOMMUs than supported by this driver\n");
@@ -1484,8 +1477,6 @@ static int __init init_iommu_all(struct acpi_table_header *table)
 	return 0;
 }
 
-static int iommu_pc_get_set_reg(struct amd_iommu *iommu, u8 bank, u8 cntr,
-				u8 fxn, u64 *value, bool is_write);
 
 static void init_iommu_perf_ctr(struct amd_iommu *iommu)
 {
@@ -1497,8 +1488,8 @@ static void init_iommu_perf_ctr(struct amd_iommu *iommu)
 	amd_iommu_pc_present = true;
 
 	/* Check if the performance counters can be written to */
-	if ((iommu_pc_get_set_reg(iommu, 0, 0, 0, &val, true)) ||
-	    (iommu_pc_get_set_reg(iommu, 0, 0, 0, &val2, false)) ||
+	if ((0 != iommu_pc_get_set_reg_val(iommu, 0, 0, 0, &val, true)) ||
+	    (0 != iommu_pc_get_set_reg_val(iommu, 0, 0, 0, &val2, false)) ||
 	    (val != val2)) {
 		pr_err("AMD-Vi: Unable to write to IOMMU perf counter.\n");
 		amd_iommu_pc_present = false;
@@ -1902,14 +1893,6 @@ static void init_device_table_dma(void)
 	for (devid = 0; devid <= amd_iommu_last_bdf; ++devid) {
 		set_dev_entry_bit(devid, DEV_ENTRY_VALID);
 		set_dev_entry_bit(devid, DEV_ENTRY_TRANSLATION);
-		/*
-		 * In kdump kernels in-flight DMA from the old kernel might
-		 * cause IO_PAGE_FAULTs. There are no reports that a kdump
-		 * actually failed because of that, so just disable fault
-		 * reporting in the hardware to get rid of the messages
-		 */
-		if (is_kdump_kernel())
-			set_dev_entry_bit(devid, DEV_ENTRY_NO_PAGE_FAULT);
 	}
 }
 
@@ -2109,27 +2092,23 @@ static struct syscore_ops amd_iommu_syscore_ops = {
 	.resume = amd_iommu_resume,
 };
 
-static void __init free_iommu_resources(void)
+static void __init free_on_init_error(void)
 {
 	kmemleak_free(irq_lookup_table);
 	free_pages((unsigned long)irq_lookup_table,
 		   get_order(rlookup_table_size));
-	irq_lookup_table = NULL;
 
 	kmem_cache_destroy(amd_iommu_irq_cache);
 	amd_iommu_irq_cache = NULL;
 
 	free_pages((unsigned long)amd_iommu_rlookup_table,
 		   get_order(rlookup_table_size));
-	amd_iommu_rlookup_table = NULL;
 
 	free_pages((unsigned long)amd_iommu_alias_table,
 		   get_order(alias_table_size));
-	amd_iommu_alias_table = NULL;
 
 	free_pages((unsigned long)amd_iommu_dev_table,
 		   get_order(dev_table_size));
-	amd_iommu_dev_table = NULL;
 
 	free_iommu_all();
 
@@ -2199,7 +2178,6 @@ static void __init free_dma_resources(void)
 {
 	free_pages((unsigned long)amd_iommu_pd_alloc_bitmap,
 		   get_order(MAX_DOMAIN_ID/8));
-	amd_iommu_pd_alloc_bitmap = NULL;
 
 	free_unity_maps();
 }
@@ -2324,9 +2302,6 @@ static int __init early_amd_iommu_init(void)
 	if (ret)
 		goto out;
 
-	/* Disable any previously enabled IOMMUs */
-	disable_iommus();
-
 	if (amd_iommu_irq_remap)
 		amd_iommu_irq_remap = check_ioapic_information();
 
@@ -2430,21 +2405,14 @@ static int __init state_next(void)
 	case IOMMU_IVRS_DETECTED:
 		ret = early_amd_iommu_init();
 		init_state = ret ? IOMMU_INIT_ERROR : IOMMU_ACPI_FINISHED;
-		if (init_state == IOMMU_ACPI_FINISHED && amd_iommu_disabled) {
-			pr_info("AMD-Vi: AMD IOMMU disabled on kernel command-line\n");
-			free_dma_resources();
-			free_iommu_resources();
-			init_state = IOMMU_CMDLINE_DISABLED;
-			ret = -EINVAL;
-		}
 		break;
 	case IOMMU_ACPI_FINISHED:
 		early_enable_iommus();
+		register_syscore_ops(&amd_iommu_syscore_ops);
 		x86_platform.iommu_shutdown = disable_iommus;
 		init_state = IOMMU_ENABLED;
 		break;
 	case IOMMU_ENABLED:
-		register_syscore_ops(&amd_iommu_syscore_ops);
 		ret = amd_iommu_init_pci();
 		init_state = ret ? IOMMU_INIT_ERROR : IOMMU_PCI_INIT;
 		enable_iommus_v2();
@@ -2465,7 +2433,6 @@ static int __init state_next(void)
 		break;
 	case IOMMU_NOT_FOUND:
 	case IOMMU_INIT_ERROR:
-	case IOMMU_CMDLINE_DISABLED:
 		/* Error states => do nothing */
 		ret = -EINVAL;
 		break;
@@ -2479,14 +2446,13 @@ static int __init state_next(void)
 
 static int __init iommu_go_to_state(enum iommu_init_state state)
 {
-	int ret = -EINVAL;
+	int ret = 0;
 
 	while (init_state != state) {
-		if (init_state == IOMMU_NOT_FOUND         ||
-		    init_state == IOMMU_INIT_ERROR        ||
-		    init_state == IOMMU_CMDLINE_DISABLED)
-			break;
 		ret = state_next();
+		if (init_state == IOMMU_NOT_FOUND ||
+		    init_state == IOMMU_INIT_ERROR)
+			break;
 	}
 
 	return ret;
@@ -2551,7 +2517,7 @@ static int __init amd_iommu_init(void)
 		free_dma_resources();
 		if (!irq_remapping_enabled) {
 			disable_iommus();
-			free_iommu_resources();
+			free_on_init_error();
 		} else {
 			struct amd_iommu *iommu;
 
@@ -2576,6 +2542,9 @@ int __init amd_iommu_detect(void)
 	int ret;
 
 	if (no_iommu || (iommu_detected && !gart_iommu_aperture))
+		return -ENODEV;
+
+	if (amd_iommu_disabled)
 		return -ENODEV;
 
 	ret = iommu_go_to_state(IOMMU_IVRS_DETECTED);
@@ -2742,18 +2711,6 @@ bool amd_iommu_v2_supported(void)
 }
 EXPORT_SYMBOL(amd_iommu_v2_supported);
 
-struct amd_iommu *get_amd_iommu(unsigned int idx)
-{
-	unsigned int i = 0;
-	struct amd_iommu *iommu;
-
-	for_each_iommu(iommu)
-		if (i++ == idx)
-			return iommu;
-	return NULL;
-}
-EXPORT_SYMBOL(get_amd_iommu);
-
 /****************************************************************************
  *
  * IOMMU EFR Performance Counter support functionality. This code allows
@@ -2761,14 +2718,17 @@ EXPORT_SYMBOL(get_amd_iommu);
  *
  ****************************************************************************/
 
-u8 amd_iommu_pc_get_max_banks(unsigned int idx)
+u8 amd_iommu_pc_get_max_banks(u16 devid)
 {
-	struct amd_iommu *iommu = get_amd_iommu(idx);
+	struct amd_iommu *iommu;
+	u8 ret = 0;
 
+	/* locate the iommu governing the devid */
+	iommu = amd_iommu_rlookup_table[devid];
 	if (iommu)
-		return iommu->max_banks;
+		ret = iommu->max_banks;
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(amd_iommu_pc_get_max_banks);
 
@@ -2778,69 +2738,62 @@ bool amd_iommu_pc_supported(void)
 }
 EXPORT_SYMBOL(amd_iommu_pc_supported);
 
-u8 amd_iommu_pc_get_max_counters(unsigned int idx)
+u8 amd_iommu_pc_get_max_counters(u16 devid)
 {
-	struct amd_iommu *iommu = get_amd_iommu(idx);
+	struct amd_iommu *iommu;
+	u8 ret = 0;
 
+	/* locate the iommu governing the devid */
+	iommu = amd_iommu_rlookup_table[devid];
 	if (iommu)
-		return iommu->max_counters;
+		ret = iommu->max_counters;
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(amd_iommu_pc_get_max_counters);
 
-static int iommu_pc_get_set_reg(struct amd_iommu *iommu, u8 bank, u8 cntr,
-				u8 fxn, u64 *value, bool is_write)
+static int iommu_pc_get_set_reg_val(struct amd_iommu *iommu,
+				    u8 bank, u8 cntr, u8 fxn,
+				    u64 *value, bool is_write)
 {
 	u32 offset;
 	u32 max_offset_lim;
 
-	/* Make sure the IOMMU PC resource is available */
-	if (!amd_iommu_pc_present)
-		return -ENODEV;
-
 	/* Check for valid iommu and pc register indexing */
-	if (WARN_ON(!iommu || (fxn > 0x28) || (fxn & 7)))
+	if (WARN_ON((fxn > 0x28) || (fxn & 7)))
 		return -ENODEV;
 
-	offset = (u32)(((0x40 | bank) << 12) | (cntr << 8) | fxn);
+	offset = (u32)(((0x40|bank) << 12) | (cntr << 8) | fxn);
 
 	/* Limit the offset to the hw defined mmio region aperture */
-	max_offset_lim = (u32)(((0x40 | iommu->max_banks) << 12) |
+	max_offset_lim = (u32)(((0x40|iommu->max_banks) << 12) |
 				(iommu->max_counters << 8) | 0x28);
 	if ((offset < MMIO_CNTR_REG_OFFSET) ||
 	    (offset > max_offset_lim))
 		return -EINVAL;
 
 	if (is_write) {
-		u64 val = *value & GENMASK_ULL(47, 0);
-
-		writel((u32)val, iommu->mmio_base + offset);
-		writel((val >> 32), iommu->mmio_base + offset + 4);
+		writel((u32)*value, iommu->mmio_base + offset);
+		writel((*value >> 32), iommu->mmio_base + offset + 4);
 	} else {
 		*value = readl(iommu->mmio_base + offset + 4);
 		*value <<= 32;
-		*value |= readl(iommu->mmio_base + offset);
-		*value &= GENMASK_ULL(47, 0);
+		*value = readl(iommu->mmio_base + offset);
 	}
 
 	return 0;
 }
+EXPORT_SYMBOL(amd_iommu_pc_get_set_reg_val);
 
-int amd_iommu_pc_get_reg(struct amd_iommu *iommu, u8 bank, u8 cntr, u8 fxn, u64 *value)
+int amd_iommu_pc_get_set_reg_val(u16 devid, u8 bank, u8 cntr, u8 fxn,
+				    u64 *value, bool is_write)
 {
-	if (!iommu)
-		return -EINVAL;
+	struct amd_iommu *iommu = amd_iommu_rlookup_table[devid];
 
-	return iommu_pc_get_set_reg(iommu, bank, cntr, fxn, value, false);
+	/* Make sure the IOMMU PC resource is available */
+	if (!amd_iommu_pc_present || iommu == NULL)
+		return -ENODEV;
+
+	return iommu_pc_get_set_reg_val(iommu, bank, cntr, fxn,
+					value, is_write);
 }
-EXPORT_SYMBOL(amd_iommu_pc_get_reg);
-
-int amd_iommu_pc_set_reg(struct amd_iommu *iommu, u8 bank, u8 cntr, u8 fxn, u64 *value)
-{
-	if (!iommu)
-		return -EINVAL;
-
-	return iommu_pc_get_set_reg(iommu, bank, cntr, fxn, value, true);
-}
-EXPORT_SYMBOL(amd_iommu_pc_set_reg);

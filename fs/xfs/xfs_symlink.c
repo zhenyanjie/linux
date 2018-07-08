@@ -43,8 +43,8 @@
 #include "xfs_log.h"
 
 /* ----- Kernel only functions below ----- */
-int
-xfs_readlink_bmap_ilocked(
+STATIC int
+xfs_readlink_bmap(
 	struct xfs_inode	*ip,
 	char			*link)
 {
@@ -60,8 +60,6 @@ xfs_readlink_bmap_ilocked(
 	int			error = 0;
 	int			fsblocks = 0;
 	int			offset;
-
-	ASSERT(xfs_isilocked(ip, XFS_ILOCK_SHARED | XFS_ILOCK_EXCL));
 
 	fsblocks = xfs_symlink_blocks(mp, pathlen);
 	error = xfs_bmapi_read(ip, 0, fsblocks, mval, &nmaps, 0);
@@ -145,7 +143,7 @@ xfs_readlink(
 	if (!pathlen)
 		goto out;
 
-	if (pathlen < 0 || pathlen > XFS_SYMLINK_MAXLEN) {
+	if (pathlen < 0 || pathlen > MAXPATHLEN) {
 		xfs_alert(mp, "%s: inode (%llu) bad symlink length (%lld)",
 			 __func__, (unsigned long long) ip->i_ino,
 			 (long long) pathlen);
@@ -155,7 +153,7 @@ xfs_readlink(
 	}
 
 
-	error = xfs_readlink_bmap_ilocked(ip, link);
+	error = xfs_readlink_bmap(ip, link);
 
  out:
 	xfs_iunlock(ip, XFS_ILOCK_SHARED);
@@ -204,7 +202,7 @@ xfs_symlink(
 	 * Check component lengths of the target path name.
 	 */
 	pathlen = strlen(target_path);
-	if (pathlen >= XFS_SYMLINK_MAXLEN)      /* total string too long */
+	if (pathlen >= MAXPATHLEN)      /* total string too long */
 		return -ENAMETOOLONG;
 
 	udqp = gdqp = NULL;
@@ -561,7 +559,7 @@ xfs_inactive_symlink(
 		return 0;
 	}
 
-	if (pathlen < 0 || pathlen > XFS_SYMLINK_MAXLEN) {
+	if (pathlen < 0 || pathlen > MAXPATHLEN) {
 		xfs_alert(mp, "%s: inode (0x%llx) bad symlink length (%d)",
 			 __func__, (unsigned long long)ip->i_ino, pathlen);
 		xfs_iunlock(ip, XFS_ILOCK_EXCL);

@@ -276,6 +276,8 @@ static inline int hrtimer_is_hres_active(struct hrtimer *timer)
 	return timer->base->cpu_base->hres_active;
 }
 
+extern void hrtimer_peek_ahead_timers(void);
+
 /*
  * The resolution of the clocks. The resolution value is returned in
  * the clock_getres() system call to give application programmers an
@@ -297,6 +299,8 @@ extern unsigned int hrtimer_resolution;
 # define KTIME_MONOTONIC_RES	KTIME_LOW_RES
 
 #define hrtimer_resolution	(unsigned int)LOW_RES_NSEC
+
+static inline void hrtimer_peek_ahead_timers(void) { }
 
 static inline int hrtimer_is_hres_active(struct hrtimer *timer)
 {
@@ -452,11 +456,11 @@ static inline u64 hrtimer_forward_now(struct hrtimer *timer,
 }
 
 /* Precise sleep: */
-
-extern int nanosleep_copyout(struct restart_block *, struct timespec64 *);
-extern long hrtimer_nanosleep(const struct timespec64 *rqtp,
+extern long hrtimer_nanosleep(struct timespec *rqtp,
+			      struct timespec __user *rmtp,
 			      const enum hrtimer_mode mode,
 			      const clockid_t clockid);
+extern long hrtimer_nanosleep_restart(struct restart_block *restart_block);
 
 extern void hrtimer_init_sleeper(struct hrtimer_sleeper *sl,
 				 struct task_struct *tsk);

@@ -14,7 +14,6 @@
 #include <linux/wait.h>
 #include <linux/writeback.h>
 #include <linux/slab.h>
-#include <linux/refcount.h>
 
 #include <linux/ceph/types.h>
 #include <linux/ceph/messenger.h>
@@ -162,7 +161,7 @@ struct ceph_client {
  * dirtied.
  */
 struct ceph_snap_context {
-	refcount_t nref;
+	atomic_t nref;
 	u64 seq;
 	u32 num_snaps;
 	u64 snaps[];
@@ -184,11 +183,10 @@ static inline int calc_pages_for(u64 off, u64 len)
 		(off >> PAGE_SHIFT);
 }
 
-#define RB_BYVAL(a)      (a)
-#define RB_BYPTR(a)      (&(a))
-#define RB_CMP3WAY(a, b) ((a) < (b) ? -1 : (a) > (b))
-
-#define DEFINE_RB_INSDEL_FUNCS2(name, type, keyfld, cmpexp, keyexp, nodefld) \
+/*
+ * These are not meant to be generic - an integer key is assumed.
+ */
+#define DEFINE_RB_INSDEL_FUNCS(name, type, keyfld, nodefld)		\
 static void insert_##name(struct rb_root *root, type *t)		\
 {									\
 	struct rb_node **n = &root->rb_node;				\
@@ -198,13 +196,11 @@ static void insert_##name(struct rb_root *root, type *t)		\
 									\
 	while (*n) {							\
 		type *cur = rb_entry(*n, type, nodefld);		\
-		int cmp;						\
 									\
 		parent = *n;						\
-		cmp = cmpexp(keyexp(t->keyfld), keyexp(cur->keyfld));	\
-		if (cmp < 0)						\
+		if (t->keyfld < cur->keyfld)				\
 			n = &(*n)->rb_left;				\
-		else if (cmp > 0)					\
+		else if (t->keyfld > cur->keyfld)			\
 			n = &(*n)->rb_right;				\
 		else							\
 			BUG();						\
@@ -220,24 +216,19 @@ static void erase_##name(struct rb_root *root, type *t)			\
 	RB_CLEAR_NODE(&t->nodefld);					\
 }
 
-/*
- * @lookup_param_type is a parameter and not constructed from (@type,
- * @keyfld) with typeof() because adding const is too unwieldy.
- */
-#define DEFINE_RB_LOOKUP_FUNC2(name, type, keyfld, cmpexp, keyexp,	\
-			       lookup_param_type, nodefld)		\
-static type *lookup_##name(struct rb_root *root, lookup_param_type key)	\
+#define DEFINE_RB_LOOKUP_FUNC(name, type, keyfld, nodefld)		\
+extern type __lookup_##name##_key;					\
+static type *lookup_##name(struct rb_root *root,			\
+			   typeof(__lookup_##name##_key.keyfld) key)	\
 {									\
 	struct rb_node *n = root->rb_node;				\
 									\
 	while (n) {							\
 		type *cur = rb_entry(n, type, nodefld);			\
-		int cmp;						\
 									\
-		cmp = cmpexp(key, keyexp(cur->keyfld));			\
-		if (cmp < 0)						\
+		if (key < cur->keyfld)					\
 			n = n->rb_left;					\
-		else if (cmp > 0)					\
+		else if (key > cur->keyfld)				\
 			n = n->rb_right;				\
 		else							\
 			return cur;					\
@@ -245,23 +236,6 @@ static type *lookup_##name(struct rb_root *root, lookup_param_type key)	\
 									\
 	return NULL;							\
 }
-
-#define DEFINE_RB_FUNCS2(name, type, keyfld, cmpexp, keyexp,		\
-			 lookup_param_type, nodefld)			\
-DEFINE_RB_INSDEL_FUNCS2(name, type, keyfld, cmpexp, keyexp, nodefld)	\
-DEFINE_RB_LOOKUP_FUNC2(name, type, keyfld, cmpexp, keyexp,		\
-		       lookup_param_type, nodefld)
-
-/*
- * Shorthands for integer keys.
- */
-#define DEFINE_RB_INSDEL_FUNCS(name, type, keyfld, nodefld)		\
-DEFINE_RB_INSDEL_FUNCS2(name, type, keyfld, RB_CMP3WAY, RB_BYVAL, nodefld)
-
-#define DEFINE_RB_LOOKUP_FUNC(name, type, keyfld, nodefld)		\
-extern type __lookup_##name##_key;					\
-DEFINE_RB_LOOKUP_FUNC2(name, type, keyfld, RB_CMP3WAY, RB_BYVAL,	\
-		       typeof(__lookup_##name##_key.keyfld), nodefld)
 
 #define DEFINE_RB_FUNCS(name, type, keyfld, nodefld)			\
 DEFINE_RB_INSDEL_FUNCS(name, type, keyfld, nodefld)			\
@@ -288,7 +262,10 @@ int ceph_print_client_options(struct seq_file *m, struct ceph_client *client);
 extern void ceph_destroy_options(struct ceph_options *opt);
 extern int ceph_compare_options(struct ceph_options *new_opt,
 				struct ceph_client *client);
-struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private);
+extern struct ceph_client *ceph_create_client(struct ceph_options *opt,
+					      void *private,
+					      u64 supported_features,
+					      u64 required_features);
 struct ceph_entity_addr *ceph_client_addr(struct ceph_client *client);
 u64 ceph_client_gid(struct ceph_client *client);
 extern void ceph_destroy_client(struct ceph_client *client);

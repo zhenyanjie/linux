@@ -36,13 +36,8 @@ struct vgic_register_region {
 	};
 	unsigned long (*uaccess_read)(struct kvm_vcpu *vcpu, gpa_t addr,
 				      unsigned int len);
-	union {
-		void (*uaccess_write)(struct kvm_vcpu *vcpu, gpa_t addr,
-				      unsigned int len, unsigned long val);
-		int (*uaccess_its_write)(struct kvm *kvm, struct vgic_its *its,
-					 gpa_t addr, unsigned int len,
-					 unsigned long val);
-	};
+	void (*uaccess_write)(struct kvm_vcpu *vcpu, gpa_t addr,
+			      unsigned int len, unsigned long val);
 };
 
 extern struct kvm_io_device_ops kvm_io_gic_ops;
@@ -75,7 +70,7 @@ extern struct kvm_io_device_ops kvm_io_gic_ops;
  * The _WITH_LENGTH version instantiates registers with a fixed length
  * and is mutually exclusive with the _PER_IRQ version.
  */
-#define REGISTER_DESC_WITH_BITS_PER_IRQ(off, rd, wr, ur, uw, bpi, acc)	\
+#define REGISTER_DESC_WITH_BITS_PER_IRQ(off, rd, wr, bpi, acc)		\
 	{								\
 		.reg_offset = off,					\
 		.bits_per_irq = bpi,					\
@@ -83,8 +78,6 @@ extern struct kvm_io_device_ops kvm_io_gic_ops;
 		.access_flags = acc,					\
 		.read = rd,						\
 		.write = wr,						\
-		.uaccess_read = ur,					\
-		.uaccess_write = uw,					\
 	}
 
 #define REGISTER_DESC_WITH_LENGTH(off, rd, wr, length, acc)		\
@@ -167,14 +160,6 @@ void vgic_mmio_write_sactive(struct kvm_vcpu *vcpu,
 			     gpa_t addr, unsigned int len,
 			     unsigned long val);
 
-void vgic_mmio_uaccess_write_cactive(struct kvm_vcpu *vcpu,
-				     gpa_t addr, unsigned int len,
-				     unsigned long val);
-
-void vgic_mmio_uaccess_write_sactive(struct kvm_vcpu *vcpu,
-				     gpa_t addr, unsigned int len,
-				     unsigned long val);
-
 unsigned long vgic_mmio_read_priority(struct kvm_vcpu *vcpu,
 				      gpa_t addr, unsigned int len);
 
@@ -206,10 +191,5 @@ u64 vgic_sanitise_inner_cacheability(u64 reg);
 u64 vgic_sanitise_shareability(u64 reg);
 u64 vgic_sanitise_field(u64 reg, u64 field_mask, int field_shift,
 			u64 (*sanitise_fn)(u64));
-
-/* Find the proper register handler entry given a certain address offset */
-const struct vgic_register_region *
-vgic_find_mmio_region(const struct vgic_register_region *regions,
-		      int nr_regions, unsigned int offset);
 
 #endif

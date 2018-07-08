@@ -1,5 +1,6 @@
 atmel-hlcdc-dc-y := atmel_hlcdc_crtc.o \
 		atmel_hlcdc_dc.o \
+		atmel_hlcdc_layer.o \
 		atmel_hlcdc_output.o \
 		atmel_hlcdc_plane.o
 

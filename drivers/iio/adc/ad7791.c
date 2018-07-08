@@ -272,9 +272,11 @@ static ssize_t ad7791_write_frequency(struct device *dev,
 	struct ad7791_state *st = iio_priv(indio_dev);
 	int i, ret;
 
-	i = sysfs_match_string(ad7791_sample_freq_avail, buf);
-	if (i < 0)
-		return i;
+	for (i = 0; i < ARRAY_SIZE(ad7791_sample_freq_avail); i++)
+		if (sysfs_streq(ad7791_sample_freq_avail[i], buf))
+			break;
+	if (i == ARRAY_SIZE(ad7791_sample_freq_avail))
+		return -EINVAL;
 
 	ret = iio_device_claim_direct_mode(indio_dev);
 	if (ret)

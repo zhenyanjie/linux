@@ -556,7 +556,6 @@ EXPORT_SYMBOL(vchi_connect);
 int32_t vchi_disconnect(VCHI_INSTANCE_T instance_handle)
 {
 	VCHIQ_INSTANCE_T instance = (VCHIQ_INSTANCE_T)instance_handle;
-
 	return vchiq_status_to_vchi(vchiq_shutdown(instance));
 }
 EXPORT_SYMBOL(vchi_disconnect);
@@ -734,7 +733,6 @@ int32_t vchi_service_close(const VCHI_SERVICE_HANDLE_T handle)
 {
 	int32_t ret = -1;
 	SHIM_SERVICE_T *service = (SHIM_SERVICE_T *)handle;
-
 	if (service) {
 		VCHIQ_STATUS_T status = vchiq_close_service(service->handle);
 		if (status == VCHIQ_SUCCESS) {
@@ -752,10 +750,8 @@ int32_t vchi_service_destroy(const VCHI_SERVICE_HANDLE_T handle)
 {
 	int32_t ret = -1;
 	SHIM_SERVICE_T *service = (SHIM_SERVICE_T *)handle;
-
 	if (service) {
 		VCHIQ_STATUS_T status = vchiq_remove_service(service->handle);
-
 		if (status == VCHIQ_SUCCESS) {
 			service_free(service);
 			service = NULL;
@@ -774,7 +770,6 @@ int32_t vchi_service_set_option(const VCHI_SERVICE_HANDLE_T handle,
 	int32_t ret = -1;
 	SHIM_SERVICE_T *service = (SHIM_SERVICE_T *)handle;
 	VCHIQ_SERVICE_OPTION_T vchiq_option;
-
 	switch (option) {
 	case VCHI_SERVICE_OPTION_TRACE:
 		vchiq_option = VCHIQ_SERVICE_OPTION_TRACE;
@@ -802,7 +797,6 @@ int32_t vchi_get_peer_version(const VCHI_SERVICE_HANDLE_T handle, short *peer_ve
 {
 	int32_t ret = -1;
 	SHIM_SERVICE_T *service = (SHIM_SERVICE_T *)handle;
-
 	if (service)
 	{
 		VCHIQ_STATUS_T status;
@@ -813,6 +807,54 @@ int32_t vchi_get_peer_version(const VCHI_SERVICE_HANDLE_T handle, short *peer_ve
 	return ret;
 }
 EXPORT_SYMBOL(vchi_get_peer_version);
+
+/* ----------------------------------------------------------------------
+ * read a uint32_t from buffer.
+ * network format is defined to be little endian
+ * -------------------------------------------------------------------- */
+uint32_t
+vchi_readbuf_uint32(const void *_ptr)
+{
+	const unsigned char *ptr = _ptr;
+	return ptr[0] | (ptr[1] << 8) | (ptr[2] << 16) | (ptr[3] << 24);
+}
+
+/* ----------------------------------------------------------------------
+ * write a uint32_t to buffer.
+ * network format is defined to be little endian
+ * -------------------------------------------------------------------- */
+void
+vchi_writebuf_uint32(void *_ptr, uint32_t value)
+{
+	unsigned char *ptr = _ptr;
+	ptr[0] = (unsigned char)((value >> 0)  & 0xFF);
+	ptr[1] = (unsigned char)((value >> 8)  & 0xFF);
+	ptr[2] = (unsigned char)((value >> 16) & 0xFF);
+	ptr[3] = (unsigned char)((value >> 24) & 0xFF);
+}
+
+/* ----------------------------------------------------------------------
+ * read a uint16_t from buffer.
+ * network format is defined to be little endian
+ * -------------------------------------------------------------------- */
+uint16_t
+vchi_readbuf_uint16(const void *_ptr)
+{
+	const unsigned char *ptr = _ptr;
+	return ptr[0] | (ptr[1] << 8);
+}
+
+/* ----------------------------------------------------------------------
+ * write a uint16_t into the buffer.
+ * network format is defined to be little endian
+ * -------------------------------------------------------------------- */
+void
+vchi_writebuf_uint16(void *_ptr, uint16_t value)
+{
+	unsigned char *ptr = _ptr;
+	ptr[0] = (value >> 0)  & 0xFF;
+	ptr[1] = (value >> 8)  & 0xFF;
+}
 
 /***********************************************************
  * Name: vchi_service_use
@@ -827,7 +869,6 @@ EXPORT_SYMBOL(vchi_get_peer_version);
 int32_t vchi_service_use(const VCHI_SERVICE_HANDLE_T handle)
 {
 	int32_t ret = -1;
-
 	SHIM_SERVICE_T *service = (SHIM_SERVICE_T *)handle;
 	if (service)
 		ret = vchiq_status_to_vchi(vchiq_use_service(service->handle));
@@ -848,7 +889,6 @@ EXPORT_SYMBOL(vchi_service_use);
 int32_t vchi_service_release(const VCHI_SERVICE_HANDLE_T handle)
 {
 	int32_t ret = -1;
-
 	SHIM_SERVICE_T *service = (SHIM_SERVICE_T *)handle;
 	if (service)
 		ret = vchiq_status_to_vchi(

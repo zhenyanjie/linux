@@ -172,7 +172,7 @@ int mlx5_query_nic_vport_mac_address(struct mlx5_core_dev *mdev,
 	u8 *out_addr;
 	int err;
 
-	out = kvzalloc(outlen, GFP_KERNEL);
+	out = mlx5_vzalloc(outlen);
 	if (!out)
 		return -ENOMEM;
 
@@ -197,9 +197,11 @@ int mlx5_modify_nic_vport_mac_address(struct mlx5_core_dev *mdev,
 	void *nic_vport_ctx;
 	u8 *perm_mac;
 
-	in = kvzalloc(inlen, GFP_KERNEL);
-	if (!in)
+	in = mlx5_vzalloc(inlen);
+	if (!in) {
+		mlx5_core_warn(mdev, "failed to allocate inbox\n");
 		return -ENOMEM;
+	}
 
 	MLX5_SET(modify_nic_vport_context_in, in,
 		 field_select.permanent_address, 1);
@@ -229,7 +231,7 @@ int mlx5_query_nic_vport_mtu(struct mlx5_core_dev *mdev, u16 *mtu)
 	u32 *out;
 	int err;
 
-	out = kvzalloc(outlen, GFP_KERNEL);
+	out = mlx5_vzalloc(outlen);
 	if (!out)
 		return -ENOMEM;
 
@@ -249,7 +251,7 @@ int mlx5_modify_nic_vport_mtu(struct mlx5_core_dev *mdev, u16 mtu)
 	void *in;
 	int err;
 
-	in = kvzalloc(inlen, GFP_KERNEL);
+	in = mlx5_vzalloc(inlen);
 	if (!in)
 		return -ENOMEM;
 
@@ -499,7 +501,7 @@ int mlx5_query_nic_vport_system_image_guid(struct mlx5_core_dev *mdev,
 	u32 *out;
 	int outlen = MLX5_ST_SZ_BYTES(query_nic_vport_context_out);
 
-	out = kvzalloc(outlen, GFP_KERNEL);
+	out = mlx5_vzalloc(outlen);
 	if (!out)
 		return -ENOMEM;
 
@@ -519,7 +521,7 @@ int mlx5_query_nic_vport_node_guid(struct mlx5_core_dev *mdev, u64 *node_guid)
 	u32 *out;
 	int outlen = MLX5_ST_SZ_BYTES(query_nic_vport_context_out);
 
-	out = kvzalloc(outlen, GFP_KERNEL);
+	out = mlx5_vzalloc(outlen);
 	if (!out)
 		return -ENOMEM;
 
@@ -549,7 +551,7 @@ int mlx5_modify_nic_vport_node_guid(struct mlx5_core_dev *mdev,
 	if (!MLX5_CAP_ESW(mdev, nic_vport_node_guid_modify))
 		return -EOPNOTSUPP;
 
-	in = kvzalloc(inlen, GFP_KERNEL);
+	in = mlx5_vzalloc(inlen);
 	if (!in)
 		return -ENOMEM;
 
@@ -575,7 +577,7 @@ int mlx5_query_nic_vport_qkey_viol_cntr(struct mlx5_core_dev *mdev,
 	u32 *out;
 	int outlen = MLX5_ST_SZ_BYTES(query_nic_vport_context_out);
 
-	out = kvzalloc(outlen, GFP_KERNEL);
+	out = mlx5_vzalloc(outlen);
 	if (!out)
 		return -ENOMEM;
 
@@ -877,9 +879,11 @@ int mlx5_modify_nic_vport_promisc(struct mlx5_core_dev *mdev,
 	int inlen = MLX5_ST_SZ_BYTES(modify_nic_vport_context_in);
 	int err;
 
-	in = kvzalloc(inlen, GFP_KERNEL);
-	if (!in)
+	in = mlx5_vzalloc(inlen);
+	if (!in) {
+		mlx5_core_err(mdev, "failed to allocate inbox\n");
 		return -ENOMEM;
+	}
 
 	MLX5_SET(modify_nic_vport_context_in, in, field_select.promisc, 1);
 	MLX5_SET(modify_nic_vport_context_in, in,
@@ -909,9 +913,11 @@ static int mlx5_nic_vport_update_roce_state(struct mlx5_core_dev *mdev,
 	int inlen = MLX5_ST_SZ_BYTES(modify_nic_vport_context_in);
 	int err;
 
-	in = kvzalloc(inlen, GFP_KERNEL);
-	if (!in)
+	in = mlx5_vzalloc(inlen);
+	if (!in) {
+		mlx5_core_warn(mdev, "failed to allocate inbox\n");
 		return -ENOMEM;
+	}
 
 	MLX5_SET(modify_nic_vport_context_in, in, field_select.roce_en, 1);
 	MLX5_SET(modify_nic_vport_context_in, in, nic_vport_context.roce_en,
@@ -926,16 +932,12 @@ static int mlx5_nic_vport_update_roce_state(struct mlx5_core_dev *mdev,
 
 int mlx5_nic_vport_enable_roce(struct mlx5_core_dev *mdev)
 {
-	if (atomic_inc_return(&mdev->roce.roce_en) != 1)
-		return 0;
 	return mlx5_nic_vport_update_roce_state(mdev, MLX5_VPORT_ROCE_ENABLED);
 }
 EXPORT_SYMBOL_GPL(mlx5_nic_vport_enable_roce);
 
 int mlx5_nic_vport_disable_roce(struct mlx5_core_dev *mdev)
 {
-	if (atomic_dec_return(&mdev->roce.roce_en) != 0)
-		return 0;
 	return mlx5_nic_vport_update_roce_state(mdev, MLX5_VPORT_ROCE_DISABLED);
 }
 EXPORT_SYMBOL_GPL(mlx5_nic_vport_disable_roce);
@@ -950,7 +952,7 @@ int mlx5_core_query_vport_counter(struct mlx5_core_dev *dev, u8 other_vport,
 	int	err;
 
 	is_group_manager = MLX5_CAP_GEN(dev, vport_group_manager);
-	in = kvzalloc(in_sz, GFP_KERNEL);
+	in = mlx5_vzalloc(in_sz);
 	if (!in) {
 		err = -ENOMEM;
 		return err;

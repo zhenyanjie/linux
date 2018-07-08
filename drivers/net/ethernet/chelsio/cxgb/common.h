@@ -223,6 +223,7 @@ struct port_info {
 	struct cmac *mac;
 	struct cphy *phy;
 	struct link_config link_config;
+	struct net_device_stats netstats;
 };
 
 struct sge;

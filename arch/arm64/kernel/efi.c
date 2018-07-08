@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/dmi.h>
 #include <linux/efi.h>
 #include <linux/init.h>
 
@@ -115,6 +116,20 @@ int __init efi_set_mapping_permissions(struct mm_struct *mm,
 				   md->num_pages << EFI_PAGE_SHIFT,
 				   set_permissions, md);
 }
+
+static int __init arm64_dmi_init(void)
+{
+	/*
+	 * On arm64, DMI depends on UEFI, and dmi_scan_machine() needs to
+	 * be called early because dmi_id_init(), which is an arch_initcall
+	 * itself, depends on dmi_scan_machine() having been called already.
+	 */
+	dmi_scan_machine();
+	if (dmi_available)
+		dmi_set_dump_stack_arch_desc();
+	return 0;
+}
+core_initcall(arm64_dmi_init);
 
 /*
  * UpdateCapsule() depends on the system being shutdown via

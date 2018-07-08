@@ -188,29 +188,17 @@ void lots_o_noops_around_write(int *write_to_me)
 #define u64 uint64_t
 
 #ifdef __i386__
-
-#ifndef SYS_mprotect_key
-# define SYS_mprotect_key 380
-#endif
-#ifndef SYS_pkey_alloc
-# define SYS_pkey_alloc	 381
-# define SYS_pkey_free	 382
-#endif
+#define SYS_mprotect_key 380
+#define SYS_pkey_alloc	 381
+#define SYS_pkey_free	 382
 #define REG_IP_IDX REG_EIP
 #define si_pkey_offset 0x14
-
 #else
-
-#ifndef SYS_mprotect_key
-# define SYS_mprotect_key 329
-#endif
-#ifndef SYS_pkey_alloc
-# define SYS_pkey_alloc	 330
-# define SYS_pkey_free	 331
-#endif
+#define SYS_mprotect_key 329
+#define SYS_pkey_alloc	 330
+#define SYS_pkey_free	 331
 #define REG_IP_IDX REG_RIP
 #define si_pkey_offset 0x20
-
 #endif
 
 void dump_mem(void *dumpme, int len_bytes)

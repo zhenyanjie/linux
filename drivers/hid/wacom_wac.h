@@ -96,8 +96,6 @@
 #define WACOM_DEVICETYPE_WL_MONITOR     0x0008
 #define WACOM_DEVICETYPE_DIRECT         0x0010
 
-#define WACOM_POWER_SUPPLY_STATUS_AUTO  -1
-
 #define WACOM_HID_UP_WACOMDIGITIZER     0xff0d0000
 #define WACOM_HID_SP_PAD                0x00040000
 #define WACOM_HID_SP_BUTTON             0x00090000
@@ -122,11 +120,6 @@
 #define WACOM_HID_WD_BATTERY_LEVEL      (WACOM_HID_UP_WACOMDIGITIZER | 0x043b)
 #define WACOM_HID_WD_EXPRESSKEY00       (WACOM_HID_UP_WACOMDIGITIZER | 0x0910)
 #define WACOM_HID_WD_EXPRESSKEYCAP00    (WACOM_HID_UP_WACOMDIGITIZER | 0x0950)
-#define WACOM_HID_WD_MODE_CHANGE        (WACOM_HID_UP_WACOMDIGITIZER | 0x0980)
-#define WACOM_HID_WD_MUTE_DEVICE        (WACOM_HID_UP_WACOMDIGITIZER | 0x0981)
-#define WACOM_HID_WD_CONTROLPANEL       (WACOM_HID_UP_WACOMDIGITIZER | 0x0982)
-#define WACOM_HID_WD_ONSCREEN_KEYBOARD  (WACOM_HID_UP_WACOMDIGITIZER | 0x0983)
-#define WACOM_HID_WD_BUTTONCONFIG       (WACOM_HID_UP_WACOMDIGITIZER | 0x0986)
 #define WACOM_HID_WD_BUTTONHOME         (WACOM_HID_UP_WACOMDIGITIZER | 0x0990)
 #define WACOM_HID_WD_BUTTONUP           (WACOM_HID_UP_WACOMDIGITIZER | 0x0991)
 #define WACOM_HID_WD_BUTTONDOWN         (WACOM_HID_UP_WACOMDIGITIZER | 0x0992)
@@ -153,10 +146,6 @@
 #define WACOM_HID_WT_X                  (WACOM_HID_UP_WACOMTOUCH | 0x130)
 #define WACOM_HID_WT_Y                  (WACOM_HID_UP_WACOMTOUCH | 0x131)
 
-#define WACOM_BATTERY_USAGE(f)	(((f)->hid == HID_DG_BATTERYSTRENGTH) || \
-				 ((f)->hid == WACOM_HID_WD_BATTERY_CHARGING) || \
-				 ((f)->hid == WACOM_HID_WD_BATTERY_LEVEL))
-
 #define WACOM_PAD_FIELD(f)	(((f)->physical == HID_DG_TABLETFUNCTIONKEY) || \
 				 ((f)->physical == WACOM_HID_WD_DIGITIZERFNKEYS) || \
 				 ((f)->physical == WACOM_HID_WD_DIGITIZERINFO))
@@ -166,7 +155,6 @@
 				 ((f)->physical == HID_DG_PEN) || \
 				 ((f)->application == HID_DG_PEN) || \
 				 ((f)->application == HID_DG_DIGITIZER) || \
-				 ((f)->application == WACOM_HID_WD_PEN) || \
 				 ((f)->application == WACOM_HID_WD_DIGITIZER) || \
 				 ((f)->application == WACOM_HID_G9_PEN) || \
 				 ((f)->application == WACOM_HID_G11_PEN))
@@ -282,7 +270,6 @@ struct wacom_shared {
 	struct hid_device *pen;
 	struct hid_device *touch;
 	bool has_mute_touch_switch;
-	bool is_touch_on;
 };
 
 struct hid_data {
@@ -304,12 +291,10 @@ struct hid_data {
 	int last_slot_field;
 	int num_expected;
 	int num_received;
-	int bat_status;
 	int battery_capacity;
 	int bat_charging;
 	int bat_connected;
 	int ps_connected;
-	bool pad_input_event_flag;
 };
 
 struct wacom_remote_data {
@@ -342,9 +327,6 @@ struct wacom_wac {
 	int mode_value;
 	struct hid_data hid_data;
 	bool has_mute_touch_switch;
-	bool has_mode_change;
-	bool is_direct_mode;
-
 };
 
 #endif

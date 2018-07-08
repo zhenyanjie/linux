@@ -339,15 +339,9 @@ static void __init setup_lowcore(void)
 	lc->stfl_fac_list = S390_lowcore.stfl_fac_list;
 	memcpy(lc->stfle_fac_list, S390_lowcore.stfle_fac_list,
 	       MAX_FACILITY_BIT/8);
-	if (MACHINE_HAS_VX || MACHINE_HAS_GS) {
-		unsigned long bits, size;
-
-		bits = MACHINE_HAS_GS ? 11 : 10;
-		size = 1UL << bits;
-		lc->mcesad = (__u64) memblock_virt_alloc(size, size);
-		if (MACHINE_HAS_GS)
-			lc->mcesad |= bits;
-	}
+	if (MACHINE_HAS_VX)
+		lc->vector_save_area_addr =
+			(unsigned long) &lc->vector_save_area;
 	lc->vdso_per_cpu_data = (unsigned long) &lc->paste[0];
 	lc->sync_enter_timer = S390_lowcore.sync_enter_timer;
 	lc->async_enter_timer = S390_lowcore.async_enter_timer;
@@ -494,6 +488,11 @@ static void __init setup_memory_end(void)
 	memblock_remove(memory_end, ULONG_MAX);
 
 	pr_notice("The maximum memory size is %luMB\n", memory_end >> 20);
+}
+
+static void __init setup_vmcoreinfo(void)
+{
+	mem_assign_absolute(S390_lowcore.vmcore_info, paddr_vmcoreinfo_note());
 }
 
 #ifdef CONFIG_CRASH_DUMP
@@ -780,12 +779,6 @@ static int __init setup_hwcaps(void)
 			elf_hwcap |= HWCAP_S390_VXRS_BCD;
 	}
 
-	/*
-	 * Guarded storage support HWCAP_S390_GS is bit 12.
-	 */
-	if (MACHINE_HAS_GS)
-		elf_hwcap |= HWCAP_S390_GS;
-
 	get_cpu_id(&cpu_id);
 	add_device_randomness(&cpu_id, sizeof(cpu_id));
 	switch (cpu_id.machine) {
@@ -934,6 +927,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	setup_resources();
+	setup_vmcoreinfo();
 	setup_lowcore();
 	smp_fill_possible_mask();
 	cpu_detect_mhz_feature();

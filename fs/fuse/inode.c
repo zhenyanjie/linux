@@ -21,7 +21,6 @@
 #include <linux/sched.h>
 #include <linux/exportfs.h>
 #include <linux/posix_acl.h>
-#include <linux/pid_namespace.h>
 
 MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
 MODULE_DESCRIPTION("Filesystem in Userspace");
@@ -387,6 +386,12 @@ static void fuse_send_destroy(struct fuse_conn *fc)
 	}
 }
 
+static void fuse_bdi_destroy(struct fuse_conn *fc)
+{
+	if (fc->bdi_initialized)
+		bdi_destroy(&fc->bdi);
+}
+
 static void fuse_put_super(struct super_block *sb)
 {
 	struct fuse_conn *fc = get_fuse_conn_super(sb);
@@ -398,6 +403,7 @@ static void fuse_put_super(struct super_block *sb)
 	list_del(&fc->entry);
 	fuse_ctl_remove_conn(fc);
 	mutex_unlock(&fuse_mutex);
+	fuse_bdi_destroy(fc);
 
 	fuse_conn_put(fc);
 }
@@ -602,7 +608,7 @@ void fuse_conn_init(struct fuse_conn *fc)
 	memset(fc, 0, sizeof(*fc));
 	spin_lock_init(&fc->lock);
 	init_rwsem(&fc->killsb);
-	refcount_set(&fc->count, 1);
+	atomic_set(&fc->count, 1);
 	atomic_set(&fc->dev_count, 1);
 	init_waitqueue_head(&fc->blocked_waitq);
 	init_waitqueue_head(&fc->reserved_req_waitq);
@@ -620,16 +626,14 @@ void fuse_conn_init(struct fuse_conn *fc)
 	fc->connected = 1;
 	fc->attr_version = 1;
 	get_random_bytes(&fc->scramble_key, sizeof(fc->scramble_key));
-	fc->pid_ns = get_pid_ns(task_active_pid_ns(current));
 }
 EXPORT_SYMBOL_GPL(fuse_conn_init);
 
 void fuse_conn_put(struct fuse_conn *fc)
 {
-	if (refcount_dec_and_test(&fc->count)) {
+	if (atomic_dec_and_test(&fc->count)) {
 		if (fc->destroy_req)
 			fuse_request_free(fc->destroy_req);
-		put_pid_ns(fc->pid_ns);
 		fc->release(fc);
 	}
 }
@@ -637,7 +641,7 @@ EXPORT_SYMBOL_GPL(fuse_conn_put);
 
 struct fuse_conn *fuse_conn_get(struct fuse_conn *fc)
 {
-	refcount_inc(&fc->count);
+	atomic_inc(&fc->count);
 	return fc;
 }
 EXPORT_SYMBOL_GPL(fuse_conn_get);
@@ -924,8 +928,7 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 			fc->no_flock = 1;
 		}
 
-		fc->sb->s_bdi->ra_pages =
-				min(fc->sb->s_bdi->ra_pages, ra_pages);
+		fc->bdi.ra_pages = min(fc->bdi.ra_pages, ra_pages);
 		fc->minor = arg->minor;
 		fc->max_write = arg->minor < 5 ? 4096 : arg->max_write;
 		fc->max_write = max_t(unsigned, 4096, fc->max_write);
@@ -941,7 +944,7 @@ static void fuse_send_init(struct fuse_conn *fc, struct fuse_req *req)
 
 	arg->major = FUSE_KERNEL_VERSION;
 	arg->minor = FUSE_KERNEL_MINOR_VERSION;
-	arg->max_readahead = fc->sb->s_bdi->ra_pages * PAGE_SIZE;
+	arg->max_readahead = fc->bdi.ra_pages * PAGE_SIZE;
 	arg->flags |= FUSE_ASYNC_READ | FUSE_POSIX_LOCKS | FUSE_ATOMIC_O_TRUNC |
 		FUSE_EXPORT_SUPPORT | FUSE_BIG_WRITES | FUSE_DONT_MASK |
 		FUSE_SPLICE_WRITE | FUSE_SPLICE_MOVE | FUSE_SPLICE_READ |
@@ -973,25 +976,27 @@ static void fuse_free_conn(struct fuse_conn *fc)
 static int fuse_bdi_init(struct fuse_conn *fc, struct super_block *sb)
 {
 	int err;
-	char *suffix = "";
 
-	if (sb->s_bdev) {
-		suffix = "-fuseblk";
-		/*
-		 * sb->s_bdi points to blkdev's bdi however we want to redirect
-		 * it to our private bdi...
-		 */
-		bdi_put(sb->s_bdi);
-		sb->s_bdi = &noop_backing_dev_info;
-	}
-	err = super_setup_bdi_name(sb, "%u:%u%s", MAJOR(fc->dev),
-				   MINOR(fc->dev), suffix);
+	fc->bdi.name = "fuse";
+	fc->bdi.ra_pages = (VM_MAX_READAHEAD * 1024) / PAGE_SIZE;
+	/* fuse does it's own writeback accounting */
+	fc->bdi.capabilities = BDI_CAP_NO_ACCT_WB | BDI_CAP_STRICTLIMIT;
+
+	err = bdi_init(&fc->bdi);
 	if (err)
 		return err;
 
-	sb->s_bdi->ra_pages = (VM_MAX_READAHEAD * 1024) / PAGE_SIZE;
-	/* fuse does it's own writeback accounting */
-	sb->s_bdi->capabilities = BDI_CAP_NO_ACCT_WB | BDI_CAP_STRICTLIMIT;
+	fc->bdi_initialized = 1;
+
+	if (sb->s_bdev) {
+		err =  bdi_register(&fc->bdi, NULL, "%u:%u-fuseblk",
+				    MAJOR(fc->dev), MINOR(fc->dev));
+	} else {
+		err = bdi_register_dev(&fc->bdi, fc->dev);
+	}
+
+	if (err)
+		return err;
 
 	/*
 	 * For a single fuse filesystem use max 1% of dirty +
@@ -1005,7 +1010,7 @@ static int fuse_bdi_init(struct fuse_conn *fc, struct super_block *sb)
 	 *
 	 *    /sys/class/bdi/<bdi>/max_ratio
 	 */
-	bdi_set_max_ratio(sb->s_bdi, 1);
+	bdi_set_max_ratio(&fc->bdi, 1);
 
 	return 0;
 }
@@ -1108,6 +1113,8 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	if (err)
 		goto err_dev_free;
 
+	sb->s_bdi = &fc->bdi;
+
 	/* Handle umasking inside the fuse code */
 	if (sb->s_flags & MS_POSIXACL)
 		fc->dont_mask = 1;
@@ -1175,6 +1182,7 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
  err_dev_free:
 	fuse_dev_free(fud);
  err_put_conn:
+	fuse_bdi_destroy(fc);
 	fuse_conn_put(fc);
  err_fput:
 	fput(file);

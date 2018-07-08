@@ -205,8 +205,8 @@ target_emulate_report_target_port_groups(struct se_cmd *cmd)
 		/*
 		 * TARGET PORT GROUP
 		 */
-		put_unaligned_be16(tg_pt_gp->tg_pt_gp_id, &buf[off]);
-		off += 2;
+		buf[off++] = ((tg_pt_gp->tg_pt_gp_id >> 8) & 0xff);
+		buf[off++] = (tg_pt_gp->tg_pt_gp_id & 0xff);
 
 		off++; /* Skip over Reserved */
 		/*
@@ -235,8 +235,8 @@ target_emulate_report_target_port_groups(struct se_cmd *cmd)
 			/*
 			 * Set RELATIVE TARGET PORT IDENTIFIER
 			 */
-			put_unaligned_be16(lun->lun_rtpi, &buf[off]);
-			off += 2;
+			buf[off++] = ((lun->lun_rtpi >> 8) & 0xff);
+			buf[off++] = (lun->lun_rtpi & 0xff);
 			rd_len += 4;
 		}
 		spin_unlock(&tg_pt_gp->tg_pt_gp_lock);

@@ -69,6 +69,9 @@ struct phy_8x16 {
 
 	struct reset_control		*phy_reset;
 
+	struct extcon_dev		*vbus_edev;
+	struct notifier_block		vbus_notify;
+
 	struct gpio_desc		*switch_gpio;
 	struct notifier_block		reboot_notify;
 };
@@ -128,8 +131,7 @@ static int phy_8x16_vbus_off(struct phy_8x16 *qphy)
 static int phy_8x16_vbus_notify(struct notifier_block *nb, unsigned long event,
 				void *ptr)
 {
-	struct usb_phy *usb_phy = container_of(nb, struct usb_phy, vbus_nb);
-	struct phy_8x16 *qphy = container_of(usb_phy, struct phy_8x16, phy);
+	struct phy_8x16 *qphy = container_of(nb, struct phy_8x16, vbus_notify);
 
 	if (event)
 		phy_8x16_vbus_on(qphy);
@@ -185,7 +187,7 @@ static int phy_8x16_init(struct usb_phy *phy)
 	val = ULPI_PWR_OTG_COMP_DISABLE;
 	usb_phy_io_write(phy, val, ULPI_SET(ULPI_PWR_CLK_MNG_REG));
 
-	state = extcon_get_state(qphy->phy.edev, EXTCON_USB);
+	state = extcon_get_state(qphy->vbus_edev, EXTCON_USB);
 	if (state)
 		phy_8x16_vbus_on(qphy);
 	else
@@ -287,12 +289,14 @@ static int phy_8x16_probe(struct platform_device *pdev)
 	phy->io_priv		= qphy->regs + HSPHY_ULPI_VIEWPORT;
 	phy->io_ops		= &ulpi_viewport_access_ops;
 	phy->type		= USB_PHY_TYPE_USB2;
-	phy->vbus_nb.notifier_call = phy_8x16_vbus_notify;
-	phy->id_nb.notifier_call = NULL;
 
 	ret = phy_8x16_read_devicetree(qphy);
 	if (ret < 0)
 		return ret;
+
+	qphy->vbus_edev = extcon_get_edev_by_phandle(phy->dev, 0);
+	if (IS_ERR(qphy->vbus_edev))
+		return PTR_ERR(qphy->vbus_edev);
 
 	ret = clk_set_rate(qphy->core_clk, INT_MAX);
 	if (ret < 0)
@@ -310,6 +314,12 @@ static int phy_8x16_probe(struct platform_device *pdev)
 				    qphy->regulator);
 	if (WARN_ON(ret))
 		goto off_clks;
+
+	qphy->vbus_notify.notifier_call = phy_8x16_vbus_notify;
+	ret = devm_extcon_register_notifier(&pdev->dev, qphy->vbus_edev,
+					EXTCON_USB, &qphy->vbus_notify);
+	if (ret < 0)
+		goto off_power;
 
 	ret = usb_add_phy_dev(&qphy->phy);
 	if (ret)

@@ -117,7 +117,7 @@ static inline void
 __xfs_buf_ioacct_dec(
 	struct xfs_buf	*bp)
 {
-	lockdep_assert_held(&bp->b_lock);
+	ASSERT(spin_is_locked(&bp->b_lock));
 
 	if (bp->b_state & XFS_BSTATE_IN_FLIGHT) {
 		bp->b_state &= ~XFS_BSTATE_IN_FLIGHT;
@@ -457,17 +457,17 @@ _xfs_buf_map_pages(
 		bp->b_addr = NULL;
 	} else {
 		int retried = 0;
-		unsigned nofs_flag;
+		unsigned noio_flag;
 
 		/*
 		 * vm_map_ram() will allocate auxillary structures (e.g.
 		 * pagetables) with GFP_KERNEL, yet we are likely to be under
 		 * GFP_NOFS context here. Hence we need to tell memory reclaim
-		 * that we are in such a context via PF_MEMALLOC_NOFS to prevent
+		 * that we are in such a context via PF_MEMALLOC_NOIO to prevent
 		 * memory reclaim re-entering the filesystem here and
 		 * potentially deadlocking.
 		 */
-		nofs_flag = memalloc_nofs_save();
+		noio_flag = memalloc_noio_save();
 		do {
 			bp->b_addr = vm_map_ram(bp->b_pages, bp->b_page_count,
 						-1, PAGE_KERNEL);
@@ -475,7 +475,7 @@ _xfs_buf_map_pages(
 				break;
 			vm_unmap_aliases();
 		} while (retried++ <= 1);
-		memalloc_nofs_restore(nofs_flag);
+		memalloc_noio_restore(noio_flag);
 
 		if (!bp->b_addr)
 			return -ENOMEM;
@@ -1194,7 +1194,7 @@ xfs_buf_ioerror_alert(
 {
 	xfs_alert(bp->b_target->bt_mount,
 "metadata I/O error: block 0x%llx (\"%s\") error %d numblks %d",
-		(uint64_t)XFS_BUF_ADDR(bp), func, -bp->b_error, bp->b_length);
+		(__uint64_t)XFS_BUF_ADDR(bp), func, -bp->b_error, bp->b_length);
 }
 
 int
@@ -1227,11 +1227,8 @@ xfs_buf_bio_end_io(
 	 * don't overwrite existing errors - otherwise we can lose errors on
 	 * buffers that require multiple bios to complete.
 	 */
-	if (bio->bi_status) {
-		int error = blk_status_to_errno(bio->bi_status);
-
-		cmpxchg(&bp->b_io_error, 0, error);
-	}
+	if (bio->bi_error)
+		cmpxchg(&bp->b_io_error, 0, bio->bi_error);
 
 	if (!bp->b_error && xfs_buf_is_vmapped(bp) && (bp->b_flags & XBF_READ))
 		invalidate_kernel_vmap_range(bp->b_addr, xfs_buf_vmap_len(bp));
@@ -2046,66 +2043,6 @@ xfs_buf_delwri_submit(
 		if (!error)
 			error = error2;
 	}
-
-	return error;
-}
-
-/*
- * Push a single buffer on a delwri queue.
- *
- * The purpose of this function is to submit a single buffer of a delwri queue
- * and return with the buffer still on the original queue. The waiting delwri
- * buffer submission infrastructure guarantees transfer of the delwri queue
- * buffer reference to a temporary wait list. We reuse this infrastructure to
- * transfer the buffer back to the original queue.
- *
- * Note the buffer transitions from the queued state, to the submitted and wait
- * listed state and back to the queued state during this call. The buffer
- * locking and queue management logic between _delwri_pushbuf() and
- * _delwri_queue() guarantee that the buffer cannot be queued to another list
- * before returning.
- */
-int
-xfs_buf_delwri_pushbuf(
-	struct xfs_buf		*bp,
-	struct list_head	*buffer_list)
-{
-	LIST_HEAD		(submit_list);
-	int			error;
-
-	ASSERT(bp->b_flags & _XBF_DELWRI_Q);
-
-	trace_xfs_buf_delwri_pushbuf(bp, _RET_IP_);
-
-	/*
-	 * Isolate the buffer to a new local list so we can submit it for I/O
-	 * independently from the rest of the original list.
-	 */
-	xfs_buf_lock(bp);
-	list_move(&bp->b_list, &submit_list);
-	xfs_buf_unlock(bp);
-
-	/*
-	 * Delwri submission clears the DELWRI_Q buffer flag and returns with
-	 * the buffer on the wait list with an associated reference. Rather than
-	 * bounce the buffer from a local wait list back to the original list
-	 * after I/O completion, reuse the original list as the wait list.
-	 */
-	xfs_buf_delwri_submit_buffers(&submit_list, buffer_list);
-
-	/*
-	 * The buffer is now under I/O and wait listed as during typical delwri
-	 * submission. Lock the buffer to wait for I/O completion. Rather than
-	 * remove the buffer from the wait list and release the reference, we
-	 * want to return with the buffer queued to the original list. The
-	 * buffer already sits on the original list with a wait list reference,
-	 * however. If we let the queue inherit that wait list reference, all we
-	 * need to do is reset the DELWRI_Q flag.
-	 */
-	xfs_buf_lock(bp);
-	error = bp->b_error;
-	bp->b_flags |= _XBF_DELWRI_Q;
-	xfs_buf_unlock(bp);
 
 	return error;
 }

@@ -885,57 +885,57 @@ do {								\
 #define MACvSetRFLE_LatchBase(iobase)                                 \
 	MACvWordRegBitsOn(iobase, MAC_REG_SOFTPWRCTL, SOFTPWRCTL_RFLEOPT)
 
-bool MACbIsRegBitsOn(struct vnt_private *priv, unsigned char byRegOfs,
+bool MACbIsRegBitsOn(struct vnt_private *, unsigned char byRegOfs,
 		     unsigned char byTestBits);
-bool MACbIsRegBitsOff(struct vnt_private *priv, unsigned char byRegOfs,
+bool MACbIsRegBitsOff(struct vnt_private *, unsigned char byRegOfs,
 		      unsigned char byTestBits);
 
-bool MACbIsIntDisable(struct vnt_private *priv);
+bool MACbIsIntDisable(struct vnt_private *);
 
-void MACvSetShortRetryLimit(struct vnt_private *priv, unsigned char byRetryLimit);
+void MACvSetShortRetryLimit(struct vnt_private *, unsigned char byRetryLimit);
 
-void MACvSetLongRetryLimit(struct vnt_private *priv, unsigned char byRetryLimit);
-void MACvGetLongRetryLimit(struct vnt_private *priv,
+void MACvSetLongRetryLimit(struct vnt_private *, unsigned char byRetryLimit);
+void MACvGetLongRetryLimit(struct vnt_private *,
 			   unsigned char *pbyRetryLimit);
 
-void MACvSetLoopbackMode(struct vnt_private *priv, unsigned char byLoopbackMode);
+void MACvSetLoopbackMode(struct vnt_private *, unsigned char byLoopbackMode);
 
-void MACvSaveContext(struct vnt_private *priv, unsigned char *pbyCxtBuf);
-void MACvRestoreContext(struct vnt_private *priv, unsigned char *pbyCxtBuf);
+void MACvSaveContext(struct vnt_private *, unsigned char *pbyCxtBuf);
+void MACvRestoreContext(struct vnt_private *, unsigned char *pbyCxtBuf);
 
-bool MACbSoftwareReset(struct vnt_private *priv);
-bool MACbSafeSoftwareReset(struct vnt_private *priv);
-bool MACbSafeRxOff(struct vnt_private *priv);
-bool MACbSafeTxOff(struct vnt_private *priv);
-bool MACbSafeStop(struct vnt_private *priv);
-bool MACbShutdown(struct vnt_private *priv);
-void MACvInitialize(struct vnt_private *priv);
-void MACvSetCurrRx0DescAddr(struct vnt_private *priv,
+bool MACbSoftwareReset(struct vnt_private *);
+bool MACbSafeSoftwareReset(struct vnt_private *);
+bool MACbSafeRxOff(struct vnt_private *);
+bool MACbSafeTxOff(struct vnt_private *);
+bool MACbSafeStop(struct vnt_private *);
+bool MACbShutdown(struct vnt_private *);
+void MACvInitialize(struct vnt_private *);
+void MACvSetCurrRx0DescAddr(struct vnt_private *,
 			    u32 curr_desc_addr);
-void MACvSetCurrRx1DescAddr(struct vnt_private *priv,
+void MACvSetCurrRx1DescAddr(struct vnt_private *,
 			    u32 curr_desc_addr);
-void MACvSetCurrTXDescAddr(int iTxType, struct vnt_private *priv,
+void MACvSetCurrTXDescAddr(int iTxType, struct vnt_private *,
 			   u32 curr_desc_addr);
-void MACvSetCurrTx0DescAddrEx(struct vnt_private *priv,
+void MACvSetCurrTx0DescAddrEx(struct vnt_private *,
 			      u32 curr_desc_addr);
-void MACvSetCurrAC0DescAddrEx(struct vnt_private *priv,
+void MACvSetCurrAC0DescAddrEx(struct vnt_private *,
 			      u32 curr_desc_addr);
-void MACvSetCurrSyncDescAddrEx(struct vnt_private *priv,
+void MACvSetCurrSyncDescAddrEx(struct vnt_private *,
 			       u32 curr_desc_addr);
-void MACvSetCurrATIMDescAddrEx(struct vnt_private *priv,
+void MACvSetCurrATIMDescAddrEx(struct vnt_private *,
 			       u32 curr_desc_addr);
-void MACvTimer0MicroSDelay(struct vnt_private *priv, unsigned int uDelay);
-void MACvOneShotTimer1MicroSec(struct vnt_private *priv, unsigned int uDelayTime);
+void MACvTimer0MicroSDelay(struct vnt_private *, unsigned int uDelay);
+void MACvOneShotTimer1MicroSec(struct vnt_private *, unsigned int uDelayTime);
 
-void MACvSetMISCFifo(struct vnt_private *priv, unsigned short wOffset,
+void MACvSetMISCFifo(struct vnt_private *, unsigned short wOffset,
 		     u32 dwData);
 
-bool MACbPSWakeup(struct vnt_private *priv);
+bool MACbPSWakeup(struct vnt_private *);
 
-void MACvSetKeyEntry(struct vnt_private *priv, unsigned short wKeyCtl,
+void MACvSetKeyEntry(struct vnt_private *, unsigned short wKeyCtl,
 		     unsigned int uEntryIdx, unsigned int uKeyIdx,
 		     unsigned char *pbyAddr, u32 *pdwKey,
 		     unsigned char byLocalID);
-void MACvDisableKeyEntry(struct vnt_private *priv, unsigned int uEntryIdx);
+void MACvDisableKeyEntry(struct vnt_private *, unsigned int uEntryIdx);
 
 #endif /* __MAC_H__ */

@@ -288,4 +288,9 @@ static struct platform_driver qcom_irq_combiner_probe = {
 	},
 	.probe = combiner_probe,
 };
-builtin_platform_driver(qcom_irq_combiner_probe);
+
+static int __init register_qcom_irq_combiner(void)
+{
+	return platform_driver_register(&qcom_irq_combiner_probe);
+}
+device_initcall(register_qcom_irq_combiner);

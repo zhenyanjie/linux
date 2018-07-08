@@ -24,9 +24,7 @@
 #include "meson_canvas.h"
 #include "meson_registers.h"
 
-/**
- * DOC: Canvas
- *
+/*
  * CANVAS is a memory zone where physical memory frames information
  * are stored for the VIU to scanout.
  */

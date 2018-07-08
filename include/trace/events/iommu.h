@@ -11,6 +11,7 @@
 #define _TRACE_IOMMU_H
 
 #include <linux/tracepoint.h>
+#include <linux/pci.h>
 
 struct device;
 

@@ -879,8 +879,7 @@ bpf_object__create_maps(struct bpf_object *obj)
 			size_t j;
 			int err = *pfd;
 
-			pr_warning("failed to create map (name: '%s'): %s\n",
-				   obj->maps[i].name,
+			pr_warning("failed to create map: %s\n",
 				   strerror(errno));
 			for (j = 0; j < i; j++)
 				zclose(obj->maps[j].fd);
@@ -1619,7 +1618,8 @@ int bpf_program__nth_fd(struct bpf_program *prog, int n)
 	return fd;
 }
 
-void bpf_program__set_type(struct bpf_program *prog, enum bpf_prog_type type)
+static void bpf_program__set_type(struct bpf_program *prog,
+				  enum bpf_prog_type type)
 {
 	prog->type = type;
 }

@@ -33,7 +33,6 @@
 #include <asm/mce.h>
 #include <asm/trace/irq_vectors.h>
 #include <asm/kexec.h>
-#include <asm/virtext.h>
 
 /*
  *	Some notes on x86 processor bugs affecting SMP operation:
@@ -125,7 +124,7 @@ static bool smp_no_nmi_ipi = false;
 static void native_smp_send_reschedule(int cpu)
 {
 	if (unlikely(cpu_is_offline(cpu))) {
-		WARN(1, "sched: Unexpected reschedule of offline CPU#%d!\n", cpu);
+		WARN_ON(1);
 		return;
 	}
 	apic->send_IPI(cpu, RESCHEDULE_VECTOR);
@@ -163,7 +162,6 @@ static int smp_stop_nmi_callback(unsigned int val, struct pt_regs *regs)
 	if (raw_smp_processor_id() == atomic_read(&stopping_cpu))
 		return NMI_HANDLED;
 
-	cpu_emergency_vmxoff();
 	stop_this_cpu(NULL);
 
 	return NMI_HANDLED;
@@ -176,7 +174,6 @@ static int smp_stop_nmi_callback(unsigned int val, struct pt_regs *regs)
 asmlinkage __visible void smp_reboot_interrupt(void)
 {
 	ipi_entering_ack_irq();
-	cpu_emergency_vmxoff();
 	stop_this_cpu(NULL);
 	irq_exit();
 }

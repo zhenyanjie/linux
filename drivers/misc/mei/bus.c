@@ -1040,7 +1040,7 @@ static void mei_cl_bus_dev_init(struct mei_device *bus,
  *
  * @bus: mei device
  */
-static void mei_cl_bus_rescan(struct mei_device *bus)
+void mei_cl_bus_rescan(struct mei_device *bus)
 {
 	struct mei_cl_device *cldev, *n;
 	struct mei_me_client *me_cl;
@@ -1078,6 +1078,12 @@ void mei_cl_bus_rescan_work(struct work_struct *work)
 {
 	struct mei_device *bus =
 		container_of(work, struct mei_device, bus_rescan_work);
+	struct mei_me_client *me_cl;
+
+	me_cl = mei_me_cl_by_uuid(bus, &mei_amthif_guid);
+	if (me_cl)
+		mei_amthif_host_init(bus, me_cl);
+	mei_me_cl_put(me_cl);
 
 	mei_cl_bus_rescan(bus);
 }

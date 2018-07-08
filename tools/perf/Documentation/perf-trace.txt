@@ -123,8 +123,7 @@ the thread executes on the designated CPUs. Default is to monitor all CPUs.
 	major or all pagefaults. Default value is maj.
 
 --syscalls::
-	Trace system calls. This options is enabled by default, disable with
-	--no-syscalls.
+	Trace system calls. This options is enabled by default.
 
 --call-graph [mode,type,min[,limit],order[,key][,branch]]::
         Setup and enable call-graph (stack chain/backtrace) recording.

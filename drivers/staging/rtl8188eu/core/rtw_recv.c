@@ -392,7 +392,7 @@ static struct recv_frame *decryptor(struct adapter *padapter,
 		}
 	}
 
-	if ((prxattrib->encrypt > 0) && (prxattrib->bdecrypted == 0)) {
+	if ((prxattrib->encrypt > 0) && ((prxattrib->bdecrypted == 0) || (psecuritypriv->sw_decrypt))) {
 		psecuritypriv->hw_decrypted = false;
 
 		switch (prxattrib->encrypt) {
@@ -452,7 +452,7 @@ static struct recv_frame *portctrl(struct adapter *adapter,
 
 	if (auth_alg == 2) {
 		/* get ether_type */
-		ptr = ptr + pfhdr->attrib.hdrlen + LLC_HEADER_SIZE + pfhdr->attrib.iv_len;
+		ptr = ptr + pfhdr->attrib.hdrlen + LLC_HEADER_SIZE;
 		memcpy(&be_tmp, ptr, 2);
 		ether_type = ntohs(be_tmp);
 
@@ -1510,6 +1510,7 @@ static int amsdu_to_msdu(struct adapter *padapter, struct recv_frame *prframe)
 	u8	nr_subframes, i;
 	unsigned char *pdata;
 	struct rx_pkt_attrib *pattrib;
+	unsigned char *data_ptr;
 	struct sk_buff *sub_skb, *subframes[MAX_SUBFRAME_COUNT];
 	struct recv_priv *precvpriv = &padapter->recvpriv;
 	struct __queue *pfree_recv_queue = &(precvpriv->free_recv_queue);
@@ -1543,7 +1544,8 @@ static int amsdu_to_msdu(struct adapter *padapter, struct recv_frame *prframe)
 		sub_skb = dev_alloc_skb(nSubframe_Length + 12);
 		if (sub_skb) {
 			skb_reserve(sub_skb, 12);
-			skb_put_data(sub_skb, pdata, nSubframe_Length);
+			data_ptr = (u8 *)skb_put(sub_skb, nSubframe_Length);
+			memcpy(data_ptr, pdata, nSubframe_Length);
 		} else {
 			sub_skb = skb_clone(prframe->pkt, GFP_ATOMIC);
 			if (sub_skb) {
@@ -1977,7 +1979,7 @@ static int recv_func(struct adapter *padapter, struct recv_frame *rframe)
 		/* check if need to enqueue into uc_swdec_pending_queue*/
 		if (check_fwstate(mlmepriv, WIFI_STATION_STATE) &&
 		    !IS_MCAST(prxattrib->ra) && prxattrib->encrypt > 0 &&
-		    prxattrib->bdecrypted == 0 &&
+		    (prxattrib->bdecrypted == 0 || psecuritypriv->sw_decrypt) &&
 		    !is_wep_enc(psecuritypriv->dot11PrivacyAlgrthm) &&
 		    !psecuritypriv->busetkipkey) {
 			rtw_enqueue_recvframe(rframe, &padapter->recvpriv.uc_swdec_pending_queue);
@@ -2048,13 +2050,19 @@ static void rtw_signal_stat_timer_hdl(unsigned long data)
 	if (check_fwstate(&adapter->mlmepriv, _FW_UNDER_SURVEY) == false) {
 		tmp_s = avg_signal_strength +
 			(_alpha - 1) * recvpriv->signal_strength;
-		tmp_s = DIV_ROUND_UP(tmp_s, _alpha);
+		if (tmp_s % _alpha)
+			tmp_s = tmp_s / _alpha + 1;
+		else
+			tmp_s = tmp_s / _alpha;
 		if (tmp_s > 100)
 			tmp_s = 100;
 
 		tmp_q = avg_signal_qual +
 			(_alpha - 1) * recvpriv->signal_qual;
-		tmp_q = DIV_ROUND_UP(tmp_q, _alpha);
+		if (tmp_q % _alpha)
+			tmp_q = tmp_q / _alpha + 1;
+		else
+			tmp_q = tmp_q / _alpha;
 		if (tmp_q > 100)
 			tmp_q = 100;
 

@@ -39,7 +39,7 @@
 
 #define D_LNI D_CONSOLE
 
-struct lnet the_lnet;		/* THE state of the network */
+lnet_t the_lnet;			   /* THE state of the network */
 EXPORT_SYMBOL(the_lnet);
 
 static char *ip2nets = "";
@@ -58,8 +58,8 @@ static int rnet_htable_size = LNET_REMOTE_NETS_HASH_DEFAULT;
 module_param(rnet_htable_size, int, 0444);
 MODULE_PARM_DESC(rnet_htable_size, "size of remote network hash table");
 
-static int lnet_ping(struct lnet_process_id id, int timeout_ms,
-		     struct lnet_process_id __user *ids, int n_ids);
+static int lnet_ping(lnet_process_id_t id, int timeout_ms,
+		     lnet_process_id_t __user *ids, int n_ids);
 
 static char *
 lnet_get_routes(void)
@@ -265,15 +265,15 @@ static void lnet_assert_wire_constants(void)
 	BUILD_BUG_ON((int)sizeof(((struct lnet_hdr *)0)->msg.hello.type) != 4);
 }
 
-static struct lnet_lnd *
+static lnd_t *
 lnet_find_lnd_by_type(__u32 type)
 {
-	struct lnet_lnd *lnd;
+	lnd_t *lnd;
 	struct list_head *tmp;
 
 	/* holding lnd mutex */
 	list_for_each(tmp, &the_lnet.ln_lnds) {
-		lnd = list_entry(tmp, struct lnet_lnd, lnd_list);
+		lnd = list_entry(tmp, lnd_t, lnd_list);
 
 		if (lnd->lnd_type == type)
 			return lnd;
@@ -283,7 +283,7 @@ lnet_find_lnd_by_type(__u32 type)
 }
 
 void
-lnet_register_lnd(struct lnet_lnd *lnd)
+lnet_register_lnd(lnd_t *lnd)
 {
 	mutex_lock(&the_lnet.ln_lnd_mutex);
 
@@ -300,7 +300,7 @@ lnet_register_lnd(struct lnet_lnd *lnd)
 EXPORT_SYMBOL(lnet_register_lnd);
 
 void
-lnet_unregister_lnd(struct lnet_lnd *lnd)
+lnet_unregister_lnd(lnd_t *lnd)
 {
 	mutex_lock(&the_lnet.ln_lnd_mutex);
 
@@ -315,9 +315,9 @@ lnet_unregister_lnd(struct lnet_lnd *lnd)
 EXPORT_SYMBOL(lnet_unregister_lnd);
 
 void
-lnet_counters_get(struct lnet_counters *counters)
+lnet_counters_get(lnet_counters_t *counters)
 {
-	struct lnet_counters *ctr;
+	lnet_counters_t *ctr;
 	int i;
 
 	memset(counters, 0, sizeof(*counters));
@@ -344,13 +344,13 @@ EXPORT_SYMBOL(lnet_counters_get);
 void
 lnet_counters_reset(void)
 {
-	struct lnet_counters *counters;
+	lnet_counters_t *counters;
 	int i;
 
 	lnet_net_lock(LNET_LOCK_EX);
 
 	cfs_percpt_for_each(counters, i, the_lnet.ln_counters)
-		memset(counters, 0, sizeof(struct lnet_counters));
+		memset(counters, 0, sizeof(lnet_counters_t));
 
 	lnet_net_unlock(LNET_LOCK_EX);
 }
@@ -383,10 +383,10 @@ lnet_res_container_cleanup(struct lnet_res_container *rec)
 
 		list_del_init(e);
 		if (rec->rec_type == LNET_COOKIE_TYPE_EQ) {
-			lnet_eq_free(list_entry(e, struct lnet_eq, eq_list));
+			lnet_eq_free(list_entry(e, lnet_eq_t, eq_list));
 
 		} else if (rec->rec_type == LNET_COOKIE_TYPE_MD) {
-			lnet_md_free(list_entry(e, struct lnet_libmd, md_list));
+			lnet_md_free(list_entry(e, lnet_libmd_t, md_list));
 
 		} else { /* NB: Active MEs should be attached on portals */
 			LBUG();
@@ -483,12 +483,12 @@ lnet_res_containers_create(int type)
 	return recs;
 }
 
-struct lnet_libhandle *
+lnet_libhandle_t *
 lnet_res_lh_lookup(struct lnet_res_container *rec, __u64 cookie)
 {
 	/* ALWAYS called with lnet_res_lock held */
 	struct list_head *head;
-	struct lnet_libhandle *lh;
+	lnet_libhandle_t *lh;
 	unsigned int hash;
 
 	if ((cookie & LNET_COOKIE_MASK) != rec->rec_type)
@@ -506,8 +506,7 @@ lnet_res_lh_lookup(struct lnet_res_container *rec, __u64 cookie)
 }
 
 void
-lnet_res_lh_initialize(struct lnet_res_container *rec,
-		       struct lnet_libhandle *lh)
+lnet_res_lh_initialize(struct lnet_res_container *rec, lnet_libhandle_t *lh)
 {
 	/* ALWAYS called with lnet_res_lock held */
 	unsigned int ibits = LNET_COOKIE_TYPE_BITS + LNET_CPT_BITS;
@@ -560,7 +559,7 @@ lnet_prepare(lnet_pid_t requested_pid)
 	the_lnet.ln_interface_cookie = ktime_get_ns();
 
 	the_lnet.ln_counters = cfs_percpt_alloc(lnet_cpt_table(),
-						sizeof(struct lnet_counters));
+						sizeof(lnet_counters_t));
 	if (!the_lnet.ln_counters) {
 		CERROR("Failed to allocate counters for LNet\n");
 		rc = -ENOMEM;
@@ -653,16 +652,16 @@ lnet_unprepare(void)
 	return 0;
 }
 
-struct lnet_ni  *
+lnet_ni_t  *
 lnet_net2ni_locked(__u32 net, int cpt)
 {
 	struct list_head *tmp;
-	struct lnet_ni *ni;
+	lnet_ni_t *ni;
 
 	LASSERT(cpt != LNET_LOCK_EX);
 
 	list_for_each(tmp, &the_lnet.ln_nis) {
-		ni = list_entry(tmp, struct lnet_ni, ni_list);
+		ni = list_entry(tmp, lnet_ni_t, ni_list);
 
 		if (LNET_NIDNET(ni->ni_nid) == net) {
 			lnet_ni_addref_locked(ni, cpt);
@@ -673,10 +672,10 @@ lnet_net2ni_locked(__u32 net, int cpt)
 	return NULL;
 }
 
-struct lnet_ni *
+lnet_ni_t *
 lnet_net2ni(__u32 net)
 {
-	struct lnet_ni *ni;
+	lnet_ni_t *ni;
 
 	lnet_net_lock(0);
 	ni = lnet_net2ni_locked(net, 0);
@@ -766,7 +765,7 @@ lnet_islocalnet(__u32 net)
 	return !!ni;
 }
 
-struct lnet_ni  *
+lnet_ni_t  *
 lnet_nid2ni_locked(lnet_nid_t nid, int cpt)
 {
 	struct lnet_ni *ni;
@@ -775,7 +774,7 @@ lnet_nid2ni_locked(lnet_nid_t nid, int cpt)
 	LASSERT(cpt != LNET_LOCK_EX);
 
 	list_for_each(tmp, &the_lnet.ln_nis) {
-		ni = list_entry(tmp, struct lnet_ni, ni_list);
+		ni = list_entry(tmp, lnet_ni_t, ni_list);
 
 		if (ni->ni_nid == nid) {
 			lnet_ni_addref_locked(ni, cpt);
@@ -812,7 +811,7 @@ lnet_count_acceptor_nis(void)
 
 	cpt = lnet_net_lock_current();
 	list_for_each(tmp, &the_lnet.ln_nis) {
-		ni = list_entry(tmp, struct lnet_ni, ni_list);
+		ni = list_entry(tmp, lnet_ni_t, ni_list);
 
 		if (ni->ni_lnd->lnd_accept)
 			count++;
@@ -888,7 +887,7 @@ lnet_ping_info_destroy(void)
 }
 
 static void
-lnet_ping_event_handler(struct lnet_event *event)
+lnet_ping_event_handler(lnet_event_t *event)
 {
 	struct lnet_ping_info *pinfo = event->md.user_ptr;
 
@@ -897,13 +896,12 @@ lnet_ping_event_handler(struct lnet_event *event)
 }
 
 static int
-lnet_ping_info_setup(struct lnet_ping_info **ppinfo,
-		     struct lnet_handle_md *md_handle,
+lnet_ping_info_setup(struct lnet_ping_info **ppinfo, lnet_handle_md_t *md_handle,
 		     int ni_count, bool set_eq)
 {
-	struct lnet_process_id id = {LNET_NID_ANY, LNET_PID_ANY};
-	struct lnet_handle_me me_handle;
-	struct lnet_md md = { NULL };
+	lnet_process_id_t id = {LNET_NID_ANY, LNET_PID_ANY};
+	lnet_handle_me_t me_handle;
+	lnet_md_t md = { NULL };
 	int rc, rc2;
 
 	if (set_eq) {
@@ -963,13 +961,12 @@ failed_0:
 }
 
 static void
-lnet_ping_md_unlink(struct lnet_ping_info *pinfo,
-		    struct lnet_handle_md *md_handle)
+lnet_ping_md_unlink(struct lnet_ping_info *pinfo, lnet_handle_md_t *md_handle)
 {
 	sigset_t blocked = cfs_block_allsigs();
 
 	LNetMDUnlink(*md_handle);
-	LNetInvalidateMDHandle(md_handle);
+	LNetInvalidateHandle(md_handle);
 
 	/* NB md could be busy; this just starts the unlink */
 	while (pinfo->pi_features != LNET_PING_FEAT_INVAL) {
@@ -985,7 +982,7 @@ static void
 lnet_ping_info_install_locked(struct lnet_ping_info *ping_info)
 {
 	struct lnet_ni_status *ns;
-	struct lnet_ni *ni;
+	lnet_ni_t *ni;
 	int i = 0;
 
 	list_for_each_entry(ni, &the_lnet.ln_nis, ni_list) {
@@ -1006,11 +1003,10 @@ lnet_ping_info_install_locked(struct lnet_ping_info *ping_info)
 }
 
 static void
-lnet_ping_target_update(struct lnet_ping_info *pinfo,
-			struct lnet_handle_md md_handle)
+lnet_ping_target_update(struct lnet_ping_info *pinfo, lnet_handle_md_t md_handle)
 {
 	struct lnet_ping_info *old_pinfo = NULL;
-	struct lnet_handle_md old_md;
+	lnet_handle_md_t old_md;
 
 	/* switch the NIs to point to the new ping info created */
 	lnet_net_lock(LNET_LOCK_EX);
@@ -1050,7 +1046,7 @@ lnet_ping_target_fini(void)
 }
 
 static int
-lnet_ni_tq_credits(struct lnet_ni *ni)
+lnet_ni_tq_credits(lnet_ni_t *ni)
 {
 	int credits;
 
@@ -1067,7 +1063,7 @@ lnet_ni_tq_credits(struct lnet_ni *ni)
 }
 
 static void
-lnet_ni_unlink_locked(struct lnet_ni *ni)
+lnet_ni_unlink_locked(lnet_ni_t *ni)
 {
 	if (!list_empty(&ni->ni_cptlist)) {
 		list_del_init(&ni->ni_cptlist);
@@ -1085,8 +1081,8 @@ lnet_clear_zombies_nis_locked(void)
 {
 	int i;
 	int islo;
-	struct lnet_ni *ni;
-	struct lnet_ni *temp;
+	lnet_ni_t *ni;
+	lnet_ni_t *temp;
 
 	/*
 	 * Now wait for the NI's I just nuked to show up on ln_zombie_nis
@@ -1145,8 +1141,8 @@ lnet_clear_zombies_nis_locked(void)
 static void
 lnet_shutdown_lndnis(void)
 {
-	struct lnet_ni *ni;
-	struct lnet_ni *temp;
+	lnet_ni_t *ni;
+	lnet_ni_t *temp;
 	int i;
 
 	/* NB called holding the global mutex */
@@ -1174,7 +1170,7 @@ lnet_shutdown_lndnis(void)
 
 	/*
 	 * Clear lazy portals and drop delayed messages which hold refs
-	 * on their lnet_msg::msg_rxpeer
+	 * on their lnet_msg_t::msg_rxpeer
 	 */
 	for (i = 0; i < the_lnet.ln_nportals; i++)
 		LNetClearLazyPortal(i);
@@ -1220,7 +1216,7 @@ lnet_startup_lndni(struct lnet_ni *ni, struct lnet_ioctl_config_data *conf)
 	struct lnet_ioctl_config_lnd_tunables *lnd_tunables = NULL;
 	int rc = -EINVAL;
 	int lnd_type;
-	struct lnet_lnd *lnd;
+	lnd_t *lnd;
 	struct lnet_tx_queue *tq;
 	int i;
 
@@ -1380,7 +1376,7 @@ lnet_startup_lndnis(struct list_head *nilist)
 	int ni_count = 0;
 
 	while (!list_empty(nilist)) {
-		ni = list_entry(nilist->next, struct lnet_ni, ni_list);
+		ni = list_entry(nilist->next, lnet_ni_t, ni_list);
 		list_del(&ni->ni_list);
 		rc = lnet_startup_lndni(ni, NULL);
 
@@ -1437,7 +1433,7 @@ int lnet_lib_init(void)
 	}
 
 	the_lnet.ln_refcount = 0;
-	LNetInvalidateEQHandle(&the_lnet.ln_rc_eqh);
+	LNetInvalidateHandle(&the_lnet.ln_rc_eqh);
 	INIT_LIST_HEAD(&the_lnet.ln_lnds);
 	INIT_LIST_HEAD(&the_lnet.ln_rcd_zombie);
 	INIT_LIST_HEAD(&the_lnet.ln_rcd_deathrow);
@@ -1475,7 +1471,7 @@ void lnet_lib_exit(void)
 
 	while (!list_empty(&the_lnet.ln_lnds))
 		lnet_unregister_lnd(list_entry(the_lnet.ln_lnds.next,
-					       struct lnet_lnd, lnd_list));
+					       lnd_t, lnd_list));
 	lnet_destroy_locks();
 }
 
@@ -1501,7 +1497,7 @@ LNetNIInit(lnet_pid_t requested_pid)
 	int rc;
 	int ni_count;
 	struct lnet_ping_info *pinfo;
-	struct lnet_handle_md md_handle;
+	lnet_handle_md_t md_handle;
 	struct list_head net_head;
 
 	INIT_LIST_HEAD(&net_head);
@@ -1742,7 +1738,7 @@ lnet_get_net_config(struct lnet_ioctl_config_data *config)
 		if (i++ != idx)
 			continue;
 
-		ni = list_entry(tmp, struct lnet_ni, ni_list);
+		ni = list_entry(tmp, lnet_ni_t, ni_list);
 		lnet_ni_lock(ni);
 		lnet_fill_ni_info(ni, config);
 		lnet_ni_unlock(ni);
@@ -1759,10 +1755,10 @@ lnet_dyn_add_ni(lnet_pid_t requested_pid, struct lnet_ioctl_config_data *conf)
 {
 	char *nets = conf->cfg_config_u.cfg_net.net_intf;
 	struct lnet_ping_info *pinfo;
-	struct lnet_handle_md md_handle;
+	lnet_handle_md_t md_handle;
 	struct lnet_ni *ni;
 	struct list_head net_head;
-	struct lnet_remotenet *rnet;
+	lnet_remotenet_t *rnet;
 	int rc;
 
 	INIT_LIST_HEAD(&net_head);
@@ -1837,9 +1833,9 @@ failed0:
 int
 lnet_dyn_del_ni(__u32 net)
 {
-	struct lnet_ni *ni;
+	lnet_ni_t *ni;
 	struct lnet_ping_info *pinfo;
-	struct lnet_handle_md md_handle;
+	lnet_handle_md_t md_handle;
 	int rc;
 
 	/* don't allow userspace to shutdown the LOLND */
@@ -1887,8 +1883,8 @@ LNetCtl(unsigned int cmd, void *arg)
 {
 	struct libcfs_ioctl_data *data = arg;
 	struct lnet_ioctl_config_data *config;
-	struct lnet_process_id id = {0};
-	struct lnet_ni *ni;
+	lnet_process_id_t id = {0};
+	lnet_ni_t *ni;
 	int rc;
 	unsigned long secs_passed;
 
@@ -2059,7 +2055,7 @@ LNetCtl(unsigned int cmd, void *arg)
 		id.pid = data->ioc_u32[0];
 		rc = lnet_ping(id, data->ioc_u32[1], /* timeout */
 			       data->ioc_pbuf1,
-			       data->ioc_plen1 / sizeof(struct lnet_process_id));
+			       data->ioc_plen1 / sizeof(lnet_process_id_t));
 		if (rc < 0)
 			return rc;
 		data->ioc_count = rc;
@@ -2082,25 +2078,25 @@ LNetCtl(unsigned int cmd, void *arg)
 }
 EXPORT_SYMBOL(LNetCtl);
 
-void LNetDebugPeer(struct lnet_process_id id)
+void LNetDebugPeer(lnet_process_id_t id)
 {
 	lnet_debug_peer(id.nid);
 }
 EXPORT_SYMBOL(LNetDebugPeer);
 
 /**
- * Retrieve the lnet_process_id ID of LNet interface at \a index. Note that
+ * Retrieve the lnet_process_id_t ID of LNet interface at \a index. Note that
  * all interfaces share a same PID, as requested by LNetNIInit().
  *
  * \param index Index of the interface to look up.
  * \param id On successful return, this location will hold the
- * lnet_process_id ID of the interface.
+ * lnet_process_id_t ID of the interface.
  *
  * \retval 0 If an interface exists at \a index.
  * \retval -ENOENT If no interface has been found.
  */
 int
-LNetGetId(unsigned int index, struct lnet_process_id *id)
+LNetGetId(unsigned int index, lnet_process_id_t *id)
 {
 	struct lnet_ni *ni;
 	struct list_head *tmp;
@@ -2115,7 +2111,7 @@ LNetGetId(unsigned int index, struct lnet_process_id *id)
 		if (index--)
 			continue;
 
-		ni = list_entry(tmp, struct lnet_ni, ni_list);
+		ni = list_entry(tmp, lnet_ni_t, ni_list);
 
 		id->nid = ni->ni_nid;
 		id->pid = the_lnet.ln_pid;
@@ -2128,20 +2124,31 @@ LNetGetId(unsigned int index, struct lnet_process_id *id)
 }
 EXPORT_SYMBOL(LNetGetId);
 
-static int lnet_ping(struct lnet_process_id id, int timeout_ms,
-		     struct lnet_process_id __user *ids, int n_ids)
+/**
+ * Print a string representation of handle \a h into buffer \a str of
+ * \a len bytes.
+ */
+void
+LNetSnprintHandle(char *str, int len, lnet_handle_any_t h)
 {
-	struct lnet_handle_eq eqh;
-	struct lnet_handle_md mdh;
-	struct lnet_event event;
-	struct lnet_md md = { NULL };
+	snprintf(str, len, "%#llx", h.cookie);
+}
+EXPORT_SYMBOL(LNetSnprintHandle);
+
+static int lnet_ping(lnet_process_id_t id, int timeout_ms,
+		     lnet_process_id_t __user *ids, int n_ids)
+{
+	lnet_handle_eq_t eqh;
+	lnet_handle_md_t mdh;
+	lnet_event_t event;
+	lnet_md_t md = { NULL };
 	int which;
 	int unlinked = 0;
 	int replied = 0;
 	const int a_long_time = 60000; /* mS */
 	int infosz;
 	struct lnet_ping_info *info;
-	struct lnet_process_id tmpid;
+	lnet_process_id_t tmpid;
 	int i;
 	int nob;
 	int rc;

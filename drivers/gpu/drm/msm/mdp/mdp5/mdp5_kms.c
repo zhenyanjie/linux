@@ -93,7 +93,6 @@ struct mdp5_state *mdp5_get_state(struct drm_atomic_state *s)
 
 	/* Copy state: */
 	new_state->hwpipe = mdp5_kms->state->hwpipe;
-	new_state->hwmixer = mdp5_kms->state->hwmixer;
 	if (mdp5_kms->smp)
 		new_state->smp = mdp5_kms->state->smp;
 
@@ -163,11 +162,8 @@ static void mdp5_set_encoder_mode(struct msm_kms *kms,
 static void mdp5_kms_destroy(struct msm_kms *kms)
 {
 	struct mdp5_kms *mdp5_kms = to_mdp5_kms(to_mdp_kms(kms));
-	struct msm_gem_address_space *aspace = kms->aspace;
+	struct msm_gem_address_space *aspace = mdp5_kms->aspace;
 	int i;
-
-	for (i = 0; i < mdp5_kms->num_hwmixers; i++)
-		mdp5_mixer_destroy(mdp5_kms->hwmixers[i]);
 
 	for (i = 0; i < mdp5_kms->num_hwpipes; i++)
 		mdp5_pipe_destroy(mdp5_kms->hwpipes[i]);
@@ -175,7 +171,7 @@ static void mdp5_kms_destroy(struct msm_kms *kms)
 	if (aspace) {
 		aspace->mmu->funcs->detach(aspace->mmu,
 				iommu_ports, ARRAY_SIZE(iommu_ports));
-		msm_gem_address_space_put(aspace);
+		msm_gem_address_space_destroy(aspace);
 	}
 }
 
@@ -218,6 +214,12 @@ static int mdp5_kms_debugfs_init(struct msm_kms *kms, struct drm_minor *minor)
 
 	return 0;
 }
+
+static void mdp5_kms_debugfs_cleanup(struct msm_kms *kms, struct drm_minor *minor)
+{
+	drm_debugfs_remove_files(mdp5_debugfs_list,
+			ARRAY_SIZE(mdp5_debugfs_list), minor);
+}
 #endif
 
 static const struct mdp_kms_funcs kms_funcs = {
@@ -240,6 +242,7 @@ static const struct mdp_kms_funcs kms_funcs = {
 		.destroy         = mdp5_kms_destroy,
 #ifdef CONFIG_DEBUG_FS
 		.debugfs_init    = mdp5_kms_debugfs_init,
+		.debugfs_cleanup = mdp5_kms_debugfs_cleanup,
 #endif
 	},
 	.set_irqmask         = mdp5_set_irqmask,
@@ -272,14 +275,19 @@ int mdp5_enable(struct mdp5_kms *mdp5_kms)
 }
 
 static struct drm_encoder *construct_encoder(struct mdp5_kms *mdp5_kms,
-					     struct mdp5_interface *intf,
-					     struct mdp5_ctl *ctl)
+		enum mdp5_intf_type intf_type, int intf_num,
+		struct mdp5_ctl *ctl)
 {
 	struct drm_device *dev = mdp5_kms->dev;
 	struct msm_drm_private *priv = dev->dev_private;
 	struct drm_encoder *encoder;
+	struct mdp5_interface intf = {
+			.num	= intf_num,
+			.type	= intf_type,
+			.mode	= MDP5_INTF_MODE_NONE,
+	};
 
-	encoder = mdp5_encoder_init(dev, intf, ctl);
+	encoder = mdp5_encoder_init(dev, &intf, ctl);
 	if (IS_ERR(encoder)) {
 		dev_err(dev->dev, "failed to construct encoder\n");
 		return encoder;
@@ -308,28 +316,32 @@ static int get_dsi_id_from_intf(const struct mdp5_cfg_hw *hw_cfg, int intf_num)
 	return -EINVAL;
 }
 
-static int modeset_init_intf(struct mdp5_kms *mdp5_kms,
-			     struct mdp5_interface *intf)
+static int modeset_init_intf(struct mdp5_kms *mdp5_kms, int intf_num)
 {
 	struct drm_device *dev = mdp5_kms->dev;
 	struct msm_drm_private *priv = dev->dev_private;
+	const struct mdp5_cfg_hw *hw_cfg =
+					mdp5_cfg_get_hw_config(mdp5_kms->cfg);
+	enum mdp5_intf_type intf_type = hw_cfg->intf.connect[intf_num];
 	struct mdp5_ctl_manager *ctlm = mdp5_kms->ctlm;
 	struct mdp5_ctl *ctl;
 	struct drm_encoder *encoder;
 	int ret = 0;
 
-	switch (intf->type) {
+	switch (intf_type) {
+	case INTF_DISABLED:
+		break;
 	case INTF_eDP:
 		if (!priv->edp)
 			break;
 
-		ctl = mdp5_ctlm_request(ctlm, intf->num);
+		ctl = mdp5_ctlm_request(ctlm, intf_num);
 		if (!ctl) {
 			ret = -EINVAL;
 			break;
 		}
 
-		encoder = construct_encoder(mdp5_kms, intf, ctl);
+		encoder = construct_encoder(mdp5_kms, INTF_eDP, intf_num, ctl);
 		if (IS_ERR(encoder)) {
 			ret = PTR_ERR(encoder);
 			break;
@@ -341,13 +353,13 @@ static int modeset_init_intf(struct mdp5_kms *mdp5_kms,
 		if (!priv->hdmi)
 			break;
 
-		ctl = mdp5_ctlm_request(ctlm, intf->num);
+		ctl = mdp5_ctlm_request(ctlm, intf_num);
 		if (!ctl) {
 			ret = -EINVAL;
 			break;
 		}
 
-		encoder = construct_encoder(mdp5_kms, intf, ctl);
+		encoder = construct_encoder(mdp5_kms, INTF_HDMI, intf_num, ctl);
 		if (IS_ERR(encoder)) {
 			ret = PTR_ERR(encoder);
 			break;
@@ -357,13 +369,11 @@ static int modeset_init_intf(struct mdp5_kms *mdp5_kms,
 		break;
 	case INTF_DSI:
 	{
-		const struct mdp5_cfg_hw *hw_cfg =
-					mdp5_cfg_get_hw_config(mdp5_kms->cfg);
-		int dsi_id = get_dsi_id_from_intf(hw_cfg, intf->num);
+		int dsi_id = get_dsi_id_from_intf(hw_cfg, intf_num);
 
 		if ((dsi_id >= ARRAY_SIZE(priv->dsi)) || (dsi_id < 0)) {
 			dev_err(dev->dev, "failed to find dsi from intf %d\n",
-				intf->num);
+				intf_num);
 			ret = -EINVAL;
 			break;
 		}
@@ -371,13 +381,13 @@ static int modeset_init_intf(struct mdp5_kms *mdp5_kms,
 		if (!priv->dsi[dsi_id])
 			break;
 
-		ctl = mdp5_ctlm_request(ctlm, intf->num);
+		ctl = mdp5_ctlm_request(ctlm, intf_num);
 		if (!ctl) {
 			ret = -EINVAL;
 			break;
 		}
 
-		encoder = construct_encoder(mdp5_kms, intf, ctl);
+		encoder = construct_encoder(mdp5_kms, INTF_DSI, intf_num, ctl);
 		if (IS_ERR(encoder)) {
 			ret = PTR_ERR(encoder);
 			break;
@@ -387,7 +397,7 @@ static int modeset_init_intf(struct mdp5_kms *mdp5_kms,
 		break;
 	}
 	default:
-		dev_err(dev->dev, "unknown intf: %d\n", intf->type);
+		dev_err(dev->dev, "unknown intf: %d\n", intf_type);
 		ret = -EINVAL;
 		break;
 	}
@@ -411,8 +421,8 @@ static int modeset_init(struct mdp5_kms *mdp5_kms)
 	 * Construct encoders and modeset initialize connector devices
 	 * for each external display interface.
 	 */
-	for (i = 0; i < mdp5_kms->num_intfs; i++) {
-		ret = modeset_init_intf(mdp5_kms, mdp5_kms->intfs[i]);
+	for (i = 0; i < ARRAY_SIZE(hw_cfg->intf.connect); i++) {
+		ret = modeset_init_intf(mdp5_kms, i);
 		if (ret)
 			goto fail;
 	}
@@ -422,7 +432,7 @@ static int modeset_init(struct mdp5_kms *mdp5_kms)
 	 * the MDP5 interfaces) than the number of layer mixers present in HW,
 	 * but let's be safe here anyway
 	 */
-	num_crtcs = min(priv->num_encoders, mdp5_kms->num_hwmixers);
+	num_crtcs = min(priv->num_encoders, mdp5_cfg->lm.count);
 
 	/*
 	 * Construct planes equaling the number of hw pipes, and CRTCs for the
@@ -502,7 +512,7 @@ static int get_clk(struct platform_device *pdev, struct clk **clkp,
 		const char *name, bool mandatory)
 {
 	struct device *dev = &pdev->dev;
-	struct clk *clk = msm_clk_get(pdev, name);
+	struct clk *clk = devm_clk_get(dev, name);
 	if (IS_ERR(clk) && mandatory) {
 		dev_err(dev, "failed to get %s (%ld)\n", name, PTR_ERR(clk));
 		return PTR_ERR(clk);
@@ -527,27 +537,30 @@ static struct drm_encoder *get_encoder_from_crtc(struct drm_crtc *crtc)
 	return NULL;
 }
 
-static bool mdp5_get_scanoutpos(struct drm_device *dev, unsigned int pipe,
-				bool in_vblank_irq, int *vpos, int *hpos,
-				ktime_t *stime, ktime_t *etime,
-				const struct drm_display_mode *mode)
+static int mdp5_get_scanoutpos(struct drm_device *dev, unsigned int pipe,
+			       unsigned int flags, int *vpos, int *hpos,
+			       ktime_t *stime, ktime_t *etime,
+			       const struct drm_display_mode *mode)
 {
 	struct msm_drm_private *priv = dev->dev_private;
 	struct drm_crtc *crtc;
 	struct drm_encoder *encoder;
 	int line, vsw, vbp, vactive_start, vactive_end, vfp_end;
+	int ret = 0;
 
 	crtc = priv->crtcs[pipe];
 	if (!crtc) {
 		DRM_ERROR("Invalid crtc %d\n", pipe);
-		return false;
+		return 0;
 	}
 
 	encoder = get_encoder_from_crtc(crtc);
 	if (!encoder) {
 		DRM_ERROR("no encoder found for crtc %d\n", pipe);
-		return false;
+		return 0;
 	}
+
+	ret |= DRM_SCANOUTPOS_VALID | DRM_SCANOUTPOS_ACCURATE;
 
 	vsw = mode->crtc_vsync_end - mode->crtc_vsync_start;
 	vbp = mode->crtc_vtotal - mode->crtc_vsync_end;
@@ -572,8 +585,10 @@ static bool mdp5_get_scanoutpos(struct drm_device *dev, unsigned int pipe,
 
 	if (line < vactive_start) {
 		line -= vactive_start;
+		ret |= DRM_SCANOUTPOS_IN_VBLANK;
 	} else if (line > vactive_end) {
 		line = line - vfp_end - vactive_start;
+		ret |= DRM_SCANOUTPOS_IN_VBLANK;
 	} else {
 		line -= vactive_start;
 	}
@@ -584,7 +599,31 @@ static bool mdp5_get_scanoutpos(struct drm_device *dev, unsigned int pipe,
 	if (etime)
 		*etime = ktime_get();
 
-	return true;
+	return ret;
+}
+
+static int mdp5_get_vblank_timestamp(struct drm_device *dev, unsigned int pipe,
+				     int *max_error,
+				     struct timeval *vblank_time,
+				     unsigned flags)
+{
+	struct msm_drm_private *priv = dev->dev_private;
+	struct drm_crtc *crtc;
+
+	if (pipe < 0 || pipe >= priv->num_crtcs) {
+		DRM_ERROR("Invalid crtc %d\n", pipe);
+		return -EINVAL;
+	}
+
+	crtc = priv->crtcs[pipe];
+	if (!crtc) {
+		DRM_ERROR("Invalid crtc %d\n", pipe);
+		return -EINVAL;
+	}
+
+	return drm_calc_vbltimestamp_from_scanoutpos(dev, pipe, max_error,
+						     vblank_time, flags,
+						     &crtc->mode);
 }
 
 static u32 mdp5_get_vblank_counter(struct drm_device *dev, unsigned int pipe)
@@ -663,7 +702,7 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 			goto fail;
 		}
 
-		kms->aspace = aspace;
+		mdp5_kms->aspace = aspace;
 
 		ret = aspace->mmu->funcs->attach(aspace->mmu, iommu_ports,
 				ARRAY_SIZE(iommu_ports));
@@ -678,6 +717,13 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 		aspace = NULL;;
 	}
 
+	mdp5_kms->id = msm_register_address_space(dev, aspace);
+	if (mdp5_kms->id < 0) {
+		ret = mdp5_kms->id;
+		dev_err(&pdev->dev, "failed to register mdp5 iommu: %d\n", ret);
+		goto fail;
+	}
+
 	ret = modeset_init(mdp5_kms);
 	if (ret) {
 		dev_err(&pdev->dev, "modeset_init failed: %d\n", ret);
@@ -689,7 +735,7 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 	dev->mode_config.max_width = 0xffff;
 	dev->mode_config.max_height = 0xffff;
 
-	dev->driver->get_vblank_timestamp = drm_calc_vbltimestamp_from_scanoutpos;
+	dev->driver->get_vblank_timestamp = mdp5_get_vblank_timestamp;
 	dev->driver->get_scanout_position = mdp5_get_scanoutpos;
 	dev->driver->get_vblank_counter = mdp5_get_vblank_counter;
 	dev->max_vblank_count = 0xffffffff;
@@ -705,7 +751,6 @@ fail:
 static void mdp5_destroy(struct platform_device *pdev)
 {
 	struct mdp5_kms *mdp5_kms = platform_get_drvdata(pdev);
-	int i;
 
 	if (mdp5_kms->ctlm)
 		mdp5_ctlm_destroy(mdp5_kms->ctlm);
@@ -713,9 +758,6 @@ static void mdp5_destroy(struct platform_device *pdev)
 		mdp5_smp_destroy(mdp5_kms->smp);
 	if (mdp5_kms->cfg)
 		mdp5_cfg_destroy(mdp5_kms->cfg);
-
-	for (i = 0; i < mdp5_kms->num_intfs; i++)
-		kfree(mdp5_kms->intfs[i]);
 
 	if (mdp5_kms->rpm_enabled)
 		pm_runtime_disable(&pdev->dev);
@@ -794,64 +836,6 @@ static int hwpipe_init(struct mdp5_kms *mdp5_kms)
 	return 0;
 }
 
-static int hwmixer_init(struct mdp5_kms *mdp5_kms)
-{
-	struct drm_device *dev = mdp5_kms->dev;
-	const struct mdp5_cfg_hw *hw_cfg;
-	int i, ret;
-
-	hw_cfg = mdp5_cfg_get_hw_config(mdp5_kms->cfg);
-
-	for (i = 0; i < hw_cfg->lm.count; i++) {
-		struct mdp5_hw_mixer *mixer;
-
-		mixer = mdp5_mixer_init(&hw_cfg->lm.instances[i]);
-		if (IS_ERR(mixer)) {
-			ret = PTR_ERR(mixer);
-			dev_err(dev->dev, "failed to construct LM%d (%d)\n",
-				i, ret);
-			return ret;
-		}
-
-		mixer->idx = mdp5_kms->num_hwmixers;
-		mdp5_kms->hwmixers[mdp5_kms->num_hwmixers++] = mixer;
-	}
-
-	return 0;
-}
-
-static int interface_init(struct mdp5_kms *mdp5_kms)
-{
-	struct drm_device *dev = mdp5_kms->dev;
-	const struct mdp5_cfg_hw *hw_cfg;
-	const enum mdp5_intf_type *intf_types;
-	int i;
-
-	hw_cfg = mdp5_cfg_get_hw_config(mdp5_kms->cfg);
-	intf_types = hw_cfg->intf.connect;
-
-	for (i = 0; i < ARRAY_SIZE(hw_cfg->intf.connect); i++) {
-		struct mdp5_interface *intf;
-
-		if (intf_types[i] == INTF_DISABLED)
-			continue;
-
-		intf = kzalloc(sizeof(*intf), GFP_KERNEL);
-		if (!intf) {
-			dev_err(dev->dev, "failed to construct INTF%d\n", i);
-			return -ENOMEM;
-		}
-
-		intf->num = i;
-		intf->type = intf_types[i];
-		intf->mode = MDP5_INTF_MODE_NONE;
-		intf->idx = mdp5_kms->num_intfs;
-		mdp5_kms->intfs[mdp5_kms->num_intfs++] = intf;
-	}
-
-	return 0;
-}
-
 static int mdp5_init(struct platform_device *pdev, struct drm_device *dev)
 {
 	struct msm_drm_private *priv = dev->dev_private;
@@ -887,21 +871,21 @@ static int mdp5_init(struct platform_device *pdev, struct drm_device *dev)
 	}
 
 	/* mandatory clocks: */
-	ret = get_clk(pdev, &mdp5_kms->axi_clk, "bus", true);
+	ret = get_clk(pdev, &mdp5_kms->axi_clk, "bus_clk", true);
 	if (ret)
 		goto fail;
-	ret = get_clk(pdev, &mdp5_kms->ahb_clk, "iface", true);
+	ret = get_clk(pdev, &mdp5_kms->ahb_clk, "iface_clk", true);
 	if (ret)
 		goto fail;
-	ret = get_clk(pdev, &mdp5_kms->core_clk, "core", true);
+	ret = get_clk(pdev, &mdp5_kms->core_clk, "core_clk", true);
 	if (ret)
 		goto fail;
-	ret = get_clk(pdev, &mdp5_kms->vsync_clk, "vsync", true);
+	ret = get_clk(pdev, &mdp5_kms->vsync_clk, "vsync_clk", true);
 	if (ret)
 		goto fail;
 
 	/* optional clocks: */
-	get_clk(pdev, &mdp5_kms->lut_clk, "lut", false);
+	get_clk(pdev, &mdp5_kms->lut_clk, "lut_clk", false);
 
 	/* we need to set a default rate before enabling.  Set a safe
 	 * rate first, then figure out hw revision, and then set a
@@ -949,14 +933,6 @@ static int mdp5_init(struct platform_device *pdev, struct drm_device *dev)
 	}
 
 	ret = hwpipe_init(mdp5_kms);
-	if (ret)
-		goto fail;
-
-	ret = hwmixer_init(mdp5_kms);
-	if (ret)
-		goto fail;
-
-	ret = interface_init(mdp5_kms);
 	if (ret)
 		goto fail;
 

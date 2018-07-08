@@ -1,5 +1,3 @@
-#include <errno.h>
-#include <inttypes.h>
 #include <math.h>
 #include "stat.h"
 #include "evlist.h"
@@ -86,8 +84,6 @@ static const char *id_str[PERF_STAT_EVSEL_ID__MAX] = {
 	ID(TOPDOWN_SLOTS_RETIRED, topdown-slots-retired),
 	ID(TOPDOWN_FETCH_BUBBLES, topdown-fetch-bubbles),
 	ID(TOPDOWN_RECOVERY_BUBBLES, topdown-recovery-bubbles),
-	ID(SMI_NUM, msr/smi/),
-	ID(APERF, msr/aperf/),
 };
 #undef ID
 

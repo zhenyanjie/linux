@@ -1152,8 +1152,7 @@ int w5100_probe(struct device *dev, const struct w5100_ops *ops,
 	if (err < 0)
 		goto err_register;
 
-	priv->xfer_wq = alloc_workqueue("%s", WQ_MEM_RECLAIM, 0,
-					netdev_name(ndev));
+	priv->xfer_wq = alloc_workqueue(netdev_name(ndev), WQ_MEM_RECLAIM, 0);
 	if (!priv->xfer_wq) {
 		err = -ENOMEM;
 		goto err_wq;

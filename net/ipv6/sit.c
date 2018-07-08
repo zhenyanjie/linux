@@ -305,7 +305,7 @@ static int ipip6_tunnel_get_prl(struct ip_tunnel *t,
 	 * we try harder to allocate.
 	 */
 	kp = (cmax <= 1 || capable(CAP_NET_ADMIN)) ?
-		kcalloc(cmax, sizeof(*kp), GFP_KERNEL | __GFP_NOWARN) :
+		kcalloc(cmax, sizeof(*kp), GFP_KERNEL) :
 		NULL;
 
 	rcu_read_lock();
@@ -881,12 +881,11 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 			goto tx_error;
 	}
 
-	flowi4_init_output(&fl4, tunnel->parms.link, tunnel->fwmark,
-			   RT_TOS(tos), RT_SCOPE_UNIVERSE, IPPROTO_IPV6,
-			   0, dst, tiph->saddr, 0, 0,
-			   sock_net_uid(tunnel->net, NULL));
-	rt = ip_route_output_flow(tunnel->net, &fl4, NULL);
-
+	rt = ip_route_output_ports(tunnel->net, &fl4, NULL,
+				   dst, tiph->saddr,
+				   0, 0,
+				   IPPROTO_IPV6, RT_TOS(tos),
+				   tunnel->parms.link);
 	if (IS_ERR(rt)) {
 		dev->stats.tx_carrier_errors++;
 		goto tx_error_icmp;
@@ -1072,8 +1071,7 @@ static void ipip6_tunnel_bind_dev(struct net_device *dev)
 	}
 }
 
-static void ipip6_tunnel_update(struct ip_tunnel *t, struct ip_tunnel_parm *p,
-				__u32 fwmark)
+static void ipip6_tunnel_update(struct ip_tunnel *t, struct ip_tunnel_parm *p)
 {
 	struct net *net = t->net;
 	struct sit_net *sitn = net_generic(net, sit_net_id);
@@ -1087,9 +1085,8 @@ static void ipip6_tunnel_update(struct ip_tunnel *t, struct ip_tunnel_parm *p,
 	ipip6_tunnel_link(sitn, t);
 	t->parms.iph.ttl = p->iph.ttl;
 	t->parms.iph.tos = p->iph.tos;
-	if (t->parms.link != p->link || t->fwmark != fwmark) {
+	if (t->parms.link != p->link) {
 		t->parms.link = p->link;
-		t->fwmark = fwmark;
 		ipip6_tunnel_bind_dev(t->dev);
 	}
 	dst_cache_reset(&t->dst_cache);
@@ -1223,7 +1220,7 @@ ipip6_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				t = netdev_priv(dev);
 			}
 
-			ipip6_tunnel_update(t, &p, t->fwmark);
+			ipip6_tunnel_update(t, &p);
 		}
 
 		if (t) {
@@ -1406,8 +1403,7 @@ static void __net_init ipip6_fb_tunnel_init(struct net_device *dev)
 	rcu_assign_pointer(sitn->tunnels_wc[0], tunnel);
 }
 
-static int ipip6_validate(struct nlattr *tb[], struct nlattr *data[],
-			  struct netlink_ext_ack *extack)
+static int ipip6_validate(struct nlattr *tb[], struct nlattr *data[])
 {
 	u8 proto;
 
@@ -1422,8 +1418,7 @@ static int ipip6_validate(struct nlattr *tb[], struct nlattr *data[],
 }
 
 static void ipip6_netlink_parms(struct nlattr *data[],
-				struct ip_tunnel_parm *parms,
-				__u32 *fwmark)
+				struct ip_tunnel_parm *parms)
 {
 	memset(parms, 0, sizeof(*parms));
 
@@ -1462,8 +1457,6 @@ static void ipip6_netlink_parms(struct nlattr *data[],
 	if (data[IFLA_IPTUN_PROTO])
 		parms->iph.protocol = nla_get_u8(data[IFLA_IPTUN_PROTO]);
 
-	if (data[IFLA_IPTUN_FWMARK])
-		*fwmark = nla_get_u32(data[IFLA_IPTUN_FWMARK]);
 }
 
 /* This function returns true when ENCAP attributes are present in the nl msg */
@@ -1538,8 +1531,7 @@ static bool ipip6_netlink_6rd_parms(struct nlattr *data[],
 #endif
 
 static int ipip6_newlink(struct net *src_net, struct net_device *dev,
-			 struct nlattr *tb[], struct nlattr *data[],
-			 struct netlink_ext_ack *extack)
+			 struct nlattr *tb[], struct nlattr *data[])
 {
 	struct net *net = dev_net(dev);
 	struct ip_tunnel *nt;
@@ -1557,7 +1549,7 @@ static int ipip6_newlink(struct net *src_net, struct net_device *dev,
 			return err;
 	}
 
-	ipip6_netlink_parms(data, &nt->parms, &nt->fwmark);
+	ipip6_netlink_parms(data, &nt->parms);
 
 	if (ipip6_tunnel_locate(net, &nt->parms, 0))
 		return -EEXIST;
@@ -1575,8 +1567,7 @@ static int ipip6_newlink(struct net *src_net, struct net_device *dev,
 }
 
 static int ipip6_changelink(struct net_device *dev, struct nlattr *tb[],
-			    struct nlattr *data[],
-			    struct netlink_ext_ack *extack)
+			  struct nlattr *data[])
 {
 	struct ip_tunnel *t = netdev_priv(dev);
 	struct ip_tunnel_parm p;
@@ -1586,7 +1577,6 @@ static int ipip6_changelink(struct net_device *dev, struct nlattr *tb[],
 #ifdef CONFIG_IPV6_SIT_6RD
 	struct ip_tunnel_6rd ip6rd;
 #endif
-	__u32 fwmark = t->fwmark;
 	int err;
 
 	if (dev == sitn->fb_tunnel_dev)
@@ -1598,7 +1588,7 @@ static int ipip6_changelink(struct net_device *dev, struct nlattr *tb[],
 			return err;
 	}
 
-	ipip6_netlink_parms(data, &p, &fwmark);
+	ipip6_netlink_parms(data, &p);
 
 	if (((dev->flags & IFF_POINTOPOINT) && !p.iph.daddr) ||
 	    (!(dev->flags & IFF_POINTOPOINT) && p.iph.daddr))
@@ -1612,7 +1602,7 @@ static int ipip6_changelink(struct net_device *dev, struct nlattr *tb[],
 	} else
 		t = netdev_priv(dev);
 
-	ipip6_tunnel_update(t, &p, fwmark);
+	ipip6_tunnel_update(t, &p);
 
 #ifdef CONFIG_IPV6_SIT_6RD
 	if (ipip6_netlink_6rd_parms(data, &ip6rd))
@@ -1659,8 +1649,6 @@ static size_t ipip6_get_size(const struct net_device *dev)
 		nla_total_size(2) +
 		/* IFLA_IPTUN_ENCAP_DPORT */
 		nla_total_size(2) +
-		/* IFLA_IPTUN_FWMARK */
-		nla_total_size(4) +
 		0;
 }
 
@@ -1677,8 +1665,7 @@ static int ipip6_fill_info(struct sk_buff *skb, const struct net_device *dev)
 	    nla_put_u8(skb, IFLA_IPTUN_PMTUDISC,
 		       !!(parm->iph.frag_off & htons(IP_DF))) ||
 	    nla_put_u8(skb, IFLA_IPTUN_PROTO, parm->iph.protocol) ||
-	    nla_put_be16(skb, IFLA_IPTUN_FLAGS, parm->i_flags) ||
-	    nla_put_u32(skb, IFLA_IPTUN_FWMARK, tunnel->fwmark))
+	    nla_put_be16(skb, IFLA_IPTUN_FLAGS, parm->i_flags))
 		goto nla_put_failure;
 
 #ifdef CONFIG_IPV6_SIT_6RD
@@ -1728,7 +1715,6 @@ static const struct nla_policy ipip6_policy[IFLA_IPTUN_MAX + 1] = {
 	[IFLA_IPTUN_ENCAP_FLAGS]	= { .type = NLA_U16 },
 	[IFLA_IPTUN_ENCAP_SPORT]	= { .type = NLA_U16 },
 	[IFLA_IPTUN_ENCAP_DPORT]	= { .type = NLA_U16 },
-	[IFLA_IPTUN_FWMARK]		= { .type = NLA_U32 },
 };
 
 static void ipip6_dellink(struct net_device *dev, struct list_head *head)

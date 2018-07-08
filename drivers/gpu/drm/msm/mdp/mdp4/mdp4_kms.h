@@ -18,14 +18,12 @@
 #ifndef __MDP4_KMS_H__
 #define __MDP4_KMS_H__
 
-#include <drm/drm_panel.h>
-
 #include "msm_drv.h"
 #include "msm_kms.h"
 #include "mdp/mdp_kms.h"
 #include "mdp4.xml.h"
 
-struct device_node;
+#include "drm_panel.h"
 
 struct mdp4_kms {
 	struct mdp_kms base;
@@ -33,6 +31,9 @@ struct mdp4_kms {
 	struct drm_device *dev;
 
 	int rev;
+
+	/* mapper-id used to request GEM buffer mapped for scanout: */
+	int id;
 
 	void __iomem *mmio;
 
@@ -42,6 +43,7 @@ struct mdp4_kms {
 	struct clk *pclk;
 	struct clk *lut_clk;
 	struct clk *axi_clk;
+	struct msm_gem_address_space *aspace;
 
 	struct mdp_irq error_handler;
 

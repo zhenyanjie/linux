@@ -19,9 +19,10 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/debugfs.h>
 #include <linux/slab.h>
 #include <linux/export.h>
-#include <asm/debugfs.h>
+#include <asm/debug.h>
 #include <asm/prom.h>
 #include <asm/scom.h>
 #include <linux/uaccess.h>

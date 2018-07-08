@@ -19,10 +19,10 @@
 #include <linux/can.h>
 #include <linux/can/dev.h>
 #include <linux/can/error.h>
-#include <linux/can/dev/peak_canfd.h>
 
 #include "pcan_usb_core.h"
 #include "pcan_usb_pro.h"
+#include "pcan_ucan.h"
 
 MODULE_SUPPORTED_DEVICE("PEAK-System PCAN-USB FD adapter");
 MODULE_SUPPORTED_DEVICE("PEAK-System PCAN-USB Pro FD adapter");
@@ -238,7 +238,7 @@ static int pcan_usb_fd_build_restart_cmd(struct peak_usb_device *dev, u8 *buf)
 
 	/* 1st, reset error counters: */
 	prc = (struct pucan_wr_err_cnt *)pc;
-	prc->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+	prc->opcode_channel = pucan_cmd_opcode_channel(dev,
 						       PUCAN_CMD_WR_ERR_CNT);
 
 	/* select both counters */
@@ -257,10 +257,9 @@ static int pcan_usb_fd_build_restart_cmd(struct peak_usb_device *dev, u8 *buf)
 
 		puo->opcode_channel =
 			(dev->can.ctrlmode & CAN_CTRLMODE_FD_NON_ISO) ?
-			pucan_cmd_opcode_channel(dev->ctrl_idx,
+			pucan_cmd_opcode_channel(dev,
 						 PUCAN_CMD_CLR_DIS_OPTION) :
-			pucan_cmd_opcode_channel(dev->ctrl_idx,
-						 PUCAN_CMD_SET_EN_OPTION);
+			pucan_cmd_opcode_channel(dev, PUCAN_CMD_SET_EN_OPTION);
 
 		puo->options = cpu_to_le16(PUCAN_OPTION_CANDFDISO);
 
@@ -275,7 +274,7 @@ static int pcan_usb_fd_build_restart_cmd(struct peak_usb_device *dev, u8 *buf)
 
 	/* next, go back to operational mode */
 	cmd = (struct pucan_command *)pc;
-	cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+	cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 				(dev->can.ctrlmode & CAN_CTRLMODE_LISTENONLY) ?
 						PUCAN_CMD_LISTEN_ONLY_MODE :
 						PUCAN_CMD_NORMAL_MODE);
@@ -297,7 +296,7 @@ static int pcan_usb_fd_set_bus(struct peak_usb_device *dev, u8 onoff)
 		struct pucan_command *cmd = (struct pucan_command *)pc;
 
 		/* build cmd to go back to reset mode */
-		cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+		cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 							PUCAN_CMD_RESET_MODE);
 		l = sizeof(struct pucan_command);
 	}
@@ -333,7 +332,7 @@ static int pcan_usb_fd_set_filter_std(struct peak_usb_device *dev, int idx,
 	}
 
 	for (i = idx; i < n; i++, cmd++) {
-		cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+		cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 							PUCAN_CMD_FILTER_STD);
 		cmd->idx = cpu_to_le16(i);
 		cmd->mask = cpu_to_le32(mask);
@@ -353,7 +352,7 @@ static int pcan_usb_fd_set_options(struct peak_usb_device *dev,
 {
 	struct pcan_ufd_options *cmd = pcan_usb_fd_cmd_buffer(dev);
 
-	cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+	cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 					(onoff) ? PUCAN_CMD_SET_EN_OPTION :
 						  PUCAN_CMD_CLR_DIS_OPTION);
 
@@ -369,7 +368,7 @@ static int pcan_usb_fd_set_can_led(struct peak_usb_device *dev, u8 led_mode)
 {
 	struct pcan_ufd_led *cmd = pcan_usb_fd_cmd_buffer(dev);
 
-	cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+	cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 						       PCAN_UFD_CMD_LED_SET);
 	cmd->mode = led_mode;
 
@@ -383,7 +382,7 @@ static int pcan_usb_fd_set_clock_domain(struct peak_usb_device *dev,
 {
 	struct pcan_ufd_clock *cmd = pcan_usb_fd_cmd_buffer(dev);
 
-	cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+	cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 						       PCAN_UFD_CMD_CLK_SET);
 	cmd->mode = clk_mode;
 
@@ -397,7 +396,7 @@ static int pcan_usb_fd_set_bittiming_slow(struct peak_usb_device *dev,
 {
 	struct pucan_timing_slow *cmd = pcan_usb_fd_cmd_buffer(dev);
 
-	cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+	cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 						       PUCAN_CMD_TIMING_SLOW);
 	cmd->sjw_t = PUCAN_TSLOW_SJW_T(bt->sjw - 1,
 				dev->can.ctrlmode & CAN_CTRLMODE_3_SAMPLES);
@@ -418,7 +417,7 @@ static int pcan_usb_fd_set_bittiming_fast(struct peak_usb_device *dev,
 {
 	struct pucan_timing_fast *cmd = pcan_usb_fd_cmd_buffer(dev);
 
-	cmd->opcode_channel = pucan_cmd_opcode_channel(dev->ctrl_idx,
+	cmd->opcode_channel = pucan_cmd_opcode_channel(dev,
 						       PUCAN_CMD_TIMING_FAST);
 	cmd->sjw = PUCAN_TFAST_SJW(bt->sjw - 1);
 	cmd->tseg2 = PUCAN_TFAST_TSEG2(bt->phase_seg2 - 1);

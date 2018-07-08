@@ -36,7 +36,6 @@
 
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
-#include <linux/interrupt.h>
 #include <linux/spinlock.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>

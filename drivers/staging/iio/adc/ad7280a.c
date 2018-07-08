@@ -134,7 +134,6 @@ struct ad7280_state {
 	unsigned char			aux_threshhigh;
 	unsigned char			aux_threshlow;
 	unsigned char			cb_mask[AD7280A_MAX_CHAIN];
-	struct mutex			lock; /* protect sensor state */
 
 	__be32				buf[2] ____cacheline_aligned;
 };
@@ -411,7 +410,7 @@ static ssize_t ad7280_store_balance_sw(struct device *dev,
 	devaddr = this_attr->address >> 8;
 	ch = this_attr->address & 0xFF;
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 	if (readin)
 		st->cb_mask[devaddr] |= 1 << (ch + 2);
 	else
@@ -419,7 +418,7 @@ static ssize_t ad7280_store_balance_sw(struct device *dev,
 
 	ret = ad7280_write(st, devaddr, AD7280A_CELL_BALANCE,
 			   0, st->cb_mask[devaddr]);
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret ? ret : len;
 }
@@ -434,10 +433,10 @@ static ssize_t ad7280_show_balance_timer(struct device *dev,
 	int ret;
 	unsigned int msecs;
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 	ret = ad7280_read(st, this_attr->address >> 8,
 			  this_attr->address & 0xFF);
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	if (ret < 0)
 		return ret;
@@ -467,11 +466,11 @@ static ssize_t ad7280_store_balance_timer(struct device *dev,
 	if (val > 31)
 		return -EINVAL;
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 	ret = ad7280_write(st, this_attr->address >> 8,
 			   this_attr->address & 0xFF,
 			   0, (val & 0x1F) << 3);
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret ? ret : len;
 }
@@ -560,7 +559,7 @@ static int ad7280_attr_init(struct ad7280_state *st)
 			st->iio_attr[cnt].address =
 				AD7280A_DEVADDR(dev) << 8 | ch;
 			st->iio_attr[cnt].dev_attr.attr.mode =
-				0644;
+				S_IWUSR | S_IRUGO;
 			st->iio_attr[cnt].dev_attr.show =
 				ad7280_show_balance_sw;
 			st->iio_attr[cnt].dev_attr.store =
@@ -577,7 +576,7 @@ static int ad7280_attr_init(struct ad7280_state *st)
 				AD7280A_DEVADDR(dev) << 8 |
 				(AD7280A_CB1_TIMER + ch);
 			st->iio_attr[cnt].dev_attr.attr.mode =
-				0644;
+				S_IWUSR | S_IRUGO;
 			st->iio_attr[cnt].dev_attr.show =
 				ad7280_show_balance_timer;
 			st->iio_attr[cnt].dev_attr.store =
@@ -656,7 +655,7 @@ static ssize_t ad7280_write_channel_config(struct device *dev,
 
 	val = clamp(val, 0L, 0xFFL);
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 	switch ((u32)this_attr->address) {
 	case AD7280A_CELL_OVERVOLTAGE:
 		st->cell_threshhigh = val;
@@ -675,7 +674,7 @@ static ssize_t ad7280_write_channel_config(struct device *dev,
 	ret = ad7280_write(st, AD7280A_DEVADDR_MASTER,
 			   this_attr->address, 1, val);
 
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret ? ret : len;
 }
@@ -746,26 +745,26 @@ out:
 
 static IIO_DEVICE_ATTR_NAMED(in_thresh_low_value,
 		in_voltage-voltage_thresh_low_value,
-		0644,
+		S_IRUGO | S_IWUSR,
 		ad7280_read_channel_config,
 		ad7280_write_channel_config,
 		AD7280A_CELL_UNDERVOLTAGE);
 
 static IIO_DEVICE_ATTR_NAMED(in_thresh_high_value,
 		in_voltage-voltage_thresh_high_value,
-		0644,
+		S_IRUGO | S_IWUSR,
 		ad7280_read_channel_config,
 		ad7280_write_channel_config,
 		AD7280A_CELL_OVERVOLTAGE);
 
 static IIO_DEVICE_ATTR(in_temp_thresh_low_value,
-		0644,
+		S_IRUGO | S_IWUSR,
 		ad7280_read_channel_config,
 		ad7280_write_channel_config,
 		AD7280A_AUX_ADC_UNDERVOLTAGE);
 
 static IIO_DEVICE_ATTR(in_temp_thresh_high_value,
-		0644,
+		S_IRUGO | S_IWUSR,
 		ad7280_read_channel_config,
 		ad7280_write_channel_config,
 		AD7280A_AUX_ADC_OVERVOLTAGE);
@@ -793,13 +792,13 @@ static int ad7280_read_raw(struct iio_dev *indio_dev,
 
 	switch (m) {
 	case IIO_CHAN_INFO_RAW:
-		mutex_lock(&st->lock);
+		mutex_lock(&indio_dev->mlock);
 		if (chan->address == AD7280A_ALL_CELLS)
 			ret = ad7280_read_all_channels(st, st->scan_cnt, NULL);
 		else
 			ret = ad7280_read_channel(st, chan->address >> 8,
 						  chan->address & 0xFF);
-		mutex_unlock(&st->lock);
+		mutex_unlock(&indio_dev->mlock);
 
 		if (ret < 0)
 			return ret;
@@ -848,7 +847,6 @@ static int ad7280_probe(struct spi_device *spi)
 	st = iio_priv(indio_dev);
 	spi_set_drvdata(spi, indio_dev);
 	st->spi = spi;
-	mutex_init(&st->lock);
 
 	if (!pdata)
 		pdata = &ad7793_default_pdata;

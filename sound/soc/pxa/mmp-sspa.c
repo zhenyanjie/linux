@@ -119,6 +119,7 @@ static void mmp_sspa_shutdown(struct snd_pcm_substream *substream,
 	clk_disable(priv->sspa->clk);
 	clk_disable(priv->sysclk);
 
+	return;
 }
 
 /*

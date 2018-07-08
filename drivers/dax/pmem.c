@@ -16,7 +16,7 @@
 #include <linux/pfn_t.h>
 #include "../nvdimm/pfn.h"
 #include "../nvdimm/nd.h"
-#include "device-dax.h"
+#include "dax.h"
 
 struct dax_pmem {
 	struct device *dev;
@@ -43,7 +43,6 @@ static void dax_pmem_percpu_exit(void *data)
 	struct dax_pmem *dax_pmem = to_dax_pmem(ref);
 
 	dev_dbg(dax_pmem->dev, "%s\n", __func__);
-	wait_for_completion(&dax_pmem->cmp);
 	percpu_ref_exit(ref);
 }
 
@@ -54,16 +53,18 @@ static void dax_pmem_percpu_kill(void *data)
 
 	dev_dbg(dax_pmem->dev, "%s\n", __func__);
 	percpu_ref_kill(ref);
+	wait_for_completion(&dax_pmem->cmp);
 }
 
 static int dax_pmem_probe(struct device *dev)
 {
+	int rc;
 	void *addr;
 	struct resource res;
-	int rc, id, region_id;
+	struct dax_dev *dax_dev;
 	struct nd_pfn_sb *pfn_sb;
-	struct dev_dax *dev_dax;
 	struct dax_pmem *dax_pmem;
+	struct nd_region *nd_region;
 	struct nd_namespace_io *nsio;
 	struct dax_region *dax_region;
 	struct nd_namespace_common *ndns;
@@ -122,22 +123,19 @@ static int dax_pmem_probe(struct device *dev)
 	/* adjust the dax_region resource to the start of data */
 	res.start += le64_to_cpu(pfn_sb->dataoff);
 
-	rc = sscanf(dev_name(&ndns->dev), "namespace%d.%d", &region_id, &id);
-	if (rc != 2)
-		return -EINVAL;
-
-	dax_region = alloc_dax_region(dev, region_id, &res,
+	nd_region = to_nd_region(dev->parent);
+	dax_region = alloc_dax_region(dev, nd_region->id, &res,
 			le32_to_cpu(pfn_sb->align), addr, PFN_DEV|PFN_MAP);
 	if (!dax_region)
 		return -ENOMEM;
 
 	/* TODO: support for subdividing a dax region... */
-	dev_dax = devm_create_dev_dax(dax_region, id, &res, 1);
+	dax_dev = devm_create_dax_dev(dax_region, &res, 1);
 
-	/* child dev_dax instances now own the lifetime of the dax_region */
+	/* child dax_dev instances now own the lifetime of the dax_region */
 	dax_region_put(dax_region);
 
-	return PTR_ERR_OR_ZERO(dev_dax);
+	return PTR_ERR_OR_ZERO(dax_dev);
 }
 
 static struct nd_device_driver dax_pmem_driver = {

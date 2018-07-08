@@ -78,7 +78,7 @@ static inline int ptrace_set_thread_area(struct task_struct *child, int idx,
         return -ENOSYS;
 }
 
-extern long arch_prctl(struct task_struct *task, int option,
+extern long arch_prctl(struct task_struct *task, int code,
 		       unsigned long __user *addr);
 
 #endif

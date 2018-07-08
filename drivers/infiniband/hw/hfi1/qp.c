@@ -294,7 +294,7 @@ int hfi1_check_send_wqe(struct rvt_qp *qp,
 		ah = ibah_to_rvtah(wqe->ud_wr.ah);
 		if (wqe->length > (1 << ah->log_pmtu))
 			return -EINVAL;
-		if (ibp->sl_to_sc[rdma_ah_get_sl(&ah->attr)] == 0xf)
+		if (ibp->sl_to_sc[ah->attr.sl] == 0xf)
 			return -EINVAL;
 	default:
 		break;
@@ -631,8 +631,8 @@ void qp_iter_print(struct seq_file *s, struct qp_iter *iter)
 		   qp->s_tail, qp->s_head, qp->s_size,
 		   qp->s_avail,
 		   qp->remote_qpn,
-		   rdma_ah_get_dlid(&qp->remote_ah_attr),
-		   rdma_ah_get_sl(&qp->remote_ah_attr),
+		   qp->remote_ah_attr.dlid,
+		   qp->remote_ah_attr.sl,
 		   qp->pmtu,
 		   qp->s_retry,
 		   qp->s_retry_cnt,
@@ -647,17 +647,18 @@ void qp_iter_print(struct seq_file *s, struct qp_iter *iter)
 		   qp->pid);
 }
 
-void *qp_priv_alloc(struct rvt_dev_info *rdi, struct rvt_qp *qp)
+void *qp_priv_alloc(struct rvt_dev_info *rdi, struct rvt_qp *qp,
+		    gfp_t gfp)
 {
 	struct hfi1_qp_priv *priv;
 
-	priv = kzalloc_node(sizeof(*priv), GFP_KERNEL, rdi->dparms.node);
+	priv = kzalloc_node(sizeof(*priv), gfp, rdi->dparms.node);
 	if (!priv)
 		return ERR_PTR(-ENOMEM);
 
 	priv->owner = qp;
 
-	priv->s_ahg = kzalloc_node(sizeof(*priv->s_ahg), GFP_KERNEL,
+	priv->s_ahg = kzalloc_node(sizeof(*priv->s_ahg), gfp,
 				   rdi->dparms.node);
 	if (!priv->s_ahg) {
 		kfree(priv);
@@ -730,7 +731,9 @@ void quiesce_qp(struct rvt_qp *qp)
 
 void notify_qp_reset(struct rvt_qp *qp)
 {
-	qp->r_adefered = 0;
+	struct hfi1_qp_priv *priv = qp->priv;
+
+	priv->r_adefered = 0;
 	clear_ahg(qp);
 }
 
@@ -745,7 +748,7 @@ void hfi1_migrate_qp(struct rvt_qp *qp)
 
 	qp->s_mig_state = IB_MIG_MIGRATED;
 	qp->remote_ah_attr = qp->alt_ah_attr;
-	qp->port_num = rdma_ah_get_port_num(&qp->alt_ah_attr);
+	qp->port_num = qp->alt_ah_attr.port_num;
 	qp->s_pkey_index = qp->s_alt_pkey_index;
 	qp->s_flags |= RVT_S_AHG_CLEAR;
 	priv->s_sc = ah_to_sc(qp->ibqp.device, &qp->remote_ah_attr);
@@ -775,7 +778,7 @@ u32 mtu_from_qp(struct rvt_dev_info *rdi, struct rvt_qp *qp, u32 pmtu)
 	u8 sc, vl;
 
 	ibp = &dd->pport[qp->port_num - 1].ibport_data;
-	sc = ibp->sl_to_sc[rdma_ah_get_sl(&qp->remote_ah_attr)];
+	sc = ibp->sl_to_sc[qp->remote_ah_attr.sl];
 	vl = sc_to_vlt(dd, sc);
 
 	mtu = verbs_mtu_enum_to_int(qp->ibqp.device, pmtu);
@@ -858,7 +861,7 @@ void hfi1_error_port_qps(struct hfi1_ibport *ibp, u8 sl)
 			if (qp->port_num == ppd->port &&
 			    (qp->ibqp.qp_type == IB_QPT_UC ||
 			     qp->ibqp.qp_type == IB_QPT_RC) &&
-			    rdma_ah_get_sl(&qp->remote_ah_attr) == sl &&
+			    qp->remote_ah_attr.sl == sl &&
 			    (ib_rvt_state_ops[qp->state] &
 			     RVT_POST_SEND_OK)) {
 				spin_lock_irq(&qp->r_lock);

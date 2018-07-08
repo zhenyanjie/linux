@@ -112,7 +112,6 @@ static int validate_nla(const struct nlattr *nla, int maxtype,
  * @len: length of attribute stream
  * @maxtype: maximum attribute type to be expected
  * @policy: validation policy
- * @extack: extended ACK report struct
  *
  * Validates all attributes in the specified attribute stream against the
  * specified policy. Attributes with a type exceeding maxtype will be
@@ -121,23 +120,20 @@ static int validate_nla(const struct nlattr *nla, int maxtype,
  * Returns 0 on success or a negative error code.
  */
 int nla_validate(const struct nlattr *head, int len, int maxtype,
-		 const struct nla_policy *policy,
-		 struct netlink_ext_ack *extack)
+		 const struct nla_policy *policy)
 {
 	const struct nlattr *nla;
-	int rem;
+	int rem, err;
 
 	nla_for_each_attr(nla, head, len, rem) {
-		int err = validate_nla(nla, maxtype, policy);
-
-		if (err < 0) {
-			if (extack)
-				extack->bad_attr = nla;
-			return err;
-		}
+		err = validate_nla(nla, maxtype, policy);
+		if (err < 0)
+			goto errout;
 	}
 
-	return 0;
+	err = 0;
+errout:
+	return err;
 }
 EXPORT_SYMBOL(nla_validate);
 
@@ -184,8 +180,7 @@ EXPORT_SYMBOL(nla_policy_len);
  * Returns 0 on success or a negative error code.
  */
 int nla_parse(struct nlattr **tb, int maxtype, const struct nlattr *head,
-	      int len, const struct nla_policy *policy,
-	      struct netlink_ext_ack *extack)
+	      int len, const struct nla_policy *policy)
 {
 	const struct nlattr *nla;
 	int rem, err;
@@ -198,11 +193,8 @@ int nla_parse(struct nlattr **tb, int maxtype, const struct nlattr *head,
 		if (type > 0 && type <= maxtype) {
 			if (policy) {
 				err = validate_nla(nla, maxtype, policy);
-				if (err < 0) {
-					if (extack)
-						extack->bad_attr = nla;
+				if (err < 0)
 					goto errout;
-				}
 			}
 
 			tb[type] = (struct nlattr *)nla;
@@ -352,7 +344,7 @@ struct nlattr *__nla_reserve(struct sk_buff *skb, int attrtype, int attrlen)
 {
 	struct nlattr *nla;
 
-	nla = skb_put(skb, nla_total_size(attrlen));
+	nla = (struct nlattr *) skb_put(skb, nla_total_size(attrlen));
 	nla->nla_type = attrtype;
 	nla->nla_len = nla_attr_size(attrlen);
 
@@ -398,7 +390,12 @@ EXPORT_SYMBOL(__nla_reserve_64bit);
  */
 void *__nla_reserve_nohdr(struct sk_buff *skb, int attrlen)
 {
-	return skb_put_zero(skb, NLA_ALIGN(attrlen));
+	void *start;
+
+	start = skb_put(skb, NLA_ALIGN(attrlen));
+	memset(start, 0, NLA_ALIGN(attrlen));
+
+	return start;
 }
 EXPORT_SYMBOL(__nla_reserve_nohdr);
 
@@ -612,7 +609,7 @@ int nla_append(struct sk_buff *skb, int attrlen, const void *data)
 	if (unlikely(skb_tailroom(skb) < NLA_ALIGN(attrlen)))
 		return -EMSGSIZE;
 
-	skb_put_data(skb, data, attrlen);
+	memcpy(skb_put(skb, attrlen), data, attrlen);
 	return 0;
 }
 EXPORT_SYMBOL(nla_append);

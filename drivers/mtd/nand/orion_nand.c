@@ -156,21 +156,8 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	/* Not all platforms can gate the clock, so it is not
 	   an error if the clock does not exists. */
 	info->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(info->clk)) {
-		ret = PTR_ERR(info->clk);
-		if (ret == -ENOENT) {
-			info->clk = NULL;
-		} else {
-			dev_err(&pdev->dev, "failed to get clock!\n");
-			return ret;
-		}
-	}
-
-	ret = clk_prepare_enable(info->clk);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to prepare clock!\n");
-		return ret;
-	}
+	if (!IS_ERR(info->clk))
+		clk_prepare_enable(info->clk);
 
 	ret = nand_scan(mtd, 1);
 	if (ret)
@@ -186,7 +173,9 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	return 0;
 
 no_dev:
-	clk_disable_unprepare(info->clk);
+	if (!IS_ERR(info->clk))
+		clk_disable_unprepare(info->clk);
+
 	return ret;
 }
 
@@ -198,7 +187,8 @@ static int orion_nand_remove(struct platform_device *pdev)
 
 	nand_release(mtd);
 
-	clk_disable_unprepare(info->clk);
+	if (!IS_ERR(info->clk))
+		clk_disable_unprepare(info->clk);
 
 	return 0;
 }

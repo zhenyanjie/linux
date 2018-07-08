@@ -22,7 +22,7 @@
  */
 
 #include <linux/firmware.h>
-#include <drm/drmP.h>
+#include "drmP.h"
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_ucode.h"

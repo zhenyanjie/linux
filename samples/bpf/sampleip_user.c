@@ -180,7 +180,6 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	signal(SIGINT, int_exit);
-	signal(SIGTERM, int_exit);
 
 	/* do sampling */
 	printf("Sampling at %d Hertz for %d seconds. Ctrl-C also ends.\n",

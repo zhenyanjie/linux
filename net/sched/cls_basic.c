@@ -93,10 +93,13 @@ static void basic_delete_filter(struct rcu_head *head)
 	kfree(f);
 }
 
-static void basic_destroy(struct tcf_proto *tp)
+static bool basic_destroy(struct tcf_proto *tp, bool force)
 {
 	struct basic_head *head = rtnl_dereference(tp->root);
 	struct basic_filter *f, *n;
+
+	if (!force && !list_empty(&head->flist))
+		return false;
 
 	list_for_each_entry_safe(f, n, &head->flist, link) {
 		list_del_rcu(&f->link);
@@ -104,17 +107,16 @@ static void basic_destroy(struct tcf_proto *tp)
 		call_rcu(&f->rcu, basic_delete_filter);
 	}
 	kfree_rcu(head, rcu);
+	return true;
 }
 
-static int basic_delete(struct tcf_proto *tp, unsigned long arg, bool *last)
+static int basic_delete(struct tcf_proto *tp, unsigned long arg)
 {
-	struct basic_head *head = rtnl_dereference(tp->root);
 	struct basic_filter *f = (struct basic_filter *) arg;
 
 	list_del_rcu(&f->link);
 	tcf_unbind_filter(tp, &f->res);
 	call_rcu(&f->rcu, basic_delete_filter);
-	*last = list_empty(&head->flist);
 	return 0;
 }
 
@@ -172,7 +174,7 @@ static int basic_change(struct net *net, struct sk_buff *in_skb,
 		return -EINVAL;
 
 	err = nla_parse_nested(tb, TCA_BASIC_MAX, tca[TCA_OPTIONS],
-			       basic_policy, NULL);
+			       basic_policy);
 	if (err < 0)
 		return err;
 

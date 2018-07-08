@@ -540,7 +540,7 @@ static void bL_cpufreq_ready(struct cpufreq_policy *policy)
 				     &power_coefficient);
 
 		cdev[cur_cluster] = of_cpufreq_power_cooling_register(np,
-				policy, power_coefficient, NULL);
+				policy->related_cpus, power_coefficient, NULL);
 		if (IS_ERR(cdev[cur_cluster])) {
 			dev_err(cpu_dev,
 				"running cpufreq without cooling device: %ld\n",

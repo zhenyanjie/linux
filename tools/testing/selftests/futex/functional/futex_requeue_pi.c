@@ -32,7 +32,6 @@
 #include "futextest.h"
 #include "logging.h"
 
-#define TEST_NAME "futex-requeue-pi"
 #define MAX_WAKE_ITERS 1000
 #define THREAD_MAX 10
 #define SIGNAL_PERIOD_US 100
@@ -405,6 +404,6 @@ int main(int argc, char *argv[])
 	 */
 	ret = unit_test(broadcast, locked, owner, timeout_ns);
 
-	print_result(TEST_NAME, ret);
+	print_result(ret);
 	return ret;
 }

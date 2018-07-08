@@ -556,11 +556,11 @@ static int init_hash_table(struct pxa168_eth_private *pep)
 	 * function.Driver can dynamically switch to them if the 1/2kB hash
 	 * table is full.
 	 */
-	if (!pep->htpr) {
+	if (pep->htpr == NULL) {
 		pep->htpr = dma_zalloc_coherent(pep->dev->dev.parent,
 						HASH_ADDR_TABLE_SIZE,
 						&pep->htpr_dma, GFP_KERNEL);
-		if (!pep->htpr)
+		if (pep->htpr == NULL)
 			return -ENOMEM;
 	} else {
 		memset(pep->htpr, 0, HASH_ADDR_TABLE_SIZE);
@@ -1036,7 +1036,8 @@ static int rxq_init(struct net_device *dev)
 	int rx_desc_num = pep->rx_ring_size;
 
 	/* Allocate RX skb rings */
-	pep->rx_skb = kcalloc(rx_desc_num, sizeof(*pep->rx_skb), GFP_KERNEL);
+	pep->rx_skb = kzalloc(sizeof(*pep->rx_skb) * pep->rx_ring_size,
+			     GFP_KERNEL);
 	if (!pep->rx_skb)
 		return -ENOMEM;
 
@@ -1095,7 +1096,8 @@ static int txq_init(struct net_device *dev)
 	int size = 0, i = 0;
 	int tx_desc_num = pep->tx_ring_size;
 
-	pep->tx_skb = kcalloc(tx_desc_num, sizeof(*pep->tx_skb), GFP_KERNEL);
+	pep->tx_skb = kzalloc(sizeof(*pep->tx_skb) * pep->tx_ring_size,
+			     GFP_KERNEL);
 	if (!pep->tx_skb)
 		return -ENOMEM;
 
@@ -1356,7 +1358,7 @@ static int pxa168_smi_write(struct mii_bus *bus, int phy_addr, int regnum,
 static int pxa168_eth_do_ioctl(struct net_device *dev, struct ifreq *ifr,
 			       int cmd)
 {
-	if (dev->phydev)
+	if (dev->phydev != NULL)
 		return phy_mii_ioctl(dev->phydev, ifr, cmd);
 
 	return -EOPNOTSUPP;
@@ -1501,7 +1503,7 @@ static int pxa168_eth_probe(struct platform_device *pdev)
 	pep->timeout.data = (unsigned long)pep;
 
 	pep->smi_bus = mdiobus_alloc();
-	if (!pep->smi_bus) {
+	if (pep->smi_bus == NULL) {
 		err = -ENOMEM;
 		goto err_netdev;
 	}

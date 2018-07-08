@@ -43,6 +43,8 @@
 
 #define UNSET (-1U)
 
+#define PREFIX (t->i2c->dev.driver->name)
+
 /*
  * Driver modprobe parameters
  */

@@ -44,6 +44,7 @@
 #include "sun5i-a10s.dtsi"
 #include "sunxi-common-regulators.dtsi"
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/sun4i-a10.h>
 
 / {
 	model = "Auxtek t004 A10s hdmi tv-stick";
@@ -166,6 +167,10 @@
 &usb_otg {
 	dr_mode = "otg";
 	status = "okay";
+};
+
+&usb1_vbus_pin_a {
+	pins = "PG13";
 };
 
 &usbphy {

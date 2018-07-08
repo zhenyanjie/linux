@@ -691,9 +691,8 @@ mwifiex_scan_channel_list(struct mwifiex_private *priv,
 
 			/* Increment the TLV header length by the size
 			   appended */
-			le16_unaligned_add_cpu(&chan_tlv_out->header.len,
-					       sizeof(
-						chan_tlv_out->chan_scan_param));
+			le16_add_cpu(&chan_tlv_out->header.len,
+				     sizeof(chan_tlv_out->chan_scan_param));
 
 			/*
 			 * The tlv buffer length is set to the number of bytes
@@ -860,7 +859,6 @@ mwifiex_config_scan(struct mwifiex_private *priv,
 	*scan_current_only = false;
 
 	if (user_scan_in) {
-		u8 tmpaddr[ETH_ALEN];
 
 		/* Default the ssid_filter flag to TRUE, set false under
 		   certain wildcard conditions and qualified by the existence
@@ -885,10 +883,8 @@ mwifiex_config_scan(struct mwifiex_private *priv,
 		       user_scan_in->specific_bssid,
 		       sizeof(scan_cfg_out->specific_bssid));
 
-		memcpy(tmpaddr, scan_cfg_out->specific_bssid, ETH_ALEN);
-
 		if (adapter->ext_scan &&
-		    !is_zero_ether_addr(tmpaddr)) {
+		    !is_zero_ether_addr(scan_cfg_out->specific_bssid)) {
 			bssid_tlv =
 				(struct mwifiex_ie_types_bssid_list *)tlv_pos;
 			bssid_tlv->header.type = cpu_to_le16(TLV_TYPE_BSSID);
@@ -951,9 +947,8 @@ mwifiex_config_scan(struct mwifiex_private *priv,
 		 *  truncate scan results.  That is not an issue with an SSID
 		 *  or BSSID filter applied to the scan results in the firmware.
 		 */
-		memcpy(tmpaddr, scan_cfg_out->specific_bssid, ETH_ALEN);
 		if ((i && ssid_filter) ||
-		    !is_zero_ether_addr(tmpaddr))
+		    !is_zero_ether_addr(scan_cfg_out->specific_bssid))
 			*filtered_scan = true;
 
 		if (user_scan_in->scan_chan_gap) {
@@ -994,15 +989,10 @@ mwifiex_config_scan(struct mwifiex_private *priv,
 	 *  If a specific BSSID or SSID is used, the number of channels in the
 	 *  scan command will be increased to the absolute maximum.
 	 */
-	if (*filtered_scan) {
+	if (*filtered_scan)
 		*max_chan_per_scan = MWIFIEX_MAX_CHANNELS_PER_SPECIFIC_SCAN;
-	} else {
-		if (!priv->media_connected)
-			*max_chan_per_scan = MWIFIEX_DEF_CHANNELS_PER_SCAN_CMD;
-		else
-			*max_chan_per_scan =
-					MWIFIEX_DEF_CHANNELS_PER_SCAN_CMD / 2;
-	}
+	else
+		*max_chan_per_scan = MWIFIEX_DEF_CHANNELS_PER_SCAN_CMD;
 
 	if (adapter->ext_scan) {
 		bss_mode = (struct mwifiex_ie_types_bss_mode *)tlv_pos;
@@ -1752,7 +1742,7 @@ mwifiex_parse_single_response_buf(struct mwifiex_private *priv, u8 **bss_info,
 
 	if (*bytes_left >= sizeof(beacon_size)) {
 		/* Extract & convert beacon size from command buffer */
-		beacon_size = get_unaligned_le16((*bss_info));
+		beacon_size = le16_to_cpu(*(__le16 *)(*bss_info));
 		*bytes_left -= sizeof(beacon_size);
 		*bss_info += sizeof(beacon_size);
 	}
@@ -2379,9 +2369,8 @@ int mwifiex_cmd_802_11_bg_scan_config(struct mwifiex_private *priv,
 			temp_chan = chan_list_tlv->chan_scan_param + chan_idx;
 
 			/* Increment the TLV header length by size appended */
-			le16_unaligned_add_cpu(&chan_list_tlv->header.len,
-					       sizeof(
-					       chan_list_tlv->chan_scan_param));
+			le16_add_cpu(&chan_list_tlv->header.len,
+				     sizeof(chan_list_tlv->chan_scan_param));
 
 			temp_chan->chan_number =
 				bgscan_cfg_in->chan_list[chan_idx].chan_number;
@@ -2418,8 +2407,8 @@ int mwifiex_cmd_802_11_bg_scan_config(struct mwifiex_private *priv,
 			mwifiex_bgscan_create_channel_list(priv, bgscan_cfg_in,
 							   chan_list_tlv->
 							   chan_scan_param);
-		le16_unaligned_add_cpu(&chan_list_tlv->header.len,
-				       chan_num *
+		le16_add_cpu(&chan_list_tlv->header.len,
+			     chan_num *
 			     sizeof(chan_list_tlv->chan_scan_param[0]));
 	}
 
@@ -2443,7 +2432,7 @@ int mwifiex_cmd_802_11_bg_scan_config(struct mwifiex_private *priv,
 	/* Append vendor specific IE TLV */
 	mwifiex_cmd_append_vsie_tlv(priv, MWIFIEX_VSIE_MASK_BGSCAN, &tlv_pos);
 
-	le16_unaligned_add_cpu(&cmd->size, tlv_pos - bgscan_config->tlv);
+	le16_add_cpu(&cmd->size, tlv_pos - bgscan_config->tlv);
 
 	return 0;
 }
@@ -2492,12 +2481,6 @@ mwifiex_update_chan_statistics(struct mwifiex_private *priv,
 					      sizeof(struct mwifiex_chan_stats);
 
 	for (i = 0 ; i < num_chan; i++) {
-		if (adapter->survey_idx >= adapter->num_in_chan_stats) {
-			mwifiex_dbg(adapter, WARN,
-				    "FW reported too many channel results (max %d)\n",
-				    adapter->num_in_chan_stats);
-			return;
-		}
 		chan_stats.chan_num = fw_chan_stats->chan_num;
 		chan_stats.bandcfg = fw_chan_stats->bandcfg;
 		chan_stats.flags = fw_chan_stats->flags;
@@ -2815,7 +2798,7 @@ int mwifiex_request_scan(struct mwifiex_private *priv,
 {
 	int ret;
 
-	if (mutex_lock_interruptible(&priv->async_mutex)) {
+	if (down_interruptible(&priv->async_sem)) {
 		mwifiex_dbg(priv->adapter, ERROR,
 			    "%s: acquire semaphore fail\n",
 			    __func__);
@@ -2831,7 +2814,7 @@ int mwifiex_request_scan(struct mwifiex_private *priv,
 		/* Normal scan */
 		ret = mwifiex_scan_networks(priv, NULL);
 
-	mutex_unlock(&priv->async_mutex);
+	up(&priv->async_sem);
 
 	return ret;
 }

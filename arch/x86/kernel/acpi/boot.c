@@ -37,7 +37,6 @@
 #include <linux/pci.h>
 #include <linux/efi-bgrt.h>
 
-#include <asm/e820/api.h>
 #include <asm/irqdomain.h>
 #include <asm/pci_x86.h>
 #include <asm/pgtable.h>
@@ -345,14 +344,6 @@ static void __init mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger,
 	int ioapic;
 	int pin;
 	struct mpc_intsrc mp_irq;
-
-	/*
-	 * Check bus_irq boundary.
-	 */
-	if (bus_irq >= NR_IRQS_LEGACY) {
-		pr_warn("Invalid bus_irq %u for legacy override\n", bus_irq);
-		return;
-	}
 
 	/*
 	 * Convert 'gsi' to 'ioapic.pin'.
@@ -1573,6 +1564,12 @@ int __init early_acpi_boot_init(void)
 	return 0;
 }
 
+static int __init acpi_parse_bgrt(struct acpi_table_header *table)
+{
+	efi_bgrt_init(table);
+	return 0;
+}
+
 int __init acpi_boot_init(void)
 {
 	/* those are executed after early-quirks are executed */
@@ -1732,6 +1729,6 @@ int __acpi_release_global_lock(unsigned int *lock)
 
 void __init arch_reserve_mem_area(acpi_physical_address addr, size_t size)
 {
-	e820__range_add(addr, size, E820_TYPE_ACPI);
-	e820__update_table_print();
+	e820_add_region(addr, size, E820_ACPI);
+	update_e820();
 }

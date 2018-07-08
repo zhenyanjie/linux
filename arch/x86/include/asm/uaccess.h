@@ -3,13 +3,18 @@
 /*
  * User space memory access functions
  */
+#include <linux/errno.h>
 #include <linux/compiler.h>
 #include <linux/kasan-checks.h>
+#include <linux/thread_info.h>
 #include <linux/string.h>
 #include <asm/asm.h>
 #include <asm/page.h>
 #include <asm/smap.h>
 #include <asm/extable.h>
+
+#define VERIFY_READ 0
+#define VERIFY_WRITE 1
 
 /*
  * The fs value determines whether argument validity checking should be
@@ -379,18 +384,6 @@ do {									\
 		     : "=r" (err), ltype(x)				\
 		     : "m" (__m(addr)), "i" (errret), "0" (err))
 
-#define __get_user_asm_nozero(x, addr, err, itype, rtype, ltype, errret)	\
-	asm volatile("\n"						\
-		     "1:	mov"itype" %2,%"rtype"1\n"		\
-		     "2:\n"						\
-		     ".section .fixup,\"ax\"\n"				\
-		     "3:	mov %3,%0\n"				\
-		     "	jmp 2b\n"					\
-		     ".previous\n"					\
-		     _ASM_EXTABLE(1b, 3b)				\
-		     : "=r" (err), ltype(x)				\
-		     : "m" (__m(addr)), "i" (errret), "0" (err))
-
 /*
  * This doesn't do __uaccess_begin/end - the exception handling
  * around it must do that.
@@ -535,6 +528,9 @@ struct __large_struct { unsigned long buf[100]; };
 #define __put_user(x, ptr)						\
 	__put_user_nocheck((__typeof__(*(ptr)))(x), (ptr), sizeof(*(ptr)))
 
+#define __get_user_unaligned __get_user
+#define __put_user_unaligned __put_user
+
 /*
  * {get|put}_user_try and catch
  *
@@ -562,6 +558,7 @@ copy_from_user_nmi(void *to, const void __user *from, unsigned long n);
 extern __must_check long
 strncpy_from_user(char *dst, const char __user *src, long count);
 
+extern __must_check long strlen_user(const char __user *str);
 extern __must_check long strnlen_user(const char __user *str, long n);
 
 unsigned long __must_check clear_user(void __user *mem, unsigned long len);
@@ -678,6 +675,59 @@ extern struct movsl_mask {
 # include <asm/uaccess_64.h>
 #endif
 
+unsigned long __must_check _copy_from_user(void *to, const void __user *from,
+					   unsigned n);
+unsigned long __must_check _copy_to_user(void __user *to, const void *from,
+					 unsigned n);
+
+extern void __compiletime_error("usercopy buffer size is too small")
+__bad_copy_user(void);
+
+static inline void copy_user_overflow(int size, unsigned long count)
+{
+	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
+}
+
+static __always_inline unsigned long __must_check
+copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+	int sz = __compiletime_object_size(to);
+
+	might_fault();
+
+	kasan_check_write(to, n);
+
+	if (likely(sz < 0 || sz >= n)) {
+		check_object_size(to, n, false);
+		n = _copy_from_user(to, from, n);
+	} else if (!__builtin_constant_p(n))
+		copy_user_overflow(sz, n);
+	else
+		__bad_copy_user();
+
+	return n;
+}
+
+static __always_inline unsigned long __must_check
+copy_to_user(void __user *to, const void *from, unsigned long n)
+{
+	int sz = __compiletime_object_size(from);
+
+	kasan_check_read(from, n);
+
+	might_fault();
+
+	if (likely(sz < 0 || sz >= n)) {
+		check_object_size(from, n, true);
+		n = _copy_to_user(to, from, n);
+	} else if (!__builtin_constant_p(n))
+		copy_user_overflow(sz, n);
+	else
+		__bad_copy_user();
+
+	return n;
+}
+
 /*
  * We rely on the nested NMI work to allow atomic faults from the NMI path; the
  * nested NMI paths are careful to preserve CR2.
@@ -699,15 +749,14 @@ extern struct movsl_mask {
 #define unsafe_put_user(x, ptr, err_label)					\
 do {										\
 	int __pu_err;								\
-	__typeof__(*(ptr)) __pu_val = (x);					\
-	__put_user_size(__pu_val, (ptr), sizeof(*(ptr)), __pu_err, -EFAULT);	\
+	__put_user_size((x), (ptr), sizeof(*(ptr)), __pu_err, -EFAULT);		\
 	if (unlikely(__pu_err)) goto err_label;					\
 } while (0)
 
 #define unsafe_get_user(x, ptr, err_label)					\
 do {										\
 	int __gu_err;								\
-	__inttype(*(ptr)) __gu_val;						\
+	unsigned long __gu_val;							\
 	__get_user_size(__gu_val, (ptr), sizeof(*(ptr)), __gu_err, -EFAULT);	\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;				\
 	if (unlikely(__gu_err)) goto err_label;					\

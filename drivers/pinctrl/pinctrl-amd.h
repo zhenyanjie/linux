@@ -87,7 +87,7 @@ struct amd_function {
 };
 
 struct amd_gpio {
-	raw_spinlock_t          lock;
+	spinlock_t              lock;
 	void __iomem            *base;
 
 	const struct amd_pingroup *groups;
@@ -97,7 +97,6 @@ struct amd_gpio {
 	unsigned int            hwbank_num;
 	struct resource         *res;
 	struct platform_device  *pdev;
-	u32			*saved_regs;
 };
 
 /*  KERNCZ configuration*/

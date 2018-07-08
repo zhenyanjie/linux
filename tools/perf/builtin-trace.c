@@ -21,11 +21,9 @@
 #include "builtin.h"
 #include "util/color.h"
 #include "util/debug.h"
-#include "util/event.h"
 #include "util/evlist.h"
 #include <subcmd/exec-cmd.h>
 #include "util/machine.h"
-#include "util/path.h"
 #include "util/session.h"
 #include "util/thread.h"
 #include <subcmd/parse-options.h>
@@ -33,32 +31,22 @@
 #include "util/intlist.h"
 #include "util/thread_map.h"
 #include "util/stat.h"
-#include "trace/beauty/beauty.h"
 #include "trace-event.h"
 #include "util/parse-events.h"
 #include "util/bpf-loader.h"
 #include "callchain.h"
-#include "print_binary.h"
-#include "string2.h"
 #include "syscalltbl.h"
 #include "rb_resort.h"
 
-#include <errno.h>
-#include <inttypes.h>
 #include <libaudit.h> /* FIXME: Still needed for audit_errno_to_name */
-#include <poll.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <linux/err.h>
 #include <linux/filter.h>
 #include <linux/audit.h>
-#include <linux/kernel.h>
 #include <linux/random.h>
 #include <linux/stringify.h>
 #include <linux/time64.h>
-
-#include "sane_ctype.h"
 
 #ifndef O_CLOEXEC
 # define O_CLOEXEC		02000000
@@ -278,6 +266,15 @@ out_delete:
 #define perf_evsel__sc_tp_ptr(evsel, name, sample) \
 	({ struct syscall_tp *fields = evsel->priv; \
 	   fields->name.pointer(&fields->name, sample); })
+
+struct syscall_arg {
+	unsigned long val;
+	struct thread *thread;
+	struct trace  *trace;
+	void	      *parm;
+	u8	      idx;
+	u8	      mask;
+};
 
 struct strarray {
 	int	    offset;
@@ -681,10 +678,6 @@ static struct syscall_fmt {
 	{ .name	    = "mlockall",   .errmsg = true,
 	  .arg_scnprintf = { [0] = SCA_HEX, /* addr */ }, },
 	{ .name	    = "mmap",	    .hexret = true,
-/* The standard mmap maps to old_mmap on s390x */
-#if defined(__s390x__)
-	.alias = "old_mmap",
-#endif
 	  .arg_scnprintf = { [0] = SCA_HEX,	  /* addr */
 			     [2] = SCA_MMAP_PROT, /* prot */
 			     [3] = SCA_MMAP_FLAGS, /* flags */ }, },
@@ -778,10 +771,6 @@ static struct syscall_fmt {
 	  .arg_parm	 = { [0] = &strarray__socket_families, /* family */ }, },
 	{ .name	    = "stat",	    .errmsg = true, .alias = "newstat", },
 	{ .name	    = "statfs",	    .errmsg = true, },
-	{ .name	    = "statx",	    .errmsg = true,
-	  .arg_scnprintf = { [0] = SCA_FDAT, /* flags */
-			     [2] = SCA_STATX_FLAGS, /* flags */
-			     [3] = SCA_STATX_MASK, /* mask */ }, },
 	{ .name	    = "swapoff",    .errmsg = true,
 	  .arg_scnprintf = { [0] = SCA_FILENAME, /* specialfile */ }, },
 	{ .name	    = "swapon",	    .errmsg = true,
@@ -832,21 +821,12 @@ struct syscall {
 	void		    **arg_parm;
 };
 
-/*
- * We need to have this 'calculated' boolean because in some cases we really
- * don't know what is the duration of a syscall, for instance, when we start
- * a session and some threads are waiting for a syscall to finish, say 'poll',
- * in which case all we can do is to print "( ? ) for duration and for the
- * start timestamp.
- */
-static size_t fprintf_duration(unsigned long t, bool calculated, FILE *fp)
+static size_t fprintf_duration(unsigned long t, FILE *fp)
 {
 	double duration = (double)t / NSEC_PER_MSEC;
 	size_t printed = fprintf(fp, "(");
 
-	if (!calculated)
-		printed += fprintf(fp, "     ?   ");
-	else if (duration >= 1.0)
+	if (duration >= 1.0)
 		printed += color_fprintf(fp, PERF_COLOR_RED, "%6.3f ms", duration);
 	else if (duration >= 0.01)
 		printed += color_fprintf(fp, PERF_COLOR_YELLOW, "%6.3f ms", duration);
@@ -1048,25 +1028,11 @@ static bool trace__filter_duration(struct trace *trace, double t)
 	return t < (trace->duration_filter * NSEC_PER_MSEC);
 }
 
-static size_t __trace__fprintf_tstamp(struct trace *trace, u64 tstamp, FILE *fp)
+static size_t trace__fprintf_tstamp(struct trace *trace, u64 tstamp, FILE *fp)
 {
 	double ts = (double)(tstamp - trace->base_time) / NSEC_PER_MSEC;
 
 	return fprintf(fp, "%10.3f ", ts);
-}
-
-/*
- * We're handling tstamp=0 as an undefined tstamp, i.e. like when we are
- * using ttrace->entry_time for a thread that receives a sys_exit without
- * first having received a sys_enter ("poll" issued before tracing session
- * starts, lost sys_enter exit due to ring buffer overflow).
- */
-static size_t trace__fprintf_tstamp(struct trace *trace, u64 tstamp, FILE *fp)
-{
-	if (tstamp > 0)
-		return __trace__fprintf_tstamp(trace, tstamp, fp);
-
-	return fprintf(fp, "         ? ");
 }
 
 static bool done = false;
@@ -1079,10 +1045,10 @@ static void sig_handler(int sig)
 }
 
 static size_t trace__fprintf_entry_head(struct trace *trace, struct thread *thread,
-					u64 duration, bool duration_calculated, u64 tstamp, FILE *fp)
+					u64 duration, u64 tstamp, FILE *fp)
 {
 	size_t printed = trace__fprintf_tstamp(trace, tstamp, fp);
-	printed += fprintf_duration(duration, duration_calculated, fp);
+	printed += fprintf_duration(duration, fp);
 
 	if (trace->multiple_threads) {
 		if (trace->show_comm)
@@ -1484,7 +1450,7 @@ static int trace__printf_interrupted_entry(struct trace *trace, struct perf_samp
 
 	duration = sample->time - ttrace->entry_time;
 
-	printed  = trace__fprintf_entry_head(trace, trace->current, duration, true, ttrace->entry_time, trace->output);
+	printed  = trace__fprintf_entry_head(trace, trace->current, duration, ttrace->entry_time, trace->output);
 	printed += fprintf(trace->output, "%-70s) ...\n", ttrace->entry_str);
 	ttrace->entry_pending = false;
 
@@ -1531,7 +1497,7 @@ static int trace__sys_enter(struct trace *trace, struct perf_evsel *evsel,
 
 	if (sc->is_exit) {
 		if (!(trace->duration_filter || trace->summary_only || trace->min_stack)) {
-			trace__fprintf_entry_head(trace, thread, 0, false, ttrace->entry_time, trace->output);
+			trace__fprintf_entry_head(trace, thread, 1, ttrace->entry_time, trace->output);
 			fprintf(trace->output, "%-70s)\n", ttrace->entry_str);
 		}
 	} else {
@@ -1579,7 +1545,6 @@ static int trace__sys_exit(struct trace *trace, struct perf_evsel *evsel,
 {
 	long ret;
 	u64 duration = 0;
-	bool duration_calculated = false;
 	struct thread *thread;
 	int id = perf_evsel__sc_tp_uint(evsel, id, sample), err = -1, callchain_ret = 0;
 	struct syscall *sc = trace__syscall_info(trace, evsel, id);
@@ -1608,7 +1573,6 @@ static int trace__sys_exit(struct trace *trace, struct perf_evsel *evsel,
 		duration = sample->time - ttrace->entry_time;
 		if (trace__filter_duration(trace, duration))
 			goto out;
-		duration_calculated = true;
 	} else if (trace->duration_filter)
 		goto out;
 
@@ -1624,7 +1588,7 @@ static int trace__sys_exit(struct trace *trace, struct perf_evsel *evsel,
 	if (trace->summary_only)
 		goto out;
 
-	trace__fprintf_entry_head(trace, thread, duration, duration_calculated, ttrace->entry_time, trace->output);
+	trace__fprintf_entry_head(trace, thread, duration, ttrace->entry_time, trace->output);
 
 	if (ttrace->entry_pending) {
 		fprintf(trace->output, "%-70s", ttrace->entry_str);
@@ -1689,17 +1653,15 @@ static int trace__vfs_getname(struct trace *trace, struct perf_evsel *evsel,
 
 	ttrace = thread__priv(thread);
 	if (!ttrace)
-		goto out_put;
+		goto out;
 
 	filename_len = strlen(filename);
-	if (filename_len == 0)
-		goto out_put;
 
 	if (ttrace->filename.namelen < filename_len) {
 		char *f = realloc(ttrace->filename.name, filename_len + 1);
 
 		if (f == NULL)
-			goto out_put;
+				goto out;
 
 		ttrace->filename.namelen = filename_len;
 		ttrace->filename.name = f;
@@ -1709,12 +1671,12 @@ static int trace__vfs_getname(struct trace *trace, struct perf_evsel *evsel,
 	ttrace->filename.pending_open = true;
 
 	if (!ttrace->filename.ptr)
-		goto out_put;
+		goto out;
 
 	entry_str_len = strlen(ttrace->entry_str);
 	remaining_space = trace__entry_str_size - entry_str_len - 1; /* \0 */
 	if (remaining_space <= 0)
-		goto out_put;
+		goto out;
 
 	if (filename_len > (size_t)remaining_space) {
 		filename += filename_len - remaining_space;
@@ -1728,8 +1690,6 @@ static int trace__vfs_getname(struct trace *trace, struct perf_evsel *evsel,
 
 	ttrace->filename.ptr = 0;
 	ttrace->filename.entry_str_pos = 0;
-out_put:
-	thread__put(thread);
 out:
 	return 0;
 }
@@ -1750,7 +1710,6 @@ static int trace__sched_stat_runtime(struct trace *trace, struct perf_evsel *evs
 
 	ttrace->runtime_ms += runtime_ms;
 	trace->runtime_ms += runtime_ms;
-out_put:
 	thread__put(thread);
 	return 0;
 
@@ -1761,7 +1720,8 @@ out_dump:
 	       (pid_t)perf_evsel__intval(evsel, sample, "pid"),
 	       runtime,
 	       perf_evsel__intval(evsel, sample, "vruntime"));
-	goto out_put;
+	thread__put(thread);
+	return 0;
 }
 
 static void bpf_output__printer(enum binary_printer_ops op,
@@ -1891,7 +1851,7 @@ static int trace__pgfault(struct trace *trace,
 	thread__find_addr_location(thread, sample->cpumode, MAP__FUNCTION,
 			      sample->ip, &al);
 
-	trace__fprintf_entry_head(trace, thread, 0, true, sample->time, trace->output);
+	trace__fprintf_entry_head(trace, thread, 0, sample->time, trace->output);
 
 	fprintf(trace->output, "%sfault [",
 		evsel->attr.config == PERF_COUNT_SW_PAGE_FAULTS_MAJ ?
@@ -1960,7 +1920,7 @@ static int trace__process_sample(struct perf_tool *tool,
 
 	thread = machine__findnew_thread(trace->host, sample->pid, sample->tid);
 	if (thread && thread__is_filtered(thread))
-		goto out;
+		return 0;
 
 	trace__set_base_time(trace, evsel, sample);
 
@@ -1968,8 +1928,7 @@ static int trace__process_sample(struct perf_tool *tool,
 		++trace->nr_events;
 		handler(trace, evsel, event, sample);
 	}
-out:
-	thread__put(thread);
+
 	return err;
 }
 
@@ -2029,7 +1988,7 @@ static int trace__record(struct trace *trace, int argc, const char **argv)
 	for (i = 0; i < (unsigned int)argc; i++)
 		rec_argv[j++] = argv[i];
 
-	return cmd_record(j, rec_argv);
+	return cmd_record(j, rec_argv, NULL);
 }
 
 static size_t trace__fprintf_thread_summary(struct trace *trace, FILE *fp);
@@ -2456,9 +2415,8 @@ static int trace__replay(struct trace *trace)
 	trace->tool.exit	  = perf_event__process_exit;
 	trace->tool.fork	  = perf_event__process_fork;
 	trace->tool.attr	  = perf_event__process_attr;
-	trace->tool.tracing_data  = perf_event__process_tracing_data;
+	trace->tool.tracing_data = perf_event__process_tracing_data;
 	trace->tool.build_id	  = perf_event__process_build_id;
-	trace->tool.namespaces	  = perf_event__process_namespaces;
 
 	trace->tool.ordered_events = true;
 	trace->tool.ordering_requires_timestamps = true;
@@ -2827,7 +2785,7 @@ out:
 	return err;
 }
 
-int cmd_trace(int argc, const char **argv)
+int cmd_trace(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	const char *trace_usage[] = {
 		"perf trace [<options>] [<command>]",

@@ -378,6 +378,7 @@ struct dm_block_manager {
 
 struct dm_block_manager *dm_block_manager_create(struct block_device *bdev,
 						 unsigned block_size,
+						 unsigned cache_size,
 						 unsigned max_held_per_thread)
 {
 	int r;

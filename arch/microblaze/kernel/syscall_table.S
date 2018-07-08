@@ -398,4 +398,3 @@ ENTRY(sys_call_table)
 	.long sys_pkey_mprotect		/* 395 */
 	.long sys_pkey_alloc
 	.long sys_pkey_free
-	.long sys_statx

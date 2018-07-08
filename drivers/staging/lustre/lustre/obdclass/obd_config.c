@@ -1052,8 +1052,7 @@ int class_process_proc_param(char *prefix, struct lprocfs_vars *lvars,
 
 					oldfs = get_fs();
 					set_fs(KERNEL_DS);
-					rc = var->fops->write(&fakefile,
-						(const char __user *)sval,
+					rc = var->fops->write(&fakefile, sval,
 								vallen, NULL);
 					set_fs(oldfs);
 				}
@@ -1427,8 +1426,8 @@ int class_manual_cleanup(struct obd_device *obd)
 	lustre_cfg_bufs_reset(&bufs, obd->obd_name);
 	lustre_cfg_bufs_set_string(&bufs, 1, flags);
 	lcfg = lustre_cfg_new(LCFG_CLEANUP, &bufs);
-	if (IS_ERR(lcfg))
-		return PTR_ERR(lcfg);
+	if (!lcfg)
+		return -ENOMEM;
 
 	rc = class_process_config(lcfg);
 	if (rc) {

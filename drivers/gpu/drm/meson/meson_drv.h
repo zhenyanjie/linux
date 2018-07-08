@@ -47,9 +47,6 @@ struct meson_drm {
 
 	struct {
 		unsigned int current_mode;
-		bool hdmi_repeat;
-		bool venc_repeat;
-		bool hdmi_use_enci;
 	} venc;
 };
 

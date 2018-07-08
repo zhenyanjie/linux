@@ -5,7 +5,7 @@
 #include <linux/types.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <sys/ioctl.h>
+#include <termios.h>
 
 struct perf_evlist;
 struct perf_evsel;

@@ -264,7 +264,13 @@ nf_nat_ipv4_fn(void *priv, struct sk_buff *skb,
 	if (!ct)
 		return NF_ACCEPT;
 
-	nat = nfct_nat(ct);
+	/* Don't try to NAT if this packet is not conntracked */
+	if (nf_ct_is_untracked(ct))
+		return NF_ACCEPT;
+
+	nat = nf_ct_nat_ext_add(ct);
+	if (nat == NULL)
+		return NF_ACCEPT;
 
 	switch (ctinfo) {
 	case IP_CT_RELATED:

@@ -46,6 +46,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/sun4i-a10.h>
 
 / {
 	model = "A10s-Wobo i5";
@@ -94,7 +95,7 @@
 
 &emac {
 	pinctrl-names = "default";
-	pinctrl-0 = <&emac_pins_a>;
+	pinctrl-0 = <&emac_pins_b>;
 	phy = <&phy1>;
 	status = "okay";
 };
@@ -214,6 +215,10 @@
 &usb_otg {
 	dr_mode = "host";
 	status = "okay";
+};
+
+&usb1_vbus_pin_a {
+	pins = "PG12";
 };
 
 &usbphy {

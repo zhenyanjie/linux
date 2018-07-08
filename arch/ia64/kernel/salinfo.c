@@ -179,14 +179,14 @@ struct salinfo_platform_oemdata_parms {
 	const u8 *efi_guid;
 	u8 **oemdata;
 	u64 *oemdata_size;
+	int ret;
 };
 
-static long
+static void
 salinfo_platform_oemdata_cpu(void *context)
 {
 	struct salinfo_platform_oemdata_parms *parms = context;
-
-	return salinfo_platform_oemdata(parms->efi_guid, parms->oemdata, parms->oemdata_size);
+	parms->ret = salinfo_platform_oemdata(parms->efi_guid, parms->oemdata, parms->oemdata_size);
 }
 
 static void
@@ -380,7 +380,16 @@ salinfo_log_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static long
+static void
+call_on_cpu(int cpu, void (*fn)(void *), void *arg)
+{
+	cpumask_t save_cpus_allowed = current->cpus_allowed;
+	set_cpus_allowed_ptr(current, cpumask_of(cpu));
+	(*fn)(arg);
+	set_cpus_allowed_ptr(current, &save_cpus_allowed);
+}
+
+static void
 salinfo_log_read_cpu(void *context)
 {
 	struct salinfo_data *data = context;
@@ -390,7 +399,6 @@ salinfo_log_read_cpu(void *context)
 	/* Clear corrected errors as they are read from SAL */
 	if (rh->severity == sal_log_severity_corrected)
 		ia64_sal_clear_state_info(data->type);
-	return 0;
 }
 
 static void
@@ -422,7 +430,7 @@ retry:
 	spin_unlock_irqrestore(&data_saved_lock, flags);
 
 	if (!data->saved_num)
-		work_on_cpu_safe(cpu, salinfo_log_read_cpu, data);
+		call_on_cpu(cpu, salinfo_log_read_cpu, data);
 	if (!data->log_size) {
 		data->state = STATE_NO_DATA;
 		cpumask_clear_cpu(cpu, &data->cpu_event);
@@ -451,13 +459,11 @@ salinfo_log_read(struct file *file, char __user *buffer, size_t count, loff_t *p
 	return simple_read_from_buffer(buffer, count, ppos, buf, bufsize);
 }
 
-static long
+static void
 salinfo_log_clear_cpu(void *context)
 {
 	struct salinfo_data *data = context;
-
 	ia64_sal_clear_state_info(data->type);
-	return 0;
 }
 
 static int
@@ -480,7 +486,7 @@ salinfo_log_clear(struct salinfo_data *data, int cpu)
 	rh = (sal_log_record_header_t *)(data->log_buffer);
 	/* Corrected errors have already been cleared from SAL */
 	if (rh->severity != sal_log_severity_corrected)
-		work_on_cpu_safe(cpu, salinfo_log_clear_cpu, data);
+		call_on_cpu(cpu, salinfo_log_clear_cpu, data);
 	/* clearing a record may make a new record visible */
 	salinfo_log_new_read(cpu, data);
 	if (data->state == STATE_LOG_RECORD) {
@@ -525,8 +531,9 @@ salinfo_log_write(struct file *file, const char __user *buffer, size_t count, lo
 				.oemdata = &data->oemdata,
 				.oemdata_size = &data->oemdata_size
 			};
-			count = work_on_cpu_safe(cpu, salinfo_platform_oemdata_cpu,
-						 &parms);
+			call_on_cpu(cpu, salinfo_platform_oemdata_cpu, &parms);
+			if (parms.ret)
+				count = parms.ret;
 		} else
 			data->oemdata_size = 0;
 	} else

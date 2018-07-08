@@ -1235,8 +1235,10 @@ static int mtdswap_show(struct seq_file *s, void *data)
 
 		if (root->rb_node) {
 			count[i] = d->trees[i].count;
-			min[i] = MTDSWAP_ECNT_MIN(root);
-			max[i] = MTDSWAP_ECNT_MAX(root);
+			min[i] = rb_entry(rb_first(root), struct swap_eb,
+					rb)->erase_count;
+			max[i] = rb_entry(rb_last(root), struct swap_eb,
+					rb)->erase_count;
 		} else
 			count[i] = 0;
 	}

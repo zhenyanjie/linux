@@ -17,6 +17,7 @@
 #include <linux/bitops.h>
 #include <linux/compiler.h>
 #include <linux/atomic.h>
+#include <linux/rhashtable.h>
 
 #include <linux/netfilter/nf_conntrack_tcp.h>
 #include <linux/netfilter/nf_conntrack_dccp.h>
@@ -48,6 +49,25 @@ union nf_conntrack_expect_proto {
 #else
 #define NF_CT_ASSERT(x)
 #endif
+
+struct nf_conntrack_helper;
+
+/* Must be kept in sync with the classes defined by helpers */
+#define NF_CT_MAX_EXPECT_CLASSES	4
+
+/* nf_conn feature for connections that have a helper */
+struct nf_conn_help {
+	/* Helper. if any */
+	struct nf_conntrack_helper __rcu *helper;
+
+	struct hlist_head expectations;
+
+	/* Current number of expected connections */
+	u8 expecting[NF_CT_MAX_EXPECT_CLASSES];
+
+	/* private helper information. */
+	char data[];
+};
 
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
@@ -82,7 +102,7 @@ struct nf_conn {
 	possible_net_t ct_net;
 
 #if IS_ENABLED(CONFIG_NF_NAT)
-	struct hlist_node	nat_bysource;
+	struct rhlist_head nat_bysource;
 #endif
 	/* all members below initialized via memset */
 	u8 __nfct_init_offset[0];
@@ -223,14 +243,18 @@ extern s32 (*nf_ct_nat_offset)(const struct nf_conn *ct,
 			       enum ip_conntrack_dir dir,
 			       u32 seq);
 
-/* Iterate over all conntracks: if iter returns true, it's deleted. */
-void nf_ct_iterate_cleanup_net(struct net *net,
-			       int (*iter)(struct nf_conn *i, void *data),
-			       void *data, u32 portid, int report);
+/* Fake conntrack entry for untracked connections */
+DECLARE_PER_CPU_ALIGNED(struct nf_conn, nf_conntrack_untracked);
+static inline struct nf_conn *nf_ct_untracked_get(void)
+{
+	return raw_cpu_ptr(&nf_conntrack_untracked);
+}
+void nf_ct_untracked_status_or(unsigned long bits);
 
-/* also set unconfirmed conntracks as dying. Only use in module exit path. */
-void nf_ct_iterate_destroy(int (*iter)(struct nf_conn *i, void *data),
-			   void *data);
+/* Iterate over all conntracks: if iter returns true, it's deleted. */
+void nf_ct_iterate_cleanup(struct net *net,
+			   int (*iter)(struct nf_conn *i, void *data),
+			   void *data, u32 portid, int report);
 
 struct nf_conntrack_zone;
 
@@ -255,6 +279,11 @@ static inline int nf_ct_is_confirmed(const struct nf_conn *ct)
 static inline int nf_ct_is_dying(const struct nf_conn *ct)
 {
 	return test_bit(IPS_DYING_BIT, &ct->status);
+}
+
+static inline int nf_ct_is_untracked(const struct nf_conn *ct)
+{
+	return test_bit(IPS_UNTRACKED_BIT, &ct->status);
 }
 
 /* Packet is received from loopback */

@@ -149,7 +149,6 @@ function cleanup {
 	ip link del veth1
 	ip link del ipip11
 	ip link del gretap11
-	ip link del vxlan11
 	ip link del geneve11
 	pkill tcpdump
 	pkill cat

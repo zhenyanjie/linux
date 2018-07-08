@@ -86,17 +86,9 @@ EXPORT_SYMBOL_GPL(user_preparse);
  */
 void user_free_preparse(struct key_preparsed_payload *prep)
 {
-	kzfree(prep->payload.data[0]);
+	kfree(prep->payload.data[0]);
 }
 EXPORT_SYMBOL_GPL(user_free_preparse);
-
-static void user_free_payload_rcu(struct rcu_head *head)
-{
-	struct user_key_payload *payload;
-
-	payload = container_of(head, struct user_key_payload, rcu);
-	kzfree(payload);
-}
 
 /*
  * update a user defined key
@@ -114,13 +106,13 @@ int user_update(struct key *key, struct key_preparsed_payload *prep)
 
 	/* attach the new data, displacing the old */
 	key->expiry = prep->expiry;
-	if (key_is_positive(key))
+	if (!test_bit(KEY_FLAG_NEGATIVE, &key->flags))
 		zap = dereference_key_locked(key);
 	rcu_assign_keypointer(key, prep->payload.data[0]);
 	prep->payload.data[0] = NULL;
 
 	if (zap)
-		call_rcu(&zap->rcu, user_free_payload_rcu);
+		kfree_rcu(zap, rcu);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(user_update);
@@ -138,7 +130,7 @@ void user_revoke(struct key *key)
 
 	if (upayload) {
 		rcu_assign_keypointer(key, NULL);
-		call_rcu(&upayload->rcu, user_free_payload_rcu);
+		kfree_rcu(upayload, rcu);
 	}
 }
 
@@ -151,7 +143,7 @@ void user_destroy(struct key *key)
 {
 	struct user_key_payload *upayload = key->payload.data[0];
 
-	kzfree(upayload);
+	kfree(upayload);
 }
 
 EXPORT_SYMBOL_GPL(user_destroy);
@@ -162,7 +154,7 @@ EXPORT_SYMBOL_GPL(user_destroy);
 void user_describe(const struct key *key, struct seq_file *m)
 {
 	seq_puts(m, key->description);
-	if (key_is_positive(key))
+	if (key_is_instantiated(key))
 		seq_printf(m, ": %u", key->datalen);
 }
 

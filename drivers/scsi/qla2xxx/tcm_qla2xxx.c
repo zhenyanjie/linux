@@ -25,6 +25,7 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <generated/utsrelease.h>
 #include <linux/utsname.h>
 #include <linux/vmalloc.h>
 #include <linux/init.h>
@@ -283,7 +284,7 @@ static void tcm_qla2xxx_complete_free(struct work_struct *work)
 
 	WARN_ON(cmd->trc_flags & TRC_CMD_FREE);
 
-	cmd->qpair->tgt_counters.qla_core_ret_sta_ctio++;
+	cmd->vha->tgt_counters.qla_core_ret_sta_ctio++;
 	cmd->trc_flags |= TRC_CMD_FREE;
 	transport_generic_free_cmd(&cmd->se_cmd, 0);
 }
@@ -295,7 +296,7 @@ static void tcm_qla2xxx_complete_free(struct work_struct *work)
  */
 static void tcm_qla2xxx_free_cmd(struct qla_tgt_cmd *cmd)
 {
-	cmd->qpair->tgt_counters.core_qla_free_cmd++;
+	cmd->vha->tgt_counters.core_qla_free_cmd++;
 	cmd->cmd_in_wq = 1;
 
 	WARN_ON(cmd->trc_flags & TRC_CMD_DONE);
@@ -491,7 +492,7 @@ static int tcm_qla2xxx_handle_cmd(scsi_qla_host_t *vha, struct qla_tgt_cmd *cmd,
 	}
 #endif
 
-	cmd->qpair->tgt_counters.qla_core_sbt_cmd++;
+	cmd->vha->tgt_counters.qla_core_sbt_cmd++;
 	return target_submit_cmd(se_cmd, se_sess, cdb, &cmd->sense_buffer[0],
 				cmd->unpacked_lun, data_length, fcp_task_attr,
 				data_dir, flags);
@@ -500,6 +501,7 @@ static int tcm_qla2xxx_handle_cmd(scsi_qla_host_t *vha, struct qla_tgt_cmd *cmd,
 static void tcm_qla2xxx_handle_data_work(struct work_struct *work)
 {
 	struct qla_tgt_cmd *cmd = container_of(work, struct qla_tgt_cmd, work);
+	unsigned long flags;
 
 	/*
 	 * Ensure that the complete FCP WRITE payload has been received.
@@ -507,7 +509,18 @@ static void tcm_qla2xxx_handle_data_work(struct work_struct *work)
 	 */
 	cmd->cmd_in_wq = 0;
 
-	cmd->qpair->tgt_counters.qla_core_ret_ctio++;
+	spin_lock_irqsave(&cmd->cmd_lock, flags);
+	cmd->data_work = 1;
+	if (cmd->aborted) {
+		cmd->data_work_free = 1;
+		spin_unlock_irqrestore(&cmd->cmd_lock, flags);
+
+		tcm_qla2xxx_free_cmd(cmd);
+		return;
+	}
+	spin_unlock_irqrestore(&cmd->cmd_lock, flags);
+
+	cmd->vha->tgt_counters.qla_core_ret_ctio++;
 	if (!cmd->write_data_transferred) {
 		/*
 		 * Check if se_cmd has already been aborted via LUN_RESET, and
@@ -582,19 +595,17 @@ static int tcm_qla2xxx_dif_tags(struct qla_tgt_cmd *cmd,
 /*
  * Called from qla_target.c:qlt_issue_task_mgmt()
  */
-static int tcm_qla2xxx_handle_tmr(struct qla_tgt_mgmt_cmd *mcmd, u64 lun,
+static int tcm_qla2xxx_handle_tmr(struct qla_tgt_mgmt_cmd *mcmd, uint32_t lun,
 	uint16_t tmr_func, uint32_t tag)
 {
 	struct fc_port *sess = mcmd->sess;
 	struct se_cmd *se_cmd = &mcmd->se_cmd;
 	int transl_tmr_func = 0;
-	int flags = TARGET_SCF_ACK_KREF;
 
 	switch (tmr_func) {
 	case QLA_TGT_ABTS:
 		pr_debug("%ld: ABTS received\n", sess->vha->host_no);
 		transl_tmr_func = TMR_ABORT_TASK;
-		flags |= TARGET_SCF_LOOKUP_LUN_FROM_TAG;
 		break;
 	case QLA_TGT_2G_ABORT_TASK:
 		pr_debug("%ld: 2G Abort Task received\n", sess->vha->host_no);
@@ -627,7 +638,7 @@ static int tcm_qla2xxx_handle_tmr(struct qla_tgt_mgmt_cmd *mcmd, u64 lun,
 	}
 
 	return target_submit_tmr(se_cmd, sess->se_sess, NULL, lun, mcmd,
-	    transl_tmr_func, GFP_ATOMIC, tag, flags);
+	    transl_tmr_func, GFP_ATOMIC, tag, TARGET_SCF_ACK_KREF);
 }
 
 static int tcm_qla2xxx_queue_data_in(struct se_cmd *se_cmd)
@@ -675,19 +686,6 @@ static int tcm_qla2xxx_queue_status(struct se_cmd *se_cmd)
 				struct qla_tgt_cmd, se_cmd);
 	int xmit_type = QLA_TGT_XMIT_STATUS;
 
-	if (cmd->aborted) {
-		/*
-		 * Cmd can loop during Q-full. tcm_qla2xxx_aborted_task
-		 * can get ahead of this cmd. tcm_qla2xxx_aborted_task
-		 * already kick start the free.
-		 */
-		pr_debug(
-		    "queue_data_in aborted cmd[%p] refcount %d transport_state %x, t_state %x, se_cmd_flags %x\n",
-		    cmd, kref_read(&cmd->se_cmd.cmd_kref),
-		    cmd->se_cmd.transport_state, cmd->se_cmd.t_state,
-		    cmd->se_cmd.se_cmd_flags);
-		return 0;
-	}
 	cmd->bufflen = se_cmd->data_length;
 	cmd->sg = NULL;
 	cmd->sg_cnt = 0;
@@ -753,13 +751,31 @@ static void tcm_qla2xxx_queue_tm_rsp(struct se_cmd *se_cmd)
 	qlt_xmit_tm_rsp(mcmd);
 }
 
+#define DATA_WORK_NOT_FREE(_cmd) (_cmd->data_work && !_cmd->data_work_free)
 static void tcm_qla2xxx_aborted_task(struct se_cmd *se_cmd)
 {
 	struct qla_tgt_cmd *cmd = container_of(se_cmd,
 				struct qla_tgt_cmd, se_cmd);
+	unsigned long flags;
 
 	if (qlt_abort_cmd(cmd))
 		return;
+
+	spin_lock_irqsave(&cmd->cmd_lock, flags);
+	if ((cmd->state == QLA_TGT_STATE_NEW)||
+	    ((cmd->state == QLA_TGT_STATE_DATA_IN) &&
+		DATA_WORK_NOT_FREE(cmd))) {
+		cmd->data_work_free = 1;
+		spin_unlock_irqrestore(&cmd->cmd_lock, flags);
+		/*
+		 * cmd has not reached fw, Use this trigger to free it.
+		 */
+		tcm_qla2xxx_free_cmd(cmd);
+		return;
+	}
+	spin_unlock_irqrestore(&cmd->cmd_lock, flags);
+	return;
+
 }
 
 static void tcm_qla2xxx_clear_sess_lookup(struct tcm_qla2xxx_lport *,
@@ -1854,9 +1870,9 @@ static ssize_t tcm_qla2xxx_wwn_version_show(struct config_item *item,
 		char *page)
 {
 	return sprintf(page,
-	    "TCM QLOGIC QLA2XXX NPIV capable fabric module %s on %s/%s on %s\n",
-	    QLA2XXX_VERSION, utsname()->sysname,
-	    utsname()->machine, utsname()->release);
+	    "TCM QLOGIC QLA2XXX NPIV capable fabric module %s on %s/%s on "
+	    UTS_RELEASE"\n", QLA2XXX_VERSION, utsname()->sysname,
+	    utsname()->machine);
 }
 
 CONFIGFS_ATTR_RO(tcm_qla2xxx_wwn_, version);
@@ -1960,9 +1976,9 @@ static int tcm_qla2xxx_register_configfs(void)
 {
 	int ret;
 
-	pr_debug("TCM QLOGIC QLA2XXX fabric module %s on %s/%s on %s\n",
-	    QLA2XXX_VERSION, utsname()->sysname,
-	    utsname()->machine, utsname()->release);
+	pr_debug("TCM QLOGIC QLA2XXX fabric module %s on %s/%s on "
+	    UTS_RELEASE"\n", QLA2XXX_VERSION, utsname()->sysname,
+	    utsname()->machine);
 
 	ret = target_register_template(&tcm_qla2xxx_ops);
 	if (ret)

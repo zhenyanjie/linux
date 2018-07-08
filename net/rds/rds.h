@@ -8,7 +8,6 @@
 #include <linux/mutex.h>
 #include <linux/rds.h>
 #include <linux/rhashtable.h>
-#include <linux/refcount.h>
 
 #include "info.h"
 
@@ -93,8 +92,6 @@ enum {
 #define	RDS_MPATH_HASH(rs, n) (jhash_1word((rs)->rs_bound_port, \
 			       (rs)->rs_hash_initval) & ((n) - 1))
 
-#define IS_CANONICAL(laddr, faddr) (htonl(laddr) < htonl(faddr))
-
 /* Per mpath connection state */
 struct rds_conn_path {
 	struct rds_connection	*cp_conn;
@@ -128,6 +125,8 @@ struct rds_conn_path {
 
 	unsigned int		cp_unacked_packets;
 	unsigned int		cp_unacked_bytes;
+	unsigned int		cp_outgoing:1,
+				cp_pad_to_32:31;
 	unsigned int		cp_index;
 };
 
@@ -138,8 +137,7 @@ struct rds_connection {
 	__be32			c_faddr;
 	unsigned int		c_loopback:1,
 				c_ping_triggered:1,
-				c_destroy_in_prog:1,
-				c_pad_to_32:29;
+				c_pad_to_32:30;
 	int			c_npaths;
 	struct rds_connection	*c_passive;
 	struct rds_transport	*c_trans;
@@ -262,7 +260,7 @@ struct rds_ext_header_rdma_dest {
 #define	RDS_MSG_RX_CMSG		3
 
 struct rds_incoming {
-	refcount_t		i_refcount;
+	atomic_t		i_refcount;
 	struct list_head	i_item;
 	struct rds_connection	*i_conn;
 	struct rds_conn_path	*i_conn_path;
@@ -277,7 +275,7 @@ struct rds_incoming {
 
 struct rds_mr {
 	struct rb_node		r_rb_node;
-	refcount_t		r_refcount;
+	atomic_t		r_refcount;
 	u32			r_key;
 
 	/* A copy of the creation flags */
@@ -356,7 +354,7 @@ static inline u32 rds_rdma_cookie_offset(rds_rdma_cookie_t cookie)
 #define RDS_MSG_FLUSH		8
 
 struct rds_message {
-	refcount_t		m_refcount;
+	atomic_t		m_refcount;
 	struct list_head	m_sock_item;
 	struct list_head	m_conn_item;
 	struct rds_incoming	m_inc;
@@ -829,7 +827,6 @@ void rds_send_drop_acked(struct rds_connection *conn, u64 ack,
 			 is_acked_func is_acked);
 void rds_send_path_drop_acked(struct rds_conn_path *cp, u64 ack,
 			      is_acked_func is_acked);
-void rds_send_ping(struct rds_connection *conn, int cp_index);
 int rds_send_pong(struct rds_conn_path *cp, __be16 dport);
 
 /* rdma.c */
@@ -857,7 +854,7 @@ int rds_cmsg_atomic(struct rds_sock *rs, struct rds_message *rm,
 void __rds_put_mr_final(struct rds_mr *mr);
 static inline void rds_mr_put(struct rds_mr *mr)
 {
-	if (refcount_dec_and_test(&mr->r_refcount))
+	if (atomic_dec_and_test(&mr->r_refcount))
 		__rds_put_mr_final(mr);
 }
 

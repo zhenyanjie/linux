@@ -437,7 +437,8 @@ static int hns_roce_create_qp_common(struct hns_roce_dev *hr_dev,
 		}
 
 		ret = hns_roce_mtt_init(hr_dev, ib_umem_page_count(hr_qp->umem),
-					hr_qp->umem->page_shift, &hr_qp->mtt);
+				    ilog2((unsigned int)hr_qp->umem->page_size),
+				    &hr_qp->mtt);
 		if (ret) {
 			dev_err(dev, "hns_roce_mtt_init error for create qp\n");
 			goto err_buf;

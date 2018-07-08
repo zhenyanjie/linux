@@ -150,7 +150,7 @@ static void tcindex_destroy_fexts(struct rcu_head *head)
 	kfree(f);
 }
 
-static int tcindex_delete(struct tcf_proto *tp, unsigned long arg, bool *last)
+static int tcindex_delete(struct tcf_proto *tp, unsigned long arg)
 {
 	struct tcindex_data *p = rtnl_dereference(tp->root);
 	struct tcindex_filter_result *r = (struct tcindex_filter_result *) arg;
@@ -186,8 +186,6 @@ found:
 		call_rcu(&f->rcu, tcindex_destroy_fexts);
 	else
 		call_rcu(&r->rcu, tcindex_destroy_rexts);
-
-	*last = false;
 	return 0;
 }
 
@@ -195,9 +193,7 @@ static int tcindex_destroy_element(struct tcf_proto *tp,
 				   unsigned long arg,
 				   struct tcf_walker *walker)
 {
-	bool last;
-
-	return tcindex_delete(tp, arg, &last);
+	return tcindex_delete(tp, arg);
 }
 
 static void __tcindex_destroy(struct rcu_head *head)
@@ -486,7 +482,7 @@ tcindex_change(struct net *net, struct sk_buff *in_skb,
 	if (!opt)
 		return 0;
 
-	err = nla_parse_nested(tb, TCA_TCINDEX_MAX, opt, tcindex_policy, NULL);
+	err = nla_parse_nested(tb, TCA_TCINDEX_MAX, opt, tcindex_policy);
 	if (err < 0)
 		return err;
 
@@ -533,10 +529,13 @@ static void tcindex_walk(struct tcf_proto *tp, struct tcf_walker *walker)
 	}
 }
 
-static void tcindex_destroy(struct tcf_proto *tp)
+static bool tcindex_destroy(struct tcf_proto *tp, bool force)
 {
 	struct tcindex_data *p = rtnl_dereference(tp->root);
 	struct tcf_walker walker;
+
+	if (!force)
+		return false;
 
 	pr_debug("tcindex_destroy(tp %p),p %p\n", tp, p);
 	walker.count = 0;
@@ -545,6 +544,7 @@ static void tcindex_destroy(struct tcf_proto *tp)
 	tcindex_walk(tp, &walker);
 
 	call_rcu(&p->rcu, __tcindex_destroy);
+	return true;
 }
 
 

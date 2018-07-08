@@ -41,9 +41,6 @@
 #include "xfs_trans.h"
 #include "xfs_pnfs.h"
 #include "xfs_acl.h"
-#include "xfs_btree.h"
-#include <linux/fsmap.h>
-#include "xfs_fsmap.h"
 
 #include <linux/capability.h>
 #include <linux/cred.h>
@@ -120,7 +117,8 @@ xfs_find_handle(
 		handle.ha_fid.fid_pad = 0;
 		handle.ha_fid.fid_gen = inode->i_generation;
 		handle.ha_fid.fid_ino = ip->i_ino;
-		hsize = sizeof(xfs_handle_t);
+
+		hsize = XFS_HSIZE(handle);
 	}
 
 	error = -EFAULT;
@@ -443,8 +441,8 @@ xfs_attrmulti_attr_get(
 	struct inode		*inode,
 	unsigned char		*name,
 	unsigned char		__user *ubuf,
-	uint32_t		*len,
-	uint32_t		flags)
+	__uint32_t		*len,
+	__uint32_t		flags)
 {
 	unsigned char		*kbuf;
 	int			error = -EFAULT;
@@ -472,8 +470,8 @@ xfs_attrmulti_attr_set(
 	struct inode		*inode,
 	unsigned char		*name,
 	const unsigned char	__user *ubuf,
-	uint32_t		len,
-	uint32_t		flags)
+	__uint32_t		len,
+	__uint32_t		flags)
 {
 	unsigned char		*kbuf;
 	int			error;
@@ -498,7 +496,7 @@ int
 xfs_attrmulti_attr_remove(
 	struct inode		*inode,
 	unsigned char		*name,
-	uint32_t		flags)
+	__uint32_t		flags)
 {
 	int			error;
 
@@ -876,7 +874,7 @@ xfs_merge_ioc_xflags(
 
 STATIC unsigned int
 xfs_di2lxflags(
-	uint16_t	di_flags)
+	__uint16_t	di_flags)
 {
 	unsigned int	flags = 0;
 
@@ -931,15 +929,16 @@ xfs_ioc_fsgetxattr(
 	return 0;
 }
 
-STATIC uint16_t
-xfs_flags2diflags(
+STATIC void
+xfs_set_diflags(
 	struct xfs_inode	*ip,
 	unsigned int		xflags)
 {
-	/* can't set PREALLOC this way, just preserve it */
-	uint16_t		di_flags =
-		(ip->i_d.di_flags & XFS_DIFLAG_PREALLOC);
+	unsigned int		di_flags;
+	uint64_t		di_flags2;
 
+	/* can't set PREALLOC this way, just preserve it */
+	di_flags = (ip->i_d.di_flags & XFS_DIFLAG_PREALLOC);
 	if (xflags & FS_XFLAG_IMMUTABLE)
 		di_flags |= XFS_DIFLAG_IMMUTABLE;
 	if (xflags & FS_XFLAG_APPEND)
@@ -969,24 +968,19 @@ xfs_flags2diflags(
 		if (xflags & FS_XFLAG_EXTSIZE)
 			di_flags |= XFS_DIFLAG_EXTSIZE;
 	}
+	ip->i_d.di_flags = di_flags;
 
-	return di_flags;
-}
+	/* diflags2 only valid for v3 inodes. */
+	if (ip->i_d.di_version < 3)
+		return;
 
-STATIC uint64_t
-xfs_flags2diflags2(
-	struct xfs_inode	*ip,
-	unsigned int		xflags)
-{
-	uint64_t		di_flags2 =
-		(ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK);
-
+	di_flags2 = (ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK);
 	if (xflags & FS_XFLAG_DAX)
 		di_flags2 |= XFS_DIFLAG2_DAX;
 	if (xflags & FS_XFLAG_COWEXTSIZE)
 		di_flags2 |= XFS_DIFLAG2_COWEXTSIZE;
 
-	return di_flags2;
+	ip->i_d.di_flags2 = di_flags2;
 }
 
 STATIC void
@@ -1012,12 +1006,11 @@ xfs_diflags_to_linux(
 		inode->i_flags |= S_NOATIME;
 	else
 		inode->i_flags &= ~S_NOATIME;
-#if 0	/* disabled until the flag switching races are sorted out */
 	if (xflags & FS_XFLAG_DAX)
 		inode->i_flags |= S_DAX;
 	else
 		inode->i_flags &= ~S_DAX;
-#endif
+
 }
 
 static int
@@ -1027,7 +1020,6 @@ xfs_ioctl_setattr_xflags(
 	struct fsxattr		*fa)
 {
 	struct xfs_mount	*mp = ip->i_mount;
-	uint64_t		di_flags2;
 
 	/* Can't change realtime flag if any extents are allocated. */
 	if ((ip->i_d.di_nextents || ip->i_delayed_blks) &&
@@ -1058,14 +1050,7 @@ xfs_ioctl_setattr_xflags(
 	    !capable(CAP_LINUX_IMMUTABLE))
 		return -EPERM;
 
-	/* diflags2 only valid for v3 inodes. */
-	di_flags2 = xfs_flags2diflags2(ip, fa->fsx_xflags);
-	if (di_flags2 && ip->i_d.di_version < 3)
-		return -EINVAL;
-
-	ip->i_d.di_flags = xfs_flags2diflags(ip, fa->fsx_xflags);
-	ip->i_d.di_flags2 = di_flags2;
-
+	xfs_set_diflags(ip, fa->fsx_xflags);
 	xfs_diflags_to_linux(ip);
 	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
@@ -1088,7 +1073,6 @@ xfs_ioctl_setattr_dax_invalidate(
 	int			*join_flags)
 {
 	struct inode		*inode = VFS_I(ip);
-	struct super_block	*sb = inode->i_sb;
 	int			error;
 
 	*join_flags = 0;
@@ -1101,7 +1085,7 @@ xfs_ioctl_setattr_dax_invalidate(
 	if (fa->fsx_xflags & FS_XFLAG_DAX) {
 		if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode)))
 			return -EINVAL;
-		if (bdev_dax_supported(sb, sb->s_blocksize) < 0)
+		if (ip->i_mount->m_sb.sb_blocksize != PAGE_SIZE)
 			return -EINVAL;
 	}
 
@@ -1301,7 +1285,7 @@ xfs_ioctl_setattr_check_projid(
 	struct fsxattr		*fa)
 {
 	/* Disallow 32bit project ids if projid32bit feature is not enabled. */
-	if (fa->fsx_projid > (uint16_t)-1 &&
+	if (fa->fsx_projid > (__uint16_t)-1 &&
 	    !xfs_sb_version_hasprojid32bit(&ip->i_mount->m_sb))
 		return -EINVAL;
 
@@ -1625,84 +1609,6 @@ xfs_ioc_getbmapx(
 	return 0;
 }
 
-struct getfsmap_info {
-	struct xfs_mount	*mp;
-	struct fsmap_head __user *data;
-	unsigned int		idx;
-	__u32			last_flags;
-};
-
-STATIC int
-xfs_getfsmap_format(struct xfs_fsmap *xfm, void *priv)
-{
-	struct getfsmap_info	*info = priv;
-	struct fsmap		fm;
-
-	trace_xfs_getfsmap_mapping(info->mp, xfm);
-
-	info->last_flags = xfm->fmr_flags;
-	xfs_fsmap_from_internal(&fm, xfm);
-	if (copy_to_user(&info->data->fmh_recs[info->idx++], &fm,
-			sizeof(struct fsmap)))
-		return -EFAULT;
-
-	return 0;
-}
-
-STATIC int
-xfs_ioc_getfsmap(
-	struct xfs_inode	*ip,
-	struct fsmap_head	__user *arg)
-{
-	struct getfsmap_info	info = { NULL };
-	struct xfs_fsmap_head	xhead = {0};
-	struct fsmap_head	head;
-	bool			aborted = false;
-	int			error;
-
-	if (copy_from_user(&head, arg, sizeof(struct fsmap_head)))
-		return -EFAULT;
-	if (memchr_inv(head.fmh_reserved, 0, sizeof(head.fmh_reserved)) ||
-	    memchr_inv(head.fmh_keys[0].fmr_reserved, 0,
-		       sizeof(head.fmh_keys[0].fmr_reserved)) ||
-	    memchr_inv(head.fmh_keys[1].fmr_reserved, 0,
-		       sizeof(head.fmh_keys[1].fmr_reserved)))
-		return -EINVAL;
-
-	xhead.fmh_iflags = head.fmh_iflags;
-	xhead.fmh_count = head.fmh_count;
-	xfs_fsmap_to_internal(&xhead.fmh_keys[0], &head.fmh_keys[0]);
-	xfs_fsmap_to_internal(&xhead.fmh_keys[1], &head.fmh_keys[1]);
-
-	trace_xfs_getfsmap_low_key(ip->i_mount, &xhead.fmh_keys[0]);
-	trace_xfs_getfsmap_high_key(ip->i_mount, &xhead.fmh_keys[1]);
-
-	info.mp = ip->i_mount;
-	info.data = arg;
-	error = xfs_getfsmap(ip->i_mount, &xhead, xfs_getfsmap_format, &info);
-	if (error == XFS_BTREE_QUERY_RANGE_ABORT) {
-		error = 0;
-		aborted = true;
-	} else if (error)
-		return error;
-
-	/* If we didn't abort, set the "last" flag in the last fmx */
-	if (!aborted && info.idx) {
-		info.last_flags |= FMR_OF_LAST;
-		if (copy_to_user(&info.data->fmh_recs[info.idx - 1].fmr_flags,
-				&info.last_flags, sizeof(info.last_flags)))
-			return -EFAULT;
-	}
-
-	/* copy back header */
-	head.fmh_entries = xhead.fmh_entries;
-	head.fmh_oflags = xhead.fmh_oflags;
-	if (copy_to_user(arg, &head, sizeof(struct fsmap_head)))
-		return -EFAULT;
-
-	return 0;
-}
-
 int
 xfs_ioc_swapext(
 	xfs_swapext_t	*sxp)
@@ -1883,9 +1789,6 @@ xfs_file_ioctl(
 	case XFS_IOC_GETBMAPX:
 		return xfs_ioc_getbmapx(ip, arg);
 
-	case FS_IOC_GETFSMAP:
-		return xfs_ioc_getfsmap(ip, arg);
-
 	case XFS_IOC_FD_TO_HANDLE:
 	case XFS_IOC_PATH_TO_HANDLE:
 	case XFS_IOC_PATH_TO_FSHANDLE: {
@@ -1945,7 +1848,7 @@ xfs_file_ioctl(
 
 	case XFS_IOC_SET_RESBLKS: {
 		xfs_fsop_resblks_t inout;
-		uint64_t	   in;
+		__uint64_t	   in;
 
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
@@ -2031,12 +1934,12 @@ xfs_file_ioctl(
 	}
 
 	case XFS_IOC_GOINGDOWN: {
-		uint32_t in;
+		__uint32_t in;
 
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
 
-		if (get_user(in, (uint32_t __user *)arg))
+		if (get_user(in, (__uint32_t __user *)arg))
 			return -EFAULT;
 
 		return xfs_fs_goingdown(mp, in);
@@ -2051,14 +1954,14 @@ xfs_file_ioctl(
 		if (copy_from_user(&in, arg, sizeof(in)))
 			return -EFAULT;
 
-		return xfs_errortag_add(mp, in.errtag);
+		return xfs_errortag_add(in.errtag, mp);
 	}
 
 	case XFS_IOC_ERROR_CLEARALL:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
 
-		return xfs_errortag_clearall(mp);
+		return xfs_errortag_clearall(mp, 1);
 
 	case XFS_IOC_FREE_EOFBLOCKS: {
 		struct xfs_fs_eofblocks eofb;

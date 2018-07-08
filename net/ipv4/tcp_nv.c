@@ -263,7 +263,7 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 
 	/* rate in 100's bits per second */
 	rate64 = ((u64)sample->in_flight) * 8000000;
-	rate = (u32)div64_u64(rate64, (u64)(avg_rtt ?: 1) * 100);
+	rate = (u32)div64_u64(rate64, (u64)(avg_rtt * 100));
 
 	/* Remember the maximum rate seen during this RTT
 	 * Note: It may be more than one RTT. This function should be
@@ -424,8 +424,8 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 }
 
 /* Extract info for Tcp socket info provided via netlink */
-static size_t tcpnv_get_info(struct sock *sk, u32 ext, int *attr,
-			     union tcp_cc_info *info)
+size_t tcpnv_get_info(struct sock *sk, u32 ext, int *attr,
+		      union tcp_cc_info *info)
 {
 	const struct tcpnv *ca = inet_csk_ca(sk);
 
@@ -440,6 +440,7 @@ static size_t tcpnv_get_info(struct sock *sk, u32 ext, int *attr,
 	}
 	return 0;
 }
+EXPORT_SYMBOL_GPL(tcpnv_get_info);
 
 static struct tcp_congestion_ops tcpnv __read_mostly = {
 	.init		= tcpnv_init,

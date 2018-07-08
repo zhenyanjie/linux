@@ -190,7 +190,7 @@ static int __init init_nmi_wdt(void)
 }
 device_initcall(init_nmi_wdt);
 
-void arch_touch_nmi_watchdog(void)
+void touch_nmi_watchdog(void)
 {
 	atomic_set(&nmi_touched[smp_processor_id()], 1);
 }

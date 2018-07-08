@@ -53,7 +53,7 @@ enum srpc_state {
 static struct smoketest_rpc {
 	spinlock_t	 rpc_glock;	/* global lock */
 	struct srpc_service	*rpc_services[SRPC_SERVICE_MAX_ID + 1];
-	struct lnet_handle_eq	 rpc_lnet_eq;	/* _the_ LNet event queue */
+	lnet_handle_eq_t rpc_lnet_eq;	/* _the_ LNet event queue */
 	enum srpc_state	 rpc_state;
 	struct srpc_counters	 rpc_counters;
 	__u64		 rpc_matchbits;	/* matchbits counter */
@@ -185,7 +185,7 @@ srpc_init_server_rpc(struct srpc_server_rpc *rpc,
 	rpc->srpc_reqstbuf = buffer;
 	rpc->srpc_peer = buffer->buf_peer;
 	rpc->srpc_self = buffer->buf_self;
-	LNetInvalidateMDHandle(&rpc->srpc_replymdh);
+	LNetInvalidateHandle(&rpc->srpc_replymdh);
 }
 
 static void
@@ -355,12 +355,12 @@ srpc_remove_service(struct srpc_service *sv)
 
 static int
 srpc_post_passive_rdma(int portal, int local, __u64 matchbits, void *buf,
-		       int len, int options, struct lnet_process_id peer,
-		       struct lnet_handle_md *mdh, struct srpc_event *ev)
+		       int len, int options, lnet_process_id_t peer,
+		       lnet_handle_md_t *mdh, struct srpc_event *ev)
 {
 	int rc;
-	struct lnet_md md;
-	struct lnet_handle_me meh;
+	lnet_md_t md;
+	lnet_handle_me_t meh;
 
 	rc = LNetMEAttach(portal, peer, matchbits, 0, LNET_UNLINK,
 			  local ? LNET_INS_LOCAL : LNET_INS_AFTER, &meh);
@@ -394,12 +394,11 @@ srpc_post_passive_rdma(int portal, int local, __u64 matchbits, void *buf,
 
 static int
 srpc_post_active_rdma(int portal, __u64 matchbits, void *buf, int len,
-		      int options, struct lnet_process_id peer,
-		      lnet_nid_t self, struct lnet_handle_md *mdh,
-		      struct srpc_event *ev)
+		      int options, lnet_process_id_t peer, lnet_nid_t self,
+		      lnet_handle_md_t *mdh, struct srpc_event *ev)
 {
 	int rc;
-	struct lnet_md md;
+	lnet_md_t md;
 
 	md.user_ptr = ev;
 	md.start = buf;
@@ -449,9 +448,9 @@ srpc_post_active_rdma(int portal, __u64 matchbits, void *buf, int len,
 
 static int
 srpc_post_passive_rqtbuf(int service, int local, void *buf, int len,
-			 struct lnet_handle_md *mdh, struct srpc_event *ev)
+			 lnet_handle_md_t *mdh, struct srpc_event *ev)
 {
-	struct lnet_process_id any = { 0 };
+	lnet_process_id_t any = { 0 };
 
 	any.nid = LNET_NID_ANY;
 	any.pid = LNET_PID_ANY;
@@ -469,7 +468,7 @@ __must_hold(&scd->scd_lock)
 	struct srpc_msg	*msg = &buf->buf_msg;
 	int rc;
 
-	LNetInvalidateMDHandle(&buf->buf_mdh);
+	LNetInvalidateHandle(&buf->buf_mdh);
 	list_add(&buf->buf_list, &scd->scd_buf_posted);
 	scd->scd_buf_nposted++;
 	spin_unlock(&scd->scd_lock);
@@ -1311,7 +1310,7 @@ abort:
 }
 
 struct srpc_client_rpc *
-srpc_create_client_rpc(struct lnet_process_id peer, int service,
+srpc_create_client_rpc(lnet_process_id_t peer, int service,
 		       int nbulkiov, int bulklen,
 		       void (*rpc_done)(struct srpc_client_rpc *),
 		       void (*rpc_fini)(struct srpc_client_rpc *), void *priv)
@@ -1409,7 +1408,7 @@ srpc_send_reply(struct srpc_server_rpc *rpc)
 
 /* when in kernel always called with LNET_LOCK() held, and in thread context */
 static void
-srpc_lnet_ev_handler(struct lnet_event *ev)
+srpc_lnet_ev_handler(lnet_event_t *ev)
 {
 	struct srpc_service_cd *scd;
 	struct srpc_event *rpcev = ev->md.user_ptr;
@@ -1623,7 +1622,7 @@ srpc_startup(void)
 
 	srpc_data.rpc_state = SRPC_STATE_NI_INIT;
 
-	LNetInvalidateEQHandle(&srpc_data.rpc_lnet_eq);
+	LNetInvalidateHandle(&srpc_data.rpc_lnet_eq);
 	rc = LNetEQAlloc(0, srpc_lnet_ev_handler, &srpc_data.rpc_lnet_eq);
 	if (rc) {
 		CERROR("LNetEQAlloc() has failed: %d\n", rc);

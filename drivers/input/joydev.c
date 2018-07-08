@@ -742,6 +742,8 @@ static void joydev_cleanup(struct joydev *joydev)
 	joydev_mark_dead(joydev);
 	joydev_hangup(joydev);
 
+	cdev_del(&joydev->cdev);
+
 	/* joydev is marked dead so no one else accesses joydev->open */
 	if (joydev->open)
 		input_close_device(handle);
@@ -911,8 +913,12 @@ static int joydev_connect(struct input_handler *handler, struct input_dev *dev,
 		goto err_free_joydev;
 
 	cdev_init(&joydev->cdev, &joydev_fops);
+	joydev->cdev.kobj.parent = &joydev->dev.kobj;
+	error = cdev_add(&joydev->cdev, joydev->dev.devt, 1);
+	if (error)
+		goto err_unregister_handle;
 
-	error = cdev_device_add(&joydev->cdev, &joydev->dev);
+	error = device_add(&joydev->dev);
 	if (error)
 		goto err_cleanup_joydev;
 
@@ -920,6 +926,7 @@ static int joydev_connect(struct input_handler *handler, struct input_dev *dev,
 
  err_cleanup_joydev:
 	joydev_cleanup(joydev);
+ err_unregister_handle:
 	input_unregister_handle(&joydev->handle);
  err_free_joydev:
 	put_device(&joydev->dev);
@@ -932,7 +939,7 @@ static void joydev_disconnect(struct input_handle *handle)
 {
 	struct joydev *joydev = handle->private;
 
-	cdev_device_del(&joydev->cdev, &joydev->dev);
+	device_del(&joydev->dev);
 	joydev_cleanup(joydev);
 	input_free_minor(MINOR(joydev->dev.devt));
 	input_unregister_handle(handle);

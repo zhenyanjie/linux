@@ -135,7 +135,7 @@ static struct attribute *default_attrs[] = {
 	&trans_table.attr,
 	NULL
 };
-static const struct attribute_group stats_attr_group = {
+static struct attribute_group stats_attr_group = {
 	.attrs = default_attrs,
 	.name = "stats"
 };
@@ -170,10 +170,11 @@ void cpufreq_stats_create_table(struct cpufreq_policy *policy)
 	unsigned int i = 0, count = 0, ret = -ENOMEM;
 	struct cpufreq_stats *stats;
 	unsigned int alloc_size;
-	struct cpufreq_frequency_table *pos;
+	struct cpufreq_frequency_table *pos, *table;
 
-	count = cpufreq_table_count_valid_entries(policy);
-	if (!count)
+	/* We need cpufreq table for creating stats table */
+	table = policy->freq_table;
+	if (unlikely(!table))
 		return;
 
 	/* stats already initialized */
@@ -183,6 +184,10 @@ void cpufreq_stats_create_table(struct cpufreq_policy *policy)
 	stats = kzalloc(sizeof(*stats), GFP_KERNEL);
 	if (!stats)
 		return;
+
+	/* Find total allocation size */
+	cpufreq_for_each_valid_entry(pos, table)
+		count++;
 
 	alloc_size = count * sizeof(int) + count * sizeof(u64);
 
@@ -200,7 +205,7 @@ void cpufreq_stats_create_table(struct cpufreq_policy *policy)
 	stats->max_state = count;
 
 	/* Find valid-unique entries */
-	cpufreq_for_each_valid_entry(pos, policy->freq_table)
+	cpufreq_for_each_valid_entry(pos, table)
 		if (freq_table_get_index(stats, pos->frequency) == -1)
 			stats->freq_table[i++] = pos->frequency;
 

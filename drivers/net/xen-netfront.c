@@ -1934,7 +1934,8 @@ abort_transaction_no_dev_fatal:
 	xennet_disconnect_backend(info);
 	xennet_destroy_queues(info);
  out:
-	device_unregister(&dev->dev);
+	unregister_netdev(info->netdev);
+	xennet_free_netdev(info->netdev);
 	return err;
 }
 

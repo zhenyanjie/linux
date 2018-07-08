@@ -750,9 +750,9 @@ acpi_os_wait_semaphore(acpi_handle handle, u32 units, u16 msec_timeout)
 {
 	acpi_status status = AE_OK;
 	sem_t *sem = (sem_t *) handle;
-	int ret_val;
 #ifndef ACPI_USE_ALTERNATE_TIMEOUT
 	struct timespec time;
+	int ret_val;
 #endif
 
 	if (!sem) {
@@ -778,10 +778,7 @@ acpi_os_wait_semaphore(acpi_handle handle, u32 units, u16 msec_timeout)
 
 	case ACPI_WAIT_FOREVER:
 
-		while (((ret_val = sem_wait(sem)) == -1) && (errno == EINTR)) {
-			continue;	/* Restart if interrupted */
-		}
-		if (ret_val != 0) {
+		if (sem_wait(sem)) {
 			status = (AE_TIME);
 		}
 		break;
@@ -834,8 +831,7 @@ acpi_os_wait_semaphore(acpi_handle handle, u32 units, u16 msec_timeout)
 
 		while (((ret_val = sem_timedwait(sem, &time)) == -1)
 		       && (errno == EINTR)) {
-			continue;	/* Restart if interrupted */
-
+			continue;
 		}
 
 		if (ret_val != 0) {

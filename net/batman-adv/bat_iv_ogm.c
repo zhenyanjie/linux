@@ -679,10 +679,14 @@ static void batadv_iv_ogm_aggregate_new(const unsigned char *packet_buff,
 {
 	struct batadv_priv *bat_priv = netdev_priv(if_incoming->soft_iface);
 	struct batadv_forw_packet *forw_packet_aggr;
-	struct sk_buff *skb;
 	unsigned char *skb_buff;
 	unsigned int skb_size;
 	atomic_t *queue_left = own_packet ? NULL : &bat_priv->batman_queue_left;
+
+	forw_packet_aggr = batadv_forw_packet_alloc(if_incoming, if_outgoing,
+						    queue_left, bat_priv);
+	if (!forw_packet_aggr)
+		return;
 
 	if (atomic_read(&bat_priv->aggregated_ogms) &&
 	    packet_len < BATADV_MAX_AGGREGATION_BYTES)
@@ -692,14 +696,9 @@ static void batadv_iv_ogm_aggregate_new(const unsigned char *packet_buff,
 
 	skb_size += ETH_HLEN;
 
-	skb = netdev_alloc_skb_ip_align(NULL, skb_size);
-	if (!skb)
-		return;
-
-	forw_packet_aggr = batadv_forw_packet_alloc(if_incoming, if_outgoing,
-						    queue_left, bat_priv, skb);
-	if (!forw_packet_aggr) {
-		kfree_skb(skb);
+	forw_packet_aggr->skb = netdev_alloc_skb_ip_align(NULL, skb_size);
+	if (!forw_packet_aggr->skb) {
+		batadv_forw_packet_free(forw_packet_aggr, true);
 		return;
 	}
 
@@ -732,8 +731,8 @@ static void batadv_iv_ogm_aggregate(struct batadv_forw_packet *forw_packet_aggr,
 	unsigned char *skb_buff;
 	unsigned long new_direct_link_flag;
 
-	skb_buff = skb_put_data(forw_packet_aggr->skb, packet_buff,
-				packet_len);
+	skb_buff = skb_put(forw_packet_aggr->skb, packet_len);
+	memcpy(skb_buff, packet_buff, packet_len);
 	forw_packet_aggr->packet_len += packet_len;
 	forw_packet_aggr->num_packets++;
 
@@ -1022,8 +1021,7 @@ batadv_iv_ogm_orig_update(struct batadv_priv *bat_priv,
 	u8 tq_avg;
 
 	batadv_dbg(BATADV_DBG_BATMAN, bat_priv,
-		   "%s(): Searching and updating originator entry of received packet\n",
-		   __func__);
+		   "update_originator(): Searching and updating originator entry of received packet\n");
 
 	rcu_read_lock();
 	hlist_for_each_entry_rcu(tmp_neigh_node,
@@ -1945,7 +1943,7 @@ static void batadv_iv_ogm_orig_print(struct batadv_priv *bat_priv,
 
 			batadv_iv_ogm_orig_print_neigh(orig_node, if_outgoing,
 						       seq);
-			seq_putc(seq, '\n');
+			seq_puts(seq, "\n");
 			batman_count++;
 
 next:

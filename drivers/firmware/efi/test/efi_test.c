@@ -71,12 +71,17 @@ copy_ucs2_from_user_len(efi_char16_t **dst, efi_char16_t __user *src,
 	if (!access_ok(VERIFY_READ, src, 1))
 		return -EFAULT;
 
-	buf = memdup_user(src, len);
-	if (IS_ERR(buf)) {
+	buf = kmalloc(len, GFP_KERNEL);
+	if (!buf) {
 		*dst = NULL;
-		return PTR_ERR(buf);
+		return -ENOMEM;
 	}
 	*dst = buf;
+
+	if (copy_from_user(*dst, src, len)) {
+		kfree(buf);
+		return -EFAULT;
+	}
 
 	return 0;
 }

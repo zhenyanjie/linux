@@ -17,7 +17,7 @@ static inline u32 peek32(u32 addr)
 	return readl(addr + mmio750);
 }
 
-static inline void poke32(u32 addr, u32 data)
+static inline void poke32(u32 data, u32 addr)
 {
 	writel(data, addr + mmio750);
 }
@@ -98,6 +98,6 @@ void sm750_set_chip_type(unsigned short devId, u8 revId);
 unsigned int sm750_calc_pll_value(unsigned int request, struct  pll_value *pll);
 unsigned int sm750_format_pll_reg(struct pll_value *pPLL);
 unsigned int ddk750_get_vm_size(void);
-int ddk750_init_hw(struct initchip_param *pinit_param);
+int ddk750_init_hw(struct initchip_param *);
 
 #endif

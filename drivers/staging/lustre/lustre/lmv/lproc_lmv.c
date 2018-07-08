@@ -91,6 +91,7 @@ static void *lmv_tgt_seq_start(struct seq_file *p, loff_t *pos)
 
 static void lmv_tgt_seq_stop(struct seq_file *p, void *v)
 {
+	return;
 }
 
 static void *lmv_tgt_seq_next(struct seq_file *p, void *v, loff_t *pos)

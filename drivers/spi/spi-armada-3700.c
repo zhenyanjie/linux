@@ -161,7 +161,7 @@ static void a3700_spi_deactivate_cs(struct a3700_spi *a3700_spi,
 }
 
 static int a3700_spi_pin_mode_set(struct a3700_spi *a3700_spi,
-				  unsigned int pin_mode, bool receiving)
+				  unsigned int pin_mode)
 {
 	u32 val;
 
@@ -177,9 +177,6 @@ static int a3700_spi_pin_mode_set(struct a3700_spi *a3700_spi,
 		break;
 	case SPI_NBITS_QUAD:
 		val |= A3700_SPI_DATA_PIN1;
-		/* RX during address reception uses 4-pin */
-		if (receiving)
-			val |= A3700_SPI_ADDR_PIN;
 		break;
 	default:
 		dev_err(&a3700_spi->master->dev, "wrong pin mode %u", pin_mode);
@@ -395,8 +392,7 @@ static bool a3700_spi_wait_completion(struct spi_device *spi)
 
 	spireg_write(a3700_spi, A3700_SPI_INT_MASK_REG, 0);
 
-	/* Timeout was reached */
-	return false;
+	return true;
 }
 
 static bool a3700_spi_transfer_wait(struct spi_device *spi,
@@ -657,7 +653,7 @@ static int a3700_spi_transfer_one(struct spi_master *master,
 	else if (xfer->rx_buf)
 		nbits = xfer->rx_nbits;
 
-	a3700_spi_pin_mode_set(a3700_spi, nbits, xfer->rx_buf ? true : false);
+	a3700_spi_pin_mode_set(a3700_spi, nbits);
 
 	if (xfer->rx_buf) {
 		/* Set read data length */

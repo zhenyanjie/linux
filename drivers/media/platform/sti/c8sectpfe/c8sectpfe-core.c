@@ -865,8 +865,9 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 	}
 
 	/* Setup timer interrupt */
-	setup_timer(&fei->timer, c8sectpfe_timer_interrupt,
-		    (unsigned long)fei);
+	init_timer(&fei->timer);
+	fei->timer.function = c8sectpfe_timer_interrupt;
+	fei->timer.data = (unsigned long)fei;
 
 	mutex_init(&fei->lock);
 

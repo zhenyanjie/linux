@@ -353,7 +353,7 @@ static int dccp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 	if (ipv6_opt_accepted(sk, skb, IP6CB(skb)) ||
 	    np->rxopt.bits.rxinfo || np->rxopt.bits.rxoinfo ||
 	    np->rxopt.bits.rxhlim || np->rxopt.bits.rxohlim) {
-		refcount_inc(&skb->users);
+		atomic_inc(&skb->users);
 		ireq->pktopts = skb;
 	}
 	ireq->ir_iif = sk->sk_bound_dev_if;
@@ -380,7 +380,6 @@ static int dccp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 		goto drop_and_free;
 
 	inet_csk_reqsk_queue_hash_add(sk, req, DCCP_TIMEOUT_INIT);
-	reqsk_put(req);
 	return 0;
 
 drop_and_free:
@@ -1021,7 +1020,7 @@ static struct proto dccp_v6_prot = {
 	.orphan_count	   = &dccp_orphan_count,
 	.max_header	   = MAX_DCCP_HEADER,
 	.obj_size	   = sizeof(struct dccp6_sock),
-	.slab_flags	   = SLAB_TYPESAFE_BY_RCU,
+	.slab_flags	   = SLAB_DESTROY_BY_RCU,
 	.rsk_prot	   = &dccp6_request_sock_ops,
 	.twsk_prot	   = &dccp6_timewait_sock_ops,
 	.h.hashinfo	   = &dccp_hashinfo,
@@ -1099,33 +1098,33 @@ static int __init dccp_v6_init(void)
 {
 	int err = proto_register(&dccp_v6_prot, 1);
 
-	if (err)
+	if (err != 0)
 		goto out;
+
+	err = inet6_add_protocol(&dccp_v6_protocol, IPPROTO_DCCP);
+	if (err != 0)
+		goto out_unregister_proto;
 
 	inet6_register_protosw(&dccp_v6_protosw);
 
 	err = register_pernet_subsys(&dccp_v6_ops);
-	if (err)
+	if (err != 0)
 		goto out_destroy_ctl_sock;
-
-	err = inet6_add_protocol(&dccp_v6_protocol, IPPROTO_DCCP);
-	if (err)
-		goto out_unregister_proto;
-
 out:
 	return err;
-out_unregister_proto:
-	unregister_pernet_subsys(&dccp_v6_ops);
+
 out_destroy_ctl_sock:
+	inet6_del_protocol(&dccp_v6_protocol, IPPROTO_DCCP);
 	inet6_unregister_protosw(&dccp_v6_protosw);
+out_unregister_proto:
 	proto_unregister(&dccp_v6_prot);
 	goto out;
 }
 
 static void __exit dccp_v6_exit(void)
 {
-	inet6_del_protocol(&dccp_v6_protocol, IPPROTO_DCCP);
 	unregister_pernet_subsys(&dccp_v6_ops);
+	inet6_del_protocol(&dccp_v6_protocol, IPPROTO_DCCP);
 	inet6_unregister_protosw(&dccp_v6_protosw);
 	proto_unregister(&dccp_v6_prot);
 }

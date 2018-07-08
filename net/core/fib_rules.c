@@ -23,20 +23,6 @@ static const struct fib_kuid_range fib_kuid_range_unset = {
 	KUIDT_INIT(~0),
 };
 
-bool fib_rule_matchall(const struct fib_rule *rule)
-{
-	if (rule->iifindex || rule->oifindex || rule->mark || rule->tun_id ||
-	    rule->flags)
-		return false;
-	if (rule->suppress_ifgroup != -1 || rule->suppress_prefixlen != -1)
-		return false;
-	if (!uid_eq(rule->uid_range.start, fib_kuid_range_unset.start) ||
-	    !uid_eq(rule->uid_range.end, fib_kuid_range_unset.end))
-		return false;
-	return true;
-}
-EXPORT_SYMBOL_GPL(fib_rule_matchall);
-
 int fib_default_rule_add(struct fib_rules_ops *ops,
 			 u32 pref, u32 table, u32 flags)
 {
@@ -46,7 +32,7 @@ int fib_default_rule_add(struct fib_rules_ops *ops,
 	if (r == NULL)
 		return -ENOMEM;
 
-	refcount_set(&r->refcnt, 1);
+	atomic_set(&r->refcnt, 1);
 	r->action = FR_ACT_TO_TBL;
 	r->pref = pref;
 	r->table = table;
@@ -283,7 +269,7 @@ jumped:
 
 		if (err != -EAGAIN) {
 			if ((arg->flags & FIB_LOOKUP_NOREF) ||
-			    likely(refcount_inc_not_zero(&rule->refcnt))) {
+			    likely(atomic_inc_not_zero(&rule->refcnt))) {
 				arg->rule = rule;
 				goto out;
 			}
@@ -368,8 +354,7 @@ static int rule_exists(struct fib_rules_ops *ops, struct fib_rule_hdr *frh,
 	return 0;
 }
 
-int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
-		   struct netlink_ext_ack *extack)
+int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct net *net = sock_net(skb->sk);
 	struct fib_rule_hdr *frh = nlmsg_data(nlh);
@@ -387,7 +372,7 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto errout;
 	}
 
-	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy, extack);
+	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy);
 	if (err < 0)
 		goto errout;
 
@@ -400,7 +385,6 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 		err = -ENOMEM;
 		goto errout;
 	}
-	refcount_set(&rule->refcnt, 1);
 	rule->fr_net = net;
 
 	rule->pref = tb[FRA_PRIORITY] ? nla_get_u32(tb[FRA_PRIORITY])
@@ -441,7 +425,6 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 	if (tb[FRA_TUN_ID])
 		rule->tun_id = nla_get_be64(tb[FRA_TUN_ID]);
 
-	err = -EINVAL;
 	if (tb[FRA_L3MDEV]) {
 #ifdef CONFIG_NET_L3_MASTER_DEV
 		rule->l3mdev = nla_get_u8(tb[FRA_L3MDEV]);
@@ -463,6 +446,7 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 	else
 		rule->suppress_ifgroup = -1;
 
+	err = -EINVAL;
 	if (tb[FRA_GOTO]) {
 		if (rule->action != FR_ACT_GOTO)
 			goto errout_free;
@@ -518,6 +502,8 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 		last = r;
 	}
 
+	fib_rule_get(rule);
+
 	if (last)
 		list_add_rcu(&rule->list, &last->list);
 	else
@@ -561,13 +547,12 @@ errout:
 }
 EXPORT_SYMBOL_GPL(fib_nl_newrule);
 
-int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr *nlh,
-		   struct netlink_ext_ack *extack)
+int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct net *net = sock_net(skb->sk);
 	struct fib_rule_hdr *frh = nlmsg_data(nlh);
 	struct fib_rules_ops *ops = NULL;
-	struct fib_rule *rule, *r;
+	struct fib_rule *rule, *tmp;
 	struct nlattr *tb[FRA_MAX+1];
 	struct fib_kuid_range range;
 	int err = -EINVAL;
@@ -581,7 +566,7 @@ int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto errout;
 	}
 
-	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy, extack);
+	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy);
 	if (err < 0)
 		goto errout;
 
@@ -591,10 +576,8 @@ int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	if (tb[FRA_UID_RANGE]) {
 		range = nla_get_kuid_range(tb);
-		if (!uid_range_set(&range)) {
-			err = -EINVAL;
+		if (!uid_range_set(&range))
 			goto errout;
-		}
 	} else {
 		range = fib_kuid_range_unset;
 	}
@@ -667,23 +650,16 @@ int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 		/*
 		 * Check if this rule is a target to any of them. If so,
-		 * adjust to the next one with the same preference or
 		 * disable them. As this operation is eventually very
-		 * expensive, it is only performed if goto rules, except
-		 * current if it is goto rule, have actually been added.
+		 * expensive, it is only performed if goto rules have
+		 * actually been added.
 		 */
 		if (ops->nr_goto_rules > 0) {
-			struct fib_rule *n;
-
-			n = list_next_entry(rule, list);
-			if (&n->list == &ops->rules_list || n->pref != rule->pref)
-				n = NULL;
-			list_for_each_entry(r, &ops->rules_list, list) {
-				if (rtnl_dereference(r->ctarget) != rule)
-					continue;
-				rcu_assign_pointer(r->ctarget, n);
-				if (!n)
+			list_for_each_entry(tmp, &ops->rules_list, list) {
+				if (rtnl_dereference(tmp->ctarget) == rule) {
+					RCU_INIT_POINTER(tmp->ctarget, NULL);
 					ops->unresolved_rules++;
+				}
 			}
 		}
 

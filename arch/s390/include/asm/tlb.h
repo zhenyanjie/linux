@@ -47,9 +47,10 @@ struct mmu_table_batch {
 extern void tlb_table_flush(struct mmu_gather *tlb);
 extern void tlb_remove_table(struct mmu_gather *tlb, void *table);
 
-static inline void
-arch_tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm,
-			unsigned long start, unsigned long end)
+static inline void tlb_gather_mmu(struct mmu_gather *tlb,
+				  struct mm_struct *mm,
+				  unsigned long start,
+				  unsigned long end)
 {
 	tlb->mm = mm;
 	tlb->start = start;
@@ -75,15 +76,9 @@ static inline void tlb_flush_mmu(struct mmu_gather *tlb)
 	tlb_flush_mmu_free(tlb);
 }
 
-static inline void
-arch_tlb_finish_mmu(struct mmu_gather *tlb,
-		unsigned long start, unsigned long end, bool force)
+static inline void tlb_finish_mmu(struct mmu_gather *tlb,
+				  unsigned long start, unsigned long end)
 {
-	if (force) {
-		tlb->start = start;
-		tlb->end = end;
-	}
-
 	tlb_flush_mmu(tlb);
 }
 
@@ -139,21 +134,6 @@ static inline void pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd,
 		return;
 	pgtable_pmd_page_dtor(virt_to_page(pmd));
 	tlb_remove_table(tlb, pmd);
-}
-
-/*
- * p4d_free_tlb frees a pud table and clears the CRSTE for the
- * region second table entry from the tlb.
- * If the mm uses a four level page table the single p4d is freed
- * as the pgd. p4d_free_tlb checks the asce_limit against 8PB
- * to avoid the double free of the p4d in this case.
- */
-static inline void p4d_free_tlb(struct mmu_gather *tlb, p4d_t *p4d,
-				unsigned long address)
-{
-	if (tlb->mm->context.asce_limit <= (1UL << 53))
-		return;
-	tlb_remove_table(tlb, p4d);
 }
 
 /*

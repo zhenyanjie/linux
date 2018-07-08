@@ -25,6 +25,7 @@
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/pagevec.h>
+#include <linux/pmem.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/uio.h>
@@ -54,6 +55,32 @@ static int __init init_dax_wait_table(void)
 }
 fs_initcall(init_dax_wait_table);
 
+static long dax_map_atomic(struct block_device *bdev, struct blk_dax_ctl *dax)
+{
+	struct request_queue *q = bdev->bd_queue;
+	long rc = -EIO;
+
+	dax->addr = ERR_PTR(-EIO);
+	if (blk_queue_enter(q, true) != 0)
+		return rc;
+
+	rc = bdev_direct_access(bdev, dax);
+	if (rc < 0) {
+		dax->addr = ERR_PTR(rc);
+		blk_queue_exit(q);
+		return rc;
+	}
+	return rc;
+}
+
+static void dax_unmap_atomic(struct block_device *bdev,
+		const struct blk_dax_ctl *dax)
+{
+	if (IS_ERR(dax->addr))
+		return;
+	blk_queue_exit(bdev->bd_queue);
+}
+
 static int dax_is_pmd_entry(void *entry)
 {
 	return (unsigned long)entry & RADIX_DAX_PMD;
@@ -74,6 +101,26 @@ static int dax_is_empty_entry(void *entry)
 	return (unsigned long)entry & RADIX_DAX_EMPTY;
 }
 
+struct page *read_dax_sector(struct block_device *bdev, sector_t n)
+{
+	struct page *page = alloc_pages(GFP_KERNEL, 0);
+	struct blk_dax_ctl dax = {
+		.size = PAGE_SIZE,
+		.sector = n & ~((((int) PAGE_SIZE) / 512) - 1),
+	};
+	long rc;
+
+	if (!page)
+		return ERR_PTR(-ENOMEM);
+
+	rc = dax_map_atomic(bdev, &dax);
+	if (rc < 0)
+		return ERR_PTR(rc);
+	memcpy_from_pmem(page_address(page), dax.addr, PAGE_SIZE);
+	dax_unmap_atomic(bdev, &dax);
+	return page;
+}
+
 /*
  * DAX radix tree locking
  */
@@ -83,7 +130,7 @@ struct exceptional_entry_key {
 };
 
 struct wait_exceptional_entry_queue {
-	wait_queue_entry_t wait;
+	wait_queue_t wait;
 	struct exceptional_entry_key key;
 };
 
@@ -107,7 +154,7 @@ static wait_queue_head_t *dax_entry_waitqueue(struct address_space *mapping,
 	return wait_table + hash;
 }
 
-static int wake_exceptional_entry_func(wait_queue_entry_t *wait, unsigned int mode,
+static int wake_exceptional_entry_func(wait_queue_t *wait, unsigned int mode,
 				       int sync, void *keyp)
 {
 	struct exceptional_entry_key *key = keyp;
@@ -479,25 +526,21 @@ int dax_invalidate_mapping_entry_sync(struct address_space *mapping,
 static int dax_load_hole(struct address_space *mapping, void **entry,
 			 struct vm_fault *vmf)
 {
-	struct inode *inode = mapping->host;
 	struct page *page;
 	int ret;
 
 	/* Hole page already exists? Return it...  */
 	if (!radix_tree_exceptional_entry(*entry)) {
 		page = *entry;
-		goto finish_fault;
+		goto out;
 	}
 
 	/* This will replace locked radix tree entry with a hole page */
 	page = find_or_create_page(mapping, vmf->pgoff,
 				   vmf->gfp_mask | __GFP_ZERO);
-	if (!page) {
-		ret = VM_FAULT_OOM;
-		goto out;
-	}
-
-finish_fault:
+	if (!page)
+		return VM_FAULT_OOM;
+ out:
 	vmf->page = page;
 	ret = finish_fault(vmf);
 	vmf->page = NULL;
@@ -505,37 +548,26 @@ finish_fault:
 	if (!ret) {
 		/* Grab reference for PTE that is now referencing the page */
 		get_page(page);
-		ret = VM_FAULT_NOPAGE;
+		return VM_FAULT_NOPAGE;
 	}
-out:
-	trace_dax_load_hole(inode, vmf, ret);
 	return ret;
 }
 
-static int copy_user_dax(struct block_device *bdev, struct dax_device *dax_dev,
-		sector_t sector, size_t size, struct page *to,
-		unsigned long vaddr)
+static int copy_user_dax(struct block_device *bdev, sector_t sector, size_t size,
+		struct page *to, unsigned long vaddr)
 {
-	void *vto, *kaddr;
-	pgoff_t pgoff;
-	pfn_t pfn;
-	long rc;
-	int id;
+	struct blk_dax_ctl dax = {
+		.sector = sector,
+		.size = size,
+	};
+	void *vto;
 
-	rc = bdev_dax_pgoff(bdev, sector, size, &pgoff);
-	if (rc)
-		return rc;
-
-	id = dax_read_lock();
-	rc = dax_direct_access(dax_dev, pgoff, PHYS_PFN(size), &kaddr, &pfn);
-	if (rc < 0) {
-		dax_read_unlock(id);
-		return rc;
-	}
+	if (dax_map_atomic(bdev, &dax) < 0)
+		return PTR_ERR(dax.addr);
 	vto = kmap_atomic(to);
-	copy_user_page(vto, (void __force *)kaddr, vaddr, to);
+	copy_user_page(vto, (void __force *)dax.addr, vaddr, to);
 	kunmap_atomic(vto);
-	dax_read_unlock(id);
+	dax_unmap_atomic(bdev, &dax);
 	return 0;
 }
 
@@ -646,10 +678,11 @@ static void dax_mapping_entry_mkclean(struct address_space *mapping,
 	pte_t pte, *ptep = NULL;
 	pmd_t *pmdp = NULL;
 	spinlock_t *ptl;
+	bool changed;
 
 	i_mmap_lock_read(mapping);
 	vma_interval_tree_foreach(vma, &mapping->i_mmap, index, index) {
-		unsigned long address, start, end;
+		unsigned long address;
 
 		cond_resched();
 
@@ -657,13 +690,8 @@ static void dax_mapping_entry_mkclean(struct address_space *mapping,
 			continue;
 
 		address = pgoff_address(index, vma);
-
-		/*
-		 * Note because we provide start/end to follow_pte_pmd it will
-		 * call mmu_notifier_invalidate_range_start() on our behalf
-		 * before taking any lock.
-		 */
-		if (follow_pte_pmd(vma->vm_mm, address, &start, &end, &ptep, &pmdp, &ptl))
+		changed = false;
+		if (follow_pte_pmd(vma->vm_mm, address, &ptep, &pmdp, &ptl))
 			continue;
 
 		if (pmdp) {
@@ -680,7 +708,7 @@ static void dax_mapping_entry_mkclean(struct address_space *mapping,
 			pmd = pmd_wrprotect(pmd);
 			pmd = pmd_mkclean(pmd);
 			set_pmd_at(vma->vm_mm, address, pmdp, pmd);
-			mmu_notifier_invalidate_range(vma->vm_mm, start, end);
+			changed = true;
 unlock_pmd:
 			spin_unlock(ptl);
 #endif
@@ -695,27 +723,24 @@ unlock_pmd:
 			pte = pte_wrprotect(pte);
 			pte = pte_mkclean(pte);
 			set_pte_at(vma->vm_mm, address, ptep, pte);
-			mmu_notifier_invalidate_range(vma->vm_mm, start, end);
+			changed = true;
 unlock_pte:
 			pte_unmap_unlock(ptep, ptl);
 		}
 
-		mmu_notifier_invalidate_range_end(vma->vm_mm, start, end);
+		if (changed)
+			mmu_notifier_invalidate_page(vma->vm_mm, address);
 	}
 	i_mmap_unlock_read(mapping);
 }
 
 static int dax_writeback_one(struct block_device *bdev,
-		struct dax_device *dax_dev, struct address_space *mapping,
-		pgoff_t index, void *entry)
+		struct address_space *mapping, pgoff_t index, void *entry)
 {
 	struct radix_tree_root *page_tree = &mapping->page_tree;
-	void *entry2, **slot, *kaddr;
-	long ret = 0, id;
-	sector_t sector;
-	pgoff_t pgoff;
-	size_t size;
-	pfn_t pfn;
+	struct blk_dax_ctl dax;
+	void *entry2, **slot;
+	int ret = 0;
 
 	/*
 	 * A page got tagged dirty in DAX mapping? Something is seriously
@@ -764,29 +789,26 @@ static int dax_writeback_one(struct block_device *bdev,
 	 * 'entry'.  This allows us to flush for PMD_SIZE and not have to
 	 * worry about partial PMD writebacks.
 	 */
-	sector = dax_radix_sector(entry);
-	size = PAGE_SIZE << dax_radix_order(entry);
-
-	id = dax_read_lock();
-	ret = bdev_dax_pgoff(bdev, sector, size, &pgoff);
-	if (ret)
-		goto dax_unlock;
+	dax.sector = dax_radix_sector(entry);
+	dax.size = PAGE_SIZE << dax_radix_order(entry);
 
 	/*
-	 * dax_direct_access() may sleep, so cannot hold tree_lock over
-	 * its invocation.
+	 * We cannot hold tree_lock while calling dax_map_atomic() because it
+	 * eventually calls cond_resched().
 	 */
-	ret = dax_direct_access(dax_dev, pgoff, size / PAGE_SIZE, &kaddr, &pfn);
-	if (ret < 0)
-		goto dax_unlock;
-
-	if (WARN_ON_ONCE(ret < size / PAGE_SIZE)) {
-		ret = -EIO;
-		goto dax_unlock;
+	ret = dax_map_atomic(bdev, &dax);
+	if (ret < 0) {
+		put_locked_mapping_entry(mapping, index, entry);
+		return ret;
 	}
 
-	dax_mapping_entry_mkclean(mapping, index, pfn_t_to_pfn(pfn));
-	dax_flush(dax_dev, kaddr, size);
+	if (WARN_ON_ONCE(ret < dax.size)) {
+		ret = -EIO;
+		goto unmap;
+	}
+
+	dax_mapping_entry_mkclean(mapping, index, pfn_t_to_pfn(dax.pfn));
+	wb_cache_pmem(dax.addr, dax.size);
 	/*
 	 * After we have flushed the cache, we can clear the dirty tag. There
 	 * cannot be new dirty data in the pfn after the flush has completed as
@@ -796,9 +818,8 @@ static int dax_writeback_one(struct block_device *bdev,
 	spin_lock_irq(&mapping->tree_lock);
 	radix_tree_tag_clear(page_tree, index, PAGECACHE_TAG_DIRTY);
 	spin_unlock_irq(&mapping->tree_lock);
-	trace_dax_writeback_one(mapping->host, index, size >> PAGE_SHIFT);
- dax_unlock:
-	dax_read_unlock(id);
+ unmap:
+	dax_unmap_atomic(bdev, &dax);
 	put_locked_mapping_entry(mapping, index, entry);
 	return ret;
 
@@ -819,7 +840,6 @@ int dax_writeback_mapping_range(struct address_space *mapping,
 	struct inode *inode = mapping->host;
 	pgoff_t start_index, end_index;
 	pgoff_t indices[PAGEVEC_SIZE];
-	struct dax_device *dax_dev;
 	struct pagevec pvec;
 	bool done = false;
 	int i, ret = 0;
@@ -830,14 +850,8 @@ int dax_writeback_mapping_range(struct address_space *mapping,
 	if (!mapping->nrexceptional || wbc->sync_mode != WB_SYNC_ALL)
 		return 0;
 
-	dax_dev = dax_get_by_host(bdev->bd_disk->disk_name);
-	if (!dax_dev)
-		return -EIO;
-
 	start_index = wbc->range_start >> PAGE_SHIFT;
 	end_index = wbc->range_end >> PAGE_SHIFT;
-
-	trace_dax_writeback_range(inode, start_index, end_index);
 
 	tag_pages_for_writeback(mapping, start_index, end_index);
 
@@ -856,53 +870,39 @@ int dax_writeback_mapping_range(struct address_space *mapping,
 				break;
 			}
 
-			ret = dax_writeback_one(bdev, dax_dev, mapping,
-					indices[i], pvec.pages[i]);
-			if (ret < 0) {
-				mapping_set_error(mapping, ret);
-				goto out;
-			}
+			ret = dax_writeback_one(bdev, mapping, indices[i],
+					pvec.pages[i]);
+			if (ret < 0)
+				return ret;
 		}
 		start_index = indices[pvec.nr - 1] + 1;
 	}
-out:
-	put_dax(dax_dev);
-	trace_dax_writeback_range_done(inode, start_index, end_index);
-	return (ret < 0 ? ret : 0);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(dax_writeback_mapping_range);
 
 static int dax_insert_mapping(struct address_space *mapping,
-		struct block_device *bdev, struct dax_device *dax_dev,
-		sector_t sector, size_t size, void **entryp,
-		struct vm_area_struct *vma, struct vm_fault *vmf)
+		struct block_device *bdev, sector_t sector, size_t size,
+		void **entryp, struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	unsigned long vaddr = vmf->address;
+	struct blk_dax_ctl dax = {
+		.sector = sector,
+		.size = size,
+	};
+	void *ret;
 	void *entry = *entryp;
-	void *ret, *kaddr;
-	pgoff_t pgoff;
-	int id, rc;
-	pfn_t pfn;
 
-	rc = bdev_dax_pgoff(bdev, sector, size, &pgoff);
-	if (rc)
-		return rc;
+	if (dax_map_atomic(bdev, &dax) < 0)
+		return PTR_ERR(dax.addr);
+	dax_unmap_atomic(bdev, &dax);
 
-	id = dax_read_lock();
-	rc = dax_direct_access(dax_dev, pgoff, PHYS_PFN(size), &kaddr, &pfn);
-	if (rc < 0) {
-		dax_read_unlock(id);
-		return rc;
-	}
-	dax_read_unlock(id);
-
-	ret = dax_insert_mapping_entry(mapping, vmf, entry, sector, 0);
+	ret = dax_insert_mapping_entry(mapping, vmf, entry, dax.sector, 0);
 	if (IS_ERR(ret))
 		return PTR_ERR(ret);
 	*entryp = ret;
 
-	trace_dax_insert_mapping(mapping->host, vmf, ret);
-	return vm_insert_mixed(vma, vaddr, pfn);
+	return vm_insert_mixed(vma, vaddr, dax.pfn);
 }
 
 /**
@@ -913,7 +913,6 @@ int dax_pfn_mkwrite(struct vm_fault *vmf)
 {
 	struct file *file = vmf->vma->vm_file;
 	struct address_space *mapping = file->f_mapping;
-	struct inode *inode = mapping->host;
 	void *entry, **slot;
 	pgoff_t index = vmf->pgoff;
 
@@ -923,7 +922,6 @@ int dax_pfn_mkwrite(struct vm_fault *vmf)
 		if (entry)
 			put_unlocked_mapping_entry(mapping, index, entry);
 		spin_unlock_irq(&mapping->tree_lock);
-		trace_dax_pfn_mkwrite_no_entry(inode, vmf, VM_FAULT_NOPAGE);
 		return VM_FAULT_NOPAGE;
 	}
 	radix_tree_tag_set(&mapping->page_tree, index, PAGECACHE_TAG_DIRTY);
@@ -936,7 +934,6 @@ int dax_pfn_mkwrite(struct vm_fault *vmf)
 	 */
 	finish_mkwrite_fault(vmf);
 	put_locked_mapping_entry(mapping, index, entry);
-	trace_dax_pfn_mkwrite(inode, vmf, VM_FAULT_NOPAGE);
 	return VM_FAULT_NOPAGE;
 }
 EXPORT_SYMBOL_GPL(dax_pfn_mkwrite);
@@ -954,35 +951,24 @@ static bool dax_range_is_aligned(struct block_device *bdev,
 	return true;
 }
 
-int __dax_zero_page_range(struct block_device *bdev,
-		struct dax_device *dax_dev, sector_t sector,
-		unsigned int offset, unsigned int size)
+int __dax_zero_page_range(struct block_device *bdev, sector_t sector,
+		unsigned int offset, unsigned int length)
 {
-	if (dax_range_is_aligned(bdev, offset, size)) {
-		sector_t start_sector = sector + (offset >> 9);
+	struct blk_dax_ctl dax = {
+		.sector		= sector,
+		.size		= PAGE_SIZE,
+	};
+
+	if (dax_range_is_aligned(bdev, offset, length)) {
+		sector_t start_sector = dax.sector + (offset >> 9);
 
 		return blkdev_issue_zeroout(bdev, start_sector,
-				size >> 9, GFP_NOFS, 0);
+				length >> 9, GFP_NOFS, true);
 	} else {
-		pgoff_t pgoff;
-		long rc, id;
-		void *kaddr;
-		pfn_t pfn;
-
-		rc = bdev_dax_pgoff(bdev, sector, PAGE_SIZE, &pgoff);
-		if (rc)
-			return rc;
-
-		id = dax_read_lock();
-		rc = dax_direct_access(dax_dev, pgoff, 1, &kaddr,
-				&pfn);
-		if (rc < 0) {
-			dax_read_unlock(id);
-			return rc;
-		}
-		memset(kaddr + offset, 0, size);
-		dax_flush(dax_dev, kaddr + offset, size);
-		dax_read_unlock(id);
+		if (dax_map_atomic(bdev, &dax) < 0)
+			return PTR_ERR(dax.addr);
+		clear_pmem(dax.addr + offset, length);
+		dax_unmap_atomic(bdev, &dax);
 	}
 	return 0;
 }
@@ -997,12 +983,9 @@ static loff_t
 dax_iomap_actor(struct inode *inode, loff_t pos, loff_t length, void *data,
 		struct iomap *iomap)
 {
-	struct block_device *bdev = iomap->bdev;
-	struct dax_device *dax_dev = iomap->dax_dev;
 	struct iov_iter *iter = data;
 	loff_t end = pos + length, done = 0;
 	ssize_t ret = 0;
-	int id;
 
 	if (iov_iter_rw(iter) == READ) {
 		end = min(end, i_size_read(inode));
@@ -1027,43 +1010,34 @@ dax_iomap_actor(struct inode *inode, loff_t pos, loff_t length, void *data,
 					      (end - 1) >> PAGE_SHIFT);
 	}
 
-	id = dax_read_lock();
 	while (pos < end) {
 		unsigned offset = pos & (PAGE_SIZE - 1);
-		const size_t size = ALIGN(length + offset, PAGE_SIZE);
-		const sector_t sector = dax_iomap_sector(iomap, pos);
+		struct blk_dax_ctl dax = { 0 };
 		ssize_t map_len;
-		pgoff_t pgoff;
-		void *kaddr;
-		pfn_t pfn;
 
 		if (fatal_signal_pending(current)) {
 			ret = -EINTR;
 			break;
 		}
 
-		ret = bdev_dax_pgoff(bdev, sector, size, &pgoff);
-		if (ret)
-			break;
-
-		map_len = dax_direct_access(dax_dev, pgoff, PHYS_PFN(size),
-				&kaddr, &pfn);
+		dax.sector = dax_iomap_sector(iomap, pos);
+		dax.size = (length + offset + PAGE_SIZE - 1) & PAGE_MASK;
+		map_len = dax_map_atomic(iomap->bdev, &dax);
 		if (map_len < 0) {
 			ret = map_len;
 			break;
 		}
 
-		map_len = PFN_PHYS(map_len);
-		kaddr += offset;
+		dax.addr += offset;
 		map_len -= offset;
 		if (map_len > end - pos)
 			map_len = end - pos;
 
 		if (iov_iter_rw(iter) == WRITE)
-			map_len = dax_copy_from_iter(dax_dev, pgoff, kaddr,
-					map_len, iter);
+			map_len = copy_from_iter_pmem(dax.addr, map_len, iter);
 		else
-			map_len = copy_to_iter(kaddr, map_len, iter);
+			map_len = copy_to_iter(dax.addr, map_len, iter);
+		dax_unmap_atomic(iomap->bdev, &dax);
 		if (map_len <= 0) {
 			ret = map_len ? map_len : -EFAULT;
 			break;
@@ -1073,7 +1047,6 @@ dax_iomap_actor(struct inode *inode, loff_t pos, loff_t length, void *data,
 		length -= map_len;
 		done += map_len;
 	}
-	dax_read_unlock(id);
 
 	return done ? done : ret;
 }
@@ -1141,25 +1114,20 @@ static int dax_iomap_pte_fault(struct vm_fault *vmf,
 	int vmf_ret = 0;
 	void *entry;
 
-	trace_dax_pte_fault(inode, vmf, vmf_ret);
 	/*
 	 * Check whether offset isn't beyond end of file now. Caller is supposed
 	 * to hold locks serializing us with truncate / punch hole so this is
 	 * a reliable test.
 	 */
-	if (pos >= i_size_read(inode)) {
-		vmf_ret = VM_FAULT_SIGBUS;
-		goto out;
-	}
+	if (pos >= i_size_read(inode))
+		return VM_FAULT_SIGBUS;
 
 	if ((vmf->flags & FAULT_FLAG_WRITE) && !vmf->cow_page)
 		flags |= IOMAP_WRITE;
 
 	entry = grab_mapping_entry(mapping, vmf->pgoff, 0);
-	if (IS_ERR(entry)) {
-		vmf_ret = dax_fault_return(PTR_ERR(entry));
-		goto out;
-	}
+	if (IS_ERR(entry))
+		return dax_fault_return(PTR_ERR(entry));
 
 	/*
 	 * It is possible, particularly with mixed reads & writes to private
@@ -1196,8 +1164,8 @@ static int dax_iomap_pte_fault(struct vm_fault *vmf,
 			clear_user_highpage(vmf->cow_page, vaddr);
 			break;
 		case IOMAP_MAPPED:
-			error = copy_user_dax(iomap.bdev, iomap.dax_dev,
-					sector, PAGE_SIZE, vmf->cow_page, vaddr);
+			error = copy_user_dax(iomap.bdev, sector, PAGE_SIZE,
+					vmf->cow_page, vaddr);
 			break;
 		default:
 			WARN_ON_ONCE(1);
@@ -1219,11 +1187,11 @@ static int dax_iomap_pte_fault(struct vm_fault *vmf,
 	case IOMAP_MAPPED:
 		if (iomap.flags & IOMAP_F_NEW) {
 			count_vm_event(PGMAJFAULT);
-			count_memcg_event_mm(vmf->vma->vm_mm, PGMAJFAULT);
+			mem_cgroup_count_vm_event(vmf->vma->vm_mm, PGMAJFAULT);
 			major = VM_FAULT_MAJOR;
 		}
-		error = dax_insert_mapping(mapping, iomap.bdev, iomap.dax_dev,
-				sector, PAGE_SIZE, &entry, vmf->vma, vmf);
+		error = dax_insert_mapping(mapping, iomap.bdev, sector,
+				PAGE_SIZE, &entry, vmf->vma, vmf);
 		/* -EBUSY is fine, somebody else faulted on the same PTE */
 		if (error == -EBUSY)
 			error = 0;
@@ -1259,8 +1227,6 @@ static int dax_iomap_pte_fault(struct vm_fault *vmf,
 	}
  unlock_entry:
 	put_locked_mapping_entry(mapping, vmf->pgoff, entry);
- out:
-	trace_dax_pte_fault_done(inode, vmf, vmf_ret);
 	return vmf_ret;
 }
 
@@ -1275,48 +1241,41 @@ static int dax_pmd_insert_mapping(struct vm_fault *vmf, struct iomap *iomap,
 		loff_t pos, void **entryp)
 {
 	struct address_space *mapping = vmf->vma->vm_file->f_mapping;
-	const sector_t sector = dax_iomap_sector(iomap, pos);
-	struct dax_device *dax_dev = iomap->dax_dev;
 	struct block_device *bdev = iomap->bdev;
 	struct inode *inode = mapping->host;
-	const size_t size = PMD_SIZE;
-	void *ret = NULL, *kaddr;
-	long length = 0;
-	pgoff_t pgoff;
-	pfn_t pfn;
-	int id;
+	struct blk_dax_ctl dax = {
+		.sector = dax_iomap_sector(iomap, pos),
+		.size = PMD_SIZE,
+	};
+	long length = dax_map_atomic(bdev, &dax);
+	void *ret = NULL;
 
-	if (bdev_dax_pgoff(bdev, sector, size, &pgoff) != 0)
+	if (length < 0) /* dax_map_atomic() failed */
 		goto fallback;
+	if (length < PMD_SIZE)
+		goto unmap_fallback;
+	if (pfn_t_to_pfn(dax.pfn) & PG_PMD_COLOUR)
+		goto unmap_fallback;
+	if (!pfn_t_devmap(dax.pfn))
+		goto unmap_fallback;
 
-	id = dax_read_lock();
-	length = dax_direct_access(dax_dev, pgoff, PHYS_PFN(size), &kaddr, &pfn);
-	if (length < 0)
-		goto unlock_fallback;
-	length = PFN_PHYS(length);
+	dax_unmap_atomic(bdev, &dax);
 
-	if (length < size)
-		goto unlock_fallback;
-	if (pfn_t_to_pfn(pfn) & PG_PMD_COLOUR)
-		goto unlock_fallback;
-	if (!pfn_t_devmap(pfn))
-		goto unlock_fallback;
-	dax_read_unlock(id);
-
-	ret = dax_insert_mapping_entry(mapping, vmf, *entryp, sector,
+	ret = dax_insert_mapping_entry(mapping, vmf, *entryp, dax.sector,
 			RADIX_DAX_PMD);
 	if (IS_ERR(ret))
 		goto fallback;
 	*entryp = ret;
 
-	trace_dax_pmd_insert_mapping(inode, vmf, length, pfn, ret);
+	trace_dax_pmd_insert_mapping(inode, vmf, length, dax.pfn, ret);
 	return vmf_insert_pfn_pmd(vmf->vma, vmf->address, vmf->pmd,
-			pfn, vmf->flags & FAULT_FLAG_WRITE);
+			dax.pfn, vmf->flags & FAULT_FLAG_WRITE);
 
-unlock_fallback:
-	dax_read_unlock(id);
+ unmap_fallback:
+	dax_unmap_atomic(bdev, &dax);
 fallback:
-	trace_dax_pmd_insert_mapping_fallback(inode, vmf, length, pfn, ret);
+	trace_dax_pmd_insert_mapping_fallback(inode, vmf, length,
+			dax.pfn, ret);
 	return VM_FAULT_FALLBACK;
 }
 
@@ -1385,16 +1344,6 @@ static int dax_iomap_pmd_fault(struct vm_fault *vmf,
 	max_pgoff = (i_size_read(inode) - 1) >> PAGE_SHIFT;
 
 	trace_dax_pmd_fault(inode, vmf, max_pgoff, 0);
-
-	/*
-	 * Make sure that the faulting address's PMD offset (color) matches
-	 * the PMD offset from the start of the file.  This is necessary so
-	 * that a PMD range in the page table overlaps exactly with a PMD
-	 * range in the radix tree.
-	 */
-	if ((vmf->pgoff & PG_PMD_COLOUR) !=
-	    ((vmf->address >> PAGE_SHIFT) & PG_PMD_COLOUR))
-		goto fallback;
 
 	/* Fall back to PTEs if we're going to COW */
 	if (write && !(vma->vm_flags & VM_SHARED))

@@ -278,7 +278,7 @@ static void mtk_vdec_flush_decoder(struct mtk_vcodec_ctx *ctx)
 	clean_free_buffer(ctx);
 }
 
-static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
+static void mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 {
 	unsigned int dpbsize = 0;
 	int ret;
@@ -288,7 +288,7 @@ static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 				&ctx->last_decoded_picinfo)) {
 		mtk_v4l2_err("[%d]Error!! Cannot get param : GET_PARAM_PICTURE_INFO ERR",
 				ctx->id);
-		return -EINVAL;
+		return;
 	}
 
 	if (ctx->last_decoded_picinfo.pic_w == 0 ||
@@ -296,12 +296,12 @@ static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 		ctx->last_decoded_picinfo.buf_w == 0 ||
 		ctx->last_decoded_picinfo.buf_h == 0) {
 		mtk_v4l2_err("Cannot get correct pic info");
-		return -EINVAL;
+		return;
 	}
 
 	if ((ctx->last_decoded_picinfo.pic_w == ctx->picinfo.pic_w) ||
 	    (ctx->last_decoded_picinfo.pic_h == ctx->picinfo.pic_h))
-		return 0;
+		return;
 
 	mtk_v4l2_debug(1,
 			"[%d]-> new(%d,%d), old(%d,%d), real(%d,%d)",
@@ -316,8 +316,6 @@ static int mtk_vdec_pic_info_update(struct mtk_vcodec_ctx *ctx)
 		mtk_v4l2_err("Incorrect dpb size, ret=%d", ret);
 
 	ctx->dpb_size = dpbsize;
-
-	return ret;
 }
 
 static void mtk_vdec_worker(struct work_struct *work)
@@ -422,11 +420,6 @@ static void mtk_vdec_worker(struct work_struct *work)
 			dst_buf->index,
 			ret, res_chg);
 		src_buf = v4l2_m2m_src_buf_remove(ctx->m2m_ctx);
-		if (ret == -EIO) {
-			mutex_lock(&ctx->lock);
-			src_buf_info->error = true;
-			mutex_unlock(&ctx->lock);
-		}
 		v4l2_m2m_buf_done(&src_buf_info->vb, VB2_BUF_STATE_ERROR);
 	} else if (res_chg == false) {
 		/*
@@ -1177,16 +1170,8 @@ static void vb2ops_vdec_buf_queue(struct vb2_buffer *vb)
 		 */
 
 		src_buf = v4l2_m2m_src_buf_remove(ctx->m2m_ctx);
-		if (ret == -EIO) {
-			mtk_v4l2_err("[%d] Unrecoverable error in vdec_if_decode.",
-					ctx->id);
-			ctx->state = MTK_STATE_ABORT;
-			v4l2_m2m_buf_done(to_vb2_v4l2_buffer(src_buf),
-						VB2_BUF_STATE_ERROR);
-		} else {
-			v4l2_m2m_buf_done(to_vb2_v4l2_buffer(src_buf),
-						VB2_BUF_STATE_DONE);
-		}
+		v4l2_m2m_buf_done(to_vb2_v4l2_buffer(src_buf),
+					VB2_BUF_STATE_DONE);
 		mtk_v4l2_debug(ret ? 0 : 1,
 			       "[%d] vdec_if_decode() src_buf=%d, size=%zu, fail=%d, res_chg=%d",
 			       ctx->id, src_buf->index,
@@ -1231,22 +1216,16 @@ static void vb2ops_vdec_buf_finish(struct vb2_buffer *vb)
 	struct mtk_vcodec_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
 	struct vb2_v4l2_buffer *vb2_v4l2;
 	struct mtk_video_dec_buf *buf;
-	bool buf_error;
+
+	if (vb->vb2_queue->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+		return;
 
 	vb2_v4l2 = container_of(vb, struct vb2_v4l2_buffer, vb2_buf);
 	buf = container_of(vb2_v4l2, struct mtk_video_dec_buf, vb);
 	mutex_lock(&ctx->lock);
-	if (vb->vb2_queue->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-		buf->queued_in_v4l2 = false;
-		buf->queued_in_vb2 = false;
-	}
-	buf_error = buf->error;
+	buf->queued_in_v4l2 = false;
+	buf->queued_in_vb2 = false;
 	mutex_unlock(&ctx->lock);
-
-	if (buf_error) {
-		mtk_v4l2_err("Unrecoverable error on buffer.");
-		ctx->state = MTK_STATE_ABORT;
-	}
 }
 
 static int vb2ops_vdec_buf_init(struct vb2_buffer *vb)

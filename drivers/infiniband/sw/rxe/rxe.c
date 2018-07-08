@@ -31,7 +31,6 @@
  * SOFTWARE.
  */
 
-#include <net/addrconf.h>
 #include "rxe.h"
 #include "rxe_loc.h"
 
@@ -65,8 +64,6 @@ static void rxe_cleanup(struct rxe_dev *rxe)
 	rxe_pool_cleanup(&rxe->mc_elem_pool);
 
 	rxe_cleanup_ports(rxe);
-
-	crypto_free_shash(rxe->tfm);
 }
 
 /* called when all references have been dropped */
@@ -181,8 +178,7 @@ static int rxe_init_ports(struct rxe_dev *rxe)
 		return -ENOMEM;
 
 	port->pkey_tbl[0] = 0xffff;
-	addrconf_addr_eui48((unsigned char *)&port->port_guid,
-			    rxe->ndev->dev_addr);
+	port->port_guid = rxe_port_guid(rxe);
 
 	spin_lock_init(&port->port_lock);
 

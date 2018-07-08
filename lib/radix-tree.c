@@ -463,7 +463,7 @@ radix_tree_node_free(struct radix_tree_node *node)
  * To make use of this facility, the radix tree must be initialised without
  * __GFP_DIRECT_RECLAIM being passed to INIT_RADIX_TREE().
  */
-static __must_check int __radix_tree_preload(gfp_t gfp_mask, unsigned nr)
+static int __radix_tree_preload(gfp_t gfp_mask, unsigned nr)
 {
 	struct radix_tree_preload *rtp;
 	struct radix_tree_node *node;
@@ -2103,8 +2103,7 @@ EXPORT_SYMBOL(radix_tree_tagged);
  */
 void idr_preload(gfp_t gfp_mask)
 {
-	if (__radix_tree_preload(gfp_mask, IDR_PRELOAD_SIZE))
-		preempt_disable();
+	__radix_tree_preload(gfp_mask, IDR_PRELOAD_SIZE);
 }
 EXPORT_SYMBOL(idr_preload);
 
@@ -2118,13 +2117,13 @@ EXPORT_SYMBOL(idr_preload);
  */
 int ida_pre_get(struct ida *ida, gfp_t gfp)
 {
+	__radix_tree_preload(gfp, IDA_PRELOAD_SIZE);
 	/*
 	 * The IDA API has no preload_end() equivalent.  Instead,
 	 * ida_get_new() can return -EAGAIN, prompting the caller
 	 * to return to the ida_pre_get() step.
 	 */
-	if (!__radix_tree_preload(gfp, IDA_PRELOAD_SIZE))
-		preempt_enable();
+	preempt_enable();
 
 	if (!this_cpu_read(ida_bitmap)) {
 		struct ida_bitmap *bitmap = kmalloc(sizeof(*bitmap), gfp);
@@ -2285,8 +2284,6 @@ static int radix_tree_cpu_dead(unsigned int cpu)
 void __init radix_tree_init(void)
 {
 	int ret;
-
-	BUILD_BUG_ON(RADIX_TREE_MAX_TAGS + __GFP_BITS_SHIFT > 32);
 	radix_tree_node_cachep = kmem_cache_create("radix_tree_node",
 			sizeof(struct radix_tree_node), 0,
 			SLAB_PANIC | SLAB_RECLAIM_ACCOUNT,

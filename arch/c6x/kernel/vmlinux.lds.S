@@ -128,8 +128,6 @@ SECTIONS
 		. = ALIGN(8);
 	}
 
-	BUG_TABLE
-
 	_edata = .;
 
 	__bss_start = .;

@@ -446,7 +446,6 @@ static int write_same16(struct scsi_device *sdev,
 	while (left > 0) {
 
 		scsi_cmd[0] = WRITE_SAME_16;
-		scsi_cmd[1] = cfg->ws_unmap ? 0x8 : 0;
 		put_unaligned_be64(offset, &scsi_cmd[2]);
 		put_unaligned_be32(ws_limit < left ? ws_limit : left,
 				   &scsi_cmd[10]);
@@ -595,9 +594,7 @@ static int grow_lxt(struct afu *afu,
 	rhte->lxt_cnt = my_new_size;
 	dma_wmb(); /* Make RHT entry's LXT table size update visible */
 
-	rc = cxlflash_afu_sync(afu, ctxid, rhndl, AFU_LW_SYNC);
-	if (unlikely(rc))
-		rc = -EAGAIN;
+	cxlflash_afu_sync(afu, ctxid, rhndl, AFU_LW_SYNC);
 
 	/* free old lxt if reallocated */
 	if (lxt != lxt_old)
@@ -676,11 +673,8 @@ static int shrink_lxt(struct afu *afu,
 	rhte->lxt_start = lxt;
 	dma_wmb(); /* Make RHT entry's LXT table update visible */
 
-	if (needs_sync) {
-		rc = cxlflash_afu_sync(afu, ctxid, rhndl, AFU_HW_SYNC);
-		if (unlikely(rc))
-			rc = -EAGAIN;
-	}
+	if (needs_sync)
+		cxlflash_afu_sync(afu, ctxid, rhndl, AFU_HW_SYNC);
 
 	if (needs_ws) {
 		/*
@@ -798,21 +792,6 @@ int _cxlflash_vlun_resize(struct scsi_device *sdev,
 		rc = grow_lxt(afu, sdev, ctxid, rhndl, rhte, &new_size);
 	else if (new_size < rhte->lxt_cnt)
 		rc = shrink_lxt(afu, sdev, rhndl, rhte, ctxi, &new_size);
-	else {
-		/*
-		 * Rare case where there is already sufficient space, just
-		 * need to perform a translation sync with the AFU. This
-		 * scenario likely follows a previous sync failure during
-		 * a resize operation. Accordingly, perform the heavyweight
-		 * form of translation sync as it is unknown which type of
-		 * resize failed previously.
-		 */
-		rc = cxlflash_afu_sync(afu, ctxid, rhndl, AFU_HW_SYNC);
-		if (unlikely(rc)) {
-			rc = -EAGAIN;
-			goto out;
-		}
-	}
 
 	resize->hdr.return_flags = 0;
 	resize->last_lba = (new_size * MC_CHUNK_SIZE * gli->blk_len);
@@ -840,10 +819,11 @@ int cxlflash_vlun_resize(struct scsi_device *sdev,
 void cxlflash_restore_luntable(struct cxlflash_cfg *cfg)
 {
 	struct llun_info *lli, *temp;
+	u32 chan;
 	u32 lind;
-	int k;
+	struct afu *afu = cfg->afu;
 	struct device *dev = &cfg->dev->dev;
-	__be64 __iomem *fc_port_luns;
+	struct sisl_global_map __iomem *agm = &afu->afu_map->global;
 
 	mutex_lock(&global.mutex);
 
@@ -852,31 +832,23 @@ void cxlflash_restore_luntable(struct cxlflash_cfg *cfg)
 			continue;
 
 		lind = lli->lun_index;
-		dev_dbg(dev, "%s: Virtual LUNs on slot %d:\n", __func__, lind);
 
-		for (k = 0; k < cfg->num_fc_ports; k++)
-			if (lli->port_sel & (1 << k)) {
-				fc_port_luns = get_fc_port_luns(cfg, k);
-				writeq_be(lli->lun_id[k], &fc_port_luns[lind]);
-				dev_dbg(dev, "\t%d=%llx\n", k, lli->lun_id[k]);
-			}
+		if (lli->port_sel == BOTH_PORTS) {
+			writeq_be(lli->lun_id[0], &agm->fc_port[0][lind]);
+			writeq_be(lli->lun_id[1], &agm->fc_port[1][lind]);
+			dev_dbg(dev, "%s: Virtual LUN on slot %d  id0=%llx "
+				"id1=%llx\n", __func__, lind,
+				lli->lun_id[0], lli->lun_id[1]);
+		} else {
+			chan = PORT2CHAN(lli->port_sel);
+			writeq_be(lli->lun_id[chan], &agm->fc_port[chan][lind]);
+			dev_dbg(dev, "%s: Virtual LUN on slot %d chan=%d "
+				"id=%llx\n", __func__, lind, chan,
+				lli->lun_id[chan]);
+		}
 	}
 
 	mutex_unlock(&global.mutex);
-}
-
-/**
- * get_num_ports() - compute number of ports from port selection mask
- * @psm:	Port selection mask.
- *
- * Return: Population count of port selection mask
- */
-static inline u8 get_num_ports(u32 psm)
-{
-	static const u8 bits[16] = { 0, 1, 1, 2, 1, 2, 2, 3,
-				     1, 2, 2, 3, 2, 3, 3, 4 };
-
-	return bits[psm & 0xf];
 }
 
 /**
@@ -884,9 +856,9 @@ static inline u8 get_num_ports(u32 psm)
  * @cfg:	Internal structure associated with the host.
  * @lli:	Per adapter LUN information structure.
  *
- * On successful return, a LUN table entry is created:
- *	- at the top for LUNs visible on multiple ports.
- *	- at the bottom for LUNs visible only on one port.
+ * On successful return, a LUN table entry is created.
+ * At the top for LUNs visible on both ports.
+ * At the bottom for LUNs visible only on one port.
  *
  * Return: 0 on success, -errno on failure
  */
@@ -894,68 +866,48 @@ static int init_luntable(struct cxlflash_cfg *cfg, struct llun_info *lli)
 {
 	u32 chan;
 	u32 lind;
-	u32 nports;
 	int rc = 0;
-	int k;
+	struct afu *afu = cfg->afu;
 	struct device *dev = &cfg->dev->dev;
-	__be64 __iomem *fc_port_luns;
+	struct sisl_global_map __iomem *agm = &afu->afu_map->global;
 
 	mutex_lock(&global.mutex);
 
 	if (lli->in_table)
 		goto out;
 
-	nports = get_num_ports(lli->port_sel);
-	if (nports == 0 || nports > cfg->num_fc_ports) {
-		WARN(1, "Unsupported port configuration nports=%u", nports);
-		rc = -EIO;
-		goto out;
-	}
-
-	if (nports > 1) {
+	if (lli->port_sel == BOTH_PORTS) {
 		/*
-		 * When LUN is visible from multiple ports, we will put
+		 * If this LUN is visible from both ports, we will put
 		 * it in the top half of the LUN table.
 		 */
-		for (k = 0; k < cfg->num_fc_ports; k++) {
-			if (!(lli->port_sel & (1 << k)))
-				continue;
-
-			if (cfg->promote_lun_index == cfg->last_lun_index[k]) {
-				rc = -ENOSPC;
-				goto out;
-			}
+		if ((cfg->promote_lun_index == cfg->last_lun_index[0]) ||
+		    (cfg->promote_lun_index == cfg->last_lun_index[1])) {
+			rc = -ENOSPC;
+			goto out;
 		}
 
 		lind = lli->lun_index = cfg->promote_lun_index;
-		dev_dbg(dev, "%s: Virtual LUNs on slot %d:\n", __func__, lind);
-
-		for (k = 0; k < cfg->num_fc_ports; k++) {
-			if (!(lli->port_sel & (1 << k)))
-				continue;
-
-			fc_port_luns = get_fc_port_luns(cfg, k);
-			writeq_be(lli->lun_id[k], &fc_port_luns[lind]);
-			dev_dbg(dev, "\t%d=%llx\n", k, lli->lun_id[k]);
-		}
-
+		writeq_be(lli->lun_id[0], &agm->fc_port[0][lind]);
+		writeq_be(lli->lun_id[1], &agm->fc_port[1][lind]);
 		cfg->promote_lun_index++;
+		dev_dbg(dev, "%s: Virtual LUN on slot %d  id0=%llx id1=%llx\n",
+			__func__, lind, lli->lun_id[0], lli->lun_id[1]);
 	} else {
 		/*
-		 * When LUN is visible only from one port, we will put
+		 * If this LUN is visible only from one port, we will put
 		 * it in the bottom half of the LUN table.
 		 */
-		chan = PORTMASK2CHAN(lli->port_sel);
+		chan = PORT2CHAN(lli->port_sel);
 		if (cfg->promote_lun_index == cfg->last_lun_index[chan]) {
 			rc = -ENOSPC;
 			goto out;
 		}
 
 		lind = lli->lun_index = cfg->last_lun_index[chan];
-		fc_port_luns = get_fc_port_luns(cfg, chan);
-		writeq_be(lli->lun_id[chan], &fc_port_luns[lind]);
+		writeq_be(lli->lun_id[chan], &agm->fc_port[chan][lind]);
 		cfg->last_lun_index[chan]--;
-		dev_dbg(dev, "%s: Virtual LUNs on slot %d:\n\t%d=%llx\n",
+		dev_dbg(dev, "%s: Virtual LUN on slot %d  chan=%d id=%llx\n",
 			__func__, lind, chan, lli->lun_id[chan]);
 	}
 
@@ -1064,7 +1016,7 @@ int cxlflash_disk_virtual_open(struct scsi_device *sdev, void *arg)
 	virt->last_lba = last_lba;
 	virt->rsrc_handle = rsrc_handle;
 
-	if (get_num_ports(lli->port_sel) > 1)
+	if (lli->port_sel == BOTH_PORTS)
 		virt->hdr.return_flags |= DK_CXLFLASH_ALL_PORTS_ACTIVE;
 out:
 	if (likely(ctxi))
@@ -1105,13 +1057,10 @@ static int clone_lxt(struct afu *afu,
 {
 	struct cxlflash_cfg *cfg = afu->parent;
 	struct device *dev = &cfg->dev->dev;
-	struct sisl_lxt_entry *lxt = NULL;
-	bool locked = false;
+	struct sisl_lxt_entry *lxt;
 	u32 ngrps;
 	u64 aun;		/* chunk# allocated by block allocator */
-	int j;
-	int i = 0;
-	int rc = 0;
+	int i, j;
 
 	ngrps = LXT_NUM_GROUPS(rhte_src->lxt_cnt);
 
@@ -1119,29 +1068,33 @@ static int clone_lxt(struct afu *afu,
 		/* allocate new LXTs for clone */
 		lxt = kzalloc((sizeof(*lxt) * LXT_GROUP_SIZE * ngrps),
 				GFP_KERNEL);
-		if (unlikely(!lxt)) {
-			rc = -ENOMEM;
-			goto out;
-		}
+		if (unlikely(!lxt))
+			return -ENOMEM;
 
 		/* copy over */
 		memcpy(lxt, rhte_src->lxt_start,
 		       (sizeof(*lxt) * rhte_src->lxt_cnt));
 
-		/* clone the LBAs in block allocator via ref_cnt, note that the
-		 * block allocator mutex must be held until it is established
-		 * that this routine will complete without the need for a
-		 * cleanup.
-		 */
+		/* clone the LBAs in block allocator via ref_cnt */
 		mutex_lock(&blka->mutex);
-		locked = true;
 		for (i = 0; i < rhte_src->lxt_cnt; i++) {
 			aun = (lxt[i].rlba_base >> MC_CHUNK_SHIFT);
 			if (ba_clone(&blka->ba_lun, aun) == -1ULL) {
-				rc = -EIO;
-				goto err;
+				/* free the clones already made */
+				for (j = 0; j < i; j++) {
+					aun = (lxt[j].rlba_base >>
+					       MC_CHUNK_SHIFT);
+					ba_free(&blka->ba_lun, aun);
+				}
+
+				mutex_unlock(&blka->mutex);
+				kfree(lxt);
+				return -EIO;
 			}
 		}
+		mutex_unlock(&blka->mutex);
+	} else {
+		lxt = NULL;
 	}
 
 	/*
@@ -1156,31 +1109,10 @@ static int clone_lxt(struct afu *afu,
 	rhte->lxt_cnt = rhte_src->lxt_cnt;
 	dma_wmb(); /* Make RHT entry's LXT table size update visible */
 
-	rc = cxlflash_afu_sync(afu, ctxid, rhndl, AFU_LW_SYNC);
-	if (unlikely(rc)) {
-		rc = -EAGAIN;
-		goto err2;
-	}
+	cxlflash_afu_sync(afu, ctxid, rhndl, AFU_LW_SYNC);
 
-out:
-	if (locked)
-		mutex_unlock(&blka->mutex);
-	dev_dbg(dev, "%s: returning rc=%d\n", __func__, rc);
-	return rc;
-err2:
-	/* Reset the RHTE */
-	rhte->lxt_cnt = 0;
-	dma_wmb();
-	rhte->lxt_start = NULL;
-	dma_wmb();
-err:
-	/* free the clones already made */
-	for (j = 0; j < i; j++) {
-		aun = (lxt[j].rlba_base >> MC_CHUNK_SHIFT);
-		ba_free(&blka->ba_lun, aun);
-	}
-	kfree(lxt);
-	goto out;
+	dev_dbg(dev, "%s: returning\n", __func__);
+	return 0;
 }
 
 /**

@@ -273,13 +273,14 @@ static void exynos_plane_attach_zpos_property(struct drm_plane *plane,
 }
 
 int exynos_plane_init(struct drm_device *dev,
-		      struct exynos_drm_plane *exynos_plane, unsigned int index,
+		      struct exynos_drm_plane *exynos_plane,
+		      unsigned int index, unsigned long possible_crtcs,
 		      const struct exynos_drm_plane_config *config)
 {
 	int err;
 
 	err = drm_universal_plane_init(dev, &exynos_plane->base,
-				       1 << dev->mode_config.num_crtc,
+				       possible_crtcs,
 				       &exynos_plane_funcs,
 				       config->pixel_formats,
 				       config->num_pixel_formats,

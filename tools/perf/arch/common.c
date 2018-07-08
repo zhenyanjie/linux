@@ -4,8 +4,6 @@
 #include "../util/util.h"
 #include "../util/debug.h"
 
-#include "sane_ctype.h"
-
 const char *const arm_triplets[] = {
 	"arm-eabi-",
 	"arm-linux-androideabi-",
@@ -26,7 +24,6 @@ const char *const arm64_triplets[] = {
 
 const char *const powerpc_triplets[] = {
 	"powerpc-unknown-linux-gnu-",
-	"powerpc-linux-gnu-",
 	"powerpc64-unknown-linux-gnu-",
 	"powerpc64-linux-gnu-",
 	"powerpc64le-linux-gnu-",

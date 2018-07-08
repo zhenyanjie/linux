@@ -690,8 +690,8 @@ void blk_trace_shutdown(struct request_queue *q)
 
 /**
  * blk_add_trace_rq - Add a trace for a request oriented action
+ * @q:		queue the io is for
  * @rq:		the source request
- * @error:	return status to log
  * @nr_bytes:	number of completed bytes
  * @what:	the action
  *
@@ -699,10 +699,10 @@ void blk_trace_shutdown(struct request_queue *q)
  *     Records an action against a request. Will log the bio offset + size.
  *
  **/
-static void blk_add_trace_rq(struct request *rq, int error,
+static void blk_add_trace_rq(struct request_queue *q, struct request *rq,
 			     unsigned int nr_bytes, u32 what)
 {
-	struct blk_trace *bt = rq->q->blk_trace;
+	struct blk_trace *bt = q->blk_trace;
 
 	if (likely(!bt))
 		return;
@@ -713,32 +713,40 @@ static void blk_add_trace_rq(struct request *rq, int error,
 		what |= BLK_TC_ACT(BLK_TC_FS);
 
 	__blk_add_trace(bt, blk_rq_trace_sector(rq), nr_bytes, req_op(rq),
-			rq->cmd_flags, what, error, 0, NULL);
+			rq->cmd_flags, what, rq->errors, 0, NULL);
+}
+
+static void blk_add_trace_rq_abort(void *ignore,
+				   struct request_queue *q, struct request *rq)
+{
+	blk_add_trace_rq(q, rq, blk_rq_bytes(rq), BLK_TA_ABORT);
 }
 
 static void blk_add_trace_rq_insert(void *ignore,
 				    struct request_queue *q, struct request *rq)
 {
-	blk_add_trace_rq(rq, 0, blk_rq_bytes(rq), BLK_TA_INSERT);
+	blk_add_trace_rq(q, rq, blk_rq_bytes(rq), BLK_TA_INSERT);
 }
 
 static void blk_add_trace_rq_issue(void *ignore,
 				   struct request_queue *q, struct request *rq)
 {
-	blk_add_trace_rq(rq, 0, blk_rq_bytes(rq), BLK_TA_ISSUE);
+	blk_add_trace_rq(q, rq, blk_rq_bytes(rq), BLK_TA_ISSUE);
 }
 
 static void blk_add_trace_rq_requeue(void *ignore,
 				     struct request_queue *q,
 				     struct request *rq)
 {
-	blk_add_trace_rq(rq, 0, blk_rq_bytes(rq), BLK_TA_REQUEUE);
+	blk_add_trace_rq(q, rq, blk_rq_bytes(rq), BLK_TA_REQUEUE);
 }
 
-static void blk_add_trace_rq_complete(void *ignore, struct request *rq,
-			int error, unsigned int nr_bytes)
+static void blk_add_trace_rq_complete(void *ignore,
+				      struct request_queue *q,
+				      struct request *rq,
+				      unsigned int nr_bytes)
 {
-	blk_add_trace_rq(rq, error, nr_bytes, BLK_TA_COMPLETE);
+	blk_add_trace_rq(q, rq, nr_bytes, BLK_TA_COMPLETE);
 }
 
 /**
@@ -867,7 +875,7 @@ static void blk_add_trace_split(void *ignore,
 
 		__blk_add_trace(bt, bio->bi_iter.bi_sector,
 				bio->bi_iter.bi_size, bio_op(bio), bio->bi_opf,
-				BLK_TA_SPLIT, bio->bi_status, sizeof(rpdu),
+				BLK_TA_SPLIT, bio->bi_error, sizeof(rpdu),
 				&rpdu);
 	}
 }
@@ -900,7 +908,7 @@ static void blk_add_trace_bio_remap(void *ignore,
 	r.sector_from = cpu_to_be64(from);
 
 	__blk_add_trace(bt, bio->bi_iter.bi_sector, bio->bi_iter.bi_size,
-			bio_op(bio), bio->bi_opf, BLK_TA_REMAP, bio->bi_status,
+			bio_op(bio), bio->bi_opf, BLK_TA_REMAP, bio->bi_error,
 			sizeof(r), &r);
 }
 
@@ -933,7 +941,7 @@ static void blk_add_trace_rq_remap(void *ignore,
 	r.sector_from = cpu_to_be64(from);
 
 	__blk_add_trace(bt, blk_rq_pos(rq), blk_rq_bytes(rq),
-			rq_data_dir(rq), 0, BLK_TA_REMAP, 0,
+			rq_data_dir(rq), 0, BLK_TA_REMAP, !!rq->errors,
 			sizeof(r), &r);
 }
 
@@ -958,7 +966,7 @@ void blk_add_driver_data(struct request_queue *q,
 		return;
 
 	__blk_add_trace(bt, blk_rq_trace_sector(rq), blk_rq_bytes(rq), 0, 0,
-				BLK_TA_DRV_DATA, 0, len, data);
+				BLK_TA_DRV_DATA, rq->errors, len, data);
 }
 EXPORT_SYMBOL_GPL(blk_add_driver_data);
 
@@ -966,6 +974,8 @@ static void blk_register_tracepoints(void)
 {
 	int ret;
 
+	ret = register_trace_block_rq_abort(blk_add_trace_rq_abort, NULL);
+	WARN_ON(ret);
 	ret = register_trace_block_rq_insert(blk_add_trace_rq_insert, NULL);
 	WARN_ON(ret);
 	ret = register_trace_block_rq_issue(blk_add_trace_rq_issue, NULL);
@@ -1018,6 +1028,7 @@ static void blk_unregister_tracepoints(void)
 	unregister_trace_block_rq_requeue(blk_add_trace_rq_requeue, NULL);
 	unregister_trace_block_rq_issue(blk_add_trace_rq_issue, NULL);
 	unregister_trace_block_rq_insert(blk_add_trace_rq_insert, NULL);
+	unregister_trace_block_rq_abort(blk_add_trace_rq_abort, NULL);
 
 	tracepoint_synchronize_unregister();
 }
@@ -1662,14 +1673,14 @@ static ssize_t sysfs_blk_trace_attr_store(struct device *dev,
 		goto out;
 
 	if (attr == &dev_attr_act_mask) {
-		if (kstrtoull(buf, 0, &value)) {
+		if (sscanf(buf, "%llx", &value) != 1) {
 			/* Assume it is a list of trace category names */
 			ret = blk_trace_str2mask(buf);
 			if (ret < 0)
 				goto out;
 			value = ret;
 		}
-	} else if (kstrtoull(buf, 0, &value))
+	} else if (sscanf(buf, "%llu", &value) != 1)
 		goto out;
 
 	ret = -ENXIO;

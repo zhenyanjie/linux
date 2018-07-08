@@ -31,9 +31,11 @@
  * Internal function to assign a slot in the object idr and optionally
  * register the object into the idr.
  */
-int __drm_mode_object_add(struct drm_device *dev, struct drm_mode_object *obj,
-			  uint32_t obj_type, bool register_obj,
-			  void (*obj_free_cb)(struct kref *kref))
+int drm_mode_object_get_reg(struct drm_device *dev,
+			    struct drm_mode_object *obj,
+			    uint32_t obj_type,
+			    bool register_obj,
+			    void (*obj_free_cb)(struct kref *kref))
 {
 	int ret;
 
@@ -57,21 +59,23 @@ int __drm_mode_object_add(struct drm_device *dev, struct drm_mode_object *obj,
 }
 
 /**
- * drm_mode_object_add - allocate a new modeset identifier
+ * drm_mode_object_get - allocate a new modeset identifier
  * @dev: DRM device
  * @obj: object pointer, used to generate unique ID
  * @obj_type: object type
  *
  * Create a unique identifier based on @ptr in @dev's identifier space.  Used
- * for tracking modes, CRTCs and connectors.
+ * for tracking modes, CRTCs and connectors. Note that despite the _get postfix
+ * modeset identifiers are _not_ reference counted. Hence don't use this for
+ * reference counted modeset objects like framebuffers.
  *
  * Returns:
  * Zero on success, error code on failure.
  */
-int drm_mode_object_add(struct drm_device *dev,
+int drm_mode_object_get(struct drm_device *dev,
 			struct drm_mode_object *obj, uint32_t obj_type)
 {
-	return __drm_mode_object_add(dev, obj, obj_type, true, NULL);
+	return drm_mode_object_get_reg(dev, obj, obj_type, true, NULL);
 }
 
 void drm_mode_object_register(struct drm_device *dev,
@@ -133,7 +137,7 @@ struct drm_mode_object *__drm_mode_object_find(struct drm_device *dev,
  *
  * This function is used to look up a modeset object. It will acquire a
  * reference for reference counted objects. This reference must be dropped again
- * by callind drm_mode_object_put().
+ * by callind drm_mode_object_unreference().
  */
 struct drm_mode_object *drm_mode_object_find(struct drm_device *dev,
 		uint32_t id, uint32_t type)
@@ -146,38 +150,38 @@ struct drm_mode_object *drm_mode_object_find(struct drm_device *dev,
 EXPORT_SYMBOL(drm_mode_object_find);
 
 /**
- * drm_mode_object_put - release a mode object reference
- * @obj: DRM mode object
+ * drm_mode_object_unreference - decr the object refcnt
+ * @obj: mode_object
  *
  * This function decrements the object's refcount if it is a refcounted modeset
  * object. It is a no-op on any other object. This is used to drop references
- * acquired with drm_mode_object_get().
+ * acquired with drm_mode_object_reference().
  */
-void drm_mode_object_put(struct drm_mode_object *obj)
+void drm_mode_object_unreference(struct drm_mode_object *obj)
 {
 	if (obj->free_cb) {
 		DRM_DEBUG("OBJ ID: %d (%d)\n", obj->id, kref_read(&obj->refcount));
 		kref_put(&obj->refcount, obj->free_cb);
 	}
 }
-EXPORT_SYMBOL(drm_mode_object_put);
+EXPORT_SYMBOL(drm_mode_object_unreference);
 
 /**
- * drm_mode_object_get - acquire a mode object reference
- * @obj: DRM mode object
+ * drm_mode_object_reference - incr the object refcnt
+ * @obj: mode_object
  *
  * This function increments the object's refcount if it is a refcounted modeset
  * object. It is a no-op on any other object. References should be dropped again
- * by calling drm_mode_object_put().
+ * by calling drm_mode_object_unreference().
  */
-void drm_mode_object_get(struct drm_mode_object *obj)
+void drm_mode_object_reference(struct drm_mode_object *obj)
 {
 	if (obj->free_cb) {
 		DRM_DEBUG("OBJ ID: %d (%d)\n", obj->id, kref_read(&obj->refcount));
 		kref_get(&obj->refcount);
 	}
 }
-EXPORT_SYMBOL(drm_mode_object_get);
+EXPORT_SYMBOL(drm_mode_object_reference);
 
 /**
  * drm_object_attach_property - attach a property to a modeset object
@@ -363,7 +367,7 @@ int drm_mode_obj_get_properties_ioctl(struct drm_device *dev, void *data,
 			&arg->count_props);
 
 out_unref:
-	drm_mode_object_put(obj);
+	drm_mode_object_unreference(obj);
 out:
 	drm_modeset_unlock_all(dev);
 	return ret;
@@ -428,7 +432,7 @@ int drm_mode_obj_set_property_ioctl(struct drm_device *dev, void *data,
 	drm_property_change_valid_put(property, ref);
 
 out_unref:
-	drm_mode_object_put(arg_obj);
+	drm_mode_object_unreference(arg_obj);
 out:
 	drm_modeset_unlock_all(dev);
 	return ret;

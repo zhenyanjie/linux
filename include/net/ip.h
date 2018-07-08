@@ -33,8 +33,6 @@
 #include <net/flow.h>
 #include <net/flow_dissector.h>
 
-#define IPV4_MAX_PMTU		65535U		/* RFC 2675, Section 5.1 */
-
 struct sock;
 
 struct inet_skb_parm {
@@ -352,7 +350,7 @@ static inline unsigned int ip_dst_mtu_maybe_forward(const struct dst_entry *dst,
 	    !forwarding)
 		return dst_mtu(dst);
 
-	return min(READ_ONCE(dst->dev->mtu), IP_MAX_MTU);
+	return min(dst->dev->mtu, IP_MAX_MTU);
 }
 
 static inline unsigned int ip_skb_dst_mtu(struct sock *sk,
@@ -364,7 +362,7 @@ static inline unsigned int ip_skb_dst_mtu(struct sock *sk,
 		return ip_dst_mtu_maybe_forward(skb_dst(skb), forwarding);
 	}
 
-	return min(READ_ONCE(skb_dst(skb)->dev->mtu), IP_MAX_MTU);
+	return min(skb_dst(skb)->dev->mtu, IP_MAX_MTU);
 }
 
 u32 ip_idents_reserve(u32 hash, int segs);

@@ -183,12 +183,14 @@ GEM Objects Lifetime
 --------------------
 
 All GEM objects are reference-counted by the GEM core. References can be
-acquired and release by :c:func:`calling drm_gem_object_get()` and
-:c:func:`drm_gem_object_put()` respectively. The caller must hold the
-:c:type:`struct drm_device <drm_device>` struct_mutex lock when calling
-:c:func:`drm_gem_object_get()`. As a convenience, GEM provides
-:c:func:`drm_gem_object_put_unlocked()` functions that can be called without
-holding the lock.
+acquired and release by :c:func:`calling
+drm_gem_object_reference()` and
+:c:func:`drm_gem_object_unreference()` respectively. The caller
+must hold the :c:type:`struct drm_device <drm_device>`
+struct_mutex lock when calling
+:c:func:`drm_gem_object_reference()`. As a convenience, GEM
+provides :c:func:`drm_gem_object_unreference_unlocked()`
+functions that can be called without holding the lock.
 
 When the last reference to a GEM object is released the GEM core calls
 the :c:type:`struct drm_driver <drm_driver>` gem_free_object
@@ -365,11 +367,11 @@ from the client in libdrm.
 GEM Function Reference
 ----------------------
 
-.. kernel-doc:: include/drm/drm_gem.h
-   :internal:
-
 .. kernel-doc:: drivers/gpu/drm/drm_gem.c
    :export:
+
+.. kernel-doc:: include/drm/drm_gem.h
+   :internal:
 
 GEM CMA Helper Functions Reference
 ----------------------------------
@@ -377,11 +379,11 @@ GEM CMA Helper Functions Reference
 .. kernel-doc:: drivers/gpu/drm/drm_gem_cma_helper.c
    :doc: cma helpers
 
-.. kernel-doc:: include/drm/drm_gem_cma_helper.h
-   :internal:
-
 .. kernel-doc:: drivers/gpu/drm/drm_gem_cma_helper.c
    :export:
+
+.. kernel-doc:: include/drm/drm_gem_cma_helper.h
+   :internal:
 
 VMA Offset Manager
 ==================
@@ -389,11 +391,11 @@ VMA Offset Manager
 .. kernel-doc:: drivers/gpu/drm/drm_vma_manager.c
    :doc: vma offset manager
 
-.. kernel-doc:: include/drm/drm_vma_manager.h
-   :internal:
-
 .. kernel-doc:: drivers/gpu/drm/drm_vma_manager.c
    :export:
+
+.. kernel-doc:: include/drm/drm_vma_manager.h
+   :internal:
 
 PRIME Buffer Sharing
 ====================
@@ -449,9 +451,6 @@ PRIME Helper Functions
 PRIME Function References
 -------------------------
 
-.. kernel-doc:: include/drm/drm_prime.h
-   :internal:
-
 .. kernel-doc:: drivers/gpu/drm/drm_prime.c
    :export:
 
@@ -473,26 +472,14 @@ LRU Scan/Eviction Support
 DRM MM Range Allocator Function References
 ------------------------------------------
 
-.. kernel-doc:: include/drm/drm_mm.h
-   :internal:
-
 .. kernel-doc:: drivers/gpu/drm/drm_mm.c
    :export:
+
+.. kernel-doc:: include/drm/drm_mm.h
+   :internal:
 
 DRM Cache Handling
 ==================
 
 .. kernel-doc:: drivers/gpu/drm/drm_cache.c
-   :export:
-
-DRM Sync Objects
-===========================
-
-.. kernel-doc:: drivers/gpu/drm/drm_syncobj.c
-   :doc: Overview
-
-.. kernel-doc:: include/drm/drm_syncobj.h
-   :export:
-
-.. kernel-doc:: drivers/gpu/drm/drm_syncobj.c
    :export:

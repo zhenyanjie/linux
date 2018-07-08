@@ -34,10 +34,6 @@
 
 /* ------------------------------------------------------------------------- */
 
-#define BOARD_CONTROL    0x30
-
-/* ------------------------------------------------------------------------- */
-
 /* Interrupt controller                                     */
 /* How many MSI's are available depends on HW (Min 2 max 8) */
 /* How many are usable also depends on Host platform        */

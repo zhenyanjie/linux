@@ -39,9 +39,9 @@
 #include "vvp_internal.h"
 
 /* debugfs llite mount point registration */
-static const struct file_operations ll_rw_extents_stats_fops;
-static const struct file_operations ll_rw_extents_stats_pp_fops;
-static const struct file_operations ll_rw_offset_stats_fops;
+static struct file_operations ll_rw_extents_stats_fops;
+static struct file_operations ll_rw_extents_stats_pp_fops;
+static struct file_operations ll_rw_offset_stats_fops;
 
 static ssize_t blocksize_show(struct kobject *kobj, struct attribute *attr,
 			      char *buf)
@@ -386,7 +386,7 @@ static ssize_t ll_max_cached_mb_seq_write(struct file *file,
 	struct lu_env *env;
 	long diff = 0;
 	long nrpages = 0;
-	u16 refcheck;
+	int refcheck;
 	long pages_number;
 	int mult;
 	long rc;
@@ -1308,7 +1308,7 @@ static void ll_display_extents_info(struct ll_rw_extents_info *io_extents,
 			   r, pct(r, read_tot), pct(read_cum, read_tot),
 			   w, pct(w, write_tot), pct(write_cum, write_tot));
 		start = end;
-		if (start == 1024) {
+		if (start == 1 << 10) {
 			start = 1;
 			units += 10;
 			unitp++;

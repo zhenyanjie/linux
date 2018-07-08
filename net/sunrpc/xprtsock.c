@@ -1624,8 +1624,6 @@ static void xs_tcp_state_change(struct sock *sk)
 		if (test_and_clear_bit(XPRT_SOCK_CONNECTING,
 					&transport->sock_state))
 			xprt_clear_connecting(xprt);
-		if (sk->sk_err)
-			xprt_wake_pending_tasks(xprt, -sk->sk_err);
 		xs_sock_mark_closed(xprt);
 	}
  out:
@@ -2434,12 +2432,7 @@ static void xs_tcp_setup_socket(struct work_struct *work)
 	case -ENETUNREACH:
 	case -EADDRINUSE:
 	case -ENOBUFS:
-		/*
-		 * xs_tcp_force_close() wakes tasks with -EIO.
-		 * We need to wake them first to ensure the
-		 * correct error code.
-		 */
-		xprt_wake_pending_tasks(xprt, status);
+		/* retry with existing socket, after a delay */
 		xs_tcp_force_close(xprt);
 		goto out;
 	}

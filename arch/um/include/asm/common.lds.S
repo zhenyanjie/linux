@@ -15,7 +15,7 @@
   PROVIDE (_unprotected_end = .);
 
   . = ALIGN(4096);
-  NOTES
+  .note : { *(.note.*) }
   EXCEPTION_TABLE(0)
 
   BUG_TABLE

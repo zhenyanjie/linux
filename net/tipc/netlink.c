@@ -268,8 +268,7 @@ int tipc_nlmsg_parse(const struct nlmsghdr *nlh, struct nlattr ***attr)
 	if (!*attr)
 		return -EOPNOTSUPP;
 
-	return nlmsg_parse(nlh, GENL_HDRLEN, *attr, maxattr, tipc_nl_policy,
-			   NULL);
+	return nlmsg_parse(nlh, GENL_HDRLEN, *attr, maxattr, tipc_nl_policy);
 }
 
 int __init tipc_netlink_start(void)

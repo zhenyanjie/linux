@@ -344,7 +344,7 @@ EXPORT_SYMBOL_GPL(platform_device_add_data);
  * platform device is released.
  */
 int platform_device_add_properties(struct platform_device *pdev,
-				   const struct property_entry *properties)
+				   struct property_entry *properties)
 {
 	return device_add_properties(&pdev->dev, properties);
 }
@@ -847,7 +847,7 @@ static ssize_t modalias_show(struct device *dev, struct device_attribute *a,
 	struct platform_device	*pdev = to_platform_device(dev);
 	int len;
 
-	len = of_device_modalias(dev, buf, PAGE_SIZE);
+	len = of_device_get_modalias(dev, buf, PAGE_SIZE -1);
 	if (len != -ENODEV)
 		return len;
 
@@ -868,8 +868,7 @@ static ssize_t driver_override_store(struct device *dev,
 	struct platform_device *pdev = to_platform_device(dev);
 	char *driver_override, *old, *cp;
 
-	/* We need to keep extra room for a newline */
-	if (count >= (PAGE_SIZE - 1))
+	if (count > PATH_MAX)
 		return -EINVAL;
 
 	driver_override = kstrndup(buf, count, GFP_KERNEL);

@@ -209,7 +209,7 @@ static struct mcast_group *mcast_insert(struct mlx4_ib_demux_ctx *ctx,
 static int send_mad_to_wire(struct mlx4_ib_demux_ctx *ctx, struct ib_mad *mad)
 {
 	struct mlx4_ib_dev *dev = ctx->dev;
-	struct rdma_ah_attr	ah_attr;
+	struct ib_ah_attr	ah_attr;
 	unsigned long flags;
 
 	spin_lock_irqsave(&dev->sm_lock, flags);
@@ -231,20 +231,20 @@ static int send_mad_to_slave(int slave, struct mlx4_ib_demux_ctx *ctx,
 	struct mlx4_ib_dev *dev = ctx->dev;
 	struct ib_mad_agent *agent = dev->send_agent[ctx->port - 1][1];
 	struct ib_wc wc;
-	struct rdma_ah_attr ah_attr;
+	struct ib_ah_attr ah_attr;
 
 	/* Our agent might not yet be registered when mads start to arrive */
 	if (!agent)
 		return -EAGAIN;
 
-	rdma_query_ah(dev->sm_ah[ctx->port - 1], &ah_attr);
+	ib_query_ah(dev->sm_ah[ctx->port - 1], &ah_attr);
 
 	if (ib_find_cached_pkey(&dev->ib_dev, ctx->port, IB_DEFAULT_PKEY_FULL, &wc.pkey_index))
 		return -EINVAL;
 	wc.sl = 0;
 	wc.dlid_path_bits = 0;
 	wc.port_num = ctx->port;
-	wc.slid = rdma_ah_get_dlid(&ah_attr);  /* opensm lid */
+	wc.slid = ah_attr.dlid;  /* opensm lid */
 	wc.src_qp = 1;
 	return mlx4_ib_send_to_slave(dev, slave, ctx->port, IB_QPT_GSI, &wc, NULL, mad);
 }
@@ -1091,7 +1091,7 @@ static void _mlx4_ib_mcg_port_cleanup(struct mlx4_ib_demux_ctx *ctx, int destroy
 		if (!count)
 			break;
 
-		usleep_range(1000, 2000);
+		msleep(1);
 	} while (time_after(end, jiffies));
 
 	flush_workqueue(ctx->mcg_wq);

@@ -693,7 +693,7 @@ static void serial_omap_set_mctrl(struct uart_port *port, unsigned int mctrl)
 	if ((mctrl & TIOCM_RTS) && (port->status & UPSTAT_AUTORTS))
 		up->efr |= UART_EFR_RTS;
 	else
-		up->efr &= ~UART_EFR_RTS;
+		up->efr &= UART_EFR_RTS;
 	serial_out(up, UART_EFR, up->efr);
 	serial_out(up, UART_LCR, lcr);
 
@@ -1597,9 +1597,6 @@ static struct omap_uart_port_info *of_get_uart_port_info(struct device *dev)
 
 	of_property_read_u32(dev->of_node, "clock-frequency",
 					 &omap_up_info->uartclk);
-
-	omap_up_info->flags = UPF_BOOT_AUTOCONF;
-
 	return omap_up_info;
 }
 

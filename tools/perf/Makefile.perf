@@ -226,7 +226,7 @@ endif
 
 ifeq ($(config),0)
 include $(srctree)/tools/scripts/Makefile.arch
--include arch/$(SRCARCH)/Makefile
+-include arch/$(ARCH)/Makefile
 endif
 
 # The FEATURE_DUMP_EXPORT holds location of the actual

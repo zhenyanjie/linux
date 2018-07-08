@@ -11,7 +11,6 @@
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
 #include <linux/atomic.h>
-#include <linux/refcount.h>
 #include <linux/netlink.h>
 #include <linux/rculist.h>
 #include <linux/slab.h>
@@ -33,7 +32,7 @@ struct nf_acct {
 	atomic64_t		bytes;
 	unsigned long		flags;
 	struct list_head	head;
-	refcount_t		refcnt;
+	atomic_t		refcnt;
 	char			name[NFACCT_NAME_MAX];
 	struct rcu_head		rcu_head;
 	char			data[0];
@@ -49,8 +48,7 @@ struct nfacct_filter {
 
 static int nfnl_acct_new(struct net *net, struct sock *nfnl,
 			 struct sk_buff *skb, const struct nlmsghdr *nlh,
-			 const struct nlattr * const tb[],
-			 struct netlink_ext_ack *extack)
+			 const struct nlattr * const tb[])
 {
 	struct nf_acct *nfacct, *matching = NULL;
 	char *acct_name;
@@ -125,7 +123,7 @@ static int nfnl_acct_new(struct net *net, struct sock *nfnl,
 		atomic64_set(&nfacct->pkts,
 			     be64_to_cpu(nla_get_be64(tb[NFACCT_PKTS])));
 	}
-	refcount_set(&nfacct->refcnt, 1);
+	atomic_set(&nfacct->refcnt, 1);
 	list_add_tail_rcu(&nfacct->head, &net->nfnl_acct_list);
 	return 0;
 }
@@ -140,7 +138,7 @@ nfnl_acct_fill_info(struct sk_buff *skb, u32 portid, u32 seq, u32 type,
 	u64 pkts, bytes;
 	u32 old_flags;
 
-	event = nfnl_msg_type(NFNL_SUBSYS_ACCT, event);
+	event |= NFNL_SUBSYS_ACCT << 8;
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*nfmsg), flags);
 	if (nlh == NULL)
 		goto nlmsg_failure;
@@ -168,7 +166,7 @@ nfnl_acct_fill_info(struct sk_buff *skb, u32 portid, u32 seq, u32 type,
 			 NFACCT_PAD) ||
 	    nla_put_be64(skb, NFACCT_BYTES, cpu_to_be64(bytes),
 			 NFACCT_PAD) ||
-	    nla_put_be32(skb, NFACCT_USE, htonl(refcount_read(&acct->refcnt))))
+	    nla_put_be32(skb, NFACCT_USE, htonl(atomic_read(&acct->refcnt))))
 		goto nla_put_failure;
 	if (acct->flags & NFACCT_F_QUOTA) {
 		u64 *quota = (u64 *)acct->data;
@@ -245,8 +243,7 @@ nfacct_filter_alloc(const struct nlattr * const attr)
 	struct nlattr *tb[NFACCT_FILTER_MAX + 1];
 	int err;
 
-	err = nla_parse_nested(tb, NFACCT_FILTER_MAX, attr, filter_policy,
-			       NULL);
+	err = nla_parse_nested(tb, NFACCT_FILTER_MAX, attr, filter_policy);
 	if (err < 0)
 		return ERR_PTR(err);
 
@@ -265,8 +262,7 @@ nfacct_filter_alloc(const struct nlattr * const attr)
 
 static int nfnl_acct_get(struct net *net, struct sock *nfnl,
 			 struct sk_buff *skb, const struct nlmsghdr *nlh,
-			 const struct nlattr * const tb[],
-			 struct netlink_ext_ack *extack)
+			 const struct nlattr * const tb[])
 {
 	int ret = -ENOENT;
 	struct nf_acct *cur;
@@ -333,7 +329,7 @@ static int nfnl_acct_try_del(struct nf_acct *cur)
 	/* We want to avoid races with nfnl_acct_put. So only when the current
 	 * refcnt is 1, we decrease it to 0.
 	 */
-	if (refcount_dec_if_one(&cur->refcnt)) {
+	if (atomic_cmpxchg(&cur->refcnt, 1, 0) == 1) {
 		/* We are protected by nfnl mutex. */
 		list_del_rcu(&cur->head);
 		kfree_rcu(cur, rcu_head);
@@ -345,8 +341,7 @@ static int nfnl_acct_try_del(struct nf_acct *cur)
 
 static int nfnl_acct_del(struct net *net, struct sock *nfnl,
 			 struct sk_buff *skb, const struct nlmsghdr *nlh,
-			 const struct nlattr * const tb[],
-			 struct netlink_ext_ack *extack)
+			 const struct nlattr * const tb[])
 {
 	struct nf_acct *cur, *tmp;
 	int ret = -ENOENT;
@@ -418,7 +413,7 @@ struct nf_acct *nfnl_acct_find_get(struct net *net, const char *acct_name)
 		if (!try_module_get(THIS_MODULE))
 			goto err;
 
-		if (!refcount_inc_not_zero(&cur->refcnt)) {
+		if (!atomic_inc_not_zero(&cur->refcnt)) {
 			module_put(THIS_MODULE);
 			goto err;
 		}
@@ -434,7 +429,7 @@ EXPORT_SYMBOL_GPL(nfnl_acct_find_get);
 
 void nfnl_acct_put(struct nf_acct *acct)
 {
-	if (refcount_dec_and_test(&acct->refcnt))
+	if (atomic_dec_and_test(&acct->refcnt))
 		kfree_rcu(acct, rcu_head);
 
 	module_put(THIS_MODULE);
@@ -507,7 +502,7 @@ static void __net_exit nfnl_acct_net_exit(struct net *net)
 	list_for_each_entry_safe(cur, tmp, &net->nfnl_acct_list, head) {
 		list_del_rcu(&cur->head);
 
-		if (refcount_dec_and_test(&cur->refcnt))
+		if (atomic_dec_and_test(&cur->refcnt))
 			kfree_rcu(cur, rcu_head);
 	}
 }

@@ -25,7 +25,6 @@
 #include <net/xfrm.h>
 #include <net/tcp.h>
 #include <net/sock_reuseport.h>
-#include <net/addrconf.h>
 
 #ifdef INET_CSK_DEBUG
 const char inet_csk_timer_bug_msg[] = "inet_csk BUG: unknown timer value\n";
@@ -537,10 +536,8 @@ struct dst_entry *inet_csk_route_req(const struct sock *sk,
 {
 	const struct inet_request_sock *ireq = inet_rsk(req);
 	struct net *net = read_pnet(&ireq->ireq_net);
-	struct ip_options_rcu *opt;
+	struct ip_options_rcu *opt = ireq->opt;
 	struct rtable *rt;
-
-	opt = ireq_opt_deref(ireq);
 
 	flowi4_init_output(fl4, ireq->ir_iif, ireq->ir_mark,
 			   RT_CONN_FLAGS(sk), RT_SCOPE_UNIVERSE,
@@ -575,9 +572,10 @@ struct dst_entry *inet_csk_route_child_sock(const struct sock *sk,
 	struct flowi4 *fl4;
 	struct rtable *rt;
 
-	opt = rcu_dereference(ireq->ireq_opt);
 	fl4 = &newinet->cork.fl.u.ip4;
 
+	rcu_read_lock();
+	opt = rcu_dereference(newinet->inet_opt);
 	flowi4_init_output(fl4, ireq->ir_iif, ireq->ir_mark,
 			   RT_CONN_FLAGS(sk), RT_SCOPE_UNIVERSE,
 			   sk->sk_protocol, inet_sk_flowi_flags(sk),
@@ -590,11 +588,13 @@ struct dst_entry *inet_csk_route_child_sock(const struct sock *sk,
 		goto no_route;
 	if (opt && opt->opt.is_strictroute && rt->rt_uses_gateway)
 		goto route_err;
+	rcu_read_unlock();
 	return &rt->dst;
 
 route_err:
 	ip_rt_put(rt);
 no_route:
+	rcu_read_unlock();
 	__IP_INC_STATS(net, IPSTATS_MIB_OUTNOROUTES);
 	return NULL;
 }
@@ -755,7 +755,7 @@ static void reqsk_queue_hash_req(struct request_sock *req,
 	 * are committed to memory and refcnt initialized.
 	 */
 	smp_wmb();
-	refcount_set(&req->rsk_refcnt, 2 + 1);
+	atomic_set(&req->rsk_refcnt, 2 + 1);
 }
 
 void inet_csk_reqsk_queue_hash_add(struct sock *sk, struct request_sock *req,
@@ -789,6 +789,7 @@ struct sock *inet_csk_clone_lock(const struct sock *sk,
 		inet_sk(newsk)->inet_dport = inet_rsk(req)->ir_rmt_port;
 		inet_sk(newsk)->inet_num = inet_rsk(req)->ir_num;
 		inet_sk(newsk)->inet_sport = htons(inet_rsk(req)->ir_num);
+		newsk->sk_write_space = sk_stream_write_space;
 
 		/* listeners have SOCK_RCU_FREE, not the children */
 		sock_reset_flag(newsk, SOCK_RCU_FREE);

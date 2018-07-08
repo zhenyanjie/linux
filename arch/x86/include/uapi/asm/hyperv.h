@@ -34,10 +34,16 @@
 #define HV_X64_MSR_REFERENCE_TSC		0x40000021
 
 /*
- * There is a single feature flag that signifies if the partition has access
- * to MSRs with local APIC and TSC frequencies.
+ * There is a single feature flag that signifies the presence of the MSR
+ * that can be used to retrieve both the local APIC Timer frequency as
+ * well as the TSC frequency.
  */
-#define HV_X64_ACCESS_FREQUENCY_MSRS		(1 << 11)
+
+/* Local APIC timer frequency MSR (HV_X64_MSR_APIC_FREQUENCY) is available */
+#define HV_X64_MSR_APIC_FREQUENCY_AVAILABLE (1 << 11)
+
+/* TSC frequency MSR (HV_X64_MSR_TSC_FREQUENCY) is available */
+#define HV_X64_MSR_TSC_FREQUENCY_AVAILABLE (1 << 11)
 
 /*
  * Basic SynIC MSRs (HV_X64_MSR_SCONTROL through HV_X64_MSR_EOM
@@ -66,9 +72,6 @@
   * HV_X64_MSR_STATS_VP_INTERNAL_PAGE) available
   */
 #define HV_X64_MSR_STAT_PAGES_AVAILABLE		(1 << 8)
-
-/* Frequency MSRs available */
-#define HV_FEATURE_FREQUENCY_MSRS_AVAILABLE	(1 << 8)
 
 /* Crash MSR available */
 #define HV_FEATURE_GUEST_CRASH_MSR_AVAILABLE (1 << 10)
@@ -121,7 +124,7 @@
   * Recommend using hypercall for address space switches rather
   * than MOV to CR3 instruction
   */
-#define HV_X64_AS_SWITCH_RECOMMENDED		(1 << 0)
+#define HV_X64_MWAIT_RECOMMENDED		(1 << 0)
 /* Recommend using hypercall for local TLB flushes rather
  * than INVLPG or MOV to CR3 instructions */
 #define HV_X64_LOCAL_TLB_FLUSH_RECOMMENDED	(1 << 1)
@@ -143,17 +146,6 @@
  * timely delivery of external interrupts
  */
 #define HV_X64_RELAXED_TIMING_RECOMMENDED	(1 << 5)
-
-/*
- * Virtual APIC support
- */
-#define HV_X64_DEPRECATING_AEOI_RECOMMENDED	(1 << 9)
-
-/*
- * HV_VP_SET available
- */
-#define HV_X64_EX_PROCESSOR_MASKS_RECOMMENDED	(1 << 11)
-
 
 /*
  * Crash notification flag.

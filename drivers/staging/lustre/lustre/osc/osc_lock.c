@@ -167,8 +167,6 @@ static __u64 osc_enq2ldlm_flags(__u32 enqflags)
 		result |= LDLM_FL_AST_DISCARD_DATA;
 	if (enqflags & CEF_PEEK)
 		result |= LDLM_FL_TEST_LOCK;
-	if (enqflags & CEF_LOCK_MATCH)
-		result |= LDLM_FL_MATCH_LOCK;
 	return result;
 }
 
@@ -297,7 +295,7 @@ static int osc_lock_upcall(void *cookie, struct lustre_handle *lockh,
 	struct cl_lock_slice *slice = &oscl->ols_cl;
 	struct lu_env *env;
 	int rc;
-	u16 refcheck;
+	int refcheck;
 
 	env = cl_env_get(&refcheck);
 	/* should never happen, similar to osc_ldlm_blocking_ast(). */
@@ -349,7 +347,7 @@ static int osc_lock_upcall_agl(void *cookie, struct lustre_handle *lockh,
 	struct osc_object *osc = cookie;
 	struct ldlm_lock *dlmlock;
 	struct lu_env *env;
-	u16 refcheck;
+	int refcheck;
 
 	env = cl_env_get(&refcheck);
 	LASSERT(!IS_ERR(env));
@@ -384,7 +382,7 @@ static int osc_lock_flush(struct osc_object *obj, pgoff_t start, pgoff_t end,
 			  enum cl_lock_mode mode, int discard)
 {
 	struct lu_env *env;
-	u16 refcheck;
+	int refcheck;
 	int rc = 0;
 	int rc2 = 0;
 
@@ -538,7 +536,7 @@ static int osc_ldlm_blocking_ast(struct ldlm_lock *dlmlock,
 	}
 	case LDLM_CB_CANCELING: {
 		struct lu_env *env;
-		u16 refcheck;
+		int refcheck;
 
 		/*
 		 * This can be called in the context of outer IO, e.g.,
@@ -575,7 +573,7 @@ static int osc_ldlm_glimpse_ast(struct ldlm_lock *dlmlock, void *data)
 	struct req_capsule *cap;
 	struct cl_object *obj = NULL;
 	int result;
-	u16 refcheck;
+	int refcheck;
 
 	LASSERT(lustre_msg_get_opc(req->rq_reqmsg) == LDLM_GL_CALLBACK);
 
@@ -686,7 +684,7 @@ unsigned long osc_ldlm_weigh_ast(struct ldlm_lock *dlmlock)
 	struct osc_lock		*oscl;
 	unsigned long            weight;
 	bool			 found = false;
-	u16 refcheck;
+	int refcheck;
 
 	might_sleep();
 	/*
@@ -840,14 +838,13 @@ static void osc_lock_wake_waiters(const struct lu_env *env,
 	spin_unlock(&oscl->ols_lock);
 }
 
-static int osc_lock_enqueue_wait(const struct lu_env *env,
-				 struct osc_object *obj,
-				 struct osc_lock *oscl)
+static void osc_lock_enqueue_wait(const struct lu_env *env,
+				  struct osc_object *obj,
+				  struct osc_lock *oscl)
 {
 	struct osc_lock *tmp_oscl;
 	struct cl_lock_descr *need = &oscl->ols_cl.cls_lock->cll_descr;
 	struct cl_sync_io *waiter = &osc_env_info(env)->oti_anchor;
-	int rc = 0;
 
 	spin_lock(&obj->oo_ol_spin);
 	list_add_tail(&oscl->ols_nextlock_oscobj, &obj->oo_ol_list);
@@ -884,17 +881,13 @@ restart:
 		spin_unlock(&tmp_oscl->ols_lock);
 
 		spin_unlock(&obj->oo_ol_spin);
-		rc = cl_sync_io_wait(env, waiter, 0);
-		spin_lock(&obj->oo_ol_spin);
-		if (rc < 0)
-			break;
+		(void)cl_sync_io_wait(env, waiter, 0);
 
+		spin_lock(&obj->oo_ol_spin);
 		oscl->ols_owner = NULL;
 		goto restart;
 	}
 	spin_unlock(&obj->oo_ol_spin);
-
-	return rc;
 }
 
 /**
@@ -942,9 +935,7 @@ static int osc_lock_enqueue(const struct lu_env *env,
 		goto enqueue_base;
 	}
 
-	result = osc_lock_enqueue_wait(env, osc, oscl);
-	if (result < 0)
-		goto out;
+	osc_lock_enqueue_wait(env, osc, oscl);
 
 	/* we can grant lockless lock right after all conflicting locks
 	 * are canceled.
@@ -969,6 +960,7 @@ enqueue_base:
 	 * osc_lock.
 	 */
 	ostid_build_res_name(&osc->oo_oinfo->loi_oi, resname);
+	osc_lock_build_einfo(env, lock, osc, &oscl->ols_einfo);
 	osc_lock_build_policy(env, lock, policy);
 	if (oscl->ols_agl) {
 		oscl->ols_einfo.ei_cbdata = NULL;
@@ -983,7 +975,18 @@ enqueue_base:
 				  upcall, cookie,
 				  &oscl->ols_einfo, PTLRPCD_SET, async,
 				  oscl->ols_agl);
-	if (!result) {
+	if (result != 0) {
+		oscl->ols_state = OLS_CANCELLED;
+		osc_lock_wake_waiters(env, osc, oscl);
+
+		/* hide error for AGL lock. */
+		if (oscl->ols_agl) {
+			cl_object_put(env, osc2cl(osc));
+			result = 0;
+		}
+		if (anchor)
+			cl_sync_io_note(env, anchor, result);
+	} else {
 		if (osc_lock_is_lockless(oscl)) {
 			oio->oi_lockless = 1;
 		} else if (!async) {
@@ -991,18 +994,6 @@ enqueue_base:
 			LASSERT(oscl->ols_hold);
 			LASSERT(oscl->ols_dlmlock);
 		}
-	} else if (oscl->ols_agl) {
-		cl_object_put(env, osc2cl(osc));
-		result = 0;
-	}
-
-out:
-	if (result < 0) {
-		oscl->ols_state = OLS_CANCELLED;
-		osc_lock_wake_waiters(env, osc, oscl);
-
-		if (anchor)
-			cl_sync_io_note(env, anchor, result);
 	}
 	return result;
 }
@@ -1166,7 +1157,6 @@ int osc_lock_init(const struct lu_env *env,
 		oscl->ols_flags |= LDLM_FL_BLOCK_GRANTED;
 		oscl->ols_glimpse = 1;
 	}
-	osc_lock_build_einfo(env, lock, cl2osc(obj), &oscl->ols_einfo);
 
 	cl_lock_slice_add(lock, &oscl->ols_cl, obj, &osc_lock_ops);
 

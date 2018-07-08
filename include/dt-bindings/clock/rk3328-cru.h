@@ -97,7 +97,6 @@
 #define SCLK_MAC2IO_SRC		99
 #define SCLK_MAC2IO		100
 #define SCLK_MAC2PHY		101
-#define SCLK_MAC2IO_EXT		102
 
 /* dclk gates */
 #define DCLK_LCDC		120

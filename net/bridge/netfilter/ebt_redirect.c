@@ -47,7 +47,7 @@ static int ebt_redirect_tg_check(const struct xt_tgchk_param *par)
 	    (strcmp(par->table, "broute") != 0 ||
 	    hook_mask & ~(1 << NF_BR_BROUTING)))
 		return -EINVAL;
-	if (ebt_invalid_target(info->target))
+	if (INVALID_TARGET)
 		return -EINVAL;
 	return 0;
 }

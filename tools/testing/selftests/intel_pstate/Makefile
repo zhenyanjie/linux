@@ -1,5 +1,5 @@
 CFLAGS := $(CFLAGS) -Wall -D_GNU_SOURCE
-LDLIBS := $(LDLIBS) -lm
+LDFLAGS := $(LDFLAGS) -lm
 
 TEST_GEN_FILES := msr aperf
 

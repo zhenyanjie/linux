@@ -96,18 +96,15 @@ void nf_queue_entry_get_refs(struct nf_queue_entry *entry)
 }
 EXPORT_SYMBOL_GPL(nf_queue_entry_get_refs);
 
-unsigned int nf_queue_nf_hook_drop(struct net *net)
+void nf_queue_nf_hook_drop(struct net *net, const struct nf_hook_entry *entry)
 {
 	const struct nf_queue_handler *qh;
-	unsigned int count = 0;
 
 	rcu_read_lock();
 	qh = rcu_dereference(net->nf.queue_handler);
 	if (qh)
-		count = qh->nf_hook_drop(net);
+		qh->nf_hook_drop(net, entry);
 	rcu_read_unlock();
-
-	return count;
 }
 
 static int __nf_queue(struct sk_buff *skb, const struct nf_hook_state *state,

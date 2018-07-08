@@ -81,7 +81,7 @@ static void bch_data_insert_keys(struct closure *cl)
 	if (ret == -ESRCH) {
 		op->replace_collision = true;
 	} else if (ret) {
-		op->status		= BLK_STS_RESOURCE;
+		op->error		= -ENOMEM;
 		op->insert_data_done	= true;
 	}
 
@@ -178,17 +178,17 @@ static void bch_data_insert_endio(struct bio *bio)
 	struct closure *cl = bio->bi_private;
 	struct data_insert_op *op = container_of(cl, struct data_insert_op, cl);
 
-	if (bio->bi_status) {
+	if (bio->bi_error) {
 		/* TODO: We could try to recover from this. */
 		if (op->writeback)
-			op->status = bio->bi_status;
+			op->error = bio->bi_error;
 		else if (!op->replace)
 			set_closure_fn(cl, bch_data_insert_error, op->wq);
 		else
 			set_closure_fn(cl, NULL, NULL);
 	}
 
-	bch_bbio_endio(op->c, bio, bio->bi_status, "writing data to cache");
+	bch_bbio_endio(op->c, bio, bio->bi_error, "writing data to cache");
 }
 
 static void bch_data_insert_start(struct closure *cl)
@@ -196,11 +196,11 @@ static void bch_data_insert_start(struct closure *cl)
 	struct data_insert_op *op = container_of(cl, struct data_insert_op, cl);
 	struct bio *bio = op->bio, *n;
 
-	if (op->bypass)
-		return bch_data_invalidate(cl);
-
 	if (atomic_sub_return(bio_sectors(bio), &op->c->sectors_to_gc) < 0)
 		wake_up_gc(op->c);
+
+	if (op->bypass)
+		return bch_data_invalidate(cl);
 
 	/*
 	 * Journal writes are marked REQ_PREFLUSH; if the original write was a
@@ -400,6 +400,12 @@ static bool check_should_bypass(struct cached_dev *dc, struct bio *bio)
 	if (!congested && !dc->sequential_cutoff)
 		goto rescale;
 
+	if (!congested &&
+	    mode == CACHE_MODE_WRITEBACK &&
+	    op_is_write(bio->bi_opf) &&
+	    op_is_sync(bio->bi_opf))
+		goto rescale;
+
 	spin_lock(&dc->io_lock);
 
 	hlist_for_each_entry(i, iohash(dc, bio->bi_iter.bi_sector), hash)
@@ -482,15 +488,15 @@ static void bch_cache_read_endio(struct bio *bio)
 	 * from the backing device.
 	 */
 
-	if (bio->bi_status)
-		s->iop.status = bio->bi_status;
+	if (bio->bi_error)
+		s->iop.error = bio->bi_error;
 	else if (!KEY_DIRTY(&b->key) &&
 		 ptr_stale(s->iop.c, &b->key, 0)) {
 		atomic_long_inc(&s->iop.c->cache_read_races);
-		s->iop.status = BLK_STS_IOERR;
+		s->iop.error = -EINTR;
 	}
 
-	bch_bbio_endio(s->iop.c, bio, bio->bi_status, "reading from cache");
+	bch_bbio_endio(s->iop.c, bio, bio->bi_error, "reading from cache");
 }
 
 /*
@@ -587,9 +593,9 @@ static void request_endio(struct bio *bio)
 {
 	struct closure *cl = bio->bi_private;
 
-	if (bio->bi_status) {
+	if (bio->bi_error) {
 		struct search *s = container_of(cl, struct search, cl);
-		s->iop.status = bio->bi_status;
+		s->iop.error = bio->bi_error;
 		/* Only cache read errors are recoverable */
 		s->recoverable = false;
 	}
@@ -605,7 +611,7 @@ static void bio_complete(struct search *s)
 				    &s->d->disk->part0, s->start_time);
 
 		trace_bcache_request_end(s->d, s->orig_bio);
-		s->orig_bio->bi_status = s->iop.status;
+		s->orig_bio->bi_error = s->iop.error;
 		bio_endio(s->orig_bio);
 		s->orig_bio = NULL;
 	}
@@ -658,7 +664,7 @@ static inline struct search *search_alloc(struct bio *bio,
 	s->iop.inode		= d->id;
 	s->iop.write_point	= hash_long((unsigned long) current, 16);
 	s->iop.write_prio	= 0;
-	s->iop.status		= 0;
+	s->iop.error		= 0;
 	s->iop.flags		= 0;
 	s->iop.flush_journal	= op_is_flush(bio->bi_opf);
 	s->iop.wq		= bcache_wq;
@@ -701,7 +707,7 @@ static void cached_dev_read_error(struct closure *cl)
 		/* Retry from the backing device: */
 		trace_bcache_read_retry(s->orig_bio);
 
-		s->iop.status = 0;
+		s->iop.error = 0;
 		do_bio_hook(s, s->orig_bio);
 
 		/* XXX: invalidate cache */
@@ -761,7 +767,7 @@ static void cached_dev_read_done_bh(struct closure *cl)
 				  !s->cache_miss, s->iop.bypass);
 	trace_bcache_read(s->orig_bio, !s->cache_miss, s->iop.bypass);
 
-	if (s->iop.status)
+	if (s->iop.error)
 		continue_at_nobarrier(cl, cached_dev_read_error, bcache_wq);
 	else if (s->iop.bio || verify(dc, &s->bio.bio))
 		continue_at_nobarrier(cl, cached_dev_read_done, bcache_wq);

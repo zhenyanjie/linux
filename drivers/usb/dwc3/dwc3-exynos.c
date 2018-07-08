@@ -125,16 +125,12 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 		dev_err(dev, "couldn't get clock\n");
 		return -EINVAL;
 	}
-	ret = clk_prepare_enable(exynos->clk);
-	if (ret)
-		return ret;
+	clk_prepare_enable(exynos->clk);
 
 	exynos->susp_clk = devm_clk_get(dev, "usbdrd30_susp_clk");
 	if (IS_ERR(exynos->susp_clk))
 		exynos->susp_clk = NULL;
-	ret = clk_prepare_enable(exynos->susp_clk);
-	if (ret)
-		goto susp_clk_err;
+	clk_prepare_enable(exynos->susp_clk);
 
 	if (of_device_is_compatible(node, "samsung,exynos7-dwusb3")) {
 		exynos->axius_clk = devm_clk_get(dev, "usbdrd30_axius_clk");
@@ -143,9 +139,7 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 			ret = -ENODEV;
 			goto axius_clk_err;
 		}
-		ret = clk_prepare_enable(exynos->axius_clk);
-		if (ret)
-			goto axius_clk_err;
+		clk_prepare_enable(exynos->axius_clk);
 	} else {
 		exynos->axius_clk = NULL;
 	}
@@ -153,57 +147,56 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 	exynos->vdd33 = devm_regulator_get(dev, "vdd33");
 	if (IS_ERR(exynos->vdd33)) {
 		ret = PTR_ERR(exynos->vdd33);
-		goto vdd33_err;
+		goto err2;
 	}
 	ret = regulator_enable(exynos->vdd33);
 	if (ret) {
 		dev_err(dev, "Failed to enable VDD33 supply\n");
-		goto vdd33_err;
+		goto err2;
 	}
 
 	exynos->vdd10 = devm_regulator_get(dev, "vdd10");
 	if (IS_ERR(exynos->vdd10)) {
 		ret = PTR_ERR(exynos->vdd10);
-		goto vdd10_err;
+		goto err3;
 	}
 	ret = regulator_enable(exynos->vdd10);
 	if (ret) {
 		dev_err(dev, "Failed to enable VDD10 supply\n");
-		goto vdd10_err;
+		goto err3;
 	}
 
 	ret = dwc3_exynos_register_phys(exynos);
 	if (ret) {
 		dev_err(dev, "couldn't register PHYs\n");
-		goto phys_err;
+		goto err4;
 	}
 
 	if (node) {
 		ret = of_platform_populate(node, NULL, NULL, dev);
 		if (ret) {
 			dev_err(dev, "failed to add dwc3 core\n");
-			goto populate_err;
+			goto err5;
 		}
 	} else {
 		dev_err(dev, "no device node, failed to add dwc3 core\n");
 		ret = -ENODEV;
-		goto populate_err;
+		goto err5;
 	}
 
 	return 0;
 
-populate_err:
+err5:
 	platform_device_unregister(exynos->usb2_phy);
 	platform_device_unregister(exynos->usb3_phy);
-phys_err:
+err4:
 	regulator_disable(exynos->vdd10);
-vdd10_err:
+err3:
 	regulator_disable(exynos->vdd33);
-vdd33_err:
+err2:
 	clk_disable_unprepare(exynos->axius_clk);
 axius_clk_err:
 	clk_disable_unprepare(exynos->susp_clk);
-susp_clk_err:
 	clk_disable_unprepare(exynos->clk);
 	return ret;
 }

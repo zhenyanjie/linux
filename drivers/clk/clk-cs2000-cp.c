@@ -36,34 +36,14 @@
 
 /* DEVICE_CTRL */
 #define PLL_UNLOCK	(1 << 7)
-#define AUXOUTDIS	(1 << 1)
-#define CLKOUTDIS	(1 << 0)
 
 /* DEVICE_CFG1 */
 #define RSEL(x)		(((x) & 0x3) << 3)
 #define RSEL_MASK	RSEL(0x3)
 #define ENDEV1		(0x1)
 
-/* DEVICE_CFG2 */
-#define AUTORMOD	(1 << 3)
-#define LOCKCLK(x)	(((x) & 0x3) << 1)
-#define LOCKCLK_MASK	LOCKCLK(0x3)
-#define FRACNSRC_MASK	(1 << 0)
-#define FRACNSRC_STATIC		(0 << 0)
-#define FRACNSRC_DYNAMIC	(1 << 1)
-
 /* GLOBAL_CFG */
 #define ENDEV2		(0x1)
-
-/* FUNC_CFG1 */
-#define CLKSKIPEN	(1 << 7)
-#define REFCLKDIV(x)	(((x) & 0x3) << 3)
-#define REFCLKDIV_MASK	REFCLKDIV(0x3)
-
-/* FUNC_CFG2 */
-#define LFRATIO_MASK	(1 << 3)
-#define LFRATIO_20_12	(0 << 3)
-#define LFRATIO_12_20	(1 << 3)
 
 #define CH_SIZE_ERR(ch)		((ch < 0) || (ch >= CH_MAX))
 #define hw_to_priv(_hw)		container_of(_hw, struct cs2000_priv, hw)
@@ -130,17 +110,6 @@ static int cs2000_enable_dev_config(struct cs2000_priv *priv, bool enable)
 	if (ret < 0)
 		return ret;
 
-	ret = cs2000_bset(priv, FUNC_CFG1, CLKSKIPEN,
-			  enable ? CLKSKIPEN : 0);
-	if (ret < 0)
-		return ret;
-
-	/* FIXME: for Static ratio mode */
-	ret = cs2000_bset(priv, FUNC_CFG2, LFRATIO_MASK,
-			  LFRATIO_12_20);
-	if (ret < 0)
-		return ret;
-
 	return 0;
 }
 
@@ -158,9 +127,7 @@ static int cs2000_clk_in_bound_rate(struct cs2000_priv *priv,
 	else
 		return -EINVAL;
 
-	return cs2000_bset(priv, FUNC_CFG1,
-			   REFCLKDIV_MASK,
-			   REFCLKDIV(val));
+	return cs2000_bset(priv, FUNC_CFG1, 0x3 << 3, val << 3);
 }
 
 static int cs2000_wait_pll_lock(struct cs2000_priv *priv)
@@ -186,10 +153,7 @@ static int cs2000_wait_pll_lock(struct cs2000_priv *priv)
 static int cs2000_clk_out_enable(struct cs2000_priv *priv, bool enable)
 {
 	/* enable both AUX_OUT, CLK_OUT */
-	return cs2000_bset(priv, DEVICE_CTRL,
-			   (AUXOUTDIS | CLKOUTDIS),
-			   enable ? 0 :
-			   (AUXOUTDIS | CLKOUTDIS));
+	return cs2000_write(priv, DEVICE_CTRL, enable ? 0 : 0x3);
 }
 
 static u32 cs2000_rate_to_ratio(u32 rate_in, u32 rate_out)
@@ -279,9 +243,7 @@ static int cs2000_ratio_select(struct cs2000_priv *priv, int ch)
 	if (ret < 0)
 		return ret;
 
-	ret = cs2000_bset(priv, DEVICE_CFG2,
-			  (AUTORMOD | LOCKCLK_MASK | FRACNSRC_MASK),
-			  (LOCKCLK(ch) | FRACNSRC_STATIC));
+	ret = cs2000_write(priv, DEVICE_CFG2, 0x0);
 	if (ret < 0)
 		return ret;
 
@@ -389,7 +351,8 @@ static const struct clk_ops cs2000_ops = {
 
 static int cs2000_clk_get(struct cs2000_priv *priv)
 {
-	struct device *dev = priv_to_dev(priv);
+	struct i2c_client *client = priv_to_client(priv);
+	struct device *dev = &client->dev;
 	struct clk *clk_in, *ref_clk;
 
 	clk_in = devm_clk_get(dev, "clk_in");
@@ -457,7 +420,8 @@ static int cs2000_clk_register(struct cs2000_priv *priv)
 
 static int cs2000_version_print(struct cs2000_priv *priv)
 {
-	struct device *dev = priv_to_dev(priv);
+	struct i2c_client *client = priv_to_client(priv);
+	struct device *dev = &client->dev;
 	s32 val;
 	const char *revision;
 
@@ -488,7 +452,7 @@ static int cs2000_version_print(struct cs2000_priv *priv)
 static int cs2000_remove(struct i2c_client *client)
 {
 	struct cs2000_priv *priv = i2c_get_clientdata(client);
-	struct device *dev = priv_to_dev(priv);
+	struct device *dev = &client->dev;
 	struct device_node *np = dev->of_node;
 
 	of_clk_del_provider(np);

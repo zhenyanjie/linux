@@ -198,8 +198,7 @@ static void recover_inode(struct inode *inode, struct page *page)
 			ino_of_node(page), name);
 }
 
-static int find_fsync_dnodes(struct f2fs_sb_info *sbi, struct list_head *head,
-				bool check_only)
+static int find_fsync_dnodes(struct f2fs_sb_info *sbi, struct list_head *head)
 {
 	struct curseg_info *curseg;
 	struct page *page = NULL;
@@ -226,8 +225,7 @@ static int find_fsync_dnodes(struct f2fs_sb_info *sbi, struct list_head *head,
 
 		entry = get_fsync_inode(head, ino_of_node(page));
 		if (!entry) {
-			if (!check_only &&
-					IS_INODE(page) && is_dent_dnode(page)) {
+			if (IS_INODE(page) && is_dent_dnode(page)) {
 				err = recover_inode_page(sbi, page);
 				if (err)
 					break;
@@ -291,7 +289,7 @@ static int check_index_in_prev_nodes(struct f2fs_sb_info *sbi,
 		return 0;
 
 	/* Get the previous summary */
-	for (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++) {
+	for (i = CURSEG_WARM_DATA; i <= CURSEG_COLD_DATA; i++) {
 		struct curseg_info *curseg = CURSEG_I(sbi, i);
 		if (curseg->segno == segno) {
 			sum = curseg->sum_blk->entries[blkoff];
@@ -571,7 +569,7 @@ int recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only)
 	mutex_lock(&sbi->cp_mutex);
 
 	/* step #1: find fsynced inode numbers */
-	err = find_fsync_dnodes(sbi, &inode_list, check_only);
+	err = find_fsync_dnodes(sbi, &inode_list);
 	if (err || list_empty(&inode_list))
 		goto out;
 
@@ -599,6 +597,8 @@ out:
 	}
 
 	clear_sbi_flag(sbi, SBI_POR_DOING);
+	if (err)
+		set_ckpt_flags(sbi, CP_ERROR_FLAG);
 	mutex_unlock(&sbi->cp_mutex);
 
 	/* let's drop all the directory inodes for clean checkpoint */

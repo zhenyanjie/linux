@@ -232,6 +232,7 @@ void adv7533_detach_dsi(struct adv7511 *adv)
 int adv7533_parse_dt(struct device_node *np, struct adv7511 *adv)
 {
 	u32 num_lanes;
+	struct device_node *endpoint;
 
 	of_property_read_u32(np, "adi,dsi-lanes", &num_lanes);
 
@@ -240,10 +241,17 @@ int adv7533_parse_dt(struct device_node *np, struct adv7511 *adv)
 
 	adv->num_dsi_lanes = num_lanes;
 
-	adv->host_node = of_graph_get_remote_node(np, 0, 0);
-	if (!adv->host_node)
+	endpoint = of_graph_get_next_endpoint(np, NULL);
+	if (!endpoint)
 		return -ENODEV;
 
+	adv->host_node = of_graph_get_remote_port_parent(endpoint);
+	if (!adv->host_node) {
+		of_node_put(endpoint);
+		return -ENODEV;
+	}
+
+	of_node_put(endpoint);
 	of_node_put(adv->host_node);
 
 	adv->use_timing_gen = !of_property_read_bool(np,

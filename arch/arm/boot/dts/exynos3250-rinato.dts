@@ -58,7 +58,7 @@
 		max77836: subpmic@25 {
 			compatible = "maxim,max77836";
 			interrupt-parent = <&gpx1>;
-			interrupts = <5 IRQ_TYPE_NONE>;
+			interrupts = <5 0>;
 			reg = <0x25>;
 			wakeup-source;
 
@@ -215,8 +215,6 @@
 &dsi_0 {
 	vddcore-supply = <&ldo6_reg>;
 	vddio-supply = <&ldo6_reg>;
-	samsung,burst-clock-frequency = <250000000>;
-	samsung,esc-clock-frequency = <20000000>;
 	samsung,pll-clock-frequency = <24000000>;
 	status = "okay";
 
@@ -240,7 +238,7 @@
 		reg = <0>;
 		vdd3-supply = <&ldo16_reg>;
 		vci-supply = <&ldo20_reg>;
-		reset-gpios = <&gpe0 1 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&gpe0 1 GPIO_ACTIVE_HIGH>;
 		te-gpios = <&gpx0 6 GPIO_ACTIVE_HIGH>;
 		power-on-delay= <30>;
 		power-off-delay= <120>;
@@ -295,7 +293,7 @@
 	s2mps14_pmic@66 {
 		compatible = "samsung,s2mps14-pmic";
 		interrupt-parent = <&gpx0>;
-		interrupts = <7 IRQ_TYPE_NONE>;
+		interrupts = <7 0>;
 		reg = <0x66>;
 		wakeup-source;
 
@@ -626,7 +624,7 @@
 	fuelgauge@36 {
 		compatible = "maxim,max77836-battery";
 		interrupt-parent = <&gpx1>;
-		interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
+		interrupts = <2 8>;
 		reg = <0x36>;
 	};
 };

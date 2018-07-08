@@ -469,7 +469,7 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 			entry->ecx &= kvm_cpuid_7_0_ecx_x86_features;
 			cpuid_mask(&entry->ecx, CPUID_7_ECX);
 			/* PKU is not yet implemented for shadow paging. */
-			if (!tdp_enabled || !boot_cpu_has(X86_FEATURE_OSPKE))
+			if (!tdp_enabled)
 				entry->ecx &= ~F(PKU);
 			entry->edx &= kvm_cpuid_7_0_edx_x86_features;
 			entry->edx &= get_scattered_cpuid_leaf(7, 0, CPUID_EDX);
@@ -877,9 +877,6 @@ EXPORT_SYMBOL_GPL(kvm_cpuid);
 int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 {
 	u32 eax, ebx, ecx, edx;
-
-	if (cpuid_fault_enabled(vcpu) && !kvm_require_cpl(vcpu, 0))
-		return 1;
 
 	eax = kvm_register_read(vcpu, VCPU_REGS_RAX);
 	ecx = kvm_register_read(vcpu, VCPU_REGS_RCX);

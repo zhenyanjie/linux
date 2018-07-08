@@ -43,25 +43,19 @@ static void child(int size, int wr)
 	volatile uint8_t *addr = &var[32 + wr];
 
 	if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) != 0) {
-		ksft_print_msg(
-			"ptrace(PTRACE_TRACEME) failed: %s\n",
-			strerror(errno));
+		perror("ptrace(PTRACE_TRACEME) failed");
 		_exit(1);
 	}
 
 	if (raise(SIGSTOP) != 0) {
-		ksft_print_msg(
-			"raise(SIGSTOP) failed: %s\n", strerror(errno));
+		perror("raise(SIGSTOP) failed");
 		_exit(1);
 	}
 
 	if ((uintptr_t) addr % size) {
-		ksft_print_msg(
-			 "Wrong address write for the given size: %s\n",
-			 strerror(errno));
+		perror("Wrong address write for the given size\n");
 		_exit(1);
 	}
-
 	switch (size) {
 	case 1:
 		*addr = 47;
@@ -106,14 +100,12 @@ static bool set_watchpoint(pid_t pid, int size, int wp)
 	if (ptrace(PTRACE_SETREGSET, pid, NT_ARM_HW_WATCH, &iov) == 0)
 		return true;
 
-	if (errno == EIO)
-		ksft_print_msg(
-			"ptrace(PTRACE_SETREGSET, NT_ARM_HW_WATCH) not supported on this hardware: %s\n",
-			strerror(errno));
-
-	ksft_print_msg(
-		"ptrace(PTRACE_SETREGSET, NT_ARM_HW_WATCH) failed: %s\n",
-		strerror(errno));
+	if (errno == EIO) {
+		printf("ptrace(PTRACE_SETREGSET, NT_ARM_HW_WATCH) "
+			"not supported on this hardware\n");
+		ksft_exit_skip();
+	}
+	perror("ptrace(PTRACE_SETREGSET, NT_ARM_HW_WATCH) failed");
 	return false;
 }
 
@@ -125,8 +117,7 @@ static bool run_test(int wr_size, int wp_size, int wr, int wp)
 	pid_t wpid;
 
 	if (pid < 0) {
-		ksft_test_result_fail(
-			"fork() failed: %s\n", strerror(errno));
+		perror("fork() failed");
 		return false;
 	}
 	if (pid == 0)
@@ -134,17 +125,15 @@ static bool run_test(int wr_size, int wp_size, int wr, int wp)
 
 	wpid = waitpid(pid, &status, __WALL);
 	if (wpid != pid) {
-		ksft_print_msg(
-			"waitpid() failed: %s\n", strerror(errno));
+		perror("waitpid() failed");
 		return false;
 	}
 	if (!WIFSTOPPED(status)) {
-		ksft_print_msg(
-			"child did not stop: %s\n", strerror(errno));
+		printf("child did not stop\n");
 		return false;
 	}
 	if (WSTOPSIG(status) != SIGSTOP) {
-		ksft_print_msg("child did not stop with SIGSTOP\n");
+		printf("child did not stop with SIGSTOP\n");
 		return false;
 	}
 
@@ -152,49 +141,42 @@ static bool run_test(int wr_size, int wp_size, int wr, int wp)
 		return false;
 
 	if (ptrace(PTRACE_CONT, pid, NULL, NULL) < 0) {
-		ksft_print_msg(
-			"ptrace(PTRACE_SINGLESTEP) failed: %s\n",
-			strerror(errno));
+		perror("ptrace(PTRACE_SINGLESTEP) failed");
 		return false;
 	}
 
 	alarm(3);
 	wpid = waitpid(pid, &status, __WALL);
 	if (wpid != pid) {
-		ksft_print_msg(
-			"waitpid() failed: %s\n", strerror(errno));
+		perror("waitpid() failed");
 		return false;
 	}
 	alarm(0);
 	if (WIFEXITED(status)) {
-		ksft_print_msg("child did not single-step\n");
+		printf("child did not single-step\t");
 		return false;
 	}
 	if (!WIFSTOPPED(status)) {
-		ksft_print_msg("child did not stop\n");
+		printf("child did not stop\n");
 		return false;
 	}
 	if (WSTOPSIG(status) != SIGTRAP) {
-		ksft_print_msg("child did not stop with SIGTRAP\n");
+		printf("child did not stop with SIGTRAP\n");
 		return false;
 	}
 	if (ptrace(PTRACE_GETSIGINFO, pid, NULL, &siginfo) != 0) {
-		ksft_print_msg(
-			"ptrace(PTRACE_GETSIGINFO): %s\n",
-			strerror(errno));
+		perror("ptrace(PTRACE_GETSIGINFO)");
 		return false;
 	}
 	if (siginfo.si_code != TRAP_HWBKPT) {
-		ksft_print_msg(
-			"Unexpected si_code %d\n", siginfo.si_code);
+		printf("Unexpected si_code %d\n", siginfo.si_code);
 		return false;
 	}
 
 	kill(pid, SIGKILL);
 	wpid = waitpid(pid, &status, 0);
 	if (wpid != pid) {
-		ksft_print_msg(
-			"waitpid() failed: %s\n", strerror(errno));
+		perror("waitpid() failed");
 		return false;
 	}
 	return true;
@@ -212,8 +194,6 @@ int main(int argc, char **argv)
 	int wr, wp, size;
 	bool result;
 
-	ksft_print_header();
-
 	act.sa_handler = sigalrm;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;
@@ -221,16 +201,14 @@ int main(int argc, char **argv)
 	for (size = 1; size <= 32; size = size*2) {
 		for (wr = 0; wr <= 32; wr = wr + size) {
 			for (wp = wr - size; wp <= wr + size; wp = wp + size) {
+				printf("Test size = %d write offset = %d watchpoint offset = %d\t", size, wr, wp);
 				result = run_test(size, MIN(size, 8), wr, wp);
-				if ((result && wr == wp) ||
-				    (!result && wr != wp))
-					ksft_test_result_pass(
-						"Test size = %d write offset = %d watchpoint offset = %d\n",
-						size, wr, wp);
-				else {
-					ksft_test_result_fail(
-						"Test size = %d write offset = %d watchpoint offset = %d\n",
-						size, wr, wp);
+				if ((result && wr == wp) || (!result && wr != wp)) {
+					printf("[OK]\n");
+					ksft_inc_pass_cnt();
+				} else {
+					printf("[FAILED]\n");
+					ksft_inc_fail_cnt();
 					succeeded = false;
 				}
 			}
@@ -238,18 +216,19 @@ int main(int argc, char **argv)
 	}
 
 	for (size = 1; size <= 32; size = size*2) {
-		if (run_test(size, 8, -size, -8))
-			ksft_test_result_pass(
-				"Test size = %d write offset = %d watchpoint offset = -8\n",
-				size, -size);
-		else {
-			ksft_test_result_fail(
-				"Test size = %d write offset = %d watchpoint offset = -8\n",
-				size, -size);
+		printf("Test size = %d write offset = %d watchpoint offset = -8\t", size, -size);
+
+		if (run_test(size, 8, -size, -8)) {
+			printf("[OK]\n");
+			ksft_inc_pass_cnt();
+		} else {
+			printf("[FAILED]\n");
+			ksft_inc_fail_cnt();
 			succeeded = false;
 		}
 	}
 
+	ksft_print_cnts();
 	if (succeeded)
 		ksft_exit_pass();
 	else

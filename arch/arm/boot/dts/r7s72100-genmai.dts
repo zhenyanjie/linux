@@ -44,10 +44,6 @@
 	clock-frequency = <48000000>;
 };
 
-&rtc_x1_clk {
-	clock-frequency = <32768>;
-};
-
 &mtu2 {
 	status = "okay";
 };
@@ -61,10 +57,6 @@
 		reg = <0x50>;
 		pagesize = <64>;
 	};
-};
-
-&rtc {
-	status = "okay";
 };
 
 &scif2 {

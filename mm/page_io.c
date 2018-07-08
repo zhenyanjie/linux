@@ -22,7 +22,6 @@
 #include <linux/frontswap.h>
 #include <linux/blkdev.h>
 #include <linux/uio.h>
-#include <linux/sched/task.h>
 #include <asm/pgtable.h>
 
 static struct bio *get_swap_bio(gfp_t gfp_flags,
@@ -46,7 +45,7 @@ void end_swap_bio_write(struct bio *bio)
 {
 	struct page *page = bio->bi_io_vec[0].bv_page;
 
-	if (bio->bi_status) {
+	if (bio->bi_error) {
 		SetPageError(page);
 		/*
 		 * We failed to write the page out to swap-space.
@@ -118,9 +117,8 @@ static void swap_slot_free_notify(struct page *page)
 static void end_swap_bio_read(struct bio *bio)
 {
 	struct page *page = bio->bi_io_vec[0].bv_page;
-	struct task_struct *waiter = bio->bi_private;
 
-	if (bio->bi_status) {
+	if (bio->bi_error) {
 		SetPageError(page);
 		ClearPageUptodate(page);
 		pr_alert("Read-error on swap-device (%u:%u:%llu)\n",
@@ -134,10 +132,7 @@ static void end_swap_bio_read(struct bio *bio)
 	swap_slot_free_notify(page);
 out:
 	unlock_page(page);
-	WRITE_ONCE(bio->bi_private, NULL);
 	bio_put(bio);
-	wake_up_process(waiter);
-	put_task_struct(waiter);
 }
 
 int generic_swapfile_activate(struct swap_info_struct *sis,
@@ -334,13 +329,11 @@ out:
 	return ret;
 }
 
-int swap_readpage(struct page *page, bool do_poll)
+int swap_readpage(struct page *page)
 {
 	struct bio *bio;
 	int ret = 0;
 	struct swap_info_struct *sis = page_swap_info(page);
-	blk_qc_t qc;
-	struct block_device *bdev;
 
 	VM_BUG_ON_PAGE(!PageSwapCache(page), page);
 	VM_BUG_ON_PAGE(!PageLocked(page), page);
@@ -379,28 +372,9 @@ int swap_readpage(struct page *page, bool do_poll)
 		ret = -ENOMEM;
 		goto out;
 	}
-	bdev = bio->bi_bdev;
-	/*
-	 * Keep this task valid during swap readpage because the oom killer may
-	 * attempt to access it in the page fault retry time check.
-	 */
-	get_task_struct(current);
-	bio->bi_private = current;
 	bio_set_op_attrs(bio, REQ_OP_READ, 0);
 	count_vm_event(PSWPIN);
-	bio_get(bio);
-	qc = submit_bio(bio);
-	while (do_poll) {
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		if (!READ_ONCE(bio->bi_private))
-			break;
-
-		if (!blk_mq_poll(bdev_get_queue(bdev), qc))
-			break;
-	}
-	__set_current_state(TASK_RUNNING);
-	bio_put(bio);
-
+	submit_bio(bio);
 out:
 	return ret;
 }

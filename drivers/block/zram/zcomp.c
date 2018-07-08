@@ -68,11 +68,13 @@ static struct zcomp_strm *zcomp_strm_alloc(struct zcomp *comp)
 
 bool zcomp_available_algorithm(const char *comp)
 {
-	int i;
+	int i = 0;
 
-	i = __sysfs_match_string(backends, -1, comp);
-	if (i >= 0)
-		return true;
+	while (backends[i]) {
+		if (sysfs_streq(comp, backends[i]))
+			return true;
+		i++;
+	}
 
 	/*
 	 * Crypto does not ignore a trailing new line symbol,

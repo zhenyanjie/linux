@@ -25,7 +25,6 @@
 #include "trace_probe.h"
 
 #define KPROBE_EVENT_SYSTEM "kprobes"
-#define KRETPROBE_MAXACTIVE_MAX 4096
 
 /**
  * Kprobe event core functions
@@ -283,7 +282,6 @@ static struct trace_kprobe *alloc_trace_kprobe(const char *group,
 					     void *addr,
 					     const char *symbol,
 					     unsigned long offs,
-					     int maxactive,
 					     int nargs, bool is_return)
 {
 	struct trace_kprobe *tk;
@@ -310,8 +308,6 @@ static struct trace_kprobe *alloc_trace_kprobe(const char *group,
 		tk->rp.handler = kretprobe_dispatcher;
 	else
 		tk->rp.kp.pre_handler = kprobe_dispatcher;
-
-	tk->rp.maxactive = maxactive;
 
 	if (!event || !is_good_name(event)) {
 		ret = -EINVAL;
@@ -598,22 +594,12 @@ static struct notifier_block trace_kprobe_module_nb = {
 	.priority = 1	/* Invoked after kprobe module callback */
 };
 
-/* Convert certain expected symbols into '_' when generating event names */
-static inline void sanitize_event_name(char *name)
-{
-	while (*name++ != '\0')
-		if (*name == ':' || *name == '.')
-			*name = '_';
-}
-
 static int create_trace_kprobe(int argc, char **argv)
 {
 	/*
 	 * Argument syntax:
-	 *  - Add kprobe:
-	 *      p[:[GRP/]EVENT] [MOD:]KSYM[+OFFS]|KADDR [FETCHARGS]
-	 *  - Add kretprobe:
-	 *      r[MAXACTIVE][:[GRP/]EVENT] [MOD:]KSYM[+0] [FETCHARGS]
+	 *  - Add kprobe: p[:[GRP/]EVENT] [MOD:]KSYM[+OFFS]|KADDR [FETCHARGS]
+	 *  - Add kretprobe: r[:[GRP/]EVENT] [MOD:]KSYM[+0] [FETCHARGS]
 	 * Fetch args:
 	 *  $retval	: fetch return value
 	 *  $stack	: fetch stack address
@@ -633,7 +619,6 @@ static int create_trace_kprobe(int argc, char **argv)
 	int i, ret = 0;
 	bool is_return = false, is_delete = false;
 	char *symbol = NULL, *event = NULL, *group = NULL;
-	int maxactive = 0;
 	char *arg;
 	unsigned long offset = 0;
 	void *addr = NULL;
@@ -652,28 +637,8 @@ static int create_trace_kprobe(int argc, char **argv)
 		return -EINVAL;
 	}
 
-	event = strchr(&argv[0][1], ':');
-	if (event) {
-		event[0] = '\0';
-		event++;
-	}
-	if (is_return && isdigit(argv[0][1])) {
-		ret = kstrtouint(&argv[0][1], 0, &maxactive);
-		if (ret) {
-			pr_info("Failed to parse maxactive.\n");
-			return ret;
-		}
-		/* kretprobes instances are iterated over via a list. The
-		 * maximum should stay reasonable.
-		 */
-		if (maxactive > KRETPROBE_MAXACTIVE_MAX) {
-			pr_info("Maxactive is too big (%d > %d).\n",
-				maxactive, KRETPROBE_MAXACTIVE_MAX);
-			return -E2BIG;
-		}
-	}
-
-	if (event) {
+	if (argv[0][1] == ':') {
+		event = &argv[0][2];
 		if (strchr(event, '/')) {
 			group = event;
 			event = strchr(group, '/') + 1;
@@ -727,11 +692,13 @@ static int create_trace_kprobe(int argc, char **argv)
 			pr_info("Failed to parse either an address or a symbol.\n");
 			return ret;
 		}
-		if (offset && is_return &&
-		    !kprobe_on_func_entry(NULL, symbol, offset)) {
-			pr_info("Given offset is not valid for return probe.\n");
+		if (offset && is_return) {
+			pr_info("Return probe must be used without offset.\n");
 			return -EINVAL;
 		}
+	} else if (is_return) {
+		pr_info("Return probe point must be a symbol.\n");
+		return -EINVAL;
 	}
 	argc -= 2; argv += 2;
 
@@ -744,11 +711,10 @@ static int create_trace_kprobe(int argc, char **argv)
 		else
 			snprintf(buf, MAX_EVENT_NAME_LEN, "%c_0x%p",
 				 is_return ? 'r' : 'p', addr);
-		sanitize_event_name(buf);
 		event = buf;
 	}
-	tk = alloc_trace_kprobe(group, event, addr, symbol, offset, maxactive,
-			       argc, is_return);
+	tk = alloc_trace_kprobe(group, event, addr, symbol, offset, argc,
+			       is_return);
 	if (IS_ERR(tk)) {
 		pr_info("Failed to allocate trace_probe.(%d)\n",
 			(int)PTR_ERR(tk));
@@ -1200,7 +1166,7 @@ kprobe_perf_func(struct trace_kprobe *tk, struct pt_regs *regs)
 	memset(&entry[1], 0, dsize);
 	store_trace_args(sizeof(*entry), &tk->tp, regs, (u8 *)&entry[1], dsize);
 	perf_trace_buf_submit(entry, size, rctx, call->event.type, 1, regs,
-			      head, NULL, NULL);
+			      head, NULL);
 }
 NOKPROBE_SYMBOL(kprobe_perf_func);
 
@@ -1236,7 +1202,7 @@ kretprobe_perf_func(struct trace_kprobe *tk, struct kretprobe_instance *ri,
 	entry->ret_ip = (unsigned long)ri->ret_addr;
 	store_trace_args(sizeof(*entry), &tk->tp, regs, (u8 *)&entry[1], dsize);
 	perf_trace_buf_submit(entry, size, rctx, call->event.type, 1, regs,
-			      head, NULL, NULL);
+			      head, NULL);
 }
 NOKPROBE_SYMBOL(kretprobe_perf_func);
 #endif	/* CONFIG_PERF_EVENTS */

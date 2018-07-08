@@ -1,8 +1,5 @@
 #include <linux/compiler.h>
-#include <errno.h>
-#include <inttypes.h>
 #include <string.h>
-#include <sys/wait.h>
 #include "tests.h"
 #include "evlist.h"
 #include "evsel.h"

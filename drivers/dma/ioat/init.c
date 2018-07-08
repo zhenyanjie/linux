@@ -760,7 +760,9 @@ ioat_init_channel(struct ioatdma_device *ioat_dma,
 	dma_cookie_init(&ioat_chan->dma_chan);
 	list_add_tail(&ioat_chan->dma_chan.device_node, &dma->channels);
 	ioat_dma->idx[idx] = ioat_chan;
-	setup_timer(&ioat_chan->timer, ioat_timer_event, data);
+	init_timer(&ioat_chan->timer);
+	ioat_chan->timer.function = ioat_timer_event;
+	ioat_chan->timer.data = data;
 	tasklet_init(&ioat_chan->cleanup_task, ioat_cleanup_event, data);
 }
 
@@ -839,6 +841,8 @@ static int ioat_xor_val_self_test(struct ioatdma_device *ioat_dma)
 		goto free_resources;
 	}
 
+	for (i = 0; i < IOAT_NUM_SRC_TEST; i++)
+		dma_srcs[i] = DMA_ERROR_CODE;
 	for (i = 0; i < IOAT_NUM_SRC_TEST; i++) {
 		dma_srcs[i] = dma_map_page(dev, xor_srcs[i], 0, PAGE_SIZE,
 					   DMA_TO_DEVICE);
@@ -908,6 +912,8 @@ static int ioat_xor_val_self_test(struct ioatdma_device *ioat_dma)
 
 	xor_val_result = 1;
 
+	for (i = 0; i < IOAT_NUM_SRC_TEST + 1; i++)
+		dma_srcs[i] = DMA_ERROR_CODE;
 	for (i = 0; i < IOAT_NUM_SRC_TEST + 1; i++) {
 		dma_srcs[i] = dma_map_page(dev, xor_val_srcs[i], 0, PAGE_SIZE,
 					   DMA_TO_DEVICE);
@@ -961,6 +967,8 @@ static int ioat_xor_val_self_test(struct ioatdma_device *ioat_dma)
 	op = IOAT_OP_XOR_VAL;
 
 	xor_val_result = 0;
+	for (i = 0; i < IOAT_NUM_SRC_TEST + 1; i++)
+		dma_srcs[i] = DMA_ERROR_CODE;
 	for (i = 0; i < IOAT_NUM_SRC_TEST + 1; i++) {
 		dma_srcs[i] = dma_map_page(dev, xor_val_srcs[i], 0, PAGE_SIZE,
 					   DMA_TO_DEVICE);
@@ -1011,14 +1019,18 @@ static int ioat_xor_val_self_test(struct ioatdma_device *ioat_dma)
 	goto free_resources;
 dma_unmap:
 	if (op == IOAT_OP_XOR) {
-		while (--i >= 0)
-			dma_unmap_page(dev, dma_srcs[i], PAGE_SIZE,
-				       DMA_TO_DEVICE);
-		dma_unmap_page(dev, dest_dma, PAGE_SIZE, DMA_FROM_DEVICE);
+		if (dest_dma != DMA_ERROR_CODE)
+			dma_unmap_page(dev, dest_dma, PAGE_SIZE,
+				       DMA_FROM_DEVICE);
+		for (i = 0; i < IOAT_NUM_SRC_TEST; i++)
+			if (dma_srcs[i] != DMA_ERROR_CODE)
+				dma_unmap_page(dev, dma_srcs[i], PAGE_SIZE,
+					       DMA_TO_DEVICE);
 	} else if (op == IOAT_OP_XOR_VAL) {
-		while (--i >= 0)
-			dma_unmap_page(dev, dma_srcs[i], PAGE_SIZE,
-				       DMA_TO_DEVICE);
+		for (i = 0; i < IOAT_NUM_SRC_TEST + 1; i++)
+			if (dma_srcs[i] != DMA_ERROR_CODE)
+				dma_unmap_page(dev, dma_srcs[i], PAGE_SIZE,
+					       DMA_TO_DEVICE);
 	}
 free_resources:
 	dma->device_free_chan_resources(dma_chan);

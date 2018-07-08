@@ -397,7 +397,7 @@ static int tpm_inf_pnp_probe(struct pnp_dev *dev,
 	int vendorid[2];
 	int version[2];
 	int productid[2];
-	const char *chipname;
+	char chipname[20];
 	struct tpm_chip *chip;
 
 	/* read IO-ports through PnP */
@@ -488,13 +488,13 @@ static int tpm_inf_pnp_probe(struct pnp_dev *dev,
 
 	switch ((productid[0] << 8) | productid[1]) {
 	case 6:
-		chipname = " (SLD 9630 TT 1.1)";
+		snprintf(chipname, sizeof(chipname), " (SLD 9630 TT 1.1)");
 		break;
 	case 11:
-		chipname = " (SLB 9635 TT 1.2)";
+		snprintf(chipname, sizeof(chipname), " (SLB 9635 TT 1.2)");
 		break;
 	default:
-		chipname = " (unknown chip)";
+		snprintf(chipname, sizeof(chipname), " (unknown chip)");
 		break;
 	}
 

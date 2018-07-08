@@ -136,7 +136,7 @@ struct inode *ocfs2_ilookup(struct super_block *sb, u64 blkno)
 struct inode *ocfs2_iget(struct ocfs2_super *osb, u64 blkno, unsigned flags,
 			 int sysfile_type)
 {
-	int rc = -ESTALE;
+	int rc = 0;
 	struct inode *inode = NULL;
 	struct super_block *sb = osb->sb;
 	struct ocfs2_find_inode_args args;

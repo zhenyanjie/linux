@@ -25,6 +25,7 @@
 #include <linux/linkage.h>
 #include <asm/asm-offsets.h>
 #include <asm/thread_info.h>
+#include <asm/facility.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
 

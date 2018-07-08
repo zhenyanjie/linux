@@ -25,6 +25,7 @@ brcmfmac-objs += \
 		chip.o \
 		fwil.o \
 		fweh.o \
+		fwsignal.o \
 		p2p.o \
 		proto.o \
 		common.o \
@@ -35,8 +36,7 @@ brcmfmac-objs += \
 		vendor.o \
 		pno.o
 brcmfmac-$(CONFIG_BRCMFMAC_PROTO_BCDC) += \
-		bcdc.o \
-		fwsignal.o
+		bcdc.o
 brcmfmac-$(CONFIG_BRCMFMAC_PROTO_MSGBUF) += \
 		commonring.o \
 		flowring.o \

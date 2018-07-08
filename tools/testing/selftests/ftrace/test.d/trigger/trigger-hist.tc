@@ -1,6 +1,5 @@
 #!/bin/sh
 # description: event trigger - test histogram trigger
-# flags: instance
 
 do_reset() {
     reset_trigger

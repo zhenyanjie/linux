@@ -102,8 +102,7 @@ static pte_t *get_pte(pte_t *base, int index, int level)
 	return ptep;
 }
 
-pte_t *huge_pte_offset(struct mm_struct *mm,
-		       unsigned long addr, unsigned long sz)
+pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
 	pud_t *pud;

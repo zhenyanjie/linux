@@ -194,12 +194,6 @@ static void smp_callin(void)
 	smp_store_cpu_info(cpuid);
 
 	/*
-	 * The topology information must be up to date before
-	 * calibrate_delay() and notify_cpu_starting().
-	 */
-	set_cpu_sibling_map(raw_smp_processor_id());
-
-	/*
 	 * Get our bogomips.
 	 * Update loops_per_jiffy in cpu_data. Previous call to
 	 * smp_store_cpu_info() stored a value that is close but not as
@@ -209,6 +203,11 @@ static void smp_callin(void)
 	cpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;
 	pr_debug("Stack at about %p\n", &cpuid);
 
+	/*
+	 * This must be done before setting cpu_online_mask
+	 * or calling notify_cpu_starting.
+	 */
+	set_cpu_sibling_map(raw_smp_processor_id());
 	wmb();
 
 	notify_cpu_starting(cpuid);
@@ -864,7 +863,7 @@ static void announce_cpu(int cpu, int apicid)
 	if (cpu == 1)
 		printk(KERN_INFO "x86: Booting SMP configuration:\n");
 
-	if (system_state < SYSTEM_RUNNING) {
+	if (system_state == SYSTEM_BOOTING) {
 		if (node != current_node) {
 			if (current_node > (-1))
 				pr_cont("\n");
@@ -972,8 +971,7 @@ void common_cpu_up(unsigned int cpu, struct task_struct *idle)
  * Returns zero if CPU booted OK, else error code from
  * ->wakeup_secondary_cpu.
  */
-static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle,
-		       int *cpu0_nmi_registered)
+static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
 {
 	volatile u32 *trampoline_status =
 		(volatile u32 *) __va(real_mode_header->trampoline_status);
@@ -981,10 +979,11 @@ static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle,
 	unsigned long start_ip = real_mode_header->trampoline_start;
 
 	unsigned long boot_error = 0;
+	int cpu0_nmi_registered = 0;
 	unsigned long timeout;
 
 	idle->thread.sp = (unsigned long)task_pt_regs(idle);
-	early_gdt_descr.address = (unsigned long)get_cpu_gdt_rw(cpu);
+	early_gdt_descr.address = (unsigned long)get_cpu_gdt_table(cpu);
 	initial_code = (unsigned long)start_secondary;
 	initial_stack  = idle->thread.sp;
 
@@ -1036,7 +1035,7 @@ static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle,
 		boot_error = apic->wakeup_secondary_cpu(apicid, start_ip);
 	else
 		boot_error = wakeup_cpu_via_init_nmi(cpu, start_ip, apicid,
-						     cpu0_nmi_registered);
+						     &cpu0_nmi_registered);
 
 	if (!boot_error) {
 		/*
@@ -1081,6 +1080,12 @@ static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle,
 		 */
 		smpboot_restore_warm_reset_vector();
 	}
+	/*
+	 * Clean up the nmi handler. Do this after the callin and callout sync
+	 * to avoid impact of possible long unregister time.
+	 */
+	if (cpu0_nmi_registered)
+		unregister_nmi_handler(NMI_LOCAL, "wake_cpu0");
 
 	return boot_error;
 }
@@ -1088,9 +1093,8 @@ static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle,
 int native_cpu_up(unsigned int cpu, struct task_struct *tidle)
 {
 	int apicid = apic->cpu_present_to_apicid(cpu);
-	int cpu0_nmi_registered = 0;
 	unsigned long flags;
-	int err, ret = 0;
+	int err;
 
 	WARN_ON(irqs_disabled());
 
@@ -1127,11 +1131,10 @@ int native_cpu_up(unsigned int cpu, struct task_struct *tidle)
 
 	common_cpu_up(cpu, tidle);
 
-	err = do_boot_cpu(apicid, cpu, tidle, &cpu0_nmi_registered);
+	err = do_boot_cpu(apicid, cpu, tidle);
 	if (err) {
 		pr_err("do_boot_cpu failed(%d) to wakeup CPU#%u\n", err, cpu);
-		ret = -EIO;
-		goto unreg_nmi;
+		return -EIO;
 	}
 
 	/*
@@ -1147,15 +1150,7 @@ int native_cpu_up(unsigned int cpu, struct task_struct *tidle)
 		touch_nmi_watchdog();
 	}
 
-unreg_nmi:
-	/*
-	 * Clean up the nmi handler. Do this after the callin and callout sync
-	 * to avoid impact of possible long unregister time.
-	 */
-	if (cpu0_nmi_registered)
-		unregister_nmi_handler(NMI_LOCAL, "wake_cpu0");
-
-	return ret;
+	return 0;
 }
 
 /**
@@ -1594,6 +1589,7 @@ void native_cpu_die(unsigned int cpu)
 void play_dead_common(void)
 {
 	idle_task_exit();
+	reset_lazy_tlbstate();
 
 	/* Ack it */
 	(void)cpu_report_death();

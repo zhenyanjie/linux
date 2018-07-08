@@ -32,7 +32,6 @@
 #include "futextest.h"
 #include "logging.h"
 
-#define TEST_NAME "futex-requeue-pi-signal-restart"
 #define DELAY_US 100
 
 futex_t f1 = FUTEX_INITIALIZER;
@@ -219,6 +218,6 @@ int main(int argc, char *argv[])
 	if (ret == RET_PASS && waiter_ret)
 		ret = waiter_ret;
 
-	print_result(TEST_NAME, ret);
+	print_result(ret);
 	return ret;
 }

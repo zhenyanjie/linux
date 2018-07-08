@@ -9,7 +9,6 @@
  */
 
 /* For the CLR_() macros */
-#include <string.h>
 #include <pthread.h>
 
 #include <errno.h>
@@ -114,7 +113,8 @@ static void print_summary(void)
 	       (int) runtime.tv_sec);
 }
 
-int bench_futex_hash(int argc, const char **argv)
+int bench_futex_hash(int argc, const char **argv,
+		     const char *prefix __maybe_unused)
 {
 	int ret = 0;
 	cpu_set_t cpu;

@@ -104,9 +104,10 @@ const struct rvt_operation_params qib_post_parms[RVT_OPERATION_MAX] = {
 
 };
 
-static void get_map_page(struct rvt_qpn_table *qpt, struct rvt_qpn_map *map)
+static void get_map_page(struct rvt_qpn_table *qpt, struct rvt_qpn_map *map,
+			 gfp_t gfp)
 {
-	unsigned long page = get_zeroed_page(GFP_KERNEL);
+	unsigned long page = get_zeroed_page(gfp);
 
 	/*
 	 * Free the page if someone raced with us installing it.
@@ -125,7 +126,7 @@ static void get_map_page(struct rvt_qpn_table *qpt, struct rvt_qpn_map *map)
  * zero/one for QP type IB_QPT_SMI/IB_QPT_GSI.
  */
 int qib_alloc_qpn(struct rvt_dev_info *rdi, struct rvt_qpn_table *qpt,
-		  enum ib_qp_type type, u8 port)
+		  enum ib_qp_type type, u8 port, gfp_t gfp)
 {
 	u32 i, offset, max_scan, qpn;
 	struct rvt_qpn_map *map;
@@ -159,7 +160,7 @@ int qib_alloc_qpn(struct rvt_dev_info *rdi, struct rvt_qpn_table *qpt,
 	max_scan = qpt->nmaps - !offset;
 	for (i = 0;;) {
 		if (unlikely(!map->page)) {
-			get_map_page(qpt, map);
+			get_map_page(qpt, map, gfp);
 			if (unlikely(!map->page))
 				break;
 		}
@@ -316,16 +317,16 @@ u32 qib_mtu_from_qp(struct rvt_dev_info *rdi, struct rvt_qp *qp, u32 pmtu)
 	return ib_mtu_enum_to_int(pmtu);
 }
 
-void *qib_qp_priv_alloc(struct rvt_dev_info *rdi, struct rvt_qp *qp)
+void *qib_qp_priv_alloc(struct rvt_dev_info *rdi, struct rvt_qp *qp, gfp_t gfp)
 {
 	struct qib_qp_priv *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc(sizeof(*priv), gfp);
 	if (!priv)
 		return ERR_PTR(-ENOMEM);
 	priv->owner = qp;
 
-	priv->s_hdr = kzalloc(sizeof(*priv->s_hdr), GFP_KERNEL);
+	priv->s_hdr = kzalloc(sizeof(*priv->s_hdr), gfp);
 	if (!priv->s_hdr) {
 		kfree(priv);
 		return ERR_PTR(-ENOMEM);
@@ -488,7 +489,7 @@ void qib_qp_iter_print(struct seq_file *s, struct qib_qp_iter *iter)
 		   qp->s_last, qp->s_acked, qp->s_cur,
 		   qp->s_tail, qp->s_head, qp->s_size,
 		   qp->remote_qpn,
-		   rdma_ah_get_dlid(&qp->remote_ah_attr));
+		   qp->remote_ah_attr.dlid);
 }
 
 #endif

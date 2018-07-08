@@ -40,7 +40,6 @@
 #include <linux/ratelimit.h>
 #include <linux/kthread.h>
 #include <linux/init.h>
-#include <linux/mmu_notifier.h>
 
 #include <asm/tlb.h>
 #include "internal.h"
@@ -491,22 +490,6 @@ static bool __oom_reap_task_mm(struct task_struct *tsk, struct mm_struct *mm)
 
 	if (!down_read_trylock(&mm->mmap_sem)) {
 		ret = false;
-		trace_skip_task_reaping(tsk->pid);
-		goto unlock_oom;
-	}
-
-	/*
-	 * If the mm has notifiers then we would need to invalidate them around
-	 * unmap_page_range and that is risky because notifiers can sleep and
-	 * what they do is basically undeterministic.  So let's have a short
-	 * sleep to give the oom victim some more time.
-	 * TODO: we really want to get rid of this ugly hack and make sure that
-	 * notifiers cannot block for unbounded amount of time and add
-	 * mmu_notifier_invalidate_range_{start,end} around unmap_page_range
-	 */
-	if (mm_has_notifiers(mm)) {
-		up_read(&mm->mmap_sem);
-		schedule_timeout_idle(HZ);
 		goto unlock_oom;
 	}
 
@@ -517,11 +500,8 @@ static bool __oom_reap_task_mm(struct task_struct *tsk, struct mm_struct *mm)
 	 */
 	if (!mmget_not_zero(mm)) {
 		up_read(&mm->mmap_sem);
-		trace_skip_task_reaping(tsk->pid);
 		goto unlock_oom;
 	}
-
-	trace_start_task_reaping(tsk->pid);
 
 	/*
 	 * Tell all users of get_user/copy_from_user etc... that the content
@@ -564,7 +544,6 @@ static bool __oom_reap_task_mm(struct task_struct *tsk, struct mm_struct *mm)
 	 * put the oom_reaper out of the way.
 	 */
 	mmput_async(mm);
-	trace_finish_task_reaping(tsk->pid);
 unlock_oom:
 	mutex_unlock(&oom_lock);
 	return ret;
@@ -636,7 +615,6 @@ static void wake_oom_reaper(struct task_struct *tsk)
 	tsk->oom_reaper_list = oom_reaper_list;
 	oom_reaper_list = tsk;
 	spin_unlock(&oom_reaper_lock);
-	trace_wake_reaper(tsk->pid);
 	wake_up(&oom_reaper_wait);
 }
 
@@ -688,7 +666,6 @@ static void mark_oom_victim(struct task_struct *tsk)
 	 */
 	__thaw_task(tsk);
 	atomic_inc(&oom_victims);
-	trace_mark_victim(tsk->pid);
 }
 
 /**
@@ -708,7 +685,6 @@ void exit_oom_victim(void)
 void oom_killer_enable(void)
 {
 	oom_killer_disabled = false;
-	pr_info("OOM killer enabled.\n");
 }
 
 /**
@@ -745,7 +721,6 @@ bool oom_killer_disable(signed long timeout)
 		oom_killer_enable();
 		return false;
 	}
-	pr_info("OOM killer disabled.\n");
 
 	return true;
 }
@@ -899,11 +874,6 @@ static void oom_kill_process(struct oom_control *oc, const char *message)
 	/* Get a reference to safely compare mm after task_unlock(victim) */
 	mm = victim->mm;
 	mmgrab(mm);
-
-	/* Raise event before sending signal: task reaper must see this */
-	count_vm_event(OOM_KILL);
-	count_memcg_event_mm(mm, OOM_KILL);
-
 	/*
 	 * We should send SIGKILL before setting TIF_MEMDIE in order to prevent
 	 * the OOM victim from depleting the memory reserves from the user

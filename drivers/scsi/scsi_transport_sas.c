@@ -33,7 +33,6 @@
 #include <linux/bsg.h>
 
 #include <scsi/scsi.h>
-#include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_request.h>
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
@@ -173,7 +172,7 @@ static void sas_smp_request(struct request_queue *q, struct Scsi_Host *shost,
 			    struct sas_rphy *rphy)
 {
 	struct request *req;
-	blk_status_t ret;
+	int ret;
 	int (*handler)(struct Scsi_Host *, struct sas_rphy *, struct request *);
 
 	while ((req = blk_fetch_request(q)) != NULL) {
@@ -185,9 +184,9 @@ static void sas_smp_request(struct request_queue *q, struct Scsi_Host *shost,
 				blk_rq_bytes(req->next_rq);
 		handler = to_sas_internal(shost->transportt)->f->smp_handler;
 		ret = handler(shost, rphy, req);
-		scsi_req(req)->result = ret;
+		req->errors = ret;
 
-		blk_end_request_all(req, 0);
+		blk_end_request_all(req, ret);
 
 		spin_lock_irq(q->queue_lock);
 	}
@@ -231,7 +230,6 @@ static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
 	q = blk_alloc_queue(GFP_KERNEL);
 	if (!q)
 		return -ENOMEM;
-	q->initialize_rq_fn = scsi_initialize_rq;
 	q->cmd_size = sizeof(struct scsi_request);
 
 	if (rphy) {
@@ -251,11 +249,6 @@ static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
 	if (error)
 		goto out_cleanup_queue;
 
-	/*
-	 * by default assume old behaviour and bounce for any highmem page
-	 */
-	blk_queue_bounce_limit(q, BLK_BOUNCE_HIGH);
-
 	error = bsg_register_queue(q, dev, name, release);
 	if (error)
 		goto out_cleanup_queue;
@@ -271,7 +264,6 @@ static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
 		q->queuedata = shost;
 
 	queue_flag_set_unlocked(QUEUE_FLAG_BIDI, q);
-	queue_flag_set_unlocked(QUEUE_FLAG_SCSI_PASSTHROUGH, q);
 	return 0;
 
 out_cleanup_queue:
@@ -378,16 +370,12 @@ EXPORT_SYMBOL(sas_remove_children);
  * sas_remove_host  -  tear down a Scsi_Host's SAS data structures
  * @shost:	Scsi Host that is torn down
  *
- * Removes all SAS PHYs and remote PHYs for a given Scsi_Host and remove the
- * Scsi_Host as well.
- *
- * Note: Do not call scsi_remove_host() on the Scsi_Host any more, as it is
- * already removed.
+ * Removes all SAS PHYs and remote PHYs for a given Scsi_Host.
+ * Must be called just before scsi_remove_host for SAS HBAs.
  */
 void sas_remove_host(struct Scsi_Host *shost)
 {
 	sas_remove_children(&shost->shost_gendev);
-	scsi_remove_host(shost);
 }
 EXPORT_SYMBOL(sas_remove_host);
 

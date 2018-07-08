@@ -221,7 +221,7 @@ skip:
 			goto bad_desc;
 	}
 
-	if (header.usb_cdc_ether_desc && info->ether->wMaxSegmentSize) {
+	if (header.usb_cdc_ether_desc) {
 		dev->hard_mtu = le16_to_cpu(info->ether->wMaxSegmentSize);
 		/* because of Zaurus, we may be ignoring the host
 		 * side link address we were given.
@@ -310,26 +310,6 @@ skip:
 		return -ENODEV;
 	}
 
-	return 0;
-
-bad_desc:
-	dev_info(&dev->udev->dev, "bad CDC descriptors\n");
-	return -ENODEV;
-}
-EXPORT_SYMBOL_GPL(usbnet_generic_cdc_bind);
-
-
-/* like usbnet_generic_cdc_bind() but handles filter initialization
- * correctly
- */
-int usbnet_ether_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
-{
-	int rv;
-
-	rv = usbnet_generic_cdc_bind(dev, intf);
-	if (rv < 0)
-		goto bail_out;
-
 	/* Some devices don't initialise properly. In particular
 	 * the packet filter is not reset. There are devices that
 	 * don't do reset all the way. So the packet filter should
@@ -337,10 +317,13 @@ int usbnet_ether_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 	 */
 	usbnet_cdc_update_filter(dev);
 
-bail_out:
-	return rv;
+	return 0;
+
+bad_desc:
+	dev_info(&dev->udev->dev, "bad CDC descriptors\n");
+	return -ENODEV;
 }
-EXPORT_SYMBOL_GPL(usbnet_ether_cdc_bind);
+EXPORT_SYMBOL_GPL(usbnet_generic_cdc_bind);
 
 void usbnet_cdc_unbind(struct usbnet *dev, struct usb_interface *intf)
 {
@@ -434,7 +417,7 @@ int usbnet_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 	BUILD_BUG_ON((sizeof(((struct usbnet *)0)->data)
 			< sizeof(struct cdc_state)));
 
-	status = usbnet_ether_cdc_bind(dev, intf);
+	status = usbnet_generic_cdc_bind(dev, intf);
 	if (status < 0)
 		return status;
 

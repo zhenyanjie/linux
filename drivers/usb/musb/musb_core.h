@@ -172,8 +172,6 @@ struct musb_io;
  */
 struct musb_platform_ops {
 
-#define MUSB_G_NO_SKB_RESERVE	BIT(9)
-#define MUSB_DA8XX		BIT(8)
 #define MUSB_PRESERVE_SESSION	BIT(7)
 #define MUSB_DMA_UX500		BIT(6)
 #define MUSB_DMA_CPPI41		BIT(5)
@@ -427,8 +425,6 @@ struct musb {
 	unsigned		set_address:1;
 	unsigned		test_mode:1;
 	unsigned		softconnect:1;
-
-	unsigned		flush_irq_work:1;
 
 	u8			address;
 	u8			test_mode_nr;

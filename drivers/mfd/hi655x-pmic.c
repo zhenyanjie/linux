@@ -77,8 +77,7 @@ static const struct mfd_cell hi655x_pmic_devs[] = {
 		.num_resources	= ARRAY_SIZE(pwrkey_resources),
 		.resources	= &pwrkey_resources[0],
 	},
-	{	.name		= "hi655x-regulator",	},
-	{	.name		= "hi655x-clk",		},
+	{	.name		= "hi655x-regulator", },
 };
 
 static void hi655x_local_irq_clear(struct regmap *map)

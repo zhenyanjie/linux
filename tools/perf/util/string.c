@@ -1,9 +1,5 @@
-#include "string2.h"
-#include <linux/kernel.h>
-#include <linux/string.h>
-#include <stdlib.h>
-
-#include "sane_ctype.h"
+#include "util.h"
+#include "linux/string.h"
 
 #define K 1024LL
 /*
@@ -103,10 +99,8 @@ static int count_argc(const char *str)
 void argv_free(char **argv)
 {
 	char **p;
-	for (p = argv; *p; p++) {
-		free(*p);
-		*p = NULL;
-	}
+	for (p = argv; *p; p++)
+		zfree(p);
 
 	free(argv);
 }
@@ -126,7 +120,7 @@ void argv_free(char **argv)
 char **argv_split(const char *str, int *argcp)
 {
 	int argc = count_argc(str);
-	char **argv = calloc(argc + 1, sizeof(*argv));
+	char **argv = zalloc(sizeof(*argv) * (argc+1));
 	char **argvp;
 
 	if (argv == NULL)
@@ -328,8 +322,12 @@ char *strxfrchar(char *s, char from, char to)
  */
 char *ltrim(char *s)
 {
-	while (isspace(*s))
+	int len = strlen(s);
+
+	while (len && isspace(*s)) {
+		len--;
 		s++;
+	}
 
 	return s;
 }
@@ -383,7 +381,7 @@ char *asprintf_expr_inout_ints(const char *var, bool in, size_t nints, int *ints
 				goto out_err_overflow;
 
 			if (i > 0)
-				printed += scnprintf(e + printed, size - printed, " %s ", or_and);
+				printed += snprintf(e + printed, size - printed, " %s ", or_and);
 			printed += scnprintf(e + printed, size - printed,
 					     "%s %s %d", var, eq_neq, ints[i]);
 		}

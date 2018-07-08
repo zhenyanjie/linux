@@ -357,10 +357,7 @@ static int aemif_probe(struct platform_device *pdev)
 		return PTR_ERR(aemif->clk);
 	}
 
-	ret = clk_prepare_enable(aemif->clk);
-	if (ret)
-		return ret;
-
+	clk_prepare_enable(aemif->clk);
 	aemif->clk_rate = clk_get_rate(aemif->clk) / MSEC_PER_SEC;
 
 	if (of_device_is_compatible(np, "ti,da850-aemif"))

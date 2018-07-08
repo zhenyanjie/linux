@@ -63,6 +63,7 @@ struct tm6000_IR {
 	u8			wait:1;
 	u8			pwled:2;
 	u8			submit_urb:1;
+	u16			key_addr;
 	struct urb		*int_urb;
 
 	/* IR device properties */
@@ -319,6 +320,9 @@ static int tm6000_ir_change_protocol(struct rc_dev *rc, u64 *rc_type)
 		return 0;
 
 	dprintk(2, "%s\n",__func__);
+
+	if ((rc->rc_map.scan) && (*rc_type == RC_BIT_NEC))
+		ir->key_addr = ((rc->rc_map.scan[0].scancode >> 8) & 0xffff);
 
 	ir->rc_type = *rc_type;
 

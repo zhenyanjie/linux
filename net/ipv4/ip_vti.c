@@ -168,7 +168,6 @@ static netdev_tx_t vti_xmit(struct sk_buff *skb, struct net_device *dev,
 	struct ip_tunnel_parm *parms = &tunnel->parms;
 	struct dst_entry *dst = skb_dst(skb);
 	struct net_device *tdev;	/* Device to other host */
-	int pkt_len = skb->len;
 	int err;
 	int mtu;
 
@@ -230,7 +229,7 @@ static netdev_tx_t vti_xmit(struct sk_buff *skb, struct net_device *dev,
 
 	err = dst_output(tunnel->net, skb->sk, skb);
 	if (net_xmit_eval(err) == 0)
-		err = pkt_len;
+		err = skb->len;
 	iptunnel_xmit_stats(dev, err);
 	return NETDEV_TX_OK;
 
@@ -466,15 +465,13 @@ static struct pernet_operations vti_net_ops = {
 	.size = sizeof(struct ip_tunnel_net),
 };
 
-static int vti_tunnel_validate(struct nlattr *tb[], struct nlattr *data[],
-			       struct netlink_ext_ack *extack)
+static int vti_tunnel_validate(struct nlattr *tb[], struct nlattr *data[])
 {
 	return 0;
 }
 
 static void vti_netlink_parms(struct nlattr *data[],
-			      struct ip_tunnel_parm *parms,
-			      __u32 *fwmark)
+			      struct ip_tunnel_parm *parms)
 {
 	memset(parms, 0, sizeof(*parms));
 
@@ -500,31 +497,24 @@ static void vti_netlink_parms(struct nlattr *data[],
 	if (data[IFLA_VTI_REMOTE])
 		parms->iph.daddr = nla_get_in_addr(data[IFLA_VTI_REMOTE]);
 
-	if (data[IFLA_VTI_FWMARK])
-		*fwmark = nla_get_u32(data[IFLA_VTI_FWMARK]);
 }
 
 static int vti_newlink(struct net *src_net, struct net_device *dev,
-		       struct nlattr *tb[], struct nlattr *data[],
-		       struct netlink_ext_ack *extack)
+		       struct nlattr *tb[], struct nlattr *data[])
 {
 	struct ip_tunnel_parm parms;
-	__u32 fwmark = 0;
 
-	vti_netlink_parms(data, &parms, &fwmark);
-	return ip_tunnel_newlink(dev, tb, &parms, fwmark);
+	vti_netlink_parms(data, &parms);
+	return ip_tunnel_newlink(dev, tb, &parms);
 }
 
 static int vti_changelink(struct net_device *dev, struct nlattr *tb[],
-			  struct nlattr *data[],
-			  struct netlink_ext_ack *extack)
+			  struct nlattr *data[])
 {
-	struct ip_tunnel *t = netdev_priv(dev);
-	__u32 fwmark = t->fwmark;
 	struct ip_tunnel_parm p;
 
-	vti_netlink_parms(data, &p, &fwmark);
-	return ip_tunnel_changelink(dev, tb, &p, fwmark);
+	vti_netlink_parms(data, &p);
+	return ip_tunnel_changelink(dev, tb, &p);
 }
 
 static size_t vti_get_size(const struct net_device *dev)
@@ -540,8 +530,6 @@ static size_t vti_get_size(const struct net_device *dev)
 		nla_total_size(4) +
 		/* IFLA_VTI_REMOTE */
 		nla_total_size(4) +
-		/* IFLA_VTI_FWMARK */
-		nla_total_size(4) +
 		0;
 }
 
@@ -550,13 +538,11 @@ static int vti_fill_info(struct sk_buff *skb, const struct net_device *dev)
 	struct ip_tunnel *t = netdev_priv(dev);
 	struct ip_tunnel_parm *p = &t->parms;
 
-	if (nla_put_u32(skb, IFLA_VTI_LINK, p->link) ||
-	    nla_put_be32(skb, IFLA_VTI_IKEY, p->i_key) ||
-	    nla_put_be32(skb, IFLA_VTI_OKEY, p->o_key) ||
-	    nla_put_in_addr(skb, IFLA_VTI_LOCAL, p->iph.saddr) ||
-	    nla_put_in_addr(skb, IFLA_VTI_REMOTE, p->iph.daddr) ||
-	    nla_put_u32(skb, IFLA_VTI_FWMARK, t->fwmark))
-		return -EMSGSIZE;
+	nla_put_u32(skb, IFLA_VTI_LINK, p->link);
+	nla_put_be32(skb, IFLA_VTI_IKEY, p->i_key);
+	nla_put_be32(skb, IFLA_VTI_OKEY, p->o_key);
+	nla_put_in_addr(skb, IFLA_VTI_LOCAL, p->iph.saddr);
+	nla_put_in_addr(skb, IFLA_VTI_REMOTE, p->iph.daddr);
 
 	return 0;
 }
@@ -567,7 +553,6 @@ static const struct nla_policy vti_policy[IFLA_VTI_MAX + 1] = {
 	[IFLA_VTI_OKEY]		= { .type = NLA_U32 },
 	[IFLA_VTI_LOCAL]	= { .len = FIELD_SIZEOF(struct iphdr, saddr) },
 	[IFLA_VTI_REMOTE]	= { .len = FIELD_SIZEOF(struct iphdr, daddr) },
-	[IFLA_VTI_FWMARK]	= { .type = NLA_U32 },
 };
 
 static struct rtnl_link_ops vti_link_ops __read_mostly = {

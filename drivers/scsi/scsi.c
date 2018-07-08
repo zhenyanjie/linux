@@ -108,7 +108,14 @@ EXPORT_SYMBOL(scsi_sd_pm_domain);
  */
 void scsi_put_command(struct scsi_cmnd *cmd)
 {
-	scsi_del_cmd_from_list(cmd);
+	unsigned long flags;
+
+	/* serious error if the command hasn't come from a device list */
+	spin_lock_irqsave(&cmd->device->list_lock, flags);
+	BUG_ON(list_empty(&cmd->list));
+	list_del_init(&cmd->list);
+	spin_unlock_irqrestore(&cmd->device->list_lock, flags);
+
 	BUG_ON(delayed_work_pending(&cmd->abort_work));
 }
 
@@ -756,8 +763,6 @@ struct scsi_device *__scsi_device_lookup(struct Scsi_Host *shost,
 	struct scsi_device *sdev;
 
 	list_for_each_entry(sdev, &shost->__devices, siblings) {
-		if (sdev->sdev_state == SDEV_DEL)
-			continue;
 		if (sdev->channel == channel && sdev->id == id &&
 				sdev->lun ==lun)
 			return sdev;

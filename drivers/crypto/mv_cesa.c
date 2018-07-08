@@ -18,7 +18,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/clk.h>
-#include <crypto/hmac.h>
 #include <crypto/internal/hash.h>
 #include <crypto/sha.h>
 #include <linux/of.h>
@@ -823,8 +822,8 @@ static int mv_hash_setkey(struct crypto_ahash *tfm, const u8 * key,
 		memcpy(opad, ipad, bs);
 
 		for (i = 0; i < bs; i++) {
-			ipad[i] ^= HMAC_IPAD_VALUE;
-			opad[i] ^= HMAC_OPAD_VALUE;
+			ipad[i] ^= 0x36;
+			opad[i] ^= 0x5c;
 		}
 
 		rc = crypto_shash_init(shash) ? :

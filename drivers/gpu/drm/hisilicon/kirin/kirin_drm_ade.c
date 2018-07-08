@@ -302,8 +302,9 @@ static void ade_set_medianoc_qos(struct ade_crtc *acrtc)
 			   SOCKET_QOS_EN, SOCKET_QOS_EN);
 }
 
-static int ade_crtc_enable_vblank(struct drm_crtc *crtc)
+static int ade_enable_vblank(struct drm_device *dev, unsigned int pipe)
 {
+	struct drm_crtc *crtc = drm_crtc_from_index(dev, pipe);
 	struct ade_crtc *acrtc = to_ade_crtc(crtc);
 	struct ade_hw_ctx *ctx = acrtc->ctx;
 	void __iomem *base = ctx->base;
@@ -317,8 +318,9 @@ static int ade_crtc_enable_vblank(struct drm_crtc *crtc)
 	return 0;
 }
 
-static void ade_crtc_disable_vblank(struct drm_crtc *crtc)
+static void ade_disable_vblank(struct drm_device *dev, unsigned int pipe)
 {
+	struct drm_crtc *crtc = drm_crtc_from_index(dev, pipe);
 	struct ade_crtc *acrtc = to_ade_crtc(crtc);
 	struct ade_hw_ctx *ctx = acrtc->ctx;
 	void __iomem *base = ctx->base;
@@ -568,8 +570,6 @@ static const struct drm_crtc_funcs ade_crtc_funcs = {
 	.set_property = drm_atomic_helper_crtc_set_property,
 	.atomic_duplicate_state	= drm_atomic_helper_crtc_duplicate_state,
 	.atomic_destroy_state	= drm_atomic_helper_crtc_destroy_state,
-	.enable_vblank	= ade_crtc_enable_vblank,
-	.disable_vblank	= ade_crtc_disable_vblank,
 };
 
 static int ade_crtc_init(struct drm_device *dev, struct drm_crtc *crtc,
@@ -1025,6 +1025,9 @@ static int ade_drm_init(struct platform_device *pdev)
 			       IRQF_SHARED, dev->driver->name, acrtc);
 	if (ret)
 		return ret;
+	dev->driver->get_vblank_counter = drm_vblank_no_hw_counter;
+	dev->driver->enable_vblank = ade_enable_vblank;
+	dev->driver->disable_vblank = ade_disable_vblank;
 
 	return 0;
 }

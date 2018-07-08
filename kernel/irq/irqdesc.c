@@ -4,7 +4,7 @@
  *
  * This file contains the interrupt descriptor management code
  *
- * Detailed information is available in Documentation/core-api/genericirq.rst
+ * Detailed information is available in Documentation/DocBook/genericirq
  *
  */
 #include <linux/irq.h>
@@ -54,25 +54,14 @@ static void __init init_irq_default_affinity(void)
 #endif
 
 #ifdef CONFIG_SMP
-static int alloc_masks(struct irq_desc *desc, int node)
+static int alloc_masks(struct irq_desc *desc, gfp_t gfp, int node)
 {
 	if (!zalloc_cpumask_var_node(&desc->irq_common_data.affinity,
-				     GFP_KERNEL, node))
+				     gfp, node))
 		return -ENOMEM;
-
-#ifdef CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK
-	if (!zalloc_cpumask_var_node(&desc->irq_common_data.effective_affinity,
-				     GFP_KERNEL, node)) {
-		free_cpumask_var(desc->irq_common_data.affinity);
-		return -ENOMEM;
-	}
-#endif
 
 #ifdef CONFIG_GENERIC_PENDING_IRQ
-	if (!zalloc_cpumask_var_node(&desc->pending_mask, GFP_KERNEL, node)) {
-#ifdef CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK
-		free_cpumask_var(desc->irq_common_data.effective_affinity);
-#endif
+	if (!zalloc_cpumask_var_node(&desc->pending_mask, gfp, node)) {
 		free_cpumask_var(desc->irq_common_data.affinity);
 		return -ENOMEM;
 	}
@@ -97,7 +86,7 @@ static void desc_smp_init(struct irq_desc *desc, int node,
 
 #else
 static inline int
-alloc_masks(struct irq_desc *desc, int node) { return 0; }
+alloc_masks(struct irq_desc *desc, gfp_t gfp, int node) { return 0; }
 static inline void
 desc_smp_init(struct irq_desc *desc, int node, const struct cpumask *affinity) { }
 #endif
@@ -116,7 +105,6 @@ static void desc_set_defaults(unsigned int irq, struct irq_desc *desc, int node,
 	desc->irq_data.chip_data = NULL;
 	irq_settings_clr_and_set(desc, ~0, _IRQ_DEFAULT_INIT_FLAGS);
 	irqd_set(&desc->irq_data, IRQD_IRQ_DISABLED);
-	irqd_set(&desc->irq_data, IRQD_IRQ_MASKED);
 	desc->handle_irq = handle_bad_irq;
 	desc->depth = 1;
 	desc->irq_count = 0;
@@ -336,9 +324,6 @@ static void free_masks(struct irq_desc *desc)
 	free_cpumask_var(desc->pending_mask);
 #endif
 	free_cpumask_var(desc->irq_common_data.affinity);
-#ifdef CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK
-	free_cpumask_var(desc->irq_common_data.effective_affinity);
-#endif
 }
 #else
 static inline void free_masks(struct irq_desc *desc) { }
@@ -359,8 +344,9 @@ static struct irq_desc *alloc_desc(int irq, int node, unsigned int flags,
 				   struct module *owner)
 {
 	struct irq_desc *desc;
+	gfp_t gfp = GFP_KERNEL;
 
-	desc = kzalloc_node(sizeof(*desc), GFP_KERNEL, node);
+	desc = kzalloc_node(sizeof(*desc), gfp, node);
 	if (!desc)
 		return NULL;
 	/* allocate based on nr_cpu_ids */
@@ -368,12 +354,11 @@ static struct irq_desc *alloc_desc(int irq, int node, unsigned int flags,
 	if (!desc->kstat_irqs)
 		goto err_desc;
 
-	if (alloc_masks(desc, node))
+	if (alloc_masks(desc, gfp, node))
 		goto err_kstat;
 
 	raw_spin_lock_init(&desc->lock);
 	lockdep_set_class(&desc->lock, &irq_desc_lock_class);
-	mutex_init(&desc->request_mutex);
 	init_rcu_head(&desc->rcu);
 
 	desc_set_defaults(irq, desc, node, affinity, owner);
@@ -409,7 +394,6 @@ static void free_desc(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
 
-	irq_remove_debugfs_entry(desc);
 	unregister_irq_proc(irq, desc);
 
 	/*
@@ -421,8 +405,10 @@ static void free_desc(unsigned int irq)
 	 * The sysfs entry must be serialized against a concurrent
 	 * irq_sysfs_init() as well.
 	 */
+	mutex_lock(&sparse_irq_lock);
 	kobject_del(&desc->kobj);
 	delete_irq_desc(irq);
+	mutex_unlock(&sparse_irq_lock);
 
 	/*
 	 * We free the descriptor, masks and stat fields via RCU. That
@@ -460,15 +446,20 @@ static int alloc_descs(unsigned int start, unsigned int cnt, int node,
 		desc = alloc_desc(start + i, node, flags, mask, owner);
 		if (!desc)
 			goto err;
+		mutex_lock(&sparse_irq_lock);
 		irq_insert_desc(start + i, desc);
 		irq_sysfs_add(start + i, desc);
+		mutex_unlock(&sparse_irq_lock);
 	}
-	bitmap_set(allocated_irqs, start, cnt);
 	return start;
 
 err:
 	for (i--; i >= 0; i--)
 		free_desc(start + i);
+
+	mutex_lock(&sparse_irq_lock);
+	bitmap_clear(allocated_irqs, start, cnt);
+	mutex_unlock(&sparse_irq_lock);
 	return -ENOMEM;
 }
 
@@ -489,8 +480,7 @@ int __init early_irq_init(void)
 
 	/* Let arch update nr_irqs and return the nr of preallocated irqs */
 	initcnt = arch_probe_nr_irqs();
-	printk(KERN_INFO "NR_IRQS: %d, nr_irqs: %d, preallocated irqs: %d\n",
-	       NR_IRQS, nr_irqs, initcnt);
+	printk(KERN_INFO "NR_IRQS:%d nr_irqs:%d %d\n", NR_IRQS, nr_irqs, initcnt);
 
 	if (WARN_ON(nr_irqs > IRQ_BITMAP_BITS))
 		nr_irqs = IRQ_BITMAP_BITS;
@@ -526,14 +516,14 @@ int __init early_irq_init(void)
 
 	init_irq_default_affinity();
 
-	printk(KERN_INFO "NR_IRQS: %d\n", NR_IRQS);
+	printk(KERN_INFO "NR_IRQS:%d\n", NR_IRQS);
 
 	desc = irq_desc;
 	count = ARRAY_SIZE(irq_desc);
 
 	for (i = 0; i < count; i++) {
 		desc[i].kstat_irqs = alloc_percpu(unsigned int);
-		alloc_masks(&desc[i], node);
+		alloc_masks(&desc[i], GFP_KERNEL, node);
 		raw_spin_lock_init(&desc[i].lock);
 		lockdep_set_class(&desc[i].lock, &irq_desc_lock_class);
 		desc_set_defaults(i, &desc[i], node, NULL, NULL);
@@ -568,7 +558,6 @@ static inline int alloc_descs(unsigned int start, unsigned int cnt, int node,
 
 		desc->owner = owner;
 	}
-	bitmap_set(allocated_irqs, start, cnt);
 	return start;
 }
 
@@ -664,10 +653,10 @@ void irq_free_descs(unsigned int from, unsigned int cnt)
 	if (from >= nr_irqs || (from + cnt) > nr_irqs)
 		return;
 
-	mutex_lock(&sparse_irq_lock);
 	for (i = 0; i < cnt; i++)
 		free_desc(from + i);
 
+	mutex_lock(&sparse_irq_lock);
 	bitmap_clear(allocated_irqs, from, cnt);
 	mutex_unlock(&sparse_irq_lock);
 }
@@ -714,15 +703,19 @@ __irq_alloc_descs(int irq, unsigned int from, unsigned int cnt, int node,
 					   from, cnt, 0);
 	ret = -EEXIST;
 	if (irq >=0 && start != irq)
-		goto unlock;
+		goto err;
 
 	if (start + cnt > nr_irqs) {
 		ret = irq_expand_nr_irqs(start + cnt);
 		if (ret)
-			goto unlock;
+			goto err;
 	}
-	ret = alloc_descs(start, cnt, node, affinity, owner);
-unlock:
+
+	bitmap_set(allocated_irqs, start, cnt);
+	mutex_unlock(&sparse_irq_lock);
+	return alloc_descs(start, cnt, node, affinity, owner);
+
+err:
 	mutex_unlock(&sparse_irq_lock);
 	return ret;
 }

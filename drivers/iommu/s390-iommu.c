@@ -165,14 +165,20 @@ static void s390_iommu_detach_device(struct iommu_domain *domain,
 
 static int s390_iommu_add_device(struct device *dev)
 {
-	struct iommu_group *group = iommu_group_get_for_dev(dev);
+	struct iommu_group *group;
+	int rc;
 
-	if (IS_ERR(group))
-		return PTR_ERR(group);
+	group = iommu_group_get(dev);
+	if (!group) {
+		group = iommu_group_alloc();
+		if (IS_ERR(group))
+			return PTR_ERR(group);
+	}
 
+	rc = iommu_group_add_device(group, dev);
 	iommu_group_put(group);
 
-	return 0;
+	return rc;
 }
 
 static void s390_iommu_remove_device(struct device *dev)
@@ -338,7 +344,6 @@ static struct iommu_ops s390_iommu_ops = {
 	.iova_to_phys = s390_iommu_iova_to_phys,
 	.add_device = s390_iommu_add_device,
 	.remove_device = s390_iommu_remove_device,
-	.device_group = generic_device_group,
 	.pgsize_bitmap = S390_IOMMU_PGSIZES,
 };
 

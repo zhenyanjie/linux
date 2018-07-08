@@ -231,36 +231,24 @@ static void vgic_mmio_change_active(struct kvm_vcpu *vcpu, struct vgic_irq *irq,
  * be migrated while we don't hold the IRQ locks and we don't want to be
  * chasing moving targets.
  *
- * For private interrupts we don't have to do anything because userspace
- * accesses to the VGIC state already require all VCPUs to be stopped, and
- * only the VCPU itself can modify its private interrupts active state, which
- * guarantees that the VCPU is not running.
+ * For private interrupts, we only have to make sure the single and only VCPU
+ * that can potentially queue the IRQ is stopped.
  */
 static void vgic_change_active_prepare(struct kvm_vcpu *vcpu, u32 intid)
 {
-	if (intid > VGIC_NR_PRIVATE_IRQS)
+	if (intid < VGIC_NR_PRIVATE_IRQS)
+		kvm_arm_halt_vcpu(vcpu);
+	else
 		kvm_arm_halt_guest(vcpu->kvm);
 }
 
 /* See vgic_change_active_prepare */
 static void vgic_change_active_finish(struct kvm_vcpu *vcpu, u32 intid)
 {
-	if (intid > VGIC_NR_PRIVATE_IRQS)
+	if (intid < VGIC_NR_PRIVATE_IRQS)
+		kvm_arm_resume_vcpu(vcpu);
+	else
 		kvm_arm_resume_guest(vcpu->kvm);
-}
-
-static void __vgic_mmio_write_cactive(struct kvm_vcpu *vcpu,
-				      gpa_t addr, unsigned int len,
-				      unsigned long val)
-{
-	u32 intid = VGIC_ADDR_TO_INTID(addr, 1);
-	int i;
-
-	for_each_set_bit(i, &val, len * 8) {
-		struct vgic_irq *irq = vgic_get_irq(vcpu->kvm, vcpu, intid + i);
-		vgic_mmio_change_active(vcpu, irq, false);
-		vgic_put_irq(vcpu->kvm, irq);
-	}
 }
 
 void vgic_mmio_write_cactive(struct kvm_vcpu *vcpu,
@@ -268,35 +256,15 @@ void vgic_mmio_write_cactive(struct kvm_vcpu *vcpu,
 			     unsigned long val)
 {
 	u32 intid = VGIC_ADDR_TO_INTID(addr, 1);
-
-	mutex_lock(&vcpu->kvm->lock);
-	vgic_change_active_prepare(vcpu, intid);
-
-	__vgic_mmio_write_cactive(vcpu, addr, len, val);
-
-	vgic_change_active_finish(vcpu, intid);
-	mutex_unlock(&vcpu->kvm->lock);
-}
-
-void vgic_mmio_uaccess_write_cactive(struct kvm_vcpu *vcpu,
-				     gpa_t addr, unsigned int len,
-				     unsigned long val)
-{
-	__vgic_mmio_write_cactive(vcpu, addr, len, val);
-}
-
-static void __vgic_mmio_write_sactive(struct kvm_vcpu *vcpu,
-				      gpa_t addr, unsigned int len,
-				      unsigned long val)
-{
-	u32 intid = VGIC_ADDR_TO_INTID(addr, 1);
 	int i;
 
+	vgic_change_active_prepare(vcpu, intid);
 	for_each_set_bit(i, &val, len * 8) {
 		struct vgic_irq *irq = vgic_get_irq(vcpu->kvm, vcpu, intid + i);
-		vgic_mmio_change_active(vcpu, irq, true);
+		vgic_mmio_change_active(vcpu, irq, false);
 		vgic_put_irq(vcpu->kvm, irq);
 	}
+	vgic_change_active_finish(vcpu, intid);
 }
 
 void vgic_mmio_write_sactive(struct kvm_vcpu *vcpu,
@@ -304,21 +272,15 @@ void vgic_mmio_write_sactive(struct kvm_vcpu *vcpu,
 			     unsigned long val)
 {
 	u32 intid = VGIC_ADDR_TO_INTID(addr, 1);
+	int i;
 
-	mutex_lock(&vcpu->kvm->lock);
 	vgic_change_active_prepare(vcpu, intid);
-
-	__vgic_mmio_write_sactive(vcpu, addr, len, val);
-
+	for_each_set_bit(i, &val, len * 8) {
+		struct vgic_irq *irq = vgic_get_irq(vcpu->kvm, vcpu, intid + i);
+		vgic_mmio_change_active(vcpu, irq, true);
+		vgic_put_irq(vcpu->kvm, irq);
+	}
 	vgic_change_active_finish(vcpu, intid);
-	mutex_unlock(&vcpu->kvm->lock);
-}
-
-void vgic_mmio_uaccess_write_sactive(struct kvm_vcpu *vcpu,
-				     gpa_t addr, unsigned int len,
-				     unsigned long val)
-{
-	__vgic_mmio_write_sactive(vcpu, addr, len, val);
 }
 
 unsigned long vgic_mmio_read_priority(struct kvm_vcpu *vcpu,
@@ -484,12 +446,13 @@ static int match_region(const void *key, const void *elt)
 	return 0;
 }
 
-const struct vgic_register_region *
-vgic_find_mmio_region(const struct vgic_register_region *regions,
-		      int nr_regions, unsigned int offset)
+/* Find the proper register handler entry given a certain address offset. */
+static const struct vgic_register_region *
+vgic_find_mmio_region(const struct vgic_register_region *region, int nr_regions,
+		      unsigned int offset)
 {
-	return bsearch((void *)(uintptr_t)offset, regions, nr_regions,
-		       sizeof(regions[0]), match_region);
+	return bsearch((void *)(uintptr_t)offset, region, nr_regions,
+		       sizeof(region[0]), match_region);
 }
 
 void vgic_set_vmcr(struct kvm_vcpu *vcpu, struct vgic_vmcr *vmcr)

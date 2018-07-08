@@ -4,9 +4,6 @@
  * Copyright 2008-2012 Freescale Semiconductor, Inc.
  */
 
-#ifndef DESC_CONSTR_H
-#define DESC_CONSTR_H
-
 #include "desc.h"
 #include "regs.h"
 
@@ -494,5 +491,3 @@ static inline int desc_inline_query(unsigned int sd_base_len,
 
 	return (rem_bytes >= 0) ? 0 : -1;
 }
-
-#endif /* DESC_CONSTR_H */

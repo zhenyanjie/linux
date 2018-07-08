@@ -825,7 +825,6 @@ static int tg3_ape_event_lock(struct tg3 *tp, u32 timeout_us)
 	return timeout_us ? 0 : -EBUSY;
 }
 
-#ifdef CONFIG_TIGON3_HWMON
 static int tg3_ape_wait_for_event(struct tg3 *tp, u32 timeout_us)
 {
 	u32 i, apedata;
@@ -905,7 +904,6 @@ static int tg3_ape_scratchpad_read(struct tg3 *tp, u32 *data, u32 base_off,
 
 	return 0;
 }
-#endif
 
 static int tg3_ape_send_event(struct tg3 *tp, u32 event)
 {
@@ -10746,7 +10744,6 @@ static int tg3_init_hw(struct tg3 *tp, bool reset_phy)
 	return tg3_reset_hw(tp, reset_phy);
 }
 
-#ifdef CONFIG_TIGON3_HWMON
 static void tg3_sd_scan_scratchpad(struct tg3 *tp, struct tg3_ocir *ocir)
 {
 	int i;
@@ -10829,10 +10826,6 @@ static void tg3_hwmon_open(struct tg3 *tp)
 		dev_err(&pdev->dev, "Cannot register hwmon device, aborting\n");
 	}
 }
-#else
-static inline void tg3_hwmon_close(struct tg3 *tp) { }
-static inline void tg3_hwmon_open(struct tg3 *tp) { }
-#endif /* CONFIG_TIGON3_HWMON */
 
 
 #define TG3_STAT_ADD32(PSTAT, REG) \
@@ -11729,6 +11722,10 @@ static int tg3_close(struct net_device *dev)
 
 	tg3_stop(tp);
 
+	/* Clear stats across close / open calls */
+	memset(&tp->net_stats_prev, 0, sizeof(tp->net_stats_prev));
+	memset(&tp->estats_prev, 0, sizeof(tp->estats_prev));
+
 	if (pci_device_is_present(tp->pdev)) {
 		tg3_power_down_prepare(tp);
 
@@ -12097,9 +12094,7 @@ static int tg3_get_link_ksettings(struct net_device *dev,
 		if (!(tp->phy_flags & TG3_PHYFLG_IS_CONNECTED))
 			return -EAGAIN;
 		phydev = mdiobus_get_phy(tp->mdio_bus, tp->phy_addr);
-		phy_ethtool_ksettings_get(phydev, cmd);
-
-		return 0;
+		return phy_ethtool_ksettings_get(phydev, cmd);
 	}
 
 	supported = (SUPPORTED_Autoneg);

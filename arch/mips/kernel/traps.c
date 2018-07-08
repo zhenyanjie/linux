@@ -429,8 +429,7 @@ static const struct exception_table_entry *search_dbe_tables(unsigned long addr)
 {
 	const struct exception_table_entry *e;
 
-	e = search_extable(__start___dbe_table,
-			   __stop___dbe_table - __start___dbe_table, addr);
+	e = search_extable(__start___dbe_table, __stop___dbe_table - 1, addr);
 	if (!e)
 		e = search_module_dbetables(addr);
 	return e;
@@ -2259,8 +2258,8 @@ void set_handler(unsigned long offset, void *addr, unsigned long size)
 	local_flush_icache_range(ebase + offset, ebase + offset + size);
 }
 
-static const char panic_null_cerr[] =
-	"Trying to set NULL cache error exception handler\n";
+static char panic_null_cerr[] =
+	"Trying to set NULL cache error exception handler";
 
 /*
  * Install uncached CPU exception handler.

@@ -1,7 +1,6 @@
 #include "cpumap.h"
 #include "env.h"
 #include "util.h"
-#include <errno.h>
 
 struct perf_env perf_env;
 

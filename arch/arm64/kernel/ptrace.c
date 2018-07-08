@@ -623,10 +623,6 @@ static int fpr_get(struct task_struct *target, const struct user_regset *regset,
 {
 	struct user_fpsimd_state *uregs;
 	uregs = &target->thread.fpsimd_state.user_fpsimd;
-
-	if (target == current)
-		fpsimd_preserve_current_state();
-
 	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs, 0, -1);
 }
 
@@ -652,10 +648,6 @@ static int tls_get(struct task_struct *target, const struct user_regset *regset,
 		   void *kbuf, void __user *ubuf)
 {
 	unsigned long *tls = &target->thread.tp_value;
-
-	if (target == current)
-		tls_preserve_current_state();
-
 	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, tls, 0, -1);
 }
 
@@ -902,27 +894,21 @@ static int compat_vfp_get(struct task_struct *target,
 {
 	struct user_fpsimd_state *uregs;
 	compat_ulong_t fpscr;
-	int ret, vregs_end_pos;
+	int ret;
 
 	uregs = &target->thread.fpsimd_state.user_fpsimd;
-
-	if (target == current)
-		fpsimd_preserve_current_state();
 
 	/*
 	 * The VFP registers are packed into the fpsimd_state, so they all sit
 	 * nicely together for us. We just need to create the fpscr separately.
 	 */
-	vregs_end_pos = VFP_STATE_SIZE - sizeof(compat_ulong_t);
-	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs,
-				  0, vregs_end_pos);
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs, 0,
+				  VFP_STATE_SIZE - sizeof(compat_ulong_t));
 
 	if (count && !ret) {
 		fpscr = (uregs->fpsr & VFP_FPSCR_STAT_MASK) |
 			(uregs->fpcr & VFP_FPSCR_CTRL_MASK);
-
-		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &fpscr,
-					  vregs_end_pos, VFP_STATE_SIZE);
+		ret = put_user(fpscr, (compat_ulong_t *)ubuf);
 	}
 
 	return ret;
@@ -935,21 +921,20 @@ static int compat_vfp_set(struct task_struct *target,
 {
 	struct user_fpsimd_state *uregs;
 	compat_ulong_t fpscr;
-	int ret, vregs_end_pos;
+	int ret;
+
+	if (pos + count > VFP_STATE_SIZE)
+		return -EIO;
 
 	uregs = &target->thread.fpsimd_state.user_fpsimd;
 
-	vregs_end_pos = VFP_STATE_SIZE - sizeof(compat_ulong_t);
 	ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf, uregs, 0,
-				 vregs_end_pos);
+				 VFP_STATE_SIZE - sizeof(compat_ulong_t));
 
 	if (count && !ret) {
-		ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf, &fpscr,
-					 vregs_end_pos, VFP_STATE_SIZE);
-		if (!ret) {
-			uregs->fpsr = fpscr & VFP_FPSCR_STAT_MASK;
-			uregs->fpcr = fpscr & VFP_FPSCR_CTRL_MASK;
-		}
+		ret = get_user(fpscr, (compat_ulong_t *)ubuf);
+		uregs->fpsr = fpscr & VFP_FPSCR_STAT_MASK;
+		uregs->fpcr = fpscr & VFP_FPSCR_CTRL_MASK;
 	}
 
 	fpsimd_flush_task_state(target);

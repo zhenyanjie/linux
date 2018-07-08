@@ -27,13 +27,12 @@
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
-#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/smiapp.h>
 #include <linux/v4l2-mediabus.h>
-#include <media/v4l2-fwnode.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-of.h>
 
 #include "smiapp.h"
 
@@ -2785,20 +2784,19 @@ static int __maybe_unused smiapp_resume(struct device *dev)
 static struct smiapp_hwconfig *smiapp_get_hwconfig(struct device *dev)
 {
 	struct smiapp_hwconfig *hwcfg;
-	struct v4l2_fwnode_endpoint *bus_cfg;
-	struct fwnode_handle *ep;
-	struct fwnode_handle *fwnode = dev_fwnode(dev);
+	struct v4l2_of_endpoint *bus_cfg;
+	struct device_node *ep;
 	int i;
 	int rval;
 
-	if (!fwnode)
+	if (!dev->of_node)
 		return dev->platform_data;
 
-	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
+	ep = of_graph_get_next_endpoint(dev->of_node, NULL);
 	if (!ep)
 		return NULL;
 
-	bus_cfg = v4l2_fwnode_endpoint_alloc_parse(ep);
+	bus_cfg = v4l2_of_alloc_parse_endpoint(ep);
 	if (IS_ERR(bus_cfg))
 		goto out_err;
 
@@ -2819,10 +2817,11 @@ static struct smiapp_hwconfig *smiapp_get_hwconfig(struct device *dev)
 	dev_dbg(dev, "lanes %u\n", hwcfg->lanes);
 
 	/* NVM size is not mandatory */
-	fwnode_property_read_u32(fwnode, "nokia,nvm-size", &hwcfg->nvm_size);
+	of_property_read_u32(dev->of_node, "nokia,nvm-size",
+				    &hwcfg->nvm_size);
 
-	rval = fwnode_property_read_u32(fwnode, "clock-frequency",
-					&hwcfg->ext_clk);
+	rval = of_property_read_u32(dev->of_node, "clock-frequency",
+				    &hwcfg->ext_clk);
 	if (rval) {
 		dev_warn(dev, "can't get clock-frequency\n");
 		goto out_err;
@@ -2847,13 +2846,13 @@ static struct smiapp_hwconfig *smiapp_get_hwconfig(struct device *dev)
 		dev_dbg(dev, "freq %d: %lld\n", i, hwcfg->op_sys_clock[i]);
 	}
 
-	v4l2_fwnode_endpoint_free(bus_cfg);
-	fwnode_handle_put(ep);
+	v4l2_of_free_endpoint(bus_cfg);
+	of_node_put(ep);
 	return hwcfg;
 
 out_err:
-	v4l2_fwnode_endpoint_free(bus_cfg);
-	fwnode_handle_put(ep);
+	v4l2_of_free_endpoint(bus_cfg);
+	of_node_put(ep);
 	return NULL;
 }
 

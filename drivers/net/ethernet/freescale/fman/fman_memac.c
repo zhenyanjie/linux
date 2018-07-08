@@ -443,10 +443,7 @@ static int init(struct memac_regs __iomem *regs, struct memac_cfg *cfg,
 		break;
 	default:
 		tmp |= IF_MODE_GMII;
-		if (phy_if == PHY_INTERFACE_MODE_RGMII ||
-		    phy_if == PHY_INTERFACE_MODE_RGMII_ID ||
-		    phy_if == PHY_INTERFACE_MODE_RGMII_RXID ||
-		    phy_if == PHY_INTERFACE_MODE_RGMII_TXID)
+		if (phy_if == PHY_INTERFACE_MODE_RGMII)
 			tmp |= IF_MODE_RGMII | IF_MODE_RGMII_AUTO;
 	}
 	iowrite32be(tmp, &regs->if_mode);

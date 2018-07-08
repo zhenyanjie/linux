@@ -18,8 +18,6 @@
 
 #ifndef __BTRFS_TRANSACTION__
 #define __BTRFS_TRANSACTION__
-
-#include <linux/refcount.h>
 #include "btrfs_inode.h"
 #include "delayed-ref.h"
 #include "ctree.h"
@@ -51,7 +49,7 @@ struct btrfs_transaction {
 	 * transaction can end
 	 */
 	atomic_t num_writers;
-	refcount_t use_count;
+	atomic_t use_count;
 	atomic_t pending_ordered;
 
 	unsigned long flags;
@@ -127,6 +125,8 @@ struct btrfs_trans_handle {
 	unsigned int type;
 	struct btrfs_root *root;
 	struct btrfs_fs_info *fs_info;
+	struct seq_list delayed_ref_elem;
+	struct list_head qgroup_ref_list;
 	struct list_head new_bgs;
 };
 

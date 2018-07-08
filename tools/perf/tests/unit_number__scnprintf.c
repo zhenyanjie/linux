@@ -1,8 +1,7 @@
-#include <inttypes.h>
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include "tests.h"
-#include "units.h"
+#include "util.h"
 #include "debug.h"
 
 int test__unit_number__scnprint(int subtest __maybe_unused)

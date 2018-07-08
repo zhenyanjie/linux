@@ -42,7 +42,6 @@
  */
 
 #include <dt-bindings/clock/imx7d-clock.h>
-#include <dt-bindings/power/imx7-power.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
@@ -120,7 +119,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "simple-bus";
-		interrupt-parent = <&gpc>;
+		interrupt-parent = <&intc>;
 		ranges;
 
 		funnel@30041000 {
@@ -302,7 +301,6 @@
 			interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
 			#interrupt-cells = <3>;
 			interrupt-controller;
-			interrupt-parent = <&intc>;
 			reg = <0x31001000 0x1000>,
 			      <0x31002000 0x2000>,
 			      <0x31004000 0x2000>,
@@ -311,7 +309,6 @@
 
 		timer {
 			compatible = "arm,armv7-timer";
-			interrupt-parent = <&intc>;
 			interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
 				     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
 				     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
@@ -491,15 +488,15 @@
 			};
 
 			gpr: iomuxc-gpr@30340000 {
-				compatible = "fsl,imx7d-iomuxc-gpr",
-					"fsl,imx6q-iomuxc-gpr", "syscon";
+				compatible = "fsl,imx7d-iomuxc-gpr", "syscon";
 				reg = <0x30340000 0x10000>;
 			};
 
 			ocotp: ocotp-ctrl@30350000 {
-				compatible = "fsl,imx7d-ocotp", "syscon";
+				compatible = "syscon";
 				reg = <0x30350000 0x10000>;
-				clocks = <&clks IMX7D_OCOTP_CLK>;
+				clocks = <&clks IMX7D_CLK_DUMMY>;
+				status = "disabled";
 			};
 
 			anatop: anatop@30360000 {
@@ -520,7 +517,6 @@
 					anatop-min-bit-val = <8>;
 					anatop-min-voltage = <800000>;
 					anatop-max-voltage = <1200000>;
-					anatop-enable-bit = <0>;
 				};
 			};
 
@@ -563,31 +559,10 @@
 			};
 
 			src: src@30390000 {
-				compatible = "fsl,imx7d-src", "syscon";
+				compatible = "fsl,imx7d-src", "fsl,imx51-src", "syscon";
 				reg = <0x30390000 0x10000>;
 				interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
 				#reset-cells = <1>;
-			};
-
-			gpc: gpc@303a0000 {
-				compatible = "fsl,imx7d-gpc";
-				reg = <0x303a0000 0x10000>;
-				interrupt-controller;
-				interrupts = <GIC_SPI 87 IRQ_TYPE_LEVEL_HIGH>;
-				#interrupt-cells = <3>;
-				interrupt-parent = <&intc>;
-				#power-domain-cells = <1>;
-
-				pgc {
-					#address-cells = <1>;
-					#size-cells = <0>;
-
-					pgc_pcie_phy: pgc-power-domain@IMX7_POWER_DOMAIN_PCIE_PHY {
-						#power-domain-cells = <0>;
-						reg = <IMX7_POWER_DOMAIN_PCIE_PHY>;
-						power-supply = <&reg_1p0d>;
-					};
-				};
 			};
 		};
 
@@ -635,7 +610,7 @@
 				clocks = <&clks IMX7D_PWM1_ROOT_CLK>,
 					 <&clks IMX7D_PWM1_ROOT_CLK>;
 				clock-names = "ipg", "per";
-				#pwm-cells = <3>;
+				#pwm-cells = <2>;
 				status = "disabled";
 			};
 
@@ -646,7 +621,7 @@
 				clocks = <&clks IMX7D_PWM2_ROOT_CLK>,
 					 <&clks IMX7D_PWM2_ROOT_CLK>;
 				clock-names = "ipg", "per";
-				#pwm-cells = <3>;
+				#pwm-cells = <2>;
 				status = "disabled";
 			};
 
@@ -657,7 +632,7 @@
 				clocks = <&clks IMX7D_PWM3_ROOT_CLK>,
 					 <&clks IMX7D_PWM3_ROOT_CLK>;
 				clock-names = "ipg", "per";
-				#pwm-cells = <3>;
+				#pwm-cells = <2>;
 				status = "disabled";
 			};
 
@@ -668,7 +643,7 @@
 				clocks = <&clks IMX7D_PWM4_ROOT_CLK>,
 					 <&clks IMX7D_PWM4_ROOT_CLK>;
 				clock-names = "ipg", "per";
-				#pwm-cells = <3>;
+				#pwm-cells = <2>;
 				status = "disabled";
 			};
 
@@ -960,8 +935,8 @@
 				compatible = "fsl,imx7d-usdhc", "fsl,imx6sl-usdhc";
 				reg = <0x30b40000 0x10000>;
 				interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&clks IMX7D_IPG_ROOT_CLK>,
-					<&clks IMX7D_NAND_USDHC_BUS_ROOT_CLK>,
+				clocks = <&clks IMX7D_CLK_DUMMY>,
+					<&clks IMX7D_CLK_DUMMY>,
 					<&clks IMX7D_USDHC1_ROOT_CLK>;
 				clock-names = "ipg", "ahb", "per";
 				bus-width = <4>;
@@ -972,8 +947,8 @@
 				compatible = "fsl,imx7d-usdhc", "fsl,imx6sl-usdhc";
 				reg = <0x30b50000 0x10000>;
 				interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&clks IMX7D_IPG_ROOT_CLK>,
-					<&clks IMX7D_NAND_USDHC_BUS_ROOT_CLK>,
+				clocks = <&clks IMX7D_CLK_DUMMY>,
+					<&clks IMX7D_CLK_DUMMY>,
 					<&clks IMX7D_USDHC2_ROOT_CLK>;
 				clock-names = "ipg", "ahb", "per";
 				bus-width = <4>;
@@ -984,8 +959,8 @@
 				compatible = "fsl,imx7d-usdhc", "fsl,imx6sl-usdhc";
 				reg = <0x30b60000 0x10000>;
 				interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&clks IMX7D_IPG_ROOT_CLK>,
-					<&clks IMX7D_NAND_USDHC_BUS_ROOT_CLK>,
+				clocks = <&clks IMX7D_CLK_DUMMY>,
+					<&clks IMX7D_CLK_DUMMY>,
 					<&clks IMX7D_USDHC3_ROOT_CLK>;
 				clock-names = "ipg", "ahb", "per";
 				bus-width = <4>;

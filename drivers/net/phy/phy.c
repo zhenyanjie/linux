@@ -50,24 +50,8 @@ static const char *phy_speed_to_str(int speed)
 		return "1Gbps";
 	case SPEED_2500:
 		return "2.5Gbps";
-	case SPEED_5000:
-		return "5Gbps";
 	case SPEED_10000:
 		return "10Gbps";
-	case SPEED_14000:
-		return "14Gbps";
-	case SPEED_20000:
-		return "20Gbps";
-	case SPEED_25000:
-		return "25Gbps";
-	case SPEED_40000:
-		return "40Gbps";
-	case SPEED_50000:
-		return "50Gbps";
-	case SPEED_56000:
-		return "56Gbps";
-	case SPEED_100000:
-		return "100Gbps";
 	case SPEED_UNKNOWN:
 		return "Unknown";
 	default:
@@ -151,25 +135,6 @@ static int phy_config_interrupt(struct phy_device *phydev, u32 interrupts)
 	return 0;
 }
 
-/**
- * phy_restart_aneg - restart auto-negotiation
- * @phydev: target phy_device struct
- *
- * Restart the autonegotiation on @phydev.  Returns >= 0 on success or
- * negative errno on error.
- */
-int phy_restart_aneg(struct phy_device *phydev)
-{
-	int ret;
-
-	if (phydev->is_c45 && !(phydev->c45_ids.devices_in_package & BIT(0)))
-		ret = genphy_c45_restart_aneg(phydev);
-	else
-		ret = genphy_restart_aneg(phydev);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(phy_restart_aneg);
 
 /**
  * phy_aneg_done - return auto-negotiation status
@@ -184,12 +149,6 @@ int phy_aneg_done(struct phy_device *phydev)
 	if (phydev->drv && phydev->drv->aneg_done)
 		return phydev->drv->aneg_done(phydev);
 
-	/* Avoid genphy_aneg_done() if the Clause 45 PHY does not
-	 * implement Clause 22 registers
-	 */
-	if (phydev->is_c45 && !(phydev->c45_ids.devices_in_package & BIT(0)))
-		return -EINVAL;
-
 	return genphy_aneg_done(phydev);
 }
 EXPORT_SYMBOL(phy_aneg_done);
@@ -203,9 +162,7 @@ struct phy_setting {
 	u32 setting;
 };
 
-/* A mapping of all SUPPORTED settings to speed/duplex.  This table
- * must be grouped by speed and sorted in descending match priority
- * - iow, descending speed. */
+/* A mapping of all SUPPORTED settings to speed/duplex */
 static const struct phy_setting settings[] = {
 	{
 		.speed = SPEED_10000,
@@ -264,70 +221,45 @@ static const struct phy_setting settings[] = {
 	},
 };
 
+#define MAX_NUM_SETTINGS ARRAY_SIZE(settings)
+
 /**
- * phy_lookup_setting - lookup a PHY setting
+ * phy_find_setting - find a PHY settings array entry that matches speed & duplex
  * @speed: speed to match
  * @duplex: duplex to match
- * @features: allowed link modes
- * @exact: an exact match is required
  *
- * Search the settings array for a setting that matches the speed and
- * duplex, and which is supported.
- *
- * If @exact is unset, either an exact match or %NULL for no match will
- * be returned.
- *
- * If @exact is set, an exact match, the fastest supported setting at
- * or below the specified speed, the slowest supported setting, or if
- * they all fail, %NULL will be returned.
+ * Description: Searches the settings array for the setting which
+ *   matches the desired speed and duplex, and returns the index
+ *   of that setting.  Returns the index of the last setting if
+ *   none of the others match.
  */
-static const struct phy_setting *
-phy_lookup_setting(int speed, int duplex, u32 features, bool exact)
+static inline unsigned int phy_find_setting(int speed, int duplex)
 {
-	const struct phy_setting *p, *match = NULL, *last = NULL;
-	int i;
+	unsigned int idx = 0;
 
-	for (i = 0, p = settings; i < ARRAY_SIZE(settings); i++, p++) {
-		if (p->setting & features) {
-			last = p;
-			if (p->speed == speed && p->duplex == duplex) {
-				/* Exact match for speed and duplex */
-				match = p;
-				break;
-			} else if (!exact) {
-				if (!match && p->speed <= speed)
-					/* Candidate */
-					match = p;
+	while (idx < ARRAY_SIZE(settings) &&
+	       (settings[idx].speed != speed || settings[idx].duplex != duplex))
+		idx++;
 
-				if (p->speed < speed)
-					break;
-			}
-		}
-	}
-
-	if (!match && !exact)
-		match = last;
-
-	return match;
+	return idx < MAX_NUM_SETTINGS ? idx : MAX_NUM_SETTINGS - 1;
 }
 
 /**
- * phy_find_valid - find a PHY setting that matches the requested parameters
- * @speed: desired speed
- * @duplex: desired duplex
- * @supported: mask of supported link modes
+ * phy_find_valid - find a PHY setting that matches the requested features mask
+ * @idx: The first index in settings[] to search
+ * @features: A mask of the valid settings
  *
- * Locate a supported phy setting that is, in priority order:
- * - an exact match for the specified speed and duplex mode
- * - a match for the specified speed, or slower speed
- * - the slowest supported speed
- * Returns the matched phy_setting entry, or %NULL if no supported phy
- * settings were found.
+ * Description: Returns the index of the first valid setting less
+ *   than or equal to the one pointed to by idx, as determined by
+ *   the mask in features.  Returns the index of the last setting
+ *   if nothing else matches.
  */
-static const struct phy_setting *
-phy_find_valid(int speed, int duplex, u32 supported)
+static inline unsigned int phy_find_valid(unsigned int idx, u32 features)
 {
-	return phy_lookup_setting(speed, duplex, supported, false);
+	while (idx < MAX_NUM_SETTINGS && !(settings[idx].setting & features))
+		idx++;
+
+	return idx < MAX_NUM_SETTINGS ? idx : MAX_NUM_SETTINGS - 1;
 }
 
 /**
@@ -347,11 +279,20 @@ unsigned int phy_supported_speeds(struct phy_device *phy,
 	unsigned int count = 0;
 	unsigned int idx = 0;
 
-	for (idx = 0; idx < ARRAY_SIZE(settings) && count < size; idx++)
+	while (idx < MAX_NUM_SETTINGS && count < size) {
+		idx = phy_find_valid(idx, phy->supported);
+
+		if (!(settings[idx].setting & phy->supported))
+			break;
+
 		/* Assumes settings are grouped by speed */
-		if ((settings[idx].setting & phy->supported) &&
-		    (count == 0 || speeds[count - 1] != settings[idx].speed))
-			speeds[count++] = settings[idx].speed;
+		if ((count == 0) ||
+		    (speeds[count - 1] != settings[idx].speed)) {
+			speeds[count] = settings[idx].speed;
+			count++;
+		}
+		idx++;
+	}
 
 	return count;
 }
@@ -367,7 +308,12 @@ unsigned int phy_supported_speeds(struct phy_device *phy,
  */
 static inline bool phy_check_valid(int speed, int duplex, u32 features)
 {
-	return !!phy_lookup_setting(speed, duplex, features, true);
+	unsigned int idx;
+
+	idx = phy_find_valid(phy_find_setting(speed, duplex), features);
+
+	return settings[idx].speed == speed && settings[idx].duplex == duplex &&
+		(settings[idx].setting & features);
 }
 
 /**
@@ -380,22 +326,18 @@ static inline bool phy_check_valid(int speed, int duplex, u32 features)
  */
 static void phy_sanitize_settings(struct phy_device *phydev)
 {
-	const struct phy_setting *setting;
 	u32 features = phydev->supported;
+	unsigned int idx;
 
 	/* Sanitize settings based on PHY capabilities */
 	if ((features & SUPPORTED_Autoneg) == 0)
 		phydev->autoneg = AUTONEG_DISABLE;
 
-	setting = phy_find_valid(phydev->speed, phydev->duplex, features);
-	if (setting) {
-		phydev->speed = setting->speed;
-		phydev->duplex = setting->duplex;
-	} else {
-		/* We failed to find anything (no supported speeds?) */
-		phydev->speed = SPEED_UNKNOWN;
-		phydev->duplex = DUPLEX_UNKNOWN;
-	}
+	idx = phy_find_valid(phy_find_setting(phydev->speed, phydev->duplex),
+			features);
+
+	phydev->speed = settings[idx].speed;
+	phydev->duplex = settings[idx].duplex;
 }
 
 /**
@@ -404,7 +346,6 @@ static void phy_sanitize_settings(struct phy_device *phydev)
  * @cmd: ethtool_cmd
  *
  * A few notes about parameter checking:
- *
  * - We don't set port or transceiver, so we don't care what they
  *   were set to.
  * - phy_start_aneg() will make sure forced settings are sane, and
@@ -512,8 +453,32 @@ int phy_ethtool_ksettings_set(struct phy_device *phydev,
 }
 EXPORT_SYMBOL(phy_ethtool_ksettings_set);
 
-void phy_ethtool_ksettings_get(struct phy_device *phydev,
-			       struct ethtool_link_ksettings *cmd)
+int phy_ethtool_gset(struct phy_device *phydev, struct ethtool_cmd *cmd)
+{
+	cmd->supported = phydev->supported;
+
+	cmd->advertising = phydev->advertising;
+	cmd->lp_advertising = phydev->lp_advertising;
+
+	ethtool_cmd_speed_set(cmd, phydev->speed);
+	cmd->duplex = phydev->duplex;
+	if (phydev->interface == PHY_INTERFACE_MODE_MOCA)
+		cmd->port = PORT_BNC;
+	else
+		cmd->port = PORT_MII;
+	cmd->phy_address = phydev->mdio.addr;
+	cmd->transceiver = phy_is_internal(phydev) ?
+		XCVR_INTERNAL : XCVR_EXTERNAL;
+	cmd->autoneg = phydev->autoneg;
+	cmd->eth_tp_mdix_ctrl = phydev->mdix_ctrl;
+	cmd->eth_tp_mdix = phydev->mdix;
+
+	return 0;
+}
+EXPORT_SYMBOL(phy_ethtool_gset);
+
+int phy_ethtool_ksettings_get(struct phy_device *phydev,
+			      struct ethtool_link_ksettings *cmd)
 {
 	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
 						phydev->supported);
@@ -535,6 +500,8 @@ void phy_ethtool_ksettings_get(struct phy_device *phydev,
 	cmd->base.autoneg = phydev->autoneg;
 	cmd->base.eth_tp_mdix_ctrl = phydev->mdix_ctrl;
 	cmd->base.eth_tp_mdix = phydev->mdix;
+
+	return 0;
 }
 EXPORT_SYMBOL(phy_ethtool_ksettings_get);
 
@@ -1257,6 +1224,91 @@ void phy_mac_interrupt(struct phy_device *phydev, int new_link)
 }
 EXPORT_SYMBOL(phy_mac_interrupt);
 
+static inline void mmd_phy_indirect(struct mii_bus *bus, int prtad, int devad,
+				    int addr)
+{
+	/* Write the desired MMD Devad */
+	bus->write(bus, addr, MII_MMD_CTRL, devad);
+
+	/* Write the desired MMD register address */
+	bus->write(bus, addr, MII_MMD_DATA, prtad);
+
+	/* Select the Function : DATA with no post increment */
+	bus->write(bus, addr, MII_MMD_CTRL, (devad | MII_MMD_CTRL_NOINCR));
+}
+
+/**
+ * phy_read_mmd_indirect - reads data from the MMD registers
+ * @phydev: The PHY device bus
+ * @prtad: MMD Address
+ * @devad: MMD DEVAD
+ *
+ * Description: it reads data from the MMD registers (clause 22 to access to
+ * clause 45) of the specified phy address.
+ * To read these register we have:
+ * 1) Write reg 13 // DEVAD
+ * 2) Write reg 14 // MMD Address
+ * 3) Write reg 13 // MMD Data Command for MMD DEVAD
+ * 3) Read  reg 14 // Read MMD data
+ */
+int phy_read_mmd_indirect(struct phy_device *phydev, int prtad, int devad)
+{
+	struct phy_driver *phydrv = phydev->drv;
+	int addr = phydev->mdio.addr;
+	int value = -1;
+
+	if (!phydrv->read_mmd_indirect) {
+		struct mii_bus *bus = phydev->mdio.bus;
+
+		mutex_lock(&bus->mdio_lock);
+		mmd_phy_indirect(bus, prtad, devad, addr);
+
+		/* Read the content of the MMD's selected register */
+		value = bus->read(bus, addr, MII_MMD_DATA);
+		mutex_unlock(&bus->mdio_lock);
+	} else {
+		value = phydrv->read_mmd_indirect(phydev, prtad, devad, addr);
+	}
+	return value;
+}
+EXPORT_SYMBOL(phy_read_mmd_indirect);
+
+/**
+ * phy_write_mmd_indirect - writes data to the MMD registers
+ * @phydev: The PHY device
+ * @prtad: MMD Address
+ * @devad: MMD DEVAD
+ * @data: data to write in the MMD register
+ *
+ * Description: Write data from the MMD registers of the specified
+ * phy address.
+ * To write these register we have:
+ * 1) Write reg 13 // DEVAD
+ * 2) Write reg 14 // MMD Address
+ * 3) Write reg 13 // MMD Data Command for MMD DEVAD
+ * 3) Write reg 14 // Write MMD data
+ */
+void phy_write_mmd_indirect(struct phy_device *phydev, int prtad,
+				   int devad, u32 data)
+{
+	struct phy_driver *phydrv = phydev->drv;
+	int addr = phydev->mdio.addr;
+
+	if (!phydrv->write_mmd_indirect) {
+		struct mii_bus *bus = phydev->mdio.bus;
+
+		mutex_lock(&bus->mdio_lock);
+		mmd_phy_indirect(bus, prtad, devad, addr);
+
+		/* Write the data into MMD's selected register */
+		bus->write(bus, addr, MII_MMD_DATA, data);
+		mutex_unlock(&bus->mdio_lock);
+	} else {
+		phydrv->write_mmd_indirect(phydev, prtad, devad, addr, data);
+	}
+}
+EXPORT_SYMBOL(phy_write_mmd_indirect);
+
 /**
  * phy_init_eee - init and check the EEE feature
  * @phydev: target phy_device struct
@@ -1273,8 +1325,15 @@ int phy_init_eee(struct phy_device *phydev, bool clk_stop_enable)
 		return -EIO;
 
 	/* According to 802.3az,the EEE is supported only in full duplex-mode.
+	 * Also EEE feature is active when core is operating with MII, GMII
+	 * or RGMII (all kinds). Internal PHYs are also allowed to proceed and
+	 * should return an error if they do not support EEE.
 	 */
-	if (phydev->duplex == DUPLEX_FULL) {
+	if ((phydev->duplex == DUPLEX_FULL) &&
+	    ((phydev->interface == PHY_INTERFACE_MODE_MII) ||
+	    (phydev->interface == PHY_INTERFACE_MODE_GMII) ||
+	     phy_interface_is_rgmii(phydev) ||
+	     phy_is_internal(phydev))) {
 		int eee_lp, eee_cap, eee_adv;
 		u32 lp, cap, adv;
 		int status;
@@ -1285,7 +1344,8 @@ int phy_init_eee(struct phy_device *phydev, bool clk_stop_enable)
 			return status;
 
 		/* First check if the EEE ability is supported */
-		eee_cap = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_PCS_EEE_ABLE);
+		eee_cap = phy_read_mmd_indirect(phydev, MDIO_PCS_EEE_ABLE,
+						MDIO_MMD_PCS);
 		if (eee_cap <= 0)
 			goto eee_exit_err;
 
@@ -1296,11 +1356,13 @@ int phy_init_eee(struct phy_device *phydev, bool clk_stop_enable)
 		/* Check which link settings negotiated and verify it in
 		 * the EEE advertising registers.
 		 */
-		eee_lp = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_LPABLE);
+		eee_lp = phy_read_mmd_indirect(phydev, MDIO_AN_EEE_LPABLE,
+					       MDIO_MMD_AN);
 		if (eee_lp <= 0)
 			goto eee_exit_err;
 
-		eee_adv = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV);
+		eee_adv = phy_read_mmd_indirect(phydev, MDIO_AN_EEE_ADV,
+						MDIO_MMD_AN);
 		if (eee_adv <= 0)
 			goto eee_exit_err;
 
@@ -1313,12 +1375,14 @@ int phy_init_eee(struct phy_device *phydev, bool clk_stop_enable)
 			/* Configure the PHY to stop receiving xMII
 			 * clock while it is signaling LPI.
 			 */
-			int val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_CTRL1);
+			int val = phy_read_mmd_indirect(phydev, MDIO_CTRL1,
+							MDIO_MMD_PCS);
 			if (val < 0)
 				return val;
 
 			val |= MDIO_PCS_CTRL1_CLKSTOP_EN;
-			phy_write_mmd(phydev, MDIO_MMD_PCS, MDIO_CTRL1, val);
+			phy_write_mmd_indirect(phydev, MDIO_CTRL1,
+					       MDIO_MMD_PCS, val);
 		}
 
 		return 0; /* EEE supported */
@@ -1340,7 +1404,7 @@ int phy_get_eee_err(struct phy_device *phydev)
 	if (!phydev->drv)
 		return -EIO;
 
-	return phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_PCS_EEE_WK_ERR);
+	return phy_read_mmd_indirect(phydev, MDIO_PCS_EEE_WK_ERR, MDIO_MMD_PCS);
 }
 EXPORT_SYMBOL(phy_get_eee_err);
 
@@ -1360,19 +1424,19 @@ int phy_ethtool_get_eee(struct phy_device *phydev, struct ethtool_eee *data)
 		return -EIO;
 
 	/* Get Supported EEE */
-	val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_PCS_EEE_ABLE);
+	val = phy_read_mmd_indirect(phydev, MDIO_PCS_EEE_ABLE, MDIO_MMD_PCS);
 	if (val < 0)
 		return val;
 	data->supported = mmd_eee_cap_to_ethtool_sup_t(val);
 
 	/* Get advertisement EEE */
-	val = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV);
+	val = phy_read_mmd_indirect(phydev, MDIO_AN_EEE_ADV, MDIO_MMD_AN);
 	if (val < 0)
 		return val;
 	data->advertised = mmd_eee_adv_to_ethtool_adv_t(val);
 
 	/* Get LP advertisement EEE */
-	val = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_LPABLE);
+	val = phy_read_mmd_indirect(phydev, MDIO_AN_EEE_LPABLE, MDIO_MMD_AN);
 	if (val < 0)
 		return val;
 	data->lp_advertised = mmd_eee_adv_to_ethtool_adv_t(val);
@@ -1390,37 +1454,15 @@ EXPORT_SYMBOL(phy_ethtool_get_eee);
  */
 int phy_ethtool_set_eee(struct phy_device *phydev, struct ethtool_eee *data)
 {
-	int cap, old_adv, adv, ret;
+	int val = ethtool_adv_to_mmd_eee_adv_t(data->advertised);
 
 	if (!phydev->drv)
 		return -EIO;
 
-	/* Get Supported EEE */
-	cap = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_PCS_EEE_ABLE);
-	if (cap < 0)
-		return cap;
-
-	old_adv = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV);
-	if (old_adv < 0)
-		return old_adv;
-
-	adv = ethtool_adv_to_mmd_eee_adv_t(data->advertised) & cap;
-
 	/* Mask prohibited EEE modes */
-	adv &= ~phydev->eee_broken_modes;
+	val &= ~phydev->eee_broken_modes;
 
-	if (old_adv != adv) {
-		ret = phy_write_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV, adv);
-		if (ret < 0)
-			return ret;
-
-		/* Restart autonegotiation so the new modes get sent to the
-		 * link partner.
-		 */
-		ret = phy_restart_aneg(phydev);
-		if (ret < 0)
-			return ret;
-	}
+	phy_write_mmd_indirect(phydev, MDIO_AN_EEE_ADV, MDIO_MMD_AN, val);
 
 	return 0;
 }
@@ -1450,9 +1492,7 @@ int phy_ethtool_get_link_ksettings(struct net_device *ndev,
 	if (!phydev)
 		return -ENODEV;
 
-	phy_ethtool_ksettings_get(phydev, cmd);
-
-	return 0;
+	return phy_ethtool_ksettings_get(phydev, cmd);
 }
 EXPORT_SYMBOL(phy_ethtool_get_link_ksettings);
 
@@ -1478,6 +1518,6 @@ int phy_ethtool_nway_reset(struct net_device *ndev)
 	if (!phydev->drv)
 		return -EIO;
 
-	return phy_restart_aneg(phydev);
+	return genphy_restart_aneg(phydev);
 }
 EXPORT_SYMBOL(phy_ethtool_nway_reset);

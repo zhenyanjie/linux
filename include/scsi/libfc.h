@@ -23,7 +23,6 @@
 #include <linux/timer.h>
 #include <linux/if.h>
 #include <linux/percpu.h>
-#include <linux/refcount.h>
 
 #include <scsi/scsi_transport.h>
 #include <scsi/scsi_transport_fc.h>
@@ -322,7 +321,7 @@ struct fc_seq_els_data {
  */
 struct fc_fcp_pkt {
 	spinlock_t	  scsi_pkt_lock;
-	refcount_t	  ref_cnt;
+	atomic_t	  ref_cnt;
 
 	/* SCSI command and data transfer information */
 	u32		  data_len;

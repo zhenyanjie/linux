@@ -1,6 +1,6 @@
 /*
  *  QLogic FCoE Offload Driver
- *  Copyright (c) 2016-2017 Cavium Inc.
+ *  Copyright (c) 2016 Cavium Inc.
  *
  *  This software is available under the terms of the GNU General Public License
  *  (GPL) Version 2, available from the file COPYING in the main directory of
@@ -25,9 +25,6 @@ static int qedf_initiate_els(struct qedf_rport *fcport, unsigned int op,
 	uint16_t xid;
 	uint32_t start_time = jiffies / HZ;
 	uint32_t current_time;
-	struct fcoe_wqe *sqe;
-	unsigned long flags;
-	u16 sqe_idx;
 
 	QEDF_INFO(&(qedf->dbg_ctx), QEDF_LOG_ELS, "Sending ELS\n");
 
@@ -44,7 +41,7 @@ static int qedf_initiate_els(struct qedf_rport *fcport, unsigned int op,
 		goto els_err;
 	}
 
-	if (!test_bit(QEDF_RPORT_SESSION_READY, &fcport->flags)) {
+	if (!(test_bit(QEDF_RPORT_SESSION_READY, &fcport->flags))) {
 		QEDF_ERR(&(qedf->dbg_ctx), "els 0x%x: fcport not ready\n", op);
 		rc = -EINVAL;
 		goto els_err;
@@ -109,32 +106,27 @@ retry_els:
 	did = fcport->rdata->ids.port_id;
 	sid = fcport->sid;
 
-	__fc_fill_fc_hdr(fc_hdr, FC_RCTL_ELS_REQ, did, sid,
+	__fc_fill_fc_hdr(fc_hdr, FC_RCTL_ELS_REQ, sid, did,
 			   FC_TYPE_ELS, FC_FC_FIRST_SEQ | FC_FC_END_SEQ |
 			   FC_FC_SEQ_INIT, 0);
 
 	/* Obtain exchange id */
 	xid = els_req->xid;
 
-	spin_lock_irqsave(&fcport->rport_lock, flags);
-
-	sqe_idx = qedf_get_sqe_idx(fcport);
-	sqe = &fcport->sq[sqe_idx];
-	memset(sqe, 0, sizeof(struct fcoe_wqe));
-
 	/* Initialize task context for this IO request */
 	task = qedf_get_task_mem(&qedf->tasks, xid);
-	qedf_init_mp_task(els_req, task, sqe);
+	qedf_init_mp_task(els_req, task);
 
 	/* Put timer on original I/O request */
 	if (timer_msec)
 		qedf_cmd_timer_set(qedf, els_req, timer_msec);
 
+	qedf_add_to_sq(fcport, xid, 0, FCOE_TASK_TYPE_MIDPATH, 0);
+
 	/* Ring doorbell */
 	QEDF_INFO(&(qedf->dbg_ctx), QEDF_LOG_ELS, "Ringing doorbell for ELS "
 		   "req\n");
 	qedf_ring_doorbell(fcport);
-	spin_unlock_irqrestore(&fcport->rport_lock, flags);
 els_err:
 	return rc;
 }
@@ -225,7 +217,7 @@ int qedf_send_rrq(struct qedf_ioreq *aborted_io_req)
 	fcport = aborted_io_req->fcport;
 
 	/* Check that fcport is still offloaded */
-	if (!test_bit(QEDF_RPORT_SESSION_READY, &fcport->flags)) {
+	if (!(test_bit(QEDF_RPORT_SESSION_READY, &fcport->flags))) {
 		QEDF_ERR(NULL, "fcport is no longer offloaded.\n");
 		return -EINVAL;
 	}
@@ -489,7 +481,7 @@ static void qedf_srr_compl(struct qedf_els_cb_arg *cb_arg)
 
 	/* If a SRR times out, simply free resources */
 	if (srr_req->event == QEDF_IOREQ_EV_ELS_TMO)
-		goto out_put;
+		goto out_free;
 
 	/* Normalize response data into struct fc_frame */
 	mp_req = &(srr_req->mp_req);
@@ -501,7 +493,7 @@ static void qedf_srr_compl(struct qedf_els_cb_arg *cb_arg)
 	if (!fp) {
 		QEDF_ERR(&(qedf->dbg_ctx),
 		    "fc_frame_alloc failure.\n");
-		goto out_put;
+		goto out_free;
 	}
 
 	/* Copy frame header from firmware into fp */
@@ -526,10 +518,9 @@ static void qedf_srr_compl(struct qedf_els_cb_arg *cb_arg)
 	}
 
 	fc_frame_free(fp);
-out_put:
+out_free:
 	/* Put reference for original command since SRR completed */
 	kref_put(&orig_io_req->refcount, qedf_release_cmd);
-out_free:
 	kfree(cb_arg);
 }
 
@@ -551,7 +542,7 @@ static int qedf_send_srr(struct qedf_ioreq *orig_io_req, u32 offset, u8 r_ctl)
 	fcport = orig_io_req->fcport;
 
 	/* Check that fcport is still offloaded */
-	if (!test_bit(QEDF_RPORT_SESSION_READY, &fcport->flags)) {
+	if (!(test_bit(QEDF_RPORT_SESSION_READY, &fcport->flags))) {
 		QEDF_ERR(NULL, "fcport is no longer offloaded.\n");
 		return -EINVAL;
 	}
@@ -613,8 +604,6 @@ static void qedf_initiate_seq_cleanup(struct qedf_ioreq *orig_io_req,
 	struct qedf_rport *fcport;
 	unsigned long flags;
 	struct qedf_els_cb_arg *cb_arg;
-	struct fcoe_wqe *sqe;
-	u16 sqe_idx;
 
 	fcport = orig_io_req->fcport;
 
@@ -642,13 +631,8 @@ static void qedf_initiate_seq_cleanup(struct qedf_ioreq *orig_io_req,
 
 	spin_lock_irqsave(&fcport->rport_lock, flags);
 
-	sqe_idx = qedf_get_sqe_idx(fcport);
-	sqe = &fcport->sq[sqe_idx];
-	memset(sqe, 0, sizeof(struct fcoe_wqe));
-	orig_io_req->task_params->sqe = sqe;
-
-	init_initiator_sequence_recovery_fcoe_task(orig_io_req->task_params,
-						   offset);
+	qedf_add_to_sq(fcport, orig_io_req->xid, 0,
+	    FCOE_TASK_TYPE_SEQUENCE_CLEANUP, offset);
 	qedf_ring_doorbell(fcport);
 
 	spin_unlock_irqrestore(&fcport->rport_lock, flags);
@@ -781,7 +765,7 @@ static void qedf_rec_compl(struct qedf_els_cb_arg *cb_arg)
 
 	/* If a REC times out, free resources */
 	if (rec_req->event == QEDF_IOREQ_EV_ELS_TMO)
-		goto out_put;
+		goto out_free;
 
 	/* Normalize response data into struct fc_frame */
 	mp_req = &(rec_req->mp_req);
@@ -793,7 +777,7 @@ static void qedf_rec_compl(struct qedf_els_cb_arg *cb_arg)
 	if (!fp) {
 		QEDF_ERR(&(qedf->dbg_ctx),
 		    "fc_frame_alloc failure.\n");
-		goto out_put;
+		goto out_free;
 	}
 
 	/* Copy frame header from firmware into fp */
@@ -885,10 +869,9 @@ static void qedf_rec_compl(struct qedf_els_cb_arg *cb_arg)
 
 out_free_frame:
 	fc_frame_free(fp);
-out_put:
+out_free:
 	/* Put reference for original command since REC completed */
 	kref_put(&orig_io_req->refcount, qedf_release_cmd);
-out_free:
 	kfree(cb_arg);
 }
 

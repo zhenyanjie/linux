@@ -36,7 +36,7 @@ void subpage_prot_free(struct mm_struct *mm)
 		}
 	}
 	addr = 0;
-	for (i = 0; i < (TASK_SIZE_USER64 >> 43); ++i) {
+	for (i = 0; i < 2; ++i) {
 		p = spt->protptrs[i];
 		if (!p)
 			continue;
@@ -197,8 +197,7 @@ long sys_subpage_prot(unsigned long addr, unsigned long len, u32 __user *map)
 
 	/* Check parameters */
 	if ((addr & ~PAGE_MASK) || (len & ~PAGE_MASK) ||
-	    addr >= mm->task_size || len >= mm->task_size ||
-	    addr + len > mm->task_size)
+	    addr >= TASK_SIZE || len >= TASK_SIZE || addr + len > TASK_SIZE)
 		return -EINVAL;
 
 	if (is_hugepage_only_range(mm, addr, len))

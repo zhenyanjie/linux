@@ -13,7 +13,8 @@
 #include <linux/gfp.h>
 #include <linux/init.h>
 
-#include <asm/page-states.h>
+#define ESSA_SET_STABLE		1
+#define ESSA_SET_UNUSED		2
 
 static int cmma_flag = 1;
 

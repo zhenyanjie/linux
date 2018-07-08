@@ -122,8 +122,9 @@ int mdio_mux_init(struct device *dev,
 	pb = devm_kzalloc(dev, sizeof(*pb), GFP_KERNEL);
 	if (pb == NULL) {
 		ret_val = -ENOMEM;
-		goto err_pb_kz;
+		goto err_parent_bus;
 	}
+
 
 	pb->switch_data = data;
 	pb->switch_fn = switch_fn;
@@ -133,35 +134,28 @@ int mdio_mux_init(struct device *dev,
 
 	ret_val = -ENODEV;
 	for_each_available_child_of_node(dev->of_node, child_bus_node) {
-		int v;
+		u32 v;
 
 		r = of_property_read_u32(child_bus_node, "reg", &v);
-		if (r) {
-			dev_err(dev,
-				"Error: Failed to find reg for child %s\n",
-				of_node_full_name(child_bus_node));
+		if (r)
 			continue;
-		}
 
 		cb = devm_kzalloc(dev, sizeof(*cb), GFP_KERNEL);
 		if (cb == NULL) {
 			dev_err(dev,
-				"Error: Failed to allocate memory for child %s\n",
-				of_node_full_name(child_bus_node));
+				"Error: Failed to allocate memory for child\n");
 			ret_val = -ENOMEM;
-			continue;
+			of_node_put(child_bus_node);
+			break;
 		}
 		cb->bus_number = v;
 		cb->parent = pb;
 
 		cb->mii_bus = mdiobus_alloc();
 		if (!cb->mii_bus) {
-			dev_err(dev,
-				"Error: Failed to allocate MDIO bus for child %s\n",
-				of_node_full_name(child_bus_node));
 			ret_val = -ENOMEM;
-			devm_kfree(dev, cb);
-			continue;
+			of_node_put(child_bus_node);
+			break;
 		}
 		cb->mii_bus->priv = cb;
 
@@ -173,12 +167,10 @@ int mdio_mux_init(struct device *dev,
 		cb->mii_bus->write = mdio_mux_write;
 		r = of_mdiobus_register(cb->mii_bus, child_bus_node);
 		if (r) {
-			dev_err(dev,
-				"Error: Failed to register MDIO bus for child %s\n",
-				of_node_full_name(child_bus_node));
 			mdiobus_free(cb->mii_bus);
 			devm_kfree(dev, cb);
 		} else {
+			of_node_get(child_bus_node);
 			cb->next = pb->children;
 			pb->children = cb;
 		}
@@ -189,12 +181,9 @@ int mdio_mux_init(struct device *dev,
 		return 0;
 	}
 
-	dev_err(dev, "Error: No acceptable child buses found\n");
-	devm_kfree(dev, pb);
-err_pb_kz:
 	/* balance the reference of_mdio_find_bus() took */
-	if (!mux_bus)
-		put_device(&parent_bus->dev);
+	put_device(&pb->mii_bus->dev);
+
 err_parent_bus:
 	of_node_put(parent_bus_node);
 	return ret_val;

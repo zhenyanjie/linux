@@ -6611,8 +6611,9 @@ static int qib_init_7322_variables(struct qib_devdata *dd)
 		if (!qib_mini_init)
 			write_7322_init_portregs(ppd);
 
-		setup_timer(&cp->chase_timer, reenable_chase,
-			    (unsigned long)ppd);
+		init_timer(&cp->chase_timer);
+		cp->chase_timer.function = reenable_chase;
+		cp->chase_timer.data = (unsigned long)ppd;
 
 		ppd++;
 	}
@@ -6638,8 +6639,9 @@ static int qib_init_7322_variables(struct qib_devdata *dd)
 		(u64) rcv_int_count << IBA7322_HDRHEAD_PKTINT_SHIFT;
 
 	/* setup the stats timer; the add_timer is done at end of init */
-	setup_timer(&dd->stats_timer, qib_get_7322_faststats,
-		    (unsigned long)dd);
+	init_timer(&dd->stats_timer);
+	dd->stats_timer.function = qib_get_7322_faststats;
+	dd->stats_timer.data = (unsigned long) dd;
 
 	dd->ureg_align = 0x10000;  /* 64KB alignment */
 

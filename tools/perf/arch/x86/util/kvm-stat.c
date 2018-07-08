@@ -1,4 +1,3 @@
-#include <errno.h>
 #include "../../util/kvm-stat.h"
 #include <asm/svm.h>
 #include <asm/vmx.h>

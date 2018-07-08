@@ -298,7 +298,7 @@ void __pci_write_msi_msg(struct msi_desc *entry, struct msi_msg *msg)
 {
 	struct pci_dev *dev = msi_desc_to_pci_dev(entry);
 
-	if (dev->current_state != PCI_D0 || pci_dev_is_disconnected(dev)) {
+	if (dev->current_state != PCI_D0) {
 		/* Don't touch the hardware now */
 	} else if (entry->msi_attrib.is_msix) {
 		void __iomem *base = pci_msix_desc_addr(entry);
@@ -538,9 +538,11 @@ msi_setup_entry(struct pci_dev *dev, int nvec, const struct irq_affinity *affd)
 	struct msi_desc *entry;
 	u16 control;
 
-	if (affd)
+	if (affd) {
 		masks = irq_create_affinity_masks(nvec, affd);
-
+		if (!masks)
+			pr_err("Unable to allocate affinity masks, ignoring\n");
+	}
 
 	/* MSI Entry Initialization */
 	entry = alloc_msi_entry(&dev->dev, nvec, masks);
@@ -676,8 +678,11 @@ static int msix_setup_entries(struct pci_dev *dev, void __iomem *base,
 	struct msi_desc *entry;
 	int ret, i;
 
-	if (affd)
+	if (affd) {
 		masks = irq_create_affinity_masks(nvec, affd);
+		if (!masks)
+			pr_err("Unable to allocate affinity masks, ignoring\n");
+	}
 
 	for (i = 0, curmsk = masks; i < nvec; i++) {
 		entry = alloc_msi_entry(&dev->dev, 1, curmsk);
@@ -877,7 +882,7 @@ int pci_msi_vec_count(struct pci_dev *dev)
 }
 EXPORT_SYMBOL(pci_msi_vec_count);
 
-static void pci_msi_shutdown(struct pci_dev *dev)
+void pci_msi_shutdown(struct pci_dev *dev)
 {
 	struct msi_desc *desc;
 	u32 mask;
@@ -968,17 +973,33 @@ static int __pci_enable_msix(struct pci_dev *dev, struct msix_entry *entries,
 	return msix_capability_init(dev, entries, nvec, affd);
 }
 
-static void pci_msix_shutdown(struct pci_dev *dev)
+/**
+ * pci_enable_msix - configure device's MSI-X capability structure
+ * @dev: pointer to the pci_dev data structure of MSI-X device function
+ * @entries: pointer to an array of MSI-X entries (optional)
+ * @nvec: number of MSI-X irqs requested for allocation by device driver
+ *
+ * Setup the MSI-X capability structure of device function with the number
+ * of requested irqs upon its software driver call to request for
+ * MSI-X mode enabled on its hardware device function. A return of zero
+ * indicates the successful configuration of MSI-X capability structure
+ * with new allocated MSI-X irqs. A return of < 0 indicates a failure.
+ * Or a return of > 0 indicates that driver request is exceeding the number
+ * of irqs or MSI-X vectors available. Driver should use the returned value to
+ * re-send its request.
+ **/
+int pci_enable_msix(struct pci_dev *dev, struct msix_entry *entries, int nvec)
+{
+	return __pci_enable_msix(dev, entries, nvec, NULL);
+}
+EXPORT_SYMBOL(pci_enable_msix);
+
+void pci_msix_shutdown(struct pci_dev *dev)
 {
 	struct msi_desc *entry;
 
 	if (!pci_msi_enable || !dev || !dev->msix_enabled)
 		return;
-
-	if (pci_dev_is_disconnected(dev)) {
-		dev->msix_enabled = 0;
-		return;
-	}
 
 	/* Return the device with MSI-X masked as initial states */
 	for_each_pci_msi_entry(entry, dev) {
@@ -1051,7 +1072,7 @@ static int __pci_enable_msi_range(struct pci_dev *dev, int minvec, int maxvec,
 
 	for (;;) {
 		if (affd) {
-			nvec = irq_calc_affinity_vectors(minvec, nvec, affd);
+			nvec = irq_calc_affinity_vectors(nvec, affd);
 			if (nvec < minvec)
 				return -ENOSPC;
 		}
@@ -1090,7 +1111,7 @@ static int __pci_enable_msix_range(struct pci_dev *dev,
 
 	for (;;) {
 		if (affd) {
-			nvec = irq_calc_affinity_vectors(minvec, nvec, affd);
+			nvec = irq_calc_affinity_vectors(nvec, affd);
 			if (nvec < minvec)
 				return -ENOSPC;
 		}
@@ -1158,6 +1179,16 @@ int pci_alloc_irq_vectors_affinity(struct pci_dev *dev, unsigned int min_vecs,
 	if (flags & PCI_IRQ_AFFINITY) {
 		if (!affd)
 			affd = &msi_default_affd;
+
+		if (affd->pre_vectors + affd->post_vectors > min_vecs)
+			return -EINVAL;
+
+		/*
+		 * If there aren't any vectors left after applying the pre/post
+		 * vectors don't bother with assigning affinity.
+		 */
+		if (affd->pre_vectors + affd->post_vectors == min_vecs)
+			affd = NULL;
 	} else {
 		if (WARN_ON(affd))
 			affd = NULL;
@@ -1446,7 +1477,7 @@ struct irq_domain *pci_msi_create_irq_domain(struct fwnode_handle *fwnode,
 	if (!domain)
 		return NULL;
 
-	irq_domain_update_bus_token(domain, DOMAIN_BUS_PCI_MSI);
+	domain->bus_token = DOMAIN_BUS_PCI_MSI;
 	return domain;
 }
 EXPORT_SYMBOL_GPL(pci_msi_create_irq_domain);

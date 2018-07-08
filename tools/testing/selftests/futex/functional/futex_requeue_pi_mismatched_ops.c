@@ -30,8 +30,6 @@
 #include "futextest.h"
 #include "logging.h"
 
-#define TEST_NAME "futex-requeue-pi-mismatched-ops"
-
 futex_t f1 = FUTEX_INITIALIZER;
 futex_t f2 = FUTEX_INITIALIZER;
 int child_ret = 0;
@@ -132,6 +130,6 @@ int main(int argc, char *argv[])
 
  out:
 	/* If the kernel crashes, we shouldn't return at all. */
-	print_result(TEST_NAME, ret);
+	print_result(ret);
 	return ret;
 }

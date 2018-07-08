@@ -232,14 +232,14 @@ int mmc_send_relative_addr(struct mmc_host *host, unsigned int *rca)
 	return 0;
 }
 
-int mmc_app_send_scr(struct mmc_card *card)
+int mmc_app_send_scr(struct mmc_card *card, u32 *scr)
 {
 	int err;
 	struct mmc_request mrq = {};
 	struct mmc_command cmd = {};
 	struct mmc_data data = {};
 	struct scatterlist sg;
-	__be32 *scr;
+	void *data_buf;
 
 	/* NOTE: caller guarantees scr is heap-allocated */
 
@@ -250,8 +250,8 @@ int mmc_app_send_scr(struct mmc_card *card)
 	/* dma onto stack is unsafe/nonportable, but callers to this
 	 * routine normally provide temporary on-stack buffers ...
 	 */
-	scr = kmalloc(sizeof(card->raw_scr), GFP_KERNEL);
-	if (!scr)
+	data_buf = kmalloc(sizeof(card->raw_scr), GFP_KERNEL);
+	if (data_buf == NULL)
 		return -ENOMEM;
 
 	mrq.cmd = &cmd;
@@ -267,21 +267,22 @@ int mmc_app_send_scr(struct mmc_card *card)
 	data.sg = &sg;
 	data.sg_len = 1;
 
-	sg_init_one(&sg, scr, 8);
+	sg_init_one(&sg, data_buf, 8);
 
 	mmc_set_data_timeout(&data, card);
 
 	mmc_wait_for_req(card->host, &mrq);
 
-	card->raw_scr[0] = be32_to_cpu(scr[0]);
-	card->raw_scr[1] = be32_to_cpu(scr[1]);
-
-	kfree(scr);
+	memcpy(scr, data_buf, sizeof(card->raw_scr));
+	kfree(data_buf);
 
 	if (cmd.error)
 		return cmd.error;
 	if (data.error)
 		return data.error;
+
+	scr[0] = be32_to_cpu(scr[0]);
+	scr[1] = be32_to_cpu(scr[1]);
 
 	return 0;
 }

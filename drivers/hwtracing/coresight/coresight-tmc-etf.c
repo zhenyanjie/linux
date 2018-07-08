@@ -166,6 +166,9 @@ out:
 	if (!used)
 		kfree(buf);
 
+	if (!ret)
+		dev_info(drvdata->dev, "TMC-ETB/ETF enabled\n");
+
 	return ret;
 }
 
@@ -201,27 +204,15 @@ out:
 
 static int tmc_enable_etf_sink(struct coresight_device *csdev, u32 mode)
 {
-	int ret;
-	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
-
 	switch (mode) {
 	case CS_MODE_SYSFS:
-		ret = tmc_enable_etf_sink_sysfs(csdev);
-		break;
+		return tmc_enable_etf_sink_sysfs(csdev);
 	case CS_MODE_PERF:
-		ret = tmc_enable_etf_sink_perf(csdev);
-		break;
-	/* We shouldn't be here */
-	default:
-		ret = -EINVAL;
-		break;
+		return tmc_enable_etf_sink_perf(csdev);
 	}
 
-	if (ret)
-		return ret;
-
-	dev_info(drvdata->dev, "TMC-ETB/ETF enabled\n");
-	return 0;
+	/* We shouldn't be here */
+	return -EINVAL;
 }
 
 static void tmc_disable_etf_sink(struct coresight_device *csdev)
@@ -282,7 +273,7 @@ static void tmc_disable_etf_link(struct coresight_device *csdev,
 	drvdata->mode = CS_MODE_DISABLED;
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
-	dev_info(drvdata->dev, "TMC-ETF disabled\n");
+	dev_info(drvdata->dev, "TMC disabled\n");
 }
 
 static void *tmc_alloc_etf_buffer(struct coresight_device *csdev, int cpu,
@@ -338,7 +329,7 @@ static int tmc_set_etf_buffer(struct coresight_device *csdev,
 
 static unsigned long tmc_reset_etf_buffer(struct coresight_device *csdev,
 					  struct perf_output_handle *handle,
-					  void *sink_config)
+					  void *sink_config, bool *lost)
 {
 	long size = 0;
 	struct cs_buffers *buf = sink_config;
@@ -359,6 +350,7 @@ static unsigned long tmc_reset_etf_buffer(struct coresight_device *csdev,
 		 * resetting parameters here and squaring off with the ring
 		 * buffer API in the tracer PMU is fine.
 		 */
+		*lost = !!local_xchg(&buf->lost, 0);
 		size = local_xchg(&buf->data_size, 0);
 	}
 
@@ -397,7 +389,7 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 	 */
 	status = readl_relaxed(drvdata->base + TMC_STS);
 	if (status & TMC_STS_FULL) {
-		perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED);
+		local_inc(&buf->lost);
 		to_read = drvdata->size;
 	} else {
 		to_read = CIRC_CNT(write_ptr, read_ptr, drvdata->size);
@@ -442,7 +434,7 @@ static void tmc_update_etf_buffer(struct coresight_device *csdev,
 			read_ptr -= drvdata->size;
 		/* Tell the HW */
 		writel_relaxed(read_ptr, drvdata->base + TMC_RRP);
-		perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED);
+		local_inc(&buf->lost);
 	}
 
 	cur = buf->cur;

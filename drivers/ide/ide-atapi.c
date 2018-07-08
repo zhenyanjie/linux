@@ -93,6 +93,7 @@ int ide_queue_pc_tail(ide_drive_t *drive, struct gendisk *disk,
 	int error;
 
 	rq = blk_get_request(drive->queue, REQ_OP_DRV_IN, __GFP_RECLAIM);
+	scsi_req_init(rq);
 	ide_req(rq)->type = ATA_PRIV_MISC;
 	rq->special = (char *)pc;
 
@@ -106,8 +107,7 @@ int ide_queue_pc_tail(ide_drive_t *drive, struct gendisk *disk,
 	memcpy(scsi_req(rq)->cmd, pc->c, 12);
 	if (drive->media == ide_tape)
 		scsi_req(rq)->cmd[13] = REQ_IDETAPE_PC1;
-	blk_execute_rq(drive->queue, disk, rq, 0);
-	error = scsi_req(rq)->result ? -EIO : 0;
+	error = blk_execute_rq(drive->queue, disk, rq, 0);
 put_req:
 	blk_put_request(rq);
 	return error;
@@ -199,7 +199,7 @@ void ide_prep_sense(ide_drive_t *drive, struct request *rq)
 	memset(sense, 0, sizeof(*sense));
 
 	blk_rq_init(rq->q, sense_rq);
-	scsi_req_init(req);
+	scsi_req_init(sense_rq);
 
 	err = blk_rq_map_kern(drive->queue, sense_rq, sense, sense_len,
 			      GFP_NOIO);
@@ -272,7 +272,7 @@ void ide_retry_pc(ide_drive_t *drive)
 	ide_requeue_and_plug(drive, failed_rq);
 	if (ide_queue_sense_rq(drive, pc)) {
 		blk_start_request(failed_rq);
-		ide_complete_rq(drive, BLK_STS_IOERR, blk_rq_bytes(failed_rq));
+		ide_complete_rq(drive, -EIO, blk_rq_bytes(failed_rq));
 	}
 }
 EXPORT_SYMBOL_GPL(ide_retry_pc);
@@ -436,8 +436,7 @@ static ide_startstop_t ide_pc_intr(ide_drive_t *drive)
 
 	/* No more interrupts */
 	if ((stat & ATA_DRQ) == 0) {
-		int uptodate;
-		blk_status_t error;
+		int uptodate, error;
 
 		debug_log("Packet command completed, %d bytes transferred\n",
 			  blk_rq_bytes(rq));
@@ -455,7 +454,7 @@ static ide_startstop_t ide_pc_intr(ide_drive_t *drive)
 			debug_log("%s: I/O error\n", drive->name);
 
 			if (drive->media != ide_tape)
-				scsi_req(pc->rq)->result++;
+				pc->rq->errors++;
 
 			if (scsi_req(rq)->cmd[0] == REQUEST_SENSE) {
 				printk(KERN_ERR PFX "%s: I/O error in request "
@@ -489,16 +488,16 @@ static ide_startstop_t ide_pc_intr(ide_drive_t *drive)
 			drive->failed_pc = NULL;
 
 		if (ata_misc_request(rq)) {
-			scsi_req(rq)->result = 0;
-			error = BLK_STS_OK;
+			rq->errors = 0;
+			error = 0;
 		} else {
 
 			if (blk_rq_is_passthrough(rq) && uptodate <= 0) {
-				if (scsi_req(rq)->result == 0)
-					scsi_req(rq)->result = -EIO;
+				if (rq->errors == 0)
+					rq->errors = -EIO;
 			}
 
-			error = uptodate ? BLK_STS_OK : BLK_STS_IOERR;
+			error = uptodate ? 0 : -EIO;
 		}
 
 		ide_complete_rq(drive, error, blk_rq_bytes(rq));

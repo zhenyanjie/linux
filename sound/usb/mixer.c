@@ -542,8 +542,6 @@ int snd_usb_mixer_vol_tlv(struct snd_kcontrol *kcontrol, int op_flag,
 
 	if (size < sizeof(scale))
 		return -ENOMEM;
-	if (cval->min_mute)
-		scale[0] = SNDRV_CTL_TLVT_DB_MINMAX_MUTE;
 	scale[2] = cval->dBmin;
 	scale[3] = cval->dBmax;
 	if (copy_to_user(_tlv, scale, sizeof(scale)))
@@ -1174,7 +1172,7 @@ static struct snd_kcontrol_new usb_feature_unit_ctl = {
 };
 
 /* the read-only variant */
-static const struct snd_kcontrol_new usb_feature_unit_ctl_ro = {
+static struct snd_kcontrol_new usb_feature_unit_ctl_ro = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "", /* will be filled later manually */
 	.info = mixer_ctl_feature_info,
@@ -1747,7 +1745,7 @@ static int mixer_ctl_procunit_put(struct snd_kcontrol *kcontrol,
 }
 
 /* alsa control interface for processing/extension unit */
-static const struct snd_kcontrol_new mixer_procunit_ctl = {
+static struct snd_kcontrol_new mixer_procunit_ctl = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "", /* will be filled later */
 	.info = mixer_ctl_feature_info,
@@ -2035,7 +2033,7 @@ static int mixer_ctl_selector_put(struct snd_kcontrol *kcontrol,
 }
 
 /* alsa control interface for selector unit */
-static const struct snd_kcontrol_new mixer_selectunit_ctl = {
+static struct snd_kcontrol_new mixer_selectunit_ctl = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "", /* will be filled later */
 	.info = mixer_ctl_selector_info,
@@ -2228,9 +2226,6 @@ static int parse_audio_unit(struct mixer_build *state, int unitid)
 
 static void snd_usb_mixer_free(struct usb_mixer_interface *mixer)
 {
-	/* kill pending URBs */
-	snd_usb_mixer_disconnect(mixer);
-
 	kfree(mixer->id_elems);
 	if (mixer->urb) {
 		kfree(mixer->urb->transfer_buffer);
@@ -2581,13 +2576,8 @@ _error:
 
 void snd_usb_mixer_disconnect(struct usb_mixer_interface *mixer)
 {
-	if (mixer->disconnected)
-		return;
-	if (mixer->urb)
-		usb_kill_urb(mixer->urb);
-	if (mixer->rc_urb)
-		usb_kill_urb(mixer->rc_urb);
-	mixer->disconnected = true;
+	usb_kill_urb(mixer->urb);
+	usb_kill_urb(mixer->rc_urb);
 }
 
 #ifdef CONFIG_PM

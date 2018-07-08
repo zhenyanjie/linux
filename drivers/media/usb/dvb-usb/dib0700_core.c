@@ -215,14 +215,13 @@ static int dib0700_i2c_xfer_new(struct i2c_adapter *adap, struct i2c_msg *msg,
 						 USB_CTRL_GET_TIMEOUT);
 			if (result < 0) {
 				deb_info("i2c read error (status = %d)\n", result);
-				goto unlock;
+				break;
 			}
 
 			if (msg[i].len > sizeof(st->buf)) {
 				deb_info("buffer too small to fit %d bytes\n",
 					 msg[i].len);
-				result = -EIO;
-				goto unlock;
+				return -EIO;
 			}
 
 			memcpy(msg[i].buf, st->buf, msg[i].len);
@@ -234,8 +233,8 @@ static int dib0700_i2c_xfer_new(struct i2c_adapter *adap, struct i2c_msg *msg,
 			/* Write request */
 			if (mutex_lock_interruptible(&d->usb_mutex) < 0) {
 				err("could not acquire lock");
-				result = -EINTR;
-				goto unlock;
+				mutex_unlock(&d->i2c_mutex);
+				return -EINTR;
 			}
 			st->buf[0] = REQUEST_NEW_I2C_WRITE;
 			st->buf[1] = msg[i].addr << 1;
@@ -248,9 +247,7 @@ static int dib0700_i2c_xfer_new(struct i2c_adapter *adap, struct i2c_msg *msg,
 			if (msg[i].len > sizeof(st->buf) - 4) {
 				deb_info("i2c message to big: %d\n",
 					 msg[i].len);
-				mutex_unlock(&d->usb_mutex);
-				result = -EIO;
-				goto unlock;
+				return -EIO;
 			}
 
 			/* The Actual i2c payload */
@@ -272,11 +269,8 @@ static int dib0700_i2c_xfer_new(struct i2c_adapter *adap, struct i2c_msg *msg,
 			}
 		}
 	}
-	result = i;
-
-unlock:
 	mutex_unlock(&d->i2c_mutex);
-	return result;
+	return i;
 }
 
 /*
@@ -287,7 +281,7 @@ static int dib0700_i2c_xfer_legacy(struct i2c_adapter *adap,
 {
 	struct dvb_usb_device *d = i2c_get_adapdata(adap);
 	struct dib0700_state *st = d->priv;
-	int i, len, result;
+	int i,len;
 
 	if (mutex_lock_interruptible(&d->i2c_mutex) < 0)
 		return -EINTR;
@@ -304,8 +298,7 @@ static int dib0700_i2c_xfer_legacy(struct i2c_adapter *adap,
 		if (msg[i].len > sizeof(st->buf) - 2) {
 			deb_info("i2c xfer to big: %d\n",
 				msg[i].len);
-			result = -EIO;
-			goto unlock;
+			return -EIO;
 		}
 		memcpy(&st->buf[2], msg[i].buf, msg[i].len);
 
@@ -320,15 +313,13 @@ static int dib0700_i2c_xfer_legacy(struct i2c_adapter *adap,
 			if (len <= 0) {
 				deb_info("I2C read failed on address 0x%02x\n",
 						msg[i].addr);
-				result = -EIO;
-				goto unlock;
+				break;
 			}
 
 			if (msg[i + 1].len > sizeof(st->buf)) {
 				deb_info("i2c xfer buffer to small for %d\n",
 					msg[i].len);
-				result = -EIO;
-				goto unlock;
+				return -EIO;
 			}
 			memcpy(msg[i + 1].buf, st->buf, msg[i + 1].len);
 
@@ -337,17 +328,14 @@ static int dib0700_i2c_xfer_legacy(struct i2c_adapter *adap,
 			i++;
 		} else {
 			st->buf[0] = REQUEST_I2C_WRITE;
-			result = dib0700_ctrl_wr(d, st->buf, msg[i].len + 2);
-			if (result < 0)
-				goto unlock;
+			if (dib0700_ctrl_wr(d, st->buf, msg[i].len + 2) < 0)
+				break;
 		}
 	}
-	result = i;
-unlock:
 	mutex_unlock(&d->usb_mutex);
 	mutex_unlock(&d->i2c_mutex);
 
-	return result;
+	return i;
 }
 
 static int dib0700_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msg,

@@ -32,7 +32,6 @@
  */
 
 #include <linux/skbuff.h>
-#include <crypto/hash.h>
 
 #include "rxe.h"
 #include "rxe_loc.h"
@@ -484,7 +483,8 @@ static int fill_packet(struct rxe_qp *qp, struct rxe_send_wqe *wqe,
 		if (wqe->wr.send_flags & IB_SEND_INLINE) {
 			u8 *tmp = &wqe->dma.inline_data[wqe->dma.sge_offset];
 
-			crc = rxe_crc32(rxe, crc, tmp, paylen);
+			crc = crc32_le(crc, tmp, paylen);
+
 			memcpy(payload_addr(pkt), tmp, paylen);
 
 			wqe->dma.resid -= paylen;

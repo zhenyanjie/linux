@@ -1,4 +1,3 @@
-#include <errno.h>
 #include "util/kvm-stat.h"
 #include "util/parse-events.h"
 #include "util/debug.h"

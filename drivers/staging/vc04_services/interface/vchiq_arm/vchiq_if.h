@@ -88,10 +88,10 @@ typedef struct vchiq_header_struct {
 	char data[0];           /* message */
 } VCHIQ_HEADER_T;
 
-struct vchiq_element {
+typedef struct {
 	const void *data;
 	unsigned int size;
-};
+} VCHIQ_ELEMENT_T;
 
 typedef unsigned int VCHIQ_SERVICE_HANDLE_T;
 

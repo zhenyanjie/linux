@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Broadcom
+ * Copyright (C) 2013 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -10,10 +10,9 @@
  * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
@@ -1445,4 +1444,10 @@ static struct platform_driver bcm281xx_pinctrl_driver = {
 		.of_match_table = bcm281xx_pinctrl_of_match,
 	},
 };
-builtin_platform_driver_probe(bcm281xx_pinctrl_driver, bcm281xx_pinctrl_probe);
+
+module_platform_driver_probe(bcm281xx_pinctrl_driver, bcm281xx_pinctrl_probe);
+
+MODULE_AUTHOR("Broadcom Corporation <bcm-kernel-feedback-list@broadcom.com>");
+MODULE_AUTHOR("Sherman Yin <syin@broadcom.com>");
+MODULE_DESCRIPTION("Broadcom BCM281xx pinctrl driver");
+MODULE_LICENSE("GPL v2");

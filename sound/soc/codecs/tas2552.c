@@ -611,7 +611,7 @@ probe_fail:
 
 	regulator_bulk_disable(ARRAY_SIZE(tas2552->supplies),
 					tas2552->supplies);
-	return ret;
+	return -EIO;
 }
 
 static int tas2552_codec_remove(struct snd_soc_codec *codec)
@@ -637,7 +637,7 @@ static int tas2552_suspend(struct snd_soc_codec *codec)
 	if (ret != 0)
 		dev_err(codec->dev, "Failed to disable supplies: %d\n",
 			ret);
-	return ret;
+	return 0;
 }
 
 static int tas2552_resume(struct snd_soc_codec *codec)
@@ -653,7 +653,7 @@ static int tas2552_resume(struct snd_soc_codec *codec)
 			ret);
 	}
 
-	return ret;
+	return 0;
 }
 #else
 #define tas2552_suspend NULL

@@ -182,7 +182,6 @@ static int proc_keys_show(struct seq_file *m, void *v)
 	unsigned long timo;
 	key_ref_t key_ref, skey_ref;
 	char xbuf[16];
-	short state;
 	int rc;
 
 	struct keyring_search_context ctx = {
@@ -241,21 +240,19 @@ static int proc_keys_show(struct seq_file *m, void *v)
 			sprintf(xbuf, "%luw", timo / (60*60*24*7));
 	}
 
-	state = key_read_state(key);
-
 #define showflag(KEY, LETTER, FLAG) \
 	(test_bit(FLAG,	&(KEY)->flags) ? LETTER : '-')
 
 	seq_printf(m, "%08x %c%c%c%c%c%c%c %5d %4s %08x %5d %5d %-9.9s ",
 		   key->serial,
-		   state != KEY_IS_UNINSTANTIATED ? 'I' : '-',
+		   showflag(key, 'I', KEY_FLAG_INSTANTIATED),
 		   showflag(key, 'R', KEY_FLAG_REVOKED),
 		   showflag(key, 'D', KEY_FLAG_DEAD),
 		   showflag(key, 'Q', KEY_FLAG_IN_QUOTA),
 		   showflag(key, 'U', KEY_FLAG_USER_CONSTRUCT),
-		   state < 0 ? 'N' : '-',
+		   showflag(key, 'N', KEY_FLAG_NEGATIVE),
 		   showflag(key, 'i', KEY_FLAG_INVALIDATED),
-		   refcount_read(&key->usage),
+		   atomic_read(&key->usage),
 		   xbuf,
 		   key->perm,
 		   from_kuid_munged(seq_user_ns(m), key->uid),
@@ -343,7 +340,7 @@ static int proc_key_users_show(struct seq_file *m, void *v)
 
 	seq_printf(m, "%5u: %5d %d/%d %d/%d %d/%d\n",
 		   from_kuid_munged(seq_user_ns(m), user->uid),
-		   refcount_read(&user->usage),
+		   atomic_read(&user->usage),
 		   atomic_read(&user->nkeys),
 		   atomic_read(&user->nikeys),
 		   user->qnkeys,

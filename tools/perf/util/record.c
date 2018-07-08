@@ -2,7 +2,6 @@
 #include "evsel.h"
 #include "cpumap.h"
 #include "parse-events.h"
-#include <errno.h>
 #include <api/fs/fs.h>
 #include "util.h"
 #include "cloexec.h"

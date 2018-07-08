@@ -204,7 +204,6 @@ void set_personality_ia32(bool);
 
 #define ELF_CORE_COPY_REGS(pr_reg, regs)			\
 do {								\
-	unsigned long base;					\
 	unsigned v;						\
 	(pr_reg)[0] = (regs)->r15;				\
 	(pr_reg)[1] = (regs)->r14;				\
@@ -227,8 +226,8 @@ do {								\
 	(pr_reg)[18] = (regs)->flags;				\
 	(pr_reg)[19] = (regs)->sp;				\
 	(pr_reg)[20] = (regs)->ss;				\
-	rdmsrl(MSR_FS_BASE, base); (pr_reg)[21] = base;		\
-	rdmsrl(MSR_KERNEL_GS_BASE, base); (pr_reg)[22] = base;	\
+	(pr_reg)[21] = current->thread.fsbase;			\
+	(pr_reg)[22] = current->thread.gsbase;			\
 	asm("movl %%ds,%0" : "=r" (v)); (pr_reg)[23] = v;	\
 	asm("movl %%es,%0" : "=r" (v)); (pr_reg)[24] = v;	\
 	asm("movl %%fs,%0" : "=r" (v)); (pr_reg)[25] = v;	\
@@ -248,11 +247,11 @@ extern int force_personality32;
 
 /*
  * This is the base location for PIE (ET_DYN with INTERP) loads. On
- * 64-bit, this is above 4GB to leave the entire 32-bit address
+ * 64-bit, this is raised to 4GB to leave the entire 32-bit address
  * space open for things that want to use the area for 32-bit pointers.
  */
 #define ELF_ET_DYN_BASE		(mmap_is_ia32() ? 0x000400000UL : \
-						  (TASK_SIZE / 3 * 2))
+						  0x100000000UL)
 
 /* This yields a mask that user programs can use to figure out what
    instruction set this CPU supports.  This could be done in user space,
@@ -295,23 +294,8 @@ do {									\
 	}								\
 } while (0)
 
-/*
- * True on X86_32 or when emulating IA32 on X86_64
- */
-static inline int mmap_is_ia32(void)
-{
-	return IS_ENABLED(CONFIG_X86_32) ||
-	       (IS_ENABLED(CONFIG_COMPAT) &&
-		test_thread_flag(TIF_ADDR32));
-}
-
-extern unsigned long tasksize_32bit(void);
-extern unsigned long tasksize_64bit(void);
-extern unsigned long get_mmap_base(int is_legacy);
-
 #ifdef CONFIG_X86_32
 
-#define __STACK_RND_MASK(is32bit) (0x7ff)
 #define STACK_RND_MASK (0x7ff)
 
 #define ARCH_DLINFO		ARCH_DLINFO_IA32
@@ -321,8 +305,7 @@ extern unsigned long get_mmap_base(int is_legacy);
 #else /* CONFIG_X86_32 */
 
 /* 1GB for 64bit, 8MB for 32bit */
-#define __STACK_RND_MASK(is32bit) ((is32bit) ? 0x7ff : 0x3fffff)
-#define STACK_RND_MASK __STACK_RND_MASK(mmap_is_ia32())
+#define STACK_RND_MASK (test_thread_flag(TIF_ADDR32) ? 0x7ff : 0x3fffff)
 
 #define ARCH_DLINFO							\
 do {									\
@@ -365,6 +348,16 @@ extern int arch_setup_additional_pages(struct linux_binprm *bprm,
 extern int compat_arch_setup_additional_pages(struct linux_binprm *bprm,
 					      int uses_interp);
 #define compat_arch_setup_additional_pages compat_arch_setup_additional_pages
+
+/*
+ * True on X86_32 or when emulating IA32 on X86_64
+ */
+static inline int mmap_is_ia32(void)
+{
+	return IS_ENABLED(CONFIG_X86_32) ||
+	       (IS_ENABLED(CONFIG_COMPAT) &&
+		test_thread_flag(TIF_ADDR32));
+}
 
 /* Do not change the values. See get_align_mask() */
 enum align_flags {

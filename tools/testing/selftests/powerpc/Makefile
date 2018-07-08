@@ -8,13 +8,12 @@ ifeq ($(ARCH),powerpc)
 
 GIT_VERSION = $(shell git describe --always --long --dirty || echo "unknown")
 
-CFLAGS := -std=gnu99 -O2 -Wall -Werror -DGIT_VERSION='"$(GIT_VERSION)"' -I$(CURDIR)/include $(CFLAGS)
+CFLAGS := -std=gnu99 -Wall -O2 -Wall -Werror -DGIT_VERSION='"$(GIT_VERSION)"' -I$(CURDIR)/include $(CFLAGS)
 
 export CFLAGS
 
 SUB_DIRS = alignment		\
 	   benchmarks		\
-	   cache_shape		\
 	   copyloops		\
 	   context_switch	\
 	   dscr			\
@@ -60,13 +59,12 @@ override define EMIT_TESTS
 	done;
 endef
 
-override define CLEAN
+clean:
 	@for TARGET in $(SUB_DIRS); do \
 		BUILD_TARGET=$(OUTPUT)/$$TARGET;	\
 		$(MAKE) OUTPUT=$$BUILD_TARGET -C $$TARGET clean; \
 	done;
 	rm -f tags
-endef
 
 tags:
 	find . -name '*.c' -o -name '*.h' | xargs ctags

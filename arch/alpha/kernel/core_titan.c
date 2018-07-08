@@ -461,7 +461,6 @@ titan_ioremap(unsigned long addr, unsigned long size)
 	unsigned long *ptes;
 	unsigned long pfn;
 
-#ifdef CONFIG_VGA_HOSE
 	/*
 	 * Adjust the address and hose, if necessary.
 	 */ 
@@ -469,7 +468,6 @@ titan_ioremap(unsigned long addr, unsigned long size)
 		h = pci_vga_hose->index;
 		addr += pci_vga_hose->mem_space->start;
 	}
-#endif
 
 	/*
 	 * Find the hose.

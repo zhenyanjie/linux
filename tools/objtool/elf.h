@@ -37,9 +37,10 @@ struct section {
 	DECLARE_HASHTABLE(rela_hash, 16);
 	struct section *base, *rela;
 	struct symbol *sym;
-	Elf_Data *data;
+	Elf_Data *elf_data;
 	char *name;
 	int idx;
+	unsigned long data;
 	unsigned int len;
 };
 
@@ -85,7 +86,6 @@ struct rela *find_rela_by_dest_range(struct section *sec, unsigned long offset,
 struct symbol *find_containing_func(struct section *sec, unsigned long offset);
 void elf_close(struct elf *elf);
 
-#define for_each_sec(file, sec)						\
-	list_for_each_entry(sec, &file->elf->sections, list)
+
 
 #endif /* _OBJTOOL_ELF_H */

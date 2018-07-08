@@ -717,10 +717,9 @@ static int subn_set_portinfo(struct ib_smp *smp, struct ib_device *ibdev,
 		spin_lock_irqsave(&ibp->rvp.lock, flags);
 		if (ibp->rvp.sm_ah) {
 			if (smlid != ibp->rvp.sm_lid)
-				rdma_ah_set_dlid(&ibp->rvp.sm_ah->attr,
-						 smlid);
+				ibp->rvp.sm_ah->attr.dlid = smlid;
 			if (msl != ibp->rvp.sm_sl)
-				rdma_ah_set_sl(&ibp->rvp.sm_ah->attr, msl);
+				ibp->rvp.sm_ah->attr.sl = msl;
 		}
 		spin_unlock_irqrestore(&ibp->rvp.lock, flags);
 		if (smlid != ibp->rvp.sm_lid)
@@ -2501,5 +2500,5 @@ void qib_notify_free_mad_agent(struct rvt_dev_info *rdi, int port_idx)
 		del_timer_sync(&dd->pport[port_idx].cong_stats.timer);
 
 	if (dd->pport[port_idx].ibport_data.smi_ah)
-		rdma_destroy_ah(&dd->pport[port_idx].ibport_data.smi_ah->ibah);
+		ib_destroy_ah(&dd->pport[port_idx].ibport_data.smi_ah->ibah);
 }

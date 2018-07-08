@@ -1,4 +1,3 @@
-#include <linux/compiler.h>
 #include <sys/types.h>
 #include <stdio.h>
 #include <string.h>
@@ -239,7 +238,7 @@ code_generated_cb(jvmtiEnv *jvmti,
 }
 
 JNIEXPORT jint JNICALL
-Agent_OnLoad(JavaVM *jvm, char *options, void *reserved __maybe_unused)
+Agent_OnLoad(JavaVM *jvm, char *options, void *reserved __unused)
 {
 	jvmtiEventCallbacks cb;
 	jvmtiCapabilities caps1;
@@ -314,7 +313,7 @@ Agent_OnLoad(JavaVM *jvm, char *options, void *reserved __maybe_unused)
 }
 
 JNIEXPORT void JNICALL
-Agent_OnUnload(JavaVM *jvm __maybe_unused)
+Agent_OnUnload(JavaVM *jvm __unused)
 {
 	int ret;
 

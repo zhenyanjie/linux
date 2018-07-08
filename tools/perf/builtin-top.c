@@ -27,20 +27,19 @@
 #include "util/drv_configs.h"
 #include "util/evlist.h"
 #include "util/evsel.h"
-#include "util/event.h"
 #include "util/machine.h"
 #include "util/session.h"
 #include "util/symbol.h"
 #include "util/thread.h"
 #include "util/thread_map.h"
 #include "util/top.h"
+#include "util/util.h"
 #include <linux/rbtree.h>
 #include <subcmd/parse-options.h>
 #include "util/parse-events.h"
 #include "util/cpumap.h"
 #include "util/xyarray.h"
 #include "util/sort.h"
-#include "util/term.h"
 #include "util/intlist.h"
 #include "util/parse-branch-options.h"
 #include "arch/common.h"
@@ -59,7 +58,6 @@
 #include <errno.h>
 #include <time.h>
 #include <sched.h>
-#include <signal.h>
 
 #include <sys/syscall.h>
 #include <sys/ioctl.h>
@@ -73,8 +71,6 @@
 #include <linux/stringify.h>
 #include <linux/time64.h>
 #include <linux/types.h>
-
-#include "sane_ctype.h"
 
 static volatile int done;
 
@@ -134,7 +130,7 @@ static int perf_top__parse_source(struct perf_top *top, struct hist_entry *he)
 		return err;
 	}
 
-	err = symbol__disassemble(sym, map, NULL, 0, NULL);
+	err = symbol__disassemble(sym, map, NULL, 0);
 	if (err == 0) {
 out_assign:
 		top->sym_filter_entry = he;
@@ -958,7 +954,7 @@ static int __cmd_top(struct perf_top *top)
 
 	ret = perf_evlist__apply_drv_configs(evlist, &pos, &err_term);
 	if (ret) {
-		pr_err("failed to set config \"%s\" on event %s with %d (%s)\n",
+		error("failed to set config \"%s\" on event %s with %d (%s)\n",
 			err_term->val.drv_cfg, perf_evsel__name(pos), errno,
 			str_error_r(errno, msg, sizeof(msg)));
 		goto out_delete;
@@ -1079,7 +1075,7 @@ parse_percent_limit(const struct option *opt, const char *arg,
 const char top_callchain_help[] = CALLCHAIN_RECORD_HELP CALLCHAIN_REPORT_HELP
 	"\n\t\t\t\tDefault: fp,graph,0.5,caller,function";
 
-int cmd_top(int argc, const char **argv)
+int cmd_top(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	char errbuf[BUFSIZ];
 	struct perf_top top = {

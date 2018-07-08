@@ -14,8 +14,6 @@
 #include <linux/pci.h>
 #include <asm/pci_dma.h>
 
-#define S390_MAPPING_ERROR		(~(dma_addr_t) 0x0)
-
 static struct kmem_cache *dma_region_table_cache;
 static struct kmem_cache *dma_page_table_cache;
 static int s390_iommu_strict;
@@ -283,7 +281,7 @@ static dma_addr_t dma_alloc_address(struct device *dev, int size)
 
 out_error:
 	spin_unlock_irqrestore(&zdev->iommu_bitmap_lock, flags);
-	return S390_MAPPING_ERROR;
+	return DMA_ERROR_CODE;
 }
 
 static void dma_free_address(struct device *dev, dma_addr_t dma_addr, int size)
@@ -331,7 +329,7 @@ static dma_addr_t s390_dma_map_pages(struct device *dev, struct page *page,
 	/* This rounds up number of pages based on size and offset */
 	nr_pages = iommu_num_pages(pa, size, PAGE_SIZE);
 	dma_addr = dma_alloc_address(dev, nr_pages);
-	if (dma_addr == S390_MAPPING_ERROR) {
+	if (dma_addr == DMA_ERROR_CODE) {
 		ret = -ENOSPC;
 		goto out_err;
 	}
@@ -354,7 +352,7 @@ out_free:
 out_err:
 	zpci_err("map error:\n");
 	zpci_err_dma(ret, pa);
-	return S390_MAPPING_ERROR;
+	return DMA_ERROR_CODE;
 }
 
 static void s390_dma_unmap_pages(struct device *dev, dma_addr_t dma_addr,
@@ -431,7 +429,7 @@ static int __s390_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	int ret;
 
 	dma_addr_base = dma_alloc_address(dev, nr_pages);
-	if (dma_addr_base == S390_MAPPING_ERROR)
+	if (dma_addr_base == DMA_ERROR_CODE)
 		return -ENOMEM;
 
 	dma_addr = dma_addr_base;
@@ -478,7 +476,7 @@ static int s390_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	for (i = 1; i < nr_elements; i++) {
 		s = sg_next(s);
 
-		s->dma_address = S390_MAPPING_ERROR;
+		s->dma_address = DMA_ERROR_CODE;
 		s->dma_length = 0;
 
 		if (s->offset || (size & ~PAGE_MASK) ||
@@ -526,11 +524,6 @@ static void s390_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 		s->dma_address = 0;
 		s->dma_length = 0;
 	}
-}
-	
-static int s390_mapping_error(struct device *dev, dma_addr_t dma_addr)
-{
-	return dma_addr == S390_MAPPING_ERROR;
 }
 
 int zpci_dma_init_device(struct zpci_dev *zdev)
@@ -608,9 +601,7 @@ void zpci_dma_exit_device(struct zpci_dev *zdev)
 	 */
 	WARN_ON(zdev->s390_domain);
 
-	if (zpci_unregister_ioat(zdev, 0))
-		return;
-
+	zpci_unregister_ioat(zdev, 0);
 	dma_cleanup_tables(zdev->dma_table);
 	zdev->dma_table = NULL;
 	vfree(zdev->iommu_bitmap);
@@ -666,7 +657,6 @@ const struct dma_map_ops s390_pci_dma_ops = {
 	.unmap_sg	= s390_dma_unmap_sg,
 	.map_page	= s390_dma_map_pages,
 	.unmap_page	= s390_dma_unmap_pages,
-	.mapping_error	= s390_mapping_error,
 	/* if we support direct DMA this must be conditional */
 	.is_phys	= 0,
 	/* dma_supported is unconditionally true without a callback */

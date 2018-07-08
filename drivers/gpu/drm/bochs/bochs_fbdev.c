@@ -107,8 +107,10 @@ static int bochsfb_create(struct drm_fb_helper *helper,
 	info->par = &bochs->fb.helper;
 
 	ret = bochs_framebuffer_init(bochs->dev, &bochs->fb.gfb, &mode_cmd, gobj);
-	if (ret)
+	if (ret) {
+		drm_fb_helper_release_fbi(helper);
 		return ret;
+	}
 
 	bochs->fb.size = size;
 
@@ -132,7 +134,6 @@ static int bochsfb_create(struct drm_fb_helper *helper,
 	info->fix.smem_start = 0;
 	info->fix.smem_len = size;
 
-	bochs->fb.initialized = true;
 	return 0;
 }
 
@@ -143,12 +144,14 @@ static int bochs_fbdev_destroy(struct bochs_device *bochs)
 	DRM_DEBUG_DRIVER("\n");
 
 	drm_fb_helper_unregister_fbi(&bochs->fb.helper);
+	drm_fb_helper_release_fbi(&bochs->fb.helper);
 
 	if (gfb->obj) {
 		drm_gem_object_unreference_unlocked(gfb->obj);
 		gfb->obj = NULL;
 	}
 
+	drm_fb_helper_fini(&bochs->fb.helper);
 	drm_framebuffer_unregister_private(&gfb->base);
 	drm_framebuffer_cleanup(&gfb->base);
 
@@ -180,6 +183,7 @@ int bochs_fbdev_init(struct bochs_device *bochs)
 	if (ret)
 		goto fini;
 
+	bochs->fb.initialized = true;
 	return 0;
 
 fini:
@@ -189,11 +193,9 @@ fini:
 
 void bochs_fbdev_fini(struct bochs_device *bochs)
 {
-	if (bochs->fb.initialized)
-		bochs_fbdev_destroy(bochs);
+	if (!bochs->fb.initialized)
+		return;
 
-	if (bochs->fb.helper.fbdev)
-		drm_fb_helper_fini(&bochs->fb.helper);
-
+	bochs_fbdev_destroy(bochs);
 	bochs->fb.initialized = false;
 }

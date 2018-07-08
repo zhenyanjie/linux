@@ -130,13 +130,14 @@ int saa7164_irq_dequeue(struct saa7164_dev *dev)
  * -bus/c running buffer. */
 static int saa7164_cmd_dequeue(struct saa7164_dev *dev)
 {
+	int loop = 1;
 	int ret;
 	u32 timeout;
 	wait_queue_head_t *q = NULL;
 	u8 tmp[512];
 	dprintk(DBGLVL_CMD, "%s()\n", __func__);
 
-	while (true) {
+	while (loop) {
 
 		struct tmComResInfo tRsp = { 0, 0, 0, 0, 0, 0 };
 		ret = saa7164_bus_get(dev, &tRsp, NULL, 1);
@@ -177,6 +178,8 @@ static int saa7164_cmd_dequeue(struct saa7164_dev *dev)
 		wake_up(q);
 		return SAA_OK;
 	}
+
+	return SAA_OK;
 }
 
 static int saa7164_cmd_set(struct saa7164_dev *dev, struct tmComResInfo *msg,
@@ -506,8 +509,6 @@ int saa7164_cmd_send(struct saa7164_dev *dev, u8 id, enum tmComResCmd command,
 				dprintk(DBGLVL_CMD,
 					"%s() UNKNOWN OR INVALID CONTROL\n",
 					__func__);
-				ret = SAA_ERR_NOT_SUPPORTED;
-				break;
 			default:
 				dprintk(DBGLVL_CMD, "%s() UNKNOWN\n", __func__);
 				ret = SAA_ERR_NOT_SUPPORTED;

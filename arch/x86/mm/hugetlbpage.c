@@ -12,12 +12,10 @@
 #include <linux/pagemap.h>
 #include <linux/err.h>
 #include <linux/sysctl.h>
-#include <linux/compat.h>
 #include <asm/mman.h>
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgalloc.h>
-#include <asm/elf.h>
 
 #if 0	/* This is just for testing */
 struct page *
@@ -33,7 +31,7 @@ follow_huge_addr(struct mm_struct *mm, unsigned long address, int write)
 	if (!vma || !is_vm_hugetlb_page(vma))
 		return ERR_PTR(-EINVAL);
 
-	pte = huge_pte_offset(mm, address, vma_mmu_pagesize(vma));
+	pte = huge_pte_offset(mm, address);
 
 	/* hugetlb should be locked, and hence, prefaulted */
 	WARN_ON(!pte || pte_none(*pte));
@@ -84,9 +82,8 @@ static unsigned long hugetlb_get_unmapped_area_bottomup(struct file *file,
 
 	info.flags = 0;
 	info.length = len;
-	info.low_limit = get_mmap_base(1);
-	info.high_limit = in_compat_syscall() ?
-		tasksize_32bit() : tasksize_64bit();
+	info.low_limit = current->mm->mmap_legacy_base;
+	info.high_limit = TASK_SIZE;
 	info.align_mask = PAGE_MASK & ~huge_page_mask(h);
 	info.align_offset = 0;
 	return vm_unmapped_area(&info);
@@ -103,7 +100,7 @@ static unsigned long hugetlb_get_unmapped_area_topdown(struct file *file,
 	info.flags = VM_UNMAPPED_AREA_TOPDOWN;
 	info.length = len;
 	info.low_limit = PAGE_SIZE;
-	info.high_limit = get_mmap_base(0);
+	info.high_limit = current->mm->mmap_base;
 	info.align_mask = PAGE_MASK & ~huge_page_mask(h);
 	info.align_offset = 0;
 	addr = vm_unmapped_area(&info);

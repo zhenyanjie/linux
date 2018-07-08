@@ -1,7 +1,3 @@
-#include <inttypes.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include "builtin.h"
 #include "perf.h"
 
@@ -12,7 +8,6 @@
 #include "util/data.h"
 #include "util/mem-events.h"
 #include "util/debug.h"
-#include "util/symbol.h"
 
 #define MEM_OPERATION_LOAD	0x1
 #define MEM_OPERATION_STORE	0x2
@@ -134,7 +129,7 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem)
 		pr_debug("\n");
 	}
 
-	ret = cmd_record(i, rec_argv);
+	ret = cmd_record(i, rec_argv, NULL);
 	free(rec_argv);
 	return ret;
 }
@@ -261,7 +256,7 @@ static int report_events(int argc, const char **argv, struct perf_mem *mem)
 	for (j = 1; j < argc; j++, i++)
 		rep_argv[i] = argv[j];
 
-	ret = cmd_report(i, rep_argv);
+	ret = cmd_report(i, rep_argv, NULL);
 	free(rep_argv);
 	return ret;
 }
@@ -335,7 +330,7 @@ error:
 	return ret;
 }
 
-int cmd_mem(int argc, const char **argv)
+int cmd_mem(int argc, const char **argv, const char *prefix __maybe_unused)
 {
 	struct stat st;
 	struct perf_mem mem = {
@@ -347,7 +342,6 @@ int cmd_mem(int argc, const char **argv)
 			.lost		= perf_event__process_lost,
 			.fork		= perf_event__process_fork,
 			.build_id	= perf_event__process_build_id,
-			.namespaces	= perf_event__process_namespaces,
 			.ordered_events	= true,
 		},
 		.input_name		 = "perf.data",

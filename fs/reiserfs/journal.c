@@ -1961,7 +1961,7 @@ static int do_journal_release(struct reiserfs_transaction_handle *th,
 	 * will be requeued because superblock is being shutdown and doesn't
 	 * have MS_ACTIVE set.
 	 */
-	reiserfs_cancel_old_flush(sb);
+	cancel_delayed_work_sync(&REISERFS_SB(sb)->old_work);
 	/* wait for all commits to finish */
 	cancel_delayed_work_sync(&SB_JOURNAL(sb)->j_work);
 
@@ -2956,7 +2956,7 @@ void reiserfs_wait_on_write_block(struct super_block *s)
 
 static void queue_log_writer(struct super_block *s)
 {
-	wait_queue_entry_t wait;
+	wait_queue_t wait;
 	struct reiserfs_journal *journal = SB_JOURNAL(s);
 	set_bit(J_WRITERS_QUEUED, &journal->j_state);
 

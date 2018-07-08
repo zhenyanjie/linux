@@ -25,7 +25,8 @@
 
 #include <asm/io.h>
 
-#include <linux/w1.h>
+#include "../w1.h"
+#include "../w1_int.h"
 
 
 #define DS1WM_CMD	0x00	/* R/W 4 bits command */

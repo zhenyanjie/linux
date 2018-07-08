@@ -37,6 +37,8 @@
 #include <linux/ioport.h>
 #include <linux/device.h>
 #include <linux/io.h>
+#include "../include/mc-sys.h"
+#include "../include/mc-cmd.h"
 #include "../include/mc.h"
 
 #include "dpmcp.h"

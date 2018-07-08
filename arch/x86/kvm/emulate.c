@@ -900,7 +900,7 @@ static __always_inline int do_insn_fetch_bytes(struct x86_emulate_ctxt *ctxt,
 	if (rc != X86EMUL_CONTINUE)					\
 		goto done;						\
 	ctxt->_eip += sizeof(_type);					\
-	memcpy(&_x, ctxt->fetch.ptr, sizeof(_type));			\
+	_x = *(_type __aligned(1) *) ctxt->fetch.ptr;			\
 	ctxt->fetch.ptr += sizeof(_type);				\
 	_x;								\
 })
@@ -3855,13 +3855,6 @@ static int em_sti(struct x86_emulate_ctxt *ctxt)
 static int em_cpuid(struct x86_emulate_ctxt *ctxt)
 {
 	u32 eax, ebx, ecx, edx;
-	u64 msr = 0;
-
-	ctxt->ops->get_msr(ctxt, MSR_MISC_FEATURES_ENABLES, &msr);
-	if (msr & MSR_MISC_FEATURES_ENABLES_CPUID_FAULT &&
-	    ctxt->ops->cpl(ctxt)) {
-		return emulate_gp(ctxt, 0);
-	}
 
 	eax = reg_read(ctxt, VCPU_REGS_RAX);
 	ecx = reg_read(ctxt, VCPU_REGS_RCX);
@@ -3942,25 +3935,6 @@ static int check_fxsr(struct x86_emulate_ctxt *ctxt)
 }
 
 /*
- * Hardware doesn't save and restore XMM 0-7 without CR4.OSFXSR, but does save
- * and restore MXCSR.
- */
-static size_t __fxstate_size(int nregs)
-{
-	return offsetof(struct fxregs_state, xmm_space[0]) + nregs * 16;
-}
-
-static inline size_t fxstate_size(struct x86_emulate_ctxt *ctxt)
-{
-	bool cr4_osfxsr;
-	if (ctxt->mode == X86EMUL_MODE_PROT64)
-		return __fxstate_size(16);
-
-	cr4_osfxsr = ctxt->ops->get_cr(ctxt, 4) & X86_CR4_OSFXSR;
-	return __fxstate_size(cr4_osfxsr ? 8 : 0);
-}
-
-/*
  * FXSAVE and FXRSTOR have 4 different formats depending on execution mode,
  *  1) 16 bit mode
  *  2) 32 bit mode
@@ -3981,6 +3955,7 @@ static inline size_t fxstate_size(struct x86_emulate_ctxt *ctxt)
 static int em_fxsave(struct x86_emulate_ctxt *ctxt)
 {
 	struct fxregs_state fx_state;
+	size_t size;
 	int rc;
 
 	rc = check_fxsr(ctxt);
@@ -3996,42 +3971,68 @@ static int em_fxsave(struct x86_emulate_ctxt *ctxt)
 	if (rc != X86EMUL_CONTINUE)
 		return rc;
 
-	return segmented_write_std(ctxt, ctxt->memop.addr.mem, &fx_state,
-		                   fxstate_size(ctxt));
+	if (ctxt->ops->get_cr(ctxt, 4) & X86_CR4_OSFXSR)
+		size = offsetof(struct fxregs_state, xmm_space[8 * 16/4]);
+	else
+		size = offsetof(struct fxregs_state, xmm_space[0]);
+
+	return segmented_write_std(ctxt, ctxt->memop.addr.mem, &fx_state, size);
+}
+
+static int fxrstor_fixup(struct x86_emulate_ctxt *ctxt,
+		struct fxregs_state *new)
+{
+	int rc = X86EMUL_CONTINUE;
+	struct fxregs_state old;
+
+	rc = asm_safe("fxsave %[fx]", , [fx] "+m"(old));
+	if (rc != X86EMUL_CONTINUE)
+		return rc;
+
+	/*
+	 * 64 bit host will restore XMM 8-15, which is not correct on non-64
+	 * bit guests.  Load the current values in order to preserve 64 bit
+	 * XMMs after fxrstor.
+	 */
+#ifdef CONFIG_X86_64
+	/* XXX: accessing XMM 8-15 very awkwardly */
+	memcpy(&new->xmm_space[8 * 16/4], &old.xmm_space[8 * 16/4], 8 * 16);
+#endif
+
+	/*
+	 * Hardware doesn't save and restore XMM 0-7 without CR4.OSFXSR, but
+	 * does save and restore MXCSR.
+	 */
+	if (!(ctxt->ops->get_cr(ctxt, 4) & X86_CR4_OSFXSR))
+		memcpy(new->xmm_space, old.xmm_space, 8 * 16);
+
+	return rc;
 }
 
 static int em_fxrstor(struct x86_emulate_ctxt *ctxt)
 {
 	struct fxregs_state fx_state;
 	int rc;
-	size_t size;
 
 	rc = check_fxsr(ctxt);
 	if (rc != X86EMUL_CONTINUE)
 		return rc;
 
+	rc = segmented_read_std(ctxt, ctxt->memop.addr.mem, &fx_state, 512);
+	if (rc != X86EMUL_CONTINUE)
+		return rc;
+
+	if (fx_state.mxcsr >> 16)
+		return emulate_gp(ctxt, 0);
+
 	ctxt->ops->get_fpu(ctxt);
 
-	size = fxstate_size(ctxt);
-	if (size < __fxstate_size(16)) {
-		rc = asm_safe("fxsave %[fx]", , [fx] "+m"(fx_state));
-		if (rc != X86EMUL_CONTINUE)
-			goto out;
-	}
-
-	rc = segmented_read_std(ctxt, ctxt->memop.addr.mem, &fx_state, size);
-	if (rc != X86EMUL_CONTINUE)
-		goto out;
-
-	if (fx_state.mxcsr >> 16) {
-		rc = emulate_gp(ctxt, 0);
-		goto out;
-	}
+	if (ctxt->mode < X86EMUL_MODE_PROT64)
+		rc = fxrstor_fixup(ctxt, &fx_state);
 
 	if (rc == X86EMUL_CONTINUE)
 		rc = asm_safe("fxrstor %[fx]", : [fx] "m"(fx_state));
 
-out:
 	ctxt->ops->put_fpu(ctxt);
 
 	return rc;
@@ -4166,7 +4167,7 @@ static int check_dr_write(struct x86_emulate_ctxt *ctxt)
 
 static int check_svme(struct x86_emulate_ctxt *ctxt)
 {
-	u64 efer = 0;
+	u64 efer;
 
 	ctxt->ops->get_msr(ctxt, MSR_EFER, &efer);
 

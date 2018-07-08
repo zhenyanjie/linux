@@ -62,7 +62,7 @@ static pm_message_t pm_transition;
 
 static int async_error;
 
-static const char *pm_verb(int event)
+static char *pm_verb(int event)
 {
 	switch (event) {
 	case PM_EVENT_SUSPEND:
@@ -208,8 +208,7 @@ static ktime_t initcall_debug_start(struct device *dev)
 }
 
 static void initcall_debug_report(struct device *dev, ktime_t calltime,
-				  int error, pm_message_t state,
-				  const char *info)
+				  int error, pm_message_t state, char *info)
 {
 	ktime_t rettime;
 	s64 nsecs;
@@ -404,23 +403,21 @@ static pm_callback_t pm_noirq_op(const struct dev_pm_ops *ops, pm_message_t stat
 	return NULL;
 }
 
-static void pm_dev_dbg(struct device *dev, pm_message_t state, const char *info)
+static void pm_dev_dbg(struct device *dev, pm_message_t state, char *info)
 {
 	dev_dbg(dev, "%s%s%s\n", info, pm_verb(state.event),
 		((state.event & PM_EVENT_SLEEP) && device_may_wakeup(dev)) ?
 		", may wakeup" : "");
 }
 
-static void pm_dev_err(struct device *dev, pm_message_t state, const char *info,
+static void pm_dev_err(struct device *dev, pm_message_t state, char *info,
 			int error)
 {
 	printk(KERN_ERR "PM: Device %s failed to %s%s: error %d\n",
 		dev_name(dev), pm_verb(state.event), info, error);
 }
 
-#ifdef CONFIG_PM_DEBUG
-static void dpm_show_time(ktime_t starttime, pm_message_t state,
-			  const char *info)
+static void dpm_show_time(ktime_t starttime, pm_message_t state, char *info)
 {
 	ktime_t calltime;
 	u64 usecs64;
@@ -436,13 +433,9 @@ static void dpm_show_time(ktime_t starttime, pm_message_t state,
 		info ?: "", info ? " " : "", pm_verb(state.event),
 		usecs / USEC_PER_MSEC, usecs % USEC_PER_MSEC);
 }
-#else
-static inline void dpm_show_time(ktime_t starttime, pm_message_t state,
-				 const char *info) {}
-#endif /* CONFIG_PM_DEBUG */
 
 static int dpm_run_callback(pm_callback_t cb, struct device *dev,
-			    pm_message_t state, const char *info)
+			    pm_message_t state, char *info)
 {
 	ktime_t calltime;
 	int error;
@@ -542,7 +535,7 @@ static void dpm_watchdog_clear(struct dpm_watchdog *wd)
 static int device_resume_noirq(struct device *dev, pm_message_t state, bool async)
 {
 	pm_callback_t callback = NULL;
-	const char *info = NULL;
+	char *info = NULL;
 	int error = 0;
 
 	TRACE_DEVICE(dev);
@@ -672,7 +665,7 @@ void dpm_resume_noirq(pm_message_t state)
 static int device_resume_early(struct device *dev, pm_message_t state, bool async)
 {
 	pm_callback_t callback = NULL;
-	const char *info = NULL;
+	char *info = NULL;
 	int error = 0;
 
 	TRACE_DEVICE(dev);
@@ -800,7 +793,7 @@ EXPORT_SYMBOL_GPL(dpm_resume_start);
 static int device_resume(struct device *dev, pm_message_t state, bool async)
 {
 	pm_callback_t callback = NULL;
-	const char *info = NULL;
+	char *info = NULL;
 	int error = 0;
 	DECLARE_DPM_WATCHDOG_ON_STACK(wd);
 
@@ -962,7 +955,7 @@ void dpm_resume(pm_message_t state)
 static void device_complete(struct device *dev, pm_message_t state)
 {
 	void (*callback)(struct device *) = NULL;
-	const char *info = NULL;
+	char *info = NULL;
 
 	if (dev->power.syscore)
 		return;
@@ -1087,7 +1080,7 @@ static pm_message_t resume_event(pm_message_t sleep_state)
 static int __device_suspend_noirq(struct device *dev, pm_message_t state, bool async)
 {
 	pm_callback_t callback = NULL;
-	const char *info = NULL;
+	char *info = NULL;
 	int error = 0;
 
 	TRACE_DEVICE(dev);
@@ -1097,6 +1090,11 @@ static int __device_suspend_noirq(struct device *dev, pm_message_t state, bool a
 
 	if (async_error)
 		goto Complete;
+
+	if (pm_wakeup_pending()) {
+		async_error = -EBUSY;
+		goto Complete;
+	}
 
 	if (dev->power.syscore || dev->power.direct_complete)
 		goto Complete;
@@ -1227,7 +1225,7 @@ int dpm_suspend_noirq(pm_message_t state)
 static int __device_suspend_late(struct device *dev, pm_message_t state, bool async)
 {
 	pm_callback_t callback = NULL;
-	const char *info = NULL;
+	char *info = NULL;
 	int error = 0;
 
 	TRACE_DEVICE(dev);
@@ -1386,7 +1384,7 @@ EXPORT_SYMBOL_GPL(dpm_suspend_end);
  */
 static int legacy_suspend(struct device *dev, pm_message_t state,
 			  int (*cb)(struct device *dev, pm_message_t state),
-			  const char *info)
+			  char *info)
 {
 	int error;
 	ktime_t calltime;
@@ -1428,7 +1426,7 @@ static void dpm_clear_suppliers_direct_complete(struct device *dev)
 static int __device_suspend(struct device *dev, pm_message_t state, bool async)
 {
 	pm_callback_t callback = NULL;
-	const char *info = NULL;
+	char *info = NULL;
 	int error = 0;
 	DECLARE_DPM_WATCHDOG_ON_STACK(wd);
 
@@ -1835,13 +1833,10 @@ void device_pm_check_callbacks(struct device *dev)
 {
 	spin_lock_irq(&dev->power.lock);
 	dev->power.no_pm_callbacks =
-		(!dev->bus || (pm_ops_is_empty(dev->bus->pm) &&
-		 !dev->bus->suspend && !dev->bus->resume)) &&
-		(!dev->class || (pm_ops_is_empty(dev->class->pm) &&
-		 !dev->class->suspend && !dev->class->resume)) &&
+		(!dev->bus || pm_ops_is_empty(dev->bus->pm)) &&
+		(!dev->class || pm_ops_is_empty(dev->class->pm)) &&
 		(!dev->type || pm_ops_is_empty(dev->type->pm)) &&
 		(!dev->pm_domain || pm_ops_is_empty(&dev->pm_domain->ops)) &&
-		(!dev->driver || (pm_ops_is_empty(dev->driver->pm) &&
-		 !dev->driver->suspend && !dev->driver->resume));
+		(!dev->driver || pm_ops_is_empty(dev->driver->pm));
 	spin_unlock_irq(&dev->power.lock);
 }

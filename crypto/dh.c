@@ -4,9 +4,9 @@
  * Authors: Salvatore Benedetto <salvatore.benedetto@intel.com>
  *
  * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
+ * modify it under the terms of the GNU General Public Licence
  * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
+ * 2 of the Licence, or (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -21,12 +21,19 @@ struct dh_ctx {
 	MPI xa;
 };
 
-static void dh_clear_ctx(struct dh_ctx *ctx)
+static inline void dh_clear_params(struct dh_ctx *ctx)
 {
 	mpi_free(ctx->p);
 	mpi_free(ctx->g);
+	ctx->p = NULL;
+	ctx->g = NULL;
+}
+
+static void dh_free_ctx(struct dh_ctx *ctx)
+{
+	dh_clear_params(ctx);
 	mpi_free(ctx->xa);
-	memset(ctx, 0, sizeof(*ctx));
+	ctx->xa = NULL;
 }
 
 /*
@@ -64,36 +71,32 @@ static int dh_set_params(struct dh_ctx *ctx, struct dh *params)
 		return -EINVAL;
 
 	ctx->g = mpi_read_raw_data(params->g, params->g_size);
-	if (!ctx->g)
+	if (!ctx->g) {
+		mpi_free(ctx->p);
 		return -EINVAL;
+	}
 
 	return 0;
 }
 
-static int dh_set_secret(struct crypto_kpp *tfm, const void *buf,
-			 unsigned int len)
+static int dh_set_secret(struct crypto_kpp *tfm, void *buf, unsigned int len)
 {
 	struct dh_ctx *ctx = dh_get_ctx(tfm);
 	struct dh params;
 
-	/* Free the old MPI key if any */
-	dh_clear_ctx(ctx);
-
 	if (crypto_dh_decode_key(buf, len, &params) < 0)
-		goto err_clear_ctx;
+		return -EINVAL;
 
 	if (dh_set_params(ctx, &params) < 0)
-		goto err_clear_ctx;
+		return -EINVAL;
 
 	ctx->xa = mpi_read_raw_data(params.key, params.key_size);
-	if (!ctx->xa)
-		goto err_clear_ctx;
+	if (!ctx->xa) {
+		dh_clear_params(ctx);
+		return -EINVAL;
+	}
 
 	return 0;
-
-err_clear_ctx:
-	dh_clear_ctx(ctx);
-	return -EINVAL;
 }
 
 static int dh_compute_value(struct kpp_request *req)
@@ -140,7 +143,7 @@ err_free_val:
 	return ret;
 }
 
-static unsigned int dh_max_size(struct crypto_kpp *tfm)
+static int dh_max_size(struct crypto_kpp *tfm)
 {
 	struct dh_ctx *ctx = dh_get_ctx(tfm);
 
@@ -151,7 +154,7 @@ static void dh_exit_tfm(struct crypto_kpp *tfm)
 {
 	struct dh_ctx *ctx = dh_get_ctx(tfm);
 
-	dh_clear_ctx(ctx);
+	dh_free_ctx(ctx);
 }
 
 static struct kpp_alg dh = {

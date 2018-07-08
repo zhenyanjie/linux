@@ -105,7 +105,8 @@ xfs_inode_buf_verify(
 		di_ok = dip->di_magic == cpu_to_be16(XFS_DINODE_MAGIC) &&
 			xfs_dinode_good_version(mp, dip->di_version);
 		if (unlikely(XFS_TEST_ERROR(!di_ok, mp,
-						XFS_ERRTAG_ITOBP_INOTOBP))) {
+						XFS_ERRTAG_ITOBP_INOTOBP,
+						XFS_RANDOM_ITOBP_INOTOBP))) {
 			if (readahead) {
 				bp->b_flags &= ~XBF_DONE;
 				xfs_buf_ioerror(bp, -EIO);
@@ -380,7 +381,7 @@ xfs_log_dinode_to_disk(
 	}
 }
 
-bool
+static bool
 xfs_dinode_verify(
 	struct xfs_mount	*mp,
 	xfs_ino_t		ino,
@@ -443,7 +444,7 @@ xfs_dinode_calc_crc(
 	struct xfs_mount	*mp,
 	struct xfs_dinode	*dip)
 {
-	uint32_t		crc;
+	__uint32_t		crc;
 
 	if (dip->di_version < 3)
 		return;
@@ -507,7 +508,7 @@ xfs_iread(
 
 	/* even unallocated inodes are verified */
 	if (!xfs_dinode_verify(mp, ip->i_ino, dip)) {
-		xfs_alert(mp, "%s: validation failed for inode %lld",
+		xfs_alert(mp, "%s: validation failed for inode %lld failed",
 				__func__, ip->i_ino);
 
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp, dip);

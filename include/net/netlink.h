@@ -98,8 +98,8 @@
  *   nla_put_u8(skb, type, value)	add u8 attribute to skb
  *   nla_put_u16(skb, type, value)	add u16 attribute to skb
  *   nla_put_u32(skb, type, value)	add u32 attribute to skb
- *   nla_put_u64_64bit(skb, type,
- *                     value, padattr)	add u64 attribute to skb
+ *   nla_put_u64_64bits(skb, type,
+ *			value, padattr)	add u64 attribute to skb
  *   nla_put_s8(skb, type, value)	add s8 attribute to skb
  *   nla_put_s16(skb, type, value)	add s16 attribute to skb
  *   nla_put_s32(skb, type, value)	add s32 attribute to skb
@@ -233,17 +233,14 @@ struct nl_info {
 };
 
 int netlink_rcv_skb(struct sk_buff *skb,
-		    int (*cb)(struct sk_buff *, struct nlmsghdr *,
-			      struct netlink_ext_ack *));
+		    int (*cb)(struct sk_buff *, struct nlmsghdr *));
 int nlmsg_notify(struct sock *sk, struct sk_buff *skb, u32 portid,
 		 unsigned int group, int report, gfp_t flags);
 
 int nla_validate(const struct nlattr *head, int len, int maxtype,
-		 const struct nla_policy *policy,
-		 struct netlink_ext_ack *extack);
+		 const struct nla_policy *policy);
 int nla_parse(struct nlattr **tb, int maxtype, const struct nlattr *head,
-	      int len, const struct nla_policy *policy,
-	      struct netlink_ext_ack *extack);
+	      int len, const struct nla_policy *policy);
 int nla_policy_len(const struct nla_policy *, int);
 struct nlattr *nla_find(const struct nlattr *head, int len, int attrtype);
 size_t nla_strlcpy(char *dst, const struct nlattr *nla, size_t dstsize);
@@ -377,20 +374,18 @@ nlmsg_next(const struct nlmsghdr *nlh, int *remaining)
  * @tb: destination array with maxtype+1 elements
  * @maxtype: maximum attribute type to be expected
  * @policy: validation policy
- * @extack: extended ACK report struct
  *
  * See nla_parse()
  */
 static inline int nlmsg_parse(const struct nlmsghdr *nlh, int hdrlen,
 			      struct nlattr *tb[], int maxtype,
-			      const struct nla_policy *policy,
-			      struct netlink_ext_ack *extack)
+			      const struct nla_policy *policy)
 {
 	if (nlh->nlmsg_len < nlmsg_msg_size(hdrlen))
 		return -EINVAL;
 
 	return nla_parse(tb, maxtype, nlmsg_attrdata(nlh, hdrlen),
-			 nlmsg_attrlen(nlh, hdrlen), policy, extack);
+			 nlmsg_attrlen(nlh, hdrlen), policy);
 }
 
 /**
@@ -414,19 +409,16 @@ static inline struct nlattr *nlmsg_find_attr(const struct nlmsghdr *nlh,
  * @hdrlen: length of familiy specific header
  * @maxtype: maximum attribute type to be expected
  * @policy: validation policy
- * @extack: extended ACK report struct
  */
 static inline int nlmsg_validate(const struct nlmsghdr *nlh,
 				 int hdrlen, int maxtype,
-				 const struct nla_policy *policy,
-				 struct netlink_ext_ack *extack)
+				 const struct nla_policy *policy)
 {
 	if (nlh->nlmsg_len < nlmsg_msg_size(hdrlen))
 		return -EINVAL;
 
 	return nla_validate(nlmsg_attrdata(nlh, hdrlen),
-			    nlmsg_attrlen(nlh, hdrlen), maxtype, policy,
-			    extack);
+			    nlmsg_attrlen(nlh, hdrlen), maxtype, policy);
 }
 
 /**
@@ -747,17 +739,14 @@ nla_find_nested(const struct nlattr *nla, int attrtype)
  * @maxtype: maximum attribute type to be expected
  * @nla: attribute containing the nested attributes
  * @policy: validation policy
- * @extack: extended ACK report struct
  *
  * See nla_parse()
  */
 static inline int nla_parse_nested(struct nlattr *tb[], int maxtype,
 				   const struct nlattr *nla,
-				   const struct nla_policy *policy,
-				   struct netlink_ext_ack *extack)
+				   const struct nla_policy *policy)
 {
-	return nla_parse(tb, maxtype, nla_data(nla), nla_len(nla), policy,
-			 extack);
+	return nla_parse(tb, maxtype, nla_data(nla), nla_len(nla), policy);
 }
 
 /**
@@ -768,10 +757,7 @@ static inline int nla_parse_nested(struct nlattr *tb[], int maxtype,
  */
 static inline int nla_put_u8(struct sk_buff *skb, int attrtype, u8 value)
 {
-	/* temporary variables to work around GCC PR81715 with asan-stack=1 */
-	u8 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(u8), &tmp);
+	return nla_put(skb, attrtype, sizeof(u8), &value);
 }
 
 /**
@@ -782,9 +768,7 @@ static inline int nla_put_u8(struct sk_buff *skb, int attrtype, u8 value)
  */
 static inline int nla_put_u16(struct sk_buff *skb, int attrtype, u16 value)
 {
-	u16 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(u16), &tmp);
+	return nla_put(skb, attrtype, sizeof(u16), &value);
 }
 
 /**
@@ -795,9 +779,7 @@ static inline int nla_put_u16(struct sk_buff *skb, int attrtype, u16 value)
  */
 static inline int nla_put_be16(struct sk_buff *skb, int attrtype, __be16 value)
 {
-	__be16 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(__be16), &tmp);
+	return nla_put(skb, attrtype, sizeof(__be16), &value);
 }
 
 /**
@@ -808,9 +790,7 @@ static inline int nla_put_be16(struct sk_buff *skb, int attrtype, __be16 value)
  */
 static inline int nla_put_net16(struct sk_buff *skb, int attrtype, __be16 value)
 {
-	__be16 tmp = value;
-
-	return nla_put_be16(skb, attrtype | NLA_F_NET_BYTEORDER, tmp);
+	return nla_put_be16(skb, attrtype | NLA_F_NET_BYTEORDER, value);
 }
 
 /**
@@ -821,9 +801,7 @@ static inline int nla_put_net16(struct sk_buff *skb, int attrtype, __be16 value)
  */
 static inline int nla_put_le16(struct sk_buff *skb, int attrtype, __le16 value)
 {
-	__le16 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(__le16), &tmp);
+	return nla_put(skb, attrtype, sizeof(__le16), &value);
 }
 
 /**
@@ -834,9 +812,7 @@ static inline int nla_put_le16(struct sk_buff *skb, int attrtype, __le16 value)
  */
 static inline int nla_put_u32(struct sk_buff *skb, int attrtype, u32 value)
 {
-	u32 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(u32), &tmp);
+	return nla_put(skb, attrtype, sizeof(u32), &value);
 }
 
 /**
@@ -847,9 +823,7 @@ static inline int nla_put_u32(struct sk_buff *skb, int attrtype, u32 value)
  */
 static inline int nla_put_be32(struct sk_buff *skb, int attrtype, __be32 value)
 {
-	__be32 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(__be32), &tmp);
+	return nla_put(skb, attrtype, sizeof(__be32), &value);
 }
 
 /**
@@ -860,9 +834,7 @@ static inline int nla_put_be32(struct sk_buff *skb, int attrtype, __be32 value)
  */
 static inline int nla_put_net32(struct sk_buff *skb, int attrtype, __be32 value)
 {
-	__be32 tmp = value;
-
-	return nla_put_be32(skb, attrtype | NLA_F_NET_BYTEORDER, tmp);
+	return nla_put_be32(skb, attrtype | NLA_F_NET_BYTEORDER, value);
 }
 
 /**
@@ -873,9 +845,7 @@ static inline int nla_put_net32(struct sk_buff *skb, int attrtype, __be32 value)
  */
 static inline int nla_put_le32(struct sk_buff *skb, int attrtype, __le32 value)
 {
-	__le32 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(__le32), &tmp);
+	return nla_put(skb, attrtype, sizeof(__le32), &value);
 }
 
 /**
@@ -888,9 +858,7 @@ static inline int nla_put_le32(struct sk_buff *skb, int attrtype, __le32 value)
 static inline int nla_put_u64_64bit(struct sk_buff *skb, int attrtype,
 				    u64 value, int padattr)
 {
-	u64 tmp = value;
-
-	return nla_put_64bit(skb, attrtype, sizeof(u64), &tmp, padattr);
+	return nla_put_64bit(skb, attrtype, sizeof(u64), &value, padattr);
 }
 
 /**
@@ -903,9 +871,7 @@ static inline int nla_put_u64_64bit(struct sk_buff *skb, int attrtype,
 static inline int nla_put_be64(struct sk_buff *skb, int attrtype, __be64 value,
 			       int padattr)
 {
-	__be64 tmp = value;
-
-	return nla_put_64bit(skb, attrtype, sizeof(__be64), &tmp, padattr);
+	return nla_put_64bit(skb, attrtype, sizeof(__be64), &value, padattr);
 }
 
 /**
@@ -918,9 +884,7 @@ static inline int nla_put_be64(struct sk_buff *skb, int attrtype, __be64 value,
 static inline int nla_put_net64(struct sk_buff *skb, int attrtype, __be64 value,
 				int padattr)
 {
-	__be64 tmp = value;
-
-	return nla_put_be64(skb, attrtype | NLA_F_NET_BYTEORDER, tmp,
+	return nla_put_be64(skb, attrtype | NLA_F_NET_BYTEORDER, value,
 			    padattr);
 }
 
@@ -934,9 +898,7 @@ static inline int nla_put_net64(struct sk_buff *skb, int attrtype, __be64 value,
 static inline int nla_put_le64(struct sk_buff *skb, int attrtype, __le64 value,
 			       int padattr)
 {
-	__le64 tmp = value;
-
-	return nla_put_64bit(skb, attrtype, sizeof(__le64), &tmp, padattr);
+	return nla_put_64bit(skb, attrtype, sizeof(__le64), &value, padattr);
 }
 
 /**
@@ -947,9 +909,7 @@ static inline int nla_put_le64(struct sk_buff *skb, int attrtype, __le64 value,
  */
 static inline int nla_put_s8(struct sk_buff *skb, int attrtype, s8 value)
 {
-	s8 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(s8), &tmp);
+	return nla_put(skb, attrtype, sizeof(s8), &value);
 }
 
 /**
@@ -960,9 +920,7 @@ static inline int nla_put_s8(struct sk_buff *skb, int attrtype, s8 value)
  */
 static inline int nla_put_s16(struct sk_buff *skb, int attrtype, s16 value)
 {
-	s16 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(s16), &tmp);
+	return nla_put(skb, attrtype, sizeof(s16), &value);
 }
 
 /**
@@ -973,9 +931,7 @@ static inline int nla_put_s16(struct sk_buff *skb, int attrtype, s16 value)
  */
 static inline int nla_put_s32(struct sk_buff *skb, int attrtype, s32 value)
 {
-	s32 tmp = value;
-
-	return nla_put(skb, attrtype, sizeof(s32), &tmp);
+	return nla_put(skb, attrtype, sizeof(s32), &value);
 }
 
 /**
@@ -988,9 +944,7 @@ static inline int nla_put_s32(struct sk_buff *skb, int attrtype, s32 value)
 static inline int nla_put_s64(struct sk_buff *skb, int attrtype, s64 value,
 			      int padattr)
 {
-	s64 tmp = value;
-
-	return nla_put_64bit(skb, attrtype, sizeof(s64), &tmp, padattr);
+	return nla_put_64bit(skb, attrtype, sizeof(s64), &value, padattr);
 }
 
 /**
@@ -1040,9 +994,7 @@ static inline int nla_put_msecs(struct sk_buff *skb, int attrtype,
 static inline int nla_put_in_addr(struct sk_buff *skb, int attrtype,
 				  __be32 addr)
 {
-	__be32 tmp = addr;
-
-	return nla_put_be32(skb, attrtype, tmp);
+	return nla_put_be32(skb, attrtype, addr);
 }
 
 /**
@@ -1300,7 +1252,6 @@ static inline void nla_nest_cancel(struct sk_buff *skb, struct nlattr *start)
  * @start: container attribute
  * @maxtype: maximum attribute type to be expected
  * @policy: validation policy
- * @extack: extended ACK report struct
  *
  * Validates all attributes in the nested attribute stream against the
  * specified policy. Attributes with a type exceeding maxtype will be
@@ -1309,11 +1260,9 @@ static inline void nla_nest_cancel(struct sk_buff *skb, struct nlattr *start)
  * Returns 0 on success or a negative error code.
  */
 static inline int nla_validate_nested(const struct nlattr *start, int maxtype,
-				      const struct nla_policy *policy,
-				      struct netlink_ext_ack *extack)
+				      const struct nla_policy *policy)
 {
-	return nla_validate(nla_data(start), nla_len(start), maxtype, policy,
-			    extack);
+	return nla_validate(nla_data(start), nla_len(start), maxtype, policy);
 }
 
 /**

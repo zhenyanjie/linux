@@ -1,5 +1,4 @@
 #include "../util.h"
-#include "../string2.h"
 #include "../config.h"
 #include "../../perf.h"
 #include "libslang.h"
@@ -14,7 +13,6 @@
 #include "helpline.h"
 #include "keysyms.h"
 #include "../color.h"
-#include "sane_ctype.h"
 
 static int ui_browser__percent_color(struct ui_browser *browser,
 				     double percent, bool current)
@@ -581,7 +579,7 @@ static int ui_browser__color_config(const char *var, const char *value,
 			break;
 
 		*bg = '\0';
-		bg = ltrim(++bg);
+		while (isspace(*++bg));
 		ui_browser__colorsets[i].bg = bg;
 		ui_browser__colorsets[i].fg = fg;
 		return 0;
@@ -704,7 +702,7 @@ static void __ui_browser__line_arrow_down(struct ui_browser *browser,
 		ui_browser__gotorc(browser, row, column + 1);
 		SLsmg_draw_hline(2);
 
-		if (++row == 0)
+		if (row++ == 0)
 			goto out;
 	} else
 		row = 0;

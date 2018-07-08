@@ -71,7 +71,7 @@ struct nf_conntrack_l3proto {
 	struct module *me;
 };
 
-extern struct nf_conntrack_l3proto __rcu *nf_ct_l3protos[NFPROTO_NUMPROTO];
+extern struct nf_conntrack_l3proto __rcu *nf_ct_l3protos[AF_MAX];
 
 #ifdef CONFIG_SYSCTL
 /* Protocol pernet registration. */
@@ -100,7 +100,7 @@ extern struct nf_conntrack_l3proto nf_conntrack_l3proto_generic;
 static inline struct nf_conntrack_l3proto *
 __nf_ct_l3proto_find(u_int16_t l3proto)
 {
-	if (unlikely(l3proto >= NFPROTO_NUMPROTO))
+	if (unlikely(l3proto >= AF_MAX))
 		return &nf_conntrack_l3proto_generic;
 	return rcu_dereference(nf_ct_l3protos[l3proto]);
 }

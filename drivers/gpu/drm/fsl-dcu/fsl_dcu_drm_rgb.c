@@ -15,7 +15,6 @@
 #include <drm/drmP.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 
 #include "fsl_dcu_drm_drv.h"
@@ -142,11 +141,32 @@ err_cleanup:
 	return ret;
 }
 
+static int fsl_dcu_attach_endpoint(struct fsl_dcu_drm_device *fsl_dev,
+				   const struct of_endpoint *ep)
+{
+	struct drm_bridge *bridge;
+	struct device_node *np;
+
+	np = of_graph_get_remote_port_parent(ep->local_node);
+
+	fsl_dev->connector.panel = of_drm_find_panel(np);
+	if (fsl_dev->connector.panel) {
+		of_node_put(np);
+		return fsl_dcu_attach_panel(fsl_dev, fsl_dev->connector.panel);
+	}
+
+	bridge = of_drm_find_bridge(np);
+	of_node_put(np);
+	if (!bridge)
+		return -ENODEV;
+
+	return drm_bridge_attach(&fsl_dev->encoder, bridge, NULL);
+}
+
 int fsl_dcu_create_outputs(struct fsl_dcu_drm_device *fsl_dev)
 {
-	struct device_node *panel_node;
-	struct drm_panel *panel;
-	struct drm_bridge *bridge;
+	struct of_endpoint ep;
+	struct device_node *ep_node, *panel_node;
 	int ret;
 
 	/* This is for backward compatibility */
@@ -159,14 +179,14 @@ int fsl_dcu_create_outputs(struct fsl_dcu_drm_device *fsl_dev)
 		return fsl_dcu_attach_panel(fsl_dev, fsl_dev->connector.panel);
 	}
 
-	ret = drm_of_find_panel_or_bridge(fsl_dev->np, 0, 0, &panel, &bridge);
+	ep_node = of_graph_get_next_endpoint(fsl_dev->np, NULL);
+	if (!ep_node)
+		return -ENODEV;
+
+	ret = of_graph_parse_endpoint(ep_node, &ep);
+	of_node_put(ep_node);
 	if (ret)
-		return ret;
+		return -ENODEV;
 
-	if (panel) {
-		fsl_dev->connector.panel = panel;
-		return fsl_dcu_attach_panel(fsl_dev, panel);
-	}
-
-	return drm_bridge_attach(&fsl_dev->encoder, bridge, NULL);
+	return fsl_dcu_attach_endpoint(fsl_dev, &ep);
 }

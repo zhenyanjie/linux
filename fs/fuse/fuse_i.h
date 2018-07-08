@@ -24,8 +24,6 @@
 #include <linux/workqueue.h>
 #include <linux/kref.h>
 #include <linux/xattr.h>
-#include <linux/pid_namespace.h>
-#include <linux/refcount.h>
 
 /** Max number of pages that can be used in a single read request */
 #define FUSE_MAX_PAGES_PER_REQ 32
@@ -139,7 +137,7 @@ struct fuse_file {
 	u64 nodeid;
 
 	/** Refcount */
-	refcount_t count;
+	atomic_t count;
 
 	/** FOPEN_* flags returned by open */
 	u32 open_flags;
@@ -249,7 +247,6 @@ struct fuse_io_priv {
 	size_t size;
 	__u64 offset;
 	bool write;
-	bool should_dirty;
 	int err;
 	struct kiocb *iocb;
 	struct file *file;
@@ -309,7 +306,7 @@ struct fuse_req {
 	struct list_head intr_entry;
 
 	/** refcount */
-	refcount_t count;
+	atomic_t count;
 
 	/** Unique ID for the interrupt request */
 	u64 intr_unique;
@@ -451,7 +448,7 @@ struct fuse_conn {
 	spinlock_t lock;
 
 	/** Refcount */
-	refcount_t count;
+	atomic_t count;
 
 	/** Number of fuse_dev's */
 	atomic_t dev_count;
@@ -463,9 +460,6 @@ struct fuse_conn {
 
 	/** The group id for this mount */
 	kgid_t group_id;
-
-	/** The pid namespace for this mount */
-	struct pid_namespace *pid_ns;
 
 	/** Maximum read size */
 	unsigned max_read;
@@ -532,6 +526,9 @@ struct fuse_conn {
 
 	/** Filesystem supports NFS exporting.  Only set in INIT */
 	unsigned export_support:1;
+
+	/** Set if bdi is valid */
+	unsigned bdi_initialized:1;
 
 	/** write-back cache policy (default is write-through) */
 	unsigned writeback_cache:1;
@@ -633,6 +630,9 @@ struct fuse_conn {
 
 	/** Negotiated minor version */
 	unsigned minor;
+
+	/** Backing dev info */
+	struct backing_dev_info bdi;
 
 	/** Entry on the fuse_conn_list */
 	struct list_head entry;

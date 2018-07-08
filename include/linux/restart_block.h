@@ -11,14 +11,6 @@ struct timespec;
 struct compat_timespec;
 struct pollfd;
 
-enum timespec_type {
-	TT_NONE		= 0,
-	TT_NATIVE	= 1,
-#ifdef CONFIG_COMPAT
-	TT_COMPAT	= 2,
-#endif
-};
-
 /*
  * System call restart block.
  */
@@ -37,13 +29,10 @@ struct restart_block {
 		/* For nanosleep */
 		struct {
 			clockid_t clockid;
-			enum timespec_type type;
-			union {
-				struct timespec __user *rmtp;
+			struct timespec __user *rmtp;
 #ifdef CONFIG_COMPAT
-				struct compat_timespec __user *compat_rmtp;
+			struct compat_timespec __user *compat_rmtp;
 #endif
-			};
 			u64 expires;
 		} nanosleep;
 		/* For poll */

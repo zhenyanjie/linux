@@ -50,7 +50,6 @@ struct vdec_fb {
  * @queued_in_v4l2:	Capture buffer is in v4l2 driver, but not in vb2
  *			queue yet
  * @lastframe:		Intput buffer is last buffer - EOS
- * @error:		An unrecoverable error occurs on this buffer.
  * @frame_buffer:	Decode status, and buffer information of Capture buffer
  *
  * Note : These status information help us track and debug buffer state
@@ -64,7 +63,6 @@ struct mtk_video_dec_buf {
 	bool	queued_in_vb2;
 	bool	queued_in_v4l2;
 	bool	lastframe;
-	bool	error;
 	struct vdec_fb	frame_buffer;
 };
 

@@ -18,7 +18,6 @@
 #include <linux/clk.h>
 #include <linux/interrupt.h>
 #include <linux/clockchips.h>
-#include <linux/clocksource.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/slab.h>
@@ -540,4 +539,4 @@ static int __init ttc_timer_init(struct device_node *timer)
 	return 0;
 }
 
-TIMER_OF_DECLARE(ttc, "cdns,ttc", ttc_timer_init);
+CLOCKSOURCE_OF_DECLARE(ttc, "cdns,ttc", ttc_timer_init);

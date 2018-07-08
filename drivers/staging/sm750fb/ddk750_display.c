@@ -146,8 +146,7 @@ void ddk750_setLogicalDispOut(disp_output_t output)
 
 	if (output & PNL_SEQ_USAGE) {
 		/* set  panel sequence */
-		swPanelPowerSequence((output & PNL_SEQ_MASK) >> PNL_SEQ_OFFSET,
-				     4);
+		swPanelPowerSequence((output & PNL_SEQ_MASK) >> PNL_SEQ_OFFSET, 4);
 	}
 
 	if (output & DAC_USAGE)

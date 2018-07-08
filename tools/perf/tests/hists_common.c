@@ -1,4 +1,3 @@
-#include <inttypes.h>
 #include "perf.h"
 #include "util/debug.h"
 #include "util/symbol.h"
@@ -8,7 +7,6 @@
 #include "util/machine.h"
 #include "util/thread.h"
 #include "tests/hists_common.h"
-#include <linux/kernel.h>
 
 static struct {
 	u32 pid;

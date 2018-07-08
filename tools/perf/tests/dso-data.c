@@ -1,6 +1,4 @@
-#include <dirent.h>
 #include <stdlib.h>
-#include <linux/kernel.h>
 #include <linux/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>

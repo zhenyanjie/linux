@@ -341,7 +341,6 @@ int afs_make_call(struct in_addr *addr, struct afs_call *call, gfp_t gfp,
 	struct msghdr msg;
 	struct kvec iov[1];
 	size_t offset;
-	s64 tx_total_len;
 	u32 abort_code;
 	int ret;
 
@@ -365,20 +364,9 @@ int afs_make_call(struct in_addr *addr, struct afs_call *call, gfp_t gfp,
 	srx.transport.sin.sin_port = call->port;
 	memcpy(&srx.transport.sin.sin_addr, addr, 4);
 
-	/* Work out the length we're going to transmit.  This is awkward for
-	 * calls such as FS.StoreData where there's an extra injection of data
-	 * after the initial fixed part.
-	 */
-	tx_total_len = call->request_size;
-	if (call->send_pages) {
-		tx_total_len += call->last_to - call->first_offset;
-		tx_total_len += (call->last - call->first) * PAGE_SIZE;
-	}
-
 	/* create a call */
 	rxcall = rxrpc_kernel_begin_call(afs_socket, &srx, call->key,
-					 (unsigned long)call,
-					 tx_total_len, gfp,
+					 (unsigned long) call, gfp,
 					 (async ?
 					  afs_wake_up_async_call :
 					  afs_wake_up_call_waiter));
@@ -431,7 +419,7 @@ error_do_abort:
 	call->state = AFS_CALL_COMPLETE;
 	if (ret != -ECONNABORTED) {
 		rxrpc_kernel_abort_call(afs_socket, rxcall, RX_USER_ABORT,
-					ret, "KSD");
+					-ret, "KSD");
 	} else {
 		abort_code = 0;
 		offset = 0;
@@ -490,12 +478,12 @@ static void afs_deliver_to_call(struct afs_call *call)
 		case -ENOTCONN:
 			abort_code = RX_CALL_DEAD;
 			rxrpc_kernel_abort_call(afs_socket, call->rxcall,
-						abort_code, ret, "KNC");
+						abort_code, -ret, "KNC");
 			goto save_error;
 		case -ENOTSUPP:
 			abort_code = RXGEN_OPCODE;
 			rxrpc_kernel_abort_call(afs_socket, call->rxcall,
-						abort_code, ret, "KIV");
+						abort_code, -ret, "KIV");
 			goto save_error;
 		case -ENODATA:
 		case -EBADMSG:
@@ -505,7 +493,7 @@ static void afs_deliver_to_call(struct afs_call *call)
 			if (call->state != AFS_CALL_AWAIT_REPLY)
 				abort_code = RXGEN_SS_UNMARSHAL;
 			rxrpc_kernel_abort_call(afs_socket, call->rxcall,
-						abort_code, -EBADMSG, "KUM");
+						abort_code, EBADMSG, "KUM");
 			goto save_error;
 		}
 	}
@@ -750,8 +738,6 @@ void afs_send_empty_reply(struct afs_call *call)
 
 	_enter("");
 
-	rxrpc_kernel_set_tx_length(afs_socket, call->rxcall, 0);
-
 	msg.msg_name		= NULL;
 	msg.msg_namelen		= 0;
 	iov_iter_kvec(&msg.msg_iter, WRITE | ITER_KVEC, NULL, 0, 0);
@@ -768,7 +754,7 @@ void afs_send_empty_reply(struct afs_call *call)
 	case -ENOMEM:
 		_debug("oom");
 		rxrpc_kernel_abort_call(afs_socket, call->rxcall,
-					RX_USER_ABORT, -ENOMEM, "KOO");
+					RX_USER_ABORT, ENOMEM, "KOO");
 	default:
 		_leave(" [error]");
 		return;
@@ -785,8 +771,6 @@ void afs_send_simple_reply(struct afs_call *call, const void *buf, size_t len)
 	int n;
 
 	_enter("");
-
-	rxrpc_kernel_set_tx_length(afs_socket, call->rxcall, len);
 
 	iov[0].iov_base		= (void *) buf;
 	iov[0].iov_len		= len;
@@ -808,7 +792,7 @@ void afs_send_simple_reply(struct afs_call *call, const void *buf, size_t len)
 	if (n == -ENOMEM) {
 		_debug("oom");
 		rxrpc_kernel_abort_call(afs_socket, call->rxcall,
-					RX_USER_ABORT, -ENOMEM, "KOO");
+					RX_USER_ABORT, ENOMEM, "KOO");
 	}
 	_leave(" [error]");
 }

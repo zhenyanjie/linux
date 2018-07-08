@@ -37,7 +37,6 @@
 #include <net/net_namespace.h>
 #include <net/sock.h>
 #include <rdma/rdma_netlink.h>
-#include "core_priv.h"
 
 struct ibnl_client {
 	struct list_head		list;
@@ -56,6 +55,7 @@ int ibnl_chk_listeners(unsigned int group)
 		return -1;
 	return 0;
 }
+EXPORT_SYMBOL(ibnl_chk_listeners);
 
 int ibnl_add_client(int index, int nops,
 		    const struct ibnl_client_cbs cb_table[])
@@ -146,8 +146,7 @@ nla_put_failure:
 }
 EXPORT_SYMBOL(ibnl_put_attr);
 
-static int ibnl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
-			struct netlink_ext_ack *extack)
+static int ibnl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct ibnl_client *client;
 	int type = nlh->nlmsg_type;
@@ -210,7 +209,7 @@ static void ibnl_rcv_reply_skb(struct sk_buff *skb)
 		if (nlh->nlmsg_flags & NLM_F_REQUEST)
 			return;
 
-		ibnl_rcv_msg(skb, nlh, NULL);
+		ibnl_rcv_msg(skb, nlh);
 
 		msglen = NLMSG_ALIGN(nlh->nlmsg_len);
 		if (msglen > skb->len)

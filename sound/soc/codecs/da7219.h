@@ -810,8 +810,7 @@ struct da7219_priv {
 	bool wakeup_source;
 	struct regulator_bulk_data supplies[DA7219_NUM_SUPPLIES];
 	struct regmap *regmap;
-	struct mutex ctrl_lock;
-	struct mutex pll_lock;
+	struct mutex lock;
 
 	struct clk *mclk;
 	unsigned int mclk_rate;
@@ -821,7 +820,5 @@ struct da7219_priv {
 	bool alc_en;
 	u8 gain_ramp_ctrl;
 };
-
-int da7219_set_pll(struct snd_soc_codec *codec, int source, unsigned int fout);
 
 #endif /* __DA7219_H */

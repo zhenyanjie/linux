@@ -100,7 +100,6 @@ int main(int argc, char **argv)
 	setrlimit(RLIMIT_MEMLOCK, &r);
 
 	signal(SIGINT, int_exit);
-	signal(SIGTERM, int_exit);
 
 	if (load_kallsyms()) {
 		printf("failed to process /proc/kallsyms\n");

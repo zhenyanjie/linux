@@ -19,7 +19,6 @@ rxrpc-y := \
 	local_event.o \
 	local_object.o \
 	misc.o \
-	net_ns.o \
 	output.o \
 	peer_event.o \
 	peer_object.o \

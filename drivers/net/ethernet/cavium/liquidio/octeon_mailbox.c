@@ -178,10 +178,7 @@ int octeon_mbox_write(struct octeon_device *oct,
 					break;
 				}
 			}
-			if (ret == OCTEON_MBOX_STATUS_SUCCESS)
-				writeq(mbox_cmd->data[i], mbox->mbox_write_reg);
-			else
-				break;
+			writeq(mbox_cmd->data[i], mbox->mbox_write_reg);
 		}
 	}
 
@@ -316,7 +313,6 @@ int octeon_mbox_process_message(struct octeon_mbox *mbox)
 		return 0;
 	}
 
-	spin_unlock_irqrestore(&mbox->lock, flags);
 	WARN_ON(1);
 
 	return 0;

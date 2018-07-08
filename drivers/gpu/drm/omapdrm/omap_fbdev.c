@@ -106,7 +106,7 @@ static int omap_fbdev_create(struct drm_fb_helper *helper,
 	union omap_gem_size gsize;
 	struct fb_info *fbi = NULL;
 	struct drm_mode_fb_cmd2 mode_cmd = {0};
-	dma_addr_t dma_addr;
+	dma_addr_t paddr;
 	int ret;
 
 	sizes->surface_bpp = 32;
@@ -162,9 +162,10 @@ static int omap_fbdev_create(struct drm_fb_helper *helper,
 	 * to it).  Then we just need to be sure that we are able to re-
 	 * pin it in case of an opps.
 	 */
-	ret = omap_gem_pin(fbdev->bo, &dma_addr);
+	ret = omap_gem_get_paddr(fbdev->bo, &paddr, true);
 	if (ret) {
-		dev_err(dev->dev, "could not pin framebuffer\n");
+		dev_err(dev->dev,
+			"could not map (paddr)!  Skipping framebuffer alloc\n");
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -192,11 +193,11 @@ static int omap_fbdev_create(struct drm_fb_helper *helper,
 	drm_fb_helper_fill_fix(fbi, fb->pitches[0], fb->format->depth);
 	drm_fb_helper_fill_var(fbi, helper, sizes->fb_width, sizes->fb_height);
 
-	dev->mode_config.fb_base = dma_addr;
+	dev->mode_config.fb_base = paddr;
 
 	fbi->screen_base = omap_gem_vaddr(fbdev->bo);
 	fbi->screen_size = fbdev->bo->size;
-	fbi->fix.smem_start = dma_addr;
+	fbi->fix.smem_start = paddr;
 	fbi->fix.smem_len = fbdev->bo->size;
 
 	/* if we have DMM, then we can use it for scrolling by just
@@ -221,6 +222,9 @@ fail_unlock:
 fail:
 
 	if (ret) {
+
+		drm_fb_helper_release_fbi(helper);
+
 		if (fb)
 			drm_framebuffer_remove(fb);
 	}
@@ -297,13 +301,14 @@ void omap_fbdev_free(struct drm_device *dev)
 	DBG();
 
 	drm_fb_helper_unregister_fbi(helper);
+	drm_fb_helper_release_fbi(helper);
 
 	drm_fb_helper_fini(helper);
 
 	fbdev = to_omap_fbdev(priv->fbdev);
 
-	/* unpin the GEM object pinned in omap_fbdev_create() */
-	omap_gem_unpin(fbdev->bo);
+	/* release the ref taken in omap_fbdev_create() */
+	omap_gem_put_paddr(fbdev->bo);
 
 	/* this will free the backing object */
 	if (fbdev->fb)

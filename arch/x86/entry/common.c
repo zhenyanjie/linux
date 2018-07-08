@@ -22,7 +22,6 @@
 #include <linux/context_tracking.h>
 #include <linux/user-return-notifier.h>
 #include <linux/uprobes.h>
-#include <linux/livepatch.h>
 
 #include <asm/desc.h>
 #include <asm/traps.h>
@@ -131,13 +130,14 @@ static long syscall_trace_enter(struct pt_regs *regs)
 
 #define EXIT_TO_USERMODE_LOOP_FLAGS				\
 	(_TIF_SIGPENDING | _TIF_NOTIFY_RESUME | _TIF_UPROBE |	\
-	 _TIF_NEED_RESCHED | _TIF_USER_RETURN_NOTIFY | _TIF_PATCH_PENDING)
+	 _TIF_NEED_RESCHED | _TIF_USER_RETURN_NOTIFY)
 
 static void exit_to_usermode_loop(struct pt_regs *regs, u32 cached_flags)
 {
 	/*
 	 * In order to return to user mode, we need to have IRQs off with
-	 * none of EXIT_TO_USERMODE_LOOP_FLAGS set.  Several of these flags
+	 * none of _TIF_SIGPENDING, _TIF_NOTIFY_RESUME, _TIF_USER_RETURN_NOTIFY,
+	 * _TIF_UPROBE, or _TIF_NEED_RESCHED set.  Several of these flags
 	 * can be set at any time on preemptable kernels if we have IRQs on,
 	 * so we need to loop.  Disabling preemption wouldn't help: doing the
 	 * work to clear some of the flags can sleep.
@@ -163,9 +163,6 @@ static void exit_to_usermode_loop(struct pt_regs *regs, u32 cached_flags)
 
 		if (cached_flags & _TIF_USER_RETURN_NOTIFY)
 			fire_user_return_notifiers();
-
-		if (cached_flags & _TIF_PATCH_PENDING)
-			klp_update_patch_state(current);
 
 		/* Disable IRQs and retry */
 		local_irq_disable();

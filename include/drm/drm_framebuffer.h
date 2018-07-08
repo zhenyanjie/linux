@@ -101,8 +101,8 @@ struct drm_framebuffer_funcs {
  * cleanup (like releasing the reference(s) on the backing GEM bo(s))
  * should be deferred.  In cases like this, the driver would like to
  * hold a ref to the fb even though it has already been removed from
- * userspace perspective. See drm_framebuffer_get() and
- * drm_framebuffer_put().
+ * userspace perspective. See drm_framebuffer_reference() and
+ * drm_framebuffer_unreference().
  *
  * The refcount is stored inside the mode object @base.
  */
@@ -204,50 +204,25 @@ void drm_framebuffer_cleanup(struct drm_framebuffer *fb);
 void drm_framebuffer_unregister_private(struct drm_framebuffer *fb);
 
 /**
- * drm_framebuffer_get - acquire a framebuffer reference
- * @fb: DRM framebuffer
+ * drm_framebuffer_reference - incr the fb refcnt
+ * @fb: framebuffer
  *
- * This function increments the framebuffer's reference count.
- */
-static inline void drm_framebuffer_get(struct drm_framebuffer *fb)
-{
-	drm_mode_object_get(&fb->base);
-}
-
-/**
- * drm_framebuffer_put - release a framebuffer reference
- * @fb: DRM framebuffer
- *
- * This function decrements the framebuffer's reference count and frees the
- * framebuffer if the reference count drops to zero.
- */
-static inline void drm_framebuffer_put(struct drm_framebuffer *fb)
-{
-	drm_mode_object_put(&fb->base);
-}
-
-/**
- * drm_framebuffer_reference - acquire a framebuffer reference
- * @fb: DRM framebuffer
- *
- * This is a compatibility alias for drm_framebuffer_get() and should not be
- * used by new code.
+ * This functions increments the fb's refcount.
  */
 static inline void drm_framebuffer_reference(struct drm_framebuffer *fb)
 {
-	drm_framebuffer_get(fb);
+	drm_mode_object_reference(&fb->base);
 }
 
 /**
- * drm_framebuffer_unreference - release a framebuffer reference
- * @fb: DRM framebuffer
+ * drm_framebuffer_unreference - unref a framebuffer
+ * @fb: framebuffer to unref
  *
- * This is a compatibility alias for drm_framebuffer_put() and should not be
- * used by new code.
+ * This functions decrements the fb's refcount and frees it if it drops to zero.
  */
 static inline void drm_framebuffer_unreference(struct drm_framebuffer *fb)
 {
-	drm_framebuffer_put(fb);
+	drm_mode_object_unreference(&fb->base);
 }
 
 /**
@@ -273,9 +248,9 @@ static inline void drm_framebuffer_assign(struct drm_framebuffer **p,
 					  struct drm_framebuffer *fb)
 {
 	if (fb)
-		drm_framebuffer_get(fb);
+		drm_framebuffer_reference(fb);
 	if (*p)
-		drm_framebuffer_put(*p);
+		drm_framebuffer_unreference(*p);
 	*p = fb;
 }
 

@@ -53,8 +53,8 @@ Cropping Structures
 
 .. _crop-scale:
 
-.. kernel-figure:: crop.svg
-    :alt:    crop.svg
+.. figure::  crop.*
+    :alt:    crop.pdf / crop.svg
     :align:  center
 
     Image Cropping, Insertion and Scaling

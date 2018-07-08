@@ -458,7 +458,6 @@ static int __maybe_unused mtu3_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct ssusb_mtk *ssusb = platform_get_drvdata(pdev);
-	int ret;
 
 	dev_dbg(dev, "%s\n", __func__);
 
@@ -466,28 +465,12 @@ static int __maybe_unused mtu3_resume(struct device *dev)
 		return 0;
 
 	ssusb_wakeup_disable(ssusb);
-	ret = clk_prepare_enable(ssusb->sys_clk);
-	if (ret)
-		goto err_sys_clk;
-
-	ret = clk_prepare_enable(ssusb->ref_clk);
-	if (ret)
-		goto err_ref_clk;
-
-	ret = ssusb_phy_power_on(ssusb);
-	if (ret)
-		goto err_power_on;
-
+	clk_prepare_enable(ssusb->sys_clk);
+	clk_prepare_enable(ssusb->ref_clk);
+	ssusb_phy_power_on(ssusb);
 	ssusb_host_enable(ssusb);
 
 	return 0;
-
-err_power_on:
-	clk_disable_unprepare(ssusb->ref_clk);
-err_ref_clk:
-	clk_disable_unprepare(ssusb->sys_clk);
-err_sys_clk:
-	return ret;
 }
 
 static const struct dev_pm_ops mtu3_pm_ops = {

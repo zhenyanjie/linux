@@ -203,9 +203,7 @@ static int meson_gxbb_wdt_probe(struct platform_device *pdev)
 	if (IS_ERR(data->clk))
 		return PTR_ERR(data->clk);
 
-	ret = clk_prepare_enable(data->clk);
-	if (ret)
-		return ret;
+	clk_prepare_enable(data->clk);
 
 	platform_set_drvdata(pdev, data);
 

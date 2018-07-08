@@ -215,13 +215,13 @@ static int astfb_create(struct drm_fb_helper *helper,
 	info = drm_fb_helper_alloc_fbi(helper);
 	if (IS_ERR(info)) {
 		ret = PTR_ERR(info);
-		goto out;
+		goto err_free_vram;
 	}
 	info->par = afbdev;
 
 	ret = ast_framebuffer_init(dev, &afbdev->afb, &mode_cmd, gobj);
 	if (ret)
-		goto out;
+		goto err_release_fbi;
 
 	afbdev->sysram = sysram;
 	afbdev->size = size;
@@ -250,7 +250,9 @@ static int astfb_create(struct drm_fb_helper *helper,
 
 	return 0;
 
-out:
+err_release_fbi:
+	drm_fb_helper_release_fbi(helper);
+err_free_vram:
 	vfree(sysram);
 	return ret;
 }
@@ -285,6 +287,7 @@ static void ast_fbdev_destroy(struct drm_device *dev,
 	struct ast_framebuffer *afb = &afbdev->afb;
 
 	drm_fb_helper_unregister_fbi(&afbdev->helper);
+	drm_fb_helper_release_fbi(&afbdev->helper);
 
 	if (afb->obj) {
 		drm_gem_object_unreference_unlocked(afb->obj);

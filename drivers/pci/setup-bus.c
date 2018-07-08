@@ -1066,10 +1066,10 @@ static int pbus_size_mem(struct pci_bus *bus, unsigned long mask,
 				r->flags = 0;
 				continue;
 			}
-			size += max(r_size, align);
+			size += r_size;
 			/* Exclude ranges with size > align from
 			   calculation of the alignment. */
-			if (r_size <= align)
+			if (r_size == align)
 				aligns[order] += align;
 			if (order > max_order)
 				max_order = order;

@@ -169,8 +169,10 @@ static int tegra_alc5632_probe(struct platform_device *pdev)
 
 	alc5632 = devm_kzalloc(&pdev->dev,
 			sizeof(struct tegra_alc5632), GFP_KERNEL);
-	if (!alc5632)
+	if (!alc5632) {
+		dev_err(&pdev->dev, "Can't allocate tegra_alc5632\n");
 		return -ENOMEM;
+	}
 
 	card->dev = &pdev->dev;
 	platform_set_drvdata(pdev, card);

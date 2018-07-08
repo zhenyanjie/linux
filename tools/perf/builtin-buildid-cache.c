@@ -10,7 +10,6 @@
 #include <sys/time.h>
 #include <time.h>
 #include <dirent.h>
-#include <errno.h>
 #include <unistd.h>
 #include "builtin.h"
 #include "perf.h"
@@ -22,7 +21,6 @@
 #include "util/build-id.h"
 #include "util/session.h"
 #include "util/symbol.h"
-#include "util/time-utils.h"
 
 static int build_id_cache__kcore_buildid(const char *proc_dir, char *sbuildid)
 {
@@ -49,22 +47,19 @@ static bool same_kallsyms_reloc(const char *from_dir, char *to_dir)
 	char to[PATH_MAX];
 	const char *name;
 	u64 addr1 = 0, addr2 = 0;
-	int i, err = -1;
+	int i;
 
 	scnprintf(from, sizeof(from), "%s/kallsyms", from_dir);
 	scnprintf(to, sizeof(to), "%s/kallsyms", to_dir);
 
 	for (i = 0; (name = ref_reloc_sym_names[i]) != NULL; i++) {
-		err = kallsyms__get_function_start(from, name, &addr1);
-		if (!err)
+		addr1 = kallsyms__get_function_start(from, name);
+		if (addr1)
 			break;
 	}
 
-	if (err)
-		return false;
-
-	if (kallsyms__get_function_start(to, name, &addr2))
-		return false;
+	if (name)
+		addr2 = kallsyms__get_function_start(to, name);
 
 	return addr1 == addr2;
 }
@@ -281,7 +276,8 @@ static int build_id_cache__update_file(const char *filename)
 	return err;
 }
 
-int cmd_buildid_cache(int argc, const char **argv)
+int cmd_buildid_cache(int argc, const char **argv,
+		      const char *prefix __maybe_unused)
 {
 	struct strlist *list;
 	struct str_node *pos;

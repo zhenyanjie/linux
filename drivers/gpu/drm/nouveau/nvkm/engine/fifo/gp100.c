@@ -24,7 +24,7 @@
 #include "gk104.h"
 #include "changk104.h"
 
-const struct nvkm_enum
+static const struct nvkm_enum
 gp100_fifo_fault_engine[] = {
 	{ 0x01, "DISPLAY" },
 	{ 0x03, "IFB", NULL, NVKM_ENGINE_IFB },

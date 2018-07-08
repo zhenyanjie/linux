@@ -174,12 +174,11 @@ static inline void shm_lock_by_ptr(struct shmid_kernel *ipcp)
 
 static void shm_rcu_free(struct rcu_head *head)
 {
-	struct kern_ipc_perm *ptr = container_of(head, struct kern_ipc_perm,
-							rcu);
-	struct shmid_kernel *shp = container_of(ptr, struct shmid_kernel,
-							shm_perm);
+	struct ipc_rcu *p = container_of(head, struct ipc_rcu, rcu);
+	struct shmid_kernel *shp = ipc_rcu_to_struct(p);
+
 	security_shm_free(shp);
-	kvfree(shp);
+	ipc_rcu_free(head);
 }
 
 static inline void shm_rmid(struct ipc_namespace *ns, struct shmid_kernel *s)
@@ -242,7 +241,7 @@ static void shm_destroy(struct ipc_namespace *ns, struct shmid_kernel *shp)
 		user_shm_unlock(i_size_read(file_inode(shm_file)),
 				shp->mlock_user);
 	fput(shm_file);
-	ipc_rcu_putref(&shp->shm_perm, shm_rcu_free);
+	ipc_rcu_putref(shp, shm_rcu_free);
 }
 
 /*
@@ -453,7 +452,7 @@ static int shm_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 
 	if (!sfd->file->f_op->fsync)
 		return -EINVAL;
-	return sfd->file->f_op->fsync(sfd->file, start, end, datasync);
+	return call_fsync(sfd->file, start, end, datasync);
 }
 
 static long shm_fallocate(struct file *file, int mode, loff_t offset,
@@ -530,6 +529,7 @@ static int newseg(struct ipc_namespace *ns, struct ipc_params *params)
 	size_t numpages = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	struct file *file;
 	char name[13];
+	int id;
 	vm_flags_t acctflag = 0;
 
 	if (size < SHMMIN || size > ns->shm_ctlmax)
@@ -542,8 +542,8 @@ static int newseg(struct ipc_namespace *ns, struct ipc_params *params)
 			ns->shm_tot + numpages > ns->shm_ctlall)
 		return -ENOSPC;
 
-	shp = kvmalloc(sizeof(*shp), GFP_KERNEL);
-	if (unlikely(!shp))
+	shp = ipc_rcu_alloc(sizeof(*shp));
+	if (!shp)
 		return -ENOMEM;
 
 	shp->shm_perm.key = key;
@@ -553,7 +553,7 @@ static int newseg(struct ipc_namespace *ns, struct ipc_params *params)
 	shp->shm_perm.security = NULL;
 	error = security_shm_alloc(shp);
 	if (error) {
-		kvfree(shp);
+		ipc_rcu_putref(shp, ipc_rcu_free);
 		return error;
 	}
 
@@ -598,9 +598,11 @@ static int newseg(struct ipc_namespace *ns, struct ipc_params *params)
 	shp->shm_file = file;
 	shp->shm_creator = current;
 
-	error = ipc_addid(&shm_ids(ns), &shp->shm_perm, ns->shm_ctlmni);
-	if (error < 0)
+	id = ipc_addid(&shm_ids(ns), &shp->shm_perm, ns->shm_ctlmni);
+	if (id < 0) {
+		error = id;
 		goto no_id;
+	}
 
 	list_add(&shp->shm_clist, &current->sysvshm.shm_clist);
 
@@ -622,7 +624,7 @@ no_id:
 		user_shm_unlock(size, shp->mlock_user);
 	fput(file);
 no_file:
-	call_rcu(&shp->shm_perm.rcu, shm_rcu_free);
+	ipc_rcu_putref(shp, shm_rcu_free);
 	return error;
 }
 
@@ -1093,11 +1095,11 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 	      ulong *raddr, unsigned long shmlba)
 {
 	struct shmid_kernel *shp;
-	unsigned long addr = (unsigned long)shmaddr;
+	unsigned long addr;
 	unsigned long size;
 	struct file *file;
 	int    err;
-	unsigned long flags = MAP_SHARED;
+	unsigned long flags;
 	unsigned long prot;
 	int acc_mode;
 	struct ipc_namespace *ns;
@@ -1109,8 +1111,7 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 	err = -EINVAL;
 	if (shmid < 0)
 		goto out;
-
-	if (addr) {
+	else if ((addr = (ulong)shmaddr)) {
 		if (addr & (shmlba - 1)) {
 			/*
 			 * Round down to the nearest multiple of shmlba.
@@ -1125,10 +1126,13 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 #endif
 					goto out;
 		}
+		flags = MAP_SHARED | MAP_FIXED;
+	} else {
+		if ((shmflg & SHM_REMAP))
+			goto out;
 
-		flags |= MAP_FIXED;
-	} else if ((shmflg & SHM_REMAP))
-		goto out;
+		flags = MAP_SHARED;
+	}
 
 	if (shmflg & SHM_RDONLY) {
 		prot = PROT_READ;
@@ -1380,11 +1384,9 @@ SYSCALL_DEFINE1(shmdt, char __user *, shmaddr)
 static int sysvipc_shm_proc_show(struct seq_file *s, void *it)
 {
 	struct user_namespace *user_ns = seq_user_ns(s);
-	struct kern_ipc_perm *ipcp = it;
-	struct shmid_kernel *shp;
+	struct shmid_kernel *shp = it;
 	unsigned long rss = 0, swp = 0;
 
-	shp = container_of(ipcp, struct shmid_kernel, shm_perm);
 	shm_add_rss_swap(shp, &rss, &swp);
 
 #if BITS_PER_LONG <= 32

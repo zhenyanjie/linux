@@ -8,7 +8,7 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
  *
- * See Documentation/security/keys/request-key.rst
+ * See Documentation/security/keys-request-key.txt
  */
 
 #include <linux/module.h>
@@ -73,7 +73,7 @@ static void request_key_auth_describe(const struct key *key,
 
 	seq_puts(m, "key:");
 	seq_puts(m, key->description);
-	if (key_is_positive(key))
+	if (key_is_instantiated(key))
 		seq_printf(m, " pid:%d ci:%zu", rka->pid, rka->callout_len);
 }
 
@@ -213,7 +213,7 @@ struct key *request_key_auth_new(struct key *target, const void *callout_info,
 	if (ret < 0)
 		goto error_inst;
 
-	kleave(" = {%d,%d}", authkey->serial, refcount_read(&authkey->usage));
+	kleave(" = {%d,%d}", authkey->serial, atomic_read(&authkey->usage));
 	return authkey;
 
 auth_key_revoked:

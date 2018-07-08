@@ -1440,9 +1440,7 @@ int rtl8723be_hw_init(struct ieee80211_hw *hw)
 		 */
 		if (rtlpriv->btcoexist.btc_info.ant_num == ANT_X2 ||
 		    !rtlpriv->cfg->ops->get_btc_status()) {
-			rtl8723be_phy_iq_calibrate(hw,
-						   (rtlphy->iqk_initialized ?
-						    true : false));
+			rtl8723be_phy_iq_calibrate(hw, false);
 			rtlphy->iqk_initialized = true;
 		}
 		rtl8723be_dm_check_txpower_tracking(hw);
@@ -1676,8 +1674,7 @@ void rtl8723be_card_disable(struct ieee80211_hw *hw)
 	_rtl8723be_poweroff_adapter(hw);
 
 	/* after power off we should do iqk again */
-	if (!rtlpriv->cfg->ops->get_btc_status())
-		rtlpriv->phy.iqk_initialized = false;
+	rtlpriv->phy.iqk_initialized = false;
 }
 
 void rtl8723be_interrupt_recognized(struct ieee80211_hw *hw,
@@ -2640,7 +2637,7 @@ void rtl8723be_set_key(struct ieee80211_hw *hw, u32 key_index,
 				 "add one entry\n");
 			if (is_pairwise) {
 				RT_TRACE(rtlpriv, COMP_SEC, DBG_DMESG,
-					 "set Pairwise key\n");
+					 "set Pairwiase key\n");
 
 				rtl_cam_add_one_entry(hw, macaddr, key_index,
 					       entry_id, enc_algo,

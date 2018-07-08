@@ -20,7 +20,6 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
-#include <linux/refcount.h>
 
 #ifdef VERBOSE_DEBUG
 #ifndef pr_vdebug
@@ -40,15 +39,14 @@
 struct f_fs_opts;
 
 struct ffs_dev {
-	struct ffs_data *ffs_data;
-	struct f_fs_opts *opts;
-	struct list_head entry;
-
-	char name[41];
-
+	const char *name;
+	bool name_allocated;
 	bool mounted;
 	bool desc_ready;
 	bool single;
+	struct ffs_data *ffs_data;
+	struct f_fs_opts *opts;
+	struct list_head entry;
 
 	int (*ffs_ready_callback)(struct ffs_data *ffs);
 	void (*ffs_closed_callback)(struct ffs_data *ffs);
@@ -179,7 +177,7 @@ struct ffs_data {
 	struct completion		ep0req_completion;	/* P: mutex */
 
 	/* reference counter */
-	refcount_t			ref;
+	atomic_t			ref;
 	/* how many files are opened (EP0 and others) */
 	atomic_t			opened;
 
@@ -215,9 +213,6 @@ struct ffs_data {
 	unsigned long			flags;
 #define FFS_FL_CALL_CLOSED_CALLBACK 0
 #define FFS_FL_BOUND                1
-
-	/* For waking up blocked threads when function is enabled. */
-	wait_queue_head_t		wait;
 
 	/* Active function */
 	struct ffs_function		*func;

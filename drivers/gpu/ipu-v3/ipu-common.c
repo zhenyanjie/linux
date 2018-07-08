@@ -51,17 +51,15 @@ int ipu_get_num(struct ipu_soc *ipu)
 }
 EXPORT_SYMBOL_GPL(ipu_get_num);
 
-void ipu_srm_dp_update(struct ipu_soc *ipu, bool sync)
+void ipu_srm_dp_sync_update(struct ipu_soc *ipu)
 {
 	u32 val;
 
 	val = ipu_cm_read(ipu, IPU_SRM_PRI2);
-	val &= ~DP_S_SRM_MODE_MASK;
-	val |= sync ? DP_S_SRM_MODE_NEXT_FRAME :
-		      DP_S_SRM_MODE_NOW;
+	val |= 0x8;
 	ipu_cm_write(ipu, val, IPU_SRM_PRI2);
 }
-EXPORT_SYMBOL_GPL(ipu_srm_dp_update);
+EXPORT_SYMBOL_GPL(ipu_srm_dp_sync_update);
 
 enum ipu_color_space ipu_drm_fourcc_to_colorspace(u32 drm_fourcc)
 {
@@ -83,12 +81,6 @@ enum ipu_color_space ipu_drm_fourcc_to_colorspace(u32 drm_fourcc)
 	case DRM_FORMAT_ABGR8888:
 	case DRM_FORMAT_RGBA8888:
 	case DRM_FORMAT_BGRA8888:
-	case DRM_FORMAT_RGB565_A8:
-	case DRM_FORMAT_BGR565_A8:
-	case DRM_FORMAT_RGB888_A8:
-	case DRM_FORMAT_BGR888_A8:
-	case DRM_FORMAT_RGBX8888_A8:
-	case DRM_FORMAT_BGRX8888_A8:
 		return IPUV3_COLORSPACE_RGB;
 	case DRM_FORMAT_YUYV:
 	case DRM_FORMAT_UYVY:
@@ -274,22 +266,15 @@ struct ipuv3_channel *ipu_idmac_get(struct ipu_soc *ipu, unsigned num)
 
 	mutex_lock(&ipu->channel_lock);
 
-	list_for_each_entry(channel, &ipu->channels, list) {
-		if (channel->num == num) {
-			channel = ERR_PTR(-EBUSY);
-			goto out;
-		}
-	}
+	channel = &ipu->channel[num];
 
-	channel = kzalloc(sizeof(*channel), GFP_KERNEL);
-	if (!channel) {
-		channel = ERR_PTR(-ENOMEM);
+	if (channel->busy) {
+		channel = ERR_PTR(-EBUSY);
 		goto out;
 	}
 
+	channel->busy = true;
 	channel->num = num;
-	channel->ipu = ipu;
-	list_add(&channel->list, &ipu->channels);
 
 out:
 	mutex_unlock(&ipu->channel_lock);
@@ -306,8 +291,7 @@ void ipu_idmac_put(struct ipuv3_channel *channel)
 
 	mutex_lock(&ipu->channel_lock);
 
-	list_del(&channel->list);
-	kfree(channel);
+	channel->busy = false;
 
 	mutex_unlock(&ipu->channel_lock);
 }
@@ -597,6 +581,22 @@ int ipu_idmac_wait_busy(struct ipuv3_channel *channel, int ms)
 }
 EXPORT_SYMBOL_GPL(ipu_idmac_wait_busy);
 
+int ipu_wait_interrupt(struct ipu_soc *ipu, int irq, int ms)
+{
+	unsigned long timeout;
+
+	timeout = jiffies + msecs_to_jiffies(ms);
+	ipu_cm_write(ipu, BIT(irq % 32), IPU_INT_STAT(irq / 32));
+	while (!(ipu_cm_read(ipu, IPU_INT_STAT(irq / 32) & BIT(irq % 32)))) {
+		if (time_after(jiffies, timeout))
+			return -ETIMEDOUT;
+		cpu_relax();
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ipu_wait_interrupt);
+
 int ipu_idmac_disable_channel(struct ipuv3_channel *channel)
 {
 	struct ipu_soc *ipu = channel->ipu;
@@ -717,16 +717,15 @@ void ipu_set_ic_src_mux(struct ipu_soc *ipu, int csi_id, bool vdi)
 	spin_lock_irqsave(&ipu->lock, flags);
 
 	val = ipu_cm_read(ipu, IPU_CONF);
-	if (vdi)
+	if (vdi) {
 		val |= IPU_CONF_IC_INPUT;
-	else
+	} else {
 		val &= ~IPU_CONF_IC_INPUT;
-
-	if (csi_id == 1)
-		val |= IPU_CONF_CSI_SEL;
-	else
-		val &= ~IPU_CONF_CSI_SEL;
-
+		if (csi_id == 1)
+			val |= IPU_CONF_CSI_SEL;
+		else
+			val &= ~IPU_CONF_CSI_SEL;
+	}
 	ipu_cm_write(ipu, val, IPU_CONF);
 
 	spin_unlock_irqrestore(&ipu->lock, flags);
@@ -932,7 +931,6 @@ static const struct of_device_id imx_ipu_dt_ids[] = {
 	{ .compatible = "fsl,imx51-ipu", .data = &ipu_type_imx51, },
 	{ .compatible = "fsl,imx53-ipu", .data = &ipu_type_imx53, },
 	{ .compatible = "fsl,imx6q-ipu", .data = &ipu_type_imx6q, },
-	{ .compatible = "fsl,imx6qp-ipu", .data = &ipu_type_imx6q, },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, imx_ipu_dt_ids);
@@ -1369,7 +1367,7 @@ static int ipu_probe(struct platform_device *pdev)
 	struct ipu_soc *ipu;
 	struct resource *res;
 	unsigned long ipu_base;
-	int ret, irq_sync, irq_err;
+	int i, ret, irq_sync, irq_err;
 	const struct ipu_devtype *devtype;
 
 	devtype = of_device_get_match_data(&pdev->dev);
@@ -1392,22 +1390,14 @@ static int ipu_probe(struct platform_device *pdev)
 	if (!ipu)
 		return -ENODEV;
 
-	ipu->id = of_alias_get_id(np, "ipu");
-
-	if (of_device_is_compatible(np, "fsl,imx6qp-ipu") &&
-	    IS_ENABLED(CONFIG_DRM)) {
-		ipu->prg_priv = ipu_prg_lookup_by_phandle(&pdev->dev,
-							  "fsl,prg", ipu->id);
-		if (!ipu->prg_priv)
-			return -EPROBE_DEFER;
-	}
-
+	for (i = 0; i < 64; i++)
+		ipu->channel[i].ipu = ipu;
 	ipu->devtype = devtype;
 	ipu->ipu_type = devtype->type;
+	ipu->id = of_alias_get_id(np, "ipu");
 
 	spin_lock_init(&ipu->lock);
 	mutex_init(&ipu->channel_lock);
-	INIT_LIST_HEAD(&ipu->channels);
 
 	dev_dbg(&pdev->dev, "cm_reg:   0x%08lx\n",
 			ipu_base + devtype->cm_ofs);
@@ -1530,25 +1520,7 @@ static struct platform_driver imx_ipu_driver = {
 	.remove = ipu_remove,
 };
 
-static struct platform_driver * const drivers[] = {
-#if IS_ENABLED(CONFIG_DRM)
-	&ipu_pre_drv,
-	&ipu_prg_drv,
-#endif
-	&imx_ipu_driver,
-};
-
-static int __init imx_ipu_init(void)
-{
-	return platform_register_drivers(drivers, ARRAY_SIZE(drivers));
-}
-module_init(imx_ipu_init);
-
-static void __exit imx_ipu_exit(void)
-{
-	platform_unregister_drivers(drivers, ARRAY_SIZE(drivers));
-}
-module_exit(imx_ipu_exit);
+module_platform_driver(imx_ipu_driver);
 
 MODULE_ALIAS("platform:imx-ipuv3");
 MODULE_DESCRIPTION("i.MX IPU v3 driver");

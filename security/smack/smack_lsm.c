@@ -695,8 +695,10 @@ static int smack_parse_opts_str(char *options,
 
 	opts->mnt_opts_flags = kcalloc(NUM_SMK_MNT_OPTS, sizeof(int),
 			GFP_KERNEL);
-	if (!opts->mnt_opts_flags)
+	if (!opts->mnt_opts_flags) {
+		kfree(opts->mnt_opts);
 		goto out_err;
+	}
 
 	if (fsdefault) {
 		opts->mnt_opts[num_mnt_opts] = fsdefault;
@@ -1499,7 +1501,7 @@ static int smack_inode_removexattr(struct dentry *dentry, const char *name)
  * @inode: the object
  * @name: attribute name
  * @buffer: where to put the result
- * @alloc: duplicate memory
+ * @alloc: unused
  *
  * Returns the size of the attribute or an error code
  */
@@ -1512,38 +1514,43 @@ static int smack_inode_getsecurity(struct inode *inode,
 	struct super_block *sbp;
 	struct inode *ip = (struct inode *)inode;
 	struct smack_known *isp;
+	int ilen;
+	int rc = 0;
 
-	if (strcmp(name, XATTR_SMACK_SUFFIX) == 0)
+	if (strcmp(name, XATTR_SMACK_SUFFIX) == 0) {
 		isp = smk_of_inode(inode);
-	else {
-		/*
-		 * The rest of the Smack xattrs are only on sockets.
-		 */
-		sbp = ip->i_sb;
-		if (sbp->s_magic != SOCKFS_MAGIC)
-			return -EOPNOTSUPP;
-
-		sock = SOCKET_I(ip);
-		if (sock == NULL || sock->sk == NULL)
-			return -EOPNOTSUPP;
-
-		ssp = sock->sk->sk_security;
-
-		if (strcmp(name, XATTR_SMACK_IPIN) == 0)
-			isp = ssp->smk_in;
-		else if (strcmp(name, XATTR_SMACK_IPOUT) == 0)
-			isp = ssp->smk_out;
-		else
-			return -EOPNOTSUPP;
+		ilen = strlen(isp->smk_known);
+		*buffer = isp->smk_known;
+		return ilen;
 	}
 
-	if (alloc) {
-		*buffer = kstrdup(isp->smk_known, GFP_KERNEL);
-		if (*buffer == NULL)
-			return -ENOMEM;
+	/*
+	 * The rest of the Smack xattrs are only on sockets.
+	 */
+	sbp = ip->i_sb;
+	if (sbp->s_magic != SOCKFS_MAGIC)
+		return -EOPNOTSUPP;
+
+	sock = SOCKET_I(ip);
+	if (sock == NULL || sock->sk == NULL)
+		return -EOPNOTSUPP;
+
+	ssp = sock->sk->sk_security;
+
+	if (strcmp(name, XATTR_SMACK_IPIN) == 0)
+		isp = ssp->smk_in;
+	else if (strcmp(name, XATTR_SMACK_IPOUT) == 0)
+		isp = ssp->smk_out;
+	else
+		return -EOPNOTSUPP;
+
+	ilen = strlen(isp->smk_known);
+	if (rc == 0) {
+		*buffer = isp->smk_known;
+		rc = ilen;
 	}
 
-	return strlen(isp->smk_known);
+	return rc;
 }
 
 
@@ -1910,7 +1917,7 @@ static int smack_file_receive(struct file *file)
 	smk_ad_init(&ad, __func__, LSM_AUDIT_DATA_PATH);
 	smk_ad_setfield_u_fs_path(&ad, file->f_path);
 
-	if (inode->i_sb->s_magic == SOCKFS_MAGIC) {
+	if (S_ISSOCK(inode->i_mode)) {
 		sock = SOCKET_I(inode);
 		ssp = sock->sk->sk_security;
 		tsp = current_security();
@@ -4626,7 +4633,7 @@ static int smack_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen)
 	return 0;
 }
 
-static struct security_hook_list smack_hooks[] __lsm_ro_after_init = {
+static struct security_hook_list smack_hooks[] = {
 	LSM_HOOK_INIT(ptrace_access_check, smack_ptrace_access_check),
 	LSM_HOOK_INIT(ptrace_traceme, smack_ptrace_traceme),
 	LSM_HOOK_INIT(syslog, smack_syslog),

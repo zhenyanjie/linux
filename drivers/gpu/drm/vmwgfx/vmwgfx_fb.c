@@ -418,60 +418,6 @@ static int vmw_fb_compute_depth(struct fb_var_screeninfo *var,
 	return 0;
 }
 
-static int vmwgfx_set_config_internal(struct drm_mode_set *set)
-{
-	struct drm_crtc *crtc = set->crtc;
-	struct drm_framebuffer *fb;
-	struct drm_crtc *tmp;
-	struct drm_modeset_acquire_ctx *ctx;
-	struct drm_device *dev = set->crtc->dev;
-	int ret;
-
-	ctx = dev->mode_config.acquire_ctx;
-
-restart:
-	/*
-	 * NOTE: ->set_config can also disable other crtcs (if we steal all
-	 * connectors from it), hence we need to refcount the fbs across all
-	 * crtcs. Atomic modeset will have saner semantics ...
-	 */
-	drm_for_each_crtc(tmp, dev)
-		tmp->primary->old_fb = tmp->primary->fb;
-
-	fb = set->fb;
-
-	ret = crtc->funcs->set_config(set, ctx);
-	if (ret == 0) {
-		crtc->primary->crtc = crtc;
-		crtc->primary->fb = fb;
-	}
-
-	drm_for_each_crtc(tmp, dev) {
-		if (tmp->primary->fb)
-			drm_framebuffer_get(tmp->primary->fb);
-		if (tmp->primary->old_fb)
-			drm_framebuffer_put(tmp->primary->old_fb);
-		tmp->primary->old_fb = NULL;
-	}
-
-	if (ret == -EDEADLK) {
-		dev->mode_config.acquire_ctx = NULL;
-
-retry_locking:
-		drm_modeset_backoff(ctx);
-
-		ret = drm_modeset_lock_all_ctx(dev, ctx);
-		if (ret)
-			goto retry_locking;
-
-		dev->mode_config.acquire_ctx = ctx;
-
-		goto restart;
-	}
-
-	return ret;
-}
-
 static int vmw_fb_kms_detach(struct vmw_fb_par *par,
 			     bool detach_bo,
 			     bool unref_bo)
@@ -488,9 +434,9 @@ static int vmw_fb_kms_detach(struct vmw_fb_par *par,
 		set.y = 0;
 		set.mode = NULL;
 		set.fb = NULL;
-		set.num_connectors = 0;
+		set.num_connectors = 1;
 		set.connectors = &par->con;
-		ret = vmwgfx_set_config_internal(&set);
+		ret = drm_mode_set_config_internal(&set);
 		if (ret) {
 			DRM_ERROR("Could not unset a mode.\n");
 			return ret;
@@ -505,15 +451,13 @@ static int vmw_fb_kms_detach(struct vmw_fb_par *par,
 	}
 
 	if (par->vmw_bo && detach_bo) {
-		struct vmw_private *vmw_priv = par->vmw_priv;
-
 		if (par->bo_ptr) {
 			ttm_bo_kunmap(&par->map);
 			par->bo_ptr = NULL;
 		}
 		if (unref_bo)
 			vmw_dmabuf_unreference(&par->vmw_bo);
-		else if (vmw_priv->active_display_unit != vmw_du_legacy)
+		else
 			vmw_dmabuf_unpin(par->vmw_priv, par->vmw_bo, false);
 	}
 
@@ -632,7 +576,7 @@ static int vmw_fb_set_par(struct fb_info *info)
 	set.num_connectors = 1;
 	set.connectors = &par->con;
 
-	ret = vmwgfx_set_config_internal(&set);
+	ret = drm_mode_set_config_internal(&set);
 	if (ret)
 		goto out_unlock;
 
@@ -641,25 +585,18 @@ static int vmw_fb_set_par(struct fb_info *info)
 
 		/*
 		 * Pin before mapping. Since we don't know in what placement
-		 * to pin, call into KMS to do it for us.  LDU doesn't require
-		 * additional pinning because set_config() would've pinned
-		 * it already
+		 * to pin, call into KMS to do it for us.
 		 */
-		if (vmw_priv->active_display_unit != vmw_du_legacy) {
-			ret = vfb->pin(vfb);
-			if (ret) {
-				DRM_ERROR("Could not pin the fbdev "
-					  "framebuffer.\n");
-				goto out_unlock;
-			}
+		ret = vfb->pin(vfb);
+		if (ret) {
+			DRM_ERROR("Could not pin the fbdev framebuffer.\n");
+			goto out_unlock;
 		}
 
 		ret = ttm_bo_kmap(&par->vmw_bo->base, 0,
 				  par->vmw_bo->base.num_pages, &par->map);
 		if (ret) {
-			if (vmw_priv->active_display_unit != vmw_du_legacy)
-				vfb->unpin(vfb);
-
+			vfb->unpin(vfb);
 			DRM_ERROR("Could not map the fbdev framebuffer.\n");
 			goto out_unlock;
 		}
@@ -885,9 +822,7 @@ int vmw_fb_off(struct vmw_private *vmw_priv)
 	flush_delayed_work(&par->local_work);
 
 	mutex_lock(&par->bo_mutex);
-	drm_modeset_lock_all(vmw_priv->dev);
 	(void) vmw_fb_kms_detach(par, true, false);
-	drm_modeset_unlock_all(vmw_priv->dev);
 	mutex_unlock(&par->bo_mutex);
 
 	return 0;

@@ -158,7 +158,7 @@ struct usb_ext_prop_desc {
  * |-----+-----------------------+------+-------------------------------------|
  * |   0 | bFirstInterfaceNumber | U8   | index of the interface or of the 1st|
  * |     |                       |      | interface in an IAD group           |
- * |   1 | Reserved              | U8   | 1                                   |
+ * |   1 | Reserved              | U8   | 0                                   |
  * |   2 | CompatibleID          | U8[8]| compatible ID string                |
  * |  10 | SubCompatibleID       | U8[8]| subcompatible ID string             |
  * |  18 | Reserved              | U8[6]| 0                                   |
@@ -275,14 +275,13 @@ struct usb_functionfs_event {
 #define	FUNCTIONFS_INTERFACE_REVMAP	_IO('g', 128)
 
 /*
- * Returns real bEndpointAddress of an endpoint. If endpoint shuts down
- * during the call, returns -ESHUTDOWN.
+ * Returns real bEndpointAddress of an endpoint.  If function is not
+ * active returns -ENODEV.
  */
 #define	FUNCTIONFS_ENDPOINT_REVMAP	_IO('g', 129)
 
 /*
- * Returns endpoint descriptor. If endpoint shuts down during the call,
- * returns -ESHUTDOWN.
+ * Returns endpoint descriptor. If function is not active returns -ENODEV.
  */
 #define	FUNCTIONFS_ENDPOINT_DESC	_IOR('g', 130, \
 					     struct usb_endpoint_descriptor)

@@ -343,6 +343,14 @@ static void bind_evtchn_to_cpu(unsigned int chn, unsigned int cpu)
 	info->cpu = cpu;
 }
 
+static void xen_evtchn_mask_all(void)
+{
+	unsigned int evtchn;
+
+	for (evtchn = 0; evtchn < xen_evtchn_nr_channels(); evtchn++)
+		mask_evtchn(evtchn);
+}
+
 /**
  * notify_remote_via_irq - send event to remote end of event channel via irq
  * @irq: irq of event channel to send event to
@@ -574,7 +582,7 @@ static void shutdown_pirq(struct irq_data *data)
 
 static void enable_pirq(struct irq_data *data)
 {
-	enable_dynirq(data);
+	startup_pirq(data);
 }
 
 static void disable_pirq(struct irq_data *data)
@@ -1295,9 +1303,10 @@ void rebind_evtchn_irq(int evtchn, int irq)
 }
 
 /* Rebind an evtchn so that it gets delivered to a specific cpu */
-int xen_rebind_evtchn_to_cpu(int evtchn, unsigned tcpu)
+static int rebind_irq_to_cpu(unsigned irq, unsigned tcpu)
 {
 	struct evtchn_bind_vcpu bind_vcpu;
+	int evtchn = evtchn_from_irq(irq);
 	int masked;
 
 	if (!VALID_EVTCHN(evtchn))
@@ -1329,18 +1338,13 @@ int xen_rebind_evtchn_to_cpu(int evtchn, unsigned tcpu)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(xen_rebind_evtchn_to_cpu);
 
 static int set_affinity_irq(struct irq_data *data, const struct cpumask *dest,
 			    bool force)
 {
 	unsigned tcpu = cpumask_first_and(dest, cpu_online_mask);
-	int ret = xen_rebind_evtchn_to_cpu(evtchn_from_irq(data->irq), tcpu);
 
-	if (!ret)
-		irq_data_update_effective_affinity(data, cpumask_of(tcpu));
-
-	return ret;
+	return rebind_irq_to_cpu(data->irq, tcpu);
 }
 
 static void enable_dynirq(struct irq_data *data)
@@ -1565,6 +1569,7 @@ void xen_irq_resume(void)
 	struct irq_info *info;
 
 	/* New event-channel space is not 'live' yet. */
+	xen_evtchn_mask_all();
 	xen_evtchn_resume();
 
 	/* No IRQ <-> event-channel mappings. */
@@ -1643,7 +1648,6 @@ void xen_callback_vector(void)
 {
 	int rc;
 	uint64_t callback_via;
-
 	if (xen_have_vector_callback) {
 		callback_via = HVM_CALLBACK_VECTOR(HYPERVISOR_CALLBACK_VECTOR);
 		rc = xen_set_callback_via(callback_via);
@@ -1672,7 +1676,6 @@ module_param(fifo_events, bool, 0);
 void __init xen_init_IRQ(void)
 {
 	int ret = -EINVAL;
-	unsigned int evtchn;
 
 	if (fifo_events)
 		ret = xen_evtchn_fifo_init();
@@ -1684,8 +1687,7 @@ void __init xen_init_IRQ(void)
 	BUG_ON(!evtchn_to_irq);
 
 	/* No event channels are 'live' right now. */
-	for (evtchn = 0; evtchn < xen_evtchn_nr_channels(); evtchn++)
-		mask_evtchn(evtchn);
+	xen_evtchn_mask_all();
 
 	pirq_needs_eoi = pirq_needs_eoi_flag;
 

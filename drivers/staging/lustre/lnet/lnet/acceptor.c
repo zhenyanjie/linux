@@ -211,7 +211,7 @@ lnet_accept(struct socket *sock, __u32 magic)
 	int peer_port;
 	int rc;
 	int flip;
-	struct lnet_ni *ni;
+	lnet_ni_t *ni;
 	char *str;
 
 	LASSERT(sizeof(cr) <= 16);	     /* not too big for the stack */

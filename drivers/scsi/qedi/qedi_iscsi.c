@@ -59,7 +59,6 @@ struct scsi_host_template qedi_host_template = {
 	.this_id = -1,
 	.sg_tablesize = QEDI_ISCSI_MAX_BDS_PER_CMD,
 	.max_sectors = 0xffff,
-	.dma_boundary = QEDI_HW_DMA_BOUNDARY,
 	.cmd_per_lun = 128,
 	.use_clustering = ENABLE_CLUSTERING,
 	.shost_attrs = qedi_shost_attrs,
@@ -176,7 +175,7 @@ static void qedi_destroy_cmd_pool(struct qedi_ctx *qedi,
 		if (cmd->io_tbl.sge_tbl)
 			dma_free_coherent(&qedi->pdev->dev,
 					  QEDI_ISCSI_MAX_BDS_PER_CMD *
-					  sizeof(struct scsi_sge),
+					  sizeof(struct iscsi_sge),
 					  cmd->io_tbl.sge_tbl,
 					  cmd->io_tbl.sge_tbl_dma);
 
@@ -192,7 +191,7 @@ static int qedi_alloc_sget(struct qedi_ctx *qedi, struct iscsi_session *session,
 			   struct qedi_cmd *cmd)
 {
 	struct qedi_io_bdt *io = &cmd->io_tbl;
-	struct scsi_sge *sge;
+	struct iscsi_sge *sge;
 
 	io->sge_tbl = dma_alloc_coherent(&qedi->pdev->dev,
 					 QEDI_ISCSI_MAX_BDS_PER_CMD *
@@ -709,20 +708,22 @@ static void qedi_conn_get_stats(struct iscsi_cls_conn *cls_conn,
 
 static void qedi_iscsi_prep_generic_pdu_bd(struct qedi_conn *qedi_conn)
 {
-	struct scsi_sge *bd_tbl;
+	struct iscsi_sge *bd_tbl;
 
-	bd_tbl = (struct scsi_sge *)qedi_conn->gen_pdu.req_bd_tbl;
+	bd_tbl = (struct iscsi_sge *)qedi_conn->gen_pdu.req_bd_tbl;
 
 	bd_tbl->sge_addr.hi =
 		(u32)((u64)qedi_conn->gen_pdu.req_dma_addr >> 32);
 	bd_tbl->sge_addr.lo = (u32)qedi_conn->gen_pdu.req_dma_addr;
 	bd_tbl->sge_len = qedi_conn->gen_pdu.req_wr_ptr -
 				qedi_conn->gen_pdu.req_buf;
-	bd_tbl = (struct scsi_sge  *)qedi_conn->gen_pdu.resp_bd_tbl;
+	bd_tbl->reserved0 = 0;
+	bd_tbl = (struct iscsi_sge  *)qedi_conn->gen_pdu.resp_bd_tbl;
 	bd_tbl->sge_addr.hi =
 			(u32)((u64)qedi_conn->gen_pdu.resp_dma_addr >> 32);
 	bd_tbl->sge_addr.lo = (u32)qedi_conn->gen_pdu.resp_dma_addr;
 	bd_tbl->sge_len = ISCSI_DEF_MAX_RECV_SEG_LEN;
+	bd_tbl->reserved0 = 0;
 }
 
 static int qedi_iscsi_send_generic_request(struct iscsi_task *task)
@@ -824,7 +825,7 @@ qedi_ep_connect(struct Scsi_Host *shost, struct sockaddr *dst_addr,
 	u32 iscsi_cid = QEDI_CID_RESERVED;
 	u16 len = 0;
 	char *buf = NULL;
-	int ret, tmp;
+	int ret;
 
 	if (!shost) {
 		ret = -ENXIO;
@@ -940,10 +941,10 @@ qedi_ep_connect(struct Scsi_Host *shost, struct sockaddr *dst_addr,
 
 ep_rel_conn:
 	qedi->ep_tbl[iscsi_cid] = NULL;
-	tmp = qedi_ops->release_conn(qedi->cdev, qedi_ep->handle);
-	if (tmp)
+	ret = qedi_ops->release_conn(qedi->cdev, qedi_ep->handle);
+	if (ret)
 		QEDI_WARN(&qedi->dbg_ctx, "release_conn returned %d\n",
-			  tmp);
+			  ret);
 ep_free_sq:
 	qedi_free_sq(qedi, qedi_ep);
 ep_conn_exit:
@@ -1224,12 +1225,8 @@ static int qedi_set_path(struct Scsi_Host *shost, struct iscsi_path *path_data)
 
 	iscsi_cid = (u32)path_data->handle;
 	qedi_ep = qedi->ep_tbl[iscsi_cid];
-	QEDI_INFO(&qedi->dbg_ctx, QEDI_LOG_INFO,
+	QEDI_INFO(&qedi->dbg_ctx, QEDI_LOG_CONN,
 		  "iscsi_cid=0x%x, qedi_ep=%p\n", iscsi_cid, qedi_ep);
-	if (!qedi_ep) {
-		ret = -EINVAL;
-		goto set_path_exit;
-	}
 
 	if (!is_valid_ether_addr(&path_data->mac_addr[0])) {
 		QEDI_NOTICE(&qedi->dbg_ctx, "dst mac NOT VALID\n");
@@ -1375,7 +1372,7 @@ static void qedi_cleanup_task(struct iscsi_task *task)
 {
 	if (!task->sc || task->state == ISCSI_TASK_PENDING) {
 		QEDI_INFO(NULL, QEDI_LOG_IO, "Returning ref_cnt=%d\n",
-			  refcount_read(&task->refcount));
+			  atomic_read(&task->refcount));
 		return;
 	}
 
@@ -1465,6 +1462,9 @@ static const struct {
 	},
 	{ ISCSI_CONN_ERROR_OUT_OF_SGES_ERROR,
 	  "out of sge error"
+	},
+	{ ISCSI_CONN_ERROR_TCP_SEG_PROC_IP_OPTIONS_ERROR,
+	  "tcp seg ip options error"
 	},
 	{ ISCSI_CONN_ERROR_TCP_IP_FRAGMENT_ERROR,
 	  "tcp ip fragment error"

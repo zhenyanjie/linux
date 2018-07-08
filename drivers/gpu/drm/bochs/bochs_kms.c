@@ -96,8 +96,7 @@ static void bochs_crtc_commit(struct drm_crtc *crtc)
 static int bochs_crtc_page_flip(struct drm_crtc *crtc,
 				struct drm_framebuffer *fb,
 				struct drm_pending_vblank_event *event,
-				uint32_t page_flip_flags,
-				struct drm_modeset_acquire_ctx *ctx)
+				uint32_t page_flip_flags)
 {
 	struct bochs_device *bochs =
 		container_of(crtc, struct bochs_device, crtc);

@@ -2,8 +2,9 @@
 # Makefile for the linux arm-specific parts of the memory manager.
 #
 
-obj-y				:= extable.o fault.o init.o iomap.o
-obj-y				+= dma-mapping$(MMUEXT).o
+obj-y				:= dma-mapping.o extable.o fault.o init.o \
+				   iomap.o
+
 obj-$(CONFIG_MMU)		+= fault-armv.o flush.o idmap.o ioremap.o \
 				   mmap.o pgd.o mmu.o pageattr.o
 

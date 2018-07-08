@@ -287,15 +287,9 @@ static struct nvmem_cell *nvmem_find_cell(const char *cell_id)
 {
 	struct nvmem_cell *p;
 
-	mutex_lock(&nvmem_cells_mutex);
-
 	list_for_each_entry(p, &nvmem_cells, node)
-		if (p && !strcmp(p->name, cell_id)) {
-			mutex_unlock(&nvmem_cells_mutex);
+		if (p && !strcmp(p->name, cell_id))
 			return p;
-		}
-
-	mutex_unlock(&nvmem_cells_mutex);
 
 	return NULL;
 }
@@ -474,8 +468,7 @@ struct nvmem_device *nvmem_register(const struct nvmem_config *config)
 	np = config->dev->of_node;
 	nvmem->dev.of_node = np;
 	dev_set_name(&nvmem->dev, "%s%d",
-		     config->name ? : "nvmem",
-		     config->name ? config->id : nvmem->id);
+		     config->name ? : "nvmem", config->id);
 
 	nvmem->read_only = of_property_read_bool(np, "read-only") |
 			   config->read_only;
@@ -538,7 +531,6 @@ int nvmem_unregister(struct nvmem_device *nvmem)
 
 	nvmem_device_remove_all_cells(nvmem);
 	device_del(&nvmem->dev);
-	put_device(&nvmem->dev);
 
 	return 0;
 }

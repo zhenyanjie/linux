@@ -241,7 +241,7 @@ desired arrays with the media graph elements.
 
 .. c:type:: media_v2_intf_devnode
 
-.. flat-table:: struct media_v2_intf_devnode
+.. flat-table:: struct media_v2_interface
     :header-rows:  0
     :stub-columns: 0
     :widths: 1 2 8
@@ -312,7 +312,7 @@ desired arrays with the media graph elements.
 
 .. c:type:: media_v2_link
 
-.. flat-table:: struct media_v2_link
+.. flat-table:: struct media_v2_pad
     :header-rows:  0
     :stub-columns: 0
     :widths: 1 2 8
@@ -324,7 +324,7 @@ desired arrays with the media graph elements.
 
        -  ``id``
 
-       -  Unique ID for the link.
+       -  Unique ID for the pad.
 
     -  .. row 2
 
@@ -334,7 +334,7 @@ desired arrays with the media graph elements.
 
        -  On pad to pad links: unique ID for the source pad.
 
-	  On interface to entity links: unique ID for the entity.
+	  On interface to entity links: unique ID for the interface.
 
     -  .. row 3
 

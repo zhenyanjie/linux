@@ -370,7 +370,7 @@ static int rmi_spi_probe(struct spi_device *spi)
 	struct rmi_spi_xport *rmi_spi;
 	struct rmi_device_platform_data *pdata;
 	struct rmi_device_platform_data *spi_pdata = spi->dev.platform_data;
-	int error;
+	int retval;
 
 	if (spi->master->flags & SPI_MASTER_HALF_DUPLEX)
 		return -EINVAL;
@@ -383,9 +383,9 @@ static int rmi_spi_probe(struct spi_device *spi)
 	pdata = &rmi_spi->xport.pdata;
 
 	if (spi->dev.of_node) {
-		error = rmi_spi_of_probe(spi, pdata);
-		if (error)
-			return error;
+		retval = rmi_spi_of_probe(spi, pdata);
+		if (retval)
+			return retval;
 	} else if (spi_pdata) {
 		*pdata = *spi_pdata;
 	}
@@ -396,10 +396,10 @@ static int rmi_spi_probe(struct spi_device *spi)
 	if (pdata->spi_data.mode)
 		spi->mode = pdata->spi_data.mode;
 
-	error = spi_setup(spi);
-	if (error < 0) {
+	retval = spi_setup(spi);
+	if (retval < 0) {
 		dev_err(&spi->dev, "spi_setup failed!\n");
-		return error;
+		return retval;
 	}
 
 	pdata->irq = spi->irq;
@@ -413,34 +413,32 @@ static int rmi_spi_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, rmi_spi);
 
-	error = rmi_spi_manage_pools(rmi_spi, RMI_SPI_DEFAULT_XFER_BUF_SIZE);
-	if (error)
-		return error;
+	retval = rmi_spi_manage_pools(rmi_spi, RMI_SPI_DEFAULT_XFER_BUF_SIZE);
+	if (retval)
+		return retval;
 
 	/*
 	 * Setting the page to zero will (a) make sure the PSR is in a
 	 * known state, and (b) make sure we can talk to the device.
 	 */
-	error = rmi_set_page(rmi_spi, 0);
-	if (error) {
+	retval = rmi_set_page(rmi_spi, 0);
+	if (retval) {
 		dev_err(&spi->dev, "Failed to set page select to 0.\n");
-		return error;
+		return retval;
 	}
 
-	dev_info(&spi->dev, "registering SPI-connected sensor\n");
-
-	error = rmi_register_transport_device(&rmi_spi->xport);
-	if (error) {
-		dev_err(&spi->dev, "failed to register sensor: %d\n", error);
-		return error;
+	retval = rmi_register_transport_device(&rmi_spi->xport);
+	if (retval) {
+		dev_err(&spi->dev, "failed to register transport.\n");
+		return retval;
 	}
-
-	error = devm_add_action_or_reset(&spi->dev,
+	retval = devm_add_action_or_reset(&spi->dev,
 					  rmi_spi_unregister_transport,
 					  rmi_spi);
-	if (error)
-		return error;
+	if (retval)
+		return retval;
 
+	dev_info(&spi->dev, "registered RMI SPI driver\n");
 	return 0;
 }
 

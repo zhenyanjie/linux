@@ -23,7 +23,6 @@
 #include <linux/quotaops.h>
 #include <linux/lockdep.h>
 #include <linux/module.h>
-#include <linux/backing-dev.h>
 
 #include "gfs2.h"
 #include "incore.h"
@@ -176,10 +175,10 @@ static void end_bio_io_page(struct bio *bio)
 {
 	struct page *page = bio->bi_private;
 
-	if (!bio->bi_status)
+	if (!bio->bi_error)
 		SetPageUptodate(page);
 	else
-		pr_warn("error %d reading superblock\n", bio->bi_status);
+		pr_warn("error %d reading superblock\n", bio->bi_error);
 	unlock_page(page);
 }
 
@@ -203,7 +202,7 @@ static void gfs2_sb_in(struct gfs2_sbd *sdp, const void *buf)
 
 	memcpy(sb->sb_lockproto, str->sb_lockproto, GFS2_LOCKNAME_LEN);
 	memcpy(sb->sb_locktable, str->sb_locktable, GFS2_LOCKNAME_LEN);
-	memcpy(&s->s_uuid, str->sb_uuid, 16);
+	memcpy(s->s_uuid, str->sb_uuid, 16);
 }
 
 /**
@@ -1223,7 +1222,12 @@ static int set_gfs2_super(struct super_block *s, void *data)
 {
 	s->s_bdev = data;
 	s->s_dev = s->s_bdev->bd_dev;
-	s->s_bdi = bdi_get(s->s_bdev->bd_bdi);
+
+	/*
+	 * We set the bdi here to the queue backing, file systems can
+	 * overwrite this in ->fill_super()
+	 */
+	s->s_bdi = bdev_get_queue(s->s_bdev)->backing_dev_info;
 	return 0;
 }
 

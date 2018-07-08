@@ -367,6 +367,16 @@ static int opticon_ioctl(struct tty_struct *tty,
 	return -ENOIOCTLCMD;
 }
 
+static int opticon_startup(struct usb_serial *serial)
+{
+	if (!serial->num_bulk_in) {
+		dev_err(&serial->dev->dev, "no bulk in endpoint\n");
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
 static int opticon_port_probe(struct usb_serial_port *port)
 {
 	struct opticon_private *priv;
@@ -398,8 +408,8 @@ static struct usb_serial_driver opticon_device = {
 	},
 	.id_table =		id_table,
 	.num_ports =		1,
-	.num_bulk_in =		1,
 	.bulk_in_size =		256,
+	.attach =		opticon_startup,
 	.port_probe =		opticon_port_probe,
 	.port_remove =		opticon_port_remove,
 	.open =			opticon_open,

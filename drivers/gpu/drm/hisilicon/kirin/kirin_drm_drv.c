@@ -146,7 +146,17 @@ err_mode_config_cleanup:
 	return ret;
 }
 
-DEFINE_DRM_GEM_CMA_FOPS(kirin_drm_fops);
+static const struct file_operations kirin_drm_fops = {
+	.owner		= THIS_MODULE,
+	.open		= drm_open,
+	.release	= drm_release,
+	.unlocked_ioctl	= drm_ioctl,
+	.compat_ioctl	= drm_compat_ioctl,
+	.poll		= drm_poll,
+	.read		= drm_read,
+	.llseek		= no_llseek,
+	.mmap		= drm_gem_cma_mmap,
+};
 
 static int kirin_gem_cma_dumb_create(struct drm_file *file,
 				     struct drm_device *dev,
@@ -230,6 +240,34 @@ static const struct component_master_ops kirin_drm_ops = {
 	.unbind = kirin_drm_unbind,
 };
 
+static struct device_node *kirin_get_remote_node(struct device_node *np)
+{
+	struct device_node *endpoint, *remote;
+
+	/* get the first endpoint, in our case only one remote node
+	 * is connected to display controller.
+	 */
+	endpoint = of_graph_get_next_endpoint(np, NULL);
+	if (!endpoint) {
+		DRM_ERROR("no valid endpoint node\n");
+		return ERR_PTR(-ENODEV);
+	}
+
+	remote = of_graph_get_remote_port_parent(endpoint);
+	of_node_put(endpoint);
+	if (!remote) {
+		DRM_ERROR("no valid remote node\n");
+		return ERR_PTR(-ENODEV);
+	}
+
+	if (!of_device_is_available(remote)) {
+		DRM_ERROR("not available for remote node\n");
+		return ERR_PTR(-ENODEV);
+	}
+
+	return remote;
+}
+
 static int kirin_drm_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -243,7 +281,7 @@ static int kirin_drm_platform_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	remote = of_graph_get_remote_node(np, 0, 0);
+	remote = kirin_get_remote_node(np);
 	if (IS_ERR(remote))
 		return PTR_ERR(remote);
 

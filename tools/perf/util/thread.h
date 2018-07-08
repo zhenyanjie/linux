@@ -1,7 +1,7 @@
 #ifndef __PERF_THREAD_H
 #define __PERF_THREAD_H
 
-#include <linux/refcount.h>
+#include <linux/atomic.h>
 #include <linux/rbtree.h>
 #include <linux/list.h>
 #include <unistd.h>
@@ -23,12 +23,11 @@ struct thread {
 	pid_t			tid;
 	pid_t			ppid;
 	int			cpu;
-	refcount_t		refcnt;
+	atomic_t		refcnt;
 	char			shortname[3];
 	bool			comm_set;
 	int			comm_len;
 	bool			dead; /* if set thread has exited */
-	struct list_head	namespaces_list;
 	struct list_head	comm_list;
 	u64			db_id;
 
@@ -41,7 +40,6 @@ struct thread {
 };
 
 struct machine;
-struct namespaces;
 struct comm;
 
 struct thread *thread__new(pid_t pid, pid_t tid);
@@ -63,10 +61,6 @@ static inline void thread__exited(struct thread *thread)
 {
 	thread->dead = true;
 }
-
-struct namespaces *thread__namespaces(const struct thread *thread);
-int thread__set_namespaces(struct thread *thread, u64 timestamp,
-			   struct namespaces_event *event);
 
 int __thread__set_comm(struct thread *thread, const char *comm, u64 timestamp,
 		       bool exec);

@@ -262,8 +262,6 @@ SECTIONS
 	}
 	_edata_loc = __data_loc + SIZEOF(.data);
 
-	BUG_TABLE
-
 #ifdef CONFIG_HAVE_TCM
         /*
 	 * We align everything to a page boundary so we can

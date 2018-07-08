@@ -63,7 +63,6 @@
 #include <linux/cgroup.h>
 #include <linux/wait.h>
 
-DEFINE_STATIC_KEY_FALSE(cpusets_pre_enable_key);
 DEFINE_STATIC_KEY_FALSE(cpusets_enabled_key);
 
 /* See "Frequency meter" comments, below. */
@@ -1039,25 +1038,40 @@ static void cpuset_post_attach(void)
  * @tsk: the task to change
  * @newmems: new nodes that the task will be set
  *
- * We use the mems_allowed_seq seqlock to safely update both tsk->mems_allowed
- * and rebind an eventual tasks' mempolicy. If the task is allocating in
- * parallel, it might temporarily see an empty intersection, which results in
- * a seqlock check and retry before OOM or allocation failure.
+ * In order to avoid seeing no nodes if the old and new nodes are disjoint,
+ * we structure updates as setting all new allowed nodes, then clearing newly
+ * disallowed ones.
  */
 static void cpuset_change_task_nodemask(struct task_struct *tsk,
 					nodemask_t *newmems)
 {
-	task_lock(tsk);
+	bool need_loop;
 
-	local_irq_disable();
-	write_seqcount_begin(&tsk->mems_allowed_seq);
+	task_lock(tsk);
+	/*
+	 * Determine if a loop is necessary if another thread is doing
+	 * read_mems_allowed_begin().  If at least one node remains unchanged and
+	 * tsk does not have a mempolicy, then an empty nodemask will not be
+	 * possible when mems_allowed is larger than a word.
+	 */
+	need_loop = task_has_mempolicy(tsk) ||
+			!nodes_intersects(*newmems, tsk->mems_allowed);
+
+	if (need_loop) {
+		local_irq_disable();
+		write_seqcount_begin(&tsk->mems_allowed_seq);
+	}
 
 	nodes_or(tsk->mems_allowed, tsk->mems_allowed, *newmems);
-	mpol_rebind_task(tsk, newmems);
+	mpol_rebind_task(tsk, newmems, MPOL_REBIND_STEP1);
+
+	mpol_rebind_task(tsk, newmems, MPOL_REBIND_STEP2);
 	tsk->mems_allowed = *newmems;
 
-	write_seqcount_end(&tsk->mems_allowed_seq);
-	local_irq_enable();
+	if (need_loop) {
+		write_seqcount_end(&tsk->mems_allowed_seq);
+		local_irq_enable();
+	}
 
 	task_unlock(tsk);
 }
@@ -1892,7 +1906,6 @@ static struct cftype files[] = {
 	{
 		.name = "memory_pressure",
 		.read_u64 = cpuset_read_u64,
-		.private = FILE_MEMORY_PRESSURE,
 	},
 
 	{
@@ -2108,8 +2121,10 @@ int __init cpuset_init(void)
 {
 	int err = 0;
 
-	BUG_ON(!alloc_cpumask_var(&top_cpuset.cpus_allowed, GFP_KERNEL));
-	BUG_ON(!alloc_cpumask_var(&top_cpuset.effective_cpus, GFP_KERNEL));
+	if (!alloc_cpumask_var(&top_cpuset.cpus_allowed, GFP_KERNEL))
+		BUG();
+	if (!alloc_cpumask_var(&top_cpuset.effective_cpus, GFP_KERNEL))
+		BUG();
 
 	cpumask_setall(top_cpuset.cpus_allowed);
 	nodes_setall(top_cpuset.mems_allowed);
@@ -2124,7 +2139,8 @@ int __init cpuset_init(void)
 	if (err < 0)
 		return err;
 
-	BUG_ON(!alloc_cpumask_var(&cpus_attach, GFP_KERNEL));
+	if (!alloc_cpumask_var(&cpus_attach, GFP_KERNEL))
+		BUG();
 
 	return 0;
 }
@@ -2260,13 +2276,6 @@ retry:
 	mutex_unlock(&cpuset_mutex);
 }
 
-static bool force_rebuild;
-
-void cpuset_force_rebuild(void)
-{
-	force_rebuild = true;
-}
-
 /**
  * cpuset_hotplug_workfn - handle CPU/memory hotunplug for a cpuset
  *
@@ -2341,13 +2350,11 @@ static void cpuset_hotplug_workfn(struct work_struct *work)
 	}
 
 	/* rebuild sched domains if cpus_allowed has changed */
-	if (cpus_updated || force_rebuild) {
-		force_rebuild = false;
+	if (cpus_updated)
 		rebuild_sched_domains();
-	}
 }
 
-void cpuset_update_active_cpus(void)
+void cpuset_update_active_cpus(bool cpu_online)
 {
 	/*
 	 * We're inside cpu hotplug critical region which usually nests
@@ -2361,11 +2368,6 @@ void cpuset_update_active_cpus(void)
 	 */
 	partition_sched_domains(1, NULL, NULL);
 	schedule_work(&cpuset_hotplug_work);
-}
-
-void cpuset_wait_for_hotplug(void)
-{
-	flush_work(&cpuset_hotplug_work);
 }
 
 /*

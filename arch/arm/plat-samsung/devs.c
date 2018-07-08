@@ -10,6 +10,7 @@
  * published by the Free Software Foundation.
 */
 
+#include <linux/amba/pl330.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>

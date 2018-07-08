@@ -219,7 +219,8 @@ static int hns_roce_ib_get_cq_umem(struct hns_roce_dev *hr_dev,
 		return PTR_ERR(*umem);
 
 	ret = hns_roce_mtt_init(hr_dev, ib_umem_page_count(*umem),
-				(*umem)->page_shift, &buf->hr_mtt);
+				ilog2((unsigned int)(*umem)->page_size),
+				&buf->hr_mtt);
 	if (ret)
 		goto err_buf;
 

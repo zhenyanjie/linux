@@ -11,7 +11,7 @@ struct blkcipher_desc;
 #define XTS_BLOCK_SIZE 16
 
 struct xts_crypt_req {
-	le128 *tbuf;
+	be128 *tbuf;
 	unsigned int tbuflen;
 
 	void *tweak_ctx;

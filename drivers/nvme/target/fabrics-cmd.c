@@ -73,7 +73,7 @@ static void nvmet_execute_prop_get(struct nvmet_req *req)
 	nvmet_req_complete(req, status);
 }
 
-u16 nvmet_parse_fabrics_cmd(struct nvmet_req *req)
+int nvmet_parse_fabrics_cmd(struct nvmet_req *req)
 {
 	struct nvme_command *cmd = req->cmd;
 
@@ -122,15 +122,7 @@ static void nvmet_execute_admin_connect(struct nvmet_req *req)
 	struct nvmet_ctrl *ctrl = NULL;
 	u16 status = 0;
 
-	d = kmalloc(sizeof(*d), GFP_KERNEL);
-	if (!d) {
-		status = NVME_SC_INTERNAL;
-		goto complete;
-	}
-
-	status = nvmet_copy_from_sgl(req, 0, d, sizeof(*d));
-	if (status)
-		goto out;
+	d = kmap(sg_page(req->sg)) + req->sg->offset;
 
 	/* zero out initial completion result, assign values as needed */
 	req->rsp->result.u32 = 0;
@@ -151,7 +143,7 @@ static void nvmet_execute_admin_connect(struct nvmet_req *req)
 	}
 
 	status = nvmet_alloc_ctrl(d->subsysnqn, d->hostnqn, req,
-				  le32_to_cpu(c->kato), &ctrl);
+			le32_to_cpu(c->kato), &ctrl);
 	if (status)
 		goto out;
 
@@ -166,8 +158,7 @@ static void nvmet_execute_admin_connect(struct nvmet_req *req)
 	req->rsp->result.u16 = cpu_to_le16(ctrl->cntlid);
 
 out:
-	kfree(d);
-complete:
+	kunmap(sg_page(req->sg));
 	nvmet_req_complete(req, status);
 }
 
@@ -179,15 +170,7 @@ static void nvmet_execute_io_connect(struct nvmet_req *req)
 	u16 qid = le16_to_cpu(c->qid);
 	u16 status = 0;
 
-	d = kmalloc(sizeof(*d), GFP_KERNEL);
-	if (!d) {
-		status = NVME_SC_INTERNAL;
-		goto complete;
-	}
-
-	status = nvmet_copy_from_sgl(req, 0, d, sizeof(*d));
-	if (status)
-		goto out;
+	d = kmap(sg_page(req->sg)) + req->sg->offset;
 
 	/* zero out initial completion result, assign values as needed */
 	req->rsp->result.u32 = 0;
@@ -200,8 +183,8 @@ static void nvmet_execute_io_connect(struct nvmet_req *req)
 	}
 
 	status = nvmet_ctrl_find_get(d->subsysnqn, d->hostnqn,
-				     le16_to_cpu(d->cntlid),
-				     req, &ctrl);
+			le16_to_cpu(d->cntlid),
+			req, &ctrl);
 	if (status)
 		goto out;
 
@@ -222,8 +205,7 @@ static void nvmet_execute_io_connect(struct nvmet_req *req)
 	pr_info("adding queue %d to ctrl %d.\n", qid, ctrl->cntlid);
 
 out:
-	kfree(d);
-complete:
+	kunmap(sg_page(req->sg));
 	nvmet_req_complete(req, status);
 	return;
 
@@ -232,7 +214,7 @@ out_ctrl_put:
 	goto out;
 }
 
-u16 nvmet_parse_connect_cmd(struct nvmet_req *req)
+int nvmet_parse_connect_cmd(struct nvmet_req *req)
 {
 	struct nvme_command *cmd = req->cmd;
 

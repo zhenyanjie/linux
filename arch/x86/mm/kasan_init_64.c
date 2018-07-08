@@ -8,12 +8,11 @@
 #include <linux/sched/task.h>
 #include <linux/vmalloc.h>
 
-#include <asm/e820/types.h>
 #include <asm/tlbflush.h>
 #include <asm/sections.h>
 
-extern pgd_t early_top_pgt[PTRS_PER_PGD];
-extern struct range pfn_mapped[E820_MAX_ENTRIES];
+extern pgd_t early_level4_pgt[PTRS_PER_PGD];
+extern struct range pfn_mapped[E820_X_MAX];
 
 static int __init map_range(struct range *range)
 {
@@ -23,25 +22,19 @@ static int __init map_range(struct range *range)
 	start = (unsigned long)kasan_mem_to_shadow(pfn_to_kaddr(range->start));
 	end = (unsigned long)kasan_mem_to_shadow(pfn_to_kaddr(range->end));
 
-	return vmemmap_populate(start, end, NUMA_NO_NODE);
+	/*
+	 * end + 1 here is intentional. We check several shadow bytes in advance
+	 * to slightly speed up fastpath. In some rare cases we could cross
+	 * boundary of mapped shadow, so we just map some more here.
+	 */
+	return vmemmap_populate(start, end + 1, NUMA_NO_NODE);
 }
 
 static void __init clear_pgds(unsigned long start,
 			unsigned long end)
 {
-	pgd_t *pgd;
-
-	for (; start < end; start += PGDIR_SIZE) {
-		pgd = pgd_offset_k(start);
-		/*
-		 * With folded p4d, pgd_clear() is nop, use p4d_clear()
-		 * instead.
-		 */
-		if (CONFIG_PGTABLE_LEVELS < 5)
-			p4d_clear(p4d_offset(pgd, start));
-		else
-			pgd_clear(pgd);
-	}
+	for (; start < end; start += PGDIR_SIZE)
+		pgd_clear(pgd_offset_k(start));
 }
 
 static void __init kasan_map_early_shadow(pgd_t *pgd)
@@ -51,18 +44,8 @@ static void __init kasan_map_early_shadow(pgd_t *pgd)
 	unsigned long end = KASAN_SHADOW_END;
 
 	for (i = pgd_index(start); start < end; i++) {
-		switch (CONFIG_PGTABLE_LEVELS) {
-		case 4:
-			pgd[i] = __pgd(__pa_nodebug(kasan_zero_pud) |
-					_KERNPG_TABLE);
-			break;
-		case 5:
-			pgd[i] = __pgd(__pa_nodebug(kasan_zero_p4d) |
-					_KERNPG_TABLE);
-			break;
-		default:
-			BUILD_BUG();
-		}
+		pgd[i] = __pgd(__pa_nodebug(kasan_zero_pud)
+				| _KERNPG_TABLE);
 		start += PGDIR_SIZE;
 	}
 }
@@ -90,7 +73,6 @@ void __init kasan_early_init(void)
 	pteval_t pte_val = __pa_nodebug(kasan_zero_page) | __PAGE_KERNEL;
 	pmdval_t pmd_val = __pa_nodebug(kasan_zero_pte) | _KERNPG_TABLE;
 	pudval_t pud_val = __pa_nodebug(kasan_zero_pmd) | _KERNPG_TABLE;
-	p4dval_t p4d_val = __pa_nodebug(kasan_zero_pud) | _KERNPG_TABLE;
 
 	for (i = 0; i < PTRS_PER_PTE; i++)
 		kasan_zero_pte[i] = __pte(pte_val);
@@ -101,11 +83,8 @@ void __init kasan_early_init(void)
 	for (i = 0; i < PTRS_PER_PUD; i++)
 		kasan_zero_pud[i] = __pud(pud_val);
 
-	for (i = 0; CONFIG_PGTABLE_LEVELS >= 5 && i < PTRS_PER_P4D; i++)
-		kasan_zero_p4d[i] = __p4d(p4d_val);
-
-	kasan_map_early_shadow(early_top_pgt);
-	kasan_map_early_shadow(init_top_pgt);
+	kasan_map_early_shadow(early_level4_pgt);
+	kasan_map_early_shadow(init_level4_pgt);
 }
 
 void __init kasan_init(void)
@@ -116,8 +95,8 @@ void __init kasan_init(void)
 	register_die_notifier(&kasan_die_notifier);
 #endif
 
-	memcpy(early_top_pgt, init_top_pgt, sizeof(early_top_pgt));
-	load_cr3(early_top_pgt);
+	memcpy(early_level4_pgt, init_level4_pgt, sizeof(early_level4_pgt));
+	load_cr3(early_level4_pgt);
 	__flush_tlb_all();
 
 	clear_pgds(KASAN_SHADOW_START, KASAN_SHADOW_END);
@@ -125,7 +104,7 @@ void __init kasan_init(void)
 	kasan_populate_zero_shadow((void *)KASAN_SHADOW_START,
 			kasan_mem_to_shadow((void *)PAGE_OFFSET));
 
-	for (i = 0; i < E820_MAX_ENTRIES; i++) {
+	for (i = 0; i < E820_X_MAX; i++) {
 		if (pfn_mapped[i].end == 0)
 			break;
 
@@ -143,7 +122,7 @@ void __init kasan_init(void)
 	kasan_populate_zero_shadow(kasan_mem_to_shadow((void *)MODULES_END),
 			(void *)KASAN_SHADOW_END);
 
-	load_cr3(init_top_pgt);
+	load_cr3(init_level4_pgt);
 	__flush_tlb_all();
 
 	/*

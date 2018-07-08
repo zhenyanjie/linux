@@ -23,7 +23,6 @@
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 
 #include <drm/bridge/analogix_dp.h>
@@ -102,6 +101,7 @@ static int exynos_dp_bridge_attach(struct analogix_dp_plat_data *plat_data,
 	struct exynos_dp_device *dp = to_dp(plat_data);
 	int ret;
 
+	drm_connector_register(connector);
 	dp->connector = connector;
 
 	/* Pre-empt DP connector creation if there's a bridge */
@@ -212,11 +212,8 @@ static const struct component_ops exynos_dp_ops = {
 static int exynos_dp_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *np;
+	struct device_node *np = NULL, *endpoint = NULL;
 	struct exynos_dp_device *dp;
-	struct drm_panel *panel;
-	struct drm_bridge *bridge;
-	int ret;
 
 	dp = devm_kzalloc(&pdev->dev, sizeof(struct exynos_dp_device),
 			  GFP_KERNEL);
@@ -240,13 +237,28 @@ static int exynos_dp_probe(struct platform_device *pdev)
 		goto out;
 	}
 
-	ret = drm_of_find_panel_or_bridge(dev->of_node, 0, 0, &panel, &bridge);
-	if (ret)
-		return ret;
-
-	/* The remote port can be either a panel or a bridge */
-	dp->plat_data.panel = panel;
-	dp->ptn_bridge = bridge;
+	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (endpoint) {
+		np = of_graph_get_remote_port_parent(endpoint);
+		if (np) {
+			/* The remote port can be either a panel or a bridge */
+			dp->plat_data.panel = of_drm_find_panel(np);
+			if (!dp->plat_data.panel) {
+				dp->ptn_bridge = of_drm_find_bridge(np);
+				if (!dp->ptn_bridge) {
+					of_node_put(np);
+					return -EPROBE_DEFER;
+				}
+			}
+			of_node_put(np);
+		} else {
+			DRM_ERROR("no remote endpoint device node found.\n");
+			return -EINVAL;
+		}
+	} else {
+		DRM_ERROR("no port endpoint subnode found.\n");
+		return -EINVAL;
+	}
 
 out:
 	return component_add(&pdev->dev, &exynos_dp_ops);

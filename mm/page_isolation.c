@@ -8,7 +8,6 @@
 #include <linux/memory.h>
 #include <linux/hugetlb.h>
 #include <linux/page_owner.h>
-#include <linux/migrate.h>
 #include "internal.h"
 
 #define CREATE_TRACE_POINTS
@@ -67,8 +66,7 @@ out:
 
 		set_pageblock_migratetype(page, MIGRATE_ISOLATE);
 		zone->nr_isolate_pageblock++;
-		nr_pages = move_freepages_block(zone, page, MIGRATE_ISOLATE,
-									NULL);
+		nr_pages = move_freepages_block(zone, page, MIGRATE_ISOLATE);
 
 		__mod_zone_freepage_state(zone, -nr_pages, migratetype);
 	}
@@ -90,7 +88,7 @@ static void unset_migratetype_isolate(struct page *page, unsigned migratetype)
 
 	zone = page_zone(page);
 	spin_lock_irqsave(&zone->lock, flags);
-	if (!is_migrate_isolate_page(page))
+	if (get_pageblock_migratetype(page) != MIGRATE_ISOLATE)
 		goto out;
 
 	/*
@@ -122,7 +120,7 @@ static void unset_migratetype_isolate(struct page *page, unsigned migratetype)
 	 * pageblock scanning for freepage moving.
 	 */
 	if (!isolated_page) {
-		nr_pages = move_freepages_block(zone, page, migratetype, NULL);
+		nr_pages = move_freepages_block(zone, page, migratetype);
 		__mod_zone_freepage_state(zone, nr_pages, migratetype);
 	}
 	set_pageblock_migratetype(page, migratetype);
@@ -139,18 +137,12 @@ static inline struct page *
 __first_valid_page(unsigned long pfn, unsigned long nr_pages)
 {
 	int i;
-
-	for (i = 0; i < nr_pages; i++) {
-		struct page *page;
-
-		if (!pfn_valid_within(pfn + i))
-			continue;
-		page = pfn_to_online_page(pfn + i);
-		if (!page)
-			continue;
-		return page;
-	}
-	return NULL;
+	for (i = 0; i < nr_pages; i++)
+		if (pfn_valid_within(pfn + i))
+			break;
+	if (unlikely(i == nr_pages))
+		return NULL;
+	return pfn_to_page(pfn + i);
 }
 
 /*
@@ -191,12 +183,8 @@ int start_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 undo:
 	for (pfn = start_pfn;
 	     pfn < undo_pfn;
-	     pfn += pageblock_nr_pages) {
-		struct page *page = pfn_to_online_page(pfn);
-		if (!page)
-			continue;
-		unset_migratetype_isolate(page, migratetype);
-	}
+	     pfn += pageblock_nr_pages)
+		unset_migratetype_isolate(pfn_to_page(pfn), migratetype);
 
 	return -EBUSY;
 }
@@ -217,7 +205,7 @@ int undo_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 	     pfn < end_pfn;
 	     pfn += pageblock_nr_pages) {
 		page = __first_valid_page(pfn, pageblock_nr_pages);
-		if (!page || !is_migrate_isolate_page(page))
+		if (!page || get_pageblock_migratetype(page) != MIGRATE_ISOLATE)
 			continue;
 		unset_migratetype_isolate(page, migratetype);
 	}
@@ -274,7 +262,7 @@ int test_pages_isolated(unsigned long start_pfn, unsigned long end_pfn,
 	 */
 	for (pfn = start_pfn; pfn < end_pfn; pfn += pageblock_nr_pages) {
 		page = __first_valid_page(pfn, pageblock_nr_pages);
-		if (page && !is_migrate_isolate_page(page))
+		if (page && get_pageblock_migratetype(page) != MIGRATE_ISOLATE)
 			break;
 	}
 	page = __first_valid_page(start_pfn, end_pfn - start_pfn);
@@ -295,5 +283,20 @@ int test_pages_isolated(unsigned long start_pfn, unsigned long end_pfn,
 struct page *alloc_migrate_target(struct page *page, unsigned long private,
 				  int **resultp)
 {
-	return new_page_nodemask(page, numa_node_id(), &node_states[N_MEMORY]);
+	gfp_t gfp_mask = GFP_USER | __GFP_MOVABLE;
+
+	/*
+	 * TODO: allocate a destination hugepage from a nearest neighbor node,
+	 * accordance with memory policy of the user process if possible. For
+	 * now as a simple work-around, we use the next node for destination.
+	 */
+	if (PageHuge(page))
+		return alloc_huge_page_node(page_hstate(compound_head(page)),
+					    next_node_in(page_to_nid(page),
+							 node_online_map));
+
+	if (PageHighMem(page))
+		gfp_mask |= __GFP_HIGHMEM;
+
+	return alloc_page(gfp_mask);
 }

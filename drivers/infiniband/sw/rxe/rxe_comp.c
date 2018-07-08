@@ -154,8 +154,6 @@ void rxe_comp_queue_pkt(struct rxe_dev *rxe, struct rxe_qp *qp,
 	skb_queue_tail(&qp->resp_pkts, skb);
 
 	must_sched = skb_queue_len(&qp->resp_pkts) > 1;
-	if (must_sched != 0)
-		rxe_counter_inc(rxe, RXE_CNT_COMPLETER_SCHED);
 	rxe_run_task(&qp->comp.task, must_sched);
 }
 
@@ -238,7 +236,6 @@ static inline enum comp_state check_ack(struct rxe_qp *qp,
 {
 	unsigned int mask = pkt->mask;
 	u8 syn;
-	struct rxe_dev *rxe = to_rdev(qp->ibqp.device);
 
 	/* Check the sequence only */
 	switch (qp->comp.opcode) {
@@ -301,7 +298,6 @@ static inline enum comp_state check_ack(struct rxe_qp *qp,
 			return COMPST_WRITE_SEND;
 
 		case AETH_RNR_NAK:
-			rxe_counter_inc(rxe, RXE_CNT_RCV_RNR);
 			return COMPST_RNR_RETRY;
 
 		case AETH_NAK:
@@ -311,8 +307,6 @@ static inline enum comp_state check_ack(struct rxe_qp *qp,
 				 * before
 				 */
 				if (psn_compare(pkt->psn, qp->comp.psn) > 0) {
-					rxe_counter_inc(rxe,
-							RXE_CNT_RCV_SEQ_ERR);
 					qp->comp.psn = pkt->psn;
 					if (qp->req.wait_psn) {
 						qp->req.wait_psn = 0;
@@ -540,7 +534,6 @@ static void rxe_drain_resp_pkts(struct rxe_qp *qp, bool notify)
 int rxe_completer(void *arg)
 {
 	struct rxe_qp *qp = (struct rxe_qp *)arg;
-	struct rxe_dev *rxe = to_rdev(qp->ibqp.device);
 	struct rxe_send_wqe *wqe = wqe;
 	struct sk_buff *skb = NULL;
 	struct rxe_pkt_info *pkt = NULL;
@@ -690,10 +683,8 @@ int rxe_completer(void *arg)
 				if (psn_compare(qp->req.psn,
 						qp->comp.psn) > 0) {
 					/* tell the requester to retry the
-					 * send queue next time around
+					 * send send queue next time around
 					 */
-					rxe_counter_inc(rxe,
-							RXE_CNT_COMP_RETRY);
 					qp->req.need_retry = 1;
 					rxe_run_task(&qp->req.task, 1);
 				}
@@ -708,7 +699,6 @@ int rxe_completer(void *arg)
 				goto exit;
 
 			} else {
-				rxe_counter_inc(rxe, RXE_CNT_RETRY_EXCEEDED);
 				wqe->status = IB_WC_RETRY_EXC_ERR;
 				state = COMPST_ERROR;
 			}
@@ -730,8 +720,6 @@ int rxe_completer(void *arg)
 				skb = NULL;
 				goto exit;
 			} else {
-				rxe_counter_inc(rxe,
-						RXE_CNT_RNR_RETRY_EXCEEDED);
 				wqe->status = IB_WC_RNR_RETRY_EXC_ERR;
 				state = COMPST_ERROR;
 			}

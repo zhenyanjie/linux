@@ -132,14 +132,14 @@ static struct sk_buff *mlx5e_test_get_udp_skb(struct mlx5e_priv *priv)
 	skb_reserve(skb, NET_IP_ALIGN);
 
 	/*  Reserve for ethernet and IP header  */
-	ethh = skb_push(skb, ETH_HLEN);
+	ethh = (struct ethhdr *)skb_push(skb, ETH_HLEN);
 	skb_reset_mac_header(skb);
 
 	skb_set_network_header(skb, skb->len);
-	iph = skb_put(skb, sizeof(struct iphdr));
+	iph = (struct iphdr *)skb_put(skb, sizeof(struct iphdr));
 
 	skb_set_transport_header(skb, skb->len);
-	udph = skb_put(skb, sizeof(struct udphdr));
+	udph = (struct udphdr *)skb_put(skb, sizeof(struct udphdr));
 
 	/* Fill ETH header */
 	ether_addr_copy(ethh->h_dest, priv->netdev->dev_addr);
@@ -167,12 +167,12 @@ static struct sk_buff *mlx5e_test_get_udp_skb(struct mlx5e_priv *priv)
 	ip_send_check(iph);
 
 	/* Fill test header and data */
-	mlxh = skb_put(skb, sizeof(*mlxh));
+	mlxh = (struct mlx5ehdr *)skb_put(skb, sizeof(*mlxh));
 	mlxh->version = 0;
 	mlxh->magic = cpu_to_be64(MLX5E_TEST_MAGIC);
 	strlcpy(mlxh->text, mlx5e_test_text, sizeof(mlxh->text));
 	datalen -= sizeof(*mlxh);
-	skb_put_zero(skb, datalen);
+	memset(skb_put(skb, datalen), 0, datalen);
 
 	skb->csum = 0;
 	skb->ip_summed = CHECKSUM_PARTIAL;
@@ -236,9 +236,12 @@ static int mlx5e_test_loopback_setup(struct mlx5e_priv *priv,
 {
 	int err = 0;
 
-	err = mlx5e_refresh_tirs(priv, true);
-	if (err)
+	err = mlx5e_refresh_tirs_self_loopback(priv->mdev, true);
+	if (err) {
+		netdev_err(priv->netdev,
+			   "\tFailed to enable UC loopback err(%d)\n", err);
 		return err;
+	}
 
 	lbtp->loopback_ok = false;
 	init_completion(&lbtp->comp);
@@ -255,7 +258,7 @@ static void mlx5e_test_loopback_cleanup(struct mlx5e_priv *priv,
 					struct mlx5e_lbt_priv *lbtp)
 {
 	dev_remove_pack(&lbtp->pt);
-	mlx5e_refresh_tirs(priv, false);
+	mlx5e_refresh_tirs_self_loopback(priv->mdev, false);
 }
 
 #define MLX5E_LB_VERIFY_TIMEOUT (msecs_to_jiffies(200))

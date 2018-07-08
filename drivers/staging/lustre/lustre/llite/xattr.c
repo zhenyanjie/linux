@@ -40,6 +40,7 @@
 #include "../include/obd_support.h"
 #include "../include/lustre_dlm.h"
 #include "../include/lustre_ver.h"
+#include "../include/lustre_eacl.h"
 
 #include "llite_internal.h"
 
@@ -195,7 +196,7 @@ static int ll_xattr_set(const struct xattr_handler *handler,
 	LASSERT(inode);
 	LASSERT(name);
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode=" DFID "(%p), xattr %s\n",
+	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p), xattr %s\n",
 	       PFID(ll_inode2fid(inode)), inode, name);
 
 	if (!strcmp(name, "lov")) {
@@ -370,7 +371,7 @@ static int ll_xattr_get_common(const struct xattr_handler *handler,
 #endif
 	int rc;
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode=" DFID "(%p)\n",
+	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p)\n",
 	       PFID(ll_inode2fid(inode)), inode);
 
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_GETXATTR, 1);
@@ -426,7 +427,7 @@ static ssize_t ll_getxattr_lov(struct inode *inode, void *buf, size_t buf_size)
 			.cl_buf.lb_len = buf_size,
 		};
 		struct lu_env *env;
-		u16 refcheck;
+		int refcheck;
 
 		if (!obj)
 			return -ENODATA;
@@ -523,7 +524,7 @@ ssize_t ll_listxattr(struct dentry *dentry, char *buffer, size_t size)
 
 	LASSERT(inode);
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode=" DFID "(%p)\n",
+	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p)\n",
 	       PFID(ll_inode2fid(inode)), inode);
 
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_LISTXATTR, 1);

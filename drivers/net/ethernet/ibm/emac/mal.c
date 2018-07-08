@@ -402,7 +402,7 @@ static int mal_poll(struct napi_struct *napi, int budget)
 	unsigned long flags;
 
 	MAL_DBG2(mal, "poll(%d)" NL, budget);
-
+ again:
 	/* Process TX skbs */
 	list_for_each(l, &mal->poll_list) {
 		struct mal_commac *mc =
@@ -451,6 +451,7 @@ static int mal_poll(struct napi_struct *napi, int budget)
 			spin_lock_irqsave(&mal->lock, flags);
 			mal_disable_eob_irq(mal);
 			spin_unlock_irqrestore(&mal->lock, flags);
+			goto again;
 		}
 		mc->ops->poll_tx(mc->dev);
 	}
@@ -694,6 +695,8 @@ static int mal_probe(struct platform_device *ofdev)
 	wmb();
 	platform_set_drvdata(ofdev, mal);
 
+	mal_dbg_register(mal);
+
 	return 0;
 
  fail6:
@@ -736,6 +739,8 @@ static int mal_remove(struct platform_device *ofdev)
 	free_irq(mal->rxeob_irq, mal);
 
 	mal_reset(mal);
+
+	mal_dbg_unregister(mal);
 
 	dma_free_coherent(&ofdev->dev,
 			  sizeof(struct mal_descriptor) *

@@ -37,7 +37,6 @@
 #include <asm/vm86.h>
 #include <asm/switch_to.h>
 #include <asm/desc.h>
-#include <asm/prctl.h>
 
 /*
  * per-CPU TSS segments. Threads are completely 'soft' on Linux,
@@ -125,6 +124,11 @@ void flush_thread(void)
 	fpu__clear(&tsk->thread.fpu);
 }
 
+static void hard_disable_TSC(void)
+{
+	cr4_set_bits(X86_CR4_TSD);
+}
+
 void disable_TSC(void)
 {
 	preempt_disable();
@@ -133,8 +137,13 @@ void disable_TSC(void)
 		 * Must flip the CPU state synchronously with
 		 * TIF_NOTSC in the current running context.
 		 */
-		cr4_set_bits(X86_CR4_TSD);
+		hard_disable_TSC();
 	preempt_enable();
+}
+
+static void hard_enable_TSC(void)
+{
+	cr4_clear_bits(X86_CR4_TSD);
 }
 
 static void enable_TSC(void)
@@ -145,7 +154,7 @@ static void enable_TSC(void)
 		 * Must flip the CPU state synchronously with
 		 * TIF_NOTSC in the current running context.
 		 */
-		cr4_clear_bits(X86_CR4_TSD);
+		hard_enable_TSC();
 	preempt_enable();
 }
 
@@ -173,129 +182,54 @@ int set_tsc_mode(unsigned int val)
 	return 0;
 }
 
-DEFINE_PER_CPU(u64, msr_misc_features_shadow);
-
-static void set_cpuid_faulting(bool on)
+void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
+		      struct tss_struct *tss)
 {
-	u64 msrval;
+	struct thread_struct *prev, *next;
 
-	msrval = this_cpu_read(msr_misc_features_shadow);
-	msrval &= ~MSR_MISC_FEATURES_ENABLES_CPUID_FAULT;
-	msrval |= (on << MSR_MISC_FEATURES_ENABLES_CPUID_FAULT_BIT);
-	this_cpu_write(msr_misc_features_shadow, msrval);
-	wrmsrl(MSR_MISC_FEATURES_ENABLES, msrval);
-}
+	prev = &prev_p->thread;
+	next = &next_p->thread;
 
-static void disable_cpuid(void)
-{
-	preempt_disable();
-	if (!test_and_set_thread_flag(TIF_NOCPUID)) {
-		/*
-		 * Must flip the CPU state synchronously with
-		 * TIF_NOCPUID in the current running context.
-		 */
-		set_cpuid_faulting(true);
+	if (test_tsk_thread_flag(prev_p, TIF_BLOCKSTEP) ^
+	    test_tsk_thread_flag(next_p, TIF_BLOCKSTEP)) {
+		unsigned long debugctl = get_debugctlmsr();
+
+		debugctl &= ~DEBUGCTLMSR_BTF;
+		if (test_tsk_thread_flag(next_p, TIF_BLOCKSTEP))
+			debugctl |= DEBUGCTLMSR_BTF;
+
+		update_debugctlmsr(debugctl);
 	}
-	preempt_enable();
-}
 
-static void enable_cpuid(void)
-{
-	preempt_disable();
-	if (test_and_clear_thread_flag(TIF_NOCPUID)) {
-		/*
-		 * Must flip the CPU state synchronously with
-		 * TIF_NOCPUID in the current running context.
-		 */
-		set_cpuid_faulting(false);
+	if (test_tsk_thread_flag(prev_p, TIF_NOTSC) ^
+	    test_tsk_thread_flag(next_p, TIF_NOTSC)) {
+		/* prev and next are different */
+		if (test_tsk_thread_flag(next_p, TIF_NOTSC))
+			hard_disable_TSC();
+		else
+			hard_enable_TSC();
 	}
-	preempt_enable();
-}
 
-static int get_cpuid_mode(void)
-{
-	return !test_thread_flag(TIF_NOCPUID);
-}
-
-static int set_cpuid_mode(struct task_struct *task, unsigned long cpuid_enabled)
-{
-	if (!static_cpu_has(X86_FEATURE_CPUID_FAULT))
-		return -ENODEV;
-
-	if (cpuid_enabled)
-		enable_cpuid();
-	else
-		disable_cpuid();
-
-	return 0;
-}
-
-/*
- * Called immediately after a successful exec.
- */
-void arch_setup_new_exec(void)
-{
-	/* If cpuid was previously disabled for this task, re-enable it. */
-	if (test_thread_flag(TIF_NOCPUID))
-		enable_cpuid();
-}
-
-static inline void switch_to_bitmap(struct tss_struct *tss,
-				    struct thread_struct *prev,
-				    struct thread_struct *next,
-				    unsigned long tifp, unsigned long tifn)
-{
-	if (tifn & _TIF_IO_BITMAP) {
+	if (test_tsk_thread_flag(next_p, TIF_IO_BITMAP)) {
 		/*
 		 * Copy the relevant range of the IO bitmap.
 		 * Normally this is 128 bytes or less:
 		 */
 		memcpy(tss->io_bitmap, next->io_bitmap_ptr,
 		       max(prev->io_bitmap_max, next->io_bitmap_max));
+
 		/*
 		 * Make sure that the TSS limit is correct for the CPU
 		 * to notice the IO bitmap.
 		 */
 		refresh_tss_limit();
-	} else if (tifp & _TIF_IO_BITMAP) {
+	} else if (test_tsk_thread_flag(prev_p, TIF_IO_BITMAP)) {
 		/*
 		 * Clear any possible leftover bits:
 		 */
 		memset(tss->io_bitmap, 0xff, prev->io_bitmap_max);
 	}
-}
-
-void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
-		      struct tss_struct *tss)
-{
-	struct thread_struct *prev, *next;
-	unsigned long tifp, tifn;
-
-	prev = &prev_p->thread;
-	next = &next_p->thread;
-
-	tifn = READ_ONCE(task_thread_info(next_p)->flags);
-	tifp = READ_ONCE(task_thread_info(prev_p)->flags);
-	switch_to_bitmap(tss, prev, next, tifp, tifn);
-
 	propagate_user_return_notify(prev_p, next_p);
-
-	if ((tifp & _TIF_BLOCKSTEP || tifn & _TIF_BLOCKSTEP) &&
-	    arch_has_block_step()) {
-		unsigned long debugctl, msk;
-
-		rdmsrl(MSR_IA32_DEBUGCTLMSR, debugctl);
-		debugctl &= ~DEBUGCTLMSR_BTF;
-		msk = tifn & _TIF_BLOCKSTEP;
-		debugctl |= (msk >> TIF_BLOCKSTEP) << DEBUGCTLMSR_BTF_SHIFT;
-		wrmsrl(MSR_IA32_DEBUGCTLMSR, debugctl);
-	}
-
-	if ((tifp ^ tifn) & _TIF_NOTSC)
-		cr4_toggle_bits(X86_CR4_TSD);
-
-	if ((tifp ^ tifn) & _TIF_NOCPUID)
-		set_cpuid_faulting(!!(tifn & _TIF_NOCPUID));
 }
 
 /*
@@ -545,6 +479,17 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 }
 
 /*
+ * Return saved PC of a blocked thread.
+ * What is this good for? it will be always the scheduler or ret_from_fork.
+ */
+unsigned long thread_saved_pc(struct task_struct *tsk)
+{
+	struct inactive_task_frame *frame =
+		(struct inactive_task_frame *) READ_ONCE(tsk->thread.sp);
+	return READ_ONCE_NOCHECK(frame->ret_addr);
+}
+
+/*
  * Called from fs/proc with a reference on @p to find the function
  * which called into schedule(). This needs to be done carefully
  * because the task might wake up and we might look at a stack
@@ -604,17 +549,4 @@ unsigned long get_wchan(struct task_struct *p)
 out:
 	put_task_stack(p);
 	return ret;
-}
-
-long do_arch_prctl_common(struct task_struct *task, int option,
-			  unsigned long cpuid_enabled)
-{
-	switch (option) {
-	case ARCH_GET_CPUID:
-		return get_cpuid_mode();
-	case ARCH_SET_CPUID:
-		return set_cpuid_mode(task, cpuid_enabled);
-	}
-
-	return -EINVAL;
 }

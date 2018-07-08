@@ -264,11 +264,7 @@ static int s3c2410ts_probe(struct platform_device *pdev)
 		return -ENOENT;
 	}
 
-	ret = clk_prepare_enable(ts.clock);
-	if (ret) {
-		dev_err(dev, "Failed! to enabled clocks\n");
-		goto err_clk_get;
-	}
+	clk_prepare_enable(ts.clock);
 	dev_dbg(dev, "got and enabled clocks\n");
 
 	ts.irq_tc = ret = platform_get_irq(pdev, 0);
@@ -357,9 +353,7 @@ static int s3c2410ts_probe(struct platform_device *pdev)
  err_iomap:
 	iounmap(ts.io);
  err_clk:
-	clk_disable_unprepare(ts.clock);
 	del_timer_sync(&touch_timer);
- err_clk_get:
 	clk_put(ts.clock);
 	return ret;
 }

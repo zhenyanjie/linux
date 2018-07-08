@@ -9,7 +9,6 @@
  */
 
 /* For the CLR_() macros */
-#include <string.h>
 #include <pthread.h>
 
 #include <signal.h>
@@ -109,7 +108,8 @@ static void toggle_done(int sig __maybe_unused,
 	done = true;
 }
 
-int bench_futex_requeue(int argc, const char **argv)
+int bench_futex_requeue(int argc, const char **argv,
+			const char *prefix __maybe_unused)
 {
 	int ret = 0;
 	unsigned int i, j;

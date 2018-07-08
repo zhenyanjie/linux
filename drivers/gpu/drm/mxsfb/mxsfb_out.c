@@ -19,7 +19,6 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_simple_kms_helper.h>
@@ -83,15 +82,20 @@ static const struct drm_connector_funcs mxsfb_panel_connector_funcs = {
 	.atomic_destroy_state	= drm_atomic_helper_connector_destroy_state,
 };
 
-int mxsfb_create_output(struct drm_device *drm)
+static int mxsfb_attach_endpoint(struct drm_device *drm,
+				 const struct of_endpoint *ep)
 {
 	struct mxsfb_drm_private *mxsfb = drm->dev_private;
+	struct device_node *np;
 	struct drm_panel *panel;
-	int ret;
+	int ret = -EPROBE_DEFER;
 
-	ret = drm_of_find_panel_or_bridge(drm->dev->of_node, 0, 0, &panel, NULL);
-	if (ret)
-		return ret;
+	np = of_graph_get_remote_port_parent(ep->local_node);
+	panel = of_drm_find_panel(np);
+	of_node_put(np);
+
+	if (!panel)
+		return -EPROBE_DEFER;
 
 	mxsfb->connector.dpms = DRM_MODE_DPMS_OFF;
 	mxsfb->connector.polled = 0;
@@ -104,4 +108,28 @@ int mxsfb_create_output(struct drm_device *drm)
 		mxsfb->panel = panel;
 
 	return ret;
+}
+
+int mxsfb_create_output(struct drm_device *drm)
+{
+	struct mxsfb_drm_private *mxsfb = drm->dev_private;
+	struct device_node *ep_np = NULL;
+	struct of_endpoint ep;
+	int ret;
+
+	for_each_endpoint_of_node(drm->dev->of_node, ep_np) {
+		ret = of_graph_parse_endpoint(ep_np, &ep);
+		if (!ret)
+			ret = mxsfb_attach_endpoint(drm, &ep);
+
+		if (ret) {
+			of_node_put(ep_np);
+			return ret;
+		}
+	}
+
+	if (!mxsfb->panel)
+		return -EPROBE_DEFER;
+
+	return 0;
 }

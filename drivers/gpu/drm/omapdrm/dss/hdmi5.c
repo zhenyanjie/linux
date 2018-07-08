@@ -39,7 +39,6 @@
 #include <linux/regulator/consumer.h>
 #include <linux/component.h>
 #include <linux/of.h>
-#include <linux/of_graph.h>
 #include <sound/omap-hdmi-audio.h>
 
 #include "omapdss.h"
@@ -573,7 +572,7 @@ static int hdmi_probe_of(struct platform_device *pdev)
 	struct device_node *ep;
 	int r;
 
-	ep = of_graph_get_endpoint_by_regs(node, 0, 0);
+	ep = omapdss_of_get_first_endpoint(node);
 	if (!ep)
 		return 0;
 
@@ -728,9 +727,11 @@ static int hdmi5_bind(struct device *dev, struct device *master, void *data)
 	mutex_init(&hdmi.lock);
 	spin_lock_init(&hdmi.audio_playing_lock);
 
-	r = hdmi_probe_of(pdev);
-	if (r)
-		return r;
+	if (pdev->dev.of_node) {
+		r = hdmi_probe_of(pdev);
+		if (r)
+			return r;
+	}
 
 	r = hdmi_wp_init(pdev, &hdmi.wp);
 	if (r)

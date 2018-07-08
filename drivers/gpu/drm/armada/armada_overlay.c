@@ -94,8 +94,7 @@ static int
 armada_ovl_plane_update(struct drm_plane *plane, struct drm_crtc *crtc,
 	struct drm_framebuffer *fb,
 	int crtc_x, int crtc_y, unsigned crtc_w, unsigned crtc_h,
-	uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h,
-	struct drm_modeset_acquire_ctx *ctx)
+	uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h)
 {
 	struct armada_ovl_plane *dplane = drm_to_armada_ovl_plane(plane);
 	struct armada_crtc *dcrtc = drm_to_armada_crtc(crtc);
@@ -125,7 +124,7 @@ armada_ovl_plane_update(struct drm_plane *plane, struct drm_crtc *crtc,
 				 src_x, src_y, src_w, src_h);
 
 	ret = drm_plane_helper_check_update(plane, crtc, fb, &src, &dest, &clip,
-					    DRM_MODE_ROTATE_0,
+					    DRM_ROTATE_0,
 					    0, INT_MAX, true, false, &visible);
 	if (ret)
 		return ret;
@@ -258,8 +257,7 @@ armada_ovl_plane_update(struct drm_plane *plane, struct drm_crtc *crtc,
 	return 0;
 }
 
-static int armada_ovl_plane_disable(struct drm_plane *plane,
-				    struct drm_modeset_acquire_ctx *ctx)
+static int armada_ovl_plane_disable(struct drm_plane *plane)
 {
 	struct armada_ovl_plane *dplane = drm_to_armada_ovl_plane(plane);
 	struct drm_framebuffer *fb;

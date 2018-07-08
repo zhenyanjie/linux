@@ -462,7 +462,7 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	/* If a delay is expected, orphan the skb. (orphaning usually takes
 	 * place at TX completion time, so _before_ the link transit delay)
 	 */
-	if (q->latency || q->jitter || q->rate)
+	if (q->latency || q->jitter)
 		skb_orphan_partial(skb);
 
 	/*
@@ -530,31 +530,21 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		now = psched_get_time();
 
 		if (q->rate) {
-			struct netem_skb_cb *last = NULL;
+			struct sk_buff *last;
 
-			if (sch->q.tail)
-				last = netem_skb_cb(sch->q.tail);
-			if (q->t_root.rb_node) {
-				struct sk_buff *t_skb;
-				struct netem_skb_cb *t_last;
-
-				t_skb = netem_rb_to_skb(rb_last(&q->t_root));
-				t_last = netem_skb_cb(t_skb);
-				if (!last ||
-				    t_last->time_to_send > last->time_to_send) {
-					last = t_last;
-				}
-			}
-
+			if (sch->q.qlen)
+				last = sch->q.tail;
+			else
+				last = netem_rb_to_skb(rb_last(&q->t_root));
 			if (last) {
 				/*
 				 * Last packet in queue is reference point (now),
 				 * calculate this time bonus and subtract
 				 * from delay.
 				 */
-				delay -= last->time_to_send - now;
+				delay -= netem_skb_cb(last)->time_to_send - now;
 				delay = max_t(psched_tdiff_t, 0, delay);
-				now = last->time_to_send;
+				now = netem_skb_cb(last)->time_to_send;
 			}
 
 			delay += packet_len_2_sched_time(qdisc_pkt_len(skb), q);
@@ -702,11 +692,15 @@ static int get_dist_table(struct Qdisc *sch, const struct nlattr *attr)
 	spinlock_t *root_lock;
 	struct disttable *d;
 	int i;
+	size_t s;
 
 	if (n > NETEM_DIST_MAX)
 		return -EINVAL;
 
-	d = kvmalloc(sizeof(struct disttable) + n * sizeof(s16), GFP_KERNEL);
+	s = sizeof(struct disttable) + n * sizeof(s16);
+	d = kmalloc(s, GFP_KERNEL | __GFP_NOWARN);
+	if (!d)
+		d = vmalloc(s);
 	if (!d)
 		return -ENOMEM;
 
@@ -839,7 +833,7 @@ static int parse_attr(struct nlattr *tb[], int maxtype, struct nlattr *nla,
 
 	if (nested_len >= nla_attr_size(0))
 		return nla_parse(tb, maxtype, nla_data(nla) + NLA_ALIGN(len),
-				 nested_len, policy, NULL);
+				 nested_len, policy);
 
 	memset(tb, 0, sizeof(struct nlattr *) * (maxtype + 1));
 	return 0;
@@ -933,10 +927,10 @@ static int netem_init(struct Qdisc *sch, struct nlattr *opt)
 	struct netem_sched_data *q = qdisc_priv(sch);
 	int ret;
 
-	qdisc_watchdog_init(&q->watchdog, sch);
-
 	if (!opt)
 		return -EINVAL;
+
+	qdisc_watchdog_init(&q->watchdog, sch);
 
 	q->loss_model = CLG_RANDOM;
 	ret = netem_change(sch, opt);

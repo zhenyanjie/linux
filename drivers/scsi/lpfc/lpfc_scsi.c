@@ -26,7 +26,6 @@
 #include <linux/export.h>
 #include <linux/delay.h>
 #include <asm/unaligned.h>
-#include <linux/t10-pi.h>
 #include <linux/crc-t10dif.h>
 #include <net/checksum.h>
 
@@ -2935,8 +2934,8 @@ lpfc_calc_bg_err(struct lpfc_hba *phba, struct lpfc_scsi_buf *lpfc_cmd)
 				 * First check to see if a protection data
 				 * check is valid
 				 */
-				if ((src->ref_tag == T10_PI_REF_ESCAPE) ||
-				    (src->app_tag == T10_PI_APP_ESCAPE)) {
+				if ((src->ref_tag == 0xffffffff) ||
+				    (src->app_tag == 0xffff)) {
 					start_ref_tag++;
 					goto skipit;
 				}
@@ -3932,7 +3931,7 @@ lpfc_scsi_cmd_iocb_cmpl(struct lpfc_hba *phba, struct lpfc_iocbq *pIocbIn,
 	struct Scsi_Host *shost;
 	uint32_t logit = LOG_FCP;
 
-	atomic_inc(&phba->fc4ScsiIoCmpls);
+	phba->fc4ScsiIoCmpls++;
 
 	/* Sanity check on return of outstanding command */
 	cmd = lpfc_cmd->pCmd;
@@ -4251,19 +4250,19 @@ lpfc_scsi_prep_cmnd(struct lpfc_vport *vport, struct lpfc_scsi_buf *lpfc_cmd,
 						vport->cfg_first_burst_size;
 			}
 			fcp_cmnd->fcpCntl3 = WRITE_DATA;
-			atomic_inc(&phba->fc4ScsiOutputRequests);
+			phba->fc4ScsiOutputRequests++;
 		} else {
 			iocb_cmd->ulpCommand = CMD_FCP_IREAD64_CR;
 			iocb_cmd->ulpPU = PARM_READ_CHECK;
 			fcp_cmnd->fcpCntl3 = READ_DATA;
-			atomic_inc(&phba->fc4ScsiInputRequests);
+			phba->fc4ScsiInputRequests++;
 		}
 	} else {
 		iocb_cmd->ulpCommand = CMD_FCP_ICMND64_CR;
 		iocb_cmd->un.fcpi.fcpi_parm = 0;
 		iocb_cmd->ulpPU = 0;
 		fcp_cmnd->fcpCntl3 = 0;
-		atomic_inc(&phba->fc4ScsiControlRequests);
+		phba->fc4ScsiControlRequests++;
 	}
 	if (phba->sli_rev == 3 &&
 	    !(phba->sli3_options & LPFC_SLI3_BG_ENABLED))
@@ -4641,16 +4640,7 @@ lpfc_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *cmnd)
 				 (uint32_t)
 				 (cmnd->request->timeout / 1000));
 
-		switch (lpfc_cmd->fcp_cmnd->fcpCntl3) {
-		case WRITE_DATA:
-			atomic_dec(&phba->fc4ScsiOutputRequests);
-			break;
-		case READ_DATA:
-			atomic_dec(&phba->fc4ScsiInputRequests);
-			break;
-		default:
-			atomic_dec(&phba->fc4ScsiControlRequests);
-		}
+
 		goto out_host_busy_free_buf;
 	}
 	if (phba->cfg_poll & ENABLE_FCP_RING_POLLING) {

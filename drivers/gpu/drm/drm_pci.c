@@ -26,7 +26,6 @@
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
 #include <linux/export.h>
-#include <drm/drm_pci.h>
 #include <drm/drmP.h>
 #include "drm_internal.h"
 #include "drm_legacy.h"
@@ -36,9 +35,6 @@
  * @dev: DRM device
  * @size: size of block to allocate
  * @align: alignment of block
- *
- * FIXME: This is a needless abstraction of the Linux dma-api and should be
- * removed.
  *
  * Return: A handle to the allocated memory block on success or NULL on
  * failure.
@@ -108,9 +104,6 @@ void __drm_legacy_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
  * drm_pci_free - Free a PCI consistent memory block
  * @dev: DRM device
  * @dmah: handle to memory block
- *
- * FIXME: This is a needless abstraction of the Linux dma-api and should be
- * removed.
  */
 void drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
 {

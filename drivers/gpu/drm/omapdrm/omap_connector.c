@@ -146,6 +146,8 @@ static int omap_connector_mode_valid(struct drm_connector *connector,
 	int r, ret = MODE_BAD;
 
 	drm_display_mode_to_videomode(mode, &vm);
+	vm.flags |= DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
+		    DISPLAY_FLAGS_SYNC_NEGEDGE;
 	mode->vrefresh = drm_mode_vrefresh(mode);
 
 	/*
@@ -159,12 +161,6 @@ static int omap_connector_mode_valid(struct drm_connector *connector,
 		struct videomode t = {0};
 
 		dssdrv->get_timings(dssdev, &t);
-
-		/*
-		 * Ignore the flags, as we don't get them from
-		 * drm_display_mode_to_videomode.
-		 */
-		t.flags = 0;
 
 		if (memcmp(&vm, &t, sizeof(vm)))
 			r = -EINVAL;
@@ -233,11 +229,13 @@ struct drm_connector *omap_connector_init(struct drm_device *dev,
 				connector_type);
 	drm_connector_helper_add(connector, &omap_connector_helper_funcs);
 
-	if (dssdev->driver->detect)
-		connector->polled = DRM_CONNECTOR_POLL_CONNECT |
-				    DRM_CONNECTOR_POLL_DISCONNECT;
-	else
+#if 0 /* enable when dss2 supports hotplug */
+	if (dssdev->caps & OMAP_DSS_DISPLAY_CAP_HPD)
 		connector->polled = 0;
+	else
+#endif
+		connector->polled = DRM_CONNECTOR_POLL_CONNECT |
+				DRM_CONNECTOR_POLL_DISCONNECT;
 
 	connector->interlace_allowed = 1;
 	connector->doublescan_allowed = 0;

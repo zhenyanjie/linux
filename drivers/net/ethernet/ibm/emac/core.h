@@ -265,6 +265,7 @@ struct emac_instance {
 	/* Stats
 	 */
 	struct emac_error_stats		estats;
+	struct net_device_stats		nstats;
 	struct emac_stats 		stats;
 
 	/* Misc

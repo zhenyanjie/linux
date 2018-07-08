@@ -31,7 +31,6 @@
 
 extern bool hang_debug;
 static void a4xx_dump(struct msm_gpu *gpu);
-static bool a4xx_idle(struct msm_gpu *gpu);
 
 /*
  * a4xx_enable_hwcg() - Program the clock control registers
@@ -138,7 +137,7 @@ static bool a4xx_me_init(struct msm_gpu *gpu)
 	OUT_RING(ring, 0x00000000);
 
 	gpu->funcs->flush(gpu);
-	return a4xx_idle(gpu);
+	return gpu->funcs->idle(gpu);
 }
 
 static int a4xx_hw_init(struct msm_gpu *gpu)
@@ -457,8 +456,12 @@ static const unsigned int a4xx_registers[] = {
 #ifdef CONFIG_DEBUG_FS
 static void a4xx_show(struct msm_gpu *gpu, struct seq_file *m)
 {
+	gpu->funcs->pm_resume(gpu);
+
 	seq_printf(m, "status:   %08x\n",
 			gpu_read(gpu, REG_A4XX_RBBM_STATUS));
+	gpu->funcs->pm_suspend(gpu);
+
 	adreno_show(gpu, m);
 
 }
@@ -535,6 +538,7 @@ static const struct adreno_gpu_funcs funcs = {
 		.last_fence = adreno_last_fence,
 		.submit = adreno_submit,
 		.flush = adreno_flush,
+		.idle = a4xx_idle,
 		.irq = a4xx_irq,
 		.destroy = a4xx_destroy,
 #ifdef CONFIG_DEBUG_FS

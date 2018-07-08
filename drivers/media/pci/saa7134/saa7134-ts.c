@@ -223,8 +223,9 @@ int saa7134_ts_init1(struct saa7134_dev *dev)
 	dev->ts.nr_packets = ts_nr_packets;
 
 	INIT_LIST_HEAD(&dev->ts_q.queue);
-	setup_timer(&dev->ts_q.timeout, saa7134_buffer_timeout,
-		    (unsigned long)(&dev->ts_q));
+	init_timer(&dev->ts_q.timeout);
+	dev->ts_q.timeout.function = saa7134_buffer_timeout;
+	dev->ts_q.timeout.data     = (unsigned long)(&dev->ts_q);
 	dev->ts_q.dev              = dev;
 	dev->ts_q.need_two         = 1;
 	dev->ts_started            = 0;

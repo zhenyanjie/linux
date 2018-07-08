@@ -45,13 +45,18 @@ static struct {
 	{ "peer_ifindex" },
 };
 
-static int veth_get_link_ksettings(struct net_device *dev,
-				   struct ethtool_link_ksettings *cmd)
+static int veth_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
-	cmd->base.speed		= SPEED_10000;
-	cmd->base.duplex	= DUPLEX_FULL;
-	cmd->base.port		= PORT_TP;
-	cmd->base.autoneg	= AUTONEG_DISABLE;
+	cmd->supported		= 0;
+	cmd->advertising	= 0;
+	ethtool_cmd_speed_set(cmd, SPEED_10000);
+	cmd->duplex		= DUPLEX_FULL;
+	cmd->port		= PORT_TP;
+	cmd->phy_address	= 0;
+	cmd->transceiver	= XCVR_INTERNAL;
+	cmd->autoneg		= AUTONEG_DISABLE;
+	cmd->maxtxpkt		= 0;
+	cmd->maxrxpkt		= 0;
 	return 0;
 }
 
@@ -90,12 +95,12 @@ static void veth_get_ethtool_stats(struct net_device *dev,
 }
 
 static const struct ethtool_ops veth_ethtool_ops = {
+	.get_settings		= veth_get_settings,
 	.get_drvinfo		= veth_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
 	.get_strings		= veth_get_strings,
 	.get_sset_count		= veth_get_sset_count,
 	.get_ethtool_stats	= veth_get_ethtool_stats,
-	.get_link_ksettings	= veth_get_link_ksettings,
 };
 
 static netdev_tx_t veth_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -329,8 +334,7 @@ static void veth_setup(struct net_device *dev)
  * netlink interface
  */
 
-static int veth_validate(struct nlattr *tb[], struct nlattr *data[],
-			 struct netlink_ext_ack *extack)
+static int veth_validate(struct nlattr *tb[], struct nlattr *data[])
 {
 	if (tb[IFLA_ADDRESS]) {
 		if (nla_len(tb[IFLA_ADDRESS]) != ETH_ALEN)
@@ -348,8 +352,7 @@ static int veth_validate(struct nlattr *tb[], struct nlattr *data[],
 static struct rtnl_link_ops veth_link_ops;
 
 static int veth_newlink(struct net *src_net, struct net_device *dev,
-			struct nlattr *tb[], struct nlattr *data[],
-			struct netlink_ext_ack *extack)
+			 struct nlattr *tb[], struct nlattr *data[])
 {
 	int err;
 	struct net_device *peer;
@@ -370,12 +373,11 @@ static int veth_newlink(struct net *src_net, struct net_device *dev,
 		ifmp = nla_data(nla_peer);
 		err = rtnl_nla_parse_ifla(peer_tb,
 					  nla_data(nla_peer) + sizeof(struct ifinfomsg),
-					  nla_len(nla_peer) - sizeof(struct ifinfomsg),
-					  NULL);
+					  nla_len(nla_peer) - sizeof(struct ifinfomsg));
 		if (err < 0)
 			return err;
 
-		err = veth_validate(peer_tb, NULL, extack);
+		err = veth_validate(peer_tb, NULL);
 		if (err < 0)
 			return err;
 
@@ -385,7 +387,7 @@ static int veth_newlink(struct net *src_net, struct net_device *dev,
 		tbp = tb;
 	}
 
-	if (ifmp && tbp[IFLA_IFNAME]) {
+	if (tbp[IFLA_IFNAME]) {
 		nla_strlcpy(ifname, tbp[IFLA_IFNAME], IFNAMSIZ);
 		name_assign_type = NET_NAME_USER;
 	} else {
@@ -404,7 +406,7 @@ static int veth_newlink(struct net *src_net, struct net_device *dev,
 		return PTR_ERR(peer);
 	}
 
-	if (!ifmp || !tbp[IFLA_ADDRESS])
+	if (tbp[IFLA_ADDRESS] == NULL)
 		eth_hw_addr_random(peer);
 
 	if (ifmp && (dev->ifindex != 0))

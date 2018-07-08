@@ -382,8 +382,4 @@
 #define ACPI_INIT_FUNCTION
 #endif
 
-#ifndef ACPI_STRUCT_INIT
-#define ACPI_STRUCT_INIT(field, value) value
-#endif
-
 #endif				/* __ACENV_H__ */

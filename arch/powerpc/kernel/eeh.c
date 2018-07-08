@@ -22,6 +22,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/debugfs.h>
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/list.h>
@@ -36,7 +37,7 @@
 #include <linux/of.h>
 
 #include <linux/atomic.h>
-#include <asm/debugfs.h>
+#include <asm/debug.h>
 #include <asm/eeh.h>
 #include <asm/eeh_event.h>
 #include <asm/io.h>
@@ -1017,10 +1018,6 @@ int eeh_init(void)
 		return -EEXIST;
 	} else if ((ret = eeh_ops->init()))
 		return ret;
-
-	/* Initialize PHB PEs */
-	list_for_each_entry_safe(hose, tmp, &hose_list, list_node)
-		eeh_dev_phb_init_dynamic(hose);
 
 	/* Initialize EEH event */
 	ret = eeh_event_init();

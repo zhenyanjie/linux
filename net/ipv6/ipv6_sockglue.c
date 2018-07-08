@@ -242,6 +242,7 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 			pktopt = xchg(&np->pktoptions, NULL);
 			kfree_skb(pktopt);
 
+			sk->sk_destruct = inet_sock_destruct;
 			/*
 			 * ... and add it to the refcnt debug socks count
 			 * in the new family. -acme
@@ -504,7 +505,7 @@ sticky_done:
 			break;
 
 		memset(opt, 0, sizeof(*opt));
-		refcount_set(&opt->refcnt, 1);
+		atomic_set(&opt->refcnt, 1);
 		opt->tot_len = sizeof(*opt) + optlen;
 		retv = -EFAULT;
 		if (copy_from_user(opt+1, optval, optlen))
@@ -734,9 +735,14 @@ done:
 			retv = -ENOBUFS;
 			break;
 		}
-		gsf = memdup_user(optval, optlen);
-		if (IS_ERR(gsf)) {
-			retv = PTR_ERR(gsf);
+		gsf = kmalloc(optlen, GFP_KERNEL);
+		if (!gsf) {
+			retv = -ENOBUFS;
+			break;
+		}
+		retv = -EFAULT;
+		if (copy_from_user(gsf, optval, optlen)) {
+			kfree(gsf);
 			break;
 		}
 		/* numsrc >= (4G-140)/128 overflow in 32 bits */

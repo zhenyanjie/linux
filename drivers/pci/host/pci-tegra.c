@@ -235,7 +235,6 @@ struct tegra_msi {
 	struct irq_domain *domain;
 	unsigned long pages;
 	struct mutex lock;
-	u64 phys;
 	int irq;
 };
 
@@ -381,7 +380,7 @@ static struct tegra_pcie_bus *tegra_pcie_bus_alloc(struct tegra_pcie *pcie,
 						   unsigned int busnr)
 {
 	struct device *dev = pcie->dev;
-	pgprot_t prot = pgprot_noncached(PAGE_KERNEL);
+	pgprot_t prot = pgprot_device(PAGE_KERNEL);
 	phys_addr_t cs = pcie->cs->start;
 	struct tegra_pcie_bus *bus;
 	unsigned int i;
@@ -1449,8 +1448,9 @@ static int tegra_msi_setup_irq(struct msi_controller *chip,
 
 	irq_set_msi_desc(irq, desc);
 
-	msg.address_lo = lower_32_bits(msi->phys);
-	msg.address_hi = upper_32_bits(msi->phys);
+	msg.address_lo = virt_to_phys((void *)msi->pages);
+	/* 32 bit address only */
+	msg.address_hi = 0;
 	msg.data = hwirq;
 
 	pci_write_msi_msg(irq, &msg);
@@ -1499,6 +1499,7 @@ static int tegra_pcie_enable_msi(struct tegra_pcie *pcie)
 	const struct tegra_pcie_soc *soc = pcie->soc;
 	struct tegra_msi *msi = &pcie->msi;
 	struct device *dev = pcie->dev;
+	unsigned long base;
 	int err;
 	u32 reg;
 
@@ -1532,10 +1533,10 @@ static int tegra_pcie_enable_msi(struct tegra_pcie *pcie)
 
 	/* setup AFI/FPCI range */
 	msi->pages = __get_free_pages(GFP_KERNEL, 0);
-	msi->phys = virt_to_phys((void *)msi->pages);
+	base = virt_to_phys((void *)msi->pages);
 
-	afi_writel(pcie, msi->phys >> soc->msi_base_shift, AFI_MSI_FPCI_BAR_ST);
-	afi_writel(pcie, msi->phys, AFI_MSI_AXI_BAR_ST);
+	afi_writel(pcie, base >> soc->msi_base_shift, AFI_MSI_FPCI_BAR_ST);
+	afi_writel(pcie, base, AFI_MSI_AXI_BAR_ST);
 	/* this register is in 4K increments */
 	afi_writel(pcie, 1, AFI_MSI_BAR_SZ);
 
@@ -1961,7 +1962,7 @@ static int tegra_pcie_parse_dt(struct tegra_pcie *pcie)
 		rp->pcie = pcie;
 		rp->np = port;
 
-		rp->base = devm_pci_remap_cfg_resource(dev, &rp->regs);
+		rp->base = devm_ioremap_resource(dev, &rp->regs);
 		if (IS_ERR(rp->base))
 			return PTR_ERR(rp->base);
 
@@ -2237,7 +2238,7 @@ static int tegra_pcie_probe(struct platform_device *pdev)
 	struct pci_bus *child;
 	int err;
 
-	host = devm_pci_alloc_host_bridge(dev, sizeof(*pcie));
+	host = pci_alloc_host_bridge(sizeof(*pcie));
 	if (!host)
 		return -ENOMEM;
 
@@ -2283,15 +2284,16 @@ static int tegra_pcie_probe(struct platform_device *pdev)
 	host->busnr = pcie->busn.start;
 	host->dev.parent = &pdev->dev;
 	host->ops = &tegra_pcie_ops;
-	host->map_irq = tegra_pcie_map_irq;
-	host->swizzle_irq = pci_common_swizzle;
 
-	err = pci_scan_root_bus_bridge(host);
+	err = pci_register_host_bridge(host);
 	if (err < 0) {
 		dev_err(dev, "failed to register host: %d\n", err);
 		goto disable_msi;
 	}
 
+	pci_scan_child_bus(host->bus);
+
+	pci_fixup_irqs(pci_common_swizzle, tegra_pcie_map_irq);
 	pci_bus_size_bridges(host->bus);
 	pci_bus_assign_resources(host->bus);
 

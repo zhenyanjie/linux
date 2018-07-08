@@ -1,7 +1,7 @@
 /*
  * CPU Microcode Update Driver for Linux
  *
- * Copyright (C) 2000-2006 Tigran Aivazian <aivazian.tigran@gmail.com>
+ * Copyright (C) 2000-2006 Tigran Aivazian <tigran@aivazian.fsnet.co.uk>
  *	      2006	Shaohua Li <shaohua.li@intel.com>
  *	      2013-2016	Borislav Petkov <bp@alien8.de>
  *
@@ -122,6 +122,9 @@ static bool __init check_loader_disabled_bsp(void)
 	bool *res = &dis_ucode_ldr;
 #endif
 
+	if (!have_cpuid_p())
+		return *res;
+
 	/*
 	 * CPUID(1).ECX[31]: reserved for hypervisor use. This is still not
 	 * completely accurate as xen pv guests don't see that CPUID bit set but
@@ -163,36 +166,24 @@ bool get_builtin_firmware(struct cpio_data *cd, const char *name)
 void __init load_ucode_bsp(void)
 {
 	unsigned int cpuid_1_eax;
-	bool intel = true;
 
-	if (!have_cpuid_p())
+	if (check_loader_disabled_bsp())
 		return;
 
 	cpuid_1_eax = native_cpuid_eax(1);
 
 	switch (x86_cpuid_vendor()) {
 	case X86_VENDOR_INTEL:
-		if (x86_family(cpuid_1_eax) < 6)
-			return;
+		if (x86_family(cpuid_1_eax) >= 6)
+			load_ucode_intel_bsp();
 		break;
-
 	case X86_VENDOR_AMD:
-		if (x86_family(cpuid_1_eax) < 0x10)
-			return;
-		intel = false;
+		if (x86_family(cpuid_1_eax) >= 0x10)
+			load_ucode_amd_bsp(cpuid_1_eax);
 		break;
-
 	default:
-		return;
+		break;
 	}
-
-	if (check_loader_disabled_bsp())
-		return;
-
-	if (intel)
-		load_ucode_intel_bsp();
-	else
-		load_ucode_amd_bsp(cpuid_1_eax);
 }
 
 static bool check_loader_disabled_ap(void)
@@ -299,17 +290,6 @@ struct cpio_data find_microcode_in_initrd(const char *path, bool use_pa)
 			return (struct cpio_data){ NULL, 0, "" };
 		if (initrd_start)
 			start = initrd_start;
-	} else {
-		/*
-		 * The picture with physical addresses is a bit different: we
-		 * need to get the *physical* address to which the ramdisk was
-		 * relocated, i.e., relocated_ramdisk (not initrd_start) and
-		 * since we're running from physical addresses, we need to access
-		 * relocated_ramdisk through its *physical* address too.
-		 */
-		u64 *rr = (u64 *)__pa_nodebug(&relocated_ramdisk);
-		if (*rr)
-			start = *rr;
 	}
 
 	return find_cpio_data(path, (void *)start, size, NULL);
@@ -570,7 +550,7 @@ static struct attribute *mc_default_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group mc_attr_group = {
+static struct attribute_group mc_attr_group = {
 	.attrs			= mc_default_attrs,
 	.name			= "microcode",
 };
@@ -716,7 +696,7 @@ static struct attribute *cpu_root_microcode_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group cpu_root_microcode_group = {
+static struct attribute_group cpu_root_microcode_group = {
 	.name  = "microcode",
 	.attrs = cpu_root_microcode_attrs,
 };

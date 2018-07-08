@@ -10,8 +10,6 @@
 
 #include <stdbool.h>
 
-extern int param;
-
 extern bool do_exit;
 
 #if defined(__x86_64__) || defined(__i386__)

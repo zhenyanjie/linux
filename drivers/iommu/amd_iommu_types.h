@@ -322,7 +322,6 @@
 #define IOMMU_PTE_IW (1ULL << 62)
 
 #define DTE_FLAG_IOTLB	(1ULL << 32)
-#define DTE_FLAG_SA	(1ULL << 34)
 #define DTE_FLAG_GV	(1ULL << 55)
 #define DTE_FLAG_MASK	(0x3ffULL << 32)
 #define DTE_GLX_SHIFT	(56)
@@ -517,8 +516,6 @@ struct amd_iommu {
 
 	/* command buffer virtual address */
 	u8 *cmd_buf;
-	u32 cmd_buf_head;
-	u32 cmd_buf_tail;
 
 	/* event buffer virtual address */
 	u8 *evt_buf;
@@ -574,9 +571,7 @@ struct amd_iommu {
 
 static inline struct amd_iommu *dev_to_amd_iommu(struct device *dev)
 {
-	struct iommu_device *iommu = dev_to_iommu_device(dev);
-
-	return container_of(iommu, struct amd_iommu, iommu);
+	return container_of(dev, struct amd_iommu, iommu.dev);
 }
 
 #define ACPIHID_UID_LEN 256
@@ -615,6 +610,9 @@ extern struct list_head amd_iommu_list;
  * The indices are referenced in the protection domains
  */
 extern struct amd_iommu *amd_iommus[MAX_IOMMUS];
+
+/* Number of IOMMUs present in the system */
+extern int amd_iommus_present;
 
 /*
  * Declarations for the global list of all protection domains

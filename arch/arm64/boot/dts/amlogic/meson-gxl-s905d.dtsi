@@ -42,7 +42,6 @@
  */
 
 #include "meson-gxl.dtsi"
-#include "meson-gxl-mali.dtsi"
 
 / {
 	compatible = "amlogic,s905d", "amlogic,meson-gxl";

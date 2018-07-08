@@ -1057,7 +1057,7 @@ fail:
 
 	rtsx_write_register(chip, SD_DCMPS_CTL, DCMPS_CHANGE, 0);
 	rtsx_write_register(chip, SD_VP_CTL, PHASE_CHANGE, 0);
-	mdelay(10);
+	wait_timeout(10);
 	sd_reset_dcm(chip, tune_dir);
 	return STATUS_FAIL;
 }
@@ -5231,7 +5231,7 @@ int sd_power_off_card3v3(struct rtsx_chip *chip)
 			return STATUS_FAIL;
 		}
 
-		mdelay(50);
+		wait_timeout(50);
 	}
 
 	if (chip->asic_code) {

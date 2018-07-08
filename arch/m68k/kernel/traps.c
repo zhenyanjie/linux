@@ -1016,13 +1016,8 @@ asmlinkage void trap_c(struct frame *fp)
 			/* traced a trapping instruction on a 68020/30,
 			 * real exception will be executed afterwards.
 			 */
-			return;
-		}
-#ifdef CONFIG_MMU
-		if (fixup_exception(&fp->ptregs))
-			return;
-#endif
-		bad_super_trap(fp);
+		} else if (!handle_kernel_fault(&fp->ptregs))
+			bad_super_trap(fp);
 		return;
 	}
 

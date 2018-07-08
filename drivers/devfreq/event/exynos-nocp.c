@@ -267,11 +267,7 @@ static int exynos_nocp_probe(struct platform_device *pdev)
 	}
 	platform_set_drvdata(pdev, nocp);
 
-	ret = clk_prepare_enable(nocp->clk);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to prepare ppmu clock\n");
-		return ret;
-	}
+	clk_prepare_enable(nocp->clk);
 
 	pr_info("exynos-nocp: new NoC Probe device registered: %s\n",
 			dev_name(dev));

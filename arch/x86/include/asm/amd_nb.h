@@ -3,7 +3,6 @@
 
 #include <linux/ioport.h>
 #include <linux/pci.h>
-#include <linux/refcount.h>
 
 struct amd_nb_bus_dev_range {
 	u8 bus;
@@ -56,7 +55,7 @@ struct threshold_bank {
 	struct threshold_block	*blocks;
 
 	/* initialized to the number of CPUs on the node sharing this bank */
-	refcount_t		cpus;
+	atomic_t		cpus;
 };
 
 struct amd_northbridge {

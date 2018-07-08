@@ -47,12 +47,12 @@ STACK_SIZE  = 1 << STACK_SHIFT
 STACK_INIT = STACK_SIZE - STACK_FRAME_OVERHEAD - __PT_SIZE
 
 _TIF_WORK	= (_TIF_SIGPENDING | _TIF_NOTIFY_RESUME | _TIF_NEED_RESCHED | \
-		   _TIF_UPROBE | _TIF_GUARDED_STORAGE | _TIF_PATCH_PENDING)
+		   _TIF_UPROBE)
 _TIF_TRACE	= (_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | _TIF_SECCOMP | \
 		   _TIF_SYSCALL_TRACEPOINT)
 _CIF_WORK	= (_CIF_MCCK_PENDING | _CIF_ASCE_PRIMARY | \
 		   _CIF_ASCE_SECONDARY | _CIF_FPU)
-_PIF_WORK	= (_PIF_PER_TRAP | _PIF_SYSCALL_RESTART)
+_PIF_WORK	= (_PIF_PER_TRAP)
 
 #define BASED(name) name-cleanup_critical(%r13)
 
@@ -189,6 +189,8 @@ ENTRY(__switch_to)
 	stg	%r3,__LC_CURRENT		# store task struct of next
 	stg	%r15,__LC_KERNEL_STACK		# store end of kernel stack
 	lg	%r15,__THREAD_ksp(%r1)		# load kernel stack of next
+	/* c4 is used in guest detection: arch/s390/kernel/perf_cpum_sf.c */
+	lctl	%c4,%c4,__TASK_pid(%r3)		# load pid to control reg. 4
 	mvc	__LC_CURRENT_PID(4,%r0),__TASK_pid(%r3) # store pid of next
 	lmg	%r6,%r15,__SF_GPRS(%r15)	# load gprs of next task
 	TSTMSK	__LC_MACHINE_FLAGS,MACHINE_FLAG_LPP
@@ -225,7 +227,6 @@ ENTRY(sie64a)
 	jnz	.Lsie_skip
 	TSTMSK	__LC_CPU_FLAGS,_CIF_FPU
 	jo	.Lsie_skip			# exit if fp/vx regs changed
-.Lsie_entry:
 	sie	0(%r14)
 .Lsie_skip:
 	ni	__SIE_PROG0C+3(%r14),0xfe	# no longer in SIE
@@ -335,23 +336,12 @@ ENTRY(system_call)
 	jo	.Lsysc_mcck_pending
 	TSTMSK	__TI_flags(%r12),_TIF_NEED_RESCHED
 	jo	.Lsysc_reschedule
-	TSTMSK	__PT_FLAGS(%r11),_PIF_SYSCALL_RESTART
-	jo	.Lsysc_syscall_restart
 #ifdef CONFIG_UPROBES
 	TSTMSK	__TI_flags(%r12),_TIF_UPROBE
 	jo	.Lsysc_uprobe_notify
 #endif
-	TSTMSK	__TI_flags(%r12),_TIF_GUARDED_STORAGE
-	jo	.Lsysc_guarded_storage
 	TSTMSK	__PT_FLAGS(%r11),_PIF_PER_TRAP
 	jo	.Lsysc_singlestep
-#ifdef CONFIG_LIVEPATCH
-	TSTMSK	__TI_flags(%r12),_TIF_PATCH_PENDING
-	jo	.Lsysc_patch_pending	# handle live patching just before
-					# signals and possible syscall restart
-#endif
-	TSTMSK	__PT_FLAGS(%r11),_PIF_SYSCALL_RESTART
-	jo	.Lsysc_syscall_restart
 	TSTMSK	__TI_flags(%r12),_TIF_SIGPENDING
 	jo	.Lsysc_sigpending
 	TSTMSK	__TI_flags(%r12),_TIF_NOTIFY_RESUME
@@ -427,23 +417,6 @@ ENTRY(system_call)
 #endif
 
 #
-# _TIF_GUARDED_STORAGE is set, call guarded_storage_load
-#
-.Lsysc_guarded_storage:
-	lgr	%r2,%r11		# pass pointer to pt_regs
-	larl	%r14,.Lsysc_return
-	jg	gs_load_bc_cb
-#
-# _TIF_PATCH_PENDING is set, call klp_update_patch_state
-#
-#ifdef CONFIG_LIVEPATCH
-.Lsysc_patch_pending:
-	lg	%r2,__LC_CURRENT	# pass pointer to task struct
-	larl	%r14,.Lsysc_return
-	jg	klp_update_patch_state
-#endif
-
-#
 # _PIF_PER_TRAP is set, call do_per_trap
 #
 .Lsysc_singlestep:
@@ -451,15 +424,6 @@ ENTRY(system_call)
 	lgr	%r2,%r11		# pass pointer to pt_regs
 	larl	%r14,.Lsysc_return
 	jg	do_per_trap
-
-#
-# _PIF_SYSCALL_RESTART is set, repeat the current system call
-#
-.Lsysc_syscall_restart:
-	ni	__PT_FLAGS+7(%r11),255-_PIF_SYSCALL_RESTART
-	lmg	%r1,%r7,__PT_R1(%r11)	# load svc arguments
-	lg	%r2,__PT_ORIG_GPR2(%r11)
-	j	.Lsysc_do_svc
 
 #
 # call tracehook_report_syscall_entry/tracehook_report_syscall_exit before
@@ -521,15 +485,12 @@ ENTRY(pgm_check_handler)
 	tmhh	%r8,0x0001		# test problem state bit
 	jnz	2f			# -> fault in user space
 #if IS_ENABLED(CONFIG_KVM)
-	# cleanup critical section for program checks in sie64a
+	# cleanup critical section for sie64a
 	lgr	%r14,%r9
 	slg	%r14,BASED(.Lsie_critical_start)
 	clg	%r14,BASED(.Lsie_critical_length)
 	jhe	0f
-	lg	%r14,__SF_EMPTY(%r15)		# get control block pointer
-	ni	__SIE_PROG0C+3(%r14),0xfe	# no longer in SIE
-	lctlg	%c1,%c1,__LC_USER_ASCE		# load primary asce
-	larl	%r9,sie_exit			# skip forward to sie_exit
+	brasl	%r14,.Lcleanup_sie
 #endif
 0:	tmhh	%r8,0x4000		# PER bit set in old PSW ?
 	jnz	1f			# -> enabled, can't be a double fault
@@ -707,16 +668,10 @@ ENTRY(io_int_handler)
 	jo	.Lio_mcck_pending
 	TSTMSK	__TI_flags(%r12),_TIF_NEED_RESCHED
 	jo	.Lio_reschedule
-#ifdef CONFIG_LIVEPATCH
-	TSTMSK	__TI_flags(%r12),_TIF_PATCH_PENDING
-	jo	.Lio_patch_pending
-#endif
 	TSTMSK	__TI_flags(%r12),_TIF_SIGPENDING
 	jo	.Lio_sigpending
 	TSTMSK	__TI_flags(%r12),_TIF_NOTIFY_RESUME
 	jo	.Lio_notify_resume
-	TSTMSK	__TI_flags(%r12),_TIF_GUARDED_STORAGE
-	jo	.Lio_guarded_storage
 	TSTMSK	__LC_CPU_FLAGS,_CIF_FPU
 	jo	.Lio_vxrs
 	TSTMSK	__LC_CPU_FLAGS,(_CIF_ASCE_PRIMARY|_CIF_ASCE_SECONDARY)
@@ -751,18 +706,6 @@ ENTRY(io_int_handler)
 	jg	load_fpu_regs
 
 #
-# _TIF_GUARDED_STORAGE is set, call guarded_storage_load
-#
-.Lio_guarded_storage:
-	# TRACE_IRQS_ON already done at .Lio_return
-	ssm	__LC_SVC_NEW_PSW	# reenable interrupts
-	lgr	%r2,%r11		# pass pointer to pt_regs
-	brasl	%r14,gs_load_bc_cb
-	ssm	__LC_PGM_NEW_PSW	# disable I/O and ext. interrupts
-	TRACE_IRQS_OFF
-	j	.Lio_return
-
-#
 # _TIF_NEED_RESCHED is set, call schedule
 #
 .Lio_reschedule:
@@ -772,16 +715,6 @@ ENTRY(io_int_handler)
 	ssm	__LC_PGM_NEW_PSW	# disable I/O and ext. interrupts
 	TRACE_IRQS_OFF
 	j	.Lio_return
-
-#
-# _TIF_PATCH_PENDING is set, call klp_update_patch_state
-#
-#ifdef CONFIG_LIVEPATCH
-.Lio_patch_pending:
-	lg	%r2,__LC_CURRENT	# pass pointer to task struct
-	larl	%r14,.Lio_return
-	jg	klp_update_patch_state
-#endif
 
 #
 # _TIF_SIGPENDING or is set, call do_signal
@@ -898,7 +831,9 @@ ENTRY(save_fpu_regs)
 	oi	__LC_CPU_FLAGS+7,_CIF_FPU
 	br	%r14
 .Lsave_fpu_regs_end:
+#if IS_ENABLED(CONFIG_KVM)
 EXPORT_SYMBOL(save_fpu_regs)
+#endif
 
 /*
  * Load floating-point controls and floating-point or vector registers.
@@ -1126,13 +1061,7 @@ cleanup_critical:
 	.quad	.Lsie_done
 
 .Lcleanup_sie:
-	cghi    %r11,__LC_SAVE_AREA_ASYNC 	#Is this in normal interrupt?
-	je      1f
-	slg     %r9,BASED(.Lsie_crit_mcck_start)
-	clg     %r9,BASED(.Lsie_crit_mcck_length)
-	jh      1f
-	oi      __LC_CPU_FLAGS+7, _CIF_MCCK_GUEST
-1:	lg	%r9,__SF_EMPTY(%r15)		# get control block pointer
+	lg	%r9,__SF_EMPTY(%r15)		# get control block pointer
 	ni	__SIE_PROG0C+3(%r9),0xfe	# no longer in SIE
 	lctlg	%c1,%c1,__LC_USER_ASCE		# load primary asce
 	larl	%r9,sie_exit			# skip forward to sie_exit
@@ -1317,10 +1246,6 @@ cleanup_critical:
 	.quad	.Lsie_gmap
 .Lsie_critical_length:
 	.quad	.Lsie_done - .Lsie_gmap
-.Lsie_crit_mcck_start:
-	.quad   .Lsie_entry
-.Lsie_crit_mcck_length:
-	.quad   .Lsie_skip - .Lsie_entry
 #endif
 
 	.section .rodata, "a"

@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/uaccess.h>
 #include <uapi/asm-generic/errno-base.h>
+#include <linux/slab.h>
 
 #include <linux/lwip/lwip/sockets.h>
 #include <linux/lwip/lwip/tcpip.h>

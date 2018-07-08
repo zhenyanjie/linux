@@ -587,13 +587,15 @@ static s32 update_attrib(struct adapter *padapter, struct sk_buff *pkt, struct p
 	}
 
 	RT_TRACE(_module_rtl871x_xmit_c_, _drv_info_,
-		 ("update_attrib: encrypt=%d\n", pattrib->encrypt));
+		 ("update_attrib: encrypt=%d  securitypriv.sw_encrypt=%d\n",
+		  pattrib->encrypt, padapter->securitypriv.sw_encrypt));
 
-	if (pattrib->encrypt && !psecuritypriv->hw_decrypted) {
+	if (pattrib->encrypt &&
+	    (padapter->securitypriv.sw_encrypt || !psecuritypriv->hw_decrypted)) {
 		pattrib->bswenc = true;
 		RT_TRACE(_module_rtl871x_xmit_c_, _drv_err_,
-			 ("update_attrib: encrypt=%d bswenc = true\n",
-			  pattrib->encrypt));
+			 ("update_attrib: encrypt=%d securitypriv.hw_decrypted=%d bswenc = true\n",
+			  pattrib->encrypt, padapter->securitypriv.sw_encrypt));
 	} else {
 		pattrib->bswenc = false;
 		RT_TRACE(_module_rtl871x_xmit_c_, _drv_info_, ("update_attrib: bswenc = false\n"));
@@ -1139,8 +1141,9 @@ s32 rtw_put_snap(u8 *data, u16 h_proto)
 
 void rtw_update_protection(struct adapter *padapter, u8 *ie, uint ie_len)
 {
-	uint	protection, erp_len;
+	uint	protection;
 	u8	*perp;
+	int	 erp_len;
 	struct	xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct	registry_priv *pregistrypriv = &padapter->registrypriv;
 
@@ -1760,20 +1763,20 @@ int xmitframe_enqueue_for_sleeping_sta(struct adapter *padapter, struct xmit_fra
 			switch (pattrib->priority) {
 			case 1:
 			case 2:
-				wmmps_ac = psta->uapsd_bk & BIT(0);
+				wmmps_ac = psta->uapsd_bk&BIT(0);
 				break;
 			case 4:
 			case 5:
-				wmmps_ac = psta->uapsd_vi & BIT(0);
+				wmmps_ac = psta->uapsd_vi&BIT(0);
 				break;
 			case 6:
 			case 7:
-				wmmps_ac = psta->uapsd_vo & BIT(0);
+				wmmps_ac = psta->uapsd_vo&BIT(0);
 				break;
 			case 0:
 			case 3:
 			default:
-				wmmps_ac = psta->uapsd_be & BIT(0);
+				wmmps_ac = psta->uapsd_be&BIT(0);
 				break;
 			}
 
@@ -1887,20 +1890,20 @@ void wakeup_sta_to_xmit(struct adapter *padapter, struct sta_info *psta)
 		switch (pxmitframe->attrib.priority) {
 		case 1:
 		case 2:
-			wmmps_ac = psta->uapsd_bk & BIT(1);
+			wmmps_ac = psta->uapsd_bk&BIT(1);
 			break;
 		case 4:
 		case 5:
-			wmmps_ac = psta->uapsd_vi & BIT(1);
+			wmmps_ac = psta->uapsd_vi&BIT(1);
 			break;
 		case 6:
 		case 7:
-			wmmps_ac = psta->uapsd_vo & BIT(1);
+			wmmps_ac = psta->uapsd_vo&BIT(1);
 			break;
 		case 0:
 		case 3:
 		default:
-			wmmps_ac = psta->uapsd_be & BIT(1);
+			wmmps_ac = psta->uapsd_be&BIT(1);
 			break;
 		}
 
@@ -2013,20 +2016,20 @@ void xmit_delivery_enabled_frames(struct adapter *padapter, struct sta_info *pst
 		switch (pxmitframe->attrib.priority) {
 		case 1:
 		case 2:
-			wmmps_ac = psta->uapsd_bk & BIT(1);
+			wmmps_ac = psta->uapsd_bk&BIT(1);
 			break;
 		case 4:
 		case 5:
-			wmmps_ac = psta->uapsd_vi & BIT(1);
+			wmmps_ac = psta->uapsd_vi&BIT(1);
 			break;
 		case 6:
 		case 7:
-			wmmps_ac = psta->uapsd_vo & BIT(1);
+			wmmps_ac = psta->uapsd_vo&BIT(1);
 			break;
 		case 0:
 		case 3:
 		default:
-			wmmps_ac = psta->uapsd_be & BIT(1);
+			wmmps_ac = psta->uapsd_be&BIT(1);
 			break;
 		}
 

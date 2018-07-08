@@ -1420,7 +1420,7 @@ static int cx8800_initdev(struct pci_dev *pci_dev,
 		request_module("rtc-isl1208");
 		core->i2c_rtc = i2c_new_device(&core->i2c_adap, &rtc_info);
 	}
-		/* fall-through */
+		/* break intentionally omitted */
 	case CX88_BOARD_DVICO_FUSIONHDTV_5_PCI_NANO:
 		request_module("ir-kbd-i2c");
 	}
@@ -1435,7 +1435,7 @@ static int cx8800_initdev(struct pci_dev *pci_dev,
 
 	/* initial device configuration */
 	mutex_lock(&core->lock);
-	cx88_set_tvnorm(core, V4L2_STD_NTSC_M);
+	cx88_set_tvnorm(core, core->tvnorm);
 	v4l2_ctrl_handler_setup(&core->video_hdl);
 	v4l2_ctrl_handler_setup(&core->audio_hdl);
 	cx88_video_mux(core, 0);

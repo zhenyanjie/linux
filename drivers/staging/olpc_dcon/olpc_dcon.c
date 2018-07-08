@@ -290,7 +290,7 @@ static void dcon_source_switch(struct work_struct *work)
 
 	switch (source) {
 	case DCON_SOURCE_CPU:
-		pr_info("%s to CPU\n", __func__);
+		pr_info("dcon_source_switch to CPU\n");
 		/* Enable the scanline interrupt bit */
 		if (dcon_write(dcon, DCON_REG_MODE,
 			       dcon->disp_mode | MODE_SCAN_INT))
@@ -330,7 +330,7 @@ static void dcon_source_switch(struct work_struct *work)
 	{
 		ktime_t delta_t;
 
-		pr_info("%s to DCON\n", __func__);
+		pr_info("dcon_source_switch to DCON\n");
 
 		/* Clear DCONLOAD - this implies that the DCON is in control */
 		pdata->set_dconload(0);

@@ -245,8 +245,10 @@ static int i2c_mux_pinctrl_probe(struct platform_device *pdev)
 				(mux->pdata->base_bus_num + i) : 0;
 
 		ret = i2c_mux_add_adapter(muxc, bus, i, 0);
-		if (ret)
+		if (ret) {
+			dev_err(&pdev->dev, "Failed to add adapter %d\n", i);
 			goto err_del_adapter;
+		}
 	}
 
 	return 0;

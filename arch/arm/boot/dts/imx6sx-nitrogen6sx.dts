@@ -296,7 +296,7 @@
 &pcie {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie>;
-	reset-gpio = <&gpio4 10 GPIO_ACTIVE_LOW>;
+	reset-gpio = <&gpio4 10 GPIO_ACTIVE_HIGH>;
 	status = "okay";
 };
 
@@ -374,7 +374,7 @@
 	cap-sdio-irq;
 	status = "okay";
 
-	brcmf: wifi@1 {
+	brcmf: bcrmf@1 {
 		reg = <1>;
 		compatible = "brcm,bcm4329-fmac";
 		interrupt-parent = <&gpio7>;

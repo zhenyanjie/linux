@@ -30,9 +30,6 @@
 
 #define COUNTER_SHIFT		16
 
-#undef pr_fmt
-#define pr_fmt(fmt)	"amd_uncore: " fmt
-
 static int num_counters_llc;
 static int num_counters_nb;
 
@@ -512,34 +509,51 @@ static int __init amd_uncore_init(void)
 	int ret = -ENODEV;
 
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
-		return -ENODEV;
+		goto fail_nodev;
+
+	switch(boot_cpu_data.x86) {
+		case 23:
+			/* Family 17h: */
+			num_counters_nb = NUM_COUNTERS_NB;
+			num_counters_llc = NUM_COUNTERS_L3;
+			/*
+			 * For Family17h, the NorthBridge counters are
+			 * re-purposed as Data Fabric counters. Also, support is
+			 * added for L3 counters. The pmus are exported based on
+			 * family as either L2 or L3 and NB or DF.
+			 */
+			amd_nb_pmu.name = "amd_df";
+			amd_llc_pmu.name = "amd_l3";
+			format_attr_event_df.show = &event_show_df;
+			format_attr_event_l3.show = &event_show_l3;
+			break;
+		case 22:
+			/* Family 16h - may change: */
+			num_counters_nb = NUM_COUNTERS_NB;
+			num_counters_llc = NUM_COUNTERS_L2;
+			amd_nb_pmu.name = "amd_nb";
+			amd_llc_pmu.name = "amd_l2";
+			format_attr_event_df = format_attr_event;
+			format_attr_event_l3 = format_attr_event;
+			break;
+		default:
+			/*
+			 * All prior families have the same number of
+			 * NorthBridge and Last Level Cache counters
+			 */
+			num_counters_nb = NUM_COUNTERS_NB;
+			num_counters_llc = NUM_COUNTERS_L2;
+			amd_nb_pmu.name = "amd_nb";
+			amd_llc_pmu.name = "amd_l2";
+			format_attr_event_df = format_attr_event;
+			format_attr_event_l3 = format_attr_event;
+			break;
+	}
+	amd_nb_pmu.attr_groups = amd_uncore_attr_groups_df;
+	amd_llc_pmu.attr_groups = amd_uncore_attr_groups_l3;
 
 	if (!boot_cpu_has(X86_FEATURE_TOPOEXT))
-		return -ENODEV;
-
-	if (boot_cpu_data.x86 == 0x17) {
-		/*
-		 * For F17h, the Northbridge counters are repurposed as Data
-		 * Fabric counters. Also, L3 counters are supported too. The PMUs
-		 * are exported based on  family as either L2 or L3 and NB or DF.
-		 */
-		num_counters_nb		  = NUM_COUNTERS_NB;
-		num_counters_llc	  = NUM_COUNTERS_L3;
-		amd_nb_pmu.name		  = "amd_df";
-		amd_llc_pmu.name	  = "amd_l3";
-		format_attr_event_df.show = &event_show_df;
-		format_attr_event_l3.show = &event_show_l3;
-	} else {
-		num_counters_nb		  = NUM_COUNTERS_NB;
-		num_counters_llc	  = NUM_COUNTERS_L2;
-		amd_nb_pmu.name		  = "amd_nb";
-		amd_llc_pmu.name	  = "amd_l2";
-		format_attr_event_df	  = format_attr_event;
-		format_attr_event_l3	  = format_attr_event;
-	}
-
-	amd_nb_pmu.attr_groups	= amd_uncore_attr_groups_df;
-	amd_llc_pmu.attr_groups = amd_uncore_attr_groups_l3;
+		goto fail_nodev;
 
 	if (boot_cpu_has(X86_FEATURE_PERFCTR_NB)) {
 		amd_uncore_nb = alloc_percpu(struct amd_uncore *);
@@ -551,7 +565,7 @@ static int __init amd_uncore_init(void)
 		if (ret)
 			goto fail_nb;
 
-		pr_info("AMD NB counters detected\n");
+		pr_info("perf: AMD NB counters detected\n");
 		ret = 0;
 	}
 
@@ -565,7 +579,7 @@ static int __init amd_uncore_init(void)
 		if (ret)
 			goto fail_llc;
 
-		pr_info("AMD LLC counters detected\n");
+		pr_info("perf: AMD LLC counters detected\n");
 		ret = 0;
 	}
 
@@ -601,6 +615,7 @@ fail_nb:
 	if (amd_uncore_nb)
 		free_percpu(amd_uncore_nb);
 
+fail_nodev:
 	return ret;
 }
 device_initcall(amd_uncore_init);

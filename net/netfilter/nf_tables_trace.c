@@ -169,7 +169,7 @@ void nft_trace_notify(struct nft_traceinfo *info)
 	struct nlmsghdr *nlh;
 	struct sk_buff *skb;
 	unsigned int size;
-	u16 event;
+	int event = (NFNL_SUBSYS_NFTABLES << 8) | NFT_MSG_TRACE;
 
 	if (!nfnetlink_has_listeners(nft_net(pkt), NFNLGRP_NFTRACE))
 		return;
@@ -198,7 +198,6 @@ void nft_trace_notify(struct nft_traceinfo *info)
 	if (!skb)
 		return;
 
-	event = nfnl_msg_type(NFNL_SUBSYS_NFTABLES, NFT_MSG_TRACE);
 	nlh = nlmsg_put(skb, 0, 0, event, sizeof(struct nfgenmsg), 0);
 	if (!nlh)
 		goto nla_put_failure;

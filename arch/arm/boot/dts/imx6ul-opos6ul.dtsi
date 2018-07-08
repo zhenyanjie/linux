@@ -120,7 +120,7 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	brcmf: wifi@1 {
+	brcmf: bcrmf@1 {
 		compatible = "brcm,bcm4329-fmac";
 		reg = <1>;
 		interrupt-parent = <&gpio2>;

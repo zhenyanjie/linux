@@ -119,7 +119,6 @@ struct efx_ef10_filter_table {
 	bool mc_promisc;
 /* Whether in multicast promiscuous mode when last changed */
 	bool mc_promisc_last;
-	bool mc_overflow; /* Too many MC addrs; should always imply mc_promisc */
 	bool vlan_filter;
 	struct list_head vlan_list;
 };
@@ -5058,14 +5057,12 @@ static void efx_ef10_filter_mc_addr_list(struct efx_nic *efx)
 	struct netdev_hw_addr *mc;
 	unsigned int i;
 
-	table->mc_overflow = false;
 	table->mc_promisc = !!(net_dev->flags & (IFF_PROMISC | IFF_ALLMULTI));
 
 	i = 0;
 	netdev_for_each_mc_addr(mc, net_dev) {
 		if (i >= EFX_EF10_FILTER_DEV_MC_MAX) {
 			table->mc_promisc = true;
-			table->mc_overflow = true;
 			break;
 		}
 		ether_addr_copy(table->dev_mc_list[i].addr, mc->addr);
@@ -5103,7 +5100,6 @@ static int efx_ef10_filter_insert_addr_list(struct efx_nic *efx,
 
 	/* Insert/renew filters */
 	for (i = 0; i < addr_count; i++) {
-		EFX_WARN_ON_PARANOID(ids[i] != EFX_EF10_FILTER_ID_INVALID);
 		efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO, filter_flags, 0);
 		efx_filter_set_eth_local(&spec, vlan->vid, addr_list[i].addr);
 		rc = efx_ef10_filter_insert(efx, &spec, true);
@@ -5121,11 +5117,11 @@ static int efx_ef10_filter_insert_addr_list(struct efx_nic *efx,
 				}
 				return rc;
 			} else {
-				/* keep invalid ID, and carry on */
+				/* mark as not inserted, and carry on */
+				rc = EFX_EF10_FILTER_ID_INVALID;
 			}
-		} else {
-			ids[i] = efx_ef10_filter_get_unsafe_id(rc);
 		}
+		ids[i] = efx_ef10_filter_get_unsafe_id(rc);
 	}
 
 	if (multicast && rollback) {
@@ -5471,15 +5467,12 @@ static void efx_ef10_filter_vlan_sync_rx_mode(struct efx_nic *efx,
 			}
 		} else {
 			/* If we failed to insert promiscuous filters, don't
-			 * rollback.  Regardless, also insert the mc_list,
-			 * unless it's incomplete due to overflow
+			 * rollback.  Regardless, also insert the mc_list
 			 */
 			efx_ef10_filter_insert_def(efx, vlan,
 						   EFX_ENCAP_TYPE_NONE,
 						   true, false);
-			if (!table->mc_overflow)
-				efx_ef10_filter_insert_addr_list(efx, vlan,
-								 true, false);
+			efx_ef10_filter_insert_addr_list(efx, vlan, true, false);
 		}
 	} else {
 		/* If any filters failed to insert, rollback and fall back to
@@ -6067,7 +6060,6 @@ static int efx_ef10_ptp_set_ts_config(struct efx_nic *efx,
 	case HWTSTAMP_FILTER_PTP_V2_EVENT:
 	case HWTSTAMP_FILTER_PTP_V2_SYNC:
 	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
-	case HWTSTAMP_FILTER_NTP_ALL:
 		init->rx_filter = HWTSTAMP_FILTER_ALL;
 		rc = efx_ptp_change_mode(efx, true, 0);
 		if (!rc)

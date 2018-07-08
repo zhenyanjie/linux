@@ -219,9 +219,6 @@ static int nfsd4_scsi_identify_device(struct block_device *bdev,
 	u8 *buf, *d, type, assoc;
 	int error;
 
-	if (WARN_ON_ONCE(!blk_queue_scsi_passthrough(q)))
-		return -EINVAL;
-
 	buf = kzalloc(bufflen, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
@@ -232,6 +229,7 @@ static int nfsd4_scsi_identify_device(struct block_device *bdev,
 		goto out_free_buf;
 	}
 	req = scsi_req(rq);
+	scsi_req_init(rq);
 
 	error = blk_rq_map_kern(q, rq, buf, bufflen, GFP_KERNEL);
 	if (error)
@@ -244,11 +242,10 @@ static int nfsd4_scsi_identify_device(struct block_device *bdev,
 	req->cmd[4] = bufflen & 0xff;
 	req->cmd_len = COMMAND_SIZE(INQUIRY);
 
-	blk_execute_rq(rq->q, NULL, rq, 1);
-	if (req->result) {
+	error = blk_execute_rq(rq->q, NULL, rq, 1);
+	if (error) {
 		pr_err("pNFS: INQUIRY 0x83 failed with: %x\n",
-			req->result);
-		error = -EIO;
+			rq->errors);
 		goto out_put_request;
 	}
 

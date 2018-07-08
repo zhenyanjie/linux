@@ -417,7 +417,7 @@ static void srpt_mgmt_method_get(struct srpt_port *sp, struct ib_mad *rq_mad,
 static void srpt_mad_send_handler(struct ib_mad_agent *mad_agent,
 				  struct ib_mad_send_wc *mad_wc)
 {
-	rdma_destroy_ah(mad_wc->send_buf->ah);
+	ib_destroy_ah(mad_wc->send_buf->ah);
 	ib_free_send_mad(mad_wc->send_buf);
 }
 
@@ -481,7 +481,7 @@ static void srpt_mad_recv_handler(struct ib_mad_agent *mad_agent,
 	ib_free_send_mad(rsp);
 
 err_rsp:
-	rdma_destroy_ah(ah);
+	ib_destroy_ah(ah);
 err:
 	ib_free_recv_mad(mad_wc);
 }
@@ -1157,8 +1157,8 @@ static int srpt_abort_cmd(struct srpt_send_ioctx *ioctx)
 	}
 	spin_unlock_irqrestore(&ioctx->spinlock, flags);
 
-	pr_debug("Aborting cmd with state %d -> %d and tag %lld\n", state,
-		 ioctx->state, ioctx->cmd.tag);
+	pr_debug("Aborting cmd with state %d and tag %lld\n", state,
+		 ioctx->cmd.tag);
 
 	switch (state) {
 	case SRPT_STATE_NEW:
@@ -2302,8 +2302,12 @@ static void srpt_queue_response(struct se_cmd *cmd)
 	}
 	spin_unlock_irqrestore(&ioctx->spinlock, flags);
 
-	if (unlikely(WARN_ON_ONCE(state == SRPT_STATE_CMD_RSP_SENT)))
+	if (unlikely(transport_check_aborted_status(&ioctx->cmd, false)
+		     || WARN_ON_ONCE(state == SRPT_STATE_CMD_RSP_SENT))) {
+		atomic_inc(&ch->req_lim_delta);
+		srpt_abort_cmd(ioctx);
 		return;
+	}
 
 	/* For read commands, transfer the data to the initiator. */
 	if (ioctx->cmd.data_direction == DMA_FROM_DEVICE &&
@@ -2685,8 +2689,7 @@ static void srpt_release_cmd(struct se_cmd *se_cmd)
 	struct srpt_rdma_ch *ch = ioctx->ch;
 	unsigned long flags;
 
-	WARN_ON_ONCE(ioctx->state != SRPT_STATE_DONE &&
-		     !(ioctx->cmd.transport_state & CMD_T_ABORTED));
+	WARN_ON(ioctx->state != SRPT_STATE_DONE);
 
 	if (ioctx->n_rw_ctx) {
 		srpt_free_rw_ctxs(ch, ioctx);

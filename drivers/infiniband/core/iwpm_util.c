@@ -472,14 +472,12 @@ int iwpm_parse_nlmsg(struct netlink_callback *cb, int policy_max,
 	int ret;
 	const char *err_str = "";
 
-	ret = nlmsg_validate(cb->nlh, nlh_len, policy_max - 1, nlmsg_policy,
-			     NULL);
+	ret = nlmsg_validate(cb->nlh, nlh_len, policy_max-1, nlmsg_policy);
 	if (ret) {
 		err_str = "Invalid attribute";
 		goto parse_nlmsg_error;
 	}
-	ret = nlmsg_parse(cb->nlh, nlh_len, nltb, policy_max - 1,
-			  nlmsg_policy, NULL);
+	ret = nlmsg_parse(cb->nlh, nlh_len, nltb, policy_max-1, nlmsg_policy);
 	if (ret) {
 		err_str = "Unable to parse the nlmsg";
 		goto parse_nlmsg_error;

@@ -20,6 +20,8 @@
 #include <linux/reset.h>
 #include <linux/interrupt.h>
 
+#define MAX_MCI_SLOTS	2
+
 enum dw_mci_state {
 	STATE_IDLE = 0,
 	STATE_SENDING_CMD,
@@ -132,6 +134,7 @@ struct dw_mci_dma_slave {
  * =======
  *
  * @lock is a softirq-safe spinlock protecting @queue as well as
+ * @cur_slot, @mrq and @state. These must always be updated
  * at the same time while holding @lock.
  *
  * @irq_lock is an irq-safe spinlock protecting the INTMASK register
@@ -167,6 +170,7 @@ struct dw_mci {
 	struct scatterlist	*sg;
 	struct sg_mapping_iter	sg_miter;
 
+	struct dw_mci_slot	*cur_slot;
 	struct mmc_request	*mrq;
 	struct mmc_command	*cmd;
 	struct mmc_data		*data;
@@ -202,6 +206,7 @@ struct dw_mci {
 
 	u32			bus_hz;
 	u32			current_speed;
+	u32			num_slots;
 	u32			fifoth_val;
 	u16			verid;
 	struct device		*dev;
@@ -210,7 +215,7 @@ struct dw_mci {
 	void			*priv;
 	struct clk		*biu_clk;
 	struct clk		*ciu_clk;
-	struct dw_mci_slot	*slot;
+	struct dw_mci_slot	*slot[MAX_MCI_SLOTS];
 
 	/* FIFO push and pull */
 	int			fifo_depth;

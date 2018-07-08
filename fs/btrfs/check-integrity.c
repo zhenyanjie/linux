@@ -94,7 +94,7 @@
 #include <linux/mutex.h>
 #include <linux/genhd.h>
 #include <linux/blkdev.h>
-#include <linux/mm.h>
+#include <linux/vmalloc.h>
 #include <linux/string.h>
 #include "ctree.h"
 #include "disk-io.h"
@@ -1638,7 +1638,12 @@ static int btrfsic_read_block(struct btrfsic_state *state,
 		struct bio *bio;
 		unsigned int j;
 
-		bio = btrfs_io_bio_alloc(num_pages - i);
+		bio = btrfs_io_bio_alloc(GFP_NOFS, num_pages - i);
+		if (!bio) {
+			pr_info("btrfsic: bio_alloc() for %u pages failed!\n",
+			       num_pages - i);
+			return -1;
+		}
 		bio->bi_bdev = block_ctx->dev->bdev;
 		bio->bi_iter.bi_sector = dev_bytenr >> 9;
 		bio_set_op_attrs(bio, REQ_OP_READ, 0);
@@ -1663,8 +1668,14 @@ static int btrfsic_read_block(struct btrfsic_state *state,
 		dev_bytenr += (j - i) * PAGE_SIZE;
 		i = j;
 	}
-	for (i = 0; i < num_pages; i++)
+	for (i = 0; i < num_pages; i++) {
 		block_ctx->datav[i] = kmap(block_ctx->pagev[i]);
+		if (!block_ctx->datav[i]) {
+			pr_info("btrfsic: kmap() failed (dev %s)!\n",
+			       block_ctx->dev->name);
+			return -1;
+		}
+	}
 
 	return block_ctx->len;
 }
@@ -2118,7 +2129,7 @@ static void btrfsic_bio_end_io(struct bio *bp)
 	/* mutex is not held! This is not save if IO is not yet completed
 	 * on umount */
 	iodone_w_error = 0;
-	if (bp->bi_status)
+	if (bp->bi_error)
 		iodone_w_error = 1;
 
 	BUG_ON(NULL == block);
@@ -2132,7 +2143,7 @@ static void btrfsic_bio_end_io(struct bio *bp)
 		if ((dev_state->state->print_mask &
 		     BTRFSIC_PRINT_MASK_END_IO_BIO_BH))
 			pr_info("bio_end_io(err=%d) for %c @%llu (%s/%llu/%d)\n",
-			       bp->bi_status,
+			       bp->bi_error,
 			       btrfsic_get_block_type(dev_state->state, block),
 			       block->logical_bytenr, dev_state->name,
 			       block->dev_bytenr, block->mirror_num);
@@ -2811,47 +2822,44 @@ static void __btrfsic_submit_bio(struct bio *bio)
 	dev_state = btrfsic_dev_state_lookup(bio->bi_bdev);
 	if (NULL != dev_state &&
 	    (bio_op(bio) == REQ_OP_WRITE) && bio_has_data(bio)) {
-		unsigned int i = 0;
+		unsigned int i;
 		u64 dev_bytenr;
 		u64 cur_bytenr;
-		struct bio_vec bvec;
-		struct bvec_iter iter;
+		struct bio_vec *bvec;
 		int bio_is_patched;
 		char **mapped_datav;
-		unsigned int segs = bio_segments(bio);
 
 		dev_bytenr = 512 * bio->bi_iter.bi_sector;
 		bio_is_patched = 0;
 		if (dev_state->state->print_mask &
 		    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH)
 			pr_info("submit_bio(rw=%d,0x%x, bi_vcnt=%u, bi_sector=%llu (bytenr %llu), bi_bdev=%p)\n",
-			       bio_op(bio), bio->bi_opf, segs,
+			       bio_op(bio), bio->bi_opf, bio->bi_vcnt,
 			       (unsigned long long)bio->bi_iter.bi_sector,
 			       dev_bytenr, bio->bi_bdev);
 
-		mapped_datav = kmalloc_array(segs,
+		mapped_datav = kmalloc_array(bio->bi_vcnt,
 					     sizeof(*mapped_datav), GFP_NOFS);
 		if (!mapped_datav)
 			goto leave;
 		cur_bytenr = dev_bytenr;
 
-		bio_for_each_segment(bvec, bio, iter) {
-			BUG_ON(bvec.bv_len != PAGE_SIZE);
-			mapped_datav[i] = kmap(bvec.bv_page);
-			i++;
+		bio_for_each_segment_all(bvec, bio, i) {
+			BUG_ON(bvec->bv_len != PAGE_SIZE);
+			mapped_datav[i] = kmap(bvec->bv_page);
 
 			if (dev_state->state->print_mask &
 			    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH_VERBOSE)
 				pr_info("#%u: bytenr=%llu, len=%u, offset=%u\n",
-				       i, cur_bytenr, bvec.bv_len, bvec.bv_offset);
-			cur_bytenr += bvec.bv_len;
+				       i, cur_bytenr, bvec->bv_len, bvec->bv_offset);
+			cur_bytenr += bvec->bv_len;
 		}
 		btrfsic_process_written_block(dev_state, dev_bytenr,
-					      mapped_datav, segs,
+					      mapped_datav, bio->bi_vcnt,
 					      bio, &bio_is_patched,
 					      NULL, bio->bi_opf);
-		bio_for_each_segment(bvec, bio, iter)
-			kunmap(bvec.bv_page);
+		bio_for_each_segment_all(bvec, bio, i)
+			kunmap(bvec->bv_page);
 		kfree(mapped_datav);
 	} else if (NULL != dev_state && (bio->bi_opf & REQ_PREFLUSH)) {
 		if (dev_state->state->print_mask &
@@ -2915,10 +2923,13 @@ int btrfsic_mount(struct btrfs_fs_info *fs_info,
 		       fs_info->sectorsize, PAGE_SIZE);
 		return -1;
 	}
-	state = kvzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc(sizeof(*state), GFP_KERNEL | __GFP_NOWARN | __GFP_REPEAT);
 	if (!state) {
-		pr_info("btrfs check-integrity: allocation failed!\n");
-		return -1;
+		state = vzalloc(sizeof(*state));
+		if (!state) {
+			pr_info("btrfs check-integrity: vzalloc() failed!\n");
+			return -1;
+		}
 	}
 
 	if (!btrfsic_is_initialized) {

@@ -15,20 +15,24 @@
 #include "ccu_gate.h"
 #include "ccu_mux.h"
 
-static u16 ccu_mux_get_prediv(struct ccu_common *common,
-			      struct ccu_mux_internal *cm,
-			      int parent_index)
+void ccu_mux_helper_adjust_parent_for_prediv(struct ccu_common *common,
+					     struct ccu_mux_internal *cm,
+					     int parent_index,
+					     unsigned long *parent_rate)
 {
 	u16 prediv = 1;
 	u32 reg;
+	int i;
 
 	if (!((common->features & CCU_FEATURE_FIXED_PREDIV) ||
 	      (common->features & CCU_FEATURE_VARIABLE_PREDIV) ||
 	      (common->features & CCU_FEATURE_ALL_PREDIV)))
-		return 1;
+		return;
 
-	if (common->features & CCU_FEATURE_ALL_PREDIV)
-		return common->prediv;
+	if (common->features & CCU_FEATURE_ALL_PREDIV) {
+		*parent_rate = *parent_rate / common->prediv;
+		return;
+	}
 
 	reg = readl(common->base + common->reg);
 	if (parent_index < 0) {
@@ -36,52 +40,28 @@ static u16 ccu_mux_get_prediv(struct ccu_common *common,
 		parent_index &= (1 << cm->width) - 1;
 	}
 
-	if (common->features & CCU_FEATURE_FIXED_PREDIV) {
-		int i;
-
+	if (common->features & CCU_FEATURE_FIXED_PREDIV)
 		for (i = 0; i < cm->n_predivs; i++)
 			if (parent_index == cm->fixed_predivs[i].index)
 				prediv = cm->fixed_predivs[i].div;
-	}
 
-	if (common->features & CCU_FEATURE_VARIABLE_PREDIV) {
-		int i;
+	if (common->features & CCU_FEATURE_VARIABLE_PREDIV)
+		if (parent_index == cm->variable_prediv.index) {
+			u8 div;
 
-		for (i = 0; i < cm->n_var_predivs; i++)
-			if (parent_index == cm->var_predivs[i].index) {
-				u8 div;
+			div = reg >> cm->variable_prediv.shift;
+			div &= (1 << cm->variable_prediv.width) - 1;
+			prediv = div + 1;
+		}
 
-				div = reg >> cm->var_predivs[i].shift;
-				div &= (1 << cm->var_predivs[i].width) - 1;
-				prediv = div + 1;
-			}
-	}
-
-	return prediv;
-}
-
-unsigned long ccu_mux_helper_apply_prediv(struct ccu_common *common,
-					  struct ccu_mux_internal *cm,
-					  int parent_index,
-					  unsigned long parent_rate)
-{
-	return parent_rate / ccu_mux_get_prediv(common, cm, parent_index);
-}
-
-static unsigned long ccu_mux_helper_unapply_prediv(struct ccu_common *common,
-					    struct ccu_mux_internal *cm,
-					    int parent_index,
-					    unsigned long parent_rate)
-{
-	return parent_rate * ccu_mux_get_prediv(common, cm, parent_index);
+	*parent_rate = *parent_rate / prediv;
 }
 
 int ccu_mux_helper_determine_rate(struct ccu_common *common,
 				  struct ccu_mux_internal *cm,
 				  struct clk_rate_request *req,
 				  unsigned long (*round)(struct ccu_mux_internal *,
-							 struct clk_hw *,
-							 unsigned long *,
+							 unsigned long,
 							 unsigned long,
 							 void *),
 				  void *data)
@@ -95,43 +75,41 @@ int ccu_mux_helper_determine_rate(struct ccu_common *common,
 
 		best_parent = clk_hw_get_parent(hw);
 		best_parent_rate = clk_hw_get_rate(best_parent);
-		adj_parent_rate = ccu_mux_helper_apply_prediv(common, cm, -1,
-							      best_parent_rate);
 
-		best_rate = round(cm, best_parent, &adj_parent_rate,
-				  req->rate, data);
+		adj_parent_rate = best_parent_rate;
+		ccu_mux_helper_adjust_parent_for_prediv(common, cm, -1,
+							&adj_parent_rate);
 
-		/*
-		 * adj_parent_rate might have been modified by our clock.
-		 * Unapply the pre-divider if there's one, and give
-		 * the actual frequency the parent needs to run at.
-		 */
-		best_parent_rate = ccu_mux_helper_unapply_prediv(common, cm, -1,
-								 adj_parent_rate);
+		best_rate = round(cm, adj_parent_rate, req->rate, data);
 
 		goto out;
 	}
 
 	for (i = 0; i < clk_hw_get_num_parents(hw); i++) {
-		unsigned long tmp_rate, parent_rate;
+		unsigned long tmp_rate, parent_rate, adj_parent_rate;
 		struct clk_hw *parent;
 
 		parent = clk_hw_get_parent_by_index(hw, i);
 		if (!parent)
 			continue;
 
-		parent_rate = ccu_mux_helper_apply_prediv(common, cm, i,
-							  clk_hw_get_rate(parent));
+		if (clk_hw_get_flags(hw) & CLK_SET_RATE_PARENT) {
+			struct clk_rate_request parent_req = *req;
+			int ret = __clk_determine_rate(parent, &parent_req);
 
-		tmp_rate = round(cm, parent, &parent_rate, req->rate, data);
+			if (ret)
+				continue;
 
-		/*
-		 * parent_rate might have been modified by our clock.
-		 * Unapply the pre-divider if there's one, and give
-		 * the actual frequency the parent needs to run at.
-		 */
-		parent_rate = ccu_mux_helper_unapply_prediv(common, cm, i,
-							    parent_rate);
+			parent_rate = parent_req.rate;
+		} else {
+			parent_rate = clk_hw_get_rate(parent);
+		}
+
+		adj_parent_rate = parent_rate;
+		ccu_mux_helper_adjust_parent_for_prediv(common, cm, i,
+							&adj_parent_rate);
+
+		tmp_rate = round(cm, adj_parent_rate, req->rate, data);
 		if (tmp_rate == req->rate) {
 			best_parent = parent;
 			best_parent_rate = parent_rate;
@@ -239,8 +217,10 @@ static unsigned long ccu_mux_recalc_rate(struct clk_hw *hw,
 {
 	struct ccu_mux *cm = hw_to_ccu_mux(hw);
 
-	return ccu_mux_helper_apply_prediv(&cm->common, &cm->mux, -1,
-					   parent_rate);
+	ccu_mux_helper_adjust_parent_for_prediv(&cm->common, &cm->mux, -1,
+						&parent_rate);
+
+	return parent_rate;
 }
 
 const struct clk_ops ccu_mux_ops = {

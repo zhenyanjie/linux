@@ -1039,7 +1039,7 @@ el3_link_ok(struct net_device *dev)
 	return tmp & (1<<11);
 }
 
-static void
+static int
 el3_netdev_get_ecmd(struct net_device *dev, struct ethtool_link_ksettings *cmd)
 {
 	u16 tmp;
@@ -1082,6 +1082,7 @@ el3_netdev_get_ecmd(struct net_device *dev, struct ethtool_link_ksettings *cmd)
 						supported);
 	cmd->base.speed = SPEED_10;
 	EL3WINDOW(1);
+	return 0;
 }
 
 static int
@@ -1150,11 +1151,12 @@ static int el3_get_link_ksettings(struct net_device *dev,
 				  struct ethtool_link_ksettings *cmd)
 {
 	struct el3_private *lp = netdev_priv(dev);
+	int ret;
 
 	spin_lock_irq(&lp->lock);
-	el3_netdev_get_ecmd(dev, cmd);
+	ret = el3_netdev_get_ecmd(dev, cmd);
 	spin_unlock_irq(&lp->lock);
-	return 0;
+	return ret;
 }
 
 static int el3_set_link_ksettings(struct net_device *dev,
@@ -1369,7 +1371,7 @@ el3_resume(struct device *pdev)
 #endif /* CONFIG_PM */
 
 module_param(debug,int, 0);
-module_param_hw_array(irq, int, irq, NULL, 0);
+module_param_array(irq, int, NULL, 0);
 module_param(max_interrupt_work, int, 0);
 MODULE_PARM_DESC(debug, "debug level (0-6)");
 MODULE_PARM_DESC(irq, "IRQ number(s) (assigned)");

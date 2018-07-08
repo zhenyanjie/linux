@@ -158,13 +158,12 @@ void arch_remove_optimized_kprobe(struct optimized_kprobe *op)
 void patch_imm32_load_insns(unsigned int val, kprobe_opcode_t *addr)
 {
 	/* addis r4,0,(insn)@h */
-	patch_instruction(addr, PPC_INST_ADDIS | ___PPC_RT(4) |
-			  ((val >> 16) & 0xffff));
-	addr++;
+	*addr++ = PPC_INST_ADDIS | ___PPC_RT(4) |
+		  ((val >> 16) & 0xffff);
 
 	/* ori r4,r4,(insn)@l */
-	patch_instruction(addr, PPC_INST_ORI | ___PPC_RA(4) |
-			  ___PPC_RS(4) | (val & 0xffff));
+	*addr = PPC_INST_ORI | ___PPC_RA(4) | ___PPC_RS(4) |
+		(val & 0xffff);
 }
 
 /*
@@ -174,28 +173,24 @@ void patch_imm32_load_insns(unsigned int val, kprobe_opcode_t *addr)
 void patch_imm64_load_insns(unsigned long val, kprobe_opcode_t *addr)
 {
 	/* lis r3,(op)@highest */
-	patch_instruction(addr, PPC_INST_ADDIS | ___PPC_RT(3) |
-			  ((val >> 48) & 0xffff));
-	addr++;
+	*addr++ = PPC_INST_ADDIS | ___PPC_RT(3) |
+		  ((val >> 48) & 0xffff);
 
 	/* ori r3,r3,(op)@higher */
-	patch_instruction(addr, PPC_INST_ORI | ___PPC_RA(3) |
-			  ___PPC_RS(3) | ((val >> 32) & 0xffff));
-	addr++;
+	*addr++ = PPC_INST_ORI | ___PPC_RA(3) | ___PPC_RS(3) |
+		  ((val >> 32) & 0xffff);
 
 	/* rldicr r3,r3,32,31 */
-	patch_instruction(addr, PPC_INST_RLDICR | ___PPC_RA(3) |
-			  ___PPC_RS(3) | __PPC_SH64(32) | __PPC_ME64(31));
-	addr++;
+	*addr++ = PPC_INST_RLDICR | ___PPC_RA(3) | ___PPC_RS(3) |
+		  __PPC_SH64(32) | __PPC_ME64(31);
 
 	/* oris r3,r3,(op)@h */
-	patch_instruction(addr, PPC_INST_ORIS | ___PPC_RA(3) |
-			  ___PPC_RS(3) | ((val >> 16) & 0xffff));
-	addr++;
+	*addr++ = PPC_INST_ORIS | ___PPC_RA(3) | ___PPC_RS(3) |
+		  ((val >> 16) & 0xffff);
 
 	/* ori r3,r3,(op)@l */
-	patch_instruction(addr, PPC_INST_ORI | ___PPC_RA(3) |
-			  ___PPC_RS(3) | (val & 0xffff));
+	*addr = PPC_INST_ORI | ___PPC_RA(3) | ___PPC_RS(3) |
+		(val & 0xffff);
 }
 
 int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
@@ -203,8 +198,7 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 	kprobe_opcode_t *buff, branch_op_callback, branch_emulate_step;
 	kprobe_opcode_t *op_callback_addr, *emulate_step_addr;
 	long b_offset;
-	unsigned long nip, size;
-	int rc, i;
+	unsigned long nip;
 
 	kprobe_ppc_optinsn_slots.insn_size = MAX_OPTINSN_SIZE;
 
@@ -237,14 +231,8 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 		goto error;
 
 	/* Setup template */
-	/* We can optimize this via patch_instruction_window later */
-	size = (TMPL_END_IDX * sizeof(kprobe_opcode_t)) / sizeof(int);
-	pr_devel("Copying template to %p, size %lu\n", buff, size);
-	for (i = 0; i < size; i++) {
-		rc = patch_instruction(buff + i, *(optprobe_template_entry + i));
-		if (rc < 0)
-			goto error;
-	}
+	memcpy(buff, optprobe_template_entry,
+			TMPL_END_IDX * sizeof(kprobe_opcode_t));
 
 	/*
 	 * Fixup the template with instructions to:
@@ -255,10 +243,10 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 	/*
 	 * 2. branch to optimized_callback() and emulate_step()
 	 */
-	op_callback_addr = (kprobe_opcode_t *)ppc_kallsyms_lookup_name("optimized_callback");
-	emulate_step_addr = (kprobe_opcode_t *)ppc_kallsyms_lookup_name("emulate_step");
+	kprobe_lookup_name("optimized_callback", op_callback_addr);
+	kprobe_lookup_name("emulate_step", emulate_step_addr);
 	if (!op_callback_addr || !emulate_step_addr) {
-		WARN(1, "Unable to lookup optimized_callback()/emulate_step()\n");
+		WARN(1, "kprobe_lookup_name() failed\n");
 		goto error;
 	}
 
@@ -273,8 +261,8 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 	if (!branch_op_callback || !branch_emulate_step)
 		goto error;
 
-	patch_instruction(buff + TMPL_CALL_HDLR_IDX, branch_op_callback);
-	patch_instruction(buff + TMPL_EMULATE_IDX, branch_emulate_step);
+	buff[TMPL_CALL_HDLR_IDX] = branch_op_callback;
+	buff[TMPL_EMULATE_IDX] = branch_emulate_step;
 
 	/*
 	 * 3. load instruction to be emulated into relevant register, and
@@ -284,7 +272,8 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 	/*
 	 * 4. branch back from trampoline
 	 */
-	patch_branch(buff + TMPL_RET_IDX, (unsigned long)nip, 0);
+	buff[TMPL_RET_IDX] = create_branch((unsigned int *)buff + TMPL_RET_IDX,
+				(unsigned long)nip, 0);
 
 	flush_icache_range((unsigned long)buff,
 			   (unsigned long)(&buff[TMPL_END_IDX]));

@@ -85,8 +85,6 @@ acpi_evaluate_object_typed(acpi_handle handle,
 {
 	acpi_status status;
 	u8 free_buffer_on_error = FALSE;
-	acpi_handle target_handle;
-	char *full_pathname;
 
 	ACPI_FUNCTION_TRACE(acpi_evaluate_object_typed);
 
@@ -100,55 +98,38 @@ acpi_evaluate_object_typed(acpi_handle handle,
 		free_buffer_on_error = TRUE;
 	}
 
-	if (pathname) {
-		status = acpi_get_handle(handle, pathname, &target_handle);
-		if (ACPI_FAILURE(status)) {
-			return_ACPI_STATUS(status);
-		}
-	} else {
-		target_handle = handle;
-	}
-
-	full_pathname = acpi_ns_get_external_pathname(target_handle);
-	if (!full_pathname) {
-		return_ACPI_STATUS(AE_NO_MEMORY);
-	}
-
 	/* Evaluate the object */
 
-	status = acpi_evaluate_object(target_handle, NULL, external_params,
-				      return_buffer);
+	status = acpi_evaluate_object(handle, pathname,
+				      external_params, return_buffer);
 	if (ACPI_FAILURE(status)) {
-		goto exit;
+		return_ACPI_STATUS(status);
 	}
 
-	/* Type ANY means "don't care about return value type" */
+	/* Type ANY means "don't care" */
 
 	if (return_type == ACPI_TYPE_ANY) {
-		goto exit;
+		return_ACPI_STATUS(AE_OK);
 	}
 
 	if (return_buffer->length == 0) {
 
 		/* Error because caller specifically asked for a return value */
 
-		ACPI_ERROR((AE_INFO, "%s did not return any object",
-			    full_pathname));
-		status = AE_NULL_OBJECT;
-		goto exit;
+		ACPI_ERROR((AE_INFO, "No return value"));
+		return_ACPI_STATUS(AE_NULL_OBJECT);
 	}
 
 	/* Examine the object type returned from evaluate_object */
 
 	if (((union acpi_object *)return_buffer->pointer)->type == return_type) {
-		goto exit;
+		return_ACPI_STATUS(AE_OK);
 	}
 
 	/* Return object type does not match requested type */
 
 	ACPI_ERROR((AE_INFO,
-		    "Incorrect return type from %s - received [%s], requested [%s]",
-		    full_pathname,
+		    "Incorrect return type [%s] requested [%s]",
 		    acpi_ut_get_type_name(((union acpi_object *)return_buffer->
 					   pointer)->type),
 		    acpi_ut_get_type_name(return_type)));
@@ -166,11 +147,7 @@ acpi_evaluate_object_typed(acpi_handle handle,
 	}
 
 	return_buffer->length = 0;
-	status = AE_TYPE;
-
-exit:
-	ACPI_FREE(full_pathname);
-	return_ACPI_STATUS(status);
+	return_ACPI_STATUS(AE_TYPE);
 }
 
 ACPI_EXPORT_SYMBOL(acpi_evaluate_object_typed)

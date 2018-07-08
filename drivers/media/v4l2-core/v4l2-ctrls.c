@@ -19,7 +19,6 @@
  */
 
 #include <linux/ctype.h>
-#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/export.h>
 #include <media/v4l2-ioctl.h>
@@ -460,8 +459,8 @@ const char * const *v4l2_ctrl_get_menu(u32 id)
 	};
 	static const char * const dv_rgb_range[] = {
 		"Automatic",
-		"RGB Limited Range (16-235)",
-		"RGB Full Range (0-255)",
+		"RGB limited range (16-235)",
+		"RGB full range (0-255)",
 		NULL,
 	};
 	static const char * const dv_it_content_type[] = {
@@ -887,7 +886,6 @@ const char *v4l2_ctrl_get_name(u32 id)
 	case V4L2_CID_PIXEL_RATE:		return "Pixel Rate";
 	case V4L2_CID_TEST_PATTERN:		return "Test Pattern";
 	case V4L2_CID_DEINTERLACING_MODE:	return "Deinterlacing Mode";
-	case V4L2_CID_DIGITAL_GAIN:		return "Digital Gain";
 
 	/* DV controls */
 	/* Keep the order of the 'case's the same as in v4l2-controls.h! */
@@ -998,10 +996,6 @@ void v4l2_ctrl_fill(u32 id, const char **name, enum v4l2_ctrl_type *type,
 		*type = V4L2_CTRL_TYPE_BOOLEAN;
 		*min = 0;
 		*max = *step = 1;
-		break;
-	case V4L2_CID_ROTATE:
-		*type = V4L2_CTRL_TYPE_INTEGER;
-		*flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
 		break;
 	case V4L2_CID_MPEG_VIDEO_MV_H_SEARCH_RANGE:
 	case V4L2_CID_MPEG_VIDEO_MV_V_SEARCH_RANGE:
@@ -1741,15 +1735,14 @@ int v4l2_ctrl_handler_init_class(struct v4l2_ctrl_handler *hdl,
 				 unsigned nr_of_controls_hint,
 				 struct lock_class_key *key, const char *name)
 {
-	mutex_init(&hdl->_lock);
 	hdl->lock = &hdl->_lock;
+	mutex_init(hdl->lock);
 	lockdep_set_class_and_name(hdl->lock, key, name);
 	INIT_LIST_HEAD(&hdl->ctrls);
 	INIT_LIST_HEAD(&hdl->ctrl_refs);
 	hdl->nr_of_buckets = 1 + nr_of_controls_hint / 8;
-	hdl->buckets = kvmalloc_array(hdl->nr_of_buckets,
-				      sizeof(hdl->buckets[0]),
-				      GFP_KERNEL | __GFP_ZERO);
+	hdl->buckets = kcalloc(hdl->nr_of_buckets, sizeof(hdl->buckets[0]),
+			       GFP_KERNEL);
 	hdl->error = hdl->buckets ? 0 : -ENOMEM;
 	return hdl->error;
 }
@@ -1776,14 +1769,13 @@ void v4l2_ctrl_handler_free(struct v4l2_ctrl_handler *hdl)
 		list_del(&ctrl->node);
 		list_for_each_entry_safe(sev, next_sev, &ctrl->ev_subs, node)
 			list_del(&sev->node);
-		kvfree(ctrl);
+		kfree(ctrl);
 	}
-	kvfree(hdl->buckets);
+	kfree(hdl->buckets);
 	hdl->buckets = NULL;
 	hdl->cached = NULL;
 	hdl->error = 0;
 	mutex_unlock(hdl->lock);
-	mutex_destroy(&hdl->_lock);
 }
 EXPORT_SYMBOL(v4l2_ctrl_handler_free);
 
@@ -2026,7 +2018,7 @@ static struct v4l2_ctrl *v4l2_ctrl_new(struct v4l2_ctrl_handler *hdl,
 		 is_array)
 		sz_extra += 2 * tot_ctrl_size;
 
-	ctrl = kvzalloc(sizeof(*ctrl) + sz_extra, GFP_KERNEL);
+	ctrl = kzalloc(sizeof(*ctrl) + sz_extra, GFP_KERNEL);
 	if (ctrl == NULL) {
 		handler_set_err(hdl, -ENOMEM);
 		return NULL;
@@ -2075,7 +2067,7 @@ static struct v4l2_ctrl *v4l2_ctrl_new(struct v4l2_ctrl_handler *hdl,
 	}
 
 	if (handler_new_ref(hdl, ctrl)) {
-		kvfree(ctrl);
+		kfree(ctrl);
 		return NULL;
 	}
 	mutex_lock(hdl->lock);
@@ -2448,16 +2440,14 @@ int v4l2_ctrl_subdev_log_status(struct v4l2_subdev *sd)
 EXPORT_SYMBOL(v4l2_ctrl_subdev_log_status);
 
 /* Call s_ctrl for all controls owned by the handler */
-int __v4l2_ctrl_handler_setup(struct v4l2_ctrl_handler *hdl)
+int v4l2_ctrl_handler_setup(struct v4l2_ctrl_handler *hdl)
 {
 	struct v4l2_ctrl *ctrl;
 	int ret = 0;
 
 	if (hdl == NULL)
 		return 0;
-
-	lockdep_assert_held(hdl->lock);
-
+	mutex_lock(hdl->lock);
 	list_for_each_entry(ctrl, &hdl->ctrls, node)
 		ctrl->done = false;
 
@@ -2482,22 +2472,7 @@ int __v4l2_ctrl_handler_setup(struct v4l2_ctrl_handler *hdl)
 		if (ret)
 			break;
 	}
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(__v4l2_ctrl_handler_setup);
-
-int v4l2_ctrl_handler_setup(struct v4l2_ctrl_handler *hdl)
-{
-	int ret;
-
-	if (hdl == NULL)
-		return 0;
-
-	mutex_lock(hdl->lock);
-	ret = __v4l2_ctrl_handler_setup(hdl);
 	mutex_unlock(hdl->lock);
-
 	return ret;
 }
 EXPORT_SYMBOL(v4l2_ctrl_handler_setup);
@@ -2845,8 +2820,8 @@ int v4l2_g_ext_ctrls(struct v4l2_ctrl_handler *hdl, struct v4l2_ext_controls *cs
 		return class_check(hdl, cs->which);
 
 	if (cs->count > ARRAY_SIZE(helper)) {
-		helpers = kvmalloc_array(cs->count, sizeof(helper[0]),
-					 GFP_KERNEL);
+		helpers = kmalloc_array(cs->count, sizeof(helper[0]),
+					GFP_KERNEL);
 		if (helpers == NULL)
 			return -ENOMEM;
 	}
@@ -2898,7 +2873,7 @@ int v4l2_g_ext_ctrls(struct v4l2_ctrl_handler *hdl, struct v4l2_ext_controls *cs
 	}
 
 	if (cs->count > ARRAY_SIZE(helper))
-		kvfree(helpers);
+		kfree(helpers);
 	return ret;
 }
 EXPORT_SYMBOL(v4l2_g_ext_ctrls);
@@ -3100,8 +3075,8 @@ static int try_set_ext_ctrls(struct v4l2_fh *fh, struct v4l2_ctrl_handler *hdl,
 		return class_check(hdl, cs->which);
 
 	if (cs->count > ARRAY_SIZE(helper)) {
-		helpers = kvmalloc_array(cs->count, sizeof(helper[0]),
-					 GFP_KERNEL);
+		helpers = kmalloc_array(cs->count, sizeof(helper[0]),
+					GFP_KERNEL);
 		if (!helpers)
 			return -ENOMEM;
 	}
@@ -3178,7 +3153,7 @@ static int try_set_ext_ctrls(struct v4l2_fh *fh, struct v4l2_ctrl_handler *hdl,
 	}
 
 	if (cs->count > ARRAY_SIZE(helper))
-		kvfree(helpers);
+		kfree(helpers);
 	return ret;
 }
 

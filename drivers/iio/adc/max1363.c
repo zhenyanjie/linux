@@ -1007,7 +1007,7 @@ static struct attribute *max1363_event_attributes[] = {
 	NULL,
 };
 
-static const struct attribute_group max1363_event_attribute_group = {
+static struct attribute_group max1363_event_attribute_group = {
 	.attrs = max1363_event_attributes,
 };
 

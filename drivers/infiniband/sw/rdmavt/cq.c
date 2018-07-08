@@ -50,7 +50,6 @@
 #include <linux/kthread.h>
 #include "cq.h"
 #include "vt.h"
-#include "trace.h"
 
 /**
  * rvt_cq_enter - add a new entry to the completion queue
@@ -94,7 +93,6 @@ void rvt_cq_enter(struct rvt_cq *cq, struct ib_wc *entry, bool solicited)
 		}
 		return;
 	}
-	trace_rvt_cq_enter(cq, entry, head);
 	if (cq->ip) {
 		wc->uqueue[head].wr_id = entry->wr_id;
 		wc->uqueue[head].status = entry->status;
@@ -484,7 +482,6 @@ int rvt_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *entry)
 		if (tail == wc->head)
 			break;
 		/* The kernel doesn't need a RMB since it has the lock. */
-		trace_rvt_cq_poll(cq, &wc->kqueue[tail], npolled);
 		*entry = wc->kqueue[tail];
 		if (tail >= cq->ibcq.cqe)
 			tail = 0;

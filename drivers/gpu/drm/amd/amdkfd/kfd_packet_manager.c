@@ -65,7 +65,8 @@ static void pm_calc_rlib_size(struct packet_manager *pm,
 
 	/* check if there is over subscription*/
 	*over_subscription = false;
-	if ((process_count > 1) || queue_count > get_queues_num(pm->dqm)) {
+	if ((process_count > 1) ||
+		queue_count > PIPE_PER_ME_CP_SCHEDULING * QUEUES_PER_PIPE) {
 		*over_subscription = true;
 		pr_debug("kfd: over subscribed runlist\n");
 	}

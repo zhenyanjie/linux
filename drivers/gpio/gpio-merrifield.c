@@ -11,6 +11,7 @@
 
 #include <linux/bitops.h>
 #include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -165,7 +166,7 @@ static int mrfld_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
 {
 	void __iomem *gpdr = gpio_reg(chip, offset, GPDR);
 
-	return !(readl(gpdr) & BIT(offset % 32));
+	return (readl(gpdr) & BIT(offset % 32)) ? GPIOF_DIR_OUT : GPIOF_DIR_IN;
 }
 
 static int mrfld_gpio_set_debounce(struct gpio_chip *chip, unsigned int offset,

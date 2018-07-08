@@ -359,7 +359,15 @@ union cq_desc_t {
 };
 
 struct rbdr_entry_t {
-	u64   buf_addr;
+#if defined(__BIG_ENDIAN_BITFIELD)
+	u64   rsvd0:15;
+	u64   buf_addr:42;
+	u64   cache_align:7;
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
+	u64   cache_align:7;
+	u64   buf_addr:42;
+	u64   rsvd0:15;
+#endif
 };
 
 /* TCP reassembly context */

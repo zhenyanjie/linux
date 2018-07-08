@@ -531,26 +531,19 @@ static int stm32f4_pll_is_enabled(struct clk_hw *hw)
 	return clk_gate_ops.is_enabled(hw);
 }
 
-#define PLL_TIMEOUT 10000
-
 static int stm32f4_pll_enable(struct clk_hw *hw)
 {
 	struct clk_gate *gate = to_clk_gate(hw);
 	struct stm32f4_pll *pll = to_stm32f4_pll(gate);
-	int bit_status;
-	unsigned int timeout = PLL_TIMEOUT;
+	int ret = 0;
+	unsigned long reg;
 
-	if (clk_gate_ops.is_enabled(hw))
-		return 0;
+	ret = clk_gate_ops.enable(hw);
 
-	clk_gate_ops.enable(hw);
+	ret = readl_relaxed_poll_timeout_atomic(base + STM32F4_RCC_CR, reg,
+			reg & (1 << pll->bit_rdy_idx), 0, 10000);
 
-	do {
-		bit_status = !(readl(gate->reg) & BIT(pll->bit_rdy_idx));
-
-	} while (bit_status && --timeout);
-
-	return bit_status;
+	return ret;
 }
 
 static void stm32f4_pll_disable(struct clk_hw *hw)
@@ -841,32 +834,24 @@ struct stm32_rgate {
 	u8	bit_rdy_idx;
 };
 
-#define RGATE_TIMEOUT 50000
+#define RTC_TIMEOUT 1000000
 
 static int rgclk_enable(struct clk_hw *hw)
 {
 	struct clk_gate *gate = to_clk_gate(hw);
 	struct stm32_rgate *rgate = to_rgclk(gate);
-	int bit_status;
-	unsigned int timeout = RGATE_TIMEOUT;
-
-	if (clk_gate_ops.is_enabled(hw))
-		return 0;
+	u32 reg;
+	int ret;
 
 	disable_power_domain_write_protection();
 
 	clk_gate_ops.enable(hw);
 
-	do {
-		bit_status = !(readl(gate->reg) & BIT(rgate->bit_rdy_idx));
-		if (bit_status)
-			udelay(100);
-
-	} while (bit_status && --timeout);
+	ret = readl_relaxed_poll_timeout_atomic(gate->reg, reg,
+			reg & rgate->bit_rdy_idx, 1000, RTC_TIMEOUT);
 
 	enable_power_domain_write_protection();
-
-	return bit_status;
+	return ret;
 }
 
 static void rgclk_disable(struct clk_hw *hw)
@@ -1548,7 +1533,7 @@ static void __init stm32f4_rcc_init(struct device_node *np)
 	}
 
 	clks[CLK_LSI] = clk_register_rgate(NULL, "lsi", "clk-lsi", 0,
-			base + STM32F4_RCC_CSR, 0, 1, 0, &stm32f4_clk_lock);
+			base + STM32F4_RCC_CSR, 0, 2, 0, &stm32f4_clk_lock);
 
 	if (IS_ERR(clks[CLK_LSI])) {
 		pr_err("Unable to register lsi clock\n");
@@ -1556,7 +1541,7 @@ static void __init stm32f4_rcc_init(struct device_node *np)
 	}
 
 	clks[CLK_LSE] = clk_register_rgate(NULL, "lse", "clk-lse", 0,
-			base + STM32F4_RCC_BDCR, 0, 1, 0, &stm32f4_clk_lock);
+			base + STM32F4_RCC_BDCR, 0, 2, 0, &stm32f4_clk_lock);
 
 	if (IS_ERR(clks[CLK_LSE])) {
 		pr_err("Unable to register lse clock\n");

@@ -54,6 +54,9 @@ struct memblock memblock __initdata_memblock = {
 };
 
 int memblock_debug __initdata_memblock;
+#ifdef CONFIG_MOVABLE_NODE
+bool movable_node_enabled __initdata_memblock = false;
+#endif
 static bool system_has_some_mirror __initdata_memblock = false;
 static int memblock_can_resize __initdata_memblock;
 static int memblock_memory_in_slab __initdata_memblock = 0;
@@ -285,27 +288,31 @@ static void __init_memblock memblock_remove_region(struct memblock_type *type, u
 }
 
 #ifdef CONFIG_ARCH_DISCARD_MEMBLOCK
-/**
- * Discard memory and reserved arrays if they were allocated
- */
-void __init memblock_discard(void)
+
+phys_addr_t __init_memblock get_allocated_memblock_reserved_regions_info(
+					phys_addr_t *addr)
 {
-	phys_addr_t addr, size;
+	if (memblock.reserved.regions == memblock_reserved_init_regions)
+		return 0;
 
-	if (memblock.reserved.regions != memblock_reserved_init_regions) {
-		addr = __pa(memblock.reserved.regions);
-		size = PAGE_ALIGN(sizeof(struct memblock_region) *
-				  memblock.reserved.max);
-		__memblock_free_late(addr, size);
-	}
+	*addr = __pa(memblock.reserved.regions);
 
-	if (memblock.memory.regions != memblock_memory_init_regions) {
-		addr = __pa(memblock.memory.regions);
-		size = PAGE_ALIGN(sizeof(struct memblock_region) *
-				  memblock.memory.max);
-		__memblock_free_late(addr, size);
-	}
+	return PAGE_ALIGN(sizeof(struct memblock_region) *
+			  memblock.reserved.max);
 }
+
+phys_addr_t __init_memblock get_allocated_memblock_memory_regions_info(
+					phys_addr_t *addr)
+{
+	if (memblock.memory.regions == memblock_memory_init_regions)
+		return 0;
+
+	*addr = __pa(memblock.memory.regions);
+
+	return PAGE_ALIGN(sizeof(struct memblock_region) *
+			  memblock.memory.max);
+}
+
 #endif
 
 /**
@@ -795,18 +802,6 @@ int __init_memblock memblock_mark_mirror(phys_addr_t base, phys_addr_t size)
 int __init_memblock memblock_mark_nomap(phys_addr_t base, phys_addr_t size)
 {
 	return memblock_setclr_flag(base, size, 1, MEMBLOCK_NOMAP);
-}
-
-/**
- * memblock_clear_nomap - Clear flag MEMBLOCK_NOMAP for a specified region.
- * @base: the base phys addr of the region
- * @size: the size of the region
- *
- * Return 0 on success, -errno on failure.
- */
-int __init_memblock memblock_clear_nomap(phys_addr_t base, phys_addr_t size)
-{
-	return memblock_setclr_flag(base, size, 0, MEMBLOCK_NOMAP);
 }
 
 /**
@@ -1536,37 +1531,11 @@ void __init memblock_enforce_memory_limit(phys_addr_t limit)
 			      (phys_addr_t)ULLONG_MAX);
 }
 
-void __init memblock_cap_memory_range(phys_addr_t base, phys_addr_t size)
-{
-	int start_rgn, end_rgn;
-	int i, ret;
-
-	if (!size)
-		return;
-
-	ret = memblock_isolate_range(&memblock.memory, base, size,
-						&start_rgn, &end_rgn);
-	if (ret)
-		return;
-
-	/* remove all the MAP regions */
-	for (i = memblock.memory.cnt - 1; i >= end_rgn; i--)
-		if (!memblock_is_nomap(&memblock.memory.regions[i]))
-			memblock_remove_region(&memblock.memory, i);
-
-	for (i = start_rgn - 1; i >= 0; i--)
-		if (!memblock_is_nomap(&memblock.memory.regions[i]))
-			memblock_remove_region(&memblock.memory, i);
-
-	/* truncate the reserved regions */
-	memblock_remove_range(&memblock.reserved, 0, base);
-	memblock_remove_range(&memblock.reserved,
-			base + size, (phys_addr_t)ULLONG_MAX);
-}
-
 void __init memblock_mem_limit_remove_map(phys_addr_t limit)
 {
+	struct memblock_type *type = &memblock.memory;
 	phys_addr_t max_addr;
+	int i, ret, start_rgn, end_rgn;
 
 	if (!limit)
 		return;
@@ -1577,7 +1546,19 @@ void __init memblock_mem_limit_remove_map(phys_addr_t limit)
 	if (max_addr == (phys_addr_t)ULLONG_MAX)
 		return;
 
-	memblock_cap_memory_range(0, max_addr);
+	ret = memblock_isolate_range(type, max_addr, (phys_addr_t)ULLONG_MAX,
+				&start_rgn, &end_rgn);
+	if (ret)
+		return;
+
+	/* remove all the MAP regions above the limit */
+	for (i = end_rgn - 1; i >= start_rgn; i--) {
+		if (!memblock_is_nomap(&type->regions[i]))
+			memblock_remove_region(type, i);
+	}
+	/* truncate the reserved regions */
+	memblock_remove_range(&memblock.reserved, max_addr,
+			      (phys_addr_t)ULLONG_MAX);
 }
 
 static int __init_memblock memblock_search(struct memblock_type *type, phys_addr_t addr)

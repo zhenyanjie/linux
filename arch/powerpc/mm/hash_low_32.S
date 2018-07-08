@@ -31,8 +31,10 @@
 #ifdef CONFIG_SMP
 	.section .bss
 	.align	2
+	.globl mmu_hash_lock
 mmu_hash_lock:
 	.space	4
+EXPORT_SYMBOL(mmu_hash_lock)
 #endif /* CONFIG_SMP */
 
 /*

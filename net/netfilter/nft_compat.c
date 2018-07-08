@@ -42,8 +42,7 @@ static int nft_compat_chain_validate_dependency(const char *tablename,
 {
 	const struct nft_base_chain *basechain;
 
-	if (!tablename ||
-	    !nft_is_base_chain(chain))
+	if (!tablename || !(chain->flags & NFT_BASE_CHAIN))
 		return 0;
 
 	basechain = nft_base_chain(chain);
@@ -166,7 +165,7 @@ nft_target_set_tgchk_param(struct xt_tgchk_param *par,
 	par->entryinfo	= entry;
 	par->target	= target;
 	par->targinfo	= info;
-	if (nft_is_base_chain(ctx->chain)) {
+	if (ctx->chain->flags & NFT_BASE_CHAIN) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
 		const struct nf_hook_ops *ops = &basechain->ops[0];
@@ -201,7 +200,7 @@ static int nft_parse_compat(const struct nlattr *attr, u16 *proto, bool *inv)
 	int err;
 
 	err = nla_parse_nested(tb, NFTA_RULE_COMPAT_MAX, attr,
-			       nft_rule_compat_policy, NULL);
+			       nft_rule_compat_policy);
 	if (err < 0)
 		return err;
 
@@ -230,6 +229,10 @@ nft_target_init(const struct nft_ctx *ctx, const struct nft_expr *expr,
 	bool inv = false;
 	union nft_entry e = {};
 	int ret;
+
+	ret = nft_compat_chain_validate_dependency(target->table, ctx->chain);
+	if (ret < 0)
+		goto err;
 
 	target_compat_from_user(target, nla_data(tb[NFTA_TARGET_INFO]), info);
 
@@ -299,13 +302,13 @@ static int nft_target_validate(const struct nft_ctx *ctx,
 	unsigned int hook_mask = 0;
 	int ret;
 
-	if (nft_is_base_chain(ctx->chain)) {
+	if (ctx->chain->flags & NFT_BASE_CHAIN) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
 		const struct nf_hook_ops *ops = &basechain->ops[0];
 
 		hook_mask = 1 << ops->hooknum;
-		if (target->hooks && !(hook_mask & target->hooks))
+		if (!(hook_mask & target->hooks))
 			return -EINVAL;
 
 		ret = nft_compat_chain_validate_dependency(target->table,
@@ -380,7 +383,7 @@ nft_match_set_mtchk_param(struct xt_mtchk_param *par, const struct nft_ctx *ctx,
 	par->entryinfo	= entry;
 	par->match	= match;
 	par->matchinfo	= info;
-	if (nft_is_base_chain(ctx->chain)) {
+	if (ctx->chain->flags & NFT_BASE_CHAIN) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
 		const struct nf_hook_ops *ops = &basechain->ops[0];
@@ -415,6 +418,10 @@ nft_match_init(const struct nft_ctx *ctx, const struct nft_expr *expr,
 	bool inv = false;
 	union nft_entry e = {};
 	int ret;
+
+	ret = nft_compat_chain_validate_dependency(match->table, ctx->chain);
+	if (ret < 0)
+		goto err;
 
 	match_compat_from_user(match, nla_data(tb[NFTA_MATCH_INFO]), info);
 
@@ -478,13 +485,13 @@ static int nft_match_validate(const struct nft_ctx *ctx,
 	unsigned int hook_mask = 0;
 	int ret;
 
-	if (nft_is_base_chain(ctx->chain)) {
+	if (ctx->chain->flags & NFT_BASE_CHAIN) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
 		const struct nf_hook_ops *ops = &basechain->ops[0];
 
 		hook_mask = 1 << ops->hooknum;
-		if (match->hooks && !(hook_mask & match->hooks))
+		if (!(hook_mask & match->hooks))
 			return -EINVAL;
 
 		ret = nft_compat_chain_validate_dependency(match->table,
@@ -504,7 +511,7 @@ nfnl_compat_fill_info(struct sk_buff *skb, u32 portid, u32 seq, u32 type,
 	struct nfgenmsg *nfmsg;
 	unsigned int flags = portid ? NLM_F_MULTI : 0;
 
-	event = nfnl_msg_type(NFNL_SUBSYS_NFT_COMPAT, event);
+	event |= NFNL_SUBSYS_NFT_COMPAT << 8;
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*nfmsg), flags);
 	if (nlh == NULL)
 		goto nlmsg_failure;
@@ -530,8 +537,7 @@ nla_put_failure:
 
 static int nfnl_compat_get(struct net *net, struct sock *nfnl,
 			   struct sk_buff *skb, const struct nlmsghdr *nlh,
-			   const struct nlattr * const tb[],
-			   struct netlink_ext_ack *extack)
+			   const struct nlattr * const tb[])
 {
 	int ret = 0, target;
 	struct nfgenmsg *nfmsg;

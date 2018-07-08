@@ -69,11 +69,12 @@ static bool intel_crt_get_hw_state(struct intel_encoder *encoder,
 	struct drm_device *dev = encoder->base.dev;
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	struct intel_crt *crt = intel_encoder_to_crt(encoder);
+	enum intel_display_power_domain power_domain;
 	u32 tmp;
 	bool ret;
 
-	if (!intel_display_power_get_if_enabled(dev_priv,
-						encoder->power_domain))
+	power_domain = intel_display_port_power_domain(encoder);
+	if (!intel_display_power_get_if_enabled(dev_priv, power_domain))
 		return false;
 
 	ret = false;
@@ -90,7 +91,7 @@ static bool intel_crt_get_hw_state(struct intel_encoder *encoder,
 
 	ret = true;
 out:
-	intel_display_power_put(dev_priv, encoder->power_domain);
+	intel_display_power_put(dev_priv, power_domain);
 
 	return ret;
 }
@@ -669,16 +670,16 @@ static const struct dmi_system_id intel_spurious_crt_detect[] = {
 	{ }
 };
 
-static int
-intel_crt_detect(struct drm_connector *connector,
-		 struct drm_modeset_acquire_ctx *ctx,
-		 bool force)
+static enum drm_connector_status
+intel_crt_detect(struct drm_connector *connector, bool force)
 {
 	struct drm_i915_private *dev_priv = to_i915(connector->dev);
 	struct intel_crt *crt = intel_attached_crt(connector);
 	struct intel_encoder *intel_encoder = &crt->base;
-	int status, ret;
+	enum intel_display_power_domain power_domain;
+	enum drm_connector_status status;
 	struct intel_load_detect_pipe tmp;
+	struct drm_modeset_acquire_ctx ctx;
 
 	DRM_DEBUG_KMS("[CONNECTOR:%d:%s] force=%d\n",
 		      connector->base.id, connector->name,
@@ -688,7 +689,8 @@ intel_crt_detect(struct drm_connector *connector,
 	if (dmi_check_system(intel_spurious_crt_detect))
 		return connector_status_disconnected;
 
-	intel_display_power_get(dev_priv, intel_encoder->power_domain);
+	power_domain = intel_display_port_power_domain(intel_encoder);
+	intel_display_power_get(dev_priv, power_domain);
 
 	if (I915_HAS_HOTPLUG(dev_priv)) {
 		/* We can not rely on the HPD pin always being correctly wired
@@ -722,9 +724,10 @@ intel_crt_detect(struct drm_connector *connector,
 		goto out;
 	}
 
+	drm_modeset_acquire_init(&ctx, 0);
+
 	/* for pre-945g platforms use load detect */
-	ret = intel_get_load_detect_pipe(connector, NULL, &tmp, ctx);
-	if (ret > 0) {
+	if (intel_get_load_detect_pipe(connector, NULL, &tmp, &ctx)) {
 		if (intel_crt_detect_ddc(connector))
 			status = connector_status_connected;
 		else if (INTEL_GEN(dev_priv) < 4)
@@ -734,14 +737,15 @@ intel_crt_detect(struct drm_connector *connector,
 			status = connector_status_disconnected;
 		else
 			status = connector_status_unknown;
-		intel_release_load_detect_pipe(connector, &tmp, ctx);
-	} else if (ret == 0)
+		intel_release_load_detect_pipe(connector, &tmp, &ctx);
+	} else
 		status = connector_status_unknown;
-	else if (ret < 0)
-		status = ret;
+
+	drm_modeset_drop_locks(&ctx);
+	drm_modeset_acquire_fini(&ctx);
 
 out:
-	intel_display_power_put(dev_priv, intel_encoder->power_domain);
+	intel_display_power_put(dev_priv, power_domain);
 	return status;
 }
 
@@ -757,10 +761,12 @@ static int intel_crt_get_modes(struct drm_connector *connector)
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	struct intel_crt *crt = intel_attached_crt(connector);
 	struct intel_encoder *intel_encoder = &crt->base;
+	enum intel_display_power_domain power_domain;
 	int ret;
 	struct i2c_adapter *i2c;
 
-	intel_display_power_get(dev_priv, intel_encoder->power_domain);
+	power_domain = intel_display_port_power_domain(intel_encoder);
+	intel_display_power_get(dev_priv, power_domain);
 
 	i2c = intel_gmbus_get_adapter(dev_priv, dev_priv->vbt.crt_ddc_pin);
 	ret = intel_crt_ddc_get_modes(connector, i2c);
@@ -772,9 +778,16 @@ static int intel_crt_get_modes(struct drm_connector *connector)
 	ret = intel_crt_ddc_get_modes(connector, i2c);
 
 out:
-	intel_display_power_put(dev_priv, intel_encoder->power_domain);
+	intel_display_power_put(dev_priv, power_domain);
 
 	return ret;
+}
+
+static int intel_crt_set_property(struct drm_connector *connector,
+				  struct drm_property *property,
+				  uint64_t value)
+{
+	return 0;
 }
 
 void intel_crt_reset(struct drm_encoder *encoder)
@@ -803,17 +816,18 @@ void intel_crt_reset(struct drm_encoder *encoder)
 
 static const struct drm_connector_funcs intel_crt_connector_funcs = {
 	.dpms = drm_atomic_helper_connector_dpms,
+	.detect = intel_crt_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.late_register = intel_connector_register,
 	.early_unregister = intel_connector_unregister,
 	.destroy = intel_crt_destroy,
-	.set_property = drm_atomic_helper_connector_set_property,
+	.set_property = intel_crt_set_property,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
+	.atomic_get_property = intel_connector_atomic_get_property,
 };
 
 static const struct drm_connector_helper_funcs intel_crt_connector_helper_funcs = {
-	.detect_ctx = intel_crt_detect,
 	.mode_valid = intel_crt_mode_valid,
 	.get_modes = intel_crt_get_modes,
 };
@@ -889,8 +903,6 @@ void intel_crt_init(struct drm_i915_private *dev_priv)
 	connector->doublescan_allowed = 0;
 
 	crt->adpa_reg = adpa_reg;
-
-	crt->base.power_domain = POWER_DOMAIN_PORT_CRT;
 
 	crt->base.compute_config = intel_crt_compute_config;
 	if (HAS_PCH_SPLIT(dev_priv)) {

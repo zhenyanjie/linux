@@ -2444,24 +2444,30 @@ static struct mport_dev *mport_cdev_add(struct rio_mport *mport)
 	mutex_init(&md->buf_mutex);
 	mutex_init(&md->file_mutex);
 	INIT_LIST_HEAD(&md->file_list);
+	cdev_init(&md->cdev, &mport_fops);
+	md->cdev.owner = THIS_MODULE;
+	ret = cdev_add(&md->cdev, MKDEV(MAJOR(dev_number), mport->id), 1);
+	if (ret < 0) {
+		kfree(md);
+		rmcd_error("Unable to register a device, err=%d", ret);
+		return NULL;
+	}
 
-	device_initialize(&md->dev);
-	md->dev.devt = MKDEV(MAJOR(dev_number), mport->id);
+	md->dev.devt = md->cdev.dev;
 	md->dev.class = dev_class;
 	md->dev.parent = &mport->dev;
 	md->dev.release = mport_device_release;
 	dev_set_name(&md->dev, DEV_NAME "%d", mport->id);
 	atomic_set(&md->active, 1);
 
-	cdev_init(&md->cdev, &mport_fops);
-	md->cdev.owner = THIS_MODULE;
-
-	ret = cdev_device_add(&md->cdev, &md->dev);
+	ret = device_register(&md->dev);
 	if (ret) {
 		rmcd_error("Failed to register mport %d (err=%d)",
 		       mport->id, ret);
 		goto err_cdev;
 	}
+
+	get_device(&md->dev);
 
 	INIT_LIST_HEAD(&md->doorbells);
 	spin_lock_init(&md->db_lock);
@@ -2507,7 +2513,8 @@ static struct mport_dev *mport_cdev_add(struct rio_mport *mport)
 	return md;
 
 err_cdev:
-	put_device(&md->dev);
+	cdev_del(&md->cdev);
+	kfree(md);
 	return NULL;
 }
 
@@ -2571,7 +2578,7 @@ static void mport_cdev_remove(struct mport_dev *md)
 	atomic_set(&md->active, 0);
 	mport_cdev_terminate_dma(md);
 	rio_del_mport_pw_handler(md->mport, md, rio_mport_pw_handler);
-	cdev_device_del(&md->cdev, &md->dev);
+	cdev_del(&(md->cdev));
 	mport_cdev_kill_fasync(md);
 
 	flush_workqueue(dma_wq);
@@ -2596,6 +2603,7 @@ static void mport_cdev_remove(struct mport_dev *md)
 
 	rio_release_inb_dbell(md->mport, 0, 0x0fff);
 
+	device_unregister(&md->dev);
 	put_device(&md->dev);
 }
 

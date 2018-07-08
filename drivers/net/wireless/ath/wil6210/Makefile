@@ -10,6 +10,7 @@ wil6210-y += interrupt.o
 wil6210-y += txrx.o
 wil6210-y += debug.o
 wil6210-y += rx_reorder.o
+wil6210-y += ioctl.o
 wil6210-y += fw.o
 wil6210-y += pm.o
 wil6210-y += pmc.o

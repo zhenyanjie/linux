@@ -262,16 +262,14 @@ static int snd_ivtv_pcm_hw_free(struct snd_pcm_substream *substream)
 {
 	struct snd_ivtv_card *itvsc = snd_pcm_substream_chip(substream);
 	unsigned long flags;
-	unsigned char *dma_area = NULL;
 
 	spin_lock_irqsave(&itvsc->slock, flags);
 	if (substream->runtime->dma_area) {
 		dprintk("freeing pcm capture region\n");
-		dma_area = substream->runtime->dma_area;
+		vfree(substream->runtime->dma_area);
 		substream->runtime->dma_area = NULL;
 	}
 	spin_unlock_irqrestore(&itvsc->slock, flags);
-	vfree(dma_area);
 
 	return 0;
 }

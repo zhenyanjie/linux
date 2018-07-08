@@ -6,7 +6,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <api/fs/fs.h>
-#include <linux/kernel.h>
 #include "mem-events.h"
 #include "debug.h"
 #include "symbol.h"
@@ -206,8 +205,8 @@ int perf_mem__lvl_scnprintf(char *out, size_t sz, struct mem_info *mem_info)
 static const char * const snoop_access[] = {
 	"N/A",
 	"None",
-	"Hit",
 	"Miss",
+	"Hit",
 	"HitM",
 };
 

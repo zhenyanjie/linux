@@ -13,7 +13,7 @@
 #include <linux/ktime.h>
 #include <linux/sunrpc/types.h>
 #include <linux/spinlock.h>
-#include <linux/wait_bit.h>
+#include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/sunrpc/xdr.h>
 
@@ -22,7 +22,7 @@
  */
 struct rpc_procinfo;
 struct rpc_message {
-	const struct rpc_procinfo *rpc_proc;	/* Procedure information */
+	struct rpc_procinfo *	rpc_proc;	/* Procedure information */
 	void *			rpc_argp;	/* Arguments */
 	void *			rpc_resp;	/* Result */
 	struct rpc_cred *	rpc_cred;	/* Credentials */

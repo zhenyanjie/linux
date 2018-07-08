@@ -32,7 +32,7 @@ int send_fault_sig(struct pt_regs *regs)
 		force_sig_info(siginfo.si_signo,
 			       &siginfo, current);
 	} else {
-		if (fixup_exception(regs))
+		if (handle_kernel_fault(regs))
 			return -1;
 
 		//if (siginfo.si_signo == SIGBUS)

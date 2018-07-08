@@ -14,9 +14,6 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/device.h>
-#include <linux/regmap.h>
-
 #define CPCAP_VENDOR_ST		0
 #define CPCAP_VENDOR_TI		1
 
@@ -293,5 +290,3 @@ static inline int cpcap_get_vendor(struct device *dev,
 
 	return 0;
 }
-
-extern int cpcap_sense_virq(struct regmap *regmap, int virq);

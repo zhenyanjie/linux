@@ -118,7 +118,6 @@
 #include <linux/spinlock.h>
 #include <linux/tcp.h>
 #include <linux/if_vlan.h>
-#include <linux/interrupt.h>
 #include <net/busy_poll.h>
 #include <linux/clk.h>
 #include <linux/if_ether.h>
@@ -158,91 +157,48 @@ static int xgbe_one_poll(struct napi_struct *, int);
 static int xgbe_all_poll(struct napi_struct *, int);
 static void xgbe_stop(struct xgbe_prv_data *);
 
-static void *xgbe_alloc_node(size_t size, int node)
-{
-	void *mem;
-
-	mem = kzalloc_node(size, GFP_KERNEL, node);
-	if (!mem)
-		mem = kzalloc(size, GFP_KERNEL);
-
-	return mem;
-}
-
-static void xgbe_free_channels(struct xgbe_prv_data *pdata)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(pdata->channel); i++) {
-		if (!pdata->channel[i])
-			continue;
-
-		kfree(pdata->channel[i]->rx_ring);
-		kfree(pdata->channel[i]->tx_ring);
-		kfree(pdata->channel[i]);
-
-		pdata->channel[i] = NULL;
-	}
-
-	pdata->channel_count = 0;
-}
-
 static int xgbe_alloc_channels(struct xgbe_prv_data *pdata)
 {
-	struct xgbe_channel *channel;
-	struct xgbe_ring *ring;
+	struct xgbe_channel *channel_mem, *channel;
+	struct xgbe_ring *tx_ring, *rx_ring;
 	unsigned int count, i;
-	unsigned int cpu;
-	int node;
+	int ret = -ENOMEM;
 
 	count = max_t(unsigned int, pdata->tx_ring_count, pdata->rx_ring_count);
-	for (i = 0; i < count; i++) {
-		/* Attempt to use a CPU on the node the device is on */
-		cpu = cpumask_local_spread(i, dev_to_node(pdata->dev));
 
-		/* Set the allocation node based on the returned CPU */
-		node = cpu_to_node(cpu);
+	channel_mem = kcalloc(count, sizeof(struct xgbe_channel), GFP_KERNEL);
+	if (!channel_mem)
+		goto err_channel;
 
-		channel = xgbe_alloc_node(sizeof(*channel), node);
-		if (!channel)
-			goto err_mem;
-		pdata->channel[i] = channel;
+	tx_ring = kcalloc(pdata->tx_ring_count, sizeof(struct xgbe_ring),
+			  GFP_KERNEL);
+	if (!tx_ring)
+		goto err_tx_ring;
 
+	rx_ring = kcalloc(pdata->rx_ring_count, sizeof(struct xgbe_ring),
+			  GFP_KERNEL);
+	if (!rx_ring)
+		goto err_rx_ring;
+
+	for (i = 0, channel = channel_mem; i < count; i++, channel++) {
 		snprintf(channel->name, sizeof(channel->name), "channel-%u", i);
 		channel->pdata = pdata;
 		channel->queue_index = i;
 		channel->dma_regs = pdata->xgmac_regs + DMA_CH_BASE +
 				    (DMA_CH_INC * i);
-		channel->node = node;
-		cpumask_set_cpu(cpu, &channel->affinity_mask);
 
 		if (pdata->per_channel_irq)
 			channel->dma_irq = pdata->channel_irq[i];
 
 		if (i < pdata->tx_ring_count) {
-			ring = xgbe_alloc_node(sizeof(*ring), node);
-			if (!ring)
-				goto err_mem;
-
-			spin_lock_init(&ring->lock);
-			ring->node = node;
-
-			channel->tx_ring = ring;
+			spin_lock_init(&tx_ring->lock);
+			channel->tx_ring = tx_ring++;
 		}
 
 		if (i < pdata->rx_ring_count) {
-			ring = xgbe_alloc_node(sizeof(*ring), node);
-			if (!ring)
-				goto err_mem;
-
-			spin_lock_init(&ring->lock);
-			ring->node = node;
-
-			channel->rx_ring = ring;
+			spin_lock_init(&rx_ring->lock);
+			channel->rx_ring = rx_ring++;
 		}
-
-		netif_dbg(pdata, drv, pdata->netdev,
-			  "%s: cpu=%u, node=%d\n", channel->name, cpu, node);
 
 		netif_dbg(pdata, drv, pdata->netdev,
 			  "%s: dma_regs=%p, dma_irq=%d, tx=%p, rx=%p\n",
@@ -250,14 +206,32 @@ static int xgbe_alloc_channels(struct xgbe_prv_data *pdata)
 			  channel->tx_ring, channel->rx_ring);
 	}
 
+	pdata->channel = channel_mem;
 	pdata->channel_count = count;
 
 	return 0;
 
-err_mem:
-	xgbe_free_channels(pdata);
+err_rx_ring:
+	kfree(tx_ring);
 
-	return -ENOMEM;
+err_tx_ring:
+	kfree(channel_mem);
+
+err_channel:
+	return ret;
+}
+
+static void xgbe_free_channels(struct xgbe_prv_data *pdata)
+{
+	if (!pdata->channel)
+		return;
+
+	kfree(pdata->channel->rx_ring);
+	kfree(pdata->channel->tx_ring);
+	kfree(pdata->channel);
+
+	pdata->channel = NULL;
+	pdata->channel_count = 0;
 }
 
 static inline unsigned int xgbe_tx_avail_desc(struct xgbe_ring *ring)
@@ -326,10 +300,12 @@ static void xgbe_enable_rx_tx_int(struct xgbe_prv_data *pdata,
 
 static void xgbe_enable_rx_tx_ints(struct xgbe_prv_data *pdata)
 {
+	struct xgbe_channel *channel;
 	unsigned int i;
 
-	for (i = 0; i < pdata->channel_count; i++)
-		xgbe_enable_rx_tx_int(pdata, pdata->channel[i]);
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++)
+		xgbe_enable_rx_tx_int(pdata, channel);
 }
 
 static void xgbe_disable_rx_tx_int(struct xgbe_prv_data *pdata,
@@ -352,10 +328,12 @@ static void xgbe_disable_rx_tx_int(struct xgbe_prv_data *pdata,
 
 static void xgbe_disable_rx_tx_ints(struct xgbe_prv_data *pdata)
 {
+	struct xgbe_channel *channel;
 	unsigned int i;
 
-	for (i = 0; i < pdata->channel_count; i++)
-		xgbe_disable_rx_tx_int(pdata, pdata->channel[i]);
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++)
+		xgbe_disable_rx_tx_int(pdata, channel);
 }
 
 static bool xgbe_ecc_sec(struct xgbe_prv_data *pdata, unsigned long *period,
@@ -403,9 +381,9 @@ static bool xgbe_ecc_ded(struct xgbe_prv_data *pdata, unsigned long *period,
 	return false;
 }
 
-static void xgbe_ecc_isr_task(unsigned long data)
+static irqreturn_t xgbe_ecc_isr(int irq, void *data)
 {
-	struct xgbe_prv_data *pdata = (struct xgbe_prv_data *)data;
+	struct xgbe_prv_data *pdata = data;
 	unsigned int ecc_isr;
 	bool stop = false;
 
@@ -456,26 +434,12 @@ out:
 	/* Clear all ECC interrupts */
 	XP_IOWRITE(pdata, XP_ECC_ISR, ecc_isr);
 
-	/* Reissue interrupt if status is not clear */
-	if (pdata->vdata->irq_reissue_support)
-		XP_IOWRITE(pdata, XP_INT_REISSUE_EN, 1 << 1);
-}
-
-static irqreturn_t xgbe_ecc_isr(int irq, void *data)
-{
-	struct xgbe_prv_data *pdata = data;
-
-	if (pdata->isr_as_tasklet)
-		tasklet_schedule(&pdata->tasklet_ecc);
-	else
-		xgbe_ecc_isr_task((unsigned long)pdata);
-
 	return IRQ_HANDLED;
 }
 
-static void xgbe_isr_task(unsigned long data)
+static irqreturn_t xgbe_isr(int irq, void *data)
 {
-	struct xgbe_prv_data *pdata = (struct xgbe_prv_data *)data;
+	struct xgbe_prv_data *pdata = data;
 	struct xgbe_hw_if *hw_if = &pdata->hw_if;
 	struct xgbe_channel *channel;
 	unsigned int dma_isr, dma_ch_isr;
@@ -496,7 +460,7 @@ static void xgbe_isr_task(unsigned long data)
 		if (!(dma_isr & (1 << i)))
 			continue;
 
-		channel = pdata->channel[i];
+		channel = pdata->channel + i;
 
 		dma_ch_isr = XGMAC_DMA_IOREAD(channel, DMA_CH_SR);
 		netif_dbg(pdata, intr, pdata->netdev, "DMA_CH%u_ISR=%#010x\n",
@@ -578,36 +542,15 @@ static void xgbe_isr_task(unsigned long data)
 isr_done:
 	/* If there is not a separate AN irq, handle it here */
 	if (pdata->dev_irq == pdata->an_irq)
-		pdata->phy_if.an_isr(pdata);
+		pdata->phy_if.an_isr(irq, pdata);
 
 	/* If there is not a separate ECC irq, handle it here */
 	if (pdata->vdata->ecc_support && (pdata->dev_irq == pdata->ecc_irq))
-		xgbe_ecc_isr_task((unsigned long)pdata);
+		xgbe_ecc_isr(irq, pdata);
 
 	/* If there is not a separate I2C irq, handle it here */
 	if (pdata->vdata->i2c_support && (pdata->dev_irq == pdata->i2c_irq))
-		pdata->i2c_if.i2c_isr(pdata);
-
-	/* Reissue interrupt if status is not clear */
-	if (pdata->vdata->irq_reissue_support) {
-		unsigned int reissue_mask;
-
-		reissue_mask = 1 << 0;
-		if (!pdata->per_channel_irq)
-			reissue_mask |= 0xffff < 4;
-
-		XP_IOWRITE(pdata, XP_INT_REISSUE_EN, reissue_mask);
-	}
-}
-
-static irqreturn_t xgbe_isr(int irq, void *data)
-{
-	struct xgbe_prv_data *pdata = data;
-
-	if (pdata->isr_as_tasklet)
-		tasklet_schedule(&pdata->tasklet_dev);
-	else
-		xgbe_isr_task((unsigned long)pdata);
+		pdata->i2c_if.i2c_isr(irq, pdata);
 
 	return IRQ_HANDLED;
 }
@@ -696,8 +639,8 @@ static void xgbe_init_timers(struct xgbe_prv_data *pdata)
 	setup_timer(&pdata->service_timer, xgbe_service_timer,
 		    (unsigned long)pdata);
 
-	for (i = 0; i < pdata->channel_count; i++) {
-		channel = pdata->channel[i];
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++) {
 		if (!channel->tx_ring)
 			break;
 
@@ -718,8 +661,8 @@ static void xgbe_stop_timers(struct xgbe_prv_data *pdata)
 
 	del_timer_sync(&pdata->service_timer);
 
-	for (i = 0; i < pdata->channel_count; i++) {
-		channel = pdata->channel[i];
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++) {
 		if (!channel->tx_ring)
 			break;
 
@@ -837,8 +780,8 @@ static void xgbe_napi_enable(struct xgbe_prv_data *pdata, unsigned int add)
 	unsigned int i;
 
 	if (pdata->per_channel_irq) {
-		for (i = 0; i < pdata->channel_count; i++) {
-			channel = pdata->channel[i];
+		channel = pdata->channel;
+		for (i = 0; i < pdata->channel_count; i++, channel++) {
 			if (add)
 				netif_napi_add(pdata->netdev, &channel->napi,
 					       xgbe_one_poll, NAPI_POLL_WEIGHT);
@@ -860,8 +803,8 @@ static void xgbe_napi_disable(struct xgbe_prv_data *pdata, unsigned int del)
 	unsigned int i;
 
 	if (pdata->per_channel_irq) {
-		for (i = 0; i < pdata->channel_count; i++) {
-			channel = pdata->channel[i];
+		channel = pdata->channel;
+		for (i = 0; i < pdata->channel_count; i++, channel++) {
 			napi_disable(&channel->napi);
 
 			if (del)
@@ -881,10 +824,6 @@ static int xgbe_request_irqs(struct xgbe_prv_data *pdata)
 	struct net_device *netdev = pdata->netdev;
 	unsigned int i;
 	int ret;
-
-	tasklet_init(&pdata->tasklet_dev, xgbe_isr_task, (unsigned long)pdata);
-	tasklet_init(&pdata->tasklet_ecc, xgbe_ecc_isr_task,
-		     (unsigned long)pdata);
 
 	ret = devm_request_irq(pdata->dev, pdata->dev_irq, xgbe_isr, 0,
 			       netdev->name, pdata);
@@ -907,8 +846,8 @@ static int xgbe_request_irqs(struct xgbe_prv_data *pdata)
 	if (!pdata->per_channel_irq)
 		return 0;
 
-	for (i = 0; i < pdata->channel_count; i++) {
-		channel = pdata->channel[i];
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++) {
 		snprintf(channel->dma_irq_name,
 			 sizeof(channel->dma_irq_name) - 1,
 			 "%s-TxRx-%u", netdev_name(netdev),
@@ -922,21 +861,14 @@ static int xgbe_request_irqs(struct xgbe_prv_data *pdata)
 				     channel->dma_irq);
 			goto err_dma_irq;
 		}
-
-		irq_set_affinity_hint(channel->dma_irq,
-				      &channel->affinity_mask);
 	}
 
 	return 0;
 
 err_dma_irq:
 	/* Using an unsigned int, 'i' will go to UINT_MAX and exit */
-	for (i--; i < pdata->channel_count; i--) {
-		channel = pdata->channel[i];
-
-		irq_set_affinity_hint(channel->dma_irq, NULL);
+	for (i--, channel--; i < pdata->channel_count; i--, channel--)
 		devm_free_irq(pdata->dev, channel->dma_irq, channel);
-	}
 
 	if (pdata->vdata->ecc_support && (pdata->dev_irq != pdata->ecc_irq))
 		devm_free_irq(pdata->dev, pdata->ecc_irq, pdata);
@@ -960,12 +892,9 @@ static void xgbe_free_irqs(struct xgbe_prv_data *pdata)
 	if (!pdata->per_channel_irq)
 		return;
 
-	for (i = 0; i < pdata->channel_count; i++) {
-		channel = pdata->channel[i];
-
-		irq_set_affinity_hint(channel->dma_irq, NULL);
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++)
 		devm_free_irq(pdata->dev, channel->dma_irq, channel);
-	}
 }
 
 void xgbe_init_tx_coalesce(struct xgbe_prv_data *pdata)
@@ -1000,14 +929,16 @@ void xgbe_init_rx_coalesce(struct xgbe_prv_data *pdata)
 static void xgbe_free_tx_data(struct xgbe_prv_data *pdata)
 {
 	struct xgbe_desc_if *desc_if = &pdata->desc_if;
+	struct xgbe_channel *channel;
 	struct xgbe_ring *ring;
 	struct xgbe_ring_data *rdata;
 	unsigned int i, j;
 
 	DBGPR("-->xgbe_free_tx_data\n");
 
-	for (i = 0; i < pdata->channel_count; i++) {
-		ring = pdata->channel[i]->tx_ring;
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++) {
+		ring = channel->tx_ring;
 		if (!ring)
 			break;
 
@@ -1023,14 +954,16 @@ static void xgbe_free_tx_data(struct xgbe_prv_data *pdata)
 static void xgbe_free_rx_data(struct xgbe_prv_data *pdata)
 {
 	struct xgbe_desc_if *desc_if = &pdata->desc_if;
+	struct xgbe_channel *channel;
 	struct xgbe_ring *ring;
 	struct xgbe_ring_data *rdata;
 	unsigned int i, j;
 
 	DBGPR("-->xgbe_free_rx_data\n");
 
-	for (i = 0; i < pdata->channel_count; i++) {
-		ring = pdata->channel[i]->rx_ring;
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++) {
+		ring = channel->rx_ring;
 		if (!ring)
 			break;
 
@@ -1206,8 +1139,8 @@ static void xgbe_stop(struct xgbe_prv_data *pdata)
 
 	hw_if->exit(pdata);
 
-	for (i = 0; i < pdata->channel_count; i++) {
-		channel = pdata->channel[i];
+	channel = pdata->channel;
+	for (i = 0; i < pdata->channel_count; i++, channel++) {
 		if (!channel->tx_ring)
 			continue;
 
@@ -1278,10 +1211,6 @@ static void xgbe_tx_tstamp(struct work_struct *work)
 	u64 nsec;
 	unsigned long flags;
 
-	spin_lock_irqsave(&pdata->tstamp_lock, flags);
-	if (!pdata->tx_tstamp_skb)
-		goto unlock;
-
 	if (pdata->tx_tstamp) {
 		nsec = timecounter_cyc2time(&pdata->tstamp_tc,
 					    pdata->tx_tstamp);
@@ -1293,9 +1222,8 @@ static void xgbe_tx_tstamp(struct work_struct *work)
 
 	dev_kfree_skb_any(pdata->tx_tstamp_skb);
 
+	spin_lock_irqsave(&pdata->tstamp_lock, flags);
 	pdata->tx_tstamp_skb = NULL;
-
-unlock:
 	spin_unlock_irqrestore(&pdata->tstamp_lock, flags);
 }
 
@@ -1339,7 +1267,6 @@ static int xgbe_set_hwtstamp_settings(struct xgbe_prv_data *pdata,
 	case HWTSTAMP_FILTER_NONE:
 		break;
 
-	case HWTSTAMP_FILTER_NTP_ALL:
 	case HWTSTAMP_FILTER_ALL:
 		XGMAC_SET_BITS(mac_tscr, MAC_TSCR, TSENALL, 1);
 		XGMAC_SET_BITS(mac_tscr, MAC_TSCR, TSENA, 1);
@@ -1462,7 +1389,8 @@ static void xgbe_prep_tx_tstamp(struct xgbe_prv_data *pdata,
 		spin_unlock_irqrestore(&pdata->tstamp_lock, flags);
 	}
 
-	skb_tx_timestamp(skb);
+	if (!XGMAC_GET_BITS(packet->attributes, TX_PACKET_ATTRIBUTES, PTP))
+		skb_tx_timestamp(skb);
 }
 
 static void xgbe_prep_vlan(struct sk_buff *skb, struct xgbe_packet_data *packet)
@@ -1694,7 +1622,7 @@ static int xgbe_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	DBGPR("-->xgbe_xmit: skb->len = %d\n", skb->len);
 
-	channel = pdata->channel[skb->queue_mapping];
+	channel = pdata->channel + skb->queue_mapping;
 	txq = netdev_get_tx_queue(netdev, channel->queue_index);
 	ring = channel->tx_ring;
 	packet = &ring->packet_data;
@@ -1904,10 +1832,9 @@ static void xgbe_poll_controller(struct net_device *netdev)
 	DBGPR("-->xgbe_poll_controller\n");
 
 	if (pdata->per_channel_irq) {
-		for (i = 0; i < pdata->channel_count; i++) {
-			channel = pdata->channel[i];
+		channel = pdata->channel;
+		for (i = 0; i < pdata->channel_count; i++, channel++)
 			xgbe_dma_isr(channel->dma_irq, channel);
-		}
 	} else {
 		disable_irq(pdata->dev_irq);
 		xgbe_isr(pdata->dev_irq, pdata);
@@ -1918,8 +1845,7 @@ static void xgbe_poll_controller(struct net_device *netdev)
 }
 #endif /* End CONFIG_NET_POLL_CONTROLLER */
 
-static int xgbe_setup_tc(struct net_device *netdev, u32 handle, u32 chain_index,
-			 __be16 proto,
+static int xgbe_setup_tc(struct net_device *netdev, u32 handle, __be16 proto,
 			 struct tc_to_netdev *tc_to_netdev)
 {
 	struct xgbe_prv_data *pdata = netdev_priv(netdev);
@@ -1928,8 +1854,7 @@ static int xgbe_setup_tc(struct net_device *netdev, u32 handle, u32 chain_index,
 	if (tc_to_netdev->type != TC_SETUP_MQPRIO)
 		return -EINVAL;
 
-	tc_to_netdev->mqprio->hw = TC_MQPRIO_HW_OFFLOAD_TCS;
-	tc = tc_to_netdev->mqprio->num_tc;
+	tc = tc_to_netdev->tc;
 
 	if (tc > pdata->hw_feat.tc_cnt)
 		return -EINVAL;
@@ -2400,9 +2325,8 @@ static int xgbe_all_poll(struct napi_struct *napi, int budget)
 	do {
 		last_processed = processed;
 
-		for (i = 0; i < pdata->channel_count; i++) {
-			channel = pdata->channel[i];
-
+		channel = pdata->channel;
+		for (i = 0; i < pdata->channel_count; i++, channel++) {
 			/* Cleanup Tx ring first */
 			xgbe_tx_poll(channel);
 

@@ -1,4 +1,3 @@
-#include <inttypes.h>
 #include <math.h>
 #include <linux/compiler.h>
 
@@ -210,8 +209,6 @@ static int __hpp__sort_acc(struct hist_entry *a, struct hist_entry *b,
 			return 0;
 
 		ret = b->callchain->max_depth - a->callchain->max_depth;
-		if (callchain_param.order == ORDER_CALLER)
-			ret = -ret;
 	}
 	return ret;
 }

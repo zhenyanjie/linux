@@ -530,7 +530,6 @@ struct bcm2835_clock_data {
 
 	bool is_vpu_clock;
 	bool is_mash_clock;
-	bool low_jitter;
 
 	u32 tcnt_mux;
 };
@@ -617,10 +616,8 @@ static unsigned long bcm2835_pll_get_rate(struct clk_hw *hw,
 	using_prediv = cprman_read(cprman, data->ana_reg_base + 4) &
 		data->ana->fb_prediv_mask;
 
-	if (using_prediv) {
+	if (using_prediv)
 		ndiv *= 2;
-		fdiv *= 2;
-	}
 
 	return bcm2835_pll_rate_from_divisors(parent_rate, ndiv, fdiv, pdiv);
 }
@@ -1127,8 +1124,7 @@ static unsigned long bcm2835_clock_choose_div_and_prate(struct clk_hw *hw,
 							int parent_idx,
 							unsigned long rate,
 							u32 *div,
-							unsigned long *prate,
-							unsigned long *avgrate)
+							unsigned long *prate)
 {
 	struct bcm2835_clock *clock = bcm2835_clock_from_hw(hw);
 	struct bcm2835_cprman *cprman = clock->cprman;
@@ -1143,25 +1139,8 @@ static unsigned long bcm2835_clock_choose_div_and_prate(struct clk_hw *hw,
 		*prate = clk_hw_get_rate(parent);
 		*div = bcm2835_clock_choose_div(hw, rate, *prate, true);
 
-		*avgrate = bcm2835_clock_rate_from_divisor(clock, *prate, *div);
-
-		if (data->low_jitter && (*div & CM_DIV_FRAC_MASK)) {
-			unsigned long high, low;
-			u32 int_div = *div & ~CM_DIV_FRAC_MASK;
-
-			high = bcm2835_clock_rate_from_divisor(clock, *prate,
-							       int_div);
-			int_div += CM_DIV_FRAC_MASK + 1;
-			low = bcm2835_clock_rate_from_divisor(clock, *prate,
-							      int_div);
-
-			/*
-			 * Return a value which is the maximum deviation
-			 * below the ideal rate, for use as a metric.
-			 */
-			return *avgrate - max(*avgrate - low, high - *avgrate);
-		}
-		return *avgrate;
+		return bcm2835_clock_rate_from_divisor(clock, *prate,
+						       *div);
 	}
 
 	if (data->frac_bits)
@@ -1188,7 +1167,6 @@ static unsigned long bcm2835_clock_choose_div_and_prate(struct clk_hw *hw,
 
 	*div = curdiv << CM_DIV_FRAC_BITS;
 	*prate = curdiv * best_rate;
-	*avgrate = best_rate;
 
 	return best_rate;
 }
@@ -1200,7 +1178,6 @@ static int bcm2835_clock_determine_rate(struct clk_hw *hw,
 	bool current_parent_is_pllc;
 	unsigned long rate, best_rate = 0;
 	unsigned long prate, best_prate = 0;
-	unsigned long avgrate, best_avgrate = 0;
 	size_t i;
 	u32 div;
 
@@ -1225,13 +1202,11 @@ static int bcm2835_clock_determine_rate(struct clk_hw *hw,
 			continue;
 
 		rate = bcm2835_clock_choose_div_and_prate(hw, i, req->rate,
-							  &div, &prate,
-							  &avgrate);
+							  &div, &prate);
 		if (rate > best_rate && rate <= req->rate) {
 			best_parent = parent;
 			best_prate = prate;
 			best_rate = rate;
-			best_avgrate = avgrate;
 		}
 	}
 
@@ -1241,7 +1216,7 @@ static int bcm2835_clock_determine_rate(struct clk_hw *hw,
 	req->best_parent_hw = best_parent;
 	req->best_parent_rate = best_prate;
 
-	req->rate = best_avgrate;
+	req->rate = best_rate;
 
 	return 0;
 }
@@ -1539,31 +1514,6 @@ static const char *const bcm2835_clock_per_parents[] = {
 #define REGISTER_PER_CLK(...)	REGISTER_CLK(				\
 	.num_mux_parents = ARRAY_SIZE(bcm2835_clock_per_parents),	\
 	.parents = bcm2835_clock_per_parents,				\
-	__VA_ARGS__)
-
-/*
- * Restrict clock sources for the PCM peripheral to the oscillator and
- * PLLD_PER because other source may have varying rates or be switched
- * off.
- *
- * Prevent other sources from being selected by replacing their names in
- * the list of potential parents with dummy entries (entry index is
- * significant).
- */
-static const char *const bcm2835_pcm_per_parents[] = {
-	"-",
-	"xosc",
-	"-",
-	"-",
-	"-",
-	"-",
-	"plld_per",
-	"-",
-};
-
-#define REGISTER_PCM_CLK(...)	REGISTER_CLK(				\
-	.num_mux_parents = ARRAY_SIZE(bcm2835_pcm_per_parents),		\
-	.parents = bcm2835_pcm_per_parents,				\
 	__VA_ARGS__)
 
 /* main vpu parent mux */
@@ -2043,14 +1993,13 @@ static const struct bcm2835_clk_desc clk_desc_array[] = {
 		.int_bits = 4,
 		.frac_bits = 8,
 		.tcnt_mux = 22),
-	[BCM2835_CLOCK_PCM]	= REGISTER_PCM_CLK(
+	[BCM2835_CLOCK_PCM]	= REGISTER_PER_CLK(
 		.name = "pcm",
 		.ctl_reg = CM_PCMCTL,
 		.div_reg = CM_PCMDIV,
 		.int_bits = 12,
 		.frac_bits = 12,
 		.is_mash_clock = true,
-		.low_jitter = true,
 		.tcnt_mux = 23),
 	[BCM2835_CLOCK_PWM]	= REGISTER_PER_CLK(
 		.name = "pwm",

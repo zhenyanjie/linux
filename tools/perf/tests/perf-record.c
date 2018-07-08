@@ -1,5 +1,3 @@
-#include <errno.h>
-#include <inttypes.h>
 /* For the CLR_() macros */
 #include <pthread.h>
 

@@ -64,6 +64,7 @@ long jfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case JFS_IOC_GETFLAGS:
+		jfs_get_inode_flags(jfs_inode);
 		flags = jfs_inode->mode2 & JFS_FL_USER_VISIBLE;
 		flags = jfs_map_ext2(flags, 0);
 		return put_user(flags, (int __user *) arg);
@@ -97,6 +98,7 @@ long jfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		/* Lock against other parallel changes of flags */
 		inode_lock(inode);
 
+		jfs_get_inode_flags(jfs_inode);
 		oldflags = jfs_inode->mode2;
 
 		/*

@@ -534,7 +534,6 @@ static int zoran_v4l_queue_frame(struct zoran_fh *fh, int num)
 				KERN_WARNING
 				"%s: %s - queueing buffer %d in state DONE!?\n",
 				ZR_DEVNAME(zr), __func__, num);
-			/* fall through */
 		case BUZ_STATE_USER:
 			/* since there is at least one unused buffer there's room for at least
 			 * one more pend[] entry */
@@ -694,7 +693,6 @@ static int zoran_jpg_queue_frame(struct zoran_fh *fh, int num,
 				KERN_WARNING
 				"%s: %s - queing frame in BUZ_STATE_DONE state!?\n",
 				ZR_DEVNAME(zr), __func__);
-			/* fall through */
 		case BUZ_STATE_USER:
 			/* since there is at least one unused buffer there's room for at
 			 *least one more pend[] entry */

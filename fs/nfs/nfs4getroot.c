@@ -14,6 +14,8 @@ int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh, bool auth_p
 	struct nfs_fsinfo fsinfo;
 	int ret = -ENOMEM;
 
+	dprintk("--> nfs4_get_rootfh()\n");
+
 	fsinfo.fattr = nfs_alloc_fattr();
 	if (fsinfo.fattr == NULL)
 		goto out;
@@ -36,5 +38,6 @@ int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh, bool auth_p
 	memcpy(&server->fsid, &fsinfo.fattr->fsid, sizeof(server->fsid));
 out:
 	nfs_free_fattr(fsinfo.fattr);
+	dprintk("<-- nfs4_get_rootfh() = %d\n", ret);
 	return ret;
 }

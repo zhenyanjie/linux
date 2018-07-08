@@ -471,7 +471,8 @@ static int init_tp_parity(struct adapter *adap)
 		if (!skb)
 			goto alloc_skb_fail;
 
-		req = __skb_put_zero(skb, sizeof(*req));
+		req = (struct cpl_smt_write_req *)__skb_put(skb, sizeof(*req));
+		memset(req, 0, sizeof(*req));
 		req->wr.wr_hi = htonl(V_WR_OP(FW_WROPCODE_FORWARD));
 		OPCODE_TID(req) = htonl(MK_OPCODE_TID(CPL_SMT_WRITE_REQ, i));
 		req->mtu_idx = NMTUS - 1;
@@ -494,7 +495,8 @@ static int init_tp_parity(struct adapter *adap)
 		if (!skb)
 			goto alloc_skb_fail;
 
-		req = __skb_put_zero(skb, sizeof(*req));
+		req = (struct cpl_l2t_write_req *)__skb_put(skb, sizeof(*req));
+		memset(req, 0, sizeof(*req));
 		req->wr.wr_hi = htonl(V_WR_OP(FW_WROPCODE_FORWARD));
 		OPCODE_TID(req) = htonl(MK_OPCODE_TID(CPL_L2T_WRITE_REQ, i));
 		req->params = htonl(V_L2T_W_IDX(i));
@@ -516,7 +518,8 @@ static int init_tp_parity(struct adapter *adap)
 		if (!skb)
 			goto alloc_skb_fail;
 
-		req = __skb_put_zero(skb, sizeof(*req));
+		req = (struct cpl_rte_write_req *)__skb_put(skb, sizeof(*req));
+		memset(req, 0, sizeof(*req));
 		req->wr.wr_hi = htonl(V_WR_OP(FW_WROPCODE_FORWARD));
 		OPCODE_TID(req) = htonl(MK_OPCODE_TID(CPL_RTE_WRITE_REQ, i));
 		req->l2t_idx = htonl(V_L2T_W_IDX(i));
@@ -535,7 +538,8 @@ static int init_tp_parity(struct adapter *adap)
 	if (!skb)
 		goto alloc_skb_fail;
 
-	greq = __skb_put_zero(skb, sizeof(*greq));
+	greq = (struct cpl_set_tcb_field *)__skb_put(skb, sizeof(*greq));
+	memset(greq, 0, sizeof(*greq));
 	greq->wr.wr_hi = htonl(V_WR_OP(FW_WROPCODE_FORWARD));
 	OPCODE_TID(greq) = htonl(MK_OPCODE_TID(CPL_SET_TCB_FIELD, 0));
 	greq->mask = cpu_to_be64(1);
@@ -905,7 +909,7 @@ static int write_smt_entry(struct adapter *adapter, int idx)
 	if (!skb)
 		return -ENOMEM;
 
-	req = __skb_put(skb, sizeof(*req));
+	req = (struct cpl_smt_write_req *)__skb_put(skb, sizeof(*req));
 	req->wr.wr_hi = htonl(V_WR_OP(FW_WROPCODE_FORWARD));
 	OPCODE_TID(req) = htonl(MK_OPCODE_TID(CPL_SMT_WRITE_REQ, idx));
 	req->mtu_idx = NMTUS - 1;	/* should be 0 but there's a T3 bug */
@@ -948,7 +952,7 @@ static int send_pktsched_cmd(struct adapter *adap, int sched, int qidx, int lo,
 	if (!skb)
 		return -ENOMEM;
 
-	req = skb_put(skb, sizeof(*req));
+	req = (struct mngt_pktsched_wr *)skb_put(skb, sizeof(*req));
 	req->wr_hi = htonl(V_WR_OP(FW_WROPCODE_MNGT));
 	req->mngt_opcode = FW_MNGTOPCODE_PKTSCHED_SET;
 	req->sched = sched;
@@ -1485,7 +1489,7 @@ static struct net_device_stats *cxgb_get_stats(struct net_device *dev)
 {
 	struct port_info *pi = netdev_priv(dev);
 	struct adapter *adapter = pi->adapter;
-	struct net_device_stats *ns = &dev->stats;
+	struct net_device_stats *ns = &pi->netstats;
 	const struct mac_stats *pstats;
 
 	spin_lock(&adapter->stats_lock);

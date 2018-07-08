@@ -201,7 +201,6 @@ static void *etm_setup_aux(int event_cpu, void **pages,
 	event_data = alloc_event_data(event_cpu);
 	if (!event_data)
 		return NULL;
-	INIT_WORK(&event_data->work, free_event_data);
 
 	/*
 	 * In theory nothing prevent tracers in a trace session from being
@@ -217,6 +216,8 @@ static void *etm_setup_aux(int event_cpu, void **pages,
 	sink = coresight_get_enabled_sink(true);
 	if (!sink)
 		goto err;
+
+	INIT_WORK(&event_data->work, free_event_data);
 
 	mask = &event_data->mask;
 
@@ -301,8 +302,7 @@ out:
 	return;
 
 fail_end_stop:
-	perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED);
-	perf_aux_output_end(handle, 0);
+	perf_aux_output_end(handle, 0, true);
 fail:
 	event->hw.state = PERF_HES_STOPPED;
 	goto out;
@@ -310,6 +310,7 @@ fail:
 
 static void etm_event_stop(struct perf_event *event, int mode)
 {
+	bool lost;
 	int cpu = smp_processor_id();
 	unsigned long size;
 	struct coresight_device *sink, *csdev = per_cpu(csdev_src, cpu);
@@ -347,9 +348,10 @@ static void etm_event_stop(struct perf_event *event, int mode)
 			return;
 
 		size = sink_ops(sink)->reset_buffer(sink, handle,
-						    event_data->snk_config);
+						    event_data->snk_config,
+						    &lost);
 
-		perf_aux_output_end(handle, size);
+		perf_aux_output_end(handle, size, lost);
 	}
 
 	/* Disabling the path make its elements available to other sessions */

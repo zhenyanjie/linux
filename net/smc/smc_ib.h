@@ -11,7 +11,6 @@
 #ifndef _SMC_IB_H
 #define _SMC_IB_H
 
-#include <linux/interrupt.h>
 #include <linux/if_ether.h>
 #include <rdma/ib_verbs.h>
 

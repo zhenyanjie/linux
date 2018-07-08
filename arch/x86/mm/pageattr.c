@@ -15,7 +15,7 @@
 #include <linux/pci.h>
 #include <linux/vmalloc.h>
 
-#include <asm/e820/api.h>
+#include <asm/e820.h>
 #include <asm/processor.h>
 #include <asm/tlbflush.h>
 #include <asm/sections.h>
@@ -24,7 +24,6 @@
 #include <asm/pgalloc.h>
 #include <asm/proto.h>
 #include <asm/pat.h>
-#include <asm/set_memory.h>
 
 /*
  * The current flushing context - we pass it instead of 5 arguments:
@@ -150,12 +149,6 @@ void clflush_cache_range(void *vaddr, unsigned int size)
 }
 EXPORT_SYMBOL_GPL(clflush_cache_range);
 
-void arch_invalidate_pmem(void *addr, size_t size)
-{
-	clflush_cache_range(addr, size);
-}
-EXPORT_SYMBOL_GPL(arch_invalidate_pmem);
-
 static void __cpa_flush_all(void *arg)
 {
 	unsigned long cache = (unsigned long)arg;
@@ -192,7 +185,7 @@ static void cpa_flush_range(unsigned long start, int numpages, int cache)
 	unsigned int i, level;
 	unsigned long addr;
 
-	BUG_ON(irqs_disabled() && !early_boot_irqs_disabled);
+	BUG_ON(irqs_disabled());
 	WARN_ON(PAGE_ALIGN(start) != start);
 
 	on_each_cpu(__cpa_flush_range, NULL, 1);
@@ -353,7 +346,6 @@ static inline pgprot_t static_protections(pgprot_t prot, unsigned long address,
 pte_t *lookup_address_in_pgd(pgd_t *pgd, unsigned long address,
 			     unsigned int *level)
 {
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 
@@ -362,15 +354,7 @@ pte_t *lookup_address_in_pgd(pgd_t *pgd, unsigned long address,
 	if (pgd_none(*pgd))
 		return NULL;
 
-	p4d = p4d_offset(pgd, address);
-	if (p4d_none(*p4d))
-		return NULL;
-
-	*level = PG_LEVEL_512G;
-	if (p4d_large(*p4d) || !p4d_present(*p4d))
-		return (pte_t *)p4d;
-
-	pud = pud_offset(p4d, address);
+	pud = pud_offset(pgd, address);
 	if (pud_none(*pud))
 		return NULL;
 
@@ -422,18 +406,13 @@ static pte_t *_lookup_address_cpa(struct cpa_data *cpa, unsigned long address,
 pmd_t *lookup_pmd_address(unsigned long address)
 {
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 
 	pgd = pgd_offset_k(address);
 	if (pgd_none(*pgd))
 		return NULL;
 
-	p4d = p4d_offset(pgd, address);
-	if (p4d_none(*p4d) || p4d_large(*p4d) || !p4d_present(*p4d))
-		return NULL;
-
-	pud = pud_offset(p4d, address);
+	pud = pud_offset(pgd, address);
 	if (pud_none(*pud) || pud_large(*pud) || !pud_present(*pud))
 		return NULL;
 
@@ -498,13 +477,11 @@ static void __set_pmd_pte(pte_t *kpte, unsigned long address, pte_t pte)
 
 		list_for_each_entry(page, &pgd_list, lru) {
 			pgd_t *pgd;
-			p4d_t *p4d;
 			pud_t *pud;
 			pmd_t *pmd;
 
 			pgd = (pgd_t *)page_address(page) + pgd_index(address);
-			p4d = p4d_offset(pgd, address);
-			pud = pud_offset(p4d, address);
+			pud = pud_offset(pgd, address);
 			pmd = pmd_offset(pud, address);
 			set_pte_atomic((pte_t *)pmd, pte);
 		}
@@ -859,9 +836,9 @@ static void unmap_pmd_range(pud_t *pud, unsigned long start, unsigned long end)
 			pud_clear(pud);
 }
 
-static void unmap_pud_range(p4d_t *p4d, unsigned long start, unsigned long end)
+static void unmap_pud_range(pgd_t *pgd, unsigned long start, unsigned long end)
 {
-	pud_t *pud = pud_offset(p4d, start);
+	pud_t *pud = pud_offset(pgd, start);
 
 	/*
 	 * Not on a GB page boundary?
@@ -1027,8 +1004,8 @@ static long populate_pmd(struct cpa_data *cpa,
 	return num_pages;
 }
 
-static int populate_pud(struct cpa_data *cpa, unsigned long start, p4d_t *p4d,
-			pgprot_t pgprot)
+static long populate_pud(struct cpa_data *cpa, unsigned long start, pgd_t *pgd,
+			 pgprot_t pgprot)
 {
 	pud_t *pud;
 	unsigned long end;
@@ -1049,7 +1026,7 @@ static int populate_pud(struct cpa_data *cpa, unsigned long start, p4d_t *p4d,
 		cur_pages = (pre_end - start) >> PAGE_SHIFT;
 		cur_pages = min_t(int, (int)cpa->numpages, cur_pages);
 
-		pud = pud_offset(p4d, start);
+		pud = pud_offset(pgd, start);
 
 		/*
 		 * Need a PMD page?
@@ -1070,7 +1047,7 @@ static int populate_pud(struct cpa_data *cpa, unsigned long start, p4d_t *p4d,
 	if (cpa->numpages == cur_pages)
 		return cur_pages;
 
-	pud = pud_offset(p4d, start);
+	pud = pud_offset(pgd, start);
 	pud_pgprot = pgprot_4k_2_large(pgprot);
 
 	/*
@@ -1090,7 +1067,7 @@ static int populate_pud(struct cpa_data *cpa, unsigned long start, p4d_t *p4d,
 	if (start < end) {
 		long tmp;
 
-		pud = pud_offset(p4d, start);
+		pud = pud_offset(pgd, start);
 		if (pud_none(*pud))
 			if (alloc_pmd_page(pud))
 				return -1;
@@ -1113,43 +1090,33 @@ static int populate_pgd(struct cpa_data *cpa, unsigned long addr)
 {
 	pgprot_t pgprot = __pgprot(_KERNPG_TABLE);
 	pud_t *pud = NULL;	/* shut up gcc */
-	p4d_t *p4d;
 	pgd_t *pgd_entry;
 	long ret;
 
 	pgd_entry = cpa->pgd + pgd_index(addr);
 
-	if (pgd_none(*pgd_entry)) {
-		p4d = (p4d_t *)get_zeroed_page(GFP_KERNEL | __GFP_NOTRACK);
-		if (!p4d)
-			return -1;
-
-		set_pgd(pgd_entry, __pgd(__pa(p4d) | _KERNPG_TABLE));
-	}
-
 	/*
 	 * Allocate a PUD page and hand it down for mapping.
 	 */
-	p4d = p4d_offset(pgd_entry, addr);
-	if (p4d_none(*p4d)) {
+	if (pgd_none(*pgd_entry)) {
 		pud = (pud_t *)get_zeroed_page(GFP_KERNEL | __GFP_NOTRACK);
 		if (!pud)
 			return -1;
 
-		set_p4d(p4d, __p4d(__pa(pud) | _KERNPG_TABLE));
+		set_pgd(pgd_entry, __pgd(__pa(pud) | _KERNPG_TABLE));
 	}
 
 	pgprot_val(pgprot) &= ~pgprot_val(cpa->mask_clr);
 	pgprot_val(pgprot) |=  pgprot_val(cpa->mask_set);
 
-	ret = populate_pud(cpa, addr, p4d, pgprot);
+	ret = populate_pud(cpa, addr, pgd_entry, pgprot);
 	if (ret < 0) {
 		/*
 		 * Leave the PUD page in place in case some other CPU or thread
 		 * already found it, but remove any useless entries we just
 		 * added to it.
 		 */
-		unmap_pud_range(p4d, addr,
+		unmap_pud_range(pgd_entry, addr,
 				addr + (cpa->numpages << PAGE_SHIFT));
 		return ret;
 	}

@@ -19,12 +19,10 @@ void pgd_init(unsigned long page)
 	unsigned long *p, *end;
 	unsigned long entry;
 
-#if !defined(__PAGETABLE_PUD_FOLDED)
-	entry = (unsigned long)invalid_pud_table;
-#elif !defined(__PAGETABLE_PMD_FOLDED)
-	entry = (unsigned long)invalid_pmd_table;
-#else
+#ifdef __PAGETABLE_PMD_FOLDED
 	entry = (unsigned long)invalid_pte_table;
+#else
+	entry = (unsigned long)invalid_pmd_table;
 #endif
 
 	p = (unsigned long *) page;
@@ -66,28 +64,6 @@ void pmd_init(unsigned long addr, unsigned long pagetable)
 EXPORT_SYMBOL_GPL(pmd_init);
 #endif
 
-#ifndef __PAGETABLE_PUD_FOLDED
-void pud_init(unsigned long addr, unsigned long pagetable)
-{
-	unsigned long *p, *end;
-
-	p = (unsigned long *)addr;
-	end = p + PTRS_PER_PUD;
-
-	do {
-		p[0] = pagetable;
-		p[1] = pagetable;
-		p[2] = pagetable;
-		p[3] = pagetable;
-		p[4] = pagetable;
-		p += 8;
-		p[-3] = pagetable;
-		p[-2] = pagetable;
-		p[-1] = pagetable;
-	} while (p != end);
-}
-#endif
-
 pmd_t mk_pmd(struct page *page, pgprot_t prot)
 {
 	pmd_t pmd;
@@ -111,9 +87,6 @@ void __init pagetable_init(void)
 
 	/* Initialize the entire pgd.  */
 	pgd_init((unsigned long)swapper_pg_dir);
-#ifndef __PAGETABLE_PUD_FOLDED
-	pud_init((unsigned long)invalid_pud_table, (unsigned long)invalid_pmd_table);
-#endif
 #ifndef __PAGETABLE_PMD_FOLDED
 	pmd_init((unsigned long)invalid_pmd_table, (unsigned long)invalid_pte_table);
 #endif

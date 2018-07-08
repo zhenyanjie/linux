@@ -22,14 +22,16 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/of_graph.h>
 #include <linux/pm.h>
 #include <linux/regulator/consumer.h>
-#include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
-#include <drm/drm_of.h>
+
 #include <drm/drm_panel.h>
-#include <drm/drmP.h>
+
+#include "drmP.h"
+#include "drm_crtc.h"
+#include "drm_crtc_helper.h"
+#include "drm_atomic_helper.h"
 
 /* Brightness scale on the Parade chip */
 #define PS8622_MAX_BRIGHTNESS 0xff
@@ -534,6 +536,7 @@ static int ps8622_probe(struct i2c_client *client,
 					const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
+	struct device_node *endpoint, *panel_node;
 	struct ps8622_bridge *ps8622;
 	int ret;
 
@@ -541,9 +544,16 @@ static int ps8622_probe(struct i2c_client *client,
 	if (!ps8622)
 		return -ENOMEM;
 
-	ret = drm_of_find_panel_or_bridge(dev->of_node, 0, 0, &ps8622->panel, NULL);
-	if (ret)
-		return ret;
+	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (endpoint) {
+		panel_node = of_graph_get_remote_port_parent(endpoint);
+		if (panel_node) {
+			ps8622->panel = of_drm_find_panel(panel_node);
+			of_node_put(panel_node);
+			if (!ps8622->panel)
+				return -EPROBE_DEFER;
+		}
+	}
 
 	ps8622->client = client;
 

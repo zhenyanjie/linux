@@ -22,6 +22,7 @@ struct panel_drv_data {
 	struct omap_dss_device *in;
 
 	int pd_gpio;
+	int data_lines;
 
 	struct videomode vm;
 };
@@ -81,6 +82,8 @@ static int tfp410_enable(struct omap_dss_device *dssdev)
 		return 0;
 
 	in->ops.dpi->set_timings(in, &ddata->vm);
+	if (ddata->data_lines)
+		in->ops.dpi->set_data_lines(in, ddata->data_lines);
 
 	r = in->ops.dpi->enable(in);
 	if (r)
@@ -223,6 +226,7 @@ static int tfp410_probe(struct platform_device *pdev)
 	dssdev->type = OMAP_DISPLAY_TYPE_DPI;
 	dssdev->output_type = OMAP_DISPLAY_TYPE_DVI;
 	dssdev->owner = THIS_MODULE;
+	dssdev->phy.dpi.data_lines = ddata->data_lines;
 	dssdev->port_num = 1;
 
 	r = omapdss_register_output(dssdev);

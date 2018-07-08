@@ -95,7 +95,7 @@ static struct console prom_early_console = {
 	.index =	-1,
 };
 
-/*
+/* 
  * Process kernel command line switches that are specific to the
  * SPARC or that require special low-level processing.
  */
@@ -133,7 +133,7 @@ static void __init boot_flags_init(char *commands)
 {
 	while (*commands) {
 		/* Move to the start of the next "argument". */
-		while (*commands == ' ')
+		while (*commands && *commands == ' ')
 			commands++;
 
 		/* Process any command switches, otherwise skip it. */
@@ -288,17 +288,10 @@ static void __init sun4v_patch(void)
 
 	sun4v_patch_2insn_range(&__sun4v_2insn_patch,
 				&__sun4v_2insn_patch_end);
-
-	switch (sun4v_chip_type) {
-	case SUN4V_CHIP_SPARC_M7:
-	case SUN4V_CHIP_SPARC_M8:
-	case SUN4V_CHIP_SPARC_SN:
+	if (sun4v_chip_type == SUN4V_CHIP_SPARC_M7 ||
+	    sun4v_chip_type == SUN4V_CHIP_SPARC_SN)
 		sun_m7_patch_2insn_range(&__sun_m7_2insn_patch,
 					 &__sun_m7_2insn_patch_end);
-		break;
-	default:
-		break;
-	}
 
 	sun4v_hvapi_init();
 }
@@ -372,7 +365,6 @@ void __init start_early_boot(void)
 	}
 	current_thread_info()->cpu = cpu;
 
-	time_init_early();
 	prom_init_report();
 	start_kernel();
 }
@@ -536,7 +528,6 @@ static void __init init_sparc64_elf_hwcap(void)
 		    sun4v_chip_type == SUN4V_CHIP_NIAGARA5 ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC_M6 ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC_M7 ||
-		    sun4v_chip_type == SUN4V_CHIP_SPARC_M8 ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC_SN ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC64X)
 			cap |= HWCAP_SPARC_BLKINIT;
@@ -546,7 +537,6 @@ static void __init init_sparc64_elf_hwcap(void)
 		    sun4v_chip_type == SUN4V_CHIP_NIAGARA5 ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC_M6 ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC_M7 ||
-		    sun4v_chip_type == SUN4V_CHIP_SPARC_M8 ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC_SN ||
 		    sun4v_chip_type == SUN4V_CHIP_SPARC64X)
 			cap |= HWCAP_SPARC_N2;
@@ -577,7 +567,6 @@ static void __init init_sparc64_elf_hwcap(void)
 			    sun4v_chip_type == SUN4V_CHIP_NIAGARA5 ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC_M6 ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC_M7 ||
-			    sun4v_chip_type == SUN4V_CHIP_SPARC_M8 ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC_SN ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC64X)
 				cap |= (AV_SPARC_VIS | AV_SPARC_VIS2 |
@@ -588,7 +577,6 @@ static void __init init_sparc64_elf_hwcap(void)
 			    sun4v_chip_type == SUN4V_CHIP_NIAGARA5 ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC_M6 ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC_M7 ||
-			    sun4v_chip_type == SUN4V_CHIP_SPARC_M8 ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC_SN ||
 			    sun4v_chip_type == SUN4V_CHIP_SPARC64X)
 				cap |= (AV_SPARC_VIS3 | AV_SPARC_HPC |
@@ -651,7 +639,7 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_BLK_DEV_RAM
 	rd_image_start = ram_flags & RAMDISK_IMAGE_START_MASK;
 	rd_prompt = ((ram_flags & RAMDISK_PROMPT_FLAG) != 0);
-	rd_doload = ((ram_flags & RAMDISK_LOAD_FLAG) != 0);
+	rd_doload = ((ram_flags & RAMDISK_LOAD_FLAG) != 0);	
 #endif
 
 	task_thread_info(&init_task)->kregs = &fake_swapper_regs;
@@ -660,7 +648,7 @@ void __init setup_arch(char **cmdline_p)
 	if (!ic_set_manually) {
 		phandle chosen = prom_finddevice("/chosen");
 		u32 cl, sv, gw;
-
+		
 		cl = prom_getintdefault (chosen, "client-ip", 0);
 		sv = prom_getintdefault (chosen, "server-ip", 0);
 		gw = prom_getintdefault (chosen, "gateway-ip", 0);

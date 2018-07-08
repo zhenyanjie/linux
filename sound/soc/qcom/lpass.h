@@ -91,8 +91,6 @@ struct lpass_variant {
 	/* SOC specific dais */
 	struct snd_soc_dai_driver *dai_driver;
 	int num_dai;
-	const char * const *dai_osr_clk_names;
-	const char * const *dai_bit_clk_names;
 };
 
 /* register the platform driver from the CPU DAI driver */

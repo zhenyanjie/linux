@@ -1,6 +1,6 @@
 /*
  *  QLogic FCoE Offload Driver
- *  Copyright (c) 2016-2017 Cavium Inc.
+ *  Copyright (c) 2016 Cavium Inc.
  *
  *  This software is available under the terms of the GNU General Public License
  *  (GPL) Version 2, available from the file COPYING in the main directory of
@@ -26,7 +26,6 @@
 #include <linux/qed/qed_ll2_if.h>
 #include "qedf_version.h"
 #include "qedf_dbg.h"
-#include "drv_fcoe_fw_funcs.h"
 
 /* Helpers to extract upper and lower 32-bits of pointer */
 #define U64_HI(val) ((u32)(((u64)(val)) >> 32))
@@ -60,17 +59,19 @@
 #define UPSTREAM_KEEP		1
 
 struct qedf_mp_req {
+	uint8_t tm_flags;
+
 	uint32_t req_len;
 	void *req_buf;
 	dma_addr_t req_buf_dma;
-	struct scsi_sge *mp_req_bd;
+	struct fcoe_sge *mp_req_bd;
 	dma_addr_t mp_req_bd_dma;
 	struct fc_frame_header req_fc_hdr;
 
 	uint32_t resp_len;
 	void *resp_buf;
 	dma_addr_t resp_buf_dma;
-	struct scsi_sge *mp_resp_bd;
+	struct fcoe_sge *mp_resp_bd;
 	dma_addr_t mp_resp_bd_dma;
 	struct fc_frame_header resp_fc_hdr;
 };
@@ -118,7 +119,6 @@ struct qedf_ioreq {
 #define QEDF_CMD_IN_CLEANUP		0x2
 #define QEDF_CMD_SRR_SENT		0x3
 	u8 io_req_flags;
-	uint8_t tm_flags;
 	struct qedf_rport *fcport;
 	unsigned long flags;
 	enum qedf_ioreq_event event;
@@ -130,8 +130,6 @@ struct qedf_ioreq {
 	struct completion tm_done;
 	struct completion abts_done;
 	struct fcoe_task_context *task;
-	struct fcoe_task_params *task_params;
-	struct scsi_sgl_task_params *sgl_task_params;
 	int idx;
 /*
  * Need to allocate enough room for both sense data and FCP response data
@@ -201,8 +199,8 @@ struct qedf_rport {
 	dma_addr_t sq_pbl_dma;
 	u32 sq_pbl_size;
 	u32 sid;
-#define	QEDF_RPORT_TYPE_DISK		0
-#define	QEDF_RPORT_TYPE_TAPE		1
+#define	QEDF_RPORT_TYPE_DISK		1
+#define	QEDF_RPORT_TYPE_TAPE		2
 	uint dev_type; /* Disk or tape */
 	struct list_head peers;
 };
@@ -259,7 +257,7 @@ struct qedf_io_log {
 	uint16_t task_id;
 	uint32_t port_id; /* Remote port fabric ID */
 	int lun;
-	unsigned char op; /* SCSI CDB */
+	char op; /* SCSI CDB */
 	uint8_t lba[4];
 	unsigned int bufflen; /* SCSI buffer length */
 	unsigned int sg_count; /* Number of SG elements */
@@ -393,7 +391,7 @@ struct qedf_ctx {
 
 struct io_bdt {
 	struct qedf_ioreq *io_req;
-	struct scsi_sge *bd_tbl;
+	struct fcoe_sge *bd_tbl;
 	dma_addr_t bd_tbl_dma;
 	u16 bd_valid;
 };
@@ -402,7 +400,7 @@ struct qedf_cmd_mgr {
 	struct qedf_ctx *qedf;
 	u16 idx;
 	struct io_bdt **io_bdt_pool;
-#define FCOE_PARAMS_NUM_TASKS		2048
+#define FCOE_PARAMS_NUM_TASKS		4096
 	struct qedf_ioreq cmds[FCOE_PARAMS_NUM_TASKS];
 	spinlock_t lock;
 	atomic_t free_list_cnt;
@@ -467,8 +465,9 @@ extern void qedf_cmd_timer_set(struct qedf_ctx *qedf, struct qedf_ioreq *io_req,
 	unsigned int timer_msec);
 extern int qedf_init_mp_req(struct qedf_ioreq *io_req);
 extern void qedf_init_mp_task(struct qedf_ioreq *io_req,
-	struct fcoe_task_context *task_ctx, struct fcoe_wqe *wqe);
-extern u16 qedf_get_sqe_idx(struct qedf_rport *fcport);
+	struct fcoe_task_context *task_ctx);
+extern void qedf_add_to_sq(struct qedf_rport *fcport, u16 xid,
+	u32 ptu_invalidate, enum fcoe_task_type req_type, u32 offset);
 extern void qedf_ring_doorbell(struct qedf_rport *fcport);
 extern void qedf_process_els_compl(struct qedf_ctx *qedf, struct fcoe_cqe *cqe,
 	struct qedf_ioreq *els_req);
@@ -528,8 +527,7 @@ struct fip_vlan {
 #define QEDF_WRITE                    (1 << 0)
 #define MAX_FIBRE_LUNS			0xffffffff
 
-#define MIN_NUM_CPUS_MSIX(x)	min_t(u32, x->dev_info.num_cqs, \
-					num_online_cpus())
+#define QEDF_MAX_NUM_CQS		8
 
 /*
  * PCI function probe defines

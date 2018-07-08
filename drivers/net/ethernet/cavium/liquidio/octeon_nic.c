@@ -100,16 +100,14 @@ static void octnet_link_ctrl_callback(struct octeon_device *oct,
 
 	nctrl = (struct octnic_ctrl_pkt *)sc->ctxptr;
 
-	/* Call the callback function if status is zero (meaning OK) or status
-	 * contains a firmware status code bigger than zero (meaning the
-	 * firmware is reporting an error).
+	/* Call the callback function if status is OK.
+	 * Status is OK only if a response was expected and core returned
+	 * success.
 	 * If no response was expected, status is OK if the command was posted
 	 * successfully.
 	 */
-	if ((!status || status > FIRMWARE_STATUS_CODE(0)) && nctrl->cb_fn) {
-		nctrl->status = status;
+	if (!status && nctrl->cb_fn)
 		nctrl->cb_fn(nctrl);
-	}
 
 	octeon_free_soft_command(oct, sc);
 }

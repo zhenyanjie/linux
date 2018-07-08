@@ -1046,5 +1046,6 @@ mwifiex_debugfs_init(void)
 void
 mwifiex_debugfs_remove(void)
 {
-	debugfs_remove(mwifiex_dfs_dir);
+	if (mwifiex_dfs_dir)
+		debugfs_remove(mwifiex_dfs_dir);
 }

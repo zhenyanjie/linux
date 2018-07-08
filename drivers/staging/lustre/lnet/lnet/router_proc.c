@@ -77,7 +77,7 @@ static int __proc_lnet_stats(void *data, int write,
 			     loff_t pos, void __user *buffer, int nob)
 {
 	int rc;
-	struct lnet_counters *ctrs;
+	lnet_counters_t *ctrs;
 	int len;
 	char *tmpstr;
 	const int tmpsiz = 256; /* 7 %u and 4 %llu */
@@ -171,8 +171,8 @@ static int proc_lnet_routes(struct ctl_table *table, int write,
 	} else {
 		struct list_head *n;
 		struct list_head *r;
-		struct lnet_route *route = NULL;
-		struct lnet_remotenet *rnet  = NULL;
+		lnet_route_t *route = NULL;
+		lnet_remotenet_t *rnet  = NULL;
 		int skip  = off - 1;
 		struct list_head *rn_list;
 		int i;
@@ -191,16 +191,15 @@ static int proc_lnet_routes(struct ctl_table *table, int write,
 			n = rn_list->next;
 
 			while (n != rn_list && !route) {
-				rnet = list_entry(n, struct lnet_remotenet,
+				rnet = list_entry(n, lnet_remotenet_t,
 						  lrn_list);
 
 				r = rnet->lrn_routes.next;
 
 				while (r != &rnet->lrn_routes) {
-					struct lnet_route *re;
-
-					re = list_entry(r, struct lnet_route,
-							lr_list);
+					lnet_route_t *re =
+						list_entry(r, lnet_route_t,
+							   lr_list);
 					if (!skip) {
 						route = re;
 						break;
@@ -308,9 +307,9 @@ static int proc_lnet_routers(struct ctl_table *table, int write,
 		r = the_lnet.ln_routers.next;
 
 		while (r != &the_lnet.ln_routers) {
-			struct lnet_peer *lp;
+			lnet_peer_t *lp = list_entry(r, lnet_peer_t,
+						     lp_rtr_list);
 
-			lp = list_entry(r, struct lnet_peer, lp_rtr_list);
 			if (!skip) {
 				peer = lp;
 				break;
@@ -332,7 +331,7 @@ static int proc_lnet_routers(struct ctl_table *table, int write,
 			int last_ping = cfs_duration_sec(cfs_time_sub(now,
 						     peer->lp_ping_timestamp));
 			int down_ni = 0;
-			struct lnet_route *rtr;
+			lnet_route_t *rtr;
 
 			if ((peer->lp_ping_feats &
 			     LNET_PING_FEAT_NI_STATUS)) {
@@ -455,10 +454,8 @@ static int proc_lnet_peers(struct ctl_table *table, int write,
 				p = ptable->pt_hash[hash].next;
 
 			while (p != &ptable->pt_hash[hash]) {
-				struct lnet_peer *lp;
-
-				lp = list_entry(p, struct lnet_peer,
-						lp_hashlist);
+				lnet_peer_t *lp = list_entry(p, lnet_peer_t,
+							     lp_hashlist);
 				if (!skip) {
 					peer = lp;
 
@@ -592,7 +589,7 @@ static int __proc_lnet_buffers(void *data, int write,
 		goto out; /* I'm not a router */
 
 	for (idx = 0; idx < LNET_NRBPOOLS; idx++) {
-		struct lnet_rtrbufpool *rbp;
+		lnet_rtrbufpool_t *rbp;
 
 		lnet_net_lock(LNET_LOCK_EX);
 		cfs_percpt_for_each(rbp, i, the_lnet.ln_rtrpools) {
@@ -655,7 +652,7 @@ static int proc_lnet_nis(struct ctl_table *table, int write,
 		LASSERT(tmpstr + tmpsiz - s > 0);
 	} else {
 		struct list_head *n;
-		struct lnet_ni *ni = NULL;
+		lnet_ni_t *ni   = NULL;
 		int skip = *ppos - 1;
 
 		lnet_net_lock(0);
@@ -663,9 +660,8 @@ static int proc_lnet_nis(struct ctl_table *table, int write,
 		n = the_lnet.ln_nis.next;
 
 		while (n != &the_lnet.ln_nis) {
-			struct lnet_ni *a_ni;
+			lnet_ni_t *a_ni = list_entry(n, lnet_ni_t, ni_list);
 
-			a_ni = list_entry(n, struct lnet_ni, ni_list);
 			if (!skip) {
 				ni = a_ni;
 				break;

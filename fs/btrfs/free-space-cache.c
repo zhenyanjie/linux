@@ -355,7 +355,7 @@ static void io_ctl_map_page(struct btrfs_io_ctl *io_ctl, int clear)
 	io_ctl->orig = io_ctl->cur;
 	io_ctl->size = PAGE_SIZE;
 	if (clear)
-		clear_page(io_ctl->cur);
+		memset(io_ctl->cur, 0, PAGE_SIZE);
 }
 
 static void io_ctl_drop_pages(struct btrfs_io_ctl *io_ctl)

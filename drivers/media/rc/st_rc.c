@@ -165,7 +165,8 @@ static void st_rc_hardware_init(struct st_rc_device *dev)
 	unsigned int rx_sampling_freq_div;
 
 	/* Enable the IP */
-	reset_control_deassert(dev->rstc);
+	if (dev->rstc)
+		reset_control_deassert(dev->rstc);
 
 	clk_prepare_enable(dev->sys_clock);
 	baseclock = clk_get_rate(dev->sys_clock);
@@ -280,11 +281,10 @@ static int st_rc_probe(struct platform_device *pdev)
 	else
 		rc_dev->rx_base = rc_dev->base;
 
+
 	rc_dev->rstc = reset_control_get_optional(dev, NULL);
-	if (IS_ERR(rc_dev->rstc)) {
-		ret = PTR_ERR(rc_dev->rstc);
-		goto err;
-	}
+	if (IS_ERR(rc_dev->rstc))
+		rc_dev->rstc = NULL;
 
 	rc_dev->dev = dev;
 	platform_set_drvdata(pdev, rc_dev);
@@ -298,7 +298,7 @@ static int st_rc_probe(struct platform_device *pdev)
 	rdev->open = st_rc_open;
 	rdev->close = st_rc_close;
 	rdev->driver_name = IR_ST_NAME;
-	rdev->map_name = RC_MAP_EMPTY;
+	rdev->map_name = RC_MAP_LIRC;
 	rdev->input_name = "ST Remote Control Receiver";
 
 	ret = rc_register_device(rdev);
@@ -352,7 +352,8 @@ static int st_rc_suspend(struct device *dev)
 		writel(0x00, rc_dev->rx_base + IRB_RX_EN);
 		writel(0x00, rc_dev->rx_base + IRB_RX_INT_EN);
 		clk_disable_unprepare(rc_dev->sys_clock);
-		reset_control_assert(rc_dev->rstc);
+		if (rc_dev->rstc)
+			reset_control_assert(rc_dev->rstc);
 	}
 
 	return 0;

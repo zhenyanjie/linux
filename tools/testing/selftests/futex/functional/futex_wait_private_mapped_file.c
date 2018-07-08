@@ -34,7 +34,6 @@
 #include "logging.h"
 #include "futextest.h"
 
-#define TEST_NAME "futex-wait-private-mapped-file"
 #define PAGE_SZ 4096
 
 char pad[PAGE_SZ] = {1};
@@ -61,7 +60,7 @@ void *thr_futex_wait(void *arg)
 	ret = futex_wait(&val, 1, &wait_timeout, 0);
 	if (ret && errno != EWOULDBLOCK && errno != ETIMEDOUT) {
 		error("futex error.\n", errno);
-		print_result(TEST_NAME, RET_ERROR);
+		print_result(RET_ERROR);
 		exit(RET_ERROR);
 	}
 
@@ -121,6 +120,6 @@ int main(int argc, char **argv)
 	pthread_join(thr, NULL);
 
  out:
-	print_result(TEST_NAME, ret);
+	print_result(ret);
 	return ret;
 }

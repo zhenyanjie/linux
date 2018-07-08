@@ -471,13 +471,11 @@ static ssize_t modalias_show(struct device *_dev, struct device_attribute *a,
 
 	return (len >= PAGE_SIZE) ? (PAGE_SIZE - 1) : len;
 }
-static DEVICE_ATTR_RO(modalias);
 
-static struct attribute *ps3_system_bus_dev_attrs[] = {
-	&dev_attr_modalias.attr,
-	NULL,
+static struct device_attribute ps3_system_bus_dev_attrs[] = {
+	__ATTR_RO(modalias),
+	__ATTR_NULL,
 };
-ATTRIBUTE_GROUPS(ps3_system_bus_dev);
 
 struct bus_type ps3_system_bus_type = {
 	.name = "ps3_system_bus",
@@ -486,7 +484,7 @@ struct bus_type ps3_system_bus_type = {
 	.probe = ps3_system_bus_probe,
 	.remove = ps3_system_bus_remove,
 	.shutdown = ps3_system_bus_shutdown,
-	.dev_groups = ps3_system_bus_dev_groups,
+	.dev_attrs = ps3_system_bus_dev_attrs,
 };
 
 static int __init ps3_system_bus_init(void)

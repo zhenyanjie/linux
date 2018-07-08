@@ -91,7 +91,7 @@ struct drm_property *drm_property_create(struct drm_device *dev, int flags,
 			goto fail;
 	}
 
-	ret = drm_mode_object_add(dev, &property->base, DRM_MODE_OBJECT_PROPERTY);
+	ret = drm_mode_object_get(dev, &property->base, DRM_MODE_OBJECT_PROPERTY);
 	if (ret)
 		goto fail;
 
@@ -442,7 +442,8 @@ int drm_mode_getproperty_ioctl(struct drm_device *dev,
 	struct drm_property *property;
 	int enum_count = 0;
 	int value_count = 0;
-	int i, copied;
+	int ret = 0, i;
+	int copied;
 	struct drm_property_enum *prop_enum;
 	struct drm_mode_property_enum __user *enum_ptr;
 	uint64_t __user *values_ptr;
@@ -450,43 +451,55 @@ int drm_mode_getproperty_ioctl(struct drm_device *dev,
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		return -EINVAL;
 
+	drm_modeset_lock_all(dev);
 	property = drm_property_find(dev, out_resp->prop_id);
-	if (!property)
-		return -ENOENT;
+	if (!property) {
+		ret = -ENOENT;
+		goto done;
+	}
+
+	if (drm_property_type_is(property, DRM_MODE_PROP_ENUM) ||
+			drm_property_type_is(property, DRM_MODE_PROP_BITMASK)) {
+		list_for_each_entry(prop_enum, &property->enum_list, head)
+			enum_count++;
+	}
+
+	value_count = property->num_values;
 
 	strncpy(out_resp->name, property->name, DRM_PROP_NAME_LEN);
 	out_resp->name[DRM_PROP_NAME_LEN-1] = 0;
 	out_resp->flags = property->flags;
 
-	value_count = property->num_values;
-	values_ptr = u64_to_user_ptr(out_resp->values_ptr);
-
-	for (i = 0; i < value_count; i++) {
-		if (i < out_resp->count_values &&
-		    put_user(property->values[i], values_ptr + i)) {
-			return -EFAULT;
+	if ((out_resp->count_values >= value_count) && value_count) {
+		values_ptr = (uint64_t __user *)(unsigned long)out_resp->values_ptr;
+		for (i = 0; i < value_count; i++) {
+			if (copy_to_user(values_ptr + i, &property->values[i], sizeof(uint64_t))) {
+				ret = -EFAULT;
+				goto done;
+			}
 		}
 	}
 	out_resp->count_values = value_count;
 
-	copied = 0;
-	enum_ptr = u64_to_user_ptr(out_resp->enum_blob_ptr);
-
 	if (drm_property_type_is(property, DRM_MODE_PROP_ENUM) ||
-	    drm_property_type_is(property, DRM_MODE_PROP_BITMASK)) {
-		list_for_each_entry(prop_enum, &property->enum_list, head) {
-			enum_count++;
-			if (out_resp->count_enum_blobs < enum_count)
-				continue;
+			drm_property_type_is(property, DRM_MODE_PROP_BITMASK)) {
+		if ((out_resp->count_enum_blobs >= enum_count) && enum_count) {
+			copied = 0;
+			enum_ptr = (struct drm_mode_property_enum __user *)(unsigned long)out_resp->enum_blob_ptr;
+			list_for_each_entry(prop_enum, &property->enum_list, head) {
 
-			if (copy_to_user(&enum_ptr[copied].value,
-					 &prop_enum->value, sizeof(uint64_t)))
-				return -EFAULT;
+				if (copy_to_user(&enum_ptr[copied].value, &prop_enum->value, sizeof(uint64_t))) {
+					ret = -EFAULT;
+					goto done;
+				}
 
-			if (copy_to_user(&enum_ptr[copied].name,
-					 &prop_enum->name, DRM_PROP_NAME_LEN))
-				return -EFAULT;
-			copied++;
+				if (copy_to_user(&enum_ptr[copied].name,
+						 &prop_enum->name, DRM_PROP_NAME_LEN)) {
+					ret = -EFAULT;
+					goto done;
+				}
+				copied++;
+			}
 		}
 		out_resp->count_enum_blobs = enum_count;
 	}
@@ -501,8 +514,9 @@ int drm_mode_getproperty_ioctl(struct drm_device *dev,
 	 */
 	if (drm_property_type_is(property, DRM_MODE_PROP_BLOB))
 		out_resp->count_enum_blobs = 0;
-
-	return 0;
+done:
+	drm_modeset_unlock_all(dev);
+	return ret;
 }
 
 static void drm_property_free_blob(struct kref *kref)
@@ -556,8 +570,8 @@ drm_property_create_blob(struct drm_device *dev, size_t length,
 	if (data)
 		memcpy(blob->data, data, length);
 
-	ret = __drm_mode_object_add(dev, &blob->base, DRM_MODE_OBJECT_BLOB,
-				    true, drm_property_free_blob);
+	ret = drm_mode_object_get_reg(dev, &blob->base, DRM_MODE_OBJECT_BLOB,
+				      true, drm_property_free_blob);
 	if (ret) {
 		kfree(blob);
 		return ERR_PTR(-EINVAL);
@@ -573,19 +587,19 @@ drm_property_create_blob(struct drm_device *dev, size_t length,
 EXPORT_SYMBOL(drm_property_create_blob);
 
 /**
- * drm_property_blob_put - release a blob property reference
- * @blob: DRM blob property
+ * drm_property_unreference_blob - Unreference a blob property
+ * @blob: Pointer to blob property
  *
- * Releases a reference to a blob property. May free the object.
+ * Drop a reference on a blob property. May free the object.
  */
-void drm_property_blob_put(struct drm_property_blob *blob)
+void drm_property_unreference_blob(struct drm_property_blob *blob)
 {
 	if (!blob)
 		return;
 
-	drm_mode_object_put(&blob->base);
+	drm_mode_object_unreference(&blob->base);
 }
-EXPORT_SYMBOL(drm_property_blob_put);
+EXPORT_SYMBOL(drm_property_unreference_blob);
 
 void drm_property_destroy_user_blobs(struct drm_device *dev,
 				     struct drm_file *file_priv)
@@ -598,23 +612,23 @@ void drm_property_destroy_user_blobs(struct drm_device *dev,
 	 */
 	list_for_each_entry_safe(blob, bt, &file_priv->blobs, head_file) {
 		list_del_init(&blob->head_file);
-		drm_property_blob_put(blob);
+		drm_property_unreference_blob(blob);
 	}
 }
 
 /**
- * drm_property_blob_get - acquire blob property reference
- * @blob: DRM blob property
+ * drm_property_reference_blob - Take a reference on an existing property
+ * @blob: Pointer to blob property
  *
- * Acquires a reference to an existing blob property. Returns @blob, which
+ * Take a new reference on an existing blob property. Returns @blob, which
  * allows this to be used as a shorthand in assignments.
  */
-struct drm_property_blob *drm_property_blob_get(struct drm_property_blob *blob)
+struct drm_property_blob *drm_property_reference_blob(struct drm_property_blob *blob)
 {
-	drm_mode_object_get(&blob->base);
+	drm_mode_object_reference(&blob->base);
 	return blob;
 }
-EXPORT_SYMBOL(drm_property_blob_get);
+EXPORT_SYMBOL(drm_property_reference_blob);
 
 /**
  * drm_property_lookup_blob - look up a blob property and take a reference
@@ -623,7 +637,7 @@ EXPORT_SYMBOL(drm_property_blob_get);
  *
  * If successful, this takes an additional reference to the blob property.
  * callers need to make sure to eventually unreference the returned property
- * again, using drm_property_blob_put().
+ * again, using @drm_property_unreference_blob.
  *
  * Return:
  * NULL on failure, pointer to the blob on success.
@@ -698,13 +712,13 @@ int drm_property_replace_global_blob(struct drm_device *dev,
 			goto err_created;
 	}
 
-	drm_property_blob_put(old_blob);
+	drm_property_unreference_blob(old_blob);
 	*replace = new_blob;
 
 	return 0;
 
 err_created:
-	drm_property_blob_put(new_blob);
+	drm_property_unreference_blob(new_blob);
 	return ret;
 }
 EXPORT_SYMBOL(drm_property_replace_global_blob);
@@ -733,7 +747,7 @@ int drm_mode_getblob_ioctl(struct drm_device *dev,
 	}
 	out_resp->length = blob->length;
 unref:
-	drm_property_blob_put(blob);
+	drm_property_unreference_blob(blob);
 
 	return ret;
 }
@@ -770,7 +784,7 @@ int drm_mode_createblob_ioctl(struct drm_device *dev,
 	return 0;
 
 out_blob:
-	drm_property_blob_put(blob);
+	drm_property_unreference_blob(blob);
 	return ret;
 }
 
@@ -809,14 +823,14 @@ int drm_mode_destroyblob_ioctl(struct drm_device *dev,
 	mutex_unlock(&dev->mode_config.blob_lock);
 
 	/* One reference from lookup, and one from the filp. */
-	drm_property_blob_put(blob);
-	drm_property_blob_put(blob);
+	drm_property_unreference_blob(blob);
+	drm_property_unreference_blob(blob);
 
 	return 0;
 
 err:
 	mutex_unlock(&dev->mode_config.blob_lock);
-	drm_property_blob_put(blob);
+	drm_property_unreference_blob(blob);
 
 	return ret;
 }
@@ -892,7 +906,7 @@ void drm_property_change_valid_put(struct drm_property *property,
 		return;
 
 	if (drm_property_type_is(property, DRM_MODE_PROP_OBJECT)) {
-		drm_mode_object_put(ref);
+		drm_mode_object_unreference(ref);
 	} else if (drm_property_type_is(property, DRM_MODE_PROP_BLOB))
-		drm_property_blob_put(obj_to_blob(ref));
+		drm_property_unreference_blob(obj_to_blob(ref));
 }

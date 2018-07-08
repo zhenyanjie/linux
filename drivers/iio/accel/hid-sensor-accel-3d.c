@@ -347,7 +347,7 @@ static int accel_3d_parse_report(struct platform_device *pdev,
 static int hid_accel_3d_probe(struct platform_device *pdev)
 {
 	int ret = 0;
-	const char *name;
+	static const char *name;
 	struct iio_dev *indio_dev;
 	struct accel_3d_state *accel_state;
 	const struct iio_chan_spec *channel_spec;

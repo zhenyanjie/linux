@@ -190,12 +190,12 @@ xfs_generic_create(
 
 #ifdef CONFIG_XFS_POSIX_ACL
 	if (default_acl) {
-		error = __xfs_set_acl(inode, default_acl, ACL_TYPE_DEFAULT);
+		error = xfs_set_acl(inode, default_acl, ACL_TYPE_DEFAULT);
 		if (error)
 			goto out_cleanup_inode;
 	}
 	if (acl) {
-		error = __xfs_set_acl(inode, acl, ACL_TYPE_ACCESS);
+		error = xfs_set_acl(inode, acl, ACL_TYPE_ACCESS);
 		if (error)
 			goto out_cleanup_inode;
 	}
@@ -460,7 +460,7 @@ xfs_vn_get_link(
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
 
-	link = kmalloc(XFS_SYMLINK_MAXLEN+1, GFP_KERNEL);
+	link = kmalloc(MAXPATHLEN+1, GFP_KERNEL);
 	if (!link)
 		goto out_err;
 
@@ -817,7 +817,7 @@ xfs_vn_setattr_nonsize(
  * Caution: The caller of this function is responsible for calling
  * setattr_prepare() or otherwise verifying the change is fine.
  */
-STATIC int
+int
 xfs_setattr_size(
 	struct xfs_inode	*ip,
 	struct iattr		*iattr)

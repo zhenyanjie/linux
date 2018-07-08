@@ -28,6 +28,12 @@
 
 #include <asm/sections.h>
 
+#ifdef CONFIG_KALLSYMS_ALL
+#define all_var 1
+#else
+#define all_var 0
+#endif
+
 /*
  * These will be re-linked against their real values
  * during the second link stage.
@@ -76,7 +82,7 @@ static inline int is_kernel(unsigned long addr)
 
 static int is_ksym_addr(unsigned long addr)
 {
-	if (IS_ENABLED(CONFIG_KALLSYMS_ALL))
+	if (all_var)
 		return is_kernel(addr);
 
 	return is_kernel_text(addr) || is_kernel_inittext(addr);
@@ -274,7 +280,7 @@ static unsigned long get_symbol_pos(unsigned long addr,
 	if (!symbol_end) {
 		if (is_kernel_inittext(addr))
 			symbol_end = (unsigned long)_einittext;
-		else if (IS_ENABLED(CONFIG_KALLSYMS_ALL))
+		else if (all_var)
 			symbol_end = (unsigned long)_end;
 		else
 			symbol_end = (unsigned long)_etext;

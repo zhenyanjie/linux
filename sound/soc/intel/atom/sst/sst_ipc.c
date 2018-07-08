@@ -236,9 +236,7 @@ static void process_fw_init(struct intel_sst_drv *sst_drv_ctx,
 		retval = init->result;
 		goto ret;
 	}
-	if (memcmp(&sst_drv_ctx->fw_version, &init->fw_version,
-		   sizeof(init->fw_version)))
-		dev_info(sst_drv_ctx->dev, "FW Version %02x.%02x.%02x.%02x\n",
+	dev_info(sst_drv_ctx->dev, "FW Version %02x.%02x.%02x.%02x\n",
 			init->fw_version.type, init->fw_version.major,
 			init->fw_version.minor, init->fw_version.build);
 	dev_dbg(sst_drv_ctx->dev, "Build date %s Time %s\n",

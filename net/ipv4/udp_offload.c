@@ -122,7 +122,7 @@ static struct sk_buff *__skb_udp_tunnel_segment(struct sk_buff *skb,
 		 * will be using a length value equal to only one MSS sized
 		 * segment instead of the entire frame.
 		 */
-		if (gso_partial && skb_is_gso(skb)) {
+		if (gso_partial) {
 			uh->len = htons(skb_shinfo(skb)->gso_size +
 					SKB_GSO_CB(skb)->data_offset +
 					skb->head - (unsigned char *)uh);
@@ -235,7 +235,7 @@ static struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb,
 	if (uh->check == 0)
 		uh->check = CSUM_MANGLED_0;
 
-	skb->ip_summed = CHECKSUM_UNNECESSARY;
+	skb->ip_summed = CHECKSUM_NONE;
 
 	/* If there is no outer header we can fake a checksum offload
 	 * due to the fact that we have already done the checksum in

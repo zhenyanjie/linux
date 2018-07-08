@@ -530,11 +530,12 @@ static int dw8250_probe(struct platform_device *pdev)
 	}
 
 	data->rst = devm_reset_control_get_optional(dev, NULL);
-	if (IS_ERR(data->rst)) {
-		err = PTR_ERR(data->rst);
+	if (IS_ERR(data->rst) && PTR_ERR(data->rst) == -EPROBE_DEFER) {
+		err = -EPROBE_DEFER;
 		goto err_pclk;
 	}
-	reset_control_deassert(data->rst);
+	if (!IS_ERR(data->rst))
+		reset_control_deassert(data->rst);
 
 	dw8250_quirks(p, data);
 
@@ -566,7 +567,8 @@ static int dw8250_probe(struct platform_device *pdev)
 	return 0;
 
 err_reset:
-	reset_control_assert(data->rst);
+	if (!IS_ERR(data->rst))
+		reset_control_assert(data->rst);
 
 err_pclk:
 	if (!IS_ERR(data->pclk))
@@ -587,7 +589,8 @@ static int dw8250_remove(struct platform_device *pdev)
 
 	serial8250_unregister_port(data->line);
 
-	reset_control_assert(data->rst);
+	if (!IS_ERR(data->rst))
+		reset_control_assert(data->rst);
 
 	if (!IS_ERR(data->pclk))
 		clk_disable_unprepare(data->pclk);

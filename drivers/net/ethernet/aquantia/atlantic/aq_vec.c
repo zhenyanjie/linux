@@ -34,6 +34,8 @@ struct aq_vec_s {
 #define AQ_VEC_RX_ID 1
 
 static int aq_vec_poll(struct napi_struct *napi, int budget)
+__releases(&self->lock)
+__acquires(&self->lock)
 {
 	struct aq_vec_s *self = container_of(napi, struct aq_vec_s, napi);
 	struct aq_ring_s *ring = NULL;
@@ -45,7 +47,7 @@ static int aq_vec_poll(struct napi_struct *napi, int budget)
 
 	if (!self) {
 		err = -EINVAL;
-	} else {
+	} else if (spin_trylock(&self->header.lock)) {
 		for (i = 0U, ring = self->ring[0];
 			self->tx_rings > i; ++i, ring = self->ring[i]) {
 			if (self->aq_hw_ops->hw_ring_tx_head_update) {
@@ -103,8 +105,11 @@ static int aq_vec_poll(struct napi_struct *napi, int budget)
 			self->aq_hw_ops->hw_irq_enable(self->aq_hw,
 					1U << self->aq_ring_param.vec_idx);
 		}
-	}
+
 err_exit:
+		spin_unlock(&self->header.lock);
+	}
+
 	return work_done;
 }
 
@@ -179,6 +184,8 @@ int aq_vec_init(struct aq_vec_s *self, struct aq_hw_ops *aq_hw_ops,
 
 	self->aq_hw_ops = aq_hw_ops;
 	self->aq_hw = aq_hw;
+
+	spin_lock_init(&self->header.lock);
 
 	for (i = 0U, ring = self->ring[0];
 		self->tx_rings > i; ++i, ring = self->ring[i]) {

@@ -116,7 +116,6 @@ static struct virtqueue *setup_vq(struct virtio_pci_device *vp_dev,
 				  unsigned index,
 				  void (*callback)(struct virtqueue *vq),
 				  const char *name,
-				  bool ctx,
 				  u16 msix_vec)
 {
 	struct virtqueue *vq;
@@ -136,8 +135,7 @@ static struct virtqueue *setup_vq(struct virtio_pci_device *vp_dev,
 	/* create the vring */
 	vq = vring_create_virtqueue(index, num,
 				    VIRTIO_PCI_VRING_ALIGN, &vp_dev->vdev,
-				    true, false, ctx,
-				    vp_notify, callback, name);
+				    true, false, vp_notify, callback, name);
 	if (!vq)
 		return ERR_PTR(-ENOMEM);
 

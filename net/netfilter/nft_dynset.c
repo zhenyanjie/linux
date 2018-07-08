@@ -82,7 +82,8 @@ static void nft_dynset_eval(const struct nft_expr *expr,
 		    nft_set_ext_exists(ext, NFT_SET_EXT_EXPIRATION)) {
 			timeout = priv->timeout ? : set->timeout;
 			*nft_set_ext_expiration(ext) = jiffies + timeout;
-		}
+		} else if (sexpr == NULL)
+			goto out;
 
 		if (sexpr != NULL)
 			sexpr->ops->eval(sexpr, regs, pkt);
@@ -91,7 +92,7 @@ static void nft_dynset_eval(const struct nft_expr *expr,
 			regs->verdict.code = NFT_BREAK;
 		return;
 	}
-
+out:
 	if (!priv->invert)
 		regs->verdict.code = NFT_BREAK;
 }
@@ -132,10 +133,16 @@ static int nft_dynset_init(const struct nft_ctx *ctx,
 			priv->invert = true;
 	}
 
-	set = nft_set_lookup(ctx->net, ctx->table, tb[NFTA_DYNSET_SET_NAME],
-			     tb[NFTA_DYNSET_SET_ID], genmask);
-	if (IS_ERR(set))
-		return PTR_ERR(set);
+	set = nf_tables_set_lookup(ctx->table, tb[NFTA_DYNSET_SET_NAME],
+				   genmask);
+	if (IS_ERR(set)) {
+		if (tb[NFTA_DYNSET_SET_ID])
+			set = nf_tables_set_lookup_byid(ctx->net,
+							tb[NFTA_DYNSET_SET_ID],
+							genmask);
+		if (IS_ERR(set))
+			return PTR_ERR(set);
+	}
 
 	if (set->ops->update == NULL)
 		return -EOPNOTSUPP;

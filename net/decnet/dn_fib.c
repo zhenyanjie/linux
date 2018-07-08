@@ -389,7 +389,7 @@ link_it:
 	}
 
 	fi->fib_treeref++;
-	refcount_set(&fi->fib_clntref, 1);
+	atomic_inc(&fi->fib_clntref);
 	spin_lock(&dn_fib_info_lock);
 	fi->fib_next = dn_fib_info_list;
 	fi->fib_prev = NULL;
@@ -425,7 +425,7 @@ int dn_fib_semantic_match(int type, struct dn_fib_info *fi, const struct flowidn
 		switch (type) {
 		case RTN_NAT:
 			DN_FIB_RES_RESET(*res);
-			refcount_inc(&fi->fib_clntref);
+			atomic_inc(&fi->fib_clntref);
 			return 0;
 		case RTN_UNICAST:
 		case RTN_LOCAL:
@@ -438,7 +438,7 @@ int dn_fib_semantic_match(int type, struct dn_fib_info *fi, const struct flowidn
 			}
 			if (nhsel < fi->fib_nhs) {
 				res->nh_sel = nhsel;
-				refcount_inc(&fi->fib_clntref);
+				atomic_inc(&fi->fib_clntref);
 				return 0;
 			}
 			endfor_nexthops(fi);
@@ -501,8 +501,7 @@ static inline u32 rtm_get_table(struct nlattr *attrs[], u8 table)
 	return table;
 }
 
-static int dn_fib_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh,
-			       struct netlink_ext_ack *extack)
+static int dn_fib_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct net *net = sock_net(skb->sk);
 	struct dn_fib_table *tb;
@@ -516,8 +515,7 @@ static int dn_fib_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh,
 	if (!net_eq(net, &init_net))
 		return -EINVAL;
 
-	err = nlmsg_parse(nlh, sizeof(*r), attrs, RTA_MAX, rtm_dn_policy,
-			  extack);
+	err = nlmsg_parse(nlh, sizeof(*r), attrs, RTA_MAX, rtm_dn_policy);
 	if (err < 0)
 		return err;
 
@@ -528,8 +526,7 @@ static int dn_fib_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh,
 	return tb->delete(tb, r, attrs, nlh, &NETLINK_CB(skb));
 }
 
-static int dn_fib_rtm_newroute(struct sk_buff *skb, struct nlmsghdr *nlh,
-			       struct netlink_ext_ack *extack)
+static int dn_fib_rtm_newroute(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct net *net = sock_net(skb->sk);
 	struct dn_fib_table *tb;
@@ -543,8 +540,7 @@ static int dn_fib_rtm_newroute(struct sk_buff *skb, struct nlmsghdr *nlh,
 	if (!net_eq(net, &init_net))
 		return -EINVAL;
 
-	err = nlmsg_parse(nlh, sizeof(*r), attrs, RTA_MAX, rtm_dn_policy,
-			  extack);
+	err = nlmsg_parse(nlh, sizeof(*r), attrs, RTA_MAX, rtm_dn_policy);
 	if (err < 0)
 		return err;
 

@@ -421,15 +421,14 @@ static void set_badblock(struct badblocks *bb, sector_t s, int num)
 static void __add_badblock_range(struct badblocks *bb, u64 ns_offset, u64 len)
 {
 	const unsigned int sector_size = 512;
-	sector_t start_sector, end_sector;
+	sector_t start_sector;
 	u64 num_sectors;
 	u32 rem;
 
 	start_sector = div_u64(ns_offset, sector_size);
-	end_sector = div_u64_rem(ns_offset + len, sector_size, &rem);
+	num_sectors = div_u64_rem(len, sector_size, &rem);
 	if (rem)
-		end_sector++;
-	num_sectors = end_sector - start_sector;
+		num_sectors++;
 
 	if (unlikely(num_sectors > (u64)INT_MAX)) {
 		u64 remaining = num_sectors;
@@ -505,7 +504,7 @@ void nvdimm_badblocks_populate(struct nd_region *nd_region,
 	struct nvdimm_bus *nvdimm_bus;
 	struct list_head *poison_list;
 
-	if (!is_memory(&nd_region->dev)) {
+	if (!is_nd_pmem(&nd_region->dev)) {
 		dev_WARN_ONCE(&nd_region->dev, 1,
 				"%s only valid for pmem regions\n", __func__);
 		return;
@@ -519,15 +518,6 @@ void nvdimm_badblocks_populate(struct nd_region *nd_region,
 }
 EXPORT_SYMBOL_GPL(nvdimm_badblocks_populate);
 
-static void append_poison_entry(struct nvdimm_bus *nvdimm_bus,
-		struct nd_poison *pl, u64 addr, u64 length)
-{
-	lockdep_assert_held(&nvdimm_bus->poison_lock);
-	pl->start = addr;
-	pl->length = length;
-	list_add_tail(&pl->list, &nvdimm_bus->poison_list);
-}
-
 static int add_poison(struct nvdimm_bus *nvdimm_bus, u64 addr, u64 length,
 			gfp_t flags)
 {
@@ -537,24 +527,19 @@ static int add_poison(struct nvdimm_bus *nvdimm_bus, u64 addr, u64 length,
 	if (!pl)
 		return -ENOMEM;
 
-	append_poison_entry(nvdimm_bus, pl, addr, length);
+	pl->start = addr;
+	pl->length = length;
+	list_add_tail(&pl->list, &nvdimm_bus->poison_list);
+
 	return 0;
 }
 
 static int bus_add_poison(struct nvdimm_bus *nvdimm_bus, u64 addr, u64 length)
 {
-	struct nd_poison *pl, *pl_new;
+	struct nd_poison *pl;
 
-	spin_unlock(&nvdimm_bus->poison_lock);
-	pl_new = kzalloc(sizeof(*pl_new), GFP_KERNEL);
-	spin_lock(&nvdimm_bus->poison_lock);
-
-	if (list_empty(&nvdimm_bus->poison_list)) {
-		if (!pl_new)
-			return -ENOMEM;
-		append_poison_entry(nvdimm_bus, pl_new, addr, length);
-		return 0;
-	}
+	if (list_empty(&nvdimm_bus->poison_list))
+		return add_poison(nvdimm_bus, addr, length, GFP_KERNEL);
 
 	/*
 	 * There is a chance this is a duplicate, check for those first.
@@ -566,7 +551,6 @@ static int bus_add_poison(struct nvdimm_bus *nvdimm_bus, u64 addr, u64 length)
 			/* If length has changed, update this list entry */
 			if (pl->length != length)
 				pl->length = length;
-			kfree(pl_new);
 			return 0;
 		}
 
@@ -575,33 +559,29 @@ static int bus_add_poison(struct nvdimm_bus *nvdimm_bus, u64 addr, u64 length)
 	 * as any overlapping ranges will get resolved when the list is consumed
 	 * and converted to badblocks
 	 */
-	if (!pl_new)
-		return -ENOMEM;
-	append_poison_entry(nvdimm_bus, pl_new, addr, length);
-
-	return 0;
+	return add_poison(nvdimm_bus, addr, length, GFP_KERNEL);
 }
 
 int nvdimm_bus_add_poison(struct nvdimm_bus *nvdimm_bus, u64 addr, u64 length)
 {
 	int rc;
 
-	spin_lock(&nvdimm_bus->poison_lock);
+	nvdimm_bus_lock(&nvdimm_bus->dev);
 	rc = bus_add_poison(nvdimm_bus, addr, length);
-	spin_unlock(&nvdimm_bus->poison_lock);
+	nvdimm_bus_unlock(&nvdimm_bus->dev);
 
 	return rc;
 }
 EXPORT_SYMBOL_GPL(nvdimm_bus_add_poison);
 
-void nvdimm_forget_poison(struct nvdimm_bus *nvdimm_bus, phys_addr_t start,
-		unsigned int len)
+void nvdimm_clear_from_poison_list(struct nvdimm_bus *nvdimm_bus,
+		phys_addr_t start, unsigned int len)
 {
 	struct list_head *poison_list = &nvdimm_bus->poison_list;
 	u64 clr_end = start + len - 1;
 	struct nd_poison *pl, *next;
 
-	spin_lock(&nvdimm_bus->poison_lock);
+	nvdimm_bus_lock(&nvdimm_bus->dev);
 	WARN_ON_ONCE(list_empty(poison_list));
 
 	/*
@@ -648,15 +628,15 @@ void nvdimm_forget_poison(struct nvdimm_bus *nvdimm_bus, phys_addr_t start,
 			u64 new_len = pl_end - new_start + 1;
 
 			/* Add new entry covering the right half */
-			add_poison(nvdimm_bus, new_start, new_len, GFP_NOWAIT);
+			add_poison(nvdimm_bus, new_start, new_len, GFP_NOIO);
 			/* Adjust this entry to cover the left half */
 			pl->length = start - pl->start;
 			continue;
 		}
 	}
-	spin_unlock(&nvdimm_bus->poison_lock);
+	nvdimm_bus_unlock(&nvdimm_bus->dev);
 }
-EXPORT_SYMBOL_GPL(nvdimm_forget_poison);
+EXPORT_SYMBOL_GPL(nvdimm_clear_from_poison_list);
 
 #ifdef CONFIG_BLK_DEV_INTEGRITY
 int nd_integrity_init(struct gendisk *disk, unsigned long meta_size)
@@ -700,9 +680,6 @@ static __init int libnvdimm_init(void)
 	rc = nd_region_init();
 	if (rc)
 		goto err_region;
-
-	nd_label_init();
-
 	return 0;
  err_region:
 	nvdimm_exit();

@@ -356,8 +356,12 @@ static inline struct mtu3_ep *to_mtu3_ep(struct usb_ep *ep)
 
 static inline struct mtu3_request *next_request(struct mtu3_ep *mep)
 {
-	return list_first_entry_or_null(&mep->req_list, struct mtu3_request,
-					list);
+	struct list_head *queue = &mep->req_list;
+
+	if (list_empty(queue))
+		return NULL;
+
+	return list_first_entry(queue, struct mtu3_request, list);
 }
 
 static inline void mtu3_writel(void __iomem *base, u32 offset, u32 data)

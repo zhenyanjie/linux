@@ -81,12 +81,14 @@ static int bq24735_charger_property_is_writeable(struct power_supply *psy,
 static inline int bq24735_write_word(struct i2c_client *client, u8 reg,
 				     u16 value)
 {
-	return i2c_smbus_write_word_data(client, reg, value);
+	return i2c_smbus_write_word_data(client, reg, le16_to_cpu(value));
 }
 
 static inline int bq24735_read_word(struct i2c_client *client, u8 reg)
 {
-	return i2c_smbus_read_word_data(client, reg);
+	s32 ret = i2c_smbus_read_word_data(client, reg);
+
+	return ret < 0 ? ret : le16_to_cpu(ret);
 }
 
 static int bq24735_update_word(struct i2c_client *client, u8 reg,

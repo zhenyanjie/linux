@@ -39,7 +39,6 @@
 #include <linux/debugfs.h>
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
-#include <linux/of_graph.h>
 #include <linux/of_platform.h>
 #include <linux/component.h>
 
@@ -528,7 +527,7 @@ static inline int wait_for_bit_change(struct platform_device *dsidev,
 	return !value;
 }
 
-static u8 dsi_get_pixel_size(enum omap_dss_dsi_pixel_format fmt)
+u8 dsi_get_pixel_size(enum omap_dss_dsi_pixel_format fmt)
 {
 	switch (fmt) {
 	case OMAP_DSS_DSI_FMT_RGB888:
@@ -583,14 +582,15 @@ static void dsi_perf_show(struct platform_device *dsidev, const char *name)
 
 	total_bytes = dsi->update_bytes;
 
-	pr_info("DSI(%s): %u us + %u us = %u us (%uHz), %u bytes, %u kbytes/sec\n",
-		name,
-		setup_us,
-		trans_us,
-		total_us,
-		1000 * 1000 / total_us,
-		total_bytes,
-		total_bytes * 1000 / total_us);
+	printk(KERN_INFO "DSI(%s): %u us + %u us = %u us (%uHz), "
+			"%u bytes, %u kbytes/sec\n",
+			name,
+			setup_us,
+			trans_us,
+			total_us,
+			1000*1000 / total_us,
+			total_bytes,
+			total_bytes * 1000 / total_us);
 }
 #else
 static inline void dsi_perf_mark_setup(struct platform_device *dsidev)
@@ -5091,7 +5091,7 @@ static int dsi_probe_of(struct platform_device *pdev)
 	struct device_node *ep;
 	struct omap_dsi_pin_config pin_cfg;
 
-	ep = of_graph_get_endpoint_by_regs(node, 0, 0);
+	ep = omapdss_of_get_first_endpoint(node);
 	if (!ep)
 		return 0;
 
@@ -5276,12 +5276,12 @@ static int dsi_init_pll_data(struct platform_device *dsidev)
 static int dsi_bind(struct device *dev, struct device *master, void *data)
 {
 	struct platform_device *dsidev = to_platform_device(dev);
-	const struct dsi_module_id_data *d;
 	u32 rev;
 	int r, i;
 	struct dsi_data *dsi;
 	struct resource *dsi_mem;
 	struct resource *res;
+	struct resource temp_res;
 
 	dsi = devm_kzalloc(&dsidev->dev, sizeof(*dsi), GFP_KERNEL);
 	if (!dsi)
@@ -5311,20 +5311,67 @@ static int dsi_bind(struct device *dev, struct device *master, void *data)
 	dsi->te_timer.data = 0;
 #endif
 
-	dsi_mem = platform_get_resource_byname(dsidev, IORESOURCE_MEM, "proto");
-	dsi->proto_base = devm_ioremap_resource(&dsidev->dev, dsi_mem);
-	if (IS_ERR(dsi->proto_base))
-		return PTR_ERR(dsi->proto_base);
+	res = platform_get_resource_byname(dsidev, IORESOURCE_MEM, "proto");
+	if (!res) {
+		res = platform_get_resource(dsidev, IORESOURCE_MEM, 0);
+		if (!res) {
+			DSSERR("can't get IORESOURCE_MEM DSI\n");
+			return -EINVAL;
+		}
+
+		temp_res.start = res->start;
+		temp_res.end = temp_res.start + DSI_PROTO_SZ - 1;
+		res = &temp_res;
+	}
+
+	dsi_mem = res;
+
+	dsi->proto_base = devm_ioremap(&dsidev->dev, res->start,
+		resource_size(res));
+	if (!dsi->proto_base) {
+		DSSERR("can't ioremap DSI protocol engine\n");
+		return -ENOMEM;
+	}
 
 	res = platform_get_resource_byname(dsidev, IORESOURCE_MEM, "phy");
-	dsi->phy_base = devm_ioremap_resource(&dsidev->dev, res);
-	if (IS_ERR(dsi->phy_base))
-		return PTR_ERR(dsi->phy_base);
+	if (!res) {
+		res = platform_get_resource(dsidev, IORESOURCE_MEM, 0);
+		if (!res) {
+			DSSERR("can't get IORESOURCE_MEM DSI\n");
+			return -EINVAL;
+		}
+
+		temp_res.start = res->start + DSI_PHY_OFFSET;
+		temp_res.end = temp_res.start + DSI_PHY_SZ - 1;
+		res = &temp_res;
+	}
+
+	dsi->phy_base = devm_ioremap(&dsidev->dev, res->start,
+		resource_size(res));
+	if (!dsi->phy_base) {
+		DSSERR("can't ioremap DSI PHY\n");
+		return -ENOMEM;
+	}
 
 	res = platform_get_resource_byname(dsidev, IORESOURCE_MEM, "pll");
-	dsi->pll_base = devm_ioremap_resource(&dsidev->dev, res);
-	if (IS_ERR(dsi->pll_base))
-		return PTR_ERR(dsi->pll_base);
+	if (!res) {
+		res = platform_get_resource(dsidev, IORESOURCE_MEM, 0);
+		if (!res) {
+			DSSERR("can't get IORESOURCE_MEM DSI\n");
+			return -EINVAL;
+		}
+
+		temp_res.start = res->start + DSI_PLL_OFFSET;
+		temp_res.end = temp_res.start + DSI_PLL_SZ - 1;
+		res = &temp_res;
+	}
+
+	dsi->pll_base = devm_ioremap(&dsidev->dev, res->start,
+		resource_size(res));
+	if (!dsi->pll_base) {
+		DSSERR("can't ioremap DSI PLL\n");
+		return -ENOMEM;
+	}
 
 	dsi->irq = platform_get_irq(dsi->pdev, 0);
 	if (dsi->irq < 0) {
@@ -5339,16 +5386,30 @@ static int dsi_bind(struct device *dev, struct device *master, void *data)
 		return r;
 	}
 
-	d = of_match_node(dsi_of_match, dsidev->dev.of_node)->data;
-	while (d->address != 0 && d->address != dsi_mem->start)
-		d++;
+	if (dsidev->dev.of_node) {
+		const struct of_device_id *match;
+		const struct dsi_module_id_data *d;
 
-	if (d->address == 0) {
-		DSSERR("unsupported DSI module\n");
-		return -ENODEV;
+		match = of_match_node(dsi_of_match, dsidev->dev.of_node);
+		if (!match) {
+			DSSERR("unsupported DSI module\n");
+			return -ENODEV;
+		}
+
+		d = match->data;
+
+		while (d->address != 0 && d->address != dsi_mem->start)
+			d++;
+
+		if (d->address == 0) {
+			DSSERR("unsupported DSI module\n");
+			return -ENODEV;
+		}
+
+		dsi->module_id = d->id;
+	} else {
+		dsi->module_id = dsidev->id;
 	}
-
-	dsi->module_id = d->id;
 
 	/* DSI VCs initialization */
 	for (i = 0; i < ARRAY_SIZE(dsi->vc); i++) {
@@ -5385,15 +5446,18 @@ static int dsi_bind(struct device *dev, struct device *master, void *data)
 
 	dsi_init_output(dsidev);
 
-	r = dsi_probe_of(dsidev);
-	if (r) {
-		DSSERR("Invalid DSI DT data\n");
-		goto err_probe_of;
-	}
+	if (dsidev->dev.of_node) {
+		r = dsi_probe_of(dsidev);
+		if (r) {
+			DSSERR("Invalid DSI DT data\n");
+			goto err_probe_of;
+		}
 
-	r = of_platform_populate(dsidev->dev.of_node, NULL, NULL, &dsidev->dev);
-	if (r)
-		DSSERR("Failed to populate DSI child devices: %d\n", r);
+		r = of_platform_populate(dsidev->dev.of_node, NULL, NULL,
+			&dsidev->dev);
+		if (r)
+			DSSERR("Failed to populate DSI child devices: %d\n", r);
+	}
 
 	dsi_runtime_put(dsidev);
 

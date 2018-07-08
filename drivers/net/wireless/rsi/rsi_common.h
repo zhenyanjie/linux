@@ -20,7 +20,8 @@
 #include <linux/kthread.h>
 
 #define EVENT_WAIT_FOREVER              0
-#define FIRMWARE_RSI9113                "rs9113_wlan_qspi.rps"
+#define TA_LOAD_ADDRESS                 0x00
+#define FIRMWARE_RSI9113                "rsi_91x.fw"
 #define QUEUE_NOT_FULL                  1
 #define QUEUE_FULL                      0
 

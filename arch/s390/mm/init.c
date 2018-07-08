@@ -39,7 +39,6 @@
 #include <asm/sections.h>
 #include <asm/ctl_reg.h>
 #include <asm/sclp.h>
-#include <asm/set_memory.h>
 
 pgd_t swapper_pg_dir[PTRS_PER_PGD] __section(.bss..swapper_pg_dir);
 
@@ -81,7 +80,6 @@ void __init paging_init(void)
 {
 	unsigned long max_zone_pfns[MAX_NR_ZONES];
 	unsigned long pgd_type, asce_bits;
-	psw_t psw;
 
 	init_mm.pgd = swapper_pg_dir;
 	if (VMALLOC_END > (1UL << 42)) {
@@ -101,10 +99,7 @@ void __init paging_init(void)
 	__ctl_load(S390_lowcore.kernel_asce, 1, 1);
 	__ctl_load(S390_lowcore.kernel_asce, 7, 7);
 	__ctl_load(S390_lowcore.kernel_asce, 13, 13);
-	psw.mask = __extract_psw();
-	psw_bits(psw).dat = 1;
-	psw_bits(psw).as = PSW_BITS_AS_HOME;
-	__load_psw_mask(psw.mask);
+	__arch_local_irq_stosm(0x04);
 
 	sparse_memory_present_with_active_regions(MAX_NUMNODES);
 	sparse_init();
@@ -166,17 +161,43 @@ unsigned long memory_block_size_bytes(void)
 }
 
 #ifdef CONFIG_MEMORY_HOTPLUG
-int arch_add_memory(int nid, u64 start, u64 size, bool want_memblock)
+int arch_add_memory(int nid, u64 start, u64 size, bool for_device)
 {
+	unsigned long zone_start_pfn, zone_end_pfn, nr_pages;
 	unsigned long start_pfn = PFN_DOWN(start);
 	unsigned long size_pages = PFN_DOWN(size);
-	int rc;
+	pg_data_t *pgdat = NODE_DATA(nid);
+	struct zone *zone;
+	int rc, i;
 
 	rc = vmem_add_mapping(start, size);
 	if (rc)
 		return rc;
 
-	rc = __add_pages(nid, start_pfn, size_pages, want_memblock);
+	for (i = 0; i < MAX_NR_ZONES; i++) {
+		zone = pgdat->node_zones + i;
+		if (zone_idx(zone) != ZONE_MOVABLE) {
+			/* Add range within existing zone limits, if possible */
+			zone_start_pfn = zone->zone_start_pfn;
+			zone_end_pfn = zone->zone_start_pfn +
+				       zone->spanned_pages;
+		} else {
+			/* Add remaining range to ZONE_MOVABLE */
+			zone_start_pfn = start_pfn;
+			zone_end_pfn = start_pfn + size_pages;
+		}
+		if (start_pfn < zone_start_pfn || start_pfn >= zone_end_pfn)
+			continue;
+		nr_pages = (start_pfn + size_pages > zone_end_pfn) ?
+			   zone_end_pfn - start_pfn : size_pages;
+		rc = __add_pages(nid, zone, start_pfn, nr_pages);
+		if (rc)
+			break;
+		start_pfn += nr_pages;
+		size_pages -= nr_pages;
+		if (!size_pages)
+			break;
+	}
 	if (rc)
 		vmem_remove_mapping(start, size);
 	return rc;

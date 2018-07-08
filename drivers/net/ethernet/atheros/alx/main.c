@@ -314,7 +314,7 @@ static int alx_poll(struct napi_struct *napi, int budget)
 	napi_complete_done(&np->napi, work);
 
 	/* enable interrupt */
-	if (alx->hw.pdev->msix_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSIX) {
 		alx_mask_msix(hw, np->vec_idx, false);
 	} else {
 		spin_lock_irqsave(&alx->irq_lock, flags);
@@ -811,7 +811,7 @@ static void alx_config_vector_mapping(struct alx_priv *alx)
 	u32 tbl[2] = {0, 0};
 	int i, vector, idx, shift;
 
-	if (alx->hw.pdev->msix_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSIX) {
 		/* tx mappings */
 		for (i = 0, vector = 1; i < alx->num_txq; i++, vector++) {
 			idx = txq_vec_mapping_shift[i * 2];
@@ -828,19 +828,29 @@ static void alx_config_vector_mapping(struct alx_priv *alx)
 	alx_write_mem32(hw, ALX_MSI_ID_MAP, 0);
 }
 
-static int alx_enable_msix(struct alx_priv *alx)
+static bool alx_enable_msix(struct alx_priv *alx)
 {
-	int err, num_vec, num_txq, num_rxq;
+	int i, err, num_vec, num_txq, num_rxq;
 
 	num_txq = min_t(int, num_online_cpus(), ALX_MAX_TX_QUEUES);
 	num_rxq = 1;
 	num_vec = max_t(int, num_txq, num_rxq) + 1;
 
-	err = pci_alloc_irq_vectors(alx->hw.pdev, num_vec, num_vec,
-			PCI_IRQ_MSIX);
-	if (err < 0) {
+	alx->msix_entries = kcalloc(num_vec, sizeof(struct msix_entry),
+				    GFP_KERNEL);
+	if (!alx->msix_entries) {
+		netdev_warn(alx->dev, "Allocation of msix entries failed!\n");
+		return false;
+	}
+
+	for (i = 0; i < num_vec; i++)
+		alx->msix_entries[i].entry = i;
+
+	err = pci_enable_msix(alx->hw.pdev, alx->msix_entries, num_vec);
+	if (err) {
+		kfree(alx->msix_entries);
 		netdev_warn(alx->dev, "Enabling MSI-X interrupts failed!\n");
-		return err;
+		return false;
 	}
 
 	alx->num_vec = num_vec;
@@ -848,7 +858,7 @@ static int alx_enable_msix(struct alx_priv *alx)
 	alx->num_txq = num_txq;
 	alx->num_rxq = num_rxq;
 
-	return err;
+	return true;
 }
 
 static int alx_request_msix(struct alx_priv *alx)
@@ -856,7 +866,7 @@ static int alx_request_msix(struct alx_priv *alx)
 	struct net_device *netdev = alx->dev;
 	int i, err, vector = 0, free_vector = 0;
 
-	err = request_irq(pci_irq_vector(alx->hw.pdev, 0), alx_intr_msix_misc,
+	err = request_irq(alx->msix_entries[0].vector, alx_intr_msix_misc,
 			  0, netdev->name, alx);
 	if (err)
 		goto out_err;
@@ -879,7 +889,7 @@ static int alx_request_msix(struct alx_priv *alx)
 			sprintf(np->irq_lbl, "%s-unused", netdev->name);
 
 		np->vec_idx = vector;
-		err = request_irq(pci_irq_vector(alx->hw.pdev, vector),
+		err = request_irq(alx->msix_entries[vector].vector,
 				  alx_intr_msix_ring, 0, np->irq_lbl, np);
 		if (err)
 			goto out_free;
@@ -887,31 +897,47 @@ static int alx_request_msix(struct alx_priv *alx)
 	return 0;
 
 out_free:
-	free_irq(pci_irq_vector(alx->hw.pdev, free_vector++), alx);
+	free_irq(alx->msix_entries[free_vector++].vector, alx);
 
 	vector--;
 	for (i = 0; i < vector; i++)
-		free_irq(pci_irq_vector(alx->hw.pdev,free_vector++),
+		free_irq(alx->msix_entries[free_vector++].vector,
 			 alx->qnapi[i]);
 
 out_err:
 	return err;
 }
 
-static int alx_init_intr(struct alx_priv *alx)
+static void alx_init_intr(struct alx_priv *alx, bool msix)
 {
-	int ret;
+	if (msix) {
+		if (alx_enable_msix(alx))
+			alx->flags |= ALX_FLAG_USING_MSIX;
+	}
 
-	ret = pci_alloc_irq_vectors(alx->hw.pdev, 1, 1,
-			PCI_IRQ_MSI | PCI_IRQ_LEGACY);
-	if (ret < 0)
-		return ret;
+	if (!(alx->flags & ALX_FLAG_USING_MSIX)) {
+		alx->num_vec = 1;
+		alx->num_napi = 1;
+		alx->num_txq = 1;
+		alx->num_rxq = 1;
 
-	alx->num_vec = 1;
-	alx->num_napi = 1;
-	alx->num_txq = 1;
-	alx->num_rxq = 1;
-	return 0;
+		if (!pci_enable_msi(alx->hw.pdev))
+			alx->flags |= ALX_FLAG_USING_MSI;
+	}
+}
+
+static void alx_disable_advanced_intr(struct alx_priv *alx)
+{
+	if (alx->flags & ALX_FLAG_USING_MSIX) {
+		kfree(alx->msix_entries);
+		pci_disable_msix(alx->hw.pdev);
+		alx->flags &= ~ALX_FLAG_USING_MSIX;
+	}
+
+	if (alx->flags & ALX_FLAG_USING_MSI) {
+		pci_disable_msi(alx->hw.pdev);
+		alx->flags &= ~ALX_FLAG_USING_MSI;
+	}
 }
 
 static void alx_irq_enable(struct alx_priv *alx)
@@ -924,11 +950,10 @@ static void alx_irq_enable(struct alx_priv *alx)
 	alx_write_mem32(hw, ALX_IMR, alx->int_mask);
 	alx_post_write(hw);
 
-	if (alx->hw.pdev->msix_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSIX)
 		/* enable all msix irqs */
 		for (i = 0; i < alx->num_vec; i++)
 			alx_mask_msix(hw, i, false);
-	}
 }
 
 static void alx_irq_disable(struct alx_priv *alx)
@@ -940,13 +965,13 @@ static void alx_irq_disable(struct alx_priv *alx)
 	alx_write_mem32(hw, ALX_IMR, 0);
 	alx_post_write(hw);
 
-	if (alx->hw.pdev->msix_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSIX) {
 		for (i = 0; i < alx->num_vec; i++) {
 			alx_mask_msix(hw, i, true);
-			synchronize_irq(pci_irq_vector(alx->hw.pdev, i));
+			synchronize_irq(alx->msix_entries[i].vector);
 		}
 	} else {
-		synchronize_irq(pci_irq_vector(alx->hw.pdev, 0));
+		synchronize_irq(alx->hw.pdev->irq);
 	}
 }
 
@@ -956,11 +981,8 @@ static int alx_realloc_resources(struct alx_priv *alx)
 
 	alx_free_rings(alx);
 	alx_free_napis(alx);
-	pci_free_irq_vectors(alx->hw.pdev);
-
-	err = alx_init_intr(alx);
-	if (err)
-		return err;
+	alx_disable_advanced_intr(alx);
+	alx_init_intr(alx, false);
 
 	err = alx_alloc_napis(alx);
 	if (err)
@@ -982,7 +1004,7 @@ static int alx_request_irq(struct alx_priv *alx)
 
 	msi_ctrl = (hw->imt >> 1) << ALX_MSI_RETRANS_TM_SHIFT;
 
-	if (alx->hw.pdev->msix_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSIX) {
 		alx_write_mem32(hw, ALX_MSI_RETRANS_TIMER, msi_ctrl);
 		err = alx_request_msix(alx);
 		if (!err)
@@ -994,20 +1016,20 @@ static int alx_request_irq(struct alx_priv *alx)
 			goto out;
 	}
 
-	if (alx->hw.pdev->msi_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSI) {
 		alx_write_mem32(hw, ALX_MSI_RETRANS_TIMER,
 				msi_ctrl | ALX_MSI_MASK_SEL_LINE);
-		err = request_irq(pci_irq_vector(pdev, 0), alx_intr_msi, 0,
+		err = request_irq(pdev->irq, alx_intr_msi, 0,
 				  alx->dev->name, alx);
 		if (!err)
 			goto out;
-
 		/* fall back to legacy interrupt */
-		pci_free_irq_vectors(alx->hw.pdev);
+		alx->flags &= ~ALX_FLAG_USING_MSI;
+		pci_disable_msi(alx->hw.pdev);
 	}
 
 	alx_write_mem32(hw, ALX_MSI_RETRANS_TIMER, 0);
-	err = request_irq(pci_irq_vector(pdev, 0), alx_intr_legacy, IRQF_SHARED,
+	err = request_irq(pdev->irq, alx_intr_legacy, IRQF_SHARED,
 			  alx->dev->name, alx);
 out:
 	if (!err)
@@ -1020,15 +1042,18 @@ out:
 static void alx_free_irq(struct alx_priv *alx)
 {
 	struct pci_dev *pdev = alx->hw.pdev;
-	int i;
+	int i, vector = 0;
 
-	free_irq(pci_irq_vector(pdev, 0), alx);
-	if (alx->hw.pdev->msix_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSIX) {
+		free_irq(alx->msix_entries[vector++].vector, alx);
 		for (i = 0; i < alx->num_napi; i++)
-			free_irq(pci_irq_vector(pdev, i + 1), alx->qnapi[i]);
+			free_irq(alx->msix_entries[vector++].vector,
+				 alx->qnapi[i]);
+	} else {
+		free_irq(pdev->irq, alx);
 	}
 
-	pci_free_irq_vectors(pdev);
+	alx_disable_advanced_intr(alx);
 }
 
 static int alx_identify_hw(struct alx_priv *alx)
@@ -1196,12 +1221,7 @@ static int __alx_open(struct alx_priv *alx, bool resume)
 {
 	int err;
 
-	err = alx_enable_msix(alx);
-	if (err < 0) {
-		err = alx_init_intr(alx);
-		if (err)
-			return err;
-	}
+	alx_init_intr(alx, true);
 
 	if (!resume)
 		netif_carrier_off(alx->dev);
@@ -1244,7 +1264,7 @@ out_free_rings:
 	alx_free_rings(alx);
 	alx_free_napis(alx);
 out_disable_adv_intr:
-	pci_free_irq_vectors(alx->hw.pdev);
+	alx_disable_advanced_intr(alx);
 	return err;
 }
 
@@ -1617,11 +1637,11 @@ static void alx_poll_controller(struct net_device *netdev)
 	struct alx_priv *alx = netdev_priv(netdev);
 	int i;
 
-	if (alx->hw.pdev->msix_enabled) {
+	if (alx->flags & ALX_FLAG_USING_MSIX) {
 		alx_intr_msix_misc(0, alx);
 		for (i = 0; i < alx->num_txq; i++)
 			alx_intr_msix_ring(0, alx->qnapi[i]);
-	} else if (alx->hw.pdev->msi_enabled)
+	} else if (alx->flags & ALX_FLAG_USING_MSI)
 		alx_intr_msi(0, alx);
 	else
 		alx_intr_legacy(0, alx);
@@ -1763,7 +1783,7 @@ static int alx_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	netdev->netdev_ops = &alx_netdev_ops;
 	netdev->ethtool_ops = &alx_ethtool_ops;
-	netdev->irq = pci_irq_vector(pdev, 0);
+	netdev->irq = pdev->irq;
 	netdev->watchdog_timeo = ALX_WATCHDOG_TIME;
 
 	if (ent->driver_data & ALX_DEV_QUIRK_MSI_INTX_DISABLE_BUG)

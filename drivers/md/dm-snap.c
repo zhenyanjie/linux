@@ -1590,7 +1590,7 @@ static void full_bio_end_io(struct bio *bio)
 {
 	void *callback_data = bio->bi_private;
 
-	dm_kcopyd_do_callback(callback_data, 0, bio->bi_status ? 1 : 0);
+	dm_kcopyd_do_callback(callback_data, 0, bio->bi_error ? 1 : 0);
 }
 
 static void start_full_bio(struct dm_snap_pending_exception *pe,
@@ -1690,7 +1690,7 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio)
 	/* Full snapshots are not usable */
 	/* To get here the table must be live so s->active is always set. */
 	if (!s->valid)
-		return DM_MAPIO_KILL;
+		return -EIO;
 
 	/* FIXME: should only take write lock if we need
 	 * to copy an exception */
@@ -1698,7 +1698,7 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio)
 
 	if (!s->valid || (unlikely(s->snapshot_overflowed) &&
 	    bio_data_dir(bio) == WRITE)) {
-		r = DM_MAPIO_KILL;
+		r = -EIO;
 		goto out_unlock;
 	}
 
@@ -1723,7 +1723,7 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio)
 
 			if (!s->valid || s->snapshot_overflowed) {
 				free_pending_exception(pe);
-				r = DM_MAPIO_KILL;
+				r = -EIO;
 				goto out_unlock;
 			}
 
@@ -1741,7 +1741,7 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio)
 					DMERR("Snapshot overflowed: Unable to allocate exception.");
 				} else
 					__invalidate_snapshot(s, -ENOMEM);
-				r = DM_MAPIO_KILL;
+				r = -EIO;
 				goto out_unlock;
 			}
 		}
@@ -1851,15 +1851,14 @@ out_unlock:
 	return r;
 }
 
-static int snapshot_end_io(struct dm_target *ti, struct bio *bio,
-		blk_status_t *error)
+static int snapshot_end_io(struct dm_target *ti, struct bio *bio, int error)
 {
 	struct dm_snapshot *s = ti->private;
 
 	if (is_bio_tracked(bio))
 		stop_tracking_chunk(s, bio);
 
-	return DM_ENDIO_DONE;
+	return 0;
 }
 
 static void snapshot_merge_presuspend(struct dm_target *ti)
@@ -2303,8 +2302,8 @@ static int origin_map(struct dm_target *ti, struct bio *bio)
 	return do_origin(o->dev, bio);
 }
 
-static long origin_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
-		long nr_pages, void **kaddr, pfn_t *pfn)
+static long origin_direct_access(struct dm_target *ti, sector_t sector,
+		void **kaddr, pfn_t *pfn, long size)
 {
 	DMWARN("device does not support dax.");
 	return -EIO;
@@ -2369,7 +2368,7 @@ static struct target_type origin_target = {
 	.postsuspend = origin_postsuspend,
 	.status  = origin_status,
 	.iterate_devices = origin_iterate_devices,
-	.direct_access = origin_dax_direct_access,
+	.direct_access = origin_direct_access,
 };
 
 static struct target_type snapshot_target = {

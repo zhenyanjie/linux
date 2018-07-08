@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 
 #include <drm/drm_edid.h>
+#include <video/omap-panel-data.h>
 
 #include "../dss/omapdss.h"
 
@@ -226,6 +227,8 @@ static struct omap_dss_driver dvic_driver = {
 	.set_timings	= dvic_set_timings,
 	.get_timings	= dvic_get_timings,
 	.check_timings	= dvic_check_timings,
+
+	.get_resolution	= omapdss_default_get_resolution,
 
 	.read_edid	= dvic_read_edid,
 	.detect		= dvic_detect,

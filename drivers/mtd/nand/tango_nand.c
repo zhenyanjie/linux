@@ -231,13 +231,12 @@ static void tango_dma_callback(void *arg)
 	complete(arg);
 }
 
-static int do_dma(struct tango_nfc *nfc, enum dma_data_direction dir, int cmd,
-		  const void *buf, int len, int page)
+static int do_dma(struct tango_nfc *nfc, int dir, int cmd, const void *buf,
+		  int len, int page)
 {
 	void __iomem *addr = nfc->reg_base + NFC_STATUS;
 	struct dma_chan *chan = nfc->chan;
 	struct dma_async_tx_descriptor *desc;
-	enum dma_transfer_direction tdir;
 	struct scatterlist sg;
 	struct completion tx_done;
 	int err = -EIO;
@@ -247,8 +246,7 @@ static int do_dma(struct tango_nfc *nfc, enum dma_data_direction dir, int cmd,
 	if (dma_map_sg(chan->device->dev, &sg, 1, dir) != 1)
 		return -EIO;
 
-	tdir = dir == DMA_TO_DEVICE ? DMA_MEM_TO_DEV : DMA_DEV_TO_MEM;
-	desc = dmaengine_prep_slave_sg(chan, &sg, 1, tdir, DMA_PREP_INTERRUPT);
+	desc = dmaengine_prep_slave_sg(chan, &sg, 1, dir, DMA_PREP_INTERRUPT);
 	if (!desc)
 		goto dma_unmap;
 
@@ -303,7 +301,7 @@ static int tango_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 			    const u8 *buf, int oob_required, int page)
 {
 	struct tango_nfc *nfc = to_tango_nfc(chip->controller);
-	int err, status, len = mtd->writesize;
+	int err, len = mtd->writesize;
 
 	/* Calling tango_write_oob() would send PAGEPROG twice */
 	if (oob_required)
@@ -313,10 +311,6 @@ static int tango_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	err = do_dma(nfc, DMA_TO_DEVICE, NFC_WRITE, buf, len, page);
 	if (err)
 		return err;
-
-	status = chip->waitfunc(mtd, chip);
-	if (status & NAND_STATUS_FAIL)
-		return -EIO;
 
 	return 0;
 }
@@ -344,7 +338,7 @@ static void aux_write(struct nand_chip *chip, const u8 **buf, int len, int *pos)
 
 	if (!*buf) {
 		/* skip over "len" bytes */
-		chip->cmdfunc(mtd, NAND_CMD_RNDIN, *pos, -1);
+		chip->cmdfunc(mtd, NAND_CMD_SEQIN, *pos, -1);
 	} else {
 		tango_write_buf(mtd, *buf, len);
 		*buf += len;
@@ -435,16 +429,9 @@ static int tango_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 static int tango_write_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 				const u8 *buf, int oob_required, int page)
 {
-	int status;
-
 	chip->cmdfunc(mtd, NAND_CMD_SEQIN, 0, page);
 	raw_write(chip, buf, chip->oob_poi);
 	chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
-
-	status = chip->waitfunc(mtd, chip);
-	if (status & NAND_STATUS_FAIL)
-		return -EIO;
-
 	return 0;
 }
 
@@ -495,8 +482,9 @@ static u32 to_ticks(int kHz, int ps)
 	return DIV_ROUND_UP_ULL((u64)kHz * ps, NSEC_PER_SEC);
 }
 
-static int tango_set_timings(struct mtd_info *mtd, int csline,
-			     const struct nand_data_interface *conf)
+static int tango_set_timings(struct mtd_info *mtd,
+			     const struct nand_data_interface *conf,
+			     bool check_only)
 {
 	const struct nand_sdr_timings *sdr = nand_get_sdr_timings(conf);
 	struct nand_chip *chip = mtd_to_nand(mtd);
@@ -508,7 +496,7 @@ static int tango_set_timings(struct mtd_info *mtd, int csline,
 	if (IS_ERR(sdr))
 		return PTR_ERR(sdr);
 
-	if (csline == NAND_DATA_IFACE_CHECK_ONLY)
+	if (check_only)
 		return 0;
 
 	Trdy = to_ticks(kHz, sdr->tCEA_max - sdr->tREA_max);

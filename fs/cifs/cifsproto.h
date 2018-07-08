@@ -480,7 +480,8 @@ extern int CIFSSMBCopy(unsigned int xid,
 extern ssize_t CIFSSMBQAllEAs(const unsigned int xid, struct cifs_tcon *tcon,
 			const unsigned char *searchName,
 			const unsigned char *ea_name, char *EAData,
-			size_t bufsize, struct cifs_sb_info *cifs_sb);
+			size_t bufsize, const struct nls_table *nls_codepage,
+			int remap_special_chars);
 extern int CIFSSMBSetEA(const unsigned int xid, struct cifs_tcon *tcon,
 		const char *fileName, const char *ea_name,
 		const void *ea_value, const __u16 ea_value_len,
@@ -534,7 +535,4 @@ int __cifs_calc_signature(struct smb_rqst *rqst,
 			struct shash_desc *shash);
 enum securityEnum cifs_select_sectype(struct TCP_Server_Info *,
 					enum securityEnum);
-struct cifs_aio_ctx *cifs_aio_ctx_alloc(void);
-void cifs_aio_ctx_release(struct kref *refcount);
-int setup_aio_ctx_iter(struct cifs_aio_ctx *ctx, struct iov_iter *iter, int rw);
 #endif			/* _CIFSPROTO_H */

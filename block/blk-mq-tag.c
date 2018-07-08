@@ -96,10 +96,7 @@ static int __blk_mq_get_tag(struct blk_mq_alloc_data *data,
 	if (!(data->flags & BLK_MQ_REQ_INTERNAL) &&
 	    !hctx_may_queue(data->hctx, bt))
 		return -1;
-	if (data->shallow_depth)
-		return __sbitmap_queue_get_shallow(bt, data->shallow_depth);
-	else
-		return __sbitmap_queue_get(bt);
+	return __sbitmap_queue_get(bt);
 }
 
 unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)

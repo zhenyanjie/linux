@@ -9,10 +9,8 @@ struct scsi_request {
 	unsigned char	__cmd[BLK_MAX_CDB];
 	unsigned char	*cmd;
 	unsigned short	cmd_len;
-	int		result;
 	unsigned int	sense_len;
 	unsigned int	resid_len;	/* residual count */
-	int		retries;
 	void		*sense;
 };
 
@@ -27,6 +25,6 @@ static inline void scsi_req_free_cmd(struct scsi_request *req)
 		kfree(req->cmd);
 }
 
-void scsi_req_init(struct scsi_request *req);
+void scsi_req_init(struct request *);
 
 #endif /* _SCSI_SCSI_REQUEST_H */

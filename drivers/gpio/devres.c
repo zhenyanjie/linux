@@ -136,7 +136,7 @@ EXPORT_SYMBOL(devm_gpiod_get_index);
  * GPIO descriptors returned from this function are automatically disposed on
  * driver detach.
  *
- * On successful request the GPIO pin is configured in accordance with
+ * On successfull request the GPIO pin is configured in accordance with
  * provided @flags.
  */
 struct gpio_desc *devm_fwnode_get_index_gpiod_from_child(struct device *dev,

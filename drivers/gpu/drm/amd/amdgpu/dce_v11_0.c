@@ -20,7 +20,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  *
  */
-#include <drm/drmP.h>
+#include "drmP.h"
 #include "amdgpu.h"
 #include "amdgpu_pm.h"
 #include "amdgpu_i2c.h"
@@ -2217,7 +2217,7 @@ static int dce_v11_0_crtc_do_set_base(struct drm_crtc *crtc,
 	if (!atomic && fb && fb != crtc->primary->fb) {
 		amdgpu_fb = to_amdgpu_framebuffer(fb);
 		abo = gem_to_amdgpu_bo(amdgpu_fb->obj);
-		r = amdgpu_bo_reserve(abo, true);
+		r = amdgpu_bo_reserve(abo, false);
 		if (unlikely(r != 0))
 			return r;
 		amdgpu_bo_unpin(abo);
@@ -2612,7 +2612,7 @@ static int dce_v11_0_crtc_cursor_set2(struct drm_crtc *crtc,
 unpin:
 	if (amdgpu_crtc->cursor_bo) {
 		struct amdgpu_bo *aobj = gem_to_amdgpu_bo(amdgpu_crtc->cursor_bo);
-		ret = amdgpu_bo_reserve(aobj, true);
+		ret = amdgpu_bo_reserve(aobj, false);
 		if (likely(ret == 0)) {
 			amdgpu_bo_unpin(aobj);
 			amdgpu_bo_unreserve(aobj);
@@ -2641,8 +2641,7 @@ static void dce_v11_0_cursor_reset(struct drm_crtc *crtc)
 }
 
 static int dce_v11_0_crtc_gamma_set(struct drm_crtc *crtc, u16 *red, u16 *green,
-				    u16 *blue, uint32_t size,
-				    struct drm_modeset_acquire_ctx *ctx)
+				    u16 *blue, uint32_t size)
 {
 	struct amdgpu_crtc *amdgpu_crtc = to_amdgpu_crtc(crtc);
 	int i;
@@ -2743,7 +2742,7 @@ static void dce_v11_0_crtc_disable(struct drm_crtc *crtc)
 
 		amdgpu_fb = to_amdgpu_framebuffer(crtc->primary->fb);
 		abo = gem_to_amdgpu_bo(amdgpu_fb->obj);
-		r = amdgpu_bo_reserve(abo, true);
+		r = amdgpu_bo_reserve(abo, false);
 		if (unlikely(r))
 			DRM_ERROR("failed to reserve abo before unpin\n");
 		else {
@@ -2998,19 +2997,19 @@ static int dce_v11_0_sw_init(void *handle)
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
 	for (i = 0; i < adev->mode_info.num_crtc; i++) {
-		r = amdgpu_irq_add_id(adev, AMDGPU_IH_CLIENTID_LEGACY, i + 1, &adev->crtc_irq);
+		r = amdgpu_irq_add_id(adev, i + 1, &adev->crtc_irq);
 		if (r)
 			return r;
 	}
 
 	for (i = 8; i < 20; i += 2) {
-		r = amdgpu_irq_add_id(adev, AMDGPU_IH_CLIENTID_LEGACY, i, &adev->pageflip_irq);
+		r = amdgpu_irq_add_id(adev, i, &adev->pageflip_irq);
 		if (r)
 			return r;
 	}
 
 	/* HPD hotplug */
-	r = amdgpu_irq_add_id(adev, AMDGPU_IH_CLIENTID_LEGACY, 42, &adev->hpd_irq);
+	r = amdgpu_irq_add_id(adev, 42, &adev->hpd_irq);
 	if (r)
 		return r;
 
@@ -3453,7 +3452,7 @@ static int dce_v11_0_crtc_irq(struct amdgpu_device *adev,
 	uint32_t disp_int = RREG32(interrupt_status_offsets[crtc].reg);
 	unsigned irq_type = amdgpu_crtc_idx_to_irq_type(adev, crtc);
 
-	switch (entry->src_data[0]) {
+	switch (entry->src_data) {
 	case 0: /* vblank */
 		if (disp_int & interrupt_status_offsets[crtc].vblank)
 			dce_v11_0_crtc_vblank_int_ack(adev, crtc);
@@ -3476,7 +3475,7 @@ static int dce_v11_0_crtc_irq(struct amdgpu_device *adev,
 
 		break;
 	default:
-		DRM_DEBUG("Unhandled interrupt: %d %d\n", entry->src_id, entry->src_data[0]);
+		DRM_DEBUG("Unhandled interrupt: %d %d\n", entry->src_id, entry->src_data);
 		break;
 	}
 
@@ -3490,12 +3489,12 @@ static int dce_v11_0_hpd_irq(struct amdgpu_device *adev,
 	uint32_t disp_int, mask;
 	unsigned hpd;
 
-	if (entry->src_data[0] >= adev->mode_info.num_hpd) {
-		DRM_DEBUG("Unhandled interrupt: %d %d\n", entry->src_id, entry->src_data[0]);
+	if (entry->src_data >= adev->mode_info.num_hpd) {
+		DRM_DEBUG("Unhandled interrupt: %d %d\n", entry->src_id, entry->src_data);
 		return 0;
 	}
 
-	hpd = entry->src_data[0];
+	hpd = entry->src_data;
 	disp_int = RREG32(interrupt_status_offsets[hpd].reg);
 	mask = interrupt_status_offsets[hpd].hpd;
 

@@ -905,7 +905,7 @@ int ll_writepage(struct page *vmpage, struct writeback_control *wbc)
 	bool redirtied = false;
 	bool unlocked = false;
 	int result;
-	u16 refcheck;
+	int refcheck;
 
 	LASSERT(PageLocked(vmpage));
 	LASSERT(!PageWriteback(vmpage));

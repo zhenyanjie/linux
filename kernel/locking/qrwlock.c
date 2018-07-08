@@ -20,7 +20,6 @@
 #include <linux/cpumask.h>
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
-#include <linux/spinlock.h>
 #include <asm/qrwlock.h>
 
 /*

@@ -15,12 +15,12 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
-#include <drm/drm_flip_work.h>
-#include <drm/drm_mode.h>
-
 #include "mdp4_kms.h"
+
+#include <drm/drm_mode.h>
+#include "drm_crtc.h"
+#include "drm_crtc_helper.h"
+#include "drm_flip_work.h"
 
 struct mdp4_crtc {
 	struct drm_crtc base;
@@ -114,9 +114,15 @@ static void complete_flip(struct drm_crtc *crtc, struct drm_file *file)
 	spin_lock_irqsave(&dev->event_lock, flags);
 	event = mdp4_crtc->event;
 	if (event) {
-		mdp4_crtc->event = NULL;
-		DBG("%s: send event: %p", mdp4_crtc->name, event);
-		drm_crtc_send_vblank_event(crtc, event);
+		/* if regular vblank case (!file) or if cancel-flip from
+		 * preclose on file that requested flip, then send the
+		 * event:
+		 */
+		if (!file || (event->base.file_priv == file)) {
+			mdp4_crtc->event = NULL;
+			DBG("%s: send event: %p", mdp4_crtc->name, event);
+			drm_crtc_send_vblank_event(crtc, event);
+		}
 	}
 	spin_unlock_irqrestore(&dev->event_lock, flags);
 }
@@ -126,9 +132,8 @@ static void unref_cursor_worker(struct drm_flip_work *work, void *val)
 	struct mdp4_crtc *mdp4_crtc =
 		container_of(work, struct mdp4_crtc, unref_cursor_work);
 	struct mdp4_kms *mdp4_kms = get_kms(&mdp4_crtc->base);
-	struct msm_kms *kms = &mdp4_kms->base.base;
 
-	msm_gem_put_iova(val, kms->aspace);
+	msm_gem_put_iova(val, mdp4_kms->id);
 	drm_gem_object_unreference_unlocked(val);
 }
 
@@ -361,7 +366,6 @@ static void update_cursor(struct drm_crtc *crtc)
 {
 	struct mdp4_crtc *mdp4_crtc = to_mdp4_crtc(crtc);
 	struct mdp4_kms *mdp4_kms = get_kms(crtc);
-	struct msm_kms *kms = &mdp4_kms->base.base;
 	enum mdp4_dma dma = mdp4_crtc->dma;
 	unsigned long flags;
 
@@ -374,7 +378,7 @@ static void update_cursor(struct drm_crtc *crtc)
 		if (next_bo) {
 			/* take a obj ref + iova ref when we start scanning out: */
 			drm_gem_object_reference(next_bo);
-			msm_gem_get_iova(next_bo, kms->aspace, &iova);
+			msm_gem_get_iova_locked(next_bo, mdp4_kms->id, &iova);
 
 			/* enable cursor: */
 			mdp4_write(mdp4_kms, REG_MDP4_DMA_CURSOR_SIZE(dma),
@@ -411,7 +415,6 @@ static int mdp4_crtc_cursor_set(struct drm_crtc *crtc,
 {
 	struct mdp4_crtc *mdp4_crtc = to_mdp4_crtc(crtc);
 	struct mdp4_kms *mdp4_kms = get_kms(crtc);
-	struct msm_kms *kms = &mdp4_kms->base.base;
 	struct drm_device *dev = crtc->dev;
 	struct drm_gem_object *cursor_bo, *old_bo;
 	unsigned long flags;
@@ -432,7 +435,7 @@ static int mdp4_crtc_cursor_set(struct drm_crtc *crtc,
 	}
 
 	if (cursor_bo) {
-		ret = msm_gem_get_iova(cursor_bo, kms->aspace, &iova);
+		ret = msm_gem_get_iova(cursor_bo, mdp4_kms->id, &iova);
 		if (ret)
 			goto fail;
 	} else {

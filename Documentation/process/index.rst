@@ -3,7 +3,6 @@
 	\renewcommand\thesection*
 	\renewcommand\thesubsection*
 
-.. _process_index:
 
 Working with the kernel development community
 =============================================

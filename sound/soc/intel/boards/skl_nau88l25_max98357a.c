@@ -266,21 +266,21 @@ static int skylake_nau8825_fe_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
-static const unsigned int rates[] = {
+static unsigned int rates[] = {
 	48000,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_rates = {
+static struct snd_pcm_hw_constraint_list constraints_rates = {
 	.count = ARRAY_SIZE(rates),
 	.list  = rates,
 	.mask = 0,
 };
 
-static const unsigned int channels[] = {
+static unsigned int channels[] = {
 	2,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_channels = {
+static struct snd_pcm_hw_constraint_list constraints_channels = {
 	.count = ARRAY_SIZE(channels),
 	.list = channels,
 	.mask = 0,
@@ -348,11 +348,11 @@ static int skylake_dmic_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
-static const unsigned int channels_dmic[] = {
+static unsigned int channels_dmic[] = {
 	2, 4,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_dmic_channels = {
+static struct snd_pcm_hw_constraint_list constraints_dmic_channels = {
 	.count = ARRAY_SIZE(channels_dmic),
 	.list = channels_dmic,
 	.mask = 0,
@@ -384,11 +384,11 @@ static const struct snd_soc_ops skylake_dmic_ops = {
 	.startup = skylake_dmic_startup,
 };
 
-static const unsigned int rates_16000[] = {
+static unsigned int rates_16000[] = {
 	16000,
 };
 
-static const struct snd_pcm_hw_constraint_list constraints_16000 = {
+static struct snd_pcm_hw_constraint_list constraints_16000 = {
 	.count = ARRAY_SIZE(rates_16000),
 	.list  = rates_16000,
 };

@@ -34,7 +34,6 @@ struct test {
 		int (*get_nr)(void);
 		const char *(*get_desc)(int subtest);
 	} subtest;
-	bool (*is_supported)(void);
 };
 
 /* Tests */
@@ -63,7 +62,6 @@ int test__sample_parsing(int subtest);
 int test__keep_tracking(int subtest);
 int test__parse_no_sample_id_all(int subtest);
 int test__dwarf_unwind(int subtest);
-int test__expr(int subtest);
 int test__hists_filter(int subtest);
 int test__mmap_thread_lookup(int subtest);
 int test__thread_mg_share(int subtest);
@@ -99,8 +97,6 @@ int test__clang(int subtest);
 const char *test__clang_subtest_get_desc(int subtest);
 int test__clang_subtest_get_nr(void);
 int test__unit_number__scnprint(int subtest);
-
-bool test__bp_signal_is_supported(void);
 
 #if defined(__arm__) || defined(__aarch64__)
 #ifdef HAVE_DWARF_UNWIND_SUPPORT

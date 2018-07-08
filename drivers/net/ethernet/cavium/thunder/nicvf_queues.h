@@ -10,7 +10,6 @@
 #define NICVF_QUEUES_H
 
 #include <linux/netdevice.h>
-#include <linux/iommu.h>
 #include "q_struct.h"
 
 #define MAX_QUEUE_SET			128
@@ -214,12 +213,6 @@ struct q_desc_mem {
 	void		*unalign_base;
 };
 
-struct pgcache {
-	struct page	*page;
-	int		ref_count;
-	u64		dma_addr;
-};
-
 struct rbdr {
 	bool		enable;
 	u32		dma_size;
@@ -229,13 +222,6 @@ struct rbdr {
 	u32		head;
 	u32		tail;
 	struct q_desc_mem   dmem;
-	bool		is_xdp;
-
-	/* For page recycling */
-	int		pgidx;
-	int		pgcnt;
-	int		pgalloc;
-	struct pgcache	*pgcache;
 } ____cacheline_aligned_in_smp;
 
 struct rcv_queue {
@@ -272,10 +258,6 @@ struct snd_queue {
 	u32		tail;
 	u64		*skbuff;
 	void		*desc;
-	u64		*xdp_page;
-	u16		xdp_desc_cnt;
-	u16		xdp_free_cnt;
-	bool		is_xdp;
 
 #define	TSO_HEADER_SIZE	128
 	/* For TSO segment's header */
@@ -319,14 +301,6 @@ struct queue_set {
 
 #define	CQ_ERR_MASK	(CQ_WR_FULL | CQ_WR_DISABLE | CQ_WR_FAULT)
 
-static inline u64 nicvf_iova_to_phys(struct nicvf *nic, dma_addr_t dma_addr)
-{
-	/* Translation is installed only when IOMMU is present */
-	if (nic->iommu_domain)
-		return iommu_iova_to_phys(nic->iommu_domain, dma_addr);
-	return dma_addr;
-}
-
 void nicvf_unmap_sndq_buffers(struct nicvf *nic, struct snd_queue *sq,
 			      int hdr_sqe, u8 subdesc_cnt);
 void nicvf_config_vlan_stripping(struct nicvf *nic,
@@ -344,12 +318,8 @@ void nicvf_sq_free_used_descs(struct net_device *netdev,
 			      struct snd_queue *sq, int qidx);
 int nicvf_sq_append_skb(struct nicvf *nic, struct snd_queue *sq,
 			struct sk_buff *skb, u8 sq_num);
-int nicvf_xdp_sq_append_pkt(struct nicvf *nic, struct snd_queue *sq,
-			    u64 bufaddr, u64 dma_addr, u16 len);
-void nicvf_xdp_sq_doorbell(struct nicvf *nic, struct snd_queue *sq, int sq_num);
 
-struct sk_buff *nicvf_get_rcv_skb(struct nicvf *nic,
-				  struct cqe_rx_t *cqe_rx, bool xdp);
+struct sk_buff *nicvf_get_rcv_skb(struct nicvf *nic, struct cqe_rx_t *cqe_rx);
 void nicvf_rbdr_task(unsigned long data);
 void nicvf_rbdr_work(struct work_struct *work);
 

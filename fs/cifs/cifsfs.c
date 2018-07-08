@@ -37,7 +37,6 @@
 #include <linux/freezer.h>
 #include <linux/namei.h>
 #include <linux/random.h>
-#include <linux/uuid.h>
 #include <linux/xattr.h>
 #include <net/ipv6.h>
 #include "cifsfs.h"
@@ -51,7 +50,9 @@
 #include <linux/key-type.h>
 #include "cifs_spnego.h"
 #include "fscache.h"
+#ifdef CONFIG_CIFS_SMB2
 #include "smb2pdu.h"
+#endif
 
 int cifsFYI = 0;
 bool traceSMB;
@@ -138,12 +139,7 @@ cifs_read_super(struct super_block *sb)
 	sb->s_magic = CIFS_MAGIC_NUMBER;
 	sb->s_op = &cifs_super_ops;
 	sb->s_xattr = cifs_xattr_handlers;
-	rc = super_setup_bdi(sb);
-	if (rc)
-		goto out_no_root;
-	/* tune readahead according to rsize */
-	sb->s_bdi->ra_pages = cifs_sb->rsize / PAGE_SIZE;
-
+	sb->s_bdi = &cifs_sb->bdi;
 	sb->s_blocksize = CIFS_MAX_MSGSIZE;
 	sb->s_blocksize_bits = 14;	/* default 2**14 = CIFS_MAX_MSGSIZE */
 	inode = cifs_root_iget(sb);
@@ -275,8 +271,9 @@ cifs_alloc_inode(struct super_block *sb)
 	cifs_inode->uniqueid = 0;
 	cifs_inode->createtime = 0;
 	cifs_inode->epoch = 0;
+#ifdef CONFIG_CIFS_SMB2
 	generate_random_uuid(cifs_inode->lease_key);
-
+#endif
 	/*
 	 * Can not set i_flags here - they get immediately overwritten to zero
 	 * by the VFS.
@@ -1210,12 +1207,14 @@ cifs_destroy_inodecache(void)
 static int
 cifs_init_request_bufs(void)
 {
+	size_t max_hdr_size = MAX_CIFS_HDR_SIZE;
+#ifdef CONFIG_CIFS_SMB2
 	/*
 	 * SMB2 maximum header size is bigger than CIFS one - no problems to
 	 * allocate some more bytes for CIFS.
 	 */
-	size_t max_hdr_size = MAX_SMB2_HDR_SIZE;
-
+	max_hdr_size = MAX_SMB2_HDR_SIZE;
+#endif
 	if (CIFSMaxBufSize < 8192) {
 	/* Buffer size can not be smaller than 2 * PATH_MAX since maximum
 	Unicode path name has to fit in any SMB/CIFS path based frames */
@@ -1354,7 +1353,7 @@ init_cifs(void)
 	spin_lock_init(&cifs_tcp_ses_lock);
 	spin_lock_init(&GlobalMid_Lock);
 
-	cifs_lock_secret = get_random_u32();
+	get_random_bytes(&cifs_lock_secret, sizeof(cifs_lock_secret));
 
 	if (cifs_max_pending < 2) {
 		cifs_max_pending = 2;
@@ -1447,7 +1446,7 @@ exit_cifs(void)
 	exit_cifs_idmap();
 #endif
 #ifdef CONFIG_CIFS_UPCALL
-	exit_cifs_spnego();
+	unregister_key_type(&cifs_spnego_key_type);
 #endif
 	cifs_destroy_request_bufs();
 	cifs_destroy_mids();
@@ -1471,10 +1470,12 @@ MODULE_SOFTDEP("pre: hmac");
 MODULE_SOFTDEP("pre: md4");
 MODULE_SOFTDEP("pre: md5");
 MODULE_SOFTDEP("pre: nls");
+#ifdef CONFIG_CIFS_SMB2
 MODULE_SOFTDEP("pre: aes");
 MODULE_SOFTDEP("pre: cmac");
 MODULE_SOFTDEP("pre: sha256");
 MODULE_SOFTDEP("pre: aead2");
 MODULE_SOFTDEP("pre: ccm");
+#endif /* CONFIG_CIFS_SMB2 */
 module_init(init_cifs)
 module_exit(exit_cifs)

@@ -180,9 +180,16 @@ int hdmi_pll_init(struct platform_device *pdev, struct hdmi_pll_data *pll,
 	pll->wp = wp;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pll");
+	if (!res) {
+		DSSERR("can't get PLL mem resource\n");
+		return -EINVAL;
+	}
+
 	pll->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(pll->base))
+	if (IS_ERR(pll->base)) {
+		DSSERR("can't ioremap PLLCTRL\n");
 		return PTR_ERR(pll->base);
+	}
 
 	r = dsi_init_pll_data(pdev, pll);
 	if (r) {

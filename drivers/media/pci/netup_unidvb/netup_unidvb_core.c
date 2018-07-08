@@ -122,8 +122,7 @@ static void netup_unidvb_queue_cleanup(struct netup_dma *dma);
 
 static struct cxd2841er_config demod_config = {
 	.i2c_addr = 0xc8,
-	.xtal = SONY_XTAL_24000,
-	.flags = CXD2841ER_USE_GATECTRL | CXD2841ER_ASCOT
+	.xtal = SONY_XTAL_24000
 };
 
 static struct horus3a_config horus3a_conf = {
@@ -664,8 +663,9 @@ static int netup_unidvb_dma_init(struct netup_unidvb_dev *ndev, int num)
 	spin_lock_init(&dma->lock);
 	INIT_WORK(&dma->work, netup_unidvb_dma_worker);
 	INIT_LIST_HEAD(&dma->free_buffers);
-	setup_timer(&dma->timeout, netup_unidvb_dma_timeout,
-		    (unsigned long)dma);
+	dma->timeout.function = netup_unidvb_dma_timeout;
+	dma->timeout.data = (unsigned long)dma;
+	init_timer(&dma->timeout);
 	dma->ring_buffer_size = ndev->dma_size / 2;
 	dma->addr_virt = ndev->dma_virt + dma->ring_buffer_size * num;
 	dma->addr_phys = (dma_addr_t)((u64)ndev->dma_phys +

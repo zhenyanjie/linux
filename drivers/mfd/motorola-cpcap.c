@@ -23,8 +23,6 @@
 
 #define CPCAP_NR_IRQ_REG_BANKS	6
 #define CPCAP_NR_IRQ_CHIPS	3
-#define CPCAP_REGISTER_SIZE	4
-#define CPCAP_REGISTER_BITS	16
 
 struct cpcap_ddata {
 	struct spi_device *spi;
@@ -33,32 +31,6 @@ struct cpcap_ddata {
 	const struct regmap_config *regmap_conf;
 	struct regmap *regmap;
 };
-
-static int cpcap_sense_irq(struct regmap *regmap, int irq)
-{
-	int regnum = irq / CPCAP_REGISTER_BITS;
-	int mask = BIT(irq % CPCAP_REGISTER_BITS);
-	int reg = CPCAP_REG_INTS1 + (regnum * CPCAP_REGISTER_SIZE);
-	int err, val;
-
-	if (reg < CPCAP_REG_INTS1 || reg > CPCAP_REG_INTS4)
-		return -EINVAL;
-
-	err = regmap_read(regmap, reg, &val);
-	if (err)
-		return err;
-
-	return !!(val & mask);
-}
-
-int cpcap_sense_virq(struct regmap *regmap, int virq)
-{
-	struct regmap_irq_chip_data *d = irq_get_chip_data(virq);
-	int irq_base = regmap_irq_chip_get_base(d);
-
-	return cpcap_sense_irq(regmap, virq - irq_base);
-}
-EXPORT_SYMBOL_GPL(cpcap_sense_virq);
 
 static int cpcap_check_revision(struct cpcap_ddata *cpcap)
 {
@@ -260,7 +232,17 @@ static int cpcap_probe(struct spi_device *spi)
 	if (ret)
 		return ret;
 
-	return devm_of_platform_populate(&cpcap->spi->dev);
+	return of_platform_populate(spi->dev.of_node, NULL, NULL,
+				    &cpcap->spi->dev);
+}
+
+static int cpcap_remove(struct spi_device *pdev)
+{
+	struct cpcap_ddata *cpcap = spi_get_drvdata(pdev);
+
+	of_platform_depopulate(&cpcap->spi->dev);
+
+	return 0;
 }
 
 static struct spi_driver cpcap_driver = {
@@ -269,6 +251,7 @@ static struct spi_driver cpcap_driver = {
 		.of_match_table = cpcap_of_match,
 	},
 	.probe = cpcap_probe,
+	.remove = cpcap_remove,
 };
 module_spi_driver(cpcap_driver);
 

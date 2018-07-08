@@ -10,7 +10,6 @@
 #include <linux/mm.h>
 #include <linux/stackprotector.h>
 #include <linux/suspend.h>
-#include <linux/livepatch.h>
 
 #include <asm/tlb.h>
 
@@ -219,7 +218,6 @@ static void do_idle(void)
 	 */
 
 	__current_set_polling();
-	quiet_vmstat();
 	tick_nohz_idle_enter();
 
 	while (!need_resched()) {
@@ -266,10 +264,7 @@ static void do_idle(void)
 	smp_mb__after_atomic();
 
 	sched_ttwu_pending();
-	schedule_idle();
-
-	if (unlikely(klp_patch_pending(current)))
-		klp_update_patch_state(current);
+	schedule_preempt_disabled();
 }
 
 bool cpu_in_idle(unsigned long pc)

@@ -52,26 +52,9 @@ int tegra_fb_get_tiling(struct drm_framebuffer *framebuffer,
 			struct tegra_bo_tiling *tiling)
 {
 	struct tegra_fb *fb = to_tegra_fb(framebuffer);
-	uint64_t modifier = fb->base.modifier;
 
-	switch (fourcc_mod_tegra_mod(modifier)) {
-	case NV_FORMAT_MOD_TEGRA_TILED:
-		tiling->mode = TEGRA_BO_TILING_MODE_TILED;
-		tiling->value = 0;
-		break;
-
-	case NV_FORMAT_MOD_TEGRA_16BX2_BLOCK(0):
-		tiling->mode = TEGRA_BO_TILING_MODE_BLOCK;
-		tiling->value = fourcc_mod_tegra_param(modifier);
-		if (tiling->value > 5)
-			return -EINVAL;
-		break;
-
-	default:
-		/* TODO: handle YUV formats? */
-		*tiling = fb->planes[0]->tiling;
-		break;
-	}
+	/* TODO: handle YUV formats? */
+	*tiling = fb->planes[0]->tiling;
 
 	return 0;
 }
@@ -252,7 +235,7 @@ static int tegra_fbdev_probe(struct drm_fb_helper *helper,
 		dev_err(drm->dev, "failed to allocate DRM framebuffer: %d\n",
 			err);
 		drm_gem_object_unreference_unlocked(&bo->gem);
-		return PTR_ERR(fbdev->fb);
+		goto release;
 	}
 
 	fb = &fbdev->fb->base;
@@ -289,6 +272,8 @@ static int tegra_fbdev_probe(struct drm_fb_helper *helper,
 
 destroy:
 	drm_framebuffer_remove(fb);
+release:
+	drm_fb_helper_release_fbi(helper);
 	return err;
 }
 
@@ -354,6 +339,7 @@ fini:
 static void tegra_fbdev_exit(struct tegra_fbdev *fbdev)
 {
 	drm_fb_helper_unregister_fbi(&fbdev->base);
+	drm_fb_helper_release_fbi(&fbdev->base);
 
 	if (fbdev->fb)
 		drm_framebuffer_remove(&fbdev->fb->base);

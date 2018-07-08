@@ -35,7 +35,6 @@ static const intercept_handler_t instruction_handlers[256] = {
 	[0xb6] = kvm_s390_handle_stctl,
 	[0xb7] = kvm_s390_handle_lctl,
 	[0xb9] = kvm_s390_handle_b9,
-	[0xe3] = kvm_s390_handle_e3,
 	[0xe5] = kvm_s390_handle_e5,
 	[0xeb] = kvm_s390_handle_eb,
 };
@@ -369,7 +368,8 @@ static int handle_operexc(struct kvm_vcpu *vcpu)
 	trace_kvm_s390_handle_operexc(vcpu, vcpu->arch.sie_block->ipa,
 				      vcpu->arch.sie_block->ipb);
 
-	if (vcpu->arch.sie_block->ipa == 0xb256)
+	if (vcpu->arch.sie_block->ipa == 0xb256 &&
+	    test_kvm_facility(vcpu->kvm, 74))
 		return handle_sthyi(vcpu);
 
 	if (vcpu->arch.sie_block->ipa == 0 && vcpu->kvm->arch.user_instr0)
@@ -404,30 +404,27 @@ int kvm_handle_sie_intercept(struct kvm_vcpu *vcpu)
 		return -EOPNOTSUPP;
 
 	switch (vcpu->arch.sie_block->icptcode) {
-	case ICPT_EXTREQ:
-	case ICPT_IOREQ:
+	case 0x10:
+	case 0x18:
 		return handle_noop(vcpu);
-	case ICPT_INST:
+	case 0x04:
 		rc = handle_instruction(vcpu);
 		break;
-	case ICPT_PROGI:
+	case 0x08:
 		return handle_prog(vcpu);
-	case ICPT_EXTINT:
+	case 0x14:
 		return handle_external_interrupt(vcpu);
-	case ICPT_WAIT:
+	case 0x1c:
 		return kvm_s390_handle_wait(vcpu);
-	case ICPT_VALIDITY:
+	case 0x20:
 		return handle_validity(vcpu);
-	case ICPT_STOP:
+	case 0x28:
 		return handle_stop(vcpu);
-	case ICPT_OPEREXC:
+	case 0x2c:
 		rc = handle_operexc(vcpu);
 		break;
-	case ICPT_PARTEXEC:
+	case 0x38:
 		rc = handle_partial_execution(vcpu);
-		break;
-	case ICPT_KSS:
-		rc = kvm_s390_skey_check_enable(vcpu);
 		break;
 	default:
 		return -EOPNOTSUPP;

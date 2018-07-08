@@ -129,7 +129,6 @@ static void mtk_iommu_tlb_add_flush_nosync(unsigned long iova, size_t size,
 	writel_relaxed(iova, data->base + REG_MMU_INVLD_START_A);
 	writel_relaxed(iova + size - 1, data->base + REG_MMU_INVLD_END_A);
 	writel_relaxed(F_MMU_INV_RANGE, data->base + REG_MMU_INVALIDATE);
-	data->tlb_flush_active = true;
 }
 
 static void mtk_iommu_tlb_sync(void *cookie)
@@ -137,10 +136,6 @@ static void mtk_iommu_tlb_sync(void *cookie)
 	struct mtk_iommu_data *data = cookie;
 	int ret;
 	u32 tmp;
-
-	/* Avoid timing out if there's nothing to wait for */
-	if (!data->tlb_flush_active)
-		return;
 
 	ret = readl_poll_timeout_atomic(data->base + REG_MMU_CPE_DONE, tmp,
 					tmp != 0, 10, 100000);
@@ -151,7 +146,6 @@ static void mtk_iommu_tlb_sync(void *cookie)
 	}
 	/* Clear the CPE status */
 	writel_relaxed(0, data->base + REG_MMU_CPE_DONE);
-	data->tlb_flush_active = false;
 }
 
 static const struct iommu_gather_ops mtk_iommu_gather_ops = {
