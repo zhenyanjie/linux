@@ -32,10 +32,13 @@ struct device;
 extern int bad_dma_address;
 #define DMA_ERROR_CODE bad_dma_address
 
-extern const struct dma_map_ops *dma_ops;
+extern struct dma_map_ops *dma_ops;
 
-static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
+	if (unlikely(dev == NULL))
+		return NULL;
+
 	return dma_ops;
 }
 

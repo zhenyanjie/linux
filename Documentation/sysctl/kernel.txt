@@ -40,6 +40,7 @@ show up in /proc/sys/kernel:
 - hung_task_warnings
 - kexec_load_disabled
 - kptr_restrict
+- kstack_depth_to_print       [ X86 only ]
 - l2cr                        [ PPC only ]
 - modprobe                    ==> Documentation/debugging-modules.txt
 - modules_disabled
@@ -70,7 +71,7 @@ show up in /proc/sys/kernel:
 - printk_ratelimit_burst
 - pty                         ==> Documentation/filesystems/devpts.txt
 - randomize_va_space
-- real-root-dev               ==> Documentation/admin-guide/initrd.rst
+- real-root-dev               ==> Documentation/initrd.txt
 - reboot-cmd                  [ SPARC only ]
 - rtsig-max
 - rtsig-nr
@@ -85,7 +86,7 @@ show up in /proc/sys/kernel:
 - softlockup_all_cpu_backtrace
 - soft_watchdog
 - stop-a                      [ SPARC only ]
-- sysrq                       ==> Documentation/admin-guide/sysrq.rst
+- sysrq                       ==> Documentation/sysrq.txt
 - sysctl_writes_strict
 - tainted
 - threads-max
@@ -394,6 +395,13 @@ When kptr_restrict is set to (2), kernel pointers printed using
 
 ==============================================================
 
+kstack_depth_to_print: (X86 only)
+
+Controls the number of words to print when dumping the raw
+kernel stack.
+
+==============================================================
+
 l2cr: (PPC only)
 
 This flag controls the L2 cache of G3 processor boards. If
@@ -445,7 +453,7 @@ in a KVM virtual machine. This default can be overridden by adding
 
    nmi_watchdog=1
 
-to the guest kernel command line (see Documentation/admin-guide/kernel-parameters.rst).
+to the guest kernel command line (see Documentation/kernel-parameters.txt).
 
 ==============================================================
 

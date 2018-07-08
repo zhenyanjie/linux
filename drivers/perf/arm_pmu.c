@@ -20,7 +20,6 @@
 #include <linux/perf/arm_pmu.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/sched/clock.h>
 #include <linux/spinlock.h>
 #include <linux/irq.h>
 #include <linux/irqdesc.h>
@@ -323,10 +322,16 @@ validate_group(struct perf_event *event)
 	return 0;
 }
 
+static struct arm_pmu_platdata *armpmu_get_platdata(struct arm_pmu *armpmu)
+{
+	struct platform_device *pdev = armpmu->plat_device;
+
+	return pdev ? dev_get_platdata(&pdev->dev) : NULL;
+}
+
 static irqreturn_t armpmu_dispatch_irq(int irq, void *dev)
 {
 	struct arm_pmu *armpmu;
-	struct platform_device *plat_device;
 	struct arm_pmu_platdata *plat;
 	int ret;
 	u64 start_clock, finish_clock;
@@ -338,8 +343,8 @@ static irqreturn_t armpmu_dispatch_irq(int irq, void *dev)
 	 * dereference.
 	 */
 	armpmu = *(void **)dev;
-	plat_device = armpmu->plat_device;
-	plat = dev_get_platdata(&plat_device->dev);
+
+	plat = armpmu_get_platdata(armpmu);
 
 	start_clock = sched_clock();
 	if (plat && plat->handle_irq)
@@ -1085,7 +1090,7 @@ static int arm_pmu_hp_init(void)
 	int ret;
 
 	ret = cpuhp_setup_state_multi(CPUHP_AP_PERF_ARM_STARTING,
-				      "perf/arm/pmu:starting",
+				      "AP_PERF_ARM_STARTING",
 				      arm_perf_starting_cpu, NULL);
 	if (ret)
 		pr_err("CPU hotplug notifier for ARM PMU could not be registered: %d\n",

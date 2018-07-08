@@ -19,7 +19,6 @@
 #include <linux/rwsem.h>
 #include <linux/types.h>
 #include <scsi/scsi.h>
-#include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_device.h>
 
 extern const struct file_operations cxlflash_cxl_fops;
@@ -54,9 +53,6 @@ extern const struct file_operations cxlflash_cxl_fops;
 /* RRQ for master issued cmds */
 #define NUM_RRQ_ENTRY                   CXLFLASH_MAX_CMDS
 
-/* SQ for master issued cmds */
-#define NUM_SQ_ENTRY			CXLFLASH_MAX_CMDS
-
 
 static inline void check_sizes(void)
 {
@@ -65,6 +61,11 @@ static inline void check_sizes(void)
 
 /* AFU defines a fixed size of 4K for command buffers (borrow 4K page define) */
 #define CMD_BUFSIZE     SIZE_4K
+
+/* flags in IOA status area for host use */
+#define B_DONE       0x01
+#define B_ERROR      0x02	/* set with B_DONE */
+#define B_TIMEOUT    0x04	/* set with B_DONE & B_ERROR */
 
 enum cxlflash_lr_state {
 	LINK_RESET_INVALID,
@@ -131,9 +132,12 @@ struct cxlflash_cfg {
 struct afu_cmd {
 	struct sisl_ioarcb rcb;	/* IOARCB (cache line aligned) */
 	struct sisl_ioasa sa;	/* IOASA must follow IOARCB */
-	struct afu *parent;
-	struct scsi_cmnd *scp;
+	spinlock_t slock;
 	struct completion cevent;
+	char *buf;		/* per command buffer */
+	struct afu *parent;
+	int slot;
+	atomic_t free;
 
 	u8 cmd_tmf:1;
 
@@ -143,30 +147,18 @@ struct afu_cmd {
 	 */
 } __aligned(cache_line_size());
 
-static inline struct afu_cmd *sc_to_afuc(struct scsi_cmnd *sc)
-{
-	return PTR_ALIGN(scsi_cmd_priv(sc), __alignof__(struct afu_cmd));
-}
-
-static inline struct afu_cmd *sc_to_afucz(struct scsi_cmnd *sc)
-{
-	struct afu_cmd *afuc = sc_to_afuc(sc);
-
-	memset(afuc, 0, sizeof(*afuc));
-	return afuc;
-}
-
 struct afu {
 	/* Stuff requiring alignment go first. */
-	struct sisl_ioarcb sq[NUM_SQ_ENTRY];		/* 16K SQ */
-	u64 rrq_entry[NUM_RRQ_ENTRY];			/* 2K RRQ */
+
+	u64 rrq_entry[NUM_RRQ_ENTRY];	/* 2K RRQ */
+	/*
+	 * Command & data for AFU commands.
+	 */
+	struct afu_cmd cmd[CXLFLASH_NUM_CMDS];
 
 	/* Beware of alignment till here. Preferably introduce new
 	 * fields after this point
 	 */
-
-	int (*send_cmd)(struct afu *, struct afu_cmd *);
-	void (*context_reset)(struct afu_cmd *);
 
 	/* AFU HW */
 	struct cxl_ioctl_start_work work;
@@ -174,21 +166,17 @@ struct afu {
 	struct sisl_host_map __iomem *host_map;		/* MC host map */
 	struct sisl_ctrl_map __iomem *ctrl_map;		/* MC control map */
 
-	ctx_hndl_t ctx_hndl;	/* master's context handle */
+	struct kref mapcount;
 
-	atomic_t hsq_credits;
-	spinlock_t hsq_slock;
-	struct sisl_ioarcb *hsq_start;
-	struct sisl_ioarcb *hsq_end;
-	struct sisl_ioarcb *hsq_curr;
+	ctx_hndl_t ctx_hndl;	/* master's context handle */
 	u64 *hrrq_start;
 	u64 *hrrq_end;
 	u64 *hrrq_curr;
 	bool toggle;
-	atomic_t cmds_active;	/* Number of currently active AFU commands */
-	s64 room;
-	spinlock_t rrin_slock; /* Lock to rrin queuing and cmd_room updates */
+	bool read_room;
+	atomic64_t room;
 	u64 hb;
+	u32 cmd_couts;		/* Number of command checkouts */
 	u32 internal_lun;	/* User-desired LUN mode for this AFU */
 
 	char version[16];
@@ -197,23 +185,6 @@ struct afu {
 	struct cxlflash_cfg *parent; /* Pointer back to parent cxlflash_cfg */
 
 };
-
-static inline bool afu_is_cmd_mode(struct afu *afu, u64 cmd_mode)
-{
-	u64 afu_cap = afu->interface_version >> SISL_INTVER_CAP_SHIFT;
-
-	return afu_cap & cmd_mode;
-}
-
-static inline bool afu_is_sq_cmd_mode(struct afu *afu)
-{
-	return afu_is_cmd_mode(afu, SISL_INTVER_CAP_SQ_CMD_MODE);
-}
-
-static inline bool afu_is_ioarrin_cmd_mode(struct afu *afu)
-{
-	return afu_is_cmd_mode(afu, SISL_INTVER_CAP_IOARRIN_CMD_MODE);
-}
 
 static inline u64 lun_to_lunid(u64 lun)
 {

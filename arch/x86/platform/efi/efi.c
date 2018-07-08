@@ -542,6 +542,11 @@ void __init efi_init(void)
 		efi_print_memmap();
 }
 
+void __init efi_late_init(void)
+{
+	efi_bgrt_init();
+}
+
 void __init efi_set_executable(efi_memory_desc_t *md, bool executable)
 {
 	u64 addr, npages;
@@ -827,9 +832,11 @@ static void __init kexec_enter_virtual_mode(void)
 
 	/*
 	 * We don't do virtual mode, since we don't do runtime services, on
-	 * non-native EFI
+	 * non-native EFI. With efi=old_map, we don't do runtime services in
+	 * kexec kernel because in the initial boot something else might
+	 * have been mapped at these virtual addresses.
 	 */
-	if (!efi_is_native()) {
+	if (!efi_is_native() || efi_enabled(EFI_OLD_MEMMAP)) {
 		efi_memmap_unmap();
 		clear_bit(EFI_RUNTIME_SERVICES, &efi.flags);
 		return;
@@ -953,11 +960,6 @@ static void __init __efi_enter_virtual_mode(void)
 		pr_err("Failed to remap late EFI memory map\n");
 		clear_bit(EFI_RUNTIME_SERVICES, &efi.flags);
 		return;
-	}
-
-	if (efi_enabled(EFI_DBG)) {
-		pr_info("EFI runtime memory map:\n");
-		efi_print_memmap();
 	}
 
 	BUG_ON(!efi.systab);

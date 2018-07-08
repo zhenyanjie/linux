@@ -69,7 +69,7 @@
 #include <net/ip6_route.h>
 #endif
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/page.h>
 #include <net/sock.h>
 #include <net/snmp.h>
@@ -141,8 +141,6 @@ int sctp_primitive_ABORT(struct net *, struct sctp_association *, void *arg);
 int sctp_primitive_SEND(struct net *, struct sctp_association *, void *arg);
 int sctp_primitive_REQUESTHEARTBEAT(struct net *, struct sctp_association *, void *arg);
 int sctp_primitive_ASCONF(struct net *, struct sctp_association *, void *arg);
-int sctp_primitive_RECONF(struct net *net, struct sctp_association *asoc,
-			  void *arg);
 
 /*
  * sctp/input.c
@@ -166,7 +164,7 @@ void sctp_backlog_migrate(struct sctp_association *assoc,
 			  struct sock *oldsk, struct sock *newsk);
 int sctp_transport_hashtable_init(void);
 void sctp_transport_hashtable_destroy(void);
-int sctp_hash_transport(struct sctp_transport *t);
+void sctp_hash_transport(struct sctp_transport *t);
 void sctp_unhash_transport(struct sctp_transport *t);
 struct sctp_transport *sctp_addrs_lookup_transport(
 				struct net *net,
@@ -192,15 +190,6 @@ void sctp_remaddr_proc_exit(struct net *net);
  * sctp/offload.c
  */
 int sctp_offload_init(void);
-
-/*
- * sctp/stream.c
- */
-int sctp_send_reset_streams(struct sctp_association *asoc,
-			    struct sctp_reset_streams *params);
-int sctp_send_reset_assoc(struct sctp_association *asoc);
-int sctp_send_add_streams(struct sctp_association *asoc,
-			  struct sctp_add_streams *params);
 
 /*
  * Module global variables
@@ -294,6 +283,7 @@ extern atomic_t sctp_dbg_objcnt_chunk;
 extern atomic_t sctp_dbg_objcnt_bind_addr;
 extern atomic_t sctp_dbg_objcnt_bind_bucket;
 extern atomic_t sctp_dbg_objcnt_addr;
+extern atomic_t sctp_dbg_objcnt_ssnmap;
 extern atomic_t sctp_dbg_objcnt_datamsg;
 extern atomic_t sctp_dbg_objcnt_keys;
 
@@ -443,14 +433,16 @@ static inline int sctp_frag_point(const struct sctp_association *asoc, int pmtu)
 	if (asoc->user_frag)
 		frag = min_t(int, frag, asoc->user_frag);
 
-	frag = SCTP_TRUNC4(min_t(int, frag, SCTP_MAX_CHUNK_LEN));
+	frag = SCTP_TRUNC4(min_t(int, frag, SCTP_MAX_CHUNK_LEN -
+					    sizeof(struct sctp_data_chunk)));
 
 	return frag;
 }
 
-static inline void sctp_assoc_pending_pmtu(struct sctp_association *asoc)
+static inline void sctp_assoc_pending_pmtu(struct sock *sk, struct sctp_association *asoc)
 {
-	sctp_assoc_sync_pmtu(asoc);
+
+	sctp_assoc_sync_pmtu(sk, asoc);
 	asoc->pmtu_pending = 0;
 }
 
@@ -469,6 +461,8 @@ _sctp_walk_params((pos), (chunk), ntohs((chunk)->chunk_hdr.length), member)
 
 #define _sctp_walk_params(pos, chunk, end, member)\
 for (pos.v = chunk->member;\
+     (pos.v + offsetof(struct sctp_paramhdr, length) + sizeof(pos.p->length) <=\
+      (void *)chunk + end) &&\
      pos.v <= (void *)chunk + end - ntohs(pos.p->length) &&\
      ntohs(pos.p->length) >= sizeof(sctp_paramhdr_t);\
      pos.v += SCTP_PAD4(ntohs(pos.p->length)))
@@ -479,6 +473,8 @@ _sctp_walk_errors((err), (chunk_hdr), ntohs((chunk_hdr)->length))
 #define _sctp_walk_errors(err, chunk_hdr, end)\
 for (err = (sctp_errhdr_t *)((void *)chunk_hdr + \
 	    sizeof(sctp_chunkhdr_t));\
+     ((void *)err + offsetof(sctp_errhdr_t, length) + sizeof(err->length) <=\
+      (void *)chunk_hdr + end) &&\
      (void *)err <= (void *)chunk_hdr + end - ntohs(err->length) &&\
      ntohs(err->length) >= sizeof(sctp_errhdr_t); \
      err = (sctp_errhdr_t *)((void *)err + SCTP_PAD4(ntohs(err->length))))
@@ -595,23 +591,12 @@ static inline void sctp_v4_map_v6(union sctp_addr *addr)
  */
 static inline struct dst_entry *sctp_transport_dst_check(struct sctp_transport *t)
 {
-	if (t->dst && !dst_check(t->dst, t->dst_cookie))
-		sctp_transport_dst_release(t);
+	if (t->dst && !dst_check(t->dst, t->dst_cookie)) {
+		dst_release(t->dst);
+		t->dst = NULL;
+	}
 
 	return t->dst;
-}
-
-static inline bool sctp_transport_pmtu_check(struct sctp_transport *t)
-{
-	__u32 pmtu = max_t(size_t, SCTP_TRUNC4(dst_mtu(t->dst)),
-			   SCTP_DEFAULT_MINSEGMENT);
-
-	if (t->pathmtu == pmtu)
-		return true;
-
-	t->pathmtu = pmtu;
-
-	return false;
 }
 
 #endif /* __net_sctp_h__ */

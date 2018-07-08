@@ -548,6 +548,11 @@ static int ath10k_htt_rx_crypto_param_len(struct ath10k *ar,
 		return IEEE80211_TKIP_IV_LEN;
 	case HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2:
 		return IEEE80211_CCMP_HDR_LEN;
+	case HTT_RX_MPDU_ENCRYPT_AES_CCM256_WPA2:
+		return IEEE80211_CCMP_256_HDR_LEN;
+	case HTT_RX_MPDU_ENCRYPT_AES_GCMP_WPA2:
+	case HTT_RX_MPDU_ENCRYPT_AES_GCMP256_WPA2:
+		return IEEE80211_GCMP_HDR_LEN;
 	case HTT_RX_MPDU_ENCRYPT_WEP128:
 	case HTT_RX_MPDU_ENCRYPT_WAPI:
 		break;
@@ -573,6 +578,11 @@ static int ath10k_htt_rx_crypto_tail_len(struct ath10k *ar,
 		return IEEE80211_TKIP_ICV_LEN;
 	case HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2:
 		return IEEE80211_CCMP_MIC_LEN;
+	case HTT_RX_MPDU_ENCRYPT_AES_CCM256_WPA2:
+		return IEEE80211_CCMP_256_MIC_LEN;
+	case HTT_RX_MPDU_ENCRYPT_AES_GCMP_WPA2:
+	case HTT_RX_MPDU_ENCRYPT_AES_GCMP256_WPA2:
+		return IEEE80211_GCMP_MIC_LEN;
 	case HTT_RX_MPDU_ENCRYPT_WEP128:
 	case HTT_RX_MPDU_ENCRYPT_WAPI:
 		break;
@@ -702,10 +712,6 @@ static void ath10k_htt_rx_h_rates(struct ath10k *ar,
 		/* 80MHZ */
 		case 2:
 			status->vht_flag |= RX_VHT_FLAG_80MHZ;
-			break;
-		case 3:
-			status->vht_flag |= RX_VHT_FLAG_160MHZ;
-			break;
 		}
 
 		status->flag |= RX_FLAG_VHT;
@@ -930,7 +936,7 @@ static void ath10k_process_rx(struct ath10k *ar,
 	*status = *rx_status;
 
 	ath10k_dbg(ar, ATH10K_DBG_DATA,
-		   "rx skb %pK len %u peer %pM %s %s sn %u %s%s%s%s%s%s %srate_idx %u vht_nss %u freq %u band %u flag 0x%llx fcs-err %i mic-err %i amsdu-more %i\n",
+		   "rx skb %pK len %u peer %pM %s %s sn %u %s%s%s%s%s %srate_idx %u vht_nss %u freq %u band %u flag 0x%llx fcs-err %i mic-err %i amsdu-more %i\n",
 		   skb,
 		   skb->len,
 		   ieee80211_get_SA(hdr),
@@ -944,7 +950,6 @@ static void ath10k_process_rx(struct ath10k *ar,
 		   status->flag & RX_FLAG_VHT ? "vht" : "",
 		   status->flag & RX_FLAG_40MHZ ? "40" : "",
 		   status->vht_flag & RX_VHT_FLAG_80MHZ ? "80" : "",
-		   status->vht_flag & RX_VHT_FLAG_160MHZ ? "160" : "",
 		   status->flag & RX_FLAG_SHORT_GI ? "sgi " : "",
 		   status->rate_idx,
 		   status->vht_nss,
@@ -1029,9 +1034,21 @@ static void ath10k_htt_rx_h_undecap_raw(struct ath10k *ar,
 	hdr = (void *)msdu->data;
 
 	/* Tail */
-	if (status->flag & RX_FLAG_IV_STRIPPED)
+	if (status->flag & RX_FLAG_IV_STRIPPED) {
 		skb_trim(msdu, msdu->len -
 			 ath10k_htt_rx_crypto_tail_len(ar, enctype));
+	} else {
+		/* MIC */
+		if ((status->flag & RX_FLAG_MIC_STRIPPED) &&
+		    enctype == HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2)
+			skb_trim(msdu, msdu->len - 8);
+
+		/* ICV */
+		if (status->flag & RX_FLAG_ICV_STRIPPED &&
+		    enctype != HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2)
+			skb_trim(msdu, msdu->len -
+				 ath10k_htt_rx_crypto_tail_len(ar, enctype));
+	}
 
 	/* MMIC */
 	if ((status->flag & RX_FLAG_MMIC_STRIPPED) &&
@@ -1053,7 +1070,8 @@ static void ath10k_htt_rx_h_undecap_raw(struct ath10k *ar,
 static void ath10k_htt_rx_h_undecap_nwifi(struct ath10k *ar,
 					  struct sk_buff *msdu,
 					  struct ieee80211_rx_status *status,
-					  const u8 first_hdr[64])
+					  const u8 first_hdr[64],
+					  enum htt_rx_mpdu_encrypt_type enctype)
 {
 	struct ieee80211_hdr *hdr;
 	struct htt_rx_desc *rxd;
@@ -1061,6 +1079,7 @@ static void ath10k_htt_rx_h_undecap_nwifi(struct ath10k *ar,
 	u8 da[ETH_ALEN];
 	u8 sa[ETH_ALEN];
 	int l3_pad_bytes;
+	int bytes_aligned = ar->hw_params.decap_align_bytes;
 
 	/* Delivered decapped frame:
 	 * [nwifi 802.11 header] <-- replaced with 802.11 hdr
@@ -1089,6 +1108,14 @@ static void ath10k_htt_rx_h_undecap_nwifi(struct ath10k *ar,
 	/* push original 802.11 header */
 	hdr = (struct ieee80211_hdr *)first_hdr;
 	hdr_len = ieee80211_hdrlen(hdr->frame_control);
+
+	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
+		memcpy(skb_push(msdu,
+				ath10k_htt_rx_crypto_param_len(ar, enctype)),
+		       (void *)hdr + round_up(hdr_len, bytes_aligned),
+			ath10k_htt_rx_crypto_param_len(ar, enctype));
+	}
+
 	memcpy(skb_push(msdu, hdr_len), hdr, hdr_len);
 
 	/* original 802.11 header has a different DA and in
@@ -1149,6 +1176,7 @@ static void ath10k_htt_rx_h_undecap_eth(struct ath10k *ar,
 	u8 sa[ETH_ALEN];
 	int l3_pad_bytes;
 	struct htt_rx_desc *rxd;
+	int bytes_aligned = ar->hw_params.decap_align_bytes;
 
 	/* Delivered decapped frame:
 	 * [eth header] <-- replaced with 802.11 hdr & rfc1042/llc
@@ -1177,6 +1205,14 @@ static void ath10k_htt_rx_h_undecap_eth(struct ath10k *ar,
 	/* push original 802.11 header */
 	hdr = (struct ieee80211_hdr *)first_hdr;
 	hdr_len = ieee80211_hdrlen(hdr->frame_control);
+
+	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
+		memcpy(skb_push(msdu,
+				ath10k_htt_rx_crypto_param_len(ar, enctype)),
+		       (void *)hdr + round_up(hdr_len, bytes_aligned),
+			ath10k_htt_rx_crypto_param_len(ar, enctype));
+	}
+
 	memcpy(skb_push(msdu, hdr_len), hdr, hdr_len);
 
 	/* original 802.11 header has a different DA and in
@@ -1190,12 +1226,14 @@ static void ath10k_htt_rx_h_undecap_eth(struct ath10k *ar,
 static void ath10k_htt_rx_h_undecap_snap(struct ath10k *ar,
 					 struct sk_buff *msdu,
 					 struct ieee80211_rx_status *status,
-					 const u8 first_hdr[64])
+					 const u8 first_hdr[64],
+					 enum htt_rx_mpdu_encrypt_type enctype)
 {
 	struct ieee80211_hdr *hdr;
 	size_t hdr_len;
 	int l3_pad_bytes;
 	struct htt_rx_desc *rxd;
+	int bytes_aligned = ar->hw_params.decap_align_bytes;
 
 	/* Delivered decapped frame:
 	 * [amsdu header] <-- replaced with 802.11 hdr
@@ -1211,6 +1249,14 @@ static void ath10k_htt_rx_h_undecap_snap(struct ath10k *ar,
 
 	hdr = (struct ieee80211_hdr *)first_hdr;
 	hdr_len = ieee80211_hdrlen(hdr->frame_control);
+
+	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
+		memcpy(skb_push(msdu,
+				ath10k_htt_rx_crypto_param_len(ar, enctype)),
+		       (void *)hdr + round_up(hdr_len, bytes_aligned),
+			ath10k_htt_rx_crypto_param_len(ar, enctype));
+	}
+
 	memcpy(skb_push(msdu, hdr_len), hdr, hdr_len);
 }
 
@@ -1245,13 +1291,15 @@ static void ath10k_htt_rx_h_undecap(struct ath10k *ar,
 					    is_decrypted);
 		break;
 	case RX_MSDU_DECAP_NATIVE_WIFI:
-		ath10k_htt_rx_h_undecap_nwifi(ar, msdu, status, first_hdr);
+		ath10k_htt_rx_h_undecap_nwifi(ar, msdu, status, first_hdr,
+					      enctype);
 		break;
 	case RX_MSDU_DECAP_ETHERNET2_DIX:
 		ath10k_htt_rx_h_undecap_eth(ar, msdu, status, first_hdr, enctype);
 		break;
 	case RX_MSDU_DECAP_8023_SNAP_LLC:
-		ath10k_htt_rx_h_undecap_snap(ar, msdu, status, first_hdr);
+		ath10k_htt_rx_h_undecap_snap(ar, msdu, status, first_hdr,
+					     enctype);
 		break;
 	}
 }
@@ -1294,7 +1342,8 @@ static void ath10k_htt_rx_h_csum_offload(struct sk_buff *msdu)
 
 static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 				 struct sk_buff_head *amsdu,
-				 struct ieee80211_rx_status *status)
+				 struct ieee80211_rx_status *status,
+				 bool fill_crypt_header)
 {
 	struct sk_buff *first;
 	struct sk_buff *last;
@@ -1304,7 +1353,6 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 	enum htt_rx_mpdu_encrypt_type enctype;
 	u8 first_hdr[64];
 	u8 *qos;
-	size_t hdr_len;
 	bool has_fcs_err;
 	bool has_crypto_err;
 	bool has_tkip_err;
@@ -1329,15 +1377,17 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 	 * decapped header. It'll be used for undecapping of each MSDU.
 	 */
 	hdr = (void *)rxd->rx_hdr_status;
-	hdr_len = ieee80211_hdrlen(hdr->frame_control);
-	memcpy(first_hdr, hdr, hdr_len);
+	memcpy(first_hdr, hdr, RX_HTT_HDR_STATUS_LEN);
 
 	/* Each A-MSDU subframe will use the original header as the base and be
 	 * reported as a separate MSDU so strip the A-MSDU bit from QoS Ctl.
 	 */
 	hdr = (void *)first_hdr;
-	qos = ieee80211_get_qos_ctl(hdr);
-	qos[0] &= ~IEEE80211_QOS_CTL_A_MSDU_PRESENT;
+
+	if (ieee80211_is_data_qos(hdr->frame_control)) {
+		qos = ieee80211_get_qos_ctl(hdr);
+		qos[0] &= ~IEEE80211_QOS_CTL_A_MSDU_PRESENT;
+	}
 
 	/* Some attention flags are valid only in the last MSDU. */
 	last = skb_peek_tail(amsdu);
@@ -1384,9 +1434,14 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 		status->flag |= RX_FLAG_DECRYPTED;
 
 		if (likely(!is_mgmt))
-			status->flag |= RX_FLAG_IV_STRIPPED |
-					RX_FLAG_MMIC_STRIPPED;
-}
+			status->flag |= RX_FLAG_MMIC_STRIPPED;
+
+		if (fill_crypt_header)
+			status->flag |= RX_FLAG_MIC_STRIPPED |
+					RX_FLAG_ICV_STRIPPED;
+		else
+			status->flag |= RX_FLAG_IV_STRIPPED;
+	}
 
 	skb_queue_walk(amsdu, msdu) {
 		ath10k_htt_rx_h_csum_offload(msdu);
@@ -1402,6 +1457,9 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 		if (is_mgmt)
 			continue;
 
+		if (fill_crypt_header)
+			continue;
+
 		hdr = (void *)msdu->data;
 		hdr->frame_control &= ~__cpu_to_le16(IEEE80211_FCTL_PROTECTED);
 	}
@@ -1412,6 +1470,9 @@ static void ath10k_htt_rx_h_deliver(struct ath10k *ar,
 				    struct ieee80211_rx_status *status)
 {
 	struct sk_buff *msdu;
+	struct sk_buff *first_subframe;
+
+	first_subframe = skb_peek(amsdu);
 
 	while ((msdu = __skb_dequeue(amsdu))) {
 		/* Setup per-MSDU flags */
@@ -1419,6 +1480,13 @@ static void ath10k_htt_rx_h_deliver(struct ath10k *ar,
 			status->flag &= ~RX_FLAG_AMSDU_MORE;
 		else
 			status->flag |= RX_FLAG_AMSDU_MORE;
+
+		if (msdu == first_subframe) {
+			first_subframe = NULL;
+			status->flag &= ~RX_FLAG_ALLOW_SAME_PN;
+		} else {
+			status->flag |= RX_FLAG_ALLOW_SAME_PN;
+		}
 
 		ath10k_process_rx(ar, status, msdu);
 	}
@@ -1468,7 +1536,8 @@ static int ath10k_unchain_msdu(struct sk_buff_head *amsdu)
 }
 
 static void ath10k_htt_rx_h_unchain(struct ath10k *ar,
-				    struct sk_buff_head *amsdu)
+				    struct sk_buff_head *amsdu,
+				    bool chained)
 {
 	struct sk_buff *first;
 	struct htt_rx_desc *rxd;
@@ -1478,6 +1547,9 @@ static void ath10k_htt_rx_h_unchain(struct ath10k *ar,
 	rxd = (void *)first->data - sizeof(*rxd);
 	decap = MS(__le32_to_cpu(rxd->msdu_start.common.info1),
 		   RX_MSDU_START_INFO1_DECAP_FORMAT);
+
+	if (!chained)
+		return;
 
 	/* FIXME: Current unchaining logic can only handle simple case of raw
 	 * msdu chaining. If decapping is other than raw the chaining may be
@@ -1556,13 +1628,9 @@ static int ath10k_htt_rx_handle_amsdu(struct ath10k_htt *htt)
 
 	num_msdus = skb_queue_len(&amsdu);
 	ath10k_htt_rx_h_ppdu(ar, &amsdu, rx_status, 0xffff);
-
-	/* only for ret = 1 indicates chained msdus */
-	if (ret > 0)
-		ath10k_htt_rx_h_unchain(ar, &amsdu);
-
+	ath10k_htt_rx_h_unchain(ar, &amsdu, ret > 0);
 	ath10k_htt_rx_h_filter(ar, &amsdu, rx_status);
-	ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status);
+	ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status, true);
 	ath10k_htt_rx_h_deliver(ar, &amsdu, rx_status);
 
 	return num_msdus;
@@ -1897,7 +1965,7 @@ static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 			num_msdus += skb_queue_len(&amsdu);
 			ath10k_htt_rx_h_ppdu(ar, &amsdu, status, vdev_id);
 			ath10k_htt_rx_h_filter(ar, &amsdu, status);
-			ath10k_htt_rx_h_mpdu(ar, &amsdu, status);
+			ath10k_htt_rx_h_mpdu(ar, &amsdu, status, false);
 			ath10k_htt_rx_h_deliver(ar, &amsdu, status);
 			break;
 		case -EAGAIN:
@@ -2199,130 +2267,6 @@ void ath10k_htt_htc_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 		dev_kfree_skb_any(skb);
 }
 
-static inline bool is_valid_legacy_rate(u8 rate)
-{
-	static const u8 legacy_rates[] = {1, 2, 5, 11, 6, 9, 12,
-					  18, 24, 36, 48, 54};
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(legacy_rates); i++) {
-		if (rate == legacy_rates[i])
-			return true;
-	}
-
-	return false;
-}
-
-static void
-ath10k_update_per_peer_tx_stats(struct ath10k *ar,
-				struct ieee80211_sta *sta,
-				struct ath10k_per_peer_tx_stats *peer_stats)
-{
-	struct ath10k_sta *arsta = (struct ath10k_sta *)sta->drv_priv;
-	u8 rate = 0, sgi;
-	struct rate_info txrate;
-
-	lockdep_assert_held(&ar->data_lock);
-
-	txrate.flags = ATH10K_HW_PREAMBLE(peer_stats->ratecode);
-	txrate.bw = ATH10K_HW_BW(peer_stats->flags);
-	txrate.nss = ATH10K_HW_NSS(peer_stats->ratecode);
-	txrate.mcs = ATH10K_HW_MCS_RATE(peer_stats->ratecode);
-	sgi = ATH10K_HW_GI(peer_stats->flags);
-
-	if (((txrate.flags == WMI_RATE_PREAMBLE_HT) ||
-	     (txrate.flags == WMI_RATE_PREAMBLE_VHT)) && txrate.mcs > 9) {
-		ath10k_warn(ar, "Invalid mcs %hhd peer stats", txrate.mcs);
-		return;
-	}
-
-	memset(&arsta->txrate, 0, sizeof(arsta->txrate));
-
-	if (txrate.flags == WMI_RATE_PREAMBLE_CCK ||
-	    txrate.flags == WMI_RATE_PREAMBLE_OFDM) {
-		rate = ATH10K_HW_LEGACY_RATE(peer_stats->ratecode);
-
-		if (!is_valid_legacy_rate(rate)) {
-			ath10k_warn(ar, "Invalid legacy rate %hhd peer stats",
-				    rate);
-			return;
-		}
-
-		/* This is hacky, FW sends CCK rate 5.5Mbps as 6 */
-		rate *= 10;
-		if (rate == 60 && txrate.flags == WMI_RATE_PREAMBLE_CCK)
-			rate = rate - 5;
-		arsta->txrate.legacy = rate;
-	} else if (txrate.flags == WMI_RATE_PREAMBLE_HT) {
-		arsta->txrate.flags = RATE_INFO_FLAGS_MCS;
-		arsta->txrate.mcs = txrate.mcs;
-	} else {
-		arsta->txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
-		arsta->txrate.mcs = txrate.mcs;
-	}
-
-	if (sgi)
-		arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
-
-	arsta->txrate.nss = txrate.nss;
-	arsta->txrate.bw = txrate.bw + RATE_INFO_BW_20;
-}
-
-static void ath10k_htt_fetch_peer_stats(struct ath10k *ar,
-					struct sk_buff *skb)
-{
-	struct htt_resp *resp = (struct htt_resp *)skb->data;
-	struct ath10k_per_peer_tx_stats *p_tx_stats = &ar->peer_tx_stats;
-	struct htt_per_peer_tx_stats_ind *tx_stats;
-	struct ieee80211_sta *sta;
-	struct ath10k_peer *peer;
-	int peer_id, i;
-	u8 ppdu_len, num_ppdu;
-
-	num_ppdu = resp->peer_tx_stats.num_ppdu;
-	ppdu_len = resp->peer_tx_stats.ppdu_len * sizeof(__le32);
-
-	if (skb->len < sizeof(struct htt_resp_hdr) + num_ppdu * ppdu_len) {
-		ath10k_warn(ar, "Invalid peer stats buf length %d\n", skb->len);
-		return;
-	}
-
-	tx_stats = (struct htt_per_peer_tx_stats_ind *)
-			(resp->peer_tx_stats.payload);
-	peer_id = __le16_to_cpu(tx_stats->peer_id);
-
-	rcu_read_lock();
-	spin_lock_bh(&ar->data_lock);
-	peer = ath10k_peer_find_by_id(ar, peer_id);
-	if (!peer) {
-		ath10k_warn(ar, "Invalid peer id %d peer stats buffer\n",
-			    peer_id);
-		goto out;
-	}
-
-	sta = peer->sta;
-	for (i = 0; i < num_ppdu; i++) {
-		tx_stats = (struct htt_per_peer_tx_stats_ind *)
-			   (resp->peer_tx_stats.payload + i * ppdu_len);
-
-		p_tx_stats->succ_bytes = __le32_to_cpu(tx_stats->succ_bytes);
-		p_tx_stats->retry_bytes = __le32_to_cpu(tx_stats->retry_bytes);
-		p_tx_stats->failed_bytes =
-				__le32_to_cpu(tx_stats->failed_bytes);
-		p_tx_stats->ratecode = tx_stats->ratecode;
-		p_tx_stats->flags = tx_stats->flags;
-		p_tx_stats->succ_pkts = __le16_to_cpu(tx_stats->succ_pkts);
-		p_tx_stats->retry_pkts = __le16_to_cpu(tx_stats->retry_pkts);
-		p_tx_stats->failed_pkts = __le16_to_cpu(tx_stats->failed_pkts);
-
-		ath10k_update_per_peer_tx_stats(ar, sta, p_tx_stats);
-	}
-
-out:
-	spin_unlock_bh(&ar->data_lock);
-	rcu_read_unlock();
-}
-
 bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 {
 	struct ath10k_htt *htt = &ar->htt;
@@ -2458,7 +2402,8 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 		u32 phymode = __le32_to_cpu(resp->chan_change.phymode);
 		u32 freq = __le32_to_cpu(resp->chan_change.freq);
 
-		ar->tgt_oper_chan = ieee80211_get_channel(ar->hw->wiphy, freq);
+		ar->tgt_oper_chan =
+			__ieee80211_get_channel(ar->hw->wiphy, freq);
 		ath10k_dbg(ar, ATH10K_DBG_HTT,
 			   "htt chan change freq %u phymode %s\n",
 			   freq, ath10k_wmi_phymode_str(phymode));
@@ -2482,9 +2427,6 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 	case HTT_T2H_MSG_TYPE_TX_MODE_SWITCH_IND:
 		ath10k_htt_rx_tx_mode_switch_ind(ar, skb);
 		break;
-	case HTT_T2H_MSG_TYPE_PEER_STATS:
-		ath10k_htt_fetch_peer_stats(ar, skb);
-		break;
 	case HTT_T2H_MSG_TYPE_EN_STATS:
 	default:
 		ath10k_warn(ar, "htt event (%d) not handled\n",
@@ -2492,7 +2434,7 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 		ath10k_dbg_dump(ar, ATH10K_DBG_HTT_DUMP, NULL, "htt event: ",
 				skb->data, skb->len);
 		break;
-	}
+	};
 	return true;
 }
 EXPORT_SYMBOL(ath10k_htt_t2h_msg_handler);

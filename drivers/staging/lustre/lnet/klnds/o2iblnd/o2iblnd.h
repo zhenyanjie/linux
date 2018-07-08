@@ -364,7 +364,7 @@ struct kib_connparams {
 } WIRE_ATTR;
 
 struct kib_immediate_msg {
-	struct lnet_hdr	ibim_hdr;        /* portals header */
+	lnet_hdr_t   ibim_hdr;        /* portals header */
 	char         ibim_payload[0]; /* piggy-backed payload */
 } WIRE_ATTR;
 
@@ -380,7 +380,7 @@ struct kib_rdma_desc {
 } WIRE_ATTR;
 
 struct kib_putreq_msg {
-	struct lnet_hdr	ibprm_hdr;    /* portals header */
+	lnet_hdr_t      ibprm_hdr;    /* portals header */
 	__u64           ibprm_cookie; /* opaque completion cookie */
 } WIRE_ATTR;
 
@@ -391,7 +391,7 @@ struct kib_putack_msg {
 } WIRE_ATTR;
 
 struct kib_get_msg {
-	struct lnet_hdr ibgm_hdr;     /* portals header */
+	lnet_hdr_t      ibgm_hdr;     /* portals header */
 	__u64           ibgm_cookie;  /* opaque completion cookie */
 	struct kib_rdma_desc ibgm_rd;      /* rdma descriptor */
 } WIRE_ATTR;
@@ -1018,7 +1018,7 @@ int  kiblnd_close_peer_conns_locked(struct kib_peer *peer, int why);
 struct kib_conn *kiblnd_create_conn(struct kib_peer *peer,
 				    struct rdma_cm_id *cmid,
 				    int state, int version);
-void kiblnd_destroy_conn(struct kib_conn *conn, bool free_conn);
+void kiblnd_destroy_conn(struct kib_conn *conn);
 void kiblnd_close_conn(struct kib_conn *conn, int error);
 void kiblnd_close_conn_locked(struct kib_conn *conn, int error);
 

@@ -1093,6 +1093,7 @@ xfs_rtallocate_extent(
 	xfs_extlen_t	minlen,		/* minimum length to allocate */
 	xfs_extlen_t	maxlen,		/* maximum length to allocate */
 	xfs_extlen_t	*len,		/* out: actual length allocated */
+	xfs_alloctype_t	type,		/* allocation type XFS_ALLOCTYPE... */
 	int		wasdel,		/* was a delayed allocation extent */
 	xfs_extlen_t	prod,		/* extent product factor */
 	xfs_rtblock_t	*rtblock)	/* out: start block allocated */
@@ -1122,16 +1123,27 @@ xfs_rtallocate_extent(
 		}
 	}
 
-retry:
 	sumbp = NULL;
-	if (bno == 0) {
+	/*
+	 * Allocate by size, or near another block, or exactly at some block.
+	 */
+	switch (type) {
+	case XFS_ALLOCTYPE_ANY_AG:
 		error = xfs_rtallocate_extent_size(mp, tp, minlen, maxlen, len,
 				&sumbp,	&sb, prod, &r);
-	} else {
+		break;
+	case XFS_ALLOCTYPE_NEAR_BNO:
 		error = xfs_rtallocate_extent_near(mp, tp, bno, minlen, maxlen,
 				len, &sumbp, &sb, prod, &r);
+		break;
+	case XFS_ALLOCTYPE_THIS_BNO:
+		error = xfs_rtallocate_extent_exact(mp, tp, bno, minlen, maxlen,
+				len, &sumbp, &sb, prod, &r);
+		break;
+	default:
+		error = -EIO;
+		ASSERT(0);
 	}
-
 	if (error)
 		return error;
 
@@ -1146,11 +1158,7 @@ retry:
 			xfs_trans_mod_sb(tp, XFS_TRANS_SB_RES_FREXTENTS, -slen);
 		else
 			xfs_trans_mod_sb(tp, XFS_TRANS_SB_FREXTENTS, -slen);
-	} else if (prod > 1) {
-		prod = 1;
-		goto retry;
 	}
-
 	*rtblock = r;
 	return 0;
 }

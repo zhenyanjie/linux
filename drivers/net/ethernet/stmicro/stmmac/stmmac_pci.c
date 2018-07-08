@@ -12,6 +12,10 @@
   FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
   more details.
 
+  You should have received a copy of the GNU General Public License along with
+  this program; if not, write to the Free Software Foundation, Inc.,
+  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
+
   The full GNU General Public License is included in this distribution in
   the file called "COPYING".
 
@@ -77,7 +81,6 @@ static void stmmac_default_data(struct plat_stmmacenet_data *plat)
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 32;
-	plat->dma_cfg->pblx8 = true;
 	/* TODO: AXI */
 
 	/* Set default value for multicast hash bins */
@@ -85,9 +88,6 @@ static void stmmac_default_data(struct plat_stmmacenet_data *plat)
 
 	/* Set default value for unicast filter entries */
 	plat->unicast_filter_entries = 1;
-
-	/* Set the maxmtu to a default of JUMBO_LEN */
-	plat->maxmtu = JUMBO_LEN;
 }
 
 static int quark_default_data(struct plat_stmmacenet_data *plat,
@@ -115,7 +115,6 @@ static int quark_default_data(struct plat_stmmacenet_data *plat,
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 16;
-	plat->dma_cfg->pblx8 = true;
 	plat->dma_cfg->fixed_burst = 1;
 	/* AXI (TODO) */
 
@@ -124,9 +123,6 @@ static int quark_default_data(struct plat_stmmacenet_data *plat,
 
 	/* Set default value for unicast filter entries */
 	plat->unicast_filter_entries = 1;
-
-	/* Set the maxmtu to a default of JUMBO_LEN */
-	plat->maxmtu = JUMBO_LEN;
 
 	return 0;
 }

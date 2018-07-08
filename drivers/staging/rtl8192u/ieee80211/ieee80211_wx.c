@@ -623,6 +623,7 @@ int ieee80211_wx_set_encode_ext(struct ieee80211_device *ieee,
 			goto done;
 		}
 		*crypt = new_crypt;
+
 	}
 
 	if (ext->key_len > 0 && (*crypt)->ops->set_key &&
@@ -724,6 +725,7 @@ int ieee80211_wx_get_encode_ext(struct ieee80211_device *ieee,
 		    (ext->alg == IW_ENCODE_ALG_TKIP ||
 		     ext->alg == IW_ENCODE_ALG_CCMP))
 			ext->ext_flags |= IW_ENCODE_EXT_TX_SEQ_VALID;
+
 	}
 
 	return 0;
@@ -837,5 +839,6 @@ int ieee80211_wx_set_gen_ie(struct ieee80211_device *ieee, u8 *ie, size_t len)
 		ieee->wpa_ie_len = 0;
 	}
 	return 0;
+
 }
 EXPORT_SYMBOL(ieee80211_wx_set_gen_ie);

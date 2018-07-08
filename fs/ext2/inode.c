@@ -732,13 +732,16 @@ static int ext2_get_blocks(struct inode *inode,
 	}
 
 	if (IS_DAX(inode)) {
+		int i;
+
 		/*
 		 * We must unmap blocks before zeroing so that writeback cannot
 		 * overwrite zeros with stale data from block device page cache.
 		 */
-		clean_bdev_aliases(inode->i_sb->s_bdev,
-				   le32_to_cpu(chain[depth-1].key),
-				   count);
+		for (i = 0; i < count; i++) {
+			unmap_underlying_metadata(inode->i_sb->s_bdev,
+					le32_to_cpu(chain[depth-1].key) + i);
+		}
 		/*
 		 * block must be initialised before we put it in the tree
 		 * so that it's not found by another thread before it's
@@ -751,8 +754,9 @@ static int ext2_get_blocks(struct inode *inode,
 			mutex_unlock(&ei->truncate_mutex);
 			goto cleanup;
 		}
+	} else {
+		*new = true;
 	}
-	*new = true;
 
 	ext2_splice_branch(inode, iblock, partial, indirect_blks, count);
 	mutex_unlock(&ei->truncate_mutex);
@@ -842,13 +846,10 @@ ext2_iomap_end(struct inode *inode, loff_t offset, loff_t length,
 	return 0;
 }
 
-const struct iomap_ops ext2_iomap_ops = {
+struct iomap_ops ext2_iomap_ops = {
 	.iomap_begin		= ext2_iomap_begin,
 	.iomap_end		= ext2_iomap_end,
 };
-#else
-/* Define empty ops for !CONFIG_FS_DAX case to avoid ugly ifdefs */
-const struct iomap_ops ext2_iomap_ops;
 #endif /* CONFIG_FS_DAX */
 
 int ext2_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
@@ -1257,20 +1258,10 @@ do_indirects:
 
 static void ext2_truncate_blocks(struct inode *inode, loff_t offset)
 {
-	/*
-	 * XXX: it seems like a bug here that we don't allow
-	 * IS_APPEND inode to have blocks-past-i_size trimmed off.
-	 * review and fix this.
-	 *
-	 * Also would be nice to be able to handle IO errors and such,
-	 * but that's probably too much to ask.
-	 */
 	if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
 	    S_ISLNK(inode->i_mode)))
 		return;
 	if (ext2_inode_is_fast_symlink(inode))
-		return;
-	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
 
 	dax_sem_down_write(EXT2_I(inode));
@@ -1292,11 +1283,9 @@ static int ext2_setsize(struct inode *inode, loff_t newsize)
 
 	inode_dio_wait(inode);
 
-	if (IS_DAX(inode)) {
-		error = iomap_zero_range(inode, newsize,
-					 PAGE_ALIGN(newsize) - newsize, NULL,
-					 &ext2_iomap_ops);
-	} else if (test_opt(inode->i_sb, NOBH))
+	if (IS_DAX(inode))
+		error = dax_truncate_page(inode, newsize, ext2_get_block);
+	else if (test_opt(inode->i_sb, NOBH))
 		error = nobh_truncate_page(inode->i_mapping,
 				newsize, ext2_get_block);
 	else
@@ -1477,10 +1466,6 @@ struct inode *ext2_iget (struct super_block *sb, unsigned long ino)
 		inode->i_size |= ((__u64)le32_to_cpu(raw_inode->i_size_high)) << 32;
 	else
 		ei->i_dir_acl = le32_to_cpu(raw_inode->i_dir_acl);
-	if (i_size_read(inode) < 0) {
-		ret = -EFSCORRUPTED;
-		goto bad_inode;
-	}
 	ei->i_dtime = 0;
 	inode->i_generation = le32_to_cpu(raw_inode->i_generation);
 	ei->i_state = 0;

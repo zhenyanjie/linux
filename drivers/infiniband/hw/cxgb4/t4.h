@@ -171,7 +171,7 @@ struct t4_cqe {
 			__be32 msn;
 		} rcqe;
 		struct {
-			u32 stag;
+			__be32 stag;
 			u16 nada2;
 			u16 cidx;
 		} scqe;
@@ -179,7 +179,6 @@ struct t4_cqe {
 			__be32 wrid_hi;
 			__be32 wrid_low;
 		} gen;
-		u64 drain_cookie;
 	} u;
 	__be64 reserved;
 	__be64 bits_type_ts;
@@ -239,7 +238,6 @@ struct t4_cqe {
 /* generic accessor macros */
 #define CQE_WRID_HI(x)		(be32_to_cpu((x)->u.gen.wrid_hi))
 #define CQE_WRID_LOW(x)		(be32_to_cpu((x)->u.gen.wrid_low))
-#define CQE_DRAIN_COOKIE(x)	((x)->u.drain_cookie)
 
 /* macros for flit 3 of the cqe */
 #define CQE_GENBIT_S	63

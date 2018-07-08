@@ -139,8 +139,7 @@ handle_line() {
 
 while read line; do
 	# Let's see if we have an address in the line
-	if [[ $line =~ \[\<([^]]+)\>\] ]] ||
-	   [[ $line =~ [^+\ ]+\+0x[0-9a-f]+/0x[0-9a-f]+ ]]; then
+	if [[ $line =~ \[\<([^]]+)\>\]  ]]; then
 		# Translate address to line numbers
 		handle_line "$line"
 	# Is it a code line?

@@ -57,7 +57,3 @@
 &ohci0 {
 	status = "disabled";
 };
-
-&mspi {
-	status = "okay";
-};

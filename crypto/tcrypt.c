@@ -22,8 +22,6 @@
  *
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <crypto/aead.h>
 #include <crypto/hash.h>
 #include <crypto/skcipher.h>
@@ -225,11 +223,13 @@ static void sg_init_aead(struct scatterlist *sg, char *xbuf[XBUFSIZE],
 	}
 
 	sg_init_table(sg, np + 1);
-	np--;
+	if (rem)
+		np--;
 	for (k = 0; k < np; k++)
 		sg_set_buf(&sg[k + 1], xbuf[k], PAGE_SIZE);
 
-	sg_set_buf(&sg[k + 1], xbuf[k], rem);
+	if (rem)
+		sg_set_buf(&sg[k + 1], xbuf[k], rem);
 }
 
 static void test_aead_speed(const char *algo, int enc, unsigned int secs,
@@ -344,7 +344,7 @@ static void test_aead_speed(const char *algo, int enc, unsigned int secs,
 			}
 
 			sg_init_aead(sg, xbuf,
-				    *b_size + (enc ? authsize : 0));
+				    *b_size + (enc ? 0 : authsize));
 
 			sg_init_aead(sgout, xoutbuf,
 				    *b_size + (enc ? authsize : 0));
@@ -352,7 +352,9 @@ static void test_aead_speed(const char *algo, int enc, unsigned int secs,
 			sg_set_buf(&sg[0], assoc, aad_size);
 			sg_set_buf(&sgout[0], assoc, aad_size);
 
-			aead_request_set_crypt(req, sg, sgout, *b_size, iv);
+			aead_request_set_crypt(req, sg, sgout,
+					       *b_size + (enc ? 0 : authsize),
+					       iv);
 			aead_request_set_ad(req, aad_size);
 
 			if (secs)
@@ -1011,8 +1013,6 @@ static void test_available(void)
 static inline int tcrypt_test(const char *alg)
 {
 	int ret;
-
-	pr_debug("testing %s\n", alg);
 
 	ret = alg_test(alg, alg, 0, 0);
 	/* non-fips algs return -EINVAL in fips mode */
@@ -2063,8 +2063,6 @@ static int __init tcrypt_mod_init(void)
 	if (err) {
 		printk(KERN_ERR "tcrypt: one or more tests failed!\n");
 		goto err_free_tv;
-	} else {
-		pr_debug("all tests passed\n");
 	}
 
 	/* We intentionaly return -EAGAIN to prevent keeping the module,

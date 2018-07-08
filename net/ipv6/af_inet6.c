@@ -61,9 +61,8 @@
 #include <net/ip6_tunnel.h>
 #endif
 #include <net/calipso.h>
-#include <net/seg6.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/mroute6.h>
 
 #include "ip6_offload.h"
@@ -210,7 +209,6 @@ lookup_protocol:
 	np->mcast_hops	= IPV6_DEFAULT_MCASTHOPS;
 	np->mc_loop	= 1;
 	np->pmtudisc	= IPV6_PMTUDISC_WANT;
-	np->autoflowlabel = ip6_default_np_autolabel(sock_net(sk));
 	sk->sk_ipv6only	= net->ipv6.sysctl.bindv6only;
 
 	/* Init the ipv4 part of the socket since we can have sockets
@@ -258,14 +256,6 @@ lookup_protocol:
 			goto out;
 		}
 	}
-
-	if (!kern) {
-		err = BPF_CGROUP_RUN_PROG_INET_SOCK(sk);
-		if (err) {
-			sk_common_release(sk);
-			goto out;
-		}
-	}
 out:
 	return err;
 out_rcu_unlock:
@@ -284,6 +274,7 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	struct net *net = sock_net(sk);
 	__be32 v4addr = 0;
 	unsigned short snum;
+	bool saved_ipv6only;
 	int addr_type = 0;
 	int err = 0;
 
@@ -302,8 +293,7 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		return -EINVAL;
 
 	snum = ntohs(addr->sin6_port);
-	if (snum && snum < inet_prot_sock(net) &&
-	    !ns_capable(net->user_ns, CAP_NET_BIND_SERVICE))
+	if (snum && snum < PROT_SOCK && !ns_capable(net->user_ns, CAP_NET_BIND_SERVICE))
 		return -EACCES;
 
 	lock_sock(sk);
@@ -389,19 +379,21 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (!(addr_type & IPV6_ADDR_MULTICAST))
 		np->saddr = addr->sin6_addr;
 
+	saved_ipv6only = sk->sk_ipv6only;
+	if (addr_type != IPV6_ADDR_ANY && addr_type != IPV6_ADDR_MAPPED)
+		sk->sk_ipv6only = 1;
+
 	/* Make sure we are allowed to bind here. */
 	if ((snum || !inet->bind_address_no_port) &&
 	    sk->sk_prot->get_port(sk, snum)) {
+		sk->sk_ipv6only = saved_ipv6only;
 		inet_reset_saddr(sk);
 		err = -EADDRINUSE;
 		goto out;
 	}
 
-	if (addr_type != IPV6_ADDR_ANY) {
+	if (addr_type != IPV6_ADDR_ANY)
 		sk->sk_userlocks |= SOCK_BINDADDR_LOCK;
-		if (addr_type != IPV6_ADDR_MAPPED)
-			sk->sk_ipv6only = 1;
-	}
 	if (snum)
 		sk->sk_userlocks |= SOCK_BINDPORT_LOCK;
 	inet->inet_sport = htons(inet->inet_num);
@@ -688,7 +680,6 @@ int inet6_sk_rebuild_header(struct sock *sk)
 		fl6.flowi6_mark = sk->sk_mark;
 		fl6.fl6_dport = inet->inet_dport;
 		fl6.fl6_sport = inet->inet_sport;
-		fl6.flowi6_uid = sk->sk_uid;
 		security_sk_classify_flow(sk, flowi6_to_flowi(&fl6));
 
 		rcu_read_lock();
@@ -933,6 +924,8 @@ static int __init inet6_init(void)
 	if (err)
 		goto igmp_fail;
 
+	ipv6_stub = &ipv6_stub_impl;
+
 	err = ipv6_netfilter_init();
 	if (err)
 		goto netfilter_fail;
@@ -999,28 +992,18 @@ static int __init inet6_init(void)
 	if (err)
 		goto calipso_fail;
 
-	err = seg6_init();
-	if (err)
-		goto seg6_fail;
-
 #ifdef CONFIG_SYSCTL
 	err = ipv6_sysctl_register();
 	if (err)
 		goto sysctl_fail;
 #endif
-
-	/* ensure that ipv6 stubs are visible only after ipv6 is ready */
-	wmb();
-	ipv6_stub = &ipv6_stub_impl;
 out:
 	return err;
 
 #ifdef CONFIG_SYSCTL
 sysctl_fail:
-	seg6_exit();
-#endif
-seg6_fail:
 	calipso_exit();
+#endif
 calipso_fail:
 	pingv6_exit();
 pingv6_fail:

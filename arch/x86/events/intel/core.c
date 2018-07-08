@@ -2066,9 +2066,15 @@ static int intel_pmu_handle_irq(struct pt_regs *regs)
 	int bit, loops;
 	u64 status;
 	int handled;
+	int pmu_enabled;
 
 	cpuc = this_cpu_ptr(&cpu_hw_events);
 
+	/*
+	 * Save the PMU state.
+	 * It needs to be restored when leaving the handler.
+	 */
+	pmu_enabled = cpuc->enabled;
 	/*
 	 * No known reason to not always do late ACK,
 	 * but just in case do it opt-in.
@@ -2076,6 +2082,7 @@ static int intel_pmu_handle_irq(struct pt_regs *regs)
 	if (!x86_pmu.late_ack)
 		apic_write(APIC_LVTPC, APIC_DM_NMI);
 	intel_bts_disable_local();
+	cpuc->enabled = 0;
 	__intel_pmu_disable_all();
 	handled = intel_pmu_drain_bts_buffer();
 	handled += intel_bts_interrupt();
@@ -2110,27 +2117,6 @@ again:
 		    GLOBAL_STATUS_LBRS_FROZEN);
 	if (!status)
 		goto done;
-	/*
-	 * In case multiple PEBS events are sampled at the same time,
-	 * it is possible to have GLOBAL_STATUS bit 62 set indicating
-	 * PEBS buffer overflow and also seeing at most 3 PEBS counters
-	 * having their bits set in the status register. This is a sign
-	 * that there was at least one PEBS record pending at the time
-	 * of the PMU interrupt. PEBS counters must only be processed
-	 * via the drain_pebs() calls and not via the regular sample
-	 * processing loop coming after that the function, otherwise
-	 * phony regular samples may be generated in the sampling buffer
-	 * not marked with the EXACT tag. Another possibility is to have
-	 * one PEBS event and at least one non-PEBS event whic hoverflows
-	 * while PEBS has armed. In this case, bit 62 of GLOBAL_STATUS will
-	 * not be set, yet the overflow status bit for the PEBS counter will
-	 * be on Skylake.
-	 *
-	 * To avoid this problem, we systematically ignore the PEBS-enabled
-	 * counters from the GLOBAL_STATUS mask and we always process PEBS
-	 * events via drain_pebs().
-	 */
-	status &= ~(cpuc->pebs_enabled & PEBS_COUNTER_MASK);
 
 	/*
 	 * PEBS overflow sets bit 62 in the global status register
@@ -2138,6 +2124,15 @@ again:
 	if (__test_and_clear_bit(62, (unsigned long *)&status)) {
 		handled++;
 		x86_pmu.drain_pebs(regs);
+		/*
+		 * There are cases where, even though, the PEBS ovfl bit is set
+		 * in GLOBAL_OVF_STATUS, the PEBS events may also have their
+		 * overflow bits set for their counters. We must clear them
+		 * here because they have been processed as exact samples in
+		 * the drain_pebs() routine. They must not be processed again
+		 * in the for_each_bit_set() loop for regular samples below.
+		 */
+		status &= ~cpuc->pebs_enabled;
 		status &= x86_pmu.intel_ctrl | GLOBAL_STATUS_TRACE_TOPAPMI;
 	}
 
@@ -2185,7 +2180,8 @@ again:
 
 done:
 	/* Only restore PMU state when it's active. See x86_pmu_disable(). */
-	if (cpuc->enabled)
+	cpuc->enabled = pmu_enabled;
+	if (pmu_enabled)
 		__intel_pmu_enable_all(0, true);
 	intel_bts_enable_local();
 
@@ -3031,13 +3027,13 @@ hsw_get_event_constraints(struct cpu_hw_events *cpuc, int idx,
  * Therefore the effective (average) period matches the requested period,
  * despite coarser hardware granularity.
  */
-static unsigned bdw_limit_period(struct perf_event *event, unsigned left)
+static u64 bdw_limit_period(struct perf_event *event, u64 left)
 {
 	if ((event->hw.config & INTEL_ARCH_EVENT_MASK) ==
 			X86_CONFIG(.event=0xc0, .umask=0x01)) {
 		if (left < 128)
 			left = 128;
-		left &= ~0x3fu;
+		left &= ~0x3fULL;
 	}
 	return left;
 }
@@ -3375,7 +3371,7 @@ static int intel_snb_pebs_broken(int cpu)
 		break;
 
 	case INTEL_FAM6_SANDYBRIDGE_X:
-		switch (cpu_data(cpu).x86_mask) {
+		switch (cpu_data(cpu).x86_stepping) {
 		case 6: rev = 0x618; break;
 		case 7: rev = 0x70c; break;
 		}

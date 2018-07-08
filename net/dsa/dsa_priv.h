@@ -25,8 +25,12 @@ struct dsa_slave_priv {
 	struct sk_buff *	(*xmit)(struct sk_buff *skb,
 					struct net_device *dev);
 
-	/* DSA port data, such as switch, port index, etc. */
-	struct dsa_port		*dp;
+	/*
+	 * Which switch this port is a part of, and the port index
+	 * for this port.
+	 */
+	struct dsa_switch	*parent;
+	u8			port;
 
 	/*
 	 * The phylib phy_device pointer for the PHY connected
@@ -38,18 +42,17 @@ struct dsa_slave_priv {
 	int			old_pause;
 	int			old_duplex;
 
+	struct net_device	*bridge_dev;
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	struct netpoll		*netpoll;
 #endif
-
-	/* TC context */
-	struct list_head	mall_tc_list;
 };
 
 /* dsa.c */
+extern char dsa_driver_version[];
 int dsa_cpu_dsa_setup(struct dsa_switch *ds, struct device *dev,
-		      struct dsa_port *dport, int port);
-void dsa_cpu_dsa_destroy(struct dsa_port *dport);
+		      struct device_node *port_dn, int port);
+void dsa_cpu_dsa_destroy(struct device_node *port_dn);
 const struct dsa_device_ops *dsa_resolve_tag_protocol(int tag_protocol);
 int dsa_cpu_port_ethtool_setup(struct dsa_switch *ds);
 void dsa_cpu_port_ethtool_restore(struct dsa_switch *ds);
@@ -63,12 +66,8 @@ int dsa_slave_create(struct dsa_switch *ds, struct device *parent,
 void dsa_slave_destroy(struct net_device *slave_dev);
 int dsa_slave_suspend(struct net_device *slave_dev);
 int dsa_slave_resume(struct net_device *slave_dev);
-int dsa_slave_register_notifier(void);
-void dsa_slave_unregister_notifier(void);
-
-/* switch.c */
-int dsa_switch_register_notifier(struct dsa_switch *ds);
-void dsa_switch_unregister_notifier(struct dsa_switch *ds);
+int dsa_slave_netdevice_event(struct notifier_block *unused,
+			      unsigned long event, void *ptr);
 
 /* tag_dsa.c */
 extern const struct dsa_device_ops dsa_netdev_ops;

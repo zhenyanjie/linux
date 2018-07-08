@@ -564,9 +564,6 @@ static int intel_th_gth_assign(struct intel_th_device *thdev,
 	struct gth_device *gth = dev_get_drvdata(&thdev->dev);
 	int i, id;
 
-	if (thdev->host_mode)
-		return -EBUSY;
-
 	if (othdev->type != INTEL_TH_OUTPUT)
 		return -EINVAL;
 
@@ -602,9 +599,6 @@ static void intel_th_gth_unassign(struct intel_th_device *thdev,
 {
 	struct gth_device *gth = dev_get_drvdata(&thdev->dev);
 	int port = othdev->output.port;
-
-	if (thdev->host_mode)
-		return;
 
 	spin_lock(&gth->gth_lock);
 	othdev->output.port = -1;
@@ -660,24 +654,9 @@ static int intel_th_gth_probe(struct intel_th_device *thdev)
 	gth->base = base;
 	spin_lock_init(&gth->gth_lock);
 
-	/*
-	 * Host mode can be signalled via SW means or via SCRPD_DEBUGGER_IN_USE
-	 * bit. Either way, don't reset HW in this case, and don't export any
-	 * capture configuration attributes. Also, refuse to assign output
-	 * drivers to ports, see intel_th_gth_assign().
-	 */
-	if (thdev->host_mode)
-		goto done;
-
 	ret = intel_th_gth_reset(gth);
-	if (ret) {
-		if (ret != -EBUSY)
-			return ret;
-
-		thdev->host_mode = true;
-
-		goto done;
-	}
+	if (ret)
+		return ret;
 
 	for (i = 0; i < TH_CONFIGURABLE_MASTERS + 1; i++)
 		gth->master[i] = -1;
@@ -698,7 +677,6 @@ static int intel_th_gth_probe(struct intel_th_device *thdev)
 		return -ENOMEM;
 	}
 
-done:
 	dev_set_drvdata(dev, gth);
 
 	return 0;

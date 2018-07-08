@@ -75,7 +75,7 @@ static int sock_fanout_open(uint16_t typeflags, int num_packets)
 {
 	int fd, val;
 
-	fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_IP));
+	fd = socket(PF_PACKET, SOCK_DGRAM, htons(ETH_P_IP));
 	if (fd < 0) {
 		perror("socket packet");
 		exit(1);
@@ -95,26 +95,10 @@ static int sock_fanout_open(uint16_t typeflags, int num_packets)
 	return fd;
 }
 
-static void sock_fanout_set_cbpf(int fd)
-{
-	struct sock_filter bpf_filter[] = {
-		BPF_STMT(BPF_LD+BPF_B+BPF_ABS, 80),	      /* ldb [80] */
-		BPF_STMT(BPF_RET+BPF_A, 0),		      /* ret A */
-	};
-	struct sock_fprog bpf_prog;
-
-	bpf_prog.filter = bpf_filter;
-	bpf_prog.len = sizeof(bpf_filter) / sizeof(struct sock_filter);
-
-	if (setsockopt(fd, SOL_PACKET, PACKET_FANOUT_DATA, &bpf_prog,
-		       sizeof(bpf_prog))) {
-		perror("fanout data cbpf");
-		exit(1);
-	}
-}
-
 static void sock_fanout_set_ebpf(int fd)
 {
+	static char log_buf[65536];
+
 	const int len_off = __builtin_offsetof(struct __sk_buff, len);
 	struct bpf_insn prog[] = {
 		{ BPF_ALU64 | BPF_MOV | BPF_X,   6, 1, 0, 0 },
@@ -127,7 +111,6 @@ static void sock_fanout_set_ebpf(int fd)
 		{ BPF_ALU   | BPF_MOV | BPF_K,   0, 0, 0, 0 },
 		{ BPF_JMP   | BPF_EXIT,          0, 0, 0, 0 }
 	};
-	char log_buf[512];
 	union bpf_attr attr;
 	int pfd;
 
@@ -288,7 +271,7 @@ static int test_datapath(uint16_t typeflags, int port_off,
 		exit(1);
 	}
 	if (type == PACKET_FANOUT_CBPF)
-		sock_fanout_set_cbpf(fds[0]);
+		sock_setfilter(fds[0], SOL_PACKET, PACKET_FANOUT_DATA);
 	else if (type == PACKET_FANOUT_EBPF)
 		sock_fanout_set_ebpf(fds[0]);
 

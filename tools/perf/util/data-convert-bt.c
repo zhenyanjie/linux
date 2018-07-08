@@ -1473,7 +1473,7 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 		},
 	};
 	struct ctf_writer *cw = &c.writer;
-	int err;
+	int err = -1;
 
 	if (opts->all) {
 		c.tool.comm = process_comm_event;
@@ -1481,15 +1481,12 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 		c.tool.fork = process_fork_event;
 	}
 
-	err = perf_config(convert__config, &c);
-	if (err)
-		return err;
+	perf_config(convert__config, &c);
 
 	/* CTF writer */
 	if (ctf_writer__init(cw, path))
 		return -1;
 
-	err = -1;
 	/* perf.data session */
 	session = perf_session__new(&file, 0, &c.tool);
 	if (!session)

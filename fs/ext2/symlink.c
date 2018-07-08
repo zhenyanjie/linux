@@ -21,6 +21,7 @@
 #include "xattr.h"
 
 const struct inode_operations ext2_symlink_inode_operations = {
+	.readlink	= generic_readlink,
 	.get_link	= page_get_link,
 	.setattr	= ext2_setattr,
 #ifdef CONFIG_EXT2_FS_XATTR
@@ -29,6 +30,7 @@ const struct inode_operations ext2_symlink_inode_operations = {
 };
  
 const struct inode_operations ext2_fast_symlink_inode_operations = {
+	.readlink	= generic_readlink,
 	.get_link	= simple_get_link,
 	.setattr	= ext2_setattr,
 #ifdef CONFIG_EXT2_FS_XATTR

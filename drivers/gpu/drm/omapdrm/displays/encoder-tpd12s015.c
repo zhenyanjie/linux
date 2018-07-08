@@ -26,7 +26,7 @@ struct panel_drv_data {
 	struct gpio_desc *ls_oe_gpio;
 	struct gpio_desc *hpd_gpio;
 
-	struct videomode vm;
+	struct omap_video_timings timings;
 };
 
 #define to_panel_data(x) container_of(x, struct panel_drv_data, dssdev)
@@ -80,7 +80,7 @@ static int tpd_enable(struct omap_dss_device *dssdev)
 	if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)
 		return 0;
 
-	in->ops.hdmi->set_timings(in, &ddata->vm);
+	in->ops.hdmi->set_timings(in, &ddata->timings);
 
 	r = in->ops.hdmi->enable(in);
 	if (r)
@@ -105,33 +105,33 @@ static void tpd_disable(struct omap_dss_device *dssdev)
 }
 
 static void tpd_set_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
 
-	ddata->vm = *vm;
-	dssdev->panel.vm = *vm;
+	ddata->timings = *timings;
+	dssdev->panel.timings = *timings;
 
-	in->ops.hdmi->set_timings(in, vm);
+	in->ops.hdmi->set_timings(in, timings);
 }
 
 static void tpd_get_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 
-	*vm = ddata->vm;
+	*timings = ddata->timings;
 }
 
 static int tpd_check_timings(struct omap_dss_device *dssdev,
-			     struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
 	int r;
 
-	r = in->ops.hdmi->check_timings(in, vm);
+	r = in->ops.hdmi->check_timings(in, timings);
 
 	return r;
 }
@@ -234,30 +234,25 @@ static int tpd_probe(struct platform_device *pdev)
 	if (r)
 		return r;
 
+
 	gpio = devm_gpiod_get_index_optional(&pdev->dev, NULL, 0,
 		 GPIOD_OUT_LOW);
-	if (IS_ERR(gpio)) {
-		r = PTR_ERR(gpio);
+	if (IS_ERR(gpio))
 		goto err_gpio;
-	}
 
 	ddata->ct_cp_hpd_gpio = gpio;
 
 	gpio = devm_gpiod_get_index_optional(&pdev->dev, NULL, 1,
 		 GPIOD_OUT_LOW);
-	if (IS_ERR(gpio)) {
-		r = PTR_ERR(gpio);
+	if (IS_ERR(gpio))
 		goto err_gpio;
-	}
 
 	ddata->ls_oe_gpio = gpio;
 
 	gpio = devm_gpiod_get_index(&pdev->dev, NULL, 2,
 		GPIOD_IN);
-	if (IS_ERR(gpio)) {
-		r = PTR_ERR(gpio);
+	if (IS_ERR(gpio))
 		goto err_gpio;
-	}
 
 	ddata->hpd_gpio = gpio;
 

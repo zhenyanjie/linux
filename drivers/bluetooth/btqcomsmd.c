@@ -85,7 +85,8 @@ static int btqcomsmd_send(struct hci_dev *hdev, struct sk_buff *skb)
 		break;
 	}
 
-	kfree_skb(skb);
+	if (!ret)
+		kfree_skb(skb);
 
 	return ret;
 }
@@ -165,7 +166,6 @@ static const struct of_device_id btqcomsmd_of_match[] = {
 	{ .compatible = "qcom,wcnss-bt", },
 	{ },
 };
-MODULE_DEVICE_TABLE(of, btqcomsmd_of_match);
 
 static struct platform_driver btqcomsmd_driver = {
 	.probe = btqcomsmd_probe,

@@ -35,6 +35,8 @@ struct hns_mac_cb;
 
 #define DSAF_CFG_READ_CNT   30
 
+#define MAC_NUM_OCTETS_PER_ADDR 6
+
 #define DSAF_DUMP_REGS_NUM 504
 #define DSAF_STATIC_NUM 28
 #define DSAF_V2_STATIC_NUM	44
@@ -68,7 +70,7 @@ enum dsaf_roce_qos_sl {
 };
 
 #define DSAF_STATS_READ(p, offset) (*((u64 *)((u8 *)(p) + (offset))))
-#define HNS_DSAF_IS_DEBUG(dev) (dev->dsaf_mode == DSAF_MODE_DISABLE_SP)
+#define HNS_DSAF_IS_DEBUG(dev) ((dev)->dsaf_mode == DSAF_MODE_DISABLE_SP)
 
 enum hal_dsaf_mode {
 	HRD_DSAF_NO_DSAF_MODE	= 0x0,
@@ -163,7 +165,7 @@ enum dsaf_mode {
 /*mac entry, mc or uc entry*/
 struct dsaf_drv_mac_single_dest_entry {
 	/* mac addr, match the entry*/
-	u8 addr[ETH_ALEN];
+	u8 addr[MAC_NUM_OCTETS_PER_ADDR];
 	u16 in_vlan_id; /* value of VlanId */
 
 	/* the vld input port num, dsaf-mode fix 0, */
@@ -177,7 +179,7 @@ struct dsaf_drv_mac_single_dest_entry {
 /*only mc entry*/
 struct dsaf_drv_mac_multi_dest_entry {
 	/* mac addr, match the entry*/
-	u8 addr[ETH_ALEN];
+	u8 addr[MAC_NUM_OCTETS_PER_ADDR];
 	u16 in_vlan_id;
 	/* this mac addr output port,*/
 	/*	bit0-bit5 means Port0-Port5(1bit is vld)**/
@@ -306,6 +308,8 @@ struct dsaf_misc_op {
 	/* reset series function, it will be reset if the dereset is 0 */
 	void (*dsaf_reset)(struct dsaf_device *dsaf_dev, bool dereset);
 	void (*xge_srst)(struct dsaf_device *dsaf_dev, u32 port, bool dereset);
+	void (*xge_core_srst)(struct dsaf_device *dsaf_dev, u32 port,
+			      bool dereset);
 	void (*ge_srst)(struct dsaf_device *dsaf_dev, u32 port, bool dereset);
 	void (*ppe_srst)(struct dsaf_device *dsaf_dev, u32 port, bool dereset);
 	void (*ppe_comm_srst)(struct dsaf_device *dsaf_dev, bool dereset);
@@ -339,7 +343,6 @@ struct dsaf_device {
 	enum hal_dsaf_mode dsaf_en;
 	enum hal_dsaf_tc_mode dsaf_tc_mode;
 	u32 dsaf_ver;
-	u16 tcam_max_num;	/* max TCAM entry for user except promisc */
 
 	struct ppe_common_cb *ppe_common[DSAF_COMM_DEV_NUM];
 	struct rcb_common_cb *rcb_common[DSAF_COMM_DEV_NUM];
@@ -357,11 +360,6 @@ static inline void *hns_dsaf_dev_priv(const struct dsaf_device *dsaf_dev)
 	return (void *)((u8 *)dsaf_dev + sizeof(*dsaf_dev));
 }
 
-#define DSAF_TBL_TCAM_KEY_PORT_S 0
-#define DSAF_TBL_TCAM_KEY_PORT_M (((1ULL << 4) - 1) << 0)
-#define DSAF_TBL_TCAM_KEY_VLAN_S 4
-#define DSAF_TBL_TCAM_KEY_VLAN_M (((1ULL << 12) - 1) << 4)
-
 struct dsaf_drv_tbl_tcam_key {
 	union {
 		struct {
@@ -375,9 +373,11 @@ struct dsaf_drv_tbl_tcam_key {
 	} high;
 	union {
 		struct {
-			u16 port_vlan;
-			u8 mac_5;
-			u8 mac_4;
+			u32 port:4; /* port id, */
+			/* dsaf-mode fixed 0, non-dsaf-mode port id*/
+			u32 vlan:12; /* vlan id */
+			u32 mac_5:8;
+			u32 mac_4:8;
 		} bits;
 
 		u32 val;
@@ -461,19 +461,10 @@ void hns_dsaf_get_strings(int stringset, u8 *data, int port,
 void hns_dsaf_get_regs(struct dsaf_device *ddev, u32 port, void *data);
 int hns_dsaf_get_regs_count(void);
 void hns_dsaf_set_promisc_mode(struct dsaf_device *dsaf_dev, u32 en);
-void hns_dsaf_set_promisc_tcam(struct dsaf_device *dsaf_dev,
-			       u32 port, bool enable);
 
 void hns_dsaf_get_rx_mac_pause_en(struct dsaf_device *dsaf_dev, int mac_id,
 				  u32 *en);
 int hns_dsaf_set_rx_mac_pause_en(struct dsaf_device *dsaf_dev, int mac_id,
 				 u32 en);
-int hns_dsaf_rm_mac_addr(
-	struct dsaf_device *dsaf_dev,
-	struct dsaf_drv_mac_single_dest_entry *mac_entry);
-
-int hns_dsaf_clr_mac_mc_port(struct dsaf_device *dsaf_dev,
-			     u8 mac_id, u8 port_num);
-
 
 #endif /* __HNS_DSAF_MAIN_H__ */

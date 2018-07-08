@@ -13,7 +13,6 @@
 #define __KERNEL_RTMUTEX_COMMON_H
 
 #include <linux/rtmutex.h>
-#include <linux/sched/wake_q.h>
 
 /*
  * This is the control structure for tasks blocked on a rt_mutex,
@@ -34,6 +33,7 @@ struct rt_mutex_waiter {
 	struct rt_mutex		*deadlock_lock;
 #endif
 	int prio;
+	u64 deadline;
 };
 
 /*
@@ -72,12 +72,13 @@ task_top_pi_waiter(struct task_struct *p)
  * lock->owner state tracking:
  */
 #define RT_MUTEX_HAS_WAITERS	1UL
+#define RT_MUTEX_OWNER_MASKALL	1UL
 
 static inline struct task_struct *rt_mutex_owner(struct rt_mutex *lock)
 {
 	unsigned long owner = (unsigned long) READ_ONCE(lock->owner);
 
-	return (struct task_struct *) (owner & ~RT_MUTEX_HAS_WAITERS);
+	return (struct task_struct *) (owner & ~RT_MUTEX_OWNER_MASKALL);
 }
 
 /*

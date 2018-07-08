@@ -336,6 +336,7 @@ static int cvm_oct_poll(struct oct_rx_group *rx_group, int budget)
 		if (likely((port < TOTAL_NUMBER_OF_PORTS) &&
 			   cvm_oct_device[port])) {
 			struct net_device *dev = cvm_oct_device[port];
+			struct octeon_ethernet *priv = netdev_priv(dev);
 
 			/*
 			 * Only accept packets for devices that are
@@ -355,8 +356,8 @@ static int cvm_oct_poll(struct oct_rx_group *rx_group, int budget)
 
 				/* Increment RX stats for virtual ports */
 				if (port >= CVMX_PIP_NUM_INPUT_PORTS) {
-					dev->stats.rx_packets++;
-					dev->stats.rx_bytes += skb->len;
+					priv->stats.rx_packets++;
+					priv->stats.rx_bytes += skb->len;
 				}
 				netif_receive_skb(skb);
 			} else {
@@ -364,7 +365,7 @@ static int cvm_oct_poll(struct oct_rx_group *rx_group, int budget)
 				 * Drop any packet received for a device that
 				 * isn't up.
 				 */
-				dev->stats.rx_dropped++;
+				priv->stats.rx_dropped++;
 				dev_kfree_skb_irq(skb);
 			}
 		} else {
@@ -428,7 +429,7 @@ static int cvm_oct_napi_poll(struct napi_struct *napi, int budget)
 
 	if (rx_count < budget) {
 		/* No more work */
-		napi_complete_done(napi, rx_count);
+		napi_complete(napi);
 		enable_irq(rx_group->irq);
 	}
 	return rx_count;

@@ -21,7 +21,7 @@
 
 #include <asm/dcr.h>
 
-#include "edac_module.h"
+#include "edac_core.h"
 #include "ppc4xx_edac.h"
 
 /*

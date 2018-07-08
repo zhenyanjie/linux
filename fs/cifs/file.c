@@ -224,6 +224,13 @@ cifs_nt_open(char *full_path, struct inode *inode, struct cifs_sb_info *cifs_sb,
 	if (backup_cred(cifs_sb))
 		create_options |= CREATE_OPEN_BACKUP_INTENT;
 
+	/* O_SYNC also has bit for O_DSYNC so following check picks up either */
+	if (f_flags & O_SYNC)
+		create_options |= CREATE_WRITE_THROUGH;
+
+	if (f_flags & O_DIRECT)
+		create_options |= CREATE_NO_BUFFER;
+
 	oparms.tcon = tcon;
 	oparms.cifs_sb = cifs_sb;
 	oparms.desired_access = desired_access;
@@ -582,7 +589,7 @@ cifs_relock_file(struct cifsFileInfo *cfile)
 	struct cifs_tcon *tcon = tlink_tcon(cfile->tlink);
 	int rc = 0;
 
-	down_read(&cinode->lock_sem);
+	down_read_nested(&cinode->lock_sem, SINGLE_DEPTH_NESTING);
 	if (cinode->can_cache_brlcks) {
 		/* can cache locks - no need to relock */
 		up_read(&cinode->lock_sem);
@@ -2911,9 +2918,8 @@ cifs_uncached_readv_complete(struct work_struct *work)
 }
 
 static int
-uncached_fill_pages(struct TCP_Server_Info *server,
-		    struct cifs_readdata *rdata, struct iov_iter *iter,
-		    unsigned int len)
+cifs_uncached_read_into_pages(struct TCP_Server_Info *server,
+			struct cifs_readdata *rdata, unsigned int len)
 {
 	int result = 0;
 	unsigned int i;
@@ -2942,10 +2948,7 @@ uncached_fill_pages(struct TCP_Server_Info *server,
 			rdata->tailsz = len;
 			len = 0;
 		}
-		if (iter)
-			result = copy_page_from_iter(page, 0, n, iter);
-		else
-			result = cifs_read_page_from_socket(server, page, n);
+		result = cifs_read_page_from_socket(server, page, n);
 		if (result < 0)
 			break;
 
@@ -2954,21 +2957,6 @@ uncached_fill_pages(struct TCP_Server_Info *server,
 
 	return rdata->got_bytes > 0 && result != -ECONNABORTED ?
 						rdata->got_bytes : result;
-}
-
-static int
-cifs_uncached_read_into_pages(struct TCP_Server_Info *server,
-			      struct cifs_readdata *rdata, unsigned int len)
-{
-	return uncached_fill_pages(server, rdata, NULL, len);
-}
-
-static int
-cifs_uncached_copy_into_pages(struct TCP_Server_Info *server,
-			      struct cifs_readdata *rdata,
-			      struct iov_iter *iter)
-{
-	return uncached_fill_pages(server, rdata, iter, iter->count);
 }
 
 static int
@@ -3018,7 +3006,6 @@ cifs_send_async_read(loff_t offset, size_t len, struct cifsFileInfo *open_file,
 		rdata->pid = pid;
 		rdata->pagesz = PAGE_SIZE;
 		rdata->read_into_pages = cifs_uncached_read_into_pages;
-		rdata->copy_into_pages = cifs_uncached_copy_into_pages;
 		rdata->credits = credits;
 
 		if (!rdata->cfile->invalidHandle ||
@@ -3282,7 +3269,7 @@ cifs_read(struct file *file, char *read_data, size_t read_size, loff_t *offset)
  * sure that it doesn't change while being written back.
  */
 static int
-cifs_page_mkwrite(struct vm_fault *vmf)
+cifs_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	struct page *page = vmf->page;
 
@@ -3298,20 +3285,18 @@ static const struct vm_operations_struct cifs_file_vm_ops = {
 
 int cifs_file_strict_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	int rc, xid;
+	int xid, rc = 0;
 	struct inode *inode = file_inode(file);
 
 	xid = get_xid();
 
-	if (!CIFS_CACHE_READ(CIFS_I(inode))) {
+	if (!CIFS_CACHE_READ(CIFS_I(inode)))
 		rc = cifs_zap_mapping(inode);
-		if (rc)
-			return rc;
-	}
-
-	rc = generic_file_mmap(file, vma);
-	if (rc == 0)
+	if (!rc)
+		rc = generic_file_mmap(file, vma);
+	if (!rc)
 		vma->vm_ops = &cifs_file_vm_ops;
+
 	free_xid(xid);
 	return rc;
 }
@@ -3321,16 +3306,16 @@ int cifs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	int rc, xid;
 
 	xid = get_xid();
+
 	rc = cifs_revalidate_file(file);
-	if (rc) {
+	if (rc)
 		cifs_dbg(FYI, "Validation prior to mmap failed, error=%d\n",
 			 rc);
-		free_xid(xid);
-		return rc;
-	}
-	rc = generic_file_mmap(file, vma);
-	if (rc == 0)
+	if (!rc)
+		rc = generic_file_mmap(file, vma);
+	if (!rc)
 		vma->vm_ops = &cifs_file_vm_ops;
+
 	free_xid(xid);
 	return rc;
 }
@@ -3369,9 +3354,8 @@ cifs_readv_complete(struct work_struct *work)
 }
 
 static int
-readpages_fill_pages(struct TCP_Server_Info *server,
-		     struct cifs_readdata *rdata, struct iov_iter *iter,
-		     unsigned int len)
+cifs_readpages_read_into_pages(struct TCP_Server_Info *server,
+			struct cifs_readdata *rdata, unsigned int len)
 {
 	int result = 0;
 	unsigned int i;
@@ -3425,10 +3409,7 @@ readpages_fill_pages(struct TCP_Server_Info *server,
 			continue;
 		}
 
-		if (iter)
-			result = copy_page_from_iter(page, 0, n, iter);
-		else
-			result = cifs_read_page_from_socket(server, page, n);
+		result = cifs_read_page_from_socket(server, page, n);
 		if (result < 0)
 			break;
 
@@ -3437,21 +3418,6 @@ readpages_fill_pages(struct TCP_Server_Info *server,
 
 	return rdata->got_bytes > 0 && result != -ECONNABORTED ?
 						rdata->got_bytes : result;
-}
-
-static int
-cifs_readpages_read_into_pages(struct TCP_Server_Info *server,
-			       struct cifs_readdata *rdata, unsigned int len)
-{
-	return readpages_fill_pages(server, rdata, NULL, len);
-}
-
-static int
-cifs_readpages_copy_into_pages(struct TCP_Server_Info *server,
-			       struct cifs_readdata *rdata,
-			       struct iov_iter *iter)
-{
-	return readpages_fill_pages(server, rdata, iter, iter->count);
 }
 
 static int
@@ -3608,7 +3574,6 @@ static int cifs_readpages(struct file *file, struct address_space *mapping,
 		rdata->pid = pid;
 		rdata->pagesz = PAGE_SIZE;
 		rdata->read_into_pages = cifs_readpages_read_into_pages;
-		rdata->copy_into_pages = cifs_readpages_copy_into_pages;
 		rdata->credits = credits;
 
 		list_for_each_entry_safe(page, tpage, &tmplist, lru) {

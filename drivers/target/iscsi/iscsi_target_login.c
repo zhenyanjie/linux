@@ -17,13 +17,9 @@
  ******************************************************************************/
 
 #include <crypto/hash.h>
-#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/kthread.h>
-#include <linux/sched/signal.h>
 #include <linux/idr.h>
-#include <linux/tcp.h>        /* TCP_NODELAY */
-#include <net/ipv6.h>         /* ipv6_addr_v4mapped() */
 #include <scsi/iscsi_proto.h>
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
@@ -225,7 +221,7 @@ int iscsi_check_for_session_reinstatement(struct iscsi_conn *conn)
 		return 0;
 
 	pr_debug("%s iSCSI Session SID %u is still active for %s,"
-		" performing session reinstatement.\n", (sessiontype) ?
+		" preforming session reinstatement.\n", (sessiontype) ?
 		"Discovery" : "Normal", sess->sid,
 		sess->sess_ops->InitiatorName);
 
@@ -1237,9 +1233,11 @@ static int __iscsi_target_login_thread(struct iscsi_np *np)
 	flush_signals(current);
 
 	spin_lock_bh(&np->np_thread_lock);
-	if (np->np_thread_state == ISCSI_NP_THREAD_RESET) {
+	if (atomic_dec_if_positive(&np->np_reset_count) >= 0) {
 		np->np_thread_state = ISCSI_NP_THREAD_ACTIVE;
+		spin_unlock_bh(&np->np_thread_lock);
 		complete(&np->np_restart_comp);
+		return 1;
 	} else if (np->np_thread_state == ISCSI_NP_THREAD_SHUTDOWN) {
 		spin_unlock_bh(&np->np_thread_lock);
 		goto exit;
@@ -1272,7 +1270,8 @@ static int __iscsi_target_login_thread(struct iscsi_np *np)
 		goto exit;
 	} else if (rc < 0) {
 		spin_lock_bh(&np->np_thread_lock);
-		if (np->np_thread_state == ISCSI_NP_THREAD_RESET) {
+		if (atomic_dec_if_positive(&np->np_reset_count) >= 0) {
+			np->np_thread_state = ISCSI_NP_THREAD_ACTIVE;
 			spin_unlock_bh(&np->np_thread_lock);
 			complete(&np->np_restart_comp);
 			iscsit_put_transport(conn->conn_transport);

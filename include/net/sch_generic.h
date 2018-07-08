@@ -76,7 +76,7 @@ struct Qdisc {
 
 	struct netdev_queue	*dev_queue;
 
-	struct net_rate_estimator __rcu *rate_est;
+	struct gnet_stats_rate_est64	rate_est;
 	struct gnet_stats_basic_cpu __percpu *cpu_bstats;
 	struct gnet_stats_queue	__percpu *cpu_qstats;
 
@@ -405,33 +405,17 @@ struct Qdisc *qdisc_create_dflt(struct netdev_queue *dev_queue,
 				const struct Qdisc_ops *ops, u32 parentid);
 void __qdisc_calculate_pkt_len(struct sk_buff *skb,
 			       const struct qdisc_size_table *stab);
+bool tcf_destroy(struct tcf_proto *tp, bool force);
+void tcf_destroy_chain(struct tcf_proto __rcu **fl);
 int skb_do_redirect(struct sk_buff *);
-
-static inline void skb_reset_tc(struct sk_buff *skb)
-{
-#ifdef CONFIG_NET_CLS_ACT
-	skb->tc_redirected = 0;
-#endif
-}
 
 static inline bool skb_at_tc_ingress(const struct sk_buff *skb)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	return skb->tc_at_ingress;
+	return G_TC_AT(skb->tc_verd) & AT_INGRESS;
 #else
 	return false;
 #endif
-}
-
-static inline bool skb_skip_tc_classify(struct sk_buff *skb)
-{
-#ifdef CONFIG_NET_CLS_ACT
-	if (skb->tc_skip_classify) {
-		skb->tc_skip_classify = 0;
-		return true;
-	}
-#endif
-	return false;
 }
 
 /* Reset all TX qdiscs greater then index of a device.  */
@@ -691,6 +675,16 @@ static inline void __qdisc_drop(struct sk_buff *skb, struct sk_buff **to_free)
 	*to_free = skb;
 }
 
+static inline void __qdisc_drop_all(struct sk_buff *skb,
+				    struct sk_buff **to_free)
+{
+	if (skb->prev)
+		skb->prev->next = *to_free;
+	else
+		skb->next = *to_free;
+	*to_free = skb;
+}
+
 static inline unsigned int __qdisc_queue_drop_head(struct Qdisc *sch,
 						   struct qdisc_skb_head *qh,
 						   struct sk_buff **to_free)
@@ -784,8 +778,11 @@ static inline struct Qdisc *qdisc_replace(struct Qdisc *sch, struct Qdisc *new,
 	old = *pold;
 	*pold = new;
 	if (old != NULL) {
-		qdisc_tree_reduce_backlog(old, old->q.qlen, old->qstats.backlog);
+		unsigned int qlen = old->q.qlen;
+		unsigned int backlog = old->qstats.backlog;
+
 		qdisc_reset(old);
+		qdisc_tree_reduce_backlog(old, qlen, backlog);
 	}
 	sch_tree_unlock(sch);
 
@@ -803,6 +800,15 @@ static inline int qdisc_drop(struct sk_buff *skb, struct Qdisc *sch,
 			     struct sk_buff **to_free)
 {
 	__qdisc_drop(skb, to_free);
+	qdisc_qstats_drop(sch);
+
+	return NET_XMIT_DROP;
+}
+
+static inline int qdisc_drop_all(struct sk_buff *skb, struct Qdisc *sch,
+				 struct sk_buff **to_free)
+{
+	__qdisc_drop_all(skb, to_free);
 	qdisc_qstats_drop(sch);
 
 	return NET_XMIT_DROP;

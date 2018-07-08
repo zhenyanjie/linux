@@ -58,7 +58,7 @@ static u32 calc_residency(struct drm_i915_private *dev_priv,
 
 		if (I915_READ(VLV_COUNTER_CONTROL) & VLV_COUNT_RANGE_HIGH)
 			units <<= 8;
-	} else if (IS_GEN9_LP(dev_priv)) {
+	} else if (IS_BROXTON(dev_priv)) {
 		units = 1;
 		div = 1200;		/* 833.33ns */
 	}
@@ -514,8 +514,6 @@ static const struct attribute *vlv_attrs[] = {
 	NULL,
 };
 
-#if IS_ENABLED(CONFIG_DRM_I915_CAPTURE_ERROR)
-
 static ssize_t error_state_read(struct file *filp, struct kobject *kobj,
 				struct bin_attribute *attr, char *buf,
 				loff_t off, size_t count)
@@ -535,7 +533,7 @@ static ssize_t error_state_read(struct file *filp, struct kobject *kobj,
 	if (ret)
 		return ret;
 
-	error_priv.i915 = dev_priv;
+	error_priv.dev = dev;
 	i915_error_state_get(dev, &error_priv);
 
 	ret = i915_error_state_to_str(&error_str, &error_priv);
@@ -560,7 +558,7 @@ static ssize_t error_state_write(struct file *file, struct kobject *kobj,
 	struct drm_i915_private *dev_priv = kdev_minor_to_i915(kdev);
 
 	DRM_DEBUG_DRIVER("Resetting error state\n");
-	i915_destroy_error_state(dev_priv);
+	i915_destroy_error_state(&dev_priv->drm);
 
 	return count;
 }
@@ -572,21 +570,6 @@ static struct bin_attribute error_state_attr = {
 	.read = error_state_read,
 	.write = error_state_write,
 };
-
-static void i915_setup_error_capture(struct device *kdev)
-{
-	if (sysfs_create_bin_file(&kdev->kobj, &error_state_attr))
-		DRM_ERROR("error_state sysfs setup failed\n");
-}
-
-static void i915_teardown_error_capture(struct device *kdev)
-{
-	sysfs_remove_bin_file(&kdev->kobj, &error_state_attr);
-}
-#else
-static void i915_setup_error_capture(struct device *kdev) {}
-static void i915_teardown_error_capture(struct device *kdev) {}
-#endif
 
 void i915_setup_sysfs(struct drm_i915_private *dev_priv)
 {
@@ -634,15 +617,17 @@ void i915_setup_sysfs(struct drm_i915_private *dev_priv)
 	if (ret)
 		DRM_ERROR("RPS sysfs setup failed\n");
 
-	i915_setup_error_capture(kdev);
+	ret = sysfs_create_bin_file(&kdev->kobj,
+				    &error_state_attr);
+	if (ret)
+		DRM_ERROR("error_state sysfs setup failed\n");
 }
 
 void i915_teardown_sysfs(struct drm_i915_private *dev_priv)
 {
 	struct device *kdev = dev_priv->drm.primary->kdev;
 
-	i915_teardown_error_capture(kdev);
-
+	sysfs_remove_bin_file(&kdev->kobj, &error_state_attr);
 	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv))
 		sysfs_remove_files(&kdev->kobj, vlv_attrs);
 	else

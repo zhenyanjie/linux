@@ -553,10 +553,9 @@ int amdgpu_parse_extended_power_table(struct amdgpu_device *adev)
 				entry = (ATOM_PPLIB_VCE_Clock_Voltage_Limit_Record *)
 					((u8 *)entry + sizeof(ATOM_PPLIB_VCE_Clock_Voltage_Limit_Record));
 			}
-			adev->pm.dpm.num_of_vce_states =
-					states->numEntries > AMD_MAX_VCE_LEVELS ?
-					AMD_MAX_VCE_LEVELS : states->numEntries;
-			for (i = 0; i < adev->pm.dpm.num_of_vce_states; i++) {
+			for (i = 0; i < states->numEntries; i++) {
+				if (i >= AMDGPU_MAX_VCE_LEVELS)
+					break;
 				vce_clk = (VCEClockInfo *)
 					((u8 *)&array->entries[0] +
 					 (state_entry->ucVCEClockInfoIndex * sizeof(VCEClockInfo)));
@@ -955,13 +954,4 @@ u8 amdgpu_encode_pci_lane_width(u32 lanes)
 		return 0;
 
 	return encoded_lanes[lanes];
-}
-
-struct amd_vce_state*
-amdgpu_get_vce_clock_state(struct amdgpu_device *adev, unsigned idx)
-{
-	if (idx < adev->pm.dpm.num_of_vce_states)
-		return &adev->pm.dpm.vce_states[idx];
-
-	return NULL;
 }

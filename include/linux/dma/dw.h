@@ -23,7 +23,6 @@ struct dw_dma;
 /**
  * struct dw_dma_chip - representation of DesignWare DMA controller hardware
  * @dev:		struct device of the DMA controller
- * @id:			instance ID
  * @irq:		irq line
  * @regs:		memory mapped I/O space
  * @clk:		hclk clock
@@ -32,7 +31,6 @@ struct dw_dma;
  */
 struct dw_dma_chip {
 	struct device	*dev;
-	int		id;
 	int		irq;
 	void __iomem	*regs;
 	struct clk	*clk;

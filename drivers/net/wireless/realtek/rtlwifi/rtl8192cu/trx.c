@@ -11,6 +11,10 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -241,7 +245,7 @@ u16 rtl8192cu_mq_to_hwq(__le16 fc, u16 mac80211_queue_index)
 		break;
 	default:
 		hw_queue_index = RTL_TXQ_BE;
-		WARN_ONCE(true, "rtl8192cu: QSLT_BE queue, skb_queue:%d\n",
+		RT_ASSERT(false, "QSLT_BE queue, skb_queue:%d\n",
 			  mac80211_queue_index);
 		break;
 	}
@@ -477,14 +481,14 @@ static void _rtl_fill_usb_tx_desc(u8 *txdesc)
  */
 static void _rtl_tx_desc_checksum(u8 *txdesc)
 {
-	__le16 *ptr = (__le16 *)txdesc;
+	u16 *ptr = (u16 *)txdesc;
 	u16	checksum = 0;
 	u32 index;
 
 	/* Clear first */
 	SET_TX_DESC_TX_DESC_CHECKSUM(txdesc, 0);
 	for (index = 0; index < 16; index++)
-		checksum = checksum ^ le16_to_cpu(*(ptr + index));
+		checksum = checksum ^ (*(ptr + index));
 	SET_TX_DESC_TX_DESC_CHECKSUM(txdesc, checksum);
 }
 

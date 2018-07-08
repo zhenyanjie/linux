@@ -202,32 +202,38 @@
 
 &pio {
 	mmc0_cd_pin_olinuxino_micro: mmc0_cd_pin@0 {
-		pins = "PG1";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PG1";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 
 	mmc1_cd_pin_olinuxino_micro: mmc1_cd_pin@0 {
-		pins = "PG13";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PG13";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 
 	led_pins_olinuxino: led_pins@0 {
-		pins = "PE3";
-		function = "gpio_out";
-		drive-strength = <20>;
+		allwinner,pins = "PE3";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_20_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 
 	usb1_vbus_pin_olinuxino_m: usb1_vbus_pin@0 {
-		pins = "PB10";
-		function = "gpio_out";
+		allwinner,pins = "PB10";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 
 	usb0_id_detect_pin: usb0_id_detect_pin@0 {
-		pins = "PG12";
-		function = "gpio_in";
-		bias-pull-up;
+		allwinner,pins = "PG12";
+		allwinner,function = "gpio_in";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 	};
 };
 
@@ -244,8 +250,8 @@
 
 &spi2 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&spi2_pins_b>,
-		    <&spi2_cs0_pins_b>;
+	pinctrl-0 = <&spi2_pins_a>,
+		    <&spi2_cs0_pins_a>;
 	status = "okay";
 };
 
@@ -273,7 +279,7 @@
 };
 
 &usb0_vbus_pin_a {
-	pins = "PG11";
+	allwinner,pins = "PG11";
 };
 
 &usbphy {

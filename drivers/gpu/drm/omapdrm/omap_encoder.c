@@ -102,7 +102,7 @@ static void omap_encoder_disable(struct drm_encoder *encoder)
 
 static int omap_encoder_update(struct drm_encoder *encoder,
 			       enum omap_channel channel,
-			       struct videomode *vm)
+			       struct omap_video_timings *timings)
 {
 	struct drm_device *dev = encoder->dev;
 	struct omap_encoder *omap_encoder = to_omap_encoder(encoder);
@@ -111,13 +111,13 @@ static int omap_encoder_update(struct drm_encoder *encoder,
 	int ret;
 
 	if (dssdrv->check_timings) {
-		ret = dssdrv->check_timings(dssdev, vm);
+		ret = dssdrv->check_timings(dssdev, timings);
 	} else {
-		struct videomode t = {0};
+		struct omap_video_timings t = {0};
 
 		dssdrv->get_timings(dssdev, &t);
 
-		if (memcmp(vm, &t, sizeof(*vm)))
+		if (memcmp(timings, &t, sizeof(struct omap_video_timings)))
 			ret = -EINVAL;
 		else
 			ret = 0;
@@ -129,7 +129,7 @@ static int omap_encoder_update(struct drm_encoder *encoder,
 	}
 
 	if (dssdrv->set_timings)
-		dssdrv->set_timings(dssdev, vm);
+		dssdrv->set_timings(dssdev, timings);
 
 	return 0;
 }

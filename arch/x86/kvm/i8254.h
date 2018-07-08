@@ -44,7 +44,8 @@ struct kvm_pit {
 	struct kvm_kpit_state pit_state;
 	int irq_source_id;
 	struct kvm_irq_mask_notifier mask_notifier;
-	struct kthread_worker *worker;
+	struct kthread_worker worker;
+	struct task_struct *worker_task;
 	struct kthread_work expired;
 };
 

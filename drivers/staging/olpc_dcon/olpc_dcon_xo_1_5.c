@@ -53,8 +53,9 @@ static int dcon_was_irq(void)
 
 	/* irq status will appear in PMIO_Rx50[6] on gpio12 */
 	tmp = inb(VX855_GPI_STATUS_CHG);
-
 	return !!(tmp & BIT_GPIO12);
+
+	return 0;
 }
 
 static int dcon_init_xo_1_5(struct dcon_priv *dcon)
@@ -106,6 +107,7 @@ static void set_i2c_line(int sda, int scl)
 	outb(port, 0x3c4);
 	outb(tmp, 0x3c5);
 }
+
 
 static void dcon_wiggle_xo_1_5(void)
 {

@@ -186,16 +186,16 @@ static const struct ipr_chip_cfg_t ipr_chip_cfg[] = {
 };
 
 static const struct ipr_chip_t ipr_chip[] = {
-	{ PCI_VENDOR_ID_MYLEX, PCI_DEVICE_ID_IBM_GEMSTONE, false, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
-	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CITRINE, false, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
-	{ PCI_VENDOR_ID_ADAPTEC2, PCI_DEVICE_ID_ADAPTEC2_OBSIDIAN, false, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
-	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_OBSIDIAN, false, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
-	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_OBSIDIAN_E, true, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
-	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_SNIPE, false, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[1] },
-	{ PCI_VENDOR_ID_ADAPTEC2, PCI_DEVICE_ID_ADAPTEC2_SCAMP, false, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[1] },
-	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROC_FPGA_E2, true, IPR_SIS64, IPR_MMIO, &ipr_chip_cfg[2] },
-	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROCODILE, true, IPR_SIS64, IPR_MMIO, &ipr_chip_cfg[2] },
-	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_RATTLESNAKE, true, IPR_SIS64, IPR_MMIO, &ipr_chip_cfg[2] }
+	{ PCI_VENDOR_ID_MYLEX, PCI_DEVICE_ID_IBM_GEMSTONE, IPR_USE_LSI, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CITRINE, IPR_USE_LSI, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
+	{ PCI_VENDOR_ID_ADAPTEC2, PCI_DEVICE_ID_ADAPTEC2_OBSIDIAN, IPR_USE_LSI, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_OBSIDIAN, IPR_USE_LSI, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_OBSIDIAN_E, IPR_USE_MSI, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[0] },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_SNIPE, IPR_USE_LSI, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[1] },
+	{ PCI_VENDOR_ID_ADAPTEC2, PCI_DEVICE_ID_ADAPTEC2_SCAMP, IPR_USE_LSI, IPR_SIS32, IPR_PCI_CFG, &ipr_chip_cfg[1] },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROC_FPGA_E2, IPR_USE_MSI, IPR_SIS64, IPR_MMIO, &ipr_chip_cfg[2] },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROCODILE, IPR_USE_MSI, IPR_SIS64, IPR_MMIO, &ipr_chip_cfg[2] },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_RATTLESNAKE, IPR_USE_MSI, IPR_SIS64, IPR_MMIO, &ipr_chip_cfg[2] }
 };
 
 static int ipr_max_bus_speeds[] = {
@@ -836,8 +836,10 @@ static void ipr_sata_eh_done(struct ipr_cmnd *ipr_cmd)
 
 	qc->err_mask |= AC_ERR_OTHER;
 	sata_port->ioasa.status |= ATA_BUSY;
-	list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 	ata_qc_complete(qc);
+	if (ipr_cmd->eh_comp)
+		complete(ipr_cmd->eh_comp);
+	list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 }
 
 /**
@@ -5947,8 +5949,10 @@ static void ipr_erp_done(struct ipr_cmnd *ipr_cmd)
 		res->in_erp = 0;
 	}
 	scsi_dma_unmap(ipr_cmd->scsi_cmd);
-	list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 	scsi_cmd->scsi_done(scsi_cmd);
+	if (ipr_cmd->eh_comp)
+		complete(ipr_cmd->eh_comp);
+	list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 }
 
 /**
@@ -6293,12 +6297,7 @@ static void ipr_erp_start(struct ipr_ioa_cfg *ioa_cfg,
 		break;
 	case IPR_IOASC_MED_DO_NOT_REALLOC: /* prevent retries */
 	case IPR_IOASA_IR_DUAL_IOA_DISABLED:
-		/*
-		 * exception: do not set DID_PASSTHROUGH on CHECK CONDITION
-		 * so SCSI mid-layer and upper layers handle it accordingly.
-		 */
-		if (scsi_cmd->result != SAM_STAT_CHECK_CONDITION)
-			scsi_cmd->result |= (DID_PASSTHROUGH << 16);
+		scsi_cmd->result |= (DID_PASSTHROUGH << 16);
 		break;
 	case IPR_IOASC_BUS_WAS_RESET:
 	case IPR_IOASC_BUS_WAS_RESET_BY_OTHER:
@@ -6343,8 +6342,10 @@ static void ipr_erp_start(struct ipr_ioa_cfg *ioa_cfg,
 	}
 
 	scsi_dma_unmap(ipr_cmd->scsi_cmd);
-	list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 	scsi_cmd->scsi_done(scsi_cmd);
+	if (ipr_cmd->eh_comp)
+		complete(ipr_cmd->eh_comp);
+	list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 }
 
 /**
@@ -6370,8 +6371,10 @@ static void ipr_scsi_done(struct ipr_cmnd *ipr_cmd)
 		scsi_dma_unmap(scsi_cmd);
 
 		spin_lock_irqsave(ipr_cmd->hrrq->lock, lock_flags);
-		list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 		scsi_cmd->scsi_done(scsi_cmd);
+		if (ipr_cmd->eh_comp)
+			complete(ipr_cmd->eh_comp);
+		list_add_tail(&ipr_cmd->queue, &ipr_cmd->hrrq->hrrq_free_q);
 		spin_unlock_irqrestore(ipr_cmd->hrrq->lock, lock_flags);
 	} else {
 		spin_lock_irqsave(ioa_cfg->host->host_lock, lock_flags);
@@ -9335,7 +9338,7 @@ static pci_ers_result_t ipr_pci_error_detected(struct pci_dev *pdev,
  * ipr_probe_ioa_part2 - Initializes IOAs found in ipr_probe_ioa(..)
  * @ioa_cfg:	ioa cfg struct
  *
- * Description: This is the second phase of adapter initialization
+ * Description: This is the second phase of adapter intialization
  * This function takes care of initilizing the adapter to the point
  * where it can accept new commands.
 
@@ -9444,11 +9447,23 @@ static void ipr_free_mem(struct ipr_ioa_cfg *ioa_cfg)
 static void ipr_free_irqs(struct ipr_ioa_cfg *ioa_cfg)
 {
 	struct pci_dev *pdev = ioa_cfg->pdev;
-	int i;
 
-	for (i = 0; i < ioa_cfg->nvectors; i++)
-		free_irq(pci_irq_vector(pdev, i), &ioa_cfg->hrrq[i]);
-	pci_free_irq_vectors(pdev);
+	if (ioa_cfg->intr_flag == IPR_USE_MSI ||
+	    ioa_cfg->intr_flag == IPR_USE_MSIX) {
+		int i;
+		for (i = 0; i < ioa_cfg->nvectors; i++)
+			free_irq(ioa_cfg->vectors_info[i].vec,
+				 &ioa_cfg->hrrq[i]);
+	} else
+		free_irq(pdev->irq, &ioa_cfg->hrrq[0]);
+
+	if (ioa_cfg->intr_flag == IPR_USE_MSI) {
+		pci_disable_msi(pdev);
+		ioa_cfg->intr_flag &= ~IPR_USE_MSI;
+	} else if (ioa_cfg->intr_flag == IPR_USE_MSIX) {
+		pci_disable_msix(pdev);
+		ioa_cfg->intr_flag &= ~IPR_USE_MSIX;
+	}
 }
 
 /**
@@ -9876,6 +9891,45 @@ static void ipr_wait_for_pci_err_recovery(struct ipr_ioa_cfg *ioa_cfg)
 	}
 }
 
+static int ipr_enable_msix(struct ipr_ioa_cfg *ioa_cfg)
+{
+	struct msix_entry entries[IPR_MAX_MSIX_VECTORS];
+	int i, vectors;
+
+	for (i = 0; i < ARRAY_SIZE(entries); ++i)
+		entries[i].entry = i;
+
+	vectors = pci_enable_msix_range(ioa_cfg->pdev,
+					entries, 1, ipr_number_of_msix);
+	if (vectors < 0) {
+		ipr_wait_for_pci_err_recovery(ioa_cfg);
+		return vectors;
+	}
+
+	for (i = 0; i < vectors; i++)
+		ioa_cfg->vectors_info[i].vec = entries[i].vector;
+	ioa_cfg->nvectors = vectors;
+
+	return 0;
+}
+
+static int ipr_enable_msi(struct ipr_ioa_cfg *ioa_cfg)
+{
+	int i, vectors;
+
+	vectors = pci_enable_msi_range(ioa_cfg->pdev, 1, ipr_number_of_msix);
+	if (vectors < 0) {
+		ipr_wait_for_pci_err_recovery(ioa_cfg);
+		return vectors;
+	}
+
+	for (i = 0; i < vectors; i++)
+		ioa_cfg->vectors_info[i].vec = ioa_cfg->pdev->irq + i;
+	ioa_cfg->nvectors = vectors;
+
+	return 0;
+}
+
 static void name_msi_vectors(struct ipr_ioa_cfg *ioa_cfg)
 {
 	int vec_idx, n = sizeof(ioa_cfg->vectors_info[0].desc) - 1;
@@ -9888,20 +9942,19 @@ static void name_msi_vectors(struct ipr_ioa_cfg *ioa_cfg)
 	}
 }
 
-static int ipr_request_other_msi_irqs(struct ipr_ioa_cfg *ioa_cfg,
-		struct pci_dev *pdev)
+static int ipr_request_other_msi_irqs(struct ipr_ioa_cfg *ioa_cfg)
 {
 	int i, rc;
 
 	for (i = 1; i < ioa_cfg->nvectors; i++) {
-		rc = request_irq(pci_irq_vector(pdev, i),
+		rc = request_irq(ioa_cfg->vectors_info[i].vec,
 			ipr_isr_mhrrq,
 			0,
 			ioa_cfg->vectors_info[i].desc,
 			&ioa_cfg->hrrq[i]);
 		if (rc) {
 			while (--i >= 0)
-				free_irq(pci_irq_vector(pdev, i),
+				free_irq(ioa_cfg->vectors_info[i].vec,
 					&ioa_cfg->hrrq[i]);
 			return rc;
 		}
@@ -9939,7 +9992,8 @@ static irqreturn_t ipr_test_intr(int irq, void *devp)
  * ipr_test_msi - Test for Message Signaled Interrupt (MSI) support.
  * @pdev:		PCI device struct
  *
- * Description: This routine sets up and initiates a test interrupt to determine
+ * Description: The return value from pci_enable_msi_range() can not always be
+ * trusted.  This routine sets up and initiates a test interrupt to determine
  * if the interrupt is received via the ipr_test_intr() service routine.
  * If the tests fails, the driver will fall back to LSI.
  *
@@ -9951,7 +10005,6 @@ static int ipr_test_msi(struct ipr_ioa_cfg *ioa_cfg, struct pci_dev *pdev)
 	int rc;
 	volatile u32 int_reg;
 	unsigned long lock_flags = 0;
-	int irq = pci_irq_vector(pdev, 0);
 
 	ENTER;
 
@@ -9963,12 +10016,15 @@ static int ipr_test_msi(struct ipr_ioa_cfg *ioa_cfg, struct pci_dev *pdev)
 	int_reg = readl(ioa_cfg->regs.sense_interrupt_mask_reg);
 	spin_unlock_irqrestore(ioa_cfg->host->host_lock, lock_flags);
 
-	rc = request_irq(irq, ipr_test_intr, 0, IPR_NAME, ioa_cfg);
+	if (ioa_cfg->intr_flag == IPR_USE_MSIX)
+		rc = request_irq(ioa_cfg->vectors_info[0].vec, ipr_test_intr, 0, IPR_NAME, ioa_cfg);
+	else
+		rc = request_irq(pdev->irq, ipr_test_intr, 0, IPR_NAME, ioa_cfg);
 	if (rc) {
-		dev_err(&pdev->dev, "Can not assign irq %d\n", irq);
+		dev_err(&pdev->dev, "Can not assign irq %d\n", pdev->irq);
 		return rc;
 	} else if (ipr_debug)
-		dev_info(&pdev->dev, "IRQ assigned: %d\n", irq);
+		dev_info(&pdev->dev, "IRQ assigned: %d\n", pdev->irq);
 
 	writel(IPR_PCII_IO_DEBUG_ACKNOWLEDGE, ioa_cfg->regs.sense_interrupt_reg32);
 	int_reg = readl(ioa_cfg->regs.sense_interrupt_reg);
@@ -9985,7 +10041,10 @@ static int ipr_test_msi(struct ipr_ioa_cfg *ioa_cfg, struct pci_dev *pdev)
 
 	spin_unlock_irqrestore(ioa_cfg->host->host_lock, lock_flags);
 
-	free_irq(irq, ioa_cfg);
+	if (ioa_cfg->intr_flag == IPR_USE_MSIX)
+		free_irq(ioa_cfg->vectors_info[0].vec, ioa_cfg);
+	else
+		free_irq(pdev->irq, ioa_cfg);
 
 	LEAVE;
 
@@ -10009,7 +10068,6 @@ static int ipr_probe_ioa(struct pci_dev *pdev,
 	int rc = PCIBIOS_SUCCESSFUL;
 	volatile u32 mask, uproc, interrupts;
 	unsigned long lock_flags, driver_lock_flags;
-	unsigned int irq_flag;
 
 	ENTER;
 
@@ -10125,18 +10183,18 @@ static int ipr_probe_ioa(struct pci_dev *pdev,
 		ipr_number_of_msix = IPR_MAX_MSIX_VECTORS;
 	}
 
-	irq_flag = PCI_IRQ_LEGACY;
-	if (ioa_cfg->ipr_chip->has_msi)
-		irq_flag |= PCI_IRQ_MSI | PCI_IRQ_MSIX;
-	rc = pci_alloc_irq_vectors(pdev, 1, ipr_number_of_msix, irq_flag);
-	if (rc < 0) {
-		ipr_wait_for_pci_err_recovery(ioa_cfg);
-		goto cleanup_nomem;
-	}
-	ioa_cfg->nvectors = rc;
-
-	if (!pdev->msi_enabled && !pdev->msix_enabled)
+	if (ioa_cfg->ipr_chip->intr_type == IPR_USE_MSI &&
+			ipr_enable_msix(ioa_cfg) == 0)
+		ioa_cfg->intr_flag = IPR_USE_MSIX;
+	else if (ioa_cfg->ipr_chip->intr_type == IPR_USE_MSI &&
+			ipr_enable_msi(ioa_cfg) == 0)
+		ioa_cfg->intr_flag = IPR_USE_MSI;
+	else {
+		ioa_cfg->intr_flag = IPR_USE_LSI;
 		ioa_cfg->clear_isr = 1;
+		ioa_cfg->nvectors = 1;
+		dev_info(&pdev->dev, "Cannot enable MSI.\n");
+	}
 
 	pci_set_master(pdev);
 
@@ -10149,23 +10207,33 @@ static int ipr_probe_ioa(struct pci_dev *pdev,
 		}
 	}
 
-	if (pdev->msi_enabled || pdev->msix_enabled) {
+	if (ioa_cfg->intr_flag == IPR_USE_MSI ||
+	    ioa_cfg->intr_flag == IPR_USE_MSIX) {
 		rc = ipr_test_msi(ioa_cfg, pdev);
-		switch (rc) {
-		case 0:
-			dev_info(&pdev->dev,
-				"Request for %d MSI%ss succeeded.", ioa_cfg->nvectors,
-				pdev->msix_enabled ? "-X" : "");
-			break;
-		case -EOPNOTSUPP:
+		if (rc == -EOPNOTSUPP) {
 			ipr_wait_for_pci_err_recovery(ioa_cfg);
-			pci_free_irq_vectors(pdev);
+			if (ioa_cfg->intr_flag == IPR_USE_MSI) {
+				ioa_cfg->intr_flag &= ~IPR_USE_MSI;
+				pci_disable_msi(pdev);
+			 } else if (ioa_cfg->intr_flag == IPR_USE_MSIX) {
+				ioa_cfg->intr_flag &= ~IPR_USE_MSIX;
+				pci_disable_msix(pdev);
+			}
 
+			ioa_cfg->intr_flag = IPR_USE_LSI;
 			ioa_cfg->nvectors = 1;
-			ioa_cfg->clear_isr = 1;
-			break;
-		default:
+		}
+		else if (rc)
 			goto out_msi_disable;
+		else {
+			if (ioa_cfg->intr_flag == IPR_USE_MSI)
+				dev_info(&pdev->dev,
+					"Request for %d MSIs succeeded with starting IRQ: %d\n",
+					ioa_cfg->nvectors, pdev->irq);
+			else if (ioa_cfg->intr_flag == IPR_USE_MSIX)
+				dev_info(&pdev->dev,
+					"Request for %d MSIXs succeeded.",
+					ioa_cfg->nvectors);
 		}
 	}
 
@@ -10213,13 +10281,15 @@ static int ipr_probe_ioa(struct pci_dev *pdev,
 	ipr_mask_and_clear_interrupts(ioa_cfg, ~IPR_PCII_IOA_TRANS_TO_OPER);
 	spin_unlock_irqrestore(ioa_cfg->host->host_lock, lock_flags);
 
-	if (pdev->msi_enabled || pdev->msix_enabled) {
+	if (ioa_cfg->intr_flag == IPR_USE_MSI
+			|| ioa_cfg->intr_flag == IPR_USE_MSIX) {
 		name_msi_vectors(ioa_cfg);
-		rc = request_irq(pci_irq_vector(pdev, 0), ipr_isr, 0,
+		rc = request_irq(ioa_cfg->vectors_info[0].vec, ipr_isr,
+			0,
 			ioa_cfg->vectors_info[0].desc,
 			&ioa_cfg->hrrq[0]);
 		if (!rc)
-			rc = ipr_request_other_msi_irqs(ioa_cfg, pdev);
+			rc = ipr_request_other_msi_irqs(ioa_cfg);
 	} else {
 		rc = request_irq(pdev->irq, ipr_isr,
 			 IRQF_SHARED,
@@ -10261,7 +10331,10 @@ cleanup_nolog:
 	ipr_free_mem(ioa_cfg);
 out_msi_disable:
 	ipr_wait_for_pci_err_recovery(ioa_cfg);
-	pci_free_irq_vectors(pdev);
+	if (ioa_cfg->intr_flag == IPR_USE_MSI)
+		pci_disable_msi(pdev);
+	else if (ioa_cfg->intr_flag == IPR_USE_MSIX)
+		pci_disable_msix(pdev);
 cleanup_nomem:
 	iounmap(ipr_regs);
 out_disable:

@@ -36,6 +36,7 @@
 #include <linux/scatterlist.h>
 #include <linux/version.h>
 #include <linux/err.h>
+#include <linux/scatterlist.h>
 #include <linux/aer.h>
 #include <linux/ctype.h>
 #include <linux/wait.h>
@@ -269,6 +270,8 @@ struct skd_device {
 	resource_size_t mem_phys[SKD_MAX_BARS];
 	u32 mem_size[SKD_MAX_BARS];
 
+	skd_irq_type_t irq_type;
+	u32 msix_count;
 	struct skd_msix_entry *msix_entries;
 
 	struct pci_dev *pdev;
@@ -1204,11 +1207,10 @@ static void skd_complete_special(struct skd_device *skdev,
 static int skd_bdev_ioctl(struct block_device *bdev, fmode_t mode,
 			  uint cmd_in, ulong arg)
 {
-	static const int sg_version_num = 30527;
-	int rc = 0, timeout;
+	int rc = 0;
 	struct gendisk *disk = bdev->bd_disk;
 	struct skd_device *skdev = disk->private_data;
-	int __user *p = (int __user *)arg;
+	void __user *p = (void *)arg;
 
 	pr_debug("%s:%s:%d %s: CMD[%s] ioctl  mode 0x%x, cmd 0x%x arg %0lx\n",
 		 skdev->name, __func__, __LINE__,
@@ -1219,18 +1221,12 @@ static int skd_bdev_ioctl(struct block_device *bdev, fmode_t mode,
 
 	switch (cmd_in) {
 	case SG_SET_TIMEOUT:
-		rc = get_user(timeout, p);
-		if (!rc)
-			disk->queue->sg_timeout = clock_t_to_jiffies(timeout);
-		break;
 	case SG_GET_TIMEOUT:
-		rc = jiffies_to_clock_t(disk->queue->sg_timeout);
-		break;
 	case SG_GET_VERSION_NUM:
-		rc = put_user(sg_version_num, p);
+		rc = scsi_cmd_ioctl(disk->queue, disk, mode, cmd_in, p);
 		break;
 	case SG_IO:
-		rc = skd_ioctl_sg_io(skdev, mode, (void __user *)arg);
+		rc = skd_ioctl_sg_io(skdev, mode, p);
 		break;
 
 	default:
@@ -2142,8 +2138,12 @@ static void skd_send_fitmsg(struct skd_device *skdev,
 		u8 *bp = (u8 *)skmsg->msg_buf;
 		int i;
 		for (i = 0; i < skmsg->length; i += 8) {
-			pr_debug("%s:%s:%d msg[%2d] %8ph\n",
-				 skdev->name, __func__, __LINE__, i, &bp[i]);
+			pr_debug("%s:%s:%d msg[%2d] %02x %02x %02x %02x "
+				 "%02x %02x %02x %02x\n",
+				 skdev->name, __func__, __LINE__,
+				 i, bp[i + 0], bp[i + 1], bp[i + 2],
+				 bp[i + 3], bp[i + 4], bp[i + 5],
+				 bp[i + 6], bp[i + 7]);
 			if (i == 0)
 				i = 64 - 8;
 		}
@@ -2163,7 +2163,11 @@ static void skd_send_fitmsg(struct skd_device *skdev,
 		 */
 		qcmd |= FIT_QCMD_MSGSIZE_64;
 
+	/* Make sure skd_msg_buf is written before the doorbell is triggered. */
+	smp_wmb();
+
 	SKD_WRITEQ(skdev, qcmd, FIT_Q_COMMAND);
+
 }
 
 static void skd_send_special_fitmsg(struct skd_device *skdev,
@@ -2176,8 +2180,11 @@ static void skd_send_special_fitmsg(struct skd_device *skdev,
 		int i;
 
 		for (i = 0; i < SKD_N_SPECIAL_FITMSG_BYTES; i += 8) {
-			pr_debug("%s:%s:%d  spcl[%2d] %8ph\n",
-				 skdev->name, __func__, __LINE__, i, &bp[i]);
+			pr_debug("%s:%s:%d  spcl[%2d] %02x %02x %02x %02x  "
+				 "%02x %02x %02x %02x\n",
+				 skdev->name, __func__, __LINE__, i,
+				 bp[i + 0], bp[i + 1], bp[i + 2], bp[i + 3],
+				 bp[i + 4], bp[i + 5], bp[i + 6], bp[i + 7]);
 			if (i == 0)
 				i = 64 - 8;
 		}
@@ -2204,6 +2211,9 @@ static void skd_send_special_fitmsg(struct skd_device *skdev,
 	 */
 	qcmd = skspcl->mb_dma_address;
 	qcmd |= FIT_QCMD_QID_NORMAL + FIT_QCMD_MSGSIZE_128;
+
+	/* Make sure skd_msg_buf is written before the doorbell is triggered. */
+	smp_wmb();
 
 	SKD_WRITEQ(skdev, qcmd, FIT_Q_COMMAND);
 }
@@ -2951,8 +2961,8 @@ static void skd_completion_worker(struct work_struct *work)
 
 static void skd_isr_msg_from_dev(struct skd_device *skdev);
 
-static irqreturn_t
-skd_isr(int irq, void *ptr)
+irqreturn_t
+static skd_isr(int irq, void *ptr)
 {
 	struct skd_device *skdev;
 	u32 intstat;
@@ -3817,6 +3827,10 @@ static irqreturn_t skd_qfull_isr(int irq, void *skd_host_data)
  */
 
 struct skd_msix_entry {
+	int have_irq;
+	u32 vector;
+	u32 entry;
+	struct skd_device *rsp;
 	char isr_name[30];
 };
 
@@ -3845,121 +3859,193 @@ static struct skd_init_msix_entry msix_entries[SKD_MAX_MSIX_COUNT] = {
 	{ "(Queue Full 3)", skd_qfull_isr    },
 };
 
+static void skd_release_msix(struct skd_device *skdev)
+{
+	struct skd_msix_entry *qentry;
+	int i;
+
+	if (skdev->msix_entries) {
+		for (i = 0; i < skdev->msix_count; i++) {
+			qentry = &skdev->msix_entries[i];
+			skdev = qentry->rsp;
+
+			if (qentry->have_irq)
+				devm_free_irq(&skdev->pdev->dev,
+					      qentry->vector, qentry->rsp);
+		}
+
+		kfree(skdev->msix_entries);
+	}
+
+	if (skdev->msix_count)
+		pci_disable_msix(skdev->pdev);
+
+	skdev->msix_count = 0;
+	skdev->msix_entries = NULL;
+}
+
 static int skd_acquire_msix(struct skd_device *skdev)
 {
 	int i, rc;
 	struct pci_dev *pdev = skdev->pdev;
+	struct msix_entry *entries;
+	struct skd_msix_entry *qentry;
 
-	rc = pci_alloc_irq_vectors(pdev, SKD_MAX_MSIX_COUNT, SKD_MAX_MSIX_COUNT,
-			PCI_IRQ_MSIX);
-	if (rc < 0) {
+	entries = kzalloc(sizeof(struct msix_entry) * SKD_MAX_MSIX_COUNT,
+			  GFP_KERNEL);
+	if (!entries)
+		return -ENOMEM;
+
+	for (i = 0; i < SKD_MAX_MSIX_COUNT; i++)
+		entries[i].entry = i;
+
+	rc = pci_enable_msix_exact(pdev, entries, SKD_MAX_MSIX_COUNT);
+	if (rc) {
 		pr_err("(%s): failed to enable MSI-X %d\n",
 		       skd_name(skdev), rc);
-		goto out;
+		goto msix_out;
 	}
 
-	skdev->msix_entries = kcalloc(SKD_MAX_MSIX_COUNT,
-			sizeof(struct skd_msix_entry), GFP_KERNEL);
+	skdev->msix_count = SKD_MAX_MSIX_COUNT;
+	skdev->msix_entries = kzalloc(sizeof(struct skd_msix_entry) *
+				      skdev->msix_count, GFP_KERNEL);
 	if (!skdev->msix_entries) {
 		rc = -ENOMEM;
 		pr_err("(%s): msix table allocation error\n",
 		       skd_name(skdev));
-		goto out;
+		goto msix_out;
+	}
+
+	for (i = 0; i < skdev->msix_count; i++) {
+		qentry = &skdev->msix_entries[i];
+		qentry->vector = entries[i].vector;
+		qentry->entry = entries[i].entry;
+		qentry->rsp = NULL;
+		qentry->have_irq = 0;
+		pr_debug("%s:%s:%d %s: <%s> msix (%d) vec %d, entry %x\n",
+			 skdev->name, __func__, __LINE__,
+			 pci_name(pdev), skdev->name,
+			 i, qentry->vector, qentry->entry);
 	}
 
 	/* Enable MSI-X vectors for the base queue */
-	for (i = 0; i < SKD_MAX_MSIX_COUNT; i++) {
-		struct skd_msix_entry *qentry = &skdev->msix_entries[i];
-
+	for (i = 0; i < skdev->msix_count; i++) {
+		qentry = &skdev->msix_entries[i];
 		snprintf(qentry->isr_name, sizeof(qentry->isr_name),
 			 "%s%d-msix %s", DRV_NAME, skdev->devno,
 			 msix_entries[i].name);
-
-		rc = devm_request_irq(&skdev->pdev->dev,
-				pci_irq_vector(skdev->pdev, i),
-				msix_entries[i].handler, 0,
-				qentry->isr_name, skdev);
+		rc = devm_request_irq(&skdev->pdev->dev, qentry->vector,
+				      msix_entries[i].handler, 0,
+				      qentry->isr_name, skdev);
 		if (rc) {
 			pr_err("(%s): Unable to register(%d) MSI-X "
 			       "handler %d: %s\n",
 			       skd_name(skdev), rc, i, qentry->isr_name);
 			goto msix_out;
+		} else {
+			qentry->have_irq = 1;
+			qentry->rsp = skdev;
 		}
 	}
-
 	pr_debug("%s:%s:%d %s: <%s> msix %d irq(s) enabled\n",
 		 skdev->name, __func__, __LINE__,
-		 pci_name(pdev), skdev->name, SKD_MAX_MSIX_COUNT);
+		 pci_name(pdev), skdev->name, skdev->msix_count);
 	return 0;
 
 msix_out:
-	while (--i >= 0)
-		devm_free_irq(&pdev->dev, pci_irq_vector(pdev, i), skdev);
-out:
-	kfree(skdev->msix_entries);
-	skdev->msix_entries = NULL;
+	if (entries)
+		kfree(entries);
+	skd_release_msix(skdev);
 	return rc;
 }
 
 static int skd_acquire_irq(struct skd_device *skdev)
 {
-	struct pci_dev *pdev = skdev->pdev;
-	unsigned int irq_flag = PCI_IRQ_LEGACY;
 	int rc;
+	struct pci_dev *pdev;
 
-	if (skd_isr_type == SKD_IRQ_MSIX) {
+	pdev = skdev->pdev;
+	skdev->msix_count = 0;
+
+RETRY_IRQ_TYPE:
+	switch (skdev->irq_type) {
+	case SKD_IRQ_MSIX:
 		rc = skd_acquire_msix(skdev);
 		if (!rc)
-			return 0;
-
-		pr_err("(%s): failed to enable MSI-X, re-trying with MSI %d\n",
-		       skd_name(skdev), rc);
+			pr_info("(%s): MSI-X %d irqs enabled\n",
+			       skd_name(skdev), skdev->msix_count);
+		else {
+			pr_err(
+			       "(%s): failed to enable MSI-X, re-trying with MSI %d\n",
+			       skd_name(skdev), rc);
+			skdev->irq_type = SKD_IRQ_MSI;
+			goto RETRY_IRQ_TYPE;
+		}
+		break;
+	case SKD_IRQ_MSI:
+		snprintf(skdev->isr_name, sizeof(skdev->isr_name), "%s%d-msi",
+			 DRV_NAME, skdev->devno);
+		rc = pci_enable_msi_range(pdev, 1, 1);
+		if (rc > 0) {
+			rc = devm_request_irq(&pdev->dev, pdev->irq, skd_isr, 0,
+					      skdev->isr_name, skdev);
+			if (rc) {
+				pci_disable_msi(pdev);
+				pr_err(
+				       "(%s): failed to allocate the MSI interrupt %d\n",
+				       skd_name(skdev), rc);
+				goto RETRY_IRQ_LEGACY;
+			}
+			pr_info("(%s): MSI irq %d enabled\n",
+			       skd_name(skdev), pdev->irq);
+		} else {
+RETRY_IRQ_LEGACY:
+			pr_err(
+			       "(%s): failed to enable MSI, re-trying with LEGACY %d\n",
+			       skd_name(skdev), rc);
+			skdev->irq_type = SKD_IRQ_LEGACY;
+			goto RETRY_IRQ_TYPE;
+		}
+		break;
+	case SKD_IRQ_LEGACY:
+		snprintf(skdev->isr_name, sizeof(skdev->isr_name),
+			 "%s%d-legacy", DRV_NAME, skdev->devno);
+		rc = devm_request_irq(&pdev->dev, pdev->irq, skd_isr,
+				      IRQF_SHARED, skdev->isr_name, skdev);
+		if (!rc)
+			pr_info("(%s): LEGACY irq %d enabled\n",
+			       skd_name(skdev), pdev->irq);
+		else
+			pr_err("(%s): request LEGACY irq error %d\n",
+			       skd_name(skdev), rc);
+		break;
+	default:
+		pr_info("(%s): irq_type %d invalid, re-set to %d\n",
+		       skd_name(skdev), skdev->irq_type, SKD_IRQ_DEFAULT);
+		skdev->irq_type = SKD_IRQ_LEGACY;
+		goto RETRY_IRQ_TYPE;
 	}
-
-	snprintf(skdev->isr_name, sizeof(skdev->isr_name), "%s%d", DRV_NAME,
-			skdev->devno);
-
-	if (skd_isr_type != SKD_IRQ_LEGACY)
-		irq_flag |= PCI_IRQ_MSI;
-	rc = pci_alloc_irq_vectors(pdev, 1, 1, irq_flag);
-	if (rc < 0) {
-		pr_err("(%s): failed to allocate the MSI interrupt %d\n",
-			skd_name(skdev), rc);
-		return rc;
-	}
-
-	rc = devm_request_irq(&pdev->dev, pdev->irq, skd_isr,
-			pdev->msi_enabled ? 0 : IRQF_SHARED,
-			skdev->isr_name, skdev);
-	if (rc) {
-		pci_free_irq_vectors(pdev);
-		pr_err("(%s): failed to allocate interrupt %d\n",
-			skd_name(skdev), rc);
-		return rc;
-	}
-
-	return 0;
+	return rc;
 }
 
 static void skd_release_irq(struct skd_device *skdev)
 {
-	struct pci_dev *pdev = skdev->pdev;
-
-	if (skdev->msix_entries) {
-		int i;
-
-		for (i = 0; i < SKD_MAX_MSIX_COUNT; i++) {
-			devm_free_irq(&pdev->dev, pci_irq_vector(pdev, i),
-					skdev);
-		}
-
-		kfree(skdev->msix_entries);
-		skdev->msix_entries = NULL;
-	} else {
-		devm_free_irq(&pdev->dev, pdev->irq, skdev);
+	switch (skdev->irq_type) {
+	case SKD_IRQ_MSIX:
+		skd_release_msix(skdev);
+		break;
+	case SKD_IRQ_MSI:
+		devm_free_irq(&skdev->pdev->dev, skdev->pdev->irq, skdev);
+		pci_disable_msi(skdev->pdev);
+		break;
+	case SKD_IRQ_LEGACY:
+		devm_free_irq(&skdev->pdev->dev, skdev->pdev->irq, skdev);
+		break;
+	default:
+		pr_err("(%s): wrong irq type %d!",
+		       skd_name(skdev), skdev->irq_type);
+		break;
 	}
-
-	pci_free_irq_vectors(pdev);
 }
 
 /*
@@ -4322,6 +4408,7 @@ static struct skd_device *skd_construct(struct pci_dev *pdev)
 	skdev->pdev = pdev;
 	skdev->devno = skd_next_devno++;
 	skdev->major = blk_major;
+	skdev->irq_type = skd_isr_type;
 	sprintf(skdev->name, DRV_NAME "%d", skdev->devno);
 	skdev->dev_max_queue_depth = 0;
 
@@ -4541,15 +4628,16 @@ static void skd_free_disk(struct skd_device *skdev)
 {
 	struct gendisk *disk = skdev->disk;
 
-	if (disk != NULL) {
-		struct request_queue *q = disk->queue;
+	if (disk && (disk->flags & GENHD_FL_UP))
+		del_gendisk(disk);
 
-		if (disk->flags & GENHD_FL_UP)
-			del_gendisk(disk);
-		if (q)
-			blk_cleanup_queue(q);
-		put_disk(disk);
+	if (skdev->queue) {
+		blk_cleanup_queue(skdev->queue);
+		skdev->queue = NULL;
+		disk->queue = NULL;
 	}
+
+	put_disk(disk);
 	skdev->disk = NULL;
 }
 

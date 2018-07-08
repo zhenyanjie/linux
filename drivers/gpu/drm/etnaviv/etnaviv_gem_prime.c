@@ -23,12 +23,10 @@
 struct sg_table *etnaviv_gem_prime_get_sg_table(struct drm_gem_object *obj)
 {
 	struct etnaviv_gem_object *etnaviv_obj = to_etnaviv_bo(obj);
-	int npages = obj->size >> PAGE_SHIFT;
 
-	if (WARN_ON(!etnaviv_obj->pages))  /* should have already pinned! */
-		return NULL;
+	BUG_ON(!etnaviv_obj->sgt);  /* should have already pinned! */
 
-	return drm_prime_pages_to_sg(etnaviv_obj->pages, npages);
+	return etnaviv_obj->sgt;
 }
 
 void *etnaviv_gem_prime_vmap(struct drm_gem_object *obj)
@@ -39,19 +37,6 @@ void *etnaviv_gem_prime_vmap(struct drm_gem_object *obj)
 void etnaviv_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr)
 {
 	/* TODO msm_gem_vunmap() */
-}
-
-int etnaviv_gem_prime_mmap(struct drm_gem_object *obj,
-			   struct vm_area_struct *vma)
-{
-	struct etnaviv_gem_object *etnaviv_obj = to_etnaviv_bo(obj);
-	int ret;
-
-	ret = drm_gem_mmap_obj(obj, obj->size, vma);
-	if (ret < 0)
-		return ret;
-
-	return etnaviv_obj->ops->mmap(etnaviv_obj, vma);
 }
 
 int etnaviv_gem_prime_pin(struct drm_gem_object *obj)

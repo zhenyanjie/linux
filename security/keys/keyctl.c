@@ -12,20 +12,18 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/sched.h>
-#include <linux/sched/task.h>
 #include <linux/slab.h>
 #include <linux/syscalls.h>
 #include <linux/key.h>
 #include <linux/keyctl.h>
 #include <linux/fs.h>
 #include <linux/capability.h>
-#include <linux/cred.h>
 #include <linux/string.h>
 #include <linux/err.h>
 #include <linux/vmalloc.h>
 #include <linux/security.h>
 #include <linux/uio.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include "internal.h"
 
 #define KEY_MAX_DESC_SIZE 4096
@@ -768,6 +766,10 @@ long keyctl_read_key(key_serial_t keyid, char __user *buffer, size_t buflen)
 
 	key = key_ref_to_ptr(key_ref);
 
+	ret = key_read_state(key);
+	if (ret < 0)
+		goto error2; /* Negatively instantiated */
+
 	/* see if we can read it directly */
 	ret = key_permission(key_ref, KEY_NEED_READ);
 	if (ret == 0)
@@ -898,7 +900,7 @@ long keyctl_chown_key(key_serial_t id, uid_t user, gid_t group)
 		atomic_dec(&key->user->nkeys);
 		atomic_inc(&newowner->nkeys);
 
-		if (test_bit(KEY_FLAG_INSTANTIATED, &key->flags)) {
+		if (key->state != KEY_IS_UNINSTANTIATED) {
 			atomic_dec(&key->user->nikeys);
 			atomic_inc(&newowner->nikeys);
 		}
@@ -1081,7 +1083,7 @@ long keyctl_instantiate_key_common(key_serial_t id,
 		}
 
 		ret = -EFAULT;
-		if (!copy_from_iter_full(payload, plen, from))
+		if (copy_from_iter(payload, plen, from) != plen)
 			goto error2;
 	}
 

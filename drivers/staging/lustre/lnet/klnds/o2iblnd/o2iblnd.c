@@ -258,8 +258,8 @@ int kiblnd_unpack_msg(struct kib_msg *msg, int nob)
 	if (flip) {
 		/* leave magic unflipped as a clue to peer endianness */
 		msg->ibm_version = version;
-		BUILD_BUG_ON(sizeof(msg->ibm_type) != 1);
-		BUILD_BUG_ON(sizeof(msg->ibm_credits) != 1);
+		CLASSERT(sizeof(msg->ibm_type) == 1);
+		CLASSERT(sizeof(msg->ibm_credits) == 1);
 		msg->ibm_nob     = msg_nob;
 		__swab64s(&msg->ibm_srcnid);
 		__swab64s(&msg->ibm_srcstamp);
@@ -824,14 +824,15 @@ struct kib_conn *kiblnd_create_conn(struct kib_peer *peer, struct rdma_cm_id *cm
 	return conn;
 
  failed_2:
-	kiblnd_destroy_conn(conn, true);
+	kiblnd_destroy_conn(conn);
+	LIBCFS_FREE(conn, sizeof(*conn));
  failed_1:
 	LIBCFS_FREE(init_qp_attr, sizeof(*init_qp_attr));
  failed_0:
 	return NULL;
 }
 
-void kiblnd_destroy_conn(struct kib_conn *conn, bool free_conn)
+void kiblnd_destroy_conn(struct kib_conn *conn)
 {
 	struct rdma_cm_id *cmid = conn->ibc_cmid;
 	struct kib_peer *peer = conn->ibc_peer;
@@ -894,8 +895,6 @@ void kiblnd_destroy_conn(struct kib_conn *conn, bool free_conn)
 		rdma_destroy_id(cmid);
 		atomic_dec(&net->ibn_nconns);
 	}
-
-	LIBCFS_FREE(conn, sizeof(*conn));
 }
 
 int kiblnd_close_peer_conns_locked(struct kib_peer *peer, int why)
@@ -1247,10 +1246,10 @@ static void kiblnd_map_tx_pool(struct kib_tx_pool *tpo)
 	dev = net->ibn_dev;
 
 	/* pre-mapped messages are not bigger than 1 page */
-	BUILD_BUG_ON(IBLND_MSG_SIZE > PAGE_SIZE);
+	CLASSERT(IBLND_MSG_SIZE <= PAGE_SIZE);
 
 	/* No fancy arithmetic when we do the buffer calculations */
-	BUILD_BUG_ON(PAGE_SIZE % IBLND_MSG_SIZE);
+	CLASSERT(!(PAGE_SIZE % IBLND_MSG_SIZE));
 
 	tpo->tpo_hdev = kiblnd_current_hdev(dev);
 
@@ -1489,7 +1488,7 @@ out_fpo:
 static void kiblnd_fail_fmr_poolset(struct kib_fmr_poolset *fps,
 				    struct list_head *zombies)
 {
-	if (!fps->fps_net) /* initialized? */
+	if (!fps->fps_net) /* intialized? */
 		return;
 
 	spin_lock(&fps->fps_lock);
@@ -1637,7 +1636,7 @@ int kiblnd_fmr_pool_map(struct kib_fmr_poolset *fps, struct kib_tx *tx,
 {
 	__u64 *pages = tx->tx_pages;
 	bool is_rx = (rd != tx->tx_rd);
-	bool tx_pages_mapped = false;
+        bool tx_pages_mapped = 0;
 	struct kib_fmr_pool *fpo;
 	int npages = 0;
 	__u64 version;
@@ -1812,7 +1811,7 @@ static void kiblnd_destroy_pool_list(struct list_head *head)
 
 static void kiblnd_fail_poolset(struct kib_poolset *ps, struct list_head *zombies)
 {
-	if (!ps->ps_net) /* initialized? */
+	if (!ps->ps_net) /* intialized? */
 		return;
 
 	spin_lock(&ps->ps_lock);
@@ -2943,7 +2942,7 @@ static int kiblnd_startup(lnet_ni_t *ni)
 	if (ni->ni_interfaces[0]) {
 		/* Use the IPoIB interface specified in 'networks=' */
 
-		BUILD_BUG_ON(LNET_MAX_INTERFACES <= 1);
+		CLASSERT(LNET_MAX_INTERFACES > 1);
 		if (ni->ni_interfaces[1]) {
 			CERROR("Multiple interfaces not supported\n");
 			goto failed;
@@ -3020,11 +3019,11 @@ static void __exit ko2iblnd_exit(void)
 
 static int __init ko2iblnd_init(void)
 {
-	BUILD_BUG_ON(sizeof(struct kib_msg) > IBLND_MSG_SIZE);
-	BUILD_BUG_ON(!offsetof(struct kib_msg,
+	CLASSERT(sizeof(struct kib_msg) <= IBLND_MSG_SIZE);
+	CLASSERT(offsetof(struct kib_msg,
 			  ibm_u.get.ibgm_rd.rd_frags[IBLND_MAX_RDMA_FRAGS])
 			  <= IBLND_MSG_SIZE);
-	BUILD_BUG_ON(!offsetof(struct kib_msg,
+	CLASSERT(offsetof(struct kib_msg,
 			  ibm_u.putack.ibpam_rd.rd_frags[IBLND_MAX_RDMA_FRAGS])
 			  <= IBLND_MSG_SIZE);
 

@@ -167,7 +167,7 @@ static int __init boot_params_kdebugfs_init(void)
 	struct dentry *dbp, *version, *data;
 	int error = -ENOMEM;
 
-	dbp = debugfs_create_dir("boot_params", arch_debugfs_dir);
+	dbp = debugfs_create_dir("boot_params", NULL);
 	if (!dbp)
 		return -ENOMEM;
 

@@ -373,7 +373,7 @@ static int uniphier_i2c_probe(struct platform_device *pdev)
 	if (!clk_rate) {
 		dev_err(dev, "input clock rate should not be zero\n");
 		ret = -EINVAL;
-		goto disable_clk;
+		goto err;
 	}
 
 	init_completion(&priv->comp);
@@ -392,11 +392,11 @@ static int uniphier_i2c_probe(struct platform_device *pdev)
 			       priv);
 	if (ret) {
 		dev_err(dev, "failed to request irq %d\n", irq);
-		goto disable_clk;
+		goto err;
 	}
 
 	ret = i2c_add_adapter(&priv->adap);
-disable_clk:
+err:
 	if (ret)
 		clk_disable_unprepare(priv->clk);
 

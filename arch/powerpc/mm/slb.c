@@ -22,8 +22,6 @@
 #include <asm/cacheflush.h>
 #include <asm/smp.h>
 #include <linux/compiler.h>
-#include <linux/mm_types.h>
-
 #include <asm/udbg.h>
 #include <asm/code-patching.h>
 

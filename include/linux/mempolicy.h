@@ -7,7 +7,6 @@
 
 
 #include <linux/mmzone.h>
-#include <linux/dax.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
 #include <linux/spinlock.h>
@@ -176,13 +175,6 @@ extern void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol);
 static inline bool vma_migratable(struct vm_area_struct *vma)
 {
 	if (vma->vm_flags & (VM_IO | VM_PFNMAP))
-		return false;
-
-	/*
-	 * DAX device mappings require predictable access latency, so avoid
-	 * incurring periodic faults.
-	 */
-	if (vma_is_dax(vma))
 		return false;
 
 #ifndef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION

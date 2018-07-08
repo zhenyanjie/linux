@@ -151,7 +151,7 @@ static int64_t _sort__dso_cmp(struct map *map_l, struct map *map_r)
 	if (!dso_l || !dso_r)
 		return cmp_null(dso_r, dso_l);
 
-	if (verbose > 0) {
+	if (verbose) {
 		dso_name_l = dso_l->long_name;
 		dso_name_r = dso_r->long_name;
 	} else {
@@ -172,8 +172,8 @@ static int _hist_entry__dso_snprintf(struct map *map, char *bf,
 				     size_t size, unsigned int width)
 {
 	if (map && map->dso) {
-		const char *dso_name = verbose > 0 ? map->dso->long_name :
-			map->dso->short_name;
+		const char *dso_name = !verbose ? map->dso->short_name :
+			map->dso->long_name;
 		return repsep_snprintf(bf, size, "%-*.*s", width, width, dso_name);
 	}
 
@@ -261,7 +261,7 @@ static int _hist_entry__sym_snprintf(struct map *map, struct symbol *sym,
 {
 	size_t ret = 0;
 
-	if (verbose > 0) {
+	if (verbose) {
 		char o = map ? dso__symtab_origin(map->dso) : '!';
 		ret += repsep_snprintf(bf, size, "%-#*llx %c ",
 				       BITS_PER_LONG / 4 + 2, ip, o);
@@ -315,7 +315,7 @@ struct sort_entry sort_sym = {
 
 /* --sort srcline */
 
-char *hist_entry__get_srcline(struct hist_entry *he)
+static char *hist_entry__get_srcline(struct hist_entry *he)
 {
 	struct map *map = he->ms.map;
 
@@ -846,6 +846,9 @@ static int hist_entry__mispredict_snprintf(struct hist_entry *he, char *bf,
 static int64_t
 sort__cycles_cmp(struct hist_entry *left, struct hist_entry *right)
 {
+	if (!left->branch_info || !right->branch_info)
+		return cmp_null(left->branch_info, right->branch_info);
+
 	return left->branch_info->flags.cycles -
 		right->branch_info->flags.cycles;
 }
@@ -853,6 +856,8 @@ sort__cycles_cmp(struct hist_entry *left, struct hist_entry *right)
 static int hist_entry__cycles_snprintf(struct hist_entry *he, char *bf,
 				    size_t size, unsigned int width)
 {
+	if (!he->branch_info)
+		return scnprintf(bf, size, "%-.*s", width, "N/A");
 	if (he->branch_info->flags.cycles == 0)
 		return repsep_snprintf(bf, size, "%-*s", width, "-");
 	return repsep_snprintf(bf, size, "%-*hd", width,

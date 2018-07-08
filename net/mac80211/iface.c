@@ -151,6 +151,15 @@ void ieee80211_recalc_idle(struct ieee80211_local *local)
 		ieee80211_hw_config(local, change);
 }
 
+static int ieee80211_change_mtu(struct net_device *dev, int new_mtu)
+{
+	if (new_mtu < 256 || new_mtu > IEEE80211_MAX_DATA_LEN)
+		return -EINVAL;
+
+	dev->mtu = new_mtu;
+	return 0;
+}
+
 static int ieee80211_verify_mac(struct ieee80211_sub_if_data *sdata, u8 *addr,
 				bool check_dup)
 {
@@ -782,6 +791,7 @@ static int ieee80211_open(struct net_device *dev)
 static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 			      bool going_down)
 {
+	struct ieee80211_sub_if_data *txq_sdata = sdata;
 	struct ieee80211_local *local = sdata->local;
 	struct fq *fq = &local->fq;
 	unsigned long flags;
@@ -922,6 +932,9 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 
 	switch (sdata->vif.type) {
 	case NL80211_IFTYPE_AP_VLAN:
+		txq_sdata = container_of(sdata->bss,
+					 struct ieee80211_sub_if_data, u.ap);
+
 		mutex_lock(&local->mtx);
 		list_del(&sdata->u.vlan.list);
 		mutex_unlock(&local->mtx);
@@ -992,8 +1005,17 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 	}
 	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 
-	if (sdata->vif.txq) {
-		struct txq_info *txqi = to_txq_info(sdata->vif.txq);
+	if (txq_sdata->vif.txq) {
+		struct txq_info *txqi = to_txq_info(txq_sdata->vif.txq);
+
+		/*
+		 * FIXME FIXME
+		 *
+		 * We really shouldn't purge the *entire* txqi since that
+		 * contains frames for the other AP_VLANs (and possibly
+		 * the AP itself) as well, but there's no API in FQ now
+		 * to be able to filter.
+		 */
 
 		spin_lock_bh(&fq->lock);
 		ieee80211_txq_purge(local, txqi);
@@ -1124,7 +1146,7 @@ static u16 ieee80211_netdev_select_queue(struct net_device *dev,
 	return ieee80211_select_queue(IEEE80211_DEV_TO_SUB_IF(dev), skb);
 }
 
-static void
+static struct rtnl_link_stats64 *
 ieee80211_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 {
 	int i;
@@ -1149,6 +1171,8 @@ ieee80211_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 		stats->rx_bytes   += rx_bytes;
 		stats->tx_bytes   += tx_bytes;
 	}
+
+	return stats;
 }
 
 static const struct net_device_ops ieee80211_dataif_ops = {
@@ -1157,6 +1181,7 @@ static const struct net_device_ops ieee80211_dataif_ops = {
 	.ndo_uninit		= ieee80211_uninit,
 	.ndo_start_xmit		= ieee80211_subif_start_xmit,
 	.ndo_set_rx_mode	= ieee80211_set_multicast_list,
+	.ndo_change_mtu 	= ieee80211_change_mtu,
 	.ndo_set_mac_address 	= ieee80211_change_mac,
 	.ndo_select_queue	= ieee80211_netdev_select_queue,
 	.ndo_get_stats64	= ieee80211_get_stats64,
@@ -1190,6 +1215,7 @@ static const struct net_device_ops ieee80211_monitorif_ops = {
 	.ndo_uninit		= ieee80211_uninit,
 	.ndo_start_xmit		= ieee80211_monitor_start_xmit,
 	.ndo_set_rx_mode	= ieee80211_set_multicast_list,
+	.ndo_change_mtu 	= ieee80211_change_mtu,
 	.ndo_set_mac_address 	= ieee80211_change_mac,
 	.ndo_select_queue	= ieee80211_monitor_select_queue,
 	.ndo_get_stats64	= ieee80211_get_stats64,
@@ -1198,6 +1224,7 @@ static const struct net_device_ops ieee80211_monitorif_ops = {
 static void ieee80211_if_free(struct net_device *dev)
 {
 	free_percpu(dev->tstats);
+	free_netdev(dev);
 }
 
 static void ieee80211_if_setup(struct net_device *dev)
@@ -1205,8 +1232,7 @@ static void ieee80211_if_setup(struct net_device *dev)
 	ether_setup(dev);
 	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
 	dev->netdev_ops = &ieee80211_dataif_ops;
-	dev->needs_free_netdev = true;
-	dev->priv_destructor = ieee80211_if_free;
+	dev->destructor = ieee80211_if_free;
 }
 
 static void ieee80211_if_setup_no_queue(struct net_device *dev)
@@ -1494,7 +1520,7 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
 		break;
 	case NL80211_IFTYPE_UNSPECIFIED:
 	case NUM_NL80211_IFTYPES:
-		BUG();
+		WARN_ON(1);
 		break;
 	}
 
@@ -1810,7 +1836,6 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 		ret = dev_alloc_name(ndev, ndev->name);
 		if (ret < 0) {
 			ieee80211_if_free(ndev);
-			free_netdev(ndev);
 			return ret;
 		}
 
@@ -1894,13 +1919,9 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 
 		netdev_set_default_ethtool_ops(ndev, &ieee80211_ethtool_ops);
 
-		/* MTU range: 256 - 2304 */
-		ndev->min_mtu = 256;
-		ndev->max_mtu = IEEE80211_MAX_DATA_LEN;
-
 		ret = register_netdevice(ndev);
 		if (ret) {
-			free_netdev(ndev);
+			ieee80211_if_free(ndev);
 			return ret;
 		}
 	}
@@ -2018,20 +2039,4 @@ int ieee80211_iface_init(void)
 void ieee80211_iface_exit(void)
 {
 	unregister_netdevice_notifier(&mac80211_netdev_notifier);
-}
-
-void ieee80211_vif_inc_num_mcast(struct ieee80211_sub_if_data *sdata)
-{
-	if (sdata->vif.type == NL80211_IFTYPE_AP)
-		atomic_inc(&sdata->u.ap.num_mcast_sta);
-	else if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
-		atomic_inc(&sdata->u.vlan.num_mcast_sta);
-}
-
-void ieee80211_vif_dec_num_mcast(struct ieee80211_sub_if_data *sdata)
-{
-	if (sdata->vif.type == NL80211_IFTYPE_AP)
-		atomic_dec(&sdata->u.ap.num_mcast_sta);
-	else if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
-		atomic_dec(&sdata->u.vlan.num_mcast_sta);
 }

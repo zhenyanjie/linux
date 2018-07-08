@@ -37,12 +37,23 @@
 #include <linux/suspend.h>
 #include <linux/acpi.h>
 #include <acpi/video.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #define PREFIX "ACPI: "
 
 #define ACPI_VIDEO_BUS_NAME		"Video Bus"
 #define ACPI_VIDEO_DEVICE_NAME		"Video Device"
+#define ACPI_VIDEO_NOTIFY_SWITCH	0x80
+#define ACPI_VIDEO_NOTIFY_PROBE		0x81
+#define ACPI_VIDEO_NOTIFY_CYCLE		0x82
+#define ACPI_VIDEO_NOTIFY_NEXT_OUTPUT	0x83
+#define ACPI_VIDEO_NOTIFY_PREV_OUTPUT	0x84
+
+#define ACPI_VIDEO_NOTIFY_CYCLE_BRIGHTNESS	0x85
+#define	ACPI_VIDEO_NOTIFY_INC_BRIGHTNESS	0x86
+#define ACPI_VIDEO_NOTIFY_DEC_BRIGHTNESS	0x87
+#define ACPI_VIDEO_NOTIFY_ZERO_BRIGHTNESS	0x88
+#define ACPI_VIDEO_NOTIFY_DISPLAY_OFF		0x89
 
 #define MAX_NAME_LEN	20
 
@@ -76,8 +87,8 @@ MODULE_PARM_DESC(report_key_events,
 static bool device_id_scheme = false;
 module_param(device_id_scheme, bool, 0444);
 
-static bool only_lcd = false;
-module_param(only_lcd, bool, 0444);
+static int only_lcd = -1;
+module_param(only_lcd, int, 0444);
 
 static int register_count;
 static DEFINE_MUTEX(register_count_mutex);
@@ -2058,6 +2069,25 @@ static int __init intel_opregion_present(void)
 	return opregion;
 }
 
+static bool dmi_is_desktop(void)
+{
+	const char *chassis_type;
+
+	chassis_type = dmi_get_system_info(DMI_CHASSIS_TYPE);
+	if (!chassis_type)
+		return false;
+
+	if (!strcmp(chassis_type, "3") || /*  3: Desktop */
+	    !strcmp(chassis_type, "4") || /*  4: Low Profile Desktop */
+	    !strcmp(chassis_type, "5") || /*  5: Pizza Box */
+	    !strcmp(chassis_type, "6") || /*  6: Mini Tower */
+	    !strcmp(chassis_type, "7") || /*  7: Tower */
+	    !strcmp(chassis_type, "11"))  /* 11: Main Server Chassis */
+		return true;
+
+	return false;
+}
+
 int acpi_video_register(void)
 {
 	int ret = 0;
@@ -2069,6 +2099,20 @@ int acpi_video_register(void)
 		 * don't register the acpi_vide_bus again and return no error.
 		 */
 		goto leave;
+	}
+
+	/*
+	 * We're seeing a lot of bogus backlight interfaces on newer machines
+	 * without a LCD such as desktops, servers and HDMI sticks. Checking
+	 * the lcd flag fixes this, so enable this on any machines which are
+	 * win8 ready (where we also prefer the native backlight driver, so
+	 * normally the acpi_video code should not register there anyways).
+	 */
+	if (only_lcd == -1) {
+		if (dmi_is_desktop() && acpi_osi_is_win8())
+			only_lcd = true;
+		else
+			only_lcd = false;
 	}
 
 	dmi_check_system(video_dmi_table);

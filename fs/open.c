@@ -19,7 +19,7 @@
 #include <linux/mount.h>
 #include <linux/fcntl.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/fs.h>
 #include <linux/personality.h>
 #include <linux/pagemap.h>
@@ -301,10 +301,12 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (S_ISFIFO(inode->i_mode))
 		return -ESPIPE;
 
-	if (S_ISDIR(inode->i_mode))
-		return -EISDIR;
-
-	if (!S_ISREG(inode->i_mode) && !S_ISBLK(inode->i_mode))
+	/*
+	 * Let individual file system decide if it supports preallocation
+	 * for directories or not.
+	 */
+	if (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode) &&
+	    !S_ISBLK(inode->i_mode))
 		return -ENODEV;
 
 	/* Check for wrap through zero too */
@@ -314,7 +316,7 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (!file->f_op->fallocate)
 		return -EOPNOTSUPP;
 
-	file_start_write(file);
+	sb_start_write(inode->i_sb);
 	ret = file->f_op->fallocate(file, mode, offset, len);
 
 	/*
@@ -327,7 +329,7 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (ret == 0)
 		fsnotify_modify(file);
 
-	file_end_write(file);
+	sb_end_write(inode->i_sb);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(vfs_fallocate);

@@ -24,7 +24,7 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/rtnetlink.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/net.h>
 
 /*
@@ -102,6 +102,7 @@ static const char netdev_features_strings[NETDEV_FEATURE_COUNT][ETH_GSTRING_LEN]
 	[NETIF_F_RXFCS_BIT] =            "rx-fcs",
 	[NETIF_F_RXALL_BIT] =            "rx-all",
 	[NETIF_F_HW_L2FW_DOFFLOAD_BIT] = "l2-fwd-offload",
+	[NETIF_F_BUSY_POLL_BIT] =        "busy-poll",
 	[NETIF_F_HW_TC_BIT] =		 "hw-tc-offload",
 };
 
@@ -116,12 +117,6 @@ tunable_strings[__ETHTOOL_TUNABLE_COUNT][ETH_GSTRING_LEN] = {
 	[ETHTOOL_ID_UNSPEC]     = "Unspec",
 	[ETHTOOL_RX_COPYBREAK]	= "rx-copybreak",
 	[ETHTOOL_TX_COPYBREAK]	= "tx-copybreak",
-};
-
-static const char
-phy_tunable_strings[__ETHTOOL_PHY_TUNABLE_COUNT][ETH_GSTRING_LEN] = {
-	[ETHTOOL_ID_UNSPEC]     = "Unspec",
-	[ETHTOOL_PHY_DOWNSHIFT]	= "phy-downshift",
 };
 
 static int ethtool_get_features(struct net_device *dev, void __user *useraddr)
@@ -232,9 +227,6 @@ static int __ethtool_get_sset_count(struct net_device *dev, int sset)
 	if (sset == ETH_SS_TUNABLES)
 		return ARRAY_SIZE(tunable_strings);
 
-	if (sset == ETH_SS_PHY_TUNABLES)
-		return ARRAY_SIZE(phy_tunable_strings);
-
 	if (sset == ETH_SS_PHY_STATS) {
 		if (dev->phydev)
 			return phy_get_sset_count(dev->phydev);
@@ -261,8 +253,6 @@ static void __ethtool_get_strings(struct net_device *dev,
 		       sizeof(rss_hash_func_strings));
 	else if (stringset == ETH_SS_TUNABLES)
 		memcpy(data, tunable_strings, sizeof(tunable_strings));
-	else if (stringset == ETH_SS_PHY_TUNABLES)
-		memcpy(data, phy_tunable_strings, sizeof(phy_tunable_strings));
 	else if (stringset == ETH_SS_PHY_STATS) {
 		struct phy_device *phydev = dev->phydev;
 
@@ -752,15 +742,6 @@ static int ethtool_set_link_ksettings(struct net_device *dev,
 	return dev->ethtool_ops->set_link_ksettings(dev, &link_ksettings);
 }
 
-static void
-warn_incomplete_ethtool_legacy_settings_conversion(const char *details)
-{
-	char name[sizeof(current->comm)];
-
-	pr_info_once("warning: `%s' uses legacy ethtool link settings API, %s\n",
-		     get_task_comm(name, current), details);
-}
-
 /* Query device for its ethtool_cmd settings.
  *
  * Backward compatibility note: for compatibility with legacy ethtool,
@@ -787,10 +768,8 @@ static int ethtool_get_settings(struct net_device *dev, void __user *useraddr)
 							   &link_ksettings);
 		if (err < 0)
 			return err;
-		if (!convert_link_ksettings_to_legacy_settings(&cmd,
-							       &link_ksettings))
-			warn_incomplete_ethtool_legacy_settings_conversion(
-				"link modes are only partially reported");
+		convert_link_ksettings_to_legacy_settings(&cmd,
+							  &link_ksettings);
 
 		/* send a sensible cmd tag back to user */
 		cmd.cmd = ETHTOOL_GSET;
@@ -1819,13 +1798,11 @@ static int ethtool_get_strings(struct net_device *dev, void __user *useraddr)
 	ret = __ethtool_get_sset_count(dev, gstrings.string_set);
 	if (ret < 0)
 		return ret;
-	if (ret > S32_MAX / ETH_GSTRING_LEN)
-		return -ENOMEM;
-	WARN_ON_ONCE(!ret);
 
 	gstrings.len = ret;
-	data = vzalloc(gstrings.len * ETH_GSTRING_LEN);
-	if (gstrings.len && !data)
+
+	data = kcalloc(gstrings.len, ETH_GSTRING_LEN, GFP_USER);
+	if (!data)
 		return -ENOMEM;
 
 	__ethtool_get_strings(dev, gstrings.string_set, data);
@@ -1834,13 +1811,12 @@ static int ethtool_get_strings(struct net_device *dev, void __user *useraddr)
 	if (copy_to_user(useraddr, &gstrings, sizeof(gstrings)))
 		goto out;
 	useraddr += sizeof(gstrings);
-	if (gstrings.len &&
-	    copy_to_user(useraddr, data, gstrings.len * ETH_GSTRING_LEN))
+	if (copy_to_user(useraddr, data, gstrings.len * ETH_GSTRING_LEN))
 		goto out;
 	ret = 0;
 
 out:
-	vfree(data);
+	kfree(data);
 	return ret;
 }
 
@@ -1917,15 +1893,14 @@ static int ethtool_get_stats(struct net_device *dev, void __user *useraddr)
 	n_stats = ops->get_sset_count(dev, ETH_SS_STATS);
 	if (n_stats < 0)
 		return n_stats;
-	if (n_stats > S32_MAX / sizeof(u64))
-		return -ENOMEM;
-	WARN_ON_ONCE(!n_stats);
+	WARN_ON(n_stats == 0);
+
 	if (copy_from_user(&stats, useraddr, sizeof(stats)))
 		return -EFAULT;
 
 	stats.n_stats = n_stats;
-	data = vzalloc(n_stats * sizeof(u64));
-	if (n_stats && !data)
+	data = kmalloc(n_stats * sizeof(u64), GFP_USER);
+	if (!data)
 		return -ENOMEM;
 
 	ops->get_ethtool_stats(dev, &stats, data);
@@ -1934,12 +1909,12 @@ static int ethtool_get_stats(struct net_device *dev, void __user *useraddr)
 	if (copy_to_user(useraddr, &stats, sizeof(stats)))
 		goto out;
 	useraddr += sizeof(stats);
-	if (n_stats && copy_to_user(useraddr, data, n_stats * sizeof(u64)))
+	if (copy_to_user(useraddr, data, stats.n_stats * sizeof(u64)))
 		goto out;
 	ret = 0;
 
  out:
-	vfree(data);
+	kfree(data);
 	return ret;
 }
 
@@ -1954,18 +1929,17 @@ static int ethtool_get_phy_stats(struct net_device *dev, void __user *useraddr)
 		return -EOPNOTSUPP;
 
 	n_stats = phy_get_sset_count(phydev);
+
 	if (n_stats < 0)
 		return n_stats;
-	if (n_stats > S32_MAX / sizeof(u64))
-		return -ENOMEM;
-	WARN_ON_ONCE(!n_stats);
+	WARN_ON(n_stats == 0);
 
 	if (copy_from_user(&stats, useraddr, sizeof(stats)))
 		return -EFAULT;
 
 	stats.n_stats = n_stats;
-	data = vzalloc(n_stats * sizeof(u64));
-	if (n_stats && !data)
+	data = kmalloc_array(n_stats, sizeof(u64), GFP_USER);
+	if (!data)
 		return -ENOMEM;
 
 	mutex_lock(&phydev->lock);
@@ -1976,12 +1950,12 @@ static int ethtool_get_phy_stats(struct net_device *dev, void __user *useraddr)
 	if (copy_to_user(useraddr, &stats, sizeof(stats)))
 		goto out;
 	useraddr += sizeof(stats);
-	if (n_stats && copy_to_user(useraddr, data, n_stats * sizeof(u64)))
+	if (copy_to_user(useraddr, data, stats.n_stats * sizeof(u64)))
 		goto out;
 	ret = 0;
 
  out:
-	vfree(data);
+	kfree(data);
 	return ret;
 }
 
@@ -2440,85 +2414,6 @@ static int ethtool_set_per_queue(struct net_device *dev, void __user *useraddr)
 	};
 }
 
-static int ethtool_phy_tunable_valid(const struct ethtool_tunable *tuna)
-{
-	switch (tuna->id) {
-	case ETHTOOL_PHY_DOWNSHIFT:
-		if (tuna->len != sizeof(u8) ||
-		    tuna->type_id != ETHTOOL_TUNABLE_U8)
-			return -EINVAL;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int get_phy_tunable(struct net_device *dev, void __user *useraddr)
-{
-	int ret;
-	struct ethtool_tunable tuna;
-	struct phy_device *phydev = dev->phydev;
-	void *data;
-
-	if (!(phydev && phydev->drv && phydev->drv->get_tunable))
-		return -EOPNOTSUPP;
-
-	if (copy_from_user(&tuna, useraddr, sizeof(tuna)))
-		return -EFAULT;
-	ret = ethtool_phy_tunable_valid(&tuna);
-	if (ret)
-		return ret;
-	data = kmalloc(tuna.len, GFP_USER);
-	if (!data)
-		return -ENOMEM;
-	mutex_lock(&phydev->lock);
-	ret = phydev->drv->get_tunable(phydev, &tuna, data);
-	mutex_unlock(&phydev->lock);
-	if (ret)
-		goto out;
-	useraddr += sizeof(tuna);
-	ret = -EFAULT;
-	if (copy_to_user(useraddr, data, tuna.len))
-		goto out;
-	ret = 0;
-
-out:
-	kfree(data);
-	return ret;
-}
-
-static int set_phy_tunable(struct net_device *dev, void __user *useraddr)
-{
-	int ret;
-	struct ethtool_tunable tuna;
-	struct phy_device *phydev = dev->phydev;
-	void *data;
-
-	if (!(phydev && phydev->drv && phydev->drv->set_tunable))
-		return -EOPNOTSUPP;
-	if (copy_from_user(&tuna, useraddr, sizeof(tuna)))
-		return -EFAULT;
-	ret = ethtool_phy_tunable_valid(&tuna);
-	if (ret)
-		return ret;
-	data = kmalloc(tuna.len, GFP_USER);
-	if (!data)
-		return -ENOMEM;
-	useraddr += sizeof(tuna);
-	ret = -EFAULT;
-	if (copy_from_user(data, useraddr, tuna.len))
-		goto out;
-	mutex_lock(&phydev->lock);
-	ret = phydev->drv->set_tunable(phydev, &tuna, data);
-	mutex_unlock(&phydev->lock);
-
-out:
-	kfree(data);
-	return ret;
-}
-
 /* The main entry point in this file.  Called from net/core/dev_ioctl.c */
 
 int dev_ethtool(struct net *net, struct ifreq *ifr)
@@ -2576,7 +2471,6 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 	case ETHTOOL_GET_TS_INFO:
 	case ETHTOOL_GEEE:
 	case ETHTOOL_GTUNABLE:
-	case ETHTOOL_PHY_GTUNABLE:
 	case ETHTOOL_GLINKSETTINGS:
 		break;
 	default:
@@ -2782,12 +2676,6 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 		break;
 	case ETHTOOL_SLINKSETTINGS:
 		rc = ethtool_set_link_ksettings(dev, useraddr);
-		break;
-	case ETHTOOL_PHY_GTUNABLE:
-		rc = get_phy_tunable(dev, useraddr);
-		break;
-	case ETHTOOL_PHY_STUNABLE:
-		rc = set_phy_tunable(dev, useraddr);
 		break;
 	default:
 		rc = -EOPNOTSUPP;

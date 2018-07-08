@@ -320,7 +320,8 @@ dma_unmap:
 }
 
 static void jz4740_mmc_pre_request(struct mmc_host *mmc,
-				   struct mmc_request *mrq)
+				   struct mmc_request *mrq,
+				   bool is_first_req)
 {
 	struct jz4740_mmc_host *host = mmc_priv(mmc);
 	struct mmc_data *data = mrq->data;
@@ -367,9 +368,9 @@ static void jz4740_mmc_set_irq_enabled(struct jz4740_mmc_host *host,
 		host->irq_mask &= ~irq;
 	else
 		host->irq_mask |= irq;
-	spin_unlock_irqrestore(&host->lock, flags);
 
 	writew(host->irq_mask, host->base + JZ_REG_MMC_IMASK);
+	spin_unlock_irqrestore(&host->lock, flags);
 }
 
 static void jz4740_mmc_clock_enable(struct jz4740_mmc_host *host,

@@ -41,7 +41,7 @@
 
 static void __iomem *tcaddr;
 
-static u64 tc_get_cycles(struct clocksource *cs)
+static cycle_t tc_get_cycles(struct clocksource *cs)
 {
 	unsigned long	flags;
 	u32		lower, upper;
@@ -56,7 +56,7 @@ static u64 tc_get_cycles(struct clocksource *cs)
 	return (upper << 16) | lower;
 }
 
-static u64 tc_get_cycles32(struct clocksource *cs)
+static cycle_t tc_get_cycles32(struct clocksource *cs)
 {
 	return __raw_readl(tcaddr + ATMEL_TC_REG(0, CV));
 }

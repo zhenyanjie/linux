@@ -12,9 +12,11 @@
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
+#include <linux/syscalls.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/uaccess.h>
+#include <linux/kaiser.h>
 
 #include <asm/ldt.h>
 #include <asm/desc.h>
@@ -33,11 +35,21 @@ static void flush_ldt(void *current_mm)
 	set_ldt(pc->ldt->entries, pc->ldt->size);
 }
 
+static void __free_ldt_struct(struct ldt_struct *ldt)
+{
+	if (ldt->size * LDT_ENTRY_SIZE > PAGE_SIZE)
+		vfree(ldt->entries);
+	else
+		free_page((unsigned long)ldt->entries);
+	kfree(ldt);
+}
+
 /* The caller must call finalize_ldt_struct on the result. LDT starts zeroed. */
-static struct ldt_struct *alloc_ldt_struct(unsigned int size)
+static struct ldt_struct *alloc_ldt_struct(int size)
 {
 	struct ldt_struct *new_ldt;
-	unsigned int alloc_size;
+	int alloc_size;
+	int ret;
 
 	if (size > LDT_ENTRIES)
 		return NULL;
@@ -65,7 +77,13 @@ static struct ldt_struct *alloc_ldt_struct(unsigned int size)
 		return NULL;
 	}
 
+	ret = kaiser_add_mapping((unsigned long)new_ldt->entries, alloc_size,
+				 __PAGE_KERNEL);
 	new_ldt->size = size;
+	if (ret) {
+		__free_ldt_struct(new_ldt);
+		return NULL;
+	}
 	return new_ldt;
 }
 
@@ -91,12 +109,10 @@ static void free_ldt_struct(struct ldt_struct *ldt)
 	if (likely(!ldt))
 		return;
 
+	kaiser_remove_mapping((unsigned long)ldt->entries,
+			      ldt->size * LDT_ENTRY_SIZE);
 	paravirt_free_ldt(ldt->entries, ldt->size);
-	if (ldt->size * LDT_ENTRY_SIZE > PAGE_SIZE)
-		vfree_atomic(ldt->entries);
-	else
-		free_page((unsigned long)ldt->entries);
-	kfree(ldt);
+	__free_ldt_struct(ldt);
 }
 
 /*
@@ -207,11 +223,11 @@ static int read_default_ldt(void __user *ptr, unsigned long bytecount)
 static int write_ldt(void __user *ptr, unsigned long bytecount, int oldmode)
 {
 	struct mm_struct *mm = current->mm;
-	struct ldt_struct *new_ldt, *old_ldt;
-	unsigned int oldsize, newsize;
-	struct user_desc ldt_info;
 	struct desc_struct ldt;
 	int error;
+	struct user_desc ldt_info;
+	int oldsize, newsize;
+	struct ldt_struct *new_ldt, *old_ldt;
 
 	error = -EINVAL;
 	if (bytecount != sizeof(ldt_info))
@@ -249,7 +265,7 @@ static int write_ldt(void __user *ptr, unsigned long bytecount, int oldmode)
 
 	old_ldt = mm->context.ldt;
 	oldsize = old_ldt ? old_ldt->size : 0;
-	newsize = max(ldt_info.entry_number + 1, oldsize);
+	newsize = max((int)(ldt_info.entry_number + 1), oldsize);
 
 	error = -ENOMEM;
 	new_ldt = alloc_ldt_struct(newsize);
@@ -271,8 +287,8 @@ out:
 	return error;
 }
 
-asmlinkage int sys_modify_ldt(int func, void __user *ptr,
-			      unsigned long bytecount)
+SYSCALL_DEFINE3(modify_ldt, int , func , void __user * , ptr ,
+		unsigned long , bytecount)
 {
 	int ret = -ENOSYS;
 
@@ -290,5 +306,14 @@ asmlinkage int sys_modify_ldt(int func, void __user *ptr,
 		ret = write_ldt(ptr, bytecount, 0);
 		break;
 	}
-	return ret;
+	/*
+	 * The SYSCALL_DEFINE() macros give us an 'unsigned long'
+	 * return type, but tht ABI for sys_modify_ldt() expects
+	 * 'int'.  This cast gives us an int-sized value in %rax
+	 * for the return code.  The 'unsigned' is necessary so
+	 * the compiler does not try to sign-extend the negative
+	 * return codes into the high half of the register when
+	 * taking the value from int->long.
+	 */
+	return (unsigned int)ret;
 }

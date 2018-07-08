@@ -170,7 +170,7 @@ static int qedr_register_device(struct qedr_dev *dev)
 	dev->ibdev.get_port_immutable = qedr_port_immutable;
 	dev->ibdev.get_netdev = qedr_get_netdev;
 
-	dev->ibdev.dev.parent = &dev->pdev->dev;
+	dev->ibdev.dma_device = &dev->pdev->dev;
 
 	dev->ibdev.get_link_layer = qedr_link_layer;
 	dev->ibdev.get_dev_fw_str = qedr_get_dev_fw_str;
@@ -576,7 +576,8 @@ static int qedr_set_device_attr(struct qedr_dev *dev)
 	return 0;
 }
 
-void qedr_unaffiliated_event(void *context, u8 event_code)
+void qedr_unaffiliated_event(void *context,
+			     u8 event_code)
 {
 	pr_err("unaffiliated event not implemented yet\n");
 }
@@ -761,7 +762,8 @@ static struct qedr_dev *qedr_add(struct qed_dev *cdev, struct pci_dev *pdev,
 
 	dev->num_cnq = dev->ops->rdma_get_min_cnq_msix(cdev);
 	if (!dev->num_cnq) {
-		DP_ERR(dev, "not enough CNQ resources.\n");
+		DP_ERR(dev, "Failed. At least one CNQ is required.\n");
+		rc = -ENOMEM;
 		goto init_err;
 	}
 

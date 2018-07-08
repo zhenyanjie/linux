@@ -175,17 +175,6 @@ struct atmel_uart_port {
 	unsigned int		pending_status;
 	spinlock_t		lock_suspended;
 
-	struct {
-		u32		cr;
-		u32		mr;
-		u32		imr;
-		u32		brgr;
-		u32		rtor;
-		u32		ttgr;
-		u32		fmr;
-		u32		fimr;
-	} cache;
-
 	int (*prepare_rx)(struct uart_port *port);
 	int (*prepare_tx)(struct uart_port *port);
 	void (*schedule_rx)(struct uart_port *port);
@@ -1769,9 +1758,7 @@ static void atmel_get_ip_name(struct uart_port *port)
 
 	/*
 	 * Only USART devices from at91sam9260 SOC implement fractional
-	 * baudrate. It is available for all asynchronous modes, with the
-	 * following restriction: the sampling clock's duty cycle is not
-	 * constant.
+	 * baudrate.
 	 */
 	atmel_port->has_frac_baudrate = false;
 	atmel_port->has_hw_timer = false;
@@ -1793,6 +1780,7 @@ static void atmel_get_ip_name(struct uart_port *port)
 		switch (version) {
 		case 0x302:
 		case 0x10213:
+		case 0x10302:
 			dev_dbg(port->dev, "This version is usart\n");
 			atmel_port->has_frac_baudrate = true;
 			atmel_port->has_hw_timer = true;
@@ -1815,7 +1803,6 @@ static int atmel_startup(struct uart_port *port)
 {
 	struct platform_device *pdev = to_platform_device(port->dev);
 	struct atmel_uart_port *atmel_port = to_atmel_uart_port(port);
-	struct tty_struct *tty = port->state->port.tty;
 	int retval;
 
 	/*
@@ -1830,8 +1817,8 @@ static int atmel_startup(struct uart_port *port)
 	 * Allocate the IRQ
 	 */
 	retval = request_irq(port->irq, atmel_interrupt,
-			IRQF_SHARED | IRQF_COND_SUSPEND,
-			tty ? tty->name : "atmel_serial", port);
+			     IRQF_SHARED | IRQF_COND_SUSPEND,
+			     dev_name(&pdev->dev), port);
 	if (retval) {
 		dev_err(port->dev, "atmel_startup - Can't get irq\n");
 		return retval;
@@ -2220,7 +2207,8 @@ static void atmel_set_termios(struct uart_port *port, struct ktermios *termios,
 	 * then
 	 * 8 CD + FP = selected clock / (2 * baudrate)
 	 */
-	if (atmel_port->has_frac_baudrate) {
+	if (atmel_port->has_frac_baudrate &&
+	    (mode & ATMEL_US_USMODE) == ATMEL_US_USMODE_NORMAL) {
 		div = DIV_ROUND_CLOSEST(port->uartclk, baud * 2);
 		cd = div >> 3;
 		fp = div & ATMEL_US_FP_MASK;
@@ -2679,20 +2667,6 @@ static int atmel_serial_suspend(struct platform_device *pdev,
 			cpu_relax();
 	}
 
-	if (atmel_is_console_port(port) && !console_suspend_enabled) {
-		/* Cache register values as we won't get a full shutdown/startup
-		 * cycle
-		 */
-		atmel_port->cache.mr = atmel_uart_readl(port, ATMEL_US_MR);
-		atmel_port->cache.imr = atmel_uart_readl(port, ATMEL_US_IMR);
-		atmel_port->cache.brgr = atmel_uart_readl(port, ATMEL_US_BRGR);
-		atmel_port->cache.rtor = atmel_uart_readl(port,
-							  atmel_port->rtor);
-		atmel_port->cache.ttgr = atmel_uart_readl(port, ATMEL_US_TTGR);
-		atmel_port->cache.fmr = atmel_uart_readl(port, ATMEL_US_FMR);
-		atmel_port->cache.fimr = atmel_uart_readl(port, ATMEL_US_FIMR);
-	}
-
 	/* we can not wake up if we're running on slow clock */
 	atmel_port->may_wakeup = device_may_wakeup(&pdev->dev);
 	if (atmel_serial_clk_will_stop()) {
@@ -2714,25 +2688,6 @@ static int atmel_serial_resume(struct platform_device *pdev)
 	struct uart_port *port = platform_get_drvdata(pdev);
 	struct atmel_uart_port *atmel_port = to_atmel_uart_port(port);
 	unsigned long flags;
-
-	if (atmel_is_console_port(port) && !console_suspend_enabled) {
-		atmel_uart_writel(port, ATMEL_US_MR, atmel_port->cache.mr);
-		atmel_uart_writel(port, ATMEL_US_IER, atmel_port->cache.imr);
-		atmel_uart_writel(port, ATMEL_US_BRGR, atmel_port->cache.brgr);
-		atmel_uart_writel(port, atmel_port->rtor,
-				  atmel_port->cache.rtor);
-		atmel_uart_writel(port, ATMEL_US_TTGR, atmel_port->cache.ttgr);
-
-		if (atmel_port->fifo_size) {
-			atmel_uart_writel(port, ATMEL_US_CR, ATMEL_US_FIFOEN |
-					  ATMEL_US_RXFCLR | ATMEL_US_TXFLCLR);
-			atmel_uart_writel(port, ATMEL_US_FMR,
-					  atmel_port->cache.fmr);
-			atmel_uart_writel(port, ATMEL_US_FIER,
-					  atmel_port->cache.fimr);
-		}
-		atmel_start_rx(port);
-	}
 
 	spin_lock_irqsave(&atmel_port->lock_suspended, flags);
 	if (atmel_port->pending) {

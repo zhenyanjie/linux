@@ -58,18 +58,10 @@ static int brcmf_debug_psm_watchdog_notify(struct brcmf_if *ifp,
 					   const struct brcmf_event_msg *evtmsg,
 					   void *data)
 {
-	int err;
-
 	brcmf_dbg(TRACE, "enter: bsscfgidx=%d\n", ifp->bsscfgidx);
 
-	brcmf_err("PSM's watchdog has fired!\n");
-
-	err = brcmf_debug_create_memdump(ifp->drvr->bus_if, data,
-					 evtmsg->datalen);
-	if (err)
-		brcmf_err("Failed to get memory dump, %d\n", err);
-
-	return err;
+	return brcmf_debug_create_memdump(ifp->drvr->bus_if, data,
+					  evtmsg->datalen);
 }
 
 void brcmf_debugfs_init(void)

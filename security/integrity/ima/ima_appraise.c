@@ -130,7 +130,6 @@ enum hash_algo ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value,
 				 int xattr_len)
 {
 	struct signature_v2_hdr *sig;
-	enum hash_algo ret;
 
 	if (!xattr_value || xattr_len < 2)
 		/* return default hash algo */
@@ -144,9 +143,7 @@ enum hash_algo ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value,
 		return sig->hash_algo;
 		break;
 	case IMA_XATTR_DIGEST_NG:
-		ret = xattr_value->digest[0];
-		if (ret < HASH_ALGO__LAST)
-			return ret;
+		return xattr_value->digest[0];
 		break;
 	case IMA_XATTR_DIGEST:
 		/* this is for backward compatibility */
@@ -210,7 +207,8 @@ int ima_appraise_measurement(enum ima_hooks func,
 		if (opened & FILE_CREATED)
 			iint->flags |= IMA_NEW_FILE;
 		if ((iint->flags & IMA_NEW_FILE) &&
-		    !(iint->flags & IMA_DIGSIG_REQUIRED))
+		    (!(iint->flags & IMA_DIGSIG_REQUIRED) ||
+		     (inode->i_size == 0)))
 			status = INTEGRITY_PASS;
 		goto out;
 	}
@@ -304,6 +302,9 @@ void ima_update_xattr(struct integrity_iint_cache *iint, struct file *file)
 
 	/* do not collect and update hash for digital signatures */
 	if (iint->flags & IMA_DIGSIG)
+		return;
+
+	if (iint->ima_file_status != INTEGRITY_PASS)
 		return;
 
 	rc = ima_collect_measurement(iint, file, NULL, 0, ima_hash_algo);

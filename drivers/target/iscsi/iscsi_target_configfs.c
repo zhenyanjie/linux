@@ -21,11 +21,10 @@
 #include <linux/ctype.h>
 #include <linux/export.h>
 #include <linux/inet.h>
-#include <linux/module.h>
-#include <net/ipv6.h>
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
 #include <target/iscsi/iscsi_transport.h>
+
 #include <target/iscsi/iscsi_target_core.h>
 #include "iscsi_target_parameters.h"
 #include "iscsi_target_device.h"
@@ -803,6 +802,7 @@ DEF_TPG_ATTRIB(default_erl);
 DEF_TPG_ATTRIB(t10_pi);
 DEF_TPG_ATTRIB(fabric_prot_type);
 DEF_TPG_ATTRIB(tpg_enabled_sendtargets);
+DEF_TPG_ATTRIB(login_keys_workaround);
 
 static struct configfs_attribute *lio_target_tpg_attrib_attrs[] = {
 	&iscsi_tpg_attrib_attr_authentication,
@@ -818,6 +818,7 @@ static struct configfs_attribute *lio_target_tpg_attrib_attrs[] = {
 	&iscsi_tpg_attrib_attr_t10_pi,
 	&iscsi_tpg_attrib_attr_fabric_prot_type,
 	&iscsi_tpg_attrib_attr_tpg_enabled_sendtargets,
+	&iscsi_tpg_attrib_attr_login_keys_workaround,
 	NULL,
 };
 
@@ -1143,7 +1144,7 @@ static struct se_portal_group *lio_target_tiqn_addtpg(
 
 	ret = core_tpg_register(wwn, &tpg->tpg_se_tpg, SCSI_PROTOCOL_ISCSI);
 	if (ret < 0)
-		return NULL;
+		goto free_out;
 
 	ret = iscsit_tpg_add_portal_group(tiqn, tpg);
 	if (ret != 0)
@@ -1155,6 +1156,7 @@ static struct se_portal_group *lio_target_tiqn_addtpg(
 	return &tpg->tpg_se_tpg;
 out:
 	core_tpg_deregister(&tpg->tpg_se_tpg);
+free_out:
 	kfree(tpg);
 	return NULL;
 }
@@ -1398,10 +1400,11 @@ static u32 lio_sess_get_initiator_sid(
 static int lio_queue_data_in(struct se_cmd *se_cmd)
 {
 	struct iscsi_cmd *cmd = container_of(se_cmd, struct iscsi_cmd, se_cmd);
-	struct iscsi_conn *conn = cmd->conn;
 
 	cmd->i_state = ISTATE_SEND_DATAIN;
-	return conn->conn_transport->iscsit_queue_data_in(conn, cmd);
+	cmd->conn->conn_transport->iscsit_queue_data_in(cmd->conn, cmd);
+
+	return 0;
 }
 
 static int lio_write_pending(struct se_cmd *se_cmd)
@@ -1430,14 +1433,16 @@ static int lio_write_pending_status(struct se_cmd *se_cmd)
 static int lio_queue_status(struct se_cmd *se_cmd)
 {
 	struct iscsi_cmd *cmd = container_of(se_cmd, struct iscsi_cmd, se_cmd);
-	struct iscsi_conn *conn = cmd->conn;
 
 	cmd->i_state = ISTATE_SEND_STATUS;
 
 	if (cmd->se_cmd.scsi_status || cmd->sense_reason) {
-		return iscsit_add_cmd_to_response_queue(cmd, conn, cmd->i_state);
+		iscsit_add_cmd_to_response_queue(cmd, cmd->conn, cmd->i_state);
+		return 0;
 	}
-	return conn->conn_transport->iscsit_queue_status(conn, cmd);
+	cmd->conn->conn_transport->iscsit_queue_status(cmd->conn, cmd);
+
+	return 0;
 }
 
 static void lio_queue_tm_rsp(struct se_cmd *se_cmd)

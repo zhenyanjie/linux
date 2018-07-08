@@ -1634,8 +1634,7 @@ static const struct snd_soc_dapm_widget da7218_dapm_widgets[] = {
 			    SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
 
 	/* DAI */
-	SND_SOC_DAPM_AIF_OUT("DAIOUT", "Capture", 0, DA7218_DAI_TDM_CTRL,
-			     DA7218_DAI_OE_SHIFT, DA7218_NO_INVERT),
+	SND_SOC_DAPM_AIF_OUT("DAIOUT", "Capture", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("DAIIN", "Playback", 0, SND_SOC_NOPM, 0, 0),
 
 	/* Output Mixers */
@@ -2520,7 +2519,7 @@ static struct da7218_pdata *da7218_of_to_pdata(struct snd_soc_codec *codec)
 	}
 
 	if (da7218->dev_id == DA7218_DEV_ID) {
-		hpldet_np = of_find_node_by_name(np, "da7218_hpldet");
+		hpldet_np = of_get_child_by_name(np, "da7218_hpldet");
 		if (!hpldet_np)
 			return pdata;
 

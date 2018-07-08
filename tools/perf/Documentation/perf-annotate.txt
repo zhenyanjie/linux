@@ -39,10 +39,6 @@ OPTIONS
 --verbose::
         Be more verbose. (Show symbol address, etc)
 
--q::
---quiet::
-	Do not show any message.  (Suppress -v)
-
 -D::
 --dump-raw-trace::
         Dump raw trace in ASCII.

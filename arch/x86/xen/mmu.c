@@ -38,7 +38,7 @@
  *
  * Jeremy Fitzhardinge <jeremy@xensource.com>, XenSource Inc, 2007
  */
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/highmem.h>
 #include <linux/debugfs.h>
 #include <linux/bug.h>
@@ -1317,8 +1317,6 @@ void xen_flush_tlb_all(void)
 	struct mmuext_op *op;
 	struct multicall_space mcs;
 
-	trace_xen_mmu_flush_tlb_all(0);
-
 	preempt_disable();
 
 	mcs = xen_mc_entry(sizeof(*op));
@@ -1335,8 +1333,6 @@ static void xen_flush_tlb(void)
 {
 	struct mmuext_op *op;
 	struct multicall_space mcs;
-
-	trace_xen_mmu_flush_tlb(0);
 
 	preempt_disable();
 
@@ -1792,6 +1788,10 @@ static void __init set_page_prot_flags(void *addr, pgprot_t prot,
 	unsigned long pfn = __pa(addr) >> PAGE_SHIFT;
 	pte_t pte = pfn_pte(pfn, prot);
 
+	/* For PVH no need to set R/O or R/W to pin them or unpin them. */
+	if (xen_feature(XENFEAT_auto_translated_physmap))
+		return;
+
 	if (HYPERVISOR_update_va_mapping((unsigned long)addr, pte, flags))
 		BUG();
 }
@@ -1898,7 +1898,8 @@ static void __init check_pt_base(unsigned long *pt_base, unsigned long *pt_end,
  * level2_ident_pgt, and level2_kernel_pgt.  This means that only the
  * kernel has a physical mapping to start with - but that's enough to
  * get __va working.  We need to fill in the rest of the physical
- * mapping once some sort of allocator has been set up.
+ * mapping once some sort of allocator has been set up.  NOTE: for
+ * PVH, the page tables are native.
  */
 void __init xen_setup_kernel_pagetable(pgd_t *pgd, unsigned long max_pfn)
 {
@@ -2808,6 +2809,16 @@ static int do_remap_gfn(struct vm_area_struct *vma,
 
 	BUG_ON(!((vma->vm_flags & (VM_PFNMAP | VM_IO)) == (VM_PFNMAP | VM_IO)));
 
+	if (xen_feature(XENFEAT_auto_translated_physmap)) {
+#ifdef CONFIG_XEN_PVH
+		/* We need to update the local page tables and the xen HAP */
+		return xen_xlate_remap_gfn_array(vma, addr, gfn, nr, err_ptr,
+						 prot, domid, pages);
+#else
+		return -EINVAL;
+#endif
+        }
+
 	rmd.mfn = gfn;
 	rmd.prot = prot;
 	/* We use the err_ptr to indicate if there we are doing a contiguous
@@ -2901,6 +2912,10 @@ int xen_unmap_domain_gfn_range(struct vm_area_struct *vma,
 	if (!pages || !xen_feature(XENFEAT_auto_translated_physmap))
 		return 0;
 
+#ifdef CONFIG_XEN_PVH
+	return xen_xlate_unmap_gfn_range(vma, numpgs, pages);
+#else
 	return -EINVAL;
+#endif
 }
 EXPORT_SYMBOL_GPL(xen_unmap_domain_gfn_range);

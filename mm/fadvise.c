@@ -126,7 +126,15 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		 */
 		start_index = (offset+(PAGE_SIZE-1)) >> PAGE_SHIFT;
 		end_index = (endbyte >> PAGE_SHIFT);
-		if ((endbyte & ~PAGE_MASK) != ~PAGE_MASK) {
+		/*
+		 * The page at end_index will be inclusively discarded according
+		 * by invalidate_mapping_pages(), so subtracting 1 from
+		 * end_index means we will skip the last page.  But if endbyte
+		 * is page aligned or is at the end of file, we should not skip
+		 * that page - discarding the last page is safe enough.
+		 */
+		if ((endbyte & ~PAGE_MASK) != ~PAGE_MASK &&
+				endbyte != inode->i_size - 1) {
 			/* First page is tricky as 0 - 1 = -1, but pgoff_t
 			 * is unsigned, so the end_index >= start_index
 			 * check below would be true and we'll discard the whole
@@ -139,20 +147,7 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		}
 
 		if (end_index >= start_index) {
-			unsigned long count;
-
-			/*
-			 * It's common to FADV_DONTNEED right after
-			 * the read or write that instantiates the
-			 * pages, in which case there will be some
-			 * sitting on the local LRU cache. Try to
-			 * avoid the expensive remote drain and the
-			 * second cache tree walk below by flushing
-			 * them out right away.
-			 */
-			lru_add_drain();
-
-			count = invalidate_mapping_pages(mapping,
+			unsigned long count = invalidate_mapping_pages(mapping,
 						start_index, end_index);
 
 			/*

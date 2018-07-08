@@ -28,7 +28,7 @@
 #include <linux/export.h>
 #include <linux/time.h>
 #include <linux/timex.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
 #include <linux/err.h>
@@ -48,6 +48,8 @@
 #include <asm/setup.h>
 #include <asm/maar.h>
 
+cpumask_t cpu_callin_map;		/* Bitmask of started secondaries */
+
 int __cpu_number_map[NR_CPUS];		/* Map physical to logical */
 EXPORT_SYMBOL(__cpu_number_map);
 
@@ -66,6 +68,7 @@ EXPORT_SYMBOL(cpu_sibling_map);
 cpumask_t cpu_core_map[NR_CPUS] __read_mostly;
 EXPORT_SYMBOL(cpu_core_map);
 
+static DECLARE_COMPLETION(cpu_starting);
 static DECLARE_COMPLETION(cpu_running);
 
 /*
@@ -369,15 +372,24 @@ asmlinkage void start_secondary(void)
 	cpumask_set_cpu(cpu, &cpu_coherent_mask);
 	notify_cpu_starting(cpu);
 
-	complete(&cpu_running);
+	/* Notify boot CPU that we're starting & ready to sync counters */
+	complete(&cpu_starting);
+
 	synchronise_count_slave(cpu);
 
+	/* The CPU is running and counters synchronised, now mark it online */
 	set_cpu_online(cpu, true);
 
 	set_cpu_sibling_map(cpu);
 	set_cpu_core_map(cpu);
 
 	calculate_cpu_foreign_map();
+
+	/*
+	 * Notify boot CPU that we're up & online and it can safely return
+	 * from __cpu_up
+	 */
+	complete(&cpu_running);
 
 	/*
 	 * irq will be enabled in ->smp_finish(), enabling it too early
@@ -436,17 +448,17 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 {
 	mp_ops->boot_secondary(cpu, tidle);
 
-	/*
-	 * We must check for timeout here, as the CPU will not be marked
-	 * online until the counters are synchronised.
-	 */
-	if (!wait_for_completion_timeout(&cpu_running,
+	/* Wait for CPU to start and be ready to sync counters */
+	if (!wait_for_completion_timeout(&cpu_starting,
 					 msecs_to_jiffies(1000))) {
 		pr_crit("CPU%u: failed to start\n", cpu);
 		return -EIO;
 	}
 
 	synchronise_count_master(cpu);
+
+	/* Wait for CPU to finish startup & mark itself online before return */
+	wait_for_completion(&cpu_running);
 	return 0;
 }
 
@@ -637,6 +649,23 @@ void flush_tlb_one(unsigned long vaddr)
 
 EXPORT_SYMBOL(flush_tlb_page);
 EXPORT_SYMBOL(flush_tlb_one);
+
+#if defined(CONFIG_KEXEC)
+void (*dump_ipi_function_ptr)(void *) = NULL;
+void dump_send_ipi(void (*dump_ipi_callback)(void *))
+{
+	int i;
+	int cpu = smp_processor_id();
+
+	dump_ipi_function_ptr = dump_ipi_callback;
+	smp_mb();
+	for_each_online_cpu(i)
+		if (i != cpu)
+			mp_ops->send_ipi_single(i, SMP_DUMP);
+
+}
+EXPORT_SYMBOL(dump_send_ipi);
+#endif
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 

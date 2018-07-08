@@ -11,3 +11,5 @@ rtl8188ee-objs :=		\
 		trx.o
 
 obj-$(CONFIG_RTL8188EE) += rtl8188ee.o
+
+ccflags-y += -D__CHECK_ENDIAN__

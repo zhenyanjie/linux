@@ -430,7 +430,7 @@ static int mlx4_dev_cap(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap)
 		/* Virtual PCI function needs to determine UAR page size from
 		 * firmware. Only master PCI function can set the uar page size
 		 */
-		if (enable_4k_uar)
+		if (enable_4k_uar || !dev->persist->num_vfs)
 			dev->uar_page_shift = DEFAULT_UAR_PAGE_SHIFT;
 		else
 			dev->uar_page_shift = PAGE_SHIFT;
@@ -838,7 +838,7 @@ static int mlx4_slave_cap(struct mlx4_dev *dev)
 	 */
 	if (hca_param.global_caps) {
 		mlx4_err(dev, "Unknown hca global capabilities\n");
-		return -EINVAL;
+		return -ENOSYS;
 	}
 
 	dev->caps.hca_core_clock = hca_param.hca_core_clock;
@@ -894,7 +894,7 @@ static int mlx4_slave_cap(struct mlx4_dev *dev)
 	    PF_CONTEXT_BEHAVIOUR_MASK) {
 		mlx4_err(dev, "Unknown pf context behaviour %x known flags %x\n",
 			 func_cap.pf_context_behaviour, PF_CONTEXT_BEHAVIOUR_MASK);
-		return -EINVAL;
+		return -ENOSYS;
 	}
 
 	dev->caps.num_ports		= func_cap.num_ports;
@@ -1445,7 +1445,7 @@ int mlx4_port_map_set(struct mlx4_dev *dev, struct mlx4_port_map *v2p)
 	int err;
 
 	if (!(dev->caps.flags2 & MLX4_DEV_CAP_FLAG2_PORT_REMAP))
-		return -EOPNOTSUPP;
+		return -ENOTSUPP;
 
 	mutex_lock(&priv->bond_mutex);
 
@@ -1839,10 +1839,10 @@ static void unmap_bf_area(struct mlx4_dev *dev)
 		io_mapping_free(mlx4_priv(dev)->bf_mapping);
 }
 
-u64 mlx4_read_clock(struct mlx4_dev *dev)
+cycle_t mlx4_read_clock(struct mlx4_dev *dev)
 {
 	u32 clockhi, clocklo, clockhi1;
-	u64 cycles;
+	cycle_t cycles;
 	int i;
 	struct mlx4_priv *priv = mlx4_priv(dev);
 
@@ -1882,7 +1882,7 @@ int mlx4_get_internal_clock_params(struct mlx4_dev *dev,
 	struct mlx4_priv *priv = mlx4_priv(dev);
 
 	if (mlx4_is_slave(dev))
-		return -EOPNOTSUPP;
+		return -ENOTSUPP;
 
 	if (!params)
 		return -EINVAL;
@@ -2275,7 +2275,7 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 
 		dev->caps.max_fmr_maps = (1 << (32 - ilog2(dev->caps.num_mpts))) - 1;
 
-		if (enable_4k_uar) {
+		if (enable_4k_uar || !dev->persist->num_vfs) {
 			init_hca.log_uar_sz = ilog2(dev->caps.num_uars) +
 						    PAGE_SHIFT - DEFAULT_UAR_PAGE_SHIFT;
 			init_hca.uar_page_sz = DEFAULT_UAR_PAGE_SHIFT - 12;
@@ -2390,7 +2390,7 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 
 	/* Query CONFIG_DEV parameters */
 	err = mlx4_config_dev_retrieval(dev, &params);
-	if (err && err != -EOPNOTSUPP) {
+	if (err && err != -ENOTSUPP) {
 		mlx4_err(dev, "Failed to query CONFIG_DEV parameters\n");
 	} else if (!err) {
 		dev->caps.rx_checksum_flags_port[1] = params.rx_csum_flags_port_1;
@@ -2983,6 +2983,7 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 		mlx4_err(dev, "Failed to create file for port %d\n", port);
 		devlink_port_unregister(&info->devlink_port);
 		info->port = -1;
+		return err;
 	}
 
 	sprintf(info->dev_mtu_name, "mlx4_port%d_mtu", port);
@@ -3004,9 +3005,10 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 				   &info->port_attr);
 		devlink_port_unregister(&info->devlink_port);
 		info->port = -1;
+		return err;
 	}
 
-	return err;
+	return 0;
 }
 
 static void mlx4_cleanup_port_info(struct mlx4_port_info *info)
@@ -3498,7 +3500,7 @@ slave_start:
 	mlx4_enable_msi_x(dev);
 	if ((mlx4_is_mfunc(dev)) &&
 	    !(dev->flags & MLX4_FLAG_MSI_X)) {
-		err = -EOPNOTSUPP;
+		err = -ENOSYS;
 		mlx4_err(dev, "INTx is not supported in multi-function mode, aborting\n");
 		goto err_free_eq;
 	}
@@ -3508,8 +3510,6 @@ slave_start:
 		if (err)
 			goto err_disable_msix;
 	}
-
-	mlx4_init_quotas(dev);
 
 	err = mlx4_setup_hca(dev);
 	if (err == -EBUSY && (dev->flags & MLX4_FLAG_MSI_X) &&
@@ -3523,6 +3523,7 @@ slave_start:
 	if (err)
 		goto err_steer;
 
+	mlx4_init_quotas(dev);
 	/* When PF resources are ready arm its comm channel to enable
 	 * getting commands
 	 */

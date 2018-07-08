@@ -14,7 +14,7 @@
  * GNU General Public License for more details.
  */
 
-#include "extcon.h"
+#include <linux/extcon.h>
 
 static int devm_extcon_dev_match(struct device *dev, void *res, void *data)
 {

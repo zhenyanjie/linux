@@ -34,8 +34,7 @@
 
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/export.h>
 #include <linux/hugetlb.h>
 #include <linux/slab.h>
@@ -52,7 +51,7 @@ static void __ib_umem_release(struct ib_device *dev, struct ib_umem *umem, int d
 
 	if (umem->nmap > 0)
 		ib_dma_unmap_sg(dev, umem->sg_head.sgl,
-				umem->npages,
+				umem->nmap,
 				DMA_BIDIRECTIONAL);
 
 	for_each_sg(umem->sg_head.sgl, sg, umem->npages, i) {
@@ -99,6 +98,9 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 
 	if (dmasync)
 		dma_attrs |= DMA_ATTR_WRITE_BARRIER;
+
+	if (!size)
+		return ERR_PTR(-EINVAL);
 
 	/*
 	 * If the combination of the addr and size requested for this memory
@@ -191,7 +193,7 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 	sg_list_start = umem->sg_head.sgl;
 
 	while (npages) {
-		ret = get_user_pages(cur_base,
+		ret = get_user_pages_longterm(cur_base,
 				     min_t(unsigned long, npages,
 					   PAGE_SIZE / sizeof (struct page *)),
 				     gup_flags, page_list, vma_list);
@@ -355,7 +357,7 @@ int ib_umem_copy_from(void *dst, struct ib_umem *umem, size_t offset,
 		return -EINVAL;
 	}
 
-	ret = sg_pcopy_to_buffer(umem->sg_head.sgl, umem->nmap, dst, length,
+	ret = sg_pcopy_to_buffer(umem->sg_head.sgl, umem->npages, dst, length,
 				 offset + ib_umem_offset(umem));
 
 	if (ret < 0)

@@ -17,6 +17,7 @@
 
 #include <linux/linkage.h>
 #include <asm/frame.h>
+#include <asm/nospec-branch.h>
 
 #define CAMELLIA_TABLE_BYTE_LEN 272
 
@@ -571,9 +572,7 @@ ENDPROC(roundsm16_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	vmovdqu y6, 14 * 16(rio); \
 	vmovdqu y7, 15 * 16(rio);
 
-
-/* NB: section is mergeable, all elements must be aligned 16-byte blocks */
-.section	.rodata.cst16, "aM", @progbits, 16
+.data
 .align 16
 
 #define SHUFB_BYTES(idx) \
@@ -713,7 +712,6 @@ ENDPROC(roundsm16_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	.byte 0x08, 0x05, 0x02, 0x0f, 0x0c, 0x09, 0x06, 0x03
 
 /* 4-bit mask */
-.section	.rodata.cst4.L0f0f0f0f, "aM", @progbits, 4
 .align 4
 .L0f0f0f0f:
 	.long 0x0f0f0f0f
@@ -1227,7 +1225,7 @@ camellia_xts_crypt_16way:
 	vpxor 14 * 16(%rax), %xmm15, %xmm14;
 	vpxor 15 * 16(%rax), %xmm15, %xmm15;
 
-	call *%r9;
+	CALL_NOSPEC %r9;
 
 	addq $(16 * 16), %rsp;
 

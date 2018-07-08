@@ -16,7 +16,6 @@
 #include <linux/freezer.h>
 #include <linux/init.h>
 #include <linux/kthread.h>
-#include <linux/sched/task.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/random.h>
@@ -159,16 +158,22 @@ MODULE_PARM_DESC(run, "Run the test (default: false)");
 #define PATTERN_OVERWRITE	0x20
 #define PATTERN_COUNT_MASK	0x1f
 
+/* poor man's completion - we want to use wait_event_freezable() on it */
+struct dmatest_done {
+	bool			done;
+	wait_queue_head_t	*wait;
+};
+
 struct dmatest_thread {
 	struct list_head	node;
 	struct dmatest_info	*info;
 	struct task_struct	*task;
 	struct dma_chan		*chan;
 	u8			**srcs;
-	u8			**usrcs;
 	u8			**dsts;
-	u8			**udsts;
 	enum dma_transaction_type type;
+	wait_queue_head_t done_wait;
+	struct dmatest_done test_done;
 	bool			done;
 };
 
@@ -329,18 +334,25 @@ static unsigned int dmatest_verify(u8 **bufs, unsigned int start,
 	return error_count;
 }
 
-/* poor man's completion - we want to use wait_event_freezable() on it */
-struct dmatest_done {
-	bool			done;
-	wait_queue_head_t	*wait;
-};
 
 static void dmatest_callback(void *arg)
 {
 	struct dmatest_done *done = arg;
-
-	done->done = true;
-	wake_up_all(done->wait);
+	struct dmatest_thread *thread =
+		container_of(done, struct dmatest_thread, test_done);
+	if (!thread->done) {
+		done->done = true;
+		wake_up_all(done->wait);
+	} else {
+		/*
+		 * If thread->done, it means that this callback occurred
+		 * after the parent thread has cleaned up. This can
+		 * happen in the case that driver doesn't implement
+		 * the terminate_all() functionality and a dma operation
+		 * did not occur within the timeout period
+		 */
+		WARN(1, "dmatest: Kernel memory may be corrupted!!\n");
+	}
 }
 
 static unsigned int min_odd(unsigned int x, unsigned int y)
@@ -411,9 +423,8 @@ static unsigned long long dmatest_KBs(s64 runtime, unsigned long long len)
  */
 static int dmatest_func(void *data)
 {
-	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(done_wait);
 	struct dmatest_thread	*thread = data;
-	struct dmatest_done	done = { .wait = &done_wait };
+	struct dmatest_done	*done = &thread->test_done;
 	struct dmatest_info	*info;
 	struct dmatest_params	*params;
 	struct dma_chan		*chan;
@@ -430,11 +441,10 @@ static int dmatest_func(void *data)
 	int			dst_cnt;
 	int			i;
 	ktime_t			ktime, start, diff;
-	ktime_t			filltime = 0;
-	ktime_t			comparetime = 0;
+	ktime_t			filltime = ktime_set(0, 0);
+	ktime_t			comparetime = ktime_set(0, 0);
 	s64			runtime = 0;
 	unsigned long long	total_len = 0;
-	u8			align = 0;
 
 	set_freezable();
 
@@ -445,24 +455,20 @@ static int dmatest_func(void *data)
 	params = &info->params;
 	chan = thread->chan;
 	dev = chan->device;
-	if (thread->type == DMA_MEMCPY) {
-		align = dev->copy_align;
+	if (thread->type == DMA_MEMCPY)
 		src_cnt = dst_cnt = 1;
-	} else if (thread->type == DMA_SG) {
-		align = dev->copy_align;
+	else if (thread->type == DMA_SG)
 		src_cnt = dst_cnt = sg_buffers;
-	} else if (thread->type == DMA_XOR) {
+	else if (thread->type == DMA_XOR) {
 		/* force odd to ensure dst = src */
 		src_cnt = min_odd(params->xor_sources | 1, dev->max_xor);
 		dst_cnt = 1;
-		align = dev->xor_align;
 	} else if (thread->type == DMA_PQ) {
 		/* force odd to ensure dst = src */
 		src_cnt = min_odd(params->pq_sources | 1, dma_maxpq(dev, 0));
 		dst_cnt = 2;
-		align = dev->pq_align;
 
-		pq_coefs = kmalloc(params->pq_sources + 1, GFP_KERNEL);
+		pq_coefs = kmalloc(params->pq_sources+1, GFP_KERNEL);
 		if (!pq_coefs)
 			goto err_thread_type;
 
@@ -471,47 +477,23 @@ static int dmatest_func(void *data)
 	} else
 		goto err_thread_type;
 
-	thread->srcs = kcalloc(src_cnt + 1, sizeof(u8 *), GFP_KERNEL);
+	thread->srcs = kcalloc(src_cnt+1, sizeof(u8 *), GFP_KERNEL);
 	if (!thread->srcs)
 		goto err_srcs;
-
-	thread->usrcs = kcalloc(src_cnt + 1, sizeof(u8 *), GFP_KERNEL);
-	if (!thread->usrcs)
-		goto err_usrcs;
-
 	for (i = 0; i < src_cnt; i++) {
-		thread->usrcs[i] = kmalloc(params->buf_size + align,
-					   GFP_KERNEL);
-		if (!thread->usrcs[i])
+		thread->srcs[i] = kmalloc(params->buf_size, GFP_KERNEL);
+		if (!thread->srcs[i])
 			goto err_srcbuf;
-
-		/* align srcs to alignment restriction */
-		if (align)
-			thread->srcs[i] = PTR_ALIGN(thread->usrcs[i], align);
-		else
-			thread->srcs[i] = thread->usrcs[i];
 	}
 	thread->srcs[i] = NULL;
 
-	thread->dsts = kcalloc(dst_cnt + 1, sizeof(u8 *), GFP_KERNEL);
+	thread->dsts = kcalloc(dst_cnt+1, sizeof(u8 *), GFP_KERNEL);
 	if (!thread->dsts)
 		goto err_dsts;
-
-	thread->udsts = kcalloc(dst_cnt + 1, sizeof(u8 *), GFP_KERNEL);
-	if (!thread->udsts)
-		goto err_udsts;
-
 	for (i = 0; i < dst_cnt; i++) {
-		thread->udsts[i] = kmalloc(params->buf_size + align,
-					   GFP_KERNEL);
-		if (!thread->udsts[i])
+		thread->dsts[i] = kmalloc(params->buf_size, GFP_KERNEL);
+		if (!thread->dsts[i])
 			goto err_dstbuf;
-
-		/* align dsts to alignment restriction */
-		if (align)
-			thread->dsts[i] = PTR_ALIGN(thread->udsts[i], align);
-		else
-			thread->dsts[i] = thread->udsts[i];
 	}
 	thread->dsts[i] = NULL;
 
@@ -530,10 +512,19 @@ static int dmatest_func(void *data)
 		dma_addr_t srcs[src_cnt];
 		dma_addr_t *dsts;
 		unsigned int src_off, dst_off, len;
+		u8 align = 0;
 		struct scatterlist tx_sg[src_cnt];
 		struct scatterlist rx_sg[src_cnt];
 
 		total_tests++;
+
+		/* honor alignment restrictions */
+		if (thread->type == DMA_MEMCPY || thread->type == DMA_SG)
+			align = dev->copy_align;
+		else if (thread->type == DMA_XOR)
+			align = dev->xor_align;
+		else if (thread->type == DMA_PQ)
+			align = dev->pq_align;
 
 		if (1 << align > params->buf_size) {
 			pr_err("%u-byte buffer too small for %d-byte alignment\n",
@@ -572,7 +563,7 @@ static int dmatest_func(void *data)
 			filltime = ktime_add(filltime, diff);
 		}
 
-		um = dmaengine_get_unmap_data(dev->dev, src_cnt + dst_cnt,
+		um = dmaengine_get_unmap_data(dev->dev, src_cnt+dst_cnt,
 					      GFP_KERNEL);
 		if (!um) {
 			failed_tests++;
@@ -660,9 +651,9 @@ static int dmatest_func(void *data)
 			continue;
 		}
 
-		done.done = false;
+		done->done = false;
 		tx->callback = dmatest_callback;
-		tx->callback_param = &done;
+		tx->callback_param = done;
 		cookie = tx->tx_submit(tx);
 
 		if (dma_submit_error(cookie)) {
@@ -675,20 +666,12 @@ static int dmatest_func(void *data)
 		}
 		dma_async_issue_pending(chan);
 
-		wait_event_freezable_timeout(done_wait, done.done,
+		wait_event_freezable_timeout(thread->done_wait, done->done,
 					     msecs_to_jiffies(params->timeout));
 
 		status = dma_async_is_tx_complete(chan, cookie, NULL, NULL);
 
-		if (!done.done) {
-			/*
-			 * We're leaving the timed out dma operation with
-			 * dangling pointer to done_wait.  To make this
-			 * correct, we'll need to allocate wait_done for
-			 * each test iteration and perform "who's gonna
-			 * free it this time?" dancing.  For now, just
-			 * leave it dangling.
-			 */
+		if (!done->done) {
 			dmaengine_unmap_put(um);
 			result("test timed out", total_tests, src_off, dst_off,
 			       len, 0);
@@ -752,17 +735,13 @@ static int dmatest_func(void *data)
 
 	ret = 0;
 err_dstbuf:
-	for (i = 0; thread->udsts[i]; i++)
-		kfree(thread->udsts[i]);
-	kfree(thread->udsts);
-err_udsts:
+	for (i = 0; thread->dsts[i]; i++)
+		kfree(thread->dsts[i]);
 	kfree(thread->dsts);
 err_dsts:
 err_srcbuf:
-	for (i = 0; thread->usrcs[i]; i++)
-		kfree(thread->usrcs[i]);
-	kfree(thread->usrcs);
-err_usrcs:
+	for (i = 0; thread->srcs[i]; i++)
+		kfree(thread->srcs[i]);
 	kfree(thread->srcs);
 err_srcs:
 	kfree(pq_coefs);
@@ -773,7 +752,7 @@ err_thread_type:
 		dmatest_KBs(runtime, total_len), ret);
 
 	/* terminate all transfers on specified channels */
-	if (ret)
+	if (ret || failed_tests)
 		dmaengine_terminate_all(chan);
 
 	thread->done = true;
@@ -833,6 +812,8 @@ static int dmatest_add_threads(struct dmatest_info *info,
 		thread->info = info;
 		thread->chan = dtc->chan;
 		thread->type = type;
+		thread->test_done.wait = &thread->done_wait;
+		init_waitqueue_head(&thread->done_wait);
 		smp_wmb();
 		thread->task = kthread_create(dmatest_func, thread, "%s-%s%u",
 				dma_chan_name(chan), op, i);

@@ -4,6 +4,7 @@
  * Copyright IBM Corp. 2011
  * Author(s): Jan Glauber <jang@linux.vnet.ibm.com>
  */
+#include <linux/module.h>
 #include <linux/uaccess.h>
 #include <linux/stop_machine.h>
 #include <linux/jump_label.h>

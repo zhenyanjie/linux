@@ -985,11 +985,7 @@ static int imxfb_probe(struct platform_device *pdev)
 	 */
 	imxfb_check_var(&info->var, info);
 
-	/*
-	 * For modes > 8bpp, the color map is bypassed.
-	 * Therefore, 256 entries are enough.
-	 */
-	ret = fb_alloc_cmap(&info->cmap, 256, 0);
+	ret = fb_alloc_cmap(&info->cmap, 1 << info->var.bits_per_pixel, 0);
 	if (ret < 0)
 		goto failed_cmap;
 

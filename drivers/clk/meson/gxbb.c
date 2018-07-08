@@ -564,46 +564,6 @@ static struct clk_gate gxbb_clk81 = {
 	},
 };
 
-static struct clk_mux gxbb_sar_adc_clk_sel = {
-	.reg = (void *)HHI_SAR_CLK_CNTL,
-	.mask = 0x3,
-	.shift = 9,
-	.lock = &clk_lock,
-	.hw.init = &(struct clk_init_data){
-		.name = "sar_adc_clk_sel",
-		.ops = &clk_mux_ops,
-		/* NOTE: The datasheet doesn't list the parents for bit 10 */
-		.parent_names = (const char *[]){ "xtal", "clk81", },
-		.num_parents = 2,
-	},
-};
-
-static struct clk_divider gxbb_sar_adc_clk_div = {
-	.reg = (void *)HHI_SAR_CLK_CNTL,
-	.shift = 0,
-	.width = 8,
-	.lock = &clk_lock,
-	.hw.init = &(struct clk_init_data){
-		.name = "sar_adc_clk_div",
-		.ops = &clk_divider_ops,
-		.parent_names = (const char *[]){ "sar_adc_clk_sel" },
-		.num_parents = 1,
-	},
-};
-
-static struct clk_gate gxbb_sar_adc_clk = {
-	.reg = (void *)HHI_SAR_CLK_CNTL,
-	.bit_idx = 8,
-	.lock = &clk_lock,
-	.hw.init = &(struct clk_init_data){
-		.name = "sar_adc_clk",
-		.ops = &clk_gate_ops,
-		.parent_names = (const char *[]){ "sar_adc_clk_div" },
-		.num_parents = 1,
-		.flags = CLK_SET_RATE_PARENT,
-	},
-};
-
 /* Everything Else (EE) domain gates */
 static MESON_GATE(gxbb_ddr, HHI_GCLK_MPEG0, 0);
 static MESON_GATE(gxbb_dos, HHI_GCLK_MPEG0, 1);
@@ -612,7 +572,7 @@ static MESON_GATE(gxbb_pl301, HHI_GCLK_MPEG0, 6);
 static MESON_GATE(gxbb_periphs, HHI_GCLK_MPEG0, 7);
 static MESON_GATE(gxbb_spicc, HHI_GCLK_MPEG0, 8);
 static MESON_GATE(gxbb_i2c, HHI_GCLK_MPEG0, 9);
-static MESON_GATE(gxbb_sar_adc, HHI_GCLK_MPEG0, 10);
+static MESON_GATE(gxbb_sana, HHI_GCLK_MPEG0, 10);
 static MESON_GATE(gxbb_smart_card, HHI_GCLK_MPEG0, 11);
 static MESON_GATE(gxbb_rng0, HHI_GCLK_MPEG0, 12);
 static MESON_GATE(gxbb_uart0, HHI_GCLK_MPEG0, 13);
@@ -663,7 +623,7 @@ static MESON_GATE(gxbb_usb0_ddr_bridge, HHI_GCLK_MPEG2, 9);
 static MESON_GATE(gxbb_mmc_pclk, HHI_GCLK_MPEG2, 11);
 static MESON_GATE(gxbb_dvin, HHI_GCLK_MPEG2, 12);
 static MESON_GATE(gxbb_uart2, HHI_GCLK_MPEG2, 15);
-static MESON_GATE(gxbb_sana, HHI_GCLK_MPEG2, 22);
+static MESON_GATE(gxbb_sar_adc, HHI_GCLK_MPEG2, 22);
 static MESON_GATE(gxbb_vpu_intr, HHI_GCLK_MPEG2, 25);
 static MESON_GATE(gxbb_sec_ahb_ahb3_bridge, HHI_GCLK_MPEG2, 26);
 static MESON_GATE(gxbb_clk81_a53, HHI_GCLK_MPEG2, 29);
@@ -794,9 +754,6 @@ static struct clk_hw_onecell_data gxbb_hw_onecell_data = {
 		[CLKID_SD_EMMC_A]	    = &gxbb_emmc_a.hw,
 		[CLKID_SD_EMMC_B]	    = &gxbb_emmc_b.hw,
 		[CLKID_SD_EMMC_C]	    = &gxbb_emmc_c.hw,
-		[CLKID_SAR_ADC_CLK]	    = &gxbb_sar_adc_clk.hw,
-		[CLKID_SAR_ADC_SEL]	    = &gxbb_sar_adc_clk_sel.hw,
-		[CLKID_SAR_ADC_DIV]	    = &gxbb_sar_adc_clk_div.hw,
 	},
 	.num = NR_CLKS,
 };
@@ -899,7 +856,6 @@ static struct clk_gate *gxbb_clk_gates[] = {
 	&gxbb_emmc_a,
 	&gxbb_emmc_b,
 	&gxbb_emmc_c,
-	&gxbb_sar_adc_clk,
 };
 
 static int gxbb_clkc_probe(struct platform_device *pdev)
@@ -931,10 +887,6 @@ static int gxbb_clkc_probe(struct platform_device *pdev)
 	/* Populate the base address for the MPEG clks */
 	gxbb_mpeg_clk_sel.reg = clk_base + (u64)gxbb_mpeg_clk_sel.reg;
 	gxbb_mpeg_clk_div.reg = clk_base + (u64)gxbb_mpeg_clk_div.reg;
-
-	/* Populate the base address for the SAR ADC clks */
-	gxbb_sar_adc_clk_sel.reg = clk_base + (u64)gxbb_sar_adc_clk_sel.reg;
-	gxbb_sar_adc_clk_div.reg = clk_base + (u64)gxbb_sar_adc_clk_div.reg;
 
 	/* Populate base address for gates */
 	for (i = 0; i < ARRAY_SIZE(gxbb_clk_gates); i++)

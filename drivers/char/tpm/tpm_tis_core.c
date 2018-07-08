@@ -182,13 +182,11 @@ static int recv_data(struct tpm_chip *chip, u8 *buf, size_t count)
 	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
 	int size = 0, burstcnt, rc;
 
-	while (size < count) {
-		rc = wait_for_tpm_stat(chip,
+	while (size < count &&
+	       wait_for_tpm_stat(chip,
 				 TPM_STS_DATA_AVAIL | TPM_STS_VALID,
 				 chip->timeout_c,
-				 &priv->read_queue, true);
-		if (rc < 0)
-			return rc;
+				 &priv->read_queue, true) == 0) {
 		burstcnt = get_burstcount(chip);
 		if (burstcnt < 0) {
 			dev_err(&chip->dev, "Unable to read burstcount\n");
@@ -210,7 +208,8 @@ static int tpm_tis_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 {
 	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
 	int size = 0;
-	int expected, status;
+	int status;
+	u32 expected;
 
 	if (count < TPM_HEADER_SIZE) {
 		size = -EIO;
@@ -225,7 +224,7 @@ static int tpm_tis_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 	}
 
 	expected = be32_to_cpu(*(__be32 *) (buf + 2));
-	if (expected > count) {
+	if (expected > count || expected < TPM_HEADER_SIZE) {
 		size = -EIO;
 		goto out;
 	}
@@ -238,11 +237,8 @@ static int tpm_tis_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 		goto out;
 	}
 
-	if (wait_for_tpm_stat(chip, TPM_STS_VALID, chip->timeout_c,
-				&priv->int_queue, false) < 0) {
-		size = -ETIME;
-		goto out;
-	}
+	wait_for_tpm_stat(chip, TPM_STS_VALID, chip->timeout_c,
+			  &priv->int_queue, false);
 	status = tpm_tis_status(chip);
 	if (status & TPM_STS_DATA_AVAIL) {	/* retry? */
 		dev_err(&chip->dev, "Error left over data\n");
@@ -261,12 +257,12 @@ out:
  * tpm.c can skip polling for the data to be available as the interrupt is
  * waited for here
  */
-static int tpm_tis_send_data(struct tpm_chip *chip, u8 *buf, size_t len)
+static int tpm_tis_send_data(struct tpm_chip *chip, const u8 *buf, size_t len)
 {
 	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
 	int rc, status, burstcnt;
 	size_t count = 0;
-	bool itpm = priv->flags & TPM_TIS_ITPM_WORKAROUND;
+	bool itpm = priv->flags & TPM_TIS_ITPM_POSSIBLE;
 
 	if (request_locality(chip, 0) < 0)
 		return -EBUSY;
@@ -297,11 +293,8 @@ static int tpm_tis_send_data(struct tpm_chip *chip, u8 *buf, size_t len)
 
 		count += burstcnt;
 
-		if (wait_for_tpm_stat(chip, TPM_STS_VALID, chip->timeout_c,
-					&priv->int_queue, false) < 0) {
-			rc = -ETIME;
-			goto out_err;
-		}
+		wait_for_tpm_stat(chip, TPM_STS_VALID, chip->timeout_c,
+				  &priv->int_queue, false);
 		status = tpm_tis_status(chip);
 		if (!itpm && (status & TPM_STS_DATA_EXPECT) == 0) {
 			rc = -EIO;
@@ -314,11 +307,8 @@ static int tpm_tis_send_data(struct tpm_chip *chip, u8 *buf, size_t len)
 	if (rc < 0)
 		goto out_err;
 
-	if (wait_for_tpm_stat(chip, TPM_STS_VALID, chip->timeout_c,
-				&priv->int_queue, false) < 0) {
-		rc = -ETIME;
-		goto out_err;
-	}
+	wait_for_tpm_stat(chip, TPM_STS_VALID, chip->timeout_c,
+			  &priv->int_queue, false);
 	status = tpm_tis_status(chip);
 	if (!itpm && (status & TPM_STS_DATA_EXPECT) != 0) {
 		rc = -EIO;
@@ -356,7 +346,7 @@ static void disable_interrupts(struct tpm_chip *chip)
  * tpm.c can skip polling for the data to be available as the interrupt is
  * waited for here
  */
-static int tpm_tis_send_main(struct tpm_chip *chip, u8 *buf, size_t len)
+static int tpm_tis_send_main(struct tpm_chip *chip, const u8 *buf, size_t len)
 {
 	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
 	int rc;
@@ -466,9 +456,6 @@ static int probe_itpm(struct tpm_chip *chip)
 	size_t len = sizeof(cmd_getticks);
 	u16 vendor;
 
-	if (priv->flags & TPM_TIS_ITPM_WORKAROUND)
-		return 0;
-
 	rc = tpm_tis_read16(priv, TPM_DID_VID(0), &vendor);
 	if (rc < 0)
 		return rc;
@@ -484,15 +471,12 @@ static int probe_itpm(struct tpm_chip *chip)
 	tpm_tis_ready(chip);
 	release_locality(chip, priv->locality, 0);
 
-	priv->flags |= TPM_TIS_ITPM_WORKAROUND;
-
 	rc = tpm_tis_send_data(chip, cmd_getticks, len);
-	if (rc == 0)
+	if (rc == 0) {
 		dev_info(&chip->dev, "Detected an iTPM.\n");
-	else {
-		priv->flags &= ~TPM_TIS_ITPM_WORKAROUND;
+		rc = 1;
+	} else
 		rc = -EFAULT;
-	}
 
 out:
 	tpm_tis_ready(chip);
@@ -560,8 +544,7 @@ static int tpm_tis_gen_interrupt(struct tpm_chip *chip)
 	if (chip->flags & TPM_CHIP_FLAG_TPM2)
 		return tpm2_get_tpm_pt(chip, 0x100, &cap2, desc);
 	else
-		return tpm_getcap(chip, TPM_CAP_PROP_TIS_TIMEOUT, &cap, desc,
-				  0);
+		return tpm_getcap(chip, TPM_CAP_PROP_TIS_TIMEOUT, &cap, desc);
 }
 
 /* Register the IRQ and issue a command that will cause an interrupt. If an
@@ -749,10 +732,15 @@ int tpm_tis_core_init(struct device *dev, struct tpm_tis_data *priv, int irq,
 		 (chip->flags & TPM_CHIP_FLAG_TPM2) ? "2.0" : "1.2",
 		 vendor >> 16, rid);
 
-	probe = probe_itpm(chip);
-	if (probe < 0) {
-		rc = -ENODEV;
-		goto out_err;
+	if (!(priv->flags & TPM_TIS_ITPM_POSSIBLE)) {
+		probe = probe_itpm(chip);
+		if (probe < 0) {
+			rc = -ENODEV;
+			goto out_err;
+		}
+
+		if (!!probe)
+			priv->flags |= TPM_TIS_ITPM_POSSIBLE;
 	}
 
 	/* Figure out the capabilities */
@@ -781,20 +769,20 @@ int tpm_tis_core_init(struct device *dev, struct tpm_tis_data *priv, int irq,
 	if (intfcaps & TPM_INTF_DATA_AVAIL_INT)
 		dev_dbg(dev, "\tData Avail Int Support\n");
 
+	/* Very early on issue a command to the TPM in polling mode to make
+	 * sure it works. May as well use that command to set the proper
+	 *  timeouts for the driver.
+	 */
+	if (tpm_get_timeouts(chip)) {
+		dev_err(dev, "Could not get TPM timeouts and durations\n");
+		rc = -ENODEV;
+		goto out_err;
+	}
+
 	/* INTERRUPT Setup */
 	init_waitqueue_head(&priv->read_queue);
 	init_waitqueue_head(&priv->int_queue);
 	if (irq != -1) {
-		/* Before doing irq testing issue a command to the TPM in polling mode
-		 * to make sure it works. May as well use that command to set the
-		 * proper timeouts for the driver.
-		 */
-		if (tpm_get_timeouts(chip)) {
-			dev_err(dev, "Could not get TPM timeouts and durations\n");
-			rc = -ENODEV;
-			goto out_err;
-		}
-
 		if (irq) {
 			tpm_tis_probe_irq_single(chip, intmask, IRQF_SHARED,
 						 irq);

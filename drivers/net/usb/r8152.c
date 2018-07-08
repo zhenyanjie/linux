@@ -517,9 +517,9 @@ enum rtl8152_flags {
 
 /* Define these values to match your device */
 #define VENDOR_ID_REALTEK		0x0bda
-#define VENDOR_ID_MICROSOFT		0x045e
 #define VENDOR_ID_SAMSUNG		0x04e8
 #define VENDOR_ID_LENOVO		0x17ef
+#define VENDOR_ID_LINKSYS		0x13b1
 #define VENDOR_ID_NVIDIA		0x0955
 
 #define MCU_TYPE_PLA			0x0100
@@ -1693,7 +1693,7 @@ static int r8152_tx_agg_fill(struct r8152 *tp, struct tx_agg *agg)
 
 		tx_data += len;
 		agg->skb_len += len;
-		agg->skb_num++;
+		agg->skb_num += skb_shinfo(skb)->gso_segs ?: 1;
 
 		dev_kfree_skb_any(skb);
 
@@ -2902,8 +2902,7 @@ static void r8153_first_init(struct r8152 *tp)
 
 	rtl_rx_vlan_en(tp, tp->netdev->features & NETIF_F_HW_VLAN_CTAG_RX);
 
-	ocp_data = tp->netdev->mtu + VLAN_ETH_HLEN + CRC_SIZE;
-	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RMS, ocp_data);
+	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RMS, RTL8153_RMS);
 	ocp_write_byte(tp, MCU_TYPE_PLA, PLA_MTPS, MTPS_JUMBO);
 
 	ocp_data = ocp_read_word(tp, MCU_TYPE_PLA, PLA_TCR0);
@@ -2955,8 +2954,7 @@ static void r8153_enter_oob(struct r8152 *tp)
 		usleep_range(1000, 2000);
 	}
 
-	ocp_data = tp->netdev->mtu + VLAN_ETH_HLEN + CRC_SIZE;
-	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RMS, ocp_data);
+	ocp_write_word(tp, MCU_TYPE_PLA, PLA_RMS, RTL8153_RMS);
 
 	ocp_data = ocp_read_word(tp, MCU_TYPE_PLA, PLA_TEREDO_CFG);
 	ocp_data &= ~TEREDO_WAKE_MASK;
@@ -3599,7 +3597,7 @@ static bool delay_autosuspend(struct r8152 *tp)
 		return false;
 }
 
-static int rtl8152_runtime_suspend(struct r8152 *tp)
+static int rtl8152_rumtime_suspend(struct r8152 *tp)
 {
 	struct net_device *netdev = tp->netdev;
 	int ret = 0;
@@ -3681,7 +3679,7 @@ static int rtl8152_suspend(struct usb_interface *intf, pm_message_t message)
 	mutex_lock(&tp->control);
 
 	if (PMSG_IS_AUTO(message))
-		ret = rtl8152_runtime_suspend(tp);
+		ret = rtl8152_rumtime_suspend(tp);
 	else
 		ret = rtl8152_system_suspend(tp);
 
@@ -4205,11 +4203,13 @@ static int rtl8152_change_mtu(struct net_device *dev, int new_mtu)
 	switch (tp->version) {
 	case RTL_VER_01:
 	case RTL_VER_02:
-		dev->mtu = new_mtu;
-		return 0;
+		return eth_change_mtu(dev, new_mtu);
 	default:
 		break;
 	}
+
+	if (new_mtu < 68 || new_mtu > RTL8153_MAX_MTU)
+		return -EINVAL;
 
 	ret = usb_autopm_get_interface(tp->intf);
 	if (ret < 0)
@@ -4219,14 +4219,8 @@ static int rtl8152_change_mtu(struct net_device *dev, int new_mtu)
 
 	dev->mtu = new_mtu;
 
-	if (netif_running(dev)) {
-		u32 rms = new_mtu + VLAN_ETH_HLEN + CRC_SIZE;
-
-		ocp_write_word(tp, MCU_TYPE_PLA, PLA_RMS, rms);
-
-		if (netif_carrier_ok(dev))
-			r8153_set_rx_early_size(tp);
-	}
+	if (netif_running(dev) && netif_carrier_ok(dev))
+		r8153_set_rx_early_size(tp);
 
 	mutex_unlock(&tp->control);
 
@@ -4411,18 +4405,6 @@ static int rtl8152_probe(struct usb_interface *intf,
 	netdev->ethtool_ops = &ops;
 	netif_set_gso_max_size(netdev, RTL_LIMITED_TSO_SIZE);
 
-	/* MTU range: 68 - 1500 or 9194 */
-	netdev->min_mtu = ETH_MIN_MTU;
-	switch (tp->version) {
-	case RTL_VER_01:
-	case RTL_VER_02:
-		netdev->max_mtu = ETH_DATA_LEN;
-		break;
-	default:
-		netdev->max_mtu = RTL8153_MAX_MTU;
-		break;
-	}
-
 	tp->mii.dev = netdev;
 	tp->mii.mdio_read = read_mii_word;
 	tp->mii.mdio_write = write_mii_word;
@@ -4522,15 +4504,10 @@ static void rtl8152_disconnect(struct usb_interface *intf)
 static struct usb_device_id rtl8152_table[] = {
 	{REALTEK_USB_DEVICE(VENDOR_ID_REALTEK, 0x8152)},
 	{REALTEK_USB_DEVICE(VENDOR_ID_REALTEK, 0x8153)},
-	{REALTEK_USB_DEVICE(VENDOR_ID_MICROSOFT, 0x07ab)},
-	{REALTEK_USB_DEVICE(VENDOR_ID_MICROSOFT, 0x07c6)},
 	{REALTEK_USB_DEVICE(VENDOR_ID_SAMSUNG, 0xa101)},
-	{REALTEK_USB_DEVICE(VENDOR_ID_LENOVO,  0x304f)},
-	{REALTEK_USB_DEVICE(VENDOR_ID_LENOVO,  0x3062)},
-	{REALTEK_USB_DEVICE(VENDOR_ID_LENOVO,  0x3069)},
 	{REALTEK_USB_DEVICE(VENDOR_ID_LENOVO,  0x7205)},
-	{REALTEK_USB_DEVICE(VENDOR_ID_LENOVO,  0x720c)},
-	{REALTEK_USB_DEVICE(VENDOR_ID_LENOVO,  0x7214)},
+	{REALTEK_USB_DEVICE(VENDOR_ID_LENOVO,  0x304f)},
+	{REALTEK_USB_DEVICE(VENDOR_ID_LINKSYS, 0x0041)},
 	{REALTEK_USB_DEVICE(VENDOR_ID_NVIDIA,  0x09ff)},
 	{}
 };

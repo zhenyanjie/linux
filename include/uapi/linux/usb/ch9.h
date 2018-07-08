@@ -423,7 +423,6 @@ struct usb_endpoint_descriptor {
 #define USB_ENDPOINT_XFER_INT		3
 #define USB_ENDPOINT_MAX_ADJUSTABLE	0x80
 
-#define USB_ENDPOINT_MAXP_MASK	0x07ff
 #define USB_EP_MAXP_MULT_SHIFT	11
 #define USB_EP_MAXP_MULT_MASK	(3 << USB_EP_MAXP_MULT_SHIFT)
 #define USB_EP_MAXP_MULT(m) \
@@ -629,11 +628,11 @@ static inline int usb_endpoint_is_isoc_out(
  * usb_endpoint_maxp - get endpoint's max packet size
  * @epd: endpoint to be checked
  *
- * Returns @epd's max packet bits [10:0]
+ * Returns @epd's max packet
  */
 static inline int usb_endpoint_maxp(const struct usb_endpoint_descriptor *epd)
 {
-	return __le16_to_cpu(epd->wMaxPacketSize) & USB_ENDPOINT_MAXP_MASK;
+	return __le16_to_cpu(epd->wMaxPacketSize);
 }
 
 /**
@@ -779,6 +778,7 @@ struct usb_interface_assoc_descriptor {
 	__u8  iFunction;
 } __attribute__ ((packed));
 
+#define USB_DT_INTERFACE_ASSOCIATION_SIZE	8
 
 /*-------------------------------------------------------------------------*/
 
@@ -872,6 +872,8 @@ struct usb_wireless_cap_descriptor {	/* Ultra Wide Band */
 	__le16 bmBandGroup;
 	__u8  bReserved;
 } __attribute__((packed));
+
+#define USB_DT_USB_WIRELESS_CAP_SIZE	11
 
 /* USB 2.0 Extension descriptor */
 #define	USB_CAP_TYPE_EXT		2
@@ -1065,6 +1067,7 @@ struct usb_ptm_cap_descriptor {
 	__u8  bDevCapabilityType;
 } __attribute__((packed));
 
+#define USB_DT_USB_PTM_ID_SIZE		3
 /*
  * The size of the descriptor for the Sublink Speed Attribute Count
  * (SSAC) specified in bmAttributes[4:0].

@@ -167,19 +167,6 @@ static void nft_hash_activate(const struct net *net, const struct nft_set *set,
 	nft_set_elem_clear_busy(&he->ext);
 }
 
-static bool nft_hash_flush(const struct net *net,
-			   const struct nft_set *set, void *priv)
-{
-	struct nft_hash_elem *he = priv;
-
-	if (!nft_set_elem_mark_busy(&he->ext) ||
-	    !nft_is_active(net, &he->ext)) {
-		nft_set_elem_change_active(net, set, &he->ext);
-		return true;
-	}
-	return false;
-}
-
 static void *nft_hash_deactivate(const struct net *net,
 				 const struct nft_set *set,
 				 const struct nft_set_elem *elem)
@@ -194,17 +181,19 @@ static void *nft_hash_deactivate(const struct net *net,
 
 	rcu_read_lock();
 	he = rhashtable_lookup_fast(&priv->ht, &arg, nft_hash_params);
-	if (he != NULL &&
-	    !nft_hash_flush(net, set, he))
-		he = NULL;
-
+	if (he != NULL) {
+		if (!nft_set_elem_mark_busy(&he->ext) ||
+		    !nft_is_active(net, &he->ext))
+			nft_set_elem_change_active(net, set, &he->ext);
+		else
+			he = NULL;
+	}
 	rcu_read_unlock();
 
 	return he;
 }
 
-static void nft_hash_remove(const struct net *net,
-			    const struct nft_set *set,
+static void nft_hash_remove(const struct nft_set *set,
 			    const struct nft_set_elem *elem)
 {
 	struct nft_hash *priv = nft_set_priv(set);
@@ -213,7 +202,7 @@ static void nft_hash_remove(const struct net *net,
 	rhashtable_remove_fast(&priv->ht, &he->node, nft_hash_params);
 }
 
-static void nft_hash_walk(const struct nft_ctx *ctx, struct nft_set *set,
+static void nft_hash_walk(const struct nft_ctx *ctx, const struct nft_set *set,
 			  struct nft_set_iter *iter)
 {
 	struct nft_hash *priv = nft_set_priv(set);
@@ -384,8 +373,7 @@ static bool nft_hash_estimate(const struct nft_set_desc *desc, u32 features,
 		est->size = esize + 2 * sizeof(struct nft_hash_elem *);
 	}
 
-	est->lookup = NFT_SET_CLASS_O_1;
-	est->space  = NFT_SET_CLASS_O_N;
+	est->class = NFT_SET_CLASS_O_1;
 
 	return true;
 }
@@ -399,12 +387,11 @@ static struct nft_set_ops nft_hash_ops __read_mostly = {
 	.insert		= nft_hash_insert,
 	.activate	= nft_hash_activate,
 	.deactivate	= nft_hash_deactivate,
-	.flush		= nft_hash_flush,
 	.remove		= nft_hash_remove,
 	.lookup		= nft_hash_lookup,
 	.update		= nft_hash_update,
 	.walk		= nft_hash_walk,
-	.features	= NFT_SET_MAP | NFT_SET_OBJECT | NFT_SET_TIMEOUT,
+	.features	= NFT_SET_MAP | NFT_SET_TIMEOUT,
 	.owner		= THIS_MODULE,
 };
 

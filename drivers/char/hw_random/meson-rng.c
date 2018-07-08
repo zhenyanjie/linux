@@ -110,7 +110,6 @@ static const struct of_device_id meson_rng_of_match[] = {
 	{ .compatible = "amlogic,meson-rng", },
 	{},
 };
-MODULE_DEVICE_TABLE(of, meson_rng_of_match);
 
 static struct platform_driver meson_rng_driver = {
 	.probe	= meson_rng_probe,
@@ -122,6 +121,7 @@ static struct platform_driver meson_rng_driver = {
 
 module_platform_driver(meson_rng_driver);
 
+MODULE_ALIAS("platform:meson-rng");
 MODULE_DESCRIPTION("Meson H/W Random Number Generator driver");
 MODULE_AUTHOR("Lawrence Mok <lawrence.mok@amlogic.com>");
 MODULE_AUTHOR("Neil Armstrong <narmstrong@baylibre.com>");

@@ -10,7 +10,6 @@
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/miscdevice.h>
-#include <linux/sched/mm.h>
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
@@ -18,7 +17,7 @@
 #include <linux/hdreg.h>
 #include <linux/compat.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #define DM_MSG_PREFIX "ioctl"
 #define DM_DRIVER_EMAIL "dm-devel@redhat.com"
@@ -1698,7 +1697,7 @@ static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl *param_kern
 {
 	struct dm_ioctl *dmi;
 	int secure_data;
-	const size_t minimum_data_size = offsetof(struct dm_ioctl, data);
+	const size_t minimum_data_size = sizeof(*param_kernel) - sizeof(param_kernel->data);
 
 	if (copy_from_user(param_kernel, user, minimum_data_size))
 		return -EFAULT;
@@ -1778,12 +1777,12 @@ static int validate_params(uint cmd, struct dm_ioctl *param)
 	    cmd == DM_LIST_VERSIONS_CMD)
 		return 0;
 
-	if ((cmd == DM_DEV_CREATE_CMD)) {
+	if (cmd == DM_DEV_CREATE_CMD) {
 		if (!*param->name) {
 			DMWARN("name not supplied when creating device");
 			return -EINVAL;
 		}
-	} else if ((*param->uuid && *param->name)) {
+	} else if (*param->uuid && *param->name) {
 		DMWARN("only supply one of name or uuid, cmd(%u)", cmd);
 		return -EINVAL;
 	}

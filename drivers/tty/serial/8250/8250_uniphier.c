@@ -24,22 +24,10 @@
 /* Most (but not all) of UniPhier UART devices have 64-depth FIFO. */
 #define UNIPHIER_UART_DEFAULT_FIFO_SIZE	64
 
-/*
- * This hardware is similar to 8250, but its register map is a bit different:
- *   - MMIO32 (regshift = 2)
- *   - FCR is not at 2, but 3
- *   - LCR and MCR are not at 3 and 4, they share 4
- *   - Divisor latch at 9, no divisor latch access bit
- */
-
-#define UNIPHIER_UART_REGSHIFT		2
-
-/* bit[15:8] = CHAR (not used), bit[7:0] = FCR */
-#define UNIPHIER_UART_CHAR_FCR		(3 << (UNIPHIER_UART_REGSHIFT))
-/* bit[15:8] = LCR, bit[7:0] = MCR */
-#define UNIPHIER_UART_LCR_MCR		(4 << (UNIPHIER_UART_REGSHIFT))
-/* Divisor Latch Register */
-#define UNIPHIER_UART_DLR		(9 << (UNIPHIER_UART_REGSHIFT))
+#define UNIPHIER_UART_CHAR_FCR	3	/* Character / FIFO Control Register */
+#define UNIPHIER_UART_LCR_MCR	4	/* Line/Modem Control Register */
+#define   UNIPHIER_UART_LCR_SHIFT	8
+#define UNIPHIER_UART_DLR	9	/* Divisor Latch Register */
 
 struct uniphier8250_priv {
 	int line;
@@ -56,7 +44,7 @@ static int __init uniphier_early_console_setup(struct earlycon_device *device,
 
 	/* This hardware always expects MMIO32 register interface. */
 	device->port.iotype = UPIO_MEM32;
-	device->port.regshift = UNIPHIER_UART_REGSHIFT;
+	device->port.regshift = 2;
 
 	/*
 	 * Do not touch the divisor register in early_serial8250_setup();
@@ -80,15 +68,16 @@ static unsigned int uniphier_serial_in(struct uart_port *p, int offset)
 
 	switch (offset) {
 	case UART_LCR:
-		valshift = 8;
+		valshift = UNIPHIER_UART_LCR_SHIFT;
 		/* fall through */
 	case UART_MCR:
 		offset = UNIPHIER_UART_LCR_MCR;
 		break;
 	default:
-		offset <<= UNIPHIER_UART_REGSHIFT;
 		break;
 	}
+
+	offset <<= p->regshift;
 
 	/*
 	 * The return value must be masked with 0xff because LCR and MCR reside
@@ -101,25 +90,26 @@ static unsigned int uniphier_serial_in(struct uart_port *p, int offset)
 static void uniphier_serial_out(struct uart_port *p, int offset, int value)
 {
 	unsigned int valshift = 0;
-	bool normal = true;
+	bool normal = false;
 
 	switch (offset) {
 	case UART_FCR:
 		offset = UNIPHIER_UART_CHAR_FCR;
 		break;
 	case UART_LCR:
-		valshift = 8;
+		valshift = UNIPHIER_UART_LCR_SHIFT;
 		/* Divisor latch access bit does not exist. */
 		value &= ~UART_LCR_DLAB;
 		/* fall through */
 	case UART_MCR:
 		offset = UNIPHIER_UART_LCR_MCR;
-		normal = false;
 		break;
 	default:
-		offset <<= UNIPHIER_UART_REGSHIFT;
+		normal = true;
 		break;
 	}
+
+	offset <<= p->regshift;
 
 	if (normal) {
 		writel(value, p->membase + offset);
@@ -149,12 +139,16 @@ static void uniphier_serial_out(struct uart_port *p, int offset, int value)
  */
 static int uniphier_serial_dl_read(struct uart_8250_port *up)
 {
-	return readl(up->port.membase + UNIPHIER_UART_DLR);
+	int offset = UNIPHIER_UART_DLR << up->port.regshift;
+
+	return readl(up->port.membase + offset);
 }
 
 static void uniphier_serial_dl_write(struct uart_8250_port *up, int value)
 {
-	writel(value, up->port.membase + UNIPHIER_UART_DLR);
+	int offset = UNIPHIER_UART_DLR << up->port.regshift;
+
+	writel(value, up->port.membase + offset);
 }
 
 static int uniphier_of_serial_setup(struct device *dev, struct uart_port *port,
@@ -240,7 +234,7 @@ static int uniphier_uart_probe(struct platform_device *pdev)
 
 	up.port.type = PORT_16550A;
 	up.port.iotype = UPIO_MEM32;
-	up.port.regshift = UNIPHIER_UART_REGSHIFT;
+	up.port.regshift = 2;
 	up.port.flags = UPF_FIXED_PORT | UPF_FIXED_TYPE;
 	up.capabilities = UART_CAP_FIFO;
 

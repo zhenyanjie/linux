@@ -202,5 +202,7 @@ bool rtl92e_init_fw(struct net_device *dev)
 
 download_firmware_fail:
 	netdev_err(dev, "%s: Failed to initialize firmware.\n", __func__);
-	return false;
+	rt_status = false;
+	return rt_status;
+
 }

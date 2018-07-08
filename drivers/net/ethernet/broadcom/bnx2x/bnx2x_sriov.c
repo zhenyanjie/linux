@@ -473,7 +473,7 @@ int bnx2x_vf_mac_vlan_config_list(struct bnx2x *bp, struct bnx2x_virtf *vf,
 	/* Rollback if needed */
 	if (i != filters->count) {
 		BNX2X_ERR("Managed only %d/%d filters - rolling back\n",
-			  i, filters->count);
+			  i, filters->count + 1);
 		while (--i >= 0) {
 			if (!filters->filters[i].applied)
 				continue;
@@ -591,7 +591,7 @@ int bnx2x_vf_mcast(struct bnx2x *bp, struct bnx2x_virtf *vf,
 		mcast.mcast_list_len = mc_num;
 		rc = bnx2x_config_mcast(bp, &mcast, BNX2X_MCAST_CMD_SET);
 		if (rc)
-			BNX2X_ERR("Failed to set multicasts\n");
+			BNX2X_ERR("Faled to set multicasts\n");
 	} else {
 		/* clear existing mcasts */
 		rc = bnx2x_config_mcast(bp, &mcast, BNX2X_MCAST_CMD_DEL);
@@ -1905,8 +1905,7 @@ void bnx2x_iov_adjust_stats_req(struct bnx2x *bp)
 			continue;
 		}
 
-		DP_AND((BNX2X_MSG_IOV | BNX2X_MSG_STATS),
-		       "add addresses for vf %d\n", vf->abs_vfid);
+		DP(BNX2X_MSG_IOV, "add addresses for vf %d\n", vf->abs_vfid);
 		for_each_vfq(vf, j) {
 			struct bnx2x_vf_queue *rxq = vfq_get(vf, j);
 
@@ -1927,12 +1926,11 @@ void bnx2x_iov_adjust_stats_req(struct bnx2x *bp)
 				cpu_to_le32(U64_HI(q_stats_addr));
 			cur_query_entry->address.lo =
 				cpu_to_le32(U64_LO(q_stats_addr));
-			DP_AND((BNX2X_MSG_IOV | BNX2X_MSG_STATS),
-			       "added address %x %x for vf %d queue %d client %d\n",
-			       cur_query_entry->address.hi,
-			       cur_query_entry->address.lo,
-			       cur_query_entry->funcID,
-			       j, cur_query_entry->index);
+			DP(BNX2X_MSG_IOV,
+			   "added address %x %x for vf %d queue %d client %d\n",
+			   cur_query_entry->address.hi,
+			   cur_query_entry->address.lo, cur_query_entry->funcID,
+			   j, cur_query_entry->index);
 			cur_query_entry++;
 			cur_data_offset += sizeof(struct per_queue_stats);
 			stats_count++;

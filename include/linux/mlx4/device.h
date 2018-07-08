@@ -1375,7 +1375,6 @@ int mlx4_get_base_qpn(struct mlx4_dev *dev, u8 port);
 int __mlx4_replace_mac(struct mlx4_dev *dev, u8 port, int qpn, u64 new_mac);
 int mlx4_SET_PORT_general(struct mlx4_dev *dev, u8 port, int mtu,
 			  u8 pptx, u8 pfctx, u8 pprx, u8 pfcrx);
-int mlx4_SET_PORT_user_mtu(struct mlx4_dev *dev, u8 port, u16 user_mtu);
 int mlx4_SET_PORT_qpn_calc(struct mlx4_dev *dev, u8 port, u32 base_qpn,
 			   u8 promisc);
 int mlx4_SET_PORT_BEACON(struct mlx4_dev *dev, u8 port, u16 time);
@@ -1464,7 +1463,7 @@ int mlx4_get_roce_gid_from_slave(struct mlx4_dev *dev, int port, int slave_id,
 int mlx4_FLOW_STEERING_IB_UC_QP_RANGE(struct mlx4_dev *dev, u32 min_range_qpn,
 				      u32 max_range_qpn);
 
-u64 mlx4_read_clock(struct mlx4_dev *dev);
+cycle_t mlx4_read_clock(struct mlx4_dev *dev);
 
 struct mlx4_active_ports {
 	DECLARE_BITMAP(ports, MLX4_MAX_PORTS);
@@ -1541,13 +1540,8 @@ enum mlx4_ptys_proto {
 	MLX4_PTYS_EN = 1<<2,
 };
 
-enum mlx4_ptys_flags {
-	MLX4_PTYS_AN_DISABLE_CAP   = 1 << 5,
-	MLX4_PTYS_AN_DISABLE_ADMIN = 1 << 6,
-};
-
 struct mlx4_ptys_reg {
-	u8 flags;
+	u8 resrvd1;
 	u8 local_port;
 	u8 resrvd2;
 	u8 proto_mask;

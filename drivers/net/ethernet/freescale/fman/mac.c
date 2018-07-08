@@ -594,7 +594,6 @@ static const u16 phy2speed[] = {
 	[PHY_INTERFACE_MODE_RGMII_RXID]	= SPEED_1000,
 	[PHY_INTERFACE_MODE_RGMII_TXID]	= SPEED_1000,
 	[PHY_INTERFACE_MODE_RTBI]		= SPEED_1000,
-	[PHY_INTERFACE_MODE_QSGMII]		= SPEED_1000,
 	[PHY_INTERFACE_MODE_XGMII]		= SPEED_10000
 };
 
@@ -622,6 +621,9 @@ static struct platform_device *dpaa_eth_add_device(int fman_id,
 		ret = -ENOMEM;
 		goto no_mem;
 	}
+
+	pdev->dev.of_node = node;
+	pdev->dev.parent = priv->dev;
 
 	ret = platform_device_add_data(pdev, &data, sizeof(data));
 	if (ret)
@@ -880,17 +882,13 @@ static int mac_probe(struct platform_device *_of_dev)
 
 		priv->fixed_link = kzalloc(sizeof(*priv->fixed_link),
 					   GFP_KERNEL);
-		if (!priv->fixed_link) {
-			err = -ENOMEM;
+		if (!priv->fixed_link)
 			goto _return_dev_set_drvdata;
-		}
 
 		priv->phy_node = of_node_get(mac_node);
 		phy = of_phy_find_device(priv->phy_node);
-		if (!phy) {
-			err = -EINVAL;
+		if (!phy)
 			goto _return_dev_set_drvdata;
-		}
 
 		priv->fixed_link->link = phy->link;
 		priv->fixed_link->speed = phy->speed;

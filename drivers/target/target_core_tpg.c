@@ -364,7 +364,7 @@ void core_tpg_del_initiator_node_acl(struct se_node_acl *acl)
 	mutex_lock(&tpg->acl_node_mutex);
 	if (acl->dynamic_node_acl)
 		acl->dynamic_node_acl = 0;
-	list_del(&acl->acl_list);
+	list_del_init(&acl->acl_list);
 	mutex_unlock(&tpg->acl_node_mutex);
 
 	target_shutdown_sessions(acl);
@@ -448,7 +448,6 @@ static void core_tpg_lun_ref_release(struct percpu_ref *ref)
 	complete(&lun->lun_shutdown_comp);
 }
 
-/* Does not change se_wwn->priv. */
 int core_tpg_register(
 	struct se_wwn *se_wwn,
 	struct se_portal_group *se_tpg,
@@ -541,7 +540,7 @@ int core_tpg_deregister(struct se_portal_group *se_tpg)
 	 * in transport_deregister_session().
 	 */
 	list_for_each_entry_safe(nacl, nacl_tmp, &node_list, acl_list) {
-		list_del(&nacl->acl_list);
+		list_del_init(&nacl->acl_list);
 
 		core_tpg_wait_for_nacl_pr_ref(nacl);
 		core_free_device_list_for_node(nacl, se_tpg);
@@ -602,8 +601,7 @@ int core_tpg_add_lun(
 	if (ret)
 		goto out_kill_ref;
 
-	if (!(dev->transport->transport_flags &
-	     TRANSPORT_FLAG_PASSTHROUGH_ALUA) &&
+	if (!(dev->transport->transport_flags & TRANSPORT_FLAG_PASSTHROUGH) &&
 	    !(dev->se_hba->hba_flags & HBA_FLAGS_INTERNAL_USE))
 		target_attach_tg_pt_gp(lun, dev->t10_alua.default_tg_pt_gp);
 

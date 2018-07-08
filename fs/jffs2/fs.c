@@ -15,7 +15,6 @@
 #include <linux/capability.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <linux/cred.h>
 #include <linux/fs.h>
 #include <linux/list.h>
 #include <linux/mtd/mtd.h>
@@ -362,7 +361,6 @@ error_io:
 	ret = -EIO;
 error:
 	mutex_unlock(&f->sem);
-	jffs2_do_clear_inode(c, f);
 	iget_failed(inode);
 	return ERR_PTR(ret);
 }

@@ -13,6 +13,7 @@ sti-drm-y := \
 	sti_dvo.o \
 	sti_awg_utils.o \
 	sti_vtg.o \
+	sti_vtac.o \
 	sti_hda.o \
 	sti_tvout.o \
 	sti_hqvdp.o \

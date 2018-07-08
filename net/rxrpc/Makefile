@@ -2,9 +2,7 @@
 # Makefile for Linux kernel RxRPC
 #
 
-obj-$(CONFIG_AF_RXRPC) += rxrpc.o
-
-rxrpc-y := \
+af-rxrpc-y := \
 	af_rxrpc.o \
 	call_accept.o \
 	call_event.o \
@@ -28,6 +26,8 @@ rxrpc-y := \
 	skbuff.o \
 	utils.o
 
-rxrpc-$(CONFIG_PROC_FS) += proc.o
-rxrpc-$(CONFIG_RXKAD) += rxkad.o
-rxrpc-$(CONFIG_SYSCTL) += sysctl.o
+af-rxrpc-$(CONFIG_PROC_FS) += proc.o
+af-rxrpc-$(CONFIG_RXKAD) += rxkad.o
+af-rxrpc-$(CONFIG_SYSCTL) += sysctl.o
+
+obj-$(CONFIG_AF_RXRPC) += af-rxrpc.o

@@ -30,11 +30,10 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/err.h>
+#include <linux/extcon.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
-
-#include "extcon.h"
 
 #define SUPPORTED_CABLE_MAX	32
 #define CABLE_NAME_MAX		30
@@ -60,7 +59,7 @@ struct __extcon_info {
 	[EXTCON_USB_HOST] = {
 		.type = EXTCON_TYPE_USB,
 		.id = EXTCON_USB_HOST,
-		.name = "USB-HOST",
+		.name = "USB_HOST",
 	},
 
 	/* Charging external connector */
@@ -98,11 +97,6 @@ struct __extcon_info {
 		.type = EXTCON_TYPE_CHG,
 		.id = EXTCON_CHG_WPT,
 		.name = "WPT",
-	},
-	[EXTCON_CHG_USB_PD] = {
-		.type = EXTCON_TYPE_CHG | EXTCON_TYPE_USB,
-		.id = EXTCON_CHG_USB_PD,
-		.name = "PD",
 	},
 
 	/* Jack external connector */

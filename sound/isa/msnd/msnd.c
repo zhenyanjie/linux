@@ -36,7 +36,6 @@
  ********************************************************************/
 
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>

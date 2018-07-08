@@ -315,13 +315,13 @@ int ceph_auth_update_authorizer(struct ceph_auth_client *ac,
 EXPORT_SYMBOL(ceph_auth_update_authorizer);
 
 int ceph_auth_verify_authorizer_reply(struct ceph_auth_client *ac,
-				      struct ceph_authorizer *a)
+				      struct ceph_authorizer *a, size_t len)
 {
 	int ret = 0;
 
 	mutex_lock(&ac->mutex);
 	if (ac->ops && ac->ops->verify_authorizer_reply)
-		ret = ac->ops->verify_authorizer_reply(ac, a);
+		ret = ac->ops->verify_authorizer_reply(ac, a, len);
 	mutex_unlock(&ac->mutex);
 	return ret;
 }

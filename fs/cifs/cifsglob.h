@@ -136,8 +136,6 @@ struct cifs_secmech {
 	struct sdesc *sdescmd5; /* ctxt to generate cifs/smb signature */
 	struct sdesc *sdeschmacsha256;  /* ctxt to generate smb2 signature */
 	struct sdesc *sdesccmacaes;  /* ctxt to generate smb3 signature */
-	struct crypto_aead *ccmaesencrypt; /* smb3 encryption aead */
-	struct crypto_aead *ccmaesdecrypt; /* smb3 decryption aead */
 };
 
 /* per smb session structure/fields */
@@ -210,7 +208,7 @@ struct cifsInodeInfo;
 struct cifs_open_parms;
 
 struct smb_version_operations {
-	int (*send_cancel)(struct TCP_Server_Info *, struct smb_rqst *,
+	int (*send_cancel)(struct TCP_Server_Info *, void *,
 			   struct mid_q_entry *);
 	bool (*compare_fids)(struct cifsFileInfo *, struct cifsFileInfo *);
 	/* setup request: allocate mid, sign message */
@@ -367,6 +365,8 @@ struct smb_version_operations {
 	unsigned int (*calc_smb_size)(void *);
 	/* check for STATUS_PENDING and process it in a positive case */
 	bool (*is_status_pending)(char *, struct TCP_Server_Info *, int);
+	/* check for STATUS_NETWORK_SESSION_EXPIRED */
+	bool (*is_session_expired)(char *);
 	/* send oplock break response */
 	int (*oplock_response)(struct cifs_tcon *, struct cifs_fid *,
 			       struct cifsInodeInfo *);
@@ -408,10 +408,9 @@ struct smb_version_operations {
 	char * (*create_lease_buf)(u8 *, u8);
 	/* parse lease context buffer and return oplock/epoch info */
 	__u8 (*parse_lease_buf)(void *, unsigned int *);
-	ssize_t (*copychunk_range)(const unsigned int,
-			struct cifsFileInfo *src_file,
-			struct cifsFileInfo *target_file,
-			u64 src_off, u64 len, u64 dest_off);
+	int (*clone_range)(const unsigned int, struct cifsFileInfo *src_file,
+			struct cifsFileInfo *target_file, u64 src_off, u64 len,
+			u64 dest_off);
 	int (*duplicate_extents)(const unsigned int, struct cifsFileInfo *src,
 			struct cifsFileInfo *target_file, u64 src_off, u64 len,
 			u64 dest_off);
@@ -437,17 +436,6 @@ struct smb_version_operations {
 	bool (*dir_needs_close)(struct cifsFileInfo *);
 	long (*fallocate)(struct file *, struct cifs_tcon *, int, loff_t,
 			  loff_t);
-	/* init transform request - used for encryption for now */
-	int (*init_transform_rq)(struct TCP_Server_Info *, struct smb_rqst *,
-				 struct smb_rqst *);
-	/* free transform request */
-	void (*free_transform_rq)(struct smb_rqst *);
-	int (*is_transform_hdr)(void *buf);
-	int (*receive_transform)(struct TCP_Server_Info *,
-				 struct mid_q_entry **);
-	enum securityEnum (*select_sectype)(struct TCP_Server_Info *,
-			    enum securityEnum);
-
 };
 
 struct smb_version_values {
@@ -529,7 +517,6 @@ struct smb_vol {
 	bool persistent:1;
 	bool nopersistent:1;
 	bool resilient:1; /* noresilient not required since not fored for CA */
-	bool domainauto:1;
 	unsigned int rsize;
 	unsigned int wsize;
 	bool sockopt_tcp_nodelay:1;
@@ -541,7 +528,6 @@ struct smb_vol {
 	struct sockaddr_storage srcaddr; /* allow binding to a local IP */
 	struct nls_table *local_nls;
 	unsigned int echo_interval; /* echo interval in secs */
-	__u64 snapshot_time; /* needed for timewarp tokens */
 	unsigned int max_credits; /* smb3 max_credits 10 < credits < 60000 */
 };
 
@@ -827,7 +813,7 @@ struct cifs_ses {
 	int ses_count;		/* reference counter */
 	enum statusEnum status;
 	unsigned overrideSecFlg;  /* if non-zero override global sec flags */
-	__u32 ipc_tid;		/* special tid for connection to IPC share */
+	__u16 ipc_tid;		/* special tid for connection to IPC share */
 	char *serverOS;		/* name of operating system underlying server */
 	char *serverNOS;	/* name of network operating system of server */
 	char *serverDomain;	/* security realm of server */
@@ -846,7 +832,6 @@ struct cifs_ses {
 	enum securityEnum sectype; /* what security flavor was specified? */
 	bool sign;		/* is signing required? */
 	bool need_reconnect:1; /* connection reset, uid now invalid */
-	bool domainAuto:1;
 #ifdef CONFIG_CIFS_SMB2
 	__u16 session_flags;
 	__u8 smb3signingkey[SMB3_SIGN_KEY_SIZE];
@@ -953,7 +938,6 @@ struct cifs_tcon {
 	__u32 maximal_access;
 	__u32 vol_serial_number;
 	__le64 vol_create_time;
-	__u64 snapshot_time; /* for timewarp tokens - timestamp of snapshot */
 	__u32 ss_flags;		/* sector size flags */
 	__u32 perf_sector_size; /* best sector size for perf */
 	__u32 max_chunks;
@@ -1133,10 +1117,7 @@ struct cifs_readdata {
 	int (*read_into_pages)(struct TCP_Server_Info *server,
 				struct cifs_readdata *rdata,
 				unsigned int len);
-	int (*copy_into_pages)(struct TCP_Server_Info *server,
-				struct cifs_readdata *rdata,
-				struct iov_iter *iter);
-	struct kvec			iov[2];
+	struct kvec			iov;
 	unsigned int			pagesz;
 	unsigned int			tailsz;
 	unsigned int			credits;
@@ -1319,13 +1300,6 @@ typedef int (mid_receive_t)(struct TCP_Server_Info *server,
  */
 typedef void (mid_callback_t)(struct mid_q_entry *mid);
 
-/*
- * This is the protopyte for mid handle function. This is called once the mid
- * has been recognized after decryption of the message.
- */
-typedef int (mid_handle_t)(struct TCP_Server_Info *server,
-			    struct mid_q_entry *mid);
-
 /* one of these for every pending CIFS request to the server */
 struct mid_q_entry {
 	struct list_head qhead;	/* mids waiting on reply from this server */
@@ -1340,7 +1314,6 @@ struct mid_q_entry {
 #endif
 	mid_receive_t *receive; /* call receive callback */
 	mid_callback_t *callback; /* call completion callback */
-	mid_handle_t *handle; /* call handle mid callback */
 	void *callback_data;	  /* general purpose pointer for callback */
 	void *resp_buf;		/* pointer to received SMB header */
 	int mid_state;	/* wish this were enum but can not pass to wait_event */
@@ -1349,7 +1322,6 @@ struct mid_q_entry {
 	bool large_buf:1;	/* if valid response, is pointer to large buf */
 	bool multiRsp:1;	/* multiple trans2 responses for one request  */
 	bool multiEnd:1;	/* both received */
-	bool decrypted:1;	/* decrypted entry */
 };
 
 struct close_cancelled_open {
@@ -1440,6 +1412,7 @@ struct dfs_info3_param {
 #define CIFS_FATTR_NEED_REVAL		0x4
 #define CIFS_FATTR_INO_COLLISION	0x8
 #define CIFS_FATTR_UNKNOWN_NLINK	0x10
+#define CIFS_FATTR_FAKE_ROOT_INO	0x20
 
 struct cifs_fattr {
 	u32		cf_flags;
@@ -1511,9 +1484,7 @@ static inline void free_dfs_info_array(struct dfs_info3_param *param,
 #define   CIFS_OBREAK_OP   0x0100    /* oplock break request */
 #define   CIFS_NEG_OP      0x0200    /* negotiate request */
 #define   CIFS_OP_MASK     0x0380    /* mask request type */
-
 #define   CIFS_HAS_CREDITS 0x0400    /* already has credits */
-#define   CIFS_TRANSFORM_REQ 0x0800    /* transform request before sending */
 
 /* Security Flags: indicate type of session setup needed */
 #define   CIFSSEC_MAY_SIGN	0x00001

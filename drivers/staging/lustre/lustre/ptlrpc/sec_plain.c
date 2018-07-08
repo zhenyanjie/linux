@@ -153,16 +153,14 @@ static void corrupt_bulk_data(struct ptlrpc_bulk_desc *desc)
 	char *ptr;
 	unsigned int off, i;
 
-	LASSERT(ptlrpc_is_bulk_desc_kiov(desc->bd_type));
-
 	for (i = 0; i < desc->bd_iov_count; i++) {
-		if (!BD_GET_KIOV(desc, i).bv_len)
+		if (desc->bd_iov[i].bv_len == 0)
 			continue;
 
-		ptr = kmap(BD_GET_KIOV(desc, i).bv_page);
-		off = BD_GET_KIOV(desc, i).bv_offset & ~PAGE_MASK;
+		ptr = kmap(desc->bd_iov[i].bv_page);
+		off = desc->bd_iov[i].bv_offset & ~PAGE_MASK;
 		ptr[off] ^= 0x1;
-		kunmap(BD_GET_KIOV(desc, i).bv_page);
+		kunmap(desc->bd_iov[i].bv_page);
 		return;
 	}
 }
@@ -354,11 +352,11 @@ int plain_cli_unwrap_bulk(struct ptlrpc_cli_ctx *ctx,
 
 	/* fix the actual data size */
 	for (i = 0, nob = 0; i < desc->bd_iov_count; i++) {
-		struct bio_vec bv_desc = BD_GET_KIOV(desc, i);
-
-		if (bv_desc.bv_len + nob > desc->bd_nob_transferred)
-			bv_desc.bv_len = desc->bd_nob_transferred - nob;
-		nob += bv_desc.bv_len;
+		if (desc->bd_iov[i].bv_len + nob > desc->bd_nob_transferred) {
+			desc->bd_iov[i].bv_len =
+				desc->bd_nob_transferred - nob;
+		}
+		nob += desc->bd_iov[i].bv_len;
 	}
 
 	rc = plain_verify_bulk_csum(desc, req->rq_flvr.u_bulk.hash.hash_alg,

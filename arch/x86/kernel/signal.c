@@ -10,7 +10,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/sched.h>
-#include <linux/sched/task_stack.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/kernel.h>
@@ -786,7 +785,7 @@ static inline unsigned long get_nr_restart_syscall(const struct pt_regs *regs)
 	 * than the tracee.
 	 */
 #ifdef CONFIG_IA32_EMULATION
-	if (current->thread.status & (TS_COMPAT|TS_I386_REGS_POKED))
+	if (current_thread_info()->status & (TS_COMPAT|TS_I386_REGS_POKED))
 		return __NR_ia32_restart_syscall;
 #endif
 #ifdef CONFIG_X86_X32_ABI
@@ -846,7 +845,7 @@ void signal_fault(struct pt_regs *regs, void __user *frame, char *where)
 		       task_pid_nr(current) > 1 ? KERN_INFO : KERN_EMERG,
 		       me->comm, me->pid, where, frame,
 		       regs->ip, regs->sp, regs->orig_ax);
-		print_vma_addr(KERN_CONT " in ", regs->ip);
+		print_vma_addr(" in ", regs->ip);
 		pr_cont("\n");
 	}
 

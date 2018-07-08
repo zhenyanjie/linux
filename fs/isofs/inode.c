@@ -15,7 +15,6 @@
 #include <linux/module.h>
 
 #include <linux/slab.h>
-#include <linux/cred.h>
 #include <linux/nls.h>
 #include <linux/ctype.h>
 #include <linux/statfs.h>

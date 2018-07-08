@@ -13,8 +13,6 @@
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/module.h>
-#include <linux/rculist.h>
-
 #include <generated/utsrelease.h>
 #include <asm/unaligned.h>
 #include "nvmet.h"
@@ -43,7 +41,7 @@ static u16 nvmet_get_smart_log_nsid(struct nvmet_req *req,
 	ns = nvmet_find_namespace(req->sq->ctrl, req->cmd->get_log_page.nsid);
 	if (!ns) {
 		status = NVME_SC_INVALID_NS;
-		pr_err("nvmet : Could not find namespace id : %d\n",
+		pr_err("nvmet : Counld not find namespace id : %d\n",
 				le32_to_cpu(req->cmd->get_log_page.nsid));
 		goto out;
 	}
@@ -100,7 +98,7 @@ static u16 nvmet_get_smart_log(struct nvmet_req *req,
 	u16 status;
 
 	WARN_ON(req == NULL || slog == NULL);
-	if (req->cmd->get_log_page.nsid == cpu_to_le32(0xFFFFFFFF))
+	if (req->cmd->get_log_page.nsid == 0xFFFFFFFF)
 		status = nvmet_get_smart_log_all(req, slog);
 	else
 		status = nvmet_get_smart_log_nsid(req, slog);
@@ -168,11 +166,21 @@ out:
 	nvmet_req_complete(req, status);
 }
 
+static void copy_and_pad(char *dst, int dst_len, const char *src, int src_len)
+{
+	int len = min(src_len, dst_len);
+
+	memcpy(dst, src, len);
+	if (dst_len > len)
+		memset(dst + len, ' ', dst_len - len);
+}
+
 static void nvmet_execute_identify_ctrl(struct nvmet_req *req)
 {
 	struct nvmet_ctrl *ctrl = req->sq->ctrl;
 	struct nvme_id_ctrl *id;
 	u16 status = 0;
+	const char model[] = "Linux";
 
 	id = kzalloc(sizeof(*id), GFP_KERNEL);
 	if (!id) {
@@ -184,14 +192,10 @@ static void nvmet_execute_identify_ctrl(struct nvmet_req *req)
 	id->vid = 0;
 	id->ssvid = 0;
 
-	memset(id->sn, ' ', sizeof(id->sn));
-	snprintf(id->sn, sizeof(id->sn), "%llx", ctrl->serial);
-
-	memset(id->mn, ' ', sizeof(id->mn));
-	strncpy((char *)id->mn, "Linux", sizeof(id->mn));
-
-	memset(id->fr, ' ', sizeof(id->fr));
-	strncpy((char *)id->fr, UTS_RELEASE, sizeof(id->fr));
+	bin2hex(id->sn, &ctrl->subsys->serial,
+		min(sizeof(ctrl->subsys->serial), sizeof(id->sn) / 2));
+	copy_and_pad(id->mn, sizeof(id->mn), model, sizeof(model) - 1);
+	copy_and_pad(id->fr, sizeof(id->fr), UTS_RELEASE, strlen(UTS_RELEASE));
 
 	id->rab = 6;
 
@@ -239,8 +243,7 @@ static void nvmet_execute_identify_ctrl(struct nvmet_req *req)
 	id->maxcmd = cpu_to_le16(NVMET_MAX_CMD);
 
 	id->nn = cpu_to_le32(ctrl->subsys->max_nsid);
-	id->oncs = cpu_to_le16(NVME_CTRL_ONCS_DSM |
-			NVME_CTRL_ONCS_WRITE_ZEROES);
+	id->oncs = cpu_to_le16(NVME_CTRL_ONCS_DSM);
 
 	/* XXX: don't report vwc if the underlying device is write through */
 	id->vwc = NVME_CTRL_VWC_PRESENT;
@@ -511,7 +514,7 @@ int nvmet_parse_admin_cmd(struct nvmet_req *req)
 		break;
 	case nvme_admin_identify:
 		req->data_len = 4096;
-		switch (cmd->identify.cns) {
+		switch (le32_to_cpu(cmd->identify.cns)) {
 		case NVME_ID_CNS_NS:
 			req->execute = nvmet_execute_identify_ns;
 			return 0;

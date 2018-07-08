@@ -114,6 +114,7 @@ static int rds_add_bound(struct rds_sock *rs, __be32 addr, __be16 *port)
 			  rs, &addr, (int)ntohs(*port));
 			break;
 		} else {
+			rs->rs_bound_addr = 0;
 			rds_sock_put(rs);
 			ret = -ENOMEM;
 			break;
@@ -176,8 +177,8 @@ int rds_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (!trans) {
 		ret = -EADDRNOTAVAIL;
 		rds_remove_bound(rs);
-		pr_info_ratelimited("RDS: %s could not find a transport for %pI4, load rds_tcp or rds_rdma?\n",
-				    __func__, &sin->sin_addr.s_addr);
+		printk_ratelimited(KERN_INFO "RDS: rds_bind() could not find a transport, "
+				"load rds_tcp or rds_rdma?\n");
 		goto out;
 	}
 

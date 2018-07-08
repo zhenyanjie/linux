@@ -245,6 +245,7 @@ static void bpf_jit_emit_tail_call(u32 *image, struct codegen_context *ctx, u32 
 	 *   goto out;
 	 */
 	PPC_LWZ(b2p[TMP_REG_1], b2p_bpf_array, offsetof(struct bpf_array, map.max_entries));
+	PPC_RLWINM(b2p_index, b2p_index, 0, 0, 31);
 	PPC_CMPLW(b2p_index, b2p[TMP_REG_1]);
 	PPC_BCC(COND_GE, out);
 
@@ -766,7 +767,7 @@ emit_clear:
 			func = (u8 *) __bpf_call_base + imm;
 
 			/* Save skb pointer if we need to re-cache skb data */
-			if (bpf_helper_changes_pkt_data(func))
+			if (bpf_helper_changes_skb_data(func))
 				PPC_BPF_STL(3, 1, bpf_jit_stack_local(ctx));
 
 			bpf_jit_emit_func_call(image, ctx, (u64)func);
@@ -775,7 +776,7 @@ emit_clear:
 			PPC_MR(b2p[BPF_REG_0], 3);
 
 			/* refresh skb cache */
-			if (bpf_helper_changes_pkt_data(func)) {
+			if (bpf_helper_changes_skb_data(func)) {
 				/* reload skb pointer to r3 */
 				PPC_BPF_LL(3, 1, bpf_jit_stack_local(ctx));
 				bpf_jit_emit_skb_loads(image, ctx);
@@ -961,6 +962,8 @@ common_load:
 	return 0;
 }
 
+void bpf_jit_compile(struct bpf_prog *fp) { }
+
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 {
 	u32 proglen;
@@ -1044,16 +1047,16 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 		 */
 		bpf_jit_dump(flen, proglen, pass, code_base);
 
+	if (image) {
+		bpf_flush_icache(bpf_hdr, image + alloclen);
 #ifdef PPC64_ELF_ABI_v1
-	/* Function descriptor nastiness: Address + TOC */
-	((u64 *)image)[0] = (u64)code_base;
-	((u64 *)image)[1] = local_paca->kernel_toc;
+		/* Function descriptor nastiness: Address + TOC */
+		((u64 *)image)[0] = (u64)code_base;
+		((u64 *)image)[1] = local_paca->kernel_toc;
 #endif
-
-	fp->bpf_func = (void *)image;
-	fp->jited = 1;
-
-	bpf_flush_icache(bpf_hdr, (u8 *)bpf_hdr + (bpf_hdr->pages * PAGE_SIZE));
+		fp->bpf_func = (void *)image;
+		fp->jited = 1;
+	}
 
 out:
 	kfree(addrs);
@@ -1064,7 +1067,6 @@ out:
 	return fp;
 }
 
-/* Overriding bpf_jit_free() as we don't set images read-only. */
 void bpf_jit_free(struct bpf_prog *fp)
 {
 	unsigned long addr = (unsigned long)fp->bpf_func & PAGE_MASK;

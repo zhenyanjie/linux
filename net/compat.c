@@ -29,7 +29,7 @@
 #include <net/sock.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <net/compat.h>
 
 int get_compat_msghdr(struct msghdr *kmsg,
@@ -91,11 +91,11 @@ int get_compat_msghdr(struct msghdr *kmsg,
 #define CMSG_COMPAT_ALIGN(len)	ALIGN((len), sizeof(s32))
 
 #define CMSG_COMPAT_DATA(cmsg)				\
-	((void __user *)((char __user *)(cmsg) + sizeof(struct compat_cmsghdr)))
+	((void __user *)((char __user *)(cmsg) + CMSG_COMPAT_ALIGN(sizeof(struct compat_cmsghdr))))
 #define CMSG_COMPAT_SPACE(len)				\
-	(sizeof(struct compat_cmsghdr) + CMSG_COMPAT_ALIGN(len))
+	(CMSG_COMPAT_ALIGN(sizeof(struct compat_cmsghdr)) + CMSG_COMPAT_ALIGN(len))
 #define CMSG_COMPAT_LEN(len)				\
-	(sizeof(struct compat_cmsghdr) + (len))
+	(CMSG_COMPAT_ALIGN(sizeof(struct compat_cmsghdr)) + (len))
 
 #define CMSG_COMPAT_FIRSTHDR(msg)			\
 	(((msg)->msg_controllen) >= sizeof(struct compat_cmsghdr) ?	\
@@ -131,9 +131,6 @@ int cmsghdr_from_user_compat_to_kern(struct msghdr *kmsg, struct sock *sk,
 	__kernel_size_t kcmlen, tmp;
 	int err = -EFAULT;
 
-	BUILD_BUG_ON(sizeof(struct compat_cmsghdr) !=
-		     CMSG_COMPAT_ALIGN(sizeof(struct compat_cmsghdr)));
-
 	kcmlen = 0;
 	kcmsg_base = kcmsg = (struct cmsghdr *)stackbuf;
 	ucmsg = CMSG_COMPAT_FIRSTHDR(kmsg);
@@ -145,7 +142,8 @@ int cmsghdr_from_user_compat_to_kern(struct msghdr *kmsg, struct sock *sk,
 		if (!CMSG_COMPAT_OK(ucmlen, ucmsg, kmsg))
 			return -EINVAL;
 
-		tmp = ((ucmlen - sizeof(*ucmsg)) + sizeof(struct cmsghdr));
+		tmp = ((ucmlen - CMSG_COMPAT_ALIGN(sizeof(*ucmsg))) +
+		       CMSG_ALIGN(sizeof(struct cmsghdr)));
 		tmp = CMSG_ALIGN(tmp);
 		kcmlen += tmp;
 		ucmsg = cmsg_compat_nxthdr(kmsg, ucmsg, ucmlen);
@@ -171,7 +169,8 @@ int cmsghdr_from_user_compat_to_kern(struct msghdr *kmsg, struct sock *sk,
 			goto Efault;
 		if (!CMSG_COMPAT_OK(ucmlen, ucmsg, kmsg))
 			goto Einval;
-		tmp = ((ucmlen - sizeof(*ucmsg)) + sizeof(struct cmsghdr));
+		tmp = ((ucmlen - CMSG_COMPAT_ALIGN(sizeof(*ucmsg))) +
+		       CMSG_ALIGN(sizeof(struct cmsghdr)));
 		if ((char *)kcmsg_base + kcmlen - (char *)kcmsg < CMSG_ALIGN(tmp))
 			goto Einval;
 		kcmsg->cmsg_len = tmp;
@@ -180,7 +179,7 @@ int cmsghdr_from_user_compat_to_kern(struct msghdr *kmsg, struct sock *sk,
 		    __get_user(kcmsg->cmsg_type, &ucmsg->cmsg_type) ||
 		    copy_from_user(CMSG_DATA(kcmsg),
 				   CMSG_COMPAT_DATA(ucmsg),
-				   (ucmlen - sizeof(*ucmsg))))
+				   (ucmlen - CMSG_COMPAT_ALIGN(sizeof(*ucmsg)))))
 			goto Efault;
 
 		/* Advance. */
@@ -373,7 +372,8 @@ static int compat_sock_setsockopt(struct socket *sock, int level, int optname,
 	    optname == SO_ATTACH_REUSEPORT_CBPF)
 		return do_set_attach_filter(sock, level, optname,
 					    optval, optlen);
-	if (optname == SO_RCVTIMEO || optname == SO_SNDTIMEO)
+	if (!COMPAT_USE_64BIT_TIME &&
+	    (optname == SO_RCVTIMEO || optname == SO_SNDTIMEO))
 		return do_set_sock_timeout(sock, level, optname, optval, optlen);
 
 	return sock_setsockopt(sock, level, optname, optval, optlen);
@@ -438,7 +438,8 @@ static int do_get_sock_timeout(struct socket *sock, int level, int optname,
 static int compat_sock_getsockopt(struct socket *sock, int level, int optname,
 				char __user *optval, int __user *optlen)
 {
-	if (optname == SO_RCVTIMEO || optname == SO_SNDTIMEO)
+	if (!COMPAT_USE_64BIT_TIME &&
+	    (optname == SO_RCVTIMEO || optname == SO_SNDTIMEO))
 		return do_get_sock_timeout(sock, level, optname, optval, optlen);
 	return sock_getsockopt(sock, level, optname, optval, optlen);
 }

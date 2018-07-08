@@ -45,13 +45,6 @@
 #include "8250.h"
 
 /*
- * These are definitions for the Exar XR17V35X and XR17(C|D)15X
- */
-#define UART_EXAR_INT0		0x80
-#define UART_EXAR_SLEEP		0x8b	/* Sleep mode */
-#define UART_EXAR_DVID		0x8d	/* Device identification */
-
-/*
  * Debugging.
  */
 #if 0
@@ -279,15 +272,6 @@ static const struct serial8250_config uart_config[] = {
 		.fcr		= UART_FCR_ENABLE_FIFO | UART_FCR_R_TRIG_10,
 		.rxtrig_bytes	= {1, 4, 8, 14},
 		.flags		= UART_CAP_FIFO,
-	},
-	[PORT_DA830] = {
-		.name		= "TI DA8xx/66AK2x",
-		.fifo_size	= 16,
-		.tx_loadsz	= 16,
-		.fcr		= UART_FCR_DMA_SELECT | UART_FCR_ENABLE_FIFO |
-				  UART_FCR_R_TRIG_10,
-		.rxtrig_bytes	= {1, 4, 8, 14},
-		.flags		= UART_CAP_FIFO | UART_CAP_AFE,
 	},
 };
 
@@ -652,7 +636,7 @@ EXPORT_SYMBOL_GPL(serial8250_em485_destroy);
  * once and disable_runtime_pm_tx() will still disable RPM because the fifo is
  * empty and the HW can idle again.
  */
-void serial8250_rpm_get_tx(struct uart_8250_port *p)
+static void serial8250_rpm_get_tx(struct uart_8250_port *p)
 {
 	unsigned char rpm_active;
 
@@ -664,9 +648,8 @@ void serial8250_rpm_get_tx(struct uart_8250_port *p)
 		return;
 	pm_runtime_get_sync(p->port.dev);
 }
-EXPORT_SYMBOL_GPL(serial8250_rpm_get_tx);
 
-void serial8250_rpm_put_tx(struct uart_8250_port *p)
+static void serial8250_rpm_put_tx(struct uart_8250_port *p)
 {
 	unsigned char rpm_active;
 
@@ -679,7 +662,6 @@ void serial8250_rpm_put_tx(struct uart_8250_port *p)
 	pm_runtime_mark_last_busy(p->port.dev);
 	pm_runtime_put_autosuspend(p->port.dev);
 }
-EXPORT_SYMBOL_GPL(serial8250_rpm_put_tx);
 
 /*
  * IER sleep support.  UARTs which have EFRs need the "extended
@@ -1833,7 +1815,8 @@ int serial8250_handle_irq(struct uart_port *port, unsigned int iir)
 
 	status = serial_port_in(port, UART_LSR);
 
-	if (status & (UART_LSR_DR | UART_LSR_BI)) {
+	if (status & (UART_LSR_DR | UART_LSR_BI) &&
+	    iir & UART_IIR_RDI) {
 		if (!up->dma || handle_rx_dma(up, iir))
 			status = serial8250_rx_chars(up, status);
 	}
@@ -1870,13 +1853,17 @@ static int serial8250_default_handle_irq(struct uart_port *port)
 static int exar_handle_irq(struct uart_port *port)
 {
 	unsigned int iir = serial_port_in(port, UART_IIR);
-	int ret = 0;
+	int ret;
 
-	if (((port->type == PORT_XR17V35X) || (port->type == PORT_XR17D15X)) &&
-	    serial_port_in(port, UART_EXAR_INT0) != 0)
-		ret = 1;
+	ret = serial8250_handle_irq(port, iir);
 
-	ret |= serial8250_handle_irq(port, iir);
+	if ((port->type == PORT_XR17V35X) ||
+	   (port->type == PORT_XR17D15X)) {
+		serial_port_in(port, 0x80);
+		serial_port_in(port, 0x81);
+		serial_port_in(port, 0x82);
+		serial_port_in(port, 0x83);
+	}
 
 	return ret;
 }
@@ -2126,19 +2113,6 @@ int serial8250_do_startup(struct uart_port *port)
 		serial_port_out(port, UART_LCR, 0);
 	}
 
-	if (port->type == PORT_DA830) {
-		/* Reset the port */
-		serial_port_out(port, UART_IER, 0);
-		serial_port_out(port, UART_DA830_PWREMU_MGMT, 0);
-		mdelay(10);
-
-		/* Enable Tx, Rx and free run mode */
-		serial_port_out(port, UART_DA830_PWREMU_MGMT,
-				UART_DA830_PWREMU_MGMT_UTRST |
-				UART_DA830_PWREMU_MGMT_URRST |
-				UART_DA830_PWREMU_MGMT_FREE);
-	}
-
 #ifdef CONFIG_SERIAL_8250_RSA
 	/*
 	 * If this is an RSA port, see if we can kick it up to the
@@ -2174,8 +2148,6 @@ int serial8250_do_startup(struct uart_port *port)
 	serial_port_in(port, UART_RX);
 	serial_port_in(port, UART_IIR);
 	serial_port_in(port, UART_MSR);
-	if ((port->type == PORT_XR17V35X) || (port->type == PORT_XR17D15X))
-		serial_port_in(port, UART_EXAR_INT0);
 
 	/*
 	 * At this point, there's no way the LSR could still be 0xff;
@@ -2334,8 +2306,6 @@ dont_test_tx_en:
 	serial_port_in(port, UART_RX);
 	serial_port_in(port, UART_IIR);
 	serial_port_in(port, UART_MSR);
-	if ((port->type == PORT_XR17V35X) || (port->type == PORT_XR17D15X))
-		serial_port_in(port, UART_EXAR_INT0);
 	up->lsr_saved_flags = 0;
 	up->msr_saved_flags = 0;
 
@@ -2557,8 +2527,11 @@ static void serial8250_set_divisor(struct uart_port *port, unsigned int baud,
 	serial_dl_write(up, quot);
 
 	/* XR17V35x UARTs have an extra fractional divisor register (DLD) */
-	if (up->port.type == PORT_XR17V35X)
+	if (up->port.type == PORT_XR17V35X) {
+		/* Preserve bits not related to baudrate; DLD[7:4]. */
+		quot_frac |= serial_port_in(port, 0x2) & 0xf0;
 		serial_port_out(port, 0x2, quot_frac);
+	}
 }
 
 static unsigned int serial8250_get_baud_rate(struct uart_port *port,
@@ -2718,7 +2691,8 @@ serial8250_set_termios(struct uart_port *port, struct ktermios *termios,
 		serial8250_do_set_termios(port, termios, old);
 }
 
-void serial8250_do_set_ldisc(struct uart_port *port, struct ktermios *termios)
+static void
+serial8250_set_ldisc(struct uart_port *port, struct ktermios *termios)
 {
 	if (termios->c_line == N_PPS) {
 		port->flags |= UPF_HARDPPS_CD;
@@ -2734,16 +2708,7 @@ void serial8250_do_set_ldisc(struct uart_port *port, struct ktermios *termios)
 		}
 	}
 }
-EXPORT_SYMBOL_GPL(serial8250_do_set_ldisc);
 
-static void
-serial8250_set_ldisc(struct uart_port *port, struct ktermios *termios)
-{
-	if (port->set_ldisc)
-		port->set_ldisc(port, termios);
-	else
-		serial8250_do_set_ldisc(port, termios);
-}
 
 void serial8250_do_pm(struct uart_port *port, unsigned int state,
 		      unsigned int oldstate)

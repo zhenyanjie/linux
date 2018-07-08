@@ -44,7 +44,7 @@ static unsigned long reg_save[][2] = {
 	{ ASS_CLK_GATE, 0 },
 };
 
-static int exynos_audss_clk_suspend(struct device *dev)
+static int exynos_audss_clk_suspend(void)
 {
 	int i;
 
@@ -54,15 +54,18 @@ static int exynos_audss_clk_suspend(struct device *dev)
 	return 0;
 }
 
-static int exynos_audss_clk_resume(struct device *dev)
+static void exynos_audss_clk_resume(void)
 {
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(reg_save); i++)
 		writel(reg_save[i][1], reg_base + reg_save[i][0]);
-
-	return 0;
 }
+
+static struct syscore_ops exynos_audss_clk_syscore_ops = {
+	.suspend	= exynos_audss_clk_suspend,
+	.resume		= exynos_audss_clk_resume,
+};
 #endif /* CONFIG_PM_SLEEP */
 
 struct exynos_audss_clk_drvdata {
@@ -248,6 +251,9 @@ static int exynos_audss_clk_probe(struct platform_device *pdev)
 		goto unregister;
 	}
 
+#ifdef CONFIG_PM_SLEEP
+	register_syscore_ops(&exynos_audss_clk_syscore_ops);
+#endif
 	return 0;
 
 unregister:
@@ -261,6 +267,10 @@ unregister:
 
 static int exynos_audss_clk_remove(struct platform_device *pdev)
 {
+#ifdef CONFIG_PM_SLEEP
+	unregister_syscore_ops(&exynos_audss_clk_syscore_ops);
+#endif
+
 	of_clk_del_provider(pdev->dev.of_node);
 
 	exynos_audss_clk_teardown();
@@ -271,16 +281,10 @@ static int exynos_audss_clk_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct dev_pm_ops exynos_audss_clk_pm_ops = {
-	SET_LATE_SYSTEM_SLEEP_PM_OPS(exynos_audss_clk_suspend,
-				     exynos_audss_clk_resume)
-};
-
 static struct platform_driver exynos_audss_clk_driver = {
 	.driver	= {
 		.name = "exynos-audss-clk",
 		.of_match_table = exynos_audss_clk_of_match,
-		.pm = &exynos_audss_clk_pm_ops,
 	},
 	.probe = exynos_audss_clk_probe,
 	.remove = exynos_audss_clk_remove,

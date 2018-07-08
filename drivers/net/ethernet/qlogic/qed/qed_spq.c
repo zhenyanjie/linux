@@ -1,33 +1,9 @@
 /* QLogic qed NIC Driver
- * Copyright (c) 2015-2017  QLogic Corporation
+ * Copyright (c) 2015 QLogic Corporation
  *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and /or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * This software is available under the terms of the GNU General Public License
+ * (GPL) Version 2, available from the file COPYING in the main directory of
+ * this source tree.
  */
 
 #include <linux/types.h>
@@ -48,9 +24,7 @@
 #include "qed_hsi.h"
 #include "qed_hw.h"
 #include "qed_int.h"
-#include "qed_iscsi.h"
 #include "qed_mcp.h"
-#include "qed_ooo.h"
 #include "qed_reg_addr.h"
 #include "qed_sp.h"
 #include "qed_sriov.h"
@@ -61,11 +35,7 @@
 ***************************************************************************/
 
 #define SPQ_HIGH_PRI_RESERVE_DEFAULT    (1)
-
-#define SPQ_BLOCK_DELAY_MAX_ITER        (10)
-#define SPQ_BLOCK_DELAY_US              (10)
-#define SPQ_BLOCK_SLEEP_MAX_ITER        (1000)
-#define SPQ_BLOCK_SLEEP_MS              (5)
+#define SPQ_BLOCK_SLEEP_LENGTH          (1000)
 
 /***************************************************************************
 * Blocking Imp. (BLOCK/EBLOCK mode)
@@ -78,88 +48,60 @@ static void qed_spq_blocking_cb(struct qed_hwfn *p_hwfn,
 
 	comp_done = (struct qed_spq_comp_done *)cookie;
 
-	comp_done->fw_return_code = fw_return_code;
+	comp_done->done			= 0x1;
+	comp_done->fw_return_code	= fw_return_code;
 
-	/* Make sure completion done is visible on waiting thread */
-	smp_store_release(&comp_done->done, 0x1);
-}
-
-static int __qed_spq_block(struct qed_hwfn *p_hwfn,
-			   struct qed_spq_entry *p_ent,
-			   u8 *p_fw_ret, bool sleep_between_iter)
-{
-	struct qed_spq_comp_done *comp_done;
-	u32 iter_cnt;
-
-	comp_done = (struct qed_spq_comp_done *)p_ent->comp_cb.cookie;
-	iter_cnt = sleep_between_iter ? SPQ_BLOCK_SLEEP_MAX_ITER
-				      : SPQ_BLOCK_DELAY_MAX_ITER;
-
-	while (iter_cnt--) {
-		/* Validate we receive completion update */
-		if (READ_ONCE(comp_done->done) == 1) {
-			/* Read updated FW return value */
-			smp_read_barrier_depends();
-			if (p_fw_ret)
-				*p_fw_ret = comp_done->fw_return_code;
-			return 0;
-		}
-
-		if (sleep_between_iter)
-			msleep(SPQ_BLOCK_SLEEP_MS);
-		else
-			udelay(SPQ_BLOCK_DELAY_US);
-	}
-
-	return -EBUSY;
+	/* make update visible to waiting thread */
+	smp_wmb();
 }
 
 static int qed_spq_block(struct qed_hwfn *p_hwfn,
 			 struct qed_spq_entry *p_ent,
-			 u8 *p_fw_ret, bool skip_quick_poll)
+			 u8 *p_fw_ret)
 {
+	int sleep_count = SPQ_BLOCK_SLEEP_LENGTH;
 	struct qed_spq_comp_done *comp_done;
 	int rc;
 
-	/* A relatively short polling period w/o sleeping, to allow the FW to
-	 * complete the ramrod and thus possibly to avoid the following sleeps.
-	 */
-	if (!skip_quick_poll) {
-		rc = __qed_spq_block(p_hwfn, p_ent, p_fw_ret, false);
-		if (!rc)
+	comp_done = (struct qed_spq_comp_done *)p_ent->comp_cb.cookie;
+	while (sleep_count) {
+		/* validate we receive completion update */
+		smp_rmb();
+		if (comp_done->done == 1) {
+			if (p_fw_ret)
+				*p_fw_ret = comp_done->fw_return_code;
 			return 0;
+		}
+		usleep_range(5000, 10000);
+		sleep_count--;
 	}
-
-	/* Move to polling with a sleeping period between iterations */
-	rc = __qed_spq_block(p_hwfn, p_ent, p_fw_ret, true);
-	if (!rc)
-		return 0;
 
 	DP_INFO(p_hwfn, "Ramrod is stuck, requesting MCP drain\n");
 	rc = qed_mcp_drain(p_hwfn, p_hwfn->p_main_ptt);
-	if (rc) {
+	if (rc != 0)
 		DP_NOTICE(p_hwfn, "MCP drain failed\n");
-		goto err;
-	}
 
 	/* Retry after drain */
-	rc = __qed_spq_block(p_hwfn, p_ent, p_fw_ret, true);
-	if (!rc)
-		return 0;
+	sleep_count = SPQ_BLOCK_SLEEP_LENGTH;
+	while (sleep_count) {
+		/* validate we receive completion update */
+		smp_rmb();
+		if (comp_done->done == 1) {
+			if (p_fw_ret)
+				*p_fw_ret = comp_done->fw_return_code;
+			return 0;
+		}
+		usleep_range(5000, 10000);
+		sleep_count--;
+	}
 
-	comp_done = (struct qed_spq_comp_done *)p_ent->comp_cb.cookie;
 	if (comp_done->done == 1) {
 		if (p_fw_ret)
 			*p_fw_ret = comp_done->fw_return_code;
 		return 0;
 	}
-err:
-	DP_NOTICE(p_hwfn,
-		  "Ramrod is stuck [CID %08x cmd %02x protocol %02x echo %04x]\n",
-		  le32_to_cpu(p_ent->elem.hdr.cid),
-		  p_ent->elem.hdr.cmd_id,
-		  p_ent->elem.hdr.protocol_id,
-		  le16_to_cpu(p_ent->elem.hdr.echo));
+
+	DP_NOTICE(p_hwfn, "Ramrod is stuck, MCP drain failed\n");
 
 	return -EBUSY;
 }
@@ -303,28 +245,6 @@ qed_async_event_completion(struct qed_hwfn *p_hwfn,
 		return qed_sriov_eqe_event(p_hwfn,
 					   p_eqe->opcode,
 					   p_eqe->echo, &p_eqe->data);
-	case PROTOCOLID_ISCSI:
-		if (!IS_ENABLED(CONFIG_QED_ISCSI))
-			return -EINVAL;
-		if (p_eqe->opcode == ISCSI_EVENT_TYPE_ASYN_DELETE_OOO_ISLES) {
-			u32 cid = le32_to_cpu(p_eqe->data.iscsi_info.cid);
-
-			qed_ooo_release_connection_isles(p_hwfn,
-							 p_hwfn->p_ooo_info,
-							 cid);
-			return 0;
-		}
-
-		if (p_hwfn->p_iscsi_info->event_cb) {
-			struct qed_iscsi_info *p_iscsi = p_hwfn->p_iscsi_info;
-
-			return p_iscsi->event_cb(p_iscsi->event_context,
-						 p_eqe->opcode, &p_eqe->data);
-		} else {
-			DP_NOTICE(p_hwfn,
-				  "iSCSI async completion is not set\n");
-			return -EINVAL;
-		}
 	default:
 		DP_NOTICE(p_hwfn,
 			  "Unknown Async completion for protocol: %d\n",
@@ -805,8 +725,7 @@ int qed_spq_post(struct qed_hwfn *p_hwfn,
 		 * access p_ent here to see whether it's successful or not.
 		 * Thus, after gaining the answer perform the cleanup here.
 		 */
-		rc = qed_spq_block(p_hwfn, p_ent, fw_return_code,
-				   p_ent->queue == &p_spq->unlimited_pending);
+		rc = qed_spq_block(p_hwfn, p_ent, fw_return_code);
 
 		if (p_ent->queue == &p_spq->unlimited_pending) {
 			/* This is an allocated p_ent which does not need to

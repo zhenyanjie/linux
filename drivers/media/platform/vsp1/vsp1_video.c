@@ -124,11 +124,6 @@ static int __vsp1_video_try_format(struct vsp1_video *video,
 	pix->pixelformat = info->fourcc;
 	pix->colorspace = V4L2_COLORSPACE_SRGB;
 	pix->field = V4L2_FIELD_NONE;
-
-	if (info->fourcc == V4L2_PIX_FMT_HSV24 ||
-	    info->fourcc == V4L2_PIX_FMT_HSV32)
-		pix->hsv_enc = V4L2_HSV_ENC_256;
-
 	memset(pix->reserved, 0, sizeof(pix->reserved));
 
 	/* Align the width and height for YUV 4:2:2 and 4:2:0 formats. */
@@ -548,20 +543,20 @@ out:
 static int vsp1_video_pipeline_build(struct vsp1_pipeline *pipe,
 				     struct vsp1_video *video)
 {
-	struct media_graph graph;
+	struct media_entity_graph graph;
 	struct media_entity *entity = &video->video.entity;
 	struct media_device *mdev = entity->graph_obj.mdev;
 	unsigned int i;
 	int ret;
 
 	/* Walk the graph to locate the entities and video nodes. */
-	ret = media_graph_walk_init(&graph, mdev);
+	ret = media_entity_graph_walk_init(&graph, mdev);
 	if (ret)
 		return ret;
 
-	media_graph_walk_start(&graph, entity);
+	media_entity_graph_walk_start(&graph, entity);
 
-	while ((entity = media_graph_walk_next(&graph))) {
+	while ((entity = media_entity_graph_walk_next(&graph))) {
 		struct v4l2_subdev *subdev;
 		struct vsp1_rwpf *rwpf;
 		struct vsp1_entity *e;
@@ -590,7 +585,7 @@ static int vsp1_video_pipeline_build(struct vsp1_pipeline *pipe,
 		}
 	}
 
-	media_graph_walk_cleanup(&graph);
+	media_entity_graph_walk_cleanup(&graph);
 
 	/* We need one output and at least one input. */
 	if (pipe->num_inputs == 0 || !pipe->output)
@@ -797,6 +792,7 @@ static int vsp1_video_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct vsp1_video *video = vb2_get_drv_priv(vq);
 	struct vsp1_pipeline *pipe = video->rwpf->pipe;
+	bool start_pipeline = false;
 	unsigned long flags;
 	int ret;
 
@@ -807,10 +803,22 @@ static int vsp1_video_start_streaming(struct vb2_queue *vq, unsigned int count)
 			mutex_unlock(&pipe->lock);
 			return ret;
 		}
+
+		start_pipeline = true;
 	}
 
 	pipe->stream_count++;
 	mutex_unlock(&pipe->lock);
+
+	/*
+	 * vsp1_pipeline_ready() is not sufficient to establish that all streams
+	 * are prepared and the pipeline is configured, as multiple streams
+	 * can race through streamon with buffers already queued; Therefore we
+	 * don't even attempt to start the pipeline until the last stream has
+	 * called through here.
+	 */
+	if (!start_pipeline)
+		return 0;
 
 	spin_lock_irqsave(&pipe->irqlock, flags);
 	if (vsp1_pipeline_ready(pipe))
@@ -848,7 +856,7 @@ static void vsp1_video_stop_streaming(struct vb2_queue *vq)
 	}
 	mutex_unlock(&pipe->lock);
 
-	media_pipeline_stop(&video->video.entity);
+	media_entity_pipeline_stop(&video->video.entity);
 	vsp1_video_pipeline_put(pipe);
 
 	/* Remove all buffers from the IRQ queue. */
@@ -980,7 +988,7 @@ vsp1_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 		return PTR_ERR(pipe);
 	}
 
-	ret = __media_pipeline_start(&video->video.entity, &pipe->pipe);
+	ret = __media_entity_pipeline_start(&video->video.entity, &pipe->pipe);
 	if (ret < 0) {
 		mutex_unlock(&mdev->graph_mutex);
 		goto err_pipe;
@@ -1003,7 +1011,7 @@ vsp1_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 	return 0;
 
 err_stop:
-	media_pipeline_stop(&video->video.entity);
+	media_entity_pipeline_stop(&video->video.entity);
 err_pipe:
 	vsp1_video_pipeline_put(pipe);
 	return ret;
@@ -1021,7 +1029,6 @@ static const struct v4l2_ioctl_ops vsp1_video_ioctl_ops = {
 	.vidioc_querybuf		= vb2_ioctl_querybuf,
 	.vidioc_qbuf			= vb2_ioctl_qbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
-	.vidioc_expbuf			= vb2_ioctl_expbuf,
 	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
 	.vidioc_prepare_buf		= vb2_ioctl_prepare_buf,
 	.vidioc_streamon		= vsp1_video_streamon,

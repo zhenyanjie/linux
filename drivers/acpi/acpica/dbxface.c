@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2017, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -430,7 +430,7 @@ acpi_status acpi_initialize_debugger(void)
 
 		/* These were created with one unit, grab it */
 
-		status = acpi_os_initialize_debugger();
+		status = acpi_os_initialize_command_signals();
 		if (ACPI_FAILURE(status)) {
 			acpi_os_printf("Could not get debugger mutex\n");
 			return_ACPI_STATUS(status);
@@ -482,7 +482,7 @@ void acpi_terminate_debugger(void)
 			acpi_os_sleep(100);
 		}
 
-		acpi_os_terminate_debugger();
+		acpi_os_terminate_command_signals();
 	}
 
 	if (acpi_gbl_db_buffer) {

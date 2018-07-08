@@ -20,13 +20,13 @@
 #include <linux/export.h>
 #include <linux/init.h>
 #include <linux/kdebug.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/clock.h>
+#include <linux/sched.h>
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/cpu.h>
 #include <linux/bitops.h>
 #include <linux/device.h>
+#include <linux/nospec.h>
 
 #include <asm/apic.h>
 #include <asm/stacktrace.h>
@@ -191,8 +191,8 @@ static void release_pmc_hardware(void) {}
 
 static bool check_hw_exists(void)
 {
-	u64 val, val_fail, val_new= ~0;
-	int i, reg, reg_fail, ret = 0;
+	u64 val, val_fail = -1, val_new= ~0;
+	int i, reg, reg_fail = -1, ret = 0;
 	int bios_fail = 0;
 	int reg_safe = -1;
 
@@ -304,17 +304,20 @@ set_ext_hw_attr(struct hw_perf_event *hwc, struct perf_event *event)
 
 	config = attr->config;
 
-	cache_type = (config >>  0) & 0xff;
+	cache_type = (config >> 0) & 0xff;
 	if (cache_type >= PERF_COUNT_HW_CACHE_MAX)
 		return -EINVAL;
+	cache_type = array_index_nospec(cache_type, PERF_COUNT_HW_CACHE_MAX);
 
 	cache_op = (config >>  8) & 0xff;
 	if (cache_op >= PERF_COUNT_HW_CACHE_OP_MAX)
 		return -EINVAL;
+	cache_op = array_index_nospec(cache_op, PERF_COUNT_HW_CACHE_OP_MAX);
 
 	cache_result = (config >> 16) & 0xff;
 	if (cache_result >= PERF_COUNT_HW_CACHE_RESULT_MAX)
 		return -EINVAL;
+	cache_result = array_index_nospec(cache_result, PERF_COUNT_HW_CACHE_RESULT_MAX);
 
 	val = hw_cache_event_ids[cache_type][cache_op][cache_result];
 
@@ -420,6 +423,8 @@ int x86_setup_perfctr(struct perf_event *event)
 
 	if (attr->config >= x86_pmu.max_events)
 		return -EINVAL;
+
+	attr->config = array_index_nospec((unsigned long)attr->config, x86_pmu.max_events);
 
 	/*
 	 * The generic map:
@@ -1150,16 +1155,13 @@ int x86_perf_event_set_period(struct perf_event *event)
 
 	per_cpu(pmc_prev_left[idx], smp_processor_id()) = left;
 
-	if (!(hwc->flags & PERF_X86_EVENT_AUTO_RELOAD) ||
-	    local64_read(&hwc->prev_count) != (u64)-left) {
-		/*
-		 * The hw event starts counting from this event offset,
-		 * mark it to be able to extra future deltas:
-		 */
-		local64_set(&hwc->prev_count, (u64)-left);
+	/*
+	 * The hw event starts counting from this event offset,
+	 * mark it to be able to extra future deltas:
+	 */
+	local64_set(&hwc->prev_count, (u64)-left);
 
-		wrmsrl(hwc->event_base, (u64)(-left) & x86_pmu.cntval_mask);
-	}
+	wrmsrl(hwc->event_base, (u64)(-left) & x86_pmu.cntval_mask);
 
 	/*
 	 * Due to erratum on certan cpu we need
@@ -1825,18 +1827,18 @@ static int __init init_hw_perf_events(void)
 	 * Install callbacks. Core will call them for each online
 	 * cpu.
 	 */
-	err = cpuhp_setup_state(CPUHP_PERF_X86_PREPARE, "perf/x86:prepare",
+	err = cpuhp_setup_state(CPUHP_PERF_X86_PREPARE, "PERF_X86_PREPARE",
 				x86_pmu_prepare_cpu, x86_pmu_dead_cpu);
 	if (err)
 		return err;
 
 	err = cpuhp_setup_state(CPUHP_AP_PERF_X86_STARTING,
-				"perf/x86:starting", x86_pmu_starting_cpu,
+				"AP_PERF_X86_STARTING", x86_pmu_starting_cpu,
 				x86_pmu_dying_cpu);
 	if (err)
 		goto out;
 
-	err = cpuhp_setup_state(CPUHP_AP_PERF_X86_ONLINE, "perf/x86:online",
+	err = cpuhp_setup_state(CPUHP_AP_PERF_X86_ONLINE, "AP_PERF_X86_ONLINE",
 				x86_pmu_online_cpu, NULL);
 	if (err)
 		goto out1;
@@ -2110,18 +2112,6 @@ static void x86_pmu_event_mapped(struct perf_event *event)
 	if (!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED))
 		return;
 
-	/*
-	 * This function relies on not being called concurrently in two
-	 * tasks in the same mm.  Otherwise one task could observe
-	 * perf_rdpmc_allowed > 1 and return all the way back to
-	 * userspace with CR4.PCE clear while another task is still
-	 * doing on_each_cpu_mask() to propagate CR4.PCE.
-	 *
-	 * For now, this can't happen because all callers hold mmap_sem
-	 * for write.  If this changes, we'll need a different solution.
-	 */
-	lockdep_assert_held_exclusive(&current->mm->mmap_sem);
-
 	if (atomic_inc_return(&current->mm->context.perf_rdpmc_allowed) == 1)
 		on_each_cpu_mask(mm_cpumask(current->mm), refresh_pce, NULL, 1);
 }
@@ -2256,7 +2246,6 @@ void arch_perf_update_userpage(struct perf_event *event,
 			       struct perf_event_mmap_page *userpg, u64 now)
 {
 	struct cyc2ns_data *data;
-	u64 offset;
 
 	userpg->cap_user_time = 0;
 	userpg->cap_user_time_zero = 0;
@@ -2264,12 +2253,10 @@ void arch_perf_update_userpage(struct perf_event *event,
 		!!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED);
 	userpg->pmc_width = x86_pmu.cntval_bits;
 
-	if (!using_native_sched_clock() || !sched_clock_stable())
+	if (!sched_clock_stable())
 		return;
 
 	data = cyc2ns_read_begin();
-
-	offset = data->cyc2ns_offset + __sched_clock_offset;
 
 	/*
 	 * Internal timekeeping for enabled/running/stopped times
@@ -2278,7 +2265,7 @@ void arch_perf_update_userpage(struct perf_event *event,
 	userpg->cap_user_time = 1;
 	userpg->time_mult = data->cyc2ns_mul;
 	userpg->time_shift = data->cyc2ns_shift;
-	userpg->time_offset = offset - now;
+	userpg->time_offset = data->cyc2ns_offset - now;
 
 	/*
 	 * cap_user_time_zero doesn't make sense when we're using a different
@@ -2286,7 +2273,7 @@ void arch_perf_update_userpage(struct perf_event *event,
 	 */
 	if (!event->attr.use_clockid) {
 		userpg->cap_user_time_zero = 1;
-		userpg->time_zero = offset;
+		userpg->time_zero = data->cyc2ns_offset;
 	}
 
 	cyc2ns_read_end(data);
@@ -2323,7 +2310,7 @@ valid_user_frame(const void __user *fp, unsigned long size)
 static unsigned long get_segment_base(unsigned int segment)
 {
 	struct desc_struct *desc;
-	unsigned int idx = segment >> 3;
+	int idx = segment >> 3;
 
 	if ((segment & SEGMENT_TI_MASK) == SEGMENT_LDT) {
 #ifdef CONFIG_MODIFY_LDT_SYSCALL

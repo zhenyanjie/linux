@@ -399,6 +399,22 @@ static inline struct sk_buff *__vlan_hwaccel_push_inside(struct sk_buff *skb)
 		skb->vlan_tci = 0;
 	return skb;
 }
+/*
+ * vlan_hwaccel_push_inside - pushes vlan tag to the payload
+ * @skb: skbuff to tag
+ *
+ * Checks is tag is present in @skb->vlan_tci and if it is, it pushes the
+ * VLAN tag from @skb->vlan_tci inside to the payload.
+ *
+ * Following the skb_unshare() example, in case of error, the calling function
+ * doesn't have to worry about freeing the original skb.
+ */
+static inline struct sk_buff *vlan_hwaccel_push_inside(struct sk_buff *skb)
+{
+	if (skb_vlan_tag_present(skb))
+		skb = __vlan_hwaccel_push_inside(skb);
+	return skb;
+}
 
 /**
  * __vlan_hwaccel_put_tag - hardware accelerated VLAN inserting
@@ -584,7 +600,7 @@ static inline bool skb_vlan_tagged(const struct sk_buff *skb)
  * Returns true if the skb is tagged with multiple vlan headers, regardless
  * of whether it is hardware accelerated or not.
  */
-static inline bool skb_vlan_tagged_multi(const struct sk_buff *skb)
+static inline bool skb_vlan_tagged_multi(struct sk_buff *skb)
 {
 	__be16 protocol = skb->protocol;
 
@@ -592,6 +608,9 @@ static inline bool skb_vlan_tagged_multi(const struct sk_buff *skb)
 		struct vlan_ethhdr *veh;
 
 		if (likely(!eth_type_vlan(protocol)))
+			return false;
+
+		if (unlikely(!pskb_may_pull(skb, VLAN_ETH_HLEN)))
 			return false;
 
 		veh = (struct vlan_ethhdr *)skb->data;
@@ -611,7 +630,7 @@ static inline bool skb_vlan_tagged_multi(const struct sk_buff *skb)
  *
  * Returns features without unsafe ones if the skb has multiple tags.
  */
-static inline netdev_features_t vlan_features_check(const struct sk_buff *skb,
+static inline netdev_features_t vlan_features_check(struct sk_buff *skb,
 						    netdev_features_t features)
 {
 	if (skb_vlan_tagged_multi(skb)) {

@@ -1153,13 +1153,15 @@ static void alps_process_packet_v7(struct psmouse *psmouse)
 		alps_process_touchpad_packet_v7(psmouse);
 }
 
-static enum SS4_PACKET_ID alps_get_pkt_id_ss4_v2(unsigned char *byte)
+static unsigned char alps_get_pkt_id_ss4_v2(unsigned char *byte)
 {
-	enum SS4_PACKET_ID pkt_id = SS4_PACKET_ID_IDLE;
+	unsigned char pkt_id = SS4_PACKET_ID_IDLE;
 
 	switch (byte[3] & 0x30) {
 	case 0x00:
-		if (SS4_IS_IDLE_V2(byte)) {
+		if (byte[0] == 0x18 && byte[1] == 0x10 && byte[2] == 0x00 &&
+		    (byte[3] & 0x88) == 0x08 && byte[4] == 0x10 &&
+		    byte[5] == 0x00) {
 			pkt_id = SS4_PACKET_ID_IDLE;
 		} else {
 			pkt_id = SS4_PACKET_ID_ONE;
@@ -1186,7 +1188,7 @@ static int alps_decode_ss4_v2(struct alps_fields *f,
 			      unsigned char *p, struct psmouse *psmouse)
 {
 	struct alps_data *priv = psmouse->private;
-	enum SS4_PACKET_ID pkt_id;
+	unsigned char pkt_id;
 	unsigned int no_data_x, no_data_y;
 
 	pkt_id = alps_get_pkt_id_ss4_v2(p);
@@ -1210,14 +1212,24 @@ static int alps_decode_ss4_v2(struct alps_fields *f,
 
 	case SS4_PACKET_ID_TWO:
 		if (priv->flags & ALPS_BUTTONPAD) {
-			f->mt[0].x = SS4_BTL_MF_X_V2(p, 0);
+			if (IS_SS4PLUS_DEV(priv->dev_id)) {
+				f->mt[0].x = SS4_PLUS_BTL_MF_X_V2(p, 0);
+				f->mt[1].x = SS4_PLUS_BTL_MF_X_V2(p, 1);
+			} else {
+				f->mt[0].x = SS4_BTL_MF_X_V2(p, 0);
+				f->mt[1].x = SS4_BTL_MF_X_V2(p, 1);
+			}
 			f->mt[0].y = SS4_BTL_MF_Y_V2(p, 0);
-			f->mt[1].x = SS4_BTL_MF_X_V2(p, 1);
 			f->mt[1].y = SS4_BTL_MF_Y_V2(p, 1);
 		} else {
-			f->mt[0].x = SS4_STD_MF_X_V2(p, 0);
+			if (IS_SS4PLUS_DEV(priv->dev_id)) {
+				f->mt[0].x = SS4_PLUS_STD_MF_X_V2(p, 0);
+				f->mt[1].x = SS4_PLUS_STD_MF_X_V2(p, 1);
+			} else {
+				f->mt[0].x = SS4_STD_MF_X_V2(p, 0);
+				f->mt[1].x = SS4_STD_MF_X_V2(p, 1);
+			}
 			f->mt[0].y = SS4_STD_MF_Y_V2(p, 0);
-			f->mt[1].x = SS4_STD_MF_X_V2(p, 1);
 			f->mt[1].y = SS4_STD_MF_Y_V2(p, 1);
 		}
 		f->pressure = SS4_MF_Z_V2(p, 0) ? 0x30 : 0;
@@ -1234,19 +1246,33 @@ static int alps_decode_ss4_v2(struct alps_fields *f,
 
 	case SS4_PACKET_ID_MULTI:
 		if (priv->flags & ALPS_BUTTONPAD) {
-			f->mt[2].x = SS4_BTL_MF_X_V2(p, 0);
-			f->mt[2].y = SS4_BTL_MF_Y_V2(p, 0);
-			f->mt[3].x = SS4_BTL_MF_X_V2(p, 1);
-			f->mt[3].y = SS4_BTL_MF_Y_V2(p, 1);
-			no_data_x = SS4_MFPACKET_NO_AX_BL;
+			if (IS_SS4PLUS_DEV(priv->dev_id)) {
+				f->mt[2].x = SS4_PLUS_BTL_MF_X_V2(p, 0);
+				f->mt[3].x = SS4_PLUS_BTL_MF_X_V2(p, 1);
+				no_data_x = SS4_PLUS_MFPACKET_NO_AX_BL;
+			} else {
+				f->mt[2].x = SS4_BTL_MF_X_V2(p, 0);
+				f->mt[3].x = SS4_BTL_MF_X_V2(p, 1);
+				no_data_x = SS4_MFPACKET_NO_AX_BL;
+			}
 			no_data_y = SS4_MFPACKET_NO_AY_BL;
+
+			f->mt[2].y = SS4_BTL_MF_Y_V2(p, 0);
+			f->mt[3].y = SS4_BTL_MF_Y_V2(p, 1);
 		} else {
-			f->mt[2].x = SS4_STD_MF_X_V2(p, 0);
-			f->mt[2].y = SS4_STD_MF_Y_V2(p, 0);
-			f->mt[3].x = SS4_STD_MF_X_V2(p, 1);
-			f->mt[3].y = SS4_STD_MF_Y_V2(p, 1);
-			no_data_x = SS4_MFPACKET_NO_AX;
+			if (IS_SS4PLUS_DEV(priv->dev_id)) {
+				f->mt[2].x = SS4_PLUS_STD_MF_X_V2(p, 0);
+				f->mt[3].x = SS4_PLUS_STD_MF_X_V2(p, 1);
+				no_data_x = SS4_PLUS_MFPACKET_NO_AX;
+			} else {
+				f->mt[2].x = SS4_STD_MF_X_V2(p, 0);
+				f->mt[3].x = SS4_STD_MF_X_V2(p, 1);
+				no_data_x = SS4_MFPACKET_NO_AX;
+			}
 			no_data_y = SS4_MFPACKET_NO_AY;
+
+			f->mt[2].y = SS4_STD_MF_Y_V2(p, 0);
+			f->mt[3].y = SS4_STD_MF_Y_V2(p, 1);
 		}
 
 		f->first_mp = 0;
@@ -1265,12 +1291,18 @@ static int alps_decode_ss4_v2(struct alps_fields *f,
 		break;
 
 	case SS4_PACKET_ID_STICK:
-		/*
-		 * x, y, and pressure are decoded in
-		 * alps_process_packet_ss4_v2()
-		 */
-		f->first_mp = 0;
-		f->is_mp = 0;
+		if (!(priv->flags & ALPS_DUALPOINT)) {
+			psmouse_warn(psmouse,
+				     "Rejected trackstick packet from non DualPoint device");
+		} else {
+			int x = (s8)(((p[0] & 1) << 7) | (p[1] & 0x7f));
+			int y = (s8)(((p[3] & 1) << 7) | (p[2] & 0x7f));
+			int pressure = (s8)(p[4] & 0x7f);
+
+			input_report_rel(priv->dev2, REL_X, x);
+			input_report_rel(priv->dev2, REL_Y, -y);
+			input_report_abs(priv->dev2, ABS_PRESSURE, pressure);
+		}
 		break;
 
 	case SS4_PACKET_ID_IDLE:
@@ -1338,21 +1370,12 @@ static void alps_process_packet_ss4_v2(struct psmouse *psmouse)
 
 	/* Report trackstick */
 	if (alps_get_pkt_id_ss4_v2(packet) == SS4_PACKET_ID_STICK) {
-		if (!(priv->flags & ALPS_DUALPOINT)) {
-			psmouse_warn(psmouse,
-				     "Rejected trackstick packet from non DualPoint device");
-			return;
+		if (priv->flags & ALPS_DUALPOINT) {
+			input_report_key(dev2, BTN_LEFT, f->ts_left);
+			input_report_key(dev2, BTN_RIGHT, f->ts_right);
+			input_report_key(dev2, BTN_MIDDLE, f->ts_middle);
+			input_sync(dev2);
 		}
-
-		input_report_rel(dev2, REL_X, SS4_TS_X_V2(packet));
-		input_report_rel(dev2, REL_Y, SS4_TS_Y_V2(packet));
-		input_report_abs(dev2, ABS_PRESSURE, SS4_TS_Z_V2(packet));
-
-		input_report_key(dev2, BTN_LEFT, f->ts_left);
-		input_report_key(dev2, BTN_RIGHT, f->ts_right);
-		input_report_key(dev2, BTN_MIDDLE, f->ts_middle);
-
-		input_sync(dev2);
 		return;
 	}
 
@@ -1853,7 +1876,7 @@ static int alps_absolute_mode_v1_v2(struct psmouse *psmouse)
 	 * Switch mouse to poll (remote) mode so motion data will not
 	 * get in our way
 	 */
-	return ps2_command(ps2dev, NULL, PSMOUSE_CMD_SETPOLL);
+	return ps2_command(&psmouse->ps2dev, NULL, PSMOUSE_CMD_SETPOLL);
 }
 
 static int alps_monitor_mode_send_word(struct psmouse *psmouse, u16 word)
@@ -2515,12 +2538,30 @@ static int alps_update_btn_info_ss4_v2(unsigned char otp[][4],
 }
 
 static int alps_update_dual_info_ss4_v2(unsigned char otp[][4],
-				       struct alps_data *priv)
+					struct alps_data *priv,
+					struct psmouse *psmouse)
 {
 	bool is_dual = false;
+	int reg_val = 0;
+	struct ps2dev *ps2dev = &psmouse->ps2dev;
 
-	if (IS_SS4PLUS_DEV(priv->dev_id))
+	if (IS_SS4PLUS_DEV(priv->dev_id)) {
 		is_dual = (otp[0][0] >> 4) & 0x01;
+
+		if (!is_dual) {
+			/* For support TrackStick of Thinkpad L/E series */
+			if (alps_exit_command_mode(psmouse) == 0 &&
+				alps_enter_command_mode(psmouse) == 0) {
+				reg_val = alps_command_mode_read_reg(psmouse,
+									0xD7);
+			}
+			alps_exit_command_mode(psmouse);
+			ps2_command(ps2dev, NULL, PSMOUSE_CMD_ENABLE);
+
+			if (reg_val == 0x0C || reg_val == 0x1D)
+				is_dual = true;
+		}
+	}
 
 	if (is_dual)
 		priv->flags |= ALPS_DUALPOINT |
@@ -2536,15 +2577,15 @@ static int alps_set_defaults_ss4_v2(struct psmouse *psmouse,
 
 	memset(otp, 0, sizeof(otp));
 
-	if (alps_get_otp_values_ss4_v2(psmouse, 0, &otp[0][0]) ||
-	    alps_get_otp_values_ss4_v2(psmouse, 1, &otp[1][0]))
+	if (alps_get_otp_values_ss4_v2(psmouse, 1, &otp[1][0]) ||
+	    alps_get_otp_values_ss4_v2(psmouse, 0, &otp[0][0]))
 		return -1;
 
 	alps_update_device_area_ss4_v2(otp, priv);
 
 	alps_update_btn_info_ss4_v2(otp, priv);
 
-	alps_update_dual_info_ss4_v2(otp, priv);
+	alps_update_dual_info_ss4_v2(otp, priv, psmouse);
 
 	return 0;
 }

@@ -10,6 +10,5 @@ struct fermi_channel_gpfifo_v0 {
 	__u64 vm;
 };
 
-#define NV906F_V0_NTFY_NON_STALL_INTERRUPT                                 0x00
-#define NV906F_V0_NTFY_KILLED                                              0x01
+#define FERMI_CHANNEL_GPFIFO_V0_NTFY_UEVENT                                0x00
 #endif

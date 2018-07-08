@@ -22,6 +22,7 @@
 #include <asm/nops.h>
 #include "../entry/calling.h"
 #include <asm/export.h>
+#include <asm/nospec-branch.h>
 
 #ifdef CONFIG_PARAVIRT
 #include <asm/asm-offsets.h>
@@ -66,8 +67,13 @@ startup_64:
 	 * tables and then reload them.
 	 */
 
-	/* Set up the stack for verify_cpu(), similar to initial_stack below */
-	leaq	(__end_init_task - SIZEOF_PTREGS)(%rip), %rsp
+	/*
+	 * Setup stack for verify_cpu(). "-8" because initial_stack is defined
+	 * this way, see below. Our best guess is a NULL ptr for stack
+	 * termination heuristics and we don't want to break anything which
+	 * might depend on it (kgdb, ...).
+	 */
+	leaq	(__end_init_task - 8)(%rip), %rsp
 
 	/* Sanitize CPU configuration */
 	call verify_cpu
@@ -112,20 +118,20 @@ startup_64:
 	movq	%rdi, %rax
 	shrq	$PGDIR_SHIFT, %rax
 
-	leaq	(PAGE_SIZE + _KERNPG_TABLE)(%rbx), %rdx
+	leaq	(4096 + _KERNPG_TABLE)(%rbx), %rdx
 	movq	%rdx, 0(%rbx,%rax,8)
 	movq	%rdx, 8(%rbx,%rax,8)
 
-	addq	$PAGE_SIZE, %rdx
+	addq	$4096, %rdx
 	movq	%rdi, %rax
 	shrq	$PUD_SHIFT, %rax
 	andl	$(PTRS_PER_PUD-1), %eax
-	movq	%rdx, PAGE_SIZE(%rbx,%rax,8)
+	movq	%rdx, 4096(%rbx,%rax,8)
 	incl	%eax
 	andl	$(PTRS_PER_PUD-1), %eax
-	movq	%rdx, PAGE_SIZE(%rbx,%rax,8)
+	movq	%rdx, 4096(%rbx,%rax,8)
 
-	addq	$PAGE_SIZE * 2, %rbx
+	addq	$8192, %rbx
 	movq	%rdi, %rax
 	shrq	$PMD_SHIFT, %rdi
 	addq	$(__PAGE_KERNEL_LARGE_EXEC & ~_PAGE_GLOBAL), %rax
@@ -142,9 +148,6 @@ startup_64:
 	decl	%ecx
 	jnz	1b
 
-	test %rbp, %rbp
-	jz .Lskip_fixup
-
 	/*
 	 * Fixup the kernel text+data virtual addresses. Note that
 	 * we might write invalid pmds, when the kernel is relocated
@@ -152,9 +155,9 @@ startup_64:
 	 * beyond _end.
 	 */
 	leaq	level2_kernel_pgt(%rip), %rdi
-	leaq	PAGE_SIZE(%rdi), %r8
+	leaq	4096(%rdi), %r8
 	/* See if it is a valid page table entry */
-1:	testb	$_PAGE_PRESENT, 0(%rdi)
+1:	testb	$1, 0(%rdi)
 	jz	2f
 	addq	%rbp, 0(%rdi)
 	/* Go to the next page */
@@ -165,7 +168,6 @@ startup_64:
 	/* Fixup phys_base */
 	addq	%rbp, phys_base(%rip)
 
-.Lskip_fixup:
 	movq	$(early_level4_pgt - __START_KERNEL_map), %rax
 	jmp 1f
 ENTRY(secondary_startup_64)
@@ -189,8 +191,8 @@ ENTRY(secondary_startup_64)
 	movq	$(init_level4_pgt - __START_KERNEL_map), %rax
 1:
 
-	/* Enable PAE mode and PGE */
-	movl	$(X86_CR4_PAE | X86_CR4_PGE), %ecx
+	/* Enable PAE and PSE, but defer PGE until kaiser_enabled is decided */
+	movl	$(X86_CR4_PAE | X86_CR4_PSE), %ecx
 	movq	%rcx, %cr4
 
 	/* Setup early boot stage 4 level pagetables. */
@@ -199,6 +201,7 @@ ENTRY(secondary_startup_64)
 
 	/* Ensure I am executing from virtual addresses */
 	movq	$1f, %rax
+	ANNOTATE_RETPOLINE_SAFE
 	jmp	*%rax
 1:
 
@@ -264,17 +267,13 @@ ENTRY(secondary_startup_64)
 	movl	$MSR_GS_BASE,%ecx
 	movl	initial_gs(%rip),%eax
 	movl	initial_gs+4(%rip),%edx
-	wrmsr
+	wrmsr	
 
 	/* rsi is pointer to real mode structure with interesting info.
 	   pass it to C */
 	movq	%rsi, %rdi
-	jmp	start_cpu
-ENDPROC(secondary_startup_64)
-
-ENTRY(start_cpu)
-	/*
-	 * Jump to run C code and to be on a real kernel address.
+	
+	/* Finally jump to run C code and to be on real kernel address
 	 * Since we are running on identity-mapped space we have to jump
 	 * to the full 64bit address, this is only possible as indirect
 	 * jump.  In addition we need to ensure %cs is set so we make this
@@ -298,14 +297,12 @@ ENTRY(start_cpu)
 	 *	REX.W + FF /5 JMP m16:64 Jump far, absolute indirect,
 	 *		address given in m16:64.
 	 */
-	pushq	$.Lafter_lret	# put return address on stack for unwinder
-	xorq	%rbp, %rbp	# clear frame pointer
-	movq	initial_code(%rip), %rax
+	movq	initial_code(%rip),%rax
+	pushq	$0		# fake return address to stop unwinder
 	pushq	$__KERNEL_CS	# set correct cs
 	pushq	%rax		# target address in negative space
 	lretq
-.Lafter_lret:
-ENDPROC(start_cpu)
+ENDPROC(secondary_startup_64)
 
 #include "verify_cpu.S"
 
@@ -313,11 +310,15 @@ ENDPROC(start_cpu)
 /*
  * Boot CPU0 entry point. It's called from play_dead(). Everything has been set
  * up already except stack. We just set up stack here. Then call
- * start_secondary() via start_cpu().
+ * start_secondary().
  */
 ENTRY(start_cpu0)
-	movq	initial_stack(%rip), %rsp
-	jmp	start_cpu
+	movq initial_stack(%rip),%rsp
+	movq	initial_code(%rip),%rax
+	pushq	$0		# fake return address to stop unwinder
+	pushq	$__KERNEL_CS	# set correct cs
+	pushq	%rax		# target address in negative space
+	lretq
 ENDPROC(start_cpu0)
 #endif
 
@@ -329,11 +330,7 @@ ENDPROC(start_cpu0)
 	GLOBAL(initial_gs)
 	.quad	INIT_PER_CPU_VAR(irq_stack_union)
 	GLOBAL(initial_stack)
-	/*
-	 * The SIZEOF_PTREGS gap is a convention which helps the in-kernel
-	 * unwinder reliably detect the end of the stack.
-	 */
-	.quad  init_thread_union + THREAD_SIZE - SIZEOF_PTREGS
+	.quad  init_thread_union+THREAD_SIZE-8
 	__FINITDATA
 
 bad_address:
@@ -410,6 +407,27 @@ GLOBAL(early_recursion_flag)
 	.balign	PAGE_SIZE; \
 GLOBAL(name)
 
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+/*
+ * Each PGD needs to be 8k long and 8k aligned.  We do not
+ * ever go out to userspace with these, so we do not
+ * strictly *need* the second page, but this allows us to
+ * have a single set_pgd() implementation that does not
+ * need to worry about whether it has 4k or 8k to work
+ * with.
+ *
+ * This ensures PGDs are 8k long:
+ */
+#define KAISER_USER_PGD_FILL	512
+/* This ensures they are 8k-aligned: */
+#define NEXT_PGD_PAGE(name) \
+	.balign 2 * PAGE_SIZE; \
+GLOBAL(name)
+#else
+#define NEXT_PGD_PAGE(name) NEXT_PAGE(name)
+#define KAISER_USER_PGD_FILL	0
+#endif
+
 /* Automate the creation of 1 to 1 mapping pmd entries */
 #define PMDS(START, PERM, COUNT)			\
 	i = 0 ;						\
@@ -419,9 +437,10 @@ GLOBAL(name)
 	.endr
 
 	__INITDATA
-NEXT_PAGE(early_level4_pgt)
+NEXT_PGD_PAGE(early_level4_pgt)
 	.fill	511,8,0
 	.quad	level3_kernel_pgt - __START_KERNEL_map + _PAGE_TABLE
+	.fill	KAISER_USER_PGD_FILL,8,0
 
 NEXT_PAGE(early_dynamic_pgts)
 	.fill	512*EARLY_DYNAMIC_PAGE_TABLES,8,0
@@ -429,16 +448,18 @@ NEXT_PAGE(early_dynamic_pgts)
 	.data
 
 #ifndef CONFIG_XEN
-NEXT_PAGE(init_level4_pgt)
+NEXT_PGD_PAGE(init_level4_pgt)
 	.fill	512,8,0
+	.fill	KAISER_USER_PGD_FILL,8,0
 #else
-NEXT_PAGE(init_level4_pgt)
+NEXT_PGD_PAGE(init_level4_pgt)
 	.quad   level3_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE
 	.org    init_level4_pgt + L4_PAGE_OFFSET*8, 0
 	.quad   level3_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE
 	.org    init_level4_pgt + L4_START_KERNEL*8, 0
 	/* (2^48-(2*1024*1024*1024))/(2^39) = 511 */
 	.quad   level3_kernel_pgt - __START_KERNEL_map + _PAGE_TABLE
+	.fill	KAISER_USER_PGD_FILL,8,0
 
 NEXT_PAGE(level3_ident_pgt)
 	.quad	level2_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE
@@ -449,6 +470,7 @@ NEXT_PAGE(level2_ident_pgt)
 	 */
 	PMDS(0, __PAGE_KERNEL_IDENT_LARGE_EXEC, PTRS_PER_PMD)
 #endif
+	.fill	KAISER_USER_PGD_FILL,8,0
 
 NEXT_PAGE(level3_kernel_pgt)
 	.fill	L3_START_KERNEL,8,0

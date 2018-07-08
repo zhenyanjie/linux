@@ -318,7 +318,6 @@ enum rtattr_type_t {
 	RTA_ENCAP,
 	RTA_EXPIRES,
 	RTA_PAD,
-	RTA_UID,
 	__RTA_MAX
 };
 
@@ -350,7 +349,6 @@ struct rtnexthop {
 #define RTNH_F_ONLINK		4	/* Gateway is forced on link	*/
 #define RTNH_F_OFFLOAD		8	/* offloaded route */
 #define RTNH_F_LINKDOWN		16	/* carrier-down on nexthop */
-#define RTNH_F_UNRESOLVED	32	/* The entry is unresolved (ipmr) */
 
 #define RTNH_COMPARE_MASK	(RTNH_F_DEAD | RTNH_F_LINKDOWN | RTNH_F_OFFLOAD)
 
@@ -658,8 +656,6 @@ enum rtnetlink_groups {
 #define RTNLGRP_MPLS_ROUTE	RTNLGRP_MPLS_ROUTE
 	RTNLGRP_NSID,
 #define RTNLGRP_NSID		RTNLGRP_NSID
-	RTNLGRP_MPLS_NETCONF,
-#define RTNLGRP_MPLS_NETCONF	RTNLGRP_MPLS_NETCONF
 	__RTNLGRP_MAX
 };
 #define RTNLGRP_MAX	(__RTNLGRP_MAX - 1)

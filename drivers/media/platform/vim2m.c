@@ -907,7 +907,6 @@ static int vim2m_open(struct file *file)
 	if (hdl->error) {
 		rc = hdl->error;
 		v4l2_ctrl_handler_free(hdl);
-		kfree(ctx);
 		goto open_unlock;
 	}
 	ctx->fh.ctrl_handler = hdl;
@@ -929,7 +928,6 @@ static int vim2m_open(struct file *file)
 		rc = PTR_ERR(ctx->fh.m2m_ctx);
 
 		v4l2_ctrl_handler_free(hdl);
-		v4l2_fh_exit(&ctx->fh);
 		kfree(ctx);
 		goto open_unlock;
 	}

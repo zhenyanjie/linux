@@ -145,7 +145,6 @@
 #define NFC_ECC_PIPELINE	BIT(3)
 #define NFC_ECC_EXCEPTION	BIT(4)
 #define NFC_ECC_BLOCK_SIZE_MSK	BIT(5)
-#define NFC_ECC_BLOCK_512	BIT(5)
 #define NFC_RANDOM_EN		BIT(9)
 #define NFC_RANDOM_DIRECTION	BIT(10)
 #define NFC_ECC_MODE_MSK	GENMASK(15, 12)
@@ -522,8 +521,6 @@ static void sunxi_nfc_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 	u32 tmp;
 
 	while (len > offs) {
-		bool poll = false;
-
 		cnt = min(len - offs, NFC_SRAM_SIZE);
 
 		ret = sunxi_nfc_wait_cmd_fifo_empty(nfc);
@@ -534,11 +531,7 @@ static void sunxi_nfc_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 		tmp = NFC_DATA_TRANS | NFC_DATA_SWAP_METHOD;
 		writel(tmp, nfc->regs + NFC_REG_CMD);
 
-		/* Arbitrary limit for polling mode */
-		if (cnt < 64)
-			poll = true;
-
-		ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, poll, 0);
+		ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, true, 0);
 		if (ret)
 			break;
 
@@ -561,8 +554,6 @@ static void sunxi_nfc_write_buf(struct mtd_info *mtd, const uint8_t *buf,
 	u32 tmp;
 
 	while (len > offs) {
-		bool poll = false;
-
 		cnt = min(len - offs, NFC_SRAM_SIZE);
 
 		ret = sunxi_nfc_wait_cmd_fifo_empty(nfc);
@@ -575,11 +566,7 @@ static void sunxi_nfc_write_buf(struct mtd_info *mtd, const uint8_t *buf,
 		      NFC_ACCESS_DIR;
 		writel(tmp, nfc->regs + NFC_REG_CMD);
 
-		/* Arbitrary limit for polling mode */
-		if (cnt < 64)
-			poll = true;
-
-		ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, poll, 0);
+		ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, true, 0);
 		if (ret)
 			break;
 
@@ -603,6 +590,10 @@ static void sunxi_nfc_cmd_ctrl(struct mtd_info *mtd, int dat,
 	struct sunxi_nand_chip *sunxi_nand = to_sunxi_nand(nand);
 	struct sunxi_nfc *nfc = to_sunxi_nfc(sunxi_nand->nand.controller);
 	int ret;
+
+	ret = sunxi_nfc_wait_cmd_fifo_empty(nfc);
+	if (ret)
+		return;
 
 	if (dat == NAND_CMD_NONE && (ctrl & NAND_NCE) &&
 	    !(ctrl & (NAND_CLE | NAND_ALE))) {
@@ -632,10 +623,6 @@ static void sunxi_nfc_cmd_ctrl(struct mtd_info *mtd, int dat,
 		if (sunxi_nand->addr_cycles > 4)
 			writel(sunxi_nand->addr[1],
 			       nfc->regs + NFC_REG_ADDR_HIGH);
-
-		ret = sunxi_nfc_wait_cmd_fifo_empty(nfc);
-		if (ret)
-			return;
 
 		writel(cmd, nfc->regs + NFC_REG_CMD);
 		sunxi_nand->addr[0] = 0;
@@ -834,9 +821,6 @@ static void sunxi_nfc_hw_ecc_enable(struct mtd_info *mtd)
 	ecc_ctl |= NFC_ECC_EN | NFC_ECC_MODE(data->mode) | NFC_ECC_EXCEPTION |
 		   NFC_ECC_PIPELINE;
 
-	if (nand->ecc.size == 512)
-		ecc_ctl |= NFC_ECC_BLOCK_512;
-
 	writel(ecc_ctl, nfc->regs + NFC_REG_ECC_CTL);
 }
 
@@ -973,7 +957,7 @@ static int sunxi_nfc_hw_ecc_read_chunk(struct mtd_info *mtd,
 	writel(NFC_DATA_TRANS | NFC_DATA_SWAP_METHOD | NFC_ECC_OP,
 	       nfc->regs + NFC_REG_CMD);
 
-	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, false, 0);
+	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, true, 0);
 	sunxi_nfc_randomizer_disable(mtd);
 	if (ret)
 		return ret;
@@ -1085,7 +1069,7 @@ static int sunxi_nfc_hw_ecc_read_chunks_dma(struct mtd_info *mtd, uint8_t *buf,
 	writel(NFC_PAGE_OP | NFC_DATA_SWAP_METHOD | NFC_DATA_TRANS,
 	       nfc->regs + NFC_REG_CMD);
 
-	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, false, 0);
+	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, true, 0);
 	if (ret)
 		dmaengine_terminate_all(nfc->dmac);
 
@@ -1205,7 +1189,7 @@ static int sunxi_nfc_hw_ecc_write_chunk(struct mtd_info *mtd,
 	       NFC_ACCESS_DIR | NFC_ECC_OP,
 	       nfc->regs + NFC_REG_CMD);
 
-	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, false, 0);
+	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, true, 0);
 	sunxi_nfc_randomizer_disable(mtd);
 	if (ret)
 		return ret;
@@ -1444,7 +1428,7 @@ static int sunxi_nfc_hw_ecc_write_page_dma(struct mtd_info *mtd,
 	       NFC_DATA_TRANS | NFC_ACCESS_DIR,
 	       nfc->regs + NFC_REG_CMD);
 
-	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, false, 0);
+	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, true, 0);
 	if (ret)
 		dmaengine_terminate_all(nfc->dmac);
 
@@ -1851,8 +1835,14 @@ static int sunxi_nand_hw_common_ecc_ctrl_init(struct mtd_info *mtd,
 
 	/* Add ECC info retrieval from DT */
 	for (i = 0; i < ARRAY_SIZE(strengths); i++) {
-		if (ecc->strength <= strengths[i])
+		if (ecc->strength <= strengths[i]) {
+			/*
+			 * Update ecc->strength value with the actual strength
+			 * that will be used by the ECC engine.
+			 */
+			ecc->strength = strengths[i];
 			break;
+		}
 	}
 
 	if (i >= ARRAY_SIZE(strengths)) {

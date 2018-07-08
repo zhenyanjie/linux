@@ -46,7 +46,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/pm_runtime.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_dbg.h>
@@ -117,7 +117,7 @@ static unsigned int sr_check_events(struct cdrom_device_info *cdi,
 				    unsigned int clearing, int slot);
 static int sr_packet(struct cdrom_device_info *, struct packet_command *);
 
-static const struct cdrom_device_ops sr_dops = {
+static struct cdrom_device_ops sr_dops = {
 	.open			= sr_open,
 	.release	 	= sr_release,
 	.drive_status	 	= sr_drive_status,
@@ -437,17 +437,14 @@ static int sr_init_command(struct scsi_cmnd *SCpnt)
 		goto out;
 	}
 
-	switch (req_op(rq)) {
-	case REQ_OP_WRITE:
+	if (rq_data_dir(rq) == WRITE) {
 		if (!cd->writeable)
 			goto out;
 		SCpnt->cmnd[0] = WRITE_10;
 		cd->cdi.media_written = 1;
-		break;
-	case REQ_OP_READ:
+	} else if (rq_data_dir(rq) == READ) {
 		SCpnt->cmnd[0] = READ_10;
-		break;
-	default:
+	} else {
 		blk_dump_rq_flags(rq, "Unknown sr command");
 		goto out;
 	}
@@ -525,6 +522,8 @@ static int sr_block_open(struct block_device *bdev, fmode_t mode)
 	struct scsi_cd *cd;
 	int ret = -ENXIO;
 
+	check_disk_change(bdev);
+
 	mutex_lock(&sr_mutex);
 	cd = scsi_cd_get(bdev->bd_disk);
 	if (cd) {
@@ -585,18 +584,28 @@ out:
 static unsigned int sr_block_check_events(struct gendisk *disk,
 					  unsigned int clearing)
 {
-	struct scsi_cd *cd = scsi_cd(disk);
+	unsigned int ret = 0;
+	struct scsi_cd *cd;
 
-	if (atomic_read(&cd->device->disk_events_disable_depth))
+	cd = scsi_cd_get(disk);
+	if (!cd)
 		return 0;
 
-	return cdrom_check_events(&cd->cdi, clearing);
+	if (!atomic_read(&cd->device->disk_events_disable_depth))
+		ret = cdrom_check_events(&cd->cdi, clearing);
+
+	scsi_cd_put(cd);
+	return ret;
 }
 
 static int sr_block_revalidate_disk(struct gendisk *disk)
 {
-	struct scsi_cd *cd = scsi_cd(disk);
 	struct scsi_sense_hdr sshdr;
+	struct scsi_cd *cd;
+
+	cd = scsi_cd_get(disk);
+	if (!cd)
+		return -ENXIO;
 
 	/* if the unit is not ready, nothing more to do */
 	if (scsi_test_unit_ready(cd->device, SR_TIMEOUT, MAX_RETRIES, &sshdr))
@@ -605,6 +614,7 @@ static int sr_block_revalidate_disk(struct gendisk *disk)
 	sr_cd_check(&cd->cdi);
 	get_sectorsize(cd);
 out:
+	scsi_cd_put(cd);
 	return 0;
 }
 

@@ -35,7 +35,6 @@
 #include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
-#include <linux/of_graph.h>
 #include <linux/hdmi.h>
 #include <linux/component.h>
 #include <linux/mfd/syscon.h>
@@ -47,6 +46,19 @@
 #include "exynos_drm_crtc.h"
 
 #define HOTPLUG_DEBOUNCE_MS		1100
+
+/* AVI header and aspect ratio */
+#define HDMI_AVI_VERSION		0x02
+#define HDMI_AVI_LENGTH			0x0d
+
+/* AUI header info */
+#define HDMI_AUI_VERSION		0x01
+#define HDMI_AUI_LENGTH			0x0a
+
+/* AVI active format aspect ratio */
+#define AVI_SAME_AS_PIC_ASPECT_RATIO	0x08
+#define AVI_4_3_CENTER_RATIO		0x09
+#define AVI_16_9_CENTER_RATIO		0x0a
 
 enum hdmi_type {
 	HDMI_TYPE13,
@@ -119,6 +131,7 @@ struct hdmi_context {
 	bool				dvi_mode;
 	struct delayed_work		hotplug_work;
 	struct drm_display_mode		current_mode;
+	u8				cea_video_id;
 	const struct hdmi_driver_data	*drv_data;
 
 	void __iomem			*regs;
@@ -134,7 +147,6 @@ struct hdmi_context {
 	struct regulator_bulk_data	regul_bulk[ARRAY_SIZE(supply)];
 	struct regulator		*reg_hdmi_en;
 	struct exynos_drm_clk		phy_clk;
-	struct drm_bridge		*bridge;
 };
 
 static inline struct hdmi_context *encoder_to_hdmi(struct drm_encoder *e)
@@ -511,9 +523,9 @@ static const struct hdmiphy_config hdmiphy_5433_configs[] = {
 	{
 		.pixel_clock = 27000000,
 		.conf = {
-			0x01, 0x51, 0x2d, 0x75, 0x01, 0x00, 0x88, 0x02,
-			0x72, 0x50, 0x44, 0x8c, 0x27, 0x00, 0x7c, 0xac,
-			0xd6, 0x2b, 0x67, 0x00, 0x00, 0x04, 0x00, 0x30,
+			0x01, 0x51, 0x22, 0x51, 0x08, 0xfc, 0x88, 0x46,
+			0x72, 0x50, 0x24, 0x0c, 0x24, 0x0f, 0x7c, 0xa5,
+			0xd4, 0x2b, 0x87, 0x00, 0x00, 0x04, 0x00, 0x30,
 			0x08, 0x10, 0x01, 0x01, 0x48, 0x40, 0x00, 0x40,
 		},
 	},
@@ -521,9 +533,9 @@ static const struct hdmiphy_config hdmiphy_5433_configs[] = {
 		.pixel_clock = 27027000,
 		.conf = {
 			0x01, 0x51, 0x2d, 0x72, 0x64, 0x09, 0x88, 0xc3,
-			0x71, 0x50, 0x44, 0x8c, 0x27, 0x00, 0x7c, 0xac,
-			0xd6, 0x2b, 0x67, 0x00, 0x00, 0x04, 0x00, 0x30,
-			0x08, 0x10, 0x01, 0x01, 0x48, 0x40, 0x00, 0x40,
+			0x71, 0x50, 0x24, 0x14, 0x24, 0x0f, 0x7c, 0xa5,
+			0xd4, 0x2b, 0x87, 0x00, 0x00, 0x04, 0x00, 0x30,
+			0x28, 0x10, 0x01, 0x01, 0x48, 0x40, 0x00, 0x40,
 		},
 	},
 	{
@@ -587,15 +599,6 @@ static const struct hdmiphy_config hdmiphy_5433_configs[] = {
 			0x52, 0x52, 0x24, 0x0c, 0x24, 0x0f, 0x7c, 0xa5,
 			0xd4, 0x2b, 0x87, 0x00, 0x00, 0x04, 0x00, 0x30,
 			0x08, 0x10, 0x01, 0x01, 0x48, 0x4a, 0x00, 0x40,
-		},
-	},
-	{
-		.pixel_clock = 297000000,
-		.conf = {
-			0x01, 0x51, 0x3E, 0x05, 0x40, 0xF0, 0x88, 0xC2,
-			0x52, 0x53, 0x44, 0x8C, 0x27, 0x00, 0x7C, 0xAC,
-			0xD6, 0x2B, 0x67, 0x00, 0x00, 0x04, 0x00, 0x30,
-			0x08, 0x10, 0x01, 0x01, 0x48, 0x40, 0x00, 0x40,
 		},
 	},
 };
@@ -676,13 +679,6 @@ static inline void hdmi_reg_writev(struct hdmi_context *hdata, u32 reg_id,
 		val >>= 8;
 		reg_id += 4;
 	}
-}
-
-static inline void hdmi_reg_write_buf(struct hdmi_context *hdata, u32 reg_id,
-				      u8 *buf, int size)
-{
-	for (reg_id = hdmi_map_reg(hdata, reg_id); size; --size, reg_id += 4)
-		writel(*buf++, hdata->regs + reg_id);
 }
 
 static inline void hdmi_reg_writemask(struct hdmi_context *hdata,
@@ -766,51 +762,93 @@ static int hdmi_clk_set_parents(struct hdmi_context *hdata, bool to_phy)
 	return ret;
 }
 
-static void hdmi_reg_infoframes(struct hdmi_context *hdata)
+static u8 hdmi_chksum(struct hdmi_context *hdata,
+			u32 start, u8 len, u32 hdr_sum)
 {
-	union hdmi_infoframe frm;
-	u8 buf[25];
-	int ret;
+	int i;
+
+	/* hdr_sum : header0 + header1 + header2
+	* start : start address of packet byte1
+	* len : packet bytes - 1 */
+	for (i = 0; i < len; ++i)
+		hdr_sum += 0xff & hdmi_reg_read(hdata, start + i * 4);
+
+	/* return 2's complement of 8 bit hdr_sum */
+	return (u8)(~(hdr_sum & 0xff) + 1);
+}
+
+static void hdmi_reg_infoframe(struct hdmi_context *hdata,
+			union hdmi_infoframe *infoframe)
+{
+	u32 hdr_sum;
+	u8 chksum;
+	u8 ar;
 
 	if (hdata->dvi_mode) {
-		hdmi_reg_writeb(hdata, HDMI_AVI_CON,
-				HDMI_AVI_CON_DO_NOT_TRANSMIT);
 		hdmi_reg_writeb(hdata, HDMI_VSI_CON,
 				HDMI_VSI_CON_DO_NOT_TRANSMIT);
+		hdmi_reg_writeb(hdata, HDMI_AVI_CON,
+				HDMI_AVI_CON_DO_NOT_TRANSMIT);
 		hdmi_reg_writeb(hdata, HDMI_AUI_CON, HDMI_AUI_CON_NO_TRAN);
 		return;
 	}
 
-	ret = drm_hdmi_avi_infoframe_from_display_mode(&frm.avi,
-			&hdata->current_mode);
-	if (!ret)
-		ret = hdmi_avi_infoframe_pack(&frm.avi, buf, sizeof(buf));
-	if (ret > 0) {
+	switch (infoframe->any.type) {
+	case HDMI_INFOFRAME_TYPE_AVI:
 		hdmi_reg_writeb(hdata, HDMI_AVI_CON, HDMI_AVI_CON_EVERY_VSYNC);
-		hdmi_reg_write_buf(hdata, HDMI_AVI_HEADER0, buf, ret);
-	} else {
-		DRM_INFO("%s: invalid AVI infoframe (%d)\n", __func__, ret);
-	}
+		hdmi_reg_writeb(hdata, HDMI_AVI_HEADER0, infoframe->any.type);
+		hdmi_reg_writeb(hdata, HDMI_AVI_HEADER1,
+				infoframe->any.version);
+		hdmi_reg_writeb(hdata, HDMI_AVI_HEADER2, infoframe->any.length);
+		hdr_sum = infoframe->any.type + infoframe->any.version +
+			  infoframe->any.length;
 
-	ret = drm_hdmi_vendor_infoframe_from_display_mode(&frm.vendor.hdmi,
-			&hdata->current_mode);
-	if (!ret)
-		ret = hdmi_vendor_infoframe_pack(&frm.vendor.hdmi, buf,
-				sizeof(buf));
-	if (ret > 0) {
-		hdmi_reg_writeb(hdata, HDMI_VSI_CON, HDMI_VSI_CON_EVERY_VSYNC);
-		hdmi_reg_write_buf(hdata, HDMI_VSI_HEADER0, buf, 3);
-		hdmi_reg_write_buf(hdata, HDMI_VSI_DATA(0), buf + 3, ret - 3);
-	}
+		/* Output format zero hardcoded ,RGB YBCR selection */
+		hdmi_reg_writeb(hdata, HDMI_AVI_BYTE(1), 0 << 5 |
+			AVI_ACTIVE_FORMAT_VALID |
+			AVI_UNDERSCANNED_DISPLAY_VALID);
 
-	ret = hdmi_audio_infoframe_init(&frm.audio);
-	if (!ret) {
-		frm.audio.channels = 2;
-		ret = hdmi_audio_infoframe_pack(&frm.audio, buf, sizeof(buf));
-	}
-	if (ret > 0) {
-		hdmi_reg_writeb(hdata, HDMI_AUI_CON, HDMI_AUI_CON_EVERY_VSYNC);
-		hdmi_reg_write_buf(hdata, HDMI_AUI_HEADER0, buf, ret);
+		/*
+		 * Set the aspect ratio as per the mode, mentioned in
+		 * Table 9 AVI InfoFrame Data Byte 2 of CEA-861-D Standard
+		 */
+		ar = hdata->current_mode.picture_aspect_ratio;
+		switch (ar) {
+		case HDMI_PICTURE_ASPECT_4_3:
+			ar |= AVI_4_3_CENTER_RATIO;
+			break;
+		case HDMI_PICTURE_ASPECT_16_9:
+			ar |= AVI_16_9_CENTER_RATIO;
+			break;
+		case HDMI_PICTURE_ASPECT_NONE:
+		default:
+			ar |= AVI_SAME_AS_PIC_ASPECT_RATIO;
+			break;
+		}
+		hdmi_reg_writeb(hdata, HDMI_AVI_BYTE(2), ar);
+
+		hdmi_reg_writeb(hdata, HDMI_AVI_BYTE(4), hdata->cea_video_id);
+
+		chksum = hdmi_chksum(hdata, HDMI_AVI_BYTE(1),
+					infoframe->any.length, hdr_sum);
+		DRM_DEBUG_KMS("AVI checksum = 0x%x\n", chksum);
+		hdmi_reg_writeb(hdata, HDMI_AVI_CHECK_SUM, chksum);
+		break;
+	case HDMI_INFOFRAME_TYPE_AUDIO:
+		hdmi_reg_writeb(hdata, HDMI_AUI_CON, 0x02);
+		hdmi_reg_writeb(hdata, HDMI_AUI_HEADER0, infoframe->any.type);
+		hdmi_reg_writeb(hdata, HDMI_AUI_HEADER1,
+				infoframe->any.version);
+		hdmi_reg_writeb(hdata, HDMI_AUI_HEADER2, infoframe->any.length);
+		hdr_sum = infoframe->any.type + infoframe->any.version +
+			  infoframe->any.length;
+		chksum = hdmi_chksum(hdata, HDMI_AUI_BYTE(1),
+					infoframe->any.length, hdr_sum);
+		DRM_DEBUG_KMS("AUI checksum = 0x%x\n", chksum);
+		hdmi_reg_writeb(hdata, HDMI_AUI_CHECK_SUM, chksum);
+		break;
+	default:
+		break;
 	}
 }
 
@@ -924,15 +962,7 @@ static int hdmi_create_connector(struct drm_encoder *encoder)
 	drm_connector_register(connector);
 	drm_mode_connector_attach_encoder(connector, encoder);
 
-	if (hdata->bridge) {
-		encoder->bridge = hdata->bridge;
-		hdata->bridge->encoder = encoder;
-		ret = drm_bridge_attach(encoder, hdata->bridge, NULL);
-		if (ret)
-			DRM_ERROR("Failed to attach bridge\n");
-	}
-
-	return ret;
+	return 0;
 }
 
 static bool hdmi_mode_fixup(struct drm_encoder *encoder,
@@ -1097,6 +1127,8 @@ static void hdmi_start(struct hdmi_context *hdata, bool start)
 
 static void hdmi_conf_init(struct hdmi_context *hdata)
 {
+	union hdmi_infoframe infoframe;
+
 	/* disable HPD interrupts from HDMI IP block, use GPIO instead */
 	hdmi_reg_writemask(hdata, HDMI_INTC_CON, 0, HDMI_INTC_EN_GLOBAL |
 		HDMI_INTC_EN_HPD_PLUG | HDMI_INTC_EN_HPD_UNPLUG);
@@ -1132,7 +1164,15 @@ static void hdmi_conf_init(struct hdmi_context *hdata)
 		hdmi_reg_writeb(hdata, HDMI_V13_AUI_CON, 0x02);
 		hdmi_reg_writeb(hdata, HDMI_V13_ACR_CON, 0x04);
 	} else {
-		hdmi_reg_infoframes(hdata);
+		infoframe.any.type = HDMI_INFOFRAME_TYPE_AVI;
+		infoframe.any.version = HDMI_AVI_VERSION;
+		infoframe.any.length = HDMI_AVI_LENGTH;
+		hdmi_reg_infoframe(hdata, &infoframe);
+
+		infoframe.any.type = HDMI_INFOFRAME_TYPE_AUDIO;
+		infoframe.any.version = HDMI_AUI_VERSION;
+		infoframe.any.length = HDMI_AUI_LENGTH;
+		hdmi_reg_infoframe(hdata, &infoframe);
 
 		/* enable AVI packet every vsync, fixes purple line problem */
 		hdmi_reg_writemask(hdata, HDMI_CON_1, 2, 3 << 5);
@@ -1418,6 +1458,7 @@ static void hdmi_mode_set(struct drm_encoder *encoder,
 		"INTERLACED" : "PROGRESSIVE");
 
 	drm_mode_copy(&hdata->current_mode, m);
+	hdata->cea_video_id = drm_match_cea_mode(mode);
 }
 
 static void hdmi_set_refclk(struct hdmi_context *hdata, bool on)
@@ -1601,31 +1642,6 @@ static void hdmiphy_clk_enable(struct exynos_drm_clk *clk, bool enable)
 		hdmiphy_disable(hdata);
 }
 
-static int hdmi_bridge_init(struct hdmi_context *hdata)
-{
-	struct device *dev = hdata->dev;
-	struct device_node *ep, *np;
-
-	ep = of_graph_get_endpoint_by_regs(dev->of_node, 1, -1);
-	if (!ep)
-		return 0;
-
-	np = of_graph_get_remote_port_parent(ep);
-	of_node_put(ep);
-	if (!np) {
-		DRM_ERROR("failed to get remote port parent");
-		return -EINVAL;
-	}
-
-	hdata->bridge = of_drm_find_bridge(np);
-	of_node_put(np);
-
-	if (!hdata->bridge)
-		return -EPROBE_DEFER;
-
-	return 0;
-}
-
 static int hdmi_resources_init(struct hdmi_context *hdata)
 {
 	struct device *dev = hdata->dev;
@@ -1665,18 +1681,17 @@ static int hdmi_resources_init(struct hdmi_context *hdata)
 
 	hdata->reg_hdmi_en = devm_regulator_get_optional(dev, "hdmi-en");
 
-	if (PTR_ERR(hdata->reg_hdmi_en) != -ENODEV) {
-		if (IS_ERR(hdata->reg_hdmi_en))
-			return PTR_ERR(hdata->reg_hdmi_en);
+	if (PTR_ERR(hdata->reg_hdmi_en) == -ENODEV)
+		return 0;
 
-		ret = regulator_enable(hdata->reg_hdmi_en);
-		if (ret) {
-			DRM_ERROR("failed to enable hdmi-en regulator\n");
-			return ret;
-		}
-	}
+	if (IS_ERR(hdata->reg_hdmi_en))
+		return PTR_ERR(hdata->reg_hdmi_en);
 
-	return hdmi_bridge_init(hdata);
+	ret = regulator_enable(hdata->reg_hdmi_en);
+	if (ret)
+		DRM_ERROR("failed to enable hdmi-en regulator\n");
+
+	return ret;
 }
 
 static struct of_device_id hdmi_match_types[] = {
@@ -1924,8 +1939,7 @@ static int hdmi_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int exynos_hdmi_suspend(struct device *dev)
+static int __maybe_unused exynos_hdmi_suspend(struct device *dev)
 {
 	struct hdmi_context *hdata = dev_get_drvdata(dev);
 
@@ -1934,7 +1948,7 @@ static int exynos_hdmi_suspend(struct device *dev)
 	return 0;
 }
 
-static int exynos_hdmi_resume(struct device *dev)
+static int __maybe_unused exynos_hdmi_resume(struct device *dev)
 {
 	struct hdmi_context *hdata = dev_get_drvdata(dev);
 	int ret;
@@ -1945,7 +1959,6 @@ static int exynos_hdmi_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
 static const struct dev_pm_ops exynos_hdmi_pm_ops = {
 	SET_RUNTIME_PM_OPS(exynos_hdmi_suspend, exynos_hdmi_resume, NULL)

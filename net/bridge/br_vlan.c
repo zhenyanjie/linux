@@ -5,7 +5,6 @@
 #include <net/switchdev.h>
 
 #include "br_private.h"
-#include "br_private_tunnel.h"
 
 static inline int br_vlan_cmp(struct rhashtable_compare_arg *arg,
 			      const void *ptr)
@@ -311,7 +310,6 @@ static int __vlan_del(struct net_bridge_vlan *v)
 	}
 
 	if (masterv != v) {
-		vlan_tunnel_info_del(vg, v);
 		rhashtable_remove_fast(&vg->vlan_hash, &v->vnode,
 				       br_vlan_rht_params);
 		__vlan_del_list(v);
@@ -327,7 +325,6 @@ static void __vlan_group_free(struct net_bridge_vlan_group *vg)
 {
 	WARN_ON(!list_empty(&vg->vlan_list));
 	rhashtable_destroy(&vg->vlan_hash);
-	vlan_tunnel_deinit(vg);
 	kfree(vg);
 }
 
@@ -341,7 +338,6 @@ static void __vlan_flush(struct net_bridge_vlan_group *vg)
 }
 
 struct sk_buff *br_handle_vlan(struct net_bridge *br,
-			       const struct net_bridge_port *p,
 			       struct net_bridge_vlan_group *vg,
 			       struct sk_buff *skb)
 {
@@ -382,12 +378,6 @@ struct sk_buff *br_handle_vlan(struct net_bridge *br,
 
 	if (v->flags & BRIDGE_VLAN_INFO_UNTAGGED)
 		skb->vlan_tci = 0;
-
-	if (p && (p->flags & BR_VLAN_TUNNEL) &&
-	    br_handle_egress_vlan_tunnel(skb, v)) {
-		kfree_skb(skb);
-		return NULL;
-	}
 out:
 	return skb;
 }
@@ -622,8 +612,6 @@ int br_vlan_delete(struct net_bridge *br, u16 vid)
 
 	br_fdb_find_delete_local(br, NULL, br->dev->dev_addr, vid);
 	br_fdb_delete_by_port(br, NULL, vid, 0);
-
-	vlan_tunnel_info_del(vg, v);
 
 	return __vlan_del(v);
 }
@@ -930,9 +918,6 @@ int br_vlan_init(struct net_bridge *br)
 	ret = rhashtable_init(&vg->vlan_hash, &br_vlan_rht_params);
 	if (ret)
 		goto err_rhtbl;
-	ret = vlan_tunnel_init(vg);
-	if (ret)
-		goto err_tunnel_init;
 	INIT_LIST_HEAD(&vg->vlan_list);
 	br->vlan_proto = htons(ETH_P_8021Q);
 	br->default_pvid = 1;
@@ -947,8 +932,6 @@ out:
 	return ret;
 
 err_vlan_add:
-	vlan_tunnel_deinit(vg);
-err_tunnel_init:
 	rhashtable_destroy(&vg->vlan_hash);
 err_rhtbl:
 	kfree(vg);
@@ -978,9 +961,6 @@ int nbp_vlan_init(struct net_bridge_port *p)
 	ret = rhashtable_init(&vg->vlan_hash, &br_vlan_rht_params);
 	if (ret)
 		goto err_rhtbl;
-	ret = vlan_tunnel_init(vg);
-	if (ret)
-		goto err_tunnel_init;
 	INIT_LIST_HEAD(&vg->vlan_list);
 	rcu_assign_pointer(p->vlgrp, vg);
 	if (p->br->default_pvid) {
@@ -996,11 +976,9 @@ out:
 err_vlan_add:
 	RCU_INIT_POINTER(p->vlgrp, NULL);
 	synchronize_rcu();
-	vlan_tunnel_deinit(vg);
-err_tunnel_init:
 	rhashtable_destroy(&vg->vlan_hash);
-err_rhtbl:
 err_vlan_enabled:
+err_rhtbl:
 	kfree(vg);
 
 	goto out;

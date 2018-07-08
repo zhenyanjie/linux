@@ -489,10 +489,6 @@ static int imx_thermal_probe(struct platform_device *pdev)
 	data->tempmon = map;
 
 	data->socdata = of_device_get_match_data(&pdev->dev);
-	if (!data->socdata) {
-		dev_err(&pdev->dev, "no device match found\n");
-		return -ENODEV;
-	}
 
 	/* make sure the IRQ flag is clear before enabling irq on i.MX6SX */
 	if (data->socdata->version == TEMPMON_IMX6SX) {
@@ -591,6 +587,9 @@ static int imx_thermal_probe(struct platform_device *pdev)
 	regmap_write(map, TEMPSENSE0 + REG_CLR, TEMPSENSE0_POWER_DOWN);
 	regmap_write(map, TEMPSENSE0 + REG_SET, TEMPSENSE0_MEASURE_TEMP);
 
+	data->irq_enabled = true;
+	data->mode = THERMAL_DEVICE_ENABLED;
+
 	ret = devm_request_threaded_irq(&pdev->dev, data->irq,
 			imx_thermal_alarm_irq, imx_thermal_alarm_irq_thread,
 			0, "imx_thermal", data);
@@ -601,9 +600,6 @@ static int imx_thermal_probe(struct platform_device *pdev)
 		cpufreq_cooling_unregister(data->cdev);
 		return ret;
 	}
-
-	data->irq_enabled = true;
-	data->mode = THERMAL_DEVICE_ENABLED;
 
 	return 0;
 }

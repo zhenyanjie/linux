@@ -10,7 +10,6 @@
 #include <linux/syscalls.h>
 #include <linux/mempolicy.h>
 #include <linux/page-isolation.h>
-#include <linux/userfaultfd_k.h>
 #include <linux/hugetlb.h>
 #include <linux/falloc.h>
 #include <linux/sched.h>
@@ -21,12 +20,10 @@
 #include <linux/backing-dev.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
-#include <linux/shmem_fs.h>
 #include <linux/mmu_notifier.h>
+#include "internal.h"
 
 #include <asm/tlb.h>
-
-#include "internal.h"
 
 /*
  * Any behaviour which results in changes to the vma->vm_flags needs to
@@ -93,28 +90,14 @@ static long madvise_behavior(struct vm_area_struct *vma,
 	case MADV_MERGEABLE:
 	case MADV_UNMERGEABLE:
 		error = ksm_madvise(vma, start, end, behavior, &new_flags);
-		if (error) {
-			/*
-			 * madvise() returns EAGAIN if kernel resources, such as
-			 * slab, are temporarily unavailable.
-			 */
-			if (error == -ENOMEM)
-				error = -EAGAIN;
+		if (error)
 			goto out;
-		}
 		break;
 	case MADV_HUGEPAGE:
 	case MADV_NOHUGEPAGE:
 		error = hugepage_madvise(vma, &new_flags, behavior);
-		if (error) {
-			/*
-			 * madvise() returns EAGAIN if kernel resources, such as
-			 * slab, are temporarily unavailable.
-			 */
-			if (error == -ENOMEM)
-				error = -EAGAIN;
+		if (error)
 			goto out;
-		}
 		break;
 	}
 
@@ -135,37 +118,15 @@ static long madvise_behavior(struct vm_area_struct *vma,
 	*prev = vma;
 
 	if (start != vma->vm_start) {
-		if (unlikely(mm->map_count >= sysctl_max_map_count)) {
-			error = -ENOMEM;
+		error = split_vma(mm, vma, start, 1);
+		if (error)
 			goto out;
-		}
-		error = __split_vma(mm, vma, start, 1);
-		if (error) {
-			/*
-			 * madvise() returns EAGAIN if kernel resources, such as
-			 * slab, are temporarily unavailable.
-			 */
-			if (error == -ENOMEM)
-				error = -EAGAIN;
-			goto out;
-		}
 	}
 
 	if (end != vma->vm_end) {
-		if (unlikely(mm->map_count >= sysctl_max_map_count)) {
-			error = -ENOMEM;
+		error = split_vma(mm, vma, end, 0);
+		if (error)
 			goto out;
-		}
-		error = __split_vma(mm, vma, end, 0);
-		if (error) {
-			/*
-			 * madvise() returns EAGAIN if kernel resources, such as
-			 * slab, are temporarily unavailable.
-			 */
-			if (error == -ENOMEM)
-				error = -EAGAIN;
-			goto out;
-		}
 	}
 
 success:
@@ -173,7 +134,10 @@ success:
 	 * vm_flags is protected by the mmap_sem held in write mode.
 	 */
 	vma->vm_flags = new_flags;
+
 out:
+	if (error == -ENOMEM)
+		error = -EAGAIN;
 	return error;
 }
 
@@ -264,15 +228,14 @@ static long madvise_willneed(struct vm_area_struct *vma,
 {
 	struct file *file = vma->vm_file;
 
+	*prev = vma;
 #ifdef CONFIG_SWAP
 	if (!file) {
-		*prev = vma;
 		force_swapin_readahead(vma, start, end);
 		return 0;
 	}
 
 	if (shmem_mapping(file->f_mapping)) {
-		*prev = vma;
 		force_shm_swapin_readahead(vma, start, end,
 					file->f_mapping);
 		return 0;
@@ -287,7 +250,6 @@ static long madvise_willneed(struct vm_area_struct *vma,
 		return 0;
 	}
 
-	*prev = vma;
 	start = ((start - vma->vm_start) >> PAGE_SHIFT) + vma->vm_pgoff;
 	if (end > vma->vm_end)
 		end = vma->vm_end;
@@ -318,8 +280,8 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 	if (pmd_trans_unstable(pmd))
 		return 0;
 
-	tlb_remove_check_page_size_change(tlb, PAGE_SIZE);
 	orig_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+	flush_tlb_batched_pending(mm);
 	arch_enter_lazy_mmu_mode();
 	for (; addr != end; pte++, addr += PAGE_SIZE) {
 		ptent = *pte;
@@ -367,8 +329,8 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 				pte_offset_map_lock(mm, pmd, addr, &ptl);
 				goto out;
 			}
-			put_page(page);
 			unlock_page(page);
+			put_page(page);
 			pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 			pte--;
 			addr -= PAGE_SIZE;
@@ -510,47 +472,10 @@ static long madvise_dontneed(struct vm_area_struct *vma,
 			     unsigned long start, unsigned long end)
 {
 	*prev = vma;
-	if (!can_madv_dontneed_vma(vma))
+	if (vma->vm_flags & (VM_LOCKED|VM_HUGETLB|VM_PFNMAP))
 		return -EINVAL;
 
-	if (!userfaultfd_remove(vma, start, end)) {
-		*prev = NULL; /* mmap_sem has been dropped, prev is stale */
-
-		down_read(&current->mm->mmap_sem);
-		vma = find_vma(current->mm, start);
-		if (!vma)
-			return -ENOMEM;
-		if (start < vma->vm_start) {
-			/*
-			 * This "vma" under revalidation is the one
-			 * with the lowest vma->vm_start where start
-			 * is also < vma->vm_end. If start <
-			 * vma->vm_start it means an hole materialized
-			 * in the user address space within the
-			 * virtual range passed to MADV_DONTNEED.
-			 */
-			return -ENOMEM;
-		}
-		if (!can_madv_dontneed_vma(vma))
-			return -EINVAL;
-		if (end > vma->vm_end) {
-			/*
-			 * Don't fail if end > vma->vm_end. If the old
-			 * vma was splitted while the mmap_sem was
-			 * released the effect of the concurrent
-			 * operation may not cause MADV_DONTNEED to
-			 * have an undefined result. There may be an
-			 * adjacent next vma that we'll walk
-			 * next. userfaultfd_remove() will generate an
-			 * UFFD_EVENT_REMOVE repetition on the
-			 * end-vma->vm_end range, but the manager can
-			 * handle a repetition fine.
-			 */
-			end = vma->vm_end;
-		}
-		VM_WARN_ON(start >= end);
-	}
-	zap_page_range(vma, start, end - start);
+	zap_page_range(vma, start, end - start, NULL);
 	return 0;
 }
 
@@ -590,10 +515,7 @@ static long madvise_remove(struct vm_area_struct *vma,
 	 * mmap_sem.
 	 */
 	get_file(f);
-	if (userfaultfd_remove(vma, start, end)) {
-		/* mmap_sem was not released by userfaultfd_remove() */
-		up_read(&current->mm->mmap_sem);
-	}
+	up_read(&current->mm->mmap_sem);
 	error = vfs_fallocate(f,
 				FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
 				offset, end - start);
@@ -609,6 +531,8 @@ static long madvise_remove(struct vm_area_struct *vma,
 static int madvise_hwpoison(int bhv, unsigned long start, unsigned long end)
 {
 	struct page *p;
+	struct zone *zone;
+
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 	for (; start < end; start += PAGE_SIZE <<
@@ -637,6 +561,11 @@ static int madvise_hwpoison(int bhv, unsigned long start, unsigned long end)
 		if (ret)
 			return ret;
 	}
+
+	/* Ensure that all poisoned pages are removed from per-cpu lists */
+	for_each_populated_zone(zone)
+		drain_all_pages(zone);
+
 	return 0;
 }
 #endif

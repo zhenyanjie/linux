@@ -42,6 +42,7 @@
 #include <asm/desc_defs.h>
 #include <asm/kmap_types.h>
 #include <asm/pgtable_types.h>
+#include <asm/nospec-branch.h>
 
 struct page;
 struct thread_struct;
@@ -102,6 +103,8 @@ struct pv_cpu_ops {
 	/* hooks for various privileged instructions */
 	unsigned long (*get_debugreg)(int regno);
 	void (*set_debugreg)(int regno, unsigned long value);
+
+	void (*clts)(void);
 
 	unsigned long (*read_cr0)(void);
 	void (*write_cr0)(unsigned long);
@@ -249,8 +252,6 @@ struct pv_mmu_ops {
 	void (*set_pmd)(pmd_t *pmdp, pmd_t pmdval);
 	void (*set_pmd_at)(struct mm_struct *mm, unsigned long addr,
 			   pmd_t *pmdp, pmd_t pmdval);
-	void (*set_pud_at)(struct mm_struct *mm, unsigned long addr,
-			   pud_t *pudp, pud_t pudval);
 	void (*pte_update)(struct mm_struct *mm, unsigned long addr,
 			   pte_t *ptep);
 
@@ -310,8 +311,6 @@ struct pv_lock_ops {
 
 	void (*wait)(u8 *ptr, u8 val);
 	void (*kick)(int cpu);
-
-	struct paravirt_callee_save vcpu_is_preempted;
 };
 
 /* This contains all the paravirt structures: we get a convenient
@@ -393,7 +392,9 @@ int paravirt_disable_iospace(void);
  * offset into the paravirt_patch_template structure, and can therefore be
  * freely converted back into a structure offset.
  */
-#define PARAVIRT_CALL	"call *%c[paravirt_opptr];"
+#define PARAVIRT_CALL					\
+	ANNOTATE_RETPOLINE_SAFE				\
+	"call *%c[paravirt_opptr];"
 
 /*
  * These macros are intended to wrap calls through one of the paravirt
@@ -510,18 +511,6 @@ int paravirt_disable_iospace(void);
 #define PVOP_TEST_NULL(op)	((void)op)
 #endif
 
-#define PVOP_RETMASK(rettype)						\
-	({	unsigned long __mask = ~0UL;				\
-		switch (sizeof(rettype)) {				\
-		case 1: __mask =       0xffUL; break;			\
-		case 2: __mask =     0xffffUL; break;			\
-		case 4: __mask = 0xffffffffUL; break;			\
-		default: break;						\
-		}							\
-		__mask;							\
-	})
-
-
 #define ____PVOP_CALL(rettype, op, clbr, call_clbr, extra_clbr,		\
 		      pre, post, ...)					\
 	({								\
@@ -549,7 +538,7 @@ int paravirt_disable_iospace(void);
 				       paravirt_clobber(clbr),		\
 				       ##__VA_ARGS__			\
 				     : "memory", "cc" extra_clbr);	\
-			__ret = (rettype)(__eax & PVOP_RETMASK(rettype));	\
+			__ret = (rettype)__eax;				\
 		}							\
 		__ret;							\
 	})

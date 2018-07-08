@@ -3442,7 +3442,7 @@ static int niu_process_rx_pkt(struct napi_struct *napi, struct niu *np,
 
 		len = (val & RCR_ENTRY_L2_LEN) >>
 			RCR_ENTRY_L2_LEN_SHIFT;
-		len -= ETH_FCS_LEN;
+		append_size = len + ETH_HLEN + ETH_FCS_LEN;
 
 		addr = (val & RCR_ENTRY_PKT_BUF_ADDR) <<
 			RCR_ENTRY_PKT_BUF_ADDR_SHIFT;
@@ -3452,7 +3452,6 @@ static int niu_process_rx_pkt(struct napi_struct *napi, struct niu *np,
 					 RCR_ENTRY_PKTBUFSZ_SHIFT];
 
 		off = addr & ~PAGE_MASK;
-		append_size = rcr_size;
 		if (num_rcr == 1) {
 			int ptype;
 
@@ -3465,7 +3464,7 @@ static int niu_process_rx_pkt(struct napi_struct *napi, struct niu *np,
 			else
 				skb_checksum_none_assert(skb);
 		} else if (!(val & RCR_ENTRY_MULTI))
-			append_size = len - skb->len;
+			append_size = append_size - skb->len;
 
 		niu_rx_skb_append(skb, page, off, append_size, rcr_size);
 		if ((page->index + rp->rbr_block_size) - rcr_size == addr) {
@@ -3786,7 +3785,7 @@ static int niu_poll(struct napi_struct *napi, int budget)
 	work_done = niu_poll_core(np, lp, budget);
 
 	if (work_done < budget) {
-		napi_complete_done(napi, work_done);
+		napi_complete(napi);
 		niu_ldg_rearm(np, lp, 1);
 	}
 	return work_done;
@@ -6294,8 +6293,8 @@ no_rings:
 	stats->tx_errors = errors;
 }
 
-static void niu_get_stats(struct net_device *dev,
-			  struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *niu_get_stats(struct net_device *dev,
+					       struct rtnl_link_stats64 *stats)
 {
 	struct niu *np = netdev_priv(dev);
 
@@ -6303,6 +6302,8 @@ static void niu_get_stats(struct net_device *dev,
 		niu_get_rx_stats(np, stats);
 		niu_get_tx_stats(np, stats);
 	}
+
+	return stats;
 }
 
 static void niu_load_hash_xmac(struct niu *np, u16 *hash)
@@ -6751,6 +6752,9 @@ static int niu_change_mtu(struct net_device *dev, int new_mtu)
 {
 	struct niu *np = netdev_priv(dev);
 	int err, orig_jumbo, new_jumbo;
+
+	if (new_mtu < 68 || new_mtu > NIU_MAX_MTU)
+		return -EINVAL;
 
 	orig_jumbo = (dev->mtu > ETH_DATA_LEN);
 	new_jumbo = (new_mtu > ETH_DATA_LEN);
@@ -9817,10 +9821,6 @@ static int niu_pci_init_one(struct pci_dev *pdev,
 	pci_save_state(pdev);
 
 	dev->irq = pdev->irq;
-
-	/* MTU range: 68 - 9216 */
-	dev->min_mtu = ETH_MIN_MTU;
-	dev->max_mtu = NIU_MAX_MTU;
 
 	niu_assign_netdev_ops(dev);
 

@@ -387,10 +387,10 @@ size_t map__fprintf_dsoname(struct map *map, FILE *fp)
 {
 	const char *dsoname = "[unknown]";
 
-	if (map && map->dso) {
+	if (map && map->dso && (map->dso->name || map->dso->long_name)) {
 		if (symbol_conf.show_kernel_path && map->dso->long_name)
 			dsoname = map->dso->long_name;
-		else
+		else if (map->dso->name)
 			dsoname = map->dso->name;
 	}
 
@@ -682,16 +682,9 @@ static int maps__fixup_overlappings(struct maps *maps, struct map *map, FILE *fp
 			continue;
 
 		if (verbose >= 2) {
-
-			if (use_browser) {
-				pr_warning("overlapping maps in %s "
-					   "(disable tui for more info)\n",
-					   map->dso->name);
-			} else {
-				fputs("overlapping maps:\n", fp);
-				map__fprintf(map, fp);
-				map__fprintf(pos, fp);
-			}
+			fputs("overlapping maps:\n", fp);
+			map__fprintf(map, fp);
+			map__fprintf(pos, fp);
 		}
 
 		rb_erase_init(&pos->rb_node, root);
@@ -709,7 +702,7 @@ static int maps__fixup_overlappings(struct maps *maps, struct map *map, FILE *fp
 
 			before->end = map->start;
 			__map_groups__insert(pos->groups, before);
-			if (verbose >= 2 && !use_browser)
+			if (verbose >= 2)
 				map__fprintf(before, fp);
 			map__put(before);
 		}
@@ -724,7 +717,7 @@ static int maps__fixup_overlappings(struct maps *maps, struct map *map, FILE *fp
 
 			after->start = map->end;
 			__map_groups__insert(pos->groups, after);
-			if (verbose >= 2 && !use_browser)
+			if (verbose >= 2)
 				map__fprintf(after, fp);
 			map__put(after);
 		}

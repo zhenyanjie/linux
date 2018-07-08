@@ -97,11 +97,11 @@ static int btmrvl_sdio_probe_of(struct device *dev,
 		cfg->irq_bt = irq_of_parse_and_map(card->plt_of_node, 0);
 		if (!cfg->irq_bt) {
 			dev_err(dev, "fail to parse irq_bt from device tree");
-			cfg->irq_bt = -1;
 		} else {
 			ret = devm_request_irq(dev, cfg->irq_bt,
 					       btmrvl_wake_irq_bt,
-					       0, "bt_wake", cfg);
+					       IRQF_TRIGGER_LOW,
+					       "bt_wake", cfg);
 			if (ret) {
 				dev_err(dev,
 					"Failed to request irq_bt %d (%d)\n",
@@ -1624,7 +1624,7 @@ static int btmrvl_sdio_suspend(struct device *dev)
 
 	if (priv->adapter->hs_state != HS_ACTIVATED) {
 		if (btmrvl_enable_hs(priv)) {
-			BT_ERR("HS not activated, suspend failed!");
+			BT_ERR("HS not actived, suspend failed!");
 			priv->adapter->is_suspending = false;
 			return -EBUSY;
 		}

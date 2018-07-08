@@ -10,7 +10,7 @@
 
 #include <keys/user-type.h>
 #include <linux/scatterlist.h>
-#include "fscrypt_private.h"
+#include <linux/fscrypto.h>
 
 static void derive_crypt_complete(struct crypto_async_request *req, int rc)
 {
@@ -77,22 +77,26 @@ out:
 
 static int validate_user_key(struct fscrypt_info *crypt_info,
 			struct fscrypt_context *ctx, u8 *raw_key,
-			const char *prefix)
+			u8 *prefix, int prefix_size)
 {
-	char *description;
+	u8 *full_key_descriptor;
 	struct key *keyring_key;
 	struct fscrypt_key *master_key;
 	const struct user_key_payload *ukp;
+	int full_key_len = prefix_size + (FS_KEY_DESCRIPTOR_SIZE * 2) + 1;
 	int res;
 
-	description = kasprintf(GFP_NOFS, "%s%*phN", prefix,
-				FS_KEY_DESCRIPTOR_SIZE,
-				ctx->master_key_descriptor);
-	if (!description)
+	full_key_descriptor = kmalloc(full_key_len, GFP_NOFS);
+	if (!full_key_descriptor)
 		return -ENOMEM;
 
-	keyring_key = request_key(&key_type_logon, description, NULL);
-	kfree(description);
+	memcpy(full_key_descriptor, prefix, prefix_size);
+	sprintf(full_key_descriptor + prefix_size,
+			"%*phN", FS_KEY_DESCRIPTOR_SIZE,
+			ctx->master_key_descriptor);
+	full_key_descriptor[full_key_len - 1] = '\0';
+	keyring_key = request_key(&key_type_logon, full_key_descriptor, NULL);
+	kfree(full_key_descriptor);
 	if (IS_ERR(keyring_key))
 		return PTR_ERR(keyring_key);
 	down_read(&keyring_key->sem);
@@ -103,7 +107,12 @@ static int validate_user_key(struct fscrypt_info *crypt_info,
 		res = -ENOKEY;
 		goto out;
 	}
-	ukp = user_key_payload_locked(keyring_key);
+	ukp = user_key_payload(keyring_key);
+	if (!ukp) {
+		/* key was revoked before we acquired its semaphore */
+		res = -EKEYREVOKED;
+		goto out;
+	}
 	if (ukp->datalen != sizeof(struct fscrypt_key)) {
 		res = -EINVAL;
 		goto out;
@@ -179,7 +188,7 @@ int fscrypt_get_encryption_info(struct inode *inode)
 	if (inode->i_crypt_info)
 		return 0;
 
-	res = fscrypt_initialize(inode->i_sb->s_cop->flags);
+	res = fscrypt_initialize();
 	if (res)
 		return res;
 
@@ -188,15 +197,12 @@ int fscrypt_get_encryption_info(struct inode *inode)
 
 	res = inode->i_sb->s_cop->get_context(inode, &ctx, sizeof(ctx));
 	if (res < 0) {
-		if (!fscrypt_dummy_context_enabled(inode) ||
-		    inode->i_sb->s_cop->is_encrypted(inode))
+		if (!fscrypt_dummy_context_enabled(inode))
 			return res;
-		/* Fake up a context for an unencrypted directory */
-		memset(&ctx, 0, sizeof(ctx));
 		ctx.format = FS_ENCRYPTION_CONTEXT_FORMAT_V1;
 		ctx.contents_encryption_mode = FS_ENCRYPTION_MODE_AES_256_XTS;
 		ctx.filenames_encryption_mode = FS_ENCRYPTION_MODE_AES_256_CTS;
-		memset(ctx.master_key_descriptor, 0x42, FS_KEY_DESCRIPTOR_SIZE);
+		ctx.flags = 0;
 	} else if (res != sizeof(ctx)) {
 		return -EINVAL;
 	}
@@ -231,10 +237,20 @@ int fscrypt_get_encryption_info(struct inode *inode)
 	if (!raw_key)
 		goto out;
 
-	res = validate_user_key(crypt_info, &ctx, raw_key, FS_KEY_DESC_PREFIX);
+	if (fscrypt_dummy_context_enabled(inode)) {
+		memset(raw_key, 0x42, FS_AES_256_XTS_KEY_SIZE);
+		goto got_key;
+	}
+
+	res = validate_user_key(crypt_info, &ctx, raw_key,
+			FS_KEY_DESC_PREFIX, FS_KEY_DESC_PREFIX_SIZE);
 	if (res && inode->i_sb->s_cop->key_prefix) {
-		int res2 = validate_user_key(crypt_info, &ctx, raw_key,
-					     inode->i_sb->s_cop->key_prefix);
+		u8 *prefix = NULL;
+		int prefix_size, res2;
+
+		prefix_size = inode->i_sb->s_cop->key_prefix(inode, &prefix);
+		res2 = validate_user_key(crypt_info, &ctx, raw_key,
+							prefix, prefix_size);
 		if (res2) {
 			if (res2 == -ENOKEY)
 				res = -ENOKEY;
@@ -243,6 +259,7 @@ int fscrypt_get_encryption_info(struct inode *inode)
 	} else if (res) {
 		goto out;
 	}
+got_key:
 	ctfm = crypto_alloc_skcipher(cipher_str, 0, 0);
 	if (!ctfm || IS_ERR(ctfm)) {
 		res = ctfm ? PTR_ERR(ctfm) : -ENOMEM;

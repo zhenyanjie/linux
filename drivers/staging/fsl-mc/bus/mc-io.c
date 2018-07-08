@@ -1,5 +1,4 @@
-/*
- * Copyright 2013-2016 Freescale Semiconductor Inc.
+/* Copyright 2013-2016 Freescale Semiconductor Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -11,6 +10,7 @@
  *     * Neither the name of the above-listed copyright holders nor the
  *       names of any contributors may be used to endorse or promote products
  *       derived from this software without specific prior written permission.
+ *
  *
  * ALTERNATIVELY, this software may be distributed under the terms of the
  * GNU General Public License ("GPL") as published by the Free Software

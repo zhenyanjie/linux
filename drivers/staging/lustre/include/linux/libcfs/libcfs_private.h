@@ -75,7 +75,7 @@ do {									\
 
 #define KLASSERT(e) LASSERT(e)
 
-void __noreturn lbug_with_loc(struct libcfs_debug_msg_data *msg);
+void __noreturn lbug_with_loc(struct libcfs_debug_msg_data *);
 
 #define LBUG()							  \
 do {								    \
@@ -96,7 +96,7 @@ do {									    \
 
 #define LIBCFS_ALLOC_POST(ptr, size)					    \
 do {									    \
-	if (unlikely(!(ptr))) {						    \
+	if (unlikely((ptr) == NULL)) {					    \
 		CERROR("LNET: out of memory at %s:%d (tried to alloc '"	    \
 		       #ptr "' = %d)\n", __FILE__, __LINE__, (int)(size));  \
 	} else {							    \
@@ -147,7 +147,7 @@ do {									    \
 
 #define LIBCFS_FREE(ptr, size)					  \
 do {								    \
-	if (unlikely(!(ptr))) {						\
+	if (unlikely((ptr) == NULL)) {				  \
 		CERROR("LIBCFS: free NULL '" #ptr "' (%d bytes) at "    \
 		       "%s:%d\n", (int)(size), __FILE__, __LINE__);	\
 		break;						  \
@@ -169,6 +169,8 @@ do {								    \
 #define ntohs(x) ___ntohs(x)
 #endif
 
+void libcfs_run_upcall(char **argv);
+void libcfs_run_lbug_upcall(struct libcfs_debug_msg_data *);
 void libcfs_debug_dumplog(void);
 int libcfs_debug_init(unsigned long bufsize);
 int libcfs_debug_cleanup(void);
@@ -277,6 +279,22 @@ do {							    \
 #define CFS_ALLOC_PTR(ptr)      LIBCFS_ALLOC(ptr, sizeof(*(ptr)))
 #define CFS_FREE_PTR(ptr)       LIBCFS_FREE(ptr, sizeof(*(ptr)))
 
+/** Compile-time assertion.
+
+ * Check an invariant described by a constant expression at compile time by
+ * forcing a compiler error if it does not hold.  \a cond must be a constant
+ * expression as defined by the ISO C Standard:
+ *
+ *       6.8.4.2  The switch statement
+ *       ....
+ *       [#3] The expression of each case label shall be  an  integer
+ *       constant   expression  and  no  two  of  the  case  constant
+ *       expressions in the same switch statement shall have the same
+ *       value  after  conversion...
+ *
+ */
+#define CLASSERT(cond) do {switch (42) {case (cond): case 0: break; } } while (0)
+
 /* max value for numeric network address */
 #define MAX_NUMERIC_VALUE 0xffffffff
 
@@ -288,8 +306,7 @@ do {							    \
 /* --------------------------------------------------------------------
  * Light-weight trace
  * Support for temporary event tracing with minimal Heisenberg effect.
- * --------------------------------------------------------------------
- */
+ * -------------------------------------------------------------------- */
 
 #define MKSTR(ptr) ((ptr)) ? (ptr) : ""
 

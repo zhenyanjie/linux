@@ -30,7 +30,7 @@
 
 static gfp_t high_order_gfp_flags = (GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN |
 				     __GFP_NORETRY) & ~__GFP_RECLAIM;
-static gfp_t low_order_gfp_flags  = GFP_HIGHUSER | __GFP_ZERO;
+static gfp_t low_order_gfp_flags  = (GFP_HIGHUSER | __GFP_ZERO);
 static const unsigned int orders[] = {8, 4, 0};
 
 static int order_to_index(unsigned int order)
@@ -384,7 +384,7 @@ static int ion_system_contig_heap_allocate(struct ion_heap *heap,
 	if (align > (PAGE_SIZE << order))
 		return -EINVAL;
 
-	page = alloc_pages(low_order_gfp_flags, order);
+	page = alloc_pages(low_order_gfp_flags | __GFP_NOWARN, order);
 	if (!page)
 		return -ENOMEM;
 

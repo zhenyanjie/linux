@@ -12,6 +12,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
  * File: device_main.c
  *
  * Purpose: driver entry for initial, open, close, tx and rx.
@@ -310,7 +314,7 @@ static void device_init_registers(struct vnt_private *priv)
 			SROMbyReadEmbedded(priv->PortOffset,
 					   (unsigned char)(ii + EEP_OFS_CCK_PWR_TBL));
 		if (priv->abyCCKPwrTbl[ii + 1] == 0)
-			priv->abyCCKPwrTbl[ii + 1] = priv->byCCKPwr;
+			priv->abyCCKPwrTbl[ii+1] = priv->byCCKPwr;
 
 		priv->abyOFDMPwrTbl[ii + 1] =
 			SROMbyReadEmbedded(priv->PortOffset,
@@ -552,7 +556,7 @@ static void device_init_rd0_ring(struct vnt_private *priv)
 		if (!device_alloc_rx_buf(priv, desc))
 			dev_err(&priv->pcid->dev, "can not alloc rx bufs\n");
 
-		desc->next = &(priv->aRD0Ring[(i + 1) % priv->opts.rx_descs0]);
+		desc->next = &(priv->aRD0Ring[(i+1) % priv->opts.rx_descs0]);
 		desc->next_desc = cpu_to_le32(curr + sizeof(struct vnt_rx_desc));
 	}
 
@@ -1268,6 +1272,7 @@ static void vnt_remove_interface(struct ieee80211_hw *hw,
 	priv->op_mode = NL80211_IFTYPE_UNSPECIFIED;
 }
 
+
 static int vnt_config(struct ieee80211_hw *hw, u32 changed)
 {
 	struct vnt_private *priv = hw->priv;
@@ -1693,9 +1698,10 @@ static int vt6655_suspend(struct pci_dev *pcid, pm_message_t state)
 	MACbShutdown(priv);
 
 	pci_disable_device(pcid);
-	pci_set_power_state(pcid, pci_choose_state(pcid, state));
 
 	spin_unlock_irqrestore(&priv->lock, flags);
+
+	pci_set_power_state(pcid, pci_choose_state(pcid, state));
 
 	return 0;
 }

@@ -225,7 +225,7 @@
 };
 
 &usbotg1 {
-	dr_mode = "otg";
+	dr_mode = "peripheral";
 	status = "okay";
 };
 
@@ -233,14 +233,6 @@
 	dr_mode = "host";
 	disable-over-current;
 	status = "okay";
-};
-
-&usbphy1 {
-	fsl,tx-d-cal = <106>;
-};
-
-&usbphy2 {
-	fsl,tx-d-cal = <106>;
 };
 
 &usdhc1 {

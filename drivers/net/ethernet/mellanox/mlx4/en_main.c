@@ -163,13 +163,13 @@ static int mlx4_en_get_profile(struct mlx4_en_dev *mdev)
 		params->udp_rss = 0;
 	}
 	for (i = 1; i <= MLX4_MAX_PORTS; i++) {
-		params->prof[i].rx_pause = 1;
+		params->prof[i].rx_pause = !(pfcrx || pfctx);
 		params->prof[i].rx_ppp = pfcrx;
-		params->prof[i].tx_pause = 1;
+		params->prof[i].tx_pause = !(pfcrx || pfctx);
 		params->prof[i].tx_ppp = pfctx;
 		params->prof[i].tx_ring_size = MLX4_EN_DEF_TX_RING_SIZE;
 		params->prof[i].rx_ring_size = MLX4_EN_DEF_RX_RING_SIZE;
-		params->prof[i].tx_ring_num[TX] = params->num_tx_rings_p_up *
+		params->prof[i].tx_ring_num = params->num_tx_rings_p_up *
 			MLX4_EN_NUM_UP;
 		params->prof[i].rss_rings = 0;
 		params->prof[i].inline_thold = inline_thold;

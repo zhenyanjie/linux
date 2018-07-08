@@ -156,9 +156,9 @@ int rxe_cq_post(struct rxe_cq *cq, struct rxe_cqe *cqe, int solicited)
 	return 0;
 }
 
-void rxe_cq_cleanup(struct rxe_pool_entry *arg)
+void rxe_cq_cleanup(void *arg)
 {
-	struct rxe_cq *cq = container_of(arg, typeof(*cq), pelem);
+	struct rxe_cq *cq = arg;
 
 	if (cq->queue)
 		rxe_queue_cleanup(cq->queue);

@@ -19,7 +19,6 @@
 #include <net/netlink.h>
 #include <linux/file.h>
 #include <linux/vmalloc.h>
-#include <linux/stringify.h>
 
 /* bpf_check() is a static code analyzer that walks eBPF program
  * instruction by instruction and updates register/stack state.
@@ -33,7 +32,7 @@
  * - out of bounds or malformed jumps
  * The second pass is all possible path descent from the 1st insn.
  * Since it's analyzing all pathes through the program, the length of the
- * analysis is limited to 64k insn, which may be hit even if total number of
+ * analysis is limited to 32k insn, which may be hit even if total number of
  * insn is less then 4K, but there are too many branches that change stack/regs.
  * Number of 'branches to be analyzed' is limited to 1k
  *
@@ -190,22 +189,6 @@ static const char * const reg_type_str[] = {
 	[PTR_TO_PACKET]		= "pkt",
 	[PTR_TO_PACKET_END]	= "pkt_end",
 };
-
-#define __BPF_FUNC_STR_FN(x) [BPF_FUNC_ ## x] = __stringify(bpf_ ## x)
-static const char * const func_id_str[] = {
-	__BPF_FUNC_MAPPER(__BPF_FUNC_STR_FN)
-};
-#undef __BPF_FUNC_STR_FN
-
-static const char *func_id_name(int id)
-{
-	BUILD_BUG_ON(ARRAY_SIZE(func_id_str) != __BPF_FUNC_MAX_ID);
-
-	if (id >= 0 && id < __BPF_FUNC_MAX_ID && func_id_str[id])
-		return func_id_str[id];
-	else
-		return "unknown";
-}
 
 static void print_verifier_state(struct bpf_verifier_state *state)
 {
@@ -382,8 +365,7 @@ static void print_bpf_insn(const struct bpf_verifier_env *env,
 		u8 opcode = BPF_OP(insn->code);
 
 		if (opcode == BPF_CALL) {
-			verbose("(%02x) call %s#%d\n", insn->code,
-				func_id_name(insn->imm), insn->imm);
+			verbose("(%02x) call %d\n", insn->code, insn->imm);
 		} else if (insn->code == (BPF_JMP | BPF_JA)) {
 			verbose("(%02x) goto pc%+d\n",
 				insn->code, insn->off);
@@ -492,13 +474,6 @@ static void reset_reg_range_values(struct bpf_reg_state *regs, u32 regno)
 	regs[regno].max_value = BPF_REGISTER_MAX_RANGE;
 }
 
-static void mark_reg_unknown_value_and_range(struct bpf_reg_state *regs,
-					     u32 regno)
-{
-	mark_reg_unknown_value(regs, regno);
-	reset_reg_range_values(regs, regno);
-}
-
 enum reg_arg_type {
 	SRC_OP,		/* register is used as source operand */
 	DST_OP,		/* register is used as destination operand */
@@ -550,7 +525,6 @@ static bool is_spillable_regtype(enum bpf_reg_type type)
 	switch (type) {
 	case PTR_TO_MAP_VALUE:
 	case PTR_TO_MAP_VALUE_OR_NULL:
-	case PTR_TO_MAP_VALUE_ADJ:
 	case PTR_TO_STACK:
 	case PTR_TO_CTX:
 	case PTR_TO_PACKET:
@@ -635,8 +609,7 @@ static int check_stack_read(struct bpf_verifier_state *state, int off, int size,
 		}
 		if (value_regno >= 0)
 			/* have read misc data from the stack */
-			mark_reg_unknown_value_and_range(state->regs,
-							 value_regno);
+			mark_reg_unknown_value(state->regs, value_regno);
 		return 0;
 	}
 }
@@ -647,7 +620,7 @@ static int check_map_access(struct bpf_verifier_env *env, u32 regno, int off,
 {
 	struct bpf_map *map = env->cur_state.regs[regno].map_ptr;
 
-	if (off < 0 || size <= 0 || off + size > map->value_size) {
+	if (off < 0 || off + size > map->value_size) {
 		verbose("invalid access to map value, value_size=%d off=%d size=%d\n",
 			map->value_size, off, size);
 		return -EACCES;
@@ -655,68 +628,15 @@ static int check_map_access(struct bpf_verifier_env *env, u32 regno, int off,
 	return 0;
 }
 
-/* check read/write into an adjusted map element */
-static int check_map_access_adj(struct bpf_verifier_env *env, u32 regno,
-				int off, int size)
-{
-	struct bpf_verifier_state *state = &env->cur_state;
-	struct bpf_reg_state *reg = &state->regs[regno];
-	int err;
-
-	/* We adjusted the register to this map value, so we
-	 * need to change off and size to min_value and max_value
-	 * respectively to make sure our theoretical access will be
-	 * safe.
-	 */
-	if (log_level)
-		print_verifier_state(state);
-	env->varlen_map_value_access = true;
-	/* The minimum value is only important with signed
-	 * comparisons where we can't assume the floor of a
-	 * value is 0.  If we are using signed variables for our
-	 * index'es we need to make sure that whatever we use
-	 * will have a set floor within our range.
-	 */
-	if (reg->min_value < 0) {
-		verbose("R%d min value is negative, either use unsigned index or do a if (index >=0) check.\n",
-			regno);
-		return -EACCES;
-	}
-	err = check_map_access(env, regno, reg->min_value + off, size);
-	if (err) {
-		verbose("R%d min value is outside of the array range\n",
-			regno);
-		return err;
-	}
-
-	/* If we haven't set a max value then we need to bail
-	 * since we can't be sure we won't do bad things.
-	 */
-	if (reg->max_value == BPF_REGISTER_MAX_RANGE) {
-		verbose("R%d unbounded memory access, make sure to bounds check any array access into a map\n",
-			regno);
-		return -EACCES;
-	}
-	return check_map_access(env, regno, reg->max_value + off, size);
-}
-
 #define MAX_PACKET_OFF 0xffff
 
 static bool may_access_direct_pkt_data(struct bpf_verifier_env *env,
-				       const struct bpf_call_arg_meta *meta,
-				       enum bpf_access_type t)
+				       const struct bpf_call_arg_meta *meta)
 {
 	switch (env->prog->type) {
-	case BPF_PROG_TYPE_LWT_IN:
-	case BPF_PROG_TYPE_LWT_OUT:
-		/* dst_input() and dst_output() can't write for now */
-		if (t == BPF_WRITE)
-			return false;
-		/* fallthrough */
 	case BPF_PROG_TYPE_SCHED_CLS:
 	case BPF_PROG_TYPE_SCHED_ACT:
 	case BPF_PROG_TYPE_XDP:
-	case BPF_PROG_TYPE_LWT_XMIT:
 		if (meta)
 			return meta->pkt_access;
 
@@ -762,12 +682,13 @@ static int check_ctx_access(struct bpf_verifier_env *env, int off, int size,
 	return -EACCES;
 }
 
-static bool is_pointer_value(struct bpf_verifier_env *env, int regno)
+static bool __is_pointer_value(bool allow_ptr_leaks,
+			       const struct bpf_reg_state *reg)
 {
-	if (env->allow_ptr_leaks)
+	if (allow_ptr_leaks)
 		return false;
 
-	switch (env->cur_state.regs[regno].type) {
+	switch (reg->type) {
 	case UNKNOWN_VALUE:
 	case CONST_IMM:
 		return false;
@@ -776,54 +697,48 @@ static bool is_pointer_value(struct bpf_verifier_env *env, int regno)
 	}
 }
 
-static int check_pkt_ptr_alignment(const struct bpf_reg_state *reg,
-				   int off, int size)
+static bool is_pointer_value(struct bpf_verifier_env *env, int regno)
 {
-	if (reg->id && size != 1) {
-		verbose("Unknown alignment. Only byte-sized access allowed in packet access.\n");
-		return -EACCES;
-	}
-
-	/* skb->data is NET_IP_ALIGN-ed */
-	if ((NET_IP_ALIGN + reg->off + off) % size != 0) {
-		verbose("misaligned packet access off %d+%d+%d size %d\n",
-			NET_IP_ALIGN, reg->off, off, size);
-		return -EACCES;
-	}
-
-	return 0;
+	return __is_pointer_value(env->allow_ptr_leaks, &env->cur_state.regs[regno]);
 }
 
-static int check_val_ptr_alignment(const struct bpf_reg_state *reg,
-				   int size)
+static bool is_ctx_reg(struct bpf_verifier_env *env, int regno)
 {
-	if (size != 1) {
-		verbose("Unknown alignment. Only byte-sized access allowed in value access.\n");
-		return -EACCES;
-	}
+	const struct bpf_reg_state *reg = &env->cur_state.regs[regno];
 
-	return 0;
+	return reg->type == PTR_TO_CTX;
 }
 
-static int check_ptr_alignment(const struct bpf_reg_state *reg,
-			       int off, int size)
+static int check_ptr_alignment(struct bpf_verifier_env *env,
+			       struct bpf_reg_state *reg, int off, int size)
 {
-	switch (reg->type) {
-	case PTR_TO_PACKET:
-		return IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) ? 0 :
-		       check_pkt_ptr_alignment(reg, off, size);
-	case PTR_TO_MAP_VALUE_ADJ:
-		return IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) ? 0 :
-		       check_val_ptr_alignment(reg, size);
-	default:
+	if (reg->type != PTR_TO_PACKET && reg->type != PTR_TO_MAP_VALUE_ADJ) {
 		if (off % size != 0) {
 			verbose("misaligned access off %d size %d\n",
 				off, size);
 			return -EACCES;
+		} else {
+			return 0;
 		}
-
-		return 0;
 	}
+
+	if (IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS))
+		/* misaligned access to packet is ok on x86,arm,arm64 */
+		return 0;
+
+	if (reg->id && size != 1) {
+		verbose("Unknown packet alignment. Only byte-sized access allowed\n");
+		return -EACCES;
+	}
+
+	/* skb->data is NET_IP_ALIGN-ed */
+	if (reg->type == PTR_TO_PACKET &&
+	    (NET_IP_ALIGN + reg->off + off) % size != 0) {
+		verbose("misaligned packet access off %d+%d+%d size %d\n",
+			NET_IP_ALIGN, reg->off, off, size);
+		return -EACCES;
+	}
+	return 0;
 }
 
 /* check whether memory at (regno + off) is accessible for t = (read | write)
@@ -847,7 +762,7 @@ static int check_mem_access(struct bpf_verifier_env *env, u32 regno, int off,
 	if (size < 0)
 		return size;
 
-	err = check_ptr_alignment(reg, off, size);
+	err = check_ptr_alignment(env, reg, off, size);
 	if (err)
 		return err;
 
@@ -859,13 +774,47 @@ static int check_mem_access(struct bpf_verifier_env *env, u32 regno, int off,
 			return -EACCES;
 		}
 
-		if (reg->type == PTR_TO_MAP_VALUE_ADJ)
-			err = check_map_access_adj(env, regno, off, size);
-		else
-			err = check_map_access(env, regno, off, size);
+		/* If we adjusted the register to this map value at all then we
+		 * need to change off and size to min_value and max_value
+		 * respectively to make sure our theoretical access will be
+		 * safe.
+		 */
+		if (reg->type == PTR_TO_MAP_VALUE_ADJ) {
+			if (log_level)
+				print_verifier_state(state);
+			env->varlen_map_value_access = true;
+			/* The minimum value is only important with signed
+			 * comparisons where we can't assume the floor of a
+			 * value is 0.  If we are using signed variables for our
+			 * index'es we need to make sure that whatever we use
+			 * will have a set floor within our range.
+			 */
+			if (reg->min_value < 0) {
+				verbose("R%d min value is negative, either use unsigned index or do a if (index >=0) check.\n",
+					regno);
+				return -EACCES;
+			}
+			err = check_map_access(env, regno, reg->min_value + off,
+					       size);
+			if (err) {
+				verbose("R%d min value is outside of the array range\n",
+					regno);
+				return err;
+			}
+
+			/* If we haven't set a max value then we need to bail
+			 * since we can't be sure we won't do bad things.
+			 */
+			if (reg->max_value == BPF_REGISTER_MAX_RANGE) {
+				verbose("R%d unbounded memory access, make sure to bounds check any array access into a map\n",
+					regno);
+				return -EACCES;
+			}
+			off += reg->max_value;
+		}
+		err = check_map_access(env, regno, off, size);
 		if (!err && t == BPF_READ && value_regno >= 0)
-			mark_reg_unknown_value_and_range(state->regs,
-							 value_regno);
+			mark_reg_unknown_value(state->regs, value_regno);
 
 	} else if (reg->type == PTR_TO_CTX) {
 		enum bpf_reg_type reg_type = UNKNOWN_VALUE;
@@ -877,8 +826,7 @@ static int check_mem_access(struct bpf_verifier_env *env, u32 regno, int off,
 		}
 		err = check_ctx_access(env, off, size, t, &reg_type);
 		if (!err && t == BPF_READ && value_regno >= 0) {
-			mark_reg_unknown_value_and_range(state->regs,
-							 value_regno);
+			mark_reg_unknown_value(state->regs, value_regno);
 			/* note that reg.[id|off|range] == 0 */
 			state->regs[value_regno].type = reg_type;
 		}
@@ -900,7 +848,7 @@ static int check_mem_access(struct bpf_verifier_env *env, u32 regno, int off,
 			err = check_stack_read(state, off, size, value_regno);
 		}
 	} else if (state->regs[regno].type == PTR_TO_PACKET) {
-		if (t == BPF_WRITE && !may_access_direct_pkt_data(env, NULL, t)) {
+		if (t == BPF_WRITE && !may_access_direct_pkt_data(env, NULL)) {
 			verbose("cannot write into packet\n");
 			return -EACCES;
 		}
@@ -911,8 +859,7 @@ static int check_mem_access(struct bpf_verifier_env *env, u32 regno, int off,
 		}
 		err = check_packet_access(env, regno, off, size);
 		if (!err && t == BPF_READ && value_regno >= 0)
-			mark_reg_unknown_value_and_range(state->regs,
-							 value_regno);
+			mark_reg_unknown_value(state->regs, value_regno);
 	} else {
 		verbose("R%d invalid mem access '%s'\n",
 			regno, reg_type_str[reg->type]);
@@ -953,6 +900,12 @@ static int check_xadd(struct bpf_verifier_env *env, struct bpf_insn *insn)
 
 	if (is_pointer_value(env, insn->src_reg)) {
 		verbose("R%d leaks addr into mem\n", insn->src_reg);
+		return -EACCES;
+	}
+
+	if (is_ctx_reg(env, insn->dst_reg)) {
+		verbose("BPF_XADD stores into R%d context is not allowed\n",
+			insn->dst_reg);
 		return -EACCES;
 	}
 
@@ -1015,25 +968,6 @@ static int check_stack_boundary(struct bpf_verifier_env *env, int regno,
 	return 0;
 }
 
-static int check_helper_mem_access(struct bpf_verifier_env *env, int regno,
-				   int access_size, bool zero_size_allowed,
-				   struct bpf_call_arg_meta *meta)
-{
-	struct bpf_reg_state *regs = env->cur_state.regs;
-
-	switch (regs[regno].type) {
-	case PTR_TO_PACKET:
-		return check_packet_access(env, regno, 0, access_size);
-	case PTR_TO_MAP_VALUE:
-		return check_map_access(env, regno, 0, access_size);
-	case PTR_TO_MAP_VALUE_ADJ:
-		return check_map_access_adj(env, regno, 0, access_size);
-	default: /* const_imm|ptr_to_stack or invalid ptr */
-		return check_stack_boundary(env, regno, access_size,
-					    zero_size_allowed, meta);
-	}
-}
-
 static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 			  enum bpf_arg_type arg_type,
 			  struct bpf_call_arg_meta *meta)
@@ -1058,8 +992,7 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		return 0;
 	}
 
-	if (type == PTR_TO_PACKET &&
-	    !may_access_direct_pkt_data(env, meta, BPF_READ)) {
+	if (type == PTR_TO_PACKET && !may_access_direct_pkt_data(env, meta)) {
 		verbose("helper access to the packet is not allowed\n");
 		return -EACCES;
 	}
@@ -1069,13 +1002,10 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		expected_type = PTR_TO_STACK;
 		if (type != PTR_TO_PACKET && type != expected_type)
 			goto err_type;
-	} else if (arg_type == ARG_CONST_SIZE ||
-		   arg_type == ARG_CONST_SIZE_OR_ZERO) {
+	} else if (arg_type == ARG_CONST_STACK_SIZE ||
+		   arg_type == ARG_CONST_STACK_SIZE_OR_ZERO) {
 		expected_type = CONST_IMM;
-		/* One exception. Allow UNKNOWN_VALUE registers when the
-		 * boundaries are known and don't cause unsafe memory accesses
-		 */
-		if (type != UNKNOWN_VALUE && type != expected_type)
+		if (type != expected_type)
 			goto err_type;
 	} else if (arg_type == ARG_CONST_MAP_PTR) {
 		expected_type = CONST_PTR_TO_MAP;
@@ -1085,8 +1015,8 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		expected_type = PTR_TO_CTX;
 		if (type != expected_type)
 			goto err_type;
-	} else if (arg_type == ARG_PTR_TO_MEM ||
-		   arg_type == ARG_PTR_TO_UNINIT_MEM) {
+	} else if (arg_type == ARG_PTR_TO_STACK ||
+		   arg_type == ARG_PTR_TO_RAW_STACK) {
 		expected_type = PTR_TO_STACK;
 		/* One exception here. In case function allows for NULL to be
 		 * passed in as argument, it's a CONST_IMM type. Final test
@@ -1094,10 +1024,9 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		 */
 		if (type == CONST_IMM && reg->imm == 0)
 			/* final test in check_stack_boundary() */;
-		else if (type != PTR_TO_PACKET && type != PTR_TO_MAP_VALUE &&
-			 type != PTR_TO_MAP_VALUE_ADJ && type != expected_type)
+		else if (type != PTR_TO_PACKET && type != expected_type)
 			goto err_type;
-		meta->raw_mode = arg_type == ARG_PTR_TO_UNINIT_MEM;
+		meta->raw_mode = arg_type == ARG_PTR_TO_RAW_STACK;
 	} else {
 		verbose("unsupported arg_type %d\n", arg_type);
 		return -EFAULT;
@@ -1143,9 +1072,9 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 			err = check_stack_boundary(env, regno,
 						   meta->map_ptr->value_size,
 						   false, NULL);
-	} else if (arg_type == ARG_CONST_SIZE ||
-		   arg_type == ARG_CONST_SIZE_OR_ZERO) {
-		bool zero_size_allowed = (arg_type == ARG_CONST_SIZE_OR_ZERO);
+	} else if (arg_type == ARG_CONST_STACK_SIZE ||
+		   arg_type == ARG_CONST_STACK_SIZE_OR_ZERO) {
+		bool zero_size_allowed = (arg_type == ARG_CONST_STACK_SIZE_OR_ZERO);
 
 		/* bpf_xxx(..., buf, len) call will access 'len' bytes
 		 * from stack pointer 'buf'. Check it
@@ -1153,50 +1082,14 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		 */
 		if (regno == 0) {
 			/* kernel subsystem misconfigured verifier */
-			verbose("ARG_CONST_SIZE cannot be first argument\n");
+			verbose("ARG_CONST_STACK_SIZE cannot be first argument\n");
 			return -EACCES;
 		}
-
-		/* If the register is UNKNOWN_VALUE, the access check happens
-		 * using its boundaries. Otherwise, just use its imm
-		 */
-		if (type == UNKNOWN_VALUE) {
-			/* For unprivileged variable accesses, disable raw
-			 * mode so that the program is required to
-			 * initialize all the memory that the helper could
-			 * just partially fill up.
-			 */
-			meta = NULL;
-
-			if (reg->min_value < 0) {
-				verbose("R%d min value is negative, either use unsigned or 'var &= const'\n",
-					regno);
-				return -EACCES;
-			}
-
-			if (reg->min_value == 0) {
-				err = check_helper_mem_access(env, regno - 1, 0,
-							      zero_size_allowed,
-							      meta);
-				if (err)
-					return err;
-			}
-
-			if (reg->max_value == BPF_REGISTER_MAX_RANGE) {
-				verbose("R%d unbounded memory access, use 'var &= const' or 'if (var < const)'\n",
-					regno);
-				return -EACCES;
-			}
-			err = check_helper_mem_access(env, regno - 1,
-						      reg->max_value,
-						      zero_size_allowed, meta);
-			if (err)
-				return err;
-		} else {
-			/* register is CONST_IMM */
-			err = check_helper_mem_access(env, regno - 1, reg->imm,
-						      zero_size_allowed, meta);
-		}
+		if (regs[regno - 1].type == PTR_TO_PACKET)
+			err = check_packet_access(env, regno - 1, 0, reg->imm);
+		else
+			err = check_stack_boundary(env, regno - 1, reg->imm,
+						   zero_size_allowed, meta);
 	}
 
 	return err;
@@ -1261,8 +1154,8 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 
 	return 0;
 error:
-	verbose("cannot pass map_type %d into func %s#%d\n",
-		map->map_type, func_id_name(func_id), func_id);
+	verbose("cannot pass map_type %d into func %d\n",
+		map->map_type, func_id);
 	return -EINVAL;
 }
 
@@ -1270,15 +1163,15 @@ static int check_raw_mode(const struct bpf_func_proto *fn)
 {
 	int count = 0;
 
-	if (fn->arg1_type == ARG_PTR_TO_UNINIT_MEM)
+	if (fn->arg1_type == ARG_PTR_TO_RAW_STACK)
 		count++;
-	if (fn->arg2_type == ARG_PTR_TO_UNINIT_MEM)
+	if (fn->arg2_type == ARG_PTR_TO_RAW_STACK)
 		count++;
-	if (fn->arg3_type == ARG_PTR_TO_UNINIT_MEM)
+	if (fn->arg3_type == ARG_PTR_TO_RAW_STACK)
 		count++;
-	if (fn->arg4_type == ARG_PTR_TO_UNINIT_MEM)
+	if (fn->arg4_type == ARG_PTR_TO_RAW_STACK)
 		count++;
-	if (fn->arg5_type == ARG_PTR_TO_UNINIT_MEM)
+	if (fn->arg5_type == ARG_PTR_TO_RAW_STACK)
 		count++;
 
 	return count > 1 ? -EINVAL : 0;
@@ -1307,7 +1200,7 @@ static void clear_all_pkt_pointers(struct bpf_verifier_env *env)
 	}
 }
 
-static int check_call(struct bpf_verifier_env *env, int func_id)
+static int check_call(struct bpf_verifier_env *env, int func_id, int insn_idx)
 {
 	struct bpf_verifier_state *state = &env->cur_state;
 	const struct bpf_func_proto *fn = NULL;
@@ -1319,7 +1212,7 @@ static int check_call(struct bpf_verifier_env *env, int func_id)
 
 	/* find function prototype */
 	if (func_id < 0 || func_id >= __BPF_FUNC_MAX_ID) {
-		verbose("invalid func %s#%d\n", func_id_name(func_id), func_id);
+		verbose("invalid func %d\n", func_id);
 		return -EINVAL;
 	}
 
@@ -1327,7 +1220,7 @@ static int check_call(struct bpf_verifier_env *env, int func_id)
 		fn = env->prog->aux->ops->get_func_proto(func_id);
 
 	if (!fn) {
-		verbose("unknown func %s#%d\n", func_id_name(func_id), func_id);
+		verbose("unknown func %d\n", func_id);
 		return -EINVAL;
 	}
 
@@ -1337,7 +1230,7 @@ static int check_call(struct bpf_verifier_env *env, int func_id)
 		return -EINVAL;
 	}
 
-	changes_data = bpf_helper_changes_pkt_data(fn->func);
+	changes_data = bpf_helper_changes_skb_data(fn->func);
 
 	memset(&meta, 0, sizeof(meta));
 	meta.pkt_access = fn->pkt_access;
@@ -1347,8 +1240,7 @@ static int check_call(struct bpf_verifier_env *env, int func_id)
 	 */
 	err = check_raw_mode(fn);
 	if (err) {
-		verbose("kernel subsystem misconfigured func %s#%d\n",
-			func_id_name(func_id), func_id);
+		verbose("kernel subsystem misconfigured func %d\n", func_id);
 		return err;
 	}
 
@@ -1359,6 +1251,13 @@ static int check_call(struct bpf_verifier_env *env, int func_id)
 	err = check_func_arg(env, BPF_REG_2, fn->arg2_type, &meta);
 	if (err)
 		return err;
+	if (func_id == BPF_FUNC_tail_call) {
+		if (meta.map_ptr == NULL) {
+			verbose("verifier bug\n");
+			return -EINVAL;
+		}
+		env->insn_aux_data[insn_idx].map_ptr = meta.map_ptr;
+	}
 	err = check_func_arg(env, BPF_REG_3, fn->arg3_type, &meta);
 	if (err)
 		return err;
@@ -1404,8 +1303,8 @@ static int check_call(struct bpf_verifier_env *env, int func_id)
 		regs[BPF_REG_0].map_ptr = meta.map_ptr;
 		regs[BPF_REG_0].id = ++env->id_gen;
 	} else {
-		verbose("unknown return type %d of func %s#%d\n",
-			fn->ret_type, func_id_name(func_id), func_id);
+		verbose("unknown return type %d of func %d\n",
+			fn->ret_type, func_id);
 		return -EINVAL;
 	}
 
@@ -1432,7 +1331,7 @@ static int check_packet_ptr_add(struct bpf_verifier_env *env,
 		imm = insn->imm;
 
 add_imm:
-		if (imm < 0) {
+		if (imm <= 0) {
 			verbose("addition of negative constant to packet pointer is not allowed\n");
 			return -EACCES;
 		}
@@ -1594,6 +1493,65 @@ static int evaluate_reg_alu(struct bpf_verifier_env *env, struct bpf_insn *insn)
 	return 0;
 }
 
+static int evaluate_reg_imm_alu_unknown(struct bpf_verifier_env *env,
+					struct bpf_insn *insn)
+{
+	struct bpf_reg_state *regs = env->cur_state.regs;
+	struct bpf_reg_state *dst_reg = &regs[insn->dst_reg];
+	struct bpf_reg_state *src_reg = &regs[insn->src_reg];
+	u8 opcode = BPF_OP(insn->code);
+	s64 imm_log2 = __ilog2_u64((long long)dst_reg->imm);
+
+	/* BPF_X code with src_reg->type UNKNOWN_VALUE here. */
+	if (src_reg->imm > 0 && dst_reg->imm) {
+		switch (opcode) {
+		case BPF_ADD:
+			/* dreg += sreg
+			 * where both have zero upper bits. Adding them
+			 * can only result making one more bit non-zero
+			 * in the larger value.
+			 * Ex. 0xffff (imm=48) + 1 (imm=63) = 0x10000 (imm=47)
+			 *     0xffff (imm=48) + 0xffff = 0x1fffe (imm=47)
+			 */
+			dst_reg->imm = min(src_reg->imm, 63 - imm_log2);
+			dst_reg->imm--;
+			break;
+		case BPF_AND:
+			/* dreg &= sreg
+			 * AND can not extend zero bits only shrink
+			 * Ex.  0x00..00ffffff
+			 *    & 0x0f..ffffffff
+			 *     ----------------
+			 *      0x00..00ffffff
+			 */
+			dst_reg->imm = max(src_reg->imm, 63 - imm_log2);
+			break;
+		case BPF_OR:
+			/* dreg |= sreg
+			 * OR can only extend zero bits
+			 * Ex.  0x00..00ffffff
+			 *    | 0x0f..ffffffff
+			 *     ----------------
+			 *      0x0f..00ffffff
+			 */
+			dst_reg->imm = min(src_reg->imm, 63 - imm_log2);
+			break;
+		case BPF_SUB:
+		case BPF_MUL:
+		case BPF_RSH:
+		case BPF_LSH:
+			/* These may be flushed out later */
+		default:
+			mark_reg_unknown_value(regs, insn->dst_reg);
+		}
+	} else {
+		mark_reg_unknown_value(regs, insn->dst_reg);
+	}
+
+	dst_reg->type = UNKNOWN_VALUE;
+	return 0;
+}
+
 static int evaluate_reg_imm_alu(struct bpf_verifier_env *env,
 				struct bpf_insn *insn)
 {
@@ -1601,54 +1559,20 @@ static int evaluate_reg_imm_alu(struct bpf_verifier_env *env,
 	struct bpf_reg_state *dst_reg = &regs[insn->dst_reg];
 	struct bpf_reg_state *src_reg = &regs[insn->src_reg];
 	u8 opcode = BPF_OP(insn->code);
-	u64 dst_imm = dst_reg->imm;
 
-	/* dst_reg->type == CONST_IMM here. Simulate execution of insns
-	 * containing ALU ops. Don't care about overflow or negative
-	 * values, just add/sub/... them; registers are in u64.
+	if (BPF_SRC(insn->code) == BPF_X && src_reg->type == UNKNOWN_VALUE)
+		return evaluate_reg_imm_alu_unknown(env, insn);
+
+	/* dst_reg->type == CONST_IMM here, simulate execution of 'add' insn.
+	 * Don't care about overflow or negative values, just add them
 	 */
-	if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_K) {
-		dst_imm += insn->imm;
-	} else if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_X &&
-		   src_reg->type == CONST_IMM) {
-		dst_imm += src_reg->imm;
-	} else if (opcode == BPF_SUB && BPF_SRC(insn->code) == BPF_K) {
-		dst_imm -= insn->imm;
-	} else if (opcode == BPF_SUB && BPF_SRC(insn->code) == BPF_X &&
-		   src_reg->type == CONST_IMM) {
-		dst_imm -= src_reg->imm;
-	} else if (opcode == BPF_MUL && BPF_SRC(insn->code) == BPF_K) {
-		dst_imm *= insn->imm;
-	} else if (opcode == BPF_MUL && BPF_SRC(insn->code) == BPF_X &&
-		   src_reg->type == CONST_IMM) {
-		dst_imm *= src_reg->imm;
-	} else if (opcode == BPF_OR && BPF_SRC(insn->code) == BPF_K) {
-		dst_imm |= insn->imm;
-	} else if (opcode == BPF_OR && BPF_SRC(insn->code) == BPF_X &&
-		   src_reg->type == CONST_IMM) {
-		dst_imm |= src_reg->imm;
-	} else if (opcode == BPF_AND && BPF_SRC(insn->code) == BPF_K) {
-		dst_imm &= insn->imm;
-	} else if (opcode == BPF_AND && BPF_SRC(insn->code) == BPF_X &&
-		   src_reg->type == CONST_IMM) {
-		dst_imm &= src_reg->imm;
-	} else if (opcode == BPF_RSH && BPF_SRC(insn->code) == BPF_K) {
-		dst_imm >>= insn->imm;
-	} else if (opcode == BPF_RSH && BPF_SRC(insn->code) == BPF_X &&
-		   src_reg->type == CONST_IMM) {
-		dst_imm >>= src_reg->imm;
-	} else if (opcode == BPF_LSH && BPF_SRC(insn->code) == BPF_K) {
-		dst_imm <<= insn->imm;
-	} else if (opcode == BPF_LSH && BPF_SRC(insn->code) == BPF_X &&
-		   src_reg->type == CONST_IMM) {
-		dst_imm <<= src_reg->imm;
-	} else {
+	if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_K)
+		dst_reg->imm += insn->imm;
+	else if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_X &&
+		 src_reg->type == CONST_IMM)
+		dst_reg->imm += src_reg->imm;
+	else
 		mark_reg_unknown_value(regs, insn->dst_reg);
-		goto out;
-	}
-
-	dst_reg->imm = dst_imm;
-out:
 	return 0;
 }
 
@@ -1667,6 +1591,7 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 	struct bpf_reg_state *regs = env->cur_state.regs, *dst_reg;
 	s64 min_val = BPF_REGISTER_MIN_RANGE;
 	u64 max_val = BPF_REGISTER_MAX_RANGE;
+	bool min_set = false, max_set = false;
 	u8 opcode = BPF_OP(insn->code);
 
 	dst_reg = &regs[insn->dst_reg];
@@ -1689,13 +1614,28 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 	} else if (insn->imm < BPF_REGISTER_MAX_RANGE &&
 		   (s64)insn->imm > BPF_REGISTER_MIN_RANGE) {
 		min_val = max_val = insn->imm;
+		min_set = max_set = true;
 	}
 
 	/* We don't know anything about what was done to this register, mark it
-	 * as unknown.
+	 * as unknown. Also, if both derived bounds came from signed/unsigned
+	 * mixed compares and one side is unbounded, we cannot really do anything
+	 * with them as boundaries cannot be trusted. Thus, arithmetic of two
+	 * regs of such kind will get invalidated bounds on the dst side.
 	 */
-	if (min_val == BPF_REGISTER_MIN_RANGE &&
-	    max_val == BPF_REGISTER_MAX_RANGE) {
+	if ((min_val == BPF_REGISTER_MIN_RANGE &&
+	     max_val == BPF_REGISTER_MAX_RANGE) ||
+	    (BPF_SRC(insn->code) == BPF_X &&
+	     ((min_val != BPF_REGISTER_MIN_RANGE &&
+	       max_val == BPF_REGISTER_MAX_RANGE) ||
+	      (min_val == BPF_REGISTER_MIN_RANGE &&
+	       max_val != BPF_REGISTER_MAX_RANGE) ||
+	      (dst_reg->min_value != BPF_REGISTER_MIN_RANGE &&
+	       dst_reg->max_value == BPF_REGISTER_MAX_RANGE) ||
+	      (dst_reg->min_value == BPF_REGISTER_MIN_RANGE &&
+	       dst_reg->max_value != BPF_REGISTER_MAX_RANGE)) &&
+	     regs[insn->dst_reg].value_from_signed !=
+	     regs[insn->src_reg].value_from_signed)) {
 		reset_reg_range_values(regs, insn->dst_reg);
 		return;
 	}
@@ -1704,10 +1644,12 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 	 * do our normal operations to the register, we need to set the values
 	 * to the min/max since they are undefined.
 	 */
-	if (min_val == BPF_REGISTER_MIN_RANGE)
-		dst_reg->min_value = BPF_REGISTER_MIN_RANGE;
-	if (max_val == BPF_REGISTER_MAX_RANGE)
-		dst_reg->max_value = BPF_REGISTER_MAX_RANGE;
+	if (opcode != BPF_SUB) {
+		if (min_val == BPF_REGISTER_MIN_RANGE)
+			dst_reg->min_value = BPF_REGISTER_MIN_RANGE;
+		if (max_val == BPF_REGISTER_MAX_RANGE)
+			dst_reg->max_value = BPF_REGISTER_MAX_RANGE;
+	}
 
 	switch (opcode) {
 	case BPF_ADD:
@@ -1717,10 +1659,17 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 			dst_reg->max_value += max_val;
 		break;
 	case BPF_SUB:
+		/* If one of our values was at the end of our ranges, then the
+		 * _opposite_ value in the dst_reg goes to the end of our range.
+		 */
+		if (min_val == BPF_REGISTER_MIN_RANGE)
+			dst_reg->max_value = BPF_REGISTER_MAX_RANGE;
+		if (max_val == BPF_REGISTER_MAX_RANGE)
+			dst_reg->min_value = BPF_REGISTER_MIN_RANGE;
 		if (dst_reg->min_value != BPF_REGISTER_MIN_RANGE)
-			dst_reg->min_value -= min_val;
+			dst_reg->min_value -= max_val;
 		if (dst_reg->max_value != BPF_REGISTER_MAX_RANGE)
-			dst_reg->max_value -= max_val;
+			dst_reg->max_value -= min_val;
 		break;
 	case BPF_MUL:
 		if (dst_reg->min_value != BPF_REGISTER_MIN_RANGE)
@@ -1791,7 +1740,8 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 			}
 		} else {
 			if (insn->src_reg != BPF_REG_0 || insn->off != 0 ||
-			    (insn->imm != 16 && insn->imm != 32 && insn->imm != 64)) {
+			    (insn->imm != 16 && insn->imm != 32 && insn->imm != 64) ||
+			    BPF_CLASS(insn->code) == BPF_ALU64) {
 				verbose("BPF_END uses reserved fields\n");
 				return -EINVAL;
 			}
@@ -1860,10 +1810,17 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 			/* case: R = imm
 			 * remember the value we stored into this reg
 			 */
+			u64 imm;
+
+			if (BPF_CLASS(insn->code) == BPF_ALU64)
+				imm = insn->imm;
+			else
+				imm = (u32)insn->imm;
+
 			regs[insn->dst_reg].type = CONST_IMM;
-			regs[insn->dst_reg].imm = insn->imm;
-			regs[insn->dst_reg].max_value = insn->imm;
-			regs[insn->dst_reg].min_value = insn->imm;
+			regs[insn->dst_reg].imm = imm;
+			regs[insn->dst_reg].max_value = imm;
+			regs[insn->dst_reg].min_value = imm;
 		}
 
 	} else if (opcode > BPF_END) {
@@ -1899,6 +1856,11 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 			return -EINVAL;
 		}
 
+		if (opcode == BPF_ARSH && BPF_CLASS(insn->code) != BPF_ALU64) {
+			verbose("BPF_ARSH not supported for 32 bit ALU\n");
+			return -EINVAL;
+		}
+
 		if ((opcode == BPF_LSH || opcode == BPF_RSH ||
 		     opcode == BPF_ARSH) && BPF_SRC(insn->code) == BPF_K) {
 			int size = BPF_CLASS(insn->code) == BPF_ALU64 ? 64 : 32;
@@ -1931,10 +1893,28 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 			   ((BPF_SRC(insn->code) == BPF_X &&
 			     regs[insn->src_reg].type == CONST_IMM) ||
 			    BPF_SRC(insn->code) == BPF_K)) {
-			if (BPF_SRC(insn->code) == BPF_X)
+			if (BPF_SRC(insn->code) == BPF_X) {
+				/* check in case the register contains a big
+				 * 64-bit value
+				 */
+				if (regs[insn->src_reg].imm < -MAX_BPF_STACK ||
+				    regs[insn->src_reg].imm > MAX_BPF_STACK) {
+					verbose("R%d value too big in R%d pointer arithmetic\n",
+						insn->src_reg, insn->dst_reg);
+					return -EACCES;
+				}
 				dst_reg->imm += regs[insn->src_reg].imm;
-			else
+			} else {
+				/* safe against overflow: addition of 32-bit
+				 * numbers in 64-bit representation
+				 */
 				dst_reg->imm += insn->imm;
+			}
+			if (dst_reg->imm > 0 || dst_reg->imm < -MAX_BPF_STACK) {
+				verbose("R%d out-of-bounds pointer arithmetic\n",
+					insn->dst_reg);
+				return -EACCES;
+			}
 			return 0;
 		} else if (opcode == BPF_ADD &&
 			   BPF_CLASS(insn->code) == BPF_ALU64 &&
@@ -2039,40 +2019,63 @@ static void reg_set_min_max(struct bpf_reg_state *true_reg,
 			    struct bpf_reg_state *false_reg, u64 val,
 			    u8 opcode)
 {
+	bool value_from_signed = true;
+	bool is_range = true;
+
 	switch (opcode) {
 	case BPF_JEQ:
 		/* If this is false then we know nothing Jon Snow, but if it is
 		 * true then we know for sure.
 		 */
 		true_reg->max_value = true_reg->min_value = val;
+		is_range = false;
 		break;
 	case BPF_JNE:
 		/* If this is true we know nothing Jon Snow, but if it is false
 		 * we know the value for sure;
 		 */
 		false_reg->max_value = false_reg->min_value = val;
+		is_range = false;
 		break;
 	case BPF_JGT:
-		/* Unsigned comparison, the minimum value is 0. */
-		false_reg->min_value = 0;
+		value_from_signed = false;
 		/* fallthrough */
 	case BPF_JSGT:
+		if (true_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(true_reg, 0);
+		if (false_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(false_reg, 0);
+		if (opcode == BPF_JGT) {
+			/* Unsigned comparison, the minimum value is 0. */
+			false_reg->min_value = 0;
+		}
 		/* If this is false then we know the maximum val is val,
 		 * otherwise we know the min val is val+1.
 		 */
 		false_reg->max_value = val;
+		false_reg->value_from_signed = value_from_signed;
 		true_reg->min_value = val + 1;
+		true_reg->value_from_signed = value_from_signed;
 		break;
 	case BPF_JGE:
-		/* Unsigned comparison, the minimum value is 0. */
-		false_reg->min_value = 0;
+		value_from_signed = false;
 		/* fallthrough */
 	case BPF_JSGE:
+		if (true_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(true_reg, 0);
+		if (false_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(false_reg, 0);
+		if (opcode == BPF_JGE) {
+			/* Unsigned comparison, the minimum value is 0. */
+			false_reg->min_value = 0;
+		}
 		/* If this is false then we know the maximum value is val - 1,
 		 * otherwise we know the mimimum value is val.
 		 */
 		false_reg->max_value = val - 1;
+		false_reg->value_from_signed = value_from_signed;
 		true_reg->min_value = val;
+		true_reg->value_from_signed = value_from_signed;
 		break;
 	default:
 		break;
@@ -2080,6 +2083,12 @@ static void reg_set_min_max(struct bpf_reg_state *true_reg,
 
 	check_reg_overflow(false_reg);
 	check_reg_overflow(true_reg);
+	if (is_range) {
+		if (__is_pointer_value(false, false_reg))
+			reset_reg_range_values(false_reg, 0);
+		if (__is_pointer_value(false, true_reg))
+			reset_reg_range_values(true_reg, 0);
+	}
 }
 
 /* Same as above, but for the case that dst_reg is a CONST_IMM reg and src_reg
@@ -2089,41 +2098,64 @@ static void reg_set_min_max_inv(struct bpf_reg_state *true_reg,
 				struct bpf_reg_state *false_reg, u64 val,
 				u8 opcode)
 {
+	bool value_from_signed = true;
+	bool is_range = true;
+
 	switch (opcode) {
 	case BPF_JEQ:
 		/* If this is false then we know nothing Jon Snow, but if it is
 		 * true then we know for sure.
 		 */
 		true_reg->max_value = true_reg->min_value = val;
+		is_range = false;
 		break;
 	case BPF_JNE:
 		/* If this is true we know nothing Jon Snow, but if it is false
 		 * we know the value for sure;
 		 */
 		false_reg->max_value = false_reg->min_value = val;
+		is_range = false;
 		break;
 	case BPF_JGT:
-		/* Unsigned comparison, the minimum value is 0. */
-		true_reg->min_value = 0;
+		value_from_signed = false;
 		/* fallthrough */
 	case BPF_JSGT:
+		if (true_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(true_reg, 0);
+		if (false_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(false_reg, 0);
+		if (opcode == BPF_JGT) {
+			/* Unsigned comparison, the minimum value is 0. */
+			true_reg->min_value = 0;
+		}
 		/*
 		 * If this is false, then the val is <= the register, if it is
 		 * true the register <= to the val.
 		 */
 		false_reg->min_value = val;
+		false_reg->value_from_signed = value_from_signed;
 		true_reg->max_value = val - 1;
+		true_reg->value_from_signed = value_from_signed;
 		break;
 	case BPF_JGE:
-		/* Unsigned comparison, the minimum value is 0. */
-		true_reg->min_value = 0;
+		value_from_signed = false;
 		/* fallthrough */
 	case BPF_JSGE:
+		if (true_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(true_reg, 0);
+		if (false_reg->value_from_signed != value_from_signed)
+			reset_reg_range_values(false_reg, 0);
+		if (opcode == BPF_JGE) {
+			/* Unsigned comparison, the minimum value is 0. */
+			true_reg->min_value = 0;
+		}
 		/* If this is false then constant < register, if it is true then
 		 * the register < constant.
 		 */
 		false_reg->min_value = val + 1;
+		false_reg->value_from_signed = value_from_signed;
 		true_reg->max_value = val;
+		true_reg->value_from_signed = value_from_signed;
 		break;
 	default:
 		break;
@@ -2131,6 +2163,12 @@ static void reg_set_min_max_inv(struct bpf_reg_state *true_reg,
 
 	check_reg_overflow(false_reg);
 	check_reg_overflow(true_reg);
+	if (is_range) {
+		if (__is_pointer_value(false, false_reg))
+			reset_reg_range_values(false_reg, 0);
+		if (__is_pointer_value(false, true_reg))
+			reset_reg_range_values(true_reg, 0);
+	}
 }
 
 static void mark_map_reg(struct bpf_reg_state *regs, u32 regno, u32 id,
@@ -2309,7 +2347,13 @@ static int check_ld_imm(struct bpf_verifier_env *env, struct bpf_insn *insn)
 		return err;
 
 	if (insn->src_reg == 0) {
+		/* generic move 64-bit immediate into a register,
+		 * only analyzer needs to collect the ld_imm value.
+		 */
 		u64 imm = ((u64)(insn + 1)->imm << 32) | (u32)insn->imm;
+
+		if (!env->analyzer_ops)
+			return 0;
 
 		regs[insn->dst_reg].type = CONST_IMM;
 		regs[insn->dst_reg].imm = imm;
@@ -2703,11 +2747,12 @@ static bool states_equal(struct bpf_verifier_env *env,
 
 		/* If we didn't map access then again we don't care about the
 		 * mismatched range values and it's ok if our old type was
-		 * UNKNOWN and we didn't go to a NOT_INIT'ed reg.
+		 * UNKNOWN and we didn't go to a NOT_INIT'ed or pointer reg.
 		 */
 		if (rold->type == NOT_INIT ||
 		    (!varlen_map_access && rold->type == UNKNOWN_VALUE &&
-		     rcur->type != NOT_INIT))
+		     rcur->type != NOT_INIT &&
+		     !__is_pointer_value(env->allow_ptr_leaks, rcur)))
 			continue;
 
 		/* Don't care about the reg->id in this case. */
@@ -2830,7 +2875,7 @@ static int do_check(struct bpf_verifier_env *env)
 		class = BPF_CLASS(insn->code);
 
 		if (++insn_processed > BPF_COMPLEXITY_LIMIT_INSNS) {
-			verbose("BPF program is too large. Processed %d insn\n",
+			verbose("BPF program is too large. Proccessed %d insn\n",
 				insn_processed);
 			return -E2BIG;
 		}
@@ -2868,6 +2913,7 @@ static int do_check(struct bpf_verifier_env *env)
 		if (err)
 			return err;
 
+		env->insn_aux_data[insn_idx].seen = true;
 		if (class == BPF_ALU || class == BPF_ALU64) {
 			err = check_alu_op(env, insn);
 			if (err)
@@ -2898,6 +2944,7 @@ static int do_check(struct bpf_verifier_env *env)
 			if (err)
 				return err;
 
+			reset_reg_range_values(regs, insn->dst_reg);
 			if (BPF_SIZE(insn->code) != BPF_W &&
 			    BPF_SIZE(insn->code) != BPF_DW) {
 				insn_idx++;
@@ -2978,6 +3025,12 @@ static int do_check(struct bpf_verifier_env *env)
 			if (err)
 				return err;
 
+			if (is_ctx_reg(env, insn->dst_reg)) {
+				verbose("BPF_ST stores into R%d context is not allowed\n",
+					insn->dst_reg);
+				return -EACCES;
+			}
+
 			/* check that memory (dst_reg + off) is writeable */
 			err = check_mem_access(env, insn->dst_reg, insn->off,
 					       BPF_SIZE(insn->code), BPF_WRITE,
@@ -2997,7 +3050,7 @@ static int do_check(struct bpf_verifier_env *env)
 					return -EINVAL;
 				}
 
-				err = check_call(env, insn->imm);
+				err = check_call(env, insn->imm, insn_idx);
 				if (err)
 					return err;
 
@@ -3064,6 +3117,7 @@ process_bpf_exit:
 					return err;
 
 				insn_idx++;
+				env->insn_aux_data[insn_idx].seen = true;
 			} else {
 				verbose("invalid BPF_LD mode\n");
 				return -EINVAL;
@@ -3103,10 +3157,6 @@ static int replace_map_fd_with_map_ptr(struct bpf_verifier_env *env)
 	struct bpf_insn *insn = env->prog->insnsi;
 	int insn_cnt = env->prog->len;
 	int i, j, err;
-
-	err = bpf_prog_calc_tag(env->prog);
-	if (err)
-		return err;
 
 	for (i = 0; i < insn_cnt; i++, insn++) {
 		if (BPF_CLASS(insn->code) == BPF_LDX &&
@@ -3219,6 +3269,63 @@ static void convert_pseudo_ld_imm64(struct bpf_verifier_env *env)
 			insn->src_reg = 0;
 }
 
+/* single env->prog->insni[off] instruction was replaced with the range
+ * insni[off, off + cnt).  Adjust corresponding insn_aux_data by copying
+ * [0, off) and [off, end) to new locations, so the patched range stays zero
+ */
+static int adjust_insn_aux_data(struct bpf_verifier_env *env, u32 prog_len,
+				u32 off, u32 cnt)
+{
+	struct bpf_insn_aux_data *new_data, *old_data = env->insn_aux_data;
+	int i;
+
+	if (cnt == 1)
+		return 0;
+	new_data = vzalloc(sizeof(struct bpf_insn_aux_data) * prog_len);
+	if (!new_data)
+		return -ENOMEM;
+	memcpy(new_data, old_data, sizeof(struct bpf_insn_aux_data) * off);
+	memcpy(new_data + off + cnt - 1, old_data + off,
+	       sizeof(struct bpf_insn_aux_data) * (prog_len - off - cnt + 1));
+	for (i = off; i < off + cnt - 1; i++)
+		new_data[i].seen = true;
+	env->insn_aux_data = new_data;
+	vfree(old_data);
+	return 0;
+}
+
+static struct bpf_prog *bpf_patch_insn_data(struct bpf_verifier_env *env, u32 off,
+					    const struct bpf_insn *patch, u32 len)
+{
+	struct bpf_prog *new_prog;
+
+	new_prog = bpf_patch_insn_single(env->prog, off, patch, len);
+	if (!new_prog)
+		return NULL;
+	if (adjust_insn_aux_data(env, new_prog->len, off, len))
+		return NULL;
+	return new_prog;
+}
+
+/* The verifier does more data flow analysis than llvm and will not explore
+ * branches that are dead at run time. Malicious programs can have dead code
+ * too. Therefore replace all dead at-run-time code with nops.
+ */
+static void sanitize_dead_code(struct bpf_verifier_env *env)
+{
+	struct bpf_insn_aux_data *aux_data = env->insn_aux_data;
+	struct bpf_insn nop = BPF_MOV64_REG(BPF_REG_0, BPF_REG_0);
+	struct bpf_insn *insn = env->prog->insnsi;
+	const int insn_cnt = env->prog->len;
+	int i;
+
+	for (i = 0; i < insn_cnt; i++) {
+		if (aux_data[i].seen)
+			continue;
+		memcpy(insn + i, &nop, sizeof(nop));
+	}
+}
+
 /* convert load instructions that access fields of 'struct __sk_buff'
  * into sequence of instructions that access fields of 'struct sk_buff'
  */
@@ -3238,10 +3345,10 @@ static int convert_ctx_accesses(struct bpf_verifier_env *env)
 			verbose("bpf verifier is misconfigured\n");
 			return -EINVAL;
 		} else if (cnt) {
-			new_prog = bpf_patch_insn_single(env->prog, 0,
-							 insn_buf, cnt);
+			new_prog = bpf_patch_insn_data(env, 0, insn_buf, cnt);
 			if (!new_prog)
 				return -ENOMEM;
+
 			env->prog = new_prog;
 			delta += cnt - 1;
 		}
@@ -3253,30 +3360,26 @@ static int convert_ctx_accesses(struct bpf_verifier_env *env)
 	insn = env->prog->insnsi + delta;
 
 	for (i = 0; i < insn_cnt; i++, insn++) {
-		if (insn->code == (BPF_LDX | BPF_MEM | BPF_B) ||
-		    insn->code == (BPF_LDX | BPF_MEM | BPF_H) ||
-		    insn->code == (BPF_LDX | BPF_MEM | BPF_W) ||
+		if (insn->code == (BPF_LDX | BPF_MEM | BPF_W) ||
 		    insn->code == (BPF_LDX | BPF_MEM | BPF_DW))
 			type = BPF_READ;
-		else if (insn->code == (BPF_STX | BPF_MEM | BPF_B) ||
-			 insn->code == (BPF_STX | BPF_MEM | BPF_H) ||
-			 insn->code == (BPF_STX | BPF_MEM | BPF_W) ||
+		else if (insn->code == (BPF_STX | BPF_MEM | BPF_W) ||
 			 insn->code == (BPF_STX | BPF_MEM | BPF_DW))
 			type = BPF_WRITE;
 		else
 			continue;
 
-		if (env->insn_aux_data[i].ptr_type != PTR_TO_CTX)
+		if (env->insn_aux_data[i + delta].ptr_type != PTR_TO_CTX)
 			continue;
 
-		cnt = ops->convert_ctx_access(type, insn, insn_buf, env->prog);
+		cnt = ops->convert_ctx_access(type, insn->dst_reg, insn->src_reg,
+					      insn->off, insn_buf, env->prog);
 		if (cnt == 0 || cnt >= ARRAY_SIZE(insn_buf)) {
 			verbose("bpf verifier is misconfigured\n");
 			return -EINVAL;
 		}
 
-		new_prog = bpf_patch_insn_single(env->prog, i + delta, insn_buf,
-						 cnt);
+		new_prog = bpf_patch_insn_data(env, i + delta, insn_buf, cnt);
 		if (!new_prog)
 			return -ENOMEM;
 
@@ -3285,6 +3388,99 @@ static int convert_ctx_accesses(struct bpf_verifier_env *env)
 		/* keep walking new program and skip insns we just inserted */
 		env->prog = new_prog;
 		insn      = new_prog->insnsi + i + delta;
+	}
+
+	return 0;
+}
+
+/* fixup insn->imm field of bpf_call instructions
+ *
+ * this function is called after eBPF program passed verification
+ */
+static int fixup_bpf_calls(struct bpf_verifier_env *env)
+{
+	struct bpf_prog *prog = env->prog;
+	struct bpf_insn *insn = prog->insnsi;
+	const struct bpf_func_proto *fn;
+	const int insn_cnt = prog->len;
+	struct bpf_insn insn_buf[16];
+	struct bpf_prog *new_prog;
+	struct bpf_map *map_ptr;
+	int i, cnt, delta = 0;
+
+
+	for (i = 0; i < insn_cnt; i++, insn++) {
+		if (insn->code == (BPF_ALU | BPF_MOD | BPF_X) ||
+		    insn->code == (BPF_ALU | BPF_DIV | BPF_X)) {
+			/* due to JIT bugs clear upper 32-bits of src register
+			 * before div/mod operation
+			 */
+			insn_buf[0] = BPF_MOV32_REG(insn->src_reg, insn->src_reg);
+			insn_buf[1] = *insn;
+			cnt = 2;
+			new_prog = bpf_patch_insn_data(env, i + delta, insn_buf, cnt);
+			if (!new_prog)
+				return -ENOMEM;
+
+			delta    += cnt - 1;
+			env->prog = prog = new_prog;
+			insn      = new_prog->insnsi + i + delta;
+			continue;
+		}
+
+		if (insn->code != (BPF_JMP | BPF_CALL))
+			continue;
+
+		if (insn->imm == BPF_FUNC_get_route_realm)
+			prog->dst_needed = 1;
+		if (insn->imm == BPF_FUNC_get_prandom_u32)
+			bpf_user_rnd_init_once();
+		if (insn->imm == BPF_FUNC_tail_call) {
+			/* mark bpf_tail_call as different opcode to avoid
+			 * conditional branch in the interpeter for every normal
+			 * call and to prevent accidental JITing by JIT compiler
+			 * that doesn't support bpf_tail_call yet
+ 			 */
+			insn->imm = 0;
+			insn->code |= BPF_X;
+
+			/* instead of changing every JIT dealing with tail_call
+			 * emit two extra insns:
+			 * if (index >= max_entries) goto out;
+			 * index &= array->index_mask;
+			 * to avoid out-of-bounds cpu speculation
+			 */
+			map_ptr = env->insn_aux_data[i + delta].map_ptr;
+			if (!map_ptr->unpriv_array)
+				continue;
+			insn_buf[0] = BPF_JMP_IMM(BPF_JGE, BPF_REG_3,
+						  map_ptr->max_entries, 2);
+			insn_buf[1] = BPF_ALU32_IMM(BPF_AND, BPF_REG_3,
+						    container_of(map_ptr,
+								 struct bpf_array,
+								 map)->index_mask);
+			insn_buf[2] = *insn;
+			cnt = 3;
+			new_prog = bpf_patch_insn_data(env, i + delta, insn_buf, cnt);
+			if (!new_prog)
+				return -ENOMEM;
+
+			delta    += cnt - 1;
+			env->prog = prog = new_prog;
+			insn      = new_prog->insnsi + i + delta;
+			continue;
+		}
+
+		fn = prog->aux->ops->get_func_proto(insn->imm);
+		/* all functions that have prototype and verifier allowed
+		 * programs to call them, must be real in-kernel functions
+		 */
+		if (!fn->func) {
+			verbose("kernel subsystem misconfigured func %d\n",
+				insn->imm);
+			return -EFAULT;
+		}
+		insn->imm = fn->func - __bpf_call_base;
 	}
 
 	return 0;
@@ -3317,6 +3513,9 @@ int bpf_check(struct bpf_prog **prog, union bpf_attr *attr)
 	char __user *log_ubuf = NULL;
 	struct bpf_verifier_env *env;
 	int ret = -EINVAL;
+
+	if ((*prog)->len <= 0 || (*prog)->len > BPF_MAXINSNS)
+		return -E2BIG;
 
 	/* 'struct bpf_verifier_env' can be global, but since it's not small,
 	 * allocate/free it every time bpf_check() is called
@@ -3382,8 +3581,14 @@ skip_full_check:
 	free_states(env);
 
 	if (ret == 0)
+		sanitize_dead_code(env);
+
+	if (ret == 0)
 		/* program is valid, convert *(u32*)(ctx + off) accesses */
 		ret = convert_ctx_accesses(env);
+
+	if (ret == 0)
+		ret = fixup_bpf_calls(env);
 
 	if (log_level && log_len >= log_size - 1) {
 		BUG_ON(log_len >= log_size);

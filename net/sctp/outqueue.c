@@ -364,7 +364,8 @@ static int sctp_prsctp_prune_sent(struct sctp_association *asoc,
 		asoc->sent_cnt_removable--;
 		asoc->abandoned_sent[SCTP_PR_INDEX(PRIO)]++;
 
-		if (!chk->tsn_gap_acked) {
+		if (queue != &asoc->outqueue.retransmit &&
+		    !chk->tsn_gap_acked) {
 			if (chk->transport)
 				chk->transport->flight_size -=
 						sctp_data_size(chk);
@@ -505,6 +506,8 @@ void sctp_retransmit_mark(struct sctp_outq *q,
 				chunk->rtt_in_progress = 0;
 				transport->rto_pending = 0;
 			}
+
+			chunk->resent = 1;
 
 			/* Move the chunk to the retransmit queue. The chunks
 			 * on the retransmit queue are always kept in order.
@@ -914,28 +917,22 @@ static void sctp_outq_flush(struct sctp_outq *q, int rtx_timeout, gfp_t gfp)
 		case SCTP_CID_ECN_ECNE:
 		case SCTP_CID_ASCONF:
 		case SCTP_CID_FWD_TSN:
-		case SCTP_CID_RECONF:
 			status = sctp_packet_transmit_chunk(packet, chunk,
 							    one_packet, gfp);
 			if (status  != SCTP_XMIT_OK) {
 				/* put the chunk back */
 				list_add(&chunk->list, &q->control_chunk_list);
-				break;
+			} else {
+				asoc->stats.octrlchunks++;
+				/* PR-SCTP C5) If a FORWARD TSN is sent, the
+				 * sender MUST assure that at least one T3-rtx
+				 * timer is running.
+				 */
+				if (chunk->chunk_hdr->type == SCTP_CID_FWD_TSN) {
+					sctp_transport_reset_t3_rtx(transport);
+					transport->last_time_sent = jiffies;
+				}
 			}
-
-			asoc->stats.octrlchunks++;
-			/* PR-SCTP C5) If a FORWARD TSN is sent, the
-			 * sender MUST assure that at least one T3-rtx
-			 * timer is running.
-			 */
-			if (chunk->chunk_hdr->type == SCTP_CID_FWD_TSN) {
-				sctp_transport_reset_t3_rtx(transport);
-				transport->last_time_sent = jiffies;
-			}
-
-			if (chunk == asoc->strreset_chunk)
-				sctp_transport_reset_reconf_timer(transport);
-
 			break;
 
 		default:
@@ -1021,12 +1018,11 @@ static void sctp_outq_flush(struct sctp_outq *q, int rtx_timeout, gfp_t gfp)
 
 		/* Finally, transmit new packets.  */
 		while ((chunk = sctp_outq_dequeue_data(q)) != NULL) {
-			__u32 sid = ntohs(chunk->subh.data_hdr->stream);
-
 			/* RFC 2960 6.5 Every DATA chunk MUST carry a valid
 			 * stream identifier.
 			 */
-			if (chunk->sinfo.sinfo_stream >= asoc->stream->outcnt) {
+			if (chunk->sinfo.sinfo_stream >=
+			    asoc->c.sinit_num_ostreams) {
 
 				/* Mark as failed send. */
 				sctp_chunk_fail(chunk, SCTP_ERROR_INV_STRM);
@@ -1044,11 +1040,6 @@ static void sctp_outq_flush(struct sctp_outq *q, int rtx_timeout, gfp_t gfp)
 				continue;
 			}
 
-			if (asoc->stream->out[sid].state == SCTP_STREAM_CLOSED) {
-				sctp_outq_head_data(q, chunk);
-				goto sctp_flush_out;
-			}
-
 			/* If there is a specified transport, use it.
 			 * Otherwise, we want to use the active path.
 			 */
@@ -1059,7 +1050,7 @@ static void sctp_outq_flush(struct sctp_outq *q, int rtx_timeout, gfp_t gfp)
 			     (new_transport->state == SCTP_PF)))
 				new_transport = asoc->peer.active_path;
 			if (new_transport->state == SCTP_UNCONFIRMED) {
-				WARN_ONCE(1, "Attempt to send packet on unconfirmed path.");
+				WARN_ONCE(1, "Atempt to send packet on unconfirmed path.");
 				sctp_chunk_fail(chunk, 0);
 				sctp_chunk_free(chunk);
 				continue;
@@ -1419,7 +1410,8 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 			/* If this chunk has not been acked, stop
 			 * considering it as 'outstanding'.
 			 */
-			if (!tchunk->tsn_gap_acked) {
+			if (transmitted_queue != &q->retransmit &&
+			    !tchunk->tsn_gap_acked) {
 				if (tchunk->transport)
 					tchunk->transport->flight_size -=
 							sctp_data_size(tchunk);
@@ -1448,7 +1440,7 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 				 * instance).
 				 */
 				if (!tchunk->tsn_gap_acked &&
-				    !sctp_chunk_retransmitted(tchunk) &&
+				    !tchunk->resent &&
 				    tchunk->rtt_in_progress) {
 					tchunk->rtt_in_progress = 0;
 					rtt = jiffies - tchunk->sent_at;
@@ -1652,7 +1644,7 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 
 		if (forward_progress) {
 			if (transport->dst)
-				sctp_transport_dst_confirm(transport);
+				dst_confirm(transport->dst);
 		}
 	}
 

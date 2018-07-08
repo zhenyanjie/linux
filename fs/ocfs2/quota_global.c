@@ -634,15 +634,7 @@ static void qsync_work_fn(struct work_struct *work)
 						      dqi_sync_work.work);
 	struct super_block *sb = oinfo->dqi_gqinode->i_sb;
 
-	/*
-	 * We have to be careful here not to deadlock on s_umount as umount
-	 * disabling quotas may be in progress and it waits for this work to
-	 * complete. If trylock fails, we'll do the sync next time...
-	 */
-	if (down_read_trylock(&sb->s_umount)) {
-		dquot_scan_active(sb, ocfs2_sync_dquot_helper, oinfo->dqi_type);
-		up_read(&sb->s_umount);
-	}
+	dquot_scan_active(sb, ocfs2_sync_dquot_helper, oinfo->dqi_type);
 	schedule_delayed_work(&oinfo->dqi_sync_work,
 			      msecs_to_jiffies(oinfo->dqi_syncms));
 }

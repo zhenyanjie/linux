@@ -244,21 +244,6 @@ FTRACE_ENTRY(print, print_entry,
 	FILTER_OTHER
 );
 
-FTRACE_ENTRY(raw_data, raw_data_entry,
-
-	TRACE_RAW_DATA,
-
-	F_STRUCT(
-		__field(	unsigned int,	id	)
-		__dynamic_array(	char,	buf	)
-	),
-
-	F_printk("id:%04x %08x",
-		 __entry->id, (int)__entry->buf[0]),
-
-	FILTER_OTHER
-);
-
 FTRACE_ENTRY(bputs, bputs_entry,
 
 	TRACE_BPUTS,
@@ -328,13 +313,11 @@ FTRACE_ENTRY(branch, trace_branch,
 		__array(	char,		func,	TRACE_FUNC_SIZE+1	)
 		__array(	char,		file,	TRACE_FILE_SIZE+1	)
 		__field(	char,		correct				)
-		__field(	char,		constant			)
 	),
 
-	F_printk("%u:%s:%s (%u)%s",
+	F_printk("%u:%s:%s (%u)",
 		 __entry->line,
-		 __entry->func, __entry->file, __entry->correct,
-		 __entry->constant ? " CONSTANT" : ""),
+		 __entry->func, __entry->file, __entry->correct),
 
 	FILTER_OTHER
 );

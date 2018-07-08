@@ -10,16 +10,15 @@
 
 #include <linux/jiffies.h>
 #include <linux/mm.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/debug.h>
+#include <linux/sched.h>
 #include <linux/tty.h>
 #include <linux/delay.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/kallsyms.h>
 #include <linux/ratelimit.h>
 
 #include <asm/gentrap.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unaligned.h>
 #include <asm/sysinfo.h>
 #include <asm/hwrpb.h>
@@ -159,11 +158,16 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 	for(i=0; i < kstack_depth_to_print; i++) {
 		if (((long) stack & (THREAD_SIZE-1)) == 0)
 			break;
-		if (i && ((i % 4) == 0))
-			printk("\n       ");
-		printk("%016lx ", *stack++);
+		if ((i % 4) == 0) {
+			if (i)
+				pr_cont("\n");
+			printk("       ");
+		} else {
+			pr_cont(" ");
+		}
+		pr_cont("%016lx", *stack++);
 	}
-	printk("\n");
+	pr_cont("\n");
 	dik_show_trace(sp);
 }
 

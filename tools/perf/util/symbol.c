@@ -1460,11 +1460,9 @@ int dso__load(struct dso *dso, struct map *map)
 	 * DSO_BINARY_TYPE__BUILDID_DEBUGINFO to work
 	 */
 	if (!dso->has_build_id &&
-	    is_regular_file(dso->long_name)) {
-	    __symbol__join_symfs(name, PATH_MAX, dso->long_name);
-	    if (filename__read_build_id(name, build_id, BUILD_ID_SIZE) > 0)
+	    is_regular_file(dso->long_name) &&
+	    filename__read_build_id(dso->long_name, build_id, BUILD_ID_SIZE) > 0)
 		dso__set_build_id(dso, build_id);
-	}
 
 	/*
 	 * Iterate over candidate debug images.
@@ -1965,7 +1963,7 @@ static bool symbol__read_kptr_restrict(void)
 		char line[8];
 
 		if (fgets(line, sizeof(line), fp) != NULL)
-			value = ((geteuid() != 0) || (getuid() != 0)) ?
+			value = (geteuid() != 0) ?
 					(atoi(line) != 0) :
 					(atoi(line) == 2);
 
@@ -2035,10 +2033,6 @@ int symbol__init(struct perf_env *env)
 		       symbol_conf.sym_list_str, "symbol") < 0)
 		goto out_free_tid_list;
 
-	if (setup_list(&symbol_conf.bt_stop_list,
-		       symbol_conf.bt_stop_list_str, "symbol") < 0)
-		goto out_free_sym_list;
-
 	/*
 	 * A path to symbols of "/" is identical to ""
 	 * reset here for simplicity.
@@ -2056,8 +2050,6 @@ int symbol__init(struct perf_env *env)
 	symbol_conf.initialized = true;
 	return 0;
 
-out_free_sym_list:
-	strlist__delete(symbol_conf.sym_list);
 out_free_tid_list:
 	intlist__delete(symbol_conf.tid_list);
 out_free_pid_list:
@@ -2073,7 +2065,6 @@ void symbol__exit(void)
 {
 	if (!symbol_conf.initialized)
 		return;
-	strlist__delete(symbol_conf.bt_stop_list);
 	strlist__delete(symbol_conf.sym_list);
 	strlist__delete(symbol_conf.dso_list);
 	strlist__delete(symbol_conf.comm_list);
@@ -2081,7 +2072,6 @@ void symbol__exit(void)
 	intlist__delete(symbol_conf.pid_list);
 	vmlinux_path__exit();
 	symbol_conf.sym_list = symbol_conf.dso_list = symbol_conf.comm_list = NULL;
-	symbol_conf.bt_stop_list = NULL;
 	symbol_conf.initialized = false;
 }
 

@@ -48,7 +48,7 @@
 #include <net/sock.h>
 #include <net/genetlink.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <net/ip_vs.h>
 
@@ -426,9 +426,10 @@ ip_vs_service_find(struct netns_ipvs *ipvs, int af, __u32 fwmark, __u16 protocol
 	 */
 	svc = __ip_vs_service_find(ipvs, af, protocol, vaddr, vport);
 
-	if (!svc && protocol == IPPROTO_TCP &&
-	    atomic_read(&ipvs->ftpsvc_counter) &&
-	    (vport == FTPDATA || ntohs(vport) >= inet_prot_sock(ipvs->net))) {
+	if (svc == NULL
+	    && protocol == IPPROTO_TCP
+	    && atomic_read(&ipvs->ftpsvc_counter)
+	    && (vport == FTPDATA || ntohs(vport) >= PROT_SOCK)) {
 		/*
 		 * Check if ftp service entry exists, the packet
 		 * might belong to FTP data connections.
@@ -710,6 +711,7 @@ ip_vs_trash_get_dest(struct ip_vs_service *svc, int dest_af,
 		      dest->vport == svc->port))) {
 			/* HIT */
 			list_del(&dest->t_list);
+			ip_vs_dest_hold(dest);
 			goto out;
 		}
 	}
@@ -739,7 +741,7 @@ static void ip_vs_dest_free(struct ip_vs_dest *dest)
  *  When the ip_vs_control_clearup is activated by ipvs module exit,
  *  the service tables must have been flushed and all the connections
  *  are expired, and the refcnt of each destination in the trash must
- *  be 1, so we simply release them here.
+ *  be 0, so we simply release them here.
  */
 static void ip_vs_trash_cleanup(struct netns_ipvs *ipvs)
 {
@@ -1078,10 +1080,11 @@ static void __ip_vs_del_dest(struct netns_ipvs *ipvs, struct ip_vs_dest *dest,
 	if (list_empty(&ipvs->dest_trash) && !cleanup)
 		mod_timer(&ipvs->dest_trash_timer,
 			  jiffies + (IP_VS_DEST_TRASH_PERIOD >> 1));
-	/* dest lives in trash with reference */
+	/* dest lives in trash without reference */
 	list_add(&dest->t_list, &ipvs->dest_trash);
 	dest->idle_start = 0;
 	spin_unlock_bh(&ipvs->dest_trash_lock);
+	ip_vs_dest_put(dest);
 }
 
 
@@ -1157,7 +1160,7 @@ static void ip_vs_dest_trash_expire(unsigned long data)
 
 	spin_lock(&ipvs->dest_trash_lock);
 	list_for_each_entry_safe(dest, next, &ipvs->dest_trash, t_list) {
-		if (atomic_read(&dest->refcnt) > 1)
+		if (atomic_read(&dest->refcnt) > 0)
 			continue;
 		if (dest->idle_start) {
 			if (time_before(now, dest->idle_start +
@@ -2037,12 +2040,16 @@ static int ip_vs_info_seq_show(struct seq_file *seq, void *v)
 		seq_puts(seq,
 			 "  -> RemoteAddress:Port Forward Weight ActiveConn InActConn\n");
 	} else {
+		struct net *net = seq_file_net(seq);
+		struct netns_ipvs *ipvs = net_ipvs(net);
 		const struct ip_vs_service *svc = v;
 		const struct ip_vs_iter *iter = seq->private;
 		const struct ip_vs_dest *dest;
 		struct ip_vs_scheduler *sched = rcu_dereference(svc->scheduler);
 		char *sched_name = sched ? sched->name : "none";
 
+		if (svc->ipvs != ipvs)
+			return 0;
 		if (iter->table == ip_vs_svc_table) {
 #ifdef CONFIG_IP_VS_IPV6
 			if (svc->af == AF_INET6)
@@ -2383,14 +2390,12 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 			struct ipvs_sync_daemon_cfg cfg;
 
 			memset(&cfg, 0, sizeof(cfg));
-			strlcpy(cfg.mcast_ifn, dm->mcast_ifn,
-				sizeof(cfg.mcast_ifn));
+			ret = -EINVAL;
+			if (strscpy(cfg.mcast_ifn, dm->mcast_ifn,
+				    sizeof(cfg.mcast_ifn)) <= 0)
+				goto out_dec;
 			cfg.syncid = dm->syncid;
-			rtnl_lock();
-			mutex_lock(&ipvs->sync_mutex);
 			ret = start_sync_thread(ipvs, &cfg, dm->state);
-			mutex_unlock(&ipvs->sync_mutex);
-			rtnl_unlock();
 		} else {
 			mutex_lock(&ipvs->sync_mutex);
 			ret = stop_sync_thread(ipvs, dm->state);
@@ -2426,12 +2431,19 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 		}
 	}
 
+	if ((cmd == IP_VS_SO_SET_ADD || cmd == IP_VS_SO_SET_EDIT) &&
+	    strnlen(usvc.sched_name, IP_VS_SCHEDNAME_MAXLEN) ==
+	    IP_VS_SCHEDNAME_MAXLEN) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	/* Check for valid protocol: TCP or UDP or SCTP, even for fwmark!=0 */
 	if (usvc.protocol != IPPROTO_TCP && usvc.protocol != IPPROTO_UDP &&
 	    usvc.protocol != IPPROTO_SCTP) {
-		pr_err("set_ctl: invalid protocol: %d %pI4:%d %s\n",
+		pr_err("set_ctl: invalid protocol: %d %pI4:%d\n",
 		       usvc.protocol, &usvc.addr.ip,
-		       ntohs(usvc.port), usvc.sched_name);
+		       ntohs(usvc.port));
 		ret = -EFAULT;
 		goto out_unlock;
 	}
@@ -2837,7 +2849,14 @@ static struct nf_sockopt_ops ip_vs_sockopts = {
  */
 
 /* IPVS genetlink family */
-static struct genl_family ip_vs_genl_family;
+static struct genl_family ip_vs_genl_family = {
+	.id		= GENL_ID_GENERATE,
+	.hdrsize	= 0,
+	.name		= IPVS_GENL_NAME,
+	.version	= IPVS_GENL_VERSION,
+	.maxattr	= IPVS_CMD_ATTR_MAX,
+	.netnsok        = true,         /* Make ipvsadm to work on netns */
+};
 
 /* Policy used for first-level command attributes */
 static const struct nla_policy ip_vs_cmd_policy[IPVS_CMD_ATTR_MAX + 1] = {
@@ -2853,7 +2872,7 @@ static const struct nla_policy ip_vs_cmd_policy[IPVS_CMD_ATTR_MAX + 1] = {
 static const struct nla_policy ip_vs_daemon_policy[IPVS_DAEMON_ATTR_MAX + 1] = {
 	[IPVS_DAEMON_ATTR_STATE]	= { .type = NLA_U32 },
 	[IPVS_DAEMON_ATTR_MCAST_IFN]	= { .type = NLA_NUL_STRING,
-					    .len = IP_VS_IFNAME_MAXLEN },
+					    .len = IP_VS_IFNAME_MAXLEN - 1 },
 	[IPVS_DAEMON_ATTR_SYNC_ID]	= { .type = NLA_U32 },
 	[IPVS_DAEMON_ATTR_SYNC_MAXLEN]	= { .type = NLA_U16 },
 	[IPVS_DAEMON_ATTR_MCAST_GROUP]	= { .type = NLA_U32 },
@@ -2871,7 +2890,7 @@ static const struct nla_policy ip_vs_svc_policy[IPVS_SVC_ATTR_MAX + 1] = {
 	[IPVS_SVC_ATTR_PORT]		= { .type = NLA_U16 },
 	[IPVS_SVC_ATTR_FWMARK]		= { .type = NLA_U32 },
 	[IPVS_SVC_ATTR_SCHED_NAME]	= { .type = NLA_NUL_STRING,
-					    .len = IP_VS_SCHEDNAME_MAXLEN },
+					    .len = IP_VS_SCHEDNAME_MAXLEN - 1 },
 	[IPVS_SVC_ATTR_PE_NAME]		= { .type = NLA_NUL_STRING,
 					    .len = IP_VS_PENAME_MAXLEN },
 	[IPVS_SVC_ATTR_FLAGS]		= { .type = NLA_BINARY,
@@ -3078,6 +3097,17 @@ nla_put_failure:
 	return skb->len;
 }
 
+static bool ip_vs_is_af_valid(int af)
+{
+	if (af == AF_INET)
+		return true;
+#ifdef CONFIG_IP_VS_IPV6
+	if (af == AF_INET6 && ipv6_mod_enabled())
+		return true;
+#endif
+	return false;
+}
+
 static int ip_vs_genl_parse_service(struct netns_ipvs *ipvs,
 				    struct ip_vs_service_user_kern *usvc,
 				    struct nlattr *nla, int full_entry,
@@ -3104,11 +3134,7 @@ static int ip_vs_genl_parse_service(struct netns_ipvs *ipvs,
 	memset(usvc, 0, sizeof(*usvc));
 
 	usvc->af = nla_get_u16(nla_af);
-#ifdef CONFIG_IP_VS_IPV6
-	if (usvc->af != AF_INET && usvc->af != AF_INET6)
-#else
-	if (usvc->af != AF_INET)
-#endif
+	if (!ip_vs_is_af_valid(usvc->af))
 		return -EAFNOSUPPORT;
 
 	if (nla_fwmark) {
@@ -3257,7 +3283,7 @@ static int ip_vs_genl_dump_dests(struct sk_buff *skb,
 
 
 	svc = ip_vs_genl_find_service(ipvs, attrs[IPVS_CMD_ATTR_SERVICE]);
-	if (IS_ERR_OR_NULL(svc))
+	if (IS_ERR(svc) || svc == NULL)
 		goto out_err;
 
 	/* Dump the destinations */
@@ -3474,12 +3500,8 @@ static int ip_vs_genl_new_daemon(struct netns_ipvs *ipvs, struct nlattr **attrs)
 	if (ipvs->mixed_address_family_dests > 0)
 		return -EINVAL;
 
-	rtnl_lock();
-	mutex_lock(&ipvs->sync_mutex);
 	ret = start_sync_thread(ipvs, &c,
 				nla_get_u32(attrs[IPVS_DAEMON_ATTR_STATE]));
-	mutex_unlock(&ipvs->sync_mutex);
-	rtnl_unlock();
 	return ret;
 }
 
@@ -3609,6 +3631,11 @@ static int ip_vs_genl_set_cmd(struct sk_buff *skb, struct genl_info *info)
 		 */
 		if (udest.af == 0)
 			udest.af = svc->af;
+
+		if (!ip_vs_is_af_valid(udest.af)) {
+			ret = -EAFNOSUPPORT;
+			goto out;
+		}
 
 		if (udest.af != svc->af && cmd != IPVS_CMD_DEL_DEST) {
 			/* The synchronization protocol is incompatible
@@ -3862,20 +3889,10 @@ static const struct genl_ops ip_vs_genl_ops[] = {
 	},
 };
 
-static struct genl_family ip_vs_genl_family __ro_after_init = {
-	.hdrsize	= 0,
-	.name		= IPVS_GENL_NAME,
-	.version	= IPVS_GENL_VERSION,
-	.maxattr	= IPVS_CMD_ATTR_MAX,
-	.netnsok        = true,         /* Make ipvsadm to work on netns */
-	.module		= THIS_MODULE,
-	.ops		= ip_vs_genl_ops,
-	.n_ops		= ARRAY_SIZE(ip_vs_genl_ops),
-};
-
 static int __init ip_vs_genl_register(void)
 {
-	return genl_register_family(&ip_vs_genl_family);
+	return genl_register_family_with_ops(&ip_vs_genl_family,
+					     ip_vs_genl_ops);
 }
 
 static void ip_vs_genl_unregister(void)

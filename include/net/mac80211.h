@@ -147,6 +147,7 @@ enum ieee80211_ac_numbers {
 	IEEE80211_AC_BE		= 2,
 	IEEE80211_AC_BK		= 3,
 };
+#define IEEE80211_NUM_ACS	4
 
 /**
  * struct ieee80211_tx_queue_params - transmit queue configuration
@@ -901,21 +902,10 @@ struct ieee80211_tx_info {
 				unsigned long jiffies;
 			};
 			/* NB: vif can be NULL for injected frames */
-			union {
-				/* NB: vif can be NULL for injected frames */
-				struct ieee80211_vif *vif;
-
-				/* When packets are enqueued on txq it's easy
-				 * to re-construct the vif pointer. There's no
-				 * more space in tx_info so it can be used to
-				 * store the necessary enqueue time for packet
-				 * sojourn time computation.
-				 */
-				codel_time_t enqueue_time;
-			};
+			struct ieee80211_vif *vif;
 			struct ieee80211_key_conf *hw_key;
 			u32 flags;
-			/* 4 bytes free */
+			codel_time_t enqueue_time;
 		} control;
 		struct {
 			u64 cookie;
@@ -1444,7 +1434,7 @@ enum ieee80211_vif_flags {
 struct ieee80211_vif {
 	enum nl80211_iftype type;
 	struct ieee80211_bss_conf bss_conf;
-	u8 addr[ETH_ALEN] __aligned(2);
+	u8 addr[ETH_ALEN];
 	bool p2p;
 	bool csa_active;
 	bool mu_mimo_owner;
@@ -1751,8 +1741,7 @@ struct ieee80211_sta_rates {
  * @drv_priv: data area for driver use, will always be aligned to
  *	sizeof(void \*), size is determined in hw information.
  * @uapsd_queues: bitmap of queues configured for uapsd. Only valid
- *	if wme is supported. The bits order is like in
- *	IEEE80211_WMM_IE_STA_QOSINFO_AC_*.
+ *	if wme is supported.
  * @max_sp: max Service Period. Only valid if wme is supported.
  * @bandwidth: current bandwidth the station can receive with
  * @rx_nss: in HT/VHT, the maximum number of spatial streams the
@@ -1768,6 +1757,15 @@ struct ieee80211_sta_rates {
  * @max_amsdu_subframes: indicates the maximal number of MSDUs in a single
  *	A-MSDU. Taken from the Extended Capabilities element. 0 means
  *	unlimited.
+ * @max_amsdu_len: indicates the maximal length of an A-MSDU in bytes. This
+ *	field is always valid for packets with a VHT preamble. For packets
+ *	with a HT preamble, additional limits apply:
+ *		+ If the skb is transmitted as part of a BA agreement, the
+ *		  A-MSDU maximal size is min(max_amsdu_len, 4065) bytes.
+ *		+ If the skb is not part of a BA aggreement, the A-MSDU maximal
+ *		  size is min(max_amsdu_len, 7935) bytes.
+ *	Both additional HT limits must be enforced by the low level driver.
+ *	This is defined by the spec (IEEE 802.11-2012 section 8.3.2.2 NOTE 2).
  * @support_p2p_ps: indicates whether the STA supports P2P PS mechanism or not.
  * @max_rc_amsdu_len: Maximum A-MSDU size in bytes recommended by rate control.
  * @txq: per-TID data TX queues (if driver uses the TXQ abstraction)
@@ -1790,22 +1788,6 @@ struct ieee80211_sta {
 	bool tdls_initiator;
 	bool mfp;
 	u8 max_amsdu_subframes;
-
-	/**
-	 * @max_amsdu_len:
-	 * indicates the maximal length of an A-MSDU in bytes.
-	 * This field is always valid for packets with a VHT preamble.
-	 * For packets with a HT preamble, additional limits apply:
-	 *
-	 * * If the skb is transmitted as part of a BA agreement, the
-	 *   A-MSDU maximal size is min(max_amsdu_len, 4065) bytes.
-	 * * If the skb is not part of a BA aggreement, the A-MSDU maximal
-	 *   size is min(max_amsdu_len, 7935) bytes.
-	 *
-	 * Both additional HT limits must be enforced by the low level
-	 * driver. This is defined by the spec (IEEE 802.11-2012 section
-	 * 8.3.2.2 NOTE 2).
-	 */
 	u16 max_amsdu_len;
 	bool support_p2p_ps;
 	u16 max_rc_amsdu_len;
@@ -2039,10 +2021,6 @@ struct ieee80211_txq {
  *	drivers, mac80211 packet loss mechanism will not be triggered and driver
  *	is completely depending on firmware event for station kickout.
  *
- * @IEEE80211_HW_SUPPORTS_TX_FRAG: Hardware does fragmentation by itself.
- *	The stack will not do fragmentation.
- *	The callback for @set_frag_threshold should be set as well.
- *
  * @NUM_IEEE80211_HW_FLAGS: number of hardware flags, used for sizing arrays
  */
 enum ieee80211_hw_flags {
@@ -2084,7 +2062,6 @@ enum ieee80211_hw_flags {
 	IEEE80211_HW_TX_AMSDU,
 	IEEE80211_HW_TX_FRAG_LIST,
 	IEEE80211_HW_REPORTS_LOW_ACK,
-	IEEE80211_HW_SUPPORTS_TX_FRAG,
 
 	/* keep last, obviously */
 	NUM_IEEE80211_HW_FLAGS
@@ -3113,9 +3090,8 @@ enum ieee80211_reconfig_type {
  *	The callback must be atomic.
  *
  * @set_frag_threshold: Configuration of fragmentation threshold. Assign this
- *	if the device does fragmentation by itself. Note that to prevent the
- *	stack from doing fragmentation IEEE80211_HW_SUPPORTS_TX_FRAG
- *	should be set as well.
+ *	if the device does fragmentation by itself; if this callback is
+ *	implemented then the stack will not do fragmentation.
  *	The callback can sleep.
  *
  * @set_rts_threshold: Configuration of RTS threshold (if device needs it)
@@ -3208,6 +3184,26 @@ enum ieee80211_reconfig_type {
  *	This is needed only for IBSS mode and the result of this function is
  *	used to determine whether to reply to Probe Requests.
  *	Returns non-zero if this device sent the last beacon.
+ *	The callback can sleep.
+ *
+ * @ampdu_action: Perform a certain A-MPDU action
+ * 	The RA/TID combination determines the destination and TID we want
+ * 	the ampdu action to be performed for. The action is defined through
+ *	ieee80211_ampdu_mlme_action.
+ *	When the action is set to %IEEE80211_AMPDU_TX_OPERATIONAL the driver
+ *	may neither send aggregates containing more subframes than @buf_size
+ *	nor send aggregates in a way that lost frames would exceed the
+ *	buffer size. If just limiting the aggregate size, this would be
+ *	possible with a buf_size of 8:
+ *	 - TX: 1.....7
+ *	 - RX:  2....7 (lost frame #1)
+ *	 - TX:        8..1...
+ *	which is invalid since #1 was now re-transmitted well past the
+ *	buffer size of 8. Correct ways to retransmit #1 would be:
+ *	 - TX:       1 or 18 or 81
+ *	Even "189" would be wrong since 1 could be lost again.
+ *
+ *	Returns a negative error code on failure.
  *	The callback can sleep.
  *
  * @get_survey: Return per-channel survey information
@@ -3392,7 +3388,7 @@ enum ieee80211_reconfig_type {
  *	since there won't be any time to beacon before the switch anyway.
  * @pre_channel_switch: This is an optional callback that is called
  *	before a channel switch procedure is started (ie. when a STA
- *	gets a CSA or a userspace initiated channel-switch), allowing
+ *	gets a CSA or an userspace initiated channel-switch), allowing
  *	the driver to prepare for the channel switch.
  * @post_channel_switch: This is an optional callback that is called
  *	after a channel switch procedure is completed, allowing the
@@ -3562,35 +3558,6 @@ struct ieee80211_ops {
 			   s64 offset);
 	void (*reset_tsf)(struct ieee80211_hw *hw, struct ieee80211_vif *vif);
 	int (*tx_last_beacon)(struct ieee80211_hw *hw);
-
-	/**
-	 * @ampdu_action:
-	 * Perform a certain A-MPDU action.
-	 * The RA/TID combination determines the destination and TID we want
-	 * the ampdu action to be performed for. The action is defined through
-	 * ieee80211_ampdu_mlme_action.
-	 * When the action is set to %IEEE80211_AMPDU_TX_OPERATIONAL the driver
-	 * may neither send aggregates containing more subframes than @buf_size
-	 * nor send aggregates in a way that lost frames would exceed the
-	 * buffer size. If just limiting the aggregate size, this would be
-	 * possible with a buf_size of 8:
-	 *
-	 * - ``TX: 1.....7``
-	 * - ``RX:  2....7`` (lost frame #1)
-	 * - ``TX:        8..1...``
-	 *
-	 * which is invalid since #1 was now re-transmitted well past the
-	 * buffer size of 8. Correct ways to retransmit #1 would be:
-	 *
-	 * - ``TX:        1   or``
-	 * - ``TX:        18  or``
-	 * - ``TX:        81``
-	 *
-	 * Even ``189`` would be wrong since 1 could be lost again.
-	 *
-	 * Returns a negative error code on failure.
-	 * The callback can sleep.
-	 */
 	int (*ampdu_action)(struct ieee80211_hw *hw,
 			    struct ieee80211_vif *vif,
 			    struct ieee80211_ampdu_params *params);
@@ -4117,10 +4084,6 @@ void ieee80211_sta_pspoll(struct ieee80211_sta *sta);
  * This must be used in conjunction with ieee80211_sta_ps_transition()
  * and possibly ieee80211_sta_pspoll(); calls to all three must be
  * serialized.
- * %IEEE80211_NUM_TIDS can be passed as the tid if the tid is unknown.
- * In this case, mac80211 will not check that this tid maps to an AC
- * that is trigger enabled and assume that the caller did the proper
- * checks.
  */
 void ieee80211_sta_uapsd_trigger(struct ieee80211_sta *sta, u8 tid);
 
@@ -4128,7 +4091,7 @@ void ieee80211_sta_uapsd_trigger(struct ieee80211_sta *sta, u8 tid);
  * The TX headroom reserved by mac80211 for its own tx_status functions.
  * This is enough for the radiotap header.
  */
-#define IEEE80211_TX_STATUS_HEADROOM	14
+#define IEEE80211_TX_STATUS_HEADROOM	ALIGN(14, 4)
 
 /**
  * ieee80211_sta_set_buffered - inform mac80211 about driver-buffered frames
@@ -5278,7 +5241,6 @@ void ieee80211_resume_disconnect(struct ieee80211_vif *vif);
  *
  * @vif: &struct ieee80211_vif pointer from the add_interface callback.
  * @rssi_event: the RSSI trigger event type
- * @rssi_level: new RSSI level value or 0 if not available
  * @gfp: context flags
  *
  * When the %IEEE80211_VIF_SUPPORTS_CQM_RSSI is set, and a connection quality
@@ -5287,7 +5249,6 @@ void ieee80211_resume_disconnect(struct ieee80211_vif *vif);
  */
 void ieee80211_cqm_rssi_notify(struct ieee80211_vif *vif,
 			       enum nl80211_cqm_rssi_threshold_event rssi_event,
-			       s32 rssi_level,
 			       gfp_t gfp);
 
 /**

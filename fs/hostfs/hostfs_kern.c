@@ -920,6 +920,7 @@ static const char *hostfs_get_link(struct dentry *dentry,
 }
 
 static const struct inode_operations hostfs_link_iops = {
+	.readlink	= generic_readlink,
 	.get_link	= hostfs_get_link,
 };
 

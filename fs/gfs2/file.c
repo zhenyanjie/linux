@@ -22,7 +22,7 @@
 #include <linux/swap.h>
 #include <linux/crc32.h>
 #include <linux/writeback.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/dlm.h>
 #include <linux/dlm_plock.h>
 #include <linux/delay.h>
@@ -256,7 +256,7 @@ static int do_gfs2_set_flags(struct file *filp, u32 reqflags, u32 mask)
 			goto out;
 	}
 	if ((flags ^ new_flags) & GFS2_DIF_JDATA) {
-		if (flags & GFS2_DIF_JDATA)
+		if (new_flags & GFS2_DIF_JDATA)
 			gfs2_log_flush(sdp, ip->i_gl, NORMAL_FLUSH);
 		error = filemap_fdatawrite(inode->i_mapping);
 		if (error)
@@ -264,6 +264,8 @@ static int do_gfs2_set_flags(struct file *filp, u32 reqflags, u32 mask)
 		error = filemap_fdatawait(inode->i_mapping);
 		if (error)
 			goto out;
+		if (new_flags & GFS2_DIF_JDATA)
+			gfs2_ordered_del_inode(ip);
 	}
 	error = gfs2_trans_begin(sdp, RES_DINODE, 0);
 	if (error)
@@ -379,10 +381,10 @@ static int gfs2_allocate_page_backing(struct page *page)
  * blocks allocated on disk to back that page.
  */
 
-static int gfs2_page_mkwrite(struct vm_fault *vmf)
+static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	struct page *page = vmf->page;
-	struct inode *inode = file_inode(vmf->vma->vm_file);
+	struct inode *inode = file_inode(vma->vm_file);
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct gfs2_alloc_parms ap = { .aflags = 0, };
@@ -399,7 +401,7 @@ static int gfs2_page_mkwrite(struct vm_fault *vmf)
 	if (ret)
 		goto out;
 
-	gfs2_size_hint(vmf->vma->vm_file, pos, PAGE_SIZE);
+	gfs2_size_hint(vma->vm_file, pos, PAGE_SIZE);
 
 	gfs2_holder_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
 	ret = gfs2_glock_nq(&gh);
@@ -407,7 +409,7 @@ static int gfs2_page_mkwrite(struct vm_fault *vmf)
 		goto out_uninit;
 
 	/* Update file times before taking page lock */
-	file_update_time(vmf->vma->vm_file);
+	file_update_time(vma->vm_file);
 
 	set_bit(GLF_DIRTY, &ip->i_gl->gl_flags);
 	set_bit(GIF_SW_PAGED, &ip->i_flags);
@@ -799,7 +801,7 @@ static long __gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t 
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_alloc_parms ap = { .aflags = 0, };
 	unsigned int data_blocks = 0, ind_blocks = 0, rblocks;
-	loff_t bytes, max_bytes, max_blks = UINT_MAX;
+	loff_t bytes, max_bytes, max_blks;
 	int error;
 	const loff_t pos = offset;
 	const loff_t count = len;
@@ -851,7 +853,8 @@ static long __gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t 
 			return error;
 		/* ap.allowed tells us how many blocks quota will allow
 		 * us to write. Check if this reduces max_blks */
-		if (ap.allowed && ap.allowed < max_blks)
+		max_blks = UINT_MAX;
+		if (ap.allowed)
 			max_blks = ap.allowed;
 
 		error = gfs2_inplace_reserve(ip, &ap);

@@ -290,6 +290,7 @@ int ipv6_flowlabel_opt_get(struct sock *sk, struct in6_flowlabel_req *freq,
 			   int flags);
 int ip6_flowlabel_init(void);
 void ip6_flowlabel_cleanup(void);
+bool ip6_autoflowlabel(struct net *net, const struct ipv6_pinfo *np);
 
 static inline void fl6_sock_release(struct ip6_flowlabel *fl)
 {
@@ -937,8 +938,7 @@ int ip6_local_out(struct net *net, struct sock *sk, struct sk_buff *skb);
  */
 
 void ipv6_push_nfrag_opts(struct sk_buff *skb, struct ipv6_txoptions *opt,
-			  u8 *proto, struct in6_addr **daddr_p,
-			  struct in6_addr *saddr);
+			  u8 *proto, struct in6_addr **daddr_p);
 void ipv6_push_frag_opts(struct sk_buff *skb, struct ipv6_txoptions *opt,
 			 u8 *proto);
 

@@ -1,7 +1,7 @@
 /*
  * Freescale Management Complex (MC) bus driver MSI support
  *
- * Copyright (C) 2015-2016 Freescale Semiconductor, Inc.
+ * Copyright (C) 2015 Freescale Semiconductor, Inc.
  * Author: German Rivera <German.Rivera@freescale.com>
  *
  * This file is licensed under the terms of the GNU General Public
@@ -20,7 +20,7 @@
 #include "fsl-mc-private.h"
 
 static struct irq_chip its_msi_irq_chip = {
-	.name = "ITS-fMSI",
+	.name = "fsl-mc-bus-msi",
 	.irq_mask = irq_chip_mask_parent,
 	.irq_unmask = irq_chip_unmask_parent,
 	.irq_eoi = irq_chip_eoi_parent,
@@ -52,7 +52,7 @@ static int its_fsl_mc_msi_prepare(struct irq_domain *msi_domain,
 	return msi_info->ops->msi_prepare(msi_domain->parent, dev, nvec, info);
 }
 
-static struct msi_domain_ops its_fsl_mc_msi_ops __ro_after_init = {
+static struct msi_domain_ops its_fsl_mc_msi_ops = {
 	.msi_prepare = its_fsl_mc_msi_prepare,
 };
 
@@ -75,6 +75,8 @@ int __init its_fsl_mc_msi_init(void)
 
 	for (np = of_find_matching_node(NULL, its_device_id); np;
 	     np = of_find_matching_node(np, its_device_id)) {
+		if (!of_device_is_available(np))
+			continue;
 		if (!of_property_read_bool(np, "msi-controller"))
 			continue;
 

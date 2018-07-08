@@ -1194,7 +1194,7 @@ static void snd_cs4281_proc_init(struct cs4281 *chip)
  * joystick support
  */
 
-#if IS_REACHABLE(CONFIG_GAMEPORT)
+#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
 
 static void snd_cs4281_gameport_trigger(struct gameport *gameport)
 {
@@ -1767,14 +1767,14 @@ static void snd_cs4281_midi_output_trigger(struct snd_rawmidi_substream *substre
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
-static const struct snd_rawmidi_ops snd_cs4281_midi_output =
+static struct snd_rawmidi_ops snd_cs4281_midi_output =
 {
 	.open =		snd_cs4281_midi_output_open,
 	.close =	snd_cs4281_midi_output_close,
 	.trigger =	snd_cs4281_midi_output_trigger,
 };
 
-static const struct snd_rawmidi_ops snd_cs4281_midi_input =
+static struct snd_rawmidi_ops snd_cs4281_midi_input =
 {
 	.open = 	snd_cs4281_midi_input_open,
 	.close =	snd_cs4281_midi_input_close,

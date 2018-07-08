@@ -377,7 +377,7 @@ static int ade7753_initial_setup(struct iio_dev *indio_dev)
 	}
 
 	ade7753_reset(dev);
-	usleep_range(ADE7753_STARTUP_DELAY, ADE7753_STARTUP_DELAY + 100);
+	msleep(ADE7753_STARTUP_DELAY);
 
 err_ret:
 	return ret;

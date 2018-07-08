@@ -1,11 +1,9 @@
-config BCM2835_VCHIQ
+config BCM2708_VCHIQ
 	tristate "Videocore VCHIQ"
-	depends on HAS_DMA
-	depends on OF
-	depends on RASPBERRYPI_FIRMWARE || (COMPILE_TEST && !RASPBERRYPI_FIRMWARE)
+	depends on RASPBERRYPI_FIRMWARE && BROKEN
 	default y
 	help
 		Kernel to VideoCore communication interface for the
-		BCM2835 family of products.
+		BCM2708 family of products.
 		Defaults to Y when the Broadcom Videocore services
 		are included in the build, N otherwise.

@@ -12,8 +12,7 @@ struct unwind_state {
 	struct task_struct *task;
 	int graph_idx;
 #ifdef CONFIG_FRAME_POINTER
-	unsigned long *bp, *orig_sp;
-	struct pt_regs *regs;
+	unsigned long *bp;
 #else
 	unsigned long *sp;
 #endif
@@ -48,26 +47,13 @@ unsigned long *unwind_get_return_address_ptr(struct unwind_state *state)
 	if (unwind_done(state))
 		return NULL;
 
-	return state->regs ? &state->regs->ip : state->bp + 1;
-}
-
-static inline struct pt_regs *unwind_get_entry_regs(struct unwind_state *state)
-{
-	if (unwind_done(state))
-		return NULL;
-
-	return state->regs;
+	return state->bp + 1;
 }
 
 #else /* !CONFIG_FRAME_POINTER */
 
 static inline
 unsigned long *unwind_get_return_address_ptr(struct unwind_state *state)
-{
-	return NULL;
-}
-
-static inline struct pt_regs *unwind_get_entry_regs(struct unwind_state *state)
 {
 	return NULL;
 }

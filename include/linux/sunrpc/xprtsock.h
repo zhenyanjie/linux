@@ -55,8 +55,6 @@ struct sock_xprt {
 	size_t			rcvsize,
 				sndsize;
 
-	struct rpc_timeout	tcp_timeout;
-
 	/*
 	 * Saved socket callback addresses
 	 */
@@ -83,7 +81,6 @@ struct sock_xprt {
 
 #define XPRT_SOCK_CONNECTING	1U
 #define XPRT_SOCK_DATA_READY	(2)
-#define XPRT_SOCK_UPD_TIMEOUT	(3)
 
 #endif /* __KERNEL__ */
 

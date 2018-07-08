@@ -8,6 +8,7 @@
 #include <linux/pci.h>
 #include <linux/iommu.h>
 #include <linux/iommu-helper.h>
+#include <linux/pci.h>
 #include <linux/sizes.h>
 #include <asm/pci_dma.h>
 

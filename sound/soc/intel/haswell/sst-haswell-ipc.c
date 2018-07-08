@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/platform_device.h>
+#include <linux/kthread.h>
 #include <linux/firmware.h>
 #include <linux/dma-mapping.h>
 #include <linux/debugfs.h>
@@ -817,7 +818,7 @@ static irqreturn_t hsw_irq_thread(int irq, void *context)
 	spin_unlock_irqrestore(&sst->spinlock, flags);
 
 	/* continue to send any remaining messages... */
-	schedule_work(&ipc->kwork);
+	kthread_queue_work(&ipc->kworker, &ipc->kwork);
 
 	return IRQ_HANDLED;
 }

@@ -11,9 +11,6 @@
  */
 #include <linux/errno.h>
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task.h>
-#include <linux/sched/task_stack.h>
 #include <linux/tick.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -42,7 +39,7 @@
 #include <asm/mipsregs.h>
 #include <asm/processor.h>
 #include <asm/reg.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/elf.h>
 #include <asm/isadep.h>
@@ -120,6 +117,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	struct thread_info *ti = task_thread_info(p);
 	struct pt_regs *childregs, *regs = current_pt_regs();
 	unsigned long childksp;
+	p->set_child_tid = p->clear_child_tid = NULL;
 
 	childksp = (unsigned long)task_stack_page(p) + THREAD_SIZE - 32;
 
@@ -685,8 +683,24 @@ int mips_set_process_fp_mode(struct task_struct *task, unsigned int value)
 	struct task_struct *t;
 	int max_users;
 
+	/* If nothing to change, return right away, successfully.  */
+	if (value == mips_get_process_fp_mode(task))
+		return 0;
+
+	/* Only accept a mode change if 64-bit FP enabled for o32.  */
+	if (!IS_ENABLED(CONFIG_MIPS_O32_FP64_SUPPORT))
+		return -EOPNOTSUPP;
+
+	/* And only for o32 tasks.  */
+	if (IS_ENABLED(CONFIG_64BIT) && !test_thread_flag(TIF_32BIT_REGS))
+		return -EOPNOTSUPP;
+
 	/* Check the value is valid */
 	if (value & ~known_bits)
+		return -EOPNOTSUPP;
+
+	/* Setting FRE without FR is not supported.  */
+	if ((value & (PR_FP_MODE_FR | PR_FP_MODE_FRE)) == PR_FP_MODE_FRE)
 		return -EOPNOTSUPP;
 
 	/* Avoid inadvertently triggering emulation */
@@ -751,47 +765,3 @@ int mips_set_process_fp_mode(struct task_struct *task, unsigned int value)
 
 	return 0;
 }
-
-#if defined(CONFIG_32BIT) || defined(CONFIG_MIPS32_O32)
-void mips_dump_regs32(u32 *uregs, const struct pt_regs *regs)
-{
-	unsigned int i;
-
-	for (i = MIPS32_EF_R1; i <= MIPS32_EF_R31; i++) {
-		/* k0/k1 are copied as zero. */
-		if (i == MIPS32_EF_R26 || i == MIPS32_EF_R27)
-			uregs[i] = 0;
-		else
-			uregs[i] = regs->regs[i - MIPS32_EF_R0];
-	}
-
-	uregs[MIPS32_EF_LO] = regs->lo;
-	uregs[MIPS32_EF_HI] = regs->hi;
-	uregs[MIPS32_EF_CP0_EPC] = regs->cp0_epc;
-	uregs[MIPS32_EF_CP0_BADVADDR] = regs->cp0_badvaddr;
-	uregs[MIPS32_EF_CP0_STATUS] = regs->cp0_status;
-	uregs[MIPS32_EF_CP0_CAUSE] = regs->cp0_cause;
-}
-#endif /* CONFIG_32BIT || CONFIG_MIPS32_O32 */
-
-#ifdef CONFIG_64BIT
-void mips_dump_regs64(u64 *uregs, const struct pt_regs *regs)
-{
-	unsigned int i;
-
-	for (i = MIPS64_EF_R1; i <= MIPS64_EF_R31; i++) {
-		/* k0/k1 are copied as zero. */
-		if (i == MIPS64_EF_R26 || i == MIPS64_EF_R27)
-			uregs[i] = 0;
-		else
-			uregs[i] = regs->regs[i - MIPS64_EF_R0];
-	}
-
-	uregs[MIPS64_EF_LO] = regs->lo;
-	uregs[MIPS64_EF_HI] = regs->hi;
-	uregs[MIPS64_EF_CP0_EPC] = regs->cp0_epc;
-	uregs[MIPS64_EF_CP0_BADVADDR] = regs->cp0_badvaddr;
-	uregs[MIPS64_EF_CP0_STATUS] = regs->cp0_status;
-	uregs[MIPS64_EF_CP0_CAUSE] = regs->cp0_cause;
-}
-#endif /* CONFIG_64BIT */

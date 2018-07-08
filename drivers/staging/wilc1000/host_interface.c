@@ -1722,8 +1722,10 @@ _WPAPtk_end_case_:
 
 	case PMKSA:
 		pu8keybuf = kmalloc((pstrHostIFkeyAttr->attr.pmkid.numpmkid * PMKSA_KEY_LEN) + 1, GFP_KERNEL);
-		if (!pu8keybuf)
+		if (!pu8keybuf) {
+			netdev_err(vif->ndev, "No buffer to send PMKSA Key\n");
 			return -ENOMEM;
+		}
 
 		pu8keybuf[0] = pstrHostIFkeyAttr->attr.pmkid.numpmkid;
 
@@ -1928,9 +1930,11 @@ static s32 Handle_Get_InActiveTime(struct wilc_vif *vif,
 	wid.type = WID_STR;
 	wid.size = ETH_ALEN;
 	wid.val = kmalloc(wid.size, GFP_KERNEL);
+	if (!wid.val)
+		return -ENOMEM;
 
 	stamac = wid.val;
-	ether_addr_copy(stamac, strHostIfStaInactiveT->mac);
+	memcpy(stamac, strHostIfStaInactiveT->mac, ETH_ALEN);
 
 	result = wilc_send_config_pkt(vif, SET_CFG, &wid, 1,
 				      wilc_get_vif_idx(vif));
@@ -2166,7 +2170,7 @@ static void Handle_DelStation(struct wilc_vif *vif,
 
 	pu8CurrByte = wid.val;
 
-	ether_addr_copy(pu8CurrByte, pstrDelStaParam->mac_addr);
+	memcpy(pu8CurrByte, pstrDelStaParam->mac_addr, ETH_ALEN);
 
 	result = wilc_send_config_pkt(vif, SET_CFG, &wid, 1,
 				      wilc_get_vif_idx(vif));
@@ -2320,8 +2324,10 @@ static u32 Handle_ListenStateExpired(struct wilc_vif *vif,
 		wid.size = 2;
 		wid.val = kmalloc(wid.size, GFP_KERNEL);
 
-		if (!wid.val)
+		if (!wid.val) {
+			netdev_err(vif->ndev, "Failed to allocate memory\n");
 			return -ENOMEM;
+		}
 
 		wid.val[0] = u8remain_on_chan_flag;
 		wid.val[1] = FALSE_FRMWR_CHANNEL;
@@ -3998,9 +4004,8 @@ static void *host_int_ParseJoinBssParam(struct network_info *ptstrNetworkInfo)
 				pNewJoinBssParam->rsn_found = true;
 				index += pu8IEs[index + 1] + 2;
 				continue;
-			} else {
+			} else
 				index += pu8IEs[index + 1] + 2;
-			}
 		}
 	}
 

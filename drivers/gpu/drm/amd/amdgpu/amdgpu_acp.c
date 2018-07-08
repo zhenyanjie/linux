@@ -265,14 +265,14 @@ static int acp_hw_init(void *handle)
 
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
-	const struct amdgpu_ip_block *ip_block =
+	const struct amdgpu_ip_block_version *ip_version =
 		amdgpu_get_ip_block(adev, AMD_IP_BLOCK_TYPE_ACP);
 
-	if (!ip_block)
+	if (!ip_version)
 		return -EINVAL;
 
 	r = amd_acp_hw_init(adev->acp.cgs_device,
-			    ip_block->version->major, ip_block->version->minor);
+			    ip_version->major, ip_version->minor);
 	/* -ENODEV means board uses AZ rather than ACP */
 	if (r == -ENODEV)
 		return 0;
@@ -459,7 +459,7 @@ static int acp_set_powergating_state(void *handle,
 	return 0;
 }
 
-static const struct amd_ip_funcs acp_ip_funcs = {
+const struct amd_ip_funcs acp_ip_funcs = {
 	.name = "acp_ip",
 	.early_init = acp_early_init,
 	.late_init = NULL,
@@ -474,13 +474,4 @@ static const struct amd_ip_funcs acp_ip_funcs = {
 	.soft_reset = acp_soft_reset,
 	.set_clockgating_state = acp_set_clockgating_state,
 	.set_powergating_state = acp_set_powergating_state,
-};
-
-const struct amdgpu_ip_block_version acp_ip_block =
-{
-	.type = AMD_IP_BLOCK_TYPE_ACP,
-	.major = 2,
-	.minor = 2,
-	.rev = 0,
-	.funcs = &acp_ip_funcs,
 };

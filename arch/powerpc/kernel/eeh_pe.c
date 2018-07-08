@@ -104,7 +104,7 @@ int eeh_phb_pe_create(struct pci_controller *phb)
 	/* Put it into the list */
 	list_add_tail(&pe->child, &eeh_phb_pe);
 
-	pr_debug("EEH: Add PE for PHB#%x\n", phb->global_number);
+	pr_debug("EEH: Add PE for PHB#%d\n", phb->global_number);
 
 	return 0;
 }
@@ -333,7 +333,7 @@ int eeh_add_to_parent_pe(struct eeh_dev *edev)
 
 	/* Check if the PE number is valid */
 	if (!eeh_has_flag(EEH_VALID_PE_ZERO) && !edev->pe_config_addr) {
-		pr_err("%s: Invalid PE#0 for edev 0x%x on PHB#%x\n",
+		pr_err("%s: Invalid PE#0 for edev 0x%x on PHB#%d\n",
 		       __func__, edev->config_addr, edev->phb->global_number);
 		return -EINVAL;
 	}
@@ -795,7 +795,8 @@ static void eeh_restore_bridge_bars(struct eeh_dev *edev)
 	eeh_ops->write_config(pdn, 15*4, 4, edev->config_space[15]);
 
 	/* PCI Command: 0x4 */
-	eeh_ops->write_config(pdn, PCI_COMMAND, 4, edev->config_space[1]);
+	eeh_ops->write_config(pdn, PCI_COMMAND, 4, edev->config_space[1] |
+			      PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
 
 	/* Check the PCIe link is ready */
 	eeh_bridge_check_link(edev);

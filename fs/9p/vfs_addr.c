@@ -34,7 +34,6 @@
 #include <linux/idr.h>
 #include <linux/sched.h>
 #include <linux/uio.h>
-#include <linux/bvec.h>
 #include <net/9p/9p.h>
 #include <net/9p/client.h>
 
@@ -310,10 +309,18 @@ static int v9fs_write_end(struct file *filp, struct address_space *mapping,
 
 	p9_debug(P9_DEBUG_VFS, "filp %p, mapping %p\n", filp, mapping);
 
-	if (unlikely(copied < len && !PageUptodate(page))) {
-		copied = 0;
-		goto out;
+	if (unlikely(copied < len)) {
+		/*
+		 * zero out the rest of the area
+		 */
+		unsigned from = pos & (PAGE_SIZE - 1);
+
+		zero_user(page, from + copied, len - copied);
+		flush_dcache_page(page);
 	}
+
+	if (!PageUptodate(page))
+		SetPageUptodate(page);
 	/*
 	 * No need to use i_size_read() here, the i_size
 	 * cannot change under us because we hold the i_mutex.
@@ -323,7 +330,6 @@ static int v9fs_write_end(struct file *filp, struct address_space *mapping,
 		i_size_write(inode, last_pos);
 	}
 	set_page_dirty(page);
-out:
 	unlock_page(page);
 	put_page(page);
 

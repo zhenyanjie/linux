@@ -739,9 +739,8 @@ struct iwl_mvm {
 
 	enum iwl_ucode_type cur_ucode;
 	bool ucode_loaded;
-	bool hw_registered;
 	bool calibrating;
-	u32 error_event_table[2];
+	u32 error_event_table;
 	u32 log_event_table;
 	u32 umac_error_event_table;
 	bool support_umac_log;
@@ -1113,8 +1112,9 @@ static inline bool iwl_mvm_is_d0i3_supported(struct iwl_mvm *mvm)
 
 static inline bool iwl_mvm_is_dqa_supported(struct iwl_mvm *mvm)
 {
-	return fw_has_capa(&mvm->fw->ucode_capa,
-			   IWL_UCODE_TLV_CAPA_DQA_SUPPORT);
+	/* Make sure DQA isn't allowed in driver until feature is complete */
+	return false && fw_has_capa(&mvm->fw->ucode_capa,
+				    IWL_UCODE_TLV_CAPA_DQA_SUPPORT);
 }
 
 static inline bool iwl_mvm_enter_d0i3_on_suspend(struct iwl_mvm *mvm)
@@ -1218,19 +1218,6 @@ static inline bool iwl_mvm_has_new_tx_api(struct iwl_mvm *mvm)
 	return mvm->trans->cfg->use_tfh;
 }
 
-static inline bool iwl_mvm_is_cdb_supported(struct iwl_mvm *mvm)
-{
-	/*
-	 * TODO:
-	 * The issue of how to determine CDB support is still not well defined.
-	 * It may be that it will be for all next HW devices and it may be per
-	 * FW compilation and it may also differ between different devices.
-	 * For now take a ride on the new TX API and get back to it when
-	 * it is well defined.
-	 */
-	return iwl_mvm_has_new_tx_api(mvm);
-}
-
 static inline bool iwl_mvm_is_tt_in_fw(struct iwl_mvm *mvm)
 {
 #ifdef CONFIG_THERMAL
@@ -1271,7 +1258,6 @@ int __iwl_mvm_mac_start(struct iwl_mvm *mvm);
  ******************/
 /* uCode */
 int iwl_run_init_mvm_ucode(struct iwl_mvm *mvm, bool read_nvm);
-int iwl_run_unified_mvm_ucode(struct iwl_mvm *mvm, bool read_nvm);
 
 /* Utils */
 int iwl_mvm_legacy_rate_to_mac80211_idx(u32 rate_n_flags,
@@ -1433,7 +1419,6 @@ void iwl_mvm_rx_stored_beacon_notif(struct iwl_mvm *mvm,
 				    struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_mu_mimo_grp_notif(struct iwl_mvm *mvm,
 			       struct iwl_rx_cmd_buffer *rxb);
-void iwl_mvm_sta_pm_notif(struct iwl_mvm *mvm, struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_window_status_notif(struct iwl_mvm *mvm,
 				 struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_mac_ctxt_recalc_tsf_id(struct iwl_mvm *mvm,
@@ -1672,8 +1657,8 @@ void iwl_mvm_enable_txq(struct iwl_mvm *mvm, int queue, int mac80211_queue,
  * Disable a TXQ.
  * Note that in non-DQA mode the %mac80211_queue and %tid params are ignored.
  */
-int iwl_mvm_disable_txq(struct iwl_mvm *mvm, int queue, int mac80211_queue,
-			u8 tid, u8 flags);
+void iwl_mvm_disable_txq(struct iwl_mvm *mvm, int queue, int mac80211_queue,
+			 u8 tid, u8 flags);
 int iwl_mvm_find_free_queue(struct iwl_mvm *mvm, u8 sta_id, u8 minq, u8 maxq);
 
 /* Return a bitmask with all the hw supported queues, except for the
@@ -1681,8 +1666,11 @@ int iwl_mvm_find_free_queue(struct iwl_mvm *mvm, u8 sta_id, u8 minq, u8 maxq);
  */
 static inline u32 iwl_mvm_flushable_queues(struct iwl_mvm *mvm)
 {
+	u32 cmd_queue = iwl_mvm_is_dqa_supported(mvm) ? IWL_MVM_DQA_CMD_QUEUE :
+		IWL_MVM_CMD_QUEUE;
+
 	return ((BIT(mvm->cfg->base_params->num_of_queues) - 1) &
-		~BIT(IWL_MVM_CMD_QUEUE));
+		~BIT(cmd_queue));
 }
 
 static inline
@@ -1701,8 +1689,8 @@ void iwl_mvm_enable_ac_txq(struct iwl_mvm *mvm, int queue, int mac80211_queue,
 
 static inline void iwl_mvm_stop_device(struct iwl_mvm *mvm)
 {
-	iwl_free_fw_paging(mvm);
 	mvm->ucode_loaded = false;
+	mvm->fw_dbg_conf = FW_DBG_INVALID;
 	iwl_trans_stop_device(mvm->trans);
 }
 

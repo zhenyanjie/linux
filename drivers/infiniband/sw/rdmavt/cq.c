@@ -119,17 +119,18 @@ void rvt_cq_enter(struct rvt_cq *cq, struct ib_wc *entry, bool solicited)
 	if (cq->notify == IB_CQ_NEXT_COMP ||
 	    (cq->notify == IB_CQ_SOLICITED &&
 	     (solicited || entry->status != IB_WC_SUCCESS))) {
+		struct kthread_worker *worker;
 		/*
 		 * This will cause send_complete() to be called in
 		 * another thread.
 		 */
-		spin_lock(&cq->rdi->n_cqs_lock);
-		if (likely(cq->rdi->worker)) {
+		smp_read_barrier_depends(); /* see rvt_cq_exit */
+		worker = cq->rdi->worker;
+		if (likely(worker)) {
 			cq->notify = RVT_CQ_NONE;
 			cq->triggered++;
-			kthread_queue_work(cq->rdi->worker, &cq->comptask);
+			kthread_queue_work(worker, &cq->comptask);
 		}
-		spin_unlock(&cq->rdi->n_cqs_lock);
 	}
 
 	spin_unlock_irqrestore(&cq->lock, flags);
@@ -196,7 +197,7 @@ struct ib_cq *rvt_create_cq(struct ib_device *ibdev,
 		return ERR_PTR(-EINVAL);
 
 	/* Allocate the completion queue structure. */
-	cq = kzalloc(sizeof(*cq), GFP_KERNEL);
+	cq = kzalloc_node(sizeof(*cq), GFP_KERNEL, rdi->dparms.node);
 	if (!cq)
 		return ERR_PTR(-ENOMEM);
 
@@ -212,7 +213,9 @@ struct ib_cq *rvt_create_cq(struct ib_device *ibdev,
 		sz += sizeof(struct ib_uverbs_wc) * (entries + 1);
 	else
 		sz += sizeof(struct ib_wc) * (entries + 1);
-	wc = vmalloc_user(sz);
+	wc = udata ?
+		vmalloc_user(sz) :
+		vzalloc_node(sz, rdi->dparms.node);
 	if (!wc) {
 		ret = ERR_PTR(-ENOMEM);
 		goto bail_cq;
@@ -239,15 +242,15 @@ struct ib_cq *rvt_create_cq(struct ib_device *ibdev,
 		}
 	}
 
-	spin_lock_irq(&rdi->n_cqs_lock);
+	spin_lock(&rdi->n_cqs_lock);
 	if (rdi->n_cqs_allocated == rdi->dparms.props.max_cq) {
-		spin_unlock_irq(&rdi->n_cqs_lock);
+		spin_unlock(&rdi->n_cqs_lock);
 		ret = ERR_PTR(-ENOMEM);
 		goto bail_ip;
 	}
 
 	rdi->n_cqs_allocated++;
-	spin_unlock_irq(&rdi->n_cqs_lock);
+	spin_unlock(&rdi->n_cqs_lock);
 
 	if (cq->ip) {
 		spin_lock_irq(&rdi->pending_lock);
@@ -295,9 +298,9 @@ int rvt_destroy_cq(struct ib_cq *ibcq)
 	struct rvt_dev_info *rdi = cq->rdi;
 
 	kthread_flush_work(&cq->comptask);
-	spin_lock_irq(&rdi->n_cqs_lock);
+	spin_lock(&rdi->n_cqs_lock);
 	rdi->n_cqs_allocated--;
-	spin_unlock_irq(&rdi->n_cqs_lock);
+	spin_unlock(&rdi->n_cqs_lock);
 	if (cq->ip)
 		kref_put(&cq->ip->ref, rvt_release_mmap_info);
 	else
@@ -367,7 +370,9 @@ int rvt_resize_cq(struct ib_cq *ibcq, int cqe, struct ib_udata *udata)
 		sz += sizeof(struct ib_uverbs_wc) * (cqe + 1);
 	else
 		sz += sizeof(struct ib_wc) * (cqe + 1);
-	wc = vmalloc_user(sz);
+	wc = udata ?
+		vmalloc_user(sz) :
+		vzalloc_node(sz, rdi->dparms.node);
 	if (!wc)
 		return -ENOMEM;
 
@@ -503,23 +508,33 @@ int rvt_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *entry)
  */
 int rvt_driver_cq_init(struct rvt_dev_info *rdi)
 {
+	int ret = 0;
 	int cpu;
-	struct kthread_worker *worker;
+	struct task_struct *task;
 
 	if (rdi->worker)
 		return 0;
-
 	spin_lock_init(&rdi->n_cqs_lock);
+	rdi->worker = kzalloc(sizeof(*rdi->worker), GFP_KERNEL);
+	if (!rdi->worker)
+		return -ENOMEM;
+	kthread_init_worker(rdi->worker);
+	task = kthread_create_on_node(
+		kthread_worker_fn,
+		rdi->worker,
+		rdi->dparms.node,
+		"%s", rdi->dparms.cq_name);
+	if (IS_ERR(task)) {
+		kfree(rdi->worker);
+		rdi->worker = NULL;
+		return PTR_ERR(task);
+	}
 
+	set_user_nice(task, MIN_NICE);
 	cpu = cpumask_first(cpumask_of_node(rdi->dparms.node));
-	worker = kthread_create_worker_on_cpu(cpu, 0,
-					      "%s", rdi->dparms.cq_name);
-	if (IS_ERR(worker))
-		return PTR_ERR(worker);
-
-	set_user_nice(worker->task, MIN_NICE);
-	rdi->worker = worker;
-	return 0;
+	kthread_bind(task, cpu);
+	wake_up_process(task);
+	return ret;
 }
 
 /**
@@ -530,15 +545,13 @@ void rvt_cq_exit(struct rvt_dev_info *rdi)
 {
 	struct kthread_worker *worker;
 
-	/* block future queuing from send_complete() */
-	spin_lock_irq(&rdi->n_cqs_lock);
 	worker = rdi->worker;
-	if (!worker) {
-		spin_unlock_irq(&rdi->n_cqs_lock);
+	if (!worker)
 		return;
-	}
+	/* blocks future queuing from send_complete() */
 	rdi->worker = NULL;
-	spin_unlock_irq(&rdi->n_cqs_lock);
-
-	kthread_destroy_worker(worker);
+	smp_wmb(); /* See rdi_cq_enter */
+	kthread_flush_worker(worker);
+	kthread_stop(worker->task);
+	kfree(worker);
 }

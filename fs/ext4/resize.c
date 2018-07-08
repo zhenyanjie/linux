@@ -45,8 +45,7 @@ int ext4_resize_begin(struct super_block *sb)
 		return -EPERM;
 	}
 
-	if (test_and_set_bit_lock(EXT4_FLAGS_RESIZING,
-				  &EXT4_SB(sb)->s_ext4_flags))
+	if (test_and_set_bit_lock(EXT4_RESIZING, &EXT4_SB(sb)->s_resize_flags))
 		ret = -EBUSY;
 
 	return ret;
@@ -54,7 +53,7 @@ int ext4_resize_begin(struct super_block *sb)
 
 void ext4_resize_end(struct super_block *sb)
 {
-	clear_bit_unlock(EXT4_FLAGS_RESIZING, &EXT4_SB(sb)->s_ext4_flags);
+	clear_bit_unlock(EXT4_RESIZING, &EXT4_SB(sb)->s_resize_flags);
 	smp_mb__after_atomic();
 }
 
@@ -1904,7 +1903,7 @@ retry:
 		return 0;
 
 	n_group = ext4_get_group_number(sb, n_blocks_count - 1);
-	if (n_group > (0xFFFFFFFFUL / EXT4_INODES_PER_GROUP(sb))) {
+	if (n_group >= (0xFFFFFFFFUL / EXT4_INODES_PER_GROUP(sb))) {
 		ext4_warning(sb, "resize would cause inodes_count overflow");
 		return -EINVAL;
 	}
@@ -1927,7 +1926,8 @@ retry:
 			n_desc_blocks = o_desc_blocks +
 				le16_to_cpu(es->s_reserved_gdt_blocks);
 			n_group = n_desc_blocks * EXT4_DESC_PER_BLOCK(sb);
-			n_blocks_count = n_group * EXT4_BLOCKS_PER_GROUP(sb);
+			n_blocks_count = (ext4_fsblk_t)n_group *
+				EXT4_BLOCKS_PER_GROUP(sb);
 			n_group--; /* set to last group number */
 		}
 

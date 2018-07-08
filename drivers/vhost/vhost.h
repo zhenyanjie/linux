@@ -76,13 +76,6 @@ struct vhost_umem {
 	int numem;
 };
 
-enum vhost_uaddr_type {
-	VHOST_ADDR_DESC = 0,
-	VHOST_ADDR_AVAIL = 1,
-	VHOST_ADDR_USED = 2,
-	VHOST_NUM_ADDRS = 3,
-};
-
 /* The virtqueue structure describes a queue attached to a device. */
 struct vhost_virtqueue {
 	struct vhost_dev *dev;
@@ -93,7 +86,6 @@ struct vhost_virtqueue {
 	struct vring_desc __user *desc;
 	struct vring_avail __user *avail;
 	struct vring_used __user *used;
-	const struct vhost_umem_node *meta_iotlb[VHOST_NUM_ADDRS];
 	struct file *kick;
 	struct file *call;
 	struct file *error;
@@ -114,9 +106,6 @@ struct vhost_virtqueue {
 
 	/* Last index we used. */
 	u16 last_used_idx;
-
-	/* Last used evet we've seen */
-	u16 last_used_event;
 
 	/* Used flags */
 	u16 used_flags;

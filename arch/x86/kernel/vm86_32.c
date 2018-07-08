@@ -35,7 +35,6 @@
 #include <linux/interrupt.h>
 #include <linux/syscalls.h>
 #include <linux/sched.h>
-#include <linux/sched/task_stack.h>
 #include <linux/kernel.h>
 #include <linux/signal.h>
 #include <linux/string.h>
@@ -48,7 +47,7 @@
 #include <linux/slab.h>
 #include <linux/security.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/tlbflush.h>
 #include <asm/irq.h>
@@ -193,7 +192,7 @@ static void mark_screen_rdonly(struct mm_struct *mm)
 	pte_unmap_unlock(pte, ptl);
 out:
 	up_write(&mm->mmap_sem);
-	flush_tlb();
+	flush_tlb_mm_range(mm, 0xA0000, 0xA0000 + 32*PAGE_SIZE, 0UL);
 }
 
 
@@ -720,7 +719,8 @@ void handle_vm86_fault(struct kernel_vm86_regs *regs, long error_code)
 	return;
 
 check_vip:
-	if (VEFLAGS & X86_EFLAGS_VIP) {
+	if ((VEFLAGS & (X86_EFLAGS_VIP | X86_EFLAGS_VIF)) ==
+	    (X86_EFLAGS_VIP | X86_EFLAGS_VIF)) {
 		save_v86_state(regs, VM86_STI);
 		return;
 	}

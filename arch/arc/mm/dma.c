@@ -158,10 +158,7 @@ static dma_addr_t arc_dma_map_page(struct device *dev, struct page *page,
 		unsigned long attrs)
 {
 	phys_addr_t paddr = page_to_phys(page) + offset;
-
-	if (!(attrs & DMA_ATTR_SKIP_CPU_SYNC))
-		_dma_cache_sync(paddr, size, dir);
-
+	_dma_cache_sync(paddr, size, dir);
 	return plat_phys_to_dma(dev, paddr);
 }
 
@@ -218,7 +215,7 @@ static int arc_dma_supported(struct device *dev, u64 dma_mask)
 	return dma_mask == DMA_BIT_MASK(32);
 }
 
-const struct dma_map_ops arc_dma_ops = {
+struct dma_map_ops arc_dma_ops = {
 	.alloc			= arc_dma_alloc,
 	.free			= arc_dma_free,
 	.mmap			= arc_dma_mmap,

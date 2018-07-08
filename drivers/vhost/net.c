@@ -17,8 +17,6 @@
 #include <linux/workqueue.h>
 #include <linux/file.h>
 #include <linux/slab.h>
-#include <linux/sched/clock.h>
-#include <linux/sched/signal.h>
 #include <linux/vmalloc.h>
 
 #include <linux/net.h>
@@ -26,7 +24,6 @@
 #include <linux/if_arp.h>
 #include <linux/if_tun.h>
 #include <linux/if_macvlan.h>
-#include <linux/if_tap.h>
 #include <linux/if_vlan.h>
 
 #include <net/sock.h>
@@ -345,22 +342,13 @@ static int vhost_net_tx_get_vq_desc(struct vhost_net *net,
 		endtime = busy_clock() + vq->busyloop_timeout;
 		while (vhost_can_busy_poll(vq->dev, endtime) &&
 		       vhost_vq_avail_empty(vq->dev, vq))
-			cpu_relax();
+			cpu_relax_lowlatency();
 		preempt_enable();
 		r = vhost_get_vq_desc(vq, vq->iov, ARRAY_SIZE(vq->iov),
 				      out_num, in_num, NULL, NULL);
 	}
 
 	return r;
-}
-
-static bool vhost_exceeds_maxpend(struct vhost_net *net)
-{
-	struct vhost_net_virtqueue *nvq = &net->vqs[VHOST_NET_VQ_TX];
-	struct vhost_virtqueue *vq = &nvq->vq;
-
-	return (nvq->upend_idx + vq->num - VHOST_MAX_PEND) % UIO_MAXIOV
-		== nvq->done_idx;
 }
 
 /* Expects to be always run from workqueue - which acts as
@@ -406,7 +394,8 @@ static void handle_tx(struct vhost_net *net)
 		/* If more outstanding DMAs, queue the work.
 		 * Handle upend_idx wrap around
 		 */
-		if (unlikely(vhost_exceeds_maxpend(net)))
+		if (unlikely((nvq->upend_idx + vq->num - VHOST_MAX_PEND)
+			      % UIO_MAXIOV == nvq->done_idx))
 			break;
 
 		head = vhost_net_tx_get_vq_desc(net, vq, vq->iov,
@@ -465,16 +454,6 @@ static void handle_tx(struct vhost_net *net)
 			msg.msg_control = NULL;
 			ubufs = NULL;
 		}
-
-		total_len += len;
-		if (total_len < VHOST_NET_WEIGHT &&
-		    !vhost_vq_avail_empty(&net->dev, vq) &&
-		    likely(!vhost_exceeds_maxpend(net))) {
-			msg.msg_flags |= MSG_MORE;
-		} else {
-			msg.msg_flags &= ~MSG_MORE;
-		}
-
 		/* TODO: Check specific error and bomb out unless ENOBUFS? */
 		err = sock->ops->sendmsg(sock, &msg, len);
 		if (unlikely(err < 0)) {
@@ -493,6 +472,7 @@ static void handle_tx(struct vhost_net *net)
 			vhost_add_used_and_signal(&net->dev, vq, head, 0);
 		else
 			vhost_zerocopy_signal_used(net, vq);
+		total_len += len;
 		vhost_net_tx_packet(net);
 		if (unlikely(total_len >= VHOST_NET_WEIGHT)) {
 			vhost_poll_queue(&vq->poll);
@@ -544,7 +524,7 @@ static int vhost_net_rx_peek_head_len(struct vhost_net *net, struct sock *sk)
 
 	if (!len && vq->busyloop_timeout) {
 		/* Both tx vq and rx socket were polled here */
-		mutex_lock(&vq->mutex);
+		mutex_lock_nested(&vq->mutex, 1);
 		vhost_disable_notify(&net->dev, vq);
 
 		preempt_disable();
@@ -553,12 +533,17 @@ static int vhost_net_rx_peek_head_len(struct vhost_net *net, struct sock *sk)
 		while (vhost_can_busy_poll(&net->dev, endtime) &&
 		       !sk_has_rx_data(sk) &&
 		       vhost_vq_avail_empty(&net->dev, vq))
-			cpu_relax();
+			cpu_relax_lowlatency();
 
 		preempt_enable();
 
-		if (vhost_enable_notify(&net->dev, vq))
+		if (!vhost_vq_avail_empty(&net->dev, vq))
 			vhost_poll_queue(&vq->poll);
+		else if (unlikely(vhost_enable_notify(&net->dev, vq))) {
+			vhost_disable_notify(&net->dev, vq);
+			vhost_poll_queue(&vq->poll);
+		}
+
 		mutex_unlock(&vq->mutex);
 
 		len = peek_head_len(sk);
@@ -672,7 +657,7 @@ static void handle_rx(struct vhost_net *net)
 	struct iov_iter fixup;
 	__virtio16 num_buffers;
 
-	mutex_lock(&vq->mutex);
+	mutex_lock_nested(&vq->mutex, 0);
 	sock = vq->private_data;
 	if (!sock)
 		goto out;
@@ -963,7 +948,7 @@ static struct socket *get_tap_socket(int fd)
 	sock = tun_get_socket(file);
 	if (!IS_ERR(sock))
 		return sock;
-	sock = tap_get_socket(file);
+	sock = macvtap_get_socket(file);
 	if (IS_ERR(sock))
 		fput(file);
 	return sock;
@@ -1093,6 +1078,7 @@ static long vhost_net_reset_owner(struct vhost_net *n)
 	}
 	vhost_net_stop(n, &tx_sock, &rx_sock);
 	vhost_net_flush(n);
+	vhost_dev_stop(&n->dev);
 	vhost_dev_reset_owner(&n->dev, umem);
 	vhost_net_vq_reset(n);
 done:

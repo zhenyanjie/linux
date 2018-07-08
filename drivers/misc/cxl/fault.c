@@ -8,8 +8,7 @@
  */
 
 #include <linux/workqueue.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/pid.h>
 #include <linux/mm.h>
 #include <linux/moduleparam.h>

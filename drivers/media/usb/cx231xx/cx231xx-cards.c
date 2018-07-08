@@ -841,33 +841,6 @@ struct cx231xx_board cx231xx_boards[] = {
 			.gpio = NULL,
 		} },
 	},
-	[CX231XX_BOARD_EVROMEDIA_FULL_HYBRID_FULLHD] = {
-		.name = "Evromedia USB Full Hybrid Full HD",
-		.tuner_type = TUNER_ABSENT,
-		.demod_addr = 0x64, /* 0xc8 >> 1 */
-		.demod_i2c_master = I2C_1_MUX_3,
-		.has_dvb = 1,
-		.ir_i2c_master = I2C_0,
-		.norm = V4L2_STD_PAL,
-		.output_mode = OUT_MODE_VIP11,
-		.tuner_addr = 0x60, /* 0xc0 >> 1 */
-		.tuner_i2c_master = I2C_2,
-		.input = {{
-			.type = CX231XX_VMUX_TELEVISION,
-			.vmux = 0,
-			.amux = CX231XX_AMUX_VIDEO,
-		}, {
-			.type = CX231XX_VMUX_COMPOSITE1,
-			.vmux = CX231XX_VIN_2_1,
-			.amux = CX231XX_AMUX_LINE_IN,
-		}, {
-			.type = CX231XX_VMUX_SVIDEO,
-			.vmux = CX231XX_VIN_1_1 |
-				(CX231XX_VIN_1_2 << 8) |
-				CX25840_SVIDEO_ON,
-			.amux = CX231XX_AMUX_LINE_IN,
-		} },
-	},
 };
 const unsigned int cx231xx_bcount = ARRAY_SIZE(cx231xx_boards);
 
@@ -891,6 +864,9 @@ struct usb_device_id cx231xx_id_table[] = {
 	 .driver_info = CX231XX_BOARD_CNXT_RDE_250},
 	{USB_DEVICE(0x0572, 0x58A0),
 	 .driver_info = CX231XX_BOARD_CNXT_RDU_250},
+	/* AverMedia DVD EZMaker 7 */
+	{USB_DEVICE(0x07ca, 0xc039),
+	 .driver_info = CX231XX_BOARD_CNXT_VIDEO_GRABBER},
 	{USB_DEVICE(0x2040, 0xb110),
 	 .driver_info = CX231XX_BOARD_HAUPPAUGE_USB2_FM_PAL},
 	{USB_DEVICE(0x2040, 0xb111),
@@ -935,8 +911,6 @@ struct usb_device_id cx231xx_id_table[] = {
 	 .driver_info = CX231XX_BOARD_OTG102},
 	{USB_DEVICE(USB_VID_TERRATEC, 0x00a6),
 	 .driver_info = CX231XX_BOARD_TERRATEC_GRABBY},
-	{USB_DEVICE(0x1b80, 0xd3b2),
-	.driver_info = CX231XX_BOARD_EVROMEDIA_FULL_HYBRID_FULLHD},
 	{},
 };
 
@@ -1651,7 +1625,7 @@ static int cx231xx_usb_probe(struct usb_interface *interface,
 	nr = dev->devno;
 
 	assoc_desc = udev->actconfig->intf_assoc[0];
-	if (assoc_desc->bFirstInterface != ifnum) {
+	if (!assoc_desc || assoc_desc->bFirstInterface != ifnum) {
 		dev_err(d, "Not found matching IAD interface\n");
 		retval = -ENODEV;
 		goto err_if;

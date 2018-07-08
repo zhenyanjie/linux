@@ -1,5 +1,8 @@
 /*
+ *	w1.c
+ *
  * Copyright (c) 2004 Evgeniy Polyakov <zbr@ioremap.net>
+ *
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -10,6 +13,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/delay.h>
@@ -734,7 +741,7 @@ int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
 
 	/* slave modules need to be loaded in a context with unlocked mutex */
 	mutex_unlock(&dev->mutex);
-	request_module("w1-family-0x%02x", rn->family);
+	request_module("w1-family-0x%02X", rn->family);
 	mutex_lock(&dev->mutex);
 
 	spin_lock(&w1_flock);

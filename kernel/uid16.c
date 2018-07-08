@@ -12,10 +12,9 @@
 #include <linux/init.h>
 #include <linux/highuid.h>
 #include <linux/security.h>
-#include <linux/cred.h>
 #include <linux/syscalls.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 SYSCALL_DEFINE3(chown16, const char __user *, filename, old_uid_t, user, old_gid_t, group)
 {
@@ -191,6 +190,7 @@ SYSCALL_DEFINE2(setgroups16, int, gidsetsize, old_gid_t __user *, grouplist)
 		return retval;
 	}
 
+	groups_sort(group_info);
 	retval = set_current_groups(group_info);
 	put_group_info(group_info);
 

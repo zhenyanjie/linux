@@ -40,7 +40,7 @@
 #include <linux/fcntl.h>
 #include <linux/in.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 
 #include <linux/inet.h>
@@ -97,8 +97,8 @@ static netdev_tx_t loopback_xmit(struct sk_buff *skb,
 	return NETDEV_TX_OK;
 }
 
-static void loopback_get_stats64(struct net_device *dev,
-				 struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *loopback_get_stats64(struct net_device *dev,
+						      struct rtnl_link_stats64 *stats)
 {
 	u64 bytes = 0;
 	u64 packets = 0;
@@ -122,6 +122,7 @@ static void loopback_get_stats64(struct net_device *dev,
 	stats->tx_packets = packets;
 	stats->rx_bytes   = bytes;
 	stats->tx_bytes   = bytes;
+	return stats;
 }
 
 static u32 always_on(struct net_device *dev)
@@ -145,6 +146,7 @@ static void loopback_dev_free(struct net_device *dev)
 {
 	dev_net(dev)->loopback_dev = NULL;
 	free_percpu(dev->lstats);
+	free_netdev(dev);
 }
 
 static const struct net_device_ops loopback_ops = {
@@ -182,8 +184,7 @@ static void loopback_setup(struct net_device *dev)
 	dev->ethtool_ops	= &loopback_ethtool_ops;
 	dev->header_ops		= &eth_header_ops;
 	dev->netdev_ops		= &loopback_ops;
-	dev->needs_free_netdev	= true;
-	dev->priv_destructor	= loopback_dev_free;
+	dev->destructor		= loopback_dev_free;
 }
 
 /* Setup and register the loopback device. */

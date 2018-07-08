@@ -161,7 +161,7 @@ static ssize_t orangefs_devreq_read(struct file *file,
 	struct orangefs_kernel_op_s *op, *temp;
 	__s32 proto_ver = ORANGEFS_KERNEL_PROTO_VERSION;
 	static __s32 magic = ORANGEFS_DEVREQ_MAGIC;
-	struct orangefs_kernel_op_s *cur_op = NULL;
+	struct orangefs_kernel_op_s *cur_op;
 	unsigned long ret;
 
 	/* We do not support blocking IO. */
@@ -181,6 +181,7 @@ static ssize_t orangefs_devreq_read(struct file *file,
 	}
 
 restart:
+	cur_op = NULL;
 	/* Get next op (if any) from top of list. */
 	spin_lock(&orangefs_request_list_lock);
 	list_for_each_entry_safe(op, temp, &orangefs_request_list, list) {
@@ -360,6 +361,7 @@ static ssize_t orangefs_devreq_write_iter(struct kiocb *iocb,
 		__u64 tag;
 	} head;
 	int total = ret = iov_iter_count(iter);
+	int n;
 	int downcall_size = sizeof(struct orangefs_downcall_s);
 	int head_size = sizeof(head);
 
@@ -376,7 +378,8 @@ static ssize_t orangefs_devreq_write_iter(struct kiocb *iocb,
 		return -EFAULT;
 	}
      
-	if (!copy_from_iter_full(&head, head_size, iter)) {
+	n = copy_from_iter(&head, head_size, iter);
+	if (n < head_size) {
 		gossip_err("%s: failed to copy head.\n", __func__);
 		return -EFAULT;
 	}
@@ -411,7 +414,8 @@ static ssize_t orangefs_devreq_write_iter(struct kiocb *iocb,
 		return ret;
 	}
 
-	if (!copy_from_iter_full(&op->downcall, downcall_size, iter)) {
+	n = copy_from_iter(&op->downcall, downcall_size, iter);
+	if (n != downcall_size) {
 		gossip_err("%s: failed to copy downcall.\n", __func__);
 		goto Efault;
 	}
@@ -465,8 +469,10 @@ static ssize_t orangefs_devreq_write_iter(struct kiocb *iocb,
 		goto Enomem;
 	}
 	memset(op->downcall.trailer_buf, 0, op->downcall.trailer_size);
-	if (!copy_from_iter_full(op->downcall.trailer_buf,
-			         op->downcall.trailer_size, iter)) {
+	n = copy_from_iter(op->downcall.trailer_buf,
+			   op->downcall.trailer_size,
+			   iter);
+	if (n != op->downcall.trailer_size) {
 		gossip_err("%s: failed to copy trailer.\n", __func__);
 		vfree(op->downcall.trailer_buf);
 		goto Efault;

@@ -222,7 +222,7 @@
 #define USB3_EP0_SS_MAX_PACKET_SIZE	512
 #define USB3_EP0_HSFS_MAX_PACKET_SIZE	64
 #define USB3_EP0_BUF_SIZE		8
-#define USB3_MAX_NUM_PIPES		30
+#define USB3_MAX_NUM_PIPES		6	/* This includes PIPE 0 */
 #define USB3_WAIT_US			3
 
 struct renesas_usb3;
@@ -521,6 +521,13 @@ static void usb3_disconnect(struct renesas_usb3 *usb3)
 	usb3_usb2_pullup(usb3, 0);
 	usb3_clear_bit(usb3, USB30_CON_B3_CONNECT, USB3_USB30_CON);
 	usb3_reset_epc(usb3);
+	usb3_disable_irq_1(usb3, USB_INT_1_B2_RSUM | USB_INT_1_B3_PLLWKUP |
+			   USB_INT_1_B3_LUPSUCS | USB_INT_1_B3_DISABLE |
+			   USB_INT_1_SPEED | USB_INT_1_B3_WRMRST |
+			   USB_INT_1_B3_HOTRST | USB_INT_1_B2_SPND |
+			   USB_INT_1_B2_L1SPND | USB_INT_1_B2_USBRST);
+	usb3_clear_bit(usb3, USB_COM_CON_SPD_MODE, USB3_USB_COM_CON);
+	usb3_init_epc_registers(usb3);
 
 	if (usb3->driver)
 		usb3->driver->disconnect(&usb3->gadget);
@@ -685,21 +692,32 @@ static struct renesas_usb3_request *usb3_get_request(struct renesas_usb3_ep
 	return usb3_req;
 }
 
+static void __usb3_request_done(struct renesas_usb3_ep *usb3_ep,
+				struct renesas_usb3_request *usb3_req,
+				int status)
+{
+	struct renesas_usb3 *usb3 = usb3_ep_to_usb3(usb3_ep);
+
+	dev_dbg(usb3_to_dev(usb3), "giveback: ep%2d, %u, %u, %d\n",
+		usb3_ep->num, usb3_req->req.length, usb3_req->req.actual,
+		status);
+	usb3_req->req.status = status;
+	usb3_ep->started = false;
+	list_del_init(&usb3_req->queue);
+	spin_unlock(&usb3->lock);
+	usb_gadget_giveback_request(&usb3_ep->ep, &usb3_req->req);
+	spin_lock(&usb3->lock);
+}
+
 static void usb3_request_done(struct renesas_usb3_ep *usb3_ep,
 			      struct renesas_usb3_request *usb3_req, int status)
 {
 	struct renesas_usb3 *usb3 = usb3_ep_to_usb3(usb3_ep);
 	unsigned long flags;
 
-	dev_dbg(usb3_to_dev(usb3), "giveback: ep%2d, %u, %u, %d\n",
-		usb3_ep->num, usb3_req->req.length, usb3_req->req.actual,
-		status);
-	usb3_req->req.status = status;
 	spin_lock_irqsave(&usb3->lock, flags);
-	usb3_ep->started = false;
-	list_del_init(&usb3_req->queue);
+	__usb3_request_done(usb3_ep, usb3_req, status);
 	spin_unlock_irqrestore(&usb3->lock, flags);
-	usb_gadget_giveback_request(&usb3_ep->ep, &usb3_req->req);
 }
 
 static void usb3_irq_epc_pipe0_status_end(struct renesas_usb3 *usb3)
@@ -868,7 +886,7 @@ static int usb3_write_pipe(struct renesas_usb3_ep *usb3_ep,
 			usb3_ep->ep.maxpacket);
 	u8 *buf = usb3_req->req.buf + usb3_req->req.actual;
 	u32 tmp = 0;
-	bool is_last;
+	bool is_last = !len ? true : false;
 
 	if (usb3_wait_pipe_status(usb3_ep, PX_STA_BUFSTS) < 0)
 		return -EBUSY;
@@ -889,7 +907,8 @@ static int usb3_write_pipe(struct renesas_usb3_ep *usb3_ep,
 		usb3_write(usb3, tmp, fifo_reg);
 	}
 
-	is_last = usb3_is_transfer_complete(usb3_ep, usb3_req);
+	if (!is_last)
+		is_last = usb3_is_transfer_complete(usb3_ep, usb3_req);
 	/* Send the data */
 	usb3_set_px_con_send(usb3_ep, len, is_last);
 
@@ -980,7 +999,8 @@ static void usb3_start_pipe0(struct renesas_usb3_ep *usb3_ep,
 		usb3_set_p0_con_for_ctrl_read_data(usb3);
 	} else {
 		usb3_clear_bit(usb3, P0_MOD_DIR, USB3_P0_MOD);
-		usb3_set_p0_con_for_ctrl_write_data(usb3);
+		if (usb3_req->req.length)
+			usb3_set_p0_con_for_ctrl_write_data(usb3);
 	}
 
 	usb3_p0_xfer(usb3_ep, usb3_req);
@@ -1557,7 +1577,16 @@ static u32 usb3_calc_ramarea(int ram_size)
 static u32 usb3_calc_rammap_val(struct renesas_usb3_ep *usb3_ep,
 				const struct usb_endpoint_descriptor *desc)
 {
-	return usb3_ep->rammap_val | PN_RAMMAP_MPKT(usb_endpoint_maxp(desc));
+	int i;
+	const u32 max_packet_array[] = {8, 16, 32, 64, 512};
+	u32 mpkt = PN_RAMMAP_MPKT(1024);
+
+	for (i = 0; i < ARRAY_SIZE(max_packet_array); i++) {
+		if (usb_endpoint_maxp(desc) <= max_packet_array[i])
+			mpkt = PN_RAMMAP_MPKT(max_packet_array[i]);
+	}
+
+	return usb3_ep->rammap_val | mpkt;
 }
 
 static int usb3_enable_pipe_n(struct renesas_usb3_ep *usb3_ep,
@@ -1813,7 +1842,7 @@ static int renesas_usb3_init_ep(struct renesas_usb3 *usb3, struct device *dev,
 
 	dev_dbg(dev, "%s: num_usb3_eps = %d\n", __func__, usb3->num_usb3_eps);
 	/*
-	 * This driver prepares pipes as follows:
+	 * This driver prepares pipes as the followings:
 	 *  - odd pipes = IN pipe
 	 *  - even pipes = OUT pipe (except pipe 0)
 	 */
@@ -1863,7 +1892,7 @@ static void renesas_usb3_init_ram(struct renesas_usb3 *usb3, struct device *dev,
 	memset(basead, 0, sizeof(basead));
 
 	/*
-	 * This driver prepares pipes as follows:
+	 * This driver prepares pipes as the followings:
 	 *  - all pipes = the same size as "ramsize_per_pipe"
 	 * Please refer to the "Method of Specifying RAM Mapping"
 	 */

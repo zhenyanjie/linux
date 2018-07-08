@@ -600,7 +600,8 @@ static struct nfs_client *(*get_v3_ds_connect)(
 			int ds_addrlen,
 			int ds_proto,
 			unsigned int ds_timeo,
-			unsigned int ds_retrans);
+			unsigned int ds_retrans,
+			rpc_authflavor_t au_flavor);
 
 static bool load_v3_ds_connect(void)
 {
@@ -624,13 +625,15 @@ EXPORT_SYMBOL_GPL(nfs4_pnfs_v3_ds_connect_unload);
 static int _nfs4_pnfs_v3_ds_connect(struct nfs_server *mds_srv,
 				 struct nfs4_pnfs_ds *ds,
 				 unsigned int timeo,
-				 unsigned int retrans)
+				 unsigned int retrans,
+				 rpc_authflavor_t au_flavor)
 {
 	struct nfs_client *clp = ERR_PTR(-EIO);
 	struct nfs4_pnfs_ds_addr *da;
 	int status = 0;
 
-	dprintk("--> %s DS %s\n", __func__, ds->ds_remotestr);
+	dprintk("--> %s DS %s au_flavor %d\n", __func__,
+		ds->ds_remotestr, au_flavor);
 
 	if (!load_v3_ds_connect())
 		goto out;
@@ -654,7 +657,7 @@ static int _nfs4_pnfs_v3_ds_connect(struct nfs_server *mds_srv,
 			clp = get_v3_ds_connect(mds_srv,
 					(struct sockaddr *)&da->da_addr,
 					da->da_addrlen, IPPROTO_TCP,
-					timeo, retrans);
+					timeo, retrans, au_flavor);
 	}
 
 	if (IS_ERR(clp)) {
@@ -673,13 +676,15 @@ static int _nfs4_pnfs_v4_ds_connect(struct nfs_server *mds_srv,
 				 struct nfs4_pnfs_ds *ds,
 				 unsigned int timeo,
 				 unsigned int retrans,
-				 u32 minor_version)
+				 u32 minor_version,
+				 rpc_authflavor_t au_flavor)
 {
 	struct nfs_client *clp = ERR_PTR(-EIO);
 	struct nfs4_pnfs_ds_addr *da;
 	int status = 0;
 
-	dprintk("--> %s DS %s\n", __func__, ds->ds_remotestr);
+	dprintk("--> %s DS %s au_flavor %d\n", __func__, ds->ds_remotestr,
+		au_flavor);
 
 	list_for_each_entry(da, &ds->ds_addrs, da_node) {
 		dprintk("%s: DS %s: trying address %s\n",
@@ -715,7 +720,8 @@ static int _nfs4_pnfs_v4_ds_connect(struct nfs_server *mds_srv,
 			clp = nfs4_set_ds_client(mds_srv,
 						(struct sockaddr *)&da->da_addr,
 						da->da_addrlen, IPPROTO_TCP,
-						timeo, retrans, minor_version);
+						timeo, retrans, minor_version,
+						au_flavor);
 			if (IS_ERR(clp))
 				continue;
 
@@ -745,52 +751,35 @@ out:
 /*
  * Create an rpc connection to the nfs4_pnfs_ds data server.
  * Currently only supports IPv4 and IPv6 addresses.
- * If connection fails, make devid unavailable and return a -errno.
+ * If connection fails, make devid unavailable.
  */
-int nfs4_pnfs_ds_connect(struct nfs_server *mds_srv, struct nfs4_pnfs_ds *ds,
+void nfs4_pnfs_ds_connect(struct nfs_server *mds_srv, struct nfs4_pnfs_ds *ds,
 			  struct nfs4_deviceid_node *devid, unsigned int timeo,
-			  unsigned int retrans, u32 version, u32 minor_version)
+			  unsigned int retrans, u32 version,
+			  u32 minor_version, rpc_authflavor_t au_flavor)
 {
-	int err;
-
-again:
-	err = 0;
 	if (test_and_set_bit(NFS4DS_CONNECTING, &ds->ds_state) == 0) {
+		int err = 0;
+
 		if (version == 3) {
 			err = _nfs4_pnfs_v3_ds_connect(mds_srv, ds, timeo,
-						       retrans);
+						       retrans, au_flavor);
 		} else if (version == 4) {
 			err = _nfs4_pnfs_v4_ds_connect(mds_srv, ds, timeo,
-						       retrans, minor_version);
+						       retrans, minor_version,
+						       au_flavor);
 		} else {
 			dprintk("%s: unsupported DS version %d\n", __func__,
 				version);
 			err = -EPROTONOSUPPORT;
 		}
 
+		if (err)
+			nfs4_mark_deviceid_unavailable(devid);
 		nfs4_clear_ds_conn_bit(ds);
 	} else {
 		nfs4_wait_ds_connect(ds);
-
-		/* what was waited on didn't connect AND didn't mark unavail */
-		if (!ds->ds_clp && !nfs4_test_deviceid_unavailable(devid))
-			goto again;
 	}
-
-	/*
-	 * At this point the ds->ds_clp should be ready, but it might have
-	 * hit an error.
-	 */
-	if (!err) {
-		if (!ds->ds_clp || !nfs_client_init_is_complete(ds->ds_clp)) {
-			WARN_ON_ONCE(ds->ds_clp ||
-				!nfs4_test_deviceid_unavailable(devid));
-			return -EINVAL;
-		}
-		err = nfs_client_init_status(ds->ds_clp);
-	}
-
-	return err;
 }
 EXPORT_SYMBOL_GPL(nfs4_pnfs_ds_connect);
 

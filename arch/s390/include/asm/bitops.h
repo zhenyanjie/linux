@@ -42,8 +42,56 @@
 
 #include <linux/typecheck.h>
 #include <linux/compiler.h>
-#include <asm/atomic_ops.h>
 #include <asm/barrier.h>
+
+#define __BITOPS_NO_BARRIER	"\n"
+
+#ifdef CONFIG_HAVE_MARCH_Z196_FEATURES
+
+#define __BITOPS_OR		"laog"
+#define __BITOPS_AND		"lang"
+#define __BITOPS_XOR		"laxg"
+#define __BITOPS_BARRIER	"bcr	14,0\n"
+
+#define __BITOPS_LOOP(__addr, __val, __op_string, __barrier)	\
+({								\
+	unsigned long __old;					\
+								\
+	typecheck(unsigned long *, (__addr));			\
+	asm volatile(						\
+		__op_string "	%0,%2,%1\n"			\
+		__barrier					\
+		: "=d" (__old),	"+Q" (*(__addr))		\
+		: "d" (__val)					\
+		: "cc", "memory");				\
+	__old;							\
+})
+
+#else /* CONFIG_HAVE_MARCH_Z196_FEATURES */
+
+#define __BITOPS_OR		"ogr"
+#define __BITOPS_AND		"ngr"
+#define __BITOPS_XOR		"xgr"
+#define __BITOPS_BARRIER	"\n"
+
+#define __BITOPS_LOOP(__addr, __val, __op_string, __barrier)	\
+({								\
+	unsigned long __old, __new;				\
+								\
+	typecheck(unsigned long *, (__addr));			\
+	asm volatile(						\
+		"	lg	%0,%2\n"			\
+		"0:	lgr	%1,%0\n"			\
+		__op_string "	%1,%3\n"			\
+		"	csg	%0,%1,%2\n"			\
+		"	jl	0b"				\
+		: "=&d" (__old), "=&d" (__new), "+Q" (*(__addr))\
+		: "d" (__val)					\
+		: "cc", "memory");				\
+	__old;							\
+})
+
+#endif /* CONFIG_HAVE_MARCH_Z196_FEATURES */
 
 #define __BITOPS_WORDS(bits) (((bits) + BITS_PER_LONG - 1) / BITS_PER_LONG)
 
@@ -80,7 +128,7 @@ static inline void set_bit(unsigned long nr, volatile unsigned long *ptr)
 	}
 #endif
 	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	__atomic64_or(mask, addr);
+	__BITOPS_LOOP(addr, mask, __BITOPS_OR, __BITOPS_NO_BARRIER);
 }
 
 static inline void clear_bit(unsigned long nr, volatile unsigned long *ptr)
@@ -101,7 +149,7 @@ static inline void clear_bit(unsigned long nr, volatile unsigned long *ptr)
 	}
 #endif
 	mask = ~(1UL << (nr & (BITS_PER_LONG - 1)));
-	__atomic64_and(mask, addr);
+	__BITOPS_LOOP(addr, mask, __BITOPS_AND, __BITOPS_NO_BARRIER);
 }
 
 static inline void change_bit(unsigned long nr, volatile unsigned long *ptr)
@@ -122,7 +170,7 @@ static inline void change_bit(unsigned long nr, volatile unsigned long *ptr)
 	}
 #endif
 	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	__atomic64_xor(mask, addr);
+	__BITOPS_LOOP(addr, mask, __BITOPS_XOR, __BITOPS_NO_BARRIER);
 }
 
 static inline int
@@ -132,7 +180,7 @@ test_and_set_bit(unsigned long nr, volatile unsigned long *ptr)
 	unsigned long old, mask;
 
 	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	old = __atomic64_or_barrier(mask, addr);
+	old = __BITOPS_LOOP(addr, mask, __BITOPS_OR, __BITOPS_BARRIER);
 	return (old & mask) != 0;
 }
 
@@ -143,7 +191,7 @@ test_and_clear_bit(unsigned long nr, volatile unsigned long *ptr)
 	unsigned long old, mask;
 
 	mask = ~(1UL << (nr & (BITS_PER_LONG - 1)));
-	old = __atomic64_and_barrier(mask, addr);
+	old = __BITOPS_LOOP(addr, mask, __BITOPS_AND, __BITOPS_BARRIER);
 	return (old & ~mask) != 0;
 }
 
@@ -154,7 +202,7 @@ test_and_change_bit(unsigned long nr, volatile unsigned long *ptr)
 	unsigned long old, mask;
 
 	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	old = __atomic64_xor_barrier(mask, addr);
+	old = __BITOPS_LOOP(addr, mask, __BITOPS_XOR, __BITOPS_BARRIER);
 	return (old & mask) != 0;
 }
 

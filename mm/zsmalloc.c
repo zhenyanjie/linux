@@ -24,7 +24,8 @@
  *
  * Usage of struct page flags:
  *	PG_private: identifies the first component page
- *	PG_owner_priv_1: identifies the huge component page
+ *	PG_private2: identifies the last component page
+ *	PG_owner_priv_1: indentifies the huge component page
  *
  */
 
@@ -33,7 +34,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <linux/magic.h>
 #include <linux/bitops.h>
 #include <linux/errno.h>
 #include <linux/highmem.h>
@@ -268,6 +268,10 @@ struct zs_pool {
 #endif
 };
 
+/*
+ * A zspage's class index and fullness group
+ * are encoded in its (first)page->mapping
+ */
 #define FULLNESS_BITS	2
 #define CLASS_BITS	8
 #define ISOLATED_BITS	3
@@ -360,7 +364,7 @@ static struct zspage *cache_alloc_zspage(struct zs_pool *pool, gfp_t flags)
 {
 	return kmem_cache_alloc(pool->zspage_cachep,
 			flags & ~(__GFP_HIGHMEM|__GFP_MOVABLE));
-}
+};
 
 static void cache_free_zspage(struct zs_pool *pool, struct zspage *zspage)
 {
@@ -934,6 +938,7 @@ static void reset_page(struct page *page)
 {
 	__ClearPageMovable(page);
 	ClearPagePrivate(page);
+	ClearPagePrivate2(page);
 	set_page_private(page, 0);
 	page_mapcount_reset(page);
 	ClearPageHugeObject(page);
@@ -1080,7 +1085,7 @@ static void create_page_chain(struct size_class *class, struct zspage *zspage,
 	 * 2. each sub-page point to zspage using page->private
 	 *
 	 * we set PG_private to identify the first page (i.e. no other sub-page
-	 * has this flag set).
+	 * has this flag set) and PG_private_2 to identify the last page.
 	 */
 	for (i = 0; i < nr_pages; i++) {
 		page = pages[i];
@@ -1095,6 +1100,8 @@ static void create_page_chain(struct size_class *class, struct zspage *zspage,
 		} else {
 			prev_page->freelist = page;
 		}
+		if (i == nr_pages - 1)
+			SetPagePrivate2(page);
 		prev_page = page;
 	}
 }
@@ -1277,21 +1284,61 @@ out:
 
 #endif /* CONFIG_PGTABLE_MAPPING */
 
-static int zs_cpu_prepare(unsigned int cpu)
+static int zs_cpu_notifier(struct notifier_block *nb, unsigned long action,
+				void *pcpu)
 {
+	int ret, cpu = (long)pcpu;
 	struct mapping_area *area;
 
-	area = &per_cpu(zs_map_area, cpu);
-	return __zs_cpu_up(area);
+	switch (action) {
+	case CPU_UP_PREPARE:
+		area = &per_cpu(zs_map_area, cpu);
+		ret = __zs_cpu_up(area);
+		if (ret)
+			return notifier_from_errno(ret);
+		break;
+	case CPU_DEAD:
+	case CPU_UP_CANCELED:
+		area = &per_cpu(zs_map_area, cpu);
+		__zs_cpu_down(area);
+		break;
+	}
+
+	return NOTIFY_OK;
 }
 
-static int zs_cpu_dead(unsigned int cpu)
-{
-	struct mapping_area *area;
+static struct notifier_block zs_cpu_nb = {
+	.notifier_call = zs_cpu_notifier
+};
 
-	area = &per_cpu(zs_map_area, cpu);
-	__zs_cpu_down(area);
-	return 0;
+static int zs_register_cpu_notifier(void)
+{
+	int cpu, uninitialized_var(ret);
+
+	cpu_notifier_register_begin();
+
+	__register_cpu_notifier(&zs_cpu_nb);
+	for_each_online_cpu(cpu) {
+		ret = zs_cpu_notifier(NULL, CPU_UP_PREPARE, (void *)(long)cpu);
+		if (notifier_to_errno(ret))
+			break;
+	}
+
+	cpu_notifier_register_done();
+	return notifier_to_errno(ret);
+}
+
+static void zs_unregister_cpu_notifier(void)
+{
+	int cpu;
+
+	cpu_notifier_register_begin();
+
+	for_each_online_cpu(cpu)
+		zs_cpu_notifier(NULL, CPU_DEAD, (void *)(long)cpu);
+	__unregister_cpu_notifier(&zs_cpu_nb);
+
+	cpu_notifier_register_done();
 }
 
 static void __init init_zs_size_classes(void)
@@ -1360,7 +1407,7 @@ void *zs_map_object(struct zs_pool *pool, unsigned long handle,
 	 * pools/users, we can't allow mapping in interrupt context
 	 * because it can corrupt another users mappings.
 	 */
-	WARN_ON_ONCE(in_interrupt());
+	BUG_ON(in_interrupt());
 
 	/* From now on, migration cannot move the object */
 	pin_tag(handle);
@@ -2376,7 +2423,7 @@ struct zs_pool *zs_create_pool(const char *name)
 		goto err;
 
 	/*
-	 * Iterate reversely, because, size of size_class that we want to use
+	 * Iterate reversly, because, size of size_class that we want to use
 	 * for merging should be larger or equal to current size.
 	 */
 	for (i = zs_size_classes - 1; i >= 0; i--) {
@@ -2487,10 +2534,10 @@ static int __init zs_init(void)
 	if (ret)
 		goto out;
 
-	ret = cpuhp_setup_state(CPUHP_MM_ZS_PREPARE, "mm/zsmalloc:prepare",
-				zs_cpu_prepare, zs_cpu_dead);
+	ret = zs_register_cpu_notifier();
+
 	if (ret)
-		goto hp_setup_fail;
+		goto notifier_fail;
 
 	init_zs_size_classes();
 
@@ -2502,7 +2549,8 @@ static int __init zs_init(void)
 
 	return 0;
 
-hp_setup_fail:
+notifier_fail:
+	zs_unregister_cpu_notifier();
 	zsmalloc_unmount();
 out:
 	return ret;
@@ -2514,7 +2562,7 @@ static void __exit zs_exit(void)
 	zpool_unregister_driver(&zs_zpool_driver);
 #endif
 	zsmalloc_unmount();
-	cpuhp_remove_state(CPUHP_MM_ZS_PREPARE);
+	zs_unregister_cpu_notifier();
 
 	zs_stat_exit();
 }

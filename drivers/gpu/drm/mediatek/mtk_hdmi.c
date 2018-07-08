@@ -149,7 +149,6 @@ struct hdmi_audio_param {
 
 struct mtk_hdmi {
 	struct drm_bridge bridge;
-	struct drm_bridge *next_bridge;
 	struct drm_connector conn;
 	struct device *dev;
 	struct phy *phy;
@@ -1315,9 +1314,9 @@ static int mtk_hdmi_bridge_attach(struct drm_bridge *bridge)
 		return ret;
 	}
 
-	if (hdmi->next_bridge) {
-		ret = drm_bridge_attach(bridge->encoder, hdmi->next_bridge,
-					bridge);
+	if (bridge->next) {
+		bridge->next->encoder = bridge->encoder;
+		ret = drm_bridge_attach(bridge->encoder->dev, bridge->next);
 		if (ret) {
 			dev_err(hdmi->dev,
 				"Failed to attach external bridge: %d\n", ret);
@@ -1511,8 +1510,8 @@ static int mtk_hdmi_dt_parse_pdata(struct mtk_hdmi *hdmi,
 	of_node_put(ep);
 
 	if (!of_device_is_compatible(remote, "hdmi-connector")) {
-		hdmi->next_bridge = of_drm_find_bridge(remote);
-		if (!hdmi->next_bridge) {
+		hdmi->bridge.next = of_drm_find_bridge(remote);
+		if (!hdmi->bridge.next) {
 			dev_err(dev, "Waiting for external bridge\n");
 			of_node_put(remote);
 			return -EPROBE_DEFER;

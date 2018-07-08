@@ -12,6 +12,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/clk.h>
@@ -44,7 +45,7 @@ static struct clk *__init ath79_add_sys_clkdev(
 	int err;
 
 	clk = clk_register_fixed_rate(NULL, id, NULL, 0, rate);
-	if (IS_ERR(clk))
+	if (!clk)
 		panic("failed to allocate %s clock structure", id);
 
 	err = clk_register_clkdev(clk, id, NULL);

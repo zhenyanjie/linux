@@ -22,8 +22,6 @@
 
 #include <linux/delay.h>
 #include <linux/i2c.h>
-#include <linux/iio/iio.h>
-#include <linux/iio/buffer.h>
 #include <linux/iio/kfifo_buf.h>
 #include <linux/iio/sysfs.h>
 #include <linux/kthread.h>

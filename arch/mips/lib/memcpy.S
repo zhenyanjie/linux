@@ -31,7 +31,6 @@
 
 #include <asm/asm.h>
 #include <asm/asm-offsets.h>
-#include <asm/export.h>
 #include <asm/regdef.h>
 
 #define dst a0
@@ -623,7 +622,6 @@ SEXC(1)
 
 	.align	5
 LEAF(memmove)
-EXPORT_SYMBOL(memmove)
 	ADD	t0, a0, a2
 	ADD	t1, a1, a2
 	sltu	t0, a1, t0			# dst + len <= src -> memcpy
@@ -676,7 +674,6 @@ LEAF(__rmemcpy)					/* a0=dst a1=src a2=len */
  * t6 is used as a flag to note inatomic mode.
  */
 LEAF(__copy_user_inatomic)
-EXPORT_SYMBOL(__copy_user_inatomic)
 	b	__copy_user_common
 	li	t6, 1
 	END(__copy_user_inatomic)
@@ -689,11 +686,9 @@ EXPORT_SYMBOL(__copy_user_inatomic)
  */
 	.align	5
 LEAF(memcpy)					/* a0=dst a1=src a2=len */
-EXPORT_SYMBOL(memcpy)
 	move	v0, dst				/* return value */
 .L__memcpy:
 FEXPORT(__copy_user)
-EXPORT_SYMBOL(__copy_user)
 	li	t6, 0	/* not inatomic */
 __copy_user_common:
 	/* Legacy Mode, user <-> user */
@@ -709,7 +704,6 @@ __copy_user_common:
  */
 
 LEAF(__copy_user_inatomic_eva)
-EXPORT_SYMBOL(__copy_user_inatomic_eva)
 	b       __copy_from_user_common
 	li	t6, 1
 	END(__copy_user_inatomic_eva)
@@ -719,7 +713,6 @@ EXPORT_SYMBOL(__copy_user_inatomic_eva)
  */
 
 LEAF(__copy_from_user_eva)
-EXPORT_SYMBOL(__copy_from_user_eva)
 	li	t6, 0	/* not inatomic */
 __copy_from_user_common:
 	__BUILD_COPY_USER EVA_MODE USEROP KERNELOP
@@ -732,7 +725,6 @@ END(__copy_from_user_eva)
  */
 
 LEAF(__copy_to_user_eva)
-EXPORT_SYMBOL(__copy_to_user_eva)
 __BUILD_COPY_USER EVA_MODE KERNELOP USEROP
 END(__copy_to_user_eva)
 
@@ -741,7 +733,6 @@ END(__copy_to_user_eva)
  */
 
 LEAF(__copy_in_user_eva)
-EXPORT_SYMBOL(__copy_in_user_eva)
 __BUILD_COPY_USER EVA_MODE USEROP USEROP
 END(__copy_in_user_eva)
 

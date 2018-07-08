@@ -21,13 +21,13 @@
  *
  */
 
-#include "pp_debug.h"
 #include "polaris10_smc.h"
 #include "smu7_dyn_defaults.h"
 
 #include "smu7_hwmgr.h"
 #include "hardwaremanager.h"
 #include "ppatomctrl.h"
+#include "pp_debug.h"
 #include "cgs_common.h"
 #include "atombios.h"
 #include "polaris10_smumgr.h"
@@ -494,7 +494,6 @@ static int polaris10_populate_ulv_level(struct pp_hwmgr *hwmgr,
 	struct smu7_hwmgr *data = (struct smu7_hwmgr *)(hwmgr->backend);
 	struct phm_ppt_v1_information *table_info =
 			(struct phm_ppt_v1_information *)(hwmgr->pptable);
-	struct pp_smumgr *smumgr = hwmgr->smumgr;
 
 	state->CcPwrDynRm = 0;
 	state->CcPwrDynRm1 = 0;
@@ -503,10 +502,7 @@ static int polaris10_populate_ulv_level(struct pp_hwmgr *hwmgr,
 	state->VddcOffsetVid = (uint8_t)(table_info->us_ulv_voltage_offset *
 			VOLTAGE_VID_OFFSET_SCALE2 / VOLTAGE_VID_OFFSET_SCALE1);
 
-	if (smumgr->chip_id == CHIP_POLARIS12 || smumgr->is_kicker)
-		state->VddcPhase = data->vddc_phase_shed_control ^ 0x3;
-	else
-		state->VddcPhase = (data->vddc_phase_shed_control) ? 0 : 1;
+	state->VddcPhase = (data->vddc_phase_shed_control) ? 0 : 1;
 
 	CONVERT_FROM_HOST_TO_SMC_UL(state->CcPwrDynRm);
 	CONVERT_FROM_HOST_TO_SMC_UL(state->CcPwrDynRm1);
@@ -2184,7 +2180,7 @@ uint32_t polaris10_get_offsetof(uint32_t type, uint32_t member)
 			return offsetof(SMU74_Discrete_DpmTable, LowSclkInterruptThreshold);
 		}
 	}
-	pr_warning("can't get the offset of type %x member %x\n", type, member);
+	printk("cant't get the offset of type %x member %x \n", type, member);
 	return 0;
 }
 
@@ -2211,7 +2207,7 @@ uint32_t polaris10_get_mac_definition(uint32_t value)
 		return SMU7_UVD_MCLK_HANDSHAKE_DISABLE;
 	}
 
-	pr_warning("can't get the mac of %x\n", value);
+	printk("cant't get the mac of %x \n", value);
 	return 0;
 }
 

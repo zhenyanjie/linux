@@ -65,7 +65,7 @@ struct bmp280_data {
 	struct bmp180_calib calib;
 	struct regulator *vddd;
 	struct regulator *vdda;
-	unsigned int start_up_time; /* in microseconds */
+	unsigned int start_up_time; /* in milliseconds */
 
 	/* log of base 2 of oversampling rate */
 	u8 oversampling_press;
@@ -558,7 +558,7 @@ static int bmp280_chip_config(struct bmp280_data *data)
 	u8 osrs = BMP280_OSRS_TEMP_X(data->oversampling_temp + 1) |
 		  BMP280_OSRS_PRESS_X(data->oversampling_press + 1);
 
-	ret = regmap_update_bits(data->regmap, BMP280_REG_CTRL_MEAS,
+	ret = regmap_write_bits(data->regmap, BMP280_REG_CTRL_MEAS,
 				 BMP280_OSRS_TEMP_MASK |
 				 BMP280_OSRS_PRESS_MASK |
 				 BMP280_MODE_MASK,
@@ -936,14 +936,14 @@ int bmp280_common_probe(struct device *dev,
 		data->chip_info = &bmp180_chip_info;
 		data->oversampling_press = ilog2(8);
 		data->oversampling_temp = ilog2(1);
-		data->start_up_time = 10000;
+		data->start_up_time = 10;
 		break;
 	case BMP280_CHIP_ID:
 		indio_dev->num_channels = 2;
 		data->chip_info = &bmp280_chip_info;
 		data->oversampling_press = ilog2(16);
 		data->oversampling_temp = ilog2(2);
-		data->start_up_time = 2000;
+		data->start_up_time = 2;
 		break;
 	case BME280_CHIP_ID:
 		indio_dev->num_channels = 3;
@@ -951,7 +951,7 @@ int bmp280_common_probe(struct device *dev,
 		data->oversampling_press = ilog2(16);
 		data->oversampling_humid = ilog2(16);
 		data->oversampling_temp = ilog2(2);
-		data->start_up_time = 2000;
+		data->start_up_time = 2;
 		break;
 	default:
 		return -EINVAL;
@@ -980,7 +980,7 @@ int bmp280_common_probe(struct device *dev,
 		goto out_disable_vddd;
 	}
 	/* Wait to make sure we started up properly */
-	usleep_range(data->start_up_time, data->start_up_time + 100);
+	mdelay(data->start_up_time);
 
 	/* Bring chip out of reset if there is an assigned GPIO line */
 	gpiod = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
@@ -1039,7 +1039,7 @@ int bmp280_common_probe(struct device *dev,
 	 * Set autosuspend to two orders of magnitude larger than the
 	 * start-up time.
 	 */
-	pm_runtime_set_autosuspend_delay(dev, data->start_up_time / 10);
+	pm_runtime_set_autosuspend_delay(dev, data->start_up_time *100);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_put(dev);
 
@@ -1102,7 +1102,7 @@ static int bmp280_runtime_resume(struct device *dev)
 	ret = regulator_enable(data->vdda);
 	if (ret)
 		return ret;
-	usleep_range(data->start_up_time, data->start_up_time + 100);
+	msleep(data->start_up_time);
 	return data->chip_info->chip_config(data);
 }
 #endif /* CONFIG_PM */

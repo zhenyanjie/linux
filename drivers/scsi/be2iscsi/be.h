@@ -84,6 +84,7 @@ static inline void queue_tail_inc(struct be_queue_info *q)
 /*ISCSI */
 
 struct be_aic_obj {		/* Adaptive interrupt coalescing (AIC) info */
+	bool enable;
 	u32 min_eqd;		/* in usecs */
 	u32 max_eqd;		/* in usecs */
 	u32 prev_eqd;		/* in usecs */
@@ -93,6 +94,8 @@ struct be_aic_obj {		/* Adaptive interrupt coalescing (AIC) info */
 };
 
 struct be_eq_obj {
+	bool todo_mcc_cq;
+	bool todo_cq;
 	u32 cq_count;
 	struct be_queue_info q;
 	struct beiscsi_hba *phba;

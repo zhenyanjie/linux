@@ -614,7 +614,7 @@ _GLOBAL(start_secondary_resume)
 _GLOBAL(__main)
 	blr
 
-#ifdef CONFIG_KEXEC_CORE
+#ifdef CONFIG_KEXEC
 	/*
 	 * Must be relocatable PIC code callable as a C function.
 	 */

@@ -2125,14 +2125,9 @@ static int pxa_camera_sensor_bound(struct v4l2_async_notifier *notifier,
 				    pix->bytesperline, pix->height);
 	pix->pixelformat = pcdev->current_fmt->host_fmt->fourcc;
 	v4l2_fill_mbus_format(mf, pix, pcdev->current_fmt->code);
-
-	err = sensor_call(pcdev, core, s_power, 1);
-	if (err)
-		goto out;
-
 	err = sensor_call(pcdev, pad, set_fmt, NULL, &format);
 	if (err)
-		goto out_sensor_poweroff;
+		goto out;
 
 	v4l2_fill_pix_format(pix, mf);
 	pr_info("%s(): colorspace=0x%x pixfmt=0x%x\n",
@@ -2140,7 +2135,7 @@ static int pxa_camera_sensor_bound(struct v4l2_async_notifier *notifier,
 
 	err = pxa_camera_init_videobuf2(pcdev);
 	if (err)
-		goto out_sensor_poweroff;
+		goto out;
 
 	err = video_register_device(&pcdev->vdev, VFL_TYPE_GRABBER, -1);
 	if (err) {
@@ -2151,9 +2146,6 @@ static int pxa_camera_sensor_bound(struct v4l2_async_notifier *notifier,
 			 "PXA Camera driver attached to camera %s\n",
 			 subdev->name);
 	}
-
-out_sensor_poweroff:
-	err = sensor_call(pcdev, core, s_power, 0);
 out:
 	mutex_unlock(&pcdev->mlock);
 	return err;
@@ -2177,6 +2169,12 @@ static void pxa_camera_sensor_unbind(struct v4l2_async_notifier *notifier,
 	pxa_dma_stop_channels(pcdev);
 
 	pxa_camera_destroy_formats(pcdev);
+
+	if (pcdev->mclk_clk) {
+		v4l2_clk_unregister(pcdev->mclk_clk);
+		pcdev->mclk_clk = NULL;
+	}
+
 	video_unregister_device(&pcdev->vdev);
 	pcdev->sensor = NULL;
 
@@ -2355,7 +2353,8 @@ static int pxa_camera_probe(struct platform_device *pdev)
 		 * Platform hasn't set available data widths. This is bad.
 		 * Warn and use a default.
 		 */
-		dev_warn(&pdev->dev, "WARNING! Platform hasn't set available data widths, using default 10 bit\n");
+		dev_warn(&pdev->dev, "WARNING! Platform hasn't set available "
+			 "data widths, using default 10 bit\n");
 		pcdev->platform_flags |= PXA_CAMERA_DATAWIDTH_10;
 	}
 	if (pcdev->platform_flags & PXA_CAMERA_DATAWIDTH_8)
@@ -2366,7 +2365,8 @@ static int pxa_camera_probe(struct platform_device *pdev)
 		pcdev->width_flags |= 1 << 9;
 	if (!pcdev->mclk) {
 		dev_warn(&pdev->dev,
-			 "mclk == 0! Please, fix your platform data. Using default 20MHz\n");
+			 "mclk == 0! Please, fix your platform data. "
+			 "Using default 20MHz\n");
 		pcdev->mclk = 20000000;
 	}
 
@@ -2501,7 +2501,13 @@ static int pxa_camera_remove(struct platform_device *pdev)
 	dma_release_channel(pcdev->dma_chans[1]);
 	dma_release_channel(pcdev->dma_chans[2]);
 
-	v4l2_clk_unregister(pcdev->mclk_clk);
+	v4l2_async_notifier_unregister(&pcdev->notifier);
+
+	if (pcdev->mclk_clk) {
+		v4l2_clk_unregister(pcdev->mclk_clk);
+		pcdev->mclk_clk = NULL;
+	}
+
 	v4l2_device_unregister(&pcdev->v4l2_dev);
 
 	dev_info(&pdev->dev, "PXA Camera driver unloaded\n");

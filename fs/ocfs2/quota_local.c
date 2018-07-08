@@ -454,7 +454,7 @@ out:
 /* Sync changes in local quota file into global quota file and
  * reinitialize local quota file.
  * The function expects local quota file to be already locked and
- * s_umount locked in shared mode. */
+ * dqonoff_mutex locked. */
 static int ocfs2_recover_local_quota_file(struct inode *lqinode,
 					  int type,
 					  struct ocfs2_quota_recovery *rec)
@@ -597,7 +597,7 @@ int ocfs2_finish_quota_recovery(struct ocfs2_super *osb,
 	printk(KERN_NOTICE "ocfs2: Finishing quota recovery on device (%s) for "
 	       "slot %u\n", osb->dev_str, slot_num);
 
-	down_read(&sb->s_umount);
+	mutex_lock(&sb_dqopt(sb)->dqonoff_mutex);
 	for (type = 0; type < OCFS2_MAXQUOTAS; type++) {
 		if (list_empty(&(rec->r_list[type])))
 			continue;
@@ -674,7 +674,7 @@ out_put:
 			break;
 	}
 out:
-	up_read(&sb->s_umount);
+	mutex_unlock(&sb_dqopt(sb)->dqonoff_mutex);
 	kfree(rec);
 	return status;
 }
@@ -840,10 +840,7 @@ static int ocfs2_local_free_info(struct super_block *sb, int type)
 	}
 	ocfs2_release_local_quota_bitmaps(&oinfo->dqi_chunk);
 
-	/*
-	 * s_umount held in exclusive mode protects us against racing with
-	 * recovery thread...
-	 */
+	/* dqonoff_mutex protects us against racing with recovery thread... */
 	if (oinfo->dqi_rec) {
 		ocfs2_free_quota_recovery(oinfo->dqi_rec);
 		mark_clean = 0;

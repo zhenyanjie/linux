@@ -15,7 +15,6 @@
 
 #include <asm/asm.h>
 #include <asm/asm-offsets.h>
-#include <asm/export.h>
 #include <asm/regdef.h>
 
 #define dst a0
@@ -143,7 +142,6 @@
  * t7 is used as a flag to note inatomic mode.
  */
 LEAF(__copy_user_inatomic)
-EXPORT_SYMBOL(__copy_user_inatomic)
 	b	__copy_user_common
 	 li	t7, 1
 	END(__copy_user_inatomic)
@@ -156,11 +154,9 @@ EXPORT_SYMBOL(__copy_user_inatomic)
  */
 	.align	5
 LEAF(memcpy)					/* a0=dst a1=src a2=len */
-EXPORT_SYMBOL(memcpy)
 	move	v0, dst				/* return value */
 __memcpy:
 FEXPORT(__copy_user)
-EXPORT_SYMBOL(__copy_user)
 	li	t7, 0				/* not inatomic */
 __copy_user_common:
 	/*
@@ -467,7 +463,6 @@ s_exc:
 
 	.align	5
 LEAF(memmove)
-EXPORT_SYMBOL(memmove)
 	ADD	t0, a0, a2
 	ADD	t1, a1, a2
 	sltu	t0, a1, t0			# dst + len <= src -> memcpy

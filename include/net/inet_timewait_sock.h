@@ -29,6 +29,16 @@
 
 #include <linux/atomic.h>
 
+struct inet_hashinfo;
+
+struct inet_timewait_death_row {
+	atomic_t		tw_count;
+
+	struct inet_hashinfo 	*hashinfo ____cacheline_aligned_in_smp;
+	int			sysctl_tw_recycle;
+	int			sysctl_max_tw_buckets;
+};
+
 struct inet_bind_bucket;
 
 /*
@@ -45,6 +55,7 @@ struct inet_timewait_sock {
 #define tw_family		__tw_common.skc_family
 #define tw_state		__tw_common.skc_state
 #define tw_reuse		__tw_common.skc_reuse
+#define tw_reuseport		__tw_common.skc_reuseport
 #define tw_ipv6only		__tw_common.skc_ipv6only
 #define tw_bound_dev_if		__tw_common.skc_bound_dev_if
 #define tw_node			__tw_common.skc_nulls_node
@@ -115,7 +126,8 @@ static inline void inet_twsk_reschedule(struct inet_timewait_sock *tw, int timeo
 
 void inet_twsk_deschedule_put(struct inet_timewait_sock *tw);
 
-void inet_twsk_purge(struct inet_hashinfo *hashinfo, int family);
+void inet_twsk_purge(struct inet_hashinfo *hashinfo,
+		     struct inet_timewait_death_row *twdr, int family);
 
 static inline
 struct net *twsk_net(const struct inet_timewait_sock *twsk)

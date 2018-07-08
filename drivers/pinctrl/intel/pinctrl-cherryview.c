@@ -763,7 +763,7 @@ static void chv_pin_dbg_show(struct pinctrl_dev *pctldev, struct seq_file *s,
 		seq_printf(s, "mode %d ", mode);
 	}
 
-	seq_printf(s, "0x%08x 0x%08x", ctrl0, ctrl1);
+	seq_printf(s, "ctrl0 0x%08x ctrl1 0x%08x", ctrl0, ctrl1);
 
 	if (locked)
 		seq_puts(s, " [LOCKED]");
@@ -1060,7 +1060,7 @@ static int chv_config_get(struct pinctrl_dev *pctldev, unsigned pin,
 }
 
 static int chv_config_set_pull(struct chv_pinctrl *pctrl, unsigned pin,
-			       enum pin_config_param param, u32 arg)
+			       enum pin_config_param param, u16 arg)
 {
 	void __iomem *reg = chv_padreg(pctrl, pin, CHV_PADCTRL0);
 	unsigned long flags;
@@ -1152,7 +1152,7 @@ static int chv_config_set(struct pinctrl_dev *pctldev, unsigned pin,
 	struct chv_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
 	enum pin_config_param param;
 	int i, ret;
-	u32 arg;
+	u16 arg;
 
 	if (chv_pad_locked(pctrl, pin))
 		return -EBUSY;
@@ -1592,6 +1592,22 @@ static int chv_gpio_probe(struct chv_pinctrl *pctrl, int irq)
 
 		if (need_valid_mask && intsel >= pctrl->community->nirqs)
 			clear_bit(i, chip->irq_valid_mask);
+	}
+
+	/*
+	 * The same set of machines in chv_no_valid_mask[] have incorrectly
+	 * configured GPIOs that generate spurious interrupts so we use
+	 * this same list to apply another quirk for them.
+	 *
+	 * See also https://bugzilla.kernel.org/show_bug.cgi?id=197953.
+	 */
+	if (!need_valid_mask) {
+		/*
+		 * Mask all interrupts the community is able to generate
+		 * but leave the ones that can only generate GPEs unmasked.
+		 */
+		chv_writel(GENMASK(31, pctrl->community->nirqs),
+			   pctrl->regs + CHV_INTMASK);
 	}
 
 	/* Clear all interrupts */

@@ -106,35 +106,36 @@ static noinline int gup_pte_range(pmd_t pmd, unsigned long addr,
 		unsigned long end, int write, struct page **pages, int *nr)
 {
 	struct dev_pagemap *pgmap = NULL;
-	int nr_start = *nr, ret = 0;
-	pte_t *ptep, *ptem;
+	int nr_start = *nr;
+	pte_t *ptep;
 
-	/*
-	 * Keep the original mapped PTE value (ptem) around since we
-	 * might increment ptep off the end of the page when finishing
-	 * our loop iteration.
-	 */
-	ptem = ptep = pte_offset_map(&pmd, addr);
+	ptep = pte_offset_map(&pmd, addr);
 	do {
 		pte_t pte = gup_get_pte(ptep);
 		struct page *page;
 
 		/* Similar to the PMD case, NUMA hinting must take slow path */
-		if (pte_protnone(pte))
-			break;
+		if (pte_protnone(pte)) {
+			pte_unmap(ptep);
+			return 0;
+		}
 
-		if (!pte_allows_gup(pte_val(pte), write))
-			break;
+		if (!pte_allows_gup(pte_val(pte), write)) {
+			pte_unmap(ptep);
+			return 0;
+		}
 
 		if (pte_devmap(pte)) {
 			pgmap = get_dev_pagemap(pte_pfn(pte), pgmap);
 			if (unlikely(!pgmap)) {
 				undo_dev_pagemap(nr, nr_start, pages);
-				break;
+				pte_unmap(ptep);
+				return 0;
 			}
-		} else if (pte_special(pte))
-			break;
-
+		} else if (pte_special(pte)) {
+			pte_unmap(ptep);
+			return 0;
+		}
 		VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
 		page = pte_page(pte);
 		get_page(page);
@@ -144,11 +145,9 @@ static noinline int gup_pte_range(pmd_t pmd, unsigned long addr,
 		(*nr)++;
 
 	} while (ptep++, addr += PAGE_SIZE, addr != end);
-	if (addr == end)
-		ret = 1;
-	pte_unmap(ptem);
+	pte_unmap(ptep - 1);
 
-	return ret;
+	return 1;
 }
 
 static inline void get_head_page_multiple(struct page *page, int nr)
@@ -159,12 +158,14 @@ static inline void get_head_page_multiple(struct page *page, int nr)
 	SetPageReferenced(page);
 }
 
-static int __gup_device_huge(unsigned long pfn, unsigned long addr,
+static int __gup_device_huge_pmd(pmd_t pmd, unsigned long addr,
 		unsigned long end, struct page **pages, int *nr)
 {
 	int nr_start = *nr;
+	unsigned long pfn = pmd_pfn(pmd);
 	struct dev_pagemap *pgmap = NULL;
 
+	pfn += (addr & ~PMD_MASK) >> PAGE_SHIFT;
 	do {
 		struct page *page = pfn_to_page(pfn);
 
@@ -181,24 +182,6 @@ static int __gup_device_huge(unsigned long pfn, unsigned long addr,
 		pfn++;
 	} while (addr += PAGE_SIZE, addr != end);
 	return 1;
-}
-
-static int __gup_device_huge_pmd(pmd_t pmd, unsigned long addr,
-		unsigned long end, struct page **pages, int *nr)
-{
-	unsigned long fault_pfn;
-
-	fault_pfn = pmd_pfn(pmd) + ((addr & ~PMD_MASK) >> PAGE_SHIFT);
-	return __gup_device_huge(fault_pfn, addr, end, pages, nr);
-}
-
-static int __gup_device_huge_pud(pud_t pud, unsigned long addr,
-		unsigned long end, struct page **pages, int *nr)
-{
-	unsigned long fault_pfn;
-
-	fault_pfn = pud_pfn(pud) + ((addr & ~PUD_MASK) >> PAGE_SHIFT);
-	return __gup_device_huge(fault_pfn, addr, end, pages, nr);
 }
 
 static noinline int gup_huge_pmd(pmd_t pmd, unsigned long addr,
@@ -272,13 +255,9 @@ static noinline int gup_huge_pud(pud_t pud, unsigned long addr,
 
 	if (!pte_allows_gup(pud_val(pud), write))
 		return 0;
-
-	VM_BUG_ON(!pfn_valid(pud_pfn(pud)));
-	if (pud_devmap(pud))
-		return __gup_device_huge_pud(pud, addr, end, pages, nr);
-
 	/* hugepages are never "special" */
 	VM_BUG_ON(pud_flags(pud) & _PAGE_SPECIAL);
+	VM_BUG_ON(!pfn_valid(pud_pfn(pud)));
 
 	refs = 0;
 	head = pud_page(pud);

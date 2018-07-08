@@ -30,6 +30,7 @@
 
 #include "soc.h"
 #include "common.h"
+#include "mux.h"
 #include "control.h"
 #include "display.h"
 

@@ -2288,7 +2288,9 @@ restart:
 
 		while (q.ptr != NULL) {
 			union ehci_shadow temp;
+			int live;
 
+			live = HC_IS_RUNNING(oxu_to_hcd(oxu)->state);
 			switch (type) {
 			case Q_TYPE_QH:
 				/* handle any completions */

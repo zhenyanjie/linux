@@ -13,7 +13,6 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/reboot.h>
-#include <linux/sched/debug.h>
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
 #include <linux/syscalls.h>
@@ -25,7 +24,7 @@
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/file.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/switch_to.h>
 
 #include <init.h>

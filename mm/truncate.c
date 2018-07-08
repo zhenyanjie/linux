@@ -20,40 +20,16 @@
 #include <linux/task_io_accounting_ops.h>
 #include <linux/buffer_head.h>	/* grr. try_to_release_page,
 				   do_invalidatepage */
-#include <linux/shmem_fs.h>
 #include <linux/cleancache.h>
 #include <linux/rmap.h>
 #include "internal.h"
 
-static void clear_shadow_entry(struct address_space *mapping, pgoff_t index,
-			       void *entry)
+static void clear_exceptional_entry(struct address_space *mapping,
+				    pgoff_t index, void *entry)
 {
 	struct radix_tree_node *node;
 	void **slot;
 
-	spin_lock_irq(&mapping->tree_lock);
-	/*
-	 * Regular page slots are stabilized by the page lock even
-	 * without the tree itself locked.  These unlocked entries
-	 * need verification under the tree lock.
-	 */
-	if (!__radix_tree_lookup(&mapping->page_tree, index, &node, &slot))
-		goto unlock;
-	if (*slot != entry)
-		goto unlock;
-	__radix_tree_replace(&mapping->page_tree, node, slot, NULL,
-			     workingset_update_node, mapping);
-	mapping->nrexceptional--;
-unlock:
-	spin_unlock_irq(&mapping->tree_lock);
-}
-
-/*
- * Unconditionally remove exceptional entry. Usually called from truncate path.
- */
-static void truncate_exceptional_entry(struct address_space *mapping,
-				       pgoff_t index, void *entry)
-{
 	/* Handled by shmem itself */
 	if (shmem_mapping(mapping))
 		return;
@@ -62,37 +38,36 @@ static void truncate_exceptional_entry(struct address_space *mapping,
 		dax_delete_mapping_entry(mapping, index);
 		return;
 	}
-	clear_shadow_entry(mapping, index, entry);
-}
-
-/*
- * Invalidate exceptional entry if easily possible. This handles exceptional
- * entries for invalidate_inode_pages().
- */
-static int invalidate_exceptional_entry(struct address_space *mapping,
-					pgoff_t index, void *entry)
-{
-	/* Handled by shmem itself, or for DAX we do nothing. */
-	if (shmem_mapping(mapping) || dax_mapping(mapping))
-		return 1;
-	clear_shadow_entry(mapping, index, entry);
-	return 1;
-}
-
-/*
- * Invalidate exceptional entry if clean. This handles exceptional entries for
- * invalidate_inode_pages2() so for DAX it evicts only clean entries.
- */
-static int invalidate_exceptional_entry2(struct address_space *mapping,
-					 pgoff_t index, void *entry)
-{
-	/* Handled by shmem itself */
-	if (shmem_mapping(mapping))
-		return 1;
-	if (dax_mapping(mapping))
-		return dax_invalidate_mapping_entry_sync(mapping, index);
-	clear_shadow_entry(mapping, index, entry);
-	return 1;
+	spin_lock_irq(&mapping->tree_lock);
+	/*
+	 * Regular page slots are stabilized by the page lock even
+	 * without the tree itself locked.  These unlocked entries
+	 * need verification under the tree lock.
+	 */
+	if (!__radix_tree_lookup(&mapping->page_tree, index, &node,
+				&slot))
+		goto unlock;
+	if (*slot != entry)
+		goto unlock;
+	radix_tree_replace_slot(slot, NULL);
+	mapping->nrexceptional--;
+	if (!node)
+		goto unlock;
+	workingset_node_shadows_dec(node);
+	/*
+	 * Don't track node without shadow entries.
+	 *
+	 * Avoid acquiring the list_lru lock if already untracked.
+	 * The list_empty() test is safe as node->private_list is
+	 * protected by mapping->tree_lock.
+	 */
+	if (!workingset_node_shadows(node) &&
+	    !list_empty(&node->private_list))
+		list_lru_del(&workingset_shadow_nodes,
+				&node->private_list);
+	__radix_tree_delete_node(&mapping->page_tree, node);
+unlock:
+	spin_unlock_irq(&mapping->tree_lock);
 }
 
 /**
@@ -302,8 +277,7 @@ void truncate_inode_pages_range(struct address_space *mapping,
 				break;
 
 			if (radix_tree_exceptional_entry(page)) {
-				truncate_exceptional_entry(mapping, index,
-							   page);
+				clear_exceptional_entry(mapping, index, page);
 				continue;
 			}
 
@@ -392,8 +366,7 @@ void truncate_inode_pages_range(struct address_space *mapping,
 			}
 
 			if (radix_tree_exceptional_entry(page)) {
-				truncate_exceptional_entry(mapping, index,
-							   page);
+				clear_exceptional_entry(mapping, index, page);
 				continue;
 			}
 
@@ -512,8 +485,7 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 				break;
 
 			if (radix_tree_exceptional_entry(page)) {
-				invalidate_exceptional_entry(mapping, index,
-							     page);
+				clear_exceptional_entry(mapping, index, page);
 				continue;
 			}
 
@@ -635,9 +607,7 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 				break;
 
 			if (radix_tree_exceptional_entry(page)) {
-				if (!invalidate_exceptional_entry2(mapping,
-								   index, page))
-					ret = -EBUSY;
+				clear_exceptional_entry(mapping, index, page);
 				continue;
 			}
 
@@ -682,17 +652,6 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 		pagevec_release(&pvec);
 		cond_resched();
 		index++;
-	}
-	/*
-	 * For DAX we invalidate page tables after invalidating radix tree.  We
-	 * could invalidate page tables while invalidating each entry however
-	 * that would be expensive. And doing range unmapping before doesn't
-	 * work as we have no cheap way to find whether radix tree entry didn't
-	 * get remapped later.
-	 */
-	if (dax_mapping(mapping)) {
-		unmap_mapping_range(mapping, (loff_t)start << PAGE_SHIFT,
-				    (loff_t)(end - start + 1) << PAGE_SHIFT, 0);
 	}
 	cleancache_invalidate_inode(mapping);
 	return ret;

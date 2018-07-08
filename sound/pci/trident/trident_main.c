@@ -3120,7 +3120,7 @@ static int snd_trident_mixer(struct snd_trident *trident, int pcm_spdif_device)
  * gameport interface
  */
 
-#if IS_REACHABLE(CONFIG_GAMEPORT)
+#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
 
 static unsigned char snd_trident_gameport_read(struct gameport *gameport)
 {

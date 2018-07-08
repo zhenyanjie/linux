@@ -1111,8 +1111,7 @@ static int flush_commit_list(struct super_block *s,
 		mark_buffer_dirty(jl->j_commit_bh) ;
 		depth = reiserfs_write_unlock_nested(s);
 		if (reiserfs_barrier_flush(s))
-			__sync_dirty_buffer(jl->j_commit_bh,
-					REQ_SYNC | REQ_PREFLUSH | REQ_FUA);
+			__sync_dirty_buffer(jl->j_commit_bh, WRITE_FLUSH_FUA);
 		else
 			sync_dirty_buffer(jl->j_commit_bh);
 		reiserfs_write_lock_nested(s, depth);
@@ -1270,8 +1269,7 @@ static int _update_journal_header_block(struct super_block *sb,
 		depth = reiserfs_write_unlock_nested(sb);
 
 		if (reiserfs_barrier_flush(sb))
-			__sync_dirty_buffer(journal->j_header_bh,
-					REQ_SYNC | REQ_PREFLUSH | REQ_FUA);
+			__sync_dirty_buffer(journal->j_header_bh, WRITE_FLUSH_FUA);
 		else
 			sync_dirty_buffer(journal->j_header_bh);
 
@@ -1961,7 +1959,7 @@ static int do_journal_release(struct reiserfs_transaction_handle *th,
 	 * will be requeued because superblock is being shutdown and doesn't
 	 * have MS_ACTIVE set.
 	 */
-	cancel_delayed_work_sync(&REISERFS_SB(sb)->old_work);
+	reiserfs_cancel_old_flush(sb);
 	/* wait for all commits to finish */
 	cancel_delayed_work_sync(&SB_JOURNAL(sb)->j_work);
 
@@ -2642,7 +2640,7 @@ static int journal_init_dev(struct super_block *super,
 	if (IS_ERR(journal->j_dev_bd)) {
 		result = PTR_ERR(journal->j_dev_bd);
 		journal->j_dev_bd = NULL;
-		reiserfs_warning(super,
+		reiserfs_warning(super, "sh-457",
 				 "journal_init_dev: Cannot open '%s': %i",
 				 jdev_name, result);
 		return result;

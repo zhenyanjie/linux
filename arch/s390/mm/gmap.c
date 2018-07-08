@@ -359,8 +359,8 @@ static int __gmap_unlink_by_vmaddr(struct gmap *gmap, unsigned long vmaddr)
 	spin_lock(&gmap->guest_table_lock);
 	entry = radix_tree_delete(&gmap->host_to_guest, vmaddr >> PMD_SHIFT);
 	if (entry) {
-		flush = (*entry != _SEGMENT_ENTRY_EMPTY);
-		*entry = _SEGMENT_ENTRY_EMPTY;
+		flush = (*entry != _SEGMENT_ENTRY_INVALID);
+		*entry = _SEGMENT_ENTRY_INVALID;
 	}
 	spin_unlock(&gmap->guest_table_lock);
 	return flush;
@@ -589,7 +589,7 @@ int __gmap_link(struct gmap *gmap, unsigned long gaddr, unsigned long vmaddr)
 		return rc;
 	ptl = pmd_lock(mm, pmd);
 	spin_lock(&gmap->guest_table_lock);
-	if (*table == _SEGMENT_ENTRY_EMPTY) {
+	if (*table == _SEGMENT_ENTRY_INVALID) {
 		rc = radix_tree_insert(&gmap->host_to_guest,
 				       vmaddr >> PMD_SHIFT, table);
 		if (!rc)
@@ -687,7 +687,7 @@ void gmap_discard(struct gmap *gmap, unsigned long from, unsigned long to)
 		/* Find vma in the parent mm */
 		vma = find_vma(gmap->mm, vmaddr);
 		size = min(to - gaddr, PMD_SIZE - (gaddr & ~PMD_MASK));
-		zap_page_range(vma, vmaddr, size);
+		zap_page_range(vma, vmaddr, size, NULL);
 	}
 	up_read(&gmap->mm->mmap_sem);
 }
@@ -1015,7 +1015,7 @@ static inline void gmap_insert_rmap(struct gmap *sg, unsigned long vmaddr,
 	if (slot) {
 		rmap->next = radix_tree_deref_slot_protected(slot,
 							&sg->guest_table_lock);
-		radix_tree_replace_slot(&sg->host_to_rmap, slot, rmap);
+		radix_tree_replace_slot(slot, rmap);
 	} else {
 		rmap->next = NULL;
 		radix_tree_insert(&sg->host_to_rmap, vmaddr >> PAGE_SHIFT,
@@ -2125,6 +2125,37 @@ static inline void thp_split_mm(struct mm_struct *mm)
 }
 
 /*
+ * Remove all empty zero pages from the mapping for lazy refaulting
+ * - This must be called after mm->context.has_pgste is set, to avoid
+ *   future creation of zero pages
+ * - This must be called after THP was enabled
+ */
+static int __zap_zero_pages(pmd_t *pmd, unsigned long start,
+			   unsigned long end, struct mm_walk *walk)
+{
+	unsigned long addr;
+
+	for (addr = start; addr != end; addr += PAGE_SIZE) {
+		pte_t *ptep;
+		spinlock_t *ptl;
+
+		ptep = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+		if (is_zero_pfn(pte_pfn(*ptep)))
+			ptep_xchg_direct(walk->mm, addr, ptep, __pte(_PAGE_INVALID));
+		pte_unmap_unlock(ptep, ptl);
+	}
+	return 0;
+}
+
+static inline void zap_zero_pages(struct mm_struct *mm)
+{
+	struct mm_walk walk = { .pmd_entry = __zap_zero_pages };
+
+	walk.mm = mm;
+	walk_page_range(0, TASK_SIZE, &walk);
+}
+
+/*
  * switch on pgstes for its userspace process (for kvm)
  */
 int s390_enable_sie(void)
@@ -2141,6 +2172,7 @@ int s390_enable_sie(void)
 	mm->context.has_pgste = 1;
 	/* split thp mappings and disable thp for future mappings */
 	thp_split_mm(mm);
+	zap_zero_pages(mm);
 	up_write(&mm->mmap_sem);
 	return 0;
 }
@@ -2153,13 +2185,6 @@ EXPORT_SYMBOL_GPL(s390_enable_sie);
 static int __s390_enable_skey(pte_t *pte, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	/*
-	 * Remove all zero page mappings,
-	 * after establishing a policy to forbid zero page mappings
-	 * following faults for that page will get fresh anonymous pages
-	 */
-	if (is_zero_pfn(pte_pfn(*pte)))
-		ptep_xchg_direct(walk->mm, addr, pte, __pte(_PAGE_INVALID));
 	/* Clear storage key */
 	ptep_zap_key(walk->mm, addr, pte);
 	return 0;

@@ -13,7 +13,6 @@
 
 #include <video/vga.h>
 
-#include <drm/drm_encoder.h>
 #include <drm/drm_fb_helper.h>
 
 #include <drm/ttm/ttm_bo_api.h>
@@ -231,7 +230,7 @@ irqreturn_t cirrus_driver_irq_handler(int irq, void *arg);
 
 				/* cirrus_kms.c */
 int cirrus_driver_load(struct drm_device *dev, unsigned long flags);
-void cirrus_driver_unload(struct drm_device *dev);
+int cirrus_driver_unload(struct drm_device *dev);
 extern struct drm_ioctl_desc cirrus_ioctls[];
 extern int cirrus_max_ioctl;
 

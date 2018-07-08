@@ -25,9 +25,8 @@
 #include <linux/init.h>
 #include <linux/coredump.h>
 #include <linux/slab.h>
-#include <linux/sched/task_stack.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/cacheflush.h>
 #include <asm/a.out-core.h>
 

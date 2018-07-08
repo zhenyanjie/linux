@@ -110,53 +110,20 @@ out:
 #if defined(CONFIG_NFS_V4_1)
 
 /*
- * Lookup a layout inode by stateid
+ * Lookup a layout by filehandle.
  *
- * Note: returns a refcount on the inode and superblock
+ * Note: gets a refcount on the layout hdr and on its respective inode.
+ * Caller must put the layout hdr and the inode.
+ *
+ * TODO: keep track of all layouts (and delegations) in a hash table
+ * hashed by filehandle.
  */
-static struct inode *nfs_layout_find_inode_by_stateid(struct nfs_client *clp,
-		const nfs4_stateid *stateid)
-{
-	struct nfs_server *server;
-	struct inode *inode;
-	struct pnfs_layout_hdr *lo;
-
-restart:
-	list_for_each_entry_rcu(server, &clp->cl_superblocks, client_link) {
-		list_for_each_entry(lo, &server->layouts, plh_layouts) {
-			if (stateid != NULL &&
-			    !nfs4_stateid_match_other(stateid, &lo->plh_stateid))
-				continue;
-			inode = igrab(lo->plh_inode);
-			if (!inode)
-				continue;
-			if (!nfs_sb_active(inode->i_sb)) {
-				rcu_read_unlock();
-				spin_unlock(&clp->cl_lock);
-				iput(inode);
-				spin_lock(&clp->cl_lock);
-				rcu_read_lock();
-				goto restart;
-			}
-			return inode;
-		}
-	}
-
-	return NULL;
-}
-
-/*
- * Lookup a layout inode by filehandle.
- *
- * Note: returns a refcount on the inode and superblock
- *
- */
-static struct inode *nfs_layout_find_inode_by_fh(struct nfs_client *clp,
-		const struct nfs_fh *fh)
+static struct pnfs_layout_hdr * get_layout_by_fh_locked(struct nfs_client *clp,
+		struct nfs_fh *fh)
 {
 	struct nfs_server *server;
 	struct nfs_inode *nfsi;
-	struct inode *inode;
+	struct inode *ino;
 	struct pnfs_layout_hdr *lo;
 
 restart:
@@ -167,39 +134,37 @@ restart:
 				continue;
 			if (nfsi->layout != lo)
 				continue;
-			inode = igrab(lo->plh_inode);
-			if (!inode)
-				continue;
-			if (!nfs_sb_active(inode->i_sb)) {
-				rcu_read_unlock();
-				spin_unlock(&clp->cl_lock);
-				iput(inode);
-				spin_lock(&clp->cl_lock);
-				rcu_read_lock();
+			ino = igrab(lo->plh_inode);
+			if (!ino)
+				break;
+			spin_lock(&ino->i_lock);
+			/* Is this layout in the process of being freed? */
+			if (nfsi->layout != lo) {
+				spin_unlock(&ino->i_lock);
+				iput(ino);
 				goto restart;
 			}
-			return inode;
+			pnfs_get_layout_hdr(lo);
+			spin_unlock(&ino->i_lock);
+			return lo;
 		}
 	}
 
 	return NULL;
 }
 
-static struct inode *nfs_layout_find_inode(struct nfs_client *clp,
-		const struct nfs_fh *fh,
-		const nfs4_stateid *stateid)
+static struct pnfs_layout_hdr * get_layout_by_fh(struct nfs_client *clp,
+		struct nfs_fh *fh)
 {
-	struct inode *inode;
+	struct pnfs_layout_hdr *lo;
 
 	spin_lock(&clp->cl_lock);
 	rcu_read_lock();
-	inode = nfs_layout_find_inode_by_stateid(clp, stateid);
-	if (!inode)
-		inode = nfs_layout_find_inode_by_fh(clp, fh);
+	lo = get_layout_by_fh_locked(clp, fh);
 	rcu_read_unlock();
 	spin_unlock(&clp->cl_lock);
 
-	return inode;
+	return lo;
 }
 
 /*
@@ -248,20 +213,18 @@ static u32 initiate_file_draining(struct nfs_client *clp,
 	u32 rv = NFS4ERR_NOMATCHING_LAYOUT;
 	LIST_HEAD(free_me_list);
 
-	ino = nfs_layout_find_inode(clp, &args->cbl_fh, &args->cbl_stateid);
-	if (!ino)
+	lo = get_layout_by_fh(clp, &args->cbl_fh);
+	if (!lo) {
+		trace_nfs4_cb_layoutrecall_file(clp, &args->cbl_fh, NULL,
+				&args->cbl_stateid, -rv);
 		goto out;
+	}
 
+	ino = lo->plh_inode;
 	pnfs_layoutcommit_inode(ino, false);
 
 
 	spin_lock(&ino->i_lock);
-	lo = NFS_I(ino)->layout;
-	if (!lo) {
-		spin_unlock(&ino->i_lock);
-		goto out;
-	}
-	pnfs_get_layout_hdr(lo);
 	rv = pnfs_check_callback_stateid(lo, &args->cbl_stateid);
 	if (rv != NFS_OK)
 		goto unlock;
@@ -295,10 +258,10 @@ unlock:
 	/* Free all lsegs that are attached to commit buckets */
 	nfs_commit_inode(ino, 0);
 	pnfs_put_layout_hdr(lo);
-out:
 	trace_nfs4_cb_layoutrecall_file(clp, &args->cbl_fh, ino,
 			&args->cbl_stateid, -rv);
-	nfs_iput_and_deactive(ino);
+	iput(ino);
+out:
 	return rv;
 }
 
@@ -439,11 +402,8 @@ validate_seqid(const struct nfs4_slot_table *tbl, const struct nfs4_slot *slot,
 		return htonl(NFS4ERR_SEQ_FALSE_RETRY);
 	}
 
-	/* Wraparound */
-	if (unlikely(slot->seq_nr == 0xFFFFFFFFU)) {
-		if (args->csa_sequenceid == 1)
-			return htonl(NFS4_OK);
-	} else if (likely(args->csa_sequenceid == slot->seq_nr + 1))
+	/* Note: wraparound relies on seq_nr being of type u32 */
+	if (likely(args->csa_sequenceid == slot->seq_nr + 1))
 		return htonl(NFS4_OK);
 
 	/* Misordered request */

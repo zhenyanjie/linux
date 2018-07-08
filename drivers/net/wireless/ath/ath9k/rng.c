@@ -22,7 +22,7 @@
 #include "ar9003_phy.h"
 
 #define ATH9K_RNG_BUF_SIZE	320
-#define ATH9K_RNG_ENTROPY(x)	(((x) * 8 * 10) >> 5) /* quality: 10/32 */
+#define ATH9K_RNG_ENTROPY(x)	(((x) * 8 * 320) >> 10) /* quality: 320/1024 */
 
 static int ath9k_rng_data_read(struct ath_softc *sc, u32 *buf, u32 buf_size)
 {
@@ -120,6 +120,8 @@ void ath9k_rng_start(struct ath_softc *sc)
 
 void ath9k_rng_stop(struct ath_softc *sc)
 {
-	if (sc->rng_task)
+	if (sc->rng_task) {
 		kthread_stop(sc->rng_task);
+		sc->rng_task = NULL;
+	}
 }

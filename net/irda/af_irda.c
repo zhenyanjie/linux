@@ -46,14 +46,13 @@
 #include <linux/socket.h>
 #include <linux/sockios.h>
 #include <linux/slab.h>
-#include <linux/sched/signal.h>
 #include <linux/init.h>
 #include <linux/net.h>
 #include <linux/irda.h>
 #include <linux/poll.h>
 
 #include <asm/ioctls.h>		/* TIOCOUTQ, TIOCINQ */
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <net/sock.h>
 #include <net/tcp_states.h>
@@ -828,8 +827,7 @@ out:
  *    Wait for incoming connection
  *
  */
-static int irda_accept(struct socket *sock, struct socket *newsock, int flags,
-		       bool kern)
+static int irda_accept(struct socket *sock, struct socket *newsock, int flags)
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *new, *self = irda_sk(sk);
@@ -837,7 +835,7 @@ static int irda_accept(struct socket *sock, struct socket *newsock, int flags,
 	struct sk_buff *skb = NULL;
 	int err;
 
-	err = irda_create(sock_net(sk), newsock, sk->sk_protocol, kern);
+	err = irda_create(sock_net(sk), newsock, sk->sk_protocol, 0);
 	if (err)
 		return err;
 
@@ -2225,7 +2223,7 @@ static int irda_getsockopt(struct socket *sock, int level, int optname,
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *self = irda_sk(sk);
-	struct irda_device_list list;
+	struct irda_device_list list = { 0 };
 	struct irda_device_info *discoveries;
 	struct irda_ias_set *	ias_opt;	/* IAS get/query params */
 	struct ias_object *	ias_obj;	/* Object in IAS */

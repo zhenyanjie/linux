@@ -8,6 +8,7 @@
  *
  */
 
+#include <linux/version.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -155,7 +156,7 @@ static long efi_runtime_get_variable(unsigned long arg)
 {
 	struct efi_getvariable __user *getvariable_user;
 	struct efi_getvariable getvariable;
-	unsigned long datasize = 0, prev_datasize, *dz;
+	unsigned long datasize, prev_datasize, *dz;
 	efi_guid_t vendor_guid, *vd = NULL;
 	efi_status_t status;
 	efi_char16_t *name = NULL;
@@ -265,10 +266,14 @@ static long efi_runtime_set_variable(unsigned long arg)
 			return rv;
 	}
 
-	data = memdup_user(setvariable.data, setvariable.data_size);
-	if (IS_ERR(data)) {
+	data = kmalloc(setvariable.data_size, GFP_KERNEL);
+	if (!data) {
 		kfree(name);
-		return PTR_ERR(data);
+		return -ENOMEM;
+	}
+	if (copy_from_user(data, setvariable.data, setvariable.data_size)) {
+		rv = -EFAULT;
+		goto out;
 	}
 
 	status = efi.set_variable(name, &vendor_guid,
@@ -424,7 +429,7 @@ static long efi_runtime_get_nextvariablename(unsigned long arg)
 	efi_guid_t *vd = NULL;
 	efi_guid_t vendor_guid;
 	efi_char16_t *name = NULL;
-	int rv = 0;
+	int rv;
 
 	getnextvariablename_user = (struct efi_getnextvariablename __user *)arg;
 

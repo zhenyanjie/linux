@@ -281,6 +281,8 @@ static inline int qeth_is_ipa_enabled(struct qeth_ipa_info *ipa,
 #define QETH_HIGH_WATERMARK_PACK 5
 #define QETH_WATERMARK_PACK_FUZZ 1
 
+#define QETH_IP_HEADER_SIZE 40
+
 /* large receive scatter gather copy break */
 #define QETH_RX_SG_CB (PAGE_SIZE >> 1)
 #define QETH_RX_PULL_LEN 256
@@ -574,9 +576,9 @@ enum qeth_cq {
 };
 
 struct qeth_ipato {
-	int enabled;
-	int invert4;
-	int invert6;
+	bool enabled;
+	bool invert4;
+	bool invert6;
 	struct list_head entries;
 };
 
@@ -589,6 +591,11 @@ struct qeth_cmd_buffer {
 	int rc;
 	void (*callback) (struct qeth_channel *, struct qeth_cmd_buffer *);
 };
+
+static inline struct qeth_ipa_cmd *__ipa_cmd(struct qeth_cmd_buffer *iob)
+{
+	return (struct qeth_ipa_cmd *)(iob->data + IPA_PDU_HEADER_SIZE);
+}
 
 /**
  * definition of a qeth channel, used for read and write
@@ -672,6 +679,8 @@ struct qeth_card_info {
 	int broadcast_capable;
 	int unique_id;
 	struct qeth_card_blkt blkt;
+	__u32 csum_mask;
+	__u32 tx_csum_mask;
 	enum qeth_ipa_promisc_modes promisc_mode;
 	__u32 diagass_support;
 	__u32 hwtrap;
@@ -845,7 +854,7 @@ struct qeth_trap_id {
  */
 static inline int qeth_get_elements_for_range(addr_t start, addr_t end)
 {
-	return PFN_UP(end - 1) - PFN_DOWN(start);
+	return PFN_UP(end) - PFN_DOWN(start);
 }
 
 static inline int qeth_get_micros(void)
@@ -1001,6 +1010,9 @@ struct qeth_cmd_buffer *qeth_get_setassparms_cmd(struct qeth_card *,
 int qeth_set_features(struct net_device *, netdev_features_t);
 int qeth_recover_features(struct net_device *);
 netdev_features_t qeth_fix_features(struct net_device *, netdev_features_t);
+netdev_features_t qeth_features_check(struct sk_buff *skb,
+				      struct net_device *dev,
+				      netdev_features_t features);
 
 /* exports for OSN */
 int qeth_osn_assist(struct net_device *, void *, int);

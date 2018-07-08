@@ -94,13 +94,10 @@
  */
 #define TMIO_MMC_HAVE_CMD12_CTRL	(1 << 7)
 
-/* Controller has some SDIO status bits which must be 1 */
-#define TMIO_MMC_SDIO_STATUS_SETBITS	(1 << 8)
-
 /*
- * Some controllers have a 32-bit wide data port register
+ * Some controllers needs to set 1 on SDIO status reserved bits
  */
-#define TMIO_MMC_32BIT_DATA_PORT	(1 << 9)
+#define TMIO_MMC_SDIO_STATUS_QUIRK	(1 << 8)
 
 /*
  * Some controllers allows to set SDx actual clock

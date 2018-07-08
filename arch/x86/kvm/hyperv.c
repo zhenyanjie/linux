@@ -28,8 +28,6 @@
 
 #include <linux/kvm_host.h>
 #include <linux/highmem.h>
-#include <linux/sched/cputime.h>
-
 #include <asm/apicdef.h>
 #include <trace/events/kvm.h>
 
@@ -293,7 +291,7 @@ static int synic_get_msr(struct kvm_vcpu_hv_synic *synic, u32 msr, u64 *pdata)
 	return ret;
 }
 
-static int synic_set_irq(struct kvm_vcpu_hv_synic *synic, u32 sint)
+int synic_set_irq(struct kvm_vcpu_hv_synic *synic, u32 sint)
 {
 	struct kvm_vcpu *vcpu = synic_to_vcpu(synic);
 	struct kvm_lapic_irq irq;
@@ -307,13 +305,13 @@ static int synic_set_irq(struct kvm_vcpu_hv_synic *synic, u32 sint)
 		return -ENOENT;
 
 	memset(&irq, 0, sizeof(irq));
-	irq.shorthand = APIC_DEST_SELF;
+	irq.dest_id = kvm_apic_id(vcpu->arch.apic);
 	irq.dest_mode = APIC_DEST_PHYSICAL;
 	irq.delivery_mode = APIC_DM_FIXED;
 	irq.vector = vector;
 	irq.level = 1;
 
-	ret = kvm_irq_delivery_to_apic(vcpu->kvm, vcpu->arch.apic, &irq, NULL);
+	ret = kvm_irq_delivery_to_apic(vcpu->kvm, NULL, &irq, NULL);
 	trace_kvm_hv_synic_set_irq(vcpu->vcpu_id, sint, irq.vector, ret);
 	return ret;
 }
@@ -854,10 +852,6 @@ void kvm_hv_setup_tsc_page(struct kvm *kvm,
 	if (!(hv->hv_tsc_page & HV_X64_MSR_TSC_REFERENCE_ENABLE))
 		return;
 
-	mutex_lock(&kvm->arch.hyperv.hv_lock);
-	if (!(hv->hv_tsc_page & HV_X64_MSR_TSC_REFERENCE_ENABLE))
-		goto out_unlock;
-
 	gfn = hv->hv_tsc_page >> HV_X64_MSR_TSC_REFERENCE_ADDRESS_SHIFT;
 	/*
 	 * Because the TSC parameters only vary when there is a
@@ -865,7 +859,7 @@ void kvm_hv_setup_tsc_page(struct kvm *kvm,
 	 */
 	if (unlikely(kvm_read_guest(kvm, gfn_to_gpa(gfn),
 				    &tsc_seq, sizeof(tsc_seq))))
-		goto out_unlock;
+		return;
 
 	/*
 	 * While we're computing and writing the parameters, force the
@@ -874,15 +868,15 @@ void kvm_hv_setup_tsc_page(struct kvm *kvm,
 	hv->tsc_ref.tsc_sequence = 0;
 	if (kvm_write_guest(kvm, gfn_to_gpa(gfn),
 			    &hv->tsc_ref, sizeof(hv->tsc_ref.tsc_sequence)))
-		goto out_unlock;
+		return;
 
 	if (!compute_tsc_page_parameters(hv_clock, &hv->tsc_ref))
-		goto out_unlock;
+		return;
 
 	/* Ensure sequence is zero before writing the rest of the struct.  */
 	smp_wmb();
 	if (kvm_write_guest(kvm, gfn_to_gpa(gfn), &hv->tsc_ref, sizeof(hv->tsc_ref)))
-		goto out_unlock;
+		return;
 
 	/*
 	 * Now switch to the TSC page mechanism by writing the sequence.
@@ -897,8 +891,6 @@ void kvm_hv_setup_tsc_page(struct kvm *kvm,
 	hv->tsc_ref.tsc_sequence = tsc_seq;
 	kvm_write_guest(kvm, gfn_to_gpa(gfn),
 			&hv->tsc_ref, sizeof(hv->tsc_ref.tsc_sequence));
-out_unlock:
-	mutex_unlock(&kvm->arch.hyperv.hv_lock);
 }
 
 static int kvm_hv_set_msr_pw(struct kvm_vcpu *vcpu, u32 msr, u64 data,
@@ -966,11 +958,10 @@ static int kvm_hv_set_msr_pw(struct kvm_vcpu *vcpu, u32 msr, u64 data,
 /* Calculate cpu time spent by current task in 100ns units */
 static u64 current_task_runtime_100ns(void)
 {
-	u64 utime, stime;
+	cputime_t utime, stime;
 
 	task_cputime_adjusted(current, &utime, &stime);
-
-	return div_u64(utime + stime, 100);
+	return div_u64(cputime_to_nsecs(utime + stime), 100);
 }
 
 static int kvm_hv_set_msr(struct kvm_vcpu *vcpu, u32 msr, u64 data, bool host)
@@ -1151,9 +1142,9 @@ int kvm_hv_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data, bool host)
 	if (kvm_hv_msr_partition_wide(msr)) {
 		int r;
 
-		mutex_lock(&vcpu->kvm->arch.hyperv.hv_lock);
+		mutex_lock(&vcpu->kvm->lock);
 		r = kvm_hv_set_msr_pw(vcpu, msr, data, host);
-		mutex_unlock(&vcpu->kvm->arch.hyperv.hv_lock);
+		mutex_unlock(&vcpu->kvm->lock);
 		return r;
 	} else
 		return kvm_hv_set_msr(vcpu, msr, data, host);
@@ -1164,9 +1155,9 @@ int kvm_hv_get_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata)
 	if (kvm_hv_msr_partition_wide(msr)) {
 		int r;
 
-		mutex_lock(&vcpu->kvm->arch.hyperv.hv_lock);
+		mutex_lock(&vcpu->kvm->lock);
 		r = kvm_hv_get_msr_pw(vcpu, msr, pdata);
-		mutex_unlock(&vcpu->kvm->arch.hyperv.hv_lock);
+		mutex_unlock(&vcpu->kvm->lock);
 		return r;
 	} else
 		return kvm_hv_get_msr(vcpu, msr, pdata);
@@ -1174,7 +1165,7 @@ int kvm_hv_get_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata)
 
 bool kvm_hv_hypercall_enabled(struct kvm *kvm)
 {
-	return READ_ONCE(kvm->arch.hyperv.hv_hypercall) & HV_X64_MSR_HYPERCALL_ENABLE;
+	return kvm->arch.hyperv.hv_hypercall & HV_X64_MSR_HYPERCALL_ENABLE;
 }
 
 static void kvm_hv_hypercall_set_result(struct kvm_vcpu *vcpu, u64 result)

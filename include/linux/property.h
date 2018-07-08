@@ -33,6 +33,8 @@ enum dev_dma_attr {
 	DEV_DMA_COHERENT,
 };
 
+struct fwnode_handle *dev_fwnode(struct device *dev);
+
 bool device_property_present(struct device *dev, const char *propname);
 int device_property_read_u8_array(struct device *dev, const char *propname,
 				  u8 *val, size_t nval);
@@ -160,12 +162,12 @@ struct property_entry {
 	bool is_string;
 	union {
 		union {
-			const void *raw_data;
-			const u8 *u8_data;
-			const u16 *u16_data;
-			const u32 *u32_data;
-			const u64 *u64_data;
-			const char * const *str;
+			void *raw_data;
+			u8 *u8_data;
+			u16 *u16_data;
+			u32 *u32_data;
+			u64 *u64_data;
+			const char **str;
 		} pointer;
 		union {
 			unsigned long long raw_data;
@@ -185,7 +187,7 @@ struct property_entry {
  */
 
 #define PROPERTY_ENTRY_INTEGER_ARRAY(_name_, _type_, _val_)	\
-{								\
+(struct property_entry) {					\
 	.name = _name_,						\
 	.length = ARRAY_SIZE(_val_) * sizeof(_type_),		\
 	.is_array = true,					\
@@ -203,7 +205,7 @@ struct property_entry {
 	PROPERTY_ENTRY_INTEGER_ARRAY(_name_, u64, _val_)
 
 #define PROPERTY_ENTRY_STRING_ARRAY(_name_, _val_)		\
-{								\
+(struct property_entry) {					\
 	.name = _name_,						\
 	.length = ARRAY_SIZE(_val_) * sizeof(const char *),	\
 	.is_array = true,					\
@@ -212,7 +214,7 @@ struct property_entry {
 }
 
 #define PROPERTY_ENTRY_INTEGER(_name_, _type_, _val_)	\
-{							\
+(struct property_entry) {				\
 	.name = _name_,					\
 	.length = sizeof(_type_),			\
 	.is_string = false,				\
@@ -229,7 +231,7 @@ struct property_entry {
 	PROPERTY_ENTRY_INTEGER(_name_, u64, _val_)
 
 #define PROPERTY_ENTRY_STRING(_name_, _val_)		\
-{							\
+(struct property_entry) {				\
 	.name = _name_,					\
 	.length = sizeof(_val_),			\
 	.is_string = true,				\
@@ -237,17 +239,12 @@ struct property_entry {
 }
 
 #define PROPERTY_ENTRY_BOOL(_name_)		\
-{						\
+(struct property_entry) {			\
 	.name = _name_,				\
 }
 
-struct property_entry *
-property_entries_dup(const struct property_entry *properties);
-
-void property_entries_free(const struct property_entry *properties);
-
 int device_add_properties(struct device *dev,
-			  const struct property_entry *properties);
+			  struct property_entry *properties);
 void device_remove_properties(struct device *dev);
 
 bool device_dma_supported(struct device *dev);

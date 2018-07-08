@@ -146,8 +146,7 @@ static dma_addr_t avr32_dma_map_page(struct device *dev, struct page *page,
 {
 	void *cpu_addr = page_address(page) + offset;
 
-	if (!(attrs & DMA_ATTR_SKIP_CPU_SYNC))
-		dma_cache_sync(dev, cpu_addr, size, direction);
+	dma_cache_sync(dev, cpu_addr, size, direction);
 	return virt_to_bus(cpu_addr);
 }
 
@@ -163,10 +162,6 @@ static int avr32_dma_map_sg(struct device *dev, struct scatterlist *sglist,
 
 		sg->dma_address = page_to_bus(sg_page(sg)) + sg->offset;
 		virt = sg_virt(sg);
-
-		if (attrs & DMA_ATTR_SKIP_CPU_SYNC)
-			continue;
-
 		dma_cache_sync(dev, virt, sg->length, direction);
 	}
 
@@ -191,7 +186,7 @@ static void avr32_dma_sync_sg_for_device(struct device *dev,
 		dma_cache_sync(dev, sg_virt(sg), sg->length, direction);
 }
 
-const struct dma_map_ops avr32_dma_ops = {
+struct dma_map_ops avr32_dma_ops = {
 	.alloc			= avr32_dma_alloc,
 	.free			= avr32_dma_free,
 	.map_page		= avr32_dma_map_page,

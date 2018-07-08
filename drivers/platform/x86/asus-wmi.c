@@ -161,6 +161,16 @@ MODULE_LICENSE("GPL");
 
 static const char * const ashs_ids[] = { "ATK4001", "ATK4002", NULL };
 
+static bool ashs_present(void)
+{
+	int i = 0;
+	while (ashs_ids[i]) {
+		if (acpi_dev_found(ashs_ids[i++]))
+			return true;
+	}
+	return false;
+}
+
 struct bios_args {
 	u32 arg0;
 	u32 arg1;
@@ -966,6 +976,9 @@ static int asus_new_rfkill(struct asus_wmi *asus,
 
 static void asus_wmi_rfkill_exit(struct asus_wmi *asus)
 {
+	if (asus->driver->wlan_ctrl_by_user && ashs_present())
+		return;
+
 	asus_unregister_rfkill_notifier(asus, "\\_SB.PCI0.P0P5");
 	asus_unregister_rfkill_notifier(asus, "\\_SB.PCI0.P0P6");
 	asus_unregister_rfkill_notifier(asus, "\\_SB.PCI0.P0P7");
@@ -1106,6 +1119,15 @@ static void asus_wmi_set_xusb2pr(struct asus_wmi *asus)
 
 	pr_info("set USB_INTEL_XUSB2PR old: 0x%04x, new: 0x%04x\n",
 			orig_ports_available, ports_available);
+}
+
+/*
+ * Some devices dont support or have borcken get_als method
+ * but still support set method.
+ */
+static void asus_wmi_set_als(void)
+{
+	asus_wmi_set_devstate(ASUS_WMI_DEVID_ALS_ENABLE, 1, NULL);
 }
 
 /*
@@ -2053,16 +2075,6 @@ static int asus_wmi_fan_init(struct asus_wmi *asus)
 	return 0;
 }
 
-static bool ashs_present(void)
-{
-	int i = 0;
-	while (ashs_ids[i]) {
-		if (acpi_dev_found(ashs_ids[i++]))
-			return true;
-	}
-	return false;
-}
-
 /*
  * WMI Driver
  */
@@ -2111,11 +2123,17 @@ static int asus_wmi_add(struct platform_device *pdev)
 	if (result & (ASUS_WMI_DSTS_PRESENCE_BIT | ASUS_WMI_DSTS_USER_BIT))
 		asus->driver->wlan_ctrl_by_user = 1;
 
-	if (!(asus->driver->wlan_ctrl_by_user && ashs_present())) {
+	if (asus->driver->wlan_ctrl_by_user && ashs_present())
+		asus->driver->quirks->no_rfkill = 1;
+
+	if (!asus->driver->quirks->no_rfkill) {
 		err = asus_wmi_rfkill_init(asus);
 		if (err)
 			goto fail_rfkill;
 	}
+
+	if (asus->driver->quirks->wmi_force_als_set)
+		asus_wmi_set_als();
 
 	/* Some Asus desktop boards export an acpi-video backlight interface,
 	   stop this from showing up */

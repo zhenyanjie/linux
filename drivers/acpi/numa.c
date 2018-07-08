@@ -70,7 +70,7 @@ int acpi_map_pxm_to_node(int pxm)
 {
 	int node;
 
-	if (pxm < 0 || pxm >= MAX_PXM_DOMAINS || numa_off)
+	if (pxm < 0 || pxm >= MAX_PXM_DOMAINS)
 		return NUMA_NO_NODE;
 
 	node = pxm_to_node_map[pxm];
@@ -103,25 +103,27 @@ int acpi_map_pxm_to_node(int pxm)
  */
 int acpi_map_pxm_to_online_node(int pxm)
 {
-	int node, n, dist, min_dist;
+	int node, min_node;
 
 	node = acpi_map_pxm_to_node(pxm);
 
 	if (node == NUMA_NO_NODE)
 		node = 0;
 
+	min_node = node;
 	if (!node_online(node)) {
-		min_dist = INT_MAX;
+		int min_dist = INT_MAX, dist, n;
+
 		for_each_online_node(n) {
 			dist = node_distance(node, n);
 			if (dist < min_dist) {
 				min_dist = dist;
-				node = n;
+				min_node = n;
 			}
 		}
 	}
 
-	return node;
+	return min_node;
 }
 EXPORT_SYMBOL(acpi_map_pxm_to_online_node);
 

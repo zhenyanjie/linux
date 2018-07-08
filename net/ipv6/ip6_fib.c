@@ -148,9 +148,21 @@ static struct fib6_node *node_alloc(void)
 	return fn;
 }
 
-static void node_free(struct fib6_node *fn)
+static void node_free_immediate(struct fib6_node *fn)
 {
 	kmem_cache_free(fib6_node_kmem, fn);
+}
+
+static void node_free_rcu(struct rcu_head *head)
+{
+	struct fib6_node *fn = container_of(head, struct fib6_node, rcu);
+
+	kmem_cache_free(fib6_node_kmem, fn);
+}
+
+static void node_free(struct fib6_node *fn)
+{
+	call_rcu(&fn->rcu, node_free_rcu);
 }
 
 static void rt6_rcu_free(struct rt6_info *rt)
@@ -187,6 +199,12 @@ static void rt6_release(struct rt6_info *rt)
 		rt6_free_pcpu(rt);
 		rt6_rcu_free(rt);
 	}
+}
+
+static void fib6_free_table(struct fib6_table *table)
+{
+	inetpeer_invalidate_tree(&table->tb6_peers);
+	kfree(table);
 }
 
 static void fib6_link_table(struct net *net, struct fib6_table *tb)
@@ -317,16 +335,6 @@ static int fib6_dump_node(struct fib6_walker *w)
 			w->leaf = rt;
 			return 1;
 		}
-
-		/* Multipath routes are dumped in one route with the
-		 * RTA_MULTIPATH attribute. Jump 'rt' to point to the
-		 * last sibling of this route (no need to dump the
-		 * sibling routes again)
-		 */
-		if (rt->rt6i_nsiblings)
-			rt = list_last_entry(&rt->rt6i_siblings,
-					     struct rt6_info,
-					     rt6i_siblings);
 	}
 	w->leaf = NULL;
 	return 0;
@@ -599,9 +607,9 @@ insert_above:
 
 		if (!in || !ln) {
 			if (in)
-				node_free(in);
+				node_free_immediate(in);
 			if (ln)
-				node_free(ln);
+				node_free_immediate(ln);
 			return ERR_PTR(-ENOMEM);
 		}
 
@@ -755,9 +763,6 @@ static int fib6_add_rt2node(struct fib6_node *fn, struct rt6_info *rt,
 	u16 nlflags = NLM_F_EXCL;
 	int err;
 
-	if (info->nlh && (info->nlh->nlmsg_flags & NLM_F_APPEND))
-		nlflags |= NLM_F_APPEND;
-
 	ins = &fn->leaf;
 
 	for (iter = fn->leaf; iter; iter = iter->dst.rt6_next) {
@@ -875,10 +880,9 @@ add:
 
 		rt->dst.rt6_next = iter;
 		*ins = rt;
-		rt->rt6i_node = fn;
+		rcu_assign_pointer(rt->rt6i_node, fn);
 		atomic_inc(&rt->rt6i_ref);
-		if (!info->skip_notify)
-			inet6_rt_notify(RTM_NEWROUTE, rt, info, nlflags);
+		inet6_rt_notify(RTM_NEWROUTE, rt, info, nlflags);
 		info->nl_net->ipv6.rt6_stats->fib_rt_entries++;
 
 		if (!(fn->fn_flags & RTN_RTINFO)) {
@@ -901,17 +905,18 @@ add:
 			return err;
 
 		*ins = rt;
-		rt->rt6i_node = fn;
+		rcu_assign_pointer(rt->rt6i_node, fn);
 		rt->dst.rt6_next = iter->dst.rt6_next;
 		atomic_inc(&rt->rt6i_ref);
-		if (!info->skip_notify)
-			inet6_rt_notify(RTM_NEWROUTE, rt, info, NLM_F_REPLACE);
+		inet6_rt_notify(RTM_NEWROUTE, rt, info, NLM_F_REPLACE);
 		if (!(fn->fn_flags & RTN_RTINFO)) {
 			info->nl_net->ipv6.rt6_stats->fib_route_nodes++;
 			fn->fn_flags |= RTN_RTINFO;
 		}
 		nsiblings = iter->rt6i_nsiblings;
 		fib6_purge_rt(iter, fn, info->nl_net);
+		if (fn->rr_ptr == iter)
+			fn->rr_ptr = NULL;
 		rt6_release(iter);
 
 		if (nsiblings) {
@@ -924,6 +929,8 @@ add:
 				if (rt6_qualify_for_ecmp(iter)) {
 					*ins = iter->dst.rt6_next;
 					fib6_purge_rt(iter, fn, info->nl_net);
+					if (fn->rr_ptr == iter)
+						fn->rr_ptr = NULL;
 					rt6_release(iter);
 					nsiblings--;
 				} else {
@@ -1012,7 +1019,7 @@ int fib6_add(struct fib6_node *root, struct rt6_info *rt,
 			/* Create subtree root node */
 			sfn = node_alloc();
 			if (!sfn)
-				goto st_failure;
+				goto failure;
 
 			sfn->leaf = info->nl_net->ipv6.ip6_null_entry;
 			atomic_inc(&info->nl_net->ipv6.ip6_null_entry->rt6i_ref);
@@ -1028,12 +1035,12 @@ int fib6_add(struct fib6_node *root, struct rt6_info *rt,
 
 			if (IS_ERR(sn)) {
 				/* If it is failed, discard just allocated
-				   root, and then (in st_failure) stale node
+				   root, and then (in failure) stale node
 				   in main tree.
 				 */
-				node_free(sfn);
+				node_free_immediate(sfn);
 				err = PTR_ERR(sn);
-				goto st_failure;
+				goto failure;
 			}
 
 			/* Now link new subtree to main tree */
@@ -1047,7 +1054,7 @@ int fib6_add(struct fib6_node *root, struct rt6_info *rt,
 
 			if (IS_ERR(sn)) {
 				err = PTR_ERR(sn);
-				goto st_failure;
+				goto failure;
 			}
 		}
 
@@ -1089,22 +1096,22 @@ out:
 			atomic_inc(&pn->leaf->rt6i_ref);
 		}
 #endif
-		if (!(rt->dst.flags & DST_NOCACHE))
-			dst_free(&rt->dst);
+		goto failure;
 	}
 	return err;
 
-#ifdef CONFIG_IPV6_SUBTREES
-	/* Subtree creation failed, probably main tree node
-	   is orphan. If it is, shoot it.
+failure:
+	/* fn->leaf could be NULL if fn is an intermediate node and we
+	 * failed to add the new route to it in both subtree creation
+	 * failure and fib6_add_rt2node() failure case.
+	 * In both cases, fib6_repair_tree() should be called to fix
+	 * fn->leaf.
 	 */
-st_failure:
 	if (fn && !(fn->fn_flags & (RTN_RTINFO|RTN_ROOT)))
 		fib6_repair_tree(info->nl_net, fn);
 	if (!(rt->dst.flags & DST_NOCACHE))
 		dst_free(&rt->dst);
 	return err;
-#endif
 }
 
 /*
@@ -1452,15 +1459,15 @@ static void fib6_del_route(struct fib6_node *fn, struct rt6_info **rtp,
 
 	fib6_purge_rt(rt, fn, net);
 
-	if (!info->skip_notify)
-		inet6_rt_notify(RTM_DELROUTE, rt, info, 0);
+	inet6_rt_notify(RTM_DELROUTE, rt, info, 0);
 	rt6_release(rt);
 }
 
 int fib6_del(struct rt6_info *rt, struct nl_info *info)
 {
+	struct fib6_node *fn = rcu_dereference_protected(rt->rt6i_node,
+				    lockdep_is_held(&rt->rt6i_table->tb6_lock));
 	struct net *net = info->nl_net;
-	struct fib6_node *fn = rt->rt6i_node;
 	struct rt6_info **rtp;
 
 #if RT6_DEBUG >= 2
@@ -1649,7 +1656,9 @@ static int fib6_clean_node(struct fib6_walker *w)
 			if (res) {
 #if RT6_DEBUG >= 2
 				pr_debug("%s: del failed: rt=%p@%p err=%d\n",
-					 __func__, rt, rt->rt6i_node, res);
+					 __func__, rt,
+					 rcu_access_pointer(rt->rt6i_node),
+					 res);
 #endif
 				continue;
 			}
@@ -1890,15 +1899,22 @@ out_timer:
 
 static void fib6_net_exit(struct net *net)
 {
+	unsigned int i;
+
 	rt6_ifdown(net, NULL);
 	del_timer_sync(&net->ipv6.ip6_fib_timer);
 
-#ifdef CONFIG_IPV6_MULTIPLE_TABLES
-	inetpeer_invalidate_tree(&net->ipv6.fib6_local_tbl->tb6_peers);
-	kfree(net->ipv6.fib6_local_tbl);
-#endif
-	inetpeer_invalidate_tree(&net->ipv6.fib6_main_tbl->tb6_peers);
-	kfree(net->ipv6.fib6_main_tbl);
+	for (i = 0; i < FIB6_TABLE_HASHSZ; i++) {
+		struct hlist_head *head = &net->ipv6.fib_table_hash[i];
+		struct hlist_node *tmp;
+		struct fib6_table *tb;
+
+		hlist_for_each_entry_safe(tb, tmp, head, tb6_hlist) {
+			hlist_del(&tb->tb6_hlist);
+			fib6_free_table(tb);
+		}
+	}
+
 	kfree(net->ipv6.fib_table_hash);
 	kfree(net->ipv6.rt6_stats);
 }

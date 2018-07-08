@@ -21,8 +21,7 @@
 struct mdio_mux_mmioreg_state {
 	void *mux_handle;
 	phys_addr_t phys;
-	unsigned int iosize;
-	unsigned int mask;
+	uint8_t mask;
 };
 
 /*
@@ -48,47 +47,17 @@ static int mdio_mux_mmioreg_switch_fn(int current_child, int desired_child,
 	struct mdio_mux_mmioreg_state *s = data;
 
 	if (current_child ^ desired_child) {
-		void __iomem *p = ioremap(s->phys, s->iosize);
+		void __iomem *p = ioremap(s->phys, 1);
+		uint8_t x, y;
+
 		if (!p)
 			return -ENOMEM;
 
-		switch (s->iosize) {
-		case sizeof(uint8_t): {
-			uint8_t x, y;
-
-			x = ioread8(p);
-			y = (x & ~s->mask) | desired_child;
-			if (x != y) {
-				iowrite8((x & ~s->mask) | desired_child, p);
-				pr_debug("%s: %02x -> %02x\n", __func__, x, y);
-			}
-
-			break;
-		}
-		case sizeof(uint16_t): {
-			uint16_t x, y;
-
-			x = ioread16(p);
-			y = (x & ~s->mask) | desired_child;
-			if (x != y) {
-				iowrite16((x & ~s->mask) | desired_child, p);
-				pr_debug("%s: %04x -> %04x\n", __func__, x, y);
-			}
-
-			break;
-		}
-		case sizeof(uint32_t): {
-			uint32_t x, y;
-
-			x = ioread32(p);
-			y = (x & ~s->mask) | desired_child;
-			if (x != y) {
-				iowrite32((x & ~s->mask) | desired_child, p);
-				pr_debug("%s: %08x -> %08x\n", __func__, x, y);
-			}
-
-			break;
-		}
+		x = ioread8(p);
+		y = (x & ~s->mask) | desired_child;
+		if (x != y) {
+			iowrite8((x & ~s->mask) | desired_child, p);
+			pr_debug("%s: %02x -> %02x\n", __func__, x, y);
 		}
 
 		iounmap(p);
@@ -119,11 +88,8 @@ static int mdio_mux_mmioreg_probe(struct platform_device *pdev)
 	}
 	s->phys = res.start;
 
-	s->iosize = resource_size(&res);
-	if (s->iosize != sizeof(uint8_t) &&
-	    s->iosize != sizeof(uint16_t) &&
-	    s->iosize != sizeof(uint32_t)) {
-		dev_err(&pdev->dev, "only 8/16/32-bit registers are supported\n");
+	if (resource_size(&res) != sizeof(uint8_t)) {
+		dev_err(&pdev->dev, "only 8-bit registers are supported\n");
 		return -EINVAL;
 	}
 
@@ -132,8 +98,8 @@ static int mdio_mux_mmioreg_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "missing or invalid mux-mask property\n");
 		return -ENODEV;
 	}
-	if (be32_to_cpup(iprop) >= BIT(s->iosize * 8)) {
-		dev_err(&pdev->dev, "only 8/16/32-bit registers are supported\n");
+	if (be32_to_cpup(iprop) > 255) {
+		dev_err(&pdev->dev, "only 8-bit registers are supported\n");
 		return -EINVAL;
 	}
 	s->mask = be32_to_cpup(iprop);

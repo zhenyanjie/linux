@@ -8,7 +8,6 @@
 #ifndef __ASM_AVR32_PGTABLE_2LEVEL_H
 #define __ASM_AVR32_PGTABLE_2LEVEL_H
 
-#define __ARCH_USE_5LEVEL_HACK
 #include <asm-generic/pgtable-nopmd.h>
 
 /*

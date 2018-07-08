@@ -25,6 +25,8 @@
 #include <net/mip6.h>
 #endif
 
+static struct xfrm_policy_afinfo xfrm6_policy_afinfo;
+
 static struct dst_entry *xfrm6_dst_lookup(struct net *net, int tos, int oif,
 					  const xfrm_address_t *saddr,
 					  const xfrm_address_t *daddr)
@@ -119,7 +121,7 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 	struct flowi6 *fl6 = &fl->u.ip6;
 	int onlyproto = 0;
 	const struct ipv6hdr *hdr = ipv6_hdr(skb);
-	u16 offset = sizeof(*hdr);
+	u32 offset = sizeof(*hdr);
 	struct ipv6_opt_hdr *exthdr;
 	const unsigned char *nh = skb_network_header(skb);
 	u16 nhoff = IP6CB(skb)->nhoff;
@@ -218,7 +220,7 @@ static inline int xfrm6_garbage_collect(struct dst_ops *ops)
 {
 	struct net *net = container_of(ops, struct net, xfrm.xfrm6_dst_ops);
 
-	xfrm_garbage_collect_deferred(net);
+	xfrm6_policy_afinfo.garbage_collect(net);
 	return dst_entries_get_fast(ops) > ops->gc_thresh * 2;
 }
 
@@ -289,7 +291,8 @@ static struct dst_ops xfrm6_dst_ops_template = {
 	.gc_thresh =		INT_MAX,
 };
 
-static const struct xfrm_policy_afinfo xfrm6_policy_afinfo = {
+static struct xfrm_policy_afinfo xfrm6_policy_afinfo = {
+	.family =		AF_INET6,
 	.dst_ops =		&xfrm6_dst_ops_template,
 	.dst_lookup =		xfrm6_dst_lookup,
 	.get_saddr =		xfrm6_get_saddr,
@@ -302,7 +305,7 @@ static const struct xfrm_policy_afinfo xfrm6_policy_afinfo = {
 
 static int __init xfrm6_policy_init(void)
 {
-	return xfrm_policy_register_afinfo(&xfrm6_policy_afinfo, AF_INET6);
+	return xfrm_policy_register_afinfo(&xfrm6_policy_afinfo);
 }
 
 static void xfrm6_policy_fini(void)

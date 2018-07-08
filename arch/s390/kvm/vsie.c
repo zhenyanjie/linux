@@ -14,8 +14,6 @@
 #include <linux/bug.h>
 #include <linux/list.h>
 #include <linux/bitmap.h>
-#include <linux/sched/signal.h>
-
 #include <asm/gmap.h>
 #include <asm/mmu_context.h>
 #include <asm/sclp.h>
@@ -219,6 +217,12 @@ static void unshadow_scb(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 	memcpy(scb_o->gcr, scb_s->gcr, 128);
 	scb_o->pp = scb_s->pp;
 
+	/* branch prediction */
+	if (test_kvm_facility(vcpu->kvm, 82)) {
+		scb_o->fpf &= ~FPF_BPBC;
+		scb_o->fpf |= scb_s->fpf & FPF_BPBC;
+	}
+
 	/* interrupt intercept */
 	switch (scb_s->icptcode) {
 	case ICPT_PROGI:
@@ -261,6 +265,7 @@ static int shadow_scb(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 	scb_s->ecb3 = 0;
 	scb_s->ecd = 0;
 	scb_s->fac = 0;
+	scb_s->fpf = 0;
 
 	rc = prepare_cpuflags(vcpu, vsie_page);
 	if (rc)
@@ -318,6 +323,9 @@ static int shadow_scb(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 			prefix_unmapped(vsie_page);
 		scb_s->ecb |= scb_o->ecb & 0x10U;
 	}
+	/* branch prediction */
+	if (test_kvm_facility(vcpu->kvm, 82))
+		scb_s->fpf |= scb_o->fpf & FPF_BPBC;
 	/* SIMD */
 	if (test_kvm_facility(vcpu->kvm, 129)) {
 		scb_s->eca |= scb_o->eca & 0x00020000U;
@@ -326,9 +334,6 @@ static int shadow_scb(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 	/* Run-time-Instrumentation */
 	if (test_kvm_facility(vcpu->kvm, 64))
 		scb_s->ecb3 |= scb_o->ecb3 & 0x01U;
-	/* Instruction Execution Prevention */
-	if (test_kvm_facility(vcpu->kvm, 130))
-		scb_s->ecb2 |= scb_o->ecb2 & 0x20U;
 	if (test_kvm_cpu_feat(vcpu->kvm, KVM_S390_VM_CPU_FEAT_SIIF))
 		scb_s->eca |= scb_o->eca & 0x00000001U;
 	if (test_kvm_cpu_feat(vcpu->kvm, KVM_S390_VM_CPU_FEAT_IB))
@@ -544,7 +549,7 @@ static int pin_blocks(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 
 	gpa = scb_o->itdba & ~0xffUL;
 	if (gpa && (scb_s->ecb & 0x10U)) {
-		if (!(gpa & ~0x1fffU)) {
+		if (!(gpa & ~0x1fffUL)) {
 			rc = set_validity_icpt(scb_s, 0x0080U);
 			goto unpin;
 		}
@@ -759,6 +764,7 @@ static int do_vsie_run(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 {
 	struct kvm_s390_sie_block *scb_s = &vsie_page->scb_s;
 	struct kvm_s390_sie_block *scb_o = vsie_page->scb_o;
+	int guest_bp_isolation;
 	int rc;
 
 	handle_last_fault(vcpu, vsie_page);
@@ -769,6 +775,20 @@ static int do_vsie_run(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 		s390_handle_mcck();
 
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
+
+	/* save current guest state of bp isolation override */
+	guest_bp_isolation = test_thread_flag(TIF_ISOLATE_BP_GUEST);
+
+	/*
+	 * The guest is running with BPBC, so we have to force it on for our
+	 * nested guest. This is done by enabling BPBC globally, so the BPBC
+	 * control in the SCB (which the nested guest can modify) is simply
+	 * ignored.
+	 */
+	if (test_kvm_facility(vcpu->kvm, 82) &&
+	    vcpu->arch.sie_block->fpf & FPF_BPBC)
+		set_thread_flag(TIF_ISOLATE_BP_GUEST);
+
 	local_irq_disable();
 	guest_enter_irqoff();
 	local_irq_enable();
@@ -778,6 +798,11 @@ static int do_vsie_run(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 	local_irq_disable();
 	guest_exit_irqoff();
 	local_irq_enable();
+
+	/* restore guest state for bp isolation override */
+	if (!guest_bp_isolation)
+		clear_thread_flag(TIF_ISOLATE_BP_GUEST);
+
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 	if (rc > 0)
@@ -904,7 +929,7 @@ static int vsie_run(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page)
 		if (rc || scb_s->icptcode || signal_pending(current) ||
 		    kvm_s390_vcpu_has_irq(vcpu, 0))
 			break;
-	}
+	};
 
 	if (rc == -EFAULT) {
 		/*

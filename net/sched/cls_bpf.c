@@ -45,7 +45,10 @@ struct cls_bpf_prog {
 	u32 gen_flags;
 	struct tcf_exts exts;
 	u32 handle;
-	u16 bpf_num_ops;
+	union {
+		u32 bpf_fd;
+		u16 bpf_num_ops;
+	};
 	struct sock_filter *bpf_ops;
 	const char *bpf_name;
 	struct tcf_proto *tp;
@@ -148,7 +151,6 @@ static int cls_bpf_offload_cmd(struct tcf_proto *tp, struct cls_bpf_prog *prog,
 	struct net_device *dev = tp->q->dev_queue->dev;
 	struct tc_cls_bpf_offload bpf_offload = {};
 	struct tc_to_netdev offload;
-	int err;
 
 	offload.type = TC_SETUP_CLSBPF;
 	offload.cls_bpf = &bpf_offload;
@@ -160,13 +162,8 @@ static int cls_bpf_offload_cmd(struct tcf_proto *tp, struct cls_bpf_prog *prog,
 	bpf_offload.exts_integrated = prog->exts_integrated;
 	bpf_offload.gen_flags = prog->gen_flags;
 
-	err = dev->netdev_ops->ndo_setup_tc(dev, tp->q->handle,
-					    tp->protocol, &offload);
-
-	if (!err && (cmd == TC_CLSBPF_ADD || cmd == TC_CLSBPF_REPLACE))
-		prog->gen_flags |= TCA_CLS_FLAGS_IN_HW;
-
-	return err;
+	return dev->netdev_ops->ndo_setup_tc(dev, tp->q->handle,
+					     tp->protocol, &offload);
 }
 
 static int cls_bpf_offload(struct tcf_proto *tp, struct cls_bpf_prog *prog,
@@ -247,7 +244,7 @@ static int cls_bpf_init(struct tcf_proto *tp)
 	return 0;
 }
 
-static void __cls_bpf_delete_prog(struct cls_bpf_prog *prog)
+static void cls_bpf_delete_prog(struct tcf_proto *tp, struct cls_bpf_prog *prog)
 {
 	tcf_exts_destroy(&prog->exts);
 
@@ -261,22 +258,22 @@ static void __cls_bpf_delete_prog(struct cls_bpf_prog *prog)
 	kfree(prog);
 }
 
-static void cls_bpf_delete_prog_rcu(struct rcu_head *rcu)
+static void __cls_bpf_delete_prog(struct rcu_head *rcu)
 {
-	__cls_bpf_delete_prog(container_of(rcu, struct cls_bpf_prog, rcu));
-}
+	struct cls_bpf_prog *prog = container_of(rcu, struct cls_bpf_prog, rcu);
 
-static void __cls_bpf_delete(struct tcf_proto *tp, struct cls_bpf_prog *prog)
-{
-	cls_bpf_stop_offload(tp, prog);
-	list_del_rcu(&prog->link);
-	tcf_unbind_filter(tp, &prog->res);
-	call_rcu(&prog->rcu, cls_bpf_delete_prog_rcu);
+	cls_bpf_delete_prog(prog->tp, prog);
 }
 
 static int cls_bpf_delete(struct tcf_proto *tp, unsigned long arg)
 {
-	__cls_bpf_delete(tp, (struct cls_bpf_prog *) arg);
+	struct cls_bpf_prog *prog = (struct cls_bpf_prog *) arg;
+
+	cls_bpf_stop_offload(tp, prog);
+	list_del_rcu(&prog->link);
+	tcf_unbind_filter(tp, &prog->res);
+	call_rcu(&prog->rcu, __cls_bpf_delete_prog);
+
 	return 0;
 }
 
@@ -288,8 +285,12 @@ static bool cls_bpf_destroy(struct tcf_proto *tp, bool force)
 	if (!force && !list_empty(&head->plist))
 		return false;
 
-	list_for_each_entry_safe(prog, tmp, &head->plist, link)
-		__cls_bpf_delete(tp, prog);
+	list_for_each_entry_safe(prog, tmp, &head->plist, link) {
+		cls_bpf_stop_offload(tp, prog);
+		list_del_rcu(&prog->link);
+		tcf_unbind_filter(tp, &prog->res);
+		call_rcu(&prog->rcu, __cls_bpf_delete_prog);
+	}
 
 	kfree_rcu(head, rcu);
 	return true;
@@ -364,7 +365,9 @@ static int cls_bpf_prog_from_efd(struct nlattr **tb, struct cls_bpf_prog *prog,
 		return PTR_ERR(fp);
 
 	if (tb[TCA_BPF_NAME]) {
-		name = nla_memdup(tb[TCA_BPF_NAME], GFP_KERNEL);
+		name = kmemdup(nla_data(tb[TCA_BPF_NAME]),
+			       nla_len(tb[TCA_BPF_NAME]),
+			       GFP_KERNEL);
 		if (!name) {
 			bpf_prog_put(fp);
 			return -ENOMEM;
@@ -372,6 +375,7 @@ static int cls_bpf_prog_from_efd(struct nlattr **tb, struct cls_bpf_prog *prog,
 	}
 
 	prog->bpf_ops = NULL;
+	prog->bpf_fd = bpf_fd;
 	prog->bpf_name = name;
 	prog->filter = fp;
 
@@ -513,17 +517,14 @@ static int cls_bpf_change(struct net *net, struct sk_buff *in_skb,
 
 	ret = cls_bpf_offload(tp, prog, oldprog);
 	if (ret) {
-		__cls_bpf_delete_prog(prog);
+		cls_bpf_delete_prog(tp, prog);
 		return ret;
 	}
-
-	if (!tc_in_hw(prog->gen_flags))
-		prog->gen_flags |= TCA_CLS_FLAGS_NOT_IN_HW;
 
 	if (oldprog) {
 		list_replace_rcu(&oldprog->link, &prog->link);
 		tcf_unbind_filter(tp, &oldprog->res);
-		call_rcu(&oldprog->rcu, cls_bpf_delete_prog_rcu);
+		call_rcu(&oldprog->rcu, __cls_bpf_delete_prog);
 	} else {
 		list_add_rcu(&prog->link, &head->plist);
 	}
@@ -558,17 +559,12 @@ static int cls_bpf_dump_bpf_info(const struct cls_bpf_prog *prog,
 static int cls_bpf_dump_ebpf_info(const struct cls_bpf_prog *prog,
 				  struct sk_buff *skb)
 {
-	struct nlattr *nla;
+	if (nla_put_u32(skb, TCA_BPF_FD, prog->bpf_fd))
+		return -EMSGSIZE;
 
 	if (prog->bpf_name &&
 	    nla_put_string(skb, TCA_BPF_NAME, prog->bpf_name))
 		return -EMSGSIZE;
-
-	nla = nla_reserve(skb, TCA_BPF_TAG, sizeof(prog->filter->tag));
-	if (nla == NULL)
-		return -EMSGSIZE;
-
-	memcpy(nla_data(nla), prog->filter->tag, nla_len(nla));
 
 	return 0;
 }

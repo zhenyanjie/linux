@@ -327,7 +327,7 @@ static void gnttab_handle_deferred(unsigned long unused)
 			if (entry->page) {
 				pr_debug("freeing g.e. %#x (pfn %#lx)\n",
 					 entry->ref, page_to_pfn(entry->page));
-				__free_page(entry->page);
+				put_page(entry->page);
 			} else
 				pr_info("freeing g.e. %#x\n", entry->ref);
 			kfree(entry);
@@ -383,7 +383,7 @@ void gnttab_end_foreign_access(grant_ref_t ref, int readonly,
 	if (gnttab_end_foreign_access_ref(ref, readonly)) {
 		put_free_entry(ref);
 		if (page != 0)
-			free_page(page);
+			put_page(virt_to_page(page));
 	} else
 		gnttab_add_deferred(ref, readonly,
 				    page ? virt_to_page(page) : NULL);
@@ -1146,12 +1146,12 @@ EXPORT_SYMBOL_GPL(gnttab_init);
 
 static int __gnttab_init(void)
 {
-	if (!xen_domain())
-		return -ENODEV;
-
 	/* Delay grant-table initialization in the PV on HVM case */
-	if (xen_hvm_domain() && !xen_pvh_domain())
+	if (xen_hvm_domain())
 		return 0;
+
+	if (!xen_pv_domain())
+		return -ENODEV;
 
 	return gnttab_init();
 }

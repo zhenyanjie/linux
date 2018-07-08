@@ -119,31 +119,6 @@ static inline bool fb_base_is_valid(void)
 	return false;
 }
 
-#define efifb_attr_decl(name, fmt)					\
-static ssize_t name##_show(struct device *dev,				\
-			   struct device_attribute *attr,		\
-			   char *buf)					\
-{									\
-	return sprintf(buf, fmt "\n", (screen_info.lfb_##name));	\
-}									\
-static DEVICE_ATTR_RO(name)
-
-efifb_attr_decl(base, "0x%x");
-efifb_attr_decl(linelength, "%u");
-efifb_attr_decl(height, "%u");
-efifb_attr_decl(width, "%u");
-efifb_attr_decl(depth, "%u");
-
-static struct attribute *efifb_attrs[] = {
-	&dev_attr_base.attr,
-	&dev_attr_linelength.attr,
-	&dev_attr_width.attr,
-	&dev_attr_height.attr,
-	&dev_attr_depth.attr,
-	NULL
-};
-ATTRIBUTE_GROUPS(efifb);
-
 static bool pci_dev_disabled;	/* FB base matches BAR of a disabled device */
 
 static int efifb_probe(struct platform_device *dev)
@@ -233,13 +208,14 @@ static int efifb_probe(struct platform_device *dev)
 	} else {
 		/* We cannot make this fatal. Sometimes this comes from magic
 		   spaces our resource handlers simply don't know about */
-		pr_warn("efifb: cannot reserve video memory at 0x%lx\n",
+		printk(KERN_WARNING
+		       "efifb: cannot reserve video memory at 0x%lx\n",
 			efifb_fix.smem_start);
 	}
 
 	info = framebuffer_alloc(sizeof(u32) * 16, &dev->dev);
 	if (!info) {
-		pr_err("efifb: cannot allocate framebuffer\n");
+		printk(KERN_ERR "efifb: cannot allocate framebuffer\n");
 		err = -ENOMEM;
 		goto err_release_mem;
 	}
@@ -257,15 +233,16 @@ static int efifb_probe(struct platform_device *dev)
 
 	info->screen_base = ioremap_wc(efifb_fix.smem_start, efifb_fix.smem_len);
 	if (!info->screen_base) {
-		pr_err("efifb: abort, cannot ioremap video memory 0x%x @ 0x%lx\n",
+		printk(KERN_ERR "efifb: abort, cannot ioremap video memory "
+				"0x%x @ 0x%lx\n",
 			efifb_fix.smem_len, efifb_fix.smem_start);
 		err = -EIO;
 		goto err_release_fb;
 	}
 
-	pr_info("efifb: framebuffer at 0x%lx, using %dk, total %dk\n",
+	printk(KERN_INFO "efifb: framebuffer at 0x%lx, using %dk, total %dk\n",
 	       efifb_fix.smem_start, size_remap/1024, size_total/1024);
-	pr_info("efifb: mode is %dx%dx%d, linelength=%d, pages=%d\n",
+	printk(KERN_INFO "efifb: mode is %dx%dx%d, linelength=%d, pages=%d\n",
 	       efifb_defined.xres, efifb_defined.yres,
 	       efifb_defined.bits_per_pixel, efifb_fix.line_length,
 	       screen_info.pages);
@@ -273,7 +250,7 @@ static int efifb_probe(struct platform_device *dev)
 	efifb_defined.xres_virtual = efifb_defined.xres;
 	efifb_defined.yres_virtual = efifb_fix.smem_len /
 					efifb_fix.line_length;
-	pr_info("efifb: scrolling: redraw\n");
+	printk(KERN_INFO "efifb: scrolling: redraw\n");
 	efifb_defined.yres_virtual = efifb_defined.yres;
 
 	/* some dummy values for timing to make fbset happy */
@@ -291,7 +268,7 @@ static int efifb_probe(struct platform_device *dev)
 	efifb_defined.transp.offset = screen_info.rsvd_pos;
 	efifb_defined.transp.length = screen_info.rsvd_size;
 
-	pr_info("efifb: %s: "
+	printk(KERN_INFO "efifb: %s: "
 	       "size=%d:%d:%d:%d, shift=%d:%d:%d:%d\n",
 	       "Truecolor",
 	       screen_info.rsvd_size,
@@ -311,19 +288,12 @@ static int efifb_probe(struct platform_device *dev)
 	info->fix = efifb_fix;
 	info->flags = FBINFO_FLAG_DEFAULT | FBINFO_MISC_FIRMWARE;
 
-	err = sysfs_create_groups(&dev->dev.kobj, efifb_groups);
-	if (err) {
-		pr_err("efifb: cannot add sysfs attrs\n");
+	if ((err = fb_alloc_cmap(&info->cmap, 256, 0)) < 0) {
+		printk(KERN_ERR "efifb: cannot allocate colormap\n");
 		goto err_unmap;
 	}
-	err = fb_alloc_cmap(&info->cmap, 256, 0);
-	if (err < 0) {
-		pr_err("efifb: cannot allocate colormap\n");
-		goto err_groups;
-	}
-	err = register_framebuffer(info);
-	if (err < 0) {
-		pr_err("efifb: cannot register framebuffer\n");
+	if ((err = register_framebuffer(info)) < 0) {
+		printk(KERN_ERR "efifb: cannot register framebuffer\n");
 		goto err_fb_dealoc;
 	}
 	fb_info(info, "%s frame buffer device\n", info->fix.id);
@@ -331,8 +301,6 @@ static int efifb_probe(struct platform_device *dev)
 
 err_fb_dealoc:
 	fb_dealloc_cmap(&info->cmap);
-err_groups:
-	sysfs_remove_groups(&dev->dev.kobj, efifb_groups);
 err_unmap:
 	iounmap(info->screen_base);
 err_release_fb:
@@ -348,7 +316,6 @@ static int efifb_remove(struct platform_device *pdev)
 	struct fb_info *info = platform_get_drvdata(pdev);
 
 	unregister_framebuffer(info);
-	sysfs_remove_groups(&pdev->dev.kobj, efifb_groups);
 	framebuffer_release(info);
 
 	return 0;

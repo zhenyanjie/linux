@@ -24,7 +24,6 @@
 #include <asm/machdep.h>
 #include <asm/iommu.h>
 #include <asm/ppc-pci.h>
-#include <asm/isa-bridge.h>
 
 #include "maple.h"
 

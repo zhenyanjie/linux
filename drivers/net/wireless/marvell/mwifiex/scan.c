@@ -827,6 +827,7 @@ mwifiex_config_scan(struct mwifiex_private *priv,
 	u32 num_probes;
 	u32 ssid_len;
 	u32 chan_idx;
+	u32 chan_num;
 	u32 scan_type;
 	u16 scan_dur;
 	u8 channel;
@@ -1104,12 +1105,13 @@ mwifiex_config_scan(struct mwifiex_private *priv,
 			mwifiex_dbg(adapter, INFO,
 				    "info: Scan: Scanning current channel only\n");
 		}
+		chan_num = chan_idx;
 	} else {
 		mwifiex_dbg(adapter, INFO,
 			    "info: Scan: Creating full region channel list\n");
-		mwifiex_scan_create_channel_list(priv, user_scan_in,
-						 scan_chan_list,
-						 *filtered_scan);
+		chan_num = mwifiex_scan_create_channel_list(priv, user_scan_in,
+							    scan_chan_list,
+							    *filtered_scan);
 	}
 
 }
@@ -1669,10 +1671,6 @@ static int mwifiex_save_hidden_ssid_channels(struct mwifiex_private *priv,
 	}
 
 done:
-	/* beacon_ie buffer was allocated in function
-	 * mwifiex_fill_new_bss_desc(). Free it now.
-	 */
-	kfree(bss_desc->beacon_buf);
 	kfree(bss_desc);
 	return 0;
 }
@@ -2481,6 +2479,12 @@ mwifiex_update_chan_statistics(struct mwifiex_private *priv,
 					      sizeof(struct mwifiex_chan_stats);
 
 	for (i = 0 ; i < num_chan; i++) {
+		if (adapter->survey_idx >= adapter->num_in_chan_stats) {
+			mwifiex_dbg(adapter, WARN,
+				    "FW reported too many channel results (max %d)\n",
+				    adapter->num_in_chan_stats);
+			return;
+		}
 		chan_stats.chan_num = fw_chan_stats->chan_num;
 		chan_stats.bandcfg = fw_chan_stats->bandcfg;
 		chan_stats.flags = fw_chan_stats->flags;

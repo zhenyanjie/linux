@@ -441,38 +441,30 @@ static int fnic_queuecommand_lck(struct scsi_cmnd *sc, void (*done)(struct scsi_
 	unsigned long ptr;
 	spinlock_t *io_lock = NULL;
 	int io_lock_acquired = 0;
-	struct fc_rport_libfc_priv *rp;
 
 	if (unlikely(fnic_chk_state_flags_locked(fnic, FNIC_FLAGS_IO_BLOCKED)))
 		return SCSI_MLQUEUE_HOST_BUSY;
 
 	rport = starget_to_rport(scsi_target(sc->device));
-	if (!rport) {
-		FNIC_SCSI_DBG(KERN_DEBUG, fnic->lport->host,
-				"returning DID_NO_CONNECT for IO as rport is NULL\n");
-		sc->result = DID_NO_CONNECT << 16;
-		done(sc);
-		return 0;
-	}
-
 	ret = fc_remote_port_chkready(rport);
 	if (ret) {
-		FNIC_SCSI_DBG(KERN_DEBUG, fnic->lport->host,
-				"rport is not ready\n");
 		atomic64_inc(&fnic_stats->misc_stats.rport_not_ready);
 		sc->result = ret;
 		done(sc);
 		return 0;
 	}
 
-	rp = rport->dd_data;
-	if (!rp || rp->rp_state != RPORT_ST_READY) {
-		FNIC_SCSI_DBG(KERN_DEBUG, fnic->lport->host,
+	if (rport) {
+		struct fc_rport_libfc_priv *rp = rport->dd_data;
+
+		if (!rp || rp->rp_state != RPORT_ST_READY) {
+			FNIC_SCSI_DBG(KERN_DEBUG, fnic->lport->host,
 				"returning DID_NO_CONNECT for IO as rport is removed\n");
-		atomic64_inc(&fnic_stats->misc_stats.rport_not_ready);
-		sc->result = DID_NO_CONNECT<<16;
-		done(sc);
-		return 0;
+			atomic64_inc(&fnic_stats->misc_stats.rport_not_ready);
+			sc->result = DID_NO_CONNECT<<16;
+			done(sc);
+			return 0;
+		}
 	}
 
 	if (lp->state != LPORT_ST_READY || !(lp->link_up))
@@ -1135,12 +1127,6 @@ static void fnic_fcpio_itmf_cmpl_handler(struct fnic *fnic,
 		else
 			CMD_ABTS_STATUS(sc) = hdr_status;
 
-		atomic64_dec(&fnic_stats->io_stats.active_ios);
-		if (atomic64_read(&fnic->io_cmpl_skip))
-			atomic64_dec(&fnic->io_cmpl_skip);
-		else
-			atomic64_inc(&fnic_stats->io_stats.io_completions);
-
 		if (!(CMD_FLAGS(sc) & (FNIC_IO_ABORTED | FNIC_IO_DONE)))
 			atomic64_inc(&misc_stats->no_icmnd_itmf_cmpls);
 
@@ -1181,6 +1167,11 @@ static void fnic_fcpio_itmf_cmpl_handler(struct fnic *fnic,
 					(((u64)CMD_FLAGS(sc) << 32) |
 					CMD_STATE(sc)));
 				sc->scsi_done(sc);
+				atomic64_dec(&fnic_stats->io_stats.active_ios);
+				if (atomic64_read(&fnic->io_cmpl_skip))
+					atomic64_dec(&fnic->io_cmpl_skip);
+				else
+					atomic64_inc(&fnic_stats->io_stats.io_completions);
 			}
 		}
 
@@ -1970,6 +1961,11 @@ int fnic_abort_cmd(struct scsi_cmnd *sc)
 	/* Call SCSI completion function to complete the IO */
 		sc->result = (DID_ABORT << 16);
 		sc->scsi_done(sc);
+		atomic64_dec(&fnic_stats->io_stats.active_ios);
+		if (atomic64_read(&fnic->io_cmpl_skip))
+			atomic64_dec(&fnic->io_cmpl_skip);
+		else
+			atomic64_inc(&fnic_stats->io_stats.io_completions);
 	}
 
 fnic_abort_cmd_end:
@@ -2551,7 +2547,7 @@ int fnic_reset(struct Scsi_Host *shost)
 	 * Reset local port, this will clean up libFC exchanges,
 	 * reset remote port sessions, and if link is up, begin flogi
 	 */
-	ret = fc_lport_reset(lp);
+	ret = lp->tt.lport_reset(lp);
 
 	FNIC_SCSI_DBG(KERN_DEBUG, fnic->lport->host,
 		      "Returning from fnic reset %s\n",

@@ -862,7 +862,7 @@ static int sh_msiof_transfer_one(struct spi_master *master,
 				break;
 			copy32 = copy_bswap32;
 		} else if (bits <= 16) {
-			if (l & 1)
+			if (l & 3)
 				break;
 			copy32 = copy_wswap32;
 		} else {
@@ -973,16 +973,13 @@ static const struct sh_msiof_chipdata r8a779x_data = {
 };
 
 static const struct of_device_id sh_msiof_match[] = {
+	{ .compatible = "renesas,sh-msiof",        .data = &sh_data },
 	{ .compatible = "renesas,sh-mobile-msiof", .data = &sh_data },
 	{ .compatible = "renesas,msiof-r8a7790",   .data = &r8a779x_data },
 	{ .compatible = "renesas,msiof-r8a7791",   .data = &r8a779x_data },
 	{ .compatible = "renesas,msiof-r8a7792",   .data = &r8a779x_data },
 	{ .compatible = "renesas,msiof-r8a7793",   .data = &r8a779x_data },
 	{ .compatible = "renesas,msiof-r8a7794",   .data = &r8a779x_data },
-	{ .compatible = "renesas,rcar-gen2-msiof", .data = &r8a779x_data },
-	{ .compatible = "renesas,msiof-r8a7796",   .data = &r8a779x_data },
-	{ .compatible = "renesas,rcar-gen3-msiof", .data = &r8a779x_data },
-	{ .compatible = "renesas,sh-msiof",        .data = &sh_data }, /* Deprecated */
 	{},
 };
 MODULE_DEVICE_TABLE(of, sh_msiof_match);
@@ -1164,8 +1161,10 @@ static int sh_msiof_spi_probe(struct platform_device *pdev)
 	int ret;
 
 	master = spi_alloc_master(&pdev->dev, sizeof(struct sh_msiof_spi_priv));
-	if (master == NULL)
+	if (master == NULL) {
+		dev_err(&pdev->dev, "failed to allocate spi master\n");
 		return -ENOMEM;
+	}
 
 	p = spi_master_get_devdata(master);
 

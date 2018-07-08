@@ -16,7 +16,6 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_encoder.h>
 
 struct backlight_device;
 struct shmob_drm_device;

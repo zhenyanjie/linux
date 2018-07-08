@@ -253,13 +253,14 @@ static struct net_device *__ip_tunnel_create(struct net *net,
 	struct net_device *dev;
 	char name[IFNAMSIZ];
 
-	if (parms->name[0])
-		strlcpy(name, parms->name, IFNAMSIZ);
-	else {
-		if (strlen(ops->kind) > (IFNAMSIZ - 3)) {
-			err = -E2BIG;
+	err = -E2BIG;
+	if (parms->name[0]) {
+		if (!dev_valid_name(parms->name))
 			goto failed;
-		}
+		strlcpy(name, parms->name, IFNAMSIZ);
+	} else {
+		if (strlen(ops->kind) > (IFNAMSIZ - 3))
+			goto failed;
 		strlcpy(name, ops->kind, IFNAMSIZ);
 		strncat(name, "%d", 2);
 	}
@@ -346,8 +347,8 @@ static int ip_tunnel_bind_dev(struct net_device *dev)
 	dev->needed_headroom = t_hlen + hlen;
 	mtu -= (dev->hard_header_len + t_hlen);
 
-	if (mtu < 68)
-		mtu = 68;
+	if (mtu < IPV4_MIN_MTU)
+		mtu = IPV4_MIN_MTU;
 
 	return mtu;
 }
@@ -358,7 +359,6 @@ static struct ip_tunnel *ip_tunnel_create(struct net *net,
 {
 	struct ip_tunnel *nt;
 	struct net_device *dev;
-	int t_hlen;
 
 	BUG_ON(!itn->fb_tunnel_dev);
 	dev = __ip_tunnel_create(net, itn->fb_tunnel_dev->rtnl_link_ops, parms);
@@ -368,9 +368,6 @@ static struct ip_tunnel *ip_tunnel_create(struct net *net,
 	dev->mtu = ip_tunnel_bind_dev(dev);
 
 	nt = netdev_priv(dev);
-	t_hlen = nt->hlen + sizeof(struct iphdr);
-	dev->min_mtu = ETH_MIN_MTU;
-	dev->max_mtu = 0xFFF8 - dev->hard_header_len - t_hlen;
 	ip_tunnel_add(itn, nt);
 	return nt;
 }
@@ -613,8 +610,8 @@ void ip_md_tunnel_xmit(struct sk_buff *skb, struct net_device *dev, u8 proto)
 		ip_rt_put(rt);
 		goto tx_dropped;
 	}
-	iptunnel_xmit(NULL, rt, skb, fl4.saddr, fl4.daddr, proto, key->tos,
-		      key->ttl, df, !net_eq(tunnel->net, dev_net(dev)));
+	iptunnel_xmit(NULL, rt, skb, fl4.saddr, fl4.daddr, proto, tos, ttl,
+		      df, !net_eq(tunnel->net, dev_net(dev)));
 	return;
 tx_error:
 	dev->stats.tx_errors++;
@@ -933,7 +930,7 @@ int __ip_tunnel_change_mtu(struct net_device *dev, int new_mtu, bool strict)
 	int t_hlen = tunnel->hlen + sizeof(struct iphdr);
 	int max_mtu = 0xFFF8 - dev->hard_header_len - t_hlen;
 
-	if (new_mtu < ETH_MIN_MTU)
+	if (new_mtu < 68)
 		return -EINVAL;
 
 	if (new_mtu > max_mtu) {
@@ -961,6 +958,7 @@ static void ip_tunnel_dev_free(struct net_device *dev)
 	gro_cells_destroy(&tunnel->gro_cells);
 	dst_cache_destroy(&tunnel->dst_cache);
 	free_percpu(dev->tstats);
+	free_netdev(dev);
 }
 
 void ip_tunnel_dellink(struct net_device *dev, struct list_head *head)
@@ -993,7 +991,7 @@ int ip_tunnel_get_iflink(const struct net_device *dev)
 }
 EXPORT_SYMBOL(ip_tunnel_get_iflink);
 
-int ip_tunnel_init_net(struct net *net, unsigned int ip_tnl_net_id,
+int ip_tunnel_init_net(struct net *net, int ip_tnl_net_id,
 				  struct rtnl_link_ops *ops, char *devname)
 {
 	struct ip_tunnel_net *itn = net_generic(net, ip_tnl_net_id);
@@ -1147,8 +1145,7 @@ int ip_tunnel_init(struct net_device *dev)
 	struct iphdr *iph = &tunnel->parms.iph;
 	int err;
 
-	dev->needs_free_netdev = true;
-	dev->priv_destructor = ip_tunnel_dev_free;
+	dev->destructor	= ip_tunnel_dev_free;
 	dev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
 	if (!dev->tstats)
 		return -ENOMEM;
@@ -1196,7 +1193,7 @@ void ip_tunnel_uninit(struct net_device *dev)
 EXPORT_SYMBOL_GPL(ip_tunnel_uninit);
 
 /* Do least required initialization, rest of init is done in tunnel_init call */
-void ip_tunnel_setup(struct net_device *dev, unsigned int net_id)
+void ip_tunnel_setup(struct net_device *dev, int net_id)
 {
 	struct ip_tunnel *tunnel = netdev_priv(dev);
 	tunnel->ip_tnl_net_id = net_id;

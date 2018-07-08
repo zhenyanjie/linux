@@ -309,7 +309,9 @@ static void cadet_handler(unsigned long data)
 	/*
 	 * Clean up and exit
 	 */
-	setup_timer(&dev->readtimer, cadet_handler, data);
+	init_timer(&dev->readtimer);
+	dev->readtimer.function = cadet_handler;
+	dev->readtimer.data = data;
 	dev->readtimer.expires = jiffies + msecs_to_jiffies(50);
 	add_timer(&dev->readtimer);
 }
@@ -318,7 +320,9 @@ static void cadet_start_rds(struct cadet *dev)
 {
 	dev->rdsstat = 1;
 	outb(0x80, dev->io);        /* Select RDS fifo */
-	setup_timer(&dev->readtimer, cadet_handler, (unsigned long)dev);
+	init_timer(&dev->readtimer);
+	dev->readtimer.function = cadet_handler;
+	dev->readtimer.data = (unsigned long)dev;
 	dev->readtimer.expires = jiffies + msecs_to_jiffies(50);
 	add_timer(&dev->readtimer);
 }

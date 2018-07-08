@@ -143,13 +143,13 @@ static ssize_t target_core_item_dbroot_store(struct config_item *item,
 		pr_err("db_root: cannot open: %s\n", db_root_stage);
 		return -EINVAL;
 	}
-	if (!S_ISDIR(file_inode(fp)->i_mode)) {
-		filp_close(fp, NULL);
+	if (!S_ISDIR(fp->f_inode->i_mode)) {
+		filp_close(fp, 0);
 		mutex_unlock(&g_tf_lock);
 		pr_err("db_root: not a directory: %s\n", db_root_stage);
 		return -EINVAL;
 	}
-	filp_close(fp, NULL);
+	filp_close(fp, 0);
 
 	strncpy(db_root, db_root_stage, read_bytes);
 
@@ -419,10 +419,6 @@ static int target_fabric_tf_ops_check(const struct target_core_fabric_ops *tfo)
 	}
 	if (!tfo->aborted_task) {
 		pr_err("Missing tfo->aborted_task()\n");
-		return -EINVAL;
-	}
-	if (!tfo->check_stop_free) {
-		pr_err("Missing tfo->check_stop_free()\n");
 		return -EINVAL;
 	}
 	/*
@@ -2392,7 +2388,7 @@ static ssize_t target_tg_pt_gp_alua_access_state_show(struct config_item *item,
 		char *page)
 {
 	return sprintf(page, "%d\n",
-		       to_tg_pt_gp(item)->tg_pt_gp_alua_access_state);
+		atomic_read(&to_tg_pt_gp(item)->tg_pt_gp_alua_access_state));
 }
 
 static ssize_t target_tg_pt_gp_alua_access_state_store(struct config_item *item,

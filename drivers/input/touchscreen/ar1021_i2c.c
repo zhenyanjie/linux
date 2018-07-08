@@ -127,6 +127,7 @@ static int ar1021_i2c_probe(struct i2c_client *client,
 		return error;
 	}
 
+	i2c_set_clientdata(client, ar1021);
 	return 0;
 }
 
@@ -151,7 +152,7 @@ static int __maybe_unused ar1021_i2c_resume(struct device *dev)
 static SIMPLE_DEV_PM_OPS(ar1021_i2c_pm, ar1021_i2c_suspend, ar1021_i2c_resume);
 
 static const struct i2c_device_id ar1021_i2c_id[] = {
-	{ "MICROCHIP_AR1021_I2C", 0 },
+	{ "ar1021", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(i2c, ar1021_i2c_id);

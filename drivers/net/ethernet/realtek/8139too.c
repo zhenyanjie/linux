@@ -653,8 +653,9 @@ static int rtl8139_poll(struct napi_struct *napi, int budget);
 static irqreturn_t rtl8139_interrupt (int irq, void *dev_instance);
 static int rtl8139_close (struct net_device *dev);
 static int netdev_ioctl (struct net_device *dev, struct ifreq *rq, int cmd);
-static void rtl8139_get_stats64(struct net_device *dev,
-				struct rtnl_link_stats64 *stats);
+static struct rtnl_link_stats64 *rtl8139_get_stats64(struct net_device *dev,
+						    struct rtnl_link_stats64
+						    *stats);
 static void rtl8139_set_rx_mode (struct net_device *dev);
 static void __set_rx_mode (struct net_device *dev);
 static void rtl8139_hw_start (struct net_device *dev);
@@ -923,10 +924,19 @@ static int rtl8139_set_features(struct net_device *dev, netdev_features_t featur
 	return 0;
 }
 
+static int rtl8139_change_mtu(struct net_device *dev, int new_mtu)
+{
+	if (new_mtu < 68 || new_mtu > MAX_ETH_DATA_SIZE)
+		return -EINVAL;
+	dev->mtu = new_mtu;
+	return 0;
+}
+
 static const struct net_device_ops rtl8139_netdev_ops = {
 	.ndo_open		= rtl8139_open,
 	.ndo_stop		= rtl8139_close,
 	.ndo_get_stats64	= rtl8139_get_stats64,
+	.ndo_change_mtu		= rtl8139_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address 	= rtl8139_set_mac_address,
 	.ndo_start_xmit		= rtl8139_start_xmit,
@@ -1011,10 +1021,6 @@ static int rtl8139_init_one(struct pci_dev *pdev,
 
 	dev->hw_features |= NETIF_F_RXALL;
 	dev->hw_features |= NETIF_F_RXFCS;
-
-	/* MTU range: 68 - 1770 */
-	dev->min_mtu = ETH_MIN_MTU;
-	dev->max_mtu = MAX_ETH_DATA_SIZE;
 
 	/* tp zeroed and aligned in alloc_etherdev */
 	tp = netdev_priv(dev);
@@ -2135,10 +2141,14 @@ static int rtl8139_poll(struct napi_struct *napi, int budget)
 	if (likely(RTL_R16(IntrStatus) & RxAckBits))
 		work_done += rtl8139_rx(dev, tp, budget);
 
-	if (work_done < budget && napi_complete_done(napi, work_done)) {
+	if (work_done < budget) {
 		unsigned long flags;
-
+		/*
+		 * Order is important since data can get interrupted
+		 * again when we think we are done.
+		 */
 		spin_lock_irqsave(&tp->lock, flags);
+		__napi_complete(napi);
 		RTL_W16_F(IntrMask, rtl8139_intr_mask);
 		spin_unlock_irqrestore(&tp->lock, flags);
 	}
@@ -2223,7 +2233,7 @@ static void rtl8139_poll_controller(struct net_device *dev)
 	struct rtl8139_private *tp = netdev_priv(dev);
 	const int irq = tp->pci_dev->irq;
 
-	disable_irq(irq);
+	disable_irq_nosync(irq);
 	rtl8139_interrupt(irq, dev);
 	enable_irq(irq);
 }
@@ -2511,7 +2521,7 @@ static int netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 }
 
 
-static void
+static struct rtnl_link_stats64 *
 rtl8139_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 {
 	struct rtl8139_private *tp = netdev_priv(dev);
@@ -2539,6 +2549,8 @@ rtl8139_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 		stats->tx_packets = tp->tx_stats.packets;
 		stats->tx_bytes = tp->tx_stats.bytes;
 	} while (u64_stats_fetch_retry_irq(&tp->tx_stats.syncp, start));
+
+	return stats;
 }
 
 /* Set or clear the multicast filter for this adaptor.

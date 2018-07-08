@@ -82,7 +82,7 @@ int native_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (domain == NULL)
 		return -ENOSYS;
 
-	return msi_domain_alloc_irqs(domain, &dev->dev, nvec);
+	return pci_msi_domain_alloc_irqs(domain, dev, nvec, type);
 }
 
 void native_teardown_msi_irq(unsigned int irq)

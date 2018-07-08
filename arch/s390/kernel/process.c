@@ -11,9 +11,6 @@
 #include <linux/compiler.h>
 #include <linux/cpu.h>
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task.h>
-#include <linux/sched/task_stack.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/elfcore.h>
@@ -26,7 +23,7 @@
 #include <linux/compat.h>
 #include <linux/kprobes.h>
 #include <linux/random.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/init_task.h>
 #include <asm/io.h>
 #include <asm/processor.h>
@@ -73,8 +70,6 @@ extern void kernel_thread_starter(void);
  */
 void exit_thread(struct task_struct *tsk)
 {
-	if (tsk == current)
-		exit_thread_runtime_instr();
 }
 
 void flush_thread(void)
@@ -87,6 +82,7 @@ void release_thread(struct task_struct *dead_task)
 
 void arch_release_task_struct(struct task_struct *tsk)
 {
+	runtime_instr_release(tsk);
 }
 
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
@@ -103,9 +99,10 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 	return 0;
 }
 
-int copy_thread_tls(unsigned long clone_flags, unsigned long new_stackp,
-		    unsigned long arg, struct task_struct *p, unsigned long tls)
+int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
+		unsigned long arg, struct task_struct *p)
 {
+	struct thread_info *ti;
 	struct fake_frame
 	{
 		struct stack_frame sf;
@@ -122,12 +119,11 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long new_stackp,
 	memset(&p->thread.per_user, 0, sizeof(p->thread.per_user));
 	memset(&p->thread.per_event, 0, sizeof(p->thread.per_event));
 	clear_tsk_thread_flag(p, TIF_SINGLE_STEP);
+	p->thread.per_flags = 0;
 	/* Initialize per thread user and system timer values */
-	p->thread.user_timer = 0;
-	p->thread.guest_timer = 0;
-	p->thread.system_timer = 0;
-	p->thread.hardirq_timer = 0;
-	p->thread.softirq_timer = 0;
+	ti = task_thread_info(p);
+	ti->user_timer = 0;
+	ti->system_timer = 0;
 
 	frame->sf.back_chain = 0;
 	/* new return point is ret_from_fork */
@@ -162,6 +158,7 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long new_stackp,
 
 	/* Set a new TLS ?  */
 	if (clone_flags & CLONE_SETTLS) {
+		unsigned long tls = frame->childregs.gprs[6];
 		if (is_compat_task()) {
 			p->thread.acrs[0] = (unsigned int)tls;
 		} else {
@@ -238,17 +235,4 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 
 	ret = PAGE_ALIGN(mm->brk + brk_rnd());
 	return (ret > mm->brk) ? ret : mm->brk;
-}
-
-void set_fs_fixup(void)
-{
-	struct pt_regs *regs = current_pt_regs();
-	static bool warned;
-
-	set_fs(USER_DS);
-	if (warned)
-		return;
-	WARN(1, "Unbalanced set_fs - int code: 0x%x\n", regs->int_code);
-	show_registers(regs);
-	warned = true;
 }

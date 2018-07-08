@@ -209,6 +209,14 @@ static void reopen_session(struct ceph_mon_client *monc)
 	__open_session(monc);
 }
 
+static void un_backoff(struct ceph_mon_client *monc)
+{
+	monc->hunt_mult /= 2; /* reduce by 50% */
+	if (monc->hunt_mult < 1)
+		monc->hunt_mult = 1;
+	dout("%s hunt_mult now %d\n", __func__, monc->hunt_mult);
+}
+
 /*
  * Reschedule delayed work timer.
  */
@@ -955,6 +963,7 @@ static void delayed_work(struct work_struct *work)
 		if (!monc->hunting) {
 			ceph_con_keepalive(&monc->con);
 			__validate_auth(monc);
+			un_backoff(monc);
 		}
 
 		if (is_auth) {
@@ -1028,21 +1037,21 @@ int ceph_monc_init(struct ceph_mon_client *monc, struct ceph_client *cl)
 	err = -ENOMEM;
 	monc->m_subscribe_ack = ceph_msg_new(CEPH_MSG_MON_SUBSCRIBE_ACK,
 				     sizeof(struct ceph_mon_subscribe_ack),
-				     GFP_KERNEL, true);
+				     GFP_NOFS, true);
 	if (!monc->m_subscribe_ack)
 		goto out_auth;
 
-	monc->m_subscribe = ceph_msg_new(CEPH_MSG_MON_SUBSCRIBE, 128,
-					 GFP_KERNEL, true);
+	monc->m_subscribe = ceph_msg_new(CEPH_MSG_MON_SUBSCRIBE, 128, GFP_NOFS,
+					 true);
 	if (!monc->m_subscribe)
 		goto out_subscribe_ack;
 
-	monc->m_auth_reply = ceph_msg_new(CEPH_MSG_AUTH_REPLY, 4096,
-					  GFP_KERNEL, true);
+	monc->m_auth_reply = ceph_msg_new(CEPH_MSG_AUTH_REPLY, 4096, GFP_NOFS,
+					  true);
 	if (!monc->m_auth_reply)
 		goto out_subscribe;
 
-	monc->m_auth = ceph_msg_new(CEPH_MSG_AUTH, 4096, GFP_KERNEL, true);
+	monc->m_auth = ceph_msg_new(CEPH_MSG_AUTH, 4096, GFP_NOFS, true);
 	monc->pending_auth = 0;
 	if (!monc->m_auth)
 		goto out_auth_reply;
@@ -1114,9 +1123,8 @@ static void finish_hunting(struct ceph_mon_client *monc)
 		dout("%s found mon%d\n", __func__, monc->cur_mon);
 		monc->hunting = false;
 		monc->had_a_connection = true;
-		monc->hunt_mult /= 2; /* reduce by 50% */
-		if (monc->hunt_mult < 1)
-			monc->hunt_mult = 1;
+		un_backoff(monc);
+		__schedule_delayed(monc);
 	}
 }
 

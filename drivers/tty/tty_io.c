@@ -69,8 +69,7 @@
 #include <linux/errno.h>
 #include <linux/signal.h>
 #include <linux/fcntl.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/task.h>
+#include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
@@ -710,6 +709,14 @@ static void __tty_hangup(struct tty_struct *tty, int exit_session)
 		return;
 	}
 
+	/*
+	 * Some console devices aren't actually hung up for technical and
+	 * historical reasons, which can lead to indefinite interruptible
+	 * sleep in n_tty_read().  The following explicitly tells
+	 * n_tty_read() to abort readers.
+	 */
+	set_bit(TTY_HUPPING, &tty->flags);
+
 	/* inuse_filps is protected by the single tty lock,
 	   this really needs to change if we want to flush the
 	   workqueue with the lock held */
@@ -764,6 +771,7 @@ static void __tty_hangup(struct tty_struct *tty, int exit_session)
 	 * from the ldisc side, which is now guaranteed.
 	 */
 	set_bit(TTY_HUPPED, &tty->flags);
+	clear_bit(TTY_HUPPING, &tty->flags);
 	tty_unlock(tty);
 
 	if (f)
@@ -856,7 +864,7 @@ static void tty_vhangup_session(struct tty_struct *tty)
 
 int tty_hung_up_p(struct file *filp)
 {
-	return (filp && filp->f_op == &hung_up_tty_fops);
+	return (filp->f_op == &hung_up_tty_fops);
 }
 
 EXPORT_SYMBOL(tty_hung_up_p);
@@ -1544,6 +1552,9 @@ struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx)
 			"%s: %s driver does not set tty->port. This will crash the kernel later. Fix the driver!\n",
 			__func__, tty->driver->name);
 
+	retval = tty_ldisc_lock(tty, 5 * HZ);
+	if (retval)
+		goto err_release_lock;
 	tty->port->itty = tty;
 
 	/*
@@ -1554,6 +1565,7 @@ struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx)
 	retval = tty_ldisc_setup(tty, tty->link);
 	if (retval)
 		goto err_release_tty;
+	tty_ldisc_unlock(tty);
 	/* Return the tty locked so that it cannot vanish under the caller */
 	return tty;
 
@@ -1566,9 +1578,11 @@ err_module_put:
 
 	/* call the tty release_tty routine to clean out this slot */
 err_release_tty:
-	tty_unlock(tty);
+	tty_ldisc_unlock(tty);
 	tty_info_ratelimited(tty, "ldisc open failed (%d), clearing slot %d\n",
 			     retval, idx);
+err_release_lock:
+	tty_unlock(tty);
 	release_tty(tty, idx);
 	return ERR_PTR(retval);
 }
@@ -1697,6 +1711,8 @@ static void release_tty(struct tty_struct *tty, int idx)
 	if (tty->link)
 		tty->link->port->itty = NULL;
 	tty_buffer_cancel_work(tty->port);
+	if (tty->link)
+		tty_buffer_cancel_work(tty->link->port);
 
 	tty_kref_put(tty->link);
 	tty_kref_put(tty);
@@ -1744,37 +1760,6 @@ static int tty_release_checks(struct tty_struct *tty, int idx)
 #endif
 	return 0;
 }
-
-/**
- *	tty_release_struct	-	release a tty struct
- *	@tty: tty device
- *	@idx: index of the tty
- *
- *	Performs the final steps to release and free a tty device. It is
- *	roughly the reverse of tty_init_dev.
- */
-void tty_release_struct(struct tty_struct *tty, int idx)
-{
-	/*
-	 * Ask the line discipline code to release its structures
-	 */
-	tty_ldisc_release(tty);
-
-	/* Wait for pending work before tty destruction commmences */
-	tty_flush_works(tty);
-
-	tty_debug_hangup(tty, "freeing structure\n");
-	/*
-	 * The release_tty function takes care of the details of clearing
-	 * the slots and preserving the termios structure. The tty_unlock_pair
-	 * should be safe as we keep a kref while the tty is locked (so the
-	 * unlock never unlocks a freed tty).
-	 */
-	mutex_lock(&tty_mutex);
-	release_tty(tty, idx);
-	mutex_unlock(&tty_mutex);
-}
-EXPORT_SYMBOL_GPL(tty_release_struct);
 
 /**
  *	tty_release		-	vfs callback for close
@@ -1930,8 +1915,25 @@ int tty_release(struct inode *inode, struct file *filp)
 		return 0;
 
 	tty_debug_hangup(tty, "final close\n");
+	/*
+	 * Ask the line discipline code to release its structures
+	 */
+	tty_ldisc_release(tty);
 
-	tty_release_struct(tty, idx);
+	/* Wait for pending work before tty destruction commmences */
+	tty_flush_works(tty);
+
+	tty_debug_hangup(tty, "freeing structure\n");
+	/*
+	 * The release_tty function takes care of the details of clearing
+	 * the slots and preserving the termios structure. The tty_unlock_pair
+	 * should be safe as we keep a kref while the tty is locked (so the
+	 * unlock never unlocks a freed tty).
+	 */
+	mutex_lock(&tty_mutex);
+	release_tty(tty, idx);
+	mutex_unlock(&tty_mutex);
+
 	return 0;
 }
 
@@ -3168,7 +3170,10 @@ struct tty_struct *alloc_tty_struct(struct tty_driver *driver, int idx)
 
 	kref_init(&tty->kref);
 	tty->magic = TTY_MAGIC;
-	tty_ldisc_init(tty);
+	if (tty_ldisc_init(tty)) {
+		kfree(tty);
+		return NULL;
+	}
 	tty->session = NULL;
 	tty->pgrp = NULL;
 	mutex_init(&tty->legacy_mutex);

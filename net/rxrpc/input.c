@@ -420,7 +420,6 @@ static void rxrpc_input_data(struct rxrpc_call *call, struct sk_buff *skb,
 			     u16 skew)
 {
 	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
-	enum rxrpc_call_state state;
 	unsigned int offset = sizeof(struct rxrpc_wire_header);
 	unsigned int ix;
 	rxrpc_serial_t serial = sp->hdr.serial, ack_serial = 0;
@@ -435,15 +434,14 @@ static void rxrpc_input_data(struct rxrpc_call *call, struct sk_buff *skb,
 	_proto("Rx DATA %%%u { #%u f=%02x }",
 	       sp->hdr.serial, seq, sp->hdr.flags);
 
-	state = READ_ONCE(call->state);
-	if (state >= RXRPC_CALL_COMPLETE)
+	if (call->state >= RXRPC_CALL_COMPLETE)
 		return;
 
 	/* Received data implicitly ACKs all of the request packets we sent
 	 * when we're acting as a client.
 	 */
-	if ((state == RXRPC_CALL_CLIENT_SEND_REQUEST ||
-	     state == RXRPC_CALL_CLIENT_AWAIT_REPLY) &&
+	if ((call->state == RXRPC_CALL_CLIENT_SEND_REQUEST ||
+	     call->state == RXRPC_CALL_CLIENT_AWAIT_REPLY) &&
 	    !rxrpc_receiving_reply(call))
 		return;
 
@@ -483,7 +481,6 @@ next_subpacket:
 			return rxrpc_proto_abort("LSA", call, seq);
 	}
 
-	trace_rxrpc_rx_data(call, seq, serial, flags, annotation);
 	if (before_eq(seq, hard_ack)) {
 		ack = RXRPC_ACK_DUPLICATE;
 		ack_serial = serial;
@@ -777,9 +774,16 @@ static void rxrpc_input_ack(struct rxrpc_call *call, struct sk_buff *skb,
 	summary.ack_reason = (buf.ack.reason < RXRPC_ACK__INVALID ?
 			      buf.ack.reason : RXRPC_ACK__INVALID);
 
-	trace_rxrpc_rx_ack(call, sp->hdr.serial, acked_serial,
-			   first_soft_ack, ntohl(buf.ack.previousPacket),
-			   summary.ack_reason, nr_acks);
+	trace_rxrpc_rx_ack(call, first_soft_ack, summary.ack_reason, nr_acks);
+
+	_proto("Rx ACK %%%u { m=%hu f=#%u p=#%u s=%%%u r=%s n=%u }",
+	       sp->hdr.serial,
+	       ntohs(buf.ack.maxSkew),
+	       first_soft_ack,
+	       ntohl(buf.ack.previousPacket),
+	       acked_serial,
+	       rxrpc_ack_names[summary.ack_reason],
+	       buf.ack.nAcks);
 
 	if (buf.ack.reason == RXRPC_ACK_PING_RESPONSE)
 		rxrpc_input_ping_response(call, skb->tstamp, acked_serial,
@@ -810,7 +814,7 @@ static void rxrpc_input_ack(struct rxrpc_call *call, struct sk_buff *skb,
 		return rxrpc_proto_abort("AK0", call, 0);
 
 	/* Ignore ACKs unless we are or have just been transmitting. */
-	switch (READ_ONCE(call->state)) {
+	switch (call->state) {
 	case RXRPC_CALL_CLIENT_SEND_REQUEST:
 	case RXRPC_CALL_CLIENT_AWAIT_REPLY:
 	case RXRPC_CALL_SERVER_SEND_REPLY:
@@ -936,6 +940,7 @@ static void rxrpc_input_call_packet(struct rxrpc_call *call,
 		break;
 
 	default:
+		_proto("Rx %s %%%u", rxrpc_pkts[sp->hdr.type], sp->hdr.serial);
 		break;
 	}
 
@@ -951,7 +956,7 @@ static void rxrpc_input_call_packet(struct rxrpc_call *call,
 static void rxrpc_input_implicit_end_call(struct rxrpc_connection *conn,
 					  struct rxrpc_call *call)
 {
-	switch (READ_ONCE(call->state)) {
+	switch (call->state) {
 	case RXRPC_CALL_SERVER_AWAIT_ACK:
 		rxrpc_call_completed(call);
 		break;
@@ -965,7 +970,6 @@ static void rxrpc_input_implicit_end_call(struct rxrpc_connection *conn,
 		break;
 	}
 
-	trace_rxrpc_improper_term(call);
 	__rxrpc_disconnect_call(conn, call);
 	rxrpc_notify_socket(call);
 }
@@ -1058,7 +1062,7 @@ void rxrpc_data_ready(struct sock *udp_sk)
 
 	ASSERT(!irqs_disabled());
 
-	skb = skb_recv_udp(udp_sk, 0, 1, &ret);
+	skb = skb_recv_datagram(udp_sk, 0, 1, &ret);
 	if (!skb) {
 		if (ret == -EAGAIN)
 			return;
@@ -1080,9 +1084,10 @@ void rxrpc_data_ready(struct sock *udp_sk)
 
 	__UDP_INC_STATS(&init_net, UDP_MIB_INDATAGRAMS, 0);
 
-	/* The UDP protocol already released all skb resources;
-	 * we are free to add our own data there.
+	/* The socket buffer we have is owned by UDP, with UDP's data all over
+	 * it, but we really want our own data there.
 	 */
+	skb_orphan(skb);
 	sp = rxrpc_skb(skb);
 
 	/* dig out the RxRPC connection details */
@@ -1161,16 +1166,19 @@ void rxrpc_data_ready(struct sock *udp_sk)
 			goto discard_unlock;
 
 		if (sp->hdr.callNumber == chan->last_call) {
-			/* For the previous service call, if completed successfully, we
-			 * discard all further packets.
-			 */
-			if (rxrpc_conn_is_service(conn) &&
-			    (chan->last_type == RXRPC_PACKET_TYPE_ACK ||
-			     sp->hdr.type == RXRPC_PACKET_TYPE_ABORT))
+			if (chan->call ||
+			    sp->hdr.type == RXRPC_PACKET_TYPE_ABORT)
 				goto discard_unlock;
 
-			/* But otherwise we need to retransmit the final packet from
-			 * data cached in the connection record.
+			/* For the previous service call, if completed
+			 * successfully, we discard all further packets.
+			 */
+			if (rxrpc_conn_is_service(conn) &&
+			    chan->last_type == RXRPC_PACKET_TYPE_ACK)
+				goto discard_unlock;
+
+			/* But otherwise we need to retransmit the final packet
+			 * from data cached in the connection record.
 			 */
 			rxrpc_post_packet_to_conn(conn, skb);
 			goto out_unlock;
@@ -1205,7 +1213,6 @@ void rxrpc_data_ready(struct sock *udp_sk)
 			goto reject_packet;
 		}
 		rxrpc_send_ping(call, skb, skew);
-		mutex_unlock(&call->user_mutex);
 	}
 
 	rxrpc_input_call_packet(call, skb, skew);

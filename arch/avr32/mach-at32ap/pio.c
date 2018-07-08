@@ -367,13 +367,13 @@ static void pio_bank_show(struct seq_file *s, struct gpio_chip *chip)
 			(mask & pdsr) ? "hi" : "lo",
 			(mask & pusr) ? "  " : "up");
 		if (ifsr & mask)
-			seq_puts(s, " deglitch");
+			seq_printf(s, " deglitch");
 		if ((osr & mdsr) & mask)
-			seq_puts(s, " open-drain");
+			seq_printf(s, " open-drain");
 		if (imr & mask)
 			seq_printf(s, " irq-%d edge-both",
 				gpio_to_irq(chip->base + i));
-		seq_putc(s, '\n');
+		seq_printf(s, "\n");
 	}
 }
 

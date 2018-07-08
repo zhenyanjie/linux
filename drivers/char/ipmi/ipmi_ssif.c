@@ -174,6 +174,7 @@ enum ssif_stat_indexes {
 };
 
 struct ssif_addr_info {
+	unsigned short addr;
 	struct i2c_board_info binfo;
 	char *adapter_name;
 	int debug;
@@ -408,6 +409,7 @@ static void start_event_fetch(struct ssif_info *ssif_info, unsigned long *flags)
 	msg = ipmi_alloc_smi_msg();
 	if (!msg) {
 		ssif_info->ssif_state = SSIF_NORMAL;
+		ipmi_ssif_unlock_cond(ssif_info, flags);
 		return;
 	}
 
@@ -430,6 +432,7 @@ static void start_recv_msg_fetch(struct ssif_info *ssif_info,
 	msg = ipmi_alloc_smi_msg();
 	if (!msg) {
 		ssif_info->ssif_state = SSIF_NORMAL;
+		ipmi_ssif_unlock_cond(ssif_info, flags);
 		return;
 	}
 
@@ -758,9 +761,14 @@ static void msg_done_handler(struct ssif_info *ssif_info, int result,
 			ssif_info->ssif_state = SSIF_NORMAL;
 			ipmi_ssif_unlock_cond(ssif_info, flags);
 			pr_warn(PFX "Error getting flags: %d %d, %x\n",
-			       result, len, data[2]);
+			       result, len, (len >= 3) ? data[2] : 0);
 		} else if (data[0] != (IPMI_NETFN_APP_REQUEST | 1) << 2
 			   || data[1] != IPMI_GET_MSG_FLAGS_CMD) {
+			/*
+			 * Don't abort here, maybe it was a queued
+			 * response to a previous command.
+			 */
+			ipmi_ssif_unlock_cond(ssif_info, flags);
 			pr_warn(PFX "Invalid response getting flags: %x %x\n",
 				data[0], data[1]);
 		} else {
@@ -775,7 +783,7 @@ static void msg_done_handler(struct ssif_info *ssif_info, int result,
 		if ((result < 0) || (len < 3) || (data[2] != 0)) {
 			/* Error clearing flags */
 			pr_warn(PFX "Error clearing flags: %d %d, %x\n",
-			       result, len, data[2]);
+			       result, len, (len >= 3) ? data[2] : 0);
 		} else if (data[0] != (IPMI_NETFN_APP_REQUEST | 1) << 2
 			   || data[1] != IPMI_CLEAR_MSG_FLAGS_CMD) {
 			pr_warn(PFX "Invalid response clearing flags: %x %x\n",
@@ -1155,6 +1163,10 @@ static bool ssif_dbg_probe;
 module_param_named(dbg_probe, ssif_dbg_probe, bool, 0);
 MODULE_PARM_DESC(dbg_probe, "Enable debugging of probing of adapters.");
 
+static int use_thread;
+module_param(use_thread, int, 0);
+MODULE_PARM_DESC(use_thread, "Use the thread interface.");
+
 static bool ssif_tryacpi = true;
 module_param_named(tryacpi, ssif_tryacpi, bool, 0);
 MODULE_PARM_DESC(tryacpi, "Setting this to zero will disable the default scan of the interfaces identified via ACPI");
@@ -1402,34 +1414,6 @@ static bool check_acpi(struct ssif_info *ssif_info, struct device *dev)
 	return false;
 }
 
-static int find_slave_address(struct i2c_client *client, int slave_addr)
-{
-	struct ssif_addr_info *info;
-
-	if (slave_addr)
-		return slave_addr;
-
-	/*
-	 * Came in without a slave address, search around to see if
-	 * the other sources have a slave address.  This lets us pick
-	 * up an SMBIOS slave address when using ACPI.
-	 */
-	list_for_each_entry(info, &ssif_infos, link) {
-		if (info->binfo.addr != client->addr)
-			continue;
-		if (info->adapter_name && client->adapter->name &&
-		    strcmp_nospace(info->adapter_name,
-				   client->adapter->name))
-			continue;
-		if (info->slave_addr) {
-			slave_addr = info->slave_addr;
-			break;
-		}
-	}
-
-	return slave_addr;
-}
-
 /*
  * Global enables we care about.
  */
@@ -1471,8 +1455,6 @@ static int ssif_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			slave_addr = addr_info->slave_addr;
 		}
 	}
-
-	slave_addr = find_slave_address(client, slave_addr);
 
 	pr_info(PFX "Trying %s-specified SSIF interface at i2c address 0x%x, adapter %s, slave address 0x%x\n",
 	       ipmi_addr_src_to_str(ssif_info->addr_source),
@@ -1962,7 +1944,7 @@ static int decode_dmi(const struct dmi_device *dmi_dev)
 		slave_addr = data[6];
 	}
 
-	return new_ssif_client(myaddr, NULL, 0, slave_addr, SI_SMBIOS);
+	return new_ssif_client(myaddr, NULL, 0, 0, SI_SMBIOS);
 }
 
 static void dmi_iterator(void)

@@ -2,7 +2,6 @@
 #define _UAPI_XT_HASHLIMIT_H
 
 #include <linux/types.h>
-#include <linux/limits.h>
 #include <linux/if.h>
 
 /* timings are in milliseconds. */

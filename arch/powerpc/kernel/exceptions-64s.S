@@ -93,7 +93,7 @@ USE_FIXED_SECTION(real_vectors)
 __start_interrupts:
 
 /* No virt vectors corresponding with 0x0..0x100 */
-EXC_VIRT_NONE(0x4000, 0x100)
+EXC_VIRT_NONE(0x4000, 0x4100)
 
 
 #ifdef CONFIG_PPC_P7_NAP
@@ -114,15 +114,15 @@ EXC_VIRT_NONE(0x4000, 0x100)
 #define IDLETEST NOTEST
 #endif
 
-EXC_REAL_BEGIN(system_reset, 0x100, 0x100)
+EXC_REAL_BEGIN(system_reset, 0x100, 0x200)
 	SET_SCRATCH0(r13)
 	GET_PACA(r13)
 	clrrdi	r13,r13,1 /* Last bit of HSPRG0 is set if waking from winkle */
 	EXCEPTION_PROLOG_PSERIES_PACA(PACA_EXGEN, system_reset_common, EXC_STD,
 				 IDLETEST, 0x100)
 
-EXC_REAL_END(system_reset, 0x100, 0x100)
-EXC_VIRT_NONE(0x4100, 0x100)
+EXC_REAL_END(system_reset, 0x100, 0x200)
+EXC_VIRT_NONE(0x4100, 0x4200)
 
 #ifdef CONFIG_PPC_P7_NAP
 EXC_COMMON_BEGIN(system_reset_idle_common)
@@ -142,7 +142,7 @@ END_FTR_SECTION_IFCLR(CPU_FTR_ARCH_300)
 	lbz	r0,HSTATE_HWTHREAD_REQ(r13)
 	cmpwi	r0,0
 	beq	1f
-	BRANCH_TO_KVM(r10, kvm_start_guest)
+	b	kvm_start_guest
 1:
 #endif
 
@@ -166,7 +166,7 @@ TRAMP_REAL_BEGIN(system_reset_fwnmi)
 #endif /* CONFIG_PPC_PSERIES */
 
 
-EXC_REAL_BEGIN(machine_check, 0x200, 0x100)
+EXC_REAL_BEGIN(machine_check, 0x200, 0x300)
 	/* This is moved out of line as it can be patched by FW, but
 	 * some code path might still want to branch into the original
 	 * vector
@@ -186,8 +186,8 @@ BEGIN_FTR_SECTION
 FTR_SECTION_ELSE
 	b	machine_check_pSeries_0
 ALT_FTR_SECTION_END_IFSET(CPU_FTR_HVMODE)
-EXC_REAL_END(machine_check, 0x200, 0x100)
-EXC_VIRT_NONE(0x4200, 0x100)
+EXC_REAL_END(machine_check, 0x200, 0x300)
+EXC_VIRT_NONE(0x4200, 0x4300)
 TRAMP_REAL_BEGIN(machine_check_powernv_early)
 BEGIN_FTR_SECTION
 	EXCEPTION_PROLOG_1(PACA_EXMC, NOTEST, 0x200)
@@ -244,7 +244,7 @@ BEGIN_FTR_SECTION
 	LOAD_HANDLER(r12, machine_check_handle_early)
 1:	mtspr	SPRN_SRR0,r12
 	mtspr	SPRN_SRR1,r11
-	rfid
+	RFI_TO_KERNEL
 	b	.	/* prevent speculative execution */
 2:
 	/* Stack overflow. Stay on emergency stack and panic.
@@ -280,7 +280,7 @@ machine_check_pSeries_0:
 	mtspr	SPRN_SRR0,r12
 	mfspr	r12,SPRN_SRR1
 	mtspr	SPRN_SRR1,r10
-	rfid
+	RFI_TO_KERNEL
 	b	.	/* prevent speculative execution */
 
 TRAMP_KVM_SKIP(PACA_EXMC, 0x200)
@@ -381,12 +381,12 @@ EXC_COMMON_BEGIN(machine_check_handle_early)
 	lbz	r3,PACA_THREAD_IDLE_STATE(r13)
 	cmpwi	r3,PNV_THREAD_NAP
 	bgt	10f
-	IDLE_STATE_ENTER_SEQ_NORET(PPC_NAP)
+	IDLE_STATE_ENTER_SEQ(PPC_NAP)
 	/* No return */
 10:
 	cmpwi	r3,PNV_THREAD_SLEEP
 	bgt	2f
-	IDLE_STATE_ENTER_SEQ_NORET(PPC_SLEEP)
+	IDLE_STATE_ENTER_SEQ(PPC_SLEEP)
 	/* No return */
 
 2:
@@ -400,7 +400,7 @@ EXC_COMMON_BEGIN(machine_check_handle_early)
 	 */
 	ori	r13,r13,1
 	SET_PACA(r13)
-	IDLE_STATE_ENTER_SEQ_NORET(PPC_WINKLE)
+	IDLE_STATE_ENTER_SEQ(PPC_WINKLE)
 	/* No return */
 4:
 #endif
@@ -446,7 +446,7 @@ EXC_COMMON_BEGIN(machine_check_handle_early)
 	li	r3,MSR_ME
 	andc	r10,r10,r3		/* Turn off MSR_ME */
 	mtspr	SPRN_SRR1,r10
-	rfid
+	RFI_TO_KERNEL
 	b	.
 2:
 	/*
@@ -464,7 +464,7 @@ EXC_COMMON_BEGIN(machine_check_handle_early)
 	 */
 	bl	machine_check_queue_event
 	MACHINE_CHECK_HANDLER_WINDUP
-	rfid
+	RFI_TO_USER_OR_KERNEL
 9:
 	/* Deliver the machine check to host kernel in V mode. */
 	MACHINE_CHECK_HANDLER_WINDUP
@@ -483,8 +483,8 @@ EXC_COMMON_BEGIN(unrecover_mce)
 	b	1b
 
 
-EXC_REAL(data_access, 0x300, 0x80)
-EXC_VIRT(data_access, 0x4300, 0x80, 0x300)
+EXC_REAL(data_access, 0x300, 0x380)
+EXC_VIRT(data_access, 0x4300, 0x4380, 0x300)
 TRAMP_KVM_SKIP(PACA_EXGEN, 0x300)
 
 EXC_COMMON_BEGIN(data_access_common)
@@ -512,7 +512,7 @@ MMU_FTR_SECTION_ELSE
 ALT_MMU_FTR_SECTION_END_IFCLR(MMU_FTR_TYPE_RADIX)
 
 
-EXC_REAL_BEGIN(data_access_slb, 0x380, 0x80)
+EXC_REAL_BEGIN(data_access_slb, 0x380, 0x400)
 	SET_SCRATCH0(r13)
 	EXCEPTION_PROLOG_0(PACA_EXSLB)
 	EXCEPTION_PROLOG_1(PACA_EXSLB, KVMTEST_PR, 0x380)
@@ -533,9 +533,9 @@ EXC_REAL_BEGIN(data_access_slb, 0x380, 0x80)
 	mtctr	r10
 	bctr
 #endif
-EXC_REAL_END(data_access_slb, 0x380, 0x80)
+EXC_REAL_END(data_access_slb, 0x380, 0x400)
 
-EXC_VIRT_BEGIN(data_access_slb, 0x4380, 0x80)
+EXC_VIRT_BEGIN(data_access_slb, 0x4380, 0x4400)
 	SET_SCRATCH0(r13)
 	EXCEPTION_PROLOG_0(PACA_EXSLB)
 	EXCEPTION_PROLOG_1(PACA_EXSLB, NOTEST, 0x380)
@@ -556,12 +556,12 @@ EXC_VIRT_BEGIN(data_access_slb, 0x4380, 0x80)
 	mtctr	r10
 	bctr
 #endif
-EXC_VIRT_END(data_access_slb, 0x4380, 0x80)
+EXC_VIRT_END(data_access_slb, 0x4380, 0x4400)
 TRAMP_KVM_SKIP(PACA_EXSLB, 0x380)
 
 
-EXC_REAL(instruction_access, 0x400, 0x80)
-EXC_VIRT(instruction_access, 0x4400, 0x80, 0x400)
+EXC_REAL(instruction_access, 0x400, 0x480)
+EXC_VIRT(instruction_access, 0x4400, 0x4480, 0x400)
 TRAMP_KVM(PACA_EXGEN, 0x400)
 
 EXC_COMMON_BEGIN(instruction_access_common)
@@ -580,7 +580,7 @@ MMU_FTR_SECTION_ELSE
 ALT_MMU_FTR_SECTION_END_IFCLR(MMU_FTR_TYPE_RADIX)
 
 
-EXC_REAL_BEGIN(instruction_access_slb, 0x480, 0x80)
+EXC_REAL_BEGIN(instruction_access_slb, 0x480, 0x500)
 	SET_SCRATCH0(r13)
 	EXCEPTION_PROLOG_0(PACA_EXSLB)
 	EXCEPTION_PROLOG_1(PACA_EXSLB, KVMTEST_PR, 0x480)
@@ -596,9 +596,9 @@ EXC_REAL_BEGIN(instruction_access_slb, 0x480, 0x80)
 	mtctr	r10
 	bctr
 #endif
-EXC_REAL_END(instruction_access_slb, 0x480, 0x80)
+EXC_REAL_END(instruction_access_slb, 0x480, 0x500)
 
-EXC_VIRT_BEGIN(instruction_access_slb, 0x4480, 0x80)
+EXC_VIRT_BEGIN(instruction_access_slb, 0x4480, 0x4500)
 	SET_SCRATCH0(r13)
 	EXCEPTION_PROLOG_0(PACA_EXSLB)
 	EXCEPTION_PROLOG_1(PACA_EXSLB, NOTEST, 0x480)
@@ -614,7 +614,7 @@ EXC_VIRT_BEGIN(instruction_access_slb, 0x4480, 0x80)
 	mtctr	r10
 	bctr
 #endif
-EXC_VIRT_END(instruction_access_slb, 0x4480, 0x80)
+EXC_VIRT_END(instruction_access_slb, 0x4480, 0x4500)
 TRAMP_KVM(PACA_EXSLB, 0x480)
 
 
@@ -655,6 +655,8 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_TYPE_RADIX)
 
 	andi.	r10,r12,MSR_RI	/* check for unrecoverable exception */
 	beq-	2f
+	andi.	r10,r12,MSR_PR	/* check for user mode (PR != 0) */
+	bne	1f
 
 	/* All done -- return from exception. */
 
@@ -671,7 +673,24 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_TYPE_RADIX)
 	ld	r11,PACA_EXSLB+EX_R11(r13)
 	ld	r12,PACA_EXSLB+EX_R12(r13)
 	ld	r13,PACA_EXSLB+EX_R13(r13)
-	rfid
+	RFI_TO_KERNEL
+	b	.	/* prevent speculative execution */
+
+1:
+.machine	push
+.machine	"power4"
+	mtcrf	0x80,r9
+	mtcrf	0x02,r9		/* I/D indication is in cr6 */
+	mtcrf	0x01,r9		/* slb_allocate uses cr0 and cr7 */
+.machine	pop
+
+	RESTORE_PPR_PACA(PACA_EXSLB, r9)
+	ld	r9,PACA_EXSLB+EX_R9(r13)
+	ld	r10,PACA_EXSLB+EX_R10(r13)
+	ld	r11,PACA_EXSLB+EX_R11(r13)
+	ld	r12,PACA_EXSLB+EX_R12(r13)
+	ld	r13,PACA_EXSLB+EX_R13(r13)
+	RFI_TO_USER
 	b	.	/* prevent speculative execution */
 
 2:	mfspr	r11,SPRN_SRR0
@@ -679,7 +698,7 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_TYPE_RADIX)
 	mtspr	SPRN_SRR0,r10
 	ld	r10,PACAKMSR(r13)
 	mtspr	SPRN_SRR1,r10
-	rfid
+	RFI_TO_KERNEL
 	b	.
 
 8:	mfspr	r11,SPRN_SRR0
@@ -687,7 +706,7 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_TYPE_RADIX)
 	mtspr	SPRN_SRR0,r10
 	ld	r10,PACAKMSR(r13)
 	mtspr	SPRN_SRR1,r10
-	rfid
+	RFI_TO_KERNEL
 	b	.
 
 EXC_COMMON_BEGIN(unrecov_slb)
@@ -704,26 +723,30 @@ EXC_COMMON_BEGIN(bad_addr_slb)
 	ld	r3, PACA_EXSLB+EX_DAR(r13)
 	std	r3, _DAR(r1)
 	beq	cr6, 2f
-	li	r10, 0x480		/* fix trap number for I-SLB miss */
+	li	r10, 0x481		/* fix trap number for I-SLB miss */
 	std	r10, _TRAP(r1)
 2:	bl	save_nvgprs
 	addi	r3, r1, STACK_FRAME_OVERHEAD
 	bl	slb_miss_bad_addr
 	b	ret_from_except
 
-EXC_REAL_BEGIN(hardware_interrupt, 0x500, 0x100)
+EXC_REAL_BEGIN(hardware_interrupt, 0x500, 0x600)
 	.globl hardware_interrupt_hv;
 hardware_interrupt_hv:
 	BEGIN_FTR_SECTION
 		_MASKABLE_EXCEPTION_PSERIES(0x500, hardware_interrupt_common,
 					    EXC_HV, SOFTEN_TEST_HV)
+do_kvm_H0x500:
+		KVM_HANDLER(PACA_EXGEN, EXC_HV, 0x502)
 	FTR_SECTION_ELSE
 		_MASKABLE_EXCEPTION_PSERIES(0x500, hardware_interrupt_common,
 					    EXC_STD, SOFTEN_TEST_PR)
+do_kvm_0x500:
+		KVM_HANDLER(PACA_EXGEN, EXC_STD, 0x500)
 	ALT_FTR_SECTION_END_IFSET(CPU_FTR_HVMODE | CPU_FTR_ARCH_206)
-EXC_REAL_END(hardware_interrupt, 0x500, 0x100)
+EXC_REAL_END(hardware_interrupt, 0x500, 0x600)
 
-EXC_VIRT_BEGIN(hardware_interrupt, 0x4500, 0x100)
+EXC_VIRT_BEGIN(hardware_interrupt, 0x4500, 0x4600)
 	.globl hardware_interrupt_relon_hv;
 hardware_interrupt_relon_hv:
 	BEGIN_FTR_SECTION
@@ -731,15 +754,13 @@ hardware_interrupt_relon_hv:
 	FTR_SECTION_ELSE
 		_MASKABLE_RELON_EXCEPTION_PSERIES(0x500, hardware_interrupt_common, EXC_STD, SOFTEN_TEST_PR)
 	ALT_FTR_SECTION_END_IFSET(CPU_FTR_HVMODE)
-EXC_VIRT_END(hardware_interrupt, 0x4500, 0x100)
+EXC_VIRT_END(hardware_interrupt, 0x4500, 0x4600)
 
-TRAMP_KVM(PACA_EXGEN, 0x500)
-TRAMP_KVM_HV(PACA_EXGEN, 0x500)
 EXC_COMMON_ASYNC(hardware_interrupt_common, 0x500, do_IRQ)
 
 
-EXC_REAL(alignment, 0x600, 0x100)
-EXC_VIRT(alignment, 0x4600, 0x100, 0x600)
+EXC_REAL(alignment, 0x600, 0x700)
+EXC_VIRT(alignment, 0x4600, 0x4700, 0x600)
 TRAMP_KVM(PACA_EXGEN, 0x600)
 EXC_COMMON_BEGIN(alignment_common)
 	mfspr	r10,SPRN_DAR
@@ -758,11 +779,33 @@ EXC_COMMON_BEGIN(alignment_common)
 	b	ret_from_except
 
 
-EXC_REAL(program_check, 0x700, 0x100)
-EXC_VIRT(program_check, 0x4700, 0x100, 0x700)
+EXC_REAL(program_check, 0x700, 0x800)
+EXC_VIRT(program_check, 0x4700, 0x4800, 0x700)
 TRAMP_KVM(PACA_EXGEN, 0x700)
 EXC_COMMON_BEGIN(program_check_common)
-	EXCEPTION_PROLOG_COMMON(0x700, PACA_EXGEN)
+	/*
+	 * It's possible to receive a TM Bad Thing type program check with
+	 * userspace register values (in particular r1), but with SRR1 reporting
+	 * that we came from the kernel. Normally that would confuse the bad
+	 * stack logic, and we would report a bad kernel stack pointer. Instead
+	 * we switch to the emergency stack if we're taking a TM Bad Thing from
+	 * the kernel.
+	 */
+	li	r10,MSR_PR		/* Build a mask of MSR_PR ..	*/
+	oris	r10,r10,0x200000@h	/* .. and SRR1_PROGTM		*/
+	and	r10,r10,r12		/* Mask SRR1 with that.		*/
+	srdi	r10,r10,8		/* Shift it so we can compare	*/
+	cmpldi	r10,(0x200000 >> 8)	/* .. with an immediate.	*/
+	bne 1f				/* If != go to normal path.	*/
+
+	/* SRR1 had PR=0 and SRR1_PROGTM=1, so use the emergency stack	*/
+	andi.	r10,r12,MSR_PR;		/* Set CR0 correctly for label	*/
+					/* 3 in EXCEPTION_PROLOG_COMMON	*/
+	mr	r10,r1			/* Save r1			*/
+	ld	r1,PACAEMERGSP(r13)	/* Use emergency stack		*/
+	subi	r1,r1,INT_FRAME_SIZE	/* alloc stack frame		*/
+	b 3f				/* Jump into the macro !!	*/
+1:	EXCEPTION_PROLOG_COMMON(0x700, PACA_EXGEN)
 	bl	save_nvgprs
 	RECONCILE_IRQ_STATE(r10, r11)
 	addi	r3,r1,STACK_FRAME_OVERHEAD
@@ -770,8 +813,8 @@ EXC_COMMON_BEGIN(program_check_common)
 	b	ret_from_except
 
 
-EXC_REAL(fp_unavailable, 0x800, 0x100)
-EXC_VIRT(fp_unavailable, 0x4800, 0x100, 0x800)
+EXC_REAL(fp_unavailable, 0x800, 0x900)
+EXC_VIRT(fp_unavailable, 0x4800, 0x4900, 0x800)
 TRAMP_KVM(PACA_EXGEN, 0x800)
 EXC_COMMON_BEGIN(fp_unavailable_common)
 	EXCEPTION_PROLOG_COMMON(0x800, PACA_EXGEN)
@@ -803,20 +846,20 @@ END_FTR_SECTION_IFSET(CPU_FTR_TM)
 #endif
 
 
-EXC_REAL_MASKABLE(decrementer, 0x900, 0x80)
-EXC_VIRT_MASKABLE(decrementer, 0x4900, 0x80, 0x900)
+EXC_REAL_OOL_MASKABLE(decrementer, 0x900, 0x980)
+EXC_VIRT_MASKABLE(decrementer, 0x4900, 0x4980, 0x900)
 TRAMP_KVM(PACA_EXGEN, 0x900)
 EXC_COMMON_ASYNC(decrementer_common, 0x900, timer_interrupt)
 
 
-EXC_REAL_HV(hdecrementer, 0x980, 0x80)
-EXC_VIRT_HV(hdecrementer, 0x4980, 0x80, 0x980)
+EXC_REAL_HV(hdecrementer, 0x980, 0xa00)
+EXC_VIRT_HV(hdecrementer, 0x4980, 0x4a00, 0x980)
 TRAMP_KVM_HV(PACA_EXGEN, 0x980)
 EXC_COMMON(hdecrementer_common, 0x980, hdec_interrupt)
 
 
-EXC_REAL_MASKABLE(doorbell_super, 0xa00, 0x100)
-EXC_VIRT_MASKABLE(doorbell_super, 0x4a00, 0x100, 0xa00)
+EXC_REAL_MASKABLE(doorbell_super, 0xa00, 0xb00)
+EXC_VIRT_MASKABLE(doorbell_super, 0x4a00, 0x4b00, 0xa00)
 TRAMP_KVM(PACA_EXGEN, 0xa00)
 #ifdef CONFIG_PPC_DOORBELL
 EXC_COMMON_ASYNC(doorbell_super_common, 0xa00, doorbell_exception)
@@ -825,36 +868,11 @@ EXC_COMMON_ASYNC(doorbell_super_common, 0xa00, unknown_exception)
 #endif
 
 
-EXC_REAL(trap_0b, 0xb00, 0x100)
-EXC_VIRT(trap_0b, 0x4b00, 0x100, 0xb00)
+EXC_REAL(trap_0b, 0xb00, 0xc00)
+EXC_VIRT(trap_0b, 0x4b00, 0x4c00, 0xb00)
 TRAMP_KVM(PACA_EXGEN, 0xb00)
 EXC_COMMON(trap_0b_common, 0xb00, unknown_exception)
 
-#ifdef CONFIG_KVM_BOOK3S_64_HANDLER
-	 /*
-	  * If CONFIG_KVM_BOOK3S_64_HANDLER is set, save the PPR (on systems
-	  * that support it) before changing to HMT_MEDIUM. That allows the KVM
-	  * code to save that value into the guest state (it is the guest's PPR
-	  * value). Otherwise just change to HMT_MEDIUM as userspace has
-	  * already saved the PPR.
-	  */
-#define SYSCALL_KVMTEST							\
-	SET_SCRATCH0(r13);						\
-	GET_PACA(r13);							\
-	std	r9,PACA_EXGEN+EX_R9(r13);				\
-	OPT_GET_SPR(r9, SPRN_PPR, CPU_FTR_HAS_PPR);			\
-	HMT_MEDIUM;							\
-	std	r10,PACA_EXGEN+EX_R10(r13);				\
-	OPT_SAVE_REG_TO_PACA(PACA_EXGEN+EX_PPR, r9, CPU_FTR_HAS_PPR);	\
-	mfcr	r9;							\
-	KVMTEST_PR(0xc00);						\
-	GET_SCRATCH0(r13)
-
-#else
-#define SYSCALL_KVMTEST							\
-	HMT_MEDIUM
-#endif
-	
 #define LOAD_SYSCALL_HANDLER(reg)					\
 	__LOAD_HANDLER(reg, system_call_common)
 
@@ -866,6 +884,7 @@ BEGIN_FTR_SECTION						\
 END_FTR_SECTION_IFSET(CPU_FTR_REAL_LE)				\
 	mr	r9,r13 ;					\
 	GET_PACA(r13) ;						\
+	INTERRUPT_TO_KERNEL ;					\
 	mfspr	r11,SPRN_SRR0 ;					\
 0:
 
@@ -875,7 +894,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_REAL_LE)				\
 	mtspr	SPRN_SRR0,r10 ; 				\
 	ld	r10,PACAKMSR(r13) ;				\
 	mtspr	SPRN_SRR1,r10 ; 				\
-	rfid ; 							\
+	RFI_TO_KERNEL ;						\
 	b	. ;	/* prevent speculative execution */
 
 #define SYSCALL_PSERIES_3					\
@@ -883,7 +902,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_REAL_LE)				\
 1:	mfspr	r12,SPRN_SRR1 ;					\
 	xori	r12,r12,MSR_LE ;				\
 	mtspr	SPRN_SRR1,r12 ;					\
-	rfid ;		/* return to userspace */		\
+	RFI_TO_USER ;	/* return to userspace */		\
 	b	. ;	/* prevent speculative execution */
 
 #if defined(CONFIG_RELOCATABLE)
@@ -907,30 +926,50 @@ END_FTR_SECTION_IFSET(CPU_FTR_REAL_LE)				\
 	b	system_call_common ;
 #endif
 
-EXC_REAL_BEGIN(system_call, 0xc00, 0x100)
-	SYSCALL_KVMTEST
+EXC_REAL_BEGIN(system_call, 0xc00, 0xd00)
+	 /*
+	  * If CONFIG_KVM_BOOK3S_64_HANDLER is set, save the PPR (on systems
+	  * that support it) before changing to HMT_MEDIUM. That allows the KVM
+	  * code to save that value into the guest state (it is the guest's PPR
+	  * value). Otherwise just change to HMT_MEDIUM as userspace has
+	  * already saved the PPR.
+	  */
+#ifdef CONFIG_KVM_BOOK3S_64_HANDLER
+	SET_SCRATCH0(r13)
+	GET_PACA(r13)
+	std	r9,PACA_EXGEN+EX_R9(r13)
+	OPT_GET_SPR(r9, SPRN_PPR, CPU_FTR_HAS_PPR);
+	HMT_MEDIUM;
+	std	r10,PACA_EXGEN+EX_R10(r13)
+	OPT_SAVE_REG_TO_PACA(PACA_EXGEN+EX_PPR, r9, CPU_FTR_HAS_PPR);
+	mfcr	r9
+	KVMTEST_PR(0xc00)
+	GET_SCRATCH0(r13)
+#else
+	HMT_MEDIUM;
+#endif
 	SYSCALL_PSERIES_1
 	SYSCALL_PSERIES_2_RFID
 	SYSCALL_PSERIES_3
-EXC_REAL_END(system_call, 0xc00, 0x100)
+EXC_REAL_END(system_call, 0xc00, 0xd00)
 
-EXC_VIRT_BEGIN(system_call, 0x4c00, 0x100)
-	SYSCALL_KVMTEST
+EXC_VIRT_BEGIN(system_call, 0x4c00, 0x4d00)
+	HMT_MEDIUM
 	SYSCALL_PSERIES_1
 	SYSCALL_PSERIES_2_DIRECT
 	SYSCALL_PSERIES_3
-EXC_VIRT_END(system_call, 0x4c00, 0x100)
+EXC_VIRT_END(system_call, 0x4c00, 0x4d00)
 
 TRAMP_KVM(PACA_EXGEN, 0xc00)
 
 
-EXC_REAL(single_step, 0xd00, 0x100)
-EXC_VIRT(single_step, 0x4d00, 0x100, 0xd00)
+EXC_REAL(single_step, 0xd00, 0xe00)
+EXC_VIRT(single_step, 0x4d00, 0x4e00, 0xd00)
 TRAMP_KVM(PACA_EXGEN, 0xd00)
 EXC_COMMON(single_step_common, 0xd00, single_step_exception)
 
-EXC_REAL_OOL_HV(h_data_storage, 0xe00, 0x20)
-EXC_VIRT_OOL_HV(h_data_storage, 0x4e00, 0x20, 0xe00)
+EXC_REAL_OOL_HV(h_data_storage, 0xe00, 0xe20)
+EXC_VIRT_NONE(0x4e00, 0x4e20)
 TRAMP_KVM_HV_SKIP(PACA_EXGEN, 0xe00)
 EXC_COMMON_BEGIN(h_data_storage_common)
 	mfspr   r10,SPRN_HDAR
@@ -945,14 +984,14 @@ EXC_COMMON_BEGIN(h_data_storage_common)
 	b       ret_from_except
 
 
-EXC_REAL_OOL_HV(h_instr_storage, 0xe20, 0x20)
-EXC_VIRT_OOL_HV(h_instr_storage, 0x4e20, 0x20, 0xe20)
+EXC_REAL_OOL_HV(h_instr_storage, 0xe20, 0xe40)
+EXC_VIRT_NONE(0x4e20, 0x4e40)
 TRAMP_KVM_HV(PACA_EXGEN, 0xe20)
 EXC_COMMON(h_instr_storage_common, 0xe20, unknown_exception)
 
 
-EXC_REAL_OOL_HV(emulation_assist, 0xe40, 0x20)
-EXC_VIRT_OOL_HV(emulation_assist, 0x4e40, 0x20, 0xe40)
+EXC_REAL_OOL_HV(emulation_assist, 0xe40, 0xe60)
+EXC_VIRT_OOL_HV(emulation_assist, 0x4e40, 0x4e60, 0xe40)
 TRAMP_KVM_HV(PACA_EXGEN, 0xe40)
 EXC_COMMON(emulation_assist_common, 0xe40, emulation_assist_interrupt)
 
@@ -962,9 +1001,9 @@ EXC_COMMON(emulation_assist_common, 0xe40, emulation_assist_interrupt)
  * first, and then eventaully from there to the trampoline to get into virtual
  * mode.
  */
-__EXC_REAL_OOL_HV_DIRECT(hmi_exception, 0xe60, 0x20, hmi_exception_early)
-__TRAMP_REAL_OOL_MASKABLE_HV(hmi_exception, 0xe60)
-EXC_VIRT_NONE(0x4e60, 0x20)
+__EXC_REAL_OOL_HV_DIRECT(hmi_exception, 0xe60, 0xe80, hmi_exception_early)
+__TRAMP_REAL_REAL_OOL_MASKABLE_HV(hmi_exception, 0xe60)
+EXC_VIRT_NONE(0x4e60, 0x4e80)
 TRAMP_KVM_HV(PACA_EXGEN, 0xe60)
 TRAMP_REAL_BEGIN(hmi_exception_early)
 	EXCEPTION_PROLOG_1(PACA_EXGEN, KVMTEST_HV, 0xe60)
@@ -982,7 +1021,7 @@ TRAMP_REAL_BEGIN(hmi_exception_early)
 	EXCEPTION_PROLOG_COMMON_2(PACA_EXGEN)
 	EXCEPTION_PROLOG_COMMON_3(0xe60)
 	addi	r3,r1,STACK_FRAME_OVERHEAD
-	BRANCH_LINK_TO_FAR(hmi_exception_realmode) /* Function call ABI */
+	bl	hmi_exception_realmode
 	/* Windup the stack. */
 	/* Move original HSRR0 and HSRR1 into the respective regs */
 	ld	r9,_MSR(r1)
@@ -1018,8 +1057,8 @@ hmi_exception_after_realmode:
 EXC_COMMON_ASYNC(hmi_exception_common, 0xe60, handle_hmi_exception)
 
 
-EXC_REAL_OOL_MASKABLE_HV(h_doorbell, 0xe80, 0x20)
-EXC_VIRT_OOL_MASKABLE_HV(h_doorbell, 0x4e80, 0x20, 0xe80)
+EXC_REAL_OOL_MASKABLE_HV(h_doorbell, 0xe80, 0xea0)
+EXC_VIRT_OOL_MASKABLE_HV(h_doorbell, 0x4e80, 0x4ea0, 0xe80)
 TRAMP_KVM_HV(PACA_EXGEN, 0xe80)
 #ifdef CONFIG_PPC_DOORBELL
 EXC_COMMON_ASYNC(h_doorbell_common, 0xe80, doorbell_exception)
@@ -1028,26 +1067,24 @@ EXC_COMMON_ASYNC(h_doorbell_common, 0xe80, unknown_exception)
 #endif
 
 
-EXC_REAL_OOL_MASKABLE_HV(h_virt_irq, 0xea0, 0x20)
-EXC_VIRT_OOL_MASKABLE_HV(h_virt_irq, 0x4ea0, 0x20, 0xea0)
+EXC_REAL_OOL_MASKABLE_HV(h_virt_irq, 0xea0, 0xec0)
+EXC_VIRT_OOL_MASKABLE_HV(h_virt_irq, 0x4ea0, 0x4ec0, 0xea0)
 TRAMP_KVM_HV(PACA_EXGEN, 0xea0)
 EXC_COMMON_ASYNC(h_virt_irq_common, 0xea0, do_IRQ)
 
 
-EXC_REAL_NONE(0xec0, 0x20)
-EXC_VIRT_NONE(0x4ec0, 0x20)
-EXC_REAL_NONE(0xee0, 0x20)
-EXC_VIRT_NONE(0x4ee0, 0x20)
+EXC_REAL_NONE(0xec0, 0xf00)
+EXC_VIRT_NONE(0x4ec0, 0x4f00)
 
 
-EXC_REAL_OOL(performance_monitor, 0xf00, 0x20)
-EXC_VIRT_OOL(performance_monitor, 0x4f00, 0x20, 0xf00)
+EXC_REAL_OOL(performance_monitor, 0xf00, 0xf20)
+EXC_VIRT_OOL(performance_monitor, 0x4f00, 0x4f20, 0xf00)
 TRAMP_KVM(PACA_EXGEN, 0xf00)
 EXC_COMMON_ASYNC(performance_monitor_common, 0xf00, performance_monitor_exception)
 
 
-EXC_REAL_OOL(altivec_unavailable, 0xf20, 0x20)
-EXC_VIRT_OOL(altivec_unavailable, 0x4f20, 0x20, 0xf20)
+EXC_REAL_OOL(altivec_unavailable, 0xf20, 0xf40)
+EXC_VIRT_OOL(altivec_unavailable, 0x4f20, 0x4f40, 0xf20)
 TRAMP_KVM(PACA_EXGEN, 0xf20)
 EXC_COMMON_BEGIN(altivec_unavailable_common)
 	EXCEPTION_PROLOG_COMMON(0xf20, PACA_EXGEN)
@@ -1083,8 +1120,8 @@ END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
 	b	ret_from_except
 
 
-EXC_REAL_OOL(vsx_unavailable, 0xf40, 0x20)
-EXC_VIRT_OOL(vsx_unavailable, 0x4f40, 0x20, 0xf40)
+EXC_REAL_OOL(vsx_unavailable, 0xf40, 0xf60)
+EXC_VIRT_OOL(vsx_unavailable, 0x4f40, 0x4f60, 0xf40)
 TRAMP_KVM(PACA_EXGEN, 0xf40)
 EXC_COMMON_BEGIN(vsx_unavailable_common)
 	EXCEPTION_PROLOG_COMMON(0xf40, PACA_EXGEN)
@@ -1119,50 +1156,41 @@ END_FTR_SECTION_IFSET(CPU_FTR_VSX)
 	b	ret_from_except
 
 
-EXC_REAL_OOL(facility_unavailable, 0xf60, 0x20)
-EXC_VIRT_OOL(facility_unavailable, 0x4f60, 0x20, 0xf60)
+EXC_REAL_OOL(facility_unavailable, 0xf60, 0xf80)
+EXC_VIRT_OOL(facility_unavailable, 0x4f60, 0x4f80, 0xf60)
 TRAMP_KVM(PACA_EXGEN, 0xf60)
 EXC_COMMON(facility_unavailable_common, 0xf60, facility_unavailable_exception)
 
 
-EXC_REAL_OOL_HV(h_facility_unavailable, 0xf80, 0x20)
-EXC_VIRT_OOL_HV(h_facility_unavailable, 0x4f80, 0x20, 0xf80)
+EXC_REAL_OOL_HV(h_facility_unavailable, 0xf80, 0xfa0)
+EXC_VIRT_OOL_HV(h_facility_unavailable, 0x4f80, 0x4fa0, 0xf80)
 TRAMP_KVM_HV(PACA_EXGEN, 0xf80)
 EXC_COMMON(h_facility_unavailable_common, 0xf80, facility_unavailable_exception)
 
 
-EXC_REAL_NONE(0xfa0, 0x20)
-EXC_VIRT_NONE(0x4fa0, 0x20)
-EXC_REAL_NONE(0xfc0, 0x20)
-EXC_VIRT_NONE(0x4fc0, 0x20)
-EXC_REAL_NONE(0xfe0, 0x20)
-EXC_VIRT_NONE(0x4fe0, 0x20)
-
-EXC_REAL_NONE(0x1000, 0x100)
-EXC_VIRT_NONE(0x5000, 0x100)
-EXC_REAL_NONE(0x1100, 0x100)
-EXC_VIRT_NONE(0x5100, 0x100)
+EXC_REAL_NONE(0xfa0, 0x1200)
+EXC_VIRT_NONE(0x4fa0, 0x5200)
 
 #ifdef CONFIG_CBE_RAS
-EXC_REAL_HV(cbe_system_error, 0x1200, 0x100)
-EXC_VIRT_NONE(0x5200, 0x100)
+EXC_REAL_HV(cbe_system_error, 0x1200, 0x1300)
+EXC_VIRT_NONE(0x5200, 0x5300)
 TRAMP_KVM_HV_SKIP(PACA_EXGEN, 0x1200)
 EXC_COMMON(cbe_system_error_common, 0x1200, cbe_system_error_exception)
 #else /* CONFIG_CBE_RAS */
-EXC_REAL_NONE(0x1200, 0x100)
-EXC_VIRT_NONE(0x5200, 0x100)
+EXC_REAL_NONE(0x1200, 0x1300)
+EXC_VIRT_NONE(0x5200, 0x5300)
 #endif
 
 
-EXC_REAL(instruction_breakpoint, 0x1300, 0x100)
-EXC_VIRT(instruction_breakpoint, 0x5300, 0x100, 0x1300)
+EXC_REAL(instruction_breakpoint, 0x1300, 0x1400)
+EXC_VIRT(instruction_breakpoint, 0x5300, 0x5400, 0x1300)
 TRAMP_KVM_SKIP(PACA_EXGEN, 0x1300)
 EXC_COMMON(instruction_breakpoint_common, 0x1300, instruction_breakpoint_exception)
 
-EXC_REAL_NONE(0x1400, 0x100)
-EXC_VIRT_NONE(0x5400, 0x100)
+EXC_REAL_NONE(0x1400, 0x1500)
+EXC_VIRT_NONE(0x5400, 0x5500)
 
-EXC_REAL_BEGIN(denorm_exception_hv, 0x1500, 0x100)
+EXC_REAL_BEGIN(denorm_exception_hv, 0x1500, 0x1600)
 	mtspr	SPRN_SPRG_HSCRATCH0,r13
 	EXCEPTION_PROLOG_0(PACA_EXGEN)
 	EXCEPTION_PROLOG_1(PACA_EXGEN, NOTEST, 0x1500)
@@ -1177,14 +1205,14 @@ EXC_REAL_BEGIN(denorm_exception_hv, 0x1500, 0x100)
 
 	KVMTEST_PR(0x1500)
 	EXCEPTION_PROLOG_PSERIES_1(denorm_common, EXC_HV)
-EXC_REAL_END(denorm_exception_hv, 0x1500, 0x100)
+EXC_REAL_END(denorm_exception_hv, 0x1500, 0x1600)
 
 #ifdef CONFIG_PPC_DENORMALISATION
-EXC_VIRT_BEGIN(denorm_exception, 0x5500, 0x100)
+EXC_VIRT_BEGIN(denorm_exception, 0x5500, 0x5600)
 	b	exc_real_0x1500_denorm_exception_hv
-EXC_VIRT_END(denorm_exception, 0x5500, 0x100)
+EXC_VIRT_END(denorm_exception, 0x5500, 0x5600)
 #else
-EXC_VIRT_NONE(0x5500, 0x100)
+EXC_VIRT_NONE(0x5500, 0x5600)
 #endif
 
 TRAMP_KVM_SKIP(PACA_EXGEN, 0x1500)
@@ -1249,7 +1277,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_CFAR)
 	ld	r11,PACA_EXGEN+EX_R11(r13)
 	ld	r12,PACA_EXGEN+EX_R12(r13)
 	ld	r13,PACA_EXGEN+EX_R13(r13)
-	HRFID
+	HRFI_TO_UNKNOWN
 	b	.
 #endif
 
@@ -1257,18 +1285,18 @@ EXC_COMMON_HV(denorm_common, 0x1500, unknown_exception)
 
 
 #ifdef CONFIG_CBE_RAS
-EXC_REAL_HV(cbe_maintenance, 0x1600, 0x100)
-EXC_VIRT_NONE(0x5600, 0x100)
+EXC_REAL_HV(cbe_maintenance, 0x1600, 0x1700)
+EXC_VIRT_NONE(0x5600, 0x5700)
 TRAMP_KVM_HV_SKIP(PACA_EXGEN, 0x1600)
 EXC_COMMON(cbe_maintenance_common, 0x1600, cbe_maintenance_exception)
 #else /* CONFIG_CBE_RAS */
-EXC_REAL_NONE(0x1600, 0x100)
-EXC_VIRT_NONE(0x5600, 0x100)
+EXC_REAL_NONE(0x1600, 0x1700)
+EXC_VIRT_NONE(0x5600, 0x5700)
 #endif
 
 
-EXC_REAL(altivec_assist, 0x1700, 0x100)
-EXC_VIRT(altivec_assist, 0x5700, 0x100, 0x1700)
+EXC_REAL(altivec_assist, 0x1700, 0x1800)
+EXC_VIRT(altivec_assist, 0x5700, 0x5800, 0x1700)
 TRAMP_KVM(PACA_EXGEN, 0x1700)
 #ifdef CONFIG_ALTIVEC
 EXC_COMMON(altivec_assist_common, 0x1700, altivec_assist_exception)
@@ -1278,13 +1306,13 @@ EXC_COMMON(altivec_assist_common, 0x1700, unknown_exception)
 
 
 #ifdef CONFIG_CBE_RAS
-EXC_REAL_HV(cbe_thermal, 0x1800, 0x100)
-EXC_VIRT_NONE(0x5800, 0x100)
+EXC_REAL_HV(cbe_thermal, 0x1800, 0x1900)
+EXC_VIRT_NONE(0x5800, 0x5900)
 TRAMP_KVM_HV_SKIP(PACA_EXGEN, 0x1800)
 EXC_COMMON(cbe_thermal_common, 0x1800, cbe_thermal_exception)
 #else /* CONFIG_CBE_RAS */
-EXC_REAL_NONE(0x1800, 0x100)
-EXC_VIRT_NONE(0x5800, 0x100)
+EXC_REAL_NONE(0x1800, 0x1900)
+EXC_VIRT_NONE(0x5800, 0x5900)
 #endif
 
 
@@ -1323,8 +1351,21 @@ masked_##_H##interrupt:					\
 	ld	r10,PACA_EXGEN+EX_R10(r13);		\
 	ld	r11,PACA_EXGEN+EX_R11(r13);		\
 	GET_SCRATCH0(r13);				\
-	##_H##rfid;					\
+	##_H##RFI_TO_KERNEL;				\
 	b	.
+
+TRAMP_REAL_BEGIN(stf_barrier_fallback)
+	std	r9,PACA_EXRFI+EX_R9(r13)
+	std	r10,PACA_EXRFI+EX_R10(r13)
+	sync
+	ld	r9,PACA_EXRFI+EX_R9(r13)
+	ld	r10,PACA_EXRFI+EX_R10(r13)
+	ori	31,31,0
+	.rept 14
+	b	1f
+1:
+	.endr
+	blr
 
 /*
  * Real mode exceptions actually use this too, but alternate
@@ -1345,7 +1386,7 @@ TRAMP_REAL_BEGIN(kvmppc_skip_interrupt)
 	addi	r13, r13, 4
 	mtspr	SPRN_SRR0, r13
 	GET_SCRATCH0(r13)
-	rfid
+	RFI_TO_KERNEL
 	b	.
 
 TRAMP_REAL_BEGIN(kvmppc_skip_Hinterrupt)
@@ -1357,7 +1398,7 @@ TRAMP_REAL_BEGIN(kvmppc_skip_Hinterrupt)
 	addi	r13, r13, 4
 	mtspr	SPRN_HSRR0, r13
 	GET_SCRATCH0(r13)
-	hrfid
+	HRFI_TO_KERNEL
 	b	.
 #endif
 
@@ -1422,7 +1463,7 @@ USE_TEXT_SECTION()
 /*
  * Hash table stuff
  */
-	.balign	IFETCH_ALIGN_BYTES
+	.align	7
 do_hash_page:
 #ifdef CONFIG_PPC_STD_MMU_64
 	andis.	r0,r4,0xa450		/* weird error? */
@@ -1567,6 +1608,88 @@ END_FTR_SECTION_IFSET(CPU_FTR_CFAR)
 1:	addi	r3,r1,STACK_FRAME_OVERHEAD
 	bl	kernel_bad_stack
 	b	1b
+
+	.globl rfi_flush_fallback
+rfi_flush_fallback:
+	SET_SCRATCH0(r13);
+	GET_PACA(r13);
+	std	r9,PACA_EXRFI+EX_R9(r13)
+	std	r10,PACA_EXRFI+EX_R10(r13)
+	std	r11,PACA_EXRFI+EX_R11(r13)
+	mfctr	r9
+	ld	r10,PACA_RFI_FLUSH_FALLBACK_AREA(r13)
+	ld	r11,PACA_L1D_FLUSH_SIZE(r13)
+	srdi	r11,r11,(7 + 3) /* 128 byte lines, unrolled 8x */
+	mtctr	r11
+	DCBT_STOP_ALL_STREAM_IDS(r11) /* Stop prefetch streams */
+
+	/* order ld/st prior to dcbt stop all streams with flushing */
+	sync
+
+	/*
+	 * The load adresses are at staggered offsets within cachelines,
+	 * which suits some pipelines better (on others it should not
+	 * hurt).
+	 */
+1:
+	ld	r11,(0x80 + 8)*0(r10)
+	ld	r11,(0x80 + 8)*1(r10)
+	ld	r11,(0x80 + 8)*2(r10)
+	ld	r11,(0x80 + 8)*3(r10)
+	ld	r11,(0x80 + 8)*4(r10)
+	ld	r11,(0x80 + 8)*5(r10)
+	ld	r11,(0x80 + 8)*6(r10)
+	ld	r11,(0x80 + 8)*7(r10)
+	addi	r10,r10,0x80*8
+	bdnz	1b
+
+	mtctr	r9
+	ld	r9,PACA_EXRFI+EX_R9(r13)
+	ld	r10,PACA_EXRFI+EX_R10(r13)
+	ld	r11,PACA_EXRFI+EX_R11(r13)
+	GET_SCRATCH0(r13);
+	rfid
+
+	.globl hrfi_flush_fallback
+hrfi_flush_fallback:
+	SET_SCRATCH0(r13);
+	GET_PACA(r13);
+	std	r9,PACA_EXRFI+EX_R9(r13)
+	std	r10,PACA_EXRFI+EX_R10(r13)
+	std	r11,PACA_EXRFI+EX_R11(r13)
+	mfctr	r9
+	ld	r10,PACA_RFI_FLUSH_FALLBACK_AREA(r13)
+	ld	r11,PACA_L1D_FLUSH_SIZE(r13)
+	srdi	r11,r11,(7 + 3) /* 128 byte lines, unrolled 8x */
+	mtctr	r11
+	DCBT_STOP_ALL_STREAM_IDS(r11) /* Stop prefetch streams */
+
+	/* order ld/st prior to dcbt stop all streams with flushing */
+	sync
+
+	/*
+	 * The load adresses are at staggered offsets within cachelines,
+	 * which suits some pipelines better (on others it should not
+	 * hurt).
+	 */
+1:
+	ld	r11,(0x80 + 8)*0(r10)
+	ld	r11,(0x80 + 8)*1(r10)
+	ld	r11,(0x80 + 8)*2(r10)
+	ld	r11,(0x80 + 8)*3(r10)
+	ld	r11,(0x80 + 8)*4(r10)
+	ld	r11,(0x80 + 8)*5(r10)
+	ld	r11,(0x80 + 8)*6(r10)
+	ld	r11,(0x80 + 8)*7(r10)
+	addi	r10,r10,0x80*8
+	bdnz	1b
+
+	mtctr	r9
+	ld	r9,PACA_EXRFI+EX_R9(r13)
+	ld	r10,PACA_EXRFI+EX_R10(r13)
+	ld	r11,PACA_EXRFI+EX_R11(r13)
+	GET_SCRATCH0(r13);
+	hrfid
 
 /*
  * Called from arch_local_irq_enable when an interrupt needs

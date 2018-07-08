@@ -125,7 +125,6 @@ static const char *sdebug_version_date = "20160430";
 #define DEF_OPTS   0
 #define DEF_OPT_BLKS 1024
 #define DEF_PHYSBLK_EXP 0
-#define DEF_OPT_XFERLEN_EXP 0
 #define DEF_PTYPE   TYPE_DISK
 #define DEF_REMOVABLE false
 #define DEF_SCSI_LEVEL   7    /* INQUIRY, byte2 [6->SPC-4; 7->SPC-5] */
@@ -591,7 +590,6 @@ static int sdebug_num_tgts = DEF_NUM_TGTS; /* targets per host */
 static int sdebug_opt_blks = DEF_OPT_BLKS;
 static int sdebug_opts = DEF_OPTS;
 static int sdebug_physblk_exp = DEF_PHYSBLK_EXP;
-static int sdebug_opt_xferlen_exp = DEF_OPT_XFERLEN_EXP;
 static int sdebug_ptype = DEF_PTYPE; /* SCSI peripheral device type */
 static int sdebug_scsi_level = DEF_SCSI_LEVEL;
 static int sdebug_sector_size = DEF_SECTOR_SIZE;
@@ -1207,11 +1205,7 @@ static int inquiry_vpd_b0(unsigned char *arr)
 	memcpy(arr, vpdb0_data, sizeof(vpdb0_data));
 
 	/* Optimal transfer length granularity */
-	if (sdebug_opt_xferlen_exp != 0 &&
-	    sdebug_physblk_exp < sdebug_opt_xferlen_exp)
-		gran = 1 << sdebug_opt_xferlen_exp;
-	else
-		gran = 1 << sdebug_physblk_exp;
+	gran = 1 << sdebug_physblk_exp;
 	put_unaligned_be16(gran, arr + 2);
 
 	/* Maximum Transfer Length */
@@ -3002,11 +2996,11 @@ static int resp_write_same(struct scsi_cmnd *scp, u64 lba, u32 num,
 	if (-1 == ret) {
 		write_unlock_irqrestore(&atomic_rw, iflags);
 		return DID_ERROR << 16;
-	} else if (sdebug_verbose && (ret < (num * sdebug_sector_size)))
+	} else if (sdebug_verbose && !ndob && (ret < sdebug_sector_size))
 		sdev_printk(KERN_INFO, scp->device,
-			    "%s: %s: cdb indicated=%u, IO sent=%d bytes\n",
+			    "%s: %s: lb size=%u, IO sent=%d bytes\n",
 			    my_name, "write same",
-			    num * sdebug_sector_size, ret);
+			    sdebug_sector_size, ret);
 
 	/* Copy first sector to remaining blocks */
 	for (i = 1 ; i < num ; i++)
@@ -4091,7 +4085,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 			jiffies_to_timespec(delta_jiff, &ts);
 			kt = ktime_set(ts.tv_sec, ts.tv_nsec);
 		} else
-			kt = sdebug_ndelay;
+			kt = ktime_set(0, sdebug_ndelay);
 		if (NULL == sd_dp) {
 			sd_dp = kzalloc(sizeof(*sd_dp), GFP_ATOMIC);
 			if (NULL == sd_dp)
@@ -4167,7 +4161,6 @@ module_param_named(num_tgts, sdebug_num_tgts, int, S_IRUGO | S_IWUSR);
 module_param_named(opt_blks, sdebug_opt_blks, int, S_IRUGO);
 module_param_named(opts, sdebug_opts, int, S_IRUGO | S_IWUSR);
 module_param_named(physblk_exp, sdebug_physblk_exp, int, S_IRUGO);
-module_param_named(opt_xferlen_exp, sdebug_opt_xferlen_exp, int, S_IRUGO);
 module_param_named(ptype, sdebug_ptype, int, S_IRUGO | S_IWUSR);
 module_param_named(removable, sdebug_removable, bool, S_IRUGO | S_IWUSR);
 module_param_named(scsi_level, sdebug_scsi_level, int, S_IRUGO);
@@ -4219,7 +4212,6 @@ MODULE_PARM_DESC(num_tgts, "number of targets per host to simulate(def=1)");
 MODULE_PARM_DESC(opt_blks, "optimal transfer length in blocks (def=1024)");
 MODULE_PARM_DESC(opts, "1->noise, 2->medium_err, 4->timeout, 8->recovered_err... (def=0)");
 MODULE_PARM_DESC(physblk_exp, "physical block exponent (def=0)");
-MODULE_PARM_DESC(opt_xferlen_exp, "optimal transfer length granularity exponent (def=physblk_exp)");
 MODULE_PARM_DESC(ptype, "SCSI peripheral type(def=0[disk])");
 MODULE_PARM_DESC(removable, "claim to have removable media (def=0)");
 MODULE_PARM_DESC(scsi_level, "SCSI level to simulate(def=7[SPC-5])");

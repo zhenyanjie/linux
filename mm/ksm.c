@@ -19,8 +19,6 @@
 #include <linux/fs.h>
 #include <linux/mman.h>
 #include <linux/sched.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/coredump.h>
 #include <linux/rwsem.h>
 #include <linux/pagemap.h>
 #include <linux/rmap.h>
@@ -224,12 +222,6 @@ static unsigned int ksm_thread_pages_to_scan = 100;
 
 /* Milliseconds ksmd should sleep between batches */
 static unsigned int ksm_thread_sleep_millisecs = 20;
-
-/* Checksum of an empty (zeroed) page */
-static unsigned int zero_checksum __read_mostly;
-
-/* Whether to merge empty (zeroed) pages with actual zero pages */
-static bool ksm_use_zero_pages __read_mostly;
 
 #ifdef CONFIG_NUMA
 /* Zeroed when merging across nodes is not allowed */
@@ -858,36 +850,33 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
 			      pte_t *orig_pte)
 {
 	struct mm_struct *mm = vma->vm_mm;
-	struct page_vma_mapped_walk pvmw = {
-		.page = page,
-		.vma = vma,
-	};
+	unsigned long addr;
+	pte_t *ptep;
+	spinlock_t *ptl;
 	int swapped;
 	int err = -EFAULT;
 	unsigned long mmun_start;	/* For mmu_notifiers */
 	unsigned long mmun_end;		/* For mmu_notifiers */
 
-	pvmw.address = page_address_in_vma(page, vma);
-	if (pvmw.address == -EFAULT)
+	addr = page_address_in_vma(page, vma);
+	if (addr == -EFAULT)
 		goto out;
 
 	BUG_ON(PageTransCompound(page));
 
-	mmun_start = pvmw.address;
-	mmun_end   = pvmw.address + PAGE_SIZE;
+	mmun_start = addr;
+	mmun_end   = addr + PAGE_SIZE;
 	mmu_notifier_invalidate_range_start(mm, mmun_start, mmun_end);
 
-	if (!page_vma_mapped_walk(&pvmw))
+	ptep = page_check_address(page, mm, addr, &ptl, 0);
+	if (!ptep)
 		goto out_mn;
-	if (WARN_ONCE(!pvmw.pte, "Unexpected PMD mapping?"))
-		goto out_unlock;
 
-	if (pte_write(*pvmw.pte) || pte_dirty(*pvmw.pte) ||
-	    (pte_protnone(*pvmw.pte) && pte_savedwrite(*pvmw.pte))) {
+	if (pte_write(*ptep) || pte_dirty(*ptep)) {
 		pte_t entry;
 
 		swapped = PageSwapCache(page);
-		flush_cache_page(vma, pvmw.address, page_to_pfn(page));
+		flush_cache_page(vma, addr, page_to_pfn(page));
 		/*
 		 * Ok this is tricky, when get_user_pages_fast() run it doesn't
 		 * take any lock, therefore the check that we are going to make
@@ -897,29 +886,25 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
 		 * this assure us that no O_DIRECT can happen after the check
 		 * or in the middle of the check.
 		 */
-		entry = ptep_clear_flush_notify(vma, pvmw.address, pvmw.pte);
+		entry = ptep_clear_flush_notify(vma, addr, ptep);
 		/*
 		 * Check that no O_DIRECT or similar I/O is in progress on the
 		 * page
 		 */
 		if (page_mapcount(page) + 1 + swapped != page_count(page)) {
-			set_pte_at(mm, pvmw.address, pvmw.pte, entry);
+			set_pte_at(mm, addr, ptep, entry);
 			goto out_unlock;
 		}
 		if (pte_dirty(entry))
 			set_page_dirty(page);
-
-		if (pte_protnone(entry))
-			entry = pte_mkclean(pte_clear_savedwrite(entry));
-		else
-			entry = pte_mkclean(pte_wrprotect(entry));
-		set_pte_at_notify(mm, pvmw.address, pvmw.pte, entry);
+		entry = pte_mkclean(pte_wrprotect(entry));
+		set_pte_at_notify(mm, addr, ptep, entry);
 	}
-	*orig_pte = *pvmw.pte;
+	*orig_pte = *ptep;
 	err = 0;
 
 out_unlock:
-	page_vma_mapped_walk_done(&pvmw);
+	pte_unmap_unlock(ptep, ptl);
 out_mn:
 	mmu_notifier_invalidate_range_end(mm, mmun_start, mmun_end);
 out:
@@ -941,7 +926,6 @@ static int replace_page(struct vm_area_struct *vma, struct page *page,
 	struct mm_struct *mm = vma->vm_mm;
 	pmd_t *pmd;
 	pte_t *ptep;
-	pte_t newpte;
 	spinlock_t *ptl;
 	unsigned long addr;
 	int err = -EFAULT;
@@ -966,22 +950,12 @@ static int replace_page(struct vm_area_struct *vma, struct page *page,
 		goto out_mn;
 	}
 
-	/*
-	 * No need to check ksm_use_zero_pages here: we can only have a
-	 * zero_page here if ksm_use_zero_pages was enabled alreaady.
-	 */
-	if (!is_zero_pfn(page_to_pfn(kpage))) {
-		get_page(kpage);
-		page_add_anon_rmap(kpage, vma, addr, false);
-		newpte = mk_pte(kpage, vma->vm_page_prot);
-	} else {
-		newpte = pte_mkspecial(pfn_pte(page_to_pfn(kpage),
-					       vma->vm_page_prot));
-	}
+	get_page(kpage);
+	page_add_anon_rmap(kpage, vma, addr, false);
 
 	flush_cache_page(vma, addr, pte_pfn(*ptep));
 	ptep_clear_flush_notify(vma, addr, ptep);
-	set_pte_at_notify(mm, addr, ptep, newpte);
+	set_pte_at_notify(mm, addr, ptep, mk_pte(kpage, vma->vm_page_prot));
 
 	page_remove_rmap(page, false);
 	if (!page_mapped(page))
@@ -1492,28 +1466,25 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
 		return;
 	}
 
-	/*
-	 * Same checksum as an empty page. We attempt to merge it with the
-	 * appropriate zero page if the user enabled this via sysfs.
-	 */
-	if (ksm_use_zero_pages && (checksum == zero_checksum)) {
-		struct vm_area_struct *vma;
-
-		vma = find_mergeable_vma(rmap_item->mm, rmap_item->address);
-		err = try_to_merge_one_page(vma, page,
-					    ZERO_PAGE(rmap_item->address));
-		/*
-		 * In case of failure, the page was not really empty, so we
-		 * need to continue. Otherwise we're done.
-		 */
-		if (!err)
-			return;
-	}
 	tree_rmap_item =
 		unstable_tree_search_insert(rmap_item, page, &tree_page);
 	if (tree_rmap_item) {
+		bool split;
+
 		kpage = try_to_merge_two_pages(rmap_item, page,
 						tree_rmap_item, tree_page);
+		/*
+		 * If both pages we tried to merge belong to the same compound
+		 * page, then we actually ended up increasing the reference
+		 * count of the same compound page twice, and split_huge_page
+		 * failed.
+		 * Here we set a flag if that happened, and we use it later to
+		 * try split_huge_page again. Since we call put_page right
+		 * afterwards, the reference count will be correct and
+		 * split_huge_page should succeed.
+		 */
+		split = PageTransCompound(page)
+			&& compound_head(page) == compound_head(tree_page);
 		put_page(tree_page);
 		if (kpage) {
 			/*
@@ -1538,6 +1509,20 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
 				break_cow(tree_rmap_item);
 				break_cow(rmap_item);
 			}
+		} else if (split) {
+			/*
+			 * We are here if we tried to merge two pages and
+			 * failed because they both belonged to the same
+			 * compound page. We will split the page now, but no
+			 * merging will take place.
+			 * We do not want to add the cost of a full lock; if
+			 * the page is locked, it is better to skip it and
+			 * perhaps try again later.
+			 */
+			if (!trylock_page(page))
+				return;
+			split_huge_page(page);
+			unlock_page(page);
 		}
 	}
 }
@@ -1855,7 +1840,7 @@ int __ksm_enter(struct mm_struct *mm)
 	spin_unlock(&ksm_mmlist_lock);
 
 	set_bit(MMF_VM_MERGEABLE, &mm->flags);
-	mmgrab(mm);
+	atomic_inc(&mm->mm_count);
 
 	if (needs_wakeup)
 		wake_up_interruptible(&ksm_thread_wait);
@@ -2275,28 +2260,6 @@ static ssize_t merge_across_nodes_store(struct kobject *kobj,
 KSM_ATTR(merge_across_nodes);
 #endif
 
-static ssize_t use_zero_pages_show(struct kobject *kobj,
-				struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%u\n", ksm_use_zero_pages);
-}
-static ssize_t use_zero_pages_store(struct kobject *kobj,
-				   struct kobj_attribute *attr,
-				   const char *buf, size_t count)
-{
-	int err;
-	bool value;
-
-	err = kstrtobool(buf, &value);
-	if (err)
-		return -EINVAL;
-
-	ksm_use_zero_pages = value;
-
-	return count;
-}
-KSM_ATTR(use_zero_pages);
-
 static ssize_t pages_shared_show(struct kobject *kobj,
 				 struct kobj_attribute *attr, char *buf)
 {
@@ -2354,7 +2317,6 @@ static struct attribute *ksm_attrs[] = {
 #ifdef CONFIG_NUMA
 	&merge_across_nodes_attr.attr,
 #endif
-	&use_zero_pages_attr.attr,
 	NULL,
 };
 
@@ -2368,11 +2330,6 @@ static int __init ksm_init(void)
 {
 	struct task_struct *ksm_thread;
 	int err;
-
-	/* The correct value depends on page size and endianness */
-	zero_checksum = calc_checksum(ZERO_PAGE(0));
-	/* Default to false for backwards compatibility */
-	ksm_use_zero_pages = false;
 
 	err = ksm_slab_init();
 	if (err)

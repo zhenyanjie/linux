@@ -17,7 +17,6 @@
  * Copyright (C) 2006 Ingo Molnar <mingo@elte.hu>
  *
  */
-#include <linux/bvec.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/pagemap.h>
@@ -33,8 +32,6 @@
 #include <linux/gfp.h>
 #include <linux/socket.h>
 #include <linux/compat.h>
-#include <linux/sched/signal.h>
-
 #include "internal.h"
 
 /*
@@ -309,7 +306,7 @@ ssize_t generic_file_splice_read(struct file *in, loff_t *ppos,
 	idx = to.idx;
 	init_sync_kiocb(&kiocb, in);
 	kiocb.ki_pos = *ppos;
-	ret = call_read_iter(in, &kiocb, &to);
+	ret = in->f_op->read_iter(&kiocb, &to);
 	if (ret > 0) {
 		*ppos = kiocb.ki_pos;
 		file_accessed(in);

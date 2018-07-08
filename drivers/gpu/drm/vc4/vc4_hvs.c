@@ -141,7 +141,8 @@ static int vc4_hvs_upload_linear_kernel(struct vc4_hvs *hvs,
 	int ret, i;
 	u32 __iomem *dst_kernel;
 
-	ret = drm_mm_insert_node(&hvs->dlist_mm, space, VC4_KERNEL_DWORDS);
+	ret = drm_mm_insert_node(&hvs->dlist_mm, space, VC4_KERNEL_DWORDS, 1,
+				 0);
 	if (ret) {
 		DRM_ERROR("Failed to allocate space for filter kernel: %d\n",
 			  ret);
@@ -169,7 +170,6 @@ static int vc4_hvs_bind(struct device *dev, struct device *master, void *data)
 	struct vc4_dev *vc4 = drm->dev_private;
 	struct vc4_hvs *hvs = NULL;
 	int ret;
-	u32 dispctrl;
 
 	hvs = devm_kzalloc(&pdev->dev, sizeof(*hvs), GFP_KERNEL);
 	if (!hvs)
@@ -211,19 +211,6 @@ static int vc4_hvs_bind(struct device *dev, struct device *master, void *data)
 		return ret;
 
 	vc4->hvs = hvs;
-
-	dispctrl = HVS_READ(SCALER_DISPCTRL);
-
-	dispctrl |= SCALER_DISPCTRL_ENABLE;
-
-	/* Set DSP3 (PV1) to use HVS channel 2, which would otherwise
-	 * be unused.
-	 */
-	dispctrl &= ~SCALER_DISPCTRL_DSP3_MUX_MASK;
-	dispctrl |= VC4_SET_FIELD(2, SCALER_DISPCTRL_DSP3_MUX);
-
-	HVS_WRITE(SCALER_DISPCTRL, dispctrl);
-
 	return 0;
 }
 

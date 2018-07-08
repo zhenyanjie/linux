@@ -204,6 +204,7 @@ void set_personality_ia32(bool);
 
 #define ELF_CORE_COPY_REGS(pr_reg, regs)			\
 do {								\
+	unsigned long base;					\
 	unsigned v;						\
 	(pr_reg)[0] = (regs)->r15;				\
 	(pr_reg)[1] = (regs)->r14;				\
@@ -226,8 +227,8 @@ do {								\
 	(pr_reg)[18] = (regs)->flags;				\
 	(pr_reg)[19] = (regs)->sp;				\
 	(pr_reg)[20] = (regs)->ss;				\
-	(pr_reg)[21] = current->thread.fsbase;			\
-	(pr_reg)[22] = current->thread.gsbase;			\
+	rdmsrl(MSR_FS_BASE, base); (pr_reg)[21] = base;		\
+	rdmsrl(MSR_KERNEL_GS_BASE, base); (pr_reg)[22] = base;	\
 	asm("movl %%ds,%0" : "=r" (v)); (pr_reg)[23] = v;	\
 	asm("movl %%es,%0" : "=r" (v)); (pr_reg)[24] = v;	\
 	asm("movl %%fs,%0" : "=r" (v)); (pr_reg)[25] = v;	\
@@ -247,26 +248,17 @@ extern int force_personality32;
 
 /*
  * This is the base location for PIE (ET_DYN with INTERP) loads. On
- * 64-bit, this is raised to 4GB to leave the entire 32-bit address
+ * 64-bit, this is above 4GB to leave the entire 32-bit address
  * space open for things that want to use the area for 32-bit pointers.
  */
 #define ELF_ET_DYN_BASE		(mmap_is_ia32() ? 0x000400000UL : \
-						  0x100000000UL)
+						  (TASK_SIZE / 3 * 2))
 
 /* This yields a mask that user programs can use to figure out what
    instruction set this CPU supports.  This could be done in user space,
    but it's not easy, and we've already done it here.  */
 
 #define ELF_HWCAP		(boot_cpu_data.x86_capability[CPUID_1_EDX])
-
-extern u32 elf_hwcap2;
-
-/*
- * HWCAP2 supplies mask with kernel enabled CPU features, so that
- * the application can discover that it can safely use them.
- * The bits are defined in uapi/asm/hwcap2.h.
- */
-#define ELF_HWCAP2		(elf_hwcap2)
 
 /* This yields a string that ld.so will use to load implementation
    specific libraries for optimization.  This is more specific in

@@ -62,6 +62,7 @@ int iwpm_init(u8 nl_client)
 					sizeof(struct hlist_head), GFP_KERNEL);
 		if (!iwpm_hash_bucket) {
 			ret = -ENOMEM;
+			pr_err("%s Unable to create mapinfo hash table\n", __func__);
 			goto init_exit;
 		}
 		iwpm_reminfo_bucket = kzalloc(IWPM_REMINFO_HASH_SIZE *
@@ -69,6 +70,7 @@ int iwpm_init(u8 nl_client)
 		if (!iwpm_reminfo_bucket) {
 			kfree(iwpm_hash_bucket);
 			ret = -ENOMEM;
+			pr_err("%s Unable to create reminfo hash table\n", __func__);
 			goto init_exit;
 		}
 	}
@@ -126,9 +128,10 @@ int iwpm_create_mapinfo(struct sockaddr_storage *local_sockaddr,
 	if (!iwpm_valid_client(nl_client))
 		return ret;
 	map_info = kzalloc(sizeof(struct iwpm_mapping_info), GFP_KERNEL);
-	if (!map_info)
+	if (!map_info) {
+		pr_err("%s: Unable to allocate a mapping info\n", __func__);
 		return -ENOMEM;
-
+	}
 	memcpy(&map_info->local_sockaddr, local_sockaddr,
 	       sizeof(struct sockaddr_storage));
 	memcpy(&map_info->mapped_sockaddr, mapped_sockaddr,
@@ -306,9 +309,10 @@ struct iwpm_nlmsg_request *iwpm_get_nlmsg_request(__u32 nlmsg_seq,
 	unsigned long flags;
 
 	nlmsg_request = kzalloc(sizeof(struct iwpm_nlmsg_request), gfp);
-	if (!nlmsg_request)
+	if (!nlmsg_request) {
+		pr_err("%s Unable to allocate a nlmsg_request\n", __func__);
 		return NULL;
-
+	}
 	spin_lock_irqsave(&iwpm_nlmsg_req_lock, flags);
 	list_add_tail(&nlmsg_request->inprocess_list, &iwpm_nlmsg_req_list);
 	spin_unlock_irqrestore(&iwpm_nlmsg_req_lock, flags);
@@ -660,6 +664,7 @@ int iwpm_send_mapinfo(u8 nl_client, int iwpm_pid)
 	}
 	skb_num++;
 	spin_lock_irqsave(&iwpm_mapinfo_lock, flags);
+	ret = -EINVAL;
 	for (i = 0; i < IWPM_MAPINFO_HASH_SIZE; i++) {
 		hlist_for_each_entry(map_info, &iwpm_hash_bucket[i],
 				     hlist_node) {

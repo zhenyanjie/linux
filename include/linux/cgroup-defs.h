@@ -16,7 +16,6 @@
 #include <linux/percpu-refcount.h>
 #include <linux/percpu-rwsem.h>
 #include <linux/workqueue.h>
-#include <linux/bpf-cgroup.h>
 
 #ifdef CONFIG_CGROUPS
 
@@ -149,18 +148,14 @@ struct cgroup_subsys_state {
  * set for a task.
  */
 struct css_set {
-	/*
-	 * Set of subsystem states, one for each subsystem. This array is
-	 * immutable after creation apart from the init_css_set during
-	 * subsystem registration (at boot time).
-	 */
-	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
-
-	/* reference count */
+	/* Reference count */
 	atomic_t refcount;
 
-	/* the default cgroup associated with this css_set */
-	struct cgroup *dfl_cgrp;
+	/*
+	 * List running through all cgroup groups in the same hash
+	 * slot. Protected by css_set_lock
+	 */
+	struct hlist_node hlist;
 
 	/*
 	 * Lists running through all tasks using this cgroup group.
@@ -172,29 +167,21 @@ struct css_set {
 	struct list_head tasks;
 	struct list_head mg_tasks;
 
-	/* all css_task_iters currently walking this cset */
-	struct list_head task_iters;
-
-	/*
-	 * On the default hierarhcy, ->subsys[ssid] may point to a css
-	 * attached to an ancestor instead of the cgroup this css_set is
-	 * associated with.  The following node is anchored at
-	 * ->subsys[ssid]->cgroup->e_csets[ssid] and provides a way to
-	 * iterate through all css's attached to a given cgroup.
-	 */
-	struct list_head e_cset_node[CGROUP_SUBSYS_COUNT];
-
-	/*
-	 * List running through all cgroup groups in the same hash
-	 * slot. Protected by css_set_lock
-	 */
-	struct hlist_node hlist;
-
 	/*
 	 * List of cgrp_cset_links pointing at cgroups referenced from this
 	 * css_set.  Protected by css_set_lock.
 	 */
 	struct list_head cgrp_links;
+
+	/* the default cgroup associated with this css_set */
+	struct cgroup *dfl_cgrp;
+
+	/*
+	 * Set of subsystem states, one for each subsystem. This array is
+	 * immutable after creation apart from the init_css_set during
+	 * subsystem registration (at boot time).
+	 */
+	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
 
 	/*
 	 * List of csets participating in the on-going migration either as
@@ -213,6 +200,18 @@ struct css_set {
 	struct cgroup *mg_src_cgrp;
 	struct cgroup *mg_dst_cgrp;
 	struct css_set *mg_dst_cset;
+
+	/*
+	 * On the default hierarhcy, ->subsys[ssid] may point to a css
+	 * attached to an ancestor instead of the cgroup this css_set is
+	 * associated with.  The following node is anchored at
+	 * ->subsys[ssid]->cgroup->e_csets[ssid] and provides a way to
+	 * iterate through all css's attached to a given cgroup.
+	 */
+	struct list_head e_cset_node[CGROUP_SUBSYS_COUNT];
+
+	/* all css_task_iters currently walking this cset */
+	struct list_head task_iters;
 
 	/* dead and being drained, ignore for migration */
 	bool dead;
@@ -302,9 +301,6 @@ struct cgroup {
 	/* used to schedule release agent */
 	struct work_struct release_agent_work;
 
-	/* used to store eBPF programs */
-	struct cgroup_bpf bpf;
-
 	/* ids of the ancestors at each level including self */
 	int ancestor_ids[];
 };
@@ -388,9 +384,6 @@ struct cftype {
 	struct cgroup_subsys *ss;	/* NULL for cgroup core files */
 	struct list_head node;		/* anchored at ss->cfts */
 	struct kernfs_ops *kf_ops;
-
-	int (*open)(struct kernfs_open_file *of);
-	void (*release)(struct kernfs_open_file *of);
 
 	/*
 	 * read_u64() is a shortcut for the common case of returning a
@@ -532,8 +525,8 @@ extern struct percpu_rw_semaphore cgroup_threadgroup_rwsem;
  * cgroup_threadgroup_change_begin - threadgroup exclusion for cgroups
  * @tsk: target task
  *
- * Allows cgroup operations to synchronize against threadgroup changes
- * using a percpu_rw_semaphore.
+ * Called from threadgroup_change_begin() and allows cgroup operations to
+ * synchronize against threadgroup changes using a percpu_rw_semaphore.
  */
 static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk)
 {
@@ -544,7 +537,8 @@ static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk)
  * cgroup_threadgroup_change_end - threadgroup exclusion for cgroups
  * @tsk: target task
  *
- * Counterpart of cgroup_threadcgroup_change_begin().
+ * Called from threadgroup_change_end().  Counterpart of
+ * cgroup_threadcgroup_change_begin().
  */
 static inline void cgroup_threadgroup_change_end(struct task_struct *tsk)
 {
@@ -555,11 +549,7 @@ static inline void cgroup_threadgroup_change_end(struct task_struct *tsk)
 
 #define CGROUP_SUBSYS_COUNT 0
 
-static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk)
-{
-	might_sleep();
-}
-
+static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk) {}
 static inline void cgroup_threadgroup_change_end(struct task_struct *tsk) {}
 
 #endif	/* CONFIG_CGROUPS */
@@ -619,13 +609,13 @@ struct sock_cgroup_data {
  * updaters and return part of the previous pointer as the prioidx or
  * classid.  Such races are short-lived and the result isn't critical.
  */
-static inline u16 sock_cgroup_prioidx(struct sock_cgroup_data *skcd)
+static inline u16 sock_cgroup_prioidx(const struct sock_cgroup_data *skcd)
 {
 	/* fallback to 1 which is always the ID of the root cgroup */
 	return (skcd->is_data & 1) ? skcd->prioidx : 1;
 }
 
-static inline u32 sock_cgroup_classid(struct sock_cgroup_data *skcd)
+static inline u32 sock_cgroup_classid(const struct sock_cgroup_data *skcd)
 {
 	/* fallback to 0 which is the unconfigured default classid */
 	return (skcd->is_data & 1) ? skcd->classid : 0;

@@ -17,7 +17,6 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
@@ -25,7 +24,6 @@
 #include <linux/spi/spi.h>
 
 #define SUN6I_FIFO_DEPTH		128
-#define SUN8I_FIFO_DEPTH		64
 
 #define SUN6I_GBL_CTL_REG		0x04
 #define SUN6I_GBL_CTL_BUS_ENABLE		BIT(0)
@@ -92,7 +90,6 @@ struct sun6i_spi {
 	const u8		*tx_buf;
 	u8			*rx_buf;
 	int			len;
-	unsigned long		fifo_depth;
 };
 
 static inline u32 sun6i_spi_read(struct sun6i_spi *sspi, u32 reg)
@@ -158,9 +155,7 @@ static void sun6i_spi_set_cs(struct spi_device *spi, bool enable)
 
 static size_t sun6i_spi_max_transfer_size(struct spi_device *spi)
 {
-	struct sun6i_spi *sspi = spi_master_get_devdata(spi->master);
-
-	return sspi->fifo_depth - 1;
+	return SUN6I_FIFO_DEPTH - 1;
 }
 
 static int sun6i_spi_transfer_one(struct spi_master *master,
@@ -175,7 +170,7 @@ static int sun6i_spi_transfer_one(struct spi_master *master,
 	u32 reg;
 
 	/* We don't support transfer larger than the FIFO */
-	if (tfr->len > sspi->fifo_depth)
+	if (tfr->len > SUN6I_FIFO_DEPTH)
 		return -EINVAL;
 
 	reinit_completion(&sspi->done);
@@ -270,7 +265,7 @@ static int sun6i_spi_transfer_one(struct spi_master *master,
 			SUN6I_BURST_CTL_CNT_STC(tx_len));
 
 	/* Fill the TX FIFO */
-	sun6i_spi_fill_fifo(sspi, sspi->fifo_depth);
+	sun6i_spi_fill_fifo(sspi, SUN6I_FIFO_DEPTH);
 
 	/* Enable the interrupts */
 	sun6i_spi_write(sspi, SUN6I_INT_CTL_REG, SUN6I_INT_CTL_TC);
@@ -293,7 +288,7 @@ static int sun6i_spi_transfer_one(struct spi_master *master,
 		goto out;
 	}
 
-	sun6i_spi_drain_fifo(sspi, sspi->fifo_depth);
+	sun6i_spi_drain_fifo(sspi, SUN6I_FIFO_DEPTH);
 
 out:
 	sun6i_spi_write(sspi, SUN6I_INT_CTL_REG, 0);
@@ -403,8 +398,6 @@ static int sun6i_spi_probe(struct platform_device *pdev)
 	}
 
 	sspi->master = master;
-	sspi->fifo_depth = (unsigned long)of_device_get_match_data(&pdev->dev);
-
 	master->max_speed_hz = 100 * 1000 * 1000;
 	master->min_speed_hz = 3 * 1000;
 	master->set_cs = sun6i_spi_set_cs;
@@ -471,14 +464,13 @@ err_free_master:
 
 static int sun6i_spi_remove(struct platform_device *pdev)
 {
-	pm_runtime_disable(&pdev->dev);
+	pm_runtime_force_suspend(&pdev->dev);
 
 	return 0;
 }
 
 static const struct of_device_id sun6i_spi_match[] = {
-	{ .compatible = "allwinner,sun6i-a31-spi", .data = (void *)SUN6I_FIFO_DEPTH },
-	{ .compatible = "allwinner,sun8i-h3-spi",  .data = (void *)SUN8I_FIFO_DEPTH },
+	{ .compatible = "allwinner,sun6i-a31-spi", },
 	{}
 };
 MODULE_DEVICE_TABLE(of, sun6i_spi_match);

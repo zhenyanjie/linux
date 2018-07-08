@@ -466,6 +466,16 @@ static void clean_buffers(struct page *page, unsigned first_unmapped)
 		try_to_free_buffers(page);
 }
 
+/*
+ * For situations where we want to clean all buffers attached to a page.
+ * We don't need to calculate how many buffers are attached to the page,
+ * we just need to specify a number larger than the maximum number of buffers.
+ */
+void clean_page_buffers(struct page *page)
+{
+	clean_buffers(page, ~0U);
+}
+
 static int __mpage_writepage(struct page *page, struct writeback_control *wbc,
 		      void *data)
 {
@@ -489,7 +499,7 @@ static int __mpage_writepage(struct page *page, struct writeback_control *wbc,
 	struct buffer_head map_bh;
 	loff_t i_size = i_size_read(inode);
 	int ret = 0;
-	int op_flags = wbc_to_write_flags(wbc);
+	int op_flags = (wbc->sync_mode == WB_SYNC_ALL ?  WRITE_SYNC : 0);
 
 	if (page_has_buffers(page)) {
 		struct buffer_head *head = page_buffers(page);
@@ -555,7 +565,8 @@ static int __mpage_writepage(struct page *page, struct writeback_control *wbc,
 		if (mpd->get_block(inode, block_in_file, &map_bh, 1))
 			goto confused;
 		if (buffer_new(&map_bh))
-			clean_bdev_bh_alias(&map_bh);
+			unmap_underlying_metadata(map_bh.b_bdev,
+						map_bh.b_blocknr);
 		if (buffer_boundary(&map_bh)) {
 			boundary_block = map_bh.b_blocknr;
 			boundary_bdev = map_bh.b_bdev;
@@ -603,10 +614,8 @@ alloc_new:
 	if (bio == NULL) {
 		if (first_unmapped == blocks_per_page) {
 			if (!bdev_write_page(bdev, blocks[0] << (blkbits - 9),
-								page, wbc)) {
-				clean_buffers(page, first_unmapped);
+								page, wbc))
 				goto out;
-			}
 		}
 		bio = mpage_alloc(bdev, blocks[0] << (blkbits - 9),
 				BIO_MAX_PAGES, GFP_NOFS|__GFP_HIGH);
@@ -704,7 +713,7 @@ mpage_writepages(struct address_space *mapping,
 		ret = write_cache_pages(mapping, wbc, __mpage_writepage, &mpd);
 		if (mpd.bio) {
 			int op_flags = (wbc->sync_mode == WB_SYNC_ALL ?
-				  REQ_SYNC : 0);
+				  WRITE_SYNC : 0);
 			mpage_bio_submit(REQ_OP_WRITE, op_flags, mpd.bio);
 		}
 	}
@@ -725,7 +734,7 @@ int mpage_writepage(struct page *page, get_block_t get_block,
 	int ret = __mpage_writepage(page, wbc, &mpd);
 	if (mpd.bio) {
 		int op_flags = (wbc->sync_mode == WB_SYNC_ALL ?
-			  REQ_SYNC : 0);
+			  WRITE_SYNC : 0);
 		mpage_bio_submit(REQ_OP_WRITE, op_flags, mpd.bio);
 	}
 	return ret;

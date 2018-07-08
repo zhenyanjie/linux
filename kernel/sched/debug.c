@@ -11,8 +11,7 @@
  */
 
 #include <linux/proc_fs.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/task.h>
+#include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <linux/kallsyms.h>
 #include <linux/utsname.h>
@@ -954,10 +953,6 @@ void proc_sched_show_task(struct task_struct *p, struct seq_file *m)
 #endif
 	P(policy);
 	P(prio);
-	if (p->policy == SCHED_DEADLINE) {
-		P(dl.runtime);
-		P(dl.deadline);
-	}
 #undef PN_SCHEDSTAT
 #undef PN
 #undef __PN

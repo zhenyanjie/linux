@@ -79,9 +79,6 @@ struct udp_sock {
 	int			(*gro_complete)(struct sock *sk,
 						struct sk_buff *skb,
 						int nhoff);
-
-	/* This field is dirtied by udp_recvmsg() */
-	int		forward_deficit;
 };
 
 static inline struct udp_sock *udp_sk(const struct sock *sk)

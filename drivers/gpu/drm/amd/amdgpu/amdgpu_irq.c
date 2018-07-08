@@ -61,8 +61,10 @@ static void amdgpu_hotplug_work_func(struct work_struct *work)
 	struct drm_connector *connector;
 
 	mutex_lock(&mode_config->mutex);
-	list_for_each_entry(connector, &mode_config->connector_list, head)
-		amdgpu_connector_hotplug(connector);
+	if (mode_config->num_connector) {
+		list_for_each_entry(connector, &mode_config->connector_list, head)
+			amdgpu_connector_hotplug(connector);
+	}
 	mutex_unlock(&mode_config->mutex);
 	/* Just fire off a uevent and let userspace tell us what to do */
 	drm_helper_hpd_irq_event(dev);
@@ -420,6 +422,15 @@ int amdgpu_irq_get(struct amdgpu_device *adev, struct amdgpu_irq_src *src,
 		return amdgpu_irq_update(adev, src, type);
 
 	return 0;
+}
+
+bool amdgpu_irq_get_delayed(struct amdgpu_device *adev,
+			struct amdgpu_irq_src *src,
+			unsigned type)
+{
+	if ((type >= src->num_types) || !src->enabled_types)
+		return false;
+	return atomic_inc_return(&src->enabled_types[type]) == 1;
 }
 
 /**

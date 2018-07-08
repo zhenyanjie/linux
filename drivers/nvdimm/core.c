@@ -317,6 +317,35 @@ ssize_t nd_sector_size_store(struct device *dev, const char *buf,
 	}
 }
 
+void __nd_iostat_start(struct bio *bio, unsigned long *start)
+{
+	struct gendisk *disk = bio->bi_bdev->bd_disk;
+	const int rw = bio_data_dir(bio);
+	int cpu = part_stat_lock();
+
+	*start = jiffies;
+	part_round_stats(cpu, &disk->part0);
+	part_stat_inc(cpu, &disk->part0, ios[rw]);
+	part_stat_add(cpu, &disk->part0, sectors[rw], bio_sectors(bio));
+	part_inc_in_flight(&disk->part0, rw);
+	part_stat_unlock();
+}
+EXPORT_SYMBOL(__nd_iostat_start);
+
+void nd_iostat_end(struct bio *bio, unsigned long start)
+{
+	struct gendisk *disk = bio->bi_bdev->bd_disk;
+	unsigned long duration = jiffies - start;
+	const int rw = bio_data_dir(bio);
+	int cpu = part_stat_lock();
+
+	part_stat_add(cpu, &disk->part0, ticks[rw], duration);
+	part_round_stats(cpu, &disk->part0);
+	part_dec_in_flight(&disk->part0, rw);
+	part_stat_unlock();
+}
+EXPORT_SYMBOL(nd_iostat_end);
+
 static ssize_t commands_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -421,14 +450,15 @@ static void set_badblock(struct badblocks *bb, sector_t s, int num)
 static void __add_badblock_range(struct badblocks *bb, u64 ns_offset, u64 len)
 {
 	const unsigned int sector_size = 512;
-	sector_t start_sector;
+	sector_t start_sector, end_sector;
 	u64 num_sectors;
 	u32 rem;
 
 	start_sector = div_u64(ns_offset, sector_size);
-	num_sectors = div_u64_rem(len, sector_size, &rem);
+	end_sector = div_u64_rem(ns_offset + len, sector_size, &rem);
 	if (rem)
-		num_sectors++;
+		end_sector++;
+	num_sectors = end_sector - start_sector;
 
 	if (unlikely(num_sectors > (u64)INT_MAX)) {
 		u64 remaining = num_sectors;

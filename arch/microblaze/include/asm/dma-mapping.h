@@ -36,9 +36,9 @@
 /*
  * Available generic sets of operations
  */
-extern const struct dma_map_ops dma_direct_ops;
+extern struct dma_map_ops dma_direct_ops;
 
-static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+static inline struct dma_map_ops *get_dma_ops(struct device *dev)
 {
 	return &dma_direct_ops;
 }

@@ -25,7 +25,7 @@
 #include <linux/module.h>
 #include <asm/page.h>
 
-const struct dma_map_ops *dma_ops;
+struct dma_map_ops *dma_ops;
 EXPORT_SYMBOL(dma_ops);
 
 int bad_dma_address;  /*  globals are automatically initialized to zero  */
@@ -119,9 +119,6 @@ static int hexagon_map_sg(struct device *hwdev, struct scatterlist *sg,
 
 		s->dma_length = s->length;
 
-		if (attrs & DMA_ATTR_SKIP_CPU_SYNC)
-			continue;
-
 		flush_dcache_range(dma_addr_to_virt(s->dma_address),
 				   dma_addr_to_virt(s->dma_address + s->length));
 	}
@@ -183,8 +180,7 @@ static dma_addr_t hexagon_map_page(struct device *dev, struct page *page,
 	if (!check_addr("map_single", dev, bus, size))
 		return bad_dma_address;
 
-	if (!(attrs & DMA_ATTR_SKIP_CPU_SYNC))
-		dma_sync(dma_addr_to_virt(bus), size, dir);
+	dma_sync(dma_addr_to_virt(bus), size, dir);
 
 	return bus;
 }
@@ -203,7 +199,7 @@ static void hexagon_sync_single_for_device(struct device *dev,
 	dma_sync(dma_addr_to_virt(dma_handle), size, dir);
 }
 
-const struct dma_map_ops hexagon_dma_ops = {
+struct dma_map_ops hexagon_dma_ops = {
 	.alloc		= hexagon_dma_alloc_coherent,
 	.free		= hexagon_free_coherent,
 	.map_sg		= hexagon_map_sg,

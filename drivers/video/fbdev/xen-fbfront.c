@@ -633,6 +633,7 @@ static void xenfb_backend_changed(struct xenbus_device *dev,
 				  enum xenbus_state backend_state)
 {
 	struct xenfb_info *info = dev_get_drvdata(&dev->dev);
+	int val;
 
 	switch (backend_state) {
 	case XenbusStateInitialising:
@@ -656,12 +657,16 @@ static void xenfb_backend_changed(struct xenbus_device *dev,
 			/* no InitWait seen yet, fudge it */
 			xenbus_switch_state(dev, XenbusStateConnected);
 
-		if (xenbus_read_unsigned(info->xbdev->otherend,
-					 "request-update", 0))
+		if (xenbus_scanf(XBT_NIL, info->xbdev->otherend,
+				 "request-update", "%d", &val) < 0)
+			val = 0;
+		if (val)
 			info->update_wanted = 1;
 
-		info->feature_resize = xenbus_read_unsigned(dev->otherend,
-							"feature-resize", 0);
+		if (xenbus_scanf(XBT_NIL, dev->otherend,
+				 "feature-resize", "%d", &val) < 0)
+			val = 0;
+		info->feature_resize = val;
 		break;
 
 	case XenbusStateClosed:

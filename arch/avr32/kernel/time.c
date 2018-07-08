@@ -20,9 +20,9 @@
 
 static bool disable_cpu_idle_poll;
 
-static u64 read_cycle_count(struct clocksource *cs)
+static cycle_t read_cycle_count(struct clocksource *cs)
 {
-	return (u64)sysreg_read(COUNT);
+	return (cycle_t)sysreg_read(COUNT);
 }
 
 /*

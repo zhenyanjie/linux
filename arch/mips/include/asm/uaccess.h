@@ -1241,9 +1241,6 @@ extern size_t __copy_in_user_eva(void *__to, const void *__from, size_t __n);
 	__cu_len;							\
 })
 
-extern __kernel_size_t __bzero_kernel(void __user *addr, __kernel_size_t size);
-extern __kernel_size_t __bzero(void __user *addr, __kernel_size_t size);
-
 /*
  * __clear_user: - Zero a block of memory in user space, with less checking.
  * @to:	  Destination address, in user space.
@@ -1260,6 +1257,13 @@ __clear_user(void __user *addr, __kernel_size_t size)
 {
 	__kernel_size_t res;
 
+#ifdef CONFIG_CPU_MICROMIPS
+/* micromips memset / bzero also clobbers t7 & t8 */
+#define bzero_clobbers "$4", "$5", "$6", __UA_t0, __UA_t1, "$15", "$24", "$31"
+#else
+#define bzero_clobbers "$4", "$5", "$6", __UA_t0, __UA_t1, "$31"
+#endif /* CONFIG_CPU_MICROMIPS */
+
 	if (eva_kernel_access()) {
 		__asm__ __volatile__(
 			"move\t$4, %1\n\t"
@@ -1269,7 +1273,7 @@ __clear_user(void __user *addr, __kernel_size_t size)
 			"move\t%0, $6"
 			: "=r" (res)
 			: "r" (addr), "r" (size)
-			: "$4", "$5", "$6", __UA_t0, __UA_t1, "$31");
+			: bzero_clobbers);
 	} else {
 		might_fault();
 		__asm__ __volatile__(
@@ -1280,7 +1284,7 @@ __clear_user(void __user *addr, __kernel_size_t size)
 			"move\t%0, $6"
 			: "=r" (res)
 			: "r" (addr), "r" (size)
-			: "$4", "$5", "$6", __UA_t0, __UA_t1, "$31");
+			: bzero_clobbers);
 	}
 
 	return res;
@@ -1295,9 +1299,6 @@ __clear_user(void __user *addr, __kernel_size_t size)
 		__cl_size = __clear_user(__cl_addr, __cl_size);		\
 	__cl_size;							\
 })
-
-extern long __strncpy_from_kernel_nocheck_asm(char *__to, const char __user *__from, long __len);
-extern long __strncpy_from_user_nocheck_asm(char *__to, const char __user *__from, long __len);
 
 /*
  * __strncpy_from_user: - Copy a NUL terminated string from userspace, with less checking.
@@ -1350,9 +1351,6 @@ __strncpy_from_user(char *__to, const char __user *__from, long __len)
 	return res;
 }
 
-extern long __strncpy_from_kernel_asm(char *__to, const char __user *__from, long __len);
-extern long __strncpy_from_user_asm(char *__to, const char __user *__from, long __len);
-
 /*
  * strncpy_from_user: - Copy a NUL terminated string from userspace.
  * @dst:   Destination address, in kernel space.  This buffer must be at
@@ -1402,9 +1400,6 @@ strncpy_from_user(char *__to, const char __user *__from, long __len)
 	return res;
 }
 
-extern long __strlen_kernel_asm(const char __user *s);
-extern long __strlen_user_asm(const char __user *s);
-
 /*
  * strlen_user: - Get the size of a string in user space.
  * @str: The string to measure.
@@ -1446,9 +1441,6 @@ static inline long strlen_user(const char __user *s)
 	return res;
 }
 
-extern long __strnlen_kernel_nocheck_asm(const char __user *s, long n);
-extern long __strnlen_user_nocheck_asm(const char __user *s, long n);
-
 /* Returns: 0 if bad, string length+1 (memory size) of string if ok */
 static inline long __strnlen_user(const char __user *s, long n)
 {
@@ -1477,9 +1469,6 @@ static inline long __strnlen_user(const char __user *s, long n)
 
 	return res;
 }
-
-extern long __strnlen_kernel_asm(const char __user *s, long n);
-extern long __strnlen_user_asm(const char __user *s, long n);
 
 /*
  * strnlen_user: - Get the size of a string in user space.

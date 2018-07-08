@@ -70,7 +70,7 @@
 #include <linux/spinlock.h>
 #include <linux/virtio.h>
 #include <linux/virtio_config.h>
-#include <uapi/linux/virtio_mmio.h>
+#include <linux/virtio_mmio.h>
 #include <linux/virtio_ring.h>
 
 
@@ -446,8 +446,7 @@ error_available:
 static int vm_find_vqs(struct virtio_device *vdev, unsigned nvqs,
 		       struct virtqueue *vqs[],
 		       vq_callback_t *callbacks[],
-		       const char * const names[],
-		       struct irq_affinity *desc)
+		       const char * const names[])
 {
 	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vdev);
 	unsigned int irq = platform_get_irq(vm_dev->pdev, 0);
@@ -491,7 +490,6 @@ static const struct virtio_config_ops virtio_mmio_config_ops = {
 };
 
 
-static void virtio_mmio_release_dev_empty(struct device *_d) {}
 
 /* Platform device */
 
@@ -515,7 +513,6 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 		return  -ENOMEM;
 
 	vm_dev->vdev.dev.parent = &pdev->dev;
-	vm_dev->vdev.dev.release = virtio_mmio_release_dev_empty;
 	vm_dev->vdev.config = &virtio_mmio_config_ops;
 	vm_dev->pdev = pdev;
 	INIT_LIST_HEAD(&vm_dev->virtqueues);

@@ -33,7 +33,10 @@
  *
  * @refcount: Refcount for this master object.
  * @dev: Link back to the DRM device
- * @lock: DRI1 lock information.
+ * @unique: Unique identifier: e.g. busid. Protected by drm_global_mutex.
+ * @unique_len: Length of unique field. Protected by drm_global_mutex.
+ * @magic_map: Map of used authentication tokens. Protected by struct_mutex.
+ * @lock: DRI lock information.
  * @driver_priv: Pointer to driver-private information.
  *
  * Note that master structures are only relevant for the legacy/primary device
@@ -42,20 +45,8 @@
 struct drm_master {
 	struct kref refcount;
 	struct drm_device *dev;
-	/**
-	 * @unique: Unique identifier: e.g. busid. Protected by
-	 * &drm_device.master_mutex.
-	 */
 	char *unique;
-	/**
-	 * @unique_len: Length of unique field. Protected by
-	 * &drm_device.master_mutex.
-	 */
 	int unique_len;
-	/**
-	 * @magic_map: Map of used authentication tokens. Protected by
-	 * &drm_device.master_mutex.
-	 */
 	struct idr magic_map;
 	struct drm_lock_data lock;
 	void *driver_priv;

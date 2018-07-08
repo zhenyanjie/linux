@@ -32,10 +32,7 @@
 #include <linux/notifier.h>
 #include <linux/suspend.h>
 #include <linux/acpi.h>
-#include <linux/io-64-nonatomic-lo-hi.h>
-
 #include <asm/intel_pmc_ipc.h>
-
 #include <linux/platform_data/itco_wdt.h>
 
 /*
@@ -57,18 +54,6 @@
 #define IPC_WRITE_BUFFER	0x80
 #define IPC_READ_BUFFER		0x90
 
-/* PMC Global Control Registers */
-#define GCR_TELEM_DEEP_S0IX_OFFSET	0x1078
-#define GCR_TELEM_SHLW_S0IX_OFFSET	0x1080
-
-/* Residency with clock rate at 19.2MHz to usecs */
-#define S0IX_RESIDENCY_IN_USECS(d, s)		\
-({						\
-	u64 result = 10ull * ((d) + (s));	\
-	do_div(result, 192);			\
-	result;					\
-})
-
 /*
  * 16-byte buffer for sending data associated with IPC command.
  */
@@ -83,7 +68,7 @@
 #define PLAT_RESOURCE_IPC_INDEX		0
 #define PLAT_RESOURCE_IPC_SIZE		0x1000
 #define PLAT_RESOURCE_GCR_OFFSET	0x1008
-#define PLAT_RESOURCE_GCR_SIZE		0x1000
+#define PLAT_RESOURCE_GCR_SIZE		0x4
 #define PLAT_RESOURCE_BIOS_DATA_INDEX	1
 #define PLAT_RESOURCE_BIOS_IFACE_INDEX	2
 #define PLAT_RESOURCE_TELEM_SSRAM_INDEX	3
@@ -112,6 +97,8 @@
 #define TCO_PMC_OFFSET			0x8
 #define TCO_PMC_SIZE			0x4
 
+static const int iTCO_version = 3;
+
 static struct intel_pmc_ipc_dev {
 	struct device *dev;
 	void __iomem *ipc_base;
@@ -128,7 +115,6 @@ static struct intel_pmc_ipc_dev {
 	/* gcr */
 	resource_size_t gcr_base;
 	int gcr_size;
-	bool has_gcr_regs;
 
 	/* punit */
 	struct platform_device *punit_dev;
@@ -192,11 +178,6 @@ static inline u8 ipc_data_readb(u32 offset)
 static inline u32 ipc_data_readl(u32 offset)
 {
 	return readl(ipcdev.ipc_base + IPC_READ_BUFFER + offset);
-}
-
-static inline u64 gcr_data_readq(u32 offset)
-{
-	return readq(ipcdev.ipc_base + offset);
 }
 
 static int intel_pmc_ipc_check_status(void)
@@ -408,7 +389,6 @@ static void ipc_pci_remove(struct pci_dev *pdev)
 static const struct pci_device_id ipc_pci_ids[] = {
 	{PCI_VDEVICE(INTEL, 0x0a94), 0},
 	{PCI_VDEVICE(INTEL, 0x1a94), 0},
-	{PCI_VDEVICE(INTEL, 0x5a94), 0},
 	{ 0,}
 };
 MODULE_DEVICE_TABLE(pci, ipc_pci_ids);
@@ -732,8 +712,7 @@ static int ipc_plat_get_res(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Failed to get ipc resource\n");
 		return -ENXIO;
 	}
-	size = PLAT_RESOURCE_IPC_SIZE + PLAT_RESOURCE_GCR_SIZE;
-
+	size = PLAT_RESOURCE_IPC_SIZE;
 	if (!request_mem_region(res->start, size, pdev->name)) {
 		dev_err(&pdev->dev, "Failed to request ipc resource\n");
 		return -EBUSY;
@@ -768,28 +747,6 @@ static int ipc_plat_get_res(struct platform_device *pdev)
 
 	return 0;
 }
-
-/**
- * intel_pmc_s0ix_counter_read() - Read S0ix residency.
- * @data: Out param that contains current S0ix residency count.
- *
- * Return: an error code or 0 on success.
- */
-int intel_pmc_s0ix_counter_read(u64 *data)
-{
-	u64 deep, shlw;
-
-	if (!ipcdev.has_gcr_regs)
-		return -EACCES;
-
-	deep = gcr_data_readq(GCR_TELEM_DEEP_S0IX_OFFSET);
-	shlw = gcr_data_readq(GCR_TELEM_SHLW_S0IX_OFFSET);
-
-	*data = S0IX_RESIDENCY_IN_USECS(deep, shlw);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(intel_pmc_s0ix_counter_read);
 
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id ipc_acpi_ids[] = {
@@ -840,8 +797,6 @@ static int ipc_plat_probe(struct platform_device *pdev)
 		goto err_sys;
 	}
 
-	ipcdev.has_gcr_regs = true;
-
 	return 0;
 err_sys:
 	free_irq(ipcdev.irq, &ipcdev);
@@ -853,11 +808,8 @@ err_device:
 	iounmap(ipcdev.ipc_base);
 	res = platform_get_resource(pdev, IORESOURCE_MEM,
 				    PLAT_RESOURCE_IPC_INDEX);
-	if (res) {
-		release_mem_region(res->start,
-				   PLAT_RESOURCE_IPC_SIZE +
-				   PLAT_RESOURCE_GCR_SIZE);
-	}
+	if (res)
+		release_mem_region(res->start, PLAT_RESOURCE_IPC_SIZE);
 	return ret;
 }
 
@@ -873,11 +825,8 @@ static int ipc_plat_remove(struct platform_device *pdev)
 	iounmap(ipcdev.ipc_base);
 	res = platform_get_resource(pdev, IORESOURCE_MEM,
 				    PLAT_RESOURCE_IPC_INDEX);
-	if (res) {
-		release_mem_region(res->start,
-				   PLAT_RESOURCE_IPC_SIZE +
-				   PLAT_RESOURCE_GCR_SIZE);
-	}
+	if (res)
+		release_mem_region(res->start, PLAT_RESOURCE_IPC_SIZE);
 	ipcdev.dev = NULL;
 	return 0;
 }

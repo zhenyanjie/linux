@@ -46,7 +46,8 @@ ENTRY(entry)
 	 *                         efi_system_table_t *sys_table,
 	 *                         unsigned long *image_addr) ;
 	 */
-	adr_l	x8, _text
+	adrp	x8, _text
+	add	x8, x8, #:lo12:_text
 	add	x2, sp, 16
 	str	x8, [x2]
 	bl	efi_entry
@@ -67,8 +68,10 @@ ENTRY(entry)
 	/*
 	 * Calculate size of the kernel Image (same for original and copy).
 	 */
-	adr_l	x1, _text
-	adr_l	x2, _edata
+	adrp	x1, _text
+	add	x1, x1, #:lo12:_text
+	adrp	x2, _edata
+	add	x2, x2, #:lo12:_edata
 	sub	x1, x2, x1
 
 	/*

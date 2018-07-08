@@ -18,6 +18,7 @@
 #include <linux/cred.h>
 #include <linux/key-type.h>
 #include <linux/digsig.h>
+#include <linux/vmalloc.h>
 #include <crypto/public_key.h>
 #include <keys/system_keyring.h>
 
@@ -51,7 +52,7 @@ static bool init_keyring __initdata;
 int integrity_digsig_verify(const unsigned int id, const char *sig, int siglen,
 			    const char *digest, int digestlen)
 {
-	if (id >= INTEGRITY_KEYRING_MAX || siglen < 2)
+	if (id >= INTEGRITY_KEYRING_MAX)
 		return -EINVAL;
 
 	if (!keyring[id]) {

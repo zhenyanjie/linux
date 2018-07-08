@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 Oracle.  All rights reserved.
+ * Copyright (c) 2006, 2018 Oracle and/or its affiliates. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -259,9 +259,8 @@ restart:
 			 * connection.
 			 * Therefore, we never retransmit messages with RDMA ops.
 			 */
-			if (test_bit(RDS_MSG_FLUSH, &rm->m_flags) ||
-			    (rm->rdma.op_active &&
-			    test_bit(RDS_MSG_RETRANSMITTED, &rm->m_flags))) {
+			if (rm->rdma.op_active &&
+			    test_bit(RDS_MSG_RETRANSMITTED, &rm->m_flags)) {
 				spin_lock_irqsave(&cp->cp_lock, flags);
 				if (test_and_clear_bit(RDS_MSG_ON_CONN, &rm->m_flags))
 					list_move(&rm->m_conn_item, &to_be_dropped);
@@ -984,10 +983,15 @@ static int rds_send_mprds_hash(struct rds_sock *rs, struct rds_connection *conn)
 	if (conn->c_npaths == 0 && hash != 0) {
 		rds_send_ping(conn);
 
-		if (conn->c_npaths == 0) {
-			wait_event_interruptible(conn->c_hs_waitq,
-						 (conn->c_npaths != 0));
-		}
+		/* The underlying connection is not up yet.  Need to wait
+		 * until it is up to be sure that the non-zero c_path can be
+		 * used.  But if we are interrupted, we have to use the zero
+		 * c_path in case the connection ends up being non-MP capable.
+		 */
+		if (conn->c_npaths == 0)
+			if (wait_event_interruptible(conn->c_hs_waitq,
+						     conn->c_npaths != 0))
+				hash = 0;
 		if (conn->c_npaths == 1)
 			hash = 0;
 	}
@@ -1007,6 +1011,9 @@ static int rds_rdma_bytes(struct msghdr *msg, size_t *rdma_bytes)
 			continue;
 
 		if (cmsg->cmsg_type == RDS_CMSG_RDMA_ARGS) {
+			if (cmsg->cmsg_len <
+			    CMSG_LEN(sizeof(struct rds_rdma_args)))
+				return -EINVAL;
 			args = CMSG_DATA(cmsg);
 			*rdma_bytes += args->remote_vec.bytes;
 		}
@@ -1211,7 +1218,7 @@ out:
  * or
  *   RDS_FLAG_HB_PONG|RDS_FLAG_ACK_REQUIRED
  */
-static int
+int
 rds_send_probe(struct rds_conn_path *cp, __be16 sport,
 	       __be16 dport, u8 h_flags)
 {
@@ -1252,10 +1259,6 @@ rds_send_probe(struct rds_conn_path *cp, __be16 sport,
 		rds_message_add_extension(&rm->m_inc.i_hdr,
 					  RDS_EXTHDR_NPATHS, &npaths,
 					  sizeof(npaths));
-		rds_message_add_extension(&rm->m_inc.i_hdr,
-					  RDS_EXTHDR_GEN_NUM,
-					  &cp->cp_conn->c_my_gen_num,
-					  sizeof(u32));
 	}
 	spin_unlock_irqrestore(&cp->cp_lock, flags);
 
@@ -1280,7 +1283,7 @@ rds_send_pong(struct rds_conn_path *cp, __be16 dport)
 	return rds_send_probe(cp, 0, dport, 0);
 }
 
-static void
+void
 rds_send_ping(struct rds_connection *conn)
 {
 	unsigned long flags;

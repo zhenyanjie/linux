@@ -2034,5 +2034,9 @@ static struct platform_driver armv7_pmu_driver = {
 	.probe		= armv7_pmu_device_probe,
 };
 
-builtin_platform_driver(armv7_pmu_driver);
+static int __init register_armv7_pmu_driver(void)
+{
+	return platform_driver_register(&armv7_pmu_driver);
+}
+device_initcall(register_armv7_pmu_driver);
 #endif	/* CONFIG_CPU_V7 */

@@ -134,6 +134,16 @@ static int map_tboot_page(unsigned long vaddr, unsigned long pfn,
 		return -1;
 	set_pte_at(&tboot_mm, vaddr, pte, pfn_pte(pfn, prot));
 	pte_unmap(pte);
+
+	/*
+	 * PTI poisons low addresses in the kernel page tables in the
+	 * name of making them unusable for userspace.  To execute
+	 * code at such a low address, the poison must be cleared.
+	 *
+	 * Note: 'pgd' actually gets set in pud_alloc().
+	 */
+	pgd->pgd &= ~_PAGE_NX;
+
 	return 0;
 }
 
@@ -408,7 +418,7 @@ static __init int tboot_late_init(void)
 	tboot_create_trampoline();
 
 	atomic_set(&ap_wfs_count, 0);
-	cpuhp_setup_state(CPUHP_AP_X86_TBOOT_DYING, "x86/tboot:dying", NULL,
+	cpuhp_setup_state(CPUHP_AP_X86_TBOOT_DYING, "AP_X86_TBOOT_DYING", NULL,
 			  tboot_dying_cpu);
 #ifdef CONFIG_DEBUG_FS
 	debugfs_create_file("tboot_log", S_IRUSR,

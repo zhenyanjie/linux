@@ -15,8 +15,6 @@
  *  GNU General Public License for more details.
  */
 
-#include "cx23885.h"
-
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -25,6 +23,7 @@
 #include <linux/firmware.h>
 #include <misc/altera.h>
 
+#include "cx23885.h"
 #include "tuner-xc2028.h"
 #include "netup-eeprom.h"
 #include "netup-init.h"
@@ -1097,24 +1096,26 @@ void cx23885_card_list(struct cx23885_dev *dev)
 
 	if (0 == dev->pci->subsystem_vendor &&
 	    0 == dev->pci->subsystem_device) {
-		pr_info("%s: Board has no valid PCIe Subsystem ID and can't\n"
-			"%s: be autodetected. Pass card=<n> insmod option\n"
-			"%s: to workaround that. Redirect complaints to the\n"
-			"%s: vendor of the TV card.  Best regards,\n"
-			"%s:         -- tux\n",
-			dev->name, dev->name, dev->name, dev->name, dev->name);
+		printk(KERN_INFO
+			"%s: Board has no valid PCIe Subsystem ID and can't\n"
+		       "%s: be autodetected. Pass card=<n> insmod option\n"
+		       "%s: to workaround that. Redirect complaints to the\n"
+		       "%s: vendor of the TV card.  Best regards,\n"
+		       "%s:         -- tux\n",
+		       dev->name, dev->name, dev->name, dev->name, dev->name);
 	} else {
-		pr_info("%s: Your board isn't known (yet) to the driver.\n"
-			"%s: Try to pick one of the existing card configs via\n"
-			"%s: card=<n> insmod option.  Updating to the latest\n"
-			"%s: version might help as well.\n",
-			dev->name, dev->name, dev->name, dev->name);
+		printk(KERN_INFO
+			"%s: Your board isn't known (yet) to the driver.\n"
+		       "%s: Try to pick one of the existing card configs via\n"
+		       "%s: card=<n> insmod option.  Updating to the latest\n"
+		       "%s: version might help as well.\n",
+		       dev->name, dev->name, dev->name, dev->name);
 	}
-	pr_info("%s: Here is a list of valid choices for the card=<n> insmod option:\n",
+	printk(KERN_INFO "%s: Here is a list of valid choices for the card=<n> insmod option:\n",
 	       dev->name);
 	for (i = 0; i < cx23885_bcount; i++)
-		pr_info("%s:    card=%d -> %s\n",
-			dev->name, i, cx23885_boards[i].name);
+		printk(KERN_INFO "%s:    card=%d -> %s\n",
+		       dev->name, i, cx23885_boards[i].name);
 }
 
 static void viewcast_eeprom(struct cx23885_dev *dev, u8 *eeprom_data)
@@ -1303,13 +1304,14 @@ static void hauppauge_eeprom(struct cx23885_dev *dev, u8 *eeprom_data)
 		 */
 		break;
 	default:
-		pr_warn("%s: warning: unknown hauppauge model #%d\n",
+		printk(KERN_WARNING "%s: warning: "
+			"unknown hauppauge model #%d\n",
 			dev->name, tv.model);
 		break;
 	}
 
-	pr_info("%s: hauppauge eeprom: model=%d\n",
-		dev->name, tv.model);
+	printk(KERN_INFO "%s: hauppauge eeprom: model=%d\n",
+			dev->name, tv.model);
 }
 
 /* Some TBS cards require initing a chip using a bitbanged SPI attached
@@ -1351,8 +1353,8 @@ int cx23885_tuner_callback(void *priv, int component, int command, int arg)
 		return 0;
 
 	if (command != 0) {
-		pr_err("%s(): Unknown command 0x%x.\n",
-		       __func__, command);
+		printk(KERN_ERR "%s(): Unknown command 0x%x.\n",
+			__func__, command);
 		return -EINVAL;
 	}
 
@@ -2280,6 +2282,10 @@ void cx23885_card_setup(struct cx23885_dev *dev)
 				&dev->i2c_bus[2].i2c_adap,
 				"cx25840", 0x88 >> 1, NULL);
 		if (dev->sd_cx25840) {
+			/* set host data for clk_freq configuration */
+			v4l2_set_subdev_hostdata(dev->sd_cx25840,
+						&dev->clk_freq);
+
 			dev->sd_cx25840->grp_id = CX23885_HW_AV_CORE;
 			v4l2_subdev_call(dev->sd_cx25840, core, load_fw);
 		}
@@ -2335,13 +2341,14 @@ void cx23885_card_setup(struct cx23885_dev *dev)
 			filename = "dvb-netup-altera-01.fw";
 			break;
 		}
-		pr_info("NetUP card rev=0x%x fw_filename=%s\n",
-			cinfo.rev, filename);
+		printk(KERN_INFO "NetUP card rev=0x%x fw_filename=%s\n",
+				cinfo.rev, filename);
 
 		ret = request_firmware(&fw, filename, &dev->pci->dev);
 		if (ret != 0)
-			pr_err("did not find the firmware file. (%s) Please see linux/Documentation/dvb/ for more details on firmware-problems.",
-			       filename);
+			printk(KERN_ERR "did not find the firmware file. (%s) "
+			"Please see linux/Documentation/dvb/ for more details "
+			"on firmware-problems.", filename);
 		else
 			altera_init(&netup_config, fw);
 

@@ -23,8 +23,6 @@
 
 #include <linux/printk.h>
 #include <linux/slab.h>
-#include <linux/mm_types.h>
-
 #include "kfd_priv.h"
 #include "kfd_mqd_manager.h"
 #include "vi_structs.h"

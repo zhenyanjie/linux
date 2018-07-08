@@ -56,7 +56,6 @@
 #include <linux/list.h>
 #include <linux/notifier.h>
 #include <linux/reboot.h>
-#include <linux/workqueue.h>
 #include <generated/utsrelease.h>
 
 #include <linux/io.h>
@@ -64,6 +63,8 @@
 
 #define LCD_MINOR		156
 #define KEYPAD_MINOR		185
+
+#define PANEL_VERSION		"0.9.5"
 
 #define LCD_MAXBYTES		256	/* max burst write */
 
@@ -76,8 +77,8 @@
 /* a key repeats this times INPUT_POLL_TIME */
 #define KEYPAD_REP_DELAY	(2)
 
-/* keep the light on this many seconds for each flash */
-#define FLASH_LIGHT_TEMPO	(4)
+/* keep the light on this times INPUT_POLL_TIME for each flash */
+#define FLASH_LIGHT_TEMPO	(200)
 
 /* converts an r_str() input to an active high, bits string : 000BAOSE */
 #define PNL_PINPUT(a)		((((unsigned char)(a)) ^ 0x7F) >> 3)
@@ -120,6 +121,8 @@
 #define PIN_SELECP		17
 #define PIN_NOT_SET		127
 
+#define LCD_FLAG_S		0x0001
+#define LCD_FLAG_ID		0x0002
 #define LCD_FLAG_B		0x0004	/* blink on */
 #define LCD_FLAG_C		0x0008	/* cursor on */
 #define LCD_FLAG_D		0x0010	/* display on */
@@ -253,10 +256,7 @@ static struct {
 	int hwidth;
 	int charset;
 	int proto;
-
-	struct delayed_work bl_work;
-	struct mutex bl_tempo_lock;	/* Protects access to bl_tempo */
-	bool bl_tempo;
+	int light_tempo;
 
 	/* TODO: use union here? */
 	struct {
@@ -661,6 +661,8 @@ static void lcd_get_bits(unsigned int port, int *val)
 	}
 }
 
+static void init_scan_timer(void);
+
 /* sets data port bits according to current signals values */
 static int set_data_bits(void)
 {
@@ -792,8 +794,11 @@ static void lcd_send_serial(int byte)
 }
 
 /* turn the backlight on or off */
-static void __lcd_backlight(int on)
+static void lcd_backlight(int on)
 {
+	if (lcd.pins.bl == PIN_NONE)
+		return;
+
 	/* The backlight is activated by setting the AUTOFEED line to +5V  */
 	spin_lock_irq(&pprt_lock);
 	if (on)
@@ -802,44 +807,6 @@ static void __lcd_backlight(int on)
 		clear_bit(LCD_BIT_BL, bits);
 	panel_set_bits();
 	spin_unlock_irq(&pprt_lock);
-}
-
-static void lcd_backlight(int on)
-{
-	if (lcd.pins.bl == PIN_NONE)
-		return;
-
-	mutex_lock(&lcd.bl_tempo_lock);
-	if (!lcd.bl_tempo)
-		__lcd_backlight(on);
-	mutex_unlock(&lcd.bl_tempo_lock);
-}
-
-static void lcd_bl_off(struct work_struct *work)
-{
-	mutex_lock(&lcd.bl_tempo_lock);
-	if (lcd.bl_tempo) {
-		lcd.bl_tempo = false;
-		if (!(lcd.flags & LCD_FLAG_L))
-			__lcd_backlight(0);
-	}
-	mutex_unlock(&lcd.bl_tempo_lock);
-}
-
-/* turn the backlight on for a little while */
-static void lcd_poke(void)
-{
-	if (lcd.pins.bl == PIN_NONE)
-		return;
-
-	cancel_delayed_work_sync(&lcd.bl_work);
-
-	mutex_lock(&lcd.bl_tempo_lock);
-	if (!lcd.bl_tempo && !(lcd.flags & LCD_FLAG_L))
-		__lcd_backlight(1);
-	lcd.bl_tempo = true;
-	schedule_delayed_work(&lcd.bl_work, FLASH_LIGHT_TEMPO * HZ);
-	mutex_unlock(&lcd.bl_tempo_lock);
 }
 
 /* send a command to the LCD panel in serial mode */
@@ -940,13 +907,6 @@ static void lcd_gotoxy(void)
 			 (lcd.hwidth - 1) : lcd.bwidth - 1));
 }
 
-static void lcd_home(void)
-{
-	lcd.addr.x = 0;
-	lcd.addr.y = 0;
-	lcd_gotoxy();
-}
-
 static void lcd_print(char c)
 {
 	if (lcd.addr.x < lcd.bwidth) {
@@ -965,7 +925,9 @@ static void lcd_clear_fast_s(void)
 {
 	int pos;
 
-	lcd_home();
+	lcd.addr.x = 0;
+	lcd.addr.y = 0;
+	lcd_gotoxy();
 
 	spin_lock_irq(&pprt_lock);
 	for (pos = 0; pos < lcd.height * lcd.hwidth; pos++) {
@@ -977,7 +939,9 @@ static void lcd_clear_fast_s(void)
 	}
 	spin_unlock_irq(&pprt_lock);
 
-	lcd_home();
+	lcd.addr.x = 0;
+	lcd.addr.y = 0;
+	lcd_gotoxy();
 }
 
 /* fills the display with spaces and resets X/Y */
@@ -985,7 +949,9 @@ static void lcd_clear_fast_p8(void)
 {
 	int pos;
 
-	lcd_home();
+	lcd.addr.x = 0;
+	lcd.addr.y = 0;
+	lcd_gotoxy();
 
 	spin_lock_irq(&pprt_lock);
 	for (pos = 0; pos < lcd.height * lcd.hwidth; pos++) {
@@ -1011,7 +977,9 @@ static void lcd_clear_fast_p8(void)
 	}
 	spin_unlock_irq(&pprt_lock);
 
-	lcd_home();
+	lcd.addr.x = 0;
+	lcd.addr.y = 0;
+	lcd_gotoxy();
 }
 
 /* fills the display with spaces and resets X/Y */
@@ -1019,7 +987,9 @@ static void lcd_clear_fast_tilcd(void)
 {
 	int pos;
 
-	lcd_home();
+	lcd.addr.x = 0;
+	lcd.addr.y = 0;
+	lcd_gotoxy();
 
 	spin_lock_irq(&pprt_lock);
 	for (pos = 0; pos < lcd.height * lcd.hwidth; pos++) {
@@ -1030,7 +1000,9 @@ static void lcd_clear_fast_tilcd(void)
 
 	spin_unlock_irq(&pprt_lock);
 
-	lcd_home();
+	lcd.addr.x = 0;
+	lcd.addr.y = 0;
+	lcd_gotoxy();
 }
 
 /* clears the display and resets X/Y */
@@ -1136,8 +1108,13 @@ static inline int handle_lcd_special_code(void)
 		processed = 1;
 		break;
 	case '*':
-		/* flash back light */
-		lcd_poke();
+		/* flash back light using the keypad timer */
+		if (scan_timer.function) {
+			if (lcd.light_tempo == 0 &&
+			    ((lcd.flags & LCD_FLAG_L) == 0))
+				lcd_backlight(1);
+			lcd.light_tempo = FLASH_LIGHT_TEMPO;
+		}
 		processed = 1;
 		break;
 	case 'f':	/* Small Font */
@@ -1301,14 +1278,21 @@ static inline int handle_lcd_special_code(void)
 			lcd_write_cmd(LCD_CMD_FUNCTION_SET
 				      | LCD_CMD_DATA_LEN_8BITS
 				      | ((lcd.flags & LCD_FLAG_F)
-						      ? LCD_CMD_FONT_5X10_DOTS
-								      : 0)
+						      ? LCD_CMD_TWO_LINES : 0)
 				      | ((lcd.flags & LCD_FLAG_N)
-						      ? LCD_CMD_TWO_LINES
+						      ? LCD_CMD_FONT_5X10_DOTS
 								      : 0));
 		/* check whether L flag was changed */
-		else if ((oldflags ^ lcd.flags) & (LCD_FLAG_L))
-			lcd_backlight(!!(lcd.flags & LCD_FLAG_L));
+		else if ((oldflags ^ lcd.flags) & (LCD_FLAG_L)) {
+			if (lcd.flags & (LCD_FLAG_L))
+				lcd_backlight(1);
+			else if (lcd.light_tempo == 0)
+				/*
+				 * switch off the light only when the tempo
+				 * lighting is gone
+				 */
+				lcd_backlight(0);
+		}
 	}
 
 	return processed;
@@ -1392,7 +1376,9 @@ static void lcd_write_char(char c)
 			processed = 1;
 		} else if (!strcmp(lcd.esc_seq.buf, "[H")) {
 			/* cursor to home */
-			lcd_home();
+			lcd.addr.x = 0;
+			lcd.addr.y = 0;
+			lcd_gotoxy();
 			processed = 1;
 		}
 		/* codes starting with ^[[L */
@@ -1437,17 +1423,25 @@ static ssize_t lcd_write(struct file *file,
 
 static int lcd_open(struct inode *inode, struct file *file)
 {
-	if (!atomic_dec_and_test(&lcd_available))
-		return -EBUSY;	/* open only once at a time */
+	int ret;
 
+	ret = -EBUSY;
+	if (!atomic_dec_and_test(&lcd_available))
+		goto fail; /* open only once at a time */
+
+	ret = -EPERM;
 	if (file->f_mode & FMODE_READ)	/* device is write-only */
-		return -EPERM;
+		goto fail;
 
 	if (lcd.must_clear) {
 		lcd_clear_display();
 		lcd.must_clear = false;
 	}
 	return nonseekable_open(inode, file);
+
+ fail:
+	atomic_inc(&lcd_available);
+	return ret;
 }
 
 static int lcd_release(struct inode *inode, struct file *file)
@@ -1639,10 +1633,8 @@ static void lcd_init(void)
 	else
 		lcd_char_conv = NULL;
 
-	if (lcd.pins.bl != PIN_NONE) {
-		mutex_init(&lcd.bl_tempo_lock);
-		INIT_DELAYED_WORK(&lcd.bl_work, lcd_bl_off);
-	}
+	if (lcd.pins.bl != PIN_NONE)
+		init_scan_timer();
 
 	pin_to_bits(lcd.pins.e, lcd_bits[LCD_PORT_D][LCD_BIT_E],
 		    lcd_bits[LCD_PORT_C][LCD_BIT_E]);
@@ -1671,11 +1663,14 @@ static void lcd_init(void)
 	panel_lcd_print("\x1b[Lc\x1b[Lb\x1b[L*" CONFIG_PANEL_BOOT_MESSAGE);
 #endif
 #else
-	panel_lcd_print("\x1b[Lc\x1b[Lb\x1b[L*Linux-" UTS_RELEASE);
+	panel_lcd_print("\x1b[Lc\x1b[Lb\x1b[L*Linux-" UTS_RELEASE "\nPanel-"
+			PANEL_VERSION);
 #endif
+	lcd.addr.x = 0;
+	lcd.addr.y = 0;
 	/* clear the display on the next device opening */
 	lcd.must_clear = true;
-	lcd_home();
+	lcd_gotoxy();
 }
 
 /*
@@ -1709,14 +1704,21 @@ static ssize_t keypad_read(struct file *file,
 
 static int keypad_open(struct inode *inode, struct file *file)
 {
-	if (!atomic_dec_and_test(&keypad_available))
-		return -EBUSY;	/* open only once at a time */
+	int ret;
 
+	ret = -EBUSY;
+	if (!atomic_dec_and_test(&keypad_available))
+		goto fail;	/* open only once at a time */
+
+	ret = -EPERM;
 	if (file->f_mode & FMODE_WRITE)	/* device is read-only */
-		return -EPERM;
+		goto fail;
 
 	keypad_buflen = 0;	/* flush the buffer on opening */
 	return 0;
+ fail:
+	atomic_inc(&keypad_available);
+	return ret;
 }
 
 static int keypad_release(struct inode *inode, struct file *file)
@@ -2010,8 +2012,19 @@ static void panel_scan_timer(void)
 			panel_process_inputs();
 	}
 
-	if (keypressed && lcd.enabled && lcd.initialized)
-		lcd_poke();
+	if (lcd.enabled && lcd.initialized) {
+		if (keypressed) {
+			if (lcd.light_tempo == 0 &&
+			    ((lcd.flags & LCD_FLAG_L) == 0))
+				lcd_backlight(1);
+			lcd.light_tempo = FLASH_LIGHT_TEMPO;
+		} else if (lcd.light_tempo > 0) {
+			lcd.light_tempo--;
+			if (lcd.light_tempo == 0 &&
+			    ((lcd.flags & LCD_FLAG_L) == 0))
+				lcd_backlight(0);
+		}
+	}
 
 	mod_timer(&scan_timer, jiffies + INPUT_POLL_TIME);
 }
@@ -2272,26 +2285,25 @@ static void panel_detach(struct parport *port)
 	if (scan_timer.function)
 		del_timer_sync(&scan_timer);
 
-	if (keypad.enabled) {
-		misc_deregister(&keypad_dev);
-		keypad_initialized = 0;
-	}
-
-	if (lcd.enabled) {
-		panel_lcd_print("\x0cLCD driver unloaded.\x1b[Lc\x1b[Lb\x1b[L-");
-		misc_deregister(&lcd_dev);
-		if (lcd.pins.bl != PIN_NONE) {
-			cancel_delayed_work_sync(&lcd.bl_work);
-			__lcd_backlight(0);
+	if (pprt) {
+		if (keypad.enabled) {
+			misc_deregister(&keypad_dev);
+			keypad_initialized = 0;
 		}
-		lcd.initialized = false;
-	}
 
-	/* TODO: free all input signals */
-	parport_release(pprt);
-	parport_unregister_device(pprt);
-	pprt = NULL;
-	unregister_reboot_notifier(&panel_notifier);
+		if (lcd.enabled) {
+			panel_lcd_print("\x0cLCD driver " PANEL_VERSION
+					"\nunloaded.\x1b[Lc\x1b[Lb\x1b[L-");
+			misc_deregister(&lcd_dev);
+			lcd.initialized = false;
+		}
+
+		/* TODO: free all input signals */
+		parport_release(pprt);
+		parport_unregister_device(pprt);
+		pprt = NULL;
+		unregister_reboot_notifier(&panel_notifier);
+	}
 }
 
 static struct parport_driver panel_driver = {
@@ -2403,7 +2415,7 @@ static int __init panel_init_module(void)
 
 	if (!lcd.enabled && !keypad.enabled) {
 		/* no device enabled, let's exit */
-		pr_err("panel driver disabled.\n");
+		pr_err("driver version " PANEL_VERSION " disabled.\n");
 		return -ENODEV;
 	}
 
@@ -2414,10 +2426,12 @@ static int __init panel_init_module(void)
 	}
 
 	if (pprt)
-		pr_info("panel driver registered on parport%d (io=0x%lx).\n",
-			parport, pprt->port->base);
+		pr_info("driver version " PANEL_VERSION
+			" registered on parport%d (io=0x%lx).\n", parport,
+			pprt->port->base);
 	else
-		pr_info("panel driver not yet registered\n");
+		pr_info("driver version " PANEL_VERSION
+			" not yet registered\n");
 	return 0;
 }
 

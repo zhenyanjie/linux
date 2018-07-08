@@ -18,8 +18,6 @@
 #include <linux/errno.h>
 #include <linux/export.h>
 #include <linux/sched.h>
-#include <linux/sched/task.h>
-#include <linux/cpu.h>
 #include <linux/kernel.h>
 #include <linux/memblock.h>
 #include <linux/mm.h>
@@ -37,7 +35,6 @@
 #include <linux/root_dev.h>
 #include <linux/console.h>
 #include <linux/kernel_stat.h>
-#include <linux/dma-contiguous.h>
 #include <linux/device.h>
 #include <linux/notifier.h>
 #include <linux/pfn.h>
@@ -66,6 +63,8 @@
 #include <asm/sclp.h>
 #include <asm/sysinfo.h>
 #include <asm/numa.h>
+#include <asm/alternative.h>
+#include <asm/nospec-branch.h>
 #include "entry.h"
 
 /*
@@ -306,7 +305,7 @@ static void __init setup_lowcore(void)
 	 * Setup lowcore for boot cpu
 	 */
 	BUILD_BUG_ON(sizeof(struct lowcore) != LC_PAGES * 4096);
-	lc = memblock_virt_alloc_low(sizeof(*lc), sizeof(*lc));
+	lc = __alloc_bootmem_low(LC_PAGES * PAGE_SIZE, LC_PAGES * PAGE_SIZE, 0);
 	lc->restart_psw.mask = PSW_KERNEL_BITS;
 	lc->restart_psw.addr = (unsigned long) restart_int_handler;
 	lc->external_new_psw.mask = PSW_KERNEL_BITS |
@@ -327,18 +326,20 @@ static void __init setup_lowcore(void)
 	lc->kernel_stack = ((unsigned long) &init_thread_union)
 		+ THREAD_SIZE - STACK_FRAME_OVERHEAD - sizeof(struct pt_regs);
 	lc->async_stack = (unsigned long)
-		memblock_virt_alloc(ASYNC_SIZE, ASYNC_SIZE)
+		__alloc_bootmem(ASYNC_SIZE, ASYNC_SIZE, 0)
 		+ ASYNC_SIZE - STACK_FRAME_OVERHEAD - sizeof(struct pt_regs);
 	lc->panic_stack = (unsigned long)
-		memblock_virt_alloc(PAGE_SIZE, PAGE_SIZE)
+		__alloc_bootmem(PAGE_SIZE, PAGE_SIZE, 0)
 		+ PAGE_SIZE - STACK_FRAME_OVERHEAD - sizeof(struct pt_regs);
-	lc->current_task = (unsigned long)&init_task;
+	lc->current_task = (unsigned long) init_thread_union.thread_info.task;
+	lc->thread_info = (unsigned long) &init_thread_union;
 	lc->lpp = LPP_MAGIC;
 	lc->machine_flags = S390_lowcore.machine_flags;
-	lc->preempt_count = S390_lowcore.preempt_count;
 	lc->stfl_fac_list = S390_lowcore.stfl_fac_list;
 	memcpy(lc->stfle_fac_list, S390_lowcore.stfle_fac_list,
-	       MAX_FACILITY_BIT/8);
+	       sizeof(lc->stfle_fac_list));
+	memcpy(lc->alt_stfle_fac_list, S390_lowcore.alt_stfle_fac_list,
+	       sizeof(lc->alt_stfle_fac_list));
 	if (MACHINE_HAS_VX)
 		lc->vector_save_area_addr =
 			(unsigned long) &lc->vector_save_area;
@@ -352,7 +353,7 @@ static void __init setup_lowcore(void)
 	lc->last_update_timer = S390_lowcore.last_update_timer;
 	lc->last_update_clock = S390_lowcore.last_update_clock;
 
-	restart_stack = memblock_virt_alloc(ASYNC_SIZE, ASYNC_SIZE);
+	restart_stack = __alloc_bootmem(ASYNC_SIZE, ASYNC_SIZE, 0);
 	restart_stack += ASYNC_SIZE;
 
 	/*
@@ -375,6 +376,7 @@ static void __init setup_lowcore(void)
 #ifdef CONFIG_SMP
 	lc->spinlock_lockval = arch_spin_lockval(0);
 #endif
+	lc->br_r1_trampoline = 0x07f1;	/* br %r1 */
 
 	set_prefix((u32)(unsigned long) lc);
 	lowcore_ptr[0] = lc;
@@ -415,7 +417,7 @@ static void __init setup_resources(void)
 	bss_resource.end = (unsigned long) &__bss_stop - 1;
 
 	for_each_memblock(memory, reg) {
-		res = memblock_virt_alloc(sizeof(*res), 8);
+		res = alloc_bootmem_low(sizeof(*res));
 		res->flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM;
 
 		res->name = "System RAM";
@@ -429,7 +431,7 @@ static void __init setup_resources(void)
 			    std_res->start > res->end)
 				continue;
 			if (std_res->end > res->end) {
-				sub_res = memblock_virt_alloc(sizeof(*sub_res), 8);
+				sub_res = alloc_bootmem_low(sizeof(*sub_res));
 				*sub_res = *std_res;
 				sub_res->end = res->end;
 				std_res->start = res->end + 1;
@@ -487,7 +489,7 @@ static void __init setup_memory_end(void)
 	max_pfn = max_low_pfn = PFN_DOWN(memory_end);
 	memblock_remove(memory_end, ULONG_MAX);
 
-	pr_notice("The maximum memory size is %luMB\n", memory_end >> 20);
+	pr_notice("Max memory size: %luMB\n", memory_end >> 20);
 }
 
 static void __init setup_vmcoreinfo(void)
@@ -638,8 +640,6 @@ static void __init reserve_crashkernel(void)
 static void __init reserve_initrd(void)
 {
 #ifdef CONFIG_BLK_DEV_INITRD
-	if (!INITRD_START || !INITRD_SIZE)
-		return;
 	initrd_start = INITRD_START;
 	initrd_end = initrd_start + INITRD_SIZE;
 	memblock_reserve(INITRD_START, INITRD_SIZE);
@@ -654,7 +654,7 @@ static void __init check_initrd(void)
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (INITRD_START && INITRD_SIZE &&
 	    !memblock_is_region_memory(INITRD_START, INITRD_SIZE)) {
-		pr_err("The initial RAM disk does not fit into the memory\n");
+		pr_err("initrd does not fit memory.\n");
 		memblock_free(INITRD_START, INITRD_SIZE);
 		initrd_start = initrd_end = 0;
 	}
@@ -751,7 +751,7 @@ static int __init setup_hwcaps(void)
 	/*
 	 * Huge page support HWCAP_S390_HPAGE is bit 7.
 	 */
-	if (MACHINE_HAS_EDAT1)
+	if (MACHINE_HAS_HPAGE)
 		elf_hwcap |= HWCAP_S390_HPAGE;
 
 	/*
@@ -771,14 +771,8 @@ static int __init setup_hwcaps(void)
 	 * can be disabled with the "novx" parameter. Use MACHINE_HAS_VX
 	 * instead of facility bit 129.
 	 */
-	if (MACHINE_HAS_VX) {
+	if (MACHINE_HAS_VX)
 		elf_hwcap |= HWCAP_S390_VXRS;
-		if (test_facility(134))
-			elf_hwcap |= HWCAP_S390_VXRS_EXT;
-		if (test_facility(135))
-			elf_hwcap |= HWCAP_S390_VXRS_BCD;
-	}
-
 	get_cpu_id(&cpu_id);
 	add_device_randomness(&cpu_id, sizeof(cpu_id));
 	switch (cpu_id.machine) {
@@ -882,6 +876,9 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_data = (unsigned long) &_edata;
 	init_mm.brk = (unsigned long) &_end;
 
+	if (IS_ENABLED(CONFIG_EXPOLINE_AUTO))
+		nospec_auto_detect();
+
 	parse_early_param();
 #ifdef CONFIG_CRASH_DUMP
 	/* Deactivate elfcorehdr= kernel parameter */
@@ -914,7 +911,6 @@ void __init setup_arch(char **cmdline_p)
 
 	setup_memory_end();
 	setup_memory();
-	dma_contiguous_reserve(memory_end);
 
 	check_initrd();
 	reserve_crashkernel();
@@ -933,8 +929,6 @@ void __init setup_arch(char **cmdline_p)
 	cpu_detect_mhz_feature();
         cpu_init();
 	numa_setup();
-	smp_detect_cpus();
-	topology_init_early();
 
 	/*
 	 * Create kernel page tables and switch to virtual addressing.
@@ -944,6 +938,10 @@ void __init setup_arch(char **cmdline_p)
         /* Setup default console */
 	conmode_default();
 	set_preferred_console();
+
+	apply_alternative_instructions();
+	if (IS_ENABLED(CONFIG_EXPOLINE))
+		nospec_init_branches();
 
 	/* Setup zfcpdump support */
 	setup_zfcpdump();

@@ -150,9 +150,6 @@ cond_syscall(sys_io_destroy);
 cond_syscall(sys_io_submit);
 cond_syscall(sys_io_cancel);
 cond_syscall(sys_io_getevents);
-cond_syscall(compat_sys_io_setup);
-cond_syscall(compat_sys_io_submit);
-cond_syscall(compat_sys_io_getevents);
 cond_syscall(sys_sysfs);
 cond_syscall(sys_syslog);
 cond_syscall(sys_process_vm_readv);
@@ -260,7 +257,6 @@ cond_syscall(sys_pkey_alloc);
 cond_syscall(sys_pkey_free);
 
 /* lwipport/core/syscall.c */
-cond_syscall(sys_lwip_closesock);
+cond_syscall(lwip_closesock);
 /* send/recv has already been defined in __ARCH_WANT_SYSCALL_DEPRECATED */
-
 

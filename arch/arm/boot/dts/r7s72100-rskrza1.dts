@@ -56,19 +56,6 @@
 	};
 };
 
-&sdhi1 {
-	bus-width = <4>;
-	status = "okay";
-};
-
-&ostm0 {
-	status = "okay";
-};
-
-&ostm1 {
-	status = "okay";
-};
-
 &scif2 {
 	status = "okay";
 };

@@ -1,4 +1,4 @@
-static uint32_t gf117_grgpc_data[] = {
+uint32_t gf117_grgpc_data[] = {
 /* 0x0000: gpc_mmio_list_head */
 	0x0000006c,
 /* 0x0004: gpc_mmio_list_tail */
@@ -40,7 +40,7 @@ static uint32_t gf117_grgpc_data[] = {
 	0x00000000,
 };
 
-static uint32_t gf117_grgpc_code[] = {
+uint32_t gf117_grgpc_code[] = {
 	0x03a10ef5,
 /* 0x0004: queue_put */
 	0x9800d898,

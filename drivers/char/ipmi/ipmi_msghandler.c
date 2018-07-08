@@ -102,7 +102,7 @@ struct ipmi_user {
 	struct kref refcount;
 
 	/* The upper layer that handles receive messages. */
-	const struct ipmi_user_hndl *handler;
+	struct ipmi_user_hndl *handler;
 	void             *handler_data;
 
 	/* The interface this user is bound to. */
@@ -158,16 +158,15 @@ struct seq_table {
  * Store the information in a msgid (long) to allow us to find a
  * sequence table entry from the msgid.
  */
-#define STORE_SEQ_IN_MSGID(seq, seqid) \
-	((((seq) & 0x3f) << 26) | ((seqid) & 0x3ffffff))
+#define STORE_SEQ_IN_MSGID(seq, seqid) (((seq&0xff)<<26) | (seqid&0x3ffffff))
 
 #define GET_SEQ_FROM_MSGID(msgid, seq, seqid) \
 	do {								\
-		seq = (((msgid) >> 26) & 0x3f);				\
-		seqid = ((msgid) & 0x3ffffff);				\
+		seq = ((msgid >> 26) & 0x3f);				\
+		seqid = (msgid & 0x3fffff);				\
 	} while (0)
 
-#define NEXT_SEQID(seqid) (((seqid) + 1) & 0x3ffffff)
+#define NEXT_SEQID(seqid) (((seqid) + 1) & 0x3fffff)
 
 struct ipmi_channel {
 	unsigned char medium;
@@ -919,7 +918,7 @@ static int intf_err_seq(ipmi_smi_t   intf,
 
 
 int ipmi_create_user(unsigned int          if_num,
-		     const struct ipmi_user_hndl *handler,
+		     struct ipmi_user_hndl *handler,
 		     void                  *handler_data,
 		     ipmi_user_t           *user)
 {
@@ -3878,6 +3877,9 @@ static void smi_recv_tasklet(unsigned long val)
 	 * because the lower layer is allowed to hold locks while calling
 	 * message delivery.
 	 */
+
+	rcu_read_lock();
+
 	if (!run_to_completion)
 		spin_lock_irqsave(&intf->xmit_msgs_lock, flags);
 	if (intf->curr_msg == NULL && !intf->in_shutdown) {
@@ -3899,6 +3901,8 @@ static void smi_recv_tasklet(unsigned long val)
 		spin_unlock_irqrestore(&intf->xmit_msgs_lock, flags);
 	if (newmsg)
 		intf->handlers->sender(intf->send_info, newmsg);
+
+	rcu_read_unlock();
 
 	handle_new_recv_msgs(intf);
 }
@@ -4025,7 +4029,8 @@ smi_from_recv_msg(ipmi_smi_t intf, struct ipmi_recv_msg *recv_msg,
 }
 
 static void check_msg_timeout(ipmi_smi_t intf, struct seq_table *ent,
-			      struct list_head *timeouts, long timeout_period,
+			      struct list_head *timeouts,
+			      unsigned long timeout_period,
 			      int slot, unsigned long *flags,
 			      unsigned int *waiting_msgs)
 {
@@ -4038,8 +4043,8 @@ static void check_msg_timeout(ipmi_smi_t intf, struct seq_table *ent,
 	if (!ent->inuse)
 		return;
 
-	ent->timeout -= timeout_period;
-	if (ent->timeout > 0) {
+	if (timeout_period < ent->timeout) {
+		ent->timeout -= timeout_period;
 		(*waiting_msgs)++;
 		return;
 	}
@@ -4105,7 +4110,8 @@ static void check_msg_timeout(ipmi_smi_t intf, struct seq_table *ent,
 	}
 }
 
-static unsigned int ipmi_timeout_handler(ipmi_smi_t intf, long timeout_period)
+static unsigned int ipmi_timeout_handler(ipmi_smi_t intf,
+					 unsigned long timeout_period)
 {
 	struct list_head     timeouts;
 	struct ipmi_recv_msg *msg, *msg2;
@@ -4646,4 +4652,3 @@ MODULE_AUTHOR("Corey Minyard <minyard@mvista.com>");
 MODULE_DESCRIPTION("Incoming and outgoing message routing for an IPMI"
 		   " interface.");
 MODULE_VERSION(IPMI_DRIVER_VERSION);
-MODULE_SOFTDEP("post: ipmi_devintf");

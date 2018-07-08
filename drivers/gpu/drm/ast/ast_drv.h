@@ -28,7 +28,6 @@
 #ifndef __AST_DRV_H__
 #define __AST_DRV_H__
 
-#include <drm/drm_encoder.h>
 #include <drm/drm_fb_helper.h>
 
 #include <drm/ttm/ttm_bo_api.h>
@@ -65,7 +64,6 @@ enum ast_chip {
 	AST2150,
 	AST2300,
 	AST2400,
-	AST2500,
 	AST1180,
 };
 
@@ -82,7 +80,6 @@ enum ast_tx_chip {
 #define AST_DRAM_1Gx32   3
 #define AST_DRAM_2Gx16   6
 #define AST_DRAM_4Gx16   7
-#define AST_DRAM_8Gx16   8
 
 struct ast_fbdev;
 
@@ -129,7 +126,7 @@ struct ast_private {
 };
 
 int ast_driver_load(struct drm_device *dev, unsigned long flags);
-void ast_driver_unload(struct drm_device *dev);
+int ast_driver_unload(struct drm_device *dev);
 
 struct ast_gem_object;
 
@@ -307,8 +304,8 @@ struct ast_vbios_dclk_info {
 };
 
 struct ast_vbios_mode_info {
-	const struct ast_vbios_stdtable *std_table;
-	const struct ast_vbios_enhtable *enh_table;
+	struct ast_vbios_stdtable *std_table;
+	struct ast_vbios_enhtable *enh_table;
 };
 
 extern int ast_mode_init(struct drm_device *dev);

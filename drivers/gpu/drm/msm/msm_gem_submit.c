@@ -31,11 +31,14 @@
 #define BO_PINNED   0x2000
 
 static struct msm_gem_submit *submit_create(struct drm_device *dev,
-		struct msm_gpu *gpu, int nr_bos, int nr_cmds)
+		struct msm_gpu *gpu, uint32_t nr_bos, uint32_t nr_cmds)
 {
 	struct msm_gem_submit *submit;
-	int sz = sizeof(*submit) + (nr_bos * sizeof(submit->bos[0])) +
-			(nr_cmds * sizeof(*submit->cmd));
+	uint64_t sz = sizeof(*submit) + ((u64)nr_bos * sizeof(submit->bos[0])) +
+		((u64)nr_cmds * sizeof(submit->cmd[0]));
+
+	if (sz > SIZE_MAX)
+		return NULL;
 
 	submit = kmalloc(sz, GFP_TEMPORARY | __GFP_NOWARN | __GFP_NORETRY);
 	if (!submit)
@@ -60,7 +63,7 @@ static struct msm_gem_submit *submit_create(struct drm_device *dev,
 
 void msm_gem_submit_free(struct msm_gem_submit *submit)
 {
-	dma_fence_put(submit->fence);
+	fence_put(submit->fence);
 	list_del(&submit->node);
 	put_pid(submit->pid);
 	kfree(submit);
@@ -95,13 +98,13 @@ static int submit_lookup_objects(struct msm_gem_submit *submit,
 		 */
 		submit->bos[i].flags = 0;
 
-		if (copy_from_user_inatomic(&submit_bo, userptr, sizeof(submit_bo))) {
+		ret = copy_from_user_inatomic(&submit_bo, userptr, sizeof(submit_bo));
+		if (unlikely(ret)) {
 			pagefault_enable();
 			spin_unlock(&file->table_lock);
-			if (copy_from_user(&submit_bo, userptr, sizeof(submit_bo))) {
-				ret = -EFAULT;
+			ret = copy_from_user(&submit_bo, userptr, sizeof(submit_bo));
+			if (ret)
 				goto out;
-			}
 			spin_lock(&file->table_lock);
 			pagefault_disable();
 		}
@@ -242,7 +245,7 @@ static int submit_pin_objects(struct msm_gem_submit *submit)
 
 	for (i = 0; i < submit->nr_bos; i++) {
 		struct msm_gem_object *msm_obj = submit->bos[i].obj;
-		uint64_t iova;
+		uint32_t iova;
 
 		/* if locking succeeded, pin bo: */
 		ret = msm_gem_get_iova_locked(&msm_obj->base,
@@ -267,7 +270,7 @@ static int submit_pin_objects(struct msm_gem_submit *submit)
 }
 
 static int submit_bo(struct msm_gem_submit *submit, uint32_t idx,
-		struct msm_gem_object **obj, uint64_t *iova, bool *valid)
+		struct msm_gem_object **obj, uint32_t *iova, bool *valid)
 {
 	if (idx >= submit->nr_bos) {
 		DRM_ERROR("invalid buffer index: %u (out of %u)\n",
@@ -313,14 +316,12 @@ static int submit_reloc(struct msm_gem_submit *submit, struct msm_gem_object *ob
 		struct drm_msm_gem_submit_reloc submit_reloc;
 		void __user *userptr =
 			u64_to_user_ptr(relocs + (i * sizeof(submit_reloc)));
-		uint32_t off;
-		uint64_t iova;
+		uint32_t iova, off;
 		bool valid;
 
-		if (copy_from_user(&submit_reloc, userptr, sizeof(submit_reloc))) {
-			ret = -EFAULT;
+		ret = copy_from_user(&submit_reloc, userptr, sizeof(submit_reloc));
+		if (ret)
 			goto out;
-		}
 
 		if (submit_reloc.submit_offset % 4) {
 			DRM_ERROR("non-aligned reloc offset: %u\n",
@@ -386,7 +387,7 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 	struct msm_file_private *ctx = file->driver_priv;
 	struct msm_gem_submit *submit;
 	struct msm_gpu *gpu = priv->gpu;
-	struct dma_fence *in_fence = NULL;
+	struct fence *in_fence = NULL;
 	struct sync_file *sync_file = NULL;
 	int out_fence_fd = -1;
 	unsigned i;
@@ -445,7 +446,7 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 		 */
 
 		if (in_fence->context != gpu->fctx->context) {
-			ret = dma_fence_wait(in_fence, true);
+			ret = fence_wait(in_fence, true);
 			if (ret)
 				goto out;
 		}
@@ -467,7 +468,7 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 		void __user *userptr =
 			u64_to_user_ptr(args->cmds + (i * sizeof(submit_cmd)));
 		struct msm_gem_object *msm_obj;
-		uint64_t iova;
+		uint32_t iova;
 
 		ret = copy_from_user(&submit_cmd, userptr, sizeof(submit_cmd));
 		if (ret) {
@@ -548,7 +549,7 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 
 out:
 	if (in_fence)
-		dma_fence_put(in_fence);
+		fence_put(in_fence);
 	submit_cleanup(submit);
 	if (ret)
 		msm_gem_submit_free(submit);

@@ -600,13 +600,13 @@ static int snd_mtpav_get_ISA(struct mtpav *mcard)
 /*
  */
 
-static const struct snd_rawmidi_ops snd_mtpav_output = {
+static struct snd_rawmidi_ops snd_mtpav_output = {
 	.open =		snd_mtpav_output_open,
 	.close =	snd_mtpav_output_close,
 	.trigger =	snd_mtpav_output_trigger,
 };
 
-static const struct snd_rawmidi_ops snd_mtpav_input = {
+static struct snd_rawmidi_ops snd_mtpav_input = {
 	.open =		snd_mtpav_input_open,
 	.close =	snd_mtpav_input_close,
 	.trigger =	snd_mtpav_input_trigger,

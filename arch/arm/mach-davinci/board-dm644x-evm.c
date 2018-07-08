@@ -25,7 +25,6 @@
 #include <linux/videodev2.h>
 #include <linux/v4l2-dv-timings.h>
 #include <linux/export.h>
-#include <linux/leds.h>
 
 #include <media/i2c/tvp514x.h>
 

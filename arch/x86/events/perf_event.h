@@ -79,7 +79,6 @@ struct amd_nb {
 
 /* The maximal number of PEBS events: */
 #define MAX_PEBS_EVENTS		8
-#define PEBS_COUNTER_MASK	((1ULL << MAX_PEBS_EVENTS) - 1)
 
 /*
  * Flags PEBS can handle without an PMI.
@@ -549,7 +548,7 @@ struct x86_pmu {
 	struct x86_pmu_quirk *quirks;
 	int		perfctr_second_write;
 	bool		late_ack;
-	unsigned	(*limit_period)(struct perf_event *event, unsigned l);
+	u64		(*limit_period)(struct perf_event *event, u64 l);
 
 	/*
 	 * sysfs attrs

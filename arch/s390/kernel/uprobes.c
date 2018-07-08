@@ -9,8 +9,6 @@
 #include <linux/uprobes.h>
 #include <linux/compat.h>
 #include <linux/kdebug.h>
-#include <linux/sched/task_stack.h>
-
 #include <asm/switch_to.h>
 #include <asm/facility.h>
 #include <asm/kprobes.h>
@@ -147,6 +145,15 @@ unsigned long arch_uretprobe_hijack_return_addr(unsigned long trampoline,
 	orig = regs->gprs[14];
 	regs->gprs[14] = trampoline;
 	return orig;
+}
+
+bool arch_uretprobe_is_alive(struct return_instance *ret, enum rp_check ctx,
+			     struct pt_regs *regs)
+{
+	if (ctx == RP_CHECK_CHAIN_CALL)
+		return user_stack_pointer(regs) <= ret->stack;
+	else
+		return user_stack_pointer(regs) < ret->stack;
 }
 
 /* Instruction Emulation */

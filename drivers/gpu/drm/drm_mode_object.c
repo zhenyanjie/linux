@@ -23,7 +23,6 @@
 #include <linux/export.h>
 #include <drm/drmP.h>
 #include <drm/drm_mode_object.h>
-#include <drm/drm_atomic.h>
 
 #include "drm_crtc_internal.h"
 
@@ -160,7 +159,7 @@ EXPORT_SYMBOL(drm_mode_object_find);
 void drm_mode_object_unreference(struct drm_mode_object *obj)
 {
 	if (obj->free_cb) {
-		DRM_DEBUG("OBJ ID: %d (%d)\n", obj->id, kref_read(&obj->refcount));
+		DRM_DEBUG("OBJ ID: %d (%d)\n", obj->id, atomic_read(&obj->refcount.refcount));
 		kref_put(&obj->refcount, obj->free_cb);
 	}
 }
@@ -177,7 +176,7 @@ EXPORT_SYMBOL(drm_mode_object_unreference);
 void drm_mode_object_reference(struct drm_mode_object *obj)
 {
 	if (obj->free_cb) {
-		DRM_DEBUG("OBJ ID: %d (%d)\n", obj->id, kref_read(&obj->refcount));
+		DRM_DEBUG("OBJ ID: %d (%d)\n", obj->id, atomic_read(&obj->refcount.refcount));
 		kref_get(&obj->refcount);
 	}
 }
@@ -274,7 +273,7 @@ int drm_object_property_get_value(struct drm_mode_object *obj,
 	 * their value in obj->properties->values[].. mostly to avoid
 	 * having to deal w/ EDID and similar props in atomic paths:
 	 */
-	if (drm_drv_uses_atomic_modeset(property->dev) &&
+	if (drm_core_check_feature(property->dev, DRIVER_ATOMIC) &&
 			!(property->flags & DRM_MODE_PROP_IMMUTABLE))
 		return drm_atomic_get_property(obj, property, val);
 

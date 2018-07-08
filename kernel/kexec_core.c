@@ -38,6 +38,7 @@
 #include <linux/syscore_ops.h>
 #include <linux/compiler.h>
 #include <linux/hugetlb.h>
+#include <linux/frame.h>
 
 #include <asm/page.h>
 #include <asm/sections.h>
@@ -440,8 +441,6 @@ static struct page *kimage_alloc_crash_control_pages(struct kimage *image,
 	hole_end   = hole_start + size - 1;
 	while (hole_end <= crashk_res.end) {
 		unsigned long i;
-
-		cond_resched();
 
 		if (hole_end > KEXEC_CRASH_CONTROL_MEMORY_LIMIT)
 			break;
@@ -880,7 +879,7 @@ int kexec_load_disabled;
  * only when panic_cpu holds the current CPU number; this is the only CPU
  * which processes crash_kexec routines.
  */
-void __crash_kexec(struct pt_regs *regs)
+void __noclone __crash_kexec(struct pt_regs *regs)
 {
 	/* Take the kexec_mutex here to prevent sys_kexec_load
 	 * running on one cpu from replacing the crash kernel
@@ -902,6 +901,7 @@ void __crash_kexec(struct pt_regs *regs)
 		mutex_unlock(&kexec_mutex);
 	}
 }
+STACK_FRAME_NON_STANDARD(__crash_kexec);
 
 void crash_kexec(struct pt_regs *regs)
 {
@@ -916,7 +916,7 @@ void crash_kexec(struct pt_regs *regs)
 	old_cpu = atomic_cmpxchg(&panic_cpu, PANIC_CPU_INVALID, this_cpu);
 	if (old_cpu == PANIC_CPU_INVALID) {
 		/* This is the 1st CPU which comes here, so go ahead. */
-		printk_safe_flush_on_panic();
+		printk_nmi_flush_on_panic();
 		__crash_kexec(regs);
 
 		/*
@@ -1399,7 +1399,7 @@ void __weak arch_crash_save_vmcoreinfo(void)
 
 phys_addr_t __weak paddr_vmcoreinfo_note(void)
 {
-	return __pa_symbol((unsigned long)(char *)&vmcoreinfo_note);
+	return __pa((unsigned long)(char *)&vmcoreinfo_note);
 }
 
 static int __init crash_save_vmcoreinfo_init(void)
@@ -1469,6 +1469,9 @@ static int __init crash_save_vmcoreinfo_init(void)
 #endif
 	VMCOREINFO_NUMBER(PG_head_mask);
 	VMCOREINFO_NUMBER(PAGE_BUDDY_MAPCOUNT_VALUE);
+#ifdef CONFIG_X86
+	VMCOREINFO_NUMBER(KERNEL_IMAGE_SIZE);
+#endif
 #ifdef CONFIG_HUGETLB_PAGE
 	VMCOREINFO_NUMBER(HUGETLB_PAGE_DTOR);
 #endif

@@ -261,6 +261,17 @@ static void __team_option_inst_mark_removed_port(struct team *team,
 	}
 }
 
+static bool __team_option_inst_tmp_find(const struct list_head *opts,
+					const struct team_option_inst *needle)
+{
+	struct team_option_inst *opt_inst;
+
+	list_for_each_entry(opt_inst, opts, tmp_list)
+		if (opt_inst == needle)
+			return true;
+	return false;
+}
+
 static int __team_options_register(struct team *team,
 				   const struct team_option *option,
 				   size_t option_count)
@@ -990,10 +1001,11 @@ static void team_port_disable(struct team *team,
 #define TEAM_ENC_FEATURES	(NETIF_F_HW_CSUM | NETIF_F_SG | \
 				 NETIF_F_RXCSUM | NETIF_F_ALL_TSO)
 
-static void __team_compute_features(struct team *team)
+static void ___team_compute_features(struct team *team)
 {
 	struct team_port *port;
-	u32 vlan_features = TEAM_VLAN_FEATURES & NETIF_F_ALL_FOR_ALL;
+	netdev_features_t vlan_features = TEAM_VLAN_FEATURES &
+					  NETIF_F_ALL_FOR_ALL;
 	netdev_features_t enc_features  = TEAM_ENC_FEATURES;
 	unsigned short max_hard_header_len = ETH_HLEN;
 	unsigned int dst_release_flag = IFF_XMIT_DST_RELEASE |
@@ -1023,10 +1035,16 @@ static void __team_compute_features(struct team *team)
 		team->dev->priv_flags |= IFF_XMIT_DST_RELEASE;
 }
 
+static void __team_compute_features(struct team *team)
+{
+	___team_compute_features(team);
+	netdev_change_features(team->dev);
+}
+
 static void team_compute_features(struct team *team)
 {
 	mutex_lock(&team->lock);
-	__team_compute_features(team);
+	___team_compute_features(team);
 	mutex_unlock(&team->lock);
 	netdev_change_features(team->dev);
 }
@@ -1061,13 +1079,10 @@ static void team_port_leave(struct team *team, struct team_port *port)
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
-static int team_port_enable_netpoll(struct team *team, struct team_port *port)
+static int __team_port_enable_netpoll(struct team_port *port)
 {
 	struct netpoll *np;
 	int err;
-
-	if (!team->dev->npinfo)
-		return 0;
 
 	np = kzalloc(sizeof(*np), GFP_KERNEL);
 	if (!np)
@@ -1080,6 +1095,14 @@ static int team_port_enable_netpoll(struct team *team, struct team_port *port)
 	}
 	port->np = np;
 	return err;
+}
+
+static int team_port_enable_netpoll(struct team_port *port)
+{
+	if (!port->team->dev->npinfo)
+		return 0;
+
+	return __team_port_enable_netpoll(port);
 }
 
 static void team_port_disable_netpoll(struct team_port *port)
@@ -1096,7 +1119,7 @@ static void team_port_disable_netpoll(struct team_port *port)
 	kfree(np);
 }
 #else
-static int team_port_enable_netpoll(struct team *team, struct team_port *port)
+static int team_port_enable_netpoll(struct team_port *port)
 {
 	return 0;
 }
@@ -1197,11 +1220,6 @@ static int team_port_add(struct team *team, struct net_device *port_dev)
 		goto err_dev_open;
 	}
 
-	netif_addr_lock_bh(dev);
-	dev_uc_sync_multiple(port_dev, dev);
-	dev_mc_sync_multiple(port_dev, dev);
-	netif_addr_unlock_bh(dev);
-
 	err = vlan_vids_add_by_dev(port_dev, dev);
 	if (err) {
 		netdev_err(dev, "Failed to add vlan ids to device %s\n",
@@ -1209,7 +1227,7 @@ static int team_port_add(struct team *team, struct net_device *port_dev)
 		goto err_vids_add;
 	}
 
-	err = team_port_enable_netpoll(team, port);
+	err = team_port_enable_netpoll(port);
 	if (err) {
 		netdev_err(dev, "Failed to enable netpoll on device %s\n",
 			   portname);
@@ -1241,6 +1259,11 @@ static int team_port_add(struct team *team, struct net_device *port_dev)
 		goto err_option_port_add;
 	}
 
+	netif_addr_lock_bh(dev);
+	dev_uc_sync_multiple(port_dev, dev);
+	dev_mc_sync_multiple(port_dev, dev);
+	netif_addr_unlock_bh(dev);
+
 	port->index = -1;
 	list_add_tail_rcu(&port->list, &team->port_list);
 	team_port_enable(team, port);
@@ -1265,8 +1288,6 @@ err_enable_netpoll:
 	vlan_vids_del_by_dev(port_dev, dev);
 
 err_vids_add:
-	dev_uc_unsync(port_dev, dev);
-	dev_mc_unsync(port_dev, dev);
 	dev_close(port_dev);
 
 err_dev_open:
@@ -1635,7 +1656,6 @@ static void team_uninit(struct net_device *dev)
 	team_notify_peers_fini(team);
 	team_queue_override_fini(team);
 	mutex_unlock(&team->lock);
-	netdev_change_features(dev);
 }
 
 static void team_destructor(struct net_device *dev)
@@ -1643,6 +1663,7 @@ static void team_destructor(struct net_device *dev)
 	struct team *team = netdev_priv(dev);
 
 	free_percpu(team->pcpu_stats);
+	free_netdev(dev);
 }
 
 static int team_open(struct net_device *dev)
@@ -1792,7 +1813,7 @@ unwind:
 	return err;
 }
 
-static void
+static struct rtnl_link_stats64 *
 team_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 {
 	struct team *team = netdev_priv(dev);
@@ -1829,6 +1850,7 @@ team_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 	stats->rx_dropped	= rx_dropped;
 	stats->tx_dropped	= tx_dropped;
 	stats->rx_nohandler	= rx_nohandler;
+	return stats;
 }
 
 static int team_vlan_rx_add_vid(struct net_device *dev, __be16 proto, u16 vid)
@@ -1903,7 +1925,7 @@ static int team_netpoll_setup(struct net_device *dev,
 
 	mutex_lock(&team->lock);
 	list_for_each_entry(port, &team->port_list, list) {
-		err = team_port_enable_netpoll(team, port);
+		err = __team_port_enable_netpoll(port);
 		if (err) {
 			__team_netpoll_cleanup(team);
 			break;
@@ -1922,10 +1944,6 @@ static int team_add_slave(struct net_device *dev, struct net_device *port_dev)
 	mutex_lock(&team->lock);
 	err = team_port_add(team, port_dev);
 	mutex_unlock(&team->lock);
-
-	if (!err)
-		netdev_change_features(dev);
-
 	return err;
 }
 
@@ -1937,10 +1955,6 @@ static int team_del_slave(struct net_device *dev, struct net_device *port_dev)
 	mutex_lock(&team->lock);
 	err = team_port_del(team, port_dev);
 	mutex_unlock(&team->lock);
-
-	if (!err)
-		netdev_change_features(dev);
-
 	return err;
 }
 
@@ -2003,6 +2017,8 @@ static const struct net_device_ops team_netdev_ops = {
 	.ndo_add_slave		= team_add_slave,
 	.ndo_del_slave		= team_del_slave,
 	.ndo_fix_features	= team_fix_features,
+	.ndo_neigh_construct	= netdev_default_l2upper_neigh_construct,
+	.ndo_neigh_destroy	= netdev_default_l2upper_neigh_destroy,
 	.ndo_change_carrier     = team_change_carrier,
 	.ndo_bridge_setlink	= switchdev_port_bridge_setlink,
 	.ndo_bridge_getlink	= switchdev_port_bridge_getlink,
@@ -2074,12 +2090,10 @@ static int team_dev_type_check_change(struct net_device *dev,
 static void team_setup(struct net_device *dev)
 {
 	ether_setup(dev);
-	dev->max_mtu = ETH_MAX_MTU;
 
 	dev->netdev_ops = &team_netdev_ops;
 	dev->ethtool_ops = &team_ethtool_ops;
-	dev->needs_free_netdev = true;
-	dev->priv_destructor = team_destructor;
+	dev->destructor	= team_destructor;
 	dev->priv_flags &= ~(IFF_XMIT_DST_RELEASE | IFF_TX_SKB_SHARING);
 	dev->priv_flags |= IFF_NO_QUEUE;
 	dev->priv_flags |= IFF_TEAM;
@@ -2151,7 +2165,13 @@ static struct rtnl_link_ops team_link_ops __read_mostly = {
  * Generic netlink custom interface
  ***********************************/
 
-static struct genl_family team_nl_family;
+static struct genl_family team_nl_family = {
+	.id		= GENL_ID_GENERATE,
+	.name		= TEAM_GENL_NAME,
+	.version	= TEAM_GENL_VERSION,
+	.maxattr	= TEAM_ATTR_MAX,
+	.netnsok	= true,
+};
 
 static const struct nla_policy team_nl_policy[TEAM_ATTR_MAX + 1] = {
 	[TEAM_ATTR_UNSPEC]			= { .type = NLA_UNSPEC, },
@@ -2398,7 +2418,7 @@ send_done:
 	if (!nlh) {
 		err = __send_and_alloc_skb(&skb, team, portid, send_func);
 		if (err)
-			goto errout;
+			return err;
 		goto send_done;
 	}
 
@@ -2566,6 +2586,14 @@ static int team_nl_cmd_options_set(struct sk_buff *skb, struct genl_info *info)
 			if (err)
 				goto team_put;
 			opt_inst->changed = true;
+
+			/* dumb/evil user-space can send us duplicate opt,
+			 * keep only the last one
+			 */
+			if (__team_option_inst_tmp_find(&opt_inst_list,
+							opt_inst))
+				continue;
+
 			list_add(&opt_inst->tmp_list, &opt_inst_list);
 		}
 		if (!opt_found) {
@@ -2683,7 +2711,7 @@ send_done:
 	if (!nlh) {
 		err = __send_and_alloc_skb(&skb, team, portid, send_func);
 		if (err)
-			goto errout;
+			return err;
 		goto send_done;
 	}
 
@@ -2745,18 +2773,6 @@ static const struct genl_multicast_group team_nl_mcgrps[] = {
 	{ .name = TEAM_GENL_CHANGE_EVENT_MC_GRP_NAME, },
 };
 
-static struct genl_family team_nl_family __ro_after_init = {
-	.name		= TEAM_GENL_NAME,
-	.version	= TEAM_GENL_VERSION,
-	.maxattr	= TEAM_ATTR_MAX,
-	.netnsok	= true,
-	.module		= THIS_MODULE,
-	.ops		= team_nl_ops,
-	.n_ops		= ARRAY_SIZE(team_nl_ops),
-	.mcgrps		= team_nl_mcgrps,
-	.n_mcgrps	= ARRAY_SIZE(team_nl_mcgrps),
-};
-
 static int team_nl_send_multicast(struct sk_buff *skb,
 				  struct team *team, u32 portid)
 {
@@ -2778,9 +2794,10 @@ static int team_nl_send_event_port_get(struct team *team,
 					  port);
 }
 
-static int __init team_nl_init(void)
+static int team_nl_init(void)
 {
-	return genl_register_family(&team_nl_family);
+	return genl_register_family_with_ops_groups(&team_nl_family, team_nl_ops,
+						    team_nl_mcgrps);
 }
 
 static void team_nl_fini(void)

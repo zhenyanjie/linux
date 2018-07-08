@@ -173,11 +173,12 @@ static int eeti_ts_probe(struct i2c_client *client,
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv) {
 		dev_err(&client->dev, "failed to allocate driver data\n");
-		return -ENOMEM;
+		goto err0;
 	}
 
 	mutex_init(&priv->mutex);
 	input = input_allocate_device();
+
 	if (!input) {
 		dev_err(&client->dev, "Failed to allocate input device.\n");
 		goto err1;
@@ -231,6 +232,7 @@ static int eeti_ts_probe(struct i2c_client *client,
 	 */
 	eeti_ts_stop(priv);
 
+	device_init_wakeup(&client->dev, 0);
 	return 0;
 
 err3:
@@ -241,6 +243,7 @@ err2:
 err1:
 	input_free_device(input);
 	kfree(priv);
+err0:
 	return err;
 }
 

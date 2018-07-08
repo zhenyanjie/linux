@@ -37,6 +37,7 @@
 #include <asm/desc.h>
 #include <asm/ptrace.h>
 #include <asm/irq.h>
+#include <asm/idle.h>
 #include <asm/io_apic.h>
 #include <asm/i8259.h>
 #include <asm/xen/pci.h>
@@ -636,8 +637,6 @@ static void __unbind_from_irq(unsigned int irq)
 		xen_irq_info_cleanup(info);
 	}
 
-	BUG_ON(info_for_irq(irq)->type == IRQT_UNBOUND);
-
 	xen_free_irq(irq);
 }
 
@@ -763,8 +762,8 @@ out:
 	mutex_unlock(&irq_mapping_update_lock);
 	return irq;
 error_irq:
-	for (; i >= 0; i--)
-		__unbind_from_irq(irq + i);
+	while (nvec--)
+		__unbind_from_irq(irq + nvec);
 	mutex_unlock(&irq_mapping_update_lock);
 	return ret;
 }
@@ -947,7 +946,7 @@ static int find_virq(unsigned int virq, unsigned int cpu)
 			continue;
 		if (status.status != EVTCHNSTAT_virq)
 			continue;
-		if (status.u.virq == virq && status.vcpu == xen_vcpu_nr(cpu)) {
+		if (status.u.virq == virq && status.vcpu == cpu) {
 			rc = port;
 			break;
 		}
@@ -1255,6 +1254,7 @@ void xen_evtchn_do_upcall(struct pt_regs *regs)
 
 	irq_enter();
 #ifdef CONFIG_X86
+	exit_idle();
 	inc_irq_stat(irq_hv_callback_count);
 #endif
 
@@ -1712,6 +1712,7 @@ void __init xen_init_IRQ(void)
 		pirq_eoi_map = (void *)__get_free_page(GFP_KERNEL|__GFP_ZERO);
 		eoi_gmfn.gmfn = virt_to_gfn(pirq_eoi_map);
 		rc = HYPERVISOR_physdev_op(PHYSDEVOP_pirq_eoi_gmfn_v2, &eoi_gmfn);
+		/* TODO: No PVH support for PIRQ EOI */
 		if (rc != 0) {
 			free_page((unsigned long) pirq_eoi_map);
 			pirq_eoi_map = NULL;

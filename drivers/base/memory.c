@@ -23,7 +23,7 @@
 #include <linux/slab.h>
 
 #include <linux/atomic.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 static DEFINE_MUTEX(mem_sysfs_mutex);
 
@@ -226,9 +226,11 @@ memory_block_action(unsigned long phys_index, unsigned long action, int online_t
 {
 	unsigned long start_pfn;
 	unsigned long nr_pages = PAGES_PER_SECTION * sections_per_block;
+	struct page *first_page;
 	int ret;
 
 	start_pfn = section_nr_to_pfn(phys_index);
+	first_page = pfn_to_page(start_pfn);
 
 	switch (action) {
 	case MEM_ONLINE:
@@ -249,7 +251,7 @@ memory_block_action(unsigned long phys_index, unsigned long action, int online_t
 	return ret;
 }
 
-static int memory_block_change_state(struct memory_block *mem,
+int memory_block_change_state(struct memory_block *mem,
 		unsigned long to_state, unsigned long from_state_req)
 {
 	int ret = 0;

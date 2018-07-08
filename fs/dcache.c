@@ -26,7 +26,7 @@
 #include <linux/export.h>
 #include <linux/mount.h>
 #include <linux/file.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/security.h>
 #include <linux/seqlock.h>
 #include <linux/swap.h>
@@ -277,6 +277,33 @@ static inline int dname_external(const struct dentry *dentry)
 	return dentry->d_name.name != dentry->d_iname;
 }
 
+void take_dentry_name_snapshot(struct name_snapshot *name, struct dentry *dentry)
+{
+	spin_lock(&dentry->d_lock);
+	if (unlikely(dname_external(dentry))) {
+		struct external_name *p = external_name(dentry);
+		atomic_inc(&p->u.count);
+		spin_unlock(&dentry->d_lock);
+		name->name = p->name;
+	} else {
+		memcpy(name->inline_name, dentry->d_iname, DNAME_INLINE_LEN);
+		spin_unlock(&dentry->d_lock);
+		name->name = name->inline_name;
+	}
+}
+EXPORT_SYMBOL(take_dentry_name_snapshot);
+
+void release_dentry_name_snapshot(struct name_snapshot *name)
+{
+	if (unlikely(name->name != name->inline_name)) {
+		struct external_name *p;
+		p = container_of(name->name, struct external_name, name[0]);
+		if (unlikely(atomic_dec_and_test(&p->u.count)))
+			kfree_rcu(p, u.head);
+	}
+}
+EXPORT_SYMBOL(release_dentry_name_snapshot);
+
 static inline void __d_set_inode_and_type(struct dentry *dentry,
 					  struct inode *inode,
 					  unsigned type_flags)
@@ -434,9 +461,11 @@ static void dentry_lru_add(struct dentry *dentry)
  * d_drop() is used mainly for stuff that wants to invalidate a dentry for some
  * reason (NFS timeouts or autofs deletes).
  *
- * __d_drop requires dentry->d_lock.
+ * __d_drop requires dentry->d_lock
+ * ___d_drop doesn't mark dentry as "unhashed"
+ *   (dentry->d_hash.pprev will be LIST_POISON2, not NULL).
  */
-void __d_drop(struct dentry *dentry)
+static void ___d_drop(struct dentry *dentry)
 {
 	if (!d_unhashed(dentry)) {
 		struct hlist_bl_head *b;
@@ -452,11 +481,16 @@ void __d_drop(struct dentry *dentry)
 
 		hlist_bl_lock(b);
 		__hlist_bl_del(&dentry->d_hash);
-		dentry->d_hash.pprev = NULL;
 		hlist_bl_unlock(b);
 		/* After this call, in-progress rcu-walk path lookup will fail. */
 		write_seqcount_invalidate(&dentry->d_seq);
 	}
+}
+
+void __d_drop(struct dentry *dentry)
+{
+	___d_drop(dentry);
+	dentry->d_hash.pprev = NULL;
 }
 EXPORT_SYMBOL(__d_drop);
 
@@ -610,11 +644,16 @@ again:
 		spin_unlock(&parent->d_lock);
 		goto again;
 	}
-	rcu_read_unlock();
-	if (parent != dentry)
+	if (parent != dentry) {
 		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
-	else
+		if (unlikely(dentry->d_lockref.count < 0)) {
+			spin_unlock(&parent->d_lock);
+			parent = NULL;
+		}
+	} else {
 		parent = NULL;
+	}
+	rcu_read_unlock();
 	return parent;
 }
 
@@ -1274,44 +1313,38 @@ rename_retry:
 	goto again;
 }
 
-struct check_mount {
-	struct vfsmount *mnt;
-	unsigned int mounted;
-};
+/*
+ * Search for at least 1 mount point in the dentry's subdirs.
+ * We descend to the next level whenever the d_subdirs
+ * list is non-empty and continue searching.
+ */
 
-static enum d_walk_ret path_check_mount(void *data, struct dentry *dentry)
+static enum d_walk_ret check_mount(void *data, struct dentry *dentry)
 {
-	struct check_mount *info = data;
-	struct path path = { .mnt = info->mnt, .dentry = dentry };
-
-	if (likely(!d_mountpoint(dentry)))
-		return D_WALK_CONTINUE;
-	if (__path_is_mountpoint(&path)) {
-		info->mounted = 1;
+	int *ret = data;
+	if (d_mountpoint(dentry)) {
+		*ret = 1;
 		return D_WALK_QUIT;
 	}
 	return D_WALK_CONTINUE;
 }
 
 /**
- * path_has_submounts - check for mounts over a dentry in the
- *                      current namespace.
- * @parent: path to check.
+ * have_submounts - check for mounts over a dentry
+ * @parent: dentry to check.
  *
  * Return true if the parent or its subdirectories contain
- * a mount point in the current namespace.
+ * a mount point
  */
-int path_has_submounts(const struct path *parent)
+int have_submounts(struct dentry *parent)
 {
-	struct check_mount data = { .mnt = parent->mnt, .mounted = 0 };
+	int ret = 0;
 
-	read_seqlock_excl(&mount_lock);
-	d_walk(parent->dentry, &data, path_check_mount, NULL);
-	read_sequnlock_excl(&mount_lock);
+	d_walk(parent, &ret, check_mount, NULL);
 
-	return data.mounted;
+	return ret;
 }
-EXPORT_SYMBOL(path_has_submounts);
+EXPORT_SYMBOL(have_submounts);
 
 /*
  * Called by mount code to set a mountpoint and check if the mountpoint is
@@ -1825,6 +1858,28 @@ void d_instantiate(struct dentry *entry, struct inode * inode)
 	}
 }
 EXPORT_SYMBOL(d_instantiate);
+
+/*
+ * This should be equivalent to d_instantiate() + unlock_new_inode(),
+ * with lockdep-related part of unlock_new_inode() done before
+ * anything else.  Use that instead of open-coding d_instantiate()/
+ * unlock_new_inode() combinations.
+ */
+void d_instantiate_new(struct dentry *entry, struct inode *inode)
+{
+	BUG_ON(!hlist_unhashed(&entry->d_u.d_alias));
+	BUG_ON(!inode);
+	lockdep_annotate_inode_mutex_key(inode);
+	security_d_instantiate(entry, inode);
+	spin_lock(&inode->i_lock);
+	__d_instantiate(entry, inode);
+	WARN_ON(!(inode->i_state & I_NEW));
+	inode->i_state &= ~I_NEW;
+	smp_mb();
+	wake_up_bit(&inode->i_state, __I_NEW);
+	spin_unlock(&inode->i_lock);
+}
+EXPORT_SYMBOL(d_instantiate_new);
 
 /**
  * d_instantiate_no_diralias - instantiate a non-aliased dentry
@@ -2352,7 +2407,7 @@ EXPORT_SYMBOL(d_delete);
 static void __d_rehash(struct dentry *entry)
 {
 	struct hlist_bl_head *b = d_hash(entry->d_name.hash);
-	BUG_ON(!d_unhashed(entry));
+
 	hlist_bl_lock(b);
 	hlist_bl_add_head_rcu(&entry->d_hash, b);
 	hlist_bl_unlock(b);
@@ -2419,7 +2474,7 @@ struct dentry *d_alloc_parallel(struct dentry *parent,
 
 retry:
 	rcu_read_lock();
-	seq = smp_load_acquire(&parent->d_inode->i_dir_seq) & ~1;
+	seq = smp_load_acquire(&parent->d_inode->i_dir_seq);
 	r_seq = read_seqbegin(&rename_lock);
 	dentry = __d_lookup_rcu(parent, name, &d_seq);
 	if (unlikely(dentry)) {
@@ -2440,8 +2495,14 @@ retry:
 		rcu_read_unlock();
 		goto retry;
 	}
+
+	if (unlikely(seq & 1)) {
+		rcu_read_unlock();
+		goto retry;
+	}
+
 	hlist_bl_lock(b);
-	if (unlikely(parent->d_inode->i_dir_seq != seq)) {
+	if (unlikely(READ_ONCE(parent->d_inode->i_dir_seq) != seq)) {
 		hlist_bl_unlock(b);
 		rcu_read_unlock();
 		goto retry;
@@ -2789,9 +2850,9 @@ static void __d_move(struct dentry *dentry, struct dentry *target,
 	write_seqcount_begin_nested(&target->d_seq, DENTRY_D_LOCK_NESTED);
 
 	/* unhash both */
-	/* __d_drop does write_seqcount_barrier, but they're OK to nest. */
-	__d_drop(dentry);
-	__d_drop(target);
+	/* ___d_drop does write_seqcount_barrier, but they're OK to nest. */
+	___d_drop(dentry);
+	___d_drop(target);
 
 	/* Switch the names.. */
 	if (exchange)
@@ -2803,6 +2864,8 @@ static void __d_move(struct dentry *dentry, struct dentry *target,
 	__d_rehash(dentry);
 	if (exchange)
 		__d_rehash(target);
+	else
+		target->d_hash.pprev = NULL;
 
 	/* ... and switch them in the tree */
 	if (IS_ROOT(dentry)) {

@@ -252,13 +252,13 @@ static void bcd2000_input_complete(struct urb *urb)
 			__func__, ret);
 }
 
-static const struct snd_rawmidi_ops bcd2000_midi_output = {
+static struct snd_rawmidi_ops bcd2000_midi_output = {
 	.open =    bcd2000_midi_output_open,
 	.close =   bcd2000_midi_output_close,
 	.trigger = bcd2000_midi_output_trigger,
 };
 
-static const struct snd_rawmidi_ops bcd2000_midi_input = {
+static struct snd_rawmidi_ops bcd2000_midi_input = {
 	.open =    bcd2000_midi_input_open,
 	.close =   bcd2000_midi_input_close,
 	.trigger = bcd2000_midi_input_trigger,

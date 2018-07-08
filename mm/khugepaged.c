@@ -2,8 +2,6 @@
 
 #include <linux/mm.h>
 #include <linux/sched.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/coredump.h>
 #include <linux/mmu_notifier.h>
 #include <linux/rmap.h>
 #include <linux/swap.h>
@@ -422,7 +420,7 @@ int __khugepaged_enter(struct mm_struct *mm)
 	list_add_tail(&mm_slot->mm_node, &khugepaged_scan.mm_head);
 	spin_unlock(&khugepaged_mm_lock);
 
-	mmgrab(mm);
+	atomic_inc(&mm->mm_count);
 	if (wakeup)
 		wake_up_interruptible(&khugepaged_wait);
 
@@ -530,7 +528,12 @@ static int __collapse_huge_page_isolate(struct vm_area_struct *vma,
 			goto out;
 		}
 
-		VM_BUG_ON_PAGE(PageCompound(page), page);
+		/* TODO: teach khugepaged to collapse THP mapped with pte */
+		if (PageCompound(page)) {
+			result = SCAN_PAGE_COMPOUND;
+			goto out;
+		}
+
 		VM_BUG_ON_PAGE(!PageAnon(page), page);
 		VM_BUG_ON_PAGE(!PageSwapBacked(page), page);
 
@@ -877,13 +880,13 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 					unsigned long address, pmd_t *pmd,
 					int referenced)
 {
+	pte_t pteval;
 	int swapped_in = 0, ret = 0;
-	struct vm_fault vmf = {
+	struct fault_env fe = {
 		.vma = vma,
 		.address = address,
 		.flags = FAULT_FLAG_ALLOW_RETRY,
 		.pmd = pmd,
-		.pgoff = linear_page_index(vma, address),
 	};
 
 	/* we only decide to swapin, if there is enough young ptes */
@@ -891,19 +894,19 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 		trace_mm_collapse_huge_page_swapin(mm, swapped_in, referenced, 0);
 		return false;
 	}
-	vmf.pte = pte_offset_map(pmd, address);
-	for (; vmf.address < address + HPAGE_PMD_NR*PAGE_SIZE;
-			vmf.pte++, vmf.address += PAGE_SIZE) {
-		vmf.orig_pte = *vmf.pte;
-		if (!is_swap_pte(vmf.orig_pte))
+	fe.pte = pte_offset_map(pmd, address);
+	for (; fe.address < address + HPAGE_PMD_NR*PAGE_SIZE;
+			fe.pte++, fe.address += PAGE_SIZE) {
+		pteval = *fe.pte;
+		if (!is_swap_pte(pteval))
 			continue;
 		swapped_in++;
-		ret = do_swap_page(&vmf);
+		ret = do_swap_page(&fe, pteval);
 
 		/* do_swap_page returns VM_FAULT_RETRY with released mmap_sem */
 		if (ret & VM_FAULT_RETRY) {
 			down_read(&mm->mmap_sem);
-			if (hugepage_vma_revalidate(mm, address, &vmf.vma)) {
+			if (hugepage_vma_revalidate(mm, address, &fe.vma)) {
 				/* vma is no longer available, don't continue to swapin */
 				trace_mm_collapse_huge_page_swapin(mm, swapped_in, referenced, 0);
 				return false;
@@ -917,10 +920,10 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 			return false;
 		}
 		/* pte is unmapped now, we need to map it */
-		vmf.pte = pte_offset_map(pmd, vmf.address);
+		fe.pte = pte_offset_map(pmd, fe.address);
 	}
-	vmf.pte--;
-	pte_unmap(vmf.pte);
+	fe.pte--;
+	pte_unmap(fe.pte);
 	trace_mm_collapse_huge_page_swapin(mm, swapped_in, referenced, 1);
 	return true;
 }
@@ -945,7 +948,7 @@ static void collapse_huge_page(struct mm_struct *mm,
 	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
 
 	/* Only allocate from the target node */
-	gfp = alloc_hugepage_khugepaged_gfpmask() | __GFP_THISNODE;
+	gfp = alloc_hugepage_khugepaged_gfpmask() | __GFP_OTHER_NODE | __GFP_THISNODE;
 
 	/*
 	 * Before allocating the hugepage, release the mmap_sem read lock.
@@ -960,7 +963,9 @@ static void collapse_huge_page(struct mm_struct *mm,
 		goto out_nolock;
 	}
 
-	if (unlikely(mem_cgroup_try_charge(new_page, mm, gfp, &memcg, true))) {
+	/* Do not oom kill for khugepaged charges */
+	if (unlikely(mem_cgroup_try_charge(new_page, mm, gfp | __GFP_NORETRY,
+					   &memcg, true))) {
 		result = SCAN_CGROUP_CHARGE_FAIL;
 		goto out_nolock;
 	}
@@ -1311,7 +1316,8 @@ static void collapse_shmem(struct mm_struct *mm,
 	VM_BUG_ON(start & (HPAGE_PMD_NR - 1));
 
 	/* Only allocate from the target node */
-	gfp = alloc_hugepage_khugepaged_gfpmask() | __GFP_THISNODE;
+	gfp = alloc_hugepage_khugepaged_gfpmask() |
+		__GFP_OTHER_NODE | __GFP_THISNODE;
 
 	new_page = khugepaged_alloc_page(hpage, gfp, node);
 	if (!new_page) {
@@ -1319,7 +1325,9 @@ static void collapse_shmem(struct mm_struct *mm,
 		goto out;
 	}
 
-	if (unlikely(mem_cgroup_try_charge(new_page, mm, gfp, &memcg, true))) {
+	/* Do not oom kill for khugepaged charges */
+	if (unlikely(mem_cgroup_try_charge(new_page, mm, gfp | __GFP_NORETRY,
+					   &memcg, true))) {
 		result = SCAN_CGROUP_CHARGE_FAIL;
 		goto out;
 	}
@@ -1427,10 +1435,10 @@ static void collapse_shmem(struct mm_struct *mm,
 		list_add_tail(&page->lru, &pagelist);
 
 		/* Finally, replace with the new page. */
-		radix_tree_replace_slot(&mapping->page_tree, slot,
+		radix_tree_replace_slot(slot,
 				new_page + (index % HPAGE_PMD_NR));
 
-		slot = radix_tree_iter_resume(slot, &iter);
+		slot = radix_tree_iter_next(&iter);
 		index++;
 		continue;
 out_lru:
@@ -1530,6 +1538,7 @@ tree_unlocked:
 				/* Put holes back where they were */
 				radix_tree_delete(&mapping->page_tree,
 						  iter.index);
+				slot = radix_tree_iter_next(&iter);
 				continue;
 			}
 
@@ -1538,13 +1547,12 @@ tree_unlocked:
 			/* Unfreeze the page. */
 			list_del(&page->lru);
 			page_ref_unfreeze(page, 2);
-			radix_tree_replace_slot(&mapping->page_tree,
-						slot, page);
-			slot = radix_tree_iter_resume(slot, &iter);
+			radix_tree_replace_slot(slot, page);
 			spin_unlock_irq(&mapping->tree_lock);
 			putback_lru_page(page);
 			unlock_page(page);
 			spin_lock_irq(&mapping->tree_lock);
+			slot = radix_tree_iter_next(&iter);
 		}
 		VM_BUG_ON(nr_none);
 		spin_unlock_irq(&mapping->tree_lock);
@@ -1624,8 +1632,8 @@ static void khugepaged_scan_shmem(struct mm_struct *mm,
 		present++;
 
 		if (need_resched()) {
-			slot = radix_tree_iter_resume(slot, &iter);
 			cond_resched_rcu();
+			slot = radix_tree_iter_next(&iter);
 		}
 	}
 	rcu_read_unlock();
@@ -1674,10 +1682,14 @@ static unsigned int khugepaged_scan_mm_slot(unsigned int pages,
 	spin_unlock(&khugepaged_mm_lock);
 
 	mm = mm_slot->mm;
-	down_read(&mm->mmap_sem);
-	if (unlikely(khugepaged_test_exit(mm)))
-		vma = NULL;
-	else
+	/*
+	 * Don't wait for semaphore (to avoid long wait times).  Just move to
+	 * the next mm on the list.
+	 */
+	vma = NULL;
+	if (unlikely(!down_read_trylock(&mm->mmap_sem)))
+		goto breakouterloop_mmap_sem;
+	if (likely(!khugepaged_test_exit(mm)))
 		vma = find_vma(mm, khugepaged_scan.address);
 
 	progress++;

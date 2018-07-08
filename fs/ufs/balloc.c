@@ -15,7 +15,6 @@
 #include <linux/buffer_head.h>
 #include <linux/capability.h>
 #include <linux/bitops.h>
-#include <linux/bio.h>
 #include <asm/byteorder.h>
 
 #include "ufs_fs.h"
@@ -309,7 +308,8 @@ static void ufs_change_blocknr(struct inode *inode, sector_t beg,
 			     (unsigned long long)(pos + newb), pos);
 
 			bh->b_blocknr = newb + pos;
-			clean_bdev_bh_alias(bh);
+			unmap_underlying_metadata(bh->b_bdev,
+						  bh->b_blocknr);
 			mark_buffer_dirty(bh);
 			++j;
 			bh = bh->b_this_page;

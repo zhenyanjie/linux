@@ -1,5 +1,5 @@
 /* QLogic qed NIC Driver
- * Copyright (c) 2015-2017  QLogic Corporation
+ * Copyright (c) 2015-2016  QLogic Corporation
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -948,9 +948,7 @@ static int qed_rdma_create_cq(void *rdma_cxt,
 
 err:
 	/* release allocated icid */
-	spin_lock_bh(&p_info->lock);
 	qed_bmap_release_id(p_hwfn, &p_info->cq_map, returned_id);
-	spin_unlock_bh(&p_info->lock);
 	DP_NOTICE(p_hwfn, "Create CQ failed, rc = %d\n", rc);
 
 	return rc;
@@ -1849,7 +1847,6 @@ err_resp:
 
 static int qed_roce_destroy_qp(struct qed_hwfn *p_hwfn, struct qed_rdma_qp *qp)
 {
-	struct qed_rdma_info *p_rdma_info = p_hwfn->p_rdma_info;
 	u32 num_invalidated_mw = 0;
 	u32 num_bound_mw = 0;
 	u32 start_cid;
@@ -1864,39 +1861,35 @@ static int qed_roce_destroy_qp(struct qed_hwfn *p_hwfn, struct qed_rdma_qp *qp)
 		return -EINVAL;
 	}
 
-	if (qp->cur_state != QED_ROCE_QP_STATE_RESET) {
-		rc = qed_roce_sp_destroy_qp_responder(p_hwfn, qp,
-						      &num_invalidated_mw);
-		if (rc)
-			return rc;
+	rc = qed_roce_sp_destroy_qp_responder(p_hwfn, qp, &num_invalidated_mw);
+	if (rc)
+		return rc;
 
-		/* Send destroy requester ramrod */
-		rc = qed_roce_sp_destroy_qp_requester(p_hwfn, qp,
-						      &num_bound_mw);
-		if (rc)
-			return rc;
+	/* Send destroy requester ramrod */
+	rc = qed_roce_sp_destroy_qp_requester(p_hwfn, qp, &num_bound_mw);
+	if (rc)
+		return rc;
 
-		if (num_invalidated_mw != num_bound_mw) {
-			DP_NOTICE(p_hwfn,
-				  "number of invalidate memory windows is different from bounded ones\n");
-			return -EINVAL;
-		}
-
-		spin_lock_bh(&p_rdma_info->lock);
-
-		start_cid = qed_cxt_get_proto_cid_start(p_hwfn,
-							p_rdma_info->proto);
-
-		/* Release responder's icid */
-		qed_bmap_release_id(p_hwfn, &p_rdma_info->cid_map,
-				    qp->icid - start_cid);
-
-		/* Release requester's icid */
-		qed_bmap_release_id(p_hwfn, &p_rdma_info->cid_map,
-				    qp->icid + 1 - start_cid);
-
-		spin_unlock_bh(&p_rdma_info->lock);
+	if (num_invalidated_mw != num_bound_mw) {
+		DP_NOTICE(p_hwfn,
+			  "number of invalidate memory windows is different from bounded ones\n");
+		return -EINVAL;
 	}
+
+	spin_lock_bh(&p_hwfn->p_rdma_info->lock);
+
+	start_cid = qed_cxt_get_proto_cid_start(p_hwfn,
+						p_hwfn->p_rdma_info->proto);
+
+	/* Release responder's icid */
+	qed_bmap_release_id(p_hwfn, &p_hwfn->p_rdma_info->cid_map,
+			    qp->icid - start_cid);
+
+	/* Release requester's icid */
+	qed_bmap_release_id(p_hwfn, &p_hwfn->p_rdma_info->cid_map,
+			    qp->icid + 1 - start_cid);
+
+	spin_unlock_bh(&p_hwfn->p_rdma_info->lock);
 
 	return 0;
 }
@@ -2639,7 +2632,7 @@ static int qed_roce_ll2_start(struct qed_dev *cdev,
 {
 	struct qed_hwfn *hwfn = QED_LEADING_HWFN(cdev);
 	struct qed_roce_ll2_info *roce_ll2;
-	struct qed_ll2_conn ll2_params;
+	struct qed_ll2_info ll2_params;
 	int rc;
 
 	if (!params) {
@@ -2665,6 +2658,7 @@ static int qed_roce_ll2_start(struct qed_dev *cdev,
 		DP_ERR(cdev, "qed roce ll2 start: failed memory allocation\n");
 		return -ENOMEM;
 	}
+	memset(roce_ll2, 0, sizeof(*roce_ll2));
 	roce_ll2->handle = QED_LL2_UNUSED_HANDLE;
 	roce_ll2->cbs = params->cbs;
 	roce_ll2->cb_cookie = params->cb_cookie;
@@ -2778,7 +2772,6 @@ static int qed_roce_ll2_tx(struct qed_dev *cdev,
 	/* Tx header */
 	rc = qed_ll2_prepare_tx_packet(QED_LEADING_HWFN(cdev), roce_ll2->handle,
 				       1 + pkt->n_seg, 0, flags, 0,
-				       QED_LL2_TX_DEST_NW,
 				       qed_roce_flavor, pkt->header.baddr,
 				       pkt->header.len, pkt, 1);
 	if (rc) {

@@ -19,6 +19,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /* Controlling the sensor via the STK1125 vendor specific control interface:
@@ -387,8 +391,8 @@ int stk_sensor_init(struct stk_camera *dev)
 	}
 	stk_sensor_write_regvals(dev, ov_initvals);
 	msleep(10);
-	STK_INFO("OmniVision sensor detected, id %02X%02X at address %x\n",
-		 idh, idl, SENSOR_ADDRESS);
+	STK_INFO("OmniVision sensor detected, id %02X%02X"
+		" at address %x\n", idh, idl, SENSOR_ADDRESS);
 	return 0;
 }
 

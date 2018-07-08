@@ -638,9 +638,11 @@ int ocfs2_calc_xattr_init(struct inode *dir,
 						     si->value_len);
 
 	if (osb->s_mount_opt & OCFS2_MOUNT_POSIX_ACL) {
+		down_read(&OCFS2_I(dir)->ip_xattr_sem);
 		acl_len = ocfs2_xattr_get_nolock(dir, dir_bh,
 					OCFS2_XATTR_INDEX_POSIX_ACL_DEFAULT,
 					"", NULL, 0);
+		up_read(&OCFS2_I(dir)->ip_xattr_sem);
 		if (acl_len > 0) {
 			a_size = ocfs2_xattr_entry_real_size(0, acl_len);
 			if (S_ISDIR(mode))
@@ -1328,21 +1330,20 @@ static int ocfs2_xattr_get(struct inode *inode,
 			   void *buffer,
 			   size_t buffer_size)
 {
-	int ret, had_lock;
+	int ret;
 	struct buffer_head *di_bh = NULL;
-	struct ocfs2_lock_holder oh;
 
-	had_lock = ocfs2_inode_lock_tracker(inode, &di_bh, 0, &oh);
-	if (had_lock < 0) {
-		mlog_errno(had_lock);
-		return had_lock;
+	ret = ocfs2_inode_lock(inode, &di_bh, 0);
+	if (ret < 0) {
+		mlog_errno(ret);
+		return ret;
 	}
 	down_read(&OCFS2_I(inode)->ip_xattr_sem);
 	ret = ocfs2_xattr_get_nolock(inode, di_bh, name_index,
 				     name, buffer, buffer_size);
 	up_read(&OCFS2_I(inode)->ip_xattr_sem);
 
-	ocfs2_inode_unlock_tracker(inode, 0, &oh, had_lock);
+	ocfs2_inode_unlock(inode, 0);
 
 	brelse(di_bh);
 
@@ -2578,7 +2579,7 @@ int ocfs2_xattr_remove(struct inode *inode, struct buffer_head *di_bh)
 	if (!(oi->ip_dyn_features & OCFS2_HAS_XATTR_FL))
 		return 0;
 
-	if (ocfs2_is_refcount_inode(inode)) {
+	if (OCFS2_I(inode)->ip_dyn_features & OCFS2_HAS_REFCOUNT_FL) {
 		ret = ocfs2_lock_refcount_tree(OCFS2_SB(inode->i_sb),
 					       le64_to_cpu(di->i_refcount_loc),
 					       1, &ref_tree, &ref_root_bh);
@@ -3538,12 +3539,11 @@ int ocfs2_xattr_set(struct inode *inode,
 {
 	struct buffer_head *di_bh = NULL;
 	struct ocfs2_dinode *di;
-	int ret, credits, had_lock, ref_meta = 0, ref_credits = 0;
+	int ret, credits, ref_meta = 0, ref_credits = 0;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 	struct inode *tl_inode = osb->osb_tl_inode;
 	struct ocfs2_xattr_set_ctxt ctxt = { NULL, NULL, NULL, };
 	struct ocfs2_refcount_tree *ref_tree = NULL;
-	struct ocfs2_lock_holder oh;
 
 	struct ocfs2_xattr_info xi = {
 		.xi_name_index = name_index,
@@ -3574,9 +3574,8 @@ int ocfs2_xattr_set(struct inode *inode,
 		return -ENOMEM;
 	}
 
-	had_lock = ocfs2_inode_lock_tracker(inode, &di_bh, 1, &oh);
-	if (had_lock < 0) {
-		ret = had_lock;
+	ret = ocfs2_inode_lock(inode, &di_bh, 1);
+	if (ret < 0) {
 		mlog_errno(ret);
 		goto cleanup_nolock;
 	}
@@ -3611,7 +3610,7 @@ int ocfs2_xattr_set(struct inode *inode,
 	}
 
 	/* Check whether the value is refcounted and do some preparation. */
-	if (ocfs2_is_refcount_inode(inode) &&
+	if (OCFS2_I(inode)->ip_dyn_features & OCFS2_HAS_REFCOUNT_FL &&
 	    (!xis.not_found || !xbs.not_found)) {
 		ret = ocfs2_prepare_refcount_xattr(inode, di, &xi,
 						   &xis, &xbs, &ref_tree,
@@ -3673,7 +3672,7 @@ cleanup:
 		if (ret)
 			mlog_errno(ret);
 	}
-	ocfs2_inode_unlock_tracker(inode, 1, &oh, had_lock);
+	ocfs2_inode_unlock(inode, 1);
 cleanup_nolock:
 	brelse(di_bh);
 	brelse(xbs.xattr_bh);

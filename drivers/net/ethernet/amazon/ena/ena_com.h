@@ -33,7 +33,6 @@
 #ifndef ENA_COM
 #define ENA_COM
 
-#include <linux/compiler.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/gfp.h>

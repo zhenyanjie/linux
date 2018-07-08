@@ -18,7 +18,6 @@ struct hist_browser {
 	u64		     nr_non_filtered_entries;
 	u64		     nr_hierarchy_entries;
 	u64		     nr_callchain_rows;
-	bool		     c2c_filter;
 
 	/* Get title string. */
 	int                  (*title)(struct hist_browser *browser,

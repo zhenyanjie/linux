@@ -573,8 +573,7 @@ static inline u32 _emit_ADDH(unsigned dry_run, u8 buf[],
 
 	buf[0] = CMD_DMAADDH;
 	buf[0] |= (da << 1);
-	buf[1] = val;
-	buf[2] = val >> 8;
+	*((__le16 *)&buf[1]) = cpu_to_le16(val);
 
 	PL330_DBGCMD_DUMP(SZ_DMAADDH, "\tDMAADDH %s %u\n",
 		da == 1 ? "DA" : "SA", val);
@@ -728,10 +727,7 @@ static inline u32 _emit_MOV(unsigned dry_run, u8 buf[],
 
 	buf[0] = CMD_DMAMOV;
 	buf[1] = dst;
-	buf[2] = val;
-	buf[3] = val >> 8;
-	buf[4] = val >> 16;
-	buf[5] = val >> 24;
+	*((__le32 *)&buf[2]) = cpu_to_le32(val);
 
 	PL330_DBGCMD_DUMP(SZ_DMAMOV, "\tDMAMOV %s 0x%x\n",
 		dst == SAR ? "SAR" : (dst == DAR ? "DAR" : "CCR"), val);
@@ -906,11 +902,10 @@ static inline u32 _emit_GO(unsigned dry_run, u8 buf[],
 
 	buf[0] = CMD_DMAGO;
 	buf[0] |= (ns << 1);
+
 	buf[1] = chan & 0x7;
-	buf[2] = addr;
-	buf[3] = addr >> 8;
-	buf[4] = addr >> 16;
-	buf[5] = addr >> 24;
+
+	*((__le32 *)&buf[2]) = cpu_to_le32(addr);
 
 	return SZ_DMAGO;
 }
@@ -1575,7 +1570,7 @@ static void pl330_dotask(unsigned long data)
 /* Returns 1 if state was updated, 0 otherwise */
 static int pl330_update(struct pl330_dmac *pl330)
 {
-	struct dma_pl330_desc *descdone, *tmp;
+	struct dma_pl330_desc *descdone;
 	unsigned long flags;
 	void __iomem *regs;
 	u32 val;
@@ -1653,7 +1648,9 @@ static int pl330_update(struct pl330_dmac *pl330)
 	}
 
 	/* Now that we are in no hurry, do the callbacks */
-	list_for_each_entry_safe(descdone, tmp, &pl330->req_done, rqd) {
+	while (!list_empty(&pl330->req_done)) {
+		descdone = list_first_entry(&pl330->req_done,
+					    struct dma_pl330_desc, rqd);
 		list_del(&descdone->rqd);
 		spin_unlock_irqrestore(&pl330->lock, flags);
 		dma_pl330_rqcb(descdone, PL330_ERR_NONE);
@@ -1859,10 +1856,9 @@ static int dmac_alloc_resources(struct pl330_dmac *pl330)
 	 * Alloc MicroCode buffer for 'chans' Channel threads.
 	 * A channel's buffer offset is (Channel_Id * MCODE_BUFF_PERCHAN)
 	 */
-	pl330->mcode_cpu = dma_alloc_attrs(pl330->ddma.dev,
+	pl330->mcode_cpu = dma_alloc_coherent(pl330->ddma.dev,
 				chans * pl330->mcbufsz,
-				&pl330->mcode_bus, GFP_KERNEL,
-				DMA_ATTR_PRIVILEGED);
+				&pl330->mcode_bus, GFP_KERNEL);
 	if (!pl330->mcode_cpu) {
 		dev_err(pl330->ddma.dev, "%s:%d Can't allocate memory!\n",
 			__func__, __LINE__);
@@ -1884,7 +1880,10 @@ static int dmac_alloc_resources(struct pl330_dmac *pl330)
 
 static int pl330_add(struct pl330_dmac *pl330)
 {
+	void __iomem *regs;
 	int i, ret;
+
+	regs = pl330->base;
 
 	/* Check if we can handle this DMAC */
 	if ((pl330->pcfg.periph_id & 0xfffff) != PERIPH_ID_VAL) {
@@ -2269,11 +2268,6 @@ static int pl330_get_current_xferred_count(struct dma_pl330_chan *pch,
 	}
 	pm_runtime_mark_last_busy(pch->dmac->ddma.dev);
 	pm_runtime_put_autosuspend(pl330->ddma.dev);
-
-	/* If DMAMOV hasn't finished yet, SAR/DAR can be zero */
-	if (!val)
-		return 0;
-
 	return val - addr;
 }
 

@@ -234,9 +234,10 @@ static int ams_delta_init(struct platform_device *pdev)
 		goto out_gpio;
 
 	/* Scan to find existence of the device */
-	err = nand_scan(ams_delta_mtd, 1);
-	if (err)
+	if (nand_scan(ams_delta_mtd, 1)) {
+		err = -ENXIO;
 		goto out_mtd;
+	}
 
 	/* Register the partitions */
 	mtd_device_register(ams_delta_mtd, partition_info,

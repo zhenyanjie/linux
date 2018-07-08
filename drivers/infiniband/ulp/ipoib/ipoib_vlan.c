@@ -31,12 +31,11 @@
  */
 
 #include <linux/module.h>
-#include <linux/sched/signal.h>
 
 #include <linux/init.h>
 #include <linux/seq_file.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "ipoib.h"
 
@@ -62,7 +61,9 @@ int __ipoib_vlan_add(struct ipoib_dev_priv *ppriv, struct ipoib_dev_priv *priv,
 	priv->parent = ppriv->dev;
 	set_bit(IPOIB_FLAG_SUBINTERFACE, &priv->flags);
 
-	ipoib_set_dev_features(priv, ppriv->ca);
+	result = ipoib_set_dev_features(priv, ppriv->ca);
+	if (result)
+		goto err;
 
 	priv->pkey = pkey;
 

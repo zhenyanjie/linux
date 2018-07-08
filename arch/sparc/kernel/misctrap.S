@@ -82,7 +82,6 @@ do_stdfmna:
 	call		handle_stdfmna
 	 add		%sp, PTREGS_OFF, %o0
 	ba,a,pt		%xcc, rtrap
-	 nop
 	.size		do_stdfmna,.-do_stdfmna
 
 	.type		breakpoint_trap,#function

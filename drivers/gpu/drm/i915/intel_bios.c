@@ -114,18 +114,16 @@ fill_detail_timing_data(struct drm_display_mode *panel_fixed_mode,
 	panel_fixed_mode->hsync_start = panel_fixed_mode->hdisplay +
 		((dvo_timing->hsync_off_hi << 8) | dvo_timing->hsync_off_lo);
 	panel_fixed_mode->hsync_end = panel_fixed_mode->hsync_start +
-		((dvo_timing->hsync_pulse_width_hi << 8) |
-			dvo_timing->hsync_pulse_width_lo);
+		dvo_timing->hsync_pulse_width;
 	panel_fixed_mode->htotal = panel_fixed_mode->hdisplay +
 		((dvo_timing->hblank_hi << 8) | dvo_timing->hblank_lo);
 
 	panel_fixed_mode->vdisplay = (dvo_timing->vactive_hi << 8) |
 		dvo_timing->vactive_lo;
 	panel_fixed_mode->vsync_start = panel_fixed_mode->vdisplay +
-		((dvo_timing->vsync_off_hi << 4) | dvo_timing->vsync_off_lo);
+		dvo_timing->vsync_off;
 	panel_fixed_mode->vsync_end = panel_fixed_mode->vsync_start +
-		((dvo_timing->vsync_pulse_width_hi << 4) |
-			dvo_timing->vsync_pulse_width_lo);
+		dvo_timing->vsync_pulse_width;
 	panel_fixed_mode->vtotal = panel_fixed_mode->vdisplay +
 		((dvo_timing->vblank_hi << 8) | dvo_timing->vblank_lo);
 	panel_fixed_mode->clock = dvo_timing->clock * 10;
@@ -332,19 +330,17 @@ parse_lfp_backlight(struct drm_i915_private *dev_priv,
 
 		method = &backlight_data->backlight_control[panel_type];
 		dev_priv->vbt.backlight.type = method->type;
-		dev_priv->vbt.backlight.controller = method->controller;
 	}
 
 	dev_priv->vbt.backlight.pwm_freq_hz = entry->pwm_freq_hz;
 	dev_priv->vbt.backlight.active_low_pwm = entry->active_low_pwm;
 	dev_priv->vbt.backlight.min_brightness = entry->min_brightness;
 	DRM_DEBUG_KMS("VBT backlight PWM modulation frequency %u Hz, "
-		      "active %s, min brightness %u, level %u, controller %u\n",
+		      "active %s, min brightness %u, level %u\n",
 		      dev_priv->vbt.backlight.pwm_freq_hz,
 		      dev_priv->vbt.backlight.active_low_pwm ? "low" : "high",
 		      dev_priv->vbt.backlight.min_brightness,
-		      backlight_data->level[panel_type],
-		      dev_priv->vbt.backlight.controller);
+		      backlight_data->level[panel_type]);
 }
 
 /* Try to find sdvo panel data */
@@ -1000,10 +996,6 @@ parse_mipi_sequence(struct drm_i915_private *dev_priv,
 			goto err;
 		}
 
-		/* Log about presence of sequences we won't run. */
-		if (seq_id == MIPI_SEQ_TEAR_ON || seq_id == MIPI_SEQ_TEAR_OFF)
-			DRM_DEBUG_KMS("Unsupported sequence %u\n", seq_id);
-
 		dev_priv->vbt.dsi.sequence[seq_id] = data + index;
 
 		if (sequence->version >= 3)
@@ -1160,10 +1152,16 @@ static void parse_ddi_port(struct drm_i915_private *dev_priv, enum port port,
 	is_hdmi = is_dvi && (child->common.device_type & DEVICE_TYPE_NOT_HDMI_OUTPUT) == 0;
 	is_edp = is_dp && (child->common.device_type & DEVICE_TYPE_INTERNAL_CONNECTOR);
 
+	if (port == PORT_A && is_dvi) {
+		DRM_DEBUG_KMS("VBT claims port A supports DVI%s, ignoring\n",
+			      is_hdmi ? "/HDMI" : "");
+		is_dvi = false;
+		is_hdmi = false;
+	}
+
 	info->supports_dvi = is_dvi;
 	info->supports_hdmi = is_hdmi;
 	info->supports_dp = is_dp;
-	info->supports_edp = is_edp;
 
 	DRM_DEBUG_KMS("Port %c VBT info: DP:%d HDMI:%d DVI:%d EDP:%d CRT:%d\n",
 		      port_name(port), is_dp, is_hdmi, is_dvi, is_edp, is_crt);
@@ -1221,7 +1219,7 @@ static void parse_ddi_ports(struct drm_i915_private *dev_priv,
 {
 	enum port port;
 
-	if (!HAS_DDI(dev_priv))
+	if (!HAS_DDI(dev_priv) && !IS_CHERRYVIEW(dev_priv))
 		return;
 
 	if (!dev_priv->vbt.child_dev_num)
@@ -1429,16 +1427,13 @@ bool intel_bios_is_valid_vbt(const void *buf, size_t size)
 		return false;
 	}
 
-	if (range_overflows_t(size_t,
-			      vbt->bdb_offset,
-			      sizeof(struct bdb_header),
-			      size)) {
+	if (vbt->bdb_offset + sizeof(struct bdb_header) > size) {
 		DRM_DEBUG_DRIVER("BDB header incomplete\n");
 		return false;
 	}
 
 	bdb = get_bdb_header(vbt);
-	if (range_overflows_t(size_t, vbt->bdb_offset, bdb->bdb_size, size)) {
+	if (vbt->bdb_offset + bdb->bdb_size > size) {
 		DRM_DEBUG_DRIVER("BDB incomplete\n");
 		return false;
 	}
@@ -1686,9 +1681,6 @@ bool intel_bios_is_port_edp(struct drm_i915_private *dev_priv, enum port port)
 	};
 	int i;
 
-	if (HAS_DDI(dev_priv))
-		return dev_priv->vbt.ddi_port_info[port].supports_edp;
-
 	if (!dev_priv->vbt.child_dev_num)
 		return false;
 
@@ -1806,7 +1798,7 @@ intel_bios_is_port_hpd_inverted(struct drm_i915_private *dev_priv,
 {
 	int i;
 
-	if (WARN_ON_ONCE(!IS_GEN9_LP(dev_priv)))
+	if (WARN_ON_ONCE(!IS_BROXTON(dev_priv)))
 		return false;
 
 	for (i = 0; i < dev_priv->vbt.child_dev_num; i++) {
@@ -1827,55 +1819,6 @@ intel_bios_is_port_hpd_inverted(struct drm_i915_private *dev_priv,
 		case DVO_PORT_DPC:
 		case DVO_PORT_HDMIC:
 			if (port == PORT_C)
-				return true;
-			break;
-		default:
-			break;
-		}
-	}
-
-	return false;
-}
-
-/**
- * intel_bios_is_lspcon_present - if LSPCON is attached on %port
- * @dev_priv:	i915 device instance
- * @port:	port to check
- *
- * Return true if LSPCON is present on this port
- */
-bool
-intel_bios_is_lspcon_present(struct drm_i915_private *dev_priv,
-				enum port port)
-{
-	int i;
-
-	if (!HAS_LSPCON(dev_priv))
-		return false;
-
-	for (i = 0; i < dev_priv->vbt.child_dev_num; i++) {
-		if (!dev_priv->vbt.child_dev[i].common.lspcon)
-			continue;
-
-		switch (dev_priv->vbt.child_dev[i].common.dvo_port) {
-		case DVO_PORT_DPA:
-		case DVO_PORT_HDMIA:
-			if (port == PORT_A)
-				return true;
-			break;
-		case DVO_PORT_DPB:
-		case DVO_PORT_HDMIB:
-			if (port == PORT_B)
-				return true;
-			break;
-		case DVO_PORT_DPC:
-		case DVO_PORT_HDMIC:
-			if (port == PORT_C)
-				return true;
-			break;
-		case DVO_PORT_DPD:
-		case DVO_PORT_HDMID:
-			if (port == PORT_D)
 				return true;
 			break;
 		default:

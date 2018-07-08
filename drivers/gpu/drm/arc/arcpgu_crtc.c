@@ -35,8 +35,7 @@ static struct simplefb_format supported_formats[] = {
 static void arc_pgu_set_pxl_fmt(struct drm_crtc *crtc)
 {
 	struct arcpgu_drm_private *arcpgu = crtc_to_arcpgu_priv(crtc);
-	const struct drm_framebuffer *fb = crtc->primary->state->fb;
-	uint32_t pixel_format = fb->format->format;
+	uint32_t pixel_format = crtc->primary->state->fb->pixel_format;
 	struct simplefb_format *format = NULL;
 	int i;
 

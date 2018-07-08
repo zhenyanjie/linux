@@ -336,8 +336,7 @@ static int init(struct cxd *ci)
 			break;
 #endif
 		/* TOSTRT = 8, Mode B (gated clock), falling Edge,
-		 * Serial, POL=HIGH, MSB
-		 */
+		 * Serial, POL=HIGH, MSB */
 		status = write_reg(ci, 0x0A, 0xA7);
 		if (status < 0)
 			break;

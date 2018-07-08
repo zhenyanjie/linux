@@ -46,12 +46,11 @@
 #include <linux/anon_inodes.h>
 #include <linux/slab.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <rdma/ib.h>
 
 #include "uverbs.h"
-#include "core_priv.h"
 
 MODULE_AUTHOR("Roland Dreier");
 MODULE_DESCRIPTION("InfiniBand userspace verbs access");
@@ -138,7 +137,6 @@ static int (*uverbs_ex_cmd_table[])(struct ib_uverbs_file *file,
 	[IB_USER_VERBS_EX_CMD_DESTROY_WQ]       = ib_uverbs_ex_destroy_wq,
 	[IB_USER_VERBS_EX_CMD_CREATE_RWQ_IND_TBL] = ib_uverbs_ex_create_rwq_ind_table,
 	[IB_USER_VERBS_EX_CMD_DESTROY_RWQ_IND_TBL] = ib_uverbs_ex_destroy_rwq_ind_table,
-	[IB_USER_VERBS_EX_CMD_MODIFY_QP]        = ib_uverbs_ex_modify_qp,
 };
 
 static void ib_uverbs_add_one(struct ib_device *device);
@@ -238,8 +236,6 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 
 		idr_remove_uobj(&ib_uverbs_ah_idr, uobj);
 		ib_destroy_ah(ah);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		kfree(uobj);
 	}
 
@@ -249,8 +245,6 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 
 		idr_remove_uobj(&ib_uverbs_mw_idr, uobj);
 		uverbs_dealloc_mw(mw);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		kfree(uobj);
 	}
 
@@ -259,8 +253,6 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 
 		idr_remove_uobj(&ib_uverbs_rule_idr, uobj);
 		ib_destroy_flow(flow_id);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		kfree(uobj);
 	}
 
@@ -273,8 +265,6 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 		if (qp == qp->real_qp)
 			ib_uverbs_detach_umcast(qp, uqp);
 		ib_destroy_qp(qp);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		ib_uverbs_release_uevent(file, &uqp->uevent);
 		kfree(uqp);
 	}
@@ -307,8 +297,6 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 
 		idr_remove_uobj(&ib_uverbs_srq_idr, uobj);
 		ib_destroy_srq(srq);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		ib_uverbs_release_uevent(file, uevent);
 		kfree(uevent);
 	}
@@ -321,8 +309,6 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 
 		idr_remove_uobj(&ib_uverbs_cq_idr, uobj);
 		ib_destroy_cq(cq);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		ib_uverbs_release_ucq(file, ev_file, ucq);
 		kfree(ucq);
 	}
@@ -332,8 +318,6 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 
 		idr_remove_uobj(&ib_uverbs_mr_idr, uobj);
 		ib_dereg_mr(mr);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		kfree(uobj);
 	}
 
@@ -354,15 +338,10 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 
 		idr_remove_uobj(&ib_uverbs_pd_idr, uobj);
 		ib_dealloc_pd(pd);
-		ib_rdmacg_uncharge(&uobj->cg_obj, context->device,
-				   RDMACG_RESOURCE_HCA_OBJECT);
 		kfree(uobj);
 	}
 
 	put_pid(context->tgid);
-
-	ib_rdmacg_uncharge(&context->cg_obj, context->device,
-			   RDMACG_RESOURCE_HCA_HANDLE);
 
 	return context->device->dealloc_ucontext(context);
 }
@@ -756,22 +735,28 @@ static int verify_command_mask(struct ib_device *ib_dev, __u32 command)
 	return -1;
 }
 
+static bool verify_command_idx(u32 command, bool extended)
+{
+	if (extended)
+		return command < ARRAY_SIZE(uverbs_ex_cmd_table);
+
+	return command < ARRAY_SIZE(uverbs_cmd_table);
+}
+
 static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 			     size_t count, loff_t *pos)
 {
 	struct ib_uverbs_file *file = filp->private_data;
 	struct ib_device *ib_dev;
 	struct ib_uverbs_cmd_hdr hdr;
+	bool extended_command;
 	__u32 command;
 	__u32 flags;
 	int srcu_key;
 	ssize_t ret;
 
-	if (!ib_safe_file_access(filp)) {
-		pr_err_once("uverbs_write: process %d (%s) changed security contexts after opening file descriptor, this is not allowed.\n",
-			    task_tgid_vnr(current), current->comm);
+	if (WARN_ON_ONCE(!ib_safe_file_access(filp)))
 		return -EACCES;
-	}
 
 	if (count < sizeof hdr)
 		return -EINVAL;
@@ -794,6 +779,15 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 	}
 
 	command = hdr.command & IB_USER_VERBS_CMD_COMMAND_MASK;
+	flags = (hdr.command &
+		 IB_USER_VERBS_CMD_FLAGS_MASK) >> IB_USER_VERBS_CMD_FLAGS_SHIFT;
+
+	extended_command = flags & IB_USER_VERBS_CMD_FLAG_EXTENDED;
+	if (!verify_command_idx(command, extended_command)) {
+		ret = -EINVAL;
+		goto out;
+	}
+
 	if (verify_command_mask(ib_dev, command)) {
 		ret = -EOPNOTSUPP;
 		goto out;
@@ -805,12 +799,8 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 		goto out;
 	}
 
-	flags = (hdr.command &
-		 IB_USER_VERBS_CMD_FLAGS_MASK) >> IB_USER_VERBS_CMD_FLAGS_SHIFT;
-
 	if (!flags) {
-		if (command >= ARRAY_SIZE(uverbs_cmd_table) ||
-		    !uverbs_cmd_table[command]) {
+		if (!uverbs_cmd_table[command]) {
 			ret = -EINVAL;
 			goto out;
 		}
@@ -831,8 +821,7 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 		struct ib_udata uhw;
 		size_t written_count = count;
 
-		if (command >= ARRAY_SIZE(uverbs_ex_cmd_table) ||
-		    !uverbs_ex_cmd_table[command]) {
+		if (!uverbs_ex_cmd_table[command]) {
 			ret = -ENOSYS;
 			goto out;
 		}
@@ -1194,7 +1183,7 @@ static void ib_uverbs_add_one(struct ib_device *device)
 	if (cdev_add(&uverbs_dev->cdev, base, 1))
 		goto err_cdev;
 
-	uverbs_dev->dev = device_create(uverbs_class, device->dev.parent,
+	uverbs_dev->dev = device_create(uverbs_class, device->dma_device,
 					uverbs_dev->cdev.dev, uverbs_dev,
 					"uverbs%d", uverbs_dev->devnum);
 	if (IS_ERR(uverbs_dev->dev))

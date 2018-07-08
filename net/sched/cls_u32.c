@@ -334,6 +334,7 @@ static int u32_init(struct tcf_proto *tp)
 	if (root_ht == NULL)
 		return -ENOBUFS;
 
+	root_ht->divisor = 0;
 	root_ht->refcnt++;
 	root_ht->handle = tp_c ? gen_new_htid(tp_c) : 0x80000000;
 	root_ht->prio = tp->prio;
@@ -495,6 +496,7 @@ static void u32_clear_hw_hnode(struct tcf_proto *tp, struct tc_u_hnode *h)
 static int u32_replace_hw_knode(struct tcf_proto *tp, struct tc_u_knode *n,
 				u32 flags)
 {
+	struct tc_u_hnode *ht = rtnl_dereference(n->ht_down);
 	struct net_device *dev = tp->q->dev_queue->dev;
 	struct tc_cls_u32_offload u32_offload = {0};
 	struct tc_to_netdev offload;
@@ -519,14 +521,10 @@ static int u32_replace_hw_knode(struct tcf_proto *tp, struct tc_u_knode *n,
 	offload.cls_u32->knode.sel = &n->sel;
 	offload.cls_u32->knode.exts = &n->exts;
 	if (n->ht_down)
-		offload.cls_u32->knode.link_handle = n->ht_down->handle;
+		offload.cls_u32->knode.link_handle = ht->handle;
 
 	err = dev->netdev_ops->ndo_setup_tc(dev, tp->q->handle,
 					    tp->protocol, &offload);
-
-	if (!err)
-		n->flags |= TCA_CLS_FLAGS_IN_HW;
-
 	if (tc_skip_sw(flags))
 		return err;
 
@@ -791,8 +789,9 @@ static void u32_replace_knode(struct tcf_proto *tp, struct tc_u_common *tp_c,
 static struct tc_u_knode *u32_init_knode(struct tcf_proto *tp,
 					 struct tc_u_knode *n)
 {
-	struct tc_u_knode *new;
+	struct tc_u_hnode *ht = rtnl_dereference(n->ht_down);
 	struct tc_u32_sel *s = &n->sel;
+	struct tc_u_knode *new;
 
 	new = kzalloc(sizeof(*n) + s->nkeys*sizeof(struct tc_u32_key),
 		      GFP_KERNEL);
@@ -810,11 +809,11 @@ static struct tc_u_knode *u32_init_knode(struct tcf_proto *tp,
 	new->fshift = n->fshift;
 	new->res = n->res;
 	new->flags = n->flags;
-	RCU_INIT_POINTER(new->ht_down, n->ht_down);
+	RCU_INIT_POINTER(new->ht_down, ht);
 
 	/* bump reference count as long as we hold pointer to structure */
-	if (new->ht_down)
-		new->ht_down->refcnt++;
+	if (ht)
+		ht->refcnt++;
 
 #ifdef CONFIG_CLS_U32_PERF
 	/* Statistics may be incremented by readers during update
@@ -898,9 +897,6 @@ static int u32_change(struct net *net, struct sk_buff *in_skb,
 			u32_destroy_key(tp, new, false);
 			return err;
 		}
-
-		if (!tc_in_hw(new->flags))
-			new->flags |= TCA_CLS_FLAGS_NOT_IN_HW;
 
 		u32_replace_knode(tp, tp_c, new);
 		tcf_unbind_filter(tp, &n->res);
@@ -1020,9 +1016,6 @@ static int u32_change(struct net *net, struct sk_buff *in_skb,
 		err = u32_replace_hw_knode(tp, n, flags);
 		if (err)
 			goto errhw;
-
-		if (!tc_in_hw(n->flags))
-			n->flags |= TCA_CLS_FLAGS_NOT_IN_HW;
 
 		ins = &ht->ht[TC_U32_HASH(handle)];
 		for (pins = rtnl_dereference(*ins); pins;

@@ -204,9 +204,6 @@ struct rsi_common {
 	struct cqm_info cqm_info;
 
 	bool hw_data_qs_blocked;
-	
-	int tx_power;
-	u8 ant_in_use;
 };
 
 struct rsi_hw {
@@ -223,7 +220,6 @@ struct rsi_hw {
 	struct rsi_debugfs *dfsentry;
 	u8 num_debugfs_entries;
 #endif
-	u8 dfs_region;
 	void *rsi_dev;
 	int (*host_intf_read_pkt)(struct rsi_hw *adapter, u8 *pkt, u32 len);
 	int (*host_intf_write_pkt)(struct rsi_hw *adapter, u8 *pkt, u32 len);

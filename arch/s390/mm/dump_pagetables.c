@@ -1,6 +1,6 @@
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
-#include <linux/sched.h>
+#include <linux/module.h>
 #include <linux/mm.h>
 #include <asm/sections.h>
 #include <asm/pgtable.h>
@@ -49,8 +49,8 @@ static void print_prot(struct seq_file *m, unsigned int pr, int level)
 		seq_printf(m, "I\n");
 		return;
 	}
-	seq_puts(m, (pr & _PAGE_PROTECT) ? "RO " : "RW ");
-	seq_puts(m, (pr & _PAGE_NOEXEC) ? "NX\n" : "X\n");
+	seq_printf(m, "%s", pr & _PAGE_PROTECT ? "RO " : "RW ");
+	seq_putc(m, '\n');
 }
 
 static void note_page(struct seq_file *m, struct pg_state *st,
@@ -117,8 +117,7 @@ static void walk_pte_level(struct seq_file *m, struct pg_state *st,
 	for (i = 0; i < PTRS_PER_PTE && addr < max_addr; i++) {
 		st->current_address = addr;
 		pte = pte_offset_kernel(pmd, addr);
-		prot = pte_val(*pte) &
-			(_PAGE_PROTECT | _PAGE_INVALID | _PAGE_NOEXEC);
+		prot = pte_val(*pte) & (_PAGE_PROTECT | _PAGE_INVALID);
 		note_page(m, st, prot, 4);
 		addr += PAGE_SIZE;
 	}
@@ -136,9 +135,7 @@ static void walk_pmd_level(struct seq_file *m, struct pg_state *st,
 		pmd = pmd_offset(pud, addr);
 		if (!pmd_none(*pmd)) {
 			if (pmd_large(*pmd)) {
-				prot = pmd_val(*pmd) &
-					(_SEGMENT_ENTRY_PROTECT |
-					 _SEGMENT_ENTRY_NOEXEC);
+				prot = pmd_val(*pmd) & _SEGMENT_ENTRY_PROTECT;
 				note_page(m, st, prot, 3);
 			} else
 				walk_pte_level(m, st, pmd, addr);
@@ -160,9 +157,7 @@ static void walk_pud_level(struct seq_file *m, struct pg_state *st,
 		pud = pud_offset(pgd, addr);
 		if (!pud_none(*pud))
 			if (pud_large(*pud)) {
-				prot = pud_val(*pud) &
-					(_REGION_ENTRY_PROTECT |
-					 _REGION_ENTRY_NOEXEC);
+				prot = pud_val(*pud) & _REGION_ENTRY_PROTECT;
 				note_page(m, st, prot, 2);
 			} else
 				walk_pmd_level(m, st, pud, addr);
@@ -188,7 +183,6 @@ static void walk_pgd_level(struct seq_file *m)
 		else
 			note_page(m, &st, _PAGE_INVALID, 1);
 		addr += PGDIR_SIZE;
-		cond_resched();
 	}
 	/* Flush out the last page */
 	st.current_address = max_addr;

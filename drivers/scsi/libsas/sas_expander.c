@@ -282,6 +282,7 @@ static void sas_set_ex_phy(struct domain_device *dev, int phy_id, void *rsp)
 	phy->phy->minimum_linkrate = dr->pmin_linkrate;
 	phy->phy->maximum_linkrate = dr->pmax_linkrate;
 	phy->phy->negotiated_linkrate = phy->linkrate;
+	phy->phy->enabled = (phy->linkrate != SAS_PHY_DISABLED);
 
  skip:
 	if (new_phy)
@@ -675,7 +676,7 @@ int sas_smp_get_phy_events(struct sas_phy *phy)
 	res = smp_execute_task(dev, req, RPEL_REQ_SIZE,
 			            resp, RPEL_RESP_SIZE);
 
-	if (!res)
+	if (res)
 		goto out;
 
 	phy->invalid_dword_count = scsi_to_u32(&resp[12]);
@@ -684,6 +685,7 @@ int sas_smp_get_phy_events(struct sas_phy *phy)
 	phy->phy_reset_problem_count = scsi_to_u32(&resp[24]);
 
  out:
+	kfree(req);
 	kfree(resp);
 	return res;
 
@@ -2174,12 +2176,12 @@ int sas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 			       bio_data(rsp->bio), blk_rq_bytes(rsp));
 	if (ret > 0) {
 		/* positive number is the untransferred residual */
-		scsi_req(rsp)->resid_len = ret;
-		scsi_req(req)->resid_len = 0;
+		rsp->resid_len = ret;
+		req->resid_len = 0;
 		ret = 0;
 	} else if (ret == 0) {
-		scsi_req(rsp)->resid_len = 0;
-		scsi_req(req)->resid_len = 0;
+		rsp->resid_len = 0;
+		req->resid_len = 0;
 	}
 
 	return ret;

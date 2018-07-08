@@ -28,6 +28,7 @@
  */
 
 #include <linux/export.h>
+#include <linux/kernel.h>
 #include <linux/timex.h>
 #include <linux/capability.h>
 #include <linux/timekeeper_internal.h>
@@ -38,7 +39,7 @@
 #include <linux/math64.h>
 #include <linux/ptrace.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unistd.h>
 
 #include <generated/timeconst.h>
@@ -258,9 +259,10 @@ unsigned int jiffies_to_msecs(const unsigned long j)
 	return (j + (HZ / MSEC_PER_SEC) - 1)/(HZ / MSEC_PER_SEC);
 #else
 # if BITS_PER_LONG == 32
-	return (HZ_TO_MSEC_MUL32 * j) >> HZ_TO_MSEC_SHR32;
+	return (HZ_TO_MSEC_MUL32 * j + (1ULL << HZ_TO_MSEC_SHR32) - 1) >>
+	       HZ_TO_MSEC_SHR32;
 # else
-	return (j * HZ_TO_MSEC_NUM) / HZ_TO_MSEC_DEN;
+	return DIV_ROUND_UP(j * HZ_TO_MSEC_NUM, HZ_TO_MSEC_DEN);
 # endif
 #endif
 }
@@ -701,16 +703,6 @@ u64 nsec_to_clock_t(u64 x)
 	return div_u64(x * 9, (9ull * NSEC_PER_SEC + (USER_HZ / 2)) / USER_HZ);
 #endif
 }
-
-u64 jiffies64_to_nsecs(u64 j)
-{
-#if !(NSEC_PER_SEC % HZ)
-	return (NSEC_PER_SEC / HZ) * j;
-# else
-	return div_u64(j * HZ_TO_NSEC_NUM, HZ_TO_NSEC_DEN);
-#endif
-}
-EXPORT_SYMBOL(jiffies64_to_nsecs);
 
 /**
  * nsecs_to_jiffies64 - Convert nsecs in u64 to jiffies64

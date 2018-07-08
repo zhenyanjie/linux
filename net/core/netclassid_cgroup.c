@@ -12,8 +12,6 @@
 #include <linux/slab.h>
 #include <linux/cgroup.h>
 #include <linux/fdtable.h>
-#include <linux/sched/task.h>
-
 #include <net/cls_cgroup.h>
 #include <net/sock.h>
 

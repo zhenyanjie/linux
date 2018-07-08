@@ -104,7 +104,7 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 	const __be32 *match_array = initial_match_array;
 	const __be32 *tmp, *imap, *imask, dummy_imask[] = { [0 ... MAX_PHANDLE_ARGS] = ~0 };
 	u32 intsize = 1, addrsize, newintsize = 0, newaddrsize = 0;
-	int imaplen, match, i, rc = -EINVAL;
+	int imaplen, match, i;
 
 #ifdef DEBUG
 	of_print_phandle_args("of_irq_parse_raw: ", out_irq);
@@ -134,7 +134,7 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 	pr_debug("of_irq_parse_raw: ipar=%s, size=%d\n", of_node_full_name(ipar), intsize);
 
 	if (out_irq->args_count != intsize)
-		goto fail;
+		return -EINVAL;
 
 	/* Look for this #address-cells. We have to implement the old linux
 	 * trick of looking for the parent here as some device-trees rely on it
@@ -153,10 +153,8 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 	pr_debug(" -> addrsize=%d\n", addrsize);
 
 	/* Range check so that the temporary buffer doesn't overflow */
-	if (WARN_ON(addrsize + intsize > MAX_PHANDLE_ARGS)) {
-		rc = -EFAULT;
+	if (WARN_ON(addrsize + intsize > MAX_PHANDLE_ARGS))
 		goto fail;
-	}
 
 	/* Precalculate the match array - this simplifies match loop */
 	for (i = 0; i < addrsize; i++)
@@ -242,11 +240,10 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 			    newintsize, newaddrsize);
 
 			/* Check for malformed properties */
-			if (WARN_ON(newaddrsize + newintsize > MAX_PHANDLE_ARGS)
-			    || (imaplen < (newaddrsize + newintsize))) {
-				rc = -EFAULT;
+			if (WARN_ON(newaddrsize + newintsize > MAX_PHANDLE_ARGS))
 				goto fail;
-			}
+			if (imaplen < (newaddrsize + newintsize))
+				goto fail;
 
 			imap += newaddrsize + newintsize;
 			imaplen -= newaddrsize + newintsize;
@@ -274,13 +271,11 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 		ipar = newpar;
 		newpar = NULL;
 	}
-	rc = -ENOENT; /* No interrupt-map found */
-
  fail:
 	of_node_put(ipar);
 	of_node_put(newpar);
 
-	return rc;
+	return -EINVAL;
 }
 EXPORT_SYMBOL_GPL(of_irq_parse_raw);
 
@@ -702,4 +697,3 @@ void of_msi_configure(struct device *dev, struct device_node *np)
 	dev_set_msi_domain(dev,
 			   of_msi_get_domain(dev, np, DOMAIN_BUS_PLATFORM_MSI));
 }
-EXPORT_SYMBOL_GPL(of_msi_configure);

@@ -152,8 +152,8 @@ struct ports_device {
 	spinlock_t c_ivq_lock;
 	spinlock_t c_ovq_lock;
 
-	/* max. number of ports this device can hold */
-	u32 max_nr_ports;
+	/* The current config space is stored here */
+	struct virtio_console_config config;
 
 	/* The virtio device we're associated with */
 	struct virtio_device *vdev;
@@ -1405,7 +1405,6 @@ static int add_port(struct ports_device *portdev, u32 id)
 {
 	char debugfs_name[16];
 	struct port *port;
-	struct port_buffer *buf;
 	dev_t devt;
 	unsigned int nr_added_bufs;
 	int err;
@@ -1516,8 +1515,6 @@ static int add_port(struct ports_device *portdev, u32 id)
 	return 0;
 
 free_inbufs:
-	while ((buf = virtqueue_detach_unused_buf(port->in_vq)))
-		free_buf(buf, true);
 free_device:
 	device_destroy(pdrvdata.class, port->dev->devt);
 free_cdev:
@@ -1542,34 +1539,14 @@ static void remove_port(struct kref *kref)
 
 static void remove_port_data(struct port *port)
 {
-	struct port_buffer *buf;
-
 	spin_lock_irq(&port->inbuf_lock);
 	/* Remove unused data this port might have received. */
 	discard_port_data(port);
 	spin_unlock_irq(&port->inbuf_lock);
 
-	/* Remove buffers we queued up for the Host to send us data in. */
-	do {
-		spin_lock_irq(&port->inbuf_lock);
-		buf = virtqueue_detach_unused_buf(port->in_vq);
-		spin_unlock_irq(&port->inbuf_lock);
-		if (buf)
-			free_buf(buf, true);
-	} while (buf);
-
 	spin_lock_irq(&port->outvq_lock);
 	reclaim_consumed_buffers(port);
 	spin_unlock_irq(&port->outvq_lock);
-
-	/* Free pending buffers from the out-queue. */
-	do {
-		spin_lock_irq(&port->outvq_lock);
-		buf = virtqueue_detach_unused_buf(port->out_vq);
-		spin_unlock_irq(&port->outvq_lock);
-		if (buf)
-			free_buf(buf, true);
-	} while (buf);
 }
 
 /*
@@ -1657,11 +1634,11 @@ static void handle_control_message(struct virtio_device *vdev,
 			break;
 		}
 		if (virtio32_to_cpu(vdev, cpkt->id) >=
-		    portdev->max_nr_ports) {
+		    portdev->config.max_nr_ports) {
 			dev_warn(&portdev->vdev->dev,
 				"Request for adding port with "
 				"out-of-bound id %u, max. supported id: %u\n",
-				cpkt->id, portdev->max_nr_ports - 1);
+				cpkt->id, portdev->config.max_nr_ports - 1);
 			break;
 		}
 		add_port(portdev, virtio32_to_cpu(vdev, cpkt->id));
@@ -1794,13 +1771,24 @@ static void control_work_handler(struct work_struct *work)
 	spin_unlock(&portdev->c_ivq_lock);
 }
 
+static void flush_bufs(struct virtqueue *vq, bool can_sleep)
+{
+	struct port_buffer *buf;
+	unsigned int len;
+
+	while ((buf = virtqueue_get_buf(vq, &len)))
+		free_buf(buf, can_sleep);
+}
+
 static void out_intr(struct virtqueue *vq)
 {
 	struct port *port;
 
 	port = find_port_by_vq(vq->vdev->priv, vq);
-	if (!port)
+	if (!port) {
+		flush_bufs(vq, false);
 		return;
+	}
 
 	wake_up_interruptible(&port->waitqueue);
 }
@@ -1811,8 +1799,10 @@ static void in_intr(struct virtqueue *vq)
 	unsigned long flags;
 
 	port = find_port_by_vq(vq->vdev->priv, vq);
-	if (!port)
+	if (!port) {
+		flush_bufs(vq, false);
 		return;
+	}
 
 	spin_lock_irqsave(&port->inbuf_lock, flags);
 	port->inbuf = get_inbuf(port);
@@ -1902,7 +1892,7 @@ static int init_vqs(struct ports_device *portdev)
 	u32 i, j, nr_ports, nr_queues;
 	int err;
 
-	nr_ports = portdev->max_nr_ports;
+	nr_ports = portdev->config.max_nr_ports;
 	nr_queues = use_multiport(portdev) ? (nr_ports + 1) * 2 : 2;
 
 	vqs = kmalloc(nr_queues * sizeof(struct virtqueue *), GFP_KERNEL);
@@ -1947,7 +1937,7 @@ static int init_vqs(struct ports_device *portdev)
 	/* Find the queues. */
 	err = portdev->vdev->config->find_vqs(portdev->vdev, nr_queues, vqs,
 					      io_callbacks,
-					      (const char **)io_names, NULL);
+					      (const char **)io_names);
 	if (err)
 		goto free;
 
@@ -1987,6 +1977,15 @@ static const struct file_operations portdev_fops = {
 
 static void remove_vqs(struct ports_device *portdev)
 {
+	struct virtqueue *vq;
+
+	virtio_device_for_each_vq(portdev->vdev, vq) {
+		struct port_buffer *buf;
+
+		flush_bufs(vq, true);
+		while ((buf = virtqueue_detach_unused_buf(vq)))
+			free_buf(buf, true);
+	}
 	portdev->vdev->config->del_vqs(portdev->vdev);
 	kfree(portdev->in_vqs);
 	kfree(portdev->out_vqs);
@@ -2055,13 +2054,13 @@ static int virtcons_probe(struct virtio_device *vdev)
 	}
 
 	multiport = false;
-	portdev->max_nr_ports = 1;
+	portdev->config.max_nr_ports = 1;
 
 	/* Don't test MULTIPORT at all if we're rproc: not a valid feature! */
 	if (!is_rproc_serial(vdev) &&
 	    virtio_cread_feature(vdev, VIRTIO_CONSOLE_F_MULTIPORT,
 				 struct virtio_console_config, max_nr_ports,
-				 &portdev->max_nr_ports) == 0) {
+				 &portdev->config.max_nr_ports) == 0) {
 		multiport = true;
 	}
 
@@ -2202,16 +2201,14 @@ static int virtcons_freeze(struct virtio_device *vdev)
 
 	vdev->config->reset(vdev);
 
-	if (use_multiport(portdev))
-		virtqueue_disable_cb(portdev->c_ivq);
+	virtqueue_disable_cb(portdev->c_ivq);
 	cancel_work_sync(&portdev->control_work);
 	cancel_work_sync(&portdev->config_work);
 	/*
 	 * Once more: if control_work_handler() was running, it would
 	 * enable the cb as the last step.
 	 */
-	if (use_multiport(portdev))
-		virtqueue_disable_cb(portdev->c_ivq);
+	virtqueue_disable_cb(portdev->c_ivq);
 	remove_controlq_data(portdev);
 
 	list_for_each_entry(port, &portdev->ports, list) {

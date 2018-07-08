@@ -20,7 +20,7 @@
 #include <linux/module.h>
 #include <linux/cache.h>
 #include <linux/audit.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/ktime.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
@@ -192,7 +192,7 @@ int xfrm_register_type(const struct xfrm_type *type, unsigned short family)
 	else
 		err = -EEXIST;
 	spin_unlock_bh(&xfrm_type_lock);
-	rcu_read_unlock();
+	xfrm_state_put_afinfo(afinfo);
 	return err;
 }
 EXPORT_SYMBOL(xfrm_register_type);
@@ -213,7 +213,7 @@ int xfrm_unregister_type(const struct xfrm_type *type, unsigned short family)
 	else
 		typemap[type->proto] = NULL;
 	spin_unlock_bh(&xfrm_type_lock);
-	rcu_read_unlock();
+	xfrm_state_put_afinfo(afinfo);
 	return err;
 }
 EXPORT_SYMBOL(xfrm_unregister_type);
@@ -231,18 +231,17 @@ retry:
 		return NULL;
 	typemap = afinfo->type_map;
 
-	type = READ_ONCE(typemap[proto]);
+	type = typemap[proto];
 	if (unlikely(type && !try_module_get(type->owner)))
 		type = NULL;
-
-	rcu_read_unlock();
-
 	if (!type && !modload_attempted) {
+		xfrm_state_put_afinfo(afinfo);
 		request_module("xfrm-type-%d-%d", family, proto);
 		modload_attempted = 1;
 		goto retry;
 	}
 
+	xfrm_state_put_afinfo(afinfo);
 	return type;
 }
 
@@ -281,7 +280,7 @@ int xfrm_register_mode(struct xfrm_mode *mode, int family)
 
 out:
 	spin_unlock_bh(&xfrm_mode_lock);
-	rcu_read_unlock();
+	xfrm_state_put_afinfo(afinfo);
 	return err;
 }
 EXPORT_SYMBOL(xfrm_register_mode);
@@ -309,7 +308,7 @@ int xfrm_unregister_mode(struct xfrm_mode *mode, int family)
 	}
 
 	spin_unlock_bh(&xfrm_mode_lock);
-	rcu_read_unlock();
+	xfrm_state_put_afinfo(afinfo);
 	return err;
 }
 EXPORT_SYMBOL(xfrm_unregister_mode);
@@ -328,17 +327,17 @@ retry:
 	if (unlikely(afinfo == NULL))
 		return NULL;
 
-	mode = READ_ONCE(afinfo->mode_map[encap]);
+	mode = afinfo->mode_map[encap];
 	if (unlikely(mode && !try_module_get(mode->owner)))
 		mode = NULL;
-
-	rcu_read_unlock();
 	if (!mode && !modload_attempted) {
+		xfrm_state_put_afinfo(afinfo);
 		request_module("xfrm-mode-%d-%d", family, encap);
 		modload_attempted = 1;
 		goto retry;
 	}
 
+	xfrm_state_put_afinfo(afinfo);
 	return mode;
 }
 
@@ -389,6 +388,14 @@ static void xfrm_state_gc_task(struct work_struct *work)
 		xfrm_state_gc_destroy(x);
 }
 
+static inline unsigned long make_jiffies(long secs)
+{
+	if (secs >= (MAX_SCHEDULE_TIMEOUT-1)/HZ)
+		return MAX_SCHEDULE_TIMEOUT-1;
+	else
+		return secs*HZ;
+}
+
 static enum hrtimer_restart xfrm_timer_handler(struct hrtimer *me)
 {
 	struct tasklet_hrtimer *thr = container_of(me, struct tasklet_hrtimer, timer);
@@ -410,7 +417,7 @@ static enum hrtimer_restart xfrm_timer_handler(struct hrtimer *me)
 			if (x->xflags & XFRM_SOFT_EXPIRE) {
 				/* enter hard expire without soft expire first?!
 				 * setting a new date could trigger this.
-				 * workaround: fix x->curflt.add_time by below:
+				 * workarbound: fix x->curflt.add_time by below:
 				 */
 				x->curlft.add_time = now - x->saved_tmo - 1;
 				tmo = x->lft.hard_add_expires_seconds - x->saved_tmo;
@@ -640,25 +647,26 @@ void xfrm_sad_getinfo(struct net *net, struct xfrmk_sadinfo *si)
 }
 EXPORT_SYMBOL(xfrm_sad_getinfo);
 
-static void
+static int
 xfrm_init_tempstate(struct xfrm_state *x, const struct flowi *fl,
 		    const struct xfrm_tmpl *tmpl,
 		    const xfrm_address_t *daddr, const xfrm_address_t *saddr,
 		    unsigned short family)
 {
-	struct xfrm_state_afinfo *afinfo = xfrm_state_afinfo_get_rcu(family);
-
+	struct xfrm_state_afinfo *afinfo = xfrm_state_get_afinfo(family);
 	if (!afinfo)
-		return;
-
+		return -1;
 	afinfo->init_tempsel(&x->sel, fl);
 
 	if (family != tmpl->encap_family) {
-		afinfo = xfrm_state_afinfo_get_rcu(tmpl->encap_family);
+		xfrm_state_put_afinfo(afinfo);
+		afinfo = xfrm_state_get_afinfo(tmpl->encap_family);
 		if (!afinfo)
-			return;
+			return -1;
 	}
 	afinfo->init_temprop(x, tmpl, daddr, saddr);
+	xfrm_state_put_afinfo(afinfo);
+	return 0;
 }
 
 static struct xfrm_state *__xfrm_state_lookup(struct net *net, u32 mark,
@@ -1189,6 +1197,7 @@ static struct xfrm_state *xfrm_state_clone(struct xfrm_state *orig)
 
 	if (orig->aead) {
 		x->aead = xfrm_algo_aead_clone(orig->aead);
+		x->geniv = orig->geniv;
 		if (!x->aead)
 			goto error;
 	}
@@ -1238,6 +1247,8 @@ static struct xfrm_state *xfrm_state_clone(struct xfrm_state *orig)
 	x->curlft.add_time = orig->curlft.add_time;
 	x->km.state = orig->km.state;
 	x->km.seq = orig->km.seq;
+	x->replay = orig->replay;
+	x->preplay = orig->preplay;
 
 	return x;
 
@@ -1404,7 +1415,7 @@ int xfrm_state_check_expire(struct xfrm_state *x)
 	if (x->curlft.bytes >= x->lft.hard_byte_limit ||
 	    x->curlft.packets >= x->lft.hard_packet_limit) {
 		x->km.state = XFRM_STATE_EXPIRED;
-		tasklet_hrtimer_start(&x->mtimer, 0, HRTIMER_MODE_REL);
+		tasklet_hrtimer_start(&x->mtimer, ktime_set(0, 0), HRTIMER_MODE_REL);
 		return -EINVAL;
 	}
 
@@ -1474,7 +1485,7 @@ xfrm_tmpl_sort(struct xfrm_tmpl **dst, struct xfrm_tmpl **src, int n,
 	if (afinfo->tmpl_sort)
 		err = afinfo->tmpl_sort(dst, src, n);
 	spin_unlock_bh(&net->xfrm.xfrm_state_lock);
-	rcu_read_unlock();
+	xfrm_state_put_afinfo(afinfo);
 	return err;
 }
 EXPORT_SYMBOL(xfrm_tmpl_sort);
@@ -1494,7 +1505,7 @@ xfrm_state_sort(struct xfrm_state **dst, struct xfrm_state **src, int n,
 	if (afinfo->state_sort)
 		err = afinfo->state_sort(dst, src, n);
 	spin_unlock_bh(&net->xfrm.xfrm_state_lock);
-	rcu_read_unlock();
+	xfrm_state_put_afinfo(afinfo);
 	return err;
 }
 EXPORT_SYMBOL(xfrm_state_sort);
@@ -1875,6 +1886,18 @@ int xfrm_user_policy(struct sock *sk, int optname, u8 __user *optval, int optlen
 	struct xfrm_mgr *km;
 	struct xfrm_policy *pol = NULL;
 
+#ifdef CONFIG_COMPAT
+	if (in_compat_syscall())
+		return -EOPNOTSUPP;
+#endif
+
+	if (!optval && !optlen) {
+		xfrm_sk_policy_insert(sk, XFRM_POLICY_IN, NULL);
+		xfrm_sk_policy_insert(sk, XFRM_POLICY_OUT, NULL);
+		__sk_dst_reset(sk);
+		return 0;
+	}
+
 	if (optlen <= 0 || optlen > PAGE_SIZE)
 		return -EMSGSIZE;
 
@@ -1932,10 +1955,10 @@ EXPORT_SYMBOL(xfrm_unregister_km);
 int xfrm_state_register_afinfo(struct xfrm_state_afinfo *afinfo)
 {
 	int err = 0;
-
-	if (WARN_ON(afinfo->family >= NPROTO))
+	if (unlikely(afinfo == NULL))
+		return -EINVAL;
+	if (unlikely(afinfo->family >= NPROTO))
 		return -EAFNOSUPPORT;
-
 	spin_lock_bh(&xfrm_state_afinfo_lock);
 	if (unlikely(xfrm_state_afinfo[afinfo->family] != NULL))
 		err = -EEXIST;
@@ -1948,14 +1971,14 @@ EXPORT_SYMBOL(xfrm_state_register_afinfo);
 
 int xfrm_state_unregister_afinfo(struct xfrm_state_afinfo *afinfo)
 {
-	int err = 0, family = afinfo->family;
-
-	if (WARN_ON(family >= NPROTO))
+	int err = 0;
+	if (unlikely(afinfo == NULL))
+		return -EINVAL;
+	if (unlikely(afinfo->family >= NPROTO))
 		return -EAFNOSUPPORT;
-
 	spin_lock_bh(&xfrm_state_afinfo_lock);
 	if (likely(xfrm_state_afinfo[afinfo->family] != NULL)) {
-		if (rcu_access_pointer(xfrm_state_afinfo[family]) != afinfo)
+		if (unlikely(xfrm_state_afinfo[afinfo->family] != afinfo))
 			err = -EINVAL;
 		else
 			RCU_INIT_POINTER(xfrm_state_afinfo[afinfo->family], NULL);
@@ -1965,14 +1988,6 @@ int xfrm_state_unregister_afinfo(struct xfrm_state_afinfo *afinfo)
 	return err;
 }
 EXPORT_SYMBOL(xfrm_state_unregister_afinfo);
-
-struct xfrm_state_afinfo *xfrm_state_afinfo_get_rcu(unsigned int family)
-{
-	if (unlikely(family >= NPROTO))
-		return NULL;
-
-	return rcu_dereference(xfrm_state_afinfo[family]);
-}
 
 struct xfrm_state_afinfo *xfrm_state_get_afinfo(unsigned int family)
 {
@@ -1984,6 +1999,11 @@ struct xfrm_state_afinfo *xfrm_state_get_afinfo(unsigned int family)
 	if (unlikely(!afinfo))
 		rcu_read_unlock();
 	return afinfo;
+}
+
+void xfrm_state_put_afinfo(struct xfrm_state_afinfo *afinfo)
+{
+	rcu_read_unlock();
 }
 
 /* Temporarily located here until net/xfrm/xfrm_tunnel.c is created */
@@ -2003,13 +2023,16 @@ EXPORT_SYMBOL(xfrm_state_delete_tunnel);
 
 int xfrm_state_mtu(struct xfrm_state *x, int mtu)
 {
-	const struct xfrm_type *type = READ_ONCE(x->type);
+	int res;
 
+	spin_lock_bh(&x->lock);
 	if (x->km.state == XFRM_STATE_VALID &&
-	    type && type->get_mtu)
-		return type->get_mtu(x, mtu);
-
-	return mtu - x->props.header_len;
+	    x->type && x->type->get_mtu)
+		res = x->type->get_mtu(x, mtu);
+	else
+		res = mtu - x->props.header_len;
+	spin_unlock_bh(&x->lock);
+	return res;
 }
 
 int __xfrm_init_state(struct xfrm_state *x, bool init_replay)
@@ -2028,7 +2051,7 @@ int __xfrm_init_state(struct xfrm_state *x, bool init_replay)
 	if (afinfo->init_flags)
 		err = afinfo->init_flags(x);
 
-	rcu_read_unlock();
+	xfrm_state_put_afinfo(afinfo);
 
 	if (err)
 		goto error;

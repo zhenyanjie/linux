@@ -43,6 +43,7 @@
 #define TTM_BO_VM_NUM_PREFAULT 16
 
 static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
+				struct vm_area_struct *vma,
 				struct vm_fault *vmf)
 {
 	int ret = 0;
@@ -53,7 +54,7 @@ static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 	/*
 	 * Quick non-stalling check for idle.
 	 */
-	if (dma_fence_is_signaled(bo->moving))
+	if (fence_is_signaled(bo->moving))
 		goto out_clear;
 
 	/*
@@ -66,8 +67,8 @@ static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 			goto out_unlock;
 
 		ttm_bo_reference(bo);
-		up_read(&vmf->vma->vm_mm->mmap_sem);
-		(void) dma_fence_wait(bo->moving, true);
+		up_read(&vma->vm_mm->mmap_sem);
+		(void) fence_wait(bo->moving, true);
 		ttm_bo_unreserve(bo);
 		ttm_bo_unref(&bo);
 		goto out_unlock;
@@ -76,7 +77,7 @@ static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 	/*
 	 * Ordinary wait.
 	 */
-	ret = dma_fence_wait(bo->moving, true);
+	ret = fence_wait(bo->moving, true);
 	if (unlikely(ret != 0)) {
 		ret = (ret != -ERESTARTSYS) ? VM_FAULT_SIGBUS :
 			VM_FAULT_NOPAGE;
@@ -84,16 +85,15 @@ static int ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 	}
 
 out_clear:
-	dma_fence_put(bo->moving);
+	fence_put(bo->moving);
 	bo->moving = NULL;
 
 out_unlock:
 	return ret;
 }
 
-static int ttm_bo_vm_fault(struct vm_fault *vmf)
+static int ttm_bo_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct vm_area_struct *vma = vmf->vma;
 	struct ttm_buffer_object *bo = (struct ttm_buffer_object *)
 	    vma->vm_private_data;
 	struct ttm_bo_device *bdev = bo->bdev;
@@ -104,7 +104,7 @@ static int ttm_bo_vm_fault(struct vm_fault *vmf)
 	struct page *page;
 	int ret;
 	int i;
-	unsigned long address = vmf->address;
+	unsigned long address = (unsigned long)vmf->virtual_address;
 	int retval = VM_FAULT_NOPAGE;
 	struct ttm_mem_type_manager *man =
 		&bdev->man[bo->mem.mem_type];
@@ -124,7 +124,7 @@ static int ttm_bo_vm_fault(struct vm_fault *vmf)
 		if (vmf->flags & FAULT_FLAG_ALLOW_RETRY) {
 			if (!(vmf->flags & FAULT_FLAG_RETRY_NOWAIT)) {
 				ttm_bo_reference(bo);
-				up_read(&vmf->vma->vm_mm->mmap_sem);
+				up_read(&vma->vm_mm->mmap_sem);
 				(void) ttm_bo_wait_unreserved(bo);
 				ttm_bo_unref(&bo);
 			}
@@ -168,7 +168,7 @@ static int ttm_bo_vm_fault(struct vm_fault *vmf)
 	 * Wait for buffer data in transit, due to a pipelined
 	 * move.
 	 */
-	ret = ttm_bo_vm_fault_idle(bo, vmf);
+	ret = ttm_bo_vm_fault_idle(bo, vma, vmf);
 	if (unlikely(ret != 0)) {
 		retval = ret;
 

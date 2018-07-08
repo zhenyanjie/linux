@@ -20,7 +20,6 @@
 #include <linux/moduleparam.h>
 #include <linux/stringify.h>
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
 #include <linux/types.h>
 #include <linux/compiler.h>
 #include <linux/slab.h>
@@ -125,7 +124,7 @@ static inline void _tg3_flag_clear(enum TG3_FLAGS flag, unsigned long *bits)
 #define TG3_TX_TIMEOUT			(5 * HZ)
 
 /* hardware minimum and maximum for a single frame's data payload */
-#define TG3_MIN_MTU			ETH_ZLEN
+#define TG3_MIN_MTU			60
 #define TG3_MAX_MTU(tp)	\
 	(tg3_flag(tp, JUMBO_CAPABLE) ? 9000 : 1500)
 
@@ -8721,14 +8720,15 @@ static void tg3_free_consistent(struct tg3 *tp)
 	tg3_mem_rx_release(tp);
 	tg3_mem_tx_release(tp);
 
-	/* Protect tg3_get_stats64() from reading freed tp->hw_stats. */
-	tg3_full_lock(tp, 0);
+	/* tp->hw_stats can be referenced safely:
+	 *     1. under rtnl_lock
+	 *     2. or under tp->lock if TG3_FLAG_INIT_COMPLETE is set.
+	 */
 	if (tp->hw_stats) {
 		dma_free_coherent(&tp->pdev->dev, sizeof(struct tg3_hw_stats),
 				  tp->hw_stats, tp->stats_mapping);
 		tp->hw_stats = NULL;
 	}
-	tg3_full_unlock(tp);
 }
 
 /*
@@ -10049,6 +10049,16 @@ static int tg3_reset_hw(struct tg3 *tp, bool reset_phy)
 		val |= GRC_MODE_TIME_SYNC_ENABLE;
 
 	tw32(GRC_MODE, tp->grc_mode | val);
+
+	/* On one of the AMD platform, MRRS is restricted to 4000 because of
+	 * south bridge limitation. As a workaround, Driver is setting MRRS
+	 * to 2048 instead of default 4096.
+	 */
+	if (tp->pdev->subsystem_vendor == PCI_VENDOR_ID_DELL &&
+	    tp->pdev->subsystem_device == TG3PCI_SUBDEVICE_ID_DELL_5762) {
+		val = tr32(TG3PCI_DEV_STATUS_CTRL) & ~MAX_READ_REQ_MASK;
+		tw32(TG3PCI_DEV_STATUS_CTRL, val | MAX_READ_REQ_SIZE_2048);
+	}
 
 	/* Setup the timer prescalar register.  Clock is always 66Mhz. */
 	val = tr32(GRC_MISC_CFG);
@@ -14146,20 +14156,22 @@ static const struct ethtool_ops tg3_ethtool_ops = {
 	.set_link_ksettings	= tg3_set_link_ksettings,
 };
 
-static void tg3_get_stats64(struct net_device *dev,
-			    struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *tg3_get_stats64(struct net_device *dev,
+						struct rtnl_link_stats64 *stats)
 {
 	struct tg3 *tp = netdev_priv(dev);
 
 	spin_lock_bh(&tp->lock);
-	if (!tp->hw_stats) {
+	if (!tp->hw_stats || !tg3_flag(tp, INIT_COMPLETE)) {
 		*stats = tp->net_stats_prev;
 		spin_unlock_bh(&tp->lock);
-		return;
+		return stats;
 	}
 
 	tg3_get_nstats(tp, stats);
 	spin_unlock_bh(&tp->lock);
+
+	return stats;
 }
 
 static void tg3_set_rx_mode(struct net_device *dev)
@@ -14201,6 +14213,9 @@ static int tg3_change_mtu(struct net_device *dev, int new_mtu)
 	int err;
 	bool reset_phy = false;
 
+	if (new_mtu < TG3_MIN_MTU || new_mtu > TG3_MAX_MTU(tp))
+		return -EINVAL;
+
 	if (!netif_running(dev)) {
 		/* We'll just catch it later when the
 		 * device is up'd.
@@ -14222,7 +14237,10 @@ static int tg3_change_mtu(struct net_device *dev, int new_mtu)
 	/* Reset PHY, otherwise the read DMA engine will be in a mode that
 	 * breaks all requests to 256 bytes.
 	 */
-	if (tg3_asic_rev(tp) == ASIC_REV_57766)
+	if (tg3_asic_rev(tp) == ASIC_REV_57766 ||
+	    tg3_asic_rev(tp) == ASIC_REV_5717 ||
+	    tg3_asic_rev(tp) == ASIC_REV_5719 ||
+	    tg3_asic_rev(tp) == ASIC_REV_5720)
 		reset_phy = true;
 
 	err = tg3_restart_hw(tp, reset_phy);
@@ -17797,10 +17815,6 @@ static int tg3_init_one(struct pci_dev *pdev,
 
 	dev->hw_features |= features;
 	dev->priv_flags |= IFF_UNICAST_FLT;
-
-	/* MTU range: 60 - 9000 or 1500, depending on hardware */
-	dev->min_mtu = TG3_MIN_MTU;
-	dev->max_mtu = TG3_MAX_MTU(tp);
 
 	if (tg3_chip_rev_id(tp) == CHIPREV_ID_5705_A1 &&
 	    !tg3_flag(tp, TSO_CAPABLE) &&

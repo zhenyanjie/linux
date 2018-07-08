@@ -162,9 +162,6 @@ int hfi1_pcie_ddinit(struct hfi1_devdata *dd, struct pci_dev *pdev)
 	unsigned long len;
 	resource_size_t addr;
 
-	dd->pcidev = pdev;
-	pci_set_drvdata(pdev, dd);
-
 	addr = pci_resource_start(pdev, 0);
 	len = pci_resource_len(pdev, 0);
 
@@ -598,6 +595,15 @@ pci_slot_reset(struct pci_dev *pdev)
 	return PCI_ERS_RESULT_CAN_RECOVER;
 }
 
+static pci_ers_result_t
+pci_link_reset(struct pci_dev *pdev)
+{
+	struct hfi1_devdata *dd = pci_get_drvdata(pdev);
+
+	dd_dev_info(dd, "HFI1 link_reset function called, ignored\n");
+	return PCI_ERS_RESULT_CAN_RECOVER;
+}
+
 static void
 pci_resume(struct pci_dev *pdev)
 {
@@ -616,6 +622,7 @@ pci_resume(struct pci_dev *pdev)
 const struct pci_error_handlers hfi1_pci_err_handler = {
 	.error_detected = pci_error_detected,
 	.mmio_enabled = pci_mmio_enabled,
+	.link_reset = pci_link_reset,
 	.slot_reset = pci_slot_reset,
 	.resume = pci_resume,
 };

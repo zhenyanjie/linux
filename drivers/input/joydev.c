@@ -22,6 +22,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
+#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/poll.h>
 #include <linux/init.h>
@@ -87,7 +88,7 @@ static int joydev_correct(int value, struct js_corr *corr)
 		return 0;
 	}
 
-	return clamp(value, -32767, 32767);
+	return value < -32767 ? -32767 : (value > 32767 ? 32767 : value);
 }
 
 static void joydev_pass_event(struct joydev_client *client,
@@ -187,17 +188,6 @@ static void joydev_detach_client(struct joydev *joydev,
 	synchronize_rcu();
 }
 
-static void joydev_refresh_state(struct joydev *joydev)
-{
-	struct input_dev *dev = joydev->handle.dev;
-	int i, val;
-
-	for (i = 0; i < joydev->nabs; i++) {
-		val = input_abs_get_val(dev, joydev->abspam[i]);
-		joydev->abs[i] = joydev_correct(val, &joydev->corr[i]);
-	}
-}
-
 static int joydev_open_device(struct joydev *joydev)
 {
 	int retval;
@@ -212,8 +202,6 @@ static int joydev_open_device(struct joydev *joydev)
 		retval = input_open_device(&joydev->handle);
 		if (retval)
 			joydev->open--;
-		else
-			joydev_refresh_state(joydev);
 	}
 
 	mutex_unlock(&joydev->mutex);
@@ -885,6 +873,7 @@ static int joydev_connect(struct input_handler *handler, struct input_dev *dev,
 		j = joydev->abspam[i];
 		if (input_abs_get_max(dev, j) == input_abs_get_min(dev, j)) {
 			joydev->corr[i].type = JS_CORR_NONE;
+			joydev->abs[i] = input_abs_get_val(dev, j);
 			continue;
 		}
 		joydev->corr[i].type = JS_CORR_BROKEN;
@@ -899,6 +888,10 @@ static int joydev_connect(struct input_handler *handler, struct input_dev *dev,
 		if (t) {
 			joydev->corr[i].coef[2] = (1 << 29) / t;
 			joydev->corr[i].coef[3] = (1 << 29) / t;
+
+			joydev->abs[i] =
+				joydev_correct(input_abs_get_val(dev, j),
+					       joydev->corr + i);
 		}
 	}
 

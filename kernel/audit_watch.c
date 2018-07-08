@@ -242,9 +242,10 @@ static void audit_watch_log_rule_change(struct audit_krule *r, struct audit_watc
 		ab = audit_log_start(NULL, GFP_NOFS, AUDIT_CONFIG_CHANGE);
 		if (unlikely(!ab))
 			return;
-		audit_log_format(ab, "auid=%u ses=%u op=%s",
+		audit_log_format(ab, "auid=%u ses=%u op=",
 				 from_kuid(&init_user_ns, audit_get_loginuid(current)),
-				 audit_get_sessionid(current), op);
+				 audit_get_sessionid(current));
+		audit_log_string(ab, op);
 		audit_log_format(ab, " path=");
 		audit_log_untrustedstring(ab, w->path);
 		audit_log_key(ab, r->filterkey);
@@ -456,13 +457,15 @@ void audit_remove_watch_rule(struct audit_krule *krule)
 	list_del(&krule->rlist);
 
 	if (list_empty(&watch->rules)) {
+		/*
+		 * audit_remove_watch() drops our reference to 'parent' which
+		 * can get freed. Grab our own reference to be safe.
+		 */
+		audit_get_parent(parent);
 		audit_remove_watch(watch);
-
-		if (list_empty(&parent->watches)) {
-			audit_get_parent(parent);
+		if (list_empty(&parent->watches))
 			fsnotify_destroy_mark(&parent->mark, audit_watch_group);
-			audit_put_parent(parent);
-		}
+		audit_put_parent(parent);
 	}
 }
 
@@ -471,10 +474,10 @@ static int audit_watch_handle_event(struct fsnotify_group *group,
 				    struct inode *to_tell,
 				    struct fsnotify_mark *inode_mark,
 				    struct fsnotify_mark *vfsmount_mark,
-				    u32 mask, const void *data, int data_type,
+				    u32 mask, void *data, int data_type,
 				    const unsigned char *dname, u32 cookie)
 {
-	const struct inode *inode;
+	struct inode *inode;
 	struct audit_parent *parent;
 
 	parent = container_of(inode_mark, struct audit_parent, mark);
@@ -483,10 +486,10 @@ static int audit_watch_handle_event(struct fsnotify_group *group,
 
 	switch (data_type) {
 	case (FSNOTIFY_EVENT_PATH):
-		inode = d_backing_inode(((const struct path *)data)->dentry);
+		inode = d_backing_inode(((struct path *)data)->dentry);
 		break;
 	case (FSNOTIFY_EVENT_INODE):
-		inode = (const struct inode *)data;
+		inode = (struct inode *)data;
 		break;
 	default:
 		BUG();
@@ -547,8 +550,8 @@ int audit_exe_compare(struct task_struct *tsk, struct audit_fsnotify_mark *mark)
 	exe_file = get_task_exe_file(tsk);
 	if (!exe_file)
 		return 0;
-	ino = file_inode(exe_file)->i_ino;
-	dev = file_inode(exe_file)->i_sb->s_dev;
+	ino = exe_file->f_inode->i_ino;
+	dev = exe_file->f_inode->i_sb->s_dev;
 	fput(exe_file);
 	return audit_mark_compare(mark, ino, dev);
 }

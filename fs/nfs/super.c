@@ -55,7 +55,7 @@
 #include <linux/nsproxy.h>
 #include <linux/rcupdate.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "nfs4_fs.h"
 #include "callback.h"
@@ -531,32 +531,39 @@ static void nfs_show_mountd_netid(struct seq_file *m, struct nfs_server *nfss,
 				  int showdefaults)
 {
 	struct sockaddr *sap = (struct sockaddr *) &nfss->mountd_address;
-	char *proto = NULL;
 
+	seq_printf(m, ",mountproto=");
 	switch (sap->sa_family) {
 	case AF_INET:
 		switch (nfss->mountd_protocol) {
 		case IPPROTO_UDP:
-			proto = RPCBIND_NETID_UDP;
+			seq_printf(m, RPCBIND_NETID_UDP);
 			break;
 		case IPPROTO_TCP:
-			proto = RPCBIND_NETID_TCP;
+			seq_printf(m, RPCBIND_NETID_TCP);
 			break;
+		default:
+			if (showdefaults)
+				seq_printf(m, "auto");
 		}
 		break;
 	case AF_INET6:
 		switch (nfss->mountd_protocol) {
 		case IPPROTO_UDP:
-			proto = RPCBIND_NETID_UDP6;
+			seq_printf(m, RPCBIND_NETID_UDP6);
 			break;
 		case IPPROTO_TCP:
-			proto = RPCBIND_NETID_TCP6;
+			seq_printf(m, RPCBIND_NETID_TCP6);
 			break;
+		default:
+			if (showdefaults)
+				seq_printf(m, "auto");
 		}
 		break;
+	default:
+		if (showdefaults)
+			seq_printf(m, "auto");
 	}
-	if (proto || showdefaults)
-		seq_printf(m, ",mountproto=%s", proto ?: "auto");
 }
 
 static void nfs_show_mountd_options(struct seq_file *m, struct nfs_server *nfss,
@@ -1332,7 +1339,7 @@ static int nfs_parse_mount_options(char *raw,
 			mnt->options |= NFS_OPTION_MIGRATION;
 			break;
 		case Opt_nomigration:
-			mnt->options &= NFS_OPTION_MIGRATION;
+			mnt->options &= ~NFS_OPTION_MIGRATION;
 			break;
 
 		/*
@@ -2606,6 +2613,8 @@ struct dentry *nfs_fs_mount_common(struct nfs_server *server,
 		/* initial superblock/root creation */
 		mount_info->fill_super(s, mount_info);
 		nfs_get_cache_cookie(s, mount_info->parsed, mount_info->cloned);
+		if (!(server->flags & NFS_MOUNT_UNSHARED))
+			s->s_iflags |= SB_I_MULTIROOT;
 	}
 
 	mntroot = nfs_get_root(s, mount_info->mntfh, dev_name);

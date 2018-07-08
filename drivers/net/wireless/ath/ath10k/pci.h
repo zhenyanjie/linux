@@ -25,6 +25,11 @@
 #include "ahb.h"
 
 /*
+ * maximum number of bytes that can be handled atomically by DiagRead/DiagWrite
+ */
+#define DIAG_TRANSFER_LIMIT 2048
+
+/*
  * maximum number of bytes that can be
  * handled atomically by DiagRead/DiagWrite
  */

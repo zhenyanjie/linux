@@ -132,7 +132,7 @@ static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
 	u64 cur_wall_time;
 	u64 busy_time;
 
-	cur_wall_time = jiffies64_to_nsecs(get_jiffies_64());
+	cur_wall_time = jiffies64_to_cputime64(get_jiffies_64());
 
 	busy_time = kcpustat_cpu(cpu).cpustat[CPUTIME_USER];
 	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_SYSTEM];
@@ -143,9 +143,9 @@ static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
 
 	idle_time = cur_wall_time - busy_time;
 	if (wall)
-		*wall = div_u64(cur_wall_time, NSEC_PER_USEC);
+		*wall = cputime_to_usecs(cur_wall_time);
 
-	return div_u64(idle_time, NSEC_PER_USEC);
+	return cputime_to_usecs(idle_time);
 }
 
 u64 get_cpu_idle_time(unsigned int cpu, u64 *wall, int io_busy)
@@ -657,6 +657,8 @@ static ssize_t store_##file_name					\
 	struct cpufreq_policy new_policy;				\
 									\
 	memcpy(&new_policy, policy, sizeof(*policy));			\
+	new_policy.min = policy->user_policy.min;			\
+	new_policy.max = policy->user_policy.max;			\
 									\
 	ret = sscanf(buf, "%u", &new_policy.object);			\
 	if (ret != 1)							\
@@ -1088,10 +1090,14 @@ err_free_policy:
 	return NULL;
 }
 
-static void cpufreq_policy_put_kobj(struct cpufreq_policy *policy)
+static void cpufreq_policy_put_kobj(struct cpufreq_policy *policy, bool notify)
 {
 	struct kobject *kobj;
 	struct completion *cmp;
+
+	if (notify)
+		blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
+					     CPUFREQ_REMOVE_POLICY, policy);
 
 	down_write(&policy->rwsem);
 	cpufreq_stats_free_table(policy);
@@ -1110,7 +1116,7 @@ static void cpufreq_policy_put_kobj(struct cpufreq_policy *policy)
 	pr_debug("wait complete\n");
 }
 
-static void cpufreq_policy_free(struct cpufreq_policy *policy)
+static void cpufreq_policy_free(struct cpufreq_policy *policy, bool notify)
 {
 	unsigned long flags;
 	int cpu;
@@ -1123,7 +1129,7 @@ static void cpufreq_policy_free(struct cpufreq_policy *policy)
 		per_cpu(cpufreq_cpu_data, cpu) = NULL;
 	write_unlock_irqrestore(&cpufreq_driver_lock, flags);
 
-	cpufreq_policy_put_kobj(policy);
+	cpufreq_policy_put_kobj(policy, notify);
 	free_cpumask_var(policy->real_cpus);
 	free_cpumask_var(policy->related_cpus);
 	free_cpumask_var(policy->cpus);
@@ -1251,11 +1257,16 @@ static int cpufreq_online(unsigned int cpu)
 			goto out_exit_policy;
 
 		cpufreq_stats_create_table(policy);
+		blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
+				CPUFREQ_CREATE_POLICY, policy);
 
 		write_lock_irqsave(&cpufreq_driver_lock, flags);
 		list_add(&policy->policy_list, &cpufreq_policy_list);
 		write_unlock_irqrestore(&cpufreq_driver_lock, flags);
 	}
+
+	blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
+				     CPUFREQ_START, policy);
 
 	ret = cpufreq_init_policy(policy);
 	if (ret) {
@@ -1279,16 +1290,16 @@ static int cpufreq_online(unsigned int cpu)
 	return 0;
 
 out_exit_policy:
+	for_each_cpu(j, policy->real_cpus)
+		remove_cpu_dev_symlink(policy, get_cpu_device(j));
+
 	up_write(&policy->rwsem);
 
 	if (cpufreq_driver->exit)
 		cpufreq_driver->exit(policy);
 
-	for_each_cpu(j, policy->real_cpus)
-		remove_cpu_dev_symlink(policy, get_cpu_device(j));
-
 out_free_policy:
-	cpufreq_policy_free(policy);
+	cpufreq_policy_free(policy, !new_policy);
 	return ret;
 }
 
@@ -1401,7 +1412,7 @@ static void cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif)
 	remove_cpu_dev_symlink(policy, dev);
 
 	if (cpumask_empty(policy->real_cpus))
-		cpufreq_policy_free(policy);
+		cpufreq_policy_free(policy, true);
 }
 
 /**
@@ -1524,10 +1535,7 @@ unsigned int cpufreq_get(unsigned int cpu)
 
 	if (policy) {
 		down_read(&policy->rwsem);
-
-		if (!policy_is_inactive(policy))
-			ret_freq = __cpufreq_get(policy);
-
+		ret_freq = __cpufreq_get(policy);
 		up_read(&policy->rwsem);
 
 		cpufreq_cpu_put(policy);
@@ -2255,18 +2263,16 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
  *	Useful for policy notifiers which have different necessities
  *	at different times.
  */
-void cpufreq_update_policy(unsigned int cpu)
+int cpufreq_update_policy(unsigned int cpu)
 {
 	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
 	struct cpufreq_policy new_policy;
+	int ret;
 
 	if (!policy)
-		return;
+		return -ENODEV;
 
 	down_write(&policy->rwsem);
-
-	if (policy_is_inactive(policy))
-		goto unlock;
 
 	pr_debug("updating policy for CPU %u\n", cpu);
 	memcpy(&new_policy, policy, sizeof(*policy));
@@ -2278,20 +2284,24 @@ void cpufreq_update_policy(unsigned int cpu)
 	 * -> ask driver for current freq and notify governors about a change
 	 */
 	if (cpufreq_driver->get && !cpufreq_driver->setpolicy) {
-		if (cpufreq_suspended)
+		if (cpufreq_suspended) {
+			ret = -EAGAIN;
 			goto unlock;
-
+		}
 		new_policy.cur = cpufreq_update_current_freq(policy);
-		if (WARN_ON(!new_policy.cur))
+		if (WARN_ON(!new_policy.cur)) {
+			ret = -EIO;
 			goto unlock;
+		}
 	}
 
-	cpufreq_set_policy(policy, &new_policy);
+	ret = cpufreq_set_policy(policy, &new_policy);
 
 unlock:
 	up_write(&policy->rwsem);
 
 	cpufreq_cpu_put(policy);
+	return ret;
 }
 EXPORT_SYMBOL(cpufreq_update_policy);
 
@@ -2556,5 +2566,4 @@ static int __init cpufreq_core_init(void)
 
 	return 0;
 }
-module_param(off, int, 0444);
 core_initcall(cpufreq_core_init);

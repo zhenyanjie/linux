@@ -14,6 +14,7 @@
 #define _EXYNOS_HDMI_CEC_H_ __FILE__
 
 #include <linux/regmap.h>
+#include <linux/miscdevice.h>
 #include "s5p_cec.h"
 
 void s5p_cec_set_divider(struct s5p_cec_dev *cec);

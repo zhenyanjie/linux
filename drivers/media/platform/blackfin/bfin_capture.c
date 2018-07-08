@@ -11,6 +11,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/completion.h>
@@ -165,7 +169,7 @@ static int bcap_init_sensor_formats(struct bcap_device *bcap_dev)
 	if (!num_formats)
 		return -ENXIO;
 
-	sf = kcalloc(num_formats, sizeof(*sf), GFP_KERNEL);
+	sf = kzalloc(num_formats * sizeof(*sf), GFP_KERNEL);
 	if (!sf)
 		return -ENOMEM;
 
@@ -798,8 +802,10 @@ static int bcap_probe(struct platform_device *pdev)
 	}
 
 	bcap_dev = kzalloc(sizeof(*bcap_dev), GFP_KERNEL);
-	if (!bcap_dev)
+	if (!bcap_dev) {
+		v4l2_err(pdev->dev.driver, "Unable to alloc bcap_dev\n");
 		return -ENOMEM;
+	}
 
 	bcap_dev->cfg = config;
 

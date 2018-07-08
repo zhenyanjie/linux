@@ -409,7 +409,7 @@ out:
 	return ret;
 }
 
-static void config_usb_cfg_unlink(
+static int config_usb_cfg_unlink(
 	struct config_item *usb_cfg_ci,
 	struct config_item *usb_func_ci)
 {
@@ -438,11 +438,12 @@ static void config_usb_cfg_unlink(
 			list_del(&f->list);
 			usb_put_function(f);
 			mutex_unlock(&gi->lock);
-			return;
+			return 0;
 		}
 	}
 	mutex_unlock(&gi->lock);
 	WARN(1, "Unable to locate function to unbind\n");
+	return 0;
 }
 
 static struct configfs_item_operations gadget_config_item_ops = {
@@ -865,7 +866,7 @@ out:
 	return ret;
 }
 
-static void os_desc_unlink(struct config_item *os_desc_ci,
+static int os_desc_unlink(struct config_item *os_desc_ci,
 			  struct config_item *usb_cfg_ci)
 {
 	struct gadget_info *gi = container_of(to_config_group(os_desc_ci),
@@ -878,6 +879,7 @@ static void os_desc_unlink(struct config_item *os_desc_ci,
 	cdev->os_desc_config = NULL;
 	WARN_ON(gi->composite.gadget_driver.udc_name);
 	mutex_unlock(&gi->lock);
+	return 0;
 }
 
 static struct configfs_item_operations os_desc_ops = {
@@ -1139,11 +1141,12 @@ static struct configfs_attribute *interf_grp_attrs[] = {
 	NULL
 };
 
-int usb_os_desc_prepare_interf_dir(struct config_group *parent,
-				   int n_interf,
-				   struct usb_os_desc **desc,
-				   char **names,
-				   struct module *owner)
+struct config_group *usb_os_desc_prepare_interf_dir(
+		struct config_group *parent,
+		int n_interf,
+		struct usb_os_desc **desc,
+		char **names,
+		struct module *owner)
 {
 	struct config_group *os_desc_group;
 	struct config_item_type *os_desc_type, *interface_type;
@@ -1155,7 +1158,7 @@ int usb_os_desc_prepare_interf_dir(struct config_group *parent,
 
 	char *vlabuf = kzalloc(vla_group_size(data_chunk), GFP_KERNEL);
 	if (!vlabuf)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	os_desc_group = vla_ptr(vlabuf, data_chunk, os_desc_group);
 	os_desc_type = vla_ptr(vlabuf, data_chunk, os_desc_type);
@@ -1180,7 +1183,7 @@ int usb_os_desc_prepare_interf_dir(struct config_group *parent,
 		configfs_add_default_group(&d->group, os_desc_group);
 	}
 
-	return 0;
+	return os_desc_group;
 }
 EXPORT_SYMBOL(usb_os_desc_prepare_interf_dir);
 

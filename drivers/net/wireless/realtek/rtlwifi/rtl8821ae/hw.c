@@ -822,8 +822,9 @@ static bool _rtl8821ae_llt_write(struct ieee80211_hw *hw, u32 address, u32 data)
 			break;
 
 		if (count > POLLING_LLT_THRESHOLD) {
-			pr_err("Failed to polling write LLT done at address %d!\n",
-			       address);
+			RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG,
+				 "Failed to polling write LLT done at address %d!\n",
+				 address);
 			status = false;
 			break;
 		}
@@ -890,8 +891,9 @@ static bool _rtl8821ae_llt_table_init(struct ieee80211_hw *hw)
 static void _rtl8821ae_gen_refresh_led_state(struct ieee80211_hw *hw)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
+	struct rtl_pci_priv *pcipriv = rtl_pcipriv(hw);
 	struct rtl_ps_ctl *ppsc = rtl_psc(rtl_priv(hw));
-	struct rtl_led *pled0 = &rtlpriv->ledctl.sw_led0;
+	struct rtl_led *pled0 = &pcipriv->ledctl.sw_led0;
 	struct rtl_hal *rtlhal = rtl_hal(rtl_priv(hw));
 
 	if (rtlpriv->rtlhal.up_first_time)
@@ -1168,7 +1170,8 @@ static void _rtl8821ae_enable_aspm_back_door(struct ieee80211_hw *hw)
 	}
 
 	tmp = _rtl8821ae_dbi_read(rtlpriv, 0x70f);
-	_rtl8821ae_dbi_write(rtlpriv, 0x70f, tmp | BIT(7));
+	_rtl8821ae_dbi_write(rtlpriv, 0x70f, tmp | BIT(7) |
+			     ASPM_L1_LATENCY << 3);
 
 	tmp = _rtl8821ae_dbi_read(rtlpriv, 0x719);
 	_rtl8821ae_dbi_write(rtlpriv, 0x719, tmp | BIT(3) | BIT(4));
@@ -1376,6 +1379,7 @@ static void _rtl8821ae_get_wakeup_reason(struct ieee80211_hw *hw)
 
 	ppsc->wakeup_reason = 0;
 
+	do_gettimeofday(&ts);
 	rtlhal->last_suspend_sec = ts.tv_sec;
 
 	switch (fw_reason) {
@@ -1925,7 +1929,7 @@ int rtl8821ae_hw_init(struct ieee80211_hw *hw)
 
 	rtstatus = _rtl8821ae_init_mac(hw);
 	if (rtstatus != true) {
-		pr_err("Init MAC failed\n");
+		RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG, "Init MAC failed\n");
 		err = 1;
 		return err;
 	}
@@ -2172,7 +2176,8 @@ static int _rtl8821ae_set_media_status(struct ieee80211_hw *hw,
 			 "Set Network type to AP!\n");
 		break;
 	default:
-		pr_err("Network type %d not support!\n", type);
+		RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG,
+			 "Network type %d not support!\n", type);
 		return 1;
 	}
 
@@ -2246,7 +2251,7 @@ void rtl8821ae_set_qos(struct ieee80211_hw *hw, int aci)
 		rtl_write_dword(rtlpriv, REG_EDCA_VO_PARAM, 0x2f3222);
 		break;
 	default:
-		WARN_ONCE(true, "rtl8821ae: invalid aci: %d !\n", aci);
+		RT_ASSERT(false, "invalid aci: %d !\n", aci);
 		break;
 	}
 }
@@ -2598,10 +2603,11 @@ static u8 _rtl8821ae_get_chnl_group(u8 chnl)
 			group = 12;
 	else if (173 <= chnl && chnl <= 177)
 			group = 13;
-	else
-		WARN_ONCE(true,
-			  "rtl8821ae: 5G, Channel %d in Group not found\n",
-			  chnl);
+		else
+			/*RT_TRACE(rtlpriv, COMP_EFUSE,DBG_LOUD,
+				"5G, Channel %d in Group not found\n",chnl);*/
+			RT_ASSERT(!COMP_EFUSE,
+				"5G, Channel %d in Group not found\n", chnl);
 	}
 	return group;
 }
@@ -3097,6 +3103,7 @@ static void _rtl8821ae_read_adapter_info(struct ieee80211_hw *hw, bool b_pseudo_
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_efuse *rtlefuse = rtl_efuse(rtl_priv(hw));
 	struct rtl_hal *rtlhal = rtl_hal(rtl_priv(hw));
+	struct rtl_pci_priv *pcipriv = rtl_pcipriv(hw);
 	int params[] = {RTL_EEPROM_ID, EEPROM_VID, EEPROM_DID,
 			EEPROM_SVID, EEPROM_SMID, EEPROM_MAC_ADDR,
 			EEPROM_CHANNELPLAN, EEPROM_VERSION, EEPROM_CUSTOMER_ID,
@@ -3191,7 +3198,7 @@ static void _rtl8821ae_read_adapter_info(struct ieee80211_hw *hw, bool b_pseudo_
 		"SWAS: bHwAntDiv = %x, TRxAntDivType = %x\n",
 		rtlefuse->antenna_div_cfg, rtlefuse->antenna_div_type);
 
-	rtlpriv->ledctl.led_opendrain = true;
+	pcipriv->ledctl.led_opendrain = true;
 
 	if (rtlhal->oem_id == RT_CID_DEFAULT) {
 		switch (rtlefuse->eeprom_oemid) {
@@ -3222,10 +3229,10 @@ exit:
 	struct rtl_pci_priv *pcipriv = rtl_pcipriv(hw);
 	struct rtl_hal *rtlhal = rtl_hal(rtl_priv(hw));
 
-	rtlpriv->ledctl.led_opendrain = true;
+	pcipriv->ledctl.led_opendrain = true;
 	switch (rtlhal->oem_id) {
 	case RT_CID_819X_HP:
-		rtlpriv->ledctl.led_opendrain = true;
+		pcipriv->ledctl.led_opendrain = true;
 		break;
 	case RT_CID_819X_LENOVO:
 	case RT_CID_DEFAULT:
@@ -3271,7 +3278,7 @@ void rtl8821ae_read_eeprom_info(struct ieee80211_hw *hw)
 		rtlefuse->autoload_failflag = false;
 		_rtl8821ae_read_adapter_info(hw, false);
 	} else {
-		pr_err("Autoload ERR!!\n");
+		RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG, "Autoload ERR!!\n");
 	}
 	/*hal_ReadRFType_8812A()*/
 	/* _rtl8821ae_hal_customized_behavior(hw); */
@@ -3946,7 +3953,8 @@ void rtl8821ae_set_key(struct ieee80211_hw *hw, u32 key_index,
 				if (mac->opmode == NL80211_IFTYPE_AP) {
 					entry_id = rtl_cam_get_free_entry(hw, p_macaddr);
 					if (entry_id >=  TOTAL_CAM_ENTRY) {
-						pr_err("an not find free hwsecurity cam entry\n");
+						RT_TRACE(rtlpriv, COMP_SEC, DBG_EMERG,
+							 "Can not find free hwsecurity cam entry\n");
 						return;
 					}
 				} else {
@@ -4129,9 +4137,8 @@ void rtl8821ae_add_wowlan_pattern(struct ieee80211_hw *hw,
 			count++;
 		} while (tmp && count < 100);
 
-		WARN_ONCE((count >= 100),
-			  "rtl8821ae: Write wake up frame mask FAIL %d value!\n",
-			  tmp);
+		RT_ASSERT((count < 100),
+			  "Write wake up frame mask FAIL %d value!\n", tmp);
 	}
 	/* Disable Rx packet buffer access. */
 	rtl_write_byte(rtlpriv, REG_PKT_BUFF_ACCESS_CTRL,

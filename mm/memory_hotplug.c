@@ -6,7 +6,6 @@
 
 #include <linux/stddef.h>
 #include <linux/mm.h>
-#include <linux/sched/signal.h>
 #include <linux/swap.h>
 #include <linux/interrupt.h>
 #include <linux/pagemap.h>
@@ -125,13 +124,8 @@ void put_online_mems(void)
 
 }
 
-/* Serializes write accesses to mem_hotplug.active_writer. */
-static DEFINE_MUTEX(memory_add_remove_lock);
-
 void mem_hotplug_begin(void)
 {
-	mutex_lock(&memory_add_remove_lock);
-
 	mem_hotplug.active_writer = current;
 
 	memhp_lock_acquire();
@@ -150,7 +144,6 @@ void mem_hotplug_done(void)
 	mem_hotplug.active_writer = NULL;
 	mutex_unlock(&mem_hotplug.lock);
 	memhp_lock_release();
-	mutex_unlock(&memory_add_remove_lock);
 }
 
 /* add this memory to iomem resource */
@@ -869,6 +862,7 @@ int __remove_pages(struct zone *zone, unsigned long phys_start_pfn,
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(__remove_pages);
 #endif /* CONFIG_MEMORY_HOTREMOVE */
 
 int set_online_page_callback(online_page_callback_t callback)
@@ -1342,7 +1336,7 @@ int zone_for_memory(int nid, u64 start, u64 size, int zone_default,
 
 static int online_memory_block(struct memory_block *mem, void *arg)
 {
-	return device_online(&mem->dev);
+	return memory_block_change_state(mem, MEM_ONLINE, MEM_OFFLINE);
 }
 
 /* we are OK calling __meminit stuff here - we have CONFIG_MEMORY_HOTPLUG */
@@ -1514,7 +1508,7 @@ int test_pages_in_a_zone(unsigned long start_pfn, unsigned long end_pfn,
 			while ((i < MAX_ORDER_NR_PAGES) &&
 				!pfn_valid_within(pfn + i))
 				i++;
-			if (i == MAX_ORDER_NR_PAGES || pfn + i >= end_pfn)
+			if (i == MAX_ORDER_NR_PAGES)
 				continue;
 			page = pfn_to_page(pfn + i);
 			if (zone && page_zone(page) != zone)
@@ -1528,7 +1522,7 @@ int test_pages_in_a_zone(unsigned long start_pfn, unsigned long end_pfn,
 
 	if (zone) {
 		*valid_start = start;
-		*valid_end = min(end, end_pfn);
+		*valid_end = end;
 		return 1;
 	} else {
 		return 0;
@@ -1536,10 +1530,10 @@ int test_pages_in_a_zone(unsigned long start_pfn, unsigned long end_pfn,
 }
 
 /*
- * Scan pfn range [start,end) to find movable/migratable pages (LRU pages,
- * non-lru movable pages and hugepages). We scan pfn because it's much
- * easier than scanning over linked list. This function returns the pfn
- * of the first found movable page if it's found, otherwise 0.
+ * Scan pfn range [start,end) to find movable/migratable pages (LRU pages
+ * and hugepages). We scan pfn because it's much easier than scanning over
+ * linked list. This function returns the pfn of the first found movable
+ * page if it's found, otherwise 0.
  */
 static unsigned long scan_movable_pages(unsigned long start, unsigned long end)
 {
@@ -1549,8 +1543,6 @@ static unsigned long scan_movable_pages(unsigned long start, unsigned long end)
 		if (pfn_valid(pfn)) {
 			page = pfn_to_page(pfn);
 			if (PageLRU(page))
-				return pfn;
-			if (__PageMovable(page))
 				return pfn;
 			if (PageHuge(page)) {
 				if (page_huge_active(page))
@@ -1628,25 +1620,21 @@ do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 		if (!get_page_unless_zero(page))
 			continue;
 		/*
-		 * We can skip free pages. And we can deal with pages on
-		 * LRU and non-lru movable pages.
+		 * We can skip free pages. And we can only deal with pages on
+		 * LRU.
 		 */
-		if (PageLRU(page))
-			ret = isolate_lru_page(page);
-		else
-			ret = isolate_movable_page(page, ISOLATE_UNEVICTABLE);
+		ret = isolate_lru_page(page);
 		if (!ret) { /* Success */
 			put_page(page);
 			list_add_tail(&page->lru, &source);
 			move_pages--;
-			if (!__PageMovable(page))
-				inc_node_page_state(page, NR_ISOLATED_ANON +
-						    page_is_file_cache(page));
+			inc_node_page_state(page, NR_ISOLATED_ANON +
+					    page_is_file_cache(page));
 
 		} else {
 #ifdef CONFIG_DEBUG_VM
-			pr_alert("failed to isolate pfn %lx\n", pfn);
-			dump_page(page, "isolation failed");
+			pr_alert("removing pfn %lx from LRU failed\n", pfn);
+			dump_page(page, "failed to remove from LRU");
 #endif
 			put_page(page);
 			/* Because we don't have big zone->lock. we should
@@ -1759,6 +1747,26 @@ static bool can_offline_normal(struct zone *zone, unsigned long nr_pages)
 static int __init cmdline_parse_movable_node(char *p)
 {
 #ifdef CONFIG_MOVABLE_NODE
+	/*
+	 * Memory used by the kernel cannot be hot-removed because Linux
+	 * cannot migrate the kernel pages. When memory hotplug is
+	 * enabled, we should prevent memblock from allocating memory
+	 * for the kernel.
+	 *
+	 * ACPI SRAT records all hotpluggable memory ranges. But before
+	 * SRAT is parsed, we don't know about it.
+	 *
+	 * The kernel image is loaded into memory at very early time. We
+	 * cannot prevent this anyway. So on NUMA system, we set any
+	 * node the kernel resides in as un-hotpluggable.
+	 *
+	 * Since on modern servers, one node could have double-digit
+	 * gigabytes memory, we can assume the memory around the kernel
+	 * image is also un-hotpluggable. So before SRAT is parsed, just
+	 * allocate memory near the kernel image to try the best to keep
+	 * the kernel away from hotpluggable memory.
+	 */
+	memblock_set_bottom_up(true);
 	movable_node_enabled = true;
 #else
 	pr_warn("movable_node option not supported\n");

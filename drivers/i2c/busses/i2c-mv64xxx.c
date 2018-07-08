@@ -848,12 +848,16 @@ mv64xxx_of_config(struct mv64xxx_i2c_data *drv_data,
 	 */
 	if (of_device_is_compatible(np, "marvell,mv78230-i2c")) {
 		drv_data->offload_enabled = true;
-		drv_data->errata_delay = true;
+		/* The delay is only needed in standard mode (100kHz) */
+		if (bus_freq <= 100000)
+			drv_data->errata_delay = true;
 	}
 
 	if (of_device_is_compatible(np, "marvell,mv78230-a0-i2c")) {
 		drv_data->offload_enabled = false;
-		drv_data->errata_delay = true;
+		/* The delay is only needed in standard mode (100kHz) */
+		if (bus_freq <= 100000)
+			drv_data->errata_delay = true;
 	}
 
 	if (of_device_is_compatible(np, "allwinner,sun6i-a31-i2c"))
@@ -977,32 +981,11 @@ mv64xxx_i2c_remove(struct platform_device *dev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int mv64xxx_i2c_resume(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct mv64xxx_i2c_data *drv_data = platform_get_drvdata(pdev);
-
-	mv64xxx_i2c_hw_init(drv_data);
-
-	return 0;
-}
-
-static const struct dev_pm_ops mv64xxx_i2c_pm = {
-	.resume = mv64xxx_i2c_resume,
-};
-
-#define mv64xxx_i2c_pm_ops (&mv64xxx_i2c_pm)
-#else
-#define mv64xxx_i2c_pm_ops NULL
-#endif
-
 static struct platform_driver mv64xxx_i2c_driver = {
 	.probe	= mv64xxx_i2c_probe,
 	.remove	= mv64xxx_i2c_remove,
 	.driver	= {
 		.name	= MV64XXX_I2C_CTLR_NAME,
-		.pm     = mv64xxx_i2c_pm_ops,
 		.of_match_table = mv64xxx_i2c_of_match_table,
 	},
 };

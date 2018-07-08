@@ -272,86 +272,97 @@ static int xgbe_set_pauseparam(struct net_device *netdev,
 	return ret;
 }
 
-static int xgbe_get_link_ksettings(struct net_device *netdev,
-				   struct ethtool_link_ksettings *cmd)
+static int xgbe_get_settings(struct net_device *netdev,
+			     struct ethtool_cmd *cmd)
 {
 	struct xgbe_prv_data *pdata = netdev_priv(netdev);
 
-	cmd->base.phy_address = pdata->phy.address;
+	cmd->phy_address = pdata->phy.address;
 
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
-						pdata->phy.supported);
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.advertising,
-						pdata->phy.advertising);
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.lp_advertising,
-						pdata->phy.lp_advertising);
+	cmd->supported = pdata->phy.supported;
+	cmd->advertising = pdata->phy.advertising;
+	cmd->lp_advertising = pdata->phy.lp_advertising;
 
-	cmd->base.autoneg = pdata->phy.autoneg;
-	cmd->base.speed = pdata->phy.speed;
-	cmd->base.duplex = pdata->phy.duplex;
+	cmd->autoneg = pdata->phy.autoneg;
+	ethtool_cmd_speed_set(cmd, pdata->phy.speed);
+	cmd->duplex = pdata->phy.duplex;
 
-	cmd->base.port = PORT_NONE;
+	cmd->port = PORT_NONE;
+	cmd->transceiver = XCVR_INTERNAL;
 
 	return 0;
 }
 
-static int xgbe_set_link_ksettings(struct net_device *netdev,
-				   const struct ethtool_link_ksettings *cmd)
+static int xgbe_set_settings(struct net_device *netdev,
+			     struct ethtool_cmd *cmd)
 {
 	struct xgbe_prv_data *pdata = netdev_priv(netdev);
-	u32 advertising;
 	u32 speed;
 	int ret;
 
-	speed = cmd->base.speed;
+	speed = ethtool_cmd_speed(cmd);
 
-	if (cmd->base.phy_address != pdata->phy.address) {
+	if (cmd->phy_address != pdata->phy.address) {
 		netdev_err(netdev, "invalid phy address %hhu\n",
-			   cmd->base.phy_address);
+			   cmd->phy_address);
 		return -EINVAL;
 	}
 
-	if ((cmd->base.autoneg != AUTONEG_ENABLE) &&
-	    (cmd->base.autoneg != AUTONEG_DISABLE)) {
+	if ((cmd->autoneg != AUTONEG_ENABLE) &&
+	    (cmd->autoneg != AUTONEG_DISABLE)) {
 		netdev_err(netdev, "unsupported autoneg %hhu\n",
-			   cmd->base.autoneg);
+			   cmd->autoneg);
 		return -EINVAL;
 	}
 
-	if (cmd->base.autoneg == AUTONEG_DISABLE) {
-		if (!pdata->phy_if.phy_valid_speed(pdata, speed)) {
+	if (cmd->autoneg == AUTONEG_DISABLE) {
+		switch (speed) {
+		case SPEED_10000:
+			break;
+		case SPEED_2500:
+			if (pdata->speed_set != XGBE_SPEEDSET_2500_10000) {
+				netdev_err(netdev, "unsupported speed %u\n",
+					   speed);
+				return -EINVAL;
+			}
+			break;
+		case SPEED_1000:
+			if (pdata->speed_set != XGBE_SPEEDSET_1000_10000) {
+				netdev_err(netdev, "unsupported speed %u\n",
+					   speed);
+				return -EINVAL;
+			}
+			break;
+		default:
 			netdev_err(netdev, "unsupported speed %u\n", speed);
 			return -EINVAL;
 		}
 
-		if (cmd->base.duplex != DUPLEX_FULL) {
+		if (cmd->duplex != DUPLEX_FULL) {
 			netdev_err(netdev, "unsupported duplex %hhu\n",
-				   cmd->base.duplex);
+				   cmd->duplex);
 			return -EINVAL;
 		}
 	}
 
-	ethtool_convert_link_mode_to_legacy_u32(&advertising,
-						cmd->link_modes.advertising);
-
 	netif_dbg(pdata, link, netdev,
 		  "requested advertisement %#x, phy supported %#x\n",
-		  advertising, pdata->phy.supported);
+		  cmd->advertising, pdata->phy.supported);
 
-	advertising &= pdata->phy.supported;
-	if ((cmd->base.autoneg == AUTONEG_ENABLE) && !advertising) {
+	cmd->advertising &= pdata->phy.supported;
+	if ((cmd->autoneg == AUTONEG_ENABLE) && !cmd->advertising) {
 		netdev_err(netdev,
 			   "unsupported requested advertisement\n");
 		return -EINVAL;
 	}
 
 	ret = 0;
-	pdata->phy.autoneg = cmd->base.autoneg;
+	pdata->phy.autoneg = cmd->autoneg;
 	pdata->phy.speed = speed;
-	pdata->phy.duplex = cmd->base.duplex;
-	pdata->phy.advertising = advertising;
+	pdata->phy.duplex = cmd->duplex;
+	pdata->phy.advertising = cmd->advertising;
 
-	if (cmd->base.autoneg == AUTONEG_ENABLE)
+	if (cmd->autoneg == AUTONEG_ENABLE)
 		pdata->phy.advertising |= ADVERTISED_Autoneg;
 	else
 		pdata->phy.advertising &= ~ADVERTISED_Autoneg;
@@ -591,6 +602,8 @@ static int xgbe_get_ts_info(struct net_device *netdev,
 }
 
 static const struct ethtool_ops xgbe_ethtool_ops = {
+	.get_settings = xgbe_get_settings,
+	.set_settings = xgbe_set_settings,
 	.get_drvinfo = xgbe_get_drvinfo,
 	.get_msglevel = xgbe_get_msglevel,
 	.set_msglevel = xgbe_set_msglevel,
@@ -608,8 +621,6 @@ static const struct ethtool_ops xgbe_ethtool_ops = {
 	.get_rxfh = xgbe_get_rxfh,
 	.set_rxfh = xgbe_set_rxfh,
 	.get_ts_info = xgbe_get_ts_info,
-	.get_link_ksettings = xgbe_get_link_ksettings,
-	.set_link_ksettings = xgbe_set_link_ksettings,
 };
 
 const struct ethtool_ops *xgbe_get_ethtool_ops(void)

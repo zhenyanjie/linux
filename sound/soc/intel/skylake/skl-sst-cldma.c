@@ -17,6 +17,7 @@
 
 #include <linux/device.h>
 #include <linux/mm.h>
+#include <linux/kthread.h>
 #include <linux/delay.h>
 #include "../common/sst-dsp.h"
 #include "../common/sst-dsp-priv.h"

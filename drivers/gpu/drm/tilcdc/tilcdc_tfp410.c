@@ -249,6 +249,8 @@ static struct drm_connector *tfp410_connector_create(struct drm_device *dev,
 	if (ret)
 		goto fail;
 
+	drm_connector_register(connector);
+
 	return connector;
 
 fail:

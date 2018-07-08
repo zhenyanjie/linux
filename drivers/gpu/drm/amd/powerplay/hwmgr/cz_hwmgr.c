@@ -20,13 +20,13 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  *
  */
-#include "pp_debug.h"
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include "atom-types.h"
 #include "atombios.h"
 #include "processpptables.h"
+#include "pp_debug.h"
 #include "cgs_common.h"
 #include "smu/smu_8_0_d.h"
 #include "smu8_fusion.h"
@@ -38,6 +38,7 @@
 #include "cz_hwmgr.h"
 #include "power_state.h"
 #include "cz_clockpowergating.h"
+#include "pp_debug.h"
 
 #define ixSMUSVI_NB_CURRENTVID 0xD8230044
 #define CURRENT_NB_VID_MASK 0xff000000
@@ -65,7 +66,7 @@ static const struct cz_power_state *cast_const_PhwCzPowerState(
 	return (struct cz_power_state *)hw_ps;
 }
 
-static uint32_t cz_get_eclk_level(struct pp_hwmgr *hwmgr,
+uint32_t cz_get_eclk_level(struct pp_hwmgr *hwmgr,
 					uint32_t clock, uint32_t msg)
 {
 	int i = 0;
@@ -287,7 +288,7 @@ static int cz_init_dynamic_state_adjustment_rule_settings(
 					kzalloc(table_size, GFP_KERNEL);
 
 	if (NULL == table_clk_vlt) {
-		pr_err("Can not allocate memory!\n");
+		printk(KERN_ERR "[ powerplay ] Can not allocate memory!\n");
 		return -ENOMEM;
 	}
 
@@ -328,12 +329,12 @@ static int cz_get_system_info_data(struct pp_hwmgr *hwmgr)
 			&size, &frev, &crev);
 
 	if (crev != 9) {
-		pr_err("Unsupported IGP table: %d %d\n", frev, crev);
+		printk(KERN_ERR "[ powerplay ] Unsupported IGP table: %d %d\n", frev, crev);
 		return -EINVAL;
 	}
 
 	if (info == NULL) {
-		pr_err("Could not retrieve the Integrated System Info Table!\n");
+		printk(KERN_ERR "[ powerplay ] Could not retrieve the Integrated System Info Table!\n");
 		return -EINVAL;
 	}
 
@@ -360,7 +361,7 @@ static int cz_get_system_info_data(struct pp_hwmgr *hwmgr)
 
 	if (cz_hwmgr->sys_info.htc_tmp_lmt <=
 			cz_hwmgr->sys_info.htc_hyst_lmt) {
-		pr_err("The htcTmpLmt should be larger than htcHystLmt.\n");
+		printk(KERN_ERR "[ powerplay ] The htcTmpLmt should be larger than htcHystLmt.\n");
 		return -EINVAL;
 	}
 
@@ -722,7 +723,7 @@ static int cz_tf_update_sclk_limit(struct pp_hwmgr *hwmgr,
 
 	clock = hwmgr->display_config.min_core_set_clock;
 	if (clock == 0)
-		pr_info("min_core_set_clock not set\n");
+		printk(KERN_INFO "[ powerplay ] min_core_set_clock not set\n");
 
 	if (cz_hwmgr->sclk_dpm.hard_min_clk != clock) {
 		cz_hwmgr->sclk_dpm.hard_min_clk = clock;
@@ -887,13 +888,13 @@ static int cz_tf_update_low_mem_pstate(struct pp_hwmgr *hwmgr,
 }
 
 static const struct phm_master_table_item cz_set_power_state_list[] = {
-	{ .tableFunction = cz_tf_update_sclk_limit },
-	{ .tableFunction = cz_tf_set_deep_sleep_sclk_threshold },
-	{ .tableFunction = cz_tf_set_watermark_threshold },
-	{ .tableFunction = cz_tf_set_enabled_levels },
-	{ .tableFunction = cz_tf_enable_nb_dpm },
-	{ .tableFunction = cz_tf_update_low_mem_pstate },
-	{ }
+	{NULL, cz_tf_update_sclk_limit},
+	{NULL, cz_tf_set_deep_sleep_sclk_threshold},
+	{NULL, cz_tf_set_watermark_threshold},
+	{NULL, cz_tf_set_enabled_levels},
+	{NULL, cz_tf_enable_nb_dpm},
+	{NULL, cz_tf_update_low_mem_pstate},
+	{NULL, NULL}
 };
 
 static const struct phm_master_table_header cz_set_power_state_master = {
@@ -903,15 +904,15 @@ static const struct phm_master_table_header cz_set_power_state_master = {
 };
 
 static const struct phm_master_table_item cz_setup_asic_list[] = {
-	{ .tableFunction = cz_tf_reset_active_process_mask },
-	{ .tableFunction = cz_tf_upload_pptable_to_smu },
-	{ .tableFunction = cz_tf_init_sclk_limit },
-	{ .tableFunction = cz_tf_init_uvd_limit },
-	{ .tableFunction = cz_tf_init_vce_limit },
-	{ .tableFunction = cz_tf_init_acp_limit },
-	{ .tableFunction = cz_tf_init_power_gate_state },
-	{ .tableFunction = cz_tf_init_sclk_threshold },
-	{ }
+	{NULL, cz_tf_reset_active_process_mask},
+	{NULL, cz_tf_upload_pptable_to_smu},
+	{NULL, cz_tf_init_sclk_limit},
+	{NULL, cz_tf_init_uvd_limit},
+	{NULL, cz_tf_init_vce_limit},
+	{NULL, cz_tf_init_acp_limit},
+	{NULL, cz_tf_init_power_gate_state},
+	{NULL, cz_tf_init_sclk_threshold},
+	{NULL, NULL}
 };
 
 static const struct phm_master_table_header cz_setup_asic_master = {
@@ -956,10 +957,10 @@ static int cz_tf_reset_cc6_data(struct pp_hwmgr *hwmgr,
 }
 
 static const struct phm_master_table_item cz_power_down_asic_list[] = {
-	{ .tableFunction = cz_tf_power_up_display_clock_sys_pll },
-	{ .tableFunction = cz_tf_clear_nb_dpm_flag },
-	{ .tableFunction = cz_tf_reset_cc6_data },
-	{ }
+	{NULL, cz_tf_power_up_display_clock_sys_pll},
+	{NULL, cz_tf_clear_nb_dpm_flag},
+	{NULL, cz_tf_reset_cc6_data},
+	{NULL, NULL}
 };
 
 static const struct phm_master_table_header cz_power_down_asic_master = {
@@ -1016,7 +1017,7 @@ static int cz_tf_program_bootup_state(struct pp_hwmgr *hwmgr, void *input,
 	return 0;
 }
 
-static int cz_tf_reset_acp_boot_level(struct pp_hwmgr *hwmgr, void *input,
+int cz_tf_reset_acp_boot_level(struct pp_hwmgr *hwmgr, void *input,
 				void *output, void *storage, int result)
 {
 	struct cz_hwmgr *cz_hwmgr = (struct cz_hwmgr *)(hwmgr->backend);
@@ -1067,8 +1068,8 @@ static int cz_tf_check_for_dpm_enabled(struct pp_hwmgr *hwmgr,
 }
 
 static const struct phm_master_table_item cz_disable_dpm_list[] = {
-	{ .tableFunction = cz_tf_check_for_dpm_enabled },
-	{ },
+	{ NULL, cz_tf_check_for_dpm_enabled},
+	{NULL, NULL},
 };
 
 
@@ -1079,13 +1080,13 @@ static const struct phm_master_table_header cz_disable_dpm_master = {
 };
 
 static const struct phm_master_table_item cz_enable_dpm_list[] = {
-	{ .tableFunction = cz_tf_check_for_dpm_disabled },
-	{ .tableFunction = cz_tf_program_voting_clients },
-	{ .tableFunction = cz_tf_start_dpm },
-	{ .tableFunction = cz_tf_program_bootup_state },
-	{ .tableFunction = cz_tf_enable_didt },
-	{ .tableFunction = cz_tf_reset_acp_boot_level },
-	{ },
+	{ NULL, cz_tf_check_for_dpm_disabled },
+	{ NULL, cz_tf_program_voting_clients },
+	{ NULL, cz_tf_start_dpm},
+	{ NULL, cz_tf_program_bootup_state},
+	{ NULL, cz_tf_enable_didt },
+	{ NULL, cz_tf_reset_acp_boot_level },
+	{NULL, NULL},
 };
 
 static const struct phm_master_table_header cz_enable_dpm_master = {
@@ -1161,13 +1162,13 @@ static int cz_hwmgr_backend_init(struct pp_hwmgr *hwmgr)
 
 	result = cz_initialize_dpm_defaults(hwmgr);
 	if (result != 0) {
-		pr_err("cz_initialize_dpm_defaults failed\n");
+		printk(KERN_ERR "[ powerplay ] cz_initialize_dpm_defaults failed\n");
 		return result;
 	}
 
 	result = cz_get_system_info_data(hwmgr);
 	if (result != 0) {
-		pr_err("cz_get_system_info_data failed\n");
+		printk(KERN_ERR "[ powerplay ] cz_get_system_info_data failed\n");
 		return result;
 	}
 
@@ -1176,40 +1177,40 @@ static int cz_hwmgr_backend_init(struct pp_hwmgr *hwmgr)
 	result = phm_construct_table(hwmgr, &cz_setup_asic_master,
 				&(hwmgr->setup_asic));
 	if (result != 0) {
-		pr_err("Fail to construct setup ASIC\n");
+		printk(KERN_ERR "[ powerplay ] Fail to construct setup ASIC\n");
 		return result;
 	}
 
 	result = phm_construct_table(hwmgr, &cz_power_down_asic_master,
 				&(hwmgr->power_down_asic));
 	if (result != 0) {
-		pr_err("Fail to construct power down ASIC\n");
+		printk(KERN_ERR "[ powerplay ] Fail to construct power down ASIC\n");
 		return result;
 	}
 
 	result = phm_construct_table(hwmgr, &cz_disable_dpm_master,
 				&(hwmgr->disable_dynamic_state_management));
 	if (result != 0) {
-		pr_err("Fail to disable_dynamic_state\n");
+		printk(KERN_ERR "[ powerplay ] Fail to disable_dynamic_state\n");
 		return result;
 	}
 	result = phm_construct_table(hwmgr, &cz_enable_dpm_master,
 				&(hwmgr->enable_dynamic_state_management));
 	if (result != 0) {
-		pr_err("Fail to enable_dynamic_state\n");
+		printk(KERN_ERR "[ powerplay ] Fail to enable_dynamic_state\n");
 		return result;
 	}
 	result = phm_construct_table(hwmgr, &cz_set_power_state_master,
 				&(hwmgr->set_power_state));
 	if (result != 0) {
-		pr_err("Fail to construct set_power_state\n");
+		printk(KERN_ERR "[ powerplay ] Fail to construct set_power_state\n");
 		return result;
 	}
 	hwmgr->platform_descriptor.hardwareActivityPerformanceLevels =  CZ_MAX_HARDWARE_POWERLEVELS;
 
 	result = phm_construct_table(hwmgr, &cz_phm_enable_clock_power_gatings_master, &(hwmgr->enable_clock_power_gatings));
 	if (result != 0) {
-		pr_err("Fail to construct enable_clock_power_gatings\n");
+		printk(KERN_ERR "[ powerplay ] Fail to construct enable_clock_power_gatings\n");
 		return result;
 	}
 	return result;
@@ -1217,20 +1218,14 @@ static int cz_hwmgr_backend_init(struct pp_hwmgr *hwmgr)
 
 static int cz_hwmgr_backend_fini(struct pp_hwmgr *hwmgr)
 {
-	if (hwmgr != NULL) {
-		phm_destroy_table(hwmgr, &(hwmgr->enable_clock_power_gatings));
-		phm_destroy_table(hwmgr, &(hwmgr->set_power_state));
-		phm_destroy_table(hwmgr, &(hwmgr->enable_dynamic_state_management));
-		phm_destroy_table(hwmgr, &(hwmgr->disable_dynamic_state_management));
-		phm_destroy_table(hwmgr, &(hwmgr->power_down_asic));
-		phm_destroy_table(hwmgr, &(hwmgr->setup_asic));
+	if (hwmgr != NULL && hwmgr->backend != NULL) {
 		kfree(hwmgr->backend);
-		hwmgr->backend = NULL;
+		kfree(hwmgr);
 	}
 	return 0;
 }
 
-static int cz_phm_force_dpm_highest(struct pp_hwmgr *hwmgr)
+int cz_phm_force_dpm_highest(struct pp_hwmgr *hwmgr)
 {
 	struct cz_hwmgr *cz_hwmgr = (struct cz_hwmgr *)(hwmgr->backend);
 
@@ -1244,7 +1239,7 @@ static int cz_phm_force_dpm_highest(struct pp_hwmgr *hwmgr)
 	return 0;
 }
 
-static int cz_phm_unforce_dpm_levels(struct pp_hwmgr *hwmgr)
+int cz_phm_unforce_dpm_levels(struct pp_hwmgr *hwmgr)
 {
 	struct cz_hwmgr *cz_hwmgr = (struct cz_hwmgr *)(hwmgr->backend);
 	struct phm_clock_voltage_dependency_table *table =
@@ -1282,7 +1277,7 @@ static int cz_phm_unforce_dpm_levels(struct pp_hwmgr *hwmgr)
 	return 0;
 }
 
-static int cz_phm_force_dpm_lowest(struct pp_hwmgr *hwmgr)
+int cz_phm_force_dpm_lowest(struct pp_hwmgr *hwmgr)
 {
 	struct cz_hwmgr *cz_hwmgr = (struct cz_hwmgr *)(hwmgr->backend);
 
@@ -1546,7 +1541,7 @@ static int cz_dpm_get_pp_table_entry(struct pp_hwmgr *hwmgr,
 	return result;
 }
 
-static int cz_get_power_state_size(struct pp_hwmgr *hwmgr)
+int cz_get_power_state_size(struct pp_hwmgr *hwmgr)
 {
 	return sizeof(struct cz_power_state);
 }
@@ -1944,7 +1939,7 @@ static const struct pp_hwmgr_func cz_hwmgr_funcs = {
 	.read_sensor = cz_read_sensor,
 };
 
-int cz_init_function_pointers(struct pp_hwmgr *hwmgr)
+int cz_hwmgr_init(struct pp_hwmgr *hwmgr)
 {
 	hwmgr->hwmgr_func = &cz_hwmgr_funcs;
 	hwmgr->pptable_func = &pptable_funcs;

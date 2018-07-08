@@ -17,6 +17,7 @@ config DEVMEM
 
 config DEVKMEM
 	bool "/dev/kmem virtual device support"
+	default y
 	help
 	  Say Y here if you want to support the /dev/kmem device. The
 	  /dev/kmem device is rarely used, but can be used for certain
@@ -46,7 +47,6 @@ config SGI_MBCS
          say Y or M here, otherwise say N.
 
 source "drivers/tty/serial/Kconfig"
-source "drivers/tty/serdev/Kconfig"
 
 config TTY_PRINTK
 	tristate "TTY driver to output user messages via printk"
@@ -542,7 +542,6 @@ config HANGCHECK_TIMER
 config MMTIMER
 	tristate "MMTIMER Memory mapped RTC for SGI Altix"
 	depends on IA64_GENERIC || IA64_SGI_SN2
-	depends on POSIX_TIMERS
 	default y
 	help
 	  The mmtimer device allows direct userspace access to the
@@ -582,7 +581,7 @@ config DEVPORT
 source "drivers/s390/char/Kconfig"
 
 config TILE_SROM
-	tristate "Character-device access via hypervisor to the Tilera SPI ROM"
+	bool "Character-device access via hypervisor to the Tilera SPI ROM"
 	depends on TILE
 	default y
 	---help---

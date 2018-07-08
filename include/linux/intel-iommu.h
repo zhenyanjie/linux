@@ -29,7 +29,6 @@
 #include <linux/dma_remapping.h>
 #include <linux/mmu_notifier.h>
 #include <linux/list.h>
-#include <linux/iommu.h>
 #include <asm/cacheflush.h>
 #include <asm/iommu.h>
 
@@ -440,7 +439,7 @@ struct intel_iommu {
 	struct irq_domain *ir_domain;
 	struct irq_domain *ir_msi_domain;
 #endif
-	struct iommu_device iommu;  /* IOMMU core code handle */
+	struct device	*iommu_dev; /* IOMMU-sysfs device */
 	int		node;
 	u32		flags;      /* Software defined flags */
 };

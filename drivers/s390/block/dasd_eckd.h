@@ -94,8 +94,6 @@
 #define FCX_MAX_DATA_FACTOR 65536
 #define DASD_ECKD_RCD_DATA_SIZE 256
 
-#define DASD_ECKD_PATH_THRHLD		 256
-#define DASD_ECKD_PATH_INTERVAL		 300
 
 /*****************************************************************************
  * SECTION: Type Definitions
@@ -537,7 +535,8 @@ struct dasd_eckd_private {
 	struct dasd_eckd_characteristics rdc_data;
 	u8 *conf_data;
 	int conf_len;
-
+	/* per path configuration data */
+	struct dasd_conf_data *path_conf_data[8];
 	/* pointers to specific parts in the conf_data */
 	struct dasd_ned *ned;
 	struct dasd_sneq *sneq;

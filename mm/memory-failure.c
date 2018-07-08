@@ -40,8 +40,7 @@
 #include <linux/mm.h>
 #include <linux/page-flags.h>
 #include <linux/kernel-page-flags.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/task.h>
+#include <linux/sched.h>
 #include <linux/ksm.h>
 #include <linux/rmap.h>
 #include <linux/export.h>
@@ -536,6 +535,13 @@ static int delete_from_lru_cache(struct page *p)
 		 */
 		ClearPageActive(p);
 		ClearPageUnevictable(p);
+
+		/*
+		 * Poisoned page might never drop its ref count to 0 so we have
+		 * to uncharge it manually from its memcg.
+		 */
+		mem_cgroup_uncharge(p);
+
 		/*
 		 * drop the page count elevated by isolate_lru_page()
 		 */
@@ -765,11 +771,12 @@ static int me_huge_page(struct page *p, unsigned long pfn)
  */
 
 #define dirty		(1UL << PG_dirty)
-#define sc		((1UL << PG_swapcache) | (1UL << PG_swapbacked))
+#define sc		(1UL << PG_swapcache)
 #define unevict		(1UL << PG_unevictable)
 #define mlock		(1UL << PG_mlocked)
 #define writeback	(1UL << PG_writeback)
 #define lru		(1UL << PG_lru)
+#define swapbacked	(1UL << PG_swapbacked)
 #define head		(1UL << PG_head)
 #define slab		(1UL << PG_slab)
 #define reserved	(1UL << PG_reserved)
@@ -819,6 +826,7 @@ static struct page_state {
 #undef mlock
 #undef writeback
 #undef lru
+#undef swapbacked
 #undef head
 #undef slab
 #undef reserved
@@ -913,6 +921,7 @@ static int hwpoison_user_mappings(struct page *p, unsigned long pfn,
 	int ret;
 	int kill = 1, forcekill;
 	struct page *hpage = *hpagep;
+	bool mlocked = PageMlocked(hpage);
 
 	/*
 	 * Here we are interested only in user-mapped pages, so skip any
@@ -975,6 +984,13 @@ static int hwpoison_user_mappings(struct page *p, unsigned long pfn,
 	if (ret != SWAP_SUCCESS)
 		pr_err("Memory failure: %#lx: failed to unmap page (mapcount=%d)\n",
 		       pfn, page_mapcount(hpage));
+
+	/*
+	 * try_to_unmap() might put mlocked page in lru cache, so call
+	 * shake_page() again to ensure that it's flushed.
+	 */
+	if (mlocked)
+		shake_page(hpage, 0);
 
 	/*
 	 * Now that the dirty bit has been propagated to the
@@ -1531,8 +1547,7 @@ static int get_any_page(struct page *page, unsigned long pfn, int flags)
 {
 	int ret = __get_any_page(page, pfn, flags);
 
-	if (ret == 1 && !PageHuge(page) &&
-	    !PageLRU(page) && !__PageMovable(page)) {
+	if (ret == 1 && !PageHuge(page) && !PageLRU(page)) {
 		/*
 		 * Try to free it.
 		 */
@@ -1650,10 +1665,7 @@ static int __soft_offline_page(struct page *page, int flags)
 	 * Try to migrate to a new page instead. migrate.c
 	 * handles a large number of cases for us.
 	 */
-	if (PageLRU(page))
-		ret = isolate_lru_page(page);
-	else
-		ret = isolate_movable_page(page, ISOLATE_UNEVICTABLE);
+	ret = isolate_lru_page(page);
 	/*
 	 * Drop page reference which is came from get_any_page()
 	 * successful isolate_lru_page() already took another one.
@@ -1661,20 +1673,18 @@ static int __soft_offline_page(struct page *page, int flags)
 	put_hwpoison_page(page);
 	if (!ret) {
 		LIST_HEAD(pagelist);
-		/*
-		 * After isolated lru page, the PageLRU will be cleared,
-		 * so use !__PageMovable instead for LRU page's mapping
-		 * cannot have PAGE_MAPPING_MOVABLE.
-		 */
-		if (!__PageMovable(page))
-			inc_node_page_state(page, NR_ISOLATED_ANON +
-						page_is_file_cache(page));
+		inc_node_page_state(page, NR_ISOLATED_ANON +
+					page_is_file_cache(page));
 		list_add(&page->lru, &pagelist);
 		ret = migrate_pages(&pagelist, new_page, NULL, MPOL_MF_MOVE_ALL,
 					MIGRATE_SYNC, MR_MEMORY_FAILURE);
 		if (ret) {
-			if (!list_empty(&pagelist))
-				putback_movable_pages(&pagelist);
+			if (!list_empty(&pagelist)) {
+				list_del(&page->lru);
+				dec_node_page_state(page, NR_ISOLATED_ANON +
+						page_is_file_cache(page));
+				putback_lru_page(page);
+			}
 
 			pr_info("soft offline: %#lx: migration failed %d, type %lx\n",
 				pfn, ret, page->flags);

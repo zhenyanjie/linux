@@ -16,7 +16,6 @@
 #include <linux/skbuff.h>
 #include <linux/vmalloc.h>
 #include <net/pkt_sched.h>
-#include <net/pkt_cls.h>
 #include <net/inet_ecn.h>
 #include <net/red.h>
 #include <net/flow_dissector.h>
@@ -424,6 +423,9 @@ static int choke_change(struct Qdisc *sch, struct nlattr *opt)
 	max_P = tb[TCA_CHOKE_MAX_P] ? nla_get_u32(tb[TCA_CHOKE_MAX_P]) : 0;
 
 	ctl = nla_data(tb[TCA_CHOKE_PARMS]);
+
+	if (!red_check_params(ctl->qth_min, ctl->qth_max, ctl->Wlog))
+		return -EINVAL;
 
 	if (ctl->limit > CHOKE_MAX_QUEUE)
 		return -EINVAL;

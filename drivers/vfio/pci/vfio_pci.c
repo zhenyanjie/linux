@@ -558,9 +558,10 @@ static int vfio_pci_for_each_slot_or_bus(struct pci_dev *pdev,
 static int msix_sparse_mmap_cap(struct vfio_pci_device *vdev,
 				struct vfio_info_cap *caps)
 {
+	struct vfio_info_cap_header *header;
 	struct vfio_region_info_cap_sparse_mmap *sparse;
 	size_t end, size;
-	int nr_areas = 2, i = 0, ret;
+	int nr_areas = 2, i = 0;
 
 	end = pci_resource_len(vdev->pdev, vdev->msix_bar);
 
@@ -571,10 +572,13 @@ static int msix_sparse_mmap_cap(struct vfio_pci_device *vdev,
 
 	size = sizeof(*sparse) + (nr_areas * sizeof(*sparse->areas));
 
-	sparse = kzalloc(size, GFP_KERNEL);
-	if (!sparse)
-		return -ENOMEM;
+	header = vfio_info_cap_add(caps, size,
+				   VFIO_REGION_INFO_CAP_SPARSE_MMAP, 1);
+	if (IS_ERR(header))
+		return PTR_ERR(header);
 
+	sparse = container_of(header,
+			      struct vfio_region_info_cap_sparse_mmap, header);
 	sparse->nr_areas = nr_areas;
 
 	if (vdev->msix_offset & PAGE_MASK) {
@@ -590,11 +594,26 @@ static int msix_sparse_mmap_cap(struct vfio_pci_device *vdev,
 		i++;
 	}
 
-	ret = vfio_info_add_capability(caps, VFIO_REGION_INFO_CAP_SPARSE_MMAP,
-				       sparse);
-	kfree(sparse);
+	return 0;
+}
 
-	return ret;
+static int region_type_cap(struct vfio_pci_device *vdev,
+			   struct vfio_info_cap *caps,
+			   unsigned int type, unsigned int subtype)
+{
+	struct vfio_info_cap_header *header;
+	struct vfio_region_info_cap_type *cap;
+
+	header = vfio_info_cap_add(caps, sizeof(*cap),
+				   VFIO_REGION_INFO_CAP_TYPE, 1);
+	if (IS_ERR(header))
+		return PTR_ERR(header);
+
+	cap = container_of(header, struct vfio_region_info_cap_type, header);
+	cap->type = type;
+	cap->subtype = subtype;
+
+	return 0;
 }
 
 int vfio_pci_register_dev_region(struct vfio_pci_device *vdev,
@@ -733,9 +752,6 @@ static long vfio_pci_ioctl(void *device_data,
 
 			break;
 		default:
-		{
-			struct vfio_region_info_cap_type cap_type;
-
 			if (info.index >=
 			    VFIO_PCI_NUM_REGIONS + vdev->num_regions)
 				return -EINVAL;
@@ -746,16 +762,11 @@ static long vfio_pci_ioctl(void *device_data,
 			info.size = vdev->region[i].size;
 			info.flags = vdev->region[i].flags;
 
-			cap_type.type = vdev->region[i].type;
-			cap_type.subtype = vdev->region[i].subtype;
-
-			ret = vfio_info_add_capability(&caps,
-						      VFIO_REGION_INFO_CAP_TYPE,
-						      &cap_type);
+			ret = region_type_cap(vdev, &caps,
+					      vdev->region[i].type,
+					      vdev->region[i].subtype);
 			if (ret)
 				return ret;
-
-		}
 		}
 
 		if (caps.size) {
@@ -818,25 +829,45 @@ static long vfio_pci_ioctl(void *device_data,
 
 	} else if (cmd == VFIO_DEVICE_SET_IRQS) {
 		struct vfio_irq_set hdr;
+		size_t size;
 		u8 *data = NULL;
 		int max, ret = 0;
-		size_t data_size = 0;
 
 		minsz = offsetofend(struct vfio_irq_set, count);
 
 		if (copy_from_user(&hdr, (void __user *)arg, minsz))
 			return -EFAULT;
 
+		if (hdr.argsz < minsz || hdr.index >= VFIO_PCI_NUM_IRQS ||
+		    hdr.count >= (U32_MAX - hdr.start) ||
+		    hdr.flags & ~(VFIO_IRQ_SET_DATA_TYPE_MASK |
+				  VFIO_IRQ_SET_ACTION_TYPE_MASK))
+			return -EINVAL;
+
 		max = vfio_pci_get_irq_count(vdev, hdr.index);
+		if (hdr.start >= max || hdr.start + hdr.count > max)
+			return -EINVAL;
 
-		ret = vfio_set_irqs_validate_and_prepare(&hdr, max,
-						 VFIO_PCI_NUM_IRQS, &data_size);
-		if (ret)
-			return ret;
+		switch (hdr.flags & VFIO_IRQ_SET_DATA_TYPE_MASK) {
+		case VFIO_IRQ_SET_DATA_NONE:
+			size = 0;
+			break;
+		case VFIO_IRQ_SET_DATA_BOOL:
+			size = sizeof(uint8_t);
+			break;
+		case VFIO_IRQ_SET_DATA_EVENTFD:
+			size = sizeof(int32_t);
+			break;
+		default:
+			return -EINVAL;
+		}
 
-		if (data_size) {
+		if (size) {
+			if (hdr.argsz - minsz < hdr.count * size)
+				return -EINVAL;
+
 			data = memdup_user((void __user *)(arg + minsz),
-					    data_size);
+					   hdr.count * size);
 			if (IS_ERR(data))
 				return PTR_ERR(data);
 		}

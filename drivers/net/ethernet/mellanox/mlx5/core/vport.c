@@ -113,36 +113,17 @@ static int mlx5_modify_nic_vport_context(struct mlx5_core_dev *mdev, void *in,
 	return mlx5_cmd_exec(mdev, in, inlen, out, sizeof(out));
 }
 
-int mlx5_query_nic_vport_min_inline(struct mlx5_core_dev *mdev,
-				    u16 vport, u8 *min_inline)
+void mlx5_query_nic_vport_min_inline(struct mlx5_core_dev *mdev,
+				     u8 *min_inline_mode)
 {
 	u32 out[MLX5_ST_SZ_DW(query_nic_vport_context_out)] = {0};
-	int err;
 
-	err = mlx5_query_nic_vport_context(mdev, vport, out, sizeof(out));
-	if (!err)
-		*min_inline = MLX5_GET(query_nic_vport_context_out, out,
-				       nic_vport_context.min_wqe_inline_mode);
-	return err;
+	mlx5_query_nic_vport_context(mdev, 0, out, sizeof(out));
+
+	*min_inline_mode = MLX5_GET(query_nic_vport_context_out, out,
+				    nic_vport_context.min_wqe_inline_mode);
 }
 EXPORT_SYMBOL_GPL(mlx5_query_nic_vport_min_inline);
-
-void mlx5_query_min_inline(struct mlx5_core_dev *mdev,
-			   u8 *min_inline_mode)
-{
-	switch (MLX5_CAP_ETH(mdev, wqe_inline_mode)) {
-	case MLX5_CAP_INLINE_MODE_L2:
-		*min_inline_mode = MLX5_INLINE_MODE_L2;
-		break;
-	case MLX5_CAP_INLINE_MODE_VPORT_CONTEXT:
-		mlx5_query_nic_vport_min_inline(mdev, 0, min_inline_mode);
-		break;
-	case MLX5_CAP_INLINE_MODE_NOT_REQUIRED:
-		*min_inline_mode = MLX5_INLINE_MODE_NONE;
-		break;
-	}
-}
-EXPORT_SYMBOL_GPL(mlx5_query_min_inline);
 
 int mlx5_modify_nic_vport_min_inline(struct mlx5_core_dev *mdev,
 				     u16 vport, u8 min_inline)
@@ -549,7 +530,7 @@ int mlx5_modify_nic_vport_node_guid(struct mlx5_core_dev *mdev,
 	if (!MLX5_CAP_GEN(mdev, vport_group_manager))
 		return -EACCES;
 	if (!MLX5_CAP_ESW(mdev, nic_vport_node_guid_modify))
-		return -EOPNOTSUPP;
+		return -ENOTSUPP;
 
 	in = mlx5_vzalloc(inlen);
 	if (!in)

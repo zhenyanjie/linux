@@ -18,23 +18,32 @@
 #include "msm_drv.h"
 #include "msm_gem.h"
 
-static bool msm_gem_shrinker_lock(struct drm_device *dev, bool *unlock)
+static bool mutex_is_locked_by(struct mutex *mutex, struct task_struct *task)
 {
-	switch (mutex_trylock_recursive(&dev->struct_mutex)) {
-	case MUTEX_TRYLOCK_FAILED:
+	if (!mutex_is_locked(mutex))
 		return false;
 
-	case MUTEX_TRYLOCK_SUCCESS:
-		*unlock = true;
-		return true;
+#if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_MUTEXES)
+	return mutex->owner == task;
+#else
+	/* Since UP may be pre-empted, we cannot assume that we own the lock */
+	return false;
+#endif
+}
 
-	case MUTEX_TRYLOCK_RECURSIVE:
+static bool msm_gem_shrinker_lock(struct drm_device *dev, bool *unlock)
+{
+	if (!mutex_trylock(&dev->struct_mutex)) {
+		if (!mutex_is_locked_by(&dev->struct_mutex, current))
+			return false;
 		*unlock = false;
-		return true;
+	} else {
+		*unlock = true;
 	}
 
-	BUG();
+	return true;
 }
+
 
 static unsigned long
 msm_gem_shrinker_count(struct shrinker *shrinker, struct shrink_control *sc)

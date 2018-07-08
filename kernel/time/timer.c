@@ -38,14 +38,12 @@
 #include <linux/tick.h>
 #include <linux/kallsyms.h>
 #include <linux/irq_work.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/sched/sysctl.h>
-#include <linux/sched/nohz.h>
-#include <linux/sched/debug.h>
 #include <linux/slab.h>
 #include <linux/compat.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/div64.h>
 #include <asm/timex.h>
@@ -203,6 +201,7 @@ struct timer_base {
 	bool			migration_enabled;
 	bool			nohz_active;
 	bool			is_idle;
+	bool			must_forward_clk;
 	DECLARE_BITMAP(pending_map, WHEEL_SIZE);
 	struct hlist_head	vectors[WHEEL_SIZE];
 } ____cacheline_aligned;
@@ -241,7 +240,7 @@ int timer_migration_handler(struct ctl_table *table, int write,
 	int ret;
 
 	mutex_lock(&mutex);
-	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
 	if (!ret && write)
 		timers_update_migration(false);
 	mutex_unlock(&mutex);
@@ -573,6 +572,38 @@ internal_add_timer(struct timer_base *base, struct timer_list *timer)
 	trigger_dyntick_cpu(base, timer);
 }
 
+#ifdef CONFIG_TIMER_STATS
+void __timer_stats_timer_set_start_info(struct timer_list *timer, void *addr)
+{
+	if (timer->start_site)
+		return;
+
+	timer->start_site = addr;
+	memcpy(timer->start_comm, current->comm, TASK_COMM_LEN);
+	timer->start_pid = current->pid;
+}
+
+static void timer_stats_account_timer(struct timer_list *timer)
+{
+	void *site;
+
+	/*
+	 * start_site can be concurrently reset by
+	 * timer_stats_timer_clear_start_info()
+	 */
+	site = READ_ONCE(timer->start_site);
+	if (likely(!site))
+		return;
+
+	timer_stats_update_stats(timer, timer->start_pid, site,
+				 timer->function, timer->start_comm,
+				 timer->flags);
+}
+
+#else
+static void timer_stats_account_timer(struct timer_list *timer) {}
+#endif
+
 #ifdef CONFIG_DEBUG_OBJECTS_TIMERS
 
 static struct debug_obj_descr timer_debug_descr;
@@ -759,6 +790,11 @@ static void do_init_timer(struct timer_list *timer, unsigned int flags,
 {
 	timer->entry.pprev = NULL;
 	timer->flags = flags | raw_smp_processor_id();
+#ifdef CONFIG_TIMER_STATS
+	timer->start_site = NULL;
+	timer->start_pid = -1;
+	memset(timer->start_comm, 0, TASK_COMM_LEN);
+#endif
 	lockdep_init_map(&timer->lockdep_map, name, key, 0);
 }
 
@@ -813,11 +849,10 @@ static inline struct timer_base *get_timer_cpu_base(u32 tflags, u32 cpu)
 	struct timer_base *base = per_cpu_ptr(&timer_bases[BASE_STD], cpu);
 
 	/*
-	 * If the timer is deferrable and nohz is active then we need to use
-	 * the deferrable base.
+	 * If the timer is deferrable and NO_HZ_COMMON is set then we need
+	 * to use the deferrable base.
 	 */
-	if (IS_ENABLED(CONFIG_NO_HZ_COMMON) && base->nohz_active &&
-	    (tflags & TIMER_DEFERRABLE))
+	if (IS_ENABLED(CONFIG_NO_HZ_COMMON) && (tflags & TIMER_DEFERRABLE))
 		base = per_cpu_ptr(&timer_bases[BASE_DEF], cpu);
 	return base;
 }
@@ -827,11 +862,10 @@ static inline struct timer_base *get_timer_this_cpu_base(u32 tflags)
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
 
 	/*
-	 * If the timer is deferrable and nohz is active then we need to use
-	 * the deferrable base.
+	 * If the timer is deferrable and NO_HZ_COMMON is set then we need
+	 * to use the deferrable base.
 	 */
-	if (IS_ENABLED(CONFIG_NO_HZ_COMMON) && base->nohz_active &&
-	    (tflags & TIMER_DEFERRABLE))
+	if (IS_ENABLED(CONFIG_NO_HZ_COMMON) && (tflags & TIMER_DEFERRABLE))
 		base = this_cpu_ptr(&timer_bases[BASE_DEF]);
 	return base;
 }
@@ -856,13 +890,19 @@ get_target_base(struct timer_base *base, unsigned tflags)
 
 static inline void forward_timer_base(struct timer_base *base)
 {
-	unsigned long jnow = READ_ONCE(jiffies);
+	unsigned long jnow;
 
 	/*
-	 * We only forward the base when it's idle and we have a delta between
-	 * base clock and jiffies.
+	 * We only forward the base when we are idle or have just come out of
+	 * idle (must_forward_clk logic), and have a delta between base clock
+	 * and jiffies. In the common case, run_timers will take care of it.
 	 */
-	if (!base->is_idle || (long) (jnow - base->clk) < 2)
+	if (likely(!base->must_forward_clk))
+		return;
+
+	jnow = READ_ONCE(jiffies);
+	base->must_forward_clk = base->is_idle;
+	if ((long)(jnow - base->clk) < 2)
 		return;
 
 	/*
@@ -938,6 +978,11 @@ __mod_timer(struct timer_list *timer, unsigned long expires, bool pending_only)
 	 * same array bucket then just return:
 	 */
 	if (timer_pending(timer)) {
+		/*
+		 * The downside of this optimization is that it can result in
+		 * larger granularity than you would get from adding a new
+		 * timer with this expiry.
+		 */
 		if (timer->expires == expires)
 			return 1;
 
@@ -948,6 +993,7 @@ __mod_timer(struct timer_list *timer, unsigned long expires, bool pending_only)
 		 * dequeue/enqueue dance.
 		 */
 		base = lock_timer_base(timer, &flags);
+		forward_timer_base(base);
 
 		clk = base->clk;
 		idx = calc_wheel_index(expires, clk);
@@ -964,13 +1010,14 @@ __mod_timer(struct timer_list *timer, unsigned long expires, bool pending_only)
 		}
 	} else {
 		base = lock_timer_base(timer, &flags);
+		forward_timer_base(base);
 	}
+
+	timer_stats_timer_set_start_info(timer);
 
 	ret = detach_if_pending(timer, base, false);
 	if (!ret && pending_only)
 		goto out_unlock;
-
-	debug_activate(timer, expires);
 
 	new_base = get_target_base(base, timer->flags);
 
@@ -991,11 +1038,11 @@ __mod_timer(struct timer_list *timer, unsigned long expires, bool pending_only)
 			spin_lock(&base->lock);
 			WRITE_ONCE(timer->flags,
 				   (timer->flags & ~TIMER_BASEMASK) | base->cpu);
+			forward_timer_base(base);
 		}
 	}
 
-	/* Try to forward a stale timer base clock */
-	forward_timer_base(base);
+	debug_activate(timer, expires);
 
 	timer->expires = expires;
 	/*
@@ -1093,6 +1140,7 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	struct timer_base *new_base, *base;
 	unsigned long flags;
 
+	timer_stats_timer_set_start_info(timer);
 	BUG_ON(timer_pending(timer) || !timer->function);
 
 	new_base = get_timer_cpu_base(timer->flags, cpu);
@@ -1112,6 +1160,7 @@ void add_timer_on(struct timer_list *timer, int cpu)
 		WRITE_ONCE(timer->flags,
 			   (timer->flags & ~TIMER_BASEMASK) | cpu);
 	}
+	forward_timer_base(base);
 
 	debug_activate(timer, timer->expires);
 	internal_add_timer(base, timer);
@@ -1138,6 +1187,7 @@ int del_timer(struct timer_list *timer)
 
 	debug_assert_init(timer);
 
+	timer_stats_timer_clear_start_info(timer);
 	if (timer_pending(timer)) {
 		base = lock_timer_base(timer, &flags);
 		ret = detach_if_pending(timer, base, true);
@@ -1165,9 +1215,10 @@ int try_to_del_timer_sync(struct timer_list *timer)
 
 	base = lock_timer_base(timer, &flags);
 
-	if (base->running_timer != timer)
+	if (base->running_timer != timer) {
+		timer_stats_timer_clear_start_info(timer);
 		ret = detach_if_pending(timer, base, true);
-
+	}
 	spin_unlock_irqrestore(&base->lock, flags);
 
 	return ret;
@@ -1291,6 +1342,7 @@ static void expire_timers(struct timer_base *base, struct hlist_head *head)
 		unsigned long data;
 
 		timer = hlist_entry(head->first, struct timer_list, entry);
+		timer_stats_account_timer(timer);
 
 		base->running_timer = timer;
 		detach_timer(timer, true);
@@ -1495,12 +1547,18 @@ u64 get_next_timer_interrupt(unsigned long basej, u64 basem)
 		base->is_idle = false;
 	} else {
 		if (!is_max_delta)
-			expires = basem + (nextevt - basej) * TICK_NSEC;
+			expires = basem + (u64)(nextevt - basej) * TICK_NSEC;
 		/*
-		 * If we expect to sleep more than a tick, mark the base idle:
+		 * If we expect to sleep more than a tick, mark the base idle.
+		 * Also the tick is stopped so any added timer must forward
+		 * the base clk itself to keep granularity small. This idle
+		 * logic is only maintained for the BASE_STD base, deferrable
+		 * timers may still see large granularity skew (by design).
 		 */
-		if ((expires - basem) > TICK_NSEC)
+		if ((expires - basem) > TICK_NSEC) {
+			base->must_forward_clk = true;
 			base->is_idle = true;
+		}
 	}
 	spin_unlock(&base->lock);
 
@@ -1574,8 +1632,7 @@ void update_process_times(int user_tick)
 		irq_work_tick();
 #endif
 	scheduler_tick();
-	if (IS_ENABLED(CONFIG_POSIX_TIMERS))
-		run_posix_cpu_timers(p);
+	run_posix_cpu_timers(p);
 }
 
 /**
@@ -1611,8 +1668,21 @@ static __latent_entropy void run_timer_softirq(struct softirq_action *h)
 {
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
 
+	/*
+	 * must_forward_clk must be cleared before running timers so that any
+	 * timer functions that call mod_timer will not try to forward the
+	 * base. idle trcking / clock forwarding logic is only used with
+	 * BASE_STD timers.
+	 *
+	 * The deferrable base does not do idle tracking at all, so we do
+	 * not forward it. This can result in very large variations in
+	 * granularity for deferrable timers, but they can be deferred for
+	 * long periods due to idle.
+	 */
+	base->must_forward_clk = false;
+
 	__run_timers(base);
-	if (IS_ENABLED(CONFIG_NO_HZ_COMMON) && base->nohz_active)
+	if (IS_ENABLED(CONFIG_NO_HZ_COMMON))
 		__run_timers(this_cpu_ptr(&timer_bases[BASE_DEF]));
 }
 
@@ -1626,7 +1696,7 @@ void run_local_timers(void)
 	hrtimer_run_queues();
 	/* Raise the softirq only if required. */
 	if (time_before(jiffies, base->clk)) {
-		if (!IS_ENABLED(CONFIG_NO_HZ_COMMON) || !base->nohz_active)
+		if (!IS_ENABLED(CONFIG_NO_HZ_COMMON))
 			return;
 		/* CPU is awake, so check the deferrable base. */
 		base++;
@@ -1635,6 +1705,19 @@ void run_local_timers(void)
 	}
 	raise_softirq(TIMER_SOFTIRQ);
 }
+
+#ifdef __ARCH_WANT_SYS_ALARM
+
+/*
+ * For backwards compatibility?  This can be done in libc so Alpha
+ * and all newer ports shouldn't need it.
+ */
+SYSCALL_DEFINE1(alarm, unsigned int, seconds)
+{
+	return alarm_setitimer(seconds);
+}
+
+#endif
 
 static void process_timeout(unsigned long __data)
 {
@@ -1652,12 +1735,11 @@ static void process_timeout(unsigned long __data)
  * You can set the task state as follows -
  *
  * %TASK_UNINTERRUPTIBLE - at least @timeout jiffies are guaranteed to
- * pass before the routine returns unless the current task is explicitly
- * woken up, (e.g. by wake_up_process())".
+ * pass before the routine returns. The routine will return 0
  *
  * %TASK_INTERRUPTIBLE - the routine may return early if a signal is
- * delivered to the current task or the current task is explicitly woken
- * up.
+ * delivered to the current task. In this case the remaining time
+ * in jiffies will be returned, or 0 if the timer expired in time
  *
  * The current task state is guaranteed to be TASK_RUNNING when this
  * routine returns.
@@ -1666,9 +1748,7 @@ static void process_timeout(unsigned long __data)
  * the CPU away without a bound on the timeout. In this case the return
  * value will be %MAX_SCHEDULE_TIMEOUT.
  *
- * Returns 0 when the timer has expired otherwise the remaining time in
- * jiffies will be returned.  In all cases the return value is guaranteed
- * to be non-negative.
+ * In all cases the return value is guaranteed to be non-negative.
  */
 signed long __sched schedule_timeout(signed long timeout)
 {
@@ -1771,6 +1851,21 @@ static void migrate_timer_list(struct timer_base *new_base, struct hlist_head *h
 	}
 }
 
+int timers_prepare_cpu(unsigned int cpu)
+{
+	struct timer_base *base;
+	int b;
+
+	for (b = 0; b < NR_BASES; b++) {
+		base = per_cpu_ptr(&timer_bases[b], cpu);
+		base->clk = jiffies;
+		base->next_expiry = base->clk + NEXT_TIMER_MAX_DELTA;
+		base->is_idle = false;
+		base->must_forward_clk = true;
+	}
+	return 0;
+}
+
 int timers_dead_cpu(unsigned int cpu)
 {
 	struct timer_base *old_base;
@@ -1788,6 +1883,12 @@ int timers_dead_cpu(unsigned int cpu)
 		 */
 		spin_lock_irq(&new_base->lock);
 		spin_lock_nested(&old_base->lock, SINGLE_DEPTH_NESTING);
+
+		/*
+		 * The current CPUs base clock might be stale. Update it
+		 * before moving the timers over.
+		 */
+		forward_timer_base(new_base);
 
 		BUG_ON(old_base->running_timer);
 
@@ -1827,6 +1928,7 @@ static void __init init_timer_cpus(void)
 void __init init_timers(void)
 {
 	init_timer_cpus();
+	init_timer_stats();
 	open_softirq(TIMER_SOFTIRQ, run_timer_softirq);
 }
 
@@ -1859,6 +1961,16 @@ unsigned long msleep_interruptible(unsigned int msecs)
 
 EXPORT_SYMBOL(msleep_interruptible);
 
+static void __sched do_usleep_range(unsigned long min, unsigned long max)
+{
+	ktime_t kmin;
+	u64 delta;
+
+	kmin = ktime_set(0, min * NSEC_PER_USEC);
+	delta = (u64)(max - min) * NSEC_PER_USEC;
+	schedule_hrtimeout_range(&kmin, delta, HRTIMER_MODE_REL);
+}
+
 /**
  * usleep_range - Sleep for an approximate time
  * @min: Minimum time in usecs to sleep
@@ -1872,14 +1984,7 @@ EXPORT_SYMBOL(msleep_interruptible);
  */
 void __sched usleep_range(unsigned long min, unsigned long max)
 {
-	ktime_t exp = ktime_add_us(ktime_get(), min);
-	u64 delta = (u64)(max - min) * NSEC_PER_USEC;
-
-	for (;;) {
-		__set_current_state(TASK_UNINTERRUPTIBLE);
-		/* Do not return before the requested sleep time has elapsed */
-		if (!schedule_hrtimeout_range(&exp, delta, HRTIMER_MODE_ABS))
-			break;
-	}
+	__set_current_state(TASK_UNINTERRUPTIBLE);
+	do_usleep_range(min, max);
 }
 EXPORT_SYMBOL(usleep_range);

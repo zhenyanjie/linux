@@ -81,7 +81,7 @@ static struct rvt_mcast_qp *rvt_mcast_qp_alloc(struct rvt_qp *qp)
 		goto bail;
 
 	mqp->qp = qp;
-	rvt_get_qp(qp);
+	atomic_inc(&qp->refcount);
 
 bail:
 	return mqp;
@@ -92,7 +92,8 @@ static void rvt_mcast_qp_free(struct rvt_mcast_qp *mqp)
 	struct rvt_qp *qp = mqp->qp;
 
 	/* Notify hfi1_destroy_qp() if it is waiting. */
-	rvt_put_qp(qp);
+	if (atomic_dec_and_test(&qp->refcount))
+		wake_up(&qp->wait);
 
 	kfree(mqp);
 }

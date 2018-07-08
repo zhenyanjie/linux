@@ -100,7 +100,6 @@ struct regulator_linear_range {
  *
  * @set_mode: Set the configured operating mode for the regulator.
  * @get_mode: Get the configured operating mode for the regulator.
- * @get_error_flags: Get the current error(s) for the regulator.
  * @get_status: Return actual (not as-configured) status of regulator, as a
  *	REGULATOR_STATUS value (or negative errno)
  * @get_optimum_mode: Get the most efficient operating mode for the regulator
@@ -169,9 +168,6 @@ struct regulator_ops {
 	/* get/set regulator operating mode (defined in consumer.h) */
 	int (*set_mode) (struct regulator_dev *, unsigned int mode);
 	unsigned int (*get_mode) (struct regulator_dev *);
-
-	/* retrieve current error flags on the regulator */
-	int (*get_error_flags)(struct regulator_dev *, unsigned int *flags);
 
 	/* Time taken to enable or set voltage on the regulator */
 	int (*enable_time) (struct regulator_dev *);
@@ -428,6 +424,8 @@ struct regulator_dev {
 
 	struct regulator_enable_gpio *ena_pin;
 	unsigned int ena_gpio_state:1;
+
+	unsigned int is_switch:1;
 
 	/* time when this regulator was disabled last time */
 	unsigned long last_off_jiffy;

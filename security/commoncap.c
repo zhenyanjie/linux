@@ -548,10 +548,9 @@ skip:
 
 	if ((is_setid ||
 	     !cap_issubset(new->cap_permitted, old->cap_permitted)) &&
-	    ((bprm->unsafe & ~LSM_UNSAFE_PTRACE) ||
-	     !ptracer_capable(current, new->user_ns))) {
+	    bprm->unsafe & ~LSM_UNSAFE_PTRACE_CAP) {
 		/* downgrade; they get no more than they had, and maybe less */
-		if (!ns_capable(new->user_ns, CAP_SETUID) ||
+		if (!capable(CAP_SETUID) ||
 		    (bprm->unsafe & LSM_UNSAFE_NO_NEW_PRIVS)) {
 			new->euid = new->uid;
 			new->egid = new->gid;
@@ -1094,8 +1093,7 @@ struct security_hook_list capability_hooks[] = {
 
 void __init capability_add_hooks(void)
 {
-	security_add_hooks(capability_hooks, ARRAY_SIZE(capability_hooks),
-				"capability");
+	security_add_hooks(capability_hooks, ARRAY_SIZE(capability_hooks));
 }
 
 #endif /* CONFIG_SECURITY */

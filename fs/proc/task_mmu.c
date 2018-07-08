@@ -11,14 +11,13 @@
 #include <linux/mempolicy.h>
 #include <linux/rmap.h>
 #include <linux/swap.h>
-#include <linux/sched/mm.h>
 #include <linux/swapops.h>
 #include <linux/mmu_notifier.h>
 #include <linux/page_idle.h>
 #include <linux/shmem_fs.h>
 
 #include <asm/elf.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/tlbflush.h>
 #include "internal.h"
 
@@ -168,7 +167,7 @@ static void *m_start(struct seq_file *m, loff_t *ppos)
 		return ERR_PTR(-ESRCH);
 
 	mm = priv->mm;
-	if (!mm || !mmget_not_zero(mm))
+	if (!mm || !atomic_inc_not_zero(&mm->mm_users))
 		return NULL;
 
 	down_read(&mm->mmap_sem);
@@ -1356,7 +1355,7 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 	unsigned long end_vaddr;
 	int ret = 0, copied = 0;
 
-	if (!mm || !mmget_not_zero(mm))
+	if (!mm || !atomic_inc_not_zero(&mm->mm_users))
 		goto out;
 
 	ret = -EINVAL;
@@ -1592,7 +1591,6 @@ static int gather_pte_stats(pmd_t *pmd, unsigned long addr,
 
 	} while (pte++, addr += PAGE_SIZE, addr != end);
 	pte_unmap_unlock(orig_pte, ptl);
-	cond_resched();
 	return 0;
 }
 #ifdef CONFIG_HUGETLB_PAGE

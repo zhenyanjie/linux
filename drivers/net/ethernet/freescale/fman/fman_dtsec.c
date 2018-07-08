@@ -337,7 +337,7 @@ struct fman_mac {
 	u8 mac_id;
 	u32 exceptions;
 	bool ptp_tsu_enabled;
-	bool en_tsu_err_exception;
+	bool en_tsu_err_exeption;
 	struct dtsec_cfg *dtsec_drv_param;
 	void *fm;
 	struct fman_rev_info fm_rev_info;
@@ -1036,7 +1036,7 @@ int dtsec_add_hash_mac_address(struct fman_mac *dtsec, enet_addr_t *eth_addr)
 	set_bucket(dtsec->regs, bucket, true);
 
 	/* Create element to be added to the driver hash table */
-	hash_entry = kmalloc(sizeof(*hash_entry), GFP_KERNEL);
+	hash_entry = kmalloc(sizeof(*hash_entry), GFP_ATOMIC);
 	if (!hash_entry)
 		return -ENOMEM;
 	hash_entry->addr = addr;
@@ -1247,12 +1247,12 @@ int dtsec_set_exception(struct fman_mac *dtsec,
 		switch (exception) {
 		case FM_MAC_EX_1G_1588_TS_RX_ERR:
 			if (enable) {
-				dtsec->en_tsu_err_exception = true;
+				dtsec->en_tsu_err_exeption = true;
 				iowrite32be(ioread32be(&regs->tmr_pemask) |
 					    TMR_PEMASK_TSREEN,
 					    &regs->tmr_pemask);
 			} else {
-				dtsec->en_tsu_err_exception = false;
+				dtsec->en_tsu_err_exeption = false;
 				iowrite32be(ioread32be(&regs->tmr_pemask) &
 					    ~TMR_PEMASK_TSREEN,
 					    &regs->tmr_pemask);
@@ -1420,7 +1420,7 @@ struct fman_mac *dtsec_config(struct fman_mac_params *params)
 	dtsec->event_cb = params->event_cb;
 	dtsec->dev_id = params->dev_id;
 	dtsec->ptp_tsu_enabled = dtsec->dtsec_drv_param->ptp_tsu_en;
-	dtsec->en_tsu_err_exception = dtsec->dtsec_drv_param->ptp_exception_en;
+	dtsec->en_tsu_err_exeption = dtsec->dtsec_drv_param->ptp_exception_en;
 
 	dtsec->fm = params->fm;
 	dtsec->basex_if = params->basex_if;

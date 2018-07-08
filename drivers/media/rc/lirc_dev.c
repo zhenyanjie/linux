@@ -13,13 +13,17 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/errno.h>
 #include <linux/ioctl.h>
 #include <linux/fs.h>
@@ -146,6 +150,9 @@ static const struct file_operations lirc_dev_fops = {
 	.write		= lirc_dev_fop_write,
 	.poll		= lirc_dev_fop_poll,
 	.unlocked_ioctl	= lirc_dev_fop_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= lirc_dev_fop_ioctl,
+#endif
 	.open		= lirc_dev_fop_open,
 	.release	= lirc_dev_fop_close,
 	.llseek		= noop_llseek,
@@ -153,19 +160,19 @@ static const struct file_operations lirc_dev_fops = {
 
 static int lirc_cdev_add(struct irctl *ir)
 {
+	int retval = -ENOMEM;
 	struct lirc_driver *d = &ir->d;
 	struct cdev *cdev;
-	int retval;
 
-	cdev = cdev_alloc();
+	cdev = kzalloc(sizeof(*cdev), GFP_KERNEL);
 	if (!cdev)
-		return -ENOMEM;
+		goto err_out;
 
 	if (d->fops) {
-		cdev->ops = d->fops;
+		cdev_init(cdev, d->fops);
 		cdev->owner = d->owner;
 	} else {
-		cdev->ops = &lirc_dev_fops;
+		cdev_init(cdev, &lirc_dev_fops);
 		cdev->owner = THIS_MODULE;
 	}
 	retval = kobject_set_name(&cdev->kobj, "lirc%d", d->minor);
@@ -173,15 +180,17 @@ static int lirc_cdev_add(struct irctl *ir)
 		goto err_out;
 
 	retval = cdev_add(cdev, MKDEV(MAJOR(lirc_base_dev), d->minor), 1);
-	if (retval)
+	if (retval) {
+		kobject_put(&cdev->kobj);
 		goto err_out;
+	}
 
 	ir->cdev = cdev;
 
 	return 0;
 
 err_out:
-	cdev_del(cdev);
+	kfree(cdev);
 	return retval;
 }
 
@@ -411,6 +420,7 @@ int lirc_unregister_driver(int minor)
 	} else {
 		lirc_irctl_cleanup(ir);
 		cdev_del(cdev);
+		kfree(cdev);
 		kfree(ir);
 		irctls[minor] = NULL;
 	}
@@ -470,7 +480,7 @@ int lirc_dev_fop_open(struct inode *inode, struct file *file)
 		if (retval) {
 			module_put(cdev->owner);
 			ir->open--;
-		} else if (ir->buf) {
+		} else {
 			lirc_buffer_clear(ir->buf);
 		}
 		if (ir->task)
@@ -511,6 +521,7 @@ int lirc_dev_fop_close(struct inode *inode, struct file *file)
 		lirc_irctl_cleanup(ir);
 		cdev_del(cdev);
 		irctls[ir->d.minor] = NULL;
+		kfree(cdev);
 		kfree(ir);
 	}
 
@@ -647,9 +658,6 @@ ssize_t lirc_dev_fop_read(struct file *file,
 		return -ENODEV;
 	}
 
-	if (!LIRC_CAN_REC(ir->d.features))
-		return -EINVAL;
-
 	dev_dbg(ir->d.dev, LOGHEAD "read called\n", ir->d.name, ir->d.minor);
 
 	buf = kzalloc(ir->chunk_size, GFP_KERNEL);
@@ -676,6 +684,7 @@ ssize_t lirc_dev_fop_read(struct file *file,
 	 * between while condition checking and scheduling)
 	 */
 	add_wait_queue(&ir->buf->wait_poll, &wait);
+	set_current_state(TASK_INTERRUPTIBLE);
 
 	/*
 	 * while we didn't provide 'length' bytes, device is opened in blocking
@@ -700,19 +709,19 @@ ssize_t lirc_dev_fop_read(struct file *file,
 			}
 
 			mutex_unlock(&ir->irctl_lock);
-			set_current_state(TASK_INTERRUPTIBLE);
 			schedule();
-			set_current_state(TASK_RUNNING);
+			set_current_state(TASK_INTERRUPTIBLE);
 
 			if (mutex_lock_interruptible(&ir->irctl_lock)) {
 				ret = -ERESTARTSYS;
 				remove_wait_queue(&ir->buf->wait_poll, &wait);
+				set_current_state(TASK_RUNNING);
 				goto out_unlocked;
 			}
 
 			if (!ir->attached) {
 				ret = -ENODEV;
-				goto out_locked;
+				break;
 			}
 		} else {
 			lirc_buffer_read(ir->buf, buf);
@@ -726,6 +735,7 @@ ssize_t lirc_dev_fop_read(struct file *file,
 	}
 
 	remove_wait_queue(&ir->buf->wait_poll, &wait);
+	set_current_state(TASK_RUNNING);
 
 out_locked:
 	mutex_unlock(&ir->irctl_lock);

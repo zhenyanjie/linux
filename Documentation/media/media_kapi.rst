@@ -33,4 +33,3 @@ For more details see the file COPYING in the source distribution of Linux.
     kapi/rc-core
     kapi/mc-core
     kapi/cec-core
-    kapi/csi2

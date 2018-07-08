@@ -73,6 +73,7 @@
 #include <linux/types.h>
 
 static volatile int done;
+static volatile int resize;
 
 #define HEADER_LINE_NR  5
 
@@ -82,10 +83,13 @@ static void perf_top__update_print_entries(struct perf_top *top)
 }
 
 static void perf_top__sig_winch(int sig __maybe_unused,
-				siginfo_t *info __maybe_unused, void *arg)
+				siginfo_t *info __maybe_unused, void *arg __maybe_unused)
 {
-	struct perf_top *top = arg;
+	resize = 1;
+}
 
+static void perf_top__resize(struct perf_top *top)
+{
 	get_term_dimensions(&top->winsize);
 	perf_top__update_print_entries(top);
 }
@@ -130,7 +134,7 @@ static int perf_top__parse_source(struct perf_top *top, struct hist_entry *he)
 		return err;
 	}
 
-	err = symbol__disassemble(sym, map, NULL, 0);
+	err = symbol__disassemble(sym, map, 0);
 	if (err == 0) {
 out_assign:
 		top->sym_filter_entry = he;
@@ -472,7 +476,7 @@ static bool perf_top__handle_keypress(struct perf_top *top, int c)
 					.sa_sigaction = perf_top__sig_winch,
 					.sa_flags     = SA_SIGINFO,
 				};
-				perf_top__sig_winch(SIGWINCH, NULL, top);
+				perf_top__resize(top);
 				sigaction(SIGWINCH, &act, NULL);
 			} else {
 				signal(SIGWINCH, SIG_DFL);
@@ -859,7 +863,7 @@ static void perf_top__mmap_read(struct perf_top *top)
 
 static int perf_top__start_counters(struct perf_top *top)
 {
-	char msg[BUFSIZ];
+	char msg[512];
 	struct perf_evsel *counter;
 	struct perf_evlist *evlist = top->evlist;
 	struct record_opts *opts = &top->record_opts;
@@ -871,7 +875,7 @@ try_again:
 		if (perf_evsel__open(counter, top->evlist->cpus,
 				     top->evlist->threads) < 0) {
 			if (perf_evsel__fallback(counter, errno, msg, sizeof(msg))) {
-				if (verbose > 0)
+				if (verbose)
 					ui__warning("%s\n", msg);
 				goto try_again;
 			}
@@ -1003,6 +1007,11 @@ static int __cmd_top(struct perf_top *top)
 
 		if (hits == top->samples)
 			ret = perf_evlist__poll(top->evlist, 100);
+
+		if (resize) {
+			perf_top__resize(top);
+			resize = 0;
+		}
 	}
 
 	ret = 0;
@@ -1052,8 +1061,10 @@ parse_callchain_opt(const struct option *opt, const char *arg, int unset)
 
 static int perf_top_config(const char *var, const char *value, void *cb __maybe_unused)
 {
-	if (!strcmp(var, "top.call-graph"))
-		var = "call-graph.record-mode"; /* fall-through */
+	if (!strcmp(var, "top.call-graph")) {
+		var = "call-graph.record-mode";
+		return perf_default_config(var, value, cb);
+	}
 	if (!strcmp(var, "top.children")) {
 		symbol_conf.cumulate_callchain = perf_config_bool(var, value);
 		return 0;
@@ -1216,9 +1227,7 @@ int cmd_top(int argc, const char **argv, const char *prefix __maybe_unused)
 	if (top.evlist == NULL)
 		return -ENOMEM;
 
-	status = perf_config(perf_top_config, &top);
-	if (status)
-		return status;
+	perf_config(perf_top_config, &top);
 
 	argc = parse_options(argc, argv, options, top_usage, 0);
 	if (argc)

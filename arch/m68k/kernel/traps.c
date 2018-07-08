@@ -19,7 +19,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
 #include <linux/signal.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -33,7 +32,7 @@
 
 #include <asm/setup.h>
 #include <asm/fpu.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/traps.h>
 #include <asm/pgalloc.h>
 #include <asm/machdep.h>

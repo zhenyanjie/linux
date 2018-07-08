@@ -14,12 +14,9 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/module.h>
 #include <linux/random.h>
-#include <linux/rculist.h>
-
 #include "nvmet.h"
 
 static struct nvmet_fabrics_ops *nvmet_transports[NVMF_TRTYPE_MAX];
-static DEFINE_IDA(cntlid_ida);
 
 /*
  * This read/write semaphore is used to synchronize access to configuration
@@ -203,7 +200,7 @@ static void nvmet_keep_alive_timer(struct work_struct *work)
 	pr_err("ctrl %d keep-alive timer (%d seconds) expired!\n",
 		ctrl->cntlid, ctrl->kato);
 
-	nvmet_ctrl_fatal_error(ctrl);
+	ctrl->ops->delete_ctrl(ctrl);
 }
 
 static void nvmet_start_keep_alive_timer(struct nvmet_ctrl *ctrl)
@@ -494,9 +491,12 @@ bool nvmet_req_init(struct nvmet_req *req, struct nvmet_cq *cq,
 		goto fail;
 	}
 
-	/* either variant of SGLs is fine, as we don't support metadata */
-	if (unlikely((flags & NVME_CMD_SGL_ALL) != NVME_CMD_SGL_METABUF &&
-		     (flags & NVME_CMD_SGL_ALL) != NVME_CMD_SGL_METASEG)) {
+	/*
+	 * For fabrics, PSDT field shall describe metadata pointer (MPTR) that
+	 * contains an address of a single contiguous physical buffer that is
+	 * byte aligned.
+	 */
+	if (unlikely((flags & NVME_CMD_SGL_ALL) != NVME_CMD_SGL_METABUF)) {
 		status = NVME_SC_INVALID_FIELD | NVME_SC_DNR;
 		goto fail;
 	}
@@ -631,7 +631,7 @@ u16 nvmet_ctrl_find_get(const char *subsysnqn, const char *hostnqn, u16 cntlid,
 	if (!subsys) {
 		pr_warn("connect request for invalid subsystem %s!\n",
 			subsysnqn);
-		req->rsp->result.u32 = IPO_IATTR_CONNECT_DATA(subsysnqn);
+		req->rsp->result = IPO_IATTR_CONNECT_DATA(subsysnqn);
 		return NVME_SC_CONNECT_INVALID_PARAM | NVME_SC_DNR;
 	}
 
@@ -652,7 +652,7 @@ u16 nvmet_ctrl_find_get(const char *subsysnqn, const char *hostnqn, u16 cntlid,
 
 	pr_warn("could not find controller %d for subsys %s / host %s\n",
 		cntlid, subsysnqn, hostnqn);
-	req->rsp->result.u32 = IPO_IATTR_CONNECT_DATA(cntlid);
+	req->rsp->result = IPO_IATTR_CONNECT_DATA(cntlid);
 	status = NVME_SC_CONNECT_INVALID_PARAM | NVME_SC_DNR;
 
 out:
@@ -714,7 +714,7 @@ u16 nvmet_alloc_ctrl(const char *subsysnqn, const char *hostnqn,
 	if (!subsys) {
 		pr_warn("connect request for invalid subsystem %s!\n",
 			subsysnqn);
-		req->rsp->result.u32 = IPO_IATTR_CONNECT_DATA(subsysnqn);
+		req->rsp->result = IPO_IATTR_CONNECT_DATA(subsysnqn);
 		goto out;
 	}
 
@@ -723,7 +723,7 @@ u16 nvmet_alloc_ctrl(const char *subsysnqn, const char *hostnqn,
 	if (!nvmet_host_allowed(req, subsys, hostnqn)) {
 		pr_info("connect by host %s for subsystem %s not allowed\n",
 			hostnqn, subsysnqn);
-		req->rsp->result.u32 = IPO_IATTR_CONNECT_DATA(hostnqn);
+		req->rsp->result = IPO_IATTR_CONNECT_DATA(hostnqn);
 		up_read(&nvmet_config_sem);
 		goto out_put_subsystem;
 	}
@@ -743,9 +743,6 @@ u16 nvmet_alloc_ctrl(const char *subsysnqn, const char *hostnqn,
 	memcpy(ctrl->subsysnqn, subsysnqn, NVMF_NQN_SIZE);
 	memcpy(ctrl->hostnqn, hostnqn, NVMF_NQN_SIZE);
 
-	/* generate a random serial number as our controllers are ephemeral: */
-	get_random_bytes(&ctrl->serial, sizeof(ctrl->serial));
-
 	kref_init(&ctrl->ref);
 	ctrl->subsys = subsys;
 
@@ -761,7 +758,7 @@ u16 nvmet_alloc_ctrl(const char *subsysnqn, const char *hostnqn,
 	if (!ctrl->sqs)
 		goto out_free_cqs;
 
-	ret = ida_simple_get(&cntlid_ida,
+	ret = ida_simple_get(&subsys->cntlid_ida,
 			     NVME_CNTLID_MIN, NVME_CNTLID_MAX,
 			     GFP_KERNEL);
 	if (ret < 0) {
@@ -831,7 +828,7 @@ static void nvmet_ctrl_free(struct kref *ref)
 	flush_work(&ctrl->async_event_work);
 	cancel_work_sync(&ctrl->fatal_err_work);
 
-	ida_simple_remove(&cntlid_ida, ctrl->cntlid);
+	ida_simple_remove(&subsys->cntlid_ida, ctrl->cntlid);
 	nvmet_subsys_put(subsys);
 
 	kfree(ctrl->sqs);
@@ -904,6 +901,8 @@ struct nvmet_subsys *nvmet_subsys_alloc(const char *subsysnqn,
 		return NULL;
 
 	subsys->ver = NVME_VS(1, 2, 1); /* NVMe 1.2.1 */
+	/* generate a random serial number as our controllers are ephemeral: */
+	get_random_bytes(&subsys->serial, sizeof(subsys->serial));
 
 	switch (type) {
 	case NVME_NQN_NVME:
@@ -930,6 +929,9 @@ struct nvmet_subsys *nvmet_subsys_alloc(const char *subsysnqn,
 	mutex_init(&subsys->lock);
 	INIT_LIST_HEAD(&subsys->namespaces);
 	INIT_LIST_HEAD(&subsys->ctrls);
+
+	ida_init(&subsys->cntlid_ida);
+
 	INIT_LIST_HEAD(&subsys->hosts);
 
 	return subsys;
@@ -942,18 +944,9 @@ static void nvmet_subsys_free(struct kref *ref)
 
 	WARN_ON_ONCE(!list_empty(&subsys->namespaces));
 
+	ida_destroy(&subsys->cntlid_ida);
 	kfree(subsys->subsysnqn);
 	kfree(subsys);
-}
-
-void nvmet_subsys_del_ctrls(struct nvmet_subsys *subsys)
-{
-	struct nvmet_ctrl *ctrl;
-
-	mutex_lock(&subsys->lock);
-	list_for_each_entry(ctrl, &subsys->ctrls, subsys_entry)
-		ctrl->ops->delete_ctrl(ctrl);
-	mutex_unlock(&subsys->lock);
 }
 
 void nvmet_subsys_put(struct nvmet_subsys *subsys)
@@ -984,7 +977,6 @@ static void __exit nvmet_exit(void)
 {
 	nvmet_exit_configfs();
 	nvmet_exit_discovery();
-	ida_destroy(&cntlid_ida);
 
 	BUILD_BUG_ON(sizeof(struct nvmf_disc_rsp_page_entry) != 1024);
 	BUILD_BUG_ON(sizeof(struct nvmf_disc_rsp_page_hdr) != 1024);

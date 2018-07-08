@@ -55,7 +55,7 @@ typedef __u32			xfs_nlink_t;
 #include <linux/file.h>
 #include <linux/swap.h>
 #include <linux/errno.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/bitops.h>
 #include <linux/major.h>
 #include <linux/pagemap.h>
@@ -78,12 +78,11 @@ typedef __u32			xfs_nlink_t;
 #include <linux/freezer.h>
 #include <linux/list_sort.h>
 #include <linux/ratelimit.h>
-#include <linux/rhashtable.h>
 
 #include <asm/page.h>
 #include <asm/div64.h>
 #include <asm/param.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/byteorder.h>
 #include <asm/unaligned.h>
 
@@ -364,7 +363,14 @@ static inline __uint64_t howmany_64(__uint64_t x, __uint32_t y)
 #endif /* DEBUG */
 
 #ifdef CONFIG_XFS_RT
-#define XFS_IS_REALTIME_INODE(ip) ((ip)->i_d.di_flags & XFS_DIFLAG_REALTIME)
+
+/*
+ * make sure we ignore the inode flag if the filesystem doesn't have a
+ * configured realtime device.
+ */
+#define XFS_IS_REALTIME_INODE(ip)			\
+	(((ip)->i_d.di_flags & XFS_DIFLAG_REALTIME) &&	\
+	 (ip)->i_mount->m_rtdev_targp)
 #else
 #define XFS_IS_REALTIME_INODE(ip) (0)
 #endif

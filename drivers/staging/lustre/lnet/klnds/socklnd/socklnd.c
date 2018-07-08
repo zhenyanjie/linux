@@ -96,8 +96,7 @@ ksocknal_destroy_route(struct ksock_route *route)
 }
 
 static int
-ksocknal_create_peer(struct ksock_peer **peerp, lnet_ni_t *ni,
-		     lnet_process_id_t id)
+ksocknal_create_peer(struct ksock_peer **peerp, lnet_ni_t *ni, lnet_process_id_t id)
 {
 	int cpt = lnet_cpt_of_nid(id.nid);
 	struct ksock_net *net = ni->ni_data;
@@ -320,8 +319,7 @@ ksocknal_get_peer_info(lnet_ni_t *ni, int index,
 }
 
 static void
-ksocknal_associate_route_conn_locked(struct ksock_route *route,
-				     struct ksock_conn *conn)
+ksocknal_associate_route_conn_locked(struct ksock_route *route, struct ksock_conn *conn)
 {
 	struct ksock_peer *peer = route->ksnr_peer;
 	int type = conn->ksnc_type;
@@ -823,8 +821,7 @@ ksocknal_select_ips(struct ksock_peer *peer, __u32 *peerips, int n_peerips)
 				if (k < peer->ksnp_n_passive_ips) /* using it already */
 					continue;
 
-				k = ksocknal_match_peerip(iface, peerips,
-							  n_peerips);
+				k = ksocknal_match_peerip(iface, peerips, n_peerips);
 				xor = ip ^ peerips[k];
 				this_netmatch = !(xor & iface->ksni_netmask) ? 1 : 0;
 
@@ -1108,12 +1105,12 @@ ksocknal_create_conn(lnet_ni_t *ni, struct ksock_route *route,
 		write_unlock_bh(global_lock);
 
 		if (!conn->ksnc_proto) {
-			conn->ksnc_proto = &ksocknal_protocol_v3x;
+			 conn->ksnc_proto = &ksocknal_protocol_v3x;
 #if SOCKNAL_VERSION_DEBUG
-			if (*ksocknal_tunables.ksnd_protocol == 2)
-				conn->ksnc_proto = &ksocknal_protocol_v2x;
-			else if (*ksocknal_tunables.ksnd_protocol == 1)
-				conn->ksnc_proto = &ksocknal_protocol_v1x;
+			 if (*ksocknal_tunables.ksnd_protocol == 2)
+				 conn->ksnc_proto = &ksocknal_protocol_v2x;
+			 else if (*ksocknal_tunables.ksnd_protocol == 1)
+				 conn->ksnc_proto = &ksocknal_protocol_v1x;
 #endif
 		}
 
@@ -1305,11 +1302,8 @@ ksocknal_create_conn(lnet_ni_t *ni, struct ksock_route *route,
 
 	/* Take packets blocking for this connection. */
 	list_for_each_entry_safe(tx, txtmp, &peer->ksnp_tx_queue, tx_list) {
-		int match = conn->ksnc_proto->pro_match_tx(conn, tx,
-							   tx->tx_nonblk);
-
-		if (match == SOCKNAL_MATCH_NO)
-			continue;
+		if (conn->ksnc_proto->pro_match_tx(conn, tx, tx->tx_nonblk) == SOCKNAL_MATCH_NO)
+				continue;
 
 		list_del(&tx->tx_list);
 		ksocknal_queue_tx_locked(tx, conn);
@@ -1499,8 +1493,8 @@ ksocknal_close_conn_locked(struct ksock_conn *conn, int error)
 			spin_unlock_bh(&conn->ksnc_scheduler->kss_lock);
 		}
 
-		peer->ksnp_proto = NULL;  /* renegotiate protocol version */
-		peer->ksnp_error = error; /* stash last conn close reason */
+		peer->ksnp_proto = NULL;	/* renegotiate protocol version */
+		peer->ksnp_error = error;       /* stash last conn close reason */
 
 		if (list_empty(&peer->ksnp_routes)) {
 			/*
@@ -1792,8 +1786,7 @@ ksocknal_close_matching_conns(lnet_process_id_t id, __u32 ipaddr)
 			      (id.pid == LNET_PID_ANY || id.pid == peer->ksnp_id.pid)))
 				continue;
 
-			count += ksocknal_close_peer_conns_locked(peer, ipaddr,
-								  0);
+			count += ksocknal_close_peer_conns_locked(peer, ipaddr, 0);
 		}
 	}
 
@@ -2033,10 +2026,7 @@ ksocknal_add_interface(lnet_ni_t *ni, __u32 ipaddress, __u32 netmask)
 		}
 
 		rc = 0;
-		/*
-		 * NB only new connections will pay attention to the
-		 * new interface!
-		 */
+		/* NB only new connections will pay attention to the new interface! */
 	}
 
 	write_unlock_bh(&ksocknal_data.ksnd_global_lock);
@@ -2210,9 +2200,8 @@ ksocknal_ctl(lnet_ni_t *ni, unsigned int cmd, void *arg)
 		int txmem;
 		int rxmem;
 		int nagle;
-		struct ksock_conn *conn;
+		struct ksock_conn *conn = ksocknal_get_conn_by_idx(ni, data->ioc_count);
 
-		conn = ksocknal_get_conn_by_idx(ni, data->ioc_count);
 		if (!conn)
 			return -ENOENT;
 
@@ -2507,7 +2496,7 @@ ksocknal_base_startup(void)
 
 		snprintf(name, sizeof(name), "socknal_cd%02d", i);
 		rc = ksocknal_thread_start(ksocknal_connd,
-					   (void *)((uintptr_t)i), name);
+					   (void *)((ulong_ptr_t)i), name);
 		if (rc) {
 			spin_lock_bh(&ksocknal_data.ksnd_connd_lock);
 			ksocknal_data.ksnd_connd_starting--;
@@ -2904,8 +2893,8 @@ static int __init ksocklnd_init(void)
 	int rc;
 
 	/* check ksnr_connected/connecting field large enough */
-	BUILD_BUG_ON(SOCKLND_CONN_NTYPES > 4);
-	BUILD_BUG_ON(SOCKLND_CONN_ACK != SOCKLND_CONN_BULK_IN);
+	CLASSERT(SOCKLND_CONN_NTYPES <= 4);
+	CLASSERT(SOCKLND_CONN_ACK == SOCKLND_CONN_BULK_IN);
 
 	/* initialize the_ksocklnd */
 	the_ksocklnd.lnd_type     = SOCKLND;

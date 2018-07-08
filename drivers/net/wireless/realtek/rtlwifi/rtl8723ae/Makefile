@@ -14,3 +14,5 @@ rtl8723ae-objs :=		\
 
 
 obj-$(CONFIG_RTL8723AE) += rtl8723ae.o
+
+ccflags-y += -D__CHECK_ENDIAN__

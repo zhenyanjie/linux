@@ -147,7 +147,7 @@ extern void		    audit_log_d_path(struct audit_buffer *ab,
 extern void		    audit_log_key(struct audit_buffer *ab,
 					  char *key);
 extern void		    audit_log_link_denied(const char *operation,
-						  const struct path *link);
+						  struct path *link);
 extern void		    audit_log_lost(const char *message);
 #ifdef CONFIG_SECURITY
 extern void 		    audit_log_secctx(struct audit_buffer *ab, u32 secid);
@@ -360,7 +360,6 @@ extern int __audit_log_bprm_fcaps(struct linux_binprm *bprm,
 				  const struct cred *old);
 extern void __audit_log_capset(const struct cred *new, const struct cred *old);
 extern void __audit_mmap_fd(int fd, int flags);
-extern void __audit_log_kern_module(char *name);
 
 static inline void audit_ipc_obj(struct kern_ipc_perm *ipcp)
 {
@@ -449,12 +448,6 @@ static inline void audit_mmap_fd(int fd, int flags)
 {
 	if (unlikely(!audit_dummy_context()))
 		__audit_mmap_fd(fd, flags);
-}
-
-static inline void audit_log_kern_module(char *name)
-{
-	if (!audit_dummy_context())
-		__audit_log_kern_module(name);
 }
 
 extern int audit_n_rules;
@@ -568,11 +561,6 @@ static inline void audit_log_capset(const struct cred *new,
 { }
 static inline void audit_mmap_fd(int fd, int flags)
 { }
-
-static inline void audit_log_kern_module(char *name)
-{
-}
-
 static inline void audit_ptrace(struct task_struct *t)
 { }
 #define audit_n_rules 0

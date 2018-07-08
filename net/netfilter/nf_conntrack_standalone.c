@@ -452,9 +452,6 @@ static int log_invalid_proto_max __read_mostly = 255;
 /* size the user *wants to set */
 static unsigned int nf_conntrack_htable_size_user __read_mostly;
 
-extern unsigned int nf_conntrack_default_on;
-unsigned int nf_conntrack_default_on __read_mostly = 1;
-
 static int
 nf_conntrack_hash_sysctl(struct ctl_table *table, int write,
 			 void __user *buffer, size_t *lenp, loff_t *ppos)
@@ -517,13 +514,6 @@ static struct ctl_table nf_ct_sysctl_table[] = {
 		.procname	= "nf_conntrack_expect_max",
 		.data		= &nf_ct_expect_max,
 		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "nf_conntrack_default_on",
-		.data		= &nf_conntrack_default_on,
-		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
@@ -641,9 +631,6 @@ static int __init nf_conntrack_standalone_init(void)
 	int ret = nf_conntrack_init_start();
 	if (ret < 0)
 		goto out_start;
-
-	BUILD_BUG_ON(SKB_NFCT_PTRMASK != NFCT_PTRMASK);
-	BUILD_BUG_ON(NFCT_INFOMASK <= IP_CT_NUMBER);
 
 #ifdef CONFIG_SYSCTL
 	nf_ct_netfilter_header =

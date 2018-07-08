@@ -94,43 +94,6 @@ static int pmu_format(const char *name, struct list_head *format)
 	return 0;
 }
 
-static int convert_scale(const char *scale, char **end, double *sval)
-{
-	char *lc;
-	int ret = 0;
-
-	/*
-	 * save current locale
-	 */
-	lc = setlocale(LC_NUMERIC, NULL);
-
-	/*
-	 * The lc string may be allocated in static storage,
-	 * so get a dynamic copy to make it survive setlocale
-	 * call below.
-	 */
-	lc = strdup(lc);
-	if (!lc) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	/*
-	 * force to C locale to ensure kernel
-	 * scale string is converted correctly.
-	 * kernel uses default C locale.
-	 */
-	setlocale(LC_NUMERIC, "C");
-
-	*sval = strtod(scale, end);
-
-out:
-	/* restore locale */
-	setlocale(LC_NUMERIC, lc);
-	free(lc);
-	return ret;
-}
-
 static int perf_pmu__parse_scale(struct perf_pmu_alias *alias, char *dir, char *name)
 {
 	struct stat st;
@@ -138,6 +101,7 @@ static int perf_pmu__parse_scale(struct perf_pmu_alias *alias, char *dir, char *
 	char scale[128];
 	int fd, ret = -1;
 	char path[PATH_MAX];
+	char *lc;
 
 	snprintf(path, PATH_MAX, "%s/%s.scale", dir, name);
 
@@ -157,7 +121,37 @@ static int perf_pmu__parse_scale(struct perf_pmu_alias *alias, char *dir, char *
 	else
 		scale[sret] = '\0';
 
-	ret = convert_scale(scale, NULL, &alias->scale);
+	/*
+	 * save current locale
+	 */
+	lc = setlocale(LC_NUMERIC, NULL);
+
+	/*
+	 * The lc string may be allocated in static storage,
+	 * so get a dynamic copy to make it survive setlocale
+	 * call below.
+	 */
+	lc = strdup(lc);
+	if (!lc) {
+		ret = -ENOMEM;
+		goto error;
+	}
+
+	/*
+	 * force to C locale to ensure kernel
+	 * scale string is converted correctly.
+	 * kernel uses default C locale.
+	 */
+	setlocale(LC_NUMERIC, "C");
+
+	alias->scale = strtod(scale, NULL);
+
+	/* restore locale */
+	setlocale(LC_NUMERIC, lc);
+
+	free(lc);
+
+	ret = 0;
 error:
 	close(fd);
 	return ret;
@@ -229,13 +223,11 @@ static int perf_pmu__parse_snapshot(struct perf_pmu_alias *alias,
 }
 
 static int __perf_pmu__new_alias(struct list_head *list, char *dir, char *name,
-				 char *desc, char *val,
-				 char *long_desc, char *topic,
-				 char *unit, char *perpkg)
+				 char *desc, char *val, char *long_desc,
+				 char *topic)
 {
 	struct perf_pmu_alias *alias;
 	int ret;
-	int num;
 
 	alias = malloc(sizeof(*alias));
 	if (!alias)
@@ -269,13 +261,6 @@ static int __perf_pmu__new_alias(struct list_head *list, char *dir, char *name,
 	alias->long_desc = long_desc ? strdup(long_desc) :
 				desc ? strdup(desc) : NULL;
 	alias->topic = topic ? strdup(topic) : NULL;
-	if (unit) {
-		if (convert_scale(unit, &unit, &alias->scale) < 0)
-			return -1;
-		snprintf(alias->unit, sizeof(alias->unit), "%s", unit);
-	}
-	alias->per_pkg = perpkg && sscanf(perpkg, "%d", &num) == 1 && num == 1;
-	alias->str = strdup(val);
 
 	list_add_tail(&alias->list, list);
 
@@ -293,8 +278,7 @@ static int perf_pmu__new_alias(struct list_head *list, char *dir, char *name, FI
 
 	buf[ret] = 0;
 
-	return __perf_pmu__new_alias(list, dir, name, NULL, buf, NULL, NULL, NULL,
-				     NULL);
+	return __perf_pmu__new_alias(list, dir, name, NULL, buf, NULL, NULL);
 }
 
 static inline bool pmu_alias_info_file(char *name)
@@ -514,13 +498,12 @@ char * __weak get_cpuid_str(void)
  * to the current running CPU. Then, add all PMU events from that table
  * as aliases.
  */
-static void pmu_add_cpu_aliases(struct list_head *head, const char *name)
+static void pmu_add_cpu_aliases(struct list_head *head)
 {
 	int i;
 	struct pmu_events_map *map;
 	struct pmu_event *pe;
 	char *cpuid;
-	static bool printed;
 
 	cpuid = getenv("PERF_CPUID");
 	if (cpuid)
@@ -530,10 +513,7 @@ static void pmu_add_cpu_aliases(struct list_head *head, const char *name)
 	if (!cpuid)
 		return;
 
-	if (!printed) {
-		pr_debug("Using CPUID %s\n", cpuid);
-		printed = true;
-	}
+	pr_debug("Using CPUID %s\n", cpuid);
 
 	i = 0;
 	while (1) {
@@ -550,21 +530,14 @@ static void pmu_add_cpu_aliases(struct list_head *head, const char *name)
 	 */
 	i = 0;
 	while (1) {
-		const char *pname;
-
 		pe = &map->table[i++];
 		if (!pe->name)
 			break;
 
-		pname = pe->pmu ? pe->pmu : "cpu";
-		if (strncmp(pname, name, strlen(pname)))
-			continue;
-
 		/* need type casts to override 'const' */
 		__perf_pmu__new_alias(head, NULL, (char *)pe->name,
 				(char *)pe->desc, (char *)pe->event,
-				(char *)pe->long_desc, (char *)pe->topic,
-				(char *)pe->unit, (char *)pe->perpkg);
+				(char *)pe->long_desc, (char *)pe->topic);
 	}
 
 out:
@@ -592,16 +565,15 @@ static struct perf_pmu *pmu_lookup(const char *name)
 	if (pmu_format(name, &format))
 		return NULL;
 
-	/*
-	 * Check the type first to avoid unnecessary work.
-	 */
-	if (pmu_type(name, &type))
-		return NULL;
-
 	if (pmu_aliases(name, &aliases))
 		return NULL;
 
-	pmu_add_cpu_aliases(&aliases, name);
+	if (!strcmp(name, "cpu"))
+		pmu_add_cpu_aliases(&aliases);
+
+	if (pmu_type(name, &type))
+		return NULL;
+
 	pmu = zalloc(sizeof(*pmu));
 	if (!pmu)
 		return NULL;
@@ -745,7 +717,7 @@ static int pmu_resolve_param_term(struct parse_events_term *term,
 		}
 	}
 
-	if (verbose > 0)
+	if (verbose)
 		printf("Required parameter '%s' not specified\n", term->config);
 
 	return -1;
@@ -803,7 +775,7 @@ static int pmu_config_term(struct list_head *formats,
 
 	format = pmu_find_format(formats, term->config);
 	if (!format) {
-		if (verbose > 0)
+		if (verbose)
 			printf("Invalid event/parameter '%s'\n", term->config);
 		if (err) {
 			char *pmu_term = pmu_formats_string(formats);
@@ -834,20 +806,11 @@ static int pmu_config_term(struct list_head *formats,
 	 * Either directly use a numeric term, or try to translate string terms
 	 * using event parameters.
 	 */
-	if (term->type_val == PARSE_EVENTS__TERM_TYPE_NUM) {
-		if (term->no_value &&
-		    bitmap_weight(format->bits, PERF_PMU_FORMAT_BITS) > 1) {
-			if (err) {
-				err->idx = term->err_val;
-				err->str = strdup("no value assigned for term");
-			}
-			return -EINVAL;
-		}
-
+	if (term->type_val == PARSE_EVENTS__TERM_TYPE_NUM)
 		val = term->val.num;
-	} else if (term->type_val == PARSE_EVENTS__TERM_TYPE_STR) {
+	else if (term->type_val == PARSE_EVENTS__TERM_TYPE_STR) {
 		if (strcmp(term->val.str, "?")) {
-			if (verbose > 0) {
+			if (verbose) {
 				pr_info("Invalid sysfs entry %s=%s\n",
 						term->config, term->val.str);
 			}
@@ -954,12 +917,12 @@ static int check_info_data(struct perf_pmu_alias *alias,
 	 * define unit, scale and snapshot, fail
 	 * if there's more than one.
 	 */
-	if ((info->unit && alias->unit[0]) ||
+	if ((info->unit && alias->unit) ||
 	    (info->scale && alias->scale) ||
 	    (info->snapshot && alias->snapshot))
 		return -EINVAL;
 
-	if (alias->unit[0])
+	if (alias->unit)
 		info->unit = alias->unit;
 
 	if (alias->scale)
@@ -1098,8 +1061,6 @@ struct sevent {
 	char *name;
 	char *desc;
 	char *topic;
-	char *str;
-	char *pmu;
 };
 
 static int cmp_sevent(const void *a, const void *b)
@@ -1174,11 +1135,9 @@ void print_pmu_events(const char *event_glob, bool name_only, bool quiet_flag,
 			bool is_cpu = !strcmp(pmu->name, "cpu");
 
 			if (event_glob != NULL &&
-			    !(strglobmatch_nocase(name, event_glob) ||
-			      (!is_cpu && strglobmatch_nocase(alias->name,
-						       event_glob)) ||
-			      (alias->topic &&
-			       strglobmatch_nocase(alias->topic, event_glob))))
+			    !(strglobmatch(name, event_glob) ||
+			      (!is_cpu && strglobmatch(alias->name,
+						       event_glob))))
 				continue;
 
 			if (is_cpu && !name_only && !alias->desc)
@@ -1196,8 +1155,6 @@ void print_pmu_events(const char *event_glob, bool name_only, bool quiet_flag,
 			aliases[j].desc = long_desc ? alias->long_desc :
 						alias->desc;
 			aliases[j].topic = alias->topic;
-			aliases[j].str = alias->str;
-			aliases[j].pmu = pmu->name;
 			j++;
 		}
 		if (pmu->selectable &&
@@ -1212,9 +1169,6 @@ void print_pmu_events(const char *event_glob, bool name_only, bool quiet_flag,
 	len = j;
 	qsort(aliases, len, sizeof(struct sevent), cmp_sevent);
 	for (j = 0; j < len; j++) {
-		/* Skip duplicates */
-		if (j > 0 && !strcmp(aliases[j].name, aliases[j - 1].name))
-			continue;
 		if (name_only) {
 			printf("%s ", aliases[j].name);
 			continue;
@@ -1232,8 +1186,6 @@ void print_pmu_events(const char *event_glob, bool name_only, bool quiet_flag,
 			printf("%*s", 8, "[");
 			wordwrap(aliases[j].desc, 8, columns, 0);
 			printf("]\n");
-			if (verbose > 0)
-				printf("%*s%s/%s/\n", 8, "", aliases[j].pmu, aliases[j].str);
 		} else
 			printf("  %-50s [Kernel PMU event]\n", aliases[j].name);
 		printed++;

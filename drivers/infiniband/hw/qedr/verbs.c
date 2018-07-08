@@ -238,8 +238,8 @@ int qedr_query_port(struct ib_device *ibdev, u8 port, struct ib_port_attr *attr)
 	}
 
 	rdma_port = dev->ops->rdma_query_port(dev->rdma_ctx);
+	memset(attr, 0, sizeof(*attr));
 
-	/* *attr being zeroed by the caller, avoid zeroing it here */
 	if (rdma_port->port_state == QED_RDMA_PORT_UP) {
 		attr->state = IB_PORT_ACTIVE;
 		attr->phys_state = 5;
@@ -521,10 +521,8 @@ int qedr_dealloc_pd(struct ib_pd *ibpd)
 	struct qedr_dev *dev = get_qedr_dev(ibpd->device);
 	struct qedr_pd *pd = get_qedr_pd(ibpd);
 
-	if (!pd) {
+	if (!pd)
 		pr_err("Invalid PD received in dealloc_pd\n");
-		return -EINVAL;
-	}
 
 	DP_DEBUG(dev, QEDR_MSG_INIT, "Deallocating PD %d\n", pd->pd_id);
 	dev->ops->rdma_dealloc_pd(dev->rdma_ctx, pd->pd_id);
@@ -771,10 +769,8 @@ static inline int qedr_init_user_queue(struct ib_ucontext *ib_ctx,
 		goto err0;
 
 	q->pbl_tbl = qedr_alloc_pbl_tbl(dev, &q->pbl_info, GFP_KERNEL);
-	if (IS_ERR(q->pbl_tbl)) {
-		rc = PTR_ERR(q->pbl_tbl);
+	if (IS_ERR_OR_NULL(q->pbl_tbl))
 		goto err0;
-	}
 
 	qedr_populate_pbls(dev, q->umem, q->pbl_tbl, &q->pbl_info);
 
@@ -902,8 +898,6 @@ struct ib_cq *qedr_create_cq(struct ib_device *ibdev,
 
 		pbl_ptr = cq->q.pbl_tbl->pa;
 		page_cnt = cq->q.pbl_info.num_pbes;
-
-		cq->ibcq.cqe = chain_entries;
 	} else {
 		cq->cq_type = QEDR_CQ_TYPE_KERNEL;
 
@@ -919,7 +913,6 @@ struct ib_cq *qedr_create_cq(struct ib_device *ibdev,
 
 		page_cnt = qed_chain_get_page_cnt(&cq->pbl);
 		pbl_ptr = qed_chain_get_pbl_phys(&cq->pbl);
-		cq->ibcq.cqe = cq->pbl.capacity;
 	}
 
 	qedr_init_cq_params(cq, ctx, dev, vector, chain_entries, page_cnt,
@@ -997,13 +990,8 @@ int qedr_destroy_cq(struct ib_cq *ibcq)
 
 	/* GSIs CQs are handled by driver, so they don't exist in the FW */
 	if (cq->cq_type != QEDR_CQ_TYPE_GSI) {
-		int rc;
-
 		iparams.icid = cq->icid;
-		rc = dev->ops->rdma_destroy_cq(dev->rdma_ctx, &iparams,
-					       &oparams);
-		if (rc)
-			return rc;
+		dev->ops->rdma_destroy_cq(dev->rdma_ctx, &iparams, &oparams);
 		dev->ops->common->chain_free(dev->cdev, &cq->pbl);
 	}
 
@@ -1086,6 +1074,30 @@ static inline int get_gid_info_from_table(struct ib_qp *ibqp,
 		qp_params->vlan_id = 0;
 
 	return 0;
+}
+
+static void qedr_cleanup_user_sq(struct qedr_dev *dev, struct qedr_qp *qp)
+{
+	qedr_free_pbl(dev, &qp->usq.pbl_info, qp->usq.pbl_tbl);
+	ib_umem_release(qp->usq.umem);
+}
+
+static void qedr_cleanup_user_rq(struct qedr_dev *dev, struct qedr_qp *qp)
+{
+	qedr_free_pbl(dev, &qp->urq.pbl_info, qp->urq.pbl_tbl);
+	ib_umem_release(qp->urq.umem);
+}
+
+static void qedr_cleanup_kernel_sq(struct qedr_dev *dev, struct qedr_qp *qp)
+{
+	dev->ops->common->chain_free(dev->cdev, &qp->sq.pbl);
+	kfree(qp->wqe_wr_id);
+}
+
+static void qedr_cleanup_kernel_rq(struct qedr_dev *dev, struct qedr_qp *qp)
+{
+	dev->ops->common->chain_free(dev->cdev, &qp->rq.pbl);
+	kfree(qp->rqe_wr_id);
 }
 
 static int qedr_check_qp_attrs(struct ib_pd *ibpd, struct qedr_dev *dev,
@@ -1176,13 +1188,15 @@ static int qedr_copy_qp_uresp(struct qedr_dev *dev,
 	return rc;
 }
 
-static void qedr_set_common_qp_params(struct qedr_dev *dev,
-				      struct qedr_qp *qp,
-				      struct qedr_pd *pd,
-				      struct ib_qp_init_attr *attrs)
+static void qedr_set_qp_init_params(struct qedr_dev *dev,
+				    struct qedr_qp *qp,
+				    struct qedr_pd *pd,
+				    struct ib_qp_init_attr *attrs)
 {
-	spin_lock_init(&qp->q_lock);
 	qp->pd = pd;
+
+	spin_lock_init(&qp->q_lock);
+
 	qp->qp_type = attrs->qp_type;
 	qp->max_inline_data = attrs->cap.max_inline_data;
 	qp->sq.max_sges = attrs->cap.max_send_sge;
@@ -1191,11 +1205,7 @@ static void qedr_set_common_qp_params(struct qedr_dev *dev,
 	qp->sq_cq = get_qedr_cq(attrs->send_cq);
 	qp->rq_cq = get_qedr_cq(attrs->recv_cq);
 	qp->dev = dev;
-	qp->rq.max_sges = attrs->cap.max_recv_sge;
 
-	DP_DEBUG(dev, QEDR_MSG_QP,
-		 "RQ params:\trq_max_sges = %d, rq_cq_id = %d\n",
-		 qp->rq.max_sges, qp->rq_cq->icid);
 	DP_DEBUG(dev, QEDR_MSG_QP,
 		 "QP params:\tpd = %d, qp_type = %d, max_inline_data = %d, state = %d, signaled = %d, use_srq=%d\n",
 		 pd->pd_id, qp->qp_type, qp->max_inline_data,
@@ -1203,149 +1213,95 @@ static void qedr_set_common_qp_params(struct qedr_dev *dev,
 	DP_DEBUG(dev, QEDR_MSG_QP,
 		 "SQ params:\tsq_max_sges = %d, sq_cq_id = %d\n",
 		 qp->sq.max_sges, qp->sq_cq->icid);
+	qp->rq.max_sges = attrs->cap.max_recv_sge;
+	DP_DEBUG(dev, QEDR_MSG_QP,
+		 "RQ params:\trq_max_sges = %d, rq_cq_id = %d\n",
+		 qp->rq.max_sges, qp->rq_cq->icid);
 }
 
-static void qedr_set_roce_db_info(struct qedr_dev *dev, struct qedr_qp *qp)
+static inline void
+qedr_init_qp_user_params(struct qed_rdma_create_qp_in_params *params,
+			 struct qedr_create_qp_ureq *ureq)
+{
+	/* QP handle to be written in CQE */
+	params->qp_handle_lo = ureq->qp_handle_lo;
+	params->qp_handle_hi = ureq->qp_handle_hi;
+}
+
+static inline void
+qedr_init_qp_kernel_doorbell_sq(struct qedr_dev *dev, struct qedr_qp *qp)
 {
 	qp->sq.db = dev->db_addr +
 		    DB_ADDR_SHIFT(DQ_PWM_OFFSET_XCM_RDMA_SQ_PROD);
 	qp->sq.db_data.data.icid = qp->icid + 1;
+}
+
+static inline void
+qedr_init_qp_kernel_doorbell_rq(struct qedr_dev *dev, struct qedr_qp *qp)
+{
 	qp->rq.db = dev->db_addr +
 		    DB_ADDR_SHIFT(DQ_PWM_OFFSET_TCM_ROCE_RQ_PROD);
 	qp->rq.db_data.data.icid = qp->icid;
 }
 
-static inline void
-qedr_init_common_qp_in_params(struct qedr_dev *dev,
-			      struct qedr_pd *pd,
-			      struct qedr_qp *qp,
-			      struct ib_qp_init_attr *attrs,
-			      bool fmr_and_reserved_lkey,
-			      struct qed_rdma_create_qp_in_params *params)
+static inline int
+qedr_init_qp_kernel_params_rq(struct qedr_dev *dev,
+			      struct qedr_qp *qp, struct ib_qp_init_attr *attrs)
 {
-	/* QP handle to be written in an async event */
-	params->qp_handle_async_lo = lower_32_bits((uintptr_t) qp);
-	params->qp_handle_async_hi = upper_32_bits((uintptr_t) qp);
+	/* Allocate driver internal RQ array */
+	qp->rqe_wr_id = kcalloc(qp->rq.max_wr, sizeof(*qp->rqe_wr_id),
+				GFP_KERNEL);
+	if (!qp->rqe_wr_id)
+		return -ENOMEM;
 
-	params->signal_all = (attrs->sq_sig_type == IB_SIGNAL_ALL_WR);
-	params->fmr_and_reserved_lkey = fmr_and_reserved_lkey;
-	params->pd = pd->pd_id;
-	params->dpi = pd->uctx ? pd->uctx->dpi : dev->dpi;
-	params->sq_cq_id = get_qedr_cq(attrs->send_cq)->icid;
-	params->stats_queue = 0;
-	params->rq_cq_id = get_qedr_cq(attrs->recv_cq)->icid;
-	params->srq_id = 0;
-	params->use_srq = false;
-}
-
-static inline void qedr_qp_user_print(struct qedr_dev *dev, struct qedr_qp *qp)
-{
-	DP_DEBUG(dev, QEDR_MSG_QP, "create qp: successfully created user QP. "
-		 "qp=%p. "
-		 "sq_addr=0x%llx, "
-		 "sq_len=%zd, "
-		 "rq_addr=0x%llx, "
-		 "rq_len=%zd"
-		 "\n",
-		 qp,
-		 qp->usq.buf_addr,
-		 qp->usq.buf_len, qp->urq.buf_addr, qp->urq.buf_len);
-}
-
-static void qedr_cleanup_user(struct qedr_dev *dev, struct qedr_qp *qp)
-{
-	if (qp->usq.umem)
-		ib_umem_release(qp->usq.umem);
-	qp->usq.umem = NULL;
-
-	if (qp->urq.umem)
-		ib_umem_release(qp->urq.umem);
-	qp->urq.umem = NULL;
-}
-
-static int qedr_create_user_qp(struct qedr_dev *dev,
-			       struct qedr_qp *qp,
-			       struct ib_pd *ibpd,
-			       struct ib_udata *udata,
-			       struct ib_qp_init_attr *attrs)
-{
-	struct qed_rdma_create_qp_in_params in_params;
-	struct qed_rdma_create_qp_out_params out_params;
-	struct qedr_pd *pd = get_qedr_pd(ibpd);
-	struct ib_ucontext *ib_ctx = NULL;
-	struct qedr_ucontext *ctx = NULL;
-	struct qedr_create_qp_ureq ureq;
-	int rc = -EINVAL;
-
-	ib_ctx = ibpd->uobject->context;
-	ctx = get_qedr_ucontext(ib_ctx);
-
-	memset(&ureq, 0, sizeof(ureq));
-	rc = ib_copy_from_udata(&ureq, udata, sizeof(ureq));
-	if (rc) {
-		DP_ERR(dev, "Problem copying data from user space\n");
-		return rc;
-	}
-
-	/* SQ - read access only (0), dma sync not required (0) */
-	rc = qedr_init_user_queue(ib_ctx, dev, &qp->usq, ureq.sq_addr,
-				  ureq.sq_len, 0, 0);
-	if (rc)
-		return rc;
-
-	/* RQ - read access only (0), dma sync not required (0) */
-	rc = qedr_init_user_queue(ib_ctx, dev, &qp->urq, ureq.rq_addr,
-				  ureq.rq_len, 0, 0);
-
-	if (rc)
-		return rc;
-
-	memset(&in_params, 0, sizeof(in_params));
-	qedr_init_common_qp_in_params(dev, pd, qp, attrs, false, &in_params);
-	in_params.qp_handle_lo = ureq.qp_handle_lo;
-	in_params.qp_handle_hi = ureq.qp_handle_hi;
-	in_params.sq_num_pages = qp->usq.pbl_info.num_pbes;
-	in_params.sq_pbl_ptr = qp->usq.pbl_tbl->pa;
-	in_params.rq_num_pages = qp->urq.pbl_info.num_pbes;
-	in_params.rq_pbl_ptr = qp->urq.pbl_tbl->pa;
-
-	qp->qed_qp = dev->ops->rdma_create_qp(dev->rdma_ctx,
-					      &in_params, &out_params);
-
-	if (!qp->qed_qp) {
-		rc = -ENOMEM;
-		goto err1;
-	}
-
-	qp->qp_id = out_params.qp_id;
-	qp->icid = out_params.icid;
-
-	rc = qedr_copy_qp_uresp(dev, qp, udata);
-	if (rc)
-		goto err;
-
-	qedr_qp_user_print(dev, qp);
+	DP_DEBUG(dev, QEDR_MSG_QP, "RQ max_wr set to %d.\n", qp->rq.max_wr);
 
 	return 0;
-err:
-	rc = dev->ops->rdma_destroy_qp(dev->rdma_ctx, qp->qed_qp);
-	if (rc)
-		DP_ERR(dev, "create qp: fatal fault. rc=%d", rc);
-
-err1:
-	qedr_cleanup_user(dev, qp);
-	return rc;
 }
 
-static int
-qedr_roce_create_kernel_qp(struct qedr_dev *dev,
-			   struct qedr_qp *qp,
-			   struct qed_rdma_create_qp_in_params *in_params,
-			   u32 n_sq_elems, u32 n_rq_elems)
+static inline int
+qedr_init_qp_kernel_params_sq(struct qedr_dev *dev,
+			      struct qedr_qp *qp,
+			      struct ib_qp_init_attr *attrs,
+			      struct qed_rdma_create_qp_in_params *params)
 {
-	struct qed_rdma_create_qp_out_params out_params;
+	u32 temp_max_wr;
+
+	/* Allocate driver internal SQ array */
+	temp_max_wr = attrs->cap.max_send_wr * dev->wq_multiplier;
+	temp_max_wr = min_t(u32, temp_max_wr, dev->attr.max_sqe);
+
+	/* temp_max_wr < attr->max_sqe < u16 so the casting is safe */
+	qp->sq.max_wr = (u16)temp_max_wr;
+	qp->wqe_wr_id = kcalloc(qp->sq.max_wr, sizeof(*qp->wqe_wr_id),
+				GFP_KERNEL);
+	if (!qp->wqe_wr_id)
+		return -ENOMEM;
+
+	DP_DEBUG(dev, QEDR_MSG_QP, "SQ max_wr set to %d.\n", qp->sq.max_wr);
+
+	/* QP handle to be written in CQE */
+	params->qp_handle_lo = lower_32_bits((uintptr_t)qp);
+	params->qp_handle_hi = upper_32_bits((uintptr_t)qp);
+
+	return 0;
+}
+
+static inline int qedr_init_qp_kernel_sq(struct qedr_dev *dev,
+					 struct qedr_qp *qp,
+					 struct ib_qp_init_attr *attrs)
+{
+	u32 n_sq_elems, n_sq_entries;
 	int rc;
 
+	/* A single work request may take up to QEDR_MAX_SQ_WQE_SIZE elements in
+	 * the ring. The ring should allow at least a single WR, even if the
+	 * user requested none, due to allocation issues.
+	 */
+	n_sq_entries = attrs->cap.max_send_wr;
+	n_sq_entries = min_t(u32, n_sq_entries, dev->attr.max_sqe);
+	n_sq_entries = max_t(u32, n_sq_entries, 1);
+	n_sq_elems = n_sq_entries * QEDR_MAX_SQE_ELEMENTS_PER_SQE;
 	rc = dev->ops->common->chain_alloc(dev->cdev,
 					   QED_CHAIN_USE_TO_PRODUCE,
 					   QED_CHAIN_MODE_PBL,
@@ -1353,13 +1309,31 @@ qedr_roce_create_kernel_qp(struct qedr_dev *dev,
 					   n_sq_elems,
 					   QEDR_SQE_ELEMENT_SIZE,
 					   &qp->sq.pbl);
-
-	if (rc)
+	if (rc) {
+		DP_ERR(dev, "failed to allocate QP %p SQ\n", qp);
 		return rc;
+	}
 
-	in_params->sq_num_pages = qed_chain_get_page_cnt(&qp->sq.pbl);
-	in_params->sq_pbl_ptr = qed_chain_get_pbl_phys(&qp->sq.pbl);
+	DP_DEBUG(dev, QEDR_MSG_SQ,
+		 "SQ Pbl base addr = %llx max_send_wr=%d max_wr=%d capacity=%d, rc=%d\n",
+		 qed_chain_get_pbl_phys(&qp->sq.pbl), attrs->cap.max_send_wr,
+		 n_sq_entries, qed_chain_get_capacity(&qp->sq.pbl), rc);
+	return 0;
+}
 
+static inline int qedr_init_qp_kernel_rq(struct qedr_dev *dev,
+					 struct qedr_qp *qp,
+					 struct ib_qp_init_attr *attrs)
+{
+	u32 n_rq_elems, n_rq_entries;
+	int rc;
+
+	/* A single work request may take up to QEDR_MAX_RQ_WQE_SIZE elements in
+	 * the ring. There ring should allow at least a single WR, even if the
+	 * user requested none, due to allocation issues.
+	 */
+	n_rq_entries = max_t(u32, attrs->cap.max_recv_wr, 1);
+	n_rq_elems = n_rq_entries * QEDR_MAX_RQE_ELEMENTS_PER_RQE;
 	rc = dev->ops->common->chain_alloc(dev->cdev,
 					   QED_CHAIN_USE_TO_CONSUME_PRODUCE,
 					   QED_CHAIN_MODE_PBL,
@@ -1367,102 +1341,136 @@ qedr_roce_create_kernel_qp(struct qedr_dev *dev,
 					   n_rq_elems,
 					   QEDR_RQE_ELEMENT_SIZE,
 					   &qp->rq.pbl);
-	if (rc)
-		return rc;
 
-	in_params->rq_num_pages = qed_chain_get_page_cnt(&qp->rq.pbl);
-	in_params->rq_pbl_ptr = qed_chain_get_pbl_phys(&qp->rq.pbl);
+	if (rc) {
+		DP_ERR(dev, "failed to allocate memory for QP %p RQ\n", qp);
+		return -ENOMEM;
+	}
 
-	qp->qed_qp = dev->ops->rdma_create_qp(dev->rdma_ctx,
-					      in_params, &out_params);
+	DP_DEBUG(dev, QEDR_MSG_RQ,
+		 "RQ Pbl base addr = %llx max_recv_wr=%d max_wr=%d capacity=%d, rc=%d\n",
+		 qed_chain_get_pbl_phys(&qp->rq.pbl), attrs->cap.max_recv_wr,
+		 n_rq_entries, qed_chain_get_capacity(&qp->rq.pbl), rc);
 
-	if (!qp->qed_qp)
-		return -EINVAL;
-
-	qp->qp_id = out_params.qp_id;
-	qp->icid = out_params.icid;
-
-	qedr_set_roce_db_info(dev, qp);
+	/* n_rq_entries < u16 so the casting is safe */
+	qp->rq.max_wr = (u16)n_rq_entries;
 
 	return 0;
 }
 
-static void qedr_cleanup_kernel(struct qedr_dev *dev, struct qedr_qp *qp)
+static inline void
+qedr_init_qp_in_params_sq(struct qedr_dev *dev,
+			  struct qedr_pd *pd,
+			  struct qedr_qp *qp,
+			  struct ib_qp_init_attr *attrs,
+			  struct ib_udata *udata,
+			  struct qed_rdma_create_qp_in_params *params)
 {
-	dev->ops->common->chain_free(dev->cdev, &qp->sq.pbl);
-	kfree(qp->wqe_wr_id);
+	/* QP handle to be written in an async event */
+	params->qp_handle_async_lo = lower_32_bits((uintptr_t)qp);
+	params->qp_handle_async_hi = upper_32_bits((uintptr_t)qp);
 
-	dev->ops->common->chain_free(dev->cdev, &qp->rq.pbl);
-	kfree(qp->rqe_wr_id);
+	params->signal_all = (attrs->sq_sig_type == IB_SIGNAL_ALL_WR);
+	params->fmr_and_reserved_lkey = !udata;
+	params->pd = pd->pd_id;
+	params->dpi = pd->uctx ? pd->uctx->dpi : dev->dpi;
+	params->sq_cq_id = get_qedr_cq(attrs->send_cq)->icid;
+	params->max_sq_sges = 0;
+	params->stats_queue = 0;
+
+	if (udata) {
+		params->sq_num_pages = qp->usq.pbl_info.num_pbes;
+		params->sq_pbl_ptr = qp->usq.pbl_tbl->pa;
+	} else {
+		params->sq_num_pages = qed_chain_get_page_cnt(&qp->sq.pbl);
+		params->sq_pbl_ptr = qed_chain_get_pbl_phys(&qp->sq.pbl);
+	}
 }
 
-static int qedr_create_kernel_qp(struct qedr_dev *dev,
-				 struct qedr_qp *qp,
-				 struct ib_pd *ibpd,
-				 struct ib_qp_init_attr *attrs)
+static inline void
+qedr_init_qp_in_params_rq(struct qedr_qp *qp,
+			  struct ib_qp_init_attr *attrs,
+			  struct ib_udata *udata,
+			  struct qed_rdma_create_qp_in_params *params)
 {
-	struct qed_rdma_create_qp_in_params in_params;
-	struct qedr_pd *pd = get_qedr_pd(ibpd);
-	int rc = -EINVAL;
-	u32 n_rq_elems;
-	u32 n_sq_elems;
-	u32 n_sq_entries;
+	params->rq_cq_id = get_qedr_cq(attrs->recv_cq)->icid;
+	params->srq_id = 0;
+	params->use_srq = false;
 
-	memset(&in_params, 0, sizeof(in_params));
-
-	/* A single work request may take up to QEDR_MAX_SQ_WQE_SIZE elements in
-	 * the ring. The ring should allow at least a single WR, even if the
-	 * user requested none, due to allocation issues.
-	 * We should add an extra WR since the prod and cons indices of
-	 * wqe_wr_id are managed in such a way that the WQ is considered full
-	 * when (prod+1)%max_wr==cons. We currently don't do that because we
-	 * double the number of entries due an iSER issue that pushes far more
-	 * WRs than indicated. If we decline its ib_post_send() then we get
-	 * error prints in the dmesg we'd like to avoid.
-	 */
-	qp->sq.max_wr = min_t(u32, attrs->cap.max_send_wr * dev->wq_multiplier,
-			      dev->attr.max_sqe);
-
-	qp->wqe_wr_id = kzalloc(qp->sq.max_wr * sizeof(*qp->wqe_wr_id),
-				GFP_KERNEL);
-	if (!qp->wqe_wr_id) {
-		DP_ERR(dev, "create qp: failed SQ shadow memory allocation\n");
-		return -ENOMEM;
+	if (udata) {
+		params->rq_num_pages = qp->urq.pbl_info.num_pbes;
+		params->rq_pbl_ptr = qp->urq.pbl_tbl->pa;
+	} else {
+		params->rq_num_pages = qed_chain_get_page_cnt(&qp->rq.pbl);
+		params->rq_pbl_ptr = qed_chain_get_pbl_phys(&qp->rq.pbl);
 	}
+}
 
-	/* QP handle to be written in CQE */
-	in_params.qp_handle_lo = lower_32_bits((uintptr_t) qp);
-	in_params.qp_handle_hi = upper_32_bits((uintptr_t) qp);
+static inline void qedr_qp_user_print(struct qedr_dev *dev, struct qedr_qp *qp)
+{
+	DP_DEBUG(dev, QEDR_MSG_QP,
+		 "create qp: successfully created user QP. qp=%p, sq_addr=0x%llx, sq_len=%zd, rq_addr=0x%llx, rq_len=%zd\n",
+		 qp, qp->usq.buf_addr, qp->usq.buf_len, qp->urq.buf_addr,
+		 qp->urq.buf_len);
+}
 
-	/* A single work request may take up to QEDR_MAX_RQ_WQE_SIZE elements in
-	 * the ring. There ring should allow at least a single WR, even if the
-	 * user requested none, due to allocation issues.
-	 */
-	qp->rq.max_wr = (u16) max_t(u32, attrs->cap.max_recv_wr, 1);
+static inline int qedr_init_user_qp(struct ib_ucontext *ib_ctx,
+				    struct qedr_dev *dev,
+				    struct qedr_qp *qp,
+				    struct qedr_create_qp_ureq *ureq)
+{
+	int rc;
 
-	/* Allocate driver internal RQ array */
-	qp->rqe_wr_id = kzalloc(qp->rq.max_wr * sizeof(*qp->rqe_wr_id),
-				GFP_KERNEL);
-	if (!qp->rqe_wr_id) {
-		DP_ERR(dev,
-		       "create qp: failed RQ shadow memory allocation\n");
-		kfree(qp->wqe_wr_id);
-		return -ENOMEM;
-	}
-
-	qedr_init_common_qp_in_params(dev, pd, qp, attrs, true, &in_params);
-
-	n_sq_entries = attrs->cap.max_send_wr;
-	n_sq_entries = min_t(u32, n_sq_entries, dev->attr.max_sqe);
-	n_sq_entries = max_t(u32, n_sq_entries, 1);
-	n_sq_elems = n_sq_entries * QEDR_MAX_SQE_ELEMENTS_PER_SQE;
-
-	n_rq_elems = qp->rq.max_wr * QEDR_MAX_RQE_ELEMENTS_PER_RQE;
-
-	rc = qedr_roce_create_kernel_qp(dev, qp, &in_params,
-					n_sq_elems, n_rq_elems);
+	/* SQ - read access only (0), dma sync not required (0) */
+	rc = qedr_init_user_queue(ib_ctx, dev, &qp->usq, ureq->sq_addr,
+				  ureq->sq_len, 0, 0);
 	if (rc)
-		qedr_cleanup_kernel(dev, qp);
+		return rc;
+
+	/* RQ - read access only (0), dma sync not required (0) */
+	rc = qedr_init_user_queue(ib_ctx, dev, &qp->urq, ureq->rq_addr,
+				  ureq->rq_len, 0, 0);
+
+	if (rc)
+		qedr_cleanup_user_sq(dev, qp);
+	return rc;
+}
+
+static inline int
+qedr_init_kernel_qp(struct qedr_dev *dev,
+		    struct qedr_qp *qp,
+		    struct ib_qp_init_attr *attrs,
+		    struct qed_rdma_create_qp_in_params *params)
+{
+	int rc;
+
+	rc = qedr_init_qp_kernel_sq(dev, qp, attrs);
+	if (rc) {
+		DP_ERR(dev, "failed to init kernel QP %p SQ\n", qp);
+		return rc;
+	}
+
+	rc = qedr_init_qp_kernel_params_sq(dev, qp, attrs, params);
+	if (rc) {
+		dev->ops->common->chain_free(dev->cdev, &qp->sq.pbl);
+		DP_ERR(dev, "failed to init kernel QP %p SQ params\n", qp);
+		return rc;
+	}
+
+	rc = qedr_init_qp_kernel_rq(dev, qp, attrs);
+	if (rc) {
+		qedr_cleanup_kernel_sq(dev, qp);
+		DP_ERR(dev, "failed to init kernel QP %p RQ\n", qp);
+		return rc;
+	}
+
+	rc = qedr_init_qp_kernel_params_rq(dev, qp, attrs);
+	if (rc) {
+		DP_ERR(dev, "failed to init kernel QP %p RQ params\n", qp);
+		qedr_cleanup_kernel_sq(dev, qp);
+		dev->ops->common->chain_free(dev->cdev, &qp->rq.pbl);
+		return rc;
+	}
 
 	return rc;
 }
@@ -1472,9 +1480,13 @@ struct ib_qp *qedr_create_qp(struct ib_pd *ibpd,
 			     struct ib_udata *udata)
 {
 	struct qedr_dev *dev = get_qedr_dev(ibpd->device);
+	struct qed_rdma_create_qp_out_params out_params;
+	struct qed_rdma_create_qp_in_params in_params;
 	struct qedr_pd *pd = get_qedr_pd(ibpd);
+	struct ib_ucontext *ib_ctx = NULL;
+	struct qedr_ucontext *ctx = NULL;
+	struct qedr_create_qp_ureq ureq;
 	struct qedr_qp *qp;
-	struct ib_qp *ibqp;
 	int rc = 0;
 
 	DP_DEBUG(dev, QEDR_MSG_QP, "create qp: called from %s, pd=%p\n",
@@ -1484,51 +1496,107 @@ struct ib_qp *qedr_create_qp(struct ib_pd *ibpd,
 	if (rc)
 		return ERR_PTR(rc);
 
+	qp = kzalloc(sizeof(*qp), GFP_KERNEL);
+	if (!qp)
+		return ERR_PTR(-ENOMEM);
+
 	if (attrs->srq)
 		return ERR_PTR(-EINVAL);
 
 	DP_DEBUG(dev, QEDR_MSG_QP,
-		 "create qp: called from %s, event_handler=%p, eepd=%p sq_cq=%p, sq_icid=%d, rq_cq=%p, rq_icid=%d\n",
-		 udata ? "user library" : "kernel", attrs->event_handler, pd,
+		 "create qp: sq_cq=%p, sq_icid=%d, rq_cq=%p, rq_icid=%d\n",
 		 get_qedr_cq(attrs->send_cq),
 		 get_qedr_cq(attrs->send_cq)->icid,
 		 get_qedr_cq(attrs->recv_cq),
 		 get_qedr_cq(attrs->recv_cq)->icid);
 
-	qp = kzalloc(sizeof(*qp), GFP_KERNEL);
-	if (!qp) {
-		DP_ERR(dev, "create qp: failed allocating memory\n");
-		return ERR_PTR(-ENOMEM);
-	}
-
-	qedr_set_common_qp_params(dev, qp, pd, attrs);
+	qedr_set_qp_init_params(dev, qp, pd, attrs);
 
 	if (attrs->qp_type == IB_QPT_GSI) {
-		ibqp = qedr_create_gsi_qp(dev, attrs, qp);
-		if (IS_ERR(ibqp))
-			kfree(qp);
-		return ibqp;
+		if (udata) {
+			DP_ERR(dev,
+			       "create qp: unexpected udata when creating GSI QP\n");
+			goto err0;
+		}
+		return qedr_create_gsi_qp(dev, attrs, qp);
 	}
 
-	if (udata)
-		rc = qedr_create_user_qp(dev, qp, ibpd, udata, attrs);
-	else
-		rc = qedr_create_kernel_qp(dev, qp, ibpd, attrs);
+	memset(&in_params, 0, sizeof(in_params));
 
-	if (rc)
-		goto err;
+	if (udata) {
+		if (!(udata && ibpd->uobject && ibpd->uobject->context))
+			goto err0;
 
+		ib_ctx = ibpd->uobject->context;
+		ctx = get_qedr_ucontext(ib_ctx);
+
+		memset(&ureq, 0, sizeof(ureq));
+		if (ib_copy_from_udata(&ureq, udata, sizeof(ureq))) {
+			DP_ERR(dev,
+			       "create qp: problem copying data from user space\n");
+			goto err0;
+		}
+
+		rc = qedr_init_user_qp(ib_ctx, dev, qp, &ureq);
+		if (rc)
+			goto err0;
+
+		qedr_init_qp_user_params(&in_params, &ureq);
+	} else {
+		rc = qedr_init_kernel_qp(dev, qp, attrs, &in_params);
+		if (rc)
+			goto err0;
+	}
+
+	qedr_init_qp_in_params_sq(dev, pd, qp, attrs, udata, &in_params);
+	qedr_init_qp_in_params_rq(qp, attrs, udata, &in_params);
+
+	qp->qed_qp = dev->ops->rdma_create_qp(dev->rdma_ctx,
+					      &in_params, &out_params);
+
+	if (!qp->qed_qp)
+		goto err1;
+
+	qp->qp_id = out_params.qp_id;
+	qp->icid = out_params.icid;
 	qp->ibqp.qp_num = qp->qp_id;
+
+	if (udata) {
+		rc = qedr_copy_qp_uresp(dev, qp, udata);
+		if (rc)
+			goto err2;
+
+		qedr_qp_user_print(dev, qp);
+	} else {
+		qedr_init_qp_kernel_doorbell_sq(dev, qp);
+		qedr_init_qp_kernel_doorbell_rq(dev, qp);
+	}
+
+	DP_DEBUG(dev, QEDR_MSG_QP, "created %s space QP %p\n",
+		 udata ? "user" : "kernel", qp);
 
 	return &qp->ibqp;
 
-err:
+err2:
+	rc = dev->ops->rdma_destroy_qp(dev->rdma_ctx, qp->qed_qp);
+	if (rc)
+		DP_ERR(dev, "create qp: fatal fault. rc=%d", rc);
+err1:
+	if (udata) {
+		qedr_cleanup_user_sq(dev, qp);
+		qedr_cleanup_user_rq(dev, qp);
+	} else {
+		qedr_cleanup_kernel_sq(dev, qp);
+		qedr_cleanup_kernel_rq(dev, qp);
+	}
+
+err0:
 	kfree(qp);
 
 	return ERR_PTR(-EFAULT);
 }
 
-static enum ib_qp_state qedr_get_ibqp_state(enum qed_roce_qp_state qp_state)
+enum ib_qp_state qedr_get_ibqp_state(enum qed_roce_qp_state qp_state)
 {
 	switch (qp_state) {
 	case QED_ROCE_QP_STATE_RESET:
@@ -1549,8 +1617,7 @@ static enum ib_qp_state qedr_get_ibqp_state(enum qed_roce_qp_state qp_state)
 	return IB_QPS_ERR;
 }
 
-static enum qed_roce_qp_state qedr_get_state_from_ibqp(
-					enum ib_qp_state qp_state)
+enum qed_roce_qp_state qedr_get_state_from_ibqp(enum ib_qp_state qp_state)
 {
 	switch (qp_state) {
 	case IB_QPS_RESET:
@@ -1802,6 +1869,7 @@ int qedr_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 			 qp_params.sgid.dwords[2], qp_params.sgid.dwords[3]);
 		DP_DEBUG(dev, QEDR_MSG_QP, "remote_mac=[%pM]\n",
 			 qp_params.remote_mac_addr);
+;
 
 		qp_params.mtu = qp->mtu;
 		qp_params.lb_indication = false;
@@ -1820,18 +1888,23 @@ int qedr_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 		SET_FIELD(qp_params.modify_flags,
 			  QED_ROCE_MODIFY_QP_VALID_ACK_TIMEOUT, 1);
 
-		qp_params.ack_timeout = attr->timeout;
-		if (attr->timeout) {
-			u32 temp;
-
-			temp = 4096 * (1UL << attr->timeout) / 1000 / 1000;
-			/* FW requires [msec] */
-			qp_params.ack_timeout = temp;
-		} else {
-			/* Infinite */
+		/* The received timeout value is an exponent used like this:
+		 *    "12.7.34 LOCAL ACK TIMEOUT
+		 *    Value representing the transport (ACK) timeout for use by
+		 *    the remote, expressed as: 4.096 * 2^timeout [usec]"
+		 * The FW expects timeout in msec so we need to divide the usec
+		 * result by 1000. We'll approximate 1000~2^10, and 4.096 ~ 2^2,
+		 * so we get: 2^2 * 2^timeout / 2^10 = 2^(timeout - 8).
+		 * The value of zero means infinite so we use a 'max_t' to make
+		 * sure that sub 1 msec values will be configured as 1 msec.
+		 */
+		if (attr->timeout)
+			qp_params.ack_timeout =
+					1 << max_t(int, attr->timeout - 8, 0);
+		else
 			qp_params.ack_timeout = 0;
-		}
 	}
+
 	if (attr_mask & IB_QP_RETRY_CNT) {
 		SET_FIELD(qp_params.modify_flags,
 			  QED_ROCE_MODIFY_QP_VALID_RETRY_CNT, 1);
@@ -1910,7 +1983,7 @@ int qedr_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 
 	if (attr_mask & IB_QP_STATE) {
 		if ((qp->qp_type != IB_QPT_GSI) && (!udata))
-			rc = qedr_update_qp_state(dev, qp, qp_params.new_state);
+			qedr_update_qp_state(dev, qp, qp_params.new_state);
 		qp->state = qp_params.new_state;
 	}
 
@@ -1952,7 +2025,7 @@ int qedr_query_qp(struct ib_qp *ibqp,
 
 	qp_attr->qp_state = qedr_get_ibqp_state(params.state);
 	qp_attr->cur_qp_state = qedr_get_ibqp_state(params.state);
-	qp_attr->path_mtu = ib_mtu_int_to_enum(params.mtu);
+	qp_attr->path_mtu = iboe_get_mtu(params.mtu);
 	qp_attr->path_mig_state = IB_MIG_MIGRATED;
 	qp_attr->rq_psn = params.rq_psn;
 	qp_attr->sq_psn = params.sq_psn;
@@ -2003,24 +2076,6 @@ err:
 	return rc;
 }
 
-int qedr_free_qp_resources(struct qedr_dev *dev, struct qedr_qp *qp)
-{
-	int rc = 0;
-
-	if (qp->qp_type != IB_QPT_GSI) {
-		rc = dev->ops->rdma_destroy_qp(dev->rdma_ctx, qp->qed_qp);
-		if (rc)
-			return rc;
-	}
-
-	if (qp->ibqp.uobject && qp->ibqp.uobject->context)
-		qedr_cleanup_user(dev, qp);
-	else
-		qedr_cleanup_kernel(dev, qp);
-
-	return 0;
-}
-
 int qedr_destroy_qp(struct ib_qp *ibqp)
 {
 	struct qedr_qp *qp = get_qedr_qp(ibqp);
@@ -2032,10 +2087,8 @@ int qedr_destroy_qp(struct ib_qp *ibqp)
 	DP_DEBUG(dev, QEDR_MSG_QP, "destroy qp: destroying %p, qp type=%d\n",
 		 qp, qp->qp_type);
 
-	if ((qp->state != QED_ROCE_QP_STATE_RESET) &&
-	    (qp->state != QED_ROCE_QP_STATE_ERR) &&
-	    (qp->state != QED_ROCE_QP_STATE_INIT)) {
-
+	if (qp->state != (QED_ROCE_QP_STATE_RESET | QED_ROCE_QP_STATE_ERR |
+			  QED_ROCE_QP_STATE_INIT)) {
 		attr.qp_state = IB_QPS_ERR;
 		attr_mask |= IB_QP_STATE;
 
@@ -2043,18 +2096,28 @@ int qedr_destroy_qp(struct ib_qp *ibqp)
 		qedr_modify_qp(ibqp, &attr, attr_mask, NULL);
 	}
 
-	if (qp->qp_type == IB_QPT_GSI)
+	if (qp->qp_type != IB_QPT_GSI) {
+		rc = dev->ops->rdma_destroy_qp(dev->rdma_ctx, qp->qed_qp);
+		if (rc)
+			return rc;
+	} else {
 		qedr_destroy_gsi_qp(dev);
+	}
 
-	qedr_free_qp_resources(dev, qp);
+	if (ibqp->uobject && ibqp->uobject->context) {
+		qedr_cleanup_user_sq(dev, qp);
+		qedr_cleanup_user_rq(dev, qp);
+	} else {
+		qedr_cleanup_kernel_sq(dev, qp);
+		qedr_cleanup_kernel_rq(dev, qp);
+	}
 
 	kfree(qp);
 
 	return rc;
 }
 
-struct ib_ah *qedr_create_ah(struct ib_pd *ibpd, struct ib_ah_attr *attr,
-			     struct ib_udata *udata)
+struct ib_ah *qedr_create_ah(struct ib_pd *ibpd, struct ib_ah_attr *attr)
 {
 	struct qedr_ah *ah;
 
@@ -2107,8 +2170,8 @@ static int init_mr_info(struct qedr_dev *dev, struct mr_info *info,
 		goto done;
 
 	info->pbl_table = qedr_alloc_pbl_tbl(dev, &info->pbl_info, GFP_KERNEL);
-	if (IS_ERR(info->pbl_table)) {
-		rc = PTR_ERR(info->pbl_table);
+	if (!info->pbl_table) {
+		rc = -ENOMEM;
 		goto done;
 	}
 
@@ -2119,7 +2182,7 @@ static int init_mr_info(struct qedr_dev *dev, struct mr_info *info,
 	 * list and allocating another one
 	 */
 	tmp = qedr_alloc_pbl_tbl(dev, &info->pbl_info, GFP_KERNEL);
-	if (IS_ERR(tmp)) {
+	if (!tmp) {
 		DP_DEBUG(dev, QEDR_MSG_MR, "Extra PBL is not allocated\n");
 		goto done;
 	}
@@ -2245,8 +2308,7 @@ int qedr_dereg_mr(struct ib_mr *ib_mr)
 	return rc;
 }
 
-static struct qedr_mr *__qedr_alloc_mr(struct ib_pd *ibpd,
-				       int max_page_list_len)
+struct qedr_mr *__qedr_alloc_mr(struct ib_pd *ibpd, int max_page_list_len)
 {
 	struct qedr_pd *pd = get_qedr_pd(ibpd);
 	struct qedr_dev *dev = get_qedr_dev(ibpd->device);
@@ -2374,7 +2436,8 @@ static void handle_completed_mrs(struct qedr_dev *dev, struct mr_info *info)
 		 */
 		pbl = list_first_entry(&info->inuse_pbl_list,
 				       struct qedr_pbl, list_entry);
-		list_move_tail(&pbl->list_entry, &info->free_pbl_list);
+		list_del(&pbl->list_entry);
+		list_add_tail(&pbl->list_entry, &info->free_pbl_list);
 		info->completed_handled++;
 	}
 }
@@ -2580,9 +2643,7 @@ static u32 qedr_prepare_sq_rdma_data(struct qedr_dev *dev,
 	rwqe2->r_key = cpu_to_le32(rdma_wr(wr)->rkey);
 	DMA_REGPAIR_LE(rwqe2->remote_va, rdma_wr(wr)->remote_addr);
 
-	if (wr->send_flags & IB_SEND_INLINE &&
-	    (wr->opcode == IB_WR_RDMA_WRITE_WITH_IMM ||
-	     wr->opcode == IB_WR_RDMA_WRITE)) {
+	if (wr->send_flags & IB_SEND_INLINE) {
 		u8 flags = 0;
 
 		SET_FIELD2(flags, RDMA_SQ_RDMA_WQE_1ST_INLINE_FLG, 1);
@@ -2648,7 +2709,7 @@ static int qedr_prepare_reg(struct qedr_qp *qp,
 	return 0;
 }
 
-static enum ib_wc_opcode qedr_ib_to_wc_opcode(enum ib_wr_opcode opcode)
+enum ib_wc_opcode qedr_ib_to_wc_opcode(enum ib_wr_opcode opcode)
 {
 	switch (opcode) {
 	case IB_WR_RDMA_WRITE:
@@ -2673,7 +2734,7 @@ static enum ib_wc_opcode qedr_ib_to_wc_opcode(enum ib_wr_opcode opcode)
 	}
 }
 
-static inline bool qedr_can_post_send(struct qedr_qp *qp, struct ib_send_wr *wr)
+inline bool qedr_can_post_send(struct qedr_qp *qp, struct ib_send_wr *wr)
 {
 	int wq_is_full, err_wr, pbl_is_full;
 	struct qedr_dev *dev = qp->dev;
@@ -2710,7 +2771,7 @@ static inline bool qedr_can_post_send(struct qedr_qp *qp, struct ib_send_wr *wr)
 	return true;
 }
 
-static int __qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
+int __qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 		     struct ib_send_wr **bad_wr)
 {
 	struct qedr_dev *dev = get_qedr_dev(ibqp->device);
@@ -2751,6 +2812,11 @@ static int __qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 
 	switch (wr->opcode) {
 	case IB_WR_SEND_WITH_IMM:
+		if (unlikely(rdma_protocol_iwarp(&dev->ibdev, 1))) {
+			rc = -EINVAL;
+			*bad_wr = wr;
+			break;
+		}
 		wqe->req_type = RDMA_SQ_REQ_TYPE_SEND_WITH_IMM;
 		swqe = (struct rdma_sq_send_wqe_1st *)wqe;
 		swqe->wqe_size = 2;
@@ -2792,6 +2858,11 @@ static int __qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 		break;
 
 	case IB_WR_RDMA_WRITE_WITH_IMM:
+		if (unlikely(rdma_protocol_iwarp(&dev->ibdev, 1))) {
+			rc = -EINVAL;
+			*bad_wr = wr;
+			break;
+		}
 		wqe->req_type = RDMA_SQ_REQ_TYPE_RDMA_WR_WITH_IMM;
 		rwqe = (struct rdma_sq_rdma_wqe_1st *)wqe;
 
@@ -2933,14 +3004,18 @@ int qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 
 	spin_lock_irqsave(&qp->q_lock, flags);
 
-	if ((qp->state != QED_ROCE_QP_STATE_RTS) &&
-	    (qp->state != QED_ROCE_QP_STATE_ERR) &&
-	    (qp->state != QED_ROCE_QP_STATE_SQD)) {
+	if ((qp->state == QED_ROCE_QP_STATE_RESET) ||
+	    (qp->state == QED_ROCE_QP_STATE_ERR)) {
 		spin_unlock_irqrestore(&qp->q_lock, flags);
 		*bad_wr = wr;
 		DP_DEBUG(dev, QEDR_MSG_CQ,
 			 "QP in wrong state! QP icid=0x%x state %d\n",
 			 qp->icid, qp->state);
+		return -EINVAL;
+	}
+
+	if (!wr) {
+		DP_ERR(dev, "Got an empty post send.\n");
 		return -EINVAL;
 	}
 
@@ -2988,7 +3063,8 @@ int qedr_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
 
 	spin_lock_irqsave(&qp->q_lock, flags);
 
-	if (qp->state == QED_ROCE_QP_STATE_RESET) {
+	if ((qp->state == QED_ROCE_QP_STATE_RESET) ||
+	    (qp->state == QED_ROCE_QP_STATE_ERR)) {
 		spin_unlock_irqrestore(&qp->q_lock, flags);
 		*bad_wr = wr;
 		return -EINVAL;
@@ -3130,7 +3206,6 @@ static int process_req(struct qedr_dev *dev, struct qedr_qp *qp,
 
 		/* fill WC */
 		wc->status = status;
-		wc->vendor_err = 0;
 		wc->wc_flags = 0;
 		wc->src_qp = qp->id;
 		wc->qp = &qp->ibqp;
@@ -3183,7 +3258,7 @@ static int qedr_poll_cq_req(struct qedr_dev *dev,
 			       "Error: POLL CQ with RDMA_CQE_REQ_STS_WORK_REQUEST_FLUSHED_ERR. CQ icid=0x%x, QP icid=0x%x\n",
 			       cq->icid, qp->icid);
 		cnt = process_req(dev, qp, cq, num_entries, wc, req->sq_cons,
-				  IB_WC_WR_FLUSH_ERR, 1);
+				  IB_WC_WR_FLUSH_ERR, 0);
 		break;
 	default:
 		/* process all WQE before the cosumer */
@@ -3321,7 +3396,6 @@ static void __process_resp_one(struct qedr_dev *dev, struct qedr_qp *qp,
 
 	/* fill WC */
 	wc->status = wc_status;
-	wc->vendor_err = 0;
 	wc->src_qp = qp->id;
 	wc->qp = &qp->ibqp;
 	wc->wr_id = wr_id;
@@ -3350,7 +3424,6 @@ static int process_resp_flush(struct qedr_qp *qp, struct qedr_cq *cq,
 	while (num_entries && qp->rq.wqe_cons != hw_cons) {
 		/* fill WC */
 		wc->status = IB_WC_WR_FLUSH_ERR;
-		wc->vendor_err = 0;
 		wc->wc_flags = 0;
 		wc->src_qp = qp->id;
 		wc->byte_len = 0;
@@ -3409,7 +3482,7 @@ int qedr_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 {
 	struct qedr_dev *dev = get_qedr_dev(ibcq->device);
 	struct qedr_cq *cq = get_qedr_cq(ibcq);
-	union rdma_cqe *cqe = cq->latest_cqe;
+	union rdma_cqe *cqe;
 	u32 old_cons, new_cons;
 	unsigned long flags;
 	int update = 0;
@@ -3419,6 +3492,7 @@ int qedr_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 		return qedr_gsi_poll_cq(ibcq, num_entries, wc);
 
 	spin_lock_irqsave(&cq->cq_lock, flags);
+	cqe = cq->latest_cqe;
 	old_cons = qed_chain_get_cons_idx_u32(&cq->pbl);
 	while (num_entries && is_valid_cqe(cq, cqe)) {
 		struct qedr_qp *qp;
@@ -3494,15 +3568,14 @@ int qedr_port_immutable(struct ib_device *ibdev, u8 port_num,
 	struct ib_port_attr attr;
 	int err;
 
-	immutable->core_cap_flags = RDMA_CORE_PORT_IBA_ROCE |
-				    RDMA_CORE_PORT_IBA_ROCE_UDP_ENCAP;
-
-	err = ib_query_port(ibdev, port_num, &attr);
+	err = qedr_query_port(ibdev, port_num, &attr);
 	if (err)
 		return err;
 
 	immutable->pkey_tbl_len = attr.pkey_tbl_len;
 	immutable->gid_tbl_len = attr.gid_tbl_len;
+	immutable->core_cap_flags = RDMA_CORE_PORT_IBA_ROCE |
+				    RDMA_CORE_PORT_IBA_ROCE_UDP_ENCAP;
 	immutable->max_mad_size = IB_MGMT_MAD_SIZE;
 
 	return 0;

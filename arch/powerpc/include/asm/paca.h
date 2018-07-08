@@ -187,6 +187,7 @@ struct paca_struct {
 
 	/* Stuff for accurate time accounting */
 	struct cpu_accounting_data accounting;
+	u64 stolen_time;		/* TB ticks taken by hypervisor */
 	u64 dtl_ridx;			/* read index in dispatch log */
 	struct dtl_entry *dtl_curr;	/* pointer corresponding to dtl_ridx */
 
@@ -203,6 +204,15 @@ struct paca_struct {
 	 */
 	struct sibling_subcore_state *sibling_subcore_state;
 #endif
+#endif
+#ifdef CONFIG_PPC_BOOK3S_64
+	/*
+	 * rfi fallback flush must be in its own cacheline to prevent
+	 * other paca data leaking into the L1d
+	 */
+	u64 exrfi[13] __aligned(0x80);
+	void *rfi_flush_fallback_area;
+	u64 l1d_flush_size;
 #endif
 };
 

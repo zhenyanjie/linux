@@ -825,7 +825,6 @@ static int vmw_ttm_fault_reserve_notify(struct ttm_buffer_object *bo)
  * (currently only resources).
  */
 static void vmw_move_notify(struct ttm_buffer_object *bo,
-			    bool evict,
 			    struct ttm_mem_reg *mem)
 {
 	vmw_resource_move_notify(bo, mem);
@@ -840,7 +839,7 @@ static void vmw_move_notify(struct ttm_buffer_object *bo,
  */
 static void vmw_swap_notify(struct ttm_buffer_object *bo)
 {
-	(void) ttm_bo_wait(bo, false, false);
+	ttm_bo_wait(bo, false, false);
 }
 
 
@@ -850,7 +849,6 @@ struct ttm_bo_driver vmw_bo_driver = {
 	.ttm_tt_unpopulate = &vmw_ttm_unpopulate,
 	.invalidate_caches = vmw_invalidate_caches,
 	.init_mem_type = vmw_init_mem_type,
-	.eviction_valuable = ttm_bo_eviction_valuable,
 	.evict_flags = vmw_evict_flags,
 	.move = NULL,
 	.verify_access = vmw_verify_access,
@@ -859,4 +857,6 @@ struct ttm_bo_driver vmw_bo_driver = {
 	.fault_reserve_notify = &vmw_ttm_fault_reserve_notify,
 	.io_mem_reserve = &vmw_ttm_io_mem_reserve,
 	.io_mem_free = &vmw_ttm_io_mem_free,
+	.lru_tail = &ttm_bo_default_lru_tail,
+	.swap_lru_tail = &ttm_bo_default_swap_lru_tail,
 };

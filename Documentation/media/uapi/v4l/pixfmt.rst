@@ -29,7 +29,6 @@ see also :ref:`VIDIOC_G_FBUF <VIDIOC_G_FBUF>`.)
     pixfmt-indexed
     pixfmt-rgb
     yuv-formats
-    hsv-formats
     depth-formats
     pixfmt-013
     sdr-formats

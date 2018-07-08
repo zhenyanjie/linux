@@ -183,11 +183,23 @@ static int mx25_tsadc_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int mx25_tsadc_remove(struct platform_device *pdev)
+{
+	struct mx25_tsadc *tsadc = platform_get_drvdata(pdev);
+	int irq = platform_get_irq(pdev, 0);
+
+	if (irq) {
+		irq_set_chained_handler_and_data(irq, NULL, NULL);
+		irq_domain_remove(tsadc->domain);
+	}
+
+	return 0;
+}
+
 static const struct of_device_id mx25_tsadc_ids[] = {
 	{ .compatible = "fsl,imx25-tsadc" },
 	{ /* Sentinel */ }
 };
-MODULE_DEVICE_TABLE(of, mx25_tsadc_ids);
 
 static struct platform_driver mx25_tsadc_driver = {
 	.driver = {
@@ -195,6 +207,7 @@ static struct platform_driver mx25_tsadc_driver = {
 		.of_match_table = of_match_ptr(mx25_tsadc_ids),
 	},
 	.probe = mx25_tsadc_probe,
+	.remove = mx25_tsadc_remove,
 };
 module_platform_driver(mx25_tsadc_driver);
 

@@ -54,26 +54,19 @@ static struct sock *__l2tp_ip_bind_lookup(const struct net *net, __be32 laddr,
 	struct sock *sk;
 
 	sk_for_each_bound(sk, &l2tp_ip_bind_table) {
-		const struct l2tp_ip_sock *l2tp = l2tp_ip_sk(sk);
-		const struct inet_sock *inet = inet_sk(sk);
+		struct inet_sock *inet = inet_sk(sk);
+		struct l2tp_ip_sock *l2tp = l2tp_ip_sk(sk);
 
-		if (!net_eq(sock_net(sk), net))
+		if (l2tp == NULL)
 			continue;
 
-		if (sk->sk_bound_dev_if && dif && sk->sk_bound_dev_if != dif)
-			continue;
-
-		if (inet->inet_rcv_saddr && laddr &&
-		    inet->inet_rcv_saddr != laddr)
-			continue;
-
-		if (inet->inet_daddr && raddr && inet->inet_daddr != raddr)
-			continue;
-
-		if (l2tp->conn_id != tunnel_id)
-			continue;
-
-		goto found;
+		if ((l2tp->conn_id == tunnel_id) &&
+		    net_eq(sock_net(sk), net) &&
+		    !(inet->inet_rcv_saddr && inet->inet_rcv_saddr != laddr) &&
+		    (!inet->inet_daddr || !raddr || inet->inet_daddr == raddr) &&
+		    (!sk->sk_bound_dev_if || !dif ||
+		     sk->sk_bound_dev_if == dif))
+			goto found;
 	}
 
 	sk = NULL;
@@ -274,7 +267,7 @@ static int l2tp_ip_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	if (!sock_flag(sk, SOCK_ZAPPED))
 		goto out;
 
-	if (sk->sk_state != TCP_CLOSE)
+	if (sk->sk_state != TCP_CLOSE || addr_len < sizeof(struct sockaddr_l2tpip))
 		goto out;
 
 	chk_addr_ret = inet_addr_type(net, addr->l2tp_addr.s_addr);

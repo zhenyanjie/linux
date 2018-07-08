@@ -134,7 +134,7 @@ void rds_rdma_drop_keys(struct rds_sock *rs)
 	/* Release any MRs associated with this socket */
 	spin_lock_irqsave(&rs->rs_rdma_lock, flags);
 	while ((node = rb_first(&rs->rs_rdma_keys))) {
-		mr = rb_entry(node, struct rds_mr, r_rb_node);
+		mr = container_of(node, struct rds_mr, r_rb_node);
 		if (mr->r_trans == rs->rs_transport)
 			mr->r_invalidate = 0;
 		rb_erase(&mr->r_rb_node, &rs->rs_rdma_keys);
@@ -183,7 +183,7 @@ static int __rds_rdma_map(struct rds_sock *rs, struct rds_get_mr_args *args,
 	long i;
 	int ret;
 
-	if (rs->rs_bound_addr == 0) {
+	if (rs->rs_bound_addr == 0 || !rs->rs_transport) {
 		ret = -ENOTCONN; /* XXX not a great errno */
 		goto out;
 	}
@@ -422,8 +422,7 @@ void rds_rdma_unuse(struct rds_sock *rs, u32 r_key, int force)
 	spin_lock_irqsave(&rs->rs_rdma_lock, flags);
 	mr = rds_mr_tree_walk(&rs->rs_rdma_keys, r_key, NULL);
 	if (!mr) {
-		pr_debug("rds: trying to unuse MR with unknown r_key %u!\n",
-			 r_key);
+		printk(KERN_ERR "rds: trying to unuse MR with unknown r_key %u!\n", r_key);
 		spin_unlock_irqrestore(&rs->rs_rdma_lock, flags);
 		return;
 	}
@@ -524,6 +523,9 @@ int rds_rdma_extra_size(struct rds_rdma_args *args)
 	unsigned int i;
 
 	local_vec = (struct rds_iovec __user *)(unsigned long) args->local_vec_addr;
+
+	if (args->nr_local == 0)
+		return -EINVAL;
 
 	/* figure out the number of pages in the vector */
 	for (i = 0; i < args->nr_local; i++) {
@@ -874,6 +876,7 @@ int rds_cmsg_atomic(struct rds_sock *rs, struct rds_message *rm,
 err:
 	if (page)
 		put_page(page);
+	rm->atomic.op_active = 0;
 	kfree(rm->atomic.op_notifier);
 
 	return ret;

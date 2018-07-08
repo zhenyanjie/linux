@@ -320,7 +320,10 @@ int __swap_writepage(struct page *page, struct writeback_control *wbc,
 		ret = -ENOMEM;
 		goto out;
 	}
-	bio->bi_opf = REQ_OP_WRITE | wbc_to_write_flags(wbc);
+	if (wbc->sync_mode == WB_SYNC_ALL)
+		bio_set_op_attrs(bio, REQ_OP_WRITE, REQ_SYNC);
+	else
+		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	count_vm_event(PSWPOUT);
 	set_page_writeback(page);
 	unlock_page(page);

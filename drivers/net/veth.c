@@ -23,6 +23,9 @@
 #define DRV_NAME	"veth"
 #define DRV_VERSION	"1.0"
 
+#define MIN_MTU 68		/* Min L3 MTU */
+#define MAX_MTU 65535		/* Max L3 MTU (arbitrary) */
+
 struct pcpu_vstats {
 	u64			packets;
 	u64			bytes;
@@ -158,8 +161,8 @@ static u64 veth_stats_one(struct pcpu_vstats *result, struct net_device *dev)
 	return atomic64_read(&priv->dropped);
 }
 
-static void veth_get_stats64(struct net_device *dev,
-			     struct rtnl_link_stats64 *tot)
+static struct rtnl_link_stats64 *veth_get_stats64(struct net_device *dev,
+						  struct rtnl_link_stats64 *tot)
 {
 	struct veth_priv *priv = netdev_priv(dev);
 	struct net_device *peer;
@@ -177,6 +180,8 @@ static void veth_get_stats64(struct net_device *dev,
 		tot->rx_packets = one.packets;
 	}
 	rcu_read_unlock();
+
+	return tot;
 }
 
 /* fake multicast ability */
@@ -211,9 +216,17 @@ static int veth_close(struct net_device *dev)
 	return 0;
 }
 
-static int is_valid_veth_mtu(int mtu)
+static int is_valid_veth_mtu(int new_mtu)
 {
-	return mtu >= ETH_MIN_MTU && mtu <= ETH_MAX_MTU;
+	return new_mtu >= MIN_MTU && new_mtu <= MAX_MTU;
+}
+
+static int veth_change_mtu(struct net_device *dev, int new_mtu)
+{
+	if (!is_valid_veth_mtu(new_mtu))
+		return -EINVAL;
+	dev->mtu = new_mtu;
+	return 0;
 }
 
 static int veth_dev_init(struct net_device *dev)
@@ -227,6 +240,7 @@ static int veth_dev_init(struct net_device *dev)
 static void veth_dev_free(struct net_device *dev)
 {
 	free_percpu(dev->vstats);
+	free_netdev(dev);
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -286,6 +300,7 @@ static const struct net_device_ops veth_netdev_ops = {
 	.ndo_open            = veth_open,
 	.ndo_stop            = veth_close,
 	.ndo_start_xmit      = veth_xmit,
+	.ndo_change_mtu      = veth_change_mtu,
 	.ndo_get_stats64     = veth_get_stats64,
 	.ndo_set_rx_mode     = veth_set_multicast_list,
 	.ndo_set_mac_address = eth_mac_addr,
@@ -321,9 +336,7 @@ static void veth_setup(struct net_device *dev)
 			       NETIF_F_HW_VLAN_STAG_TX |
 			       NETIF_F_HW_VLAN_CTAG_RX |
 			       NETIF_F_HW_VLAN_STAG_RX);
-	dev->needs_free_netdev = true;
-	dev->priv_destructor = veth_dev_free;
-	dev->max_mtu = ETH_MAX_MTU;
+	dev->destructor = veth_dev_free;
 
 	dev->hw_features = VETH_FEATURES;
 	dev->hw_enc_features = VETH_FEATURES;
@@ -411,6 +424,9 @@ static int veth_newlink(struct net *src_net, struct net_device *dev,
 
 	if (ifmp && (dev->ifindex != 0))
 		peer->ifindex = ifmp->ifi_index;
+
+	peer->gso_max_size = dev->gso_max_size;
+	peer->gso_max_segs = dev->gso_max_segs;
 
 	err = register_netdevice(peer);
 	put_net(net);

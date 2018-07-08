@@ -16,9 +16,7 @@
 #include <linux/export.h>
 #include <linux/vmalloc.h>
 #include <linux/uaccess.h>
-#include <linux/sched/stat.h>
-
-#include <asm/processor.h>
+#include <asm/fpu/internal.h> /* For use_eager_fpu.  Ugh! */
 #include <asm/user.h>
 #include <asm/fpu/xstate.h>
 #include "cpuid.h"
@@ -67,11 +65,6 @@ u64 kvm_supported_xcr0(void)
 
 #define F(x) bit(X86_FEATURE_##x)
 
-/* These are scattered features in cpufeatures.h. */
-#define KVM_CPUID_BIT_AVX512_4VNNIW     2
-#define KVM_CPUID_BIT_AVX512_4FMAPS     3
-#define KF(x) bit(KVM_CPUID_BIT_##x)
-
 int kvm_update_cpuid(struct kvm_vcpu *vcpu)
 {
 	struct kvm_cpuid_entry2 *best;
@@ -87,10 +80,6 @@ int kvm_update_cpuid(struct kvm_vcpu *vcpu)
 		if (kvm_read_cr4_bits(vcpu, X86_CR4_OSXSAVE))
 			best->ecx |= F(OSXSAVE);
 	}
-
-	best->edx &= ~F(APIC);
-	if (vcpu->arch.apic_base & MSR_IA32_APICBASE_ENABLE)
-		best->edx |= F(APIC);
 
 	if (apic) {
 		if (best->ecx & F(TSC_DEADLINE_TIMER))
@@ -124,6 +113,9 @@ int kvm_update_cpuid(struct kvm_vcpu *vcpu)
 	best = kvm_find_cpuid_entry(vcpu, 0xD, 1);
 	if (best && (best->eax & (F(XSAVES) | F(XSAVEC))))
 		best->ebx = xstate_required_size(vcpu->arch.xcr0, true);
+
+	if (use_eager_fpu())
+		kvm_x86_ops->fpu_activate(vcpu);
 
 	/*
 	 * The existing code assumes virtual address is 48-bit in the canonical
@@ -363,6 +355,10 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 		F(3DNOWPREFETCH) | F(OSVW) | 0 /* IBS */ | F(XOP) |
 		0 /* SKINIT, WDT, LWP */ | F(FMA4) | F(TBM);
 
+	/* cpuid 0x80000008.ebx */
+	const u32 kvm_cpuid_8000_0008_ebx_x86_features =
+		F(AMD_IBPB) | F(AMD_IBRS) | F(VIRT_SSBD);
+
 	/* cpuid 0xC0000001.edx */
 	const u32 kvm_cpuid_C000_0001_edx_x86_features =
 		F(XSTORE) | F(XSTORE_EN) | F(XCRYPT) | F(XCRYPT_EN) |
@@ -373,21 +369,20 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 	const u32 kvm_cpuid_7_0_ebx_x86_features =
 		F(FSGSBASE) | F(BMI1) | F(HLE) | F(AVX2) | F(SMEP) |
 		F(BMI2) | F(ERMS) | f_invpcid | F(RTM) | f_mpx | F(RDSEED) |
-		F(ADX) | F(SMAP) | F(AVX512IFMA) | F(AVX512F) | F(AVX512PF) |
-		F(AVX512ER) | F(AVX512CD) | F(CLFLUSHOPT) | F(CLWB) | F(AVX512DQ) |
-		F(SHA_NI) | F(AVX512BW) | F(AVX512VL);
+		F(ADX) | F(SMAP) | F(AVX512F) | F(AVX512PF) | F(AVX512ER) |
+		F(AVX512CD) | F(CLFLUSHOPT) | F(CLWB) | F(AVX512DQ) |
+		F(AVX512BW) | F(AVX512VL);
 
 	/* cpuid 0xD.1.eax */
 	const u32 kvm_cpuid_D_1_eax_x86_features =
 		F(XSAVEOPT) | F(XSAVEC) | F(XGETBV1) | f_xsaves;
 
 	/* cpuid 7.0.ecx*/
-	const u32 kvm_cpuid_7_0_ecx_x86_features =
-		F(AVX512VBMI) | F(PKU) | 0 /*OSPKE*/ | F(AVX512_VPOPCNTDQ);
+	const u32 kvm_cpuid_7_0_ecx_x86_features = F(PKU) | 0 /*OSPKE*/;
 
 	/* cpuid 7.0.edx*/
 	const u32 kvm_cpuid_7_0_edx_x86_features =
-		KF(AVX512_4VNNIW) | KF(AVX512_4FMAPS);
+		F(SPEC_CTRL) | F(SPEC_CTRL_SSBD) | F(ARCH_CAPABILITIES);
 
 	/* all calls to cpuid_count() should be made on the same cpu */
 	get_cpu();
@@ -469,10 +464,15 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 			entry->ecx &= kvm_cpuid_7_0_ecx_x86_features;
 			cpuid_mask(&entry->ecx, CPUID_7_ECX);
 			/* PKU is not yet implemented for shadow paging. */
-			if (!tdp_enabled)
+			if (!tdp_enabled || !boot_cpu_has(X86_FEATURE_OSPKE))
 				entry->ecx &= ~F(PKU);
 			entry->edx &= kvm_cpuid_7_0_edx_x86_features;
-			entry->edx &= get_scattered_cpuid_leaf(7, 0, CPUID_EDX);
+			cpuid_mask(&entry->edx, CPUID_7_EDX);
+			/*
+			 * We emulate ARCH_CAPABILITIES in software even
+			 * if the host doesn't support it.
+			 */
+			entry->edx |= F(ARCH_CAPABILITIES);
 		} else {
 			entry->ebx = 0;
 			entry->ecx = 0;
@@ -622,7 +622,21 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 		if (!g_phys_as)
 			g_phys_as = phys_as;
 		entry->eax = g_phys_as | (virt_as << 8);
-		entry->ebx = entry->edx = 0;
+		entry->edx = 0;
+		/*
+		 * IBRS, IBPB and VIRT_SSBD aren't necessarily present in
+		 * hardware cpuid
+		 */
+		if (boot_cpu_has(X86_FEATURE_AMD_IBPB))
+			entry->ebx |= F(AMD_IBPB);
+		if (boot_cpu_has(X86_FEATURE_AMD_IBRS))
+			entry->ebx |= F(AMD_IBRS);
+		if (boot_cpu_has(X86_FEATURE_VIRT_SSBD))
+			entry->ebx |= F(VIRT_SSBD);
+		entry->ebx &= kvm_cpuid_8000_0008_ebx_x86_features;
+		cpuid_mask(&entry->ebx, CPUID_8000_0008_EBX);
+		if (boot_cpu_has(X86_FEATURE_LS_CFG_SSBD))
+			entry->ebx |= F(VIRT_SSBD);
 		break;
 	}
 	case 0x80000019:
@@ -874,17 +888,17 @@ void kvm_cpuid(struct kvm_vcpu *vcpu, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
 }
 EXPORT_SYMBOL_GPL(kvm_cpuid);
 
-int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
+void kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 {
-	u32 eax, ebx, ecx, edx;
+	u32 function, eax, ebx, ecx, edx;
 
-	eax = kvm_register_read(vcpu, VCPU_REGS_RAX);
+	function = eax = kvm_register_read(vcpu, VCPU_REGS_RAX);
 	ecx = kvm_register_read(vcpu, VCPU_REGS_RCX);
 	kvm_cpuid(vcpu, &eax, &ebx, &ecx, &edx);
 	kvm_register_write(vcpu, VCPU_REGS_RAX, eax);
 	kvm_register_write(vcpu, VCPU_REGS_RBX, ebx);
 	kvm_register_write(vcpu, VCPU_REGS_RCX, ecx);
 	kvm_register_write(vcpu, VCPU_REGS_RDX, edx);
-	return kvm_skip_emulated_instruction(vcpu);
+	kvm_x86_ops->skip_emulated_instruction(vcpu);
 }
 EXPORT_SYMBOL_GPL(kvm_emulate_cpuid);

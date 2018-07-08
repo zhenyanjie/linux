@@ -6,9 +6,6 @@
  * Based on the DaVinci "glue layer" code.
  * Copyright (C) 2005-2006 by Texas Instruments
  *
- * DT support
- * Copyright (c) 2016 Petr Kulhavy <petr@barix.com>
- *
  * This file is part of the Inventra Controller Driver for Linux.
  *
  * The Inventra Controller Driver for Linux is free software; you
@@ -125,6 +122,7 @@ static void da8xx_musb_disable(struct musb *musb)
 	musb_writel(reg_base, DA8XX_USB_INTR_MASK_CLEAR_REG,
 		    DA8XX_INTR_USB_MASK |
 		    DA8XX_INTR_TX_MASK | DA8XX_INTR_RX_MASK);
+	musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
 	musb_writel(reg_base, DA8XX_USB_END_OF_INTR_REG, 0);
 }
 
@@ -304,7 +302,15 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 			musb->xceiv->otg->state = OTG_STATE_A_WAIT_VRISE;
 			portstate(musb->port1_status |= USB_PORT_STAT_POWER);
 			del_timer(&otg_workaround);
-		} else {
+		} else if (!(musb->int_usb & MUSB_INTR_BABBLE)){
+			/*
+			 * When babble condition happens, drvvbus interrupt
+			 * is also generated. Ignore this drvvbus interrupt
+			 * and let babble interrupt handler recovers the
+			 * controller; otherwise, the host-mode flag is lost
+			 * due to the MUSB_DEV_MODE() call below and babble
+			 * recovery logic will not called.
+			 */
 			musb->is_active = 0;
 			MUSB_DEV_MODE(musb);
 			otg->default_a = 0;
@@ -342,13 +348,6 @@ static int da8xx_musb_set_mode(struct musb *musb, u8 musb_mode)
 	struct da8xx_glue *glue = dev_get_drvdata(musb->controller->parent);
 	enum phy_mode phy_mode;
 
-	/*
-	 * The PHY has some issues when it is forced in device or host mode.
-	 * Unless the user request another mode, configure the PHY in OTG mode.
-	 */
-	if (!musb->is_initialized)
-		return phy_set_mode(glue->phy, PHY_MODE_USB_OTG);
-
 	switch (musb_mode) {
 	case MUSB_HOST:		/* Force VBUS valid, ID = 0 */
 		phy_mode = PHY_MODE_USB_HOST;
@@ -375,12 +374,6 @@ static int da8xx_musb_init(struct musb *musb)
 
 	musb->mregs += DA8XX_MENTOR_CORE_OFFSET;
 
-	ret = clk_prepare_enable(glue->clk);
-	if (ret) {
-		dev_err(glue->dev, "failed to enable clock\n");
-		return ret;
-	}
-
 	/* Returns zero if e.g. not clocked */
 	rev = musb_readl(reg_base, DA8XX_USB_REVISION_REG);
 	if (!rev)
@@ -389,6 +382,12 @@ static int da8xx_musb_init(struct musb *musb)
 	musb->xceiv = usb_get_phy(USB_PHY_TYPE_USB2);
 	if (IS_ERR_OR_NULL(musb->xceiv)) {
 		ret = -EPROBE_DEFER;
+		goto fail;
+	}
+
+	ret = clk_prepare_enable(glue->clk);
+	if (ret) {
+		dev_err(glue->dev, "failed to enable clock\n");
 		goto fail;
 	}
 
@@ -401,7 +400,7 @@ static int da8xx_musb_init(struct musb *musb)
 	ret = phy_init(glue->phy);
 	if (ret) {
 		dev_err(glue->dev, "Failed to init phy.\n");
-		goto fail;
+		goto err_phy_init;
 	}
 
 	ret = phy_power_on(glue->phy);
@@ -421,8 +420,9 @@ static int da8xx_musb_init(struct musb *musb)
 
 err_phy_power_on:
 	phy_exit(glue->phy);
-fail:
+err_phy_init:
 	clk_disable_unprepare(glue->clk);
+fail:
 	return ret;
 }
 
@@ -441,23 +441,8 @@ static int da8xx_musb_exit(struct musb *musb)
 	return 0;
 }
 
-static inline u8 get_vbus_power(struct device *dev)
-{
-	struct regulator *vbus_supply;
-	int current_uA;
-
-	vbus_supply = regulator_get_optional(dev, "vbus");
-	if (IS_ERR(vbus_supply))
-		return 255;
-	current_uA = regulator_get_current_limit(vbus_supply);
-	regulator_put(vbus_supply);
-	if (current_uA <= 0 || current_uA > 510000)
-		return 255;
-	return current_uA / 1000 / 2;
-}
-
 static const struct musb_platform_ops da8xx_ops = {
-	.quirks		= MUSB_INDEXED_EP | MUSB_PRESERVE_SESSION,
+	.quirks		= MUSB_INDEXED_EP,
 	.init		= da8xx_musb_init,
 	.exit		= da8xx_musb_exit,
 
@@ -477,12 +462,6 @@ static const struct platform_device_info da8xx_dev_info = {
 	.dma_mask	= DMA_BIT_MASK(32),
 };
 
-static const struct musb_hdrc_config da8xx_config = {
-	.ram_bits = 10,
-	.num_eps = 5,
-	.multipoint = 1,
-};
-
 static int da8xx_probe(struct platform_device *pdev)
 {
 	struct resource musb_resources[2];
@@ -490,7 +469,6 @@ static int da8xx_probe(struct platform_device *pdev)
 	struct da8xx_glue		*glue;
 	struct platform_device_info	pinfo;
 	struct clk			*clk;
-	struct device_node		*np = pdev->dev.of_node;
 	int				ret;
 
 	glue = devm_kzalloc(&pdev->dev, sizeof(*glue), GFP_KERNEL);
@@ -512,16 +490,6 @@ static int da8xx_probe(struct platform_device *pdev)
 
 	glue->dev			= &pdev->dev;
 	glue->clk			= clk;
-
-	if (IS_ENABLED(CONFIG_OF) && np) {
-		pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
-		if (!pdata)
-			return -ENOMEM;
-
-		pdata->config	= &da8xx_config;
-		pdata->mode	= musb_get_mode(&pdev->dev);
-		pdata->power	= get_vbus_power(&pdev->dev);
-	}
 
 	pdata->platform_ops		= &da8xx_ops;
 
@@ -573,51 +541,11 @@ static int da8xx_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int da8xx_suspend(struct device *dev)
-{
-	int ret;
-	struct da8xx_glue *glue = dev_get_drvdata(dev);
-
-	ret = phy_power_off(glue->phy);
-	if (ret)
-		return ret;
-	clk_disable_unprepare(glue->clk);
-
-	return 0;
-}
-
-static int da8xx_resume(struct device *dev)
-{
-	int ret;
-	struct da8xx_glue *glue = dev_get_drvdata(dev);
-
-	ret = clk_prepare_enable(glue->clk);
-	if (ret)
-		return ret;
-	return phy_power_on(glue->phy);
-}
-#endif
-
-static SIMPLE_DEV_PM_OPS(da8xx_pm_ops, da8xx_suspend, da8xx_resume);
-
-#ifdef CONFIG_OF
-static const struct of_device_id da8xx_id_table[] = {
-	{
-		.compatible = "ti,da830-musb",
-	},
-	{},
-};
-MODULE_DEVICE_TABLE(of, da8xx_id_table);
-#endif
-
 static struct platform_driver da8xx_driver = {
 	.probe		= da8xx_probe,
 	.remove		= da8xx_remove,
 	.driver		= {
 		.name	= "musb-da8xx",
-		.pm = &da8xx_pm_ops,
-		.of_match_table = of_match_ptr(da8xx_id_table),
 	},
 };
 

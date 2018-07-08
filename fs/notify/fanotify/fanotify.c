@@ -6,7 +6,6 @@
 #include <linux/kernel.h> /* UINT_MAX */
 #include <linux/mount.h>
 #include <linux/sched.h>
-#include <linux/sched/user.h>
 #include <linux/types.h>
 #include <linux/wait.h>
 
@@ -32,6 +31,7 @@ static bool should_merge(struct fsnotify_event *old_fsn,
 static int fanotify_merge(struct list_head *list, struct fsnotify_event *event)
 {
 	struct fsnotify_event *test_event;
+	bool do_merge = false;
 
 	pr_debug("%s: list=%p event=%p\n", __func__, list, event);
 
@@ -47,12 +47,16 @@ static int fanotify_merge(struct list_head *list, struct fsnotify_event *event)
 
 	list_for_each_entry_reverse(test_event, list, list) {
 		if (should_merge(test_event, event)) {
-			test_event->mask |= event->mask;
-			return 1;
+			do_merge = true;
+			break;
 		}
 	}
 
-	return 0;
+	if (!do_merge)
+		return 0;
+
+	test_event->mask |= event->mask;
+	return 1;
 }
 
 #ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
@@ -86,10 +90,10 @@ static int fanotify_get_response(struct fsnotify_group *group,
 static bool fanotify_should_send_event(struct fsnotify_mark *inode_mark,
 				       struct fsnotify_mark *vfsmnt_mark,
 				       u32 event_mask,
-				       const void *data, int data_type)
+				       void *data, int data_type)
 {
-	__u32 marks_mask, marks_ignored_mask;
-	const struct path *path = data;
+	__u32 marks_mask = 0, marks_ignored_mask = 0;
+	struct path *path = data;
 
 	pr_debug("%s: inode_mark=%p vfsmnt_mark=%p mask=%x data=%p"
 		 " data_type=%d\n", __func__, inode_mark, vfsmnt_mark,
@@ -104,24 +108,20 @@ static bool fanotify_should_send_event(struct fsnotify_mark *inode_mark,
 	    !d_can_lookup(path->dentry))
 		return false;
 
-	if (inode_mark && vfsmnt_mark) {
-		marks_mask = (vfsmnt_mark->mask | inode_mark->mask);
-		marks_ignored_mask = (vfsmnt_mark->ignored_mask | inode_mark->ignored_mask);
-	} else if (inode_mark) {
-		/*
-		 * if the event is for a child and this inode doesn't care about
-		 * events on the child, don't send it!
-		 */
-		if ((event_mask & FS_EVENT_ON_CHILD) &&
-		    !(inode_mark->mask & FS_EVENT_ON_CHILD))
-			return false;
-		marks_mask = inode_mark->mask;
-		marks_ignored_mask = inode_mark->ignored_mask;
-	} else if (vfsmnt_mark) {
-		marks_mask = vfsmnt_mark->mask;
-		marks_ignored_mask = vfsmnt_mark->ignored_mask;
-	} else {
-		BUG();
+	/*
+	 * if the event is for a child and this inode doesn't care about
+	 * events on the child, don't send it!
+	 */
+	if (inode_mark &&
+	    (!(event_mask & FS_EVENT_ON_CHILD) ||
+	     (inode_mark->mask & FS_EVENT_ON_CHILD))) {
+		marks_mask |= inode_mark->mask;
+		marks_ignored_mask |= inode_mark->ignored_mask;
+	}
+
+	if (vfsmnt_mark) {
+		marks_mask |= vfsmnt_mark->mask;
+		marks_ignored_mask |= vfsmnt_mark->ignored_mask;
 	}
 
 	if (d_is_dir(path->dentry) &&
@@ -136,7 +136,7 @@ static bool fanotify_should_send_event(struct fsnotify_mark *inode_mark,
 }
 
 struct fanotify_event_info *fanotify_alloc_event(struct inode *inode, u32 mask,
-						 const struct path *path)
+						 struct path *path)
 {
 	struct fanotify_event_info *event;
 
@@ -173,7 +173,7 @@ static int fanotify_handle_event(struct fsnotify_group *group,
 				 struct inode *inode,
 				 struct fsnotify_mark *inode_mark,
 				 struct fsnotify_mark *fanotify_mark,
-				 u32 mask, const void *data, int data_type,
+				 u32 mask, void *data, int data_type,
 				 const unsigned char *file_name, u32 cookie)
 {
 	int ret = 0;

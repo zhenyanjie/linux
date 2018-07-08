@@ -17,7 +17,6 @@
 
 
 #include "msm_drv.h"
-#include "msm_gem.h"
 #include "msm_mmu.h"
 #include "mdp4_kms.h"
 
@@ -160,17 +159,16 @@ static void mdp4_destroy(struct msm_kms *kms)
 {
 	struct mdp4_kms *mdp4_kms = to_mdp4_kms(to_mdp_kms(kms));
 	struct device *dev = mdp4_kms->dev->dev;
-	struct msm_gem_address_space *aspace = mdp4_kms->aspace;
+	struct msm_mmu *mmu = mdp4_kms->mmu;
+
+	if (mmu) {
+		mmu->funcs->detach(mmu, iommu_ports, ARRAY_SIZE(iommu_ports));
+		mmu->funcs->destroy(mmu);
+	}
 
 	if (mdp4_kms->blank_cursor_iova)
 		msm_gem_put_iova(mdp4_kms->blank_cursor_bo, mdp4_kms->id);
 	drm_gem_object_unreference_unlocked(mdp4_kms->blank_cursor_bo);
-
-	if (aspace) {
-		aspace->mmu->funcs->detach(aspace->mmu,
-				iommu_ports, ARRAY_SIZE(iommu_ports));
-		msm_gem_address_space_destroy(aspace);
-	}
 
 	if (mdp4_kms->rpm_enabled)
 		pm_runtime_disable(dev);
@@ -260,7 +258,8 @@ static int mdp4_modeset_init_intf(struct mdp4_kms *mdp4_kms,
 	struct drm_encoder *encoder;
 	struct drm_connector *connector;
 	struct device_node *panel_node;
-	int dsi_id;
+	struct drm_encoder *dsi_encs[MSM_DSI_ENCODER_NUM];
+	int i, dsi_id;
 	int ret;
 
 	switch (intf_type) {
@@ -321,19 +320,22 @@ static int mdp4_modeset_init_intf(struct mdp4_kms *mdp4_kms,
 		if (!priv->dsi[dsi_id])
 			break;
 
-		encoder = mdp4_dsi_encoder_init(dev);
-		if (IS_ERR(encoder)) {
-			ret = PTR_ERR(encoder);
-			dev_err(dev->dev,
-				"failed to construct DSI encoder: %d\n", ret);
-			return ret;
+		for (i = 0; i < MSM_DSI_ENCODER_NUM; i++) {
+			dsi_encs[i] = mdp4_dsi_encoder_init(dev);
+			if (IS_ERR(dsi_encs[i])) {
+				ret = PTR_ERR(dsi_encs[i]);
+				dev_err(dev->dev,
+					"failed to construct DSI encoder: %d\n",
+					ret);
+				return ret;
+			}
+
+			/* TODO: Add DMA_S later? */
+			dsi_encs[i]->possible_crtcs = 1 << DMA_P;
+			priv->encoders[priv->num_encoders++] = dsi_encs[i];
 		}
 
-		/* TODO: Add DMA_S later? */
-		encoder->possible_crtcs = 1 << DMA_P;
-		priv->encoders[priv->num_encoders++] = encoder;
-
-		ret = msm_dsi_modeset_init(priv->dsi[dsi_id], dev, encoder);
+		ret = msm_dsi_modeset_init(priv->dsi[dsi_id], dev, dsi_encs);
 		if (ret) {
 			dev_err(dev->dev, "failed to initialize DSI: %d\n",
 				ret);
@@ -438,7 +440,7 @@ struct msm_kms *mdp4_kms_init(struct drm_device *dev)
 	struct mdp4_platform_config *config = mdp4_get_config(pdev);
 	struct mdp4_kms *mdp4_kms;
 	struct msm_kms *kms = NULL;
-	struct msm_gem_address_space *aspace;
+	struct msm_mmu *mmu;
 	int irq, ret;
 
 	mdp4_kms = kzalloc(sizeof(*mdp4_kms), GFP_KERNEL);
@@ -529,26 +531,24 @@ struct msm_kms *mdp4_kms_init(struct drm_device *dev)
 	mdelay(16);
 
 	if (config->iommu) {
-		aspace = msm_gem_address_space_create(&pdev->dev,
-				config->iommu, "mdp4");
-		if (IS_ERR(aspace)) {
-			ret = PTR_ERR(aspace);
+		mmu = msm_iommu_new(&pdev->dev, config->iommu);
+		if (IS_ERR(mmu)) {
+			ret = PTR_ERR(mmu);
 			goto fail;
 		}
-
-		mdp4_kms->aspace = aspace;
-
-		ret = aspace->mmu->funcs->attach(aspace->mmu, iommu_ports,
+		ret = mmu->funcs->attach(mmu, iommu_ports,
 				ARRAY_SIZE(iommu_ports));
 		if (ret)
 			goto fail;
+
+		mdp4_kms->mmu = mmu;
 	} else {
 		dev_info(dev->dev, "no iommu, fallback to phys "
 				"contig buffers for scanout\n");
-		aspace = NULL;
+		mmu = NULL;
 	}
 
-	mdp4_kms->id = msm_register_address_space(dev, aspace);
+	mdp4_kms->id = msm_register_mmu(dev, mmu);
 	if (mdp4_kms->id < 0) {
 		ret = mdp4_kms->id;
 		dev_err(dev->dev, "failed to register mdp4 iommu: %d\n", ret);
@@ -598,10 +598,6 @@ static struct mdp4_platform_config *mdp4_get_config(struct platform_device *dev)
 	/* TODO: Chips that aren't apq8064 have a 200 Mhz max_clk */
 	config.max_clk = 266667000;
 	config.iommu = iommu_domain_alloc(&platform_bus_type);
-	if (config.iommu) {
-		config.iommu->geometry.aperture_start = 0x1000;
-		config.iommu->geometry.aperture_end = 0xffffffff;
-	}
 
 	return &config;
 }

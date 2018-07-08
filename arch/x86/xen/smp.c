@@ -18,7 +18,6 @@
 #include <linux/smp.h>
 #include <linux/irq_work.h>
 #include <linux/tick.h>
-#include <linux/nmi.h>
 
 #include <asm/paravirt.h>
 #include <asm/desc.h>
@@ -100,8 +99,18 @@ static void cpu_bringup(void)
 	local_irq_enable();
 }
 
-asmlinkage __visible void cpu_bringup_and_idle(void)
+/*
+ * Note: cpu parameter is only relevant for PVH. The reason for passing it
+ * is we can't do smp_processor_id until the percpu segments are loaded, for
+ * which we need the cpu number! So we pass it in rdi as first parameter.
+ */
+asmlinkage __visible void cpu_bringup_and_idle(int cpu)
 {
+#ifdef CONFIG_XEN_PVH
+	if (xen_feature(XENFEAT_auto_translated_physmap) &&
+	    xen_feature(XENFEAT_supervisor_mode_kernel))
+		xen_pvh_secondary_vcpu_init(cpu);
+#endif
 	cpu_bringup();
 	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
 }
@@ -290,35 +299,46 @@ static void __init xen_filter_cpu_maps(void)
 
 }
 
-static void __init xen_smp_prepare_boot_cpu(void)
+static void __init xen_pv_smp_prepare_boot_cpu(void)
 {
 	BUG_ON(smp_processor_id() != 0);
 	native_smp_prepare_boot_cpu();
 
-	if (xen_pv_domain()) {
-		if (!xen_feature(XENFEAT_writable_page_tables))
-			/* We've switched to the "real" per-cpu gdt, so make
-			 * sure the old memory can be recycled. */
-			make_lowmem_page_readwrite(xen_initial_gdt);
+	if (!xen_feature(XENFEAT_writable_page_tables))
+		/* We've switched to the "real" per-cpu gdt, so make
+		 * sure the old memory can be recycled. */
+		make_lowmem_page_readwrite(xen_initial_gdt);
 
 #ifdef CONFIG_X86_32
-		/*
-		 * Xen starts us with XEN_FLAT_RING1_DS, but linux code
-		 * expects __USER_DS
-		 */
-		loadsegment(ds, __USER_DS);
-		loadsegment(es, __USER_DS);
+	/*
+	 * Xen starts us with XEN_FLAT_RING1_DS, but linux code
+	 * expects __USER_DS
+	 */
+	loadsegment(ds, __USER_DS);
+	loadsegment(es, __USER_DS);
 #endif
 
-		xen_filter_cpu_maps();
-		xen_setup_vcpu_info_placement();
-	}
+	xen_filter_cpu_maps();
+	xen_setup_vcpu_info_placement();
+
+	/*
+	 * The alternative logic (which patches the unlock/lock) runs before
+	 * the smp bootup up code is activated. Hence we need to set this up
+	 * the core kernel is being patched. Otherwise we will have only
+	 * modules patched but not core code.
+	 */
+	xen_init_spinlocks();
+}
+
+static void __init xen_hvm_smp_prepare_boot_cpu(void)
+{
+	BUG_ON(smp_processor_id() != 0);
+	native_smp_prepare_boot_cpu();
 
 	/*
 	 * Setup vcpu_info for boot CPU.
 	 */
-	if (xen_hvm_domain())
-		xen_vcpu_setup(0);
+	xen_vcpu_setup(0);
 
 	/*
 	 * The alternative logic (which patches the unlock/lock) runs before
@@ -395,47 +415,61 @@ cpu_initialize_context(unsigned int cpu, struct task_struct *idle)
 	gdt = get_cpu_gdt_table(cpu);
 
 #ifdef CONFIG_X86_32
+	/* Note: PVH is not yet supported on x86_32. */
 	ctxt->user_regs.fs = __KERNEL_PERCPU;
 	ctxt->user_regs.gs = __KERNEL_STACK_CANARY;
 #endif
 	memset(&ctxt->fpu_ctxt, 0, sizeof(ctxt->fpu_ctxt));
 
-	ctxt->user_regs.eip = (unsigned long)cpu_bringup_and_idle;
-	ctxt->flags = VGCF_IN_KERNEL;
-	ctxt->user_regs.eflags = 0x1000; /* IOPL_RING1 */
-	ctxt->user_regs.ds = __USER_DS;
-	ctxt->user_regs.es = __USER_DS;
-	ctxt->user_regs.ss = __KERNEL_DS;
+	if (!xen_feature(XENFEAT_auto_translated_physmap)) {
+		ctxt->user_regs.eip = (unsigned long)cpu_bringup_and_idle;
+		ctxt->flags = VGCF_IN_KERNEL;
+		ctxt->user_regs.eflags = 0x1000; /* IOPL_RING1 */
+		ctxt->user_regs.ds = __USER_DS;
+		ctxt->user_regs.es = __USER_DS;
+		ctxt->user_regs.ss = __KERNEL_DS;
 
-	xen_copy_trap_info(ctxt->trap_ctxt);
+		xen_copy_trap_info(ctxt->trap_ctxt);
 
-	ctxt->ldt_ents = 0;
+		ctxt->ldt_ents = 0;
 
-	BUG_ON((unsigned long)gdt & ~PAGE_MASK);
+		BUG_ON((unsigned long)gdt & ~PAGE_MASK);
 
-	gdt_mfn = arbitrary_virt_to_mfn(gdt);
-	make_lowmem_page_readonly(gdt);
-	make_lowmem_page_readonly(mfn_to_virt(gdt_mfn));
+		gdt_mfn = arbitrary_virt_to_mfn(gdt);
+		make_lowmem_page_readonly(gdt);
+		make_lowmem_page_readonly(mfn_to_virt(gdt_mfn));
 
-	ctxt->gdt_frames[0] = gdt_mfn;
-	ctxt->gdt_ents      = GDT_ENTRIES;
+		ctxt->gdt_frames[0] = gdt_mfn;
+		ctxt->gdt_ents      = GDT_ENTRIES;
 
-	ctxt->kernel_ss = __KERNEL_DS;
-	ctxt->kernel_sp = idle->thread.sp0;
+		ctxt->kernel_ss = __KERNEL_DS;
+		ctxt->kernel_sp = idle->thread.sp0;
 
 #ifdef CONFIG_X86_32
-	ctxt->event_callback_cs     = __KERNEL_CS;
-	ctxt->failsafe_callback_cs  = __KERNEL_CS;
+		ctxt->event_callback_cs     = __KERNEL_CS;
+		ctxt->failsafe_callback_cs  = __KERNEL_CS;
 #else
-	ctxt->gs_base_kernel = per_cpu_offset(cpu);
+		ctxt->gs_base_kernel = per_cpu_offset(cpu);
 #endif
-	ctxt->event_callback_eip    =
-		(unsigned long)xen_hypervisor_callback;
-	ctxt->failsafe_callback_eip =
-		(unsigned long)xen_failsafe_callback;
-	ctxt->user_regs.cs = __KERNEL_CS;
-	per_cpu(xen_cr3, cpu) = __pa(swapper_pg_dir);
-
+		ctxt->event_callback_eip    =
+					(unsigned long)xen_hypervisor_callback;
+		ctxt->failsafe_callback_eip =
+					(unsigned long)xen_failsafe_callback;
+		ctxt->user_regs.cs = __KERNEL_CS;
+		per_cpu(xen_cr3, cpu) = __pa(swapper_pg_dir);
+	}
+#ifdef CONFIG_XEN_PVH
+	else {
+		/*
+		 * The vcpu comes on kernel page tables which have the NX pte
+		 * bit set. This means before DS/SS is touched, NX in
+		 * EFER must be set. Hence the following assembly glue code.
+		 */
+		ctxt->user_regs.eip = (unsigned long)xen_pvh_early_cpu_init;
+		ctxt->user_regs.rdi = cpu;
+		ctxt->user_regs.rsi = true;  /* entry == true */
+	}
+#endif
 	ctxt->user_regs.esp = idle->thread.sp0 - sizeof(struct pt_regs);
 	ctxt->ctrlreg[3] = xen_pfn_to_cr3(virt_to_gfn(swapper_pg_dir));
 	if (HYPERVISOR_vcpu_op(VCPUOP_initialise, xen_vcpu_nr(cpu), ctxt))
@@ -710,7 +744,7 @@ static irqreturn_t xen_irq_work_interrupt(int irq, void *dev_id)
 }
 
 static const struct smp_ops xen_smp_ops __initconst = {
-	.smp_prepare_boot_cpu = xen_smp_prepare_boot_cpu,
+	.smp_prepare_boot_cpu = xen_pv_smp_prepare_boot_cpu,
 	.smp_prepare_cpus = xen_smp_prepare_cpus,
 	.smp_cpus_done = xen_smp_cpus_done,
 
@@ -749,5 +783,5 @@ void __init xen_hvm_smp_init(void)
 	smp_ops.cpu_die = xen_cpu_die;
 	smp_ops.send_call_func_ipi = xen_smp_send_call_function_ipi;
 	smp_ops.send_call_func_single_ipi = xen_smp_send_call_function_single_ipi;
-	smp_ops.smp_prepare_boot_cpu = xen_smp_prepare_boot_cpu;
+	smp_ops.smp_prepare_boot_cpu = xen_hvm_smp_prepare_boot_cpu;
 }

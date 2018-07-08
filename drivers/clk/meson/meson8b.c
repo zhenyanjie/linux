@@ -1,5 +1,6 @@
 /*
- * AmLogic S805 / Meson8b Clock Controller Driver
+ * AmLogic S802 (Meson8) / S805 (Meson8b) / S812 (Meson8m2) Clock Controller
+ * Driver
  *
  * Copyright (c) 2015 Endless Mobile, Inc.
  * Author: Carlo Caione <carlo@endlessm.com>
@@ -607,6 +608,7 @@ static int meson8b_clkc_probe(struct platform_device *pdev)
 	/* Populate the base address for the MPEG clks */
 	meson8b_mpeg_clk_sel.reg = clk_base + (u32)meson8b_mpeg_clk_sel.reg;
 	meson8b_mpeg_clk_div.reg = clk_base + (u32)meson8b_mpeg_clk_div.reg;
+	meson8b_clk81.reg = clk_base + (u32)meson8b_clk81.reg;
 
 	/* Populate base address for gates */
 	for (i = 0; i < ARRAY_SIZE(meson8b_clk_gates); i++)
@@ -660,7 +662,9 @@ iounmap:
 }
 
 static const struct of_device_id meson8b_clkc_match_table[] = {
+	{ .compatible = "amlogic,meson8-clkc" },
 	{ .compatible = "amlogic,meson8b-clkc" },
+	{ .compatible = "amlogic,meson8m2-clkc" },
 	{ }
 };
 

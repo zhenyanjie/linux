@@ -74,7 +74,7 @@ static void bnx2fc_cmd_timeout(struct work_struct *work)
 				    &io_req->req_flags)) {
 			/* Handle internally generated ABTS timeout */
 			BNX2FC_IO_DBG(io_req, "ABTS timed out refcnt = %d\n",
-					kref_read(&io_req->refcount));
+					io_req->refcount.refcount.counter);
 			if (!(test_and_set_bit(BNX2FC_FLAG_ABTS_DONE,
 					       &io_req->req_flags))) {
 				/*
@@ -1141,7 +1141,7 @@ int bnx2fc_eh_abort(struct scsi_cmnd *sc_cmd)
 		return SUCCESS;
 	}
 	BNX2FC_IO_DBG(io_req, "eh_abort - refcnt = %d\n",
-		      kref_read(&io_req->refcount));
+		      io_req->refcount.refcount.counter);
 
 	/* Hold IO request across abort processing */
 	kref_get(&io_req->refcount);
@@ -1299,7 +1299,7 @@ void bnx2fc_process_cleanup_compl(struct bnx2fc_cmd *io_req,
 {
 	BNX2FC_IO_DBG(io_req, "Entered process_cleanup_compl "
 			      "refcnt = %d, cmd_type = %d\n",
-		   kref_read(&io_req->refcount), io_req->cmd_type);
+		   io_req->refcount.refcount.counter, io_req->cmd_type);
 	bnx2fc_scsi_done(io_req, DID_ERROR);
 	kref_put(&io_req->refcount, bnx2fc_cmd_release);
 	if (io_req->wait_for_comp)
@@ -1318,7 +1318,7 @@ void bnx2fc_process_abts_compl(struct bnx2fc_cmd *io_req,
 	BNX2FC_IO_DBG(io_req, "Entered process_abts_compl xid = 0x%x"
 			      "refcnt = %d, cmd_type = %d\n",
 		   io_req->xid,
-		   kref_read(&io_req->refcount), io_req->cmd_type);
+		   io_req->refcount.refcount.counter, io_req->cmd_type);
 
 	if (test_and_set_bit(BNX2FC_FLAG_ABTS_DONE,
 				       &io_req->req_flags)) {
@@ -1869,6 +1869,7 @@ void bnx2fc_process_scsi_cmd_compl(struct bnx2fc_cmd *io_req,
 		/* we will not receive ABTS response for this IO */
 		BNX2FC_IO_DBG(io_req, "Timer context finished processing "
 			   "this scsi cmd\n");
+		return;
 	}
 
 	/* Cancel the timeout_work, as we received IO completion */

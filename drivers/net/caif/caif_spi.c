@@ -712,7 +712,7 @@ static void cfspi_setup(struct net_device *dev)
 	dev->flags = IFF_NOARP | IFF_POINTOPOINT;
 	dev->priv_flags |= IFF_NO_QUEUE;
 	dev->mtu = SPI_MAX_PAYLOAD_SIZE;
-	dev->needs_free_netdev = true;
+	dev->destructor = free_netdev;
 	skb_queue_head_init(&cfspi->qhead);
 	skb_queue_head_init(&cfspi->chead);
 	cfspi->cfdev.link_select = CAIF_LINK_HIGH_BANDW;

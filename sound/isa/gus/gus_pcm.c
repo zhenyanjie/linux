@@ -27,8 +27,6 @@
 
 #include <asm/dma.h>
 #include <linux/slab.h>
-#include <linux/sched/signal.h>
-
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/gus.h>

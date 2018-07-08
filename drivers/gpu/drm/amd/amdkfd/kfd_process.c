@@ -23,7 +23,6 @@
 #include <linux/mutex.h>
 #include <linux/log2.h>
 #include <linux/sched.h>
-#include <linux/sched/mm.h>
 #include <linux/slab.h>
 #include <linux/amd-iommu.h>
 #include <linux/notifier.h>
@@ -263,7 +262,7 @@ static void kfd_process_notifier_release(struct mmu_notifier *mn,
 	 * and because the mmu_notifier_unregister function also drop
 	 * mm_count we need to take an extra count here.
 	 */
-	mmgrab(p->mm);
+	atomic_inc(&p->mm->mm_count);
 	mmu_notifier_unregister_no_release(&p->mmu_notifier, p->mm);
 	mmu_notifier_call_srcu(&p->rcu, &kfd_process_destroy_delayed);
 }
@@ -318,7 +317,8 @@ static struct kfd_process *create_process(const struct task_struct *thread)
 
 	/* init process apertures*/
 	process->is_32bit_user_mode = in_compat_syscall();
-	if (kfd_init_apertures(process) != 0)
+	err = kfd_init_apertures(process);
+	if (err != 0)
 		goto err_init_apretures;
 
 	return process;

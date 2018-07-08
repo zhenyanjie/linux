@@ -16,8 +16,6 @@
 
 #include <linux/spinlock.h>
 #include <linux/shmem_fs.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/task.h>
 
 #include "etnaviv_drv.h"
 #include "etnaviv_gem.h"
@@ -177,9 +175,8 @@ int etnaviv_gem_mmap(struct file *filp, struct vm_area_struct *vma)
 	return obj->ops->mmap(obj, vma);
 }
 
-int etnaviv_gem_fault(struct vm_fault *vmf)
+int etnaviv_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct vm_area_struct *vma = vmf->vma;
 	struct drm_gem_object *obj = vma->vm_private_data;
 	struct etnaviv_gem_object *etnaviv_obj = to_etnaviv_bo(obj);
 	struct page **pages, *page;
@@ -205,14 +202,15 @@ int etnaviv_gem_fault(struct vm_fault *vmf)
 	}
 
 	/* We don't use vmf->pgoff since that has the fake offset: */
-	pgoff = (vmf->address - vma->vm_start) >> PAGE_SHIFT;
+	pgoff = ((unsigned long)vmf->virtual_address -
+			vma->vm_start) >> PAGE_SHIFT;
 
 	page = pages[pgoff];
 
-	VERB("Inserting %p pfn %lx, pa %lx", (void *)vmf->address,
+	VERB("Inserting %p pfn %lx, pa %lx", vmf->virtual_address,
 	     page_to_pfn(page), page_to_pfn(page) << PAGE_SHIFT);
 
-	ret = vm_insert_page(vma, vmf->address, page);
+	ret = vm_insert_page(vma, (unsigned long)vmf->virtual_address, page);
 
 out:
 	switch (ret) {
@@ -411,16 +409,20 @@ int etnaviv_gem_cpu_prep(struct drm_gem_object *obj, u32 op,
 	struct etnaviv_gem_object *etnaviv_obj = to_etnaviv_bo(obj);
 	struct drm_device *dev = obj->dev;
 	bool write = !!(op & ETNA_PREP_WRITE);
-	unsigned long remain =
-		op & ETNA_PREP_NOSYNC ? 0 : etnaviv_timeout_to_jiffies(timeout);
-	long lret;
+	int ret;
 
-	lret = reservation_object_wait_timeout_rcu(etnaviv_obj->resv,
-						   write, true, remain);
-	if (lret < 0)
-		return lret;
-	else if (lret == 0)
-		return remain == 0 ? -EBUSY : -ETIMEDOUT;
+	if (op & ETNA_PREP_NOSYNC) {
+		if (!reservation_object_test_signaled_rcu(etnaviv_obj->resv,
+							  write))
+			return -EBUSY;
+	} else {
+		unsigned long remain = etnaviv_timeout_to_jiffies(timeout);
+
+		ret = reservation_object_wait_timeout_rcu(etnaviv_obj->resv,
+							  write, true, remain);
+		if (ret <= 0)
+			return ret == 0 ? -ETIMEDOUT : ret;
+	}
 
 	if (etnaviv_obj->flags & ETNA_BO_CACHED) {
 		if (!etnaviv_obj->sgt) {
@@ -468,10 +470,10 @@ int etnaviv_gem_wait_bo(struct etnaviv_gpu *gpu, struct drm_gem_object *obj,
 }
 
 #ifdef CONFIG_DEBUG_FS
-static void etnaviv_gem_describe_fence(struct dma_fence *fence,
+static void etnaviv_gem_describe_fence(struct fence *fence,
 	const char *type, struct seq_file *m)
 {
-	if (!test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &fence->flags))
+	if (!test_bit(FENCE_FLAG_SIGNALED_BIT, &fence->flags))
 		seq_printf(m, "\t%9s: %s %s seq %u\n",
 			   type,
 			   fence->ops->get_driver_name(fence),
@@ -484,12 +486,12 @@ static void etnaviv_gem_describe(struct drm_gem_object *obj, struct seq_file *m)
 	struct etnaviv_gem_object *etnaviv_obj = to_etnaviv_bo(obj);
 	struct reservation_object *robj = etnaviv_obj->resv;
 	struct reservation_object_list *fobj;
-	struct dma_fence *fence;
+	struct fence *fence;
 	unsigned long off = drm_vma_node_start(&obj->vma_node);
 
 	seq_printf(m, "%08x: %c %2d (%2d) %08lx %p %zd\n",
 			etnaviv_obj->flags, is_active(etnaviv_obj) ? 'A' : 'I',
-			obj->name, kref_read(&obj->refcount),
+			obj->name, obj->refcount.refcount.counter,
 			off, etnaviv_obj->vaddr, obj->size);
 
 	rcu_read_lock();
@@ -547,12 +549,15 @@ static const struct etnaviv_gem_ops etnaviv_gem_shmem_ops = {
 void etnaviv_gem_free_object(struct drm_gem_object *obj)
 {
 	struct etnaviv_gem_object *etnaviv_obj = to_etnaviv_bo(obj);
+	struct etnaviv_drm_private *priv = obj->dev->dev_private;
 	struct etnaviv_vram_mapping *mapping, *tmp;
 
 	/* object should not be active */
 	WARN_ON(is_active(etnaviv_obj));
 
+	mutex_lock(&priv->gem_lock);
 	list_del(&etnaviv_obj->gem_node);
+	mutex_unlock(&priv->gem_lock);
 
 	list_for_each_entry_safe(mapping, tmp, &etnaviv_obj->vram_list,
 				 obj_node) {
@@ -761,7 +766,7 @@ static struct page **etnaviv_gem_userptr_do_get_pages(
 	down_read(&mm->mmap_sem);
 	while (pinned < npages) {
 		ret = get_user_pages_remote(task, mm, ptr, npages - pinned,
-					    flags, pvec + pinned, NULL, NULL);
+					    flags, pvec + pinned, NULL);
 		if (ret < 0)
 			break;
 

@@ -104,7 +104,7 @@ static void *vb2_vmalloc_get_userptr(struct device *dev, unsigned long vaddr,
 			if (nums[i-1] + 1 != nums[i])
 				goto fail_map;
 		buf->vaddr = (__force void *)
-				ioremap_nocache(nums[0] << PAGE_SHIFT, size);
+			ioremap_nocache(__pfn_to_phys(nums[0]), size + offset);
 	} else {
 		buf->vaddr = vm_map_ram(frame_vector_pages(vec), n_pages, -1,
 					PAGE_KERNEL);
@@ -151,7 +151,8 @@ static void *vb2_vmalloc_vaddr(void *buf_priv)
 	struct vb2_vmalloc_buf *buf = buf_priv;
 
 	if (!buf->vaddr) {
-		pr_err("Address of an unallocated plane requested or cannot map user pointer\n");
+		pr_err("Address of an unallocated plane requested "
+		       "or cannot map user pointer\n");
 		return NULL;
 	}
 

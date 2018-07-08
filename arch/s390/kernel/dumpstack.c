@@ -14,8 +14,6 @@
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task_stack.h>
 #include <asm/processor.h>
 #include <asm/debug.h>
 #include <asm/dis.h>

@@ -31,7 +31,7 @@
 
 static struct raw3270_fn con3270_fn;
 
-static bool auto_update = true;
+static bool auto_update = 1;
 module_param(auto_update, bool, 0);
 
 /*

@@ -139,8 +139,14 @@ struct perf_session *perf_session__new(struct perf_data_file *file,
 			if (perf_session__open(session) < 0)
 				goto out_close;
 
-			perf_session__set_id_hdr_size(session);
-			perf_session__set_comm_exec(session);
+			/*
+			 * set session attributes that are present in perf.data
+			 * but not in pipe-mode.
+			 */
+			if (!file->is_pipe) {
+				perf_session__set_id_hdr_size(session);
+				perf_session__set_comm_exec(session);
+			}
 		}
 	} else  {
 		session->machines.host.env = &perf_env;
@@ -155,7 +161,11 @@ struct perf_session *perf_session__new(struct perf_data_file *file,
 			pr_warning("Cannot read kernel map\n");
 	}
 
-	if (tool && tool->ordering_requires_timestamps &&
+	/*
+	 * In pipe-mode, evlist is empty until PERF_RECORD_HEADER_ATTR is
+	 * processed, so perf_evlist__sample_id_all is not meaningful here.
+	 */
+	if ((!file || !file->is_pipe) && tool && tool->ordering_requires_timestamps &&
 	    tool->ordered_events && !perf_evlist__sample_id_all(session->evlist)) {
 		dump_printf("WARNING: No sample_id_all support, falling back to unordered processing\n");
 		tool->ordered_events = false;
@@ -932,7 +942,7 @@ static void branch_stack__printf(struct perf_sample *sample)
 
 		printf("..... %2"PRIu64": %016" PRIx64 " -> %016" PRIx64 " %hu cycles %s%s%s%s %x\n",
 			i, e->from, e->to,
-			(unsigned short)e->flags.cycles,
+			e->flags.cycles,
 			e->flags.mispred ? "M" : " ",
 			e->flags.predicted ? "P" : " ",
 			e->flags.abort ? "A" : " ",
@@ -1191,7 +1201,7 @@ static int
 	u64 sample_type = evsel->attr.sample_type;
 	u64 read_format = evsel->attr.read_format;
 
-	/* Standard sample delivery. */
+	/* Standard sample delievery. */
 	if (!(sample_type & PERF_SAMPLE_READ))
 		return tool->sample(tool, event, sample, evsel, machine);
 
@@ -1628,6 +1638,7 @@ static int __perf_session__process_pipe_events(struct perf_session *session)
 	buf = malloc(cur_size);
 	if (!buf)
 		return -errno;
+	ordered_events__set_copy_on_queue(oe, true);
 more:
 	event = buf;
 	err = readn(fd, event, sizeof(struct perf_event_header));
@@ -1901,7 +1912,7 @@ int maps__set_kallsyms_ref_reloc_sym(struct map **maps,
 				     const char *symbol_name, u64 addr)
 {
 	char *bracket;
-	int i;
+	enum map_type i;
 	struct ref_reloc_sym *ref;
 
 	ref = zalloc(sizeof(struct ref_reloc_sym));
@@ -2025,10 +2036,20 @@ out_delete_map:
 void perf_session__fprintf_info(struct perf_session *session, FILE *fp,
 				bool full)
 {
+	struct stat st;
+	int fd, ret;
+
 	if (session == NULL || fp == NULL)
 		return;
 
+	fd = perf_data_file__fd(session->file);
+
+	ret = fstat(fd, &st);
+	if (ret == -1)
+		return;
+
 	fprintf(fp, "# ========\n");
+	fprintf(fp, "# captured on: %s", ctime(&st.st_ctime));
 	perf_header__fprintf_info(session, fp, full);
 	fprintf(fp, "# ========\n#\n");
 }

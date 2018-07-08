@@ -349,6 +349,8 @@ static struct clk *tegra_clk_sor_brick_register(struct tegra_sor *sor,
 	brick->hw.init = &init;
 
 	clk = devm_clk_register(sor->dev, &brick->hw);
+	if (IS_ERR(clk))
+		kfree(brick);
 
 	return clk;
 }

@@ -48,6 +48,7 @@
 #include <linux/bootmem.h>
 
 #include <asm/irqdomain.h>
+#include <asm/idle.h>
 #include <asm/io.h>
 #include <asm/smp.h>
 #include <asm/cpu.h>
@@ -1107,12 +1108,12 @@ int mp_map_gsi_to_irq(u32 gsi, unsigned int flags, struct irq_alloc_info *info)
 
 	ioapic = mp_find_ioapic(gsi);
 	if (ioapic < 0)
-		return -ENODEV;
+		return -1;
 
 	pin = mp_find_ioapic_pin(ioapic, gsi);
 	idx = find_irq_entry(ioapic, pin, mp_INT);
 	if ((flags & IOAPIC_MAP_CHECK) && idx < 0)
-		return -ENODEV;
+		return -1;
 
 	return mp_map_pin_to_irq(gsi, idx, ioapic, pin, flags, info);
 }
@@ -2115,7 +2116,7 @@ static inline void __init check_timer(void)
 			int idx;
 			idx = find_irq_entry(apic1, pin1, mp_INT);
 			if (idx != -1 && irq_trigger(idx))
-				unmask_ioapic_irq(irq_get_chip_data(0));
+				unmask_ioapic_irq(irq_get_irq_data(0));
 		}
 		irq_domain_deactivate_irq(irq_data);
 		irq_domain_activate_irq(irq_data);

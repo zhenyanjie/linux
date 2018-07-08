@@ -24,7 +24,6 @@
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/slab.h>
-#include <linux/sched/signal.h>
 #include <linux/init.h>
 #include <linux/console.h>
 #include <linux/of.h>
@@ -37,7 +36,7 @@
 #include <linux/mutex.h>
 
 #include <asm/irq.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 /*
  * This is used to lock changes in serial line configuration.
@@ -74,7 +73,7 @@ static inline struct uart_port *uart_port_ref(struct uart_state *state)
 
 static inline void uart_port_deref(struct uart_port *uport)
 {
-	if (atomic_dec_and_test(&uport->state->refcount))
+	if (uport && atomic_dec_and_test(&uport->state->refcount))
 		wake_up(&uport->state->remove_wait);
 }
 
@@ -89,10 +88,9 @@ static inline void uart_port_deref(struct uart_port *uport)
 #define uart_port_unlock(uport, flags)					\
 	({								\
 		struct uart_port *__uport = uport;			\
-		if (__uport) {						\
+		if (__uport)						\
 			spin_unlock_irqrestore(&__uport->lock, flags);	\
-			uart_port_deref(__uport);			\
-		}							\
+		uart_port_deref(__uport);				\
 	})
 
 static inline struct uart_port *uart_port_check(struct uart_state *state)
@@ -967,6 +965,8 @@ static int uart_set_info(struct tty_struct *tty, struct tty_port *port,
 		}
 	} else {
 		retval = uart_startup(tty, state, 1);
+		if (retval == 0)
+			tty_port_set_initialized(port, true);
 		if (retval > 0)
 			retval = 0;
 	}
@@ -1135,6 +1135,8 @@ static int uart_do_autoconfig(struct tty_struct *tty,struct uart_state *state)
 		uport->ops->config_port(uport, flags);
 
 		ret = uart_startup(tty, state, 1);
+		if (ret == 0)
+			tty_port_set_initialized(port, true);
 		if (ret > 0)
 			ret = 0;
 	}
@@ -1517,10 +1519,7 @@ static void uart_wait_until_sent(struct tty_struct *tty, int timeout)
 	unsigned long char_time, expire;
 
 	port = uart_port_ref(state);
-	if (!port)
-		return;
-
-	if (port->type == PORT_UNKNOWN || port->fifosize == 0) {
+	if (!port || port->type == PORT_UNKNOWN || port->fifosize == 0) {
 		uart_port_deref(port);
 		return;
 	}
@@ -2083,7 +2082,7 @@ int uart_suspend_port(struct uart_driver *drv, struct uart_port *uport)
 	mutex_lock(&port->mutex);
 
 	tty_dev = device_find_child(uport->dev, &match, serial_match_port);
-	if (tty_dev && device_may_wakeup(tty_dev)) {
+	if (device_may_wakeup(tty_dev)) {
 		if (!enable_irq_wake(uport->irq))
 			uport->irq_wake = 1;
 		put_device(tty_dev);
@@ -2370,10 +2369,9 @@ static int uart_poll_get_char(struct tty_driver *driver, int line)
 
 	if (state) {
 		port = uart_port_ref(state);
-		if (port) {
+		if (port)
 			ret = port->ops->poll_get_char(port);
-			uart_port_deref(port);
-		}
+		uart_port_deref(port);
 	}
 	return ret;
 }

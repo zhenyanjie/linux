@@ -375,7 +375,7 @@ static inline void complete_tx(struct sdma_engine *sde,
 			   sde->head_sn, tx->sn);
 	sde->head_sn++;
 #endif
-	__sdma_txclean(sde->dd, tx);
+	sdma_txclean(sde->dd, tx);
 	if (complete)
 		(*complete)(tx, res);
 	if (wait && iowait_sdma_dec(wait))
@@ -856,7 +856,7 @@ struct sdma_engine *sdma_select_user_engine(struct hfi1_devdata *dd,
 {
 	struct sdma_rht_node *rht_node;
 	struct sdma_engine *sde = NULL;
-	const struct cpumask *current_mask = &current->cpus_allowed;
+	const struct cpumask *current_mask = tsk_cpus_allowed(current);
 	unsigned long cpu_id;
 
 	/*
@@ -1643,7 +1643,7 @@ static inline u8 ahg_mode(struct sdma_txreq *tx)
 }
 
 /**
- * __sdma_txclean() - clean tx of mappings, descp *kmalloc's
+ * sdma_txclean() - clean tx of mappings, descp *kmalloc's
  * @dd: hfi1_devdata for unmapping
  * @tx: tx request to clean
  *
@@ -1653,7 +1653,7 @@ static inline u8 ahg_mode(struct sdma_txreq *tx)
  * The code can be called multiple times without issue.
  *
  */
-void __sdma_txclean(
+void sdma_txclean(
 	struct hfi1_devdata *dd,
 	struct sdma_txreq *tx)
 {
@@ -3065,7 +3065,7 @@ static int _extend_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx)
 		tx->descp[i] = tx->descs[i];
 	return 0;
 enomem:
-	__sdma_txclean(dd, tx);
+	sdma_txclean(dd, tx);
 	return -ENOMEM;
 }
 
@@ -3094,14 +3094,14 @@ int ext_coal_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx,
 
 	rval = _extend_sdma_tx_descs(dd, tx);
 	if (rval) {
-		__sdma_txclean(dd, tx);
+		sdma_txclean(dd, tx);
 		return rval;
 	}
 
 	/* If coalesce buffer is allocated, copy data into it */
 	if (tx->coalesce_buf) {
 		if (type == SDMA_MAP_NONE) {
-			__sdma_txclean(dd, tx);
+			sdma_txclean(dd, tx);
 			return -EINVAL;
 		}
 
@@ -3109,7 +3109,7 @@ int ext_coal_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx,
 			kvaddr = kmap(page);
 			kvaddr += offset;
 		} else if (WARN_ON(!kvaddr)) {
-			__sdma_txclean(dd, tx);
+			sdma_txclean(dd, tx);
 			return -EINVAL;
 		}
 
@@ -3139,7 +3139,7 @@ int ext_coal_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx,
 				      DMA_TO_DEVICE);
 
 		if (unlikely(dma_mapping_error(&dd->pcidev->dev, addr))) {
-			__sdma_txclean(dd, tx);
+			sdma_txclean(dd, tx);
 			return -ENOSPC;
 		}
 
@@ -3181,7 +3181,7 @@ int _pad_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx)
 	if ((unlikely(tx->num_desc == tx->desc_limit))) {
 		rval = _extend_sdma_tx_descs(dd, tx);
 		if (rval) {
-			__sdma_txclean(dd, tx);
+			sdma_txclean(dd, tx);
 			return rval;
 		}
 	}

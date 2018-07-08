@@ -284,7 +284,6 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 		1, 1, 3, 5, 10, 10, 20, 50, 100, 200
 	};
 
-	struct mbox_list entry;
 	u16 access = 0;
 	u16 execute = 0;
 	u32 v;
@@ -312,69 +311,18 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 		timeout = -timeout;
 	}
 
-	/* Queue ourselves onto the mailbox access list.  When our entry is at
-	 * the front of the list, we have rights to access the mailbox.  So we
-	 * wait [for a while] till we're at the front [or bail out with an
-	 * EBUSY] ...
-	 */
-	spin_lock(&adap->mbox_lock);
-	list_add_tail(&entry.list, &adap->mlist.list);
-	spin_unlock(&adap->mbox_lock);
-
-	delay_idx = 0;
-	ms = delay[0];
-
-	for (i = 0; ; i += ms) {
-		/* If we've waited too long, return a busy indication.  This
-		 * really ought to be based on our initial position in the
-		 * mailbox access list but this is a start.  We very rearely
-		 * contend on access to the mailbox ...
-		 */
-		pcie_fw = t4_read_reg(adap, PCIE_FW_A);
-		if (i > FW_CMD_MAX_TIMEOUT || (pcie_fw & PCIE_FW_ERR_F)) {
-			spin_lock(&adap->mbox_lock);
-			list_del(&entry.list);
-			spin_unlock(&adap->mbox_lock);
-			ret = (pcie_fw & PCIE_FW_ERR_F) ? -ENXIO : -EBUSY;
-			t4_record_mbox(adap, cmd, size, access, ret);
-			return ret;
-		}
-
-		/* If we're at the head, break out and start the mailbox
-		 * protocol.
-		 */
-		if (list_first_entry(&adap->mlist.list, struct mbox_list,
-				     list) == &entry)
-			break;
-
-		/* Delay for a bit before checking again ... */
-		if (sleep_ok) {
-			ms = delay[delay_idx];  /* last element may repeat */
-			if (delay_idx < ARRAY_SIZE(delay) - 1)
-				delay_idx++;
-			msleep(ms);
-		} else {
-			mdelay(ms);
-		}
-	}
-
-	/* Loop trying to get ownership of the mailbox.  Return an error
-	 * if we can't gain ownership.
-	 */
 	v = MBOWNER_G(t4_read_reg(adap, ctl_reg));
 	for (i = 0; v == MBOX_OWNER_NONE && i < 3; i++)
 		v = MBOWNER_G(t4_read_reg(adap, ctl_reg));
+
 	if (v != MBOX_OWNER_DRV) {
-		spin_lock(&adap->mbox_lock);
-		list_del(&entry.list);
-		spin_unlock(&adap->mbox_lock);
 		ret = (v == MBOX_OWNER_FW) ? -EBUSY : -ETIMEDOUT;
-		t4_record_mbox(adap, cmd, MBOX_LEN, access, ret);
+		t4_record_mbox(adap, cmd, size, access, ret);
 		return ret;
 	}
 
 	/* Copy in the new mailbox command and send it on its way ... */
-	t4_record_mbox(adap, cmd, MBOX_LEN, access, 0);
+	t4_record_mbox(adap, cmd, size, access, 0);
 	for (i = 0; i < size; i += 8)
 		t4_write_reg64(adap, data_reg + i, be64_to_cpu(*p++));
 
@@ -418,22 +366,15 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 			execute = i + ms;
 			t4_record_mbox(adap, cmd_rpl,
 				       MBOX_LEN, access, execute);
-			spin_lock(&adap->mbox_lock);
-			list_del(&entry.list);
-			spin_unlock(&adap->mbox_lock);
 			return -FW_CMD_RETVAL_G((int)res);
 		}
 	}
 
 	ret = (pcie_fw & PCIE_FW_ERR_F) ? -ENXIO : -ETIMEDOUT;
-	t4_record_mbox(adap, cmd, MBOX_LEN, access, ret);
+	t4_record_mbox(adap, cmd, size, access, ret);
 	dev_err(adap->pdev_dev, "command %#x in mailbox %d timed out\n",
 		*(const u8 *)cmd, mbox);
 	t4_report_fw_error(adap);
-	spin_lock(&adap->mbox_lock);
-	list_del(&entry.list);
-	spin_unlock(&adap->mbox_lock);
-	t4_fatal_err(adap);
 	return ret;
 }
 
@@ -2655,7 +2596,6 @@ void t4_get_regs(struct adapter *adap, void *buf, size_t buf_size)
 }
 
 #define EEPROM_STAT_ADDR   0x7bfc
-#define VPD_SIZE           0x800
 #define VPD_BASE           0x400
 #define VPD_BASE_OLD       0
 #define VPD_LEN            1024
@@ -2692,15 +2632,6 @@ int t4_get_raw_vpd_params(struct adapter *adapter, struct vpd_params *p)
 	vpd = vmalloc(VPD_LEN);
 	if (!vpd)
 		return -ENOMEM;
-
-	/* We have two VPD data structures stored in the adapter VPD area.
-	 * By default, Linux calculates the size of the VPD area by traversing
-	 * the first VPD area at offset 0x0, so we need to tell the OS what
-	 * our real VPD size is.
-	 */
-	ret = pci_set_vpd_size(adapter->pdev, VPD_SIZE);
-	if (ret < 0)
-		goto out;
 
 	/* Card information normally starts at VPD_BASE but early cards had
 	 * it at 0.
@@ -5441,28 +5372,22 @@ unsigned int t4_get_mps_bg_map(struct adapter *adap, int idx)
 const char *t4_get_port_type_description(enum fw_port_type port_type)
 {
 	static const char *const port_type_description[] = {
-		"Fiber_XFI",
-		"Fiber_XAUI",
-		"BT_SGMII",
-		"BT_XFI",
-		"BT_XAUI",
+		"R XFI",
+		"R XAUI",
+		"T SGMII",
+		"T XFI",
+		"T XAUI",
 		"KX4",
 		"CX4",
 		"KX",
 		"KR",
-		"SFP",
-		"BP_AP",
-		"BP4_AP",
-		"QSFP_10G",
-		"QSA",
-		"QSFP",
-		"BP40_BA",
-		"KR4_100G",
-		"CR4_QSFP",
-		"CR_QSFP",
-		"CR2_QSFP",
-		"SFP28",
-		"KR_SFP28",
+		"R SFP+",
+		"KR/KX",
+		"KR/KX/KX4",
+		"R QSFP_10G",
+		"R QSA",
+		"R QSFP",
+		"R BP40_BA",
 	};
 
 	if (port_type < ARRAY_SIZE(port_type_description))
@@ -5503,7 +5428,6 @@ void t4_get_port_stats_offset(struct adapter *adap, int idx,
 void t4_get_port_stats(struct adapter *adap, int idx, struct port_stats *p)
 {
 	u32 bgmap = t4_get_mps_bg_map(adap, idx);
-	u32 stat_ctl = t4_read_reg(adap, MPS_STAT_CTL_A);
 
 #define GET_STAT(name) \
 	t4_read_reg64(adap, \
@@ -5535,14 +5459,6 @@ void t4_get_port_stats(struct adapter *adap, int idx, struct port_stats *p)
 	p->tx_ppp6             = GET_STAT(TX_PORT_PPP6);
 	p->tx_ppp7             = GET_STAT(TX_PORT_PPP7);
 
-	if (CHELSIO_CHIP_VERSION(adap->params.chip) >= CHELSIO_T5) {
-		if (stat_ctl & COUNTPAUSESTATTX_F) {
-			p->tx_frames -= p->tx_pause;
-			p->tx_octets -= p->tx_pause * 64;
-		}
-		if (stat_ctl & COUNTPAUSEMCTX_F)
-			p->tx_mcast_frames -= p->tx_pause;
-	}
 	p->rx_octets           = GET_STAT(RX_PORT_BYTES);
 	p->rx_frames           = GET_STAT(RX_PORT_FRAMES);
 	p->rx_bcast_frames     = GET_STAT(RX_PORT_BCAST);
@@ -5570,15 +5486,6 @@ void t4_get_port_stats(struct adapter *adap, int idx, struct port_stats *p)
 	p->rx_ppp5             = GET_STAT(RX_PORT_PPP5);
 	p->rx_ppp6             = GET_STAT(RX_PORT_PPP6);
 	p->rx_ppp7             = GET_STAT(RX_PORT_PPP7);
-
-	if (CHELSIO_CHIP_VERSION(adap->params.chip) >= CHELSIO_T5) {
-		if (stat_ctl & COUNTPAUSESTATRX_F) {
-			p->rx_frames -= p->rx_pause;
-			p->rx_octets -= p->rx_pause * 64;
-		}
-		if (stat_ctl & COUNTPAUSEMCRX_F)
-			p->rx_mcast_frames -= p->rx_pause;
-	}
 
 	p->rx_ovflow0 = (bgmap & 1) ? GET_STAT_COM(RX_BG_0_MAC_DROP_FRAME) : 0;
 	p->rx_ovflow1 = (bgmap & 2) ? GET_STAT_COM(RX_BG_1_MAC_DROP_FRAME) : 0;
@@ -6278,13 +6185,18 @@ int t4_fw_upgrade(struct adapter *adap, unsigned int mbox,
 	if (!t4_fw_matches_chip(adap, fw_hdr))
 		return -EINVAL;
 
+	/* Disable FW_OK flag so that mbox commands with FW_OK flag set
+	 * wont be sent when we are flashing FW.
+	 */
+	adap->flags &= ~FW_OK;
+
 	ret = t4_fw_halt(adap, mbox, force);
 	if (ret < 0 && !force)
-		return ret;
+		goto out;
 
 	ret = t4_load_fw(adap, fw_data, size);
 	if (ret < 0)
-		return ret;
+		goto out;
 
 	/*
 	 * Older versions of the firmware don't understand the new
@@ -6295,7 +6207,17 @@ int t4_fw_upgrade(struct adapter *adap, unsigned int mbox,
 	 * its header flags to see if it advertises the capability.
 	 */
 	reset = ((be32_to_cpu(fw_hdr->flags) & FW_HDR_FLAGS_RESET_HALT) == 0);
-	return t4_fw_restart(adap, mbox, reset);
+	ret = t4_fw_restart(adap, mbox, reset);
+
+	/* Grab potentially new Firmware Device Log parameters so we can see
+	 * how healthy the new Firmware is.  It's okay to contact the new
+	 * Firmware for these parameters even though, as far as it's
+	 * concerned, we've never said "HELLO" to it ...
+	 */
+	(void)t4_init_devlog_params(adap);
+out:
+	adap->flags |= FW_OK;
+	return ret;
 }
 
 /**
@@ -7560,39 +7482,6 @@ int t4_prep_adapter(struct adapter *adapter)
 }
 
 /**
- *	t4_shutdown_adapter - shut down adapter, host & wire
- *	@adapter: the adapter
- *
- *	Perform an emergency shutdown of the adapter and stop it from
- *	continuing any further communication on the ports or DMA to the
- *	host.  This is typically used when the adapter and/or firmware
- *	have crashed and we want to prevent any further accidental
- *	communication with the rest of the world.  This will also force
- *	the port Link Status to go down -- if register writes work --
- *	which should help our peers figure out that we're down.
- */
-int t4_shutdown_adapter(struct adapter *adapter)
-{
-	int port;
-
-	t4_intr_disable(adapter);
-	t4_write_reg(adapter, DBG_GPIO_EN_A, 0);
-	for_each_port(adapter, port) {
-		u32 a_port_cfg = PORT_REG(port,
-					  is_t4(adapter->params.chip)
-					  ? XGMAC_PORT_CFG_A
-					  : MAC_PORT_CFG_A);
-
-		t4_write_reg(adapter, a_port_cfg,
-			     t4_read_reg(adapter, a_port_cfg)
-			     & ~SIGNAL_DET_V(1));
-	}
-	t4_set_reg_field(adapter, SGE_CONTROL_A, GLOBALENABLE_F, 0);
-
-	return 0;
-}
-
-/**
  *	t4_bar2_sge_qregs - return BAR2 SGE Queue register information
  *	@adapter: the adapter
  *	@qid: the Queue ID
@@ -7801,13 +7690,6 @@ int t4_init_tp_params(struct adapter *adap)
 		t4_read_indirect(adap, TP_PIO_ADDR_A, TP_PIO_DATA_A,
 				 &adap->params.tp.ingress_config, 1,
 				 TP_INGRESS_CONFIG_A);
-	}
-	/* For T6, cache the adapter's compressed error vector
-	 * and passing outer header info for encapsulated packets.
-	 */
-	if (CHELSIO_CHIP_VERSION(adap->params.chip) > CHELSIO_T5) {
-		v = t4_read_reg(adap, TP_OUT_CONFIG_A);
-		adap->params.tp.rx_pkt_encap = (v & CRXPKTENC_F) ? 1 : 0;
 	}
 
 	/* Now that we have TP_VLAN_PRI_MAP cached, we can calculate the field
@@ -8206,7 +8088,16 @@ int t4_cim_read_la(struct adapter *adap, u32 *la_buf, unsigned int *wrptr)
 		ret = t4_cim_read(adap, UP_UP_DBG_LA_DATA_A, 1, &la_buf[i]);
 		if (ret)
 			break;
-		idx = (idx + 1) & UPDBGLARDPTR_M;
+
+		/* Bits 0-3 of UpDbgLaRdPtr can be between 0000 to 1001 to
+		 * identify the 32-bit portion of the full 312-bit data
+		 */
+		if (is_t6(adap->params.chip) && (idx & 0xf) >= 9)
+			idx = (idx & 0xff0) + 0x10;
+		else
+			idx++;
+		/* address can't exceed 0xfff */
+		idx &= UPDBGLARDPTR_M;
 	}
 restart:
 	if (cfg & UPDBGLAEN_F) {

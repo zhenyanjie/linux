@@ -9,7 +9,6 @@
 #include <linux/kdebug.h>
 #include <linux/notifier.h>
 #include <linux/sched.h>
-#include <linux/sched/debug.h>
 
 #include <asm/irq.h>
 

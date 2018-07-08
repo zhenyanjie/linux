@@ -20,6 +20,10 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  *  Stripped of 2.4 stuff ready for main kernel submit by
  *		Alan Cox <alan@lxorguk.ukuu.org.uk>
  ****************************************************************************/
@@ -547,9 +551,11 @@ static int write_packet(struct usb_device *udev,
 	if (!registers || size <= 0)
 		return -EINVAL;
 
-	buf = kmemdup(registers, size, GFP_KERNEL);
+	buf = kmalloc(size, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
+
+	memcpy(buf, registers, size);
 
 	ret = usb_control_msg(udev,
 			       usb_sndctrlpipe(udev, 0),
@@ -753,7 +759,9 @@ int cpia2_usb_stream_start(struct camera_data *cam, unsigned int alternate)
 		cam->params.camera_state.stream_mode = old_alt;
 		ret2 = set_alternate(cam, USBIF_CMDONLY);
 		if (ret2 < 0) {
-			ERR("cpia2_usb_change_streaming_alternate(%d) =%d has already failed. Then tried to call set_alternate(USBIF_CMDONLY) = %d.\n",
+			ERR("cpia2_usb_change_streaming_alternate(%d) =%d has already "
+			    "failed. Then tried to call "
+			    "set_alternate(USBIF_CMDONLY) = %d.\n",
 			    alternate, ret, ret2);
 		}
 	} else {

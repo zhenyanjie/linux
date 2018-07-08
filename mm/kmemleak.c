@@ -19,7 +19,7 @@
  *
  *
  * For more information on the algorithm and kmemleak usage, please see
- * Documentation/dev-tools/kmemleak.rst.
+ * Documentation/kmemleak.txt.
  *
  * Notes on locking
  * ----------------
@@ -73,9 +73,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/task.h>
-#include <linux/sched/task_stack.h>
+#include <linux/sched.h>
 #include <linux/jiffies.h>
 #include <linux/delay.h>
 #include <linux/export.h>
@@ -1416,7 +1414,7 @@ static void kmemleak_scan(void)
 	/* data/bss scanning */
 	scan_large_block(_sdata, _edata);
 	scan_large_block(__bss_start, __bss_stop);
-	scan_large_block(__start_ro_after_init, __end_ro_after_init);
+	scan_large_block(__start_data_ro_after_init, __end_data_ro_after_init);
 
 #ifdef CONFIG_SMP
 	/* per-cpu sections scanning */
@@ -1444,6 +1442,8 @@ static void kmemleak_scan(void)
 			if (page_count(page) == 0)
 				continue;
 			scan_block(page, page + 1, NULL);
+			if (!(pfn % (MAX_SCAN_SIZE / sizeof(*page))))
+				cond_resched();
 		}
 	}
 	put_online_mems();
@@ -1577,8 +1577,7 @@ static void start_scan_thread(void)
 }
 
 /*
- * Stop the automatic memory scanning thread. This function must be called
- * with the scan_mutex held.
+ * Stop the automatic memory scanning thread.
  */
 static void stop_scan_thread(void)
 {
@@ -1841,12 +1840,15 @@ static void kmemleak_do_cleanup(struct work_struct *work)
 {
 	stop_scan_thread();
 
+	mutex_lock(&scan_mutex);
 	/*
-	 * Once the scan thread has stopped, it is safe to no longer track
-	 * object freeing. Ordering of the scan thread stopping and the memory
-	 * accesses below is guaranteed by the kthread_stop() function.
+	 * Once it is made sure that kmemleak_scan has stopped, it is safe to no
+	 * longer track object freeing. Ordering of the scan thread stopping and
+	 * the memory accesses below is guaranteed by the kthread_stop()
+	 * function.
 	 */
 	kmemleak_free_enabled = 0;
+	mutex_unlock(&scan_mutex);
 
 	if (!kmemleak_found_leaks)
 		__kmemleak_do_cleanup();

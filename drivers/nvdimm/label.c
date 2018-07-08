@@ -861,7 +861,7 @@ static int init_labels(struct nd_mapping *nd_mapping, int num_labels)
 	nsindex = to_namespace_index(ndd, 0);
 	memset(nsindex, 0, ndd->nsarea.config_size);
 	for (i = 0; i < 2; i++) {
-		int rc = nd_label_write_index(ndd, i, i*2, ND_NSINDEX_INIT);
+		int rc = nd_label_write_index(ndd, i, 3 - i, ND_NSINDEX_INIT);
 
 		if (rc)
 			return rc;
@@ -938,7 +938,7 @@ int nd_pmem_namespace_label_update(struct nd_region *nd_region,
 		}
 
 		for_each_dpa_resource(ndd, res)
-			if (strncmp(res->name, "pmem", 4) == 0)
+			if (strncmp(res->name, "pmem", 3) == 0)
 				count++;
 		WARN_ON_ONCE(!count);
 

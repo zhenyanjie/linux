@@ -29,7 +29,7 @@ struct mb_cache {
 	/* log2 of hash table size */
 	int			c_bucket_bits;
 	/* Maximum entries in cache to avoid degrading hash too much */
-	unsigned long		c_max_entries;
+	int			c_max_entries;
 	/* Protects c_list, c_entry_count */
 	spinlock_t		c_list_lock;
 	struct list_head	c_list;
@@ -43,7 +43,7 @@ struct mb_cache {
 static struct kmem_cache *mb_entry_cache;
 
 static unsigned long mb_cache_shrink(struct mb_cache *cache,
-				     unsigned long nr_to_scan);
+				     unsigned int nr_to_scan);
 
 static inline struct hlist_bl_head *mb_cache_entry_head(struct mb_cache *cache,
 							u32 key)
@@ -93,6 +93,7 @@ int mb_cache_entry_create(struct mb_cache *cache, gfp_t mask, u32 key,
 	entry->e_key = key;
 	entry->e_block = block;
 	entry->e_reusable = reusable;
+	entry->e_referenced = 0;
 	head = mb_cache_entry_head(cache, key);
 	hlist_bl_lock(head);
 	hlist_bl_for_each_entry(dup, dup_node, head, e_hash_list) {
@@ -155,12 +156,12 @@ out:
 }
 
 /*
- * mb_cache_entry_find_first - find the first reusable entry with the given key
+ * mb_cache_entry_find_first - find the first entry in cache with given key
  * @cache: cache where we should search
  * @key: key to look for
  *
- * Search in @cache for a reusable entry with key @key. Grabs reference to the
- * first reusable entry found and returns the entry.
+ * Search in @cache for entry with key @key. Grabs reference to the first
+ * entry found and returns the entry.
  */
 struct mb_cache_entry *mb_cache_entry_find_first(struct mb_cache *cache,
 						 u32 key)
@@ -170,14 +171,14 @@ struct mb_cache_entry *mb_cache_entry_find_first(struct mb_cache *cache,
 EXPORT_SYMBOL(mb_cache_entry_find_first);
 
 /*
- * mb_cache_entry_find_next - find next reusable entry with the same key
+ * mb_cache_entry_find_next - find next entry in cache with the same
  * @cache: cache where we should search
  * @entry: entry to start search from
  *
- * Finds next reusable entry in the hash chain which has the same key as @entry.
- * If @entry is unhashed (which can happen when deletion of entry races with the
- * search), finds the first reusable entry in the hash chain. The function drops
- * reference to @entry and returns with a reference to the found entry.
+ * Finds next entry in the hash chain which has the same key as @entry.
+ * If @entry is unhashed (which can happen when deletion of entry races
+ * with the search), finds the first entry in the hash chain. The function
+ * drops reference to @entry and returns with a reference to the found entry.
  */
 struct mb_cache_entry *mb_cache_entry_find_next(struct mb_cache *cache,
 						struct mb_cache_entry *entry)
@@ -274,11 +275,11 @@ static unsigned long mb_cache_count(struct shrinker *shrink,
 
 /* Shrink number of entries in cache */
 static unsigned long mb_cache_shrink(struct mb_cache *cache,
-				     unsigned long nr_to_scan)
+				     unsigned int nr_to_scan)
 {
 	struct mb_cache_entry *entry;
 	struct hlist_bl_head *head;
-	unsigned long shrunk = 0;
+	unsigned int shrunk = 0;
 
 	spin_lock(&cache->c_list_lock);
 	while (nr_to_scan-- && !list_empty(&cache->c_list)) {
@@ -286,7 +287,7 @@ static unsigned long mb_cache_shrink(struct mb_cache *cache,
 					 struct mb_cache_entry, e_list);
 		if (entry->e_referenced) {
 			entry->e_referenced = 0;
-			list_move_tail(&entry->e_list, &cache->c_list);
+			list_move_tail(&cache->c_list, &entry->e_list);
 			continue;
 		}
 		list_del_init(&entry->e_list);
@@ -316,9 +317,10 @@ static unsigned long mb_cache_shrink(struct mb_cache *cache,
 static unsigned long mb_cache_scan(struct shrinker *shrink,
 				   struct shrink_control *sc)
 {
+	int nr_to_scan = sc->nr_to_scan;
 	struct mb_cache *cache = container_of(shrink, struct mb_cache,
 					      c_shrink);
-	return mb_cache_shrink(cache, sc->nr_to_scan);
+	return mb_cache_shrink(cache, nr_to_scan);
 }
 
 /* We shrink 1/X of the cache when we have too many entries in it */
@@ -340,8 +342,11 @@ static void mb_cache_shrink_worker(struct work_struct *work)
 struct mb_cache *mb_cache_create(int bucket_bits)
 {
 	struct mb_cache *cache;
-	unsigned long bucket_count = 1UL << bucket_bits;
-	unsigned long i;
+	int bucket_count = 1 << bucket_bits;
+	int i;
+
+	if (!try_module_get(THIS_MODULE))
+		return NULL;
 
 	cache = kzalloc(sizeof(struct mb_cache), GFP_KERNEL);
 	if (!cache)
@@ -373,6 +378,7 @@ struct mb_cache *mb_cache_create(int bucket_bits)
 	return cache;
 
 err_out:
+	module_put(THIS_MODULE);
 	return NULL;
 }
 EXPORT_SYMBOL(mb_cache_create);
@@ -406,6 +412,7 @@ void mb_cache_destroy(struct mb_cache *cache)
 	}
 	kfree(cache->c_hash);
 	kfree(cache);
+	module_put(THIS_MODULE);
 }
 EXPORT_SYMBOL(mb_cache_destroy);
 
@@ -414,8 +421,7 @@ static int __init mbcache_init(void)
 	mb_entry_cache = kmem_cache_create("mbcache",
 				sizeof(struct mb_cache_entry), 0,
 				SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD, NULL);
-	if (!mb_entry_cache)
-		return -ENOMEM;
+	BUG_ON(!mb_entry_cache);
 	return 0;
 }
 

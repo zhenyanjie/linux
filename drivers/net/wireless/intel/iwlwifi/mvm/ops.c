@@ -306,8 +306,6 @@ static const struct iwl_rx_handlers iwl_mvm_rx_handlers[] = {
 		       iwl_mvm_rx_stored_beacon_notif, RX_HANDLER_SYNC),
 	RX_HANDLER_GRP(DATA_PATH_GROUP, MU_GROUP_MGMT_NOTIF,
 		       iwl_mvm_mu_mimo_grp_notif, RX_HANDLER_SYNC),
-	RX_HANDLER_GRP(DATA_PATH_GROUP, STA_PM_NOTIF,
-		       iwl_mvm_sta_pm_notif, RX_HANDLER_SYNC),
 };
 #undef RX_HANDLER
 #undef RX_HANDLER_GRP
@@ -454,7 +452,6 @@ static const struct iwl_hcmd_names iwl_mvm_phy_names[] = {
 static const struct iwl_hcmd_names iwl_mvm_data_path_names[] = {
 	HCMD_NAME(UPDATE_MU_GROUPS_CMD),
 	HCMD_NAME(TRIGGER_RX_QUEUES_NOTIF_CMD),
-	HCMD_NAME(STA_PM_NOTIF),
 	HCMD_NAME(MU_GROUP_MGMT_NOTIF),
 	HCMD_NAME(RX_QUEUES_NOTIFICATION),
 };
@@ -466,13 +463,6 @@ static const struct iwl_hcmd_names iwl_mvm_prot_offload_names[] = {
 	HCMD_NAME(STORED_BEACON_NTF),
 };
 
-/* Please keep this array *SORTED* by hex value.
- * Access is done through binary search
- */
-static const struct iwl_hcmd_names iwl_mvm_regulatory_and_nvm_names[] = {
-	HCMD_NAME(NVM_ACCESS_COMPLETE),
-};
-
 static const struct iwl_hcmd_arr iwl_mvm_groups[] = {
 	[LEGACY_GROUP] = HCMD_ARR(iwl_mvm_legacy_names),
 	[LONG_GROUP] = HCMD_ARR(iwl_mvm_legacy_names),
@@ -481,8 +471,6 @@ static const struct iwl_hcmd_arr iwl_mvm_groups[] = {
 	[PHY_OPS_GROUP] = HCMD_ARR(iwl_mvm_phy_names),
 	[DATA_PATH_GROUP] = HCMD_ARR(iwl_mvm_data_path_names),
 	[PROT_OFFLOAD_GROUP] = HCMD_ARR(iwl_mvm_prot_offload_names),
-	[REGULATORY_AND_NVM_GROUP] =
-		HCMD_ARR(iwl_mvm_regulatory_and_nvm_names),
 };
 
 /* this forward declaration can avoid to export the function */
@@ -606,10 +594,7 @@ iwl_op_mode_mvm_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 		mvm->last_agg_queue = IWL_MVM_DQA_MAX_DATA_QUEUE;
 	}
 	mvm->sf_state = SF_UNINIT;
-	if (iwl_mvm_has_new_tx_api(mvm))
-		mvm->cur_ucode = IWL_UCODE_REGULAR;
-	else
-		mvm->cur_ucode = IWL_UCODE_INIT;
+	mvm->cur_ucode = IWL_UCODE_INIT;
 	mvm->drop_bcn_ap_mode = true;
 
 	mutex_init(&mvm->mutex);
@@ -732,10 +717,7 @@ iwl_op_mode_mvm_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 
 	mutex_lock(&mvm->mutex);
 	iwl_mvm_ref(mvm, IWL_MVM_REF_INIT_UCODE);
-	if (iwl_mvm_has_new_tx_api(mvm))
-		err = iwl_run_unified_mvm_ucode(mvm, true);
-	else
-		err = iwl_run_init_mvm_ucode(mvm, true);
+	err = iwl_run_init_mvm_ucode(mvm, true);
 	if (!err || !iwlmvm_mod_params.init_dbg)
 		iwl_mvm_stop_device(mvm);
 	iwl_mvm_unref(mvm, IWL_MVM_REF_INIT_UCODE);
@@ -758,7 +740,6 @@ iwl_op_mode_mvm_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 	err = iwl_mvm_mac_setup_register(mvm);
 	if (err)
 		goto out_free;
-	mvm->hw_registered = true;
 
 	min_backoff = calc_min_backoff(trans, cfg);
 	iwl_mvm_thermal_initialize(mvm, min_backoff);
@@ -780,7 +761,6 @@ iwl_op_mode_mvm_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 
  out_unregister:
 	ieee80211_unregister_hw(mvm->hw);
-	mvm->hw_registered = false;
 	iwl_mvm_leds_exit(mvm);
 	iwl_mvm_thermal_exit(mvm);
  out_free:
@@ -1138,21 +1118,37 @@ static void iwl_mvm_fw_error_dump_wk(struct work_struct *work)
 
 	mutex_lock(&mvm->mutex);
 
-	/* stop recording */
 	if (mvm->cfg->device_family == IWL_DEVICE_FAMILY_7000) {
+		/* stop recording */
 		iwl_set_bits_prph(mvm->trans, MON_BUFF_SAMPLE_CTL, 0x100);
+
+		iwl_mvm_fw_error_dump(mvm);
+
+		/* start recording again if the firmware is not crashed */
+		if (!test_bit(STATUS_FW_ERROR, &mvm->trans->status) &&
+		    mvm->fw->dbg_dest_tlv)
+			iwl_clear_bits_prph(mvm->trans,
+					    MON_BUFF_SAMPLE_CTL, 0x100);
 	} else {
+		u32 in_sample = iwl_read_prph(mvm->trans, DBGC_IN_SAMPLE);
+		u32 out_ctrl = iwl_read_prph(mvm->trans, DBGC_OUT_CTRL);
+
+		/* stop recording */
 		iwl_write_prph(mvm->trans, DBGC_IN_SAMPLE, 0);
-		/* wait before we collect the data till the DBGC stop */
 		udelay(100);
+		iwl_write_prph(mvm->trans, DBGC_OUT_CTRL, 0);
+		/* wait before we collect the data till the DBGC stop */
+		udelay(500);
+
+		iwl_mvm_fw_error_dump(mvm);
+
+		/* start recording again if the firmware is not crashed */
+		if (!test_bit(STATUS_FW_ERROR, &mvm->trans->status) &&
+		    mvm->fw->dbg_dest_tlv) {
+			iwl_write_prph(mvm->trans, DBGC_IN_SAMPLE, in_sample);
+			iwl_write_prph(mvm->trans, DBGC_OUT_CTRL, out_ctrl);
+		}
 	}
-
-	iwl_mvm_fw_error_dump(mvm);
-
-	/* start recording again if the firmware is not crashed */
-	WARN_ON_ONCE((!test_bit(STATUS_FW_ERROR, &mvm->trans->status)) &&
-		     mvm->fw->dbg_dest_tlv &&
-		     iwl_mvm_start_fw_dbg_conf(mvm, mvm->fw_dbg_conf));
 
 	mutex_unlock(&mvm->mutex);
 
@@ -1209,8 +1205,7 @@ void iwl_mvm_nic_restart(struct iwl_mvm *mvm, bool fw_error)
 		reprobe->dev = mvm->trans->dev;
 		INIT_WORK(&reprobe->work, iwl_mvm_reprobe_wk);
 		schedule_work(&reprobe->work);
-	} else if (mvm->cur_ucode == IWL_UCODE_REGULAR &&
-		   mvm->hw_registered) {
+	} else if (mvm->cur_ucode == IWL_UCODE_REGULAR) {
 		/* don't let the transport/FW power down */
 		iwl_mvm_ref(mvm, IWL_MVM_REF_UCODE_DOWN);
 

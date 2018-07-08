@@ -44,7 +44,7 @@
 #include "ena_eth_com.h"
 
 #define DRV_MODULE_VER_MAJOR	1
-#define DRV_MODULE_VER_MINOR	1
+#define DRV_MODULE_VER_MINOR	0
 #define DRV_MODULE_VER_SUBMINOR 2
 
 #define DRV_MODULE_NAME		"ena"
@@ -241,7 +241,6 @@ struct ena_stats_dev {
 	u64 interface_up;
 	u64 interface_down;
 	u64 admin_q_pause;
-	u64 rx_drops;
 };
 
 enum ena_flags_t {

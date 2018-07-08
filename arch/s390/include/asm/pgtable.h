@@ -24,7 +24,6 @@
  * the S390 page table tree.
  */
 #ifndef __ASSEMBLY__
-#include <asm-generic/5level-fixup.h>
 #include <linux/sched.h>
 #include <linux/mm_types.h>
 #include <linux/page-flags.h>
@@ -201,7 +200,6 @@ static inline int is_module_addr(void *addr)
  */
 
 /* Hardware bits in the page table entry */
-#define _PAGE_NOEXEC	0x100		/* HW no-execute bit  */
 #define _PAGE_PROTECT	0x200		/* HW read-only bit  */
 #define _PAGE_INVALID	0x400		/* HW invalid bit    */
 #define _PAGE_LARGE	0x800		/* Bit to mark a large pte */
@@ -279,7 +277,6 @@ static inline int is_module_addr(void *addr)
 /* Bits in the region table entry */
 #define _REGION_ENTRY_ORIGIN	~0xfffUL/* region/segment table origin	    */
 #define _REGION_ENTRY_PROTECT	0x200	/* region protection bit	    */
-#define _REGION_ENTRY_NOEXEC	0x100	/* region no-execute bit	    */
 #define _REGION_ENTRY_OFFSET	0xc0	/* region table offset		    */
 #define _REGION_ENTRY_INVALID	0x20	/* invalid region table entry	    */
 #define _REGION_ENTRY_TYPE_MASK	0x0c	/* region/segment table type mask   */
@@ -319,7 +316,6 @@ static inline int is_module_addr(void *addr)
 #define _SEGMENT_ENTRY_ORIGIN_LARGE ~0xfffffUL /* large page address	    */
 #define _SEGMENT_ENTRY_ORIGIN	~0x7ffUL/* segment table origin		    */
 #define _SEGMENT_ENTRY_PROTECT	0x200	/* page protection bit		    */
-#define _SEGMENT_ENTRY_NOEXEC	0x100	/* region no-execute bit	    */
 #define _SEGMENT_ENTRY_INVALID	0x20	/* invalid segment table entry	    */
 
 #define _SEGMENT_ENTRY		(0)
@@ -389,23 +385,17 @@ static inline int is_module_addr(void *addr)
  * Page protection definitions.
  */
 #define PAGE_NONE	__pgprot(_PAGE_PRESENT | _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RO		__pgprot(_PAGE_PRESENT | _PAGE_READ | \
-				 _PAGE_NOEXEC  | _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RX		__pgprot(_PAGE_PRESENT | _PAGE_READ | \
+#define PAGE_READ	__pgprot(_PAGE_PRESENT | _PAGE_READ | \
 				 _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RW		__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
-				 _PAGE_NOEXEC  | _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RWX	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
+#define PAGE_WRITE	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
 				 _PAGE_INVALID | _PAGE_PROTECT)
 
 #define PAGE_SHARED	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
-				 _PAGE_YOUNG | _PAGE_DIRTY | _PAGE_NOEXEC)
+				 _PAGE_YOUNG | _PAGE_DIRTY)
 #define PAGE_KERNEL	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
-				 _PAGE_YOUNG | _PAGE_DIRTY | _PAGE_NOEXEC)
+				 _PAGE_YOUNG | _PAGE_DIRTY)
 #define PAGE_KERNEL_RO	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_YOUNG | \
-				 _PAGE_PROTECT | _PAGE_NOEXEC)
-#define PAGE_KERNEL_EXEC __pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
-				  _PAGE_YOUNG |	_PAGE_DIRTY)
+				 _PAGE_PROTECT)
 
 /*
  * On s390 the page table entry has an invalid bit and a read-only bit.
@@ -414,51 +404,43 @@ static inline int is_module_addr(void *addr)
  */
          /*xwr*/
 #define __P000	PAGE_NONE
-#define __P001	PAGE_RO
-#define __P010	PAGE_RO
-#define __P011	PAGE_RO
-#define __P100	PAGE_RX
-#define __P101	PAGE_RX
-#define __P110	PAGE_RX
-#define __P111	PAGE_RX
+#define __P001	PAGE_READ
+#define __P010	PAGE_READ
+#define __P011	PAGE_READ
+#define __P100	PAGE_READ
+#define __P101	PAGE_READ
+#define __P110	PAGE_READ
+#define __P111	PAGE_READ
 
 #define __S000	PAGE_NONE
-#define __S001	PAGE_RO
-#define __S010	PAGE_RW
-#define __S011	PAGE_RW
-#define __S100	PAGE_RX
-#define __S101	PAGE_RX
-#define __S110	PAGE_RWX
-#define __S111	PAGE_RWX
+#define __S001	PAGE_READ
+#define __S010	PAGE_WRITE
+#define __S011	PAGE_WRITE
+#define __S100	PAGE_READ
+#define __S101	PAGE_READ
+#define __S110	PAGE_WRITE
+#define __S111	PAGE_WRITE
 
 /*
  * Segment entry (large page) protection definitions.
  */
 #define SEGMENT_NONE	__pgprot(_SEGMENT_ENTRY_INVALID | \
 				 _SEGMENT_ENTRY_PROTECT)
-#define SEGMENT_RO	__pgprot(_SEGMENT_ENTRY_PROTECT | \
-				 _SEGMENT_ENTRY_READ | \
-				 _SEGMENT_ENTRY_NOEXEC)
-#define SEGMENT_RX	__pgprot(_SEGMENT_ENTRY_PROTECT | \
+#define SEGMENT_READ	__pgprot(_SEGMENT_ENTRY_PROTECT | \
 				 _SEGMENT_ENTRY_READ)
-#define SEGMENT_RW	__pgprot(_SEGMENT_ENTRY_READ | \
-				 _SEGMENT_ENTRY_WRITE | \
-				 _SEGMENT_ENTRY_NOEXEC)
-#define SEGMENT_RWX	__pgprot(_SEGMENT_ENTRY_READ | \
+#define SEGMENT_WRITE	__pgprot(_SEGMENT_ENTRY_READ | \
 				 _SEGMENT_ENTRY_WRITE)
 #define SEGMENT_KERNEL	__pgprot(_SEGMENT_ENTRY |	\
 				 _SEGMENT_ENTRY_LARGE |	\
 				 _SEGMENT_ENTRY_READ |	\
 				 _SEGMENT_ENTRY_WRITE | \
 				 _SEGMENT_ENTRY_YOUNG | \
-				 _SEGMENT_ENTRY_DIRTY | \
-				 _SEGMENT_ENTRY_NOEXEC)
+				 _SEGMENT_ENTRY_DIRTY)
 #define SEGMENT_KERNEL_RO __pgprot(_SEGMENT_ENTRY |	\
 				 _SEGMENT_ENTRY_LARGE |	\
 				 _SEGMENT_ENTRY_READ |	\
 				 _SEGMENT_ENTRY_YOUNG |	\
-				 _SEGMENT_ENTRY_PROTECT | \
-				 _SEGMENT_ENTRY_NOEXEC)
+				 _SEGMENT_ENTRY_PROTECT)
 
 /*
  * Region3 entry (large page) protection definitions.
@@ -469,14 +451,12 @@ static inline int is_module_addr(void *addr)
 				 _REGION3_ENTRY_READ |	 \
 				 _REGION3_ENTRY_WRITE |	 \
 				 _REGION3_ENTRY_YOUNG |	 \
-				 _REGION3_ENTRY_DIRTY | \
-				 _REGION_ENTRY_NOEXEC)
+				 _REGION3_ENTRY_DIRTY)
 #define REGION3_KERNEL_RO __pgprot(_REGION_ENTRY_TYPE_R3 | \
 				   _REGION3_ENTRY_LARGE |  \
 				   _REGION3_ENTRY_READ |   \
 				   _REGION3_ENTRY_YOUNG |  \
-				   _REGION_ENTRY_PROTECT | \
-				   _REGION_ENTRY_NOEXEC)
+				   _REGION_ENTRY_PROTECT)
 
 static inline int mm_has_pgste(struct mm_struct *mm)
 {
@@ -500,7 +480,7 @@ static inline int mm_alloc_pgste(struct mm_struct *mm)
  * In the case that a guest uses storage keys
  * faults should no longer be backed by zero pages
  */
-#define mm_forbids_zeropage mm_use_skey
+#define mm_forbids_zeropage mm_has_pgste
 static inline int mm_use_skey(struct mm_struct *mm)
 {
 #ifdef CONFIG_PGSTE
@@ -641,12 +621,12 @@ static inline int pud_bad(pud_t pud)
 
 static inline int pmd_present(pmd_t pmd)
 {
-	return pmd_val(pmd) != _SEGMENT_ENTRY_EMPTY;
+	return pmd_val(pmd) != _SEGMENT_ENTRY_INVALID;
 }
 
 static inline int pmd_none(pmd_t pmd)
 {
-	return pmd_val(pmd) == _SEGMENT_ENTRY_EMPTY;
+	return pmd_val(pmd) == _SEGMENT_ENTRY_INVALID;
 }
 
 static inline unsigned long pmd_pfn(pmd_t pmd)
@@ -804,7 +784,7 @@ static inline void pud_clear(pud_t *pud)
 
 static inline void pmd_clear(pmd_t *pmdp)
 {
-	pmd_val(*pmdp) = _SEGMENT_ENTRY_EMPTY;
+	pmd_val(*pmdp) = _SEGMENT_ENTRY_INVALID;
 }
 
 static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
@@ -821,14 +801,14 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 	pte_val(pte) &= _PAGE_CHG_MASK;
 	pte_val(pte) |= pgprot_val(newprot);
 	/*
-	 * newprot for PAGE_NONE, PAGE_RO, PAGE_RX, PAGE_RW and PAGE_RWX
-	 * has the invalid bit set, clear it again for readable, young pages
+	 * newprot for PAGE_NONE, PAGE_READ and PAGE_WRITE has the
+	 * invalid bit set, clear it again for readable, young pages
 	 */
 	if ((pte_val(pte) & _PAGE_YOUNG) && (pte_val(pte) & _PAGE_READ))
 		pte_val(pte) &= ~_PAGE_INVALID;
 	/*
-	 * newprot for PAGE_RO, PAGE_RX, PAGE_RW and PAGE_RWX has the page
-	 * protection bit set, clear it again for writable, dirty pages
+	 * newprot for PAGE_READ and PAGE_WRITE has the page protection
+	 * bit set, clear it again for writable, dirty pages
 	 */
 	if ((pte_val(pte) & _PAGE_DIRTY) && (pte_val(pte) & _PAGE_WRITE))
 		pte_val(pte) &= ~_PAGE_PROTECT;
@@ -1049,8 +1029,6 @@ int get_guest_storage_key(struct mm_struct *mm, unsigned long addr,
 static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep, pte_t entry)
 {
-	if (!MACHINE_HAS_NX)
-		pte_val(entry) &= ~_PAGE_NOEXEC;
 	if (pte_present(entry))
 		pte_val(entry) &= ~_PAGE_UNUSED;
 	if (mm_has_pgste(mm))
@@ -1197,18 +1175,14 @@ static inline pud_t pud_mkdirty(pud_t pud)
 static inline unsigned long massage_pgprot_pmd(pgprot_t pgprot)
 {
 	/*
-	 * pgprot is PAGE_NONE, PAGE_RO, PAGE_RX, PAGE_RW or PAGE_RWX
-	 * (see __Pxxx / __Sxxx). Convert to segment table entry format.
+	 * pgprot is PAGE_NONE, PAGE_READ, or PAGE_WRITE (see __Pxxx / __Sxxx)
+	 * Convert to segment table entry format.
 	 */
 	if (pgprot_val(pgprot) == pgprot_val(PAGE_NONE))
 		return pgprot_val(SEGMENT_NONE);
-	if (pgprot_val(pgprot) == pgprot_val(PAGE_RO))
-		return pgprot_val(SEGMENT_RO);
-	if (pgprot_val(pgprot) == pgprot_val(PAGE_RX))
-		return pgprot_val(SEGMENT_RX);
-	if (pgprot_val(pgprot) == pgprot_val(PAGE_RW))
-		return pgprot_val(SEGMENT_RW);
-	return pgprot_val(SEGMENT_RWX);
+	if (pgprot_val(pgprot) == pgprot_val(PAGE_READ))
+		return pgprot_val(SEGMENT_READ);
+	return pgprot_val(SEGMENT_WRITE);
 }
 
 static inline pmd_t pmd_mkyoung(pmd_t pmd)
@@ -1343,8 +1317,6 @@ static inline int pmdp_clear_flush_young(struct vm_area_struct *vma,
 static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 			      pmd_t *pmdp, pmd_t entry)
 {
-	if (!MACHINE_HAS_NX)
-		pmd_val(entry) &= ~_SEGMENT_ENTRY_NOEXEC;
 	*pmdp = entry;
 }
 
@@ -1360,7 +1332,7 @@ static inline pmd_t pmd_mkhuge(pmd_t pmd)
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 					    unsigned long addr, pmd_t *pmdp)
 {
-	return pmdp_xchg_direct(mm, addr, pmdp, __pmd(_SEGMENT_ENTRY_EMPTY));
+	return pmdp_xchg_direct(mm, addr, pmdp, __pmd(_SEGMENT_ENTRY_INVALID));
 }
 
 #define __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR_FULL
@@ -1370,10 +1342,10 @@ static inline pmd_t pmdp_huge_get_and_clear_full(struct mm_struct *mm,
 {
 	if (full) {
 		pmd_t pmd = *pmdp;
-		*pmdp = __pmd(_SEGMENT_ENTRY_EMPTY);
+		*pmdp = __pmd(_SEGMENT_ENTRY_INVALID);
 		return pmd;
 	}
-	return pmdp_xchg_lazy(mm, addr, pmdp, __pmd(_SEGMENT_ENTRY_EMPTY));
+	return pmdp_xchg_lazy(mm, addr, pmdp, __pmd(_SEGMENT_ENTRY_INVALID));
 }
 
 #define __HAVE_ARCH_PMDP_HUGE_CLEAR_FLUSH
@@ -1387,7 +1359,9 @@ static inline pmd_t pmdp_huge_clear_flush(struct vm_area_struct *vma,
 static inline void pmdp_invalidate(struct vm_area_struct *vma,
 				   unsigned long addr, pmd_t *pmdp)
 {
-	pmdp_xchg_direct(vma->vm_mm, addr, pmdp, __pmd(_SEGMENT_ENTRY_EMPTY));
+	pmd_t pmd = __pmd(pmd_val(*pmdp) | _SEGMENT_ENTRY_INVALID);
+
+	pmdp_xchg_direct(vma->vm_mm, addr, pmdp, pmd);
 }
 
 #define __HAVE_ARCH_PMDP_SET_WRPROTECT
@@ -1419,7 +1393,7 @@ static inline int pmd_trans_huge(pmd_t pmd)
 #define has_transparent_hugepage has_transparent_hugepage
 static inline int has_transparent_hugepage(void)
 {
-	return MACHINE_HAS_EDAT1 ? 1 : 0;
+	return MACHINE_HAS_HPAGE ? 1 : 0;
 }
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 

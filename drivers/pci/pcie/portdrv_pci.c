@@ -19,7 +19,6 @@
 #include <linux/dmi.h>
 #include <linux/pci-aspm.h>
 
-#include "../pci.h"
 #include "portdrv.h"
 #include "aer/aerdrv.h"
 
@@ -150,7 +149,15 @@ static int pcie_portdrv_probe(struct pci_dev *dev,
 
 	pci_save_state(dev);
 
-	if (pci_bridge_d3_possible(dev)) {
+	/*
+	 * Prevent runtime PM if the port is advertising support for PCIe
+	 * hotplug.  Otherwise the BIOS hotplug SMI code might not be able
+	 * to enumerate devices behind this port properly (the port is
+	 * powered down preventing all config space accesses to the
+	 * subordinate devices).  We can't be sure for native PCIe hotplug
+	 * either so prevent that as well.
+	 */
+	if (!dev->is_hotplug_bridge) {
 		/*
 		 * Keep the port resumed 100ms to make sure things like
 		 * config space accesses from userspace (lspci) will not
@@ -168,7 +175,7 @@ static int pcie_portdrv_probe(struct pci_dev *dev,
 
 static void pcie_portdrv_remove(struct pci_dev *dev)
 {
-	if (pci_bridge_d3_possible(dev)) {
+	if (!dev->is_hotplug_bridge) {
 		pm_runtime_forbid(&dev->dev);
 		pm_runtime_get_noresume(&dev->dev);
 		pm_runtime_dont_use_autosuspend(&dev->dev);

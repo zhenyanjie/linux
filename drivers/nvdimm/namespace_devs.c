@@ -52,17 +52,17 @@ static void namespace_blk_release(struct device *dev)
 	kfree(nsblk);
 }
 
-static const struct device_type namespace_io_device_type = {
+static struct device_type namespace_io_device_type = {
 	.name = "nd_namespace_io",
 	.release = namespace_io_release,
 };
 
-static const struct device_type namespace_pmem_device_type = {
+static struct device_type namespace_pmem_device_type = {
 	.name = "nd_namespace_pmem",
 	.release = namespace_pmem_release,
 };
 
-static const struct device_type namespace_blk_device_type = {
+static struct device_type namespace_blk_device_type = {
 	.name = "nd_namespace_blk",
 	.release = namespace_blk_release,
 };
@@ -1132,7 +1132,7 @@ static ssize_t size_show(struct device *dev,
 	return sprintf(buf, "%llu\n", (unsigned long long)
 			nvdimm_namespace_capacity(to_ndns(dev)));
 }
-static DEVICE_ATTR(size, 0444, size_show, size_store);
+static DEVICE_ATTR(size, S_IRUGO, size_show, size_store);
 
 static u8 *namespace_to_uuid(struct device *dev)
 {
@@ -1451,12 +1451,12 @@ static umode_t namespace_visible(struct kobject *kobj,
 	if (a == &dev_attr_resource.attr) {
 		if (is_namespace_blk(dev))
 			return 0;
-		return a->mode;
+		return 0400;
 	}
 
 	if (is_namespace_pmem(dev) || is_namespace_blk(dev)) {
 		if (a == &dev_attr_size.attr)
-			return 0644;
+			return S_IWUSR | S_IRUGO;
 
 		if (is_namespace_pmem(dev) && a == &dev_attr_sector_size.attr)
 			return 0;
@@ -1653,7 +1653,7 @@ static int select_pmem_id(struct nd_region *nd_region, u8 *pmem_id)
 		u64 hw_start, hw_end, pmem_start, pmem_end;
 		struct nd_label_ent *label_ent;
 
-		lockdep_assert_held(&nd_mapping->lock);
+		WARN_ON(!mutex_is_locked(&nd_mapping->lock));
 		list_for_each_entry(label_ent, &nd_mapping->labels, list) {
 			nd_label = label_ent->label;
 			if (!nd_label)
@@ -1747,7 +1747,7 @@ struct device *create_namespace_pmem(struct nd_region *nd_region,
 	}
 
 	if (i < nd_region->ndr_mappings) {
-		struct nvdimm_drvdata *ndd = to_ndd(&nd_region->mapping[i]);
+		struct nvdimm *nvdimm = nd_region->mapping[i].nvdimm;
 
 		/*
 		 * Give up if we don't find an instance of a uuid at each
@@ -1755,7 +1755,7 @@ struct device *create_namespace_pmem(struct nd_region *nd_region,
 		 * find a dimm with two instances of the same uuid.
 		 */
 		dev_err(&nd_region->dev, "%s missing label for %pUb\n",
-				dev_name(ndd->dev), nd_label->uuid);
+				nvdimm_name(nvdimm), nd_label->uuid);
 		rc = -EINVAL;
 		goto err;
 	}
@@ -2007,7 +2007,7 @@ struct device *create_namespace_blk(struct nd_region *nd_region,
 	struct nd_mapping *nd_mapping = &nd_region->mapping[0];
 	struct nvdimm_drvdata *ndd = to_ndd(nd_mapping);
 	struct nd_namespace_blk *nsblk;
-	char name[NSLABEL_NAME_LEN];
+	char *name[NSLABEL_NAME_LEN];
 	struct device *dev = NULL;
 	struct resource *res;
 

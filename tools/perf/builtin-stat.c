@@ -146,6 +146,7 @@ static aggr_get_id_t		aggr_get_id;
 static bool			append_file;
 static const char		*output_name;
 static int			output_fd;
+static int			print_free_counters_hint;
 
 struct perf_stat {
 	bool			 record;
@@ -310,8 +311,12 @@ static int read_counter(struct perf_evsel *counter)
 			struct perf_counts_values *count;
 
 			count = perf_counts(counter->counts, cpu, thread);
-			if (perf_evsel__read(counter, cpu, thread, count))
+			if (perf_evsel__read(counter, cpu, thread, count)) {
+				counter->counts->scaled = -1;
+				perf_counts(counter->counts, cpu, thread)->ena = 0;
+				perf_counts(counter->counts, cpu, thread)->run = 0;
 				return -1;
+			}
 
 			if (STAT_RECORD) {
 				if (perf_evsel__write_stat_event(counter, cpu, thread, count)) {
@@ -336,12 +341,14 @@ static int read_counter(struct perf_evsel *counter)
 static void read_counters(void)
 {
 	struct perf_evsel *counter;
+	int ret;
 
 	evlist__for_each_entry(evsel_list, counter) {
-		if (read_counter(counter))
+		ret = read_counter(counter);
+		if (ret)
 			pr_debug("failed to read counter %s\n", counter->name);
 
-		if (perf_stat_process_counter(&stat_config, counter))
+		if (ret == 0 && perf_stat_process_counter(&stat_config, counter))
 			pr_warning("failed to process counter %s\n", counter->name);
 	}
 }
@@ -533,7 +540,7 @@ static int store_counter_ids(struct perf_evsel *counter)
 static int __run_perf_stat(int argc, const char **argv)
 {
 	int interval = stat_config.interval;
-	char msg[BUFSIZ];
+	char msg[512];
 	unsigned long long t0, t1;
 	struct perf_evsel *counter;
 	struct timespec ts;
@@ -573,7 +580,7 @@ try_again:
 			if (errno == EINVAL || errno == ENOSYS ||
 			    errno == ENOENT || errno == EOPNOTSUPP ||
 			    errno == ENXIO) {
-				if (verbose > 0)
+				if (verbose)
 					ui__warning("%s event is not supported by the kernel.\n",
 						    perf_evsel__name(counter));
 				counter->supported = false;
@@ -582,7 +589,7 @@ try_again:
 				    !(counter->leader->nr_members > 1))
 					continue;
 			} else if (perf_evsel__fallback(counter, errno, msg, sizeof(msg))) {
-                                if (verbose > 0)
+                                if (verbose)
                                         ui__warning("%s\n", msg);
                                 goto try_again;
                         }
@@ -869,7 +876,7 @@ static void print_metric_csv(void *ctx,
 	char buf[64], *vals, *ends;
 
 	if (unit == NULL || fmt == NULL) {
-		fprintf(out, "%s%s%s%s", csv_sep, csv_sep, csv_sep, csv_sep);
+		fprintf(out, "%s%s", csv_sep, csv_sep);
 		return;
 	}
 	snprintf(buf, sizeof(buf), fmt, val);
@@ -1108,6 +1115,9 @@ static void printout(int id, int nr, struct perf_evsel *counter, double uval,
 			csv_output ? 0 : 18,
 			counter->supported ? CNTR_NOT_COUNTED : CNTR_NOT_SUPPORTED,
 			csv_sep);
+
+		if (counter->supported)
+			print_free_counters_hint = 1;
 
 		fprintf(stat_config.output, "%-*s%s",
 			csv_output ? 0 : unit_width,
@@ -1477,6 +1487,13 @@ static void print_footer(void)
 				avg_stats(&walltime_nsecs_stats));
 	}
 	fprintf(output, "\n\n");
+
+	if (print_free_counters_hint)
+		fprintf(output,
+"Some events weren't counted. Try disabling the NMI watchdog:\n"
+"	echo 0 > /proc/sys/kernel/nmi_watchdog\n"
+"	perf stat ...\n"
+"	echo 1 > /proc/sys/kernel/nmi_watchdog\n");
 }
 
 static void print_counters(struct timespec *ts, int argc, const char **argv)
@@ -1765,7 +1782,7 @@ static inline int perf_env__get_cpu(struct perf_env *env, struct cpu_map *map, i
 
 	cpu = map->map[idx];
 
-	if (cpu >= env->nr_cpus_avail)
+	if (cpu >= env->nr_cpus_online)
 		return -1;
 
 	return cpu;
@@ -2025,11 +2042,16 @@ static int add_default_attributes(void)
 		return 0;
 
 	if (transaction_run) {
+		struct parse_events_error errinfo;
+
 		if (pmu_have_event("cpu", "cycles-ct") &&
 		    pmu_have_event("cpu", "el-start"))
-			err = parse_events(evsel_list, transaction_attrs, NULL);
+			err = parse_events(evsel_list, transaction_attrs,
+					   &errinfo);
 		else
-			err = parse_events(evsel_list, transaction_limited_attrs, NULL);
+			err = parse_events(evsel_list,
+					   transaction_limited_attrs,
+					   &errinfo);
 		if (err) {
 			fprintf(stderr, "Cannot set up transaction events\n");
 			return -1;
@@ -2195,7 +2217,7 @@ static int process_stat_round_event(struct perf_tool *tool __maybe_unused,
 }
 
 static
-int process_stat_config_event(struct perf_tool *tool,
+int process_stat_config_event(struct perf_tool *tool __maybe_unused,
 			      union perf_event *event,
 			      struct perf_session *session __maybe_unused)
 {
@@ -2238,7 +2260,7 @@ static int set_maps(struct perf_stat *st)
 }
 
 static
-int process_thread_map_event(struct perf_tool *tool,
+int process_thread_map_event(struct perf_tool *tool __maybe_unused,
 			     union perf_event *event,
 			     struct perf_session *session __maybe_unused)
 {
@@ -2257,7 +2279,7 @@ int process_thread_map_event(struct perf_tool *tool,
 }
 
 static
-int process_cpu_map_event(struct perf_tool *tool,
+int process_cpu_map_event(struct perf_tool *tool __maybe_unused,
 			  union perf_event *event,
 			  struct perf_session *session __maybe_unused)
 {
@@ -2445,9 +2467,8 @@ int cmd_stat(int argc, const char **argv, const char *prefix __maybe_unused)
 	} else if (big_num_opt == 0) /* User passed --no-big-num */
 		big_num = false;
 
-	/* Make system wide (-a) the default target. */
 	if (!argc && target__none(&target))
-		target.system_wide = true;
+		usage_with_options(stat_usage, stat_options);
 
 	if (run_count < 0) {
 		pr_err("Run count must be a positive number\n");
@@ -2539,7 +2560,7 @@ int cmd_stat(int argc, const char **argv, const char *prefix __maybe_unused)
 
 	status = 0;
 	for (run_idx = 0; forever || run_idx < run_count; run_idx++) {
-		if (run_count != 1 && verbose > 0)
+		if (run_count != 1 && verbose)
 			fprintf(output, "[ perf stat: executing run #%d ... ]\n",
 				run_idx + 1);
 

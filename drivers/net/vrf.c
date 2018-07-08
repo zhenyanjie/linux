@@ -79,8 +79,8 @@ static void vrf_tx_error(struct net_device *vrf_dev, struct sk_buff *skb)
 	kfree_skb(skb);
 }
 
-static void vrf_get_stats64(struct net_device *dev,
-			    struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *vrf_get_stats64(struct net_device *dev,
+						 struct rtnl_link_stats64 *stats)
 {
 	int i;
 
@@ -104,6 +104,7 @@ static void vrf_get_stats64(struct net_device *dev,
 		stats->rx_bytes += rbytes;
 		stats->rx_packets += rpkts;
 	}
+	return stats;
 }
 
 /* Local traffic destined to local address. Reinsert the packet to rx
@@ -275,6 +276,11 @@ static netdev_tx_t vrf_process_v4_outbound(struct sk_buff *skb,
 	if (IS_ERR(rt))
 		goto err;
 
+	if (rt->rt_type != RTN_UNICAST && rt->rt_type != RTN_LOCAL) {
+		ip_rt_put(rt);
+		goto err;
+	}
+
 	skb_dst_drop(skb);
 
 	/* if dst.dev is loopback or the VRF device again this is locally
@@ -381,8 +387,7 @@ static int vrf_finish_output6(struct net *net, struct sock *sk,
 	if (unlikely(!neigh))
 		neigh = __neigh_create(&nd_tbl, nexthop, dst->dev, false);
 	if (!IS_ERR(neigh)) {
-		sock_confirm_neigh(skb, neigh);
-		ret = neigh_output(neigh, skb);
+		ret = dst_neigh_output(dst, neigh, skb);
 		rcu_read_unlock_bh();
 		return ret;
 	}
@@ -581,14 +586,14 @@ static int vrf_finish_output(struct net *net, struct sock *sk, struct sk_buff *s
 	if (unlikely(!neigh))
 		neigh = __neigh_create(&arp_tbl, &nexthop, dev, false);
 	if (!IS_ERR(neigh)) {
-		sock_confirm_neigh(skb, neigh);
-		ret = neigh_output(neigh, skb);
+		ret = dst_neigh_output(dst, neigh, skb);
+		rcu_read_unlock_bh();
+		return ret;
 	}
 
 	rcu_read_unlock_bh();
 err:
-	if (unlikely(ret < 0))
-		vrf_tx_error(skb->dev, skb);
+	vrf_tx_error(skb->dev, skb);
 	return ret;
 }
 
@@ -618,10 +623,6 @@ static struct sk_buff *vrf_ip_out(struct net_device *vrf_dev,
 	struct net_vrf *vrf = netdev_priv(vrf_dev);
 	struct dst_entry *dst = NULL;
 	struct rtable *rth;
-
-	/* don't divert multicast */
-	if (ipv4_is_multicast(ip_hdr(skb)->daddr))
-		return skb;
 
 	rcu_read_lock();
 
@@ -1006,9 +1007,6 @@ static struct sk_buff *vrf_ip_rcv(struct net_device *vrf_dev,
 	skb->skb_iif = vrf_dev->ifindex;
 	IPCB(skb)->flags |= IPSKB_L3SLAVE;
 
-	if (ipv4_is_multicast(ip_hdr(skb)->daddr))
-		goto out;
-
 	/* loopback traffic; do not push through packet taps again.
 	 * Reset pkt_type for upper layers to process skb
 	 */
@@ -1133,7 +1131,7 @@ static int vrf_fib_rule(const struct net_device *dev, __u8 family, bool add_it)
 	frh->family = family;
 	frh->action = FR_ACT_TO_TBL;
 
-	if (nla_put_u32(skb, FRA_L3MDEV, 1))
+	if (nla_put_u8(skb, FRA_L3MDEV, 1))
 		goto nla_put_failure;
 
 	if (nla_put_u32(skb, FRA_PRIORITY, FIB_RULE_PREF))
@@ -1174,18 +1172,7 @@ static int vrf_add_fib_rules(const struct net_device *dev)
 	if (err < 0)
 		goto ipv6_err;
 
-#if IS_ENABLED(CONFIG_IP_MROUTE_MULTIPLE_TABLES)
-	err = vrf_fib_rule(dev, RTNL_FAMILY_IPMR, true);
-	if (err < 0)
-		goto ipmr_err;
-#endif
-
 	return 0;
-
-#if IS_ENABLED(CONFIG_IP_MROUTE_MULTIPLE_TABLES)
-ipmr_err:
-	vrf_fib_rule(dev, AF_INET6,  false);
-#endif
 
 ipv6_err:
 	vrf_fib_rule(dev, AF_INET,  false);
@@ -1203,7 +1190,7 @@ static void vrf_setup(struct net_device *dev)
 	dev->netdev_ops = &vrf_netdev_ops;
 	dev->l3mdev_ops = &vrf_l3mdev_ops;
 	dev->ethtool_ops = &vrf_ethtool_ops;
-	dev->needs_free_netdev = true;
+	dev->destructor = free_netdev;
 
 	/* Fill in device structure with ethernet-generic values. */
 	eth_hw_addr_random(dev);

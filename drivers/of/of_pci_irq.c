@@ -93,15 +93,7 @@ int of_irq_parse_pci(const struct pci_dev *pdev, struct of_phandle_args *out_irq
 		goto err;
 	return 0;
 err:
-	if (rc == -ENOENT) {
-		dev_warn(&pdev->dev,
-			"%s: no interrupt-map found, INTx interrupts not available\n",
-			__func__);
-		pr_warn_once("%s: possibly some PCI slots don't have level triggered interrupts capability\n",
-			__func__);
-	} else {
-		dev_err(&pdev->dev, "%s: failed with rc=%d\n", __func__, rc);
-	}
+	dev_err(&pdev->dev, "of_irq_parse_pci() failed with rc=%d\n", rc);
 	return rc;
 }
 EXPORT_SYMBOL_GPL(of_irq_parse_pci);

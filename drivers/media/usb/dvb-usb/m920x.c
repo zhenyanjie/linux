@@ -55,9 +55,13 @@ static inline int m920x_read(struct usb_device *udev, u8 request, u16 value,
 static inline int m920x_write(struct usb_device *udev, u8 request,
 			      u16 value, u16 index)
 {
-	return usb_control_msg(udev, usb_sndctrlpipe(udev, 0), request,
-			       USB_TYPE_VENDOR | USB_DIR_OUT, value, index,
-			       NULL, 0, 2000);
+	int ret;
+
+	ret = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
+			      request, USB_TYPE_VENDOR | USB_DIR_OUT,
+			      value, index, NULL, 0, 2000);
+
+	return ret;
 }
 
 static inline int m920x_write_seq(struct usb_device *udev, u8 request,

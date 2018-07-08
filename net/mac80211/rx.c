@@ -1432,18 +1432,16 @@ EXPORT_SYMBOL(ieee80211_sta_pspoll);
 void ieee80211_sta_uapsd_trigger(struct ieee80211_sta *pubsta, u8 tid)
 {
 	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
-	int ac = ieee80211_ac_from_tid(tid);
+	u8 ac = ieee802_1d_to_ac[tid & 7];
 
 	/*
-	 * If this AC is not trigger-enabled do nothing unless the
-	 * driver is calling us after it already checked.
+	 * If this AC is not trigger-enabled do nothing.
 	 *
 	 * NB: This could/should check a separate bitmap of trigger-
 	 * enabled queues, but for now we only implement uAPSD w/o
 	 * TSPEC changes to the ACs, so they're always the same.
 	 */
-	if (!(sta->sta.uapsd_queues & ieee80211_ac_to_qos_mask[ac]) &&
-	    tid != IEEE80211_NUM_TIDS)
+	if (!(sta->sta.uapsd_queues & BIT(ac)))
 		return;
 
 	/* if we are in a service period, do nothing */
@@ -1953,6 +1951,7 @@ ieee80211_rx_h_defragment(struct ieee80211_rx_data *rx)
 	unsigned int frag, seq;
 	struct ieee80211_fragment_entry *entry;
 	struct sk_buff *skb;
+	struct ieee80211_rx_status *status;
 
 	hdr = (struct ieee80211_hdr *)rx->skb->data;
 	fc = hdr->frame_control;
@@ -2077,6 +2076,9 @@ ieee80211_rx_h_defragment(struct ieee80211_rx_data *rx)
 		memcpy(skb_put(rx->skb, skb->len), skb->data, skb->len);
 		dev_kfree_skb(skb);
 	}
+
+	/* Complete frame has been reassembled - process it now */
+	status = IEEE80211_SKB_RXCB(rx->skb);
 
  out:
 	ieee80211_led_rx(rx->local);
@@ -2258,8 +2260,7 @@ ieee80211_deliver_skb(struct ieee80211_rx_data *rx)
 	     sdata->vif.type == NL80211_IFTYPE_AP_VLAN) &&
 	    !(sdata->flags & IEEE80211_SDATA_DONT_BRIDGE_PACKETS) &&
 	    (sdata->vif.type != NL80211_IFTYPE_AP_VLAN || !sdata->u.vlan.sta)) {
-		if (is_multicast_ether_addr(ehdr->h_dest) &&
-		    ieee80211_vif_get_num_mcast_if(sdata) != 0) {
+		if (is_multicast_ether_addr(ehdr->h_dest)) {
 			/*
 			 * send multicast frames both to higher layers in
 			 * local net stack and back to the wireless medium
@@ -2268,7 +2269,7 @@ ieee80211_deliver_skb(struct ieee80211_rx_data *rx)
 			if (!xmit_skb)
 				net_info_ratelimited("%s: failed to clone multicast frame\n",
 						    dev->name);
-		} else if (!is_multicast_ether_addr(ehdr->h_dest)) {
+		} else {
 			dsta = sta_info_get(sdata, skb->data);
 			if (dsta) {
 				/*
@@ -2514,8 +2515,7 @@ ieee80211_rx_h_mesh_fwding(struct ieee80211_rx_data *rx)
 	if (!ifmsh->mshcfg.dot11MeshForwarding)
 		goto out;
 
-	fwd_skb = skb_copy_expand(skb, local->tx_headroom +
-				       sdata->encrypt_headroom, 0, GFP_ATOMIC);
+	fwd_skb = skb_copy(skb, GFP_ATOMIC);
 	if (!fwd_skb) {
 		net_info_ratelimited("%s: failed to clone mesh frame\n",
 				    sdata->name);
@@ -3611,6 +3611,8 @@ static bool ieee80211_accept_frame(struct ieee80211_rx_data *rx)
 		}
 		return true;
 	case NL80211_IFTYPE_MESH_POINT:
+		if (ether_addr_equal(sdata->vif.addr, hdr->addr2))
+			return false;
 		if (multicast)
 			return true;
 		return ether_addr_equal(sdata->vif.addr, hdr->addr1);
@@ -3905,7 +3907,7 @@ static bool ieee80211_invoke_fast_rx(struct ieee80211_rx_data *rx,
 	if ((hdr->frame_control & cpu_to_le16(IEEE80211_FCTL_FROMDS |
 					      IEEE80211_FCTL_TODS)) !=
 	    fast_rx->expected_ds_bits)
-		goto drop;
+		return false;
 
 	/* assign the key to drop unencrypted frames (later)
 	 * and strip the IV/MIC if necessary

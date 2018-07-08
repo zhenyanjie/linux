@@ -270,6 +270,7 @@ typedef struct xfs_inode_log_format {
 	__uint32_t		ilf_fields;	/* flags for fields logged */
 	__uint16_t		ilf_asize;	/* size of attr d/ext/root */
 	__uint16_t		ilf_dsize;	/* size of data/ext/root */
+	__uint32_t		ilf_pad;	/* pad for 64 bit boundary */
 	__uint64_t		ilf_ino;	/* inode number */
 	union {
 		__uint32_t	ilfu_rdev;	/* rdev value for dev inode*/
@@ -280,7 +281,12 @@ typedef struct xfs_inode_log_format {
 	__int32_t		ilf_boffset;	/* off of inode in buffer */
 } xfs_inode_log_format_t;
 
-typedef struct xfs_inode_log_format_32 {
+/*
+ * Old 32 bit systems will log in this format without the 64 bit
+ * alignment padding. Recovery will detect this and convert it to the
+ * correct format.
+ */
+struct xfs_inode_log_format_32 {
 	__uint16_t		ilf_type;	/* inode log item type */
 	__uint16_t		ilf_size;	/* size of this item */
 	__uint32_t		ilf_fields;	/* flags for fields logged */
@@ -294,24 +300,7 @@ typedef struct xfs_inode_log_format_32 {
 	__int64_t		ilf_blkno;	/* blkno of inode buffer */
 	__int32_t		ilf_len;	/* len of inode buffer */
 	__int32_t		ilf_boffset;	/* off of inode in buffer */
-} __attribute__((packed)) xfs_inode_log_format_32_t;
-
-typedef struct xfs_inode_log_format_64 {
-	__uint16_t		ilf_type;	/* inode log item type */
-	__uint16_t		ilf_size;	/* size of this item */
-	__uint32_t		ilf_fields;	/* flags for fields logged */
-	__uint16_t		ilf_asize;	/* size of attr d/ext/root */
-	__uint16_t		ilf_dsize;	/* size of data/ext/root */
-	__uint32_t		ilf_pad;	/* pad for 64 bit boundary */
-	__uint64_t		ilf_ino;	/* inode number */
-	union {
-		__uint32_t	ilfu_rdev;	/* rdev value for dev inode*/
-		uuid_t		ilfu_uuid;	/* mount point value */
-	} ilf_u;
-	__int64_t		ilf_blkno;	/* blkno of inode buffer */
-	__int32_t		ilf_len;	/* len of inode buffer */
-	__int32_t		ilf_boffset;	/* off of inode in buffer */
-} xfs_inode_log_format_64_t;
+} __attribute__((packed));
 
 
 /*
@@ -481,8 +470,8 @@ static inline uint xfs_log_dinode_size(int version)
 typedef struct xfs_buf_log_format {
 	unsigned short	blf_type;	/* buf log item type indicator */
 	unsigned short	blf_size;	/* size of this item */
-	unsigned short	blf_flags;	/* misc state */
-	unsigned short	blf_len;	/* number of blocks in this buf */
+	ushort		blf_flags;	/* misc state */
+	ushort		blf_len;	/* number of blocks in this buf */
 	__int64_t	blf_blkno;	/* starting blkno of this buf */
 	unsigned int	blf_map_size;	/* used size of data bitmap in words */
 	unsigned int	blf_data_map[XFS_BLF_DATAMAP_SIZE]; /* dirty bitmap */

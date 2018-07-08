@@ -99,6 +99,4 @@
 
 #define SO_CNX_ADVICE		53
 
-#define SCM_TIMESTAMPING_OPT_STATS	54
-
 #endif /* _ASM_IA64_SOCKET_H */

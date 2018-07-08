@@ -18,9 +18,8 @@
 #include <linux/selinux.h>
 #include <linux/atomic.h>
 #include <linux/uidgid.h>
-#include <linux/sched.h>
-#include <linux/sched/user.h>
 
+struct user_struct;
 struct cred;
 struct inode;
 
@@ -83,6 +82,7 @@ extern int set_current_groups(struct group_info *);
 extern void set_groups(struct cred *, struct group_info *);
 extern int groups_search(const struct group_info *, kgid_t);
 extern bool may_setgroups(void);
+extern void groups_sort(struct group_info *);
 
 /*
  * The security context of a task

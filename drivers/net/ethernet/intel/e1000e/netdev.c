@@ -240,9 +240,9 @@ static void e1000e_dump(struct e1000_adapter *adapter)
 	/* Print netdevice Info */
 	if (netdev) {
 		dev_info(&adapter->pdev->dev, "Net device Info\n");
-		pr_info("Device Name     state            trans_start\n");
-		pr_info("%-15s %016lX %016lX\n", netdev->name,
-			netdev->state, dev_trans_start(netdev));
+		pr_info("Device Name     state            trans_start      last_rx\n");
+		pr_info("%-15s %016lX %016lX %016lX\n", netdev->name,
+			netdev->state, dev_trans_start(netdev), netdev->last_rx);
 	}
 
 	/* Print Registers */
@@ -1182,6 +1182,7 @@ static void e1000e_tx_hwtstamp_work(struct work_struct *work)
 	struct e1000_hw *hw = &adapter->hw;
 
 	if (er32(TSYNCTXCTL) & E1000_TSYNCTXCTL_VALID) {
+		struct sk_buff *skb = adapter->tx_hwtstamp_skb;
 		struct skb_shared_hwtstamps shhwtstamps;
 		u64 txstmp;
 
@@ -1190,9 +1191,14 @@ static void e1000e_tx_hwtstamp_work(struct work_struct *work)
 
 		e1000e_systim_to_hwtstamp(adapter, &shhwtstamps, txstmp);
 
-		skb_tstamp_tx(adapter->tx_hwtstamp_skb, &shhwtstamps);
-		dev_kfree_skb_any(adapter->tx_hwtstamp_skb);
+		/* Clear the global tx_hwtstamp_skb pointer and force writes
+		 * prior to notifying the stack of a Tx timestamp.
+		 */
 		adapter->tx_hwtstamp_skb = NULL;
+		wmb(); /* force write prior to skb_tstamp_tx */
+
+		skb_tstamp_tx(skb, &shhwtstamps);
+		dev_kfree_skb_any(skb);
 	} else if (time_after(jiffies, adapter->tx_hwtstamp_start
 			      + adapter->tx_timeout_factor * HZ)) {
 		dev_kfree_skb_any(adapter->tx_hwtstamp_skb);
@@ -1905,14 +1911,30 @@ static irqreturn_t e1000_msix_other(int __always_unused irq, void *data)
 	struct net_device *netdev = data;
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
+	u32 icr;
+	bool enable = true;
 
-	hw->mac.get_link_status = true;
-
-	/* guard against interrupt when we're going down */
-	if (!test_bit(__E1000_DOWN, &adapter->state)) {
-		mod_timer(&adapter->watchdog_timer, jiffies + 1);
-		ew32(IMS, E1000_IMS_OTHER);
+	icr = er32(ICR);
+	if (icr & E1000_ICR_RXO) {
+		ew32(ICR, E1000_ICR_RXO);
+		enable = false;
+		/* napi poll will re-enable Other, make sure it runs */
+		if (napi_schedule_prep(&adapter->napi)) {
+			adapter->total_rx_bytes = 0;
+			adapter->total_rx_packets = 0;
+			__napi_schedule(&adapter->napi);
+		}
 	}
+	if (icr & E1000_ICR_LSC) {
+		ew32(ICR, E1000_ICR_LSC);
+		hw->mac.get_link_status = true;
+		/* guard against interrupt when we're going down */
+		if (!test_bit(__E1000_DOWN, &adapter->state))
+			mod_timer(&adapter->watchdog_timer, jiffies + 1);
+	}
+
+	if (enable && !test_bit(__E1000_DOWN, &adapter->state))
+		ew32(IMS, E1000_IMS_OTHER);
 
 	return IRQ_HANDLED;
 }
@@ -2309,8 +2331,8 @@ static int e1000_alloc_ring_dma(struct e1000_adapter *adapter,
 {
 	struct pci_dev *pdev = adapter->pdev;
 
-	ring->desc = dma_alloc_coherent(&pdev->dev, ring->size, &ring->dma,
-					GFP_KERNEL);
+	ring->desc = dma_zalloc_coherent(&pdev->dev, ring->size, &ring->dma,
+					 GFP_KERNEL);
 	if (!ring->desc)
 		return -ENOMEM;
 
@@ -2683,7 +2705,8 @@ static int e1000e_poll(struct napi_struct *napi, int weight)
 		napi_complete_done(napi, work_done);
 		if (!test_bit(__E1000_DOWN, &adapter->state)) {
 			if (adapter->msix_entries)
-				ew32(IMS, adapter->rx_ring->ims_val);
+				ew32(IMS, adapter->rx_ring->ims_val |
+				     E1000_IMS_OTHER);
 			else
 				e1000_irq_enable(adapter);
 		}
@@ -3511,6 +3534,12 @@ s32 e1000e_get_base_timinca(struct e1000_adapter *adapter, u32 *timinca)
 
 	switch (hw->mac.type) {
 	case e1000_pch2lan:
+		/* Stable 96MHz frequency */
+		incperiod = INCPERIOD_96MHz;
+		incvalue = INCVALUE_96MHz;
+		shift = INCVALUE_SHIFT_96MHz;
+		adapter->cc.shift = shift + INCPERIOD_SHIFT_96MHz;
+		break;
 	case e1000_pch_lpt:
 		if (er32(TSYNCRXCTL) & E1000_TSYNCRXCTL_SYSCFI) {
 			/* Stable 96MHz frequency */
@@ -4178,7 +4207,7 @@ static void e1000e_trigger_lsc(struct e1000_adapter *adapter)
 	struct e1000_hw *hw = &adapter->hw;
 
 	if (adapter->msix_entries)
-		ew32(ICS, E1000_ICS_OTHER);
+		ew32(ICS, E1000_ICS_LSC | E1000_ICS_OTHER);
 	else
 		ew32(ICS, E1000_ICS_LSC);
 }
@@ -4305,24 +4334,24 @@ void e1000e_reinit_locked(struct e1000_adapter *adapter)
 /**
  * e1000e_sanitize_systim - sanitize raw cycle counter reads
  * @hw: pointer to the HW structure
- * @systim: time value read, sanitized and returned
+ * @systim: cycle_t value read, sanitized and returned
  *
  * Errata for 82574/82583 possible bad bits read from SYSTIMH/L:
  * check to see that the time is incrementing at a reasonable
  * rate and is a multiple of incvalue.
  **/
-static u64 e1000e_sanitize_systim(struct e1000_hw *hw, u64 systim)
+static cycle_t e1000e_sanitize_systim(struct e1000_hw *hw, cycle_t systim)
 {
 	u64 time_delta, rem, temp;
-	u64 systim_next;
+	cycle_t systim_next;
 	u32 incvalue;
 	int i;
 
 	incvalue = er32(TIMINCA) & E1000_TIMINCA_INCVALUE_MASK;
 	for (i = 0; i < E1000_MAX_82574_SYSTIM_REREADS; i++) {
 		/* latch SYSTIMH on read of SYSTIML */
-		systim_next = (u64)er32(SYSTIML);
-		systim_next |= (u64)er32(SYSTIMH) << 32;
+		systim_next = (cycle_t)er32(SYSTIML);
+		systim_next |= (cycle_t)er32(SYSTIMH) << 32;
 
 		time_delta = systim_next - systim;
 		temp = time_delta;
@@ -4342,13 +4371,13 @@ static u64 e1000e_sanitize_systim(struct e1000_hw *hw, u64 systim)
  * e1000e_cyclecounter_read - read raw cycle counter (used by time counter)
  * @cc: cyclecounter structure
  **/
-static u64 e1000e_cyclecounter_read(const struct cyclecounter *cc)
+static cycle_t e1000e_cyclecounter_read(const struct cyclecounter *cc)
 {
 	struct e1000_adapter *adapter = container_of(cc, struct e1000_adapter,
 						     cc);
 	struct e1000_hw *hw = &adapter->hw;
 	u32 systimel, systimeh;
-	u64 systim;
+	cycle_t systim;
 	/* SYSTIMH latching upon SYSTIML read does not work well.
 	 * This means that if SYSTIML overflows after we read it but before
 	 * we read SYSTIMH, the value of SYSTIMH has been incremented and we
@@ -4368,8 +4397,8 @@ static u64 e1000e_cyclecounter_read(const struct cyclecounter *cc)
 			systimel = systimel_2;
 		}
 	}
-	systim = (u64)systimel;
-	systim |= (u64)systimeh << 32;
+	systim = (cycle_t)systimel;
+	systim |= (cycle_t)systimeh << 32;
 
 	if (adapter->flags2 & FLAG2_CHECK_SYSTIM_OVERFLOW)
 		systim = e1000e_sanitize_systim(hw, systim);
@@ -5056,7 +5085,7 @@ static bool e1000e_has_link(struct e1000_adapter *adapter)
 	case e1000_media_type_copper:
 		if (hw->mac.get_link_status) {
 			ret_val = hw->mac.ops.check_for_link(hw);
-			link_active = !hw->mac.get_link_status;
+			link_active = ret_val > 0;
 		} else {
 			link_active = true;
 		}
@@ -5074,7 +5103,7 @@ static bool e1000e_has_link(struct e1000_adapter *adapter)
 		break;
 	}
 
-	if ((ret_val == E1000_ERR_PHY) && (hw->phy.type == e1000_phy_igp_3) &&
+	if ((ret_val == -E1000_ERR_PHY) && (hw->phy.type == e1000_phy_igp_3) &&
 	    (er32(CTRL) & E1000_PHY_CTRL_GBE_DISABLE)) {
 		/* See e1000_kmrn_lock_loss_workaround_ich8lan() */
 		e_info("Gigabit has been disabled, downgrading speed\n");
@@ -5920,11 +5949,12 @@ static void e1000_reset_task(struct work_struct *work)
  *
  * Returns the address of the device statistics structure.
  **/
-void e1000e_get_stats64(struct net_device *netdev,
-			struct rtnl_link_stats64 *stats)
+struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
+					     struct rtnl_link_stats64 *stats)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
+	memset(stats, 0, sizeof(struct rtnl_link_stats64));
 	spin_lock(&adapter->stats64_lock);
 	e1000e_update_stats(adapter);
 	/* Fill out the OS statistics structure */
@@ -5957,6 +5987,7 @@ void e1000e_get_stats64(struct net_device *netdev,
 	/* Tx Dropped needs to be maintained elsewhere */
 
 	spin_unlock(&adapter->stats64_lock);
+	return stats;
 }
 
 /**
@@ -5972,9 +6003,16 @@ static int e1000_change_mtu(struct net_device *netdev, int new_mtu)
 	int max_frame = new_mtu + VLAN_ETH_HLEN + ETH_FCS_LEN;
 
 	/* Jumbo frame support */
-	if ((new_mtu > ETH_DATA_LEN) &&
+	if ((max_frame > (VLAN_ETH_FRAME_LEN + ETH_FCS_LEN)) &&
 	    !(adapter->flags & FLAG_HAS_JUMBO_FRAMES)) {
 		e_err("Jumbo Frames not supported.\n");
+		return -EINVAL;
+	}
+
+	/* Supported frame sizes */
+	if ((new_mtu < (VLAN_ETH_ZLEN + ETH_FCS_LEN)) ||
+	    (max_frame > adapter->max_hw_frame_size)) {
+		e_err("Unsupported MTU setting\n");
 		return -EINVAL;
 	}
 
@@ -6613,12 +6651,17 @@ static int e1000e_pm_thaw(struct device *dev)
 static int e1000e_pm_suspend(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
+	int rc;
 
 	e1000e_flush_lpic(pdev);
 
 	e1000e_pm_freeze(dev);
 
-	return __e1000_shutdown(pdev, false);
+	rc = __e1000_shutdown(pdev, false);
+	if (rc)
+		e1000e_pm_thaw(dev);
+
+	return rc;
 }
 
 static int e1000e_pm_resume(struct device *dev)
@@ -6753,13 +6796,13 @@ static void e1000_netpoll(struct net_device *netdev)
 		e1000_intr_msix(adapter->pdev->irq, netdev);
 		break;
 	case E1000E_INT_MODE_MSI:
-		if (disable_hardirq(adapter->pdev->irq))
-			e1000_intr_msi(adapter->pdev->irq, netdev);
+		disable_irq(adapter->pdev->irq);
+		e1000_intr_msi(adapter->pdev->irq, netdev);
 		enable_irq(adapter->pdev->irq);
 		break;
 	default:		/* E1000E_INT_MODE_LEGACY */
-		if (disable_hardirq(adapter->pdev->irq))
-			e1000_intr(adapter->pdev->irq, netdev);
+		disable_irq(adapter->pdev->irq);
+		e1000_intr(adapter->pdev->irq, netdev);
 		enable_irq(adapter->pdev->irq);
 		break;
 	}
@@ -7177,11 +7220,6 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		netdev->features |= NETIF_F_HIGHDMA;
 		netdev->vlan_features |= NETIF_F_HIGHDMA;
 	}
-
-	/* MTU range: 68 - max_hw_frame_size */
-	netdev->min_mtu = ETH_MIN_MTU;
-	netdev->max_mtu = adapter->max_hw_frame_size -
-			  (VLAN_ETH_HLEN + ETH_FCS_LEN);
 
 	if (e1000e_enable_mng_pass_thru(&adapter->hw))
 		adapter->flags |= FLAG_MNG_PT_ENABLED;

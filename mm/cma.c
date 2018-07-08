@@ -54,7 +54,7 @@ unsigned long cma_get_size(const struct cma *cma)
 }
 
 static unsigned long cma_bitmap_aligned_mask(const struct cma *cma,
-					     int align_order)
+					     unsigned int align_order)
 {
 	if (align_order <= cma->order_per_bit)
 		return 0;
@@ -62,17 +62,14 @@ static unsigned long cma_bitmap_aligned_mask(const struct cma *cma,
 }
 
 /*
- * Find a PFN aligned to the specified order and return an offset represented in
- * order_per_bits.
+ * Find the offset of the base PFN from the specified align_order.
+ * The value returned is represented in order_per_bits.
  */
 static unsigned long cma_bitmap_aligned_offset(const struct cma *cma,
-					       int align_order)
+					       unsigned int align_order)
 {
-	if (align_order <= cma->order_per_bit)
-		return 0;
-
-	return (ALIGN(cma->base_pfn, (1UL << align_order))
-		- cma->base_pfn) >> cma->order_per_bit;
+	return (cma->base_pfn & ((1UL << align_order) - 1))
+		>> cma->order_per_bit;
 }
 
 static unsigned long cma_bitmap_pages_to_bits(const struct cma *cma,
@@ -235,13 +232,18 @@ int __init cma_declare_contiguous(phys_addr_t base,
 	phys_addr_t highmem_start;
 	int ret = 0;
 
+#ifdef CONFIG_X86
 	/*
-	 * We can't use __pa(high_memory) directly, since high_memory
-	 * isn't a valid direct map VA, and DEBUG_VIRTUAL will (validly)
-	 * complain. Find the boundary by adding one to the last valid
-	 * address.
+	 * high_memory isn't direct mapped memory so retrieving its physical
+	 * address isn't appropriate.  But it would be useful to check the
+	 * physical address of the highmem boundary so it's justifiable to get
+	 * the physical address from it.  On x86 there is a validation check for
+	 * this case, so the following workaround is needed to avoid it.
 	 */
-	highmem_start = __pa(high_memory - 1) + 1;
+	highmem_start = __pa_nodebug(high_memory);
+#else
+	highmem_start = __pa(high_memory);
+#endif
 	pr_debug("%s(size %pa, base %pa, limit %pa alignment %pa)\n",
 		__func__, &size, &base, &limit, &alignment);
 
@@ -348,32 +350,6 @@ err:
 	return ret;
 }
 
-#ifdef CONFIG_CMA_DEBUG
-static void cma_debug_show_areas(struct cma *cma)
-{
-	unsigned long next_zero_bit, next_set_bit;
-	unsigned long start = 0;
-	unsigned int nr_zero, nr_total = 0;
-
-	mutex_lock(&cma->lock);
-	pr_info("number of available pages: ");
-	for (;;) {
-		next_zero_bit = find_next_zero_bit(cma->bitmap, cma->count, start);
-		if (next_zero_bit >= cma->count)
-			break;
-		next_set_bit = find_next_bit(cma->bitmap, cma->count, next_zero_bit);
-		nr_zero = next_set_bit - next_zero_bit;
-		pr_cont("%s%u@%lu", nr_total ? "+" : "", nr_zero, next_zero_bit);
-		nr_total += nr_zero;
-		start = next_zero_bit + nr_zero;
-	}
-	pr_cont("=> %u free of %lu total pages\n", nr_total, cma->count);
-	mutex_unlock(&cma->lock);
-}
-#else
-static inline void cma_debug_show_areas(struct cma *cma) { }
-#endif
-
 /**
  * cma_alloc() - allocate pages from contiguous area
  * @cma:   Contiguous memory region for which the allocation is performed.
@@ -383,15 +359,14 @@ static inline void cma_debug_show_areas(struct cma *cma) { }
  * This function allocates part of contiguous memory on specific
  * contiguous memory area.
  */
-struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
-		       gfp_t gfp_mask)
+struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align)
 {
 	unsigned long mask, offset;
 	unsigned long pfn = -1;
 	unsigned long start = 0;
 	unsigned long bitmap_maxno, bitmap_no, bitmap_count;
 	struct page *page = NULL;
-	int ret = -ENOMEM;
+	int ret;
 
 	if (!cma || !cma->count)
 		return NULL;
@@ -429,8 +404,7 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 
 		pfn = cma->base_pfn + (bitmap_no << cma->order_per_bit);
 		mutex_lock(&cma_mutex);
-		ret = alloc_contig_range(pfn, pfn + count, MIGRATE_CMA,
-					 gfp_mask);
+		ret = alloc_contig_range(pfn, pfn + count, MIGRATE_CMA);
 		mutex_unlock(&cma_mutex);
 		if (ret == 0) {
 			page = pfn_to_page(pfn);
@@ -448,12 +422,6 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align,
 	}
 
 	trace_cma_alloc(pfn, page, count, align);
-
-	if (ret) {
-		pr_info("%s: alloc failed, req-size: %zu pages, ret: %d\n",
-			__func__, count, ret);
-		cma_debug_show_areas(cma);
-	}
 
 	pr_debug("%s(): returned %p\n", __func__, page);
 	return page;

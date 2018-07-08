@@ -434,9 +434,9 @@ int ping_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		goto out;
 	}
 
-	pr_debug("after bind(): num = %hu, dif = %d\n",
-		 isk->inet_num,
-		 sk->sk_bound_dev_if);
+	pr_debug("after bind(): num = %d, dif = %d\n",
+		 (int)isk->inet_num,
+		 (int)sk->sk_bound_dev_if);
 
 	err = 0;
 	if (sk->sk_family == AF_INET && isk->inet_rcv_saddr)
@@ -610,15 +610,15 @@ int ping_getfrag(void *from, char *to,
 		fraglen -= sizeof(struct icmphdr);
 		if (fraglen < 0)
 			BUG();
-		if (!csum_and_copy_from_iter_full(to + sizeof(struct icmphdr),
+		if (csum_and_copy_from_iter(to + sizeof(struct icmphdr),
 			    fraglen, &pfh->wcheck,
-			    &pfh->msg->msg_iter))
+			    &pfh->msg->msg_iter) != fraglen)
 			return -EFAULT;
 	} else if (offset < sizeof(struct icmphdr)) {
 			BUG();
 	} else {
-		if (!csum_and_copy_from_iter_full(to, fraglen, &pfh->wcheck,
-					    &pfh->msg->msg_iter))
+		if (csum_and_copy_from_iter(to, fraglen, &pfh->wcheck,
+					    &pfh->msg->msg_iter) != fraglen)
 			return -EFAULT;
 	}
 
@@ -775,8 +775,10 @@ static int ping_v4_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	ipc.addr = faddr = daddr;
 
 	if (ipc.opt && ipc.opt->opt.srr) {
-		if (!daddr)
-			return -EINVAL;
+		if (!daddr) {
+			err = -EINVAL;
+			goto out_free;
+		}
 		faddr = ipc.opt->opt.faddr;
 	}
 	tos = get_rttos(&ipc, inet);
@@ -796,8 +798,7 @@ static int ping_v4_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 
 	flowi4_init_output(&fl4, ipc.oif, sk->sk_mark, tos,
 			   RT_SCOPE_UNIVERSE, sk->sk_protocol,
-			   inet_sk_flowi_flags(sk), faddr, saddr, 0, 0,
-			   sk->sk_uid);
+			   inet_sk_flowi_flags(sk), faddr, saddr, 0, 0);
 
 	security_sk_classify_flow(sk, flowi4_to_flowi(&fl4));
 	rt = ip_route_output_flow(net, &fl4, sk);
@@ -842,6 +843,7 @@ back_from_confirm:
 
 out:
 	ip_rt_put(rt);
+out_free:
 	if (free)
 		kfree(ipc.opt);
 	if (!err) {
@@ -851,8 +853,7 @@ out:
 	return err;
 
 do_confirm:
-	if (msg->msg_flags & MSG_PROBE)
-		dst_confirm_neigh(&rt->dst, &fl4.daddr);
+	dst_confirm(&rt->dst);
 	if (!(msg->msg_flags & MSG_PROBE) || len)
 		goto back_from_confirm;
 	err = 0;

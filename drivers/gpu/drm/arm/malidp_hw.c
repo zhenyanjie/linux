@@ -21,7 +21,7 @@
 #include "malidp_drv.h"
 #include "malidp_hw.h"
 
-static const struct malidp_format_id malidp500_de_formats[] = {
+static const struct malidp_input_format malidp500_de_formats[] = {
 	/*    fourcc,   layers supporting the format,     internal id  */
 	{ DRM_FORMAT_ARGB2101010, DE_VIDEO1 | DE_GRAPHICS1 | DE_GRAPHICS2,  0 },
 	{ DRM_FORMAT_ABGR2101010, DE_VIDEO1 | DE_GRAPHICS1 | DE_GRAPHICS2,  1 },
@@ -69,21 +69,21 @@ static const struct malidp_format_id malidp500_de_formats[] = {
 	{ DRM_FORMAT_NV12, DE_VIDEO1 | DE_VIDEO2, MALIDP_ID(5, 6) },	\
 	{ DRM_FORMAT_YUV420, DE_VIDEO1 | DE_VIDEO2, MALIDP_ID(5, 7) }
 
-static const struct malidp_format_id malidp550_de_formats[] = {
+static const struct malidp_input_format malidp550_de_formats[] = {
 	MALIDP_COMMON_FORMATS,
 };
 
 static const struct malidp_layer malidp500_layers[] = {
-	{ DE_VIDEO1, MALIDP500_DE_LV_BASE, MALIDP500_DE_LV_PTR_BASE, MALIDP_DE_LV_STRIDE0 },
-	{ DE_GRAPHICS1, MALIDP500_DE_LG1_BASE, MALIDP500_DE_LG1_PTR_BASE, MALIDP_DE_LG_STRIDE },
-	{ DE_GRAPHICS2, MALIDP500_DE_LG2_BASE, MALIDP500_DE_LG2_PTR_BASE, MALIDP_DE_LG_STRIDE },
+	{ DE_VIDEO1, MALIDP500_DE_LV_BASE, MALIDP500_DE_LV_PTR_BASE },
+	{ DE_GRAPHICS1, MALIDP500_DE_LG1_BASE, MALIDP500_DE_LG1_PTR_BASE },
+	{ DE_GRAPHICS2, MALIDP500_DE_LG2_BASE, MALIDP500_DE_LG2_PTR_BASE },
 };
 
 static const struct malidp_layer malidp550_layers[] = {
-	{ DE_VIDEO1, MALIDP550_DE_LV1_BASE, MALIDP550_DE_LV1_PTR_BASE, MALIDP_DE_LV_STRIDE0 },
-	{ DE_GRAPHICS1, MALIDP550_DE_LG_BASE, MALIDP550_DE_LG_PTR_BASE, MALIDP_DE_LG_STRIDE },
-	{ DE_VIDEO2, MALIDP550_DE_LV2_BASE, MALIDP550_DE_LV2_PTR_BASE, MALIDP_DE_LV_STRIDE0 },
-	{ DE_SMART, MALIDP550_DE_LS_BASE, MALIDP550_DE_LS_PTR_BASE, MALIDP550_DE_LS_R1_STRIDE },
+	{ DE_VIDEO1, MALIDP550_DE_LV1_BASE, MALIDP550_DE_LV1_PTR_BASE },
+	{ DE_GRAPHICS1, MALIDP550_DE_LG_BASE, MALIDP550_DE_LG_PTR_BASE },
+	{ DE_VIDEO2, MALIDP550_DE_LV2_BASE, MALIDP550_DE_LV2_PTR_BASE },
+	{ DE_SMART, MALIDP550_DE_LS_BASE, MALIDP550_DE_LS_PTR_BASE },
 };
 
 #define MALIDP_DE_DEFAULT_PREFETCH_START	5
@@ -125,7 +125,6 @@ static void malidp500_leave_config_mode(struct malidp_hw_device *hwdev)
 {
 	u32 status, count = 100;
 
-	malidp_hw_clearbits(hwdev, MALIDP_CFG_VALID, MALIDP500_CONFIG_VALID);
 	malidp_hw_clearbits(hwdev, MALIDP500_DC_CONFIG_REQ, MALIDP500_DC_CONTROL);
 	while (count) {
 		status = malidp_hw_read(hwdev, hwdev->map.dc_base + MALIDP_REG_STATUS);
@@ -199,6 +198,9 @@ static void malidp500_modeset(struct malidp_hw_device *hwdev, struct videomode *
 
 static int malidp500_rotmem_required(struct malidp_hw_device *hwdev, u16 w, u16 h, u32 fmt)
 {
+	unsigned int depth;
+	int bpp;
+
 	/* RGB888 or BGR888 can't be rotated */
 	if ((fmt == DRM_FORMAT_RGB888) || (fmt == DRM_FORMAT_BGR888))
 		return -EINVAL;
@@ -208,7 +210,9 @@ static int malidp500_rotmem_required(struct malidp_hw_device *hwdev, u16 w, u16 
 	 * worth of pixel data. Required size is then:
 	 *    size = rotated_width * (bpp / 8) * 8;
 	 */
-	return w * drm_format_plane_cpp(fmt, 0) * 8;
+	drm_fb_get_bpp_depth(fmt, &depth, &bpp);
+
+	return w * bpp;
 }
 
 static int malidp550_query_hw(struct malidp_hw_device *hwdev)
@@ -267,7 +271,6 @@ static void malidp550_leave_config_mode(struct malidp_hw_device *hwdev)
 {
 	u32 status, count = 100;
 
-	malidp_hw_clearbits(hwdev, MALIDP_CFG_VALID, MALIDP550_CONFIG_VALID);
 	malidp_hw_clearbits(hwdev, MALIDP550_DC_CONFIG_REQ, MALIDP550_DC_CONTROL);
 	while (count) {
 		status = malidp_hw_read(hwdev, hwdev->map.dc_base + MALIDP_REG_STATUS);
@@ -436,9 +439,8 @@ const struct malidp_hw_device malidp_device[MALIDP_MAX_DEVICES] = {
 				.irq_mask = MALIDP500_DE_IRQ_CONF_VALID,
 				.vsync_irq = MALIDP500_DE_IRQ_CONF_VALID,
 			},
-			.pixel_formats = malidp500_de_formats,
-			.n_pixel_formats = ARRAY_SIZE(malidp500_de_formats),
-			.bus_align_bytes = 8,
+			.input_formats = malidp500_de_formats,
+			.n_input_formats = ARRAY_SIZE(malidp500_de_formats),
 		},
 		.query_hw = malidp500_query_hw,
 		.enter_config_mode = malidp500_enter_config_mode,
@@ -447,7 +449,6 @@ const struct malidp_hw_device malidp_device[MALIDP_MAX_DEVICES] = {
 		.set_config_valid = malidp500_set_config_valid,
 		.modeset = malidp500_modeset,
 		.rotmem_required = malidp500_rotmem_required,
-		.features = MALIDP_DEVICE_LV_HAS_3_STRIDES,
 	},
 	[MALIDP_550] = {
 		.map = {
@@ -470,9 +471,8 @@ const struct malidp_hw_device malidp_device[MALIDP_MAX_DEVICES] = {
 				.irq_mask = MALIDP550_DC_IRQ_CONF_VALID,
 				.vsync_irq = MALIDP550_DC_IRQ_CONF_VALID,
 			},
-			.pixel_formats = malidp550_de_formats,
-			.n_pixel_formats = ARRAY_SIZE(malidp550_de_formats),
-			.bus_align_bytes = 8,
+			.input_formats = malidp550_de_formats,
+			.n_input_formats = ARRAY_SIZE(malidp550_de_formats),
 		},
 		.query_hw = malidp550_query_hw,
 		.enter_config_mode = malidp550_enter_config_mode,
@@ -481,7 +481,6 @@ const struct malidp_hw_device malidp_device[MALIDP_MAX_DEVICES] = {
 		.set_config_valid = malidp550_set_config_valid,
 		.modeset = malidp550_modeset,
 		.rotmem_required = malidp550_rotmem_required,
-		.features = 0,
 	},
 	[MALIDP_650] = {
 		.map = {
@@ -505,9 +504,8 @@ const struct malidp_hw_device malidp_device[MALIDP_MAX_DEVICES] = {
 				.irq_mask = MALIDP550_DC_IRQ_CONF_VALID,
 				.vsync_irq = MALIDP550_DC_IRQ_CONF_VALID,
 			},
-			.pixel_formats = malidp550_de_formats,
-			.n_pixel_formats = ARRAY_SIZE(malidp550_de_formats),
-			.bus_align_bytes = 16,
+			.input_formats = malidp550_de_formats,
+			.n_input_formats = ARRAY_SIZE(malidp550_de_formats),
 		},
 		.query_hw = malidp650_query_hw,
 		.enter_config_mode = malidp550_enter_config_mode,
@@ -516,7 +514,6 @@ const struct malidp_hw_device malidp_device[MALIDP_MAX_DEVICES] = {
 		.set_config_valid = malidp550_set_config_valid,
 		.modeset = malidp550_modeset,
 		.rotmem_required = malidp550_rotmem_required,
-		.features = 0,
 	},
 };
 
@@ -525,10 +522,10 @@ u8 malidp_hw_get_format_id(const struct malidp_hw_regmap *map,
 {
 	unsigned int i;
 
-	for (i = 0; i < map->n_pixel_formats; i++) {
-		if (((map->pixel_formats[i].layer & layer_id) == layer_id) &&
-		    (map->pixel_formats[i].format == format))
-			return map->pixel_formats[i].id;
+	for (i = 0; i < map->n_input_formats; i++) {
+		if (((map->input_formats[i].layer & layer_id) == layer_id) &&
+		    (map->input_formats[i].format == format))
+			return map->input_formats[i].id;
 	}
 
 	return MALIDP_INVALID_FORMAT_ID;

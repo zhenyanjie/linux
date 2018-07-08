@@ -36,7 +36,7 @@
 
 #include <asm/processor.h>
 #include <asm/bios_ebda.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/dma.h>
@@ -89,10 +89,10 @@ static int __init nonx32_setup(char *str)
 __setup("noexec32=", nonx32_setup);
 
 /*
- * When memory was added make sure all the processes MM have
+ * When memory was added/removed make sure all the processes MM have
  * suitable PGD entries in the local PGD level page.
  */
-void sync_global_pgds(unsigned long start, unsigned long end)
+void sync_global_pgds(unsigned long start, unsigned long end, int removed)
 {
 	unsigned long addr;
 
@@ -100,7 +100,12 @@ void sync_global_pgds(unsigned long start, unsigned long end)
 		const pgd_t *pgd_ref = pgd_offset_k(addr);
 		struct page *page;
 
-		if (pgd_none(*pgd_ref))
+		/*
+		 * When it is called after memory hot remove, pgd_none()
+		 * returns true. In this case (removed == 1), we must clear
+		 * the PGD entries in the local PGD level page.
+		 */
+		if (pgd_none(*pgd_ref) && !removed)
 			continue;
 
 		spin_lock(&pgd_lock);
@@ -117,8 +122,13 @@ void sync_global_pgds(unsigned long start, unsigned long end)
 				BUG_ON(pgd_page_vaddr(*pgd)
 				       != pgd_page_vaddr(*pgd_ref));
 
-			if (pgd_none(*pgd))
-				set_pgd(pgd, *pgd_ref);
+			if (removed) {
+				if (pgd_none(*pgd_ref) && !pgd_none(*pgd))
+					pgd_clear(pgd);
+			} else {
+				if (pgd_none(*pgd))
+					set_pgd(pgd, *pgd_ref);
+			}
 
 			spin_unlock(pgt_lock);
 		}
@@ -314,6 +324,16 @@ void __init cleanup_highmap(void)
 			continue;
 		if (vaddr < (unsigned long) _text || vaddr > end)
 			set_pmd(pmd, __pmd(0));
+		else if (kaiser_enabled) {
+			/*
+			 * level2_kernel_pgt is initialized with _PAGE_GLOBAL:
+			 * clear that now.  This is not important, so long as
+			 * CR4.PGE remains clear, but it removes an anomaly.
+			 * Physical mapping setup below avoids _PAGE_GLOBAL
+			 * by use of massage_pgprot() inside pfn_pte() etc.
+			 */
+			set_pmd(pmd, pmd_clear_flags(*pmd, _PAGE_GLOBAL));
+		}
 	}
 }
 
@@ -586,7 +606,7 @@ kernel_physical_mapping_init(unsigned long paddr_start,
 	}
 
 	if (pgd_changed)
-		sync_global_pgds(vaddr_start, vaddr_end - 1);
+		sync_global_pgds(vaddr_start, vaddr_end - 1, 0);
 
 	__flush_tlb_all();
 
@@ -994,11 +1014,13 @@ void __init mem_init(void)
 	after_bootmem = 1;
 
 	/* Register memory areas for /proc/kcore */
-	kclist_add(&kcore_vsyscall, (void *)VSYSCALL_ADDR,
-			 PAGE_SIZE, KCORE_OTHER);
+	kclist_add(&kcore_vsyscall, (void *)VSYSCALL_ADDR, PAGE_SIZE, KCORE_USER);
 
 	mem_init_print_info(NULL);
 }
+
+const int rodata_test_data = 0xC3;
+EXPORT_SYMBOL_GPL(rodata_test_data);
 
 int kernel_set_to_readonly;
 
@@ -1067,6 +1089,8 @@ void mark_rodata_ro(void)
 	 */
 	all_end = roundup((unsigned long)_brk_end, PMD_SIZE);
 	set_memory_nx(text_end, (all_end - text_end) >> PAGE_SHIFT);
+
+	rodata_test();
 
 #ifdef CONFIG_CPA_DEBUG
 	printk(KERN_INFO "Testing CPA: undo %lx-%lx\n", start, end);
@@ -1224,7 +1248,7 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
 	} else
 		err = vmemmap_populate_basepages(start, end, node);
 	if (!err)
-		sync_global_pgds(start, end - 1);
+		sync_global_pgds(start, end - 1, 0);
 	return err;
 }
 

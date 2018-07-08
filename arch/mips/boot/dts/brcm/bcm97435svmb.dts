@@ -115,7 +115,3 @@
 &sdhci1 {
 	status = "okay";
 };
-
-&mspi {
-	status = "okay";
-};

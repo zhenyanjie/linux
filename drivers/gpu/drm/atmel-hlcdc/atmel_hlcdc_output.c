@@ -230,7 +230,9 @@ static int atmel_hlcdc_attach_endpoint(struct drm_device *dev,
 	of_node_put(np);
 
 	if (bridge) {
-		ret = drm_bridge_attach(&output->encoder, bridge, NULL);
+		output->encoder.bridge = bridge;
+		bridge->encoder = &output->encoder;
+		ret = drm_bridge_attach(dev, bridge);
 		if (!ret)
 			return 0;
 	}

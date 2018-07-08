@@ -448,7 +448,6 @@ static struct of_device_id __initdata octeon_ids[] = {
 	{ .compatible = "cavium,octeon-3860-bootbus", },
 	{ .compatible = "cavium,mdio-mux", },
 	{ .compatible = "gpio-leds", },
-	{ .compatible = "cavium,octeon-7130-usb-uctl", },
 	{},
 };
 
@@ -1061,3 +1060,7 @@ static int __init octeon_publish_devices(void)
 	return of_platform_bus_probe(NULL, octeon_ids, NULL);
 }
 arch_initcall(octeon_publish_devices);
+
+MODULE_AUTHOR("David Daney <ddaney@caviumnetworks.com>");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Platform driver for Octeon SOC");

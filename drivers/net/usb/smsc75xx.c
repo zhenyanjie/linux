@@ -925,6 +925,9 @@ static int smsc75xx_change_mtu(struct net_device *netdev, int new_mtu)
 	struct usbnet *dev = netdev_priv(netdev);
 	int ret;
 
+	if (new_mtu > MAX_SINGLE_PACKET_SIZE)
+		return -EINVAL;
+
 	ret = smsc75xx_set_rx_max_frame_length(dev, new_mtu + ETH_HLEN);
 	if (ret < 0) {
 		netdev_warn(dev->net, "Failed to set mac rx frame length\n");
@@ -954,10 +957,11 @@ static int smsc75xx_set_features(struct net_device *netdev,
 	/* it's racing here! */
 
 	ret = smsc75xx_write_reg(dev, RFE_CTL, pdata->rfe_ctl);
-	if (ret < 0)
+	if (ret < 0) {
 		netdev_warn(dev->net, "Error writing RFE_CTL\n");
-
-	return ret;
+		return ret;
+	}
+	return 0;
 }
 
 static int smsc75xx_wait_ready(struct usbnet *dev, int in_pm)
@@ -1445,7 +1449,6 @@ static int smsc75xx_bind(struct usbnet *dev, struct usb_interface *intf)
 	dev->net->flags |= IFF_MULTICAST;
 	dev->net->hard_header_len += SMSC75XX_TX_OVERHEAD;
 	dev->hard_mtu = dev->net->mtu + dev->net->hard_header_len;
-	dev->net->max_mtu = MAX_SINGLE_PACKET_SIZE;
 	return 0;
 }
 

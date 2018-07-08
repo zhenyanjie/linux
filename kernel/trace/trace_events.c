@@ -283,6 +283,46 @@ void *trace_event_buffer_reserve(struct trace_event_buffer *fbuffer,
 }
 EXPORT_SYMBOL_GPL(trace_event_buffer_reserve);
 
+static DEFINE_SPINLOCK(tracepoint_iter_lock);
+
+static void output_printk(struct trace_event_buffer *fbuffer)
+{
+	struct trace_event_call *event_call;
+	struct trace_event *event;
+	unsigned long flags;
+	struct trace_iterator *iter = tracepoint_print_iter;
+
+	if (!iter)
+		return;
+
+	event_call = fbuffer->trace_file->event_call;
+	if (!event_call || !event_call->event.funcs ||
+	    !event_call->event.funcs->trace)
+		return;
+
+	event = &fbuffer->trace_file->event_call->event;
+
+	spin_lock_irqsave(&tracepoint_iter_lock, flags);
+	trace_seq_init(&iter->seq);
+	iter->ent = fbuffer->entry;
+	event_call->event.funcs->trace(iter, 0, event);
+	trace_seq_putc(&iter->seq, 0);
+	printk("%s", iter->seq.buffer);
+
+	spin_unlock_irqrestore(&tracepoint_iter_lock, flags);
+}
+
+void trace_event_buffer_commit(struct trace_event_buffer *fbuffer)
+{
+	if (tracepoint_printk)
+		output_printk(fbuffer);
+
+	event_trigger_unlock_commit(fbuffer->trace_file, fbuffer->buffer,
+				    fbuffer->event, fbuffer->entry,
+				    fbuffer->flags, fbuffer->pc);
+}
+EXPORT_SYMBOL_GPL(trace_event_buffer_commit);
+
 int trace_event_reg(struct trace_event_call *call,
 		    enum trace_reg type, void *data)
 {
@@ -702,7 +742,6 @@ __ftrace_set_clr_event_nolock(struct trace_array *tr, const char *match,
 	struct trace_event_call *call;
 	const char *name;
 	int ret = -EINVAL;
-	int eret = 0;
 
 	list_for_each_entry(file, &tr->events, list) {
 
@@ -726,17 +765,9 @@ __ftrace_set_clr_event_nolock(struct trace_array *tr, const char *match,
 		if (event && strcmp(event, name) != 0)
 			continue;
 
-		ret = ftrace_event_enable_disable(file, set);
+		ftrace_event_enable_disable(file, set);
 
-		/*
-		 * Save the first error and return that. Some events
-		 * may still have been enabled, but let the user
-		 * know that something went wrong.
-		 */
-		if (ret && !eret)
-			eret = ret;
-
-		ret = eret;
+		ret = 0;
 	}
 
 	return ret;
@@ -2169,6 +2200,7 @@ void trace_event_enum_update(struct trace_enum_map **map, int len)
 {
 	struct trace_event_call *call, *p;
 	const char *last_system = NULL;
+	bool first = false;
 	int last_i;
 	int i;
 
@@ -2176,15 +2208,28 @@ void trace_event_enum_update(struct trace_enum_map **map, int len)
 	list_for_each_entry_safe(call, p, &ftrace_events, list) {
 		/* events are usually grouped together with systems */
 		if (!last_system || call->class->system != last_system) {
+			first = true;
 			last_i = 0;
 			last_system = call->class->system;
 		}
 
+		/*
+		 * Since calls are grouped by systems, the likelyhood that the
+		 * next call in the iteration belongs to the same system as the
+		 * previous call is high. As an optimization, we skip seaching
+		 * for a map[] that matches the call's system if the last call
+		 * was from the same system. That's what last_i is for. If the
+		 * call has the same system as the previous call, then last_i
+		 * will be the index of the first map[] that has a matching
+		 * system.
+		 */
 		for (i = last_i; i < len; i++) {
 			if (call->class->system == map[i]->system) {
 				/* Save the first system if need be */
-				if (!last_i)
+				if (first) {
 					last_i = i;
+					first = false;
+				}
 				update_event_printk(call, map[i]);
 			}
 		}
@@ -2812,32 +2857,20 @@ create_event_toplevel_files(struct dentry *parent, struct trace_array *tr)
 		return -ENOMEM;
 	}
 
-	entry = trace_create_file("enable", 0644, d_events,
-				  tr, &ftrace_tr_enable_fops);
-	if (!entry) {
-		pr_warn("Could not create tracefs 'enable' entry\n");
-		return -ENOMEM;
-	}
-
-	/* There are not as crucial, just warn if they are not created */
-
 	entry = tracefs_create_file("set_event_pid", 0644, parent,
 				    tr, &ftrace_set_event_pid_fops);
-	if (!entry)
-		pr_warn("Could not create tracefs 'set_event_pid' entry\n");
 
 	/* ring buffer internal formats */
-	entry = trace_create_file("header_page", 0444, d_events,
-				  ring_buffer_print_page_header,
-				  &ftrace_show_header_fops);
-	if (!entry)
-		pr_warn("Could not create tracefs 'header_page' entry\n");
+	trace_create_file("header_page", 0444, d_events,
+			  ring_buffer_print_page_header,
+			  &ftrace_show_header_fops);
 
-	entry = trace_create_file("header_event", 0444, d_events,
-				  ring_buffer_print_entry_header,
-				  &ftrace_show_header_fops);
-	if (!entry)
-		pr_warn("Could not create tracefs 'header_event' entry\n");
+	trace_create_file("header_event", 0444, d_events,
+			  ring_buffer_print_entry_header,
+			  &ftrace_show_header_fops);
+
+	trace_create_file("enable", 0644, d_events,
+			  tr, &ftrace_tr_enable_fops);
 
 	tr->event_dir = d_events;
 

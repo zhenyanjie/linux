@@ -610,7 +610,7 @@ static int rtc_pinconf_set(struct pinctrl_dev *pctldev,
 	struct omap_rtc *rtc = pinctrl_dev_get_drvdata(pctldev);
 	u32 val;
 	unsigned int param;
-	u32 param_val;
+	u16 param_val;
 	int i;
 
 	rtc->type->unlock(rtc);

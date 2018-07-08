@@ -144,6 +144,7 @@ static bool rtw_monitor_enable;
 module_param_named(monitor_enable, rtw_monitor_enable, bool, 0444);
 MODULE_PARM_DESC(monitor_enable, "Enable monitor inferface (default: false)");
 
+static int netdev_open(struct net_device *pnetdev);
 static int netdev_close(struct net_device *pnetdev);
 
 static void loadparam(struct adapter *padapter, struct net_device *pnetdev)
@@ -413,6 +414,7 @@ static u8 rtw_init_default_value(struct adapter *padapter)
 	/* misc. */
 	padapter->bReadPortCancel = false;
 	padapter->bWritePortCancel = false;
+	padapter->bRxRSSIDisplay = 0;
 	return _SUCCESS;
 }
 
@@ -425,6 +427,7 @@ u8 rtw_reset_drv_sw(struct adapter *padapter)
 	rtw_hal_def_value_init(padapter);
 	padapter->bReadPortCancel = false;
 	padapter->bWritePortCancel = false;
+	padapter->bRxRSSIDisplay = 0;
 	pmlmepriv->scan_interval = SCAN_INTERVAL;/*  30*2 sec = 60sec */
 
 	padapter->xmitpriv.tx_pkts = 0;
@@ -593,9 +596,10 @@ static int _netdev_open(struct net_device *pnetdev)
 			pr_info("can't init mlme_ext_priv\n");
 			goto netdev_open_error;
 		}
-		rtw_hal_inirp_init(padapter);
+		if (padapter->intf_start)
+			padapter->intf_start(padapter);
 
-		LedControl8188eu(padapter, LED_CTL_NO_LINK);
+		rtw_led_control(padapter, LED_CTL_NO_LINK);
 
 		padapter->bup = true;
 	}
@@ -626,7 +630,7 @@ netdev_open_error:
 	return -1;
 }
 
-int netdev_open(struct net_device *pnetdev)
+static int netdev_open(struct net_device *pnetdev)
 {
 	int ret;
 	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(pnetdev);
@@ -638,7 +642,7 @@ int netdev_open(struct net_device *pnetdev)
 	return ret;
 }
 
-int  ips_netdrv_open(struct adapter *padapter)
+static int  ips_netdrv_open(struct adapter *padapter)
 {
 	int status = _SUCCESS;
 
@@ -654,7 +658,8 @@ int  ips_netdrv_open(struct adapter *padapter)
 		goto netdev_open_error;
 	}
 
-	rtw_hal_inirp_init(padapter);
+	if (padapter->intf_start)
+		padapter->intf_start(padapter);
 
 	rtw_set_pwr_state_check_timer(&padapter->pwrctrlpriv);
 	mod_timer(&padapter->mlmepriv.dynamic_chk_timer,
@@ -679,7 +684,7 @@ int rtw_ips_pwr_up(struct adapter *padapter)
 
 	result = ips_netdrv_open(padapter);
 
-	LedControl8188eu(padapter, LED_CTL_NO_LINK);
+	rtw_led_control(padapter, LED_CTL_NO_LINK);
 
 	DBG_88E("<===  rtw_ips_pwr_up.............. in %dms\n",
 		jiffies_to_msecs(jiffies - start_time));
@@ -694,7 +699,7 @@ void rtw_ips_pwr_down(struct adapter *padapter)
 
 	padapter->net_closed = true;
 
-	LedControl8188eu(padapter, LED_CTL_POWER_OFF);
+	rtw_led_control(padapter, LED_CTL_POWER_OFF);
 
 	rtw_ips_dev_unload(padapter);
 	DBG_88E("<=== rtw_ips_pwr_down..................... in %dms\n",
@@ -707,11 +712,23 @@ void rtw_ips_dev_unload(struct adapter *padapter)
 
 	rtw_hal_set_hwreg(padapter, HW_VAR_FIFO_CLEARN_UP, NULL);
 
-	usb_intf_stop(padapter);
+	if (padapter->intf_stop)
+		padapter->intf_stop(padapter);
 
 	/* s5. */
 	if (!padapter->bSurpriseRemoved)
 		rtw_hal_deinit(padapter);
+}
+
+int pm_netdev_open(struct net_device *pnetdev, u8 bnormal)
+{
+	int status;
+
+	if (bnormal)
+		status = netdev_open(pnetdev);
+	else
+		status =  (_SUCCESS == ips_netdrv_open((struct adapter *)rtw_netdev_priv(pnetdev))) ? (0) : (-1);
+	return status;
 }
 
 static int netdev_close(struct net_device *pnetdev)
@@ -746,7 +763,7 @@ static int netdev_close(struct net_device *pnetdev)
 		/* s2-4. */
 		rtw_free_network_queue(padapter, true);
 		/*  Close LED */
-		LedControl8188eu(padapter, LED_CTL_POWER_OFF);
+		rtw_led_control(padapter, LED_CTL_POWER_OFF);
 	}
 
 	RT_TRACE(_module_os_intfs_c_, _drv_info_, ("-88eu_drv - drv_close\n"));

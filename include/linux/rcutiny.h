@@ -27,12 +27,6 @@
 
 #include <linux/cache.h>
 
-struct rcu_dynticks;
-static inline int rcu_dynticks_snap(struct rcu_dynticks *rdtp)
-{
-	return 0;
-}
-
 static inline unsigned long get_state_synchronize_rcu(void)
 {
 	return 0;
@@ -53,8 +47,15 @@ static inline void cond_synchronize_sched(unsigned long oldstate)
 	might_sleep();
 }
 
-extern void rcu_barrier_bh(void);
-extern void rcu_barrier_sched(void);
+static inline void rcu_barrier_bh(void)
+{
+	wait_rcu_gp(call_rcu_bh);
+}
+
+static inline void rcu_barrier_sched(void)
+{
+	wait_rcu_gp(call_rcu_sched);
+}
 
 static inline void synchronize_rcu_expedited(void)
 {

@@ -42,7 +42,7 @@
  *		Hirokazu Takahashi:	sendfile() on UDP works now.
  */
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -74,7 +74,6 @@
 #include <net/checksum.h>
 #include <net/inetpeer.h>
 #include <net/lwtunnel.h>
-#include <linux/bpf-cgroup.h>
 #include <linux/igmp.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_bridge.h>
@@ -222,10 +221,7 @@ static int ip_finish_output2(struct net *net, struct sock *sk, struct sk_buff *s
 	if (unlikely(!neigh))
 		neigh = __neigh_create(&arp_tbl, &nexthop, dev, false);
 	if (!IS_ERR(neigh)) {
-		int res;
-
-		sock_confirm_neigh(skb, neigh);
-		res = neigh_output(neigh, skb);
+		int res = dst_neigh_output(dst, neigh, skb);
 
 		rcu_read_unlock_bh();
 		return res;
@@ -291,13 +287,6 @@ static int ip_finish_output_gso(struct net *net, struct sock *sk,
 static int ip_finish_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	unsigned int mtu;
-	int ret;
-
-	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(sk, skb);
-	if (ret) {
-		kfree_skb(skb);
-		return ret;
-	}
 
 #if defined(CONFIG_NETFILTER) && defined(CONFIG_XFRM)
 	/* Policy lookup after SNAT yielded a new policy */
@@ -314,20 +303,6 @@ static int ip_finish_output(struct net *net, struct sock *sk, struct sk_buff *sk
 		return ip_fragment(net, sk, skb, mtu, ip_finish_output2);
 
 	return ip_finish_output2(net, sk, skb);
-}
-
-static int ip_mc_finish_output(struct net *net, struct sock *sk,
-			       struct sk_buff *skb)
-{
-	int ret;
-
-	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(sk, skb);
-	if (ret) {
-		kfree_skb(skb);
-		return ret;
-	}
-
-	return dev_loopback_xmit(net, sk, skb);
 }
 
 int ip_mc_output(struct net *net, struct sock *sk, struct sk_buff *skb)
@@ -367,7 +342,7 @@ int ip_mc_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 			if (newskb)
 				NF_HOOK(NFPROTO_IPV4, NF_INET_POST_ROUTING,
 					net, sk, newskb, NULL, newskb->dev,
-					ip_mc_finish_output);
+					dev_loopback_xmit);
 		}
 
 		/* Multicasts with ttl 0 must not go beyond the host */
@@ -383,7 +358,7 @@ int ip_mc_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 		if (newskb)
 			NF_HOOK(NFPROTO_IPV4, NF_INET_POST_ROUTING,
 				net, sk, newskb, NULL, newskb->dev,
-				ip_mc_finish_output);
+				dev_loopback_xmit);
 	}
 
 	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING,
@@ -608,7 +583,7 @@ int ip_do_fragment(struct net *net, struct sock *sk, struct sk_buff *skb,
 	 */
 	if (skb_has_frag_list(skb)) {
 		struct sk_buff *frag, *frag2;
-		unsigned int first_len = skb_pagelen(skb);
+		int first_len = skb_pagelen(skb);
 
 		if (first_len - hlen > mtu ||
 		    ((first_len - hlen) & 7) ||
@@ -829,11 +804,11 @@ ip_generic_getfrag(void *from, char *to, int offset, int len, int odd, struct sk
 	struct msghdr *msg = from;
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
-		if (!copy_from_iter_full(to, len, &msg->msg_iter))
+		if (copy_from_iter(to, len, &msg->msg_iter) != len)
 			return -EFAULT;
 	} else {
 		__wsum csum = 0;
-		if (!csum_and_copy_from_iter_full(to, len, &csum, &msg->msg_iter))
+		if (csum_and_copy_from_iter(to, len, &csum, &msg->msg_iter) != len)
 			return -EFAULT;
 		skb->csum = csum_block_add(skb->csum, csum, odd);
 	}
@@ -888,9 +863,6 @@ static inline int ip_ufo_append_data(struct sock *sk,
 		skb->transport_header = skb->network_header + fragheaderlen;
 
 		skb->csum = 0;
-
-		if (flags & MSG_CONFIRM)
-			skb_set_dst_pending_confirm(skb, 1);
 
 		__skb_queue_tail(queue, skb);
 	} else if (skb_is_gso(skb)) {
@@ -964,11 +936,12 @@ static int __ip_append_data(struct sock *sk,
 		csummode = CHECKSUM_PARTIAL;
 
 	cork->length += length;
-	if ((((length + (skb ? skb->len : fragheaderlen)) > mtu) ||
-	     (skb && skb_is_gso(skb))) &&
+	if ((skb && skb_is_gso(skb)) ||
+	    ((length > mtu) &&
+	    (skb_queue_len(queue) <= 1) &&
 	    (sk->sk_protocol == IPPROTO_UDP) &&
-	    (rt->dst.dev->features & NETIF_F_UFO) && !dst_xfrm(&rt->dst) &&
-	    (sk->sk_type == SOCK_DGRAM) && !sk->sk_no_check_tx) {
+	    (rt->dst.dev->features & NETIF_F_UFO) && !rt->dst.header_len &&
+	    (sk->sk_type == SOCK_DGRAM) && !sk->sk_no_check_tx)) {
 		err = ip_ufo_append_data(sk, queue, getfrag, from, length,
 					 hh_len, fragheaderlen, transhdrlen,
 					 maxfraglen, flags);
@@ -1093,9 +1066,6 @@ alloc_new_skb:
 			exthdrlen = 0;
 			csummode = CHECKSUM_NONE;
 
-			if ((flags & MSG_CONFIRM) && !skb_prev)
-				skb_set_dst_pending_confirm(skb, 1);
-
 			/*
 			 * Put the packet on the pending queue.
 			 */
@@ -1106,7 +1076,8 @@ alloc_new_skb:
 		if (copy > length)
 			copy = length;
 
-		if (!(rt->dst.dev->features&NETIF_F_SG)) {
+		if (!(rt->dst.dev->features&NETIF_F_SG) &&
+		    skb_tailroom(skb) >= copy) {
 			unsigned int off;
 
 			off = skb->len;
@@ -1287,6 +1258,7 @@ ssize_t	ip_append_page(struct sock *sk, struct flowi4 *fl4, struct page *page,
 		return -EINVAL;
 
 	if ((size + skb->len > mtu) &&
+	    (skb_queue_len(&sk->sk_write_queue) == 1) &&
 	    (sk->sk_protocol == IPPROTO_UDP) &&
 	    (rt->dst.dev->features & NETIF_F_UFO)) {
 		if (skb->ip_summed != CHECKSUM_PARTIAL)
@@ -1626,8 +1598,7 @@ void ip_send_unicast_reply(struct sock *sk, struct sk_buff *skb,
 			   RT_SCOPE_UNIVERSE, ip_hdr(skb)->protocol,
 			   ip_reply_arg_flowi_flags(arg),
 			   daddr, saddr,
-			   tcp_hdr(skb)->source, tcp_hdr(skb)->dest,
-			   arg->uid);
+			   tcp_hdr(skb)->source, tcp_hdr(skb)->dest);
 	security_skb_classify_flow(skb, flowi4_to_flowi(&fl4));
 	rt = ip_route_output_key(net, &fl4);
 	if (IS_ERR(rt))

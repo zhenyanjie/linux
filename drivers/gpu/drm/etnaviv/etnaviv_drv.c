@@ -16,13 +16,12 @@
 
 #include <linux/component.h>
 #include <linux/of_platform.h>
-#include <drm/drm_of.h>
 
-#include "etnaviv_cmdbuf.h"
 #include "etnaviv_drv.h"
 #include "etnaviv_gpu.h"
 #include "etnaviv_gem.h"
 #include "etnaviv_mmu.h"
+#include "etnaviv_gem.h"
 
 #ifdef CONFIG_DRM_ETNAVIV_REGISTER_LOGGING
 static bool reglog;
@@ -147,23 +146,21 @@ static int etnaviv_gem_show(struct drm_device *dev, struct seq_file *m)
 
 static int etnaviv_mm_show(struct drm_device *dev, struct seq_file *m)
 {
-	struct drm_printer p = drm_seq_file_printer(m);
+	int ret;
 
 	read_lock(&dev->vma_offset_manager->vm_lock);
-	drm_mm_print(&dev->vma_offset_manager->vm_addr_space_mm, &p);
+	ret = drm_mm_dump_table(m, &dev->vma_offset_manager->vm_addr_space_mm);
 	read_unlock(&dev->vma_offset_manager->vm_lock);
 
-	return 0;
+	return ret;
 }
 
 static int etnaviv_mmu_show(struct etnaviv_gpu *gpu, struct seq_file *m)
 {
-	struct drm_printer p = drm_seq_file_printer(m);
-
 	seq_printf(m, "Active Objects (%s):\n", dev_name(gpu->dev));
 
 	mutex_lock(&gpu->mmu->lock);
-	drm_mm_print(&gpu->mmu->mm, &p);
+	drm_mm_dump_table(m, &gpu->mmu->mm);
 	mutex_unlock(&gpu->mmu->lock);
 
 	return 0;
@@ -177,8 +174,7 @@ static void etnaviv_buffer_dump(struct etnaviv_gpu *gpu, struct seq_file *m)
 	u32 i;
 
 	seq_printf(m, "virt %p - phys 0x%llx - free 0x%08x\n",
-			buf->vaddr, (u64)etnaviv_cmdbuf_get_pa(buf),
-			size - buf->user_size);
+			buf->vaddr, (u64)buf->paddr, size - buf->user_size);
 
 	for (i = 0; i < size / 4; i++) {
 		if (i && !(i % 4))
@@ -258,6 +254,12 @@ static int etnaviv_debugfs_init(struct drm_minor *minor)
 	}
 
 	return ret;
+}
+
+static void etnaviv_debugfs_cleanup(struct drm_minor *minor)
+{
+	drm_debugfs_remove_files(etnaviv_debugfs_list,
+			ARRAY_SIZE(etnaviv_debugfs_list), minor);
 }
 #endif
 
@@ -476,7 +478,9 @@ static const struct file_operations fops = {
 	.open               = drm_open,
 	.release            = drm_release,
 	.unlocked_ioctl     = drm_ioctl,
+#ifdef CONFIG_COMPAT
 	.compat_ioctl       = drm_compat_ioctl,
+#endif
 	.poll               = drm_poll,
 	.read               = drm_read,
 	.llseek             = no_llseek,
@@ -501,9 +505,9 @@ static struct drm_driver etnaviv_drm_driver = {
 	.gem_prime_import_sg_table = etnaviv_gem_prime_import_sg_table,
 	.gem_prime_vmap     = etnaviv_gem_prime_vmap,
 	.gem_prime_vunmap   = etnaviv_gem_prime_vunmap,
-	.gem_prime_mmap     = etnaviv_gem_prime_mmap,
 #ifdef CONFIG_DEBUG_FS
 	.debugfs_init       = etnaviv_debugfs_init,
+	.debugfs_cleanup    = etnaviv_debugfs_cleanup,
 #endif
 	.ioctls             = etnaviv_ioctls,
 	.num_ioctls         = DRM_ETNAVIV_NUM_IOCTLS,
@@ -588,7 +592,7 @@ static void etnaviv_unbind(struct device *dev)
 	drm->dev_private = NULL;
 	kfree(priv);
 
-	drm_dev_unref(drm);
+	drm_put_dev(drm);
 }
 
 static const struct component_master_ops etnaviv_master_ops = {
@@ -625,8 +629,8 @@ static int etnaviv_pdev_probe(struct platform_device *pdev)
 			if (!core_node)
 				break;
 
-			drm_of_component_match_add(&pdev->dev, &match,
-						   compare_of, core_node);
+			component_match_add(&pdev->dev, &match, compare_of,
+					    core_node);
 			of_node_put(core_node);
 		}
 	} else if (dev->platform_data) {

@@ -1,5 +1,6 @@
 
 generic-y += clkdev.h
+generic-y += cputime.h
 generic-y += delay.h
 generic-y += device.h
 generic-y += div64.h

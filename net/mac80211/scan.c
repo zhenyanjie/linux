@@ -1120,6 +1120,7 @@ int __ieee80211_request_sched_scan_start(struct ieee80211_sub_if_data *sdata,
 	u32 rate_masks[NUM_NL80211_BANDS] = {};
 	u8 bands_used = 0;
 	u8 *ie;
+	size_t len;
 
 	iebufsz = local->scan_ies_len + req->ie_len;
 
@@ -1144,9 +1145,10 @@ int __ieee80211_request_sched_scan_start(struct ieee80211_sub_if_data *sdata,
 
 	ieee80211_prepare_scan_chandef(&chandef, req->scan_width);
 
-	ieee80211_build_preq_ies(local, ie, num_bands * iebufsz,
-				 &sched_scan_ies, req->ie,
-				 req->ie_len, bands_used, rate_masks, &chandef);
+	len = ieee80211_build_preq_ies(local, ie, num_bands * iebufsz,
+				       &sched_scan_ies, req->ie,
+				       req->ie_len, bands_used,
+				       rate_masks, &chandef);
 
 	ret = drv_sched_scan_start(local, sdata, req, &sched_scan_ies);
 	if (ret == 0) {

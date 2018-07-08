@@ -30,6 +30,13 @@
 #include "aerdrv.h"
 #include "../../pci.h"
 
+/*
+ * Version Information
+ */
+#define DRIVER_VERSION "v1.0"
+#define DRIVER_AUTHOR "tom.l.nguyen@intel.com"
+#define DRIVER_DESC "Root Port Advanced Error Reporting Driver"
+
 static int aer_probe(struct pcie_device *dev);
 static void aer_remove(struct pcie_device *dev);
 static pci_ers_result_t aer_error_detected(struct pci_dev *dev,
@@ -290,12 +297,12 @@ static int aer_probe(struct pcie_device *dev)
 {
 	int status;
 	struct aer_rpc *rpc;
-	struct device *device = &dev->port->dev;
+	struct device *device = &dev->device;
 
 	/* Alloc rpc data structure */
 	rpc = aer_alloc_rpc(dev);
 	if (!rpc) {
-		dev_printk(KERN_DEBUG, device, "alloc AER rpc failed\n");
+		dev_printk(KERN_DEBUG, device, "alloc rpc failed\n");
 		aer_remove(dev);
 		return -ENOMEM;
 	}
@@ -303,8 +310,7 @@ static int aer_probe(struct pcie_device *dev)
 	/* Request IRQ ISR */
 	status = request_irq(dev->irq, aer_irq, IRQF_SHARED, "aerdrv", dev);
 	if (status) {
-		dev_printk(KERN_DEBUG, device, "request AER IRQ %d failed\n",
-			   dev->irq);
+		dev_printk(KERN_DEBUG, device, "request IRQ failed\n");
 		aer_remove(dev);
 		return status;
 	}
@@ -312,8 +318,8 @@ static int aer_probe(struct pcie_device *dev)
 	rpc->isr = 1;
 
 	aer_enable_rootport(rpc);
-	dev_info(device, "AER enabled with IRQ %d\n", dev->irq);
-	return 0;
+
+	return status;
 }
 
 /**

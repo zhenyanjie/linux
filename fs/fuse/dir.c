@@ -473,7 +473,7 @@ static int fuse_create_open(struct inode *dir, struct dentry *entry,
 	if (err) {
 		fuse_sync_release(ff, flags);
 	} else {
-		file->private_data = ff;
+		file->private_data = fuse_file_get(ff);
 		fuse_finish_open(inode, file);
 	}
 	return err;
@@ -1312,7 +1312,8 @@ static int parse_dirplusfile(char *buf, size_t nbytes, struct file *file,
 			*/
 			over = !dir_emit(ctx, dirent->name, dirent->namelen,
 				       dirent->ino, dirent->type);
-			ctx->pos = dirent->off;
+			if (!over)
+				ctx->pos = dirent->off;
 		}
 
 		buf += reclen;
@@ -1632,8 +1633,19 @@ int fuse_do_setattr(struct dentry *dentry, struct iattr *attr,
 		return err;
 
 	if (attr->ia_valid & ATTR_OPEN) {
-		if (fc->atomic_o_trunc)
+		/* This is coming from open(..., ... | O_TRUNC); */
+		WARN_ON(!(attr->ia_valid & ATTR_SIZE));
+		WARN_ON(attr->ia_size != 0);
+		if (fc->atomic_o_trunc) {
+			/*
+			 * No need to send request to userspace, since actual
+			 * truncation has already been done by OPEN.  But still
+			 * need to truncate page cache.
+			 */
+			i_size_write(inode, 0);
+			truncate_pagecache(inode, 0);
 			return 0;
+		}
 		file = NULL;
 	}
 
@@ -1777,10 +1789,10 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 	return ret;
 }
 
-static int fuse_getattr(const struct path *path, struct kstat *stat,
-			u32 request_mask, unsigned int flags)
+static int fuse_getattr(struct vfsmount *mnt, struct dentry *entry,
+			struct kstat *stat)
 {
-	struct inode *inode = d_inode(path->dentry);
+	struct inode *inode = d_inode(entry);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 
 	if (!fuse_allow_current_process(fc))
@@ -1831,6 +1843,7 @@ static const struct inode_operations fuse_common_inode_operations = {
 static const struct inode_operations fuse_symlink_inode_operations = {
 	.setattr	= fuse_setattr,
 	.get_link	= fuse_get_link,
+	.readlink	= generic_readlink,
 	.getattr	= fuse_getattr,
 	.listxattr	= fuse_listxattr,
 };

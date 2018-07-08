@@ -18,6 +18,9 @@
 #include "hns_dsaf_rcb.h"
 
 #define AE_NAME_PORT_ID_IDX 6
+#define ETH_STATIC_REG	 1
+#define ETH_DUMP_REG	 5
+#define ETH_GSTRING_LEN	32
 
 static struct hns_mac_cb *hns_get_mac_cb(struct hnae_handle *handle)
 {
@@ -199,28 +202,6 @@ static int hns_ae_set_mac_address(struct hnae_handle *handle, void *p)
 	return 0;
 }
 
-static int hns_ae_add_uc_address(struct hnae_handle *handle,
-				 const unsigned char *addr)
-{
-	struct hns_mac_cb *mac_cb = hns_get_mac_cb(handle);
-
-	if (mac_cb->mac_type != HNAE_PORT_SERVICE)
-		return -ENOSPC;
-
-	return hns_mac_add_uc_addr(mac_cb, handle->vf_id, addr);
-}
-
-static int hns_ae_rm_uc_address(struct hnae_handle *handle,
-				const unsigned char *addr)
-{
-	struct hns_mac_cb *mac_cb = hns_get_mac_cb(handle);
-
-	if (mac_cb->mac_type != HNAE_PORT_SERVICE)
-		return -ENOSPC;
-
-	return hns_mac_rm_uc_addr(mac_cb, handle->vf_id, addr);
-}
-
 static int hns_ae_set_multicast_one(struct hnae_handle *handle, void *addr)
 {
 	int ret;
@@ -252,16 +233,6 @@ static int hns_ae_set_multicast_one(struct hnae_handle *handle, void *addr)
 			mac_addr, DSAF_BASE_INNER_PORT_NUM, ret);
 
 	return ret;
-}
-
-static int hns_ae_clr_multicast(struct hnae_handle *handle)
-{
-	struct hns_mac_cb *mac_cb = hns_get_mac_cb(handle);
-
-	if (mac_cb->mac_type != HNAE_PORT_SERVICE)
-		return 0;
-
-	return hns_mac_clr_multicast(mac_cb, handle->vf_id);
 }
 
 static int hns_ae_set_mtu(struct hnae_handle *handle, int new_mtu)
@@ -802,8 +773,9 @@ static int hns_ae_get_rss(struct hnae_handle *handle, u32 *indir, u8 *key,
 		memcpy(key, ppe_cb->rss_key, HNS_PPEV2_RSS_KEY_SIZE);
 
 	/* update the current hash->queue mappings from the shadow RSS table */
-	memcpy(indir, ppe_cb->rss_indir_table,
-	       HNS_PPEV2_RSS_IND_TBL_SIZE * sizeof(*indir));
+	if (indir)
+		memcpy(indir, ppe_cb->rss_indir_table,
+		       HNS_PPEV2_RSS_IND_TBL_SIZE  * sizeof(*indir));
 
 	return 0;
 }
@@ -814,15 +786,19 @@ static int hns_ae_set_rss(struct hnae_handle *handle, const u32 *indir,
 	struct hns_ppe_cb *ppe_cb = hns_get_ppe_cb(handle);
 
 	/* set the RSS Hash Key if specififed by the user */
-	if (key)
-		hns_ppe_set_rss_key(ppe_cb, (u32 *)key);
+	if (key) {
+		memcpy(ppe_cb->rss_key, key, HNS_PPEV2_RSS_KEY_SIZE);
+		hns_ppe_set_rss_key(ppe_cb, ppe_cb->rss_key);
+	}
 
-	/* update the shadow RSS table with user specified qids */
-	memcpy(ppe_cb->rss_indir_table, indir,
-	       HNS_PPEV2_RSS_IND_TBL_SIZE * sizeof(*indir));
+	if (indir) {
+		/* update the shadow RSS table with user specified qids */
+		memcpy(ppe_cb->rss_indir_table, indir,
+		       HNS_PPEV2_RSS_IND_TBL_SIZE  * sizeof(*indir));
 
-	/* now update the hardware */
-	hns_ppe_set_indir_table(ppe_cb, ppe_cb->rss_indir_table);
+		/* now update the hardware */
+		hns_ppe_set_indir_table(ppe_cb, ppe_cb->rss_indir_table);
+	}
 
 	return 0;
 }
@@ -852,10 +828,7 @@ static struct hnae_ae_ops hns_dsaf_ops = {
 	.get_coalesce_range = hns_ae_get_coalesce_range,
 	.set_promisc_mode = hns_ae_set_promisc_mode,
 	.set_mac_addr = hns_ae_set_mac_address,
-	.add_uc_addr = hns_ae_add_uc_address,
-	.rm_uc_addr = hns_ae_rm_uc_address,
 	.set_mc_addr = hns_ae_set_multicast_one,
-	.clr_mc_addr = hns_ae_clr_multicast,
 	.set_mtu = hns_ae_set_mtu,
 	.update_stats = hns_ae_update_stats,
 	.set_tso_stats = hns_ae_set_tso_stats,

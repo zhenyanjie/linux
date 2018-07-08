@@ -23,8 +23,6 @@
 #include <linux/mmc/host.h>
 
 #include "core.h"
-#include "card.h"
-#include "host.h"
 #include "sdio_cis.h"
 #include "bus.h"
 
@@ -157,6 +155,9 @@ static int mmc_bus_suspend(struct device *dev)
 		return ret;
 
 	ret = host->bus_ops->suspend(host);
+	if (ret)
+		pm_generic_resume(dev);
+
 	return ret;
 }
 

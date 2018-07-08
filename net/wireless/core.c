@@ -95,6 +95,9 @@ static int cfg80211_dev_check_name(struct cfg80211_registered_device *rdev,
 
 	ASSERT_RTNL();
 
+	if (strlen(newname) > NL80211_WIPHY_NAME_MAXLEN)
+		return -EINVAL;
+
 	/* prohibit calling the thing phy%d when %d is not its number */
 	sscanf(newname, PHY_NAME "%d%n", &wiphy_idx, &taken);
 	if (taken == strlen(newname) && wiphy_idx != rdev->wiphy_idx) {
@@ -210,11 +213,11 @@ void cfg80211_stop_p2p_device(struct cfg80211_registered_device *rdev,
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_P2P_DEVICE))
 		return;
 
-	if (!wdev_running(wdev))
+	if (!wdev->p2p_started)
 		return;
 
 	rdev_stop_p2p_device(rdev, wdev);
-	wdev->is_running = false;
+	wdev->p2p_started = false;
 
 	rdev->opencount--;
 
@@ -233,11 +236,11 @@ void cfg80211_stop_nan(struct cfg80211_registered_device *rdev,
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_NAN))
 		return;
 
-	if (!wdev_running(wdev))
+	if (!wdev->nan_started)
 		return;
 
 	rdev_stop_nan(rdev, wdev);
-	wdev->is_running = false;
+	wdev->nan_started = false;
 
 	rdev->opencount--;
 }
@@ -421,6 +424,8 @@ struct wiphy *wiphy_new_nm(const struct cfg80211_ops *ops, int sizeof_priv,
 		if (rv)
 			goto use_default_name;
 	} else {
+		int rv;
+
 use_default_name:
 		/* NOTE:  This is *probably* safe w/out holding rtnl because of
 		 * the restrictions on phy names.  Probably this call could
@@ -428,7 +433,11 @@ use_default_name:
 		 * phyX.  But, might should add some locking and check return
 		 * value, and use a different name if this one exists?
 		 */
-		dev_set_name(&rdev->wiphy.dev, PHY_NAME "%d", rdev->wiphy_idx);
+		rv = dev_set_name(&rdev->wiphy.dev, PHY_NAME "%d", rdev->wiphy_idx);
+		if (rv < 0) {
+			kfree(rdev);
+			return NULL;
+		}
 	}
 
 	INIT_LIST_HEAD(&rdev->wiphy.wdev_list);
@@ -562,21 +571,6 @@ static int wiphy_verify_combinations(struct wiphy *wiphy)
 				    c->limits[j].max > 1))
 				return -EINVAL;
 
-			/*
-			 * This isn't well-defined right now. If you have an
-			 * IBSS interface, then its beacon interval may change
-			 * by joining other networks, and nothing prevents it
-			 * from doing that.
-			 * So technically we probably shouldn't even allow AP
-			 * and IBSS in the same interface, but it seems that
-			 * some drivers support that, possibly only with fixed
-			 * beacon intervals for IBSS.
-			 */
-			if (WARN_ON(types & BIT(NL80211_IFTYPE_ADHOC) &&
-				    c->beacon_int_min_gcd)) {
-				return -EINVAL;
-			}
-
 			cnt += c->limits[j].max;
 			/*
 			 * Don't advertise an unsupported type
@@ -585,11 +579,6 @@ static int wiphy_verify_combinations(struct wiphy *wiphy)
 			if (WARN_ON((wiphy->interface_modes & types) != types))
 				return -EINVAL;
 		}
-
-#ifndef CONFIG_WIRELESS_WDS
-		if (WARN_ON(all_iftypes & BIT(NL80211_IFTYPE_WDS)))
-			return -EINVAL;
-#endif
 
 		/* You can't even choose that many! */
 		if (WARN_ON(cnt < c->max_interfaces))
@@ -626,14 +615,8 @@ int wiphy_register(struct wiphy *wiphy)
 
 	if (WARN_ON((wiphy->interface_modes & BIT(NL80211_IFTYPE_NAN)) &&
 		    (!rdev->ops->start_nan || !rdev->ops->stop_nan ||
-		     !rdev->ops->add_nan_func || !rdev->ops->del_nan_func ||
-		     !(wiphy->nan_supported_bands & BIT(NL80211_BAND_2GHZ)))))
+		     !rdev->ops->add_nan_func || !rdev->ops->del_nan_func)))
 		return -EINVAL;
-
-#ifndef CONFIG_WIRELESS_WDS
-	if (WARN_ON(wiphy->interface_modes & BIT(NL80211_IFTYPE_WDS)))
-		return -EINVAL;
-#endif
 
 	/*
 	 * if a wiphy has unsupported modes for regulatory channel enforcement,
@@ -1143,8 +1126,6 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 		     wdev->iftype == NL80211_IFTYPE_ADHOC) && !wdev->use_4addr)
 			dev->priv_flags |= IFF_DONT_BRIDGE;
 
-		INIT_WORK(&wdev->disconnect_wk, cfg80211_autodisconnect_wk);
-
 		nl80211_notify_iface(rdev, wdev, NL80211_CMD_NEW_INTERFACE);
 		break;
 	case NETDEV_GOING_DOWN:
@@ -1233,7 +1214,6 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 #ifdef CONFIG_CFG80211_WEXT
 			kzfree(wdev->wext.keys);
 #endif
-			flush_work(&wdev->disconnect_wk);
 		}
 		/*
 		 * synchronise (so that we won't find this netdev

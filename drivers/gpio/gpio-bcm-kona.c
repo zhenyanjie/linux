@@ -308,18 +308,6 @@ static int bcm_kona_gpio_set_debounce(struct gpio_chip *chip, unsigned gpio,
 	return 0;
 }
 
-static int bcm_kona_gpio_set_config(struct gpio_chip *chip, unsigned gpio,
-				    unsigned long config)
-{
-	u32 debounce;
-
-	if (pinconf_to_config_param(config) != PIN_CONFIG_INPUT_DEBOUNCE)
-		return -ENOTSUPP;
-
-	debounce = pinconf_to_config_argument(config);
-	return bcm_kona_gpio_set_debounce(chip, gpio, debounce);
-}
-
 static const struct gpio_chip template_chip = {
 	.label = "bcm-kona-gpio",
 	.owner = THIS_MODULE,
@@ -330,7 +318,7 @@ static const struct gpio_chip template_chip = {
 	.get = bcm_kona_gpio_get,
 	.direction_output = bcm_kona_gpio_direction_output,
 	.set = bcm_kona_gpio_set,
-	.set_config = bcm_kona_gpio_set_config,
+	.set_debounce = bcm_kona_gpio_set_debounce,
 	.to_irq = bcm_kona_gpio_to_irq,
 	.base = 0,
 };

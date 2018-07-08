@@ -45,9 +45,6 @@
 #include <linux/smp.h>
 #include <linux/export.h>
 #include <linux/sched.h>
-#include <linux/sched/topology.h>
-#include <linux/sched/hotplug.h>
-#include <linux/sched/task_stack.h>
 #include <linux/percpu.h>
 #include <linux/bootmem.h>
 #include <linux/err.h>
@@ -61,6 +58,7 @@
 #include <asm/desc.h>
 #include <asm/nmi.h>
 #include <asm/irq.h>
+#include <asm/idle.h>
 #include <asm/realmode.h>
 #include <asm/cpu.h>
 #include <asm/numa.h>
@@ -77,6 +75,7 @@
 #include <asm/i8259.h>
 #include <asm/realmode.h>
 #include <asm/misc.h>
+#include <asm/spec-ctrl.h>
 
 /* Number of siblings per CPU package */
 int smp_num_siblings = 1;
@@ -110,17 +109,6 @@ static unsigned int logical_packages __read_mostly;
 /* Maximum number of SMT threads on any online core */
 int __max_smt_threads __read_mostly;
 
-/* Flag to indicate if a complete sched domain rebuild is required */
-bool x86_topology_update;
-
-int arch_update_cpu_topology(void)
-{
-	int retval = x86_topology_update;
-
-	x86_topology_update = false;
-	return retval;
-}
-
 static inline void smpboot_setup_warm_reset_vector(unsigned long start_eip)
 {
 	unsigned long flags;
@@ -128,24 +116,15 @@ static inline void smpboot_setup_warm_reset_vector(unsigned long start_eip)
 	spin_lock_irqsave(&rtc_lock, flags);
 	CMOS_WRITE(0xa, 0xf);
 	spin_unlock_irqrestore(&rtc_lock, flags);
-	local_flush_tlb();
-	pr_debug("1.\n");
 	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_HIGH)) =
 							start_eip >> 4;
-	pr_debug("2.\n");
 	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) =
 							start_eip & 0xf;
-	pr_debug("3.\n");
 }
 
 static inline void smpboot_restore_warm_reset_vector(void)
 {
 	unsigned long flags;
-
-	/*
-	 * Install writable page 0 entry to set BIOS data area.
-	 */
-	local_flush_tlb();
 
 	/*
 	 * Paranoid:  Set warm reset code and vector here back
@@ -194,6 +173,12 @@ static void smp_callin(void)
 	smp_store_cpu_info(cpuid);
 
 	/*
+	 * The topology information must be up to date before
+	 * calibrate_delay() and notify_cpu_starting().
+	 */
+	set_cpu_sibling_map(raw_smp_processor_id());
+
+	/*
 	 * Get our bogomips.
 	 * Update loops_per_jiffy in cpu_data. Previous call to
 	 * smp_store_cpu_info() stored a value that is close but not as
@@ -203,11 +188,6 @@ static void smp_callin(void)
 	cpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;
 	pr_debug("Stack at about %p\n", &cpuid);
 
-	/*
-	 * This must be done before setting cpu_online_mask
-	 * or calling notify_cpu_starting.
-	 */
-	set_cpu_sibling_map(raw_smp_processor_id());
 	wmb();
 
 	notify_cpu_starting(cpuid);
@@ -249,6 +229,8 @@ static void notrace start_secondary(void *unused)
 	 * Check TSC synchronization with the BP:
 	 */
 	check_tsc_sync_target();
+
+	speculative_store_bypass_ht_init();
 
 	/*
 	 * Lock vector_lock and initialize the vectors on this cpu
@@ -477,42 +459,22 @@ static bool match_die(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)
 	return false;
 }
 
-#if defined(CONFIG_SCHED_SMT) || defined(CONFIG_SCHED_MC)
-static inline int x86_sched_itmt_flags(void)
-{
-	return sysctl_sched_itmt_enabled ? SD_ASYM_PACKING : 0;
-}
-
-#ifdef CONFIG_SCHED_MC
-static int x86_core_flags(void)
-{
-	return cpu_core_flags() | x86_sched_itmt_flags();
-}
-#endif
-#ifdef CONFIG_SCHED_SMT
-static int x86_smt_flags(void)
-{
-	return cpu_smt_flags() | x86_sched_itmt_flags();
-}
-#endif
-#endif
-
 static struct sched_domain_topology_level x86_numa_in_package_topology[] = {
 #ifdef CONFIG_SCHED_SMT
-	{ cpu_smt_mask, x86_smt_flags, SD_INIT_NAME(SMT) },
+	{ cpu_smt_mask, cpu_smt_flags, SD_INIT_NAME(SMT) },
 #endif
 #ifdef CONFIG_SCHED_MC
-	{ cpu_coregroup_mask, x86_core_flags, SD_INIT_NAME(MC) },
+	{ cpu_coregroup_mask, cpu_core_flags, SD_INIT_NAME(MC) },
 #endif
 	{ NULL, },
 };
 
 static struct sched_domain_topology_level x86_topology[] = {
 #ifdef CONFIG_SCHED_SMT
-	{ cpu_smt_mask, x86_smt_flags, SD_INIT_NAME(SMT) },
+	{ cpu_smt_mask, cpu_smt_flags, SD_INIT_NAME(SMT) },
 #endif
 #ifdef CONFIG_SCHED_MC
-	{ cpu_coregroup_mask, x86_core_flags, SD_INIT_NAME(MC) },
+	{ cpu_coregroup_mask, cpu_core_flags, SD_INIT_NAME(MC) },
 #endif
 	{ cpu_cpu_mask, SD_INIT_NAME(DIE) },
 	{ NULL, },
@@ -847,6 +809,14 @@ wakeup_secondary_cpu_via_init(int phys_apicid, unsigned long start_eip)
 	return (send_status | accept_status);
 }
 
+void smp_announce(void)
+{
+	int num_nodes = num_online_nodes();
+
+	printk(KERN_INFO "x86: Booted up %d node%s, %d CPUs\n",
+	       num_nodes, (num_nodes > 1 ? "s" : ""), num_online_cpus());
+}
+
 /* reduce the number of lines printed when booting a large cpu count system */
 static void announce_cpu(int cpu, int apicid)
 {
@@ -982,7 +952,9 @@ static int do_boot_cpu(int apicid, int cpu, struct task_struct *idle)
 	int cpu0_nmi_registered = 0;
 	unsigned long timeout;
 
-	idle->thread.sp = (unsigned long)task_pt_regs(idle);
+	idle->thread.sp = (unsigned long) (((struct pt_regs *)
+			  (THREAD_SIZE +  task_stack_page(idle))) - 1);
+
 	early_gdt_descr.address = (unsigned long)get_cpu_gdt_table(cpu);
 	initial_code = (unsigned long)start_secondary;
 	initial_stack  = idle->thread.sp;
@@ -1127,7 +1099,7 @@ int native_cpu_up(unsigned int cpu, struct task_struct *tidle)
 		return err;
 
 	/* the FPU context is blank, nobody can own it */
-	per_cpu(fpu_fpregs_owner_ctx, cpu) = NULL;
+	__cpu_disable_lazy_restore(cpu);
 
 	common_cpu_up(cpu, tidle);
 
@@ -1347,14 +1319,17 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 	default_setup_apic_routing();
 	cpu0_logical_apicid = apic_bsp_setup(false);
 
-	pr_info("CPU0: ");
+	pr_info("CPU%d: ", 0);
 	print_cpu_info(&cpu_data(0));
 
-	uv_system_init();
+	if (is_uv_system())
+		uv_system_init();
 
 	set_mtrr_aps_delayed_init();
 
 	smp_quirk_init_udelay();
+
+	speculative_store_bypass_ht_init();
 }
 
 void arch_enable_nonboot_cpus_begin(void)
@@ -1471,15 +1446,15 @@ __init void prefill_possible_map(void)
 		possible = i;
 	}
 
-	nr_cpu_ids = possible;
-
 	pr_info("Allowing %d CPUs, %d hotplug CPUs\n",
 		possible, max_t(int, possible - num_processors, 0));
 
-	reset_cpu_possible_mask();
-
 	for (i = 0; i < possible; i++)
 		set_cpu_possible(i, true);
+	for (; i < NR_CPUS; i++)
+		set_cpu_possible(i, false);
+
+	nr_cpu_ids = possible;
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -1522,6 +1497,7 @@ static void remove_siblinginfo(int cpu)
 	cpumask_clear(topology_core_cpumask(cpu));
 	c->phys_proc_id = 0;
 	c->cpu_core_id = 0;
+	c->booted_cores = 0;
 	cpumask_clear_cpu(cpu, cpu_sibling_setup_mask);
 	recompute_smt_state();
 }
@@ -1590,6 +1566,7 @@ void play_dead_common(void)
 {
 	idle_task_exit();
 	reset_lazy_tlbstate();
+	amd_e400_remove_cpu(raw_smp_processor_id());
 
 	/* Ack it */
 	(void)cpu_report_death();
@@ -1620,6 +1597,8 @@ static inline void mwait_play_dead(void)
 	void *mwait_ptr;
 	int i;
 
+	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD)
+		return;
 	if (!this_cpu_has(X86_FEATURE_MWAIT))
 		return;
 	if (!this_cpu_has(X86_FEATURE_CLFLUSH))

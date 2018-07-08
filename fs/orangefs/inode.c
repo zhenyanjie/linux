@@ -8,7 +8,6 @@
  *  Linux VFS inode operations.
  */
 
-#include <linux/bvec.h>
 #include "protocol.h"
 #include "orangefs-kernel.h"
 #include "orangefs-bufmap.h"
@@ -136,6 +135,12 @@ static ssize_t orangefs_direct_IO(struct kiocb *iocb,
 	return -EINVAL;
 }
 
+struct backing_dev_info orangefs_backing_dev_info = {
+	.name = "orangefs",
+	.ra_pages = 0,
+	.capabilities = BDI_CAP_NO_ACCT_DIRTY | BDI_CAP_NO_WRITEBACK,
+};
+
 /** ORANGEFS2 implementation of address space operations */
 const struct address_space_operations orangefs_address_operations = {
 	.readpage = orangefs_readpage,
@@ -244,24 +249,25 @@ out:
 /*
  * Obtain attributes of an object given a dentry
  */
-int orangefs_getattr(const struct path *path, struct kstat *stat,
-		     u32 request_mask, unsigned int flags)
+int orangefs_getattr(struct vfsmount *mnt,
+		  struct dentry *dentry,
+		  struct kstat *kstat)
 {
 	int ret = -ENOENT;
-	struct inode *inode = path->dentry->d_inode;
+	struct inode *inode = dentry->d_inode;
 	struct orangefs_inode_s *orangefs_inode = NULL;
 
 	gossip_debug(GOSSIP_INODE_DEBUG,
 		     "orangefs_getattr: called on %pd\n",
-		     path->dentry);
+		     dentry);
 
 	ret = orangefs_inode_getattr(inode, 0, 0);
 	if (ret == 0) {
-		generic_fillattr(inode, stat);
+		generic_fillattr(inode, kstat);
 
 		/* override block size reported to stat */
 		orangefs_inode = ORANGEFS_I(inode);
-		stat->blksize = orangefs_inode->blksize;
+		kstat->blksize = orangefs_inode->blksize;
 	}
 	return ret;
 }

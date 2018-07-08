@@ -17,7 +17,6 @@
 #include <linux/if_bridge.h>
 #include <linux/rtnetlink.h>
 #include <linux/spinlock.h>
-#include <linux/sched/signal.h>
 
 #include "br_private.h"
 
@@ -189,7 +188,6 @@ static BRPORT_ATTR(multicast_router, S_IRUGO | S_IWUSR, show_multicast_router,
 		   store_multicast_router);
 
 BRPORT_ATTR_FLAG(multicast_fast_leave, BR_MULTICAST_FAST_LEAVE);
-BRPORT_ATTR_FLAG(multicast_to_unicast, BR_MULTICAST_TO_UNICAST);
 #endif
 
 static const struct brport_attribute *brport_attrs[] = {
@@ -216,7 +214,6 @@ static const struct brport_attribute *brport_attrs[] = {
 #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
 	&brport_attr_multicast_router,
 	&brport_attr_multicast_fast_leave,
-	&brport_attr_multicast_to_unicast,
 #endif
 	&brport_attr_proxyarp,
 	&brport_attr_proxyarp_wifi,
@@ -232,6 +229,9 @@ static ssize_t brport_show(struct kobject *kobj,
 {
 	struct brport_attribute *brport_attr = to_brport_attr(attr);
 	struct net_bridge_port *p = to_brport(kobj);
+
+	if (!brport_attr->show)
+		return -EINVAL;
 
 	return brport_attr->show(p, buf);
 }

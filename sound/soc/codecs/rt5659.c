@@ -4018,7 +4018,7 @@ static int rt5659_i2c_probe(struct i2c_client *i2c,
 							GPIOD_OUT_HIGH);
 
 	/* Sleep for 300 ms miniumum */
-	msleep(300);
+	usleep_range(300000, 350000);
 
 	rt5659->regmap = devm_regmap_init_i2c(i2c, &rt5659_regmap);
 	if (IS_ERR(rt5659->regmap)) {
@@ -4230,9 +4230,10 @@ static struct acpi_device_id rt5659_acpi_match[] = {
 MODULE_DEVICE_TABLE(acpi, rt5659_acpi_match);
 #endif
 
-static struct i2c_driver rt5659_i2c_driver = {
+struct i2c_driver rt5659_i2c_driver = {
 	.driver = {
 		.name = "rt5659",
+		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(rt5659_of_match),
 		.acpi_match_table = ACPI_PTR(rt5659_acpi_match),
 	},

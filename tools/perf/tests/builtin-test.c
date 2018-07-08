@@ -28,119 +28,119 @@ static struct test generic_tests[] = {
 		.func = test__vmlinux_matches_kallsyms,
 	},
 	{
-		.desc = "Detect openat syscall event",
+		.desc = "detect openat syscall event",
 		.func = test__openat_syscall_event,
 	},
 	{
-		.desc = "Detect openat syscall event on all cpus",
+		.desc = "detect openat syscall event on all cpus",
 		.func = test__openat_syscall_event_on_all_cpus,
 	},
 	{
-		.desc = "Read samples using the mmap interface",
+		.desc = "read samples using the mmap interface",
 		.func = test__basic_mmap,
 	},
 	{
-		.desc = "Parse event definition strings",
+		.desc = "parse events tests",
 		.func = test__parse_events,
 	},
 	{
-		.desc = "PERF_RECORD_* events & perf_sample fields",
+		.desc = "Validate PERF_RECORD_* events & perf_sample fields",
 		.func = test__PERF_RECORD,
 	},
 	{
-		.desc = "Parse perf pmu format",
+		.desc = "Test perf pmu format parsing",
 		.func = test__pmu,
 	},
 	{
-		.desc = "DSO data read",
+		.desc = "Test dso data read",
 		.func = test__dso_data,
 	},
 	{
-		.desc = "DSO data cache",
+		.desc = "Test dso data cache",
 		.func = test__dso_data_cache,
 	},
 	{
-		.desc = "DSO data reopen",
+		.desc = "Test dso data reopen",
 		.func = test__dso_data_reopen,
 	},
 	{
-		.desc = "Roundtrip evsel->name",
+		.desc = "roundtrip evsel->name check",
 		.func = test__perf_evsel__roundtrip_name_test,
 	},
 	{
-		.desc = "Parse sched tracepoints fields",
+		.desc = "Check parsing of sched tracepoints fields",
 		.func = test__perf_evsel__tp_sched_test,
 	},
 	{
-		.desc = "syscalls:sys_enter_openat event fields",
+		.desc = "Generate and check syscalls:sys_enter_openat event fields",
 		.func = test__syscall_openat_tp_fields,
 	},
 	{
-		.desc = "Setup struct perf_event_attr",
+		.desc = "struct perf_event_attr setup",
 		.func = test__attr,
 	},
 	{
-		.desc = "Match and link multiple hists",
+		.desc = "Test matching and linking multiple hists",
 		.func = test__hists_link,
 	},
 	{
-		.desc = "'import perf' in python",
+		.desc = "Try 'import perf' in python, checking link problems",
 		.func = test__python_use,
 	},
 	{
-		.desc = "Breakpoint overflow signal handler",
+		.desc = "Test breakpoint overflow signal handler",
 		.func = test__bp_signal,
 	},
 	{
-		.desc = "Breakpoint overflow sampling",
+		.desc = "Test breakpoint overflow sampling",
 		.func = test__bp_signal_overflow,
 	},
 	{
-		.desc = "Number of exit events of a simple workload",
+		.desc = "Test number of exit event of a simple workload",
 		.func = test__task_exit,
 	},
 	{
-		.desc = "Software clock events period values",
+		.desc = "Test software clock events have valid period values",
 		.func = test__sw_clock_freq,
 	},
 	{
-		.desc = "Object code reading",
+		.desc = "Test object code reading",
 		.func = test__code_reading,
 	},
 	{
-		.desc = "Sample parsing",
+		.desc = "Test sample parsing",
 		.func = test__sample_parsing,
 	},
 	{
-		.desc = "Use a dummy software event to keep tracking",
+		.desc = "Test using a dummy software event to keep tracking",
 		.func = test__keep_tracking,
 	},
 	{
-		.desc = "Parse with no sample_id_all bit set",
+		.desc = "Test parsing with no sample_id_all bit set",
 		.func = test__parse_no_sample_id_all,
 	},
 	{
-		.desc = "Filter hist entries",
+		.desc = "Test filtering hist entries",
 		.func = test__hists_filter,
 	},
 	{
-		.desc = "Lookup mmap thread",
+		.desc = "Test mmap thread lookup",
 		.func = test__mmap_thread_lookup,
 	},
 	{
-		.desc = "Share thread mg",
+		.desc = "Test thread mg sharing",
 		.func = test__thread_mg_share,
 	},
 	{
-		.desc = "Sort output of hist entries",
+		.desc = "Test output sorting of hist entries",
 		.func = test__hists_output,
 	},
 	{
-		.desc = "Cumulate child hist entries",
+		.desc = "Test cumulation of child hist entries",
 		.func = test__hists_cumulate,
 	},
 	{
-		.desc = "Track with sched_switch",
+		.desc = "Test tracking with sched_switch",
 		.func = test__switch_tracking,
 	},
 	{
@@ -152,15 +152,15 @@ static struct test generic_tests[] = {
 		.func = test__fdarray__add,
 	},
 	{
-		.desc = "kmod_path__parse",
+		.desc = "Test kmod_path__parse function",
 		.func = test__kmod_path__parse,
 	},
 	{
-		.desc = "Thread map",
+		.desc = "Test thread map",
 		.func = test__thread_map,
 	},
 	{
-		.desc = "LLVM search and compile",
+		.desc = "Test LLVM searching and compiling",
 		.func = test__llvm,
 		.subtest = {
 			.skip_if_fail	= true,
@@ -169,11 +169,11 @@ static struct test generic_tests[] = {
 		},
 	},
 	{
-		.desc = "Session topology",
+		.desc = "Test topology in session",
 		.func = test_session_topology,
 	},
 	{
-		.desc = "BPF filter",
+		.desc = "Test BPF filter",
 		.func = test__bpf,
 		.subtest = {
 			.skip_if_fail	= true,
@@ -182,73 +182,52 @@ static struct test generic_tests[] = {
 		},
 	},
 	{
-		.desc = "Synthesize thread map",
+		.desc = "Test thread map synthesize",
 		.func = test__thread_map_synthesize,
 	},
 	{
-		.desc = "Remove thread map",
-		.func = test__thread_map_remove,
-	},
-	{
-		.desc = "Synthesize cpu map",
+		.desc = "Test cpu map synthesize",
 		.func = test__cpu_map_synthesize,
 	},
 	{
-		.desc = "Synthesize stat config",
+		.desc = "Test stat config synthesize",
 		.func = test__synthesize_stat_config,
 	},
 	{
-		.desc = "Synthesize stat",
+		.desc = "Test stat synthesize",
 		.func = test__synthesize_stat,
 	},
 	{
-		.desc = "Synthesize stat round",
+		.desc = "Test stat round synthesize",
 		.func = test__synthesize_stat_round,
 	},
 	{
-		.desc = "Synthesize attr update",
+		.desc = "Test attr update synthesize",
 		.func = test__event_update,
 	},
 	{
-		.desc = "Event times",
+		.desc = "Test events times",
 		.func = test__event_times,
 	},
 	{
-		.desc = "Read backward ring buffer",
+		.desc = "Test backward reading from ring buffer",
 		.func = test__backward_ring_buffer,
 	},
 	{
-		.desc = "Print cpu map",
+		.desc = "Test cpu map print",
 		.func = test__cpu_map_print,
 	},
 	{
-		.desc = "Probe SDT events",
+		.desc = "Test SDT event probing",
 		.func = test__sdt_event,
 	},
 	{
-		.desc = "is_printable_array",
+		.desc = "Test is_printable_array function",
 		.func = test__is_printable_array,
 	},
 	{
-		.desc = "Print bitmap",
+		.desc = "Test bitmap print",
 		.func = test__bitmap_print,
-	},
-	{
-		.desc = "perf hooks",
-		.func = test__perf_hooks,
-	},
-	{
-		.desc = "builtin clang support",
-		.func = test__clang,
-		.subtest = {
-			.skip_if_fail	= true,
-			.get_nr		= test__clang_subtest_get_nr,
-			.get_desc	= test__clang_subtest_get_desc,
-		}
-	},
-	{
-		.desc = "unit_number__scnprintf",
-		.func = test__unit_number__scnprint,
 	},
 	{
 		.func = NULL,
@@ -299,7 +278,7 @@ static int run_test(struct test *test, int subtest)
 		if (!dont_fork) {
 			pr_debug("test child forked, pid %d\n", getpid());
 
-			if (verbose <= 0) {
+			if (!verbose) {
 				int nullfd = open("/dev/null", O_WRONLY);
 
 				if (nullfd >= 0) {

@@ -42,7 +42,6 @@
 #include <linux/seq_file.h>
 #include <linux/quotaops.h>
 #include <linux/cleancache.h>
-#include <linux/signal.h>
 
 #define CREATE_TRACE_POINTS
 #include "ocfs2_trace.h"
@@ -338,7 +337,7 @@ static int ocfs2_osb_dump(struct ocfs2_super *osb, char *buf, int len)
 		out += snprintf(buf + out, len - out, "Disabled\n");
 	else
 		out += snprintf(buf + out, len - out, "%lu seconds ago\n",
-				(unsigned long)(ktime_get_seconds() - os->os_scantime));
+				(get_seconds() - os->os_scantime.tv_sec));
 
 	out += snprintf(buf + out, len - out, "%10s => %3s  %10s\n",
 			"Slots", "Num", "RecoGen");
@@ -474,9 +473,8 @@ static int ocfs2_init_global_system_inodes(struct ocfs2_super *osb)
 		new = ocfs2_get_system_file_inode(osb, i, osb->slot_num);
 		if (!new) {
 			ocfs2_release_system_inodes(osb);
-			status = -EINVAL;
+			status = ocfs2_is_soft_readonly(osb) ? -EROFS : -EINVAL;
 			mlog_errno(status);
-			/* FIXME: Should ERROR_RO_FS */
 			mlog(ML_ERROR, "Unable to load system inode %d, "
 			     "possibly corrupt fs?", i);
 			goto bail;
@@ -505,7 +503,7 @@ static int ocfs2_init_local_system_inodes(struct ocfs2_super *osb)
 		new = ocfs2_get_system_file_inode(osb, i, osb->slot_num);
 		if (!new) {
 			ocfs2_release_system_inodes(osb);
-			status = -EINVAL;
+			status = ocfs2_is_soft_readonly(osb) ? -EROFS : -EINVAL;
 			mlog(ML_ERROR, "status=%d, sysfile=%d, slot=%d\n",
 			     status, i, osb->slot_num);
 			goto bail;
@@ -986,6 +984,7 @@ static void ocfs2_disable_quotas(struct ocfs2_super *osb)
 	for (type = 0; type < OCFS2_MAXQUOTAS; type++) {
 		if (!sb_has_quota_loaded(sb, type))
 			continue;
+		/* Cancel periodic syncing before we grab dqonoff_mutex */
 		oinfo = sb_dqinfo(sb, type)->dqi_priv;
 		cancel_delayed_work_sync(&oinfo->dqi_sync_work);
 		inode = igrab(sb->s_dquot.files[type]);

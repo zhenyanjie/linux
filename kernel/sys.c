@@ -49,22 +49,17 @@
 #include <linux/binfmts.h>
 
 #include <linux/sched.h>
-#include <linux/sched/autogroup.h>
-#include <linux/sched/loadavg.h>
-#include <linux/sched/stat.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/coredump.h>
-#include <linux/sched/task.h>
-#include <linux/sched/cputime.h>
 #include <linux/rcupdate.h>
 #include <linux/uidgid.h>
 #include <linux/cred.h>
+
+#include <linux/nospec.h>
 
 #include <linux/kmsg_dump.h>
 /* Move somewhere else to avoid recompiling? */
 #include <generated/utsrelease.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/unistd.h>
 
@@ -888,15 +883,15 @@ SYSCALL_DEFINE0(getegid)
 
 void do_sys_times(struct tms *tms)
 {
-	u64 tgutime, tgstime, cutime, cstime;
+	cputime_t tgutime, tgstime, cutime, cstime;
 
 	thread_group_cputime_adjusted(current, &tgutime, &tgstime);
 	cutime = current->signal->cutime;
 	cstime = current->signal->cstime;
-	tms->tms_utime = nsec_to_clock_t(tgutime);
-	tms->tms_stime = nsec_to_clock_t(tgstime);
-	tms->tms_cutime = nsec_to_clock_t(cutime);
-	tms->tms_cstime = nsec_to_clock_t(cstime);
+	tms->tms_utime = cputime_to_clock_t(tgutime);
+	tms->tms_stime = cputime_to_clock_t(tgstime);
+	tms->tms_cutime = cputime_to_clock_t(cutime);
+	tms->tms_cstime = cputime_to_clock_t(cstime);
 }
 
 SYSCALL_DEFINE1(times, struct tms __user *, tbuf)
@@ -1318,6 +1313,7 @@ SYSCALL_DEFINE2(old_getrlimit, unsigned int, resource,
 	if (resource >= RLIM_NLIMITS)
 		return -EINVAL;
 
+	resource = array_index_nospec(resource, RLIM_NLIMITS);
 	task_lock(current->group_leader);
 	x = current->signal->rlim[resource];
 	task_unlock(current->group_leader);
@@ -1423,8 +1419,7 @@ int do_prlimit(struct task_struct *tsk, unsigned int resource,
 	 * applications, so we live with it
 	 */
 	 if (!retval && new_rlim && resource == RLIMIT_CPU &&
-	     new_rlim->rlim_cur != RLIM_INFINITY &&
-	     IS_ENABLED(CONFIG_POSIX_TIMERS))
+			 new_rlim->rlim_cur != RLIM_INFINITY)
 		update_rlimit_cpu(tsk, new_rlim->rlim_cur);
 out:
 	read_unlock(&tasklist_lock);
@@ -1551,7 +1546,7 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 {
 	struct task_struct *t;
 	unsigned long flags;
-	u64 tgutime, tgstime, utime, stime;
+	cputime_t tgutime, tgstime, utime, stime;
 	unsigned long maxrss = 0;
 
 	memset((char *)r, 0, sizeof (*r));
@@ -1607,8 +1602,8 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 	unlock_task_sighand(p, &flags);
 
 out:
-	r->ru_utime = ns_to_timeval(utime);
-	r->ru_stime = ns_to_timeval(stime);
+	cputime_to_timeval(utime, &r->ru_utime);
+	cputime_to_timeval(stime, &r->ru_stime);
 
 	if (who != RUSAGE_CHILDREN) {
 		struct mm_struct *mm = get_task_mm(p);
@@ -1703,6 +1698,16 @@ static int prctl_set_mm_exe_file(struct mm_struct *mm, unsigned int fd)
 		up_read(&mm->mmap_sem);
 		fput(exe_file);
 	}
+
+	/*
+	 * The symlink can be changed only once, just to disallow arbitrary
+	 * transitions malicious software might bring in. This means one
+	 * could make a snapshot over all processes running and monitor
+	 * /proc/pid/exe changes to notice unusual activity if needed.
+	 */
+	err = -EPERM;
+	if (test_and_set_bit(MMF_EXE_FILE_CHANGED, &mm->flags))
+		goto exit;
 
 	err = 0;
 	/* set the new file, lockless */
@@ -2070,22 +2075,15 @@ static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
 }
 #endif
 
-static int propagate_has_child_subreaper(struct task_struct *p, void *data)
+int __weak arch_prctl_spec_ctrl_get(struct task_struct *t, unsigned long which)
 {
-	/*
-	 * If task has has_child_subreaper - all its decendants
-	 * already have these flag too and new decendants will
-	 * inherit it on fork, skip them.
-	 *
-	 * If we've found child_reaper - skip descendants in
-	 * it's subtree as they will never get out pidns.
-	 */
-	if (p->signal->has_child_subreaper ||
-	    is_child_reaper(task_pid(p)))
-		return 0;
+	return -EINVAL;
+}
 
-	p->signal->has_child_subreaper = 1;
-	return 1;
+int __weak arch_prctl_spec_ctrl_set(struct task_struct *t, unsigned long which,
+				    unsigned long ctrl)
+{
+	return -EINVAL;
 }
 
 SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
@@ -2239,10 +2237,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		break;
 	case PR_SET_CHILD_SUBREAPER:
 		me->signal->is_child_subreaper = !!arg2;
-		if (!arg2)
-			break;
-
-		walk_process_tree(me, propagate_has_child_subreaper, NULL);
 		break;
 	case PR_GET_CHILD_SUBREAPER:
 		error = put_user(me->signal->is_child_subreaper,
@@ -2289,6 +2283,16 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		break;
 	case PR_GET_FP_MODE:
 		error = GET_FP_MODE(me);
+		break;
+	case PR_GET_SPECULATION_CTRL:
+		if (arg3 || arg4 || arg5)
+			return -EINVAL;
+		error = arch_prctl_spec_ctrl_get(me, arg2);
+		break;
+	case PR_SET_SPECULATION_CTRL:
+		if (arg4 || arg5)
+			return -EINVAL;
+		error = arch_prctl_spec_ctrl_set(me, arg2, arg3);
 		break;
 	default:
 		error = -EINVAL;

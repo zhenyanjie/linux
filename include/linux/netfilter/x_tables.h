@@ -4,7 +4,6 @@
 
 #include <linux/netdevice.h>
 #include <linux/static_key.h>
-#include <linux/netfilter.h>
 #include <uapi/linux/netfilter/x_tables.h>
 
 /* Test a struct->invflags and a boolean for inequality */
@@ -18,9 +17,14 @@
  * @target:	the target extension
  * @matchinfo:	per-match data
  * @targetinfo:	per-target data
- * @state:	pointer to hook state this packet came from
+ * @net		network namespace through which the action was invoked
+ * @in:		input netdevice
+ * @out:	output netdevice
  * @fragoff:	packet is a fragment, this is the data offset
  * @thoff:	position of transport header relative to skb->data
+ * @hook:	hook number given packet came from
+ * @family:	Actual NFPROTO_* through which the function is invoked
+ * 		(helpful when match->family == NFPROTO_UNSPEC)
  *
  * Fields written to by extensions:
  *
@@ -34,46 +38,14 @@ struct xt_action_param {
 	union {
 		const void *matchinfo, *targinfo;
 	};
-	const struct nf_hook_state *state;
+	struct net *net;
+	const struct net_device *in, *out;
 	int fragoff;
 	unsigned int thoff;
+	unsigned int hooknum;
+	u_int8_t family;
 	bool hotdrop;
 };
-
-static inline struct net *xt_net(const struct xt_action_param *par)
-{
-	return par->state->net;
-}
-
-static inline struct net_device *xt_in(const struct xt_action_param *par)
-{
-	return par->state->in;
-}
-
-static inline const char *xt_inname(const struct xt_action_param *par)
-{
-	return par->state->in->name;
-}
-
-static inline struct net_device *xt_out(const struct xt_action_param *par)
-{
-	return par->state->out;
-}
-
-static inline const char *xt_outname(const struct xt_action_param *par)
-{
-	return par->state->out->name;
-}
-
-static inline unsigned int xt_hooknum(const struct xt_action_param *par)
-{
-	return par->state->hook;
-}
-
-static inline u_int8_t xt_family(const struct xt_action_param *par)
-{
-	return par->state->pf;
-}
 
 /**
  * struct xt_mtchk_param - parameters for match extensions'
@@ -167,7 +139,6 @@ struct xt_match {
 
 	const char *table;
 	unsigned int matchsize;
-	unsigned int usersize;
 #ifdef CONFIG_COMPAT
 	unsigned int compatsize;
 #endif
@@ -208,7 +179,6 @@ struct xt_target {
 
 	const char *table;
 	unsigned int targetsize;
-	unsigned int usersize;
 #ifdef CONFIG_COMPAT
 	unsigned int compatsize;
 #endif
@@ -284,17 +254,12 @@ unsigned int *xt_alloc_entry_offsets(unsigned int size);
 bool xt_find_jump_offset(const unsigned int *offsets,
 			 unsigned int target, unsigned int size);
 
+int xt_check_proc_name(const char *name, unsigned int size);
+
 int xt_check_match(struct xt_mtchk_param *, unsigned int size, u_int8_t proto,
 		   bool inv_proto);
 int xt_check_target(struct xt_tgchk_param *, unsigned int size, u_int8_t proto,
 		    bool inv_proto);
-
-int xt_match_to_user(const struct xt_entry_match *m,
-		     struct xt_entry_match __user *u);
-int xt_target_to_user(const struct xt_entry_target *t,
-		      struct xt_entry_target __user *u);
-int xt_data_to_user(void __user *dst, const void *src,
-		    int usersize, int size, int aligned_size);
 
 void *xt_copy_counters_from_user(const void __user *user, unsigned int len,
 				 struct xt_counters_info *info, bool compat);

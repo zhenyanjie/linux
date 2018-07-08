@@ -9,8 +9,7 @@
  */
 
 #include <linux/extable.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/debug.h>
+#include <linux/sched.h>
 #include <linux/linkage.h>
 #include <linux/kernel.h>
 #include <linux/signal.h>
@@ -30,7 +29,7 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/unistd.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/fpumacro.h>
 #include <asm/lsu.h>
 #include <asm/dcu.h>
@@ -2733,6 +2732,7 @@ void do_getpsr(struct pt_regs *regs)
 	}
 }
 
+u64 cpu_mondo_counter[NR_CPUS] = {0};
 struct trap_per_cpu trap_block[NR_CPUS];
 EXPORT_SYMBOL(trap_block);
 
@@ -2838,6 +2838,6 @@ void __init trap_init(void)
 	/* Attach to the address space of init_task.  On SMP we
 	 * do this in smp.c:smp_callin for other cpus.
 	 */
-	mmgrab(&init_mm);
+	atomic_inc(&init_mm.mm_count);
 	current->active_mm = &init_mm;
 }

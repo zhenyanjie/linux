@@ -777,6 +777,7 @@ static int gather_all_resync_info(struct mddev *mddev, int total_slots)
 		bm_lockres->flags |= DLM_LKF_NOQUEUE;
 		ret = dlm_lock_sync(bm_lockres, DLM_LOCK_PW);
 		if (ret == -EAGAIN) {
+			memset(bm_lockres->lksb.sb_lvbptr, '\0', LVB_SIZE);
 			s = read_resync_info(mddev, bm_lockres);
 			if (s) {
 				pr_info("%s:%d Resync[%llu..%llu] in progress on %d\n",
@@ -1121,8 +1122,10 @@ static int add_new_disk(struct mddev *mddev, struct md_rdev *rdev)
 	cmsg.raid_slot = cpu_to_le32(rdev->desc_nr);
 	lock_comm(cinfo);
 	ret = __sendmsg(cinfo, &cmsg);
-	if (ret)
+	if (ret) {
+		unlock_comm(cinfo);
 		return ret;
+	}
 	cinfo->no_new_dev_lockres->flags |= DLM_LKF_NOQUEUE;
 	ret = dlm_lock_sync(cinfo->no_new_dev_lockres, DLM_LOCK_EX);
 	cinfo->no_new_dev_lockres->flags &= ~DLM_LKF_NOQUEUE;

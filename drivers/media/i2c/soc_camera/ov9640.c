@@ -233,7 +233,7 @@ static int ov9640_reg_rmw(struct i2c_client *client, u8 reg, u8 set, u8 unset)
 	if (ret) {
 		dev_err(&client->dev,
 			"[Read]-Modify-Write of register %02x failed!\n", reg);
-		return ret;
+		return val;
 	}
 
 	val |= set;

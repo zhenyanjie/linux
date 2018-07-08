@@ -35,7 +35,6 @@
 
 #include <linux/types.h>
 #include <linux/sched.h>
-#include <linux/cred.h>
 
 struct ib_addr {
 	union {

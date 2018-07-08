@@ -22,7 +22,6 @@ enum hist_filter {
 	HIST_FILTER__GUEST,
 	HIST_FILTER__HOST,
 	HIST_FILTER__SOCKET,
-	HIST_FILTER__C2C,
 };
 
 enum hist_column {
@@ -103,7 +102,6 @@ struct hist_entry_iter {
 	int curr;
 
 	bool hide_unresolved;
-	int max_stack;
 
 	struct perf_evsel *evsel;
 	struct perf_sample *sample;

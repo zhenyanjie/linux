@@ -46,7 +46,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <linux/sched/task.h>
+#include <linux/sched.h>
 #include <linux/jiffies.h>
 #include <linux/semaphore.h>
 #include <linux/slab.h>

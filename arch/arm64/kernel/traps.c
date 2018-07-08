@@ -29,11 +29,8 @@
 #include <linux/kexec.h>
 #include <linux/delay.h>
 #include <linux/init.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/task_stack.h>
+#include <linux/sched.h>
 #include <linux/syscalls.h>
-#include <linux/mm_types.h>
 
 #include <asm/atomic.h>
 #include <asm/bug.h>
@@ -41,7 +38,6 @@
 #include <asm/esr.h>
 #include <asm/insn.h>
 #include <asm/traps.h>
-#include <asm/stack_pointer.h>
 #include <asm/stacktrace.h>
 #include <asm/exception.h>
 #include <asm/system_misc.h>
@@ -54,7 +50,7 @@ static const char *handler[]= {
 	"Error"
 };
 
-int show_unhandled_signals = 1;
+int show_unhandled_signals = 0;
 
 /*
  * Dump out the contents of some kernel memory nicely...
@@ -116,7 +112,7 @@ static void __dump_instr(const char *lvl, struct pt_regs *regs)
 	for (i = -4; i < 1; i++) {
 		unsigned int val, bad;
 
-		bad = __get_user(val, &((u32 *)addr)[i]);
+		bad = get_user(val, &((u32 *)addr)[i]);
 
 		if (!bad)
 			p += sprintf(p, i == 0 ? "(%08x) " : "%08x ", val);
@@ -150,9 +146,6 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 
 	if (!tsk)
 		tsk = current;
-
-	if (!try_get_task_stack(tsk))
-		return;
 
 	/*
 	 * Switching between stacks is valid when tracing current and in
@@ -219,8 +212,6 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 				 stack + sizeof(struct pt_regs));
 		}
 	}
-
-	put_task_stack(tsk);
 }
 
 void show_stack(struct task_struct *tsk, unsigned long *sp)
@@ -236,9 +227,10 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 #endif
 #define S_SMP " SMP"
 
-static int __die(const char *str, int err, struct pt_regs *regs)
+static int __die(const char *str, int err, struct thread_info *thread,
+		 struct pt_regs *regs)
 {
-	struct task_struct *tsk = current;
+	struct task_struct *tsk = thread->task;
 	static int die_counter;
 	int ret;
 
@@ -253,8 +245,7 @@ static int __die(const char *str, int err, struct pt_regs *regs)
 	print_modules();
 	__show_regs(regs);
 	pr_emerg("Process %.*s (pid: %d, stack limit = 0x%p)\n",
-		 TASK_COMM_LEN, tsk->comm, task_pid_nr(tsk),
-		 end_of_stack(tsk));
+		 TASK_COMM_LEN, tsk->comm, task_pid_nr(tsk), thread + 1);
 
 	if (!user_mode(regs)) {
 		dump_mem(KERN_EMERG, "Stack: ", regs->sp,
@@ -273,6 +264,7 @@ static DEFINE_RAW_SPINLOCK(die_lock);
  */
 void die(const char *str, struct pt_regs *regs, int err)
 {
+	struct thread_info *thread = current_thread_info();
 	int ret;
 
 	oops_enter();
@@ -280,9 +272,9 @@ void die(const char *str, struct pt_regs *regs, int err)
 	raw_spin_lock_irq(&die_lock);
 	console_verbose();
 	bust_spinlocks(1);
-	ret = __die(str, err, regs);
+	ret = __die(str, err, thread, regs);
 
-	if (regs && kexec_should_crash(current))
+	if (regs && kexec_should_crash(thread->task))
 		crash_kexec(regs);
 
 	bust_spinlocks(0);
@@ -443,10 +435,9 @@ int cpu_enable_cache_maint_trap(void *__unused)
 }
 
 #define __user_cache_maint(insn, address, res)			\
-	if (address >= user_addr_max()) {			\
+	if (address >= user_addr_max())				\
 		res = -EFAULT;					\
-	} else {						\
-		uaccess_ttbr0_enable();				\
+	else							\
 		asm volatile (					\
 			"1:	" insn ", %1\n"			\
 			"	mov	%w0, #0\n"		\
@@ -458,9 +449,7 @@ int cpu_enable_cache_maint_trap(void *__unused)
 			"	.popsection\n"			\
 			_ASM_EXTABLE(1b, 3b)			\
 			: "=r" (res)				\
-			: "r" (address), "i" (-EFAULT));	\
-		uaccess_ttbr0_disable();			\
-	}
+			: "r" (address), "i" (-EFAULT) )
 
 static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
 {
@@ -469,7 +458,7 @@ static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
 	int crm = (esr & ESR_ELx_SYS64_ISS_CRM_MASK) >> ESR_ELx_SYS64_ISS_CRM_SHIFT;
 	int ret = 0;
 
-	address = untagged_addr(pt_regs_read_reg(regs, rt));
+	address = (rt == 31) ? 0 : untagged_addr(regs->regs[rt]);
 
 	switch (crm) {
 	case ESR_ELx_SYS64_ISS_CRM_DC_CVAU:	/* DC CVAU, gets promoted */
@@ -498,10 +487,8 @@ static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
 static void ctr_read_handler(unsigned int esr, struct pt_regs *regs)
 {
 	int rt = (esr & ESR_ELx_SYS64_ISS_RT_MASK) >> ESR_ELx_SYS64_ISS_RT_SHIFT;
-	unsigned long val = arm64_ftr_reg_user_value(&arm64_ftr_reg_ctrel0);
 
-	pt_regs_write_reg(regs, rt, val);
-
+	regs->regs[rt] = arm64_ftr_reg_ctrel0.sys_val;
 	regs->pc += 4;
 }
 
@@ -536,12 +523,7 @@ asmlinkage void __exception do_sysinstr(unsigned int esr, struct pt_regs *regs)
 			return;
 		}
 
-	/*
-	 * New SYS instructions may previously have been undefined at EL0. Fall
-	 * back to our usual undefined instruction handler so that we handle
-	 * these consistently.
-	 */
-	do_undefinstr(regs);
+	force_signal_inject(SIGILL, ILL_ILLOPC, regs, 0);
 }
 
 long compat_arm_syscall(struct pt_regs *regs);

@@ -10,7 +10,6 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/sysrq.h>

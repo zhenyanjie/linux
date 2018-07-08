@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2017  B.A.T.M.A.N. contributors:
+/* Copyright (C) 2007-2016  B.A.T.M.A.N. contributors:
  *
  * Marek Lindner, Simon Wunderlich
  *
@@ -22,7 +22,6 @@
 #include <linux/byteorder/generic.h>
 #include <linux/cache.h>
 #include <linux/compiler.h>
-#include <linux/cpumask.h>
 #include <linux/errno.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
@@ -115,26 +114,6 @@ static int batadv_interface_release(struct net_device *dev)
 {
 	netif_stop_queue(dev);
 	return 0;
-}
-
-/**
- * batadv_sum_counter - Sum the cpu-local counters for index 'idx'
- * @bat_priv: the bat priv with all the soft interface information
- * @idx: index of counter to sum up
- *
- * Return: sum of all cpu-local counters
- */
-static u64 batadv_sum_counter(struct batadv_priv *bat_priv,  size_t idx)
-{
-	u64 *counters, sum = 0;
-	int cpu;
-
-	for_each_possible_cpu(cpu) {
-		counters = per_cpu_ptr(bat_priv->bat_counters, cpu);
-		sum += counters[idx];
-	}
-
-	return sum;
 }
 
 static struct net_device_stats *batadv_interface_stats(struct net_device *dev)
@@ -258,8 +237,7 @@ static int batadv_interface_tx(struct sk_buff *skb,
 	ethhdr = eth_hdr(skb);
 
 	/* Register the client MAC in the transtable */
-	if (!is_multicast_ether_addr(ethhdr->h_source) &&
-	    !batadv_bla_is_loopdetect_mac(ethhdr->h_source)) {
+	if (!is_multicast_ether_addr(ethhdr->h_source)) {
 		client_added = batadv_tt_local_add(soft_iface, ethhdr->h_source,
 						   vid, skb->skb_iif,
 						   skb->mark);
@@ -358,12 +336,12 @@ send:
 		seqno = atomic_inc_return(&bat_priv->bcast_seqno);
 		bcast_packet->seqno = htonl(seqno);
 
-		batadv_add_bcast_packet_to_list(bat_priv, skb, brd_delay, true);
+		batadv_add_bcast_packet_to_list(bat_priv, skb, brd_delay);
 
 		/* a copy is stored in the bcast list, therefore removing
 		 * the original skb.
 		 */
-		consume_skb(skb);
+		kfree_skb(skb);
 
 	/* unicast packet */
 	} else {
@@ -387,7 +365,7 @@ send:
 			ret = batadv_send_skb_via_tt(bat_priv, skb, dst_hint,
 						     vid);
 		}
-		if (ret != NET_XMIT_SUCCESS)
+		if (ret == NET_XMIT_DROP)
 			goto dropped_freed;
 	}
 
@@ -470,17 +448,13 @@ void batadv_interface_rx(struct net_device *soft_iface,
 
 	/* skb->dev & skb->pkt_type are set here */
 	skb->protocol = eth_type_trans(skb, soft_iface);
-
-	/* should not be necessary anymore as we use skb_pull_rcsum()
-	 * TODO: please verify this and remove this TODO
-	 * -- Dec 21st 2009, Simon Wunderlich
-	 */
-
-	/* skb->ip_summed = CHECKSUM_UNNECESSARY; */
+	skb_postpull_rcsum(skb, eth_hdr(skb), ETH_HLEN);
 
 	batadv_inc_counter(bat_priv, BATADV_CNT_RX);
 	batadv_add_counter(bat_priv, BATADV_CNT_RX_BYTES,
 			   skb->len + ETH_HLEN);
+
+	soft_iface->last_rx = jiffies;
 
 	/* Let the bridge loop avoidance check the packet. If will
 	 * not handle it, we can safely push it up.
@@ -819,6 +793,7 @@ static int batadv_softif_init_late(struct net_device *dev)
 	atomic_set(&bat_priv->mcast.num_want_all_ipv6, 0);
 #endif
 	atomic_set(&bat_priv->gw.mode, BATADV_GW_MODE_OFF);
+	atomic_set(&bat_priv->gw.sel_class, 20);
 	atomic_set(&bat_priv->gw.bandwidth_down, 100);
 	atomic_set(&bat_priv->gw.bandwidth_up, 20);
 	atomic_set(&bat_priv->orig_interval, 1000);
@@ -961,6 +936,8 @@ static void batadv_softif_free(struct net_device *dev)
 	 * netdev and its private data (bat_priv)
 	 */
 	rcu_barrier();
+
+	free_netdev(dev);
 }
 
 /**
@@ -974,8 +951,7 @@ static void batadv_softif_init_early(struct net_device *dev)
 	ether_setup(dev);
 
 	dev->netdev_ops = &batadv_netdev_ops;
-	dev->needs_free_netdev = true;
-	dev->priv_destructor = batadv_softif_free;
+	dev->destructor = batadv_softif_free;
 	dev->features |= NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_NETNS_LOCAL;
 	dev->priv_flags |= IFF_NO_QUEUE;
 

@@ -893,7 +893,7 @@ static void mmc_omap_cover_handler(unsigned long param)
 	 * If no card is inserted, we postpone polling until
 	 * the cover has been closed.
 	 */
-	if (slot->mmc->card == NULL)
+	if (slot->mmc->card == NULL || !mmc_card_present(slot->mmc->card))
 		return;
 
 	mod_timer(&slot->cover_timer,

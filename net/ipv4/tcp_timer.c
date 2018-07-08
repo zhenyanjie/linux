@@ -50,11 +50,19 @@ static void tcp_write_err(struct sock *sk)
  *  to prevent DoS attacks. It is called when a retransmission timeout
  *  or zero probe timeout occurs on orphaned socket.
  *
+ *  Also close if our net namespace is exiting; in that case there is no
+ *  hope of ever communicating again since all netns interfaces are already
+ *  down (or about to be down), and we need to release our dst references,
+ *  which have been moved to the netns loopback interface, so the namespace
+ *  can finish exiting.  This condition is only possible if we are a kernel
+ *  socket, as those do not hold references to the namespace.
+ *
  *  Criteria is still not confirmed experimentally and may change.
  *  We kill the socket, if:
  *  1. If number of orphaned sockets exceeds an administratively configured
  *     limit.
  *  2. If we have strong memory pressure.
+ *  3. If our net namespace is exiting.
  */
 static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 {
@@ -83,6 +91,13 @@ static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPABORTONMEMORY);
 		return 1;
 	}
+
+	if (!check_net(sock_net(sk))) {
+		/* Not possible to send reset; just close */
+		tcp_done(sk);
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -311,7 +326,7 @@ static void tcp_delack_timer(unsigned long data)
 		inet_csk(sk)->icsk_ack.blocked = 1;
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKLOCKED);
 		/* deleguate our work to tcp_release_cb() */
-		if (!test_and_set_bit(TCP_DELACK_TIMER_DEFERRED, &sk->sk_tsq_flags))
+		if (!test_and_set_bit(TCP_DELACK_TIMER_DEFERRED, &tcp_sk(sk)->tsq_flags))
 			sock_hold(sk);
 	}
 	bh_unlock_sock(sk);
@@ -565,8 +580,8 @@ void tcp_write_timer_handler(struct sock *sk)
 	event = icsk->icsk_pending;
 
 	switch (event) {
-	case ICSK_TIME_REO_TIMEOUT:
-		tcp_rack_reo_timeout(sk);
+	case ICSK_TIME_EARLY_RETRANS:
+		tcp_resume_early_retransmit(sk);
 		break;
 	case ICSK_TIME_LOSS_PROBE:
 		tcp_send_loss_probe(sk);
@@ -594,7 +609,7 @@ static void tcp_write_timer(unsigned long data)
 		tcp_write_timer_handler(sk);
 	} else {
 		/* delegate our work to tcp_release_cb() */
-		if (!test_and_set_bit(TCP_WRITE_TIMER_DEFERRED, &sk->sk_tsq_flags))
+		if (!test_and_set_bit(TCP_WRITE_TIMER_DEFERRED, &tcp_sk(sk)->tsq_flags))
 			sock_hold(sk);
 	}
 	bh_unlock_sock(sk);
@@ -619,7 +634,6 @@ void tcp_set_keepalive(struct sock *sk, int val)
 	else if (!val)
 		inet_csk_delete_keepalive_timer(sk);
 }
-EXPORT_SYMBOL_GPL(tcp_set_keepalive);
 
 
 static void tcp_keepalive_timer (unsigned long data)
@@ -655,7 +669,8 @@ static void tcp_keepalive_timer (unsigned long data)
 		goto death;
 	}
 
-	if (!sock_flag(sk, SOCK_KEEPOPEN) || sk->sk_state == TCP_CLOSE)
+	if (!sock_flag(sk, SOCK_KEEPOPEN) ||
+	    ((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_SYN_SENT)))
 		goto out;
 
 	elapsed = keepalive_time_when(tp);

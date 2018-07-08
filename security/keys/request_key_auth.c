@@ -16,7 +16,7 @@
 #include <linux/err.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include "internal.h"
 #include <keys/user-type.h>
 
@@ -73,7 +73,7 @@ static void request_key_auth_describe(const struct key *key,
 
 	seq_puts(m, "key:");
 	seq_puts(m, key->description);
-	if (key_is_instantiated(key))
+	if (key_is_positive(key))
 		seq_printf(m, " pid:%d ci:%zu", rka->pid, rka->callout_len);
 }
 

@@ -52,7 +52,7 @@
 #include <linux/platform_device.h>
 #include <linux/gfp.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/io.h>
 
 #include <linux/sonypi.h>
@@ -603,7 +603,7 @@ static void sonypi_type3_srs(void)
 	u16 v16;
 	u8  v8;
 
-	/* This model type uses the same initialization of
+	/* This model type uses the same initialiazation of
 	 * the embedded controller as the type2 models. */
 	sonypi_type2_srs();
 

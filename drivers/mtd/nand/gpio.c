@@ -286,9 +286,10 @@ static int gpio_nand_probe(struct platform_device *pdev)
 	if (gpio_is_valid(gpiomtd->plat.gpio_nwp))
 		gpio_direction_output(gpiomtd->plat.gpio_nwp, 1);
 
-	ret = nand_scan(mtd, 1);
-	if (ret)
+	if (nand_scan(mtd, 1)) {
+		ret = -ENXIO;
 		goto err_wp;
+	}
 
 	if (gpiomtd->plat.adjust_parts)
 		gpiomtd->plat.adjust_parts(&gpiomtd->plat, mtd->size);

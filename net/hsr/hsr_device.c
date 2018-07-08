@@ -378,6 +378,7 @@ static void hsr_dev_destroy(struct net_device *hsr_dev)
 	del_timer_sync(&hsr->announce_timer);
 
 	synchronize_rcu();
+	free_netdev(hsr_dev);
 }
 
 static const struct net_device_ops hsr_device_ops = {
@@ -394,17 +395,15 @@ static struct device_type hsr_type = {
 
 void hsr_dev_setup(struct net_device *dev)
 {
-	eth_hw_addr_random(dev);
+	random_ether_addr(dev->dev_addr);
 
 	ether_setup(dev);
-	dev->min_mtu = 0;
 	dev->header_ops = &hsr_header_ops;
 	dev->netdev_ops = &hsr_device_ops;
 	SET_NETDEV_DEVTYPE(dev, &hsr_type);
 	dev->priv_flags |= IFF_NO_QUEUE;
 
-	dev->needs_free_netdev = true;
-	dev->priv_destructor = hsr_dev_destroy;
+	dev->destructor = hsr_dev_destroy;
 
 	dev->hw_features = NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_HIGHDMA |
 			   NETIF_F_GSO_MASK | NETIF_F_HW_CSUM |

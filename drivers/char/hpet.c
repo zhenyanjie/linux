@@ -25,7 +25,6 @@
 #include <linux/spinlock.h>
 #include <linux/sysctl.h>
 #include <linux/wait.h>
-#include <linux/sched/signal.h>
 #include <linux/bcd.h>
 #include <linux/seq_file.h>
 #include <linux/bitops.h>
@@ -70,9 +69,9 @@ static u32 hpet_nhpet, hpet_max_freq = HPET_USER_FREQ;
 #ifdef CONFIG_IA64
 static void __iomem *hpet_mctr;
 
-static u64 read_hpet(struct clocksource *cs)
+static cycle_t read_hpet(struct clocksource *cs)
 {
-	return (u64)read_counter((void __iomem *)hpet_mctr);
+	return (cycle_t)read_counter((void __iomem *)hpet_mctr);
 }
 
 static struct clocksource clocksource_hpet = {

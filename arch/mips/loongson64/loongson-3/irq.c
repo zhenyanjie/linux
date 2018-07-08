@@ -1,7 +1,7 @@
 #include <loongson.h>
 #include <irq.h>
 #include <linux/interrupt.h>
-#include <linux/init.h>
+#include <linux/module.h>
 
 #include <asm/irq_cpu.h>
 #include <asm/i8259.h>

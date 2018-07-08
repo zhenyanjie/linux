@@ -25,7 +25,6 @@
  */
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
-#include <linux/leds.h>
 #include <linux/mtd/partitions.h>
 #include <linux/platform_data/gpio-davinci.h>
 #include <linux/platform_data/i2c-davinci.h>

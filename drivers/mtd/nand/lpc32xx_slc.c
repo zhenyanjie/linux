@@ -797,17 +797,22 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	struct resource *rc;
 	int res;
 
+	rc = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (rc == NULL) {
+		dev_err(&pdev->dev, "No memory resource found for device\n");
+		return -EBUSY;
+	}
+
 	/* Allocate memory for the device structure (and zero it) */
 	host = devm_kzalloc(&pdev->dev, sizeof(*host), GFP_KERNEL);
 	if (!host)
 		return -ENOMEM;
+	host->io_base_dma = rc->start;
 
-	rc = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	host->io_base = devm_ioremap_resource(&pdev->dev, rc);
 	if (IS_ERR(host->io_base))
 		return PTR_ERR(host->io_base);
 
-	host->io_base_dma = rc->start;
 	if (pdev->dev.of_node)
 		host->ncfg = lpc32xx_parse_dt(&pdev->dev);
 	if (!host->ncfg) {
@@ -889,9 +894,10 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	}
 
 	/* Find NAND device */
-	res = nand_scan_ident(mtd, 1, NULL);
-	if (res)
+	if (nand_scan_ident(mtd, 1, NULL)) {
+		res = -ENXIO;
 		goto err_exit3;
+	}
 
 	/* OOB and ECC CPU and DMA work areas */
 	host->ecc_buf = (uint32_t *)(host->data_buf + LPC32XX_DMA_DATA_SIZE);
@@ -923,9 +929,10 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	/*
 	 * Fills out all the uninitialized function pointers with the defaults
 	 */
-	res = nand_scan_tail(mtd);
-	if (res)
+	if (nand_scan_tail(mtd)) {
+		res = -ENXIO;
 		goto err_exit3;
+	}
 
 	mtd->name = "nxp_lpc3220_slc";
 	res = mtd_device_register(mtd, host->ncfg->parts,

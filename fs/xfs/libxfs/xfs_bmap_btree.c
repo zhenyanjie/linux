@@ -71,9 +71,15 @@ xfs_bmdr_to_bmbt(
 	xfs_bmbt_key_t		*tkp;
 	__be64			*tpp;
 
-	xfs_btree_init_block_int(mp, rblock, XFS_BUF_DADDR_NULL,
-				 XFS_BTNUM_BMAP, 0, 0, ip->i_ino,
+	if (xfs_sb_version_hascrc(&mp->m_sb))
+		xfs_btree_init_block_int(mp, rblock, XFS_BUF_DADDR_NULL,
+				 XFS_BMAP_CRC_MAGIC, 0, 0, ip->i_ino,
+				 XFS_BTREE_LONG_PTRS | XFS_BTREE_CRC_BLOCKS);
+	else
+		xfs_btree_init_block_int(mp, rblock, XFS_BUF_DADDR_NULL,
+				 XFS_BMAP_MAGIC, 0, 0, ip->i_ino,
 				 XFS_BTREE_LONG_PTRS);
+
 	rblock->bb_level = dblock->bb_level;
 	ASSERT(be16_to_cpu(rblock->bb_level) > 0);
 	rblock->bb_numrecs = dblock->bb_numrecs;
@@ -796,7 +802,6 @@ xfs_bmbt_init_cursor(
 	cur->bc_nlevels = be16_to_cpu(ifp->if_broot->bb_level) + 1;
 	cur->bc_btnum = XFS_BTNUM_BMAP;
 	cur->bc_blocklog = mp->m_sb.sb_blocklog;
-	cur->bc_statoff = XFS_STATS_CALC_INDEX(xs_bmbt_2);
 
 	cur->bc_ops = &xfs_bmbt_ops;
 	cur->bc_flags = XFS_BTREE_LONG_PTRS | XFS_BTREE_ROOT_IN_INODE;
@@ -883,6 +888,7 @@ xfs_bmbt_change_owner(
 	cur = xfs_bmbt_init_cursor(ip->i_mount, tp, ip, whichfork);
 	if (!cur)
 		return -ENOMEM;
+	cur->bc_private.b.flags |= XFS_BTCUR_BPRV_INVALID_OWNER;
 
 	error = xfs_btree_change_owner(cur, new_owner, buffer_list);
 	xfs_btree_del_cursor(cur, error ? XFS_BTREE_ERROR : XFS_BTREE_NOERROR);

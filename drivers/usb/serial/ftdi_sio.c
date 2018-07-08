@@ -773,6 +773,7 @@ static const struct usb_device_id id_table_combined[] = {
 		.driver_info = (kernel_ulong_t)&ftdi_NDI_device_quirk },
 	{ USB_DEVICE(TELLDUS_VID, TELLDUS_TELLSTICK_PID) },
 	{ USB_DEVICE(NOVITUS_VID, NOVITUS_BONO_E_PID) },
+	{ USB_DEVICE(FTDI_VID, RTSYSTEMS_USB_VX8_PID) },
 	{ USB_DEVICE(RTSYSTEMS_VID, RTSYSTEMS_USB_S03_PID) },
 	{ USB_DEVICE(RTSYSTEMS_VID, RTSYSTEMS_USB_59_PID) },
 	{ USB_DEVICE(RTSYSTEMS_VID, RTSYSTEMS_USB_57A_PID) },
@@ -935,6 +936,7 @@ static const struct usb_device_id id_table_combined[] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_SCIENCESCOPE_LS_LOGBOOK_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_SCIENCESCOPE_HS_LOGBOOK_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_CINTERION_MC55I_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_FHE_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_DOTEC_PID) },
 	{ USB_DEVICE(QIHARDWARE_VID, MILKYMISTONE_JTAGSERIAL_PID),
 		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
@@ -1015,6 +1017,9 @@ static const struct usb_device_id id_table_combined[] = {
 	{ USB_DEVICE(WICED_VID, WICED_USB20706V2_PID) },
 	{ USB_DEVICE(TI_VID, TI_CC3200_LAUNCHPAD_PID),
 		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
+	{ USB_DEVICE(CYPRESS_VID, CYPRESS_WICED_BT_USB_PID) },
+	{ USB_DEVICE(CYPRESS_VID, CYPRESS_WICED_WL_USB_PID) },
+	{ USB_DEVICE(AIRBUS_DS_VID, AIRBUS_DS_P8GR) },
 	{ }					/* Terminating entry */
 };
 
@@ -1459,6 +1464,8 @@ static int get_serial_info(struct usb_serial_port *port,
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	struct serial_struct tmp;
 
+	if (!retinfo)
+		return -EFAULT;
 	memset(&tmp, 0, sizeof(tmp));
 	tmp.flags = priv->flags;
 	tmp.baud_base = priv->baud_base;
@@ -1535,10 +1542,13 @@ check_and_exit:
 }
 
 static int get_lsr_info(struct usb_serial_port *port,
-			unsigned int __user *retinfo)
+			struct serial_struct __user *retinfo)
 {
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	unsigned int result = 0;
+
+	if (!retinfo)
+		return -EFAULT;
 
 	if (priv->transmit_empty)
 		result = TIOCSER_TEMT;
@@ -1901,7 +1911,8 @@ static int ftdi_8u2232c_probe(struct usb_serial *serial)
 		return ftdi_jtag_probe(serial);
 
 	if (udev->product &&
-		(!strcmp(udev->product, "BeagleBone/XDS100V2") ||
+		(!strcmp(udev->product, "Arrow USB Blaster") ||
+		 !strcmp(udev->product, "BeagleBone/XDS100V2") ||
 		 !strcmp(udev->product, "SNAP Connect E10")))
 		return ftdi_jtag_probe(serial);
 
@@ -2491,15 +2502,20 @@ static int ftdi_ioctl(struct tty_struct *tty,
 					unsigned int cmd, unsigned long arg)
 {
 	struct usb_serial_port *port = tty->driver_data;
-	void __user *argp = (void __user *)arg;
 
+	/* Based on code from acm.c and others */
 	switch (cmd) {
-	case TIOCGSERIAL:
-		return get_serial_info(port, argp);
-	case TIOCSSERIAL:
-		return set_serial_info(tty, port, argp);
+
+	case TIOCGSERIAL: /* gets serial port data */
+		return get_serial_info(port,
+					(struct serial_struct __user *) arg);
+
+	case TIOCSSERIAL: /* sets serial port data */
+		return set_serial_info(tty, port,
+					(struct serial_struct __user *) arg);
 	case TIOCSERGETLSR:
-		return get_lsr_info(port, argp);
+		return get_lsr_info(port, (struct serial_struct __user *)arg);
+		break;
 	default:
 		break;
 	}

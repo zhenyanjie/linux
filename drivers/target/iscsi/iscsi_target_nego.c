@@ -18,9 +18,6 @@
 
 #include <linux/ctype.h>
 #include <linux/kthread.h>
-#include <linux/slab.h>
-#include <linux/sched/signal.h>
-#include <net/sock.h>
 #include <scsi/iscsi_proto.h>
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
@@ -886,7 +883,8 @@ static int iscsi_target_handle_csg_zero(
 			SENDER_TARGET,
 			login->rsp_buf,
 			&login->rsp_length,
-			conn->param_list);
+			conn->param_list,
+			conn->tpg->tpg_attrib.login_keys_workaround);
 	if (ret < 0)
 		return -1;
 
@@ -956,7 +954,8 @@ static int iscsi_target_handle_csg_one(struct iscsi_conn *conn, struct iscsi_log
 			SENDER_TARGET,
 			login->rsp_buf,
 			&login->rsp_length,
-			conn->param_list);
+			conn->param_list,
+			conn->tpg->tpg_attrib.login_keys_workaround);
 	if (ret < 0) {
 		iscsit_tx_login_rsp(conn, ISCSI_STATUS_CLS_INITIATOR_ERR,
 				ISCSI_LOGIN_STATUS_INIT_ERR);
@@ -1308,8 +1307,8 @@ int iscsi_target_start_negotiation(
 {
 	int ret;
 
-	if (conn->sock) {
-		struct sock *sk = conn->sock->sk;
+       if (conn->sock) {
+               struct sock *sk = conn->sock->sk;
 
 		write_lock_bh(&sk->sk_callback_lock);
 		set_bit(LOGIN_FLAGS_READY, &conn->login_flags);

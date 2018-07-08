@@ -53,8 +53,6 @@
 
 #include <linux/module.h>
 #include <linux/bug.h>
-#include <linux/mm_types.h>
-
 #include <asm/arcregs.h>
 #include <asm/setup.h>
 #include <asm/mmu_context.h>
@@ -897,9 +895,6 @@ void do_tlb_overlap_fault(unsigned long cause, unsigned long address,
 	int set;
 
 	local_irq_save(flags);
-
-	/* re-enable the MMU */
-	write_aux_reg(ARC_REG_PID, MMU_ENABLE | read_aux_reg(ARC_REG_PID));
 
 	/* loop thru all sets of TLB */
 	for (set = 0; set < mmu->sets; set++) {

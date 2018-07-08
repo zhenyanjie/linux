@@ -84,8 +84,10 @@ bool ocrdma_alloc_stats_resources(struct ocrdma_dev *dev)
 
 	/* Alloc debugfs mem */
 	mem->debugfs_mem = kzalloc(OCRDMA_MAX_DBGFS_MEM, GFP_KERNEL);
-	if (!mem->debugfs_mem)
+	if (!mem->debugfs_mem) {
+		pr_err("%s: stats debugfs mem allocation failed\n", __func__);
 		return false;
+	}
 
 	return true;
 }
@@ -834,7 +836,7 @@ void ocrdma_add_port_stats(struct ocrdma_dev *dev)
 
 	dev->reset_stats.type = OCRDMA_RESET_STATS;
 	dev->reset_stats.dev = dev;
-	if (!debugfs_create_file("reset_stats", S_IRUSR, dev->dir,
+	if (!debugfs_create_file("reset_stats", 0200, dev->dir,
 				&dev->reset_stats, &ocrdma_dbg_ops))
 		goto err;
 

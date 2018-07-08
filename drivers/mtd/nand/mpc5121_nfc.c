@@ -777,9 +777,9 @@ static int mpc5121_nfc_probe(struct platform_device *op)
 	}
 
 	/* Detect NAND chips */
-	retval = nand_scan(mtd, be32_to_cpup(chips_no));
-	if (retval) {
+	if (nand_scan(mtd, be32_to_cpup(chips_no))) {
 		dev_err(dev, "NAND Flash not found !\n");
+		retval = -ENXIO;
 		goto error;
 	}
 

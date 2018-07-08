@@ -26,8 +26,8 @@ struct ll_xattr_entry {
 					     */
 	char			*xe_name;   /* xattr name, \0-terminated */
 	char			*xe_value;  /* xattr value */
-	unsigned int		xe_namelen; /* strlen(xe_name) + 1 */
-	unsigned int		xe_vallen;  /* xattr value length */
+	unsigned		xe_namelen; /* strlen(xe_name) + 1 */
+	unsigned		xe_vallen;  /* xattr value length */
 };
 
 static struct kmem_cache *xattr_kmem;
@@ -60,7 +60,7 @@ void ll_xattr_fini(void)
 static void ll_xattr_cache_init(struct ll_inode_info *lli)
 {
 	INIT_LIST_HEAD(&lli->lli_xattrs);
-	set_bit(LLIF_XATTR_CACHE, &lli->lli_flags);
+	lli->lli_flags |= LLIF_XATTR_CACHE;
 }
 
 /**
@@ -104,7 +104,7 @@ static int ll_xattr_cache_find(struct list_head *cache,
 static int ll_xattr_cache_add(struct list_head *cache,
 			      const char *xattr_name,
 			      const char *xattr_val,
-			      unsigned int xattr_val_len)
+			      unsigned xattr_val_len)
 {
 	struct ll_xattr_entry *xattr;
 
@@ -216,7 +216,7 @@ static int ll_xattr_cache_list(struct list_head *cache,
  */
 static int ll_xattr_cache_valid(struct ll_inode_info *lli)
 {
-	return test_bit(LLIF_XATTR_CACHE, &lli->lli_flags);
+	return !!(lli->lli_flags & LLIF_XATTR_CACHE);
 }
 
 /**
@@ -233,8 +233,7 @@ static int ll_xattr_cache_destroy_locked(struct ll_inode_info *lli)
 
 	while (ll_xattr_cache_del(&lli->lli_xattrs, NULL) == 0)
 		; /* empty loop */
-
-	clear_bit(LLIF_XATTR_CACHE, &lli->lli_flags);
+	lli->lli_flags &= ~LLIF_XATTR_CACHE;
 
 	return 0;
 }
@@ -415,10 +414,6 @@ static int ll_xattr_cache_refill(struct inode *inode, struct lookup_intent *oit)
 			/* Filter out ACL ACCESS since it's cached separately */
 			CDEBUG(D_CACHE, "not caching %s\n",
 			       XATTR_NAME_ACL_ACCESS);
-			rc = 0;
-		} else if (!strcmp(xdata, "security.selinux")) {
-			/* Filter out security.selinux, it is cached in slab */
-			CDEBUG(D_CACHE, "not caching security.selinux\n");
 			rc = 0;
 		} else {
 			rc = ll_xattr_cache_add(&lli->lli_xattrs, xdata, xval,

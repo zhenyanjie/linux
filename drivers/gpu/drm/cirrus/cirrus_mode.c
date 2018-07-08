@@ -185,7 +185,6 @@ static int cirrus_crtc_mode_set(struct drm_crtc *crtc,
 {
 	struct drm_device *dev = crtc->dev;
 	struct cirrus_device *cdev = dev->dev_private;
-	const struct drm_framebuffer *fb = crtc->primary->fb;
 	int hsyncstart, hsyncend, htotal, hdispend;
 	int vtotal, vdispend;
 	int tmp;
@@ -258,7 +257,7 @@ static int cirrus_crtc_mode_set(struct drm_crtc *crtc,
 	sr07 = RREG8(SEQ_DATA);
 	sr07 &= 0xe0;
 	hdr = 0;
-	switch (fb->format->cpp[0] * 8) {
+	switch (crtc->primary->fb->bits_per_pixel) {
 	case 8:
 		sr07 |= 0x11;
 		break;
@@ -281,13 +280,13 @@ static int cirrus_crtc_mode_set(struct drm_crtc *crtc,
 	WREG_SEQ(0x7, sr07);
 
 	/* Program the pitch */
-	tmp = fb->pitches[0] / 8;
+	tmp = crtc->primary->fb->pitches[0] / 8;
 	WREG_CRT(VGA_CRTC_OFFSET, tmp);
 
 	/* Enable extended blanking and pitch bits, and enable full memory */
 	tmp = 0x22;
-	tmp |= (fb->pitches[0] >> 7) & 0x10;
-	tmp |= (fb->pitches[0] >> 6) & 0x40;
+	tmp |= (crtc->primary->fb->pitches[0] >> 7) & 0x10;
+	tmp |= (crtc->primary->fb->pitches[0] >> 6) & 0x40;
 	WREG_CRT(0x1b, tmp);
 
 	/* Enable high-colour modes */
@@ -499,6 +498,12 @@ static struct drm_encoder *cirrus_connector_best_encoder(struct drm_connector
 	return NULL;
 }
 
+static enum drm_connector_status cirrus_vga_detect(struct drm_connector
+						   *connector, bool force)
+{
+	return connector_status_connected;
+}
+
 static void cirrus_connector_destroy(struct drm_connector *connector)
 {
 	drm_connector_cleanup(connector);
@@ -512,6 +517,7 @@ static const struct drm_connector_helper_funcs cirrus_vga_connector_helper_funcs
 
 static const struct drm_connector_funcs cirrus_vga_connector_funcs = {
 	.dpms = drm_helper_connector_dpms,
+	.detect = cirrus_vga_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = cirrus_connector_destroy,
 };

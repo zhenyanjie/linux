@@ -41,7 +41,7 @@
 #include <linux/uaccess.h>
 #include <linux/atomic.h>
 #include <linux/uio.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/wait.h>
 #include <linux/dcache.h>
@@ -440,8 +440,9 @@ struct inode *orangefs_new_inode(struct super_block *sb,
 
 int orangefs_setattr(struct dentry *dentry, struct iattr *iattr);
 
-int orangefs_getattr(const struct path *path, struct kstat *stat,
-		     u32 request_mask, unsigned int flags);
+int orangefs_getattr(struct vfsmount *mnt,
+		  struct dentry *dentry,
+		  struct kstat *kstat);
 
 int orangefs_permission(struct inode *inode, int mask);
 
@@ -529,6 +530,7 @@ extern spinlock_t orangefs_htable_ops_in_progress_lock;
 extern int hash_table_size;
 
 extern const struct address_space_operations orangefs_address_operations;
+extern struct backing_dev_info orangefs_backing_dev_info;
 extern const struct inode_operations orangefs_file_inode_operations;
 extern const struct file_operations orangefs_file_operations;
 extern const struct inode_operations orangefs_symlink_inode_operations;
@@ -567,17 +569,6 @@ do {									\
 	sys_attr.ctime = 0;						\
 	sys_attr.mask = ORANGEFS_ATTR_SYS_ALL_SETABLE;			\
 } while (0)
-
-static inline void orangefs_i_size_write(struct inode *inode, loff_t i_size)
-{
-#if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
-	inode_lock(inode);
-#endif
-	i_size_write(inode, i_size);
-#if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
-	inode_unlock(inode);
-#endif
-}
 
 static inline void orangefs_set_timeout(struct dentry *dentry)
 {

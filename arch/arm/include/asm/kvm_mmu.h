@@ -129,7 +129,8 @@ static inline bool vcpu_has_cache_enabled(struct kvm_vcpu *vcpu)
 
 static inline void __coherent_cache_guest_page(struct kvm_vcpu *vcpu,
 					       kvm_pfn_t pfn,
-					       unsigned long size)
+					       unsigned long size,
+					       bool ipa_uncached)
 {
 	/*
 	 * If we are going to insert an instruction page and the icache is
@@ -220,6 +221,32 @@ static inline void __kvm_extend_hypmap(pgd_t *boot_hyp_pgd,
 static inline unsigned int kvm_get_vmid_bits(void)
 {
 	return 8;
+}
+
+/*
+ * We are not in the kvm->srcu critical section most of the time, so we take
+ * the SRCU read lock here. Since we copy the data from the user page, we
+ * can immediately drop the lock again.
+ */
+static inline int kvm_read_guest_lock(struct kvm *kvm,
+				      gpa_t gpa, void *data, unsigned long len)
+{
+	int srcu_idx = srcu_read_lock(&kvm->srcu);
+	int ret = kvm_read_guest(kvm, gpa, data, len);
+
+	srcu_read_unlock(&kvm->srcu, srcu_idx);
+
+	return ret;
+}
+
+static inline void *kvm_get_hyp_vector(void)
+{
+	return kvm_ksym_ref(__kvm_hyp_vector);
+}
+
+static inline int kvm_map_vectors(void)
+{
+	return 0;
 }
 
 #endif	/* !__ASSEMBLY__ */

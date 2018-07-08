@@ -23,7 +23,6 @@
 #include <linux/vmalloc.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
-#include <net/pkt_cls.h>
 #include <net/codel.h>
 #include <net/codel_impl.h>
 #include <net/codel_qdisc.h>
@@ -58,6 +57,7 @@ struct fq_codel_sched_data {
 	struct fq_codel_flow *flows;	/* Flows table [flows_cnt] */
 	u32		*backlogs;	/* backlog table [flows_cnt] */
 	u32		flows_cnt;	/* number of flows */
+	u32		perturbation;	/* hash perturbation */
 	u32		quantum;	/* psched_mtu(qdisc_dev(sch)); */
 	u32		drop_batch_size;
 	u32		memory_limit;
@@ -75,7 +75,9 @@ struct fq_codel_sched_data {
 static unsigned int fq_codel_hash(const struct fq_codel_sched_data *q,
 				  struct sk_buff *skb)
 {
-	return reciprocal_scale(skb_get_hash(skb), q->flows_cnt);
+	u32 hash = skb_get_hash_perturb(skb, q->perturbation);
+
+	return reciprocal_scale(hash, q->flows_cnt);
 }
 
 static unsigned int fq_codel_classify(struct sk_buff *skb, struct Qdisc *sch,
@@ -480,6 +482,7 @@ static int fq_codel_init(struct Qdisc *sch, struct nlattr *opt)
 	q->memory_limit = 32 << 20; /* 32 MBytes */
 	q->drop_batch_size = 64;
 	q->quantum = psched_mtu(qdisc_dev(sch));
+	q->perturbation = prandom_u32();
 	INIT_LIST_HEAD(&q->new_flows);
 	INIT_LIST_HEAD(&q->old_flows);
 	codel_params_init(&q->cparams);

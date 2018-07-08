@@ -15,7 +15,7 @@
 #include <linux/key.h>
 #include <linux/context_tracking.h>
 #include <asm/hw_breakpoint.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/debug.h>
 #include <asm/tm.h>
@@ -102,7 +102,7 @@ static void check_syscall_restart(struct pt_regs *regs, struct k_sigaction *ka,
 static void do_signal(struct task_struct *tsk)
 {
 	sigset_t *oldset = sigmask_to_save();
-	struct ksignal ksig;
+	struct ksignal ksig = { .sig = 0 };
 	int ret;
 	int is32 = is_32bit_task();
 

@@ -29,7 +29,7 @@
 #include <linux/gfp.h>
 #include <linux/swap.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "delegation.h"
 #include "internal.h"
@@ -101,11 +101,18 @@ EXPORT_SYMBOL_GPL(nfs_file_release);
 static int nfs_revalidate_file_size(struct inode *inode, struct file *filp)
 {
 	struct nfs_server *server = NFS_SERVER(inode);
+	struct nfs_inode *nfsi = NFS_I(inode);
+
+	if (nfs_have_delegated_attributes(inode))
+		goto out_noreval;
 
 	if (filp->f_flags & O_DIRECT)
 		goto force_reval;
-	if (nfs_check_cache_invalid(inode, NFS_INO_REVAL_PAGECACHE))
+	if (nfsi->cache_validity & NFS_INO_REVAL_PAGECACHE)
 		goto force_reval;
+	if (nfs_attribute_timeout(inode))
+		goto force_reval;
+out_noreval:
 	return 0;
 force_reval:
 	return __nfs_revalidate_inode(server, inode);
@@ -528,10 +535,10 @@ const struct address_space_operations nfs_file_aops = {
  * writable, implying that someone is about to modify the page through a
  * shared-writable mapping
  */
-static int nfs_vm_page_mkwrite(struct vm_fault *vmf)
+static int nfs_vm_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	struct page *page = vmf->page;
-	struct file *filp = vmf->vma->vm_file;
+	struct file *filp = vma->vm_file;
 	struct inode *inode = file_inode(filp);
 	unsigned pagelen;
 	int ret = VM_FAULT_NOPAGE;
@@ -629,11 +636,11 @@ ssize_t nfs_file_write(struct kiocb *iocb, struct iov_iter *from)
 	if (result <= 0)
 		goto out;
 
-	result = generic_write_sync(iocb, result);
-	if (result < 0)
-		goto out;
 	written = result;
 	iocb->ki_pos += written;
+	result = generic_write_sync(iocb, written);
+	if (result < 0)
+		goto out;
 
 	/* Return error values */
 	if (nfs_need_check_write(file, inode)) {
@@ -750,7 +757,7 @@ do_setlk(struct file *filp, int cmd, struct file_lock *fl, int is_local)
 	 */
 	nfs_sync_mapping(filp->f_mapping);
 	if (!NFS_PROTO(inode)->have_delegation(inode, FMODE_READ))
-		nfs_zap_mapping(inode, filp->f_mapping);
+		nfs_zap_caches(inode);
 out:
 	return status;
 }

@@ -37,8 +37,6 @@ static void linux_wlan_tx_complete(void *priv, int status);
 static int  mac_init_fn(struct net_device *ndev);
 static struct net_device_stats *mac_stats(struct net_device *dev);
 static int  mac_ioctl(struct net_device *ndev, struct ifreq *req, int cmd);
-static int wilc_mac_open(struct net_device *ndev);
-static int wilc_mac_close(struct net_device *ndev);
 static void wilc_set_multicast_list(struct net_device *dev);
 
 bool wilc_enable_ps = true;
@@ -213,11 +211,22 @@ static void deinit_irq(struct net_device *dev)
 	vif = netdev_priv(dev);
 	wilc = vif->wilc;
 
-	/* Deinitialize IRQ */
+	/* Deintialize IRQ */
 	if (wilc->dev_irq_num) {
 		free_irq(wilc->dev_irq_num, wilc);
 		gpio_free(wilc->gpio);
 	}
+}
+
+int wilc_lock_timeout(struct wilc *nic, void *vp, u32 timeout)
+{
+	/* FIXME: replace with mutex_lock or wait_for_completion */
+	int error = -1;
+
+	if (vp)
+		error = down_timeout(vp,
+				     msecs_to_jiffies(timeout));
+	return error;
 }
 
 void wilc_mac_indicate(struct wilc *wilc, int flag)
@@ -364,7 +373,7 @@ static int linux_wlan_start_firmware(struct net_device *dev)
 		return ret;
 
 	if (!wait_for_completion_timeout(&wilc->sync_event,
-					 msecs_to_jiffies(5000)))
+					msecs_to_jiffies(5000)))
 		return -ETIME;
 
 	return 0;
@@ -827,7 +836,7 @@ static int mac_init_fn(struct net_device *ndev)
 	return 0;
 }
 
-static int wilc_mac_open(struct net_device *ndev)
+int wilc_mac_open(struct net_device *ndev)
 {
 	struct wilc_vif *vif;
 
@@ -1018,7 +1027,7 @@ int wilc_mac_xmit(struct sk_buff *skb, struct net_device *ndev)
 	return 0;
 }
 
-static int wilc_mac_close(struct net_device *ndev)
+int wilc_mac_close(struct net_device *ndev)
 {
 	struct wilc_priv *priv;
 	struct wilc_vif *vif;
@@ -1251,12 +1260,11 @@ int wilc_netdev_init(struct wilc **wilc, struct device *dev, int io_type,
 		else
 			strcpy(ndev->name, "p2p%d");
 
+		vif->idx = wl->vif_num;
 		vif->wilc = *wilc;
 		vif->ndev = ndev;
 		wl->vif[i] = vif;
 		wl->vif_num = i;
-		vif->idx = wl->vif_num;
-
 		ndev->netdev_ops = &wilc_netdev_ops;
 
 		{

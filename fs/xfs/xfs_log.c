@@ -743,15 +743,45 @@ xfs_log_mount_finish(
 	struct xfs_mount	*mp)
 {
 	int	error = 0;
+	bool	readonly = (mp->m_flags & XFS_MOUNT_RDONLY);
 
 	if (mp->m_flags & XFS_MOUNT_NORECOVERY) {
 		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
 		return 0;
+	} else if (readonly) {
+		/* Allow unlinked processing to proceed */
+		mp->m_flags &= ~XFS_MOUNT_RDONLY;
 	}
 
+	/*
+	 * During the second phase of log recovery, we need iget and
+	 * iput to behave like they do for an active filesystem.
+	 * xfs_fs_drop_inode needs to be able to prevent the deletion
+	 * of inodes before we're done replaying log items on those
+	 * inodes.  Turn it off immediately after recovery finishes
+	 * so that we don't leak the quota inodes if subsequent mount
+	 * activities fail.
+	 *
+	 * We let all inodes involved in redo item processing end up on
+	 * the LRU instead of being evicted immediately so that if we do
+	 * something to an unlinked inode, the irele won't cause
+	 * premature truncation and freeing of the inode, which results
+	 * in log recovery failure.  We have to evict the unreferenced
+	 * lru inodes after clearing MS_ACTIVE because we don't
+	 * otherwise clean up the lru if there's a subsequent failure in
+	 * xfs_mountfs, which leads to us leaking the inodes if nothing
+	 * else (e.g. quotacheck) references the inodes before the
+	 * mount failure occurs.
+	 */
+	mp->m_super->s_flags |= MS_ACTIVE;
 	error = xlog_recover_finish(mp->m_log);
 	if (!error)
 		xfs_log_work_queue(mp);
+	mp->m_super->s_flags &= ~MS_ACTIVE;
+	evict_inodes(mp->m_super);
+
+	if (readonly)
+		mp->m_flags |= XFS_MOUNT_RDONLY;
 
 	return error;
 }
@@ -801,11 +831,14 @@ xfs_log_unmount_write(xfs_mount_t *mp)
 	int		 error;
 
 	/*
-	 * Don't write out unmount record on read-only mounts.
+	 * Don't write out unmount record on norecovery mounts or ro devices.
 	 * Or, if we are doing a forced umount (typically because of IO errors).
 	 */
-	if (mp->m_flags & XFS_MOUNT_RDONLY)
+	if (mp->m_flags & XFS_MOUNT_NORECOVERY ||
+	    xfs_readonly_buftarg(log->l_mp->m_logdev_targp)) {
+		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
 		return 0;
+	}
 
 	error = _xfs_log_force(mp, XFS_LOG_SYNC, NULL);
 	ASSERT(error || !(XLOG_FORCED_SHUTDOWN(log)));
@@ -1668,7 +1701,7 @@ xlog_cksum(
 	__uint32_t		crc;
 
 	/* first generate the crc for the record header ... */
-	crc = xfs_start_cksum_update((char *)rhead,
+	crc = xfs_start_cksum((char *)rhead,
 			      sizeof(struct xlog_rec_header),
 			      offsetof(struct xlog_rec_header, h_crc));
 
@@ -1862,21 +1895,26 @@ xlog_sync(
 
 	bp->b_io_length = BTOBB(count);
 	bp->b_fspriv = iclog;
-	bp->b_flags &= ~XBF_FLUSH;
-	bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO | XBF_WRITE | XBF_FUA);
+	bp->b_flags &= ~(XBF_FUA | XBF_FLUSH);
+	bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO | XBF_WRITE);
 
-	/*
-	 * Flush the data device before flushing the log to make sure all meta
-	 * data written back from the AIL actually made it to disk before
-	 * stamping the new log tail LSN into the log buffer.  For an external
-	 * log we need to issue the flush explicitly, and unfortunately
-	 * synchronously here; for an internal log we can simply use the block
-	 * layer state machine for preflushes.
-	 */
-	if (log->l_mp->m_logdev_targp != log->l_mp->m_ddev_targp)
-		xfs_blkdev_issue_flush(log->l_mp->m_ddev_targp);
-	else
-		bp->b_flags |= XBF_FLUSH;
+	if (log->l_mp->m_flags & XFS_MOUNT_BARRIER) {
+		bp->b_flags |= XBF_FUA;
+
+		/*
+		 * Flush the data device before flushing the log to make
+		 * sure all meta data written back from the AIL actually made
+		 * it to disk before stamping the new log tail LSN into the
+		 * log buffer.  For an external log we need to issue the
+		 * flush explicitly, and unfortunately synchronously here;
+		 * for an internal log we can simply use the block layer
+		 * state machine for preflushes.
+		 */
+		if (log->l_mp->m_logdev_targp != log->l_mp->m_ddev_targp)
+			xfs_blkdev_issue_flush(log->l_mp->m_ddev_targp);
+		else
+			bp->b_flags |= XBF_FLUSH;
+	}
 
 	ASSERT(XFS_BUF_ADDR(bp) <= log->l_logBBsize-1);
 	ASSERT(XFS_BUF_ADDR(bp) + BTOBB(count) <= log->l_logBBsize);
@@ -1901,8 +1939,10 @@ xlog_sync(
 		xfs_buf_associate_memory(bp,
 				(char *)&iclog->ic_header + count, split);
 		bp->b_fspriv = iclog;
-		bp->b_flags &= ~XBF_FLUSH;
-		bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO | XBF_WRITE | XBF_FUA);
+		bp->b_flags &= ~(XBF_FUA | XBF_FLUSH);
+		bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO | XBF_WRITE);
+		if (log->l_mp->m_flags & XFS_MOUNT_BARRIER)
+			bp->b_flags |= XBF_FUA;
 
 		ASSERT(XFS_BUF_ADDR(bp) <= log->l_logBBsize-1);
 		ASSERT(XFS_BUF_ADDR(bp) + BTOBB(count) <= log->l_logBBsize);
@@ -3297,8 +3337,6 @@ maybe_sleep:
 		 */
 		if (iclog->ic_state & XLOG_STATE_IOERROR)
 			return -EIO;
-		if (log_flushed)
-			*log_flushed = 1;
 	} else {
 
 no_sleep:
@@ -3402,8 +3440,6 @@ try_again:
 
 				xlog_wait(&iclog->ic_prev->ic_write_wait,
 							&log->l_icloglock);
-				if (log_flushed)
-					*log_flushed = 1;
 				already_slept = 1;
 				goto try_again;
 			}
@@ -3437,9 +3473,6 @@ try_again:
 			 */
 			if (iclog->ic_state & XLOG_STATE_IOERROR)
 				return -EIO;
-
-			if (log_flushed)
-				*log_flushed = 1;
 		} else {		/* just return */
 			spin_unlock(&log->l_icloglock);
 		}

@@ -83,15 +83,23 @@ static __be32 *read_buf(struct xdr_stream *xdr, size_t nbytes)
 	return p;
 }
 
-static __be32 decode_string(struct xdr_stream *xdr, unsigned int *len,
-		const char **str, size_t maxlen)
+static __be32 decode_string(struct xdr_stream *xdr, unsigned int *len, const char **str)
 {
-	ssize_t err;
+	__be32 *p;
 
-	err = xdr_stream_decode_opaque_inline(xdr, (void **)str, maxlen);
-	if (err < 0)
-		return cpu_to_be32(NFS4ERR_RESOURCE);
-	*len = err;
+	p = read_buf(xdr, 4);
+	if (unlikely(p == NULL))
+		return htonl(NFS4ERR_RESOURCE);
+	*len = ntohl(*p);
+
+	if (*len != 0) {
+		p = read_buf(xdr, *len);
+		if (unlikely(p == NULL))
+			return htonl(NFS4ERR_RESOURCE);
+		*str = (const char *)p;
+	} else
+		*str = NULL;
+
 	return 0;
 }
 
@@ -154,9 +162,15 @@ static __be32 decode_compound_hdr_arg(struct xdr_stream *xdr, struct cb_compound
 	__be32 *p;
 	__be32 status;
 
-	status = decode_string(xdr, &hdr->taglen, &hdr->tag, CB_OP_TAGLEN_MAXSZ);
+	status = decode_string(xdr, &hdr->taglen, &hdr->tag);
 	if (unlikely(status != 0))
 		return status;
+	/* We do not like overly long tags! */
+	if (hdr->taglen > CB_OP_TAGLEN_MAXSZ) {
+		printk("NFS: NFSv4 CALLBACK %s: client sent tag of length %u\n",
+				__func__, hdr->taglen);
+		return htonl(NFS4ERR_RESOURCE);
+	}
 	p = read_buf(xdr, 12);
 	if (unlikely(p == NULL))
 		return htonl(NFS4ERR_RESOURCE);
@@ -568,8 +582,12 @@ out:
 
 static __be32 encode_string(struct xdr_stream *xdr, unsigned int len, const char *str)
 {
-	if (unlikely(xdr_stream_encode_opaque(xdr, str, len) < 0))
-		return cpu_to_be32(NFS4ERR_RESOURCE);
+	__be32 *p;
+
+	p = xdr_reserve_space(xdr, 4 + len);
+	if (unlikely(p == NULL))
+		return htonl(NFS4ERR_RESOURCE);
+	xdr_encode_opaque(p, str, len);
 	return 0;
 }
 
@@ -1065,8 +1083,7 @@ struct svc_version nfs4_callback_version1 = {
 	.vs_proc = nfs4_callback_procedures1,
 	.vs_xdrsize = NFS4_CALLBACK_XDRSIZE,
 	.vs_dispatch = NULL,
-	.vs_hidden = true,
-	.vs_need_cong_ctrl = true,
+	.vs_hidden = 1,
 };
 
 struct svc_version nfs4_callback_version4 = {
@@ -1075,6 +1092,5 @@ struct svc_version nfs4_callback_version4 = {
 	.vs_proc = nfs4_callback_procedures1,
 	.vs_xdrsize = NFS4_CALLBACK_XDRSIZE,
 	.vs_dispatch = NULL,
-	.vs_hidden = true,
-	.vs_need_cong_ctrl = true,
+	.vs_hidden = 1,
 };

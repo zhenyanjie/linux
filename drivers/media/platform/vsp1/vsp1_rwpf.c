@@ -37,7 +37,6 @@ static int vsp1_rwpf_enum_mbus_code(struct v4l2_subdev *subdev,
 {
 	static const unsigned int codes[] = {
 		MEDIA_BUS_FMT_ARGB8888_1X32,
-		MEDIA_BUS_FMT_AHSV8888_1X32,
 		MEDIA_BUS_FMT_AYUV8_1X32,
 	};
 
@@ -79,7 +78,6 @@ static int vsp1_rwpf_set_format(struct v4l2_subdev *subdev,
 
 	/* Default to YUV if the requested format is not supported. */
 	if (fmt->format.code != MEDIA_BUS_FMT_ARGB8888_1X32 &&
-	    fmt->format.code != MEDIA_BUS_FMT_AHSV8888_1X32 &&
 	    fmt->format.code != MEDIA_BUS_FMT_AYUV8_1X32)
 		fmt->format.code = MEDIA_BUS_FMT_AYUV8_1X32;
 

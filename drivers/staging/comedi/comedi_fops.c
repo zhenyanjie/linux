@@ -23,16 +23,20 @@
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/fcntl.h>
 #include <linux/delay.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <linux/kmod.h>
 #include <linux/poll.h>
+#include <linux/init.h>
 #include <linux/device.h>
+#include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include "comedidev.h"
 #include <linux/cdev.h>
+#include <linux/stat.h>
 
 #include <linux/io.h>
 #include <linux/uaccess.h>
@@ -2381,6 +2385,7 @@ static ssize_t comedi_write(struct file *file, const char __user *buf,
 			continue;
 		}
 
+		set_current_state(TASK_RUNNING);
 		wp = async->buf_write_ptr;
 		n1 = min(n, async->prealloc_bufsz - wp);
 		n2 = n - n1;
@@ -2513,6 +2518,8 @@ static ssize_t comedi_read(struct file *file, char __user *buf, size_t nbytes,
 			}
 			continue;
 		}
+
+		set_current_state(TASK_RUNNING);
 		rp = async->buf_read_ptr;
 		n1 = min(n, async->prealloc_bufsz - rp);
 		n2 = n - n1;

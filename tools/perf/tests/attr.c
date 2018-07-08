@@ -144,13 +144,13 @@ static int run_dir(const char *d, const char *perf)
 	int vcnt = min(verbose, (int) sizeof(v) - 1);
 	char cmd[3*PATH_MAX];
 
-	if (verbose > 0)
+	if (verbose)
 		vcnt++;
 
 	snprintf(cmd, 3*PATH_MAX, PYTHON " %s/attr.py -d %s/attr/ -p %s %.*s",
 		 d, d, perf, vcnt, v);
 
-	return system(cmd);
+	return system(cmd) ? TEST_FAIL : TEST_OK;
 }
 
 int test__attr(int subtest __maybe_unused)

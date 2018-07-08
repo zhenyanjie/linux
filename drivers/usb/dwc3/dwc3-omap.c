@@ -393,7 +393,7 @@ static void dwc3_omap_set_utmi_mode(struct dwc3_omap *omap)
 {
 	u32			reg;
 	struct device_node	*node = omap->dev->of_node;
-	u32			utmi_mode = 0;
+	int			utmi_mode = 0;
 
 	reg = dwc3_omap_read_utmi_ctrl(omap);
 
@@ -427,20 +427,20 @@ static int dwc3_omap_extcon_register(struct dwc3_omap *omap)
 		}
 
 		omap->vbus_nb.notifier_call = dwc3_omap_vbus_notifier;
-		ret = devm_extcon_register_notifier(omap->dev, edev,
-						EXTCON_USB, &omap->vbus_nb);
+		ret = extcon_register_notifier(edev, EXTCON_USB,
+						&omap->vbus_nb);
 		if (ret < 0)
 			dev_vdbg(omap->dev, "failed to register notifier for USB\n");
 
 		omap->id_nb.notifier_call = dwc3_omap_id_notifier;
-		ret = devm_extcon_register_notifier(omap->dev, edev,
-						EXTCON_USB_HOST, &omap->id_nb);
+		ret = extcon_register_notifier(edev, EXTCON_USB_HOST,
+						&omap->id_nb);
 		if (ret < 0)
 			dev_vdbg(omap->dev, "failed to register notifier for USB-HOST\n");
 
-		if (extcon_get_state(edev, EXTCON_USB) == true)
+		if (extcon_get_cable_state_(edev, EXTCON_USB) == true)
 			dwc3_omap_set_mailbox(omap, OMAP_DWC3_VBUS_VALID);
-		if (extcon_get_state(edev, EXTCON_USB_HOST) == true)
+		if (extcon_get_cable_state_(edev, EXTCON_USB_HOST) == true)
 			dwc3_omap_set_mailbox(omap, OMAP_DWC3_ID_GROUND);
 
 		omap->edev = edev;
@@ -529,12 +529,16 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	ret = of_platform_populate(node, NULL, NULL, dev);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to create dwc3 core\n");
-		goto err1;
+		goto err2;
 	}
 
 	dwc3_omap_enable_irqs(omap);
 	enable_irq(omap->irq);
 	return 0;
+
+err2:
+	extcon_unregister_notifier(omap->edev, EXTCON_USB, &omap->vbus_nb);
+	extcon_unregister_notifier(omap->edev, EXTCON_USB_HOST, &omap->id_nb);
 
 err1:
 	pm_runtime_put_sync(dev);
@@ -547,6 +551,8 @@ static int dwc3_omap_remove(struct platform_device *pdev)
 {
 	struct dwc3_omap	*omap = platform_get_drvdata(pdev);
 
+	extcon_unregister_notifier(omap->edev, EXTCON_USB, &omap->vbus_nb);
+	extcon_unregister_notifier(omap->edev, EXTCON_USB_HOST, &omap->id_nb);
 	dwc3_omap_disable_irqs(omap);
 	disable_irq(omap->irq);
 	of_platform_depopulate(omap->dev);
@@ -592,9 +598,25 @@ static int dwc3_omap_resume(struct device *dev)
 	return 0;
 }
 
+static void dwc3_omap_complete(struct device *dev)
+{
+	struct dwc3_omap	*omap = dev_get_drvdata(dev);
+
+	if (extcon_get_state(omap->edev, EXTCON_USB))
+		dwc3_omap_set_mailbox(omap, OMAP_DWC3_VBUS_VALID);
+	else
+		dwc3_omap_set_mailbox(omap, OMAP_DWC3_VBUS_OFF);
+
+	if (extcon_get_state(omap->edev, EXTCON_USB_HOST))
+		dwc3_omap_set_mailbox(omap, OMAP_DWC3_ID_GROUND);
+	else
+		dwc3_omap_set_mailbox(omap, OMAP_DWC3_ID_FLOAT);
+}
+
 static const struct dev_pm_ops dwc3_omap_dev_pm_ops = {
 
 	SET_SYSTEM_SLEEP_PM_OPS(dwc3_omap_suspend, dwc3_omap_resume)
+	.complete = dwc3_omap_complete,
 };
 
 #define DEV_PM_OPS	(&dwc3_omap_dev_pm_ops)

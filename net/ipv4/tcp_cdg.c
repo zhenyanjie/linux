@@ -27,8 +27,6 @@
 #include <linux/kernel.h>
 #include <linux/random.h>
 #include <linux/module.h>
-#include <linux/sched/clock.h>
-
 #include <net/tcp.h>
 
 #define HYSTART_ACK_TRAIN	1

@@ -49,8 +49,10 @@ void nvkm_timer_alarm_cancel(struct nvkm_timer *, struct nvkm_alarm *);
 	} while (_taken = nvkm_timer_read(_tmr) - _time0, _taken < _nsecs);    \
                                                                                \
 	if (_taken >= _nsecs) {                                                \
-		if (_warn)                                                     \
-			dev_WARN(_device->dev, "timeout\n");                   \
+		if (_warn) {                                                   \
+			dev_warn(_device->dev, "timeout at %s:%d/%s()!\n",     \
+				 __FILE__, __LINE__, __func__);                \
+		}                                                              \
 		_taken = -ETIMEDOUT;                                           \
 	}                                                                      \
 	_taken;                                                                \

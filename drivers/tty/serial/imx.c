@@ -205,7 +205,6 @@ struct imx_port {
 	struct timer_list	timer;
 	unsigned int		old_status;
 	unsigned int		have_rtscts:1;
-	unsigned int		have_rtsgpio:1;
 	unsigned int		dte_mode:1;
 	unsigned int		irda_inv_rx:1;
 	unsigned int		irda_inv_tx:1;
@@ -336,15 +335,15 @@ static void imx_port_ucrs_restore(struct uart_port *port,
 
 static void imx_port_rts_active(struct imx_port *sport, unsigned long *ucr2)
 {
-	*ucr2 &= ~(UCR2_CTSC | UCR2_CTS);
+	*ucr2 &= ~UCR2_CTSC;
+	*ucr2 |= UCR2_CTS;
 
 	mctrl_gpio_set(sport->gpios, sport->port.mctrl | TIOCM_RTS);
 }
 
 static void imx_port_rts_inactive(struct imx_port *sport, unsigned long *ucr2)
 {
-	*ucr2 &= ~UCR2_CTSC;
-	*ucr2 |= UCR2_CTS;
+	*ucr2 &= ~(UCR2_CTSC | UCR2_CTS);
 
 	mctrl_gpio_set(sport->gpios, sport->port.mctrl & ~TIOCM_RTS);
 }
@@ -377,9 +376,9 @@ static void imx_stop_tx(struct uart_port *port)
 	    readl(port->membase + USR2) & USR2_TXDC) {
 		temp = readl(port->membase + UCR2);
 		if (port->rs485.flags & SER_RS485_RTS_AFTER_SEND)
-			imx_port_rts_active(sport, &temp);
-		else
 			imx_port_rts_inactive(sport, &temp);
+		else
+			imx_port_rts_active(sport, &temp);
 		temp |= UCR2_RXEN;
 		writel(temp, port->membase + UCR2);
 
@@ -585,9 +584,9 @@ static void imx_start_tx(struct uart_port *port)
 	if (port->rs485.flags & SER_RS485_ENABLED) {
 		temp = readl(port->membase + UCR2);
 		if (port->rs485.flags & SER_RS485_RTS_ON_SEND)
-			imx_port_rts_active(sport, &temp);
-		else
 			imx_port_rts_inactive(sport, &temp);
+		else
+			imx_port_rts_active(sport, &temp);
 		if (!(port->rs485.flags & SER_RS485_RX_DURING_TX))
 			temp &= ~UCR2_RXEN;
 		writel(temp, port->membase + UCR2);
@@ -1317,19 +1316,10 @@ static int imx_startup(struct uart_port *port)
 	if (!is_imx1_uart(sport)) {
 		temp = readl(sport->port.membase + UCR3);
 
-		/*
-		 * The effect of RI and DCD differs depending on the UFCR_DCEDTE
-		 * bit. In DCE mode they control the outputs, in DTE mode they
-		 * enable the respective irqs. At least the DCD irq cannot be
-		 * cleared on i.MX25 at least, so it's not usable and must be
-		 * disabled. I don't have test hardware to check if RI has the
-		 * same problem but I consider this likely so it's disabled for
-		 * now, too.
-		 */
-		temp |= IMX21_UCR3_RXDMUXSEL | UCR3_ADNIMP |
-			UCR3_DTRDEN | UCR3_RI | UCR3_DCD;
+		temp |= UCR3_DTRDEN | UCR3_RI | UCR3_DCD;
 
 		if (sport->dte_mode)
+			/* disable broken interrupts */
 			temp &= ~(UCR3_RI | UCR3_DCD);
 
 		writel(temp, sport->port.membase + UCR3);
@@ -1477,9 +1467,9 @@ imx_set_termios(struct uart_port *port, struct ktermios *termios,
 				 */
 				if (port->rs485.flags &
 				    SER_RS485_RTS_AFTER_SEND)
-					imx_port_rts_active(sport, &ucr2);
-				else
 					imx_port_rts_inactive(sport, &ucr2);
+				else
+					imx_port_rts_active(sport, &ucr2);
 			} else {
 				imx_port_rts_auto(sport, &ucr2);
 			}
@@ -1489,9 +1479,9 @@ imx_set_termios(struct uart_port *port, struct ktermios *termios,
 	} else if (port->rs485.flags & SER_RS485_ENABLED) {
 		/* disable transmitter */
 		if (port->rs485.flags & SER_RS485_RTS_AFTER_SEND)
-			imx_port_rts_active(sport, &ucr2);
-		else
 			imx_port_rts_inactive(sport, &ucr2);
+		else
+			imx_port_rts_active(sport, &ucr2);
 	}
 
 
@@ -1584,8 +1574,6 @@ imx_set_termios(struct uart_port *port, struct ktermios *termios,
 
 	ufcr = readl(sport->port.membase + UFCR);
 	ufcr = (ufcr & (~UFCR_RFDIV)) | UFCR_RFDIV_REG(div);
-	if (sport->dte_mode)
-		ufcr |= UFCR_DCEDTE;
 	writel(ufcr, sport->port.membase + UFCR);
 
 	writel(num, sport->port.membase + UBIR);
@@ -1726,16 +1714,16 @@ static int imx_rs485_config(struct uart_port *port,
 	rs485conf->delay_rts_after_send = 0;
 
 	/* RTS is required to control the transmitter */
-	if (!sport->have_rtscts && !sport->have_rtsgpio)
+	if (!sport->have_rtscts)
 		rs485conf->flags &= ~SER_RS485_ENABLED;
 
 	if (rs485conf->flags & SER_RS485_ENABLED) {
 		/* disable transmitter */
 		temp = readl(sport->port.membase + UCR2);
 		if (rs485conf->flags & SER_RS485_RTS_AFTER_SEND)
-			imx_port_rts_active(sport, &temp);
-		else
 			imx_port_rts_inactive(sport, &temp);
+		else
+			imx_port_rts_active(sport, &temp);
 		writel(temp, sport->port.membase + UCR2);
 	}
 
@@ -2049,9 +2037,6 @@ static int serial_imx_probe_dt(struct imx_port *sport,
 	if (of_get_property(np, "fsl,dte-mode", NULL))
 		sport->dte_mode = 1;
 
-	if (of_get_property(np, "rts-gpios", NULL))
-		sport->have_rtsgpio = 1;
-
 	return 0;
 }
 #else
@@ -2094,6 +2079,12 @@ static int serial_imx_probe(struct platform_device *pdev)
 		serial_imx_probe_pdata(sport, pdev);
 	else if (ret < 0)
 		return ret;
+
+	if (sport->port.line >= ARRAY_SIZE(imx_ports)) {
+		dev_err(&pdev->dev, "serial%d out of range\n",
+			sport->port.line);
+		return -EINVAL;
+	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	base = devm_ioremap_resource(&pdev->dev, res);
@@ -2152,6 +2143,37 @@ static int serial_imx_probe(struct platform_device *pdev)
 	reg &= ~(UCR1_ADEN | UCR1_TRDYEN | UCR1_IDEN | UCR1_RRDYEN |
 		 UCR1_TXMPTYEN | UCR1_RTSDEN);
 	writel_relaxed(reg, sport->port.membase + UCR1);
+
+	if (!is_imx1_uart(sport) && sport->dte_mode) {
+		/*
+		 * The DCEDTE bit changes the direction of DSR, DCD, DTR and RI
+		 * and influences if UCR3_RI and UCR3_DCD changes the level of RI
+		 * and DCD (when they are outputs) or enables the respective
+		 * irqs. So set this bit early, i.e. before requesting irqs.
+		 */
+		reg = readl(sport->port.membase + UFCR);
+		if (!(reg & UFCR_DCEDTE))
+			writel(reg | UFCR_DCEDTE, sport->port.membase + UFCR);
+
+		/*
+		 * Disable UCR3_RI and UCR3_DCD irqs. They are also not
+		 * enabled later because they cannot be cleared
+		 * (confirmed on i.MX25) which makes them unusable.
+		 */
+		writel(IMX21_UCR3_RXDMUXSEL | UCR3_ADNIMP | UCR3_DSR,
+		       sport->port.membase + UCR3);
+
+	} else {
+		unsigned long ucr3 = UCR3_DSR;
+
+		reg = readl(sport->port.membase + UFCR);
+		if (reg & UFCR_DCEDTE)
+			writel(reg & ~UFCR_DCEDTE, sport->port.membase + UFCR);
+
+		if (!is_imx1_uart(sport))
+			ucr3 |= IMX21_UCR3_RXDMUXSEL | UCR3_ADNIMP;
+		writel(ucr3, sport->port.membase + UCR3);
+	}
 
 	clk_disable_unprepare(sport->clk_ipg);
 
@@ -2243,12 +2265,14 @@ static void serial_imx_enable_wakeup(struct imx_port *sport, bool on)
 		val &= ~UCR3_AWAKEN;
 	writel(val, sport->port.membase + UCR3);
 
-	val = readl(sport->port.membase + UCR1);
-	if (on)
-		val |= UCR1_RTSDEN;
-	else
-		val &= ~UCR1_RTSDEN;
-	writel(val, sport->port.membase + UCR1);
+	if (sport->have_rtscts) {
+		val = readl(sport->port.membase + UCR1);
+		if (on)
+			val |= UCR1_RTSDEN;
+		else
+			val &= ~UCR1_RTSDEN;
+		writel(val, sport->port.membase + UCR1);
+	}
 }
 
 static int imx_serial_port_suspend_noirq(struct device *dev)

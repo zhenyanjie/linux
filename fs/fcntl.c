@@ -7,7 +7,6 @@
 #include <linux/syscalls.h>
 #include <linux/init.h>
 #include <linux/mm.h>
-#include <linux/sched/task.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/fdtable.h>
@@ -26,7 +25,7 @@
 
 #include <asm/poll.h>
 #include <asm/siginfo.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #define SETFL_MASK (O_APPEND | O_NONBLOCK | O_NDELAY | O_DIRECT | O_NOATIME)
 
@@ -53,7 +52,7 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 		   arg |= O_NONBLOCK;
 
 	/* Pipe packetized mode is controlled by O_DIRECT flag */
-	if (!S_ISFIFO(inode->i_mode) && (arg & O_DIRECT)) {
+	if (!S_ISFIFO(filp->f_inode->i_mode) && (arg & O_DIRECT)) {
 		if (!filp->f_mapping || !filp->f_mapping->a_ops ||
 			!filp->f_mapping->a_ops->direct_IO)
 				return -EINVAL;
@@ -115,6 +114,10 @@ void f_setown(struct file *filp, unsigned long arg, int force)
 	int who = arg;
 	type = PIDTYPE_PID;
 	if (who < 0) {
+		/* avoid overflow below */
+		if (who == INT_MIN)
+			return;
+
 		type = PIDTYPE_PGID;
 		who = -who;
 	}

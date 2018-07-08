@@ -61,24 +61,16 @@ property can be omitted.
 
 Examples:
 
-gpio-leds {
-	compatible = "gpio-leds";
-
-	system-status {
-		label = "Status";
-		linux,default-trigger = "heartbeat";
-		gpios = <&gpio0 0 GPIO_ACTIVE_HIGH>;
-	};
+system-status {
+	label = "Status";
+	linux,default-trigger = "heartbeat";
+	...
 };
 
-max77693-led {
-	compatible = "maxim,max77693-led";
-
-	camera-flash {
-		label = "Flash";
-		led-sources = <0>, <1>;
-		led-max-microamp = <50000>;
-		flash-max-microamp = <320000>;
-		flash-max-timeout-us = <500000>;
-	};
+camera-flash {
+	label = "Flash";
+	led-sources = <0>, <1>;
+	led-max-microamp = <50000>;
+	flash-max-microamp = <320000>;
+	flash-max-timeout-us = <500000>;
 };

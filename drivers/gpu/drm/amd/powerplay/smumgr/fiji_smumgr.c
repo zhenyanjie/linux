@@ -21,7 +21,6 @@
  *
  */
 
-#include "pp_debug.h"
 #include "smumgr.h"
 #include "smu73.h"
 #include "smu_ucode_xfer_vi.h"
@@ -37,6 +36,7 @@
 #include "gca/gfx_8_0_d.h"
 #include "bif/bif_5_0_d.h"
 #include "bif/bif_5_0_sh_mask.h"
+#include "pp_debug.h"
 #include "fiji_pwrvirus.h"
 #include "fiji_smc.h"
 
@@ -159,7 +159,7 @@ static int fiji_start_smu_in_non_protection_mode(struct pp_smumgr *smumgr)
 	return result;
 }
 
-static int fiji_setup_pwr_virus(struct pp_smumgr *smumgr)
+int fiji_setup_pwr_virus(struct pp_smumgr *smumgr)
 {
 	int i, result = -1;
 	uint32_t reg, data;
@@ -179,7 +179,7 @@ static int fiji_setup_pwr_virus(struct pp_smumgr *smumgr)
 			result = 0;
 			break;
 		default:
-			pr_err("Table Exit with Invalid Command!");
+			printk(KERN_ERR "Table Exit with Invalid Command!");
 			priv->avfs.AvfsBtcStatus = AVFS_BTC_VIRUS_FAIL;
 			result = -1;
 			break;
@@ -202,13 +202,13 @@ static int fiji_start_avfs_btc(struct pp_smumgr *smumgr)
 				priv->avfs.AvfsBtcStatus = AVFS_BTC_COMPLETED_UNSAVED;
 				result = 0;
 			} else {
-				pr_err("[AVFS][fiji_start_avfs_btc] Attempt"
+				printk(KERN_ERR "[AVFS][fiji_start_avfs_btc] Attempt"
 						" to Enable AVFS Failed!");
 				smum_send_msg_to_smc(smumgr, PPSMC_MSG_DisableAvfs);
 				result = -1;
 			}
 		} else {
-			pr_err("[AVFS][fiji_start_avfs_btc] "
+			printk(KERN_ERR "[AVFS][fiji_start_avfs_btc] "
 					"PerformBTC SMU msg failed");
 			result = -1;
 		}
@@ -224,7 +224,7 @@ static int fiji_start_avfs_btc(struct pp_smumgr *smumgr)
 	return result;
 }
 
-static int fiji_setup_pm_fuse_for_avfs(struct pp_smumgr *smumgr)
+int fiji_setup_pm_fuse_for_avfs(struct pp_smumgr *smumgr)
 {
 	int result = 0;
 	uint32_t table_start;
@@ -260,7 +260,7 @@ static int fiji_setup_pm_fuse_for_avfs(struct pp_smumgr *smumgr)
 	return result;
 }
 
-static int fiji_setup_graphics_level_structure(struct pp_smumgr *smumgr)
+int fiji_setup_graphics_level_structure(struct pp_smumgr *smumgr)
 {
 	int32_t vr_config;
 	uint32_t table_start;
@@ -299,7 +299,7 @@ static int fiji_setup_graphics_level_structure(struct pp_smumgr *smumgr)
 }
 
 /* Work in Progress */
-static int fiji_restore_vft_table(struct pp_smumgr *smumgr)
+int fiji_restore_vft_table(struct pp_smumgr *smumgr)
 {
 	struct fiji_smumgr *priv = (struct fiji_smumgr *)(smumgr->backend);
 
@@ -311,7 +311,7 @@ static int fiji_restore_vft_table(struct pp_smumgr *smumgr)
 }
 
 /* Work in Progress */
-static int fiji_save_vft_table(struct pp_smumgr *smumgr)
+int fiji_save_vft_table(struct pp_smumgr *smumgr)
 {
 	struct fiji_smumgr *priv = (struct fiji_smumgr *)(smumgr->backend);
 
@@ -322,7 +322,7 @@ static int fiji_save_vft_table(struct pp_smumgr *smumgr)
 		return -EINVAL;
 }
 
-static int fiji_avfs_event_mgr(struct pp_smumgr *smumgr, bool smu_started)
+int fiji_avfs_event_mgr(struct pp_smumgr *smumgr, bool smu_started)
 {
 	struct fiji_smumgr *priv = (struct fiji_smumgr *)(smumgr->backend);
 
@@ -384,7 +384,7 @@ static int fiji_avfs_event_mgr(struct pp_smumgr *smumgr, bool smu_started)
 	case AVFS_BTC_NOTSUPPORTED: /* Do nothing */
 		break;
 	default:
-		pr_err("[AVFS] Something is broken. See log!");
+		printk(KERN_ERR "[AVFS] Something is broken. See log!");
 		break;
 	}
 	return 0;
@@ -396,8 +396,7 @@ static int fiji_start_smu(struct pp_smumgr *smumgr)
 	struct fiji_smumgr *priv = (struct fiji_smumgr *)(smumgr->backend);
 
 	/* Only start SMC if SMC RAM is not running */
-	if (!(smu7_is_smc_ram_running(smumgr)
-		|| cgs_is_virtualization_enabled(smumgr->device))) {
+	if (!smu7_is_smc_ram_running(smumgr)) {
 		fiji_avfs_event_mgr(smumgr, false);
 
 		/* Check if SMU is running in protected mode */
@@ -444,9 +443,6 @@ static bool fiji_is_hw_avfs_present(struct pp_smumgr *smumgr)
 	uint32_t efuse = 0;
 	uint32_t mask = (1 << ((AVFS_EN_MSB - AVFS_EN_LSB) + 1)) - 1;
 
-	if (cgs_is_virtualization_enabled(smumgr->device))
-		return 0;
-
 	if (!atomctrl_read_efuse(smumgr->device, AVFS_EN_LSB, AVFS_EN_MSB,
 			mask, &efuse)) {
 		if (efuse)
@@ -464,20 +460,13 @@ static bool fiji_is_hw_avfs_present(struct pp_smumgr *smumgr)
 */
 static int fiji_smu_init(struct pp_smumgr *smumgr)
 {
+	struct fiji_smumgr *priv = (struct fiji_smumgr *)(smumgr->backend);
 	int i;
-	struct fiji_smumgr *fiji_priv = NULL;
-
-	fiji_priv = kzalloc(sizeof(struct fiji_smumgr), GFP_KERNEL);
-
-	if (fiji_priv == NULL)
-		return -ENOMEM;
-
-	smumgr->backend = fiji_priv;
 
 	if (smu7_init(smumgr))
 		return -EINVAL;
 
-	fiji_priv->avfs.AvfsBtcStatus = AVFS_BTC_BOOT;
+	priv->avfs.AvfsBtcStatus = AVFS_BTC_BOOT;
 	if (fiji_is_hw_avfs_present(smumgr))
 		/* AVFS Parameter
 		 * 0 - BTC DC disabled, BTC AC disabled
@@ -486,18 +475,18 @@ static int fiji_smu_init(struct pp_smumgr *smumgr)
 		 * 3 - BTC DC enabled,  BTC AC enabled
 		 * Default is 0 - BTC DC disabled, BTC AC disabled
 		 */
-		fiji_priv->avfs.AvfsBtcParam = 0;
+		priv->avfs.AvfsBtcParam = 0;
 	else
-		fiji_priv->avfs.AvfsBtcStatus = AVFS_BTC_NOTSUPPORTED;
+		priv->avfs.AvfsBtcStatus = AVFS_BTC_NOTSUPPORTED;
 
 	for (i = 0; i < SMU73_MAX_LEVELS_GRAPHICS; i++)
-		fiji_priv->activity_target[i] = 30;
+		priv->activity_target[i] = 30;
 
 	return 0;
 }
 
 
-const struct pp_smumgr_func fiji_smu_funcs = {
+static const struct pp_smumgr_func fiji_smu_funcs = {
 	.smu_init = &fiji_smu_init,
 	.smu_fini = &smu7_smu_fini,
 	.start_smu = &fiji_start_smu,
@@ -520,3 +509,18 @@ const struct pp_smumgr_func fiji_smu_funcs = {
 	.initialize_mc_reg_table = fiji_initialize_mc_reg_table,
 	.is_dpm_running = fiji_is_dpm_running,
 };
+
+int fiji_smum_init(struct pp_smumgr *smumgr)
+{
+	struct fiji_smumgr *fiji_smu = NULL;
+
+	fiji_smu = kzalloc(sizeof(struct fiji_smumgr), GFP_KERNEL);
+
+	if (fiji_smu == NULL)
+		return -ENOMEM;
+
+	smumgr->backend = fiji_smu;
+	smumgr->smumgr_funcs = &fiji_smu_funcs;
+
+	return 0;
+}

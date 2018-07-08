@@ -70,10 +70,10 @@ static void amdgpu_bo_list_destroy(struct amdgpu_fpriv *fpriv, int id)
 	struct amdgpu_bo_list *list;
 
 	mutex_lock(&fpriv->bo_list_lock);
-	list = idr_remove(&fpriv->bo_list_handles, id);
+	list = idr_find(&fpriv->bo_list_handles, id);
 	if (list) {
-		/* Another user may have a reference to this list still */
 		mutex_lock(&list->lock);
+		idr_remove(&fpriv->bo_list_handles, id);
 		mutex_unlock(&list->lock);
 		amdgpu_bo_list_free(list);
 	}
@@ -201,8 +201,10 @@ void amdgpu_bo_list_get_list(struct amdgpu_bo_list *list,
 	for (i = 0; i < list->num_entries; i++) {
 		unsigned priority = list->array[i].priority;
 
-		list_add_tail(&list->array[i].tv.head,
-			      &bucket[priority]);
+		if (!list->array[i].robj->parent)
+			list_add_tail(&list->array[i].tv.head,
+				      &bucket[priority]);
+
 		list->array[i].user_pages = NULL;
 	}
 

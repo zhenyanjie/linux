@@ -37,8 +37,8 @@ static const struct mac_stats_string g_gmac_stats_string[] = {
 	{"gmac_rx_very_long_err", MAC_STATS_FIELD_OFF(rx_long_err)},
 	{"gmac_rx_runt_err", MAC_STATS_FIELD_OFF(rx_minto64)},
 	{"gmac_rx_short_err", MAC_STATS_FIELD_OFF(rx_under_min)},
-	{"gmac_rx_filt_pkt", MAC_STATS_FIELD_OFF(rx_filter_pkts)},
-	{"gmac_rx_octets_total_filt", MAC_STATS_FIELD_OFF(rx_filter_bytes)},
+	{"gmac_rx_filt_pkt", MAC_STATS_FIELD_OFF(rx_filter_bytes)},
+	{"gmac_rx_octets_total_filt", MAC_STATS_FIELD_OFF(rx_filter_pkts)},
 	{"gmac_rx_overrun_cnt", MAC_STATS_FIELD_OFF(rx_fifo_overrun_err)},
 	{"gmac_rx_length_err", MAC_STATS_FIELD_OFF(rx_len_err)},
 	{"gmac_rx_fail_comma", MAC_STATS_FIELD_OFF(rx_comma_err)},
@@ -86,12 +86,11 @@ static void hns_gmac_disable(void *mac_drv, enum mac_commom_mode mode)
 		dsaf_set_dev_bit(drv, GMAC_PORT_EN_REG, GMAC_PORT_RX_EN_B, 0);
 }
 
-/**
-*hns_gmac_get_en - get port enable
-*@mac_drv:mac device
-*@rx:rx enable
-*@tx:tx enable
-*/
+/* hns_gmac_get_en - get port enable
+ * @mac_drv:mac device
+ * @rx:rx enable
+ * @tx:tx enable
+ */
 static void hns_gmac_get_en(void *mac_drv, u32 *rx, u32 *tx)
 {
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;

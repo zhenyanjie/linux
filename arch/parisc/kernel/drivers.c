@@ -40,7 +40,7 @@
 #include <asm/parisc-device.h>
 
 /* See comments in include/asm-parisc/pci.h */
-const struct dma_map_ops *hppa_dma_ops __read_mostly;
+struct dma_map_ops *hppa_dma_ops __read_mostly;
 EXPORT_SYMBOL(hppa_dma_ops);
 
 static struct device root = {
@@ -647,6 +647,10 @@ static int match_pci_device(struct device *dev, int index,
 		return ((modpath->bc[5] == PCI_SLOT(devfn)) &&
 					(modpath->mod == PCI_FUNC(devfn)));
 	}
+
+	/* index might be out of bounds for bc[] */
+	if (index >= 6)
+		return 0;
 
 	id = PCI_SLOT(pdev->devfn) | (PCI_FUNC(pdev->devfn) << 5);
 	return (modpath->bc[index] == id);

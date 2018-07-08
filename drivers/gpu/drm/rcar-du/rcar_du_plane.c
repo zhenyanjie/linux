@@ -567,10 +567,10 @@ static int rcar_du_plane_atomic_check(struct drm_plane *plane,
 		return -EINVAL;
 	}
 
-	rstate->format = rcar_du_format_info(state->fb->format->format);
+	rstate->format = rcar_du_format_info(state->fb->pixel_format);
 	if (rstate->format == NULL) {
 		dev_dbg(rcdu->dev, "%s: unsupported format %08x\n", __func__,
-			state->fb->format->format);
+			state->fb->pixel_format);
 		return -EINVAL;
 	}
 

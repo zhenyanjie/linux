@@ -100,43 +100,39 @@ static DEFINE_MUTEX(ashmem_mutex);
 static struct kmem_cache *ashmem_area_cachep __read_mostly;
 static struct kmem_cache *ashmem_range_cachep __read_mostly;
 
-static inline unsigned long range_size(struct ashmem_range *range)
+#define range_size(range) \
+	((range)->pgend - (range)->pgstart + 1)
+
+#define range_on_lru(range) \
+	((range)->purged == ASHMEM_NOT_PURGED)
+
+static inline int page_range_subsumes_range(struct ashmem_range *range,
+					    size_t start, size_t end)
 {
-	return range->pgend - range->pgstart + 1;
+	return (((range)->pgstart >= (start)) && ((range)->pgend <= (end)));
 }
 
-static inline bool range_on_lru(struct ashmem_range *range)
+static inline int page_range_subsumed_by_range(struct ashmem_range *range,
+					       size_t start, size_t end)
 {
-	return range->purged == ASHMEM_NOT_PURGED;
+	return (((range)->pgstart <= (start)) && ((range)->pgend >= (end)));
 }
 
-static inline bool page_range_subsumes_range(struct ashmem_range *range,
-					     size_t start, size_t end)
+static inline int page_in_range(struct ashmem_range *range, size_t page)
 {
-	return (range->pgstart >= start) && (range->pgend <= end);
+	return (((range)->pgstart <= (page)) && ((range)->pgend >= (page)));
 }
 
-static inline bool page_range_subsumed_by_range(struct ashmem_range *range,
-						size_t start, size_t end)
+static inline int page_range_in_range(struct ashmem_range *range,
+				      size_t start, size_t end)
 {
-	return (range->pgstart <= start) && (range->pgend >= end);
+	return (page_in_range(range, start) || page_in_range(range, end) ||
+		page_range_subsumes_range(range, start, end));
 }
 
-static inline bool page_in_range(struct ashmem_range *range, size_t page)
+static inline int range_before_page(struct ashmem_range *range, size_t page)
 {
-	return (range->pgstart <= page) && (range->pgend >= page);
-}
-
-static inline bool page_range_in_range(struct ashmem_range *range,
-				       size_t start, size_t end)
-{
-	return page_in_range(range, start) || page_in_range(range, end) ||
-		page_range_subsumes_range(range, start, end);
-}
-
-static inline bool range_before_page(struct ashmem_range *range, size_t page)
-{
-	return range->pgend < page;
+	return ((range)->pgend < (page));
 }
 
 #define PROT_MASK		(PROT_EXEC | PROT_READ | PROT_WRITE)
@@ -347,24 +343,23 @@ static loff_t ashmem_llseek(struct file *file, loff_t offset, int origin)
 	mutex_lock(&ashmem_mutex);
 
 	if (asma->size == 0) {
-		ret = -EINVAL;
-		goto out;
+		mutex_unlock(&ashmem_mutex);
+		return -EINVAL;
 	}
 
 	if (!asma->file) {
-		ret = -EBADF;
-		goto out;
+		mutex_unlock(&ashmem_mutex);
+		return -EBADF;
 	}
+
+	mutex_unlock(&ashmem_mutex);
 
 	ret = vfs_llseek(asma->file, offset, origin);
 	if (ret < 0)
-		goto out;
+		return ret;
 
 	/** Copy f_pos from backing file, since f_ops->llseek() sets it */
 	file->f_pos = asma->file->f_pos;
-
-out:
-	mutex_unlock(&ashmem_mutex);
 	return ret;
 }
 
@@ -723,29 +718,29 @@ static int ashmem_pin_unpin(struct ashmem_area *asma, unsigned long cmd,
 	size_t pgstart, pgend;
 	int ret = -EINVAL;
 
-	if (unlikely(!asma->file))
-		return -EINVAL;
-
 	if (unlikely(copy_from_user(&pin, p, sizeof(pin))))
 		return -EFAULT;
+
+	mutex_lock(&ashmem_mutex);
+
+	if (unlikely(!asma->file))
+		goto out_unlock;
 
 	/* per custom, you can pass zero for len to mean "everything onward" */
 	if (!pin.len)
 		pin.len = PAGE_ALIGN(asma->size) - pin.offset;
 
 	if (unlikely((pin.offset | pin.len) & ~PAGE_MASK))
-		return -EINVAL;
+		goto out_unlock;
 
 	if (unlikely(((__u32)-1) - pin.offset < pin.len))
-		return -EINVAL;
+		goto out_unlock;
 
 	if (unlikely(PAGE_ALIGN(asma->size) < pin.offset + pin.len))
-		return -EINVAL;
+		goto out_unlock;
 
 	pgstart = pin.offset / PAGE_SIZE;
 	pgend = pgstart + (pin.len / PAGE_SIZE) - 1;
-
-	mutex_lock(&ashmem_mutex);
 
 	switch (cmd) {
 	case ASHMEM_PIN:
@@ -759,6 +754,7 @@ static int ashmem_pin_unpin(struct ashmem_area *asma, unsigned long cmd,
 		break;
 	}
 
+out_unlock:
 	mutex_unlock(&ashmem_mutex);
 
 	return ret;
@@ -778,10 +774,12 @@ static long ashmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	case ASHMEM_SET_SIZE:
 		ret = -EINVAL;
+		mutex_lock(&ashmem_mutex);
 		if (!asma->file) {
 			ret = 0;
 			asma->size = (size_t)arg;
 		}
+		mutex_unlock(&ashmem_mutex);
 		break;
 	case ASHMEM_GET_SIZE:
 		ret = asma->size;

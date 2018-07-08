@@ -22,6 +22,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/timer.h>
+#include <linux/version.h>
 #include <linux/workqueue.h>
 #include <media/cec.h>
 
@@ -203,11 +204,12 @@ static int s5p_cec_probe(struct platform_device *pdev)
 	cec->adap = cec_allocate_adapter(&s5p_cec_adap_ops, cec,
 		CEC_NAME,
 		CEC_CAP_PHYS_ADDR | CEC_CAP_LOG_ADDRS | CEC_CAP_TRANSMIT |
-		CEC_CAP_PASSTHROUGH | CEC_CAP_RC, 1);
+		CEC_CAP_PASSTHROUGH | CEC_CAP_RC,
+		1, &pdev->dev);
 	ret = PTR_ERR_OR_ZERO(cec->adap);
 	if (ret)
 		return ret;
-	ret = cec_register_adapter(cec->adap, &pdev->dev);
+	ret = cec_register_adapter(cec->adap);
 	if (ret) {
 		cec_delete_adapter(cec->adap);
 		return ret;
@@ -261,7 +263,6 @@ static const struct of_device_id s5p_cec_match[] = {
 	},
 	{},
 };
-MODULE_DEVICE_TABLE(of, s5p_cec_match);
 
 static struct platform_driver s5p_cec_pdrv = {
 	.probe	= s5p_cec_probe,

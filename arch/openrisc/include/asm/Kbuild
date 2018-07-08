@@ -1,6 +1,7 @@
 
 header-y += ucontext.h
 
+generic-y += atomic.h
 generic-y += auxvec.h
 generic-y += barrier.h
 generic-y += bitsperlong.h
@@ -9,6 +10,9 @@ generic-y += bugs.h
 generic-y += cacheflush.h
 generic-y += checksum.h
 generic-y += clkdev.h
+generic-y += cmpxchg-local.h
+generic-y += cmpxchg.h
+generic-y += cputime.h
 generic-y += current.h
 generic-y += device.h
 generic-y += div64.h
@@ -19,12 +23,12 @@ generic-y += exec.h
 generic-y += fb.h
 generic-y += fcntl.h
 generic-y += ftrace.h
+generic-y += futex.h
 generic-y += hardirq.h
 generic-y += hw_irq.h
 generic-y += ioctl.h
 generic-y += ioctls.h
 generic-y += ipcbuf.h
-generic-y += irq.h
 generic-y += irq_regs.h
 generic-y += irq_work.h
 generic-y += kdebug.h
@@ -67,4 +71,3 @@ generic-y += user.h
 generic-y += vga.h
 generic-y += word-at-a-time.h
 generic-y += xor.h
-generic-y += kprobes.h

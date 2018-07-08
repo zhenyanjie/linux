@@ -17,6 +17,7 @@
 #include <linux/edac.h>
 #include <linux/gfp.h>
 
+#include "edac_core.h"
 #include "edac_module.h"
 #include "mv64x60_edac.h"
 
@@ -758,7 +759,7 @@ static int mv64x60_mc_err_probe(struct platform_device *pdev)
 		/* Non-ECC RAM? */
 		printk(KERN_WARNING "%s: No ECC DIMMs discovered\n", __func__);
 		res = -ENODEV;
-		goto err2;
+		goto err;
 	}
 
 	edac_dbg(3, "init mci\n");

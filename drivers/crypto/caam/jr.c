@@ -496,24 +496,15 @@ static int caam_jr_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	jrpriv->rregs = (struct caam_job_ring __iomem __force *)ctrl;
+	jrpriv->rregs = (struct caam_job_ring __force *)ctrl;
 
-	if (sizeof(dma_addr_t) == sizeof(u64)) {
+	if (sizeof(dma_addr_t) == sizeof(u64))
 		if (of_device_is_compatible(nprop, "fsl,sec-v5.0-job-ring"))
-			error = dma_set_mask_and_coherent(jrdev,
-							  DMA_BIT_MASK(40));
+			dma_set_mask_and_coherent(jrdev, DMA_BIT_MASK(40));
 		else
-			error = dma_set_mask_and_coherent(jrdev,
-							  DMA_BIT_MASK(36));
-	} else {
-		error = dma_set_mask_and_coherent(jrdev, DMA_BIT_MASK(32));
-	}
-	if (error) {
-		dev_err(jrdev, "dma_set_mask_and_coherent failed (%d)\n",
-			error);
-		iounmap(ctrl);
-		return error;
-	}
+			dma_set_mask_and_coherent(jrdev, DMA_BIT_MASK(36));
+	else
+		dma_set_mask_and_coherent(jrdev, DMA_BIT_MASK(32));
 
 	/* Identify the interrupt */
 	jrpriv->irq = irq_of_parse_and_map(nprop, 0);

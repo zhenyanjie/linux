@@ -25,8 +25,7 @@
 #include <linux/personality.h>
 #include <linux/mm.h>
 #include <linux/random.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/elf-randomize.h>
 #include <linux/security.h>
 #include <linux/mman.h>

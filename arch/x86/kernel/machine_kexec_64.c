@@ -37,8 +37,11 @@ static struct kexec_file_ops *kexec_file_loaders[] = {
 static void free_transition_pgtable(struct kimage *image)
 {
 	free_page((unsigned long)image->arch.pud);
+	image->arch.pud = NULL;
 	free_page((unsigned long)image->arch.pmd);
+	image->arch.pmd = NULL;
 	free_page((unsigned long)image->arch.pte);
+	image->arch.pte = NULL;
 }
 
 static int init_transition_pgtable(struct kimage *image, pgd_t *pgd)
@@ -79,7 +82,6 @@ static int init_transition_pgtable(struct kimage *image, pgd_t *pgd)
 	set_pte(pte, pfn_pte(paddr >> PAGE_SHIFT, PAGE_KERNEL_EXEC));
 	return 0;
 err:
-	free_transition_pgtable(image);
 	return result;
 }
 
@@ -194,22 +196,19 @@ static int arch_update_purgatory(struct kimage *image)
 
 	/* Setup copying of backup region */
 	if (image->type == KEXEC_TYPE_CRASH) {
-		ret = kexec_purgatory_get_set_symbol(image,
-				"purgatory_backup_dest",
+		ret = kexec_purgatory_get_set_symbol(image, "backup_dest",
 				&image->arch.backup_load_addr,
 				sizeof(image->arch.backup_load_addr), 0);
 		if (ret)
 			return ret;
 
-		ret = kexec_purgatory_get_set_symbol(image,
-				"purgatory_backup_src",
+		ret = kexec_purgatory_get_set_symbol(image, "backup_src",
 				&image->arch.backup_src_start,
 				sizeof(image->arch.backup_src_start), 0);
 		if (ret)
 			return ret;
 
-		ret = kexec_purgatory_get_set_symbol(image,
-				"purgatory_backup_sz",
+		ret = kexec_purgatory_get_set_symbol(image, "backup_sz",
 				&image->arch.backup_src_sz,
 				sizeof(image->arch.backup_src_sz), 0);
 		if (ret)
@@ -331,7 +330,7 @@ void machine_kexec(struct kimage *image)
 
 void arch_crash_save_vmcoreinfo(void)
 {
-	VMCOREINFO_NUMBER(phys_base);
+	VMCOREINFO_SYMBOL(phys_base);
 	VMCOREINFO_SYMBOL(init_level4_pgt);
 
 #ifdef CONFIG_NUMA
@@ -340,7 +339,9 @@ void arch_crash_save_vmcoreinfo(void)
 #endif
 	vmcoreinfo_append_str("KERNELOFFSET=%lx\n",
 			      kaslr_offset());
-	VMCOREINFO_NUMBER(KERNEL_IMAGE_SIZE);
+	VMCOREINFO_PAGE_OFFSET(PAGE_OFFSET);
+	VMCOREINFO_VMALLOC_START(VMALLOC_START);
+	VMCOREINFO_VMEMMAP_START(VMEMMAP_START);
 }
 
 /* arch-dependent functionality related to kexec file-based syscall */
@@ -525,6 +526,7 @@ int arch_kexec_apply_relocations_add(const Elf64_Ehdr *ehdr,
 				goto overflow;
 			break;
 		case R_X86_64_PC32:
+		case R_X86_64_PLT32:
 			value -= (u64)address;
 			*(u32 *)location = value;
 			break;

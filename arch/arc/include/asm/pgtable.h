@@ -37,7 +37,6 @@
 
 #include <asm/page.h>
 #include <asm/mmu.h>
-#define __ARCH_USE_5LEVEL_HACK
 #include <asm-generic/pgtable-nopmd.h>
 #include <linux/const.h>
 

@@ -31,7 +31,7 @@
 #include <linux/if_arp.h>
 #include <linux/icmp.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/init.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/if_ether.h>
@@ -76,7 +76,7 @@ static bool check_6rd(struct ip_tunnel *tunnel, const struct in6_addr *v6dst,
 		      __be32 *v4dst);
 static struct rtnl_link_ops sit_link_ops __read_mostly;
 
-static unsigned int sit_net_id __read_mostly;
+static int sit_net_id __read_mostly;
 struct sit_net {
 	struct ip_tunnel __rcu *tunnels_r_l[IP6_SIT_HASH_SIZE];
 	struct ip_tunnel __rcu *tunnels_r[IP6_SIT_HASH_SIZE];
@@ -176,7 +176,7 @@ static void ipip6_tunnel_clone_6rd(struct net_device *dev, struct sit_net *sitn)
 #ifdef CONFIG_IPV6_SIT_6RD
 	struct ip_tunnel *t = netdev_priv(dev);
 
-	if (t->dev == sitn->fb_tunnel_dev) {
+	if (dev == sitn->fb_tunnel_dev) {
 		ipv6_addr_set(&t->ip6rd.prefix, htonl(0x20020000), 0, 0, 0);
 		t->ip6rd.relay_prefix = 0;
 		t->ip6rd.prefixlen = 16;
@@ -244,11 +244,13 @@ static struct ip_tunnel *ipip6_tunnel_locate(struct net *net,
 	if (!create)
 		goto failed;
 
-	if (parms->name[0])
+	if (parms->name[0]) {
+		if (!dev_valid_name(parms->name))
+			goto failed;
 		strlcpy(name, parms->name, IFNAMSIZ);
-	else
+	} else {
 		strcpy(name, "sit%d");
-
+	}
 	dev = alloc_netdev(sizeof(*t), name, NET_NAME_UNKNOWN,
 			   ipip6_tunnel_setup);
 	if (!dev)
@@ -265,7 +267,7 @@ static struct ip_tunnel *ipip6_tunnel_locate(struct net *net,
 	return nt;
 
 failed_free:
-	free_netdev(dev);
+	ipip6_dev_free(dev);
 failed:
 	return NULL;
 }
@@ -657,6 +659,7 @@ static int ipip6_rcv(struct sk_buff *skb)
 		if (iptunnel_pull_header(skb, 0, htons(ETH_P_IPV6),
 		    !net_eq(tunnel->net, dev_net(tunnel->dev))))
 			goto out;
+		iph = ip_hdr(skb);
 
 		err = IP_ECN_decapsulate(iph, skb);
 		if (unlikely(err)) {
@@ -1085,6 +1088,7 @@ static void ipip6_tunnel_update(struct ip_tunnel *t, struct ip_tunnel_parm *p)
 	ipip6_tunnel_link(sitn, t);
 	t->parms.iph.ttl = p->iph.ttl;
 	t->parms.iph.tos = p->iph.tos;
+	t->parms.iph.frag_off = p->iph.frag_off;
 	if (t->parms.link != p->link) {
 		t->parms.link = p->link;
 		ipip6_tunnel_bind_dev(t->dev);
@@ -1318,11 +1322,23 @@ done:
 	return err;
 }
 
+static int ipip6_tunnel_change_mtu(struct net_device *dev, int new_mtu)
+{
+	struct ip_tunnel *tunnel = netdev_priv(dev);
+	int t_hlen = tunnel->hlen + sizeof(struct iphdr);
+
+	if (new_mtu < IPV6_MIN_MTU || new_mtu > 0xFFF8 - t_hlen)
+		return -EINVAL;
+	dev->mtu = new_mtu;
+	return 0;
+}
+
 static const struct net_device_ops ipip6_netdev_ops = {
 	.ndo_init	= ipip6_tunnel_init,
 	.ndo_uninit	= ipip6_tunnel_uninit,
 	.ndo_start_xmit	= sit_tunnel_xmit,
 	.ndo_do_ioctl	= ipip6_tunnel_ioctl,
+	.ndo_change_mtu	= ipip6_tunnel_change_mtu,
 	.ndo_get_stats64 = ip_tunnel_get_stats64,
 	.ndo_get_iflink = ip_tunnel_get_iflink,
 };
@@ -1333,6 +1349,7 @@ static void ipip6_dev_free(struct net_device *dev)
 
 	dst_cache_destroy(&tunnel->dst_cache);
 	free_percpu(dev->tstats);
+	free_netdev(dev);
 }
 
 #define SIT_FEATURES (NETIF_F_SG	   | \
@@ -1347,14 +1364,11 @@ static void ipip6_tunnel_setup(struct net_device *dev)
 	int t_hlen = tunnel->hlen + sizeof(struct iphdr);
 
 	dev->netdev_ops		= &ipip6_netdev_ops;
-	dev->needs_free_netdev	= true;
-	dev->priv_destructor	= ipip6_dev_free;
+	dev->destructor		= ipip6_dev_free;
 
 	dev->type		= ARPHRD_SIT;
 	dev->hard_header_len	= LL_MAX_HEADER + t_hlen;
 	dev->mtu		= ETH_DATA_LEN - t_hlen;
-	dev->min_mtu		= IPV6_MIN_MTU;
-	dev->max_mtu		= 0xFFF8 - t_hlen;
 	dev->flags		= IFF_NOARP;
 	netif_keep_dst(dev);
 	dev->addr_len		= 4;
@@ -1557,6 +1571,13 @@ static int ipip6_newlink(struct net *src_net, struct net_device *dev,
 	err = ipip6_tunnel_create(dev);
 	if (err < 0)
 		return err;
+
+	if (tb[IFLA_MTU]) {
+		u32 mtu = nla_get_u32(tb[IFLA_MTU]);
+
+		if (mtu >= IPV6_MIN_MTU && mtu <= 0xFFF8 - dev->hard_header_len)
+			dev->mtu = mtu;
+	}
 
 #ifdef CONFIG_IPV6_SIT_6RD
 	if (ipip6_netlink_6rd_parms(data, &ip6rd))

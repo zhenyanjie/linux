@@ -4,7 +4,7 @@
  * Copyright 1997, Theodore Ts'o
  */
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/errno.h>
@@ -14,6 +14,7 @@
 #include <linux/tty.h>
 #include <linux/seq_file.h>
 #include <linux/bitops.h>
+#include "internal.h"
 
 /*
  * The /proc/tty directory inodes...
@@ -164,7 +165,7 @@ void proc_tty_unregister_driver(struct tty_driver *driver)
 	if (!ent)
 		return;
 		
-	remove_proc_entry(driver->driver_name, proc_tty_driver);
+	remove_proc_entry(ent->name, proc_tty_driver);
 	
 	driver->proc_entry = NULL;
 }

@@ -17,7 +17,7 @@
 #include <linux/sysctl.h>
 #include <linux/moduleparam.h>
 
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/errno.h>
 #include <linux/in.h>
 #include <linux/uio.h>
@@ -57,7 +57,7 @@ static struct task_struct	*nlmsvc_task;
 static struct svc_rqst		*nlmsvc_rqst;
 unsigned long			nlmsvc_timeout;
 
-unsigned int lockd_net_id;
+int lockd_net_id;
 
 /*
  * These can be set at insmod time (useful for NFS as root filesystem),
@@ -132,6 +132,8 @@ lockd(void *vrqstp)
 {
 	int		err = 0;
 	struct svc_rqst *rqstp = vrqstp;
+	struct net *net = &init_net;
+	struct lockd_net *ln = net_generic(net, lockd_net_id);
 
 	/* try_to_freeze() is called from svc_recv() */
 	set_freezable();
@@ -176,6 +178,8 @@ lockd(void *vrqstp)
 	if (nlmsvc_ops)
 		nlmsvc_invalidate_all();
 	nlm_shutdown_hosts();
+	cancel_delayed_work_sync(&ln->grace_period_end);
+	locks_end_grace(&ln->lockd_manager);
 	return 0;
 }
 
@@ -322,8 +326,6 @@ static int lockd_inet6addr_event(struct notifier_block *this,
 		dprintk("lockd_inet6addr_event: removed %pI6\n", &ifa->addr);
 		sin6.sin6_family = AF_INET6;
 		sin6.sin6_addr = ifa->addr;
-		if (ipv6_addr_type(&sin6.sin6_addr) & IPV6_ADDR_LINKLOCAL)
-			sin6.sin6_scope_id = ifa->idev->dev->ifindex;
 		svc_age_temp_xprts_now(nlmsvc_rqst->rq_server,
 			(struct sockaddr *)&sin6);
 	}
@@ -367,6 +369,7 @@ static int lockd_start_svc(struct svc_serv *serv)
 		printk(KERN_WARNING
 			"lockd_up: svc_rqst allocation failed, error=%d\n",
 			error);
+		lockd_unregister_notifiers();
 		goto out_rqst;
 	}
 
@@ -457,13 +460,16 @@ int lockd_up(struct net *net)
 	}
 
 	error = lockd_up_net(serv, net);
-	if (error < 0)
-		goto err_net;
+	if (error < 0) {
+		lockd_unregister_notifiers();
+		goto err_put;
+	}
 
 	error = lockd_start_svc(serv);
-	if (error < 0)
-		goto err_start;
-
+	if (error < 0) {
+		lockd_down_net(serv, net);
+		goto err_put;
+	}
 	nlmsvc_users++;
 	/*
 	 * Note: svc_serv structures have an initial use count of 1,
@@ -474,12 +480,6 @@ err_put:
 err_create:
 	mutex_unlock(&nlmsvc_mutex);
 	return error;
-
-err_start:
-	lockd_down_net(serv, net);
-err_net:
-	lockd_unregister_notifiers();
-	goto err_put;
 }
 EXPORT_SYMBOL_GPL(lockd_up);
 

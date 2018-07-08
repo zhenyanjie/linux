@@ -22,8 +22,6 @@
 
 #include <linux/fs.h>
 #include <linux/pagemap.h>
-#include <linux/sched/signal.h>
-
 #include "ecryptfs_kernel.h"
 
 /**

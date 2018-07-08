@@ -329,14 +329,11 @@ static int ad9834_probe(struct spi_device *spi)
 		return -ENODEV;
 	}
 
-	reg = devm_regulator_get(&spi->dev, "avdd");
-	if (IS_ERR(reg))
-		return PTR_ERR(reg);
-
-	ret = regulator_enable(reg);
-	if (ret) {
-		dev_err(&spi->dev, "Failed to enable specified AVDD supply\n");
-		return ret;
+	reg = devm_regulator_get(&spi->dev, "vcc");
+	if (!IS_ERR(reg)) {
+		ret = regulator_enable(reg);
+		if (ret)
+			return ret;
 	}
 
 	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
@@ -419,7 +416,8 @@ static int ad9834_probe(struct spi_device *spi)
 	return 0;
 
 error_disable_reg:
-	regulator_disable(reg);
+	if (!IS_ERR(reg))
+		regulator_disable(reg);
 
 	return ret;
 }
@@ -430,7 +428,8 @@ static int ad9834_remove(struct spi_device *spi)
 	struct ad9834_state *st = iio_priv(indio_dev);
 
 	iio_device_unregister(indio_dev);
-	regulator_disable(st->reg);
+	if (!IS_ERR(st->reg))
+		regulator_disable(st->reg);
 
 	return 0;
 }

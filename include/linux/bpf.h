@@ -8,12 +8,10 @@
 #define _LINUX_BPF_H 1
 
 #include <uapi/linux/bpf.h>
-
 #include <linux/workqueue.h>
 #include <linux/file.h>
 #include <linux/percpu.h>
 #include <linux/err.h>
-#include <linux/rbtree_latch.h>
 
 struct perf_event;
 struct bpf_map;
@@ -38,17 +36,26 @@ struct bpf_map_ops {
 };
 
 struct bpf_map {
-	atomic_t refcnt;
+	/* 1st cacheline with read-mostly members of which some
+	 * are also accessed in fast-path (e.g. ops, max_entries).
+	 */
+	const struct bpf_map_ops *ops ____cacheline_aligned;
 	enum bpf_map_type map_type;
 	u32 key_size;
 	u32 value_size;
 	u32 max_entries;
 	u32 map_flags;
 	u32 pages;
-	struct user_struct *user;
-	const struct bpf_map_ops *ops;
-	struct work_struct work;
+	bool unpriv_array;
+	/* 7 bytes hole */
+
+	/* 2nd cacheline with misc members to avoid false sharing
+	 * particularly with refcounting.
+	 */
+	struct user_struct *user ____cacheline_aligned;
+	atomic_t refcnt;
 	atomic_t usercnt;
+	struct work_struct work;
 };
 
 struct bpf_map_type_list {
@@ -71,14 +78,14 @@ enum bpf_arg_type {
 	/* the following constraints used to prototype bpf_memcmp() and other
 	 * functions that access data on eBPF program stack
 	 */
-	ARG_PTR_TO_MEM,		/* pointer to valid memory (stack, packet, map value) */
-	ARG_PTR_TO_UNINIT_MEM,	/* pointer to memory does not need to be initialized,
-				 * helper function must fill all bytes or clear
-				 * them in error case.
+	ARG_PTR_TO_STACK,	/* any pointer to eBPF program stack */
+	ARG_PTR_TO_RAW_STACK,	/* any pointer to eBPF program stack, area does not
+				 * need to be initialized, helper function must fill
+				 * all bytes or clear them in error case.
 				 */
 
-	ARG_CONST_SIZE,		/* number of bytes accessed from memory */
-	ARG_CONST_SIZE_OR_ZERO,	/* number of bytes accessed from memory or 0 */
+	ARG_CONST_STACK_SIZE,	/* number of bytes accessed from stack */
+	ARG_CONST_STACK_SIZE_OR_ZERO, /* number of bytes accessed from stack or 0 */
 
 	ARG_PTR_TO_CTX,		/* pointer to context */
 	ARG_ANYTHING,		/* any (initialized) argument is ok */
@@ -163,10 +170,9 @@ struct bpf_verifier_ops {
 				enum bpf_reg_type *reg_type);
 	int (*gen_prologue)(struct bpf_insn *insn, bool direct_write,
 			    const struct bpf_prog *prog);
-	u32 (*convert_ctx_access)(enum bpf_access_type type,
-				  const struct bpf_insn *src,
-				  struct bpf_insn *dst,
-				  struct bpf_prog *prog);
+	u32 (*convert_ctx_access)(enum bpf_access_type type, int dst_reg,
+				  int src_reg, int ctx_off,
+				  struct bpf_insn *insn, struct bpf_prog *prog);
 };
 
 struct bpf_prog_type_list {
@@ -179,8 +185,6 @@ struct bpf_prog_aux {
 	atomic_t refcnt;
 	u32 used_map_cnt;
 	u32 max_ctx_offset;
-	struct latch_tree_node ksym_tnode;
-	struct list_head ksym_lnode;
 	const struct bpf_verifier_ops *ops;
 	struct bpf_map **used_maps;
 	struct bpf_prog *prog;
@@ -194,6 +198,7 @@ struct bpf_prog_aux {
 struct bpf_array {
 	struct bpf_map map;
 	u32 elem_size;
+	u32 index_mask;
 	/* 'ownership' of prog_array is claimed by the first program that
 	 * is going to use this map or by the first program which FD is stored
 	 * in the map to make sure that all callers and callees have the same
@@ -221,7 +226,6 @@ u64 bpf_tail_call(u64 ctx, u64 r2, u64 index, u64 r4, u64 r5);
 u64 bpf_get_stackid(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5);
 
 bool bpf_prog_array_compatible(struct bpf_array *array, const struct bpf_prog *fp);
-int bpf_prog_calc_tag(struct bpf_prog *fp);
 
 const struct bpf_func_proto *bpf_get_trace_printk_proto(void);
 
@@ -239,16 +243,13 @@ void bpf_register_map_type(struct bpf_map_type_list *tl);
 
 struct bpf_prog *bpf_prog_get(u32 ufd);
 struct bpf_prog *bpf_prog_get_type(u32 ufd, enum bpf_prog_type type);
-struct bpf_prog * __must_check bpf_prog_add(struct bpf_prog *prog, int i);
-void bpf_prog_sub(struct bpf_prog *prog, int i);
-struct bpf_prog * __must_check bpf_prog_inc(struct bpf_prog *prog);
+struct bpf_prog *bpf_prog_add(struct bpf_prog *prog, int i);
+struct bpf_prog *bpf_prog_inc(struct bpf_prog *prog);
 void bpf_prog_put(struct bpf_prog *prog);
-int __bpf_prog_charge(struct user_struct *user, u32 pages);
-void __bpf_prog_uncharge(struct user_struct *user, u32 pages);
 
 struct bpf_map *bpf_map_get_with_uref(u32 ufd);
 struct bpf_map *__bpf_map_get(struct fd f);
-struct bpf_map * __must_check bpf_map_inc(struct bpf_map *map, bool uref);
+struct bpf_map *bpf_map_inc(struct bpf_map *map, bool uref);
 void bpf_map_put_with_uref(struct bpf_map *map);
 void bpf_map_put(struct bpf_map *map);
 int bpf_map_precharge_memlock(u32 pages);
@@ -309,32 +310,17 @@ static inline struct bpf_prog *bpf_prog_get_type(u32 ufd,
 {
 	return ERR_PTR(-EOPNOTSUPP);
 }
-static inline struct bpf_prog * __must_check bpf_prog_add(struct bpf_prog *prog,
-							  int i)
+static inline struct bpf_prog *bpf_prog_add(struct bpf_prog *prog, int i)
 {
 	return ERR_PTR(-EOPNOTSUPP);
-}
-
-static inline void bpf_prog_sub(struct bpf_prog *prog, int i)
-{
 }
 
 static inline void bpf_prog_put(struct bpf_prog *prog)
 {
 }
-
-static inline struct bpf_prog * __must_check bpf_prog_inc(struct bpf_prog *prog)
+static inline struct bpf_prog *bpf_prog_inc(struct bpf_prog *prog)
 {
 	return ERR_PTR(-EOPNOTSUPP);
-}
-
-static inline int __bpf_prog_charge(struct user_struct *user, u32 pages)
-{
-	return 0;
-}
-
-static inline void __bpf_prog_uncharge(struct user_struct *user, u32 pages)
-{
 }
 #endif /* CONFIG_BPF_SYSCALL */
 
@@ -345,7 +331,6 @@ extern const struct bpf_func_proto bpf_map_delete_elem_proto;
 
 extern const struct bpf_func_proto bpf_get_prandom_u32_proto;
 extern const struct bpf_func_proto bpf_get_smp_processor_id_proto;
-extern const struct bpf_func_proto bpf_get_numa_node_id_proto;
 extern const struct bpf_func_proto bpf_tail_call_proto;
 extern const struct bpf_func_proto bpf_ktime_get_ns_proto;
 extern const struct bpf_func_proto bpf_get_current_pid_tgid_proto;

@@ -58,7 +58,7 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/device.h>
 #include <linux/ioctl.h>
 #include <linux/parport.h>
@@ -293,7 +293,7 @@ static int register_device(int minor, struct pp_struct *pp)
 	struct pardevice *pdev = NULL;
 	char *name;
 	struct pardev_cb ppdev_cb;
-	int rc = 0, index;
+	int index;
 
 	name = kasprintf(GFP_KERNEL, CHRDEV "%x", minor);
 	if (name == NULL)
@@ -301,9 +301,9 @@ static int register_device(int minor, struct pp_struct *pp)
 
 	port = parport_find_number(minor);
 	if (!port) {
-		pr_warn("%s: no associated port!\n", name);
-		rc = -ENXIO;
-		goto err;
+		printk(KERN_WARNING "%s: no associated port!\n", name);
+		kfree(name);
+		return -ENXIO;
 	}
 
 	index = ida_simple_get(&ida_index, 0, 0, GFP_KERNEL);
@@ -315,18 +315,16 @@ static int register_device(int minor, struct pp_struct *pp)
 	parport_put_port(port);
 
 	if (!pdev) {
-		pr_warn("%s: failed to register device!\n", name);
-		rc = -ENXIO;
+		printk(KERN_WARNING "%s: failed to register device!\n", name);
 		ida_simple_remove(&ida_index, index);
-		goto err;
+		kfree(name);
+		return -ENXIO;
 	}
 
 	pp->pdev = pdev;
 	pp->index = index;
 	dev_dbg(&pdev->dev, "registered pardevice\n");
-err:
-	kfree(name);
-	return rc;
+	return 0;
 }
 
 static enum ieee1284_phase init_phase(int mode)
@@ -851,7 +849,8 @@ static int __init ppdev_init(void)
 	int err = 0;
 
 	if (register_chrdev(PP_MAJOR, CHRDEV, &pp_fops)) {
-		pr_warn(CHRDEV ": unable to get major %d\n", PP_MAJOR);
+		printk(KERN_WARNING CHRDEV ": unable to get major %d\n",
+		       PP_MAJOR);
 		return -EIO;
 	}
 	ppdev_class = class_create(THIS_MODULE, CHRDEV);
@@ -861,11 +860,11 @@ static int __init ppdev_init(void)
 	}
 	err = parport_register_driver(&pp_driver);
 	if (err < 0) {
-		pr_warn(CHRDEV ": unable to register with parport\n");
+		printk(KERN_WARNING CHRDEV ": unable to register with parport\n");
 		goto out_class;
 	}
 
-	pr_info(PP_VERSION "\n");
+	printk(KERN_INFO PP_VERSION "\n");
 	goto out;
 
 out_class:

@@ -77,6 +77,15 @@ static inline int omap4_pm_init_early(void)
 }
 #endif
 
+#ifdef CONFIG_OMAP_MUX
+int omap_mux_late_init(void);
+#else
+static inline int omap_mux_late_init(void)
+{
+	return 0;
+}
+#endif
+
 extern void omap2_init_common_infrastructure(void);
 
 extern void omap_init_time(void);
@@ -270,7 +279,6 @@ extern const struct smp_operations omap4_smp_ops;
 extern int omap4_mpuss_init(void);
 extern int omap4_enter_lowpower(unsigned int cpu, unsigned int power_state);
 extern int omap4_hotplug_cpu(unsigned int cpu, unsigned int power_state);
-extern u32 omap4_get_cpu1_ns_pa_addr(void);
 #else
 static inline int omap4_enter_lowpower(unsigned int cpu,
 					unsigned int power_state)
@@ -344,6 +352,7 @@ extern int omap_dss_reset(struct omap_hwmod *);
 int omap_clk_init(void);
 
 int __init omapdss_init_of(void);
+void __init omapdss_early_init_of(void);
 
 #endif /* __ASSEMBLER__ */
 #endif /* __ARCH_ARM_MACH_OMAP2PLUS_COMMON_H */

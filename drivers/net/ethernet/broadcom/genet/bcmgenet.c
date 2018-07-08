@@ -450,22 +450,6 @@ static inline void bcmgenet_rdma_ring_writel(struct bcmgenet_priv *priv,
 			genet_dma_ring_regs[r]);
 }
 
-static int bcmgenet_begin(struct net_device *dev)
-{
-	struct bcmgenet_priv *priv = netdev_priv(dev);
-
-	/* Turn on the clock */
-	return clk_prepare_enable(priv->clk);
-}
-
-static void bcmgenet_complete(struct net_device *dev)
-{
-	struct bcmgenet_priv *priv = netdev_priv(dev);
-
-	/* Turn off the clock */
-	clk_disable_unprepare(priv->clk);
-}
-
 static int bcmgenet_get_link_ksettings(struct net_device *dev,
 				       struct ethtool_link_ksettings *cmd)
 {
@@ -1036,10 +1020,15 @@ static int bcmgenet_set_eee(struct net_device *dev, struct ethtool_eee *e)
 	return phy_ethtool_set_eee(priv->phydev, e);
 }
 
+static int bcmgenet_nway_reset(struct net_device *dev)
+{
+	struct bcmgenet_priv *priv = netdev_priv(dev);
+
+	return genphy_restart_aneg(priv->phydev);
+}
+
 /* standard ethtool support functions. */
 static const struct ethtool_ops bcmgenet_ethtool_ops = {
-	.begin			= bcmgenet_begin,
-	.complete		= bcmgenet_complete,
 	.get_strings		= bcmgenet_get_strings,
 	.get_sset_count		= bcmgenet_get_sset_count,
 	.get_ethtool_stats	= bcmgenet_get_ethtool_stats,
@@ -1051,7 +1040,7 @@ static const struct ethtool_ops bcmgenet_ethtool_ops = {
 	.set_wol		= bcmgenet_set_wol,
 	.get_eee		= bcmgenet_get_eee,
 	.set_eee		= bcmgenet_set_eee,
-	.nway_reset		= phy_ethtool_nway_reset,
+	.nway_reset		= bcmgenet_nway_reset,
 	.get_coalesce		= bcmgenet_get_coalesce,
 	.set_coalesce		= bcmgenet_set_coalesce,
 	.get_link_ksettings	= bcmgenet_get_link_ksettings,
@@ -1234,6 +1223,7 @@ static unsigned int __bcmgenet_tx_reclaim(struct net_device *dev,
 	struct bcmgenet_priv *priv = netdev_priv(dev);
 	struct device *kdev = &priv->pdev->dev;
 	struct enet_cb *tx_cb_ptr;
+	struct netdev_queue *txq;
 	unsigned int pkts_compl = 0;
 	unsigned int bytes_compl = 0;
 	unsigned int c_index;
@@ -1285,8 +1275,13 @@ static unsigned int __bcmgenet_tx_reclaim(struct net_device *dev,
 	dev->stats.tx_packets += pkts_compl;
 	dev->stats.tx_bytes += bytes_compl;
 
-	netdev_tx_completed_queue(netdev_get_tx_queue(dev, ring->queue),
-				  pkts_compl, bytes_compl);
+	txq = netdev_get_tx_queue(dev, ring->queue);
+	netdev_tx_completed_queue(txq, pkts_compl, bytes_compl);
+
+	if (ring->free_bds > (MAX_SKB_FRAGS + 1)) {
+		if (netif_tx_queue_stopped(txq))
+			netif_tx_wake_queue(txq);
+	}
 
 	return pkts_compl;
 }
@@ -1309,16 +1304,8 @@ static int bcmgenet_tx_poll(struct napi_struct *napi, int budget)
 	struct bcmgenet_tx_ring *ring =
 		container_of(napi, struct bcmgenet_tx_ring, napi);
 	unsigned int work_done = 0;
-	struct netdev_queue *txq;
-	unsigned long flags;
 
-	spin_lock_irqsave(&ring->lock, flags);
-	work_done = __bcmgenet_tx_reclaim(ring->priv->dev, ring);
-	if (ring->free_bds > (MAX_SKB_FRAGS + 1)) {
-		txq = netdev_get_tx_queue(ring->priv->dev, ring->queue);
-		netif_tx_wake_queue(txq);
-	}
-	spin_unlock_irqrestore(&ring->lock, flags);
+	work_done = bcmgenet_tx_reclaim(ring->priv->dev, ring);
 
 	if (work_done == 0) {
 		napi_complete(napi);

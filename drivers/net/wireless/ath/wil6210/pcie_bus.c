@@ -23,7 +23,7 @@
 #include <linux/rtnetlink.h>
 
 static bool use_msi = true;
-module_param(use_msi, bool, 0444);
+module_param(use_msi, bool, S_IRUGO);
 MODULE_PARM_DESC(use_msi, " Use MSI interrupt, default - true");
 
 #ifdef CONFIG_PM
@@ -36,38 +36,18 @@ static int wil6210_pm_notify(struct notifier_block *notify_block,
 static
 void wil_set_capabilities(struct wil6210_priv *wil)
 {
-	u32 jtag_id = wil_r(wil, RGF_USER_JTAG_DEV_ID);
-	u8 chip_revision = (wil_r(wil, RGF_USER_REVISION_ID) &
-			    RGF_USER_REVISION_ID_MASK);
+	u32 rev_id = wil_r(wil, RGF_USER_JTAG_DEV_ID);
 
 	bitmap_zero(wil->hw_capabilities, hw_capability_last);
 	bitmap_zero(wil->fw_capabilities, WMI_FW_CAPABILITY_MAX);
-	wil->wil_fw_name = WIL_FW_NAME_DEFAULT;
-	wil->chip_revision = chip_revision;
 
-	switch (jtag_id) {
-	case JTAG_DEV_ID_SPARROW:
-		switch (chip_revision) {
-		case REVISION_ID_SPARROW_D0:
-			wil->hw_name = "Sparrow D0";
-			wil->hw_version = HW_VER_SPARROW_D0;
-			if (wil_fw_verify_file_exists(wil,
-						      WIL_FW_NAME_SPARROW_PLUS))
-				wil->wil_fw_name = WIL_FW_NAME_SPARROW_PLUS;
-			break;
-		case REVISION_ID_SPARROW_B0:
-			wil->hw_name = "Sparrow B0";
-			wil->hw_version = HW_VER_SPARROW_B0;
-			break;
-		default:
-			wil->hw_name = "Unknown";
-			wil->hw_version = HW_VER_UNKNOWN;
-			break;
-		}
+	switch (rev_id) {
+	case JTAG_DEV_ID_SPARROW_B0:
+		wil->hw_name = "Sparrow B0";
+		wil->hw_version = HW_VER_SPARROW_B0;
 		break;
 	default:
-		wil_err(wil, "Unknown board hardware, chip_id 0x%08x, chip_revision 0x%08x\n",
-			jtag_id, chip_revision);
+		wil_err(wil, "Unknown board hardware 0x%08x\n", rev_id);
 		wil->hw_name = "Unknown";
 		wil->hw_version = HW_VER_UNKNOWN;
 	}
@@ -75,7 +55,7 @@ void wil_set_capabilities(struct wil6210_priv *wil)
 	wil_info(wil, "Board hardware is %s\n", wil->hw_name);
 
 	/* extract FW capabilities from file without loading the FW */
-	wil_request_firmware(wil, wil->wil_fw_name, false);
+	wil_request_firmware(wil, WIL_FW_NAME, false);
 }
 
 void wil_disable_irq(struct wil6210_priv *wil)
@@ -99,10 +79,8 @@ static int wil_if_pcie_enable(struct wil6210_priv *wil)
 	 */
 	int msi_only = pdev->msi_enabled;
 	bool _use_msi = use_msi;
-	bool wmi_only = test_bit(WMI_FW_CAPABILITY_WMI_ONLY,
-				 wil->fw_capabilities);
 
-	wil_dbg_misc(wil, "if_pcie_enable, wmi_only %d\n", wmi_only);
+	wil_dbg_misc(wil, "%s()\n", __func__);
 
 	pdev->msi_enabled = 0;
 
@@ -125,11 +103,9 @@ static int wil_if_pcie_enable(struct wil6210_priv *wil)
 	if (rc)
 		goto stop_master;
 
-	/* need reset here to obtain MAC or in case of WMI-only FW, full reset
-	 * and fw loading takes place
-	 */
+	/* need reset here to obtain MAC */
 	mutex_lock(&wil->mutex);
-	rc = wil_reset(wil, wmi_only);
+	rc = wil_reset(wil, false);
 	mutex_unlock(&wil->mutex);
 	if (rc)
 		goto release_irq;
@@ -149,7 +125,7 @@ static int wil_if_pcie_disable(struct wil6210_priv *wil)
 {
 	struct pci_dev *pdev = wil->pdev;
 
-	wil_dbg_misc(wil, "if_pcie_disable\n");
+	wil_dbg_misc(wil, "%s()\n", __func__);
 
 	pci_clear_master(pdev);
 	/* disable and release IRQ */
@@ -313,7 +289,7 @@ static void wil_pcie_remove(struct pci_dev *pdev)
 	struct wil6210_priv *wil = pci_get_drvdata(pdev);
 	void __iomem *csr = wil->csr;
 
-	wil_dbg_misc(wil, "pcie_remove\n");
+	wil_dbg_misc(wil, "%s()\n", __func__);
 
 #ifdef CONFIG_PM
 #ifdef CONFIG_PM_SLEEP
@@ -351,7 +327,8 @@ static int wil6210_suspend(struct device *dev, bool is_runtime)
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct wil6210_priv *wil = pci_get_drvdata(pdev);
 
-	wil_dbg_pm(wil, "suspend: %s\n", is_runtime ? "runtime" : "system");
+	wil_dbg_pm(wil, "%s(%s)\n", __func__,
+		   is_runtime ? "runtime" : "system");
 
 	rc = wil_can_suspend(wil, is_runtime);
 	if (rc)
@@ -377,7 +354,8 @@ static int wil6210_resume(struct device *dev, bool is_runtime)
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct wil6210_priv *wil = pci_get_drvdata(pdev);
 
-	wil_dbg_pm(wil, "resume: %s\n", is_runtime ? "runtime" : "system");
+	wil_dbg_pm(wil, "%s(%s)\n", __func__,
+		   is_runtime ? "runtime" : "system");
 
 	/* allow master */
 	pci_set_master(pdev);
@@ -397,7 +375,7 @@ static int wil6210_pm_notify(struct notifier_block *notify_block,
 	int rc = 0;
 	enum wil_platform_event evt;
 
-	wil_dbg_pm(wil, "pm_notify: mode (%ld)\n", mode);
+	wil_dbg_pm(wil, "%s: mode (%ld)\n", __func__, mode);
 
 	switch (mode) {
 	case PM_HIBERNATION_PREPARE:

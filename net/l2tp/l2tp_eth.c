@@ -106,8 +106,8 @@ static int l2tp_eth_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 }
 
-static void l2tp_eth_get_stats64(struct net_device *dev,
-				 struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *l2tp_eth_get_stats64(struct net_device *dev,
+						      struct rtnl_link_stats64 *stats)
 {
 	struct l2tp_eth *priv = netdev_priv(dev);
 
@@ -117,7 +117,9 @@ static void l2tp_eth_get_stats64(struct net_device *dev,
 	stats->rx_bytes   = atomic_long_read(&priv->rx_bytes);
 	stats->rx_packets = atomic_long_read(&priv->rx_packets);
 	stats->rx_errors  = atomic_long_read(&priv->rx_errors);
+	return stats;
 }
+
 
 static const struct net_device_ops l2tp_eth_netdev_ops = {
 	.ndo_init		= l2tp_eth_dev_init,
@@ -133,7 +135,7 @@ static void l2tp_eth_dev_setup(struct net_device *dev)
 	dev->priv_flags		&= ~IFF_TX_SKB_SHARING;
 	dev->features		|= NETIF_F_LLTX;
 	dev->netdev_ops		= &l2tp_eth_netdev_ops;
-	dev->needs_free_netdev	= true;
+	dev->destructor		= free_netdev;
 }
 
 static void l2tp_eth_dev_recv(struct l2tp_session *session, struct sk_buff *skb, int data_len)
@@ -251,8 +253,6 @@ static int l2tp_eth_create(struct net *net, u32 tunnel_id, u32 session_id, u32 p
 		session->mtu = dev->mtu - session->hdr_len;
 	dev->mtu = session->mtu;
 	dev->needed_headroom += session->hdr_len;
-	dev->min_mtu = 0;
-	dev->max_mtu = ETH_MAX_MTU;
 
 	priv = netdev_priv(dev);
 	priv->dev = dev;

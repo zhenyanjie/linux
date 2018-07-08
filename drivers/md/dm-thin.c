@@ -699,7 +699,7 @@ static void remap_to_origin(struct thin_c *tc, struct bio *bio)
 
 static int bio_triggers_commit(struct thin_c *tc, struct bio *bio)
 {
-	return op_is_flush(bio->bi_opf) &&
+	return (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) &&
 		dm_thin_changed_this_transaction(tc->td);
 }
 
@@ -870,7 +870,8 @@ static void __inc_remap_and_issue_cell(void *context,
 	struct bio *bio;
 
 	while ((bio = bio_list_pop(&cell->bios))) {
-		if (op_is_flush(bio->bi_opf) || bio_op(bio) == REQ_OP_DISCARD)
+		if (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA) ||
+		    bio_op(bio) == REQ_OP_DISCARD)
 			bio_list_add(&info->defer_bios, bio);
 		else {
 			inc_all_io_entry(info->tc->pool, bio);
@@ -1383,6 +1384,8 @@ static void schedule_external_copy(struct thin_c *tc, dm_block_t virt_block,
 
 static void set_pool_mode(struct pool *pool, enum pool_mode new_mode);
 
+static void requeue_bios(struct pool *pool);
+
 static void check_for_space(struct pool *pool)
 {
 	int r;
@@ -1395,8 +1398,10 @@ static void check_for_space(struct pool *pool)
 	if (r)
 		return;
 
-	if (nr_free)
+	if (nr_free) {
 		set_pool_mode(pool, PM_WRITE);
+		requeue_bios(pool);
+	}
 }
 
 /*
@@ -1473,7 +1478,10 @@ static int alloc_data_block(struct thin_c *tc, dm_block_t *result)
 
 	r = dm_pool_alloc_data_block(pool->pmd, result);
 	if (r) {
-		metadata_operation_failed(pool, "dm_pool_alloc_data_block", r);
+		if (r == -ENOSPC)
+			set_pool_mode(pool, PM_OUT_OF_DATA_SPACE);
+		else
+			metadata_operation_failed(pool, "dm_pool_alloc_data_block", r);
 		return r;
 	}
 
@@ -1716,8 +1724,9 @@ static void __remap_and_issue_shared_cell(void *context,
 	struct bio *bio;
 
 	while ((bio = bio_list_pop(&cell->bios))) {
-		if (bio_data_dir(bio) == WRITE || op_is_flush(bio->bi_opf) ||
-		    bio_op(bio) == REQ_OP_DISCARD)
+		if ((bio_data_dir(bio) == WRITE) ||
+		    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA) ||
+		     bio_op(bio) == REQ_OP_DISCARD))
 			bio_list_add(&info->defer_bios, bio);
 		else {
 			struct dm_thin_endio_hook *h = dm_per_bio_data(bio, sizeof(struct dm_thin_endio_hook));;
@@ -2634,7 +2643,8 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 		return DM_MAPIO_SUBMITTED;
 	}
 
-	if (op_is_flush(bio->bi_opf) || bio_op(bio) == REQ_OP_DISCARD) {
+	if (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA) ||
+	    bio_op(bio) == REQ_OP_DISCARD) {
 		thin_defer_bio_with_throttle(tc, bio);
 		return DM_MAPIO_SUBMITTED;
 	}
@@ -2712,7 +2722,7 @@ static int pool_is_congested(struct dm_target_callbacks *cb, int bdi_bits)
 		return 1;
 
 	q = bdev_get_queue(pt->data_dev->bdev);
-	return bdi_congested(q->backing_dev_info, bdi_bits);
+	return bdi_congested(&q->backing_dev_info, bdi_bits);
 }
 
 static void requeue_bios(struct pool *pool)

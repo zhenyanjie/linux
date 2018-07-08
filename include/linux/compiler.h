@@ -27,11 +27,7 @@ extern void __chk_user_ptr(const volatile void __user *);
 extern void __chk_io_ptr(const volatile void __iomem *);
 # define ACCESS_PRIVATE(p, member) (*((typeof((p)->member) __force *) &(p)->member))
 #else /* __CHECKER__ */
-# ifdef STRUCTLEAK_PLUGIN
-#  define __user __attribute__((user))
-# else
-#  define __user
-# endif
+# define __user
 # define __kernel
 # define __safe
 # define __force
@@ -105,36 +101,29 @@ struct ftrace_branch_data {
 	};
 };
 
-struct ftrace_likely_data {
-	struct ftrace_branch_data	data;
-	unsigned long			constant;
-};
-
 /*
  * Note: DISABLE_BRANCH_PROFILING can be used by special lowlevel code
  * to disable branch tracing on a per file basis.
  */
 #if defined(CONFIG_TRACE_BRANCH_PROFILING) \
     && !defined(DISABLE_BRANCH_PROFILING) && !defined(__CHECKER__)
-void ftrace_likely_update(struct ftrace_likely_data *f, int val,
-			  int expect, int is_constant);
+void ftrace_likely_update(struct ftrace_branch_data *f, int val, int expect);
 
 #define likely_notrace(x)	__builtin_expect(!!(x), 1)
 #define unlikely_notrace(x)	__builtin_expect(!!(x), 0)
 
-#define __branch_check__(x, expect, is_constant) ({			\
-			int ______r;					\
-			static struct ftrace_likely_data		\
+#define __branch_check__(x, expect) ({					\
+			long ______r;					\
+			static struct ftrace_branch_data		\
 				__attribute__((__aligned__(4)))		\
 				__attribute__((section("_ftrace_annotated_branch"))) \
 				______f = {				\
-				.data.func = __func__,			\
-				.data.file = __FILE__,			\
-				.data.line = __LINE__,			\
+				.func = __func__,			\
+				.file = __FILE__,			\
+				.line = __LINE__,			\
 			};						\
-			______r = __builtin_expect(!!(x), expect);	\
-			ftrace_likely_update(&______f, ______r,		\
-					     expect, is_constant);	\
+			______r = likely_notrace(x);			\
+			ftrace_likely_update(&______f, ______r, expect); \
 			______r;					\
 		})
 
@@ -144,10 +133,10 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
  * written by Daniel Walker.
  */
 # ifndef likely
-#  define likely(x)	(__branch_check__(x, 1, __builtin_constant_p(x)))
+#  define likely(x)	(__builtin_constant_p(x) ? !!(x) : __branch_check__(x, 1))
 # endif
 # ifndef unlikely
-#  define unlikely(x)	(__branch_check__(x, 0, __builtin_constant_p(x)))
+#  define unlikely(x)	(__builtin_constant_p(x) ? !!(x) : __branch_check__(x, 0))
 # endif
 
 #ifdef CONFIG_PROFILE_ALL_BRANCHES
@@ -480,6 +469,10 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 # define __native_word(t) (sizeof(t) == sizeof(char) || sizeof(t) == sizeof(short) || sizeof(t) == sizeof(int) || sizeof(t) == sizeof(long))
 #endif
 
+#ifndef __optimize
+# define __optimize(level)
+#endif
+
 /* Compile time object size, -1 for unknown */
 #ifndef __compiletime_object_size
 # define __compiletime_object_size(obj) -1
@@ -577,4 +570,12 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 	(_________p1); \
 })
 
+/* Ignore/forbid kprobes attach on very low level functions marked by this attribute: */
+#ifdef CONFIG_KPROBES
+# define __kprobes	__attribute__((__section__(".kprobes.text")))
+# define nokprobe_inline	__always_inline
+#else
+# define __kprobes
+# define nokprobe_inline	inline
+#endif
 #endif /* __LINUX_COMPILER_H */

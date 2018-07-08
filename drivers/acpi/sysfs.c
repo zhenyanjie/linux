@@ -333,17 +333,14 @@ static ssize_t acpi_table_show(struct file *filp, struct kobject *kobj,
 	    container_of(bin_attr, struct acpi_table_attr, attr);
 	struct acpi_table_header *table_header = NULL;
 	acpi_status status;
-	ssize_t rc;
 
 	status = acpi_get_table(table_attr->name, table_attr->instance,
 				&table_header);
 	if (ACPI_FAILURE(status))
 		return -ENODEV;
 
-	rc = memory_read_from_buffer(buf, count, &offset, table_header,
-			table_header->length);
-	acpi_put_table(table_header);
-	return rc;
+	return memory_read_from_buffer(buf, count, &offset,
+				       table_header, table_header->length);
 }
 
 static int acpi_table_attr_init(struct kobject *tables_obj,

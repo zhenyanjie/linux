@@ -37,7 +37,7 @@
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/map.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "mtdcore.h"
 
@@ -451,7 +451,7 @@ static int mtdchar_readoob(struct file *file, struct mtd_info *mtd,
 	 * data. For our userspace tools it is important to dump areas
 	 * with ECC errors!
 	 * For kernel internal usage it also might return -EUCLEAN
-	 * to signal the caller that a bitflip has occurred and has
+	 * to signal the caller that a bitflip has occured and has
 	 * been corrected by the ECC algorithm.
 	 *
 	 * Note: currently the standard NAND function, nand_read_oob_std,
@@ -487,7 +487,7 @@ static int shrink_ecclayout(struct mtd_info *mtd,
 	for (i = 0; i < MTD_MAX_ECCPOS_ENTRIES;) {
 		u32 eccpos;
 
-		ret = mtd_ooblayout_ecc(mtd, section, &oobregion);
+		ret = mtd_ooblayout_ecc(mtd, section++, &oobregion);
 		if (ret < 0) {
 			if (ret != -ERANGE)
 				return ret;
@@ -534,7 +534,7 @@ static int get_oobinfo(struct mtd_info *mtd, struct nand_oobinfo *to)
 	for (i = 0; i < ARRAY_SIZE(to->eccpos);) {
 		u32 eccpos;
 
-		ret = mtd_ooblayout_ecc(mtd, section, &oobregion);
+		ret = mtd_ooblayout_ecc(mtd, section++, &oobregion);
 		if (ret < 0) {
 			if (ret != -ERANGE)
 				return ret;

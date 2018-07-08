@@ -21,7 +21,6 @@
 #include <linux/utsname.h>
 #include <linux/crc32.h>
 #include <linux/firmware.h>
-#include <linux/devcoredump.h>
 
 #include "core.h"
 #include "debug.h"
@@ -41,7 +40,6 @@
  */
 enum ath10k_fw_crash_dump_type {
 	ATH10K_FW_CRASH_DUMP_REGISTERS = 0,
-	ATH10K_FW_CRASH_DUMP_CE_DATA = 1,
 
 	ATH10K_FW_CRASH_DUMP_MAX,
 };
@@ -237,7 +235,7 @@ static ssize_t ath10k_read_wmi_services(struct file *file,
 {
 	struct ath10k *ar = file->private_data;
 	char *buf;
-	size_t len = 0, buf_len = 4096;
+	unsigned int len = 0, buf_len = 4096;
 	const char *name;
 	ssize_t ret_cnt;
 	bool enabled;
@@ -401,7 +399,6 @@ void ath10k_debug_fw_stats_process(struct ath10k *ar, struct sk_buff *skb)
 			 * prevent firmware from DoS-ing the host.
 			 */
 			ath10k_fw_stats_peers_free(&ar->debug.fw_stats.peers);
-			ath10k_fw_extd_stats_peers_free(&ar->debug.fw_stats.peers_extd);
 			ath10k_warn(ar, "dropping fw peer stats\n");
 			goto free;
 		}
@@ -412,12 +409,10 @@ void ath10k_debug_fw_stats_process(struct ath10k *ar, struct sk_buff *skb)
 			goto free;
 		}
 
-		if (!list_empty(&stats.peers))
-			list_splice_tail_init(&stats.peers_extd,
-					      &ar->debug.fw_stats.peers_extd);
-
 		list_splice_tail_init(&stats.peers, &ar->debug.fw_stats.peers);
 		list_splice_tail_init(&stats.vdevs, &ar->debug.fw_stats.vdevs);
+		list_splice_tail_init(&stats.peers_extd,
+				      &ar->debug.fw_stats.peers_extd);
 	}
 
 	complete(&ar->debug.fw_stats_complete);
@@ -529,7 +524,7 @@ static ssize_t ath10k_fw_stats_read(struct file *file, char __user *user_buf,
 				    size_t count, loff_t *ppos)
 {
 	const char *buf = file->private_data;
-	size_t len = strlen(buf);
+	unsigned int len = strlen(buf);
 
 	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
 }
@@ -547,16 +542,17 @@ static ssize_t ath10k_debug_fw_reset_stats_read(struct file *file,
 						size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
-	int ret;
-	size_t len = 0, buf_len = 500;
+	int ret, len, buf_len;
 	char *buf;
 
+	buf_len = 500;
 	buf = kmalloc(buf_len, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
 	spin_lock_bh(&ar->data_lock);
 
+	len = 0;
 	len += scnprintf(buf + len, buf_len - len,
 			 "fw_crash_counter\t\t%d\n", ar->stats.fw_crash_counter);
 	len += scnprintf(buf + len, buf_len - len,
@@ -628,17 +624,21 @@ static ssize_t ath10k_write_simulate_fw_crash(struct file *file,
 					      size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
-	char buf[32];
+	char buf[32] = {0};
+	ssize_t rc;
 	int ret;
 
-	simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
+	/* filter partial writes and invalid commands */
+	if (*ppos != 0 || count >= sizeof(buf) || count == 0)
+		return -EINVAL;
 
-	/* make sure that buf is null terminated */
-	buf[sizeof(buf) - 1] = 0;
+	rc = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
+	if (rc < 0)
+		return rc;
 
 	/* drop the possible '\n' from the end */
-	if (buf[count - 1] == '\n')
-		buf[count - 1] = 0;
+	if (buf[*ppos - 1] == '\n')
+		buf[*ppos - 1] = '\0';
 
 	mutex_lock(&ar->conf_mutex);
 
@@ -695,7 +695,7 @@ static ssize_t ath10k_read_chip_id(struct file *file, char __user *user_buf,
 				   size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
-	size_t len;
+	unsigned int len;
 	char buf[50];
 
 	len = scnprintf(buf, sizeof(buf), "0x%08x\n", ar->chip_id);
@@ -725,21 +725,17 @@ ath10k_debug_get_new_fw_crash_data(struct ath10k *ar)
 }
 EXPORT_SYMBOL(ath10k_debug_get_new_fw_crash_data);
 
-static struct ath10k_dump_file_data *ath10k_build_dump_file(struct ath10k *ar,
-							    bool mark_read)
+static struct ath10k_dump_file_data *ath10k_build_dump_file(struct ath10k *ar)
 {
 	struct ath10k_fw_crash_data *crash_data = ar->debug.fw_crash_data;
-	struct ath10k_ce_crash_hdr *ce_hdr;
 	struct ath10k_dump_file_data *dump_data;
 	struct ath10k_tlv_dump_data *dump_tlv;
-	size_t hdr_len = sizeof(*dump_data);
-	size_t len, sofar = 0;
+	int hdr_len = sizeof(*dump_data);
+	unsigned int len, sofar = 0;
 	unsigned char *buf;
 
 	len = hdr_len;
 	len += sizeof(*dump_tlv) + sizeof(crash_data->registers);
-	len += sizeof(*dump_tlv) + sizeof(*ce_hdr) +
-		CE_COUNT * sizeof(ce_hdr->entries[0]);
 
 	sofar += hdr_len;
 
@@ -798,56 +794,11 @@ static struct ath10k_dump_file_data *ath10k_build_dump_file(struct ath10k *ar,
 	       sizeof(crash_data->registers));
 	sofar += sizeof(*dump_tlv) + sizeof(crash_data->registers);
 
-	dump_tlv = (struct ath10k_tlv_dump_data *)(buf + sofar);
-	dump_tlv->type = cpu_to_le32(ATH10K_FW_CRASH_DUMP_CE_DATA);
-	dump_tlv->tlv_len = cpu_to_le32(sizeof(*ce_hdr) +
-					CE_COUNT * sizeof(ce_hdr->entries[0]));
-	ce_hdr = (struct ath10k_ce_crash_hdr *)(dump_tlv->tlv_data);
-	ce_hdr->ce_count = cpu_to_le32(CE_COUNT);
-	memset(ce_hdr->reserved, 0, sizeof(ce_hdr->reserved));
-	memcpy(ce_hdr->entries, crash_data->ce_crash_data,
-	       CE_COUNT * sizeof(ce_hdr->entries[0]));
-	sofar += sizeof(*dump_tlv) + sizeof(*ce_hdr) +
-		 CE_COUNT * sizeof(ce_hdr->entries[0]);
-
-	ar->debug.fw_crash_data->crashed_since_read = !mark_read;
+	ar->debug.fw_crash_data->crashed_since_read = false;
 
 	spin_unlock_bh(&ar->data_lock);
 
 	return dump_data;
-}
-
-int ath10k_debug_fw_devcoredump(struct ath10k *ar)
-{
-	struct ath10k_dump_file_data *dump;
-	void *dump_ptr;
-	u32 dump_len;
-
-	/* To keep the dump file available also for debugfs don't mark the
-	 * file read, only debugfs should do that.
-	 */
-	dump = ath10k_build_dump_file(ar, false);
-	if (!dump) {
-		ath10k_warn(ar, "no crash dump data found for devcoredump");
-		return -ENODATA;
-	}
-
-	/* Make a copy of the dump file for dev_coredumpv() as during the
-	 * transition period we need to own the original file. Once
-	 * fw_crash_dump debugfs file is removed no need to have a copy
-	 * anymore.
-	 */
-	dump_len = le32_to_cpu(dump->len);
-	dump_ptr = vzalloc(dump_len);
-
-	if (!dump_ptr)
-		return -ENOMEM;
-
-	memcpy(dump_ptr, dump, dump_len);
-
-	dev_coredumpv(ar->dev, dump_ptr, dump_len, GFP_KERNEL);
-
-	return 0;
 }
 
 static int ath10k_fw_crash_dump_open(struct inode *inode, struct file *file)
@@ -855,9 +806,7 @@ static int ath10k_fw_crash_dump_open(struct inode *inode, struct file *file)
 	struct ath10k *ar = inode->i_private;
 	struct ath10k_dump_file_data *dump;
 
-	ath10k_warn(ar, "fw_crash_dump debugfs file is deprecated, please use /sys/class/devcoredump instead.");
-
-	dump = ath10k_build_dump_file(ar, true);
+	dump = ath10k_build_dump_file(ar);
 	if (!dump)
 		return -ENODATA;
 
@@ -899,7 +848,7 @@ static ssize_t ath10k_reg_addr_read(struct file *file,
 {
 	struct ath10k *ar = file->private_data;
 	u8 buf[32];
-	size_t len = 0;
+	unsigned int len = 0;
 	u32 reg_addr;
 
 	mutex_lock(&ar->conf_mutex);
@@ -947,7 +896,7 @@ static ssize_t ath10k_reg_value_read(struct file *file,
 {
 	struct ath10k *ar = file->private_data;
 	u8 buf[48];
-	size_t len;
+	unsigned int len;
 	u32 reg_addr, reg_val;
 	int ret;
 
@@ -1170,7 +1119,7 @@ static ssize_t ath10k_read_htt_stats_mask(struct file *file,
 {
 	struct ath10k *ar = file->private_data;
 	char buf[32];
-	size_t len;
+	unsigned int len;
 
 	len = scnprintf(buf, sizeof(buf), "%lu\n", ar->debug.htt_stats_mask);
 
@@ -1224,7 +1173,7 @@ static ssize_t ath10k_read_htt_max_amsdu_ampdu(struct file *file,
 	struct ath10k *ar = file->private_data;
 	char buf[64];
 	u8 amsdu, ampdu;
-	size_t len;
+	unsigned int len;
 
 	mutex_lock(&ar->conf_mutex);
 
@@ -1284,7 +1233,7 @@ static ssize_t ath10k_read_fw_dbglog(struct file *file,
 				     size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
-	size_t len;
+	unsigned int len;
 	char buf[96];
 
 	len = scnprintf(buf, sizeof(buf), "0x%16llx %u\n",
@@ -1610,10 +1559,11 @@ static ssize_t ath10k_read_ani_enable(struct file *file, char __user *user_buf,
 				      size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
-	size_t len;
+	int len = 0;
 	char buf[32];
 
-	len = scnprintf(buf, sizeof(buf), "%d\n", ar->ani_enabled);
+	len = scnprintf(buf, sizeof(buf) - len, "%d\n",
+			ar->ani_enabled);
 
 	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
 }
@@ -1638,10 +1588,11 @@ static ssize_t ath10k_read_nf_cal_period(struct file *file,
 					 size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
-	size_t len;
+	unsigned int len;
 	char buf[32];
 
-	len = scnprintf(buf, sizeof(buf), "%d\n", ar->debug.nf_cal_period);
+	len = scnprintf(buf, sizeof(buf), "%d\n",
+			ar->debug.nf_cal_period);
 
 	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
 }
@@ -1737,10 +1688,9 @@ void ath10k_debug_tpc_stats_process(struct ath10k *ar,
 }
 
 static void ath10k_tpc_stats_print(struct ath10k_tpc_stats *tpc_stats,
-				   unsigned int j, char *buf, size_t *len)
+				   unsigned int j, char *buf, unsigned int *len)
 {
-	int i;
-	size_t buf_len;
+	unsigned int i, buf_len;
 	static const char table_str[][5] = { "CDD",
 					     "STBC",
 					     "TXBF" };
@@ -1780,8 +1730,7 @@ static void ath10k_tpc_stats_fill(struct ath10k *ar,
 				  struct ath10k_tpc_stats *tpc_stats,
 				  char *buf)
 {
-	int j;
-	size_t len, buf_len;
+	unsigned int len, j, buf_len;
 
 	len = 0;
 	buf_len = ATH10K_TPC_CONFIG_BUF_SIZE;
@@ -1915,7 +1864,7 @@ static ssize_t ath10k_tpc_stats_read(struct file *file, char __user *user_buf,
 				     size_t count, loff_t *ppos)
 {
 	const char *buf = file->private_data;
-	size_t len = strlen(buf);
+	unsigned int len = strlen(buf);
 
 	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
 }
@@ -1997,6 +1946,15 @@ static ssize_t ath10k_write_simulate_radar(struct file *file,
 					   size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
+	struct ath10k_vif *arvif;
+
+	/* Just check for for the first vif alone, as all the vifs will be
+	 * sharing the same channel and if the channel is disabled, all the
+	 * vifs will share the same 'is_started' state.
+	 */
+	arvif = list_first_entry(&ar->arvifs, typeof(*arvif), list);
+	if (!arvif->is_started)
+		return -EINVAL;
 
 	ieee80211_radar_detected(ar->hw);
 
@@ -2339,7 +2297,7 @@ static ssize_t ath10k_debug_fw_checksums_read(struct file *file,
 					      size_t count, loff_t *ppos)
 {
 	struct ath10k *ar = file->private_data;
-	size_t len = 0, buf_len = 4096;
+	unsigned int len = 0, buf_len = 4096;
 	ssize_t ret_cnt;
 	char *buf;
 
@@ -2555,7 +2513,7 @@ void ath10k_dbg_dump(struct ath10k *ar,
 		     const void *buf, size_t len)
 {
 	char linebuf[256];
-	size_t linebuflen;
+	unsigned int linebuflen;
 	const void *ptr;
 
 	if (ath10k_debug_mask & mask) {

@@ -58,7 +58,8 @@
 #include "vport-internal_dev.h"
 #include "vport-netdev.h"
 
-unsigned int ovs_net_id __read_mostly;
+int ovs_net_id __read_mostly;
+EXPORT_SYMBOL_GPL(ovs_net_id);
 
 static struct genl_family dp_packet_genl_family;
 static struct genl_family dp_flow_genl_family;
@@ -130,6 +131,7 @@ int lockdep_ovsl_is_held(void)
 	else
 		return 1;
 }
+EXPORT_SYMBOL_GPL(lockdep_ovsl_is_held);
 #endif
 
 static struct vport *new_vport(const struct vport_parms *);
@@ -381,7 +383,7 @@ static int queue_gso_packets(struct datapath *dp, struct sk_buff *skb,
 }
 
 static size_t upcall_msg_size(const struct dp_upcall_info *upcall_info,
-			      unsigned int hdrlen)
+			      unsigned int hdrlen, int actions_attrlen)
 {
 	size_t size = NLMSG_ALIGN(sizeof(struct ovs_header))
 		+ nla_total_size(hdrlen) /* OVS_PACKET_ATTR_PACKET */
@@ -398,7 +400,7 @@ static size_t upcall_msg_size(const struct dp_upcall_info *upcall_info,
 
 	/* OVS_PACKET_ATTR_ACTIONS */
 	if (upcall_info->actions_len)
-		size += nla_total_size(upcall_info->actions_len);
+		size += nla_total_size(actions_attrlen);
 
 	/* OVS_PACKET_ATTR_MRU */
 	if (upcall_info->mru)
@@ -465,7 +467,8 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 	else
 		hlen = skb->len;
 
-	len = upcall_msg_size(upcall_info, hlen - cutlen);
+	len = upcall_msg_size(upcall_info, hlen - cutlen,
+			      OVS_CB(skb)->acts_origlen);
 	user_skb = genlmsg_new(len, GFP_ATOMIC);
 	if (!user_skb) {
 		err = -ENOMEM;
@@ -560,6 +563,7 @@ static int ovs_packet_cmd_execute(struct sk_buff *skb, struct genl_info *info)
 	struct sw_flow *flow;
 	struct sw_flow_actions *sf_acts;
 	struct datapath *dp;
+	struct ethhdr *eth;
 	struct vport *input_vport;
 	u16 mru = 0;
 	int len;
@@ -579,6 +583,17 @@ static int ovs_packet_cmd_execute(struct sk_buff *skb, struct genl_info *info)
 	skb_reserve(packet, NET_IP_ALIGN);
 
 	nla_memcpy(__skb_put(packet, len), a[OVS_PACKET_ATTR_PACKET], len);
+
+	skb_reset_mac_header(packet);
+	eth = eth_hdr(packet);
+
+	/* Normally, setting the skb 'protocol' field would be handled by a
+	 * call to eth_type_trans(), but it assumes there's a sending
+	 * device, which we may not have. */
+	if (eth_proto_is_802_3(eth->h_proto))
+		packet->protocol = eth->h_proto;
+	else
+		packet->protocol = htons(ETH_P_802_2);
 
 	/* Set packet's mru */
 	if (a[OVS_PACKET_ATTR_MRU]) {
@@ -658,7 +673,8 @@ static const struct genl_ops dp_packet_genl_ops[] = {
 	}
 };
 
-static struct genl_family dp_packet_genl_family __ro_after_init = {
+static struct genl_family dp_packet_genl_family = {
+	.id = GENL_ID_GENERATE,
 	.hdrsize = sizeof(struct ovs_header),
 	.name = OVS_PACKET_FAMILY,
 	.version = OVS_PACKET_VERSION,
@@ -667,7 +683,6 @@ static struct genl_family dp_packet_genl_family __ro_after_init = {
 	.parallel_ops = true,
 	.ops = dp_packet_genl_ops,
 	.n_ops = ARRAY_SIZE(dp_packet_genl_ops),
-	.module = THIS_MODULE,
 };
 
 static void get_dp_stats(const struct datapath *dp, struct ovs_dp_stats *stats,
@@ -1423,7 +1438,8 @@ static const struct genl_ops dp_flow_genl_ops[] = {
 	},
 };
 
-static struct genl_family dp_flow_genl_family __ro_after_init = {
+static struct genl_family dp_flow_genl_family = {
+	.id = GENL_ID_GENERATE,
 	.hdrsize = sizeof(struct ovs_header),
 	.name = OVS_FLOW_FAMILY,
 	.version = OVS_FLOW_VERSION,
@@ -1434,7 +1450,6 @@ static struct genl_family dp_flow_genl_family __ro_after_init = {
 	.n_ops = ARRAY_SIZE(dp_flow_genl_ops),
 	.mcgrps = &ovs_dp_flow_multicast_group,
 	.n_mcgrps = 1,
-	.module = THIS_MODULE,
 };
 
 static size_t ovs_dp_cmd_msg_size(void)
@@ -1809,7 +1824,8 @@ static const struct genl_ops dp_datapath_genl_ops[] = {
 	},
 };
 
-static struct genl_family dp_datapath_genl_family __ro_after_init = {
+static struct genl_family dp_datapath_genl_family = {
+	.id = GENL_ID_GENERATE,
 	.hdrsize = sizeof(struct ovs_header),
 	.name = OVS_DATAPATH_FAMILY,
 	.version = OVS_DATAPATH_VERSION,
@@ -1820,7 +1836,6 @@ static struct genl_family dp_datapath_genl_family __ro_after_init = {
 	.n_ops = ARRAY_SIZE(dp_datapath_genl_ops),
 	.mcgrps = &ovs_dp_datapath_multicast_group,
 	.n_mcgrps = 1,
-	.module = THIS_MODULE,
 };
 
 /* Called with ovs_mutex or RCU read lock. */
@@ -2231,7 +2246,8 @@ static const struct genl_ops dp_vport_genl_ops[] = {
 	},
 };
 
-struct genl_family dp_vport_genl_family __ro_after_init = {
+struct genl_family dp_vport_genl_family = {
+	.id = GENL_ID_GENERATE,
 	.hdrsize = sizeof(struct ovs_header),
 	.name = OVS_VPORT_FAMILY,
 	.version = OVS_VPORT_VERSION,
@@ -2242,7 +2258,6 @@ struct genl_family dp_vport_genl_family __ro_after_init = {
 	.n_ops = ARRAY_SIZE(dp_vport_genl_ops),
 	.mcgrps = &ovs_dp_vport_multicast_group,
 	.n_mcgrps = 1,
-	.module = THIS_MODULE,
 };
 
 static struct genl_family * const dp_genl_families[] = {
@@ -2260,7 +2275,7 @@ static void dp_unregister_genl(int n_families)
 		genl_unregister_family(dp_genl_families[i]);
 }
 
-static int __init dp_register_genl(void)
+static int dp_register_genl(void)
 {
 	int err;
 	int i;

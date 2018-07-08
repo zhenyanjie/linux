@@ -43,6 +43,7 @@ struct lg_cpu {
 	struct mm_struct *mm; 	/* == tsk->mm, but that becomes NULL on exit */
 
 	u32 cr2;
+	int ts;
 	u32 esp1;
 	u16 ss1;
 

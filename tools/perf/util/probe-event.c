@@ -594,7 +594,7 @@ static int find_perf_probe_point_from_dwarf(struct probe_trace_point *tp,
 	pr_debug("try to find information at %" PRIx64 " in %s\n", addr,
 		 tp->module ? : "kernel");
 
-	dinfo = debuginfo_cache__open(tp->module, verbose <= 0);
+	dinfo = debuginfo_cache__open(tp->module, verbose == 0);
 	if (dinfo)
 		ret = debuginfo__find_probe_point(dinfo,
 						 (unsigned long)addr, pp);
@@ -615,7 +615,7 @@ static int post_process_probe_trace_point(struct probe_trace_point *tp,
 					   struct map *map, unsigned long offs)
 {
 	struct symbol *sym;
-	u64 addr = tp->address - offs;
+	u64 addr = tp->address + tp->offset - offs;
 
 	sym = map__find_symbol(map, addr);
 	if (!sym)
@@ -2061,7 +2061,7 @@ static int find_perf_probe_point_from_map(struct probe_trace_point *tp,
 					  bool is_kprobe)
 {
 	struct symbol *sym = NULL;
-	struct map *map = NULL;
+	struct map *map;
 	u64 addr = tp->address;
 	int ret = -ENOENT;
 
@@ -2609,6 +2609,14 @@ static int get_new_event_name(char *buf, size_t len, const char *base,
 
 out:
 	free(nbase);
+
+	/* Final validation */
+	if (ret >= 0 && !is_c_func_name(buf)) {
+		pr_warning("Internal error: \"%s\" is an invalid event name.\n",
+			   buf);
+		ret = -EINVAL;
+	}
+
 	return ret;
 }
 
@@ -3023,17 +3031,20 @@ static int try_to_find_absolute_address(struct perf_probe_event *pev,
 
 	tev->nargs = pev->nargs;
 	tev->args = zalloc(sizeof(struct probe_trace_arg) * tev->nargs);
-	if (!tev->args)
+	if (!tev->args) {
+		err = -ENOMEM;
 		goto errout;
-
+	}
 	for (i = 0; i < tev->nargs; i++)
 		copy_to_probe_trace_arg(&tev->args[i], &pev->args[i]);
 
 	return 1;
 
 errout:
-	clear_probe_trace_events(*tevs, 1);
-	*tevs = NULL;
+	if (*tevs) {
+		clear_probe_trace_events(*tevs, 1);
+		*tevs = NULL;
+	}
 	return err;
 }
 
@@ -3057,7 +3068,7 @@ concat_probe_trace_events(struct probe_trace_event **tevs, int *ntevs,
 	struct probe_trace_event *new_tevs;
 	int ret = 0;
 
-	if (ntevs == 0) {
+	if (*ntevs == 0) {
 		*tevs = *tevs2;
 		*ntevs = ntevs2;
 		*tevs2 = NULL;

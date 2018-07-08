@@ -91,10 +91,10 @@ SECTIONS
 	/* Text and read-only data */
 	.text :  AT(ADDR(.text) - LOAD_OFFSET) {
 		_text = .;
-		_stext = .;
 		/* bootstrapping code */
 		HEAD_TEXT
 		. = ALIGN(8);
+		_stext = .;
 		TEXT_TEXT
 		SCHED_TEXT
 		CPUIDLE_TEXT
@@ -105,6 +105,13 @@ SECTIONS
 		SOFTIRQENTRY_TEXT
 		*(.fixup)
 		*(.gnu.warning)
+
+#ifdef CONFIG_RETPOLINE
+		__indirect_thunk_start = .;
+		*(.text.__x86.indirect_thunk)
+		__indirect_thunk_end = .;
+#endif
+
 		/* End of text section */
 		_etext = .;
 	} :text = 0x9090

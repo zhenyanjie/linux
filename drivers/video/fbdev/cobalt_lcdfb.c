@@ -26,7 +26,6 @@
 #include <linux/uaccess.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
-#include <linux/sched/signal.h>
 
 /*
  * Cursor position address

@@ -20,10 +20,8 @@
 #include <linux/cpufeature.h>
 #include <linux/random.h>
 #include <linux/slab.h>
-#include <linux/sched/signal.h>
-
 #include <asm/debug.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/timex.h>
 #include <asm/cpacf.h>
 

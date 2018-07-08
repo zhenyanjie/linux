@@ -10,7 +10,9 @@ greybus-y :=	core.o		\
 		control.o	\
 		svc.o		\
 		svc_watchdog.o	\
-		operation.o
+		operation.o	\
+		timesync.o	\
+		timesync_platform.o
 
 obj-$(CONFIG_GREYBUS)		+= greybus.o
 

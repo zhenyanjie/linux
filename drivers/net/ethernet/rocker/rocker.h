@@ -72,7 +72,6 @@ struct rocker {
 	struct rocker_dma_ring_info event_ring;
 	struct notifier_block fib_nb;
 	struct rocker_world_ops *wops;
-	struct workqueue_struct *rocker_owq;
 	void *wpriv;
 };
 

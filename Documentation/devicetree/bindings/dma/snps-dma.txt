@@ -27,8 +27,6 @@ Optional properties:
   that services interrupts for this device
 - is_private: The device channels should be marked as private and not for by the
   general purpose DMA channel allocator. False if not passed.
-- multi-block: Multi block transfers supported by hardware. Array property with
-  one cell per channel. 0: not supported, 1 (default): supported.
 
 Example:
 
@@ -65,6 +63,6 @@ Example:
 		interrupts = <0 35 0x4>;
 		status = "disabled";
 		dmas = <&dmahost 12 0 1>,
-			<&dmahost 13 0 1 0>;
+			<&dmahost 13 1 0>;
 		dma-names = "rx", "rx";
 	};

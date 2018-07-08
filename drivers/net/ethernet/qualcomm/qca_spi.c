@@ -296,8 +296,9 @@ qcaspi_receive(struct qcaspi *qca)
 
 	/* Allocate rx SKB if we don't have one available. */
 	if (!qca->rx_skb) {
-		qca->rx_skb = netdev_alloc_skb(net_dev,
-					       net_dev->mtu + VLAN_ETH_HLEN);
+		qca->rx_skb = netdev_alloc_skb_ip_align(net_dev,
+							net_dev->mtu +
+							VLAN_ETH_HLEN);
 		if (!qca->rx_skb) {
 			netdev_dbg(net_dev, "out of RX resources\n");
 			qca->stats.out_of_mem++;
@@ -377,7 +378,7 @@ qcaspi_receive(struct qcaspi *qca)
 					qca->rx_skb, qca->rx_skb->dev);
 				qca->rx_skb->ip_summed = CHECKSUM_UNNECESSARY;
 				netif_rx_ni(qca->rx_skb);
-				qca->rx_skb = netdev_alloc_skb(net_dev,
+				qca->rx_skb = netdev_alloc_skb_ip_align(net_dev,
 					net_dev->mtu + VLAN_ETH_HLEN);
 				if (!qca->rx_skb) {
 					netdev_dbg(net_dev, "out of RX resources\n");
@@ -759,7 +760,8 @@ qcaspi_netdev_init(struct net_device *dev)
 	if (!qca->rx_buffer)
 		return -ENOBUFS;
 
-	qca->rx_skb = netdev_alloc_skb(dev, qca->net_dev->mtu + VLAN_ETH_HLEN);
+	qca->rx_skb = netdev_alloc_skb_ip_align(dev, qca->net_dev->mtu +
+						VLAN_ETH_HLEN);
 	if (!qca->rx_skb) {
 		kfree(qca->rx_buffer);
 		netdev_info(qca->net_dev, "Failed to allocate RX sk_buff.\n");
@@ -780,12 +782,24 @@ qcaspi_netdev_uninit(struct net_device *dev)
 		dev_kfree_skb(qca->rx_skb);
 }
 
+static int
+qcaspi_netdev_change_mtu(struct net_device *dev, int new_mtu)
+{
+	if ((new_mtu < QCAFRM_ETHMINMTU) || (new_mtu > QCAFRM_ETHMAXMTU))
+		return -EINVAL;
+
+	dev->mtu = new_mtu;
+
+	return 0;
+}
+
 static const struct net_device_ops qcaspi_netdev_ops = {
 	.ndo_init = qcaspi_netdev_init,
 	.ndo_uninit = qcaspi_netdev_uninit,
 	.ndo_open = qcaspi_netdev_open,
 	.ndo_stop = qcaspi_netdev_close,
 	.ndo_start_xmit = qcaspi_netdev_xmit,
+	.ndo_change_mtu = qcaspi_netdev_change_mtu,
 	.ndo_set_mac_address = eth_mac_addr,
 	.ndo_tx_timeout = qcaspi_netdev_tx_timeout,
 	.ndo_validate_addr = eth_validate_addr,
@@ -801,10 +815,6 @@ qcaspi_netdev_setup(struct net_device *dev)
 	dev->watchdog_timeo = QCASPI_TX_TIMEOUT;
 	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
 	dev->tx_queue_len = 100;
-
-	/* MTU range: 46 - 1500 */
-	dev->min_mtu = QCAFRM_ETHMINMTU;
-	dev->max_mtu = QCAFRM_ETHMAXMTU;
 
 	qca = netdev_priv(dev);
 	memset(qca, 0, sizeof(struct qcaspi));

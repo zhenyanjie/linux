@@ -38,7 +38,7 @@ struct driver_data {
 
 	/* SSP register addresses */
 	void __iomem *ioaddr;
-	u32 ssdr_physical;
+	phys_addr_t ssdr_physical;
 
 	/* SSP masks*/
 	u32 dma_cr1;
@@ -109,6 +109,7 @@ static  inline void pxa2xx_spi_write(const struct driver_data *drv_data,
 #define DONE_STATE ((void *)2)
 #define ERROR_STATE ((void *)-1)
 
+#define IS_DMA_ALIGNED(x)	IS_ALIGNED((unsigned long)(x), DMA_ALIGNMENT)
 #define DMA_ALIGNMENT		8
 
 static inline int pxa25x_ssp_comp(struct driver_data *drv_data)

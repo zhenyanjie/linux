@@ -12,11 +12,9 @@
  */
 #include <linux/spinlock.h>
 #include <linux/export.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/sched/rt.h>
 #include <linux/sched/deadline.h>
-#include <linux/sched/wake_q.h>
-#include <linux/sched/debug.h>
 #include <linux/timer.h>
 
 #include "rtmutex_common.h"
@@ -238,8 +236,7 @@ rt_mutex_waiter_less(struct rt_mutex_waiter *left,
 	 * then right waiter has a dl_prio() too.
 	 */
 	if (dl_prio(left->prio))
-		return dl_time_before(left->task->dl.deadline,
-				      right->task->dl.deadline);
+		return dl_time_before(left->deadline, right->deadline);
 
 	return 0;
 }
@@ -706,7 +703,26 @@ static int rt_mutex_adjust_prio_chain(struct task_struct *task,
 
 	/* [7] Requeue the waiter in the lock waiter tree. */
 	rt_mutex_dequeue(lock, waiter);
+
+	/*
+	 * Update the waiter prio fields now that we're dequeued.
+	 *
+	 * These values can have changed through either:
+	 *
+	 *   sys_sched_set_scheduler() / sys_sched_setattr()
+	 *
+	 * or
+	 *
+	 *   DL CBS enforcement advancing the effective deadline.
+	 *
+	 * Even though pi_waiters also uses these fields, and that tree is only
+	 * updated in [11], we can do this here, since we hold [L], which
+	 * serializes all pi_waiters access and rb_erase() does not care about
+	 * the values of the node being removed.
+	 */
 	waiter->prio = task->prio;
+	waiter->deadline = task->dl.deadline;
+
 	rt_mutex_enqueue(lock, waiter);
 
 	/* [8] Release the task */
@@ -833,6 +849,8 @@ static int rt_mutex_adjust_prio_chain(struct task_struct *task,
 static int try_to_take_rt_mutex(struct rt_mutex *lock, struct task_struct *task,
 				struct rt_mutex_waiter *waiter)
 {
+	lockdep_assert_held(&lock->wait_lock);
+
 	/*
 	 * Before testing whether we can acquire @lock, we set the
 	 * RT_MUTEX_HAS_WAITERS bit in @lock->owner. This forces all
@@ -960,6 +978,8 @@ static int task_blocks_on_rt_mutex(struct rt_mutex *lock,
 	struct rt_mutex *next_lock;
 	int chain_walk = 0, res;
 
+	lockdep_assert_held(&lock->wait_lock);
+
 	/*
 	 * Early deadlock detection. We really don't want the task to
 	 * enqueue on itself just to untangle the mess later. It's not
@@ -977,6 +997,7 @@ static int task_blocks_on_rt_mutex(struct rt_mutex *lock,
 	waiter->task = task;
 	waiter->lock = lock;
 	waiter->prio = task->prio;
+	waiter->deadline = task->dl.deadline;
 
 	/* Get the top priority waiter on the lock */
 	if (rt_mutex_has_waiters(lock))
@@ -1082,6 +1103,8 @@ static void remove_waiter(struct rt_mutex *lock,
 	struct task_struct *owner = rt_mutex_owner(lock);
 	struct rt_mutex *next_lock;
 
+	lockdep_assert_held(&lock->wait_lock);
+
 	raw_spin_lock(&current->pi_lock);
 	rt_mutex_dequeue(lock, waiter);
 	current->pi_blocked_on = NULL;
@@ -1181,7 +1204,7 @@ __rt_mutex_slowlock(struct rt_mutex *lock, int state,
 		 * TASK_INTERRUPTIBLE checks for signals and
 		 * timeout. Ignored otherwise.
 		 */
-		if (likely(state == TASK_INTERRUPTIBLE)) {
+		if (unlikely(state == TASK_INTERRUPTIBLE)) {
 			/* Signal pending? */
 			if (signal_pending(current))
 				ret = -EINTR;
@@ -1448,7 +1471,7 @@ rt_mutex_fastunlock(struct rt_mutex *lock,
 		    bool (*slowfn)(struct rt_mutex *lock,
 				   struct wake_q_head *wqh))
 {
-	DEFINE_WAKE_Q(wake_q);
+	WAKE_Q(wake_q);
 
 	if (likely(rt_mutex_cmpxchg_release(lock, current, NULL))) {
 		rt_mutex_deadlock_account_unlock(current);
@@ -1621,15 +1644,11 @@ EXPORT_SYMBOL_GPL(__rt_mutex_init);
  * rt_mutex_init_proxy_locked - initialize and lock a rt_mutex on behalf of a
  *				proxy owner
  *
- * @lock:	the rt_mutex to be locked
+ * @lock: 	the rt_mutex to be locked
  * @proxy_owner:the task to set as owner
  *
  * No locking. Caller has to do serializing itself
- *
- * Special API call for PI-futex support. This initializes the rtmutex and
- * assigns it to @proxy_owner. Concurrent operations on the rtmutex are not
- * possible at this point because the pi_state which contains the rtmutex
- * is not yet visible to other tasks.
+ * Special API call for PI-futex support
  */
 void rt_mutex_init_proxy_locked(struct rt_mutex *lock,
 				struct task_struct *proxy_owner)
@@ -1643,14 +1662,10 @@ void rt_mutex_init_proxy_locked(struct rt_mutex *lock,
 /**
  * rt_mutex_proxy_unlock - release a lock on behalf of owner
  *
- * @lock:	the rt_mutex to be locked
+ * @lock: 	the rt_mutex to be locked
  *
  * No locking. Caller has to do serializing itself
- *
- * Special API call for PI-futex support. This merrily cleans up the rtmutex
- * (debugging) state. Concurrent operations on this rt_mutex are not
- * possible because it belongs to the pi_state which is about to be freed
- * and it is not longer visible to other tasks.
+ * Special API call for PI-futex support
  */
 void rt_mutex_proxy_unlock(struct rt_mutex *lock,
 			   struct task_struct *proxy_owner)

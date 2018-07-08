@@ -375,9 +375,11 @@ void tcp_update_metrics(struct sock *sk)
 	u32 val;
 	int m;
 
-	sk_dst_confirm(sk);
 	if (sysctl_tcp_nometrics_save || !dst)
 		return;
+
+	if (dst->flags & DST_HOST)
+		dst_confirm(dst);
 
 	rcu_read_lock();
 	if (icsk->icsk_backoff || !tp->srtt_us) {
@@ -491,9 +493,10 @@ void tcp_init_metrics(struct sock *sk)
 	struct tcp_metrics_block *tm;
 	u32 val, crtt = 0; /* cached RTT scaled by 8 */
 
-	sk_dst_confirm(sk);
 	if (!dst)
 		goto reset;
+
+	dst_confirm(dst);
 
 	rcu_read_lock();
 	tm = tcp_get_metrics(sk, dst, true);
@@ -519,6 +522,7 @@ void tcp_init_metrics(struct sock *sk)
 	val = tcp_metric_get(tm, TCP_METRIC_REORDERING);
 	if (val && tp->reordering != val) {
 		tcp_disable_fack(tp);
+		tcp_disable_early_retrans(tp);
 		tp->reordering = val;
 	}
 
@@ -602,6 +606,7 @@ bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst,
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(tcp_peer_is_proven);
 
 void tcp_fetch_timewait_stamp(struct sock *sk, struct dst_entry *dst)
 {
@@ -737,7 +742,14 @@ void tcp_fastopen_cache_set(struct sock *sk, u16 mss,
 	rcu_read_unlock();
 }
 
-static struct genl_family tcp_metrics_nl_family;
+static struct genl_family tcp_metrics_nl_family = {
+	.id		= GENL_ID_GENERATE,
+	.hdrsize	= 0,
+	.name		= TCP_METRICS_GENL_NAME,
+	.version	= TCP_METRICS_GENL_VERSION,
+	.maxattr	= TCP_METRICS_ATTR_MAX,
+	.netnsok	= true,
+};
 
 static const struct nla_policy tcp_metrics_nl_policy[TCP_METRICS_ATTR_MAX + 1] = {
 	[TCP_METRICS_ATTR_ADDR_IPV4]	= { .type = NLA_U32, },
@@ -1104,17 +1116,6 @@ static const struct genl_ops tcp_metrics_nl_ops[] = {
 	},
 };
 
-static struct genl_family tcp_metrics_nl_family __ro_after_init = {
-	.hdrsize	= 0,
-	.name		= TCP_METRICS_GENL_NAME,
-	.version	= TCP_METRICS_GENL_VERSION,
-	.maxattr	= TCP_METRICS_ATTR_MAX,
-	.netnsok	= true,
-	.module		= THIS_MODULE,
-	.ops		= tcp_metrics_nl_ops,
-	.n_ops		= ARRAY_SIZE(tcp_metrics_nl_ops),
-};
-
 static unsigned int tcpmhash_entries;
 static int __init set_tcpmhash_entries(char *str)
 {
@@ -1178,7 +1179,8 @@ void __init tcp_metrics_init(void)
 	if (ret < 0)
 		panic("Could not allocate the tcp_metrics hash table\n");
 
-	ret = genl_register_family(&tcp_metrics_nl_family);
+	ret = genl_register_family_with_ops(&tcp_metrics_nl_family,
+					    tcp_metrics_nl_ops);
 	if (ret < 0)
 		panic("Could not register tcp_metrics generic netlink\n");
 }

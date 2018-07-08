@@ -14,8 +14,7 @@
 #include <linux/prefetch.h>
 #include <asm/sstep.h>
 #include <asm/processor.h>
-#include <linux/uaccess.h>
-#include <asm/cpu_has_feature.h>
+#include <asm/uaccess.h>
 #include <asm/cputable.h>
 
 extern char system_call_common[];
@@ -494,7 +493,10 @@ static int __kprobes do_vsx_store(int rn, int (*func)(int, unsigned long),
 		"3:	li	%0,%4\n"		\
 		"	b	2b\n"			\
 		".previous\n"				\
-		EX_TABLE(1b, 3b)			\
+		".section __ex_table,\"a\"\n"		\
+			PPC_LONG_ALIGN "\n"		\
+			PPC_LONG "1b,3b\n"		\
+		".previous"				\
 		: "=r" (err), "=r" (cr)			\
 		: "r" (x), "r" (addr), "i" (-EFAULT), "0" (err))
 
@@ -506,7 +508,10 @@ static int __kprobes do_vsx_store(int rn, int (*func)(int, unsigned long),
 		"3:	li	%0,%3\n"		\
 		"	b	2b\n"			\
 		".previous\n"				\
-		EX_TABLE(1b, 3b)			\
+		".section __ex_table,\"a\"\n"		\
+			PPC_LONG_ALIGN "\n"		\
+			PPC_LONG "1b,3b\n"		\
+		".previous"				\
 		: "=r" (err), "=r" (x)			\
 		: "r" (addr), "i" (-EFAULT), "0" (err))
 
@@ -518,7 +523,10 @@ static int __kprobes do_vsx_store(int rn, int (*func)(int, unsigned long),
 		"3:	li	%0,%3\n"		\
 		"	b	2b\n"			\
 		".previous\n"				\
-		EX_TABLE(1b, 3b)			\
+		".section __ex_table,\"a\"\n"		\
+			PPC_LONG_ALIGN "\n"		\
+			PPC_LONG "1b,3b\n"		\
+		".previous"				\
 		: "=r" (err)				\
 		: "r" (addr), "i" (-EFAULT), "0" (err))
 
@@ -679,8 +687,10 @@ int __kprobes analyse_instr(struct instruction_op *op, struct pt_regs *regs,
 	case 19:
 		switch ((instr >> 1) & 0x3ff) {
 		case 0:		/* mcrf */
-			rd = (instr >> 21) & 0x1c;
-			ra = (instr >> 16) & 0x1c;
+			rd = 7 - ((instr >> 23) & 0x7);
+			ra = 7 - ((instr >> 18) & 0x7);
+			rd *= 4;
+			ra *= 4;
 			val = (regs->ccr >> ra) & 0xf;
 			regs->ccr = (regs->ccr & ~(0xfUL << rd)) | (val << rd);
 			goto instr_done;
@@ -960,6 +970,19 @@ int __kprobes analyse_instr(struct instruction_op *op, struct pt_regs *regs,
 #endif
 
 		case 19:	/* mfcr */
+			if ((instr >> 20) & 1) {
+				imm = 0xf0000000UL;
+				for (sh = 0; sh < 8; ++sh) {
+					if (instr & (0x80000 >> sh)) {
+						regs->gpr[rd] = regs->ccr & imm;
+						break;
+					}
+					imm >>= 4;
+				}
+
+				goto instr_done;
+			}
+
 			regs->gpr[rd] = regs->ccr;
 			regs->gpr[rd] &= 0xffffffffUL;
 			goto instr_done;
@@ -1801,8 +1824,9 @@ int __kprobes emulate_step(struct pt_regs *regs, unsigned int instr)
 	case LARX:
 		if (op.ea & (size - 1))
 			break;		/* can't handle misaligned */
+		err = -EFAULT;
 		if (!address_ok(regs, op.ea, size))
-			return 0;
+			goto ldst_done;
 		err = 0;
 		switch (size) {
 		case 4:
@@ -1823,8 +1847,9 @@ int __kprobes emulate_step(struct pt_regs *regs, unsigned int instr)
 	case STCX:
 		if (op.ea & (size - 1))
 			break;		/* can't handle misaligned */
+		err = -EFAULT;
 		if (!address_ok(regs, op.ea, size))
-			return 0;
+			goto ldst_done;
 		err = 0;
 		switch (size) {
 		case 4:

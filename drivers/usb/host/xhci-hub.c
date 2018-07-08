@@ -112,7 +112,7 @@ static int xhci_create_usb3_bos_desc(struct xhci_hcd *xhci, char *buf,
 
 	/* If PSI table exists, add the custom speed attributes from it */
 	if (usb3_1 && xhci->usb3_rhub.psi_count) {
-		u32 ssp_cap_base, bm_attrib, psi;
+		u32 ssp_cap_base, bm_attrib, psi, psi_mant, psi_exp;
 		int offset;
 
 		ssp_cap_base = USB_DT_BOS_SIZE + USB_DT_USB_SS_CAP_SIZE;
@@ -139,6 +139,15 @@ static int xhci_create_usb3_bos_desc(struct xhci_hcd *xhci, char *buf,
 		for (i = 0; i < xhci->usb3_rhub.psi_count; i++) {
 			psi = xhci->usb3_rhub.psi[i];
 			psi &= ~USB_SSP_SUBLINK_SPEED_RSVD;
+			psi_exp = XHCI_EXT_PORT_PSIE(psi);
+			psi_mant = XHCI_EXT_PORT_PSIM(psi);
+
+			/* Shift to Gbps and set SSP Link BIT(14) if 10Gpbs */
+			for (; psi_exp < 3; psi_exp++)
+				psi_mant /= 1000;
+			if (psi_mant >= 10)
+				psi |= BIT(14);
+
 			if ((psi & PLT_MASK) == PLT_SYM) {
 			/* Symmetric, create SSA RX and TX from one PSI entry */
 				put_unaligned_le32(psi, &buf[offset]);
@@ -389,8 +398,6 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 	if (!virt_dev)
 		return -ENODEV;
 
-	trace_xhci_stop_device(virt_dev);
-
 	cmd = xhci_alloc_command(xhci, false, true, GFP_NOIO);
 	if (!cmd) {
 		xhci_dbg(xhci, "Couldn't allocate command structure.\n");
@@ -405,26 +412,37 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 						     GFP_NOWAIT);
 			if (!command) {
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				xhci_free_command(xhci, cmd);
-				return -ENOMEM;
-
+				ret = -ENOMEM;
+				goto cmd_cleanup;
 			}
-			xhci_queue_stop_endpoint(xhci, command, slot_id, i,
-						 suspend);
+
+			ret = xhci_queue_stop_endpoint(xhci, command, slot_id,
+						       i, suspend);
+			if (ret) {
+				spin_unlock_irqrestore(&xhci->lock, flags);
+				xhci_free_command(xhci, command);
+				goto cmd_cleanup;
+			}
 		}
 	}
-	xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
+	ret = xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
+	if (ret) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		goto cmd_cleanup;
+	}
+
 	xhci_ring_cmd_db(xhci);
 	spin_unlock_irqrestore(&xhci->lock, flags);
 
 	/* Wait for last stop endpoint command to finish */
 	wait_for_completion(cmd->completion);
 
-	if (cmd->status == COMP_COMMAND_ABORTED ||
-	    cmd->status == COMP_COMMAND_RING_STOPPED) {
+	if (cmd->status == COMP_CMD_ABORT || cmd->status == COMP_CMD_STOP) {
 		xhci_warn(xhci, "Timeout while waiting for stop endpoint command\n");
 		ret = -ETIME;
 	}
+
+cmd_cleanup:
 	xhci_free_command(xhci, cmd);
 	return ret;
 }
@@ -786,6 +804,9 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 			clear_bit(wIndex, &bus_state->resuming_ports);
 
 			set_bit(wIndex, &bus_state->rexit_ports);
+
+			xhci_test_and_clear_bit(xhci, port_array, wIndex,
+						PORT_PLC);
 			xhci_set_link_state(xhci, port_array, wIndex,
 					XDEV_U0);
 
@@ -999,7 +1020,8 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			temp = readl(port_array[wIndex]);
 			if ((temp & PORT_PE) == 0 || (temp & PORT_RESET)
 				|| (temp & PORT_PLS_MASK) >= XDEV_U3) {
-				xhci_warn(xhci, "USB core suspending device not in U0/U1/U2.\n");
+				xhci_warn(xhci, "USB core suspending device "
+					  "not in U0/U1/U2.\n");
 				goto error;
 			}
 
@@ -1350,9 +1372,6 @@ int xhci_bus_suspend(struct usb_hcd *hcd)
 				t2 |= PORT_WKOC_E | PORT_WKCONN_E;
 				t2 &= ~PORT_WKDISC_E;
 			}
-			if ((xhci->quirks & XHCI_U2_DISABLE_WAKE) &&
-			    (hcd->speed < HCD_USB3))
-				t2 &= ~PORT_WAKE_BITS;
 		} else
 			t2 &= ~PORT_WAKE_BITS;
 

@@ -278,7 +278,7 @@ static ssize_t read_file_spec_scan_ctl(struct file *file, char __user *user_buf,
 {
 	struct ath10k *ar = file->private_data;
 	char *mode = "";
-	size_t len;
+	unsigned int len;
 	enum ath10k_spectral_mode spectral_mode;
 
 	mutex_lock(&ar->conf_mutex);
@@ -370,7 +370,7 @@ static ssize_t read_file_spectral_count(struct file *file,
 {
 	struct ath10k *ar = file->private_data;
 	char buf[32];
-	size_t len;
+	unsigned int len;
 	u8 spectral_count;
 
 	mutex_lock(&ar->conf_mutex);
@@ -422,8 +422,7 @@ static ssize_t read_file_spectral_bins(struct file *file,
 {
 	struct ath10k *ar = file->private_data;
 	char buf[32];
-	unsigned int bins, fft_size, bin_scale;
-	size_t len;
+	unsigned int len, bins, fft_size, bin_scale;
 
 	mutex_lock(&ar->conf_mutex);
 

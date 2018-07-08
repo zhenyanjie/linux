@@ -27,8 +27,6 @@
 #include <linux/kernel.h>
 #include <linux/net.h>
 #include <linux/poll.h>
-#include <linux/sched/signal.h>
-
 #include <net/sock.h>
 #include <net/tcp_states.h>
 
@@ -305,7 +303,7 @@ out:
 }
 
 static int pn_socket_accept(struct socket *sock, struct socket *newsock,
-			    int flags, bool kern)
+				int flags)
 {
 	struct sock *sk = sock->sk;
 	struct sock *newsk;
@@ -314,7 +312,7 @@ static int pn_socket_accept(struct socket *sock, struct socket *newsock,
 	if (unlikely(sk->sk_state != TCP_LISTEN))
 		return -EINVAL;
 
-	newsk = sk->sk_prot->accept(sk, flags, &err, kern);
+	newsk = sk->sk_prot->accept(sk, flags, &err);
 	if (!newsk)
 		return err;
 

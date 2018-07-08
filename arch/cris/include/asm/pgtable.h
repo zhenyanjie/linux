@@ -6,11 +6,10 @@
 #define _CRIS_PGTABLE_H
 
 #include <asm/page.h>
-#define __ARCH_USE_5LEVEL_HACK
 #include <asm-generic/pgtable-nopmd.h>
 
 #ifndef __ASSEMBLY__
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <asm/mmu.h>
 #endif
 #include <arch/pgtable.h>

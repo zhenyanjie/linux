@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2017, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -609,7 +609,18 @@ acpi_status acpi_ds_load2_end_op(struct acpi_walk_state *walk_state)
 
 			status =
 			    acpi_ev_initialize_region
-			    (acpi_ns_get_attached_object(node));
+			    (acpi_ns_get_attached_object(node), FALSE);
+
+			if (ACPI_FAILURE(status)) {
+				/*
+				 *  If AE_NOT_EXIST is returned, it is not fatal
+				 *  because many regions get created before a handler
+				 *  is installed for said region.
+				 */
+				if (AE_NOT_EXIST == status) {
+					status = AE_OK;
+				}
+			}
 			break;
 
 		case AML_NAME_OP:

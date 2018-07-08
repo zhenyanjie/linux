@@ -1,5 +1,4 @@
 dts-dirs += al
-dts-dirs += allwinner
 dts-dirs += altera
 dts-dirs += amd
 dts-dirs += amlogic

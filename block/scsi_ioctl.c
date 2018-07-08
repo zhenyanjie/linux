@@ -28,7 +28,7 @@
 #include <linux/slab.h>
 #include <linux/times.h>
 #include <linux/uio.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_ioctl.h>
@@ -230,17 +230,15 @@ EXPORT_SYMBOL(blk_verify_command);
 static int blk_fill_sghdr_rq(struct request_queue *q, struct request *rq,
 			     struct sg_io_hdr *hdr, fmode_t mode)
 {
-	struct scsi_request *req = scsi_req(rq);
-
-	if (copy_from_user(req->cmd, hdr->cmdp, hdr->cmd_len))
+	if (copy_from_user(rq->cmd, hdr->cmdp, hdr->cmd_len))
 		return -EFAULT;
-	if (blk_verify_command(req->cmd, mode & FMODE_WRITE))
+	if (blk_verify_command(rq->cmd, mode & FMODE_WRITE))
 		return -EPERM;
 
 	/*
 	 * fill in request structure
 	 */
-	req->cmd_len = hdr->cmd_len;
+	rq->cmd_len = hdr->cmd_len;
 
 	rq->timeout = msecs_to_jiffies(hdr->timeout);
 	if (!rq->timeout)
@@ -256,7 +254,6 @@ static int blk_fill_sghdr_rq(struct request_queue *q, struct request *rq,
 static int blk_complete_sghdr_rq(struct request *rq, struct sg_io_hdr *hdr,
 				 struct bio *bio)
 {
-	struct scsi_request *req = scsi_req(rq);
 	int r, ret = 0;
 
 	/*
@@ -270,13 +267,13 @@ static int blk_complete_sghdr_rq(struct request *rq, struct sg_io_hdr *hdr,
 	hdr->info = 0;
 	if (hdr->masked_status || hdr->host_status || hdr->driver_status)
 		hdr->info |= SG_INFO_CHECK;
-	hdr->resid = req->resid_len;
+	hdr->resid = rq->resid_len;
 	hdr->sb_len_wr = 0;
 
-	if (req->sense_len && hdr->sbp) {
-		int len = min((unsigned int) hdr->mx_sb_len, req->sense_len);
+	if (rq->sense_len && hdr->sbp) {
+		int len = min((unsigned int) hdr->mx_sb_len, rq->sense_len);
 
-		if (!copy_to_user(hdr->sbp, req->sense, len))
+		if (!copy_to_user(hdr->sbp, rq->sense, len))
 			hdr->sb_len_wr = len;
 		else
 			ret = -EFAULT;
@@ -297,7 +294,7 @@ static int sg_io(struct request_queue *q, struct gendisk *bd_disk,
 	int writing = 0;
 	int at_head = 0;
 	struct request *rq;
-	struct scsi_request *req;
+	char sense[SCSI_SENSE_BUFFERSIZE];
 	struct bio *bio;
 
 	if (hdr->interface_id != 'S')
@@ -321,16 +318,14 @@ static int sg_io(struct request_queue *q, struct gendisk *bd_disk,
 		at_head = 1;
 
 	ret = -ENOMEM;
-	rq = blk_get_request(q, writing ? REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN,
-			GFP_KERNEL);
+	rq = blk_get_request(q, writing ? WRITE : READ, GFP_KERNEL);
 	if (IS_ERR(rq))
 		return PTR_ERR(rq);
-	req = scsi_req(rq);
-	scsi_req_init(rq);
+	blk_rq_set_block_pc(rq);
 
 	if (hdr->cmd_len > BLK_MAX_CDB) {
-		req->cmd = kzalloc(hdr->cmd_len, GFP_KERNEL);
-		if (!req->cmd)
+		rq->cmd = kzalloc(hdr->cmd_len, GFP_KERNEL);
+		if (!rq->cmd)
 			goto out_put_request;
 	}
 
@@ -362,6 +357,9 @@ static int sg_io(struct request_queue *q, struct gendisk *bd_disk,
 		goto out_free_cdb;
 
 	bio = rq->bio;
+	memset(sense, 0, sizeof(sense));
+	rq->sense = sense;
+	rq->sense_len = 0;
 	rq->retries = 0;
 
 	start_time = jiffies;
@@ -377,7 +375,8 @@ static int sg_io(struct request_queue *q, struct gendisk *bd_disk,
 	ret = blk_complete_sghdr_rq(rq, hdr, bio);
 
 out_free_cdb:
-	scsi_req_free_cmd(req);
+	if (rq->cmd != rq->__cmd)
+		kfree(rq->cmd);
 out_put_request:
 	blk_put_request(rq);
 	return ret;
@@ -421,10 +420,9 @@ int sg_scsi_ioctl(struct request_queue *q, struct gendisk *disk, fmode_t mode,
 		struct scsi_ioctl_command __user *sic)
 {
 	struct request *rq;
-	struct scsi_request *req;
 	int err;
 	unsigned int in_len, out_len, bytes, opcode, cmdlen;
-	char *buffer = NULL;
+	char *buffer = NULL, sense[SCSI_SENSE_BUFFERSIZE];
 
 	if (!sic)
 		return -EINVAL;
@@ -449,14 +447,12 @@ int sg_scsi_ioctl(struct request_queue *q, struct gendisk *disk, fmode_t mode,
 
 	}
 
-	rq = blk_get_request(q, in_len ? REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN,
-			__GFP_RECLAIM);
+	rq = blk_get_request(q, in_len ? WRITE : READ, __GFP_RECLAIM);
 	if (IS_ERR(rq)) {
 		err = PTR_ERR(rq);
 		goto error_free_buffer;
 	}
-	req = scsi_req(rq);
-	scsi_req_init(rq);
+	blk_rq_set_block_pc(rq);
 
 	cmdlen = COMMAND_SIZE(opcode);
 
@@ -464,14 +460,14 @@ int sg_scsi_ioctl(struct request_queue *q, struct gendisk *disk, fmode_t mode,
 	 * get command and data to send to device, if any
 	 */
 	err = -EFAULT;
-	req->cmd_len = cmdlen;
-	if (copy_from_user(req->cmd, sic->data, cmdlen))
+	rq->cmd_len = cmdlen;
+	if (copy_from_user(rq->cmd, sic->data, cmdlen))
 		goto error;
 
 	if (in_len && copy_from_user(buffer, sic->data + cmdlen, in_len))
 		goto error;
 
-	err = blk_verify_command(req->cmd, mode & FMODE_WRITE);
+	err = blk_verify_command(rq->cmd, mode & FMODE_WRITE);
 	if (err)
 		goto error;
 
@@ -507,14 +503,18 @@ int sg_scsi_ioctl(struct request_queue *q, struct gendisk *disk, fmode_t mode,
 		goto error;
 	}
 
+	memset(sense, 0, sizeof(sense));
+	rq->sense = sense;
+	rq->sense_len = 0;
+
 	blk_execute_rq(q, disk, rq, 0);
 
 	err = rq->errors & 0xff;	/* only 8 bit SCSI status */
 	if (err) {
-		if (req->sense_len && req->sense) {
-			bytes = (OMAX_SB_LEN > req->sense_len) ?
-				req->sense_len : OMAX_SB_LEN;
-			if (copy_to_user(sic->data, req->sense, bytes))
+		if (rq->sense_len && rq->sense) {
+			bytes = (OMAX_SB_LEN > rq->sense_len) ?
+				rq->sense_len : OMAX_SB_LEN;
+			if (copy_to_user(sic->data, rq->sense, bytes))
 				err = -EFAULT;
 		}
 	} else {
@@ -539,14 +539,14 @@ static int __blk_send_generic(struct request_queue *q, struct gendisk *bd_disk,
 	struct request *rq;
 	int err;
 
-	rq = blk_get_request(q, REQ_OP_SCSI_OUT, __GFP_RECLAIM);
+	rq = blk_get_request(q, WRITE, __GFP_RECLAIM);
 	if (IS_ERR(rq))
 		return PTR_ERR(rq);
-	scsi_req_init(rq);
+	blk_rq_set_block_pc(rq);
 	rq->timeout = BLK_DEFAULT_SG_TIMEOUT;
-	scsi_req(rq)->cmd[0] = cmd;
-	scsi_req(rq)->cmd[4] = data;
-	scsi_req(rq)->cmd_len = 6;
+	rq->cmd[0] = cmd;
+	rq->cmd[4] = data;
+	rq->cmd_len = 6;
 	err = blk_execute_rq(q, bd_disk, rq, 0);
 	blk_put_request(rq);
 
@@ -742,17 +742,6 @@ int scsi_cmd_blk_ioctl(struct block_device *bd, fmode_t mode,
 	return scsi_cmd_ioctl(bd->bd_disk->queue, bd->bd_disk, mode, cmd, arg);
 }
 EXPORT_SYMBOL(scsi_cmd_blk_ioctl);
-
-void scsi_req_init(struct request *rq)
-{
-	struct scsi_request *req = scsi_req(rq);
-
-	memset(req->__cmd, 0, sizeof(req->__cmd));
-	req->cmd = req->__cmd;
-	req->cmd_len = BLK_MAX_CDB;
-	req->sense_len = 0;
-}
-EXPORT_SYMBOL(scsi_req_init);
 
 static int __init blk_scsi_ioctl_init(void)
 {

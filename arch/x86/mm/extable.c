@@ -1,7 +1,5 @@
 #include <linux/extable.h>
-#include <linux/uaccess.h>
-#include <linux/sched/debug.h>
-
+#include <asm/uaccess.h>
 #include <asm/traps.h>
 #include <asm/kdebug.h>
 

@@ -60,10 +60,7 @@
 #include <linux/tty.h>
 #include <linux/string.h>
 #include <linux/mman.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/numa_balancing.h>
-#include <linux/sched/task.h>
-#include <linux/sched/cputime.h>
+#include <linux/sched.h>
 #include <linux/proc_fs.h>
 #include <linux/ioport.h>
 #include <linux/uaccess.h>
@@ -83,6 +80,7 @@
 #include <linux/delayacct.h>
 #include <linux/seq_file.h>
 #include <linux/pid_namespace.h>
+#include <linux/prctl.h>
 #include <linux/ptrace.h>
 #include <linux/tracehook.h>
 #include <linux/string_helpers.h>
@@ -249,7 +247,7 @@ void render_sigset_t(struct seq_file *m, const char *header,
 		if (sigismember(set, i+2)) x |= 2;
 		if (sigismember(set, i+3)) x |= 4;
 		if (sigismember(set, i+4)) x |= 8;
-		seq_putc(m, hex_asc[x]);
+		seq_printf(m, "%x", x);
 	} while (i >= 4);
 
 	seq_putc(m, '\n');
@@ -346,10 +344,33 @@ static inline void task_cap(struct seq_file *m, struct task_struct *p)
 
 static inline void task_seccomp(struct seq_file *m, struct task_struct *p)
 {
-	seq_put_decimal_ull(m, "NoNewPrivs:\t", task_no_new_privs(p));
 #ifdef CONFIG_SECCOMP
-	seq_put_decimal_ull(m, "\nSeccomp:\t", p->seccomp.mode);
+	seq_put_decimal_ull(m, "Seccomp:\t", p->seccomp.mode);
 #endif
+	seq_printf(m, "\nSpeculation_Store_Bypass:\t");
+	switch (arch_prctl_spec_ctrl_get(p, PR_SPEC_STORE_BYPASS)) {
+	case -EINVAL:
+		seq_printf(m, "unknown");
+		break;
+	case PR_SPEC_NOT_AFFECTED:
+		seq_printf(m, "not vulnerable");
+		break;
+	case PR_SPEC_PRCTL | PR_SPEC_FORCE_DISABLE:
+		seq_printf(m, "thread force mitigated");
+		break;
+	case PR_SPEC_PRCTL | PR_SPEC_DISABLE:
+		seq_printf(m, "thread mitigated");
+		break;
+	case PR_SPEC_PRCTL | PR_SPEC_ENABLE:
+		seq_printf(m, "thread vulnerable");
+		break;
+	case PR_SPEC_DISABLE:
+		seq_printf(m, "globally mitigated");
+		break;
+	default:
+		seq_printf(m, "vulnerable");
+		break;
+	}
 	seq_putc(m, '\n');
 }
 
@@ -405,8 +426,8 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 	unsigned long long start_time;
 	unsigned long cmin_flt = 0, cmaj_flt = 0;
 	unsigned long  min_flt = 0,  maj_flt = 0;
-	u64 cutime, cstime, utime, stime;
-	u64 cgtime, gtime;
+	cputime_t cutime, cstime, utime, stime;
+	cputime_t cgtime, gtime;
 	unsigned long rsslim = 0;
 	char tcomm[sizeof(task->comm)];
 	unsigned long flags;
@@ -421,7 +442,18 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 		 * esp and eip are intentionally zeroed out.  There is no
 		 * non-racy way to read them without freezing the task.
 		 * Programs that need reliable values can use ptrace(2).
+		 *
+		 * The only exception is if the task is core dumping because
+		 * a program is not able to use ptrace(2) in that case. It is
+		 * safe because the task has stopped executing permanently.
 		 */
+		if (permitted && (task->flags & PF_DUMPCORE)) {
+			if (try_get_task_stack(task)) {
+				eip = KSTK_EIP(task);
+				esp = KSTK_ESP(task);
+				put_task_stack(task);
+			}
+		}
 	}
 
 	get_task_comm(tcomm, task);
@@ -501,10 +533,10 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 	seq_put_decimal_ull(m, " ", cmin_flt);
 	seq_put_decimal_ull(m, " ", maj_flt);
 	seq_put_decimal_ull(m, " ", cmaj_flt);
-	seq_put_decimal_ull(m, " ", nsec_to_clock_t(utime));
-	seq_put_decimal_ull(m, " ", nsec_to_clock_t(stime));
-	seq_put_decimal_ll(m, " ", nsec_to_clock_t(cutime));
-	seq_put_decimal_ll(m, " ", nsec_to_clock_t(cstime));
+	seq_put_decimal_ull(m, " ", cputime_to_clock_t(utime));
+	seq_put_decimal_ull(m, " ", cputime_to_clock_t(stime));
+	seq_put_decimal_ll(m, " ", cputime_to_clock_t(cutime));
+	seq_put_decimal_ll(m, " ", cputime_to_clock_t(cstime));
 	seq_put_decimal_ll(m, " ", priority);
 	seq_put_decimal_ll(m, " ", nice);
 	seq_put_decimal_ll(m, " ", num_threads);
@@ -546,8 +578,8 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 	seq_put_decimal_ull(m, " ", task->rt_priority);
 	seq_put_decimal_ull(m, " ", task->policy);
 	seq_put_decimal_ull(m, " ", delayacct_blkio_ticks(task));
-	seq_put_decimal_ull(m, " ", nsec_to_clock_t(gtime));
-	seq_put_decimal_ll(m, " ", nsec_to_clock_t(cgtime));
+	seq_put_decimal_ull(m, " ", cputime_to_clock_t(gtime));
+	seq_put_decimal_ll(m, " ", cputime_to_clock_t(cgtime));
 
 	if (mm && permitted) {
 		seq_put_decimal_ull(m, " ", mm->start_data);

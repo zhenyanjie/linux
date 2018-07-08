@@ -49,14 +49,17 @@
 9 ## n ## 1:					\
 	addi	r5,r5,-(16 * n);		\
 	b	105f;				\
-	EX_TABLE(8 ## n ## 0b,9 ## n ## 0b);	\
-	EX_TABLE(8 ## n ## 1b,9 ## n ## 0b);	\
-	EX_TABLE(8 ## n ## 2b,9 ## n ## 0b);	\
-	EX_TABLE(8 ## n ## 3b,9 ## n ## 0b);	\
-	EX_TABLE(8 ## n ## 4b,9 ## n ## 1b);	\
-	EX_TABLE(8 ## n ## 5b,9 ## n ## 1b);	\
-	EX_TABLE(8 ## n ## 6b,9 ## n ## 1b);	\
-	EX_TABLE(8 ## n ## 7b,9 ## n ## 1b)
+.section __ex_table,"a";			\
+	.align	2;				\
+	.long	8 ## n ## 0b,9 ## n ## 0b;	\
+	.long	8 ## n ## 1b,9 ## n ## 0b;	\
+	.long	8 ## n ## 2b,9 ## n ## 0b;	\
+	.long	8 ## n ## 3b,9 ## n ## 0b;	\
+	.long	8 ## n ## 4b,9 ## n ## 1b;	\
+	.long	8 ## n ## 5b,9 ## n ## 1b;	\
+	.long	8 ## n ## 6b,9 ## n ## 1b;	\
+	.long	8 ## n ## 7b,9 ## n ## 1b;	\
+	.text
 
 	.text
 	.stabs	"arch/powerpc/lib/",N_SO,0,0,0f
@@ -320,10 +323,13 @@ _GLOBAL(__copy_tofrom_user)
 73:	stwu	r9,4(r6)
 	bdnz	72b
 
-	EX_TABLE(70b,100f)
-	EX_TABLE(71b,101f)
-	EX_TABLE(72b,102f)
-	EX_TABLE(73b,103f)
+	.section __ex_table,"a"
+	.align	2
+	.long	70b,100f
+	.long	71b,101f
+	.long	72b,102f
+	.long	73b,103f
+	.text
 
 58:	srwi.	r0,r5,LG_CACHELINE_BYTES /* # complete cachelines */
 	clrlwi	r5,r5,32-LG_CACHELINE_BYTES
@@ -358,7 +364,10 @@ _GLOBAL(__copy_tofrom_user)
 
 53:	dcbt	r3,r4
 54:	dcbz	r11,r6
-	EX_TABLE(54b,105f)
+	.section __ex_table,"a"
+	.align	2
+	.long	54b,105f
+	.text
 /* the main body of the cacheline loop */
 	COPY_16_BYTES_WITHEX(0)
 #if L1_CACHE_BYTES >= 32
@@ -491,13 +500,15 @@ _GLOBAL(__copy_tofrom_user)
 	bdnz	114b
 120:	blr
 
-	EX_TABLE(30b,108b)
-	EX_TABLE(31b,109b)
-	EX_TABLE(40b,110b)
-	EX_TABLE(41b,111b)
-	EX_TABLE(130b,132b)
-	EX_TABLE(131b,120b)
-	EX_TABLE(112b,120b)
-	EX_TABLE(114b,120b)
-
+	.section __ex_table,"a"
+	.align	2
+	.long	30b,108b
+	.long	31b,109b
+	.long	40b,110b
+	.long	41b,111b
+	.long	130b,132b
+	.long	131b,120b
+	.long	112b,120b
+	.long	114b,120b
+	.text
 EXPORT_SYMBOL(__copy_tofrom_user)

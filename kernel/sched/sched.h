@@ -1,27 +1,9 @@
 
 #include <linux/sched.h>
-#include <linux/sched/autogroup.h>
 #include <linux/sched/sysctl.h>
-#include <linux/sched/topology.h>
 #include <linux/sched/rt.h>
-#include <linux/sched/deadline.h>
-#include <linux/sched/clock.h>
-#include <linux/sched/wake_q.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/numa_balancing.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/cpufreq.h>
-#include <linux/sched/stat.h>
-#include <linux/sched/nohz.h>
-#include <linux/sched/debug.h>
-#include <linux/sched/hotplug.h>
-#include <linux/sched/task.h>
-#include <linux/sched/task_stack.h>
-#include <linux/sched/cputime.h>
-#include <linux/sched/init.h>
-
 #include <linux/u64_stats_sync.h>
-#include <linux/kernel_stat.h>
+#include <linux/sched/deadline.h>
 #include <linux/binfmts.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
@@ -29,10 +11,6 @@
 #include <linux/irq_work.h>
 #include <linux/tick.h>
 #include <linux/slab.h>
-
-#ifdef CONFIG_PARAVIRT
-#include <asm/paravirt.h>
-#endif
 
 #include "cpupri.h"
 #include "cpudeadline.h"
@@ -63,6 +41,12 @@ extern long calc_load_fold_active(struct rq *this_rq, long adjust);
 extern void cpu_load_update_active(struct rq *this_rq);
 #else
 static inline void cpu_load_update_active(struct rq *this_rq) { }
+#endif
+
+#ifdef CONFIG_SCHED_SMT
+extern void update_idle_core(struct rq *rq);
+#else
+static inline void update_idle_core(struct rq *rq) { }
 #endif
 
 /*
@@ -244,7 +228,7 @@ bool __dl_overflow(struct dl_bw *dl_b, int cpus, u64 old_bw, u64 new_bw)
 	       dl_b->bw * cpus < dl_b->total_bw - old_bw + new_bw;
 }
 
-extern void init_dl_bw(struct dl_bw *dl_b);
+extern struct mutex sched_domains_mutex;
 
 #ifdef CONFIG_CGROUP_SCHED
 
@@ -426,7 +410,6 @@ struct cfs_rq {
 	unsigned long runnable_load_avg;
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	unsigned long tg_load_avg_contrib;
-	unsigned long propagate_avg;
 #endif
 	atomic_long_t removed_load_avg, removed_util_avg;
 #ifndef CONFIG_64BIT
@@ -480,7 +463,7 @@ static inline int rt_bandwidth_enabled(void)
 }
 
 /* RT IPI pull logic requires IRQ_WORK */
-#ifdef CONFIG_IRQ_WORK
+#if defined(CONFIG_IRQ_WORK) && defined(CONFIG_SMP)
 # define HAVE_RT_PUSH_IPI
 #endif
 
@@ -502,12 +485,6 @@ struct rt_rq {
 	unsigned long rt_nr_total;
 	int overloaded;
 	struct plist_head pushable_tasks;
-#ifdef HAVE_RT_PUSH_IPI
-	int push_flags;
-	int push_cpu;
-	struct irq_work push_work;
-	raw_spinlock_t push_lock;
-#endif
 #endif /* CONFIG_SMP */
 	int rt_queued;
 
@@ -562,11 +539,6 @@ struct dl_rq {
 
 #ifdef CONFIG_SMP
 
-static inline bool sched_asym_prefer(int a, int b)
-{
-	return arch_asym_cpu_priority(a) > arch_asym_cpu_priority(b);
-}
-
 /*
  * We add the notion of a root-domain which will be used to define per-domain
  * variables. Each exclusive cpuset essentially defines an island domain by
@@ -594,6 +566,19 @@ struct root_domain {
 	struct dl_bw dl_bw;
 	struct cpudl cpudl;
 
+#ifdef HAVE_RT_PUSH_IPI
+	/*
+	 * For IPI pull requests, loop across the rto_mask.
+	 */
+	struct irq_work rto_push_work;
+	raw_spinlock_t rto_lock;
+	/* These are only updated and read within rto_lock */
+	int rto_loop;
+	int rto_cpu;
+	/* These atomics are updated outside of a lock */
+	atomic_t rto_loop_next;
+	atomic_t rto_loop_start;
+#endif
 	/*
 	 * The "RT overload" flag: it gets set if a CPU has more than
 	 * one runnable RT task.
@@ -605,14 +590,12 @@ struct root_domain {
 };
 
 extern struct root_domain def_root_domain;
-extern struct mutex sched_domains_mutex;
-extern cpumask_var_t fallback_doms;
-extern cpumask_var_t sched_domains_tmpmask;
+extern void sched_get_rd(struct root_domain *rd);
+extern void sched_put_rd(struct root_domain *rd);
 
-extern void init_defrootdomain(void);
-extern int init_sched_domains(const struct cpumask *cpu_map);
-extern void rq_attach_root(struct rq *rq, struct root_domain *rd);
-
+#ifdef HAVE_RT_PUSH_IPI
+extern void rto_push_irq_work_func(struct irq_work *work);
+#endif
 #endif /* CONFIG_SMP */
 
 /*
@@ -658,7 +641,6 @@ struct rq {
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	/* list of leaf cfs_rq on this cpu: */
 	struct list_head leaf_cfs_rq_list;
-	struct list_head *tmp_alone_branch;
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 
 	/*
@@ -673,7 +655,7 @@ struct rq {
 	unsigned long next_balance;
 	struct mm_struct *prev_mm;
 
-	unsigned int clock_update_flags;
+	unsigned int clock_skip_update;
 	u64 clock;
 	u64 clock_task;
 
@@ -767,23 +749,6 @@ static inline int cpu_of(struct rq *rq)
 #endif
 }
 
-
-#ifdef CONFIG_SCHED_SMT
-
-extern struct static_key_false sched_smt_present;
-
-extern void __update_idle_core(struct rq *rq);
-
-static inline void update_idle_core(struct rq *rq)
-{
-	if (static_branch_unlikely(&sched_smt_present))
-		__update_idle_core(rq);
-}
-
-#else
-static inline void update_idle_core(struct rq *rq) { }
-#endif
-
 DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
 #define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
@@ -797,110 +762,28 @@ static inline u64 __rq_clock_broken(struct rq *rq)
 	return READ_ONCE(rq->clock);
 }
 
-/*
- * rq::clock_update_flags bits
- *
- * %RQCF_REQ_SKIP - will request skipping of clock update on the next
- *  call to __schedule(). This is an optimisation to avoid
- *  neighbouring rq clock updates.
- *
- * %RQCF_ACT_SKIP - is set from inside of __schedule() when skipping is
- *  in effect and calls to update_rq_clock() are being ignored.
- *
- * %RQCF_UPDATED - is a debug flag that indicates whether a call has been
- *  made to update_rq_clock() since the last time rq::lock was pinned.
- *
- * If inside of __schedule(), clock_update_flags will have been
- * shifted left (a left shift is a cheap operation for the fast path
- * to promote %RQCF_REQ_SKIP to %RQCF_ACT_SKIP), so you must use,
- *
- *	if (rq-clock_update_flags >= RQCF_UPDATED)
- *
- * to check if %RQCF_UPADTED is set. It'll never be shifted more than
- * one position though, because the next rq_unpin_lock() will shift it
- * back.
- */
-#define RQCF_REQ_SKIP	0x01
-#define RQCF_ACT_SKIP	0x02
-#define RQCF_UPDATED	0x04
-
-static inline void assert_clock_updated(struct rq *rq)
-{
-	/*
-	 * The only reason for not seeing a clock update since the
-	 * last rq_pin_lock() is if we're currently skipping updates.
-	 */
-	SCHED_WARN_ON(rq->clock_update_flags < RQCF_ACT_SKIP);
-}
-
 static inline u64 rq_clock(struct rq *rq)
 {
 	lockdep_assert_held(&rq->lock);
-	assert_clock_updated(rq);
-
 	return rq->clock;
 }
 
 static inline u64 rq_clock_task(struct rq *rq)
 {
 	lockdep_assert_held(&rq->lock);
-	assert_clock_updated(rq);
-
 	return rq->clock_task;
 }
+
+#define RQCF_REQ_SKIP	0x01
+#define RQCF_ACT_SKIP	0x02
 
 static inline void rq_clock_skip_update(struct rq *rq, bool skip)
 {
 	lockdep_assert_held(&rq->lock);
 	if (skip)
-		rq->clock_update_flags |= RQCF_REQ_SKIP;
+		rq->clock_skip_update |= RQCF_REQ_SKIP;
 	else
-		rq->clock_update_flags &= ~RQCF_REQ_SKIP;
-}
-
-struct rq_flags {
-	unsigned long flags;
-	struct pin_cookie cookie;
-#ifdef CONFIG_SCHED_DEBUG
-	/*
-	 * A copy of (rq::clock_update_flags & RQCF_UPDATED) for the
-	 * current pin context is stashed here in case it needs to be
-	 * restored in rq_repin_lock().
-	 */
-	unsigned int clock_update_flags;
-#endif
-};
-
-static inline void rq_pin_lock(struct rq *rq, struct rq_flags *rf)
-{
-	rf->cookie = lockdep_pin_lock(&rq->lock);
-
-#ifdef CONFIG_SCHED_DEBUG
-	rq->clock_update_flags &= (RQCF_REQ_SKIP|RQCF_ACT_SKIP);
-	rf->clock_update_flags = 0;
-#endif
-}
-
-static inline void rq_unpin_lock(struct rq *rq, struct rq_flags *rf)
-{
-#ifdef CONFIG_SCHED_DEBUG
-	if (rq->clock_update_flags > RQCF_ACT_SKIP)
-		rf->clock_update_flags = RQCF_UPDATED;
-#endif
-
-	lockdep_unpin_lock(&rq->lock, rf->cookie);
-}
-
-static inline void rq_repin_lock(struct rq *rq, struct rq_flags *rf)
-{
-	lockdep_repin_lock(&rq->lock, rf->cookie);
-
-#ifdef CONFIG_SCHED_DEBUG
-	/*
-	 * Restore the value we stashed in @rf for this pin context.
-	 */
-	rq->clock_update_flags |= rf->clock_update_flags;
-#endif
+		rq->clock_skip_update &= ~RQCF_REQ_SKIP;
 }
 
 #ifdef CONFIG_NUMA
@@ -912,16 +795,6 @@ enum numa_topology_type {
 extern enum numa_topology_type sched_numa_topology_type;
 extern int sched_max_numa_distance;
 extern bool find_numa_distance(int distance);
-#endif
-
-#ifdef CONFIG_NUMA
-extern void sched_init_numa(void);
-extern void sched_domains_numa_masks_set(unsigned int cpu);
-extern void sched_domains_numa_masks_clear(unsigned int cpu);
-#else
-static inline void sched_init_numa(void) { }
-static inline void sched_domains_numa_masks_set(unsigned int cpu) { }
-static inline void sched_domains_numa_masks_clear(unsigned int cpu) { }
 #endif
 
 #ifdef CONFIG_NUMA_BALANCING
@@ -1020,8 +893,7 @@ struct sched_group_capacity {
 	 * CPU capacity of this group, SCHED_CAPACITY_SCALE being max capacity
 	 * for a single CPU.
 	 */
-	unsigned long capacity;
-	unsigned long min_capacity; /* Min per-CPU capacity in group */
+	unsigned int capacity;
 	unsigned long next_update;
 	int imbalance; /* XXX unrelated to capacity but shared group state */
 
@@ -1034,7 +906,6 @@ struct sched_group {
 
 	unsigned int group_weight;
 	struct sched_group_capacity *sgc;
-	int asym_prefer_cpu;		/* cpu of highest priority in group */
 
 	/*
 	 * The CPUs this group covers.
@@ -1090,7 +961,7 @@ static inline void sched_ttwu_pending(void) { }
 #endif /* CONFIG_SMP */
 
 #include "stats.h"
-#include "autogroup.h"
+#include "auto_group.h"
 
 #ifdef CONFIG_CGROUP_SCHED
 
@@ -1366,7 +1237,7 @@ struct sched_class {
 	 */
 	struct task_struct * (*pick_next_task) (struct rq *rq,
 						struct task_struct *prev,
-						struct rq_flags *rf);
+						struct pin_cookie cookie);
 	void (*put_prev_task) (struct rq *rq, struct task_struct *p);
 
 #ifdef CONFIG_SMP
@@ -1622,6 +1493,11 @@ static inline void sched_rt_avg_update(struct rq *rq, u64 rt_delta) { }
 static inline void sched_avg_update(struct rq *rq) { }
 #endif
 
+struct rq_flags {
+	unsigned long flags;
+	struct pin_cookie cookie;
+};
+
 struct rq *__task_rq_lock(struct task_struct *p, struct rq_flags *rf)
 	__acquires(rq->lock);
 struct rq *task_rq_lock(struct task_struct *p, struct rq_flags *rf)
@@ -1631,7 +1507,7 @@ struct rq *task_rq_lock(struct task_struct *p, struct rq_flags *rf)
 static inline void __task_rq_unlock(struct rq *rq, struct rq_flags *rf)
 	__releases(rq->lock)
 {
-	rq_unpin_lock(rq, rf);
+	lockdep_unpin_lock(&rq->lock, rf->cookie);
 	raw_spin_unlock(&rq->lock);
 }
 
@@ -1640,7 +1516,7 @@ task_rq_unlock(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 	__releases(rq->lock)
 	__releases(p->pi_lock)
 {
-	rq_unpin_lock(rq, rf);
+	lockdep_unpin_lock(&rq->lock, rf->cookie);
 	raw_spin_unlock(&rq->lock);
 	raw_spin_unlock_irqrestore(&p->pi_lock, rf->flags);
 }
@@ -1790,10 +1666,6 @@ static inline void double_rq_unlock(struct rq *rq1, struct rq *rq2)
 		__release(rq2->lock);
 }
 
-extern void set_rq_online (struct rq *rq);
-extern void set_rq_offline(struct rq *rq);
-extern bool sched_smp_initialized;
-
 #else /* CONFIG_SMP */
 
 /*
@@ -1838,6 +1710,7 @@ extern void print_rt_stats(struct seq_file *m, int cpu);
 extern void print_dl_stats(struct seq_file *m, int cpu);
 extern void
 print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq);
+
 #ifdef CONFIG_NUMA_BALANCING
 extern void
 show_numa_stats(struct task_struct *p, struct seq_file *m);
@@ -1869,19 +1742,14 @@ static inline void nohz_balance_exit_idle(unsigned int cpu) { }
 
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
 struct irqtime {
-	u64			total;
-	u64			tick_delta;
+	u64			hardirq_time;
+	u64			softirq_time;
 	u64			irq_start_time;
 	struct u64_stats_sync	sync;
 };
 
 DECLARE_PER_CPU(struct irqtime, cpu_irqtime);
 
-/*
- * Returns the irqtime minus the softirq time computed by ksoftirqd.
- * Otherwise ksoftirqd's sum_exec_runtime is substracted its own runtime
- * and never move forward.
- */
 static inline u64 irq_time_read(int cpu)
 {
 	struct irqtime *irqtime = &per_cpu(cpu_irqtime, cpu);
@@ -1890,7 +1758,7 @@ static inline u64 irq_time_read(int cpu)
 
 	do {
 		seq = __u64_stats_fetch_begin(&irqtime->sync);
-		total = irqtime->total;
+		total = irqtime->softirq_time + irqtime->hardirq_time;
 	} while (__u64_stats_fetch_retry(&irqtime->sync, seq));
 
 	return total;

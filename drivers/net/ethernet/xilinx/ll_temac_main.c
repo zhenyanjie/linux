@@ -37,7 +37,6 @@
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
 #include <linux/of_mdio.h>
-#include <linux/of_net.h>
 #include <linux/of_platform.h>
 #include <linux/of_address.h>
 #include <linux/skbuff.h>
@@ -333,7 +332,7 @@ static void temac_do_set_mac_address(struct net_device *ndev)
 	mutex_unlock(&lp->indirect_mutex);
 }
 
-static int temac_init_mac_address(struct net_device *ndev, const void *address)
+static int temac_init_mac_address(struct net_device *ndev, void *address)
 {
 	memcpy(ndev->dev_addr, address, ETH_ALEN);
 	if (!is_valid_ether_addr(ndev->dev_addr))
@@ -968,8 +967,13 @@ static const struct attribute_group temac_attr_group = {
 };
 
 /* ethtool support */
+static int temac_nway_reset(struct net_device *ndev)
+{
+	return phy_start_aneg(ndev->phydev);
+}
+
 static const struct ethtool_ops temac_ethtool_ops = {
-	.nway_reset = phy_ethtool_nway_reset,
+	.nway_reset = temac_nway_reset,
 	.get_link = ethtool_op_get_link,
 	.get_ts_info = ethtool_op_get_ts_info,
 	.get_link_ksettings = phy_ethtool_get_link_ksettings,
@@ -983,7 +987,7 @@ static int temac_of_probe(struct platform_device *op)
 	struct net_device *ndev;
 	const void *addr;
 	__be32 *p;
-	int rc = 0;
+	int size, rc = 0;
 
 	/* Init network device structure */
 	ndev = alloc_etherdev(sizeof(*lp));
@@ -1075,13 +1079,13 @@ static int temac_of_probe(struct platform_device *op)
 
 
 	/* Retrieve the MAC address */
-	addr = of_get_mac_address(op->dev.of_node);
-	if (!addr) {
+	addr = of_get_property(op->dev.of_node, "local-mac-address", &size);
+	if ((!addr) || (size != 6)) {
 		dev_err(&op->dev, "could not find MAC address\n");
 		rc = -ENODEV;
 		goto err_iounmap_2;
 	}
-	temac_init_mac_address(ndev, addr);
+	temac_init_mac_address(ndev, (void *)addr);
 
 	rc = temac_mdio_setup(lp, op->dev.of_node);
 	if (rc)

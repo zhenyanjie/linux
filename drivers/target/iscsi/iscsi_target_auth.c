@@ -20,8 +20,8 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/err.h>
-#include <linux/random.h>
 #include <linux/scatterlist.h>
+
 #include <target/iscsi/iscsi_target_core.h>
 #include "iscsi_target_nego.h"
 #include "iscsi_target_auth.h"
@@ -413,7 +413,8 @@ static int chap_server_compute_md5(
 	auth_ret = 0;
 out:
 	kzfree(desc);
-	crypto_free_shash(tfm);
+	if (tfm)
+		crypto_free_shash(tfm);
 	kfree(challenge);
 	kfree(challenge_binhex);
 	return auth_ret;

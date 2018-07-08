@@ -32,16 +32,13 @@ do {								\
 /**
  * enum rc_driver_type - type of the RC output
  *
- * @RC_DRIVER_SCANCODE:	 Driver or hardware generates a scancode
- * @RC_DRIVER_IR_RAW:	 Driver or hardware generates pulse/space sequences.
- *			 It needs a Infra-Red pulse/space decoder
- * @RC_DRIVER_IR_RAW_TX: Device transmitter only,
- *			 driver requires pulse/space data sequence.
+ * @RC_DRIVER_SCANCODE:	Driver or hardware generates a scancode
+ * @RC_DRIVER_IR_RAW:	Driver or hardware generates pulse/space sequences.
+ *			It needs a Infra-Red pulse/space decoder
  */
 enum rc_driver_type {
 	RC_DRIVER_SCANCODE = 0,
 	RC_DRIVER_IR_RAW,
-	RC_DRIVER_IR_RAW_TX,
 };
 
 /**
@@ -71,7 +68,6 @@ enum rc_filter_type {
  * struct rc_dev - represents a remote control device
  * @dev: driver model's view of this device
  * @initialized: 1 if the device init has completed, 0 otherwise
- * @managed_alloc: devm_rc_allocate_device was used to create rc_dev
  * @sysfs_groups: sysfs attribute groups
  * @input_name: name of the input child device
  * @input_phys: physical path to the input child device
@@ -86,13 +82,10 @@ enum rc_filter_type {
  * @input_dev: the input child device used to communicate events to userspace
  * @driver_type: specifies if protocol decoding is done in hardware or software
  * @idle: used to keep track of RX state
- * @encode_wakeup: wakeup filtering uses IR encode API, therefore the allowed
- *	wakeup protocols is the set of all raw encoders
  * @allowed_protocols: bitmask with the supported RC_BIT_* protocols
  * @enabled_protocols: bitmask with the enabled RC_BIT_* protocols
  * @allowed_wakeup_protocols: bitmask with the supported RC_BIT_* wakeup protocols
- * @wakeup_protocol: the enabled RC_TYPE_* wakeup protocol or
- *	RC_TYPE_UNKNOWN if disabled.
+ * @enabled_wakeup_protocols: bitmask with the enabled RC_BIT_* wakeup protocols
  * @scancode_filter: scancode filter
  * @scancode_wakeup_filter: scancode wakeup filters
  * @scancode_mask: some hardware decoders are not capable of providing the full
@@ -116,6 +109,8 @@ enum rc_filter_type {
  * @rx_resolution : resolution (in ns) of input sampler
  * @tx_resolution: resolution (in ns) of output sampler
  * @change_protocol: allow changing the protocol used on hardware decoders
+ * @change_wakeup_protocol: allow changing the protocol used for wakeup
+ *	filtering
  * @open: callback to allow drivers to enable polling/irq when IR input device
  *	is opened.
  * @close: callback to allow drivers to disable polling/irq when IR input device
@@ -130,15 +125,12 @@ enum rc_filter_type {
  * @s_learning_mode: enable wide band receiver used for learning
  * @s_carrier_report: enable carrier reports
  * @s_filter: set the scancode filter
- * @s_wakeup_filter: set the wakeup scancode filter. If the mask is zero
- *	then wakeup should be disabled. wakeup_protocol will be set to
- *	a valid protocol if mask is nonzero.
+ * @s_wakeup_filter: set the wakeup scancode filter
  * @s_timeout: set hardware timeout in ns
  */
 struct rc_dev {
 	struct device			dev;
 	atomic_t			initialized;
-	bool				managed_alloc;
 	const struct attribute_group	*sysfs_groups[5];
 	const char			*input_name;
 	const char			*input_phys;
@@ -152,11 +144,10 @@ struct rc_dev {
 	struct input_dev		*input_dev;
 	enum rc_driver_type		driver_type;
 	bool				idle;
-	bool				encode_wakeup;
 	u64				allowed_protocols;
 	u64				enabled_protocols;
 	u64				allowed_wakeup_protocols;
-	enum rc_type			wakeup_protocol;
+	u64				enabled_wakeup_protocols;
 	struct rc_scancode_filter	scancode_filter;
 	struct rc_scancode_filter	scancode_wakeup_filter;
 	u32				scancode_mask;
@@ -176,6 +167,7 @@ struct rc_dev {
 	u32				rx_resolution;
 	u32				tx_resolution;
 	int				(*change_protocol)(struct rc_dev *dev, u64 *rc_type);
+	int				(*change_wakeup_protocol)(struct rc_dev *dev, u64 *rc_type);
 	int				(*open)(struct rc_dev *dev);
 	void				(*close)(struct rc_dev *dev);
 	int				(*s_tx_mask)(struct rc_dev *dev, u32 mask);
@@ -206,19 +198,9 @@ struct rc_dev {
 /**
  * rc_allocate_device - Allocates a RC device
  *
- * @rc_driver_type: specifies the type of the RC output to be allocated
  * returns a pointer to struct rc_dev.
  */
-struct rc_dev *rc_allocate_device(enum rc_driver_type);
-
-/**
- * devm_rc_allocate_device - Managed RC device allocation
- *
- * @dev: pointer to struct device
- * @rc_driver_type: specifies the type of the RC output to be allocated
- * returns a pointer to struct rc_dev.
- */
-struct rc_dev *devm_rc_allocate_device(struct device *dev, enum rc_driver_type);
+struct rc_dev *rc_allocate_device(void);
 
 /**
  * rc_free_device - Frees a RC device
@@ -233,14 +215,6 @@ void rc_free_device(struct rc_dev *dev);
  * @dev: pointer to struct rc_dev.
  */
 int rc_register_device(struct rc_dev *dev);
-
-/**
- * devm_rc_register_device - Manageded registering of a RC device
- *
- * @parent: pointer to struct device.
- * @dev: pointer to struct rc_dev.
- */
-int devm_rc_register_device(struct device *parent, struct rc_dev *dev);
 
 /**
  * rc_unregister_device - Unregisters a RC device
@@ -314,8 +288,6 @@ int ir_raw_event_store_edge(struct rc_dev *dev, enum raw_event_type type);
 int ir_raw_event_store_with_filter(struct rc_dev *dev,
 				struct ir_raw_event *ev);
 void ir_raw_event_set_idle(struct rc_dev *dev, bool idle);
-int ir_raw_encode_scancode(enum rc_type protocol, u32 scancode,
-			   struct ir_raw_event *events, unsigned int max);
 
 static inline void ir_raw_event_reset(struct rc_dev *dev)
 {

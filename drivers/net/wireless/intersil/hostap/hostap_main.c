@@ -27,7 +27,7 @@
 #include <net/net_namespace.h>
 #include <net/iw_handler.h>
 #include <net/lib80211.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "hostap_wlan.h"
 #include "hostap_80211.h"
@@ -73,7 +73,7 @@ struct net_device * hostap_add_interface(struct local_info *local,
 	dev->mem_end = mdev->mem_end;
 
 	hostap_setup_dev(dev, local, type);
-	dev->needs_free_netdev = true;
+	dev->destructor = free_netdev;
 
 	sprintf(dev->name, "%s%s", prefix, name);
 	if (!rtnl_locked)
@@ -765,6 +765,16 @@ static void hostap_set_multicast_list(struct net_device *dev)
 }
 
 
+static int prism2_change_mtu(struct net_device *dev, int new_mtu)
+{
+	if (new_mtu < PRISM2_MIN_MTU || new_mtu > PRISM2_MAX_MTU)
+		return -EINVAL;
+
+	dev->mtu = new_mtu;
+	return 0;
+}
+
+
 static void prism2_tx_timeout(struct net_device *dev)
 {
 	struct hostap_interface *iface;
@@ -803,6 +813,7 @@ static const struct net_device_ops hostap_netdev_ops = {
 	.ndo_do_ioctl		= hostap_ioctl,
 	.ndo_set_mac_address	= prism2_set_mac_address,
 	.ndo_set_rx_mode	= hostap_set_multicast_list,
+	.ndo_change_mtu 	= prism2_change_mtu,
 	.ndo_tx_timeout 	= prism2_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -815,6 +826,7 @@ static const struct net_device_ops hostap_mgmt_netdev_ops = {
 	.ndo_do_ioctl		= hostap_ioctl,
 	.ndo_set_mac_address	= prism2_set_mac_address,
 	.ndo_set_rx_mode	= hostap_set_multicast_list,
+	.ndo_change_mtu 	= prism2_change_mtu,
 	.ndo_tx_timeout 	= prism2_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -827,6 +839,7 @@ static const struct net_device_ops hostap_master_ops = {
 	.ndo_do_ioctl		= hostap_ioctl,
 	.ndo_set_mac_address	= prism2_set_mac_address,
 	.ndo_set_rx_mode	= hostap_set_multicast_list,
+	.ndo_change_mtu 	= prism2_change_mtu,
 	.ndo_tx_timeout 	= prism2_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -838,8 +851,6 @@ void hostap_setup_dev(struct net_device *dev, local_info_t *local,
 
 	iface = netdev_priv(dev);
 	ether_setup(dev);
-	dev->min_mtu = PRISM2_MIN_MTU;
-	dev->max_mtu = PRISM2_MAX_MTU;
 	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
 
 	/* kernel callbacks */

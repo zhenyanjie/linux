@@ -22,6 +22,7 @@
 #include <sound/soc.h>
 
 #include "../codecs/wm9713.h"
+#include "pxa2xx-ac97.h"
 #include "pxa-ssp.h"
 
 /*

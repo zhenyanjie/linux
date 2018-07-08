@@ -79,7 +79,7 @@ static void intel_mid_power_off(void)
 
 static void intel_mid_reboot(void)
 {
-	intel_scu_ipc_simple_command(IPCMSG_COLD_BOOT, 0);
+	intel_scu_ipc_simple_command(IPCMSG_COLD_RESET, 0);
 }
 
 static unsigned long __init intel_mid_calibrate_tsc(void)
@@ -161,6 +161,12 @@ out:
 	regulator_has_full_constraints();
 }
 
+/* MID systems don't have i8042 controller */
+static int intel_mid_i8042_detect(void)
+{
+	return 0;
+}
+
 /*
  * Moorestown does not have external NMI source nor port 0x61 to report
  * NMI status. The possible NMI sources are from pmu as a result of NMI
@@ -191,6 +197,7 @@ void __init x86_intel_mid_early_setup(void)
 	x86_cpuinit.setup_percpu_clockev = apbt_setup_secondary_clock;
 
 	x86_platform.calibrate_tsc = intel_mid_calibrate_tsc;
+	x86_platform.i8042_detect = intel_mid_i8042_detect;
 	x86_init.timers.wallclock_init = intel_mid_rtc_init;
 	x86_platform.get_nmi_reason = intel_mid_get_nmi_reason;
 

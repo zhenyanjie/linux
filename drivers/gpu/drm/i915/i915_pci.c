@@ -54,32 +54,28 @@
 #define CHV_COLORS \
 	.color = { .degamma_lut_size = 65, .gamma_lut_size = 257 }
 
-/* Keep in gen based order, and chronological order within a gen */
 #define GEN2_FEATURES \
 	.gen = 2, .num_pipes = 1, \
 	.has_overlay = 1, .overlay_needs_physical = 1, \
 	.has_gmch_display = 1, \
 	.hws_needs_physical = 1, \
-	.unfenced_needs_alignment = 1, \
 	.ring_mask = RENDER_RING, \
 	GEN_DEFAULT_PIPEOFFSETS, \
 	CURSOR_OFFSETS
 
 static const struct intel_device_info intel_i830_info = {
 	GEN2_FEATURES,
-	.platform = INTEL_I830,
 	.is_mobile = 1, .cursor_needs_physical = 1,
 	.num_pipes = 2, /* legal, last one wins */
 };
 
-static const struct intel_device_info intel_i845g_info = {
+static const struct intel_device_info intel_845g_info = {
 	GEN2_FEATURES,
-	.platform = INTEL_I845G,
 };
 
 static const struct intel_device_info intel_i85x_info = {
 	GEN2_FEATURES,
-	.platform = INTEL_I85X, .is_mobile = 1,
+	.is_i85x = 1, .is_mobile = 1,
 	.num_pipes = 2, /* legal, last one wins */
 	.cursor_needs_physical = 1,
 	.has_fbc = 1,
@@ -87,7 +83,6 @@ static const struct intel_device_info intel_i85x_info = {
 
 static const struct intel_device_info intel_i865g_info = {
 	GEN2_FEATURES,
-	.platform = INTEL_I865G,
 };
 
 #define GEN3_FEATURES \
@@ -99,56 +94,33 @@ static const struct intel_device_info intel_i865g_info = {
 
 static const struct intel_device_info intel_i915g_info = {
 	GEN3_FEATURES,
-	.platform = INTEL_I915G, .cursor_needs_physical = 1,
+	.is_i915g = 1, .cursor_needs_physical = 1,
 	.has_overlay = 1, .overlay_needs_physical = 1,
 	.hws_needs_physical = 1,
-	.unfenced_needs_alignment = 1,
 };
-
 static const struct intel_device_info intel_i915gm_info = {
 	GEN3_FEATURES,
-	.platform = INTEL_I915GM,
 	.is_mobile = 1,
 	.cursor_needs_physical = 1,
 	.has_overlay = 1, .overlay_needs_physical = 1,
 	.supports_tv = 1,
 	.has_fbc = 1,
 	.hws_needs_physical = 1,
-	.unfenced_needs_alignment = 1,
 };
-
 static const struct intel_device_info intel_i945g_info = {
 	GEN3_FEATURES,
-	.platform = INTEL_I945G,
 	.has_hotplug = 1, .cursor_needs_physical = 1,
 	.has_overlay = 1, .overlay_needs_physical = 1,
 	.hws_needs_physical = 1,
-	.unfenced_needs_alignment = 1,
 };
-
 static const struct intel_device_info intel_i945gm_info = {
 	GEN3_FEATURES,
-	.platform = INTEL_I945GM, .is_mobile = 1,
+	.is_i945gm = 1, .is_mobile = 1,
 	.has_hotplug = 1, .cursor_needs_physical = 1,
 	.has_overlay = 1, .overlay_needs_physical = 1,
 	.supports_tv = 1,
 	.has_fbc = 1,
 	.hws_needs_physical = 1,
-	.unfenced_needs_alignment = 1,
-};
-
-static const struct intel_device_info intel_g33_info = {
-	GEN3_FEATURES,
-	.platform = INTEL_G33,
-	.has_hotplug = 1,
-	.has_overlay = 1,
-};
-
-static const struct intel_device_info intel_pineview_info = {
-	GEN3_FEATURES,
-	.platform = INTEL_PINEVIEW, .is_mobile = 1,
-	.has_hotplug = 1,
-	.has_overlay = 1,
 };
 
 #define GEN4_FEATURES \
@@ -161,34 +133,48 @@ static const struct intel_device_info intel_pineview_info = {
 
 static const struct intel_device_info intel_i965g_info = {
 	GEN4_FEATURES,
-	.platform = INTEL_I965G,
+	.is_broadwater = 1,
 	.has_overlay = 1,
 	.hws_needs_physical = 1,
 };
 
 static const struct intel_device_info intel_i965gm_info = {
 	GEN4_FEATURES,
-	.platform = INTEL_I965GM,
+	.is_crestline = 1,
 	.is_mobile = 1, .has_fbc = 1,
 	.has_overlay = 1,
 	.supports_tv = 1,
 	.hws_needs_physical = 1,
 };
 
+static const struct intel_device_info intel_g33_info = {
+	GEN3_FEATURES,
+	.is_g33 = 1,
+	.has_hotplug = 1,
+	.has_overlay = 1,
+};
+
 static const struct intel_device_info intel_g45_info = {
 	GEN4_FEATURES,
-	.platform = INTEL_G45,
+	.is_g4x = 1,
 	.has_pipe_cxsr = 1,
 	.ring_mask = RENDER_RING | BSD_RING,
 };
 
 static const struct intel_device_info intel_gm45_info = {
 	GEN4_FEATURES,
-	.platform = INTEL_GM45,
+	.is_g4x = 1,
 	.is_mobile = 1, .has_fbc = 1,
 	.has_pipe_cxsr = 1,
 	.supports_tv = 1,
 	.ring_mask = RENDER_RING | BSD_RING,
+};
+
+static const struct intel_device_info intel_pineview_info = {
+	GEN3_FEATURES,
+	.is_g33 = 1, .is_pineview = 1, .is_mobile = 1,
+	.has_hotplug = 1,
+	.has_overlay = 1,
 };
 
 #define GEN5_FEATURES \
@@ -201,12 +187,10 @@ static const struct intel_device_info intel_gm45_info = {
 
 static const struct intel_device_info intel_ironlake_d_info = {
 	GEN5_FEATURES,
-	.platform = INTEL_IRONLAKE,
 };
 
 static const struct intel_device_info intel_ironlake_m_info = {
 	GEN5_FEATURES,
-	.platform = INTEL_IRONLAKE,
 	.is_mobile = 1,
 };
 
@@ -220,18 +204,15 @@ static const struct intel_device_info intel_ironlake_m_info = {
 	.has_rc6p = 1, \
 	.has_gmbus_irq = 1, \
 	.has_hw_contexts = 1, \
-	.has_aliasing_ppgtt = 1, \
 	GEN_DEFAULT_PIPEOFFSETS, \
 	CURSOR_OFFSETS
 
 static const struct intel_device_info intel_sandybridge_d_info = {
 	GEN6_FEATURES,
-	.platform = INTEL_SANDYBRIDGE,
 };
 
 static const struct intel_device_info intel_sandybridge_m_info = {
 	GEN6_FEATURES,
-	.platform = INTEL_SANDYBRIDGE,
 	.is_mobile = 1,
 };
 
@@ -245,49 +226,46 @@ static const struct intel_device_info intel_sandybridge_m_info = {
 	.has_rc6p = 1, \
 	.has_gmbus_irq = 1, \
 	.has_hw_contexts = 1, \
-	.has_aliasing_ppgtt = 1, \
-	.has_full_ppgtt = 1, \
 	GEN_DEFAULT_PIPEOFFSETS, \
 	IVB_CURSOR_OFFSETS
 
 static const struct intel_device_info intel_ivybridge_d_info = {
 	GEN7_FEATURES,
-	.platform = INTEL_IVYBRIDGE,
+	.is_ivybridge = 1,
 	.has_l3_dpf = 1,
 };
 
 static const struct intel_device_info intel_ivybridge_m_info = {
 	GEN7_FEATURES,
-	.platform = INTEL_IVYBRIDGE,
+	.is_ivybridge = 1,
 	.is_mobile = 1,
 	.has_l3_dpf = 1,
 };
 
 static const struct intel_device_info intel_ivybridge_q_info = {
 	GEN7_FEATURES,
-	.platform = INTEL_IVYBRIDGE,
+	.is_ivybridge = 1,
 	.num_pipes = 0, /* legal, last one wins */
 	.has_l3_dpf = 1,
 };
 
-static const struct intel_device_info intel_valleyview_info = {
-	.platform = INTEL_VALLEYVIEW,
-	.gen = 7,
-	.is_lp = 1,
-	.num_pipes = 2,
-	.has_psr = 1,
-	.has_runtime_pm = 1,
-	.has_rc6 = 1,
-	.has_gmbus_irq = 1,
-	.has_hw_contexts = 1,
-	.has_gmch_display = 1,
-	.has_hotplug = 1,
-	.has_aliasing_ppgtt = 1,
-	.has_full_ppgtt = 1,
-	.ring_mask = RENDER_RING | BSD_RING | BLT_RING,
-	.display_mmio_offset = VLV_DISPLAY_BASE,
-	GEN_DEFAULT_PIPEOFFSETS,
+#define VLV_FEATURES  \
+	.gen = 7, .num_pipes = 2, \
+	.has_psr = 1, \
+	.has_runtime_pm = 1, \
+	.has_rc6 = 1, \
+	.has_gmbus_irq = 1, \
+	.has_hw_contexts = 1, \
+	.has_gmch_display = 1, \
+	.has_hotplug = 1, \
+	.ring_mask = RENDER_RING | BSD_RING | BLT_RING, \
+	.display_mmio_offset = VLV_DISPLAY_BASE, \
+	GEN_DEFAULT_PIPEOFFSETS, \
 	CURSOR_OFFSETS
+
+static const struct intel_device_info intel_valleyview_info = {
+	VLV_FEATURES,
+	.is_valleyview = 1,
 };
 
 #define HSW_FEATURES  \
@@ -303,37 +281,33 @@ static const struct intel_device_info intel_valleyview_info = {
 
 static const struct intel_device_info intel_haswell_info = {
 	HSW_FEATURES,
-	.platform = INTEL_HASWELL,
+	.is_haswell = 1,
 	.has_l3_dpf = 1,
 };
 
 #define BDW_FEATURES \
 	HSW_FEATURES, \
 	BDW_COLORS, \
-	.has_logical_ring_contexts = 1, \
-	.has_full_48bit_ppgtt = 1, \
-	.has_64bit_reloc = 1
+	.has_logical_ring_contexts = 1
 
 static const struct intel_device_info intel_broadwell_info = {
 	BDW_FEATURES,
 	.gen = 8,
-	.platform = INTEL_BROADWELL,
+	.is_broadwell = 1,
 };
 
 static const struct intel_device_info intel_broadwell_gt3_info = {
 	BDW_FEATURES,
 	.gen = 8,
-	.platform = INTEL_BROADWELL,
+	.is_broadwell = 1,
 	.ring_mask = RENDER_RING | BSD_RING | BLT_RING | VEBOX_RING | BSD2_RING,
 };
 
 static const struct intel_device_info intel_cherryview_info = {
 	.gen = 8, .num_pipes = 3,
 	.has_hotplug = 1,
-	.is_lp = 1,
 	.ring_mask = RENDER_RING | BSD_RING | BLT_RING | VEBOX_RING,
-	.platform = INTEL_CHERRYVIEW,
-	.has_64bit_reloc = 1,
+	.is_cherryview = 1,
 	.has_psr = 1,
 	.has_runtime_pm = 1,
 	.has_resource_streamer = 1,
@@ -342,8 +316,6 @@ static const struct intel_device_info intel_cherryview_info = {
 	.has_hw_contexts = 1,
 	.has_logical_ring_contexts = 1,
 	.has_gmch_display = 1,
-	.has_aliasing_ppgtt = 1,
-	.has_full_ppgtt = 1,
 	.display_mmio_offset = VLV_DISPLAY_BASE,
 	GEN_CHV_PIPEOFFSETS,
 	CURSOR_OFFSETS,
@@ -352,7 +324,7 @@ static const struct intel_device_info intel_cherryview_info = {
 
 static const struct intel_device_info intel_skylake_info = {
 	BDW_FEATURES,
-	.platform = INTEL_SKYLAKE,
+	.is_skylake = 1,
 	.gen = 9,
 	.has_csr = 1,
 	.has_guc = 1,
@@ -361,7 +333,7 @@ static const struct intel_device_info intel_skylake_info = {
 
 static const struct intel_device_info intel_skylake_gt3_info = {
 	BDW_FEATURES,
-	.platform = INTEL_SKYLAKE,
+	.is_skylake = 1,
 	.gen = 9,
 	.has_csr = 1,
 	.has_guc = 1,
@@ -369,49 +341,34 @@ static const struct intel_device_info intel_skylake_gt3_info = {
 	.ring_mask = RENDER_RING | BSD_RING | BLT_RING | VEBOX_RING | BSD2_RING,
 };
 
-#define GEN9_LP_FEATURES \
-	.gen = 9, \
-	.is_lp = 1, \
-	.has_hotplug = 1, \
-	.ring_mask = RENDER_RING | BSD_RING | BLT_RING | VEBOX_RING, \
-	.num_pipes = 3, \
-	.has_64bit_reloc = 1, \
-	.has_ddi = 1, \
-	.has_fpga_dbg = 1, \
-	.has_fbc = 1, \
-	.has_runtime_pm = 1, \
-	.has_pooled_eu = 0, \
-	.has_csr = 1, \
-	.has_resource_streamer = 1, \
-	.has_rc6 = 1, \
-	.has_dp_mst = 1, \
-	.has_gmbus_irq = 1, \
-	.has_hw_contexts = 1, \
-	.has_logical_ring_contexts = 1, \
-	.has_guc = 1, \
-	.has_aliasing_ppgtt = 1, \
-	.has_full_ppgtt = 1, \
-	.has_full_48bit_ppgtt = 1, \
-	GEN_DEFAULT_PIPEOFFSETS, \
-	IVB_CURSOR_OFFSETS, \
-	BDW_COLORS
-
 static const struct intel_device_info intel_broxton_info = {
-	GEN9_LP_FEATURES,
-	.platform = INTEL_BROXTON,
+	.is_broxton = 1,
+	.gen = 9,
+	.has_hotplug = 1,
+	.ring_mask = RENDER_RING | BSD_RING | BLT_RING | VEBOX_RING,
+	.num_pipes = 3,
+	.has_ddi = 1,
+	.has_fpga_dbg = 1,
+	.has_fbc = 1,
+	.has_runtime_pm = 1,
+	.has_pooled_eu = 0,
+	.has_csr = 1,
+	.has_resource_streamer = 1,
+	.has_rc6 = 1,
+	.has_dp_mst = 1,
+	.has_gmbus_irq = 1,
+	.has_hw_contexts = 1,
+	.has_logical_ring_contexts = 1,
+	.has_guc = 1,
 	.ddb_size = 512,
-};
-
-static const struct intel_device_info intel_geminilake_info = {
-	GEN9_LP_FEATURES,
-	.platform = INTEL_GEMINILAKE,
-	.is_alpha_support = 1,
-	.ddb_size = 1024,
+	GEN_DEFAULT_PIPEOFFSETS,
+	IVB_CURSOR_OFFSETS,
+	BDW_COLORS,
 };
 
 static const struct intel_device_info intel_kabylake_info = {
 	BDW_FEATURES,
-	.platform = INTEL_KABYLAKE,
+	.is_kabylake = 1,
 	.gen = 9,
 	.has_csr = 1,
 	.has_guc = 1,
@@ -420,7 +377,7 @@ static const struct intel_device_info intel_kabylake_info = {
 
 static const struct intel_device_info intel_kabylake_gt3_info = {
 	BDW_FEATURES,
-	.platform = INTEL_KABYLAKE,
+	.is_kabylake = 1,
 	.gen = 9,
 	.has_csr = 1,
 	.has_guc = 1,
@@ -436,7 +393,7 @@ static const struct intel_device_info intel_kabylake_gt3_info = {
  */
 static const struct pci_device_id pciidlist[] = {
 	INTEL_I830_IDS(&intel_i830_info),
-	INTEL_I845G_IDS(&intel_i845g_info),
+	INTEL_I845G_IDS(&intel_845g_info),
 	INTEL_I85X_IDS(&intel_i85x_info),
 	INTEL_I865G_IDS(&intel_i865g_info),
 	INTEL_I915G_IDS(&intel_i915g_info),
@@ -467,7 +424,6 @@ static const struct pci_device_id pciidlist[] = {
 	INTEL_SKL_GT3_IDS(&intel_skylake_gt3_info),
 	INTEL_SKL_GT4_IDS(&intel_skylake_gt3_info),
 	INTEL_BXT_IDS(&intel_broxton_info),
-	INTEL_GLK_IDS(&intel_geminilake_info),
 	INTEL_KBL_GT1_IDS(&intel_kabylake_info),
 	INTEL_KBL_GT2_IDS(&intel_kabylake_info),
 	INTEL_KBL_GT3_IDS(&intel_kabylake_gt3_info),
@@ -481,10 +437,9 @@ static int i915_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct intel_device_info *intel_info =
 		(struct intel_device_info *) ent->driver_data;
 
-	if (IS_ALPHA_SUPPORT(intel_info) && !i915.alpha_support) {
-		DRM_INFO("The driver support for your hardware in this kernel version is alpha quality\n"
-			 "See CONFIG_DRM_I915_ALPHA_SUPPORT or i915.alpha_support module parameter\n"
-			 "to enable support in this kernel version, or check for kernel updates.\n");
+	if (IS_PRELIMINARY_HW(intel_info) && !i915.preliminary_hw_support) {
+		DRM_INFO("This hardware requires preliminary hardware support.\n"
+			 "See CONFIG_DRM_I915_PRELIMINARY_HW_SUPPORT, and/or modparam preliminary_hw_support\n");
 		return -ENODEV;
 	}
 

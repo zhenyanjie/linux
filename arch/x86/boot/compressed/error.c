@@ -4,7 +4,6 @@
  * memcpy() and memmove() are defined for the compressed boot environment.
  */
 #include "misc.h"
-#include "error.h"
 
 void warn(char *m)
 {

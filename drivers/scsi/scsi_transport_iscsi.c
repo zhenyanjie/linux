@@ -1537,18 +1537,24 @@ iscsi_bsg_host_add(struct Scsi_Host *shost, struct iscsi_cls_host *ihost)
 	struct iscsi_internal *i = to_iscsi_internal(shost->transportt);
 	struct request_queue *q;
 	char bsg_name[20];
+	int ret;
 
 	if (!i->iscsi_transport->bsg_request)
 		return -ENOTSUPP;
 
 	snprintf(bsg_name, sizeof(bsg_name), "iscsi_host%d", shost->host_no);
-	q = bsg_setup_queue(dev, bsg_name, iscsi_bsg_host_dispatch, 0);
-	if (IS_ERR(q)) {
+
+	q = __scsi_alloc_queue(shost, bsg_request_fn);
+	if (!q)
+		return -ENOMEM;
+
+	ret = bsg_setup_queue(dev, q, bsg_name, iscsi_bsg_host_dispatch, 0);
+	if (ret) {
 		shost_printk(KERN_ERR, shost, "bsg interface failed to "
 			     "initialize - no request queue\n");
-		return PTR_ERR(q);
+		blk_cleanup_queue(q);
+		return ret;
 	}
-	__scsi_init_queue(shost, q);
 
 	ihost->bsg_q = q;
 	return 0;
@@ -3690,7 +3696,7 @@ iscsi_if_rx(struct sk_buff *skb)
 		uint32_t group;
 
 		nlh = nlmsg_hdr(skb);
-		if (nlh->nlmsg_len < sizeof(*nlh) ||
+		if (nlh->nlmsg_len < sizeof(*nlh) + sizeof(*ev) ||
 		    skb->len < nlh->nlmsg_len) {
 			break;
 		}

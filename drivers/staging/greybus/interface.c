@@ -702,11 +702,13 @@ static void gb_interface_release(struct device *dev)
 static int gb_interface_suspend(struct device *dev)
 {
 	struct gb_interface *intf = to_gb_interface(dev);
-	int ret;
+	int ret, timesync_ret;
 
 	ret = gb_control_interface_suspend_prepare(intf->control);
 	if (ret)
 		return ret;
+
+	gb_timesync_interface_remove(intf);
 
 	ret = gb_control_suspend(intf->control);
 	if (ret)
@@ -728,6 +730,12 @@ static int gb_interface_suspend(struct device *dev)
 err_hibernate_abort:
 	gb_control_interface_hibernate_abort(intf->control);
 
+	timesync_ret = gb_timesync_interface_add(intf);
+	if (timesync_ret) {
+		dev_err(dev, "failed to add to timesync: %d\n", timesync_ret);
+		return timesync_ret;
+	}
+
 	return ret;
 }
 
@@ -748,6 +756,18 @@ static int gb_interface_resume(struct device *dev)
 	ret = gb_control_resume(intf->control);
 	if (ret)
 		return ret;
+
+	ret = gb_timesync_interface_add(intf);
+	if (ret) {
+		dev_err(dev, "failed to add to timesync: %d\n", ret);
+		return ret;
+	}
+
+	ret = gb_timesync_schedule_synchronous(intf);
+	if (ret) {
+		dev_err(dev, "failed to synchronize FrameTime: %d\n", ret);
+		return ret;
+	}
 
 	return 0;
 }
@@ -1132,10 +1152,16 @@ int gb_interface_enable(struct gb_interface *intf)
 	if (ret)
 		goto err_destroy_bundles;
 
+	ret = gb_timesync_interface_add(intf);
+	if (ret) {
+		dev_err(&intf->dev, "failed to add to timesync: %d\n", ret);
+		goto err_destroy_bundles;
+	}
+
 	/* Register the control device and any bundles */
 	ret = gb_control_add(intf->control);
 	if (ret)
-		goto err_destroy_bundles;
+		goto err_remove_timesync;
 
 	pm_runtime_use_autosuspend(&intf->dev);
 	pm_runtime_get_noresume(&intf->dev);
@@ -1160,6 +1186,8 @@ int gb_interface_enable(struct gb_interface *intf)
 
 	return 0;
 
+err_remove_timesync:
+	gb_timesync_interface_remove(intf);
 err_destroy_bundles:
 	list_for_each_entry_safe(bundle, tmp, &intf->bundles, links)
 		gb_bundle_destroy(bundle);
@@ -1202,6 +1230,7 @@ void gb_interface_disable(struct gb_interface *intf)
 		gb_control_interface_deactivate_prepare(intf->control);
 
 	gb_control_del(intf->control);
+	gb_timesync_interface_remove(intf);
 	gb_control_disable(intf->control);
 	gb_control_put(intf->control);
 	intf->control = NULL;
@@ -1212,6 +1241,29 @@ void gb_interface_disable(struct gb_interface *intf)
 	pm_runtime_set_suspended(&intf->dev);
 	pm_runtime_dont_use_autosuspend(&intf->dev);
 	pm_runtime_put_noidle(&intf->dev);
+}
+
+/* Enable TimeSync on an Interface control connection. */
+int gb_interface_timesync_enable(struct gb_interface *intf, u8 count,
+				 u64 frame_time, u32 strobe_delay, u32 refclk)
+{
+	return gb_control_timesync_enable(intf->control, count,
+					  frame_time, strobe_delay,
+					  refclk);
+}
+
+/* Disable TimeSync on an Interface control connection. */
+int gb_interface_timesync_disable(struct gb_interface *intf)
+{
+	return gb_control_timesync_disable(intf->control);
+}
+
+/* Transmit the Authoritative FrameTime via an Interface control connection. */
+int gb_interface_timesync_authoritative(struct gb_interface *intf,
+					u64 *frame_time)
+{
+	return gb_control_timesync_authoritative(intf->control,
+						frame_time);
 }
 
 /* Register an interface. */

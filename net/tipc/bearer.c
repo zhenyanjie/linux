@@ -322,6 +322,7 @@ restart:
 	if (res) {
 		pr_warn("Bearer <%s> rejected, enable failure (%d)\n",
 			name, -res);
+		kfree(b);
 		return -EINVAL;
 	}
 
@@ -345,8 +346,10 @@ restart:
 	if (skb)
 		tipc_bearer_xmit_skb(net, bearer_id, skb, &b->bcast_addr);
 
-	if (tipc_mon_create(net, bearer_id))
+	if (tipc_mon_create(net, bearer_id)) {
+		bearer_disable(net, b);
 		return -ENOMEM;
+	}
 
 	pr_info("Enabled bearer <%s>, discovery domain %s, priority %u\n",
 		name,
@@ -431,7 +434,7 @@ int tipc_enable_l2_media(struct net *net, struct tipc_bearer *b,
 	memset(&b->bcast_addr, 0, sizeof(b->bcast_addr));
 	memcpy(b->bcast_addr.value, dev->broadcast, b->media->hwaddr_len);
 	b->bcast_addr.media_id = b->media->type_id;
-	b->bcast_addr.broadcast = TIPC_BROADCAST_SUPPORT;
+	b->bcast_addr.broadcast = 1;
 	b->mtu = dev->mtu;
 	b->media->raw2addr(b, &b->addr, (char *)dev->dev_addr);
 	rcu_assign_pointer(dev->tipc_ptr, b);
@@ -480,19 +483,6 @@ int tipc_l2_send_msg(struct net *net, struct sk_buff *skb,
 			dev->dev_addr, skb->len);
 	dev_queue_xmit(skb);
 	return 0;
-}
-
-bool tipc_bearer_bcast_support(struct net *net, u32 bearer_id)
-{
-	bool supp = false;
-	struct tipc_bearer *b;
-
-	rcu_read_lock();
-	b = bearer_get(net, bearer_id);
-	if (b)
-		supp = (b->bcast_addr.broadcast == TIPC_BROADCAST_SUPPORT);
-	rcu_read_unlock();
-	return supp;
 }
 
 int tipc_bearer_mtu(struct net *net, u32 bearer_id)

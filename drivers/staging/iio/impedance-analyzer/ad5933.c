@@ -23,8 +23,8 @@
 #include <linux/iio/kfifo_buf.h>
 
 /* AD5933/AD5934 Registers */
-#define AD5933_REG_CONTROL_HB		0x80	/* R/W, 1 byte */
-#define AD5933_REG_CONTROL_LB		0x81	/* R/W, 1 byte */
+#define AD5933_REG_CONTROL_HB		0x80	/* R/W, 2 bytes */
+#define AD5933_REG_CONTROL_LB		0x81	/* R/W, 2 bytes */
 #define AD5933_REG_FREQ_START		0x82	/* R/W, 3 bytes */
 #define AD5933_REG_FREQ_INC		0x85	/* R/W, 3 bytes */
 #define AD5933_REG_INC_NUM		0x88	/* R/W, 2 bytes, 9 bit */
@@ -642,8 +642,6 @@ static int ad5933_register_ring_funcs_and_init(struct iio_dev *indio_dev)
 	/* Ring buffer functions - here trigger setup related */
 	indio_dev->setup_ops = &ad5933_ring_setup_ops;
 
-	indio_dev->modes |= INDIO_BUFFER_HARDWARE;
-
 	return 0;
 }
 
@@ -726,16 +724,13 @@ static int ad5933_probe(struct i2c_client *client,
 	if (!pdata)
 		pdata = &ad5933_default_pdata;
 
-	st->reg = devm_regulator_get(&client->dev, "vdd");
-	if (IS_ERR(st->reg))
-		return PTR_ERR(st->reg);
-
-	ret = regulator_enable(st->reg);
-	if (ret) {
-		dev_err(&client->dev, "Failed to enable specified VDD supply\n");
-		return ret;
+	st->reg = devm_regulator_get(&client->dev, "vcc");
+	if (!IS_ERR(st->reg)) {
+		ret = regulator_enable(st->reg);
+		if (ret)
+			return ret;
+		voltage_uv = regulator_get_voltage(st->reg);
 	}
-	voltage_uv = regulator_get_voltage(st->reg);
 
 	if (voltage_uv)
 		st->vref_mv = voltage_uv / 1000;
@@ -757,7 +752,7 @@ static int ad5933_probe(struct i2c_client *client,
 	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &ad5933_info;
 	indio_dev->name = id->name;
-	indio_dev->modes = INDIO_DIRECT_MODE;
+	indio_dev->modes = (INDIO_BUFFER_SOFTWARE | INDIO_DIRECT_MODE);
 	indio_dev->channels = ad5933_channels;
 	indio_dev->num_channels = ARRAY_SIZE(ad5933_channels);
 
@@ -778,7 +773,8 @@ static int ad5933_probe(struct i2c_client *client,
 error_unreg_ring:
 	iio_kfifo_free(indio_dev->buffer);
 error_disable_reg:
-	regulator_disable(st->reg);
+	if (!IS_ERR(st->reg))
+		regulator_disable(st->reg);
 
 	return ret;
 }
@@ -790,7 +786,8 @@ static int ad5933_remove(struct i2c_client *client)
 
 	iio_device_unregister(indio_dev);
 	iio_kfifo_free(indio_dev->buffer);
-	regulator_disable(st->reg);
+	if (!IS_ERR(st->reg))
+		regulator_disable(st->reg);
 
 	return 0;
 }

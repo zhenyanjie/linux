@@ -17,6 +17,8 @@
 #include <net/ip.h>
 #include <net/l3mdev.h>
 
+static struct xfrm_policy_afinfo xfrm4_policy_afinfo;
+
 static struct dst_entry *__xfrm4_dst_lookup(struct net *net, struct flowi4 *fl4,
 					    int tos, int oif,
 					    const xfrm_address_t *saddr,
@@ -95,6 +97,7 @@ static int xfrm4_fill_dst(struct xfrm_dst *xdst, struct net_device *dev,
 	xdst->u.rt.rt_gateway = rt->rt_gateway;
 	xdst->u.rt.rt_uses_gateway = rt->rt_uses_gateway;
 	xdst->u.rt.rt_pmtu = rt->rt_pmtu;
+	xdst->u.rt.rt_mtu_locked = rt->rt_mtu_locked;
 	xdst->u.rt.rt_table_id = rt->rt_table_id;
 	INIT_LIST_HEAD(&xdst->u.rt.rt_uncached);
 
@@ -217,7 +220,7 @@ static inline int xfrm4_garbage_collect(struct dst_ops *ops)
 {
 	struct net *net = container_of(ops, struct net, xfrm.xfrm4_dst_ops);
 
-	xfrm_garbage_collect_deferred(net);
+	xfrm4_policy_afinfo.garbage_collect(net);
 	return (dst_entries_get_slow(ops) > ops->gc_thresh * 2);
 }
 
@@ -269,7 +272,8 @@ static struct dst_ops xfrm4_dst_ops_template = {
 	.gc_thresh =		INT_MAX,
 };
 
-static const struct xfrm_policy_afinfo xfrm4_policy_afinfo = {
+static struct xfrm_policy_afinfo xfrm4_policy_afinfo = {
+	.family = 		AF_INET,
 	.dst_ops =		&xfrm4_dst_ops_template,
 	.dst_lookup =		xfrm4_dst_lookup,
 	.get_saddr =		xfrm4_get_saddr,
@@ -373,7 +377,7 @@ static struct pernet_operations __net_initdata xfrm4_net_ops = {
 
 static void __init xfrm4_policy_init(void)
 {
-	xfrm_policy_register_afinfo(&xfrm4_policy_afinfo, AF_INET);
+	xfrm_policy_register_afinfo(&xfrm4_policy_afinfo);
 }
 
 void __init xfrm4_init(void)

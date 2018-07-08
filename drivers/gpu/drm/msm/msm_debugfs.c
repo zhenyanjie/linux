@@ -18,8 +18,6 @@
 #ifdef CONFIG_DEBUG_FS
 #include "msm_drv.h"
 #include "msm_gpu.h"
-#include "msm_kms.h"
-#include "msm_debugfs.h"
 
 static int msm_gpu_show(struct drm_device *dev, struct seq_file *m)
 {
@@ -52,11 +50,7 @@ static int msm_gem_show(struct drm_device *dev, struct seq_file *m)
 
 static int msm_mm_show(struct drm_device *dev, struct seq_file *m)
 {
-	struct drm_printer p = drm_seq_file_printer(m);
-
-	drm_mm_print(&dev->vma_offset_manager->vm_addr_space_mm, &p);
-
-	return 0;
+	return drm_mm_dump_table(m, &dev->vma_offset_manager->vm_addr_space_mm);
 }
 
 static int msm_fb_show(struct drm_device *dev, struct seq_file *m)
@@ -147,7 +141,6 @@ int msm_debugfs_late_init(struct drm_device *dev)
 int msm_debugfs_init(struct drm_minor *minor)
 {
 	struct drm_device *dev = minor->dev;
-	struct msm_drm_private *priv = dev->dev_private;
 	int ret;
 
 	ret = drm_debugfs_create_files(msm_debugfs_list,
@@ -159,25 +152,15 @@ int msm_debugfs_init(struct drm_minor *minor)
 		return ret;
 	}
 
-	if (priv->kms->funcs->debugfs_init)
-		ret = priv->kms->funcs->debugfs_init(priv->kms, minor);
-
-	return ret;
+	return 0;
 }
 
 void msm_debugfs_cleanup(struct drm_minor *minor)
 {
-	struct drm_device *dev = minor->dev;
-	struct msm_drm_private *priv = dev->dev_private;
-
 	drm_debugfs_remove_files(msm_debugfs_list,
 			ARRAY_SIZE(msm_debugfs_list), minor);
-	if (!priv)
+	if (!minor->dev->dev_private)
 		return;
-
-	if (priv->kms->funcs->debugfs_cleanup)
-		priv->kms->funcs->debugfs_cleanup(priv->kms, minor);
-
 	msm_rd_debugfs_cleanup(minor);
 	msm_perf_debugfs_cleanup(minor);
 }

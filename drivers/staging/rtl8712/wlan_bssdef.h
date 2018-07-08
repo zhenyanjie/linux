@@ -83,7 +83,7 @@ struct wlan_bssid_ex {
 	unsigned char  MacAddress[6];
 	u8  Reserved[2];
 	struct ndis_802_11_ssid  Ssid;
-	__le32 Privacy;
+	u32 Privacy;
 	s32 Rssi;
 	enum NDIS_802_11_NETWORK_TYPE  NetworkTypeInUse;
 	struct NDIS_802_11_CONFIGURATION  Configuration;

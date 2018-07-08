@@ -22,7 +22,7 @@
 #include <linux/vmalloc.h>
 #include <linux/posix_acl_xattr.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 static const char *
 strcmp_prefix(const char *a, const char *a_prefix)
@@ -249,7 +249,7 @@ xattr_getsecurity(struct inode *inode, const char *name, void *value,
 	}
 	memcpy(value, buffer, len);
 out:
-	security_release_secctx(buffer, len);
+	kfree(buffer);
 out_noalloc:
 	return len;
 }

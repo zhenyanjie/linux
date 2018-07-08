@@ -66,7 +66,7 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 	if (evlist == NULL) /* Fallback for kernels lacking PERF_COUNT_SW_DUMMY */
 		evlist = perf_evlist__new_default();
 
-	if (evlist == NULL) {
+	if (evlist == NULL || argv == NULL) {
 		pr_debug("Not enough memory to create evlist\n");
 		goto out;
 	}
@@ -172,13 +172,13 @@ int test__PERF_RECORD(int subtest __maybe_unused)
 
 				err = perf_evlist__parse_sample(evlist, event, &sample);
 				if (err < 0) {
-					if (verbose > 0)
+					if (verbose)
 						perf_event__fprintf(event, stderr);
 					pr_debug("Couldn't parse sample\n");
 					goto out_delete_evlist;
 				}
 
-				if (verbose > 0) {
+				if (verbose) {
 					pr_info("%" PRIu64" %d ", sample.time, sample.cpu);
 					perf_event__fprintf(event, stderr);
 				}

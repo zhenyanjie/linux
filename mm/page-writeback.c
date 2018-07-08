@@ -36,7 +36,6 @@
 #include <linux/pagevec.h>
 #include <linux/timer.h>
 #include <linux/sched/rt.h>
-#include <linux/sched/signal.h>
 #include <linux/mm_inline.h>
 #include <trace/events/writeback.h>
 
@@ -581,7 +580,7 @@ static void wb_domain_writeout_inc(struct wb_domain *dom,
 	__fprop_inc_percpu_max(&dom->completions, completions,
 			       max_prop_frac);
 	/* First event after period switching was turned off? */
-	if (unlikely(!dom->period_time)) {
+	if (!unlikely(dom->period_time)) {
 		/*
 		 * We can race with other __bdi_writeout_inc calls here but
 		 * it does not cause any harm since the resulting time when
@@ -1779,7 +1778,6 @@ pause:
 					  pause,
 					  start_time);
 		__set_current_state(TASK_KILLABLE);
-		wb->dirty_sleep = now;
 		io_schedule_timeout(pause);
 
 		current->dirty_paused_when = now + pause;
@@ -1798,7 +1796,7 @@ pause:
 		 * pages exceeds dirty_thresh, give the other good wb's a pipe
 		 * to go through, so that tasks on them still remain responsive.
 		 *
-		 * In theory 1 page is enough to keep the consumer-producer
+		 * In theory 1 page is enough to keep the comsumer-producer
 		 * pipe going: the flusher cleans 1 page => the task dirties 1
 		 * more page. However wb_dirty has accounting errors.  So use
 		 * the larger and more IO friendly wb_stat_error.
@@ -1989,11 +1987,11 @@ void laptop_mode_timer_fn(unsigned long data)
 	 * We want to write everything out, not just down to the dirty
 	 * threshold
 	 */
-	if (!bdi_has_dirty_io(q->backing_dev_info))
+	if (!bdi_has_dirty_io(&q->backing_dev_info))
 		return;
 
 	rcu_read_lock();
-	list_for_each_entry_rcu(wb, &q->backing_dev_info->wb_list, bdi_node)
+	list_for_each_entry_rcu(wb, &q->backing_dev_info.wb_list, bdi_node)
 		if (wb_has_dirty_io(wb))
 			wb_start_writeback(wb, nr_pages, true,
 					   WB_REASON_LAPTOP_TIMER);
@@ -2107,26 +2105,18 @@ void tag_pages_for_writeback(struct address_space *mapping,
 			     pgoff_t start, pgoff_t end)
 {
 #define WRITEBACK_TAG_BATCH 4096
-	unsigned long tagged = 0;
-	struct radix_tree_iter iter;
-	void **slot;
+	unsigned long tagged;
 
-	spin_lock_irq(&mapping->tree_lock);
-	radix_tree_for_each_tagged(slot, &mapping->page_tree, &iter, start,
-							PAGECACHE_TAG_DIRTY) {
-		if (iter.index > end)
-			break;
-		radix_tree_iter_tag_set(&mapping->page_tree, &iter,
-							PAGECACHE_TAG_TOWRITE);
-		tagged++;
-		if ((tagged % WRITEBACK_TAG_BATCH) != 0)
-			continue;
-		slot = radix_tree_iter_resume(slot, &iter);
-		spin_unlock_irq(&mapping->tree_lock);
-		cond_resched();
+	do {
 		spin_lock_irq(&mapping->tree_lock);
-	}
-	spin_unlock_irq(&mapping->tree_lock);
+		tagged = radix_tree_range_tag_if_tagged(&mapping->page_tree,
+				&start, end, WRITEBACK_TAG_BATCH,
+				PAGECACHE_TAG_DIRTY, PAGECACHE_TAG_TOWRITE);
+		spin_unlock_irq(&mapping->tree_lock);
+		WARN_ON_ONCE(tagged > WRITEBACK_TAG_BATCH);
+		cond_resched();
+		/* We check 'start' to handle wrapping when end == ~0UL */
+	} while (tagged >= WRITEBACK_TAG_BATCH && start);
 }
 EXPORT_SYMBOL(tag_pages_for_writeback);
 
@@ -2516,13 +2506,13 @@ void account_page_redirty(struct page *page)
 	if (mapping && mapping_cap_account_dirty(mapping)) {
 		struct inode *inode = mapping->host;
 		struct bdi_writeback *wb;
-		bool locked;
+		struct wb_lock_cookie cookie = {};
 
-		wb = unlocked_inode_to_wb_begin(inode, &locked);
+		wb = unlocked_inode_to_wb_begin(inode, &cookie);
 		current->nr_dirtied--;
 		dec_node_page_state(page, NR_DIRTIED);
 		dec_wb_stat(wb, WB_DIRTIED);
-		unlocked_inode_to_wb_end(inode, locked);
+		unlocked_inode_to_wb_end(inode, &cookie);
 	}
 }
 EXPORT_SYMBOL(account_page_redirty);
@@ -2628,15 +2618,15 @@ void cancel_dirty_page(struct page *page)
 	if (mapping_cap_account_dirty(mapping)) {
 		struct inode *inode = mapping->host;
 		struct bdi_writeback *wb;
-		bool locked;
+		struct wb_lock_cookie cookie = {};
 
 		lock_page_memcg(page);
-		wb = unlocked_inode_to_wb_begin(inode, &locked);
+		wb = unlocked_inode_to_wb_begin(inode, &cookie);
 
 		if (TestClearPageDirty(page))
 			account_page_cleaned(page, mapping, wb);
 
-		unlocked_inode_to_wb_end(inode, locked);
+		unlocked_inode_to_wb_end(inode, &cookie);
 		unlock_page_memcg(page);
 	} else {
 		ClearPageDirty(page);
@@ -2668,7 +2658,7 @@ int clear_page_dirty_for_io(struct page *page)
 	if (mapping && mapping_cap_account_dirty(mapping)) {
 		struct inode *inode = mapping->host;
 		struct bdi_writeback *wb;
-		bool locked;
+		struct wb_lock_cookie cookie = {};
 
 		/*
 		 * Yes, Virginia, this is indeed insane.
@@ -2705,7 +2695,7 @@ int clear_page_dirty_for_io(struct page *page)
 		 * always locked coming in here, so we get the desired
 		 * exclusion.
 		 */
-		wb = unlocked_inode_to_wb_begin(inode, &locked);
+		wb = unlocked_inode_to_wb_begin(inode, &cookie);
 		if (TestClearPageDirty(page)) {
 			mem_cgroup_dec_page_stat(page, MEM_CGROUP_STAT_DIRTY);
 			dec_node_page_state(page, NR_FILE_DIRTY);
@@ -2713,7 +2703,7 @@ int clear_page_dirty_for_io(struct page *page)
 			dec_wb_stat(wb, WB_RECLAIMABLE);
 			ret = 1;
 		}
-		unlocked_inode_to_wb_end(inode, locked);
+		unlocked_inode_to_wb_end(inode, &cookie);
 		return ret;
 	}
 	return TestClearPageDirty(page);

@@ -34,7 +34,7 @@
 
 static uint16_t jz4740_jiffies_per_tick;
 
-static u64 jz4740_clocksource_read(struct clocksource *cs)
+static cycle_t jz4740_clocksource_read(struct clocksource *cs)
 {
 	return jz4740_timer_get_count(TIMER_CLOCKSOURCE);
 }

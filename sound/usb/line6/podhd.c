@@ -153,7 +153,6 @@ static struct line6_pcm_properties podx3_pcm_properties = {
 			    .rats = &podhd_ratden},
 	.bytes_per_channel = 3 /* SNDRV_PCM_FMTBIT_S24_3LE */
 };
-static struct usb_driver podhd_driver;
 
 static void podhd_startup_start_workqueue(unsigned long data);
 static void podhd_startup_workqueue(struct work_struct *work);
@@ -292,14 +291,8 @@ static void podhd_disconnect(struct usb_line6 *line6)
 	struct usb_line6_podhd *pod = (struct usb_line6_podhd *)line6;
 
 	if (pod->line6.properties->capabilities & LINE6_CAP_CONTROL) {
-		struct usb_interface *intf;
-
 		del_timer_sync(&pod->startup_timer);
 		cancel_work_sync(&pod->startup_work);
-
-		intf = usb_ifnum_to_if(line6->usbdev,
-					pod->line6.properties->ctrl_if);
-		usb_driver_release_interface(&podhd_driver, intf);
 	}
 }
 
@@ -311,27 +304,13 @@ static int podhd_init(struct usb_line6 *line6,
 {
 	int err;
 	struct usb_line6_podhd *pod = (struct usb_line6_podhd *) line6;
-	struct usb_interface *intf;
 
 	line6->disconnect = podhd_disconnect;
 
+	init_timer(&pod->startup_timer);
+	INIT_WORK(&pod->startup_work, podhd_startup_workqueue);
+
 	if (pod->line6.properties->capabilities & LINE6_CAP_CONTROL) {
-		/* claim the data interface */
-		intf = usb_ifnum_to_if(line6->usbdev,
-					pod->line6.properties->ctrl_if);
-		if (!intf) {
-			dev_err(pod->line6.ifcdev, "interface %d not found\n",
-				pod->line6.properties->ctrl_if);
-			return -ENODEV;
-		}
-
-		err = usb_driver_claim_interface(&podhd_driver, intf, NULL);
-		if (err != 0) {
-			dev_err(pod->line6.ifcdev, "can't claim interface %d, error %d\n",
-				pod->line6.properties->ctrl_if, err);
-			return err;
-		}
-
 		/* create sysfs entries: */
 		err = snd_card_add_dev_attr(line6->card, &podhd_dev_attr_group);
 		if (err < 0)
@@ -354,8 +333,6 @@ static int podhd_init(struct usb_line6 *line6,
 	}
 
 	/* init device and delay registering */
-	init_timer(&pod->startup_timer);
-	INIT_WORK(&pod->startup_work, podhd_startup_workqueue);
 	podhd_startup(pod);
 	return 0;
 }
@@ -430,7 +407,6 @@ static const struct line6_properties podhd_properties_table[] = {
 		.altsetting = 1,
 		.ep_ctrl_r = 0x81,
 		.ep_ctrl_w = 0x01,
-		.ctrl_if = 1,
 		.ep_audio_r = 0x86,
 		.ep_audio_w = 0x02,
 	},
@@ -442,7 +418,6 @@ static const struct line6_properties podhd_properties_table[] = {
 		.altsetting = 1,
 		.ep_ctrl_r = 0x81,
 		.ep_ctrl_w = 0x01,
-		.ctrl_if = 1,
 		.ep_audio_r = 0x86,
 		.ep_audio_w = 0x02,
 	},

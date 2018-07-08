@@ -182,9 +182,9 @@ void client_bulk_callback(lnet_event_t *ev)
 	struct ptlrpc_bulk_desc *desc = cbid->cbid_arg;
 	struct ptlrpc_request *req;
 
-	LASSERT((ptlrpc_is_bulk_put_sink(desc->bd_type) &&
+	LASSERT((desc->bd_type == BULK_PUT_SINK &&
 		 ev->type == LNET_EVENT_PUT) ||
-		(ptlrpc_is_bulk_get_source(desc->bd_type) &&
+		(desc->bd_type == BULK_GET_SOURCE &&
 		 ev->type == LNET_EVENT_GET) ||
 		ev->type == LNET_EVENT_UNLINK);
 	LASSERT(ev->unlinked);
@@ -277,7 +277,7 @@ static void ptlrpc_req_add_history(struct ptlrpc_service_part *svcpt,
 		 * then we hope there will be less RPCs per bucket at some
 		 * point, and sequence will catch up again
 		 */
-		svcpt->scp_hist_seq += (1ULL << REQS_SEQ_SHIFT(svcpt));
+		svcpt->scp_hist_seq += (1U << REQS_SEQ_SHIFT(svcpt));
 		new_seq = svcpt->scp_hist_seq;
 	}
 
@@ -420,8 +420,7 @@ void reply_out_callback(lnet_event_t *ev)
 		rs->rs_on_net = 0;
 		if (!rs->rs_no_ack ||
 		    rs->rs_transno <=
-		    rs->rs_export->exp_obd->obd_last_committed ||
-		    list_empty(&rs->rs_obd_list))
+		    rs->rs_export->exp_obd->obd_last_committed)
 			ptlrpc_schedule_difficult_reply(rs);
 
 		spin_unlock(&rs->rs_lock);

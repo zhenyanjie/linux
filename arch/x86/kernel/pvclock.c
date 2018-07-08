@@ -21,8 +21,6 @@
 #include <linux/sched.h>
 #include <linux/gfp.h>
 #include <linux/bootmem.h>
-#include <linux/nmi.h>
-
 #include <asm/fixmap.h>
 #include <asm/pvclock.h>
 
@@ -73,10 +71,10 @@ u8 pvclock_read_flags(struct pvclock_vcpu_time_info *src)
 	return flags & valid_flags;
 }
 
-u64 pvclock_clocksource_read(struct pvclock_vcpu_time_info *src)
+cycle_t pvclock_clocksource_read(struct pvclock_vcpu_time_info *src)
 {
 	unsigned version;
-	u64 ret;
+	cycle_t ret;
 	u64 last;
 	u8 flags;
 

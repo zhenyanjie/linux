@@ -9,12 +9,10 @@
 #include <linux/rcupdate.h>
 #include <linux/nsproxy.h>
 #include <linux/slab.h>
-#include <linux/cred.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/user_namespace.h>
 #include <linux/proc_ns.h>
-#include <linux/sched/task.h>
 
 #include "util.h"
 

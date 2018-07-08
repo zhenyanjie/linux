@@ -154,6 +154,7 @@ int i40evf_send_vf_config_msg(struct i40evf_adapter *adapter)
 	adapter->current_op = I40E_VIRTCHNL_OP_GET_VF_RESOURCES;
 	adapter->aq_required &= ~I40EVF_FLAG_AQ_GET_CONFIG;
 	caps = I40E_VIRTCHNL_VF_OFFLOAD_L2 |
+	       I40E_VIRTCHNL_VF_OFFLOAD_RSS_PF |
 	       I40E_VIRTCHNL_VF_OFFLOAD_RSS_AQ |
 	       I40E_VIRTCHNL_VF_OFFLOAD_RSS_REG |
 	       I40E_VIRTCHNL_VF_OFFLOAD_VLAN |
@@ -836,9 +837,6 @@ static void i40evf_print_link_message(struct i40evf_adapter *adapter)
 	case I40E_LINK_SPEED_40GB:
 		speed = "40 G";
 		break;
-	case I40E_LINK_SPEED_25GB:
-		speed = "25 G";
-		break;
 	case I40E_LINK_SPEED_20GB:
 		speed = "20 G";
 		break;
@@ -998,10 +996,6 @@ void i40evf_virtchnl_completion(struct i40evf_adapter *adapter,
 		 */
 		if (v_opcode != adapter->current_op)
 			return;
-		break;
-	case I40E_VIRTCHNL_OP_CONFIG_IWARP_IRQ_MAP:
-		adapter->client_pending &=
-				~(BIT(I40E_VIRTCHNL_OP_CONFIG_IWARP_IRQ_MAP));
 		break;
 	case I40E_VIRTCHNL_OP_GET_RSS_HENA_CAPS: {
 		struct i40e_virtchnl_rss_hena *vrh =

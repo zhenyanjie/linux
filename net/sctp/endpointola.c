@@ -164,7 +164,6 @@ static struct sctp_endpoint *sctp_endpoint_init(struct sctp_endpoint *ep,
 	ep->auth_hmacs_list = auth_hmacs;
 	ep->auth_chunk_list = auth_chunks;
 	ep->prsctp_enable = net->sctp.prsctp_enable;
-	ep->reconf_enable = net->sctp.reconf_enable;
 
 	return ep;
 
@@ -332,9 +331,7 @@ struct sctp_association *sctp_endpoint_lookup_assoc(
 	 * on this endpoint.
 	 */
 	if (!ep->base.bind_addr.port)
-		return NULL;
-
-	rcu_read_lock();
+		goto out;
 	t = sctp_epaddr_lookup_transport(ep, paddr);
 	if (!t)
 		goto out;
@@ -342,7 +339,6 @@ struct sctp_association *sctp_endpoint_lookup_assoc(
 	*transport = t;
 	asoc = t->asoc;
 out:
-	rcu_read_unlock();
 	return asoc;
 }
 

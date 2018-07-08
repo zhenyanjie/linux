@@ -137,8 +137,8 @@ static void igb_update_phy_info(unsigned long);
 static void igb_watchdog(unsigned long);
 static void igb_watchdog_task(struct work_struct *);
 static netdev_tx_t igb_xmit_frame(struct sk_buff *skb, struct net_device *);
-static void igb_get_stats64(struct net_device *dev,
-			    struct rtnl_link_stats64 *stats);
+static struct rtnl_link_stats64 *igb_get_stats64(struct net_device *dev,
+					  struct rtnl_link_stats64 *stats);
 static int igb_change_mtu(struct net_device *, int);
 static int igb_set_mac(struct net_device *, void *);
 static void igb_set_uta(struct igb_adapter *adapter, bool set);
@@ -383,9 +383,9 @@ static void igb_dump(struct igb_adapter *adapter)
 	/* Print netdevice Info */
 	if (netdev) {
 		dev_info(&adapter->pdev->dev, "Net device Info\n");
-		pr_info("Device Name     state            trans_start\n");
-		pr_info("%-15s %016lX %016lX\n", netdev->name,
-			netdev->state, dev_trans_start(netdev));
+		pr_info("Device Name     state            trans_start      last_rx\n");
+		pr_info("%-15s %016lX %016lX %016lX\n", netdev->name,
+			netdev->state, dev_trans_start(netdev), netdev->last_rx);
 	}
 
 	/* Print Registers */
@@ -2468,10 +2468,6 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	netdev->priv_flags |= IFF_UNICAST_FLT;
 
-	/* MTU range: 68 - 9216 */
-	netdev->min_mtu = ETH_MIN_MTU;
-	netdev->max_mtu = MAX_STD_JUMBO_FRAME_SIZE;
-
 	adapter->en_mng_pt = igb_enable_mng_pass_thru(hw);
 
 	/* before reading the NVM, reset the controller to put the device in a
@@ -3106,6 +3102,8 @@ static int igb_sw_init(struct igb_adapter *adapter)
 	/* Setup and initialize a copy of the hw vlan table array */
 	adapter->shadow_vfta = kcalloc(E1000_VLAN_FILTER_TBL_SIZE, sizeof(u32),
 				       GFP_ATOMIC);
+	if (!adapter->shadow_vfta)
+		return -ENOMEM;
 
 	/* This call may decrease the number of queues */
 	if (igb_init_interrupt_scheme(adapter, true)) {
@@ -3275,7 +3273,7 @@ static int __igb_close(struct net_device *netdev, bool suspending)
 
 int igb_close(struct net_device *netdev)
 {
-	if (netif_device_present(netdev))
+	if (netif_device_present(netdev) || netdev->dismantle)
 		return __igb_close(netdev, false);
 	return 0;
 }
@@ -3396,7 +3394,7 @@ void igb_configure_tx_ring(struct igb_adapter *adapter,
 	     tdba & 0x00000000ffffffffULL);
 	wr32(E1000_TDBAH(reg_idx), tdba >> 32);
 
-	ring->tail = adapter->io_addr + E1000_TDT(reg_idx);
+	ring->tail = hw->hw_addr + E1000_TDT(reg_idx);
 	wr32(E1000_TDH(reg_idx), 0);
 	writel(0, ring->tail);
 
@@ -3735,7 +3733,7 @@ void igb_configure_rx_ring(struct igb_adapter *adapter,
 	     ring->count * sizeof(union e1000_adv_rx_desc));
 
 	/* initialize head and tail */
-	ring->tail = adapter->io_addr + E1000_RDT(reg_idx);
+	ring->tail = hw->hw_addr + E1000_RDT(reg_idx);
 	wr32(E1000_RDH(reg_idx), 0);
 	writel(0, ring->tail);
 
@@ -3949,23 +3947,11 @@ static void igb_clean_rx_ring(struct igb_ring *rx_ring)
 		if (!buffer_info->page)
 			continue;
 
-		/* Invalidate cache lines that may have been written to by
-		 * device so that we avoid corrupting memory.
-		 */
-		dma_sync_single_range_for_cpu(rx_ring->dev,
-					      buffer_info->dma,
-					      buffer_info->page_offset,
-					      IGB_RX_BUFSZ,
-					      DMA_FROM_DEVICE);
-
-		/* free resources associated with mapping */
-		dma_unmap_page_attrs(rx_ring->dev,
-				     buffer_info->dma,
-				     PAGE_SIZE,
-				     DMA_FROM_DEVICE,
-				     DMA_ATTR_SKIP_CPU_SYNC);
-		__page_frag_cache_drain(buffer_info->page,
-					buffer_info->pagecnt_bias);
+		dma_unmap_page(rx_ring->dev,
+			       buffer_info->dma,
+			       PAGE_SIZE,
+			       DMA_FROM_DEVICE);
+		__free_page(buffer_info->page);
 
 		buffer_info->page = NULL;
 	}
@@ -5404,8 +5390,8 @@ static void igb_reset_task(struct work_struct *work)
  *  @netdev: network interface device structure
  *  @stats: rtnl_link_stats64 pointer
  **/
-static void igb_get_stats64(struct net_device *netdev,
-			    struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *igb_get_stats64(struct net_device *netdev,
+						struct rtnl_link_stats64 *stats)
 {
 	struct igb_adapter *adapter = netdev_priv(netdev);
 
@@ -5413,6 +5399,8 @@ static void igb_get_stats64(struct net_device *netdev,
 	igb_update_stats(adapter, &adapter->stats64);
 	memcpy(stats, &adapter->stats64, sizeof(*stats));
 	spin_unlock(&adapter->stats64_lock);
+
+	return stats;
 }
 
 /**
@@ -5427,6 +5415,17 @@ static int igb_change_mtu(struct net_device *netdev, int new_mtu)
 	struct igb_adapter *adapter = netdev_priv(netdev);
 	struct pci_dev *pdev = adapter->pdev;
 	int max_frame = new_mtu + ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN;
+
+	if ((new_mtu < 68) || (max_frame > MAX_JUMBO_FRAME_SIZE)) {
+		dev_err(&pdev->dev, "Invalid MTU setting\n");
+		return -EINVAL;
+	}
+
+#define MAX_STD_JUMBO_FRAME_SIZE 9238
+	if (max_frame > MAX_STD_JUMBO_FRAME_SIZE) {
+		dev_err(&pdev->dev, "MTU > 9216 not supported.\n");
+		return -EINVAL;
+	}
 
 	/* adjust max frame to be at least the size of a standard frame */
 	if (max_frame < (ETH_FRAME_LEN + ETH_FCS_LEN))
@@ -6663,7 +6662,7 @@ static bool igb_clean_tx_irq(struct igb_q_vector *q_vector, int napi_budget)
 			break;
 
 		/* prevent any other reads prior to eop_desc */
-		read_barrier_depends();
+		smp_rmb();
 
 		/* if DD is not set pending work has not been completed */
 		if (!(eop_desc->wb.status & cpu_to_le32(E1000_TXD_STAT_DD)))
@@ -6824,6 +6823,12 @@ static void igb_reuse_rx_page(struct igb_ring *rx_ring,
 
 	/* transfer page from old buffer to new buffer */
 	*new_buff = *old_buff;
+
+	/* sync the buffer for use by the device */
+	dma_sync_single_range_for_device(rx_ring->dev, old_buff->dma,
+					 old_buff->page_offset,
+					 IGB_RX_BUFSZ,
+					 DMA_FROM_DEVICE);
 }
 
 static inline bool igb_page_is_reserved(struct page *page)
@@ -6835,15 +6840,13 @@ static bool igb_can_reuse_rx_page(struct igb_rx_buffer *rx_buffer,
 				  struct page *page,
 				  unsigned int truesize)
 {
-	unsigned int pagecnt_bias = rx_buffer->pagecnt_bias--;
-
 	/* avoid re-using remote pages */
 	if (unlikely(igb_page_is_reserved(page)))
 		return false;
 
 #if (PAGE_SIZE < 8192)
 	/* if we are only owner of page we can reuse it */
-	if (unlikely(page_ref_count(page) != pagecnt_bias))
+	if (unlikely(page_count(page) != 1))
 		return false;
 
 	/* flip page offset to other buffer */
@@ -6856,14 +6859,10 @@ static bool igb_can_reuse_rx_page(struct igb_rx_buffer *rx_buffer,
 		return false;
 #endif
 
-	/* If we have drained the page fragment pool we need to update
-	 * the pagecnt_bias and page count so that we fully restock the
-	 * number of references the driver holds.
+	/* Even if we own the page, we are not allowed to use atomic_set()
+	 * This would break get_page_unless_zero() users.
 	 */
-	if (unlikely(pagecnt_bias == 1)) {
-		page_ref_add(page, USHRT_MAX);
-		rx_buffer->pagecnt_bias = USHRT_MAX;
-	}
+	page_ref_inc(page);
 
 	return true;
 }
@@ -6915,6 +6914,7 @@ static bool igb_add_rx_frag(struct igb_ring *rx_ring,
 			return true;
 
 		/* this page cannot be reused so discard it */
+		__free_page(page);
 		return false;
 	}
 
@@ -6949,13 +6949,6 @@ static struct sk_buff *igb_fetch_rx_buffer(struct igb_ring *rx_ring,
 	page = rx_buffer->page;
 	prefetchw(page);
 
-	/* we are reusing so sync this buffer for CPU use */
-	dma_sync_single_range_for_cpu(rx_ring->dev,
-				      rx_buffer->dma,
-				      rx_buffer->page_offset,
-				      size,
-				      DMA_FROM_DEVICE);
-
 	if (likely(!skb)) {
 		void *page_addr = page_address(page) +
 				  rx_buffer->page_offset;
@@ -6980,18 +6973,21 @@ static struct sk_buff *igb_fetch_rx_buffer(struct igb_ring *rx_ring,
 		prefetchw(skb->data);
 	}
 
+	/* we are reusing so sync this buffer for CPU use */
+	dma_sync_single_range_for_cpu(rx_ring->dev,
+				      rx_buffer->dma,
+				      rx_buffer->page_offset,
+				      size,
+				      DMA_FROM_DEVICE);
+
 	/* pull page into skb */
 	if (igb_add_rx_frag(rx_ring, rx_buffer, size, rx_desc, skb)) {
 		/* hand second half of page back to the ring */
 		igb_reuse_rx_page(rx_ring, rx_buffer);
 	} else {
-		/* We are not reusing the buffer so unmap it and free
-		 * any references we are holding to it
-		 */
-		dma_unmap_page_attrs(rx_ring->dev, rx_buffer->dma,
-				     PAGE_SIZE, DMA_FROM_DEVICE,
-				     DMA_ATTR_SKIP_CPU_SYNC);
-		__page_frag_cache_drain(page, rx_buffer->pagecnt_bias);
+		/* we are not reusing the buffer so unmap it */
+		dma_unmap_page(rx_ring->dev, rx_buffer->dma,
+			       PAGE_SIZE, DMA_FROM_DEVICE);
 	}
 
 	/* clear contents of rx_buffer */
@@ -7249,8 +7245,7 @@ static bool igb_alloc_mapped_page(struct igb_ring *rx_ring,
 	}
 
 	/* map page for use */
-	dma = dma_map_page_attrs(rx_ring->dev, page, 0, PAGE_SIZE,
-				 DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+	dma = dma_map_page(rx_ring->dev, page, 0, PAGE_SIZE, DMA_FROM_DEVICE);
 
 	/* if mapping failed free memory back to system since
 	 * there isn't much point in holding memory we can't use
@@ -7265,7 +7260,6 @@ static bool igb_alloc_mapped_page(struct igb_ring *rx_ring,
 	bi->dma = dma;
 	bi->page = page;
 	bi->page_offset = 0;
-	bi->pagecnt_bias = 1;
 
 	return true;
 }
@@ -7291,12 +7285,6 @@ void igb_alloc_rx_buffers(struct igb_ring *rx_ring, u16 cleaned_count)
 	do {
 		if (!igb_alloc_mapped_page(rx_ring, bi))
 			break;
-
-		/* sync the buffer for use by the device */
-		dma_sync_single_range_for_device(rx_ring->dev, bi->dma,
-						 bi->page_offset,
-						 IGB_RX_BUFSZ,
-						 DMA_FROM_DEVICE);
 
 		/* Refresh the desc even if buffer_addrs didn't change
 		 * because each write-back erases this info.

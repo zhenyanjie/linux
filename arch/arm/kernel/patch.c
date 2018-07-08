@@ -24,9 +24,9 @@ static void __kprobes *patch_map(void *addr, int fixmap, unsigned long *flags)
 	bool module = !core_kernel_text(uintaddr);
 	struct page *page;
 
-	if (module && IS_ENABLED(CONFIG_STRICT_MODULE_RWX))
+	if (module && IS_ENABLED(CONFIG_DEBUG_SET_MODULE_RONX))
 		page = vmalloc_to_page(addr);
-	else if (!module && IS_ENABLED(CONFIG_STRICT_KERNEL_RWX))
+	else if (!module && IS_ENABLED(CONFIG_DEBUG_RODATA))
 		page = virt_to_page(addr);
 	else
 		return addr;

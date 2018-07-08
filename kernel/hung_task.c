@@ -16,9 +16,6 @@
 #include <linux/export.h>
 #include <linux/sysctl.h>
 #include <linux/utsname.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/debug.h>
-
 #include <trace/events/sched.h>
 
 /*
@@ -109,8 +106,7 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
 	 * complain:
 	 */
 	if (sysctl_hung_task_warnings) {
-		if (sysctl_hung_task_warnings > 0)
-			sysctl_hung_task_warnings--;
+		sysctl_hung_task_warnings--;
 		pr_err("INFO: task %s:%d blocked for more than %ld seconds.\n",
 			t->comm, t->pid, timeout);
 		pr_err("      %s %s %.*s\n",

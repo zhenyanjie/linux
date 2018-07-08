@@ -27,7 +27,6 @@
  */
 #include <drm/drmP.h>
 #include "radeon.h"
-#include "radeon_asic.h"
 #include "evergreend.h"
 #include "evergreen_reg_safe.h"
 #include "cayman_reg_safe.h"

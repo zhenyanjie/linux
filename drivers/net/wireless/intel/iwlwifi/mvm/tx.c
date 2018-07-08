@@ -103,13 +103,14 @@ iwl_mvm_bar_check_trigger(struct iwl_mvm *mvm, const u8 *addr,
 #define OPT_HDR(type, skb, off) \
 	(type *)(skb_network_header(skb) + (off))
 
-static u16 iwl_mvm_tx_csum(struct iwl_mvm *mvm, struct sk_buff *skb,
-			   struct ieee80211_hdr *hdr,
-			   struct ieee80211_tx_info *info)
+static void iwl_mvm_tx_csum(struct iwl_mvm *mvm, struct sk_buff *skb,
+			    struct ieee80211_hdr *hdr,
+			    struct ieee80211_tx_info *info,
+			    struct iwl_tx_cmd *tx_cmd)
 {
-	u16 offload_assist = 0;
 #if IS_ENABLED(CONFIG_INET)
 	u16 mh_len = ieee80211_hdrlen(hdr->frame_control);
+	u16 offload_assist = le16_to_cpu(tx_cmd->offload_assist);
 	u8 protocol = 0;
 
 	/*
@@ -117,7 +118,7 @@ static u16 iwl_mvm_tx_csum(struct iwl_mvm *mvm, struct sk_buff *skb,
 	 * compute it
 	 */
 	if (skb->ip_summed != CHECKSUM_PARTIAL || IWL_MVM_SW_TX_CSUM_OFFLOAD)
-		goto out;
+		return;
 
 	/* We do not expect to be requested to csum stuff we do not support */
 	if (WARN_ONCE(!(mvm->hw->netdev_features & IWL_TX_CSUM_NETIF_FLAGS) ||
@@ -125,7 +126,7 @@ static u16 iwl_mvm_tx_csum(struct iwl_mvm *mvm, struct sk_buff *skb,
 		       skb->protocol != htons(ETH_P_IPV6)),
 		      "No support for requested checksum\n")) {
 		skb_checksum_help(skb);
-		goto out;
+		return;
 	}
 
 	if (skb->protocol == htons(ETH_P_IP)) {
@@ -145,7 +146,7 @@ static u16 iwl_mvm_tx_csum(struct iwl_mvm *mvm, struct sk_buff *skb,
 			    protocol != NEXTHDR_HOP &&
 			    protocol != NEXTHDR_DEST) {
 				skb_checksum_help(skb);
-				goto out;
+				return;
 			}
 
 			hp = OPT_HDR(struct ipv6_opt_hdr, skb, off);
@@ -159,7 +160,7 @@ static u16 iwl_mvm_tx_csum(struct iwl_mvm *mvm, struct sk_buff *skb,
 	if (protocol != IPPROTO_TCP && protocol != IPPROTO_UDP) {
 		WARN_ON_ONCE(1);
 		skb_checksum_help(skb);
-		goto out;
+		return;
 	}
 
 	/* enable L4 csum */
@@ -191,9 +192,8 @@ static u16 iwl_mvm_tx_csum(struct iwl_mvm *mvm, struct sk_buff *skb,
 	mh_len /= 2;
 	offload_assist |= mh_len << TX_CMD_OFFLD_MH_SIZE;
 
-out:
+	tx_cmd->offload_assist = cpu_to_le16(offload_assist);
 #endif
-	return offload_assist;
 }
 
 /*
@@ -294,52 +294,7 @@ void iwl_mvm_set_tx_cmd(struct iwl_mvm *mvm, struct sk_buff *skb,
 	    !(tx_cmd->offload_assist & cpu_to_le16(BIT(TX_CMD_OFFLD_AMSDU))))
 		tx_cmd->offload_assist |= cpu_to_le16(BIT(TX_CMD_OFFLD_PAD));
 
-	tx_cmd->offload_assist |=
-		cpu_to_le16(iwl_mvm_tx_csum(mvm, skb, hdr, info));
-}
-
-static u32 iwl_mvm_get_tx_rate(struct iwl_mvm *mvm,
-			       struct ieee80211_tx_info *info,
-			       struct ieee80211_sta *sta)
-{
-	int rate_idx;
-	u8 rate_plcp;
-	u32 rate_flags;
-
-	/* HT rate doesn't make sense for a non data frame */
-	WARN_ONCE(info->control.rates[0].flags & IEEE80211_TX_RC_MCS,
-		  "Got an HT rate (flags:0x%x/mcs:%d) for a non data frame\n",
-		  info->control.rates[0].flags,
-		  info->control.rates[0].idx);
-
-	rate_idx = info->control.rates[0].idx;
-	/* if the rate isn't a well known legacy rate, take the lowest one */
-	if (rate_idx < 0 || rate_idx >= IWL_RATE_COUNT_LEGACY)
-		rate_idx = rate_lowest_index(
-				&mvm->nvm_data->bands[info->band], sta);
-
-	/* For 5 GHZ band, remap mac80211 rate indices into driver indices */
-	if (info->band == NL80211_BAND_5GHZ)
-		rate_idx += IWL_FIRST_OFDM_RATE;
-
-	/* For 2.4 GHZ band, check that there is no need to remap */
-	BUILD_BUG_ON(IWL_FIRST_CCK_RATE != 0);
-
-	/* Get PLCP rate for tx_cmd->rate_n_flags */
-	rate_plcp = iwl_mvm_mac80211_idx_to_hwrate(rate_idx);
-
-	if (info->band == NL80211_BAND_2GHZ &&
-	    !iwl_mvm_bt_coex_is_shared_ant_avail(mvm))
-		rate_flags = mvm->cfg->non_shared_ant << RATE_MCS_ANT_POS;
-	else
-		rate_flags =
-			BIT(mvm->mgmt_last_antenna_idx) << RATE_MCS_ANT_POS;
-
-	/* Set CCK flag as needed */
-	if ((rate_idx >= IWL_FIRST_CCK_RATE) && (rate_idx <= IWL_LAST_CCK_RATE))
-		rate_flags |= RATE_MCS_CCK_MSK;
-
-	return (u32)rate_plcp | rate_flags;
+	iwl_mvm_tx_csum(mvm, skb, hdr, info, tx_cmd);
 }
 
 /*
@@ -349,6 +304,10 @@ void iwl_mvm_set_tx_cmd_rate(struct iwl_mvm *mvm, struct iwl_tx_cmd *tx_cmd,
 			    struct ieee80211_tx_info *info,
 			    struct ieee80211_sta *sta, __le16 fc)
 {
+	u32 rate_flags;
+	int rate_idx;
+	u8 rate_plcp;
+
 	/* Set retry limit on RTS packets */
 	tx_cmd->rts_retry_limit = IWL_RTS_DFAULT_RETRY_LIMIT;
 
@@ -377,12 +336,46 @@ void iwl_mvm_set_tx_cmd_rate(struct iwl_mvm *mvm, struct iwl_tx_cmd *tx_cmd,
 			cpu_to_le32(TX_CMD_FLG_ACK | TX_CMD_FLG_BAR);
 	}
 
+	/* HT rate doesn't make sense for a non data frame */
+	WARN_ONCE(info->control.rates[0].flags & IEEE80211_TX_RC_MCS,
+		  "Got an HT rate (flags:0x%x/mcs:%d) for a non data frame (fc:0x%x)\n",
+		  info->control.rates[0].flags,
+		  info->control.rates[0].idx,
+		  le16_to_cpu(fc));
+
+	rate_idx = info->control.rates[0].idx;
+	/* if the rate isn't a well known legacy rate, take the lowest one */
+	if (rate_idx < 0 || rate_idx >= IWL_RATE_COUNT_LEGACY)
+		rate_idx = rate_lowest_index(
+				&mvm->nvm_data->bands[info->band], sta);
+
+	/* For 5 GHZ band, remap mac80211 rate indices into driver indices */
+	if (info->band == NL80211_BAND_5GHZ)
+		rate_idx += IWL_FIRST_OFDM_RATE;
+
+	/* For 2.4 GHZ band, check that there is no need to remap */
+	BUILD_BUG_ON(IWL_FIRST_CCK_RATE != 0);
+
+	/* Get PLCP rate for tx_cmd->rate_n_flags */
+	rate_plcp = iwl_mvm_mac80211_idx_to_hwrate(rate_idx);
+
 	mvm->mgmt_last_antenna_idx =
 		iwl_mvm_next_antenna(mvm, iwl_mvm_get_valid_tx_ant(mvm),
 				     mvm->mgmt_last_antenna_idx);
 
+	if (info->band == NL80211_BAND_2GHZ &&
+	    !iwl_mvm_bt_coex_is_shared_ant_avail(mvm))
+		rate_flags = mvm->cfg->non_shared_ant << RATE_MCS_ANT_POS;
+	else
+		rate_flags =
+			BIT(mvm->mgmt_last_antenna_idx) << RATE_MCS_ANT_POS;
+
+	/* Set CCK flag as needed */
+	if ((rate_idx >= IWL_FIRST_CCK_RATE) && (rate_idx <= IWL_LAST_CCK_RATE))
+		rate_flags |= RATE_MCS_CCK_MSK;
+
 	/* Set the rate in the TX cmd */
-	tx_cmd->rate_n_flags = cpu_to_le32(iwl_mvm_get_tx_rate(mvm, info, sta));
+	tx_cmd->rate_n_flags = cpu_to_le32((u32)rate_plcp | rate_flags);
 }
 
 static inline void iwl_mvm_set_tx_cmd_pn(struct ieee80211_tx_info *info,
@@ -413,11 +406,11 @@ static void iwl_mvm_set_tx_cmd_crypto(struct iwl_mvm *mvm,
 {
 	struct ieee80211_key_conf *keyconf = info->control.hw_key;
 	u8 *crypto_hdr = skb_frag->data + hdrlen;
+	enum iwl_tx_cmd_sec_ctrl type = TX_CMD_SEC_CCM;
 	u64 pn;
 
 	switch (keyconf->cipher) {
 	case WLAN_CIPHER_SUITE_CCMP:
-	case WLAN_CIPHER_SUITE_CCMP_256:
 		iwl_mvm_set_tx_cmd_ccmp(info, tx_cmd);
 		iwl_mvm_set_tx_cmd_pn(info, crypto_hdr);
 		break;
@@ -441,13 +434,16 @@ static void iwl_mvm_set_tx_cmd_crypto(struct iwl_mvm *mvm,
 		break;
 	case WLAN_CIPHER_SUITE_GCMP:
 	case WLAN_CIPHER_SUITE_GCMP_256:
+		type = TX_CMD_SEC_GCMP;
+		/* Fall through */
+	case WLAN_CIPHER_SUITE_CCMP_256:
 		/* TODO: Taking the key from the table might introduce a race
 		 * when PTK rekeying is done, having an old packets with a PN
 		 * based on the old key but the message encrypted with a new
 		 * one.
 		 * Need to handle this.
 		 */
-		tx_cmd->sec_ctl |= TX_CMD_SEC_GCMP | TX_CMD_SEC_KEY_FROM_TABLE;
+		tx_cmd->sec_ctl |= type | TX_CMD_SEC_KEY_FROM_TABLE;
 		tx_cmd->key[0] = keyconf->hw_key_idx;
 		iwl_mvm_set_tx_cmd_pn(info, crypto_hdr);
 		break;
@@ -506,7 +502,6 @@ static int iwl_mvm_get_ctrl_vif_queue(struct iwl_mvm *mvm,
 
 	switch (info->control.vif->type) {
 	case NL80211_IFTYPE_AP:
-	case NL80211_IFTYPE_ADHOC:
 		/*
 		 * Handle legacy hostapd as well, where station may be added
 		 * only after assoc. Take care of the case where we send a
@@ -518,8 +513,7 @@ static int iwl_mvm_get_ctrl_vif_queue(struct iwl_mvm *mvm,
 		if (info->hw_queue == info->control.vif->cab_queue)
 			return info->hw_queue;
 
-		WARN_ONCE(info->control.vif->type != NL80211_IFTYPE_ADHOC,
-			  "fc=0x%02x", le16_to_cpu(fc));
+		WARN_ONCE(1, "fc=0x%02x", le16_to_cpu(fc));
 		return IWL_MVM_DQA_AP_PROBE_RESP_QUEUE;
 	case NL80211_IFTYPE_P2P_DEVICE:
 		if (ieee80211_is_mgmt(fc))
@@ -551,9 +545,9 @@ int iwl_mvm_tx_skb_non_sta(struct iwl_mvm *mvm, struct sk_buff *skb)
 	 * queue. STATION (HS2.0) uses the auxiliary context of the FW,
 	 * and hence needs to be sent on the aux queue
 	 */
-	if (skb_info->hw_queue == IWL_MVM_OFFCHANNEL_QUEUE &&
+	if (IEEE80211_SKB_CB(skb)->hw_queue == IWL_MVM_OFFCHANNEL_QUEUE &&
 	    skb_info->control.vif->type == NL80211_IFTYPE_STATION)
-		skb_info->hw_queue = mvm->aux_queue;
+		IEEE80211_SKB_CB(skb)->hw_queue = mvm->aux_queue;
 
 	memcpy(&info, skb->cb, sizeof(info));
 
@@ -586,8 +580,7 @@ int iwl_mvm_tx_skb_non_sta(struct iwl_mvm *mvm, struct sk_buff *skb)
 			iwl_mvm_vif_from_mac80211(info.control.vif);
 
 		if (info.control.vif->type == NL80211_IFTYPE_P2P_DEVICE ||
-		    info.control.vif->type == NL80211_IFTYPE_AP ||
-		    info.control.vif->type == NL80211_IFTYPE_ADHOC) {
+		    info.control.vif->type == NL80211_IFTYPE_AP) {
 			sta_id = mvmvif->bcast_sta.sta_id;
 			queue = iwl_mvm_get_ctrl_vif_queue(mvm, &info,
 							   hdr->frame_control);
@@ -915,10 +908,6 @@ static int iwl_mvm_tx_mpdu(struct iwl_mvm *mvm, struct sk_buff *skb,
 
 	spin_lock(&mvmsta->lock);
 
-	/* nullfunc frames should go to the MGMT queue regardless of QOS,
-	 * the condition of !ieee80211_is_qos_nullfunc(fc) keeps the default
-	 * assignment of MGMT TID
-	 */
 	if (ieee80211_is_data_qos(fc) && !ieee80211_is_qos_nullfunc(fc)) {
 		u8 *qc = NULL;
 		qc = ieee80211_get_qos_ctl(hdr);
@@ -931,13 +920,27 @@ static int iwl_mvm_tx_mpdu(struct iwl_mvm *mvm, struct sk_buff *skb,
 		hdr->seq_ctrl &= cpu_to_le16(IEEE80211_SCTL_FRAG);
 		hdr->seq_ctrl |= cpu_to_le16(seq_number);
 		is_ampdu = info->flags & IEEE80211_TX_CTL_AMPDU;
-		if (WARN_ON_ONCE(is_ampdu &&
-				 mvmsta->tid_data[tid].state != IWL_AGG_ON))
-			goto drop_unlock_sta;
+	} else if (iwl_mvm_is_dqa_supported(mvm) &&
+		   (ieee80211_is_qos_nullfunc(fc) ||
+		    ieee80211_is_nullfunc(fc))) {
+		/*
+		 * nullfunc frames should go to the MGMT queue regardless of QOS
+		 */
+		tid = IWL_MAX_TID_COUNT;
 	}
 
-	if (iwl_mvm_is_dqa_supported(mvm) || is_ampdu)
+	if (iwl_mvm_is_dqa_supported(mvm)) {
 		txq_id = mvmsta->tid_data[tid].txq_id;
+
+		if (ieee80211_is_mgmt(fc))
+			tx_cmd->tid_tspec = IWL_TID_NON_QOS;
+	}
+
+	/* Copy MAC header from skb into command buffer */
+	memcpy(tx_cmd->hdr, hdr, hdrlen);
+
+	WARN_ON_ONCE(info->flags & IEEE80211_TX_CTL_SEND_AFTER_DTIM);
+
 	if (sta->tdls && !iwl_mvm_is_dqa_supported(mvm)) {
 		/* default to TID 0 for non-QoS packets */
 		u8 tdls_tid = tid == IWL_MAX_TID_COUNT ? 0 : tid;
@@ -945,10 +948,11 @@ static int iwl_mvm_tx_mpdu(struct iwl_mvm *mvm, struct sk_buff *skb,
 		txq_id = mvmsta->hw_queue[tid_to_mac80211_ac[tdls_tid]];
 	}
 
-	/* Copy MAC header from skb into command buffer */
-	memcpy(tx_cmd->hdr, hdr, hdrlen);
-
-	WARN_ON_ONCE(info->flags & IEEE80211_TX_CTL_SEND_AFTER_DTIM);
+	if (is_ampdu) {
+		if (WARN_ON_ONCE(mvmsta->tid_data[tid].state != IWL_AGG_ON))
+			goto drop_unlock_sta;
+		txq_id = mvmsta->tid_data[tid].txq_id;
+	}
 
 	/* Check if TXQ needs to be allocated or re-activated */
 	if (unlikely(txq_id == IEEE80211_INVAL_HW_QUEUE ||

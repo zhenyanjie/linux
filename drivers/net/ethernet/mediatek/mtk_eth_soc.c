@@ -462,8 +462,8 @@ static void mtk_stats_update(struct mtk_eth *eth)
 	}
 }
 
-static void mtk_get_stats64(struct net_device *dev,
-			    struct rtnl_link_stats64 *storage)
+static struct rtnl_link_stats64 *mtk_get_stats64(struct net_device *dev,
+					struct rtnl_link_stats64 *storage)
 {
 	struct mtk_mac *mac = netdev_priv(dev);
 	struct mtk_hw_stats *hw_stats = mac->hw_stats;
@@ -494,6 +494,8 @@ static void mtk_get_stats64(struct net_device *dev,
 	storage->tx_errors = dev->stats.tx_errors;
 	storage->rx_dropped = dev->stats.rx_dropped;
 	storage->tx_dropped = dev->stats.tx_dropped;
+
+	return storage;
 }
 
 static inline int mtk_max_frag_size(int mtu)
@@ -613,7 +615,7 @@ static int mtk_tx_map(struct sk_buff *skb, struct net_device *dev,
 	struct mtk_mac *mac = netdev_priv(dev);
 	struct mtk_eth *eth = mac->hw;
 	struct mtk_tx_dma *itxd, *txd;
-	struct mtk_tx_buf *itx_buf, *tx_buf;
+	struct mtk_tx_buf *tx_buf;
 	dma_addr_t mapped_addr;
 	unsigned int nr_frags;
 	int i, n_desc = 1;
@@ -627,8 +629,8 @@ static int mtk_tx_map(struct sk_buff *skb, struct net_device *dev,
 	fport = (mac->id + 1) << TX_DMA_FPORT_SHIFT;
 	txd4 |= fport;
 
-	itx_buf = mtk_desc_to_tx_buf(ring, itxd);
-	memset(itx_buf, 0, sizeof(*itx_buf));
+	tx_buf = mtk_desc_to_tx_buf(ring, itxd);
+	memset(tx_buf, 0, sizeof(*tx_buf));
 
 	if (gso)
 		txd4 |= TX_DMA_TSO;
@@ -647,11 +649,9 @@ static int mtk_tx_map(struct sk_buff *skb, struct net_device *dev,
 		return -ENOMEM;
 
 	WRITE_ONCE(itxd->txd1, mapped_addr);
-	itx_buf->flags |= MTK_TX_FLAGS_SINGLE0;
-	itx_buf->flags |= (!mac->id) ? MTK_TX_FLAGS_FPORT0 :
-			  MTK_TX_FLAGS_FPORT1;
-	dma_unmap_addr_set(itx_buf, dma_addr0, mapped_addr);
-	dma_unmap_len_set(itx_buf, dma_len0, skb_headlen(skb));
+	tx_buf->flags |= MTK_TX_FLAGS_SINGLE0;
+	dma_unmap_addr_set(tx_buf, dma_addr0, mapped_addr);
+	dma_unmap_len_set(tx_buf, dma_len0, skb_headlen(skb));
 
 	/* TX SG offload */
 	txd = itxd;
@@ -687,13 +687,11 @@ static int mtk_tx_map(struct sk_buff *skb, struct net_device *dev,
 					       last_frag * TX_DMA_LS0));
 			WRITE_ONCE(txd->txd4, fport);
 
+			tx_buf->skb = (struct sk_buff *)MTK_DMA_DUMMY_DESC;
 			tx_buf = mtk_desc_to_tx_buf(ring, txd);
 			memset(tx_buf, 0, sizeof(*tx_buf));
-			tx_buf->skb = (struct sk_buff *)MTK_DMA_DUMMY_DESC;
-			tx_buf->flags |= MTK_TX_FLAGS_PAGE0;
-			tx_buf->flags |= (!mac->id) ? MTK_TX_FLAGS_FPORT0 :
-					 MTK_TX_FLAGS_FPORT1;
 
+			tx_buf->flags |= MTK_TX_FLAGS_PAGE0;
 			dma_unmap_addr_set(tx_buf, dma_addr0, mapped_addr);
 			dma_unmap_len_set(tx_buf, dma_len0, frag_map_size);
 			frag_size -= frag_map_size;
@@ -702,7 +700,7 @@ static int mtk_tx_map(struct sk_buff *skb, struct net_device *dev,
 	}
 
 	/* store skb to cleanup */
-	itx_buf->skb = skb;
+	tx_buf->skb = skb;
 
 	WRITE_ONCE(itxd->txd4, txd4);
 	WRITE_ONCE(itxd->txd3, (TX_DMA_SWC | TX_DMA_PLEN0(skb_headlen(skb)) |
@@ -847,7 +845,7 @@ static int mtk_start_xmit(struct sk_buff *skb, struct net_device *dev)
 drop:
 	spin_unlock(&eth->page_lock);
 	stats->tx_dropped++;
-	dev_kfree_skb_any(skb);
+	dev_kfree_skb(skb);
 	return NETDEV_TX_OK;
 }
 
@@ -1016,16 +1014,17 @@ static int mtk_poll_tx(struct mtk_eth *eth, int budget)
 
 	while ((cpu != dma) && budget) {
 		u32 next_cpu = desc->txd2;
-		int mac = 0;
+		int mac;
 
 		desc = mtk_qdma_phys_to_virt(ring, desc->txd2);
 		if ((desc->txd3 & TX_DMA_OWNER_CPU) == 0)
 			break;
 
-		tx_buf = mtk_desc_to_tx_buf(ring, desc);
-		if (tx_buf->flags & MTK_TX_FLAGS_FPORT1)
-			mac = 1;
+		mac = (desc->txd4 >> TX_DMA_FPORT_SHIFT) &
+		       TX_DMA_FPORT_MASK;
+		mac--;
 
+		tx_buf = mtk_desc_to_tx_buf(ring, desc);
 		skb = tx_buf->skb;
 		if (!skb) {
 			condition = 1;
@@ -1843,11 +1842,12 @@ static int mtk_hw_init(struct mtk_eth *eth)
 	/* set GE2 TUNE */
 	regmap_write(eth->pctl, GPIO_BIAS_CTRL, 0x0);
 
-	/* GE1, Force 1000M/FD, FC ON */
-	mtk_w32(eth, MAC_MCR_FIXED_LINK, MTK_MAC_MCR(0));
-
-	/* GE2, Force 1000M/FD, FC ON */
-	mtk_w32(eth, MAC_MCR_FIXED_LINK, MTK_MAC_MCR(1));
+	/* Set linkdown as the default for each GMAC. Its own MCR would be set
+	 * up with the more appropriate value when mtk_phy_link_adjust call is
+	 * being invoked.
+	 */
+	for (i = 0; i < MTK_MAC_COUNT; i++)
+		mtk_w32(eth, 0, MTK_MAC_MCR(i));
 
 	/* Enable RX VLan Offloading */
 	mtk_w32(eth, 1, MTK_CDMP_EG_CTRL);
@@ -2248,6 +2248,7 @@ static const struct net_device_ops mtk_netdev_ops = {
 	.ndo_set_mac_address	= mtk_set_mac_address,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_do_ioctl		= mtk_do_ioctl,
+	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_tx_timeout		= mtk_tx_timeout,
 	.ndo_get_stats64        = mtk_get_stats64,
 	.ndo_fix_features	= mtk_fix_features,

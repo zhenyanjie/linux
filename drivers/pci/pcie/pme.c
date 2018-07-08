@@ -232,6 +232,9 @@ static void pcie_pme_work_fn(struct work_struct *work)
 			break;
 
 		pcie_capability_read_dword(port, PCI_EXP_RTSTA, &rtsta);
+		if (rtsta == (u32) ~0)
+			break;
+
 		if (rtsta & PCI_EXP_RTSTA_PME) {
 			/*
 			 * Clear PME status of the port.  If there are other
@@ -279,7 +282,7 @@ static irqreturn_t pcie_pme_irq(int irq, void *context)
 	spin_lock_irqsave(&data->lock, flags);
 	pcie_capability_read_dword(port, PCI_EXP_RTSTA, &rtsta);
 
-	if (!(rtsta & PCI_EXP_RTSTA_PME)) {
+	if (rtsta == (u32) ~0 || !(rtsta & PCI_EXP_RTSTA_PME)) {
 		spin_unlock_irqrestore(&data->lock, flags);
 		return IRQ_NONE;
 	}
@@ -300,6 +303,8 @@ static irqreturn_t pcie_pme_irq(int irq, void *context)
  */
 static int pcie_pme_set_native(struct pci_dev *dev, void *ign)
 {
+	dev_info(&dev->dev, "Signaling PME through PCIe PME interrupt\n");
+
 	device_set_run_wake(&dev->dev, true);
 	dev->pme_interrupt = true;
 	return 0;
@@ -317,8 +322,23 @@ static int pcie_pme_set_native(struct pci_dev *dev, void *ign)
 static void pcie_pme_mark_devices(struct pci_dev *port)
 {
 	pcie_pme_set_native(port, NULL);
-	if (port->subordinate)
+	if (port->subordinate) {
 		pci_walk_bus(port->subordinate, pcie_pme_set_native, NULL);
+	} else {
+		struct pci_bus *bus = port->bus;
+		struct pci_dev *dev;
+
+		/* Check if this is a root port event collector. */
+		if (pci_pcie_type(port) != PCI_EXP_TYPE_RC_EC || !bus)
+			return;
+
+		down_read(&pci_bus_sem);
+		list_for_each_entry(dev, &bus->devices, bus_list)
+			if (pci_is_pcie(dev)
+			    && pci_pcie_type(dev) == PCI_EXP_TYPE_RC_END)
+				pcie_pme_set_native(dev, NULL);
+		up_read(&pci_bus_sem);
+	}
 }
 
 /**
@@ -347,14 +367,12 @@ static int pcie_pme_probe(struct pcie_device *srv)
 	ret = request_irq(srv->irq, pcie_pme_irq, IRQF_SHARED, "PCIe PME", srv);
 	if (ret) {
 		kfree(data);
-		return ret;
+	} else {
+		pcie_pme_mark_devices(port);
+		pcie_pme_interrupt_enable(port, true);
 	}
 
-	dev_info(&port->dev, "Signaling PME with IRQ %d\n", srv->irq);
-
-	pcie_pme_mark_devices(port);
-	pcie_pme_interrupt_enable(port, true);
-	return 0;
+	return ret;
 }
 
 static bool pcie_pme_check_wakeup(struct pci_bus *bus)

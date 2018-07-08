@@ -417,7 +417,7 @@ static int slc_open(struct net_device *dev)
 static void slc_free_netdev(struct net_device *dev)
 {
 	int i = dev->base_addr;
-
+	free_netdev(dev);
 	slcan_devs[i] = NULL;
 }
 
@@ -436,8 +436,7 @@ static const struct net_device_ops slc_netdev_ops = {
 static void slc_setup(struct net_device *dev)
 {
 	dev->netdev_ops		= &slc_netdev_ops;
-	dev->needs_free_netdev	= true;
-	dev->priv_destructor	= slc_free_netdev;
+	dev->destructor		= slc_free_netdev;
 
 	dev->hard_header_len	= 0;
 	dev->addr_len		= 0;
@@ -762,6 +761,8 @@ static void __exit slcan_exit(void)
 		if (sl->tty) {
 			printk(KERN_ERR "%s: tty discipline still running\n",
 			       dev->name);
+			/* Intentionally leak the control block. */
+			dev->destructor = NULL;
 		}
 
 		unregister_netdev(dev);

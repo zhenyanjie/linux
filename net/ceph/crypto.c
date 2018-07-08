@@ -3,12 +3,10 @@
 
 #include <linux/err.h>
 #include <linux/scatterlist.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <crypto/aes.h>
 #include <crypto/skcipher.h>
 #include <linux/key-type.h>
-#include <linux/sched/mm.h>
 
 #include <keys/ceph-type.h>
 #include <keys/user-type.h>
@@ -36,7 +34,9 @@ static int set_secret(struct ceph_crypto_key *key, void *buf)
 		return -ENOTSUPP;
 	}
 
-	WARN_ON(!key->len);
+	if (!key->len)
+		return -EINVAL;
+
 	key->key = kmemdup(buf, key->len, GFP_NOIO);
 	if (!key->key) {
 		ret = -ENOMEM;

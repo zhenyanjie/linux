@@ -40,7 +40,7 @@
 #include <linux/net.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
 #include <linux/rtnetlink.h>
@@ -151,7 +151,7 @@ static atomic_t nl_table_users = ATOMIC_INIT(0);
 
 #define nl_deref_protected(X) rcu_dereference_protected(X, lockdep_is_held(&nl_table_lock));
 
-static BLOCKING_NOTIFIER_HEAD(netlink_chain);
+static ATOMIC_NOTIFIER_HEAD(netlink_chain);
 
 static DEFINE_SPINLOCK(netlink_tap_lock);
 static struct list_head netlink_tap_all __read_mostly;
@@ -260,6 +260,9 @@ static int __netlink_deliver_tap_skb(struct sk_buff *skb,
 	struct sk_buff *nskb;
 	struct sock *sk = skb->sk;
 	int ret = -ENOMEM;
+
+	if (!net_eq(dev_net(dev), sock_net(sk)))
+		return 0;
 
 	dev_hold(dev);
 
@@ -752,7 +755,7 @@ static int netlink_release(struct socket *sock)
 						.protocol = sk->sk_protocol,
 						.portid = nlk->portid,
 					  };
-		blocking_notifier_call_chain(&netlink_chain,
+		atomic_notifier_call_chain(&netlink_chain,
 				NETLINK_URELEASE, &n);
 	}
 
@@ -1051,6 +1054,9 @@ static int netlink_connect(struct socket *sock, struct sockaddr *addr,
 	if (addr->sa_family != AF_NETLINK)
 		return -EINVAL;
 
+	if (alen < sizeof(struct sockaddr_nl))
+		return -EINVAL;
+
 	if ((nladdr->nl_groups || nladdr->nl_pid) &&
 	    !netlink_allowed(sock, NL_CFG_F_NONROOT_SEND))
 		return -EPERM;
@@ -1251,9 +1257,9 @@ static struct sk_buff *netlink_trim(struct sk_buff *skb, gfp_t allocation)
 		skb = nskb;
 	}
 
-	pskb_expand_head(skb, 0, -delta,
-			 (allocation & ~__GFP_DIRECT_RECLAIM) |
-			 __GFP_NOWARN | __GFP_NORETRY);
+	if (!pskb_expand_head(skb, 0, -delta, allocation))
+		skb->truesize -= delta;
+
 	return skb;
 }
 
@@ -1789,6 +1795,8 @@ static int netlink_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 
 	if (msg->msg_namelen) {
 		err = -EINVAL;
+		if (msg->msg_namelen < sizeof(struct sockaddr_nl))
+			goto out;
 		if (addr->nl_family != AF_NETLINK)
 			goto out;
 		dst_portid = addr->nl_pid;
@@ -2118,7 +2126,7 @@ static int netlink_dump(struct sock *sk)
 	struct sk_buff *skb = NULL;
 	struct nlmsghdr *nlh;
 	struct module *module;
-	int len, err = -ENOBUFS;
+	int err = -ENOBUFS;
 	int alloc_min_size;
 	int alloc_size;
 
@@ -2165,9 +2173,11 @@ static int netlink_dump(struct sock *sk)
 	skb_reserve(skb, skb_tailroom(skb) - alloc_size);
 	netlink_skb_set_owner_r(skb, sk);
 
-	len = cb->dump(skb, cb);
+	if (nlk->dump_done_errno > 0)
+		nlk->dump_done_errno = cb->dump(skb, cb);
 
-	if (len > 0) {
+	if (nlk->dump_done_errno > 0 ||
+	    skb_tailroom(skb) < nlmsg_total_size(sizeof(nlk->dump_done_errno))) {
 		mutex_unlock(nlk->cb_mutex);
 
 		if (sk_filter(sk, skb))
@@ -2177,13 +2187,15 @@ static int netlink_dump(struct sock *sk)
 		return 0;
 	}
 
-	nlh = nlmsg_put_answer(skb, cb, NLMSG_DONE, sizeof(len), NLM_F_MULTI);
-	if (!nlh)
+	nlh = nlmsg_put_answer(skb, cb, NLMSG_DONE,
+			       sizeof(nlk->dump_done_errno), NLM_F_MULTI);
+	if (WARN_ON(!nlh))
 		goto errout_skb;
 
 	nl_dump_check_consistent(cb, nlh);
 
-	memcpy(nlmsg_data(nlh), &len, sizeof(len));
+	memcpy(nlmsg_data(nlh), &nlk->dump_done_errno,
+	       sizeof(nlk->dump_done_errno));
 
 	if (sk_filter(sk, skb))
 		kfree_skb(skb);
@@ -2248,14 +2260,19 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 	cb->min_dump_alloc = control->min_dump_alloc;
 	cb->skb = skb;
 
+	if (cb->start) {
+		ret = cb->start(cb);
+		if (ret)
+			goto error_put;
+	}
+
 	nlk->cb_running = true;
+	nlk->dump_done_errno = INT_MAX;
 
 	mutex_unlock(nlk->cb_mutex);
 
-	if (cb->start)
-		cb->start(cb);
-
 	ret = netlink_dump(sk);
+
 	sock_put(sk);
 
 	if (ret)
@@ -2266,6 +2283,8 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 	 */
 	return -EINTR;
 
+error_put:
+	module_put(control->module);
 error_unlock:
 	sock_put(sk);
 	mutex_unlock(nlk->cb_mutex);
@@ -2545,13 +2564,13 @@ static const struct file_operations netlink_seq_fops = {
 
 int netlink_register_notifier(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_register(&netlink_chain, nb);
+	return atomic_notifier_chain_register(&netlink_chain, nb);
 }
 EXPORT_SYMBOL(netlink_register_notifier);
 
 int netlink_unregister_notifier(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_unregister(&netlink_chain, nb);
+	return atomic_notifier_chain_unregister(&netlink_chain, nb);
 }
 EXPORT_SYMBOL(netlink_unregister_notifier);
 

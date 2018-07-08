@@ -18,8 +18,6 @@ struct probe_conf {
 extern struct probe_conf probe_conf;
 extern bool probe_event_dry_run;
 
-struct symbol;
-
 /* kprobe-tracer and uprobe-tracer tracing point */
 struct probe_trace_point {
 	char		*realname;	/* function real name (if needed) */

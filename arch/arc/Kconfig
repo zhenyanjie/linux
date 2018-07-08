@@ -8,10 +8,9 @@
 
 config ARC
 	def_bool y
-	select ARC_TIMERS
-	select ARCH_HAS_SG_CHAIN
 	select ARCH_SUPPORTS_ATOMIC_RMW if ARC_HAS_LLSC
 	select BUILDTIME_EXTABLE_SORT
+	select CLKSRC_OF
 	select CLONE_BACKWARDS
 	select COMMON_CLK
 	select GENERIC_ATOMIC64 if !ISA_ARCV2 || !(ARC_HAS_LL64 && ARC_HAS_LLSC)
@@ -116,7 +115,6 @@ config ISA_ARCOMPACT
 
 config ISA_ARCV2
 	bool "ARC ISA v2"
-	select ARC_TIMERS_64BIT
 	help
 	  ISA for the Next Generation ARC-HS cores
 
@@ -180,11 +178,15 @@ config CPU_BIG_ENDIAN
 config SMP
 	bool "Symmetric Multi-Processing"
 	default n
+	select ARC_HAS_COH_CACHES if ISA_ARCV2
 	select ARC_MCIP if ISA_ARCV2
 	help
 	  This enables support for systems with more than one CPU.
 
 if SMP
+
+config ARC_HAS_COH_CACHES
+	def_bool n
 
 config NR_CPUS
 	int "Maximum number of CPUs (2-4096)"
@@ -215,6 +217,8 @@ config ARC_MCIP
 menuconfig ARC_CACHE
 	bool "Enable Cache Support"
 	default y
+	# if SMP, cache enabled ONLY if ARC implementation has cache coherency
+	depends on !SMP || ARC_HAS_COH_CACHES
 
 if ARC_CACHE
 
@@ -406,13 +410,26 @@ config ARC_HAS_DIV_REM
 	bool "Insn: div, divu, rem, remu"
 	default y
 
-config ARC_HAS_ACCL_REGS
-	bool "Reg Pair ACCL:ACCH (FPU and/or MPY > 6)"
+config ARC_HAS_RTC
+	bool "Local 64-bit r/o cycle counter"
 	default n
+	depends on !SMP
+
+config ARC_HAS_GFRC
+	bool "SMP synchronized 64-bit cycle counter"
+	default y
+	depends on SMP
+
+config ARC_NUMBER_OF_INTERRUPTS
+	int "Number of interrupts"
+	range 8 240
+	default 32
 	help
-	  Depending on the configuration, CPU can contain accumulator reg-pair
-	  (also referred to as r58:r59). These can also be used by gcc as GPR so
-	  kernel needs to save/restore per process
+	  This defines the number of interrupts on the ARCv2HS core.
+	  It affects the size of vector table.
+	  The initial 8 IRQs are fixed (Timer, ICI etc) and although configurable
+	  in hardware, it keep things simple for Linux to assume they are always
+	  present.
 
 endif	# ISA_ARCV2
 
@@ -478,7 +495,6 @@ config ARC_CURR_IN_REG
 
 config ARC_EMUL_UNALIGNED
 	bool "Emulate unaligned memory access (userspace only)"
-	default N
 	select SYSCTL_ARCH_UNALIGN_NO_WARN
 	select SYSCTL_ARCH_UNALIGN_ALLOW
 	depends on ISA_ARCOMPACT

@@ -31,7 +31,7 @@ struct mce_evt_llist {
 	struct mce mce;
 };
 
-void mce_gen_pool_process(struct work_struct *__unused);
+void mce_gen_pool_process(void);
 bool mce_gen_pool_empty(void);
 int mce_gen_pool_add(struct mce *mce);
 int mce_gen_pool_init(void);

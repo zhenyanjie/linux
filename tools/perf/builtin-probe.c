@@ -442,9 +442,9 @@ static int perf_del_probe_events(struct strfilter *filter)
 	}
 
 	if (ret == -ENOENT && ret2 == -ENOENT)
-		pr_debug("\"%s\" does not hit any event.\n", str);
-		/* Note that this is silently ignored */
-	ret = 0;
+		pr_warning("\"%s\" does not hit any event.\n", str);
+	else
+		ret = 0;
 
 error:
 	if (kfd >= 0)
@@ -552,8 +552,6 @@ __cmd_probe(int argc, const char **argv, const char *prefix __maybe_unused)
 	OPT_BOOLEAN(0, "demangle-kernel", &symbol_conf.demangle_kernel,
 		    "Enable kernel symbol demangling"),
 	OPT_BOOLEAN(0, "cache", &probe_conf.cache, "Manipulate probe cache"),
-	OPT_STRING(0, "symfs", &symbol_conf.symfs, "directory",
-		   "Look for files with symbols relative to this directory"),
 	OPT_END()
 	};
 	int ret;

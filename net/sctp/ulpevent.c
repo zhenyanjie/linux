@@ -723,7 +723,6 @@ struct sctp_ulpevent *sctp_ulpevent_make_rcvmsg(struct sctp_association *asoc,
 	return event;
 
 fail_mark:
-	sctp_chunk_put(chunk);
 	kfree_skb(skb);
 fail:
 	return NULL;
@@ -850,35 +849,6 @@ struct sctp_ulpevent *sctp_ulpevent_make_sender_dry_event(
 	sdry->sender_dry_length = sizeof(struct sctp_sender_dry_event);
 	sctp_ulpevent_set_owner(event, asoc);
 	sdry->sender_dry_assoc_id = sctp_assoc2id(asoc);
-
-	return event;
-}
-
-struct sctp_ulpevent *sctp_ulpevent_make_stream_reset_event(
-	const struct sctp_association *asoc, __u16 flags, __u16 stream_num,
-	__u16 *stream_list, gfp_t gfp)
-{
-	struct sctp_stream_reset_event *sreset;
-	struct sctp_ulpevent *event;
-	struct sk_buff *skb;
-	int length, i;
-
-	length = sizeof(struct sctp_stream_reset_event) + 2 * stream_num;
-	event = sctp_ulpevent_new(length, MSG_NOTIFICATION, gfp);
-	if (!event)
-		return NULL;
-
-	skb = sctp_event2skb(event);
-	sreset = (struct sctp_stream_reset_event *)skb_put(skb, length);
-
-	sreset->strreset_type = SCTP_STREAM_RESET_EVENT;
-	sreset->strreset_flags = flags;
-	sreset->strreset_length = length;
-	sctp_ulpevent_set_owner(event, asoc);
-	sreset->strreset_assoc_id = sctp_assoc2id(asoc);
-
-	for (i = 0; i < stream_num; i++)
-		sreset->strreset_stream_list[i] = ntohs(stream_list[i]);
 
 	return event;
 }

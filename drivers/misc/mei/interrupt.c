@@ -35,14 +35,14 @@
  *	for the completed callbacks
  *
  * @dev: mei device
- * @cmpl_list: list of completed cbs
+ * @compl_list: list of completed cbs
  */
-void mei_irq_compl_handler(struct mei_device *dev, struct list_head *cmpl_list)
+void mei_irq_compl_handler(struct mei_device *dev, struct mei_cl_cb *compl_list)
 {
 	struct mei_cl_cb *cb, *next;
 	struct mei_cl *cl;
 
-	list_for_each_entry_safe(cb, next, cmpl_list, list) {
+	list_for_each_entry_safe(cb, next, &compl_list->list, list) {
 		cl = cb->cl;
 		list_del_init(&cb->list);
 
@@ -92,13 +92,13 @@ void mei_irq_discard_msg(struct mei_device *dev, struct mei_msg_hdr *hdr)
  *
  * @cl: reading client
  * @mei_hdr: header of mei client message
- * @cmpl_list: completion list
+ * @complete_list: completion list
  *
  * Return: always 0
  */
 int mei_cl_irq_read_msg(struct mei_cl *cl,
 		       struct mei_msg_hdr *mei_hdr,
-		       struct list_head *cmpl_list)
+		       struct mei_cl_cb *complete_list)
 {
 	struct mei_device *dev = cl->dev;
 	struct mei_cl_cb *cb;
@@ -118,6 +118,7 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 
 	if (!mei_cl_is_connected(cl)) {
 		cl_dbg(dev, cl, "not connected\n");
+		list_move_tail(&cb->list, &complete_list->list);
 		cb->status = -ENODEV;
 		goto discard;
 	}
@@ -127,6 +128,8 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 	if (buf_sz < cb->buf_idx) {
 		cl_err(dev, cl, "message is too big len %d idx %zu\n",
 		       mei_hdr->length, cb->buf_idx);
+
+		list_move_tail(&cb->list, &complete_list->list);
 		cb->status = -EMSGSIZE;
 		goto discard;
 	}
@@ -134,6 +137,8 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 	if (cb->buf.size < buf_sz) {
 		cl_dbg(dev, cl, "message overflow. size %zu len %d idx %zu\n",
 			cb->buf.size, mei_hdr->length, cb->buf_idx);
+
+		list_move_tail(&cb->list, &complete_list->list);
 		cb->status = -EMSGSIZE;
 		goto discard;
 	}
@@ -144,7 +149,7 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 
 	if (mei_hdr->msg_complete) {
 		cl_dbg(dev, cl, "completed read length = %zu\n", cb->buf_idx);
-		list_move_tail(&cb->list, cmpl_list);
+		list_move_tail(&cb->list, &complete_list->list);
 	} else {
 		pm_runtime_mark_last_busy(dev->dev);
 		pm_request_autosuspend(dev->dev);
@@ -153,8 +158,6 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 	return 0;
 
 discard:
-	if (cb)
-		list_move_tail(&cb->list, cmpl_list);
 	mei_irq_discard_msg(dev, mei_hdr);
 	return 0;
 }
@@ -169,7 +172,7 @@ discard:
  * Return: 0, OK; otherwise, error.
  */
 static int mei_cl_irq_disconnect_rsp(struct mei_cl *cl, struct mei_cl_cb *cb,
-				     struct list_head *cmpl_list)
+				     struct mei_cl_cb *cmpl_list)
 {
 	struct mei_device *dev = cl->dev;
 	u32 msg_slots;
@@ -183,7 +186,7 @@ static int mei_cl_irq_disconnect_rsp(struct mei_cl *cl, struct mei_cl_cb *cb,
 		return -EMSGSIZE;
 
 	ret = mei_hbm_cl_disconnect_rsp(dev, cl);
-	list_move_tail(&cb->list, cmpl_list);
+	list_move_tail(&cb->list, &cmpl_list->list);
 
 	return ret;
 }
@@ -199,7 +202,7 @@ static int mei_cl_irq_disconnect_rsp(struct mei_cl *cl, struct mei_cl_cb *cb,
  * Return: 0, OK; otherwise, error.
  */
 static int mei_cl_irq_read(struct mei_cl *cl, struct mei_cl_cb *cb,
-			   struct list_head *cmpl_list)
+			   struct mei_cl_cb *cmpl_list)
 {
 	struct mei_device *dev = cl->dev;
 	u32 msg_slots;
@@ -219,7 +222,7 @@ static int mei_cl_irq_read(struct mei_cl *cl, struct mei_cl_cb *cb,
 	if (ret) {
 		cl->status = ret;
 		cb->buf_idx = 0;
-		list_move_tail(&cb->list, cmpl_list);
+		list_move_tail(&cb->list, &cmpl_list->list);
 		return ret;
 	}
 
@@ -249,7 +252,7 @@ static inline bool hdr_is_fixed(struct mei_msg_hdr *mei_hdr)
  * Return: 0 on success, <0 on failure.
  */
 int mei_irq_read_handler(struct mei_device *dev,
-			 struct list_head *cmpl_list, s32 *slots)
+		struct mei_cl_cb *cmpl_list, s32 *slots)
 {
 	struct mei_msg_hdr *mei_hdr;
 	struct mei_cl *cl;
@@ -347,11 +350,12 @@ EXPORT_SYMBOL_GPL(mei_irq_read_handler);
  *
  * Return: 0 on success, <0 on failure.
  */
-int mei_irq_write_handler(struct mei_device *dev, struct list_head *cmpl_list)
+int mei_irq_write_handler(struct mei_device *dev, struct mei_cl_cb *cmpl_list)
 {
 
 	struct mei_cl *cl;
 	struct mei_cl_cb *cb, *next;
+	struct mei_cl_cb *list;
 	s32 slots;
 	int ret;
 
@@ -366,18 +370,19 @@ int mei_irq_write_handler(struct mei_device *dev, struct list_head *cmpl_list)
 	/* complete all waiting for write CB */
 	dev_dbg(dev->dev, "complete all waiting for write cb.\n");
 
-	list_for_each_entry_safe(cb, next, &dev->write_waiting_list, list) {
+	list = &dev->write_waiting_list;
+	list_for_each_entry_safe(cb, next, &list->list, list) {
 		cl = cb->cl;
 
 		cl->status = 0;
 		cl_dbg(dev, cl, "MEI WRITE COMPLETE\n");
 		cl->writing_state = MEI_WRITE_COMPLETE;
-		list_move_tail(&cb->list, cmpl_list);
+		list_move_tail(&cb->list, &cmpl_list->list);
 	}
 
 	/* complete control write list CB */
 	dev_dbg(dev->dev, "complete control write list cb.\n");
-	list_for_each_entry_safe(cb, next, &dev->ctrl_wr_list, list) {
+	list_for_each_entry_safe(cb, next, &dev->ctrl_wr_list.list, list) {
 		cl = cb->cl;
 		switch (cb->fop_type) {
 		case MEI_FOP_DISCONNECT:
@@ -421,7 +426,7 @@ int mei_irq_write_handler(struct mei_device *dev, struct list_head *cmpl_list)
 	}
 	/* complete  write list CB */
 	dev_dbg(dev->dev, "complete write list cb.\n");
-	list_for_each_entry_safe(cb, next, &dev->write_list, list) {
+	list_for_each_entry_safe(cb, next, &dev->write_list.list, list) {
 		cl = cb->cl;
 		if (cl == &dev->iamthif_cl)
 			ret = mei_amthif_irq_write(cl, cb, cmpl_list);

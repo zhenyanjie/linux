@@ -170,7 +170,7 @@ static int snd_soc_dapm_put_volsw_aic3x(struct snd_kcontrol *kcontrol,
 	unsigned int mask = (1 << fls(max)) - 1;
 	unsigned int invert = mc->invert;
 	unsigned short val;
-	struct snd_soc_dapm_update update = { 0 };
+	struct snd_soc_dapm_update update;
 	int connect, change;
 
 	val = (ucontrol->value.integer.value[0] & mask);
@@ -1393,12 +1393,6 @@ static int aic3x_set_power(struct snd_soc_codec *codec, int power)
 			snd_soc_write(codec, AIC3X_PLL_PROGC_REG, pll_c);
 			snd_soc_write(codec, AIC3X_PLL_PROGD_REG, pll_d);
 		}
-
-		/*
-		 * Delay is needed to reduce pop-noise after syncing back the
-		 * registers
-		 */
-		mdelay(50);
 	} else {
 		/*
 		 * Do soft reset to this codec instance in order to clear

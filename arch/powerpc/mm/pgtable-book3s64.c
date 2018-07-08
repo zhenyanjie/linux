@@ -8,8 +8,6 @@
  */
 
 #include <linux/sched.h>
-#include <linux/mm_types.h>
-
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 
@@ -37,8 +35,7 @@ int pmdp_set_access_flags(struct vm_area_struct *vma, unsigned long address,
 #endif
 	changed = !pmd_same(*(pmdp), entry);
 	if (changed) {
-		__ptep_set_access_flags(vma->vm_mm, pmdp_ptep(pmdp),
-					pmd_pte(entry), address);
+		__ptep_set_access_flags(vma->vm_mm, pmdp_ptep(pmdp), pmd_pte(entry));
 		flush_pmd_tlb_range(vma, address, address + HPAGE_PMD_SIZE);
 	}
 	return changed;
@@ -133,7 +130,7 @@ void mmu_cleanup_all(void)
 int create_section_mapping(unsigned long start, unsigned long end)
 {
 	if (radix_enabled())
-		return radix__create_section_mapping(start, end);
+		return -ENODEV;
 
 	return hash__create_section_mapping(start, end);
 }
@@ -141,7 +138,7 @@ int create_section_mapping(unsigned long start, unsigned long end)
 int remove_section_mapping(unsigned long start, unsigned long end)
 {
 	if (radix_enabled())
-		return radix__remove_section_mapping(start, end);
+		return -ENODEV;
 
 	return hash__remove_section_mapping(start, end);
 }

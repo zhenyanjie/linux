@@ -4,7 +4,6 @@
 #include <string.h>
 #include <linux/bitops.h>
 #include <stdlib.h>
-#include <linux/kernel.h>
 
 #define DECLARE_BITMAP(name,bits) \
 	unsigned long name[BITS_TO_LONGS(bits)]

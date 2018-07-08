@@ -268,7 +268,7 @@ int tipc_msg_build(struct tipc_msg *mhdr, struct msghdr *m,
 		__skb_queue_tail(list, skb);
 		skb_copy_to_linear_data(skb, mhdr, mhsz);
 		pktpos = skb->data + mhsz;
-		if (copy_from_iter_full(pktpos, dsz, &m->msg_iter))
+		if (copy_from_iter(pktpos, dsz, &m->msg_iter) == dsz)
 			return dsz;
 		rc = -EFAULT;
 		goto error;
@@ -299,7 +299,7 @@ int tipc_msg_build(struct tipc_msg *mhdr, struct msghdr *m,
 		if (drem < pktrem)
 			pktrem = drem;
 
-		if (!copy_from_iter_full(pktpos, pktrem, &m->msg_iter)) {
+		if (copy_from_iter(pktpos, pktrem, &m->msg_iter) != pktrem) {
 			rc = -EFAULT;
 			goto error;
 		}
@@ -547,7 +547,7 @@ bool tipc_msg_lookup_dest(struct net *net, struct sk_buff *skb, int *err)
 		return false;
 	if (msg_errcode(msg))
 		return false;
-	*err = -TIPC_ERR_NO_NAME;
+	*err = TIPC_ERR_NO_NAME;
 	if (skb_linearize(skb))
 		return false;
 	msg = buf_msg(skb);
@@ -605,23 +605,6 @@ error:
 	pr_warn("Failed do clone local mcast rcv buffer\n");
 	kfree_skb(head);
 	return false;
-}
-
-bool tipc_msg_pskb_copy(u32 dst, struct sk_buff_head *msg,
-			struct sk_buff_head *cpy)
-{
-	struct sk_buff *skb, *_skb;
-
-	skb_queue_walk(msg, skb) {
-		_skb = pskb_copy(skb, GFP_ATOMIC);
-		if (!_skb) {
-			__skb_queue_purge(cpy);
-			return false;
-		}
-		msg_set_destnode(buf_msg(_skb), dst);
-		__skb_queue_tail(cpy, _skb);
-	}
-	return true;
 }
 
 /* tipc_skb_queue_sorted(); sort pkt into list according to sequence number

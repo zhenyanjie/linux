@@ -239,7 +239,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY11G_1_3,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (PEF 7071/PEF 7072) v1.3",
-		.features	= PHY_GBIT_FEATURES,
+		.features	= (PHY_GBIT_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= xway_gphy14_config_aneg,
@@ -253,7 +254,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY22F_1_3,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (PEF 7061) v1.3",
-		.features	= PHY_BASIC_FEATURES,
+		.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= xway_gphy14_config_aneg,
@@ -267,7 +269,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY11G_1_4,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (PEF 7071/PEF 7072) v1.4",
-		.features	= PHY_GBIT_FEATURES,
+		.features	= (PHY_GBIT_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= xway_gphy14_config_aneg,
@@ -281,7 +284,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY22F_1_4,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (PEF 7061) v1.4",
-		.features	= PHY_BASIC_FEATURES,
+		.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= xway_gphy14_config_aneg,
@@ -295,7 +299,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY11G_1_5,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (PEF 7071/PEF 7072) v1.5 / v1.6",
-		.features	= PHY_GBIT_FEATURES,
+		.features	= (PHY_GBIT_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= genphy_config_aneg,
@@ -309,7 +314,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY22F_1_5,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (PEF 7061) v1.5 / v1.6",
-		.features	= PHY_BASIC_FEATURES,
+		.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= genphy_config_aneg,
@@ -323,7 +329,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY11G_VR9,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (xRX integrated)",
-		.features	= PHY_GBIT_FEATURES,
+		.features	= (PHY_GBIT_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= genphy_config_aneg,
@@ -337,7 +344,8 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY22F_VR9,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (xRX integrated)",
-		.features	= PHY_BASIC_FEATURES,
+		.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause |
+				   SUPPORTED_Asym_Pause),
 		.flags		= PHY_HAS_INTERRUPT,
 		.config_init	= xway_gphy_config_init,
 		.config_aneg	= genphy_config_aneg,

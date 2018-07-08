@@ -195,7 +195,7 @@ static void evict_entry(struct drm_gem_object *obj,
 	size_t size = PAGE_SIZE * n;
 	loff_t off = mmap_offset(obj) +
 			(entry->obj_pgoff << PAGE_SHIFT);
-	const int m = 1 + ((omap_obj->width << fmt) / PAGE_SIZE);
+	const int m = DIV_ROUND_UP(omap_obj->width << fmt, PAGE_SIZE);
 
 	if (m > 1) {
 		int i;
@@ -336,10 +336,8 @@ static void omap_gem_detach_pages(struct drm_gem_object *obj)
 	if (omap_obj->flags & (OMAP_BO_WC|OMAP_BO_UNCACHED)) {
 		int i, npages = obj->size >> PAGE_SHIFT;
 		for (i = 0; i < npages; i++) {
-			if (omap_obj->addrs[i])
-				dma_unmap_page(obj->dev->dev,
-					       omap_obj->addrs[i],
-					       PAGE_SIZE, DMA_BIDIRECTIONAL);
+			dma_unmap_page(obj->dev->dev, omap_obj->addrs[i],
+					PAGE_SIZE, DMA_BIDIRECTIONAL);
 		}
 	}
 
@@ -398,7 +396,8 @@ static int fault_1d(struct drm_gem_object *obj,
 	pgoff_t pgoff;
 
 	/* We don't use vmf->pgoff since that has the fake offset: */
-	pgoff = (vmf->address - vma->vm_start) >> PAGE_SHIFT;
+	pgoff = ((unsigned long)vmf->virtual_address -
+			vma->vm_start) >> PAGE_SHIFT;
 
 	if (omap_obj->pages) {
 		omap_gem_cpu_sync(obj, pgoff);
@@ -408,10 +407,11 @@ static int fault_1d(struct drm_gem_object *obj,
 		pfn = (omap_obj->paddr >> PAGE_SHIFT) + pgoff;
 	}
 
-	VERB("Inserting %p pfn %lx, pa %lx", (void *)vmf->address,
+	VERB("Inserting %p pfn %lx, pa %lx", vmf->virtual_address,
 			pfn, pfn << PAGE_SHIFT);
 
-	return vm_insert_mixed(vma, vmf->address, __pfn_to_pfn_t(pfn, PFN_DEV));
+	return vm_insert_mixed(vma, (unsigned long)vmf->virtual_address,
+			__pfn_to_pfn_t(pfn, PFN_DEV));
 }
 
 /* Special handling for the case of faulting in 2d tiled buffers */
@@ -425,7 +425,7 @@ static int fault_2d(struct drm_gem_object *obj,
 	struct page *pages[64];  /* XXX is this too much to have on stack? */
 	unsigned long pfn;
 	pgoff_t pgoff, base_pgoff;
-	unsigned long vaddr;
+	void __user *vaddr;
 	int i, ret, slots;
 
 	/*
@@ -442,10 +442,11 @@ static int fault_2d(struct drm_gem_object *obj,
 	 * into account in some of the math, so figure out virtual stride
 	 * in pages
 	 */
-	const int m = 1 + ((omap_obj->width << fmt) / PAGE_SIZE);
+	const int m = DIV_ROUND_UP(omap_obj->width << fmt, PAGE_SIZE);
 
 	/* We don't use vmf->pgoff since that has the fake offset: */
-	pgoff = (vmf->address - vma->vm_start) >> PAGE_SHIFT;
+	pgoff = ((unsigned long)vmf->virtual_address -
+			vma->vm_start) >> PAGE_SHIFT;
 
 	/*
 	 * Actual address we start mapping at is rounded down to previous slot
@@ -456,7 +457,7 @@ static int fault_2d(struct drm_gem_object *obj,
 	/* figure out buffer width in slots */
 	slots = omap_obj->width >> priv->usergart[fmt].slot_shift;
 
-	vaddr = vmf->address - ((pgoff - base_pgoff) << PAGE_SHIFT);
+	vaddr = vmf->virtual_address - ((pgoff - base_pgoff) << PAGE_SHIFT);
 
 	entry = &priv->usergart[fmt].entry[priv->usergart[fmt].last];
 
@@ -500,11 +501,12 @@ static int fault_2d(struct drm_gem_object *obj,
 
 	pfn = entry->paddr >> PAGE_SHIFT;
 
-	VERB("Inserting %p pfn %lx, pa %lx", (void *)vmf->address,
+	VERB("Inserting %p pfn %lx, pa %lx", vmf->virtual_address,
 			pfn, pfn << PAGE_SHIFT);
 
 	for (i = n; i > 0; i--) {
-		vm_insert_mixed(vma, vaddr, __pfn_to_pfn_t(pfn, PFN_DEV));
+		vm_insert_mixed(vma, (unsigned long)vaddr,
+				__pfn_to_pfn_t(pfn, PFN_DEV));
 		pfn += priv->usergart[fmt].stride_pfn;
 		vaddr += PAGE_SIZE * m;
 	}
@@ -518,6 +520,7 @@ static int fault_2d(struct drm_gem_object *obj,
 
 /**
  * omap_gem_fault		-	pagefault handler for GEM objects
+ * @vma: the VMA of the GEM object
  * @vmf: fault detail
  *
  * Invoked when a fault occurs on an mmap of a GEM managed area. GEM
@@ -528,9 +531,8 @@ static int fault_2d(struct drm_gem_object *obj,
  * vma->vm_private_data points to the GEM object that is backing this
  * mapping.
  */
-int omap_gem_fault(struct vm_fault *vmf)
+int omap_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct vm_area_struct *vma = vmf->vma;
 	struct drm_gem_object *obj = vma->vm_private_data;
 	struct omap_gem_object *omap_obj = to_omap_bo(obj);
 	struct drm_device *dev = obj->dev;
@@ -1033,7 +1035,7 @@ void omap_gem_describe(struct drm_gem_object *obj, struct seq_file *m)
 	off = drm_vma_node_start(&obj->vma_node);
 
 	seq_printf(m, "%08x: %2d (%2d) %08llx %pad (%2d) %p %4d",
-			omap_obj->flags, obj->name, kref_read(&obj->refcount),
+			omap_obj->flags, obj->name, obj->refcount.refcount.counter,
 			off, &omap_obj->paddr, omap_obj->paddr_cnt,
 			omap_obj->vaddr, omap_obj->roll);
 

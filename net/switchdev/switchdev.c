@@ -624,10 +624,13 @@ EXPORT_SYMBOL_GPL(unregister_switchdev_notifier);
 int call_switchdev_notifiers(unsigned long val, struct net_device *dev,
 			     struct switchdev_notifier_info *info)
 {
+	int err;
+
 	ASSERT_RTNL();
 
 	info->dev = dev;
-	return raw_notifier_call_chain(&switchdev_notif_chain, val, info);
+	err = raw_notifier_call_chain(&switchdev_notif_chain, val, info);
+	return err;
 }
 EXPORT_SYMBOL_GPL(call_switchdev_notifiers);
 

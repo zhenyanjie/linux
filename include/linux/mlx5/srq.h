@@ -55,7 +55,7 @@ struct mlx5_srq_attr {
 	u32 lwm;
 	u32 user_index;
 	u64 db_record;
-	__be64 *pas;
+	u64 *pas;
 };
 
 struct mlx5_core_dev;

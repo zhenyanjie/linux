@@ -43,7 +43,6 @@
 #include "xfs_acl.h"
 
 #include <linux/capability.h>
-#include <linux/cred.h>
 #include <linux/dcache.h>
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -288,7 +287,7 @@ xfs_readlink_by_handle(
 		return PTR_ERR(dentry);
 
 	/* Restrict this handle operation to symlinks only. */
-	if (!d_is_symlink(dentry)) {
+	if (!d_inode(dentry)->i_op->readlink) {
 		error = -EINVAL;
 		goto out_dput;
 	}
@@ -298,7 +297,7 @@ xfs_readlink_by_handle(
 		goto out_dput;
 	}
 
-	error = vfs_readlink(dentry, hreq->ohandle, olen);
+	error = d_inode(dentry)->i_op->readlink(dentry, hreq->ohandle, olen);
 
  out_dput:
 	dput(dentry);
@@ -640,7 +639,7 @@ xfs_ioc_space(
 		return error;
 
 	xfs_ilock(ip, iolock);
-	error = xfs_break_layouts(inode, &iolock);
+	error = xfs_break_layouts(inode, &iolock, false);
 	if (error)
 		goto out_unlock;
 
@@ -929,16 +928,15 @@ xfs_ioc_fsgetxattr(
 	return 0;
 }
 
-STATIC void
-xfs_set_diflags(
+STATIC uint16_t
+xfs_flags2diflags(
 	struct xfs_inode	*ip,
 	unsigned int		xflags)
 {
-	unsigned int		di_flags;
-	uint64_t		di_flags2;
-
 	/* can't set PREALLOC this way, just preserve it */
-	di_flags = (ip->i_d.di_flags & XFS_DIFLAG_PREALLOC);
+	uint16_t		di_flags =
+		(ip->i_d.di_flags & XFS_DIFLAG_PREALLOC);
+
 	if (xflags & FS_XFLAG_IMMUTABLE)
 		di_flags |= XFS_DIFLAG_IMMUTABLE;
 	if (xflags & FS_XFLAG_APPEND)
@@ -968,19 +966,24 @@ xfs_set_diflags(
 		if (xflags & FS_XFLAG_EXTSIZE)
 			di_flags |= XFS_DIFLAG_EXTSIZE;
 	}
-	ip->i_d.di_flags = di_flags;
 
-	/* diflags2 only valid for v3 inodes. */
-	if (ip->i_d.di_version < 3)
-		return;
+	return di_flags;
+}
 
-	di_flags2 = (ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK);
+STATIC uint64_t
+xfs_flags2diflags2(
+	struct xfs_inode	*ip,
+	unsigned int		xflags)
+{
+	uint64_t		di_flags2 =
+		(ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK);
+
 	if (xflags & FS_XFLAG_DAX)
 		di_flags2 |= XFS_DIFLAG2_DAX;
 	if (xflags & FS_XFLAG_COWEXTSIZE)
 		di_flags2 |= XFS_DIFLAG2_COWEXTSIZE;
 
-	ip->i_d.di_flags2 = di_flags2;
+	return di_flags2;
 }
 
 STATIC void
@@ -1006,11 +1009,12 @@ xfs_diflags_to_linux(
 		inode->i_flags |= S_NOATIME;
 	else
 		inode->i_flags &= ~S_NOATIME;
+#if 0	/* disabled until the flag switching races are sorted out */
 	if (xflags & FS_XFLAG_DAX)
 		inode->i_flags |= S_DAX;
 	else
 		inode->i_flags &= ~S_DAX;
-
+#endif
 }
 
 static int
@@ -1020,6 +1024,7 @@ xfs_ioctl_setattr_xflags(
 	struct fsxattr		*fa)
 {
 	struct xfs_mount	*mp = ip->i_mount;
+	uint64_t		di_flags2;
 
 	/* Can't change realtime flag if any extents are allocated. */
 	if ((ip->i_d.di_nextents || ip->i_delayed_blks) &&
@@ -1050,7 +1055,14 @@ xfs_ioctl_setattr_xflags(
 	    !capable(CAP_LINUX_IMMUTABLE))
 		return -EPERM;
 
-	xfs_set_diflags(ip, fa->fsx_xflags);
+	/* diflags2 only valid for v3 inodes. */
+	di_flags2 = xfs_flags2diflags2(ip, fa->fsx_xflags);
+	if (di_flags2 && ip->i_d.di_version < 3)
+		return -EINVAL;
+
+	ip->i_d.di_flags = xfs_flags2diflags(ip, fa->fsx_xflags);
+	ip->i_d.di_flags2 = di_flags2;
+
 	xfs_diflags_to_linux(ip);
 	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
@@ -1073,6 +1085,7 @@ xfs_ioctl_setattr_dax_invalidate(
 	int			*join_flags)
 {
 	struct inode		*inode = VFS_I(ip);
+	struct super_block	*sb = inode->i_sb;
 	int			error;
 
 	*join_flags = 0;
@@ -1085,7 +1098,7 @@ xfs_ioctl_setattr_dax_invalidate(
 	if (fa->fsx_xflags & FS_XFLAG_DAX) {
 		if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode)))
 			return -EINVAL;
-		if (ip->i_mount->m_sb.sb_blocksize != PAGE_SIZE)
+		if (bdev_dax_supported(sb, sb->s_blocksize) < 0)
 			return -EINVAL;
 	}
 
@@ -1525,7 +1538,7 @@ out_drop_write:
 }
 
 STATIC int
-xfs_getbmap_format(void **ap, struct getbmapx *bmv)
+xfs_getbmap_format(void **ap, struct getbmapx *bmv, int *full)
 {
 	struct getbmap __user	*base = (struct getbmap __user *)*ap;
 
@@ -1569,7 +1582,7 @@ xfs_ioc_getbmap(
 }
 
 STATIC int
-xfs_getbmapx_format(void **ap, struct getbmapx *bmv)
+xfs_getbmapx_format(void **ap, struct getbmapx *bmv, int *full)
 {
 	struct getbmapx __user	*base = (struct getbmapx __user *)*ap;
 

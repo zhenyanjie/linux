@@ -50,7 +50,6 @@ pci_config_attr(vendor, "0x%04x\n");
 pci_config_attr(device, "0x%04x\n");
 pci_config_attr(subsystem_vendor, "0x%04x\n");
 pci_config_attr(subsystem_device, "0x%04x\n");
-pci_config_attr(revision, "0x%02x\n");
 pci_config_attr(class, "0x%06x\n");
 pci_config_attr(irq, "%u\n");
 
@@ -472,7 +471,6 @@ static ssize_t sriov_numvfs_store(struct device *dev,
 				  const char *buf, size_t count)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
-	struct pci_sriov *iov = pdev->sriov;
 	int ret;
 	u16 num_vfs;
 
@@ -483,45 +481,37 @@ static ssize_t sriov_numvfs_store(struct device *dev,
 	if (num_vfs > pci_sriov_get_totalvfs(pdev))
 		return -ERANGE;
 
-	mutex_lock(&iov->dev->sriov->lock);
-
 	if (num_vfs == pdev->sriov->num_VFs)
-		goto exit;
+		return count;		/* no change */
 
 	/* is PF driver loaded w/callback */
 	if (!pdev->driver || !pdev->driver->sriov_configure) {
 		dev_info(&pdev->dev, "Driver doesn't support SRIOV configuration via sysfs\n");
-		ret = -ENOENT;
-		goto exit;
+		return -ENOSYS;
 	}
 
 	if (num_vfs == 0) {
 		/* disable VFs */
 		ret = pdev->driver->sriov_configure(pdev, 0);
-		goto exit;
+		if (ret < 0)
+			return ret;
+		return count;
 	}
 
 	/* enable VFs */
 	if (pdev->sriov->num_VFs) {
 		dev_warn(&pdev->dev, "%d VFs already enabled. Disable before enabling %d VFs\n",
 			 pdev->sriov->num_VFs, num_vfs);
-		ret = -EBUSY;
-		goto exit;
+		return -EBUSY;
 	}
 
 	ret = pdev->driver->sriov_configure(pdev, num_vfs);
 	if (ret < 0)
-		goto exit;
+		return ret;
 
 	if (ret != num_vfs)
 		dev_warn(&pdev->dev, "%d VFs requested; only %d enabled\n",
 			 num_vfs, ret);
-
-exit:
-	mutex_unlock(&iov->dev->sriov->lock);
-
-	if (ret < 0)
-		return ret;
 
 	return count;
 }
@@ -537,7 +527,7 @@ static ssize_t driver_override_store(struct device *dev,
 				     const char *buf, size_t count)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
-	char *driver_override, *old = pdev->driver_override, *cp;
+	char *driver_override, *old, *cp;
 
 	/* We need to keep extra room for a newline */
 	if (count >= (PAGE_SIZE - 1))
@@ -551,12 +541,15 @@ static ssize_t driver_override_store(struct device *dev,
 	if (cp)
 		*cp = '\0';
 
+	device_lock(dev);
+	old = pdev->driver_override;
 	if (strlen(driver_override)) {
 		pdev->driver_override = driver_override;
 	} else {
 		kfree(driver_override);
 		pdev->driver_override = NULL;
 	}
+	device_unlock(dev);
 
 	kfree(old);
 
@@ -567,8 +560,12 @@ static ssize_t driver_override_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
+	ssize_t len;
 
-	return snprintf(buf, PAGE_SIZE, "%s\n", pdev->driver_override);
+	device_lock(dev);
+	len = snprintf(buf, PAGE_SIZE, "%s\n", pdev->driver_override);
+	device_unlock(dev);
+	return len;
 }
 static DEVICE_ATTR_RW(driver_override);
 
@@ -578,7 +575,6 @@ static struct attribute *pci_dev_attrs[] = {
 	&dev_attr_device.attr,
 	&dev_attr_subsystem_vendor.attr,
 	&dev_attr_subsystem_device.attr,
-	&dev_attr_revision.attr,
 	&dev_attr_class.attr,
 	&dev_attr_irq.attr,
 	&dev_attr_local_cpus.attr,

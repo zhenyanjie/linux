@@ -33,7 +33,6 @@
  *  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <linux/fs_struct.h>
 #include <linux/file.h>
 #include <linux/slab.h>
 #include <linux/namei.h>
@@ -57,20 +56,6 @@
 
 
 #define NFSDDBG_FACILITY		NFSDDBG_XDR
-
-const u32 nfsd_suppattrs[3][3] = {
-	{NFSD4_SUPPORTED_ATTRS_WORD0,
-	 NFSD4_SUPPORTED_ATTRS_WORD1,
-	 NFSD4_SUPPORTED_ATTRS_WORD2},
-
-	{NFSD4_1_SUPPORTED_ATTRS_WORD0,
-	 NFSD4_1_SUPPORTED_ATTRS_WORD1,
-	 NFSD4_1_SUPPORTED_ATTRS_WORD2},
-
-	{NFSD4_1_SUPPORTED_ATTRS_WORD0,
-	 NFSD4_1_SUPPORTED_ATTRS_WORD1,
-	 NFSD4_2_SUPPORTED_ATTRS_WORD2},
-};
 
 /*
  * As per referral draft, the fsid for a referral MUST be different from the fsid of the containing
@@ -144,7 +129,7 @@ static void next_decode_page(struct nfsd4_compoundargs *argp)
 	argp->p = page_address(argp->pagelist[0]);
 	argp->pagelist++;
 	if (argp->pagelen < PAGE_SIZE) {
-		argp->end = argp->p + (argp->pagelen>>2);
+		argp->end = argp->p + XDR_QUADLEN(argp->pagelen);
 		argp->pagelen = 0;
 	} else {
 		argp->end = argp->p + (PAGE_SIZE>>2);
@@ -300,7 +285,7 @@ nfsd4_decode_bitmap(struct nfsd4_compoundargs *argp, u32 *bmval)
 static __be32
 nfsd4_decode_fattr(struct nfsd4_compoundargs *argp, u32 *bmval,
 		   struct iattr *iattr, struct nfs4_acl **acl,
-		   struct xdr_netobj *label, int *umask)
+		   struct xdr_netobj *label)
 {
 	int expected_len, len = 0;
 	u32 dummy32;
@@ -310,14 +295,6 @@ nfsd4_decode_fattr(struct nfsd4_compoundargs *argp, u32 *bmval,
 	iattr->ia_valid = 0;
 	if ((status = nfsd4_decode_bitmap(argp, bmval)))
 		return status;
-
-	if (bmval[0] & ~NFSD_WRITEABLE_ATTRS_WORD0
-	    || bmval[1] & ~NFSD_WRITEABLE_ATTRS_WORD1
-	    || bmval[2] & ~NFSD_WRITEABLE_ATTRS_WORD2) {
-		if (nfsd_attrs_supported(argp->minorversion, bmval))
-			return nfserr_inval;
-		return nfserr_attrnotsupp;
-	}
 
 	READ_BUF(4);
 	expected_len = be32_to_cpup(p++);
@@ -458,18 +435,12 @@ nfsd4_decode_fattr(struct nfsd4_compoundargs *argp, u32 *bmval,
 			return nfserr_jukebox;
 	}
 #endif
-	if (bmval[2] & FATTR4_WORD2_MODE_UMASK) {
-		if (!umask)
-			goto xdr_error;
-		READ_BUF(8);
-		len += 8;
-		dummy32 = be32_to_cpup(p++);
-		iattr->ia_mode = dummy32 & (S_IFMT | S_IALLUGO);
-		dummy32 = be32_to_cpup(p++);
-		*umask = dummy32 & S_IRWXUGO;
-		iattr->ia_valid |= ATTR_MODE;
-	}
-	if (len != expected_len)
+
+	if (bmval[0] & ~NFSD_WRITEABLE_ATTRS_WORD0
+	    || bmval[1] & ~NFSD_WRITEABLE_ATTRS_WORD1
+	    || bmval[2] & ~NFSD_WRITEABLE_ATTRS_WORD2)
+		READ_BUF(expected_len - len);
+	else if (len != expected_len)
 		goto xdr_error;
 
 	DECODE_TAIL;
@@ -663,8 +634,7 @@ nfsd4_decode_create(struct nfsd4_compoundargs *argp, struct nfsd4_create *create
 		return status;
 
 	status = nfsd4_decode_fattr(argp, create->cr_bmval, &create->cr_iattr,
-				    &create->cr_acl, &create->cr_label,
-				    &current->fs->umask);
+				    &create->cr_acl, &create->cr_label);
 	if (status)
 		goto out;
 
@@ -909,15 +879,13 @@ nfsd4_decode_open(struct nfsd4_compoundargs *argp, struct nfsd4_open *open)
 	case NFS4_OPEN_NOCREATE:
 		break;
 	case NFS4_OPEN_CREATE:
-		current->fs->umask = 0;
 		READ_BUF(4);
 		open->op_createmode = be32_to_cpup(p++);
 		switch (open->op_createmode) {
 		case NFS4_CREATE_UNCHECKED:
 		case NFS4_CREATE_GUARDED:
 			status = nfsd4_decode_fattr(argp, open->op_bmval,
-				&open->op_iattr, &open->op_acl, &open->op_label,
-				&current->fs->umask);
+				&open->op_iattr, &open->op_acl, &open->op_label);
 			if (status)
 				goto out;
 			break;
@@ -931,8 +899,7 @@ nfsd4_decode_open(struct nfsd4_compoundargs *argp, struct nfsd4_open *open)
 			READ_BUF(NFS4_VERIFIER_SIZE);
 			COPYMEM(open->op_verf.data, NFS4_VERIFIER_SIZE);
 			status = nfsd4_decode_fattr(argp, open->op_bmval,
-				&open->op_iattr, &open->op_acl, &open->op_label,
-				&current->fs->umask);
+				&open->op_iattr, &open->op_acl, &open->op_label);
 			if (status)
 				goto out;
 			break;
@@ -1169,7 +1136,7 @@ nfsd4_decode_setattr(struct nfsd4_compoundargs *argp, struct nfsd4_setattr *seta
 	if (status)
 		return status;
 	return nfsd4_decode_fattr(argp, setattr->sa_bmval, &setattr->sa_iattr,
-				  &setattr->sa_acl, &setattr->sa_label, NULL);
+				  &setattr->sa_acl, &setattr->sa_label);
 }
 
 static __be32
@@ -1250,7 +1217,7 @@ nfsd4_decode_write(struct nfsd4_compoundargs *argp, struct nfsd4_write *write)
 	READ_BUF(16);
 	p = xdr_decode_hyper(p, &write->wr_offset);
 	write->wr_stable_how = be32_to_cpup(p++);
-	if (write->wr_stable_how > NFS_FILE_SYNC)
+	if (write->wr_stable_how > 2)
 		goto xdr_error;
 	write->wr_buflen = be32_to_cpup(p++);
 
@@ -1279,9 +1246,7 @@ nfsd4_decode_write(struct nfsd4_compoundargs *argp, struct nfsd4_write *write)
 		argp->pagelen -= pages * PAGE_SIZE;
 		len -= pages * PAGE_SIZE;
 
-		argp->p = (__be32 *)page_address(argp->pagelist[0]);
-		argp->pagelist++;
-		argp->end = argp->p + XDR_QUADLEN(PAGE_SIZE);
+		next_decode_page(argp);
 	}
 	argp->p += XDR_QUADLEN(len);
 
@@ -1941,12 +1906,12 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 		} else
 			max_reply += nfsd4_max_reply(argp->rqstp, op);
 		/*
-		 * OP_LOCK and OP_LOCKT may return a conflicting lock.
-		 * (Special case because it will just skip encoding this
-		 * if it runs out of xdr buffer space, and it is the only
-		 * operation that behaves this way.)
+		 * OP_LOCK may return a conflicting lock.  (Special case
+		 * because it will just skip encoding this if it runs
+		 * out of xdr buffer space, and it is the only operation
+		 * that behaves this way.)
 		 */
-		if (op->opnum == OP_LOCK || op->opnum == OP_LOCKT)
+		if (op->opnum == OP_LOCK)
 			max_reply += NFS4_OPAQUE_LIMIT;
 
 		if (op->status) {
@@ -1966,13 +1931,9 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 	DECODE_TAIL;
 }
 
-static __be32 *encode_change(__be32 *p, struct kstat *stat, struct inode *inode,
-			     struct svc_export *exp)
+static __be32 *encode_change(__be32 *p, struct kstat *stat, struct inode *inode)
 {
-	if (exp->ex_flags & NFSEXP_V4ROOT) {
-		*p++ = cpu_to_be32(convert_to_wallclock(exp->cd->flush_time));
-		*p++ = 0;
-	} else if (IS_I_VERSION(inode)) {
+	if (IS_I_VERSION(inode)) {
 		p = xdr_encode_hyper(p, inode->i_version);
 	} else {
 		*p++ = cpu_to_be32(stat->ctime.tv_sec);
@@ -2301,7 +2262,7 @@ static int get_parent_attributes(struct svc_export *exp, struct kstat *stat)
 		if (path.dentry != path.mnt->mnt_root)
 			break;
 	}
-	err = vfs_getattr(&path, stat, STATX_BASIC_STATS, AT_STATX_SYNC_AS_STAT);
+	err = vfs_getattr(&path, stat);
 	path_put(&path);
 	return err;
 }
@@ -2377,7 +2338,9 @@ nfsd4_encode_fattr(struct xdr_stream *xdr, struct svc_fh *fhp,
 	struct nfsd_net *nn = net_generic(SVC_NET(rqstp), nfsd_net_id);
 
 	BUG_ON(bmval1 & NFSD_WRITEONLY_ATTRS_WORD1);
-	BUG_ON(!nfsd_attrs_supported(minorversion, bmval));
+	BUG_ON(bmval0 & ~nfsd_suppattrs0(minorversion));
+	BUG_ON(bmval1 & ~nfsd_suppattrs1(minorversion));
+	BUG_ON(bmval2 & ~nfsd_suppattrs2(minorversion));
 
 	if (exp->ex_fslocs.migrated) {
 		status = fattr_handle_absent_fs(&bmval0, &bmval1, &bmval2, &rdattr_err);
@@ -2385,7 +2348,7 @@ nfsd4_encode_fattr(struct xdr_stream *xdr, struct svc_fh *fhp,
 			goto out;
 	}
 
-	err = vfs_getattr(&path, &stat, STATX_BASIC_STATS, AT_STATX_SYNC_AS_STAT);
+	err = vfs_getattr(&path, &stat);
 	if (err)
 		goto out_nfserr;
 	if ((bmval0 & (FATTR4_WORD0_FILES_AVAIL | FATTR4_WORD0_FILES_FREE |
@@ -2421,11 +2384,8 @@ nfsd4_encode_fattr(struct xdr_stream *xdr, struct svc_fh *fhp,
 #ifdef CONFIG_NFSD_V4_SECURITY_LABEL
 	if ((bmval2 & FATTR4_WORD2_SECURITY_LABEL) ||
 	     bmval0 & FATTR4_WORD0_SUPPORTED_ATTRS) {
-		if (exp->ex_flags & NFSEXP_SECURITY_LABEL)
-			err = security_inode_getsecctx(d_inode(dentry),
+		err = security_inode_getsecctx(d_inode(dentry),
 						&context, &contextlen);
-		else
-			err = -EOPNOTSUPP;
 		contextsupport = (err == 0);
 		if (bmval2 & FATTR4_WORD2_SECURITY_LABEL) {
 			if (err == -EOPNOTSUPP)
@@ -2447,29 +2407,29 @@ nfsd4_encode_fattr(struct xdr_stream *xdr, struct svc_fh *fhp,
 	p++;                /* to be backfilled later */
 
 	if (bmval0 & FATTR4_WORD0_SUPPORTED_ATTRS) {
-		u32 supp[3];
-
-		memcpy(supp, nfsd_suppattrs[minorversion], sizeof(supp));
+		u32 word0 = nfsd_suppattrs0(minorversion);
+		u32 word1 = nfsd_suppattrs1(minorversion);
+		u32 word2 = nfsd_suppattrs2(minorversion);
 
 		if (!IS_POSIXACL(dentry->d_inode))
-			supp[0] &= ~FATTR4_WORD0_ACL;
+			word0 &= ~FATTR4_WORD0_ACL;
 		if (!contextsupport)
-			supp[2] &= ~FATTR4_WORD2_SECURITY_LABEL;
-		if (!supp[2]) {
+			word2 &= ~FATTR4_WORD2_SECURITY_LABEL;
+		if (!word2) {
 			p = xdr_reserve_space(xdr, 12);
 			if (!p)
 				goto out_resource;
 			*p++ = cpu_to_be32(2);
-			*p++ = cpu_to_be32(supp[0]);
-			*p++ = cpu_to_be32(supp[1]);
+			*p++ = cpu_to_be32(word0);
+			*p++ = cpu_to_be32(word1);
 		} else {
 			p = xdr_reserve_space(xdr, 16);
 			if (!p)
 				goto out_resource;
 			*p++ = cpu_to_be32(3);
-			*p++ = cpu_to_be32(supp[0]);
-			*p++ = cpu_to_be32(supp[1]);
-			*p++ = cpu_to_be32(supp[2]);
+			*p++ = cpu_to_be32(word0);
+			*p++ = cpu_to_be32(word1);
+			*p++ = cpu_to_be32(word2);
 		}
 	}
 	if (bmval0 & FATTR4_WORD0_TYPE) {
@@ -2497,7 +2457,7 @@ nfsd4_encode_fattr(struct xdr_stream *xdr, struct svc_fh *fhp,
 		p = xdr_reserve_space(xdr, 8);
 		if (!p)
 			goto out_resource;
-		p = encode_change(p, &stat, d_inode(dentry), exp);
+		p = encode_change(p, &stat, d_inode(dentry));
 	}
 	if (bmval0 & FATTR4_WORD0_SIZE) {
 		p = xdr_reserve_space(xdr, 8);
@@ -2833,7 +2793,9 @@ out_acl:
 	if (bmval2 & FATTR4_WORD2_SUPPATTR_EXCLCREAT) {
 		u32 supp[3];
 
-		memcpy(supp, nfsd_suppattrs[minorversion], sizeof(supp));
+		supp[0] = nfsd_suppattrs0(minorversion);
+		supp[1] = nfsd_suppattrs1(minorversion);
+		supp[2] = nfsd_suppattrs2(minorversion);
 		supp[0] &= NFSD_SUPPATTR_EXCLCREAT_WORD0;
 		supp[1] &= NFSD_SUPPATTR_EXCLCREAT_WORD1;
 		supp[2] &= NFSD_SUPPATTR_EXCLCREAT_WORD2;
@@ -3619,10 +3581,10 @@ nfsd4_encode_readlink(struct nfsd4_compoundres *resp, __be32 nfserr, struct nfsd
 	if (!p)
 		return nfserr_resource;
 	/*
-	 * XXX: By default, vfs_readlink() will truncate symlinks if they
-	 * would overflow the buffer.  Is this kosher in NFSv4?  If not, one
-	 * easy fix is: if vfs_readlink() precisely fills the buffer, assume
-	 * that truncation occurred, and return NFS4ERR_RESOURCE.
+	 * XXX: By default, the ->readlink() VFS op will truncate symlinks
+	 * if they would overflow the buffer.  Is this kosher in NFSv4?  If
+	 * not, one easy fix is: if ->readlink() precisely fills the buffer,
+	 * assume that truncation occurred, and return NFS4ERR_RESOURCE.
 	 */
 	nfserr = nfsd_readlink(readlink->rl_rqstp, readlink->rl_fhp,
 						(char *)p, &maxcount);
@@ -3676,7 +3638,8 @@ nfsd4_encode_readdir(struct nfsd4_compoundres *resp, __be32 nfserr, struct nfsd4
 		nfserr = nfserr_resource;
 		goto err_no_verf;
 	}
-	maxcount = min_t(u32, readdir->rd_maxcount, INT_MAX);
+	maxcount = svc_max_payload(resp->rqstp);
+	maxcount = min_t(u32, readdir->rd_maxcount, maxcount);
 	/*
 	 * Note the rfc defines rd_maxcount as the size of the
 	 * READDIR4resok structure, which includes the verifier above
@@ -3690,7 +3653,7 @@ nfsd4_encode_readdir(struct nfsd4_compoundres *resp, __be32 nfserr, struct nfsd4
 
 	/* RFC 3530 14.2.24 allows us to ignore dircount when it's 0: */
 	if (!readdir->rd_dircount)
-		readdir->rd_dircount = INT_MAX;
+		readdir->rd_dircount = svc_max_payload(resp->rqstp);
 
 	readdir->xdr = xdr;
 	readdir->rd_maxcount = maxcount;

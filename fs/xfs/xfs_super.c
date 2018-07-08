@@ -104,6 +104,9 @@ static const match_table_t tokens = {
 	{Opt_sysvgroups,"sysvgroups"},	/* group-ID from current process */
 	{Opt_allocsize,	"allocsize=%s"},/* preferred allocation size */
 	{Opt_norecovery,"norecovery"},	/* don't run XFS recovery */
+	{Opt_barrier,	"barrier"},	/* use writer barriers for log write and
+					 * unwritten extent conversion */
+	{Opt_nobarrier,	"nobarrier"},	/* .. disable */
 	{Opt_inode64,	"inode64"},	/* inodes can be allocated anywhere */
 	{Opt_inode32,   "inode32"},	/* inode allocation limited to
 					 * XFS_MAXINUMBER_32 */
@@ -131,12 +134,6 @@ static const match_table_t tokens = {
 	{Opt_nodiscard,	"nodiscard"},	/* Do not discard unused blocks */
 
 	{Opt_dax,	"dax"},		/* Enable direct access to bdev pages */
-
-	/* Deprecated mount options scheduled for removal */
-	{Opt_barrier,	"barrier"},	/* use writer barriers for log write and
-					 * unwritten extent conversion */
-	{Opt_nobarrier,	"nobarrier"},	/* .. disable */
-
 	{Opt_err,	NULL},
 };
 
@@ -304,6 +301,12 @@ xfs_parseargs(
 		case Opt_nouuid:
 			mp->m_flags |= XFS_MOUNT_NOUUID;
 			break;
+		case Opt_barrier:
+			mp->m_flags |= XFS_MOUNT_BARRIER;
+			break;
+		case Opt_nobarrier:
+			mp->m_flags &= ~XFS_MOUNT_BARRIER;
+			break;
 		case Opt_ikeep:
 			mp->m_flags |= XFS_MOUNT_IKEEP;
 			break;
@@ -371,14 +374,6 @@ xfs_parseargs(
 			mp->m_flags |= XFS_MOUNT_DAX;
 			break;
 #endif
-		case Opt_barrier:
-			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
-			mp->m_flags |= XFS_MOUNT_BARRIER;
-			break;
-		case Opt_nobarrier:
-			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
-			mp->m_flags &= ~XFS_MOUNT_BARRIER;
-			break;
 		default:
 			xfs_warn(mp, "unknown mount option [%s].", p);
 			return -EINVAL;
@@ -956,7 +951,7 @@ xfs_fs_destroy_inode(
 
 	trace_xfs_destroy_inode(ip);
 
-	ASSERT(!rwsem_is_locked(&inode->i_rwsem));
+	ASSERT(!rwsem_is_locked(&ip->i_iolock.mr_lock));
 	XFS_STATS_INC(ip->i_mount, vn_rele);
 	XFS_STATS_INC(ip->i_mount, vn_remove);
 
@@ -1219,7 +1214,7 @@ xfs_test_remount_options(
 	tmp_mp->m_super = sb;
 	error = xfs_parseargs(tmp_mp, options);
 	xfs_free_fsname(tmp_mp);
-	kfree(tmp_mp);
+	kmem_free(tmp_mp);
 
 	return error;
 }
@@ -1251,11 +1246,9 @@ xfs_fs_remount(
 		token = match_token(p, tokens, args);
 		switch (token) {
 		case Opt_barrier:
-			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
 			mp->m_flags |= XFS_MOUNT_BARRIER;
 			break;
 		case Opt_nobarrier:
-			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
 			mp->m_flags &= ~XFS_MOUNT_BARRIER;
 			break;
 		case Opt_inode64:
@@ -1964,20 +1957,12 @@ xfs_init_workqueues(void)
 	if (!xfs_alloc_wq)
 		return -ENOMEM;
 
-	xfs_discard_wq = alloc_workqueue("xfsdiscard", WQ_UNBOUND, 0);
-	if (!xfs_discard_wq)
-		goto out_free_alloc_wq;
-
 	return 0;
-out_free_alloc_wq:
-	destroy_workqueue(xfs_alloc_wq);
-	return -ENOMEM;
 }
 
 STATIC void
 xfs_destroy_workqueues(void)
 {
-	destroy_workqueue(xfs_discard_wq);
 	destroy_workqueue(xfs_alloc_wq);
 }
 

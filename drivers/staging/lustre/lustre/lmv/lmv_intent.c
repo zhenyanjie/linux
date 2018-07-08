@@ -220,13 +220,20 @@ int lmv_revalidate_slaves(struct obd_export *exp,
 			/* refresh slave from server */
 			body = req_capsule_server_get(&req->rq_pill,
 						      &RMF_MDT_BODY);
-			if (!body) {
+			LASSERT(body);
+
+			if (unlikely(body->mbo_nlink < 2)) {
+				CERROR("%s: nlink %d < 2 corrupt stripe %d "DFID":" DFID"\n",
+				       obd->obd_name, body->mbo_nlink, i,
+				       PFID(&lsm->lsm_md_oinfo[i].lmo_fid),
+				       PFID(&lsm->lsm_md_oinfo[0].lmo_fid));
+
 				if (it.it_lock_mode && lockh) {
 					ldlm_lock_decref(lockh, it.it_lock_mode);
 					it.it_lock_mode = 0;
 				}
 
-				rc = -ENOENT;
+				rc = -EIO;
 				goto cleanup;
 			}
 

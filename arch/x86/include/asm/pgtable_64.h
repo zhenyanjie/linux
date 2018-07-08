@@ -106,24 +106,32 @@ static inline void native_pud_clear(pud_t *pud)
 	native_set_pud(pud, native_make_pud(0));
 }
 
-static inline pud_t native_pudp_get_and_clear(pud_t *xp)
-{
-#ifdef CONFIG_SMP
-	return native_make_pud(xchg(&xp->pud, 0));
-#else
-	/* native_local_pudp_get_and_clear,
-	 * but duplicated because of cyclic dependency
-	 */
-	pud_t ret = *xp;
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+extern pgd_t kaiser_set_shadow_pgd(pgd_t *pgdp, pgd_t pgd);
 
-	native_pud_clear(xp);
-	return ret;
+static inline pgd_t *native_get_shadow_pgd(pgd_t *pgdp)
+{
+#ifdef CONFIG_DEBUG_VM
+	/* linux/mmdebug.h may not have been included at this point */
+	BUG_ON(!kaiser_enabled);
 #endif
+	return (pgd_t *)((unsigned long)pgdp | (unsigned long)PAGE_SIZE);
 }
+#else
+static inline pgd_t kaiser_set_shadow_pgd(pgd_t *pgdp, pgd_t pgd)
+{
+	return pgd;
+}
+static inline pgd_t *native_get_shadow_pgd(pgd_t *pgdp)
+{
+	BUILD_BUG_ON(1);
+	return NULL;
+}
+#endif /* CONFIG_PAGE_TABLE_ISOLATION */
 
 static inline void native_set_pgd(pgd_t *pgdp, pgd_t pgd)
 {
-	*pgdp = pgd;
+	*pgdp = kaiser_set_shadow_pgd(pgdp, pgd);
 }
 
 static inline void native_pgd_clear(pgd_t *pgd)
@@ -131,7 +139,8 @@ static inline void native_pgd_clear(pgd_t *pgd)
 	native_set_pgd(pgd, native_make_pgd(0));
 }
 
-extern void sync_global_pgds(unsigned long start, unsigned long end);
+extern void sync_global_pgds(unsigned long start, unsigned long end,
+			     int removed);
 
 /*
  * Conversion functions: convert a page and protection to a page entry,

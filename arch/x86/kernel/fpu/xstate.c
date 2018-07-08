@@ -65,7 +65,6 @@ void fpu__xstate_clear_all_cpu_caps(void)
 	setup_clear_cpu_cap(X86_FEATURE_AVX);
 	setup_clear_cpu_cap(X86_FEATURE_AVX2);
 	setup_clear_cpu_cap(X86_FEATURE_AVX512F);
-	setup_clear_cpu_cap(X86_FEATURE_AVX512IFMA);
 	setup_clear_cpu_cap(X86_FEATURE_AVX512PF);
 	setup_clear_cpu_cap(X86_FEATURE_AVX512ER);
 	setup_clear_cpu_cap(X86_FEATURE_AVX512CD);
@@ -74,11 +73,9 @@ void fpu__xstate_clear_all_cpu_caps(void)
 	setup_clear_cpu_cap(X86_FEATURE_AVX512VL);
 	setup_clear_cpu_cap(X86_FEATURE_MPX);
 	setup_clear_cpu_cap(X86_FEATURE_XGETBV1);
-	setup_clear_cpu_cap(X86_FEATURE_AVX512VBMI);
 	setup_clear_cpu_cap(X86_FEATURE_PKU);
 	setup_clear_cpu_cap(X86_FEATURE_AVX512_4VNNIW);
 	setup_clear_cpu_cap(X86_FEATURE_AVX512_4FMAPS);
-	setup_clear_cpu_cap(X86_FEATURE_AVX512_VPOPCNTDQ);
 }
 
 /*
@@ -706,14 +703,8 @@ void __init fpu__init_system_xstate(void)
 	WARN_ON_FPU(!on_boot_cpu);
 	on_boot_cpu = 0;
 
-	if (!boot_cpu_has(X86_FEATURE_FPU)) {
-		pr_info("x86/fpu: No FPU detected\n");
-		return;
-	}
-
 	if (!boot_cpu_has(X86_FEATURE_XSAVE)) {
-		pr_info("x86/fpu: x87 FPU will use %s\n",
-			boot_cpu_has(X86_FEATURE_FXSR) ? "FXSAVE" : "FSAVE");
+		pr_info("x86/fpu: Legacy x87 FPU detected.\n");
 		return;
 	}
 
@@ -899,6 +890,15 @@ int arch_set_user_pkey_access(struct task_struct *tsk, int pkey,
 	 */
 	if (!boot_cpu_has(X86_FEATURE_OSPKE))
 		return -EINVAL;
+	/*
+	 * For most XSAVE components, this would be an arduous task:
+	 * brining fpstate up to date with fpregs, updating fpstate,
+	 * then re-populating fpregs.  But, for components that are
+	 * never lazily managed, we can just access the fpregs
+	 * directly.  PKRU is never managed lazily, so we can just
+	 * manipulate it directly.  Make sure it stays that way.
+	 */
+	WARN_ON_ONCE(!use_eager_fpu());
 
 	/* Set the bits we need in PKRU:  */
 	if (init_val & PKEY_DISABLE_ACCESS)
@@ -1077,6 +1077,7 @@ int copyin_to_xsaves(const void *kbuf, const void __user *ubuf,
 	 * Add back in the features that came in from userspace:
 	 */
 	xsave->header.xfeatures |= xfeatures;
+	xsave->header.xcomp_bv = XCOMP_BV_COMPACTED_FORMAT | xsave->header.xfeatures;
 
 	return 0;
 }

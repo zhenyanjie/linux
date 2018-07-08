@@ -311,7 +311,9 @@ void br_dev_delete(struct net_device *dev, struct list_head *head)
 
 	br_fdb_delete_by_port(br, NULL, 0, 1);
 
-	cancel_delayed_work_sync(&br->gc_work);
+	br_vlan_flush(br);
+	br_multicast_dev_del(br);
+	del_timer_sync(&br->gc_timer);
 
 	br_sysfs_delbr(br->dev);
 	unregister_netdevice_queue(br->dev, head);
@@ -502,8 +504,8 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (dev->netdev_ops->ndo_start_xmit == br_dev_xmit)
 		return -ELOOP;
 
-	/* Device is already being bridged */
-	if (br_port_exists(dev))
+	/* Device has master upper dev */
+	if (netdev_master_upper_dev_get(dev))
 		return -EBUSY;
 
 	/* No bridging devices that dislike that (e.g. wireless) */

@@ -114,6 +114,19 @@ module_param_named(disable_sma, ib_qib_disable_sma, uint, S_IWUSR | S_IRUGO);
 MODULE_PARM_DESC(disable_sma, "Disable the SMA");
 
 /*
+ * Translate ib_wr_opcode into ib_wc_opcode.
+ */
+const enum ib_wc_opcode ib_qib_wc_opcode[] = {
+	[IB_WR_RDMA_WRITE] = IB_WC_RDMA_WRITE,
+	[IB_WR_RDMA_WRITE_WITH_IMM] = IB_WC_RDMA_WRITE,
+	[IB_WR_SEND] = IB_WC_SEND,
+	[IB_WR_SEND_WITH_IMM] = IB_WC_SEND,
+	[IB_WR_RDMA_READ] = IB_WC_RDMA_READ,
+	[IB_WR_ATOMIC_CMP_AND_SWP] = IB_WC_COMP_SWAP,
+	[IB_WR_ATOMIC_FETCH_AND_ADD] = IB_WC_FETCH_ADD
+};
+
+/*
  * System image GUID.
  */
 __be64 ib_qib_sys_image_guid;
@@ -129,12 +142,74 @@ void qib_copy_sge(struct rvt_sge_state *ss, void *data, u32 length, int release)
 	struct rvt_sge *sge = &ss->sge;
 
 	while (length) {
-		u32 len = rvt_get_sge_length(sge, length);
+		u32 len = sge->length;
 
-		WARN_ON_ONCE(len == 0);
+		if (len > length)
+			len = length;
+		if (len > sge->sge_length)
+			len = sge->sge_length;
+		BUG_ON(len == 0);
 		memcpy(sge->vaddr, data, len);
-		rvt_update_sge(ss, len, release);
+		sge->vaddr += len;
+		sge->length -= len;
+		sge->sge_length -= len;
+		if (sge->sge_length == 0) {
+			if (release)
+				rvt_put_mr(sge->mr);
+			if (--ss->num_sge)
+				*sge = *ss->sg_list++;
+		} else if (sge->length == 0 && sge->mr->lkey) {
+			if (++sge->n >= RVT_SEGSZ) {
+				if (++sge->m >= sge->mr->mapsz)
+					break;
+				sge->n = 0;
+			}
+			sge->vaddr =
+				sge->mr->map[sge->m]->segs[sge->n].vaddr;
+			sge->length =
+				sge->mr->map[sge->m]->segs[sge->n].length;
+		}
 		data += len;
+		length -= len;
+	}
+}
+
+/**
+ * qib_skip_sge - skip over SGE memory - XXX almost dup of prev func
+ * @ss: the SGE state
+ * @length: the number of bytes to skip
+ */
+void qib_skip_sge(struct rvt_sge_state *ss, u32 length, int release)
+{
+	struct rvt_sge *sge = &ss->sge;
+
+	while (length) {
+		u32 len = sge->length;
+
+		if (len > length)
+			len = length;
+		if (len > sge->sge_length)
+			len = sge->sge_length;
+		BUG_ON(len == 0);
+		sge->vaddr += len;
+		sge->length -= len;
+		sge->sge_length -= len;
+		if (sge->sge_length == 0) {
+			if (release)
+				rvt_put_mr(sge->mr);
+			if (--ss->num_sge)
+				*sge = *ss->sg_list++;
+		} else if (sge->length == 0 && sge->mr->lkey) {
+			if (++sge->n >= RVT_SEGSZ) {
+				if (++sge->m >= sge->mr->mapsz)
+					break;
+				sge->n = 0;
+			}
+			sge->vaddr =
+				sge->mr->map[sge->m]->segs[sge->n].vaddr;
+			sge->length =
+				sge->mr->map[sge->m]->segs[sge->n].length;
+		}
 		length -= len;
 	}
 }
@@ -389,7 +464,7 @@ static void mem_timer(unsigned long data)
 		priv = list_entry(list->next, struct qib_qp_priv, iowait);
 		qp = priv->owner;
 		list_del_init(&priv->iowait);
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		if (!list_empty(list))
 			mod_timer(&dev->mem_timer, jiffies + 1);
 	}
@@ -402,7 +477,29 @@ static void mem_timer(unsigned long data)
 			qib_schedule_send(qp);
 		}
 		spin_unlock_irqrestore(&qp->s_lock, flags);
-		rvt_put_qp(qp);
+		if (atomic_dec_and_test(&qp->refcount))
+			wake_up(&qp->wait);
+	}
+}
+
+static void update_sge(struct rvt_sge_state *ss, u32 length)
+{
+	struct rvt_sge *sge = &ss->sge;
+
+	sge->vaddr += length;
+	sge->length -= length;
+	sge->sge_length -= length;
+	if (sge->sge_length == 0) {
+		if (--ss->num_sge)
+			*sge = *ss->sg_list++;
+	} else if (sge->length == 0 && sge->mr->lkey) {
+		if (++sge->n >= RVT_SEGSZ) {
+			if (++sge->m >= sge->mr->mapsz)
+				return;
+			sge->n = 0;
+		}
+		sge->vaddr = sge->mr->map[sge->m]->segs[sge->n].vaddr;
+		sge->length = sge->mr->map[sge->m]->segs[sge->n].length;
 	}
 }
 
@@ -563,11 +660,11 @@ static void copy_io(u32 __iomem *piobuf, struct rvt_sge_state *ss,
 				data = clear_upper_bytes(v, extra, 0);
 			}
 		}
-		rvt_update_sge(ss, len, false);
+		update_sge(ss, len);
 		length -= len;
 	}
 	/* Update address before sending packet. */
-	rvt_update_sge(ss, length, false);
+	update_sge(ss, length);
 	if (flush_wc) {
 		/* must flush early everything before trigger word */
 		qib_flush_wc();
@@ -665,7 +762,7 @@ void qib_put_txreq(struct qib_verbs_txreq *tx)
 				  iowait);
 		qp = priv->owner;
 		list_del_init(&priv->iowait);
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		spin_unlock_irqrestore(&dev->rdi.pending_lock, flags);
 
 		spin_lock_irqsave(&qp->s_lock, flags);
@@ -675,7 +772,8 @@ void qib_put_txreq(struct qib_verbs_txreq *tx)
 		}
 		spin_unlock_irqrestore(&qp->s_lock, flags);
 
-		rvt_put_qp(qp);
+		if (atomic_dec_and_test(&qp->refcount))
+			wake_up(&qp->wait);
 	} else
 		spin_unlock_irqrestore(&dev->rdi.pending_lock, flags);
 }
@@ -710,7 +808,7 @@ void qib_verbs_sdma_desc_avail(struct qib_pportdata *ppd, unsigned avail)
 			break;
 		avail -= qpp->s_tx->txreq.sg_count;
 		list_del_init(&qpp->iowait);
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		qps[n++] = qp;
 	}
 
@@ -724,7 +822,8 @@ void qib_verbs_sdma_desc_avail(struct qib_pportdata *ppd, unsigned avail)
 			qib_schedule_send(qp);
 		}
 		spin_unlock(&qp->s_lock);
-		rvt_put_qp(qp);
+		if (atomic_dec_and_test(&qp->refcount))
+			wake_up(&qp->wait);
 	}
 }
 
@@ -986,7 +1085,7 @@ static int qib_verbs_send_pio(struct rvt_qp *qp, struct ib_header *ibhdr,
 		u32 *addr = (u32 *) ss->sge.vaddr;
 
 		/* Update address before sending packet. */
-		rvt_update_sge(ss, len, false);
+		update_sge(ss, len);
 		if (flush_wc) {
 			qib_pio_copy(piobuf, addr, dwords - 1);
 			/* must flush early everything before trigger word */
@@ -1189,7 +1288,7 @@ void qib_ib_piobufavail(struct qib_devdata *dd)
 		priv = list_entry(list->next, struct qib_qp_priv, iowait);
 		qp = priv->owner;
 		list_del_init(&priv->iowait);
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		qps[n++] = qp;
 	}
 	dd->f_wantpiobuf_intr(dd, 0);
@@ -1207,7 +1306,8 @@ full:
 		spin_unlock_irqrestore(&qp->s_lock, flags);
 
 		/* Notify qib_destroy_qp() if it is waiting. */
-		rvt_put_qp(qp);
+		if (atomic_dec_and_test(&qp->refcount))
+			wake_up(&qp->wait);
 	}
 }
 
@@ -1220,7 +1320,6 @@ static int qib_query_port(struct rvt_dev_info *rdi, u8 port_num,
 	enum ib_mtu mtu;
 	u16 lid = ppd->lid;
 
-	/* props being zeroed by the caller, avoid zeroing it here */
 	props->lid = lid ? lid : be16_to_cpu(IB_LID_PERMISSIVE);
 	props->lmc = ppd->lmc;
 	props->state = dd->f_iblink_state(ppd->lastibcstat);
@@ -1550,7 +1649,7 @@ int qib_register_ib_device(struct qib_devdata *dd)
 	ibdev->owner = THIS_MODULE;
 	ibdev->node_guid = ppd->guid;
 	ibdev->phys_port_cnt = dd->num_pports;
-	ibdev->dev.parent = &dd->pcidev->dev;
+	ibdev->dma_device = &dd->pcidev->dev;
 	ibdev->modify_device = qib_modify_device;
 	ibdev->process_mad = qib_process_mad;
 
@@ -1577,7 +1676,6 @@ int qib_register_ib_device(struct qib_devdata *dd)
 	dd->verbs_dev.rdi.driver_f.stop_send_queue = qib_stop_send_queue;
 	dd->verbs_dev.rdi.driver_f.flush_qp_waiters = qib_flush_qp_waiters;
 	dd->verbs_dev.rdi.driver_f.notify_error_qp = qib_notify_error_qp;
-	dd->verbs_dev.rdi.driver_f.notify_restart_rc = qib_restart_rc;
 	dd->verbs_dev.rdi.driver_f.mtu_to_path_mtu = qib_mtu_to_path_mtu;
 	dd->verbs_dev.rdi.driver_f.mtu_from_qp = qib_mtu_from_qp;
 	dd->verbs_dev.rdi.driver_f.get_pmtu_from_attr = qib_get_pmtu_from_attr;

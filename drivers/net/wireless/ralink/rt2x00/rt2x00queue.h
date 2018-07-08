@@ -116,6 +116,8 @@ struct skb_frame_desc {
 	__le32 iv[2];
 
 	dma_addr_t skb_dma;
+
+	struct queue_entry *entry;
 };
 
 /**

@@ -18,7 +18,6 @@
 #include <linux/of.h>
 #include <linux/delay.h>
 #include <linux/module.h>
-#include <linux/sys_soc.h>
 #include <linux/mmc/host.h>
 #include "sdhci-pltfm.h"
 #include "sdhci-esdhc.h"
@@ -29,7 +28,6 @@
 struct sdhci_esdhc {
 	u8 vendor_ver;
 	u8 spec_ver;
-	bool quirk_incorrect_hostver;
 };
 
 /**
@@ -89,8 +87,6 @@ static u32 esdhc_readl_fixup(struct sdhci_host *host,
 static u16 esdhc_readw_fixup(struct sdhci_host *host,
 				     int spec_reg, u32 value)
 {
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct sdhci_esdhc *esdhc = sdhci_pltfm_priv(pltfm_host);
 	u16 ret;
 	int shift = (spec_reg & 0x2) * 8;
 
@@ -98,12 +94,6 @@ static u16 esdhc_readw_fixup(struct sdhci_host *host,
 		ret = value & 0xffff;
 	else
 		ret = (value >> shift) & 0xffff;
-	/* Workaround for T4240-R1.0-R2.0 eSDHC which has incorrect
-	 * vendor version and spec version information.
-	 */
-	if ((spec_reg == SDHCI_HOST_VERSION) &&
-	    (esdhc->quirk_incorrect_hostver))
-		ret = (VENDOR_V_23 << SDHCI_VENDOR_VER_SHIFT) | SDHCI_SPEC_200;
 	return ret;
 }
 
@@ -431,7 +421,6 @@ static void esdhc_of_set_clock(struct sdhci_host *host, unsigned int clock)
 	struct sdhci_esdhc *esdhc = sdhci_pltfm_priv(pltfm_host);
 	int pre_div = 1;
 	int div = 1;
-	u32 timeout;
 	u32 temp;
 
 	host->mmc->actual_clock = 0;
@@ -443,6 +432,20 @@ static void esdhc_of_set_clock(struct sdhci_host *host, unsigned int clock)
 	if (esdhc->vendor_ver < VENDOR_V_23)
 		pre_div = 2;
 
+	/*
+	 * Limit SD clock to 167MHz for ls1046a according to its datasheet
+	 */
+	if (clock > 167000000 &&
+	    of_find_compatible_node(NULL, NULL, "fsl,ls1046a-esdhc"))
+		clock = 167000000;
+
+	/*
+	 * Limit SD clock to 125MHz for ls1012a according to its datasheet
+	 */
+	if (clock > 125000000 &&
+	    of_find_compatible_node(NULL, NULL, "fsl,ls1012a-esdhc"))
+		clock = 125000000;
+
 	/* Workaround to reduce the clock frequency for p1010 esdhc */
 	if (of_find_compatible_node(NULL, NULL, "fsl,p1010-esdhc")) {
 		if (clock > 20000000)
@@ -452,8 +455,8 @@ static void esdhc_of_set_clock(struct sdhci_host *host, unsigned int clock)
 	}
 
 	temp = sdhci_readl(host, ESDHC_SYSTEM_CONTROL);
-	temp &= ~(ESDHC_CLOCK_SDCLKEN | ESDHC_CLOCK_IPGEN | ESDHC_CLOCK_HCKEN |
-		  ESDHC_CLOCK_PEREN | ESDHC_CLOCK_MASK);
+	temp &= ~(ESDHC_CLOCK_IPGEN | ESDHC_CLOCK_HCKEN | ESDHC_CLOCK_PEREN
+		| ESDHC_CLOCK_MASK);
 	sdhci_writel(host, temp, ESDHC_SYSTEM_CONTROL);
 
 	while (host->max_clk / pre_div / 16 > clock && pre_div < 256)
@@ -473,21 +476,7 @@ static void esdhc_of_set_clock(struct sdhci_host *host, unsigned int clock)
 		| (div << ESDHC_DIVIDER_SHIFT)
 		| (pre_div << ESDHC_PREDIV_SHIFT));
 	sdhci_writel(host, temp, ESDHC_SYSTEM_CONTROL);
-
-	/* Wait max 20 ms */
-	timeout = 20;
-	while (!(sdhci_readl(host, ESDHC_PRSSTAT) & ESDHC_CLOCK_STABLE)) {
-		if (timeout == 0) {
-			pr_err("%s: Internal clock never stabilised.\n",
-				mmc_hostname(host->mmc));
-			return;
-		}
-		timeout--;
-		mdelay(1);
-	}
-
-	temp |= ESDHC_CLOCK_SDCLKEN;
-	sdhci_writel(host, temp, ESDHC_SYSTEM_CONTROL);
+	mdelay(1);
 }
 
 static void esdhc_pltfm_set_bus_width(struct sdhci_host *host, int width)
@@ -600,12 +589,6 @@ static const struct sdhci_pltfm_data sdhci_esdhc_le_pdata = {
 	.ops = &sdhci_esdhc_le_ops,
 };
 
-static struct soc_device_attribute soc_incorrect_hostver[] = {
-	{ .family = "QorIQ T4240", .revision = "1.0", },
-	{ .family = "QorIQ T4240", .revision = "2.0", },
-	{ },
-};
-
 static void esdhc_init(struct platform_device *pdev, struct sdhci_host *host)
 {
 	struct sdhci_pltfm_host *pltfm_host;
@@ -619,10 +602,6 @@ static void esdhc_init(struct platform_device *pdev, struct sdhci_host *host)
 	esdhc->vendor_ver = (host_ver & SDHCI_VENDOR_VER_MASK) >>
 			     SDHCI_VENDOR_VER_SHIFT;
 	esdhc->spec_ver = host_ver & SDHCI_SPEC_VER_MASK;
-	if (soc_device_match(soc_incorrect_hostver))
-		esdhc->quirk_incorrect_hostver = true;
-	else
-		esdhc->quirk_incorrect_hostver = false;
 }
 
 static int sdhci_esdhc_probe(struct platform_device *pdev)

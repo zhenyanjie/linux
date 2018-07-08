@@ -197,6 +197,7 @@ struct bonding {
 	struct   slave __rcu *primary_slave;
 	struct   bond_up_slave __rcu *slave_arr; /* Array of usable slaves */
 	bool     force_primary;
+	u32      nest_level;
 	s32      slave_cnt; /* never change this value outside the attach/detach wrappers */
 	int     (*recv_probe)(const struct sk_buff *, struct bonding *,
 			      struct slave *);
@@ -274,6 +275,11 @@ static inline bool bond_is_lb(const struct bonding *bond)
 {
 	return BOND_MODE(bond) == BOND_MODE_TLB ||
 	       BOND_MODE(bond) == BOND_MODE_ALB;
+}
+
+static inline bool bond_needs_speed_duplex(const struct bonding *bond)
+{
+	return BOND_MODE(bond) == BOND_MODE_8023AD || bond_is_lb(bond);
 }
 
 static inline bool bond_is_nondyn_tlb(const struct bonding *bond)
@@ -681,7 +687,7 @@ static inline int bond_get_targets_ip(__be32 *targets, __be32 ip)
 }
 
 /* exported from bond_main.c */
-extern unsigned int bond_net_id;
+extern int bond_net_id;
 extern const struct bond_parm_tbl bond_lacp_tbl[];
 extern const struct bond_parm_tbl xmit_hashtype_tbl[];
 extern const struct bond_parm_tbl arp_validate_tbl[];

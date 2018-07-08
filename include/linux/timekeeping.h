@@ -8,10 +8,6 @@
 void timekeeping_init(void);
 extern int timekeeping_suspended;
 
-/* Architecture timer tick functions: */
-extern void update_process_times(int user);
-extern void xtime_update(unsigned long ticks);
-
 /*
  * Get and set timeofday
  */
@@ -253,7 +249,6 @@ static inline u64 ktime_get_raw_ns(void)
 
 extern u64 ktime_get_mono_fast_ns(void);
 extern u64 ktime_get_raw_fast_ns(void);
-extern u64 ktime_get_boot_fast_ns(void);
 
 /*
  * Timespec interfaces utilizing the ktime based ones
@@ -297,7 +292,7 @@ extern void ktime_get_raw_and_real_ts64(struct timespec64 *ts_raw,
  * @cs_was_changed_seq:	The sequence number of clocksource change events
  */
 struct system_time_snapshot {
-	u64		cycles;
+	cycle_t		cycles;
 	ktime_t		real;
 	ktime_t		raw;
 	unsigned int	clock_was_set_seq;
@@ -325,7 +320,7 @@ struct system_device_crosststamp {
  *	timekeeping code to verify comparibility of two cycle values
  */
 struct system_counterval_t {
-	u64			cycles;
+	cycle_t			cycles;
 	struct clocksource	*cs;
 };
 

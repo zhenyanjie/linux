@@ -27,7 +27,6 @@
 #include <linux/device.h>
 #include <linux/dma-contiguous.h>
 #include <linux/decompress/generic.h>
-#include <linux/of_fdt.h>
 
 #include <asm/addrspace.h>
 #include <asm/bootinfo.h>
@@ -662,10 +661,6 @@ static int __init early_parse_mem(char *p)
 		start = memparse(p + 1, &p);
 
 	add_memory_region(start, size, BOOT_MEM_RAM);
-
-	if (start && start > PHYS_OFFSET)
-		add_memory_region(PHYS_OFFSET, start - PHYS_OFFSET,
-				BOOT_MEM_RESERVED);
 	return 0;
 }
 early_param("mem", early_parse_mem);
@@ -741,11 +736,6 @@ static void __init mips_parse_crashkernel(void)
 	if (ret != 0 || crash_size <= 0)
 		return;
 
-	if (!memory_region_available(crash_base, crash_size)) {
-		pr_warn("Invalid memory region reserved for crash kernel\n");
-		return;
-	}
-
 	crashk_res.start = crash_base;
 	crashk_res.end	 = crash_base + crash_size - 1;
 }
@@ -753,9 +743,6 @@ static void __init mips_parse_crashkernel(void)
 static void __init request_crashkernel(struct resource *res)
 {
 	int ret;
-
-	if (crashk_res.start == crashk_res.end)
-		return;
 
 	ret = request_resource(res, &crashk_res);
 	if (!ret)
@@ -841,9 +828,6 @@ static void __init arch_mem_init(char **cmdline_p)
 		pr_info("User-defined physical RAM map:\n");
 		print_memory_map();
 	}
-
-	early_init_fdt_reserve_self();
-	early_init_fdt_scan_reserved_mem();
 
 	bootmem_init();
 #ifdef CONFIG_PROC_VMCORE

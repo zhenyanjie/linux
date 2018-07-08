@@ -32,6 +32,7 @@
 #include <linux/linkage.h>
 #include <asm/inst.h>
 #include <asm/frame.h>
+#include <asm/nospec-branch.h>
 
 /*
  * The following macros are used to move an (un)aligned 16 byte value to/from
@@ -46,48 +47,27 @@
 
 #ifdef __x86_64__
 
-# constants in mergeable sections, linker can reorder and merge
-.section	.rodata.cst16.gf128mul_x_ble_mask, "aM", @progbits, 16
+.data
 .align 16
 .Lgf128mul_x_ble_mask:
 	.octa 0x00000000000000010000000000000087
-.section	.rodata.cst16.POLY, "aM", @progbits, 16
-.align 16
 POLY:   .octa 0xC2000000000000000000000000000001
-.section	.rodata.cst16.TWOONE, "aM", @progbits, 16
-.align 16
 TWOONE: .octa 0x00000001000000000000000000000001
-
-.section	.rodata.cst16.SHUF_MASK, "aM", @progbits, 16
-.align 16
-SHUF_MASK:  .octa 0x000102030405060708090A0B0C0D0E0F
-.section	.rodata.cst16.MASK1, "aM", @progbits, 16
-.align 16
-MASK1:      .octa 0x0000000000000000ffffffffffffffff
-.section	.rodata.cst16.MASK2, "aM", @progbits, 16
-.align 16
-MASK2:      .octa 0xffffffffffffffff0000000000000000
-.section	.rodata.cst16.ONE, "aM", @progbits, 16
-.align 16
-ONE:        .octa 0x00000000000000000000000000000001
-.section	.rodata.cst16.F_MIN_MASK, "aM", @progbits, 16
-.align 16
-F_MIN_MASK: .octa 0xf1f2f3f4f5f6f7f8f9fafbfcfdfeff0
-.section	.rodata.cst16.dec, "aM", @progbits, 16
-.align 16
-dec:        .octa 0x1
-.section	.rodata.cst16.enc, "aM", @progbits, 16
-.align 16
-enc:        .octa 0x2
 
 # order of these constants should not change.
 # more specifically, ALL_F should follow SHIFT_MASK,
-# and zero should follow ALL_F
-.section	.rodata, "a", @progbits
-.align 16
+# and ZERO should follow ALL_F
+
+SHUF_MASK:  .octa 0x000102030405060708090A0B0C0D0E0F
+MASK1:      .octa 0x0000000000000000ffffffffffffffff
+MASK2:      .octa 0xffffffffffffffff0000000000000000
 SHIFT_MASK: .octa 0x0f0e0d0c0b0a09080706050403020100
 ALL_F:      .octa 0xffffffffffffffffffffffffffffffff
-            .octa 0x00000000000000000000000000000000
+ZERO:       .octa 0x00000000000000000000000000000000
+ONE:        .octa 0x00000000000000000000000000000001
+F_MIN_MASK: .octa 0xf1f2f3f4f5f6f7f8f9fafbfcfdfeff0
+dec:        .octa 0x1
+enc:        .octa 0x2
 
 
 .text
@@ -2755,7 +2735,7 @@ ENTRY(aesni_xts_crypt8)
 	pxor INC, STATE4
 	movdqu IV, 0x30(OUTP)
 
-	call *%r11
+	CALL_NOSPEC %r11
 
 	movdqu 0x00(OUTP), INC
 	pxor INC, STATE1
@@ -2800,7 +2780,7 @@ ENTRY(aesni_xts_crypt8)
 	_aesni_gf128mul_x_ble()
 	movups IV, (IVP)
 
-	call *%r11
+	CALL_NOSPEC %r11
 
 	movdqu 0x40(OUTP), INC
 	pxor INC, STATE1

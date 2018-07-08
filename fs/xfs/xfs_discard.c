@@ -50,18 +50,18 @@ xfs_trim_extents(
 
 	pag = xfs_perag_get(mp, agno);
 
+	/*
+	 * Force out the log.  This means any transactions that might have freed
+	 * space before we take the AGF buffer lock are now on disk, and the
+	 * volatile disk cache is flushed.
+	 */
+	xfs_log_force(mp, XFS_LOG_SYNC);
+
 	error = xfs_alloc_read_agf(mp, NULL, agno, 0, &agbp);
 	if (error || !agbp)
 		goto out_put_perag;
 
 	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, agno, XFS_BTNUM_CNT);
-
-	/*
-	 * Force out the log.  This means any transactions that might have freed
-	 * space before we took the AGF buffer lock are now on disk, and the
-	 * volatile disk cache is flushed.
-	 */
-	xfs_log_force(mp, XFS_LOG_SYNC);
 
 	/*
 	 * Look up the longest btree in the AGF and start with it.
@@ -206,5 +206,34 @@ xfs_ioc_trim(
 	range.len = XFS_FSB_TO_B(mp, blocks_trimmed);
 	if (copy_to_user(urange, &range, sizeof(range)))
 		return -EFAULT;
+	return 0;
+}
+
+int
+xfs_discard_extents(
+	struct xfs_mount	*mp,
+	struct list_head	*list)
+{
+	struct xfs_extent_busy	*busyp;
+	int			error = 0;
+
+	list_for_each_entry(busyp, list, list) {
+		trace_xfs_discard_extent(mp, busyp->agno, busyp->bno,
+					 busyp->length);
+
+		error = blkdev_issue_discard(mp->m_ddev_targp->bt_bdev,
+				XFS_AGB_TO_DADDR(mp, busyp->agno, busyp->bno),
+				XFS_FSB_TO_BB(mp, busyp->length),
+				GFP_NOFS, 0);
+		if (error && error != -EOPNOTSUPP) {
+			xfs_info(mp,
+	 "discard failed for extent [0x%llx,%u], error %d",
+				 (unsigned long long)busyp->bno,
+				 busyp->length,
+				 error);
+			return error;
+		}
+	}
+
 	return 0;
 }

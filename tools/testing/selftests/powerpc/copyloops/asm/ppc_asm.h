@@ -25,8 +25,6 @@
 
 #define PPC_MTOCRF(A, B)	mtocrf A, B
 
-#define EX_TABLE(x, y)
-
 FUNC_START(enter_vmx_usercopy)
 	li	r3,1
 	blr

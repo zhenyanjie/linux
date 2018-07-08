@@ -8,7 +8,6 @@
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/vfs.h>
-#include <linux/cred.h>
 #include <linux/parser.h>
 #include <linux/buffer_head.h>
 #include <linux/vmalloc.h>

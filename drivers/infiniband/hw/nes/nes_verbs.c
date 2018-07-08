@@ -475,10 +475,20 @@ static int nes_query_port(struct ib_device *ibdev, u8 port, struct ib_port_attr 
 	struct nes_vnic *nesvnic = to_nesvnic(ibdev);
 	struct net_device *netdev = nesvnic->netdev;
 
-	/* props being zeroed by the caller, avoid zeroing it here */
+	memset(props, 0, sizeof(*props));
 
 	props->max_mtu = IB_MTU_4096;
-	props->active_mtu = ib_mtu_int_to_enum(netdev->mtu);
+
+	if (netdev->mtu  >= 4096)
+		props->active_mtu = IB_MTU_4096;
+	else if (netdev->mtu  >= 2048)
+		props->active_mtu = IB_MTU_2048;
+	else if (netdev->mtu  >= 1024)
+		props->active_mtu = IB_MTU_1024;
+	else if (netdev->mtu  >= 512)
+		props->active_mtu = IB_MTU_512;
+	else
+		props->active_mtu = IB_MTU_256;
 
 	props->lid = 1;
 	props->lmc = 0;
@@ -761,8 +771,7 @@ static int nes_dealloc_pd(struct ib_pd *ibpd)
 /**
  * nes_create_ah
  */
-static struct ib_ah *nes_create_ah(struct ib_pd *pd, struct ib_ah_attr *ah_attr,
-				   struct ib_udata *udata)
+static struct ib_ah *nes_create_ah(struct ib_pd *pd, struct ib_ah_attr *ah_attr)
 {
 	return ERR_PTR(-ENOSYS);
 }
@@ -1066,6 +1075,7 @@ static struct ib_qp *nes_create_qp(struct ib_pd *ibpd,
 			mem = kzalloc(sizeof(*nesqp)+NES_SW_CONTEXT_ALIGN-1, GFP_KERNEL);
 			if (!mem) {
 				nes_free_resource(nesadapter, nesadapter->allocated_qps, qp_num);
+				nes_debug(NES_DBG_QP, "Unable to allocate QP\n");
 				return ERR_PTR(-ENOMEM);
 			}
 			u64nesqp = (unsigned long)mem;
@@ -1465,6 +1475,7 @@ static struct ib_cq *nes_create_cq(struct ib_device *ibdev,
 	nescq = kzalloc(sizeof(struct nes_cq), GFP_KERNEL);
 	if (!nescq) {
 		nes_free_resource(nesadapter, nesadapter->allocated_cqs, cq_num);
+		nes_debug(NES_DBG_CQ, "Unable to allocate nes_cq struct\n");
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -2397,6 +2408,7 @@ static struct ib_mr *nes_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 			}
 			nespbl = kzalloc(sizeof(*nespbl), GFP_KERNEL);
 			if (!nespbl) {
+				nes_debug(NES_DBG_MR, "Unable to allocate PBL\n");
 				ib_umem_release(region);
 				return ERR_PTR(-ENOMEM);
 			}
@@ -2404,6 +2416,7 @@ static struct ib_mr *nes_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 			if (!nesmr) {
 				ib_umem_release(region);
 				kfree(nespbl);
+				nes_debug(NES_DBG_MR, "Unable to allocate nesmr\n");
 				return ERR_PTR(-ENOMEM);
 			}
 			nesmr->region = region;
@@ -3660,14 +3673,13 @@ static int nes_port_immutable(struct ib_device *ibdev, u8 port_num,
 	struct ib_port_attr attr;
 	int err;
 
-	immutable->core_cap_flags = RDMA_CORE_PORT_IWARP;
-
 	err = nes_query_port(ibdev, port_num, &attr);
 	if (err)
 		return err;
 
 	immutable->pkey_tbl_len = attr.pkey_tbl_len;
 	immutable->gid_tbl_len = attr.gid_tbl_len;
+	immutable->core_cap_flags = RDMA_CORE_PORT_IWARP;
 
 	return 0;
 }
@@ -3731,6 +3743,7 @@ struct nes_ib_device *nes_init_ofa_device(struct net_device *netdev)
 
 	nesibdev->ibdev.phys_port_cnt = 1;
 	nesibdev->ibdev.num_comp_vectors = 1;
+	nesibdev->ibdev.dma_device = &nesdev->pcidev->dev;
 	nesibdev->ibdev.dev.parent = &nesdev->pcidev->dev;
 	nesibdev->ibdev.query_device = nes_query_device;
 	nesibdev->ibdev.query_port = nes_query_port;

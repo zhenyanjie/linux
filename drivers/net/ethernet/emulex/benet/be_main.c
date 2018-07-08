@@ -647,8 +647,8 @@ void be_parse_stats(struct be_adapter *adapter)
 	}
 }
 
-static void be_get_stats64(struct net_device *netdev,
-			   struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *be_get_stats64(struct net_device *netdev,
+						struct rtnl_link_stats64 *stats)
 {
 	struct be_adapter *adapter = netdev_priv(netdev);
 	struct be_drv_stats *drvs = &adapter->drv_stats;
@@ -712,6 +712,7 @@ static void be_get_stats64(struct net_device *netdev,
 	stats->rx_fifo_errors = drvs->rxpp_fifo_overflow_drop +
 				drvs->rx_input_fifo_overflow_drop +
 				drvs->rx_drops_no_pbuf;
+	return stats;
 }
 
 void be_link_status_update(struct be_adapter *adapter, u8 link_status)
@@ -1411,6 +1412,23 @@ drop:
 		be_xmit_flush(adapter, txo);
 
 	return NETDEV_TX_OK;
+}
+
+static int be_change_mtu(struct net_device *netdev, int new_mtu)
+{
+	struct be_adapter *adapter = netdev_priv(netdev);
+	struct device *dev = &adapter->pdev->dev;
+
+	if (new_mtu < BE_MIN_MTU || new_mtu > BE_MAX_MTU) {
+		dev_info(dev, "MTU must be between %d and %d bytes\n",
+			 BE_MIN_MTU, BE_MAX_MTU);
+		return -EINVAL;
+	}
+
+	dev_info(dev, "MTU changed from %d to %d bytes\n",
+		 netdev->mtu, new_mtu);
+	netdev->mtu = new_mtu;
+	return 0;
 }
 
 static inline bool be_in_all_promisc(struct be_adapter *adapter)
@@ -3063,7 +3081,7 @@ static inline bool do_gro(struct be_rx_compl_info *rxcp)
 }
 
 static int be_process_rx(struct be_rx_obj *rxo, struct napi_struct *napi,
-			 int budget)
+			 int budget, int polling)
 {
 	struct be_adapter *adapter = rxo->adapter;
 	struct be_queue_info *rx_cq = &rxo->cq;
@@ -3095,7 +3113,8 @@ static int be_process_rx(struct be_rx_obj *rxo, struct napi_struct *napi,
 			goto loop_continue;
 		}
 
-		if (do_gro(rxcp))
+		/* Don't do gro when we're busy_polling */
+		if (do_gro(rxcp) && polling != BUSY_POLLING)
 			be_rx_compl_process_gro(rxo, napi, rxcp);
 		else
 			be_rx_compl_process(rxo, napi, rxcp);
@@ -3193,6 +3212,106 @@ static void be_process_tx(struct be_adapter *adapter, struct be_tx_obj *txo,
 	}
 }
 
+#ifdef CONFIG_NET_RX_BUSY_POLL
+static inline bool be_lock_napi(struct be_eq_obj *eqo)
+{
+	bool status = true;
+
+	spin_lock(&eqo->lock); /* BH is already disabled */
+	if (eqo->state & BE_EQ_LOCKED) {
+		WARN_ON(eqo->state & BE_EQ_NAPI);
+		eqo->state |= BE_EQ_NAPI_YIELD;
+		status = false;
+	} else {
+		eqo->state = BE_EQ_NAPI;
+	}
+	spin_unlock(&eqo->lock);
+	return status;
+}
+
+static inline void be_unlock_napi(struct be_eq_obj *eqo)
+{
+	spin_lock(&eqo->lock); /* BH is already disabled */
+
+	WARN_ON(eqo->state & (BE_EQ_POLL | BE_EQ_NAPI_YIELD));
+	eqo->state = BE_EQ_IDLE;
+
+	spin_unlock(&eqo->lock);
+}
+
+static inline bool be_lock_busy_poll(struct be_eq_obj *eqo)
+{
+	bool status = true;
+
+	spin_lock_bh(&eqo->lock);
+	if (eqo->state & BE_EQ_LOCKED) {
+		eqo->state |= BE_EQ_POLL_YIELD;
+		status = false;
+	} else {
+		eqo->state |= BE_EQ_POLL;
+	}
+	spin_unlock_bh(&eqo->lock);
+	return status;
+}
+
+static inline void be_unlock_busy_poll(struct be_eq_obj *eqo)
+{
+	spin_lock_bh(&eqo->lock);
+
+	WARN_ON(eqo->state & (BE_EQ_NAPI));
+	eqo->state = BE_EQ_IDLE;
+
+	spin_unlock_bh(&eqo->lock);
+}
+
+static inline void be_enable_busy_poll(struct be_eq_obj *eqo)
+{
+	spin_lock_init(&eqo->lock);
+	eqo->state = BE_EQ_IDLE;
+}
+
+static inline void be_disable_busy_poll(struct be_eq_obj *eqo)
+{
+	local_bh_disable();
+
+	/* It's enough to just acquire napi lock on the eqo to stop
+	 * be_busy_poll() from processing any queueus.
+	 */
+	while (!be_lock_napi(eqo))
+		mdelay(1);
+
+	local_bh_enable();
+}
+
+#else /* CONFIG_NET_RX_BUSY_POLL */
+
+static inline bool be_lock_napi(struct be_eq_obj *eqo)
+{
+	return true;
+}
+
+static inline void be_unlock_napi(struct be_eq_obj *eqo)
+{
+}
+
+static inline bool be_lock_busy_poll(struct be_eq_obj *eqo)
+{
+	return false;
+}
+
+static inline void be_unlock_busy_poll(struct be_eq_obj *eqo)
+{
+}
+
+static inline void be_enable_busy_poll(struct be_eq_obj *eqo)
+{
+}
+
+static inline void be_disable_busy_poll(struct be_eq_obj *eqo)
+{
+}
+#endif /* CONFIG_NET_RX_BUSY_POLL */
+
 int be_poll(struct napi_struct *napi, int budget)
 {
 	struct be_eq_obj *eqo = container_of(napi, struct be_eq_obj, napi);
@@ -3207,20 +3326,25 @@ int be_poll(struct napi_struct *napi, int budget)
 	for_all_tx_queues_on_eq(adapter, eqo, txo, i)
 		be_process_tx(adapter, txo, i);
 
-	/* This loop will iterate twice for EQ0 in which
-	 * completions of the last RXQ (default one) are also processed
-	 * For other EQs the loop iterates only once
-	 */
-	for_all_rx_queues_on_eq(adapter, eqo, rxo, i) {
-		work = be_process_rx(rxo, napi, budget);
-		max_work = max(work, max_work);
+	if (be_lock_napi(eqo)) {
+		/* This loop will iterate twice for EQ0 in which
+		 * completions of the last RXQ (default one) are also processed
+		 * For other EQs the loop iterates only once
+		 */
+		for_all_rx_queues_on_eq(adapter, eqo, rxo, i) {
+			work = be_process_rx(rxo, napi, budget, NAPI_POLLING);
+			max_work = max(work, max_work);
+		}
+		be_unlock_napi(eqo);
+	} else {
+		max_work = budget;
 	}
 
 	if (is_mcc_eqo(eqo))
 		be_process_mcc(adapter);
 
 	if (max_work < budget) {
-		napi_complete_done(napi, max_work);
+		napi_complete(napi);
 
 		/* Skyhawk EQ_DB has a provision to set the rearm to interrupt
 		 * delay via a delay multiplier encoding value
@@ -3236,6 +3360,28 @@ int be_poll(struct napi_struct *napi, int budget)
 	}
 	return max_work;
 }
+
+#ifdef CONFIG_NET_RX_BUSY_POLL
+static int be_busy_poll(struct napi_struct *napi)
+{
+	struct be_eq_obj *eqo = container_of(napi, struct be_eq_obj, napi);
+	struct be_adapter *adapter = eqo->adapter;
+	struct be_rx_obj *rxo;
+	int i, work = 0;
+
+	if (!be_lock_busy_poll(eqo))
+		return LL_FLUSH_BUSY;
+
+	for_all_rx_queues_on_eq(adapter, eqo, rxo, i) {
+		work = be_process_rx(rxo, napi, 4, BUSY_POLLING);
+		if (work)
+			break;
+	}
+
+	be_unlock_busy_poll(eqo);
+	return work;
+}
+#endif
 
 void be_detect_error(struct be_adapter *adapter)
 {
@@ -3541,6 +3687,7 @@ static int be_close(struct net_device *netdev)
 	if (adapter->flags & BE_FLAGS_NAPI_ENABLED) {
 		for_all_evt_queues(adapter, eqo, i) {
 			napi_disable(&eqo->napi);
+			be_disable_busy_poll(eqo);
 		}
 		adapter->flags &= ~BE_FLAGS_NAPI_ENABLED;
 	}
@@ -3710,6 +3857,7 @@ static int be_open(struct net_device *netdev)
 
 	for_all_evt_queues(adapter, eqo, i) {
 		napi_enable(&eqo->napi);
+		be_enable_busy_poll(eqo);
 		be_eq_notify(adapter, eqo->q.id, true, true, 0, 0);
 	}
 	adapter->flags |= BE_FLAGS_NAPI_ENABLED;
@@ -4585,6 +4733,15 @@ int be_update_queues(struct be_adapter *adapter)
 
 	be_schedule_worker(adapter);
 
+	/*
+	 * The IF was destroyed and re-created. We need to clear
+	 * all promiscuous flags valid for the destroyed IF.
+	 * Without this promisc mode is not restored during
+	 * be_open() because the driver thinks that it is
+	 * already enabled in HW.
+	 */
+	adapter->if_flags &= ~BE_IF_FLAGS_ALL_PROMISCUOUS;
+
 	if (netif_running(netdev))
 		status = be_open(netdev);
 
@@ -5102,6 +5259,7 @@ static const struct net_device_ops be_netdev_ops = {
 	.ndo_start_xmit		= be_xmit,
 	.ndo_set_rx_mode	= be_set_rx_mode,
 	.ndo_set_mac_address	= be_mac_addr_set,
+	.ndo_change_mtu		= be_change_mtu,
 	.ndo_get_stats64	= be_get_stats64,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_vlan_rx_add_vid	= be_vlan_add_vid,
@@ -5117,6 +5275,9 @@ static const struct net_device_ops be_netdev_ops = {
 #endif
 	.ndo_bridge_setlink	= be_ndo_bridge_setlink,
 	.ndo_bridge_getlink	= be_ndo_bridge_getlink,
+#ifdef CONFIG_NET_RX_BUSY_POLL
+	.ndo_busy_poll		= be_busy_poll,
+#endif
 	.ndo_udp_tunnel_add	= be_add_vxlan_port,
 	.ndo_udp_tunnel_del	= be_del_vxlan_port,
 	.ndo_features_check	= be_features_check,
@@ -5148,10 +5309,6 @@ static void be_netdev_init(struct net_device *netdev)
 	netdev->netdev_ops = &be_netdev_ops;
 
 	netdev->ethtool_ops = &be_ethtool_ops;
-
-	/* MTU range: 256 - 9000 */
-	netdev->min_mtu = BE_MIN_MTU;
-	netdev->max_mtu = BE_MAX_MTU;
 }
 
 static void be_cleanup(struct be_adapter *adapter)

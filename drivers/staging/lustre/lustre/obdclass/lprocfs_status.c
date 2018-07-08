@@ -100,13 +100,9 @@ static const char * const obd_connect_names[] = {
 	"lfsck",
 	"unknown",
 	"unlink_close",
-	"multi_mod_rpcs",
+	"unknown",
 	"dir_stripe",
-	"subtree",
-	"lock_ahead",
-	"bulk_mbits",
-	"compact_obdo",
-	"second_flags",
+	"unknown",
 	NULL
 };
 
@@ -131,7 +127,7 @@ EXPORT_SYMBOL(obd_connect_flags2str);
 static void obd_connect_data_seqprint(struct seq_file *m,
 				      struct obd_connect_data *ocd)
 {
-	u64 flags;
+	int flags;
 
 	LASSERT(ocd);
 	flags = ocd->ocd_connect_flags;
@@ -176,9 +172,6 @@ static void obd_connect_data_seqprint(struct seq_file *m,
 	if (flags & OBD_CONNECT_MAXBYTES)
 		seq_printf(m, "       max_object_bytes: %llx\n",
 			   ocd->ocd_maxbytes);
-	if (flags & OBD_CONNECT_MULTIMODRPCS)
-		seq_printf(m, "       max_mod_rpcs: %hu\n",
-			   ocd->ocd_maxmodrpcs);
 }
 
 int lprocfs_read_frac_helper(char *buffer, unsigned long count, long val,
@@ -403,16 +396,9 @@ int lprocfs_wr_uint(struct file *file, const char __user *buffer,
 	char dummy[MAX_STRING_SIZE + 1], *end;
 	unsigned long tmp;
 
-	if (count >= sizeof(dummy))
-		return -EINVAL;
-
-	if (count == 0)
-		return 0;
-
-	if (copy_from_user(dummy, buffer, count))
+	dummy[MAX_STRING_SIZE] = '\0';
+	if (copy_from_user(dummy, buffer, MAX_STRING_SIZE))
 		return -EFAULT;
-
-	dummy[count] = '\0';
 
 	tmp = simple_strtoul(dummy, &end, 0);
 	if (dummy == end)
@@ -1289,8 +1275,7 @@ int ldebugfs_register_stats(struct dentry *parent, const char *name,
 EXPORT_SYMBOL_GPL(ldebugfs_register_stats);
 
 void lprocfs_counter_init(struct lprocfs_stats *stats, int index,
-			  unsigned int conf, const char *name,
-			  const char *units)
+			  unsigned conf, const char *name, const char *units)
 {
 	struct lprocfs_counter_header	*header;
 	struct lprocfs_counter		*percpu_cntr;

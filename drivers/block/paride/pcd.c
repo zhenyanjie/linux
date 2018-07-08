@@ -50,7 +50,7 @@
                         the slower the port i/o.  In some cases, setting
                         this to zero will speed up the device. (default -1)
                         
-            major       You may use this parameter to override the
+            major       You may use this parameter to overide the
                         default major number (46) that this driver
                         will use.  Be sure to change the device
                         name as well.
@@ -139,7 +139,7 @@ enum {D_PRT, D_PRO, D_UNI, D_MOD, D_SLV, D_DLY};
 #include <linux/spinlock.h>
 #include <linux/blkdev.h>
 #include <linux/mutex.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 static DEFINE_MUTEX(pcd_mutex);
 static DEFINE_SPINLOCK(pcd_lock);
@@ -230,6 +230,8 @@ static int pcd_block_open(struct block_device *bdev, fmode_t mode)
 	struct pcd_unit *cd = bdev->bd_disk->private_data;
 	int ret;
 
+	check_disk_change(bdev);
+
 	mutex_lock(&pcd_mutex);
 	ret = cdrom_open(&cd->info, bdev, mode);
 	mutex_unlock(&pcd_mutex);
@@ -273,7 +275,7 @@ static const struct block_device_operations pcd_bdops = {
 	.check_events	= pcd_block_check_events,
 };
 
-static const struct cdrom_device_ops pcd_dops = {
+static struct cdrom_device_ops pcd_dops = {
 	.open		= pcd_open,
 	.release	= pcd_release,
 	.drive_status	= pcd_drive_status,

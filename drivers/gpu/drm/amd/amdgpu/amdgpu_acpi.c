@@ -540,6 +540,9 @@ int amdgpu_acpi_pcie_performance_request(struct amdgpu_device *adev,
 	size_t size;
 	u32 retry = 3;
 
+	if (amdgpu_acpi_pcie_notify_device_ready(adev))
+		return -EINVAL;
+
 	/* Get the device handle */
 	handle = ACPI_HANDLE(&adev->pdev->dev);
 	if (!handle)
@@ -672,10 +675,12 @@ int amdgpu_acpi_init(struct amdgpu_device *adev)
 
 			if ((enc->devices & (ATOM_DEVICE_LCD_SUPPORT)) &&
 			    enc->enc_priv) {
-				struct amdgpu_encoder_atom_dig *dig = enc->enc_priv;
-				if (dig->bl_dev) {
-					atif->encoder_for_bl = enc;
-					break;
+				if (adev->is_atom_bios) {
+					struct amdgpu_encoder_atom_dig *dig = enc->enc_priv;
+					if (dig->bl_dev) {
+						atif->encoder_for_bl = enc;
+						break;
+					}
 				}
 			}
 		}

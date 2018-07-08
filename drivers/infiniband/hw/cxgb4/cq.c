@@ -505,15 +505,6 @@ static int poll_cq(struct t4_wq *wq, struct t4_cq *cq, struct t4_cqe *cqe,
 	}
 
 	/*
-	 * Special cqe for drain WR completions...
-	 */
-	if (CQE_OPCODE(hw_cqe) == C4IW_DRAIN_OPCODE) {
-		*cookie = CQE_DRAIN_COOKIE(hw_cqe);
-		*cqe = *hw_cqe;
-		goto skip_cqe;
-	}
-
-	/*
 	 * Gotta tweak READ completions:
 	 *	1) the cqe doesn't contain the sq_wptr from the wr.
 	 *	2) opcode not reflected from the wr.
@@ -584,10 +575,10 @@ static int poll_cq(struct t4_wq *wq, struct t4_cq *cq, struct t4_cqe *cqe,
 			ret = -EAGAIN;
 			goto skip_cqe;
 		}
-		if (unlikely((CQE_WRID_MSN(hw_cqe) != (wq->rq.msn)))) {
+		if (unlikely(!CQE_STATUS(hw_cqe) &&
+			     CQE_WRID_MSN(hw_cqe) != wq->rq.msn)) {
 			t4_set_wq_in_error(wq);
-			hw_cqe->header |= htonl(CQE_STATUS_V(T4_ERR_MSN));
-			goto proc_cqe;
+			hw_cqe->header |= cpu_to_be32(CQE_STATUS_V(T4_ERR_MSN));
 		}
 		goto proc_cqe;
 	}
@@ -762,9 +753,6 @@ static int c4iw_poll_cq_one(struct c4iw_cq *chp, struct ib_wc *wc)
 				c4iw_invalidate_mr(qhp->rhp,
 						   CQE_WRID_FR_STAG(&cqe));
 			break;
-		case C4IW_DRAIN_OPCODE:
-			wc->opcode = IB_WC_SEND;
-			break;
 		default:
 			printk(KERN_ERR MOD "Unexpected opcode %d "
 			       "in the CQE received for QPID=0x%0x\n",
@@ -829,8 +817,15 @@ static int c4iw_poll_cq_one(struct c4iw_cq *chp, struct ib_wc *wc)
 		}
 	}
 out:
-	if (wq)
+	if (wq) {
+		if (unlikely(qhp->attr.state != C4IW_QP_STATE_RTS)) {
+			if (t4_sq_empty(wq))
+				complete(&qhp->sq_drained);
+			if (t4_rq_empty(wq))
+				complete(&qhp->rq_drained);
+		}
 		spin_unlock(&qhp->lock);
+	}
 	return ret;
 }
 

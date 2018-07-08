@@ -41,7 +41,7 @@
 #include <linux/atomic.h>
 #include <asm/byteorder.h>
 #include <asm/current.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/ioctls.h>
 #include <linux/stddef.h>
 #include <linux/slab.h>
@@ -89,10 +89,9 @@ struct raw_frag_vec {
 	int hlen;
 };
 
-struct raw_hashinfo raw_v4_hashinfo = {
+static struct raw_hashinfo raw_v4_hashinfo = {
 	.lock = __RW_LOCK_UNLOCKED(raw_v4_hashinfo.lock),
 };
-EXPORT_SYMBOL_GPL(raw_v4_hashinfo);
 
 int raw_hash_sk(struct sock *sk)
 {
@@ -121,7 +120,7 @@ void raw_unhash_sk(struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(raw_unhash_sk);
 
-struct sock *__raw_v4_lookup(struct net *net, struct sock *sk,
+static struct sock *__raw_v4_lookup(struct net *net, struct sock *sk,
 		unsigned short num, __be32 raddr, __be32 laddr, int dif)
 {
 	sk_for_each_from(sk) {
@@ -137,7 +136,6 @@ struct sock *__raw_v4_lookup(struct net *net, struct sock *sk,
 found:
 	return sk;
 }
-EXPORT_SYMBOL_GPL(__raw_v4_lookup);
 
 /*
  *	0 - deliver
@@ -386,9 +384,6 @@ static int raw_send_hdrinc(struct sock *sk, struct flowi4 *fl4,
 
 	sock_tx_timestamp(sk, sockc->tsflags, &skb_shinfo(skb)->tx_flags);
 
-	if (flags & MSG_CONFIRM)
-		skb_set_dst_pending_confirm(skb, 1);
-
 	skb->transport_header = skb->network_header;
 	err = -EFAULT;
 	if (memcpy_from_msg(iph, msg, length))
@@ -507,11 +502,16 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	int err;
 	struct ip_options_data opt_copy;
 	struct raw_frag_vec rfv;
+	int hdrincl;
 
 	err = -EMSGSIZE;
 	if (len > 0xFFFF)
 		goto out;
 
+	/* hdrincl should be READ_ONCE(inet->hdrincl)
+	 * but READ_ONCE() doesn't work with bit fields
+	 */
+	hdrincl = inet->hdrincl;
 	/*
 	 *	Check the flags.
 	 */
@@ -587,7 +587,7 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		/* Linux does not mangle headers on raw sockets,
 		 * so that IP options + IP_HDRINCL is non-sense.
 		 */
-		if (inet->hdrincl)
+		if (hdrincl)
 			goto done;
 		if (ipc.opt->opt.srr) {
 			if (!daddr)
@@ -609,12 +609,12 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 
 	flowi4_init_output(&fl4, ipc.oif, sk->sk_mark, tos,
 			   RT_SCOPE_UNIVERSE,
-			   inet->hdrincl ? IPPROTO_RAW : sk->sk_protocol,
+			   hdrincl ? IPPROTO_RAW : sk->sk_protocol,
 			   inet_sk_flowi_flags(sk) |
-			    (inet->hdrincl ? FLOWI_FLAG_KNOWN_NH : 0),
-			   daddr, saddr, 0, 0, sk->sk_uid);
+			    (hdrincl ? FLOWI_FLAG_KNOWN_NH : 0),
+			   daddr, saddr, 0, 0);
 
-	if (!inet->hdrincl) {
+	if (!hdrincl) {
 		rfv.msg = msg;
 		rfv.hlen = 0;
 
@@ -639,7 +639,7 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		goto do_confirm;
 back_from_confirm:
 
-	if (inet->hdrincl)
+	if (hdrincl)
 		err = raw_send_hdrinc(sk, &fl4, msg, len,
 				      &rt, msg->msg_flags, &ipc.sockc);
 
@@ -672,8 +672,7 @@ out:
 	return len;
 
 do_confirm:
-	if (msg->msg_flags & MSG_PROBE)
-		dst_confirm_neigh(&rt->dst, &fl4.daddr);
+	dst_confirm(&rt->dst);
 	if (!(msg->msg_flags & MSG_PROBE) || len)
 		goto back_from_confirm;
 	err = 0;
@@ -685,9 +684,7 @@ static void raw_close(struct sock *sk, long timeout)
 	/*
 	 * Raw sockets may have direct kernel references. Kill them.
 	 */
-	rtnl_lock();
 	ip_ra_control(sk, 0, NULL);
-	rtnl_unlock();
 
 	sk_common_release(sk);
 }
@@ -704,20 +701,12 @@ static int raw_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct sockaddr_in *addr = (struct sockaddr_in *) uaddr;
-	u32 tb_id = RT_TABLE_LOCAL;
 	int ret = -EINVAL;
 	int chk_addr_ret;
 
 	if (sk->sk_state != TCP_CLOSE || addr_len < sizeof(struct sockaddr_in))
 		goto out;
-
-	if (sk->sk_bound_dev_if)
-		tb_id = l3mdev_fib_table_by_index(sock_net(sk),
-						 sk->sk_bound_dev_if) ? : tb_id;
-
-	chk_addr_ret = inet_addr_type_table(sock_net(sk), addr->sin_addr.s_addr,
-					    tb_id);
-
+	chk_addr_ret = inet_addr_type(sock_net(sk), addr->sin_addr.s_addr);
 	ret = -EADDRNOTAVAIL;
 	if (addr->sin_addr.s_addr && chk_addr_ret != RTN_LOCAL &&
 	    chk_addr_ret != RTN_MULTICAST && chk_addr_ret != RTN_BROADCAST)
@@ -931,20 +920,6 @@ static int compat_raw_ioctl(struct sock *sk, unsigned int cmd, unsigned long arg
 }
 #endif
 
-int raw_abort(struct sock *sk, int err)
-{
-	lock_sock(sk);
-
-	sk->sk_err = err;
-	sk->sk_error_report(sk);
-	__udp_disconnect(sk, 0);
-
-	release_sock(sk);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(raw_abort);
-
 struct proto raw_prot = {
 	.name		   = "RAW",
 	.owner		   = THIS_MODULE,
@@ -970,7 +945,6 @@ struct proto raw_prot = {
 	.compat_getsockopt = compat_raw_getsockopt,
 	.compat_ioctl	   = compat_raw_ioctl,
 #endif
-	.diag_destroy	   = raw_abort,
 };
 
 #ifdef CONFIG_PROC_FS

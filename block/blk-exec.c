@@ -9,7 +9,11 @@
 #include <linux/sched/sysctl.h>
 
 #include "blk.h"
-#include "blk-mq-sched.h"
+
+/*
+ * for max sense size
+ */
+#include <scsi/scsi_cmnd.h>
 
 /**
  * blk_end_sync_rq - executes a completion event on a request
@@ -51,7 +55,7 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	int where = at_head ? ELEVATOR_INSERT_FRONT : ELEVATOR_INSERT_BACK;
 
 	WARN_ON(irqs_disabled());
-	WARN_ON(!blk_rq_is_passthrough(rq));
+	WARN_ON(rq->cmd_type == REQ_TYPE_FS);
 
 	rq->rq_disk = bd_disk;
 	rq->end_io = done;
@@ -61,14 +65,14 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	 * be reused after dying flag is set
 	 */
 	if (q->mq_ops) {
-		blk_mq_sched_insert_request(rq, at_head, true, false, false);
+		blk_mq_insert_request(rq, at_head, true, false);
 		return;
 	}
 
 	spin_lock_irq(q->queue_lock);
 
 	if (unlikely(blk_queue_dying(q))) {
-		rq->rq_flags |= RQF_QUIET;
+		rq->cmd_flags |= REQ_QUIET; 
 		rq->errors = -ENXIO;
 		__blk_end_request_all(rq, rq->errors);
 		spin_unlock_irq(q->queue_lock);
@@ -96,8 +100,15 @@ int blk_execute_rq(struct request_queue *q, struct gendisk *bd_disk,
 		   struct request *rq, int at_head)
 {
 	DECLARE_COMPLETION_ONSTACK(wait);
+	char sense[SCSI_SENSE_BUFFERSIZE];
 	int err = 0;
 	unsigned long hang_check;
+
+	if (!rq->sense) {
+		memset(sense, 0, sizeof(sense));
+		rq->sense = sense;
+		rq->sense_len = 0;
+	}
 
 	rq->end_io_data = &wait;
 	blk_execute_rq_nowait(q, bd_disk, rq, at_head, blk_end_sync_rq);
@@ -111,6 +122,11 @@ int blk_execute_rq(struct request_queue *q, struct gendisk *bd_disk,
 
 	if (rq->errors)
 		err = -EIO;
+
+	if (rq->sense == sense)	{
+		rq->sense = NULL;
+		rq->sense_len = 0;
+	}
 
 	return err;
 }

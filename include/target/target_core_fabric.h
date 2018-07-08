@@ -1,10 +1,6 @@
 #ifndef TARGET_CORE_FABRIC_H
 #define TARGET_CORE_FABRIC_H
 
-#include <linux/configfs.h>
-#include <linux/types.h>
-#include <target/target_core_base.h>
-
 struct target_core_fabric_ops {
 	struct module *module;
 	const char *name;
@@ -47,7 +43,7 @@ struct target_core_fabric_ops {
 	u32 (*tpg_get_inst_index)(struct se_portal_group *);
 	/*
 	 * Optional to release struct se_cmd and fabric dependent allocated
-	 * I/O descriptor after command execution has finished.
+	 * I/O descriptor in transport_cmd_check_stop().
 	 *
 	 * Returning 1 will signal a descriptor has been released.
 	 * Returning 0 will signal a descriptor has not been released.

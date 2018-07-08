@@ -29,6 +29,7 @@
 #include <linux/mmzone.h>
 #include <linux/debugfs.h>
 
+#include "edac_core.h"
 #include "edac_module.h"
 
 /* register addresses */

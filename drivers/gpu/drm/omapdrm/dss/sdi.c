@@ -39,7 +39,7 @@ static struct {
 	struct regulator *vdds_sdi_reg;
 
 	struct dss_lcd_mgr_config mgr_config;
-	struct videomode vm;
+	struct omap_video_timings timings;
 	int datapairs;
 
 	struct omap_dss_device output;
@@ -131,7 +131,7 @@ static int sdi_display_enable(struct omap_dss_device *dssdev)
 {
 	struct omap_dss_device *out = &sdi.output;
 	enum omap_channel channel = dssdev->dispc_channel;
-	struct videomode *vm = &sdi.vm;
+	struct omap_video_timings *t = &sdi.timings;
 	unsigned long fck;
 	struct dispc_clock_info dispc_cinfo;
 	unsigned long pck;
@@ -151,9 +151,10 @@ static int sdi_display_enable(struct omap_dss_device *dssdev)
 		goto err_get_dispc;
 
 	/* 15.5.9.1.2 */
-	vm->flags |= DISPLAY_FLAGS_PIXDATA_POSEDGE | DISPLAY_FLAGS_SYNC_POSEDGE;
+	t->data_pclk_edge = OMAPDSS_DRIVE_SIG_RISING_EDGE;
+	t->sync_pclk_edge = OMAPDSS_DRIVE_SIG_RISING_EDGE;
 
-	r = sdi_calc_clock_div(vm->pixelclock, &fck, &dispc_cinfo);
+	r = sdi_calc_clock_div(t->pixelclock, &fck, &dispc_cinfo);
 	if (r)
 		goto err_calc_clock_div;
 
@@ -161,15 +162,15 @@ static int sdi_display_enable(struct omap_dss_device *dssdev)
 
 	pck = fck / dispc_cinfo.lck_div / dispc_cinfo.pck_div;
 
-	if (pck != vm->pixelclock) {
-		DSSWARN("Could not find exact pixel clock. Requested %lu Hz, got %lu Hz\n",
-			vm->pixelclock, pck);
+	if (pck != t->pixelclock) {
+		DSSWARN("Could not find exact pixel clock. Requested %d Hz, got %lu Hz\n",
+			t->pixelclock, pck);
 
-		vm->pixelclock = pck;
+		t->pixelclock = pck;
 	}
 
 
-	dss_mgr_set_timings(channel, vm);
+	dss_mgr_set_timings(channel, t);
 
 	r = dss_set_fck_rate(fck);
 	if (r)
@@ -228,26 +229,26 @@ static void sdi_display_disable(struct omap_dss_device *dssdev)
 }
 
 static void sdi_set_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
-	sdi.vm = *vm;
+	sdi.timings = *timings;
 }
 
 static void sdi_get_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
-	*vm = sdi.vm;
+	*timings = sdi.timings;
 }
 
 static int sdi_check_timings(struct omap_dss_device *dssdev,
-			     struct videomode *vm)
+			struct omap_video_timings *timings)
 {
 	enum omap_channel channel = dssdev->dispc_channel;
 
-	if (!dispc_mgr_timings_ok(channel, vm))
+	if (!dispc_mgr_timings_ok(channel, timings))
 		return -EINVAL;
 
-	if (vm->pixelclock == 0)
+	if (timings->pixelclock == 0)
 		return -EINVAL;
 
 	return 0;

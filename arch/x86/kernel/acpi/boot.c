@@ -35,7 +35,6 @@
 #include <linux/bootmem.h>
 #include <linux/ioport.h>
 #include <linux/pci.h>
-#include <linux/efi-bgrt.h>
 
 #include <asm/irqdomain.h>
 #include <asm/pci_x86.h>
@@ -77,7 +76,6 @@ int acpi_fix_pin2_polarity __initdata;
 static u64 acpi_lapic_addr __initdata = APIC_DEFAULT_PHYS_BASE;
 #endif
 
-#ifdef CONFIG_X86_IO_APIC
 /*
  * Locks related to IOAPIC hotplug
  * Hotplug side:
@@ -90,7 +88,6 @@ static u64 acpi_lapic_addr __initdata = APIC_DEFAULT_PHYS_BASE;
  *			->ioapic_lock
  */
 static DEFINE_MUTEX(acpi_ioapic_lock);
-#endif
 
 /* --------------------------------------------------------------------------
                               Boot-time Configuration
@@ -338,20 +335,19 @@ acpi_parse_lapic_nmi(struct acpi_subtable_header * header, const unsigned long e
 #ifdef CONFIG_X86_IO_APIC
 #define MP_ISA_BUS		0
 
+static int __init mp_register_ioapic_irq(u8 bus_irq, u8 polarity,
+						u8 trigger, u32 gsi);
+
 static void __init mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger,
 					  u32 gsi)
 {
-	int ioapic;
-	int pin;
-	struct mpc_intsrc mp_irq;
-
 	/*
-	 * Convert 'gsi' to 'ioapic.pin'.
+	 * Check bus_irq boundary.
 	 */
-	ioapic = mp_find_ioapic(gsi);
-	if (ioapic < 0)
+	if (bus_irq >= NR_IRQS_LEGACY) {
+		pr_warn("Invalid bus_irq %u for legacy override\n", bus_irq);
 		return;
-	pin = mp_find_ioapic_pin(ioapic, gsi);
+	}
 
 	/*
 	 * TBD: This check is for faulty timer entries, where the override
@@ -361,16 +357,8 @@ static void __init mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger,
 	if ((bus_irq == 0) && (trigger == 3))
 		trigger = 1;
 
-	mp_irq.type = MP_INTSRC;
-	mp_irq.irqtype = mp_INT;
-	mp_irq.irqflag = (trigger << 2) | polarity;
-	mp_irq.srcbus = MP_ISA_BUS;
-	mp_irq.srcbusirq = bus_irq;	/* IRQ */
-	mp_irq.dstapic = mpc_ioapic_id(ioapic); /* APIC ID */
-	mp_irq.dstirq = pin;	/* INTIN# */
-
-	mp_save_irq(&mp_irq);
-
+	if (mp_register_ioapic_irq(bus_irq, polarity, trigger, gsi) < 0)
+		return;
 	/*
 	 * Reset default identity mapping if gsi is also an legacy IRQ,
 	 * otherwise there will be more than one entry with the same GSI
@@ -414,6 +402,34 @@ static int mp_config_acpi_gsi(struct device *dev, u32 gsi, int trigger,
 
 	mp_save_irq(&mp_irq);
 #endif
+	return 0;
+}
+
+static int __init mp_register_ioapic_irq(u8 bus_irq, u8 polarity,
+						u8 trigger, u32 gsi)
+{
+	struct mpc_intsrc mp_irq;
+	int ioapic, pin;
+
+	/* Convert 'gsi' to 'ioapic.pin'(INTIN#) */
+	ioapic = mp_find_ioapic(gsi);
+	if (ioapic < 0) {
+		pr_warn("Failed to find ioapic for gsi : %u\n", gsi);
+		return ioapic;
+	}
+
+	pin = mp_find_ioapic_pin(ioapic, gsi);
+
+	mp_irq.type = MP_INTSRC;
+	mp_irq.irqtype = mp_INT;
+	mp_irq.irqflag = (trigger << 2) | polarity;
+	mp_irq.srcbus = MP_ISA_BUS;
+	mp_irq.srcbusirq = bus_irq;
+	mp_irq.dstapic = mpc_ioapic_id(ioapic);
+	mp_irq.dstirq = pin;
+
+	mp_save_irq(&mp_irq);
+
 	return 0;
 }
 
@@ -461,7 +477,11 @@ static void __init acpi_sci_ioapic_setup(u8 bus_irq, u16 polarity, u16 trigger, 
 	if (acpi_sci_flags & ACPI_MADT_POLARITY_MASK)
 		polarity = acpi_sci_flags & ACPI_MADT_POLARITY_MASK;
 
-	mp_override_legacy_irq(bus_irq, polarity, trigger, gsi);
+	if (bus_irq < NR_IRQS_LEGACY)
+		mp_override_legacy_irq(bus_irq, polarity, trigger, gsi);
+	else
+		mp_register_ioapic_irq(bus_irq, polarity, trigger, gsi);
+
 	acpi_penalize_sci_irq(bus_irq, trigger, polarity);
 
 	/*
@@ -721,7 +741,7 @@ static int acpi_map_cpu2node(acpi_handle handle, int cpu, int physid)
 	int nid;
 
 	nid = acpi_get_node(handle);
-	if (nid != NUMA_NO_NODE) {
+	if (nid != -1) {
 		set_apicid_to_node(physid, nid);
 		numa_set_node(cpu, nid);
 	}
@@ -729,12 +749,11 @@ static int acpi_map_cpu2node(acpi_handle handle, int cpu, int physid)
 	return 0;
 }
 
-int acpi_map_cpu(acpi_handle handle, phys_cpuid_t physid, u32 acpi_id,
-		 int *pcpu)
+int acpi_map_cpu(acpi_handle handle, phys_cpuid_t physid, int *pcpu)
 {
 	int cpu;
 
-	cpu = acpi_register_lapic(physid, acpi_id, ACPI_MADT_ENABLED);
+	cpu = acpi_register_lapic(physid, U32_MAX, ACPI_MADT_ENABLED);
 	if (cpu < 0) {
 		pr_info(PREFIX "Unable to map lapic to logical cpu number\n");
 		return cpu;
@@ -935,13 +954,6 @@ static int __init acpi_parse_fadt(struct acpi_table_header *table)
 	if (!(acpi_gbl_FADT.boot_flags & ACPI_FADT_LEGACY_DEVICES)) {
 		pr_debug("ACPI: no legacy devices present\n");
 		x86_platform.legacy.devices.pnpbios = 0;
-	}
-
-	if (acpi_gbl_FADT.header.revision >= FADT2_REVISION_ID &&
-	    !(acpi_gbl_FADT.boot_flags & ACPI_FADT_8042) &&
-	    x86_platform.legacy.i8042 != X86_LEGACY_I8042_PLATFORM_ABSENT) {
-		pr_debug("ACPI: i8042 controller is absent\n");
-		x86_platform.legacy.i8042 = X86_LEGACY_I8042_FIRMWARE_ABSENT;
 	}
 
 	if (acpi_gbl_FADT.boot_flags & ACPI_FADT_NO_CMOS_RTC) {
@@ -1564,12 +1576,6 @@ int __init early_acpi_boot_init(void)
 	return 0;
 }
 
-static int __init acpi_parse_bgrt(struct acpi_table_header *table)
-{
-	efi_bgrt_init(table);
-	return 0;
-}
-
 int __init acpi_boot_init(void)
 {
 	/* those are executed after early-quirks are executed */
@@ -1594,8 +1600,6 @@ int __init acpi_boot_init(void)
 	acpi_process_madt();
 
 	acpi_table_parse(ACPI_SIG_HPET, acpi_parse_hpet);
-	if (IS_ENABLED(CONFIG_ACPI_BGRT))
-		acpi_table_parse(ACPI_SIG_BGRT, acpi_parse_bgrt);
 
 	if (!acpi_noirq)
 		x86_init.pci.init = pci_acpi_init;

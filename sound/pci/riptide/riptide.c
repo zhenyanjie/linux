@@ -110,7 +110,7 @@
 #include <sound/opl3.h>
 #include <sound/initval.h>
 
-#if IS_REACHABLE(CONFIG_GAMEPORT)
+#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
 #define SUPPORT_JOYSTICK 1
 #endif
 

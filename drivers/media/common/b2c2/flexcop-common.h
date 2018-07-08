@@ -14,6 +14,7 @@
 
 #include "dmxdev.h"
 #include "dvb_demux.h"
+#include "dvb_filter.h"
 #include "dvb_net.h"
 #include "dvb_frontend.h"
 

@@ -42,7 +42,6 @@ static chcr_handler_func work_handlers[NUM_CPL_CMDS] = {
 static struct cxgb4_uld_info chcr_uld_info = {
 	.name = DRV_MODULE_NAME,
 	.nrxq = MAX_ULD_QSETS,
-	.ntxq = MAX_ULD_QSETS,
 	.rxq_size = 1024,
 	.add = chcr_uld_add,
 	.state_change = chcr_uld_state_change,
@@ -61,7 +60,7 @@ int assign_chcr_device(struct chcr_dev **dev)
 	 */
 	mutex_lock(&dev_mutex); /* TODO ? */
 	list_for_each_entry(u_ctx, &uld_ctx_list, entry)
-		if (u_ctx->dev) {
+		if (u_ctx && u_ctx->dev) {
 			*dev = u_ctx->dev;
 			ret = 0;
 			break;
@@ -110,12 +109,14 @@ static int cpl_fw6_pld_handler(struct chcr_dev *dev,
 	if (ack_err_status) {
 		if (CHK_MAC_ERR_BIT(ack_err_status) ||
 		    CHK_PAD_ERR_BIT(ack_err_status))
-			error_status = -EBADMSG;
+			error_status = -EINVAL;
 	}
 	/* call completion callback with failure status */
 	if (req) {
-		error_status = chcr_handle_resp(req, input, error_status);
-		req->complete(req, error_status);
+		if (!chcr_handle_resp(req, input, error_status))
+			req->complete(req, error_status);
+		else
+			return -EINVAL;
 	} else {
 		pr_err("Incorrect request address from the firmware\n");
 		return -EFAULT;
@@ -125,7 +126,7 @@ static int cpl_fw6_pld_handler(struct chcr_dev *dev,
 
 int chcr_send_wr(struct sk_buff *skb)
 {
-	return cxgb4_crypto_send(skb->dev, skb);
+	return cxgb4_ofld_send(skb->dev, skb);
 }
 
 static void *chcr_uld_add(const struct cxgb4_lld_info *lld)
@@ -151,17 +152,18 @@ int chcr_uld_rx_handler(void *handle, const __be64 *rsp,
 {
 	struct uld_ctx *u_ctx = (struct uld_ctx *)handle;
 	struct chcr_dev *dev = u_ctx->dev;
-	const struct cpl_fw6_pld *rpl = (struct cpl_fw6_pld *)rsp;
+	const struct cpl_act_establish *rpl = (struct cpl_act_establish
+					       *)rsp;
 
-	if (rpl->opcode != CPL_FW6_PLD) {
+	if (rpl->ot.opcode != CPL_FW6_PLD) {
 		pr_err("Unsupported opcode\n");
 		return 0;
 	}
 
 	if (!pgl)
-		work_handlers[rpl->opcode](dev, (unsigned char *)&rsp[1]);
+		work_handlers[rpl->ot.opcode](dev, (unsigned char *)&rsp[1]);
 	else
-		work_handlers[rpl->opcode](dev, pgl->va);
+		work_handlers[rpl->ot.opcode](dev, pgl->va);
 	return 0;
 }
 

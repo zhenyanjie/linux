@@ -32,7 +32,8 @@
 int
 xfs_break_layouts(
 	struct inode		*inode,
-	uint			*iolock)
+	uint			*iolock,
+	bool			with_imutex)
 {
 	struct xfs_inode	*ip = XFS_I(inode);
 	int			error;
@@ -41,8 +42,12 @@ xfs_break_layouts(
 
 	while ((error = break_layout(inode, false) == -EWOULDBLOCK)) {
 		xfs_iunlock(ip, *iolock);
+		if (with_imutex && (*iolock & XFS_IOLOCK_EXCL))
+			inode_unlock(inode);
 		error = break_layout(inode, true);
 		*iolock = XFS_IOLOCK_EXCL;
+		if (with_imutex)
+			inode_lock(inode);
 		xfs_ilock(ip, *iolock);
 	}
 
@@ -274,7 +279,7 @@ xfs_fs_commit_blocks(
 					(end - 1) >> PAGE_SHIFT);
 		WARN_ON_ONCE(error);
 
-		error = xfs_iomap_write_unwritten(ip, start, length);
+		error = xfs_iomap_write_unwritten(ip, start, length, false);
 		if (error)
 			goto out_drop_iolock;
 	}

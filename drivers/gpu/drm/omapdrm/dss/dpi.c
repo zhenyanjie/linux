@@ -47,7 +47,7 @@ struct dpi_data {
 
 	struct mutex lock;
 
-	struct videomode vm;
+	struct omap_video_timings timings;
 	struct dss_lcd_mgr_config mgr_config;
 	int data_lines;
 
@@ -333,31 +333,31 @@ static int dpi_set_mode(struct dpi_data *dpi)
 {
 	struct omap_dss_device *out = &dpi->output;
 	enum omap_channel channel = out->dispc_channel;
-	struct videomode *vm = &dpi->vm;
+	struct omap_video_timings *t = &dpi->timings;
 	int lck_div = 0, pck_div = 0;
 	unsigned long fck = 0;
 	unsigned long pck;
 	int r = 0;
 
 	if (dpi->pll)
-		r = dpi_set_pll_clk(dpi, channel, vm->pixelclock, &fck,
+		r = dpi_set_pll_clk(dpi, channel, t->pixelclock, &fck,
 				&lck_div, &pck_div);
 	else
-		r = dpi_set_dispc_clk(dpi, vm->pixelclock, &fck,
+		r = dpi_set_dispc_clk(dpi, t->pixelclock, &fck,
 				&lck_div, &pck_div);
 	if (r)
 		return r;
 
 	pck = fck / lck_div / pck_div;
 
-	if (pck != vm->pixelclock) {
-		DSSWARN("Could not find exact pixel clock. Requested %lu Hz, got %lu Hz\n",
-			vm->pixelclock, pck);
+	if (pck != t->pixelclock) {
+		DSSWARN("Could not find exact pixel clock. Requested %d Hz, got %lu Hz\n",
+			t->pixelclock, pck);
 
-		vm->pixelclock = pck;
+		t->pixelclock = pck;
 	}
 
-	dss_mgr_set_timings(channel, vm);
+	dss_mgr_set_timings(channel, t);
 
 	return 0;
 }
@@ -476,7 +476,7 @@ static void dpi_display_disable(struct omap_dss_device *dssdev)
 }
 
 static void dpi_set_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct dpi_data *dpi = dpi_get_data_from_dssdev(dssdev);
 
@@ -484,25 +484,25 @@ static void dpi_set_timings(struct omap_dss_device *dssdev,
 
 	mutex_lock(&dpi->lock);
 
-	dpi->vm = *vm;
+	dpi->timings = *timings;
 
 	mutex_unlock(&dpi->lock);
 }
 
 static void dpi_get_timings(struct omap_dss_device *dssdev,
-			    struct videomode *vm)
+		struct omap_video_timings *timings)
 {
 	struct dpi_data *dpi = dpi_get_data_from_dssdev(dssdev);
 
 	mutex_lock(&dpi->lock);
 
-	*vm = dpi->vm;
+	*timings = dpi->timings;
 
 	mutex_unlock(&dpi->lock);
 }
 
 static int dpi_check_timings(struct omap_dss_device *dssdev,
-			     struct videomode *vm)
+			struct omap_video_timings *timings)
 {
 	struct dpi_data *dpi = dpi_get_data_from_dssdev(dssdev);
 	enum omap_channel channel = dpi->output.dispc_channel;
@@ -512,23 +512,23 @@ static int dpi_check_timings(struct omap_dss_device *dssdev,
 	struct dpi_clk_calc_ctx ctx;
 	bool ok;
 
-	if (vm->hactive % 8 != 0)
+	if (timings->x_res % 8 != 0)
 		return -EINVAL;
 
-	if (!dispc_mgr_timings_ok(channel, vm))
+	if (!dispc_mgr_timings_ok(channel, timings))
 		return -EINVAL;
 
-	if (vm->pixelclock == 0)
+	if (timings->pixelclock == 0)
 		return -EINVAL;
 
 	if (dpi->pll) {
-		ok = dpi_pll_clk_calc(dpi, vm->pixelclock, &ctx);
+		ok = dpi_pll_clk_calc(dpi, timings->pixelclock, &ctx);
 		if (!ok)
 			return -EINVAL;
 
 		fck = ctx.pll_cinfo.clkout[ctx.clkout_idx];
 	} else {
-		ok = dpi_dss_clk_calc(vm->pixelclock, &ctx);
+		ok = dpi_dss_clk_calc(timings->pixelclock, &ctx);
 		if (!ok)
 			return -EINVAL;
 
@@ -540,7 +540,7 @@ static int dpi_check_timings(struct omap_dss_device *dssdev,
 
 	pck = fck / lck_div / pck_div;
 
-	vm->pixelclock = pck;
+	timings->pixelclock = pck;
 
 	return 0;
 }

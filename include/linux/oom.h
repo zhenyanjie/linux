@@ -2,7 +2,7 @@
 #define __INCLUDE_LINUX_OOM_H
 
 
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/nodemask.h>
 #include <uapi/linux/oom.h>

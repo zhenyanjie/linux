@@ -19,7 +19,6 @@
 #include <linux/clockchips.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/sched/clock.h>
 #include <linux/sched_clock.h>
 
 #include <clocksource/pxa.h>
@@ -221,16 +220,17 @@ CLOCKSOURCE_OF_DECLARE(pxa_timer, "marvell,pxa-timer", pxa_timer_dt_init);
 /*
  * Legacy timer init for non device-tree boards.
  */
-void __init pxa_timer_nodt_init(int irq, void __iomem *base)
+void __init pxa_timer_nodt_init(int irq, void __iomem *base,
+	unsigned long clock_tick_rate)
 {
 	struct clk *clk;
 
 	timer_base = base;
 	clk = clk_get(NULL, "OSTIMER0");
-	if (clk && !IS_ERR(clk)) {
+	if (clk && !IS_ERR(clk))
 		clk_prepare_enable(clk);
-		pxa_timer_common_init(irq, clk_get_rate(clk));
-	} else {
+	else
 		pr_crit("%s: unable to get clk\n", __func__);
-	}
+
+	pxa_timer_common_init(irq, clock_tick_rate);
 }

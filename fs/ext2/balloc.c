@@ -15,7 +15,6 @@
 #include <linux/quotaops.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
-#include <linux/cred.h>
 #include <linux/buffer_head.h>
 #include <linux/capability.h>
 

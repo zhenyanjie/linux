@@ -90,7 +90,7 @@
 #include <linux/slab.h>
 #include <linux/xattr.h>
 
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unistd.h>
 
 #include <net/compat.h>
@@ -287,7 +287,7 @@ static void init_once(void *foo)
 	inode_init_once(&ei->vfs_inode);
 }
 
-static void init_inodecache(void)
+static int init_inodecache(void)
 {
 	sock_inode_cachep = kmem_cache_create("sock_inode_cache",
 					      sizeof(struct socket_alloc),
@@ -296,7 +296,9 @@ static void init_inodecache(void)
 					       SLAB_RECLAIM_ACCOUNT |
 					       SLAB_MEM_SPREAD | SLAB_ACCOUNT),
 					      init_once);
-	BUG_ON(sock_inode_cachep == NULL);
+	if (sock_inode_cachep == NULL)
+		return -ENOMEM;
+	return 0;
 }
 
 static const struct super_operations sockfs_ops = {
@@ -531,22 +533,8 @@ static ssize_t sockfs_listxattr(struct dentry *dentry, char *buffer,
 	return used;
 }
 
-static int sockfs_setattr(struct dentry *dentry, struct iattr *iattr)
-{
-	int err = simple_setattr(dentry, iattr);
-
-	if (!err && (iattr->ia_valid & ATTR_UID)) {
-		struct socket *sock = SOCKET_I(d_inode(dentry));
-
-		sock->sk->sk_uid = iattr->ia_uid;
-	}
-
-	return err;
-}
-
 static const struct inode_operations sockfs_inode_ops = {
 	.listxattr = sockfs_listxattr,
-	.setattr = sockfs_setattr,
 };
 
 /**
@@ -652,16 +640,6 @@ int kernel_sendmsg(struct socket *sock, struct msghdr *msg,
 }
 EXPORT_SYMBOL(kernel_sendmsg);
 
-static bool skb_is_err_queue(const struct sk_buff *skb)
-{
-	/* pkt_type of skbs enqueued on the error queue are set to
-	 * PACKET_OUTGOING in skb_set_err_queue(). This is only safe to do
-	 * in recvmsg, since skbs received on a local socket will never
-	 * have a pkt_type of PACKET_OUTGOING.
-	 */
-	return skb->pkt_type == PACKET_OUTGOING;
-}
-
 /*
  * called from sock_recv_timestamp() if sock_flag(sk, SOCK_RCVTSTAMP)
  */
@@ -676,7 +654,7 @@ void __sock_recv_timestamp(struct msghdr *msg, struct sock *sk,
 
 	/* Race occurred between timestamp enabling and packet
 	   receiving.  Fill in the current time for now. */
-	if (need_software_tstamp && skb->tstamp == 0)
+	if (need_software_tstamp && skb->tstamp.tv64 == 0)
 		__net_timestamp(skb);
 
 	if (need_software_tstamp) {
@@ -701,15 +679,9 @@ void __sock_recv_timestamp(struct msghdr *msg, struct sock *sk,
 	    (sk->sk_tsflags & SOF_TIMESTAMPING_RAW_HARDWARE) &&
 	    ktime_to_timespec_cond(shhwtstamps->hwtstamp, tss.ts + 2))
 		empty = 0;
-	if (!empty) {
+	if (!empty)
 		put_cmsg(msg, SOL_SOCKET,
 			 SCM_TIMESTAMPING, sizeof(tss), &tss);
-
-		if (skb_is_err_queue(skb) && skb->len &&
-		    SKB_EXT_ERR(skb)->opt_stats)
-			put_cmsg(msg, SOL_SOCKET, SCM_TIMESTAMPING_OPT_STATS,
-				 skb->len, skb->data);
-	}
 }
 EXPORT_SYMBOL_GPL(__sock_recv_timestamp);
 
@@ -920,11 +892,6 @@ static long sock_do_ioctl(struct net *net, struct socket *sock,
  *	what to do with it - that's up to the protocol still.
  */
 
-static struct ns_common *get_net_ns(struct ns_common *ns)
-{
-	return &get_net(container_of(ns, struct net, ns))->ns;
-}
-
 static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 {
 	struct socket *sock;
@@ -992,13 +959,6 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			if (dlci_ioctl_hook)
 				err = dlci_ioctl_hook(cmd, argp);
 			mutex_unlock(&dlci_ioctl_mutex);
-			break;
-		case SIOCGSKNS:
-			err = -EPERM;
-			if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
-				break;
-
-			err = open_related_ns(&net->ns, get_net_ns);
 			break;
 		default:
 			err = sock_do_ioctl(net, sock, cmd, arg);
@@ -1517,7 +1477,7 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 	if (err)
 		goto out_fd;
 
-	err = sock->ops->accept(sock, newsock, sock->file->f_flags, false);
+	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_fd;
 
@@ -1928,7 +1888,7 @@ static int ___sys_sendmsg(struct socket *sock, struct user_msghdr __user *msg,
 	struct sockaddr_storage address;
 	struct iovec iovstack[UIO_FASTIOV], *iov = iovstack;
 	unsigned char ctl[sizeof(struct cmsghdr) + 20]
-				__aligned(sizeof(__kernel_size_t));
+	    __attribute__ ((aligned(sizeof(__kernel_size_t))));
 	/* 20 is size of ipv6_pktinfo */
 	unsigned char *ctl_buf = ctl;
 	int ctl_len;
@@ -1958,8 +1918,6 @@ static int ___sys_sendmsg(struct socket *sock, struct user_msghdr __user *msg,
 		ctl_buf = msg_sys->msg_control;
 		ctl_len = msg_sys->msg_controllen;
 	} else if (ctl_len) {
-		BUILD_BUG_ON(sizeof(struct cmsghdr) !=
-			     CMSG_ALIGN(sizeof(struct cmsghdr)));
 		if (ctl_len > sizeof(ctl)) {
 			ctl_buf = sock_kmalloc(sock->sk, ctl_len, GFP_KERNEL);
 			if (ctl_buf == NULL)
@@ -2590,6 +2548,15 @@ out_fs:
 
 core_initcall(sock_init);	/* early initcall */
 
+static int __init jit_init(void)
+{
+#ifdef CONFIG_BPF_JIT_ALWAYS_ON
+	bpf_jit_enable = 1;
+#endif
+	return 0;
+}
+pure_initcall(jit_init);
+
 #ifdef CONFIG_PROC_FS
 void socket_seq_show(struct seq_file *seq)
 {
@@ -3155,7 +3122,6 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
 	case SIOCSIFVLAN:
 	case SIOCADDDLCI:
 	case SIOCDELDLCI:
-	case SIOCGSKNS:
 		return sock_ioctl(file, cmd, arg);
 
 	case SIOCGIFFLAGS:
@@ -3250,7 +3216,7 @@ int kernel_accept(struct socket *sock, struct socket **newsock, int flags)
 	if (err < 0)
 		goto done;
 
-	err = sock->ops->accept(sock, *newsock, flags, true);
+	err = sock->ops->accept(sock, *newsock, flags);
 	if (err < 0) {
 		sock_release(*newsock);
 		*newsock = NULL;

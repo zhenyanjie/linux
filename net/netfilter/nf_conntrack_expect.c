@@ -57,7 +57,7 @@ void nf_ct_unlink_expect_report(struct nf_conntrack_expect *exp,
 	hlist_del_rcu(&exp->hnode);
 	net->ct.expect_count--;
 
-	hlist_del_rcu(&exp->lnode);
+	hlist_del(&exp->lnode);
 	master_help->expecting[exp->class]--;
 
 	nf_ct_expect_event_report(IPEXP_DESTROY, exp, portid, report);
@@ -353,7 +353,7 @@ void nf_ct_expect_put(struct nf_conntrack_expect *exp)
 }
 EXPORT_SYMBOL_GPL(nf_ct_expect_put);
 
-static void nf_ct_expect_insert(struct nf_conntrack_expect *exp)
+static int nf_ct_expect_insert(struct nf_conntrack_expect *exp)
 {
 	struct nf_conn_help *master_help = nfct_help(exp->master);
 	struct nf_conntrack_helper *helper;
@@ -363,7 +363,7 @@ static void nf_ct_expect_insert(struct nf_conntrack_expect *exp)
 	/* two references : one for hash insert, one for the timer */
 	atomic_add(2, &exp->use);
 
-	hlist_add_head_rcu(&exp->lnode, &master_help->expectations);
+	hlist_add_head(&exp->lnode, &master_help->expectations);
 	master_help->expecting[exp->class]++;
 
 	hlist_add_head_rcu(&exp->hnode, &nf_ct_expect_hash[h]);
@@ -380,6 +380,7 @@ static void nf_ct_expect_insert(struct nf_conntrack_expect *exp)
 	add_timer(&exp->timeout);
 
 	NF_CT_STAT_INC(net, expect_create);
+	return 0;
 }
 
 /* Race with expectations being used means we could have none to find; OK. */
@@ -463,11 +464,12 @@ int nf_ct_expect_related_report(struct nf_conntrack_expect *expect,
 	if (ret < 0)
 		goto out;
 
-	nf_ct_expect_insert(expect);
-
+	ret = nf_ct_expect_insert(expect);
+	if (ret < 0)
+		goto out;
 	spin_unlock_bh(&nf_conntrack_expect_lock);
 	nf_ct_expect_event_report(IPEXP_NEW, expect, portid, report);
-	return 0;
+	return ret;
 out:
 	spin_unlock_bh(&nf_conntrack_expect_lock);
 	return ret;

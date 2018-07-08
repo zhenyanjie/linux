@@ -2509,7 +2509,7 @@ static void mxt_debug_init(struct mxt_data *data)
 		dbg->t37_pages = MXT1386_COLUMNS * MXT1386_PAGES_PER_COLUMN;
 	else
 		dbg->t37_pages = DIV_ROUND_UP(data->xsize *
-					      info->matrix_ysize *
+					      data->info.matrix_ysize *
 					      sizeof(u16),
 					      sizeof(dbg->t37_buf->data));
 
@@ -3024,6 +3024,15 @@ static const struct dmi_system_id mxt_dmi_table[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "GOOGLE"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "Samus"),
+		},
+		.driver_data = samus_platform_data,
+	},
+	{
+		/* Samsung Chromebook Pro */
+		.ident = "Samsung Chromebook Pro",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Google"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Caroline"),
 		},
 		.driver_data = samus_platform_data,
 	},

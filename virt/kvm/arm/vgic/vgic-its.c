@@ -208,8 +208,8 @@ static int update_lpi_config(struct kvm *kvm, struct vgic_irq *irq,
 	u8 prop;
 	int ret;
 
-	ret = kvm_read_guest(kvm, propbase + irq->intid - GIC_LPI_OFFSET,
-			     &prop, 1);
+	ret = kvm_read_guest_lock(kvm, propbase + irq->intid - GIC_LPI_OFFSET,
+				  &prop, 1);
 
 	if (ret)
 		return ret;
@@ -322,6 +322,7 @@ static int its_sync_lpi_pending_table(struct kvm_vcpu *vcpu)
 	int ret = 0;
 	u32 *intids;
 	int nr_irqs, i;
+	u8 pendmask;
 
 	nr_irqs = vgic_copy_lpi_list(vcpu->kvm, &intids);
 	if (nr_irqs < 0)
@@ -329,7 +330,6 @@ static int its_sync_lpi_pending_table(struct kvm_vcpu *vcpu)
 
 	for (i = 0; i < nr_irqs; i++) {
 		int byte_offset, bit_nr;
-		u8 pendmask;
 
 		byte_offset = intids[i] / BITS_PER_BYTE;
 		bit_nr = intids[i] % BITS_PER_BYTE;
@@ -339,8 +339,9 @@ static int its_sync_lpi_pending_table(struct kvm_vcpu *vcpu)
 		 * this very same byte in the last iteration. Reuse that.
 		 */
 		if (byte_offset != last_byte_offset) {
-			ret = kvm_read_guest(vcpu->kvm, pendbase + byte_offset,
-					     &pendmask, 1);
+			ret = kvm_read_guest_lock(vcpu->kvm,
+						  pendbase + byte_offset,
+						  &pendmask, 1);
 			if (ret) {
 				kfree(intids);
 				return ret;
@@ -350,7 +351,7 @@ static int its_sync_lpi_pending_table(struct kvm_vcpu *vcpu)
 
 		irq = vgic_get_irq(vcpu->kvm, NULL, intids[i]);
 		spin_lock(&irq->irq_lock);
-		irq->pending_latch = pendmask & (1U << bit_nr);
+		irq->pending = pendmask & (1U << bit_nr);
 		vgic_queue_irq_unlock(vcpu->kvm, irq);
 		vgic_put_irq(vcpu->kvm, irq);
 	}
@@ -442,7 +443,7 @@ static int vgic_its_trigger_msi(struct kvm *kvm, struct vgic_its *its,
 		return -EBUSY;
 
 	spin_lock(&itte->irq->irq_lock);
-	itte->irq->pending_latch = true;
+	itte->irq->pending = true;
 	vgic_queue_irq_unlock(kvm, itte->irq);
 
 	return 0;
@@ -609,27 +610,26 @@ static bool vgic_its_check_id(struct vgic_its *its, u64 baser, int id)
 	int index;
 	u64 indirect_ptr;
 	gfn_t gfn;
-	int esz = GITS_BASER_ENTRY_SIZE(baser);
 
 	if (!(baser & GITS_BASER_INDIRECT)) {
 		phys_addr_t addr;
 
-		if (id >= (l1_tbl_size / esz))
+		if (id >= (l1_tbl_size / GITS_BASER_ENTRY_SIZE(baser)))
 			return false;
 
-		addr = BASER_ADDRESS(baser) + id * esz;
+		addr = BASER_ADDRESS(baser) + id * GITS_BASER_ENTRY_SIZE(baser);
 		gfn = addr >> PAGE_SHIFT;
 
 		return kvm_is_visible_gfn(its->dev->kvm, gfn);
 	}
 
 	/* calculate and check the index into the 1st level */
-	index = id / (SZ_64K / esz);
+	index = id / (SZ_64K / GITS_BASER_ENTRY_SIZE(baser));
 	if (index >= (l1_tbl_size / sizeof(u64)))
 		return false;
 
 	/* Each 1st level entry is represented by a 64-bit value. */
-	if (kvm_read_guest(its->dev->kvm,
+	if (kvm_read_guest_lock(its->dev->kvm,
 			   BASER_ADDRESS(baser) + index * sizeof(indirect_ptr),
 			   &indirect_ptr, sizeof(indirect_ptr)))
 		return false;
@@ -648,8 +648,8 @@ static bool vgic_its_check_id(struct vgic_its *its, u64 baser, int id)
 	indirect_ptr &= GENMASK_ULL(51, 16);
 
 	/* Find the address of the actual entry */
-	index = id % (SZ_64K / esz);
-	indirect_ptr += index * esz;
+	index = id % (SZ_64K / GITS_BASER_ENTRY_SIZE(baser));
+	indirect_ptr += index * GITS_BASER_ENTRY_SIZE(baser);
 	gfn = indirect_ptr >> PAGE_SHIFT;
 
 	return kvm_is_visible_gfn(its->dev->kvm, gfn);
@@ -665,6 +665,8 @@ static int vgic_its_alloc_collection(struct vgic_its *its,
 		return E_ITS_MAPC_COLLECTION_OOR;
 
 	collection = kzalloc(sizeof(*collection), GFP_KERNEL);
+	if (!collection)
+		return -ENOMEM;
 
 	collection->collection_id = coll_id;
 	collection->target_addr = COLLECTION_NOT_MAPPED;
@@ -890,7 +892,7 @@ static int vgic_its_cmd_handle_clear(struct kvm *kvm, struct vgic_its *its,
 	if (!itte)
 		return E_ITS_CLEAR_UNMAPPED_INTERRUPT;
 
-	itte->irq->pending_latch = false;
+	itte->irq->pending = false;
 
 	return 0;
 }
@@ -1151,8 +1153,8 @@ static void vgic_its_process_commands(struct kvm *kvm, struct vgic_its *its)
 	cbaser = CBASER_ADDRESS(its->cbaser);
 
 	while (its->cwriter != its->creadr) {
-		int ret = kvm_read_guest(kvm, cbaser + its->creadr,
-					 cmd_buf, ITS_CMD_SIZE);
+		int ret = kvm_read_guest_lock(kvm, cbaser + its->creadr,
+					      cmd_buf, ITS_CMD_SIZE);
 		/*
 		 * If kvm_read_guest() fails, this could be due to the guest
 		 * programming a bogus value in CBASER or something else going

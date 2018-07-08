@@ -17,8 +17,6 @@
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/sched/rt.h>
-#include <linux/sched/task.h>
-#include <uapi/linux/sched/types.h>
 #include <linux/task_work.h>
 
 #include "internals.h"
@@ -355,7 +353,7 @@ static int setup_affinity(struct irq_desc *desc, struct cpumask *mask)
 		return 0;
 
 	/*
-	 * Preserve the managed affinity setting and a userspace affinity
+	 * Preserve the managed affinity setting and an userspace affinity
 	 * setup, but make sure that one of the targets is online.
 	 */
 	if (irqd_affinity_is_managed(&desc->irq_data) ||
@@ -852,7 +850,7 @@ irq_thread_check_affinity(struct irq_desc *desc, struct irqaction *action)
 	 * This code is triggered unconditionally. Check the affinity
 	 * mask pointer. For CPU_MASK_OFFSTACK=n this is optimized out.
 	 */
-	if (desc->irq_common_data.affinity)
+	if (cpumask_available(desc->irq_common_data.affinity))
 		cpumask_copy(mask, desc->irq_common_data.affinity);
 	else
 		valid = false;

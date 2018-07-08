@@ -100,6 +100,7 @@ static const struct fb_videomode lynx750_ext[] = {
 	 FB_VMODE_NONINTERLACED},
 };
 
+
 /* no hardware cursor supported under version 2.6.10, kernel bug */
 static int lynxfb_ops_cursor(struct fb_info *info, struct fb_cursor *fbcursor)
 {
@@ -117,14 +118,14 @@ static int lynxfb_ops_cursor(struct fb_info *info, struct fb_cursor *fbcursor)
 		return -ENXIO;
 	}
 
-	sm750_hw_cursor_disable(cursor);
+	hw_cursor_disable(cursor);
 	if (fbcursor->set & FB_CUR_SETSIZE)
-		sm750_hw_cursor_setSize(cursor,
+		hw_cursor_setSize(cursor,
 				  fbcursor->image.width,
 				  fbcursor->image.height);
 
 	if (fbcursor->set & FB_CUR_SETPOS)
-		sm750_hw_cursor_setPos(cursor,
+		hw_cursor_setPos(cursor,
 				 fbcursor->image.dx - info->var.xoffset,
 				 fbcursor->image.dy - info->var.yoffset);
 
@@ -140,18 +141,18 @@ static int lynxfb_ops_cursor(struct fb_info *info, struct fb_cursor *fbcursor)
 		      ((info->cmap.green[fbcursor->image.bg_color] & 0xfc00) >> 5) |
 		      ((info->cmap.blue[fbcursor->image.bg_color] & 0xf800) >> 11);
 
-		sm750_hw_cursor_setColor(cursor, fg, bg);
+		hw_cursor_setColor(cursor, fg, bg);
 	}
 
 	if (fbcursor->set & (FB_CUR_SETSHAPE | FB_CUR_SETIMAGE)) {
-		sm750_hw_cursor_setData(cursor,
+		hw_cursor_setData(cursor,
 				  fbcursor->rop,
 				  fbcursor->image.data,
 				  fbcursor->mask);
 	}
 
 	if (fbcursor->enable)
-		sm750_hw_cursor_enable(cursor);
+		hw_cursor_enable(cursor);
 
 	return 0;
 }
@@ -574,11 +575,11 @@ static int lynxfb_ops_check_var(struct fb_var_screeninfo *var,
 	return hw_sm750_crtc_checkMode(crtc, var);
 }
 
-static int lynxfb_ops_setcolreg(unsigned int regno,
-				unsigned int red,
-				unsigned int green,
-				unsigned int blue,
-				unsigned int transp,
+static int lynxfb_ops_setcolreg(unsigned regno,
+				unsigned red,
+				unsigned green,
+				unsigned blue,
+				unsigned transp,
 				struct fb_info *info)
 {
 	struct lynxfb_par *par;
@@ -787,7 +788,7 @@ static int lynxfb_set_fbinfo(struct fb_info *info, int index)
 	memset_io(crtc->cursor.vstart, 0, crtc->cursor.size);
 	if (!g_hwcursor) {
 		lynxfb_ops.fb_cursor = NULL;
-		sm750_hw_cursor_disable(&crtc->cursor);
+		hw_cursor_disable(&crtc->cursor);
 	}
 
 	/* set info->fbops, must be set before fb_find_mode */
@@ -946,13 +947,13 @@ static void sm750fb_setup(struct sm750_dev *sm750_dev, char *src)
 	g_hwcursor = 3;
 
 	if (!src || !*src) {
-		dev_warn(&sm750_dev->pdev->dev, "no specific g_option.\n");
+		pr_warn("no specific g_option.\n");
 		goto NO_PARAM;
 	}
 
 	while ((opt = strsep(&src, ":")) != NULL && *opt != 0) {
-		dev_info(&sm750_dev->pdev->dev, "opt=%s\n", opt);
-		dev_info(&sm750_dev->pdev->dev, "src=%s\n", src);
+		pr_info("opt=%s\n", opt);
+		pr_info("src=%s\n", src);
 
 		if (!strncmp(opt, "swap", strlen("swap")))
 			swap = 1;
@@ -973,14 +974,12 @@ static void sm750fb_setup(struct sm750_dev *sm750_dev, char *src)
 		else {
 			if (!g_fbmode[0]) {
 				g_fbmode[0] = opt;
-				dev_info(&sm750_dev->pdev->dev,
-					 "find fbmode0 : %s\n", g_fbmode[0]);
+				pr_info("find fbmode0 : %s\n", g_fbmode[0]);
 			} else if (!g_fbmode[1]) {
 				g_fbmode[1] = opt;
-				dev_info(&sm750_dev->pdev->dev,
-					 "find fbmode1 : %s\n", g_fbmode[1]);
+				pr_info("find fbmode1 : %s\n", g_fbmode[1]);
 			} else {
-				dev_warn(&sm750_dev->pdev->dev, "How many view you wann set?\n");
+				pr_warn("How many view you wann set?\n");
 			}
 		}
 	}
@@ -1050,6 +1049,26 @@ release_fb:
 	return err;
 }
 
+static int lynxfb_kick_out_firmware_fb(struct pci_dev *pdev)
+{
+	struct apertures_struct *ap;
+	bool primary = false;
+
+	ap = alloc_apertures(1);
+	if (!ap)
+		return -ENOMEM;
+
+	ap->ranges[0].base = pci_resource_start(pdev, 0);
+	ap->ranges[0].size = pci_resource_len(pdev, 0);
+#ifdef CONFIG_X86
+	primary = pdev->resource[PCI_ROM_RESOURCE].flags &
+					IORESOURCE_ROM_SHADOW;
+#endif
+	remove_conflicting_framebuffers(ap, "sm750_fb1", primary);
+	kfree(ap);
+	return 0;
+}
+
 static int lynxfb_pci_probe(struct pci_dev *pdev,
 			    const struct pci_device_id *ent)
 {
@@ -1057,6 +1076,10 @@ static int lynxfb_pci_probe(struct pci_dev *pdev,
 	int max_fb;
 	int fbidx;
 	int err;
+
+	err = lynxfb_kick_out_firmware_fb(pdev);
+	if (err)
+		return err;
 
 	/* enable device */
 	err = pcim_enable_device(pdev);
@@ -1084,10 +1107,10 @@ static int lynxfb_pci_probe(struct pci_dev *pdev,
 		 * if some chip need specific function,
 		 * please hook it in smXXX_set_drv routine
 		 */
-		sm750_dev->accel.de_init = sm750_hw_de_init;
-		sm750_dev->accel.de_fillrect = sm750_hw_fillrect;
-		sm750_dev->accel.de_copyarea = sm750_hw_copyarea;
-		sm750_dev->accel.de_imageblit = sm750_hw_imageblit;
+		sm750_dev->accel.de_init = hw_de_init;
+		sm750_dev->accel.de_fillrect = hw_fillrect;
+		sm750_dev->accel.de_copyarea = hw_copyarea;
+		sm750_dev->accel.de_imageblit = hw_imageblit;
 	}
 
 	/* call chip specific setup routine  */
@@ -1189,7 +1212,7 @@ static int __init lynxfb_setup(char *options)
 	return 0;
 }
 
-static const struct pci_device_id smi_pci_table[] = {
+static struct pci_device_id smi_pci_table[] = {
 	{ PCI_DEVICE(0x126f, 0x0750), },
 	{0,}
 };
@@ -1210,6 +1233,7 @@ static struct pci_driver lynxfb_driver = {
 static int __init lynxfb_init(void)
 {
 	char *option;
+	int ret;
 
 #ifdef MODULE
 	option = g_option;
@@ -1219,7 +1243,8 @@ static int __init lynxfb_init(void)
 #endif
 
 	lynxfb_setup(option);
-	return pci_register_driver(&lynxfb_driver);
+	ret = pci_register_driver(&lynxfb_driver);
+	return ret;
 }
 module_init(lynxfb_init);
 
@@ -1229,7 +1254,7 @@ static void __exit lynxfb_exit(void)
 }
 module_exit(lynxfb_exit);
 
-module_param(g_option, charp, 0444);
+module_param(g_option, charp, S_IRUGO);
 
 MODULE_PARM_DESC(g_option,
 		 "\n\t\tCommon options:\n"
@@ -1244,4 +1269,4 @@ MODULE_PARM_DESC(g_option,
 MODULE_AUTHOR("monk liu <monk.liu@siliconmotion.com>");
 MODULE_AUTHOR("Sudip Mukherjee <sudip@vectorindia.org>");
 MODULE_DESCRIPTION("Frame buffer driver for SM750 chipset");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL v2");

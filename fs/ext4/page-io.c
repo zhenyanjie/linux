@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/backing-dev.h>
+#include <linux/fscrypto.h>
 
 #include "ext4_jbd2.h"
 #include "xattr.h"
@@ -157,7 +158,7 @@ static int ext4_end_io(ext4_io_end_t *io)
 
 	io->handle = NULL;	/* Following call will use up the handle */
 	ret = ext4_convert_unwritten_extents(handle, inode, offset, size);
-	if (ret < 0 && !ext4_forced_shutdown(EXT4_SB(inode->i_sb))) {
+	if (ret < 0) {
 		ext4_msg(inode->i_sb, KERN_EMERG,
 			 "failed to convert unwritten extents to written "
 			 "extents -- potential data loss!  "
@@ -339,7 +340,7 @@ void ext4_io_submit(struct ext4_io_submit *io)
 
 	if (bio) {
 		int io_op_flags = io->io_wbc->sync_mode == WB_SYNC_ALL ?
-				  REQ_SYNC : 0;
+				  WRITE_SYNC : 0;
 		bio_set_op_attrs(io->io_bio, REQ_OP_WRITE, io_op_flags);
 		submit_bio(io->io_bio);
 	}
@@ -456,7 +457,7 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 		}
 		if (buffer_new(bh)) {
 			clear_buffer_new(bh);
-			clean_bdev_bh_alias(bh);
+			unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr);
 		}
 		set_buffer_async_write(bh);
 		nr_to_submit++;
@@ -469,8 +470,7 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 		gfp_t gfp_flags = GFP_NOFS;
 
 	retry_encrypt:
-		data_page = fscrypt_encrypt_page(inode, page, PAGE_SIZE, 0,
-						page->index, gfp_flags);
+		data_page = fscrypt_encrypt_page(inode, page, gfp_flags);
 		if (IS_ERR(data_page)) {
 			ret = PTR_ERR(data_page);
 			if (ret == -ENOMEM && wbc->sync_mode == WB_SYNC_ALL) {

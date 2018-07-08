@@ -7,7 +7,6 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/acpi.h>
-#include <linux/acpi_iort.h>
 #include <linux/signal.h>
 #include <linux/kthread.h>
 #include <linux/dmi.h>
@@ -1120,6 +1119,9 @@ acpi_backlight_cap_match(acpi_handle handle, u32 level, void *context,
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO, "Found generic backlight "
 				  "support\n"));
 		*cap |= ACPI_VIDEO_BACKLIGHT;
+		if (!acpi_has_method(handle, "_BQC"))
+			printk(KERN_WARNING FW_BUG PREFIX "No _BQC method, "
+				"cannot determine initial brightness\n");
 		/* We have backlight support, no need to scan further */
 		return AE_CTRL_TERMINATE;
 	}
@@ -1368,38 +1370,6 @@ enum dev_dma_attr acpi_get_dma_attr(struct acpi_device *adev)
 		return DEV_DMA_NON_COHERENT;
 }
 
-/**
- * acpi_dma_configure - Set-up DMA configuration for the device.
- * @dev: The pointer to the device
- * @attr: device dma attributes
- */
-void acpi_dma_configure(struct device *dev, enum dev_dma_attr attr)
-{
-	const struct iommu_ops *iommu;
-
-	iort_set_dma_mask(dev);
-
-	iommu = iort_iommu_configure(dev);
-
-	/*
-	 * Assume dma valid range starts at 0 and covers the whole
-	 * coherent_dma_mask.
-	 */
-	arch_setup_dma_ops(dev, 0, dev->coherent_dma_mask + 1, iommu,
-			   attr == DEV_DMA_COHERENT);
-}
-EXPORT_SYMBOL_GPL(acpi_dma_configure);
-
-/**
- * acpi_dma_deconfigure - Tear-down DMA configuration for the device.
- * @dev: The pointer to the device
- */
-void acpi_dma_deconfigure(struct device *dev)
-{
-	arch_teardown_dma_ops(dev);
-}
-EXPORT_SYMBOL_GPL(acpi_dma_deconfigure);
-
 static void acpi_init_coherency(struct acpi_device *adev)
 {
 	unsigned long long cca = 0;
@@ -1433,37 +1403,6 @@ static void acpi_init_coherency(struct acpi_device *adev)
 	adev->flags.coherent_dma = cca;
 }
 
-static int acpi_check_spi_i2c_slave(struct acpi_resource *ares, void *data)
-{
-	bool *is_spi_i2c_slave_p = data;
-
-	if (ares->type != ACPI_RESOURCE_TYPE_SERIAL_BUS)
-		return 1;
-
-	/*
-	 * devices that are connected to UART still need to be enumerated to
-	 * platform bus
-	 */
-	if (ares->data.common_serial_bus.type != ACPI_RESOURCE_SERIAL_TYPE_UART)
-		*is_spi_i2c_slave_p = true;
-
-	 /* no need to do more checking */
-	return -1;
-}
-
-static bool acpi_is_spi_i2c_slave(struct acpi_device *device)
-{
-	struct list_head resource_list;
-	bool is_spi_i2c_slave = false;
-
-	INIT_LIST_HEAD(&resource_list);
-	acpi_dev_get_resources(device, &resource_list, acpi_check_spi_i2c_slave,
-			       &is_spi_i2c_slave);
-	acpi_dev_free_resource_list(&resource_list);
-
-	return is_spi_i2c_slave;
-}
-
 void acpi_init_device_object(struct acpi_device *device, acpi_handle handle,
 			     int type, unsigned long long sta)
 {
@@ -1479,11 +1418,12 @@ void acpi_init_device_object(struct acpi_device *device, acpi_handle handle,
 	acpi_bus_get_flags(device);
 	device->flags.match_driver = false;
 	device->flags.initialized = true;
-	device->flags.spi_i2c_slave = acpi_is_spi_i2c_slave(device);
 	acpi_device_clear_enumerated(device);
 	device_initialize(&device->dev);
 	dev_set_uevent_suppress(&device->dev, true);
 	acpi_init_coherency(device);
+	/* Assume there are unmet deps until acpi_device_dep_initialize() runs */
+	device->dep_unmet = 1;
 }
 
 void acpi_device_add_finalize(struct acpi_device *device)
@@ -1507,6 +1447,14 @@ static int acpi_add_single_object(struct acpi_device **child,
 	}
 
 	acpi_init_device_object(device, handle, type, sta);
+	/*
+	 * For ACPI_BUS_TYPE_DEVICE getting the status is delayed till here so
+	 * that we can call acpi_bus_get_status() and use its quirk handling.
+	 * Note this must be done before the get power-/wakeup_dev-flags calls.
+	 */
+	if (type == ACPI_BUS_TYPE_DEVICE)
+		acpi_bus_get_status(device);
+
 	acpi_bus_get_power_flags(device);
 	acpi_bus_get_wakeup_device_flags(device);
 
@@ -1579,9 +1527,11 @@ static int acpi_bus_type_and_status(acpi_handle handle, int *type,
 			return -ENODEV;
 
 		*type = ACPI_BUS_TYPE_DEVICE;
-		status = acpi_bus_get_status_handle(handle, sta);
-		if (ACPI_FAILURE(status))
-			*sta = 0;
+		/*
+		 * acpi_add_single_object updates this once we've an acpi_device
+		 * so that acpi_bus_get_status' quirk handling can be used.
+		 */
+		*sta = 0;
 		break;
 	case ACPI_TYPE_PROCESSOR:
 		*type = ACPI_BUS_TYPE_PROCESSOR;
@@ -1683,6 +1633,8 @@ static void acpi_device_dep_initialize(struct acpi_device *adev)
 	acpi_status status;
 	int i;
 
+	adev->dep_unmet = 0;
+
 	if (!acpi_has_method(adev->handle, "_DEP"))
 		return;
 
@@ -1764,13 +1716,38 @@ static acpi_status acpi_bus_check_add(acpi_handle handle, u32 lvl_not_used,
 	return AE_OK;
 }
 
+static int acpi_check_spi_i2c_slave(struct acpi_resource *ares, void *data)
+{
+	bool *is_spi_i2c_slave_p = data;
+
+	if (ares->type != ACPI_RESOURCE_TYPE_SERIAL_BUS)
+		return 1;
+
+	/*
+	 * devices that are connected to UART still need to be enumerated to
+	 * platform bus
+	 */
+	if (ares->data.common_serial_bus.type != ACPI_RESOURCE_SERIAL_TYPE_UART)
+		*is_spi_i2c_slave_p = true;
+
+	 /* no need to do more checking */
+	return -1;
+}
+
 static void acpi_default_enumeration(struct acpi_device *device)
 {
+	struct list_head resource_list;
+	bool is_spi_i2c_slave = false;
+
 	/*
 	 * Do not enumerate SPI/I2C slaves as they will be enumerated by their
 	 * respective parents.
 	 */
-	if (!device->flags.spi_i2c_slave) {
+	INIT_LIST_HEAD(&resource_list);
+	acpi_dev_get_resources(device, &resource_list, acpi_check_spi_i2c_slave,
+			       &is_spi_i2c_slave);
+	acpi_dev_free_resource_list(&resource_list);
+	if (!is_spi_i2c_slave) {
 		acpi_create_platform_device(device, NULL);
 		acpi_device_set_enumerated(device);
 	} else {
@@ -1864,7 +1841,7 @@ static void acpi_bus_attach(struct acpi_device *device)
 		return;
 
 	device->flags.match_driver = true;
-	if (ret > 0 && !device->flags.spi_i2c_slave) {
+	if (ret > 0) {
 		acpi_device_set_enumerated(device);
 		goto ok;
 	}
@@ -1873,7 +1850,7 @@ static void acpi_bus_attach(struct acpi_device *device)
 	if (ret < 0)
 		return;
 
-	if (!device->pnp.type.platform_id && !device->flags.spi_i2c_slave)
+	if (ret > 0 || !device->pnp.type.platform_id)
 		acpi_device_set_enumerated(device);
 	else
 		acpi_default_enumeration(device);
@@ -2088,7 +2065,6 @@ int __init acpi_scan_init(void)
 
 	acpi_gpe_apply_masked_gpes();
 	acpi_update_all_gpes();
-	acpi_ec_ecdt_start();
 
 	acpi_scan_initialized = true;
 

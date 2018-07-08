@@ -63,9 +63,8 @@ static const char * const bench_futex_hash_usage[] = {
 static void *workerfn(void *arg)
 {
 	int ret;
-	struct worker *w = (struct worker *) arg;
 	unsigned int i;
-	unsigned long ops = w->ops; /* avoid cacheline bouncing */
+	struct worker *w = (struct worker *) arg;
 
 	pthread_mutex_lock(&thread_lock);
 	threads_starting--;
@@ -75,7 +74,7 @@ static void *workerfn(void *arg)
 	pthread_mutex_unlock(&thread_lock);
 
 	do {
-		for (i = 0; i < nfutexes; i++, ops++) {
+		for (i = 0; i < nfutexes; i++, w->ops++) {
 			/*
 			 * We want the futex calls to fail in order to stress
 			 * the hashing of uaddr and not measure other steps,
@@ -89,7 +88,6 @@ static void *workerfn(void *arg)
 		}
 	}  while (!done);
 
-	w->ops = ops;
 	return NULL;
 }
 

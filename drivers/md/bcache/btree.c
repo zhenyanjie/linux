@@ -32,9 +32,6 @@
 #include <linux/prefetch.h>
 #include <linux/random.h>
 #include <linux/rcupdate.h>
-#include <linux/sched/clock.h>
-#include <linux/rculist.h>
-
 #include <trace/events/bcache.h>
 
 /*
@@ -300,7 +297,7 @@ static void bch_btree_node_read(struct btree *b)
 	bio->bi_iter.bi_size = KEY_SIZE(&b->key) << 9;
 	bio->bi_end_io	= btree_node_read_endio;
 	bio->bi_private	= &cl;
-	bio->bi_opf = REQ_OP_READ | REQ_META;
+	bio_set_op_attrs(bio, REQ_OP_READ, REQ_META|READ_SYNC);
 
 	bch_bio_map(bio, b->keys.set[0].data);
 
@@ -396,7 +393,7 @@ static void do_btree_node_write(struct btree *b)
 	b->bio->bi_end_io	= btree_node_write_endio;
 	b->bio->bi_private	= cl;
 	b->bio->bi_iter.bi_size	= roundup(set_bytes(i), block_bytes(b->c));
-	b->bio->bi_opf		= REQ_OP_WRITE | REQ_META | REQ_FUA;
+	bio_set_op_attrs(b->bio, REQ_OP_WRITE, REQ_META|WRITE_SYNC|REQ_FUA);
 	bch_bio_map(b->bio, i);
 
 	/*
@@ -806,7 +803,10 @@ int bch_btree_cache_alloc(struct cache_set *c)
 	c->shrink.scan_objects = bch_mca_scan;
 	c->shrink.seeks = 4;
 	c->shrink.batch = c->btree_pages * 2;
-	register_shrinker(&c->shrink);
+
+	if (register_shrinker(&c->shrink))
+		pr_warn("bcache: %s: could not register shrinker",
+				__func__);
 
 	return 0;
 }
@@ -1864,14 +1864,17 @@ void bch_initial_gc_finish(struct cache_set *c)
 	 */
 	for_each_cache(ca, c, i) {
 		for_each_bucket(b, ca) {
-			if (fifo_full(&ca->free[RESERVE_PRIO]))
+			if (fifo_full(&ca->free[RESERVE_PRIO]) &&
+			    fifo_full(&ca->free[RESERVE_BTREE]))
 				break;
 
 			if (bch_can_invalidate_bucket(ca, b) &&
 			    !GC_MARK(b)) {
 				__bch_invalidate_one_bucket(ca, b);
-				fifo_push(&ca->free[RESERVE_PRIO],
-					  b - ca->buckets);
+				if (!fifo_push(&ca->free[RESERVE_PRIO],
+				   b - ca->buckets))
+					fifo_push(&ca->free[RESERVE_BTREE],
+						  b - ca->buckets);
 			}
 		}
 	}

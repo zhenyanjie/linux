@@ -1,8 +1,3 @@
-/*
- * Released under the GPLv2 only.
- * SPDX-License-Identifier: GPL-2.0
- */
-
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/bitops.h>
@@ -412,8 +407,11 @@ int usb_submit_urb(struct urb *urb, gfp_t mem_flags)
 		}
 
 		/* "high bandwidth" mode, 1-3 packets/uframe? */
-		if (dev->speed == USB_SPEED_HIGH)
-			max *= usb_endpoint_maxp_mult(&ep->desc);
+		if (dev->speed == USB_SPEED_HIGH) {
+			int	mult = 1 + ((max >> 11) & 0x03);
+			max &= 0x07ff;
+			max *= mult;
+		}
 
 		if (urb->number_of_packets <= 0)
 			return -EINVAL;

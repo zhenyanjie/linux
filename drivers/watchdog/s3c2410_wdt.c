@@ -23,6 +23,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/types.h>
@@ -63,8 +65,8 @@
 #define S3C2410_WTCON_PRESCALE_MASK	(0xff << 8)
 #define S3C2410_WTCON_PRESCALE_MAX	0xff
 
-#define S3C2410_WATCHDOG_ATBOOT		(0)
-#define S3C2410_WATCHDOG_DEFAULT_TIME	(15)
+#define CONFIG_S3C2410_WATCHDOG_ATBOOT		(0)
+#define CONFIG_S3C2410_WATCHDOG_DEFAULT_TIME	(15)
 
 #define EXYNOS5_RST_STAT_REG_OFFSET		0x0404
 #define EXYNOS5_WDT_DISABLE_REG_OFFSET		0x0408
@@ -79,23 +81,26 @@
 
 static bool nowayout	= WATCHDOG_NOWAYOUT;
 static int tmr_margin;
-static int tmr_atboot	= S3C2410_WATCHDOG_ATBOOT;
+static int tmr_atboot	= CONFIG_S3C2410_WATCHDOG_ATBOOT;
 static int soft_noboot;
+static int debug;
 
 module_param(tmr_margin,  int, 0);
 module_param(tmr_atboot,  int, 0);
 module_param(nowayout,   bool, 0);
 module_param(soft_noboot, int, 0);
+module_param(debug,	  int, 0);
 
 MODULE_PARM_DESC(tmr_margin, "Watchdog tmr_margin in seconds. (default="
-		__MODULE_STRING(S3C2410_WATCHDOG_DEFAULT_TIME) ")");
+		__MODULE_STRING(CONFIG_S3C2410_WATCHDOG_DEFAULT_TIME) ")");
 MODULE_PARM_DESC(tmr_atboot,
 		"Watchdog is started at boot time if set to 1, default="
-			__MODULE_STRING(S3C2410_WATCHDOG_ATBOOT));
+			__MODULE_STRING(CONFIG_S3C2410_WATCHDOG_ATBOOT));
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started (default="
 			__MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 MODULE_PARM_DESC(soft_noboot, "Watchdog action, set to 1 to ignore reboots, "
 			"0 to reboot (default 0)");
+MODULE_PARM_DESC(debug, "Watchdog debug, set to >1 for debug (default 0)");
 
 /**
  * struct s3c2410_wdt_variant - Per-variant config data
@@ -199,6 +204,14 @@ static const struct platform_device_id s3c2410_wdt_ids[] = {
 };
 MODULE_DEVICE_TABLE(platform, s3c2410_wdt_ids);
 
+/* watchdog control routines */
+
+#define DBG(fmt, ...)					\
+do {							\
+	if (debug)					\
+		pr_info(fmt, ##__VA_ARGS__);		\
+} while (0)
+
 /* functions */
 
 static inline unsigned int s3c2410wdt_max_timeout(struct clk *clock)
@@ -294,8 +307,8 @@ static int s3c2410wdt_start(struct watchdog_device *wdd)
 		wtcon |= S3C2410_WTCON_RSTEN;
 	}
 
-	dev_dbg(wdt->dev, "Starting watchdog: count=0x%08x, wtcon=%08lx\n",
-		wdt->count, wtcon);
+	DBG("%s: count=0x%08x, wtcon=%08lx\n",
+	    __func__, wdt->count, wtcon);
 
 	writel(wdt->count, wdt->reg_base + S3C2410_WTDAT);
 	writel(wdt->count, wdt->reg_base + S3C2410_WTCNT);
@@ -324,8 +337,8 @@ static int s3c2410wdt_set_heartbeat(struct watchdog_device *wdd, unsigned timeou
 	freq = DIV_ROUND_UP(freq, 128);
 	count = timeout * freq;
 
-	dev_dbg(wdt->dev, "Heartbeat: count=%d, timeout=%d, freq=%lu\n",
-		count, timeout, freq);
+	DBG("%s: count=%d, timeout=%d, freq=%lu\n",
+	    __func__, count, timeout, freq);
 
 	/* if the count is bigger than the watchdog register,
 	   then work out what we need to do (and if) we can
@@ -341,8 +354,8 @@ static int s3c2410wdt_set_heartbeat(struct watchdog_device *wdd, unsigned timeou
 		}
 	}
 
-	dev_dbg(wdt->dev, "Heartbeat: timeout=%d, divisor=%d, count=%d (%08x)\n",
-		timeout, divisor, count, DIV_ROUND_UP(count, divisor));
+	DBG("%s: timeout=%d, divisor=%d, count=%d (%08x)\n",
+	    __func__, timeout, divisor, count, DIV_ROUND_UP(count, divisor));
 
 	count = DIV_ROUND_UP(count, divisor);
 	wdt->count = count;
@@ -392,7 +405,7 @@ static const struct watchdog_info s3c2410_wdt_ident = {
 	.identity         =	"S3C2410 Watchdog",
 };
 
-static const struct watchdog_ops s3c2410wdt_ops = {
+static struct watchdog_ops s3c2410wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = s3c2410wdt_start,
 	.stop = s3c2410wdt_stop,
@@ -404,7 +417,7 @@ static const struct watchdog_ops s3c2410wdt_ops = {
 static struct watchdog_device s3c2410_wdd = {
 	.info = &s3c2410_wdt_ident,
 	.ops = &s3c2410wdt_ops,
-	.timeout = S3C2410_WATCHDOG_DEFAULT_TIME,
+	.timeout = CONFIG_S3C2410_WATCHDOG_DEFAULT_TIME,
 };
 
 /* interrupt handler code */
@@ -507,8 +520,9 @@ static inline unsigned int s3c2410wdt_get_bootstatus(struct s3c2410_wdt *wdt)
 	return 0;
 }
 
+/* s3c2410_get_wdt_driver_data */
 static inline struct s3c2410_wdt_variant *
-s3c2410_get_wdt_drv_data(struct platform_device *pdev)
+get_wdt_drv_data(struct platform_device *pdev)
 {
 	if (pdev->dev.of_node) {
 		const struct of_device_id *match;
@@ -530,6 +544,8 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 	int started = 0;
 	int ret;
 
+	DBG("%s: probe=%p\n", __func__, pdev);
+
 	dev = &pdev->dev;
 
 	wdt = devm_kzalloc(dev, sizeof(*wdt), GFP_KERNEL);
@@ -540,7 +556,7 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 	spin_lock_init(&wdt->lock);
 	wdt->wdt_device = s3c2410_wdd;
 
-	wdt->drv_data = s3c2410_get_wdt_drv_data(pdev);
+	wdt->drv_data = get_wdt_drv_data(pdev);
 	if (wdt->drv_data->quirks & QUIRKS_HAVE_PMUREG) {
 		wdt->pmureg = syscon_regmap_lookup_by_phandle(dev->of_node,
 						"samsung,syscon-phandle");
@@ -564,6 +580,8 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 		ret = PTR_ERR(wdt->reg_base);
 		goto err;
 	}
+
+	DBG("probe: mapped reg_base=%p\n", wdt->reg_base);
 
 	wdt->clock = devm_clk_get(dev, "watchdog");
 	if (IS_ERR(wdt->clock)) {
@@ -597,12 +615,12 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 					wdt->wdt_device.timeout);
 	if (ret) {
 		started = s3c2410wdt_set_heartbeat(&wdt->wdt_device,
-					S3C2410_WATCHDOG_DEFAULT_TIME);
+					CONFIG_S3C2410_WATCHDOG_DEFAULT_TIME);
 
 		if (started == 0)
 			dev_info(dev,
 			   "tmr_margin value out of range, default %d used\n",
-			       S3C2410_WATCHDOG_DEFAULT_TIME);
+			       CONFIG_S3C2410_WATCHDOG_DEFAULT_TIME);
 		else
 			dev_info(dev, "default timer value is out of range, "
 							"cannot start\n");

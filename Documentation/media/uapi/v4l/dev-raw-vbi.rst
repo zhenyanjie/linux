@@ -221,8 +221,8 @@ and always returns default parameters as :ref:`VIDIOC_G_FMT <VIDIOC_G_FMT>` does
 
 .. _vbi-hsync:
 
-.. figure::  vbi_hsync.*
-    :alt:    vbi_hsync.pdf / vbi_hsync.svg
+.. figure::  dev-raw-vbi_files/vbi_hsync.*
+    :alt:    vbi_hsync.pdf / vbi_hsync.gif
     :align:  center
 
     **Figure 4.1. Line synchronization**
@@ -230,8 +230,8 @@ and always returns default parameters as :ref:`VIDIOC_G_FMT <VIDIOC_G_FMT>` does
 
 .. _vbi-525:
 
-.. figure::  vbi_525.*
-    :alt:    vbi_525.pdf / vbi_525.svg
+.. figure::  dev-raw-vbi_files/vbi_525.*
+    :alt:    vbi_525.pdf / vbi_525.gif
     :align:  center
 
     **Figure 4.2. ITU-R 525 line numbering (M/NTSC and M/PAL)**
@@ -240,8 +240,8 @@ and always returns default parameters as :ref:`VIDIOC_G_FMT <VIDIOC_G_FMT>` does
 
 .. _vbi-625:
 
-.. figure::  vbi_625.*
-    :alt:    vbi_625.pdf / vbi_625.svg
+.. figure::  dev-raw-vbi_files/vbi_625.*
+    :alt:    vbi_625.pdf / vbi_625.gif
     :align:  center
 
     **Figure 4.3. ITU-R 625 line numbering**

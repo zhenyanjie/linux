@@ -92,10 +92,10 @@ static notrace const struct pvclock_vsyscall_time_info *get_pvti0(void)
 	return (const struct pvclock_vsyscall_time_info *)&pvclock_page;
 }
 
-static notrace u64 vread_pvclock(int *mode)
+static notrace cycle_t vread_pvclock(int *mode)
 {
 	const struct pvclock_vcpu_time_info *pvti = &get_pvti0()->pvti;
-	u64 ret;
+	cycle_t ret;
 	u64 last;
 	u32 version;
 
@@ -142,9 +142,9 @@ static notrace u64 vread_pvclock(int *mode)
 }
 #endif
 
-notrace static u64 vread_tsc(void)
+notrace static cycle_t vread_tsc(void)
 {
-	u64 ret = (u64)rdtsc_ordered();
+	cycle_t ret = (cycle_t)rdtsc_ordered();
 	u64 last = gtod->cycle_last;
 
 	if (likely(ret >= last))

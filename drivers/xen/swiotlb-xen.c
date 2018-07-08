@@ -275,10 +275,6 @@ retry:
 		rc = 0;
 	} else
 		rc = swiotlb_late_init_with_tbl(xen_io_tlb_start, xen_io_tlb_nslabs);
-
-	if (!rc)
-		swiotlb_set_max_segment(PAGE_SIZE);
-
 	return rc;
 error:
 	if (repeat--) {
@@ -363,7 +359,7 @@ xen_swiotlb_free_coherent(struct device *hwdev, size_t size, void *vaddr,
 	 * physical address */
 	phys = xen_bus_to_phys(dev_addr);
 
-	if (((dev_addr + size - 1 > dma_mask)) ||
+	if (((dev_addr + size - 1 <= dma_mask)) ||
 	    range_straddles_page_boundary(phys, size))
 		xen_destroy_contiguous_region(phys, order);
 
@@ -409,8 +405,7 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 	 */
 	trace_swiotlb_bounced(dev, dev_addr, size, swiotlb_force);
 
-	map = swiotlb_tbl_map_single(dev, start_dma_addr, phys, size, dir,
-				     attrs);
+	map = swiotlb_tbl_map_single(dev, start_dma_addr, phys, size, dir);
 	if (map == SWIOTLB_MAP_ERROR)
 		return DMA_ERROR_CODE;
 
@@ -421,13 +416,11 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 	/*
 	 * Ensure that the address returned is DMA'ble
 	 */
-	if (dma_capable(dev, dev_addr, size))
-		return dev_addr;
-
-	attrs |= DMA_ATTR_SKIP_CPU_SYNC;
-	swiotlb_tbl_unmap_single(dev, map, size, dir, attrs);
-
-	return DMA_ERROR_CODE;
+	if (!dma_capable(dev, dev_addr, size)) {
+		swiotlb_tbl_unmap_single(dev, map, size, dir);
+		dev_addr = 0;
+	}
+	return dev_addr;
 }
 EXPORT_SYMBOL_GPL(xen_swiotlb_map_page);
 
@@ -451,7 +444,7 @@ static void xen_unmap_single(struct device *hwdev, dma_addr_t dev_addr,
 
 	/* NOTE: We use dev_addr here, not paddr! */
 	if (is_xen_swiotlb_buffer(dev_addr)) {
-		swiotlb_tbl_unmap_single(hwdev, paddr, size, dir, attrs);
+		swiotlb_tbl_unmap_single(hwdev, paddr, size, dir);
 		return;
 	}
 
@@ -564,12 +557,11 @@ xen_swiotlb_map_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
 								 start_dma_addr,
 								 sg_phys(sg),
 								 sg->length,
-								 dir, attrs);
+								 dir);
 			if (map == SWIOTLB_MAP_ERROR) {
 				dev_warn(hwdev, "swiotlb buffer is full\n");
 				/* Don't panic here, we expect map_sg users
 				   to do proper error handling. */
-				attrs |= DMA_ATTR_SKIP_CPU_SYNC;
 				xen_swiotlb_unmap_sg_attrs(hwdev, sgl, i, dir,
 							   attrs);
 				sg_dma_len(sgl) = 0;
@@ -657,6 +649,13 @@ xen_swiotlb_sync_sg_for_device(struct device *hwdev, struct scatterlist *sg,
 }
 EXPORT_SYMBOL_GPL(xen_swiotlb_sync_sg_for_device);
 
+int
+xen_swiotlb_dma_mapping_error(struct device *hwdev, dma_addr_t dma_addr)
+{
+	return !dma_addr;
+}
+EXPORT_SYMBOL_GPL(xen_swiotlb_dma_mapping_error);
+
 /*
  * Return whether the given device DMA address mask can be supported
  * properly.  For example, if your device can only drive the low 24-bits
@@ -700,31 +699,3 @@ xen_swiotlb_dma_mmap(struct device *dev, struct vm_area_struct *vma,
 	return dma_common_mmap(dev, vma, cpu_addr, dma_addr, size);
 }
 EXPORT_SYMBOL_GPL(xen_swiotlb_dma_mmap);
-
-/*
- * This function should be called with the pages from the current domain only,
- * passing pages mapped from other domains would lead to memory corruption.
- */
-int
-xen_swiotlb_get_sgtable(struct device *dev, struct sg_table *sgt,
-			void *cpu_addr, dma_addr_t handle, size_t size,
-			unsigned long attrs)
-{
-#if defined(CONFIG_ARM) || defined(CONFIG_ARM64)
-	if (__generic_dma_ops(dev)->get_sgtable) {
-#if 0
-	/*
-	 * This check verifies that the page belongs to the current domain and
-	 * is not one mapped from another domain.
-	 * This check is for debug only, and should not go to production build
-	 */
-		unsigned long bfn = PHYS_PFN(dma_to_phys(dev, handle));
-		BUG_ON (!page_is_ram(bfn));
-#endif
-		return __generic_dma_ops(dev)->get_sgtable(dev, sgt, cpu_addr,
-							   handle, size, attrs);
-	}
-#endif
-	return dma_common_get_sgtable(dev, sgt, cpu_addr, handle, size);
-}
-EXPORT_SYMBOL_GPL(xen_swiotlb_get_sgtable);

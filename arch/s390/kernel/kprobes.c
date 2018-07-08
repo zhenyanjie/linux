@@ -33,7 +33,7 @@
 #include <linux/ftrace.h>
 #include <asm/cacheflush.h>
 #include <asm/sections.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/dis.h>
 
 DEFINE_PER_CPU(struct kprobe *, current_kprobe);
@@ -45,17 +45,11 @@ DEFINE_INSN_CACHE_OPS(dmainsn);
 
 static void *alloc_dmainsn_page(void)
 {
-	void *page;
-
-	page = (void *) __get_free_page(GFP_KERNEL | GFP_DMA);
-	if (page)
-		set_memory_x((unsigned long) page, 1);
-	return page;
+	return (void *)__get_free_page(GFP_KERNEL | GFP_DMA);
 }
 
 static void free_dmainsn_page(void *page)
 {
-	set_memory_nx((unsigned long) page, 1);
 	free_page((unsigned long)page);
 }
 

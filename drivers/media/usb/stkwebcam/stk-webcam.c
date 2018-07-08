@@ -16,6 +16,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/module.h>
@@ -369,7 +373,8 @@ static void stk_isoc_handler(struct urb *urb)
 			if (fb->v4lbuf.bytesused != 0
 				&& fb->v4lbuf.bytesused != dev->frame_size) {
 				(void) (printk_ratelimit() &&
-				STK_ERROR("frame %d, bytesused=%d, skipping\n",
+				STK_ERROR("frame %d, "
+					"bytesused=%d, skipping\n",
 					i, fb->v4lbuf.bytesused));
 				fb->v4lbuf.bytesused = 0;
 				fill = fb->buffer;

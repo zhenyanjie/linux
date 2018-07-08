@@ -23,9 +23,3 @@
 		};
 	};
 };
-
-/* enable thermal sensor with the correct compatible property set */
-&thermal {
-	compatible = "brcm,bcm2835-thermal";
-	status = "okay";
-};

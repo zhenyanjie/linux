@@ -7,8 +7,6 @@
 #include <linux/ptrace.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
-#include <linux/sched/mm.h>
-
 #include "internal.h"
 
 /*
@@ -221,7 +219,7 @@ static void *m_start(struct seq_file *m, loff_t *pos)
 		return ERR_PTR(-ESRCH);
 
 	mm = priv->mm;
-	if (!mm || !mmget_not_zero(mm))
+	if (!mm || !atomic_inc_not_zero(&mm->mm_users))
 		return NULL;
 
 	down_read(&mm->mmap_sem);

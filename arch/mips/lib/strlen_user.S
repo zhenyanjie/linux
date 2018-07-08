@@ -9,7 +9,6 @@
  */
 #include <asm/asm.h>
 #include <asm/asm-offsets.h>
-#include <asm/export.h>
 #include <asm/regdef.h>
 
 #define EX(insn,reg,addr,handler)			\
@@ -49,11 +48,9 @@ LEAF(__strlen_\func\()_asm)
 	/* Set aliases */
 	.global __strlen_user_asm
 	.set __strlen_user_asm, __strlen_kernel_asm
-EXPORT_SYMBOL(__strlen_user_asm)
 #endif
 
 __BUILD_STRLEN_ASM kernel
-EXPORT_SYMBOL(__strlen_kernel_asm)
 
 #ifdef CONFIG_EVA
 
@@ -61,5 +58,4 @@ EXPORT_SYMBOL(__strlen_kernel_asm)
 	.set eva
 __BUILD_STRLEN_ASM user
 	.set pop
-EXPORT_SYMBOL(__strlen_user_asm)
 #endif

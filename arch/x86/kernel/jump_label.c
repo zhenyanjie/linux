@@ -32,7 +32,8 @@ static void bug_at(unsigned char *ip, int line)
 	 * Something went wrong. Crash the box, as something could be
 	 * corrupting the kernel.
 	 */
-	pr_crit("jump_label: Fatal kernel bug, unexpected op at %pS [%p] (%5ph) %d\n", ip, ip, ip, line);
+	pr_warning("Unexpected op at %pS [%p] (%02x %02x %02x %02x %02x) %s:%d\n",
+	       ip, ip, ip[0], ip[1], ip[2], ip[3], ip[4], __FILE__, line);
 	BUG();
 }
 

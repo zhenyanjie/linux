@@ -5,9 +5,6 @@
 #include <linux/nsproxy.h>
 #include <linux/ns_common.h>
 #include <linux/sched.h>
-#include <linux/workqueue.h>
-#include <linux/rwsem.h>
-#include <linux/sysctl.h>
 #include <linux/err.h>
 
 #define UID_GID_MAP_MAX_EXTENTS 5
@@ -35,10 +32,6 @@ enum ucount_type {
 	UCOUNT_NET_NAMESPACES,
 	UCOUNT_MNT_NAMESPACES,
 	UCOUNT_CGROUP_NAMESPACES,
-#ifdef CONFIG_INOTIFY_USER
-	UCOUNT_INOTIFY_INSTANCES,
-	UCOUNT_INOTIFY_WATCHES,
-#endif
 	UCOUNT_COUNTS,
 };
 

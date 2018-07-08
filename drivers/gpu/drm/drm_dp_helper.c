@@ -725,7 +725,7 @@ MODULE_PARM_DESC(dp_aux_i2c_speed_khz,
 /*
  * Transfer a single I2C-over-AUX message and handle various error conditions,
  * retrying the transaction as appropriate.  It is assumed that the
- * &drm_dp_aux.transfer function does not modify anything in the msg other than the
+ * aux->transfer function does not modify anything in the msg other than the
  * reply field.
  *
  * Returns bytes transferred on success, or a negative error code on failure.
@@ -1065,6 +1065,7 @@ int drm_dp_psr_setup_time(const u8 psr_cap[EDP_PSR_RECEIVER_CAP_SIZE])
 	static const u16 psr_setup_time_us[] = {
 		PSR_SETUP_TIME(330),
 		PSR_SETUP_TIME(275),
+		PSR_SETUP_TIME(220),
 		PSR_SETUP_TIME(165),
 		PSR_SETUP_TIME(110),
 		PSR_SETUP_TIME(55),

@@ -65,7 +65,7 @@
 #include <linux/mempool.h>
 
 static DEFINE_MUTEX(dma_list_mutex);
-static DEFINE_IDA(dma_ida);
+static DEFINE_IDR(dma_idr);
 static LIST_HEAD(dma_device_list);
 static long dmaengine_ref_count;
 
@@ -162,7 +162,7 @@ static void chan_dev_release(struct device *dev)
 	chan_dev = container_of(dev, typeof(*chan_dev), device);
 	if (atomic_dec_and_test(chan_dev->idr_ref)) {
 		mutex_lock(&dma_list_mutex);
-		ida_remove(&dma_ida, chan_dev->dev_id);
+		idr_remove(&dma_idr, chan_dev->dev_id);
 		mutex_unlock(&dma_list_mutex);
 		kfree(chan_dev->idr_ref);
 	}
@@ -898,15 +898,14 @@ static int get_dma_id(struct dma_device *device)
 {
 	int rc;
 
-	do {
-		if (!ida_pre_get(&dma_ida, GFP_KERNEL))
-			return -ENOMEM;
-		mutex_lock(&dma_list_mutex);
-		rc = ida_get_new(&dma_ida, &device->dev_id);
-		mutex_unlock(&dma_list_mutex);
-	} while (rc == -EAGAIN);
+	mutex_lock(&dma_list_mutex);
 
-	return rc;
+	rc = idr_alloc(&dma_idr, NULL, 0, 0, GFP_KERNEL);
+	if (rc >= 0)
+		device->dev_id = rc;
+
+	mutex_unlock(&dma_list_mutex);
+	return rc < 0 ? rc : 0;
 }
 
 /**
@@ -1036,7 +1035,7 @@ err_out:
 	/* if we never registered a channel just release the idr */
 	if (atomic_read(idr_ref) == 0) {
 		mutex_lock(&dma_list_mutex);
-		ida_remove(&dma_ida, device->dev_id);
+		idr_remove(&dma_idr, device->dev_id);
 		mutex_unlock(&dma_list_mutex);
 		kfree(idr_ref);
 		return rc;

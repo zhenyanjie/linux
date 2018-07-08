@@ -127,6 +127,13 @@ module_param_named(log_fka, bnx2fc_log_fka, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(log_fka, " Print message to kernel log when fcoe is "
 	"initiating a FIP keep alive when debug logging is enabled.");
 
+static int bnx2fc_cpu_callback(struct notifier_block *nfb,
+			     unsigned long action, void *hcpu);
+/* notification function for CPU hotplug events */
+static struct notifier_block bnx2fc_cpu_notifier = {
+	.notifier_call = bnx2fc_cpu_callback,
+};
+
 static inline struct net_device *bnx2fc_netdev(const struct fc_lport *lport)
 {
 	return ((struct bnx2fc_interface *)
@@ -663,15 +670,17 @@ static struct fc_host_statistics *bnx2fc_get_host_stats(struct Scsi_Host *shost)
 	if (!fw_stats)
 		return NULL;
 
+	mutex_lock(&hba->hba_stats_mutex);
+
 	bnx2fc_stats = fc_get_host_stats(shost);
 
 	init_completion(&hba->stat_req_done);
 	if (bnx2fc_send_stat_req(hba))
-		return bnx2fc_stats;
+		goto unlock_stats_mutex;
 	rc = wait_for_completion_timeout(&hba->stat_req_done, (2 * HZ));
 	if (!rc) {
 		BNX2FC_HBA_DBG(lport, "FW stat req timed out\n");
-		return bnx2fc_stats;
+		goto unlock_stats_mutex;
 	}
 	BNX2FC_STATS(hba, rx_stat2, fc_crc_cnt);
 	bnx2fc_stats->invalid_crc_count += hba->bfw_stats.fc_crc_cnt;
@@ -693,6 +702,9 @@ static struct fc_host_statistics *bnx2fc_get_host_stats(struct Scsi_Host *shost)
 
 	memcpy(&hba->prev_stats, hba->stats_buffer,
 	       sizeof(struct fcoe_statistics_params));
+
+unlock_stats_mutex:
+	mutex_unlock(&hba->hba_stats_mutex);
 	return bnx2fc_stats;
 }
 
@@ -963,6 +975,7 @@ static int bnx2fc_libfc_config(struct fc_lport *lport)
 		sizeof(struct libfc_function_template));
 	fc_elsct_init(lport);
 	fc_exch_init(lport);
+	fc_rport_init(lport);
 	fc_disc_init(lport);
 	fc_disc_config(lport, lport);
 	return 0;
@@ -1340,6 +1353,7 @@ static struct bnx2fc_hba *bnx2fc_hba_create(struct cnic_dev *cnic)
 	}
 	spin_lock_init(&hba->hba_lock);
 	mutex_init(&hba->hba_mutex);
+	mutex_init(&hba->hba_stats_mutex);
 
 	hba->cnic = cnic;
 
@@ -2282,7 +2296,7 @@ static int _bnx2fc_create(struct net_device *netdev,
 	}
 
 	/* obtain physical netdev */
-	if (is_vlan_dev(netdev))
+	if (netdev->priv_flags & IFF_802_1Q_VLAN)
 		phys_dev = vlan_dev_real_dev(netdev);
 
 	/* verify if the physical device is a netxtreme2 device */
@@ -2320,7 +2334,7 @@ static int _bnx2fc_create(struct net_device *netdev,
 		goto ifput_err;
 	}
 
-	if (is_vlan_dev(netdev)) {
+	if (netdev->priv_flags & IFF_802_1Q_VLAN) {
 		vlan_id = vlan_dev_vlan_id(netdev);
 		interface->vlan_enabled = 1;
 	}
@@ -2538,7 +2552,7 @@ static bool bnx2fc_match(struct net_device *netdev)
 	struct net_device *phys_dev = netdev;
 
 	mutex_lock(&bnx2fc_dev_lock);
-	if (is_vlan_dev(netdev))
+	if (netdev->priv_flags & IFF_802_1Q_VLAN)
 		phys_dev = vlan_dev_real_dev(netdev);
 
 	if (bnx2fc_hba_lookup(phys_dev)) {
@@ -2615,19 +2629,37 @@ static void bnx2fc_percpu_thread_destroy(unsigned int cpu)
 		kthread_stop(thread);
 }
 
-
-static int bnx2fc_cpu_online(unsigned int cpu)
+/**
+ * bnx2fc_cpu_callback - Handler for CPU hotplug events
+ *
+ * @nfb:    The callback data block
+ * @action: The event triggering the callback
+ * @hcpu:   The index of the CPU that the event is for
+ *
+ * This creates or destroys per-CPU data for fcoe
+ *
+ * Returns NOTIFY_OK always.
+ */
+static int bnx2fc_cpu_callback(struct notifier_block *nfb,
+			     unsigned long action, void *hcpu)
 {
-	printk(PFX "CPU %x online: Create Rx thread\n", cpu);
-	bnx2fc_percpu_thread_create(cpu);
-	return 0;
-}
+	unsigned cpu = (unsigned long)hcpu;
 
-static int bnx2fc_cpu_dead(unsigned int cpu)
-{
-	printk(PFX "CPU %x offline: Remove Rx thread\n", cpu);
-	bnx2fc_percpu_thread_destroy(cpu);
-	return 0;
+	switch (action) {
+	case CPU_ONLINE:
+	case CPU_ONLINE_FROZEN:
+		printk(PFX "CPU %x online: Create Rx thread\n", cpu);
+		bnx2fc_percpu_thread_create(cpu);
+		break;
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
+		printk(PFX "CPU %x offline: Remove Rx thread\n", cpu);
+		bnx2fc_percpu_thread_destroy(cpu);
+		break;
+	default:
+		break;
+	}
+	return NOTIFY_OK;
 }
 
 static int bnx2fc_slave_configure(struct scsi_device *sdev)
@@ -2638,8 +2670,6 @@ static int bnx2fc_slave_configure(struct scsi_device *sdev)
 	scsi_change_queue_depth(sdev, bnx2fc_queue_depth);
 	return 0;
 }
-
-static enum cpuhp_state bnx2fc_online_state;
 
 /**
  * bnx2fc_mod_init - module init entry point
@@ -2701,31 +2731,21 @@ static int __init bnx2fc_mod_init(void)
 		spin_lock_init(&p->fp_work_lock);
 	}
 
-	get_online_cpus();
+	cpu_notifier_register_begin();
 
-	for_each_online_cpu(cpu)
+	for_each_online_cpu(cpu) {
 		bnx2fc_percpu_thread_create(cpu);
+	}
 
-	rc = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
-				       "scsi/bnx2fc:online",
-				       bnx2fc_cpu_online, NULL);
-	if (rc < 0)
-		goto stop_threads;
-	bnx2fc_online_state = rc;
+	/* Initialize per CPU interrupt thread */
+	__register_hotcpu_notifier(&bnx2fc_cpu_notifier);
 
-	cpuhp_setup_state_nocalls(CPUHP_SCSI_BNX2FC_DEAD, "scsi/bnx2fc:dead",
-				  NULL, bnx2fc_cpu_dead);
-	put_online_cpus();
+	cpu_notifier_register_done();
 
 	cnic_register_driver(CNIC_ULP_FCOE, &bnx2fc_cnic_cb);
 
 	return 0;
 
-stop_threads:
-	for_each_online_cpu(cpu)
-		bnx2fc_percpu_thread_destroy(cpu);
-	put_online_cpus();
-	kthread_stop(l2_thread);
 free_wq:
 	destroy_workqueue(bnx2fc_wq);
 release_bt:
@@ -2784,16 +2804,16 @@ static void __exit bnx2fc_mod_exit(void)
 	if (l2_thread)
 		kthread_stop(l2_thread);
 
-	get_online_cpus();
+	cpu_notifier_register_begin();
+
 	/* Destroy per cpu threads */
 	for_each_online_cpu(cpu) {
 		bnx2fc_percpu_thread_destroy(cpu);
 	}
 
-	cpuhp_remove_state_nocalls(bnx2fc_online_state);
-	cpuhp_remove_state_nocalls(CPUHP_SCSI_BNX2FC_DEAD);
+	__unregister_hotcpu_notifier(&bnx2fc_cpu_notifier);
 
-	put_online_cpus();
+	cpu_notifier_register_done();
 
 	destroy_workqueue(bnx2fc_wq);
 	/*
@@ -2947,7 +2967,6 @@ static struct scsi_host_template bnx2fc_shost_template = {
 	.module			= THIS_MODULE,
 	.name			= "QLogic Offload FCoE Initiator",
 	.queuecommand		= bnx2fc_queuecommand,
-	.eh_timed_out		= fc_eh_timed_out,
 	.eh_abort_handler	= bnx2fc_eh_abort,	  /* abts */
 	.eh_device_reset_handler = bnx2fc_eh_device_reset, /* lun reset */
 	.eh_target_reset_handler = bnx2fc_eh_target_reset, /* tgt reset */

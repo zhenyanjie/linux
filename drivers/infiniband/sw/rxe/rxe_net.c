@@ -46,7 +46,7 @@
 #include "rxe_loc.h"
 
 static LIST_HEAD(rxe_dev_list);
-static DEFINE_SPINLOCK(dev_list_lock); /* spinlock for device list */
+static spinlock_t dev_list_lock; /* spinlock for device list */
 
 struct rxe_dev *net_to_rxe(struct net_device *ndev)
 {
@@ -102,29 +102,29 @@ static __be64 rxe_mac_to_eui64(struct net_device *ndev)
 	return eui64;
 }
 
-__be64 rxe_node_guid(struct rxe_dev *rxe)
+static __be64 node_guid(struct rxe_dev *rxe)
 {
 	return rxe_mac_to_eui64(rxe->ndev);
 }
 
-__be64 rxe_port_guid(struct rxe_dev *rxe)
+static __be64 port_guid(struct rxe_dev *rxe)
 {
 	return rxe_mac_to_eui64(rxe->ndev);
 }
 
-struct device *rxe_dma_device(struct rxe_dev *rxe)
+static struct device *dma_device(struct rxe_dev *rxe)
 {
 	struct net_device *ndev;
 
 	ndev = rxe->ndev;
 
-	if (is_vlan_dev(ndev))
+	if (ndev->priv_flags & IFF_802_1Q_VLAN)
 		ndev = vlan_dev_real_dev(ndev);
 
 	return ndev->dev.parent;
 }
 
-int rxe_mcast_add(struct rxe_dev *rxe, union ib_gid *mgid)
+static int mcast_add(struct rxe_dev *rxe, union ib_gid *mgid)
 {
 	int err;
 	unsigned char ll_addr[ETH_ALEN];
@@ -135,7 +135,7 @@ int rxe_mcast_add(struct rxe_dev *rxe, union ib_gid *mgid)
 	return err;
 }
 
-int rxe_mcast_delete(struct rxe_dev *rxe, union ib_gid *mgid)
+static int mcast_delete(struct rxe_dev *rxe, union ib_gid *mgid)
 {
 	int err;
 	unsigned char ll_addr[ETH_ALEN];
@@ -243,8 +243,8 @@ static struct socket *rxe_setup_udp_tunnel(struct net *net, __be16 port,
 {
 	int err;
 	struct socket *sock;
-	struct udp_port_cfg udp_cfg = { };
-	struct udp_tunnel_sock_cfg tnl_cfg = { };
+	struct udp_port_cfg udp_cfg = {0};
+	struct udp_tunnel_sock_cfg tnl_cfg = {0};
 
 	if (ipv6) {
 		udp_cfg.family = AF_INET6;
@@ -397,8 +397,8 @@ static int prepare6(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 	return 0;
 }
 
-int rxe_prepare(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
-		struct sk_buff *skb, u32 *crc)
+static int prepare(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
+		   struct sk_buff *skb, u32 *crc)
 {
 	int err = 0;
 	struct rxe_av *av = rxe_get_av(pkt);
@@ -424,7 +424,8 @@ static void rxe_skb_tx_dtor(struct sk_buff *skb)
 		rxe_run_task(&qp->req.task, 1);
 }
 
-int rxe_send(struct rxe_dev *rxe, struct rxe_pkt_info *pkt, struct sk_buff *skb)
+static int send(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
+		struct sk_buff *skb)
 {
 	struct sk_buff *nskb;
 	struct rxe_av *av;
@@ -454,13 +455,12 @@ int rxe_send(struct rxe_dev *rxe, struct rxe_pkt_info *pkt, struct sk_buff *skb)
 		return -EAGAIN;
 	}
 
-	atomic_inc(&pkt->qp->skb_out);
 	kfree_skb(skb);
 
 	return 0;
 }
 
-int rxe_loopback(struct sk_buff *skb)
+static int loopback(struct sk_buff *skb)
 {
 	return rxe_rcv(skb);
 }
@@ -470,8 +470,8 @@ static inline int addr_same(struct rxe_dev *rxe, struct rxe_av *av)
 	return rxe->port.port_guid == av->grh.dgid.global.interface_id;
 }
 
-struct sk_buff *rxe_init_packet(struct rxe_dev *rxe, struct rxe_av *av,
-				int paylen, struct rxe_pkt_info *pkt)
+static struct sk_buff *init_packet(struct rxe_dev *rxe, struct rxe_av *av,
+				   int paylen, struct rxe_pkt_info *pkt)
 {
 	unsigned int hdr_len;
 	struct sk_buff *skb;
@@ -510,15 +510,30 @@ struct sk_buff *rxe_init_packet(struct rxe_dev *rxe, struct rxe_av *av,
  * this is required by rxe_cfg to match rxe devices in
  * /sys/class/infiniband up with their underlying ethernet devices
  */
-const char *rxe_parent_name(struct rxe_dev *rxe, unsigned int port_num)
+static char *parent_name(struct rxe_dev *rxe, unsigned int port_num)
 {
 	return rxe->ndev->name;
 }
 
-enum rdma_link_layer rxe_link_layer(struct rxe_dev *rxe, unsigned int port_num)
+static enum rdma_link_layer link_layer(struct rxe_dev *rxe,
+				       unsigned int port_num)
 {
 	return IB_LINK_LAYER_ETHERNET;
 }
+
+static struct rxe_ifc_ops ifc_ops = {
+	.node_guid	= node_guid,
+	.port_guid	= port_guid,
+	.dma_device	= dma_device,
+	.mcast_add	= mcast_add,
+	.mcast_delete	= mcast_delete,
+	.prepare	= prepare,
+	.send		= send,
+	.loopback	= loopback,
+	.init_packet	= init_packet,
+	.parent_name	= parent_name,
+	.link_layer	= link_layer,
+};
 
 struct rxe_dev *rxe_net_add(struct net_device *ndev)
 {
@@ -529,6 +544,7 @@ struct rxe_dev *rxe_net_add(struct net_device *ndev)
 	if (!rxe)
 		return NULL;
 
+	rxe->ifc_ops = &ifc_ops;
 	rxe->ndev = ndev;
 
 	err = rxe_add(rxe, ndev->mtu);
@@ -641,8 +657,10 @@ struct notifier_block rxe_net_notifier = {
 	.notifier_call = rxe_notify,
 };
 
-static int rxe_net_ipv4_init(void)
+int rxe_net_ipv4_init(void)
 {
+	spin_lock_init(&dev_list_lock);
+
 	recv_sockets.sk4 = rxe_setup_udp_tunnel(&init_net,
 				htons(ROCE_V2_UDP_DPORT), false);
 	if (IS_ERR(recv_sockets.sk4)) {
@@ -654,9 +672,11 @@ static int rxe_net_ipv4_init(void)
 	return 0;
 }
 
-static int rxe_net_ipv6_init(void)
+int rxe_net_ipv6_init(void)
 {
 #if IS_ENABLED(CONFIG_IPV6)
+
+	spin_lock_init(&dev_list_lock);
 
 	recv_sockets.sk6 = rxe_setup_udp_tunnel(&init_net,
 						htons(ROCE_V2_UDP_DPORT), true);

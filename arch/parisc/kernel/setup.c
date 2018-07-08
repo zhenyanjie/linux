@@ -36,8 +36,6 @@
 #undef PCI_DEBUG
 #include <linux/proc_fs.h>
 #include <linux/export.h>
-#include <linux/sched.h>
-#include <linux/sched/clock.h>
 
 #include <asm/processor.h>
 #include <asm/sections.h>
@@ -178,7 +176,6 @@ void __init setup_arch(char **cmdline_p)
 	conswitchp = &dummy_con;	/* we use do_take_over_console() later ! */
 #endif
 
-	clear_sched_clock_stable();
 }
 
 /*

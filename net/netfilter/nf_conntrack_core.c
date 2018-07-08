@@ -95,19 +95,26 @@ static struct conntrack_gc_work conntrack_gc_work;
 
 void nf_conntrack_lock(spinlock_t *lock) __acquires(lock)
 {
+	/* 1) Acquire the lock */
 	spin_lock(lock);
-	while (unlikely(nf_conntrack_locks_all)) {
-		spin_unlock(lock);
 
-		/*
-		 * Order the 'nf_conntrack_locks_all' load vs. the
-		 * spin_unlock_wait() loads below, to ensure
-		 * that 'nf_conntrack_locks_all_lock' is indeed held:
-		 */
-		smp_rmb(); /* spin_lock(&nf_conntrack_locks_all_lock) */
-		spin_unlock_wait(&nf_conntrack_locks_all_lock);
-		spin_lock(lock);
-	}
+	/* 2) read nf_conntrack_locks_all, with ACQUIRE semantics
+	 * It pairs with the smp_store_release() in nf_conntrack_all_unlock()
+	 */
+	if (likely(smp_load_acquire(&nf_conntrack_locks_all) == false))
+		return;
+
+	/* fast path failed, unlock */
+	spin_unlock(lock);
+
+	/* Slow path 1) get global lock */
+	spin_lock(&nf_conntrack_locks_all_lock);
+
+	/* Slow path 2) get the lock we want */
+	spin_lock(lock);
+
+	/* Slow path 3) release the global lock */
+	spin_unlock(&nf_conntrack_locks_all_lock);
 }
 EXPORT_SYMBOL_GPL(nf_conntrack_lock);
 
@@ -148,28 +155,27 @@ static void nf_conntrack_all_lock(void)
 	int i;
 
 	spin_lock(&nf_conntrack_locks_all_lock);
+
 	nf_conntrack_locks_all = true;
 
-	/*
-	 * Order the above store of 'nf_conntrack_locks_all' against
-	 * the spin_unlock_wait() loads below, such that if
-	 * nf_conntrack_lock() observes 'nf_conntrack_locks_all'
-	 * we must observe nf_conntrack_locks[] held:
-	 */
-	smp_mb(); /* spin_lock(&nf_conntrack_locks_all_lock) */
-
 	for (i = 0; i < CONNTRACK_LOCKS; i++) {
-		spin_unlock_wait(&nf_conntrack_locks[i]);
+		spin_lock(&nf_conntrack_locks[i]);
+
+		/* This spin_unlock provides the "release" to ensure that
+		 * nf_conntrack_locks_all==true is visible to everyone that
+		 * acquired spin_lock(&nf_conntrack_locks[]).
+		 */
+		spin_unlock(&nf_conntrack_locks[i]);
 	}
 }
 
 static void nf_conntrack_all_unlock(void)
 {
-	/*
-	 * All prior stores must be complete before we clear
+	/* All prior stores must be complete before we clear
 	 * 'nf_conntrack_locks_all'. Otherwise nf_conntrack_lock()
 	 * might observe the false value but not the entire
-	 * critical section:
+	 * critical section.
+	 * It pairs with the smp_load_acquire() in nf_conntrack_lock()
 	 */
 	smp_store_release(&nf_conntrack_locks_all, false);
 	spin_unlock(&nf_conntrack_locks_all_lock);
@@ -181,11 +187,7 @@ EXPORT_SYMBOL_GPL(nf_conntrack_htable_size);
 unsigned int nf_conntrack_max __read_mostly;
 seqcount_t nf_conntrack_generation __read_mostly;
 
-/* nf_conn must be 8 bytes aligned, as the 3 LSB bits are used
- * for the nfctinfo. We cheat by (ab)using the PER CPU cache line
- * alignment to enforce this.
- */
-DEFINE_PER_CPU_ALIGNED(struct nf_conn, nf_conntrack_untracked);
+DEFINE_PER_CPU(struct nf_conn, nf_conntrack_untracked);
 EXPORT_PER_CPU_SYMBOL(nf_conntrack_untracked);
 
 static unsigned int nf_conntrack_hash_rnd __read_mostly;
@@ -354,31 +356,16 @@ static void nf_ct_del_from_dying_or_unconfirmed_list(struct nf_conn *ct)
 	spin_unlock(&pcpu->lock);
 }
 
-#define NFCT_ALIGN(len)	(((len) + NFCT_INFOMASK) & ~NFCT_INFOMASK)
-
 /* Released via destroy_conntrack() */
 struct nf_conn *nf_ct_tmpl_alloc(struct net *net,
 				 const struct nf_conntrack_zone *zone,
 				 gfp_t flags)
 {
-	struct nf_conn *tmpl, *p;
+	struct nf_conn *tmpl;
 
-	if (ARCH_KMALLOC_MINALIGN <= NFCT_INFOMASK) {
-		tmpl = kzalloc(sizeof(*tmpl) + NFCT_INFOMASK, flags);
-		if (!tmpl)
-			return NULL;
-
-		p = tmpl;
-		tmpl = (struct nf_conn *)NFCT_ALIGN((unsigned long)p);
-		if (tmpl != p) {
-			tmpl = (struct nf_conn *)NFCT_ALIGN((unsigned long)p);
-			tmpl->proto.tmpl_padto = (char *)tmpl - (char *)p;
-		}
-	} else {
-		tmpl = kzalloc(sizeof(*tmpl), flags);
-		if (!tmpl)
-			return NULL;
-	}
+	tmpl = kzalloc(sizeof(*tmpl), flags);
+	if (tmpl == NULL)
+		return NULL;
 
 	tmpl->status = IPS_TEMPLATE;
 	write_pnet(&tmpl->ct_net, net);
@@ -393,11 +380,7 @@ void nf_ct_tmpl_free(struct nf_conn *tmpl)
 {
 	nf_ct_ext_destroy(tmpl);
 	nf_ct_ext_free(tmpl);
-
-	if (ARCH_KMALLOC_MINALIGN <= NFCT_INFOMASK)
-		kfree((char *)tmpl - tmpl->proto.tmpl_padto);
-	else
-		kfree(tmpl);
+	kfree(tmpl);
 }
 EXPORT_SYMBOL_GPL(nf_ct_tmpl_free);
 
@@ -706,15 +689,15 @@ static int nf_ct_resolve_clash(struct net *net, struct sk_buff *skb,
 
 	l4proto = __nf_ct_l4proto_find(nf_ct_l3num(ct), nf_ct_protonum(ct));
 	if (l4proto->allow_clash &&
-	    !nfct_nat(ct) &&
+	    ((ct->status & IPS_NAT_DONE_MASK) == 0) &&
 	    !nf_ct_is_dying(ct) &&
 	    atomic_inc_not_zero(&ct->ct_general.use)) {
-		enum ip_conntrack_info oldinfo;
-		struct nf_conn *loser_ct = nf_ct_get(skb, &oldinfo);
-
-		nf_ct_acct_merge(ct, ctinfo, loser_ct);
-		nf_conntrack_put(&loser_ct->ct_general);
-		nf_ct_set(skb, ct, oldinfo);
+		nf_ct_acct_merge(ct, ctinfo, (struct nf_conn *)skb->nfct);
+		nf_conntrack_put(skb->nfct);
+		/* Assign conntrack already in hashes to this skbuff. Don't
+		 * modify skb->nfctinfo to ensure consistent stateful filtering.
+		 */
+		skb->nfct = &ct->ct_general;
 		return NF_ACCEPT;
 	}
 	NF_CT_STAT_INC(net, drop);
@@ -806,7 +789,7 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	/* set conntrack timestamp, if enabled. */
 	tstamp = nf_conn_tstamp_find(ct);
 	if (tstamp) {
-		if (skb->tstamp == 0)
+		if (skb->tstamp.tv64 == 0)
 			__net_timestamp(skb);
 
 		tstamp->start = ktime_to_ns(skb->tstamp);
@@ -1241,7 +1224,7 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 	return &ct->tuplehash[IP_CT_DIR_ORIGINAL];
 }
 
-/* On success, returns conntrack ptr, sets skb->_nfct | ctinfo */
+/* On success, returns conntrack ptr, sets skb->nfct and ctinfo */
 static inline struct nf_conn *
 resolve_normal_ct(struct net *net, struct nf_conn *tmpl,
 		  struct sk_buff *skb,
@@ -1300,7 +1283,8 @@ resolve_normal_ct(struct net *net, struct nf_conn *tmpl,
 		}
 		*set_reply = 0;
 	}
-	nf_ct_set(skb, ct, *ctinfo);
+	skb->nfct = &ct->ct_general;
+	skb->nfctinfo = *ctinfo;
 	return ct;
 }
 
@@ -1308,7 +1292,7 @@ unsigned int
 nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 		struct sk_buff *skb)
 {
-	struct nf_conn *ct, *tmpl;
+	struct nf_conn *ct, *tmpl = NULL;
 	enum ip_conntrack_info ctinfo;
 	struct nf_conntrack_l3proto *l3proto;
 	struct nf_conntrack_l4proto *l4proto;
@@ -1318,14 +1302,14 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 	int set_reply = 0;
 	int ret;
 
-	tmpl = nf_ct_get(skb, &ctinfo);
-	if (tmpl) {
+	if (skb->nfct) {
 		/* Previously seen (loopback or untracked)?  Ignore. */
+		tmpl = (struct nf_conn *)skb->nfct;
 		if (!nf_ct_is_template(tmpl)) {
 			NF_CT_STAT_INC_ATOMIC(net, ignore);
 			return NF_ACCEPT;
 		}
-		skb->_nfct = 0;
+		skb->nfct = NULL;
 	}
 
 	/* rcu_read_lock()ed by nf_hook_thresh */
@@ -1346,7 +1330,8 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 	 * inverse of the return code tells to the netfilter
 	 * core what to do with the packet. */
 	if (l4proto->error != NULL) {
-		ret = l4proto->error(net, tmpl, skb, dataoff, pf, hooknum);
+		ret = l4proto->error(net, tmpl, skb, dataoff, &ctinfo,
+				     pf, hooknum);
 		if (ret <= 0) {
 			NF_CT_STAT_INC_ATOMIC(net, error);
 			NF_CT_STAT_INC_ATOMIC(net, invalid);
@@ -1354,10 +1339,10 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 			goto out;
 		}
 		/* ICMP[v6] protocol trackers may assign one conntrack. */
-		if (skb->_nfct)
+		if (skb->nfct)
 			goto out;
 	}
-repeat:
+
 	ct = resolve_normal_ct(net, tmpl, skb, dataoff, pf, protonum,
 			       l3proto, l4proto, &set_reply, &ctinfo);
 	if (!ct) {
@@ -1374,7 +1359,7 @@ repeat:
 		goto out;
 	}
 
-	NF_CT_ASSERT(skb_nfct(skb));
+	NF_CT_ASSERT(skb->nfct);
 
 	/* Decide what timeout policy we want to apply to this flow. */
 	timeouts = nf_ct_timeout_lookup(net, ct, l4proto);
@@ -1384,17 +1369,11 @@ repeat:
 		/* Invalid: inverse of the return code tells
 		 * the netfilter core what to do */
 		pr_debug("nf_conntrack_in: Can't track with proto module\n");
-		nf_conntrack_put(&ct->ct_general);
-		skb->_nfct = 0;
+		nf_conntrack_put(skb->nfct);
+		skb->nfct = NULL;
 		NF_CT_STAT_INC_ATOMIC(net, invalid);
 		if (ret == -NF_DROP)
 			NF_CT_STAT_INC_ATOMIC(net, drop);
-		/* Special case: TCP tracker reports an attempt to reopen a
-		 * closed/aborted connection. We have to go back and create a
-		 * fresh conntrack.
-		 */
-		if (ret == -NF_REPEAT)
-			goto repeat;
 		ret = -ret;
 		goto out;
 	}
@@ -1402,8 +1381,15 @@ repeat:
 	if (set_reply && !test_and_set_bit(IPS_SEEN_REPLY_BIT, &ct->status))
 		nf_conntrack_event_cache(IPCT_REPLY, ct);
 out:
-	if (tmpl)
-		nf_ct_put(tmpl);
+	if (tmpl) {
+		/* Special case: we have to repeat this hook, assign the
+		 * template again to this packet. We assume that this packet
+		 * has no conntrack assigned. This is used by nf_ct_tcp. */
+		if (ret == NF_REPEAT)
+			skb->nfct = (struct nf_conntrack *)tmpl;
+		else
+			nf_ct_put(tmpl);
+	}
 
 	return ret;
 }
@@ -1543,8 +1529,9 @@ static void nf_conntrack_attach(struct sk_buff *nskb, const struct sk_buff *skb)
 		ctinfo = IP_CT_RELATED;
 
 	/* Attach to new skbuff, and increment count */
-	nf_ct_set(nskb, ct, ctinfo);
-	nf_conntrack_get(skb_nfct(nskb));
+	nskb->nfct = &ct->ct_general;
+	nskb->nfctinfo = ctinfo;
+	nf_conntrack_get(nskb->nfct);
 }
 
 /* Bring out ya dead! */
@@ -1555,7 +1542,6 @@ get_next_corpse(struct net *net, int (*iter)(struct nf_conn *i, void *data),
 	struct nf_conntrack_tuple_hash *h;
 	struct nf_conn *ct;
 	struct hlist_nulls_node *n;
-	int cpu;
 	spinlock_t *lockp;
 
 	for (; *bucket < nf_conntrack_htable_size; (*bucket)++) {
@@ -1577,24 +1563,40 @@ get_next_corpse(struct net *net, int (*iter)(struct nf_conn *i, void *data),
 		cond_resched();
 	}
 
-	for_each_possible_cpu(cpu) {
-		struct ct_pcpu *pcpu = per_cpu_ptr(net->ct.pcpu_lists, cpu);
-
-		spin_lock_bh(&pcpu->lock);
-		hlist_nulls_for_each_entry(h, n, &pcpu->unconfirmed, hnnode) {
-			ct = nf_ct_tuplehash_to_ctrack(h);
-			if (iter(ct, data))
-				set_bit(IPS_DYING_BIT, &ct->status);
-		}
-		spin_unlock_bh(&pcpu->lock);
-		cond_resched();
-	}
 	return NULL;
 found:
 	atomic_inc(&ct->ct_general.use);
 	spin_unlock(lockp);
 	local_bh_enable();
 	return ct;
+}
+
+static void
+__nf_ct_unconfirmed_destroy(struct net *net)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct nf_conntrack_tuple_hash *h;
+		struct hlist_nulls_node *n;
+		struct ct_pcpu *pcpu;
+
+		pcpu = per_cpu_ptr(net->ct.pcpu_lists, cpu);
+
+		spin_lock_bh(&pcpu->lock);
+		hlist_nulls_for_each_entry(h, n, &pcpu->unconfirmed, hnnode) {
+			struct nf_conn *ct;
+
+			ct = nf_ct_tuplehash_to_ctrack(h);
+
+			/* we cannot call iter() on unconfirmed list, the
+			 * owning cpu can reallocate ct->ext at any time.
+			 */
+			set_bit(IPS_DYING_BIT, &ct->status);
+		}
+		spin_unlock_bh(&pcpu->lock);
+		cond_resched();
+	}
 }
 
 void nf_ct_iterate_cleanup(struct net *net,
@@ -1608,6 +1610,10 @@ void nf_ct_iterate_cleanup(struct net *net,
 
 	if (atomic_read(&net->ct.count) == 0)
 		return;
+
+	__nf_ct_unconfirmed_destroy(net);
+
+	synchronize_net();
 
 	while ((ct = get_next_corpse(net, iter, data, &bucket)) != NULL) {
 		/* Time to push up daises... */
@@ -1880,8 +1886,7 @@ int nf_conntrack_init_start(void)
 	nf_conntrack_max = max_factor * nf_conntrack_htable_size;
 
 	nf_conntrack_cachep = kmem_cache_create("nf_conntrack",
-						sizeof(struct nf_conn),
-						NFCT_INFOMASK + 1,
+						sizeof(struct nf_conn), 0,
 						SLAB_DESTROY_BY_RCU | SLAB_HWCACHE_ALIGN, NULL);
 	if (!nf_conntrack_cachep)
 		goto err_cachep;

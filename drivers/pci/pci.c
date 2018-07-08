@@ -2228,7 +2228,7 @@ void pci_config_pm_runtime_put(struct pci_dev *pdev)
  * This function checks if it is possible to move the bridge to D3.
  * Currently we only allow D3 for recent enough PCIe ports.
  */
-bool pci_bridge_d3_possible(struct pci_dev *bridge)
+static bool pci_bridge_d3_possible(struct pci_dev *bridge)
 {
 	unsigned int year;
 
@@ -2241,17 +2241,6 @@ bool pci_bridge_d3_possible(struct pci_dev *bridge)
 	case PCI_EXP_TYPE_DOWNSTREAM:
 		if (pci_bridge_d3_disable)
 			return false;
-
-		/*
-		 * Hotplug interrupts cannot be delivered if the link is down,
-		 * so parents of a hotplug port must stay awake. In addition,
-		 * hotplug ports handled by firmware in System Management Mode
-		 * may not be put into D3 by the OS (Thunderbolt on non-Macs).
-		 * For simplicity, disallow in general for now.
-		 */
-		if (bridge->is_hotplug_bridge)
-			return false;
-
 		if (pci_bridge_d3_force)
 			return true;
 
@@ -2272,33 +2261,32 @@ bool pci_bridge_d3_possible(struct pci_dev *bridge)
 static int pci_dev_check_d3cold(struct pci_dev *dev, void *data)
 {
 	bool *d3cold_ok = data;
+	bool no_d3cold;
 
-	if (/* The device needs to be allowed to go D3cold ... */
-	    dev->no_d3cold || !dev->d3cold_allowed ||
+	/*
+	 * The device needs to be allowed to go D3cold and if it is wake
+	 * capable to do so from D3cold.
+	 */
+	no_d3cold = dev->no_d3cold || !dev->d3cold_allowed ||
+		(device_may_wakeup(&dev->dev) && !pci_pme_capable(dev, PCI_D3cold)) ||
+		!pci_power_manageable(dev);
 
-	    /* ... and if it is wakeup capable to do so from D3cold. */
-	    (device_may_wakeup(&dev->dev) &&
-	     !pci_pme_capable(dev, PCI_D3cold)) ||
+	*d3cold_ok = !no_d3cold;
 
-	    /* If it is a bridge it must be allowed to go to D3. */
-	    !pci_power_manageable(dev))
-
-		*d3cold_ok = false;
-
-	return !*d3cold_ok;
+	return no_d3cold;
 }
 
 /*
  * pci_bridge_d3_update - Update bridge D3 capabilities
  * @dev: PCI device which is changed
+ * @remove: Is the device being removed
  *
  * Update upstream bridge PM capabilities accordingly depending on if the
  * device PM configuration was changed or the device is being removed.  The
  * change is also propagated upstream.
  */
-void pci_bridge_d3_update(struct pci_dev *dev)
+static void pci_bridge_d3_update(struct pci_dev *dev, bool remove)
 {
-	bool remove = !device_is_registered(&dev->dev);
 	struct pci_dev *bridge;
 	bool d3cold_ok = true;
 
@@ -2306,39 +2294,55 @@ void pci_bridge_d3_update(struct pci_dev *dev)
 	if (!bridge || !pci_bridge_d3_possible(bridge))
 		return;
 
+	pci_dev_get(bridge);
 	/*
-	 * If D3 is currently allowed for the bridge, removing one of its
-	 * children won't change that.
-	 */
-	if (remove && bridge->bridge_d3)
-		return;
-
-	/*
-	 * If D3 is currently allowed for the bridge and a child is added or
-	 * changed, disallowance of D3 can only be caused by that child, so
-	 * we only need to check that single device, not any of its siblings.
-	 *
-	 * If D3 is currently not allowed for the bridge, checking the device
-	 * first may allow us to skip checking its siblings.
+	 * If the device is removed we do not care about its D3cold
+	 * capabilities.
 	 */
 	if (!remove)
 		pci_dev_check_d3cold(dev, &d3cold_ok);
 
-	/*
-	 * If D3 is currently not allowed for the bridge, this may be caused
-	 * either by the device being changed/removed or any of its siblings,
-	 * so we need to go through all children to find out if one of them
-	 * continues to block D3.
-	 */
-	if (d3cold_ok && !bridge->bridge_d3)
+	if (d3cold_ok) {
+		/*
+		 * We need to go through all children to find out if all of
+		 * them can still go to D3cold.
+		 */
 		pci_walk_bus(bridge->subordinate, pci_dev_check_d3cold,
 			     &d3cold_ok);
+	}
 
 	if (bridge->bridge_d3 != d3cold_ok) {
 		bridge->bridge_d3 = d3cold_ok;
 		/* Propagate change to upstream bridges */
-		pci_bridge_d3_update(bridge);
+		pci_bridge_d3_update(bridge, false);
 	}
+
+	pci_dev_put(bridge);
+}
+
+/**
+ * pci_bridge_d3_device_changed - Update bridge D3 capabilities on change
+ * @dev: PCI device that was changed
+ *
+ * If a device is added or its PM configuration, such as is it allowed to
+ * enter D3cold, is changed this function updates upstream bridge PM
+ * capabilities accordingly.
+ */
+void pci_bridge_d3_device_changed(struct pci_dev *dev)
+{
+	pci_bridge_d3_update(dev, false);
+}
+
+/**
+ * pci_bridge_d3_device_removed - Update bridge D3 capabilities on remove
+ * @dev: PCI device being removed
+ *
+ * Function updates upstream bridge PM capabilities based on other devices
+ * still left on the bus.
+ */
+void pci_bridge_d3_device_removed(struct pci_dev *dev)
+{
+	pci_bridge_d3_update(dev, true);
 }
 
 /**
@@ -2353,7 +2357,7 @@ void pci_d3cold_enable(struct pci_dev *dev)
 {
 	if (dev->no_d3cold) {
 		dev->no_d3cold = false;
-		pci_bridge_d3_update(dev);
+		pci_bridge_d3_device_changed(dev);
 	}
 }
 EXPORT_SYMBOL_GPL(pci_d3cold_enable);
@@ -2370,7 +2374,7 @@ void pci_d3cold_disable(struct pci_dev *dev)
 {
 	if (!dev->no_d3cold) {
 		dev->no_d3cold = true;
-		pci_bridge_d3_update(dev);
+		pci_bridge_d3_device_changed(dev);
 	}
 }
 EXPORT_SYMBOL_GPL(pci_d3cold_disable);
@@ -3752,27 +3756,49 @@ int pci_wait_for_pending_transaction(struct pci_dev *dev)
 }
 EXPORT_SYMBOL(pci_wait_for_pending_transaction);
 
-/*
- * We should only need to wait 100ms after FLR, but some devices take longer.
- * Wait for up to 1000ms for config space to return something other than -1.
- * Intel IGD requires this when an LCD panel is attached.  We read the 2nd
- * dword because VFs don't implement the 1st dword.
- */
 static void pci_flr_wait(struct pci_dev *dev)
 {
-	int i = 0;
+	int delay = 1, timeout = 60000;
 	u32 id;
 
-	do {
-		msleep(100);
-		pci_read_config_dword(dev, PCI_COMMAND, &id);
-	} while (i++ < 10 && id == ~0);
+	/*
+	 * Per PCIe r3.1, sec 6.6.2, a device must complete an FLR within
+	 * 100ms, but may silently discard requests while the FLR is in
+	 * progress.  Wait 100ms before trying to access the device.
+	 */
+	msleep(100);
 
-	if (id == ~0)
-		dev_warn(&dev->dev, "Failed to return from FLR\n");
-	else if (i > 1)
-		dev_info(&dev->dev, "Required additional %dms to return from FLR\n",
-			 (i - 1) * 100);
+	/*
+	 * After 100ms, the device should not silently discard config
+	 * requests, but it may still indicate that it needs more time by
+	 * responding to them with CRS completions.  The Root Port will
+	 * generally synthesize ~0 data to complete the read (except when
+	 * CRS SV is enabled and the read was for the Vendor ID; in that
+	 * case it synthesizes 0x0001 data).
+	 *
+	 * Wait for the device to return a non-CRS completion.  Read the
+	 * Command register instead of Vendor ID so we don't have to
+	 * contend with the CRS SV value.
+	 */
+	pci_read_config_dword(dev, PCI_COMMAND, &id);
+	while (id == ~0) {
+		if (delay > timeout) {
+			dev_warn(&dev->dev, "not ready %dms after FLR; giving up\n",
+				 100 + delay - 1);
+			return;
+		}
+
+		if (delay > 1000)
+			dev_info(&dev->dev, "not ready %dms after FLR; waiting\n",
+				 100 + delay - 1);
+
+		msleep(delay);
+		delay *= 2;
+		pci_read_config_dword(dev, PCI_COMMAND, &id);
+	}
+
+	if (delay > 1000)
+		dev_info(&dev->dev, "ready %dms after FLR\n", 100 + delay - 1);
 }
 
 static int pcie_flr(struct pci_dev *dev, int probe)
@@ -4209,6 +4235,10 @@ EXPORT_SYMBOL_GPL(pci_try_reset_function);
 static bool pci_bus_resetable(struct pci_bus *bus)
 {
 	struct pci_dev *dev;
+
+
+	if (bus->self && (bus->self->dev_flags & PCI_DEV_FLAGS_NO_BUS_RESET))
+		return false;
 
 	list_for_each_entry(dev, &bus->devices, bus_list) {
 		if (dev->dev_flags & PCI_DEV_FLAGS_NO_BUS_RESET ||

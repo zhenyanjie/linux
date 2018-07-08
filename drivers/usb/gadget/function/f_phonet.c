@@ -261,10 +261,19 @@ out:
 	return NETDEV_TX_OK;
 }
 
+static int pn_net_mtu(struct net_device *dev, int new_mtu)
+{
+	if ((new_mtu < PHONET_MIN_MTU) || (new_mtu > PHONET_MAX_MTU))
+		return -EINVAL;
+	dev->mtu = new_mtu;
+	return 0;
+}
+
 static const struct net_device_ops pn_netdev_ops = {
 	.ndo_open	= pn_net_open,
 	.ndo_stop	= pn_net_close,
 	.ndo_start_xmit	= pn_net_xmit,
+	.ndo_change_mtu	= pn_net_mtu,
 };
 
 static void pn_net_setup(struct net_device *dev)
@@ -273,15 +282,13 @@ static void pn_net_setup(struct net_device *dev)
 	dev->type		= ARPHRD_PHONET;
 	dev->flags		= IFF_POINTOPOINT | IFF_NOARP;
 	dev->mtu		= PHONET_DEV_MTU;
-	dev->min_mtu		= PHONET_MIN_MTU;
-	dev->max_mtu		= PHONET_MAX_MTU;
 	dev->hard_header_len	= 1;
 	dev->dev_addr[0]	= PN_MEDIA_USB;
 	dev->addr_len		= 1;
 	dev->tx_queue_len	= 1;
 
 	dev->netdev_ops		= &pn_netdev_ops;
-	dev->needs_free_netdev	= true;
+	dev->destructor		= free_netdev;
 	dev->header_ops		= &phonet_header_ops;
 }
 

@@ -1,7 +1,7 @@
 /*
  * NET		Generic infrastructure for Network protocols.
  *
- *		Definitions for request_sock
+ *		Definitions for request_sock 
  *
  * Authors:	Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  *
@@ -122,6 +122,8 @@ static inline void reqsk_put(struct request_sock *req)
 	if (atomic_dec_and_test(&req->rsk_refcnt))
 		reqsk_free(req);
 }
+
+extern int sysctl_max_syn_backlog;
 
 /*
  * For a TCP Fast Open listener -

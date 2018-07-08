@@ -199,7 +199,7 @@ MODULE_PARM_DESC(lp_interval, "The number of seconds between instances where "
 atomic_t netpoll_block_tx = ATOMIC_INIT(0);
 #endif
 
-unsigned int bond_net_id __read_mostly;
+int bond_net_id __read_mostly;
 
 static __be32 arp_target[BOND_MAX_ARP_TARGETS];
 static int arp_ip_count;
@@ -211,8 +211,8 @@ static int lacp_fast;
 
 static int bond_init(struct net_device *bond_dev);
 static void bond_uninit(struct net_device *bond_dev);
-static void bond_get_stats(struct net_device *bond_dev,
-			   struct rtnl_link_stats64 *stats);
+static struct rtnl_link_stats64 *bond_get_stats(struct net_device *bond_dev,
+						struct rtnl_link_stats64 *stats);
 static void bond_slave_arr_handler(struct work_struct *work);
 static bool bond_time_in_interval(struct bonding *bond, unsigned long last_act,
 				  int mod);
@@ -371,9 +371,10 @@ down:
 /* Get link speed and duplex from the slave's base driver
  * using ethtool. If for some reason the call fails or the
  * values are invalid, set speed and duplex to -1,
- * and return.
+ * and return. Return 1 if speed or duplex settings are
+ * UNKNOWN; 0 otherwise.
  */
-static void bond_update_speed_duplex(struct slave *slave)
+static int bond_update_speed_duplex(struct slave *slave)
 {
 	struct net_device *slave_dev = slave->dev;
 	struct ethtool_link_ksettings ecmd;
@@ -384,23 +385,21 @@ static void bond_update_speed_duplex(struct slave *slave)
 
 	res = __ethtool_get_link_ksettings(slave_dev, &ecmd);
 	if (res < 0)
-		return;
-
+		return 1;
 	if (ecmd.base.speed == 0 || ecmd.base.speed == ((__u32)-1))
-		return;
-
+		return 1;
 	switch (ecmd.base.duplex) {
 	case DUPLEX_FULL:
 	case DUPLEX_HALF:
 		break;
 	default:
-		return;
+		return 1;
 	}
 
 	slave->speed = ecmd.base.speed;
 	slave->duplex = ecmd.base.duplex;
 
-	return;
+	return 0;
 }
 
 const char *bond_slave_link_status(s8 link)
@@ -1104,11 +1103,11 @@ static void bond_compute_features(struct bonding *bond)
 		gso_max_size = min(gso_max_size, slave->dev->gso_max_size);
 		gso_max_segs = min(gso_max_segs, slave->dev->gso_max_segs);
 	}
-	bond_dev->hard_header_len = max_hard_header_len;
 
 done:
 	bond_dev->vlan_features = vlan_features;
 	bond_dev->hw_enc_features = enc_features | NETIF_F_GSO_ENCAP_ALL;
+	bond_dev->hard_header_len = max_hard_header_len;
 	bond_dev->gso_max_segs = gso_max_segs;
 	netif_set_gso_max_size(bond_dev, gso_max_size);
 
@@ -1520,39 +1519,6 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 			goto err_close;
 	}
 
-	/* If the mode uses primary, then the following is handled by
-	 * bond_change_active_slave().
-	 */
-	if (!bond_uses_primary(bond)) {
-		/* set promiscuity level to new slave */
-		if (bond_dev->flags & IFF_PROMISC) {
-			res = dev_set_promiscuity(slave_dev, 1);
-			if (res)
-				goto err_close;
-		}
-
-		/* set allmulti level to new slave */
-		if (bond_dev->flags & IFF_ALLMULTI) {
-			res = dev_set_allmulti(slave_dev, 1);
-			if (res)
-				goto err_close;
-		}
-
-		netif_addr_lock_bh(bond_dev);
-
-		dev_mc_sync_multiple(slave_dev, bond_dev);
-		dev_uc_sync_multiple(slave_dev, bond_dev);
-
-		netif_addr_unlock_bh(bond_dev);
-	}
-
-	if (BOND_MODE(bond) == BOND_MODE_8023AD) {
-		/* add lacpdu mc addr to mc list */
-		u8 lacpdu_multicast[ETH_ALEN] = MULTICAST_LACPDU_ADDR;
-
-		dev_mc_add(slave_dev, lacpdu_multicast);
-	}
-
 	res = vlan_vids_add_by_dev(slave_dev, bond_dev);
 	if (res) {
 		netdev_err(bond_dev, "Couldn't add bond vlan ids to %s\n",
@@ -1565,7 +1531,9 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	new_slave->delay = 0;
 	new_slave->link_failure_count = 0;
 
-	bond_update_speed_duplex(new_slave);
+	if (bond_update_speed_duplex(new_slave) &&
+	    bond_needs_speed_duplex(bond))
+		new_slave->link = BOND_LINK_DOWN;
 
 	new_slave->last_rx = jiffies -
 		(msecs_to_jiffies(bond->params.arp_interval) + 1);
@@ -1683,8 +1651,7 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	} /* switch(bond_mode) */
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
-	slave_dev->npinfo = bond->dev->npinfo;
-	if (slave_dev->npinfo) {
+	if (bond->dev->npinfo) {
 		if (slave_enable_netpoll(new_slave)) {
 			netdev_info(bond_dev, "master_dev is using netpoll, but new slave device does not support netpoll\n");
 			res = -EBUSY;
@@ -1715,6 +1682,40 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 		goto err_upper_unlink;
 	}
 
+	/* If the mode uses primary, then the following is handled by
+	 * bond_change_active_slave().
+	 */
+	if (!bond_uses_primary(bond)) {
+		/* set promiscuity level to new slave */
+		if (bond_dev->flags & IFF_PROMISC) {
+			res = dev_set_promiscuity(slave_dev, 1);
+			if (res)
+				goto err_sysfs_del;
+		}
+
+		/* set allmulti level to new slave */
+		if (bond_dev->flags & IFF_ALLMULTI) {
+			res = dev_set_allmulti(slave_dev, 1);
+			if (res) {
+				if (bond_dev->flags & IFF_PROMISC)
+					dev_set_promiscuity(slave_dev, -1);
+				goto err_sysfs_del;
+			}
+		}
+
+		netif_addr_lock_bh(bond_dev);
+		dev_mc_sync_multiple(slave_dev, bond_dev);
+		dev_uc_sync_multiple(slave_dev, bond_dev);
+		netif_addr_unlock_bh(bond_dev);
+
+		if (BOND_MODE(bond) == BOND_MODE_8023AD) {
+			/* add lacpdu mc addr to mc list */
+			u8 lacpdu_multicast[ETH_ALEN] = MULTICAST_LACPDU_ADDR;
+
+			dev_mc_add(slave_dev, lacpdu_multicast);
+		}
+	}
+
 	bond->slave_cnt++;
 	bond_compute_features(bond);
 	bond_set_carrier(bond);
@@ -1728,6 +1729,8 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	if (bond_mode_uses_xmit_hash(bond))
 		bond_update_slave_arr(bond, NULL);
 
+	bond->nest_level = dev_get_nest_level(bond_dev);
+
 	netdev_info(bond_dev, "Enslaving %s as %s interface with %s link\n",
 		    slave_dev->name,
 		    bond_is_active_slave(new_slave) ? "an active" : "a backup",
@@ -1738,6 +1741,9 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	return 0;
 
 /* Undo stages on error */
+err_sysfs_del:
+	bond_sysfs_slave_del(new_slave);
+
 err_upper_unlink:
 	bond_upper_dev_unlink(bond, new_slave);
 
@@ -1745,9 +1751,6 @@ err_unregister:
 	netdev_rx_handler_unregister(slave_dev);
 
 err_detach:
-	if (!bond_uses_primary(bond))
-		bond_hw_addr_flush(bond_dev, slave_dev);
-
 	vlan_vids_del_by_dev(slave_dev, bond_dev);
 	if (rcu_access_pointer(bond->primary_slave) == new_slave)
 		RCU_INIT_POINTER(bond->primary_slave, NULL);
@@ -1993,10 +1996,11 @@ static int  bond_release_and_destroy(struct net_device *bond_dev,
 	return ret;
 }
 
-static void bond_info_query(struct net_device *bond_dev, struct ifbond *info)
+static int bond_info_query(struct net_device *bond_dev, struct ifbond *info)
 {
 	struct bonding *bond = netdev_priv(bond_dev);
 	bond_fill_ifbond(bond, info);
+	return 0;
 }
 
 static int bond_slave_info_query(struct net_device *bond_dev, struct ifslave *info)
@@ -2062,6 +2066,7 @@ static int bond_miimon_inspect(struct bonding *bond)
 					    (bond->params.downdelay - slave->delay) *
 					    bond->params.miimon,
 					    slave->dev->name);
+				commit++;
 				continue;
 			}
 
@@ -2099,7 +2104,7 @@ static int bond_miimon_inspect(struct bonding *bond)
 					    (bond->params.updelay - slave->delay) *
 					    bond->params.miimon,
 					    slave->dev->name);
-
+				commit++;
 				continue;
 			}
 
@@ -2132,7 +2137,14 @@ static void bond_miimon_commit(struct bonding *bond)
 			continue;
 
 		case BOND_LINK_UP:
-			bond_update_speed_duplex(slave);
+			if (bond_update_speed_duplex(slave) &&
+			    bond_needs_speed_duplex(bond)) {
+				slave->link = BOND_LINK_DOWN;
+				netdev_warn(bond->dev,
+					    "failed to get link speed/duplex for %s\n",
+					    slave->dev->name);
+				continue;
+			}
 			bond_set_slave_link_state(slave, BOND_LINK_UP,
 						  BOND_SLAVE_NOTIFY_NOW);
 			slave->last_link_up = jiffies;
@@ -2269,23 +2281,22 @@ re_arm:
 	}
 }
 
-static int bond_upper_dev_walk(struct net_device *upper, void *data)
-{
-	__be32 ip = *((__be32 *)data);
-
-	return ip == bond_confirm_addr(upper, 0, ip);
-}
-
 static bool bond_has_this_ip(struct bonding *bond, __be32 ip)
 {
+	struct net_device *upper;
+	struct list_head *iter;
 	bool ret = false;
 
 	if (ip == bond_confirm_addr(bond->dev, 0, ip))
 		return true;
 
 	rcu_read_lock();
-	if (netdev_walk_all_upper_dev_rcu(bond->dev, bond_upper_dev_walk, &ip))
-		ret = true;
+	netdev_for_each_all_upper_dev_rcu(bond->dev, upper, iter) {
+		if (ip == bond_confirm_addr(upper, 0, ip)) {
+			ret = true;
+			break;
+		}
+	}
 	rcu_read_unlock();
 
 	return ret;
@@ -2600,11 +2611,13 @@ static void bond_loadbalance_arp_mon(struct work_struct *work)
 	bond_for_each_slave_rcu(bond, slave, iter) {
 		unsigned long trans_start = dev_trans_start(slave->dev);
 
+		slave->new_link = BOND_LINK_NOCHANGE;
+
 		if (slave->link != BOND_LINK_UP) {
 			if (bond_time_in_interval(bond, trans_start, 1) &&
 			    bond_time_in_interval(bond, slave->last_rx, 1)) {
 
-				slave->link  = BOND_LINK_UP;
+				slave->new_link = BOND_LINK_UP;
 				slave_state_changed = 1;
 
 				/* primary_slave has no meaning in round-robin
@@ -2631,7 +2644,7 @@ static void bond_loadbalance_arp_mon(struct work_struct *work)
 			if (!bond_time_in_interval(bond, trans_start, 2) ||
 			    !bond_time_in_interval(bond, slave->last_rx, 2)) {
 
-				slave->link  = BOND_LINK_DOWN;
+				slave->new_link = BOND_LINK_DOWN;
 				slave_state_changed = 1;
 
 				if (slave->link_failure_count < UINT_MAX)
@@ -2661,6 +2674,11 @@ static void bond_loadbalance_arp_mon(struct work_struct *work)
 	if (do_failover || slave_state_changed) {
 		if (!rtnl_trylock())
 			goto re_arm;
+
+		bond_for_each_slave(bond, slave, iter) {
+			if (slave->new_link != BOND_LINK_NOCHANGE)
+				slave->link = slave->new_link;
+		}
 
 		if (slave_state_changed) {
 			bond_slave_state_change(bond);
@@ -3217,7 +3235,7 @@ u32 bond_xmit_hash(struct bonding *bond, struct sk_buff *skb)
 	hash ^= (hash >> 16);
 	hash ^= (hash >> 8);
 
-	return hash;
+	return hash >> 1;
 }
 
 /*-------------------------- Device entry points ----------------------------*/
@@ -3327,17 +3345,22 @@ static void bond_fold_stats(struct rtnl_link_stats64 *_res,
 	for (i = 0; i < sizeof(*_res) / sizeof(u64); i++) {
 		u64 nv = new[i];
 		u64 ov = old[i];
+		s64 delta = nv - ov;
 
 		/* detects if this particular field is 32bit only */
 		if (((nv | ov) >> 32) == 0)
-			res[i] += (u32)nv - (u32)ov;
-		else
-			res[i] += nv - ov;
+			delta = (s64)(s32)((u32)nv - (u32)ov);
+
+		/* filter anomalies, some drivers reset their stats
+		 * at down/up events.
+		 */
+		if (delta > 0)
+			res[i] += delta;
 	}
 }
 
-static void bond_get_stats(struct net_device *bond_dev,
-			   struct rtnl_link_stats64 *stats)
+static struct rtnl_link_stats64 *bond_get_stats(struct net_device *bond_dev,
+						struct rtnl_link_stats64 *stats)
 {
 	struct bonding *bond = netdev_priv(bond_dev);
 	struct rtnl_link_stats64 temp;
@@ -3361,6 +3384,8 @@ static void bond_get_stats(struct net_device *bond_dev,
 
 	memcpy(&bond->bond_stats, stats, sizeof(*stats));
 	spin_unlock(&bond->stats_lock);
+
+	return stats;
 }
 
 static int bond_do_ioctl(struct net_device *bond_dev, struct ifreq *ifr, int cmd)
@@ -3408,11 +3433,12 @@ static int bond_do_ioctl(struct net_device *bond_dev, struct ifreq *ifr, int cmd
 		if (copy_from_user(&k_binfo, u_binfo, sizeof(ifbond)))
 			return -EFAULT;
 
-		bond_info_query(bond_dev, &k_binfo);
-		if (copy_to_user(u_binfo, &k_binfo, sizeof(ifbond)))
+		res = bond_info_query(bond_dev, &k_binfo);
+		if (res == 0 &&
+		    copy_to_user(u_binfo, &k_binfo, sizeof(ifbond)))
 			return -EFAULT;
 
-		return 0;
+		return res;
 	case BOND_SLAVE_INFO_QUERY_OLD:
 	case SIOCBONDSLAVEINFOQUERY:
 		u_sinfo = (struct ifslave __user *)ifr->ifr_data;
@@ -4076,16 +4102,16 @@ static netdev_tx_t bond_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return ret;
 }
 
-static int bond_ethtool_get_link_ksettings(struct net_device *bond_dev,
-					   struct ethtool_link_ksettings *cmd)
+static int bond_ethtool_get_settings(struct net_device *bond_dev,
+				     struct ethtool_cmd *ecmd)
 {
 	struct bonding *bond = netdev_priv(bond_dev);
 	unsigned long speed = 0;
 	struct list_head *iter;
 	struct slave *slave;
 
-	cmd->base.duplex = DUPLEX_UNKNOWN;
-	cmd->base.port = PORT_OTHER;
+	ecmd->duplex = DUPLEX_UNKNOWN;
+	ecmd->port = PORT_OTHER;
 
 	/* Since bond_slave_can_tx returns false for all inactive or down slaves, we
 	 * do not need to check mode.  Though link speed might not represent
@@ -4096,12 +4122,12 @@ static int bond_ethtool_get_link_ksettings(struct net_device *bond_dev,
 		if (bond_slave_can_tx(slave)) {
 			if (slave->speed != SPEED_UNKNOWN)
 				speed += slave->speed;
-			if (cmd->base.duplex == DUPLEX_UNKNOWN &&
+			if (ecmd->duplex == DUPLEX_UNKNOWN &&
 			    slave->duplex != DUPLEX_UNKNOWN)
-				cmd->base.duplex = slave->duplex;
+				ecmd->duplex = slave->duplex;
 		}
 	}
-	cmd->base.speed = speed ? : SPEED_UNKNOWN;
+	ethtool_cmd_speed_set(ecmd, speed ? : SPEED_UNKNOWN);
 
 	return 0;
 }
@@ -4117,8 +4143,8 @@ static void bond_ethtool_get_drvinfo(struct net_device *bond_dev,
 
 static const struct ethtool_ops bond_ethtool_ops = {
 	.get_drvinfo		= bond_ethtool_get_drvinfo,
+	.get_settings		= bond_ethtool_get_settings,
 	.get_link		= ethtool_op_get_link,
-	.get_link_ksettings	= bond_ethtool_get_link_ksettings,
 };
 
 static const struct net_device_ops bond_netdev_ops = {
@@ -4145,6 +4171,8 @@ static const struct net_device_ops bond_netdev_ops = {
 	.ndo_add_slave		= bond_enslave,
 	.ndo_del_slave		= bond_release,
 	.ndo_fix_features	= bond_fix_features,
+	.ndo_neigh_construct	= netdev_default_l2upper_neigh_construct,
+	.ndo_neigh_destroy	= netdev_default_l2upper_neigh_destroy,
 	.ndo_bridge_setlink	= switchdev_port_bridge_setlink,
 	.ndo_bridge_getlink	= switchdev_port_bridge_getlink,
 	.ndo_bridge_dellink	= switchdev_port_bridge_dellink,
@@ -4163,6 +4191,7 @@ static void bond_destructor(struct net_device *bond_dev)
 	struct bonding *bond = netdev_priv(bond_dev);
 	if (bond->wq)
 		destroy_workqueue(bond->wq);
+	free_netdev(bond_dev);
 }
 
 void bond_setup(struct net_device *bond_dev)
@@ -4178,12 +4207,10 @@ void bond_setup(struct net_device *bond_dev)
 
 	/* Initialize the device entry points */
 	ether_setup(bond_dev);
-	bond_dev->max_mtu = ETH_MAX_MTU;
 	bond_dev->netdev_ops = &bond_netdev_ops;
 	bond_dev->ethtool_ops = &bond_ethtool_ops;
 
-	bond_dev->needs_free_netdev = true;
-	bond_dev->priv_destructor = bond_destructor;
+	bond_dev->destructor = bond_destructor;
 
 	SET_NETDEV_DEVTYPE(bond_dev, &bond_type);
 
@@ -4689,7 +4716,7 @@ int bond_create(struct net *net, const char *name)
 
 	rtnl_unlock();
 	if (res < 0)
-		free_netdev(bond_dev);
+		bond_destructor(bond_dev);
 	return res;
 }
 

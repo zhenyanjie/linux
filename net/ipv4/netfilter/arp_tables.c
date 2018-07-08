@@ -24,7 +24,7 @@
 #include <linux/err.h>
 #include <net/compat.h>
 #include <net/sock.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter_arp/arp_tables.h>
@@ -217,7 +217,11 @@ unsigned int arpt_do_table(struct sk_buff *skb,
 	 */
 	e = get_entry(table_base, private->hook_entry[hook]);
 
-	acpar.state   = state;
+	acpar.net     = state->net;
+	acpar.in      = state->in;
+	acpar.out     = state->out;
+	acpar.hooknum = hook;
+	acpar.family  = NFPROTO_ARP;
 	acpar.hotdrop = false;
 
 	arp = arp_hdr(skb);
@@ -257,6 +261,10 @@ unsigned int arpt_do_table(struct sk_buff *skb,
 			}
 			if (table_base + v
 			    != arpt_next_entry(e)) {
+				if (unlikely(stackidx >= private->stacksize)) {
+					verdict = NF_DROP;
+					break;
+				}
 				jumpstack[stackidx++] = e;
 			}
 
@@ -677,6 +685,11 @@ static int copy_entries_to_user(unsigned int total_size,
 		return PTR_ERR(counters);
 
 	loc_cpu_entry = private->entries;
+	/* ... then copy entire thing ... */
+	if (copy_to_user(userptr, loc_cpu_entry, total_size) != 0) {
+		ret = -EFAULT;
+		goto free_counters;
+	}
 
 	/* FIXME: use iterator macros --RR */
 	/* ... then go back and fix counters and names */
@@ -684,10 +697,6 @@ static int copy_entries_to_user(unsigned int total_size,
 		const struct xt_entry_target *t;
 
 		e = (struct arpt_entry *)(loc_cpu_entry + off);
-		if (copy_to_user(userptr + off, e, sizeof(*e))) {
-			ret = -EFAULT;
-			goto free_counters;
-		}
 		if (copy_to_user(userptr + off
 				 + offsetof(struct arpt_entry, counters),
 				 &counters[num],
@@ -697,7 +706,11 @@ static int copy_entries_to_user(unsigned int total_size,
 		}
 
 		t = arpt_get_target_c(e);
-		if (xt_target_to_user(t, userptr + off + e->target_offset)) {
+		if (copy_to_user(userptr + off + e->target_offset
+				 + offsetof(struct xt_entry_target,
+					    u.user.name),
+				 t->u.kernel.target->name,
+				 strlen(t->u.kernel.target->name)+1) != 0) {
 			ret = -EFAULT;
 			goto free_counters;
 		}
@@ -800,7 +813,7 @@ static int get_info(struct net *net, void __user *user,
 #endif
 	t = try_then_request_module(xt_find_table_lock(net, NFPROTO_ARP, name),
 				    "arptable_%s", name);
-	if (t) {
+	if (!IS_ERR_OR_NULL(t)) {
 		struct arpt_getinfo info;
 		const struct xt_table_info *private = t->private;
 #ifdef CONFIG_COMPAT
@@ -829,7 +842,7 @@ static int get_info(struct net *net, void __user *user,
 		xt_table_unlock(t);
 		module_put(t->me);
 	} else
-		ret = -ENOENT;
+		ret = t ? PTR_ERR(t) : -ENOENT;
 #ifdef CONFIG_COMPAT
 	if (compat)
 		xt_compat_unlock(NFPROTO_ARP);
@@ -854,7 +867,7 @@ static int get_entries(struct net *net, struct arpt_get_entries __user *uptr,
 	get.name[sizeof(get.name) - 1] = '\0';
 
 	t = xt_find_table_lock(net, NFPROTO_ARP, get.name);
-	if (t) {
+	if (!IS_ERR_OR_NULL(t)) {
 		const struct xt_table_info *private = t->private;
 
 		if (get.size == private->size)
@@ -866,7 +879,7 @@ static int get_entries(struct net *net, struct arpt_get_entries __user *uptr,
 		module_put(t->me);
 		xt_table_unlock(t);
 	} else
-		ret = -ENOENT;
+		ret = t ? PTR_ERR(t) : -ENOENT;
 
 	return ret;
 }
@@ -893,8 +906,8 @@ static int __do_replace(struct net *net, const char *name,
 
 	t = try_then_request_module(xt_find_table_lock(net, NFPROTO_ARP, name),
 				    "arptable_%s", name);
-	if (!t) {
-		ret = -ENOENT;
+	if (IS_ERR_OR_NULL(t)) {
+		ret = t ? PTR_ERR(t) : -ENOENT;
 		goto free_newinfo_counters_untrans;
 	}
 
@@ -1009,8 +1022,8 @@ static int do_add_counters(struct net *net, const void __user *user,
 		return PTR_ERR(paddc);
 
 	t = xt_find_table_lock(net, NFPROTO_ARP, tmp.name);
-	if (!t) {
-		ret = -ENOENT;
+	if (IS_ERR_OR_NULL(t)) {
+		ret = t ? PTR_ERR(t) : -ENOENT;
 		goto free;
 	}
 
@@ -1399,7 +1412,7 @@ static int compat_get_entries(struct net *net,
 
 	xt_compat_lock(NFPROTO_ARP);
 	t = xt_find_table_lock(net, NFPROTO_ARP, get.name);
-	if (t) {
+	if (!IS_ERR_OR_NULL(t)) {
 		const struct xt_table_info *private = t->private;
 		struct xt_table_info info;
 
@@ -1414,7 +1427,7 @@ static int compat_get_entries(struct net *net,
 		module_put(t->me);
 		xt_table_unlock(t);
 	} else
-		ret = -ENOENT;
+		ret = t ? PTR_ERR(t) : -ENOENT;
 
 	xt_compat_unlock(NFPROTO_ARP);
 	return ret;

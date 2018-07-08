@@ -25,8 +25,7 @@
  * @fmt:	format string.
  * ...		variadic argument list.
  */
-static __printf(2, 3)
-void __init imr_self_test_result(int res, const char *fmt, ...)
+static void __init imr_self_test_result(int res, const char *fmt, ...)
 {
 	va_list vlist;
 

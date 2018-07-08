@@ -76,7 +76,7 @@ struct gtp_dev {
 	struct hlist_head	*addr_hash;
 };
 
-static unsigned int gtp_net_id __read_mostly;
+static int gtp_net_id __read_mostly;
 
 struct gtp_net {
 	struct list_head gtp_dev_list;
@@ -157,9 +157,9 @@ static bool gtp_check_src_ms_ipv4(struct sk_buff *skb, struct pdp_ctx *pctx,
 	if (!pskb_may_pull(skb, hdrlen + sizeof(struct iphdr)))
 		return false;
 
-	iph = (struct iphdr *)(skb->data + hdrlen);
+	iph = (struct iphdr *)(skb->data + hdrlen + sizeof(struct iphdr));
 
-	return iph->saddr == pctx->ms_addr_ip4.s_addr;
+	return iph->saddr != pctx->ms_addr_ip4.s_addr;
 }
 
 /* Check if the inner IP source address in this packet is assigned to any
@@ -183,6 +183,7 @@ static int gtp0_udp_encap_recv(struct gtp_dev *gtp, struct sk_buff *skb,
 			      sizeof(struct gtp0_header);
 	struct gtp0_header *gtp0;
 	struct pdp_ctx *pctx;
+	int ret = 0;
 
 	if (!pskb_may_pull(skb, hdrlen))
 		return -1;
@@ -195,19 +196,26 @@ static int gtp0_udp_encap_recv(struct gtp_dev *gtp, struct sk_buff *skb,
 	if (gtp0->type != GTP_TPDU)
 		return 1;
 
+	rcu_read_lock();
 	pctx = gtp0_pdp_find(gtp, be64_to_cpu(gtp0->tid));
 	if (!pctx) {
 		netdev_dbg(gtp->dev, "No PDP ctx to decap skb=%p\n", skb);
-		return 1;
+		ret = -1;
+		goto out_rcu;
 	}
 
 	if (!gtp_check_src_ms(skb, pctx, hdrlen)) {
 		netdev_dbg(gtp->dev, "No PDP ctx for this MS\n");
-		return 1;
+		ret = -1;
+		goto out_rcu;
 	}
+	rcu_read_unlock();
 
 	/* Get rid of the GTP + UDP headers. */
 	return iptunnel_pull_header(skb, hdrlen, skb->protocol, xnet);
+out_rcu:
+	rcu_read_unlock();
+	return ret;
 }
 
 static int gtp1u_udp_encap_recv(struct gtp_dev *gtp, struct sk_buff *skb,
@@ -217,6 +225,7 @@ static int gtp1u_udp_encap_recv(struct gtp_dev *gtp, struct sk_buff *skb,
 			      sizeof(struct gtp1_header);
 	struct gtp1_header *gtp1;
 	struct pdp_ctx *pctx;
+	int ret = 0;
 
 	if (!pskb_may_pull(skb, hdrlen))
 		return -1;
@@ -244,19 +253,26 @@ static int gtp1u_udp_encap_recv(struct gtp_dev *gtp, struct sk_buff *skb,
 
 	gtp1 = (struct gtp1_header *)(skb->data + sizeof(struct udphdr));
 
+	rcu_read_lock();
 	pctx = gtp1_pdp_find(gtp, ntohl(gtp1->tid));
 	if (!pctx) {
 		netdev_dbg(gtp->dev, "No PDP ctx to decap skb=%p\n", skb);
-		return 1;
+		ret = -1;
+		goto out_rcu;
 	}
 
 	if (!gtp_check_src_ms(skb, pctx, hdrlen)) {
 		netdev_dbg(gtp->dev, "No PDP ctx for this MS\n");
-		return 1;
+		ret = -1;
+		goto out_rcu;
 	}
+	rcu_read_unlock();
 
 	/* Get rid of the GTP + UDP headers. */
 	return iptunnel_pull_header(skb, hdrlen, skb->protocol, xnet);
+out_rcu:
+	rcu_read_unlock();
+	return ret;
 }
 
 static void gtp_encap_disable(struct gtp_dev *gtp)
@@ -406,11 +422,11 @@ static inline void gtp1_push_header(struct sk_buff *skb, struct pdp_ctx *pctx)
 
 	/* Bits    8  7  6  5  4  3  2	1
 	 *	  +--+--+--+--+--+--+--+--+
-	 *	  |version |PT| 0| E| S|PN|
+	 *	  |version |PT| 1| E| S|PN|
 	 *	  +--+--+--+--+--+--+--+--+
 	 *	    0  0  1  1	1  0  0  0
 	 */
-	gtp1->flags	= 0x30; /* v1, GTP-non-prime. */
+	gtp1->flags	= 0x38; /* v1, GTP-non-prime. */
 	gtp1->type	= GTP_TPDU;
 	gtp1->length	= htons(payload_len);
 	gtp1->tid	= htonl(pctx->u.v1.o_tei);
@@ -618,7 +634,7 @@ static const struct net_device_ops gtp_netdev_ops = {
 static void gtp_link_setup(struct net_device *dev)
 {
 	dev->netdev_ops		= &gtp_netdev_ops;
-	dev->needs_free_netdev	= true;
+	dev->destructor		= free_netdev;
 
 	dev->hard_header_len = 0;
 	dev->addr_len = 0;
@@ -1076,7 +1092,14 @@ static int gtp_genl_del_pdp(struct sk_buff *skb, struct genl_info *info)
 	return 0;
 }
 
-static struct genl_family gtp_genl_family;
+static struct genl_family gtp_genl_family = {
+	.id		= GENL_ID_GENERATE,
+	.name		= "gtp",
+	.version	= 0,
+	.hdrsize	= 0,
+	.maxattr	= GTPA_MAX,
+	.netnsok	= true,
+};
 
 static int gtp_genl_fill_info(struct sk_buff *skb, u32 snd_portid, u32 snd_seq,
 			      u32 type, struct pdp_ctx *pctx)
@@ -1272,17 +1295,6 @@ static const struct genl_ops gtp_genl_ops[] = {
 	},
 };
 
-static struct genl_family gtp_genl_family __ro_after_init = {
-	.name		= "gtp",
-	.version	= 0,
-	.hdrsize	= 0,
-	.maxattr	= GTPA_MAX,
-	.netnsok	= true,
-	.module		= THIS_MODULE,
-	.ops		= gtp_genl_ops,
-	.n_ops		= ARRAY_SIZE(gtp_genl_ops),
-};
-
 static int __net_init gtp_net_init(struct net *net)
 {
 	struct gtp_net *gn = net_generic(net, gtp_net_id);
@@ -1322,7 +1334,7 @@ static int __init gtp_init(void)
 	if (err < 0)
 		goto error_out;
 
-	err = genl_register_family(&gtp_genl_family);
+	err = genl_register_family_with_ops(&gtp_genl_family, gtp_genl_ops);
 	if (err < 0)
 		goto unreg_rtnl_link;
 
@@ -1330,7 +1342,7 @@ static int __init gtp_init(void)
 	if (err < 0)
 		goto unreg_genl_family;
 
-	pr_info("GTP module loaded (pdp ctx size %zd bytes)\n",
+	pr_info("GTP module loaded (pdp ctx size %Zd bytes)\n",
 		sizeof(struct pdp_ctx));
 	return 0;
 

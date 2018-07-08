@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2017, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -121,6 +121,9 @@ static acpi_status acpi_ps_get_aml_opcode(struct acpi_walk_state *walk_state)
 			     (u32)(aml_offset +
 				   sizeof(struct acpi_table_header)));
 
+			ACPI_ERROR((AE_INFO,
+				    "Aborting disassembly, AML byte code is corrupt"));
+
 			/* Dump the context surrounding the invalid opcode */
 
 			acpi_ut_dump_buffer(((u8 *)walk_state->parser_state.
@@ -129,6 +132,14 @@ static acpi_status acpi_ps_get_aml_opcode(struct acpi_walk_state *walk_state)
 					     sizeof(struct acpi_table_header) -
 					     16));
 			acpi_os_printf(" */\n");
+
+			/*
+			 * Just abort the disassembly, cannot continue because the
+			 * parser is essentially lost. The disassembler can then
+			 * randomly fail because an ill-constructed parse tree
+			 * can result.
+			 */
+			return_ACPI_STATUS(AE_AML_BAD_OPCODE);
 #endif
 		}
 
@@ -293,6 +304,9 @@ acpi_ps_create_op(struct acpi_walk_state *walk_state,
 	if (status == AE_CTRL_PARSE_CONTINUE) {
 		return_ACPI_STATUS(AE_CTRL_PARSE_CONTINUE);
 	}
+	if (ACPI_FAILURE(status)) {
+		return_ACPI_STATUS(status);
+	}
 
 	/* Create Op structure and append to parent's argument list */
 
@@ -348,15 +362,7 @@ acpi_ps_create_op(struct acpi_walk_state *walk_state,
 			    argument_count) {
 				op->common.flags |= ACPI_PARSEOP_TARGET;
 			}
-		}
-
-		/*
-		 * Special case for both Increment() and Decrement(), where
-		 * the lone argument is both a source and a target.
-		 */
-		else if ((parent_scope->common.aml_opcode == AML_INCREMENT_OP)
-			 || (parent_scope->common.aml_opcode ==
-			     AML_DECREMENT_OP)) {
+		} else if (parent_scope->common.aml_opcode == AML_INCREMENT_OP) {
 			op->common.flags |= ACPI_PARSEOP_TARGET;
 		}
 	}

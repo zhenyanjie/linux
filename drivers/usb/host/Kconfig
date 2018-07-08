@@ -479,10 +479,9 @@ config USB_OHCI_HCD_OMAP3
 	  OMAP3 and later chips.
 
 config USB_OHCI_HCD_DAVINCI
-	tristate "OHCI support for TI DaVinci DA8xx"
+	bool "OHCI support for TI DaVinci DA8xx"
 	depends on ARCH_DAVINCI_DA8XX
-	depends on USB_OHCI_HCD
-	select PHY_DA8XX_USB
+	depends on USB_OHCI_HCD=y
 	default y
 	help
 	  Enables support for the DaVinci DA8xx integrated OHCI
@@ -628,14 +627,6 @@ config USB_UHCI_SUPPORT_NON_PCI_HC
 config USB_UHCI_PLATFORM
 	bool
 	default y if ARCH_VT8500
-
-config USB_UHCI_BIG_ENDIAN_MMIO
-	bool
-	default y if SPARC_LEON
-
-config USB_UHCI_BIG_ENDIAN_DESC
-	bool
-	default y if SPARC_LEON
 
 config USB_FHCI_HCD
 	tristate "Freescale QE USB Host Controller support"

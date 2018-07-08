@@ -37,12 +37,12 @@
  * rotation or Z-position. All these properties are stored in &drm_plane_state.
  *
  * To create a plane, a KMS drivers allocates and zeroes an instances of
- * &struct drm_plane (possibly as part of a larger structure) and registers it
+ * struct &drm_plane (possibly as part of a larger structure) and registers it
  * with a call to drm_universal_plane_init().
  *
  * Cursor and overlay planes are optional. All drivers should provide one
  * primary plane per CRTC to avoid surprising userspace too much. See enum
- * drm_plane_type for a more in-depth discussion of these special uapi-relevant
+ * &drm_plane_type for a more in-depth discussion of these special uapi-relevant
  * plane types. Special planes are associated with their CRTC by calling
  * drm_crtc_init_with_planes().
  *
@@ -79,7 +79,7 @@ static unsigned int drm_num_planes(struct drm_device *dev)
  * Zero on success, error code on failure.
  */
 int drm_universal_plane_init(struct drm_device *dev, struct drm_plane *plane,
-			     uint32_t possible_crtcs,
+			     unsigned long possible_crtcs,
 			     const struct drm_plane_funcs *funcs,
 			     const uint32_t *formats, unsigned int format_count,
 			     enum drm_plane_type type,
@@ -137,7 +137,6 @@ int drm_universal_plane_init(struct drm_device *dev, struct drm_plane *plane,
 
 	if (drm_core_check_feature(dev, DRIVER_ATOMIC)) {
 		drm_object_attach_property(&plane->base, config->prop_fb_id, 0);
-		drm_object_attach_property(&plane->base, config->prop_in_fence_fd, -1);
 		drm_object_attach_property(&plane->base, config->prop_crtc_id, 0);
 		drm_object_attach_property(&plane->base, config->prop_crtc_x, 0);
 		drm_object_attach_property(&plane->base, config->prop_crtc_y, 0);
@@ -196,7 +195,7 @@ void drm_plane_unregister_all(struct drm_device *dev)
  * Zero on success, error code on failure.
  */
 int drm_plane_init(struct drm_device *dev, struct drm_plane *plane,
-		   uint32_t possible_crtcs,
+		   unsigned long possible_crtcs,
 		   const struct drm_plane_funcs *funcs,
 		   const uint32_t *formats, unsigned int format_count,
 		   bool is_primary)
@@ -221,8 +220,7 @@ void drm_plane_cleanup(struct drm_plane *plane)
 {
 	struct drm_device *dev = plane->dev;
 
-	drm_modeset_lock_fini(&plane->mutex);
-
+	drm_modeset_lock_all(dev);
 	kfree(plane->format_types);
 	drm_mode_object_unregister(dev, &plane->base);
 
@@ -237,6 +235,7 @@ void drm_plane_cleanup(struct drm_plane *plane)
 	dev->mode_config.num_total_plane--;
 	if (plane->type == DRM_PLANE_TYPE_OVERLAY)
 		dev->mode_config.num_overlay_plane--;
+	drm_modeset_unlock_all(dev);
 
 	WARN_ON(plane->state && !plane->funcs->atomic_destroy_state);
 	if (plane->state && plane->funcs->atomic_destroy_state)
@@ -254,7 +253,7 @@ EXPORT_SYMBOL(drm_plane_cleanup);
  * @idx: index of registered plane to find for
  *
  * Given a plane index, return the registered plane from DRM device's
- * list of planes with matching index. This is the inverse of drm_plane_index().
+ * list of planes with matching index.
  */
 struct drm_plane *
 drm_plane_from_index(struct drm_device *dev, int idx)
@@ -392,16 +391,12 @@ int drm_mode_getplane(struct drm_device *dev, void *data,
 		return -ENOENT;
 
 	drm_modeset_lock(&plane->mutex, NULL);
-	if (plane->state && plane->state->crtc)
-		plane_resp->crtc_id = plane->state->crtc->base.id;
-	else if (!plane->state && plane->crtc)
+	if (plane->crtc)
 		plane_resp->crtc_id = plane->crtc->base.id;
 	else
 		plane_resp->crtc_id = 0;
 
-	if (plane->state && plane->state->fb)
-		plane_resp->fb_id = plane->state->fb->base.id;
-	else if (!plane->state && plane->fb)
+	if (plane->fb)
 		plane_resp->fb_id = plane->fb->base.id;
 	else
 		plane_resp->fb_id = 0;
@@ -482,12 +477,11 @@ static int __setplane_internal(struct drm_plane *plane,
 	}
 
 	/* Check whether this plane supports the fb pixel format. */
-	ret = drm_plane_check_pixel_format(plane, fb->format->format);
+	ret = drm_plane_check_pixel_format(plane, fb->pixel_format);
 	if (ret) {
-		struct drm_format_name_buf format_name;
-		DRM_DEBUG_KMS("Invalid pixel format %s\n",
-		              drm_get_format_name(fb->format->format,
-		                                  &format_name));
+		char *format_name = drm_get_format_name(fb->pixel_format);
+		DRM_DEBUG_KMS("Invalid pixel format %s\n", format_name);
+		kfree(format_name);
 		goto out;
 	}
 
@@ -858,7 +852,7 @@ int drm_mode_page_flip_ioctl(struct drm_device *dev,
 	if (ret)
 		goto out;
 
-	if (crtc->primary->fb->format != fb->format) {
+	if (crtc->primary->fb->pixel_format != fb->pixel_format) {
 		DRM_DEBUG_KMS("Page flip is not allowed to change frame buffer format.\n");
 		ret = -EINVAL;
 		goto out;

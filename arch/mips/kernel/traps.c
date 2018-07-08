@@ -23,8 +23,7 @@
 #include <linux/module.h>
 #include <linux/extable.h>
 #include <linux/mm.h>
-#include <linux/sched/mm.h>
-#include <linux/sched/debug.h>
+#include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/spinlock.h>
 #include <linux/kallsyms.h>
@@ -63,7 +62,7 @@
 #include <asm/siginfo.h>
 #include <asm/tlbdebug.h>
 #include <asm/traps.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/watch.h>
 #include <asm/mmu_context.h>
 #include <asm/types.h>
@@ -1111,6 +1110,7 @@ asmlinkage void do_ri(struct pt_regs *regs)
 		switch (status) {
 		case 0:
 		case SIGEMT:
+			task_thread_info(current)->r2_emul_return = 1;
 			return;
 		case SIGILL:
 			goto no_r2_instr;
@@ -1118,6 +1118,7 @@ asmlinkage void do_ri(struct pt_regs *regs)
 			process_fpemu_return(status,
 					     &current->thread.cp0_baduaddr,
 					     fcr31);
+			task_thread_info(current)->r2_emul_return = 1;
 			return;
 		}
 	}
@@ -2235,7 +2236,7 @@ void per_cpu_trap_init(bool is_boot_cpu)
 	if (!cpu_data[cpu].asid_cache)
 		cpu_data[cpu].asid_cache = asid_first_version(cpu);
 
-	mmgrab(&init_mm);
+	atomic_inc(&init_mm.mm_count);
 	current->active_mm = &init_mm;
 	BUG_ON(current->mm);
 	enter_lazy_tlb(&init_mm, current);
