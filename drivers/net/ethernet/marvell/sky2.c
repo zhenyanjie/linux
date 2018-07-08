@@ -2974,9 +2974,9 @@ static int sky2_rx_hung(struct net_device *dev)
 	}
 }
 
-static void sky2_watchdog(struct timer_list *t)
+static void sky2_watchdog(unsigned long arg)
 {
-	struct sky2_hw *hw = from_timer(hw, t, watchdog_timer);
+	struct sky2_hw *hw = (struct sky2_hw *) arg;
 
 	/* Check for lost IRQ once a second */
 	if (sky2_read32(hw, B0_ISRC)) {
@@ -5083,11 +5083,11 @@ static int sky2_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		sky2_show_addr(dev1);
 	}
 
-	timer_setup(&hw->watchdog_timer, sky2_watchdog, 0);
+	setup_timer(&hw->watchdog_timer, sky2_watchdog, (unsigned long) hw);
 	INIT_WORK(&hw->restart_work, sky2_restart);
 
 	pci_set_drvdata(pdev, hw);
-	pdev->d3_delay = 200;
+	pdev->d3_delay = 150;
 
 	return 0;
 

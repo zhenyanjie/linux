@@ -872,6 +872,7 @@ MODULE_DEVICE_TABLE(of, sata_rcar_match);
 
 static int sata_rcar_probe(struct platform_device *pdev)
 {
+	const struct of_device_id *of_id;
 	struct ata_host *host;
 	struct sata_rcar_priv *priv;
 	struct resource *mem;
@@ -887,7 +888,11 @@ static int sata_rcar_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	priv->type = (enum sata_rcar_type)of_device_get_match_data(&pdev->dev);
+	of_id = of_match_device(sata_rcar_match, &pdev->dev);
+	if (!of_id)
+		return -ENODEV;
+
+	priv->type = (enum sata_rcar_type)of_id->data;
 	priv->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(priv->clk)) {
 		dev_err(&pdev->dev, "failed to get access to sata clock\n");

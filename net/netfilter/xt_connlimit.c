@@ -46,6 +46,7 @@
 struct xt_connlimit_conn {
 	struct hlist_node		node;
 	struct nf_conntrack_tuple	tuple;
+	union nf_inet_addr		addr;
 };
 
 struct xt_connlimit_rb {
@@ -57,7 +58,8 @@ struct xt_connlimit_rb {
 static spinlock_t xt_connlimit_locks[CONNLIMIT_LOCK_SLOTS] __cacheline_aligned_in_smp;
 
 struct xt_connlimit_data {
-	struct rb_root climit_root[CONNLIMIT_SLOTS];
+	struct rb_root climit_root4[CONNLIMIT_SLOTS];
+	struct rb_root climit_root6[CONNLIMIT_SLOTS];
 };
 
 static u_int32_t connlimit_rnd __read_mostly;
@@ -71,9 +73,16 @@ static inline unsigned int connlimit_iphash(__be32 addr)
 }
 
 static inline unsigned int
-connlimit_iphash6(const union nf_inet_addr *addr)
+connlimit_iphash6(const union nf_inet_addr *addr,
+                  const union nf_inet_addr *mask)
 {
-	return jhash2((u32 *)addr->ip6, ARRAY_SIZE(addr->ip6),
+	union nf_inet_addr res;
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(addr->ip6); ++i)
+		res.ip6[i] = addr->ip6[i] & mask->ip6[i];
+
+	return jhash2((u32 *)res.ip6, ARRAY_SIZE(res.ip6),
 		       connlimit_rnd) % CONNLIMIT_SLOTS;
 }
 
@@ -87,13 +96,24 @@ static inline bool already_closed(const struct nf_conn *conn)
 }
 
 static int
-same_source(const union nf_inet_addr *addr,
-	    const union nf_inet_addr *u3, u_int8_t family)
+same_source_net(const union nf_inet_addr *addr,
+		const union nf_inet_addr *mask,
+		const union nf_inet_addr *u3, u_int8_t family)
 {
-	if (family == NFPROTO_IPV4)
-		return ntohl(addr->ip) - ntohl(u3->ip);
+	if (family == NFPROTO_IPV4) {
+		return ntohl(addr->ip & mask->ip) -
+		       ntohl(u3->ip & mask->ip);
+	} else {
+		union nf_inet_addr lh, rh;
+		unsigned int i;
 
-	return memcmp(addr->ip6, u3->ip6, sizeof(addr->ip6));
+		for (i = 0; i < ARRAY_SIZE(addr->ip6); ++i) {
+			lh.ip6[i] = addr->ip6[i] & mask->ip6[i];
+			rh.ip6[i] = u3->ip6[i] & mask->ip6[i];
+		}
+
+		return memcmp(&lh.ip6, &rh.ip6, sizeof(lh.ip6));
+	}
 }
 
 static bool add_hlist(struct hlist_head *head,
@@ -106,6 +126,7 @@ static bool add_hlist(struct hlist_head *head,
 	if (conn == NULL)
 		return false;
 	conn->tuple = *tuple;
+	conn->addr = *addr;
 	hlist_add_head(&conn->node, head);
 	return true;
 }
@@ -123,6 +144,7 @@ static unsigned int check_hlist(struct net *net,
 	unsigned int length = 0;
 
 	*addit = true;
+	rcu_read_lock();
 
 	/* check the saved connections */
 	hlist_for_each_entry_safe(conn, n, head, node) {
@@ -157,6 +179,8 @@ static unsigned int check_hlist(struct net *net,
 		length++;
 	}
 
+	rcu_read_unlock();
+
 	return length;
 }
 
@@ -176,7 +200,7 @@ static void tree_nodes_free(struct rb_root *root,
 static unsigned int
 count_tree(struct net *net, struct rb_root *root,
 	   const struct nf_conntrack_tuple *tuple,
-	   const union nf_inet_addr *addr,
+	   const union nf_inet_addr *addr, const union nf_inet_addr *mask,
 	   u8 family, const struct nf_conntrack_zone *zone)
 {
 	struct xt_connlimit_rb *gc_nodes[CONNLIMIT_GC_MAX_NODES];
@@ -197,7 +221,7 @@ count_tree(struct net *net, struct rb_root *root,
 		rbconn = rb_entry(*rbnode, struct xt_connlimit_rb, node);
 
 		parent = *rbnode;
-		diff = same_source(addr, &rbconn->addr, family);
+		diff = same_source_net(addr, mask, &rbconn->addr, family);
 		if (diff < 0) {
 			rbnode = &((*rbnode)->rb_left);
 		} else if (diff > 0) {
@@ -250,6 +274,7 @@ count_tree(struct net *net, struct rb_root *root,
 	}
 
 	conn->tuple = *tuple;
+	conn->addr = *addr;
 	rbconn->addr = *addr;
 
 	INIT_HLIST_HEAD(&rbconn->hhead);
@@ -264,6 +289,7 @@ static int count_them(struct net *net,
 		      struct xt_connlimit_data *data,
 		      const struct nf_conntrack_tuple *tuple,
 		      const union nf_inet_addr *addr,
+		      const union nf_inet_addr *mask,
 		      u_int8_t family,
 		      const struct nf_conntrack_zone *zone)
 {
@@ -271,15 +297,17 @@ static int count_them(struct net *net,
 	int count;
 	u32 hash;
 
-	if (family == NFPROTO_IPV6)
-		hash = connlimit_iphash6(addr);
-	else
-		hash = connlimit_iphash(addr->ip);
-	root = &data->climit_root[hash];
+	if (family == NFPROTO_IPV6) {
+		hash = connlimit_iphash6(addr, mask);
+		root = &data->climit_root6[hash];
+	} else {
+		hash = connlimit_iphash(addr->ip & mask->ip);
+		root = &data->climit_root4[hash];
+	}
 
 	spin_lock_bh(&xt_connlimit_locks[hash % CONNLIMIT_LOCK_SLOTS]);
 
-	count = count_tree(net, root, tuple, addr, family, zone);
+	count = count_tree(net, root, tuple, addr, mask, family, zone);
 
 	spin_unlock_bh(&xt_connlimit_locks[hash % CONNLIMIT_LOCK_SLOTS]);
 
@@ -310,23 +338,16 @@ connlimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 
 	if (xt_family(par) == NFPROTO_IPV6) {
 		const struct ipv6hdr *iph = ipv6_hdr(skb);
-		unsigned int i;
-
 		memcpy(&addr.ip6, (info->flags & XT_CONNLIMIT_DADDR) ?
 		       &iph->daddr : &iph->saddr, sizeof(addr.ip6));
-
-		for (i = 0; i < ARRAY_SIZE(addr.ip6); ++i)
-			addr.ip6[i] &= info->mask.ip6[i];
 	} else {
 		const struct iphdr *iph = ip_hdr(skb);
 		addr.ip = (info->flags & XT_CONNLIMIT_DADDR) ?
 			  iph->daddr : iph->saddr;
-
-		addr.ip &= info->mask.ip;
 	}
 
 	connections = count_them(net, info->data, tuple_ptr, &addr,
-				 xt_family(par), zone);
+	                         &info->mask, xt_family(par), zone);
 	if (connections == 0)
 		/* kmalloc failed, drop it entirely */
 		goto hotdrop;
@@ -361,8 +382,10 @@ static int connlimit_mt_check(const struct xt_mtchk_param *par)
 		return -ENOMEM;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(info->data->climit_root); ++i)
-		info->data->climit_root[i] = RB_ROOT;
+	for (i = 0; i < ARRAY_SIZE(info->data->climit_root4); ++i)
+		info->data->climit_root4[i] = RB_ROOT;
+	for (i = 0; i < ARRAY_SIZE(info->data->climit_root6); ++i)
+		info->data->climit_root6[i] = RB_ROOT;
 
 	return 0;
 }
@@ -393,8 +416,10 @@ static void connlimit_mt_destroy(const struct xt_mtdtor_param *par)
 
 	nf_ct_netns_put(par->net, par->family);
 
-	for (i = 0; i < ARRAY_SIZE(info->data->climit_root); ++i)
-		destroy_tree(&info->data->climit_root[i]);
+	for (i = 0; i < ARRAY_SIZE(info->data->climit_root4); ++i)
+		destroy_tree(&info->data->climit_root4[i]);
+	for (i = 0; i < ARRAY_SIZE(info->data->climit_root6); ++i)
+		destroy_tree(&info->data->climit_root6[i]);
 
 	kfree(info->data);
 }

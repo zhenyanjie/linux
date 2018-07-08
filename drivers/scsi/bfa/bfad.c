@@ -692,9 +692,9 @@ ext:
 }
 
 void
-bfad_bfa_tmo(struct timer_list *t)
+bfad_bfa_tmo(unsigned long data)
 {
-	struct bfad_s	      *bfad = from_timer(bfad, t, hal_tmo);
+	struct bfad_s	      *bfad = (struct bfad_s *) data;
 	unsigned long	flags;
 	struct list_head	       doneq;
 
@@ -719,7 +719,9 @@ bfad_bfa_tmo(struct timer_list *t)
 void
 bfad_init_timer(struct bfad_s *bfad)
 {
-	timer_setup(&bfad->hal_tmo, bfad_bfa_tmo, 0);
+	init_timer(&bfad->hal_tmo);
+	bfad->hal_tmo.function = bfad_bfa_tmo;
+	bfad->hal_tmo.data = (unsigned long)bfad;
 
 	mod_timer(&bfad->hal_tmo,
 		  jiffies + msecs_to_jiffies(BFA_TIMER_FREQ));

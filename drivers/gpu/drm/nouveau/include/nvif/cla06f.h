@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NVIF_CLA06F_H__
 #define __NVIF_CLA06F_H__
 
@@ -23,7 +22,7 @@ struct kepler_channel_gpfifo_a_v0 {
 	__u32 engines;
 	__u32 ilength;
 	__u64 ioffset;
-	__u64 vmm;
+	__u64 vm;
 };
 
 #define NVA06F_V0_NTFY_NON_STALL_INTERRUPT                                 0x00

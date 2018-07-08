@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -45,7 +44,7 @@
  * @{
  */
 
-#include <uapi/linux/lnet/lnet-types.h>
+#include "../lnet/types.h"
 
 /** \defgroup lnet_init_fini Initialization and cleanup
  * The LNet must be properly initialized before any LNet calls can be made.

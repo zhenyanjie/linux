@@ -64,7 +64,7 @@ static unsigned long wait_timeout(void)
 
 static noinline void missed_breadcrumb(struct intel_engine_cs *engine)
 {
-	DRM_DEBUG_DRIVER("%s missed breadcrumb at %pS, irq posted? %s, current seqno=%x, last=%x\n",
+	DRM_DEBUG_DRIVER("%s missed breadcrumb at %pF, irq posted? %s, current seqno=%x, last=%x\n",
 			 engine->name, __builtin_return_address(0),
 			 yesno(test_bit(ENGINE_IRQ_BREADCRUMB,
 					&engine->irq_posted)),
@@ -74,10 +74,9 @@ static noinline void missed_breadcrumb(struct intel_engine_cs *engine)
 	set_bit(engine->id, &engine->i915->gpu_error.missed_irq_rings);
 }
 
-static void intel_breadcrumbs_hangcheck(struct timer_list *t)
+static void intel_breadcrumbs_hangcheck(unsigned long data)
 {
-	struct intel_engine_cs *engine = from_timer(engine, t,
-						    breadcrumbs.hangcheck);
+	struct intel_engine_cs *engine = (struct intel_engine_cs *)data;
 	struct intel_breadcrumbs *b = &engine->breadcrumbs;
 
 	if (!b->irq_armed)
@@ -109,10 +108,9 @@ static void intel_breadcrumbs_hangcheck(struct timer_list *t)
 	}
 }
 
-static void intel_breadcrumbs_fake_irq(struct timer_list *t)
+static void intel_breadcrumbs_fake_irq(unsigned long data)
 {
-	struct intel_engine_cs *engine = from_timer(engine, t,
-						    breadcrumbs.fake_irq);
+	struct intel_engine_cs *engine = (struct intel_engine_cs *)data;
 	struct intel_breadcrumbs *b = &engine->breadcrumbs;
 
 	/* The timer persists in case we cannot enable interrupts,
@@ -186,7 +184,7 @@ void intel_engine_disarm_breadcrumbs(struct intel_engine_cs *engine)
 	struct intel_wait *wait, *n, *first;
 
 	if (!b->irq_armed)
-		goto wakeup_signaler;
+		return;
 
 	/* We only disarm the irq when we are idle (all requests completed),
 	 * so if the bottom-half remains asleep, it missed the request
@@ -208,14 +206,6 @@ void intel_engine_disarm_breadcrumbs(struct intel_engine_cs *engine)
 	b->waiters = RB_ROOT;
 
 	spin_unlock_irq(&b->rb_lock);
-
-	/*
-	 * The signaling thread may be asleep holding a reference to a request,
-	 * that had its signaling cancelled prior to being preempted. We need
-	 * to kick the signaler, just in case, to release any such reference.
-	 */
-wakeup_signaler:
-	wake_up_process(b->signaler);
 }
 
 static bool use_fake_irq(const struct intel_breadcrumbs *b)
@@ -525,7 +515,6 @@ static void __intel_engine_remove_wait(struct intel_engine_cs *engine,
 
 	GEM_BUG_ON(RB_EMPTY_NODE(&wait->node));
 	rb_erase(&wait->node, &b->waiters);
-	RB_CLEAR_NODE(&wait->node);
 
 out:
 	GEM_BUG_ON(b->irq_wait == wait);
@@ -552,16 +541,29 @@ void intel_engine_remove_wait(struct intel_engine_cs *engine,
 	spin_unlock_irq(&b->rb_lock);
 }
 
+static bool signal_valid(const struct drm_i915_gem_request *request)
+{
+	return intel_wait_check_request(&request->signaling.wait, request);
+}
+
 static bool signal_complete(const struct drm_i915_gem_request *request)
 {
 	if (!request)
 		return false;
 
-	/*
-	 * Carefully check if the request is complete, giving time for the
+	/* If another process served as the bottom-half it may have already
+	 * signalled that this wait is already completed.
+	 */
+	if (intel_wait_complete(&request->signaling.wait))
+		return signal_valid(request);
+
+	/* Carefully check if the request is complete, giving time for the
 	 * seqno to be visible or if the GPU hung.
 	 */
-	return __i915_request_irq_complete(request);
+	if (__i915_request_irq_complete(request))
+		return true;
+
+	return false;
 }
 
 static struct drm_i915_gem_request *to_signaler(struct rb_node *rb)
@@ -604,13 +606,9 @@ static int intel_breadcrumbs_signaler(void *arg)
 			request = i915_gem_request_get_rcu(request);
 		rcu_read_unlock();
 		if (signal_complete(request)) {
-			if (!test_bit(DMA_FENCE_FLAG_SIGNALED_BIT,
-				      &request->fence.flags)) {
-				local_bh_disable();
-				dma_fence_signal(&request->fence);
-				GEM_BUG_ON(!i915_gem_request_completed(request));
-				local_bh_enable(); /* kick start the tasklets */
-			}
+			local_bh_disable();
+			dma_fence_signal(&request->fence);
+			local_bh_enable(); /* kick start the tasklets */
 
 			spin_lock_irq(&b->rb_lock);
 
@@ -650,15 +648,23 @@ static int intel_breadcrumbs_signaler(void *arg)
 		}
 
 		if (unlikely(do_schedule)) {
+			DEFINE_WAIT(exec);
+
 			if (kthread_should_park())
 				kthread_parkme();
 
-			if (unlikely(kthread_should_stop())) {
-				i915_gem_request_put(request);
+			if (kthread_should_stop()) {
+				GEM_BUG_ON(request);
 				break;
 			}
 
+			if (request)
+				add_wait_queue(&request->execute, &exec);
+
 			schedule();
+
+			if (request)
+				remove_wait_queue(&request->execute, &exec);
 		}
 		i915_gem_request_put(request);
 	} while (1);
@@ -781,8 +787,12 @@ int intel_engine_init_breadcrumbs(struct intel_engine_cs *engine)
 	spin_lock_init(&b->rb_lock);
 	spin_lock_init(&b->irq_lock);
 
-	timer_setup(&b->fake_irq, intel_breadcrumbs_fake_irq, 0);
-	timer_setup(&b->hangcheck, intel_breadcrumbs_hangcheck, 0);
+	setup_timer(&b->fake_irq,
+		    intel_breadcrumbs_fake_irq,
+		    (unsigned long)engine);
+	setup_timer(&b->hangcheck,
+		    intel_breadcrumbs_hangcheck,
+		    (unsigned long)engine);
 
 	/* Spawn a thread to provide a common bottom-half for all signals.
 	 * As this is an asynchronous interface we cannot steal the current

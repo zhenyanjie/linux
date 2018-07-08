@@ -436,13 +436,13 @@ create_arg_exp(enum filter_exp_type etype)
 		return NULL;
 
 	arg->type = FILTER_ARG_EXP;
-	arg->exp.type = etype;
+	arg->op.type = etype;
 
 	return arg;
 }
 
 static struct filter_arg *
-create_arg_cmp(enum filter_cmp_type ctype)
+create_arg_cmp(enum filter_exp_type etype)
 {
 	struct filter_arg *arg;
 
@@ -452,7 +452,7 @@ create_arg_cmp(enum filter_cmp_type ctype)
 
 	/* Use NUM and change if necessary */
 	arg->type = FILTER_ARG_NUM;
-	arg->num.type = ctype;
+	arg->op.type = etype;
 
 	return arg;
 }

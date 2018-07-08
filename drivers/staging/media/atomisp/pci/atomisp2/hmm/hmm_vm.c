@@ -14,6 +14,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  */
 /*
@@ -85,8 +89,10 @@ static struct hmm_vm_node *alloc_hmm_vm_node(unsigned int pgnr,
 	struct hmm_vm_node *node;
 
 	node = kmem_cache_alloc(vm->cache, GFP_KERNEL);
-	if (!node)
+	if (!node) {
+		dev_err(atomisp_dev, "out of memory.\n");
 		return NULL;
+	}
 
 	INIT_LIST_HEAD(&node->list);
 	node->pgnr = pgnr;

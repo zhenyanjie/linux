@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * xfrm6_input.c: based on net/ipv4/xfrm4_input.c
  *
@@ -32,18 +31,9 @@ int xfrm6_rcv_spi(struct sk_buff *skb, int nexthdr, __be32 spi,
 }
 EXPORT_SYMBOL(xfrm6_rcv_spi);
 
-static int xfrm6_transport_finish2(struct net *net, struct sock *sk,
-				   struct sk_buff *skb)
-{
-	if (xfrm_trans_queue(skb, ip6_rcv_finish))
-		__kfree_skb(skb);
-	return -1;
-}
-
 int xfrm6_transport_finish(struct sk_buff *skb, int async)
 {
 	struct xfrm_offload *xo = xfrm_offload(skb);
-	int nhlen = skb->data - skb_network_header(skb);
 
 	skb_network_header(skb)[IP6CB(skb)->nhoff] =
 		XFRM_MODE_SKB_CB(skb)->protocol;
@@ -53,9 +43,8 @@ int xfrm6_transport_finish(struct sk_buff *skb, int async)
 		return 1;
 #endif
 
-	__skb_push(skb, nhlen);
+	__skb_push(skb, skb->data - skb_network_header(skb));
 	ipv6_hdr(skb)->payload_len = htons(skb->len - sizeof(struct ipv6hdr));
-	skb_postpush_rcsum(skb, skb_network_header(skb), nhlen);
 
 	if (xo && (xo->flags & XFRM_GRO)) {
 		skb_mac_header_rebuild(skb);
@@ -64,7 +53,7 @@ int xfrm6_transport_finish(struct sk_buff *skb, int async)
 
 	NF_HOOK(NFPROTO_IPV6, NF_INET_PRE_ROUTING,
 		dev_net(skb->dev), NULL, skb, skb->dev, NULL,
-		xfrm6_transport_finish2);
+		ip6_rcv_finish);
 	return -1;
 }
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _X_TABLES_H
 #define _X_TABLES_H
 
@@ -284,8 +283,6 @@ int xt_check_entry_offsets(const void *base, const char *elems,
 unsigned int *xt_alloc_entry_offsets(unsigned int size);
 bool xt_find_jump_offset(const unsigned int *offsets,
 			 unsigned int target, unsigned int size);
-
-int xt_check_proc_name(const char *name, unsigned int size);
 
 int xt_check_match(struct xt_mtchk_param *, unsigned int size, u_int8_t proto,
 		   bool inv_proto);

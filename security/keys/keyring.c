@@ -565,8 +565,6 @@ static int keyring_search_iterator(const void *object, void *iterator_data)
 
 	/* skip invalidated, revoked and expired keys */
 	if (ctx->flags & KEYRING_SEARCH_DO_STATE_CHECK) {
-		time64_t expiry = READ_ONCE(key->expiry);
-
 		if (kflags & ((1 << KEY_FLAG_INVALIDATED) |
 			      (1 << KEY_FLAG_REVOKED))) {
 			ctx->result = ERR_PTR(-EKEYREVOKED);
@@ -574,7 +572,7 @@ static int keyring_search_iterator(const void *object, void *iterator_data)
 			goto skipped;
 		}
 
-		if (expiry && ctx->now >= expiry) {
+		if (key->expiry && ctx->now.tv_sec >= key->expiry) {
 			if (!(ctx->flags & KEYRING_SEARCH_SKIP_EXPIRED))
 				ctx->result = ERR_PTR(-EKEYEXPIRED);
 			kleave(" = %d [expire]", ctx->skipped_ret);
@@ -834,10 +832,10 @@ found:
 	key = key_ref_to_ptr(ctx->result);
 	key_check(key);
 	if (!(ctx->flags & KEYRING_SEARCH_NO_UPDATE_TIME)) {
-		key->last_used_at = ctx->now;
-		keyring->last_used_at = ctx->now;
+		key->last_used_at = ctx->now.tv_sec;
+		keyring->last_used_at = ctx->now.tv_sec;
 		while (sp > 0)
-			stack[--sp].keyring->last_used_at = ctx->now;
+			stack[--sp].keyring->last_used_at = ctx->now.tv_sec;
 	}
 	kleave(" = true");
 	return true;
@@ -898,7 +896,7 @@ key_ref_t keyring_search_aux(key_ref_t keyring_ref,
 	}
 
 	rcu_read_lock();
-	ctx->now = ktime_get_real_seconds();
+	ctx->now = current_kernel_time();
 	if (search_nested_keyrings(keyring, ctx))
 		__key_get(key_ref_to_ptr(ctx->result));
 	rcu_read_unlock();
@@ -1149,7 +1147,7 @@ struct key *find_keyring_by_name(const char *name, bool uid_keyring)
 			 * (ie. it has a zero usage count) */
 			if (!refcount_inc_not_zero(&keyring->usage))
 				continue;
-			keyring->last_used_at = ktime_get_real_seconds();
+			keyring->last_used_at = current_kernel_time().tv_sec;
 			goto out;
 		}
 	}
@@ -1489,7 +1487,7 @@ static void keyring_revoke(struct key *keyring)
 static bool keyring_gc_select_iterator(void *object, void *iterator_data)
 {
 	struct key *key = keyring_ptr_to_key(object);
-	time64_t *limit = iterator_data;
+	time_t *limit = iterator_data;
 
 	if (key_is_dead(key, *limit))
 		return false;
@@ -1500,7 +1498,7 @@ static bool keyring_gc_select_iterator(void *object, void *iterator_data)
 static int keyring_gc_check_iterator(const void *object, void *iterator_data)
 {
 	const struct key *key = keyring_ptr_to_key(object);
-	time64_t *limit = iterator_data;
+	time_t *limit = iterator_data;
 
 	key_check(key);
 	return key_is_dead(key, *limit);
@@ -1512,7 +1510,7 @@ static int keyring_gc_check_iterator(const void *object, void *iterator_data)
  * Not called with any locks held.  The keyring's key struct will not be
  * deallocated under us as only our caller may deallocate it.
  */
-void keyring_gc(struct key *keyring, time64_t limit)
+void keyring_gc(struct key *keyring, time_t limit)
 {
 	int result;
 

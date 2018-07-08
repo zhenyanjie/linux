@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * linux/kernel/irq/proc.c
  *
@@ -62,12 +61,12 @@ static int show_irq_affinity(int type, struct seq_file *m)
 	case EFFECTIVE:
 	case EFFECTIVE_LIST:
 #ifdef CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK
-		mask = irq_data_get_effective_affinity_mask(&desc->irq_data);
+		mask = desc->irq_common_data.effective_affinity;
 		break;
-#endif
-	default:
+#else
 		return -EINVAL;
-	}
+#endif
+	};
 
 	switch (type) {
 	case AFFINITY_LIST:
@@ -155,9 +154,8 @@ static ssize_t write_irq_affinity(int type, struct file *file,
 		 */
 		err = irq_select_affinity_usr(irq) ? -EINVAL : count;
 	} else {
-		err = irq_set_affinity(irq, new_value);
-		if (!err)
-			err = count;
+		irq_set_affinity(irq, new_value);
+		err = count;
 	}
 
 free_cpumask:

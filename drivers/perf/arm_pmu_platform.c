@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * platform_device probing code for ARM performance counters.
  *
@@ -127,7 +126,7 @@ static int pmu_parse_irqs(struct arm_pmu *pmu)
 
 	if (num_irqs == 1) {
 		int irq = platform_get_irq(pdev, 0);
-		if (irq && irq_is_percpu_devid(irq))
+		if (irq && irq_is_percpu(irq))
 			return pmu_parse_percpu_irq(pmu, irq);
 	}
 
@@ -150,7 +149,7 @@ static int pmu_parse_irqs(struct arm_pmu *pmu)
 		if (WARN_ON(irq <= 0))
 			continue;
 
-		if (irq_is_percpu_devid(irq)) {
+		if (irq_is_percpu(irq)) {
 			pr_warn("multiple PPIs or mismatched SPI/PPI detected\n");
 			return -EINVAL;
 		}

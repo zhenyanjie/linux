@@ -220,7 +220,8 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 	bool include_plid = false;
 	u16 peering_proto = 0;
 	u8 *pos, ie_len = 4;
-	int hdr_len = offsetofend(struct ieee80211_mgmt, u.action.u.self_prot);
+	int hdr_len = offsetof(struct ieee80211_mgmt, u.action.u.self_prot) +
+		      sizeof(mgmt->u.action.u.self_prot);
 	int err = -ENOMEM;
 
 	skb = dev_alloc_skb(local->tx_headroom +
@@ -603,9 +604,8 @@ out:
 	ieee80211_mbss_info_change_notify(sdata, changed);
 }
 
-void mesh_plink_timer(struct timer_list *t)
+static void mesh_plink_timer(unsigned long data)
 {
-	struct mesh_sta *mesh = from_timer(mesh, t, plink_timer);
 	struct sta_info *sta;
 	u16 reason = 0;
 	struct ieee80211_sub_if_data *sdata;
@@ -617,7 +617,7 @@ void mesh_plink_timer(struct timer_list *t)
 	 * del_timer_sync() this timer after having made sure
 	 * it cannot be readded (by deleting the plink.)
 	 */
-	sta = mesh->plink_sta;
+	sta = (struct sta_info *) data;
 
 	if (sta->sdata->local->quiescing)
 		return;
@@ -697,8 +697,11 @@ void mesh_plink_timer(struct timer_list *t)
 
 static inline void mesh_plink_timer_set(struct sta_info *sta, u32 timeout)
 {
+	sta->mesh->plink_timer.expires = jiffies + msecs_to_jiffies(timeout);
+	sta->mesh->plink_timer.data = (unsigned long) sta;
+	sta->mesh->plink_timer.function = mesh_plink_timer;
 	sta->mesh->plink_timeout = timeout;
-	mod_timer(&sta->mesh->plink_timer, jiffies + msecs_to_jiffies(timeout));
+	add_timer(&sta->mesh->plink_timer);
 }
 
 static bool llid_in_use(struct ieee80211_sub_if_data *sdata,

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -37,9 +36,9 @@
 
 #define DEBUG_SUBSYSTEM S_LLITE
 
-#include <linux/libcfs/libcfs.h>
+#include "../../include/linux/libcfs/libcfs.h"
 
-#include <obd.h>
+#include "../include/obd.h"
 
 #include "llite_internal.h"
 #include "vvp_internal.h"

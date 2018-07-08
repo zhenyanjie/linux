@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _PKEYS_HELPER_H
 #define _PKEYS_HELPER_H
 #define _GNU_SOURCE
@@ -30,7 +29,6 @@ static inline void sigsafe_printf(const char *format, ...)
 	if (!dprint_in_signal) {
 		vprintf(format, ap);
 	} else {
-		int ret;
 		int len = vsnprintf(dprint_in_signal_buffer,
 				    DPRINT_IN_SIGNAL_BUF_SIZE,
 				    format, ap);
@@ -40,9 +38,7 @@ static inline void sigsafe_printf(const char *format, ...)
 		 */
 		if (len > DPRINT_IN_SIGNAL_BUF_SIZE)
 			len = DPRINT_IN_SIGNAL_BUF_SIZE;
-		ret = write(1, dprint_in_signal_buffer, len);
-		if (ret < 0)
-			abort();
+		write(1, dprint_in_signal_buffer, len);
 	}
 	va_end(ap);
 }

@@ -52,7 +52,7 @@
 		 */
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
-		clock-frequency = <12288000>;
+		clock-frequency = <11289600>;
 	};
 
 	backlight: backlight {
@@ -62,7 +62,6 @@
 		brightness-levels = <256 128 64 16 8 4 0>;
 		default-brightness-level = <6>;
 
-		power-supply = <&reg_12v>;
 		enable-gpios = <&gpio6 7 GPIO_ACTIVE_HIGH>;
 	};
 
@@ -80,15 +79,6 @@
 		regulator-name = "fixed-3.3V";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
-		regulator-boot-on;
-		regulator-always-on;
-	};
-
-	reg_12v: regulator2 {
-		compatible = "regulator-fixed";
-		regulator-name = "fixed-12V";
-		regulator-min-microvolt = <12000000>;
-		regulator-max-microvolt = <12000000>;
 		regulator-boot-on;
 		regulator-always-on;
 	};
@@ -255,6 +245,7 @@
 &avb {
 	pinctrl-0 = <&avb_pins>;
 	pinctrl-names = "default";
+	renesas,no-ether-link;
 	phy-handle = <&phy0>;
 	status = "okay";
 
@@ -263,7 +254,6 @@
 		reg = <0>;
 		interrupt-parent = <&gpio2>;
 		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
-		reset-gpios = <&gpio2 10 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -278,11 +268,14 @@
 				remote-endpoint = <&adv7123_in>;
 			};
 		};
+		port@3 {
+			lvds_connector: endpoint {
+			};
+		};
 	};
 };
 
 &ehci0 {
-	dr_mode = "otg";
 	status = "okay";
 };
 
@@ -295,7 +288,6 @@
 };
 
 &hsusb {
-	dr_mode = "otg";
 	status = "okay";
 };
 
@@ -358,7 +350,6 @@
 };
 
 &ohci0 {
-	dr_mode = "otg";
 	status = "okay";
 };
 
@@ -384,7 +375,8 @@
 
 	avb_pins: avb {
 		mux {
-			groups = "avb_link", "avb_mdc", "avb_mii";
+			groups = "avb_link", "avb_phy_int", "avb_mdc",
+				 "avb_mii";
 			function = "avb";
 		};
 
@@ -497,11 +489,6 @@
 			pins = "GP_6_26";
 			bias-pull-down;
 		};
-	};
-
-	usb30_pins: usb30 {
-		groups = "usb30";
-		function = "usb30";
 	};
 };
 
@@ -638,8 +625,5 @@
 };
 
 &xhci0 {
-	pinctrl-0 = <&usb30_pins>;
-	pinctrl-names = "default";
-
 	status = "okay";
 };

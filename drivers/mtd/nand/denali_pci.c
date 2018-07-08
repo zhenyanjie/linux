@@ -11,9 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  */
-
-#include <linux/errno.h>
-#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -109,6 +106,7 @@ failed_remap_reg:
 	return ret;
 }
 
+/* driver exit point */
 static void denali_pci_remove(struct pci_dev *dev)
 {
 	struct denali_nand_info *denali = pci_get_drvdata(dev);
@@ -124,8 +122,5 @@ static struct pci_driver denali_pci_driver = {
 	.probe = denali_pci_probe,
 	.remove = denali_pci_remove,
 };
-module_pci_driver(denali_pci_driver);
 
-MODULE_DESCRIPTION("PCI driver for Denali NAND controller");
-MODULE_AUTHOR("Intel Corporation and its suppliers");
-MODULE_LICENSE("GPL v2");
+module_pci_driver(denali_pci_driver);

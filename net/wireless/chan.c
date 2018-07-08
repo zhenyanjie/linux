@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * This file contains helper code to handle channel
  * settings and keeping track of what is possible at
@@ -465,7 +464,7 @@ bool cfg80211_is_sub_chan(struct cfg80211_chan_def *chandef,
 			  struct ieee80211_channel *chan)
 {
 	int width;
-	u32 freq;
+	u32 cf_offset, freq;
 
 	if (chandef->chan->center_freq == chan->center_freq)
 		return true;
@@ -473,6 +472,8 @@ bool cfg80211_is_sub_chan(struct cfg80211_chan_def *chandef,
 	width = cfg80211_chandef_get_width(chandef);
 	if (width <= 20)
 		return false;
+
+	cf_offset = width / 2 - 10;
 
 	for (freq = chandef->center_freq1 - width / 2 + 10;
 	     freq <= chandef->center_freq1 + width / 2 - 10; freq += 20) {

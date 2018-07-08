@@ -354,9 +354,9 @@ static void rsxx_handle_dma_error(struct rsxx_dma_ctrl *ctrl,
 		rsxx_complete_dma(ctrl, dma, status);
 }
 
-static void dma_engine_stalled(struct timer_list *t)
+static void dma_engine_stalled(unsigned long data)
 {
-	struct rsxx_dma_ctrl *ctrl = from_timer(ctrl, t, activity_timer);
+	struct rsxx_dma_ctrl *ctrl = (struct rsxx_dma_ctrl *)data;
 	int cnt;
 
 	if (atomic_read(&ctrl->stats.hw_q_depth) == 0 ||
@@ -838,7 +838,8 @@ static int rsxx_dma_ctrl_init(struct pci_dev *dev,
 	mutex_init(&ctrl->work_lock);
 	INIT_LIST_HEAD(&ctrl->queue);
 
-	timer_setup(&ctrl->activity_timer, dma_engine_stalled, 0);
+	setup_timer(&ctrl->activity_timer, dma_engine_stalled,
+					(unsigned long)ctrl);
 
 	ctrl->issue_wq = alloc_ordered_workqueue(DRIVER_NAME"_issue", 0);
 	if (!ctrl->issue_wq)

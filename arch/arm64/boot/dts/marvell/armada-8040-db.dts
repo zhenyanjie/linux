@@ -44,7 +44,6 @@
  * Device Tree file for Marvell Armada 8040 Development board platform
  */
 
-#include <dt-bindings/gpio/gpio.h>
 #include "armada-8040.dtsi"
 
 / {
@@ -56,58 +55,9 @@
 		stdout-path = "serial0:115200n8";
 	};
 
-	memory@0 {
+	memory@00000000 {
 		device_type = "memory";
 		reg = <0x0 0x0 0x0 0x80000000>;
-	};
-
-	aliases {
-		ethernet0 = &cpm_eth0;
-		ethernet1 = &cpm_eth2;
-		ethernet2 = &cps_eth0;
-		ethernet3 = &cps_eth1;
-	};
-
-	cpm_reg_usb3_0_vbus: cpm-usb3-0-vbus {
-		compatible = "regulator-fixed";
-		regulator-name = "cpm-usb3h0-vbus";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		enable-active-high;
-		gpio = <&expander0 0 GPIO_ACTIVE_HIGH>;
-	};
-
-	cpm_reg_usb3_1_vbus: cpm-usb3-1-vbus {
-		compatible = "regulator-fixed";
-		regulator-name = "cpm-usb3h1-vbus";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		enable-active-high;
-		gpio = <&expander0 1 GPIO_ACTIVE_HIGH>;
-	};
-
-	cpm_usb3_0_phy: cpm-usb3-0-phy {
-		compatible = "usb-nop-xceiv";
-		vcc-supply = <&cpm_reg_usb3_0_vbus>;
-	};
-
-	cpm_usb3_1_phy: cpm-usb3-1-phy {
-		compatible = "usb-nop-xceiv";
-		vcc-supply = <&cpm_reg_usb3_1_vbus>;
-	};
-
-	cps_reg_usb3_0_vbus: cps-usb3-0-vbus {
-		compatible = "regulator-fixed";
-		regulator-name = "cps-usb3h0-vbus";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		enable-active-high;
-		gpio = <&expander1 0 GPIO_ACTIVE_HIGH>;
-	};
-
-	cps_usb3_0_phy: cps-usb3-0-phy {
-		compatible = "usb-nop-xceiv";
-		vcc-supply = <&cps_reg_usb3_0_vbus>;
 	};
 };
 
@@ -146,14 +96,8 @@
 /* Accessible over the mini-USB CON9 connector on the main board */
 &uart0 {
 	status = "okay";
-	pinctrl-0 = <&uart0_pins>;
-	pinctrl-names = "default";
 };
 
-/* CON6 on CP0 expansion */
-&cpm_pcie0 {
-	status = "okay";
-};
 
 /* CON5 on CP0 expansion */
 &cpm_pcie2 {
@@ -163,25 +107,6 @@
 &cpm_i2c0 {
 	status = "okay";
 	clock-frequency = <100000>;
-
-	/* U31 */
-	expander0: pca9555@21 {
-		compatible = "nxp,pca9555";
-		pinctrl-names = "default";
-		gpio-controller;
-		#gpio-cells = <2>;
-		reg = <0x21>;
-	};
-
-	/* U25 */
-	expander1: pca9555@25 {
-		compatible = "nxp,pca9555";
-		pinctrl-names = "default";
-		gpio-controller;
-		#gpio-cells = <2>;
-		reg = <0x25>;
-	};
-
 };
 
 /* CON4 on CP0 expansion */
@@ -191,13 +116,11 @@
 
 /* CON9 on CP0 expansion */
 &cpm_usb3_0 {
-	usb-phy = <&cpm_usb3_0_phy>;
 	status = "okay";
 };
 
 /* CON10 on CP0 expansion */
 &cpm_usb3_1 {
-	usb-phy = <&cpm_usb3_1_phy>;
 	status = "okay";
 };
 
@@ -213,25 +136,10 @@
 	status = "okay";
 };
 
-&cpm_eth0 {
-	status = "okay";
-	phy-mode = "10gbase-kr";
-};
-
 &cpm_eth2 {
 	status = "okay";
 	phy = <&phy1>;
 	phy-mode = "rgmii-id";
-};
-
-/* CON6 on CP1 expansion */
-&cps_pcie0 {
-	status = "okay";
-};
-
-/* CON7 on CP1 expansion */
-&cps_pcie1 {
-	status = "okay";
 };
 
 /* CON5 on CP1 expansion */
@@ -244,37 +152,6 @@
 	clock-frequency = <100000>;
 };
 
-&cps_spi1 {
-	status = "okay";
-
-	spi-flash@0 {
-		#address-cells = <0x1>;
-		#size-cells = <0x1>;
-		compatible = "jedec,spi-nor";
-		reg = <0x0>;
-		spi-max-frequency = <20000000>;
-
-		partitions {
-			compatible = "fixed-partitions";
-			#address-cells = <1>;
-			#size-cells = <1>;
-
-			partition@0 {
-				label = "Boot";
-				reg = <0x0 0x200000>;
-			};
-			partition@200000 {
-				label = "Filesystem";
-				reg = <0x200000 0xd00000>;
-			};
-			partition@f00000 {
-				label = "Boot_2nd";
-				reg = <0xf00000 0x100000>;
-			};
-		};
-	};
-};
-
 /* CON4 on CP1 expansion */
 &cps_sata0 {
 	status = "okay";
@@ -282,7 +159,6 @@
 
 /* CON9 on CP1 expansion */
 &cps_usb3_0 {
-	usb-phy = <&cps_usb3_0_phy>;
 	status = "okay";
 };
 
@@ -301,11 +177,6 @@
 
 &cps_ethernet {
 	status = "okay";
-};
-
-&cps_eth0 {
-	status = "okay";
-	phy-mode = "10gbase-kr";
 };
 
 &cps_eth1 {

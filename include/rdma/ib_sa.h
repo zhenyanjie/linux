@@ -590,20 +590,20 @@ static inline bool sa_path_is_roce(struct sa_path_rec *rec)
 		(rec->rec_type == SA_PATH_REC_TYPE_ROCE_V2));
 }
 
-static inline void sa_path_set_slid(struct sa_path_rec *rec, u32 slid)
+static inline void sa_path_set_slid(struct sa_path_rec *rec, __be32 slid)
 {
 	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
-		rec->ib.slid = cpu_to_be16(slid);
+		rec->ib.slid = htons(ntohl(slid));
 	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
-		rec->opa.slid = cpu_to_be32(slid);
+		rec->opa.slid = slid;
 }
 
-static inline void sa_path_set_dlid(struct sa_path_rec *rec, u32 dlid)
+static inline void sa_path_set_dlid(struct sa_path_rec *rec, __be32 dlid)
 {
 	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
-		rec->ib.dlid = cpu_to_be16(dlid);
+		rec->ib.dlid = htons(ntohl(dlid));
 	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
-		rec->opa.dlid = cpu_to_be32(dlid);
+		rec->opa.dlid = dlid;
 }
 
 static inline void sa_path_set_raw_traffic(struct sa_path_rec *rec,

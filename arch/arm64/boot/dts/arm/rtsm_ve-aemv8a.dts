@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * ARM Ltd. Fast Models
  *
@@ -105,7 +104,7 @@
 			     <0 63 4>;
 	};
 
-	smb@8000000 {
+	smb@08000000 {
 		compatible = "simple-bus";
 
 		#address-cells = <2>;

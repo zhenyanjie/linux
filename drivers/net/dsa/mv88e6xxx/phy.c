@@ -13,6 +13,7 @@
 
 #include <linux/mdio.h>
 #include <linux/module.h>
+#include <net/dsa.h>
 
 #include "chip.h"
 #include "phy.h"
@@ -149,9 +150,9 @@ static void mv88e6xxx_phy_ppu_reenable_work(struct work_struct *ugly)
 	mutex_unlock(&chip->reg_lock);
 }
 
-static void mv88e6xxx_phy_ppu_reenable_timer(struct timer_list *t)
+static void mv88e6xxx_phy_ppu_reenable_timer(unsigned long _ps)
 {
-	struct mv88e6xxx_chip *chip = from_timer(chip, t, ppu_timer);
+	struct mv88e6xxx_chip *chip = (void *)_ps;
 
 	schedule_work(&chip->ppu_work);
 }
@@ -193,7 +194,8 @@ static void mv88e6xxx_phy_ppu_state_init(struct mv88e6xxx_chip *chip)
 {
 	mutex_init(&chip->ppu_mutex);
 	INIT_WORK(&chip->ppu_work, mv88e6xxx_phy_ppu_reenable_work);
-	timer_setup(&chip->ppu_timer, mv88e6xxx_phy_ppu_reenable_timer, 0);
+	setup_timer(&chip->ppu_timer, mv88e6xxx_phy_ppu_reenable_timer,
+		    (unsigned long)chip);
 }
 
 static void mv88e6xxx_phy_ppu_state_destroy(struct mv88e6xxx_chip *chip)

@@ -428,8 +428,7 @@ __tracing_map_insert(struct tracing_map *map, void *key, bool lookup_only)
 
 		if (test_key && test_key == key_hash && entry->val &&
 		    keys_match(key, entry->val->key, map->key_size)) {
-			if (!lookup_only)
-				atomic64_inc(&map->hits);
+			atomic64_inc(&map->hits);
 			return entry->val;
 		}
 

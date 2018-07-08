@@ -63,7 +63,7 @@ static int amdgpu_update_cached_map(struct amdgpu_queue_mapper *mapper,
 
 static int amdgpu_identity_map(struct amdgpu_device *adev,
 			       struct amdgpu_queue_mapper *mapper,
-			       u32 ring,
+			       int ring,
 			       struct amdgpu_ring **out_ring)
 {
 	switch (mapper->hw_ip) {
@@ -121,7 +121,7 @@ static enum amdgpu_ring_type amdgpu_hw_ip_to_ring_type(int hw_ip)
 
 static int amdgpu_lru_map(struct amdgpu_device *adev,
 			  struct amdgpu_queue_mapper *mapper,
-			  u32 user_ring, bool lru_pipe_order,
+			  int user_ring,
 			  struct amdgpu_ring **out_ring)
 {
 	int r, i, j;
@@ -139,7 +139,7 @@ static int amdgpu_lru_map(struct amdgpu_device *adev,
 	}
 
 	r = amdgpu_ring_lru_get(adev, ring_type, ring_blacklist,
-				j, lru_pipe_order, out_ring);
+				j, out_ring);
 	if (r)
 		return r;
 
@@ -208,7 +208,7 @@ int amdgpu_queue_mgr_fini(struct amdgpu_device *adev,
  */
 int amdgpu_queue_mgr_map(struct amdgpu_device *adev,
 			 struct amdgpu_queue_mgr *mgr,
-			 u32 hw_ip, u32 instance, u32 ring,
+			 int hw_ip, int instance, int ring,
 			 struct amdgpu_ring **out_ring)
 {
 	int r, ip_num_rings;
@@ -284,10 +284,8 @@ int amdgpu_queue_mgr_map(struct amdgpu_device *adev,
 		r = amdgpu_identity_map(adev, mapper, ring, out_ring);
 		break;
 	case AMDGPU_HW_IP_DMA:
-		r = amdgpu_lru_map(adev, mapper, ring, false, out_ring);
-		break;
 	case AMDGPU_HW_IP_COMPUTE:
-		r = amdgpu_lru_map(adev, mapper, ring, true, out_ring);
+		r = amdgpu_lru_map(adev, mapper, ring, out_ring);
 		break;
 	default:
 		*out_ring = NULL;

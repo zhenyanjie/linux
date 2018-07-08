@@ -44,12 +44,12 @@ static void internal_free_pages(struct sg_table *st)
 	kfree(st);
 }
 
-static int i915_gem_object_get_pages_internal(struct drm_i915_gem_object *obj)
+static struct sg_table *
+i915_gem_object_get_pages_internal(struct drm_i915_gem_object *obj)
 {
 	struct drm_i915_private *i915 = to_i915(obj->base.dev);
 	struct sg_table *st;
 	struct scatterlist *sg;
-	unsigned int sg_page_sizes;
 	unsigned int npages;
 	int max_order;
 	gfp_t gfp;
@@ -78,17 +78,16 @@ static int i915_gem_object_get_pages_internal(struct drm_i915_gem_object *obj)
 create_st:
 	st = kmalloc(sizeof(*st), GFP_KERNEL);
 	if (!st)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	npages = obj->base.size / PAGE_SIZE;
 	if (sg_alloc_table(st, npages, GFP_KERNEL)) {
 		kfree(st);
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	sg = st->sgl;
 	st->nents = 0;
-	sg_page_sizes = 0;
 
 	do {
 		int order = min(fls(npages) - 1, max_order);
@@ -106,7 +105,6 @@ create_st:
 		} while (1);
 
 		sg_set_page(sg, page, PAGE_SIZE << order, 0);
-		sg_page_sizes |= PAGE_SIZE << order;
 		st->nents++;
 
 		npages -= 1 << order;
@@ -134,17 +132,13 @@ create_st:
 	 * object are only valid whilst active and pinned.
 	 */
 	obj->mm.madv = I915_MADV_DONTNEED;
-
-	__i915_gem_object_set_pages(obj, st, sg_page_sizes);
-
-	return 0;
+	return st;
 
 err:
 	sg_set_page(sg, NULL, 0, 0);
 	sg_mark_end(sg);
 	internal_free_pages(st);
-
-	return -ENOMEM;
+	return ERR_PTR(-ENOMEM);
 }
 
 static void i915_gem_object_put_pages_internal(struct drm_i915_gem_object *obj,
@@ -180,7 +174,6 @@ i915_gem_object_create_internal(struct drm_i915_private *i915,
 				phys_addr_t size)
 {
 	struct drm_i915_gem_object *obj;
-	unsigned int cache_level;
 
 	GEM_BUG_ON(!size);
 	GEM_BUG_ON(!IS_ALIGNED(size, PAGE_SIZE));
@@ -197,9 +190,9 @@ i915_gem_object_create_internal(struct drm_i915_private *i915,
 
 	obj->base.read_domains = I915_GEM_DOMAIN_CPU;
 	obj->base.write_domain = I915_GEM_DOMAIN_CPU;
-
-	cache_level = HAS_LLC(i915) ? I915_CACHE_LLC : I915_CACHE_NONE;
-	i915_gem_object_set_cache_coherency(obj, cache_level);
+	obj->cache_level = HAS_LLC(i915) ? I915_CACHE_LLC : I915_CACHE_NONE;
+	obj->cache_coherent = i915_gem_object_is_coherent(obj);
+	obj->cache_dirty = !obj->cache_coherent;
 
 	return obj;
 }

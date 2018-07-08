@@ -605,7 +605,7 @@ static void accumulate_16bit_val(u32 *acc, u16 val)
 
 	if (wrapped)
 		newacc += 65536;
-	WRITE_ONCE(*acc, newacc);
+	ACCESS_ONCE(*acc) = newacc;
 }
 
 static void populate_erx_stats(struct be_adapter *adapter,
@@ -4634,15 +4634,6 @@ int be_update_queues(struct be_adapter *adapter)
 
 	be_schedule_worker(adapter);
 
-	/*
-	 * The IF was destroyed and re-created. We need to clear
-	 * all promiscuous flags valid for the destroyed IF.
-	 * Without this promisc mode is not restored during
-	 * be_open() because the driver thinks that it is
-	 * already enabled in HW.
-	 */
-	adapter->if_flags &= ~BE_IF_FLAGS_ALL_PROMISCUOUS;
-
 	if (netif_running(netdev))
 		status = be_open(netdev);
 
@@ -5097,20 +5088,6 @@ static netdev_features_t be_features_check(struct sk_buff *skb,
 {
 	struct be_adapter *adapter = netdev_priv(dev);
 	u8 l4_hdr = 0;
-
-	if (skb_is_gso(skb)) {
-		/* IPv6 TSO requests with extension hdrs are a problem
-		 * to Lancer and BE3 HW. Disable TSO6 feature.
-		 */
-		if (!skyhawk_chip(adapter) && is_ipv6_ext_hdr(skb))
-			features &= ~NETIF_F_TSO6;
-
-		/* Lancer cannot handle the packet with MSS less than 256.
-		 * Disable the GSO support in such cases
-		 */
-		if (lancer_chip(adapter) && skb_shinfo(skb)->gso_size < 256)
-			features &= ~NETIF_F_GSO_MASK;
-	}
 
 	/* The code below restricts offload features for some tunneled and
 	 * Q-in-Q packets.

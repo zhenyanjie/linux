@@ -479,8 +479,8 @@ static int iwl_set_default_calib(struct iwl_drv *drv, const u8 *data)
 	return 0;
 }
 
-static void iwl_set_ucode_api_flags(struct iwl_drv *drv, const u8 *data,
-				    struct iwl_ucode_capabilities *capa)
+static int iwl_set_ucode_api_flags(struct iwl_drv *drv, const u8 *data,
+				   struct iwl_ucode_capabilities *capa)
 {
 	const struct iwl_ucode_api *ucode_api = (void *)data;
 	u32 api_index = le32_to_cpu(ucode_api->api_index);
@@ -488,20 +488,23 @@ static void iwl_set_ucode_api_flags(struct iwl_drv *drv, const u8 *data,
 	int i;
 
 	if (api_index >= DIV_ROUND_UP(NUM_IWL_UCODE_TLV_API, 32)) {
-		IWL_WARN(drv,
-			 "api flags index %d larger than supported by driver\n",
-			 api_index);
-		return;
+		IWL_ERR(drv,
+			"api flags index %d larger than supported by driver\n",
+			api_index);
+		/* don't return an error so we can load FW that has more bits */
+		return 0;
 	}
 
 	for (i = 0; i < 32; i++) {
 		if (api_flags & BIT(i))
 			__set_bit(i + 32 * api_index, capa->_api);
 	}
+
+	return 0;
 }
 
-static void iwl_set_ucode_capabilities(struct iwl_drv *drv, const u8 *data,
-				       struct iwl_ucode_capabilities *capa)
+static int iwl_set_ucode_capabilities(struct iwl_drv *drv, const u8 *data,
+				      struct iwl_ucode_capabilities *capa)
 {
 	const struct iwl_ucode_capa *ucode_capa = (void *)data;
 	u32 api_index = le32_to_cpu(ucode_capa->api_index);
@@ -509,16 +512,19 @@ static void iwl_set_ucode_capabilities(struct iwl_drv *drv, const u8 *data,
 	int i;
 
 	if (api_index >= DIV_ROUND_UP(NUM_IWL_UCODE_TLV_CAPA, 32)) {
-		IWL_WARN(drv,
-			 "capa flags index %d larger than supported by driver\n",
-			 api_index);
-		return;
+		IWL_ERR(drv,
+			"capa flags index %d larger than supported by driver\n",
+			api_index);
+		/* don't return an error so we can load FW that has more bits */
+		return 0;
 	}
 
 	for (i = 0; i < 32; i++) {
 		if (api_flags & BIT(i))
 			__set_bit(i + 32 * api_index, capa->_capa);
 	}
+
+	return 0;
 }
 
 static int iwl_parse_v1_v2_firmware(struct iwl_drv *drv,
@@ -760,12 +766,14 @@ static int iwl_parse_tlv_firmware(struct iwl_drv *drv,
 		case IWL_UCODE_TLV_API_CHANGES_SET:
 			if (tlv_len != sizeof(struct iwl_ucode_api))
 				goto invalid_tlv_len;
-			iwl_set_ucode_api_flags(drv, tlv_data, capa);
+			if (iwl_set_ucode_api_flags(drv, tlv_data, capa))
+				goto tlv_error;
 			break;
 		case IWL_UCODE_TLV_ENABLED_CAPABILITIES:
 			if (tlv_len != sizeof(struct iwl_ucode_capa))
 				goto invalid_tlv_len;
-			iwl_set_ucode_capabilities(drv, tlv_data, capa);
+			if (iwl_set_ucode_capabilities(drv, tlv_data, capa))
+				goto tlv_error;
 			break;
 		case IWL_UCODE_TLV_INIT_EVTLOG_PTR:
 			if (tlv_len != sizeof(u32))
@@ -832,7 +840,7 @@ static int iwl_parse_tlv_firmware(struct iwl_drv *drv,
 			capa->standard_phy_calibration_size =
 					le32_to_cpup((__le32 *)tlv_data);
 			break;
-		case IWL_UCODE_TLV_SEC_RT:
+		 case IWL_UCODE_TLV_SEC_RT:
 			iwl_store_ucode_sec(pieces, tlv_data, IWL_UCODE_REGULAR,
 					    tlv_len);
 			drv->fw.type = IWL_FW_MVM;
@@ -864,7 +872,7 @@ static int iwl_parse_tlv_firmware(struct iwl_drv *drv,
 						FW_PHY_CFG_RX_CHAIN) >>
 						FW_PHY_CFG_RX_CHAIN_POS;
 			break;
-		case IWL_UCODE_TLV_SECURE_SEC_RT:
+		 case IWL_UCODE_TLV_SECURE_SEC_RT:
 			iwl_store_ucode_sec(pieces, tlv_data, IWL_UCODE_REGULAR,
 					    tlv_len);
 			drv->fw.type = IWL_FW_MVM;
@@ -1038,6 +1046,12 @@ static int iwl_parse_tlv_firmware(struct iwl_drv *drv,
 			usniffer_img = IWL_UCODE_REGULAR_USNIFFER;
 			drv->fw.img[usniffer_img].paging_mem_size =
 				paging_mem_size;
+			break;
+		case IWL_UCODE_TLV_SDIO_ADMA_ADDR:
+			if (tlv_len != sizeof(u32))
+				goto invalid_tlv_len;
+			drv->fw.sdio_adma_addr =
+				le32_to_cpup((__le32 *)tlv_data);
 			break;
 		case IWL_UCODE_TLV_FW_GSCAN_CAPA:
 			/*
@@ -1329,8 +1343,7 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 
 	/* Runtime instructions and 2 copies of data:
 	 * 1) unmodified from disk
-	 * 2) backup cache for save/restore during power-downs
-	 */
+	 * 2) backup cache for save/restore during power-downs */
 	for (i = 0; i < IWL_UCODE_TYPE_MAX; i++)
 		if (iwl_alloc_ucode(drv, pieces, i))
 			goto out_free_fw;

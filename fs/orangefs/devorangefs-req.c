@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * (C) 2001 Clemson University and The University of Chicago
  *
@@ -162,7 +161,7 @@ static ssize_t orangefs_devreq_read(struct file *file,
 	struct orangefs_kernel_op_s *op, *temp;
 	__s32 proto_ver = ORANGEFS_KERNEL_PROTO_VERSION;
 	static __s32 magic = ORANGEFS_DEVREQ_MAGIC;
-	struct orangefs_kernel_op_s *cur_op;
+	struct orangefs_kernel_op_s *cur_op = NULL;
 	unsigned long ret;
 
 	/* We do not support blocking IO. */
@@ -186,7 +185,6 @@ static ssize_t orangefs_devreq_read(struct file *file,
 		return -EAGAIN;
 
 restart:
-	cur_op = NULL;
 	/* Get next op (if any) from top of list. */
 	spin_lock(&orangefs_request_list_lock);
 	list_for_each_entry_safe(op, temp, &orangefs_request_list, list) {
@@ -463,10 +461,13 @@ static ssize_t orangefs_devreq_write_iter(struct kiocb *iocb,
 	if (op->downcall.type != ORANGEFS_VFS_OP_READDIR)
 		goto wakeup;
 
-	op->downcall.trailer_buf = vmalloc(op->downcall.trailer_size);
-	if (!op->downcall.trailer_buf)
+	op->downcall.trailer_buf =
+		vmalloc(op->downcall.trailer_size);
+	if (op->downcall.trailer_buf == NULL) {
+		gossip_err("%s: failed trailer vmalloc.\n",
+			   __func__);
 		goto Enomem;
-
+	}
 	memset(op->downcall.trailer_buf, 0, op->downcall.trailer_size);
 	if (!copy_from_iter_full(op->downcall.trailer_buf,
 			         op->downcall.trailer_size, iter)) {

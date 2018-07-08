@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the drm device driver.  This driver provides support for the
 # Direct Rendering Infrastructure (DRI) in XFree86 4.1.0 and higher.
@@ -40,7 +39,6 @@ i915-y += i915_cmd_parser.o \
 	  i915_gem_gtt.o \
 	  i915_gem_internal.o \
 	  i915_gem.o \
-	  i915_gem_object.o \
 	  i915_gem_render_state.o \
 	  i915_gem_request.o \
 	  i915_gem_shrinker.o \
@@ -48,7 +46,6 @@ i915-y += i915_cmd_parser.o \
 	  i915_gem_tiling.o \
 	  i915_gem_timeline.o \
 	  i915_gem_userptr.o \
-	  i915_gemfs.o \
 	  i915_trace_points.o \
 	  i915_vma.o \
 	  intel_breadcrumbs.o \
@@ -61,11 +58,9 @@ i915-y += i915_cmd_parser.o \
 
 # general-purpose microcontroller (GuC) support
 i915-y += intel_uc.o \
-	  intel_uc_fw.o \
-	  intel_guc.o \
 	  intel_guc_ct.o \
 	  intel_guc_log.o \
-	  intel_guc_fw.o \
+	  intel_guc_loader.o \
 	  intel_huc.o \
 	  i915_guc_submission.o
 
@@ -143,8 +138,7 @@ i915-y += i915_perf.o \
 	  i915_oa_bxt.o \
 	  i915_oa_kblgt2.o \
 	  i915_oa_kblgt3.o \
-	  i915_oa_glk.o \
-	  i915_oa_cflgt2.o
+	  i915_oa_glk.o
 
 ifeq ($(CONFIG_DRM_I915_GVT),y)
 i915-y += intel_gvt.o
@@ -155,3 +149,5 @@ endif
 i915-y += intel_lpe_audio.o
 
 obj-$(CONFIG_DRM_I915) += i915.o
+
+CFLAGS_i915_trace_points.o := -I$(src)

@@ -58,10 +58,8 @@ void core_pr_dump_initiator_port(
 	char *buf,
 	u32 size)
 {
-	if (!pr_reg->isid_present_at_reg) {
+	if (!pr_reg->isid_present_at_reg)
 		buf[0] = '\0';
-		return;
-	}
 
 	snprintf(buf, size, ",i,0x%s", pr_reg->pr_reg_isid);
 }
@@ -353,7 +351,6 @@ static int core_scsi3_pr_seq_non_holder(struct se_cmd *cmd, u32 pr_reg_type,
 		break;
 	case PR_TYPE_WRITE_EXCLUSIVE_REGONLY:
 		we = 1;
-		/* fall through */
 	case PR_TYPE_EXCLUSIVE_ACCESS_REGONLY:
 		/*
 		 * Some commands are only allowed for registered I_T Nexuses.
@@ -362,7 +359,6 @@ static int core_scsi3_pr_seq_non_holder(struct se_cmd *cmd, u32 pr_reg_type,
 		break;
 	case PR_TYPE_WRITE_EXCLUSIVE_ALLREG:
 		we = 1;
-		/* fall through */
 	case PR_TYPE_EXCLUSIVE_ACCESS_ALLREG:
 		/*
 		 * Each registered I_T Nexus is a reservation holder.
@@ -1525,7 +1521,7 @@ core_scsi3_decode_spec_i_port(
 	tidh_new = kzalloc(sizeof(struct pr_transport_id_holder), GFP_KERNEL);
 	if (!tidh_new) {
 		pr_err("Unable to allocate tidh_new\n");
-		return TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	}
 	INIT_LIST_HEAD(&tidh_new->dest_list);
 	tidh_new->dest_tpg = tpg;
@@ -1537,7 +1533,7 @@ core_scsi3_decode_spec_i_port(
 				sa_res_key, all_tg_pt, aptpl);
 	if (!local_pr_reg) {
 		kfree(tidh_new);
-		return TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	}
 	tidh_new->dest_pr_reg = local_pr_reg;
 	/*
@@ -1557,7 +1553,7 @@ core_scsi3_decode_spec_i_port(
 
 	buf = transport_kmap_data_sg(cmd);
 	if (!buf) {
-		ret = TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+		ret = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 		goto out;
 	}
 
@@ -1771,7 +1767,7 @@ core_scsi3_decode_spec_i_port(
 			core_scsi3_nodeacl_undepend_item(dest_node_acl);
 			core_scsi3_tpg_undepend_item(dest_tpg);
 			kfree(tidh_new);
-			ret = TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+			ret = TCM_INVALID_PARAMETER_LIST;
 			goto out_unmap;
 		}
 		tidh_new->dest_pr_reg = dest_pr_reg;
@@ -1975,32 +1971,33 @@ static int __core_scsi3_write_aptpl_to_file(
 	struct t10_wwn *wwn = &dev->t10_wwn;
 	struct file *file;
 	int flags = O_RDWR | O_CREAT | O_TRUNC;
-	char *path;
+	char path[512];
 	u32 pr_aptpl_buf_len;
 	int ret;
-	loff_t pos = 0;
 
-	path = kasprintf(GFP_KERNEL, "%s/pr/aptpl_%s", db_root,
-			&wwn->unit_serial[0]);
-	if (!path)
-		return -ENOMEM;
+	memset(path, 0, 512);
 
+	if (strlen(&wwn->unit_serial[0]) >= 512) {
+		pr_err("WWN value for struct se_device does not fit"
+			" into path buffer\n");
+		return -EMSGSIZE;
+	}
+
+	snprintf(path, 512, "%s/pr/aptpl_%s", db_root, &wwn->unit_serial[0]);
 	file = filp_open(path, flags, 0600);
 	if (IS_ERR(file)) {
 		pr_err("filp_open(%s) for APTPL metadata"
 			" failed\n", path);
-		kfree(path);
 		return PTR_ERR(file);
 	}
 
 	pr_aptpl_buf_len = (strlen(buf) + 1); /* Add extra for NULL */
 
-	ret = kernel_write(file, buf, pr_aptpl_buf_len, &pos);
+	ret = kernel_write(file, buf, pr_aptpl_buf_len, 0);
 
 	if (ret < 0)
 		pr_debug("Error writing APTPL metadata file: %s\n", path);
 	fput(file);
-	kfree(path);
 
 	return (ret < 0) ? -EIO : 0;
 }
@@ -2105,7 +2102,7 @@ core_scsi3_emulate_pro_register(struct se_cmd *cmd, u64 res_key, u64 sa_res_key,
 					register_type, 0)) {
 				pr_err("Unable to allocate"
 					" struct t10_pr_registration\n");
-				return TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+				return TCM_INVALID_PARAMETER_LIST;
 			}
 		} else {
 			/*
@@ -3217,7 +3214,7 @@ core_scsi3_emulate_pro_register_and_move(struct se_cmd *cmd, u64 res_key,
 	 */
 	buf = transport_kmap_data_sg(cmd);
 	if (!buf) {
-		ret = TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+		ret = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 		goto out_put_pr_reg;
 	}
 
@@ -3269,7 +3266,7 @@ core_scsi3_emulate_pro_register_and_move(struct se_cmd *cmd, u64 res_key,
 
 	buf = transport_kmap_data_sg(cmd);
 	if (!buf) {
-		ret = TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+		ret = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 		goto out_put_pr_reg;
 	}
 	proto_ident = (buf[24] & 0x0f);
@@ -3468,7 +3465,7 @@ after_iport_check:
 		if (core_scsi3_alloc_registration(cmd->se_dev, dest_node_acl,
 					dest_lun, dest_se_deve, dest_se_deve->mapped_lun,
 					iport_ptr, sa_res_key, 0, aptpl, 2, 1)) {
-			ret = TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+			ret = TCM_INVALID_PARAMETER_LIST;
 			goto out;
 		}
 		spin_lock(&dev->dev_reservation_lock);
@@ -3529,6 +3526,8 @@ after_iport_check:
 		core_scsi3_put_pr_reg(pr_reg);
 
 	core_scsi3_update_and_write_aptpl(cmd->se_dev, aptpl);
+
+	transport_kunmap_data_sg(cmd);
 
 	core_scsi3_put_pr_reg(dest_pr_reg);
 	return 0;
@@ -4011,7 +4010,6 @@ core_scsi3_pri_read_full_status(struct se_cmd *cmd)
 		 * Set the ADDITIONAL DESCRIPTOR LENGTH
 		 */
 		put_unaligned_be32(desc_len, &buf[off]);
-		off += 4;
 		/*
 		 * Size of full desctipor header minus TransportID
 		 * containing $FABRIC_MOD specific) initiator device/port

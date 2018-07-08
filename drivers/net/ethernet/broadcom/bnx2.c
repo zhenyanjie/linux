@@ -6183,9 +6183,9 @@ bnx2_5708_serdes_timer(struct bnx2 *bp)
 }
 
 static void
-bnx2_timer(struct timer_list *t)
+bnx2_timer(unsigned long data)
 {
-	struct bnx2 *bp = from_timer(bp, t, timer);
+	struct bnx2 *bp = (struct bnx2 *) data;
 
 	if (!netif_running(bp->dev))
 		return;
@@ -8462,8 +8462,10 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 	bnx2_set_default_link(bp);
 	bp->req_flow_ctrl = FLOW_CTRL_RX | FLOW_CTRL_TX;
 
-	timer_setup(&bp->timer, bnx2_timer, 0);
+	init_timer(&bp->timer);
 	bp->timer.expires = RUN_AT(BNX2_TIMER_INTERVAL);
+	bp->timer.data = (unsigned long) bp;
+	bp->timer.function = bnx2_timer;
 
 #ifdef BCM_CNIC
 	if (bnx2_shmem_rd(bp, BNX2_ISCSI_INITIATOR) & BNX2_ISCSI_INITIATOR_EN)

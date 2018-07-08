@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* GPL HEADER START
  *
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -30,8 +29,8 @@
 
 #include <crypto/hash.h>
 #include <linux/scatterlist.h>
-#include <linux/libcfs/libcfs.h>
-#include <linux/libcfs/libcfs_crypto.h>
+#include "../../../include/linux/libcfs/libcfs.h"
+#include "../../../include/linux/libcfs/libcfs_crypto.h"
 #include "linux-crypto.h"
 
 /**

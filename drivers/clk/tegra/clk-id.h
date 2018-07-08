@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * This header provides IDs for clocks common between several Tegra SoCs
  */
@@ -13,7 +12,6 @@ enum clk_id {
 	tegra_clk_amx,
 	tegra_clk_amx1,
 	tegra_clk_apb2ape,
-	tegra_clk_ahbdma,
 	tegra_clk_apbdma,
 	tegra_clk_apbif,
 	tegra_clk_ape,

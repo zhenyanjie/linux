@@ -25,7 +25,6 @@
 
 #include <subdev/secboot.h>
 #include <subdev/mmu.h>
-struct nvkm_gpuobj;
 
 struct nvkm_secboot_func {
 	int (*oneinit)(struct nvkm_secboot *);

@@ -23,7 +23,7 @@
 static struct sk_buff *mtk_tag_xmit(struct sk_buff *skb,
 				    struct net_device *dev)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_slave_priv *p = netdev_priv(dev);
 	u8 *mtk_tag;
 
 	if (skb_cow_head(skb, MTK_HDR_LEN) < 0)
@@ -36,7 +36,7 @@ static struct sk_buff *mtk_tag_xmit(struct sk_buff *skb,
 	/* Build the tag after the MAC Source Address */
 	mtk_tag = skb->data + 2 * ETH_ALEN;
 	mtk_tag[0] = 0;
-	mtk_tag[1] = (1 << dp->index) & MTK_HDR_XMIT_DP_BIT_MASK;
+	mtk_tag[1] = (1 << p->dp->index) & MTK_HDR_XMIT_DP_BIT_MASK;
 	mtk_tag[2] = 0;
 	mtk_tag[3] = 0;
 
@@ -44,8 +44,11 @@ static struct sk_buff *mtk_tag_xmit(struct sk_buff *skb,
 }
 
 static struct sk_buff *mtk_tag_rcv(struct sk_buff *skb, struct net_device *dev,
-				   struct packet_type *pt)
+				   struct packet_type *pt,
+				   struct net_device *orig_dev)
 {
+	struct dsa_switch_tree *dst = dev->dsa_ptr;
+	struct dsa_switch *ds;
 	int port;
 	__be16 *phdr, hdr;
 
@@ -66,27 +69,25 @@ static struct sk_buff *mtk_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 		skb->data - ETH_HLEN - MTK_HDR_LEN,
 		2 * ETH_ALEN);
 
+	/* This protocol doesn't support cascading multiple
+	 * switches so it's safe to assume the switch is first
+	 * in the tree.
+	 */
+	ds = dst->ds[0];
+	if (!ds)
+		return NULL;
+
 	/* Get source port information */
 	port = (hdr & MTK_HDR_RECV_SOURCE_PORT_MASK);
-
-	skb->dev = dsa_master_find_slave(dev, 0, port);
-	if (!skb->dev)
+	if (!ds->ports[port].netdev)
 		return NULL;
+
+	skb->dev = ds->ports[port].netdev;
 
 	return skb;
 }
 
-static int mtk_tag_flow_dissect(const struct sk_buff *skb, __be16 *proto,
-				int *offset)
-{
-	*offset = 4;
-	*proto = ((__be16 *)skb->data)[1];
-
-	return 0;
-}
-
 const struct dsa_device_ops mtk_netdev_ops = {
-	.xmit		= mtk_tag_xmit,
-	.rcv		= mtk_tag_rcv,
-	.flow_dissect	= mtk_tag_flow_dissect,
+	.xmit	= mtk_tag_xmit,
+	.rcv	= mtk_tag_rcv,
 };

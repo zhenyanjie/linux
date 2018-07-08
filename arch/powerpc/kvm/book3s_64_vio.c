@@ -265,11 +265,8 @@ static int kvm_spapr_tce_release(struct inode *inode, struct file *filp)
 {
 	struct kvmppc_spapr_tce_table *stt = filp->private_data;
 	struct kvmppc_spapr_tce_iommu_table *stit, *tmp;
-	struct kvm *kvm = stt->kvm;
 
-	mutex_lock(&kvm->lock);
 	list_del_rcu(&stt->list);
-	mutex_unlock(&kvm->lock);
 
 	list_for_each_entry_safe(stit, tmp, &stt->iommu_tables, next) {
 		WARN_ON(!kref_read(&stit->kref));
@@ -301,6 +298,7 @@ long kvm_vm_ioctl_create_spapr_tce(struct kvm *kvm,
 	unsigned long npages, size;
 	int ret = -ENOMEM;
 	int i;
+	int fd = -1;
 
 	if (!args->size)
 		return -EINVAL;
@@ -330,6 +328,11 @@ long kvm_vm_ioctl_create_spapr_tce(struct kvm *kvm,
 			goto fail;
 	}
 
+	ret = fd = anon_inode_getfd("kvm-spapr-tce", &kvm_spapr_tce_fops,
+				    stt, O_RDWR | O_CLOEXEC);
+	if (ret < 0)
+		goto fail;
+
 	mutex_lock(&kvm->lock);
 
 	/* Check this LIOBN hasn't been previously allocated */
@@ -341,19 +344,17 @@ long kvm_vm_ioctl_create_spapr_tce(struct kvm *kvm,
 		}
 	}
 
-	if (!ret)
-		ret = anon_inode_getfd("kvm-spapr-tce", &kvm_spapr_tce_fops,
-				       stt, O_RDWR | O_CLOEXEC);
-
-	if (ret >= 0) {
+	if (!ret) {
 		list_add_rcu(&stt->list, &kvm->arch.spapr_tce_tables);
 		kvm_get_kvm(kvm);
 	}
 
 	mutex_unlock(&kvm->lock);
 
-	if (ret >= 0)
-		return ret;
+	if (!ret)
+		return fd;
+
+	put_unused_fd(fd);
 
  fail:
 	for (i = 0; i < npages; i++)

@@ -688,19 +688,6 @@ struct phy_device *phy_find_first(struct mii_bus *bus)
 }
 EXPORT_SYMBOL(phy_find_first);
 
-static void phy_link_change(struct phy_device *phydev, bool up, bool do_carrier)
-{
-	struct net_device *netdev = phydev->attached_dev;
-
-	if (do_carrier) {
-		if (up)
-			netif_carrier_on(netdev);
-		else
-			netif_carrier_off(netdev);
-	}
-	phydev->adjust_link(netdev);
-}
-
 /**
  * phy_prepare_link - prepares the PHY layer to monitor link status
  * @phydev: target phy_device struct
@@ -874,37 +861,21 @@ void phy_attached_info(struct phy_device *phydev)
 }
 EXPORT_SYMBOL(phy_attached_info);
 
-#define ATTACHED_FMT "attached PHY driver [%s] (mii_bus:phy_addr=%s, irq=%s)"
+#define ATTACHED_FMT "attached PHY driver [%s] (mii_bus:phy_addr=%s, irq=%d)"
 void phy_attached_print(struct phy_device *phydev, const char *fmt, ...)
 {
 	const char *drv_name = phydev->drv ? phydev->drv->name : "unbound";
-	char *irq_str;
-	char irq_num[8];
-
-	switch(phydev->irq) {
-	case PHY_POLL:
-		irq_str = "POLL";
-		break;
-	case PHY_IGNORE_INTERRUPT:
-		irq_str = "IGNORE";
-		break;
-	default:
-		snprintf(irq_num, sizeof(irq_num), "%d", phydev->irq);
-		irq_str = irq_num;
-		break;
-	}
-
 
 	if (!fmt) {
 		dev_info(&phydev->mdio.dev, ATTACHED_FMT "\n",
 			 drv_name, phydev_name(phydev),
-			 irq_str);
+			 phydev->irq);
 	} else {
 		va_list ap;
 
 		dev_info(&phydev->mdio.dev, ATTACHED_FMT,
 			 drv_name, phydev_name(phydev),
-			 irq_str);
+			 phydev->irq);
 
 		va_start(ap, fmt);
 		vprintk(fmt, ap);
@@ -982,7 +953,6 @@ int phy_attach_direct(struct net_device *dev, struct phy_device *phydev,
 		goto error;
 	}
 
-	phydev->phy_link_change = phy_link_change;
 	phydev->attached_dev = dev;
 	dev->phydev = phydev;
 
@@ -999,17 +969,10 @@ int phy_attach_direct(struct net_device *dev, struct phy_device *phydev,
 	err = sysfs_create_link(&phydev->mdio.dev.kobj, &dev->dev.kobj,
 				"attached_dev");
 	if (!err) {
-		err = sysfs_create_link_nowarn(&dev->dev.kobj,
-					       &phydev->mdio.dev.kobj,
-					       "phydev");
-		if (err) {
-			dev_err(&dev->dev, "could not add device link to %s err %d\n",
-				kobject_name(&phydev->mdio.dev.kobj),
-				err);
-			/* non-fatal - some net drivers can use one netdevice
-			 * with more then one phy
-			 */
-		}
+		err = sysfs_create_link(&dev->dev.kobj, &phydev->mdio.dev.kobj,
+					"phydev");
+		if (err)
+			goto error;
 
 		phydev->sysfs_links = true;
 	}
@@ -1109,7 +1072,6 @@ void phy_detach(struct phy_device *phydev)
 	phydev->attached_dev->phydev = NULL;
 	phydev->attached_dev = NULL;
 	phy_suspend(phydev);
-	phydev->phylink = NULL;
 
 	phy_led_triggers_unregister(phydev);
 
@@ -1159,12 +1121,10 @@ int phy_suspend(struct phy_device *phydev)
 }
 EXPORT_SYMBOL(phy_suspend);
 
-int __phy_resume(struct phy_device *phydev)
+int phy_resume(struct phy_device *phydev)
 {
 	struct phy_driver *phydrv = to_phy_driver(phydev->mdio.dev.driver);
 	int ret = 0;
-
-	WARN_ON(!mutex_is_locked(&phydev->lock));
 
 	if (phydev->drv && phydrv->resume)
 		ret = phydrv->resume(phydev);
@@ -1173,18 +1133,6 @@ int __phy_resume(struct phy_device *phydev)
 		return ret;
 
 	phydev->suspended = false;
-
-	return ret;
-}
-EXPORT_SYMBOL(__phy_resume);
-
-int phy_resume(struct phy_device *phydev)
-{
-	int ret;
-
-	mutex_lock(&phydev->lock);
-	ret = __phy_resume(phydev);
-	mutex_unlock(&phydev->lock);
 
 	return ret;
 }
@@ -1660,8 +1608,12 @@ int genphy_resume(struct phy_device *phydev)
 {
 	int value;
 
+	mutex_lock(&phydev->lock);
+
 	value = phy_read(phydev, MII_BMCR);
 	phy_write(phydev, MII_BMCR, value & ~BMCR_PDOWN);
+
+	mutex_unlock(&phydev->lock);
 
 	return 0;
 }

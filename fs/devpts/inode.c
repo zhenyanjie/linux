@@ -168,11 +168,11 @@ struct vfsmount *devpts_mntget(struct file *filp, struct pts_fs_info *fsi)
 	dput(path.dentry);
 	if (err) {
 		mntput(path.mnt);
-		return ERR_PTR(err);
+		path.mnt = ERR_PTR(err);
 	}
 	if (DEVPTS_SB(path.mnt->mnt_sb) != fsi) {
 		mntput(path.mnt);
-		return ERR_PTR(-ENODEV);
+		path.mnt = ERR_PTR(-ENODEV);
 	}
 	return path.mnt;
 }

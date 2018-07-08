@@ -3,7 +3,7 @@
 #
 
 menuconfig HWSPINLOCK
-	bool "Hardware Spinlock drivers"
+	tristate "Hardware Spinlock drivers"
 
 config HWSPINLOCK_OMAP
 	tristate "OMAP Hardware Spinlock device"

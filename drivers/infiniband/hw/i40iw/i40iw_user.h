@@ -204,6 +204,18 @@ struct i40iw_post_inline_send {
 	u32 len;
 };
 
+struct i40iw_post_send_w_inv {
+	i40iw_sgl sg_list;
+	u32 num_sges;
+	i40iw_stag remote_stag_to_inv;
+};
+
+struct i40iw_post_inline_send_w_inv {
+	void *data;
+	u32 len;
+	i40iw_stag remote_stag_to_inv;
+};
+
 struct i40iw_rdma_write {
 	i40iw_sgl lo_sg_list;
 	u32 num_lo_sges;
@@ -245,6 +257,9 @@ struct i40iw_post_sq_info {
 	bool defer_flag;
 	union {
 		struct i40iw_post_send send;
+		struct i40iw_post_send send_w_sol;
+		struct i40iw_post_send_w_inv send_w_inv;
+		struct i40iw_post_send_w_inv send_w_sol_inv;
 		struct i40iw_rdma_write rdma_write;
 		struct i40iw_rdma_read rdma_read;
 		struct i40iw_rdma_read rdma_read_inv;
@@ -252,6 +267,9 @@ struct i40iw_post_sq_info {
 		struct i40iw_inv_local_stag inv_local_stag;
 		struct i40iw_inline_rdma_write inline_rdma_write;
 		struct i40iw_post_inline_send inline_send;
+		struct i40iw_post_inline_send inline_send_w_sol;
+		struct i40iw_post_inline_send_w_inv inline_send_w_inv;
+		struct i40iw_post_inline_send_w_inv inline_send_w_sol_inv;
 	} op;
 };
 
@@ -358,7 +376,6 @@ struct i40iw_qp_uk {
 	u8 rwqe_polarity;
 	u8 rq_wqe_size;
 	u8 rq_wqe_size_multiplier;
-	bool first_sq_wq;
 	bool deferred_flag;
 };
 
@@ -425,7 +442,5 @@ enum i40iw_status_code i40iw_fragcnt_to_wqesize_sq(u32 frag_cnt, u8 *wqe_size);
 enum i40iw_status_code i40iw_fragcnt_to_wqesize_rq(u32 frag_cnt, u8 *wqe_size);
 enum i40iw_status_code i40iw_inline_data_size_to_wqesize(u32 data_size,
 							 u8 *wqe_size);
-void i40iw_get_wqe_shift(u32 sge, u32 inline_data, u8 *shift);
-enum i40iw_status_code i40iw_get_sqdepth(u32 sq_size, u8 shift, u32 *sqdepth);
-enum i40iw_status_code i40iw_get_rqdepth(u32 rq_size, u8 shift, u32 *rqdepth);
+enum i40iw_status_code i40iw_get_wqe_shift(u32 wqdepth, u32 sge, u32 inline_data, u8 *shift);
 #endif

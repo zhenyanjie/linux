@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -24,7 +23,7 @@
  * Code originally extracted from quota directory
  */
 
-#include <obd_class.h>
+#include "../include/obd_class.h"
 #include "osc_internal.h"
 
 static inline struct osc_quota_info *osc_oqi_alloc(u32 id)

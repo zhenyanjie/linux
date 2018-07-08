@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_MSR_H
 #define _ASM_X86_MSR_H
 
@@ -214,7 +213,8 @@ static __always_inline unsigned long long rdtsc_ordered(void)
 	 * that some other imaginary CPU is updating continuously with a
 	 * time stamp.
 	 */
-	barrier_nospec();
+	alternative_2("", "mfence", X86_FEATURE_MFENCE_RDTSC,
+			  "lfence", X86_FEATURE_LFENCE_RDTSC);
 	return rdtsc();
 }
 

@@ -25,6 +25,7 @@
 
 #include <linux/if_arp.h>
 
+#define SAMPLE_TAB_MASK     7
 static unsigned int sample_net_id;
 static struct tc_action_ops act_sample_ops;
 
@@ -58,18 +59,18 @@ static int tcf_sample_init(struct net *net, struct nlattr *nla,
 
 	parm = nla_data(tb[TCA_SAMPLE_PARMS]);
 
-	exists = tcf_idr_check(tn, parm->index, a, bind);
+	exists = tcf_hash_check(tn, parm->index, a, bind);
 	if (exists && bind)
 		return 0;
 
 	if (!exists) {
-		ret = tcf_idr_create(tn, parm->index, est, a,
-				     &act_sample_ops, bind, false);
+		ret = tcf_hash_create(tn, parm->index, est, a,
+				      &act_sample_ops, bind, false);
 		if (ret)
 			return ret;
 		ret = ACT_P_CREATED;
 	} else {
-		tcf_idr_release(*a, bind);
+		tcf_hash_release(*a, bind);
 		if (!ovr)
 			return -EEXIST;
 	}
@@ -81,7 +82,7 @@ static int tcf_sample_init(struct net *net, struct nlattr *nla,
 	psample_group = psample_group_get(net, s->psample_group_num);
 	if (!psample_group) {
 		if (ret == ACT_P_CREATED)
-			tcf_idr_release(*a, bind);
+			tcf_hash_release(*a, bind);
 		return -ENOMEM;
 	}
 	RCU_INIT_POINTER(s->psample_group, psample_group);
@@ -92,19 +93,25 @@ static int tcf_sample_init(struct net *net, struct nlattr *nla,
 	}
 
 	if (ret == ACT_P_CREATED)
-		tcf_idr_insert(tn, *a);
+		tcf_hash_insert(tn, *a);
 	return ret;
+}
+
+static void tcf_sample_cleanup_rcu(struct rcu_head *rcu)
+{
+	struct tcf_sample *s = container_of(rcu, struct tcf_sample, rcu);
+	struct psample_group *psample_group;
+
+	psample_group = rcu_dereference_protected(s->psample_group, 1);
+	RCU_INIT_POINTER(s->psample_group, NULL);
+	psample_group_put(psample_group);
 }
 
 static void tcf_sample_cleanup(struct tc_action *a, int bind)
 {
 	struct tcf_sample *s = to_sample(a);
-	struct psample_group *psample_group;
 
-	psample_group = rtnl_dereference(s->psample_group);
-	RCU_INIT_POINTER(s->psample_group, NULL);
-	if (psample_group)
-		psample_group_put(psample_group);
+	call_rcu(&s->rcu, tcf_sample_cleanup_rcu);
 }
 
 static bool tcf_sample_dev_ok_push(struct net_device *dev)
@@ -214,7 +221,7 @@ static int tcf_sample_search(struct net *net, struct tc_action **a, u32 index)
 {
 	struct tc_action_net *tn = net_generic(net, sample_net_id);
 
-	return tcf_idr_search(tn, a, index);
+	return tcf_hash_search(tn, a, index);
 }
 
 static struct tc_action_ops act_sample_ops = {
@@ -234,7 +241,7 @@ static __net_init int sample_init_net(struct net *net)
 {
 	struct tc_action_net *tn = net_generic(net, sample_net_id);
 
-	return tc_action_net_init(tn, &act_sample_ops);
+	return tc_action_net_init(tn, &act_sample_ops, SAMPLE_TAB_MASK);
 }
 
 static void __net_exit sample_exit_net(struct net *net)
@@ -264,6 +271,6 @@ static void __exit sample_cleanup_module(void)
 module_init(sample_init_module);
 module_exit(sample_cleanup_module);
 
-MODULE_AUTHOR("Yotam Gigi <yotam.gi@gmail.com>");
+MODULE_AUTHOR("Yotam Gigi <yotamg@mellanox.com>");
 MODULE_DESCRIPTION("Packet sampling action");
 MODULE_LICENSE("GPL v2");

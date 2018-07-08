@@ -275,8 +275,8 @@ static int rxe_qp_init_req(struct rxe_dev *rxe, struct rxe_qp *qp,
 
 	qp->qp_timeout_jiffies = 0; /* Can't be set for UD/UC in modify_qp */
 	if (init->qp_type == IB_QPT_RC) {
-		timer_setup(&qp->rnr_nak_timer, rnr_nak_timer, 0);
-		timer_setup(&qp->retrans_timer, retransmit_timer, 0);
+		setup_timer(&qp->rnr_nak_timer, rnr_nak_timer, (unsigned long)qp);
+		setup_timer(&qp->retrans_timer, retransmit_timer, (unsigned long)qp);
 	}
 	return 0;
 }
@@ -824,9 +824,9 @@ void rxe_qp_destroy(struct rxe_qp *qp)
 }
 
 /* called when the last reference to the qp is dropped */
-static void rxe_qp_do_cleanup(struct work_struct *work)
+void rxe_qp_cleanup(struct rxe_pool_entry *arg)
 {
-	struct rxe_qp *qp = container_of(work, typeof(*qp), cleanup_work.work);
+	struct rxe_qp *qp = container_of(arg, typeof(*qp), pelem);
 
 	rxe_drop_all_mcast_groups(qp);
 
@@ -851,19 +851,16 @@ static void rxe_qp_do_cleanup(struct work_struct *work)
 		qp->resp.mr = NULL;
 	}
 
-	if (qp_type(qp) == IB_QPT_RC)
-		sk_dst_reset(qp->sk->sk);
+	if (qp_type(qp) == IB_QPT_RC) {
+		struct dst_entry *dst = NULL;
+
+		dst = sk_dst_get(qp->sk->sk);
+		if (dst)
+			dst_release(dst);
+	}
 
 	free_rd_atomic_resources(qp);
 
 	kernel_sock_shutdown(qp->sk, SHUT_RDWR);
 	sock_release(qp->sk);
-}
-
-/* called when the last reference to the qp is dropped */
-void rxe_qp_cleanup(struct rxe_pool_entry *arg)
-{
-	struct rxe_qp *qp = container_of(arg, typeof(*qp), pelem);
-
-	execute_in_process_context(rxe_qp_do_cleanup, &qp->cleanup_work);
 }

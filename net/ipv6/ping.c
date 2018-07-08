@@ -154,8 +154,9 @@ static int ping_v6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 				ICMP6_MIB_OUTERRORS);
 		ip6_flush_pending_frames(sk);
 	} else {
-		icmpv6_push_pending_frames(sk, &fl6,
-					   (struct icmp6hdr *)&pfh.icmph, len);
+		err = icmpv6_push_pending_frames(sk, &fl6,
+						 (struct icmp6hdr *) &pfh.icmph,
+						 len);
 	}
 	release_sock(sk);
 

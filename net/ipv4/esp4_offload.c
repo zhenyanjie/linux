@@ -38,8 +38,7 @@ static struct sk_buff **esp4_gro_receive(struct sk_buff **head,
 	__be32 spi;
 	int err;
 
-	if (!pskb_pull(skb, offset))
-		return NULL;
+	skb_pull(skb, offset);
 
 	if ((err = xfrm_parse_spi(skb, IPPROTO_ESP, &spi, &seq)) != 0)
 		goto out;
@@ -122,9 +121,6 @@ static struct sk_buff *esp4_gso_segment(struct sk_buff *skb,
 	if (!xo)
 		goto out;
 
-	if (!(skb_shinfo(skb)->gso_type & SKB_GSO_ESP))
-		goto out;
-
 	seq = xo->seq.low;
 
 	x = skb->sp->xvec[skb->sp->len - 1];
@@ -186,13 +182,11 @@ out:
 static int esp_input_tail(struct xfrm_state *x, struct sk_buff *skb)
 {
 	struct crypto_aead *aead = x->data;
-	struct xfrm_offload *xo = xfrm_offload(skb);
 
 	if (!pskb_may_pull(skb, sizeof(struct ip_esp_hdr) + crypto_aead_ivsize(aead)))
 		return -EINVAL;
 
-	if (!(xo->flags & CRYPTO_DONE))
-		skb->ip_summed = CHECKSUM_NONE;
+	skb->ip_summed = CHECKSUM_NONE;
 
 	return esp_input_done2(skb, 0);
 }
@@ -309,4 +303,3 @@ module_init(esp4_offload_init);
 module_exit(esp4_offload_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Steffen Klassert <steffen.klassert@secunet.com>");
-MODULE_ALIAS_XFRM_OFFLOAD_TYPE(AF_INET, XFRM_PROTO_ESP);

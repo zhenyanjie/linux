@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/mm.h>
 #include <linux/rmap.h>
 #include <linux/hugetlb.h>
@@ -30,63 +29,39 @@ static bool map_pte(struct page_vma_mapped_walk *pvmw)
 	return true;
 }
 
-static inline bool pfn_in_hpage(struct page *hpage, unsigned long pfn)
-{
-	unsigned long hpage_pfn = page_to_pfn(hpage);
-
-	/* THP can be referenced by any subpage */
-	return pfn >= hpage_pfn && pfn - hpage_pfn < hpage_nr_pages(hpage);
-}
-
-/**
- * check_pte - check if @pvmw->page is mapped at the @pvmw->pte
- *
- * page_vma_mapped_walk() found a place where @pvmw->page is *potentially*
- * mapped. check_pte() has to validate this.
- *
- * @pvmw->pte may point to empty PTE, swap PTE or PTE pointing to arbitrary
- * page.
- *
- * If PVMW_MIGRATION flag is set, returns true if @pvmw->pte contains migration
- * entry that points to @pvmw->page or any subpage in case of THP.
- *
- * If PVMW_MIGRATION flag is not set, returns true if @pvmw->pte points to
- * @pvmw->page or any subpage in case of THP.
- *
- * Otherwise, return false.
- *
- */
 static bool check_pte(struct page_vma_mapped_walk *pvmw)
 {
-	unsigned long pfn;
-
 	if (pvmw->flags & PVMW_MIGRATION) {
+#ifdef CONFIG_MIGRATION
 		swp_entry_t entry;
 		if (!is_swap_pte(*pvmw->pte))
 			return false;
 		entry = pte_to_swp_entry(*pvmw->pte);
-
 		if (!is_migration_entry(entry))
 			return false;
-
-		pfn = migration_entry_to_pfn(entry);
-	} else if (is_swap_pte(*pvmw->pte)) {
-		swp_entry_t entry;
-
-		/* Handle un-addressable ZONE_DEVICE memory */
-		entry = pte_to_swp_entry(*pvmw->pte);
-		if (!is_device_private_entry(entry))
+		if (migration_entry_to_page(entry) - pvmw->page >=
+				hpage_nr_pages(pvmw->page)) {
 			return false;
-
-		pfn = device_private_entry_to_pfn(entry);
+		}
+		if (migration_entry_to_page(entry) < pvmw->page)
+			return false;
+#else
+		WARN_ON_ONCE(1);
+#endif
 	} else {
 		if (!pte_present(*pvmw->pte))
 			return false;
 
-		pfn = pte_pfn(*pvmw->pte);
+		/* THP can be referenced by any subpage */
+		if (pte_page(*pvmw->pte) - pvmw->page >=
+				hpage_nr_pages(pvmw->page)) {
+			return false;
+		}
+		if (pte_page(*pvmw->pte) < pvmw->page)
+			return false;
 	}
 
-	return pfn_in_hpage(pvmw->page, pfn);
+	return true;
 }
 
 /**
@@ -159,27 +134,16 @@ restart:
 	 * subsequent update.
 	 */
 	pmde = READ_ONCE(*pvmw->pmd);
-	if (pmd_trans_huge(pmde) || is_pmd_migration_entry(pmde)) {
+	if (pmd_trans_huge(pmde)) {
 		pvmw->ptl = pmd_lock(mm, pvmw->pmd);
+		if (!pmd_present(*pvmw->pmd))
+			return not_found(pvmw);
 		if (likely(pmd_trans_huge(*pvmw->pmd))) {
 			if (pvmw->flags & PVMW_MIGRATION)
 				return not_found(pvmw);
 			if (pmd_page(*pvmw->pmd) != page)
 				return not_found(pvmw);
 			return true;
-		} else if (!pmd_present(*pvmw->pmd)) {
-			if (thp_migration_supported()) {
-				if (!(pvmw->flags & PVMW_MIGRATION))
-					return not_found(pvmw);
-				if (is_migration_entry(pmd_to_swp_entry(*pvmw->pmd))) {
-					swp_entry_t entry = pmd_to_swp_entry(*pvmw->pmd);
-
-					if (migration_entry_to_page(entry) != page)
-						return not_found(pvmw);
-					return true;
-				}
-			}
-			return not_found(pvmw);
 		} else {
 			/* THP pmd was split under us: handle on pte level */
 			spin_unlock(pvmw->ptl);

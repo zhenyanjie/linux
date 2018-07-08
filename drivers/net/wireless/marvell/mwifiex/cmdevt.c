@@ -17,7 +17,6 @@
  * this warranty disclaimer.
  */
 
-#include <asm/unaligned.h>
 #include "decl.h"
 #include "ioctl.h"
 #include "util.h"
@@ -26,8 +25,6 @@
 #include "wmm.h"
 #include "11n.h"
 #include "11ac.h"
-
-static void mwifiex_cancel_pending_ioctl(struct mwifiex_adapter *adapter);
 
 /*
  * This function initializes a command node.
@@ -184,6 +181,7 @@ static int mwifiex_dnld_cmd_to_fw(struct mwifiex_private *priv,
 	uint16_t cmd_code;
 	uint16_t cmd_size;
 	unsigned long flags;
+	__le32 tmp;
 
 	if (!adapter || !cmd_node)
 		return -1;
@@ -249,9 +247,9 @@ static int mwifiex_dnld_cmd_to_fw(struct mwifiex_private *priv,
 	mwifiex_dbg_dump(adapter, CMD_D, "cmd buffer:", host_cmd, cmd_size);
 
 	if (adapter->iface_type == MWIFIEX_USB) {
+		tmp = cpu_to_le32(MWIFIEX_USB_TYPE_CMD);
 		skb_push(cmd_node->cmd_skb, MWIFIEX_TYPE_LEN);
-		put_unaligned_le32(MWIFIEX_USB_TYPE_CMD,
-				   cmd_node->cmd_skb->data);
+		memcpy(cmd_node->cmd_skb->data, &tmp, MWIFIEX_TYPE_LEN);
 		adapter->cmd_sent = true;
 		ret = adapter->if_ops.host_to_card(adapter,
 						   MWIFIEX_USB_EP_CMD_EVENT,
@@ -317,6 +315,7 @@ static int mwifiex_dnld_sleep_confirm_cmd(struct mwifiex_adapter *adapter)
 				(struct mwifiex_opt_sleep_confirm *)
 						adapter->sleep_cfm->data;
 	struct sk_buff *sleep_cfm_tmp;
+	__le32 tmp;
 
 	priv = mwifiex_get_priv(adapter, MWIFIEX_BSS_ROLE_ANY);
 
@@ -341,7 +340,8 @@ static int mwifiex_dnld_sleep_confirm_cmd(struct mwifiex_adapter *adapter)
 				      + MWIFIEX_TYPE_LEN);
 		skb_put(sleep_cfm_tmp, sizeof(struct mwifiex_opt_sleep_confirm)
 			+ MWIFIEX_TYPE_LEN);
-		put_unaligned_le32(MWIFIEX_USB_TYPE_CMD, sleep_cfm_tmp->data);
+		tmp = cpu_to_le32(MWIFIEX_USB_TYPE_CMD);
+		memcpy(sleep_cfm_tmp->data, &tmp, MWIFIEX_TYPE_LEN);
 		memcpy(sleep_cfm_tmp->data + MWIFIEX_TYPE_LEN,
 		       adapter->sleep_cfm->data,
 		       sizeof(struct mwifiex_opt_sleep_confirm));
@@ -427,7 +427,7 @@ int mwifiex_alloc_cmd_buffer(struct mwifiex_adapter *adapter)
  * The function calls the completion callback for all the command
  * buffers that still have response buffers associated with them.
  */
-void mwifiex_free_cmd_buffer(struct mwifiex_adapter *adapter)
+int mwifiex_free_cmd_buffer(struct mwifiex_adapter *adapter)
 {
 	struct cmd_ctrl_node *cmd_array;
 	u32 i;
@@ -436,7 +436,7 @@ void mwifiex_free_cmd_buffer(struct mwifiex_adapter *adapter)
 	if (!adapter->cmd_pool) {
 		mwifiex_dbg(adapter, FATAL,
 			    "info: FREE_CMD_BUF: cmd_pool is null\n");
-		return;
+		return 0;
 	}
 
 	cmd_array = adapter->cmd_pool;
@@ -464,6 +464,8 @@ void mwifiex_free_cmd_buffer(struct mwifiex_adapter *adapter)
 		kfree(adapter->cmd_pool);
 		adapter->cmd_pool = NULL;
 	}
+
+	return 0;
 }
 
 /*
@@ -664,7 +666,7 @@ int mwifiex_send_cmd(struct mwifiex_private *priv, u16 cmd_no,
 	    cmd_no == HostCmd_CMD_802_11_SCAN_EXT) {
 		mwifiex_queue_scan_cmd(priv, cmd_node);
 	} else {
-		mwifiex_insert_cmd_to_pending_q(adapter, cmd_node);
+		mwifiex_insert_cmd_to_pending_q(adapter, cmd_node, true);
 		queue_work(adapter->workqueue, &adapter->main_work);
 		if (cmd_node->wait_q_enabled)
 			ret = mwifiex_wait_queue_complete(adapter, cmd_node);
@@ -682,12 +684,11 @@ int mwifiex_send_cmd(struct mwifiex_private *priv, u16 cmd_no,
  */
 void
 mwifiex_insert_cmd_to_pending_q(struct mwifiex_adapter *adapter,
-				struct cmd_ctrl_node *cmd_node)
+				struct cmd_ctrl_node *cmd_node, u32 add_tail)
 {
 	struct host_cmd_ds_command *host_cmd = NULL;
 	u16 command;
 	unsigned long flags;
-	bool add_tail = true;
 
 	host_cmd = (struct host_cmd_ds_command *) (cmd_node->cmd_skb->data);
 	if (!host_cmd) {
@@ -920,9 +921,10 @@ int mwifiex_process_cmdresp(struct mwifiex_adapter *adapter)
  * It will re-send the same command again.
  */
 void
-mwifiex_cmd_timeout_func(struct timer_list *t)
+mwifiex_cmd_timeout_func(unsigned long function_context)
 {
-	struct mwifiex_adapter *adapter = from_timer(adapter, t, cmd_timer);
+	struct mwifiex_adapter *adapter =
+		(struct mwifiex_adapter *) function_context;
 	struct cmd_ctrl_node *cmd_node;
 
 	adapter->is_cmd_timedout = 1;
@@ -1073,7 +1075,7 @@ mwifiex_cancel_all_pending_cmd(struct mwifiex_adapter *adapter)
  * In case of scan commands, all pending commands in scan pending queue
  * are cancelled.
  */
-static void
+void
 mwifiex_cancel_pending_ioctl(struct mwifiex_adapter *adapter)
 {
 	struct cmd_ctrl_node *cmd_node = NULL;

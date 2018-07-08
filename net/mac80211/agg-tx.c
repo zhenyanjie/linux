@@ -226,11 +226,7 @@ ieee80211_agg_start_txq(struct sta_info *sta, int tid, bool enable)
 		clear_bit(IEEE80211_TXQ_AMPDU, &txqi->flags);
 
 	clear_bit(IEEE80211_TXQ_STOP, &txqi->flags);
-	local_bh_disable();
-	rcu_read_lock();
 	drv_wake_tx_queue(sta->sdata->local, txqi);
-	rcu_read_unlock();
-	local_bh_enable();
 }
 
 /*
@@ -330,11 +326,6 @@ int ___ieee80211_stop_tx_ba_session(struct sta_info *sta, u16 tid,
 
 	spin_lock_bh(&sta->lock);
 
-	/* free struct pending for start, if present */
-	tid_tx = sta->ampdu_mlme.tid_start_tx[tid];
-	kfree(tid_tx);
-	sta->ampdu_mlme.tid_start_tx[tid] = NULL;
-
 	tid_tx = rcu_dereference_protected_tid_tx(sta, tid);
 	if (!tid_tx) {
 		spin_unlock_bh(&sta->lock);
@@ -427,12 +418,15 @@ int ___ieee80211_stop_tx_ba_session(struct sta_info *sta, u16 tid,
  * add Block Ack response will arrive from the recipient.
  * If this timer expires sta_addba_resp_timer_expired will be executed.
  */
-static void sta_addba_resp_timer_expired(struct timer_list *t)
+static void sta_addba_resp_timer_expired(unsigned long data)
 {
-	struct tid_ampdu_tx *tid_tx_timer =
-		from_timer(tid_tx_timer, t, addba_resp_timer);
-	struct sta_info *sta = tid_tx_timer->sta;
-	u8 tid = tid_tx_timer->tid;
+	/* not an elegant detour, but there is no choice as the timer passes
+	 * only one argument, and both sta_info and TID are needed, so init
+	 * flow in sta_info_create gives the TID as data, while the timer_to_id
+	 * array gives the sta through container_of */
+	u16 tid = *(u8 *)data;
+	struct sta_info *sta = container_of((void *)data,
+		struct sta_info, timer_to_tid[tid]);
 	struct tid_ampdu_tx *tid_tx;
 
 	/* check if the TID waits for addBA response */
@@ -442,7 +436,7 @@ static void sta_addba_resp_timer_expired(struct timer_list *t)
 	    test_bit(HT_AGG_STATE_RESPONSE_RECEIVED, &tid_tx->state)) {
 		rcu_read_unlock();
 		ht_dbg(sta->sdata,
-		       "timer expired on %pM tid %d not expecting addBA response\n",
+		       "timer expired on %pM tid %d but we are not (or no longer) expecting addBA response there\n",
 		       sta->sta.addr, tid);
 		return;
 	}
@@ -527,17 +521,21 @@ void ieee80211_tx_ba_session_handle_start(struct sta_info *sta, int tid)
  * After accepting the AddBA Response we activated a timer,
  * resetting it after each frame that we send.
  */
-static void sta_tx_agg_session_timer_expired(struct timer_list *t)
+static void sta_tx_agg_session_timer_expired(unsigned long data)
 {
-	struct tid_ampdu_tx *tid_tx_timer =
-		from_timer(tid_tx_timer, t, session_timer);
-	struct sta_info *sta = tid_tx_timer->sta;
-	u8 tid = tid_tx_timer->tid;
+	/* not an elegant detour, but there is no choice as the timer passes
+	 * only one argument, and various sta_info are needed here, so init
+	 * flow in sta_info_create gives the TID as data, while the timer_to_id
+	 * array gives the sta through container_of */
+	u8 *ptid = (u8 *)data;
+	u8 *timer_to_id = ptid - *ptid;
+	struct sta_info *sta = container_of(timer_to_id, struct sta_info,
+					 timer_to_tid[0]);
 	struct tid_ampdu_tx *tid_tx;
 	unsigned long timeout;
 
 	rcu_read_lock();
-	tid_tx = rcu_dereference(sta->ampdu_mlme.tid_tx[tid]);
+	tid_tx = rcu_dereference(sta->ampdu_mlme.tid_tx[*ptid]);
 	if (!tid_tx || test_bit(HT_AGG_STATE_STOPPING, &tid_tx->state)) {
 		rcu_read_unlock();
 		return;
@@ -553,9 +551,9 @@ static void sta_tx_agg_session_timer_expired(struct timer_list *t)
 	rcu_read_unlock();
 
 	ht_dbg(sta->sdata, "tx session timer expired on %pM tid %d\n",
-	       sta->sta.addr, tid);
+	       sta->sta.addr, (u16)*ptid);
 
-	ieee80211_stop_tx_ba_session(&sta->sta, tid);
+	ieee80211_stop_tx_ba_session(&sta->sta, *ptid);
 }
 
 int ieee80211_start_tx_ba_session(struct ieee80211_sta *pubsta, u16 tid,
@@ -641,7 +639,7 @@ int ieee80211_start_tx_ba_session(struct ieee80211_sta *pubsta, u16 tid,
 	    time_before(jiffies, sta->ampdu_mlme.last_addba_req_time[tid] +
 			HT_AGG_RETRIES_PERIOD)) {
 		ht_dbg(sdata,
-		       "BA request denied - %d failed requests on %pM tid %u\n",
+		       "BA request denied - waiting a grace period after %d failed requests on %pM tid %u\n",
 		       sta->ampdu_mlme.addba_req_num[tid], sta->sta.addr, tid);
 		ret = -EBUSY;
 		goto err_unlock_sta;
@@ -668,15 +666,16 @@ int ieee80211_start_tx_ba_session(struct ieee80211_sta *pubsta, u16 tid,
 	__set_bit(HT_AGG_STATE_WANT_START, &tid_tx->state);
 
 	tid_tx->timeout = timeout;
-	tid_tx->sta = sta;
-	tid_tx->tid = tid;
 
 	/* response timer */
-	timer_setup(&tid_tx->addba_resp_timer, sta_addba_resp_timer_expired, 0);
+	setup_timer(&tid_tx->addba_resp_timer,
+		    sta_addba_resp_timer_expired,
+		    (unsigned long)&sta->timer_to_tid[tid]);
 
 	/* tx timer */
-	timer_setup(&tid_tx->session_timer,
-		    sta_tx_agg_session_timer_expired, TIMER_DEFERRABLE);
+	setup_deferrable_timer(&tid_tx->session_timer,
+			       sta_tx_agg_session_timer_expired,
+			       (unsigned long)&sta->timer_to_tid[tid]);
 
 	/* assign a dialog token */
 	sta->ampdu_mlme.dialog_token_allocator++;

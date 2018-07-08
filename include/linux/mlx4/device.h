@@ -40,7 +40,7 @@
 #include <linux/cpu_rmap.h>
 #include <linux/crash_dump.h>
 
-#include <linux/refcount.h>
+#include <linux/atomic.h>
 
 #include <linux/timecounter.h>
 
@@ -224,7 +224,6 @@ enum {
 	MLX4_DEV_CAP_FLAG2_DIAG_PER_PORT	= 1ULL <<  35,
 	MLX4_DEV_CAP_FLAG2_SVLAN_BY_QP          = 1ULL <<  36,
 	MLX4_DEV_CAP_FLAG2_SL_TO_VL_CHANGE_EVENT = 1ULL << 37,
-	MLX4_DEV_CAP_FLAG2_USER_MAC_EN		= 1ULL << 38,
 };
 
 enum {
@@ -429,12 +428,6 @@ enum mlx4_steer_type {
 	MLX4_NUM_STEERS
 };
 
-enum mlx4_resource_usage {
-	MLX4_RES_USAGE_NONE,
-	MLX4_RES_USAGE_DRIVER,
-	MLX4_RES_USAGE_USER_VERBS,
-};
-
 enum {
 	MLX4_NUM_FEXCH          = 64 * 1024,
 };
@@ -525,14 +518,6 @@ struct mlx4_phys_caps {
 	u32			base_tunnel_sqpn;
 };
 
-struct mlx4_spec_qps {
-	u32 qp0_qkey;
-	u32 qp0_proxy;
-	u32 qp0_tunnel;
-	u32 qp1_proxy;
-	u32 qp1_tunnel;
-};
-
 struct mlx4_caps {
 	u64			fw_ver;
 	u32			function;
@@ -562,7 +547,11 @@ struct mlx4_caps {
 	int			max_qp_init_rdma;
 	int			max_qp_dest_rdma;
 	int			max_tc_eth;
-	struct mlx4_spec_qps   *spec_qps;
+	u32			*qp0_qkey;
+	u32			*qp0_proxy;
+	u32			*qp1_proxy;
+	u32			*qp0_tunnel;
+	u32			*qp1_tunnel;
 	int			num_srqs;
 	int			max_srq_wqes;
 	int			max_srq_sge;
@@ -751,7 +740,7 @@ struct mlx4_cq {
 	int			cqn;
 	unsigned		vector;
 
-	refcount_t		refcount;
+	atomic_t		refcount;
 	struct completion	free;
 	struct {
 		struct list_head list;
@@ -760,7 +749,6 @@ struct mlx4_cq {
 	} tasklet_ctx;
 	int		reset_notify_added;
 	struct list_head	reset_notify;
-	u8			usage;
 };
 
 struct mlx4_qp {
@@ -768,9 +756,8 @@ struct mlx4_qp {
 
 	int			qpn;
 
-	refcount_t		refcount;
+	atomic_t		refcount;
 	struct completion	free;
-	u8			usage;
 };
 
 struct mlx4_srq {
@@ -781,7 +768,7 @@ struct mlx4_srq {
 	int			max_gs;
 	int			wqe_shift;
 
-	refcount_t		refcount;
+	atomic_t		refcount;
 	struct completion	free;
 };
 
@@ -1134,7 +1121,7 @@ int mlx4_cq_alloc(struct mlx4_dev *dev, int nent, struct mlx4_mtt *mtt,
 		  unsigned vector, int collapsed, int timestamp_en);
 void mlx4_cq_free(struct mlx4_dev *dev, struct mlx4_cq *cq);
 int mlx4_qp_reserve_range(struct mlx4_dev *dev, int cnt, int align,
-			  int *base, u8 flags, u8 usage);
+			  int *base, u8 flags);
 void mlx4_qp_release_range(struct mlx4_dev *dev, int base_qpn, int cnt);
 
 int mlx4_qp_alloc(struct mlx4_dev *dev, int qpn, struct mlx4_qp *qp);
@@ -1386,7 +1373,6 @@ int mlx4_get_base_qpn(struct mlx4_dev *dev, u8 port);
 int __mlx4_replace_mac(struct mlx4_dev *dev, u8 port, int qpn, u64 new_mac);
 int mlx4_SET_PORT_general(struct mlx4_dev *dev, u8 port, int mtu,
 			  u8 pptx, u8 pfctx, u8 pprx, u8 pfcrx);
-int mlx4_SET_PORT_user_mac(struct mlx4_dev *dev, u8 port, u8 *user_mac);
 int mlx4_SET_PORT_user_mtu(struct mlx4_dev *dev, u8 port, u16 user_mtu);
 int mlx4_SET_PORT_qpn_calc(struct mlx4_dev *dev, u8 port, u32 base_qpn,
 			   u8 promisc);
@@ -1432,7 +1418,7 @@ int mlx4_get_phys_port_id(struct mlx4_dev *dev);
 int mlx4_wol_read(struct mlx4_dev *dev, u64 *config, int port);
 int mlx4_wol_write(struct mlx4_dev *dev, u64 config, int port);
 
-int mlx4_counter_alloc(struct mlx4_dev *dev, u32 *idx, u8 usage);
+int mlx4_counter_alloc(struct mlx4_dev *dev, u32 *idx);
 void mlx4_counter_free(struct mlx4_dev *dev, u32 idx);
 int mlx4_get_default_counter_index(struct mlx4_dev *dev, int port);
 

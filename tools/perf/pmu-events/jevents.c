@@ -137,8 +137,6 @@ static struct field {
 	{ "AnyThread",	"any=" },
 	{ "EdgeDetect",	"edge=" },
 	{ "SampleAfterValue", "period=" },
-	{ "FCMask",	"fc_mask=" },
-	{ "PortMask",	"ch_mask=" },
 	{ NULL, NULL }
 };
 
@@ -292,7 +290,7 @@ static int print_events_table_entry(void *data, char *name, char *event,
 				    char *desc, char *long_desc,
 				    char *pmu, char *unit, char *perpkg,
 				    char *metric_expr,
-				    char *metric_name, char *metric_group)
+				    char *metric_name)
 {
 	struct perf_entry_data *pd = data;
 	FILE *outfp = pd->outfp;
@@ -304,10 +302,8 @@ static int print_events_table_entry(void *data, char *name, char *event,
 	 */
 	fprintf(outfp, "{\n");
 
-	if (name)
-		fprintf(outfp, "\t.name = \"%s\",\n", name);
-	if (event)
-		fprintf(outfp, "\t.event = \"%s\",\n", event);
+	fprintf(outfp, "\t.name = \"%s\",\n", name);
+	fprintf(outfp, "\t.event = \"%s\",\n", event);
 	fprintf(outfp, "\t.desc = \"%s\",\n", desc);
 	fprintf(outfp, "\t.topic = \"%s\",\n", topic);
 	if (long_desc && long_desc[0])
@@ -322,8 +318,6 @@ static int print_events_table_entry(void *data, char *name, char *event,
 		fprintf(outfp, "\t.metric_expr = \"%s\",\n", metric_expr);
 	if (metric_name)
 		fprintf(outfp, "\t.metric_name = \"%s\",\n", metric_name);
-	if (metric_group)
-		fprintf(outfp, "\t.metric_group = \"%s\",\n", metric_group);
 	fprintf(outfp, "},\n");
 
 	return 0;
@@ -361,9 +355,6 @@ static char *real_event(const char *name, char *event)
 {
 	int i;
 
-	if (!name)
-		return NULL;
-
 	for (i = 0; fixed[i].name; i++)
 		if (!strcasecmp(name, fixed[i].name))
 			return (char *)fixed[i].event;
@@ -376,7 +367,7 @@ int json_events(const char *fn,
 		      char *long_desc,
 		      char *pmu, char *unit, char *perpkg,
 		      char *metric_expr,
-		      char *metric_name, char *metric_group),
+		      char *metric_name),
 	  void *data)
 {
 	int err = -EIO;
@@ -404,7 +395,6 @@ int json_events(const char *fn,
 		char *unit = NULL;
 		char *metric_expr = NULL;
 		char *metric_name = NULL;
-		char *metric_group = NULL;
 		unsigned long long eventcode = 0;
 		struct msrmap *msr = NULL;
 		jsmntok_t *msrval = NULL;
@@ -484,8 +474,6 @@ int json_events(const char *fn,
 				addfield(map, &perpkg, "", "", val);
 			} else if (json_streq(map, field, "MetricName")) {
 				addfield(map, &metric_name, "", "", val);
-			} else if (json_streq(map, field, "MetricGroup")) {
-				addfield(map, &metric_group, "", "", val);
 			} else if (json_streq(map, field, "MetricExpr")) {
 				addfield(map, &metric_expr, "", "", val);
 				for (s = metric_expr; *s; s++)
@@ -511,11 +499,10 @@ int json_events(const char *fn,
 			addfield(map, &event, ",", filter, NULL);
 		if (msr != NULL)
 			addfield(map, &event, ",", msr->pname, msrval);
-		if (name)
-			fixname(name);
+		fixname(name);
 
 		err = func(data, name, real_event(name, event), desc, long_desc,
-			   pmu, unit, perpkg, metric_expr, metric_name, metric_group);
+				pmu, unit, perpkg, metric_expr, metric_name);
 		free(event);
 		free(desc);
 		free(name);
@@ -527,7 +514,6 @@ int json_events(const char *fn,
 		free(unit);
 		free(metric_expr);
 		free(metric_name);
-		free(metric_group);
 		if (err)
 			break;
 		tok += j;
@@ -836,6 +822,10 @@ static int process_one_file(const char *fpath, const struct stat *sb,
  * PMU event tables (see struct pmu_events_map).
  *
  * Write out the PMU events tables and the mapping table to pmu-event.c.
+ *
+ * If unable to process the JSON or arch files, create an empty mapping
+ * table so we can continue to build/use  perf even if we cannot use the
+ * PMU event aliases.
  */
 int main(int argc, char *argv[])
 {
@@ -846,7 +836,6 @@ int main(int argc, char *argv[])
 	const char *arch;
 	const char *output_file;
 	const char *start_dirname;
-	struct stat stbuf;
 
 	prog = basename(argv[0]);
 	if (argc < 4) {
@@ -868,16 +857,10 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 
-	sprintf(ldirname, "%s/%s", start_dirname, arch);
-
-	/* If architecture does not have any event lists, bail out */
-	if (stat(ldirname, &stbuf) < 0) {
-		pr_info("%s: Arch %s has no PMU event lists\n", prog, arch);
-		goto empty_map;
-	}
-
 	/* Include pmu-events.h first */
 	fprintf(eventsfp, "#include \"../../pmu-events/pmu-events.h\"\n");
+
+	sprintf(ldirname, "%s/%s", start_dirname, arch);
 
 	/*
 	 * The mapfile allows multiple CPUids to point to the same JSON file,
@@ -895,9 +878,6 @@ int main(int argc, char *argv[])
 	if (rc && verbose) {
 		pr_info("%s: Error walking file tree %s\n", prog, ldirname);
 		goto empty_map;
-	} else if (rc < 0) {
-		/* Make build fail */
-		return 1;
 	} else if (rc) {
 		goto empty_map;
 	}
@@ -912,8 +892,7 @@ int main(int argc, char *argv[])
 
 	if (process_mapfile(eventsfp, mapfile)) {
 		pr_info("%s: Error processing mapfile %s\n", prog, mapfile);
-		/* Make build fail */
-		return 1;
+		goto empty_map;
 	}
 
 	return 0;

@@ -87,11 +87,11 @@ imx_media_add_async_subdev(struct imx_media_dev *imxmd,
 	if (pdev)
 		devname = dev_name(&pdev->dev);
 
-	/* return -EEXIST if this subdev already added */
+	/* return NULL if this subdev already added */
 	if (imx_media_find_async_subdev(imxmd, np, devname)) {
 		dev_dbg(imxmd->md.dev, "%s: already added %s\n",
 			__func__, np ? np->name : devname);
-		imxsd = ERR_PTR(-EEXIST);
+		imxsd = NULL;
 		goto out;
 	}
 
@@ -400,10 +400,10 @@ static int imx_media_create_pad_vdev_lists(struct imx_media_dev *imxmd)
 					struct media_link, list);
 		ret = imx_media_add_vdev_to_pad(imxmd, vdev, link->source);
 		if (ret)
-			return ret;
+			break;
 	}
 
-	return 0;
+	return ret;
 }
 
 /* async subdev complete notifier */
@@ -439,11 +439,6 @@ unlock:
 
 	return media_device_register(&imxmd->md);
 }
-
-static const struct v4l2_async_notifier_operations imx_media_subdev_ops = {
-	.bound = imx_media_subdev_bound,
-	.complete = imx_media_probe_complete,
-};
 
 /*
  * adds controls to a video device from an entity subdevice.
@@ -613,7 +608,8 @@ static int imx_media_probe(struct platform_device *pdev)
 
 	/* prepare the async subdev notifier and register it */
 	imxmd->subdev_notifier.subdevs = imxmd->async_ptrs;
-	imxmd->subdev_notifier.ops = &imx_media_subdev_ops;
+	imxmd->subdev_notifier.bound = imx_media_subdev_bound;
+	imxmd->subdev_notifier.complete = imx_media_probe_complete;
 	ret = v4l2_async_notifier_register(&imxmd->v4l2_dev,
 					   &imxmd->subdev_notifier);
 	if (ret) {

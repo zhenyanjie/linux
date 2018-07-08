@@ -47,9 +47,6 @@ armpmu_map_cache_event(const unsigned (*cache_map)
 	if (cache_result >= PERF_COUNT_HW_CACHE_RESULT_MAX)
 		return -EINVAL;
 
-	if (!cache_map)
-		return -ENOENT;
-
 	ret = (int)(*cache_map)[cache_type][cache_op][cache_result];
 
 	if (ret == CACHE_OP_UNSUPPORTED)
@@ -65,9 +62,6 @@ armpmu_map_hw_event(const unsigned (*event_map)[PERF_COUNT_HW_MAX], u64 config)
 
 	if (config >= PERF_COUNT_HW_MAX)
 		return -EINVAL;
-
-	if (!event_map)
-		return -ENOENT;
 
 	mapping = (*event_map)[config];
 	return mapping == HW_OP_UNSUPPORTED ? -ENOENT : mapping;
@@ -539,7 +533,7 @@ void armpmu_free_irq(struct arm_pmu *armpmu, int cpu)
 	if (!cpumask_test_and_clear_cpu(cpu, &armpmu->active_irqs))
 		return;
 
-	if (irq_is_percpu_devid(irq)) {
+	if (irq_is_percpu(irq)) {
 		free_percpu_irq(irq, &hw_events->percpu_pmu);
 		cpumask_clear(&armpmu->active_irqs);
 		return;
@@ -565,10 +559,10 @@ int armpmu_request_irq(struct arm_pmu *armpmu, int cpu)
 	if (!irq)
 		return 0;
 
-	if (irq_is_percpu_devid(irq) && cpumask_empty(&armpmu->active_irqs)) {
+	if (irq_is_percpu(irq) && cpumask_empty(&armpmu->active_irqs)) {
 		err = request_percpu_irq(irq, handler, "arm-pmu",
 					 &hw_events->percpu_pmu);
-	} else if (irq_is_percpu_devid(irq)) {
+	} else if (irq_is_percpu(irq)) {
 		int other_cpu = cpumask_first(&armpmu->active_irqs);
 		int other_irq = per_cpu(hw_events->irq, other_cpu);
 
@@ -649,7 +643,7 @@ static int arm_perf_starting_cpu(unsigned int cpu, struct hlist_node *node)
 
 	irq = armpmu_get_cpu_irq(pmu, cpu);
 	if (irq) {
-		if (irq_is_percpu_devid(irq)) {
+		if (irq_is_percpu(irq)) {
 			enable_percpu_irq(irq, IRQ_TYPE_NONE);
 			return 0;
 		}
@@ -667,7 +661,7 @@ static int arm_perf_teardown_cpu(unsigned int cpu, struct hlist_node *node)
 		return 0;
 
 	irq = armpmu_get_cpu_irq(pmu, cpu);
-	if (irq && irq_is_percpu_devid(irq))
+	if (irq && irq_is_percpu(irq))
 		disable_percpu_irq(irq);
 
 	return 0;

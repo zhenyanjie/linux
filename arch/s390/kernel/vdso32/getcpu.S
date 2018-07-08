@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Userland implementation of getcpu() for 32 bits processes in a
  * s390 kernel for use in the vDSO
@@ -15,11 +14,23 @@
 	.type  __kernel_getcpu,@function
 __kernel_getcpu:
 	.cfi_startproc
+	ear	%r1,%a4
+	lhi	%r4,1
+	sll	%r4,24
+	sar	%a4,%r4
 	la	%r4,0
-	sacf	256
+	epsw	%r0,0
+	sacf	512
 	l	%r5,__VDSO_CPU_NR(%r4)
 	l	%r4,__VDSO_NODE_ID(%r4)
-	sacf	0
+	tml	%r0,0x4000
+	jo	1f
+	tml	%r0,0x8000
+	jno	0f
+	sacf	256
+	j	1f
+0:	sacf	0
+1:	sar	%a4,%r1
 	ltr	%r2,%r2
 	jz	2f
 	st	%r5,0(%r2)

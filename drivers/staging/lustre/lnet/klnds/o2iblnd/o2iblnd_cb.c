@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -3314,13 +3313,11 @@ kiblnd_connd(void *arg)
 			spin_unlock_irqrestore(lock, flags);
 			dropped_lock = 1;
 
-			kiblnd_destroy_conn(conn);
+			kiblnd_destroy_conn(conn, !peer);
 
 			spin_lock_irqsave(lock, flags);
-			if (!peer) {
-				kfree(conn);
+			if (!peer)
 				continue;
-			}
 
 			conn->ibc_peer = peer;
 			if (peer->ibp_reconnected < KIB_RECONN_HIGH_RACE)

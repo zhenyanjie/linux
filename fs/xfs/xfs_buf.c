@@ -42,8 +42,6 @@
 #include "xfs_mount.h"
 #include "xfs_trace.h"
 #include "xfs_log.h"
-#include "xfs_errortag.h"
-#include "xfs_error.h"
 
 static kmem_zone_t *xfs_buf_zone;
 
@@ -1260,6 +1258,8 @@ xfs_buf_ioapply_map(
 	int		size;
 	int		offset;
 
+	total_nr_pages = bp->b_page_count;
+
 	/* skip the pages in the buffer before the start offset */
 	page_index = 0;
 	offset = *buf_offset;
@@ -1281,7 +1281,7 @@ next_chunk:
 	nr_pages = min(total_nr_pages, BIO_MAX_PAGES);
 
 	bio = bio_alloc(GFP_NOIO, nr_pages);
-	bio_set_dev(bio, bp->b_target->bt_bdev);
+	bio->bi_bdev = bp->b_target->bt_bdev;
 	bio->bi_iter.bi_sector = sector;
 	bio->bi_end_io = xfs_buf_bio_end_io;
 	bio->bi_private = bp;
@@ -1802,8 +1802,7 @@ xfs_setsize_buftarg_early(
 xfs_buftarg_t *
 xfs_alloc_buftarg(
 	struct xfs_mount	*mp,
-	struct block_device	*bdev,
-	struct dax_device	*dax_dev)
+	struct block_device	*bdev)
 {
 	xfs_buftarg_t		*btp;
 
@@ -1812,30 +1811,24 @@ xfs_alloc_buftarg(
 	btp->bt_mount = mp;
 	btp->bt_dev =  bdev->bd_dev;
 	btp->bt_bdev = bdev;
-	btp->bt_daxdev = dax_dev;
 
 	if (xfs_setsize_buftarg_early(btp, bdev))
-		goto error_free;
+		goto error;
 
 	if (list_lru_init(&btp->bt_lru))
-		goto error_free;
+		goto error;
 
 	if (percpu_counter_init(&btp->bt_io_count, 0, GFP_KERNEL))
-		goto error_lru;
+		goto error;
 
 	btp->bt_shrinker.count_objects = xfs_buftarg_shrink_count;
 	btp->bt_shrinker.scan_objects = xfs_buftarg_shrink_scan;
 	btp->bt_shrinker.seeks = DEFAULT_SEEKS;
 	btp->bt_shrinker.flags = SHRINKER_NUMA_AWARE;
-	if (register_shrinker(&btp->bt_shrinker))
-		goto error_pcpu;
+	register_shrinker(&btp->bt_shrinker);
 	return btp;
 
-error_pcpu:
-	percpu_counter_destroy(&btp->bt_io_count);
-error_lru:
-	list_lru_destroy(&btp->bt_lru);
-error_free:
+error:
 	kmem_free(btp);
 	return NULL;
 }
@@ -2135,18 +2128,4 @@ void
 xfs_buf_terminate(void)
 {
 	kmem_zone_destroy(xfs_buf_zone);
-}
-
-void xfs_buf_set_ref(struct xfs_buf *bp, int lru_ref)
-{
-	/*
-	 * Set the lru reference count to 0 based on the error injection tag.
-	 * This allows userspace to disrupt buffer caching for debug/testing
-	 * purposes.
-	 */
-	if (XFS_TEST_ERROR(false, bp->b_target->bt_mount,
-			   XFS_ERRTAG_BUF_LRU_REF))
-		lru_ref = 0;
-
-	atomic_set(&bp->b_lru_ref, lru_ref);
 }

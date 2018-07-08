@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * fs/mpage.c
  *
@@ -84,7 +83,7 @@ mpage_alloc(struct block_device *bdev,
 	}
 
 	if (bio) {
-		bio_set_dev(bio, bdev);
+		bio->bi_bdev = bdev;
 		bio->bi_iter.bi_sector = first_sector;
 	}
 	return bio;

@@ -906,11 +906,7 @@ static int __init omap_mbox_init(void)
 	mbox_kfifo_size = max_t(unsigned int, mbox_kfifo_size,
 							sizeof(mbox_msg_t));
 
-	err = platform_driver_register(&omap_mbox_driver);
-	if (err)
-		class_unregister(&omap_mbox_class);
-
-	return err;
+	return platform_driver_register(&omap_mbox_driver);
 }
 subsys_initcall(omap_mbox_init);
 

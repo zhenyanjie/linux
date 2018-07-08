@@ -33,7 +33,7 @@
 #define HDA_STEREO 2
 #define HDA_QUAD 4
 
-static const struct snd_pcm_hardware azx_pcm_hw = {
+static struct snd_pcm_hardware azx_pcm_hw = {
 	.info =			(SNDRV_PCM_INFO_MMAP |
 				 SNDRV_PCM_INFO_INTERLEAVED |
 				 SNDRV_PCM_INFO_BLOCK_TRANSFER |
@@ -355,8 +355,7 @@ static void skl_pcm_close(struct snd_pcm_substream *substream,
 	}
 
 	mconfig = skl_tplg_fe_get_cpr_module(dai, substream->stream);
-	if (mconfig)
-		skl_tplg_d0i3_put(skl, mconfig->d0i3_caps);
+	skl_tplg_d0i3_put(skl, mconfig->d0i3_caps);
 
 	kfree(dma_params);
 }
@@ -629,7 +628,7 @@ static int skl_link_hw_free(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static const struct snd_soc_dai_ops skl_pcm_dai_ops = {
+static struct snd_soc_dai_ops skl_pcm_dai_ops = {
 	.startup = skl_pcm_open,
 	.shutdown = skl_pcm_close,
 	.prepare = skl_pcm_prepare,
@@ -638,22 +637,22 @@ static const struct snd_soc_dai_ops skl_pcm_dai_ops = {
 	.trigger = skl_pcm_trigger,
 };
 
-static const struct snd_soc_dai_ops skl_dmic_dai_ops = {
+static struct snd_soc_dai_ops skl_dmic_dai_ops = {
 	.hw_params = skl_be_hw_params,
 };
 
-static const struct snd_soc_dai_ops skl_be_ssp_dai_ops = {
+static struct snd_soc_dai_ops skl_be_ssp_dai_ops = {
 	.hw_params = skl_be_hw_params,
 };
 
-static const struct snd_soc_dai_ops skl_link_dai_ops = {
+static struct snd_soc_dai_ops skl_link_dai_ops = {
 	.prepare = skl_link_pcm_prepare,
 	.hw_params = skl_link_hw_params,
 	.hw_free = skl_link_hw_free,
 	.trigger = skl_link_pcm_trigger,
 };
 
-static struct snd_soc_dai_driver skl_fe_dai[] = {
+static struct snd_soc_dai_driver skl_platform_dai[] = {
 {
 	.name = "System Pin",
 	.ops = &skl_pcm_dai_ops,
@@ -673,32 +672,6 @@ static struct snd_soc_dai_driver skl_fe_dai[] = {
 		.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_16000,
 		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE,
 		.sig_bits = 32,
-	},
-},
-{
-	.name = "System Pin2",
-	.ops = &skl_pcm_dai_ops,
-	.playback = {
-		.stream_name = "Headset Playback",
-		.channels_min = HDA_MONO,
-		.channels_max = HDA_STEREO,
-		.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_16000 |
-			SNDRV_PCM_RATE_8000,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE |
-			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE,
-	},
-},
-{
-	.name = "Echoref Pin",
-	.ops = &skl_pcm_dai_ops,
-	.capture = {
-		.stream_name = "Echoreference Capture",
-		.channels_min = HDA_STEREO,
-		.channels_max = HDA_STEREO,
-		.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_16000 |
-			SNDRV_PCM_RATE_8000,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE |
-			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE,
 	},
 },
 {
@@ -797,10 +770,8 @@ static struct snd_soc_dai_driver skl_fe_dai[] = {
 		.sig_bits = 32,
 	},
 },
-};
 
 /* BE CPU  Dais */
-static struct snd_soc_dai_driver skl_platform_dai[] = {
 {
 	.name = "SSP0 Pin",
 	.ops = &skl_be_ssp_dai_ops,
@@ -977,14 +948,6 @@ static struct snd_soc_dai_driver skl_platform_dai[] = {
 	},
 },
 };
-
-int skl_dai_load(struct snd_soc_component *cmp,
-		 struct snd_soc_dai_driver *pcm_dai)
-{
-	pcm_dai->ops = &skl_pcm_dai_ops;
-
-	return 0;
-}
 
 static int skl_platform_open(struct snd_pcm_substream *substream)
 {
@@ -1231,11 +1194,8 @@ static int skl_pcm_new(struct snd_soc_pcm_runtime *rtd)
 static int skl_get_module_info(struct skl *skl, struct skl_module_cfg *mconfig)
 {
 	struct skl_sst *ctx = skl->skl_sst;
-	struct skl_module_inst_id *pin_id;
-	uuid_le *uuid_mod, *uuid_tplg;
-	struct skl_module *skl_module;
 	struct uuid_module *module;
-	int i, ret = -EIO;
+	uuid_le *uuid_mod;
 
 	uuid_mod = (uuid_le *)mconfig->guid;
 
@@ -1247,45 +1207,12 @@ static int skl_get_module_info(struct skl *skl, struct skl_module_cfg *mconfig)
 	list_for_each_entry(module, &ctx->uuid_list, list) {
 		if (uuid_le_cmp(*uuid_mod, module->uuid) == 0) {
 			mconfig->id.module_id = module->id;
-			if (mconfig->module)
-				mconfig->module->loadable = module->is_loadable;
-			ret = 0;
-			break;
+			mconfig->is_loadable = module->is_loadable;
+			return 0;
 		}
 	}
 
-	if (ret)
-		return ret;
-
-	uuid_mod = &module->uuid;
-	ret = -EIO;
-	for (i = 0; i < skl->nr_modules; i++) {
-		skl_module = skl->modules[i];
-		uuid_tplg = &skl_module->uuid;
-		if (!uuid_le_cmp(*uuid_mod, *uuid_tplg)) {
-			mconfig->module = skl_module;
-			ret = 0;
-			break;
-		}
-	}
-	if (skl->nr_modules && ret)
-		return ret;
-
-	list_for_each_entry(module, &ctx->uuid_list, list) {
-		for (i = 0; i < MAX_IN_QUEUE; i++) {
-			pin_id = &mconfig->m_in_pin[i].id;
-			if (!uuid_le_cmp(pin_id->mod_uuid, module->uuid))
-				pin_id->module_id = module->id;
-		}
-
-		for (i = 0; i < MAX_OUT_QUEUE; i++) {
-			pin_id = &mconfig->m_out_pin[i].id;
-			if (!uuid_le_cmp(pin_id->mod_uuid, module->uuid))
-				pin_id->module_id = module->id;
-		}
-	}
-
-	return 0;
+	return -EIO;
 }
 
 static int skl_populate_modules(struct skl *skl)
@@ -1343,11 +1270,7 @@ static int skl_platform_soc_probe(struct snd_soc_platform *platform)
 			return -EIO;
 		}
 
-		/* disable dynamic clock gating during fw and lib download */
-		skl->skl_sst->enable_miscbdcge(platform->dev, false);
-
 		ret = ops->init_fw(platform->dev, skl->skl_sst);
-		skl->skl_sst->enable_miscbdcge(platform->dev, true);
 		if (ret < 0) {
 			dev_err(platform->dev, "Failed to boot first fw: %d\n", ret);
 			return ret;
@@ -1361,7 +1284,7 @@ static int skl_platform_soc_probe(struct snd_soc_platform *platform)
 
 	return 0;
 }
-static const struct snd_soc_platform_driver skl_platform_drv  = {
+static struct snd_soc_platform_driver skl_platform_drv  = {
 	.probe		= skl_platform_soc_probe,
 	.ops		= &skl_platform_ops,
 	.pcm_new	= skl_pcm_new,
@@ -1377,8 +1300,6 @@ int skl_platform_register(struct device *dev)
 	int ret;
 	struct hdac_ext_bus *ebus = dev_get_drvdata(dev);
 	struct skl *skl = ebus_to_skl(ebus);
-	struct snd_soc_dai_driver *dais;
-	int num_dais = ARRAY_SIZE(skl_platform_dai);
 
 	INIT_LIST_HEAD(&skl->ppl_list);
 	INIT_LIST_HEAD(&skl->bind_list);
@@ -1388,38 +1309,14 @@ int skl_platform_register(struct device *dev)
 		dev_err(dev, "soc platform registration failed %d\n", ret);
 		return ret;
 	}
-
-	skl->dais = kmemdup(skl_platform_dai, sizeof(skl_platform_dai),
-			    GFP_KERNEL);
-	if (!skl->dais) {
-		ret = -ENOMEM;
-		goto err;
-	}
-
-	if (!skl->use_tplg_pcm) {
-		dais = krealloc(skl->dais, sizeof(skl_fe_dai) +
-				sizeof(skl_platform_dai), GFP_KERNEL);
-		if (!dais) {
-			ret = -ENOMEM;
-			goto err;
-		}
-
-		skl->dais = dais;
-		memcpy(&skl->dais[ARRAY_SIZE(skl_platform_dai)], skl_fe_dai,
-		       sizeof(skl_fe_dai));
-		num_dais += ARRAY_SIZE(skl_fe_dai);
-	}
-
 	ret = snd_soc_register_component(dev, &skl_component,
-					 skl->dais, num_dais);
+				skl_platform_dai,
+				ARRAY_SIZE(skl_platform_dai));
 	if (ret) {
 		dev_err(dev, "soc component registration failed %d\n", ret);
-		goto err;
+		snd_soc_unregister_platform(dev);
 	}
 
-	return 0;
-err:
-	snd_soc_unregister_platform(dev);
 	return ret;
 
 }
@@ -1439,7 +1336,5 @@ int skl_platform_unregister(struct device *dev)
 
 	snd_soc_unregister_component(dev);
 	snd_soc_unregister_platform(dev);
-	kfree(skl->dais);
-
 	return 0;
 }

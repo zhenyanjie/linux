@@ -339,7 +339,8 @@ void __init s3c_i2c0_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 0;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c0);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c0);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c0_cfg_gpio;
@@ -367,7 +368,8 @@ void __init s3c_i2c1_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 1;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c1);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c1);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c1_cfg_gpio;
@@ -396,7 +398,8 @@ void __init s3c_i2c2_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 2;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c2);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c2);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c2_cfg_gpio;
@@ -425,7 +428,8 @@ void __init s3c_i2c3_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 3;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c3);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c3);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c3_cfg_gpio;
@@ -454,7 +458,8 @@ void __init s3c_i2c4_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 4;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c4);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c4);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c4_cfg_gpio;
@@ -483,7 +488,8 @@ void __init s3c_i2c5_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 5;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c5);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c5);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c5_cfg_gpio;
@@ -512,7 +518,8 @@ void __init s3c_i2c6_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 6;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c6);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c6);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c6_cfg_gpio;
@@ -541,7 +548,8 @@ void __init s3c_i2c7_set_platdata(struct s3c2410_platform_i2c *pd)
 		pd->bus_num = 7;
 	}
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_i2c7);
+	npd = s3c_set_platdata(pd, sizeof(struct s3c2410_platform_i2c),
+			       &s3c_device_i2c7);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = s3c_i2c7_cfg_gpio;
@@ -607,7 +615,8 @@ void __init samsung_keypad_set_platdata(struct samsung_keypad_platdata *pd)
 {
 	struct samsung_keypad_platdata *npd;
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &samsung_device_keypad);
+	npd = s3c_set_platdata(pd, sizeof(struct samsung_keypad_platdata),
+			&samsung_device_keypad);
 
 	if (!npd->cfg_gpio)
 		npd->cfg_gpio = samsung_keypad_cfg_gpio;
@@ -712,7 +721,8 @@ void __init s3c_nand_set_platdata(struct s3c2410_platform_nand *nand)
 	 * time then there is little chance the system is going to run.
 	 */
 
-	npd = s3c_set_platdata(nand, sizeof(*npd), &s3c_device_nand);
+	npd = s3c_set_platdata(nand, sizeof(struct s3c2410_platform_nand),
+				&s3c_device_nand);
 	if (!npd)
 		return;
 
@@ -1012,7 +1022,8 @@ void __init dwc2_hsotg_set_platdata(struct dwc2_hsotg_plat *pd)
 {
 	struct dwc2_hsotg_plat *npd;
 
-	npd = s3c_set_platdata(pd, sizeof(*npd), &s3c_device_usb_hsotg);
+	npd = s3c_set_platdata(pd, sizeof(struct dwc2_hsotg_plat),
+			&s3c_device_usb_hsotg);
 
 	if (!npd->phy_init)
 		npd->phy_init = s5p_usb_phy_init;

@@ -221,13 +221,16 @@ static int cx24116_writereg(struct cx24116_state *state, int reg, int data)
 static int cx24116_writeregN(struct cx24116_state *state, int reg,
 			     const u8 *data, u16 len)
 {
-	int ret;
+	int ret = -EREMOTEIO;
 	struct i2c_msg msg;
 	u8 *buf;
 
 	buf = kmalloc(len + 1, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	if (buf == NULL) {
+		printk("Unable to kmalloc\n");
+		ret = -ENOMEM;
+		goto error;
+	}
 
 	*(buf) = reg;
 	memcpy(buf + 1, data, len);
@@ -248,6 +251,7 @@ static int cx24116_writeregN(struct cx24116_state *state, int reg,
 		ret = -EREMOTEIO;
 	}
 
+error:
 	kfree(buf);
 
 	return ret;
@@ -1117,15 +1121,15 @@ static const struct dvb_frontend_ops cx24116_ops;
 struct dvb_frontend *cx24116_attach(const struct cx24116_config *config,
 	struct i2c_adapter *i2c)
 {
-	struct cx24116_state *state;
+	struct cx24116_state *state = NULL;
 	int ret;
 
 	dprintk("%s\n", __func__);
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc(sizeof(struct cx24116_state), GFP_KERNEL);
 	if (state == NULL)
-		return NULL;
+		goto error1;
 
 	state->config = config;
 	state->i2c = i2c;
@@ -1134,9 +1138,8 @@ struct dvb_frontend *cx24116_attach(const struct cx24116_config *config,
 	ret = (cx24116_readreg(state, 0xFF) << 8) |
 		cx24116_readreg(state, 0xFE);
 	if (ret != 0x0501) {
-		kfree(state);
 		printk(KERN_INFO "Invalid probe, probably not a CX24116 device\n");
-		return NULL;
+		goto error2;
 	}
 
 	/* create dvb_frontend */
@@ -1144,6 +1147,9 @@ struct dvb_frontend *cx24116_attach(const struct cx24116_config *config,
 		sizeof(struct dvb_frontend_ops));
 	state->frontend.demodulator_priv = state;
 	return &state->frontend;
+
+error2: kfree(state);
+error1: return NULL;
 }
 EXPORT_SYMBOL(cx24116_attach);
 

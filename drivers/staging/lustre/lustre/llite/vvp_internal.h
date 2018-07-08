@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -38,8 +37,8 @@
 #ifndef VVP_INTERNAL_H
 #define VVP_INTERNAL_H
 
-#include <uapi/linux/lustre/lustre_idl.h>
-#include <cl_object.h>
+#include "../include/lustre/lustre_idl.h"
+#include "../include/cl_object.h"
 
 enum obd_notify_event;
 struct inode;

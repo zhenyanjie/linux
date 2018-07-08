@@ -440,8 +440,14 @@ l1oip_socket_recv(struct l1oip *hc, u8 remotecodec, u8 channel, u16 timebase,
 
 #ifdef REORDER_DEBUG
 		if (hc->chan[channel].disorder_flag) {
-			swap(hc->chan[channel].disorder_skb, nskb);
-			swap(hc->chan[channel].disorder_cnt, rx_counter);
+			struct sk_buff *skb;
+			int cnt;
+			skb = hc->chan[channel].disorder_skb;
+			hc->chan[channel].disorder_skb = nskb;
+			nskb = skb;
+			cnt = hc->chan[channel].disorder_cnt;
+			hc->chan[channel].disorder_cnt = rx_counter;
+			rx_counter = cnt;
 		}
 		hc->chan[channel].disorder_flag ^= 1;
 		if (nskb)
@@ -836,18 +842,17 @@ l1oip_send_bh(struct work_struct *work)
  * timer stuff
  */
 static void
-l1oip_keepalive(struct timer_list *t)
+l1oip_keepalive(void *data)
 {
-	struct l1oip *hc = from_timer(hc, t, keep_tl);
+	struct l1oip *hc = (struct l1oip *)data;
 
 	schedule_work(&hc->workq);
 }
 
 static void
-l1oip_timeout(struct timer_list *t)
+l1oip_timeout(void *data)
 {
-	struct l1oip			*hc = from_timer(hc, t,
-								  timeout_tl);
+	struct l1oip			*hc = (struct l1oip *)data;
 	struct dchannel		*dch = hc->chan[hc->d_idx].dch;
 
 	if (debug & DEBUG_L1OIP_MSG)
@@ -1432,11 +1437,13 @@ init_card(struct l1oip *hc, int pri, int bundle)
 	if (ret)
 		return ret;
 
-	timer_setup(&hc->keep_tl, l1oip_keepalive, 0);
+	hc->keep_tl.function = (void *)l1oip_keepalive;
+	hc->keep_tl.data = (ulong)hc;
+	init_timer(&hc->keep_tl);
 	hc->keep_tl.expires = jiffies + 2 * HZ; /* two seconds first time */
 	add_timer(&hc->keep_tl);
 
-	timer_setup(&hc->timeout_tl, l1oip_timeout, 0);
+	setup_timer(&hc->timeout_tl, (void *)l1oip_timeout, (ulong)hc);
 	hc->timeout_on = 0; /* state that we have timer off */
 
 	return 0;

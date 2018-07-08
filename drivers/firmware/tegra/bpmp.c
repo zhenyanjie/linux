@@ -194,24 +194,16 @@ static int tegra_bpmp_wait_master_free(struct tegra_bpmp_channel *channel)
 }
 
 static ssize_t __tegra_bpmp_channel_read(struct tegra_bpmp_channel *channel,
-					 void *data, size_t size, int *ret)
+					 void *data, size_t size)
 {
-	int err;
-
 	if (data && size > 0)
 		memcpy(data, channel->ib->data, size);
 
-	err = tegra_ivc_read_advance(channel->ivc);
-	if (err < 0)
-		return err;
-
-	*ret = channel->ib->code;
-
-	return 0;
+	return tegra_ivc_read_advance(channel->ivc);
 }
 
 static ssize_t tegra_bpmp_channel_read(struct tegra_bpmp_channel *channel,
-				       void *data, size_t size, int *ret)
+				       void *data, size_t size)
 {
 	struct tegra_bpmp *bpmp = channel->bpmp;
 	unsigned long flags;
@@ -225,7 +217,7 @@ static ssize_t tegra_bpmp_channel_read(struct tegra_bpmp_channel *channel,
 	}
 
 	spin_lock_irqsave(&bpmp->lock, flags);
-	err = __tegra_bpmp_channel_read(channel, data, size, ret);
+	err = __tegra_bpmp_channel_read(channel, data, size);
 	clear_bit(index, bpmp->threaded.allocated);
 	spin_unlock_irqrestore(&bpmp->lock, flags);
 
@@ -345,8 +337,7 @@ int tegra_bpmp_transfer_atomic(struct tegra_bpmp *bpmp,
 	if (err < 0)
 		return err;
 
-	return __tegra_bpmp_channel_read(channel, msg->rx.data, msg->rx.size,
-					 &msg->rx.ret);
+	return __tegra_bpmp_channel_read(channel, msg->rx.data, msg->rx.size);
 }
 EXPORT_SYMBOL_GPL(tegra_bpmp_transfer_atomic);
 
@@ -380,8 +371,7 @@ int tegra_bpmp_transfer(struct tegra_bpmp *bpmp,
 	if (err == 0)
 		return -ETIMEDOUT;
 
-	return tegra_bpmp_channel_read(channel, msg->rx.data, msg->rx.size,
-				       &msg->rx.ret);
+	return tegra_bpmp_channel_read(channel, msg->rx.data, msg->rx.size);
 }
 EXPORT_SYMBOL_GPL(tegra_bpmp_transfer);
 
@@ -397,8 +387,8 @@ static struct tegra_bpmp_mrq *tegra_bpmp_find_mrq(struct tegra_bpmp *bpmp,
 	return NULL;
 }
 
-void tegra_bpmp_mrq_return(struct tegra_bpmp_channel *channel, int code,
-			   const void *data, size_t size)
+static void tegra_bpmp_mrq_return(struct tegra_bpmp_channel *channel,
+				  int code, const void *data, size_t size)
 {
 	unsigned long flags = channel->ib->flags;
 	struct tegra_bpmp *bpmp = channel->bpmp;
@@ -436,7 +426,6 @@ void tegra_bpmp_mrq_return(struct tegra_bpmp_channel *channel, int code,
 		mbox_client_txdone(bpmp->mbox.channel, 0);
 	}
 }
-EXPORT_SYMBOL_GPL(tegra_bpmp_mrq_return);
 
 static void tegra_bpmp_handle_mrq(struct tegra_bpmp *bpmp,
 				  unsigned int mrq,
@@ -817,8 +806,6 @@ static int tegra_bpmp_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "firmware: %s\n", tag);
 
-	platform_set_drvdata(pdev, bpmp);
-
 	err = of_platform_default_populate(pdev->dev.of_node, NULL, &pdev->dev);
 	if (err < 0)
 		goto free_mrq;
@@ -835,9 +822,7 @@ static int tegra_bpmp_probe(struct platform_device *pdev)
 	if (err < 0)
 		goto free_mrq;
 
-	err = tegra_bpmp_init_debugfs(bpmp);
-	if (err < 0)
-		dev_err(&pdev->dev, "debugfs initialization failed: %d\n", err);
+	platform_set_drvdata(pdev, bpmp);
 
 	return 0;
 

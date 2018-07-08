@@ -123,7 +123,6 @@ struct cpcap_regulator {
 		.enable_val = (mode_val),				\
 		.disable_val = (off_val),				\
 		.ramp_delay = (volt_trans_time),			\
-		.of_map_mode = cpcap_map_mode,				\
 	},								\
 	.assign_reg = (assignment_reg),					\
 	.assign_mask = (assignment_mask),				\
@@ -212,18 +211,6 @@ static int cpcap_regulator_disable(struct regulator_dev *rdev)
 	}
 
 	return error;
-}
-
-static unsigned int cpcap_map_mode(unsigned int mode)
-{
-	switch (mode) {
-	case CPCAP_BIT_AUDIO_NORMAL_MODE:
-		return REGULATOR_MODE_NORMAL;
-	case CPCAP_BIT_AUDIO_LOW_PWR:
-		return REGULATOR_MODE_STANDBY;
-	default:
-		return -EINVAL;
-	}
 }
 
 static unsigned int cpcap_regulator_get_mode(struct regulator_dev *rdev)

@@ -977,7 +977,7 @@ int snd_hda_codec_update_widgets(struct hda_codec *codec)
 	hda_nid_t fg;
 	int err;
 
-	err = snd_hdac_refresh_widgets(&codec->core, true);
+	err = snd_hdac_refresh_widget_sysfs(&codec->core);
 	if (err < 0)
 		return err;
 
@@ -1823,9 +1823,7 @@ struct slave_init_arg {
 };
 
 /* initialize the slave volume with 0dB via snd_ctl_apply_vmaster_slaves() */
-static int init_slave_0dB(struct snd_kcontrol *slave,
-			  struct snd_kcontrol *kctl,
-			  void *_arg)
+static int init_slave_0dB(struct snd_kcontrol *kctl, void *_arg)
 {
 	struct slave_init_arg *arg = _arg;
 	int _tlv[4];
@@ -1862,7 +1860,7 @@ static int init_slave_0dB(struct snd_kcontrol *slave,
 	arg->step = step;
 	val = -tlv[2] / step;
 	if (val > 0) {
-		put_kctl_with_value(slave, val);
+		put_kctl_with_value(kctl, val);
 		return val;
 	}
 
@@ -1870,9 +1868,7 @@ static int init_slave_0dB(struct snd_kcontrol *slave,
 }
 
 /* unmute the slave via snd_ctl_apply_vmaster_slaves() */
-static int init_slave_unmute(struct snd_kcontrol *slave,
-			     struct snd_kcontrol *kctl,
-			     void *_arg)
+static int init_slave_unmute(struct snd_kcontrol *slave, void *_arg)
 {
 	return put_kctl_with_value(slave, 1);
 }
@@ -3230,10 +3226,8 @@ int snd_hda_codec_build_pcms(struct hda_codec *codec)
 			continue; /* no substreams assigned */
 
 		dev = get_empty_pcm_device(bus, cpcm->pcm_type);
-		if (dev < 0) {
-			cpcm->device = SNDRV_PCM_INVALID_DEVICE;
+		if (dev < 0)
 			continue; /* no fatal error */
-		}
 		cpcm->device = dev;
 		err =  snd_hda_attach_pcm_stream(bus, codec, cpcm);
 		if (err < 0) {

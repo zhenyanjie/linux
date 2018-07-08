@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * A test for the patch "Allow compaction of unevictable pages".
@@ -136,8 +135,6 @@ int check_compaction(unsigned long mem_free, unsigned int hugepage_size)
 
 	printf("No of huge pages allocated = %d\n",
 	       (atoi(nr_hugepages)));
-
-	lseek(fd, 0, SEEK_SET);
 
 	if (write(fd, initial_nr_hugepages, strlen(initial_nr_hugepages))
 	    != strlen(initial_nr_hugepages)) {

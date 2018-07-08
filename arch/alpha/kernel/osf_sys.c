@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/alpha/kernel/osf_sys.c
  *
@@ -964,8 +963,8 @@ static inline long
 put_tv32(struct timeval32 __user *o, struct timeval *i)
 {
 	return copy_to_user(o, &(struct timeval32){
-				.tv_sec = i->tv_sec,
-				.tv_usec = i->tv_usec},
+				.tv_sec = o->tv_sec,
+				.tv_usec = o->tv_usec},
 			    sizeof(struct timeval32));
 }
 

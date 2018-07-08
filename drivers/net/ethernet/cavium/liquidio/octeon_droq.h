@@ -328,7 +328,7 @@ struct octeon_droq {
 
 	u32 cpu_id;
 
-	call_single_data_t csd;
+	struct call_single_data csd;
 };
 
 #define OCT_DROQ_SIZE   (sizeof(struct octeon_droq))
@@ -399,9 +399,6 @@ int octeon_register_dispatch_fn(struct octeon_device *oct,
 				u16 opcode,
 				u16 subcode,
 				octeon_dispatch_fn_t fn, void *fn_arg);
-
-void *octeon_get_dispatch_arg(struct octeon_device *oct,
-			      u16 opcode, u16 subcode);
 
 void octeon_droq_print_stats(void);
 

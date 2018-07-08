@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -38,7 +37,7 @@
 #define DEBUG_SUBSYSTEM S_OSC
 
 /* class_name2obd() */
-#include <obd_class.h>
+#include "../include/obd_class.h"
 
 #include "osc_cl_internal.h"
 

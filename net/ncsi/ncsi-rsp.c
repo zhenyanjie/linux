@@ -146,7 +146,7 @@ static int ncsi_rsp_handler_ec(struct ncsi_request *nr)
 
 	ncm = &nc->modes[NCSI_MODE_ENABLE];
 	if (ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	ncm->enable = 1;
 	return 0;
@@ -173,7 +173,7 @@ static int ncsi_rsp_handler_dc(struct ncsi_request *nr)
 
 	ncm = &nc->modes[NCSI_MODE_ENABLE];
 	if (!ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	ncm->enable = 0;
 	return 0;
@@ -217,7 +217,7 @@ static int ncsi_rsp_handler_ecnt(struct ncsi_request *nr)
 
 	ncm = &nc->modes[NCSI_MODE_TX_ENABLE];
 	if (ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	ncm->enable = 1;
 	return 0;
@@ -239,7 +239,7 @@ static int ncsi_rsp_handler_dcnt(struct ncsi_request *nr)
 
 	ncm = &nc->modes[NCSI_MODE_TX_ENABLE];
 	if (!ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	ncm->enable = 1;
 	return 0;
@@ -263,7 +263,7 @@ static int ncsi_rsp_handler_ae(struct ncsi_request *nr)
 	/* Check if the AEN has been enabled */
 	ncm = &nc->modes[NCSI_MODE_AEN];
 	if (ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to AEN configuration */
 	cmd = (struct ncsi_cmd_ae_pkt *)skb_network_header(nr->cmd);
@@ -354,8 +354,7 @@ static int ncsi_rsp_handler_svf(struct ncsi_request *nr)
 
 	/* Add or remove the VLAN filter */
 	if (!(cmd->enable & 0x1)) {
-		/* HW indexes from 1 */
-		ret = ncsi_remove_filter(nc, NCSI_FILTER_VLAN, cmd->index - 1);
+		ret = ncsi_remove_filter(nc, NCSI_FILTER_VLAN, cmd->index);
 	} else {
 		vlan = ntohs(cmd->vlan);
 		ret = ncsi_add_filter(nc, NCSI_FILTER_VLAN, &vlan);
@@ -382,7 +381,7 @@ static int ncsi_rsp_handler_ev(struct ncsi_request *nr)
 	/* Check if VLAN mode has been enabled */
 	ncm = &nc->modes[NCSI_MODE_VLAN];
 	if (ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to VLAN mode */
 	cmd = (struct ncsi_cmd_ev_pkt *)skb_network_header(nr->cmd);
@@ -409,7 +408,7 @@ static int ncsi_rsp_handler_dv(struct ncsi_request *nr)
 	/* Check if VLAN mode has been enabled */
 	ncm = &nc->modes[NCSI_MODE_VLAN];
 	if (!ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to VLAN mode */
 	ncm->enable = 0;
@@ -455,10 +454,13 @@ static int ncsi_rsp_handler_sma(struct ncsi_request *nr)
 
 	bitmap = &ncf->bitmap;
 	if (cmd->at_e & 0x1) {
-		set_bit(cmd->index, bitmap);
+		if (test_and_set_bit(cmd->index, bitmap))
+			return -EBUSY;
 		memcpy(ncf->data + 6 * cmd->index, cmd->mac, 6);
 	} else {
-		clear_bit(cmd->index, bitmap);
+		if (!test_and_clear_bit(cmd->index, bitmap))
+			return -EBUSY;
+
 		memset(ncf->data + 6 * cmd->index, 0, 6);
 	}
 
@@ -482,7 +484,7 @@ static int ncsi_rsp_handler_ebf(struct ncsi_request *nr)
 	/* Check if broadcast filter has been enabled */
 	ncm = &nc->modes[NCSI_MODE_BC];
 	if (ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to broadcast filter mode */
 	cmd = (struct ncsi_cmd_ebf_pkt *)skb_network_header(nr->cmd);
@@ -508,7 +510,7 @@ static int ncsi_rsp_handler_dbf(struct ncsi_request *nr)
 	/* Check if broadcast filter isn't enabled */
 	ncm = &nc->modes[NCSI_MODE_BC];
 	if (!ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to broadcast filter mode */
 	ncm->enable = 0;
@@ -535,7 +537,7 @@ static int ncsi_rsp_handler_egmf(struct ncsi_request *nr)
 	/* Check if multicast filter has been enabled */
 	ncm = &nc->modes[NCSI_MODE_MC];
 	if (ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to multicast filter mode */
 	cmd = (struct ncsi_cmd_egmf_pkt *)skb_network_header(nr->cmd);
@@ -561,7 +563,7 @@ static int ncsi_rsp_handler_dgmf(struct ncsi_request *nr)
 	/* Check if multicast filter has been enabled */
 	ncm = &nc->modes[NCSI_MODE_MC];
 	if (!ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to multicast filter mode */
 	ncm->enable = 0;
@@ -588,7 +590,7 @@ static int ncsi_rsp_handler_snfc(struct ncsi_request *nr)
 	/* Check if flow control has been enabled */
 	ncm = &nc->modes[NCSI_MODE_FC];
 	if (ncm->enable)
-		return 0;
+		return -EBUSY;
 
 	/* Update to flow control mode */
 	cmd = (struct ncsi_cmd_snfc_pkt *)skb_network_header(nr->cmd);
@@ -691,14 +693,7 @@ static int ncsi_rsp_handler_gc(struct ncsi_request *nr)
 
 		ncf->index = i;
 		ncf->total = cnt;
-		if (i == NCSI_FILTER_VLAN) {
-			/* Set VLAN filters active so they are cleared in
-			 * first configuration state
-			 */
-			ncf->bitmap = U64_MAX;
-		} else {
-			ncf->bitmap = 0x0ul;
-		}
+		ncf->bitmap = 0x0ul;
 		nc->filters[i] = ncf;
 	}
 
@@ -956,7 +951,7 @@ static struct ncsi_rsp_handler {
 	{ NCSI_PKT_RSP_EGMF,    4, ncsi_rsp_handler_egmf    },
 	{ NCSI_PKT_RSP_DGMF,    4, ncsi_rsp_handler_dgmf    },
 	{ NCSI_PKT_RSP_SNFC,    4, ncsi_rsp_handler_snfc    },
-	{ NCSI_PKT_RSP_GVI,    40, ncsi_rsp_handler_gvi     },
+	{ NCSI_PKT_RSP_GVI,    36, ncsi_rsp_handler_gvi     },
 	{ NCSI_PKT_RSP_GC,     32, ncsi_rsp_handler_gc      },
 	{ NCSI_PKT_RSP_GP,     -1, ncsi_rsp_handler_gp      },
 	{ NCSI_PKT_RSP_GCPS,  172, ncsi_rsp_handler_gcps    },
@@ -1029,19 +1024,11 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 	if (payload < 0)
 		payload = ntohs(hdr->length);
 	ret = ncsi_validate_rsp_pkt(nr, payload);
-	if (ret) {
-		netdev_warn(ndp->ndev.dev,
-			    "NCSI: 'bad' packet ignored for type 0x%x\n",
-			    hdr->type);
+	if (ret)
 		goto out;
-	}
 
 	/* Process the packet */
 	ret = nrh->handler(nr);
-	if (ret)
-		netdev_err(ndp->ndev.dev,
-			   "NCSI: Handler for packet type 0x%x returned %d\n",
-			   hdr->type, ret);
 out:
 	ncsi_free_request(nr);
 	return ret;

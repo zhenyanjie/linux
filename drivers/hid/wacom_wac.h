@@ -292,8 +292,6 @@ struct hid_data {
 	bool inrange_state;
 	bool invert_state;
 	bool tipswitch;
-	bool barrelswitch;
-	bool barrelswitch2;
 	int x;
 	int y;
 	int pressure;

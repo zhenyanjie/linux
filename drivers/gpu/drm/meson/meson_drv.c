@@ -34,7 +34,6 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_rect.h>
 #include <drm/drm_fb_helper.h>
@@ -79,7 +78,7 @@ static const struct drm_mode_config_funcs meson_mode_config_funcs = {
 	.output_poll_changed = meson_fb_output_poll_changed,
 	.atomic_check        = drm_atomic_helper_check,
 	.atomic_commit       = drm_atomic_helper_commit,
-	.fb_create           = drm_gem_fb_create,
+	.fb_create           = drm_fb_cma_create,
 };
 
 static irqreturn_t meson_irq(int irq, void *arg)
@@ -117,6 +116,8 @@ static struct drm_driver meson_driver = {
 
 	/* GEM Ops */
 	.dumb_create		= drm_gem_cma_dumb_create,
+	.dumb_destroy		= drm_gem_dumb_destroy,
+	.dumb_map_offset	= drm_gem_cma_dumb_map_offset,
 	.gem_free_object_unlocked = drm_gem_cma_free_object,
 	.gem_vm_ops		= &drm_gem_cma_vm_ops,
 
@@ -302,8 +303,9 @@ static const struct component_master_ops meson_drv_master_ops = {
 
 static int compare_of(struct device *dev, void *data)
 {
-	DRM_DEBUG_DRIVER("Comparing of node %pOF with %pOF\n",
-			 dev->of_node, data);
+	DRM_DEBUG_DRIVER("Comparing of node %s with %s\n",
+			 of_node_full_name(dev->of_node),
+			 of_node_full_name(data));
 
 	return dev->of_node == data;
 }

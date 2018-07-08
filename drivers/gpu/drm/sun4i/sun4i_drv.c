@@ -11,7 +11,6 @@
  */
 
 #include <linux/component.h>
-#include <linux/kfifo.h>
 #include <linux/of_graph.h>
 #include <linux/of_reserved_mem.h>
 
@@ -49,6 +48,8 @@ static struct drm_driver sun4i_drv_driver = {
 
 	/* GEM Operations */
 	.dumb_create		= drm_gem_cma_dumb_create,
+	.dumb_destroy		= drm_gem_dumb_destroy,
+	.dumb_map_offset	= drm_gem_cma_dumb_map_offset,
 	.gem_free_object_unlocked = drm_gem_cma_free_object,
 	.gem_vm_ops		= &drm_gem_cma_vm_ops,
 
@@ -107,6 +108,11 @@ static int sun4i_drv_bind(struct device *dev)
 		goto free_drm;
 	}
 
+	/* drm_vblank_init calls kcalloc, which can fail */
+	ret = drm_vblank_init(drm, 1);
+	if (ret)
+		goto free_mem_region;
+
 	drm_mode_config_init(drm);
 
 	ret = component_bind_all(drm->dev, drm);
@@ -114,11 +120,6 @@ static int sun4i_drv_bind(struct device *dev)
 		dev_err(drm->dev, "Couldn't bind all pipelines components\n");
 		goto cleanup_mode_config;
 	}
-
-	/* drm_vblank_init calls kcalloc, which can fail */
-	ret = drm_vblank_init(drm, drm->mode_config.num_crtc);
-	if (ret)
-		goto free_mem_region;
 
 	drm->irq_enabled = true;
 
@@ -178,60 +179,30 @@ static bool sun4i_drv_node_is_connector(struct device_node *node)
 
 static bool sun4i_drv_node_is_frontend(struct device_node *node)
 {
-	return of_device_is_compatible(node, "allwinner,sun4i-a10-display-frontend") ||
-		of_device_is_compatible(node, "allwinner,sun5i-a13-display-frontend") ||
+	return of_device_is_compatible(node, "allwinner,sun5i-a13-display-frontend") ||
 		of_device_is_compatible(node, "allwinner,sun6i-a31-display-frontend") ||
-		of_device_is_compatible(node, "allwinner,sun7i-a20-display-frontend") ||
 		of_device_is_compatible(node, "allwinner,sun8i-a33-display-frontend");
 }
 
 static bool sun4i_drv_node_is_tcon(struct device_node *node)
 {
-	return of_device_is_compatible(node, "allwinner,sun4i-a10-tcon") ||
-		of_device_is_compatible(node, "allwinner,sun5i-a13-tcon") ||
+	return of_device_is_compatible(node, "allwinner,sun5i-a13-tcon") ||
 		of_device_is_compatible(node, "allwinner,sun6i-a31-tcon") ||
 		of_device_is_compatible(node, "allwinner,sun6i-a31s-tcon") ||
-		of_device_is_compatible(node, "allwinner,sun7i-a20-tcon") ||
 		of_device_is_compatible(node, "allwinner,sun8i-a33-tcon") ||
 		of_device_is_compatible(node, "allwinner,sun8i-v3s-tcon");
 }
 
 static int compare_of(struct device *dev, void *data)
 {
-	DRM_DEBUG_DRIVER("Comparing of node %pOF with %pOF\n",
-			 dev->of_node,
-			 data);
+	DRM_DEBUG_DRIVER("Comparing of node %s with %s\n",
+			 of_node_full_name(dev->of_node),
+			 of_node_full_name(data));
 
 	return dev->of_node == data;
 }
 
-/*
- * The encoder drivers use drm_of_find_possible_crtcs to get upstream
- * crtcs from the device tree using of_graph. For the results to be
- * correct, encoders must be probed/bound after _all_ crtcs have been
- * created. The existing code uses a depth first recursive traversal
- * of the of_graph, which means the encoders downstream of the TCON
- * get add right after the first TCON. The second TCON or CRTC will
- * never be properly associated with encoders connected to it.
- *
- * Also, in a dual display pipeline setup, both frontends can feed
- * either backend, and both backends can feed either TCON, we want
- * all components of the same type to be added before the next type
- * in the pipeline. Fortunately, the pipelines are perfectly symmetric,
- * i.e. components of the same type are at the same depth when counted
- * from the frontend. The only exception is the third pipeline in
- * the A80 SoC, which we do not support anyway.
- *
- * Hence we can use a breadth first search traversal order to add
- * components. We do not need to check for duplicates. The component
- * matching system handles this for us.
- */
-struct endpoint_list {
-	DECLARE_KFIFO(fifo, struct device_node *, 16);
-};
-
 static int sun4i_drv_add_endpoints(struct device *dev,
-				   struct endpoint_list *list,
 				   struct component_match **match,
 				   struct device_node *node)
 {
@@ -256,7 +227,8 @@ static int sun4i_drv_add_endpoints(struct device *dev,
 
 	if (!sun4i_drv_node_is_frontend(node)) {
 		/* Add current component */
-		DRM_DEBUG_DRIVER("Adding component %pOF\n", node);
+		DRM_DEBUG_DRIVER("Adding component %s\n",
+				 of_node_full_name(node));
 		drm_of_component_match_add(dev, match, compare_of, node);
 		count++;
 	}
@@ -295,7 +267,10 @@ static int sun4i_drv_add_endpoints(struct device *dev,
 			}
 		}
 
-		kfifo_put(&list->fifo, remote);
+		/* Walk down our tree */
+		count += sun4i_drv_add_endpoints(dev, match, remote);
+
+		of_node_put(remote);
 	}
 
 	return count;
@@ -304,11 +279,8 @@ static int sun4i_drv_add_endpoints(struct device *dev,
 static int sun4i_drv_probe(struct platform_device *pdev)
 {
 	struct component_match *match = NULL;
-	struct device_node *np = pdev->dev.of_node, *endpoint;
-	struct endpoint_list list;
-	int i, ret, count = 0;
-
-	INIT_KFIFO(list.fifo);
+	struct device_node *np = pdev->dev.of_node;
+	int i, count = 0;
 
 	for (i = 0;; i++) {
 		struct device_node *pipeline = of_parse_phandle(np,
@@ -317,19 +289,12 @@ static int sun4i_drv_probe(struct platform_device *pdev)
 		if (!pipeline)
 			break;
 
-		kfifo_put(&list.fifo, pipeline);
-	}
+		count += sun4i_drv_add_endpoints(&pdev->dev, &match,
+						pipeline);
+		of_node_put(pipeline);
 
-	while (kfifo_get(&list.fifo, &endpoint)) {
-		/* process this endpoint */
-		ret = sun4i_drv_add_endpoints(&pdev->dev, &list, &match,
-					      endpoint);
-
-		/* sun4i_drv_add_endpoints can fail to allocate memory */
-		if (ret < 0)
-			return ret;
-
-		count += ret;
+		DRM_DEBUG_DRIVER("Queued %d outputs on pipeline %d\n",
+				 count, i);
 	}
 
 	if (count)
@@ -346,12 +311,10 @@ static int sun4i_drv_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id sun4i_drv_of_table[] = {
-	{ .compatible = "allwinner,sun4i-a10-display-engine" },
 	{ .compatible = "allwinner,sun5i-a10s-display-engine" },
 	{ .compatible = "allwinner,sun5i-a13-display-engine" },
 	{ .compatible = "allwinner,sun6i-a31-display-engine" },
 	{ .compatible = "allwinner,sun6i-a31s-display-engine" },
-	{ .compatible = "allwinner,sun7i-a20-display-engine" },
 	{ .compatible = "allwinner,sun8i-a33-display-engine" },
 	{ .compatible = "allwinner,sun8i-v3s-display-engine" },
 	{ }

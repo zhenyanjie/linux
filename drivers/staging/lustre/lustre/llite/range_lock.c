@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -35,7 +34,7 @@
  * Author: Bobi Jam <bobijam.xu@intel.com>
  */
 #include "range_lock.h"
-#include <uapi/linux/lustre/lustre_idl.h>
+#include "../include/lustre/lustre_user.h"
 
 /**
  * Initialize a range lock tree

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/pci/pci-sysfs.c
  *
@@ -557,9 +556,9 @@ static ssize_t devspec_show(struct device *dev,
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct device_node *np = pci_device_to_OF_node(pdev);
 
-	if (np == NULL)
+	if (np == NULL || np->full_name == NULL)
 		return 0;
-	return sprintf(buf, "%pOF", np);
+	return sprintf(buf, "%s", np->full_name);
 }
 static DEVICE_ATTR_RO(devspec);
 #endif
@@ -649,33 +648,6 @@ exit:
 	return count;
 }
 
-static ssize_t sriov_offset_show(struct device *dev,
-				 struct device_attribute *attr,
-				 char *buf)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-
-	return sprintf(buf, "%u\n", pdev->sriov->offset);
-}
-
-static ssize_t sriov_stride_show(struct device *dev,
-				 struct device_attribute *attr,
-				 char *buf)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-
-	return sprintf(buf, "%u\n", pdev->sriov->stride);
-}
-
-static ssize_t sriov_vf_device_show(struct device *dev,
-				    struct device_attribute *attr,
-				    char *buf)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-
-	return sprintf(buf, "%x\n", pdev->sriov->vf_device);
-}
-
 static ssize_t sriov_drivers_autoprobe_show(struct device *dev,
 					    struct device_attribute *attr,
 					    char *buf)
@@ -704,9 +676,6 @@ static struct device_attribute sriov_totalvfs_attr = __ATTR_RO(sriov_totalvfs);
 static struct device_attribute sriov_numvfs_attr =
 		__ATTR(sriov_numvfs, (S_IRUGO|S_IWUSR|S_IWGRP),
 		       sriov_numvfs_show, sriov_numvfs_store);
-static struct device_attribute sriov_offset_attr = __ATTR_RO(sriov_offset);
-static struct device_attribute sriov_stride_attr = __ATTR_RO(sriov_stride);
-static struct device_attribute sriov_vf_device_attr = __ATTR_RO(sriov_vf_device);
 static struct device_attribute sriov_drivers_autoprobe_attr =
 		__ATTR(sriov_drivers_autoprobe, (S_IRUGO|S_IWUSR|S_IWGRP),
 		       sriov_drivers_autoprobe_show, sriov_drivers_autoprobe_store);
@@ -1249,7 +1218,10 @@ static ssize_t pci_resource_io(struct file *filp, struct kobject *kobj,
 {
 	struct pci_dev *pdev = to_pci_dev(kobj_to_dev(kobj));
 	int bar = (unsigned long)attr->private;
+	struct resource *res;
 	unsigned long port = off;
+
+	res = &pdev->resource[bar];
 
 	port += pci_resource_start(pdev, bar);
 
@@ -1466,7 +1438,7 @@ static ssize_t pci_read_rom(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static const struct bin_attribute pci_config_attr = {
+static struct bin_attribute pci_config_attr = {
 	.attr =	{
 		.name = "config",
 		.mode = S_IRUGO | S_IWUSR,
@@ -1476,7 +1448,7 @@ static const struct bin_attribute pci_config_attr = {
 	.write = pci_write_config,
 };
 
-static const struct bin_attribute pcie_config_attr = {
+static struct bin_attribute pcie_config_attr = {
 	.attr =	{
 		.name = "config",
 		.mode = S_IRUGO | S_IWUSR,
@@ -1770,7 +1742,7 @@ const struct attribute_group *pcie_dev_groups[] = {
 	NULL,
 };
 
-static const struct attribute_group pci_dev_hp_attr_group = {
+static struct attribute_group pci_dev_hp_attr_group = {
 	.attrs = pci_dev_hp_attrs,
 	.is_visible = pci_dev_hp_attrs_are_visible,
 };
@@ -1779,9 +1751,6 @@ static const struct attribute_group pci_dev_hp_attr_group = {
 static struct attribute *sriov_dev_attrs[] = {
 	&sriov_totalvfs_attr.attr,
 	&sriov_numvfs_attr.attr,
-	&sriov_offset_attr.attr,
-	&sriov_stride_attr.attr,
-	&sriov_vf_device_attr.attr,
 	&sriov_drivers_autoprobe_attr.attr,
 	NULL,
 };
@@ -1797,23 +1766,23 @@ static umode_t sriov_attrs_are_visible(struct kobject *kobj,
 	return a->mode;
 }
 
-static const struct attribute_group sriov_dev_attr_group = {
+static struct attribute_group sriov_dev_attr_group = {
 	.attrs = sriov_dev_attrs,
 	.is_visible = sriov_attrs_are_visible,
 };
 #endif /* CONFIG_PCI_IOV */
 
-static const struct attribute_group pci_dev_attr_group = {
+static struct attribute_group pci_dev_attr_group = {
 	.attrs = pci_dev_dev_attrs,
 	.is_visible = pci_dev_attrs_are_visible,
 };
 
-static const struct attribute_group pci_bridge_attr_group = {
+static struct attribute_group pci_bridge_attr_group = {
 	.attrs = pci_bridge_attrs,
 	.is_visible = pci_bridge_attrs_are_visible,
 };
 
-static const struct attribute_group pcie_dev_attr_group = {
+static struct attribute_group pcie_dev_attr_group = {
 	.attrs = pcie_dev_attrs,
 	.is_visible = pcie_dev_attrs_are_visible,
 };
@@ -1829,6 +1798,6 @@ static const struct attribute_group *pci_dev_attr_groups[] = {
 	NULL,
 };
 
-const struct device_type pci_dev_type = {
+struct device_type pci_dev_type = {
 	.groups = pci_dev_attr_groups,
 };

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 # ===========================================================================
 # Module versions
 # ===========================================================================
@@ -98,6 +97,7 @@ vmlinux.o: FORCE
 	$(call cmd,kernel-mod)
 
 # Declare generated files as targets for modpost
+$(symverfile):         __modpost ;
 $(modules:.ko=.mod.c): __modpost ;
 
 
@@ -143,7 +143,8 @@ FORCE:
 # optimization, we don't need to read them if the target does not
 # exist, we will rebuild anyway in that case.
 
-cmd_files := $(wildcard $(foreach f,$(sort $(targets)),$(dir $(f)).$(notdir $(f)).cmd))
+targets := $(wildcard $(sort $(targets)))
+cmd_files := $(wildcard $(foreach f,$(targets),$(dir $(f)).$(notdir $(f)).cmd))
 
 ifneq ($(cmd_files),)
   include $(cmd_files)

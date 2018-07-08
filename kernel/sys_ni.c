@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 
 #include <linux/linkage.h>
 #include <linux/errno.h>
@@ -261,6 +260,7 @@ cond_syscall(sys_pkey_alloc);
 cond_syscall(sys_pkey_free);
 
 /* lwipport/core/syscall.c */
-cond_syscall(lwip_closesock);
+cond_syscall(sys_lwip_closesock);
 /* send/recv has already been defined in __ARCH_WANT_SYSCALL_DEPRECATED */
 
+ 

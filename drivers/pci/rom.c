@@ -147,8 +147,12 @@ void __iomem *pci_map_rom(struct pci_dev *pdev, size_t *size)
 		return NULL;
 
 	rom = ioremap(start, *size);
-	if (!rom)
-		goto err_ioremap;
+	if (!rom) {
+		/* restore enable if ioremap fails */
+		if (!(res->flags & IORESOURCE_ROM_ENABLE))
+			pci_disable_rom(pdev);
+		return NULL;
+	}
 
 	/*
 	 * Try to find the true size of the ROM since sometimes the PCI window
@@ -156,18 +160,7 @@ void __iomem *pci_map_rom(struct pci_dev *pdev, size_t *size)
 	 * True size is important if the ROM is going to be copied.
 	 */
 	*size = pci_get_rom_size(pdev, rom, *size);
-	if (!*size)
-		goto invalid_rom;
-
 	return rom;
-
-invalid_rom:
-	iounmap(rom);
-err_ioremap:
-	/* restore enable if ioremap fails */
-	if (!(res->flags & IORESOURCE_ROM_ENABLE))
-		pci_disable_rom(pdev);
-	return NULL;
 }
 EXPORT_SYMBOL(pci_map_rom);
 

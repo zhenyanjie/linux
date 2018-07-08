@@ -252,11 +252,13 @@ unsigned int ebt_do_table(struct sk_buff *skb,
 		}
 		if (verdict == EBT_RETURN) {
 letsreturn:
-			if (WARN(sp == 0, "RETURN on base chain")) {
+#ifdef CONFIG_NETFILTER_DEBUG
+			if (sp == 0) {
+				BUGPRINT("RETURN on base chain");
 				/* act like this is EBT_CONTINUE */
 				goto letscontinue;
 			}
-
+#endif
 			sp--;
 			/* put all the local variables right */
 			i = cs[sp].n;
@@ -269,24 +271,26 @@ letsreturn:
 		}
 		if (verdict == EBT_CONTINUE)
 			goto letscontinue;
-
-		if (WARN(verdict < 0, "bogus standard verdict\n")) {
+#ifdef CONFIG_NETFILTER_DEBUG
+		if (verdict < 0) {
+			BUGPRINT("bogus standard verdict\n");
 			read_unlock_bh(&table->lock);
 			return NF_DROP;
 		}
-
+#endif
 		/* jump to a udc */
 		cs[sp].n = i + 1;
 		cs[sp].chaininfo = chaininfo;
 		cs[sp].e = ebt_next_entry(point);
 		i = 0;
 		chaininfo = (struct ebt_entries *) (base + verdict);
-
-		if (WARN(chaininfo->distinguisher, "jump to non-chain\n")) {
+#ifdef CONFIG_NETFILTER_DEBUG
+		if (chaininfo->distinguisher) {
+			BUGPRINT("jump to non-chain\n");
 			read_unlock_bh(&table->lock);
 			return NF_DROP;
 		}
-
+#endif
 		nentries = chaininfo->nentries;
 		point = (struct ebt_entry *)chaininfo->data;
 		counter_base = cb_base + chaininfo->counter_offset;
@@ -1065,10 +1069,15 @@ static int do_replace_finish(struct net *net, struct ebt_replace *repl,
 
 #ifdef CONFIG_AUDIT
 	if (audit_enabled) {
-		audit_log(current->audit_context, GFP_KERNEL,
-			  AUDIT_NETFILTER_CFG,
-			  "table=%s family=%u entries=%u",
-			  repl->name, AF_BRIDGE, repl->nentries);
+		struct audit_buffer *ab;
+
+		ab = audit_log_start(current->audit_context, GFP_KERNEL,
+				     AUDIT_NETFILTER_CFG);
+		if (ab) {
+			audit_log_format(ab, "table=%s family=%u entries=%u",
+					 repl->name, AF_BRIDGE, repl->nentries);
+			audit_log_end(ab);
+		}
 	}
 #endif
 	return ret;
@@ -1169,8 +1178,9 @@ static void __ebt_unregister_table(struct net *net, struct ebt_table *table)
 	kfree(table);
 }
 
-int ebt_register_table(struct net *net, const struct ebt_table *input_table,
-		       const struct nf_hook_ops *ops, struct ebt_table **res)
+struct ebt_table *
+ebt_register_table(struct net *net, const struct ebt_table *input_table,
+		   const struct nf_hook_ops *ops)
 {
 	struct ebt_table_info *newinfo;
 	struct ebt_table *t, *table;
@@ -1182,7 +1192,7 @@ int ebt_register_table(struct net *net, const struct ebt_table *input_table,
 	    repl->entries == NULL || repl->entries_size == 0 ||
 	    repl->counters != NULL || input_table->private != NULL) {
 		BUGPRINT("Bad table data for ebt_register_table!!!\n");
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	/* Don't add one table to multiple lists. */
@@ -1251,18 +1261,16 @@ int ebt_register_table(struct net *net, const struct ebt_table *input_table,
 	list_add(&table->list, &net->xt.tables[NFPROTO_BRIDGE]);
 	mutex_unlock(&ebt_mutex);
 
-	WRITE_ONCE(*res, table);
-
 	if (!ops)
-		return 0;
+		return table;
 
 	ret = nf_register_net_hooks(net, ops, hweight32(table->valid_hooks));
 	if (ret) {
 		__ebt_unregister_table(net, table);
-		*res = NULL;
+		return ERR_PTR(ret);
 	}
 
-	return ret;
+	return table;
 free_unlock:
 	mutex_unlock(&ebt_mutex);
 free_chainstack:
@@ -1277,7 +1285,7 @@ free_newinfo:
 free_table:
 	kfree(table);
 out:
-	return ret;
+	return ERR_PTR(ret);
 }
 
 void ebt_unregister_table(struct net *net, struct ebt_table *table,
@@ -2053,9 +2061,7 @@ static int ebt_size_mwt(struct compat_ebt_entry_mwt *match32,
 		if (match_kern)
 			match_kern->match_size = ret;
 
-		if (WARN_ON(type == EBT_COMPAT_TARGET && size_left))
-			return -EINVAL;
-
+		WARN_ON(type == EBT_COMPAT_TARGET && size_left);
 		match32 = (struct compat_ebt_entry_mwt *) buf;
 	}
 
@@ -2111,20 +2117,12 @@ static int size_entry_mwt(struct ebt_entry *entry, const unsigned char *base,
 	 *
 	 * offsets are relative to beginning of struct ebt_entry (i.e., 0).
 	 */
-	for (i = 0; i < 4 ; ++i) {
-		if (offsets[i] >= *total)
-			return -EINVAL;
-		if (i == 0)
-			continue;
-		if (offsets[i-1] > offsets[i])
-			return -EINVAL;
-	}
-
 	for (i = 0, j = 1 ; j < 4 ; j++, i++) {
 		struct compat_ebt_entry_mwt *match32;
 		unsigned int size;
-		char *buf = buf_start + offsets[i];
+		char *buf = buf_start;
 
+		buf = buf_start + offsets[i];
 		if (offsets[i] > offsets[j])
 			return -EINVAL;
 

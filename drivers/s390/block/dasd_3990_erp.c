@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Author(s)......: Horst  Hummel    <Horst.Hummel@de.ibm.com>
  *		    Holger Smolinski <Holger.Smolinski@de.ibm.com>
@@ -2232,7 +2231,7 @@ static void dasd_3990_erp_account_error(struct dasd_ccw_req *erp)
 	struct dasd_device *device = erp->startdev;
 	__u8 lpum = erp->refers->irb.esw.esw1.lpum;
 	int pos = pathmask_to_pos(lpum);
-	unsigned long clk;
+	unsigned long long clk;
 
 	if (!device->path_thrhld)
 		return;
@@ -2801,16 +2800,6 @@ dasd_3990_erp_action(struct dasd_ccw_req * cqr)
 	} else {
 		/* matching erp found - set all leading erp's to DONE */
 		erp = dasd_3990_erp_handle_match_erp(cqr, erp);
-	}
-
-
-	/*
-	 * For path verification work we need to stick with the path that was
-	 * originally chosen so that the per path configuration data is
-	 * assigned correctly.
-	 */
-	if (test_bit(DASD_CQR_VERIFY_PATH, &erp->flags) && cqr->lpm) {
-		erp->lpm = cqr->lpm;
 	}
 
 	if (device->features & DASD_FEATURE_ERPLOG) {

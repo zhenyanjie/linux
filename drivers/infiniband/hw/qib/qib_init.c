@@ -93,7 +93,7 @@ unsigned qib_cc_table_size;
 module_param_named(cc_table_size, qib_cc_table_size, uint, S_IRUGO);
 MODULE_PARM_DESC(cc_table_size, "Congestion control table entries 0 (CCA disabled - default), min = 128, max = 1984");
 
-static void verify_interrupt(struct timer_list *);
+static void verify_interrupt(unsigned long);
 
 static struct idr qib_unit_table;
 u32 qib_cpulist_count;
@@ -233,7 +233,8 @@ int qib_init_pportdata(struct qib_pportdata *ppd, struct qib_devdata *dd,
 	spin_lock_init(&ppd->cc_shadow_lock);
 	init_waitqueue_head(&ppd->state_wait);
 
-	timer_setup(&ppd->symerr_clear_timer, qib_clear_symerror_on_linkup, 0);
+	setup_timer(&ppd->symerr_clear_timer, qib_clear_symerror_on_linkup,
+		    (unsigned long)ppd);
 
 	ppd->qib_wq = NULL;
 	ppd->ibport_data.pmastats =
@@ -398,7 +399,7 @@ static int loadtime_init(struct qib_devdata *dd)
 	if (((dd->revision >> QLOGIC_IB_R_SOFTWARE_SHIFT) &
 	     QLOGIC_IB_R_SOFTWARE_MASK) != QIB_CHIP_SWVERSION) {
 		qib_dev_err(dd,
-			"Driver only handles version %d, chip swversion is %d (%llx), failing\n",
+			"Driver only handles version %d, chip swversion is %d (%llx), failng\n",
 			QIB_CHIP_SWVERSION,
 			(int)(dd->revision >>
 				QLOGIC_IB_R_SOFTWARE_SHIFT) &
@@ -427,7 +428,8 @@ static int loadtime_init(struct qib_devdata *dd)
 	qib_get_eeprom_info(dd);
 
 	/* setup time (don't start yet) to verify we got interrupt */
-	timer_setup(&dd->intrchk_timer, verify_interrupt, 0);
+	setup_timer(&dd->intrchk_timer, verify_interrupt,
+		    (unsigned long)dd);
 done:
 	return ret;
 }
@@ -491,9 +493,9 @@ static void enable_chip(struct qib_devdata *dd)
 	}
 }
 
-static void verify_interrupt(struct timer_list *t)
+static void verify_interrupt(unsigned long opaque)
 {
-	struct qib_devdata *dd = from_timer(dd, t, intrchk_timer);
+	struct qib_devdata *dd = (struct qib_devdata *) opaque;
 	u64 int_counter;
 
 	if (!dd)
@@ -751,7 +753,8 @@ done:
 				continue;
 			if (dd->flags & QIB_HAS_SEND_DMA)
 				ret = qib_setup_sdma(ppd);
-			timer_setup(&ppd->hol_timer, qib_hol_event, 0);
+			setup_timer(&ppd->hol_timer, qib_hol_event,
+				    (unsigned long)ppd);
 			ppd->hol_state = QIB_HOL_UP;
 		}
 
@@ -812,19 +815,23 @@ static void qib_stop_timers(struct qib_devdata *dd)
 	struct qib_pportdata *ppd;
 	int pidx;
 
-	if (dd->stats_timer.function)
+	if (dd->stats_timer.data) {
 		del_timer_sync(&dd->stats_timer);
-	if (dd->intrchk_timer.function)
+		dd->stats_timer.data = 0;
+	}
+	if (dd->intrchk_timer.data) {
 		del_timer_sync(&dd->intrchk_timer);
+		dd->intrchk_timer.data = 0;
+	}
 	for (pidx = 0; pidx < dd->num_pports; ++pidx) {
 		ppd = dd->pport + pidx;
-		if (ppd->hol_timer.function)
+		if (ppd->hol_timer.data)
 			del_timer_sync(&ppd->hol_timer);
-		if (ppd->led_override_timer.function) {
+		if (ppd->led_override_timer.data) {
 			del_timer_sync(&ppd->led_override_timer);
 			atomic_set(&ppd->led_override_timer_active, 0);
 		}
-		if (ppd->symerr_clear_timer.function)
+		if (ppd->symerr_clear_timer.data)
 			del_timer_sync(&ppd->symerr_clear_timer);
 	}
 }
@@ -1391,6 +1398,7 @@ static void cleanup_device_data(struct qib_devdata *dd)
 		qib_free_ctxtdata(dd, rcd);
 	}
 	kfree(tmp);
+	kfree(dd->boardname);
 }
 
 /*
@@ -1667,9 +1675,8 @@ int qib_setup_eagerbufs(struct qib_ctxtdata *rcd)
 	}
 	if (!rcd->rcvegrbuf_phys) {
 		rcd->rcvegrbuf_phys =
-			kmalloc_array_node(chunk,
-					   sizeof(rcd->rcvegrbuf_phys[0]),
-					   GFP_KERNEL, rcd->node_id);
+			kmalloc_node(chunk * sizeof(rcd->rcvegrbuf_phys[0]),
+				GFP_KERNEL, rcd->node_id);
 		if (!rcd->rcvegrbuf_phys)
 			goto bail_rcvegrbuf;
 	}

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for SCTP support code.
 #
@@ -13,8 +12,7 @@ sctp-y := sm_statetable.o sm_statefuns.o sm_sideeffect.o \
 	  inqueue.o outqueue.o ulpqueue.o \
 	  tsnmap.o bind_addr.o socket.o primitive.o \
 	  output.o input.o debug.o stream.o auth.o \
-	  offload.o stream_sched.o stream_sched_prio.o \
-	  stream_sched_rr.o
+	  offload.o
 
 sctp_probe-y := probe.o
 

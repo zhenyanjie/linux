@@ -68,7 +68,6 @@ struct shadow_indirect_ctx {
 struct shadow_per_ctx {
 	unsigned long guest_gma;
 	unsigned long shadow_gma;
-	unsigned valid;
 };
 
 struct intel_shadow_wa_ctx {
@@ -83,7 +82,6 @@ struct intel_vgpu_workload {
 	struct drm_i915_gem_request *req;
 	/* if this workload has been dispatched to i915? */
 	bool dispatched;
-	bool shadowed;
 	int status;
 
 	struct intel_vgpu_mm *shadow_mm;
@@ -140,9 +138,5 @@ void intel_gvt_wait_vgpu_idle(struct intel_vgpu *vgpu);
 int intel_vgpu_init_gvt_context(struct intel_vgpu *vgpu);
 
 void intel_vgpu_clean_gvt_context(struct intel_vgpu *vgpu);
-
-void release_shadow_wa_ctx(struct intel_shadow_wa_ctx *wa_ctx);
-
-int intel_gvt_generate_request(struct intel_vgpu_workload *workload);
 
 #endif

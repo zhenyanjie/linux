@@ -204,6 +204,9 @@ static ssize_t bt_bmc_read(struct file *file, char __user *buf,
 	ssize_t ret = 0;
 	ssize_t nread;
 
+	if (!access_ok(VERIFY_WRITE, buf, count))
+		return -EFAULT;
+
 	WARN_ON(*ppos);
 
 	if (wait_event_interruptible(bt_bmc->queue,
@@ -273,6 +276,9 @@ static ssize_t bt_bmc_write(struct file *file, const char __user *buf,
 	 */
 	if (count < 5)
 		return -EINVAL;
+
+	if (!access_ok(VERIFY_READ, buf, count))
+		return -EFAULT;
 
 	WARN_ON(*ppos);
 
@@ -367,9 +373,9 @@ static const struct file_operations bt_bmc_fops = {
 	.unlocked_ioctl	= bt_bmc_ioctl,
 };
 
-static void poll_timer(struct timer_list *t)
+static void poll_timer(unsigned long data)
 {
-	struct bt_bmc *bt_bmc = from_timer(bt_bmc, t, poll_timer);
+	struct bt_bmc *bt_bmc = (void *)data;
 
 	bt_bmc->poll_timer.expires += msecs_to_jiffies(500);
 	wake_up(&bt_bmc->queue);
@@ -487,7 +493,8 @@ static int bt_bmc_probe(struct platform_device *pdev)
 		dev_info(dev, "Using IRQ %d\n", bt_bmc->irq);
 	} else {
 		dev_info(dev, "No IRQ; using timer\n");
-		timer_setup(&bt_bmc->poll_timer, poll_timer, 0);
+		setup_timer(&bt_bmc->poll_timer, poll_timer,
+			    (unsigned long)bt_bmc);
 		bt_bmc->poll_timer.expires = jiffies + msecs_to_jiffies(10);
 		add_timer(&bt_bmc->poll_timer);
 	}

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -37,7 +36,7 @@
 #include <linux/fs_struct.h>
 #include <linux/sched/signal.h>
 
-#include <linux/libcfs/libcfs.h>
+#include "../../../include/linux/libcfs/libcfs.h"
 
 #if defined(CONFIG_KGDB)
 #include <linux/kgdb.h>

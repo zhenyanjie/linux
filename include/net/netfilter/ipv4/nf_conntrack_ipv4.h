@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * IPv4 support for nf_conntrack.
  *
@@ -11,7 +10,7 @@
 #define _NF_CONNTRACK_IPV4_H
 
 
-const extern struct nf_conntrack_l3proto nf_conntrack_l3proto_ipv4;
+extern struct nf_conntrack_l3proto nf_conntrack_l3proto_ipv4;
 
 extern struct nf_conntrack_l4proto nf_conntrack_l4proto_tcp4;
 extern struct nf_conntrack_l4proto nf_conntrack_l4proto_udp4;

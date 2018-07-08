@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -35,8 +34,8 @@
 #include <linux/log2.h>
 #include <linux/ktime.h>
 
-#include <linux/lnet/lib-lnet.h>
-#include <uapi/linux/lnet/lnet-dlc.h>
+#include "../../include/linux/lnet/lib-lnet.h"
+#include "../../include/linux/lnet/lib-dlc.h"
 
 #define D_LNI D_CONSOLE
 

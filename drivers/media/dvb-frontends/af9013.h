@@ -38,13 +38,6 @@
  * @api_version: Firmware API version.
  * @gpio: GPIOs.
  * @get_dvb_frontend: Get DVB frontend callback.
- *
- * AF9013/5 GPIOs (mostly guessed):
- *   * demod#1-gpio#0 - set demod#2 i2c-addr for dual devices
- *   * demod#1-gpio#1 - xtal setting (?)
- *   * demod#1-gpio#3 - tuner#1
- *   * demod#2-gpio#0 - tuner#2
- *   * demod#2-gpio#1 - xtal setting (?)
  */
 struct af9013_platform_data {
 	/*
@@ -96,15 +89,16 @@ struct af9013_platform_data {
 #define AF9013_TS_PARALLEL  AF9013_TS_MODE_PARALLEL
 #define AF9013_TS_SERIAL    AF9013_TS_MODE_SERIAL
 
-#if IS_REACHABLE(CONFIG_DVB_AF9013)
-/**
- * Attach an af9013 demod
- *
- * @config: pointer to &struct af9013_config with demod configuration.
- * @i2c: i2c adapter to use.
- *
- * return: FE pointer on success, NULL on failure.
+/*
+ * AF9013/5 GPIOs (mostly guessed)
+ * demod#1-gpio#0 - set demod#2 i2c-addr for dual devices
+ * demod#1-gpio#1 - xtal setting (?)
+ * demod#1-gpio#3 - tuner#1
+ * demod#2-gpio#0 - tuner#2
+ * demod#2-gpio#1 - xtal setting (?)
  */
+
+#if IS_REACHABLE(CONFIG_DVB_AF9013)
 extern struct dvb_frontend *af9013_attach(const struct af9013_config *config,
 	struct i2c_adapter *i2c);
 #else

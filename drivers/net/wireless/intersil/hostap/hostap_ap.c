@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Intersil Prism2 driver with Host AP (software access point) support
  * Copyright (c) 2001-2002, SSH Communications Security Corp and Jouni Malinen
@@ -185,9 +184,9 @@ static void hostap_event_expired_sta(struct net_device *dev,
 
 #ifndef PRISM2_NO_KERNEL_IEEE80211_MGMT
 
-static void ap_handle_timer(struct timer_list *t)
+static void ap_handle_timer(unsigned long data)
 {
-	struct sta_info *sta = from_timer(sta, t, timer);
+	struct sta_info *sta = (struct sta_info *) data;
 	local_info_t *local;
 	struct ap_data *ap;
 	unsigned long next_time = 0;
@@ -1189,8 +1188,10 @@ static struct sta_info * ap_add_sta(struct ap_data *ap, u8 *addr)
 	}
 
 #ifndef PRISM2_NO_KERNEL_IEEE80211_MGMT
-	timer_setup(&sta->timer, ap_handle_timer, 0);
+	init_timer(&sta->timer);
 	sta->timer.expires = jiffies + ap->max_inactivity;
+	sta->timer.data = (unsigned long) sta;
+	sta->timer.function = ap_handle_timer;
 	if (!ap->local->hostapd)
 		add_timer(&sta->timer);
 #endif /* PRISM2_NO_KERNEL_IEEE80211_MGMT */

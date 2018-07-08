@@ -367,7 +367,7 @@ static struct attribute *cdc_ncm_sysfs_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group cdc_ncm_sysfs_attr_group = {
+static struct attribute_group cdc_ncm_sysfs_attr_group = {
 	.name = "cdc_ncm",
 	.attrs = cdc_ncm_sysfs_attrs,
 };

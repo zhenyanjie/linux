@@ -61,8 +61,8 @@ MODULE_PARM_DESC(update_ms, "milliseconds before pstore updates its content "
 
 static int pstore_new_entry;
 
-static void pstore_timefunc(struct timer_list *);
-static DEFINE_TIMER(pstore_timer, pstore_timefunc);
+static void pstore_timefunc(unsigned long);
+static DEFINE_TIMER(pstore_timer, pstore_timefunc, 0, 0);
 
 static void pstore_dowork(struct work_struct *);
 static DECLARE_WORK(pstore_work, pstore_dowork);
@@ -482,7 +482,10 @@ void pstore_record_init(struct pstore_record *record,
 	record->psi = psinfo;
 
 	/* Report zeroed timestamp if called before timekeeping has resumed. */
-	record->time = ns_to_timespec(ktime_get_real_fast_ns());
+	if (__getnstimeofday(&record->time)) {
+		record->time.tv_sec = 0;
+		record->time.tv_nsec = 0;
+	}
 }
 
 /*
@@ -651,7 +654,7 @@ static int pstore_write_user_compat(struct pstore_record *record,
 		return -EINVAL;
 
 	record->buf = memdup_user(buf, record->size);
-	if (IS_ERR(record->buf)) {
+	if (unlikely(IS_ERR(record->buf))) {
 		ret = PTR_ERR(record->buf);
 		goto out;
 	}
@@ -890,7 +893,7 @@ static void pstore_dowork(struct work_struct *work)
 	pstore_get_records(1);
 }
 
-static void pstore_timefunc(struct timer_list *unused)
+static void pstore_timefunc(unsigned long dummy)
 {
 	if (pstore_new_entry) {
 		pstore_new_entry = 0;

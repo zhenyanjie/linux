@@ -11,7 +11,6 @@
  * more details.
  */
 #include <drm/drmP.h>
-#include <drm/drm_crtc_helper.h>
 #include "udl_drv.h"
 
 /* -BULK_SIZE as per usb-skeleton. Can we get full page and avoid overhead? */
@@ -351,8 +350,6 @@ int udl_driver_load(struct drm_device *dev, unsigned long flags)
 	if (ret)
 		goto err_fb;
 
-	drm_kms_helper_poll_init(dev);
-
 	return 0;
 err_fb:
 	udl_fbdev_cleanup(dev);
@@ -374,7 +371,7 @@ void udl_driver_unload(struct drm_device *dev)
 {
 	struct udl_device *udl = dev->dev_private;
 
-	drm_kms_helper_poll_fini(dev);
+	drm_vblank_cleanup(dev);
 
 	if (udl->urbs.count)
 		udl_free_urb_list(dev);

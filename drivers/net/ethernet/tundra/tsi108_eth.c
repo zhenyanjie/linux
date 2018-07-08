@@ -164,7 +164,7 @@ static struct platform_driver tsi_eth_driver = {
 	},
 };
 
-static void tsi108_timed_checker(struct timer_list *t);
+static void tsi108_timed_checker(unsigned long dev_ptr);
 
 #ifdef DEBUG
 static void dump_eth_one(struct net_device *dev)
@@ -1370,7 +1370,7 @@ static int tsi108_open(struct net_device *dev)
 
 	napi_enable(&data->napi);
 
-	timer_setup(&data->timer, tsi108_timed_checker, 0);
+	setup_timer(&data->timer, tsi108_timed_checker, (unsigned long)dev);
 	mod_timer(&data->timer, jiffies + 1);
 
 	tsi108_restart_rx(data, dev);
@@ -1666,10 +1666,10 @@ regs_fail:
  * Thus, we have to do it using a timer.
  */
 
-static void tsi108_timed_checker(struct timer_list *t)
+static void tsi108_timed_checker(unsigned long dev_ptr)
 {
-	struct tsi108_prv_data *data = from_timer(data, t, timer);
-	struct net_device *dev = data->dev;
+	struct net_device *dev = (struct net_device *)dev_ptr;
+	struct tsi108_prv_data *data = netdev_priv(dev);
 
 	tsi108_check_phy(dev);
 	tsi108_check_rxring(dev);

@@ -400,6 +400,7 @@ enum regex_type filter_parse_regex(char *buff, int len, char **search, int *not)
 	for (i = 0; i < len; i++) {
 		if (buff[i] == '*') {
 			if (!i) {
+				*search = buff + 1;
 				type = MATCH_END_ONLY;
 			} else if (i == len - 1) {
 				if (type == MATCH_END_ONLY)
@@ -409,14 +410,14 @@ enum regex_type filter_parse_regex(char *buff, int len, char **search, int *not)
 				buff[i] = 0;
 				break;
 			} else {	/* pattern continues, use full glob */
-				return MATCH_GLOB;
+				type = MATCH_GLOB;
+				break;
 			}
 		} else if (strchr("[?\\", buff[i])) {
-			return MATCH_GLOB;
+			type = MATCH_GLOB;
+			break;
 		}
 	}
-	if (buff[0] == '*')
-		*search = buff + 1;
 
 	return type;
 }
@@ -701,7 +702,7 @@ static void append_filter_err(struct filter_parse_state *ps,
 	int pos = ps->lasterr_pos;
 	char *buf, *pbuf;
 
-	buf = (char *)__get_free_page(GFP_KERNEL);
+	buf = (char *)__get_free_page(GFP_TEMPORARY);
 	if (!buf)
 		return;
 

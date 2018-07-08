@@ -187,11 +187,6 @@ qla24xx_enable_vp(scsi_qla_host_t *vha)
 		!(ha->current_topology & ISP_CFG_F)) {
 		vha->vp_err_state =  VP_ERR_PORTDWN;
 		fc_vport_set_state(vha->fc_vport, FC_VPORT_LINKDOWN);
-		ql_dbg(ql_dbg_taskm, vha, 0x800b,
-		    "%s skip enable. loop_state %x topo %x\n",
-		    __func__, base_vha->loop_state.counter,
-		    ha->current_topology);
-
 		goto enable_failed;
 	}
 
@@ -343,21 +338,15 @@ qla2x00_do_dpc_vp(scsi_qla_host_t *vha)
 		    "FCPort update end.\n");
 	}
 
-	if (test_bit(RELOGIN_NEEDED, &vha->dpc_flags) &&
-	    !test_bit(LOOP_RESYNC_NEEDED, &vha->dpc_flags) &&
-	    atomic_read(&vha->loop_state) != LOOP_DOWN) {
+	if ((test_and_clear_bit(RELOGIN_NEEDED, &vha->dpc_flags)) &&
+		!test_bit(LOOP_RESYNC_NEEDED, &vha->dpc_flags) &&
+		atomic_read(&vha->loop_state) != LOOP_DOWN) {
 
-		if (!vha->relogin_jif ||
-		    time_after_eq(jiffies, vha->relogin_jif)) {
-			vha->relogin_jif = jiffies + HZ;
-			clear_bit(RELOGIN_NEEDED, &vha->dpc_flags);
-
-			ql_dbg(ql_dbg_dpc, vha, 0x4018,
-			    "Relogin needed scheduled.\n");
-			qla2x00_relogin(vha);
-			ql_dbg(ql_dbg_dpc, vha, 0x4019,
-			    "Relogin needed end.\n");
-		}
+		ql_dbg(ql_dbg_dpc, vha, 0x4018,
+		    "Relogin needed scheduled.\n");
+		qla2x00_relogin(vha);
+		ql_dbg(ql_dbg_dpc, vha, 0x4019,
+		    "Relogin needed end.\n");
 	}
 
 	if (test_and_clear_bit(RESET_MARKER_NEEDED, &vha->dpc_flags) &&
@@ -493,7 +482,7 @@ qla24xx_create_vhost(struct fc_vport *fc_vport)
 	atomic_set(&vha->loop_state, LOOP_DOWN);
 	atomic_set(&vha->loop_down_timer, LOOP_DOWN_TIME);
 
-	qla2x00_start_timer(vha, WATCH_INTERVAL);
+	qla2x00_start_timer(vha, qla2x00_timer, WATCH_INTERVAL);
 
 	vha->req = base_vha->req;
 	host->can_queue = base_vha->req->length + 128;
@@ -575,16 +564,14 @@ qla25xx_free_rsp_que(struct scsi_qla_host *vha, struct rsp_que *rsp)
 int
 qla25xx_delete_req_que(struct scsi_qla_host *vha, struct req_que *req)
 {
-	int ret = QLA_SUCCESS;
+	int ret = -1;
 
-	if (req && vha->flags.qpairs_req_created) {
+	if (req) {
 		req->options |= BIT_0;
 		ret = qla25xx_init_req_que(vha, req);
-		if (ret != QLA_SUCCESS)
-			return QLA_FUNCTION_FAILED;
-
-		qla25xx_free_req_que(vha, req);
 	}
+	if (ret == QLA_SUCCESS)
+		qla25xx_free_req_que(vha, req);
 
 	return ret;
 }
@@ -592,16 +579,14 @@ qla25xx_delete_req_que(struct scsi_qla_host *vha, struct req_que *req)
 int
 qla25xx_delete_rsp_que(struct scsi_qla_host *vha, struct rsp_que *rsp)
 {
-	int ret = QLA_SUCCESS;
+	int ret = -1;
 
-	if (rsp && vha->flags.qpairs_rsp_created) {
+	if (rsp) {
 		rsp->options |= BIT_0;
 		ret = qla25xx_init_rsp_que(vha, rsp);
-		if (ret != QLA_SUCCESS)
-			return QLA_FUNCTION_FAILED;
-
-		qla25xx_free_rsp_que(vha, rsp);
 	}
+	if (ret == QLA_SUCCESS)
+		qla25xx_free_rsp_que(vha, rsp);
 
 	return ret;
 }
@@ -616,7 +601,7 @@ qla25xx_delete_queues(struct scsi_qla_host *vha)
 	struct qla_hw_data *ha = vha->hw;
 	struct qla_qpair *qpair, *tqpair;
 
-	if (ql2xmqsupport || ql2xnvmeenable) {
+	if (ql2xmqsupport) {
 		list_for_each_entry_safe(qpair, tqpair, &vha->qp_list,
 		    qp_list_elem)
 			qla2xxx_delete_qpair(vha, qpair);
@@ -774,18 +759,11 @@ static void qla_do_work(struct work_struct *work)
 	struct qla_qpair *qpair = container_of(work, struct qla_qpair, q_work);
 	struct scsi_qla_host *vha;
 	struct qla_hw_data *ha = qpair->hw;
-	struct srb_iocb	*nvme, *nxt_nvme;
 
 	spin_lock_irqsave(&qpair->qp_lock, flags);
 	vha = pci_get_drvdata(ha->pdev);
 	qla24xx_process_response_queue(vha, qpair->rsp);
 	spin_unlock_irqrestore(&qpair->qp_lock, flags);
-
-	list_for_each_entry_safe(nvme, nxt_nvme, &qpair->nvme_done_list,
-		    u.nvme.entry) {
-		list_del_init(&nvme->u.nvme.entry);
-		qla_nvme_cmpl_io(nvme);
-	}
 }
 
 /* create response queue */

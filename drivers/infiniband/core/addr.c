@@ -130,11 +130,13 @@ static void ib_nl_process_good_ip_rsep(const struct nlmsghdr *nlh)
 }
 
 int ib_nl_handle_ip_res_resp(struct sk_buff *skb,
-			     struct nlmsghdr *nlh,
-			     struct netlink_ext_ack *extack)
+			     struct netlink_callback *cb)
 {
+	const struct nlmsghdr *nlh = (struct nlmsghdr *)cb->nlh;
+
 	if ((nlh->nlmsg_flags & NLM_F_REQUEST) ||
-	    !(NETLINK_CB(skb).sk))
+	    !(NETLINK_CB(skb).sk) ||
+	    !netlink_capable(skb, CAP_NET_ADMIN))
 		return -EPERM;
 
 	if (ib_nl_is_good_ip_resp(nlh))
@@ -184,7 +186,7 @@ static int ib_nl_ip_send_msg(struct rdma_dev_addr *dev_addr,
 
 	/* Repair the nlmsg header length */
 	nlmsg_end(skb, nlh);
-	rdma_nl_multicast(skb, RDMA_NL_GROUP_LS, GFP_KERNEL);
+	ibnl_multicast(skb, nlh, RDMA_NL_GROUP_LS, GFP_KERNEL);
 
 	/* Make the request retry, so when we get the response from userspace
 	 * we will have something.
@@ -206,22 +208,6 @@ int rdma_addr_size(struct sockaddr *addr)
 	}
 }
 EXPORT_SYMBOL(rdma_addr_size);
-
-int rdma_addr_size_in6(struct sockaddr_in6 *addr)
-{
-	int ret = rdma_addr_size((struct sockaddr *) addr);
-
-	return ret <= sizeof(*addr) ? ret : 0;
-}
-EXPORT_SYMBOL(rdma_addr_size_in6);
-
-int rdma_addr_size_kss(struct __kernel_sockaddr_storage *addr)
-{
-	int ret = rdma_addr_size((struct sockaddr *) addr);
-
-	return ret <= sizeof(*addr) ? ret : 0;
-}
-EXPORT_SYMBOL(rdma_addr_size_kss);
 
 static struct rdma_addr_client self;
 
@@ -245,9 +231,8 @@ void rdma_addr_unregister_client(struct rdma_addr_client *client)
 }
 EXPORT_SYMBOL(rdma_addr_unregister_client);
 
-void rdma_copy_addr(struct rdma_dev_addr *dev_addr,
-		    const struct net_device *dev,
-		    const unsigned char *dst_dev_addr)
+int rdma_copy_addr(struct rdma_dev_addr *dev_addr, struct net_device *dev,
+		     const unsigned char *dst_dev_addr)
 {
 	dev_addr->dev_type = dev->type;
 	memcpy(dev_addr->src_dev_addr, dev->dev_addr, MAX_ADDR_LEN);
@@ -255,6 +240,7 @@ void rdma_copy_addr(struct rdma_dev_addr *dev_addr,
 	if (dst_dev_addr)
 		memcpy(dev_addr->dst_dev_addr, dst_dev_addr, MAX_ADDR_LEN);
 	dev_addr->bound_dev_if = dev->ifindex;
+	return 0;
 }
 EXPORT_SYMBOL(rdma_copy_addr);
 
@@ -263,14 +249,15 @@ int rdma_translate_ip(const struct sockaddr *addr,
 		      u16 *vlan_id)
 {
 	struct net_device *dev;
+	int ret = -EADDRNOTAVAIL;
 
 	if (dev_addr->bound_dev_if) {
 		dev = dev_get_by_index(dev_addr->net, dev_addr->bound_dev_if);
 		if (!dev)
 			return -ENODEV;
-		rdma_copy_addr(dev_addr, dev, NULL);
+		ret = rdma_copy_addr(dev_addr, dev, NULL);
 		dev_put(dev);
-		return 0;
+		return ret;
 	}
 
 	switch (addr->sa_family) {
@@ -279,9 +266,9 @@ int rdma_translate_ip(const struct sockaddr *addr,
 			((const struct sockaddr_in *)addr)->sin_addr.s_addr);
 
 		if (!dev)
-			return -EADDRNOTAVAIL;
+			return ret;
 
-		rdma_copy_addr(dev_addr, dev, NULL);
+		ret = rdma_copy_addr(dev_addr, dev, NULL);
 		dev_addr->bound_dev_if = dev->ifindex;
 		if (vlan_id)
 			*vlan_id = rdma_vlan_dev_vlan_id(dev);
@@ -294,7 +281,7 @@ int rdma_translate_ip(const struct sockaddr *addr,
 			if (ipv6_chk_addr(dev_addr->net,
 					  &((const struct sockaddr_in6 *)addr)->sin6_addr,
 					  dev, 1)) {
-				rdma_copy_addr(dev_addr, dev, NULL);
+				ret = rdma_copy_addr(dev_addr, dev, NULL);
 				dev_addr->bound_dev_if = dev->ifindex;
 				if (vlan_id)
 					*vlan_id = rdma_vlan_dev_vlan_id(dev);
@@ -305,7 +292,7 @@ int rdma_translate_ip(const struct sockaddr *addr,
 		break;
 #endif
 	}
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(rdma_translate_ip);
 
@@ -339,7 +326,7 @@ static void queue_req(struct addr_req *req)
 static int ib_nl_fetch_ha(struct dst_entry *dst, struct rdma_dev_addr *dev_addr,
 			  const void *daddr, u32 seq, u16 family)
 {
-	if (rdma_nl_chk_listeners(RDMA_NL_GROUP_LS))
+	if (ibnl_chk_listeners(RDMA_NL_GROUP_LS))
 		return -EADDRNOTAVAIL;
 
 	/* We fill in what we can, the response will fill the rest */
@@ -351,7 +338,7 @@ static int dst_fetch_ha(struct dst_entry *dst, struct rdma_dev_addr *dev_addr,
 			const void *daddr)
 {
 	struct neighbour *n;
-	int ret = 0;
+	int ret;
 
 	n = dst_neigh_lookup(dst, daddr);
 
@@ -361,7 +348,7 @@ static int dst_fetch_ha(struct dst_entry *dst, struct rdma_dev_addr *dev_addr,
 			neigh_event_send(n, NULL);
 		ret = -ENODATA;
 	} else {
-		rdma_copy_addr(dev_addr, dst->dev, n->ha);
+		ret = rdma_copy_addr(dev_addr, dst->dev, n->ha);
 	}
 	rcu_read_unlock();
 
@@ -509,9 +496,7 @@ static int addr_resolve_neigh(struct dst_entry *dst,
 	if (!(dst->dev->flags & IFF_NOARP))
 		return fetch_ha(dst, addr, dst_in, seq);
 
-	rdma_copy_addr(addr, dst->dev, NULL);
-
-	return 0;
+	return rdma_copy_addr(addr, dst->dev, NULL);
 }
 
 static int addr_resolve(struct sockaddr *src_in,
@@ -613,15 +598,6 @@ static void process_one_req(struct work_struct *_work)
 	}
 	list_del(&req->list);
 	mutex_unlock(&lock);
-
-	/*
-	 * Although the work will normally have been canceled by the
-	 * workqueue, it can still be requeued as long as it is on the
-	 * req_list, so it could have been requeued before we grabbed &lock.
-	 * We need to cancel it after it is removed from req_list to really be
-	 * sure it is safe to free.
-	 */
-	cancel_delayed_work(&req->work);
 
 	req->callback(req->status, (struct sockaddr *)&req->src_addr,
 		req->addr, req->context);
@@ -878,7 +854,7 @@ static struct notifier_block nb = {
 
 int addr_init(void)
 {
-	addr_wq = alloc_ordered_workqueue("ib_addr", 0);
+	addr_wq = alloc_ordered_workqueue("ib_addr", WQ_MEM_RECLAIM);
 	if (!addr_wq)
 		return -ENOMEM;
 

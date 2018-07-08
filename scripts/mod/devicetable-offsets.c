@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/kbuild.h>
 #include <linux/mod_devicetable.h>
 
@@ -206,13 +205,6 @@ int main(void)
 	DEVID(fsl_mc_device_id);
 	DEVID_FIELD(fsl_mc_device_id, vendor);
 	DEVID_FIELD(fsl_mc_device_id, obj_type);
-
-	DEVID(tb_service_id);
-	DEVID_FIELD(tb_service_id, match_flags);
-	DEVID_FIELD(tb_service_id, protocol_key);
-	DEVID_FIELD(tb_service_id, protocol_id);
-	DEVID_FIELD(tb_service_id, protocol_version);
-	DEVID_FIELD(tb_service_id, protocol_revision);
 
 	return 0;
 }

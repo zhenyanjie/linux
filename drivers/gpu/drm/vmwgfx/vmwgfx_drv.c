@@ -36,6 +36,7 @@
 #include <drm/ttm/ttm_module.h>
 #include <linux/dma_remapping.h>
 
+#define VMWGFX_DRIVER_NAME "vmwgfx"
 #define VMWGFX_DRIVER_DESC "Linux drm driver for VMware graphics devices"
 #define VMWGFX_CHIP_SVGAII 0
 #define VMW_FB_RESERVATION 0
@@ -824,7 +825,7 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 	}
 
 	if (dev_priv->capabilities & SVGA_CAP_IRQMASK) {
-		ret = vmw_irq_install(dev, dev->pdev->irq);
+		ret = drm_irq_install(dev, dev->pdev->irq);
 		if (ret != 0) {
 			DRM_ERROR("Failed installing irq: %d\n", ret);
 			goto out_no_irq;
@@ -936,7 +937,7 @@ out_no_bdev:
 	vmw_fence_manager_takedown(dev_priv->fman);
 out_no_fman:
 	if (dev_priv->capabilities & SVGA_CAP_IRQMASK)
-		vmw_irq_uninstall(dev_priv->dev);
+		drm_irq_uninstall(dev_priv->dev);
 out_no_irq:
 	if (dev_priv->stealth)
 		pci_release_region(dev->pdev, 2);
@@ -989,7 +990,7 @@ static void vmw_driver_unload(struct drm_device *dev)
 	vmw_release_device_late(dev_priv);
 	vmw_fence_manager_takedown(dev_priv->fman);
 	if (dev_priv->capabilities & SVGA_CAP_IRQMASK)
-		vmw_irq_uninstall(dev_priv->dev);
+		drm_irq_uninstall(dev_priv->dev);
 	if (dev_priv->stealth)
 		pci_release_region(dev->pdev, 2);
 	else
@@ -1337,19 +1338,6 @@ static void __vmw_svga_disable(struct vmw_private *dev_priv)
  */
 void vmw_svga_disable(struct vmw_private *dev_priv)
 {
-	/*
-	 * Disabling SVGA will turn off device modesetting capabilities, so
-	 * notify KMS about that so that it doesn't cache atomic state that
-	 * isn't valid anymore, for example crtcs turned on.
-	 * Strictly we'd want to do this under the SVGA lock (or an SVGA mutex),
-	 * but vmw_kms_lost_device() takes the reservation sem and thus we'll
-	 * end up with lock order reversal. Thus, a master may actually perform
-	 * a new modeset just after we call vmw_kms_lost_device() and race with
-	 * vmw_svga_disable(), but that should at worst cause atomic KMS state
-	 * to be inconsistent with the device, causing modesetting problems.
-	 *
-	 */
-	vmw_kms_lost_device(dev_priv->dev);
 	ttm_write_lock(&dev_priv->reservation_sem, false);
 	spin_lock(&dev_priv->svga_lock);
 	if (dev_priv->bdev.man[TTM_PL_VRAM].use_type) {
@@ -1528,6 +1516,10 @@ static struct drm_driver driver = {
 	.load = vmw_driver_load,
 	.unload = vmw_driver_unload,
 	.lastclose = vmw_lastclose,
+	.irq_preinstall = vmw_irq_preinstall,
+	.irq_postinstall = vmw_irq_postinstall,
+	.irq_uninstall = vmw_irq_uninstall,
+	.irq_handler = vmw_irq_handler,
 	.get_vblank_counter = vmw_get_vblank_counter,
 	.enable_vblank = vmw_enable_vblank,
 	.disable_vblank = vmw_disable_vblank,
@@ -1539,6 +1531,7 @@ static struct drm_driver driver = {
 	.master_drop = vmw_master_drop,
 	.open = vmw_driver_open,
 	.postclose = vmw_postclose,
+	.set_busid = drm_pci_set_busid,
 
 	.dumb_create = vmw_dumb_create,
 	.dumb_map_offset = vmw_dumb_map_offset,
@@ -1578,7 +1571,7 @@ static int __init vmwgfx_init(void)
 	if (vgacon_text_force())
 		return -EINVAL;
 
-	ret = pci_register_driver(&vmw_pci_driver);
+	ret = drm_pci_init(&driver, &vmw_pci_driver);
 	if (ret)
 		DRM_ERROR("Failed initializing DRM.\n");
 	return ret;
@@ -1586,7 +1579,7 @@ static int __init vmwgfx_init(void)
 
 static void __exit vmwgfx_exit(void)
 {
-	pci_unregister_driver(&vmw_pci_driver);
+	drm_pci_exit(&driver, &vmw_pci_driver);
 }
 
 module_init(vmwgfx_init);

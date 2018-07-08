@@ -8,9 +8,9 @@
  */
 
 /dts-v1/;
-#include "uniphier-sld8.dtsi"
-#include "uniphier-ref-daughter.dtsi"
-#include "uniphier-support-card.dtsi"
+/include/ "uniphier-sld8.dtsi"
+/include/ "uniphier-ref-daughter.dtsi"
+/include/ "uniphier-support-card.dtsi"
 
 / {
 	model = "UniPhier sLD8 Reference Board";
@@ -38,7 +38,7 @@
 };
 
 &ethsc {
-	interrupts = <0 8>;
+	interrupts = <0 48 4>;
 };
 
 &serial0 {
@@ -51,14 +51,6 @@
 
 &serial3 {
 	status = "okay";
-};
-
-&gpio {
-	xirq0 {
-		gpio-hog;
-		gpios = <120 0>;
-		input;
-	};
 };
 
 &i2c0 {
@@ -74,9 +66,5 @@
 };
 
 &usb2 {
-	status = "okay";
-};
-
-&nand {
 	status = "okay";
 };

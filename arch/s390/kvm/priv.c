@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * handling privileged instructions
  *
  * Copyright IBM Corp. 2008, 2013
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License (version 2 only)
+ * as published by the Free Software Foundation.
  *
  *    Author(s): Carsten Otte <cotte@de.ibm.com>
  *               Christian Borntraeger <borntraeger@de.ibm.com>
@@ -81,10 +84,9 @@ int kvm_s390_handle_e3(struct kvm_vcpu *vcpu)
 /* Handle SCK (SET CLOCK) interception */
 static int handle_set_clock(struct kvm_vcpu *vcpu)
 {
-	struct kvm_s390_vm_tod_clock gtod = { 0 };
 	int rc;
 	u8 ar;
-	u64 op2;
+	u64 op2, val;
 
 	if (vcpu->arch.sie_block->gpsw.mask & PSW_MASK_PSTATE)
 		return kvm_s390_inject_program_int(vcpu, PGM_PRIVILEGED_OP);
@@ -92,12 +94,12 @@ static int handle_set_clock(struct kvm_vcpu *vcpu)
 	op2 = kvm_s390_get_base_disp_s(vcpu, &ar);
 	if (op2 & 7)	/* Operand must be on a doubleword boundary */
 		return kvm_s390_inject_program_int(vcpu, PGM_SPECIFICATION);
-	rc = read_guest(vcpu, op2, ar, &gtod.tod, sizeof(gtod.tod));
+	rc = read_guest(vcpu, op2, ar, &val, sizeof(val));
 	if (rc)
 		return kvm_s390_inject_prog_cond(vcpu, rc);
 
-	VCPU_EVENT(vcpu, 3, "SCK: setting guest TOD to 0x%llx", gtod.tod);
-	kvm_s390_set_tod_clock(vcpu->kvm, &gtod);
+	VCPU_EVENT(vcpu, 3, "SCK: setting guest TOD to 0x%llx", val);
+	kvm_s390_set_tod_clock(vcpu->kvm, val);
 
 	kvm_s390_set_psw_cc(vcpu, 0);
 	return 0;
@@ -233,6 +235,8 @@ static int try_handle_skey(struct kvm_vcpu *vcpu)
 		VCPU_EVENT(vcpu, 4, "%s", "retrying storage key operation");
 		return -EAGAIN;
 	}
+	if (vcpu->arch.sie_block->gpsw.mask & PSW_MASK_PSTATE)
+		return kvm_s390_inject_program_int(vcpu, PGM_PRIVILEGED_OP);
 	return 0;
 }
 
@@ -242,9 +246,6 @@ static int handle_iske(struct kvm_vcpu *vcpu)
 	unsigned char key;
 	int reg1, reg2;
 	int rc;
-
-	if (vcpu->arch.sie_block->gpsw.mask & PSW_MASK_PSTATE)
-		return kvm_s390_inject_program_int(vcpu, PGM_PRIVILEGED_OP);
 
 	rc = try_handle_skey(vcpu);
 	if (rc)
@@ -274,9 +275,6 @@ static int handle_rrbe(struct kvm_vcpu *vcpu)
 	unsigned long addr;
 	int reg1, reg2;
 	int rc;
-
-	if (vcpu->arch.sie_block->gpsw.mask & PSW_MASK_PSTATE)
-		return kvm_s390_inject_program_int(vcpu, PGM_PRIVILEGED_OP);
 
 	rc = try_handle_skey(vcpu);
 	if (rc)
@@ -313,9 +311,6 @@ static int handle_sske(struct kvm_vcpu *vcpu)
 	int reg1, reg2;
 	int rc;
 
-	if (vcpu->arch.sie_block->gpsw.mask & PSW_MASK_PSTATE)
-		return kvm_s390_inject_program_int(vcpu, PGM_PRIVILEGED_OP);
-
 	rc = try_handle_skey(vcpu);
 	if (rc)
 		return rc != -EAGAIN ? rc : 0;
@@ -334,7 +329,7 @@ static int handle_sske(struct kvm_vcpu *vcpu)
 	start = kvm_s390_logical_to_effective(vcpu, start);
 	if (m3 & SSKE_MB) {
 		/* start already designates an absolute address */
-		end = (start + _SEGMENT_SIZE) & ~(_SEGMENT_SIZE - 1);
+		end = (start + (1UL << 20)) & ~((1UL << 20) - 1);
 	} else {
 		start = kvm_s390_real_to_abs(vcpu, start);
 		end = start + PAGE_SIZE;
@@ -898,10 +893,10 @@ static int handle_pfmf(struct kvm_vcpu *vcpu)
 	case 0x00000000:
 		/* only 4k frames specify a real address */
 		start = kvm_s390_real_to_abs(vcpu, start);
-		end = (start + PAGE_SIZE) & ~(PAGE_SIZE - 1);
+		end = (start + (1UL << 12)) & ~((1UL << 12) - 1);
 		break;
 	case 0x00001000:
-		end = (start + _SEGMENT_SIZE) & ~(_SEGMENT_SIZE - 1);
+		end = (start + (1UL << 20)) & ~((1UL << 20) - 1);
 		break;
 	case 0x00002000:
 		/* only support 2G frame size if EDAT2 is available and we are
@@ -909,7 +904,7 @@ static int handle_pfmf(struct kvm_vcpu *vcpu)
 		if (!test_kvm_facility(vcpu->kvm, 78) ||
 		    psw_bits(vcpu->arch.sie_block->gpsw).eaba == PSW_BITS_AMODE_24BIT)
 			return kvm_s390_inject_program_int(vcpu, PGM_SPECIFICATION);
-		end = (start + _REGION3_SIZE) & ~(_REGION3_SIZE - 1);
+		end = (start + (1UL << 31)) & ~((1UL << 31) - 1);
 		break;
 	default:
 		return kvm_s390_inject_program_int(vcpu, PGM_SPECIFICATION);
@@ -993,8 +988,6 @@ static inline int do_essa(struct kvm_vcpu *vcpu, const int orc)
 		if (pgstev & _PGSTE_GPS_ZERO)
 			res |= 1;
 	}
-	if (pgstev & _PGSTE_GPS_NODAT)
-		res |= 0x20;
 	vcpu->run->s.regs.gprs[r1] = res;
 	/*
 	 * It is possible that all the normal 511 slots were full, in which case
@@ -1007,7 +1000,7 @@ static inline int do_essa(struct kvm_vcpu *vcpu, const int orc)
 		cbrlo[entries] = gfn << PAGE_SHIFT;
 	}
 
-	if (orc && gfn < ms->bitmap_size) {
+	if (orc) {
 		/* increment only if we are really flipping the bit to 1 */
 		if (!test_and_set_bit(gfn, ms->pgste_bitmap))
 			atomic64_inc(&ms->dirty_pages);
@@ -1034,9 +1027,7 @@ static int handle_essa(struct kvm_vcpu *vcpu)
 		return kvm_s390_inject_program_int(vcpu, PGM_PRIVILEGED_OP);
 	/* Check for invalid operation request code */
 	orc = (vcpu->arch.sie_block->ipb & 0xf0000000) >> 28;
-	/* ORCs 0-6 are always valid */
-	if (orc > (test_kvm_facility(vcpu->kvm, 147) ? ESSA_SET_STABLE_NODAT
-						: ESSA_SET_STABLE_IF_RESIDENT))
+	if (orc > ESSA_MAX)
 		return kvm_s390_inject_program_int(vcpu, PGM_SPECIFICATION);
 
 	if (likely(!vcpu->kvm->arch.migration_state)) {

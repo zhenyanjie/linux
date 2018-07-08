@@ -301,13 +301,20 @@ static bool tcp_invert_tuple(struct nf_conntrack_tuple *tuple,
 	return true;
 }
 
-#ifdef CONFIG_NF_CONNTRACK_PROCFS
+/* Print out the per-protocol part of the tuple. */
+static void tcp_print_tuple(struct seq_file *s,
+			    const struct nf_conntrack_tuple *tuple)
+{
+	seq_printf(s, "sport=%hu dport=%hu ",
+		   ntohs(tuple->src.u.tcp.port),
+		   ntohs(tuple->dst.u.tcp.port));
+}
+
 /* Print out the private part of the conntrack. */
 static void tcp_print_conntrack(struct seq_file *s, struct nf_conn *ct)
 {
 	seq_printf(s, "%s ", tcp_conntrack_names[ct->proto.tcp.state]);
 }
-#endif
 
 static unsigned int get_conntrack_index(const struct tcphdr *tcph)
 {
@@ -493,7 +500,8 @@ static bool tcp_in_window(const struct nf_conn *ct,
 			  unsigned int index,
 			  const struct sk_buff *skb,
 			  unsigned int dataoff,
-			  const struct tcphdr *tcph)
+			  const struct tcphdr *tcph,
+			  u_int8_t pf)
 {
 	struct net *net = nf_ct_net(ct);
 	struct nf_tcp_net *tn = tcp_pernet(net);
@@ -701,9 +709,9 @@ static bool tcp_in_window(const struct nf_conn *ct,
 		if (sender->flags & IP_CT_TCP_FLAG_BE_LIBERAL ||
 		    tn->tcp_be_liberal)
 			res = true;
-		if (!res) {
-			nf_ct_l4proto_log_invalid(skb, ct,
-			"%s",
+		if (!res && LOG_INVALID(net, IPPROTO_TCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+			"nf_ct_tcp: %s ",
 			before(seq, sender->td_maxend + 1) ?
 			in_recv_win ?
 			before(sack, receiver->td_end + 1) ?
@@ -712,7 +720,6 @@ static bool tcp_in_window(const struct nf_conn *ct,
 			: "ACK is over the upper bound (ACKed data not seen yet)"
 			: "SEQ is under the lower bound (already ACKed data retransmitted)"
 			: "SEQ is over the upper bound (over the window of the receiver)");
-		}
 	}
 
 	pr_debug("tcp_in_window: res=%u sender end=%u maxend=%u maxwin=%u "
@@ -738,12 +745,6 @@ static const u8 tcp_valid_flags[(TCPHDR_FIN|TCPHDR_SYN|TCPHDR_RST|TCPHDR_ACK|
 	[TCPHDR_ACK|TCPHDR_URG]			= 1,
 };
 
-static void tcp_error_log(const struct sk_buff *skb, struct net *net,
-			  u8 pf, const char *msg)
-{
-	nf_l4proto_log_invalid(skb, net, pf, IPPROTO_TCP, "%s", msg);
-}
-
 /* Protect conntrack agaist broken packets. Code taken from ipt_unclean.c.  */
 static int tcp_error(struct net *net, struct nf_conn *tmpl,
 		     struct sk_buff *skb,
@@ -759,13 +760,17 @@ static int tcp_error(struct net *net, struct nf_conn *tmpl,
 	/* Smaller that minimal TCP header? */
 	th = skb_header_pointer(skb, dataoff, sizeof(_tcph), &_tcph);
 	if (th == NULL) {
-		tcp_error_log(skb, net, pf, "short packet");
+		if (LOG_INVALID(net, IPPROTO_TCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				"nf_ct_tcp: short packet ");
 		return -NF_ACCEPT;
 	}
 
 	/* Not whole TCP header or malformed packet */
 	if (th->doff*4 < sizeof(struct tcphdr) || tcplen < th->doff*4) {
-		tcp_error_log(skb, net, pf, "truncated packet");
+		if (LOG_INVALID(net, IPPROTO_TCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				"nf_ct_tcp: truncated/malformed packet ");
 		return -NF_ACCEPT;
 	}
 
@@ -776,14 +781,18 @@ static int tcp_error(struct net *net, struct nf_conn *tmpl,
 	/* FIXME: Source route IP option packets --RR */
 	if (net->ct.sysctl_checksum && hooknum == NF_INET_PRE_ROUTING &&
 	    nf_checksum(skb, hooknum, dataoff, IPPROTO_TCP, pf)) {
-		tcp_error_log(skb, net, pf, "bad checksum");
+		if (LOG_INVALID(net, IPPROTO_TCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				  "nf_ct_tcp: bad TCP checksum ");
 		return -NF_ACCEPT;
 	}
 
 	/* Check TCP flags. */
 	tcpflags = (tcp_flag_byte(th) & ~(TCPHDR_ECE|TCPHDR_CWR|TCPHDR_PSH));
 	if (!tcp_valid_flags[tcpflags]) {
-		tcp_error_log(skb, net, pf, "invalid tcp flag combination");
+		if (LOG_INVALID(net, IPPROTO_TCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				  "nf_ct_tcp: invalid TCP flag combination ");
 		return -NF_ACCEPT;
 	}
 
@@ -800,6 +809,8 @@ static int tcp_packet(struct nf_conn *ct,
 		      const struct sk_buff *skb,
 		      unsigned int dataoff,
 		      enum ip_conntrack_info ctinfo,
+		      u_int8_t pf,
+		      unsigned int hooknum,
 		      unsigned int *timeouts)
 {
 	struct net *net = nf_ct_net(ct);
@@ -936,8 +947,10 @@ static int tcp_packet(struct nf_conn *ct,
 					IP_CT_EXP_CHALLENGE_ACK;
 		}
 		spin_unlock_bh(&ct->lock);
-		nf_ct_l4proto_log_invalid(skb, ct, "invalid packet ignored in "
-					  "state %s ", tcp_conntrack_names[old_state]);
+		if (LOG_INVALID(net, IPPROTO_TCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				  "nf_ct_tcp: invalid packet ignored in "
+				  "state %s ", tcp_conntrack_names[old_state]);
 		return NF_ACCEPT;
 	case TCP_CONNTRACK_MAX:
 		/* Special case for SYN proxy: when the SYN to the server or
@@ -959,7 +972,9 @@ static int tcp_packet(struct nf_conn *ct,
 		pr_debug("nf_ct_tcp: Invalid dir=%i index=%u ostate=%u\n",
 			 dir, get_conntrack_index(th), old_state);
 		spin_unlock_bh(&ct->lock);
-		nf_ct_l4proto_log_invalid(skb, ct, "invalid state");
+		if (LOG_INVALID(net, IPPROTO_TCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				  "nf_ct_tcp: invalid state ");
 		return -NF_ACCEPT;
 	case TCP_CONNTRACK_TIME_WAIT:
 		/* RFC5961 compliance cause stack to send "challenge-ACK"
@@ -974,7 +989,9 @@ static int tcp_packet(struct nf_conn *ct,
 			/* Detected RFC5961 challenge ACK */
 			ct->proto.tcp.last_flags &= ~IP_CT_EXP_CHALLENGE_ACK;
 			spin_unlock_bh(&ct->lock);
-			nf_ct_l4proto_log_invalid(skb, ct, "challenge-ack ignored");
+			if (LOG_INVALID(net, IPPROTO_TCP))
+				nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				      "nf_ct_tcp: challenge-ACK ignored ");
 			return NF_ACCEPT; /* Don't change state */
 		}
 		break;
@@ -984,7 +1001,9 @@ static int tcp_packet(struct nf_conn *ct,
 		    && before(ntohl(th->seq), ct->proto.tcp.seen[!dir].td_maxack)) {
 			/* Invalid RST  */
 			spin_unlock_bh(&ct->lock);
-			nf_ct_l4proto_log_invalid(skb, ct, "invalid rst");
+			if (LOG_INVALID(net, IPPROTO_TCP))
+				nf_log_packet(net, pf, 0, skb, NULL, NULL,
+					      NULL, "nf_ct_tcp: invalid RST ");
 			return -NF_ACCEPT;
 		}
 		if (index == TCP_RST_SET
@@ -1011,7 +1030,7 @@ static int tcp_packet(struct nf_conn *ct,
 	}
 
 	if (!tcp_in_window(ct, &ct->proto.tcp, dir, index,
-			   skb, dataoff, th)) {
+			   skb, dataoff, th, pf)) {
 		spin_unlock_bh(&ct->lock);
 		return -NF_ACCEPT;
 	}
@@ -1039,9 +1058,6 @@ static int tcp_packet(struct nf_conn *ct,
 		 IP_CT_TCP_FLAG_DATA_UNACKNOWLEDGED &&
 		 timeouts[new_state] > timeouts[TCP_CONNTRACK_UNACK])
 		timeout = timeouts[TCP_CONNTRACK_UNACK];
-	else if (ct->proto.tcp.last_win == 0 &&
-		 timeouts[new_state] > timeouts[TCP_CONNTRACK_RETRANS])
-		timeout = timeouts[TCP_CONNTRACK_RETRANS];
 	else
 		timeout = timeouts[new_state];
 	spin_unlock_bh(&ct->lock);
@@ -1280,14 +1296,9 @@ static int tcp_nlattr_size(void)
 		+ nla_policy_len(tcp_nla_policy, CTA_PROTOINFO_TCP_MAX + 1);
 }
 
-static unsigned int tcp_nlattr_tuple_size(void)
+static int tcp_nlattr_tuple_size(void)
 {
-	static unsigned int size __read_mostly;
-
-	if (!size)
-		size = nla_policy_len(nf_ct_port_nla_policy, CTA_PROTO_MAX + 1);
-
-	return size;
+	return nla_policy_len(nf_ct_port_nla_policy, CTA_PROTO_MAX + 1);
 }
 #endif
 
@@ -1545,11 +1556,11 @@ struct nf_conntrack_l4proto nf_conntrack_l4proto_tcp4 __read_mostly =
 {
 	.l3proto		= PF_INET,
 	.l4proto 		= IPPROTO_TCP,
+	.name 			= "tcp",
 	.pkt_to_tuple 		= tcp_pkt_to_tuple,
 	.invert_tuple 		= tcp_invert_tuple,
-#ifdef CONFIG_NF_CONNTRACK_PROCFS
+	.print_tuple 		= tcp_print_tuple,
 	.print_conntrack 	= tcp_print_conntrack,
-#endif
 	.packet 		= tcp_packet,
 	.get_timeouts		= tcp_get_timeouts,
 	.new 			= tcp_new,
@@ -1583,11 +1594,11 @@ struct nf_conntrack_l4proto nf_conntrack_l4proto_tcp6 __read_mostly =
 {
 	.l3proto		= PF_INET6,
 	.l4proto 		= IPPROTO_TCP,
+	.name 			= "tcp",
 	.pkt_to_tuple 		= tcp_pkt_to_tuple,
 	.invert_tuple 		= tcp_invert_tuple,
-#ifdef CONFIG_NF_CONNTRACK_PROCFS
+	.print_tuple 		= tcp_print_tuple,
 	.print_conntrack 	= tcp_print_conntrack,
-#endif
 	.packet 		= tcp_packet,
 	.get_timeouts		= tcp_get_timeouts,
 	.new 			= tcp_new,

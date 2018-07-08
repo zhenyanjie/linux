@@ -307,10 +307,10 @@ static void qca_wq_serial_tx_clock_vote_off(struct work_struct *work)
 	serial_clock_vote(HCI_IBS_TX_VOTE_CLOCK_OFF, hu);
 }
 
-static void hci_ibs_tx_idle_timeout(struct timer_list *t)
+static void hci_ibs_tx_idle_timeout(unsigned long arg)
 {
-	struct qca_data *qca = from_timer(qca, t, tx_idle_timer);
-	struct hci_uart *hu = qca->hu;
+	struct hci_uart *hu = (struct hci_uart *)arg;
+	struct qca_data *qca = hu->priv;
 	unsigned long flags;
 
 	BT_DBG("hu %p idle timeout in %d state", hu, qca->tx_ibs_state);
@@ -342,10 +342,10 @@ static void hci_ibs_tx_idle_timeout(struct timer_list *t)
 	spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
 }
 
-static void hci_ibs_wake_retrans_timeout(struct timer_list *t)
+static void hci_ibs_wake_retrans_timeout(unsigned long arg)
 {
-	struct qca_data *qca = from_timer(qca, t, wake_retrans_timer);
-	struct hci_uart *hu = qca->hu;
+	struct hci_uart *hu = (struct hci_uart *)arg;
+	struct qca_data *qca = hu->priv;
 	unsigned long flags, retrans_delay;
 	bool retransmit = false;
 
@@ -438,10 +438,11 @@ static int qca_open(struct hci_uart *hu)
 
 	hu->priv = qca;
 
-	timer_setup(&qca->wake_retrans_timer, hci_ibs_wake_retrans_timeout, 0);
+	setup_timer(&qca->wake_retrans_timer, hci_ibs_wake_retrans_timeout,
+		    (u_long)hu);
 	qca->wake_retrans = IBS_WAKE_RETRANS_TIMEOUT_MS;
 
-	timer_setup(&qca->tx_idle_timer, hci_ibs_tx_idle_timeout, 0);
+	setup_timer(&qca->tx_idle_timer, hci_ibs_tx_idle_timeout, (u_long)hu);
 	qca->tx_idle_delay = IBS_TX_IDLE_TIMEOUT_MS;
 
 	BT_DBG("HCI_UART_QCA open, tx_idle_delay=%u, wake_retrans=%u",
@@ -800,7 +801,7 @@ static int qca_recv(struct hci_uart *hu, const void *data, int count)
 				  qca_recv_pkts, ARRAY_SIZE(qca_recv_pkts));
 	if (IS_ERR(qca->rx_skb)) {
 		int err = PTR_ERR(qca->rx_skb);
-		bt_dev_err(hu->hdev, "Frame reassembly failed (%d)", err);
+		BT_ERR("%s: Frame reassembly failed (%d)", hu->hdev->name, err);
 		qca->rx_skb = NULL;
 		return err;
 	}
@@ -863,7 +864,7 @@ static int qca_set_baudrate(struct hci_dev *hdev, uint8_t baudrate)
 
 	skb = bt_skb_alloc(sizeof(cmd), GFP_ATOMIC);
 	if (!skb) {
-		bt_dev_err(hdev, "Failed to allocate baudrate packet");
+		BT_ERR("Failed to allocate memory for baudrate packet");
 		return -ENOMEM;
 	}
 
@@ -892,7 +893,7 @@ static int qca_setup(struct hci_uart *hu)
 	unsigned int speed, qca_baudrate = QCA_BAUDRATE_115200;
 	int ret;
 
-	bt_dev_info(hdev, "ROME setup");
+	BT_INFO("%s: ROME setup", hdev->name);
 
 	/* Patch downloading has to be done without IBS mode */
 	clear_bit(STATE_IN_BAND_SLEEP_ENABLED, &qca->flags);
@@ -917,11 +918,11 @@ static int qca_setup(struct hci_uart *hu)
 	if (speed) {
 		qca_baudrate = qca_get_baudrate_value(speed);
 
-		bt_dev_info(hdev, "Set UART speed to %d", speed);
+		BT_INFO("%s: Set UART speed to %d", hdev->name, speed);
 		ret = qca_set_baudrate(hdev, qca_baudrate);
 		if (ret) {
-			bt_dev_err(hdev, "Failed to change the baud rate (%d)",
-				   ret);
+			BT_ERR("%s: Failed to change the baud rate (%d)",
+			       hdev->name, ret);
 			return ret;
 		}
 		hci_uart_set_baudrate(hu, speed);
@@ -932,9 +933,6 @@ static int qca_setup(struct hci_uart *hu)
 	if (!ret) {
 		set_bit(STATE_IN_BAND_SLEEP_ENABLED, &qca->flags);
 		qca_debugfs_init(hdev);
-	} else if (ret == -ENOENT) {
-		/* No patch/nvm-config found, run with original fw/config */
-		ret = 0;
 	}
 
 	/* Setup bdaddr */

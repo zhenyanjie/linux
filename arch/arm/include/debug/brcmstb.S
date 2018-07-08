@@ -58,7 +58,6 @@
 		/* Check SUN_TOP_CTRL base */
 		ldr	\rp, =SUN_TOP_CTRL_BASE	@ load SUN_TOP_CTRL PA
 		ldr	\rv, [\rp, #0]		@ get register contents
-ARM_BE8(	rev	\rv, \rv )
 		and	\rv, \rv, #0xffffff00	@ strip revision bits [7:0]
 
 		/* Chip specific detection starts here */
@@ -99,13 +98,11 @@ ARM_BE8(	rev	\rv, \rv )
 		.endm
 
 		.macro	store, rd, rx:vararg
-ARM_BE8(	rev	\rd, \rd )
 		str	\rd, \rx
 		.endm
 
 		.macro	load, rd, rx:vararg
 		ldr	\rd, \rx
-ARM_BE8(	rev	\rd, \rd )
 		.endm
 
 		.macro	senduart,rd,rx

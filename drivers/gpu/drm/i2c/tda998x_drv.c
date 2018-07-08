@@ -601,9 +601,9 @@ tda998x_reset(struct tda998x_priv *priv)
  * we have seen a HPD inactive->active transition.  This code implements
  * that delay.
  */
-static void tda998x_edid_delay_done(struct timer_list *t)
+static void tda998x_edid_delay_done(unsigned long data)
 {
-	struct tda998x_priv *priv = from_timer(priv, t, edid_delay_timer);
+	struct tda998x_priv *priv = (struct tda998x_priv *)data;
 
 	priv->edid_delay_active = false;
 	wake_up(&priv->edid_delay_waitq);
@@ -712,7 +712,7 @@ tda998x_write_avi(struct tda998x_priv *priv, struct drm_display_mode *mode)
 {
 	union hdmi_infoframe frame;
 
-	drm_hdmi_avi_infoframe_from_display_mode(&frame.avi, mode, false);
+	drm_hdmi_avi_infoframe_from_display_mode(&frame.avi, mode);
 	frame.avi.quantization_range = HDMI_QUANTIZATION_RANGE_FULL;
 
 	tda998x_write_if(priv, DIP_IF_FLAGS_IF2, REG_IF2_HB0, &frame);
@@ -969,6 +969,14 @@ static int tda998x_audio_codec_init(struct tda998x_priv *priv,
 
 /* DRM connector functions */
 
+static int tda998x_connector_dpms(struct drm_connector *connector, int mode)
+{
+	if (drm_core_check_feature(connector->dev, DRIVER_ATOMIC))
+		return drm_atomic_helper_connector_dpms(connector, mode);
+	else
+		return drm_helper_connector_dpms(connector, mode);
+}
+
 static int tda998x_connector_fill_modes(struct drm_connector *connector,
 					uint32_t maxX, uint32_t maxY)
 {
@@ -1006,7 +1014,7 @@ static void tda998x_connector_destroy(struct drm_connector *connector)
 }
 
 static const struct drm_connector_funcs tda998x_connector_funcs = {
-	.dpms = drm_helper_connector_dpms,
+	.dpms = tda998x_connector_dpms,
 	.reset = drm_atomic_helper_connector_reset,
 	.fill_modes = tda998x_connector_fill_modes,
 	.detect = tda998x_connector_detect,
@@ -1492,7 +1500,8 @@ static int tda998x_create(struct i2c_client *client, struct tda998x_priv *priv)
 
 	mutex_init(&priv->mutex);	/* protect the page access */
 	init_waitqueue_head(&priv->edid_delay_waitq);
-	timer_setup(&priv->edid_delay_timer, tda998x_edid_delay_done, 0);
+	setup_timer(&priv->edid_delay_timer, tda998x_edid_delay_done,
+		    (unsigned long)priv);
 	INIT_WORK(&priv->detect_work, tda998x_detect_work);
 
 	/* wake up the device: */
@@ -1745,7 +1754,7 @@ static const struct of_device_id tda998x_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, tda998x_dt_ids);
 #endif
 
-static const struct i2c_device_id tda998x_ids[] = {
+static struct i2c_device_id tda998x_ids[] = {
 	{ "tda998x", 0 },
 	{ }
 };

@@ -341,7 +341,10 @@ GuC
 GuC-specific firmware loader
 ----------------------------
 
-.. kernel-doc:: drivers/gpu/drm/i915/intel_guc_fw.c
+.. kernel-doc:: drivers/gpu/drm/i915/intel_guc_loader.c
+   :doc: GuC-specific firmware loader
+
+.. kernel-doc:: drivers/gpu/drm/i915/intel_guc_loader.c
    :internal:
 
 GuC-based command submission
@@ -414,10 +417,6 @@ integrate with drm/i915 and to handle the `DRM_I915_PERF_OPEN` ioctl.
    :functions: i915_perf_open_ioctl
 .. kernel-doc:: drivers/gpu/drm/i915/i915_perf.c
    :functions: i915_perf_release
-.. kernel-doc:: drivers/gpu/drm/i915/i915_perf.c
-   :functions: i915_perf_add_config_ioctl
-.. kernel-doc:: drivers/gpu/drm/i915/i915_perf.c
-   :functions: i915_perf_remove_config_ioctl
 
 i915 Perf Stream
 ----------------
@@ -478,16 +477,4 @@ specific details than found in the more high-level sections.
 .. kernel-doc:: drivers/gpu/drm/i915/i915_perf.c
    :internal:
 
-Style
-=====
-
-The drm/i915 driver codebase has some style rules in addition to (and, in some
-cases, deviating from) the kernel coding style.
-
-Register macro definition style
--------------------------------
-
-The style guide for ``i915_reg.h``.
-
-.. kernel-doc:: drivers/gpu/drm/i915/i915_reg.h
-   :doc: The i915 register macro definition style guide
+.. WARNING: DOCPROC directive not supported: !Cdrivers/gpu/drm/i915/i915_irq.c

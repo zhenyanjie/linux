@@ -428,13 +428,13 @@ static bool dccp_new(struct nf_conn *ct, const struct sk_buff *skb,
 	default:
 		dn = dccp_pernet(net);
 		if (dn->dccp_loose == 0) {
-			msg = "not picking up existing connection ";
+			msg = "nf_ct_dccp: not picking up existing connection ";
 			goto out_invalid;
 		}
 	case CT_DCCP_REQUEST:
 		break;
 	case CT_DCCP_INVALID:
-		msg = "invalid state transition ";
+		msg = "nf_ct_dccp: invalid state transition ";
 		goto out_invalid;
 	}
 
@@ -447,7 +447,9 @@ static bool dccp_new(struct nf_conn *ct, const struct sk_buff *skb,
 	return true;
 
 out_invalid:
-	nf_ct_l4proto_log_invalid(skb, ct, "%s", msg);
+	if (LOG_INVALID(net, IPPROTO_DCCP))
+		nf_log_packet(net, nf_ct_l3num(ct), 0, skb, NULL, NULL,
+			      NULL, "%s", msg);
 	return false;
 }
 
@@ -467,8 +469,10 @@ static unsigned int *dccp_get_timeouts(struct net *net)
 
 static int dccp_packet(struct nf_conn *ct, const struct sk_buff *skb,
 		       unsigned int dataoff, enum ip_conntrack_info ctinfo,
+		       u_int8_t pf, unsigned int hooknum,
 		       unsigned int *timeouts)
 {
+	struct net *net = nf_ct_net(ct);
 	enum ip_conntrack_dir dir = CTINFO2DIR(ctinfo);
 	struct dccp_hdr _dh, *dh;
 	u_int8_t type, old_state, new_state;
@@ -530,11 +534,15 @@ static int dccp_packet(struct nf_conn *ct, const struct sk_buff *skb,
 		ct->proto.dccp.last_pkt = type;
 
 		spin_unlock_bh(&ct->lock);
-		nf_ct_l4proto_log_invalid(skb, ct, "%s", "invalid packet");
+		if (LOG_INVALID(net, IPPROTO_DCCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				      "nf_ct_dccp: invalid packet ignored ");
 		return NF_ACCEPT;
 	case CT_DCCP_INVALID:
 		spin_unlock_bh(&ct->lock);
-		nf_ct_l4proto_log_invalid(skb, ct, "%s", "invalid state transition");
+		if (LOG_INVALID(net, IPPROTO_DCCP))
+			nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL,
+				      "nf_ct_dccp: invalid state transition ");
 		return -NF_ACCEPT;
 	}
 
@@ -596,7 +604,8 @@ static int dccp_error(struct net *net, struct nf_conn *tmpl,
 	return NF_ACCEPT;
 
 out_invalid:
-	nf_l4proto_log_invalid(skb, net, pf, IPPROTO_DCCP, "%s", msg);
+	if (LOG_INVALID(net, IPPROTO_DCCP))
+		nf_log_packet(net, pf, 0, skb, NULL, NULL, NULL, "%s", msg);
 	return -NF_ACCEPT;
 }
 
@@ -614,12 +623,18 @@ static bool dccp_can_early_drop(const struct nf_conn *ct)
 	return false;
 }
 
-#ifdef CONFIG_NF_CONNTRACK_PROCFS
+static void dccp_print_tuple(struct seq_file *s,
+			     const struct nf_conntrack_tuple *tuple)
+{
+	seq_printf(s, "sport=%hu dport=%hu ",
+		   ntohs(tuple->src.u.dccp.port),
+		   ntohs(tuple->dst.u.dccp.port));
+}
+
 static void dccp_print_conntrack(struct seq_file *s, struct nf_conn *ct)
 {
 	seq_printf(s, "%s ", dccp_state_names[ct->proto.dccp.state]);
 }
-#endif
 
 #if IS_ENABLED(CONFIG_NF_CT_NETLINK)
 static int dccp_to_nlattr(struct sk_buff *skb, struct nlattr *nla,
@@ -865,6 +880,7 @@ static struct nf_proto_net *dccp_get_net_proto(struct net *net)
 struct nf_conntrack_l4proto nf_conntrack_l4proto_dccp4 __read_mostly = {
 	.l3proto		= AF_INET,
 	.l4proto		= IPPROTO_DCCP,
+	.name			= "dccp",
 	.pkt_to_tuple		= dccp_pkt_to_tuple,
 	.invert_tuple		= dccp_invert_tuple,
 	.new			= dccp_new,
@@ -872,9 +888,8 @@ struct nf_conntrack_l4proto nf_conntrack_l4proto_dccp4 __read_mostly = {
 	.get_timeouts		= dccp_get_timeouts,
 	.error			= dccp_error,
 	.can_early_drop		= dccp_can_early_drop,
-#ifdef CONFIG_NF_CONNTRACK_PROCFS
+	.print_tuple		= dccp_print_tuple,
 	.print_conntrack	= dccp_print_conntrack,
-#endif
 #if IS_ENABLED(CONFIG_NF_CT_NETLINK)
 	.to_nlattr		= dccp_to_nlattr,
 	.nlattr_size		= dccp_nlattr_size,
@@ -901,6 +916,7 @@ EXPORT_SYMBOL_GPL(nf_conntrack_l4proto_dccp4);
 struct nf_conntrack_l4proto nf_conntrack_l4proto_dccp6 __read_mostly = {
 	.l3proto		= AF_INET6,
 	.l4proto		= IPPROTO_DCCP,
+	.name			= "dccp",
 	.pkt_to_tuple		= dccp_pkt_to_tuple,
 	.invert_tuple		= dccp_invert_tuple,
 	.new			= dccp_new,
@@ -908,9 +924,8 @@ struct nf_conntrack_l4proto nf_conntrack_l4proto_dccp6 __read_mostly = {
 	.get_timeouts		= dccp_get_timeouts,
 	.error			= dccp_error,
 	.can_early_drop		= dccp_can_early_drop,
-#ifdef CONFIG_NF_CONNTRACK_PROCFS
+	.print_tuple		= dccp_print_tuple,
 	.print_conntrack	= dccp_print_conntrack,
-#endif
 #if IS_ENABLED(CONFIG_NF_CT_NETLINK)
 	.to_nlattr		= dccp_to_nlattr,
 	.nlattr_size		= dccp_nlattr_size,

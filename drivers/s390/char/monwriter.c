@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Character device driver for writing z/VM *MONITOR service records.
  *

@@ -328,7 +328,7 @@ static int WriteTable(struct drxd_state *state, u8 * pTable)
 {
 	int status = 0;
 
-	if (!pTable)
+	if (pTable == NULL)
 		return 0;
 
 	while (!status) {
@@ -638,10 +638,8 @@ static int SetCfgIfAgc(struct drxd_state *state, struct SCfgAgc *cfg)
 			/* == Speed == */
 			{
 				const u16 maxRur = 8;
-				static const u16 slowIncrDecLUT[] = {
-					3, 4, 4, 5, 6 };
-				static const u16 fastIncrDecLUT[] = {
-					14, 15, 15, 16,
+				const u16 slowIncrDecLUT[] = { 3, 4, 4, 5, 6 };
+				const u16 fastIncrDecLUT[] = { 14, 15, 15, 16,
 					17, 18, 18, 19,
 					20, 21, 22, 23,
 					24, 26, 27, 28,
@@ -909,8 +907,9 @@ static int load_firmware(struct drxd_state *state, const char *fw_name)
 	}
 
 	state->microcode = kmemdup(fw->data, fw->size, GFP_KERNEL);
-	if (!state->microcode) {
+	if (state->microcode == NULL) {
 		release_firmware(fw);
+		printk(KERN_ERR "drxd: firmware load failure: no memory\n");
 		return -ENOMEM;
 	}
 
@@ -2629,7 +2628,7 @@ static int DRXD_init(struct drxd_state *state, const u8 *fw, u32 fw_size)
 			break;
 
 		/* Apply I2c address patch to B1 */
-		if (!state->type_A && state->m_HiI2cPatch) {
+		if (!state->type_A && state->m_HiI2cPatch != NULL) {
 			status = WriteTable(state, state->m_HiI2cPatch);
 			if (status < 0)
 				break;

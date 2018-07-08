@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_PID_H
 #define _LINUX_PID_H
 
@@ -51,8 +50,10 @@ enum pid_type
  */
 
 struct upid {
+	/* Try to keep pid_chain in the same cacheline as nr for find_vpid */
 	int nr;
 	struct pid_namespace *ns;
+	struct hlist_node pid_chain;
 };
 
 struct pid

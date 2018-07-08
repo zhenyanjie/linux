@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_JUMP_LABEL_H
 #define _LINUX_JUMP_LABEL_H
 
@@ -82,9 +81,9 @@
 
 extern bool static_key_initialized;
 
-#define STATIC_KEY_CHECK_USE(key) WARN(!static_key_initialized,		      \
-				    "%s(): static key '%pS' used before call to jump_label_init()", \
-				    __func__, (key))
+#define STATIC_KEY_CHECK_USE() WARN(!static_key_initialized,		      \
+				    "%s used before call to jump_label_init", \
+				    __func__)
 
 #ifdef HAVE_JUMP_LABEL
 
@@ -160,14 +159,10 @@ extern void arch_jump_label_transform_static(struct jump_entry *entry,
 extern int jump_label_text_reserved(void *start, void *end);
 extern void static_key_slow_inc(struct static_key *key);
 extern void static_key_slow_dec(struct static_key *key);
-extern void static_key_slow_inc_cpuslocked(struct static_key *key);
-extern void static_key_slow_dec_cpuslocked(struct static_key *key);
 extern void jump_label_apply_nops(struct module *mod);
 extern int static_key_count(struct static_key *key);
 extern void static_key_enable(struct static_key *key);
 extern void static_key_disable(struct static_key *key);
-extern void static_key_enable_cpuslocked(struct static_key *key);
-extern void static_key_disable_cpuslocked(struct static_key *key);
 
 /*
  * We should be using ATOMIC_INIT() for initializing .enabled, but
@@ -214,18 +209,15 @@ static __always_inline bool static_key_true(struct static_key *key)
 
 static inline void static_key_slow_inc(struct static_key *key)
 {
-	STATIC_KEY_CHECK_USE(key);
+	STATIC_KEY_CHECK_USE();
 	atomic_inc(&key->enabled);
 }
 
 static inline void static_key_slow_dec(struct static_key *key)
 {
-	STATIC_KEY_CHECK_USE(key);
+	STATIC_KEY_CHECK_USE();
 	atomic_dec(&key->enabled);
 }
-
-#define static_key_slow_inc_cpuslocked(key) static_key_slow_inc(key)
-#define static_key_slow_dec_cpuslocked(key) static_key_slow_dec(key)
 
 static inline int jump_label_text_reserved(void *start, void *end)
 {
@@ -242,28 +234,23 @@ static inline int jump_label_apply_nops(struct module *mod)
 
 static inline void static_key_enable(struct static_key *key)
 {
-	STATIC_KEY_CHECK_USE(key);
+	int count = static_key_count(key);
 
-	if (atomic_read(&key->enabled) != 0) {
-		WARN_ON_ONCE(atomic_read(&key->enabled) != 1);
-		return;
-	}
-	atomic_set(&key->enabled, 1);
+	WARN_ON_ONCE(count < 0 || count > 1);
+
+	if (!count)
+		static_key_slow_inc(key);
 }
 
 static inline void static_key_disable(struct static_key *key)
 {
-	STATIC_KEY_CHECK_USE(key);
+	int count = static_key_count(key);
 
-	if (atomic_read(&key->enabled) != 1) {
-		WARN_ON_ONCE(atomic_read(&key->enabled) != 0);
-		return;
-	}
-	atomic_set(&key->enabled, 0);
+	WARN_ON_ONCE(count < 0 || count > 1);
+
+	if (count)
+		static_key_slow_dec(key);
 }
-
-#define static_key_enable_cpuslocked(k)		static_key_enable((k))
-#define static_key_disable_cpuslocked(k)	static_key_disable((k))
 
 #define STATIC_KEY_INIT_TRUE	{ .enabled = ATOMIC_INIT(1) }
 #define STATIC_KEY_INIT_FALSE	{ .enabled = ATOMIC_INIT(0) }
@@ -421,17 +408,13 @@ extern bool ____wrong_branch_error(void);
 
 #define static_branch_inc(x)		static_key_slow_inc(&(x)->key)
 #define static_branch_dec(x)		static_key_slow_dec(&(x)->key)
-#define static_branch_inc_cpuslocked(x)	static_key_slow_inc_cpuslocked(&(x)->key)
-#define static_branch_dec_cpuslocked(x)	static_key_slow_dec_cpuslocked(&(x)->key)
 
 /*
  * Normal usage; boolean enable/disable.
  */
 
-#define static_branch_enable(x)			static_key_enable(&(x)->key)
-#define static_branch_disable(x)		static_key_disable(&(x)->key)
-#define static_branch_enable_cpuslocked(x)	static_key_enable_cpuslocked(&(x)->key)
-#define static_branch_disable_cpuslocked(x)	static_key_disable_cpuslocked(&(x)->key)
+#define static_branch_enable(x)		static_key_enable(&(x)->key)
+#define static_branch_disable(x)	static_key_disable(&(x)->key)
 
 #endif /* __ASSEMBLY__ */
 

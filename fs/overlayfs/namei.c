@@ -15,6 +15,7 @@
 #include <linux/mount.h>
 #include <linux/exportfs.h>
 #include "overlayfs.h"
+#include "ovl_entry.h"
 
 struct ovl_lookup_data {
 	struct qstr name;
@@ -37,7 +38,7 @@ static int ovl_check_redirect(struct dentry *dentry, struct ovl_lookup_data *d,
 			return 0;
 		goto fail;
 	}
-	buf = kzalloc(prelen + res + strlen(post) + 1, GFP_KERNEL);
+	buf = kzalloc(prelen + res + strlen(post) + 1, GFP_TEMPORARY);
 	if (!buf)
 		return -ENOMEM;
 
@@ -55,15 +56,6 @@ static int ovl_check_redirect(struct dentry *dentry, struct ovl_lookup_data *d,
 			if (s == next)
 				goto invalid;
 		}
-		/*
-		 * One of the ancestor path elements in an absolute path
-		 * lookup in ovl_lookup_layer() could have been opaque and
-		 * that will stop further lookup in lower layers (d->stop=true)
-		 * But we have found an absolute redirect in decendant path
-		 * element and that should force continue lookup in lower
-		 * layers (reset d->stop).
-		 */
-		d->stop = false;
 	} else {
 		if (strchr(buf, '/') != NULL)
 			goto invalid;
@@ -111,7 +103,7 @@ static struct ovl_fh *ovl_get_origin_fh(struct dentry *dentry)
 	if (res == 0)
 		return NULL;
 
-	fh  = kzalloc(res, GFP_KERNEL);
+	fh = kzalloc(res, GFP_TEMPORARY);
 	if (!fh)
 		return ERR_PTR(-ENOMEM);
 
@@ -294,15 +286,16 @@ static int ovl_lookup_layer(struct dentry *base, struct ovl_lookup_data *d,
 
 
 static int ovl_check_origin(struct dentry *upperdentry,
-			    struct ovl_path *lower, unsigned int numlower,
-			    struct ovl_path **stackp, unsigned int *ctrp)
+			    struct path *lowerstack, unsigned int numlower,
+			    struct path **stackp, unsigned int *ctrp)
 {
 	struct vfsmount *mnt;
 	struct dentry *origin = NULL;
 	int i;
 
+
 	for (i = 0; i < numlower; i++) {
-		mnt = lower[i].layer->mnt;
+		mnt = lowerstack[i].mnt;
 		origin = ovl_get_origin(upperdentry, mnt);
 		if (IS_ERR(origin))
 			return PTR_ERR(origin);
@@ -316,12 +309,12 @@ static int ovl_check_origin(struct dentry *upperdentry,
 
 	BUG_ON(*ctrp);
 	if (!*stackp)
-		*stackp = kmalloc(sizeof(struct ovl_path), GFP_KERNEL);
+		*stackp = kmalloc(sizeof(struct path), GFP_TEMPORARY);
 	if (!*stackp) {
 		dput(origin);
 		return -ENOMEM;
 	}
-	**stackp = (struct ovl_path){.dentry = origin, .layer = lower[i].layer};
+	**stackp = (struct path) { .dentry = origin, .mnt = mnt };
 	*ctrp = 1;
 
 	return 0;
@@ -357,8 +350,8 @@ static int ovl_verify_origin_fh(struct dentry *dentry, const struct ovl_fh *fh)
  *
  * Return 0 on match, -ESTALE on mismatch, < 0 on error.
  */
-int ovl_verify_origin(struct dentry *dentry, struct dentry *origin,
-		      bool is_upper, bool set)
+int ovl_verify_origin(struct dentry *dentry, struct vfsmount *mnt,
+		      struct dentry *origin, bool is_upper, bool set)
 {
 	struct inode *inode;
 	struct ovl_fh *fh;
@@ -391,13 +384,13 @@ fail:
  * OVL_XATTR_ORIGIN and that origin file handle can be decoded to lower path.
  * Return 0 on match, -ESTALE on mismatch or stale origin, < 0 on error.
  */
-int ovl_verify_index(struct dentry *index, struct ovl_path *lower,
+int ovl_verify_index(struct dentry *index, struct path *lowerstack,
 		     unsigned int numlower)
 {
 	struct ovl_fh *fh = NULL;
 	size_t len;
-	struct ovl_path origin = { };
-	struct ovl_path *stack = &origin;
+	struct path origin = { };
+	struct path *stack = &origin;
 	unsigned int ctr = 0;
 	int err;
 
@@ -424,7 +417,7 @@ int ovl_verify_index(struct dentry *index, struct ovl_path *lower,
 
 	err = -ENOMEM;
 	len = index->d_name.len / 2;
-	fh = kzalloc(len, GFP_KERNEL);
+	fh = kzalloc(len, GFP_TEMPORARY);
 	if (!fh)
 		goto fail;
 
@@ -436,7 +429,7 @@ int ovl_verify_index(struct dentry *index, struct ovl_path *lower,
 	if (err)
 		goto fail;
 
-	err = ovl_check_origin(index, lower, numlower, &stack, &ctr);
+	err = ovl_check_origin(index, lowerstack, numlower, &stack, &ctr);
 	if (!err && !ctr)
 		err = -ESTALE;
 	if (err)
@@ -444,7 +437,7 @@ int ovl_verify_index(struct dentry *index, struct ovl_path *lower,
 
 	/* Check if index is orphan and don't warn before cleaning it */
 	if (d_inode(index)->i_nlink == 1 &&
-	    ovl_get_nlink(origin.dentry, index, 0) == 0)
+	    ovl_get_nlink(index, origin.dentry, 0) == 0)
 		err = -ENOENT;
 
 	dput(origin.dentry);
@@ -484,7 +477,7 @@ int ovl_get_index_name(struct dentry *origin, struct qstr *name)
 		return PTR_ERR(fh);
 
 	err = -ENOMEM;
-	n = kzalloc(fh->len * 2, GFP_KERNEL);
+	n = kzalloc(fh->len * 2, GFP_TEMPORARY);
 	if (n) {
 		s  = bin2hex(n, fh, fh->len);
 		*name = (struct qstr) QSTR_INIT(n, s - n);
@@ -575,22 +568,9 @@ int ovl_path_next(int idx, struct dentry *dentry, struct path *path)
 		idx++;
 	}
 	BUG_ON(idx > oe->numlower);
-	path->dentry = oe->lowerstack[idx - 1].dentry;
-	path->mnt = oe->lowerstack[idx - 1].layer->mnt;
+	*path = oe->lowerstack[idx - 1];
 
 	return (idx < oe->numlower) ? idx + 1 : -1;
-}
-
-static int ovl_find_layer(struct ovl_fs *ofs, struct ovl_path *path)
-{
-	int i;
-
-	for (i = 0; i < ofs->numlower; i++) {
-		if (ofs->lower_layers[i].mnt == path->layer->mnt)
-			break;
-	}
-
-	return i;
 }
 
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
@@ -601,7 +581,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct ovl_entry *poe = dentry->d_parent->d_fsdata;
 	struct ovl_entry *roe = dentry->d_sb->s_root->d_fsdata;
-	struct ovl_path *stack = NULL;
+	struct path *stack = NULL;
 	struct dentry *upperdir, *upperdentry = NULL;
 	struct dentry *index = NULL;
 	unsigned int ctr = 0;
@@ -650,11 +630,10 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			err = ovl_check_origin(upperdentry, roe->lowerstack,
 					       roe->numlower, &stack, &ctr);
 			if (err)
-				goto out_put_upper;
+				goto out;
 		}
 
 		if (d.redirect) {
-			err = -ENOMEM;
 			upperredirect = kstrdup(d.redirect, GFP_KERNEL);
 			if (!upperredirect)
 				goto out_put_upper;
@@ -666,17 +645,17 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 
 	if (!d.stop && poe->numlower) {
 		err = -ENOMEM;
-		stack = kcalloc(ofs->numlower, sizeof(struct ovl_path),
-				GFP_KERNEL);
+		stack = kcalloc(ofs->numlower, sizeof(struct path),
+				GFP_TEMPORARY);
 		if (!stack)
 			goto out_put_upper;
 	}
 
 	for (i = 0; !d.stop && i < poe->numlower; i++) {
-		struct ovl_path lower = poe->lowerstack[i];
+		struct path lowerpath = poe->lowerstack[i];
 
 		d.last = i == poe->numlower - 1;
-		err = ovl_lookup_layer(lower.dentry, &d, &this);
+		err = ovl_lookup_layer(lowerpath.dentry, &d, &this);
 		if (err)
 			goto out_put;
 
@@ -684,24 +663,8 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			continue;
 
 		stack[ctr].dentry = this;
-		stack[ctr].layer = lower.layer;
+		stack[ctr].mnt = lowerpath.mnt;
 		ctr++;
-
-		/*
-		 * Following redirects can have security consequences: it's like
-		 * a symlink into the lower layer without the permission checks.
-		 * This is only a problem if the upper layer is untrusted (e.g
-		 * comes from an USB drive).  This can allow a non-readable file
-		 * or directory to become readable.
-		 *
-		 * Only following redirects when redirects are enabled disables
-		 * this attack vector when not necessary.
-		 */
-		err = -EPERM;
-		if (d.redirect && !ofs->config.redirect_follow) {
-			pr_warn_ratelimited("overlay: refusing to follow redirect for (%pd2)\n", dentry);
-			goto out_put;
-		}
 
 		if (d.stop)
 			break;
@@ -710,8 +673,10 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			poe = roe;
 
 			/* Find the current layer on the root dentry */
-			i = ovl_find_layer(ofs, &lower);
-			if (WARN_ON(i == ofs->numlower))
+			for (i = 0; i < poe->numlower; i++)
+				if (poe->lowerstack[i].mnt == lowerpath.mnt)
+					break;
+			if (WARN_ON(i == poe->numlower))
 				break;
 		}
 	}
@@ -734,7 +699,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		goto out_put;
 
 	oe->opaque = upperopaque;
-	memcpy(oe->lowerstack, stack, sizeof(struct ovl_path) * ctr);
+	memcpy(oe->lowerstack, stack, sizeof(struct path) * ctr);
 	dentry->d_fsdata = oe;
 
 	if (upperdentry)

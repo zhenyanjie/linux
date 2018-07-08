@@ -105,7 +105,6 @@ static unsigned int fq_codel_classify(struct sk_buff *skb, struct Qdisc *sch,
 		case TC_ACT_QUEUED:
 		case TC_ACT_TRAP:
 			*qerr = NET_XMIT_SUCCESS | __NET_XMIT_STOLEN;
-			/* fall through */
 		case TC_ACT_SHOT:
 			return 0;
 		}
@@ -482,7 +481,7 @@ static int fq_codel_init(struct Qdisc *sch, struct nlattr *opt)
 			return err;
 	}
 
-	err = tcf_block_get(&q->block, &q->filter_list, sch);
+	err = tcf_block_get(&q->block, &q->filter_list);
 	if (err)
 		return err;
 
@@ -578,7 +577,7 @@ static struct Qdisc *fq_codel_leaf(struct Qdisc *sch, unsigned long arg)
 	return NULL;
 }
 
-static unsigned long fq_codel_find(struct Qdisc *sch, u32 classid)
+static unsigned long fq_codel_get(struct Qdisc *sch, u32 classid)
 {
 	return 0;
 }
@@ -591,7 +590,7 @@ static unsigned long fq_codel_bind(struct Qdisc *sch, unsigned long parent,
 	return 0;
 }
 
-static void fq_codel_unbind(struct Qdisc *q, unsigned long cl)
+static void fq_codel_put(struct Qdisc *q, unsigned long cl)
 {
 }
 
@@ -682,10 +681,11 @@ static void fq_codel_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 
 static const struct Qdisc_class_ops fq_codel_class_ops = {
 	.leaf		=	fq_codel_leaf,
-	.find		=	fq_codel_find,
+	.get		=	fq_codel_get,
+	.put		=	fq_codel_put,
 	.tcf_block	=	fq_codel_tcf_block,
 	.bind_tcf	=	fq_codel_bind,
-	.unbind_tcf	=	fq_codel_unbind,
+	.unbind_tcf	=	fq_codel_put,
 	.dump		=	fq_codel_dump_class,
 	.dump_stats	=	fq_codel_dump_class_stats,
 	.walk		=	fq_codel_walk,

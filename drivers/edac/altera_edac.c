@@ -38,6 +38,7 @@
 #include "edac_module.h"
 
 #define EDAC_MOD_STR		"altera_edac"
+#define EDAC_VERSION		"1"
 #define EDAC_DEVICE		"Altera"
 
 static const struct altr_sdram_prv_data c5_data = {
@@ -175,11 +176,11 @@ static ssize_t altr_sdr_mc_err_inject_write(struct file *file,
 	/*
 	 * To trigger the error, we need to read the data back
 	 * (the data was written with errors above).
-	 * The READ_ONCE macros and printk are used to prevent the
+	 * The ACCESS_ONCE macros and printk are used to prevent the
 	 * the compiler optimizing these reads out.
 	 */
-	reg = READ_ONCE(ptemp[0]);
-	read_reg = READ_ONCE(ptemp[1]);
+	reg = ACCESS_ONCE(ptemp[0]);
+	read_reg = ACCESS_ONCE(ptemp[1]);
 	/* Force Read */
 	rmb();
 
@@ -391,6 +392,7 @@ static int altr_sdram_probe(struct platform_device *pdev)
 	mci->edac_ctl_cap = EDAC_FLAG_NONE | EDAC_FLAG_SECDED;
 	mci->edac_cap = EDAC_FLAG_SECDED;
 	mci->mod_name = EDAC_MOD_STR;
+	mci->mod_ver = EDAC_VERSION;
 	mci->ctl_name = dev_name(&pdev->dev);
 	mci->scrub_mode = SCRUB_SW_SRC;
 	mci->dev_name = dev_name(&pdev->dev);
@@ -618,7 +620,7 @@ static ssize_t altr_edac_device_trig(struct file *file,
 	for (i = 0; i < (priv->trig_alloc_sz / sizeof(*ptemp)); i++) {
 		/* Read data so we're in the correct state */
 		rmb();
-		if (READ_ONCE(ptemp[i]))
+		if (ACCESS_ONCE(ptemp[i]))
 			result = -1;
 		/* Toggle Error bit (it is latched), leave ECC enabled */
 		writel(error_mask, (drvdata->base + priv->set_err_ofst));
@@ -635,7 +637,7 @@ static ssize_t altr_edac_device_trig(struct file *file,
 
 	/* Read out written data. ECC error caused here */
 	for (i = 0; i < ALTR_TRIGGER_READ_WRD_CNT; i++)
-		if (READ_ONCE(ptemp[i]) != i)
+		if (ACCESS_ONCE(ptemp[i]) != i)
 			edac_printk(KERN_ERR, EDAC_DEVICE,
 				    "Read doesn't match written data\n");
 
@@ -747,10 +749,8 @@ static int altr_edac_device_probe(struct platform_device *pdev)
 	drvdata->edac_dev_name = ecc_name;
 
 	drvdata->base = devm_ioremap(&pdev->dev, r->start, resource_size(r));
-	if (!drvdata->base) {
-		res = -ENOMEM;
+	if (!drvdata->base)
 		goto fail1;
-	}
 
 	/* Get driver specific data for this EDAC device */
 	drvdata->data = of_match_node(altr_edac_device_of_match, np)->data;

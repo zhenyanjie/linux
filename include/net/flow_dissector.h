@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NET_FLOW_DISSECTOR_H
 #define _NET_FLOW_DISSECTOR_H
 
@@ -19,14 +18,6 @@ struct flow_dissector_key_control {
 #define FLOW_DIS_IS_FRAGMENT	BIT(0)
 #define FLOW_DIS_FIRST_FRAG	BIT(1)
 #define FLOW_DIS_ENCAPSULATION	BIT(2)
-
-enum flow_dissect_ret {
-	FLOW_DISSECT_RET_OUT_GOOD,
-	FLOW_DISSECT_RET_OUT_BAD,
-	FLOW_DISSECT_RET_PROTO_AGAIN,
-	FLOW_DISSECT_RET_IPPROTO_AGAIN,
-	FLOW_DISSECT_RET_CONTINUE,
-};
 
 /**
  * struct flow_dissector_key_basic:
@@ -84,11 +75,11 @@ struct flow_dissector_key_ipv6_addrs {
 };
 
 /**
- * struct flow_dissector_key_tipc:
- * @key: source node address combined with selector
+ * struct flow_dissector_key_tipc_addrs:
+ * @srcnode: source node address
  */
-struct flow_dissector_key_tipc {
-	__be32 key;
+struct flow_dissector_key_tipc_addrs {
+	__be32 srcnode;
 };
 
 /**
@@ -100,7 +91,7 @@ struct flow_dissector_key_addrs {
 	union {
 		struct flow_dissector_key_ipv4_addrs v4addrs;
 		struct flow_dissector_key_ipv6_addrs v6addrs;
-		struct flow_dissector_key_tipc tipckey;
+		struct flow_dissector_key_tipc_addrs tipcaddrs;
 	};
 };
 
@@ -192,7 +183,7 @@ enum flow_dissector_key_id {
 	FLOW_DISSECTOR_KEY_PORTS, /* struct flow_dissector_key_ports */
 	FLOW_DISSECTOR_KEY_ICMP, /* struct flow_dissector_key_icmp */
 	FLOW_DISSECTOR_KEY_ETH_ADDRS, /* struct flow_dissector_key_eth_addrs */
-	FLOW_DISSECTOR_KEY_TIPC, /* struct flow_dissector_key_tipc */
+	FLOW_DISSECTOR_KEY_TIPC_ADDRS, /* struct flow_dissector_key_tipc_addrs */
 	FLOW_DISSECTOR_KEY_ARP, /* struct flow_dissector_key_arp */
 	FLOW_DISSECTOR_KEY_VLAN, /* struct flow_dissector_key_flow_vlan */
 	FLOW_DISSECTOR_KEY_FLOW_LABEL, /* struct flow_dissector_key_flow_tags */

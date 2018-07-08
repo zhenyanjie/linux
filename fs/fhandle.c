@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/syscalls.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
@@ -213,8 +212,8 @@ out_err:
 	return retval;
 }
 
-static long do_handle_open(int mountdirfd, struct file_handle __user *ufh,
-			   int open_flag)
+long do_handle_open(int mountdirfd,
+		    struct file_handle __user *ufh, int open_flag)
 {
 	long retval = 0;
 	struct path path;

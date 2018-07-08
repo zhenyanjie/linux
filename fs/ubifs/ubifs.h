@@ -38,11 +38,12 @@
 #include <linux/backing-dev.h>
 #include <linux/security.h>
 #include <linux/xattr.h>
+#ifdef CONFIG_UBIFS_FS_ENCRYPTION
+#include <linux/fscrypt_supp.h>
+#else
+#include <linux/fscrypt_notsupp.h>
+#endif
 #include <linux/random.h>
-
-#define __FS_HAS_ENCRYPTION IS_ENABLED(CONFIG_UBIFS_FS_ENCRYPTION)
-#include <linux/fscrypt.h>
-
 #include "ubifs-media.h"
 
 /* Version of this UBIFS implementation */
@@ -1201,7 +1202,7 @@ struct ubifs_debug_info;
  * @need_recovery: %1 if the file-system needs recovery
  * @replaying: %1 during journal replay
  * @mounting: %1 while mounting
- * @probing: %1 while attempting to mount if SB_SILENT mount flag is set
+ * @probing: %1 while attempting to mount if MS_SILENT mount flag is set
  * @remounting_rw: %1 while re-mounting from R/O mode to R/W mode
  * @replay_list: temporary list used during journal replay
  * @replay_buds: list of buds to replay
@@ -1834,11 +1835,16 @@ int ubifs_decrypt(const struct inode *inode, struct ubifs_data_node *dn,
 
 extern const struct fscrypt_operations ubifs_crypt_operations;
 
-static inline bool ubifs_crypt_is_encrypted(const struct inode *inode)
+static inline bool __ubifs_crypt_is_encrypted(struct inode *inode)
 {
-	const struct ubifs_inode *ui = ubifs_inode(inode);
+	struct ubifs_inode *ui = ubifs_inode(inode);
 
 	return ui->flags & UBIFS_CRYPT_FL;
+}
+
+static inline bool ubifs_crypt_is_encrypted(const struct inode *inode)
+{
+	return __ubifs_crypt_is_encrypted((struct inode *)inode);
 }
 
 /* Normal UBIFS messages */
@@ -1850,7 +1856,7 @@ __printf(2, 3)
 void ubifs_warn(const struct ubifs_info *c, const char *fmt, ...);
 /*
  * A conditional variant of 'ubifs_err()' which doesn't output anything
- * if probing (ie. SB_SILENT set).
+ * if probing (ie. MS_SILENT set).
  */
 #define ubifs_errc(c, fmt, ...)						\
 do {									\

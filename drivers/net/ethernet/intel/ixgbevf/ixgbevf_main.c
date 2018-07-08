@@ -164,7 +164,7 @@ static void ixgbevf_check_remove(struct ixgbe_hw *hw, u32 reg)
 
 u32 ixgbevf_read_reg(struct ixgbe_hw *hw, u32 reg)
 {
-	u8 __iomem *reg_addr = READ_ONCE(hw->hw_addr);
+	u8 __iomem *reg_addr = ACCESS_ONCE(hw->hw_addr);
 	u32 value;
 
 	if (IXGBE_REMOVED(reg_addr))
@@ -326,7 +326,7 @@ static bool ixgbevf_clean_tx_irq(struct ixgbevf_q_vector *q_vector,
 			break;
 
 		/* prevent any other reads prior to eop_desc */
-		smp_rmb();
+		read_barrier_depends();
 
 		/* if DD is not set pending work has not been completed */
 		if (!(eop_desc->wb.status & cpu_to_le32(IXGBE_TXD_STAT_DD)))
@@ -2747,10 +2747,9 @@ void ixgbevf_update_stats(struct ixgbevf_adapter *adapter)
  * ixgbevf_service_timer - Timer Call-back
  * @data: pointer to adapter cast into an unsigned long
  **/
-static void ixgbevf_service_timer(struct timer_list *t)
+static void ixgbevf_service_timer(unsigned long data)
 {
-	struct ixgbevf_adapter *adapter = from_timer(adapter, t,
-						     service_timer);
+	struct ixgbevf_adapter *adapter = (struct ixgbevf_adapter *)data;
 
 	/* Reset the timer */
 	mod_timer(&adapter->service_timer, (HZ * 2) + jiffies);
@@ -4121,7 +4120,8 @@ static int ixgbevf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_sw_init;
 	}
 
-	timer_setup(&adapter->service_timer, ixgbevf_service_timer, 0);
+	setup_timer(&adapter->service_timer, &ixgbevf_service_timer,
+		    (unsigned long)adapter);
 
 	INIT_WORK(&adapter->service_task, ixgbevf_service_task);
 	set_bit(__IXGBEVF_SERVICE_INITED, &adapter->state);

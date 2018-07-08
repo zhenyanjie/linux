@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/ceph/ceph_debug.h>
 
 #include <linux/module.h>
@@ -25,9 +24,9 @@ struct page **ceph_get_direct_page_vector(const void __user *data,
 		return ERR_PTR(-ENOMEM);
 
 	while (got < num_pages) {
-		rc = get_user_pages_fast(
+		rc = get_user_pages_unlocked(
 		    (unsigned long)data + ((unsigned long)got * PAGE_SIZE),
-		    num_pages - got, write_page, pages + got);
+		    num_pages - got, pages + got, write_page ? FOLL_WRITE : 0);
 		if (rc < 0)
 			break;
 		BUG_ON(rc == 0);

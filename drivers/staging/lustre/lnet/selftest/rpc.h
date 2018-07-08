@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -34,7 +33,7 @@
 #ifndef __SELFTEST_RPC_H__
 #define __SELFTEST_RPC_H__
 
-#include <uapi/linux/lnet/lnetst.h>
+#include "../../include/linux/lnet/lnetst.h"
 
 /*
  * LST wired structures

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NOUVEAU_CHAN_H__
 #define __NOUVEAU_CHAN_H__
 #include <nvif/object.h>
@@ -17,9 +16,8 @@ struct nouveau_channel {
 
 	struct {
 		struct nouveau_bo *buffer;
-		struct nouveau_vma *vma;
+		struct nvkm_vma vma;
 		struct nvif_object ctxdma;
-		u64 addr;
 	} push;
 
 	/* TODO: this will be reworked in the near future */

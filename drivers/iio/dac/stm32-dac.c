@@ -156,6 +156,7 @@ static const struct iio_info stm32_dac_iio_info = {
 	.read_raw = stm32_dac_read_raw,
 	.write_raw = stm32_dac_write_raw,
 	.debugfs_reg_access = stm32_dac_debugfs_reg_access,
+	.driver_module = THIS_MODULE,
 };
 
 static const char * const stm32_dac_powerdown_modes[] = {
@@ -267,7 +268,7 @@ static int stm32_dac_chan_of_init(struct iio_dev *indio_dev)
 			break;
 	}
 	if (i >= ARRAY_SIZE(stm32_dac_channels)) {
-		dev_err(&indio_dev->dev, "Invalid reg property\n");
+		dev_err(&indio_dev->dev, "Invalid st,dac-channel\n");
 		return -EINVAL;
 	}
 

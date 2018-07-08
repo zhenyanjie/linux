@@ -157,7 +157,7 @@ static struct net_device *yam_devs[NR_PORTS];
 
 static struct yam_mcs *yam_data;
 
-static DEFINE_TIMER(yam_timer, NULL);
+static DEFINE_TIMER(yam_timer, NULL, 0, 0);
 
 /* --------------------------------------------------------------------- */
 
@@ -647,7 +647,7 @@ static void yam_arbitrate(struct net_device *dev)
 	yam_start_tx(dev, yp);
 }
 
-static void yam_dotimer(struct timer_list *unused)
+static void yam_dotimer(unsigned long dummy)
 {
 	int i;
 
@@ -1164,7 +1164,7 @@ static int __init yam_init_driver(void)
 
 	}
 
-	timer_setup(&yam_timer, yam_dotimer, 0);
+	yam_timer.function = yam_dotimer;
 	yam_timer.expires = jiffies + HZ / 100;
 	add_timer(&yam_timer);
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * (C) 2001 Clemson University and The University of Chicago
  *
@@ -15,10 +14,8 @@
 
 #ifdef __KERNEL__
 #include <linux/types.h>
-#include <linux/kernel.h>
 #else
 #include <stdint.h>
-#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
 #define	GOSSIP_NO_DEBUG			(__u64)0
@@ -90,6 +87,6 @@ static struct __keyword_mask_s s_kmod_keyword_mask_map[] = {
 };
 
 static const int num_kmod_keyword_mask_map = (int)
-	(ARRAY_SIZE(s_kmod_keyword_mask_map));
+	(sizeof(s_kmod_keyword_mask_map) / sizeof(struct __keyword_mask_s));
 
 #endif /* __ORANGEFS_DEBUG_H */

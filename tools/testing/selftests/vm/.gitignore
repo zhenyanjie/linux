@@ -8,5 +8,3 @@ on-fault-limit
 transhuge-stress
 userfaultfd
 mlock-intersect-test
-mlock-random-test
-virtual_address_range

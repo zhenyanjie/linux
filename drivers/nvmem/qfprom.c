@@ -17,19 +17,15 @@
 #include <linux/nvmem-provider.h>
 #include <linux/platform_device.h>
 
-struct qfprom_priv {
-	void __iomem *base;
-};
-
 static int qfprom_reg_read(void *context,
 			unsigned int reg, void *_val, size_t bytes)
 {
-	struct qfprom_priv *priv = context;
+	void __iomem *base = context;
 	u8 *val = _val;
 	int i = 0, words = bytes;
 
 	while (words--)
-		*val++ = readb(priv->base + reg + i++);
+		*val++ = readb(base + reg + i++);
 
 	return 0;
 }
@@ -37,12 +33,12 @@ static int qfprom_reg_read(void *context,
 static int qfprom_reg_write(void *context,
 			 unsigned int reg, void *_val, size_t bytes)
 {
-	struct qfprom_priv *priv = context;
+	void __iomem *base = context;
 	u8 *val = _val;
 	int i = 0, words = bytes;
 
 	while (words--)
-		writeb(*val++, priv->base + reg + i++);
+		writeb(*val++, base + reg + i++);
 
 	return 0;
 }
@@ -56,6 +52,7 @@ static int qfprom_remove(struct platform_device *pdev)
 
 static struct nvmem_config econfig = {
 	.name = "qfprom",
+	.owner = THIS_MODULE,
 	.stride = 1,
 	.word_size = 1,
 	.reg_read = qfprom_reg_read,
@@ -67,20 +64,16 @@ static int qfprom_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct resource *res;
 	struct nvmem_device *nvmem;
-	struct qfprom_priv *priv;
-
-	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		return -ENOMEM;
+	void __iomem *base;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->base = devm_ioremap_resource(dev, res);
-	if (IS_ERR(priv->base))
-		return PTR_ERR(priv->base);
+	base = devm_ioremap_resource(dev, res);
+	if (IS_ERR(base))
+		return PTR_ERR(base);
 
 	econfig.size = resource_size(res);
 	econfig.dev = dev;
-	econfig.priv = priv;
+	econfig.priv = base;
 
 	nvmem = nvmem_register(&econfig);
 	if (IS_ERR(nvmem))

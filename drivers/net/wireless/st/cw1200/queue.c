@@ -130,11 +130,11 @@ static void __cw1200_queue_gc(struct cw1200_queue *queue,
 	}
 }
 
-static void cw1200_queue_gc(struct timer_list *t)
+static void cw1200_queue_gc(unsigned long arg)
 {
 	LIST_HEAD(list);
 	struct cw1200_queue *queue =
-		from_timer(queue, t, gc);
+		(struct cw1200_queue *)arg;
 
 	spin_lock_bh(&queue->lock);
 	__cw1200_queue_gc(queue, &list, true);
@@ -179,7 +179,7 @@ int cw1200_queue_init(struct cw1200_queue *queue,
 	INIT_LIST_HEAD(&queue->pending);
 	INIT_LIST_HEAD(&queue->free_pool);
 	spin_lock_init(&queue->lock);
-	timer_setup(&queue->gc, cw1200_queue_gc, 0);
+	setup_timer(&queue->gc, cw1200_queue_gc, (unsigned long)queue);
 
 	queue->pool = kzalloc(sizeof(struct cw1200_queue_item) * capacity,
 			GFP_KERNEL);

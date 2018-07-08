@@ -23,7 +23,6 @@
 #include "etnaviv_gpu.h"
 #include "etnaviv_gem.h"
 #include "etnaviv_mmu.h"
-#include "etnaviv_perfmon.h"
 
 #ifdef CONFIG_DRM_ETNAVIV_REGISTER_LOGGING
 static bool reglog;
@@ -317,7 +316,7 @@ static int etnaviv_ioctl_gem_cpu_prep(struct drm_device *dev, void *data,
 
 	ret = etnaviv_gem_cpu_prep(obj, args->op, &TS(args->timeout));
 
-	drm_gem_object_put_unlocked(obj);
+	drm_gem_object_unreference_unlocked(obj);
 
 	return ret;
 }
@@ -338,7 +337,7 @@ static int etnaviv_ioctl_gem_cpu_fini(struct drm_device *dev, void *data,
 
 	ret = etnaviv_gem_cpu_fini(obj);
 
-	drm_gem_object_put_unlocked(obj);
+	drm_gem_object_unreference_unlocked(obj);
 
 	return ret;
 }
@@ -358,7 +357,7 @@ static int etnaviv_ioctl_gem_info(struct drm_device *dev, void *data,
 		return -ENOENT;
 
 	ret = etnaviv_gem_mmap_offset(obj, &args->offset);
-	drm_gem_object_put_unlocked(obj);
+	drm_gem_object_unreference_unlocked(obj);
 
 	return ret;
 }
@@ -447,49 +446,9 @@ static int etnaviv_ioctl_gem_wait(struct drm_device *dev, void *data,
 
 	ret = etnaviv_gem_wait_bo(gpu, obj, timeout);
 
-	drm_gem_object_put_unlocked(obj);
+	drm_gem_object_unreference_unlocked(obj);
 
 	return ret;
-}
-
-static int etnaviv_ioctl_pm_query_dom(struct drm_device *dev, void *data,
-	struct drm_file *file)
-{
-	struct etnaviv_drm_private *priv = dev->dev_private;
-	struct drm_etnaviv_pm_domain *args = data;
-	struct etnaviv_gpu *gpu;
-
-	/* reject as long as the feature isn't stable */
-	return -EINVAL;
-
-	if (args->pipe >= ETNA_MAX_PIPES)
-		return -EINVAL;
-
-	gpu = priv->gpu[args->pipe];
-	if (!gpu)
-		return -ENXIO;
-
-	return etnaviv_pm_query_dom(gpu, args);
-}
-
-static int etnaviv_ioctl_pm_query_sig(struct drm_device *dev, void *data,
-	struct drm_file *file)
-{
-	struct etnaviv_drm_private *priv = dev->dev_private;
-	struct drm_etnaviv_pm_signal *args = data;
-	struct etnaviv_gpu *gpu;
-
-	/* reject as long as the feature isn't stable */
-	return -EINVAL;
-
-	if (args->pipe >= ETNA_MAX_PIPES)
-		return -EINVAL;
-
-	gpu = priv->gpu[args->pipe];
-	if (!gpu)
-		return -ENXIO;
-
-	return etnaviv_pm_query_sig(gpu, args);
 }
 
 static const struct drm_ioctl_desc etnaviv_ioctls[] = {
@@ -504,8 +463,6 @@ static const struct drm_ioctl_desc etnaviv_ioctls[] = {
 	ETNA_IOCTL(WAIT_FENCE,   wait_fence,   DRM_AUTH|DRM_RENDER_ALLOW),
 	ETNA_IOCTL(GEM_USERPTR,  gem_userptr,  DRM_AUTH|DRM_RENDER_ALLOW),
 	ETNA_IOCTL(GEM_WAIT,     gem_wait,     DRM_AUTH|DRM_RENDER_ALLOW),
-	ETNA_IOCTL(PM_QUERY_DOM, pm_query_dom, DRM_AUTH|DRM_RENDER_ALLOW),
-	ETNA_IOCTL(PM_QUERY_SIG, pm_query_sig, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 static const struct vm_operations_struct vm_ops = {

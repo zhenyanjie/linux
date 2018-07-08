@@ -51,7 +51,6 @@
 #include <asm/byteorder.h>
 #include <linux/torture.h>
 #include <linux/vmalloc.h>
-#include <linux/sched/debug.h>
 
 #include "rcu.h"
 
@@ -90,7 +89,6 @@ torture_param(int, shutdown_secs, 0, "Shutdown time (s), <= zero to disable.");
 torture_param(int, stall_cpu, 0, "Stall duration (s), zero to disable.");
 torture_param(int, stall_cpu_holdoff, 10,
 	     "Time to wait before starting stall (s).");
-torture_param(int, stall_cpu_irqsoff, 0, "Disable interrupts while stalling.");
 torture_param(int, stat_interval, 60,
 	     "Number of seconds between stats printk()s");
 torture_param(int, stutter, 5, "Number of seconds to run/halt test");
@@ -201,8 +199,7 @@ MODULE_PARM_DESC(torture_runnable, "Start rcutorture at boot");
 static u64 notrace rcu_trace_clock_local(void)
 {
 	u64 ts = trace_clock_local();
-
-	(void)do_div(ts, NSEC_PER_USEC);
+	unsigned long __maybe_unused ts_rem = do_div(ts, NSEC_PER_USEC);
 	return ts;
 }
 #else /* #ifdef CONFIG_RCU_TRACE */
@@ -499,7 +496,7 @@ static struct rcu_torture_ops rcu_busted_ops = {
 	.fqs		= NULL,
 	.stats		= NULL,
 	.irq_capable	= 1,
-	.name		= "busted"
+	.name		= "rcu_busted"
 };
 
 /*
@@ -525,7 +522,7 @@ static void srcu_read_delay(struct torture_random_state *rrsp)
 
 	delay = torture_random(rrsp) %
 		(nrealreaders * 2 * longdelay * uspertick);
-	if (!delay && in_task())
+	if (!delay)
 		schedule_timeout_interruptible(longdelay);
 	else
 		rcu_read_delay(rrsp);
@@ -564,7 +561,44 @@ static void srcu_torture_barrier(void)
 
 static void srcu_torture_stats(void)
 {
-	srcu_torture_stats_print(srcu_ctlp, torture_type, TORTURE_FLAG);
+	int __maybe_unused cpu;
+	int idx;
+
+#ifdef CONFIG_TREE_SRCU
+	idx = srcu_ctlp->srcu_idx & 0x1;
+	pr_alert("%s%s Tree SRCU per-CPU(idx=%d):",
+		 torture_type, TORTURE_FLAG, idx);
+	for_each_possible_cpu(cpu) {
+		unsigned long l0, l1;
+		unsigned long u0, u1;
+		long c0, c1;
+		struct srcu_data *counts;
+
+		counts = per_cpu_ptr(srcu_ctlp->sda, cpu);
+		u0 = counts->srcu_unlock_count[!idx];
+		u1 = counts->srcu_unlock_count[idx];
+
+		/*
+		 * Make sure that a lock is always counted if the corresponding
+		 * unlock is counted.
+		 */
+		smp_rmb();
+
+		l0 = counts->srcu_lock_count[!idx];
+		l1 = counts->srcu_lock_count[idx];
+
+		c0 = l0 - u0;
+		c1 = l1 - u1;
+		pr_cont(" %d(%ld,%ld)", cpu, c0, c1);
+	}
+	pr_cont("\n");
+#elif defined(CONFIG_TINY_SRCU)
+	idx = READ_ONCE(srcu_ctlp->srcu_idx) & 0x1;
+	pr_alert("%s%s Tiny SRCU per-CPU(idx=%d): (%hd,%hd)\n",
+		 torture_type, TORTURE_FLAG, idx,
+		 READ_ONCE(srcu_ctlp->srcu_lock_nesting[!idx]),
+		 READ_ONCE(srcu_ctlp->srcu_lock_nesting[idx]));
+#endif
 }
 
 static void srcu_torture_synchronize_expedited(void)
@@ -586,7 +620,6 @@ static struct rcu_torture_ops srcu_ops = {
 	.call		= srcu_torture_call,
 	.cb_barrier	= srcu_torture_barrier,
 	.stats		= srcu_torture_stats,
-	.irq_capable	= 1,
 	.name		= "srcu"
 };
 
@@ -619,7 +652,6 @@ static struct rcu_torture_ops srcud_ops = {
 	.call		= srcu_torture_call,
 	.cb_barrier	= srcu_torture_barrier,
 	.stats		= srcu_torture_stats,
-	.irq_capable	= 1,
 	.name		= "srcud"
 };
 
@@ -664,6 +696,8 @@ static struct rcu_torture_ops sched_ops = {
 	.name		= "sched"
 };
 
+#ifdef CONFIG_TASKS_RCU
+
 /*
  * Definitions for RCU-tasks torture testing.
  */
@@ -701,10 +735,23 @@ static struct rcu_torture_ops tasks_ops = {
 	.name		= "tasks"
 };
 
+#define RCUTORTURE_TASKS_OPS &tasks_ops,
+
 static bool __maybe_unused torturing_tasks(void)
 {
 	return cur_ops == &tasks_ops;
 }
+
+#else /* #ifdef CONFIG_TASKS_RCU */
+
+#define RCUTORTURE_TASKS_OPS
+
+static bool __maybe_unused torturing_tasks(void)
+{
+	return false;
+}
+
+#endif /* #else #ifdef CONFIG_TASKS_RCU */
 
 /*
  * RCU torture priority-boost testing.  Runs one real-time thread per
@@ -1067,18 +1114,13 @@ rcu_torture_fakewriter(void *arg)
 	return 0;
 }
 
-static void rcu_torture_timer_cb(struct rcu_head *rhp)
-{
-	kfree(rhp);
-}
-
 /*
  * RCU torture reader from timer handler.  Dereferences rcu_torture_current,
  * incrementing the corresponding element of the pipeline array.  The
  * counter in the element should never be greater than 1, otherwise, the
  * RCU implementation is broken.
  */
-static void rcu_torture_timer(struct timer_list *unused)
+static void rcu_torture_timer(unsigned long unused)
 {
 	int idx;
 	unsigned long started;
@@ -1134,14 +1176,6 @@ static void rcu_torture_timer(struct timer_list *unused)
 	__this_cpu_inc(rcu_torture_batch[completed]);
 	preempt_enable();
 	cur_ops->readunlock(idx);
-
-	/* Test call_rcu() invocation from interrupt handler. */
-	if (cur_ops->call) {
-		struct rcu_head *rhp = kmalloc(sizeof(*rhp), GFP_NOWAIT);
-
-		if (rhp)
-			cur_ops->call(rhp, rcu_torture_timer_cb);
-	}
 }
 
 /*
@@ -1165,7 +1199,7 @@ rcu_torture_reader(void *arg)
 	VERBOSE_TOROUT_STRING("rcu_torture_reader task started");
 	set_user_nice(current, MAX_NICE);
 	if (irqreader && cur_ops->irq_capable)
-		timer_setup_on_stack(&t, rcu_torture_timer, 0);
+		setup_timer_on_stack(&t, rcu_torture_timer, 0);
 
 	do {
 		if (irqreader && cur_ops->irq_capable) {
@@ -1241,7 +1275,6 @@ rcu_torture_stats_print(void)
 	long pipesummary[RCU_TORTURE_PIPE_LEN + 1] = { 0 };
 	long batchsummary[RCU_TORTURE_PIPE_LEN + 1] = { 0 };
 	static unsigned long rtcv_snap = ULONG_MAX;
-	static bool splatted;
 	struct task_struct *wtp;
 
 	for_each_possible_cpu(cpu) {
@@ -1321,16 +1354,11 @@ rcu_torture_stats_print(void)
 		srcutorture_get_gp_data(cur_ops->ttype, srcu_ctlp,
 					&flags, &gpnum, &completed);
 		wtp = READ_ONCE(writer_task);
-		pr_alert("??? Writer stall state %s(%d) g%lu c%lu f%#x ->state %#lx cpu %d\n",
+		pr_alert("??? Writer stall state %s(%d) g%lu c%lu f%#x ->state %#lx\n",
 			 rcu_torture_writer_state_getname(),
 			 rcu_torture_writer_state,
 			 gpnum, completed, flags,
-			 wtp == NULL ? ~0UL : wtp->state,
-			 wtp == NULL ? -1 : (int)task_cpu(wtp));
-		if (!splatted && wtp) {
-			sched_show_task(wtp);
-			splatted = true;
-		}
+			 wtp == NULL ? ~0UL : wtp->state);
 		show_rcu_gp_kthreads();
 		rcu_ftrace_dump(DUMP_ALL);
 	}
@@ -1364,7 +1392,7 @@ rcu_torture_print_module_parms(struct rcu_torture_ops *cur_ops, const char *tag)
 		 "fqs_duration=%d fqs_holdoff=%d fqs_stutter=%d "
 		 "test_boost=%d/%d test_boost_interval=%d "
 		 "test_boost_duration=%d shutdown_secs=%d "
-		 "stall_cpu=%d stall_cpu_holdoff=%d stall_cpu_irqsoff=%d "
+		 "stall_cpu=%d stall_cpu_holdoff=%d "
 		 "n_barrier_cbs=%d "
 		 "onoff_interval=%d onoff_holdoff=%d\n",
 		 torture_type, tag, nrealreaders, nfakewriters,
@@ -1372,7 +1400,7 @@ rcu_torture_print_module_parms(struct rcu_torture_ops *cur_ops, const char *tag)
 		 stutter, irqreader, fqs_duration, fqs_holdoff, fqs_stutter,
 		 test_boost, cur_ops->can_boost,
 		 test_boost_interval, test_boost_duration, shutdown_secs,
-		 stall_cpu, stall_cpu_holdoff, stall_cpu_irqsoff,
+		 stall_cpu, stall_cpu_holdoff,
 		 n_barrier_cbs,
 		 onoff_interval, onoff_holdoff);
 }
@@ -1437,19 +1465,12 @@ static int rcu_torture_stall(void *args)
 	if (!kthread_should_stop()) {
 		stop_at = get_seconds() + stall_cpu;
 		/* RCU CPU stall is expected behavior in following code. */
+		pr_alert("rcu_torture_stall start.\n");
 		rcu_read_lock();
-		if (stall_cpu_irqsoff)
-			local_irq_disable();
-		else
-			preempt_disable();
-		pr_alert("rcu_torture_stall start on CPU %d.\n",
-			 smp_processor_id());
+		preempt_disable();
 		while (ULONG_CMP_LT(get_seconds(), stop_at))
 			continue;  /* Induce RCU CPU stall warning. */
-		if (stall_cpu_irqsoff)
-			local_irq_enable();
-		else
-			preempt_enable();
+		preempt_enable();
 		rcu_read_unlock();
 		pr_alert("rcu_torture_stall end.\n");
 	}
@@ -1728,7 +1749,7 @@ rcu_torture_init(void)
 	int firsterr = 0;
 	static struct rcu_torture_ops *torture_ops[] = {
 		&rcu_ops, &rcu_bh_ops, &rcu_busted_ops, &srcu_ops, &srcud_ops,
-		&sched_ops, &tasks_ops,
+		&sched_ops, RCUTORTURE_TASKS_OPS
 	};
 
 	if (!torture_init_begin(torture_type, verbose, &torture_runnable))

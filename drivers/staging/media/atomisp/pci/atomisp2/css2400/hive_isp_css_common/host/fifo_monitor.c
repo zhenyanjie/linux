@@ -38,12 +38,12 @@ STORAGE_CLASS_FIFO_MONITOR_DATA unsigned int FIFO_SWITCH_ADDR[N_FIFO_SWITCH] = {
 #include "fifo_monitor_private.h"
 #endif /* __INLINE_FIFO_MONITOR__ */
 
-static inline bool fifo_monitor_status_valid (
+STORAGE_CLASS_INLINE bool fifo_monitor_status_valid (
 	const fifo_monitor_ID_t		ID,
 	const unsigned int			reg,
 	const unsigned int			port_id);
 
-static inline bool fifo_monitor_status_accept(
+STORAGE_CLASS_INLINE bool fifo_monitor_status_accept(
 	const fifo_monitor_ID_t		ID,
 	const unsigned int			reg,
 	const unsigned int			port_id);
@@ -546,7 +546,7 @@ void fifo_monitor_get_state(
 	return;
 }
 
-static inline bool fifo_monitor_status_valid (
+STORAGE_CLASS_INLINE bool fifo_monitor_status_valid (
 	const fifo_monitor_ID_t		ID,
 	const unsigned int			reg,
 	const unsigned int			port_id)
@@ -556,7 +556,7 @@ static inline bool fifo_monitor_status_valid (
 	return (data >> (((port_id * 2) + _hive_str_mon_valid_offset))) & 0x1;
 }
 
-static inline bool fifo_monitor_status_accept(
+STORAGE_CLASS_INLINE bool fifo_monitor_status_accept(
 	const fifo_monitor_ID_t		ID,
 	const unsigned int			reg,
 	const unsigned int			port_id)

@@ -51,15 +51,8 @@ static LIST_HEAD(dvb_adapter_list);
 static DEFINE_MUTEX(dvbdev_register_lock);
 
 static const char * const dnames[] = {
-	[DVB_DEVICE_VIDEO] =		"video",
-	[DVB_DEVICE_AUDIO] =		"audio",
-	[DVB_DEVICE_SEC] =		"sec",
-	[DVB_DEVICE_FRONTEND] =		"frontend",
-	[DVB_DEVICE_DEMUX] =		"demux",
-	[DVB_DEVICE_DVR] =		"dvr",
-	[DVB_DEVICE_CA] =		"ca",
-	[DVB_DEVICE_NET] =		"net",
-	[DVB_DEVICE_OSD] =		"osd"
+	"video", "audio", "sec", "frontend", "demux", "dvr", "ca",
+	"net", "osd"
 };
 
 #ifdef CONFIG_DVB_DYNAMIC_MINORS
@@ -67,22 +60,7 @@ static const char * const dnames[] = {
 #define DVB_MAX_IDS		MAX_DVB_MINORS
 #else
 #define DVB_MAX_IDS		4
-
-static const u8 minor_type[] = {
-       [DVB_DEVICE_VIDEO]      = 0,
-       [DVB_DEVICE_AUDIO]      = 1,
-       [DVB_DEVICE_SEC]        = 2,
-       [DVB_DEVICE_FRONTEND]   = 3,
-       [DVB_DEVICE_DEMUX]      = 4,
-       [DVB_DEVICE_DVR]        = 5,
-       [DVB_DEVICE_CA]         = 6,
-       [DVB_DEVICE_NET]        = 7,
-       [DVB_DEVICE_OSD]        = 8,
-};
-
-#define nums2minor(num, type, id) \
-       (((num) << 6) | ((id) << 4) | minor_type[type])
-
+#define nums2minor(num, type, id)	((num << 6) | (id << 4) | type)
 #define MAX_DVB_MINORS		(DVB_MAX_ADAPTERS*64)
 #endif
 
@@ -448,8 +426,8 @@ static int dvb_register_media_device(struct dvb_device *dvbdev,
 }
 
 int dvb_register_device(struct dvb_adapter *adap, struct dvb_device **pdvbdev,
-			const struct dvb_device *template, void *priv,
-			enum dvb_device_type type, int demux_sink_pads)
+			const struct dvb_device *template, void *priv, int type,
+			int demux_sink_pads)
 {
 	struct dvb_device *dvbdev;
 	struct file_operations *dvbdevfops;

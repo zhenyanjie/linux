@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_TOPOLOGY_H
 #define _ASM_POWERPC_TOPOLOGY_H
 #ifdef __KERNEL__
@@ -16,6 +15,8 @@ struct device_node;
 #define RECLAIM_DISTANCE 10
 
 #include <asm/mmzone.h>
+
+#define parent_node(node)	(node)
 
 #define cpumask_of_node(node) ((node) == -1 ?				\
 			       cpu_all_mask :				\
@@ -43,11 +44,6 @@ extern void __init dump_numa_cpu_topology(void);
 extern int sysfs_add_device_to_node(struct device *dev, int nid);
 extern void sysfs_remove_device_from_node(struct device *dev, int nid);
 extern int numa_update_cpu_topology(bool cpus_locked);
-
-static inline void update_numa_cpu_lookup_table(unsigned int cpu, int node)
-{
-	numa_cpu_lookup_table[cpu] = node;
-}
 
 static inline int early_cpu_to_node(int cpu)
 {
@@ -101,14 +97,6 @@ static inline int prrn_is_enabled(void)
 	return 0;
 }
 #endif /* CONFIG_NUMA && CONFIG_PPC_SPLPAR */
-
-#if defined(CONFIG_HOTPLUG_CPU) || defined(CONFIG_NEED_MULTIPLE_NODES)
-#if defined(CONFIG_PPC_SPLPAR)
-extern int timed_topology_update(int nsecs);
-#else
-#define	timed_topology_update(nsecs)
-#endif /* CONFIG_PPC_SPLPAR */
-#endif /* CONFIG_HOTPLUG_CPU || CONFIG_NEED_MULTIPLE_NODES */
 
 #include <asm-generic/topology.h>
 

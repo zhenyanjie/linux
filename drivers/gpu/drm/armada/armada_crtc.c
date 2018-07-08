@@ -168,23 +168,16 @@ static void armada_drm_crtc_update(struct armada_crtc *dcrtc)
 void armada_drm_plane_calc_addrs(u32 *addrs, struct drm_framebuffer *fb,
 	int x, int y)
 {
-	const struct drm_format_info *format = fb->format;
-	unsigned int num_planes = format->num_planes;
 	u32 addr = drm_fb_obj(fb)->dev_addr;
+	int num_planes = fb->format->num_planes;
 	int i;
 
 	if (num_planes > 3)
 		num_planes = 3;
 
-	addrs[0] = addr + fb->offsets[0] + y * fb->pitches[0] +
-		   x * format->cpp[0];
-
-	y /= format->vsub;
-	x /= format->hsub;
-
-	for (i = 1; i < num_planes; i++)
+	for (i = 0; i < num_planes; i++)
 		addrs[i] = addr + fb->offsets[i] + y * fb->pitches[i] +
-			     x * format->cpp[i];
+			     x * fb->format->cpp[i];
 	for (; i < 3; i++)
 		addrs[i] = 0;
 }
@@ -305,7 +298,7 @@ static void armada_drm_crtc_finish_fb(struct armada_crtc *dcrtc,
 
 	if (force) {
 		/* Display is disabled, so just drop the old fb */
-		drm_framebuffer_put(fb);
+		drm_framebuffer_unreference(fb);
 		return;
 	}
 
@@ -328,7 +321,7 @@ static void armada_drm_crtc_finish_fb(struct armada_crtc *dcrtc,
 	 * the best.  The worst that will happen is the buffer gets
 	 * reused before it has finished being displayed.
 	 */
-	drm_framebuffer_put(fb);
+	drm_framebuffer_unreference(fb);
 }
 
 static void armada_drm_vblank_off(struct armada_crtc *dcrtc)
@@ -339,6 +332,16 @@ static void armada_drm_vblank_off(struct armada_crtc *dcrtc)
 	 */
 	drm_crtc_vblank_off(&dcrtc->crtc);
 	armada_drm_plane_work_run(dcrtc, dcrtc->crtc.primary);
+}
+
+void armada_drm_crtc_gamma_set(struct drm_crtc *crtc, u16 r, u16 g, u16 b,
+	int idx)
+{
+}
+
+void armada_drm_crtc_gamma_get(struct drm_crtc *crtc, u16 *r, u16 *g, u16 *b,
+	int idx)
+{
 }
 
 /* The mode_config.mutex will be held for this call */
@@ -584,7 +587,7 @@ static int armada_drm_crtc_mode_set(struct drm_crtc *crtc,
 	unsigned i;
 	bool interlaced;
 
-	drm_framebuffer_get(crtc->primary->fb);
+	drm_framebuffer_reference(crtc->primary->fb);
 
 	interlaced = !!(adj->flags & DRM_MODE_FLAG_INTERLACE);
 
@@ -725,7 +728,7 @@ static int armada_drm_crtc_mode_set_base(struct drm_crtc *crtc, int x, int y,
 				   MAX_SCHEDULE_TIMEOUT);
 
 	/* Take a reference to the new fb as we're using it */
-	drm_framebuffer_get(crtc->primary->fb);
+	drm_framebuffer_reference(crtc->primary->fb);
 
 	/* Update the base in the CRTC */
 	armada_drm_crtc_update_regs(dcrtc, regs);
@@ -749,16 +752,17 @@ void armada_drm_crtc_plane_disable(struct armada_crtc *dcrtc,
 	 * primary plane.
 	 */
 	if (plane->fb)
-		drm_framebuffer_put(plane->fb);
+		drm_framebuffer_unreference(plane->fb);
+
+	/* Power down the Y/U/V FIFOs */
+	sram_para1 = CFG_PDWN16x66 | CFG_PDWN32x66;
 
 	/* Power down most RAMs and FIFOs if this is the primary plane */
 	if (plane->type == DRM_PLANE_TYPE_PRIMARY) {
-		sram_para1 = CFG_PDWN256x32 | CFG_PDWN256x24 | CFG_PDWN256x8 |
-			     CFG_PDWN32x32 | CFG_PDWN64x66;
+		sram_para1 |= CFG_PDWN256x32 | CFG_PDWN256x24 | CFG_PDWN256x8 |
+			      CFG_PDWN32x32 | CFG_PDWN64x66;
 		dma_ctrl0_mask = CFG_GRA_ENA;
 	} else {
-		/* Power down the Y/U/V FIFOs */
-		sram_para1 = CFG_PDWN16x66 | CFG_PDWN32x66;
 		dma_ctrl0_mask = CFG_DMA_ENA;
 	}
 
@@ -953,13 +957,13 @@ static int armada_drm_crtc_cursor_set(struct drm_crtc *crtc,
 
 		/* Must be a kernel-mapped object */
 		if (!obj->addr) {
-			drm_gem_object_put_unlocked(&obj->obj);
+			drm_gem_object_unreference_unlocked(&obj->obj);
 			return -EINVAL;
 		}
 
 		if (obj->obj.size < w * h * 4) {
 			DRM_ERROR("buffer is too small\n");
-			drm_gem_object_put_unlocked(&obj->obj);
+			drm_gem_object_unreference_unlocked(&obj->obj);
 			return -ENOMEM;
 		}
 	}
@@ -967,7 +971,7 @@ static int armada_drm_crtc_cursor_set(struct drm_crtc *crtc,
 	if (dcrtc->cursor_obj) {
 		dcrtc->cursor_obj->update = NULL;
 		dcrtc->cursor_obj->update_data = NULL;
-		drm_gem_object_put_unlocked(&dcrtc->cursor_obj->obj);
+		drm_gem_object_unreference_unlocked(&dcrtc->cursor_obj->obj);
 	}
 	dcrtc->cursor_obj = obj;
 	dcrtc->cursor_w = w;
@@ -1003,7 +1007,7 @@ static void armada_drm_crtc_destroy(struct drm_crtc *crtc)
 	struct armada_private *priv = crtc->dev->dev_private;
 
 	if (dcrtc->cursor_obj)
-		drm_gem_object_put_unlocked(&dcrtc->cursor_obj->obj);
+		drm_gem_object_unreference_unlocked(&dcrtc->cursor_obj->obj);
 
 	priv->dcrtc[dcrtc->num] = NULL;
 	drm_crtc_cleanup(&dcrtc->crtc);
@@ -1051,12 +1055,12 @@ static int armada_drm_crtc_page_flip(struct drm_crtc *crtc,
 	 * Ensure that we hold a reference on the new framebuffer.
 	 * This has to match the behaviour in mode_set.
 	 */
-	drm_framebuffer_get(fb);
+	drm_framebuffer_reference(fb);
 
 	ret = armada_drm_crtc_queue_frame_work(dcrtc, work);
 	if (ret) {
 		/* Undo our reference above */
-		drm_framebuffer_put(fb);
+		drm_framebuffer_unreference(fb);
 		kfree(work);
 		return ret;
 	}
@@ -1146,13 +1150,13 @@ int armada_drm_plane_init(struct armada_plane *plane)
 	return 0;
 }
 
-static const struct drm_prop_enum_list armada_drm_csc_yuv_enum_list[] = {
+static struct drm_prop_enum_list armada_drm_csc_yuv_enum_list[] = {
 	{ CSC_AUTO,        "Auto" },
 	{ CSC_YUV_CCIR601, "CCIR601" },
 	{ CSC_YUV_CCIR709, "CCIR709" },
 };
 
-static const struct drm_prop_enum_list armada_drm_csc_rgb_enum_list[] = {
+static struct drm_prop_enum_list armada_drm_csc_rgb_enum_list[] = {
 	{ CSC_AUTO,         "Auto" },
 	{ CSC_RGB_COMPUTER, "Computer system" },
 	{ CSC_RGB_STUDIO,   "Studio" },
@@ -1231,13 +1235,17 @@ static int armada_drm_crtc_create(struct drm_device *drm, struct device *dev,
 
 	ret = devm_request_irq(dev, irq, armada_drm_irq, 0, "armada_drm_crtc",
 			       dcrtc);
-	if (ret < 0)
-		goto err_crtc;
+	if (ret < 0) {
+		kfree(dcrtc);
+		return ret;
+	}
 
 	if (dcrtc->variant->init) {
 		ret = dcrtc->variant->init(dcrtc, dev);
-		if (ret)
-			goto err_crtc;
+		if (ret) {
+			kfree(dcrtc);
+			return ret;
+		}
 	}
 
 	/* Ensure AXI pipeline is enabled */
@@ -1248,26 +1256,23 @@ static int armada_drm_crtc_create(struct drm_device *drm, struct device *dev,
 	dcrtc->crtc.port = port;
 
 	primary = kzalloc(sizeof(*primary), GFP_KERNEL);
-	if (!primary) {
-		ret = -ENOMEM;
-		goto err_crtc;
-	}
+	if (!primary)
+		return -ENOMEM;
 
 	ret = armada_drm_plane_init(primary);
 	if (ret) {
 		kfree(primary);
-		goto err_crtc;
+		return ret;
 	}
 
 	ret = drm_universal_plane_init(drm, &primary->base, 0,
 				       &armada_primary_plane_funcs,
 				       armada_primary_formats,
 				       ARRAY_SIZE(armada_primary_formats),
-				       NULL,
 				       DRM_PLANE_TYPE_PRIMARY, NULL);
 	if (ret) {
 		kfree(primary);
-		goto err_crtc;
+		return ret;
 	}
 
 	ret = drm_crtc_init_with_planes(drm, &dcrtc->crtc, &primary->base, NULL,
@@ -1286,9 +1291,6 @@ static int armada_drm_crtc_create(struct drm_device *drm, struct device *dev,
 
 err_crtc_init:
 	primary->base.funcs->destroy(&primary->base);
-err_crtc:
-	kfree(dcrtc);
-
 	return ret;
 }
 
@@ -1327,7 +1329,8 @@ armada_lcd_bind(struct device *dev, struct device *master, void *data)
 		port = of_get_child_by_name(parent, "port");
 		of_node_put(np);
 		if (!port) {
-			dev_err(dev, "no port node found in %pOF\n", parent);
+			dev_err(dev, "no port node found in %s\n",
+				parent->full_name);
 			return -ENXIO;
 		}
 
@@ -1361,7 +1364,7 @@ static int armada_lcd_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id armada_lcd_of_match[] = {
+static struct of_device_id armada_lcd_of_match[] = {
 	{
 		.compatible	= "marvell,dove-lcd",
 		.data		= &armada510_ops,

@@ -78,30 +78,31 @@ dsa_switch_probe(struct device *parent, struct device *host_dev, int sw_addr,
 }
 
 /* basic switch operations **************************************************/
-static int dsa_cpu_dsa_setups(struct dsa_switch *ds)
+static int dsa_cpu_dsa_setups(struct dsa_switch *ds, struct device *dev)
 {
+	struct dsa_port *dport;
 	int ret, port;
 
 	for (port = 0; port < ds->num_ports; port++) {
 		if (!(dsa_is_cpu_port(ds, port) || dsa_is_dsa_port(ds, port)))
 			continue;
 
-		ret = dsa_port_fixed_link_register_of(&ds->ports[port]);
+		dport = &ds->ports[port];
+		ret = dsa_cpu_dsa_setup(ds, dev, dport, port);
 		if (ret)
 			return ret;
 	}
 	return 0;
 }
 
-static int dsa_switch_setup_one(struct dsa_switch *ds,
-				struct net_device *master)
+static int dsa_switch_setup_one(struct dsa_switch *ds, struct net_device *master,
+				struct device *parent)
 {
 	const struct dsa_switch_ops *ops = ds->ops;
 	struct dsa_switch_tree *dst = ds->dst;
 	struct dsa_chip_data *cd = ds->cd;
 	bool valid_name_found = false;
 	int index = ds->index;
-	struct dsa_port *dp;
 	int i, ret;
 
 	/*
@@ -110,12 +111,9 @@ static int dsa_switch_setup_one(struct dsa_switch *ds,
 	for (i = 0; i < ds->num_ports; i++) {
 		char *name;
 
-		dp = &ds->ports[i];
-
 		name = cd->port_names[i];
 		if (name == NULL)
 			continue;
-		dp->name = name;
 
 		if (!strcmp(name, "cpu")) {
 			if (dst->cpu_dp) {
@@ -124,12 +122,12 @@ static int dsa_switch_setup_one(struct dsa_switch *ds,
 				return -EINVAL;
 			}
 			dst->cpu_dp = &ds->ports[i];
-			dst->cpu_dp->master = master;
-			dp->type = DSA_PORT_TYPE_CPU;
+			dst->cpu_dp->netdev = master;
+			ds->cpu_port_mask |= 1 << i;
 		} else if (!strcmp(name, "dsa")) {
-			dp->type = DSA_PORT_TYPE_DSA;
+			ds->dsa_port_mask |= 1 << i;
 		} else {
-			dp->type = DSA_PORT_TYPE_USER;
+			ds->enabled_port_mask |= 1 << i;
 		}
 		valid_name_found = true;
 	}
@@ -140,7 +138,7 @@ static int dsa_switch_setup_one(struct dsa_switch *ds,
 	/* Make the built-in MII bus mask match the number of ports,
 	 * switch drivers can override this later
 	 */
-	ds->phys_mii_mask |= dsa_user_ports(ds);
+	ds->phys_mii_mask = ds->enabled_port_mask;
 
 	/*
 	 * If the CPU connects to this switch, set the switch tree
@@ -148,19 +146,14 @@ static int dsa_switch_setup_one(struct dsa_switch *ds,
 	 * switch.
 	 */
 	if (dst->cpu_dp->ds == ds) {
-		const struct dsa_device_ops *tag_ops;
 		enum dsa_tag_protocol tag_protocol;
 
-		tag_protocol = ops->get_tag_protocol(ds, dst->cpu_dp->index);
-		tag_ops = dsa_resolve_tag_protocol(tag_protocol);
-		if (IS_ERR(tag_ops))
-			return PTR_ERR(tag_ops);
+		tag_protocol = ops->get_tag_protocol(ds);
+		dst->tag_ops = dsa_resolve_tag_protocol(tag_protocol);
+		if (IS_ERR(dst->tag_ops))
+			return PTR_ERR(dst->tag_ops);
 
-		dst->cpu_dp->tag_ops = tag_ops;
-
-		/* Few copies for faster access in master receive hot path */
-		dst->cpu_dp->rcv = dst->cpu_dp->tag_ops->rcv;
-		dst->cpu_dp->dst = dst;
+		dst->rcv = dst->tag_ops->rcv;
 	}
 
 	memcpy(ds->rtable, cd->rtable, sizeof(ds->rtable));
@@ -176,8 +169,14 @@ static int dsa_switch_setup_one(struct dsa_switch *ds,
 	if (ret)
 		return ret;
 
+	if (ops->set_addr) {
+		ret = ops->set_addr(ds, master->dev_addr);
+		if (ret < 0)
+			return ret;
+	}
+
 	if (!ds->slave_mii_bus && ops->phy_read) {
-		ds->slave_mii_bus = devm_mdiobus_alloc(ds->dev);
+		ds->slave_mii_bus = devm_mdiobus_alloc(parent);
 		if (!ds->slave_mii_bus)
 			return -ENOMEM;
 		dsa_slave_mii_bus_init(ds);
@@ -194,20 +193,24 @@ static int dsa_switch_setup_one(struct dsa_switch *ds,
 		ds->ports[i].dn = cd->port_dn[i];
 		ds->ports[i].cpu_dp = dst->cpu_dp;
 
-		if (!dsa_is_user_port(ds, i))
+		if (!(ds->enabled_port_mask & (1 << i)))
 			continue;
 
-		ret = dsa_slave_create(&ds->ports[i]);
+		ret = dsa_slave_create(ds, parent, i, cd->port_names[i]);
 		if (ret < 0)
 			netdev_err(master, "[%d]: can't create dsa slave device for port %d(%s): %d\n",
 				   index, i, cd->port_names[i], ret);
 	}
 
 	/* Perform configuration of the CPU and DSA ports */
-	ret = dsa_cpu_dsa_setups(ds);
+	ret = dsa_cpu_dsa_setups(ds, parent);
 	if (ret < 0)
 		netdev_err(master, "[%d] : can't configure CPU and DSA ports\n",
 			   index);
+
+	ret = dsa_cpu_port_ethtool_setup(ds->dst->cpu_dp);
+	if (ret)
+		return ret;
 
 	return 0;
 }
@@ -249,7 +252,7 @@ dsa_switch_setup(struct dsa_switch_tree *dst, struct net_device *master,
 	ds->ops = ops;
 	ds->priv = priv;
 
-	ret = dsa_switch_setup_one(ds, master);
+	ret = dsa_switch_setup_one(ds, master, parent);
 	if (ret)
 		return ERR_PTR(ret);
 
@@ -262,20 +265,24 @@ static void dsa_switch_destroy(struct dsa_switch *ds)
 
 	/* Destroy network devices for physical switch ports. */
 	for (port = 0; port < ds->num_ports; port++) {
-		if (!dsa_is_user_port(ds, port))
+		if (!(ds->enabled_port_mask & (1 << port)))
 			continue;
 
-		if (!ds->ports[port].slave)
+		if (!ds->ports[port].netdev)
 			continue;
 
-		dsa_slave_destroy(ds->ports[port].slave);
+		dsa_slave_destroy(ds->ports[port].netdev);
 	}
 
 	/* Disable configuration of the CPU and DSA ports */
 	for (port = 0; port < ds->num_ports; port++) {
 		if (!(dsa_is_cpu_port(ds, port) || dsa_is_dsa_port(ds, port)))
 			continue;
-		dsa_port_fixed_link_unregister_of(&ds->ports[port]);
+		dsa_cpu_dsa_destroy(&ds->ports[port]);
+
+		/* Clearing a bit which is not set does no harm */
+		ds->cpu_port_mask |= ~(1 << port);
+		ds->dsa_port_mask |= ~(1 << port);
 	}
 
 	if (ds->slave_mii_bus && ds->ops->phy_read)
@@ -593,7 +600,15 @@ static int dsa_setup_dst(struct dsa_switch_tree *dst, struct net_device *dev,
 	if (!configured)
 		return -EPROBE_DEFER;
 
-	return dsa_master_setup(dst->cpu_dp->master, dst->cpu_dp);
+	/*
+	 * If we use a tagging format that doesn't have an ethertype
+	 * field, make sure that all packets from this point on get
+	 * sent to the tag format's receive function.
+	 */
+	wmb();
+	dev->dsa_ptr = dst;
+
+	return 0;
 }
 
 static int dsa_probe(struct platform_device *pdev)
@@ -658,7 +673,13 @@ static void dsa_remove_dst(struct dsa_switch_tree *dst)
 {
 	int i;
 
-	dsa_master_teardown(dst->cpu_dp->master);
+	dst->cpu_dp->netdev->dsa_ptr = NULL;
+
+	/* If we used a tagging format that doesn't have an ethertype
+	 * field, make sure that all packets from this point get sent
+	 * without the tag and go through the regular receive path.
+	 */
+	wmb();
 
 	for (i = 0; i < dst->pd->nr_chips; i++) {
 		struct dsa_switch *ds = dst->ds[i];
@@ -667,7 +688,9 @@ static void dsa_remove_dst(struct dsa_switch_tree *dst)
 			dsa_switch_destroy(ds);
 	}
 
-	dev_put(dst->cpu_dp->master);
+	dsa_cpu_port_ethtool_restore(dst->cpu_dp);
+
+	dev_put(dst->cpu_dp->netdev);
 }
 
 static int dsa_remove(struct platform_device *pdev)
@@ -717,26 +740,6 @@ static int dsa_resume(struct device *d)
 	return ret;
 }
 #endif
-
-/* legacy way, bypassing the bridge *****************************************/
-int dsa_legacy_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
-		       struct net_device *dev,
-		       const unsigned char *addr, u16 vid,
-		       u16 flags)
-{
-	struct dsa_port *dp = dsa_slave_to_port(dev);
-
-	return dsa_port_fdb_add(dp, addr, vid);
-}
-
-int dsa_legacy_fdb_del(struct ndmsg *ndm, struct nlattr *tb[],
-		       struct net_device *dev,
-		       const unsigned char *addr, u16 vid)
-{
-	struct dsa_port *dp = dsa_slave_to_port(dev);
-
-	return dsa_port_fdb_del(dp, addr, vid);
-}
 
 static SIMPLE_DEV_PM_OPS(dsa_pm_ops, dsa_suspend, dsa_resume);
 

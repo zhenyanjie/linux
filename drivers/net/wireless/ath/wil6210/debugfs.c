@@ -20,6 +20,7 @@
 #include <linux/pci.h>
 #include <linux/rtnetlink.h>
 #include <linux/power_supply.h>
+
 #include "wil6210.h"
 #include "wmi.h"
 #include "txrx.h"
@@ -29,6 +30,7 @@
 static u32 mem_addr;
 static u32 dbg_txdesc_index;
 static u32 dbg_vring_index; /* 24+ for Rx, 0..23 for Tx */
+u32 vring_idle_trsh = 16; /* HW fetches up to 16 descriptors at once */
 
 enum dbg_off_type {
 	doff_u32 = 0,
@@ -799,9 +801,6 @@ static ssize_t wil_write_file_txmgmt(struct file *file, const char __user *buf,
 	int rc;
 	void *frame;
 
-	if (!len)
-		return -EINVAL;
-
 	frame = memdup_user(buf, len);
 	if (IS_ERR(frame))
 		return PTR_ERR(frame);
@@ -1014,7 +1013,6 @@ static int wil_bf_debugfs_show(struct seq_file *s, void *data)
 			   "  TSF = 0x%016llx\n"
 			   "  TxMCS = %2d TxTpt = %4d\n"
 			   "  SQI = %4d\n"
-			   "  RSSI = %4d\n"
 			   "  Status = 0x%08x %s\n"
 			   "  Sectors(rx:tx) my %2d:%2d peer %2d:%2d\n"
 			   "  Goodput(rx:tx) %4d:%4d\n"
@@ -1024,7 +1022,6 @@ static int wil_bf_debugfs_show(struct seq_file *s, void *data)
 			   le16_to_cpu(reply.evt.bf_mcs),
 			   le32_to_cpu(reply.evt.tx_tpt),
 			   reply.evt.sqi,
-			   reply.evt.rssi,
 			   status, wil_bfstatus_str(status),
 			   le16_to_cpu(reply.evt.my_rx_sector),
 			   le16_to_cpu(reply.evt.my_tx_sector),
@@ -1046,6 +1043,50 @@ static const struct file_operations fops_bf = {
 	.release	= single_release,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
+};
+
+/*---------SSID------------*/
+static ssize_t wil_read_file_ssid(struct file *file, char __user *user_buf,
+				  size_t count, loff_t *ppos)
+{
+	struct wil6210_priv *wil = file->private_data;
+	struct wireless_dev *wdev = wil_to_wdev(wil);
+
+	return simple_read_from_buffer(user_buf, count, ppos,
+				       wdev->ssid, wdev->ssid_len);
+}
+
+static ssize_t wil_write_file_ssid(struct file *file, const char __user *buf,
+				   size_t count, loff_t *ppos)
+{
+	struct wil6210_priv *wil = file->private_data;
+	struct wireless_dev *wdev = wil_to_wdev(wil);
+	struct net_device *ndev = wil_to_ndev(wil);
+
+	if (*ppos != 0) {
+		wil_err(wil, "Unable to set SSID substring from [%d]\n",
+			(int)*ppos);
+		return -EINVAL;
+	}
+
+	if (count > sizeof(wdev->ssid)) {
+		wil_err(wil, "SSID too long, len = %d\n", (int)count);
+		return -EINVAL;
+	}
+	if (netif_running(ndev)) {
+		wil_err(wil, "Unable to change SSID on running interface\n");
+		return -EINVAL;
+	}
+
+	wdev->ssid_len = count;
+	return simple_write_to_buffer(wdev->ssid, wdev->ssid_len, ppos,
+				      buf, count);
+}
+
+static const struct file_operations fops_ssid = {
+	.read = wil_read_file_ssid,
+	.write = wil_write_file_ssid,
+	.open  = simple_open,
 };
 
 /*---------temp------------*/
@@ -1571,8 +1612,6 @@ static ssize_t wil_write_suspend_stats(struct file *file,
 	struct wil6210_priv *wil = file->private_data;
 
 	memset(&wil->suspend_stats, 0, sizeof(wil->suspend_stats));
-	wil->suspend_stats.min_suspend_time = ULONG_MAX;
-	wil->suspend_stats.collection_start = ktime_get();
 
 	return len;
 }
@@ -1584,27 +1623,18 @@ static ssize_t wil_read_suspend_stats(struct file *file,
 	struct wil6210_priv *wil = file->private_data;
 	static char text[400];
 	int n;
-	unsigned long long stats_collection_time =
-		ktime_to_us(ktime_sub(ktime_get(),
-				      wil->suspend_stats.collection_start));
 
 	n = snprintf(text, sizeof(text),
 		     "Suspend statistics:\n"
 		     "successful suspends:%ld failed suspends:%ld\n"
 		     "successful resumes:%ld failed resumes:%ld\n"
-		     "rejected by host:%ld rejected by device:%ld\n"
-		     "total suspend time:%lld min suspend time:%lld\n"
-		     "max suspend time:%lld stats collection time: %lld\n",
+		     "rejected by host:%ld rejected by device:%ld\n",
 		     wil->suspend_stats.successful_suspends,
 		     wil->suspend_stats.failed_suspends,
 		     wil->suspend_stats.successful_resumes,
 		     wil->suspend_stats.failed_resumes,
 		     wil->suspend_stats.rejected_by_host,
-		     wil->suspend_stats.rejected_by_device,
-		     wil->suspend_stats.total_suspend_time,
-		     wil->suspend_stats.min_suspend_time,
-		     wil->suspend_stats.max_suspend_time,
-		     stats_collection_time);
+		     wil->suspend_stats.rejected_by_device);
 
 	n = min_t(int, n, sizeof(text));
 
@@ -1651,6 +1681,7 @@ static const struct {
 	{"stations", 0444,		&fops_sta},
 	{"desc",	0444,		&fops_txdesc},
 	{"bf",		0444,		&fops_bf},
+	{"ssid",	0644,		&fops_ssid},
 	{"mem_val",	0644,		&fops_memread},
 	{"reset",	0244,		&fops_reset},
 	{"rxon",	0244,		&fops_rxon},
@@ -1716,7 +1747,6 @@ static const struct dbg_off dbg_wil_off[] = {
 	WIL_FIELD(chip_revision, 0444,	doff_u8),
 	WIL_FIELD(abft_len, 0644,		doff_u8),
 	WIL_FIELD(wakeup_trigger, 0644,		doff_u8),
-	WIL_FIELD(vring_idle_trsh, 0644,	doff_u32),
 	{},
 };
 
@@ -1732,6 +1762,8 @@ static const struct dbg_off dbg_statics[] = {
 	{"desc_index",	0644, (ulong)&dbg_txdesc_index, doff_u32},
 	{"vring_index",	0644, (ulong)&dbg_vring_index, doff_u32},
 	{"mem_addr",	0644, (ulong)&mem_addr, doff_u32},
+	{"vring_idle_trsh", 0644, (ulong)&vring_idle_trsh,
+	 doff_u32},
 	{"led_polarity", 0644, (ulong)&led_polarity, doff_u8},
 	{},
 };
@@ -1757,8 +1789,6 @@ int wil6210_debugfs_init(struct wil6210_priv *wil)
 	wil6210_debugfs_create_pseudo_ISR(wil, dbg);
 
 	wil6210_debugfs_create_ITR_CNT(wil, dbg);
-
-	wil->suspend_stats.collection_start = ktime_get();
 
 	return 0;
 }

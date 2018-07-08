@@ -365,8 +365,10 @@ ia_css_shading_table_alloc(
 	IA_CSS_ENTER("");
 
 	me = kmalloc(sizeof(*me), GFP_KERNEL);
-	if (!me)
+	if (me == NULL) {
+		IA_CSS_ERROR("out of memory");
 		return me;
+	}
 
 	me->width         = width;
 	me->height        = height;

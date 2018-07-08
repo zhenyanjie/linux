@@ -56,8 +56,7 @@ struct list_head audit_filter_list[AUDIT_NR_FILTERS] = {
 	LIST_HEAD_INIT(audit_filter_list[3]),
 	LIST_HEAD_INIT(audit_filter_list[4]),
 	LIST_HEAD_INIT(audit_filter_list[5]),
-	LIST_HEAD_INIT(audit_filter_list[6]),
-#if AUDIT_NR_FILTERS != 7
+#if AUDIT_NR_FILTERS != 6
 #error Fix audit_filter_list initialiser
 #endif
 };
@@ -68,7 +67,6 @@ static struct list_head audit_rules_list[AUDIT_NR_FILTERS] = {
 	LIST_HEAD_INIT(audit_rules_list[3]),
 	LIST_HEAD_INIT(audit_rules_list[4]),
 	LIST_HEAD_INIT(audit_rules_list[5]),
-	LIST_HEAD_INIT(audit_rules_list[6]),
 };
 
 DEFINE_MUTEX(audit_filter_mutex);
@@ -265,7 +263,6 @@ static inline struct audit_entry *audit_to_entry_common(struct audit_rule_data *
 #endif
 	case AUDIT_FILTER_USER:
 	case AUDIT_FILTER_TYPE:
-	case AUDIT_FILTER_FS:
 		;
 	}
 	if (unlikely(rule->action == AUDIT_POSSIBLE)) {
@@ -341,21 +338,6 @@ static int audit_field_valid(struct audit_entry *entry, struct audit_field *f)
 		    entry->rule.listnr != AUDIT_FILTER_USER)
 			return -EINVAL;
 		break;
-	case AUDIT_FSTYPE:
-		if (entry->rule.listnr != AUDIT_FILTER_FS)
-			return -EINVAL;
-		break;
-	}
-
-	switch(entry->rule.listnr) {
-	case AUDIT_FILTER_FS:
-		switch(f->type) {
-		case AUDIT_FSTYPE:
-		case AUDIT_FILTERKEY:
-			break;
-		default:
-			return -EINVAL;
-		}
 	}
 
 	switch(f->type) {
@@ -409,7 +391,6 @@ static int audit_field_valid(struct audit_entry *entry, struct audit_field *f)
 			return -EINVAL;
 	/* FALL THROUGH */
 	case AUDIT_ARCH:
-	case AUDIT_FSTYPE:
 		if (f->op != Audit_not_equal && f->op != Audit_equal)
 			return -EINVAL;
 		break;
@@ -929,13 +910,10 @@ static inline int audit_add_rule(struct audit_entry *entry)
 #ifdef CONFIG_AUDITSYSCALL
 	int dont_count = 0;
 
-	/* If any of these, don't count towards total */
-	switch(entry->rule.listnr) {
-	case AUDIT_FILTER_USER:
-	case AUDIT_FILTER_TYPE:
-	case AUDIT_FILTER_FS:
+	/* If either of these, don't count towards total */
+	if (entry->rule.listnr == AUDIT_FILTER_USER ||
+		entry->rule.listnr == AUDIT_FILTER_TYPE)
 		dont_count = 1;
-	}
 #endif
 
 	mutex_lock(&audit_filter_mutex);
@@ -1011,13 +989,10 @@ int audit_del_rule(struct audit_entry *entry)
 #ifdef CONFIG_AUDITSYSCALL
 	int dont_count = 0;
 
-	/* If any of these, don't count towards total */
-	switch(entry->rule.listnr) {
-	case AUDIT_FILTER_USER:
-	case AUDIT_FILTER_TYPE:
-	case AUDIT_FILTER_FS:
+	/* If either of these, don't count towards total */
+	if (entry->rule.listnr == AUDIT_FILTER_USER ||
+		entry->rule.listnr == AUDIT_FILTER_TYPE)
 		dont_count = 1;
-	}
 #endif
 
 	mutex_lock(&audit_filter_mutex);

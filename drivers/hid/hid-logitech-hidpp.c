@@ -1957,8 +1957,7 @@ static int hidpp_ff_init(struct hidpp_device *hidpp, u8 feature_index)
 	/* initialize with zero autocenter to get wheel in usable state */
 	hidpp_ff_set_autocenter(dev, 0);
 
-	hid_info(hid, "Force feedback support loaded (firmware release %d).\n",
-		 version);
+	hid_info(hid, "Force feeback support loaded (firmware release %d).\n", version);
 
 	return 0;
 }
@@ -2927,7 +2926,7 @@ static struct attribute *sysfs_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group ps_attribute_group = {
+static struct attribute_group ps_attribute_group = {
 	.attrs = sysfs_attrs
 };
 

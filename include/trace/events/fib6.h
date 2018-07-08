@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM fib6
 
@@ -13,9 +12,9 @@
 TRACE_EVENT(fib6_table_lookup,
 
 	TP_PROTO(const struct net *net, const struct rt6_info *rt,
-		 struct fib6_table *table, const struct flowi6 *flp),
+		 u32 tb_id, const struct flowi6 *flp),
 
-	TP_ARGS(net, rt, table, flp),
+	TP_ARGS(net, rt, tb_id, flp),
 
 	TP_STRUCT__entry(
 		__field(	u32,	tb_id		)
@@ -35,7 +34,7 @@ TRACE_EVENT(fib6_table_lookup,
 	TP_fast_assign(
 		struct in6_addr *in6;
 
-		__entry->tb_id = table->tb6_id;
+		__entry->tb_id = tb_id;
 		__entry->oif = flp->flowi6_oif;
 		__entry->iif = flp->flowi6_iif;
 		__entry->tos = ip6_tclass(flp->flowlabel);

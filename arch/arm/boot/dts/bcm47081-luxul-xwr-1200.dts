@@ -57,8 +57,7 @@
 		usb {
 			label = "bcm53xx:green:usb";
 			gpios = <&chipcommon 8 GPIO_ACTIVE_LOW>;
-			trigger-sources = <&ohci_port2>, <&ehci_port2>;
-			linux,default-trigger = "usbport";
+			linux,default-trigger = "none";
 		};
 
 		status {

@@ -265,8 +265,6 @@ acpi_ex_do_logical_numeric_op(u16 opcode,
 
 	default:
 
-		ACPI_ERROR((AE_INFO,
-			    "Invalid numeric logical opcode: %X", opcode));
 		status = AE_AML_INTERNAL;
 		break;
 	}
@@ -330,7 +328,7 @@ acpi_ex_do_logical_op(u16 opcode,
 	case ACPI_TYPE_INTEGER:
 
 		status = acpi_ex_convert_to_integer(operand1, &local_operand1,
-						    ACPI_IMPLICIT_CONVERSION);
+						    ACPI_STRTOUL_BASE16);
 		break;
 
 	case ACPI_TYPE_STRING:
@@ -347,9 +345,6 @@ acpi_ex_do_logical_op(u16 opcode,
 
 	default:
 
-		ACPI_ERROR((AE_INFO,
-			    "Invalid object type for logical operator: %X",
-			    operand0->common.type));
 		status = AE_AML_INTERNAL;
 		break;
 	}
@@ -393,8 +388,6 @@ acpi_ex_do_logical_op(u16 opcode,
 
 		default:
 
-			ACPI_ERROR((AE_INFO,
-				    "Invalid comparison opcode: %X", opcode));
 			status = AE_AML_INTERNAL;
 			break;
 		}
@@ -463,8 +456,6 @@ acpi_ex_do_logical_op(u16 opcode,
 
 		default:
 
-			ACPI_ERROR((AE_INFO,
-				    "Invalid comparison opcode: %X", opcode));
 			status = AE_AML_INTERNAL;
 			break;
 		}

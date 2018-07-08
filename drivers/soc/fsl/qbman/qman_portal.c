@@ -224,6 +224,7 @@ static int qman_portal_probe(struct platform_device *pdev)
 	struct device_node *node = dev->of_node;
 	struct qm_portal_config *pcfg;
 	struct resource *addr_phys[2];
+	void __iomem *va;
 	int irq, cpu, err;
 	u32 val;
 
@@ -236,45 +237,50 @@ static int qman_portal_probe(struct platform_device *pdev)
 	addr_phys[0] = platform_get_resource(pdev, IORESOURCE_MEM,
 					     DPAA_PORTAL_CE);
 	if (!addr_phys[0]) {
-		dev_err(dev, "Can't get %pOF property 'reg::CE'\n", node);
+		dev_err(dev, "Can't get %s property 'reg::CE'\n",
+			node->full_name);
 		return -ENXIO;
 	}
 
 	addr_phys[1] = platform_get_resource(pdev, IORESOURCE_MEM,
 					     DPAA_PORTAL_CI);
 	if (!addr_phys[1]) {
-		dev_err(dev, "Can't get %pOF property 'reg::CI'\n", node);
+		dev_err(dev, "Can't get %s property 'reg::CI'\n",
+			node->full_name);
 		return -ENXIO;
 	}
 
 	err = of_property_read_u32(node, "cell-index", &val);
 	if (err) {
-		dev_err(dev, "Can't get %pOF property 'cell-index'\n", node);
+		dev_err(dev, "Can't get %s property 'cell-index'\n",
+			node->full_name);
 		return err;
 	}
 	pcfg->channel = val;
 	pcfg->cpu = -1;
 	irq = platform_get_irq(pdev, 0);
 	if (irq <= 0) {
-		dev_err(dev, "Can't get %pOF IRQ\n", node);
+		dev_err(dev, "Can't get %s IRQ\n", node->full_name);
 		return -ENXIO;
 	}
 	pcfg->irq = irq;
 
-	pcfg->addr_virt_ce = memremap(addr_phys[0]->start,
-					resource_size(addr_phys[0]),
-					QBMAN_MEMREMAP_ATTR);
-	if (!pcfg->addr_virt_ce) {
-		dev_err(dev, "memremap::CE failed\n");
+	va = ioremap_prot(addr_phys[0]->start, resource_size(addr_phys[0]), 0);
+	if (!va) {
+		dev_err(dev, "ioremap::CE failed\n");
 		goto err_ioremap1;
 	}
 
-	pcfg->addr_virt_ci = ioremap(addr_phys[1]->start,
-				resource_size(addr_phys[1]));
-	if (!pcfg->addr_virt_ci) {
+	pcfg->addr_virt[DPAA_PORTAL_CE] = va;
+
+	va = ioremap_prot(addr_phys[1]->start, resource_size(addr_phys[1]),
+			  _PAGE_GUARDED | _PAGE_NO_CACHE);
+	if (!va) {
 		dev_err(dev, "ioremap::CI failed\n");
 		goto err_ioremap2;
 	}
+
+	pcfg->addr_virt[DPAA_PORTAL_CI] = va;
 
 	pcfg->pools = qm_get_pools_sdqcr();
 
@@ -307,9 +313,9 @@ static int qman_portal_probe(struct platform_device *pdev)
 	return 0;
 
 err_portal_init:
-	iounmap(pcfg->addr_virt_ci);
+	iounmap(pcfg->addr_virt[DPAA_PORTAL_CI]);
 err_ioremap2:
-	memunmap(pcfg->addr_virt_ce);
+	iounmap(pcfg->addr_virt[DPAA_PORTAL_CE]);
 err_ioremap1:
 	return -ENXIO;
 }

@@ -134,9 +134,11 @@ struct clk_hw *clk_hw_register_mux_table(struct device *dev, const char *name,
 	}
 
 	/* allocate the mux */
-	mux = kzalloc(sizeof(*mux), GFP_KERNEL);
-	if (!mux)
+	mux = kzalloc(sizeof(struct clk_mux), GFP_KERNEL);
+	if (!mux) {
+		pr_err("%s: could not allocate mux clk\n", __func__);
 		return ERR_PTR(-ENOMEM);
+	}
 
 	init.name = name;
 	if (clk_mux_flags & CLK_MUX_READ_ONLY)

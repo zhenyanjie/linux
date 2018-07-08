@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -36,9 +35,9 @@
 # include <linux/module.h>
 # include <linux/kernel.h>
 
-#include <obd_class.h>
+#include "../include/obd_class.h"
 #include "mdc_internal.h"
-#include <lustre_fid.h>
+#include "../include/lustre_fid.h"
 
 /* mdc_setattr does its own semaphore handling */
 static int mdc_reint(struct ptlrpc_request *request, int level)

@@ -321,7 +321,7 @@ static struct net_device_stats *pcnet32_get_stats(struct net_device *);
 static void pcnet32_load_multicast(struct net_device *dev);
 static void pcnet32_set_multicast_list(struct net_device *);
 static int pcnet32_ioctl(struct net_device *, struct ifreq *, int);
-static void pcnet32_watchdog(struct timer_list *);
+static void pcnet32_watchdog(struct net_device *);
 static int mdio_read(struct net_device *dev, int phy_id, int reg_num);
 static void mdio_write(struct net_device *dev, int phy_id, int reg_num,
 		       int val);
@@ -1970,7 +1970,9 @@ pcnet32_probe1(unsigned long ioaddr, int shared, struct pci_dev *pdev)
 			lp->options |= PCNET32_PORT_MII;
 	}
 
-	timer_setup(&lp->watchdog_timer, pcnet32_watchdog, 0);
+	init_timer(&lp->watchdog_timer);
+	lp->watchdog_timer.data = (unsigned long)dev;
+	lp->watchdog_timer.function = (void *)&pcnet32_watchdog;
 
 	/* The PCNET32-specific entries in the device structure. */
 	dev->netdev_ops = &pcnet32_netdev_ops;
@@ -2900,10 +2902,9 @@ static void pcnet32_check_media(struct net_device *dev, int verbose)
  * Could possibly be changed to use mii_check_media instead.
  */
 
-static void pcnet32_watchdog(struct timer_list *t)
+static void pcnet32_watchdog(struct net_device *dev)
 {
-	struct pcnet32_private *lp = from_timer(lp, t, watchdog_timer);
-	struct net_device *dev = lp->dev;
+	struct pcnet32_private *lp = netdev_priv(dev);
 	unsigned long flags;
 
 	/* Print the link status if it has changed */

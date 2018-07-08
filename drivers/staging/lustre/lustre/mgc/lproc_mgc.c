@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -33,8 +32,8 @@
 #define DEBUG_SUBSYSTEM S_CLASS
 
 #include <linux/vfs.h>
-#include <obd_class.h>
-#include <lprocfs_status.h>
+#include "../include/obd_class.h"
+#include "../include/lprocfs_status.h"
 #include "mgc_internal.h"
 
 LPROC_SEQ_FOPS_RO_TYPE(mgc, connect_flags);

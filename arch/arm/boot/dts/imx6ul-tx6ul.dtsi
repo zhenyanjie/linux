@@ -362,7 +362,7 @@
 	clock-frequency = <400000>;
 	status = "okay";
 
-	sgtl5000: codec@a {
+	sgtl5000: codec@0a {
 		compatible = "fsl,sgtl5000";
 		reg = <0x0a>;
 		#sound-dai-cells = <0>;
@@ -424,7 +424,7 @@
 	display = <&display>;
 	status = "okay";
 
-	display: disp0 {
+	display: display@di0 {
 		bits-per-pixel = <32>;
 		bus-width = <24>;
 		status = "okay";

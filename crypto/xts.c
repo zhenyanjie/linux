@@ -269,7 +269,9 @@ static int do_encrypt(struct skcipher_request *req, int err)
 		      crypto_skcipher_encrypt(subreq) ?:
 		      post_crypt(req);
 
-		if (err == -EINPROGRESS || err == -EBUSY)
+		if (err == -EINPROGRESS ||
+		    (err == -EBUSY &&
+		     req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
 			return err;
 	}
 
@@ -319,7 +321,9 @@ static int do_decrypt(struct skcipher_request *req, int err)
 		      crypto_skcipher_decrypt(subreq) ?:
 		      post_crypt(req);
 
-		if (err == -EINPROGRESS || err == -EBUSY)
+		if (err == -EINPROGRESS ||
+		    (err == -EBUSY &&
+		     req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
 			return err;
 	}
 
@@ -550,10 +554,8 @@ static int create(struct crypto_template *tmpl, struct rtattr **tb)
 		ctx->name[len - 1] = 0;
 
 		if (snprintf(inst->alg.base.cra_name, CRYPTO_MAX_ALG_NAME,
-			     "xts(%s)", ctx->name) >= CRYPTO_MAX_ALG_NAME) {
-			err = -ENAMETOOLONG;
-			goto err_drop_spawn;
-		}
+			     "xts(%s)", ctx->name) >= CRYPTO_MAX_ALG_NAME)
+			return -ENAMETOOLONG;
 	} else
 		goto err_drop_spawn;
 

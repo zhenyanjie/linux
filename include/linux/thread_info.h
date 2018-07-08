@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /* thread_info.h: common low-level thread information accessors
  *
  * Copyright (C) 2002  David Howells (dhowells@redhat.com)
@@ -39,14 +38,11 @@ enum {
 
 #ifdef __KERNEL__
 
-#ifndef THREAD_ALIGN
-#define THREAD_ALIGN	THREAD_SIZE
-#endif
-
-#if IS_ENABLED(CONFIG_DEBUG_STACK_USAGE) || IS_ENABLED(CONFIG_DEBUG_KMEMLEAK)
-# define THREADINFO_GFP		(GFP_KERNEL_ACCOUNT | __GFP_ZERO)
+#ifdef CONFIG_DEBUG_STACK_USAGE
+# define THREADINFO_GFP		(GFP_KERNEL_ACCOUNT | __GFP_NOTRACK | \
+				 __GFP_ZERO)
 #else
-# define THREADINFO_GFP		(GFP_KERNEL_ACCOUNT)
+# define THREADINFO_GFP		(GFP_KERNEL_ACCOUNT | __GFP_NOTRACK)
 #endif
 
 /*

@@ -296,6 +296,7 @@ static inline int virtqueue_add(struct virtqueue *_vq,
 	}
 #endif
 
+	BUG_ON(total_sg > vq->vring.num);
 	BUG_ON(total_sg == 0);
 
 	head = vq->free_head;
@@ -304,10 +305,8 @@ static inline int virtqueue_add(struct virtqueue *_vq,
 	 * buffers, then go indirect. FIXME: tune this threshold */
 	if (vq->indirect && total_sg > 1 && vq->vq.num_free)
 		desc = alloc_indirect(_vq, total_sg, gfp);
-	else {
+	else
 		desc = NULL;
-		WARN_ON_ONCE(total_sg > vq->vring.num && !vq->indirect);
-	}
 
 	if (desc) {
 		/* Use a single buffer which doesn't continue */
@@ -392,7 +391,7 @@ static inline int virtqueue_add(struct virtqueue *_vq,
 	vq->desc_state[head].data = data;
 	if (indirect)
 		vq->desc_state[head].indir_desc = desc;
-	else
+	if (ctx)
 		vq->desc_state[head].indir_desc = ctx;
 
 	/* Put entry in available array (but don't update avail->idx until they
@@ -427,6 +426,8 @@ unmap_release:
 		vring_unmap_one(vq, &desc[i]);
 		i = virtio16_to_cpu(_vq->vdev, vq->vring.desc[i].next);
 	}
+
+	vq->vq.num_free += total_sg;
 
 	if (indirect)
 		kfree(desc);

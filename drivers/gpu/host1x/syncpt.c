@@ -54,7 +54,7 @@ static void host1x_syncpt_base_free(struct host1x_syncpt_base *base)
 }
 
 static struct host1x_syncpt *host1x_syncpt_alloc(struct host1x *host,
-						 struct host1x_client *client,
+						 struct device *dev,
 						 unsigned long flags)
 {
 	int i;
@@ -76,11 +76,11 @@ static struct host1x_syncpt *host1x_syncpt_alloc(struct host1x *host,
 	}
 
 	name = kasprintf(GFP_KERNEL, "%02u-%s", sp->id,
-			 client ? dev_name(client->dev) : NULL);
+			dev ? dev_name(dev) : NULL);
 	if (!name)
 		goto free_base;
 
-	sp->client = client;
+	sp->dev = dev;
 	sp->name = name;
 
 	if (flags & HOST1X_SYNCPT_CLIENT_MANAGED)
@@ -398,13 +398,6 @@ int host1x_syncpt_init(struct host1x *host)
 	for (i = 0; i < host->info->nb_pts; i++) {
 		syncpt[i].id = i;
 		syncpt[i].host = host;
-
-		/*
-		 * Unassign syncpt from channels for purposes of Tegra186
-		 * syncpoint protection. This prevents any channel from
-		 * accessing it until it is reassigned.
-		 */
-		host1x_hw_syncpt_assign_to_channel(host, &syncpt[i], NULL);
 	}
 
 	for (i = 0; i < host->info->nb_bases; i++)
@@ -415,7 +408,6 @@ int host1x_syncpt_init(struct host1x *host)
 	host->bases = bases;
 
 	host1x_syncpt_restore(host);
-	host1x_hw_syncpt_enable_protection(host);
 
 	/* Allocate sync point to use for clearing waits for expired fences */
 	host->nop_sp = host1x_syncpt_alloc(host, NULL, 0);
@@ -427,7 +419,7 @@ int host1x_syncpt_init(struct host1x *host)
 
 /**
  * host1x_syncpt_request() - request a syncpoint
- * @client: client requesting the syncpoint
+ * @dev: device requesting the syncpoint
  * @flags: flags
  *
  * host1x client drivers can use this function to allocate a syncpoint for
@@ -435,12 +427,12 @@ int host1x_syncpt_init(struct host1x *host)
  * use by the client exclusively. When no longer using a syncpoint, a host1x
  * client driver needs to release it using host1x_syncpt_free().
  */
-struct host1x_syncpt *host1x_syncpt_request(struct host1x_client *client,
+struct host1x_syncpt *host1x_syncpt_request(struct device *dev,
 					    unsigned long flags)
 {
-	struct host1x *host = dev_get_drvdata(client->parent->parent);
+	struct host1x *host = dev_get_drvdata(dev->parent);
 
-	return host1x_syncpt_alloc(host, client, flags);
+	return host1x_syncpt_alloc(host, dev, flags);
 }
 EXPORT_SYMBOL(host1x_syncpt_request);
 
@@ -464,7 +456,7 @@ void host1x_syncpt_free(struct host1x_syncpt *sp)
 	host1x_syncpt_base_free(sp->base);
 	kfree(sp->name);
 	sp->base = NULL;
-	sp->client = NULL;
+	sp->dev = NULL;
 	sp->name = NULL;
 	sp->client_managed = false;
 

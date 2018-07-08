@@ -25,8 +25,8 @@
 /**
  * ir_lirc_decode() - Send raw IR data to lirc_dev to be relayed to the
  *		      lircd userspace daemon for decoding.
- * @dev:	the struct rc_dev descriptor of the device
- * @ev:		the struct ir_raw_event descriptor of the pulse/space
+ * @input_dev:	the struct rc_dev descriptor of the device
+ * @duration:	the struct ir_raw_event descriptor of the pulse/space
  *
  * This function returns -EINVAL if the lirc interfaces aren't wired up.
  */
@@ -35,7 +35,7 @@ static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 	struct lirc_codec *lirc = &dev->raw->lirc;
 	int sample;
 
-	if (!dev->raw->lirc.ldev || !dev->raw->lirc.ldev->buf)
+	if (!dev->raw->lirc.drv || !dev->raw->lirc.drv->rbuf)
 		return -EINVAL;
 
 	/* Packet start */
@@ -84,8 +84,8 @@ static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 							(u64)LIRC_VALUE_MASK);
 
 			gap_sample = LIRC_SPACE(lirc->gap_duration);
-			lirc_buffer_write(dev->raw->lirc.ldev->buf,
-					  (unsigned char *)&gap_sample);
+			lirc_buffer_write(dev->raw->lirc.drv->rbuf,
+						(unsigned char *) &gap_sample);
 			lirc->gap = false;
 		}
 
@@ -95,9 +95,9 @@ static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 			   TO_US(ev.duration), TO_STR(ev.pulse));
 	}
 
-	lirc_buffer_write(dev->raw->lirc.ldev->buf,
+	lirc_buffer_write(dev->raw->lirc.drv->rbuf,
 			  (unsigned char *) &sample);
-	wake_up(&dev->raw->lirc.ldev->buf->wait_poll);
+	wake_up(&dev->raw->lirc.drv->rbuf->wait_poll);
 
 	return 0;
 }
@@ -298,14 +298,11 @@ static long ir_lirc_ioctl(struct file *filep, unsigned int cmd,
 		if (!dev->max_timeout)
 			return -ENOTTY;
 
-		/* Check for multiply overflow */
-		if (val > U32_MAX / 1000)
-			return -EINVAL;
-
 		tmp = val * 1000;
 
-		if (tmp < dev->min_timeout || tmp > dev->max_timeout)
-			return -EINVAL;
+		if (tmp < dev->min_timeout ||
+		    tmp > dev->max_timeout)
+				return -EINVAL;
 
 		if (dev->s_timeout)
 			ret = dev->s_timeout(dev, tmp);
@@ -346,12 +343,12 @@ static const struct file_operations lirc_fops = {
 
 static int ir_lirc_register(struct rc_dev *dev)
 {
-	struct lirc_dev *ldev;
+	struct lirc_driver *drv;
 	int rc = -ENOMEM;
 	unsigned long features = 0;
 
-	ldev = lirc_allocate_device();
-	if (!ldev)
+	drv = kzalloc(sizeof(struct lirc_driver), GFP_KERNEL);
+	if (!drv)
 		return rc;
 
 	if (dev->driver_type != RC_DRIVER_IR_RAW_TX) {
@@ -383,29 +380,32 @@ static int ir_lirc_register(struct rc_dev *dev)
 	if (dev->max_timeout)
 		features |= LIRC_CAN_SET_REC_TIMEOUT;
 
-	snprintf(ldev->name, sizeof(ldev->name), "ir-lirc-codec (%s)",
+	snprintf(drv->name, sizeof(drv->name), "ir-lirc-codec (%s)",
 		 dev->driver_name);
-	ldev->features = features;
-	ldev->data = &dev->raw->lirc;
-	ldev->buf = NULL;
-	ldev->code_length = sizeof(struct ir_raw_event) * 8;
-	ldev->chunk_size = sizeof(int);
-	ldev->buffer_size = LIRCBUF_SIZE;
-	ldev->fops = &lirc_fops;
-	ldev->dev.parent = &dev->dev;
-	ldev->rdev = dev;
-	ldev->owner = THIS_MODULE;
+	drv->minor = -1;
+	drv->features = features;
+	drv->data = &dev->raw->lirc;
+	drv->rbuf = NULL;
+	drv->code_length = sizeof(struct ir_raw_event) * 8;
+	drv->chunk_size = sizeof(int);
+	drv->buffer_size = LIRCBUF_SIZE;
+	drv->fops = &lirc_fops;
+	drv->dev = &dev->dev;
+	drv->rdev = dev;
+	drv->owner = THIS_MODULE;
 
-	rc = lirc_register_device(ldev);
-	if (rc < 0)
+	drv->minor = lirc_register_driver(drv);
+	if (drv->minor < 0) {
+		rc = -ENODEV;
 		goto out;
+	}
 
-	dev->raw->lirc.ldev = ldev;
+	dev->raw->lirc.drv = drv;
 	dev->raw->lirc.dev = dev;
 	return 0;
 
 out:
-	lirc_free_device(ldev);
+	kfree(drv);
 	return rc;
 }
 
@@ -413,8 +413,9 @@ static int ir_lirc_unregister(struct rc_dev *dev)
 {
 	struct lirc_codec *lirc = &dev->raw->lirc;
 
-	lirc_unregister_device(lirc->ldev);
-	lirc->ldev = NULL;
+	lirc_unregister_driver(lirc->drv->minor);
+	kfree(lirc->drv);
+	lirc->drv = NULL;
 
 	return 0;
 }

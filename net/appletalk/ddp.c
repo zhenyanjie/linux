@@ -158,9 +158,9 @@ found:
 	return s;
 }
 
-static void atalk_destroy_timer(struct timer_list *t)
+static void atalk_destroy_timer(unsigned long data)
 {
-	struct sock *sk = from_timer(sk, t, sk_timer);
+	struct sock *sk = (struct sock *)data;
 
 	if (sk_has_allocations(sk)) {
 		sk->sk_timer.expires = jiffies + SOCK_DESTROY_TIME;
@@ -175,7 +175,8 @@ static inline void atalk_destroy_socket(struct sock *sk)
 	skb_queue_purge(&sk->sk_receive_queue);
 
 	if (sk_has_allocations(sk)) {
-		timer_setup(&sk->sk_timer, atalk_destroy_timer, 0);
+		setup_timer(&sk->sk_timer, atalk_destroy_timer,
+				(unsigned long)sk);
 		sk->sk_timer.expires	= jiffies + SOCK_DESTROY_TIME;
 		add_timer(&sk->sk_timer);
 	} else

@@ -472,6 +472,47 @@ send_key_to_dongle(struct brcmf_if *ifp, struct brcmf_wsec_key *key)
 	return err;
 }
 
+static s32
+brcmf_configure_arp_nd_offload(struct brcmf_if *ifp, bool enable)
+{
+	s32 err;
+	u32 mode;
+
+	if (enable)
+		mode = BRCMF_ARP_OL_AGENT | BRCMF_ARP_OL_PEER_AUTO_REPLY;
+	else
+		mode = 0;
+
+	/* Try to set and enable ARP offload feature, this may fail, then it  */
+	/* is simply not supported and err 0 will be returned                 */
+	err = brcmf_fil_iovar_int_set(ifp, "arp_ol", mode);
+	if (err) {
+		brcmf_dbg(TRACE, "failed to set ARP offload mode to 0x%x, err = %d\n",
+			  mode, err);
+		err = 0;
+	} else {
+		err = brcmf_fil_iovar_int_set(ifp, "arpoe", enable);
+		if (err) {
+			brcmf_dbg(TRACE, "failed to configure (%d) ARP offload err = %d\n",
+				  enable, err);
+			err = 0;
+		} else
+			brcmf_dbg(TRACE, "successfully configured (%d) ARP offload to 0x%x\n",
+				  enable, mode);
+	}
+
+	err = brcmf_fil_iovar_int_set(ifp, "ndoe", enable);
+	if (err) {
+		brcmf_dbg(TRACE, "failed to configure (%d) ND offload err = %d\n",
+			  enable, err);
+		err = 0;
+	} else
+		brcmf_dbg(TRACE, "successfully configured (%d) ND offload to 0x%x\n",
+			  enable, mode);
+
+	return err;
+}
+
 static void
 brcmf_cfg80211_update_proto_addr_mode(struct wireless_dev *wdev)
 {
@@ -1043,6 +1084,7 @@ brcmf_do_escan(struct brcmf_if *ifp, struct cfg80211_scan_request *request)
 {
 	struct brcmf_cfg80211_info *cfg = ifp->drvr->config;
 	s32 err;
+	u32 passive_scan;
 	struct brcmf_scan_results *results;
 	struct escan_info *escan = &cfg->escan_info;
 
@@ -1050,7 +1092,13 @@ brcmf_do_escan(struct brcmf_if *ifp, struct cfg80211_scan_request *request)
 	escan->ifp = ifp;
 	escan->wiphy = cfg->wiphy;
 	escan->escan_state = WL_ESCAN_STATE_SCANNING;
-
+	passive_scan = cfg->active_scan ? 0 : 1;
+	err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_PASSIVE_SCAN,
+				    passive_scan);
+	if (err) {
+		brcmf_err("error (%d)\n", err);
+		return err;
+	}
 	brcmf_scan_config_mpc(ifp, 0);
 	results = (struct brcmf_scan_results *)cfg->escan_info.escan_buf;
 	results->version = 0;
@@ -1064,16 +1112,21 @@ brcmf_do_escan(struct brcmf_if *ifp, struct cfg80211_scan_request *request)
 }
 
 static s32
-brcmf_cfg80211_scan(struct wiphy *wiphy, struct cfg80211_scan_request *request)
+brcmf_cfg80211_escan(struct wiphy *wiphy, struct brcmf_cfg80211_vif *vif,
+		     struct cfg80211_scan_request *request,
+		     struct cfg80211_ssid *this_ssid)
 {
+	struct brcmf_if *ifp = vif->ifp;
 	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
-	struct brcmf_cfg80211_vif *vif;
-	s32 err = 0;
+	struct cfg80211_ssid *ssids;
+	u32 passive_scan;
+	bool escan_req;
+	bool spec_scan;
+	s32 err;
+	struct brcmf_ssid_le ssid_le;
+	u32 SSID_len;
 
-	brcmf_dbg(TRACE, "Enter\n");
-	vif = container_of(request->wdev, struct brcmf_cfg80211_vif, wdev);
-	if (!check_vif_up(vif))
-		return -EIO;
+	brcmf_dbg(SCAN, "START ESCAN\n");
 
 	if (test_bit(BRCMF_SCAN_STATUS_BUSY, &cfg->scan_status)) {
 		brcmf_err("Scanning already: status (%lu)\n", cfg->scan_status);
@@ -1089,8 +1142,8 @@ brcmf_cfg80211_scan(struct wiphy *wiphy, struct cfg80211_scan_request *request)
 			  cfg->scan_status);
 		return -EAGAIN;
 	}
-	if (test_bit(BRCMF_VIF_STATUS_CONNECTING, &vif->sme_state)) {
-		brcmf_err("Connecting: status (%lu)\n", vif->sme_state);
+	if (test_bit(BRCMF_VIF_STATUS_CONNECTING, &ifp->vif->sme_state)) {
+		brcmf_err("Connecting: status (%lu)\n", ifp->vif->sme_state);
 		return -EAGAIN;
 	}
 
@@ -1098,35 +1151,93 @@ brcmf_cfg80211_scan(struct wiphy *wiphy, struct cfg80211_scan_request *request)
 	if (vif == cfg->p2p.bss_idx[P2PAPI_BSSCFG_DEVICE].vif)
 		vif = cfg->p2p.bss_idx[P2PAPI_BSSCFG_PRIMARY].vif;
 
-	brcmf_dbg(SCAN, "START ESCAN\n");
+	escan_req = false;
+	if (request) {
+		/* scan bss */
+		ssids = request->ssids;
+		escan_req = true;
+	} else {
+		/* scan in ibss */
+		/* we don't do escan in ibss */
+		ssids = this_ssid;
+	}
 
 	cfg->scan_request = request;
 	set_bit(BRCMF_SCAN_STATUS_BUSY, &cfg->scan_status);
+	if (escan_req) {
+		cfg->escan_info.run = brcmf_run_escan;
+		err = brcmf_p2p_scan_prep(wiphy, request, vif);
+		if (err)
+			goto scan_out;
 
-	cfg->escan_info.run = brcmf_run_escan;
-	err = brcmf_p2p_scan_prep(wiphy, request, vif);
-	if (err)
-		goto scan_out;
+		err = brcmf_do_escan(vif->ifp, request);
+		if (err)
+			goto scan_out;
+	} else {
+		brcmf_dbg(SCAN, "ssid \"%s\", ssid_len (%d)\n",
+			  ssids->ssid, ssids->ssid_len);
+		memset(&ssid_le, 0, sizeof(ssid_le));
+		SSID_len = min_t(u8, sizeof(ssid_le.SSID), ssids->ssid_len);
+		ssid_le.SSID_len = cpu_to_le32(0);
+		spec_scan = false;
+		if (SSID_len) {
+			memcpy(ssid_le.SSID, ssids->ssid, SSID_len);
+			ssid_le.SSID_len = cpu_to_le32(SSID_len);
+			spec_scan = true;
+		} else
+			brcmf_dbg(SCAN, "Broadcast scan\n");
 
-	err = brcmf_vif_set_mgmt_ie(vif, BRCMF_VNDR_IE_PRBREQ_FLAG,
-				    request->ie, request->ie_len);
-	if (err)
-		goto scan_out;
+		passive_scan = cfg->active_scan ? 0 : 1;
+		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_PASSIVE_SCAN,
+					    passive_scan);
+		if (err) {
+			brcmf_err("WLC_SET_PASSIVE_SCAN error (%d)\n", err);
+			goto scan_out;
+		}
+		brcmf_scan_config_mpc(ifp, 0);
+		err = brcmf_fil_cmd_data_set(ifp, BRCMF_C_SCAN, &ssid_le,
+					     sizeof(ssid_le));
+		if (err) {
+			if (err == -EBUSY)
+				brcmf_dbg(INFO, "BUSY: scan for \"%s\" canceled\n",
+					  ssid_le.SSID);
+			else
+				brcmf_err("WLC_SCAN error (%d)\n", err);
 
-	err = brcmf_do_escan(vif->ifp, request);
-	if (err)
-		goto scan_out;
+			brcmf_scan_config_mpc(ifp, 1);
+			goto scan_out;
+		}
+	}
 
 	/* Arm scan timeout timer */
-	mod_timer(&cfg->escan_timeout,
-		  jiffies + msecs_to_jiffies(BRCMF_ESCAN_TIMER_INTERVAL_MS));
+	mod_timer(&cfg->escan_timeout, jiffies +
+			BRCMF_ESCAN_TIMER_INTERVAL_MS * HZ / 1000);
 
 	return 0;
 
 scan_out:
-	brcmf_err("scan error (%d)\n", err);
 	clear_bit(BRCMF_SCAN_STATUS_BUSY, &cfg->scan_status);
 	cfg->scan_request = NULL;
+	return err;
+}
+
+static s32
+brcmf_cfg80211_scan(struct wiphy *wiphy, struct cfg80211_scan_request *request)
+{
+	struct brcmf_cfg80211_vif *vif;
+	s32 err = 0;
+
+	brcmf_dbg(TRACE, "Enter\n");
+	vif = container_of(request->wdev, struct brcmf_cfg80211_vif, wdev);
+	if (!check_vif_up(vif))
+		return -EIO;
+
+	err = brcmf_cfg80211_escan(wiphy, vif, request, NULL);
+
+	if (err)
+		brcmf_err("scan error (%d)\n", err);
+
+	brcmf_dbg(TRACE, "Exit\n");
 	return err;
 }
 
@@ -2983,10 +3094,10 @@ static void brcmf_cfg80211_escan_timeout_worker(struct work_struct *work)
 	brcmf_notify_escan_complete(cfg, cfg->escan_info.ifp, true, true);
 }
 
-static void brcmf_escan_timeout(struct timer_list *t)
+static void brcmf_escan_timeout(unsigned long data)
 {
 	struct brcmf_cfg80211_info *cfg =
-			from_timer(cfg, t, escan_timeout);
+			(struct brcmf_cfg80211_info *)data;
 
 	if (cfg->int_escan_map || cfg->scan_request) {
 		brcmf_err("timer expired\n");
@@ -3150,7 +3261,9 @@ static void brcmf_init_escan(struct brcmf_cfg80211_info *cfg)
 			    brcmf_cfg80211_escan_handler);
 	cfg->escan_info.escan_state = WL_ESCAN_STATE_IDLE;
 	/* Init scan_timeout timer */
-	timer_setup(&cfg->escan_timeout, brcmf_escan_timeout, 0);
+	init_timer(&cfg->escan_timeout);
+	cfg->escan_timeout.data = (unsigned long) cfg;
+	cfg->escan_timeout.function = brcmf_escan_timeout;
 	INIT_WORK(&cfg->escan_timeout_work,
 		  brcmf_cfg80211_escan_timeout_worker);
 }
@@ -3828,7 +3941,6 @@ brcmf_cfg80211_flush_pmksa(struct wiphy *wiphy, struct net_device *ndev)
 static s32 brcmf_configure_opensecurity(struct brcmf_if *ifp)
 {
 	s32 err;
-	s32 wpa_val;
 
 	/* set auth */
 	err = brcmf_fil_bsscfg_int_set(ifp, "auth", 0);
@@ -3843,11 +3955,7 @@ static s32 brcmf_configure_opensecurity(struct brcmf_if *ifp)
 		return err;
 	}
 	/* set upper-layer auth */
-	if (brcmf_is_ibssmode(ifp->vif))
-		wpa_val = WPA_AUTH_NONE;
-	else
-		wpa_val = WPA_AUTH_DISABLED;
-	err = brcmf_fil_bsscfg_int_set(ifp, "wpa_auth", wpa_val);
+	err = brcmf_fil_bsscfg_int_set(ifp, "wpa_auth", WPA_AUTH_NONE);
 	if (err < 0) {
 		brcmf_err("wpa_auth error %d\n", err);
 		return err;
@@ -5586,13 +5694,10 @@ brcmf_notify_roaming_status(struct brcmf_if *ifp,
 	u32 status = e->status;
 
 	if (event == BRCMF_E_ROAM && status == BRCMF_E_STATUS_SUCCESS) {
-		if (test_bit(BRCMF_VIF_STATUS_CONNECTED,
-			     &ifp->vif->sme_state)) {
+		if (test_bit(BRCMF_VIF_STATUS_CONNECTED, &ifp->vif->sme_state))
 			brcmf_bss_roaming_done(cfg, ifp->ndev, e);
-		} else {
+		else
 			brcmf_bss_connect_done(cfg, ifp->ndev, e, true);
-			brcmf_net_setcarrier(ifp, true);
-		}
 	}
 
 	return 0;
@@ -5764,6 +5869,7 @@ static s32 wl_init_priv(struct brcmf_cfg80211_info *cfg)
 
 	cfg->scan_request = NULL;
 	cfg->pwr_save = true;
+	cfg->active_scan = true;	/* we do active scan per default */
 	cfg->dongle_up = false;		/* dongle is not up yet */
 	err = brcmf_init_priv_mem(cfg);
 	if (err)
@@ -6351,8 +6457,6 @@ static int brcmf_setup_ifmodes(struct wiphy *wiphy, struct brcmf_if *ifp)
 	if (p2p) {
 		if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_MCHAN))
 			combo[c].num_different_channels = 2;
-		else
-			combo[c].num_different_channels = 1;
 		wiphy->interface_modes |= BIT(NL80211_IFTYPE_P2P_CLIENT) |
 					  BIT(NL80211_IFTYPE_P2P_GO) |
 					  BIT(NL80211_IFTYPE_P2P_DEVICE);
@@ -6362,10 +6466,10 @@ static int brcmf_setup_ifmodes(struct wiphy *wiphy, struct brcmf_if *ifp)
 		c0_limits[i++].types = BIT(NL80211_IFTYPE_P2P_CLIENT) |
 				       BIT(NL80211_IFTYPE_P2P_GO);
 	} else {
-		combo[c].num_different_channels = 1;
 		c0_limits[i].max = 1;
 		c0_limits[i++].types = BIT(NL80211_IFTYPE_AP);
 	}
+	combo[c].num_different_channels = 1;
 	combo[c].max_interfaces = i;
 	combo[c].n_limits = i;
 	combo[c].limits = c0_limits;

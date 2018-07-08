@@ -5761,9 +5761,9 @@ void bnx2x_drv_pulse(struct bnx2x *bp)
 		 bp->fw_drv_pulse_wr_seq);
 }
 
-static void bnx2x_timer(struct timer_list *t)
+static void bnx2x_timer(unsigned long data)
 {
-	struct bnx2x *bp = from_timer(bp, t, timer);
+	struct bnx2x *bp = (struct bnx2x *) data;
 
 	if (!netif_running(bp->dev))
 		return;
@@ -9332,7 +9332,7 @@ void bnx2x_chip_cleanup(struct bnx2x *bp, int unload_mode, bool keep_link)
 	/* Schedule the rx_mode command */
 	if (test_bit(BNX2X_FILTER_RX_MODE_PENDING, &bp->sp_state))
 		set_bit(BNX2X_FILTER_RX_MODE_SCHED, &bp->sp_state);
-	else if (bp->slowpath)
+	else
 		bnx2x_set_storm_rx_mode(bp);
 
 	/* Cleanup multicast configuration */
@@ -9578,15 +9578,6 @@ static int bnx2x_init_shmem(struct bnx2x *bp)
 
 	do {
 		bp->common.shmem_base = REG_RD(bp, MISC_REG_SHARED_MEM_ADDR);
-
-		/* If we read all 0xFFs, means we are in PCI error state and
-		 * should bail out to avoid crashes on adapter's FW reads.
-		 */
-		if (bp->common.shmem_base == 0xFFFFFFFF) {
-			bp->flags |= NO_MCP_FLAG;
-			return -ENODEV;
-		}
-
 		if (bp->common.shmem_base) {
 			val = SHMEM_RD(bp, validity_map[BP_PORT(bp)]);
 			if (val & SHR_MEM_VALIDITY_MB)
@@ -10280,15 +10271,8 @@ static void bnx2x_sp_rtnl_task(struct work_struct *work)
 		smp_mb();
 
 		bnx2x_nic_unload(bp, UNLOAD_NORMAL, true);
-		/* When ret value shows failure of allocation failure,
-		 * the nic is rebooted again. If open still fails, a error
-		 * message to notify the user.
-		 */
-		if (bnx2x_nic_load(bp, LOAD_NORMAL) == -ENOMEM) {
-			bnx2x_nic_unload(bp, UNLOAD_NORMAL, true);
-			if (bnx2x_nic_load(bp, LOAD_NORMAL))
-				BNX2X_ERR("Open the NIC fails again!\n");
-		}
+		bnx2x_nic_load(bp, LOAD_NORMAL);
+
 		rtnl_unlock();
 		return;
 	}
@@ -12430,8 +12414,10 @@ static int bnx2x_init_bp(struct bnx2x *bp)
 
 	bp->current_interval = CHIP_REV_IS_SLOW(bp) ? 5*HZ : HZ;
 
-	timer_setup(&bp->timer, bnx2x_timer, 0);
+	init_timer(&bp->timer);
 	bp->timer.expires = jiffies + bp->current_interval;
+	bp->timer.data = (unsigned long) bp;
+	bp->timer.function = bnx2x_timer;
 
 	if (SHMEM2_HAS(bp, dcbx_lldp_params_offset) &&
 	    SHMEM2_HAS(bp, dcbx_lldp_dcbx_stat_offset) &&
@@ -14329,10 +14315,7 @@ static pci_ers_result_t bnx2x_io_slot_reset(struct pci_dev *pdev)
 		BNX2X_ERR("IO slot reset --> driver unload\n");
 
 		/* MCP should have been reset; Need to wait for validity */
-		if (bnx2x_init_shmem(bp)) {
-			rtnl_unlock();
-			return PCI_ERS_RESULT_DISCONNECT;
-		}
+		bnx2x_init_shmem(bp);
 
 		if (IS_PF(bp) && SHMEM2_HAS(bp, drv_capabilities_flag)) {
 			u32 v;

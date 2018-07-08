@@ -455,10 +455,11 @@ struct dvb_frontend *as102_attach(const char *name,
 	struct as102_state *state;
 	struct dvb_frontend *fe;
 
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
-	if (!state)
+	state = kzalloc(sizeof(struct as102_state), GFP_KERNEL);
+	if (state == NULL) {
+		pr_err("%s: unable to allocate memory for state\n", __func__);
 		return NULL;
-
+	}
 	fe = &state->frontend;
 	fe->demodulator_priv = state;
 	state->ops = ops;

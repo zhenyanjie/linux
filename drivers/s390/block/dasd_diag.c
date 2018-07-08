@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Author(s)......: Holger Smolinski <Holger.Smolinski@de.ibm.com>
  * Based on.......: linux/drivers/s390/block/mdisk.c
@@ -236,7 +235,7 @@ static void dasd_ext_handler(struct ext_code ext_code,
 {
 	struct dasd_ccw_req *cqr, *next;
 	struct dasd_device *device;
-	unsigned long expires;
+	unsigned long long expires;
 	unsigned long flags;
 	addr_t ip;
 	int rc;

@@ -234,19 +234,7 @@ out:
 static int gfs2_writepages(struct address_space *mapping,
 			   struct writeback_control *wbc)
 {
-	struct gfs2_sbd *sdp = gfs2_mapping2sbd(mapping);
-	int ret = mpage_writepages(mapping, wbc, gfs2_get_block_noalloc);
-
-	/*
-	 * Even if we didn't write any pages here, we might still be holding
-	 * dirty pages in the ail. We forcibly flush the ail because we don't
-	 * want balance_dirty_pages() to loop indefinitely trying to write out
-	 * pages held in the ail that it can't find.
-	 */
-	if (ret == 0)
-		set_bit(SDF_FORCE_AIL_FLUSH, &sdp->sd_flags);
-
-	return ret;
+	return mpage_writepages(mapping, wbc, gfs2_get_block_noalloc);
 }
 
 /**
@@ -279,6 +267,22 @@ static int gfs2_write_jdata_pagevec(struct address_space *mapping,
 
 	for(i = 0; i < nr_pages; i++) {
 		struct page *page = pvec->pages[i];
+
+		/*
+		 * At this point, the page may be truncated or
+		 * invalidated (changing page->mapping to NULL), or
+		 * even swizzled back from swapper_space to tmpfs file
+		 * mapping. However, page->index will not change
+		 * because we have a reference on the page.
+		 */
+		if (page->index > end) {
+			/*
+			 * can't be range_cyclic (1st pass) because
+			 * end == -1 in that case.
+			 */
+			ret = 1;
+			break;
+		}
 
 		*done_index = page->index;
 
@@ -371,7 +375,7 @@ static int gfs2_write_cache_jdata(struct address_space *mapping,
 	int range_whole = 0;
 	int tag;
 
-	pagevec_init(&pvec);
+	pagevec_init(&pvec, 0);
 	if (wbc->range_cyclic) {
 		writeback_index = mapping->writeback_index; /* prev offset */
 		index = writeback_index;
@@ -397,8 +401,8 @@ retry:
 		tag_pages_for_writeback(mapping, index, end);
 	done_index = index;
 	while (!done && (index <= end)) {
-		nr_pages = pagevec_lookup_range_tag(&pvec, mapping, &index, end,
-				tag);
+		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
+			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 		if (nr_pages == 0)
 			break;
 

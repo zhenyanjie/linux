@@ -51,6 +51,9 @@ s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, struct adapter *padapter)
 	struct xmit_frame *pxframe;
 	sint	res = _SUCCESS;
 
+	/*  We don't need to memset padapter->XXX to zero, because adapter is allocated by vzalloc(). */
+	/* memset((unsigned char *)pxmitpriv, 0, sizeof(struct xmit_priv)); */
+
 	spin_lock_init(&pxmitpriv->lock);
 	spin_lock_init(&pxmitpriv->lock_sctx);
 	sema_init(&pxmitpriv->xmit_sema, 0);
@@ -2163,7 +2166,7 @@ void rtw_alloc_hwxmits(struct adapter *padapter)
 
 	pxmitpriv->hwxmits = NULL;
 
-	pxmitpriv->hwxmits = rtw_zmalloc(sizeof(struct hw_xmit) * pxmitpriv->hwxmit_entry);
+	pxmitpriv->hwxmits = (struct hw_xmit *)rtw_zmalloc(sizeof(struct hw_xmit) * pxmitpriv->hwxmit_entry);
 
 	if (pxmitpriv->hwxmits == NULL) {
 		DBG_871X("alloc hwxmits fail!...\n");
@@ -2298,8 +2301,8 @@ static void do_queue_select(struct adapter	*padapter, struct pkt_attrib *pattrib
  */
 s32 rtw_xmit(struct adapter *padapter, _pkt **ppkt)
 {
-	static unsigned long start;
-	static u32 drop_cnt;
+	static unsigned long start = 0;
+	static u32 drop_cnt = 0;
 
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct xmit_frame *pxmitframe = NULL;
@@ -2999,7 +3002,7 @@ int rtw_xmit_thread(void *context)
 
 
 	err = _SUCCESS;
-	padapter = context;
+	padapter = (struct adapter *)context;
 
 	thread_enter("RTW_XMIT_THREAD");
 

@@ -45,9 +45,6 @@ static const char ucode_path[] = "kernel/x86/microcode/GenuineIntel.bin";
 /* Current microcode patch used in early patching on the APs. */
 static struct microcode_intel *intel_ucode_patch;
 
-/* last level cache size per core */
-static int llc_size_per_core;
-
 static inline bool cpu_signatures_match(unsigned int s1, unsigned int p1,
 					unsigned int s2, unsigned int p2)
 {
@@ -150,18 +147,18 @@ static bool microcode_matches(struct microcode_header_intel *mc_header,
 	return false;
 }
 
-static struct ucode_patch *memdup_patch(void *data, unsigned int size)
+static struct ucode_patch *__alloc_microcode_buf(void *data, unsigned int size)
 {
 	struct ucode_patch *p;
 
 	p = kzalloc(sizeof(struct ucode_patch), GFP_KERNEL);
 	if (!p)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	p->data = kmemdup(data, size, GFP_KERNEL);
 	if (!p->data) {
 		kfree(p);
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	return p;
@@ -187,8 +184,8 @@ static void save_microcode_patch(void *data, unsigned int size)
 			if (mc_hdr->rev <= mc_saved_hdr->rev)
 				continue;
 
-			p = memdup_patch(data, size);
-			if (!p)
+			p = __alloc_microcode_buf(data, size);
+			if (IS_ERR(p))
 				pr_err("Error allocating buffer %p\n", data);
 			else
 				list_replace(&iter->plist, &p->plist);
@@ -200,25 +197,24 @@ static void save_microcode_patch(void *data, unsigned int size)
 	 * newly found.
 	 */
 	if (!prev_found) {
-		p = memdup_patch(data, size);
-		if (!p)
+		p = __alloc_microcode_buf(data, size);
+		if (IS_ERR(p))
 			pr_err("Error allocating buffer for %p\n", data);
 		else
 			list_add_tail(&p->plist, &microcode_cache);
 	}
-
-	if (!p)
-		return;
 
 	/*
 	 * Save for early loading. On 32-bit, that needs to be a physical
 	 * address as the APs are running from physical addresses, before
 	 * paging has been enabled.
 	 */
-	if (IS_ENABLED(CONFIG_X86_32))
-		intel_ucode_patch = (struct microcode_intel *)__pa_nodebug(p->data);
-	else
-		intel_ucode_patch = p->data;
+	if (p) {
+		if (IS_ENABLED(CONFIG_X86_32))
+			intel_ucode_patch = (struct microcode_intel *)__pa_nodebug(p->data);
+		else
+			intel_ucode_patch = p->data;
+	}
 }
 
 static int microcode_sanity_check(void *mc, int print_err)
@@ -568,6 +564,15 @@ static void print_ucode(struct ucode_cpu_info *uci)
 }
 #else
 
+/*
+ * Flush global tlb. We only do this in x86_64 where paging has been enabled
+ * already and PGE should be enabled as well.
+ */
+static inline void flush_tlb_early(void)
+{
+	__native_flush_tlb_global_irq_disabled();
+}
+
 static inline void print_ucode(struct ucode_cpu_info *uci)
 {
 	struct microcode_intel *mc;
@@ -589,23 +594,6 @@ static int apply_microcode_early(struct ucode_cpu_info *uci, bool early)
 	if (!mc)
 		return 0;
 
-	/*
-	 * Save us the MSR write below - which is a particular expensive
-	 * operation - when the other hyperthread has updated the microcode
-	 * already.
-	 */
-	rev = intel_get_microcode_revision();
-	if (rev >= mc->hdr.rev) {
-		uci->cpu_sig.rev = rev;
-		return UCODE_OK;
-	}
-
-	/*
-	 * Writeback and invalidate caches before updating microcode to avoid
-	 * internal issues depending on what the microcode is updating.
-	 */
-	native_wbinvd();
-
 	/* write microcode via MSR 0x79 */
 	native_wrmsrl(MSR_IA32_UCODE_WRITE, (unsigned long)mc->bits);
 
@@ -613,6 +601,10 @@ static int apply_microcode_early(struct ucode_cpu_info *uci, bool early)
 	if (rev != mc->hdr.rev)
 		return -1;
 
+#ifdef CONFIG_X86_64
+	/* Flush global tlb. This is precaution. */
+	flush_tlb_early();
+#endif
 	uci->cpu_sig.rev = rev;
 
 	if (early)
@@ -789,43 +781,26 @@ static int collect_cpu_info(int cpu_num, struct cpu_signature *csig)
 	return 0;
 }
 
-static enum ucode_state apply_microcode_intel(int cpu)
+static int apply_microcode_intel(int cpu)
 {
-	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
-	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	struct microcode_intel *mc;
+	struct ucode_cpu_info *uci;
+	struct cpuinfo_x86 *c;
 	static int prev_rev;
 	u32 rev;
 
 	/* We should bind the task to the CPU */
 	if (WARN_ON(raw_smp_processor_id() != cpu))
-		return UCODE_ERROR;
+		return -1;
 
-	/* Look for a newer patch in our cache: */
-	mc = find_patch(uci);
+	uci = ucode_cpu_info + cpu;
+	mc = uci->mc;
 	if (!mc) {
-		mc = uci->mc;
+		/* Look for a newer patch in our cache: */
+		mc = find_patch(uci);
 		if (!mc)
-			return UCODE_NFOUND;
+			return 0;
 	}
-
-	/*
-	 * Save us the MSR write below - which is a particular expensive
-	 * operation - when the other hyperthread has updated the microcode
-	 * already.
-	 */
-	rev = intel_get_microcode_revision();
-	if (rev >= mc->hdr.rev) {
-		uci->cpu_sig.rev = rev;
-		c->microcode = rev;
-		return UCODE_OK;
-	}
-
-	/*
-	 * Writeback and invalidate caches before updating microcode to avoid
-	 * internal issues depending on what the microcode is updating.
-	 */
-	native_wbinvd();
 
 	/* write microcode via MSR 0x79 */
 	wrmsrl(MSR_IA32_UCODE_WRITE, (unsigned long)mc->bits);
@@ -835,7 +810,7 @@ static enum ucode_state apply_microcode_intel(int cpu)
 	if (rev != mc->hdr.rev) {
 		pr_err("CPU%d update to revision 0x%x failed\n",
 		       cpu, mc->hdr.rev);
-		return UCODE_ERROR;
+		return -1;
 	}
 
 	if (rev != prev_rev) {
@@ -847,10 +822,12 @@ static enum ucode_state apply_microcode_intel(int cpu)
 		prev_rev = rev;
 	}
 
+	c = &cpu_data(cpu);
+
 	uci->cpu_sig.rev = rev;
 	c->microcode = rev;
 
-	return UCODE_UPDATED;
+	return 0;
 }
 
 static enum ucode_state generic_load_microcode(int cpu, void *data, size_t size,
@@ -862,7 +839,6 @@ static enum ucode_state generic_load_microcode(int cpu, void *data, size_t size,
 	unsigned int leftover = size;
 	unsigned int curr_mc_size = 0, new_mc_size = 0;
 	unsigned int csig, cpf;
-	enum ucode_state ret = UCODE_OK;
 
 	while (leftover) {
 		struct microcode_header_intel mc_header;
@@ -904,7 +880,6 @@ static enum ucode_state generic_load_microcode(int cpu, void *data, size_t size,
 			new_mc  = mc;
 			new_mc_size = mc_size;
 			mc = NULL;	/* trigger new vmalloc */
-			ret = UCODE_NEW;
 		}
 
 		ucode_ptr += mc_size;
@@ -934,7 +909,7 @@ static enum ucode_state generic_load_microcode(int cpu, void *data, size_t size,
 	pr_debug("CPU%d found a matching microcode update with version 0x%x (current=0x%x)\n",
 		 cpu, new_rev, uci->cpu_sig.rev);
 
-	return ret;
+	return UCODE_OK;
 }
 
 static int get_ucode_fw(void *to, const void *from, size_t n)
@@ -947,19 +922,8 @@ static bool is_blacklisted(unsigned int cpu)
 {
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
 
-	/*
-	 * Late loading on model 79 with microcode revision less than 0x0b000021
-	 * and LLC size per core bigger than 2.5MB may result in a system hang.
-	 * This behavior is documented in item BDF90, #334165 (Intel Xeon
-	 * Processor E7-8800/4800 v4 Product Family).
-	 */
-	if (c->x86 == 6 &&
-	    c->x86_model == INTEL_FAM6_BROADWELL_X &&
-	    c->x86_stepping == 0x01 &&
-	    llc_size_per_core > 2621440 &&
-	    c->microcode < 0x0b000021) {
-		pr_err_once("Erratum BDF90: late loading with revision < 0x0b000021 (0x%x) disabled.\n", c->microcode);
-		pr_err_once("Please consider either early loading through initrd/built-in or a potential BIOS update.\n");
+	if (c->x86 == 6 && c->x86_model == INTEL_FAM6_BROADWELL_X) {
+		pr_err_once("late loading on model 79 is disabled.\n");
 		return true;
 	}
 
@@ -978,7 +942,7 @@ static enum ucode_state request_microcode_fw(int cpu, struct device *device,
 		return UCODE_NFOUND;
 
 	sprintf(name, "intel-ucode/%02x-%02x-%02x",
-		c->x86, c->x86_model, c->x86_stepping);
+		c->x86, c->x86_model, c->x86_mask);
 
 	if (request_firmware_direct(&firmware, name, device)) {
 		pr_debug("data file %s load failed\n", name);
@@ -1014,15 +978,6 @@ static struct microcode_ops microcode_intel_ops = {
 	.apply_microcode                  = apply_microcode_intel,
 };
 
-static int __init calc_llc_size_per_core(struct cpuinfo_x86 *c)
-{
-	u64 llc_size = c->x86_cache_size * 1024ULL;
-
-	do_div(llc_size, c->x86_max_cores);
-
-	return (int)llc_size;
-}
-
 struct microcode_ops * __init init_intel_microcode(void)
 {
 	struct cpuinfo_x86 *c = &boot_cpu_data;
@@ -1032,8 +987,6 @@ struct microcode_ops * __init init_intel_microcode(void)
 		pr_err("Intel CPU family 0x%x not supported\n", c->x86);
 		return NULL;
 	}
-
-	llc_size_per_core = calc_llc_size_per_core(c);
 
 	return &microcode_intel_ops;
 }

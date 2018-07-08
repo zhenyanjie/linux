@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -41,16 +40,16 @@
 
 #define DEBUG_SUBSYSTEM S_RPC
 
-#include <linux/libcfs/libcfs.h>
+#include "../../include/linux/libcfs/libcfs.h"
 
-#include <uapi/linux/lustre/lustre_fiemap.h>
+#include "../include/lustre/ll_fiemap.h"
 
-#include <llog_swab.h>
-#include <lustre_net.h>
-#include <lustre_swab.h>
-#include <obd_cksum.h>
-#include <obd_support.h>
-#include <obd_class.h>
+#include "../include/llog_swab.h"
+#include "../include/lustre_net.h"
+#include "../include/lustre_swab.h"
+#include "../include/obd_cksum.h"
+#include "../include/obd_support.h"
+#include "../include/obd_class.h"
 
 #include "ptlrpc_internal.h"
 
@@ -187,9 +186,7 @@ void lustre_init_msg_v2(struct lustre_msg_v2 *msg, int count, __u32 *lens,
 	for (i = 0; i < count; i++) {
 		char *tmp = bufs[i];
 
-		if (tmp)
-			memcpy(ptr, tmp, lens[i]);
-		ptr += cfs_size_round(lens[i]);
+		LOGL(tmp, lens[i], ptr);
 	}
 }
 EXPORT_SYMBOL(lustre_init_msg_v2);
@@ -787,7 +784,7 @@ __u32 lustre_msg_get_flags(struct lustre_msg *msg)
 
 		CERROR("invalid msg %p: no ptlrpc body!\n", msg);
 	}
-	/* fall through */
+	/* no break */
 	default:
 		/* flags might be printed in debug code while message
 		 * uninitialized
@@ -855,7 +852,7 @@ __u32 lustre_msg_get_op_flags(struct lustre_msg *msg)
 
 		CERROR("invalid msg %p: no ptlrpc body!\n", msg);
 	}
-	/* fall through */
+	/* no break */
 	default:
 		return 0;
 	}
@@ -1036,7 +1033,7 @@ int lustre_msg_get_status(struct lustre_msg *msg)
 
 		CERROR("invalid msg %p: no ptlrpc body!\n", msg);
 	}
-	/* fall through */
+	/* no break */
 	default:
 		/* status might be printed in debug code while message
 		 * uninitialized

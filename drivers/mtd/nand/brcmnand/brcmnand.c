@@ -29,7 +29,7 @@
 #include <linux/bitops.h>
 #include <linux/mm.h>
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/rawnand.h>
+#include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
@@ -1763,7 +1763,7 @@ try_dmaread:
 			err = brcmstb_nand_verify_erased_page(mtd, chip, buf,
 							      addr);
 			/* erased page bitflips corrected */
-			if (err >= 0)
+			if (err > 0)
 				return err;
 		}
 
@@ -2193,9 +2193,16 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 	if (ctrl->nand_version >= 0x0702)
 		tmp |= ACC_CONTROL_RD_ERASED;
 	tmp &= ~ACC_CONTROL_FAST_PGM_RDIN;
-	if (ctrl->features & BRCMNAND_HAS_PREFETCH)
-		tmp &= ~ACC_CONTROL_PREFETCH;
-
+	if (ctrl->features & BRCMNAND_HAS_PREFETCH) {
+		/*
+		 * FIXME: Flash DMA + prefetch may see spurious erased-page ECC
+		 * errors
+		 */
+		if (has_flash_dma(ctrl))
+			tmp &= ~ACC_CONTROL_PREFETCH;
+		else
+			tmp |= ACC_CONTROL_PREFETCH;
+	}
 	nand_writereg(ctrl, offs, tmp);
 
 	return 0;

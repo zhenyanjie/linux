@@ -2589,17 +2589,6 @@ static const unsigned int mmc_data8_mux[] = {
 	MMC_D0_MARK, MMC_D1_MARK, MMC_D2_MARK, MMC_D3_MARK,
 	MMC_D4_MARK, MMC_D5_MARK, MMC_D6_MARK, MMC_D7_MARK,
 };
-static const unsigned int mmc_data8_b_pins[] = {
-	/* D[0:7] */
-	RCAR_GP_PIN(6, 18), RCAR_GP_PIN(6, 19),
-	RCAR_GP_PIN(6, 20), RCAR_GP_PIN(6, 21),
-	RCAR_GP_PIN(6, 22), RCAR_GP_PIN(6, 23),
-	RCAR_GP_PIN(6, 6), RCAR_GP_PIN(6, 7),
-};
-static const unsigned int mmc_data8_b_mux[] = {
-	MMC_D0_MARK, MMC_D1_MARK, MMC_D2_MARK, MMC_D3_MARK,
-	MMC_D4_MARK, MMC_D5_MARK, MMC_D6_B_MARK, MMC_D7_B_MARK,
-};
 static const unsigned int mmc_ctrl_pins[] = {
 	/* CLK, CMD */
 	RCAR_GP_PIN(6, 16), RCAR_GP_PIN(6, 17),
@@ -4431,7 +4420,7 @@ static const unsigned int vin2_clk_mux[] = {
 };
 
 static const struct {
-	struct sh_pfc_pin_group common[342];
+	struct sh_pfc_pin_group common[341];
 	struct sh_pfc_pin_group r8a779x[9];
 } pinmux_groups = {
 	.common = {
@@ -4534,7 +4523,6 @@ static const struct {
 		SH_PFC_PIN_GROUP(mmc_data1),
 		SH_PFC_PIN_GROUP(mmc_data4),
 		SH_PFC_PIN_GROUP(mmc_data8),
-		SH_PFC_PIN_GROUP(mmc_data8_b),
 		SH_PFC_PIN_GROUP(mmc_ctrl),
 		SH_PFC_PIN_GROUP(msiof0_clk),
 		SH_PFC_PIN_GROUP(msiof0_sync),
@@ -4826,10 +4814,6 @@ static const char * const can0_groups[] = {
 	"can0_data_d",
 	"can0_data_e",
 	"can0_data_f",
-	/*
-	 * Retained for backwards compatibility, use can_clk_groups in new
-	 * designs.
-	 */
 	"can_clk",
 	"can_clk_b",
 	"can_clk_c",
@@ -4841,21 +4825,6 @@ static const char * const can1_groups[] = {
 	"can1_data_b",
 	"can1_data_c",
 	"can1_data_d",
-	/*
-	 * Retained for backwards compatibility, use can_clk_groups in new
-	 * designs.
-	 */
-	"can_clk",
-	"can_clk_b",
-	"can_clk_c",
-	"can_clk_d",
-};
-
-/*
- * can_clk_groups allows for independent configuration, use can_clk function
- * in new designs.
- */
-static const char * const can_clk_groups[] = {
 	"can_clk",
 	"can_clk_b",
 	"can_clk_c",
@@ -4986,7 +4955,6 @@ static const char * const mmc_groups[] = {
 	"mmc_data1",
 	"mmc_data4",
 	"mmc_data8",
-	"mmc_data8_b",
 	"mmc_ctrl",
 };
 
@@ -5327,7 +5295,7 @@ static const char * const vin2_groups[] = {
 };
 
 static const struct {
-	struct sh_pfc_function common[57];
+	struct sh_pfc_function common[56];
 	struct sh_pfc_function r8a779x[2];
 } pinmux_functions = {
 	.common = {
@@ -5335,7 +5303,6 @@ static const struct {
 		SH_PFC_FUNCTION(avb),
 		SH_PFC_FUNCTION(can0),
 		SH_PFC_FUNCTION(can1),
-		SH_PFC_FUNCTION(can_clk),
 		SH_PFC_FUNCTION(du),
 		SH_PFC_FUNCTION(du0),
 		SH_PFC_FUNCTION(du1),

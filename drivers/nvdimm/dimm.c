@@ -55,8 +55,6 @@ static int nvdimm_probe(struct device *dev)
 		goto err;
 
 	rc = nvdimm_init_config_data(ndd);
-	if (rc == -EACCES)
-		nvdimm_set_locked(dev);
 	if (rc)
 		goto err;
 
@@ -70,7 +68,6 @@ static int nvdimm_probe(struct device *dev)
 	rc = nd_label_reserve_dpa(ndd);
 	if (ndd->ns_current >= 0)
 		nvdimm_set_aliasing(dev);
-	nvdimm_clear_locked(dev);
 	nvdimm_bus_unlock(dev);
 
 	if (rc)

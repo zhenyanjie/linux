@@ -6,10 +6,8 @@ Contents:
 .. toctree::
    :maxdepth: 2
 
-   batman-adv
    kapi
    z8530book
-   msg_zerocopy
 
 .. only::  subproject
 
@@ -17,3 +15,4 @@ Contents:
    =======
 
    * :ref:`genindex`
+

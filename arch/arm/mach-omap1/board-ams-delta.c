@@ -156,7 +156,7 @@ static struct map_desc ams_delta_io_desc[] __initdata = {
 	}
 };
 
-static const struct omap_lcd_config ams_delta_lcd_config __initconst = {
+static struct omap_lcd_config ams_delta_lcd_config __initdata = {
 	.ctrl_name	= "internal",
 };
 

@@ -88,6 +88,12 @@ unlock:
 	return ret;
 }
 
+static int core_deinit_wait_atomic_t(atomic_t *p)
+{
+	schedule();
+	return 0;
+}
+
 int hfi_core_deinit(struct venus_core *core, bool blocking)
 {
 	int ret = 0, empty;
@@ -106,7 +112,7 @@ int hfi_core_deinit(struct venus_core *core, bool blocking)
 
 	if (!empty) {
 		mutex_unlock(&core->lock);
-		wait_on_atomic_t(&core->insts_count, atomic_t_wait,
+		wait_on_atomic_t(&core->insts_count, core_deinit_wait_atomic_t,
 				 TASK_UNINTERRUPTIBLE);
 		mutex_lock(&core->lock);
 	}
@@ -478,7 +484,6 @@ int hfi_session_process_buf(struct venus_inst *inst, struct hfi_frame_data *fd)
 
 	return -EINVAL;
 }
-EXPORT_SYMBOL_GPL(hfi_session_process_buf);
 
 irqreturn_t hfi_isr_thread(int irq, void *dev_id)
 {

@@ -194,6 +194,36 @@ static enum fscache_checkaux ceph_fscache_inode_check_aux(
 	return FSCACHE_CHECKAUX_OKAY;
 }
 
+static void ceph_fscache_inode_now_uncached(void* cookie_netfs_data)
+{
+	struct ceph_inode_info* ci = cookie_netfs_data;
+	struct pagevec pvec;
+	pgoff_t first;
+	int loop, nr_pages;
+
+	pagevec_init(&pvec, 0);
+	first = 0;
+
+	dout("ceph inode 0x%p now uncached", ci);
+
+	while (1) {
+		nr_pages = pagevec_lookup(&pvec, ci->vfs_inode.i_mapping, first,
+					  PAGEVEC_SIZE - pagevec_count(&pvec));
+
+		if (!nr_pages)
+			break;
+
+		for (loop = 0; loop < nr_pages; loop++)
+			ClearPageFsCache(pvec.pages[loop]);
+
+		first = pvec.pages[nr_pages - 1]->index + 1;
+
+		pvec.nr = nr_pages;
+		pagevec_release(&pvec);
+		cond_resched();
+	}
+}
+
 static const struct fscache_cookie_def ceph_fscache_inode_object_def = {
 	.name		= "CEPH.inode",
 	.type		= FSCACHE_COOKIE_TYPE_DATAFILE,
@@ -201,6 +231,7 @@ static const struct fscache_cookie_def ceph_fscache_inode_object_def = {
 	.get_attr	= ceph_fscache_inode_get_attr,
 	.get_aux	= ceph_fscache_inode_get_aux,
 	.check_aux	= ceph_fscache_inode_check_aux,
+	.now_uncached	= ceph_fscache_inode_now_uncached,
 };
 
 void ceph_fscache_register_inode_cookie(struct inode *inode)
@@ -209,7 +240,7 @@ void ceph_fscache_register_inode_cookie(struct inode *inode)
 	struct ceph_fs_client *fsc = ceph_inode_to_client(inode);
 
 	/* No caching for filesystem */
-	if (!fsc->fscache)
+	if (fsc->fscache == NULL)
 		return;
 
 	/* Only cache for regular files that are read only */

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NVIF_OBJECT_H__
 #define __NVIF_OBJECT_H__
 
@@ -17,7 +16,7 @@ struct nvif_object {
 	void *priv; /*XXX: hack */
 	struct {
 		void __iomem *ptr;
-		u64 size;
+		u32 size;
 	} map;
 };
 
@@ -30,10 +29,7 @@ void nvif_object_sclass_put(struct nvif_sclass **);
 u32  nvif_object_rd(struct nvif_object *, int, u64);
 void nvif_object_wr(struct nvif_object *, int, u64, u32);
 int  nvif_object_mthd(struct nvif_object *, u32, void *, u32);
-int  nvif_object_map_handle(struct nvif_object *, void *, u32,
-			    u64 *handle, u64 *length);
-void nvif_object_unmap_handle(struct nvif_object *);
-int  nvif_object_map(struct nvif_object *, void *, u32);
+int  nvif_object_map(struct nvif_object *);
 void nvif_object_unmap(struct nvif_object *);
 
 #define nvif_handle(a) (unsigned long)(void *)(a)

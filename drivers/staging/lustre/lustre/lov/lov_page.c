@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -101,6 +100,7 @@ int lov_page_init_raid0(const struct lu_env *env, struct cl_object *obj,
 				break;
 		}
 	}
+	lov_sub_put(sub);
 
 	return rc;
 }

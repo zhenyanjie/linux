@@ -72,10 +72,9 @@ since_epoch_show(struct device *dev, struct device_attribute *attr, char *buf)
 
 	retval = rtc_read_time(to_rtc_device(dev), &tm);
 	if (retval == 0) {
-		time64_t time;
-
-		time = rtc_tm_to_time64(&tm);
-		retval = sprintf(buf, "%lld\n", time);
+		unsigned long time;
+		rtc_tm_to_time(&tm, &time);
+		retval = sprintf(buf, "%lu\n", time);
 	}
 
 	return retval;
@@ -133,7 +132,7 @@ static ssize_t
 wakealarm_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	ssize_t retval;
-	time64_t alarm;
+	unsigned long alarm;
 	struct rtc_wkalrm alm;
 
 	/* Don't show disabled alarms.  For uniformity, RTC alarms are
@@ -146,8 +145,8 @@ wakealarm_show(struct device *dev, struct device_attribute *attr, char *buf)
 	 */
 	retval = rtc_read_alarm(to_rtc_device(dev), &alm);
 	if (retval == 0 && alm.enabled) {
-		alarm = rtc_tm_to_time64(&alm.time);
-		retval = sprintf(buf, "%lld\n", alarm);
+		rtc_tm_to_time(&alm.time, &alarm);
+		retval = sprintf(buf, "%lu\n", alarm);
 	}
 
 	return retval;
@@ -158,8 +157,8 @@ wakealarm_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t n)
 {
 	ssize_t retval;
-	time64_t now, alarm;
-	time64_t push = 0;
+	unsigned long now, alarm;
+	unsigned long push = 0;
 	struct rtc_wkalrm alm;
 	struct rtc_device *rtc = to_rtc_device(dev);
 	const char *buf_ptr;
@@ -171,7 +170,7 @@ wakealarm_store(struct device *dev, struct device_attribute *attr,
 	retval = rtc_read_time(rtc, &alm.time);
 	if (retval < 0)
 		return retval;
-	now = rtc_tm_to_time64(&alm.time);
+	rtc_tm_to_time(&alm.time, &now);
 
 	buf_ptr = buf;
 	if (*buf_ptr == '+') {
@@ -182,7 +181,7 @@ wakealarm_store(struct device *dev, struct device_attribute *attr,
 		} else
 			adjust = 1;
 	}
-	retval = kstrtos64(buf_ptr, 0, &alarm);
+	retval = kstrtoul(buf_ptr, 0, &alarm);
 	if (retval)
 		return retval;
 	if (adjust) {
@@ -198,7 +197,7 @@ wakealarm_store(struct device *dev, struct device_attribute *attr,
 			return retval;
 		if (alm.enabled) {
 			if (push) {
-				push = rtc_tm_to_time64(&alm.time);
+				rtc_tm_to_time(&alm.time, &push);
 				alarm += push;
 			} else
 				return -EBUSY;
@@ -213,7 +212,7 @@ wakealarm_store(struct device *dev, struct device_attribute *attr,
 		 */
 		alarm = now + 300;
 	}
-	rtc_time64_to_tm(alarm, &alm.time);
+	rtc_time_to_tm(alarm, &alm.time);
 
 	retval = rtc_set_alarm(rtc, &alm);
 	return (retval < 0) ? retval : n;

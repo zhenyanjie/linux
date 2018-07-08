@@ -11,7 +11,6 @@
 #include <linux/debugfs.h>
 #include <linux/gpio.h>
 #include <linux/hdmi.h>
-#include <linux/of_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
@@ -22,12 +21,9 @@
 
 #include <sound/hda_verbs.h>
 
-#include <media/cec-notifier.h>
-
 #include "hdmi.h"
 #include "drm.h"
 #include "dc.h"
-#include "trace.h"
 
 #define HDMI_ELD_BUFFER_SIZE 96
 
@@ -104,19 +100,14 @@ enum {
 };
 
 static inline u32 tegra_hdmi_readl(struct tegra_hdmi *hdmi,
-				   unsigned int offset)
+				   unsigned long offset)
 {
-	u32 value = readl(hdmi->regs + (offset << 2));
-
-	trace_hdmi_readl(hdmi->dev, offset, value);
-
-	return value;
+	return readl(hdmi->regs + (offset << 2));
 }
 
 static inline void tegra_hdmi_writel(struct tegra_hdmi *hdmi, u32 value,
-				     unsigned int offset)
+				     unsigned long offset)
 {
-	trace_hdmi_writel(hdmi->dev, offset, value);
 	writel(value, hdmi->regs + (offset << 2));
 }
 
@@ -743,7 +734,7 @@ static void tegra_hdmi_setup_avi_infoframe(struct tegra_hdmi *hdmi,
 	u8 buffer[17];
 	ssize_t err;
 
-	err = drm_hdmi_avi_infoframe_from_display_mode(&frame, mode, false);
+	err = drm_hdmi_avi_infoframe_from_display_mode(&frame, mode);
 	if (err < 0) {
 		dev_err(hdmi->dev, "failed to setup AVI infoframe: %zd\n", err);
 		return;
@@ -911,6 +902,7 @@ tegra_hdmi_connector_detect(struct drm_connector *connector, bool force)
 }
 
 static const struct drm_connector_funcs tegra_hdmi_connector_funcs = {
+	.dpms = drm_atomic_helper_connector_dpms,
 	.reset = drm_atomic_helper_connector_reset,
 	.detect = tegra_hdmi_connector_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
@@ -1666,15 +1658,20 @@ static irqreturn_t tegra_hdmi_irq(int irq, void *data)
 
 static int tegra_hdmi_probe(struct platform_device *pdev)
 {
+	const struct of_device_id *match;
 	struct tegra_hdmi *hdmi;
 	struct resource *regs;
 	int err;
+
+	match = of_match_node(tegra_hdmi_of_match, pdev->dev.of_node);
+	if (!match)
+		return -ENODEV;
 
 	hdmi = devm_kzalloc(&pdev->dev, sizeof(*hdmi), GFP_KERNEL);
 	if (!hdmi)
 		return -ENOMEM;
 
-	hdmi->config = of_device_get_match_data(&pdev->dev);
+	hdmi->config = match->data;
 	hdmi->dev = &pdev->dev;
 
 	hdmi->audio_source = AUTO;
@@ -1722,10 +1719,6 @@ static int tegra_hdmi_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to get VDD regulator\n");
 		return PTR_ERR(hdmi->vdd);
 	}
-
-	hdmi->output.notifier = cec_notifier_get(&pdev->dev);
-	if (hdmi->output.notifier == NULL)
-		return -ENOMEM;
 
 	hdmi->output.dev = &pdev->dev;
 
@@ -1784,9 +1777,6 @@ static int tegra_hdmi_remove(struct platform_device *pdev)
 	}
 
 	tegra_output_remove(&hdmi->output);
-
-	if (hdmi->output.notifier)
-		cec_notifier_put(hdmi->output.notifier);
 
 	return 0;
 }

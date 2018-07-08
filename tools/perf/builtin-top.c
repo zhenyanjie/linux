@@ -77,7 +77,6 @@
 #include "sane_ctype.h"
 
 static volatile int done;
-static volatile int resize;
 
 #define HEADER_LINE_NR  5
 
@@ -86,13 +85,11 @@ static void perf_top__update_print_entries(struct perf_top *top)
 	top->print_entries = top->winsize.ws_row - HEADER_LINE_NR;
 }
 
-static void winch_sig(int sig __maybe_unused)
+static void perf_top__sig_winch(int sig __maybe_unused,
+				siginfo_t *info __maybe_unused, void *arg)
 {
-	resize = 1;
-}
+	struct perf_top *top = arg;
 
-static void perf_top__resize(struct perf_top *top)
-{
 	get_term_dimensions(&top->winsize);
 	perf_top__update_print_entries(top);
 }
@@ -137,7 +134,7 @@ static int perf_top__parse_source(struct perf_top *top, struct hist_entry *he)
 		return err;
 	}
 
-	err = symbol__disassemble(sym, map, NULL, 0, NULL, NULL);
+	err = symbol__disassemble(sym, map, NULL, 0, NULL);
 	if (err == 0) {
 out_assign:
 		top->sym_filter_entry = he;
@@ -186,7 +183,6 @@ static void ui__warn_map_erange(struct map *map, struct symbol *sym, u64 ip)
 
 static void perf_top__record_precise_ip(struct perf_top *top,
 					struct hist_entry *he,
-					struct perf_sample *sample,
 					int counter, u64 ip)
 {
 	struct annotation *notes;
@@ -203,7 +199,7 @@ static void perf_top__record_precise_ip(struct perf_top *top,
 	if (pthread_mutex_trylock(&notes->lock))
 		return;
 
-	err = hist_entry__inc_addr_samples(he, sample, counter, ip);
+	err = hist_entry__inc_addr_samples(he, counter, ip);
 
 	pthread_mutex_unlock(&notes->lock);
 
@@ -476,8 +472,12 @@ static bool perf_top__handle_keypress(struct perf_top *top, int c)
 		case 'e':
 			prompt_integer(&top->print_entries, "Enter display entries (lines)");
 			if (top->print_entries == 0) {
-				perf_top__resize(top);
-				signal(SIGWINCH, winch_sig);
+				struct sigaction act = {
+					.sa_sigaction = perf_top__sig_winch,
+					.sa_flags     = SA_SIGINFO,
+				};
+				perf_top__sig_winch(SIGWINCH, NULL, top);
+				sigaction(SIGWINCH, &act, NULL);
 			} else {
 				signal(SIGWINCH, SIG_DFL);
 			}
@@ -586,13 +586,6 @@ static void *display_thread_tui(void *arg)
 		.refresh	= top->delay_secs,
 	};
 
-	/* In order to read symbols from other namespaces perf to  needs to call
-	 * setns(2).  This isn't permitted if the struct_fs has multiple users.
-	 * unshare(2) the fs so that we may continue to setns into namespaces
-	 * that we're observing.
-	 */
-	unshare(CLONE_FS);
-
 	perf_top__sort_new_samples(top);
 
 	/*
@@ -633,13 +626,6 @@ static void *display_thread(void *arg)
 	struct termios save;
 	struct perf_top *top = arg;
 	int delay_msecs, c;
-
-	/* In order to read symbols from other namespaces perf to  needs to call
-	 * setns(2).  This isn't permitted if the struct_fs has multiple users.
-	 * unshare(2) the fs so that we may continue to setns into namespaces
-	 * that we're observing.
-	 */
-	unshare(CLONE_FS);
 
 	display_setup_sig();
 	pthread__unblock_sigwinch();
@@ -685,7 +671,7 @@ static int hist_iter__top_callback(struct hist_entry_iter *iter,
 	struct perf_evsel *evsel = iter->evsel;
 
 	if (perf_hpp_list.sym && single)
-		perf_top__record_precise_ip(top, he, iter->sample, evsel->idx, al->addr);
+		perf_top__record_precise_ip(top, he, evsel->idx, al->addr);
 
 	hist__account_cycles(iter->sample->branch_stack, al, iter->sample,
 		     !(top->record_opts.branch_stack & PERF_SAMPLE_BRANCH_ANY));
@@ -731,16 +717,14 @@ static void perf_event__process_sample(struct perf_tool *tool,
 	if (!machine->kptr_restrict_warned &&
 	    symbol_conf.kptr_restrict &&
 	    al.cpumode == PERF_RECORD_MISC_KERNEL) {
-		if (!perf_evlist__exclude_kernel(top->session->evlist)) {
-			ui__warning(
+		ui__warning(
 "Kernel address maps (/proc/{kallsyms,modules}) are restricted.\n\n"
 "Check /proc/sys/kernel/kptr_restrict.\n\n"
 "Kernel%s samples will not be resolved.\n",
 			  al.map && !RB_EMPTY_ROOT(&al.map->dso->symbols[MAP__FUNCTION]) ?
 			  " modules" : "");
-			if (use_browser <= 0)
-				sleep(5);
-		}
+		if (use_browser <= 0)
+			sleep(5);
 		machine->kptr_restrict_warned = true;
 	}
 
@@ -959,16 +943,8 @@ static int __cmd_top(struct perf_top *top)
 	if (perf_session__register_idle_thread(top->session) < 0)
 		goto out_delete;
 
-	if (top->nr_threads_synthesize > 1)
-		perf_set_multithreaded();
-
 	machine__synthesize_threads(&top->session->machines.host, &opts->target,
-				    top->evlist->threads, false,
-				    opts->proc_map_timeout,
-				    top->nr_threads_synthesize);
-
-	if (top->nr_threads_synthesize > 1)
-		perf_set_singlethreaded();
+				    top->evlist->threads, false, opts->proc_map_timeout);
 
 	if (perf_hpp_list.socket) {
 		ret = perf_env__read_cpu_topology_map(&perf_env);
@@ -1031,11 +1007,6 @@ static int __cmd_top(struct perf_top *top)
 
 		if (hits == top->samples)
 			ret = perf_evlist__poll(top->evlist, 100);
-
-		if (resize) {
-			perf_top__resize(top);
-			resize = 0;
-		}
 	}
 
 	ret = 0;
@@ -1126,7 +1097,6 @@ int cmd_top(int argc, const char **argv)
 		},
 		.max_stack	     = sysctl_perf_event_max_stack,
 		.sym_pcnt_filter     = 5,
-		.nr_threads_synthesize = UINT_MAX,
 	};
 	struct record_opts *opts = &top.record_opts;
 	struct target *target = &opts->target;
@@ -1235,9 +1205,6 @@ int cmd_top(int argc, const char **argv)
 		    "Show raw trace event output (do not use print fmt or plugins)"),
 	OPT_BOOLEAN(0, "hierarchy", &symbol_conf.report_hierarchy,
 		    "Show entries in a hierarchy"),
-	OPT_BOOLEAN(0, "force", &symbol_conf.force, "don't complain, do it"),
-	OPT_UINTEGER(0, "num-thread-synthesize", &top.nr_threads_synthesize,
-			"number of thread to run event synthesize"),
 	OPT_END()
 	};
 	const char * const top_usage[] = {
@@ -1358,8 +1325,12 @@ int cmd_top(int argc, const char **argv)
 
 	get_term_dimensions(&top.winsize);
 	if (top.print_entries == 0) {
+		struct sigaction act = {
+			.sa_sigaction = perf_top__sig_winch,
+			.sa_flags     = SA_SIGINFO,
+		};
 		perf_top__update_print_entries(&top);
-		signal(SIGWINCH, winch_sig);
+		sigaction(SIGWINCH, &act, NULL);
 	}
 
 	status = __cmd_top(&top);

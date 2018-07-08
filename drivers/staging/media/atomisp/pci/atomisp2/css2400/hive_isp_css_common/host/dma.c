@@ -12,7 +12,7 @@
  * more details.
  */
 
-#include <linux/kernel.h>
+#include <stddef.h>		/* NULL */
 
 #include "dma.h"
 

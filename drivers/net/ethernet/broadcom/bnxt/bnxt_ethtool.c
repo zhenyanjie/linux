@@ -26,6 +26,8 @@
 #define FLASH_PACKAGE_TIMEOUT	((HWRM_CMD_TIMEOUT) * 200)
 #define INSTALL_PACKAGE_TIMEOUT	((HWRM_CMD_TIMEOUT) * 200)
 
+static char *bnxt_get_pkgver(struct net_device *dev, char *buf, size_t buflen);
+
 static u32 bnxt_get_msglevel(struct net_device *dev)
 {
 	struct bnxt *bp = netdev_priv(dev);
@@ -44,24 +46,19 @@ static int bnxt_get_coalesce(struct net_device *dev,
 			     struct ethtool_coalesce *coal)
 {
 	struct bnxt *bp = netdev_priv(dev);
-	struct bnxt_coal *hw_coal;
-	u16 mult;
 
 	memset(coal, 0, sizeof(*coal));
 
-	hw_coal = &bp->rx_coal;
-	mult = hw_coal->bufs_per_record;
-	coal->rx_coalesce_usecs = hw_coal->coal_ticks;
-	coal->rx_max_coalesced_frames = hw_coal->coal_bufs / mult;
-	coal->rx_coalesce_usecs_irq = hw_coal->coal_ticks_irq;
-	coal->rx_max_coalesced_frames_irq = hw_coal->coal_bufs_irq / mult;
+	coal->rx_coalesce_usecs = bp->rx_coal_ticks;
+	/* 2 completion records per rx packet */
+	coal->rx_max_coalesced_frames = bp->rx_coal_bufs / 2;
+	coal->rx_coalesce_usecs_irq = bp->rx_coal_ticks_irq;
+	coal->rx_max_coalesced_frames_irq = bp->rx_coal_bufs_irq / 2;
 
-	hw_coal = &bp->tx_coal;
-	mult = hw_coal->bufs_per_record;
-	coal->tx_coalesce_usecs = hw_coal->coal_ticks;
-	coal->tx_max_coalesced_frames = hw_coal->coal_bufs / mult;
-	coal->tx_coalesce_usecs_irq = hw_coal->coal_ticks_irq;
-	coal->tx_max_coalesced_frames_irq = hw_coal->coal_bufs_irq / mult;
+	coal->tx_coalesce_usecs = bp->tx_coal_ticks;
+	coal->tx_max_coalesced_frames = bp->tx_coal_bufs;
+	coal->tx_coalesce_usecs_irq = bp->tx_coal_ticks_irq;
+	coal->tx_max_coalesced_frames_irq = bp->tx_coal_bufs_irq;
 
 	coal->stats_block_coalesce_usecs = bp->stats_coal_ticks;
 
@@ -73,32 +70,25 @@ static int bnxt_set_coalesce(struct net_device *dev,
 {
 	struct bnxt *bp = netdev_priv(dev);
 	bool update_stats = false;
-	struct bnxt_coal *hw_coal;
 	int rc = 0;
-	u16 mult;
 
-	hw_coal = &bp->rx_coal;
-	mult = hw_coal->bufs_per_record;
-	hw_coal->coal_ticks = coal->rx_coalesce_usecs;
-	hw_coal->coal_bufs = coal->rx_max_coalesced_frames * mult;
-	hw_coal->coal_ticks_irq = coal->rx_coalesce_usecs_irq;
-	hw_coal->coal_bufs_irq = coal->rx_max_coalesced_frames_irq * mult;
+	bp->rx_coal_ticks = coal->rx_coalesce_usecs;
+	/* 2 completion records per rx packet */
+	bp->rx_coal_bufs = coal->rx_max_coalesced_frames * 2;
+	bp->rx_coal_ticks_irq = coal->rx_coalesce_usecs_irq;
+	bp->rx_coal_bufs_irq = coal->rx_max_coalesced_frames_irq * 2;
 
-	hw_coal = &bp->tx_coal;
-	mult = hw_coal->bufs_per_record;
-	hw_coal->coal_ticks = coal->tx_coalesce_usecs;
-	hw_coal->coal_bufs = coal->tx_max_coalesced_frames * mult;
-	hw_coal->coal_ticks_irq = coal->tx_coalesce_usecs_irq;
-	hw_coal->coal_bufs_irq = coal->tx_max_coalesced_frames_irq * mult;
+	bp->tx_coal_ticks = coal->tx_coalesce_usecs;
+	bp->tx_coal_bufs = coal->tx_max_coalesced_frames;
+	bp->tx_coal_ticks_irq = coal->tx_coalesce_usecs_irq;
+	bp->tx_coal_bufs_irq = coal->tx_max_coalesced_frames_irq;
 
 	if (bp->stats_coal_ticks != coal->stats_block_coalesce_usecs) {
 		u32 stats_ticks = coal->stats_block_coalesce_usecs;
 
-		/* Allow 0, which means disable. */
-		if (stats_ticks)
-			stats_ticks = clamp_t(u32, stats_ticks,
-					      BNXT_MIN_STATS_COAL_TICKS,
-					      BNXT_MAX_STATS_COAL_TICKS);
+		stats_ticks = clamp_t(u32, stats_ticks,
+				      BNXT_MIN_STATS_COAL_TICKS,
+				      BNXT_MAX_STATS_COAL_TICKS);
 		stats_ticks = rounddown(stats_ticks, BNXT_MIN_STATS_COAL_TICKS);
 		bp->stats_coal_ticks = stats_ticks;
 		update_stats = true;
@@ -208,23 +198,19 @@ static const struct {
 
 #define BNXT_NUM_PORT_STATS ARRAY_SIZE(bnxt_port_stats_arr)
 
-static int bnxt_get_num_stats(struct bnxt *bp)
-{
-	int num_stats = BNXT_NUM_STATS * bp->cp_nr_rings;
-
-	if (bp->flags & BNXT_FLAG_PORT_STATS)
-		num_stats += BNXT_NUM_PORT_STATS;
-
-	return num_stats;
-}
-
 static int bnxt_get_sset_count(struct net_device *dev, int sset)
 {
 	struct bnxt *bp = netdev_priv(dev);
 
 	switch (sset) {
-	case ETH_SS_STATS:
-		return bnxt_get_num_stats(bp);
+	case ETH_SS_STATS: {
+		int num_stats = BNXT_NUM_STATS * bp->cp_nr_rings;
+
+		if (bp->flags & BNXT_FLAG_PORT_STATS)
+			num_stats += BNXT_NUM_PORT_STATS;
+
+		return num_stats;
+	}
 	case ETH_SS_TEST:
 		if (!bp->num_tests)
 			return -EOPNOTSUPP;
@@ -239,7 +225,10 @@ static void bnxt_get_ethtool_stats(struct net_device *dev,
 {
 	u32 i, j = 0;
 	struct bnxt *bp = netdev_priv(dev);
+	u32 buf_size = sizeof(struct ctx_hw_stats) * bp->cp_nr_rings;
 	u32 stat_fields = sizeof(struct ctx_hw_stats) / 8;
+
+	memset(buf, 0, buf_size);
 
 	if (!bp->bnapi)
 		return;
@@ -443,7 +432,8 @@ static int bnxt_set_channels(struct net_device *dev,
 		}
 		tx_xdp = req_rx_rings;
 	}
-	rc = bnxt_check_rings(bp, req_tx_rings, req_rx_rings, sh, tcs, tx_xdp);
+	rc = bnxt_reserve_rings(bp, req_tx_rings, req_rx_rings, sh, tcs,
+				tx_xdp);
 	if (rc) {
 		netdev_warn(dev, "Unable to allocate the requested rings\n");
 		return rc;
@@ -530,7 +520,7 @@ static int bnxt_grxclsrule(struct bnxt *bp, struct ethtool_rxnfc *cmd)
 	struct flow_keys *fkeys;
 	int i, rc = -EINVAL;
 
-	if (fs->location >= BNXT_NTP_FLTR_MAX_FLTR)
+	if (fs->location < 0 || fs->location >= BNXT_NTP_FLTR_MAX_FLTR)
 		return rc;
 
 	for (i = 0; i < BNXT_NTP_FLTR_HASH_SIZE; i++) {
@@ -830,17 +820,28 @@ static void bnxt_get_drvinfo(struct net_device *dev,
 			     struct ethtool_drvinfo *info)
 {
 	struct bnxt *bp = netdev_priv(dev);
+	char *pkglog;
+	char *pkgver = NULL;
 
+	pkglog = kmalloc(BNX_PKG_LOG_MAX_LENGTH, GFP_KERNEL);
+	if (pkglog)
+		pkgver = bnxt_get_pkgver(dev, pkglog, BNX_PKG_LOG_MAX_LENGTH);
 	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
 	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
-	strlcpy(info->fw_version, bp->fw_ver_str, sizeof(info->fw_version));
+	if (pkgver && *pkgver != 0 && isdigit(*pkgver))
+		snprintf(info->fw_version, sizeof(info->fw_version) - 1,
+			 "%s pkg %s", bp->fw_ver_str, pkgver);
+	else
+		strlcpy(info->fw_version, bp->fw_ver_str,
+			sizeof(info->fw_version));
 	strlcpy(info->bus_info, pci_name(bp->pdev), sizeof(info->bus_info));
-	info->n_stats = bnxt_get_num_stats(bp);
+	info->n_stats = BNXT_NUM_STATS * bp->cp_nr_rings;
 	info->testinfo_len = bp->num_tests;
 	/* TODO CHIMP_FW: eeprom dump details */
 	info->eedump_len = 0;
 	/* TODO CHIMP FW: reg dump details */
 	info->regdump_len = 0;
+	kfree(pkglog);
 }
 
 static void bnxt_get_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
@@ -1049,7 +1050,6 @@ static int bnxt_get_link_ksettings(struct net_device *dev,
 	u32 ethtool_speed;
 
 	ethtool_link_ksettings_zero_link_mode(lk_ksettings, supported);
-	mutex_lock(&bp->link_lock);
 	bnxt_fw_to_ethtool_support_spds(link_info, lk_ksettings);
 
 	ethtool_link_ksettings_zero_link_mode(lk_ksettings, advertising);
@@ -1097,7 +1097,6 @@ static int bnxt_get_link_ksettings(struct net_device *dev,
 			base->port = PORT_FIBRE;
 	}
 	base->phy_address = link_info->phy_addr;
-	mutex_unlock(&bp->link_lock);
 
 	return 0;
 }
@@ -1189,7 +1188,6 @@ static int bnxt_set_link_ksettings(struct net_device *dev,
 	if (!BNXT_SINGLE_PF(bp))
 		return -EOPNOTSUPP;
 
-	mutex_lock(&bp->link_lock);
 	if (base->autoneg == AUTONEG_ENABLE) {
 		BNXT_ETHTOOL_TO_FW_SPDS(fw_advertising, lk_ksettings,
 					advertising);
@@ -1234,7 +1232,6 @@ static int bnxt_set_link_ksettings(struct net_device *dev,
 		rc = bnxt_hwrm_set_link_setting(bp, set_pause, false);
 
 set_setting_exit:
-	mutex_unlock(&bp->link_lock);
 	return rc;
 }
 
@@ -1347,6 +1344,7 @@ static int bnxt_firmware_reset(struct net_device *dev,
 
 	bnxt_hwrm_cmd_hdr_init(bp, &req, HWRM_FW_RESET, -1, -1);
 
+	/* TODO: Support ASAP ChiMP self-reset (e.g. upon PF driver unload) */
 	/* TODO: Address self-reset of APE/KONG/BONO/TANG or ungraceful reset */
 	/*       (e.g. when firmware isn't already running) */
 	switch (dir_type) {
@@ -1371,10 +1369,6 @@ static int bnxt_firmware_reset(struct net_device *dev,
 	case BNX_DIR_TYPE_BONO_FW:
 	case BNX_DIR_TYPE_BONO_PATCH:
 		req.embedded_proc_type = FW_RESET_REQ_EMBEDDED_PROC_TYPE_ROCE;
-		break;
-	case BNXT_FW_RESET_CHIP:
-		req.embedded_proc_type = FW_RESET_REQ_EMBEDDED_PROC_TYPE_CHIP;
-		req.selfrst_status = FW_RESET_REQ_SELFRST_STATUS_SELFRSTASAP;
 		break;
 	default:
 		return -EINVAL;
@@ -1773,9 +1767,6 @@ static int bnxt_get_nvram_item(struct net_device *dev, u32 index, u32 offset,
 	dma_addr_t dma_handle;
 	struct hwrm_nvm_read_input req = {0};
 
-	if (!length)
-		return -EINVAL;
-
 	buf = dma_alloc_coherent(&bp->pdev->dev, length, &dma_handle,
 				 GFP_KERNEL);
 	if (!buf) {
@@ -1812,8 +1803,7 @@ static int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
 	req.dir_ordinal = cpu_to_le16(ordinal);
 	req.dir_ext = cpu_to_le16(ext);
 	req.opt_ordinal = NVM_FIND_DIR_ENTRY_REQ_OPT_ORDINAL_EQ;
-	mutex_lock(&bp->hwrm_cmd_lock);
-	rc = _hwrm_send_message_silent(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT);
+	rc = hwrm_send_message_silent(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT);
 	if (rc == 0) {
 		if (index)
 			*index = le16_to_cpu(output->dir_idx);
@@ -1822,7 +1812,6 @@ static int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
 		if (data_length)
 			*data_length = le32_to_cpu(output->dir_data_length);
 	}
-	mutex_unlock(&bp->hwrm_cmd_lock);
 	return rc;
 }
 
@@ -2136,8 +2125,8 @@ static int bnxt_get_module_eeprom(struct net_device *dev,
 	/* Read A2 portion of the EEPROM */
 	if (length) {
 		start -= ETH_MODULE_SFF_8436_LEN;
-		rc = bnxt_read_sfp_module_eeprom_info(bp, I2C_DEV_ADDR_A2, 1,
-						      start, length, data);
+		bnxt_read_sfp_module_eeprom_info(bp, I2C_DEV_ADDR_A2, 1, start,
+						 length, data);
 	}
 	return rc;
 }
@@ -2498,59 +2487,13 @@ static void bnxt_self_test(struct net_device *dev, struct ethtool_test *etest,
 	}
 }
 
-static int bnxt_reset(struct net_device *dev, u32 *flags)
-{
-	struct bnxt *bp = netdev_priv(dev);
-	int rc = 0;
-
-	if (!BNXT_PF(bp)) {
-		netdev_err(dev, "Reset is not supported from a VF\n");
-		return -EOPNOTSUPP;
-	}
-
-	if (pci_vfs_assigned(bp->pdev)) {
-		netdev_err(dev,
-			   "Reset not allowed when VFs are assigned to VMs\n");
-		return -EBUSY;
-	}
-
-	if (*flags == ETH_RESET_ALL) {
-		/* This feature is not supported in older firmware versions */
-		if (bp->hwrm_spec_code < 0x10803)
-			return -EOPNOTSUPP;
-
-		rc = bnxt_firmware_reset(dev, BNXT_FW_RESET_CHIP);
-		if (!rc)
-			netdev_info(dev, "Reset request successful. Reload driver to complete reset\n");
-	} else {
-		rc = -EINVAL;
-	}
-
-	return rc;
-}
-
 void bnxt_ethtool_init(struct bnxt *bp)
 {
 	struct hwrm_selftest_qlist_output *resp = bp->hwrm_cmd_resp_addr;
 	struct hwrm_selftest_qlist_input req = {0};
 	struct bnxt_test_info *test_info;
-	struct net_device *dev = bp->dev;
-	char *pkglog;
 	int i, rc;
 
-	pkglog = kzalloc(BNX_PKG_LOG_MAX_LENGTH, GFP_KERNEL);
-	if (pkglog) {
-		char *pkgver;
-		int len;
-
-		pkgver = bnxt_get_pkgver(dev, pkglog, BNX_PKG_LOG_MAX_LENGTH);
-		if (pkgver && *pkgver != 0 && isdigit(*pkgver)) {
-			len = strlen(bp->fw_ver_str);
-			snprintf(bp->fw_ver_str + len, FW_VER_STR_LEN - len - 1,
-				 "/pkg %s", pkgver);
-		}
-		kfree(pkglog);
-	}
 	if (bp->hwrm_spec_code < 0x10704 || !BNXT_SINGLE_PF(bp))
 		return;
 
@@ -2641,5 +2584,4 @@ const struct ethtool_ops bnxt_ethtool_ops = {
 	.nway_reset		= bnxt_nway_reset,
 	.set_phys_id		= bnxt_set_phys_id,
 	.self_test		= bnxt_self_test,
-	.reset			= bnxt_reset,
 };

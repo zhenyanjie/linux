@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ALPHA_PCI_H
 #define __ALPHA_PCI_H
 
@@ -13,6 +12,9 @@
  * The following structure is used to manage multiple PCI busses.
  */
 
+struct pci_dev;
+struct pci_bus;
+struct resource;
 struct pci_iommu_arena;
 struct page;
 
@@ -53,6 +55,8 @@ struct pci_controller {
 
 #define PCIBIOS_MIN_IO		alpha_mv.min_io_address
 #define PCIBIOS_MIN_MEM		alpha_mv.min_mem_address
+
+extern void pcibios_set_master(struct pci_dev *dev);
 
 /* IOMMU controls.  */
 

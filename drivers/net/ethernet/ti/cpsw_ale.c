@@ -765,9 +765,9 @@ int cpsw_ale_control_get(struct cpsw_ale *ale, int port, int control)
 }
 EXPORT_SYMBOL_GPL(cpsw_ale_control_get);
 
-static void cpsw_ale_timer(struct timer_list *t)
+static void cpsw_ale_timer(unsigned long arg)
 {
-	struct cpsw_ale *ale = from_timer(ale, t, timer);
+	struct cpsw_ale *ale = (struct cpsw_ale *)arg;
 
 	cpsw_ale_control_set(ale, 0, ALE_AGEOUT, 1);
 
@@ -859,7 +859,9 @@ void cpsw_ale_start(struct cpsw_ale *ale)
 	cpsw_ale_control_set(ale, 0, ALE_ENABLE, 1);
 	cpsw_ale_control_set(ale, 0, ALE_CLEAR, 1);
 
-	timer_setup(&ale->timer, cpsw_ale_timer, 0);
+	init_timer(&ale->timer);
+	ale->timer.data	    = (unsigned long)ale;
+	ale->timer.function = cpsw_ale_timer;
 	if (ale->ageout) {
 		ale->timer.expires = jiffies + ale->ageout;
 		add_timer(&ale->timer);

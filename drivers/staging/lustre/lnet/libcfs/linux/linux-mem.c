@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 only,
@@ -30,7 +29,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 
-#include <linux/libcfs/libcfs.h>
+#include "../../../include/linux/libcfs/libcfs.h"
 
 void *libcfs_kvzalloc(size_t size, gfp_t flags)
 {

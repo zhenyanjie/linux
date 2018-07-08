@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -39,8 +38,8 @@
 
 #define DEBUG_SUBSYSTEM S_LOG
 
-#include <llog_swab.h>
-#include <lustre_log.h>
+#include "../include/llog_swab.h"
+#include "../include/lustre_log.h"
 
 static void print_llogd_body(struct llogd_body *d)
 {

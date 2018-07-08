@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -89,8 +88,8 @@
 /*
  * super-class definitions.
  */
-#include <lu_object.h>
-#include <lustre_compat.h>
+#include "lu_object.h"
+#include "lustre_compat.h"
 #include <linux/atomic.h>
 #include <linux/mutex.h>
 #include <linux/radix-tree.h>
@@ -1359,7 +1358,7 @@ struct cl_2queue {
 /** IO types */
 enum cl_io_type {
 	/** read system call */
-	CIT_READ = 1,
+	CIT_READ,
 	/** write system call */
 	CIT_WRITE,
 	/** truncate, utime system calls */

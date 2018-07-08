@@ -47,14 +47,10 @@ int	xfs_bmap_eof(struct xfs_inode *ip, xfs_fileoff_t endoff,
 int	xfs_bmap_punch_delalloc_range(struct xfs_inode *ip,
 		xfs_fileoff_t start_fsb, xfs_fileoff_t length);
 
-struct kgetbmap {
-	__s64		bmv_offset;	/* file offset of segment in blocks */
-	__s64		bmv_block;	/* starting block (64-bit daddr_t)  */
-	__s64		bmv_length;	/* length of segment, blocks	    */
-	__s32		bmv_oflags;	/* output flags */
-};
+/* bmap to userspace formatter - copy to user & advance pointer */
+typedef int (*xfs_bmap_format_t)(void **, struct getbmapx *);
 int	xfs_getbmap(struct xfs_inode *ip, struct getbmapx *bmv,
-		struct kgetbmap *out);
+		xfs_bmap_format_t formatter, void *arg);
 
 /* functions in xfs_bmap.c that are only needed by xfs_bmap_util.c */
 int	xfs_bmap_extsize_align(struct xfs_mount *mp, struct xfs_bmbt_irec *gotp,
@@ -87,7 +83,6 @@ int	xfs_swap_extents(struct xfs_inode *ip, struct xfs_inode *tip,
 
 xfs_daddr_t xfs_fsb_to_db(struct xfs_inode *ip, xfs_fsblock_t fsb);
 
-xfs_extnum_t xfs_bmap_count_leaves(struct xfs_ifork *ifp, xfs_filblks_t *count);
 int xfs_bmap_count_blocks(struct xfs_trans *tp, struct xfs_inode *ip,
 			  int whichfork, xfs_extnum_t *nextents,
 			  xfs_filblks_t *count);

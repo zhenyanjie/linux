@@ -50,7 +50,7 @@
 		power-supply = <&backlight_reg>;
 	};
 
-	display1: disp1 {
+	display0: display@di0 {
 		compatible = "fsl,imx-parallel-display";
 		interface-pix-fmt = "rgb24";
 		pinctrl-names = "default";
@@ -71,9 +71,9 @@
 			};
 		};
 
-		port {
+		port@0 {
 			display0_in: endpoint {
-				remote-endpoint = <&ipu_di0_disp1>;
+				remote-endpoint = <&ipu_di0_disp0>;
 			};
 		};
 	};
@@ -107,7 +107,7 @@
 	};
 };
 
-&ipu_di0_disp1 {
+&ipu_di0_disp0 {
 	remote-endpoint = <&display0_in>;
 };
 

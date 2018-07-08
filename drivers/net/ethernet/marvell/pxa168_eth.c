@@ -362,9 +362,9 @@ static void rxq_refill(struct net_device *dev)
 	}
 }
 
-static inline void rxq_refill_timer_wrapper(struct timer_list *t)
+static inline void rxq_refill_timer_wrapper(unsigned long data)
 {
-	struct pxa168_eth_private *pep = from_timer(pep, t, timeout);
+	struct pxa168_eth_private *pep = (void *)data;
 	napi_schedule(&pep->napi);
 }
 
@@ -1496,7 +1496,9 @@ static int pxa168_eth_probe(struct platform_device *pdev)
 	netif_napi_add(dev, &pep->napi, pxa168_rx_poll, pep->rx_ring_size);
 
 	memset(&pep->timeout, 0, sizeof(struct timer_list));
-	timer_setup(&pep->timeout, rxq_refill_timer_wrapper, 0);
+	init_timer(&pep->timeout);
+	pep->timeout.function = rxq_refill_timer_wrapper;
+	pep->timeout.data = (unsigned long)pep;
 
 	pep->smi_bus = mdiobus_alloc();
 	if (!pep->smi_bus) {

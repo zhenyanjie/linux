@@ -959,21 +959,7 @@ static void pci_enable_crs(struct pci_dev *pdev)
 					 PCI_EXP_RTCTL_CRSSVE);
 }
 
-static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
-					      unsigned int available_buses);
-
 /*
- * pci_scan_bridge_extend() - Scan buses behind a bridge
- * @bus: Parent bus the bridge is on
- * @dev: Bridge itself
- * @max: Starting subordinate number of buses behind this bridge
- * @available_buses: Total number of buses available for this bridge and
- *		     the devices below. After the minimal bus space has
- *		     been allocated the remaining buses will be
- *		     distributed equally between hotplug-capable bridges.
- * @pass: Either %0 (scan already configured bridges) or %1 (scan bridges
- *        that need to be reconfigured.
- *
  * If it's a bridge, configure it and scan the bus behind it.
  * For CardBus bridges, we don't scan behind as the devices will
  * be handled by the bridge driver itself.
@@ -983,9 +969,7 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
  * them, we proceed to assigning numbers to the remaining buses in
  * order to avoid overlaps between old and new bus numbers.
  */
-static int pci_scan_bridge_extend(struct pci_bus *bus, struct pci_dev *dev,
-				  int max, unsigned int available_buses,
-				  int pass)
+int pci_scan_bridge(struct pci_bus *bus, struct pci_dev *dev, int max, int pass)
 {
 	struct pci_bus *child;
 	int is_cardbus = (dev->hdr_type == PCI_HEADER_TYPE_CARDBUS);
@@ -1092,13 +1076,9 @@ static int pci_scan_bridge_extend(struct pci_bus *bus, struct pci_dev *dev,
 			child = pci_add_new_bus(bus, dev, max+1);
 			if (!child)
 				goto out;
-			pci_bus_insert_busn_res(child, max+1,
-						bus->busn_res.end);
+			pci_bus_insert_busn_res(child, max+1, 0xff);
 		}
 		max++;
-		if (available_buses)
-			available_buses--;
-
 		buses = (buses & 0xff000000)
 		      | ((unsigned int)(child->primary)     <<  0)
 		      | ((unsigned int)(child->busn_res.start)   <<  8)
@@ -1120,7 +1100,7 @@ static int pci_scan_bridge_extend(struct pci_bus *bus, struct pci_dev *dev,
 
 		if (!is_cardbus) {
 			child->bridge_ctl = bctl;
-			max = pci_scan_child_bus_extend(child, available_buses);
+			max = pci_scan_child_bus(child);
 		} else {
 			/*
 			 * For CardBus bridges, we leave 4 bus numbers
@@ -1187,28 +1167,6 @@ out:
 	pm_runtime_put(&dev->dev);
 
 	return max;
-}
-
-/*
- * pci_scan_bridge() - Scan buses behind a bridge
- * @bus: Parent bus the bridge is on
- * @dev: Bridge itself
- * @max: Starting subordinate number of buses behind this bridge
- * @pass: Either %0 (scan already configured bridges) or %1 (scan bridges
- *        that need to be reconfigured.
- *
- * If it's a bridge, configure it and scan the bus behind it.
- * For CardBus bridges, we don't scan behind as the devices will
- * be handled by the bridge driver itself.
- *
- * We need to process bridges in two passes -- first we scan those
- * already configured by the BIOS and after we are done with all of
- * them, we proceed to assigning numbers to the remaining buses in
- * order to avoid overlaps between old and new bus numbers.
- */
-int pci_scan_bridge(struct pci_bus *bus, struct pci_dev *dev, int max, int pass)
-{
-	return pci_scan_bridge_extend(bus, dev, max, 0, pass);
 }
 EXPORT_SYMBOL(pci_scan_bridge);
 
@@ -1787,50 +1745,21 @@ static void program_hpp_type2(struct pci_dev *dev, struct hpp_type2 *hpp)
 	 */
 }
 
-int pci_configure_extended_tags(struct pci_dev *dev, void *ign)
+static void pci_configure_extended_tags(struct pci_dev *dev)
 {
-	struct pci_host_bridge *host;
-	u32 cap;
-	u16 ctl;
+	u32 dev_cap;
 	int ret;
 
 	if (!pci_is_pcie(dev))
-		return 0;
+		return;
 
-	ret = pcie_capability_read_dword(dev, PCI_EXP_DEVCAP, &cap);
+	ret = pcie_capability_read_dword(dev, PCI_EXP_DEVCAP, &dev_cap);
 	if (ret)
-		return 0;
+		return;
 
-	if (!(cap & PCI_EXP_DEVCAP_EXT_TAG))
-		return 0;
-
-	ret = pcie_capability_read_word(dev, PCI_EXP_DEVCTL, &ctl);
-	if (ret)
-		return 0;
-
-	host = pci_find_host_bridge(dev->bus);
-	if (!host)
-		return 0;
-
-	/*
-	 * If some device in the hierarchy doesn't handle Extended Tags
-	 * correctly, make sure they're disabled.
-	 */
-	if (host->no_ext_tags) {
-		if (ctl & PCI_EXP_DEVCTL_EXT_TAG) {
-			dev_info(&dev->dev, "disabling Extended Tags\n");
-			pcie_capability_clear_word(dev, PCI_EXP_DEVCTL,
-						   PCI_EXP_DEVCTL_EXT_TAG);
-		}
-		return 0;
-	}
-
-	if (!(ctl & PCI_EXP_DEVCTL_EXT_TAG)) {
-		dev_info(&dev->dev, "enabling Extended Tags\n");
+	if (dev_cap & PCI_EXP_DEVCAP_EXT_TAG)
 		pcie_capability_set_word(dev, PCI_EXP_DEVCTL,
 					 PCI_EXP_DEVCTL_EXT_TAG);
-	}
-	return 0;
 }
 
 /**
@@ -1881,7 +1810,7 @@ static void pci_configure_device(struct pci_dev *dev)
 	int ret;
 
 	pci_configure_mps(dev);
-	pci_configure_extended_tags(dev, NULL);
+	pci_configure_extended_tags(dev);
 	pci_configure_relaxed_ordering(dev);
 
 	memset(&hpp, 0, sizeof(hpp));
@@ -1938,58 +1867,11 @@ struct pci_dev *pci_alloc_dev(struct pci_bus *bus)
 }
 EXPORT_SYMBOL(pci_alloc_dev);
 
-static bool pci_bus_crs_vendor_id(u32 l)
-{
-	return (l & 0xffff) == 0x0001;
-}
-
-static bool pci_bus_wait_crs(struct pci_bus *bus, int devfn, u32 *l,
-			     int timeout)
+bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
+				int crs_timeout)
 {
 	int delay = 1;
 
-	if (!pci_bus_crs_vendor_id(*l))
-		return true;	/* not a CRS completion */
-
-	if (!timeout)
-		return false;	/* CRS, but caller doesn't want to wait */
-
-	/*
-	 * We got the reserved Vendor ID that indicates a completion with
-	 * Configuration Request Retry Status (CRS).  Retry until we get a
-	 * valid Vendor ID or we time out.
-	 */
-	while (pci_bus_crs_vendor_id(*l)) {
-		if (delay > timeout) {
-			pr_warn("pci %04x:%02x:%02x.%d: not ready after %dms; giving up\n",
-				pci_domain_nr(bus), bus->number,
-				PCI_SLOT(devfn), PCI_FUNC(devfn), delay - 1);
-
-			return false;
-		}
-		if (delay >= 1000)
-			pr_info("pci %04x:%02x:%02x.%d: not ready after %dms; waiting\n",
-				pci_domain_nr(bus), bus->number,
-				PCI_SLOT(devfn), PCI_FUNC(devfn), delay - 1);
-
-		msleep(delay);
-		delay *= 2;
-
-		if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, l))
-			return false;
-	}
-
-	if (delay >= 1000)
-		pr_info("pci %04x:%02x:%02x.%d: ready after %dms\n",
-			pci_domain_nr(bus), bus->number,
-			PCI_SLOT(devfn), PCI_FUNC(devfn), delay - 1);
-
-	return true;
-}
-
-bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
-				int timeout)
-{
 	if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, l))
 		return false;
 
@@ -1998,8 +1880,28 @@ bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
 	    *l == 0x0000ffff || *l == 0xffff0000)
 		return false;
 
-	if (pci_bus_crs_vendor_id(*l))
-		return pci_bus_wait_crs(bus, devfn, l, timeout);
+	/*
+	 * Configuration Request Retry Status.  Some root ports return the
+	 * actual device ID instead of the synthetic ID (0xFFFF) required
+	 * by the PCIe spec.  Ignore the device ID and only check for
+	 * (vendor id == 1).
+	 */
+	while ((*l & 0xffff) == 0x0001) {
+		if (!crs_timeout)
+			return false;
+
+		msleep(delay);
+		delay *= 2;
+		if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, l))
+			return false;
+		/* Card hasn't responded in 60 seconds?  Must be stuck. */
+		if (delay > crs_timeout) {
+			printk(KERN_WARNING "pci %04x:%02x:%02x.%d: not responding\n",
+			       pci_domain_nr(bus), bus->number, PCI_SLOT(devfn),
+			       PCI_FUNC(devfn));
+			return false;
+		}
+	}
 
 	return true;
 }
@@ -2429,33 +2331,9 @@ void pcie_bus_configure_settings(struct pci_bus *bus)
 }
 EXPORT_SYMBOL_GPL(pcie_bus_configure_settings);
 
-/*
- * Called after each bus is probed, but before its children are examined.  This
- * is marked as __weak because multiple architectures define it.
- */
-void __weak pcibios_fixup_bus(struct pci_bus *bus)
+unsigned int pci_scan_child_bus(struct pci_bus *bus)
 {
-       /* nothing to do, expected to be removed in the future */
-}
-
-/**
- * pci_scan_child_bus_extend() - Scan devices below a bus
- * @bus: Bus to scan for devices
- * @available_buses: Total number of buses available (%0 does not try to
- *		     extend beyond the minimal)
- *
- * Scans devices below @bus including subordinate buses. Returns new
- * subordinate number including all the found devices. Passing
- * @available_buses causes the remaining bus space to be distributed
- * equally between hotplug-capable bridges to allow future extension of the
- * hierarchy.
- */
-static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
-					      unsigned int available_buses)
-{
-	unsigned int used_buses, normal_bridges = 0, hotplug_bridges = 0;
-	unsigned int start = bus->busn_res.start;
-	unsigned int devfn, cmax, max = start;
+	unsigned int devfn, pass, max = bus->busn_res.start;
 	struct pci_dev *dev;
 
 	dev_dbg(&bus->dev, "scanning bus\n");
@@ -2465,8 +2343,7 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
 		pci_scan_slot(bus, devfn);
 
 	/* Reserve buses for SR-IOV capability. */
-	used_buses = pci_iov_bus_range(bus);
-	max += used_buses;
+	max += pci_iov_bus_range(bus);
 
 	/*
 	 * After performing arch-dependent fixup of the bus, look behind
@@ -2478,73 +2355,19 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
 		bus->is_added = 1;
 	}
 
-	/*
-	 * Calculate how many hotplug bridges and normal bridges there
-	 * are on this bus. We will distribute the additional available
-	 * buses between hotplug bridges.
-	 */
-	for_each_pci_bridge(dev, bus) {
-		if (dev->is_hotplug_bridge)
-			hotplug_bridges++;
-		else
-			normal_bridges++;
-	}
-
-	/*
-	 * Scan bridges that are already configured. We don't touch them
-	 * unless they are misconfigured (which will be done in the second
-	 * scan below).
-	 */
-	for_each_pci_bridge(dev, bus) {
-		cmax = max;
-		max = pci_scan_bridge_extend(bus, dev, max, 0, 0);
-		used_buses += cmax - max;
-	}
-
-	/* Scan bridges that need to be reconfigured */
-	for_each_pci_bridge(dev, bus) {
-		unsigned int buses = 0;
-
-		if (!hotplug_bridges && normal_bridges == 1) {
-			/*
-			 * There is only one bridge on the bus (upstream
-			 * port) so it gets all available buses which it
-			 * can then distribute to the possible hotplug
-			 * bridges below.
-			 */
-			buses = available_buses;
-		} else if (dev->is_hotplug_bridge) {
-			/*
-			 * Distribute the extra buses between hotplug
-			 * bridges if any.
-			 */
-			buses = available_buses / hotplug_bridges;
-			buses = min(buses, available_buses - used_buses);
+	for (pass = 0; pass < 2; pass++)
+		list_for_each_entry(dev, &bus->devices, bus_list) {
+			if (pci_is_bridge(dev))
+				max = pci_scan_bridge(bus, dev, max, pass);
 		}
-
-		cmax = max;
-		max = pci_scan_bridge_extend(bus, dev, cmax, buses, 1);
-		used_buses += max - cmax;
-	}
 
 	/*
 	 * Make sure a hotplug bridge has at least the minimum requested
-	 * number of buses but allow it to grow up to the maximum available
-	 * bus number of there is room.
+	 * number of buses.
 	 */
-	if (bus->self && bus->self->is_hotplug_bridge) {
-		used_buses = max_t(unsigned int, available_buses,
-				   pci_hotplug_bus_size - 1);
-		if (max - start < used_buses) {
-			max = start + used_buses;
-
-			/* Do not allocate more buses than we have room left */
-			if (max > bus->busn_res.end)
-				max = bus->busn_res.end;
-
-			dev_dbg(&bus->dev, "%pR extended by %#02x\n",
-				&bus->busn_res, max - start);
-		}
+	if (bus->self && bus->self->is_hotplug_bridge && pci_hotplug_bus_size) {
+		if (max - bus->busn_res.start < pci_hotplug_bus_size - 1)
+			max = bus->busn_res.start + pci_hotplug_bus_size - 1;
 	}
 
 	/*
@@ -2556,18 +2379,6 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
 	 */
 	dev_dbg(&bus->dev, "bus scan returning with max=%02x\n", max);
 	return max;
-}
-
-/**
- * pci_scan_child_bus() - Scan devices below a bus
- * @bus: Bus to scan for devices
- *
- * Scans devices below @bus including subordinate buses. Returns new
- * subordinate number including all the found devices.
- */
-unsigned int pci_scan_child_bus(struct pci_bus *bus)
-{
-	return pci_scan_child_bus_extend(bus, 0);
 }
 EXPORT_SYMBOL_GPL(pci_scan_child_bus);
 
@@ -2861,38 +2672,3 @@ void __init pci_sort_breadthfirst(void)
 {
 	bus_sort_breadthfirst(&pci_bus_type, &pci_sort_bf_cmp);
 }
-
-int pci_hp_add_bridge(struct pci_dev *dev)
-{
-	struct pci_bus *parent = dev->bus;
-	int busnr, start = parent->busn_res.start;
-	unsigned int available_buses = 0;
-	int end = parent->busn_res.end;
-
-	for (busnr = start; busnr <= end; busnr++) {
-		if (!pci_find_bus(pci_domain_nr(parent), busnr))
-			break;
-	}
-	if (busnr-- > end) {
-		dev_err(&dev->dev, "No bus number available for hot-added bridge\n");
-		return -1;
-	}
-
-	/* Scan bridges that are already configured */
-	busnr = pci_scan_bridge(parent, dev, busnr, 0);
-
-	/*
-	 * Distribute the available bus numbers between hotplug-capable
-	 * bridges to make extending the chain later possible.
-	 */
-	available_buses = end - busnr;
-
-	/* Scan bridges that need to be reconfigured */
-	pci_scan_bridge_extend(parent, dev, busnr, available_buses, 1);
-
-	if (!dev->subordinate)
-		return -1;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pci_hp_add_bridge);

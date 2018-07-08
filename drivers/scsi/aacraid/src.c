@@ -868,13 +868,9 @@ int aac_src_init(struct aac_dev *dev)
 	/* Failure to reset here is an option ... */
 	dev->a_ops.adapter_sync_cmd = src_sync_cmd;
 	dev->a_ops.adapter_enable_int = aac_src_disable_interrupt;
-
-	if (dev->init_reset) {
-		dev->init_reset = false;
-		if (!aac_src_restart_adapter(dev, 0, IOP_HWSOFT_RESET))
-			++restart;
-	}
-
+	if ((aac_reset_devices || reset_devices) &&
+		!aac_src_restart_adapter(dev, 0, IOP_HWSOFT_RESET))
+		++restart;
 	/*
 	 *	Check to see if the board panic'd while booting.
 	 */
@@ -1018,13 +1014,9 @@ int aac_srcv_init(struct aac_dev *dev)
 	/* Failure to reset here is an option ... */
 	dev->a_ops.adapter_sync_cmd = src_sync_cmd;
 	dev->a_ops.adapter_enable_int = aac_src_disable_interrupt;
-
-	if (dev->init_reset) {
-		dev->init_reset = false;
-		if (!aac_src_restart_adapter(dev, 0, IOP_HWSOFT_RESET))
-			++restart;
-	}
-
+	if ((aac_reset_devices || reset_devices) &&
+		!aac_src_restart_adapter(dev, 0, IOP_HWSOFT_RESET))
+		++restart;
 	/*
 	 *	Check to see if flash update is running.
 	 *	Wait for the adapter to be up and running. Wait up to 5 minutes

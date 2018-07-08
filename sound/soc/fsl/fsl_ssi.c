@@ -38,7 +38,6 @@
 #include <linux/ctype.h>
 #include <linux/device.h>
 #include <linux/delay.h>
-#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/of.h>
@@ -198,13 +197,12 @@ struct fsl_ssi_soc_data {
  * @use_dma: DMA is used or FIQ with stream filter
  * @use_dual_fifo: DMA with support for both FIFOs used
  * @fifo_deph: Depth of the SSI FIFOs
- * @slot_width: width of each DAI slot
- * @slots: number of slots
  * @rxtx_reg_val: Specific register settings for receive/transmit configuration
  *
  * @clk: SSI clock
  * @baudclk: SSI baud clock for master mode
  * @baudclk_streams: Active streams that are using baudclk
+ * @bitclk_freq: bitclock frequency set by .set_dai_sysclk
  *
  * @dma_params_tx: DMA transmit parameters
  * @dma_params_rx: DMA receive parameters
@@ -235,13 +233,12 @@ struct fsl_ssi_private {
 	bool use_dual_fifo;
 	bool has_ipg_clk_name;
 	unsigned int fifo_depth;
-	unsigned int slot_width;
-	unsigned int slots;
 	struct fsl_ssi_rxtx_reg_val rxtx_reg_val;
 
 	struct clk *clk;
 	struct clk *baudclk;
 	unsigned int baudclk_streams;
+	unsigned int bitclk_freq;
 
 	/* regcache for volatile regs */
 	u32 regcache_sfcsr;
@@ -266,8 +263,6 @@ struct fsl_ssi_private {
 
 	u32 fifo_watermark;
 	u32 dma_maxburst;
-
-	struct mutex ac97_reg_lock;
 };
 
 /*
@@ -705,8 +700,8 @@ static void fsl_ssi_shutdown(struct snd_pcm_substream *substream,
  * Note: This function can be only called when using SSI as DAI master
  *
  * Quick instruction for parameters:
- * freq: Output BCLK frequency = samplerate * slots * slot_width
- *       (In 2-channel I2S Master mode, slot_width is fixed 32)
+ * freq: Output BCLK frequency = samplerate * 32 (fixed) * channels
+ * dir: SND_SOC_CLOCK_OUT -> TxBCLK, SND_SOC_CLOCK_IN -> RxBCLK.
  */
 static int fsl_ssi_set_bclk(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *cpu_dai,
@@ -717,21 +712,15 @@ static int fsl_ssi_set_bclk(struct snd_pcm_substream *substream,
 	int synchronous = ssi_private->cpu_dai_drv.symmetric_rates, ret;
 	u32 pm = 999, div2, psr, stccr, mask, afreq, factor, i;
 	unsigned long clkrate, baudrate, tmprate;
-	unsigned int slots = params_channels(hw_params);
-	unsigned int slot_width = 32;
 	u64 sub, savesub = 100000;
 	unsigned int freq;
 	bool baudclk_is_used;
 
-	/* Override slots and slot_width if being specifically set... */
-	if (ssi_private->slots)
-		slots = ssi_private->slots;
-	/* ...but keep 32 bits if slots is 2 -- I2S Master mode */
-	if (ssi_private->slot_width && slots != 2)
-		slot_width = ssi_private->slot_width;
-
-	/* Generate bit clock based on the slot number and slot width */
-	freq = slots * slot_width * params_rate(hw_params);
+	/* Prefer the explicitly set bitclock frequency */
+	if (ssi_private->bitclk_freq)
+		freq = ssi_private->bitclk_freq;
+	else
+		freq = params_channels(hw_params) * 32 * params_rate(hw_params);
 
 	/* Don't apply it to any non-baudclk circumstance */
 	if (IS_ERR(ssi_private->baudclk))
@@ -812,6 +801,16 @@ static int fsl_ssi_set_bclk(struct snd_pcm_substream *substream,
 			return -EINVAL;
 		}
 	}
+
+	return 0;
+}
+
+static int fsl_ssi_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
+		int clk_id, unsigned int freq, int dir)
+{
+	struct fsl_ssi_private *ssi_private = snd_soc_dai_get_drvdata(cpu_dai);
+
+	ssi_private->bitclk_freq = freq;
 
 	return 0;
 }
@@ -1096,12 +1095,6 @@ static int fsl_ssi_set_dai_tdm_slot(struct snd_soc_dai *cpu_dai, u32 tx_mask,
 	struct regmap *regs = ssi_private->regs;
 	u32 val;
 
-	/* The word length should be 8, 10, 12, 16, 18, 20, 22 or 24 */
-	if (slot_width & 1 || slot_width < 8 || slot_width > 24) {
-		dev_err(cpu_dai->dev, "invalid slot width: %d\n", slot_width);
-		return -EINVAL;
-	}
-
 	/* The slot number should be >= 2 if using Network mode or I2S mode */
 	regmap_read(regs, CCSR_SSI_SCR, &val);
 	val &= CCSR_SSI_SCR_I2S_MODE_MASK | CCSR_SSI_SCR_NET;
@@ -1127,9 +1120,6 @@ static int fsl_ssi_set_dai_tdm_slot(struct snd_soc_dai *cpu_dai, u32 tx_mask,
 	regmap_write(regs, CCSR_SSI_SRMSK, ~rx_mask);
 
 	regmap_update_bits(regs, CCSR_SSI_SCR, CCSR_SSI_SCR_SSIEN, val);
-
-	ssi_private->slot_width = slot_width;
-	ssi_private->slots = slots;
 
 	return 0;
 }
@@ -1201,6 +1191,7 @@ static const struct snd_soc_dai_ops fsl_ssi_dai_ops = {
 	.hw_params	= fsl_ssi_hw_params,
 	.hw_free	= fsl_ssi_hw_free,
 	.set_fmt	= fsl_ssi_set_dai_fmt,
+	.set_sysclk	= fsl_ssi_set_dai_sysclk,
 	.set_tdm_slot	= fsl_ssi_set_dai_tdm_slot,
 	.trigger	= fsl_ssi_trigger,
 };
@@ -1263,13 +1254,11 @@ static void fsl_ssi_ac97_write(struct snd_ac97 *ac97, unsigned short reg,
 	if (reg > 0x7f)
 		return;
 
-	mutex_lock(&fsl_ac97_data->ac97_reg_lock);
-
 	ret = clk_prepare_enable(fsl_ac97_data->clk);
 	if (ret) {
 		pr_err("ac97 write clk_prepare_enable failed: %d\n",
 			ret);
-		goto ret_unlock;
+		return;
 	}
 
 	lreg = reg <<  12;
@@ -1283,9 +1272,6 @@ static void fsl_ssi_ac97_write(struct snd_ac97 *ac97, unsigned short reg,
 	udelay(100);
 
 	clk_disable_unprepare(fsl_ac97_data->clk);
-
-ret_unlock:
-	mutex_unlock(&fsl_ac97_data->ac97_reg_lock);
 }
 
 static unsigned short fsl_ssi_ac97_read(struct snd_ac97 *ac97,
@@ -1293,18 +1279,16 @@ static unsigned short fsl_ssi_ac97_read(struct snd_ac97 *ac97,
 {
 	struct regmap *regs = fsl_ac97_data->regs;
 
-	unsigned short val = 0;
+	unsigned short val = -1;
 	u32 reg_val;
 	unsigned int lreg;
 	int ret;
-
-	mutex_lock(&fsl_ac97_data->ac97_reg_lock);
 
 	ret = clk_prepare_enable(fsl_ac97_data->clk);
 	if (ret) {
 		pr_err("ac97 read clk_prepare_enable failed: %d\n",
 			ret);
-		goto ret_unlock;
+		return -1;
 	}
 
 	lreg = (reg & 0x7f) <<  12;
@@ -1319,8 +1303,6 @@ static unsigned short fsl_ssi_ac97_read(struct snd_ac97 *ac97,
 
 	clk_disable_unprepare(fsl_ac97_data->clk);
 
-ret_unlock:
-	mutex_unlock(&fsl_ac97_data->ac97_reg_lock);
 	return val;
 }
 
@@ -1450,8 +1432,10 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 
 	ssi_private = devm_kzalloc(&pdev->dev, sizeof(*ssi_private),
 			GFP_KERNEL);
-	if (!ssi_private)
+	if (!ssi_private) {
+		dev_err(&pdev->dev, "could not allocate DAI object\n");
 		return -ENOMEM;
+	}
 
 	ssi_private->soc = of_id->data;
 	ssi_private->dev = &pdev->dev;
@@ -1470,6 +1454,12 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 				sizeof(fsl_ssi_ac97_dai));
 
 		fsl_ac97_data = ssi_private;
+
+		ret = snd_soc_set_ac97_ops_of_reset(&fsl_ssi_ac97_ops, pdev);
+		if (ret) {
+			dev_err(&pdev->dev, "could not set AC'97 ops\n");
+			return ret;
+		}
 	} else {
 		/* Initialize this copy of the CPU DAI driver structure */
 		memcpy(&ssi_private->cpu_dai_drv, &fsl_ssi_dai_template,
@@ -1580,15 +1570,6 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	if (fsl_ssi_is_ac97(ssi_private)) {
-		mutex_init(&ssi_private->ac97_reg_lock);
-		ret = snd_soc_set_ac97_ops_of_reset(&fsl_ssi_ac97_ops, pdev);
-		if (ret) {
-			dev_err(&pdev->dev, "could not set AC'97 ops\n");
-			goto error_ac97_ops;
-		}
-	}
-
 	ret = devm_snd_soc_register_component(&pdev->dev, &fsl_ssi_component,
 					      &ssi_private->cpu_dai_drv, 1);
 	if (ret) {
@@ -1672,13 +1653,6 @@ error_sound_card:
 	fsl_ssi_debugfs_remove(&ssi_private->dbg_stats);
 
 error_asoc_register:
-	if (fsl_ssi_is_ac97(ssi_private))
-		snd_soc_set_ac97_ops(NULL);
-
-error_ac97_ops:
-	if (fsl_ssi_is_ac97(ssi_private))
-		mutex_destroy(&ssi_private->ac97_reg_lock);
-
 	if (ssi_private->soc->imx)
 		fsl_ssi_imx_clean(pdev, ssi_private);
 
@@ -1697,10 +1671,8 @@ static int fsl_ssi_remove(struct platform_device *pdev)
 	if (ssi_private->soc->imx)
 		fsl_ssi_imx_clean(pdev, ssi_private);
 
-	if (fsl_ssi_is_ac97(ssi_private)) {
+	if (fsl_ssi_is_ac97(ssi_private))
 		snd_soc_set_ac97_ops(NULL);
-		mutex_destroy(&ssi_private->ac97_reg_lock);
-	}
 
 	return 0;
 }

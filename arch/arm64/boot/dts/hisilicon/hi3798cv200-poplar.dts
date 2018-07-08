@@ -78,17 +78,17 @@
 
 &gpio1 {
 	status = "okay";
-	gpio-line-names = "GPIO-E",	"",
+	gpio-line-names = "LS-GPIO-E",	"",
 			  "",		"",
-			  "",		"GPIO-F",
-			  "",		"GPIO-J";
+			  "",		"LS-GPIO-F",
+			  "",		"LS-GPIO-J";
 };
 
 &gpio2 {
 	status = "okay";
-	gpio-line-names = "GPIO-H",	"GPIO-I",
-			  "GPIO-L",	"GPIO-G",
-			  "GPIO-K",	"",
+	gpio-line-names = "LS-GPIO-H",	"LS-GPIO-I",
+			  "LS-GPIO-L",	"LS-GPIO-G",
+			  "LS-GPIO-K",	"",
 			  "",		"";
 };
 
@@ -96,15 +96,15 @@
 	status = "okay";
 	gpio-line-names = "",		"",
 			  "",		"",
-			  "GPIO-C",	"",
-			  "",		"GPIO-B";
+			  "LS-GPIO-C",	"",
+			  "",		"LS-GPIO-B";
 };
 
 &gpio4 {
 	status = "okay";
 	gpio-line-names = "",		"",
 			  "",		"",
-			  "",		"GPIO-D",
+			  "",		"LS-GPIO-D",
 			  "",		"";
 };
 
@@ -112,7 +112,7 @@
 	status = "okay";
 	gpio-line-names = "",		"USER-LED-1",
 			  "USER-LED-2",	"",
-			  "",		"GPIO-A",
+			  "",		"LS-GPIO-A",
 			  "",		"";
 };
 

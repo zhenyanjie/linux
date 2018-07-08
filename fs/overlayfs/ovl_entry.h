@@ -14,26 +14,14 @@ struct ovl_config {
 	char *workdir;
 	bool default_permissions;
 	bool redirect_dir;
-	bool redirect_follow;
-	const char *redirect_mode;
 	bool index;
-};
-
-struct ovl_layer {
-	struct vfsmount *mnt;
-	dev_t pseudo_dev;
-};
-
-struct ovl_path {
-	struct ovl_layer *layer;
-	struct dentry *dentry;
 };
 
 /* private information held for overlayfs's superblock */
 struct ovl_fs {
 	struct vfsmount *upper_mnt;
 	unsigned numlower;
-	struct ovl_layer *lower_layers;
+	struct vfsmount **lower_mnt;
 	/* workbasedir is the path at workdir= mount option */
 	struct dentry *workbasedir;
 	/* workdir is the 'work' directory under workbasedir */
@@ -64,7 +52,7 @@ struct ovl_entry {
 		struct rcu_head rcu;
 	};
 	unsigned numlower;
-	struct ovl_path lowerstack[];
+	struct path lowerstack[];
 };
 
 struct ovl_entry *ovl_alloc_entry(unsigned int numlower);
@@ -89,5 +77,5 @@ static inline struct ovl_inode *OVL_I(struct inode *inode)
 
 static inline struct dentry *ovl_upperdentry_dereference(struct ovl_inode *oi)
 {
-	return READ_ONCE(oi->__upperdentry);
+	return lockless_dereference(oi->__upperdentry);
 }

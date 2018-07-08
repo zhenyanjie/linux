@@ -28,8 +28,6 @@
 #include <asm/msr.h>
 #include <asm/trace/irq_vectors.h>
 
-#include "mce-internal.h"
-
 #define NR_BLOCKS         5
 #define THRESHOLD_MAX     0xFFF
 #define INT_TYPE_APIC     0x00020000
@@ -203,8 +201,8 @@ static void smca_configure(unsigned int bank, unsigned int cpu)
 		wrmsr(smca_config, low, high);
 	}
 
-	/* Return early if this bank was already initialized. */
-	if (smca_banks[bank].hwid)
+	/* Collect bank_info using CPU 0 for now. */
+	if (cpu)
 		return;
 
 	if (rdmsr_safe_on_cpu(cpu, MSR_AMD64_SMCA_MCx_IPID(bank), &low, &high)) {
@@ -218,6 +216,11 @@ static void smca_configure(unsigned int bank, unsigned int cpu)
 	for (i = 0; i < ARRAY_SIZE(smca_hwid_mcatypes); i++) {
 		s_hwid = &smca_hwid_mcatypes[i];
 		if (hwid_mcatype == s_hwid->hwid_mcatype) {
+
+			WARN(smca_banks[bank].hwid,
+			     "Bank %s already initialized!\n",
+			     smca_get_name(s_hwid->bank_type));
+
 			smca_banks[bank].hwid = s_hwid;
 			smca_banks[bank].id = low;
 			smca_banks[bank].sysfs_id = s_hwid->count++;
@@ -415,21 +418,6 @@ static u32 get_block_address(unsigned int cpu, u32 current_addr, u32 low, u32 hi
 			     unsigned int bank, unsigned int block)
 {
 	u32 addr = 0, offset = 0;
-
-	if ((bank >= mca_cfg.banks) || (block >= NR_BLOCKS))
-		return addr;
-
-	/* Get address from already initialized block. */
-	if (per_cpu(threshold_banks, cpu)) {
-		struct threshold_bank *bankp = per_cpu(threshold_banks, cpu)[bank];
-
-		if (bankp && bankp->blocks) {
-			struct threshold_block *blockp = &bankp->blocks[block];
-
-			if (blockp)
-				return blockp->address;
-		}
-	}
 
 	if (mce_flags.smca) {
 		if (!block) {
@@ -788,12 +776,24 @@ static void __log_error(unsigned int bank, u64 status, u64 addr, u64 misc)
 	mce_log(&m);
 }
 
+static inline void __smp_deferred_error_interrupt(void)
+{
+	inc_irq_stat(irq_deferred_error_count);
+	deferred_error_int_vector();
+}
+
 asmlinkage __visible void __irq_entry smp_deferred_error_interrupt(void)
 {
 	entering_irq();
+	__smp_deferred_error_interrupt();
+	exiting_ack_irq();
+}
+
+asmlinkage __visible void __irq_entry smp_trace_deferred_error_interrupt(void)
+{
+	entering_irq();
 	trace_deferred_error_apic_entry(DEFERRED_ERROR_VECTOR);
-	inc_irq_stat(irq_deferred_error_count);
-	deferred_error_int_vector();
+	__smp_deferred_error_interrupt();
 	trace_deferred_error_apic_exit(DEFERRED_ERROR_VECTOR);
 	exiting_ack_irq();
 }

@@ -1248,10 +1248,9 @@ static void lance_set_multicast(struct net_device *dev)
 	netif_wake_queue(dev);
 }
 
-static void lance_set_multicast_retry(struct timer_list *t)
+static void lance_set_multicast_retry(unsigned long _opaque)
 {
-	struct lance_private *lp = from_timer(lp, t, multicast_timer);
-	struct net_device *dev = lp->dev;
+	struct net_device *dev = (struct net_device *) _opaque;
 
 	lance_set_multicast(dev);
 }
@@ -1460,7 +1459,9 @@ no_link_test:
 	 * can occur from interrupts (ex. IPv6).  So we
 	 * use a timer to try again later when necessary. -DaveM
 	 */
-	timer_setup(&lp->multicast_timer, lance_set_multicast_retry, 0);
+	init_timer(&lp->multicast_timer);
+	lp->multicast_timer.data = (unsigned long) dev;
+	lp->multicast_timer.function = lance_set_multicast_retry;
 
 	if (register_netdev(dev)) {
 		printk(KERN_ERR "SunLance: Cannot register device.\n");

@@ -471,8 +471,10 @@ static int rcar_pcie_enable(struct rcar_pcie *pcie)
 		bridge->msi = &pcie->msi.chip;
 
 	ret = pci_scan_root_bus_bridge(bridge);
-	if (ret < 0)
+	if (ret < 0) {
+		kfree(bridge);
 		return ret;
+	}
 
 	bus = bridge->bus;
 
@@ -1027,6 +1029,24 @@ static int rcar_pcie_inbound_ranges(struct rcar_pcie *pcie,
 	return 0;
 }
 
+static int pci_dma_range_parser_init(struct of_pci_range_parser *parser,
+				     struct device_node *node)
+{
+	const int na = 3, ns = 2;
+	int rlen;
+
+	parser->node = node;
+	parser->pna = of_n_addr_cells(node);
+	parser->np = parser->pna + na + ns;
+
+	parser->range = of_get_property(node, "dma-ranges", &rlen);
+	if (!parser->range)
+		return -ENOENT;
+
+	parser->end = parser->range + rlen / sizeof(__be32);
+	return 0;
+}
+
 static int rcar_pcie_parse_map_dma_ranges(struct rcar_pcie *pcie,
 					  struct device_node *np)
 {
@@ -1035,7 +1055,7 @@ static int rcar_pcie_parse_map_dma_ranges(struct rcar_pcie *pcie,
 	int index = 0;
 	int err;
 
-	if (of_pci_dma_range_parser_init(&parser, np))
+	if (pci_dma_range_parser_init(&parser, np))
 		return -EINVAL;
 
 	/* Get the dma-ranges from DT */
@@ -1123,19 +1143,17 @@ static int rcar_pcie_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&pcie->resources);
 
-	err = rcar_pcie_parse_request_of_pci_ranges(pcie);
-	if (err)
-		goto err_free_bridge;
+	rcar_pcie_parse_request_of_pci_ranges(pcie);
 
 	err = rcar_pcie_get_resources(pcie);
 	if (err < 0) {
 		dev_err(dev, "failed to request resources: %d\n", err);
-		goto err_free_resource_list;
+		goto err_free_bridge;
 	}
 
 	err = rcar_pcie_parse_map_dma_ranges(pcie, dev->of_node);
 	if (err)
-		goto err_free_resource_list;
+		goto err_free_bridge;
 
 	pm_runtime_enable(dev);
 	err = pm_runtime_get_sync(dev);
@@ -1172,17 +1190,14 @@ static int rcar_pcie_probe(struct platform_device *pdev)
 
 	return 0;
 
+err_free_bridge:
+	pci_free_host_bridge(bridge);
+
 err_pm_put:
 	pm_runtime_put(dev);
 
 err_pm_disable:
 	pm_runtime_disable(dev);
-
-err_free_resource_list:
-	pci_free_resource_list(&pcie->resources);
-err_free_bridge:
-	pci_free_host_bridge(bridge);
-
 	return err;
 }
 

@@ -23,7 +23,6 @@
 #include <crypto/aes.h>
 #include <crypto/internal/hash.h>
 #include <crypto/aead.h>
-#include <crypto/gcm.h>
 #include <crypto/sha.h>
 #include <crypto/sha3.h>
 
@@ -40,6 +39,8 @@
 #define ARC4_STATE_SIZE     4
 
 #define CCM_AES_IV_SIZE    16
+#define GCM_AES_IV_SIZE    12
+#define GCM_ESP_IV_SIZE     8
 #define CCM_ESP_IV_SIZE     8
 #define RFC4543_ICV_SIZE   16
 
@@ -426,13 +427,10 @@ struct spu_hw {
 
 	/* The number of SPUs on this platform */
 	u32 num_spu;
-
-	/* The number of SPU channels on this platform */
-	u32 num_chan;
 };
 
 struct device_private {
-	struct platform_device *pdev;
+	struct platform_device *pdev[MAX_SPUS];
 
 	struct spu_hw spu;
 
@@ -472,10 +470,12 @@ struct device_private {
 	/* Number of ICV check failures for AEAD messages */
 	atomic_t bad_icv;
 
-	struct mbox_client mcl;
-
+	struct mbox_client mcl[MAX_SPUS];
 	/* Array of mailbox channel pointers, one for each channel */
-	struct mbox_chan **mbox;
+	struct mbox_chan *mbox[MAX_SPUS];
+
+	/* Driver initialized */
+	bool inited;
 };
 
 extern struct device_private iproc_priv;

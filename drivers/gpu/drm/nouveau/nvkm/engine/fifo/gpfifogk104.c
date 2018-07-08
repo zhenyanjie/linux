@@ -117,7 +117,7 @@ gk104_fifo_gpfifo_engine_init(struct nvkm_fifo_chan *base,
 	u32 offset = gk104_fifo_gpfifo_engine_addr(engine);
 
 	if (offset) {
-		u64   addr = chan->engn[engine->subdev.index].vma->addr;
+		u64   addr = chan->engn[engine->subdev.index].vma.offset;
 		u32 datalo = lower_32_bits(addr) | 0x00000004;
 		u32 datahi = upper_32_bits(addr);
 		nvkm_kmap(inst);
@@ -138,7 +138,7 @@ gk104_fifo_gpfifo_engine_dtor(struct nvkm_fifo_chan *base,
 			      struct nvkm_engine *engine)
 {
 	struct gk104_fifo_chan *chan = gk104_fifo_chan(base);
-	nvkm_vmm_put(chan->base.vmm, &chan->engn[engine->subdev.index].vma);
+	nvkm_gpuobj_unmap(&chan->engn[engine->subdev.index].vma);
 	nvkm_gpuobj_del(&chan->engn[engine->subdev.index].inst);
 }
 
@@ -158,13 +158,8 @@ gk104_fifo_gpfifo_engine_ctor(struct nvkm_fifo_chan *base,
 	if (ret)
 		return ret;
 
-	ret = nvkm_vmm_get(chan->base.vmm, 12, chan->engn[engn].inst->size,
-			   &chan->engn[engn].vma);
-	if (ret)
-		return ret;
-
-	return nvkm_memory_map(chan->engn[engn].inst, 0, chan->base.vmm,
-			       chan->engn[engn].vma, NULL, 0);
+	return nvkm_gpuobj_map(chan->engn[engn].inst, chan->vm,
+			       NV_MEM_ACCESS_RW, &chan->engn[engn].vma);
 }
 
 static void
@@ -208,7 +203,10 @@ gk104_fifo_gpfifo_init(struct nvkm_fifo_chan *base)
 static void *
 gk104_fifo_gpfifo_dtor(struct nvkm_fifo_chan *base)
 {
-	return gk104_fifo_chan(base);
+	struct gk104_fifo_chan *chan = gk104_fifo_chan(base);
+	nvkm_vm_ref(NULL, &chan->vm, chan->pgd);
+	nvkm_gpuobj_del(&chan->pgd);
+	return chan;
 }
 
 static const struct nvkm_fifo_chan_func
@@ -231,18 +229,16 @@ struct gk104_fifo_chan_func {
 static int
 gk104_fifo_gpfifo_new_(const struct gk104_fifo_chan_func *func,
 		       struct gk104_fifo *fifo, u32 *engmask, u16 *chid,
-		       u64 vmm, u64 ioffset, u64 ilength,
+		       u64 vm, u64 ioffset, u64 ilength,
 		       const struct nvkm_oclass *oclass,
 		       struct nvkm_object **pobject)
 {
+	struct nvkm_device *device = fifo->base.engine.subdev.device;
 	struct gk104_fifo_chan *chan;
 	int runlist = -1, ret = -ENOSYS, i, j;
 	u32 engines = 0, present = 0;
 	u64 subdevs = 0;
 	u64 usermem;
-
-	if (!vmm)
-		return -EINVAL;
 
 	/* Determine which downstream engines are present */
 	for (i = 0; i < fifo->engine_nr; i++) {
@@ -289,13 +285,29 @@ gk104_fifo_gpfifo_new_(const struct gk104_fifo_chan_func *func,
 	INIT_LIST_HEAD(&chan->head);
 
 	ret = nvkm_fifo_chan_ctor(&gk104_fifo_gpfifo_func, &fifo->base,
-				  0x1000, 0x1000, true, vmm, 0, subdevs,
-				  1, fifo->user.bar->addr, 0x200,
+				  0x1000, 0x1000, true, vm, 0, subdevs,
+				  1, fifo->user.bar.offset, 0x200,
 				  oclass, &chan->base);
 	if (ret)
 		return ret;
 
 	*chid = chan->base.chid;
+
+	/* Page directory. */
+	ret = nvkm_gpuobj_new(device, 0x10000, 0x1000, false, NULL, &chan->pgd);
+	if (ret)
+		return ret;
+
+	nvkm_kmap(chan->base.inst);
+	nvkm_wo32(chan->base.inst, 0x0200, lower_32_bits(chan->pgd->addr));
+	nvkm_wo32(chan->base.inst, 0x0204, upper_32_bits(chan->pgd->addr));
+	nvkm_wo32(chan->base.inst, 0x0208, 0xffffffff);
+	nvkm_wo32(chan->base.inst, 0x020c, 0x000000ff);
+	nvkm_done(chan->base.inst);
+
+	ret = nvkm_vm_ref(chan->base.vm, &chan->vm, chan->pgd);
+	if (ret)
+		return ret;
 
 	/* Clear channel control registers. */
 	usermem = chan->base.chid * 0x200;
@@ -361,17 +373,18 @@ gk104_fifo_gpfifo_new(struct nvkm_fifo *base, const struct nvkm_oclass *oclass,
 
 	nvif_ioctl(parent, "create channel gpfifo size %d\n", size);
 	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
-		nvif_ioctl(parent, "create channel gpfifo vers %d vmm %llx "
+		nvif_ioctl(parent, "create channel gpfifo vers %d vm %llx "
 				   "ioffset %016llx ilength %08x engine %08x\n",
-			   args->v0.version, args->v0.vmm, args->v0.ioffset,
+			   args->v0.version, args->v0.vm, args->v0.ioffset,
 			   args->v0.ilength, args->v0.engines);
 		return gk104_fifo_gpfifo_new_(gk104_fifo_gpfifo, fifo,
 					      &args->v0.engines,
 					      &args->v0.chid,
-					       args->v0.vmm,
+					       args->v0.vm,
 					       args->v0.ioffset,
 					       args->v0.ilength,
 					      oclass, pobject);
+
 	}
 
 	return ret;

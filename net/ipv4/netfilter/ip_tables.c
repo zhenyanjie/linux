@@ -35,6 +35,12 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
 MODULE_DESCRIPTION("IPv4 packet filter");
 
+#ifdef CONFIG_NETFILTER_DEBUG
+#define IP_NF_ASSERT(x)		WARN_ON(!(x))
+#else
+#define IP_NF_ASSERT(x)
+#endif
+
 void *ipt_alloc_initial_table(const struct xt_table *info)
 {
 	return xt_alloc_initial_table(ipt, IPT);
@@ -145,7 +151,7 @@ static const char *const comments[] = {
 	[NF_IP_TRACE_COMMENT_POLICY]	= "policy",
 };
 
-static const struct nf_loginfo trace_loginfo = {
+static struct nf_loginfo trace_loginfo = {
 	.type = NF_LOG_TYPE_LOG,
 	.u = {
 		.log = {
@@ -257,7 +263,7 @@ ipt_do_table(struct sk_buff *skb,
 	acpar.hotdrop = false;
 	acpar.state   = state;
 
-	WARN_ON(!(table->valid_hooks & (1 << hook)));
+	IP_NF_ASSERT(table->valid_hooks & (1 << hook));
 	local_bh_disable();
 	addend = xt_write_recseq_begin();
 	private = table->private;
@@ -287,7 +293,7 @@ ipt_do_table(struct sk_buff *skb,
 		const struct xt_entry_match *ematch;
 		struct xt_counters *counter;
 
-		WARN_ON(!e);
+		IP_NF_ASSERT(e);
 		if (!ip_packet_match(ip, indev, outdev,
 		    &e->ip, acpar.fragoff)) {
  no_match:
@@ -306,7 +312,7 @@ ipt_do_table(struct sk_buff *skb,
 		ADD_COUNTER(*counter, skb->len, 1);
 
 		t = ipt_get_target(e);
-		WARN_ON(!t->u.kernel.target);
+		IP_NF_ASSERT(t->u.kernel.target);
 
 #if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE)
 		/* The packet is traced: log it */
@@ -335,13 +341,8 @@ ipt_do_table(struct sk_buff *skb,
 				continue;
 			}
 			if (table_base + v != ipt_next_entry(e) &&
-			    !(e->ip.flags & IPT_F_GOTO)) {
-				if (unlikely(stackidx >= private->stacksize)) {
-					verdict = NF_DROP;
-					break;
-				}
+			    !(e->ip.flags & IPT_F_GOTO))
 				jumpstack[stackidx++] = e;
-			}
 
 			e = get_entry(table_base, v);
 			continue;
@@ -444,6 +445,7 @@ mark_source_chains(const struct xt_table_info *newinfo,
 					if (!xt_find_jump_offset(offsets, newpos,
 								 newinfo->number))
 						return 0;
+					e = entry0 + newpos;
 				} else {
 					/* ... this is a fallthru */
 					newpos = pos + e->next_offset;
@@ -780,28 +782,7 @@ get_counters(const struct xt_table_info *t,
 
 			ADD_COUNTER(counters[i], bcnt, pcnt);
 			++i; /* macro does multi eval of i */
-			cond_resched();
 		}
-	}
-}
-
-static void get_old_counters(const struct xt_table_info *t,
-			     struct xt_counters counters[])
-{
-	struct ipt_entry *iter;
-	unsigned int cpu, i;
-
-	for_each_possible_cpu(cpu) {
-		i = 0;
-		xt_entry_foreach(iter, t->entries, t->size) {
-			const struct xt_counters *tmp;
-
-			tmp = xt_get_per_cpu_counter(&iter->counters, cpu);
-			ADD_COUNTER(counters[i], tmp->bcnt, tmp->pcnt);
-			++i; /* macro does multi eval of i */
-		}
-
-		cond_resched();
 	}
 }
 
@@ -1094,7 +1075,8 @@ __do_replace(struct net *net, const char *name, unsigned int valid_hooks,
 	    (newinfo->number <= oldinfo->initial_entries))
 		module_put(t->me);
 
-	get_old_counters(oldinfo, counters);
+	/* Get the old counters, and synchronize with replace */
+	get_counters(oldinfo, counters);
 
 	/* Decrease module usage counts and free resource */
 	xt_entry_foreach(iter, oldinfo->entries, oldinfo->size)
@@ -1374,6 +1356,7 @@ compat_copy_entry_from_user(struct compat_ipt_entry *e, void **dstptr,
 			    struct xt_table_info *newinfo, unsigned char *base)
 {
 	struct xt_entry_target *t;
+	struct xt_target *target;
 	struct ipt_entry *de;
 	unsigned int origsize;
 	int h;
@@ -1392,6 +1375,7 @@ compat_copy_entry_from_user(struct compat_ipt_entry *e, void **dstptr,
 
 	de->target_offset = e->target_offset - (origsize - *size);
 	t = compat_ipt_get_target(e);
+	target = t->u.kernel.target;
 	xt_compat_target_from_user(t, dstptr, size);
 
 	de->next_offset = e->next_offset - (origsize - *size);

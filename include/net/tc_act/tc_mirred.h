@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NET_TC_MIR_H
 #define __NET_TC_MIR_H
 
@@ -11,7 +10,6 @@ struct tcf_mirred {
 	int			tcfm_ifindex;
 	bool			tcfm_mac_header_xmit;
 	struct net_device __rcu	*tcfm_dev;
-	struct net		*net;
 	struct list_head	tcfm_list;
 };
 #define to_mirred(a) ((struct tcf_mirred *)a)

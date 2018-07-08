@@ -232,6 +232,11 @@ xfs_symlink(
 	resblks = XFS_SYMLINK_SPACE_RES(mp, link_name->len, fs_blocks);
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_symlink, resblks, 0, 0, &tp);
+	if (error == -ENOSPC && fs_blocks == 0) {
+		resblks = 0;
+		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_symlink, 0, 0, 0,
+				&tp);
+	}
 	if (error)
 		goto out_release_inode;
 
@@ -255,6 +260,14 @@ xfs_symlink(
 		goto out_trans_cancel;
 
 	/*
+	 * Check for ability to enter directory entry, if no space reserved.
+	 */
+	if (!resblks) {
+		error = xfs_dir_canenter(tp, dp, link_name);
+		if (error)
+			goto out_trans_cancel;
+	}
+	/*
 	 * Initialize the bmap freelist prior to calling either
 	 * bmapi or the directory create code.
 	 */
@@ -264,7 +277,7 @@ xfs_symlink(
 	 * Allocate an inode for the symlink.
 	 */
 	error = xfs_dir_ialloc(&tp, dp, S_IFLNK | (mode & ~S_IFMT), 1, 0,
-			       prid, &ip, NULL);
+			       prid, resblks > 0, &ip, NULL);
 	if (error)
 		goto out_trans_cancel;
 
@@ -365,7 +378,7 @@ xfs_symlink(
 		xfs_trans_set_sync(tp);
 	}
 
-	error = xfs_defer_finish(&tp, &dfops);
+	error = xfs_defer_finish(&tp, &dfops, NULL);
 	if (error)
 		goto out_bmap_cancel;
 
@@ -484,8 +497,7 @@ xfs_inactive_symlink_rmt(
 	/*
 	 * Commit the first transaction.  This logs the EFI and the inode.
 	 */
-	xfs_defer_ijoin(&dfops, ip);
-	error = xfs_defer_finish(&tp, &dfops);
+	error = xfs_defer_finish(&tp, &dfops, ip);
 	if (error)
 		goto error_bmap_cancel;
 	/*

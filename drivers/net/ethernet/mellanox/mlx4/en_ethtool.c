@@ -1046,32 +1046,27 @@ static int mlx4_en_set_pauseparam(struct net_device *dev,
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	struct mlx4_en_dev *mdev = priv->mdev;
-	u8 tx_pause, tx_ppp, rx_pause, rx_ppp;
 	int err;
 
 	if (pause->autoneg)
 		return -EINVAL;
 
-	tx_pause = !!(pause->tx_pause);
-	rx_pause = !!(pause->rx_pause);
-	rx_ppp = priv->prof->rx_ppp && !(tx_pause || rx_pause);
-	tx_ppp = priv->prof->tx_ppp && !(tx_pause || rx_pause);
-
+	priv->prof->tx_pause = pause->tx_pause != 0;
+	priv->prof->rx_pause = pause->rx_pause != 0;
 	err = mlx4_SET_PORT_general(mdev->dev, priv->port,
 				    priv->rx_skb_size + ETH_FCS_LEN,
-				    tx_pause, tx_ppp, rx_pause, rx_ppp);
-	if (err) {
-		en_err(priv, "Failed setting pause params, err = %d\n", err);
-		return err;
-	}
-
-	mlx4_en_update_pfc_stats_bitmap(mdev->dev, &priv->stats_bitmap,
-					rx_ppp, rx_pause, tx_ppp, tx_pause);
-
-	priv->prof->tx_pause = tx_pause;
-	priv->prof->rx_pause = rx_pause;
-	priv->prof->tx_ppp = tx_ppp;
-	priv->prof->rx_ppp = rx_ppp;
+				    priv->prof->tx_pause,
+				    priv->prof->tx_ppp,
+				    priv->prof->rx_pause,
+				    priv->prof->rx_ppp);
+	if (err)
+		en_err(priv, "Failed setting pause params\n");
+	else
+		mlx4_en_update_pfc_stats_bitmap(mdev->dev, &priv->stats_bitmap,
+						priv->prof->rx_ppp,
+						priv->prof->rx_pause,
+						priv->prof->tx_ppp,
+						priv->prof->tx_pause);
 
 	return err;
 }
@@ -1747,18 +1742,13 @@ static int mlx4_en_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
 	return err;
 }
 
-static int mlx4_en_get_max_num_rx_rings(struct net_device *dev)
-{
-	return min_t(int, num_online_cpus(), MAX_RX_RINGS);
-}
-
 static void mlx4_en_get_channels(struct net_device *dev,
 				 struct ethtool_channels *channel)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 
-	channel->max_rx = mlx4_en_get_max_num_rx_rings(dev);
-	channel->max_tx = priv->mdev->profile.max_num_tx_rings_p_up;
+	channel->max_rx = MAX_RX_RINGS;
+	channel->max_tx = MLX4_EN_MAX_TX_RING_P_UP;
 
 	channel->rx_count = priv->rx_ring_num;
 	channel->tx_count = priv->tx_ring_num[TX] /
@@ -1787,7 +1777,7 @@ static int mlx4_en_set_channels(struct net_device *dev,
 	mutex_lock(&mdev->state_lock);
 	xdp_count = priv->tx_ring_num[TX_XDP] ? channel->rx_count : 0;
 	if (channel->tx_count * priv->prof->num_up + xdp_count >
-	    priv->mdev->profile.max_num_tx_rings_p_up * priv->prof->num_up) {
+	    MAX_TX_RINGS) {
 		err = -EINVAL;
 		en_err(priv,
 		       "Total number of TX and XDP rings (%d) exceeds the maximum supported (%d)\n",

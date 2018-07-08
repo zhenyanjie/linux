@@ -532,18 +532,10 @@ static irqreturn_t amd_gpio_irq_handler(int irq, void *dev_id)
 			regval = readl(regs + i);
 			if (!(regval & PIN_IRQ_PENDING))
 				continue;
-			irq = irq_find_mapping(gc->irq.domain, irqnr + i);
+			irq = irq_find_mapping(gc->irqdomain, irqnr + i);
 			generic_handle_irq(irq);
-
-			/* Clear interrupt.
-			 * We must read the pin register again, in case the
-			 * value was changed while executing
-			 * generic_handle_irq() above.
-			 */
-			raw_spin_lock_irqsave(&gpio_dev->lock, flags);
-			regval = readl(regs + i);
+			/* Clear interrupt */
 			writel(regval, regs + i);
-			raw_spin_unlock_irqrestore(&gpio_dev->lock, flags);
 			ret = IRQ_HANDLED;
 		}
 	}
@@ -753,7 +745,7 @@ static bool amd_gpio_should_save(struct amd_gpio *gpio_dev, unsigned int pin)
 	return false;
 }
 
-static int amd_gpio_suspend(struct device *dev)
+int amd_gpio_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct amd_gpio *gpio_dev = platform_get_drvdata(pdev);
@@ -772,7 +764,7 @@ static int amd_gpio_suspend(struct device *dev)
 	return 0;
 }
 
-static int amd_gpio_resume(struct device *dev)
+int amd_gpio_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct amd_gpio *gpio_dev = platform_get_drvdata(pdev);
@@ -832,8 +824,8 @@ static int amd_gpio_probe(struct platform_device *pdev)
 
 	irq_base = platform_get_irq(pdev, 0);
 	if (irq_base < 0) {
-		dev_err(&pdev->dev, "Failed to get gpio IRQ: %d\n", irq_base);
-		return irq_base;
+		dev_err(&pdev->dev, "Failed to get gpio IRQ.\n");
+		return -EINVAL;
 	}
 
 #ifdef CONFIG_PM_SLEEP

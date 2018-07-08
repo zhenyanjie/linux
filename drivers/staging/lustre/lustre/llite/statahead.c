@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -39,8 +38,8 @@
 
 #define DEBUG_SUBSYSTEM S_LLITE
 
-#include <obd_support.h>
-#include <lustre_dlm.h>
+#include "../include/obd_support.h"
+#include "../include/lustre_dlm.h"
 #include "llite_internal.h"
 
 #define SA_OMITTED_ENTRY_MAX 8ULL
@@ -1083,8 +1082,7 @@ static int ll_statahead_thread(void *arg)
 					struct ll_inode_info *clli;
 
 					clli = list_entry(sai->sai_agls.next,
-							  struct ll_inode_info,
-							  lli_agl_list);
+							  struct ll_inode_info, lli_agl_list);
 					list_del_init(&clli->lli_agl_list);
 					spin_unlock(&lli->lli_agl_lock);
 

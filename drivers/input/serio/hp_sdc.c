@@ -794,7 +794,7 @@ int hp_sdc_release_cooked_irq(hp_sdc_irqhook *callback)
 
 /************************* Keepalive timer task *********************/
 
-static void hp_sdc_kicker(struct timer_list *unused)
+static void hp_sdc_kicker(unsigned long data)
 {
 	tasklet_schedule(&hp_sdc.task);
 	/* Re-insert the periodic task. */
@@ -805,7 +805,7 @@ static void hp_sdc_kicker(struct timer_list *unused)
 
 #if defined(__hppa__)
 
-static const struct parisc_device_id hp_sdc_tbl[] __initconst = {
+static const struct parisc_device_id hp_sdc_tbl[] = {
 	{
 		.hw_type =	HPHW_FIO,
 		.hversion_rev =	HVERSION_REV_ANY_ID,
@@ -820,7 +820,7 @@ MODULE_DEVICE_TABLE(parisc, hp_sdc_tbl);
 static int __init hp_sdc_init_hppa(struct parisc_device *d);
 static struct delayed_work moduleloader_work;
 
-static struct parisc_driver hp_sdc_driver __refdata = {
+static struct parisc_driver hp_sdc_driver = {
 	.name =		"hp_sdc",
 	.id_table =	hp_sdc_tbl,
 	.probe =	hp_sdc_init_hppa,
@@ -909,8 +909,9 @@ static int __init hp_sdc_init(void)
 	down(&s_sync); /* Wait for t_sync to complete */
 
 	/* Create the keepalive task */
-	timer_setup(&hp_sdc.kicker, hp_sdc_kicker, 0);
+	init_timer(&hp_sdc.kicker);
 	hp_sdc.kicker.expires = jiffies + HZ;
+	hp_sdc.kicker.function = &hp_sdc_kicker;
 	add_timer(&hp_sdc.kicker);
 
 	hp_sdc.dev_err = 0;

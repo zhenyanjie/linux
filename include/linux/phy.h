@@ -182,7 +182,6 @@ static inline const char *phy_modes(phy_interface_t interface)
 #define MII_ADDR_C45 (1<<30)
 
 struct device;
-struct phylink;
 struct sk_buff;
 
 /*
@@ -451,8 +450,6 @@ struct phy_device {
 	struct phy_led_trigger *phy_led_triggers;
 	unsigned int phy_num_led_triggers;
 	struct phy_led_trigger *last_triggered;
-
-	struct phy_led_trigger *led_link_trigger;
 #endif
 
 	/*
@@ -472,13 +469,11 @@ struct phy_device {
 
 	struct mutex lock;
 
-	struct phylink *phylink;
 	struct net_device *attached_dev;
 
 	u8 mdix;
 	u8 mdix_ctrl;
 
-	void (*phy_link_change)(struct phy_device *, bool up, bool do_carrier);
 	void (*adjust_link)(struct net_device *dev);
 };
 #define to_phy_device(d) container_of(to_mdio_device(d), \
@@ -672,24 +667,6 @@ struct phy_fixup {
 	int (*run)(struct phy_device *phydev);
 };
 
-const char *phy_speed_to_str(int speed);
-const char *phy_duplex_to_str(unsigned int duplex);
-
-/* A structure for mapping a particular speed and duplex
- * combination to a particular SUPPORTED and ADVERTISED value
- */
-struct phy_setting {
-	u32 speed;
-	u8 duplex;
-	u8 bit;
-};
-
-const struct phy_setting *
-phy_lookup_setting(int speed, int duplex, const unsigned long *mask,
-		   size_t maxbit, bool exact);
-size_t phy_speeds(unsigned int *speeds, size_t size,
-		  unsigned long *mask, size_t maxbit);
-
 /**
  * phy_read_mmd - Convenience function for reading a register
  * from an MMD on a given PHY.
@@ -819,7 +796,6 @@ void phy_device_remove(struct phy_device *phydev);
 int phy_init_hw(struct phy_device *phydev);
 int phy_suspend(struct phy_device *phydev);
 int phy_resume(struct phy_device *phydev);
-int __phy_resume(struct phy_device *phydev);
 int phy_loopback(struct phy_device *phydev, bool enable);
 struct phy_device *phy_attach(struct net_device *dev, const char *bus_id,
 			      phy_interface_t interface);
@@ -897,6 +873,7 @@ int phy_driver_register(struct phy_driver *new_driver, struct module *owner);
 int phy_drivers_register(struct phy_driver *new_driver, int n,
 			 struct module *owner);
 void phy_state_machine(struct work_struct *work);
+void phy_change(struct phy_device *phydev);
 void phy_change_work(struct work_struct *work);
 void phy_mac_interrupt(struct phy_device *phydev, int new_link);
 void phy_start_machine(struct phy_device *phydev);

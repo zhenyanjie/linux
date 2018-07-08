@@ -106,7 +106,9 @@ static int iser_create_device_ib_res(struct iser_device *device)
 
 	INIT_IB_EVENT_HANDLER(&device->event_handler, ib_dev,
 			      iser_event_handler);
-	ib_register_event_handler(&device->event_handler);
+	if (ib_register_event_handler(&device->event_handler))
+		goto cq_err;
+
 	return 0;
 
 cq_err:
@@ -139,7 +141,7 @@ static void iser_free_device_ib_res(struct iser_device *device)
 		comp->cq = NULL;
 	}
 
-	ib_unregister_event_handler(&device->event_handler);
+	(void)ib_unregister_event_handler(&device->event_handler);
 	ib_dealloc_pd(device->pd);
 
 	kfree(device->comps);
@@ -1146,7 +1148,7 @@ void iser_err_comp(struct ib_wc *wc, const char *type)
 	if (wc->status != IB_WC_WR_FLUSH_ERR) {
 		struct iser_conn *iser_conn = to_iser_conn(wc->qp->qp_context);
 
-		iser_err("%s failure: %s (%d) vend_err %#x\n", type,
+		iser_err("%s failure: %s (%d) vend_err %x\n", type,
 			 ib_wc_status_msg(wc->status), wc->status,
 			 wc->vendor_err);
 

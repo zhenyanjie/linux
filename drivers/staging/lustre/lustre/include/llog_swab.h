@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -49,8 +48,7 @@
 #ifndef _LLOG_SWAB_H_
 #define _LLOG_SWAB_H_
 
-#include <uapi/linux/lustre/lustre_idl.h>
-
+#include "lustre/lustre_idl.h"
 struct lustre_cfg;
 
 void lustre_swab_lu_fid(struct lu_fid *fid);

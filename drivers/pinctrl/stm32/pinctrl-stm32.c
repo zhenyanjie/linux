@@ -150,12 +150,12 @@ static int stm32_gpio_request(struct gpio_chip *chip, unsigned offset)
 		return -EINVAL;
 	}
 
-	return pinctrl_gpio_request(chip->base + offset);
+	return pinctrl_request_gpio(chip->base + offset);
 }
 
 static void stm32_gpio_free(struct gpio_chip *chip, unsigned offset)
 {
-	pinctrl_gpio_free(chip->base + offset);
+	pinctrl_free_gpio(chip->base + offset);
 }
 
 static int stm32_gpio_get(struct gpio_chip *chip, unsigned offset)
@@ -289,14 +289,13 @@ static int stm32_gpio_domain_translate(struct irq_domain *d,
 	return 0;
 }
 
-static int stm32_gpio_domain_activate(struct irq_domain *d,
-				      struct irq_data *irq_data, bool reserve)
+static void stm32_gpio_domain_activate(struct irq_domain *d,
+				       struct irq_data *irq_data)
 {
 	struct stm32_gpio_bank *bank = d->host_data;
 	struct stm32_pinctrl *pctl = dev_get_drvdata(bank->gpio_chip.parent);
 
 	regmap_field_write(pctl->irqmux[irq_data->hwirq], bank->bank_nr);
-	return 0;
 }
 
 static int stm32_gpio_domain_alloc(struct irq_domain *d,
@@ -953,7 +952,7 @@ static int stm32_gpiolib_register_bank(struct stm32_pinctrl *pctl,
 	int npins = STM32_GPIO_PINS_PER_BANK;
 	int bank_nr, err;
 
-	rstc = of_reset_control_get_exclusive(np, NULL);
+	rstc = of_reset_control_get(np, NULL);
 	if (!IS_ERR(rstc))
 		reset_control_deassert(rstc);
 

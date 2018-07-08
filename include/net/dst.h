@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * net/dst.h	Protocol independent destination cache definitions.
  *
@@ -15,7 +14,6 @@
 #include <linux/rcupdate.h>
 #include <linux/bug.h>
 #include <linux/jiffies.h>
-#include <linux/refcount.h>
 #include <net/neighbour.h>
 #include <asm/processor.h>
 
@@ -102,14 +100,14 @@ struct dst_entry {
 	union {
 		struct dst_entry	*next;
 		struct rtable __rcu	*rt_next;
-		struct rt6_info __rcu	*rt6_next;
+		struct rt6_info		*rt6_next;
 		struct dn_route __rcu	*dn_next;
 	};
 };
 
 struct dst_metrics {
 	u32		metrics[RTAX_MAX];
-	refcount_t	refcnt;
+	atomic_t	refcnt;
 };
 extern const struct dst_metrics dst_default_metrics;
 
@@ -256,24 +254,23 @@ static inline void dst_hold(struct dst_entry *dst)
 	WARN_ON(atomic_inc_not_zero(&dst->__refcnt) == 0);
 }
 
-static inline void dst_use_noref(struct dst_entry *dst, unsigned long time)
-{
-	if (unlikely(time != dst->lastuse)) {
-		dst->__use++;
-		dst->lastuse = time;
-	}
-}
-
-static inline void dst_hold_and_use(struct dst_entry *dst, unsigned long time)
+static inline void dst_use(struct dst_entry *dst, unsigned long time)
 {
 	dst_hold(dst);
-	dst_use_noref(dst, time);
+	dst->__use++;
+	dst->lastuse = time;
+}
+
+static inline void dst_use_noref(struct dst_entry *dst, unsigned long time)
+{
+	dst->__use++;
+	dst->lastuse = time;
 }
 
 static inline struct dst_entry *dst_clone(struct dst_entry *dst)
 {
 	if (dst)
-		dst_hold(dst);
+		atomic_inc(&dst->__refcnt);
 	return dst;
 }
 
@@ -314,6 +311,21 @@ static inline void skb_dst_copy(struct sk_buff *nskb, const struct sk_buff *oskb
 }
 
 /**
+ * skb_dst_force - makes sure skb dst is refcounted
+ * @skb: buffer
+ *
+ * If dst is not yet refcounted, let's do it
+ */
+static inline void skb_dst_force(struct sk_buff *skb)
+{
+	if (skb_dst_is_noref(skb)) {
+		WARN_ON(!rcu_read_lock_held());
+		skb->_skb_refdst &= ~SKB_DST_NOREF;
+		dst_clone(skb_dst(skb));
+	}
+}
+
+/**
  * dst_hold_safe - Take a reference on a dst if possible
  * @dst: pointer to dst entry
  *
@@ -326,17 +338,16 @@ static inline bool dst_hold_safe(struct dst_entry *dst)
 }
 
 /**
- * skb_dst_force - makes sure skb dst is refcounted
+ * skb_dst_force_safe - makes sure skb dst is refcounted
  * @skb: buffer
  *
  * If dst is not yet refcounted and not destroyed, grab a ref on it.
  */
-static inline void skb_dst_force(struct sk_buff *skb)
+static inline void skb_dst_force_safe(struct sk_buff *skb)
 {
 	if (skb_dst_is_noref(skb)) {
 		struct dst_entry *dst = skb_dst(skb);
 
-		WARN_ON(!rcu_read_lock_held());
 		if (!dst_hold_safe(dst))
 			dst = NULL;
 
@@ -520,13 +531,5 @@ static inline struct xfrm_state *dst_xfrm(const struct dst_entry *dst)
 	return dst->xfrm;
 }
 #endif
-
-static inline void skb_dst_update_pmtu(struct sk_buff *skb, u32 mtu)
-{
-	struct dst_entry *dst = skb_dst(skb);
-
-	if (dst && dst->ops->update_pmtu)
-		dst->ops->update_pmtu(dst, NULL, skb, mtu);
-}
 
 #endif /* _NET_DST_H */

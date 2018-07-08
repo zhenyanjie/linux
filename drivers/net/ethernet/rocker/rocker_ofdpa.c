@@ -1177,7 +1177,7 @@ static int ofdpa_group_l2_fan_out(struct ofdpa_port *ofdpa_port,
 	entry->group_id = group_id;
 	entry->group_count = group_count;
 
-	entry->group_ids = kcalloc(group_count, sizeof(u32), GFP_KERNEL);
+	entry->group_ids = kcalloc(flags, group_count, sizeof(u32));
 	if (!entry->group_ids) {
 		kfree(entry);
 		return -ENOMEM;
@@ -1456,7 +1456,7 @@ static int ofdpa_port_vlan_flood_group(struct ofdpa_port *ofdpa_port,
 	int err = 0;
 	int i;
 
-	group_ids = kcalloc(port_count, sizeof(u32), GFP_KERNEL);
+	group_ids = kcalloc(flags, port_count, sizeof(u32));
 	if (!group_ids)
 		return -ENOMEM;
 
@@ -1983,9 +1983,9 @@ err_out:
 	return err;
 }
 
-static void ofdpa_fdb_cleanup(struct timer_list *t)
+static void ofdpa_fdb_cleanup(unsigned long data)
 {
-	struct ofdpa *ofdpa = from_timer(ofdpa, t, fdb_cleanup_timer);
+	struct ofdpa *ofdpa = (struct ofdpa *)data;
 	struct ofdpa_port *ofdpa_port;
 	struct ofdpa_fdb_tbl_entry *entry;
 	struct hlist_node *tmp;
@@ -2368,7 +2368,8 @@ static int ofdpa_init(struct rocker *rocker)
 	hash_init(ofdpa->neigh_tbl);
 	spin_lock_init(&ofdpa->neigh_tbl_lock);
 
-	timer_setup(&ofdpa->fdb_cleanup_timer, ofdpa_fdb_cleanup, 0);
+	setup_timer(&ofdpa->fdb_cleanup_timer, ofdpa_fdb_cleanup,
+		    (unsigned long) ofdpa);
 	mod_timer(&ofdpa->fdb_cleanup_timer, jiffies);
 
 	ofdpa->ageing_time = BR_DEFAULT_AGEING_TIME;
@@ -2760,7 +2761,7 @@ static int ofdpa_fib4_add(struct rocker *rocker,
 				  fen_info->tb_id, 0);
 	if (err)
 		return err;
-	fen_info->fi->fib_nh->nh_flags |= RTNH_F_OFFLOAD;
+	fib_info_offload_inc(fen_info->fi);
 	return 0;
 }
 
@@ -2775,7 +2776,7 @@ static int ofdpa_fib4_del(struct rocker *rocker,
 	ofdpa_port = ofdpa_port_dev_lower_find(fen_info->fi->fib_dev, rocker);
 	if (!ofdpa_port)
 		return 0;
-	fen_info->fi->fib_nh->nh_flags &= ~RTNH_F_OFFLOAD;
+	fib_info_offload_dec(fen_info->fi);
 	return ofdpa_port_fib_ipv4(ofdpa_port, htonl(fen_info->dst),
 				   fen_info->dst_len, fen_info->fi,
 				   fen_info->tb_id, OFDPA_OP_FLAG_REMOVE);
@@ -2802,7 +2803,7 @@ static void ofdpa_fib4_abort(struct rocker *rocker)
 						       rocker);
 		if (!ofdpa_port)
 			continue;
-		flow_entry->fi->fib_nh->nh_flags &= ~RTNH_F_OFFLOAD;
+		fib_info_offload_dec(flow_entry->fi);
 		ofdpa_flow_tbl_del(ofdpa_port, OFDPA_OP_FLAG_REMOVE,
 				   flow_entry);
 	}

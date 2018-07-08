@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * core function to access sclp interface
  *
@@ -136,7 +135,6 @@ static enum sclp_suspend_state_t {
 #define SCLP_BUSY_INTERVAL	10
 #define SCLP_RETRY_INTERVAL	30
 
-static void sclp_request_timeout(bool force_restart);
 static void sclp_process_queue(void);
 static void __sclp_make_read_req(void);
 static int sclp_init_mask(int calculate);
@@ -155,32 +153,25 @@ __sclp_queue_read_req(void)
 
 /* Set up request retry timer. Called while sclp_lock is locked. */
 static inline void
-__sclp_set_request_timer(unsigned long time, void (*cb)(struct timer_list *))
+__sclp_set_request_timer(unsigned long time, void (*function)(unsigned long),
+			 unsigned long data)
 {
 	del_timer(&sclp_request_timer);
-	sclp_request_timer.function = cb;
+	sclp_request_timer.function = function;
+	sclp_request_timer.data = data;
 	sclp_request_timer.expires = jiffies + time;
 	add_timer(&sclp_request_timer);
 }
 
-static void sclp_request_timeout_restart(struct timer_list *unused)
-{
-	sclp_request_timeout(true);
-}
-
-static void sclp_request_timeout_normal(struct timer_list *unused)
-{
-	sclp_request_timeout(false);
-}
-
-/* Request timeout handler. Restart the request queue. If force_restart,
+/* Request timeout handler. Restart the request queue. If DATA is non-zero,
  * force restart of running request. */
-static void sclp_request_timeout(bool force_restart)
+static void
+sclp_request_timeout(unsigned long data)
 {
 	unsigned long flags;
 
 	spin_lock_irqsave(&sclp_lock, flags);
-	if (force_restart) {
+	if (data) {
 		if (sclp_running_state == sclp_running_state_running) {
 			/* Break running state and queue NOP read event request
 			 * to get a defined interface state. */
@@ -189,7 +180,7 @@ static void sclp_request_timeout(bool force_restart)
 		}
 	} else {
 		__sclp_set_request_timer(SCLP_BUSY_INTERVAL * HZ,
-					 sclp_request_timeout_normal);
+					 sclp_request_timeout, 0);
 	}
 	spin_unlock_irqrestore(&sclp_lock, flags);
 	sclp_process_queue();
@@ -247,7 +238,7 @@ out:
  * invokes callback. This timer can be set per request in situations where
  * waiting too long would be harmful to the system, e.g. during SE reboot.
  */
-static void sclp_req_queue_timeout(struct timer_list *unused)
+static void sclp_req_queue_timeout(unsigned long data)
 {
 	unsigned long flags, expires_next;
 	struct sclp_req *req;
@@ -284,12 +275,12 @@ __sclp_start_request(struct sclp_req *req)
 		req->status = SCLP_REQ_RUNNING;
 		sclp_running_state = sclp_running_state_running;
 		__sclp_set_request_timer(SCLP_RETRY_INTERVAL * HZ,
-					 sclp_request_timeout_restart);
+					 sclp_request_timeout, 1);
 		return 0;
 	} else if (rc == -EBUSY) {
 		/* Try again later */
 		__sclp_set_request_timer(SCLP_BUSY_INTERVAL * HZ,
-					 sclp_request_timeout_normal);
+					 sclp_request_timeout, 0);
 		return 0;
 	}
 	/* Request failed */
@@ -323,7 +314,7 @@ sclp_process_queue(void)
 			/* Cannot abort already submitted request - could still
 			 * be active at the SCLP */
 			__sclp_set_request_timer(SCLP_BUSY_INTERVAL * HZ,
-						 sclp_request_timeout_normal);
+						 sclp_request_timeout, 0);
 			break;
 		}
 do_post:
@@ -566,7 +557,7 @@ sclp_sync_wait(void)
 		if (timer_pending(&sclp_request_timer) &&
 		    get_tod_clock_fast() > timeout &&
 		    del_timer(&sclp_request_timer))
-			sclp_request_timer.function(&sclp_request_timer);
+			sclp_request_timer.function(sclp_request_timer.data);
 		cpu_relax();
 	}
 	local_irq_disable();
@@ -923,7 +914,7 @@ static void sclp_check_handler(struct ext_code ext_code,
 
 /* Initial init mask request timed out. Modify request state to failed. */
 static void
-sclp_check_timeout(struct timer_list *unused)
+sclp_check_timeout(unsigned long data)
 {
 	unsigned long flags;
 
@@ -962,7 +953,7 @@ sclp_check_interface(void)
 		sclp_init_req.status = SCLP_REQ_RUNNING;
 		sclp_running_state = sclp_running_state_running;
 		__sclp_set_request_timer(SCLP_RETRY_INTERVAL * HZ,
-					 sclp_check_timeout);
+					 sclp_check_timeout, 0);
 		spin_unlock_irqrestore(&sclp_lock, flags);
 		/* Enable service-signal interruption - needs to happen
 		 * with IRQs enabled. */
@@ -1167,8 +1158,9 @@ sclp_init(void)
 	INIT_LIST_HEAD(&sclp_req_queue);
 	INIT_LIST_HEAD(&sclp_reg_list);
 	list_add(&sclp_state_change_event.list, &sclp_reg_list);
-	timer_setup(&sclp_request_timer, NULL, 0);
-	timer_setup(&sclp_queue_timer, sclp_req_queue_timeout, 0);
+	init_timer(&sclp_request_timer);
+	init_timer(&sclp_queue_timer);
+	sclp_queue_timer.function = sclp_req_queue_timeout;
 	/* Check interface */
 	spin_unlock_irqrestore(&sclp_lock, flags);
 	rc = sclp_check_interface();

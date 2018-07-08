@@ -1,8 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NVKM_FIFO_H__
 #define __NVKM_FIFO_H__
 #include <core/engine.h>
-#include <core/object.h>
 #include <core/event.h>
 
 #define NVKM_FIFO_CHID_NR 4096
@@ -23,7 +21,7 @@ struct nvkm_fifo_chan {
 	u16 chid;
 	struct nvkm_gpuobj *inst;
 	struct nvkm_gpuobj *push;
-	struct nvkm_vmm *vmm;
+	struct nvkm_vm *vm;
 	void __iomem *user;
 	u64 addr;
 	u32 size;

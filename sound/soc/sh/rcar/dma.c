@@ -26,7 +26,10 @@
 struct rsnd_dmaen {
 	struct dma_chan		*chan;
 	dma_cookie_t		cookie;
+	dma_addr_t		dma_buf;
 	unsigned int		dma_len;
+	unsigned int		dma_period;
+	unsigned int		dma_cnt;
 };
 
 struct rsnd_dmapp {
@@ -57,21 +60,41 @@ struct rsnd_dma_ctrl {
 #define rsnd_dma_to_dmaen(dma)	(&(dma)->dma.en)
 #define rsnd_dma_to_dmapp(dma)	(&(dma)->dma.pp)
 
-/* for DEBUG */
-static struct rsnd_mod_ops mem_ops = {
-	.name = "mem",
-};
-
-static struct rsnd_mod mem = {
-};
-
 /*
  *		Audio DMAC
  */
+#define rsnd_dmaen_sync(dmaen, io, i)	__rsnd_dmaen_sync(dmaen, io, i, 1)
+#define rsnd_dmaen_unsync(dmaen, io, i)	__rsnd_dmaen_sync(dmaen, io, i, 0)
+static void __rsnd_dmaen_sync(struct rsnd_dmaen *dmaen, struct rsnd_dai_stream *io,
+			      int i, int sync)
+{
+	struct device *dev = dmaen->chan->device->dev;
+	enum dma_data_direction dir;
+	int is_play = rsnd_io_is_play(io);
+	dma_addr_t buf;
+	int len, max;
+	size_t period;
+
+	len	= dmaen->dma_len;
+	period	= dmaen->dma_period;
+	max	= len / period;
+	i	= i % max;
+	buf	= dmaen->dma_buf + (period * i);
+
+	dir = is_play ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
+
+	if (sync)
+		dma_sync_single_for_device(dev, buf, period, dir);
+	else
+		dma_sync_single_for_cpu(dev, buf, period, dir);
+}
+
 static void __rsnd_dmaen_complete(struct rsnd_mod *mod,
 				  struct rsnd_dai_stream *io)
 {
 	struct rsnd_priv *priv = rsnd_mod_to_priv(mod);
+	struct rsnd_dma *dma = rsnd_mod_to_dma(mod);
+	struct rsnd_dmaen *dmaen = rsnd_dma_to_dmaen(dma);
 	bool elapsed = false;
 	unsigned long flags;
 
@@ -84,8 +107,21 @@ static void __rsnd_dmaen_complete(struct rsnd_mod *mod,
 	 */
 	spin_lock_irqsave(&priv->lock, flags);
 
-	if (rsnd_io_is_working(io))
+	if (rsnd_io_is_working(io)) {
+		rsnd_dmaen_unsync(dmaen, io, dmaen->dma_cnt);
+
+		/*
+		 * Next period is already started.
+		 * Let's sync Next Next period
+		 * see
+		 *	rsnd_dmaen_start()
+		 */
+		rsnd_dmaen_sync(dmaen, io, dmaen->dma_cnt + 2);
+
 		elapsed = true;
+
+		dmaen->dma_cnt++;
+	}
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -121,8 +157,14 @@ static int rsnd_dmaen_stop(struct rsnd_mod *mod,
 	struct rsnd_dma *dma = rsnd_mod_to_dma(mod);
 	struct rsnd_dmaen *dmaen = rsnd_dma_to_dmaen(dma);
 
-	if (dmaen->chan)
+	if (dmaen->chan) {
+		int is_play = rsnd_io_is_play(io);
+
 		dmaengine_terminate_all(dmaen->chan);
+		dma_unmap_single(dmaen->chan->device->dev,
+				 dmaen->dma_buf, dmaen->dma_len,
+				 is_play ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+	}
 
 	return 0;
 }
@@ -169,9 +211,11 @@ static int rsnd_dmaen_nolock_start(struct rsnd_mod *mod,
 						 dma->mod_from,
 						 dma->mod_to);
 	if (IS_ERR_OR_NULL(dmaen->chan)) {
+		int ret = PTR_ERR(dmaen->chan);
+
 		dmaen->chan = NULL;
 		dev_err(dev, "can't get dma channel\n");
-		return -EIO;
+		return ret;
 	}
 
 	return 0;
@@ -187,7 +231,11 @@ static int rsnd_dmaen_start(struct rsnd_mod *mod,
 	struct device *dev = rsnd_priv_to_dev(priv);
 	struct dma_async_tx_descriptor *desc;
 	struct dma_slave_config cfg = {};
+	dma_addr_t buf;
+	size_t len;
+	size_t period;
 	int is_play = rsnd_io_is_play(io);
+	int i;
 	int ret;
 
 	cfg.direction	= is_play ? DMA_MEM_TO_DEV : DMA_DEV_TO_MEM;
@@ -204,10 +252,19 @@ static int rsnd_dmaen_start(struct rsnd_mod *mod,
 	if (ret < 0)
 		return ret;
 
+	len	= snd_pcm_lib_buffer_bytes(substream);
+	period	= snd_pcm_lib_period_bytes(substream);
+	buf	= dma_map_single(dmaen->chan->device->dev,
+				 substream->runtime->dma_area,
+				 len,
+				 is_play ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+	if (dma_mapping_error(dmaen->chan->device->dev, buf)) {
+		dev_err(dev, "dma map failed\n");
+		return -EIO;
+	}
+
 	desc = dmaengine_prep_dma_cyclic(dmaen->chan,
-					 substream->runtime->dma_addr,
-					 snd_pcm_lib_buffer_bytes(substream),
-					 snd_pcm_lib_period_bytes(substream),
+					 buf, len, period,
 					 is_play ? DMA_MEM_TO_DEV : DMA_DEV_TO_MEM,
 					 DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 
@@ -219,7 +276,18 @@ static int rsnd_dmaen_start(struct rsnd_mod *mod,
 	desc->callback		= rsnd_dmaen_complete;
 	desc->callback_param	= rsnd_mod_get(dma);
 
-	dmaen->dma_len		= snd_pcm_lib_buffer_bytes(substream);
+	dmaen->dma_buf		= buf;
+	dmaen->dma_len		= len;
+	dmaen->dma_period	= period;
+	dmaen->dma_cnt		= 0;
+
+	/*
+	 * synchronize this and next period
+	 * see
+	 *	__rsnd_dmaen_complete()
+	 */
+	for (i = 0; i < 2; i++)
+		rsnd_dmaen_sync(dmaen, io, i);
 
 	dmaen->cookie = dmaengine_submit(desc);
 	if (dmaen->cookie < 0) {
@@ -536,8 +604,8 @@ rsnd_gen2_dma_addr(struct rsnd_dai_stream *io,
 		dma_addr_t in_addr;
 	} dma_addrs[3][2][3] = {
 		/* SRC */
-		/* Capture */
 		{{{ 0,				0 },
+		  /* Capture */
 		  { RDMA_SRC_O_N(src, id),	RDMA_SRC_I_P(src, id) },
 		  { RDMA_CMD_O_N(src, id),	RDMA_SRC_I_P(src, id) } },
 		 /* Playback */
@@ -679,22 +747,20 @@ static void rsnd_dma_of_path(struct rsnd_mod *this,
 		rsnd_mod_name(this), rsnd_mod_id(this));
 	for (i = 0; i <= idx; i++) {
 		dev_dbg(dev, "  %s[%d]%s\n",
-			rsnd_mod_name(mod[i] ? mod[i] : &mem),
-			rsnd_mod_id  (mod[i] ? mod[i] : &mem),
-			(mod[i] == *mod_from) ? " from" :
-			(mod[i] == *mod_to)   ? " to" : "");
+		       rsnd_mod_name(mod[i]), rsnd_mod_id(mod[i]),
+		       (mod[i] == *mod_from) ? " from" :
+		       (mod[i] == *mod_to)   ? " to" : "");
 	}
 }
 
-static int rsnd_dma_alloc(struct rsnd_dai_stream *io, struct rsnd_mod *mod,
-			  struct rsnd_mod **dma_mod)
+int rsnd_dma_attach(struct rsnd_dai_stream *io, struct rsnd_mod *mod,
+		    struct rsnd_mod **dma_mod)
 {
 	struct rsnd_mod *mod_from = NULL;
 	struct rsnd_mod *mod_to = NULL;
 	struct rsnd_priv *priv = rsnd_io_to_priv(io);
 	struct rsnd_dma_ctrl *dmac = rsnd_priv_to_dmac(priv);
 	struct device *dev = rsnd_priv_to_dev(priv);
-	struct rsnd_dma *dma;
 	struct rsnd_mod_ops *ops;
 	enum rsnd_mod_type type;
 	int (*attach)(struct rsnd_dai_stream *io, struct rsnd_dma *dma,
@@ -734,47 +800,40 @@ static int rsnd_dma_alloc(struct rsnd_dai_stream *io, struct rsnd_mod *mod,
 		type	= RSND_MOD_AUDMA;
 	}
 
-	dma = devm_kzalloc(dev, sizeof(*dma), GFP_KERNEL);
-	if (!dma)
-		return -ENOMEM;
-
-	*dma_mod = rsnd_mod_get(dma);
-
-	ret = rsnd_mod_init(priv, *dma_mod, ops, NULL,
-			    rsnd_mod_get_status, type, dma_id);
-	if (ret < 0)
-		return ret;
-
-	dev_dbg(dev, "%s[%d] %s[%d] -> %s[%d]\n",
-		rsnd_mod_name(*dma_mod), rsnd_mod_id(*dma_mod),
-		rsnd_mod_name(mod_from ? mod_from : &mem),
-		rsnd_mod_id  (mod_from ? mod_from : &mem),
-		rsnd_mod_name(mod_to   ? mod_to   : &mem),
-		rsnd_mod_id  (mod_to   ? mod_to   : &mem));
-
-	ret = attach(io, dma, mod_from, mod_to);
-	if (ret < 0)
-		return ret;
-
-	dma->src_addr = rsnd_dma_addr(io, mod_from, is_play, 1);
-	dma->dst_addr = rsnd_dma_addr(io, mod_to,   is_play, 0);
-	dma->mod_from = mod_from;
-	dma->mod_to   = mod_to;
-
-	return 0;
-}
-
-int rsnd_dma_attach(struct rsnd_dai_stream *io, struct rsnd_mod *mod,
-		    struct rsnd_mod **dma_mod)
-{
 	if (!(*dma_mod)) {
-		int ret = rsnd_dma_alloc(io, mod, dma_mod);
+		struct rsnd_dma *dma;
 
+		dma = devm_kzalloc(dev, sizeof(*dma), GFP_KERNEL);
+		if (!dma)
+			return -ENOMEM;
+
+		*dma_mod = rsnd_mod_get(dma);
+
+		ret = rsnd_mod_init(priv, *dma_mod, ops, NULL,
+				    rsnd_mod_get_status, type, dma_id);
 		if (ret < 0)
 			return ret;
+
+		dev_dbg(dev, "%s[%d] %s[%d] -> %s[%d]\n",
+			rsnd_mod_name(*dma_mod), rsnd_mod_id(*dma_mod),
+			rsnd_mod_name(mod_from), rsnd_mod_id(mod_from),
+			rsnd_mod_name(mod_to),   rsnd_mod_id(mod_to));
+
+		ret = attach(io, dma, mod_from, mod_to);
+		if (ret < 0)
+			return ret;
+
+		dma->src_addr = rsnd_dma_addr(io, mod_from, is_play, 1);
+		dma->dst_addr = rsnd_dma_addr(io, mod_to,   is_play, 0);
+		dma->mod_from = mod_from;
+		dma->mod_to   = mod_to;
 	}
 
-	return rsnd_dai_connect(*dma_mod, io, (*dma_mod)->type);
+	ret = rsnd_dai_connect(*dma_mod, io, type);
+	if (ret < 0)
+		return ret;
+
+	return 0;
 }
 
 int rsnd_dma_probe(struct rsnd_priv *priv)
@@ -807,6 +866,5 @@ int rsnd_dma_probe(struct rsnd_priv *priv)
 
 	priv->dma = dmac;
 
-	/* dummy mem mod for debug */
-	return rsnd_mod_init(NULL, &mem, &mem_ops, NULL, NULL, 0, 0);
+	return 0;
 }

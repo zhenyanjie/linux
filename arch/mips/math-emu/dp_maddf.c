@@ -45,10 +45,10 @@ static union ieee754dp _dp_maddf(union ieee754dp z, union ieee754dp x,
 {
 	int re;
 	int rs;
-	unsigned int lxm;
-	unsigned int hxm;
-	unsigned int lym;
-	unsigned int hym;
+	unsigned lxm;
+	unsigned hxm;
+	unsigned lym;
+	unsigned hym;
 	u64 lrm;
 	u64 hrm;
 	u64 lzm;

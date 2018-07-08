@@ -1711,10 +1711,10 @@ void ieee80211_ibss_work(struct ieee80211_sub_if_data *sdata)
 	sdata_unlock(sdata);
 }
 
-static void ieee80211_ibss_timer(struct timer_list *t)
+static void ieee80211_ibss_timer(unsigned long data)
 {
 	struct ieee80211_sub_if_data *sdata =
-		from_timer(sdata, t, u.ibss.timer);
+		(struct ieee80211_sub_if_data *) data;
 
 	ieee80211_queue_work(&sdata->local->hw, &sdata->work);
 }
@@ -1723,7 +1723,8 @@ void ieee80211_ibss_setup_sdata(struct ieee80211_sub_if_data *sdata)
 {
 	struct ieee80211_if_ibss *ifibss = &sdata->u.ibss;
 
-	timer_setup(&ifibss->timer, ieee80211_ibss_timer, 0);
+	setup_timer(&ifibss->timer, ieee80211_ibss_timer,
+		    (unsigned long) sdata);
 	INIT_LIST_HEAD(&ifibss->incomplete_stations);
 	spin_lock_init(&ifibss->incomplete_lock);
 	INIT_WORK(&ifibss->csa_connection_drop_work,

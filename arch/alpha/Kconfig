@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 config ALPHA
 	bool
 	default y
@@ -506,7 +505,7 @@ config ALPHA_QEMU
 
 	  Generic kernels will auto-detect QEMU.  But when building a
 	  system-specific kernel, the assumption is that we want to
-	  eliminate as many runtime tests as possible.
+	  elimiate as many runtime tests as possible.
 
 	  If unsure, say N.
 

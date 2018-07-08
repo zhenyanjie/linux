@@ -47,11 +47,7 @@ struct arch {
 	bool		sorted_instructions;
 	bool		initialized;
 	void		*priv;
-	unsigned int	model;
-	unsigned int	family;
-	int		(*init)(struct arch *arch, char *cpuid);
-	bool		(*ins_is_fused)(struct arch *arch, const char *ins1,
-					const char *ins2);
+	int		(*init)(struct arch *arch);
 	struct		{
 		char comment_char;
 		char skip_functions_char;
@@ -131,10 +127,8 @@ static struct arch architectures[] = {
 	},
 	{
 		.name = "x86",
-		.init = x86__annotate_init,
 		.instructions = x86__instructions,
 		.nr_instructions = ARRAY_SIZE(x86__instructions),
-		.ins_is_fused = x86__ins_is_fused,
 		.objdump =  {
 			.comment_char = '#',
 		},
@@ -165,7 +159,7 @@ static void ins__delete(struct ins_operands *ops)
 static int ins__raw_scnprintf(struct ins *ins, char *bf, size_t size,
 			      struct ins_operands *ops)
 {
-	return scnprintf(bf, size, "%-6s %s", ins->name, ops->raw);
+	return scnprintf(bf, size, "%-6.6s %s", ins->name, ops->raw);
 }
 
 int ins__scnprintf(struct ins *ins, char *bf, size_t size,
@@ -175,14 +169,6 @@ int ins__scnprintf(struct ins *ins, char *bf, size_t size,
 		return ins->ops->scnprintf(ins, bf, size, ops);
 
 	return ins__raw_scnprintf(ins, bf, size, ops);
-}
-
-bool ins__is_fused(struct arch *arch, const char *ins1, const char *ins2)
-{
-	if (!arch || !arch->ins_is_fused)
-		return false;
-
-	return arch->ins_is_fused(arch, ins1, ins2);
 }
 
 static int call__parse(struct arch *arch, struct ins_operands *ops, struct map *map)
@@ -230,12 +216,12 @@ static int call__scnprintf(struct ins *ins, char *bf, size_t size,
 			   struct ins_operands *ops)
 {
 	if (ops->target.name)
-		return scnprintf(bf, size, "%-6s %s", ins->name, ops->target.name);
+		return scnprintf(bf, size, "%-6.6s %s", ins->name, ops->target.name);
 
 	if (ops->target.addr == 0)
 		return ins__raw_scnprintf(ins, bf, size, ops);
 
-	return scnprintf(bf, size, "%-6s *%" PRIx64, ins->name, ops->target.addr);
+	return scnprintf(bf, size, "%-6.6s *%" PRIx64, ins->name, ops->target.addr);
 }
 
 static struct ins_ops call_ops = {
@@ -299,7 +285,7 @@ static int jump__scnprintf(struct ins *ins, char *bf, size_t size,
 			c++;
 	}
 
-	return scnprintf(bf, size, "%-6s %.*s%" PRIx64,
+	return scnprintf(bf, size, "%-6.6s %.*s%" PRIx64,
 			 ins->name, c ? c - ops->raw : 0, ops->raw,
 			 ops->target.offset);
 }
@@ -322,8 +308,6 @@ static int comment__symbol(char *raw, char *comment, u64 *addrp, char **namep)
 		return 0;
 
 	*addrp = strtoull(comment, &endptr, 16);
-	if (endptr == comment)
-		return 0;
 	name = strchr(endptr, '<');
 	if (name == NULL)
 		return -1;
@@ -374,7 +358,7 @@ static int lock__scnprintf(struct ins *ins, char *bf, size_t size,
 	if (ops->locked.ins.ops == NULL)
 		return ins__raw_scnprintf(ins, bf, size, ops);
 
-	printed = scnprintf(bf, size, "%-6s ", ins->name);
+	printed = scnprintf(bf, size, "%-6.6s ", ins->name);
 	return printed + ins__scnprintf(&ops->locked.ins, bf + printed,
 					size - printed, ops->locked.ops);
 }
@@ -437,8 +421,8 @@ static int mov__parse(struct arch *arch, struct ins_operands *ops, struct map *m
 		return 0;
 
 	comment = ltrim(comment);
-	comment__symbol(ops->source.raw, comment + 1, &ops->source.addr, &ops->source.name);
-	comment__symbol(ops->target.raw, comment + 1, &ops->target.addr, &ops->target.name);
+	comment__symbol(ops->source.raw, comment, &ops->source.addr, &ops->source.name);
+	comment__symbol(ops->target.raw, comment, &ops->target.addr, &ops->target.name);
 
 	return 0;
 
@@ -450,7 +434,7 @@ out_free_source:
 static int mov__scnprintf(struct ins *ins, char *bf, size_t size,
 			   struct ins_operands *ops)
 {
-	return scnprintf(bf, size, "%-6s %s,%s", ins->name,
+	return scnprintf(bf, size, "%-6.6s %s,%s", ins->name,
 			 ops->source.name ?: ops->source.raw,
 			 ops->target.name ?: ops->target.raw);
 }
@@ -482,7 +466,7 @@ static int dec__parse(struct arch *arch __maybe_unused, struct ins_operands *ops
 		return 0;
 
 	comment = ltrim(comment);
-	comment__symbol(ops->target.raw, comment + 1, &ops->target.addr, &ops->target.name);
+	comment__symbol(ops->target.raw, comment, &ops->target.addr, &ops->target.name);
 
 	return 0;
 }
@@ -490,7 +474,7 @@ static int dec__parse(struct arch *arch __maybe_unused, struct ins_operands *ops
 static int dec__scnprintf(struct ins *ins, char *bf, size_t size,
 			   struct ins_operands *ops)
 {
-	return scnprintf(bf, size, "%-6s %s", ins->name,
+	return scnprintf(bf, size, "%-6.6s %s", ins->name,
 			 ops->target.name ?: ops->target.raw);
 }
 
@@ -502,7 +486,7 @@ static struct ins_ops dec_ops = {
 static int nop__scnprintf(struct ins *ins __maybe_unused, char *bf, size_t size,
 			  struct ins_operands *ops __maybe_unused)
 {
-	return scnprintf(bf, size, "%-6s", "nop");
+	return scnprintf(bf, size, "%-6.6s", "nop");
 }
 
 static struct ins_ops nop_ops = {
@@ -516,11 +500,6 @@ static struct ins_ops ret_ops = {
 bool ins__is_ret(const struct ins *ins)
 {
 	return ins->ops == &ret_ops;
-}
-
-bool ins__is_lock(const struct ins *ins)
-{
-	return ins->ops == &lock_ops;
 }
 
 static int ins__key_cmp(const void *name, const void *insp)
@@ -607,24 +586,14 @@ static struct arch *arch__find(const char *name)
 int symbol__alloc_hist(struct symbol *sym)
 {
 	struct annotation *notes = symbol__annotation(sym);
-	size_t size = symbol__size(sym);
+	const size_t size = symbol__size(sym);
 	size_t sizeof_sym_hist;
 
-	/*
-	 * Add buffer of one element for zero length symbol.
-	 * When sample is taken from first instruction of
-	 * zero length symbol, perf still resolves it and
-	 * shows symbol name in perf report and allows to
-	 * annotate it.
-	 */
-	if (size == 0)
-		size = 1;
-
 	/* Check for overflow when calculating sizeof_sym_hist */
-	if (size > (SIZE_MAX - sizeof(struct sym_hist)) / sizeof(struct sym_hist_entry))
+	if (size > (SIZE_MAX - sizeof(struct sym_hist)) / sizeof(u64))
 		return -1;
 
-	sizeof_sym_hist = (sizeof(struct sym_hist) + size * sizeof(struct sym_hist_entry));
+	sizeof_sym_hist = (sizeof(struct sym_hist) + size * sizeof(u64));
 
 	/* Check for overflow in zalloc argument */
 	if (sizeof_sym_hist > (SIZE_MAX - sizeof(*notes->src))
@@ -708,8 +677,7 @@ static int __symbol__account_cycles(struct annotation *notes,
 }
 
 static int __symbol__inc_addr_samples(struct symbol *sym, struct map *map,
-				      struct annotation *notes, int evidx, u64 addr,
-				      struct perf_sample *sample)
+				      struct annotation *notes, int evidx, u64 addr)
 {
 	unsigned offset;
 	struct sym_hist *h;
@@ -725,15 +693,12 @@ static int __symbol__inc_addr_samples(struct symbol *sym, struct map *map,
 
 	offset = addr - sym->start;
 	h = annotation__histogram(notes, evidx);
-	h->nr_samples++;
-	h->addr[offset].nr_samples++;
-	h->period += sample->period;
-	h->addr[offset].period += sample->period;
+	h->sum++;
+	h->addr[offset]++;
 
 	pr_debug3("%#" PRIx64 " %s: period++ [addr: %#" PRIx64 ", %#" PRIx64
-		  ", evidx=%d] => nr_samples: %" PRIu64 ", period: %" PRIu64 "\n",
-		  sym->start, sym->name, addr, addr - sym->start, evidx,
-		  h->addr[offset].nr_samples, h->addr[offset].period);
+		  ", evidx=%d] => %" PRIu64 "\n", sym->start, sym->name,
+		  addr, addr - sym->start, evidx, h->addr[offset]);
 	return 0;
 }
 
@@ -753,8 +718,7 @@ static struct annotation *symbol__get_annotation(struct symbol *sym, bool cycles
 }
 
 static int symbol__inc_addr_samples(struct symbol *sym, struct map *map,
-				    int evidx, u64 addr,
-				    struct perf_sample *sample)
+				    int evidx, u64 addr)
 {
 	struct annotation *notes;
 
@@ -763,7 +727,7 @@ static int symbol__inc_addr_samples(struct symbol *sym, struct map *map,
 	notes = symbol__get_annotation(sym, false);
 	if (notes == NULL)
 		return -ENOMEM;
-	return __symbol__inc_addr_samples(sym, map, notes, evidx, addr, sample);
+	return __symbol__inc_addr_samples(sym, map, notes, evidx, addr);
 }
 
 static int symbol__account_cycles(u64 addr, u64 start,
@@ -827,16 +791,14 @@ int addr_map_symbol__account_cycles(struct addr_map_symbol *ams,
 	return err;
 }
 
-int addr_map_symbol__inc_samples(struct addr_map_symbol *ams, struct perf_sample *sample,
-				 int evidx)
+int addr_map_symbol__inc_samples(struct addr_map_symbol *ams, int evidx)
 {
-	return symbol__inc_addr_samples(ams->sym, ams->map, evidx, ams->al_addr, sample);
+	return symbol__inc_addr_samples(ams->sym, ams->map, evidx, ams->al_addr);
 }
 
-int hist_entry__inc_addr_samples(struct hist_entry *he, struct perf_sample *sample,
-				 int evidx, u64 ip)
+int hist_entry__inc_addr_samples(struct hist_entry *he, int evidx, u64 ip)
 {
-	return symbol__inc_addr_samples(he->ms.sym, he->ms.map, evidx, ip, sample);
+	return symbol__inc_addr_samples(he->ms.sym, he->ms.map, evidx, ip);
 }
 
 static void disasm_line__init_ins(struct disasm_line *dl, struct arch *arch, struct map *map)
@@ -926,7 +888,7 @@ void disasm_line__free(struct disasm_line *dl)
 int disasm_line__scnprintf(struct disasm_line *dl, char *bf, size_t size, bool raw)
 {
 	if (raw || !dl->ins.ops)
-		return scnprintf(bf, size, "%-6s %s", dl->ins.name, dl->ops.raw);
+		return scnprintf(bf, size, "%-6.6s %s", dl->ins.name, dl->ops.raw);
 
 	return ins__scnprintf(&dl->ins, bf, size, &dl->ops);
 }
@@ -946,12 +908,11 @@ struct disasm_line *disasm__get_next_ip_line(struct list_head *head, struct disa
 }
 
 double disasm__calc_percent(struct annotation *notes, int evidx, s64 offset,
-			    s64 end, const char **path, struct sym_hist_entry *sample)
+			    s64 end, const char **path, u64 *nr_samples)
 {
 	struct source_line *src_line = notes->src->lines;
 	double percent = 0.0;
-
-	sample->nr_samples = sample->period = 0;
+	*nr_samples = 0;
 
 	if (src_line) {
 		size_t sizeof_src_line = sizeof(*src_line) +
@@ -965,24 +926,19 @@ double disasm__calc_percent(struct annotation *notes, int evidx, s64 offset,
 				*path = src_line->path;
 
 			percent += src_line->samples[evidx].percent;
-			sample->nr_samples += src_line->samples[evidx].nr;
+			*nr_samples += src_line->samples[evidx].nr;
 			offset++;
 		}
 	} else {
 		struct sym_hist *h = annotation__histogram(notes, evidx);
 		unsigned int hits = 0;
-		u64 period = 0;
 
-		while (offset < end) {
-			hits   += h->addr[offset].nr_samples;
-			period += h->addr[offset].period;
-			++offset;
-		}
+		while (offset < end)
+			hits += h->addr[offset++];
 
-		if (h->nr_samples) {
-			sample->period	   = period;
-			sample->nr_samples = hits;
-			percent = 100.0 * hits / h->nr_samples;
+		if (h->sum) {
+			*nr_samples = hits;
+			percent = 100.0 * hits / h->sum;
 		}
 	}
 
@@ -1081,10 +1037,10 @@ static int disasm_line__print(struct disasm_line *dl, struct symbol *sym, u64 st
 
 	if (dl->offset != -1) {
 		const char *path = NULL;
+		u64 nr_samples;
 		double percent, max_percent = 0.0;
 		double *ppercents = &percent;
-		struct sym_hist_entry sample;
-		struct sym_hist_entry *psamples = &sample;
+		u64 *psamples = &nr_samples;
 		int i, nr_percent = 1;
 		const char *color;
 		struct annotation *notes = symbol__annotation(sym);
@@ -1098,7 +1054,7 @@ static int disasm_line__print(struct disasm_line *dl, struct symbol *sym, u64 st
 		if (perf_evsel__is_group_event(evsel)) {
 			nr_percent = evsel->nr_members;
 			ppercents = calloc(nr_percent, sizeof(double));
-			psamples = calloc(nr_percent, sizeof(struct sym_hist_entry));
+			psamples = calloc(nr_percent, sizeof(u64));
 			if (ppercents == NULL || psamples == NULL) {
 				return -1;
 			}
@@ -1109,10 +1065,10 @@ static int disasm_line__print(struct disasm_line *dl, struct symbol *sym, u64 st
 					notes->src->lines ? i : evsel->idx + i,
 					offset,
 					next ? next->offset : (s64) len,
-					&path, &sample);
+					&path, &nr_samples);
 
 			ppercents[i] = percent;
-			psamples[i] = sample;
+			psamples[i] = nr_samples;
 			if (percent > max_percent)
 				max_percent = percent;
 		}
@@ -1150,15 +1106,12 @@ static int disasm_line__print(struct disasm_line *dl, struct symbol *sym, u64 st
 
 		for (i = 0; i < nr_percent; i++) {
 			percent = ppercents[i];
-			sample = psamples[i];
+			nr_samples = psamples[i];
 			color = get_percent_color(percent);
 
 			if (symbol_conf.show_total_period)
-				color_fprintf(stdout, color, " %11" PRIu64,
-					      sample.period);
-			else if (symbol_conf.show_nr_samples)
 				color_fprintf(stdout, color, " %7" PRIu64,
-					      sample.nr_samples);
+					      nr_samples);
 			else
 				color_fprintf(stdout, color, " %7.2f", percent);
 		}
@@ -1174,13 +1127,13 @@ static int disasm_line__print(struct disasm_line *dl, struct symbol *sym, u64 st
 		if (ppercents != &percent)
 			free(ppercents);
 
-		if (psamples != &sample)
+		if (psamples != &nr_samples)
 			free(psamples);
 
 	} else if (max_lines && printed >= max_lines)
 		return 1;
 	else {
-		int width = symbol_conf.show_total_period ? 12 : 8;
+		int width = 8;
 
 		if (queue)
 			return -1;
@@ -1374,7 +1327,7 @@ static int dso__disassemble_filename(struct dso *dso, char *filename, size_t fil
 	    !dso__is_kcore(dso))
 		return SYMBOL_ANNOTATE_ERRNO__NO_VMLINUX;
 
-	build_id_filename = dso__build_id_filename(dso, NULL, 0, false);
+	build_id_filename = dso__build_id_filename(dso, NULL, 0);
 	if (build_id_filename) {
 		__symbol__join_symfs(filename, filename_size, build_id_filename);
 		free(build_id_filename);
@@ -1428,7 +1381,7 @@ static const char *annotate__norm_arch(const char *arch_name)
 
 int symbol__disassemble(struct symbol *sym, struct map *map,
 			const char *arch_name, size_t privsize,
-			struct arch **parch, char *cpuid)
+			struct arch **parch)
 {
 	struct dso *dso = map->dso;
 	char command[PATH_MAX * 2];
@@ -1458,7 +1411,7 @@ int symbol__disassemble(struct symbol *sym, struct map *map,
 		*parch = arch;
 
 	if (arch->init) {
-		err = arch->init(arch, cpuid);
+		err = arch->init(arch);
 		if (err) {
 			pr_err("%s: failed to initialize %s arch priv area\n", __func__, arch->name);
 			return err;
@@ -1695,19 +1648,19 @@ static int symbol__get_source_line(struct symbol *sym, struct map *map,
 	struct sym_hist *h = annotation__histogram(notes, evidx);
 	struct rb_root tmp_root = RB_ROOT;
 	int nr_pcnt = 1;
-	u64 nr_samples = h->nr_samples;
+	u64 h_sum = h->sum;
 	size_t sizeof_src_line = sizeof(struct source_line);
 
 	if (perf_evsel__is_group_event(evsel)) {
 		for (i = 1; i < evsel->nr_members; i++) {
 			h = annotation__histogram(notes, evidx + i);
-			nr_samples += h->nr_samples;
+			h_sum += h->sum;
 		}
 		nr_pcnt = evsel->nr_members;
 		sizeof_src_line += (nr_pcnt - 1) * sizeof(src_line->samples);
 	}
 
-	if (!nr_samples)
+	if (!h_sum)
 		return 0;
 
 	src_line = notes->src->lines = calloc(len, sizeof_src_line);
@@ -1717,7 +1670,7 @@ static int symbol__get_source_line(struct symbol *sym, struct map *map,
 	start = map__rip_2objdump(map, sym->start);
 
 	for (i = 0; i < len; i++) {
-		u64 offset;
+		u64 offset, nr_samples;
 		double percent_max = 0.0;
 
 		src_line->nr_pcnt = nr_pcnt;
@@ -1726,9 +1679,9 @@ static int symbol__get_source_line(struct symbol *sym, struct map *map,
 			double percent = 0.0;
 
 			h = annotation__histogram(notes, evidx + k);
-			nr_samples = h->addr[i].nr_samples;
-			if (h->nr_samples)
-				percent = 100.0 * nr_samples / h->nr_samples;
+			nr_samples = h->addr[i];
+			if (h->sum)
+				percent = 100.0 * nr_samples / h->sum;
 
 			if (percent > percent_max)
 				percent_max = percent;
@@ -1797,10 +1750,10 @@ static void symbol__annotate_hits(struct symbol *sym, struct perf_evsel *evsel)
 	u64 len = symbol__size(sym), offset;
 
 	for (offset = 0; offset < len; ++offset)
-		if (h->addr[offset].nr_samples != 0)
+		if (h->addr[offset] != 0)
 			printf("%*" PRIx64 ": %" PRIu64 "\n", BITS_PER_LONG / 2,
-			       sym->start + offset, h->addr[offset].nr_samples);
-	printf("%*s: %" PRIu64 "\n", BITS_PER_LONG / 2, "h->nr_samples", h->nr_samples);
+			       sym->start + offset, h->addr[offset]);
+	printf("%*s: %" PRIu64 "\n", BITS_PER_LONG / 2, "h->sum", h->sum);
 }
 
 int symbol__annotate_printf(struct symbol *sym, struct map *map,
@@ -1818,7 +1771,7 @@ int symbol__annotate_printf(struct symbol *sym, struct map *map,
 	int printed = 2, queue_len = 0;
 	int more = 0;
 	u64 len;
-	int width = symbol_conf.show_total_period ? 12 : 8;
+	int width = 8;
 	int graph_dotted_len;
 
 	filename = strdup(dso->long_name);
@@ -1836,9 +1789,7 @@ int symbol__annotate_printf(struct symbol *sym, struct map *map,
 		width *= evsel->nr_members;
 
 	graph_dotted_len = printf(" %-*.*s|	Source code & Disassembly of %s for %s (%" PRIu64 " samples)\n",
-				  width, width, symbol_conf.show_total_period ? "Period" :
-				  symbol_conf.show_nr_samples ? "Samples" : "Percent",
-				  d_filename, evsel_name, h->nr_samples);
+	       width, width, "Percent", d_filename, evsel_name, h->sum);
 
 	printf("%-*.*s----\n",
 	       graph_dotted_len, graph_dotted_len, graph_dotted_line);
@@ -1902,10 +1853,10 @@ void symbol__annotate_decay_histogram(struct symbol *sym, int evidx)
 	struct sym_hist *h = annotation__histogram(notes, evidx);
 	int len = symbol__size(sym), offset;
 
-	h->nr_samples = 0;
+	h->sum = 0;
 	for (offset = 0; offset < len; ++offset) {
-		h->addr[offset].nr_samples = h->addr[offset].nr_samples * 7 / 8;
-		h->nr_samples += h->addr[offset].nr_samples;
+		h->addr[offset] = h->addr[offset] * 7 / 8;
+		h->sum += h->addr[offset];
 	}
 }
 
@@ -1956,7 +1907,7 @@ int symbol__tty_annotate(struct symbol *sym, struct map *map,
 	u64 len;
 
 	if (symbol__disassemble(sym, map, perf_evsel__env_arch(evsel),
-				0, NULL, NULL) < 0)
+				0, NULL) < 0)
 		return -1;
 
 	len = symbol__size(sym);

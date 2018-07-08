@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -38,7 +37,7 @@
 
 #define DEBUG_SUBSYSTEM S_LLITE
 
-#include <obd.h>
+#include "../include/obd.h"
 
 #include "llite_internal.h"
 #include "vvp_internal.h"

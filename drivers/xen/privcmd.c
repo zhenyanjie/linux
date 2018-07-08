@@ -191,9 +191,12 @@ static int traverse_pages_block(unsigned nelem, size_t size,
 				void *state)
 {
 	void *pagedata;
+	unsigned pageidx;
 	int ret = 0;
 
 	BUG_ON(size > PAGE_SIZE);
+
+	pageidx = PAGE_SIZE;
 
 	while (nelem) {
 		int nr = (PAGE_SIZE/size);

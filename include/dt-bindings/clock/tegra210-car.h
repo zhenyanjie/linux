@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * This header provides constants for binding nvidia,tegra210-car.
  *
@@ -310,7 +309,6 @@
 #define TEGRA210_CLK_BLINK 280
 /* 281 */
 #define TEGRA210_CLK_SOR1_SRC 282
-#define TEGRA210_CLK_SOR1_OUT 282
 /* 283 */
 #define TEGRA210_CLK_XUSB_HOST_SRC 284
 #define TEGRA210_CLK_XUSB_FALCON_SRC 285

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * include/asm-parisc/processor.h
  *
@@ -315,8 +314,6 @@ extern int _parisc_requires_coherency;
 #else
 #define parisc_requires_coherency()	(0)
 #endif
-
-extern int running_on_qemu;
 
 #endif /* __ASSEMBLY__ */
 

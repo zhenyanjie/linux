@@ -71,6 +71,16 @@ static bool icmp_invert_tuple(struct nf_conntrack_tuple *tuple,
 	return true;
 }
 
+/* Print out the per-protocol part of the tuple. */
+static void icmp_print_tuple(struct seq_file *s,
+			    const struct nf_conntrack_tuple *tuple)
+{
+	seq_printf(s, "type=%u code=%u id=%u ",
+		   tuple->dst.u.icmp.type,
+		   tuple->dst.u.icmp.code,
+		   ntohs(tuple->src.u.icmp.id));
+}
+
 static unsigned int *icmp_get_timeouts(struct net *net)
 {
 	return &icmp_pernet(net)->timeout;
@@ -81,6 +91,8 @@ static int icmp_packet(struct nf_conn *ct,
 		       const struct sk_buff *skb,
 		       unsigned int dataoff,
 		       enum ip_conntrack_info ctinfo,
+		       u_int8_t pf,
+		       unsigned int hooknum,
 		       unsigned int *timeout)
 {
 	/* Do not immediately delete the connection after the first
@@ -125,7 +137,7 @@ icmp_error_message(struct net *net, struct nf_conn *tmpl, struct sk_buff *skb,
 	enum ip_conntrack_info ctinfo;
 	struct nf_conntrack_zone tmp;
 
-	WARN_ON(skb_nfct(skb));
+	NF_CT_ASSERT(!skb_nfct(skb));
 	zone = nf_ct_zone_tmpl(tmpl, skb, &tmp);
 
 	/* Are they talking about one of our connections? */
@@ -164,12 +176,6 @@ icmp_error_message(struct net *net, struct nf_conn *tmpl, struct sk_buff *skb,
 	return NF_ACCEPT;
 }
 
-static void icmp_error_log(const struct sk_buff *skb, struct net *net,
-			   u8 pf, const char *msg)
-{
-	nf_l4proto_log_invalid(skb, net, pf, IPPROTO_ICMP, "%s", msg);
-}
-
 /* Small and modified version of icmp_rcv */
 static int
 icmp_error(struct net *net, struct nf_conn *tmpl,
@@ -182,14 +188,18 @@ icmp_error(struct net *net, struct nf_conn *tmpl,
 	/* Not enough header? */
 	icmph = skb_header_pointer(skb, ip_hdrlen(skb), sizeof(_ih), &_ih);
 	if (icmph == NULL) {
-		icmp_error_log(skb, net, pf, "short packet");
+		if (LOG_INVALID(net, IPPROTO_ICMP))
+			nf_log_packet(net, PF_INET, 0, skb, NULL, NULL,
+				      NULL, "nf_ct_icmp: short packet ");
 		return -NF_ACCEPT;
 	}
 
 	/* See ip_conntrack_proto_tcp.c */
 	if (net->ct.sysctl_checksum && hooknum == NF_INET_PRE_ROUTING &&
 	    nf_ip_checksum(skb, hooknum, dataoff, 0)) {
-		icmp_error_log(skb, net, pf, "bad hw icmp checksum");
+		if (LOG_INVALID(net, IPPROTO_ICMP))
+			nf_log_packet(net, PF_INET, 0, skb, NULL, NULL, NULL,
+				      "nf_ct_icmp: bad HW ICMP checksum ");
 		return -NF_ACCEPT;
 	}
 
@@ -200,7 +210,9 @@ icmp_error(struct net *net, struct nf_conn *tmpl,
 	 *		  discarded.
 	 */
 	if (icmph->type > NR_ICMP_TYPES) {
-		icmp_error_log(skb, net, pf, "invalid icmp type");
+		if (LOG_INVALID(net, IPPROTO_ICMP))
+			nf_log_packet(net, PF_INET, 0, skb, NULL, NULL, NULL,
+				      "nf_ct_icmp: invalid ICMP type ");
 		return -NF_ACCEPT;
 	}
 
@@ -258,14 +270,9 @@ static int icmp_nlattr_to_tuple(struct nlattr *tb[],
 	return 0;
 }
 
-static unsigned int icmp_nlattr_tuple_size(void)
+static int icmp_nlattr_tuple_size(void)
 {
-	static unsigned int size __read_mostly;
-
-	if (!size)
-		size = nla_policy_len(icmp_nla_policy, CTA_PROTO_MAX + 1);
-
-	return size;
+	return nla_policy_len(icmp_nla_policy, CTA_PROTO_MAX + 1);
 }
 #endif
 
@@ -355,8 +362,10 @@ struct nf_conntrack_l4proto nf_conntrack_l4proto_icmp __read_mostly =
 {
 	.l3proto		= PF_INET,
 	.l4proto		= IPPROTO_ICMP,
+	.name			= "icmp",
 	.pkt_to_tuple		= icmp_pkt_to_tuple,
 	.invert_tuple		= icmp_invert_tuple,
+	.print_tuple		= icmp_print_tuple,
 	.packet			= icmp_packet,
 	.get_timeouts		= icmp_get_timeouts,
 	.new			= icmp_new,

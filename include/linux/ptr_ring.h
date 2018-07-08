@@ -101,17 +101,11 @@ static inline bool ptr_ring_full_bh(struct ptr_ring *r)
 
 /* Note: callers invoking this in a loop must use a compiler barrier,
  * for example cpu_relax(). Callers must hold producer_lock.
- * Callers are responsible for making sure pointer that is being queued
- * points to a valid data.
  */
 static inline int __ptr_ring_produce(struct ptr_ring *r, void *ptr)
 {
 	if (unlikely(!r->size) || r->queue[r->producer])
 		return -ENOSPC;
-
-	/* Make sure the pointer we are storing points to a valid data. */
-	/* Pairs with smp_read_barrier_depends in __ptr_ring_consume. */
-	smp_wmb();
 
 	r->queue[r->producer++] = ptr;
 	if (unlikely(r->producer >= r->size))
@@ -174,15 +168,6 @@ static inline int ptr_ring_produce_bh(struct ptr_ring *r, void *ptr)
  * if they dereference the pointer - see e.g. PTR_RING_PEEK_CALL.
  * If ring is never resized, and if the pointer is merely
  * tested, there's no need to take the lock - see e.g.  __ptr_ring_empty.
- * However, if called outside the lock, and if some other CPU
- * consumes ring entries at the same time, the value returned
- * is not guaranteed to be correct.
- * In this case - to avoid incorrectly detecting the ring
- * as empty - the CPU consuming the ring entries is responsible
- * for either consuming all ring entries until the ring is empty,
- * or synchronizing with some other CPU and causing it to
- * execute __ptr_ring_peek and/or consume the ring enteries
- * after the synchronization point.
  */
 static inline void *__ptr_ring_peek(struct ptr_ring *r)
 {
@@ -191,7 +176,10 @@ static inline void *__ptr_ring_peek(struct ptr_ring *r)
 	return NULL;
 }
 
-/* See __ptr_ring_peek above for locking rules. */
+/* Note: callers invoking this in a loop must use a compiler barrier,
+ * for example cpu_relax(). Callers must take consumer_lock
+ * if the ring is ever resized - see e.g. ptr_ring_empty.
+ */
 static inline bool __ptr_ring_empty(struct ptr_ring *r)
 {
 	return !__ptr_ring_peek(r);
@@ -287,9 +275,6 @@ static inline void *__ptr_ring_consume(struct ptr_ring *r)
 	if (ptr)
 		__ptr_ring_discard_one(r);
 
-	/* Make sure anyone accessing data through the pointer is up to date. */
-	/* Pairs with smp_wmb in __ptr_ring_produce. */
-	smp_read_barrier_depends();
 	return ptr;
 }
 
@@ -451,14 +436,9 @@ static inline int ptr_ring_consume_batched_bh(struct ptr_ring *r,
 	__PTR_RING_PEEK_CALL_v; \
 })
 
-/* Not all gfp_t flags (besides GFP_KERNEL) are allowed. See
- * documentation for vmalloc for which of them are legal.
- */
 static inline void **__ptr_ring_init_queue_alloc(unsigned int size, gfp_t gfp)
 {
-	if (size * sizeof(void *) > KMALLOC_MAX_SIZE)
-		return NULL;
-	return kvmalloc_array(size, sizeof(void *), gfp | __GFP_ZERO);
+	return kcalloc(size, sizeof(void *), gfp);
 }
 
 static inline void __ptr_ring_set_size(struct ptr_ring *r, int size)
@@ -591,7 +571,7 @@ static inline int ptr_ring_resize(struct ptr_ring *r, int size, gfp_t gfp,
 	spin_unlock(&(r)->producer_lock);
 	spin_unlock_irqrestore(&(r)->consumer_lock, flags);
 
-	kvfree(old);
+	kfree(old);
 
 	return 0;
 }
@@ -631,7 +611,7 @@ static inline int ptr_ring_resize_multiple(struct ptr_ring **rings,
 	}
 
 	for (i = 0; i < nrings; ++i)
-		kvfree(queues[i]);
+		kfree(queues[i]);
 
 	kfree(queues);
 
@@ -639,7 +619,7 @@ static inline int ptr_ring_resize_multiple(struct ptr_ring **rings,
 
 nomem:
 	while (--i >= 0)
-		kvfree(queues[i]);
+		kfree(queues[i]);
 
 	kfree(queues);
 
@@ -654,7 +634,7 @@ static inline void ptr_ring_cleanup(struct ptr_ring *r, void (*destroy)(void *))
 	if (destroy)
 		while ((ptr = ptr_ring_consume(r)))
 			destroy(ptr);
-	kvfree(r->queue);
+	kfree(r->queue);
 }
 
 #endif /* _LINUX_PTR_RING_H  */

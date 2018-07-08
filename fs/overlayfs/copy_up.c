@@ -22,6 +22,7 @@
 #include <linux/ratelimit.h>
 #include <linux/exportfs.h>
 #include "overlayfs.h"
+#include "ovl_entry.h"
 
 #define OVL_COPY_UP_CHUNK_SIZE (1 << 20)
 
@@ -240,7 +241,7 @@ struct ovl_fh *ovl_encode_fh(struct dentry *lower, bool is_upper)
 	int buflen = MAX_HANDLE_SZ;
 	uuid_t *uuid = &lower->d_sb->s_uuid;
 
-	buf = kmalloc(buflen, GFP_KERNEL);
+	buf = kmalloc(buflen, GFP_TEMPORARY);
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
 
@@ -485,7 +486,6 @@ static int ovl_copy_up_inode(struct ovl_copy_up_ctx *c, struct dentry *temp)
 static int ovl_copy_up_locked(struct ovl_copy_up_ctx *c)
 {
 	struct inode *udir = c->destdir->d_inode;
-	struct inode *inode;
 	struct dentry *newdentry = NULL;
 	struct dentry *temp = NULL;
 	int err;
@@ -508,11 +508,7 @@ static int ovl_copy_up_locked(struct ovl_copy_up_ctx *c)
 	if (err)
 		goto out_cleanup;
 
-	inode = d_inode(c->dentry);
-	ovl_inode_update(inode, newdentry);
-	if (S_ISDIR(inode->i_mode))
-		ovl_set_flag(OVL_WHITEOUTS, inode);
-
+	ovl_inode_update(d_inode(c->dentry), newdentry);
 out:
 	dput(temp);
 	return err;

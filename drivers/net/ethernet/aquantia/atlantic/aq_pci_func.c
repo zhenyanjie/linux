@@ -51,8 +51,7 @@ struct aq_pci_func_s *aq_pci_func_alloc(struct aq_hw_ops *aq_hw_ops,
 	pci_set_drvdata(pdev, self);
 	self->pdev = pdev;
 
-	err = aq_hw_ops->get_hw_caps(NULL, &self->aq_hw_caps, pdev->device,
-				     pdev->subsystem_device);
+	err = aq_hw_ops->get_hw_caps(NULL, &self->aq_hw_caps);
 	if (err < 0)
 		goto err_exit;
 
@@ -60,7 +59,7 @@ struct aq_pci_func_s *aq_pci_func_alloc(struct aq_hw_ops *aq_hw_ops,
 
 	for (port = 0; port < self->ports; ++port) {
 		struct aq_nic_s *aq_nic = aq_nic_alloc_cold(ndev_ops, eth_ops,
-							    pdev, self,
+							    &pdev->dev, self,
 							    port, aq_hw_ops);
 
 		if (!aq_nic) {
@@ -86,7 +85,6 @@ int aq_pci_func_init(struct aq_pci_func_s *self)
 	int err = 0;
 	unsigned int bar = 0U;
 	unsigned int port = 0U;
-	unsigned int numvecs = 0U;
 
 	err = pci_enable_device(self->pdev);
 	if (err < 0)
@@ -144,12 +142,10 @@ int aq_pci_func_init(struct aq_pci_func_s *self)
 		}
 	}
 
-	numvecs = min((u8)AQ_CFG_VECS_DEF, self->aq_hw_caps.msix_irqs);
-	numvecs = min(numvecs, num_online_cpus());
-
-	/* enable interrupts */
+	/*enable interrupts */
 #if !AQ_CFG_FORCE_LEGACY_INT
-	err = pci_alloc_irq_vectors(self->pdev, numvecs, numvecs, PCI_IRQ_MSIX);
+	err = pci_alloc_irq_vectors(self->pdev, self->aq_hw_caps.msix_irqs,
+			      self->aq_hw_caps.msix_irqs, PCI_IRQ_MSIX);
 
 	if (err < 0) {
 		err = pci_alloc_irq_vectors(self->pdev, 1, 1,
@@ -157,7 +153,7 @@ int aq_pci_func_init(struct aq_pci_func_s *self)
 		if (err < 0)
 			goto err_exit;
 	}
-#endif /* AQ_CFG_FORCE_LEGACY_INT */
+#endif
 
 	/* net device init */
 	for (port = 0; port < self->ports; ++port) {
@@ -268,9 +264,6 @@ void aq_pci_func_free(struct aq_pci_func_s *self)
 
 		aq_nic_ndev_free(self->port[port]);
 	}
-
-	if (self->mmio)
-		iounmap(self->mmio);
 
 	kfree(self);
 

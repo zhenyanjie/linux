@@ -1,5 +1,5 @@
 /*
- * RZ/A1 Core CPG Clocks
+ * rz Core CPG Clocks
  *
  * Copyright (C) 2013 Ideas On Board SPRL
  * Copyright (C) 2014 Wolfram Sang, Sang Engineering <wsa@sang-engineering.com>

@@ -1090,8 +1090,7 @@ static int rbio_add_io_page(struct btrfs_raid_bio *rbio,
 		 */
 		if (last_end == disk_start && stripe->dev->bdev &&
 		    !last->bi_status &&
-		    last->bi_disk == stripe->dev->bdev->bd_disk &&
-		    last->bi_partno == stripe->dev->bdev->bd_partno) {
+		    last->bi_bdev == stripe->dev->bdev) {
 			ret = bio_add_page(last, page, PAGE_SIZE, 0);
 			if (ret == PAGE_SIZE)
 				return 0;
@@ -1101,7 +1100,7 @@ static int rbio_add_io_page(struct btrfs_raid_bio *rbio,
 	/* put a new bio on the list */
 	bio = btrfs_io_bio_alloc(bio_max_len >> PAGE_SHIFT ?: 1);
 	bio->bi_iter.bi_size = 0;
-	bio_set_dev(bio, stripe->dev->bdev);
+	bio->bi_bdev = stripe->dev->bdev;
 	bio->bi_iter.bi_sector = disk_start >> 9;
 
 	bio_add_page(bio, page, PAGE_SIZE, 0);
@@ -1326,9 +1325,6 @@ write_data:
 
 cleanup:
 	rbio_orig_end_io(rbio, BLK_STS_IOERR);
-
-	while ((bio = bio_list_pop(&bio_list)))
-		bio_put(bio);
 }
 
 /*
@@ -1351,9 +1347,7 @@ static int find_bio_stripe(struct btrfs_raid_bio *rbio,
 		stripe_start = stripe->physical;
 		if (physical >= stripe_start &&
 		    physical < stripe_start + rbio->stripe_len &&
-		    stripe->dev->bdev &&
-		    bio->bi_disk == stripe->dev->bdev->bd_disk &&
-		    bio->bi_partno == stripe->dev->bdev->bd_partno) {
+		    bio->bi_bdev == stripe->dev->bdev) {
 			return i;
 		}
 	}
@@ -1436,13 +1430,14 @@ static int fail_bio_stripe(struct btrfs_raid_bio *rbio,
  */
 static void set_bio_pages_uptodate(struct bio *bio)
 {
-	struct bio_vec *bvec;
-	int i;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
 
-	ASSERT(!bio_flagged(bio, BIO_CLONED));
+	if (bio_flagged(bio, BIO_CLONED))
+		bio->bi_iter = btrfs_io_bio(bio)->iter;
 
-	bio_for_each_segment_all(bvec, bio, i)
-		SetPageUptodate(bvec->bv_page);
+	bio_for_each_segment(bvec, bio, iter)
+		SetPageUptodate(bvec.bv_page);
 }
 
 /*
@@ -1585,10 +1580,6 @@ static int raid56_rmw_stripe(struct btrfs_raid_bio *rbio)
 
 cleanup:
 	rbio_orig_end_io(rbio, BLK_STS_IOERR);
-
-	while ((bio = bio_list_pop(&bio_list)))
-		bio_put(bio);
-
 	return -EIO;
 
 finish:
@@ -2114,10 +2105,6 @@ cleanup:
 	if (rbio->operation == BTRFS_RBIO_READ_REBUILD ||
 	    rbio->operation == BTRFS_RBIO_REBUILD_MISSING)
 		rbio_orig_end_io(rbio, BLK_STS_IOERR);
-
-	while ((bio = bio_list_pop(&bio_list)))
-		bio_put(bio);
-
 	return -EIO;
 }
 
@@ -2242,18 +2229,12 @@ raid56_parity_alloc_scrub_rbio(struct btrfs_fs_info *fs_info, struct bio *bio,
 	ASSERT(!bio->bi_iter.bi_size);
 	rbio->operation = BTRFS_RBIO_PARITY_SCRUB;
 
-	/*
-	 * After mapping bbio with BTRFS_MAP_WRITE, parities have been sorted
-	 * to the end position, so this search can start from the first parity
-	 * stripe.
-	 */
-	for (i = rbio->nr_data; i < rbio->real_stripes; i++) {
+	for (i = 0; i < rbio->real_stripes; i++) {
 		if (bbio->stripes[i].dev == scrub_dev) {
 			rbio->scrubp = i;
 			break;
 		}
 	}
-	ASSERT(i < rbio->real_stripes);
 
 	/* Now we just support the sectorsize equals to page size */
 	ASSERT(fs_info->sectorsize == PAGE_SIZE);
@@ -2471,9 +2452,6 @@ submit_write:
 
 cleanup:
 	rbio_orig_end_io(rbio, BLK_STS_IOERR);
-
-	while ((bio = bio_list_pop(&bio_list)))
-		bio_put(bio);
 }
 
 static inline int is_data_stripe(struct btrfs_raid_bio *rbio, int stripe)
@@ -2583,11 +2561,11 @@ static void raid56_parity_scrub_stripe(struct btrfs_raid_bio *rbio)
 	int stripe;
 	struct bio *bio;
 
-	bio_list_init(&bio_list);
-
 	ret = alloc_rbio_essential_pages(rbio);
 	if (ret)
 		goto cleanup;
+
+	bio_list_init(&bio_list);
 
 	atomic_set(&rbio->error, 0);
 	/*
@@ -2656,10 +2634,6 @@ static void raid56_parity_scrub_stripe(struct btrfs_raid_bio *rbio)
 
 cleanup:
 	rbio_orig_end_io(rbio, BLK_STS_IOERR);
-
-	while ((bio = bio_list_pop(&bio_list)))
-		bio_put(bio);
-
 	return;
 
 finish:

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -32,7 +31,7 @@
 
 #include <linux/cpu.h>
 #include <linux/sched.h>
-#include <linux/libcfs/libcfs.h>
+#include "../../../include/linux/libcfs/libcfs.h"
 
 #ifdef CONFIG_SMP
 
@@ -529,20 +528,19 @@ EXPORT_SYMBOL(cfs_cpt_spread_node);
 int
 cfs_cpt_current(struct cfs_cpt_table *cptab, int remap)
 {
-	int cpu;
-	int cpt;
+	int cpu = smp_processor_id();
+	int cpt = cptab->ctb_cpu2cpt[cpu];
 
-	preempt_disable();
-	cpu = smp_processor_id();
-	cpt = cptab->ctb_cpu2cpt[cpu];
+	if (cpt < 0) {
+		if (!remap)
+			return cpt;
 
-	if (cpt < 0 && remap) {
 		/* don't return negative value for safety of upper layer,
 		 * instead we shadow the unknown cpu to a valid partition ID
 		 */
 		cpt = cpu % cptab->ctb_nparts;
 	}
-	preempt_enable();
+
 	return cpt;
 }
 EXPORT_SYMBOL(cfs_cpt_current);

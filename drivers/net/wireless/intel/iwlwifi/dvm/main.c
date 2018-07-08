@@ -399,9 +399,9 @@ int iwl_send_statistics_request(struct iwl_priv *priv, u8 flags, bool clear)
  * was received.  We need to ensure we receive the statistics in order
  * to update the temperature used for calibrating the TXPOWER.
  */
-static void iwl_bg_statistics_periodic(struct timer_list *t)
+static void iwl_bg_statistics_periodic(unsigned long data)
 {
-	struct iwl_priv *priv = from_timer(priv, t, statistics_periodic);
+	struct iwl_priv *priv = (struct iwl_priv *)data;
 
 	if (test_bit(STATUS_EXIT_PENDING, &priv->status))
 		return;
@@ -556,9 +556,9 @@ static void iwl_continuous_event_trace(struct iwl_priv *priv)
  * this function is to perform continuous uCode event logging operation
  * if enabled
  */
-static void iwl_bg_ucode_trace(struct timer_list *t)
+static void iwl_bg_ucode_trace(unsigned long data)
 {
-	struct iwl_priv *priv = from_timer(priv, t, ucode_trace);
+	struct iwl_priv *priv = (struct iwl_priv *)data;
 
 	if (test_bit(STATUS_EXIT_PENDING, &priv->status))
 		return;
@@ -1085,9 +1085,11 @@ static void iwl_setup_deferred_work(struct iwl_priv *priv)
 	if (priv->lib->bt_params)
 		iwlagn_bt_setup_deferred_work(priv);
 
-	timer_setup(&priv->statistics_periodic, iwl_bg_statistics_periodic, 0);
+	setup_timer(&priv->statistics_periodic, iwl_bg_statistics_periodic,
+		    (unsigned long)priv);
 
-	timer_setup(&priv->ucode_trace, iwl_bg_ucode_trace, 0);
+	setup_timer(&priv->ucode_trace, iwl_bg_ucode_trace,
+		    (unsigned long)priv);
 }
 
 void iwl_cancel_deferred_work(struct iwl_priv *priv)

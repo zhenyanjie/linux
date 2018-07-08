@@ -396,7 +396,7 @@ int esp6_output_tail(struct xfrm_state *x, struct sk_buff *skb, struct esp_info 
 	case -EINPROGRESS:
 		goto error;
 
-	case -ENOSPC:
+	case -EBUSY:
 		err = NET_XMIT_DROP;
 		break;
 
@@ -463,58 +463,17 @@ static int esp6_output(struct xfrm_state *x, struct sk_buff *skb)
 	return esp6_output_tail(x, skb, &esp);
 }
 
-static inline int esp_remove_trailer(struct sk_buff *skb)
-{
-	struct xfrm_state *x = xfrm_input_state(skb);
-	struct xfrm_offload *xo = xfrm_offload(skb);
-	struct crypto_aead *aead = x->data;
-	int alen, hlen, elen;
-	int padlen, trimlen;
-	__wsum csumdiff;
-	u8 nexthdr[2];
-	int ret;
-
-	alen = crypto_aead_authsize(aead);
-	hlen = sizeof(struct ip_esp_hdr) + crypto_aead_ivsize(aead);
-	elen = skb->len - hlen;
-
-	if (xo && (xo->flags & XFRM_ESP_NO_TRAILER)) {
-		ret = xo->proto;
-		goto out;
-	}
-
-	ret = skb_copy_bits(skb, skb->len - alen - 2, nexthdr, 2);
-	BUG_ON(ret);
-
-	ret = -EINVAL;
-	padlen = nexthdr[0];
-	if (padlen + 2 + alen >= elen) {
-		net_dbg_ratelimited("ipsec esp packet is garbage padlen=%d, elen=%d\n",
-				    padlen + 2, elen - alen);
-		goto out;
-	}
-
-	trimlen = alen + padlen + 2;
-	if (skb->ip_summed == CHECKSUM_COMPLETE) {
-		csumdiff = skb_checksum(skb, skb->len - trimlen, trimlen, 0);
-		skb->csum = csum_block_sub(skb->csum, csumdiff,
-					   skb->len - trimlen);
-	}
-	pskb_trim(skb, skb->len - trimlen);
-
-	ret = nexthdr[1];
-
-out:
-	return ret;
-}
-
 int esp6_input_done2(struct sk_buff *skb, int err)
 {
 	struct xfrm_state *x = xfrm_input_state(skb);
 	struct xfrm_offload *xo = xfrm_offload(skb);
 	struct crypto_aead *aead = x->data;
+	int alen = crypto_aead_authsize(aead);
 	int hlen = sizeof(struct ip_esp_hdr) + crypto_aead_ivsize(aead);
+	int elen = skb->len - hlen;
 	int hdr_len = skb_network_header_len(skb);
+	int padlen;
+	u8 nexthdr[2];
 
 	if (!xo || (xo && !(xo->flags & CRYPTO_DONE)))
 		kfree(ESP_SKB_CB(skb)->tmp);
@@ -522,17 +481,27 @@ int esp6_input_done2(struct sk_buff *skb, int err)
 	if (unlikely(err))
 		goto out;
 
-	err = esp_remove_trailer(skb);
-	if (unlikely(err < 0))
-		goto out;
+	if (skb_copy_bits(skb, skb->len - alen - 2, nexthdr, 2))
+		BUG();
 
-	skb_postpull_rcsum(skb, skb_network_header(skb),
-			   skb_network_header_len(skb));
-	skb_pull_rcsum(skb, hlen);
+	err = -EINVAL;
+	padlen = nexthdr[0];
+	if (padlen + 2 + alen >= elen) {
+		net_dbg_ratelimited("ipsec esp packet is garbage padlen=%d, elen=%d\n",
+				    padlen + 2, elen - alen);
+		goto out;
+	}
+
+	/* ... check padding bits here. Silly. :-) */
+
+	pskb_trim(skb, skb->len - alen - padlen - 2);
+	__skb_pull(skb, hlen);
 	if (x->props.mode == XFRM_MODE_TUNNEL)
 		skb_reset_transport_header(skb);
 	else
 		skb_set_transport_header(skb, -hdr_len);
+
+	err = nexthdr[1];
 
 	/* RFC4303: Drop dummy packets without any error */
 	if (err == IPPROTO_NONE)
@@ -559,14 +528,14 @@ static void esp_input_restore_header(struct sk_buff *skb)
 static void esp_input_set_header(struct sk_buff *skb, __be32 *seqhi)
 {
 	struct xfrm_state *x = xfrm_input_state(skb);
+	struct ip_esp_hdr *esph = (struct ip_esp_hdr *)skb->data;
 
 	/* For ESN we move the header forward by 4 bytes to
 	 * accomodate the high bits.  We will move it back after
 	 * decryption.
 	 */
 	if ((x->props.flags & XFRM_STATE_ESN)) {
-		struct ip_esp_hdr *esph = skb_push(skb, 4);
-
+		esph = skb_push(skb, 4);
 		*seqhi = esph->spi;
 		esph->spi = esph->seq_no;
 		esph->seq_no = XFRM_SKB_CB(skb)->seq.input.hi;
@@ -890,12 +859,13 @@ static int esp6_init_state(struct xfrm_state *x)
 			x->props.header_len += IPV4_BEET_PHMAXLEN +
 					       (sizeof(struct ipv6hdr) - sizeof(struct iphdr));
 		break;
-	default:
 	case XFRM_MODE_TRANSPORT:
 		break;
 	case XFRM_MODE_TUNNEL:
 		x->props.header_len += sizeof(struct ipv6hdr);
 		break;
+	default:
+		goto error;
 	}
 
 	align = ALIGN(crypto_aead_blocksize(aead), 4);

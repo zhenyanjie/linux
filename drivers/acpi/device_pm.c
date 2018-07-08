@@ -387,7 +387,6 @@ EXPORT_SYMBOL(acpi_bus_power_manageable);
 
 #ifdef CONFIG_PM
 static DEFINE_MUTEX(acpi_pm_notifier_lock);
-static DEFINE_MUTEX(acpi_pm_notifier_install_lock);
 
 void acpi_pm_wakeup_event(struct device *dev)
 {
@@ -402,8 +401,6 @@ static void acpi_pm_notify_handler(acpi_handle handle, u32 val, void *not_used)
 	if (val != ACPI_NOTIFY_DEVICE_WAKE)
 		return;
 
-	acpi_handle_debug(handle, "Wake notify\n");
-
 	adev = acpi_bus_get_acpi_device(handle);
 	if (!adev)
 		return;
@@ -412,12 +409,8 @@ static void acpi_pm_notify_handler(acpi_handle handle, u32 val, void *not_used)
 
 	if (adev->wakeup.flags.notifier_present) {
 		pm_wakeup_ws_event(adev->wakeup.ws, 0, acpi_s2idle_wakeup());
-		if (adev->wakeup.context.func) {
-			acpi_handle_debug(handle, "Running %pF for %s\n",
-					  adev->wakeup.context.func,
-					  dev_name(adev->wakeup.context.dev));
+		if (adev->wakeup.context.func)
 			adev->wakeup.context.func(&adev->wakeup.context);
-		}
 	}
 
 	mutex_unlock(&acpi_pm_notifier_lock);
@@ -444,25 +437,24 @@ acpi_status acpi_add_pm_notifier(struct acpi_device *adev, struct device *dev,
 	if (!dev && !func)
 		return AE_BAD_PARAMETER;
 
-	mutex_lock(&acpi_pm_notifier_install_lock);
+	mutex_lock(&acpi_pm_notifier_lock);
 
 	if (adev->wakeup.flags.notifier_present)
 		goto out;
+
+	adev->wakeup.ws = wakeup_source_register(dev_name(&adev->dev));
+	adev->wakeup.context.dev = dev;
+	adev->wakeup.context.func = func;
 
 	status = acpi_install_notify_handler(adev->handle, ACPI_SYSTEM_NOTIFY,
 					     acpi_pm_notify_handler, NULL);
 	if (ACPI_FAILURE(status))
 		goto out;
 
-	mutex_lock(&acpi_pm_notifier_lock);
-	adev->wakeup.ws = wakeup_source_register(dev_name(&adev->dev));
-	adev->wakeup.context.dev = dev;
-	adev->wakeup.context.func = func;
 	adev->wakeup.flags.notifier_present = true;
-	mutex_unlock(&acpi_pm_notifier_lock);
 
  out:
-	mutex_unlock(&acpi_pm_notifier_install_lock);
+	mutex_unlock(&acpi_pm_notifier_lock);
 	return status;
 }
 
@@ -474,7 +466,7 @@ acpi_status acpi_remove_pm_notifier(struct acpi_device *adev)
 {
 	acpi_status status = AE_BAD_PARAMETER;
 
-	mutex_lock(&acpi_pm_notifier_install_lock);
+	mutex_lock(&acpi_pm_notifier_lock);
 
 	if (!adev->wakeup.flags.notifier_present)
 		goto out;
@@ -485,15 +477,14 @@ acpi_status acpi_remove_pm_notifier(struct acpi_device *adev)
 	if (ACPI_FAILURE(status))
 		goto out;
 
-	mutex_lock(&acpi_pm_notifier_lock);
 	adev->wakeup.context.func = NULL;
 	adev->wakeup.context.dev = NULL;
 	wakeup_source_unregister(adev->wakeup.ws);
+
 	adev->wakeup.flags.notifier_present = false;
-	mutex_unlock(&acpi_pm_notifier_lock);
 
  out:
-	mutex_unlock(&acpi_pm_notifier_install_lock);
+	mutex_unlock(&acpi_pm_notifier_lock);
 	return status;
 }
 
@@ -584,7 +575,8 @@ static int acpi_dev_pm_get_state(struct device *dev, struct acpi_device *adev,
 		d_min = ret;
 		wakeup = device_may_wakeup(dev) && adev->wakeup.flags.valid
 			&& adev->wakeup.sleep_state >= target_state;
-	} else {
+	} else if (dev_pm_qos_flags(dev, PM_QOS_FLAG_REMOTE_WAKEUP) !=
+			PM_QOS_FLAGS_NONE) {
 		wakeup = adev->wakeup.flags.valid;
 	}
 
@@ -690,88 +682,55 @@ static void acpi_pm_notify_work_func(struct acpi_device_wakeup_context *context)
 	}
 }
 
-static DEFINE_MUTEX(acpi_wakeup_lock);
-
-static int __acpi_device_wakeup_enable(struct acpi_device *adev,
-				       u32 target_state, int max_count)
-{
-	struct acpi_device_wakeup *wakeup = &adev->wakeup;
-	acpi_status status;
-	int error = 0;
-
-	mutex_lock(&acpi_wakeup_lock);
-
-	if (wakeup->enable_count >= max_count)
-		goto out;
-
-	if (wakeup->enable_count > 0)
-		goto inc;
-
-	error = acpi_enable_wakeup_device_power(adev, target_state);
-	if (error)
-		goto out;
-
-	status = acpi_enable_gpe(wakeup->gpe_device, wakeup->gpe_number);
-	if (ACPI_FAILURE(status)) {
-		acpi_disable_wakeup_device_power(adev);
-		error = -EIO;
-		goto out;
-	}
-
-inc:
-	wakeup->enable_count++;
-
-out:
-	mutex_unlock(&acpi_wakeup_lock);
-	return error;
-}
-
 /**
- * acpi_device_wakeup_enable - Enable wakeup functionality for device.
- * @adev: ACPI device to enable wakeup functionality for.
+ * acpi_device_wakeup - Enable/disable wakeup functionality for device.
+ * @adev: ACPI device to enable/disable wakeup functionality for.
  * @target_state: State the system is transitioning into.
+ * @enable: Whether to enable or disable the wakeup functionality.
  *
- * Enable the GPE associated with @adev so that it can generate wakeup signals
- * for the device in response to external (remote) events and enable wakeup
- * power for it.
- *
- * Callers must ensure that @adev is a valid ACPI device node before executing
- * this function.
- */
-static int acpi_device_wakeup_enable(struct acpi_device *adev, u32 target_state)
-{
-	return __acpi_device_wakeup_enable(adev, target_state, 1);
-}
-
-/**
- * acpi_device_wakeup_disable - Disable wakeup functionality for device.
- * @adev: ACPI device to disable wakeup functionality for.
- *
- * Disable the GPE associated with @adev and disable wakeup power for it.
+ * Enable/disable the GPE associated with @adev so that it can generate
+ * wakeup signals for the device in response to external (remote) events and
+ * enable/disable device wakeup power.
  *
  * Callers must ensure that @adev is a valid ACPI device node before executing
  * this function.
  */
-static void acpi_device_wakeup_disable(struct acpi_device *adev)
+static int acpi_device_wakeup(struct acpi_device *adev, u32 target_state,
+			      bool enable)
 {
 	struct acpi_device_wakeup *wakeup = &adev->wakeup;
 
-	mutex_lock(&acpi_wakeup_lock);
+	if (enable) {
+		acpi_status res;
+		int error;
 
-	if (!wakeup->enable_count)
-		goto out;
+		if (adev->wakeup.flags.enabled)
+			return 0;
 
-	acpi_disable_gpe(wakeup->gpe_device, wakeup->gpe_number);
-	acpi_disable_wakeup_device_power(adev);
+		error = acpi_enable_wakeup_device_power(adev, target_state);
+		if (error)
+			return error;
 
-	wakeup->enable_count--;
-
-out:
-	mutex_unlock(&acpi_wakeup_lock);
+		res = acpi_enable_gpe(wakeup->gpe_device, wakeup->gpe_number);
+		if (ACPI_FAILURE(res)) {
+			acpi_disable_wakeup_device_power(adev);
+			return -EIO;
+		}
+		adev->wakeup.flags.enabled = 1;
+	} else if (adev->wakeup.flags.enabled) {
+		acpi_disable_gpe(wakeup->gpe_device, wakeup->gpe_number);
+		acpi_disable_wakeup_device_power(adev);
+		adev->wakeup.flags.enabled = 0;
+	}
+	return 0;
 }
 
-static int __acpi_pm_set_device_wakeup(struct device *dev, bool enable,
-				       int max_count)
+/**
+ * acpi_pm_set_device_wakeup - Enable/disable remote wakeup for given device.
+ * @dev: Device to enable/disable to generate wakeup events.
+ * @enable: Whether to enable or disable the wakeup functionality.
+ */
+int acpi_pm_set_device_wakeup(struct device *dev, bool enable)
 {
 	struct acpi_device *adev;
 	int error;
@@ -785,41 +744,13 @@ static int __acpi_pm_set_device_wakeup(struct device *dev, bool enable,
 	if (!acpi_device_can_wakeup(adev))
 		return -EINVAL;
 
-	if (!enable) {
-		acpi_device_wakeup_disable(adev);
-		dev_dbg(dev, "Wakeup disabled by ACPI\n");
-		return 0;
-	}
-
-	error = __acpi_device_wakeup_enable(adev, acpi_target_system_state(),
-					    max_count);
+	error = acpi_device_wakeup(adev, acpi_target_system_state(), enable);
 	if (!error)
-		dev_dbg(dev, "Wakeup enabled by ACPI\n");
+		dev_dbg(dev, "Wakeup %s by ACPI\n", enable ? "enabled" : "disabled");
 
 	return error;
 }
-
-/**
- * acpi_pm_set_device_wakeup - Enable/disable remote wakeup for given device.
- * @dev: Device to enable/disable to generate wakeup events.
- * @enable: Whether to enable or disable the wakeup functionality.
- */
-int acpi_pm_set_device_wakeup(struct device *dev, bool enable)
-{
-	return __acpi_pm_set_device_wakeup(dev, enable, 1);
-}
-EXPORT_SYMBOL_GPL(acpi_pm_set_device_wakeup);
-
-/**
- * acpi_pm_set_bridge_wakeup - Enable/disable remote wakeup for given bridge.
- * @dev: Bridge device to enable/disable to generate wakeup events.
- * @enable: Whether to enable or disable the wakeup functionality.
- */
-int acpi_pm_set_bridge_wakeup(struct device *dev, bool enable)
-{
-	return __acpi_pm_set_device_wakeup(dev, enable, INT_MAX);
-}
-EXPORT_SYMBOL_GPL(acpi_pm_set_bridge_wakeup);
+EXPORT_SYMBOL(acpi_pm_set_device_wakeup);
 
 /**
  * acpi_dev_pm_low_power - Put ACPI device into a low-power state.
@@ -850,48 +781,46 @@ static int acpi_dev_pm_full_power(struct acpi_device *adev)
 }
 
 /**
- * acpi_dev_suspend - Put device into a low-power state using ACPI.
+ * acpi_dev_runtime_suspend - Put device into a low-power state using ACPI.
  * @dev: Device to put into a low-power state.
- * @wakeup: Whether or not to enable wakeup for the device.
  *
- * Put the given device into a low-power state using the standard ACPI
+ * Put the given device into a runtime low-power state using the standard ACPI
  * mechanism.  Set up remote wakeup if desired, choose the state to put the
  * device into (this checks if remote wakeup is expected to work too), and set
  * the power state of the device.
  */
-int acpi_dev_suspend(struct device *dev, bool wakeup)
+int acpi_dev_runtime_suspend(struct device *dev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(dev);
-	u32 target_state = acpi_target_system_state();
+	bool remote_wakeup;
 	int error;
 
 	if (!adev)
 		return 0;
 
-	if (wakeup && acpi_device_can_wakeup(adev)) {
-		error = acpi_device_wakeup_enable(adev, target_state);
-		if (error)
-			return -EAGAIN;
-	} else {
-		wakeup = false;
-	}
+	remote_wakeup = dev_pm_qos_flags(dev, PM_QOS_FLAG_REMOTE_WAKEUP) >
+				PM_QOS_FLAGS_NONE;
+	error = acpi_device_wakeup(adev, ACPI_STATE_S0, remote_wakeup);
+	if (remote_wakeup && error)
+		return -EAGAIN;
 
-	error = acpi_dev_pm_low_power(dev, adev, target_state);
-	if (error && wakeup)
-		acpi_device_wakeup_disable(adev);
+	error = acpi_dev_pm_low_power(dev, adev, ACPI_STATE_S0);
+	if (error)
+		acpi_device_wakeup(adev, ACPI_STATE_S0, false);
 
 	return error;
 }
-EXPORT_SYMBOL_GPL(acpi_dev_suspend);
+EXPORT_SYMBOL_GPL(acpi_dev_runtime_suspend);
 
 /**
- * acpi_dev_resume - Put device into the full-power state using ACPI.
+ * acpi_dev_runtime_resume - Put device into the full-power state using ACPI.
  * @dev: Device to put into the full-power state.
  *
  * Put the given device into the full-power state using the standard ACPI
- * mechanism.  Set the power state of the device to ACPI D0 and disable wakeup.
+ * mechanism at run time.  Set the power state of the device to ACPI D0 and
+ * disable remote wakeup.
  */
-int acpi_dev_resume(struct device *dev)
+int acpi_dev_runtime_resume(struct device *dev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(dev);
 	int error;
@@ -900,10 +829,10 @@ int acpi_dev_resume(struct device *dev)
 		return 0;
 
 	error = acpi_dev_pm_full_power(adev);
-	acpi_device_wakeup_disable(adev);
+	acpi_device_wakeup(adev, ACPI_STATE_S0, false);
 	return error;
 }
-EXPORT_SYMBOL_GPL(acpi_dev_resume);
+EXPORT_SYMBOL_GPL(acpi_dev_runtime_resume);
 
 /**
  * acpi_subsys_runtime_suspend - Suspend device using ACPI.
@@ -915,7 +844,7 @@ EXPORT_SYMBOL_GPL(acpi_dev_resume);
 int acpi_subsys_runtime_suspend(struct device *dev)
 {
 	int ret = pm_generic_runtime_suspend(dev);
-	return ret ? ret : acpi_dev_suspend(dev, true);
+	return ret ? ret : acpi_dev_runtime_suspend(dev);
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_runtime_suspend);
 
@@ -928,33 +857,66 @@ EXPORT_SYMBOL_GPL(acpi_subsys_runtime_suspend);
  */
 int acpi_subsys_runtime_resume(struct device *dev)
 {
-	int ret = acpi_dev_resume(dev);
+	int ret = acpi_dev_runtime_resume(dev);
 	return ret ? ret : pm_generic_runtime_resume(dev);
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_runtime_resume);
 
 #ifdef CONFIG_PM_SLEEP
-static bool acpi_dev_needs_resume(struct device *dev, struct acpi_device *adev)
+/**
+ * acpi_dev_suspend_late - Put device into a low-power state using ACPI.
+ * @dev: Device to put into a low-power state.
+ *
+ * Put the given device into a low-power state during system transition to a
+ * sleep state using the standard ACPI mechanism.  Set up system wakeup if
+ * desired, choose the state to put the device into (this checks if system
+ * wakeup is expected to work too), and set the power state of the device.
+ */
+int acpi_dev_suspend_late(struct device *dev)
 {
-	u32 sys_target = acpi_target_system_state();
-	int ret, state;
+	struct acpi_device *adev = ACPI_COMPANION(dev);
+	u32 target_state;
+	bool wakeup;
+	int error;
 
-	if (!pm_runtime_suspended(dev) || !adev ||
-	    device_may_wakeup(dev) != !!adev->wakeup.prepare_count)
-		return true;
+	if (!adev)
+		return 0;
 
-	if (sys_target == ACPI_STATE_S0)
-		return false;
+	target_state = acpi_target_system_state();
+	wakeup = device_may_wakeup(dev) && acpi_device_can_wakeup(adev);
+	error = acpi_device_wakeup(adev, target_state, wakeup);
+	if (wakeup && error)
+		return error;
 
-	if (adev->power.flags.dsw_present)
-		return true;
+	error = acpi_dev_pm_low_power(dev, adev, target_state);
+	if (error)
+		acpi_device_wakeup(adev, ACPI_STATE_UNKNOWN, false);
 
-	ret = acpi_dev_pm_get_state(dev, adev, sys_target, NULL, &state);
-	if (ret)
-		return true;
-
-	return state != adev->power.state;
+	return error;
 }
+EXPORT_SYMBOL_GPL(acpi_dev_suspend_late);
+
+/**
+ * acpi_dev_resume_early - Put device into the full-power state using ACPI.
+ * @dev: Device to put into the full-power state.
+ *
+ * Put the given device into the full-power state using the standard ACPI
+ * mechanism during system transition to the working state.  Set the power
+ * state of the device to ACPI D0 and disable remote wakeup.
+ */
+int acpi_dev_resume_early(struct device *dev)
+{
+	struct acpi_device *adev = ACPI_COMPANION(dev);
+	int error;
+
+	if (!adev)
+		return 0;
+
+	error = acpi_dev_pm_full_power(adev);
+	acpi_device_wakeup(adev, ACPI_STATE_UNKNOWN, false);
+	return error;
+}
+EXPORT_SYMBOL_GPL(acpi_dev_resume_early);
 
 /**
  * acpi_subsys_prepare - Prepare device for system transition to a sleep state.
@@ -963,53 +925,39 @@ static bool acpi_dev_needs_resume(struct device *dev, struct acpi_device *adev)
 int acpi_subsys_prepare(struct device *dev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(dev);
+	u32 sys_target;
+	int ret, state;
 
-	if (dev->driver && dev->driver->pm && dev->driver->pm->prepare) {
-		int ret = dev->driver->pm->prepare(dev);
+	ret = pm_generic_prepare(dev);
+	if (ret < 0)
+		return ret;
 
-		if (ret < 0)
-			return ret;
+	if (!adev || !pm_runtime_suspended(dev)
+	    || device_may_wakeup(dev) != !!adev->wakeup.prepare_count)
+		return 0;
 
-		if (!ret && dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_PREPARE))
-			return 0;
-	}
+	sys_target = acpi_target_system_state();
+	if (sys_target == ACPI_STATE_S0)
+		return 1;
 
-	return !acpi_dev_needs_resume(dev, adev);
+	if (adev->power.flags.dsw_present)
+		return 0;
+
+	ret = acpi_dev_pm_get_state(dev, adev, sys_target, NULL, &state);
+	return !ret && state == adev->power.state;
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_prepare);
-
-/**
- * acpi_subsys_complete - Finalize device's resume during system resume.
- * @dev: Device to handle.
- */
-void acpi_subsys_complete(struct device *dev)
-{
-	pm_generic_complete(dev);
-	/*
-	 * If the device had been runtime-suspended before the system went into
-	 * the sleep state it is going out of and it has never been resumed till
-	 * now, resume it in case the firmware powered it up.
-	 */
-	if (dev->power.direct_complete && pm_resume_via_firmware())
-		pm_request_resume(dev);
-}
-EXPORT_SYMBOL_GPL(acpi_subsys_complete);
 
 /**
  * acpi_subsys_suspend - Run the device driver's suspend callback.
  * @dev: Device to handle.
  *
- * Follow PCI and resume devices from runtime suspend before running their
- * system suspend callbacks, unless the driver can cope with runtime-suspended
- * devices during system suspend and there are no ACPI-specific reasons for
- * resuming them.
+ * Follow PCI and resume devices suspended at run time before running their
+ * system suspend callbacks.
  */
 int acpi_subsys_suspend(struct device *dev)
 {
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND) ||
-	    acpi_dev_needs_resume(dev, ACPI_COMPANION(dev)))
-		pm_runtime_resume(dev);
-
+	pm_runtime_resume(dev);
 	return pm_generic_suspend(dev);
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_suspend);
@@ -1023,46 +971,10 @@ EXPORT_SYMBOL_GPL(acpi_subsys_suspend);
  */
 int acpi_subsys_suspend_late(struct device *dev)
 {
-	int ret;
-
-	if (dev_pm_smart_suspend_and_suspended(dev))
-		return 0;
-
-	ret = pm_generic_suspend_late(dev);
-	return ret ? ret : acpi_dev_suspend(dev, device_may_wakeup(dev));
+	int ret = pm_generic_suspend_late(dev);
+	return ret ? ret : acpi_dev_suspend_late(dev);
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_suspend_late);
-
-/**
- * acpi_subsys_suspend_noirq - Run the device driver's "noirq" suspend callback.
- * @dev: Device to suspend.
- */
-int acpi_subsys_suspend_noirq(struct device *dev)
-{
-	if (dev_pm_smart_suspend_and_suspended(dev))
-		return 0;
-
-	return pm_generic_suspend_noirq(dev);
-}
-EXPORT_SYMBOL_GPL(acpi_subsys_suspend_noirq);
-
-/**
- * acpi_subsys_resume_noirq - Run the device driver's "noirq" resume callback.
- * @dev: Device to handle.
- */
-int acpi_subsys_resume_noirq(struct device *dev)
-{
-	/*
-	 * Devices with DPM_FLAG_SMART_SUSPEND may be left in runtime suspend
-	 * during system suspend, so update their runtime PM status to "active"
-	 * as they will be put into D0 going forward.
-	 */
-	if (dev_pm_smart_suspend_and_suspended(dev))
-		pm_runtime_set_active(dev);
-
-	return pm_generic_resume_noirq(dev);
-}
-EXPORT_SYMBOL_GPL(acpi_subsys_resume_noirq);
 
 /**
  * acpi_subsys_resume_early - Resume device using ACPI.
@@ -1074,7 +986,7 @@ EXPORT_SYMBOL_GPL(acpi_subsys_resume_noirq);
  */
 int acpi_subsys_resume_early(struct device *dev)
 {
-	int ret = acpi_dev_resume(dev);
+	int ret = acpi_dev_resume_early(dev);
 	return ret ? ret : pm_generic_resume_early(dev);
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_resume_early);
@@ -1091,60 +1003,11 @@ int acpi_subsys_freeze(struct device *dev)
 	 * runtime-suspended devices should not be touched during freeze/thaw
 	 * transitions.
 	 */
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND))
-		pm_runtime_resume(dev);
-
+	pm_runtime_resume(dev);
 	return pm_generic_freeze(dev);
 }
 EXPORT_SYMBOL_GPL(acpi_subsys_freeze);
 
-/**
- * acpi_subsys_freeze_late - Run the device driver's "late" freeze callback.
- * @dev: Device to handle.
- */
-int acpi_subsys_freeze_late(struct device *dev)
-{
-
-	if (dev_pm_smart_suspend_and_suspended(dev))
-		return 0;
-
-	return pm_generic_freeze_late(dev);
-}
-EXPORT_SYMBOL_GPL(acpi_subsys_freeze_late);
-
-/**
- * acpi_subsys_freeze_noirq - Run the device driver's "noirq" freeze callback.
- * @dev: Device to handle.
- */
-int acpi_subsys_freeze_noirq(struct device *dev)
-{
-
-	if (dev_pm_smart_suspend_and_suspended(dev))
-		return 0;
-
-	return pm_generic_freeze_noirq(dev);
-}
-EXPORT_SYMBOL_GPL(acpi_subsys_freeze_noirq);
-
-/**
- * acpi_subsys_thaw_noirq - Run the device driver's "noirq" thaw callback.
- * @dev: Device to handle.
- */
-int acpi_subsys_thaw_noirq(struct device *dev)
-{
-	/*
-	 * If the device is in runtime suspend, the "thaw" code may not work
-	 * correctly with it, so skip the driver callback and make the PM core
-	 * skip all of the subsequent "thaw" callbacks for the device.
-	 */
-	if (dev_pm_smart_suspend_and_suspended(dev)) {
-		dev_pm_skip_next_resume_phases(dev);
-		return 0;
-	}
-
-	return pm_generic_thaw_noirq(dev);
-}
-EXPORT_SYMBOL_GPL(acpi_subsys_thaw_noirq);
 #endif /* CONFIG_PM_SLEEP */
 
 static struct dev_pm_domain acpi_general_pm_domain = {
@@ -1153,20 +1016,13 @@ static struct dev_pm_domain acpi_general_pm_domain = {
 		.runtime_resume = acpi_subsys_runtime_resume,
 #ifdef CONFIG_PM_SLEEP
 		.prepare = acpi_subsys_prepare,
-		.complete = acpi_subsys_complete,
+		.complete = pm_complete_with_resume_check,
 		.suspend = acpi_subsys_suspend,
 		.suspend_late = acpi_subsys_suspend_late,
-		.suspend_noirq = acpi_subsys_suspend_noirq,
-		.resume_noirq = acpi_subsys_resume_noirq,
 		.resume_early = acpi_subsys_resume_early,
 		.freeze = acpi_subsys_freeze,
-		.freeze_late = acpi_subsys_freeze_late,
-		.freeze_noirq = acpi_subsys_freeze_noirq,
-		.thaw_noirq = acpi_subsys_thaw_noirq,
 		.poweroff = acpi_subsys_suspend,
 		.poweroff_late = acpi_subsys_suspend_late,
-		.poweroff_noirq = acpi_subsys_suspend_noirq,
-		.restore_noirq = acpi_subsys_resume_noirq,
 		.restore_early = acpi_subsys_resume_early,
 #endif
 	},
@@ -1200,7 +1056,7 @@ static void acpi_dev_pm_detach(struct device *dev, bool power_off)
 			 */
 			dev_pm_qos_hide_latency_limit(dev);
 			dev_pm_qos_hide_flags(dev);
-			acpi_device_wakeup_disable(adev);
+			acpi_device_wakeup(adev, ACPI_STATE_S0, false);
 			acpi_dev_pm_low_power(dev, adev, ACPI_STATE_S0);
 		}
 	}
@@ -1244,7 +1100,7 @@ int acpi_dev_pm_attach(struct device *dev, bool power_on)
 	dev_pm_domain_set(dev, &acpi_general_pm_domain);
 	if (power_on) {
 		acpi_dev_pm_full_power(adev);
-		acpi_device_wakeup_disable(adev);
+		acpi_device_wakeup(adev, ACPI_STATE_S0, false);
 	}
 
 	dev->pm_domain->detach = acpi_dev_pm_detach;

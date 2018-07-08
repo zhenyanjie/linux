@@ -262,8 +262,7 @@ static int fscache_objlist_show(struct seq_file *m, void *v)
 			type = "DT";
 			break;
 		default:
-			snprintf(_type, sizeof(_type), "%02u",
-				 cookie->def->type);
+			sprintf(_type, "%02u", cookie->def->type);
 			type = _type;
 			break;
 		}

@@ -32,7 +32,6 @@
 
 #define smnCPM_CONTROL                                                                                  0x11180460
 #define smnPCIE_CNTL2                                                                                   0x11180070
-#define smnPCIE_CONFIG_CNTL                                                                             0x11180044
 
 u32 nbio_v6_1_get_rev_id(struct amdgpu_device *adev)
 {
@@ -68,7 +67,7 @@ void nbio_v6_1_mc_access_enable(struct amdgpu_device *adev, bool enable)
 
 void nbio_v6_1_hdp_flush(struct amdgpu_device *adev)
 {
-	WREG32_SOC15_NO_KIQ(NBIO, 0, mmBIF_BX_PF0_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+	WREG32_SOC15(NBIO, 0, mmBIF_BX_PF0_HDP_MEM_COHERENCY_FLUSH_CNTL, 0);
 }
 
 u32 nbio_v6_1_get_memsize(struct amdgpu_device *adev)
@@ -215,27 +214,31 @@ void nbio_v6_1_get_clockgating_state(struct amdgpu_device *adev, u32 *flags)
 		*flags |= AMD_CG_SUPPORT_BIF_LS;
 }
 
-const struct nbio_hdp_flush_reg nbio_v6_1_hdp_flush_reg = {
-	.hdp_flush_req_offset = SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF0_GPU_HDP_FLUSH_REQ),
-	.hdp_flush_done_offset = SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF0_GPU_HDP_FLUSH_DONE),
-	.ref_and_mask_cp0 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP0_MASK,
-	.ref_and_mask_cp1 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP1_MASK,
-	.ref_and_mask_cp2 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP2_MASK,
-	.ref_and_mask_cp3 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP3_MASK,
-	.ref_and_mask_cp4 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP4_MASK,
-	.ref_and_mask_cp5 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP5_MASK,
-	.ref_and_mask_cp6 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP6_MASK,
-	.ref_and_mask_cp7 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP7_MASK,
-	.ref_and_mask_cp8 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP8_MASK,
-	.ref_and_mask_cp9 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP9_MASK,
-	.ref_and_mask_sdma0 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__SDMA0_MASK,
-	.ref_and_mask_sdma1 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__SDMA1_MASK
-};
+struct nbio_hdp_flush_reg nbio_v6_1_hdp_flush_reg;
+struct nbio_pcie_index_data nbio_v6_1_pcie_index_data;
 
-const struct nbio_pcie_index_data nbio_v6_1_pcie_index_data = {
-	.index_offset = SOC15_REG_OFFSET(NBIO, 0, mmPCIE_INDEX),
-	.data_offset = SOC15_REG_OFFSET(NBIO, 0, mmPCIE_DATA),
-};
+int nbio_v6_1_init(struct amdgpu_device *adev)
+{
+	nbio_v6_1_hdp_flush_reg.hdp_flush_req_offset = SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF0_GPU_HDP_FLUSH_REQ);
+	nbio_v6_1_hdp_flush_reg.hdp_flush_done_offset = SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF0_GPU_HDP_FLUSH_DONE);
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp0 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP0_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp1 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP1_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp2 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP2_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp3 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP3_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp4 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP4_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp5 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP5_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp6 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP6_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp7 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP7_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp8 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP8_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_cp9 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__CP9_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_sdma0 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__SDMA0_MASK;
+	nbio_v6_1_hdp_flush_reg.ref_and_mask_sdma1 = BIF_BX_PF0_GPU_HDP_FLUSH_DONE__SDMA1_MASK;
+
+	nbio_v6_1_pcie_index_data.index_offset = SOC15_REG_OFFSET(NBIO, 0, mmPCIE_INDEX);
+	nbio_v6_1_pcie_index_data.data_offset = SOC15_REG_OFFSET(NBIO, 0, mmPCIE_DATA);
+
+	return 0;
+}
 
 void nbio_v6_1_detect_hw_virt(struct amdgpu_device *adev)
 {
@@ -252,16 +255,4 @@ void nbio_v6_1_detect_hw_virt(struct amdgpu_device *adev)
 		if (is_virtual_machine())	/* passthrough mode exclus sriov mod */
 			adev->virt.caps |= AMDGPU_PASSTHROUGH_MODE;
 	}
-}
-
-void nbio_v6_1_init_registers(struct amdgpu_device *adev)
-{
-	uint32_t def, data;
-
-	def = data = RREG32_PCIE(smnPCIE_CONFIG_CNTL);
-	data = REG_SET_FIELD(data, PCIE_CONFIG_CNTL, CI_SWUS_MAX_READ_REQUEST_SIZE_MODE, 1);
-	data = REG_SET_FIELD(data, PCIE_CONFIG_CNTL, CI_SWUS_MAX_READ_REQUEST_SIZE_PRIV, 1);
-
-	if (def != data)
-		WREG32_PCIE(smnPCIE_CONFIG_CNTL, data);
 }

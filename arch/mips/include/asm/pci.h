@@ -106,6 +106,8 @@ extern unsigned long PCIBIOS_MIN_MEM;
 
 #define PCIBIOS_MIN_CARDBUS_IO	0x4000
 
+extern void pcibios_set_master(struct pci_dev *dev);
+
 #define HAVE_PCI_MMAP
 #define ARCH_GENERIC_PCI_MMAP_RESOURCE
 #define HAVE_ARCH_PCI_RESOURCE_TO_USER
@@ -120,6 +122,8 @@ extern unsigned long PCIBIOS_MIN_MEM;
 #include <linux/scatterlist.h>
 #include <linux/string.h>
 #include <asm/io.h>
+
+struct pci_dev;
 
 /*
  * The PCI address space does equal the physical memory address space.

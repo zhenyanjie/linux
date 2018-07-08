@@ -12,7 +12,6 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drmP.h>
 
 #include "sun4i_drv.h"
@@ -29,7 +28,7 @@ static const struct drm_mode_config_funcs sun4i_de_mode_config_funcs = {
 	.output_poll_changed	= sun4i_de_output_poll_changed,
 	.atomic_check		= drm_atomic_helper_check,
 	.atomic_commit		= drm_atomic_helper_commit,
-	.fb_create		= drm_gem_fb_create,
+	.fb_create		= drm_fb_cma_create,
 };
 
 struct drm_fbdev_cma *sun4i_framebuffer_init(struct drm_device *drm)

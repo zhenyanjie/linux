@@ -1,5 +1,5 @@
 /*
- * Amlogic Meson GX eFuse Driver
+ * Amlogic eFuse Driver
  *
  * Copyright (c) 2016 Endless Computers, Inc.
  * Author: Carlo Caione <carlo@endlessm.com>
@@ -37,6 +37,7 @@ static int meson_efuse_read(void *context, unsigned int offset,
 
 static struct nvmem_config econfig = {
 	.name = "meson-efuse",
+	.owner = THIS_MODULE,
 	.stride = 1,
 	.word_size = 1,
 	.read_only = true,
@@ -88,5 +89,5 @@ static struct platform_driver meson_efuse_driver = {
 module_platform_driver(meson_efuse_driver);
 
 MODULE_AUTHOR("Carlo Caione <carlo@endlessm.com>");
-MODULE_DESCRIPTION("Amlogic Meson GX NVMEM driver");
+MODULE_DESCRIPTION("Amlogic Meson NVMEM driver");
 MODULE_LICENSE("GPL v2");

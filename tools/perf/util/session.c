@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <errno.h>
 #include <inttypes.h>
 #include <linux/kernel.h>
@@ -33,14 +32,14 @@ static int perf_session__deliver_event(struct perf_session *session,
 
 static int perf_session__open(struct perf_session *session)
 {
-	struct perf_data *data = session->data;
+	struct perf_data_file *file = session->file;
 
 	if (perf_session__read_header(session) < 0) {
 		pr_err("incompatible file format (rerun with -v to learn more)\n");
 		return -1;
 	}
 
-	if (perf_data__is_pipe(data))
+	if (perf_data_file__is_pipe(file))
 		return 0;
 
 	if (perf_header__has_feat(&session->header, HEADER_STAT))
@@ -121,7 +120,7 @@ static int ordered_events__deliver_event(struct ordered_events *oe,
 					   session->tool, event->file_offset);
 }
 
-struct perf_session *perf_session__new(struct perf_data *data,
+struct perf_session *perf_session__new(struct perf_data_file *file,
 				       bool repipe, struct perf_tool *tool)
 {
 	struct perf_session *session = zalloc(sizeof(*session));
@@ -135,13 +134,13 @@ struct perf_session *perf_session__new(struct perf_data *data,
 	machines__init(&session->machines);
 	ordered_events__init(&session->ordered_events, ordered_events__deliver_event);
 
-	if (data) {
-		if (perf_data__open(data))
+	if (file) {
+		if (perf_data_file__open(file))
 			goto out_delete;
 
-		session->data = data;
+		session->file = file;
 
-		if (perf_data__is_read(data)) {
+		if (perf_data_file__is_read(file)) {
 			if (perf_session__open(session) < 0)
 				goto out_close;
 
@@ -149,7 +148,7 @@ struct perf_session *perf_session__new(struct perf_data *data,
 			 * set session attributes that are present in perf.data
 			 * but not in pipe-mode.
 			 */
-			if (!data->is_pipe) {
+			if (!file->is_pipe) {
 				perf_session__set_id_hdr_size(session);
 				perf_session__set_comm_exec(session);
 			}
@@ -158,7 +157,7 @@ struct perf_session *perf_session__new(struct perf_data *data,
 		session->machines.host.env = &perf_env;
 	}
 
-	if (!data || perf_data__is_write(data)) {
+	if (!file || perf_data_file__is_write(file)) {
 		/*
 		 * In O_RDONLY mode this will be performed when reading the
 		 * kernel MMAP event, in perf_event__process_mmap().
@@ -171,7 +170,7 @@ struct perf_session *perf_session__new(struct perf_data *data,
 	 * In pipe-mode, evlist is empty until PERF_RECORD_HEADER_ATTR is
 	 * processed, so perf_evlist__sample_id_all is not meaningful here.
 	 */
-	if ((!data || !data->is_pipe) && tool && tool->ordering_requires_timestamps &&
+	if ((!file || !file->is_pipe) && tool && tool->ordering_requires_timestamps &&
 	    tool->ordered_events && !perf_evlist__sample_id_all(session->evlist)) {
 		dump_printf("WARNING: No sample_id_all support, falling back to unordered processing\n");
 		tool->ordered_events = false;
@@ -180,7 +179,7 @@ struct perf_session *perf_session__new(struct perf_data *data,
 	return session;
 
  out_close:
-	perf_data__close(data);
+	perf_data_file__close(file);
  out_delete:
 	perf_session__delete(session);
  out:
@@ -202,8 +201,8 @@ void perf_session__delete(struct perf_session *session)
 	perf_session__delete_threads(session);
 	perf_env__exit(&session->header.env);
 	machines__exit(&session->machines);
-	if (session->data)
-		perf_data__close(session->data);
+	if (session->file)
+		perf_data_file__close(session->file);
 	free(session);
 }
 
@@ -291,8 +290,8 @@ static s64 process_event_auxtrace_stub(struct perf_tool *tool __maybe_unused,
 				       __maybe_unused)
 {
 	dump_printf(": unhandled!\n");
-	if (perf_data__is_pipe(session->data))
-		skipn(perf_data__fd(session->data), event->auxtrace.size);
+	if (perf_data_file__is_pipe(session->file))
+		skipn(perf_data_file__fd(session->file), event->auxtrace.size);
 	return event->auxtrace.size;
 }
 
@@ -375,8 +374,6 @@ void perf_tool__fill_defaults(struct perf_tool *tool)
 		tool->mmap2 = process_event_stub;
 	if (tool->comm == NULL)
 		tool->comm = process_event_stub;
-	if (tool->namespaces == NULL)
-		tool->namespaces = process_event_stub;
 	if (tool->fork == NULL)
 		tool->fork = process_event_stub;
 	if (tool->exit == NULL)
@@ -431,8 +428,6 @@ void perf_tool__fill_defaults(struct perf_tool *tool)
 		tool->stat_round = process_stat_round_stub;
 	if (tool->time_conv == NULL)
 		tool->time_conv = process_event_op2_stub;
-	if (tool->feature == NULL)
-		tool->feature = process_event_op2_stub;
 }
 
 static void swap_sample_id_all(union perf_event *event, void *data)
@@ -1123,38 +1118,11 @@ static void dump_sample(struct perf_evsel *evsel, union perf_event *event,
 	if (sample_type & PERF_SAMPLE_DATA_SRC)
 		printf(" . data_src: 0x%"PRIx64"\n", sample->data_src);
 
-	if (sample_type & PERF_SAMPLE_PHYS_ADDR)
-		printf(" .. phys_addr: 0x%"PRIx64"\n", sample->phys_addr);
-
 	if (sample_type & PERF_SAMPLE_TRANSACTION)
 		printf("... transaction: %" PRIx64 "\n", sample->transaction);
 
 	if (sample_type & PERF_SAMPLE_READ)
 		sample_read__printf(sample, evsel->attr.read_format);
-}
-
-static void dump_read(struct perf_evsel *evsel, union perf_event *event)
-{
-	struct read_event *read_event = &event->read;
-	u64 read_format;
-
-	if (!dump_trace)
-		return;
-
-	printf(": %d %d %s %" PRIu64 "\n", event->read.pid, event->read.tid,
-	       evsel ? perf_evsel__name(evsel) : "FAIL",
-	       event->read.value);
-
-	read_format = evsel->attr.read_format;
-
-	if (read_format & PERF_FORMAT_TOTAL_TIME_ENABLED)
-		printf("... time enabled : %" PRIu64 "\n", read_event->time_enabled);
-
-	if (read_format & PERF_FORMAT_TOTAL_TIME_RUNNING)
-		printf("... time running : %" PRIu64 "\n", read_event->time_running);
-
-	if (read_format & PERF_FORMAT_ID)
-		printf("... id           : %" PRIu64 "\n", read_event->id);
 }
 
 static struct machine *machines__find_for_cpumode(struct machines *machines,
@@ -1301,7 +1269,6 @@ static int machines__deliver_event(struct machines *machines,
 			evlist->stats.total_lost_samples += event->lost_samples.lost;
 		return tool->lost_samples(tool, event, sample, machine);
 	case PERF_RECORD_READ:
-		dump_read(evsel, event);
 		return tool->read(tool, event, sample, evsel, machine);
 	case PERF_RECORD_THROTTLE:
 		return tool->throttle(tool, event, sample, machine);
@@ -1350,11 +1317,10 @@ static s64 perf_session__process_user_event(struct perf_session *session,
 {
 	struct ordered_events *oe = &session->ordered_events;
 	struct perf_tool *tool = session->tool;
-	struct perf_sample sample = { .time = 0, };
-	int fd = perf_data__fd(session->data);
+	int fd = perf_data_file__fd(session->file);
 	int err;
 
-	dump_event(session->evlist, event, file_offset, &sample);
+	dump_event(session->evlist, event, file_offset, NULL);
 
 	/* These events are processed right away */
 	switch (event->header.type) {
@@ -1405,8 +1371,6 @@ static s64 perf_session__process_user_event(struct perf_session *session,
 	case PERF_RECORD_TIME_CONV:
 		session->time_conv = event->time_conv;
 		return tool->time_conv(tool, event, session);
-	case PERF_RECORD_HEADER_FEATURE:
-		return tool->feature(tool, event, session);
 	default:
 		return -EINVAL;
 	}
@@ -1451,10 +1415,10 @@ int perf_session__peek_event(struct perf_session *session, off_t file_offset,
 		goto out_parse_sample;
 	}
 
-	if (perf_data__is_pipe(session->data))
+	if (perf_data_file__is_pipe(session->file))
 		return -1;
 
-	fd = perf_data__fd(session->data);
+	fd = perf_data_file__fd(session->file);
 	hdr_sz = sizeof(struct perf_event_header);
 
 	if (buf_sz < hdr_sz)
@@ -1689,7 +1653,7 @@ static int __perf_session__process_pipe_events(struct perf_session *session)
 {
 	struct ordered_events *oe = &session->ordered_events;
 	struct perf_tool *tool = session->tool;
-	int fd = perf_data__fd(session->data);
+	int fd = perf_data_file__fd(session->file);
 	union perf_event *event;
 	uint32_t size, cur_size = 0;
 	void *buf = NULL;
@@ -1830,7 +1794,7 @@ static int __perf_session__process_events(struct perf_session *session,
 {
 	struct ordered_events *oe = &session->ordered_events;
 	struct perf_tool *tool = session->tool;
-	int fd = perf_data__fd(session->data);
+	int fd = perf_data_file__fd(session->file);
 	u64 head, page_offset, file_offset, file_pos, size;
 	int err, mmap_prot, mmap_flags, map_idx = 0;
 	size_t	mmap_size;
@@ -1851,7 +1815,7 @@ static int __perf_session__process_events(struct perf_session *session,
 	if (data_offset + data_size < file_size)
 		file_size = data_offset + data_size;
 
-	ui_progress__init_size(&prog, file_size, "Processing events...");
+	ui_progress__init(&prog, file_size, "Processing events...");
 
 	mmap_size = MMAP_SIZE;
 	if (mmap_size > file_size) {
@@ -1947,13 +1911,13 @@ out_err:
 
 int perf_session__process_events(struct perf_session *session)
 {
-	u64 size = perf_data__size(session->data);
+	u64 size = perf_data_file__size(session->file);
 	int err;
 
 	if (perf_session__register_idle_thread(session) < 0)
 		return -ENOMEM;
 
-	if (!perf_data__is_pipe(session->data))
+	if (!perf_data_file__is_pipe(session->file))
 		err = __perf_session__process_events(session,
 						     session->header.data_offset,
 						     session->header.data_size, size);

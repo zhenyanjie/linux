@@ -63,11 +63,11 @@ static void sctp_assoc_free_asconf_queue(struct sctp_association *asoc);
 /* 1st Level Abstractions. */
 
 /* Initialize a new association from provided memory. */
-static struct sctp_association *sctp_association_init(
-					struct sctp_association *asoc,
-					const struct sctp_endpoint *ep,
-					const struct sock *sk,
-					enum sctp_scope scope, gfp_t gfp)
+static struct sctp_association *sctp_association_init(struct sctp_association *asoc,
+					  const struct sctp_endpoint *ep,
+					  const struct sock *sk,
+					  sctp_scope_t scope,
+					  gfp_t gfp)
 {
 	struct net *net = sock_net(sk);
 	struct sctp_sock *sp;
@@ -149,7 +149,8 @@ static struct sctp_association *sctp_association_init(
 
 	/* Initializes the timers */
 	for (i = SCTP_EVENT_TIMEOUT_NONE; i < SCTP_NUM_TIMEOUT_TYPES; ++i)
-		timer_setup(&asoc->timers[i], sctp_timer_events[i], 0);
+		setup_timer(&asoc->timers[i], sctp_timer_events[i],
+				(unsigned long)asoc);
 
 	/* Pull default initialization values from the sock options.
 	 * Note: This assumes that the values have already been
@@ -300,8 +301,9 @@ fail_init:
 
 /* Allocate and initialize a new association */
 struct sctp_association *sctp_association_new(const struct sctp_endpoint *ep,
-					      const struct sock *sk,
-					      enum sctp_scope scope, gfp_t gfp)
+					 const struct sock *sk,
+					 sctp_scope_t scope,
+					 gfp_t gfp)
 {
 	struct sctp_association *asoc;
 
@@ -795,7 +797,7 @@ void sctp_assoc_del_nonprimary_peers(struct sctp_association *asoc,
  */
 void sctp_assoc_control_transport(struct sctp_association *asoc,
 				  struct sctp_transport *transport,
-				  enum sctp_transport_cmd command,
+				  sctp_transport_cmd_t command,
 				  sctp_sn_error_t error)
 {
 	struct sctp_ulpevent *event;
@@ -1020,11 +1022,11 @@ static void sctp_assoc_bh_rcv(struct work_struct *work)
 		container_of(work, struct sctp_association,
 			     base.inqueue.immediate);
 	struct net *net = sock_net(asoc->base.sk);
-	union sctp_subtype subtype;
 	struct sctp_endpoint *ep;
 	struct sctp_chunk *chunk;
 	struct sctp_inq *inqueue;
 	int state;
+	sctp_subtype_t subtype;
 	int error = 0;
 
 	/* The association should be held so we should be safe. */
@@ -1562,7 +1564,7 @@ void sctp_assoc_rwnd_decrease(struct sctp_association *asoc, unsigned int len)
  * local endpoint and the remote peer.
  */
 int sctp_assoc_set_bind_addr_from_ep(struct sctp_association *asoc,
-				     enum sctp_scope scope, gfp_t gfp)
+				     sctp_scope_t scope, gfp_t gfp)
 {
 	int flags;
 

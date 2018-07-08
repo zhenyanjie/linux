@@ -561,8 +561,8 @@ static struct dma_chan *sh_mobile_i2c_request_dma_chan(struct device *dev,
 
 	chan = dma_request_slave_channel_reason(dev, chan_name);
 	if (IS_ERR(chan)) {
-		dev_dbg(dev, "request_channel failed for %s (%ld)\n", chan_name,
-			PTR_ERR(chan));
+		ret = PTR_ERR(chan);
+		dev_dbg(dev, "request_channel failed for %s (%d)\n", chan_name, ret);
 		return chan;
 	}
 
@@ -881,7 +881,7 @@ static int sh_mobile_i2c_probe(struct platform_device *dev)
 	struct sh_mobile_i2c_data *pd;
 	struct i2c_adapter *adap;
 	struct resource *res;
-	const struct sh_mobile_dt_config *config;
+	const struct of_device_id *match;
 	int ret;
 	u32 bus_speed;
 
@@ -913,8 +913,10 @@ static int sh_mobile_i2c_probe(struct platform_device *dev)
 	pd->bus_speed = ret ? STANDARD_MODE : bus_speed;
 	pd->clks_per_count = 1;
 
-	config = of_device_get_match_data(&dev->dev);
-	if (config) {
+	match = of_match_device(sh_mobile_i2c_dt_ids, &dev->dev);
+	if (match) {
+		const struct sh_mobile_dt_config *config = match->data;
+
 		pd->clks_per_count = config->clks_per_count;
 
 		if (config->setup)

@@ -348,7 +348,7 @@ static void pmcraid_init_cmdblk(struct pmcraid_cmd *cmd, int index)
 	cmd->sense_buffer = NULL;
 	cmd->sense_buffer_dma = 0;
 	cmd->dma_handle = 0;
-	timer_setup(&cmd->timer, NULL, 0);
+	init_timer(&cmd->timer);
 }
 
 /**
@@ -557,9 +557,8 @@ static void pmcraid_reset_type(struct pmcraid_instance *pinstance)
 
 static void pmcraid_ioa_reset(struct pmcraid_cmd *);
 
-static void pmcraid_bist_done(struct timer_list *t)
+static void pmcraid_bist_done(struct pmcraid_cmd *cmd)
 {
-	struct pmcraid_cmd *cmd = from_timer(cmd, t, timer);
 	struct pmcraid_instance *pinstance = cmd->drv_inst;
 	unsigned long lock_flags;
 	int rc;
@@ -573,6 +572,9 @@ static void pmcraid_bist_done(struct timer_list *t)
 		pmcraid_info("BIST not complete, waiting another 2 secs\n");
 		cmd->timer.expires = jiffies + cmd->time_left;
 		cmd->time_left = 0;
+		cmd->timer.data = (unsigned long)cmd;
+		cmd->timer.function =
+			(void (*)(unsigned long))pmcraid_bist_done;
 		add_timer(&cmd->timer);
 	} else {
 		cmd->time_left = 0;
@@ -603,8 +605,9 @@ static void pmcraid_start_bist(struct pmcraid_cmd *cmd)
 		      doorbells, intrs);
 
 	cmd->time_left = msecs_to_jiffies(PMCRAID_BIST_TIMEOUT);
+	cmd->timer.data = (unsigned long)cmd;
 	cmd->timer.expires = jiffies + msecs_to_jiffies(PMCRAID_BIST_TIMEOUT);
-	cmd->timer.function = pmcraid_bist_done;
+	cmd->timer.function = (void (*)(unsigned long))pmcraid_bist_done;
 	add_timer(&cmd->timer);
 }
 
@@ -614,9 +617,8 @@ static void pmcraid_start_bist(struct pmcraid_cmd *cmd)
  * Return value
  *  None
  */
-static void pmcraid_reset_alert_done(struct timer_list *t)
+static void pmcraid_reset_alert_done(struct pmcraid_cmd *cmd)
 {
-	struct pmcraid_cmd *cmd = from_timer(cmd, t, timer);
 	struct pmcraid_instance *pinstance = cmd->drv_inst;
 	u32 status = ioread32(pinstance->ioa_status);
 	unsigned long lock_flags;
@@ -635,8 +637,10 @@ static void pmcraid_reset_alert_done(struct timer_list *t)
 		pmcraid_info("critical op is not yet reset waiting again\n");
 		/* restart timer if some more time is available to wait */
 		cmd->time_left -= PMCRAID_CHECK_FOR_RESET_TIMEOUT;
+		cmd->timer.data = (unsigned long)cmd;
 		cmd->timer.expires = jiffies + PMCRAID_CHECK_FOR_RESET_TIMEOUT;
-		cmd->timer.function = pmcraid_reset_alert_done;
+		cmd->timer.function =
+			(void (*)(unsigned long))pmcraid_reset_alert_done;
 		add_timer(&cmd->timer);
 	}
 }
@@ -672,8 +676,10 @@ static void pmcraid_reset_alert(struct pmcraid_cmd *cmd)
 		 * bit to be reset.
 		 */
 		cmd->time_left = PMCRAID_RESET_TIMEOUT;
+		cmd->timer.data = (unsigned long)cmd;
 		cmd->timer.expires = jiffies + PMCRAID_CHECK_FOR_RESET_TIMEOUT;
-		cmd->timer.function = pmcraid_reset_alert_done;
+		cmd->timer.function =
+			(void (*)(unsigned long))pmcraid_reset_alert_done;
 		add_timer(&cmd->timer);
 
 		iowrite32(DOORBELL_IOA_RESET_ALERT,
@@ -698,9 +704,8 @@ static void pmcraid_reset_alert(struct pmcraid_cmd *cmd)
  * Return value:
  *   None
  */
-static void pmcraid_timeout_handler(struct timer_list *t)
+static void pmcraid_timeout_handler(struct pmcraid_cmd *cmd)
 {
-	struct pmcraid_cmd *cmd = from_timer(cmd, t, timer);
 	struct pmcraid_instance *pinstance = cmd->drv_inst;
 	unsigned long lock_flags;
 
@@ -914,7 +919,7 @@ static void pmcraid_send_cmd(
 	struct pmcraid_cmd *cmd,
 	void (*cmd_done) (struct pmcraid_cmd *),
 	unsigned long timeout,
-	void (*timeout_func) (struct timer_list *)
+	void (*timeout_func) (struct pmcraid_cmd *)
 )
 {
 	/* initialize done function */
@@ -922,8 +927,9 @@ static void pmcraid_send_cmd(
 
 	if (timeout_func) {
 		/* setup timeout handler */
+		cmd->timer.data = (unsigned long)cmd;
 		cmd->timer.expires = jiffies + timeout;
-		cmd->timer.function = timeout_func;
+		cmd->timer.function = (void (*)(unsigned long))timeout_func;
 		add_timer(&cmd->timer);
 	}
 
@@ -1589,7 +1595,12 @@ static void pmcraid_handle_config_change(struct pmcraid_instance *pinstance)
 	if (pinstance->ccn.hcam->notification_type ==
 	    NOTIFICATION_TYPE_ENTRY_CHANGED &&
 	    cfg_entry->resource_type == RES_TYPE_VSET) {
-		hidden_entry = (cfg_entry->unique_flags1 & 0x80) != 0;
+
+		if (fw_version <= PMCRAID_FW_VERSION_1)
+			hidden_entry = (cfg_entry->unique_flags1 & 0x80) != 0;
+		else
+			hidden_entry = (cfg_entry->unique_flags1 & 0x80) != 0;
+
 	} else if (!pmcraid_expose_resource(fw_version, cfg_entry)) {
 		goto out_notify_apps;
 	}
@@ -1949,9 +1960,10 @@ static void pmcraid_soft_reset(struct pmcraid_cmd *cmd)
 	 * would re-initiate a reset
 	 */
 	cmd->cmd_done = pmcraid_ioa_reset;
+	cmd->timer.data = (unsigned long)cmd;
 	cmd->timer.expires = jiffies +
 			     msecs_to_jiffies(PMCRAID_TRANSOP_TIMEOUT);
-	cmd->timer.function = pmcraid_timeout_handler;
+	cmd->timer.function = (void (*)(unsigned long))pmcraid_timeout_handler;
 
 	if (!timer_pending(&cmd->timer))
 		add_timer(&cmd->timer);
@@ -4643,13 +4655,13 @@ pmcraid_release_control_blocks(
 		return;
 
 	for (i = 0; i < max_index; i++) {
-		dma_pool_free(pinstance->control_pool,
+		pci_pool_free(pinstance->control_pool,
 			      pinstance->cmd_list[i]->ioa_cb,
 			      pinstance->cmd_list[i]->ioa_cb_bus_addr);
 		pinstance->cmd_list[i]->ioa_cb = NULL;
 		pinstance->cmd_list[i]->ioa_cb_bus_addr = 0;
 	}
-	dma_pool_destroy(pinstance->control_pool);
+	pci_pool_destroy(pinstance->control_pool);
 	pinstance->control_pool = NULL;
 }
 
@@ -4706,8 +4718,8 @@ static int pmcraid_allocate_control_blocks(struct pmcraid_instance *pinstance)
 		pinstance->host->unique_id);
 
 	pinstance->control_pool =
-		dma_pool_create(pinstance->ctl_pool_name,
-				&pinstance->pdev->dev,
+		pci_pool_create(pinstance->ctl_pool_name,
+				pinstance->pdev,
 				sizeof(struct pmcraid_control_block),
 				PMCRAID_IOARCB_ALIGNMENT, 0);
 
@@ -4716,7 +4728,7 @@ static int pmcraid_allocate_control_blocks(struct pmcraid_instance *pinstance)
 
 	for (i = 0; i < PMCRAID_MAX_CMD; i++) {
 		pinstance->cmd_list[i]->ioa_cb =
-			dma_pool_alloc(
+			pci_pool_alloc(
 				pinstance->control_pool,
 				GFP_KERNEL,
 				&(pinstance->cmd_list[i]->ioa_cb_bus_addr));

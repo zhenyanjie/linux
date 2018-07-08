@@ -125,13 +125,6 @@ int is_fadump_boot_memory_area(u64 addr, ulong size)
 	return (addr + size) > RMA_START && addr <= fw_dump.boot_memory_size;
 }
 
-int should_fadump_crash(void)
-{
-	if (!fw_dump.dump_registered || !fw_dump.fadumphdr_addr)
-		return 0;
-	return 1;
-}
-
 int is_fadump_active(void)
 {
 	return fw_dump.dump_active;
@@ -525,7 +518,7 @@ void crash_fadump(struct pt_regs *regs, const char *str)
 	struct fadump_crash_info_header *fdh = NULL;
 	int old_cpu, this_cpu;
 
-	if (!should_fadump_crash())
+	if (!fw_dump.dump_registered || !fw_dump.fadumphdr_addr)
 		return;
 
 	/*
@@ -1270,15 +1263,10 @@ static ssize_t fadump_release_memory_store(struct kobject *kobj,
 					struct kobj_attribute *attr,
 					const char *buf, size_t count)
 {
-	int input = -1;
-
 	if (!fw_dump.dump_active)
 		return -EPERM;
 
-	if (kstrtoint(buf, 0, &input))
-		return -EINVAL;
-
-	if (input == 1) {
+	if (buf[0] == '1') {
 		/*
 		 * Take away the '/proc/vmcore'. We are releasing the dump
 		 * memory, hence it will not be valid anymore.
@@ -1312,25 +1300,21 @@ static ssize_t fadump_register_store(struct kobject *kobj,
 					const char *buf, size_t count)
 {
 	int ret = 0;
-	int input = -1;
 
 	if (!fw_dump.fadump_enabled || fdm_active)
 		return -EPERM;
 
-	if (kstrtoint(buf, 0, &input))
-		return -EINVAL;
-
 	mutex_lock(&fadump_mutex);
 
-	switch (input) {
-	case 0:
+	switch (buf[0]) {
+	case '0':
 		if (fw_dump.dump_registered == 0) {
 			goto unlock_out;
 		}
 		/* Un-register Firmware-assisted dump */
 		fadump_unregister_dump(&fdm);
 		break;
-	case 1:
+	case '1':
 		if (fw_dump.dump_registered == 1) {
 			ret = -EEXIST;
 			goto unlock_out;

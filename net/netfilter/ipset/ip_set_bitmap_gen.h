@@ -37,11 +37,11 @@
 #define get_ext(set, map, id)	((map)->extensions + ((set)->dsize * (id)))
 
 static void
-mtype_gc_init(struct ip_set *set, void (*gc)(struct timer_list *t))
+mtype_gc_init(struct ip_set *set, void (*gc)(unsigned long ul_set))
 {
 	struct mtype *map = set->data;
 
-	timer_setup(&map->gc, gc, 0);
+	setup_timer(&map->gc, gc, (unsigned long)set);
 	mod_timer(&map->gc, jiffies + IPSET_GC_PERIOD(set->timeout) * HZ);
 }
 
@@ -272,10 +272,10 @@ out:
 }
 
 static void
-mtype_gc(struct timer_list *t)
+mtype_gc(unsigned long ul_set)
 {
-	struct mtype *map = from_timer(map, t, gc);
-	struct ip_set *set = map->set;
+	struct ip_set *set = (struct ip_set *)ul_set;
+	struct mtype *map = set->data;
 	void *x;
 	u32 id;
 

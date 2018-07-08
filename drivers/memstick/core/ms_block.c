@@ -1492,9 +1492,9 @@ static int msb_ftl_scan(struct msb_data *msb)
 	return 0;
 }
 
-static void msb_cache_flush_timer(struct timer_list *t)
+static void msb_cache_flush_timer(unsigned long data)
 {
-	struct msb_data *msb = from_timer(msb, t, cache_flush_timer);
+	struct msb_data *msb = (struct msb_data *)data;
 	msb->need_flush_cache = true;
 	queue_work(msb->io_queue, &msb->io_work);
 }
@@ -1514,7 +1514,8 @@ static void msb_cache_discard(struct msb_data *msb)
 
 static int msb_cache_init(struct msb_data *msb)
 {
-	timer_setup(&msb->cache_flush_timer, msb_cache_flush_timer, 0);
+	setup_timer(&msb->cache_flush_timer, msb_cache_flush_timer,
+		(unsigned long)msb);
 
 	if (!msb->cache)
 		msb->cache = kzalloc(msb->block_size, GFP_KERNEL);

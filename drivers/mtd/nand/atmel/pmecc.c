@@ -47,7 +47,7 @@
 #include <linux/genalloc.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
-#include <linux/mtd/rawnand.h>
+#include <linux/mtd/nand.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
@@ -426,7 +426,7 @@ static int get_strength(struct atmel_pmecc_user *user)
 
 static int get_sectorsize(struct atmel_pmecc_user *user)
 {
-	return user->cache.cfg & PMECC_CFG_SECTOR1024 ? 1024 : 512;
+	return user->cache.cfg & PMECC_LOOKUP_TABLE_SIZE_1024 ? 1024 : 512;
 }
 
 static void atmel_pmecc_gen_syndrome(struct atmel_pmecc_user *user, int sector)
@@ -765,13 +765,6 @@ void atmel_pmecc_get_generated_eccbytes(struct atmel_pmecc_user *user,
 }
 EXPORT_SYMBOL_GPL(atmel_pmecc_get_generated_eccbytes);
 
-void atmel_pmecc_reset(struct atmel_pmecc *pmecc)
-{
-	writel(PMECC_CTRL_RST, pmecc->regs.base + ATMEL_PMECC_CTRL);
-	writel(PMECC_CTRL_DISABLE, pmecc->regs.base + ATMEL_PMECC_CTRL);
-}
-EXPORT_SYMBOL_GPL(atmel_pmecc_reset);
-
 int atmel_pmecc_enable(struct atmel_pmecc_user *user, int op)
 {
 	struct atmel_pmecc *pmecc = user->pmecc;
@@ -804,7 +797,10 @@ EXPORT_SYMBOL_GPL(atmel_pmecc_enable);
 
 void atmel_pmecc_disable(struct atmel_pmecc_user *user)
 {
-	atmel_pmecc_reset(user->pmecc);
+	struct atmel_pmecc *pmecc = user->pmecc;
+
+	writel(PMECC_CTRL_RST, pmecc->regs.base + ATMEL_PMECC_CTRL);
+	writel(PMECC_CTRL_DISABLE, pmecc->regs.base + ATMEL_PMECC_CTRL);
 	mutex_unlock(&user->pmecc->lock);
 }
 EXPORT_SYMBOL_GPL(atmel_pmecc_disable);
@@ -859,7 +855,10 @@ static struct atmel_pmecc *atmel_pmecc_create(struct platform_device *pdev,
 
 	/* Disable all interrupts before registering the PMECC handler. */
 	writel(0xffffffff, pmecc->regs.base + ATMEL_PMECC_IDR);
-	atmel_pmecc_reset(pmecc);
+
+	/* Reset the ECC engine */
+	writel(PMECC_CTRL_RST, pmecc->regs.base + ATMEL_PMECC_CTRL);
+	writel(PMECC_CTRL_DISABLE, pmecc->regs.base + ATMEL_PMECC_CTRL);
 
 	return pmecc;
 }

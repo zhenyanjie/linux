@@ -1867,7 +1867,6 @@ static int ipx_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		rc = -EPERM;
 		if (!capable(CAP_NET_ADMIN))
 			break;
-		/* fall through */
 	case SIOCGIFADDR:
 		rc = ipxitf_ioctl(cmd, argp);
 		break;

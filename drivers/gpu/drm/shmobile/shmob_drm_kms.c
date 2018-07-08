@@ -16,7 +16,6 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
 
 #include <video/sh_mobile_meram.h>
 
@@ -132,7 +131,7 @@ shmob_drm_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 		}
 	}
 
-	return drm_gem_fb_create(dev, file_priv, mode_cmd);
+	return drm_fb_cma_create(dev, file_priv, mode_cmd);
 }
 
 static const struct drm_mode_config_funcs shmob_drm_mode_config_funcs = {

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef TARGET_CORE_INTERNAL_H
 #define TARGET_CORE_INTERNAL_H
 
@@ -89,7 +88,6 @@ int	target_for_each_device(int (*fn)(struct se_device *dev, void *data),
 			       void *data);
 
 /* target_core_configfs.c */
-extern struct configfs_item_operations target_core_dev_item_ops;
 void	target_setup_backend_cits(struct target_backend *);
 
 /* target_core_fabric_configfs.c */
