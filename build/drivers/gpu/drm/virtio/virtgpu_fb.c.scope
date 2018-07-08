@@ -1,0 +1,15 @@
+M VIRTIO_GPU_FBCON_POLL_PERIOD 30 -1 30
+R virtio_gpu_fbdev 32 -1 37
+F virtio_gpu_dirty_update 39 42 117
+F virtio_gpu_surface_dirty 119 122 158
+F virtio_gpu_fb_dirty_work 160 161 169
+F virtio_gpu_3d_fillrect 171 173 179
+F virtio_gpu_3d_copyarea 181 183 189
+F virtio_gpu_3d_imageblit 191 193 199
+V virtio_gpufb_ops 201 201 213
+F virtio_gpu_vmap_fb 215 217 219
+F virtio_gpufb_create 221 223 358
+F virtio_gpu_fbdev_destroy 360 362 374
+V virtio_gpu_fb_helper_funcs 375 375 377
+F virtio_gpu_fbdev_init 379 380 406
+F virtio_gpu_fbdev_fini 408 409 416

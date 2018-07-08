@@ -32,10 +32,8 @@
 
 #include "sdhci.h"
 #include "sdhci-pci.h"
-#include "sdhci-pci-o2micro.h"
 
 static int sdhci_pci_enable_dma(struct sdhci_host *host);
-static void sdhci_pci_set_bus_width(struct sdhci_host *host, int width);
 static void sdhci_pci_hw_reset(struct sdhci_host *host);
 
 #ifdef CONFIG_PM_SLEEP
@@ -578,7 +576,7 @@ static const struct sdhci_ops sdhci_intel_byt_ops = {
 	.set_clock		= sdhci_set_clock,
 	.set_power		= sdhci_intel_set_power,
 	.enable_dma		= sdhci_pci_enable_dma,
-	.set_bus_width		= sdhci_pci_set_bus_width,
+	.set_bus_width		= sdhci_set_bus_width,
 	.reset			= sdhci_reset,
 	.set_uhs_signaling	= sdhci_set_uhs_signaling,
 	.hw_reset		= sdhci_pci_hw_reset,
@@ -595,9 +593,36 @@ static void byt_read_dsm(struct sdhci_pci_slot *slot)
 	slot->chip->rpm_retune = intel_host->d3_retune;
 }
 
+static int intel_execute_tuning(struct mmc_host *mmc, u32 opcode)
+{
+	int err = sdhci_execute_tuning(mmc, opcode);
+	struct sdhci_host *host = mmc_priv(mmc);
+
+	if (err)
+		return err;
+
+	/*
+	 * Tuning can leave the IP in an active state (Buffer Read Enable bit
+	 * set) which prevents the entry to low power states (i.e. S0i3). Data
+	 * reset will clear it.
+	 */
+	sdhci_reset(host, SDHCI_RESET_DATA);
+
+	return 0;
+}
+
+static void byt_probe_slot(struct sdhci_pci_slot *slot)
+{
+	struct mmc_host_ops *ops = &slot->host->mmc_host_ops;
+
+	byt_read_dsm(slot);
+
+	ops->execute_tuning = intel_execute_tuning;
+}
+
 static int byt_emmc_probe_slot(struct sdhci_pci_slot *slot)
 {
-	byt_read_dsm(slot);
+	byt_probe_slot(slot);
 	slot->host->mmc->caps |= MMC_CAP_8_BIT_DATA | MMC_CAP_NONREMOVABLE |
 				 MMC_CAP_HW_RESET | MMC_CAP_1_8V_DDR |
 				 MMC_CAP_CMD_DURING_TFR |
@@ -652,7 +677,7 @@ static int ni_byt_sdio_probe_slot(struct sdhci_pci_slot *slot)
 {
 	int err;
 
-	byt_read_dsm(slot);
+	byt_probe_slot(slot);
 
 	err = ni_set_max_freq(slot);
 	if (err)
@@ -665,7 +690,7 @@ static int ni_byt_sdio_probe_slot(struct sdhci_pci_slot *slot)
 
 static int byt_sdio_probe_slot(struct sdhci_pci_slot *slot)
 {
-	byt_read_dsm(slot);
+	byt_probe_slot(slot);
 	slot->host->mmc->caps |= MMC_CAP_POWER_OFF_CARD | MMC_CAP_NONREMOVABLE |
 				 MMC_CAP_WAIT_WHILE_BUSY;
 	return 0;
@@ -673,7 +698,7 @@ static int byt_sdio_probe_slot(struct sdhci_pci_slot *slot)
 
 static int byt_sd_probe_slot(struct sdhci_pci_slot *slot)
 {
-	byt_read_dsm(slot);
+	byt_probe_slot(slot);
 	slot->host->mmc->caps |= MMC_CAP_WAIT_WHILE_BUSY |
 				 MMC_CAP_AGGRESSIVE_PM | MMC_CAP_CD_WAKE;
 	slot->cd_idx = 0;
@@ -747,6 +772,24 @@ static const struct sdhci_pci_fixes sdhci_intel_byt_sd = {
 #define INTEL_MRFLD_SD		2
 #define INTEL_MRFLD_SDIO	3
 
+#ifdef CONFIG_ACPI
+static void intel_mrfld_mmc_fix_up_power_slot(struct sdhci_pci_slot *slot)
+{
+	struct acpi_device *device, *child;
+
+	device = ACPI_COMPANION(&slot->chip->pdev->dev);
+	if (!device)
+		return;
+
+	acpi_device_fix_up_power(device);
+	list_for_each_entry(child, &device->children, node)
+		if (child->status.present && child->status.enabled)
+			acpi_device_fix_up_power(child);
+}
+#else
+static inline void intel_mrfld_mmc_fix_up_power_slot(struct sdhci_pci_slot *slot) {}
+#endif
+
 static int intel_mrfld_mmc_probe_slot(struct sdhci_pci_slot *slot)
 {
 	unsigned int func = PCI_FUNC(slot->chip->pdev->devfn);
@@ -762,12 +805,16 @@ static int intel_mrfld_mmc_probe_slot(struct sdhci_pci_slot *slot)
 		slot->host->quirks2 |= SDHCI_QUIRK2_NO_1_8_V;
 		break;
 	case INTEL_MRFLD_SDIO:
+		/* Advertise 2.0v for compatibility with the SDIO card's OCR */
+		slot->host->ocr_mask = MMC_VDD_20_21 | MMC_VDD_165_195;
 		slot->host->mmc->caps |= MMC_CAP_NONREMOVABLE |
 					 MMC_CAP_POWER_OFF_CARD;
 		break;
 	default:
 		return -ENODEV;
 	}
+
+	intel_mrfld_mmc_fix_up_power_slot(slot);
 	return 0;
 }
 
@@ -778,15 +825,6 @@ static const struct sdhci_pci_fixes sdhci_intel_mrfld_mmc = {
 	.allow_runtime_pm = true,
 	.probe_slot	= intel_mrfld_mmc_probe_slot,
 };
-
-/* O2Micro extra registers */
-#define O2_SD_LOCK_WP		0xD3
-#define O2_SD_MULTI_VCC3V	0xEE
-#define O2_SD_CLKREQ		0xEC
-#define O2_SD_CAPS		0xE0
-#define O2_SD_ADMA1		0xE2
-#define O2_SD_ADMA2		0xE7
-#define O2_SD_INF_MOD		0xF1
 
 static int jmicron_pmos(struct sdhci_pci_chip *chip, int on)
 {
@@ -1214,7 +1252,7 @@ static int amd_probe(struct sdhci_pci_chip *chip)
 static const struct sdhci_ops amd_sdhci_pci_ops = {
 	.set_clock			= sdhci_set_clock,
 	.enable_dma			= sdhci_pci_enable_dma,
-	.set_bus_width			= sdhci_pci_set_bus_width,
+	.set_bus_width			= sdhci_set_bus_width,
 	.reset				= sdhci_reset,
 	.set_uhs_signaling		= sdhci_set_uhs_signaling,
 	.platform_execute_tuning	= amd_execute_tuning,
@@ -1271,6 +1309,7 @@ static const struct pci_device_id pci_ids[] = {
 	SDHCI_PCI_DEVICE(INTEL, SPT_SDIO,  intel_byt_sdio),
 	SDHCI_PCI_DEVICE(INTEL, SPT_SD,    intel_byt_sd),
 	SDHCI_PCI_DEVICE(INTEL, DNV_EMMC,  intel_byt_emmc),
+	SDHCI_PCI_DEVICE(INTEL, CDF_EMMC,  intel_glk_emmc),
 	SDHCI_PCI_DEVICE(INTEL, BXT_EMMC,  intel_byt_emmc),
 	SDHCI_PCI_DEVICE(INTEL, BXT_SDIO,  intel_byt_sdio),
 	SDHCI_PCI_DEVICE(INTEL, BXT_SD,    intel_byt_sd),
@@ -1330,29 +1369,6 @@ static int sdhci_pci_enable_dma(struct sdhci_host *host)
 	return 0;
 }
 
-static void sdhci_pci_set_bus_width(struct sdhci_host *host, int width)
-{
-	u8 ctrl;
-
-	ctrl = sdhci_readb(host, SDHCI_HOST_CONTROL);
-
-	switch (width) {
-	case MMC_BUS_WIDTH_8:
-		ctrl |= SDHCI_CTRL_8BITBUS;
-		ctrl &= ~SDHCI_CTRL_4BITBUS;
-		break;
-	case MMC_BUS_WIDTH_4:
-		ctrl |= SDHCI_CTRL_4BITBUS;
-		ctrl &= ~SDHCI_CTRL_8BITBUS;
-		break;
-	default:
-		ctrl &= ~(SDHCI_CTRL_8BITBUS | SDHCI_CTRL_4BITBUS);
-		break;
-	}
-
-	sdhci_writeb(host, ctrl, SDHCI_HOST_CONTROL);
-}
-
 static void sdhci_pci_gpio_hw_reset(struct sdhci_host *host)
 {
 	struct sdhci_pci_slot *slot = sdhci_priv(host);
@@ -1379,7 +1395,7 @@ static void sdhci_pci_hw_reset(struct sdhci_host *host)
 static const struct sdhci_ops sdhci_pci_ops = {
 	.set_clock	= sdhci_set_clock,
 	.enable_dma	= sdhci_pci_enable_dma,
-	.set_bus_width	= sdhci_pci_set_bus_width,
+	.set_bus_width	= sdhci_set_bus_width,
 	.reset		= sdhci_reset,
 	.set_uhs_signaling = sdhci_set_uhs_signaling,
 	.hw_reset		= sdhci_pci_hw_reset,

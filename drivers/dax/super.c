@@ -46,6 +46,8 @@ void dax_read_unlock(int id)
 EXPORT_SYMBOL_GPL(dax_read_unlock);
 
 #ifdef CONFIG_BLOCK
+#include <linux/blkdev.h>
+
 int bdev_dax_pgoff(struct block_device *bdev, sector_t sector, size_t size,
 		pgoff_t *pgoff)
 {
@@ -58,6 +60,16 @@ int bdev_dax_pgoff(struct block_device *bdev, sector_t sector, size_t size,
 	return 0;
 }
 EXPORT_SYMBOL(bdev_dax_pgoff);
+
+#if IS_ENABLED(CONFIG_FS_DAX)
+struct dax_device *fs_dax_get_by_bdev(struct block_device *bdev)
+{
+	if (!blk_queue_dax(bdev->bd_queue))
+		return NULL;
+	return fs_dax_get_by_host(bdev->bd_disk->disk_name);
+}
+EXPORT_SYMBOL_GPL(fs_dax_get_by_bdev);
+#endif
 
 /**
  * __bdev_dax_supported() - Check if the device supports dax for filesystem
@@ -80,21 +92,21 @@ int __bdev_dax_supported(struct super_block *sb, int blocksize)
 	long len;
 
 	if (blocksize != PAGE_SIZE) {
-		pr_err("VFS (%s): error: unsupported blocksize for dax\n",
+		pr_debug("VFS (%s): error: unsupported blocksize for dax\n",
 				sb->s_id);
 		return -EINVAL;
 	}
 
 	err = bdev_dax_pgoff(bdev, 0, PAGE_SIZE, &pgoff);
 	if (err) {
-		pr_err("VFS (%s): error: unaligned partition for dax\n",
+		pr_debug("VFS (%s): error: unaligned partition for dax\n",
 				sb->s_id);
 		return err;
 	}
 
 	dax_dev = dax_get_by_host(bdev->bd_disk->disk_name);
 	if (!dax_dev) {
-		pr_err("VFS (%s): error: device does not support dax\n",
+		pr_debug("VFS (%s): error: device does not support dax\n",
 				sb->s_id);
 		return -EOPNOTSUPP;
 	}
@@ -106,7 +118,7 @@ int __bdev_dax_supported(struct super_block *sb, int blocksize)
 	put_dax(dax_dev);
 
 	if (len < 1) {
-		pr_err("VFS (%s): error: dax access failed (%ld)",
+		pr_debug("VFS (%s): error: dax access failed (%ld)\n",
 				sb->s_id, len);
 		return len < 0 ? len : -EIO;
 	}
@@ -261,9 +273,6 @@ EXPORT_SYMBOL_GPL(dax_copy_from_iter);
 void arch_wb_cache_pmem(void *addr, size_t size);
 void dax_flush(struct dax_device *dax_dev, void *addr, size_t size)
 {
-	if (unlikely(!dax_alive(dax_dev)))
-		return;
-
 	if (unlikely(!test_bit(DAXDEV_WRITE_CACHE, &dax_dev->flags)))
 		return;
 
@@ -332,6 +341,9 @@ static struct inode *dax_alloc_inode(struct super_block *sb)
 	struct inode *inode;
 
 	dax_dev = kmem_cache_alloc(dax_cache, GFP_KERNEL);
+	if (!dax_dev)
+		return NULL;
+
 	inode = &dax_dev->inode;
 	inode->i_rdev = 0;
 	return inode;

@@ -124,8 +124,6 @@ struct hv_ring_buffer_info {
 	spinlock_t ring_lock;
 
 	u32 ring_datasize;		/* < ring_size */
-	u32 ring_data_startoffset;
-	u32 priv_write_index;
 	u32 priv_read_index;
 };
 
@@ -663,18 +661,6 @@ union hv_connection_id {
 	} u;
 };
 
-/* Definition of the hv_signal_event hypercall input structure. */
-struct hv_input_signal_event {
-	union hv_connection_id connectionid;
-	u16 flag_number;
-	u16 rsvdz;
-};
-
-struct hv_input_signal_event_buffer {
-	u64 align8;
-	struct hv_input_signal_event event;
-};
-
 enum hv_numa_policy {
 	HV_BALANCED = 0,
 	HV_LOCALIZED,
@@ -722,6 +708,7 @@ struct vmbus_channel {
 	u8 monitor_bit;
 
 	bool rescind; /* got rescind msg */
+	struct completion rescind_event;
 
 	u32 ringbuffer_gpadlhandle;
 
@@ -732,6 +719,10 @@ struct vmbus_channel {
 	struct hv_ring_buffer_info inbound;	/* receive from parent */
 
 	struct vmbus_close_msg close_msg;
+
+	/* Statistics */
+	u64	interrupts;	/* Host to Guest interrupts */
+	u64	sig_events;	/* Guest to Host events */
 
 	/* Channel callback's invoked in softirq context */
 	struct tasklet_struct callback_event;
@@ -756,8 +747,7 @@ struct vmbus_channel {
 	} callback_mode;
 
 	bool is_dedicated_interrupt;
-	struct hv_input_signal_event_buffer sig_buf;
-	struct hv_input_signal_event *sig_event;
+	u64 sig_event;
 
 	/*
 	 * Starting with win8, this field will be used to specify
@@ -842,6 +832,11 @@ struct vmbus_channel {
 	 * gone through grace period.
 	 */
 	struct rcu_head rcu;
+
+	/*
+	 * For sysfs per-channel properties.
+	 */
+	struct kobject			kobj;
 
 	/*
 	 * For performance critical channels (storage, networking
@@ -1018,33 +1013,12 @@ extern int vmbus_sendpacket(struct vmbus_channel *channel,
 				  enum vmbus_packet_type type,
 				  u32 flags);
 
-extern int vmbus_sendpacket_ctl(struct vmbus_channel *channel,
-				  void *buffer,
-				  u32 bufferLen,
-				  u64 requestid,
-				  enum vmbus_packet_type type,
-				  u32 flags);
-
 extern int vmbus_sendpacket_pagebuffer(struct vmbus_channel *channel,
 					    struct hv_page_buffer pagebuffers[],
 					    u32 pagecount,
 					    void *buffer,
 					    u32 bufferlen,
 					    u64 requestid);
-
-extern int vmbus_sendpacket_pagebuffer_ctl(struct vmbus_channel *channel,
-					   struct hv_page_buffer pagebuffers[],
-					   u32 pagecount,
-					   void *buffer,
-					   u32 bufferlen,
-					   u64 requestid,
-					   u32 flags);
-
-extern int vmbus_sendpacket_multipagebuffer(struct vmbus_channel *channel,
-					struct hv_multipage_buffer *mpb,
-					void *buffer,
-					u32 bufferlen,
-					u64 requestid);
 
 extern int vmbus_sendpacket_mpb_desc(struct vmbus_channel *channel,
 				     struct vmbus_packet_mpb_array *mpb,
@@ -1125,6 +1099,7 @@ struct hv_device {
 	struct device device;
 
 	struct vmbus_channel *channel;
+	struct kset	     *channels_kset;
 };
 
 
@@ -1174,8 +1149,6 @@ int vmbus_allocate_mmio(struct resource **new, struct hv_device *device_obj,
 			resource_size_t size, resource_size_t align,
 			bool fb_overlap_ok);
 void vmbus_free_mmio(resource_size_t start, resource_size_t size);
-int vmbus_cpu_number_to_vp_number(int cpu_number);
-u64 hv_do_hypercall(u64 control, void *input, void *output);
 
 /*
  * GUID definitions of various offer types - services offered to the guest.

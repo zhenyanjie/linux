@@ -216,7 +216,7 @@ lpfc_els_abort(struct lpfc_hba *phba, struct lpfc_nodelist *ndlp)
 	pring = lpfc_phba_elsring(phba);
 
 	/* In case of error recovery path, we might have a NULL pring here */
-	if (!pring)
+	if (unlikely(!pring))
 		return;
 
 	/* Abort outstanding I/O on NPort <nlp_DID> */
@@ -389,6 +389,11 @@ lpfc_rcv_plogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		lpfc_nlp_set_state(vport, ndlp, NLP_STE_NPR_NODE);
 		break;
 	}
+
+	ndlp->nlp_type &= ~(NLP_FCP_TARGET | NLP_FCP_INITIATOR);
+	ndlp->nlp_type &= ~(NLP_NVME_TARGET | NLP_NVME_INITIATOR);
+	ndlp->nlp_fcp_info &= ~NLP_FCP_2_DEVICE;
+	ndlp->nlp_flag &= ~NLP_FIRSTBURST;
 
 	/* Check for Nport to NPort pt2pt protocol */
 	if ((vport->fc_flag & FC_PT2PT) &&
@@ -742,9 +747,6 @@ lpfc_rcv_prli(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 	lp = (uint32_t *) pcmd->virt;
 	npr = (PRLI *) ((uint8_t *) lp + sizeof (uint32_t));
 
-	ndlp->nlp_type &= ~(NLP_FCP_TARGET | NLP_FCP_INITIATOR);
-	ndlp->nlp_fcp_info &= ~NLP_FCP_2_DEVICE;
-	ndlp->nlp_flag &= ~NLP_FIRSTBURST;
 	if ((npr->prliType == PRLI_FCP_TYPE) ||
 	    (npr->prliType == PRLI_NVME_TYPE)) {
 		if (npr->initiatorFunc) {
@@ -769,8 +771,12 @@ lpfc_rcv_prli(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		 * type.  Target mode does not issue gft_id so doesn't get
 		 * the fc4 type set until now.
 		 */
-		if ((phba->nvmet_support) && (npr->prliType == PRLI_NVME_TYPE))
+		if (phba->nvmet_support && (npr->prliType == PRLI_NVME_TYPE)) {
 			ndlp->nlp_fc4_type |= NLP_FC4_NVME;
+			lpfc_nlp_set_state(vport, ndlp, NLP_STE_UNMAPPED_NODE);
+		}
+		if (npr->prliType == PRLI_FCP_TYPE)
+			ndlp->nlp_fc4_type |= NLP_FC4_FCP;
 	}
 	if (rport) {
 		/* We need to update the rport role values */
@@ -1552,7 +1558,6 @@ lpfc_rcv_prli_reglogin_issue(struct lpfc_vport *vport,
 		if (ndlp->nlp_flag & NLP_RPI_REGISTERED) {
 			lpfc_rcv_prli(vport, ndlp, cmdiocb);
 			lpfc_els_rsp_prli_acc(vport, cmdiocb, ndlp);
-			lpfc_nlp_set_state(vport, ndlp, NLP_STE_UNMAPPED_NODE);
 		} else {
 			/* RPI registration has not completed. Reject the PRLI
 			 * to prevent an illegal state transition when the
@@ -1564,10 +1569,11 @@ lpfc_rcv_prli_reglogin_issue(struct lpfc_vport *vport,
 					 ndlp->nlp_rpi, ndlp->nlp_state,
 					 ndlp->nlp_flag);
 			memset(&stat, 0, sizeof(struct ls_rjt));
-			stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
-			stat.un.b.lsRjtRsnCodeExp = LSEXP_CMD_IN_PROGRESS;
+			stat.un.b.lsRjtRsnCode = LSRJT_LOGICAL_BSY;
+			stat.un.b.lsRjtRsnCodeExp = LSEXP_NOTHING_MORE;
 			lpfc_els_rsp_reject(vport, stat.un.lsRjtError, cmdiocb,
 					    ndlp, NULL);
+			return ndlp->nlp_state;
 		}
 	} else {
 		/* Initiator mode. */
@@ -1723,6 +1729,9 @@ lpfc_cmpl_reglogin_reglogin_issue(struct lpfc_vport *vport,
 				/* We need to update the localport also */
 				lpfc_nvme_update_localport(vport);
 			}
+
+		} else if (phba->fc_topology == LPFC_TOPOLOGY_LOOP) {
+			ndlp->nlp_fc4_type |= NLP_FC4_FCP;
 
 		} else if (ndlp->nlp_fc4_type == 0) {
 			rc = lpfc_ns_cmd(vport, SLI_CTNS_GFT_ID,
@@ -1892,6 +1901,15 @@ lpfc_cmpl_prli_prli_issue(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 			goto out;
 		}
 
+		/* When the rport rejected the FCP PRLI as unsupported.
+		 * This should only happen in Pt2Pt so an NVME PRLI
+		 * should be outstanding still.
+		 */
+		if (npr && ndlp->nlp_flag & NLP_FCP_PRLI_RJT) {
+			ndlp->nlp_fc4_type &= ~NLP_FC4_FCP;
+			goto out_err;
+		}
+
 		/* The LS Req had some error.  Don't let this be a
 		 * target.
 		 */
@@ -1910,13 +1928,6 @@ lpfc_cmpl_prli_prli_issue(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		return ndlp->nlp_state;
 	}
 
-	/* Check out PRLI rsp */
-	ndlp->nlp_type &= ~(NLP_FCP_TARGET | NLP_FCP_INITIATOR);
-	ndlp->nlp_fcp_info &= ~NLP_FCP_2_DEVICE;
-
-	/* NVME or FCP first burst must be negotiated for each PRLI. */
-	ndlp->nlp_flag &= ~NLP_FIRSTBURST;
-	ndlp->nvme_fb_size = 0;
 	if (npr && (npr->acceptRspCode == PRLI_REQ_EXECUTED) &&
 	    (npr->prliType == PRLI_FCP_TYPE)) {
 		lpfc_printf_vlog(vport, KERN_INFO, LOG_NVME_DISC,
@@ -1933,8 +1944,6 @@ lpfc_cmpl_prli_prli_issue(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		if (npr->Retry)
 			ndlp->nlp_fcp_info |= NLP_FCP_2_DEVICE;
 
-		/* PRLI completed.  Decrement count. */
-		ndlp->fc4_prli_sent--;
 	} else if (nvpr &&
 		   (bf_get_be32(prli_acc_rsp_code, nvpr) ==
 		    PRLI_REQ_EXECUTED) &&
@@ -1979,8 +1988,6 @@ lpfc_cmpl_prli_prli_issue(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 				 be32_to_cpu(nvpr->word5),
 				 ndlp->nlp_flag, ndlp->nlp_fcp_info,
 				 ndlp->nlp_type);
-		/* PRLI completed.  Decrement count. */
-		ndlp->fc4_prli_sent--;
 	}
 	if (!(ndlp->nlp_type & NLP_FCP_TARGET) &&
 	    (vport->port_type == LPFC_NPIV_PORT) &&
@@ -2004,7 +2011,8 @@ out_err:
 		ndlp->nlp_prev_state = NLP_STE_PRLI_ISSUE;
 		if (ndlp->nlp_type & (NLP_FCP_TARGET | NLP_NVME_TARGET))
 			lpfc_nlp_set_state(vport, ndlp, NLP_STE_MAPPED_NODE);
-		else
+		else if (ndlp->nlp_type &
+			 (NLP_FCP_INITIATOR | NLP_NVME_INITIATOR))
 			lpfc_nlp_set_state(vport, ndlp, NLP_STE_UNMAPPED_NODE);
 	} else
 		lpfc_printf_vlog(vport,
@@ -2189,12 +2197,15 @@ lpfc_device_rm_logo_issue(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 			  void *arg, uint32_t evt)
 {
 	/*
-	 * Take no action.  If a LOGO is outstanding, then possibly DevLoss has
-	 * timed out and is calling for Device Remove.  In this case, the LOGO
-	 * must be allowed to complete in state LOGO_ISSUE so that the rpi
-	 * and other NLP flags are correctly cleaned up.
+	 * DevLoss has timed out and is calling for Device Remove.
+	 * In this case, abort the LOGO and cleanup the ndlp
 	 */
-	return ndlp->nlp_state;
+
+	lpfc_unreg_rpi(vport, ndlp);
+	/* software abort outstanding PLOGI */
+	lpfc_els_abort(vport->phba, ndlp);
+	lpfc_drop_node(vport, ndlp);
+	return NLP_STE_FREED_NODE;
 }
 
 static uint32_t

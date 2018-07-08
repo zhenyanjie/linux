@@ -98,7 +98,6 @@ static void free_buffer_page(struct ion_system_heap *heap,
 	ion_page_pool_free(pool, page);
 }
 
-
 static struct page *alloc_largest_available(struct ion_system_heap *heap,
 					    struct ion_buffer *buffer,
 					    unsigned long size,
@@ -256,7 +255,6 @@ static struct ion_heap_ops system_heap_ops = {
 static int ion_system_heap_debug_show(struct ion_heap *heap, struct seq_file *s,
 				      void *unused)
 {
-
 	struct ion_system_heap *sys_heap = container_of(heap,
 							struct ion_system_heap,
 							heap);
@@ -373,7 +371,7 @@ static int ion_system_contig_heap_allocate(struct ion_heap *heap,
 	unsigned long i;
 	int ret;
 
-	page = alloc_pages(low_order_gfp_flags, order);
+	page = alloc_pages(low_order_gfp_flags | __GFP_NOWARN, order);
 	if (!page)
 		return -ENOMEM;
 

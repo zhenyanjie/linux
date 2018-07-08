@@ -35,7 +35,7 @@
 #include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/i2c/twl.h>
+#include <linux/mfd/twl.h>
 #include <linux/module.h>
 #include <linux/stddef.h>
 #include <linux/mutex.h>
@@ -212,7 +212,6 @@ static int twl4030_madc_read(struct iio_dev *iio_dev,
 
 static const struct iio_info twl4030_madc_iio_info = {
 	.read_raw = &twl4030_madc_read,
-	.driver_module = THIS_MODULE,
 };
 
 #define TWL4030_ADC_CHANNEL(_channel, _type, _name) {	\
@@ -893,8 +892,10 @@ static int twl4030_madc_probe(struct platform_device *pdev)
 	}
 
 	ret = regulator_enable(madc->usb3v1);
-	if (ret)
+	if (ret) {
 		dev_err(madc->dev, "could not enable 3v1 bias regulator\n");
+		goto err_i2c;
+	}
 
 	ret = iio_device_register(iio_dev);
 	if (ret) {

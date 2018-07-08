@@ -12,7 +12,7 @@
 #include "raid1.h"
 #include "raid5.h"
 #include "raid10.h"
-#include "bitmap.h"
+#include "md-bitmap.h"
 
 #include <linux/device-mapper.h>
 
@@ -675,15 +675,11 @@ static struct raid_type *get_raid_type_by_ll(const int level, const int layout)
 	return NULL;
 }
 
-/*
- * Conditionally change bdev capacity of @rs
- * in case of a disk add/remove reshape
- */
-static void rs_set_capacity(struct raid_set *rs)
+/* Adjust rdev sectors */
+static void rs_set_rdev_sectors(struct raid_set *rs)
 {
 	struct mddev *mddev = &rs->md;
 	struct md_rdev *rdev;
-	struct gendisk *gendisk = dm_disk(dm_table_get_md(rs->ti->table));
 
 	/*
 	 * raid10 sets rdev->sector to the device size, which
@@ -692,8 +688,16 @@ static void rs_set_capacity(struct raid_set *rs)
 	rdev_for_each(rdev, mddev)
 		if (!test_bit(Journal, &rdev->flags))
 			rdev->sectors = mddev->dev_sectors;
+}
 
-	set_capacity(gendisk, mddev->array_sectors);
+/*
+ * Change bdev capacity of @rs in case of a disk add/remove reshape
+ */
+static void rs_set_capacity(struct raid_set *rs)
+{
+	struct gendisk *gendisk = dm_disk(dm_table_get_md(rs->ti->table));
+
+	set_capacity(gendisk, rs->md.array_sectors);
 	revalidate_disk(gendisk);
 }
 
@@ -1674,8 +1678,11 @@ static void do_table_event(struct work_struct *ws)
 	struct raid_set *rs = container_of(ws, struct raid_set, md.event_work);
 
 	smp_rmb(); /* Make sure we access most actual mddev properties */
-	if (!rs_is_reshaping(rs))
+	if (!rs_is_reshaping(rs)) {
+		if (rs_is_raid10(rs))
+			rs_set_rdev_sectors(rs);
 		rs_set_capacity(rs);
+	}
 	dm_table_event(rs->ti->table);
 }
 
@@ -2143,13 +2150,6 @@ static int super_load(struct md_rdev *rdev, struct md_rdev *refdev)
 	struct dm_raid_superblock *refsb;
 	uint64_t events_sb, events_refsb;
 
-	rdev->sb_start = 0;
-	rdev->sb_size = bdev_logical_block_size(rdev->meta_bdev);
-	if (rdev->sb_size < sizeof(*sb) || rdev->sb_size > PAGE_SIZE) {
-		DMERR("superblock size of a logical block is no longer valid");
-		return -EINVAL;
-	}
-
 	r = read_disk_sb(rdev, rdev->sb_size, false);
 	if (r)
 		return r;
@@ -2494,6 +2494,17 @@ static int analyse_superblocks(struct dm_target *ti, struct raid_set *rs)
 		if (test_bit(Journal, &rdev->flags))
 			continue;
 
+		if (!rdev->meta_bdev)
+			continue;
+
+		/* Set superblock offset/size for metadata device. */
+		rdev->sb_start = 0;
+		rdev->sb_size = bdev_logical_block_size(rdev->meta_bdev);
+		if (rdev->sb_size < sizeof(struct dm_raid_superblock) || rdev->sb_size > PAGE_SIZE) {
+			DMERR("superblock size of a logical block is no longer valid");
+			return -EINVAL;
+		}
+
 		/*
 		 * Skipping super_load due to CTR_FLAG_SYNC will cause
 		 * the array to undergo initialization again as
@@ -2504,9 +2515,6 @@ static int analyse_superblocks(struct dm_target *ti, struct raid_set *rs)
 		 * that the "sync" directive is disallowed during the reshape.
 		 */
 		if (test_bit(__CTR_FLAG_SYNC, &rs->ctr_flags))
-			continue;
-
-		if (!rdev->meta_bdev)
 			continue;
 
 		r = super_load(rdev, freshest);
@@ -2886,9 +2894,6 @@ static void configure_discard_support(struct raid_set *rs)
 	bool raid456;
 	struct dm_target *ti = rs->ti;
 
-	/* Assume discards not supported until after checks below. */
-	ti->discards_supported = false;
-
 	/*
 	 * XXX: RAID level 4,5,6 require zeroing for safety.
 	 */
@@ -2912,9 +2917,6 @@ static void configure_discard_support(struct raid_set *rs)
 			}
 		}
 	}
-
-	/* All RAID members properly support discards */
-	ti->discards_supported = true;
 
 	/*
 	 * RAID1 and RAID10 personalities require bio splitting,
@@ -3238,7 +3240,7 @@ static int raid_map(struct dm_target *ti, struct bio *bio)
 	if (unlikely(bio_end_sector(bio) > mddev->array_sectors))
 		return DM_MAPIO_REQUEUE;
 
-	mddev->pers->make_request(mddev, bio);
+	md_handle_request(mddev, bio);
 
 	return DM_MAPIO_SUBMITTED;
 }
@@ -3297,11 +3299,10 @@ static const char *__raid_dev_status(struct raid_set *rs, struct md_rdev *rdev, 
 static sector_t rs_get_progress(struct raid_set *rs,
 				sector_t resync_max_sectors, bool *array_in_sync)
 {
-	sector_t r, recovery_cp, curr_resync_completed;
+	sector_t r, curr_resync_completed;
 	struct mddev *mddev = &rs->md;
 
 	curr_resync_completed = mddev->curr_resync_completed ?: mddev->recovery_cp;
-	recovery_cp = mddev->recovery_cp;
 	*array_in_sync = false;
 
 	if (rs_is_raid0(rs)) {
@@ -3330,9 +3331,11 @@ static sector_t rs_get_progress(struct raid_set *rs,
 		} else if (test_bit(MD_RECOVERY_RUNNING, &mddev->recovery))
 			r = curr_resync_completed;
 		else
-			r = recovery_cp;
+			r = mddev->recovery_cp;
 
-		if (r == MaxSector) {
+		if ((r == MaxSector) ||
+		    (test_bit(MD_RECOVERY_DONE, &mddev->recovery) &&
+		     (mddev->curr_resync_completed == resync_max_sectors))) {
 			/*
 			 * Sync complete.
 			 */
@@ -3628,8 +3631,11 @@ static void raid_postsuspend(struct dm_target *ti)
 {
 	struct raid_set *rs = ti->private;
 
-	if (!test_and_set_bit(RT_FLAG_RS_SUSPENDED, &rs->runtime_flags))
+	if (!test_and_set_bit(RT_FLAG_RS_SUSPENDED, &rs->runtime_flags)) {
+		mddev_lock_nointr(&rs->md);
 		mddev_suspend(&rs->md);
+		mddev_unlock(&rs->md);
+	}
 
 	rs->md.ro = 1;
 }
@@ -3843,11 +3849,10 @@ static int raid_preresume(struct dm_target *ti)
 		mddev->resync_min = mddev->recovery_cp;
 	}
 
-	rs_set_capacity(rs);
-
 	/* Check for any reshape request unless new raid set */
 	if (test_and_clear_bit(RT_FLAG_RESHAPE_RS, &rs->runtime_flags)) {
 		/* Initiate a reshape. */
+		rs_set_rdev_sectors(rs);
 		mddev_lock_nointr(mddev);
 		r = rs_start_reshape(rs);
 		mddev_unlock(mddev);
@@ -3876,6 +3881,10 @@ static void raid_resume(struct dm_target *ti)
 	mddev->ro = 0;
 	mddev->in_sync = 0;
 
+	/* Only reduce raid set size before running a disk removing reshape. */
+	if (mddev->delta_disks < 0)
+		rs_set_capacity(rs);
+
 	/*
 	 * Keep the RAID set frozen if reshape/rebuild flags are set.
 	 * The RAID set is unfrozen once the next table load/resume,
@@ -3886,13 +3895,16 @@ static void raid_resume(struct dm_target *ti)
 	if (!(rs->ctr_flags & RESUME_STAY_FROZEN_FLAGS))
 		clear_bit(MD_RECOVERY_FROZEN, &mddev->recovery);
 
-	if (test_and_clear_bit(RT_FLAG_RS_SUSPENDED, &rs->runtime_flags))
+	if (test_and_clear_bit(RT_FLAG_RS_SUSPENDED, &rs->runtime_flags)) {
+		mddev_lock_nointr(mddev);
 		mddev_resume(mddev);
+		mddev_unlock(mddev);
+	}
 }
 
 static struct target_type raid_target = {
 	.name = "raid",
-	.version = {1, 12, 1},
+	.version = {1, 13, 0},
 	.module = THIS_MODULE,
 	.ctr = raid_ctr,
 	.dtr = raid_dtr,

@@ -114,6 +114,7 @@ struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
 	union pvrdma_cmd_resp rsp;
 	struct pvrdma_cmd_create_cq *cmd = &req.create_cq;
 	struct pvrdma_cmd_create_cq_resp *resp = &rsp.create_cq_resp;
+	struct pvrdma_create_cq_resp cq_resp = {0};
 	struct pvrdma_create_cq ucmd;
 
 	BUILD_BUG_ON(sizeof(struct pvrdma_cqe) != 64);
@@ -179,7 +180,7 @@ struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
 		pvrdma_page_dir_insert_umem(&cq->pdir, cq->umem, 0);
 
 	atomic_set(&cq->refcnt, 1);
-	init_waitqueue_head(&cq->wait);
+	init_completion(&cq->free);
 	spin_lock_init(&cq->cq_lock);
 
 	memset(cmd, 0, sizeof(*cmd));
@@ -198,6 +199,7 @@ struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
 
 	cq->ibcq.cqe = resp->cqe;
 	cq->cq_handle = resp->cq_handle;
+	cq_resp.cqn = resp->cq_handle;
 	spin_lock_irqsave(&dev->cq_tbl_lock, flags);
 	dev->cq_tbl[cq->cq_handle % dev->dsr->caps.max_cq] = cq;
 	spin_unlock_irqrestore(&dev->cq_tbl_lock, flags);
@@ -206,7 +208,7 @@ struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
 		cq->uar = &(to_vucontext(context)->uar);
 
 		/* Copy udata back. */
-		if (ib_copy_to_udata(udata, &cq->cq_handle, sizeof(__u32))) {
+		if (ib_copy_to_udata(udata, &cq_resp, sizeof(cq_resp))) {
 			dev_warn(&dev->pdev->dev,
 				 "failed to copy back udata\n");
 			pvrdma_destroy_cq(&cq->ibcq);
@@ -230,8 +232,9 @@ err_cq:
 
 static void pvrdma_free_cq(struct pvrdma_dev *dev, struct pvrdma_cq *cq)
 {
-	atomic_dec(&cq->refcnt);
-	wait_event(cq->wait, !atomic_read(&cq->refcnt));
+	if (atomic_dec_and_test(&cq->refcnt))
+		complete(&cq->free);
+	wait_for_completion(&cq->free);
 
 	if (!cq->is_kernel)
 		ib_umem_release(cq->umem);
@@ -299,7 +302,7 @@ static inline struct pvrdma_cqe *get_cqe(struct pvrdma_cq *cq, int i)
 
 void _pvrdma_flush_cqe(struct pvrdma_qp *qp, struct pvrdma_cq *cq)
 {
-	int head;
+	unsigned int head;
 	int has_data;
 
 	if (!cq->is_kernel)
@@ -389,6 +392,7 @@ retry:
 	wc->dlid_path_bits = cqe->dlid_path_bits;
 	wc->port_num = cqe->port_num;
 	wc->vendor_err = cqe->vendor_err;
+	wc->network_hdr_type = cqe->network_hdr_type;
 
 	/* Update shared ring state */
 	pvrdma_idx_ring_inc(&cq->ring_state->rx.cons_head, cq->ibcq.cqe);

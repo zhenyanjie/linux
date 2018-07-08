@@ -758,9 +758,8 @@ static int crypt_iv_tcw_whitening(struct crypt_config *cc,
 	int i, r;
 
 	/* xor whitening with sector number */
-	memcpy(buf, tcw->whitening, TCW_WHITENING_SIZE);
-	crypto_xor(buf, (u8 *)&sector, 8);
-	crypto_xor(&buf[8], (u8 *)&sector, 8);
+	crypto_xor_cpy(buf, tcw->whitening, (u8 *)&sector, 8);
+	crypto_xor_cpy(&buf[8], tcw->whitening + 8, (u8 *)&sector, 8);
 
 	/* calculate crc32 for every 32bit part and xor it */
 	desc->tfm = tcw->crc32_tfm;
@@ -805,10 +804,10 @@ static int crypt_iv_tcw_gen(struct crypt_config *cc, u8 *iv,
 	}
 
 	/* Calculate IV */
-	memcpy(iv, tcw->iv_seed, cc->iv_size);
-	crypto_xor(iv, (u8 *)&sector, 8);
+	crypto_xor_cpy(iv, tcw->iv_seed, (u8 *)&sector, 8);
 	if (cc->iv_size > 8)
-		crypto_xor(&iv[8], (u8 *)&sector, cc->iv_size - 8);
+		crypto_xor_cpy(&iv[8], tcw->iv_seed + 8, (u8 *)&sector,
+			       cc->iv_size - 8);
 
 	return r;
 }
@@ -932,9 +931,6 @@ static int dm_crypt_integrity_io_alloc(struct dm_crypt_io *io, struct bio *bio)
 
 	bip->bip_iter.bi_size = tag_len;
 	bip->bip_iter.bi_sector = io->cc->start + io->sector;
-
-	/* We own the metadata, do not let bio_free to release it */
-	bip->bip_flags &= ~BIP_BLOCK_INTEGRITY;
 
 	ret = bio_integrity_add_page(bio, virt_to_page(io->integrity_metadata),
 				     tag_len, offset_in_page(io->integrity_metadata));
@@ -1079,7 +1075,7 @@ static int crypt_convert_block_aead(struct crypt_config *cc,
 	BUG_ON(cc->integrity_iv_size && cc->integrity_iv_size != cc->iv_size);
 
 	/* Reject unexpected unaligned bio. */
-	if (unlikely(bv_in.bv_offset & (cc->sector_size - 1)))
+	if (unlikely(bv_in.bv_len & (cc->sector_size - 1)))
 		return -EIO;
 
 	dmreq = dmreq_of_req(cc, req);
@@ -1172,7 +1168,7 @@ static int crypt_convert_block_skcipher(struct crypt_config *cc,
 	int r = 0;
 
 	/* Reject unexpected unaligned bio. */
-	if (unlikely(bv_in.bv_offset & (cc->sector_size - 1)))
+	if (unlikely(bv_in.bv_len & (cc->sector_size - 1)))
 		return -EIO;
 
 	dmreq = dmreq_of_req(cc, req);
@@ -1547,7 +1543,7 @@ static void clone_init(struct dm_crypt_io *io, struct bio *clone)
 
 	clone->bi_private = io;
 	clone->bi_end_io  = crypt_endio;
-	clone->bi_bdev    = cc->dev->bdev;
+	bio_set_dev(clone, cc->dev->bdev);
 	clone->bi_opf	  = io->base_bio->bi_opf;
 }
 
@@ -1958,10 +1954,15 @@ static int crypt_setkey(struct crypt_config *cc)
 	/* Ignore extra keys (which are used for IV etc) */
 	subkey_size = crypt_subkey_size(cc);
 
-	if (crypt_integrity_hmac(cc))
+	if (crypt_integrity_hmac(cc)) {
+		if (subkey_size < cc->key_mac_size)
+			return -EINVAL;
+
 		crypt_copy_authenckey(cc->authenc_key, cc->key,
 				      subkey_size - cc->key_mac_size,
 				      cc->key_mac_size);
+	}
+
 	for (i = 0; i < cc->tfms_count; i++) {
 		if (crypt_integrity_hmac(cc))
 			r = crypto_aead_setkey(cc->cipher_tfm.tfms_aead[i],
@@ -2056,9 +2057,6 @@ static int crypt_set_keyring_key(struct crypt_config *cc, const char *key_string
 	clear_bit(DM_CRYPT_KEY_VALID, &cc->flags);
 
 	ret = crypt_setkey(cc);
-
-	/* wipe the kernel key payload copy in each case */
-	memset(cc->key, 0, cc->key_size * sizeof(u8));
 
 	if (!ret) {
 		set_bit(DM_CRYPT_KEY_VALID, &cc->flags);
@@ -2527,6 +2525,10 @@ static int crypt_ctr_cipher(struct dm_target *ti, char *cipher_in, char *key)
 		}
 	}
 
+	/* wipe the kernel key payload copy */
+	if (cc->key_string)
+		memset(cc->key, 0, cc->key_size * sizeof(u8));
+
 	return ret;
 }
 
@@ -2534,7 +2536,7 @@ static int crypt_ctr_optional(struct dm_target *ti, unsigned int argc, char **ar
 {
 	struct crypt_config *cc = ti->private;
 	struct dm_arg_set as;
-	static struct dm_arg _args[] = {
+	static const struct dm_arg _args[] = {
 		{0, 6, "Invalid number of feature args"},
 	};
 	unsigned int opt_params, val;
@@ -2744,6 +2746,7 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			cc->tag_pool_max_sectors * cc->on_disk_tag_size);
 		if (!cc->tag_pool) {
 			ti->error = "Cannot allocate integrity tags mempool";
+			ret = -ENOMEM;
 			goto bad;
 		}
 
@@ -2801,7 +2804,7 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 	 */
 	if (unlikely(bio->bi_opf & REQ_PREFLUSH ||
 	    bio_op(bio) == REQ_OP_DISCARD)) {
-		bio->bi_bdev = cc->dev->bdev;
+		bio_set_dev(bio, cc->dev->bdev);
 		if (bio_sectors(bio))
 			bio->bi_iter.bi_sector = cc->start +
 				dm_target_offset(ti, bio->bi_iter.bi_sector);
@@ -2965,6 +2968,9 @@ static int crypt_message(struct dm_target *ti, unsigned argc, char **argv)
 				return ret;
 			if (cc->iv_gen_ops && cc->iv_gen_ops->init)
 				ret = cc->iv_gen_ops->init(cc);
+			/* wipe the kernel key payload copy */
+			if (cc->key_string)
+				memset(cc->key, 0, cc->key_size * sizeof(u8));
 			return ret;
 		}
 		if (argc == 2 && !strcasecmp(argv[1], "wipe")) {
@@ -3011,7 +3017,7 @@ static void crypt_io_hints(struct dm_target *ti, struct queue_limits *limits)
 
 static struct target_type crypt_target = {
 	.name   = "crypt",
-	.version = {1, 18, 0},
+	.version = {1, 18, 1},
 	.module = THIS_MODULE,
 	.ctr    = crypt_ctr,
 	.dtr    = crypt_dtr,

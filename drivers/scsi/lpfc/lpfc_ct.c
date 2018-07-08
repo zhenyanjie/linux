@@ -471,6 +471,7 @@ lpfc_prep_node_fc4type(struct lpfc_vport *vport, uint32_t Did, uint8_t fc4_type)
 				"Parse GID_FTrsp: did:x%x flg:x%x x%x",
 				Did, ndlp->nlp_flag, vport->fc_flag);
 
+			ndlp->nlp_fc4_type &= ~(NLP_FC4_FCP | NLP_FC4_NVME);
 			/* By default, the driver expects to support FCP FC4 */
 			if (fc4_type == FC_TYPE_FCP)
 				ndlp->nlp_fc4_type |= NLP_FC4_FCP;
@@ -955,7 +956,7 @@ lpfc_cmpl_ct_cmd_gft_id(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 		CTrsp = (struct lpfc_sli_ct_request *)outp->virt;
 		fc4_data_0 = be32_to_cpu(CTrsp->un.gft_acc.fc4_types[0]);
 		fc4_data_1 = be32_to_cpu(CTrsp->un.gft_acc.fc4_types[1]);
-		lpfc_printf_vlog(vport, KERN_ERR, LOG_DISCOVERY,
+		lpfc_printf_vlog(vport, KERN_INFO, LOG_DISCOVERY,
 				 "3062 DID x%06x GFT Wd0 x%08x Wd1 x%08x\n",
 				 did, fc4_data_0, fc4_data_1);
 
@@ -969,7 +970,7 @@ lpfc_cmpl_ct_cmd_gft_id(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 				ndlp->nlp_fc4_type |= NLP_FC4_FCP;
 			if (fc4_data_1 &  LPFC_FC4_TYPE_BITMASK)
 				ndlp->nlp_fc4_type |= NLP_FC4_NVME;
-			lpfc_printf_vlog(vport, KERN_ERR, LOG_DISCOVERY,
+			lpfc_printf_vlog(vport, KERN_INFO, LOG_DISCOVERY,
 					 "3064 Setting ndlp %p, DID x%06x with "
 					 "FC4 x%08x, Data: x%08x x%08x\n",
 					 ndlp, did, ndlp->nlp_fc4_type,
@@ -2884,9 +2885,9 @@ fdmi_cmd_exit:
  * the worker thread.
  **/
 void
-lpfc_delayed_disc_tmo(unsigned long ptr)
+lpfc_delayed_disc_tmo(struct timer_list *t)
 {
-	struct lpfc_vport *vport = (struct lpfc_vport *)ptr;
+	struct lpfc_vport *vport = from_timer(vport, t, delayed_disc_tmo);
 	struct lpfc_hba   *phba = vport->phba;
 	uint32_t tmo_posted;
 	unsigned long iflag;

@@ -328,7 +328,7 @@ unsigned long tpm_calc_ordinal_duration(struct tpm_chip *chip,
 }
 EXPORT_SYMBOL_GPL(tpm_calc_ordinal_duration);
 
-static bool tpm_validate_command(struct tpm_chip *chip,
+static int tpm_validate_command(struct tpm_chip *chip,
 				 struct tpm_space *space,
 				 const u8 *cmd,
 				 size_t len)
@@ -340,10 +340,10 @@ static bool tpm_validate_command(struct tpm_chip *chip,
 	unsigned int nr_handles;
 
 	if (len < TPM_HEADER_SIZE)
-		return false;
+		return -EINVAL;
 
 	if (!space)
-		return true;
+		return 0;
 
 	if (chip->flags & TPM_CHIP_FLAG_TPM2 && chip->nr_commands) {
 		cc = be32_to_cpu(header->ordinal);
@@ -352,7 +352,7 @@ static bool tpm_validate_command(struct tpm_chip *chip,
 		if (i < 0) {
 			dev_dbg(&chip->dev, "0x%04X is an invalid command\n",
 				cc);
-			return false;
+			return -EOPNOTSUPP;
 		}
 
 		attrs = chip->cc_attrs_tbl[i];
@@ -362,11 +362,11 @@ static bool tpm_validate_command(struct tpm_chip *chip,
 			goto err_len;
 	}
 
-	return true;
+	return 0;
 err_len:
 	dev_dbg(&chip->dev,
 		"%s: insufficient command length %zu", __func__, len);
-	return false;
+	return -EINVAL;
 }
 
 /**
@@ -391,8 +391,20 @@ ssize_t tpm_transmit(struct tpm_chip *chip, struct tpm_space *space,
 	unsigned long stop;
 	bool need_locality;
 
-	if (!tpm_validate_command(chip, space, buf, bufsiz))
-		return -EINVAL;
+	rc = tpm_validate_command(chip, space, buf, bufsiz);
+	if (rc == -EINVAL)
+		return rc;
+	/*
+	 * If the command is not implemented by the TPM, synthesize a
+	 * response with a TPM2_RC_COMMAND_CODE return for user-space.
+	 */
+	if (rc == -EOPNOTSUPP) {
+		header->length = cpu_to_be32(sizeof(*header));
+		header->tag = cpu_to_be16(TPM2_ST_NO_SESSIONS);
+		header->return_code = cpu_to_be32(TPM2_RC_COMMAND_CODE |
+						  TSS2_RESMGR_TPM_RC_LAYER);
+		return bufsiz;
+	}
 
 	if (bufsiz > TPM_BUFSIZE)
 		bufsiz = TPM_BUFSIZE;
@@ -412,6 +424,9 @@ ssize_t tpm_transmit(struct tpm_chip *chip, struct tpm_space *space,
 
 	if (chip->dev.parent)
 		pm_runtime_get_sync(chip->dev.parent);
+
+	if (chip->ops->clk_enable != NULL)
+		chip->ops->clk_enable(chip, true);
 
 	/* Store the decision as chip->locality will be changed. */
 	need_locality = chip->locality == -1;
@@ -455,7 +470,7 @@ ssize_t tpm_transmit(struct tpm_chip *chip, struct tpm_space *space,
 			goto out;
 		}
 
-		msleep(TPM_TIMEOUT);	/* CHECK */
+		tpm_msleep(TPM_TIMEOUT);
 		rmb();
 	} while (time_before(jiffies, stop));
 
@@ -489,6 +504,9 @@ out:
 		chip->locality = -1;
 	}
 out_no_locality:
+	if (chip->ops->clk_enable != NULL)
+		chip->ops->clk_enable(chip, false);
+
 	if (chip->dev.parent)
 		pm_runtime_put_sync(chip->dev.parent);
 
@@ -970,7 +988,7 @@ int tpm_do_selftest(struct tpm_chip *chip)
 			dev_info(
 			    &chip->dev, HW_ERR
 			    "TPM command timed out during continue self test");
-			msleep(delay_msec);
+			tpm_msleep(delay_msec);
 			continue;
 		}
 
@@ -985,7 +1003,7 @@ int tpm_do_selftest(struct tpm_chip *chip)
 		}
 		if (rc != TPM_WARN_DOING_SELFTEST)
 			return rc;
-		msleep(delay_msec);
+		tpm_msleep(delay_msec);
 	} while (--loops > 0);
 
 	return rc;
@@ -1085,7 +1103,7 @@ again:
 		}
 	} else {
 		do {
-			msleep(TPM_TIMEOUT);
+			tpm_msleep(TPM_TIMEOUT);
 			status = chip->ops->status(chip);
 			if ((status & mask) == mask)
 				return 0;
@@ -1150,7 +1168,7 @@ int tpm_pm_suspend(struct device *dev)
 		 */
 		if (rc != TPM_WARN_RETRY)
 			break;
-		msleep(TPM_TIMEOUT_RETRY);
+		tpm_msleep(TPM_TIMEOUT_RETRY);
 	}
 
 	if (rc)
@@ -1228,6 +1246,10 @@ int tpm_get_random(u32 chip_num, u8 *out, size_t max)
 			break;
 
 		recd = be32_to_cpu(tpm_cmd.params.getrandom_out.rng_data_len);
+		if (recd > num_bytes) {
+			total = -EFAULT;
+			break;
+		}
 
 		rlength = be32_to_cpu(tpm_cmd.header.out.length);
 		if (rlength < offsetof(struct tpm_getrandom_out, rng_data) +

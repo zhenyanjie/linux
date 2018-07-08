@@ -537,8 +537,10 @@ static void *rhashtable_lookup_one(struct rhashtable *ht,
 		if (!key ||
 		    (ht->p.obj_cmpfn ?
 		     ht->p.obj_cmpfn(&arg, rht_obj(ht, head)) :
-		     rhashtable_compare(&arg, rht_obj(ht, head))))
+		     rhashtable_compare(&arg, rht_obj(ht, head)))) {
+			pprev = &head->next;
 			continue;
+		}
 
 		if (!ht->rhlist)
 			return rht_obj(ht, head);
@@ -735,9 +737,9 @@ EXPORT_SYMBOL_GPL(rhashtable_walk_exit);
  * rhashtable_walk_start - Start a hash table walk
  * @iter:	Hash table iterator
  *
- * Start a hash table walk.  Note that we take the RCU lock in all
- * cases including when we return an error.  So you must always call
- * rhashtable_walk_stop to clean up.
+ * Start a hash table walk at the current iterator position.  Note that we take
+ * the RCU lock in all cases including when we return an error.  So you must
+ * always call rhashtable_walk_stop to clean up.
  *
  * Returns zero if successful.
  *
@@ -846,7 +848,8 @@ EXPORT_SYMBOL_GPL(rhashtable_walk_next);
  * rhashtable_walk_stop - Finish a hash table walk
  * @iter:	Hash table iterator
  *
- * Finish a hash table walk.
+ * Finish a hash table walk.  Does not reset the iterator to the start of the
+ * hash table.
  */
 void rhashtable_walk_stop(struct rhashtable_iter *iter)
 	__releases(RCU)

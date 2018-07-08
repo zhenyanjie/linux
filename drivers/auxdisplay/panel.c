@@ -877,21 +877,21 @@ static void lcd_clear_fast_tilcd(struct charlcd *charlcd)
 	spin_unlock_irq(&pprt_lock);
 }
 
-static struct charlcd_ops charlcd_serial_ops = {
+static const struct charlcd_ops charlcd_serial_ops = {
 	.write_cmd	= lcd_write_cmd_s,
 	.write_data	= lcd_write_data_s,
 	.clear_fast	= lcd_clear_fast_s,
 	.backlight	= lcd_backlight,
 };
 
-static struct charlcd_ops charlcd_parallel_ops = {
+static const struct charlcd_ops charlcd_parallel_ops = {
 	.write_cmd	= lcd_write_cmd_p8,
 	.write_data	= lcd_write_data_p8,
 	.clear_fast	= lcd_clear_fast_p8,
 	.backlight	= lcd_backlight,
 };
 
-static struct charlcd_ops charlcd_tilcd_ops = {
+static const struct charlcd_ops charlcd_tilcd_ops = {
 	.write_cmd	= lcd_write_cmd_tilcd,
 	.write_data	= lcd_write_data_tilcd,
 	.clear_fast	= lcd_clear_fast_tilcd,
@@ -1396,7 +1396,7 @@ static void panel_process_inputs(void)
 	}
 }
 
-static void panel_scan_timer(void)
+static void panel_scan_timer(struct timer_list *unused)
 {
 	if (keypad.enabled && keypad_initialized) {
 		if (spin_trylock_irq(&pprt_lock)) {
@@ -1421,7 +1421,7 @@ static void init_scan_timer(void)
 	if (scan_timer.function)
 		return;		/* already started */
 
-	setup_timer(&scan_timer, (void *)&panel_scan_timer, 0);
+	timer_setup(&scan_timer, panel_scan_timer, 0);
 	scan_timer.expires = jiffies + INPUT_POLL_TIME;
 	add_timer(&scan_timer);
 }

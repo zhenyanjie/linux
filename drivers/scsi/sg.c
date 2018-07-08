@@ -217,7 +217,7 @@ static int sg_allow_access(struct file *filp, unsigned char *cmd)
 	if (sfp->parentdp->device->type == TYPE_SCANNER)
 		return 0;
 
-	return blk_verify_command(cmd, filp->f_mode & FMODE_WRITE);
+	return blk_verify_command(cmd, filp->f_mode);
 }
 
 static int
@@ -1089,8 +1089,7 @@ sg_ioctl(struct file *filp, unsigned int cmd_in, unsigned long arg)
 		return blk_trace_setup(sdp->device->request_queue,
 				       sdp->disk->disk_name,
 				       MKDEV(SCSI_GENERIC_MAJOR, sdp->index),
-				       NULL,
-				       (char *)arg);
+				       NULL, p);
 	case BLKTRACESTART:
 		return blk_trace_startstop(sdp->device->request_queue, 1);
 	case BLKTRACESTOP:

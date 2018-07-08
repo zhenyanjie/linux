@@ -196,6 +196,13 @@ static void wacom_feature_mapping(struct hid_device *hdev,
 		kfree(data);
 		break;
 	}
+
+	if (hdev->vendor == USB_VENDOR_ID_WACOM &&
+	    hdev->product == 0x4200 /* Dell Canvas 27 */ &&
+	    field->application == HID_UP_MSVENDOR) {
+		wacom->wacom_wac.mode_report = field->report->id;
+		wacom->wacom_wac.mode_value = 2;
+	}
 }
 
 /*
@@ -1676,10 +1683,7 @@ static ssize_t wacom_show_remote_mode(struct kobject *kobj,
 	u8 mode;
 
 	mode = wacom->led.groups[index].select;
-	if (mode >= 0 && mode < 3)
-		return snprintf(buf, PAGE_SIZE, "%d\n", mode);
-	else
-		return snprintf(buf, PAGE_SIZE, "%d\n", -1);
+	return sprintf(buf, "%d\n", mode < 3 ? mode : -1);
 }
 
 #define DEVICE_EKR_ATTR_GROUP(SET_ID)					\
@@ -2033,41 +2037,37 @@ static void wacom_update_name(struct wacom *wacom, const char *suffix)
 
 	/* Generic devices name unspecified */
 	if ((features->type == HID_GENERIC) && !strcmp("Wacom HID", features->name)) {
-		if (strstr(wacom->hdev->name, "Wacom") ||
-		    strstr(wacom->hdev->name, "wacom") ||
-		    strstr(wacom->hdev->name, "WACOM")) {
-			/* name is in HID descriptor, use it */
-			strlcpy(name, wacom->hdev->name, sizeof(name));
+		char *product_name = wacom->hdev->name;
 
-			/* strip out excess whitespaces */
-			while (1) {
-				char *gap = strstr(name, "  ");
-				if (gap == NULL)
-					break;
-				/* shift everything including the terminator */
-				memmove(gap, gap+1, strlen(gap));
-			}
-
-			/* strip off excessive prefixing */
-			if (strstr(name, "Wacom Co.,Ltd. Wacom ") == name) {
-				int n = strlen(name);
-				int x = strlen("Wacom Co.,Ltd. ");
-				memmove(name, name+x, n-x+1);
-			}
-			if (strstr(name, "Wacom Co., Ltd. Wacom ") == name) {
-				int n = strlen(name);
-				int x = strlen("Wacom Co., Ltd. ");
-				memmove(name, name+x, n-x+1);
-			}
-
-			/* get rid of trailing whitespace */
-			if (name[strlen(name)-1] == ' ')
-				name[strlen(name)-1] = '\0';
-		} else {
-			/* no meaningful name retrieved. use product ID */
-			snprintf(name, sizeof(name),
-				 "%s %X", features->name, wacom->hdev->product);
+		if (hid_is_using_ll_driver(wacom->hdev, &usb_hid_driver)) {
+			struct usb_interface *intf = to_usb_interface(wacom->hdev->dev.parent);
+			struct usb_device *dev = interface_to_usbdev(intf);
+			product_name = dev->product;
 		}
+
+		if (wacom->hdev->bus == BUS_I2C) {
+			snprintf(name, sizeof(name), "%s %X",
+				 features->name, wacom->hdev->product);
+		} else if (strstr(product_name, "Wacom") ||
+			   strstr(product_name, "wacom") ||
+			   strstr(product_name, "WACOM")) {
+			strlcpy(name, product_name, sizeof(name));
+		} else {
+			snprintf(name, sizeof(name), "Wacom %s", product_name);
+		}
+
+		/* strip out excess whitespaces */
+		while (1) {
+			char *gap = strstr(name, "  ");
+			if (gap == NULL)
+				break;
+			/* shift everything including the terminator */
+			memmove(gap, gap+1, strlen(gap));
+		}
+
+		/* get rid of trailing whitespace */
+		if (name[strlen(name)-1] == ' ')
+			name[strlen(name)-1] = '\0';
 	} else {
 		strlcpy(name, features->name, sizeof(name));
 	}
@@ -2347,23 +2347,23 @@ static void wacom_remote_destroy_one(struct wacom *wacom, unsigned int index)
 	int i;
 	unsigned long flags;
 
-	spin_lock_irqsave(&remote->remote_lock, flags);
-	remote->remotes[index].registered = false;
-	spin_unlock_irqrestore(&remote->remote_lock, flags);
-
-	if (remote->remotes[index].battery.battery)
-		devres_release_group(&wacom->hdev->dev,
-				     &remote->remotes[index].battery.bat_desc);
-
-	if (remote->remotes[index].group.name)
-		devres_release_group(&wacom->hdev->dev,
-				     &remote->remotes[index]);
-
 	for (i = 0; i < WACOM_MAX_REMOTES; i++) {
 		if (remote->remotes[i].serial == serial) {
+
+			spin_lock_irqsave(&remote->remote_lock, flags);
+			remote->remotes[i].registered = false;
+			spin_unlock_irqrestore(&remote->remote_lock, flags);
+
+			if (remote->remotes[i].battery.battery)
+				devres_release_group(&wacom->hdev->dev,
+						     &remote->remotes[i].battery.bat_desc);
+
+			if (remote->remotes[i].group.name)
+				devres_release_group(&wacom->hdev->dev,
+						     &remote->remotes[i]);
+
 			remote->remotes[i].serial = 0;
 			remote->remotes[i].group.name = NULL;
-			remote->remotes[i].registered = false;
 			remote->remotes[i].battery.battery = NULL;
 			wacom->led.groups[i].select = WACOM_STATUS_UNKNOWN;
 		}

@@ -45,7 +45,6 @@ int sst_alloc_stream_mrfld(struct intel_sst_drv *sst_drv_ctx, void *params)
 	void *data = NULL;
 
 	dev_dbg(sst_drv_ctx->dev, "Enter\n");
-	BUG_ON(!params);
 
 	str_params = (struct snd_sst_params *)params;
 	memset(&alloc_param, 0, sizeof(alloc_param));
@@ -221,7 +220,7 @@ int sst_send_byte_stream_mrfld(struct intel_sst_drv *sst_drv_ctx,
 		sst_free_block(sst_drv_ctx, block);
 out:
 	test_and_clear_bit(pvt_id, &sst_drv_ctx->pvt_id);
-	return 0;
+	return ret;
 }
 
 /*

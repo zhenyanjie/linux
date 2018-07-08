@@ -29,6 +29,57 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/devlink.h>
 
+static struct devlink_dpipe_field devlink_dpipe_fields_ethernet[] = {
+	{
+		.name = "destination mac",
+		.id = DEVLINK_DPIPE_FIELD_ETHERNET_DST_MAC,
+		.bitwidth = 48,
+	},
+};
+
+struct devlink_dpipe_header devlink_dpipe_header_ethernet = {
+	.name = "ethernet",
+	.id = DEVLINK_DPIPE_HEADER_ETHERNET,
+	.fields = devlink_dpipe_fields_ethernet,
+	.fields_count = ARRAY_SIZE(devlink_dpipe_fields_ethernet),
+	.global = true,
+};
+EXPORT_SYMBOL(devlink_dpipe_header_ethernet);
+
+static struct devlink_dpipe_field devlink_dpipe_fields_ipv4[] = {
+	{
+		.name = "destination ip",
+		.id = DEVLINK_DPIPE_FIELD_IPV4_DST_IP,
+		.bitwidth = 32,
+	},
+};
+
+struct devlink_dpipe_header devlink_dpipe_header_ipv4 = {
+	.name = "ipv4",
+	.id = DEVLINK_DPIPE_HEADER_IPV4,
+	.fields = devlink_dpipe_fields_ipv4,
+	.fields_count = ARRAY_SIZE(devlink_dpipe_fields_ipv4),
+	.global = true,
+};
+EXPORT_SYMBOL(devlink_dpipe_header_ipv4);
+
+static struct devlink_dpipe_field devlink_dpipe_fields_ipv6[] = {
+	{
+		.name = "destination ip",
+		.id = DEVLINK_DPIPE_FIELD_IPV6_DST_IP,
+		.bitwidth = 128,
+	},
+};
+
+struct devlink_dpipe_header devlink_dpipe_header_ipv6 = {
+	.name = "ipv6",
+	.id = DEVLINK_DPIPE_HEADER_IPV6,
+	.fields = devlink_dpipe_fields_ipv6,
+	.fields_count = ARRAY_SIZE(devlink_dpipe_fields_ipv6),
+	.global = true,
+};
+EXPORT_SYMBOL(devlink_dpipe_header_ipv6);
+
 EXPORT_TRACEPOINT_SYMBOL_GPL(devlink_hwmsg);
 
 static LIST_HEAD(devlink_list);
@@ -1613,13 +1664,15 @@ static int devlink_dpipe_table_put(struct sk_buff *skb,
 				   struct devlink_dpipe_table *table)
 {
 	struct nlattr *table_attr;
+	u64 table_size;
 
+	table_size = table->table_ops->size_get(table->priv);
 	table_attr = nla_nest_start(skb, DEVLINK_ATTR_DPIPE_TABLE);
 	if (!table_attr)
 		return -EMSGSIZE;
 
 	if (nla_put_string(skb, DEVLINK_ATTR_DPIPE_TABLE_NAME, table->name) ||
-	    nla_put_u64_64bit(skb, DEVLINK_ATTR_DPIPE_TABLE_SIZE, table->size,
+	    nla_put_u64_64bit(skb, DEVLINK_ATTR_DPIPE_TABLE_SIZE, table_size,
 			      DEVLINK_ATTR_PAD))
 		goto nla_put_failure;
 	if (nla_put_u8(skb, DEVLINK_ATTR_DPIPE_TABLE_COUNTERS_ENABLED,
@@ -1723,7 +1776,7 @@ send_done:
 	if (!nlh) {
 		err = devlink_dpipe_send_and_alloc_skb(&skb, info);
 		if (err)
-			goto err_skb_send_alloc;
+			return err;
 		goto send_done;
 	}
 
@@ -1732,7 +1785,6 @@ send_done:
 nla_put_failure:
 	err = -EMSGSIZE;
 err_table_put:
-err_skb_send_alloc:
 	genlmsg_cancel(skb, hdr);
 	nlmsg_free(skb);
 	return err;
@@ -1960,6 +2012,28 @@ int devlink_dpipe_entry_ctx_close(struct devlink_dpipe_dump_ctx *dump_ctx)
 }
 EXPORT_SYMBOL_GPL(devlink_dpipe_entry_ctx_close);
 
+void devlink_dpipe_entry_clear(struct devlink_dpipe_entry *entry)
+
+{
+	unsigned int value_count, value_index;
+	struct devlink_dpipe_value *value;
+
+	value = entry->action_values;
+	value_count = entry->action_values_count;
+	for (value_index = 0; value_index < value_count; value_index++) {
+		kfree(value[value_index].value);
+		kfree(value[value_index].mask);
+	}
+
+	value = entry->match_values;
+	value_count = entry->match_values_count;
+	for (value_index = 0; value_index < value_count; value_index++) {
+		kfree(value[value_index].value);
+		kfree(value[value_index].mask);
+	}
+}
+EXPORT_SYMBOL(devlink_dpipe_entry_clear);
+
 static int devlink_dpipe_entries_fill(struct genl_info *info,
 				      enum devlink_command cmd, int flags,
 				      struct devlink_dpipe_table *table)
@@ -1976,7 +2050,7 @@ static int devlink_dpipe_entries_fill(struct genl_info *info,
 					     table->counters_enabled,
 					     &dump_ctx);
 	if (err)
-		goto err_entries_dump;
+		return err;
 
 send_done:
 	nlh = nlmsg_put(dump_ctx.skb, info->snd_portid, info->snd_seq,
@@ -1984,16 +2058,10 @@ send_done:
 	if (!nlh) {
 		err = devlink_dpipe_send_and_alloc_skb(&dump_ctx.skb, info);
 		if (err)
-			goto err_skb_send_alloc;
+			return err;
 		goto send_done;
 	}
 	return genlmsg_reply(dump_ctx.skb, info);
-
-err_entries_dump:
-err_skb_send_alloc:
-	genlmsg_cancel(dump_ctx.skb, dump_ctx.hdr);
-	nlmsg_free(dump_ctx.skb);
-	return err;
 }
 
 static int devlink_nl_cmd_dpipe_entries_get(struct sk_buff *skb,
@@ -2132,7 +2200,7 @@ send_done:
 	if (!nlh) {
 		err = devlink_dpipe_send_and_alloc_skb(&skb, info);
 		if (err)
-			goto err_skb_send_alloc;
+			return err;
 		goto send_done;
 	}
 	return genlmsg_reply(skb, info);
@@ -2140,7 +2208,6 @@ send_done:
 nla_put_failure:
 	err = -EMSGSIZE;
 err_table_put:
-err_skb_send_alloc:
 	genlmsg_cancel(skb, hdr);
 	nlmsg_free(skb);
 	return err;
@@ -2684,19 +2751,20 @@ EXPORT_SYMBOL_GPL(devlink_dpipe_table_counter_enabled);
  *	@table_name: table name
  *	@table_ops: table ops
  *	@priv: priv
- *	@size: size
  *	@counter_control_extern: external control for counters
  */
 int devlink_dpipe_table_register(struct devlink *devlink,
 				 const char *table_name,
 				 struct devlink_dpipe_table_ops *table_ops,
-				 void *priv, u64 size,
-				 bool counter_control_extern)
+				 void *priv, bool counter_control_extern)
 {
 	struct devlink_dpipe_table *table;
 
 	if (devlink_dpipe_table_find(&devlink->dpipe_table_list, table_name))
 		return -EEXIST;
+
+	if (WARN_ON(!table_ops->size_get))
+		return -EINVAL;
 
 	table = kzalloc(sizeof(*table), GFP_KERNEL);
 	if (!table)
@@ -2705,7 +2773,6 @@ int devlink_dpipe_table_register(struct devlink *devlink,
 	table->name = table_name;
 	table->table_ops = table_ops;
 	table->priv = priv;
-	table->size = size;
 	table->counter_control_extern = counter_control_extern;
 
 	mutex_lock(&devlink_mutex);

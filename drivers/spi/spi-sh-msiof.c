@@ -38,6 +38,7 @@ struct sh_msiof_chipdata {
 	u16 tx_fifo_size;
 	u16 rx_fifo_size;
 	u16 master_flags;
+	u16 min_div;
 };
 
 struct sh_msiof_spi_priv {
@@ -49,10 +50,13 @@ struct sh_msiof_spi_priv {
 	struct completion done;
 	unsigned int tx_fifo_size;
 	unsigned int rx_fifo_size;
+	unsigned int min_div;
 	void *tx_dma_page;
 	void *rx_dma_page;
 	dma_addr_t tx_dma_addr;
 	dma_addr_t rx_dma_addr;
+	bool native_cs_inited;
+	bool native_cs_high;
 	bool slave_aborted;
 };
 
@@ -260,6 +264,8 @@ static void sh_msiof_spi_set_clk_regs(struct sh_msiof_spi_priv *p,
 
 	if (!WARN_ON(!spi_hz || !parent_rate))
 		div = DIV_ROUND_UP(parent_rate, spi_hz);
+
+	div = max_t(unsigned long, div, p->min_div);
 
 	for (k = 0; k < ARRAY_SIZE(sh_msiof_spi_div_table); k++) {
 		brps = DIV_ROUND_UP(div, sh_msiof_spi_div_table[k].div);
@@ -524,8 +530,7 @@ static int sh_msiof_spi_setup(struct spi_device *spi)
 {
 	struct device_node	*np = spi->master->dev.of_node;
 	struct sh_msiof_spi_priv *p = spi_master_get_devdata(spi->master);
-
-	pm_runtime_get_sync(&p->pdev->dev);
+	u32 clr, set, tmp;
 
 	if (!np) {
 		/*
@@ -535,19 +540,31 @@ static int sh_msiof_spi_setup(struct spi_device *spi)
 		spi->cs_gpio = (uintptr_t)spi->controller_data;
 	}
 
-	/* Configure pins before deasserting CS */
-	sh_msiof_spi_set_pin_regs(p, !!(spi->mode & SPI_CPOL),
-				  !!(spi->mode & SPI_CPHA),
-				  !!(spi->mode & SPI_3WIRE),
-				  !!(spi->mode & SPI_LSB_FIRST),
-				  !!(spi->mode & SPI_CS_HIGH));
-
-	if (spi->cs_gpio >= 0)
+	if (spi->cs_gpio >= 0) {
 		gpio_set_value(spi->cs_gpio, !(spi->mode & SPI_CS_HIGH));
+		return 0;
+	}
 
+	if (spi_controller_is_slave(p->master))
+		return 0;
 
+	if (p->native_cs_inited &&
+	    (p->native_cs_high == !!(spi->mode & SPI_CS_HIGH)))
+		return 0;
+
+	/* Configure native chip select mode/polarity early */
+	clr = MDR1_SYNCMD_MASK;
+	set = MDR1_TRMD | TMDR1_PCON | MDR1_SYNCMD_SPI;
+	if (spi->mode & SPI_CS_HIGH)
+		clr |= BIT(MDR1_SYNCAC_SHIFT);
+	else
+		set |= BIT(MDR1_SYNCAC_SHIFT);
+	pm_runtime_get_sync(&p->pdev->dev);
+	tmp = sh_msiof_read(p, TMDR1) & ~clr;
+	sh_msiof_write(p, TMDR1, tmp | set);
 	pm_runtime_put(&p->pdev->dev);
-
+	p->native_cs_high = spi->mode & SPI_CS_HIGH;
+	p->native_cs_inited = true;
 	return 0;
 }
 
@@ -780,10 +797,20 @@ static int sh_msiof_dma_once(struct sh_msiof_spi_priv *p, const void *tx,
 		goto stop_dma;
 	}
 
-	/* wait for tx fifo to be emptied / rx fifo to be filled */
+	/* wait for tx/rx DMA completion */
 	ret = sh_msiof_wait_for_completion(p);
 	if (ret)
 		goto stop_reset;
+
+	if (!rx) {
+		reinit_completion(&p->done);
+		sh_msiof_write(p, IER, IER_TEOFE);
+
+		/* wait for tx fifo to be emptied */
+		ret = sh_msiof_wait_for_completion(p);
+		if (ret)
+			goto stop_reset;
+	}
 
 	/* clear status bits */
 	sh_msiof_reset_str(p);
@@ -896,7 +923,7 @@ static int sh_msiof_transfer_one(struct spi_master *master,
 				break;
 			copy32 = copy_bswap32;
 		} else if (bits <= 16) {
-			if (l & 1)
+			if (l & 3)
 				break;
 			copy32 = copy_wswap32;
 		} else {
@@ -998,24 +1025,35 @@ static const struct sh_msiof_chipdata sh_data = {
 	.tx_fifo_size = 64,
 	.rx_fifo_size = 64,
 	.master_flags = 0,
+	.min_div = 1,
 };
 
-static const struct sh_msiof_chipdata r8a779x_data = {
+static const struct sh_msiof_chipdata rcar_gen2_data = {
 	.tx_fifo_size = 64,
 	.rx_fifo_size = 64,
 	.master_flags = SPI_MASTER_MUST_TX,
+	.min_div = 1,
+};
+
+static const struct sh_msiof_chipdata rcar_gen3_data = {
+	.tx_fifo_size = 64,
+	.rx_fifo_size = 64,
+	.master_flags = SPI_MASTER_MUST_TX,
+	.min_div = 2,
 };
 
 static const struct of_device_id sh_msiof_match[] = {
 	{ .compatible = "renesas,sh-mobile-msiof", .data = &sh_data },
-	{ .compatible = "renesas,msiof-r8a7790",   .data = &r8a779x_data },
-	{ .compatible = "renesas,msiof-r8a7791",   .data = &r8a779x_data },
-	{ .compatible = "renesas,msiof-r8a7792",   .data = &r8a779x_data },
-	{ .compatible = "renesas,msiof-r8a7793",   .data = &r8a779x_data },
-	{ .compatible = "renesas,msiof-r8a7794",   .data = &r8a779x_data },
-	{ .compatible = "renesas,rcar-gen2-msiof", .data = &r8a779x_data },
-	{ .compatible = "renesas,msiof-r8a7796",   .data = &r8a779x_data },
-	{ .compatible = "renesas,rcar-gen3-msiof", .data = &r8a779x_data },
+	{ .compatible = "renesas,msiof-r8a7743",   .data = &rcar_gen2_data },
+	{ .compatible = "renesas,msiof-r8a7745",   .data = &rcar_gen2_data },
+	{ .compatible = "renesas,msiof-r8a7790",   .data = &rcar_gen2_data },
+	{ .compatible = "renesas,msiof-r8a7791",   .data = &rcar_gen2_data },
+	{ .compatible = "renesas,msiof-r8a7792",   .data = &rcar_gen2_data },
+	{ .compatible = "renesas,msiof-r8a7793",   .data = &rcar_gen2_data },
+	{ .compatible = "renesas,msiof-r8a7794",   .data = &rcar_gen2_data },
+	{ .compatible = "renesas,rcar-gen2-msiof", .data = &rcar_gen2_data },
+	{ .compatible = "renesas,msiof-r8a7796",   .data = &rcar_gen3_data },
+	{ .compatible = "renesas,rcar-gen3-msiof", .data = &rcar_gen3_data },
 	{ .compatible = "renesas,sh-msiof",        .data = &sh_data }, /* Deprecated */
 	{},
 };
@@ -1175,12 +1213,10 @@ free_tx_chan:
 static void sh_msiof_release_dma(struct sh_msiof_spi_priv *p)
 {
 	struct spi_master *master = p->master;
-	struct device *dev;
 
 	if (!master->dma_tx)
 		return;
 
-	dev = &p->pdev->dev;
 	dma_unmap_single(master->dma_rx->device->dev, p->rx_dma_addr,
 			 PAGE_SIZE, DMA_FROM_DEVICE);
 	dma_unmap_single(master->dma_tx->device->dev, p->tx_dma_addr,
@@ -1196,15 +1232,13 @@ static int sh_msiof_spi_probe(struct platform_device *pdev)
 	struct resource	*r;
 	struct spi_master *master;
 	const struct sh_msiof_chipdata *chipdata;
-	const struct of_device_id *of_id;
 	struct sh_msiof_spi_info *info;
 	struct sh_msiof_spi_priv *p;
 	int i;
 	int ret;
 
-	of_id = of_match_device(sh_msiof_match, &pdev->dev);
-	if (of_id) {
-		chipdata = of_id->data;
+	chipdata = of_device_get_match_data(&pdev->dev);
+	if (chipdata) {
 		info = sh_msiof_spi_parse_dt(&pdev->dev);
 	} else {
 		chipdata = (const void *)pdev->id_entry->driver_data;
@@ -1230,6 +1264,7 @@ static int sh_msiof_spi_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, p);
 	p->master = master;
 	p->info = info;
+	p->min_div = chipdata->min_div;
 
 	init_completion(&p->done);
 

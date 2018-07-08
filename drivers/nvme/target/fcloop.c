@@ -193,9 +193,6 @@ out_free_options:
 
 #define TGTPORT_OPTS	(NVMF_OPT_WWNN | NVMF_OPT_WWPN)
 
-#define ALL_OPTS	(NVMF_OPT_WWNN | NVMF_OPT_WWPN | NVMF_OPT_ROLES | \
-			 NVMF_OPT_FCADDR | NVMF_OPT_LPWWNN | NVMF_OPT_LPWWPN)
-
 
 static DEFINE_SPINLOCK(fcloop_lock);
 static LIST_HEAD(fcloop_lports);
@@ -205,6 +202,10 @@ struct fcloop_lport {
 	struct nvme_fc_local_port *localport;
 	struct list_head lport_list;
 	struct completion unreg_done;
+};
+
+struct fcloop_lport_priv {
+	struct fcloop_lport *lport;
 };
 
 struct fcloop_rport {
@@ -227,8 +228,6 @@ struct fcloop_nport {
 	struct fcloop_lport *lport;
 	struct list_head nport_list;
 	struct kref ref;
-	struct completion rport_unreg_done;
-	struct completion tport_unreg_done;
 	u64 node_name;
 	u64 port_name;
 	u32 port_role;
@@ -375,6 +374,7 @@ fcloop_tgt_fcprqst_done_work(struct work_struct *work)
 
 	spin_lock(&tfcp_req->reqlock);
 	fcpreq = tfcp_req->fcpreq;
+	tfcp_req->fcpreq = NULL;
 	spin_unlock(&tfcp_req->reqlock);
 
 	if (tport->remoteport && fcpreq) {
@@ -579,7 +579,7 @@ fcloop_tgt_fcp_abort(struct nvmet_fc_target_port *tgtport,
 	tfcp_req->aborted = true;
 	spin_unlock(&tfcp_req->reqlock);
 
-	tfcp_req->status = NVME_SC_FC_TRANSPORT_ABORTED;
+	tfcp_req->status = NVME_SC_INTERNAL;
 
 	/*
 	 * nothing more to do. If io wasn't active, the transport should
@@ -616,11 +616,7 @@ fcloop_fcp_abort(struct nvme_fc_local_port *localport,
 
 	if (!tfcp_req)
 		/* abort has already been called */
-		return;
-
-	if (rport->targetport)
-		nvmet_fc_rcv_fcp_abort(rport->targetport,
-					&tfcp_req->tgt_fcp_req);
+		goto finish;
 
 	/* break initiator/target relationship for io */
 	spin_lock(&tfcp_req->reqlock);
@@ -628,15 +624,47 @@ fcloop_fcp_abort(struct nvme_fc_local_port *localport,
 	tfcp_req->fcpreq = NULL;
 	spin_unlock(&tfcp_req->reqlock);
 
+	if (rport->targetport)
+		nvmet_fc_rcv_fcp_abort(rport->targetport,
+					&tfcp_req->tgt_fcp_req);
+
+finish:
 	/* post the aborted io completion */
 	fcpreq->status = -ECANCELED;
 	schedule_work(&inireq->iniwork);
 }
 
 static void
+fcloop_nport_free(struct kref *ref)
+{
+	struct fcloop_nport *nport =
+		container_of(ref, struct fcloop_nport, ref);
+	unsigned long flags;
+
+	spin_lock_irqsave(&fcloop_lock, flags);
+	list_del(&nport->nport_list);
+	spin_unlock_irqrestore(&fcloop_lock, flags);
+
+	kfree(nport);
+}
+
+static void
+fcloop_nport_put(struct fcloop_nport *nport)
+{
+	kref_put(&nport->ref, fcloop_nport_free);
+}
+
+static int
+fcloop_nport_get(struct fcloop_nport *nport)
+{
+	return kref_get_unless_zero(&nport->ref);
+}
+
+static void
 fcloop_localport_delete(struct nvme_fc_local_port *localport)
 {
-	struct fcloop_lport *lport = localport->private;
+	struct fcloop_lport_priv *lport_priv = localport->private;
+	struct fcloop_lport *lport = lport_priv->lport;
 
 	/* release any threads waiting for the unreg to complete */
 	complete(&lport->unreg_done);
@@ -647,8 +675,7 @@ fcloop_remoteport_delete(struct nvme_fc_remote_port *remoteport)
 {
 	struct fcloop_rport *rport = remoteport->private;
 
-	/* release any threads waiting for the unreg to complete */
-	complete(&rport->nport->rport_unreg_done);
+	fcloop_nport_put(rport->nport);
 }
 
 static void
@@ -656,8 +683,7 @@ fcloop_targetport_delete(struct nvmet_fc_target_port *targetport)
 {
 	struct fcloop_tport *tport = targetport->private;
 
-	/* release any threads waiting for the unreg to complete */
-	complete(&tport->nport->tport_unreg_done);
+	fcloop_nport_put(tport->nport);
 }
 
 #define	FCLOOP_HW_QUEUES		4
@@ -678,7 +704,7 @@ static struct nvme_fc_port_template fctemplate = {
 	.max_dif_sgl_segments	= FCLOOP_SGL_SEGS,
 	.dma_boundary		= FCLOOP_DMABOUND_4G,
 	/* sizes of additional private data for data structures */
-	.local_priv_sz		= sizeof(struct fcloop_lport),
+	.local_priv_sz		= sizeof(struct fcloop_lport_priv),
 	.remote_priv_sz		= sizeof(struct fcloop_rport),
 	.lsrqst_priv_sz		= sizeof(struct fcloop_lsreq),
 	.fcprqst_priv_sz	= sizeof(struct fcloop_ini_fcpreq),
@@ -709,11 +735,17 @@ fcloop_create_local_port(struct device *dev, struct device_attribute *attr,
 	struct fcloop_ctrl_options *opts;
 	struct nvme_fc_local_port *localport;
 	struct fcloop_lport *lport;
-	int ret;
+	struct fcloop_lport_priv *lport_priv;
+	unsigned long flags;
+	int ret = -ENOMEM;
+
+	lport = kzalloc(sizeof(*lport), GFP_KERNEL);
+	if (!lport)
+		return -ENOMEM;
 
 	opts = kzalloc(sizeof(*opts), GFP_KERNEL);
 	if (!opts)
-		return -ENOMEM;
+		goto out_free_lport;
 
 	ret = fcloop_parse_options(opts, buf);
 	if (ret)
@@ -725,6 +757,7 @@ fcloop_create_local_port(struct device *dev, struct device_attribute *attr,
 		goto out_free_opts;
 	}
 
+	memset(&pinfo, 0, sizeof(pinfo));
 	pinfo.node_name = opts->wwnn;
 	pinfo.port_name = opts->wwpn;
 	pinfo.port_role = opts->roles;
@@ -732,23 +765,25 @@ fcloop_create_local_port(struct device *dev, struct device_attribute *attr,
 
 	ret = nvme_fc_register_localport(&pinfo, &fctemplate, NULL, &localport);
 	if (!ret) {
-		unsigned long flags;
-
 		/* success */
-		lport = localport->private;
+		lport_priv = localport->private;
+		lport_priv->lport = lport;
+
 		lport->localport = localport;
 		INIT_LIST_HEAD(&lport->lport_list);
 
 		spin_lock_irqsave(&fcloop_lock, flags);
 		list_add_tail(&lport->lport_list, &fcloop_lports);
 		spin_unlock_irqrestore(&fcloop_lock, flags);
-
-		/* mark all of the input buffer consumed */
-		ret = count;
 	}
 
 out_free_opts:
 	kfree(opts);
+out_free_lport:
+	/* free only if we're going to fail */
+	if (ret)
+		kfree(lport);
+
 	return ret ? ret : count;
 }
 
@@ -769,6 +804,8 @@ __wait_localport_unreg(struct fcloop_lport *lport)
 	ret = nvme_fc_unregister_localport(lport->localport);
 
 	wait_for_completion(&lport->unreg_done);
+
+	kfree(lport);
 
 	return ret;
 }
@@ -805,32 +842,6 @@ fcloop_delete_local_port(struct device *dev, struct device_attribute *attr,
 	ret = __wait_localport_unreg(lport);
 
 	return ret ? ret : count;
-}
-
-static void
-fcloop_nport_free(struct kref *ref)
-{
-	struct fcloop_nport *nport =
-		container_of(ref, struct fcloop_nport, ref);
-	unsigned long flags;
-
-	spin_lock_irqsave(&fcloop_lock, flags);
-	list_del(&nport->nport_list);
-	spin_unlock_irqrestore(&fcloop_lock, flags);
-
-	kfree(nport);
-}
-
-static void
-fcloop_nport_put(struct fcloop_nport *nport)
-{
-	kref_put(&nport->ref, fcloop_nport_free);
-}
-
-static int
-fcloop_nport_get(struct fcloop_nport *nport)
-{
-	return kref_get_unless_zero(&nport->ref);
 }
 
 static struct fcloop_nport *
@@ -941,6 +952,7 @@ fcloop_create_remote_port(struct device *dev, struct device_attribute *attr,
 	if (!nport)
 		return -EIO;
 
+	memset(&pinfo, 0, sizeof(pinfo));
 	pinfo.node_name = nport->node_name;
 	pinfo.port_name = nport->port_name;
 	pinfo.port_role = nport->port_role;
@@ -982,24 +994,12 @@ __unlink_remote_port(struct fcloop_nport *nport)
 }
 
 static int
-__wait_remoteport_unreg(struct fcloop_nport *nport, struct fcloop_rport *rport)
+__remoteport_unreg(struct fcloop_nport *nport, struct fcloop_rport *rport)
 {
-	int ret;
-
 	if (!rport)
 		return -EALREADY;
 
-	init_completion(&nport->rport_unreg_done);
-
-	ret = nvme_fc_unregister_remoteport(rport->remoteport);
-	if (ret)
-		return ret;
-
-	wait_for_completion(&nport->rport_unreg_done);
-
-	fcloop_nport_put(nport);
-
-	return ret;
+	return nvme_fc_unregister_remoteport(rport->remoteport);
 }
 
 static ssize_t
@@ -1032,7 +1032,7 @@ fcloop_delete_remote_port(struct device *dev, struct device_attribute *attr,
 	if (!nport)
 		return -ENOENT;
 
-	ret = __wait_remoteport_unreg(nport, rport);
+	ret = __remoteport_unreg(nport, rport);
 
 	return ret ? ret : count;
 }
@@ -1089,24 +1089,12 @@ __unlink_target_port(struct fcloop_nport *nport)
 }
 
 static int
-__wait_targetport_unreg(struct fcloop_nport *nport, struct fcloop_tport *tport)
+__targetport_unreg(struct fcloop_nport *nport, struct fcloop_tport *tport)
 {
-	int ret;
-
 	if (!tport)
 		return -EALREADY;
 
-	init_completion(&nport->tport_unreg_done);
-
-	ret = nvmet_fc_unregister_targetport(tport->targetport);
-	if (ret)
-		return ret;
-
-	wait_for_completion(&nport->tport_unreg_done);
-
-	fcloop_nport_put(nport);
-
-	return ret;
+	return nvmet_fc_unregister_targetport(tport->targetport);
 }
 
 static ssize_t
@@ -1114,7 +1102,7 @@ fcloop_delete_target_port(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
 	struct fcloop_nport *nport = NULL, *tmpport;
-	struct fcloop_tport *tport;
+	struct fcloop_tport *tport = NULL;
 	u64 nodename, portname;
 	unsigned long flags;
 	int ret;
@@ -1139,7 +1127,7 @@ fcloop_delete_target_port(struct device *dev, struct device_attribute *attr,
 	if (!nport)
 		return -ENOENT;
 
-	ret = __wait_targetport_unreg(nport, tport);
+	ret = __targetport_unreg(nport, tport);
 
 	return ret ? ret : count;
 }
@@ -1226,11 +1214,11 @@ static void __exit fcloop_exit(void)
 
 		spin_unlock_irqrestore(&fcloop_lock, flags);
 
-		ret = __wait_targetport_unreg(nport, tport);
+		ret = __targetport_unreg(nport, tport);
 		if (ret)
 			pr_warn("%s: Failed deleting target port\n", __func__);
 
-		ret = __wait_remoteport_unreg(nport, rport);
+		ret = __remoteport_unreg(nport, rport);
 		if (ret)
 			pr_warn("%s: Failed deleting remote port\n", __func__);
 

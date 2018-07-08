@@ -1284,6 +1284,8 @@ static void ack_a_interrupt(struct comedi_device *dev, unsigned short a_status)
 		ack |= NISTC_INTA_ACK_AI_START;
 	if (a_status & NISTC_AI_STATUS1_STOP)
 		ack |= NISTC_INTA_ACK_AI_STOP;
+	if (a_status & NISTC_AI_STATUS1_OVER)
+		ack |= NISTC_INTA_ACK_AI_ERR;
 	if (ack)
 		ni_stc_writew(dev, ack, NISTC_INTA_ACK_REG);
 }
@@ -1962,7 +1964,8 @@ static unsigned int ni_timer_to_ns(const struct comedi_device *dev, int timer)
 static void ni_cmd_set_mite_transfer(struct mite_ring *ring,
 				     struct comedi_subdevice *sdev,
 				     const struct comedi_cmd *cmd,
-				     unsigned int max_count) {
+				     unsigned int max_count)
+{
 #ifdef PCIDMA
 	unsigned int nbytes = max_count;
 

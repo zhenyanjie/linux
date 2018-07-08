@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
 /*
  * f_mass_storage.c -- Mass Storage USB Composite Function
  *
@@ -684,9 +685,8 @@ static int do_read(struct fsg_common *common)
 
 		/* Perform the read */
 		file_offset_tmp = file_offset;
-		nread = vfs_read(curlun->filp,
-				 (char __user *)bh->buf,
-				 amount, &file_offset_tmp);
+		nread = kernel_read(curlun->filp, bh->buf, amount,
+				&file_offset_tmp);
 		VLDBG(curlun, "file read %u @ %llu -> %d\n", amount,
 		      (unsigned long long)file_offset, (int)nread);
 		if (signal_pending(current))
@@ -881,8 +881,8 @@ static int do_write(struct fsg_common *common)
 
 		/* Perform the write */
 		file_offset_tmp = file_offset;
-		nwritten = vfs_write(curlun->filp, (char __user *)bh->buf,
-				amount, &file_offset_tmp);
+		nwritten = kernel_write(curlun->filp, bh->buf, amount,
+				&file_offset_tmp);
 		VLDBG(curlun, "file write %u @ %llu -> %d\n", amount,
 				(unsigned long long)file_offset, (int)nwritten);
 		if (signal_pending(current))
@@ -1019,9 +1019,8 @@ static int do_verify(struct fsg_common *common)
 
 		/* Perform the read */
 		file_offset_tmp = file_offset;
-		nread = vfs_read(curlun->filp,
-				(char __user *) bh->buf,
-				amount, &file_offset_tmp);
+		nread = kernel_read(curlun->filp, bh->buf, amount,
+				&file_offset_tmp);
 		VLDBG(curlun, "file read %u @ %llu -> %d\n", amount,
 				(unsigned long long) file_offset,
 				(int) nread);
@@ -2452,13 +2451,6 @@ static int fsg_main_thread(void *common_)
 	/* Allow the thread to be frozen */
 	set_freezable();
 
-	/*
-	 * Arrange for userspace references to be interpreted as kernel
-	 * pointers.  That way we can pass a kernel pointer to a routine
-	 * that expects a __user pointer and it will work okay.
-	 */
-	set_fs(get_ds());
-
 	/* The main loop */
 	while (common->state != FSG_STATE_TERMINATED) {
 		if (exception_in_progress(common) || signal_pending(current)) {
@@ -3149,7 +3141,7 @@ static struct configfs_attribute *fsg_lun_attrs[] = {
 	NULL,
 };
 
-static struct config_item_type fsg_lun_type = {
+static const struct config_item_type fsg_lun_type = {
 	.ct_item_ops	= &fsg_lun_item_ops,
 	.ct_attrs	= fsg_lun_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -3340,7 +3332,7 @@ static struct configfs_group_operations fsg_group_ops = {
 	.drop_item	= fsg_lun_drop,
 };
 
-static struct config_item_type fsg_func_type = {
+static const struct config_item_type fsg_func_type = {
 	.ct_item_ops	= &fsg_item_ops,
 	.ct_group_ops	= &fsg_group_ops,
 	.ct_attrs	= fsg_attrs,
