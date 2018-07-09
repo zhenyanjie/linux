@@ -246,6 +246,9 @@ static int ircomm_tty_get_serial_info(struct ircomm_tty_cb *self,
 {
 	struct serial_struct info;
 
+	if (!retinfo)
+		return -EFAULT;
+
 	memset(&info, 0, sizeof(info));
 	info.line = self->line;
 	info.flags = self->port.flags;
@@ -255,6 +258,11 @@ static int ircomm_tty_get_serial_info(struct ircomm_tty_cb *self,
 
 	/* For compatibility  */
 	info.type = PORT_16550A;
+	info.port = 0;
+	info.irq = 0;
+	info.xmit_fifo_size = 0;
+	info.hub6 = 0;
+	info.custom_divisor = 0;
 
 	if (copy_to_user(retinfo, &info, sizeof(*retinfo)))
 		return -EFAULT;

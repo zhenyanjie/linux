@@ -33,8 +33,6 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 
-struct media_device;
-
 /*
  * Flag to mark the media_devnode struct as registered. Drivers must not touch
  * this flag directly, it will be set and cleared by media_devnode_register and
@@ -69,15 +67,13 @@ struct media_file_operations {
 
 /**
  * struct media_devnode - Media device node
- * @media_dev:	pointer to struct &media_device
  * @fops:	pointer to struct &media_file_operations with media device ops
- * @dev:	pointer to struct &device containing the media controller device
+ * @dev:	struct device pointer for the media controller device
  * @cdev:	struct cdev pointer character device
  * @parent:	parent device
  * @minor:	device node minor number
- * @flags:	flags, combination of the ``MEDIA_FLAG_*`` constants
- * @release:	release callback called at the end of ``media_devnode_release()``
- *		routine at media-device.c.
+ * @flags:	flags, combination of the MEDIA_FLAG_* constants
+ * @release:	release callback called at the end of media_devnode_release()
  *
  * This structure represents a media-related device node.
  *
@@ -85,8 +81,6 @@ struct media_file_operations {
  * before registering the node.
  */
 struct media_devnode {
-	struct media_device *media_dev;
-
 	/* device ops */
 	const struct media_file_operations *fops;
 
@@ -100,7 +94,7 @@ struct media_devnode {
 	unsigned long flags;		/* Use bitops to access flags */
 
 	/* callbacks */
-	void (*release)(struct media_devnode *devnode);
+	void (*release)(struct media_devnode *mdev);
 };
 
 /* dev to media_devnode */
@@ -109,8 +103,7 @@ struct media_devnode {
 /**
  * media_devnode_register - register a media device node
  *
- * @mdev: struct media_device we want to register a device node
- * @devnode: media device node structure we want to register
+ * @mdev: media device node structure we want to register
  * @owner: should be filled with %THIS_MODULE
  *
  * The registration code assigns minor numbers and registers the new device node
@@ -123,33 +116,20 @@ struct media_devnode {
  * the media_devnode structure is *not* called, so the caller is responsible for
  * freeing any data.
  */
-int __must_check media_devnode_register(struct media_device *mdev,
-					struct media_devnode *devnode,
+int __must_check media_devnode_register(struct media_devnode *mdev,
 					struct module *owner);
 
 /**
- * media_devnode_unregister_prepare - clear the media device node register bit
- * @devnode: the device node to prepare for unregister
- *
- * This clears the passed device register bit. Future open calls will be met
- * with errors. Should be called before media_devnode_unregister() to avoid
- * races with unregister and device file open calls.
- *
- * This function can safely be called if the device node has never been
- * registered or has already been unregistered.
- */
-void media_devnode_unregister_prepare(struct media_devnode *devnode);
-
-/**
  * media_devnode_unregister - unregister a media device node
- * @devnode: the device node to unregister
+ * @mdev: the device node to unregister
  *
  * This unregisters the passed device. Future open calls will be met with
  * errors.
  *
- * Should be called after media_devnode_unregister_prepare()
+ * This function can safely be called if the device node has never been
+ * registered or has already been unregistered.
  */
-void media_devnode_unregister(struct media_devnode *devnode);
+void media_devnode_unregister(struct media_devnode *mdev);
 
 /**
  * media_devnode_data - returns a pointer to the &media_devnode
@@ -165,16 +145,11 @@ static inline struct media_devnode *media_devnode_data(struct file *filp)
  * media_devnode_is_registered - returns true if &media_devnode is registered;
  *	false otherwise.
  *
- * @devnode: pointer to struct &media_devnode.
- *
- * Note: If mdev is NULL, it also returns false.
+ * @mdev: pointer to struct &media_devnode.
  */
-static inline int media_devnode_is_registered(struct media_devnode *devnode)
+static inline int media_devnode_is_registered(struct media_devnode *mdev)
 {
-	if (!devnode)
-		return false;
-
-	return test_bit(MEDIA_FLAG_REGISTERED, &devnode->flags);
+	return test_bit(MEDIA_FLAG_REGISTERED, &mdev->flags);
 }
 
 #endif /* _MEDIA_DEVNODE_H */

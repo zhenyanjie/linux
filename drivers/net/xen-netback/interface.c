@@ -105,11 +105,7 @@ static int xenvif_poll(struct napi_struct *napi, int budget)
 
 	if (work_done < budget) {
 		napi_complete(napi);
-		/* If the queue is rate-limited, it shall be
-		 * rescheduled in the timer callback.
-		 */
-		if (likely(!queue->rate_limited))
-			xenvif_napi_schedule_or_enable_events(queue);
+		xenvif_napi_schedule_or_enable_events(queue);
 	}
 
 	return work_done;
@@ -128,6 +124,15 @@ irqreturn_t xenvif_interrupt(int irq, void *dev_id)
 {
 	xenvif_tx_interrupt(irq, dev_id);
 	xenvif_rx_interrupt(irq, dev_id);
+
+	return IRQ_HANDLED;
+}
+
+irqreturn_t xenvif_ctrl_interrupt(int irq, void *dev_id)
+{
+	struct xenvif *vif = dev_id;
+
+	wake_up(&vif->ctrl_wq);
 
 	return IRQ_HANDLED;
 }
@@ -153,8 +158,17 @@ static u16 xenvif_select_queue(struct net_device *dev, struct sk_buff *skb,
 	struct xenvif *vif = netdev_priv(dev);
 	unsigned int size = vif->hash.size;
 
-	if (vif->hash.alg == XEN_NETIF_CTRL_HASH_ALGORITHM_NONE)
-		return fallback(dev, skb) % dev->real_num_tx_queues;
+	if (vif->hash.alg == XEN_NETIF_CTRL_HASH_ALGORITHM_NONE) {
+		u16 index = fallback(dev, skb) % dev->real_num_tx_queues;
+
+		/* Make sure there is no hash information in the socket
+		 * buffer otherwise it would be incorrectly forwarded
+		 * to the frontend.
+		 */
+		skb_clear_hash(skb);
+
+		return index;
+	}
 
 	xenvif_set_skb_hash(vif, skb);
 
@@ -203,13 +217,6 @@ static int xenvif_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	cb = XENVIF_RX_CB(skb);
 	cb->expires = jiffies + vif->drain_timeout;
 
-	/* If there is no hash algorithm configured then make sure there
-	 * is no hash information in the socket buffer otherwise it
-	 * would be incorrectly forwarded to the frontend.
-	 */
-	if (vif->hash.alg == XEN_NETIF_CTRL_HASH_ALGORITHM_NONE)
-		skb_clear_hash(skb);
-
 	xenvif_rx_queue_tail(queue, skb);
 	xenvif_kick_thread(queue);
 
@@ -225,18 +232,18 @@ static struct net_device_stats *xenvif_get_stats(struct net_device *dev)
 {
 	struct xenvif *vif = netdev_priv(dev);
 	struct xenvif_queue *queue = NULL;
-	u64 rx_bytes = 0;
-	u64 rx_packets = 0;
-	u64 tx_bytes = 0;
-	u64 tx_packets = 0;
+	unsigned int num_queues = vif->num_queues;
+	unsigned long rx_bytes = 0;
+	unsigned long rx_packets = 0;
+	unsigned long tx_bytes = 0;
+	unsigned long tx_packets = 0;
 	unsigned int index;
 
-	spin_lock(&vif->lock);
 	if (vif->queues == NULL)
 		goto out;
 
 	/* Aggregate tx and rx stats from each queue */
-	for (index = 0; index < vif->num_queues; ++index) {
+	for (index = 0; index < num_queues; ++index) {
 		queue = &vif->queues[index];
 		rx_bytes += queue->stats.rx_bytes;
 		rx_packets += queue->stats.rx_packets;
@@ -245,8 +252,6 @@ static struct net_device_stats *xenvif_get_stats(struct net_device *dev)
 	}
 
 out:
-	spin_unlock(&vif->lock);
-
 	vif->dev->stats.rx_bytes = rx_bytes;
 	vif->dev->stats.rx_packets = rx_packets;
 	vif->dev->stats.tx_bytes = tx_bytes;
@@ -323,9 +328,9 @@ static netdev_features_t xenvif_fix_features(struct net_device *dev,
 
 	if (!vif->can_sg)
 		features &= ~NETIF_F_SG;
-	if (~(vif->gso_mask) & GSO_BIT(TCPV4))
+	if (~(vif->gso_mask | vif->gso_prefix_mask) & GSO_BIT(TCPV4))
 		features &= ~NETIF_F_TSO;
-	if (~(vif->gso_mask) & GSO_BIT(TCPV6))
+	if (~(vif->gso_mask | vif->gso_prefix_mask) & GSO_BIT(TCPV6))
 		features &= ~NETIF_F_TSO6;
 	if (!vif->ip_csum)
 		features &= ~NETIF_F_IP_CSUM;
@@ -471,7 +476,7 @@ struct xenvif *xenvif_alloc(struct device *parent, domid_t domid,
 	dev->netdev_ops	= &xenvif_netdev_ops;
 	dev->hw_features = NETIF_F_SG |
 		NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM |
-		NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_FRAGLIST;
+		NETIF_F_TSO | NETIF_F_TSO6;
 	dev->features = dev->hw_features | NETIF_F_RXCSUM;
 	dev->ethtool_ops = &xenvif_ethtool_ops;
 
@@ -565,7 +570,8 @@ int xenvif_connect_ctrl(struct xenvif *vif, grant_ref_t ring_ref,
 	struct net_device *dev = vif->dev;
 	void *addr;
 	struct xen_netif_ctrl_sring *shared;
-	int err;
+	struct task_struct *task;
+	int err = -ENOMEM;
 
 	err = xenbus_map_ring_valloc(xenvif_to_xenbus_device(vif),
 				     &ring_ref, 1, &addr);
@@ -575,7 +581,11 @@ int xenvif_connect_ctrl(struct xenvif *vif, grant_ref_t ring_ref,
 	shared = (struct xen_netif_ctrl_sring *)addr;
 	BACK_RING_INIT(&vif->ctrl, shared, XEN_PAGE_SIZE);
 
-	err = bind_interdomain_evtchn_to_irq(vif->domid, evtchn);
+	init_waitqueue_head(&vif->ctrl_wq);
+
+	err = bind_interdomain_evtchn_to_irqhandler(vif->domid, evtchn,
+						    xenvif_ctrl_interrupt,
+						    0, dev->name, vif);
 	if (err < 0)
 		goto err_unmap;
 
@@ -583,12 +593,18 @@ int xenvif_connect_ctrl(struct xenvif *vif, grant_ref_t ring_ref,
 
 	xenvif_init_hash(vif);
 
-	err = request_threaded_irq(vif->ctrl_irq, NULL, xenvif_ctrl_irq_fn,
-				   IRQF_ONESHOT, "xen-netback-ctrl", vif);
-	if (err) {
-		pr_warn("Could not setup irq handler for %s\n", dev->name);
+	task = kthread_create(xenvif_ctrl_kthread, (void *)vif,
+			      "%s-control", dev->name);
+	if (IS_ERR(task)) {
+		pr_warn("Could not allocate kthread for %s\n", dev->name);
+		err = PTR_ERR(task);
 		goto err_deinit;
 	}
+
+	get_task_struct(task);
+	vif->ctrl_task = task;
+
+	wake_up_process(vif->ctrl_task);
 
 	return 0;
 
@@ -758,6 +774,12 @@ void xenvif_disconnect_data(struct xenvif *vif)
 
 void xenvif_disconnect_ctrl(struct xenvif *vif)
 {
+	if (vif->ctrl_task) {
+		kthread_stop(vif->ctrl_task);
+		put_task_struct(vif->ctrl_task);
+		vif->ctrl_task = NULL;
+	}
+
 	if (vif->ctrl_irq) {
 		xenvif_deinit_hash(vif);
 		unbind_from_irqhandler(vif->ctrl_irq, vif);

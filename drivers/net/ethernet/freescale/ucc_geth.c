@@ -2594,10 +2594,11 @@ static int ucc_geth_startup(struct ucc_geth_private *ugeth)
 		} else if (ugeth->ug_info->uf_info.bd_mem_part ==
 			   MEM_PART_MURAM) {
 			out_be32(&ugeth->p_send_q_mem_reg->sqqd[i].bd_ring_base,
-				 (u32)qe_muram_dma(ugeth->p_tx_bd_ring[i]));
+				 (u32) immrbar_virt_to_phys(ugeth->
+							    p_tx_bd_ring[i]));
 			out_be32(&ugeth->p_send_q_mem_reg->sqqd[i].
 				 last_bd_completed_address,
-				 (u32)qe_muram_dma(endOfRing));
+				 (u32) immrbar_virt_to_phys(endOfRing));
 		}
 	}
 
@@ -2843,7 +2844,8 @@ static int ucc_geth_startup(struct ucc_geth_private *ugeth)
 		} else if (ugeth->ug_info->uf_info.bd_mem_part ==
 			   MEM_PART_MURAM) {
 			out_be32(&ugeth->p_rx_bd_qs_tbl[i].externalbdbaseptr,
-				 (u32)qe_muram_dma(ugeth->p_rx_bd_ring[i]));
+				 (u32) immrbar_virt_to_phys(ugeth->
+							    p_rx_bd_ring[i]));
 		}
 		/* rest of fields handled by QE */
 	}
@@ -3754,7 +3756,7 @@ static int ucc_geth_probe(struct platform_device* ofdev)
 			return -EINVAL;
 		}
 		if ((*prop < QE_CLK_NONE) || (*prop > QE_CLK24)) {
-			pr_err("invalid rx-clock property\n");
+			pr_err("invalid rx-clock propperty\n");
 			return -EINVAL;
 		}
 		ug_info->uf_info.rx_clock = *prop;
@@ -3866,8 +3868,9 @@ static int ucc_geth_probe(struct platform_device* ofdev)
 	dev = alloc_etherdev(sizeof(*ugeth));
 
 	if (dev == NULL) {
-		err = -ENOMEM;
-		goto err_deregister_fixed_link;
+		of_node_put(ug_info->tbi_node);
+		of_node_put(ug_info->phy_node);
+		return -ENOMEM;
 	}
 
 	ugeth = netdev_priv(dev);
@@ -3904,7 +3907,10 @@ static int ucc_geth_probe(struct platform_device* ofdev)
 		if (netif_msg_probe(ugeth))
 			pr_err("%s: Cannot register net device, aborting\n",
 			       dev->name);
-		goto err_free_netdev;
+		free_netdev(dev);
+		of_node_put(ug_info->tbi_node);
+		of_node_put(ug_info->phy_node);
+		return err;
 	}
 
 	mac_addr = of_get_mac_address(np);
@@ -3917,29 +3923,16 @@ static int ucc_geth_probe(struct platform_device* ofdev)
 	ugeth->node = np;
 
 	return 0;
-
-err_free_netdev:
-	free_netdev(dev);
-err_deregister_fixed_link:
-	if (of_phy_is_fixed_link(np))
-		of_phy_deregister_fixed_link(np);
-	of_node_put(ug_info->tbi_node);
-	of_node_put(ug_info->phy_node);
-
-	return err;
 }
 
 static int ucc_geth_remove(struct platform_device* ofdev)
 {
 	struct net_device *dev = platform_get_drvdata(ofdev);
 	struct ucc_geth_private *ugeth = netdev_priv(dev);
-	struct device_node *np = ofdev->dev.of_node;
 
 	unregister_netdev(dev);
 	free_netdev(dev);
 	ucc_geth_memclean(ugeth);
-	if (of_phy_is_fixed_link(np))
-		of_phy_deregister_fixed_link(np);
 	of_node_put(ugeth->ug_info->tbi_node);
 	of_node_put(ugeth->ug_info->phy_node);
 

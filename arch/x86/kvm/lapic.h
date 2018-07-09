@@ -20,7 +20,6 @@ struct kvm_timer {
 	u64 tscdeadline;
 	u64 expired_tscdeadline;
 	atomic_t pending;			/* accumulated triggered timers */
-	bool hv_timer_in_use;
 };
 
 struct kvm_lapic {
@@ -81,8 +80,8 @@ bool kvm_irq_delivery_to_apic_fast(struct kvm *kvm, struct kvm_lapic *src,
 
 u64 kvm_get_apic_base(struct kvm_vcpu *vcpu);
 int kvm_set_apic_base(struct kvm_vcpu *vcpu, struct msr_data *msr_info);
-int kvm_apic_get_state(struct kvm_vcpu *vcpu, struct kvm_lapic_state *s);
-int kvm_apic_set_state(struct kvm_vcpu *vcpu, struct kvm_lapic_state *s);
+void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu,
+		struct kvm_lapic_state *s);
 int kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu);
 
 u64 kvm_get_lapic_tscdeadline_msr(struct kvm_vcpu *vcpu);
@@ -108,7 +107,6 @@ static inline bool kvm_hv_vapic_assist_page_enabled(struct kvm_vcpu *vcpu)
 
 int kvm_lapic_enable_pv_eoi(struct kvm_vcpu *vcpu, u64 data);
 void kvm_lapic_init(void);
-void kvm_lapic_exit(void);
 
 #define VEC_POS(v) ((v) & (32 - 1))
 #define REG_POS(v) (((v) >> 5) << 4)
@@ -201,15 +199,9 @@ static inline int kvm_lapic_latched_init(struct kvm_vcpu *vcpu)
 	return lapic_in_kernel(vcpu) && test_bit(KVM_APIC_INIT, &vcpu->arch.apic->pending_events);
 }
 
-static inline u32 kvm_apic_id(struct kvm_lapic *apic)
+static inline int kvm_apic_id(struct kvm_lapic *apic)
 {
-	/* To avoid a race between apic_base and following APIC_ID update when
-	 * switching to x2apic_mode, the x2apic mode returns initial x2apic id.
-	 */
-	if (apic_x2apic_mode(apic))
-		return apic->vcpu->vcpu_id;
-
-	return kvm_lapic_get_reg(apic, APIC_ID) >> 24;
+	return (kvm_lapic_get_reg(apic, APIC_ID) >> 24) & 0xff;
 }
 
 bool kvm_apic_pending_eoi(struct kvm_vcpu *vcpu, int vector);
@@ -220,8 +212,4 @@ bool kvm_intr_is_single_vcpu_fast(struct kvm *kvm, struct kvm_lapic_irq *irq,
 			struct kvm_vcpu **dest_vcpu);
 int kvm_vector_to_index(u32 vector, u32 dest_vcpus,
 			const unsigned long *bitmap, u32 bitmap_size);
-void kvm_lapic_switch_to_sw_timer(struct kvm_vcpu *vcpu);
-void kvm_lapic_switch_to_hv_timer(struct kvm_vcpu *vcpu);
-void kvm_lapic_expired_hv_timer(struct kvm_vcpu *vcpu);
-bool kvm_lapic_hv_timer_in_use(struct kvm_vcpu *vcpu);
 #endif

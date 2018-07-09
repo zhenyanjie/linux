@@ -498,8 +498,7 @@ void usb_stor_adjust_quirks(struct usb_device *udev, unsigned long *fflags)
 			US_FL_NO_READ_DISC_INFO | US_FL_NO_READ_CAPACITY_16 |
 			US_FL_INITIAL_READ10 | US_FL_WRITE_CACHE |
 			US_FL_NO_ATA_1X | US_FL_NO_REPORT_OPCODES |
-			US_FL_MAX_SECTORS_240 | US_FL_NO_REPORT_LUNS |
-			US_FL_ALWAYS_SYNC);
+			US_FL_MAX_SECTORS_240 | US_FL_NO_REPORT_LUNS);
 
 	p = quirks;
 	while (*p) {
@@ -581,9 +580,6 @@ void usb_stor_adjust_quirks(struct usb_device *udev, unsigned long *fflags)
 			break;
 		case 'w':
 			f |= US_FL_NO_WP_DETECT;
-			break;
-		case 'y':
-			f |= US_FL_ALWAYS_SYNC;
 			break;
 		/* Ignore unrecognized flag characters */
 		}
@@ -798,8 +794,10 @@ static int usb_stor_acquire_resources(struct us_data *us)
 	struct task_struct *th;
 
 	us->current_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!us->current_urb)
+	if (!us->current_urb) {
+		usb_stor_dbg(us, "URB allocation failed\n");
 		return -ENOMEM;
+	}
 
 	/*
 	 * Just before we start our control thread, initialize
@@ -1072,17 +1070,17 @@ int usb_stor_probe2(struct us_data *us)
 	result = usb_stor_acquire_resources(us);
 	if (result)
 		goto BadDevice;
-	usb_autopm_get_interface_no_resume(us->pusb_intf);
 	snprintf(us->scsi_name, sizeof(us->scsi_name), "usb-storage %s",
 					dev_name(&us->pusb_intf->dev));
 	result = scsi_add_host(us_to_host(us), dev);
 	if (result) {
 		dev_warn(dev,
 				"Unable to add the scsi host\n");
-		goto HostAddErr;
+		goto BadDevice;
 	}
 
 	/* Submit the delayed_work for SCSI-device scanning */
+	usb_autopm_get_interface_no_resume(us->pusb_intf);
 	set_bit(US_FLIDX_SCAN_PENDING, &us->dflags);
 
 	if (delay_use > 0)
@@ -1092,8 +1090,6 @@ int usb_stor_probe2(struct us_data *us)
 	return 0;
 
 	/* We come here if there are any problems */
-HostAddErr:
-	usb_autopm_put_interface_no_suspend(us->pusb_intf);
 BadDevice:
 	usb_stor_dbg(us, "storage_probe() failed\n");
 	release_everything(us);

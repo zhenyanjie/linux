@@ -33,8 +33,6 @@ struct pci_controller_ops {
 	/* Called during PCI resource reassignment */
 	resource_size_t (*window_alignment)(struct pci_bus *bus,
 					    unsigned long type);
-	void		(*setup_bridge)(struct pci_bus *bus,
-					unsigned long type);
 	void		(*reset_secondary_bus)(struct pci_dev *pdev);
 
 #ifdef CONFIG_PCI_MSI

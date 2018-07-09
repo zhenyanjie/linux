@@ -250,13 +250,3 @@ cond_syscall(sys_execveat);
 
 /* membarrier */
 cond_syscall(sys_membarrier);
-
-/* memory protection keys */
-cond_syscall(sys_pkey_mprotect);
-cond_syscall(sys_pkey_alloc);
-cond_syscall(sys_pkey_free);
-
-/* lwipport/core/syscall.c */
-cond_syscall(lwip_closesock);
-/* send/recv has already been defined in __ARCH_WANT_SYSCALL_DEPRECATED */
-

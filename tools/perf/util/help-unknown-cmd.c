@@ -1,6 +1,4 @@
 #include "cache.h"
-#include "config.h"
-#include <stdio.h>
 #include <subcmd/help.h>
 #include "../builtin.h"
 #include "levenshtein.h"

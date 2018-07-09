@@ -215,6 +215,12 @@ EXPORT_SYMBOL(local_flush_tlb_page);
 
 static DEFINE_RAW_SPINLOCK(tlbivax_lock);
 
+static int mm_is_core_local(struct mm_struct *mm)
+{
+	return cpumask_subset(mm_cpumask(mm),
+			      topology_sibling_cpumask(smp_processor_id()));
+}
+
 struct tlb_flush_param {
 	unsigned long addr;
 	unsigned int pid;
@@ -751,7 +757,7 @@ void setup_initial_memory_limit(phys_addr_t first_memblock_base,
 	 * avoid going over total available memory just in case...
 	 */
 #ifdef CONFIG_PPC_FSL_BOOK3E
-	if (early_mmu_has_feature(MMU_FTR_TYPE_FSL_E)) {
+	if (mmu_has_feature(MMU_FTR_TYPE_FSL_E)) {
 		unsigned long linear_sz;
 		unsigned int num_cams;
 

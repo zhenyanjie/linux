@@ -20,7 +20,6 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 #include <linux/exportfs.h>
-#include <linux/posix_acl.h>
 
 MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
 MODULE_DESCRIPTION("Filesystem in Userspace");
@@ -67,8 +66,7 @@ struct fuse_mount_data {
 	unsigned rootmode_present:1;
 	unsigned user_id_present:1;
 	unsigned group_id_present:1;
-	unsigned default_permissions:1;
-	unsigned allow_other:1;
+	unsigned flags;
 	unsigned max_read;
 	unsigned blksize;
 };
@@ -194,7 +192,7 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	 * check in may_delete().
 	 */
 	fi->orig_i_mode = inode->i_mode;
-	if (!fc->default_permissions)
+	if (!(fc->flags & FUSE_DEFAULT_PERMISSIONS))
 		inode->i_mode &= ~S_ISVTX;
 
 	fi->orig_ino = attr->ino;
@@ -342,7 +340,6 @@ int fuse_reverse_inval_inode(struct super_block *sb, u64 nodeid,
 		return -ENOENT;
 
 	fuse_invalidate_attr(inode);
-	forget_all_cached_acls(inode);
 	if (offset >= 0) {
 		pg_start = offset >> PAGE_SHIFT;
 		if (len <= 0)
@@ -535,11 +532,11 @@ static int parse_fuse_opt(char *opt, struct fuse_mount_data *d, int is_bdev)
 			break;
 
 		case OPT_DEFAULT_PERMISSIONS:
-			d->default_permissions = 1;
+			d->flags |= FUSE_DEFAULT_PERMISSIONS;
 			break;
 
 		case OPT_ALLOW_OTHER:
-			d->allow_other = 1;
+			d->flags |= FUSE_ALLOW_OTHER;
 			break;
 
 		case OPT_MAX_READ:
@@ -573,9 +570,9 @@ static int fuse_show_options(struct seq_file *m, struct dentry *root)
 
 	seq_printf(m, ",user_id=%u", from_kuid_munged(&init_user_ns, fc->user_id));
 	seq_printf(m, ",group_id=%u", from_kgid_munged(&init_user_ns, fc->group_id));
-	if (fc->default_permissions)
+	if (fc->flags & FUSE_DEFAULT_PERMISSIONS)
 		seq_puts(m, ",default_permissions");
-	if (fc->allow_other)
+	if (fc->flags & FUSE_ALLOW_OTHER)
 		seq_puts(m, ",allow_other");
 	if (fc->max_read != ~0)
 		seq_printf(m, ",max_read=%u", fc->max_read);
@@ -676,11 +673,13 @@ static struct dentry *fuse_get_dentry(struct super_block *sb,
 	inode = ilookup5(sb, handle->nodeid, fuse_inode_eq, &handle->nodeid);
 	if (!inode) {
 		struct fuse_entry_out outarg;
-		const struct qstr name = QSTR_INIT(".", 1);
+		struct qstr name;
 
 		if (!fc->export_support)
 			goto out_err;
 
+		name.len = 1;
+		name.name = ".";
 		err = fuse_lookup_name(sb, handle->nodeid, &name, &outarg,
 				       &inode);
 		if (err && err != -ENOENT)
@@ -776,12 +775,14 @@ static struct dentry *fuse_get_parent(struct dentry *child)
 	struct inode *inode;
 	struct dentry *parent;
 	struct fuse_entry_out outarg;
-	const struct qstr name = QSTR_INIT("..", 2);
+	struct qstr name;
 	int err;
 
 	if (!fc->export_support)
 		return ERR_PTR(-ESTALE);
 
+	name.len = 2;
+	name.name = "..";
 	err = fuse_lookup_name(child_inode->i_sb, get_node_id(child_inode),
 			       &name, &outarg, &inode);
 	if (err) {
@@ -913,15 +914,8 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 				fc->writeback_cache = 1;
 			if (arg->flags & FUSE_PARALLEL_DIROPS)
 				fc->parallel_dirops = 1;
-			if (arg->flags & FUSE_HANDLE_KILLPRIV)
-				fc->handle_killpriv = 1;
 			if (arg->time_gran && arg->time_gran <= 1000000000)
 				fc->sb->s_time_gran = arg->time_gran;
-			if ((arg->flags & FUSE_POSIX_ACL)) {
-				fc->default_permissions = 1;
-				fc->posix_acl = 1;
-				fc->sb->s_xattr = fuse_acl_xattr_handlers;
-			}
 		} else {
 			ra_pages = fc->max_read / PAGE_SIZE;
 			fc->no_lock = 1;
@@ -951,7 +945,7 @@ static void fuse_send_init(struct fuse_conn *fc, struct fuse_req *req)
 		FUSE_FLOCK_LOCKS | FUSE_HAS_IOCTL_DIR | FUSE_AUTO_INVAL_DATA |
 		FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |
 		FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT |
-		FUSE_PARALLEL_DIROPS | FUSE_HANDLE_KILLPRIV | FUSE_POSIX_ACL;
+		FUSE_PARALLEL_DIROPS;
 	req->in.h.opcode = FUSE_INIT;
 	req->in.numargs = 1;
 	req->in.args[0].size = sizeof(*arg);
@@ -1081,7 +1075,6 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	}
 	sb->s_magic = FUSE_SUPER_MAGIC;
 	sb->s_op = &fuse_super_operations;
-	sb->s_xattr = fuse_xattr_handlers;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_time_gran = 1;
 	sb->s_export_op = &fuse_export_operations;
@@ -1120,8 +1113,7 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 		fc->dont_mask = 1;
 	sb->s_flags |= MS_POSIXACL;
 
-	fc->default_permissions = d.default_permissions;
-	fc->allow_other = d.allow_other;
+	fc->flags = d.flags;
 	fc->user_id = d.user_id;
 	fc->group_id = d.group_id;
 	fc->max_read = max_t(unsigned, 4096, d.max_read);
@@ -1131,11 +1123,10 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 
 	err = -ENOMEM;
 	root = fuse_get_root_inode(sb, d.rootmode);
-	sb->s_d_op = &fuse_root_dentry_operations;
 	root_dentry = d_make_root(root);
 	if (!root_dentry)
 		goto err_dev_free;
-	/* Root dentry doesn't have .d_revalidate */
+	/* only now - we want root dentry with NULL ->d_op */
 	sb->s_d_op = &fuse_dentry_operations;
 
 	init_req = fuse_request_alloc(0);
@@ -1184,7 +1175,6 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
  err_put_conn:
 	fuse_bdi_destroy(fc);
 	fuse_conn_put(fc);
-	sb->s_fs_info = NULL;
  err_fput:
 	fput(file);
  err:

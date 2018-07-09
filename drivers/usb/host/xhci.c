@@ -192,9 +192,6 @@ int xhci_reset(struct xhci_hcd *xhci)
 	if (ret)
 		return ret;
 
-	if (xhci->quirks & XHCI_ASMEDIA_MODIFY_FLOWCONTROL)
-		usb_asmedia_modifyflowcontrol(to_pci_dev(xhci_to_hcd(xhci)->self.controller));
-
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init,
 			 "Wait for controller to be ready for doorbell rings");
 	/*
@@ -298,8 +295,10 @@ static int xhci_setup_msix(struct xhci_hcd *xhci)
 	xhci->msix_entries =
 		kmalloc((sizeof(struct msix_entry))*xhci->msix_count,
 				GFP_KERNEL);
-	if (!xhci->msix_entries)
+	if (!xhci->msix_entries) {
+		xhci_err(xhci, "Failed to allocate MSI-X entries\n");
 		return -ENOMEM;
+	}
 
 	for (i = 0; i < xhci->msix_count; i++) {
 		xhci->msix_entries[i].entry = i;
@@ -491,6 +490,8 @@ static void compliance_mode_recovery_timer_init(struct xhci_hcd *xhci)
 	xhci->comp_mode_recovery_timer.expires = jiffies +
 			msecs_to_jiffies(COMP_MODE_RCVRY_MSECS);
 
+	set_timer_slack(&xhci->comp_mode_recovery_timer,
+			msecs_to_jiffies(COMP_MODE_RCVRY_MSECS));
 	add_timer(&xhci->comp_mode_recovery_timer);
 	xhci_dbg_trace(xhci, trace_xhci_dbg_quirks,
 			"Compliance mode recovery timer initialized");
@@ -1125,9 +1126,6 @@ int xhci_resume(struct xhci_hcd *xhci, bool hibernated)
 	if ((xhci->quirks & XHCI_COMP_MODE_QUIRK) && !comp_timer_running)
 		compliance_mode_recovery_timer_init(xhci);
 
-	if (xhci->quirks & XHCI_ASMEDIA_MODIFY_FLOWCONTROL)
-		usb_asmedia_modifyflowcontrol(to_pci_dev(hcd->self.controller));
-
 	/* Re-enable port polling. */
 	xhci_dbg(xhci, "%s: starting port polling.\n", __func__);
 	set_bit(HCD_FLAG_POLL_RH, &xhci->shared_hcd->flags);
@@ -1534,6 +1532,19 @@ int xhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 		usb_hcd_giveback_urb(hcd, urb, -ESHUTDOWN);
 		xhci_urb_free_priv(urb_priv);
 		return ret;
+	}
+	if ((xhci->xhc_state & XHCI_STATE_DYING) ||
+			(xhci->xhc_state & XHCI_STATE_HALTED)) {
+		xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
+				"Ep 0x%x: URB %p to be canceled on "
+				"non-responsive xHCI host.",
+				urb->ep->desc.bEndpointAddress, urb);
+		/* Let the stop endpoint command watchdog timer (which set this
+		 * state) finish cleaning up the endpoint TD lists.  We must
+		 * have caught it in the middle of dropping a lock and giving
+		 * back an URB.
+		 */
+		goto done;
 	}
 
 	ep_index = xhci_get_endpoint_index(&urb->ep->desc);
@@ -3128,7 +3139,6 @@ int xhci_alloc_streams(struct usb_hcd *hcd, struct usb_device *udev,
 	struct xhci_input_control_ctx *ctrl_ctx;
 	unsigned int ep_index;
 	unsigned int num_stream_ctxs;
-	unsigned int max_packet;
 	unsigned long flags;
 	u32 changed_ep_bitmask = 0;
 
@@ -3202,11 +3212,9 @@ int xhci_alloc_streams(struct usb_hcd *hcd, struct usb_device *udev,
 
 	for (i = 0; i < num_eps; i++) {
 		ep_index = xhci_get_endpoint_index(&eps[i]->desc);
-		max_packet = GET_MAX_PACKET(usb_endpoint_maxp(&eps[i]->desc));
 		vdev->eps[ep_index].stream_info = xhci_alloc_stream_info(xhci,
 				num_stream_ctxs,
-				num_streams,
-				max_packet, mem_flags);
+				num_streams, mem_flags);
 		if (!vdev->eps[ep_index].stream_info)
 			goto cleanup;
 		/* Set maxPstreams in endpoint context and update deq ptr to
@@ -3776,10 +3784,8 @@ static int xhci_setup_device(struct usb_hcd *hcd, struct usb_device *udev,
 
 	mutex_lock(&xhci->mutex);
 
-	if (xhci->xhc_state) {	/* dying, removing or halted */
-		ret = -ESHUTDOWN;
+	if (xhci->xhc_state)	/* dying, removing or halted */
 		goto out;
-	}
 
 	if (!udev->slot_id) {
 		xhci_dbg_trace(xhci, trace_xhci_dbg_address,
@@ -4855,8 +4861,7 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks)
 		 */
 		hcd->has_tt = 1;
 	} else {
-		/* Some 3.1 hosts return sbrn 0x30, can't rely on sbrn alone */
-		if (xhci->sbrn == 0x31 || xhci->usb3_rhub.min_rev >= 1) {
+		if (xhci->sbrn == 0x31) {
 			xhci_info(xhci, "Host supports USB 3.1 Enhanced SuperSpeed\n");
 			hcd->speed = HCD_USB31;
 			hcd->self.root_hub->speed = USB_SPEED_SUPER_PLUS;

@@ -248,7 +248,7 @@ struct cache {
 	/*
 	 * Fields for converting from sectors to blocks.
 	 */
-	sector_t sectors_per_block;
+	uint32_t sectors_per_block;
 	int sectors_per_block_shift;
 
 	spinlock_t lock;
@@ -788,8 +788,7 @@ static void check_if_tick_bio_needed(struct cache *cache, struct bio *bio)
 
 	spin_lock_irqsave(&cache->lock, flags);
 	if (cache->need_tick_bio &&
-	    !(bio->bi_opf & (REQ_FUA | REQ_PREFLUSH)) &&
-	    bio_op(bio) != REQ_OP_DISCARD) {
+	    !(bio->bi_rw & (REQ_FUA | REQ_FLUSH | REQ_DISCARD))) {
 		pb->tick = true;
 		cache->need_tick_bio = false;
 	}
@@ -830,7 +829,7 @@ static dm_oblock_t get_bio_block(struct cache *cache, struct bio *bio)
 
 static int bio_triggers_commit(struct cache *cache, struct bio *bio)
 {
-	return bio->bi_opf & (REQ_PREFLUSH | REQ_FUA);
+	return bio->bi_rw & (REQ_FLUSH | REQ_FUA);
 }
 
 /*
@@ -852,7 +851,7 @@ static void inc_ds(struct cache *cache, struct bio *bio,
 static bool accountable_bio(struct cache *cache, struct bio *bio)
 {
 	return ((bio->bi_bdev == cache->origin_dev->bdev) &&
-		bio_op(bio) != REQ_OP_DISCARD);
+		!(bio->bi_rw & REQ_DISCARD));
 }
 
 static void accounted_begin(struct cache *cache, struct bio *bio)
@@ -1068,8 +1067,7 @@ static void dec_io_migrations(struct cache *cache)
 
 static bool discard_or_flush(struct bio *bio)
 {
-	return bio_op(bio) == REQ_OP_DISCARD ||
-	       bio->bi_opf & (REQ_PREFLUSH | REQ_FUA);
+	return bio->bi_rw & (REQ_FLUSH | REQ_FUA | REQ_DISCARD);
 }
 
 static void __cell_defer(struct cache *cache, struct dm_bio_prison_cell *cell)
@@ -1614,8 +1612,8 @@ static void process_flush_bio(struct cache *cache, struct bio *bio)
 		remap_to_cache(cache, bio, 0);
 
 	/*
-	 * REQ_PREFLUSH is not directed at any particular block so we don't
-	 * need to inc_ds().  REQ_FUA's are split into a write + REQ_PREFLUSH
+	 * REQ_FLUSH is not directed at any particular block so we don't
+	 * need to inc_ds().  REQ_FUA's are split into a write + REQ_FLUSH
 	 * by dm-core.
 	 */
 	issue(cache, bio);
@@ -1980,9 +1978,9 @@ static void process_deferred_bios(struct cache *cache)
 
 		bio = bio_list_pop(&bios);
 
-		if (bio->bi_opf & REQ_PREFLUSH)
+		if (bio->bi_rw & REQ_FLUSH)
 			process_flush_bio(cache, bio);
-		else if (bio_op(bio) == REQ_OP_DISCARD)
+		else if (bio->bi_rw & REQ_DISCARD)
 			process_discard_bio(cache, &structs, bio);
 		else
 			process_bio(cache, &structs, bio);
@@ -3546,11 +3544,11 @@ static void cache_status(struct dm_target *ti, status_type_t type,
 
 		residency = policy_residency(cache->policy);
 
-		DMEMIT("%u %llu/%llu %llu %llu/%llu %u %u %u %u %u %u %lu ",
+		DMEMIT("%u %llu/%llu %u %llu/%llu %u %u %u %u %u %u %lu ",
 		       (unsigned)DM_CACHE_METADATA_BLOCK_SIZE,
 		       (unsigned long long)(nr_blocks_metadata - nr_free_blocks_metadata),
 		       (unsigned long long)nr_blocks_metadata,
-		       (unsigned long long)cache->sectors_per_block,
+		       cache->sectors_per_block,
 		       (unsigned long long) from_cblock(residency),
 		       (unsigned long long) from_cblock(cache->cache_size),
 		       (unsigned) atomic_read(&cache->stats.read_hit),

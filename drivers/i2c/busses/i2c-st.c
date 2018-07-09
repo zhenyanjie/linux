@@ -874,8 +874,10 @@ static int st_i2c_probe(struct platform_device *pdev)
 	init_completion(&i2c_dev->complete);
 
 	ret = i2c_add_adapter(adap);
-	if (ret)
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to add adapter\n");
 		return ret;
+	}
 
 	platform_set_drvdata(pdev, i2c_dev);
 

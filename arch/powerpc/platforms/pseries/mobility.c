@@ -225,10 +225,8 @@ static int add_dt_node(__be32 parent_phandle, __be32 drc_index)
 		return -ENOENT;
 
 	dn = dlpar_configure_connector(drc_index, parent_dn);
-	if (!dn) {
-		of_node_put(parent_dn);
+	if (!dn)
 		return -ENOENT;
-	}
 
 	rc = dlpar_attach_node(dn);
 	if (rc)
@@ -313,9 +311,6 @@ void post_mobility_fixup(void)
 	if (rc)
 		printk(KERN_ERR "Post-mobility device tree update "
 			"failed: %d\n", rc);
-
-	/* Possibly switch to a new RFI flush type */
-	pseries_setup_rfi_flush();
 
 	return;
 }

@@ -107,7 +107,6 @@ static void brcmu_d11n_decchspec(struct brcmu_chan *ch)
 	u16 val;
 
 	ch->chnum = (u8)(ch->chspec & BRCMU_CHSPEC_CH_MASK);
-	ch->control_ch_num = ch->chnum;
 
 	switch (ch->chspec & BRCMU_CHSPEC_D11N_BW_MASK) {
 	case BRCMU_CHSPEC_D11N_BW_20:
@@ -119,10 +118,10 @@ static void brcmu_d11n_decchspec(struct brcmu_chan *ch)
 		val = ch->chspec & BRCMU_CHSPEC_D11N_SB_MASK;
 		if (val == BRCMU_CHSPEC_D11N_SB_L) {
 			ch->sb = BRCMU_CHAN_SB_L;
-			ch->control_ch_num -= CH_10MHZ_APART;
+			ch->chnum -= CH_10MHZ_APART;
 		} else {
 			ch->sb = BRCMU_CHAN_SB_U;
-			ch->control_ch_num += CH_10MHZ_APART;
+			ch->chnum += CH_10MHZ_APART;
 		}
 		break;
 	default:
@@ -148,7 +147,6 @@ static void brcmu_d11ac_decchspec(struct brcmu_chan *ch)
 	u16 val;
 
 	ch->chnum = (u8)(ch->chspec & BRCMU_CHSPEC_CH_MASK);
-	ch->control_ch_num = ch->chnum;
 
 	switch (ch->chspec & BRCMU_CHSPEC_D11AC_BW_MASK) {
 	case BRCMU_CHSPEC_D11AC_BW_20:
@@ -160,10 +158,10 @@ static void brcmu_d11ac_decchspec(struct brcmu_chan *ch)
 		val = ch->chspec & BRCMU_CHSPEC_D11AC_SB_MASK;
 		if (val == BRCMU_CHSPEC_D11AC_SB_L) {
 			ch->sb = BRCMU_CHAN_SB_L;
-			ch->control_ch_num -= CH_10MHZ_APART;
+			ch->chnum -= CH_10MHZ_APART;
 		} else if (val == BRCMU_CHSPEC_D11AC_SB_U) {
 			ch->sb = BRCMU_CHAN_SB_U;
-			ch->control_ch_num += CH_10MHZ_APART;
+			ch->chnum += CH_10MHZ_APART;
 		} else {
 			WARN_ON_ONCE(1);
 		}
@@ -174,16 +172,16 @@ static void brcmu_d11ac_decchspec(struct brcmu_chan *ch)
 					 BRCMU_CHSPEC_D11AC_SB_SHIFT);
 		switch (ch->sb) {
 		case BRCMU_CHAN_SB_LL:
-			ch->control_ch_num -= CH_30MHZ_APART;
+			ch->chnum -= CH_30MHZ_APART;
 			break;
 		case BRCMU_CHAN_SB_LU:
-			ch->control_ch_num -= CH_10MHZ_APART;
+			ch->chnum -= CH_10MHZ_APART;
 			break;
 		case BRCMU_CHAN_SB_UL:
-			ch->control_ch_num += CH_10MHZ_APART;
+			ch->chnum += CH_10MHZ_APART;
 			break;
 		case BRCMU_CHAN_SB_UU:
-			ch->control_ch_num += CH_30MHZ_APART;
+			ch->chnum += CH_30MHZ_APART;
 			break;
 		default:
 			WARN_ON_ONCE(1);

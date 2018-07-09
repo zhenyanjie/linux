@@ -41,6 +41,7 @@ int machine__init(struct machine *machine, const char *root_dir, pid_t pid)
 
 	machine->pid = pid;
 
+	machine->symbol_filter = NULL;
 	machine->id_hdr_size = 0;
 	machine->kptr_restrict_warned = false;
 	machine->comm_exec = false;
@@ -137,16 +138,15 @@ void machine__exit(struct machine *machine)
 
 void machine__delete(struct machine *machine)
 {
-	if (machine) {
-		machine__exit(machine);
-		free(machine);
-	}
+	machine__exit(machine);
+	free(machine);
 }
 
 void machines__init(struct machines *machines)
 {
 	machine__init(&machines->host, "", HOST_KERNEL_ID);
 	machines->guests = RB_ROOT;
+	machines->symbol_filter = NULL;
 }
 
 void machines__exit(struct machines *machines)
@@ -170,6 +170,8 @@ struct machine *machines__add(struct machines *machines, pid_t pid,
 		return NULL;
 	}
 
+	machine->symbol_filter = machines->symbol_filter;
+
 	while (*p != NULL) {
 		parent = *p;
 		pos = rb_entry(parent, struct machine, rb_node);
@@ -183,6 +185,21 @@ struct machine *machines__add(struct machines *machines, pid_t pid,
 	rb_insert_color(&machine->rb_node, &machines->guests);
 
 	return machine;
+}
+
+void machines__set_symbol_filter(struct machines *machines,
+				 symbol_filter_t symbol_filter)
+{
+	struct rb_node *nd;
+
+	machines->symbol_filter = symbol_filter;
+	machines->host.symbol_filter = symbol_filter;
+
+	for (nd = rb_first(&machines->guests); nd; nd = rb_next(nd)) {
+		struct machine *machine = rb_entry(nd, struct machine, rb_node);
+
+		machine->symbol_filter = symbol_filter;
+	}
 }
 
 void machines__set_comm_exec(struct machines *machines, bool comm_exec)
@@ -897,10 +914,10 @@ int machines__create_kernel_maps(struct machines *machines, pid_t pid)
 }
 
 int __machine__load_kallsyms(struct machine *machine, const char *filename,
-			     enum map_type type, bool no_kcore)
+			     enum map_type type, bool no_kcore, symbol_filter_t filter)
 {
 	struct map *map = machine__kernel_map(machine);
-	int ret = __dso__load_kallsyms(map->dso, filename, map, no_kcore);
+	int ret = __dso__load_kallsyms(map->dso, filename, map, no_kcore, filter);
 
 	if (ret > 0) {
 		dso__set_loaded(map->dso, type);
@@ -916,15 +933,16 @@ int __machine__load_kallsyms(struct machine *machine, const char *filename,
 }
 
 int machine__load_kallsyms(struct machine *machine, const char *filename,
-			   enum map_type type)
+			   enum map_type type, symbol_filter_t filter)
 {
-	return __machine__load_kallsyms(machine, filename, type, false);
+	return __machine__load_kallsyms(machine, filename, type, false, filter);
 }
 
-int machine__load_vmlinux_path(struct machine *machine, enum map_type type)
+int machine__load_vmlinux_path(struct machine *machine, enum map_type type,
+			       symbol_filter_t filter)
 {
 	struct map *map = machine__kernel_map(machine);
-	int ret = dso__load_vmlinux_path(map->dso, map);
+	int ret = dso__load_vmlinux_path(map->dso, map, filter);
 
 	if (ret > 0)
 		dso__set_loaded(map->dso, type);
@@ -1073,19 +1091,11 @@ static int machine__set_modules_path(struct machine *machine)
 
 	return map_groups__set_modules_path_dir(&machine->kmaps, modules_path, 0);
 }
-int __weak arch__fix_module_text_start(u64 *start __maybe_unused,
-				const char *name __maybe_unused)
-{
-	return 0;
-}
 
 static int machine__create_module(void *arg, const char *name, u64 start)
 {
 	struct machine *machine = arg;
 	struct map *map;
-
-	if (arch__fix_module_text_start(&start, name) < 0)
-		return -1;
 
 	map = machine__findnew_module_map(machine, start, name);
 	if (map == NULL)
@@ -1293,7 +1303,7 @@ static int machine__process_kernel_mmap_event(struct machine *machine,
 			/*
 			 * preload dso of guest kernel and modules
 			 */
-			dso__load(kernel, machine__kernel_map(machine));
+			dso__load(kernel, machine__kernel_map(machine), NULL);
 		}
 	}
 	return 0;
@@ -1343,16 +1353,11 @@ int machine__process_mmap2_event(struct machine *machine,
 	if (map == NULL)
 		goto out_problem_map;
 
-	ret = thread__insert_map(thread, map);
-	if (ret)
-		goto out_problem_insert;
-
+	thread__insert_map(thread, map);
 	thread__put(thread);
 	map__put(map);
 	return 0;
 
-out_problem_insert:
-	map__put(map);
 out_problem_map:
 	thread__put(thread);
 out_problem:
@@ -1398,16 +1403,11 @@ int machine__process_mmap_event(struct machine *machine, union perf_event *event
 	if (map == NULL)
 		goto out_problem_map;
 
-	ret = thread__insert_map(thread, map);
-	if (ret)
-		goto out_problem_insert;
-
+	thread__insert_map(thread, map);
 	thread__put(thread);
 	map__put(map);
 	return 0;
 
-out_problem_insert:
-	map__put(map);
 out_problem_map:
 	thread__put(thread);
 out_problem:
@@ -1745,8 +1745,9 @@ static int resolve_lbr_callchain_sample(struct thread *thread,
 					int max_stack)
 {
 	struct ip_callchain *chain = sample->callchain;
-	int chain_nr = min(max_stack, (int)chain->nr), i;
+	int chain_nr = min(max_stack, (int)chain->nr);
 	u8 cpumode = PERF_RECORD_MISC_USER;
+	int i, j, err;
 	u64 ip;
 
 	for (i = 0; i < chain_nr; i++) {
@@ -1757,7 +1758,7 @@ static int resolve_lbr_callchain_sample(struct thread *thread,
 	/* LBR only affects the user callchain */
 	if (i != chain_nr) {
 		struct branch_stack *lbr_stack = sample->branch_stack;
-		int lbr_nr = lbr_stack->nr, j;
+		int lbr_nr = lbr_stack->nr;
 		/*
 		 * LBR callstack can only get user call chain.
 		 * The mix_chain_nr is kernel call chain
@@ -1771,7 +1772,6 @@ static int resolve_lbr_callchain_sample(struct thread *thread,
 		int mix_chain_nr = i + 1 + lbr_nr + 1;
 
 		for (j = 0; j < mix_chain_nr; j++) {
-			int err;
 			if (callchain_param.order == ORDER_CALLEE) {
 				if (j < i + 1)
 					ip = chain->ips[j];
@@ -2095,7 +2095,7 @@ int machine__get_kernel_start(struct machine *machine)
 	 */
 	machine->kernel_start = 1ULL << 63;
 	if (map) {
-		err = map__load(map);
+		err = map__load(map, machine->symbol_filter);
 		if (map->start)
 			machine->kernel_start = map->start;
 	}
@@ -2111,7 +2111,7 @@ char *machine__resolve_kernel_addr(void *vmachine, unsigned long long *addrp, ch
 {
 	struct machine *machine = vmachine;
 	struct map *map;
-	struct symbol *sym = map_groups__find_symbol(&machine->kmaps, MAP__FUNCTION, *addrp, &map);
+	struct symbol *sym = map_groups__find_symbol(&machine->kmaps, MAP__FUNCTION, *addrp, &map,  NULL);
 
 	if (sym == NULL)
 		return NULL;

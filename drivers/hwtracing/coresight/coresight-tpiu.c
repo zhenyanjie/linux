@@ -46,11 +46,8 @@
 #define TPIU_ITATBCTR0		0xef8
 
 /** register definition **/
-/* FFSR - 0x300 */
-#define FFSR_FT_STOPPED		BIT(1)
 /* FFCR - 0x304 */
 #define FFCR_FON_MAN		BIT(6)
-#define FFCR_STOP_FI		BIT(12)
 
 /**
  * @base:	memory mapped base address for this component.
@@ -88,14 +85,10 @@ static void tpiu_disable_hw(struct tpiu_drvdata *drvdata)
 {
 	CS_UNLOCK(drvdata->base);
 
-	/* Clear formatter and stop on flush */
-	writel_relaxed(FFCR_STOP_FI, drvdata->base + TPIU_FFCR);
+	/* Clear formatter controle reg. */
+	writel_relaxed(0x0, drvdata->base + TPIU_FFCR);
 	/* Generate manual flush */
-	writel_relaxed(FFCR_STOP_FI | FFCR_FON_MAN, drvdata->base + TPIU_FFCR);
-	/* Wait for flush to complete */
-	coresight_timeout(drvdata->base, TPIU_FFCR, FFCR_FON_MAN, 0);
-	/* Wait for formatter to stop */
-	coresight_timeout(drvdata->base, TPIU_FFSR, FFSR_FT_STOPPED, 1);
+	writel_relaxed(FFCR_FON_MAN, drvdata->base + TPIU_FFCR);
 
 	CS_LOCK(drvdata->base);
 }
@@ -126,7 +119,7 @@ static int tpiu_probe(struct amba_device *adev, const struct amba_id *id)
 	struct coresight_platform_data *pdata = NULL;
 	struct tpiu_drvdata *drvdata;
 	struct resource *res = &adev->res;
-	struct coresight_desc desc = { 0 };
+	struct coresight_desc *desc;
 	struct device_node *np = adev->dev.of_node;
 
 	if (np) {
@@ -161,12 +154,16 @@ static int tpiu_probe(struct amba_device *adev, const struct amba_id *id)
 
 	pm_runtime_put(&adev->dev);
 
-	desc.type = CORESIGHT_DEV_TYPE_SINK;
-	desc.subtype.sink_subtype = CORESIGHT_DEV_SUBTYPE_SINK_PORT;
-	desc.ops = &tpiu_cs_ops;
-	desc.pdata = pdata;
-	desc.dev = dev;
-	drvdata->csdev = coresight_register(&desc);
+	desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
+	if (!desc)
+		return -ENOMEM;
+
+	desc->type = CORESIGHT_DEV_TYPE_SINK;
+	desc->subtype.sink_subtype = CORESIGHT_DEV_SUBTYPE_SINK_PORT;
+	desc->ops = &tpiu_cs_ops;
+	desc->pdata = pdata;
+	desc->dev = dev;
+	drvdata->csdev = coresight_register(desc);
 	if (IS_ERR(drvdata->csdev))
 		return PTR_ERR(drvdata->csdev);
 

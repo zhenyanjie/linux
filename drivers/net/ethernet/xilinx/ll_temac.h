@@ -332,6 +332,7 @@ struct temac_local {
 	struct device *dev;
 
 	/* Connection to PHY device */
+	struct phy_device *phy_dev;	/* Pointer to PHY device */
 	struct device_node *phy_node;
 
 	/* MDIO bus data */

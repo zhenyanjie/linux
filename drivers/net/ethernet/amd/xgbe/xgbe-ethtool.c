@@ -623,7 +623,7 @@ static const struct ethtool_ops xgbe_ethtool_ops = {
 	.get_ts_info = xgbe_get_ts_info,
 };
 
-const struct ethtool_ops *xgbe_get_ethtool_ops(void)
+struct ethtool_ops *xgbe_get_ethtool_ops(void)
 {
-	return &xgbe_ethtool_ops;
+	return (struct ethtool_ops *)&xgbe_ethtool_ops;
 }

@@ -19,6 +19,7 @@
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/pinctrl/machine.h>
@@ -156,7 +157,7 @@ static int imx1_read_bit(struct imx1_pinctrl *ipctl, unsigned int pin_id,
 	return !!(readl(reg) & BIT(offset));
 }
 
-static inline const struct imx1_pin_group *imx1_pinctrl_find_group_by_name(
+static const inline struct imx1_pin_group *imx1_pinctrl_find_group_by_name(
 				const struct imx1_pinctrl_soc_info *info,
 				const char *name)
 {

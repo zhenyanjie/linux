@@ -205,15 +205,11 @@ void __init omap2xxx_check_revision(void)
 
 #define OMAP3_SHOW_FEATURE(feat)		\
 	if (omap3_has_ ##feat())		\
-		n += scnprintf(buf + n, sizeof(buf) - n, #feat " ");
+		printk(#feat" ");
 
 static void __init omap3_cpuinfo(void)
 {
 	const char *cpu_name;
-	char buf[64];
-	int n = 0;
-
-	memset(buf, 0, sizeof(buf));
 
 	/*
 	 * OMAP3430 and OMAP3530 are assumed to be same.
@@ -245,10 +241,10 @@ static void __init omap3_cpuinfo(void)
 		cpu_name = "OMAP3503";
 	}
 
-	scnprintf(soc_name, sizeof(soc_name), "%s", cpu_name);
+	sprintf(soc_name, "%s", cpu_name);
 
 	/* Print verbose information */
-	n += scnprintf(buf, sizeof(buf) - n, "%s %s (", soc_name, soc_rev);
+	pr_info("%s %s (", soc_name, soc_rev);
 
 	OMAP3_SHOW_FEATURE(l2cache);
 	OMAP3_SHOW_FEATURE(iva);
@@ -256,10 +252,8 @@ static void __init omap3_cpuinfo(void)
 	OMAP3_SHOW_FEATURE(neon);
 	OMAP3_SHOW_FEATURE(isp);
 	OMAP3_SHOW_FEATURE(192mhz_clk);
-	if (*(buf + n - 1) == ' ')
-		n--;
-	n += scnprintf(buf + n, sizeof(buf) - n, ")\n");
-	pr_info("%s", buf);
+
+	printk(")\n");
 }
 
 #define OMAP3_CHECK_FEATURE(status,feat)				\

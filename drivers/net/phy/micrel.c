@@ -311,36 +311,6 @@ static int kszphy_config_init(struct phy_device *phydev)
 	return 0;
 }
 
-static int ksz8041_config_init(struct phy_device *phydev)
-{
-	struct device_node *of_node = phydev->mdio.dev.of_node;
-
-	/* Limit supported and advertised modes in fiber mode */
-	if (of_property_read_bool(of_node, "micrel,fiber-mode")) {
-		phydev->dev_flags |= MICREL_PHY_FXEN;
-		phydev->supported &= SUPPORTED_100baseT_Full |
-				     SUPPORTED_100baseT_Half;
-		phydev->supported |= SUPPORTED_FIBRE;
-		phydev->advertising &= ADVERTISED_100baseT_Full |
-				       ADVERTISED_100baseT_Half;
-		phydev->advertising |= ADVERTISED_FIBRE;
-		phydev->autoneg = AUTONEG_DISABLE;
-	}
-
-	return kszphy_config_init(phydev);
-}
-
-static int ksz8041_config_aneg(struct phy_device *phydev)
-{
-	/* Skip auto-negotiation in fiber mode */
-	if (phydev->dev_flags & MICREL_PHY_FXEN) {
-		phydev->speed = SPEED_100;
-		return 0;
-	}
-
-	return genphy_config_aneg(phydev);
-}
-
 static int ksz9021_load_values_from_of(struct phy_device *phydev,
 				       const struct device_node *of_node,
 				       u16 reg,
@@ -439,10 +409,6 @@ static int ksz9021_config_init(struct phy_device *phydev)
 #define MII_KSZ9031RN_TX_DATA_PAD_SKEW	6
 #define MII_KSZ9031RN_CLK_PAD_SKEW	8
 
-/* MMD Address 0x1C */
-#define MII_KSZ9031RN_EDPD		0x23
-#define MII_KSZ9031RN_EDPD_ENABLE	BIT(0)
-
 static int ksz9031_extended_write(struct phy_device *phydev,
 				  u8 mode, u32 dev_addr, u32 regnum, u16 val)
 {
@@ -514,18 +480,6 @@ static int ksz9031_center_flp_timing(struct phy_device *phydev)
 	return genphy_restart_aneg(phydev);
 }
 
-/* Enable energy-detect power-down mode */
-static int ksz9031_enable_edpd(struct phy_device *phydev)
-{
-	int reg;
-
-	reg = ksz9031_extended_read(phydev, OP_DATA, 0x1C, MII_KSZ9031RN_EDPD);
-	if (reg < 0)
-		return reg;
-	return ksz9031_extended_write(phydev, OP_DATA, 0x1C, MII_KSZ9031RN_EDPD,
-				      reg | MII_KSZ9031RN_EDPD_ENABLE);
-}
-
 static int ksz9031_config_init(struct phy_device *phydev)
 {
 	const struct device *dev = &phydev->mdio.dev;
@@ -541,11 +495,6 @@ static int ksz9031_config_init(struct phy_device *phydev)
 	};
 	static const char *control_skews[2] = {"txen-skew-ps", "rxdv-skew-ps"};
 	const struct device *dev_walker;
-	int result;
-
-	result = ksz9031_enable_edpd(phydev);
-	if (result < 0)
-		return result;
 
 	/* The Micrel driver has a deprecated option to place phy OF
 	 * properties in the MAC node. Walk up the tree of devices to
@@ -622,9 +571,6 @@ static int ksz9031_read_status(struct phy_device *phydev)
 	if ((regval & 0xFF) == 0xFF) {
 		phy_init_hw(phydev);
 		phydev->link = 0;
-		if (phydev->drv->config_intr && phy_interrupt_is_valid(phydev))
-			phydev->drv->config_intr(phydev);
-		return genphy_config_aneg(phydev);
 	}
 
 	return 0;
@@ -701,28 +647,17 @@ static void kszphy_get_stats(struct phy_device *phydev,
 		data[i] = kszphy_get_stat(phydev, i);
 }
 
-static int kszphy_suspend(struct phy_device *phydev)
-{
-	/* Disable PHY Interrupts */
-	if (phy_interrupt_is_valid(phydev)) {
-		phydev->interrupts = PHY_INTERRUPT_DISABLED;
-		if (phydev->drv->config_intr)
-			phydev->drv->config_intr(phydev);
-	}
-
-	return genphy_suspend(phydev);
-}
-
 static int kszphy_resume(struct phy_device *phydev)
 {
-	genphy_resume(phydev);
+	int value;
 
-	/* Enable PHY Interrupts */
-	if (phy_interrupt_is_valid(phydev)) {
-		phydev->interrupts = PHY_INTERRUPT_ENABLED;
-		if (phydev->drv->config_intr)
-			phydev->drv->config_intr(phydev);
-	}
+	mutex_lock(&phydev->lock);
+
+	value = phy_read(phydev, MII_BMCR);
+	phy_write(phydev, MII_BMCR, value & ~BMCR_PDOWN);
+
+	kszphy_config_intr(phydev);
+	mutex_unlock(&phydev->lock);
 
 	return 0;
 }
@@ -853,8 +788,8 @@ static struct phy_driver ksphy_driver[] = {
 	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
 	.driver_data	= &ksz8041_type,
 	.probe		= kszphy_probe,
-	.config_init	= ksz8041_config_init,
-	.config_aneg	= ksz8041_config_aneg,
+	.config_init	= kszphy_config_init,
+	.config_aneg	= genphy_config_aneg,
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= kszphy_ack_interrupt,
 	.config_intr	= kszphy_config_intr,
@@ -904,7 +839,7 @@ static struct phy_driver ksphy_driver[] = {
 }, {
 	.phy_id		= PHY_ID_KSZ8001,
 	.name		= "Micrel KSZ8001 or KS8721",
-	.phy_id_mask	= 0x00fffffc,
+	.phy_id_mask	= 0x00ffffff,
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause),
 	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
 	.driver_data	= &ksz8041_type,
@@ -935,7 +870,7 @@ static struct phy_driver ksphy_driver[] = {
 	.get_sset_count = kszphy_get_sset_count,
 	.get_strings	= kszphy_get_strings,
 	.get_stats	= kszphy_get_stats,
-	.suspend	= kszphy_suspend,
+	.suspend	= genphy_suspend,
 	.resume		= kszphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ8061,
@@ -988,7 +923,7 @@ static struct phy_driver ksphy_driver[] = {
 	.get_strings	= kszphy_get_strings,
 	.get_stats	= kszphy_get_stats,
 	.suspend	= genphy_suspend,
-	.resume		= kszphy_resume,
+	.resume		= genphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ8873MLL,
 	.phy_id_mask	= MICREL_PHY_ID_MASK,
@@ -1017,20 +952,6 @@ static struct phy_driver ksphy_driver[] = {
 	.get_stats	= kszphy_get_stats,
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
-}, {
-	.phy_id		= PHY_ID_KSZ8795,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
-	.name		= "Micrel KSZ8795",
-	.features	= PHY_BASIC_FEATURES,
-	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
-	.config_init	= kszphy_config_init,
-	.config_aneg	= ksz8873mll_config_aneg,
-	.read_status	= ksz8873mll_read_status,
-	.get_sset_count = kszphy_get_sset_count,
-	.get_strings	= kszphy_get_strings,
-	.get_stats	= kszphy_get_stats,
-	.suspend	= genphy_suspend,
-	.resume		= genphy_resume,
 } };
 
 module_phy_driver(ksphy_driver);
@@ -1042,7 +963,7 @@ MODULE_LICENSE("GPL");
 static struct mdio_device_id __maybe_unused micrel_tbl[] = {
 	{ PHY_ID_KSZ9021, 0x000ffffe },
 	{ PHY_ID_KSZ9031, MICREL_PHY_ID_MASK },
-	{ PHY_ID_KSZ8001, 0x00fffffc },
+	{ PHY_ID_KSZ8001, 0x00ffffff },
 	{ PHY_ID_KS8737, MICREL_PHY_ID_MASK },
 	{ PHY_ID_KSZ8021, 0x00ffffff },
 	{ PHY_ID_KSZ8031, 0x00ffffff },

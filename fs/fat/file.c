@@ -63,7 +63,7 @@ static int fat_ioctl_set_attributes(struct file *file, u32 __user *user_attr)
 
 	/* Equivalent to a chmod() */
 	ia.ia_valid = ATTR_MODE | ATTR_CTIME;
-	ia.ia_ctime = current_time(inode);
+	ia.ia_ctime = current_fs_time(inode->i_sb);
 	if (is_dir)
 		ia.ia_mode = fat_make_mode(sbi, attr, S_IRWXUGO);
 	else {
@@ -194,7 +194,7 @@ static int fat_cont_expand(struct inode *inode, loff_t size)
 	if (err)
 		goto out;
 
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
 	if (IS_SYNC(inode)) {
 		int err2;
@@ -297,7 +297,7 @@ static int fat_free(struct inode *inode, int skip)
 		MSDOS_I(inode)->i_logstart = 0;
 	}
 	MSDOS_I(inode)->i_attrs |= ATTR_ARCH;
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = CURRENT_TIME_SEC;
 	if (wait) {
 		err = fat_sync_inode(inode);
 		if (err) {
@@ -450,7 +450,7 @@ int fat_setattr(struct dentry *dentry, struct iattr *attr)
 			attr->ia_valid &= ~TIMES_SET_FLAGS;
 	}
 
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode, attr);
 	attr->ia_valid = ia_valid;
 	if (error) {
 		if (sbi->options.quiet)

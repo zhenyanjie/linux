@@ -161,10 +161,10 @@ struct tv_mode {
 	bool		dac3_en;
 	bool		dac_bit25_en;
 
-	const struct color_gains	*color_gains;
-	const struct burst_levels	*burst_levels;
-	const struct video_levels	*video_levels;
-	const struct resync_parameters	*resync_params;
+	struct color_gains		*color_gains;
+	struct burst_levels		*burst_levels;
+	struct video_levels		*video_levels;
+	struct resync_parameters	*resync_params;
 };
 
 struct sun4i_tv {
@@ -178,39 +178,39 @@ struct sun4i_tv {
 	struct sun4i_drv	*drv;
 };
 
-static const struct video_levels ntsc_video_levels = {
+struct video_levels ntsc_video_levels = {
 	.black = 282,	.blank = 240,
 };
 
-static const struct video_levels pal_video_levels = {
+struct video_levels pal_video_levels = {
 	.black = 252,	.blank = 252,
 };
 
-static const struct burst_levels ntsc_burst_levels = {
+struct burst_levels ntsc_burst_levels = {
 	.cb = 79,	.cr = 0,
 };
 
-static const struct burst_levels pal_burst_levels = {
+struct burst_levels pal_burst_levels = {
 	.cb = 40,	.cr = 40,
 };
 
-static const struct color_gains ntsc_color_gains = {
+struct color_gains ntsc_color_gains = {
 	.cb = 160,	.cr = 160,
 };
 
-static const struct color_gains pal_color_gains = {
+struct color_gains pal_color_gains = {
 	.cb = 224,	.cr = 224,
 };
 
-static const struct resync_parameters ntsc_resync_parameters = {
+struct resync_parameters ntsc_resync_parameters = {
 	.field = false,	.line = 14,	.pixel = 12,
 };
 
-static const struct resync_parameters pal_resync_parameters = {
+struct resync_parameters pal_resync_parameters = {
 	.field = true,	.line = 13,	.pixel = 12,
 };
 
-static const struct tv_mode tv_modes[] = {
+struct tv_mode tv_modes[] = {
 	{
 		.name		= "NTSC",
 		.mode		= SUN4I_TVE_CFG0_RES_480i,
@@ -289,13 +289,13 @@ drm_connector_to_sun4i_tv(struct drm_connector *connector)
  * So far, it doesn't seem to be preserved when the mode is passed by
  * to mode_set for some reason.
  */
-static const struct tv_mode *sun4i_tv_find_tv_by_mode(const struct drm_display_mode *mode)
+static struct tv_mode *sun4i_tv_find_tv_by_mode(struct drm_display_mode *mode)
 {
 	int i;
 
 	/* First try to identify the mode by name */
 	for (i = 0; i < ARRAY_SIZE(tv_modes); i++) {
-		const struct tv_mode *tv_mode = &tv_modes[i];
+		struct tv_mode *tv_mode = &tv_modes[i];
 
 		DRM_DEBUG_DRIVER("Comparing mode %s vs %s",
 				 mode->name, tv_mode->name);
@@ -306,7 +306,7 @@ static const struct tv_mode *sun4i_tv_find_tv_by_mode(const struct drm_display_m
 
 	/* Then by number of lines */
 	for (i = 0; i < ARRAY_SIZE(tv_modes); i++) {
-		const struct tv_mode *tv_mode = &tv_modes[i];
+		struct tv_mode *tv_mode = &tv_modes[i];
 
 		DRM_DEBUG_DRIVER("Comparing mode %s vs %s (X: %d vs %d)",
 				 mode->name, tv_mode->name,
@@ -319,7 +319,7 @@ static const struct tv_mode *sun4i_tv_find_tv_by_mode(const struct drm_display_m
 	return NULL;
 }
 
-static void sun4i_tv_mode_to_drm_mode(const struct tv_mode *tv_mode,
+static void sun4i_tv_mode_to_drm_mode(struct tv_mode *tv_mode,
 				      struct drm_display_mode *mode)
 {
 	DRM_DEBUG_DRIVER("Creating mode %s\n", mode->name);
@@ -386,7 +386,7 @@ static void sun4i_tv_mode_set(struct drm_encoder *encoder,
 	struct sun4i_tv *tv = drm_encoder_to_sun4i_tv(encoder);
 	struct sun4i_drv *drv = tv->drv;
 	struct sun4i_tcon *tcon = drv->tcon;
-	const struct tv_mode *tv_mode = sun4i_tv_find_tv_by_mode(mode);
+	struct tv_mode *tv_mode = sun4i_tv_find_tv_by_mode(mode);
 
 	sun4i_tcon1_mode_set(tcon, mode);
 
@@ -507,14 +507,8 @@ static int sun4i_tv_comp_get_modes(struct drm_connector *connector)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(tv_modes); i++) {
-		struct drm_display_mode *mode;
-		const struct tv_mode *tv_mode = &tv_modes[i];
-
-		mode = drm_mode_create(connector->dev);
-		if (!mode) {
-			DRM_ERROR("Failed to create a new display mode\n");
-			return 0;
-		}
+		struct drm_display_mode *mode = drm_mode_create(connector->dev);
+		struct tv_mode *tv_mode = &tv_modes[i];
 
 		strcpy(mode->name, tv_mode->name);
 
@@ -532,9 +526,18 @@ static int sun4i_tv_comp_mode_valid(struct drm_connector *connector,
 	return MODE_OK;
 }
 
+static struct drm_encoder *
+sun4i_tv_comp_best_encoder(struct drm_connector *connector)
+{
+	struct sun4i_tv *tv = drm_connector_to_sun4i_tv(connector);
+
+	return &tv->encoder;
+}
+
 static struct drm_connector_helper_funcs sun4i_tv_comp_connector_helper_funcs = {
 	.get_modes	= sun4i_tv_comp_get_modes,
 	.mode_valid	= sun4i_tv_comp_mode_valid,
+	.best_encoder	= sun4i_tv_comp_best_encoder,
 };
 
 static enum drm_connector_status

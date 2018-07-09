@@ -128,7 +128,7 @@ static int intel_wait_booting(struct hci_uart *hu)
 				  TASK_INTERRUPTIBLE,
 				  msecs_to_jiffies(1000));
 
-	if (err == -EINTR) {
+	if (err == 1) {
 		bt_dev_err(hu->hdev, "Device boot interrupted");
 		return -EINTR;
 	}
@@ -151,7 +151,7 @@ static int intel_wait_lpm_transaction(struct hci_uart *hu)
 				  TASK_INTERRUPTIBLE,
 				  msecs_to_jiffies(1000));
 
-	if (err == -EINTR) {
+	if (err == 1) {
 		bt_dev_err(hu->hdev, "LPM transaction interrupted");
 		return -EINTR;
 	}
@@ -307,9 +307,6 @@ static int intel_set_power(struct hci_uart *hu, bool powered)
 	struct list_head *p;
 	int err = -ENODEV;
 
-	if (!hu->tty->dev)
-		return err;
-
 	mutex_lock(&intel_device_list_lock);
 
 	list_for_each(p, &intel_device_list) {
@@ -381,9 +378,6 @@ static void intel_busy_work(struct work_struct *work)
 	struct list_head *p;
 	struct intel_data *intel = container_of(work, struct intel_data,
 						busy_work);
-
-	if (!intel->hu->tty->dev)
-		return;
 
 	/* Link is busy, delay the suspend */
 	mutex_lock(&intel_device_list_lock);
@@ -543,7 +537,9 @@ static int intel_setup(struct hci_uart *hu)
 {
 	static const u8 reset_param[] = { 0x00, 0x01, 0x00, 0x01,
 					  0x00, 0x08, 0x04, 0x00 };
+	static const u8 lpm_param[] = { 0x03, 0x07, 0x01, 0x0b };
 	struct intel_data *intel = hu->priv;
+	struct intel_device *idev = NULL;
 	struct hci_dev *hdev = hu->hdev;
 	struct sk_buff *skb;
 	struct intel_version ver;
@@ -819,7 +815,7 @@ static int intel_setup(struct hci_uart *hu)
 	err = wait_on_bit_timeout(&intel->flags, STATE_DOWNLOADING,
 				  TASK_INTERRUPTIBLE,
 				  msecs_to_jiffies(5000));
-	if (err == -EINTR) {
+	if (err == 1) {
 		bt_dev_err(hdev, "Firmware loading interrupted");
 		err = -EINTR;
 		goto done;
@@ -888,25 +884,35 @@ done:
 
 	bt_dev_info(hdev, "Device booted in %llu usecs", duration);
 
-	/* Enable LPM if matching pdev with wakeup enabled, set TX active
-	 * until further LPM TX notification.
-	 */
+	/* Enable LPM if matching pdev with wakeup enabled */
 	mutex_lock(&intel_device_list_lock);
 	list_for_each(p, &intel_device_list) {
 		struct intel_device *dev = list_entry(p, struct intel_device,
 						      list);
-		if (!hu->tty->dev)
-			break;
 		if (hu->tty->dev->parent == dev->pdev->dev.parent) {
-			if (device_may_wakeup(&dev->pdev->dev)) {
-				set_bit(STATE_LPM_ENABLED, &intel->flags);
-				set_bit(STATE_TX_ACTIVE, &intel->flags);
-			}
+			if (device_may_wakeup(&dev->pdev->dev))
+				idev = dev;
 			break;
 		}
 	}
 	mutex_unlock(&intel_device_list_lock);
 
+	if (!idev)
+		goto no_lpm;
+
+	bt_dev_info(hdev, "Enabling LPM");
+
+	skb = __hci_cmd_sync(hdev, 0xfc8b, sizeof(lpm_param), lpm_param,
+			     HCI_CMD_TIMEOUT);
+	if (IS_ERR(skb)) {
+		bt_dev_err(hdev, "Failed to enable LPM");
+		goto no_lpm;
+	}
+	kfree_skb(skb);
+
+	set_bit(STATE_LPM_ENABLED, &intel->flags);
+
+no_lpm:
 	/* Ignore errors, device can work without DDC parameters */
 	btintel_load_ddc_config(hdev, fwname);
 
@@ -1064,9 +1070,6 @@ static int intel_enqueue(struct hci_uart *hu, struct sk_buff *skb)
 
 	BT_DBG("hu %p skb %p", hu, skb);
 
-	if (!hu->tty->dev)
-		goto out_enqueue;
-
 	/* Be sure our controller is resumed and potential LPM transaction
 	 * completed before enqueuing any packet.
 	 */
@@ -1083,7 +1086,7 @@ static int intel_enqueue(struct hci_uart *hu, struct sk_buff *skb)
 		}
 	}
 	mutex_unlock(&intel_device_list_lock);
-out_enqueue:
+
 	skb_queue_tail(&intel->txq, skb);
 
 	return 0;

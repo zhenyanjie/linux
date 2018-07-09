@@ -23,7 +23,6 @@
 
 #include <linux/module.h>
 #include <linux/usb.h>
-#include <linux/usb/quirks.h>
 #include <linux/firmware.h>
 #include <asm/unaligned.h>
 
@@ -63,7 +62,6 @@ static struct usb_driver btusb_driver;
 #define BTUSB_REALTEK		0x20000
 #define BTUSB_BCM2045		0x40000
 #define BTUSB_IFNUM_2		0x80000
-#define BTUSB_CW6622		0x100000
 
 static const struct usb_device_id btusb_table[] = {
 	/* Generic Bluetooth USB device */
@@ -210,7 +208,6 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x04ca, 0x300f), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x04ca, 0x3010), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x04ca, 0x3014), .driver_info = BTUSB_ATH3012 },
-	{ USB_DEVICE(0x04ca, 0x3018), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0930, 0x0219), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0930, 0x021c), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0930, 0x0220), .driver_info = BTUSB_ATH3012 },
@@ -251,11 +248,8 @@ static const struct usb_device_id blacklist_table[] = {
 
 	/* QCA ROME chipset */
 	{ USB_DEVICE(0x0cf3, 0xe007), .driver_info = BTUSB_QCA_ROME },
-	{ USB_DEVICE(0x0cf3, 0xe009), .driver_info = BTUSB_QCA_ROME },
 	{ USB_DEVICE(0x0cf3, 0xe300), .driver_info = BTUSB_QCA_ROME },
 	{ USB_DEVICE(0x0cf3, 0xe360), .driver_info = BTUSB_QCA_ROME },
-	{ USB_DEVICE(0x0489, 0xe092), .driver_info = BTUSB_QCA_ROME },
-	{ USB_DEVICE(0x04ca, 0x3011), .driver_info = BTUSB_QCA_ROME },
 
 	/* Broadcom BCM2035 */
 	{ USB_DEVICE(0x0a5c, 0x2009), .driver_info = BTUSB_BCM92035 },
@@ -295,8 +289,7 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x0400, 0x080a), .driver_info = BTUSB_BROKEN_ISOC },
 
 	/* CONWISE Technology based adapters with buggy SCO support */
-	{ USB_DEVICE(0x0e5e, 0x6622),
-	  .driver_info = BTUSB_BROKEN_ISOC | BTUSB_CW6622},
+	{ USB_DEVICE(0x0e5e, 0x6622), .driver_info = BTUSB_BROKEN_ISOC },
 
 	/* Roper Class 1 Bluetooth Dongle (Silicon Wave based) */
 	{ USB_DEVICE(0x1310, 0x0001), .driver_info = BTUSB_SWAVE },
@@ -316,14 +309,12 @@ static const struct usb_device_id blacklist_table[] = {
 	/* Marvell Bluetooth devices */
 	{ USB_DEVICE(0x1286, 0x2044), .driver_info = BTUSB_MARVELL },
 	{ USB_DEVICE(0x1286, 0x2046), .driver_info = BTUSB_MARVELL },
-	{ USB_DEVICE(0x1286, 0x204e), .driver_info = BTUSB_MARVELL },
 
 	/* Intel Bluetooth devices */
 	{ USB_DEVICE(0x8087, 0x07da), .driver_info = BTUSB_CSR },
 	{ USB_DEVICE(0x8087, 0x07dc), .driver_info = BTUSB_INTEL },
 	{ USB_DEVICE(0x8087, 0x0a2a), .driver_info = BTUSB_INTEL },
 	{ USB_DEVICE(0x8087, 0x0a2b), .driver_info = BTUSB_INTEL_NEW },
-	{ USB_DEVICE(0x8087, 0x0aa7), .driver_info = BTUSB_INTEL },
 
 	/* Other Intel Bluetooth devices */
 	{ USB_VENDOR_AND_INTERFACE_INFO(0x8087, 0xe0, 0x01, 0x01),
@@ -343,10 +334,6 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x13d3, 0x3410), .driver_info = BTUSB_REALTEK },
 	{ USB_DEVICE(0x13d3, 0x3416), .driver_info = BTUSB_REALTEK },
 	{ USB_DEVICE(0x13d3, 0x3459), .driver_info = BTUSB_REALTEK },
-	{ USB_DEVICE(0x13d3, 0x3494), .driver_info = BTUSB_REALTEK },
-
-	/* Additional Realtek 8723BU Bluetooth devices */
-	{ USB_DEVICE(0x7392, 0xa611), .driver_info = BTUSB_REALTEK },
 
 	/* Additional Realtek 8821AE Bluetooth devices */
 	{ USB_DEVICE(0x0b05, 0x17dc), .driver_info = BTUSB_REALTEK },
@@ -354,9 +341,6 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x13d3, 0x3458), .driver_info = BTUSB_REALTEK },
 	{ USB_DEVICE(0x13d3, 0x3461), .driver_info = BTUSB_REALTEK },
 	{ USB_DEVICE(0x13d3, 0x3462), .driver_info = BTUSB_REALTEK },
-
-	/* Additional Realtek 8822BE Bluetooth devices */
-	{ USB_DEVICE(0x0b05, 0x185c), .driver_info = BTUSB_REALTEK },
 
 	/* Silicon Wave based devices */
 	{ USB_DEVICE(0x0c10, 0x0000), .driver_info = BTUSB_SWAVE },
@@ -376,8 +360,8 @@ static const struct usb_device_id blacklist_table[] = {
 #define BTUSB_FIRMWARE_LOADED	7
 #define BTUSB_FIRMWARE_FAILED	8
 #define BTUSB_BOOTING		9
-#define BTUSB_DIAG_RUNNING	10
-#define BTUSB_OOB_WAKE_ENABLED	11
+#define BTUSB_RESET_RESUME	10
+#define BTUSB_DIAG_RUNNING	11
 
 struct btusb_data {
 	struct hci_dev       *hdev;
@@ -1052,10 +1036,6 @@ static int btusb_open(struct hci_dev *hdev)
 
 	BT_DBG("%s", hdev->name);
 
-	err = usb_autopm_get_interface(data->intf);
-	if (err < 0)
-		return err;
-
 	/* Patching USB firmware files prior to starting any URBs of HCI path
 	 * It is more safe to use USB bulk channel for downloading USB patch
 	 */
@@ -1064,6 +1044,10 @@ static int btusb_open(struct hci_dev *hdev)
 		if (err < 0)
 			return err;
 	}
+
+	err = usb_autopm_get_interface(data->intf);
+	if (err < 0)
+		return err;
 
 	data->intf->needs_remote_wakeup = 1;
 
@@ -2120,14 +2104,10 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	/* With this Intel bootloader only the hardware variant and device
 	 * revision information are used to select the right firmware.
 	 *
-	 * The firmware filename is ibt-<hw_variant>-<dev_revid>.sfi.
-	 *
-	 * Currently the supported hardware variants are:
-	 *   11 (0x0b) for iBT3.0 (LnP/SfP)
-	 *   12 (0x0c) for iBT3.5 (WsP)
+	 * Currently this bootloader support is limited to hardware variant
+	 * iBT 3.0 (LnP/SfP) which is identified by the value 11 (0x0b).
 	 */
-	snprintf(fwname, sizeof(fwname), "intel/ibt-%u-%u.sfi",
-		 le16_to_cpu(ver.hw_variant),
+	snprintf(fwname, sizeof(fwname), "intel/ibt-11-%u.sfi",
 		 le16_to_cpu(params->dev_revid));
 
 	err = request_firmware(&fw, fwname, &hdev->dev);
@@ -2143,8 +2123,7 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	/* Save the DDC file name for later use to apply once the firmware
 	 * downloading is done.
 	 */
-	snprintf(fwname, sizeof(fwname), "intel/ibt-%u-%u.ddc",
-		 le16_to_cpu(ver.hw_variant),
+	snprintf(fwname, sizeof(fwname), "intel/ibt-11-%u.ddc",
 		 le16_to_cpu(params->dev_revid));
 
 	kfree_skb(skb);
@@ -2235,8 +2214,9 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	err = wait_on_bit_timeout(&data->flags, BTUSB_DOWNLOADING,
 				  TASK_INTERRUPTIBLE,
 				  msecs_to_jiffies(5000));
-	if (err == -EINTR) {
+	if (err == 1) {
 		BT_ERR("%s: Firmware loading interrupted", hdev->name);
+		err = -EINTR;
 		goto done;
 	}
 
@@ -2288,7 +2268,7 @@ done:
 				  TASK_INTERRUPTIBLE,
 				  msecs_to_jiffies(1000));
 
-	if (err == -EINTR) {
+	if (err == 1) {
 		BT_ERR("%s: Device boot interrupted", hdev->name);
 		return -EINTR;
 	}
@@ -2846,7 +2826,7 @@ static int btusb_probe(struct usb_interface *intf,
 	if (id->driver_info & BTUSB_AMP)
 		hdev->dev_type = HCI_AMP;
 	else
-		hdev->dev_type = HCI_PRIMARY;
+		hdev->dev_type = HCI_BREDR;
 
 	data->hdev = hdev;
 
@@ -2857,9 +2837,6 @@ static int btusb_probe(struct usb_interface *intf,
 	hdev->flush  = btusb_flush;
 	hdev->send   = btusb_send_frame;
 	hdev->notify = btusb_notify;
-
-	if (id->driver_info & BTUSB_CW6622)
-		set_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks);
 
 	if (id->driver_info & BTUSB_BCM2045)
 		set_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks);
@@ -2932,12 +2909,6 @@ static int btusb_probe(struct usb_interface *intf,
 	if (id->driver_info & BTUSB_QCA_ROME) {
 		data->setup_on_usb = btusb_setup_qca;
 		hdev->set_bdaddr = btusb_set_bdaddr_ath3012;
-
-		/* QCA Rome devices lose their updated firmware over suspend,
-		 * but the USB hub doesn't notice any status change.
-		 * explicitly request a device reset on resume.
-		 */
-		interface_to_usbdev(intf)->quirks |= USB_QUIRK_RESET_RESUME;
 	}
 
 #ifdef CONFIG_BT_HCIBTUSB_RTL
@@ -2948,7 +2919,7 @@ static int btusb_probe(struct usb_interface *intf,
 		 * but the USB hub doesn't notice any status change.
 		 * Explicitly request a device reset on resume.
 		 */
-		interface_to_usbdev(intf)->quirks |= USB_QUIRK_RESET_RESUME;
+		set_bit(BTUSB_RESET_RESUME, &data->flags);
 	}
 #endif
 
@@ -3104,6 +3075,14 @@ static int btusb_suspend(struct usb_interface *intf, pm_message_t message)
 
 	btusb_stop_traffic(data);
 	usb_kill_anchored_urbs(&data->tx_anchor);
+
+	/* Optionally request a device reset on resume, but only when
+	 * wakeups are disabled. If wakeups are enabled we assume the
+	 * device will stay powered up throughout suspend.
+	 */
+	if (test_bit(BTUSB_RESET_RESUME, &data->flags) &&
+	    !device_may_wakeup(&data->udev->dev))
+		data->udev->reset_resume = 1;
 
 	return 0;
 }

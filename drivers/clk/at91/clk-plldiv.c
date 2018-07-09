@@ -75,14 +75,13 @@ static const struct clk_ops plldiv_ops = {
 	.set_rate = clk_plldiv_set_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91_clk_register_plldiv(struct regmap *regmap, const char *name,
 			 const char *parent_name)
 {
 	struct clk_plldiv *plldiv;
-	struct clk_hw *hw;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	int ret;
 
 	plldiv = kzalloc(sizeof(*plldiv), GFP_KERNEL);
 	if (!plldiv)
@@ -97,20 +96,18 @@ at91_clk_register_plldiv(struct regmap *regmap, const char *name,
 	plldiv->hw.init = &init;
 	plldiv->regmap = regmap;
 
-	hw = &plldiv->hw;
-	ret = clk_hw_register(NULL, &plldiv->hw);
-	if (ret) {
-		kfree(plldiv);
-		hw = ERR_PTR(ret);
-	}
+	clk = clk_register(NULL, &plldiv->hw);
 
-	return hw;
+	if (IS_ERR(clk))
+		kfree(plldiv);
+
+	return clk;
 }
 
 static void __init
 of_at91sam9x5_clk_plldiv_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	const char *parent_name;
 	const char *name = np->name;
 	struct regmap *regmap;
@@ -123,11 +120,12 @@ of_at91sam9x5_clk_plldiv_setup(struct device_node *np)
 	if (IS_ERR(regmap))
 		return;
 
-	hw = at91_clk_register_plldiv(regmap, name, parent_name);
-	if (IS_ERR(hw))
+	clk = at91_clk_register_plldiv(regmap, name, parent_name);
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
+	return;
 }
 CLK_OF_DECLARE(at91sam9x5_clk_plldiv, "atmel,at91sam9x5-clk-plldiv",
 	       of_at91sam9x5_clk_plldiv_setup);

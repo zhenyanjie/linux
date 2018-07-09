@@ -31,7 +31,6 @@
 #include <asm/pci-bridge.h>
 #include <asm/ppc-pci.h>
 #include <asm/firmware.h>
-#include <asm/eeh.h>
 
 /*
  * The function is used to find the firmware data of one
@@ -182,6 +181,7 @@ struct pci_dn *add_dev_pci_data(struct pci_dev *pdev)
 {
 #ifdef CONFIG_PCI_IOV
 	struct pci_dn *parent, *pdn;
+	struct eeh_dev *edev;
 	int i;
 
 	/* Only support IOV for now */
@@ -199,8 +199,6 @@ struct pci_dn *add_dev_pci_data(struct pci_dev *pdev)
 		return NULL;
 
 	for (i = 0; i < pci_sriov_get_totalvfs(pdev); i++) {
-		struct eeh_dev *edev __maybe_unused;
-
 		pdn = add_one_dev_pci_data(parent, NULL, i,
 					   pci_iov_virtfn_bus(pdev, i),
 					   pci_iov_virtfn_devfn(pdev, i));
@@ -210,12 +208,11 @@ struct pci_dn *add_dev_pci_data(struct pci_dev *pdev)
 			return NULL;
 		}
 
-#ifdef CONFIG_EEH
 		/* Create the EEH device for the VF */
-		edev = eeh_dev_init(pdn);
+		eeh_dev_init(pdn, pci_bus_to_host(pdev->bus));
+		edev = pdn_to_eeh_dev(pdn);
 		BUG_ON(!edev);
 		edev->physfn = pdev;
-#endif /* CONFIG_EEH */
 	}
 #endif /* CONFIG_PCI_IOV */
 
@@ -227,6 +224,7 @@ void remove_dev_pci_data(struct pci_dev *pdev)
 #ifdef CONFIG_PCI_IOV
 	struct pci_dn *parent;
 	struct pci_dn *pdn, *tmp;
+	struct eeh_dev *edev;
 	int i;
 
 	/*
@@ -262,22 +260,18 @@ void remove_dev_pci_data(struct pci_dev *pdev)
 	 * a batch mode.
 	 */
 	for (i = 0; i < pci_sriov_get_totalvfs(pdev); i++) {
-		struct eeh_dev *edev __maybe_unused;
-
 		list_for_each_entry_safe(pdn, tmp,
 			&parent->child_list, list) {
 			if (pdn->busno != pci_iov_virtfn_bus(pdev, i) ||
 			    pdn->devfn != pci_iov_virtfn_devfn(pdev, i))
 				continue;
 
-#ifdef CONFIG_EEH
 			/* Release EEH device for the VF */
 			edev = pdn_to_eeh_dev(pdn);
 			if (edev) {
 				pdn->edev = NULL;
 				kfree(edev);
 			}
-#endif /* CONFIG_EEH */
 
 			if (!list_empty(&pdn->list))
 				list_del(&pdn->list);
@@ -295,11 +289,8 @@ struct pci_dn *pci_add_device_node_info(struct pci_controller *hose,
 	const __be32 *regs;
 	struct device_node *parent;
 	struct pci_dn *pdn;
-#ifdef CONFIG_EEH
-	struct eeh_dev *edev;
-#endif
 
-	pdn = kzalloc(sizeof(*pdn), GFP_KERNEL);
+	pdn = zalloc_maybe_bootmem(sizeof(*pdn), GFP_KERNEL);
 	if (pdn == NULL)
 		return NULL;
 	dn->data = pdn;
@@ -327,15 +318,6 @@ struct pci_dn *pci_add_device_node_info(struct pci_controller *hose,
 
 	/* Extended config space */
 	pdn->pci_ext_config_space = (type && of_read_number(type, 1) == 1);
-
-	/* Create EEH device */
-#ifdef CONFIG_EEH
-	edev = eeh_dev_init(pdn);
-	if (!edev) {
-		kfree(pdn);
-		return NULL;
-	}
-#endif
 
 	/* Attach to parent node */
 	INIT_LIST_HEAD(&pdn->child_list);
@@ -522,18 +504,14 @@ void pci_devs_phb_init_dynamic(struct pci_controller *phb)
  * pci device found underneath.  This routine runs once,
  * early in the boot sequence.
  */
-static int __init pci_devs_phb_init(void)
+void __init pci_devs_phb_init(void)
 {
 	struct pci_controller *phb, *tmp;
 
 	/* This must be done first so the device nodes have valid pci info! */
 	list_for_each_entry_safe(phb, tmp, &hose_list, list_node)
 		pci_devs_phb_init_dynamic(phb);
-
-	return 0;
 }
-
-core_initcall(pci_devs_phb_init);
 
 static void pci_dev_pdn_setup(struct pci_dev *pdev)
 {

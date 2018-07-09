@@ -33,9 +33,9 @@
 #include "clk-div6.h"
 
 #ifdef DEBUG
-#define WARN_DEBUG(x)	WARN_ON(x)
-#else
 #define WARN_DEBUG(x)	do { } while (0)
+#else
+#define WARN_DEBUG(x)	WARN_ON(x)
 #endif
 
 
@@ -243,9 +243,8 @@ struct clk *cpg_mssr_clk_src_twocell_get(struct of_phandle_args *clkspec,
 		dev_err(dev, "Cannot get %s clock %u: %ld", type, clkidx,
 		       PTR_ERR(clk));
 	else
-		dev_dbg(dev, "clock (%u, %u) is %pC at %lu Hz\n",
-			clkspec->args[0], clkspec->args[1], clk,
-			clk_get_rate(clk));
+		dev_dbg(dev, "clock (%u, %u) is %pC at %pCr Hz\n",
+			clkspec->args[0], clkspec->args[1], clk, clk);
 	return clk;
 }
 
@@ -305,7 +304,7 @@ static void __init cpg_mssr_register_core_clk(const struct cpg_core_clk *core,
 	if (IS_ERR_OR_NULL(clk))
 		goto fail;
 
-	dev_dbg(dev, "Core clock %pC at %lu Hz\n", clk, clk_get_rate(clk));
+	dev_dbg(dev, "Core clock %pC at %pCr Hz\n", clk, clk);
 	priv->clks[id] = clk;
 	return;
 
@@ -373,7 +372,7 @@ static void __init cpg_mssr_register_mod_clk(const struct mssr_mod_clk *mod,
 	if (IS_ERR(clk))
 		goto fail;
 
-	dev_dbg(dev, "Module clock %pC at %lu Hz\n", clk, clk_get_rate(clk));
+	dev_dbg(dev, "Module clock %pC at %pCr Hz\n", clk, clk);
 	priv->clks[id] = clk;
 	return;
 
@@ -508,12 +507,6 @@ static const struct of_device_id cpg_mssr_match[] = {
 	{
 		.compatible = "renesas,r8a7795-cpg-mssr",
 		.data = &r8a7795_cpg_mssr_info,
-	},
-#endif
-#ifdef CONFIG_ARCH_R8A7796
-	{
-		.compatible = "renesas,r8a7796-cpg-mssr",
-		.data = &r8a7796_cpg_mssr_info,
 	},
 #endif
 	{ /* sentinel */ }

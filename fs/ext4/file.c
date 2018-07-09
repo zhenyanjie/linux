@@ -91,7 +91,9 @@ ext4_unaligned_aio(struct inode *inode, struct iov_iter *from, loff_t pos)
 static ssize_t
 ext4_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 {
+	struct file *file = iocb->ki_filp;
 	struct inode *inode = file_inode(iocb->ki_filp);
+	struct blk_plug plug;
 	int o_direct = iocb->ki_flags & IOCB_DIRECT;
 	int unaligned_aio = 0;
 	int overwrite = 0;
@@ -132,16 +134,18 @@ ext4_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (o_direct) {
 		size_t length = iov_iter_count(from);
 		loff_t pos = iocb->ki_pos;
+		blk_start_plug(&plug);
 
 		/* check whether we do a DIO overwrite or not */
 		if (ext4_should_dioread_nolock(inode) && !unaligned_aio &&
-		    pos + length <= i_size_read(inode)) {
+		    !file->f_mapping->nrpages && pos + length <= i_size_read(inode)) {
 			struct ext4_map_blocks map;
 			unsigned int blkbits = inode->i_blkbits;
 			int err, len;
 
 			map.m_lblk = pos >> blkbits;
-			map.m_len = EXT4_MAX_BLOCKS(length, pos, blkbits);
+			map.m_len = (EXT4_BLOCK_ALIGN(pos + length, blkbits) >> blkbits)
+				- map.m_lblk;
 			len = map.m_len;
 
 			err = ext4_map_blocks(NULL, inode, &map, 0);
@@ -167,6 +171,8 @@ ext4_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	if (ret > 0)
 		ret = generic_write_sync(iocb, ret);
+	if (o_direct)
+		blk_finish_plug(&plug);
 
 	return ret;
 
@@ -196,7 +202,7 @@ static int ext4_dax_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (IS_ERR(handle))
 		result = VM_FAULT_SIGBUS;
 	else
-		result = dax_fault(vma, vmf, ext4_dax_get_block);
+		result = __dax_fault(vma, vmf, ext4_dax_get_block);
 
 	if (write) {
 		if (!IS_ERR(handle))
@@ -231,7 +237,7 @@ static int ext4_dax_pmd_fault(struct vm_area_struct *vma, unsigned long addr,
 	if (IS_ERR(handle))
 		result = VM_FAULT_SIGBUS;
 	else
-		result = dax_pmd_fault(vma, addr, pmd, flags,
+		result = __dax_pmd_fault(vma, addr, pmd, flags,
 					 ext4_dax_get_block);
 
 	if (write) {
@@ -297,10 +303,10 @@ static int ext4_file_mmap(struct file *file, struct vm_area_struct *vma)
 	struct inode *inode = file->f_mapping->host;
 
 	if (ext4_encrypted_inode(inode)) {
-		int err = fscrypt_get_encryption_info(inode);
+		int err = ext4_get_encryption_info(inode);
 		if (err)
 			return 0;
-		if (!fscrypt_has_encryption_key(inode))
+		if (ext4_encryption_info(inode) == NULL)
 			return -ENOKEY;
 	}
 	file_accessed(file);
@@ -356,16 +362,16 @@ static int ext4_file_open(struct inode * inode, struct file * filp)
 		}
 	}
 	if (ext4_encrypted_inode(inode)) {
-		ret = fscrypt_get_encryption_info(inode);
+		ret = ext4_get_encryption_info(inode);
 		if (ret)
 			return -EACCES;
-		if (!fscrypt_has_encryption_key(inode))
+		if (ext4_encryption_info(inode) == NULL)
 			return -ENOKEY;
 	}
 
 	dir = dget_parent(file_dentry(filp));
 	if (ext4_encrypted_inode(d_inode(dir)) &&
-			!fscrypt_has_permitted_context(d_inode(dir), inode)) {
+	    !ext4_is_child_context_consistent_with_parent(d_inode(dir), inode)) {
 		ext4_warning(inode->i_sb,
 			     "Inconsistent encryption contexts: %lu/%lu",
 			     (unsigned long) d_inode(dir)->i_ino,
@@ -429,29 +435,49 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
 		int i, num;
 		unsigned long nr_pages;
 
-		num = min_t(pgoff_t, end - index, PAGEVEC_SIZE - 1) + 1;
+		num = min_t(pgoff_t, end - index, PAGEVEC_SIZE);
 		nr_pages = pagevec_lookup(&pvec, inode->i_mapping, index,
 					  (pgoff_t)num);
-		if (nr_pages == 0)
+		if (nr_pages == 0) {
+			if (whence == SEEK_DATA)
+				break;
+
+			BUG_ON(whence != SEEK_HOLE);
+			/*
+			 * If this is the first time to go into the loop and
+			 * offset is not beyond the end offset, it will be a
+			 * hole at this offset
+			 */
+			if (lastoff == startoff || lastoff < endoff)
+				found = 1;
 			break;
+		}
+
+		/*
+		 * If this is the first time to go into the loop and
+		 * offset is smaller than the first page offset, it will be a
+		 * hole at this offset.
+		 */
+		if (lastoff == startoff && whence == SEEK_HOLE &&
+		    lastoff < page_offset(pvec.pages[0])) {
+			found = 1;
+			break;
+		}
 
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
 			struct buffer_head *bh, *head;
 
 			/*
-			 * If current offset is smaller than the page offset,
-			 * there is a hole at this offset.
+			 * If the current offset is not beyond the end of given
+			 * range, it will be a hole.
 			 */
-			if (whence == SEEK_HOLE && lastoff < endoff &&
-			    lastoff < page_offset(pvec.pages[i])) {
+			if (lastoff < endoff && whence == SEEK_HOLE &&
+			    page->index > end) {
 				found = 1;
 				*offset = lastoff;
 				goto out;
 			}
-
-			if (page->index > end)
-				goto out;
 
 			lock_page(page);
 
@@ -469,8 +495,6 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
 				lastoff = page_offset(page);
 				bh = head = page_buffers(page);
 				do {
-					if (lastoff + bh->b_size <= startoff)
-						goto next;
 					if (buffer_uptodate(bh) ||
 					    buffer_unwritten(bh)) {
 						if (whence == SEEK_DATA)
@@ -485,7 +509,6 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
 						unlock_page(page);
 						goto out;
 					}
-next:
 					lastoff += bh->b_size;
 					bh = bh->b_this_page;
 				} while (bh != head);
@@ -495,18 +518,20 @@ next:
 			unlock_page(page);
 		}
 
-		/* The no. of pages is less than our desired, we are done. */
-		if (nr_pages < num)
+		/*
+		 * The no. of pages is less than our desired, that would be a
+		 * hole in there.
+		 */
+		if (nr_pages < num && whence == SEEK_HOLE) {
+			found = 1;
+			*offset = lastoff;
 			break;
+		}
 
 		index = pvec.pages[i - 1]->index + 1;
 		pagevec_release(&pvec);
 	} while (index <= end);
 
-	if (whence == SEEK_HOLE && lastoff < endoff) {
-		found = 1;
-		*offset = lastoff;
-	}
 out:
 	pagevec_release(&pvec);
 	return found;
@@ -527,7 +552,7 @@ static loff_t ext4_seek_data(struct file *file, loff_t offset, loff_t maxsize)
 	inode_lock(inode);
 
 	isize = i_size_read(inode);
-	if (offset < 0 || offset >= isize) {
+	if (offset >= isize) {
 		inode_unlock(inode);
 		return -ENXIO;
 	}
@@ -590,7 +615,7 @@ static loff_t ext4_seek_hole(struct file *file, loff_t offset, loff_t maxsize)
 	inode_lock(inode);
 
 	isize = i_size_read(inode);
-	if (offset < 0 || offset >= isize) {
+	if (offset >= isize) {
 		inode_unlock(inode);
 		return -ENXIO;
 	}
@@ -678,7 +703,6 @@ const struct file_operations ext4_file_operations = {
 	.open		= ext4_file_open,
 	.release	= ext4_release_file,
 	.fsync		= ext4_sync_file,
-	.get_unmapped_area = thp_get_unmapped_area,
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 	.fallocate	= ext4_fallocate,
@@ -687,7 +711,10 @@ const struct file_operations ext4_file_operations = {
 const struct inode_operations ext4_file_inode_operations = {
 	.setattr	= ext4_setattr,
 	.getattr	= ext4_getattr,
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= ext4_listxattr,
+	.removexattr	= generic_removexattr,
 	.get_acl	= ext4_get_acl,
 	.set_acl	= ext4_set_acl,
 	.fiemap		= ext4_fiemap,

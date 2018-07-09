@@ -873,8 +873,7 @@ static int lan78xx_read_otp(struct lan78xx_net *dev, u32 offset,
 			offset += 0x100;
 		else
 			ret = -EINVAL;
-		if (!ret)
-			ret = lan78xx_read_raw_otp(dev, offset, length, data);
+		ret = lan78xx_read_raw_otp(dev, offset, length, data);
 	}
 
 	return ret;
@@ -1180,7 +1179,7 @@ static int lan78xx_link_reset(struct lan78xx_net *dev)
  * NOTE:  annoying asymmetry:  if it's active, schedule_work() fails,
  * but tasklet_schedule() doesn't.	hope the failure is rare.
  */
-static void lan78xx_defer_kevent(struct lan78xx_net *dev, int work)
+void lan78xx_defer_kevent(struct lan78xx_net *dev, int work)
 {
 	set_bit(work, &dev->flags);
 	if (!schedule_delayed_work(&dev->wq, 0))
@@ -1407,7 +1406,7 @@ static u32 lan78xx_get_link(struct net_device *net)
 	return net->phydev->link;
 }
 
-static int lan78xx_nway_reset(struct net_device *net)
+int lan78xx_nway_reset(struct net_device *net)
 {
 	return phy_start_aneg(net->phydev);
 }
@@ -1998,7 +1997,7 @@ static int lan78xx_change_mtu(struct net_device *netdev, int new_mtu)
 	return 0;
 }
 
-static int lan78xx_set_mac_addr(struct net_device *netdev, void *p)
+int lan78xx_set_mac_addr(struct net_device *netdev, void *p)
 {
 	struct lan78xx_net *dev = netdev_priv(netdev);
 	struct sockaddr *addr = p;
@@ -2198,7 +2197,6 @@ static int lan78xx_reset(struct lan78xx_net *dev)
 		buf = DEFAULT_BURST_CAP_SIZE / FS_USB_PKT_SIZE;
 		dev->rx_urb_size = DEFAULT_BURST_CAP_SIZE;
 		dev->rx_qlen = 4;
-		dev->tx_qlen = 4;
 	}
 
 	ret = lan78xx_write_reg(dev, BURST_CAP, buf);
@@ -2373,7 +2371,7 @@ static void lan78xx_terminate_urbs(struct lan78xx_net *dev)
 	remove_wait_queue(&unlink_wakeup, &wait);
 }
 
-static int lan78xx_stop(struct net_device *net)
+int lan78xx_stop(struct net_device *net)
 {
 	struct lan78xx_net		*dev = netdev_priv(net);
 
@@ -2421,9 +2419,14 @@ static struct sk_buff *lan78xx_tx_prep(struct lan78xx_net *dev,
 {
 	u32 tx_cmd_a, tx_cmd_b;
 
-	if (skb_cow_head(skb, TX_OVERHEAD)) {
+	if (skb_headroom(skb) < TX_OVERHEAD) {
+		struct sk_buff *skb2;
+
+		skb2 = skb_copy_expand(skb, TX_OVERHEAD, 0, flags);
 		dev_kfree_skb_any(skb);
-		return NULL;
+		skb = skb2;
+		if (!skb)
+			return NULL;
 	}
 
 	if (lan78xx_linearize(skb) < 0)
@@ -2530,8 +2533,7 @@ static void lan78xx_queue_skb(struct sk_buff_head *list,
 	entry->state = state;
 }
 
-static netdev_tx_t
-lan78xx_start_xmit(struct sk_buff *skb, struct net_device *net)
+netdev_tx_t lan78xx_start_xmit(struct sk_buff *skb, struct net_device *net)
 {
 	struct lan78xx_net *dev = netdev_priv(net);
 	struct sk_buff *skb2 = NULL;
@@ -2560,8 +2562,7 @@ lan78xx_start_xmit(struct sk_buff *skb, struct net_device *net)
 	return NETDEV_TX_OK;
 }
 
-static int
-lan78xx_get_endpoints(struct lan78xx_net *dev, struct usb_interface *intf)
+int lan78xx_get_endpoints(struct lan78xx_net *dev, struct usb_interface *intf)
 {
 	int tmp;
 	struct usb_host_interface *alt = NULL;
@@ -2699,7 +2700,7 @@ static void lan78xx_rx_csum_offload(struct lan78xx_net *dev,
 	}
 }
 
-static void lan78xx_skb_return(struct lan78xx_net *dev, struct sk_buff *skb)
+void lan78xx_skb_return(struct lan78xx_net *dev, struct sk_buff *skb)
 {
 	int		status;
 
@@ -3001,8 +3002,10 @@ static void lan78xx_tx_bh(struct lan78xx_net *dev)
 
 gso_skb:
 	urb = usb_alloc_urb(0, GFP_ATOMIC);
-	if (!urb)
+	if (!urb) {
+		netif_dbg(dev, tx_err, dev->net, "no urb\n");
 		goto drop;
+	}
 
 	entry = (struct skb_data *)skb->cb;
 	entry->urb = urb;
@@ -3282,7 +3285,7 @@ static void lan78xx_disconnect(struct usb_interface *intf)
 	usb_put_dev(udev);
 }
 
-static void lan78xx_tx_timeout(struct net_device *net)
+void lan78xx_tx_timeout(struct net_device *net)
 {
 	struct lan78xx_net *dev = netdev_priv(net);
 
@@ -3392,7 +3395,6 @@ static int lan78xx_probe(struct usb_interface *intf,
 	if (buf) {
 		dev->urb_intr = usb_alloc_urb(0, GFP_KERNEL);
 		if (!dev->urb_intr) {
-			ret = -ENOMEM;
 			kfree(buf);
 			goto out3;
 		} else {
@@ -3603,7 +3605,7 @@ static int lan78xx_set_suspend(struct lan78xx_net *dev, u32 wol)
 	return 0;
 }
 
-static int lan78xx_suspend(struct usb_interface *intf, pm_message_t message)
+int lan78xx_suspend(struct usb_interface *intf, pm_message_t message)
 {
 	struct lan78xx_net *dev = usb_get_intfdata(intf);
 	struct lan78xx_priv *pdata = (struct lan78xx_priv *)(dev->data[0]);
@@ -3699,7 +3701,7 @@ out:
 	return ret;
 }
 
-static int lan78xx_resume(struct usb_interface *intf)
+int lan78xx_resume(struct usb_interface *intf)
 {
 	struct lan78xx_net *dev = usb_get_intfdata(intf);
 	struct sk_buff *skb;
@@ -3766,7 +3768,7 @@ static int lan78xx_resume(struct usb_interface *intf)
 	return 0;
 }
 
-static int lan78xx_reset_resume(struct usb_interface *intf)
+int lan78xx_reset_resume(struct usb_interface *intf)
 {
 	struct lan78xx_net *dev = usb_get_intfdata(intf);
 

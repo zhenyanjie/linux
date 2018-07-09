@@ -25,7 +25,6 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/mbus.h>
-#include <linux/mvebu-pmsu.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
@@ -39,7 +38,7 @@
 #include <asm/suspend.h>
 #include <asm/tlbflush.h>
 #include "common.h"
-#include "pmsu.h"
+
 
 #define PMSU_BASE_OFFSET    0x100
 #define PMSU_REG_SIZE	    0x1000

@@ -1279,9 +1279,10 @@ static void init_local(void)
 		if (dlm_our_addr(&sas, i))
 			break;
 
-		addr = kmemdup(&sas, sizeof(*addr), GFP_NOFS);
+		addr = kmalloc(sizeof(*addr), GFP_NOFS);
 		if (!addr)
 			break;
+		memcpy(addr, &sas, sizeof(*addr));
 		dlm_local_addr[dlm_local_count++] = addr;
 	}
 }

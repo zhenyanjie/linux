@@ -139,7 +139,7 @@ module_param(protocol, int, 0644);
 MODULE_PARM_DESC(protocol, "protocol version");
 #endif
 
-struct ksock_tunables ksocknal_tunables;
+ksock_tunables_t ksocknal_tunables;
 
 int ksocknal_tunables_init(void)
 {

@@ -251,7 +251,7 @@ static ssize_t keymap_show(struct kobject *kobj, struct kobj_attribute *attr,
 	}
 	cp += sprintf(cp, "0, %d\n", KEY_MAP_VER);
 	spin_unlock_irqrestore(&speakup_info.spinlock, flags);
-	return (int)(cp - buf);
+	return (int)(cp-buf);
 }
 
 /*
@@ -288,8 +288,8 @@ static ssize_t keymap_store(struct kobject *kobj, struct kobj_attribute *attr,
 		cp = spk_s2uchar(cp, cp1);
 		cp1++;
 	}
-	i = (int)cp1[-2] + 1;
-	i *= (int)cp1[-1] + 1;
+	i = (int)cp1[-2]+1;
+	i *= (int)cp1[-1]+1;
 	i += 2; /* 0 and last map ver */
 	if (cp1[-3] != KEY_MAP_VER || cp1[-1] > 10 ||
 			i+SHIFT_TBL_SIZE+4 >= sizeof(spk_key_buf)) {
@@ -350,9 +350,9 @@ static ssize_t silent_store(struct kobject *kobj, struct kobj_attribute *attr,
 	} else {
 		shut = 0;
 	}
-	if (ch & 4)
+	if (ch&4)
 		shut |= 0x40;
-	if (ch & 1)
+	if (ch&1)
 		spk_shut_up |= shut;
 	else
 		spk_shut_up &= ~shut;
@@ -411,13 +411,11 @@ static ssize_t synth_direct_store(struct kobject *kobj,
 	int len;
 	int bytes;
 	const char *ptr = buf;
-	unsigned long flags;
 
 	if (!synth)
 		return -EPERM;
 
 	len = strlen(buf);
-	spin_lock_irqsave(&speakup_info.spinlock, flags);
 	while (len > 0) {
 		bytes = min_t(size_t, len, 250);
 		strncpy(tmp, ptr, bytes);
@@ -427,7 +425,6 @@ static ssize_t synth_direct_store(struct kobject *kobj,
 		ptr += bytes;
 		len -= bytes;
 	}
-	spin_unlock_irqrestore(&speakup_info.spinlock, flags);
 	return count;
 }
 
@@ -834,9 +831,7 @@ static ssize_t message_show(struct kobject *kobj,
 	struct msg_group_t *group = spk_find_msg_group(attr->attr.name);
 	unsigned long flags;
 
-	if (WARN_ON(!group))
-		return -EINVAL;
-
+	BUG_ON(!group);
 	spin_lock_irqsave(&speakup_info.spinlock, flags);
 	retval = message_show_helper(buf, group->start, group->end);
 	spin_unlock_irqrestore(&speakup_info.spinlock, flags);
@@ -848,9 +843,7 @@ static ssize_t message_store(struct kobject *kobj, struct kobj_attribute *attr,
 {
 	struct msg_group_t *group = spk_find_msg_group(attr->attr.name);
 
-	if (WARN_ON(!group))
-		return -EINVAL;
-
+	BUG_ON(!group);
 	return message_store_helper(buf, count, group);
 }
 
@@ -980,11 +973,11 @@ static struct attribute *i18n_attrs[] = {
  * created for the attributes with the directory being the name of the
  * attribute group.
  */
-static const struct attribute_group main_attr_group = {
+static struct attribute_group main_attr_group = {
 	.attrs = main_attrs,
 };
 
-static const struct attribute_group i18n_attr_group = {
+static struct attribute_group i18n_attr_group = {
 	.attrs = i18n_attrs,
 	.name = "i18n",
 };

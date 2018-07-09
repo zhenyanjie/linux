@@ -145,6 +145,11 @@ struct throtl_data
 	/* Total Number of queued bios on READ and WRITE lists */
 	unsigned int nr_queued[2];
 
+	/*
+	 * number of total undestroyed groups
+	 */
+	unsigned int nr_undestroyed_grps;
+
 	/* Work for dispatching throttled bios */
 	struct work_struct dispatch_work;
 };
@@ -499,17 +504,6 @@ static void throtl_dequeue_tg(struct throtl_grp *tg)
 static void throtl_schedule_pending_timer(struct throtl_service_queue *sq,
 					  unsigned long expires)
 {
-	unsigned long max_expire = jiffies + 8 * throtl_slice;
-
-	/*
-	 * Since we are adjusting the throttle limit dynamically, the sleep
-	 * time calculated according to previous limit might be invalid. It's
-	 * possible the cgroup sleep time is very long and no other cgroups
-	 * have IO running so notify the limit changes. Make sure the cgroup
-	 * doesn't sleep too long to avoid the missed notification.
-	 */
-	if (time_after(expires, max_expire))
-		expires = max_expire;
 	mod_timer(&sq->pending_timer, expires);
 	throtl_log(sq, "schedule timer. delay=%lu jiffies=%lu",
 		   expires - jiffies, jiffies);
@@ -791,11 +785,9 @@ static bool tg_may_dispatch(struct throtl_grp *tg, struct bio *bio,
 	/*
 	 * If previous slice expired, start a new one otherwise renew/extend
 	 * existing slice to make sure it is at least throtl_slice interval
-	 * long since now. New slice is started only for empty throttle group.
-	 * If there is queued bio, that means there should be an active
-	 * slice and it should be extended instead.
+	 * long since now.
 	 */
-	if (throtl_slice_used(tg, rw) && !(tg->service_queue.nr_queued[rw]))
+	if (throtl_slice_used(tg, rw))
 		throtl_start_new_slice(tg, rw);
 	else {
 		if (time_before(tg->slice_end[rw], jiffies + throtl_slice))
@@ -834,8 +826,8 @@ static void throtl_charge_bio(struct throtl_grp *tg, struct bio *bio)
 	 * second time when it eventually gets issued.  Set it when a bio
 	 * is being charged to a tg.
 	 */
-	if (!(bio->bi_opf & REQ_THROTTLED))
-		bio->bi_opf |= REQ_THROTTLED;
+	if (!(bio->bi_rw & REQ_THROTTLED))
+		bio->bi_rw |= REQ_THROTTLED;
 }
 
 /**
@@ -1412,7 +1404,7 @@ bool blk_throtl_bio(struct request_queue *q, struct blkcg_gq *blkg,
 	WARN_ON_ONCE(!rcu_read_lock_held());
 
 	/* see throtl_charge_bio() */
-	if ((bio->bi_opf & REQ_THROTTLED) || !tg->has_rules[rw])
+	if ((bio->bi_rw & REQ_THROTTLED) || !tg->has_rules[rw])
 		goto out;
 
 	spin_lock_irq(q->queue_lock);
@@ -1491,7 +1483,7 @@ out:
 	 * being issued.
 	 */
 	if (!throttled)
-		bio->bi_opf &= ~REQ_THROTTLED;
+		bio->bi_rw &= ~REQ_THROTTLED;
 	return throttled;
 }
 

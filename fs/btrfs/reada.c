@@ -820,7 +820,7 @@ static void dump_devs(struct btrfs_fs_info *fs_info, int all)
 
 	spin_lock(&fs_info->reada_lock);
 	list_for_each_entry(device, &fs_devices->devices, dev_list) {
-		btrfs_debug(fs_info, "dev %lld has %d in flight", device->devid,
+		printk(KERN_DEBUG "dev %lld has %d in flight\n", device->devid,
 			atomic_read(&device->reada_in_flight));
 		index = 0;
 		while (1) {
@@ -829,17 +829,17 @@ static void dump_devs(struct btrfs_fs_info *fs_info, int all)
 						     (void **)&zone, index, 1);
 			if (ret == 0)
 				break;
-			pr_debug("  zone %llu-%llu elems %llu locked %d devs",
-				    zone->start, zone->end, zone->elems,
-				    zone->locked);
+			printk(KERN_DEBUG "  zone %llu-%llu elems %llu locked "
+				"%d devs", zone->start, zone->end, zone->elems,
+				zone->locked);
 			for (j = 0; j < zone->ndevs; ++j) {
-				pr_cont(" %lld",
+				printk(KERN_CONT " %lld",
 					zone->devs[j]->devid);
 			}
 			if (device->reada_curr_zone == zone)
-				pr_cont(" curr off %llu",
+				printk(KERN_CONT " curr off %llu",
 					device->reada_next - zone->start);
-			pr_cont("\n");
+			printk(KERN_CONT "\n");
 			index = (zone->end >> PAGE_SHIFT) + 1;
 		}
 		cnt = 0;
@@ -851,20 +851,21 @@ static void dump_devs(struct btrfs_fs_info *fs_info, int all)
 						     (void **)&re, index, 1);
 			if (ret == 0)
 				break;
-			pr_debug("  re: logical %llu size %u empty %d scheduled %d",
+			printk(KERN_DEBUG
+				"  re: logical %llu size %u empty %d scheduled %d",
 				re->logical, fs_info->tree_root->nodesize,
 				list_empty(&re->extctl), re->scheduled);
 
 			for (i = 0; i < re->nzones; ++i) {
-				pr_cont(" zone %llu-%llu devs",
+				printk(KERN_CONT " zone %llu-%llu devs",
 					re->zones[i]->start,
 					re->zones[i]->end);
 				for (j = 0; j < re->zones[i]->ndevs; ++j) {
-					pr_cont(" %lld",
+					printk(KERN_CONT " %lld",
 						re->zones[i]->devs[j]->devid);
 				}
 			}
-			pr_cont("\n");
+			printk(KERN_CONT "\n");
 			index = (re->logical >> PAGE_SHIFT) + 1;
 			if (++cnt > 15)
 				break;
@@ -884,19 +885,20 @@ static void dump_devs(struct btrfs_fs_info *fs_info, int all)
 			index = (re->logical >> PAGE_SHIFT) + 1;
 			continue;
 		}
-		pr_debug("re: logical %llu size %u list empty %d scheduled %d",
+		printk(KERN_DEBUG
+			"re: logical %llu size %u list empty %d scheduled %d",
 			re->logical, fs_info->tree_root->nodesize,
 			list_empty(&re->extctl), re->scheduled);
 		for (i = 0; i < re->nzones; ++i) {
-			pr_cont(" zone %llu-%llu devs",
+			printk(KERN_CONT " zone %llu-%llu devs",
 				re->zones[i]->start,
 				re->zones[i]->end);
 			for (j = 0; j < re->zones[i]->ndevs; ++j) {
-				pr_cont(" %lld",
+				printk(KERN_CONT " %lld",
 				       re->zones[i]->devs[j]->devid);
 			}
 		}
-		pr_cont("\n");
+		printk(KERN_CONT "\n");
 		index = (re->logical >> PAGE_SHIFT) + 1;
 	}
 	spin_unlock(&fs_info->reada_lock);

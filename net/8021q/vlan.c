@@ -111,7 +111,12 @@ void unregister_vlan_dev(struct net_device *dev, struct list_head *head)
 		vlan_gvrp_uninit_applicant(real_dev);
 	}
 
-	vlan_vid_del(real_dev, vlan->vlan_proto, vlan_id);
+	/* Take it out of our own structures, but be sure to interlock with
+	 * HW accelerating devices or SW vlan input packet processing if
+	 * VLAN is not 0 (leave it there for 802.1p).
+	 */
+	if (vlan_id)
+		vlan_vid_del(real_dev, vlan->vlan_proto, vlan_id);
 
 	/* Get rid of the vlan's reference to real_dev */
 	dev_put(real_dev);
@@ -164,7 +169,7 @@ int register_vlan_dev(struct net_device *dev)
 	if (err < 0)
 		goto out_uninit_mvrp;
 
-	vlan->nest_level = dev_get_nest_level(real_dev) + 1;
+	vlan->nest_level = dev_get_nest_level(real_dev, is_vlan_dev) + 1;
 	err = register_netdevice(dev);
 	if (err < 0)
 		goto out_uninit_mvrp;
@@ -272,8 +277,7 @@ static int register_vlan_device(struct net_device *real_dev, u16 vlan_id)
 	return 0;
 
 out_free_newdev:
-	if (new_dev->reg_state == NETREG_UNINITIALIZED)
-		free_netdev(new_dev);
+	free_netdev(new_dev);
 	return err;
 }
 
@@ -371,9 +375,6 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 			dev->name);
 		vlan_vid_add(dev, htons(ETH_P_8021Q), 0);
 	}
-	if (event == NETDEV_DOWN &&
-	    (dev->features & NETIF_F_HW_VLAN_CTAG_FILTER))
-		vlan_vid_del(dev, htons(ETH_P_8021Q), 0);
 
 	vlan_info = rtnl_dereference(dev->vlan_info);
 	if (!vlan_info)
@@ -420,6 +421,9 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	case NETDEV_DOWN: {
 		struct net_device *tmp;
 		LIST_HEAD(close_list);
+
+		if (dev->features & NETIF_F_HW_VLAN_CTAG_FILTER)
+			vlan_vid_del(dev, htons(ETH_P_8021Q), 0);
 
 		/* Put all VLANs for this dev in the down state too.  */
 		vlan_group_for_each_dev(grp, i, vlandev) {
@@ -660,7 +664,7 @@ static struct sk_buff **vlan_gro_receive(struct sk_buff **head,
 
 	skb_gro_pull(skb, sizeof(*vhdr));
 	skb_gro_postpull_rcsum(skb, vhdr, sizeof(*vhdr));
-	pp = call_gro_receive(ptype->callbacks.gro_receive, head, skb);
+	pp = ptype->callbacks.gro_receive(head, skb);
 
 out_unlock:
 	rcu_read_unlock();

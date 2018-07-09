@@ -22,34 +22,34 @@
 #include <linux/iio/common/st_sensors.h>
 
 
-static int st_sensors_get_buffer_element(struct iio_dev *indio_dev, u8 *buf)
+int st_sensors_get_buffer_element(struct iio_dev *indio_dev, u8 *buf)
 {
-	int i;
+	int i, len;
+	int total = 0;
 	struct st_sensor_data *sdata = iio_priv(indio_dev);
 	unsigned int num_data_channels = sdata->num_data_channels;
 
-	for_each_set_bit(i, indio_dev->active_scan_mask, num_data_channels) {
-		const struct iio_chan_spec *channel = &indio_dev->channels[i];
-		unsigned int bytes_to_read =
-			DIV_ROUND_UP(channel->scan_type.realbits +
-				     channel->scan_type.shift, 8);
-		unsigned int storage_bytes =
-			channel->scan_type.storagebits >> 3;
+	for (i = 0; i < num_data_channels; i++) {
+		unsigned int bytes_to_read;
 
-		buf = PTR_ALIGN(buf, storage_bytes);
-		if (sdata->tf->read_multiple_byte(&sdata->tb, sdata->dev,
-						  channel->address,
-						  bytes_to_read, buf,
-						  sdata->multiread_bit) <
-		    bytes_to_read)
-			return -EIO;
+		if (test_bit(i, indio_dev->active_scan_mask)) {
+			bytes_to_read = indio_dev->channels[i].scan_type.storagebits >> 3;
+			len = sdata->tf->read_multiple_byte(&sdata->tb,
+				sdata->dev, indio_dev->channels[i].address,
+				bytes_to_read,
+				buf + total, sdata->multiread_bit);
 
-		/* Advance the buffer pointer */
-		buf += storage_bytes;
+			if (len < bytes_to_read)
+				return -EIO;
+
+			/* Advance the buffer pointer */
+			total += len;
+		}
 	}
 
-	return 0;
+	return total;
 }
+EXPORT_SYMBOL(st_sensors_get_buffer_element);
 
 irqreturn_t st_sensors_trigger_handler(int irq, void *p)
 {
@@ -59,16 +59,11 @@ irqreturn_t st_sensors_trigger_handler(int irq, void *p)
 	struct st_sensor_data *sdata = iio_priv(indio_dev);
 	s64 timestamp;
 
-	/*
-	 * If we do timetamping here, do it before reading the values, because
-	 * once we've read the values, new interrupts can occur (when using
-	 * the hardware trigger) and the hw_timestamp may get updated.
-	 * By storing it in a local variable first, we are safe.
-	 */
-	if (iio_trigger_using_own(indio_dev))
+	/* If we do timetamping here, do it before reading the values */
+	if (sdata->hw_irq_trigger)
 		timestamp = sdata->hw_timestamp;
 	else
-		timestamp = iio_get_time_ns(indio_dev);
+		timestamp = iio_get_time_ns();
 
 	len = st_sensors_get_buffer_element(indio_dev, sdata->buffer_data);
 	if (len < 0)

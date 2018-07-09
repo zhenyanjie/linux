@@ -1228,7 +1228,7 @@ static int if_sdio_probe(struct sdio_func *func,
 	}
 
 	spin_lock_init(&card->lock);
-	card->workqueue = alloc_workqueue("libertas_sdio", WQ_MEM_RECLAIM, 0);
+	card->workqueue = create_workqueue("libertas_sdio");
 	INIT_WORK(&card->packet_worker, if_sdio_host_to_card_worker);
 	init_waitqueue_head(&card->pwron_waitq);
 
@@ -1326,6 +1326,7 @@ static void if_sdio_remove(struct sdio_func *func)
 	lbs_stop_card(card->priv);
 	lbs_remove_card(card->priv);
 
+	flush_workqueue(card->workqueue);
 	destroy_workqueue(card->workqueue);
 
 	while (card->packets) {

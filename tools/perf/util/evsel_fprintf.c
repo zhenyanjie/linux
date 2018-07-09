@@ -122,6 +122,9 @@ int sample__fprintf_callchain(struct perf_sample *sample, int left_alignment,
 			if (!node)
 				break;
 
+			if (node->sym && node->sym->ignore)
+				goto next;
+
 			printed += fprintf(fp, "%-*.*s", left_alignment, left_alignment, " ");
 
 			if (print_ip)
@@ -155,7 +158,7 @@ int sample__fprintf_callchain(struct perf_sample *sample, int left_alignment,
 
 			if (!print_oneline)
 				printed += fprintf(fp, "\n");
-
+next:
 			callchain_cursor_advance(cursor);
 		}
 	}
@@ -178,7 +181,7 @@ int sample__fprintf_sym(struct perf_sample *sample, struct addr_location *al,
 	if (cursor != NULL) {
 		printed += sample__fprintf_callchain(sample, left_alignment,
 						     print_opts, cursor, fp);
-	} else {
+	} else if (!(al->sym && al->sym->ignore)) {
 		printed += fprintf(fp, "%-*.*s", left_alignment, left_alignment, " ");
 
 		if (print_ip)

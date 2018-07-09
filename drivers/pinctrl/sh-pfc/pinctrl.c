@@ -570,8 +570,7 @@ static bool sh_pfc_pinconf_validate(struct sh_pfc *pfc, unsigned int _pin,
 
 	switch (param) {
 	case PIN_CONFIG_BIAS_DISABLE:
-		return pin->configs &
-			(SH_PFC_PIN_CFG_PULL_UP | SH_PFC_PIN_CFG_PULL_DOWN);
+		return true;
 
 	case PIN_CONFIG_BIAS_PULL_UP:
 		return pin->configs & SH_PFC_PIN_CFG_PULL_UP;
@@ -597,7 +596,6 @@ static int sh_pfc_pinconf_get(struct pinctrl_dev *pctldev, unsigned _pin,
 	struct sh_pfc *pfc = pmx->pfc;
 	enum pin_config_param param = pinconf_to_config_param(*config);
 	unsigned long flags;
-	unsigned int arg;
 
 	if (!sh_pfc_pinconf_validate(pfc, _pin, param))
 		return -ENOTSUPP;
@@ -618,7 +616,7 @@ static int sh_pfc_pinconf_get(struct pinctrl_dev *pctldev, unsigned _pin,
 		if (bias != param)
 			return -EINVAL;
 
-		arg = 0;
+		*config = 0;
 		break;
 	}
 
@@ -629,26 +627,24 @@ static int sh_pfc_pinconf_get(struct pinctrl_dev *pctldev, unsigned _pin,
 		if (ret < 0)
 			return ret;
 
-		arg = ret;
+		*config = ret;
 		break;
 	}
 
 	case PIN_CONFIG_POWER_SOURCE: {
-		u32 pocctrl, val;
-		int bit;
+		int ret;
 
-		if (!pfc->info->ops || !pfc->info->ops->pin_to_pocctrl)
+		if (!pfc->info->ops || !pfc->info->ops->get_io_voltage)
 			return -ENOTSUPP;
 
-		bit = pfc->info->ops->pin_to_pocctrl(pfc, _pin, &pocctrl);
-		if (WARN(bit < 0, "invalid pin %#x", _pin))
-			return bit;
-
 		spin_lock_irqsave(&pfc->lock, flags);
-		val = sh_pfc_read_reg(pfc, pocctrl, 32);
+		ret = pfc->info->ops->get_io_voltage(pfc, _pin);
 		spin_unlock_irqrestore(&pfc->lock, flags);
 
-		arg = (val & BIT(bit)) ? 3300 : 1800;
+		if (ret < 0)
+			return ret;
+
+		*config = ret;
 		break;
 	}
 
@@ -656,7 +652,6 @@ static int sh_pfc_pinconf_get(struct pinctrl_dev *pctldev, unsigned _pin,
 		return -ENOTSUPP;
 	}
 
-	*config = pinconf_to_config_packed(param, arg);
 	return 0;
 }
 
@@ -701,28 +696,19 @@ static int sh_pfc_pinconf_set(struct pinctrl_dev *pctldev, unsigned _pin,
 		}
 
 		case PIN_CONFIG_POWER_SOURCE: {
-			unsigned int mV = pinconf_to_config_argument(configs[i]);
-			u32 pocctrl, val;
-			int bit;
+			unsigned int arg =
+				pinconf_to_config_argument(configs[i]);
+			int ret;
 
-			if (!pfc->info->ops || !pfc->info->ops->pin_to_pocctrl)
+			if (!pfc->info->ops || !pfc->info->ops->set_io_voltage)
 				return -ENOTSUPP;
 
-			bit = pfc->info->ops->pin_to_pocctrl(pfc, _pin, &pocctrl);
-			if (WARN(bit < 0, "invalid pin %#x", _pin))
-				return bit;
-
-			if (mV != 1800 && mV != 3300)
-				return -EINVAL;
-
 			spin_lock_irqsave(&pfc->lock, flags);
-			val = sh_pfc_read_reg(pfc, pocctrl, 32);
-			if (mV == 3300)
-				val |= BIT(bit);
-			else
-				val &= ~BIT(bit);
-			sh_pfc_write_reg(pfc, pocctrl, 32, val);
+			ret = pfc->info->ops->set_io_voltage(pfc, _pin, arg);
 			spin_unlock_irqrestore(&pfc->lock, flags);
+
+			if (ret)
+				return ret;
 
 			break;
 		}
@@ -817,5 +803,8 @@ int sh_pfc_register_pinctrl(struct sh_pfc *pfc)
 	pmx->pctl_desc.npins = pfc->info->nr_pins;
 
 	pmx->pctl = devm_pinctrl_register(pfc->dev, &pmx->pctl_desc, pmx);
-	return PTR_ERR_OR_ZERO(pmx->pctl);
+	if (IS_ERR(pmx->pctl))
+		return PTR_ERR(pmx->pctl);
+
+	return 0;
 }

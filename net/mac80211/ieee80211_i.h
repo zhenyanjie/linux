@@ -3,7 +3,7 @@
  * Copyright 2005, Devicescape Software, Inc.
  * Copyright 2006-2007	Jiri Benc <jbenc@suse.cz>
  * Copyright 2007-2010	Johannes Berg <johannes@sipsolutions.net>
- * Copyright 2013-2015  Intel Mobile Communications GmbH
+ * Copyright 2013-2014  Intel Mobile Communications GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -30,7 +30,6 @@
 #include <net/ieee80211_radiotap.h>
 #include <net/cfg80211.h>
 #include <net/mac80211.h>
-#include <net/fq.h>
 #include "key.h"
 #include "sta_info.h"
 #include "debug.h"
@@ -85,8 +84,6 @@ struct ieee80211_local;
 	IEEE80211_WMM_IE_STA_QOSINFO_SP_ALL
 
 #define IEEE80211_DEAUTH_FRAME_LEN	(24 /* hdr */ + 2 /* reason */)
-
-#define IEEE80211_MAX_NAN_INSTANCE_ID 255
 
 struct ieee80211_fragment_entry {
 	struct sk_buff_head skb_list;
@@ -681,6 +678,7 @@ struct ieee80211_if_mesh {
 	const struct ieee80211_mesh_sync_ops *sync_ops;
 	s64 sync_offset_clockdrift_max;
 	spinlock_t sync_offset_lock;
+	bool adjusting_tbtt;
 	/* mesh power save */
 	enum nl80211_mesh_power_mode nonpeer_pm;
 	int ps_peers_light_sleep;
@@ -807,44 +805,13 @@ enum txq_info_flags {
 	IEEE80211_TXQ_NO_AMSDU,
 };
 
-/**
- * struct txq_info - per tid queue
- *
- * @tin: contains packets split into multiple flows
- * @def_flow: used as a fallback flow when a packet destined to @tin hashes to
- *	a fq_flow which is already owned by a different tin
- * @def_cvars: codel vars for @def_flow
- * @frags: used to keep fragments created after dequeue
- */
 struct txq_info {
-	struct fq_tin tin;
-	struct fq_flow def_flow;
-	struct codel_vars def_cvars;
-	struct codel_stats cstats;
-	struct sk_buff_head frags;
+	struct sk_buff_head queue;
 	unsigned long flags;
+	unsigned long byte_cnt;
 
 	/* keep last! */
 	struct ieee80211_txq txq;
-};
-
-struct ieee80211_if_mntr {
-	u32 flags;
-	u8 mu_follow_addr[ETH_ALEN] __aligned(2);
-};
-
-/**
- * struct ieee80211_if_nan - NAN state
- *
- * @conf: current NAN configuration
- * @func_ids: a bitmap of available instance_id's
- */
-struct ieee80211_if_nan {
-	struct cfg80211_nan_conf conf;
-
-	/* protects function_inst_ids */
-	spinlock_t func_lock;
-	struct idr function_inst_ids;
 };
 
 struct ieee80211_sub_if_data {
@@ -889,7 +856,7 @@ struct ieee80211_sub_if_data {
 	bool control_port_no_encrypt;
 	int encrypt_headroom;
 
-	atomic_t num_tx_queued;
+	atomic_t txqs_len[IEEE80211_NUM_ACS];
 	struct ieee80211_tx_queue_params tx_conf[IEEE80211_NUM_ACS];
 	struct mac80211_qos_map __rcu *qos_map;
 
@@ -945,8 +912,7 @@ struct ieee80211_sub_if_data {
 		struct ieee80211_if_ibss ibss;
 		struct ieee80211_if_mesh mesh;
 		struct ieee80211_if_ocb ocb;
-		struct ieee80211_if_mntr mntr;
-		struct ieee80211_if_nan nan;
+		u32 mntr_flags;
 	} u;
 
 #ifdef CONFIG_MAC80211_DEBUGFS
@@ -989,6 +955,21 @@ static inline void
 sdata_assert_lock(struct ieee80211_sub_if_data *sdata)
 {
 	lockdep_assert_held(&sdata->wdev.mtx);
+}
+
+static inline enum nl80211_band
+ieee80211_get_sdata_band(struct ieee80211_sub_if_data *sdata)
+{
+	enum nl80211_band band = NL80211_BAND_2GHZ;
+	struct ieee80211_chanctx_conf *chanctx_conf;
+
+	rcu_read_lock();
+	chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
+	if (!WARN_ON(!chanctx_conf))
+		band = chanctx_conf->def.chan->band;
+	rcu_read_unlock();
+
+	return band;
 }
 
 static inline int
@@ -1118,10 +1099,6 @@ struct ieee80211_local {
 	 * it first anyway so they become a no-op */
 	struct ieee80211_hw hw;
 
-	struct fq fq;
-	struct codel_vars *cvars;
-	struct codel_params cparams;
-
 	const struct ieee80211_ops *ops;
 
 	/*
@@ -1216,7 +1193,7 @@ struct ieee80211_local {
 	spinlock_t tim_lock;
 	unsigned long num_sta;
 	struct list_head sta_list;
-	struct rhltable sta_hash;
+	struct rhashtable sta_hash;
 	struct timer_list sta_cleanup;
 	int sta_generation;
 
@@ -1258,7 +1235,6 @@ struct ieee80211_local {
 	int scan_channel_idx;
 	int scan_ies_len;
 	int hw_scan_ies_bufsize;
-	struct cfg80211_scan_info scan_info;
 
 	struct work_struct sched_scan_stopped_work;
 	struct ieee80211_sub_if_data __rcu *sched_scan_sdata;
@@ -1395,27 +1371,6 @@ IEEE80211_WDEV_TO_SUB_IF(struct wireless_dev *wdev)
 	return container_of(wdev, struct ieee80211_sub_if_data, wdev);
 }
 
-static inline struct ieee80211_supported_band *
-ieee80211_get_sband(struct ieee80211_sub_if_data *sdata)
-{
-	struct ieee80211_local *local = sdata->local;
-	struct ieee80211_chanctx_conf *chanctx_conf;
-	enum nl80211_band band;
-
-	rcu_read_lock();
-	chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
-
-	if (WARN_ON(!chanctx_conf)) {
-		rcu_read_unlock();
-		return NULL;
-	}
-
-	band = chanctx_conf->def.chan->band;
-	rcu_read_unlock();
-
-	return local->hw.wiphy->bands[band];
-}
-
 /* this struct represents 802.11n's RA/TID combination */
 struct ieee80211_ra_tid {
 	u8 ra[ETH_ALEN];
@@ -1503,13 +1458,6 @@ static inline struct ieee80211_local *hw_to_local(
 static inline struct txq_info *to_txq_info(struct ieee80211_txq *txq)
 {
 	return container_of(txq, struct txq_info, txq);
-}
-
-static inline bool txq_has_queue(struct ieee80211_txq *txq)
-{
-	struct txq_info *txqi = to_txq_info(txq);
-
-	return !(skb_queue_empty(&txqi->frags) && !txqi->tin.backlog_packets);
 }
 
 static inline int ieee80211_bssid_match(const u8 *raddr, const u8 *addr)
@@ -1983,13 +1931,9 @@ static inline bool ieee80211_can_run_worker(struct ieee80211_local *local)
 	return true;
 }
 
-int ieee80211_txq_setup_flows(struct ieee80211_local *local);
-void ieee80211_txq_teardown_flows(struct ieee80211_local *local);
-void ieee80211_txq_init(struct ieee80211_sub_if_data *sdata,
-			struct sta_info *sta,
-			struct txq_info *txq, int tid);
-void ieee80211_txq_purge(struct ieee80211_local *local,
-			 struct txq_info *txqi);
+void ieee80211_init_tx_queue(struct ieee80211_sub_if_data *sdata,
+			     struct sta_info *sta,
+			     struct txq_info *txq, int tid);
 void ieee80211_send_auth(struct ieee80211_sub_if_data *sdata,
 			 u16 transaction, u16 auth_alg, u16 status,
 			 const u8 *extra, size_t extra_len, const u8 *bssid,

@@ -115,6 +115,8 @@ static struct davinci_i2c_platform_data i2c_pdata = {
 	.scl_pin        = 14,
 };
 
+static struct snd_platform_data dm355_evm_snd_data;
+
 static int dm355evm_mmc_gpios = -EINVAL;
 
 static void dm355evm_mmcsd_gpios(unsigned gpio)
@@ -409,7 +411,7 @@ static __init void dm355_evm_init(void)
 			ARRAY_SIZE(dm355_evm_spi_info));
 
 	/* DM335 EVM uses ASP1; line-out is a stereo mini-jack */
-	dm355_init_asp1(ASP1_TX_EVT_EN | ASP1_RX_EVT_EN);
+	dm355_init_asp1(ASP1_TX_EVT_EN | ASP1_RX_EVT_EN, &dm355_evm_snd_data);
 }
 
 MACHINE_START(DAVINCI_DM355_EVM, "DaVinci DM355 EVM")

@@ -5,7 +5,7 @@
 #include <linux/tc_act/tc_gact.h>
 
 struct tcf_gact {
-	struct tc_action	common;
+	struct tcf_common	common;
 #ifdef CONFIG_GACT_PROB
 	u16			tcfg_ptype;
 	u16			tcfg_pval;
@@ -13,7 +13,8 @@ struct tcf_gact {
 	atomic_t		packets;
 #endif
 };
-#define to_gact(a) ((struct tcf_gact *)a)
+#define to_gact(a) \
+	container_of(a->priv, struct tcf_gact, common)
 
 static inline bool is_tcf_gact_shot(const struct tc_action *a)
 {
@@ -23,7 +24,7 @@ static inline bool is_tcf_gact_shot(const struct tc_action *a)
 	if (a->ops && a->ops->type != TCA_ACT_GACT)
 		return false;
 
-	gact = to_gact(a);
+	gact = a->priv;
 	if (gact->tcf_action == TC_ACT_SHOT)
 		return true;
 

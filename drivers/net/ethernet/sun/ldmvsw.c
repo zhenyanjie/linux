@@ -11,6 +11,7 @@
 #include <linux/highmem.h>
 #include <linux/if_vlan.h>
 #include <linux/init.h>
+#include <linux/kconfig.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>

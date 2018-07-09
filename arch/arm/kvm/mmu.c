@@ -32,6 +32,8 @@
 
 #include "trace.h"
 
+extern char  __hyp_idmap_text_start[], __hyp_idmap_text_end[];
+
 static pgd_t *boot_hyp_pgd;
 static pgd_t *hyp_pgd;
 static pgd_t *merged_hyp_pgd;
@@ -292,18 +294,11 @@ static void unmap_stage2_range(struct kvm *kvm, phys_addr_t start, u64 size)
 	phys_addr_t addr = start, end = start + size;
 	phys_addr_t next;
 
-	assert_spin_locked(&kvm->mmu_lock);
 	pgd = kvm->arch.pgd + stage2_pgd_index(addr);
 	do {
 		next = stage2_pgd_addr_end(addr, end);
 		if (!stage2_pgd_none(*pgd))
 			unmap_stage2_puds(kvm, pgd, addr, next);
-		/*
-		 * If the range is too large, release the kvm->mmu_lock
-		 * to prevent starvation and lockup detector warnings.
-		 */
-		if (next != end)
-			cond_resched_lock(&kvm->mmu_lock);
 	} while (pgd++, addr = next, addr != end);
 }
 
@@ -489,6 +484,28 @@ static void unmap_hyp_range(pgd_t *pgdp, phys_addr_t start, u64 size)
 }
 
 /**
+ * free_boot_hyp_pgd - free HYP boot page tables
+ *
+ * Free the HYP boot page tables. The bounce page is also freed.
+ */
+void free_boot_hyp_pgd(void)
+{
+	mutex_lock(&kvm_hyp_pgd_mutex);
+
+	if (boot_hyp_pgd) {
+		unmap_hyp_range(boot_hyp_pgd, hyp_idmap_start, PAGE_SIZE);
+		unmap_hyp_range(boot_hyp_pgd, TRAMPOLINE_VA, PAGE_SIZE);
+		free_pages((unsigned long)boot_hyp_pgd, hyp_pgd_order);
+		boot_hyp_pgd = NULL;
+	}
+
+	if (hyp_pgd)
+		unmap_hyp_range(hyp_pgd, TRAMPOLINE_VA, PAGE_SIZE);
+
+	mutex_unlock(&kvm_hyp_pgd_mutex);
+}
+
+/**
  * free_hyp_pgds - free Hyp-mode page tables
  *
  * Assumes hyp_pgd is a page table used strictly in Hyp-mode and
@@ -502,20 +519,15 @@ void free_hyp_pgds(void)
 {
 	unsigned long addr;
 
+	free_boot_hyp_pgd();
+
 	mutex_lock(&kvm_hyp_pgd_mutex);
 
-	if (boot_hyp_pgd) {
-		unmap_hyp_range(boot_hyp_pgd, hyp_idmap_start, PAGE_SIZE);
-		free_pages((unsigned long)boot_hyp_pgd, hyp_pgd_order);
-		boot_hyp_pgd = NULL;
-	}
-
 	if (hyp_pgd) {
-		unmap_hyp_range(hyp_pgd, hyp_idmap_start, PAGE_SIZE);
 		for (addr = PAGE_OFFSET; virt_addr_valid(addr); addr += PGDIR_SIZE)
-			unmap_hyp_range(hyp_pgd, kern_hyp_va(addr), PGDIR_SIZE);
+			unmap_hyp_range(hyp_pgd, KERN_TO_HYP(addr), PGDIR_SIZE);
 		for (addr = VMALLOC_START; is_vmalloc_addr((void*)addr); addr += PGDIR_SIZE)
-			unmap_hyp_range(hyp_pgd, kern_hyp_va(addr), PGDIR_SIZE);
+			unmap_hyp_range(hyp_pgd, KERN_TO_HYP(addr), PGDIR_SIZE);
 
 		free_pages((unsigned long)hyp_pgd, hyp_pgd_order);
 		hyp_pgd = NULL;
@@ -667,18 +679,17 @@ static phys_addr_t kvm_kaddr_to_phys(void *kaddr)
  * create_hyp_mappings - duplicate a kernel virtual address range in Hyp mode
  * @from:	The virtual kernel start address of the range
  * @to:		The virtual kernel end address of the range (exclusive)
- * @prot:	The protection to be applied to this range
  *
  * The same virtual address as the kernel virtual address is also used
  * in Hyp-mode mapping (modulo HYP_PAGE_OFFSET) to the same underlying
  * physical pages.
  */
-int create_hyp_mappings(void *from, void *to, pgprot_t prot)
+int create_hyp_mappings(void *from, void *to)
 {
 	phys_addr_t phys_addr;
 	unsigned long virt_addr;
-	unsigned long start = kern_hyp_va((unsigned long)from);
-	unsigned long end = kern_hyp_va((unsigned long)to);
+	unsigned long start = KERN_TO_HYP((unsigned long)from);
+	unsigned long end = KERN_TO_HYP((unsigned long)to);
 
 	if (is_kernel_in_hyp_mode())
 		return 0;
@@ -693,7 +704,7 @@ int create_hyp_mappings(void *from, void *to, pgprot_t prot)
 		err = __create_hyp_mappings(hyp_pgd, virt_addr,
 					    virt_addr + PAGE_SIZE,
 					    __phys_to_pfn(phys_addr),
-					    prot);
+					    PAGE_HYP);
 		if (err)
 			return err;
 	}
@@ -712,8 +723,8 @@ int create_hyp_mappings(void *from, void *to, pgprot_t prot)
  */
 int create_hyp_io_mappings(void *from, void *to, phys_addr_t phys_addr)
 {
-	unsigned long start = kern_hyp_va((unsigned long)from);
-	unsigned long end = kern_hyp_va((unsigned long)to);
+	unsigned long start = KERN_TO_HYP((unsigned long)from);
+	unsigned long end = KERN_TO_HYP((unsigned long)to);
 
 	if (is_kernel_in_hyp_mode())
 		return 0;
@@ -751,6 +762,7 @@ int kvm_alloc_stage2_pgd(struct kvm *kvm)
 	if (!pgd)
 		return -ENOMEM;
 
+	kvm_clean_pgd(pgd);
 	kvm->arch.pgd = pgd;
 	return 0;
 }
@@ -810,7 +822,6 @@ void stage2_unmap_vm(struct kvm *kvm)
 	int idx;
 
 	idx = srcu_read_lock(&kvm->srcu);
-	down_read(&current->mm->mmap_sem);
 	spin_lock(&kvm->mmu_lock);
 
 	slots = kvm_memslots(kvm);
@@ -818,7 +829,6 @@ void stage2_unmap_vm(struct kvm *kvm)
 		stage2_unmap_memslot(kvm, memslot);
 
 	spin_unlock(&kvm->mmu_lock);
-	up_read(&current->mm->mmap_sem);
 	srcu_read_unlock(&kvm->srcu, idx);
 }
 
@@ -829,22 +839,19 @@ void stage2_unmap_vm(struct kvm *kvm)
  * Walks the level-1 page table pointed to by kvm->arch.pgd and frees all
  * underlying level-2 and level-3 tables before freeing the actual level-1 table
  * and setting the struct pointer to NULL.
+ *
+ * Note we don't need locking here as this is only called when the VM is
+ * destroyed, which can only be done once.
  */
 void kvm_free_stage2_pgd(struct kvm *kvm)
 {
-	void *pgd = NULL;
+	if (kvm->arch.pgd == NULL)
+		return;
 
-	spin_lock(&kvm->mmu_lock);
-	if (kvm->arch.pgd) {
-		unmap_stage2_range(kvm, 0, KVM_PHYS_SIZE);
-		pgd = READ_ONCE(kvm->arch.pgd);
-		kvm->arch.pgd = NULL;
-	}
-	spin_unlock(&kvm->mmu_lock);
-
+	unmap_stage2_range(kvm, 0, KVM_PHYS_SIZE);
 	/* Free the HW pgd, one page at a time */
-	if (pgd)
-		free_pages_exact(pgd, S2_PGD_SIZE);
+	free_pages_exact(kvm->arch.pgd, S2_PGD_SIZE);
+	kvm->arch.pgd = NULL;
 }
 
 static pud_t *stage2_get_pud(struct kvm *kvm, struct kvm_mmu_memory_cache *cache,
@@ -872,9 +879,6 @@ static pmd_t *stage2_get_pmd(struct kvm *kvm, struct kvm_mmu_memory_cache *cache
 	pmd_t *pmd;
 
 	pud = stage2_get_pud(kvm, cache, addr);
-	if (!pud)
-		return NULL;
-
 	if (stage2_pud_none(*pud)) {
 		if (!cache)
 			return NULL;
@@ -950,6 +954,7 @@ static int stage2_set_pte(struct kvm *kvm, struct kvm_mmu_memory_cache *cache,
 		if (!cache)
 			return 0; /* ignore calls from kvm_set_spte_hva */
 		pte = mmu_memory_cache_alloc(cache);
+		kvm_clean_pte(pte);
 		pmd_populate_kernel(NULL, pmd, pte);
 		get_page(virt_to_page(pmd));
 	}
@@ -1284,7 +1289,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 		return -EFAULT;
 	}
 
-	if (vma_kernel_pagesize(vma) == PMD_SIZE && !logging_active) {
+	if (is_vm_hugetlb_page(vma) && !logging_active) {
 		hugetlb = true;
 		gfn = (fault_ipa & PMD_MASK) >> PAGE_SHIFT;
 	} else {
@@ -1322,7 +1327,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	smp_rmb();
 
 	pfn = gfn_to_pfn_prot(kvm, gfn, write_fault, &writable);
-	if (is_error_noslot_pfn(pfn))
+	if (is_error_pfn(pfn))
 		return -EFAULT;
 
 	if (kvm_is_device_pfn(pfn)) {
@@ -1447,11 +1452,6 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu, struct kvm_run *run)
 	int ret, idx;
 
 	is_iabt = kvm_vcpu_trap_is_iabt(vcpu);
-	if (unlikely(!is_iabt && kvm_vcpu_dabt_isextabt(vcpu))) {
-		kvm_inject_vabt(vcpu);
-		return 1;
-	}
-
 	fault_ipa = kvm_vcpu_get_fault_ipa(vcpu);
 
 	trace_kvm_guest_fault(*vcpu_pc(vcpu), kvm_vcpu_get_hsr(vcpu),
@@ -1664,16 +1664,12 @@ static int kvm_test_age_hva_handler(struct kvm *kvm, gpa_t gpa, void *data)
 
 int kvm_age_hva(struct kvm *kvm, unsigned long start, unsigned long end)
 {
-	if (!kvm->arch.pgd)
-		return 0;
 	trace_kvm_age_hva(start, end);
 	return handle_hva_to_gpa(kvm, start, end, kvm_age_hva_handler, NULL);
 }
 
 int kvm_test_age_hva(struct kvm *kvm, unsigned long hva)
 {
-	if (!kvm->arch.pgd)
-		return 0;
 	trace_kvm_test_age_hva(hva);
 	return handle_hva_to_gpa(kvm, hva, hva, kvm_test_age_hva_handler, NULL);
 }
@@ -1691,6 +1687,14 @@ phys_addr_t kvm_mmu_get_httbr(void)
 		return virt_to_phys(hyp_pgd);
 }
 
+phys_addr_t kvm_mmu_get_boot_httbr(void)
+{
+	if (__kvm_cpu_uses_extended_idmap())
+		return virt_to_phys(merged_hyp_pgd);
+	else
+		return virt_to_phys(boot_hyp_pgd);
+}
+
 phys_addr_t kvm_get_idmap_vector(void)
 {
 	return hyp_idmap_vector;
@@ -1699,22 +1703,6 @@ phys_addr_t kvm_get_idmap_vector(void)
 phys_addr_t kvm_get_idmap_start(void)
 {
 	return hyp_idmap_start;
-}
-
-static int kvm_map_idmap_text(pgd_t *pgd)
-{
-	int err;
-
-	/* Create the idmap in the boot page tables */
-	err = 	__create_hyp_mappings(pgd,
-				      hyp_idmap_start, hyp_idmap_end,
-				      __phys_to_pfn(hyp_idmap_start),
-				      PAGE_HYP_EXEC);
-	if (err)
-		kvm_err("Failed to idmap %lx-%lx\n",
-			hyp_idmap_start, hyp_idmap_end);
-
-	return err;
 }
 
 int kvm_mmu_init(void)
@@ -1731,42 +1719,28 @@ int kvm_mmu_init(void)
 	 */
 	BUG_ON((hyp_idmap_start ^ (hyp_idmap_end - 1)) & PAGE_MASK);
 
-	kvm_info("IDMAP page: %lx\n", hyp_idmap_start);
-	kvm_info("HYP VA range: %lx:%lx\n",
-		 kern_hyp_va(PAGE_OFFSET), kern_hyp_va(~0UL));
-
-	if (hyp_idmap_start >= kern_hyp_va(PAGE_OFFSET) &&
-	    hyp_idmap_start <  kern_hyp_va(~0UL) &&
-	    hyp_idmap_start != (unsigned long)__hyp_idmap_text_start) {
-		/*
-		 * The idmap page is intersecting with the VA space,
-		 * it is not safe to continue further.
-		 */
-		kvm_err("IDMAP intersecting with HYP VA, unable to continue\n");
-		err = -EINVAL;
-		goto out;
-	}
-
 	hyp_pgd = (pgd_t *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, hyp_pgd_order);
-	if (!hyp_pgd) {
+	boot_hyp_pgd = (pgd_t *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, hyp_pgd_order);
+
+	if (!hyp_pgd || !boot_hyp_pgd) {
 		kvm_err("Hyp mode PGD not allocated\n");
 		err = -ENOMEM;
 		goto out;
 	}
 
+	/* Create the idmap in the boot page tables */
+	err = 	__create_hyp_mappings(boot_hyp_pgd,
+				      hyp_idmap_start, hyp_idmap_end,
+				      __phys_to_pfn(hyp_idmap_start),
+				      PAGE_HYP);
+
+	if (err) {
+		kvm_err("Failed to idmap %lx-%lx\n",
+			hyp_idmap_start, hyp_idmap_end);
+		goto out;
+	}
+
 	if (__kvm_cpu_uses_extended_idmap()) {
-		boot_hyp_pgd = (pgd_t *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
-							 hyp_pgd_order);
-		if (!boot_hyp_pgd) {
-			kvm_err("Hyp boot PGD not allocated\n");
-			err = -ENOMEM;
-			goto out;
-		}
-
-		err = kvm_map_idmap_text(boot_hyp_pgd);
-		if (err)
-			goto out;
-
 		merged_hyp_pgd = (pgd_t *)__get_free_page(GFP_KERNEL | __GFP_ZERO);
 		if (!merged_hyp_pgd) {
 			kvm_err("Failed to allocate extra HYP pgd\n");
@@ -1774,10 +1748,29 @@ int kvm_mmu_init(void)
 		}
 		__kvm_extend_hypmap(boot_hyp_pgd, hyp_pgd, merged_hyp_pgd,
 				    hyp_idmap_start);
-	} else {
-		err = kvm_map_idmap_text(hyp_pgd);
-		if (err)
-			goto out;
+		return 0;
+	}
+
+	/* Map the very same page at the trampoline VA */
+	err = 	__create_hyp_mappings(boot_hyp_pgd,
+				      TRAMPOLINE_VA, TRAMPOLINE_VA + PAGE_SIZE,
+				      __phys_to_pfn(hyp_idmap_start),
+				      PAGE_HYP);
+	if (err) {
+		kvm_err("Failed to map trampoline @%lx into boot HYP pgd\n",
+			TRAMPOLINE_VA);
+		goto out;
+	}
+
+	/* Map the same page again into the runtime page tables */
+	err = 	__create_hyp_mappings(hyp_pgd,
+				      TRAMPOLINE_VA, TRAMPOLINE_VA + PAGE_SIZE,
+				      __phys_to_pfn(hyp_idmap_start),
+				      PAGE_HYP);
+	if (err) {
+		kvm_err("Failed to map trampoline @%lx into runtime HYP pgd\n",
+			TRAMPOLINE_VA);
+		goto out;
 	}
 
 	return 0;
@@ -1823,7 +1816,6 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 	    (KVM_PHYS_SIZE >> PAGE_SHIFT))
 		return -EFAULT;
 
-	down_read(&current->mm->mmap_sem);
 	/*
 	 * A memory region could potentially cover multiple VMAs, and any holes
 	 * between them, so iterate over all of them to find out if we can map
@@ -1867,10 +1859,8 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 			pa += vm_start - vma->vm_start;
 
 			/* IO region dirty page logging not allowed */
-			if (memslot->flags & KVM_MEM_LOG_DIRTY_PAGES) {
-				ret = -EINVAL;
-				goto out;
-			}
+			if (memslot->flags & KVM_MEM_LOG_DIRTY_PAGES)
+				return -EINVAL;
 
 			ret = kvm_phys_addr_ioremap(kvm, gpa, pa,
 						    vm_end - vm_start,
@@ -1882,7 +1872,7 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 	} while (hva < reg_end);
 
 	if (change == KVM_MR_FLAGS_ONLY)
-		goto out;
+		return ret;
 
 	spin_lock(&kvm->mmu_lock);
 	if (ret)
@@ -1890,8 +1880,6 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 	else
 		stage2_flush_memslot(kvm, memslot);
 	spin_unlock(&kvm->mmu_lock);
-out:
-	up_read(&current->mm->mmap_sem);
 	return ret;
 }
 

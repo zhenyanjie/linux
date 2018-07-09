@@ -5,8 +5,6 @@
 
 #ifdef CONFIG_NUMA
 
-#define NR_NODE_MEMBLKS		(MAX_NUMNODES * 2)
-
 /* currently, arm64 implements flat NUMA topology */
 #define parent_node(node)	(node)
 

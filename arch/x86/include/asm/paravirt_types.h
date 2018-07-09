@@ -42,7 +42,6 @@
 #include <asm/desc_defs.h>
 #include <asm/kmap_types.h>
 #include <asm/pgtable_types.h>
-#include <asm/nospec-branch.h>
 
 struct page;
 struct thread_struct;
@@ -109,6 +108,7 @@ struct pv_cpu_ops {
 	unsigned long (*read_cr0)(void);
 	void (*write_cr0)(unsigned long);
 
+	unsigned long (*read_cr4_safe)(void);
 	unsigned long (*read_cr4)(void);
 	void (*write_cr4)(unsigned long);
 
@@ -301,16 +301,23 @@ struct pv_mmu_ops {
 struct arch_spinlock;
 #ifdef CONFIG_SMP
 #include <asm/spinlock_types.h>
+#else
+typedef u16 __ticket_t;
 #endif
 
 struct qspinlock;
 
 struct pv_lock_ops {
+#ifdef CONFIG_QUEUED_SPINLOCKS
 	void (*queued_spin_lock_slowpath)(struct qspinlock *lock, u32 val);
 	struct paravirt_callee_save queued_spin_unlock;
 
 	void (*wait)(u8 *ptr, u8 val);
 	void (*kick)(int cpu);
+#else /* !CONFIG_QUEUED_SPINLOCKS */
+	struct paravirt_callee_save lock_spinning;
+	void (*unlock_kick)(struct arch_spinlock *lock, __ticket_t ticket);
+#endif /* !CONFIG_QUEUED_SPINLOCKS */
 };
 
 /* This contains all the paravirt structures: we get a convenient
@@ -392,9 +399,7 @@ int paravirt_disable_iospace(void);
  * offset into the paravirt_patch_template structure, and can therefore be
  * freely converted back into a structure offset.
  */
-#define PARAVIRT_CALL					\
-	ANNOTATE_RETPOLINE_SAFE				\
-	"call *%c[paravirt_opptr];"
+#define PARAVIRT_CALL	"call *%c[paravirt_opptr];"
 
 /*
  * These macros are intended to wrap calls through one of the paravirt

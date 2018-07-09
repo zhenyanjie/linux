@@ -140,8 +140,11 @@ int sctp_clear_pd(struct sock *sk, struct sctp_association *asoc)
 		 * we can go ahead and clear out the lobby in one shot
 		 */
 		if (!skb_queue_empty(&sp->pd_lobby)) {
+			struct list_head *list;
 			skb_queue_splice_tail_init(&sp->pd_lobby,
 						   &sk->sk_receive_queue);
+			list = (struct list_head *)&sctp_sk(sk)->pd_lobby;
+			INIT_LIST_HEAD(list);
 			return 1;
 		}
 	} else {
@@ -201,9 +204,7 @@ int sctp_ulpq_tail_event(struct sctp_ulpq *ulpq, struct sctp_ulpevent *event)
 	/* If the socket is just going to throw this away, do not
 	 * even try to deliver it.
 	 */
-	if (sk->sk_shutdown & RCV_SHUTDOWN &&
-	    (sk->sk_shutdown & SEND_SHUTDOWN ||
-	     !sctp_ulpevent_is_notification(event)))
+	if (sock_flag(sk, SOCK_DEAD) || (sk->sk_shutdown & RCV_SHUTDOWN))
 		goto out_free;
 
 	if (!sctp_ulpevent_is_notification(event)) {
@@ -265,8 +266,7 @@ int sctp_ulpq_tail_event(struct sctp_ulpq *ulpq, struct sctp_ulpevent *event)
 		sctp_ulpq_clear_pd(ulpq);
 
 	if (queue == &sk->sk_receive_queue && !sp->data_ready_signalled) {
-		if (!sock_owned_by_user(sk))
-			sp->data_ready_signalled = 1;
+		sp->data_ready_signalled = 1;
 		sk->sk_data_ready(sk);
 	}
 	return 1;

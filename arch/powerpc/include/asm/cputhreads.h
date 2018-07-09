@@ -3,7 +3,6 @@
 
 #ifndef __ASSEMBLY__
 #include <linux/cpumask.h>
-#include <asm/cpu_has_feature.h>
 
 /*
  * Mapping of threads to cores

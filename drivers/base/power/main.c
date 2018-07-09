@@ -1027,8 +1027,6 @@ static int __device_suspend_noirq(struct device *dev, pm_message_t state, bool a
 	TRACE_DEVICE(dev);
 	TRACE_SUSPEND(0);
 
-	dpm_wait_for_children(dev, async);
-
 	if (async_error)
 		goto Complete;
 
@@ -1039,6 +1037,8 @@ static int __device_suspend_noirq(struct device *dev, pm_message_t state, bool a
 
 	if (dev->power.syscore || dev->power.direct_complete)
 		goto Complete;
+
+	dpm_wait_for_children(dev, async);
 
 	if (dev->pm_domain) {
 		info = "noirq power domain ";
@@ -1174,8 +1174,6 @@ static int __device_suspend_late(struct device *dev, pm_message_t state, bool as
 
 	__pm_runtime_disable(dev, false);
 
-	dpm_wait_for_children(dev, async);
-
 	if (async_error)
 		goto Complete;
 
@@ -1186,6 +1184,8 @@ static int __device_suspend_late(struct device *dev, pm_message_t state, bool as
 
 	if (dev->power.syscore || dev->power.direct_complete)
 		goto Complete;
+
+	dpm_wait_for_children(dev, async);
 
 	if (dev->pm_domain) {
 		info = "late power domain ";
@@ -1757,13 +1757,10 @@ void device_pm_check_callbacks(struct device *dev)
 {
 	spin_lock_irq(&dev->power.lock);
 	dev->power.no_pm_callbacks =
-		(!dev->bus || (pm_ops_is_empty(dev->bus->pm) &&
-		 !dev->bus->suspend && !dev->bus->resume)) &&
-		(!dev->class || (pm_ops_is_empty(dev->class->pm) &&
-		 !dev->class->suspend && !dev->class->resume)) &&
+		(!dev->bus || pm_ops_is_empty(dev->bus->pm)) &&
+		(!dev->class || pm_ops_is_empty(dev->class->pm)) &&
 		(!dev->type || pm_ops_is_empty(dev->type->pm)) &&
 		(!dev->pm_domain || pm_ops_is_empty(&dev->pm_domain->ops)) &&
-		(!dev->driver || (pm_ops_is_empty(dev->driver->pm) &&
-		 !dev->driver->suspend && !dev->driver->resume));
+		(!dev->driver || pm_ops_is_empty(dev->driver->pm));
 	spin_unlock_irq(&dev->power.lock);
 }

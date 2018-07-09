@@ -66,8 +66,7 @@ static unsigned char mincore_page(struct address_space *mapping, pgoff_t pgoff)
 		 */
 		if (radix_tree_exceptional_entry(page)) {
 			swp_entry_t swp = radix_to_swp_entry(page);
-			page = find_get_page(swap_address_space(swp),
-					     swp_offset(swp));
+			page = find_get_page(swap_address_space(swp), swp.val);
 		}
 	} else
 		page = find_get_page(mapping, pgoff);
@@ -151,7 +150,7 @@ static int mincore_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			} else {
 #ifdef CONFIG_SWAP
 				*vec = mincore_page(swap_address_space(entry),
-						    swp_offset(entry));
+					entry.val);
 #else
 				WARN_ON(1);
 				*vec = 1;

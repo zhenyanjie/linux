@@ -192,6 +192,7 @@ MODULE_PARM_DESC(buffer_size, "DMA buffer allocation size");
  * @napi:	NAPI structure
  * @msg_enable:	device state flags
  * @lock:	device lock
+ * @phy:	attached PHY
  * @mdio:	MDIO bus for PHY access
  * @phy_id:	address of attached PHY
  */
@@ -218,6 +219,7 @@ struct ethoc {
 
 	spinlock_t lock;
 
+	struct phy_device *phy;
 	struct mii_bus *mdio;
 	struct clk *clk;
 	s8 phy_id;
@@ -692,6 +694,7 @@ static int ethoc_mdio_probe(struct net_device *dev)
 		return err;
 	}
 
+	priv->phy = phy;
 	phy->advertising &= ~(ADVERTISED_1000baseT_Full |
 			      ADVERTISED_1000baseT_Half);
 	phy->supported &= ~(SUPPORTED_1000baseT_Full |
@@ -710,8 +713,6 @@ static int ethoc_open(struct net_device *dev)
 	if (ret)
 		return ret;
 
-	napi_enable(&priv->napi);
-
 	ethoc_init_ring(priv, dev->mem_start);
 	ethoc_reset(priv);
 
@@ -723,7 +724,8 @@ static int ethoc_open(struct net_device *dev)
 		netif_start_queue(dev);
 	}
 
-	phy_start(dev->phydev);
+	phy_start(priv->phy);
+	napi_enable(&priv->napi);
 
 	if (netif_msg_ifup(priv)) {
 		dev_info(&dev->dev, "I/O: %08lx Memory: %08lx-%08lx\n",
@@ -739,8 +741,8 @@ static int ethoc_stop(struct net_device *dev)
 
 	napi_disable(&priv->napi);
 
-	if (dev->phydev)
-		phy_stop(dev->phydev);
+	if (priv->phy)
+		phy_stop(priv->phy);
 
 	ethoc_disable_rx_and_tx(priv);
 	free_irq(dev->irq, dev);
@@ -768,7 +770,7 @@ static int ethoc_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		if (!phy)
 			return -ENODEV;
 	} else {
-		phy = dev->phydev;
+		phy = priv->phy;
 	}
 
 	return phy_mii_ioctl(phy, ifr, cmd);
@@ -901,6 +903,28 @@ out_no_free:
 	return NETDEV_TX_OK;
 }
 
+static int ethoc_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct ethoc *priv = netdev_priv(dev);
+	struct phy_device *phydev = priv->phy;
+
+	if (!phydev)
+		return -EOPNOTSUPP;
+
+	return phy_ethtool_gset(phydev, cmd);
+}
+
+static int ethoc_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct ethoc *priv = netdev_priv(dev);
+	struct phy_device *phydev = priv->phy;
+
+	if (!phydev)
+		return -EOPNOTSUPP;
+
+	return phy_ethtool_sset(phydev, cmd);
+}
+
 static int ethoc_get_regs_len(struct net_device *netdev)
 {
 	return ETH_END;
@@ -965,14 +989,14 @@ static int ethoc_set_ringparam(struct net_device *dev,
 }
 
 const struct ethtool_ops ethoc_ethtool_ops = {
+	.get_settings = ethoc_get_settings,
+	.set_settings = ethoc_set_settings,
 	.get_regs_len = ethoc_get_regs_len,
 	.get_regs = ethoc_get_regs,
 	.get_link = ethtool_op_get_link,
 	.get_ringparam = ethoc_get_ringparam,
 	.set_ringparam = ethoc_set_ringparam,
 	.get_ts_info = ethtool_op_get_ts_info,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 static const struct net_device_ops ethoc_netdev_ops = {
@@ -1243,7 +1267,8 @@ static int ethoc_remove(struct platform_device *pdev)
 
 	if (netdev) {
 		netif_napi_del(&priv->napi);
-		phy_disconnect(netdev->phydev);
+		phy_disconnect(priv->phy);
+		priv->phy = NULL;
 
 		if (priv->mdio) {
 			mdiobus_unregister(priv->mdio);

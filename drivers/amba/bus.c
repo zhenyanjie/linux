@@ -19,7 +19,6 @@
 #include <linux/amba/bus.h>
 #include <linux/sizes.h>
 #include <linux/limits.h>
-#include <linux/clk/clk-conf.h>
 
 #include <asm/irq.h>
 
@@ -69,12 +68,11 @@ static ssize_t driver_override_show(struct device *_dev,
 				    struct device_attribute *attr, char *buf)
 {
 	struct amba_device *dev = to_amba_device(_dev);
-	ssize_t len;
 
-	device_lock(_dev);
-	len = sprintf(buf, "%s\n", dev->driver_override);
-	device_unlock(_dev);
-	return len;
+	if (!dev->driver_override)
+		return 0;
+
+	return sprintf(buf, "%s\n", dev->driver_override);
 }
 
 static ssize_t driver_override_store(struct device *_dev,
@@ -82,10 +80,9 @@ static ssize_t driver_override_store(struct device *_dev,
 				     const char *buf, size_t count)
 {
 	struct amba_device *dev = to_amba_device(_dev);
-	char *driver_override, *old, *cp;
+	char *driver_override, *old = dev->driver_override, *cp;
 
-	/* We need to keep extra room for a newline */
-	if (count >= (PAGE_SIZE - 1))
+	if (count > PATH_MAX)
 		return -EINVAL;
 
 	driver_override = kstrndup(buf, count, GFP_KERNEL);
@@ -96,15 +93,12 @@ static ssize_t driver_override_store(struct device *_dev,
 	if (cp)
 		*cp = '\0';
 
-	device_lock(_dev);
-	old = dev->driver_override;
 	if (strlen(driver_override)) {
 		dev->driver_override = driver_override;
 	} else {
 	       kfree(driver_override);
 	       dev->driver_override = NULL;
 	}
-	device_unlock(_dev);
 
 	kfree(old);
 
@@ -243,10 +237,6 @@ static int amba_probe(struct device *dev)
 	int ret;
 
 	do {
-		ret = of_clk_set_defaults(dev->of_node, false);
-		if (ret < 0)
-			break;
-
 		ret = dev_pm_domain_attach(dev, true);
 		if (ret == -EPROBE_DEFER)
 			break;

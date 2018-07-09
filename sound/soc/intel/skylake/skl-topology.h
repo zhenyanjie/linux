@@ -133,7 +133,7 @@ struct skl_i2s_config_blob {
 struct skl_dma_control {
 	u32 node_id;
 	u32 config_length;
-	u32 config_data[0];
+	u32 config_data[1];
 } __packed;
 
 struct skl_cpr_cfg {
@@ -215,20 +215,9 @@ struct skl_module_fmt {
 
 struct skl_module_cfg;
 
-struct skl_mod_inst_map {
-	u16 mod_id;
-	u16 inst_id;
-};
-
-struct skl_kpb_params {
-	u32 num_modules;
-	struct skl_mod_inst_map map[0];
-};
-
 struct skl_module_inst_id {
-	int module_id;
+	u32 module_id;
 	u32 instance_id;
-	int pvt_id;
 };
 
 enum skl_module_pin_state {
@@ -255,8 +244,7 @@ enum skl_pipe_state {
 	SKL_PIPE_INVALID = 0,
 	SKL_PIPE_CREATED = 1,
 	SKL_PIPE_PAUSED = 2,
-	SKL_PIPE_STARTED = 3,
-	SKL_PIPE_RESET = 4
+	SKL_PIPE_STARTED = 3
 };
 
 struct skl_pipe_module {
@@ -282,7 +270,6 @@ struct skl_pipe {
 	struct skl_pipe_params *p_params;
 	enum skl_pipe_state state;
 	struct list_head w_list;
-	bool passthru;
 };
 
 enum skl_module_state {
@@ -332,7 +319,6 @@ struct skl_algo_data {
 	u32 param_id;
 	u32 set_params;
 	u32 max;
-	u32 size;
 	char *params;
 };
 
@@ -370,8 +356,6 @@ int skl_pause_pipe(struct skl_sst *ctx, struct skl_pipe *pipe);
 int skl_delete_pipe(struct skl_sst *ctx, struct skl_pipe *pipe);
 
 int skl_stop_pipe(struct skl_sst *ctx, struct skl_pipe *pipe);
-
-int skl_reset_pipe(struct skl_sst *ctx, struct skl_pipe *pipe);
 
 int skl_init_module(struct skl_sst *ctx, struct skl_module_cfg *module_config);
 

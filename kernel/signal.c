@@ -72,7 +72,7 @@ static int sig_task_ignored(struct task_struct *t, int sig, bool force)
 	handler = sig_handler(t, sig);
 
 	if (unlikely(t->signal->flags & SIGNAL_UNKILLABLE) &&
-	    handler == SIG_DFL && !(force && sig_kernel_only(sig)))
+			handler == SIG_DFL && !force)
 		return 1;
 
 	return sig_handler_ignored(handler, sig);
@@ -88,15 +88,13 @@ static int sig_ignored(struct task_struct *t, int sig, bool force)
 	if (sigismember(&t->blocked, sig) || sigismember(&t->real_blocked, sig))
 		return 0;
 
-	/*
-	 * Tracers may want to know about even ignored signal unless it
-	 * is SIGKILL which can't be reported anyway but can be ignored
-	 * by SIGNAL_UNKILLABLE task.
-	 */
-	if (t->ptrace && sig != SIGKILL)
+	if (!sig_task_ignored(t, sig, force))
 		return 0;
 
-	return sig_task_ignored(t, sig, force);
+	/*
+	 * Tracers may want to know about even ignored signals.
+	 */
+	return !t->ptrace;
 }
 
 /*
@@ -348,7 +346,7 @@ static bool task_participate_group_stop(struct task_struct *task)
 	 * fresh group stop.  Read comment in do_signal_stop() for details.
 	 */
 	if (!sig->group_stop_count && !(sig->flags & SIGNAL_STOP_STOPPED)) {
-		signal_set_stop_flags(sig, SIGNAL_STOP_STOPPED);
+		sig->flags = SIGNAL_STOP_STOPPED;
 		return true;
 	}
 	return false;
@@ -505,8 +503,7 @@ int unhandled_signal(struct task_struct *tsk, int sig)
 	return !tsk->ptrace;
 }
 
-static void collect_signal(int sig, struct sigpending *list, siginfo_t *info,
-			   bool *resched_timer)
+static void collect_signal(int sig, struct sigpending *list, siginfo_t *info)
 {
 	struct sigqueue *q, *first = NULL;
 
@@ -528,12 +525,6 @@ static void collect_signal(int sig, struct sigpending *list, siginfo_t *info,
 still_pending:
 		list_del_init(&first->list);
 		copy_siginfo(info, &first->info);
-
-		*resched_timer =
-			(first->flags & SIGQUEUE_PREALLOC) &&
-			(info->si_code == SI_TIMER) &&
-			(info->si_sys_private);
-
 		__sigqueue_free(first);
 	} else {
 		/*
@@ -550,12 +541,12 @@ still_pending:
 }
 
 static int __dequeue_signal(struct sigpending *pending, sigset_t *mask,
-			siginfo_t *info, bool *resched_timer)
+			siginfo_t *info)
 {
 	int sig = next_signal(pending, mask);
 
 	if (sig)
-		collect_signal(sig, pending, info, resched_timer);
+		collect_signal(sig, pending, info);
 	return sig;
 }
 
@@ -567,16 +558,15 @@ static int __dequeue_signal(struct sigpending *pending, sigset_t *mask,
  */
 int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
 {
-	bool resched_timer = false;
 	int signr;
 
 	/* We only dequeue private signals from ourselves, we don't let
 	 * signalfd steal them
 	 */
-	signr = __dequeue_signal(&tsk->pending, mask, info, &resched_timer);
+	signr = __dequeue_signal(&tsk->pending, mask, info);
 	if (!signr) {
 		signr = __dequeue_signal(&tsk->signal->shared_pending,
-					 mask, info, &resched_timer);
+					 mask, info);
 		/*
 		 * itimer signal ?
 		 *
@@ -621,7 +611,7 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
 		 */
 		current->jobctl |= JOBCTL_STOP_DEQUEUED;
 	}
-	if (resched_timer) {
+	if ((info->si_code & __SI_MASK) == __SI_TIMER && info->si_sys_private) {
 		/*
 		 * Release the siglock to ensure proper locking order
 		 * of timer locks outside of siglocks.  Note, we leave
@@ -847,7 +837,7 @@ static bool prepare_signal(int sig, struct task_struct *p, bool force)
 			 * will take ->siglock, notice SIGNAL_CLD_MASK, and
 			 * notify its parent. See get_signal_to_deliver().
 			 */
-			signal_set_stop_flags(signal, why | SIGNAL_STOP_CONTINUED);
+			signal->flags = why | SIGNAL_STOP_CONTINUED;
 			signal->group_stop_count = 0;
 			signal->group_exit_code = 0;
 		}
@@ -919,9 +909,9 @@ static void complete_signal(int sig, struct task_struct *p, int group)
 	 * then start taking the whole group down immediately.
 	 */
 	if (sig_fatal(p, sig) &&
-	    !(signal->flags & SIGNAL_GROUP_EXIT) &&
+	    !(signal->flags & (SIGNAL_UNKILLABLE | SIGNAL_GROUP_EXIT)) &&
 	    !sigismember(&t->real_blocked, sig) &&
-	    (sig == SIGKILL || !p->ptrace)) {
+	    (sig == SIGKILL || !t->ptrace)) {
 		/*
 		 * This signal will be fatal to the whole group.
 		 */
@@ -1391,10 +1381,6 @@ static int kill_something_info(int sig, struct siginfo *info, pid_t pid)
 		rcu_read_unlock();
 		return ret;
 	}
-
-	/* -INT_MIN is undefined.  Exclude this case to avoid a UBSAN warning */
-	if (pid == INT_MIN)
-		return -ESRCH;
 
 	read_lock(&tasklist_lock);
 	if (pid != -1) {
@@ -2499,13 +2485,6 @@ void __set_current_blocked(const sigset_t *newset)
 {
 	struct task_struct *tsk = current;
 
-	/*
-	 * In case the signal mask hasn't changed, there is nothing we need
-	 * to do. The current->blocked shouldn't be modified by other task.
-	 */
-	if (sigequalsets(&tsk->blocked, newset))
-		return;
-
 	spin_lock_irq(&tsk->sighand->siglock);
 	__set_task_blocked(tsk, newset);
 	spin_unlock_irq(&tsk->sighand->siglock);
@@ -2772,18 +2751,23 @@ int copy_siginfo_to_user(siginfo_t __user *to, const siginfo_t *from)
  *  @ts: upper bound on process time suspension
  */
 int do_sigtimedwait(const sigset_t *which, siginfo_t *info,
-		    const struct timespec *ts)
+			const struct timespec *ts)
 {
-	ktime_t *to = NULL, timeout = { .tv64 = KTIME_MAX };
 	struct task_struct *tsk = current;
+	long timeout = MAX_SCHEDULE_TIMEOUT;
 	sigset_t mask = *which;
-	int sig, ret = 0;
+	int sig;
 
 	if (ts) {
 		if (!timespec_valid(ts))
 			return -EINVAL;
-		timeout = timespec_to_ktime(*ts);
-		to = &timeout;
+		timeout = timespec_to_jiffies(ts);
+		/*
+		 * We can be close to the next tick, add another one
+		 * to ensure we will wait at least the time asked for.
+		 */
+		if (ts->tv_sec || ts->tv_nsec)
+			timeout++;
 	}
 
 	/*
@@ -2794,7 +2778,7 @@ int do_sigtimedwait(const sigset_t *which, siginfo_t *info,
 
 	spin_lock_irq(&tsk->sighand->siglock);
 	sig = dequeue_signal(tsk, &mask, info);
-	if (!sig && timeout.tv64) {
+	if (!sig && timeout) {
 		/*
 		 * None ready, temporarily unblock those we're interested
 		 * while we are sleeping in so that we'll be awakened when
@@ -2806,9 +2790,8 @@ int do_sigtimedwait(const sigset_t *which, siginfo_t *info,
 		recalc_sigpending();
 		spin_unlock_irq(&tsk->sighand->siglock);
 
-		__set_current_state(TASK_INTERRUPTIBLE);
-		ret = freezable_schedule_hrtimeout_range(to, tsk->timer_slack_ns,
-							 HRTIMER_MODE_REL);
+		timeout = freezable_schedule_timeout_interruptible(timeout);
+
 		spin_lock_irq(&tsk->sighand->siglock);
 		__set_task_blocked(tsk, &tsk->real_blocked);
 		sigemptyset(&tsk->real_blocked);
@@ -2818,7 +2801,7 @@ int do_sigtimedwait(const sigset_t *which, siginfo_t *info,
 
 	if (sig)
 		return sig;
-	return ret ? -EINTR : -EAGAIN;
+	return timeout ? -EINTR : -EAGAIN;
 }
 
 /**
@@ -3065,11 +3048,6 @@ void kernel_sigaction(int sig, __sighandler_t action)
 }
 EXPORT_SYMBOL(kernel_sigaction);
 
-void __weak sigaction_compat_abi(struct k_sigaction *act,
-		struct k_sigaction *oact)
-{
-}
-
 int do_sigaction(int sig, struct k_sigaction *act, struct k_sigaction *oact)
 {
 	struct task_struct *p = current, *t;
@@ -3084,8 +3062,6 @@ int do_sigaction(int sig, struct k_sigaction *act, struct k_sigaction *oact)
 	spin_lock_irq(&p->sighand->siglock);
 	if (oact)
 		*oact = *k;
-
-	sigaction_compat_abi(act, oact);
 
 	if (act) {
 		sigdelsetmask(&act->sa.sa_mask,
@@ -3247,17 +3223,10 @@ int compat_restore_altstack(const compat_stack_t __user *uss)
 
 int __compat_save_altstack(compat_stack_t __user *uss, unsigned long sp)
 {
-	int err;
 	struct task_struct *t = current;
-	err = __put_user(ptr_to_compat((void __user *)t->sas_ss_sp),
-			 &uss->ss_sp) |
-		__put_user(t->sas_ss_flags, &uss->ss_flags) |
+	return  __put_user(ptr_to_compat((void __user *)t->sas_ss_sp), &uss->ss_sp) |
+		__put_user(sas_ss_flags(sp), &uss->ss_flags) |
 		__put_user(t->sas_ss_size, &uss->ss_size);
-	if (err)
-		return err;
-	if (t->sas_ss_flags & SS_AUTODISARM)
-		sas_ss_reset(t);
-	return 0;
 }
 #endif
 

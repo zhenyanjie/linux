@@ -29,8 +29,6 @@
 
 #define COUNTER_SHIFT		16
 
-static HLIST_HEAD(uncore_unused_list);
-
 struct amd_uncore {
 	int id;
 	int refcnt;
@@ -41,7 +39,7 @@ struct amd_uncore {
 	cpumask_t *active_mask;
 	struct pmu *pmu;
 	struct perf_event *events[MAX_COUNTERS];
-	struct hlist_node node;
+	struct amd_uncore *free_when_cpu_online;
 };
 
 static struct amd_uncore * __percpu *amd_uncore_nb;
@@ -308,7 +306,6 @@ static int amd_uncore_cpu_up_prepare(unsigned int cpu)
 		uncore_nb->msr_base = MSR_F15H_NB_PERF_CTL;
 		uncore_nb->active_mask = &amd_nb_active_mask;
 		uncore_nb->pmu = &amd_nb_pmu;
-		uncore_nb->id = -1;
 		*per_cpu_ptr(amd_uncore_nb, cpu) = uncore_nb;
 	}
 
@@ -322,7 +319,6 @@ static int amd_uncore_cpu_up_prepare(unsigned int cpu)
 		uncore_l2->msr_base = MSR_F16H_L2I_PERF_CTL;
 		uncore_l2->active_mask = &amd_l2_active_mask;
 		uncore_l2->pmu = &amd_l2_pmu;
-		uncore_l2->id = -1;
 		*per_cpu_ptr(amd_uncore_l2, cpu) = uncore_l2;
 	}
 
@@ -352,7 +348,7 @@ amd_uncore_find_online_sibling(struct amd_uncore *this,
 			continue;
 
 		if (this->id == that->id) {
-			hlist_add_head(&this->node, &uncore_unused_list);
+			that->free_when_cpu_online = this;
 			this = that;
 			break;
 		}
@@ -362,7 +358,7 @@ amd_uncore_find_online_sibling(struct amd_uncore *this,
 	return this;
 }
 
-static int amd_uncore_cpu_starting(unsigned int cpu)
+static void amd_uncore_cpu_starting(unsigned int cpu)
 {
 	unsigned int eax, ebx, ecx, edx;
 	struct amd_uncore *uncore;
@@ -388,19 +384,6 @@ static int amd_uncore_cpu_starting(unsigned int cpu)
 		uncore = amd_uncore_find_online_sibling(uncore, amd_uncore_l2);
 		*per_cpu_ptr(amd_uncore_l2, cpu) = uncore;
 	}
-
-	return 0;
-}
-
-static void uncore_clean_online(void)
-{
-	struct amd_uncore *uncore;
-	struct hlist_node *n;
-
-	hlist_for_each_entry_safe(uncore, n, &uncore_unused_list, node) {
-		hlist_del(&uncore->node);
-		kfree(uncore);
-	}
 }
 
 static void uncore_online(unsigned int cpu,
@@ -408,21 +391,20 @@ static void uncore_online(unsigned int cpu,
 {
 	struct amd_uncore *uncore = *per_cpu_ptr(uncores, cpu);
 
-	uncore_clean_online();
+	kfree(uncore->free_when_cpu_online);
+	uncore->free_when_cpu_online = NULL;
 
 	if (cpu == uncore->cpu)
 		cpumask_set_cpu(cpu, uncore->active_mask);
 }
 
-static int amd_uncore_cpu_online(unsigned int cpu)
+static void amd_uncore_cpu_online(unsigned int cpu)
 {
 	if (amd_uncore_nb)
 		uncore_online(cpu, amd_uncore_nb);
 
 	if (amd_uncore_l2)
 		uncore_online(cpu, amd_uncore_l2);
-
-	return 0;
 }
 
 static void uncore_down_prepare(unsigned int cpu,
@@ -451,15 +433,13 @@ static void uncore_down_prepare(unsigned int cpu,
 	}
 }
 
-static int amd_uncore_cpu_down_prepare(unsigned int cpu)
+static void amd_uncore_cpu_down_prepare(unsigned int cpu)
 {
 	if (amd_uncore_nb)
 		uncore_down_prepare(cpu, amd_uncore_nb);
 
 	if (amd_uncore_l2)
 		uncore_down_prepare(cpu, amd_uncore_l2);
-
-	return 0;
 }
 
 static void uncore_dead(unsigned int cpu, struct amd_uncore * __percpu *uncores)
@@ -474,19 +454,74 @@ static void uncore_dead(unsigned int cpu, struct amd_uncore * __percpu *uncores)
 	*per_cpu_ptr(uncores, cpu) = NULL;
 }
 
-static int amd_uncore_cpu_dead(unsigned int cpu)
+static void amd_uncore_cpu_dead(unsigned int cpu)
 {
 	if (amd_uncore_nb)
 		uncore_dead(cpu, amd_uncore_nb);
 
 	if (amd_uncore_l2)
 		uncore_dead(cpu, amd_uncore_l2);
+}
 
-	return 0;
+static int
+amd_uncore_cpu_notifier(struct notifier_block *self, unsigned long action,
+			void *hcpu)
+{
+	unsigned int cpu = (long)hcpu;
+
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_UP_PREPARE:
+		if (amd_uncore_cpu_up_prepare(cpu))
+			return notifier_from_errno(-ENOMEM);
+		break;
+
+	case CPU_STARTING:
+		amd_uncore_cpu_starting(cpu);
+		break;
+
+	case CPU_ONLINE:
+		amd_uncore_cpu_online(cpu);
+		break;
+
+	case CPU_DOWN_PREPARE:
+		amd_uncore_cpu_down_prepare(cpu);
+		break;
+
+	case CPU_UP_CANCELED:
+	case CPU_DEAD:
+		amd_uncore_cpu_dead(cpu);
+		break;
+
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block amd_uncore_cpu_notifier_block = {
+	.notifier_call	= amd_uncore_cpu_notifier,
+	.priority	= CPU_PRI_PERF + 1,
+};
+
+static void __init init_cpu_already_online(void *dummy)
+{
+	unsigned int cpu = smp_processor_id();
+
+	amd_uncore_cpu_starting(cpu);
+	amd_uncore_cpu_online(cpu);
+}
+
+static void cleanup_cpu_online(void *dummy)
+{
+	unsigned int cpu = smp_processor_id();
+
+	amd_uncore_cpu_dead(cpu);
 }
 
 static int __init amd_uncore_init(void)
 {
+	unsigned int cpu, cpu2;
 	int ret = -ENODEV;
 
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
@@ -523,29 +558,38 @@ static int __init amd_uncore_init(void)
 		ret = 0;
 	}
 
-	/*
-	 * Install callbacks. Core will call them for each online cpu.
-	 */
-	if (cpuhp_setup_state(CPUHP_PERF_X86_AMD_UNCORE_PREP,
-			      "PERF_X86_AMD_UNCORE_PREP",
-			      amd_uncore_cpu_up_prepare, amd_uncore_cpu_dead))
-		goto fail_l2;
+	if (ret)
+		goto fail_nodev;
 
-	if (cpuhp_setup_state(CPUHP_AP_PERF_X86_AMD_UNCORE_STARTING,
-			      "AP_PERF_X86_AMD_UNCORE_STARTING",
-			      amd_uncore_cpu_starting, NULL))
-		goto fail_prep;
-	if (cpuhp_setup_state(CPUHP_AP_PERF_X86_AMD_UNCORE_ONLINE,
-			      "AP_PERF_X86_AMD_UNCORE_ONLINE",
-			      amd_uncore_cpu_online,
-			      amd_uncore_cpu_down_prepare))
-		goto fail_start;
+	cpu_notifier_register_begin();
+
+	/* init cpus already online before registering for hotplug notifier */
+	for_each_online_cpu(cpu) {
+		ret = amd_uncore_cpu_up_prepare(cpu);
+		if (ret)
+			goto fail_online;
+		smp_call_function_single(cpu, init_cpu_already_online, NULL, 1);
+	}
+
+	__register_cpu_notifier(&amd_uncore_cpu_notifier_block);
+	cpu_notifier_register_done();
+
 	return 0;
 
-fail_start:
-	cpuhp_remove_state(CPUHP_AP_PERF_X86_AMD_UNCORE_STARTING);
-fail_prep:
-	cpuhp_remove_state(CPUHP_PERF_X86_AMD_UNCORE_PREP);
+
+fail_online:
+	for_each_online_cpu(cpu2) {
+		if (cpu2 == cpu)
+			break;
+		smp_call_function_single(cpu, cleanup_cpu_online, NULL, 1);
+	}
+	cpu_notifier_register_done();
+
+	/* amd_uncore_nb/l2 should have been freed by cleanup_cpu_online */
+	amd_uncore_nb = amd_uncore_l2 = NULL;
+
+	if (boot_cpu_has(X86_FEATURE_PERFCTR_L2))
+		perf_pmu_unregister(&amd_l2_pmu);
 fail_l2:
 	if (boot_cpu_has(X86_FEATURE_PERFCTR_NB))
 		perf_pmu_unregister(&amd_nb_pmu);

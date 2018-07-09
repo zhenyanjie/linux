@@ -1523,6 +1523,7 @@ static void pch_udc_free_dma_chain(struct pch_udc_dev *dev,
 		td = phys_to_virt(addr);
 		addr2 = (dma_addr_t)td->next;
 		pci_pool_free(dev->data_requests, td, addr);
+		td->next = 0x00;
 		addr = addr2;
 	}
 	req->chain_len = 1;
@@ -1983,8 +1984,9 @@ static int pch_udc_pcd_set_halt(struct usb_ep *usbep, int halt)
 			if (ep->num == PCH_UDC_EP0)
 				ep->dev->stall = 1;
 			pch_udc_ep_set_stall(ep);
-			pch_udc_enable_ep_interrupts(
-				ep->dev, PCH_UDC_EPINT(ep->in, ep->num));
+			pch_udc_enable_ep_interrupts(ep->dev,
+						     PCH_UDC_EPINT(ep->in,
+								   ep->num));
 		} else {
 			pch_udc_ep_clear_stall(ep);
 		}
@@ -2449,11 +2451,16 @@ static void pch_udc_svc_control_out(struct pch_udc_dev *dev)
  */
 static void pch_udc_postsvc_epinters(struct pch_udc_dev *dev, int ep_num)
 {
-	struct pch_udc_ep	*ep = &dev->ep[UDC_EPIN_IDX(ep_num)];
-	if (list_empty(&ep->queue))
-		return;
-	pch_udc_enable_ep_interrupts(ep->dev, PCH_UDC_EPINT(ep->in, ep->num));
-	pch_udc_ep_clear_nak(ep);
+	struct pch_udc_ep	*ep;
+	struct pch_udc_request *req;
+
+	ep = &dev->ep[UDC_EPIN_IDX(ep_num)];
+	if (!list_empty(&ep->queue)) {
+		req = list_entry(ep->queue.next, struct pch_udc_request, queue);
+		pch_udc_enable_ep_interrupts(ep->dev,
+					     PCH_UDC_EPINT(ep->in, ep->num));
+		pch_udc_ep_clear_nak(ep);
+	}
 }
 
 /**

@@ -243,6 +243,7 @@ void msm_hdmi_i2c_destroy(struct i2c_adapter *i2c)
 
 struct i2c_adapter *msm_hdmi_i2c_init(struct hdmi *hdmi)
 {
+	struct drm_device *dev = hdmi->dev;
 	struct hdmi_i2c_adapter *hdmi_i2c;
 	struct i2c_adapter *i2c = NULL;
 	int ret;
@@ -266,8 +267,10 @@ struct i2c_adapter *msm_hdmi_i2c_init(struct hdmi *hdmi)
 	i2c->algo = &msm_hdmi_i2c_algorithm;
 
 	ret = i2c_add_adapter(i2c);
-	if (ret)
+	if (ret) {
+		dev_err(dev->dev, "failed to register hdmi i2c: %d\n", ret);
 		goto fail;
+	}
 
 	return i2c;
 

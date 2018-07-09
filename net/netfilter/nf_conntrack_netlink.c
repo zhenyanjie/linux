@@ -45,8 +45,6 @@
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_timestamp.h>
 #include <net/netfilter/nf_conntrack_labels.h>
-#include <net/netfilter/nf_conntrack_seqadj.h>
-#include <net/netfilter/nf_conntrack_synproxy.h>
 #ifdef CONFIG_NF_NAT_NEEDED
 #include <net/netfilter/nf_nat_core.h>
 #include <net/netfilter/nf_nat_l4proto.h>
@@ -151,7 +149,10 @@ nla_put_failure:
 
 static int ctnetlink_dump_timeout(struct sk_buff *skb, const struct nf_conn *ct)
 {
-	long timeout = nf_ct_expires(ct) / HZ;
+	long timeout = ((long)ct->timeout.expires - (long)jiffies) / HZ;
+
+	if (timeout < 0)
+		timeout = 0;
 
 	if (nla_put_be32(skb, CTA_TIMEOUT, htonl(timeout)))
 		goto nla_put_failure;
@@ -345,25 +346,25 @@ static inline int ctnetlink_label_size(const struct nf_conn *ct)
 
 	if (!labels)
 		return 0;
-	return nla_total_size(sizeof(labels->bits));
+	return nla_total_size(labels->words * sizeof(long));
 }
 
 static int
 ctnetlink_dump_labels(struct sk_buff *skb, const struct nf_conn *ct)
 {
 	struct nf_conn_labels *labels = nf_ct_labels_find(ct);
-	unsigned int i;
+	unsigned int len, i;
 
 	if (!labels)
 		return 0;
 
+	len = labels->words * sizeof(long);
 	i = 0;
 	do {
 		if (labels->bits[i] != 0)
-			return nla_put(skb, CTA_LABELS, sizeof(labels->bits),
-				       labels->bits);
+			return nla_put(skb, CTA_LABELS, len, labels->bits);
 		i++;
-	} while (i < ARRAY_SIZE(labels->bits));
+	} while (i < labels->words);
 
 	return 0;
 }
@@ -817,23 +818,14 @@ ctnetlink_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
 	struct hlist_nulls_node *n;
 	struct nfgenmsg *nfmsg = nlmsg_data(cb->nlh);
 	u_int8_t l3proto = nfmsg->nfgen_family;
-	struct nf_conn *nf_ct_evict[8];
-	int res, i;
+	int res;
 	spinlock_t *lockp;
 
 	last = (struct nf_conn *)cb->args[1];
-	i = 0;
 
 	local_bh_disable();
 	for (; cb->args[0] < nf_conntrack_htable_size; cb->args[0]++) {
 restart:
-		while (i) {
-			i--;
-			if (nf_ct_should_gc(nf_ct_evict[i]))
-				nf_ct_kill(nf_ct_evict[i]);
-			nf_ct_put(nf_ct_evict[i]);
-		}
-
 		lockp = &nf_conntrack_locks[cb->args[0] % CONNTRACK_LOCKS];
 		nf_conntrack_lock(lockp);
 		if (cb->args[0] >= nf_conntrack_htable_size) {
@@ -845,13 +837,6 @@ restart:
 			if (NF_CT_DIRECTION(h) != IP_CT_DIR_ORIGINAL)
 				continue;
 			ct = nf_ct_tuplehash_to_ctrack(h);
-			if (nf_ct_is_expired(ct)) {
-				if (i < ARRAY_SIZE(nf_ct_evict) &&
-				    atomic_inc_not_zero(&ct->ct_general.use))
-					nf_ct_evict[i++] = ct;
-				continue;
-			}
-
 			if (!net_eq(net, nf_ct_net(ct)))
 				continue;
 
@@ -890,20 +875,8 @@ restart:
 	}
 out:
 	local_bh_enable();
-	if (last) {
-		/* nf ct hash resize happened, now clear the leftover. */
-		if ((struct nf_conn *)cb->args[1] == last)
-			cb->args[1] = 0;
-
+	if (last)
 		nf_ct_put(last);
-	}
-
-	while (i) {
-		i--;
-		if (nf_ct_should_gc(nf_ct_evict[i]))
-			nf_ct_kill(nf_ct_evict[i]);
-		nf_ct_put(nf_ct_evict[i]);
-	}
 
 	return skb->len;
 }
@@ -1013,8 +986,9 @@ static const struct nla_policy tuple_nla_policy[CTA_TUPLE_MAX+1] = {
 
 static int
 ctnetlink_parse_tuple(const struct nlattr * const cda[],
-		      struct nf_conntrack_tuple *tuple, u32 type,
-		      u_int8_t l3num, struct nf_conntrack_zone *zone)
+		      struct nf_conntrack_tuple *tuple,
+		      enum ctattr_type type, u_int8_t l3num,
+		      struct nf_conntrack_zone *zone)
 {
 	struct nlattr *tb[CTA_TUPLE_MAX+1];
 	int err;
@@ -1173,7 +1147,9 @@ static int ctnetlink_del_conntrack(struct net *net, struct sock *ctnl,
 		}
 	}
 
-	nf_ct_delete(ct, NETLINK_CB(skb).portid, nlmsg_report(nlh));
+	if (del_timer(&ct->timeout))
+		nf_ct_delete(ct, NETLINK_CB(skb).portid, nlmsg_report(nlh));
+
 	nf_ct_put(ct);
 
 	return 0;
@@ -1541,10 +1517,11 @@ static int ctnetlink_change_timeout(struct nf_conn *ct,
 {
 	u_int32_t timeout = ntohl(nla_get_be32(cda[CTA_TIMEOUT]));
 
-	ct->timeout = nfct_time_stamp + timeout * HZ;
-
-	if (test_bit(IPS_DYING_BIT, &ct->status))
+	if (!del_timer(&ct->timeout))
 		return -ETIME;
+
+	ct->timeout.expires = jiffies + timeout * HZ;
+	add_timer(&ct->timeout);
 
 	return 0;
 }
@@ -1742,8 +1719,9 @@ ctnetlink_create_conntrack(struct net *net,
 
 	if (!cda[CTA_TIMEOUT])
 		goto err1;
+	ct->timeout.expires = ntohl(nla_get_be32(cda[CTA_TIMEOUT]));
 
-	ct->timeout = nfct_time_stamp + ntohl(nla_get_be32(cda[CTA_TIMEOUT])) * HZ;
+	ct->timeout.expires = jiffies + ct->timeout.expires * HZ;
 
 	rcu_read_lock();
  	if (cda[CTA_HELP]) {
@@ -1806,8 +1784,6 @@ ctnetlink_create_conntrack(struct net *net,
 	nf_ct_tstamp_ext_add(ct, GFP_ATOMIC);
 	nf_ct_ecache_ext_add(ct, 0, 0, GFP_ATOMIC);
 	nf_ct_labels_ext_add(ct);
-	nfct_seqadj_ext_add(ct);
-	nfct_synproxy_ext_add(ct);
 
 	/* we must add conntrack extensions before confirmation. */
 	ct->status |= IPS_CONFIRMED;
@@ -1918,8 +1894,6 @@ static int ctnetlink_new_conntrack(struct net *net, struct sock *ctnl,
 
 			if (!cda[CTA_TUPLE_ORIG] || !cda[CTA_TUPLE_REPLY])
 				return -EINVAL;
-			if (otuple.dst.protonum != rtuple.dst.protonum)
-				return -EINVAL;
 
 			ct = ctnetlink_create_conntrack(net, &zone, cda, &otuple,
 							&rtuple, u3);
@@ -1992,9 +1966,13 @@ ctnetlink_ct_stat_cpu_fill_info(struct sk_buff *skb, u32 portid, u32 seq,
 	nfmsg->version      = NFNETLINK_V0;
 	nfmsg->res_id	    = htons(cpu);
 
-	if (nla_put_be32(skb, CTA_STATS_FOUND, htonl(st->found)) ||
+	if (nla_put_be32(skb, CTA_STATS_SEARCHED, htonl(st->searched)) ||
+	    nla_put_be32(skb, CTA_STATS_FOUND, htonl(st->found)) ||
+	    nla_put_be32(skb, CTA_STATS_NEW, htonl(st->new)) ||
 	    nla_put_be32(skb, CTA_STATS_INVALID, htonl(st->invalid)) ||
 	    nla_put_be32(skb, CTA_STATS_IGNORE, htonl(st->ignore)) ||
+	    nla_put_be32(skb, CTA_STATS_DELETE, htonl(st->delete)) ||
+	    nla_put_be32(skb, CTA_STATS_DELETE_LIST, htonl(st->delete_list)) ||
 	    nla_put_be32(skb, CTA_STATS_INSERT, htonl(st->insert)) ||
 	    nla_put_be32(skb, CTA_STATS_INSERT_FAILED,
 				htonl(st->insert_failed)) ||
@@ -2384,8 +2362,12 @@ ctnetlink_glue_attach_expect(const struct nlattr *attr, struct nf_conn *ct,
 		return PTR_ERR(exp);
 
 	err = nf_ct_expect_related_report(exp, portid, report);
-	nf_ct_expect_put(exp);
-	return err;
+	if (err < 0) {
+		nf_ct_expect_put(exp);
+		return err;
+	}
+
+	return 0;
 }
 
 static void ctnetlink_glue_seqadj(struct sk_buff *skb, struct nf_conn *ct,
@@ -2413,7 +2395,7 @@ static struct nfnl_ct_hook ctnetlink_glue_hook = {
 
 static int ctnetlink_exp_dump_tuple(struct sk_buff *skb,
 				    const struct nf_conntrack_tuple *tuple,
-				    u32 type)
+				    enum ctattr_expect type)
 {
 	struct nlattr *nest_parms;
 
@@ -3417,7 +3399,6 @@ static void __exit ctnetlink_exit(void)
 #ifdef CONFIG_NETFILTER_NETLINK_GLUE_CT
 	RCU_INIT_POINTER(nfnl_ct_hook, NULL);
 #endif
-	synchronize_rcu();
 }
 
 module_init(ctnetlink_init);

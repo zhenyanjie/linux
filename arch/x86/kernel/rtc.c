@@ -13,6 +13,7 @@
 #include <asm/x86_init.h>
 #include <asm/time.h>
 #include <asm/intel-mid.h>
+#include <asm/rtc.h>
 #include <asm/setup.h>
 
 #ifdef CONFIG_X86_32
@@ -46,7 +47,7 @@ int mach_set_rtc_mmss(const struct timespec *now)
 
 	rtc_time_to_tm(nowtime, &tm);
 	if (!rtc_valid_tm(&tm)) {
-		retval = mc146818_set_time(&tm);
+		retval = set_rtc_time(&tm);
 		if (retval)
 			printk(KERN_ERR "%s: RTC write failed with error %d\n",
 			       __func__, retval);

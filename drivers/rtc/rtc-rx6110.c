@@ -317,7 +317,7 @@ static int rx6110_init(struct rx6110_data *rx6110)
 	return ret;
 }
 
-static const struct rtc_class_ops rx6110_rtc_ops = {
+static struct rtc_class_ops rx6110_rtc_ops = {
 	.read_time = rx6110_get_time,
 	.set_time = rx6110_set_time,
 };
@@ -388,6 +388,7 @@ MODULE_DEVICE_TABLE(spi, rx6110_id);
 static struct spi_driver rx6110_driver = {
 	.driver = {
 		.name = RX6110_DRIVER_NAME,
+		.owner = THIS_MODULE,
 	},
 	.probe		= rx6110_probe,
 	.remove		= rx6110_remove,

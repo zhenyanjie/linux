@@ -175,8 +175,9 @@ static void ceph_invalidatepage(struct page *page, unsigned int offset,
 
 static int ceph_releasepage(struct page *page, gfp_t g)
 {
-	dout("%p releasepage %p idx %lu (%sdirty)\n", page->mapping->host,
-	     page, page->index, PageDirty(page) ? "" : "not ");
+	dout("%p releasepage %p idx %lu\n", page->mapping->host,
+	     page, page->index);
+	WARN_ON(PageDirty(page));
 
 	/* Can we release the page from the cache? */
 	if (!ceph_release_fscache_page(page, g))
@@ -188,7 +189,7 @@ static int ceph_releasepage(struct page *page, gfp_t g)
 /*
  * read a single page, without unlocking it.
  */
-static int ceph_do_readpage(struct file *filp, struct page *page)
+static int readpage_nounlock(struct file *filp, struct page *page)
 {
 	struct inode *inode = file_inode(filp);
 	struct ceph_inode_info *ci = ceph_inode(inode);
@@ -218,7 +219,7 @@ static int ceph_do_readpage(struct file *filp, struct page *page)
 
 	err = ceph_readpage_from_fscache(inode, page);
 	if (err == 0)
-		return -EINPROGRESS;
+		goto out;
 
 	dout("readpage inode %p file %p page %p index %lu\n",
 	     inode, filp, page, page->index);
@@ -248,11 +249,8 @@ out:
 
 static int ceph_readpage(struct file *filp, struct page *page)
 {
-	int r = ceph_do_readpage(filp, page);
-	if (r != -EINPROGRESS)
-		unlock_page(page);
-	else
-		r = 0;
+	int r = readpage_nounlock(filp, page);
+	unlock_page(page);
 	return r;
 }
 
@@ -300,6 +298,14 @@ unlock:
 	kfree(osd_data->pages);
 }
 
+static void ceph_unlock_page_vector(struct page **pages, int num_pages)
+{
+	int i;
+
+	for (i = 0; i < num_pages; i++)
+		unlock_page(pages[i]);
+}
+
 /*
  * start an async read(ahead) operation.  return nr_pages we submitted
  * a read for on success, or negative error code.
@@ -318,32 +324,7 @@ static int start_read(struct inode *inode, struct list_head *page_list, int max)
 	struct page **pages;
 	pgoff_t next_index;
 	int nr_pages = 0;
-	int got = 0;
-	int ret = 0;
-
-	if (!current->journal_info) {
-		/* caller of readpages does not hold buffer and read caps
-		 * (fadvise, madvise and readahead cases) */
-		int want = CEPH_CAP_FILE_CACHE;
-		ret = ceph_try_get_caps(ci, CEPH_CAP_FILE_RD, want, &got);
-		if (ret < 0) {
-			dout("start_read %p, error getting cap\n", inode);
-		} else if (!(got & want)) {
-			dout("start_read %p, no cache cap\n", inode);
-			ret = 0;
-		}
-		if (ret <= 0) {
-			if (got)
-				ceph_put_cap_refs(ci, got);
-			while (!list_empty(page_list)) {
-				page = list_entry(page_list->prev,
-						  struct page, lru);
-				list_del(&page->lru);
-				put_page(page);
-			}
-			return ret;
-		}
-	}
+	int ret;
 
 	off = (u64) page_offset(page);
 
@@ -366,18 +347,15 @@ static int start_read(struct inode *inode, struct list_head *page_list, int max)
 				    CEPH_OSD_FLAG_READ, NULL,
 				    ci->i_truncate_seq, ci->i_truncate_size,
 				    false);
-	if (IS_ERR(req)) {
-		ret = PTR_ERR(req);
-		goto out;
-	}
+	if (IS_ERR(req))
+		return PTR_ERR(req);
 
 	/* build page vector */
 	nr_pages = calc_pages_for(0, len);
 	pages = kmalloc(sizeof(*pages) * nr_pages, GFP_KERNEL);
-	if (!pages) {
-		ret = -ENOMEM;
-		goto out_put;
-	}
+	ret = -ENOMEM;
+	if (!pages)
+		goto out;
 	for (i = 0; i < nr_pages; ++i) {
 		page = list_entry(page_list->prev, struct page, lru);
 		BUG_ON(PageLocked(page));
@@ -392,11 +370,6 @@ static int start_read(struct inode *inode, struct list_head *page_list, int max)
 			dout("start_read %p add_to_page_cache failed %p\n",
 			     inode, page);
 			nr_pages = i;
-			if (nr_pages > 0) {
-				len = nr_pages << PAGE_SHIFT;
-				osd_req_op_extent_update(req, 0, len);
-				break;
-			}
 			goto out_pages;
 		}
 		pages[i] = page;
@@ -410,25 +383,13 @@ static int start_read(struct inode *inode, struct list_head *page_list, int max)
 	if (ret < 0)
 		goto out_pages;
 	ceph_osdc_put_request(req);
-
-	/* After adding locked pages to page cache, the inode holds cache cap.
-	 * So we can drop our cap refs. */
-	if (got)
-		ceph_put_cap_refs(ci, got);
-
 	return nr_pages;
 
 out_pages:
-	for (i = 0; i < nr_pages; ++i) {
-		ceph_fscache_readpage_cancel(inode, pages[i]);
-		unlock_page(pages[i]);
-	}
-	ceph_put_page_vector(pages, nr_pages, false);
-out_put:
-	ceph_osdc_put_request(req);
+	ceph_unlock_page_vector(pages, nr_pages);
+	ceph_release_page_vector(pages, nr_pages);
 out:
-	if (got)
-		ceph_put_cap_refs(ci, got);
+	ceph_osdc_put_request(req);
 	return ret;
 }
 
@@ -465,6 +426,7 @@ static int ceph_readpages(struct file *file, struct address_space *mapping,
 		rc = start_read(inode, page_list, max);
 		if (rc < 0)
 			goto out;
+		BUG_ON(rc == 0);
 	}
 out:
 	ceph_fscache_readpages_cancel(inode, page_list);
@@ -748,7 +710,7 @@ static int ceph_writepages_start(struct address_space *mapping,
 	struct pagevec pvec;
 	int done = 0;
 	int rc = 0;
-	unsigned int wsize = i_blocksize(inode);
+	unsigned wsize = 1 << inode->i_blkbits;
 	struct ceph_osd_request *req = NULL;
 	int do_sync = 0;
 	loff_t snap_size, i_size;
@@ -1238,7 +1200,7 @@ retry_locked:
 			goto retry_locked;
 		r = writepage_nounlock(page, NULL);
 		if (r < 0)
-			goto fail_unlock;
+			goto fail_nosnap;
 		goto retry_locked;
 	}
 
@@ -1266,14 +1228,11 @@ retry_locked:
 	}
 
 	/* we need to read it. */
-	r = ceph_do_readpage(file, page);
-	if (r < 0) {
-		if (r == -EINPROGRESS)
-			return -EAGAIN;
-		goto fail_unlock;
-	}
+	r = readpage_nounlock(file, page);
+	if (r < 0)
+		goto fail_nosnap;
 	goto retry_locked;
-fail_unlock:
+fail_nosnap:
 	unlock_page(page);
 	return r;
 }
@@ -1414,11 +1373,9 @@ static int ceph_filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	     inode, off, (size_t)PAGE_SIZE, ceph_cap_string(got));
 
 	if ((got & (CEPH_CAP_FILE_CACHE | CEPH_CAP_FILE_LAZYIO)) ||
-	    ci->i_inline_version == CEPH_INLINE_NONE) {
-		current->journal_info = vma->vm_file;
+	    ci->i_inline_version == CEPH_INLINE_NONE)
 		ret = filemap_fault(vma, vmf);
-		current->journal_info = NULL;
-	} else
+	else
 		ret = -EAGAIN;
 
 	dout("filemap_fault %p %llu~%zd dropping cap refs on %s ret %d\n",
@@ -1773,8 +1730,7 @@ enum {
 	POOL_WRITE	= 2,
 };
 
-static int __ceph_pool_perm_get(struct ceph_inode_info *ci,
-				s64 pool, struct ceph_string *pool_ns)
+static int __ceph_pool_perm_get(struct ceph_inode_info *ci, u32 pool)
 {
 	struct ceph_fs_client *fsc = ceph_inode_to_client(&ci->vfs_inode);
 	struct ceph_mds_client *mdsc = fsc->mdsc;
@@ -1782,7 +1738,6 @@ static int __ceph_pool_perm_get(struct ceph_inode_info *ci,
 	struct rb_node **p, *parent;
 	struct ceph_pool_perm *perm;
 	struct page **pages;
-	size_t pool_ns_len;
 	int err = 0, err2 = 0, have = 0;
 
 	down_read(&mdsc->pool_perm_rwsem);
@@ -1794,31 +1749,17 @@ static int __ceph_pool_perm_get(struct ceph_inode_info *ci,
 		else if (pool > perm->pool)
 			p = &(*p)->rb_right;
 		else {
-			int ret = ceph_compare_string(pool_ns,
-						perm->pool_ns,
-						perm->pool_ns_len);
-			if (ret < 0)
-				p = &(*p)->rb_left;
-			else if (ret > 0)
-				p = &(*p)->rb_right;
-			else {
-				have = perm->perm;
-				break;
-			}
+			have = perm->perm;
+			break;
 		}
 	}
 	up_read(&mdsc->pool_perm_rwsem);
 	if (*p)
 		goto out;
 
-	if (pool_ns)
-		dout("__ceph_pool_perm_get pool %lld ns %.*s no perm cached\n",
-		     pool, (int)pool_ns->len, pool_ns->str);
-	else
-		dout("__ceph_pool_perm_get pool %lld no perm cached\n", pool);
+	dout("__ceph_pool_perm_get pool %u no perm cached\n", pool);
 
 	down_write(&mdsc->pool_perm_rwsem);
-	p = &mdsc->pool_perm_tree.rb_node;
 	parent = NULL;
 	while (*p) {
 		parent = *p;
@@ -1828,17 +1769,8 @@ static int __ceph_pool_perm_get(struct ceph_inode_info *ci,
 		else if (pool > perm->pool)
 			p = &(*p)->rb_right;
 		else {
-			int ret = ceph_compare_string(pool_ns,
-						perm->pool_ns,
-						perm->pool_ns_len);
-			if (ret < 0)
-				p = &(*p)->rb_left;
-			else if (ret > 0)
-				p = &(*p)->rb_right;
-			else {
-				have = perm->perm;
-				break;
-			}
+			have = perm->perm;
+			break;
 		}
 	}
 	if (*p) {
@@ -1856,8 +1788,6 @@ static int __ceph_pool_perm_get(struct ceph_inode_info *ci,
 	rd_req->r_flags = CEPH_OSD_FLAG_READ;
 	osd_req_op_init(rd_req, 0, CEPH_OSD_OP_STAT, 0);
 	rd_req->r_base_oloc.pool = pool;
-	if (pool_ns)
-		rd_req->r_base_oloc.pool_ns = ceph_get_string(pool_ns);
 	ceph_oid_printf(&rd_req->r_base_oid, "%llx.00000000", ci->i_vino.ino);
 
 	err = ceph_osdc_alloc_messages(rd_req, GFP_NOFS);
@@ -1911,8 +1841,7 @@ static int __ceph_pool_perm_get(struct ceph_inode_info *ci,
 		goto out_unlock;
 	}
 
-	pool_ns_len = pool_ns ? pool_ns->len : 0;
-	perm = kmalloc(sizeof(*perm) + pool_ns_len + 1, GFP_NOFS);
+	perm = kmalloc(sizeof(*perm), GFP_NOFS);
 	if (!perm) {
 		err = -ENOMEM;
 		goto out_unlock;
@@ -1920,11 +1849,6 @@ static int __ceph_pool_perm_get(struct ceph_inode_info *ci,
 
 	perm->pool = pool;
 	perm->perm = have;
-	perm->pool_ns_len = pool_ns_len;
-	if (pool_ns_len > 0)
-		memcpy(perm->pool_ns, pool_ns->str, pool_ns_len);
-	perm->pool_ns[pool_ns_len] = 0;
-
 	rb_link_node(&perm->node, parent, p);
 	rb_insert_color(&perm->node, &mdsc->pool_perm_tree);
 	err = 0;
@@ -1936,19 +1860,18 @@ out_unlock:
 out:
 	if (!err)
 		err = have;
-	if (pool_ns)
-		dout("__ceph_pool_perm_get pool %lld ns %.*s result = %d\n",
-		     pool, (int)pool_ns->len, pool_ns->str, err);
-	else
-		dout("__ceph_pool_perm_get pool %lld result = %d\n", pool, err);
+	dout("__ceph_pool_perm_get pool %u result = %d\n", pool, err);
 	return err;
 }
 
 int ceph_pool_perm_check(struct ceph_inode_info *ci, int need)
 {
-	s64 pool;
-	struct ceph_string *pool_ns;
+	u32 pool;
 	int ret, flags;
+
+	/* does not support pool namespace yet */
+	if (ci->i_pool_ns_len)
+		return -EIO;
 
 	if (ceph_test_mount_opt(ceph_inode_to_client(&ci->vfs_inode),
 				NOPOOLPERM))
@@ -1956,26 +1879,24 @@ int ceph_pool_perm_check(struct ceph_inode_info *ci, int need)
 
 	spin_lock(&ci->i_ceph_lock);
 	flags = ci->i_ceph_flags;
-	pool = ci->i_layout.pool_id;
+	pool = ceph_file_layout_pg_pool(ci->i_layout);
 	spin_unlock(&ci->i_ceph_lock);
 check:
 	if (flags & CEPH_I_POOL_PERM) {
 		if ((need & CEPH_CAP_FILE_RD) && !(flags & CEPH_I_POOL_RD)) {
-			dout("ceph_pool_perm_check pool %lld no read perm\n",
+			dout("ceph_pool_perm_check pool %u no read perm\n",
 			     pool);
 			return -EPERM;
 		}
 		if ((need & CEPH_CAP_FILE_WR) && !(flags & CEPH_I_POOL_WR)) {
-			dout("ceph_pool_perm_check pool %lld no write perm\n",
+			dout("ceph_pool_perm_check pool %u no write perm\n",
 			     pool);
 			return -EPERM;
 		}
 		return 0;
 	}
 
-	pool_ns = ceph_try_get_string(ci->i_layout.pool_ns);
-	ret = __ceph_pool_perm_get(ci, pool, pool_ns);
-	ceph_put_string(pool_ns);
+	ret = __ceph_pool_perm_get(ci, pool);
 	if (ret < 0)
 		return ret;
 
@@ -1986,11 +1907,10 @@ check:
 		flags |= CEPH_I_POOL_WR;
 
 	spin_lock(&ci->i_ceph_lock);
-	if (pool == ci->i_layout.pool_id &&
-	    pool_ns == rcu_dereference_raw(ci->i_layout.pool_ns)) {
-		ci->i_ceph_flags |= flags;
+	if (pool == ceph_file_layout_pg_pool(ci->i_layout)) {
+		ci->i_ceph_flags = flags;
         } else {
-		pool = ci->i_layout.pool_id;
+		pool = ceph_file_layout_pg_pool(ci->i_layout);
 		flags = ci->i_ceph_flags;
 	}
 	spin_unlock(&ci->i_ceph_lock);

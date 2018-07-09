@@ -245,10 +245,8 @@ static int st_rproc_probe(struct platform_device *pdev)
 		goto free_rproc;
 
 	enabled = st_rproc_state(pdev);
-	if (enabled < 0) {
-		ret = enabled;
+	if (enabled < 0)
 		goto free_rproc;
-	}
 
 	if (enabled) {
 		atomic_inc(&rproc->power);
@@ -264,7 +262,7 @@ static int st_rproc_probe(struct platform_device *pdev)
 	return 0;
 
 free_rproc:
-	rproc_free(rproc);
+	rproc_put(rproc);
 	return ret;
 }
 
@@ -279,7 +277,7 @@ static int st_rproc_remove(struct platform_device *pdev)
 
 	of_reserved_mem_device_release(&pdev->dev);
 
-	rproc_free(rproc);
+	rproc_put(rproc);
 
 	return 0;
 }

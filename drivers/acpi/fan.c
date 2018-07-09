@@ -129,18 +129,8 @@ static int fan_get_state_acpi4(struct acpi_device *device, unsigned long *state)
 
 	control = obj->package.elements[1].integer.value;
 	for (i = 0; i < fan->fps_count; i++) {
-		/*
-		 * When Fine Grain Control is set, return the state
-		 * corresponding to maximum fan->fps[i].control
-		 * value compared to the current speed. Here the
-		 * fan->fps[] is sorted array with increasing speed.
-		 */
-		if (fan->fif.fine_grain_ctrl && control < fan->fps[i].control) {
-			i = (i > 0) ? i - 1 : 0;
+		if (control == fan->fps[i].control)
 			break;
-		} else if (control == fan->fps[i].control) {
-			break;
-		}
 	}
 	if (i == fan->fps_count) {
 		dev_dbg(&device->dev, "Invalid control value returned\n");

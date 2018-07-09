@@ -524,7 +524,7 @@ static int reiserfs_get_blocks_direct_io(struct inode *inode,
 	 * referenced in convert_tail_for_hole() that may be called from
 	 * reiserfs_get_block()
 	 */
-	bh_result->b_size = i_blocksize(inode);
+	bh_result->b_size = (1 << inode->i_blkbits);
 
 	ret = reiserfs_get_block(inode, iblock, bh_result,
 				 create | GET_BLOCK_NO_DANGLE);
@@ -2005,7 +2005,7 @@ int reiserfs_new_inode(struct reiserfs_transaction_handle *th,
 	if (S_ISLNK(inode->i_mode))
 		inode->i_flags &= ~(S_IMMUTABLE | S_APPEND);
 
-	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
 	inode->i_size = i_size;
 	inode->i_blocks = 0;
 	inode->i_bytes = 0;
@@ -2668,7 +2668,7 @@ static int reiserfs_write_full_page(struct page *page,
 	do {
 		struct buffer_head *next = bh->b_this_page;
 		if (buffer_async_write(bh)) {
-			submit_bh(REQ_OP_WRITE, 0, bh);
+			submit_bh(WRITE, bh);
 			nr++;
 		}
 		put_bh(bh);
@@ -2728,7 +2728,7 @@ fail:
 		struct buffer_head *next = bh->b_this_page;
 		if (buffer_async_write(bh)) {
 			clear_buffer_dirty(bh);
-			submit_bh(REQ_OP_WRITE, 0, bh);
+			submit_bh(WRITE, bh);
 			nr++;
 		}
 		put_bh(bh);
@@ -3312,7 +3312,7 @@ int reiserfs_setattr(struct dentry *dentry, struct iattr *attr)
 	unsigned int ia_valid;
 	int error;
 
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode, attr);
 	if (error)
 		return error;
 

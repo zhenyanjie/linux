@@ -188,10 +188,12 @@ static ssize_t show_hue(struct device *cd,
 {
 	struct video_device *vdev = to_video_device(cd);
 	struct usb_usbvision *usbvision = video_get_drvdata(vdev);
-	s32 val = v4l2_ctrl_g_ctrl(v4l2_ctrl_find(&usbvision->hdl,
-						  V4L2_CID_HUE));
-
-	return sprintf(buf, "%d\n", val);
+	struct v4l2_control ctrl;
+	ctrl.id = V4L2_CID_HUE;
+	ctrl.value = 0;
+	if (usbvision->user)
+		call_all(usbvision, core, g_ctrl, &ctrl);
+	return sprintf(buf, "%d\n", ctrl.value);
 }
 static DEVICE_ATTR(hue, S_IRUGO, show_hue, NULL);
 
@@ -200,10 +202,12 @@ static ssize_t show_contrast(struct device *cd,
 {
 	struct video_device *vdev = to_video_device(cd);
 	struct usb_usbvision *usbvision = video_get_drvdata(vdev);
-	s32 val = v4l2_ctrl_g_ctrl(v4l2_ctrl_find(&usbvision->hdl,
-						  V4L2_CID_CONTRAST));
-
-	return sprintf(buf, "%d\n", val);
+	struct v4l2_control ctrl;
+	ctrl.id = V4L2_CID_CONTRAST;
+	ctrl.value = 0;
+	if (usbvision->user)
+		call_all(usbvision, core, g_ctrl, &ctrl);
+	return sprintf(buf, "%d\n", ctrl.value);
 }
 static DEVICE_ATTR(contrast, S_IRUGO, show_contrast, NULL);
 
@@ -212,10 +216,12 @@ static ssize_t show_brightness(struct device *cd,
 {
 	struct video_device *vdev = to_video_device(cd);
 	struct usb_usbvision *usbvision = video_get_drvdata(vdev);
-	s32 val = v4l2_ctrl_g_ctrl(v4l2_ctrl_find(&usbvision->hdl,
-						  V4L2_CID_BRIGHTNESS));
-
-	return sprintf(buf, "%d\n", val);
+	struct v4l2_control ctrl;
+	ctrl.id = V4L2_CID_BRIGHTNESS;
+	ctrl.value = 0;
+	if (usbvision->user)
+		call_all(usbvision, core, g_ctrl, &ctrl);
+	return sprintf(buf, "%d\n", ctrl.value);
 }
 static DEVICE_ATTR(brightness, S_IRUGO, show_brightness, NULL);
 
@@ -224,10 +230,12 @@ static ssize_t show_saturation(struct device *cd,
 {
 	struct video_device *vdev = to_video_device(cd);
 	struct usb_usbvision *usbvision = video_get_drvdata(vdev);
-	s32 val = v4l2_ctrl_g_ctrl(v4l2_ctrl_find(&usbvision->hdl,
-						  V4L2_CID_SATURATION));
-
-	return sprintf(buf, "%d\n", val);
+	struct v4l2_control ctrl;
+	ctrl.id = V4L2_CID_SATURATION;
+	ctrl.value = 0;
+	if (usbvision->user)
+		call_all(usbvision, core, g_ctrl, &ctrl);
+	return sprintf(buf, "%d\n", ctrl.value);
 }
 static DEVICE_ATTR(saturation, S_IRUGO, show_saturation, NULL);
 
@@ -1506,14 +1514,7 @@ static int usbvision_probe(struct usb_interface *intf,
 	}
 
 	for (i = 0; i < usbvision->num_alt; i++) {
-		u16 tmp;
-
-		if (uif->altsetting[i].desc.bNumEndpoints < 2) {
-			ret = -ENODEV;
-			goto err_pkt;
-		}
-
-		tmp = le16_to_cpu(uif->altsetting[i].endpoint[1].desc.
+		u16 tmp = le16_to_cpu(uif->altsetting[i].endpoint[1].desc.
 				      wMaxPacketSize);
 		usbvision->alt_max_pkt_size[i] =
 			(tmp & 0x07ff) * (((tmp & 0x1800) >> 11) + 1);

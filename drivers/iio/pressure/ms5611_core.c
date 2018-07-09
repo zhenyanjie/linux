@@ -224,8 +224,7 @@ static irqreturn_t ms5611_trigger_handler(int irq, void *p)
 	if (ret < 0)
 		goto err;
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buf,
-					   iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns());
 
 err:
 	iio_trigger_notify_done(indio_dev->trig);
@@ -308,7 +307,6 @@ static int ms5611_write_raw(struct iio_dev *indio_dev,
 {
 	struct ms5611_state *st = iio_priv(indio_dev);
 	const struct ms5611_osr *osr = NULL;
-	int ret;
 
 	if (mask != IIO_CHAN_INFO_OVERSAMPLING_RATIO)
 		return -EINVAL;
@@ -322,11 +320,12 @@ static int ms5611_write_raw(struct iio_dev *indio_dev,
 	if (!osr)
 		return -EINVAL;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
-
 	mutex_lock(&st->lock);
+
+	if (iio_buffer_enabled(indio_dev)) {
+		mutex_unlock(&st->lock);
+		return -EBUSY;
+	}
 
 	if (chan->type == IIO_TEMP)
 		st->temp_osr = osr;
@@ -334,8 +333,6 @@ static int ms5611_write_raw(struct iio_dev *indio_dev,
 		st->pressure_osr = osr;
 
 	mutex_unlock(&st->lock);
-	iio_device_release_direct_mode(indio_dev);
-
 	return 0;
 }
 
@@ -418,7 +415,8 @@ static int ms5611_init(struct iio_dev *indio_dev)
 	return 0;
 
 err_regulator_disable:
-	regulator_disable(st->vdd);
+	if (!IS_ERR_OR_NULL(st->vdd))
+		regulator_disable(st->vdd);
 	return ret;
 }
 
@@ -426,7 +424,8 @@ static void ms5611_fini(const struct iio_dev *indio_dev)
 {
 	const struct ms5611_state *st = iio_priv(indio_dev);
 
-	regulator_disable(st->vdd);
+	if (!IS_ERR_OR_NULL(st->vdd))
+		regulator_disable(st->vdd);
 }
 
 int ms5611_probe(struct iio_dev *indio_dev, struct device *dev,

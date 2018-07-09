@@ -3,7 +3,7 @@
  * Copyright 2012 Dialog Semiconductor Ltd.
  * Copyright 2013 Philipp Zabel, Pengutronix
  *
- * Author: Michal Hajduk, Dialog Semiconductor
+ * Author: Michal Hajduk <michal.hajduk@diasemi.com>
  *
  *  This program is free software; you can redistribute  it and/or modify it
  *  under  the terms of  the GNU General  Public License as published by the

@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -48,6 +52,14 @@ struct obd_capa;
 struct obd_device;
 struct obd_export;
 struct page;
+
+/* specific architecture can implement only part of this list */
+enum vvp_io_subtype {
+	/** normal IO */
+	IO_NORMAL,
+	/** io started from splice_{read|write} */
+	IO_SPLICE
+};
 
 /**
  * IO state private to IO state private to VVP layer.
@@ -91,12 +103,18 @@ struct vvp_io {
 			bool		ft_flags_valid;
 		} fault;
 		struct {
+			struct pipe_inode_info	*vui_pipe;
+			unsigned int		 vui_flags;
+		} splice;
+		struct {
 			struct cl_page_list vui_queue;
 			unsigned long vui_written;
 			int vui_from;
 			int vui_to;
 		} write;
 	} u;
+
+	enum vvp_io_subtype	vui_io_subtype;
 
 	/**
 	 * Layout version when this IO is initialized
@@ -203,12 +221,11 @@ struct vvp_object {
 	struct list_head	vob_pending_list;
 
 	/**
-	 * Number of transient pages.  This is no longer protected by i_sem,
-	 * and needs to be atomic.  This is not actually used for anything,
-	 * and can probably be removed.
+	 * Access this counter is protected by inode->i_sem. Now that
+	 * the lifetime of transient pages must be covered by inode sem,
+	 * we don't need to hold any lock..
 	 */
-	atomic_t		vob_transient_pages;
-
+	int			vob_transient_pages;
 	/**
 	 * Number of outstanding mmaps on this file.
 	 *
@@ -234,9 +251,9 @@ struct vvp_object {
  */
 struct vvp_page {
 	struct cl_page_slice vpg_cl;
-	unsigned int	vpg_defer_uptodate:1,
-			vpg_ra_used:1,
-			vpg_write_queued:1;
+	int		  vpg_defer_uptodate;
+	int		  vpg_ra_used;
+	int		  vpg_write_queued;
 	/**
 	 * Non-empty iff this page is already counted in
 	 * vvp_object::vob_pending_list. This list is only used as a flag,

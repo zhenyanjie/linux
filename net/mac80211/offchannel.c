@@ -128,8 +128,7 @@ void ieee80211_offchannel_stop_vifs(struct ieee80211_local *local)
 		if (!ieee80211_sdata_running(sdata))
 			continue;
 
-		if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE ||
-		    sdata->vif.type == NL80211_IFTYPE_NAN)
+		if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE)
 			continue;
 
 		if (sdata->vif.type != NL80211_IFTYPE_MONITOR)
@@ -707,8 +706,6 @@ static int ieee80211_cancel_roc(struct ieee80211_local *local,
 	if (!cookie)
 		return -ENOENT;
 
-	flush_work(&local->hw_roc_start);
-
 	mutex_lock(&local->mtx);
 	list_for_each_entry_safe(roc, tmp, &local->roc_list, list) {
 		if (!mgmt_tx && roc->cookie != cookie)
@@ -822,7 +819,7 @@ int ieee80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 		    mgmt->u.action.category == WLAN_CATEGORY_SPECTRUM_MGMT)
 			break;
 		rcu_read_lock();
-		sta = sta_info_get_bss(sdata, mgmt->da);
+		sta = sta_info_get(sdata, mgmt->da);
 		rcu_read_unlock();
 		if (!sta)
 			return -ENOLINK;
@@ -841,7 +838,6 @@ int ieee80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 	case NL80211_IFTYPE_P2P_DEVICE:
 		need_offchan = true;
 		break;
-	case NL80211_IFTYPE_NAN:
 	default:
 		return -EOPNOTSUPP;
 	}

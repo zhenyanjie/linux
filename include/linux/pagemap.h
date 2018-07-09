@@ -16,16 +16,15 @@
 #include <linux/hugetlb_inline.h>
 
 /*
- * Bits in mapping->flags.
+ * Bits in mapping->flags.  The lower __GFP_BITS_SHIFT bits are the page
+ * allocation mode flags.
  */
 enum mapping_flags {
-	AS_EIO		= 0,	/* IO error on async write */
-	AS_ENOSPC	= 1,	/* ENOSPC on async write */
-	AS_MM_ALL_LOCKS	= 2,	/* under mm_take_all_locks() */
-	AS_UNEVICTABLE	= 3,	/* e.g., ramdisk, SHM_LOCK */
-	AS_EXITING	= 4, 	/* final truncate in progress */
-	/* writeback related tags are not used */
-	AS_NO_WRITEBACK_TAGS = 5,
+	AS_EIO		= __GFP_BITS_SHIFT + 0,	/* IO error on async write */
+	AS_ENOSPC	= __GFP_BITS_SHIFT + 1,	/* ENOSPC on async write */
+	AS_MM_ALL_LOCKS	= __GFP_BITS_SHIFT + 2,	/* under mm_take_all_locks() */
+	AS_UNEVICTABLE	= __GFP_BITS_SHIFT + 3,	/* e.g., ramdisk, SHM_LOCK */
+	AS_EXITING	= __GFP_BITS_SHIFT + 4, /* final truncate in progress */
 };
 
 static inline void mapping_set_error(struct address_space *mapping, int error)
@@ -65,19 +64,9 @@ static inline int mapping_exiting(struct address_space *mapping)
 	return test_bit(AS_EXITING, &mapping->flags);
 }
 
-static inline void mapping_set_no_writeback_tags(struct address_space *mapping)
-{
-	set_bit(AS_NO_WRITEBACK_TAGS, &mapping->flags);
-}
-
-static inline int mapping_use_writeback_tags(struct address_space *mapping)
-{
-	return !test_bit(AS_NO_WRITEBACK_TAGS, &mapping->flags);
-}
-
 static inline gfp_t mapping_gfp_mask(struct address_space * mapping)
 {
-	return mapping->gfp_mask;
+	return (__force gfp_t)mapping->flags & __GFP_BITS_MASK;
 }
 
 /* Restricts the given gfp_mask to what the mapping allows. */
@@ -93,7 +82,8 @@ static inline gfp_t mapping_gfp_constraint(struct address_space *mapping,
  */
 static inline void mapping_set_gfp_mask(struct address_space *m, gfp_t mask)
 {
-	m->gfp_mask = mask;
+	m->flags = (m->flags & ~(__force unsigned long)__GFP_BITS_MASK) |
+				(__force unsigned long)mask;
 }
 
 void release_pages(struct page **pages, int nr, bool cold);
@@ -148,7 +138,7 @@ static inline int page_cache_get_speculative(struct page *page)
 
 #ifdef CONFIG_TINY_RCU
 # ifdef CONFIG_PREEMPT_COUNT
-	VM_BUG_ON(!in_atomic() && !irqs_disabled());
+	VM_BUG_ON(!in_atomic());
 # endif
 	/*
 	 * Preempt must be disabled here - we rely on rcu_read_lock doing
@@ -186,7 +176,7 @@ static inline int page_cache_add_speculative(struct page *page, int count)
 
 #if !defined(CONFIG_SMP) && defined(CONFIG_TREE_RCU)
 # ifdef CONFIG_PREEMPT_COUNT
-	VM_BUG_ON(!in_atomic() && !irqs_disabled());
+	VM_BUG_ON(!in_atomic());
 # endif
 	VM_BUG_ON_PAGE(page_count(page) == 0, page);
 	page_ref_add(page, count);
@@ -219,10 +209,10 @@ static inline struct page *page_cache_alloc_cold(struct address_space *x)
 	return __page_cache_alloc(mapping_gfp_mask(x)|__GFP_COLD);
 }
 
-static inline gfp_t readahead_gfp_mask(struct address_space *x)
+static inline struct page *page_cache_alloc_readahead(struct address_space *x)
 {
-	return mapping_gfp_mask(x) |
-				  __GFP_COLD | __GFP_NORETRY | __GFP_NOWARN;
+	return __page_cache_alloc(mapping_gfp_mask(x) |
+				  __GFP_COLD | __GFP_NORETRY | __GFP_NOWARN);
 }
 
 typedef int filler_t(void *, struct page *);
@@ -374,12 +364,15 @@ static inline struct page *read_mapping_page(struct address_space *mapping,
 }
 
 /*
- * Get index of the page with in radix-tree
- * (TODO: remove once hugetlb pages will have ->index in PAGE_SIZE)
+ * Get the offset in PAGE_SIZE.
+ * (TODO: hugepage should have ->index in PAGE_SIZE)
  */
-static inline pgoff_t page_to_index(struct page *page)
+static inline pgoff_t page_to_pgoff(struct page *page)
 {
 	pgoff_t pgoff;
+
+	if (unlikely(PageHeadHuge(page)))
+		return page->index << compound_order(page);
 
 	if (likely(!PageTransTail(page)))
 		return page->index;
@@ -394,18 +387,6 @@ static inline pgoff_t page_to_index(struct page *page)
 }
 
 /*
- * Get the offset in PAGE_SIZE.
- * (TODO: hugepage should have ->index in PAGE_SIZE)
- */
-static inline pgoff_t page_to_pgoff(struct page *page)
-{
-	if (unlikely(PageHeadHuge(page)))
-		return page->index << compound_order(page);
-
-	return page_to_index(page);
-}
-
-/*
  * Return byte-offset into filesystem object for page.
  */
 static inline loff_t page_offset(struct page *page)
@@ -415,7 +396,7 @@ static inline loff_t page_offset(struct page *page)
 
 static inline loff_t page_file_offset(struct page *page)
 {
-	return ((loff_t)page_index(page)) << PAGE_SHIFT;
+	return ((loff_t)page_file_index(page)) << PAGE_SHIFT;
 }
 
 extern pgoff_t linear_hugepage_index(struct vm_area_struct *vma,
@@ -529,7 +510,7 @@ static inline void wait_on_page_writeback(struct page *page)
 extern void end_page_writeback(struct page *page);
 void wait_for_stable_page(struct page *page);
 
-void page_endio(struct page *page, bool is_write, int err);
+void page_endio(struct page *page, int rw, int err);
 
 /*
  * Add an arbitrary waiter to a page's wait queue
@@ -537,9 +518,58 @@ void page_endio(struct page *page, bool is_write, int err);
 extern void add_page_wait_queue(struct page *page, wait_queue_t *waiter);
 
 /*
- * Fault everything in given userspace address range in.
+ * Fault one or two userspace pages into pagetables.
+ * Return -EINVAL if more than two pages would be needed.
+ * Return non-zero on a fault.
  */
 static inline int fault_in_pages_writeable(char __user *uaddr, int size)
+{
+	int span, ret;
+
+	if (unlikely(size == 0))
+		return 0;
+
+	span = offset_in_page(uaddr) + size;
+	if (span > 2 * PAGE_SIZE)
+		return -EINVAL;
+	/*
+	 * Writing zeroes into userspace here is OK, because we know that if
+	 * the zero gets there, we'll be overwriting it.
+	 */
+	ret = __put_user(0, uaddr);
+	if (ret == 0 && span > PAGE_SIZE)
+		ret = __put_user(0, uaddr + size - 1);
+	return ret;
+}
+
+static inline int fault_in_pages_readable(const char __user *uaddr, int size)
+{
+	volatile char c;
+	int ret;
+
+	if (unlikely(size == 0))
+		return 0;
+
+	ret = __get_user(c, uaddr);
+	if (ret == 0) {
+		const char __user *end = uaddr + size - 1;
+
+		if (((unsigned long)uaddr & PAGE_MASK) !=
+				((unsigned long)end & PAGE_MASK)) {
+			ret = __get_user(c, end);
+			(void)c;
+		}
+	}
+	return ret;
+}
+
+/*
+ * Multipage variants of the above prefault helpers, useful if more than
+ * PAGE_SIZE of data needs to be prefaulted. These are separate from the above
+ * functions (which only handle up to PAGE_SIZE) to avoid clobbering the
+ * filemap.c hotpaths.
+ */
+static inline int fault_in_multipages_writeable(char __user *uaddr, int size)
 {
 	char __user *end = uaddr + size - 1;
 
@@ -566,7 +596,8 @@ static inline int fault_in_pages_writeable(char __user *uaddr, int size)
 	return 0;
 }
 
-static inline int fault_in_pages_readable(const char __user *uaddr, int size)
+static inline int fault_in_multipages_readable(const char __user *uaddr,
+					       int size)
 {
 	volatile char c;
 	const char __user *end = uaddr + size - 1;
@@ -589,7 +620,6 @@ static inline int fault_in_pages_readable(const char __user *uaddr, int size)
 		return __get_user(c, end);
 	}
 
-	(void)c;
 	return 0;
 }
 

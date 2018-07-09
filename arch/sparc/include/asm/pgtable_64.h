@@ -395,17 +395,12 @@ static inline unsigned long __pte_huge_mask(void)
 
 static inline pte_t pte_mkhuge(pte_t pte)
 {
-	return __pte(pte_val(pte) | _PAGE_PMD_HUGE | __pte_huge_mask());
+	return __pte(pte_val(pte) | __pte_huge_mask());
 }
 
 static inline bool is_hugetlb_pte(pte_t pte)
 {
 	return !!(pte_val(pte) & __pte_huge_mask());
-}
-
-static inline bool is_hugetlb_pmd(pmd_t pmd)
-{
-	return !!(pmd_val(pmd) & _PAGE_PMD_HUGE);
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
@@ -673,14 +668,6 @@ static inline unsigned long pmd_pfn(pmd_t pmd)
 	return pte_pfn(pte);
 }
 
-#define __HAVE_ARCH_PMD_WRITE
-static inline unsigned long pmd_write(pmd_t pmd)
-{
-	pte_t pte = __pte(pmd_val(pmd));
-
-	return pte_write(pte);
-}
-
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 static inline unsigned long pmd_dirty(pmd_t pmd)
 {
@@ -694,6 +681,13 @@ static inline unsigned long pmd_young(pmd_t pmd)
 	pte_t pte = __pte(pmd_val(pmd));
 
 	return pte_young(pte);
+}
+
+static inline unsigned long pmd_write(pmd_t pmd)
+{
+	pte_t pte = __pte(pmd_val(pmd));
+
+	return pte_write(pte);
 }
 
 static inline unsigned long pmd_trans_huge(pmd_t pmd)
@@ -952,7 +946,7 @@ void update_mmu_cache_pmd(struct vm_area_struct *vma, unsigned long addr,
 			  pmd_t *pmd);
 
 #define __HAVE_ARCH_PMDP_INVALIDATE
-extern pmd_t pmdp_invalidate(struct vm_area_struct *vma, unsigned long address,
+extern void pmdp_invalidate(struct vm_area_struct *vma, unsigned long address,
 			    pmd_t *pmdp);
 
 #define __HAVE_ARCH_PGTABLE_DEPOSIT

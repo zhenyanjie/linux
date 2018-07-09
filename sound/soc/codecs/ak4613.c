@@ -437,35 +437,23 @@ static struct snd_soc_dai_driver ak4613_dai = {
 	.symmetric_rates = 1,
 };
 
-static int ak4613_suspend(struct snd_soc_codec *codec)
-{
-	struct regmap *regmap = dev_get_regmap(codec->dev, NULL);
-
-	regcache_cache_only(regmap, true);
-	regcache_mark_dirty(regmap);
-	return 0;
-}
-
 static int ak4613_resume(struct snd_soc_codec *codec)
 {
 	struct regmap *regmap = dev_get_regmap(codec->dev, NULL);
 
-	regcache_cache_only(regmap, false);
+	regcache_mark_dirty(regmap);
 	return regcache_sync(regmap);
 }
 
 static struct snd_soc_codec_driver soc_codec_dev_ak4613 = {
-	.suspend		= ak4613_suspend,
 	.resume			= ak4613_resume,
 	.set_bias_level		= ak4613_set_bias_level,
-	.component_driver = {
-		.controls		= ak4613_snd_controls,
-		.num_controls		= ARRAY_SIZE(ak4613_snd_controls),
-		.dapm_widgets		= ak4613_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(ak4613_dapm_widgets),
-		.dapm_routes		= ak4613_intercon,
-		.num_dapm_routes	= ARRAY_SIZE(ak4613_intercon),
-	},
+	.controls		= ak4613_snd_controls,
+	.num_controls		= ARRAY_SIZE(ak4613_snd_controls),
+	.dapm_widgets		= ak4613_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(ak4613_dapm_widgets),
+	.dapm_routes		= ak4613_intercon,
+	.num_dapm_routes	= ARRAY_SIZE(ak4613_intercon),
 };
 
 static void ak4613_parse_of(struct ak4613_priv *priv,

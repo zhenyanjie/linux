@@ -80,8 +80,6 @@ EXPORT_SYMBOL(kstrdup_const);
  * @s: the string to duplicate
  * @max: read at most @max chars from @s
  * @gfp: the GFP mask used in the kmalloc() call when allocating memory
- *
- * Note: Use kmemdup_nul() instead if the size is known exactly.
  */
 char *kstrndup(const char *s, size_t max, gfp_t gfp)
 {
@@ -118,28 +116,6 @@ void *kmemdup(const void *src, size_t len, gfp_t gfp)
 	return p;
 }
 EXPORT_SYMBOL(kmemdup);
-
-/**
- * kmemdup_nul - Create a NUL-terminated string from unterminated data
- * @s: The data to stringify
- * @len: The size of the data
- * @gfp: the GFP mask used in the kmalloc() call when allocating memory
- */
-char *kmemdup_nul(const char *s, size_t len, gfp_t gfp)
-{
-	char *buf;
-
-	if (!s)
-		return NULL;
-
-	buf = kmalloc_track_caller(len + 1, gfp);
-	if (buf) {
-		memcpy(buf, s, len);
-		buf[len] = '\0';
-	}
-	return buf;
-}
-EXPORT_SYMBOL(kmemdup_nul);
 
 /**
  * memdup_user - duplicate memory region from user space
@@ -254,10 +230,8 @@ void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 }
 
 /* Check if the vma is being used as a stack by this task */
-int vma_is_stack_for_current(struct vm_area_struct *vma)
+int vma_is_stack_for_task(struct vm_area_struct *vma, struct task_struct *t)
 {
-	struct task_struct * __maybe_unused t = current;
-
 	return (vma->vm_start <= KSTK_ESP(t) && vma->vm_end >= KSTK_ESP(t));
 }
 
@@ -309,8 +283,7 @@ EXPORT_SYMBOL_GPL(__get_user_pages_fast);
 int __weak get_user_pages_fast(unsigned long start,
 				int nr_pages, int write, struct page **pages)
 {
-	return get_user_pages_unlocked(start, nr_pages, pages,
-				       write ? FOLL_WRITE : 0);
+	return get_user_pages_unlocked(start, nr_pages, write, 0, pages);
 }
 EXPORT_SYMBOL_GPL(get_user_pages_fast);
 
@@ -426,12 +399,10 @@ struct address_space *page_mapping(struct page *page)
 	}
 
 	mapping = page->mapping;
-	if ((unsigned long)mapping & PAGE_MAPPING_ANON)
+	if ((unsigned long)mapping & PAGE_MAPPING_FLAGS)
 		return NULL;
-
-	return (void *)((unsigned long)mapping & ~PAGE_MAPPING_FLAGS);
+	return mapping;
 }
-EXPORT_SYMBOL(page_mapping);
 
 /* Slow path of page_mapcount() for compound pages */
 int __page_mapcount(struct page *page)
@@ -439,12 +410,6 @@ int __page_mapcount(struct page *page)
 	int ret;
 
 	ret = atomic_read(&page->_mapcount) + 1;
-	/*
-	 * For file THP page->_mapcount contains total number of mapping
-	 * of the page: no need to look into compound_mapcount.
-	 */
-	if (!PageAnon(page) && !PageHuge(page))
-		return ret;
 	page = compound_head(page);
 	ret += atomic_read(compound_mapcount_ptr(page)) + 1;
 	if (PageDoubleMap(page))
@@ -555,7 +520,7 @@ int __vm_enough_memory(struct mm_struct *mm, long pages, int cap_sys_admin)
 
 	if (sysctl_overcommit_memory == OVERCOMMIT_GUESS) {
 		free = global_page_state(NR_FREE_PAGES);
-		free += global_node_page_state(NR_FILE_PAGES);
+		free += global_page_state(NR_FILE_PAGES);
 
 		/*
 		 * shmem pages shouldn't be counted as free in this
@@ -563,7 +528,7 @@ int __vm_enough_memory(struct mm_struct *mm, long pages, int cap_sys_admin)
 		 * that won't affect the overall amount of available
 		 * memory in the system.
 		 */
-		free -= global_node_page_state(NR_SHMEM);
+		free -= global_page_state(NR_SHMEM);
 
 		free += get_nr_swap_pages();
 
@@ -650,7 +615,7 @@ int get_cmdline(struct task_struct *task, char *buffer, int buflen)
 	if (len > buflen)
 		len = buflen;
 
-	res = access_process_vm(task, arg_start, buffer, len, FOLL_FORCE);
+	res = access_process_vm(task, arg_start, buffer, len, 0);
 
 	/*
 	 * If the nul at the end of args has been overwritten, then
@@ -665,8 +630,7 @@ int get_cmdline(struct task_struct *task, char *buffer, int buflen)
 			if (len > buflen - res)
 				len = buflen - res;
 			res += access_process_vm(task, env_start,
-						 buffer+res, len,
-						 FOLL_FORCE);
+						 buffer+res, len, 0);
 			res = strnlen(buffer, res);
 		}
 	}

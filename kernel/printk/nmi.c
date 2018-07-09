@@ -63,7 +63,6 @@ static int vprintk_nmi(const char *fmt, va_list args)
 	struct nmi_seq_buf *s = this_cpu_ptr(&nmi_print_seq);
 	int add = 0;
 	size_t len;
-	va_list ap;
 
 again:
 	len = atomic_read(&s->len);
@@ -80,9 +79,7 @@ again:
 	if (!len)
 		smp_rmb();
 
-	va_copy(ap, args);
-	add = vsnprintf(s->buffer + len, sizeof(s->buffer) - len, fmt, ap);
-	va_end(ap);
+	add = vsnprintf(s->buffer + len, sizeof(s->buffer) - len, fmt, args);
 
 	/*
 	 * Do it once again if the buffer has been flushed in the meantime.
@@ -102,30 +99,24 @@ again:
 	return add;
 }
 
-static void printk_nmi_flush_line(const char *text, int len)
+/*
+ * printk one line from the temporary buffer from @start index until
+ * and including the @end index.
+ */
+static void print_nmi_seq_line(struct nmi_seq_buf *s, int start, int end)
 {
+	const char *buf = s->buffer + start;
+
 	/*
 	 * The buffers are flushed in NMI only on panic.  The messages must
 	 * go only into the ring buffer at this stage.  Consoles will get
 	 * explicitly called later when a crashdump is not generated.
 	 */
 	if (in_nmi())
-		printk_deferred("%.*s", len, text);
+		printk_deferred("%.*s", (end - start) + 1, buf);
 	else
-		printk("%.*s", len, text);
+		printk("%.*s", (end - start) + 1, buf);
 
-}
-
-/*
- * printk one line from the temporary buffer from @start index until
- * and including the @end index.
- */
-static void printk_nmi_flush_seq_line(struct nmi_seq_buf *s,
-					int start, int end)
-{
-	const char *buf = s->buffer + start;
-
-	printk_nmi_flush_line(buf, (end - start) + 1);
 }
 
 /*
@@ -159,11 +150,9 @@ more:
 	 * the buffer an unexpected way. If we printed something then
 	 * @len must only increase.
 	 */
-	if (i && i >= len) {
-		const char *msg = "printk_nmi_flush: internal error\n";
-
-		printk_nmi_flush_line(msg, strlen(msg));
-	}
+	if (i && i >= len)
+		pr_err("printk_nmi_flush: internal error: i=%d >= len=%zu\n",
+		       i, len);
 
 	if (!len)
 		goto out; /* Someone else has already flushed the buffer. */
@@ -177,14 +166,14 @@ more:
 	/* Print line by line. */
 	for (; i < size; i++) {
 		if (s->buffer[i] == '\n') {
-			printk_nmi_flush_seq_line(s, last_i, i);
+			print_nmi_seq_line(s, last_i, i);
 			last_i = i + 1;
 		}
 	}
 	/* Check if there was a partial line. */
 	if (last_i < size) {
-		printk_nmi_flush_seq_line(s, last_i, size - 1);
-		printk_nmi_flush_line("\n", strlen("\n"));
+		print_nmi_seq_line(s, last_i, size - 1);
+		pr_cont("\n");
 	}
 
 	/*

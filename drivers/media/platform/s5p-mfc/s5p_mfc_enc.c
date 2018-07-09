@@ -943,10 +943,9 @@ static int vidioc_querycap(struct file *file, void *priv,
 {
 	struct s5p_mfc_dev *dev = video_drvdata(file);
 
-	strncpy(cap->driver, S5P_MFC_NAME, sizeof(cap->driver) - 1);
-	strncpy(cap->card, dev->vfd_enc->name, sizeof(cap->card) - 1);
-	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s",
-		 dev_name(&dev->plat_dev->dev));
+	strncpy(cap->driver, dev->plat_dev->name, sizeof(cap->driver) - 1);
+	strncpy(cap->card, dev->plat_dev->name, sizeof(cap->card) - 1);
+	cap->bus_info[0] = 0;
 	/*
 	 * This is only a mem-to-mem video device. The capture and output
 	 * device capability flags are left only for backward compatibility
@@ -1044,6 +1043,10 @@ static int vidioc_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
 			mfc_err("failed to try output format\n");
 			return -EINVAL;
 		}
+		if (pix_fmt_mp->plane_fmt[0].sizeimage == 0) {
+			mfc_err("must be set encoding output size\n");
+			return -EINVAL;
+		}
 		if ((dev->variant->version_bit & fmt->versions) == 0) {
 			mfc_err("Unsupported format by this MFC version.\n");
 			return -EINVAL;
@@ -1054,6 +1057,11 @@ static int vidioc_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
 	} else if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		fmt = find_format(f, MFC_FMT_RAW);
 		if (!fmt) {
+			mfc_err("failed to try output format\n");
+			return -EINVAL;
+		}
+
+		if (fmt->num_planes != pix_fmt_mp->num_planes) {
 			mfc_err("failed to try output format\n");
 			return -EINVAL;
 		}
@@ -1136,10 +1144,7 @@ static int vidioc_reqbufs(struct file *file, void *priv,
 		return -EINVAL;
 	if (reqbufs->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		if (reqbufs->count == 0) {
-			mfc_debug(2, "Freeing buffers\n");
 			ret = vb2_reqbufs(&ctx->vq_dst, reqbufs);
-			s5p_mfc_hw_call(dev->mfc_ops, release_codec_buffers,
-					ctx);
 			ctx->capture_state = QUEUE_FREE;
 			return ret;
 		}
@@ -1812,7 +1817,7 @@ static int check_vb_with_fmt(struct s5p_mfc_fmt *fmt, struct vb2_buffer *vb)
 
 static int s5p_mfc_queue_setup(struct vb2_queue *vq,
 			unsigned int *buf_count, unsigned int *plane_count,
-			unsigned int psize[], struct device *alloc_devs[])
+			unsigned int psize[], void *allocators[])
 {
 	struct s5p_mfc_ctx *ctx = fh_to_ctx(vq->drv_priv);
 	struct s5p_mfc_dev *dev = ctx->dev;
@@ -1832,7 +1837,7 @@ static int s5p_mfc_queue_setup(struct vb2_queue *vq,
 		if (*buf_count > MFC_MAX_BUFFERS)
 			*buf_count = MFC_MAX_BUFFERS;
 		psize[0] = ctx->enc_dst_buf_size;
-		alloc_devs[0] = ctx->dev->mem_dev_l;
+		allocators[0] = ctx->dev->alloc_ctx[MFC_BANK1_ALLOC_CTX];
 	} else if (vq->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		if (ctx->src_fmt)
 			*plane_count = ctx->src_fmt->num_planes;
@@ -1848,11 +1853,15 @@ static int s5p_mfc_queue_setup(struct vb2_queue *vq,
 		psize[1] = ctx->chroma_size;
 
 		if (IS_MFCV6_PLUS(dev)) {
-			alloc_devs[0] = ctx->dev->mem_dev_l;
-			alloc_devs[1] = ctx->dev->mem_dev_l;
+			allocators[0] =
+				ctx->dev->alloc_ctx[MFC_BANK1_ALLOC_CTX];
+			allocators[1] =
+				ctx->dev->alloc_ctx[MFC_BANK1_ALLOC_CTX];
 		} else {
-			alloc_devs[0] = ctx->dev->mem_dev_r;
-			alloc_devs[1] = ctx->dev->mem_dev_r;
+			allocators[0] =
+				ctx->dev->alloc_ctx[MFC_BANK2_ALLOC_CTX];
+			allocators[1] =
+				ctx->dev->alloc_ctx[MFC_BANK2_ALLOC_CTX];
 		}
 	} else {
 		mfc_err("invalid queue type: %d\n", vq->type);

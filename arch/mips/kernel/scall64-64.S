@@ -311,7 +311,7 @@ EXPORT(sys_call_table)
 	PTR	sys_sched_getaffinity
 	PTR	sys_cacheflush
 	PTR	sys_cachectl
-	PTR	__sys_sysmips
+	PTR	sys_sysmips
 	PTR	sys_io_setup			/* 5200 */
 	PTR	sys_io_destroy
 	PTR	sys_io_getevents
@@ -435,7 +435,4 @@ EXPORT(sys_call_table)
 	PTR	sys_copy_file_range		/* 5320 */
 	PTR	sys_preadv2
 	PTR	sys_pwritev2
-	PTR	sys_pkey_mprotect
-	PTR	sys_pkey_alloc
-	PTR	sys_pkey_free			/* 5325 */
 	.size	sys_call_table,.-sys_call_table

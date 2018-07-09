@@ -253,8 +253,6 @@ int __kmod_path__parse(struct kmod_path *m, const char *path,
 		if ((strncmp(name, "[kernel.kallsyms]", 17) == 0) ||
 		    (strncmp(name, "[guest.kernel.kallsyms", 22) == 0) ||
 		    (strncmp(name, "[vdso]", 6) == 0) ||
-		    (strncmp(name, "[vdso32]", 8) == 0) ||
-		    (strncmp(name, "[vdsox32]", 9) == 0) ||
 		    (strncmp(name, "[vsyscall]", 10) == 0)) {
 			m->kmod = false;
 
@@ -337,7 +335,7 @@ static int do_open(char *name)
 			return fd;
 
 		pr_debug("dso open failed: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		if (!dso__data_open_cnt || errno != EMFILE)
 			break;
 
@@ -364,9 +362,6 @@ static int __open_dso(struct dso *dso, struct machine *machine)
 		free(name);
 		return -EINVAL;
 	}
-
-	if (!is_regular_file(name))
-		return -EINVAL;
 
 	fd = do_open(name);
 	free(name);
@@ -447,27 +442,17 @@ static rlim_t get_fd_limit(void)
 	return limit;
 }
 
-static rlim_t fd_limit;
-
-/*
- * Used only by tests/dso-data.c to reset the environment
- * for tests. I dont expect we should change this during
- * standard runtime.
- */
-void reset_fd_limit(void)
-{
-	fd_limit = 0;
-}
-
 static bool may_cache_fd(void)
 {
-	if (!fd_limit)
-		fd_limit = get_fd_limit();
+	static rlim_t limit;
 
-	if (fd_limit == RLIM_INFINITY)
+	if (!limit)
+		limit = get_fd_limit();
+
+	if (limit == RLIM_INFINITY)
 		return true;
 
-	return fd_limit > (rlim_t) dso__data_open_cnt;
+	return limit > (rlim_t) dso__data_open_cnt;
 }
 
 /*
@@ -791,7 +776,7 @@ static int data_file_size(struct dso *dso, struct machine *machine)
 	if (fstat(dso->data.fd, &st) < 0) {
 		ret = -errno;
 		pr_err("dso cache fstat failed: %s\n",
-		       str_error_r(errno, sbuf, sizeof(sbuf)));
+		       strerror_r(errno, sbuf, sizeof(sbuf)));
 		dso->data.status = DSO_DATA_STATUS_ERROR;
 		goto out;
 	}
@@ -1371,7 +1356,7 @@ int dso__strerror_load(struct dso *dso, char *buf, size_t buflen)
 	BUG_ON(buflen == 0);
 
 	if (errnum >= 0) {
-		const char *err = str_error_r(errnum, buf, buflen);
+		const char *err = strerror_r(errnum, buf, buflen);
 
 		if (err != buf)
 			scnprintf(buf, buflen, "%s", err);

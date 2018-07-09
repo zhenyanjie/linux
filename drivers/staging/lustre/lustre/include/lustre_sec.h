@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -217,13 +221,13 @@ enum sptlrpc_bulk_service {
 
 #define SPTLRPC_FLVR_DEFAULT	    SPTLRPC_FLVR_NULL
 
-#define SPTLRPC_FLVR_INVALID	    ((__u32)0xFFFFFFFF)
-#define SPTLRPC_FLVR_ANY		((__u32)0xFFF00000)
+#define SPTLRPC_FLVR_INVALID	    ((__u32) 0xFFFFFFFF)
+#define SPTLRPC_FLVR_ANY		((__u32) 0xFFF00000)
 
 /**
  * extract the useful part from wire flavor
  */
-#define WIRE_FLVR(wflvr)		(((__u32)(wflvr)) & 0x000FFFFF)
+#define WIRE_FLVR(wflvr)		(((__u32) (wflvr)) & 0x000FFFFF)
 
 /** @} flavor */
 

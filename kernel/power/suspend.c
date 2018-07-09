@@ -118,18 +118,10 @@ static bool valid_state(suspend_state_t state)
  */
 static bool relative_states;
 
-void __init pm_states_init(void)
-{
-	/*
-	 * freeze state should be supported even without any suspend_ops,
-	 * initialize pm_states accordingly here
-	 */
-	pm_states[PM_SUSPEND_FREEZE] = pm_labels[relative_states ? 0 : 2];
-}
-
 static int __init sleep_states_setup(char *str)
 {
 	relative_states = !strncmp(str, "1", 1);
+	pm_states[PM_SUSPEND_FREEZE] = pm_labels[relative_states ? 0 : 2];
 	return 1;
 }
 
@@ -219,7 +211,7 @@ static int platform_suspend_begin(suspend_state_t state)
 {
 	if (state == PM_SUSPEND_FREEZE && freeze_ops && freeze_ops->begin)
 		return freeze_ops->begin();
-	else if (suspend_ops && suspend_ops->begin)
+	else if (suspend_ops->begin)
 		return suspend_ops->begin(state);
 	else
 		return 0;
@@ -229,7 +221,7 @@ static void platform_resume_end(suspend_state_t state)
 {
 	if (state == PM_SUSPEND_FREEZE && freeze_ops && freeze_ops->end)
 		freeze_ops->end();
-	else if (suspend_ops && suspend_ops->end)
+	else if (suspend_ops->end)
 		suspend_ops->end();
 }
 
@@ -274,18 +266,16 @@ static int suspend_test(int level)
  */
 static int suspend_prepare(suspend_state_t state)
 {
-	int error, nr_calls = 0;
+	int error;
 
 	if (!sleep_state_supported(state))
 		return -EPERM;
 
 	pm_prepare_console();
 
-	error = __pm_notifier_call_chain(PM_SUSPEND_PREPARE, -1, &nr_calls);
-	if (error) {
-		nr_calls--;
+	error = pm_notifier_call_chain(PM_SUSPEND_PREPARE);
+	if (error)
 		goto Finish;
-	}
 
 	trace_suspend_resume(TPS("freeze_processes"), 0, true);
 	error = suspend_freeze_processes();
@@ -296,7 +286,7 @@ static int suspend_prepare(suspend_state_t state)
 	suspend_stats.failed_freeze++;
 	dpm_save_failed_step(SUSPEND_FREEZE);
  Finish:
-	__pm_notifier_call_chain(PM_POST_SUSPEND, nr_calls, NULL);
+	pm_notifier_call_chain(PM_POST_SUSPEND);
 	pm_restore_console();
 	return error;
 }
@@ -498,9 +488,9 @@ static int enter_state(suspend_state_t state)
 
 #ifndef CONFIG_SUSPEND_SKIP_SYNC
 	trace_suspend_resume(TPS("sync_filesystems"), 0, true);
-	pr_info("PM: Syncing filesystems ... ");
+	printk(KERN_INFO "PM: Syncing filesystems ... ");
 	sys_sync();
-	pr_cont("done.\n");
+	printk("done.\n");
 	trace_suspend_resume(TPS("sync_filesystems"), 0, false);
 #endif
 

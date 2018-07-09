@@ -218,7 +218,7 @@ int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
 				   struct key_params *params, int key_idx,
 				   bool pairwise, const u8 *mac_addr)
 {
-	if (key_idx < 0 || key_idx > 5)
+	if (key_idx > 5)
 		return -EINVAL;
 
 	if (!pairwise && mac_addr && !(rdev->wiphy.flags & WIPHY_FLAG_IBSS_RSN))
@@ -249,13 +249,7 @@ int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
 		/* Disallow BIP (group-only) cipher as pairwise cipher */
 		if (pairwise)
 			return -EINVAL;
-		if (key_idx < 4)
-			return -EINVAL;
 		break;
-	case WLAN_CIPHER_SUITE_WEP40:
-	case WLAN_CIPHER_SUITE_WEP104:
-		if (key_idx > 3)
-			return -EINVAL;
 	default:
 		break;
 	}
@@ -420,8 +414,8 @@ unsigned int ieee80211_get_mesh_hdrlen(struct ieee80211s_hdr *meshhdr)
 }
 EXPORT_SYMBOL(ieee80211_get_mesh_hdrlen);
 
-int ieee80211_data_to_8023_exthdr(struct sk_buff *skb, struct ethhdr *ehdr,
-				  const u8 *addr, enum nl80211_iftype iftype)
+static int __ieee80211_data_to_8023(struct sk_buff *skb, struct ethhdr *ehdr,
+				    const u8 *addr, enum nl80211_iftype iftype)
 {
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
 	struct {
@@ -454,8 +448,6 @@ int ieee80211_data_to_8023_exthdr(struct sk_buff *skb, struct ethhdr *ehdr,
 	if (iftype == NL80211_IFTYPE_MESH_POINT)
 		skb_copy_bits(skb, hdrlen, &mesh_flags, 1);
 
-	mesh_flags &= MESH_FLAGS_AE;
-
 	switch (hdr->frame_control &
 		cpu_to_le16(IEEE80211_FCTL_TODS | IEEE80211_FCTL_FROMDS)) {
 	case cpu_to_le16(IEEE80211_FCTL_TODS):
@@ -471,9 +463,9 @@ int ieee80211_data_to_8023_exthdr(struct sk_buff *skb, struct ethhdr *ehdr,
 			     iftype != NL80211_IFTYPE_STATION))
 			return -1;
 		if (iftype == NL80211_IFTYPE_MESH_POINT) {
-			if (mesh_flags == MESH_FLAGS_AE_A4)
+			if (mesh_flags & MESH_FLAGS_AE_A4)
 				return -1;
-			if (mesh_flags == MESH_FLAGS_AE_A5_A6) {
+			if (mesh_flags & MESH_FLAGS_AE_A5_A6) {
 				skb_copy_bits(skb, hdrlen +
 					offsetof(struct ieee80211s_hdr, eaddr1),
 					tmp.h_dest, 2 * ETH_ALEN);
@@ -489,9 +481,9 @@ int ieee80211_data_to_8023_exthdr(struct sk_buff *skb, struct ethhdr *ehdr,
 		     ether_addr_equal(tmp.h_source, addr)))
 			return -1;
 		if (iftype == NL80211_IFTYPE_MESH_POINT) {
-			if (mesh_flags == MESH_FLAGS_AE_A5_A6)
+			if (mesh_flags & MESH_FLAGS_AE_A5_A6)
 				return -1;
-			if (mesh_flags == MESH_FLAGS_AE_A4)
+			if (mesh_flags & MESH_FLAGS_AE_A4)
 				skb_copy_bits(skb, hdrlen +
 					offsetof(struct ieee80211s_hdr, eaddr1),
 					tmp.h_source, ETH_ALEN);
@@ -527,7 +519,13 @@ int ieee80211_data_to_8023_exthdr(struct sk_buff *skb, struct ethhdr *ehdr,
 
 	return 0;
 }
-EXPORT_SYMBOL(ieee80211_data_to_8023_exthdr);
+
+int ieee80211_data_to_8023(struct sk_buff *skb, const u8 *addr,
+			   enum nl80211_iftype iftype)
+{
+	return __ieee80211_data_to_8023(skb, NULL, addr, iftype);
+}
+EXPORT_SYMBOL(ieee80211_data_to_8023);
 
 int ieee80211_data_from_8023(struct sk_buff *skb, const u8 *addr,
 			     enum nl80211_iftype iftype,
@@ -663,7 +661,7 @@ __ieee80211_amsdu_copy_frag(struct sk_buff *skb, struct sk_buff *frame,
 			    int offset, int len)
 {
 	struct skb_shared_info *sh = skb_shinfo(skb);
-	const skb_frag_t *frag = &sh->frags[0];
+	const skb_frag_t *frag = &sh->frags[-1];
 	struct page *frag_page;
 	void *frag_ptr;
 	int frag_len, frag_size;
@@ -676,10 +674,10 @@ __ieee80211_amsdu_copy_frag(struct sk_buff *skb, struct sk_buff *frame,
 
 	while (offset >= frag_size) {
 		offset -= frag_size;
+		frag++;
 		frag_page = skb_frag_page(frag);
 		frag_ptr = skb_frag_address(frag);
 		frag_size = skb_frag_size(frag);
-		frag++;
 	}
 
 	frag_ptr += offset;
@@ -691,12 +689,12 @@ __ieee80211_amsdu_copy_frag(struct sk_buff *skb, struct sk_buff *frame,
 	len -= cur_len;
 
 	while (len > 0) {
+		frag++;
 		frag_len = skb_frag_size(frag);
 		cur_len = min(len, frag_len);
 		__frame_add_frag(frame, skb_frag_page(frag),
 				 skb_frag_address(frag), cur_len, frag_len);
 		len -= cur_len;
-		frag++;
 	}
 }
 
@@ -742,17 +740,23 @@ __ieee80211_amsdu_copy(struct sk_buff *skb, unsigned int hlen,
 void ieee80211_amsdu_to_8023s(struct sk_buff *skb, struct sk_buff_head *list,
 			      const u8 *addr, enum nl80211_iftype iftype,
 			      const unsigned int extra_headroom,
-			      const u8 *check_da, const u8 *check_sa)
+			      bool has_80211_header)
 {
 	unsigned int hlen = ALIGN(extra_headroom, 4);
 	struct sk_buff *frame = NULL;
 	u16 ethertype;
 	u8 *payload;
-	int offset = 0, remaining;
+	int offset = 0, remaining, err;
 	struct ethhdr eth;
 	bool reuse_frag = skb->head_frag && !skb_has_frag_list(skb);
 	bool reuse_skb = false;
 	bool last = false;
+
+	if (has_80211_header) {
+		err = __ieee80211_data_to_8023(skb, &eth, addr, iftype);
+		if (err)
+			goto out;
+	}
 
 	while (!last) {
 		unsigned int subframe_len;
@@ -770,17 +774,8 @@ void ieee80211_amsdu_to_8023s(struct sk_buff *skb, struct sk_buff_head *list,
 			goto purge;
 
 		offset += sizeof(struct ethhdr);
-		last = remaining <= subframe_len + padding;
-
-		/* FIXME: should we really accept multicast DA? */
-		if ((check_da && !is_multicast_ether_addr(eth.h_dest) &&
-		     !ether_addr_equal(check_da, eth.h_dest)) ||
-		    (check_sa && !ether_addr_equal(check_sa, eth.h_source))) {
-			offset += len + padding;
-			continue;
-		}
-
 		/* reuse skb for the last subframe */
+		last = remaining <= subframe_len + padding;
 		if (!skb_is_nonlinear(skb) && !reuse_frag && last) {
 			skb_pull(skb, offset);
 			frame = skb;
@@ -818,6 +813,7 @@ void ieee80211_amsdu_to_8023s(struct sk_buff *skb, struct sk_buff_head *list,
 
  purge:
 	__skb_queue_purge(list);
+ out:
 	dev_kfree_skb(skb);
 }
 EXPORT_SYMBOL(ieee80211_amsdu_to_8023s);
@@ -910,7 +906,7 @@ void cfg80211_upload_connect_keys(struct wireless_dev *wdev)
 	if (!wdev->connect_keys)
 		return;
 
-	for (i = 0; i < CFG80211_MAX_WEP_KEYS; i++) {
+	for (i = 0; i < 6; i++) {
 		if (!wdev->connect_keys->params[i].cipher)
 			continue;
 		if (rdev_add_key(rdev, dev, i, false, NULL,
@@ -923,6 +919,9 @@ void cfg80211_upload_connect_keys(struct wireless_dev *wdev)
 				netdev_err(dev, "failed to set defkey %d\n", i);
 				continue;
 			}
+		if (wdev->connect_keys->defmgmt == i)
+			if (rdev_set_default_mgmt_key(rdev, dev, i))
+				netdev_err(dev, "failed to set mgtdef %d\n", i);
 	}
 
 	kzfree(wdev->connect_keys);
@@ -1006,9 +1005,8 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 	if (otype == NL80211_IFTYPE_AP_VLAN)
 		return -EOPNOTSUPP;
 
-	/* cannot change into P2P device or NAN */
-	if (ntype == NL80211_IFTYPE_P2P_DEVICE ||
-	    ntype == NL80211_IFTYPE_NAN)
+	/* cannot change into P2P device type */
+	if (ntype == NL80211_IFTYPE_P2P_DEVICE)
 		return -EOPNOTSUPP;
 
 	if (!rdev->ops->change_virtual_intf ||
@@ -1087,7 +1085,6 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 			/* not happening */
 			break;
 		case NL80211_IFTYPE_P2P_DEVICE:
-		case NL80211_IFTYPE_NAN:
 			WARN_ON(1);
 			break;
 		}
@@ -1160,8 +1157,7 @@ static u32 cfg80211_calculate_bitrate_vht(struct rate_info *rate)
 		   58500000,
 		   65000000,
 		   78000000,
-		/* not in the spec, but some devices use this: */
-		   86500000,
+		   0,
 		},
 		{  13500000,
 		   27000000,
@@ -1563,7 +1559,7 @@ int cfg80211_validate_beacon_int(struct cfg80211_registered_device *rdev,
 	struct wireless_dev *wdev;
 	int res = 0;
 
-	if (beacon_int < 10 || beacon_int > 10000)
+	if (!beacon_int)
 		return -EINVAL;
 
 	list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
@@ -1760,28 +1756,6 @@ int cfg80211_get_station(struct net_device *dev, const u8 *mac_addr,
 	return rdev_get_station(rdev, dev, mac_addr, sinfo);
 }
 EXPORT_SYMBOL(cfg80211_get_station);
-
-void cfg80211_free_nan_func(struct cfg80211_nan_func *f)
-{
-	int i;
-
-	if (!f)
-		return;
-
-	kfree(f->serv_spec_info);
-	kfree(f->srf_bf);
-	kfree(f->srf_macs);
-	for (i = 0; i < f->num_rx_filters; i++)
-		kfree(f->rx_filters[i].filter);
-
-	for (i = 0; i < f->num_tx_filters; i++)
-		kfree(f->tx_filters[i].filter);
-
-	kfree(f->rx_filters);
-	kfree(f->tx_filters);
-	kfree(f);
-}
-EXPORT_SYMBOL(cfg80211_free_nan_func);
 
 /* See IEEE 802.1H for LLC/SNAP encapsulation/decapsulation */
 /* Ethernet-II snap header (RFC1042 for most EtherTypes) */

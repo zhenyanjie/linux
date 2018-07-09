@@ -598,8 +598,7 @@ static ssize_t ceph_sync_read(struct kiocb *iocb, struct iov_iter *i,
 struct ceph_aio_request {
 	struct kiocb *iocb;
 	size_t total_len;
-	bool write;
-	bool should_dirty;
+	int write;
 	int error;
 	struct list_head osd_reqs;
 	unsigned num_reqs;
@@ -709,7 +708,7 @@ static void ceph_aio_complete_req(struct ceph_osd_request *req)
 		}
 	}
 
-	ceph_put_page_vector(osd_data->pages, num_pages, aio_req->should_dirty);
+	ceph_put_page_vector(osd_data->pages, num_pages, false);
 	ceph_osdc_put_request(req);
 
 	if (rc < 0)
@@ -822,54 +821,6 @@ static void ceph_sync_write_unsafe(struct ceph_osd_request *req, bool unsafe)
 	}
 }
 
-/*
- * Wait on any unsafe replies for the given inode.  First wait on the
- * newest request, and make that the upper bound.  Then, if there are
- * more requests, keep waiting on the oldest as long as it is still older
- * than the original request.
- */
-void ceph_sync_write_wait(struct inode *inode)
-{
-	struct ceph_inode_info *ci = ceph_inode(inode);
-	struct list_head *head = &ci->i_unsafe_writes;
-	struct ceph_osd_request *req;
-	u64 last_tid;
-
-	if (!S_ISREG(inode->i_mode))
-		return;
-
-	spin_lock(&ci->i_unsafe_lock);
-	if (list_empty(head))
-		goto out;
-
-	/* set upper bound as _last_ entry in chain */
-
-	req = list_last_entry(head, struct ceph_osd_request,
-			      r_unsafe_item);
-	last_tid = req->r_tid;
-
-	do {
-		ceph_osdc_get_request(req);
-		spin_unlock(&ci->i_unsafe_lock);
-
-		dout("sync_write_wait on tid %llu (until %llu)\n",
-		     req->r_tid, last_tid);
-		wait_for_completion(&req->r_safe_completion);
-		ceph_osdc_put_request(req);
-
-		spin_lock(&ci->i_unsafe_lock);
-		/*
-		 * from here on look at first entry in chain, since we
-		 * only want to wait for anything older than last_tid
-		 */
-		if (list_empty(head))
-			break;
-		req = list_first_entry(head, struct ceph_osd_request,
-				       r_unsafe_item);
-	} while (req->r_tid < last_tid);
-out:
-	spin_unlock(&ci->i_unsafe_lock);
-}
 
 static ssize_t
 ceph_direct_read_write(struct kiocb *iocb, struct iov_iter *iter,
@@ -887,11 +838,10 @@ ceph_direct_read_write(struct kiocb *iocb, struct iov_iter *iter,
 	int num_pages = 0;
 	int flags;
 	int ret;
-	struct timespec mtime = current_time(inode);
+	struct timespec mtime = current_fs_time(inode->i_sb);
 	size_t count = iov_iter_count(iter);
 	loff_t pos = iocb->ki_pos;
 	bool write = iov_iter_rw(iter) == WRITE;
-	bool should_dirty = !write && iter_is_iovec(iter);
 
 	if (write && ceph_snap(file_inode(file)) != CEPH_NOSNAP)
 		return -EROFS;
@@ -904,10 +854,10 @@ ceph_direct_read_write(struct kiocb *iocb, struct iov_iter *iter,
 		return ret;
 
 	if (write) {
-		int ret2 = invalidate_inode_pages2_range(inode->i_mapping,
+		ret = invalidate_inode_pages2_range(inode->i_mapping,
 					pos >> PAGE_SHIFT,
 					(pos + count) >> PAGE_SHIFT);
-		if (ret2 < 0)
+		if (ret < 0)
 			dout("invalidate_inode_pages2_range returned %d\n", ret);
 
 		flags = CEPH_OSD_FLAG_ORDERSNAP |
@@ -956,7 +906,6 @@ ceph_direct_read_write(struct kiocb *iocb, struct iov_iter *iter,
 			if (aio_req) {
 				aio_req->iocb = iocb;
 				aio_req->write = write;
-				aio_req->should_dirty = should_dirty;
 				INIT_LIST_HEAD(&aio_req->osd_reqs);
 				if (write) {
 					aio_req->mtime = mtime;
@@ -1015,7 +964,7 @@ ceph_direct_read_write(struct kiocb *iocb, struct iov_iter *iter,
 				len = ret;
 		}
 
-		ceph_put_page_vector(pages, num_pages, should_dirty);
+		ceph_put_page_vector(pages, num_pages, false);
 
 		ceph_osdc_put_request(req);
 		if (ret < 0)
@@ -1036,8 +985,6 @@ ceph_direct_read_write(struct kiocb *iocb, struct iov_iter *iter,
 	}
 
 	if (aio_req) {
-		LIST_HEAD(osd_reqs);
-
 		if (aio_req->num_reqs == 0) {
 			kfree(aio_req);
 			return ret;
@@ -1046,9 +993,8 @@ ceph_direct_read_write(struct kiocb *iocb, struct iov_iter *iter,
 		ceph_get_cap_refs(ci, write ? CEPH_CAP_FILE_WR :
 					      CEPH_CAP_FILE_RD);
 
-		list_splice(&aio_req->osd_reqs, &osd_reqs);
-		while (!list_empty(&osd_reqs)) {
-			req = list_first_entry(&osd_reqs,
+		while (!list_empty(&aio_req->osd_reqs)) {
+			req = list_first_entry(&aio_req->osd_reqs,
 					       struct ceph_osd_request,
 					       r_unsafe_item);
 			list_del_init(&req->r_unsafe_item);
@@ -1094,7 +1040,7 @@ ceph_sync_write(struct kiocb *iocb, struct iov_iter *from, loff_t pos,
 	int flags;
 	int check_caps = 0;
 	int ret;
-	struct timespec mtime = current_time(inode);
+	struct timespec mtime = current_fs_time(inode->i_sb);
 	size_t count = iov_iter_count(from);
 
 	if (ceph_snap(file_inode(file)) != CEPH_NOSNAP)
@@ -1252,9 +1198,8 @@ again:
 		dout("aio_read %p %llx.%llx %llu~%u got cap refs on %s\n",
 		     inode, ceph_vinop(inode), iocb->ki_pos, (unsigned)len,
 		     ceph_cap_string(got));
-		current->journal_info = filp;
+
 		ret = generic_file_read_iter(iocb, to);
-		current->journal_info = NULL;
 	}
 	dout("aio_read %p %llx.%llx dropping cap refs on %s = %d\n",
 	     inode, ceph_vinop(inode), ceph_cap_string(got), (int)ret);
@@ -1276,8 +1221,7 @@ again:
 		statret = __ceph_do_getattr(inode, page,
 					    CEPH_STAT_CAP_INLINE_DATA, !!page);
 		if (statret < 0) {
-			if (page)
-				__free_page(page);
+			 __free_page(page);
 			if (statret == -ENODATA) {
 				BUG_ON(retry_op != READ_INLINE);
 				goto again;
@@ -1637,9 +1581,9 @@ static int ceph_zero_objects(struct inode *inode, loff_t offset, loff_t length)
 {
 	int ret = 0;
 	struct ceph_inode_info *ci = ceph_inode(inode);
-	s32 stripe_unit = ci->i_layout.stripe_unit;
-	s32 stripe_count = ci->i_layout.stripe_count;
-	s32 object_size = ci->i_layout.object_size;
+	s32 stripe_unit = ceph_file_layout_su(ci->i_layout);
+	s32 stripe_count = ceph_file_layout_stripe_count(ci->i_layout);
+	s32 object_size = ceph_file_layout_object_size(ci->i_layout);
 	u64 object_set_size = object_size * stripe_count;
 	u64 nearly, t;
 
@@ -1774,6 +1718,7 @@ const struct file_operations ceph_file_fops = {
 	.fsync = ceph_fsync,
 	.lock = ceph_lock,
 	.flock = ceph_flock,
+	.splice_read = generic_file_splice_read,
 	.splice_write = iter_file_splice_write,
 	.unlocked_ioctl = ceph_ioctl,
 	.compat_ioctl	= ceph_ioctl,

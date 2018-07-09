@@ -253,10 +253,6 @@ static const struct fetch_type kprobes_fetch_type_table[] = {
 	ASSIGN_FETCH_TYPE(s16, u16, 1),
 	ASSIGN_FETCH_TYPE(s32, u32, 1),
 	ASSIGN_FETCH_TYPE(s64, u64, 1),
-	ASSIGN_FETCH_TYPE_ALIAS(x8,  u8,  u8,  0),
-	ASSIGN_FETCH_TYPE_ALIAS(x16, u16, u16, 0),
-	ASSIGN_FETCH_TYPE_ALIAS(x32, u32, u32, 0),
-	ASSIGN_FETCH_TYPE_ALIAS(x64, u64, u64, 0),
 
 	ASSIGN_FETCH_TYPE_END
 };
@@ -591,7 +587,6 @@ static int create_trace_kprobe(int argc, char **argv)
 	 *  $retval	: fetch return value
 	 *  $stack	: fetch stack address
 	 *  $stackN	: fetch Nth of stack (N:0-)
-	 *  $comm       : fetch current task comm
 	 *  @ADDR	: fetch memory at ADDR (ADDR should be in kernel)
 	 *  @SYM[+|-offs] : fetch memory at SYM +|- offs (SYM is a data symbol)
 	 *  %REG	: fetch register REG
@@ -607,7 +602,7 @@ static int create_trace_kprobe(int argc, char **argv)
 	bool is_return = false, is_delete = false;
 	char *symbol = NULL, *event = NULL, *group = NULL;
 	char *arg;
-	long offset = 0;
+	unsigned long offset = 0;
 	void *addr = NULL;
 	char buf[MAX_EVENT_NAME_LEN];
 
@@ -667,25 +662,30 @@ static int create_trace_kprobe(int argc, char **argv)
 		pr_info("Probe point is not specified.\n");
 		return -EINVAL;
 	}
-
-	/* try to parse an address. if that fails, try to read the
-	 * input as a symbol. */
-	if (kstrtoul(argv[1], 0, (unsigned long *)&addr)) {
+	if (isdigit(argv[1][0])) {
+		if (is_return) {
+			pr_info("Return probe point must be a symbol.\n");
+			return -EINVAL;
+		}
+		/* an address specified */
+		ret = kstrtoul(&argv[1][0], 0, (unsigned long *)&addr);
+		if (ret) {
+			pr_info("Failed to parse address.\n");
+			return ret;
+		}
+	} else {
 		/* a symbol specified */
 		symbol = argv[1];
 		/* TODO: support .init module functions */
 		ret = traceprobe_split_symbol_offset(symbol, &offset);
-		if (ret || offset < 0 || offset > UINT_MAX) {
-			pr_info("Failed to parse either an address or a symbol.\n");
+		if (ret) {
+			pr_info("Failed to parse symbol.\n");
 			return ret;
 		}
 		if (offset && is_return) {
 			pr_info("Return probe must be used without offset.\n");
 			return -EINVAL;
 		}
-	} else if (is_return) {
-		pr_info("Return probe point must be a symbol.\n");
-		return -EINVAL;
 	}
 	argc -= 2; argv += 2;
 
@@ -1479,11 +1479,6 @@ static __init int kprobe_trace_self_tests_init(void)
 
 end:
 	release_all_trace_kprobes();
-	/*
-	 * Wait for the optimizer work to finish. Otherwise it might fiddle
-	 * with probes in already freed __init text.
-	 */
-	wait_for_kprobe_optimizer();
 	if (warn)
 		pr_cont("NG: Some tests are failed. Please check them.\n");
 	else

@@ -150,6 +150,7 @@ int config_ep_by_speed(struct usb_gadget *g,
 			struct usb_function *f,
 			struct usb_ep *_ep)
 {
+	struct usb_composite_dev	*cdev = get_gadget_data(g);
 	struct usb_endpoint_descriptor *chosen_desc = NULL;
 	struct usb_descriptor_header **speed_desc = NULL;
 
@@ -196,16 +197,11 @@ int config_ep_by_speed(struct usb_gadget *g,
 
 ep_found:
 	/* commit results */
-	_ep->maxpacket = usb_endpoint_maxp(chosen_desc) & 0x7ff;
+	_ep->maxpacket = usb_endpoint_maxp(chosen_desc);
 	_ep->desc = chosen_desc;
 	_ep->comp_desc = NULL;
 	_ep->maxburst = 0;
-	_ep->mult = 1;
-
-	if (g->speed == USB_SPEED_HIGH && (usb_endpoint_xfer_isoc(_ep->desc) ||
-				usb_endpoint_xfer_int(_ep->desc)))
-		_ep->mult = ((usb_endpoint_maxp(_ep->desc) & 0x1800) >> 11) + 1;
-
+	_ep->mult = 0;
 	if (!want_comp_desc)
 		return 0;
 
@@ -222,18 +218,14 @@ ep_found:
 		switch (usb_endpoint_type(_ep->desc)) {
 		case USB_ENDPOINT_XFER_ISOC:
 			/* mult: bits 1:0 of bmAttributes */
-			_ep->mult = (comp_desc->bmAttributes & 0x3) + 1;
+			_ep->mult = comp_desc->bmAttributes & 0x3;
 		case USB_ENDPOINT_XFER_BULK:
 		case USB_ENDPOINT_XFER_INT:
 			_ep->maxburst = comp_desc->bMaxBurst + 1;
 			break;
 		default:
-			if (comp_desc->bMaxBurst != 0) {
-				struct usb_composite_dev *cdev;
-
-				cdev = get_gadget_data(g);
+			if (comp_desc->bMaxBurst != 0)
 				ERROR(cdev, "ep0 bMaxBurst must be 0\n");
-			}
 			_ep->maxburst = 1;
 			break;
 		}
@@ -1421,7 +1413,7 @@ static int count_ext_compat(struct usb_configuration *c)
 	return res;
 }
 
-static int fill_ext_compat(struct usb_configuration *c, u8 *buf)
+static void fill_ext_compat(struct usb_configuration *c, u8 *buf)
 {
 	int i, count;
 
@@ -1448,12 +1440,10 @@ static int fill_ext_compat(struct usb_configuration *c, u8 *buf)
 				buf += 23;
 			}
 			count += 24;
-			if (count + 24 >= USB_COMP_EP0_OS_DESC_BUFSIZ)
-				return count;
+			if (count >= 4096)
+				return;
 		}
 	}
-
-	return count;
 }
 
 static int count_ext_prop(struct usb_configuration *c, int interface)
@@ -1498,20 +1488,25 @@ static int fill_ext_prop(struct usb_configuration *c, int interface, u8 *buf)
 	struct usb_os_desc *d;
 	struct usb_os_desc_ext_prop *ext_prop;
 	int j, count, n, ret;
+	u8 *start = buf;
 
 	f = c->interface[interface];
-	count = 10; /* header length */
 	for (j = 0; j < f->os_desc_n; ++j) {
 		if (interface != f->os_desc_table[j].if_id)
 			continue;
 		d = f->os_desc_table[j].os_desc;
 		if (d)
 			list_for_each_entry(ext_prop, &d->ext_prop, entry) {
-				n = ext_prop->data_len +
+				/* 4kB minus header length */
+				n = buf - start;
+				if (n >= 4086)
+					return 0;
+
+				count = ext_prop->data_len +
 					ext_prop->name_len + 14;
-				if (count + n >= USB_COMP_EP0_OS_DESC_BUFSIZ)
-					return count;
-				usb_ext_prop_put_size(buf, n);
+				if (count > 4086 - n)
+					return -EINVAL;
+				usb_ext_prop_put_size(buf, count);
 				usb_ext_prop_put_type(buf, ext_prop->type);
 				ret = usb_ext_prop_put_name(buf, ext_prop->name,
 							    ext_prop->name_len);
@@ -1537,12 +1532,11 @@ static int fill_ext_prop(struct usb_configuration *c, int interface, u8 *buf)
 				default:
 					return -EINVAL;
 				}
-				buf += n;
-				count += n;
+				buf += count;
 			}
 	}
 
-	return count;
+	return 0;
 }
 
 /*
@@ -1695,7 +1689,9 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		value = min(w_length, (u16) 1);
 		break;
 
-	/* function drivers must handle get/set altsetting */
+	/* function drivers must handle get/set altsetting; if there's
+	 * no get() method, we know only altsetting zero works.
+	 */
 	case USB_REQ_SET_INTERFACE:
 		if (ctrl->bRequestType != USB_RECIP_INTERFACE)
 			goto unknown;
@@ -1704,13 +1700,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		f = cdev->config->interface[intf];
 		if (!f)
 			break;
-
-		/*
-		 * If there's no get_alt() method, we know only altsetting zero
-		 * works. There is no need to check if set_alt() is not NULL
-		 * as we check this in usb_add_function().
-		 */
-		if (w_value && !f->get_alt)
+		if (w_value && !f->set_alt)
 			break;
 		value = f->set_alt(f, w_index, w_value);
 		if (value == USB_GADGET_DELAYED_STATUS) {
@@ -1820,7 +1810,6 @@ unknown:
 			req->complete = composite_setup_complete;
 			buf = req->buf;
 			os_desc_cfg = cdev->os_desc_config;
-			w_length = min_t(u16, w_length, USB_COMP_EP0_OS_DESC_BUFSIZ);
 			memset(buf, 0, w_length);
 			buf[5] = 0x01;
 			switch (ctrl->bRequestType & USB_RECIP_MASK) {
@@ -1844,8 +1833,8 @@ unknown:
 					count += 16; /* header */
 					put_unaligned_le32(count, buf);
 					buf += 16;
-					value = fill_ext_compat(os_desc_cfg, buf);
-					value = min_t(u16, w_length, value);
+					fill_ext_compat(os_desc_cfg, buf);
+					value = w_length;
 				}
 				break;
 			case USB_RECIP_INTERFACE:
@@ -1874,7 +1863,8 @@ unknown:
 							      interface, buf);
 					if (value < 0)
 						return value;
-					value = min_t(u16, w_length, value);
+
+					value = w_length;
 				}
 				break;
 			}
@@ -1903,21 +1893,17 @@ unknown:
 		/* functions always handle their interfaces and endpoints...
 		 * punt other recipients (other, WUSB, ...) to the current
 		 * configuration code.
+		 *
+		 * REVISIT it could make sense to let the composite device
+		 * take such requests too, if that's ever needed:  to work
+		 * in config 0, etc.
 		 */
 		if (cdev->config) {
 			list_for_each_entry(f, &cdev->config->functions, list)
-				if (f->req_match &&
-				    f->req_match(f, ctrl, false))
+				if (f->req_match && f->req_match(f, ctrl))
 					goto try_fun_setup;
-		} else {
-			struct usb_configuration *c;
-			list_for_each_entry(c, &cdev->configs, list)
-				list_for_each_entry(f, &c->functions, list)
-					if (f->req_match &&
-					    f->req_match(f, ctrl, true))
-						goto try_fun_setup;
+			f = NULL;
 		}
-		f = NULL;
 
 		switch (ctrl->bRequestType & USB_RECIP_MASK) {
 		case USB_RECIP_INTERFACE:
@@ -1927,8 +1913,6 @@ unknown:
 			break;
 
 		case USB_RECIP_ENDPOINT:
-			if (!cdev->config)
-				break;
 			endp = ((w_index & 0x80) >> 3) | (w_index & 0x0f);
 			list_for_each_entry(f, &cdev->config->functions, list) {
 				if (test_bit(endp, f->endpoints))
@@ -2019,8 +2003,6 @@ static DEVICE_ATTR_RO(suspended);
 static void __composite_unbind(struct usb_gadget *gadget, bool unbind_driver)
 {
 	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
-	struct usb_gadget_strings	*gstr = cdev->driver->strings[0];
-	struct usb_string		*dev_str = gstr->strings;
 
 	/* composite_disconnect() must already have been called
 	 * by the underlying peripheral controller driver!
@@ -2039,9 +2021,6 @@ static void __composite_unbind(struct usb_gadget *gadget, bool unbind_driver)
 		cdev->driver->unbind(cdev);
 
 	composite_dev_cleanup(cdev);
-
-	if (dev_str[USB_GADGET_MANUFACTURER_IDX].s == cdev->def_manufacturer)
-		dev_str[USB_GADGET_MANUFACTURER_IDX].s = "";
 
 	kfree(cdev->def_manufacturer);
 	kfree(cdev);
@@ -2145,15 +2124,15 @@ int composite_os_desc_req_prepare(struct usb_composite_dev *cdev,
 
 	cdev->os_desc_req = usb_ep_alloc_request(ep0, GFP_KERNEL);
 	if (!cdev->os_desc_req) {
-		ret = -ENOMEM;
+		ret = PTR_ERR(cdev->os_desc_req);
 		goto end;
 	}
 
-	cdev->os_desc_req->buf = kmalloc(USB_COMP_EP0_OS_DESC_BUFSIZ,
-					 GFP_KERNEL);
+	/* OS feature descriptor length <= 4kB */
+	cdev->os_desc_req->buf = kmalloc(4096, GFP_KERNEL);
 	if (!cdev->os_desc_req->buf) {
-		ret = -ENOMEM;
-		usb_ep_free_request(ep0, cdev->os_desc_req);
+		ret = PTR_ERR(cdev->os_desc_req->buf);
+		kfree(cdev->os_desc_req);
 		goto end;
 	}
 	cdev->os_desc_req->context = cdev;

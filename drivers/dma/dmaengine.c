@@ -997,13 +997,6 @@ int dma_async_device_register(struct dma_device *device)
 		}
 		chan->client_count = 0;
 	}
-
-	if (!chancnt) {
-		dev_err(device->dev, "%s: device has no channels!\n", __func__);
-		rc = -ENODEV;
-		goto err_out;
-	}
-
 	device->chancnt = chancnt;
 
 	mutex_lock(&dma_list_mutex);
@@ -1107,14 +1100,12 @@ static struct dmaengine_unmap_pool *__get_unmap_pool(int nr)
 	switch (order) {
 	case 0 ... 1:
 		return &unmap_pool[0];
-#if IS_ENABLED(CONFIG_DMA_ENGINE_RAID)
 	case 2 ... 4:
 		return &unmap_pool[1];
 	case 5 ... 7:
 		return &unmap_pool[2];
 	case 8:
 		return &unmap_pool[3];
-#endif
 	default:
 		BUG();
 		return NULL;

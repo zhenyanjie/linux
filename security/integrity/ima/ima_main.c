@@ -16,9 +16,6 @@
  *	implements the IMA hooks: ima_bprm_check, ima_file_mmap,
  *	and ima_file_check.
  */
-
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/module.h>
 #include <linux/file.h>
 #include <linux/binfmts.h>
@@ -54,8 +51,6 @@ static int __init hash_setup(char *str)
 			ima_hash_algo = HASH_ALGO_SHA1;
 		else if (strncmp(str, "md5", 3) == 0)
 			ima_hash_algo = HASH_ALGO_MD5;
-		else
-			return 1;
 		goto out;
 	}
 
@@ -65,8 +60,6 @@ static int __init hash_setup(char *str)
 			break;
 		}
 	}
-	if (i == HASH_ALGO__LAST)
-		return 1;
 out:
 	hash_setup_done = 1;
 	return 1;
@@ -90,7 +83,6 @@ static void ima_rdwr_violation_check(struct file *file,
 				     const char **pathname)
 {
 	struct inode *inode = file_inode(file);
-	char filename[NAME_MAX];
 	fmode_t mode = file->f_mode;
 	bool send_tomtou = false, send_writers = false;
 
@@ -110,7 +102,7 @@ static void ima_rdwr_violation_check(struct file *file,
 	if (!send_tomtou && !send_writers)
 		return;
 
-	*pathname = ima_d_path(&file->f_path, pathbuf, filename);
+	*pathname = ima_d_path(&file->f_path, pathbuf);
 
 	if (send_tomtou)
 		ima_add_violation(file, *pathname, iint,
@@ -133,7 +125,6 @@ static void ima_check_last_writer(struct integrity_iint_cache *iint,
 		if ((iint->version != inode->i_version) ||
 		    (iint->flags & IMA_NEW_FILE)) {
 			iint->flags &= ~(IMA_DONE_MASK | IMA_NEW_FILE);
-			iint->measured_pcrs = 0;
 			if (iint->flags & IMA_APPRAISE)
 				ima_update_xattr(iint, file);
 		}
@@ -169,10 +160,8 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 	struct integrity_iint_cache *iint = NULL;
 	struct ima_template_desc *template_desc;
 	char *pathbuf = NULL;
-	char filename[NAME_MAX];
 	const char *pathname = NULL;
 	int rc = -ENOMEM, action, must_appraise;
-	int pcr = CONFIG_IMA_MEASURE_PCR_IDX;
 	struct evm_ima_xattr_data *xattr_value = NULL;
 	int xattr_len = 0;
 	bool violation_check;
@@ -185,7 +174,7 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 	 * bitmask based on the appraise/audit/measurement policy.
 	 * Included is the appraise submask.
 	 */
-	action = ima_get_action(inode, mask, func, &pcr);
+	action = ima_get_action(inode, mask, func);
 	violation_check = ((func == FILE_CHECK || func == MMAP_CHECK) &&
 			   (ima_policy_flag & IMA_MEASURE));
 	if (!action && !violation_check)
@@ -220,11 +209,7 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 	 */
 	iint->flags |= action;
 	action &= IMA_DO_MASK;
-	action &= ~((iint->flags & (IMA_DONE_MASK ^ IMA_MEASURED)) >> 1);
-
-	/* If target pcr is already measured, unset IMA_MEASURE action */
-	if ((action & IMA_MEASURE) && (iint->measured_pcrs & (0x1 << pcr)))
-		action ^= IMA_MEASURE;
+	action &= ~((iint->flags & IMA_DONE_MASK) >> 1);
 
 	/* Nothing to do, just return existing appraised status */
 	if (!action) {
@@ -248,12 +233,12 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 		goto out_digsig;
 	}
 
-	if (!pathbuf)	/* ima_rdwr_violation possibly pre-fetched */
-		pathname = ima_d_path(&file->f_path, &pathbuf, filename);
+	if (!pathname)	/* ima_rdwr_violation possibly pre-fetched */
+		pathname = ima_d_path(&file->f_path, &pathbuf);
 
 	if (action & IMA_MEASURE)
 		ima_store_measurement(iint, file, pathname,
-				      xattr_value, xattr_len, pcr);
+				      xattr_value, xattr_len);
 	if (action & IMA_APPRAISE_SUBMASK)
 		rc = ima_appraise_measurement(func, iint, file, pathname,
 					      xattr_value, xattr_len, opened);
@@ -429,16 +414,6 @@ static int __init init_ima(void)
 
 	hash_setup(CONFIG_IMA_DEFAULT_HASH);
 	error = ima_init();
-
-	if (error && strcmp(hash_algo_name[ima_hash_algo],
-			    CONFIG_IMA_DEFAULT_HASH) != 0) {
-		pr_info("Allocating %s failed, going to use default hash algorithm %s\n",
-			hash_algo_name[ima_hash_algo], CONFIG_IMA_DEFAULT_HASH);
-		hash_setup_done = 0;
-		hash_setup(CONFIG_IMA_DEFAULT_HASH);
-		error = ima_init();
-	}
-
 	if (!error) {
 		ima_initialized = 1;
 		ima_update_policy_flag();

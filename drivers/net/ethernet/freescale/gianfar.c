@@ -1312,7 +1312,6 @@ static void gfar_init_addr_hash_table(struct gfar_private *priv)
  */
 static int gfar_probe(struct platform_device *ofdev)
 {
-	struct device_node *np = ofdev->dev.of_node;
 	struct net_device *dev = NULL;
 	struct gfar_private *priv = NULL;
 	int err = 0, i;
@@ -1375,11 +1374,9 @@ static int gfar_probe(struct platform_device *ofdev)
 
 	gfar_init_addr_hash_table(priv);
 
-	/* Insert receive time stamps into padding alignment bytes, and
-	 * plus 2 bytes padding to ensure the cpu alignment.
-	 */
+	/* Insert receive time stamps into padding alignment bytes */
 	if (priv->device_flags & FSL_GIANFAR_DEV_HAS_TIMER)
-		priv->padding = 8 + DEFAULT_PADDING;
+		priv->padding = 8;
 
 	if (dev->features & NETIF_F_IP_CSUM ||
 	    priv->device_flags & FSL_GIANFAR_DEV_HAS_TIMER)
@@ -1465,8 +1462,6 @@ static int gfar_probe(struct platform_device *ofdev)
 	return 0;
 
 register_fail:
-	if (of_phy_is_fixed_link(np))
-		of_phy_deregister_fixed_link(np);
 	unmap_group_regs(priv);
 	gfar_free_rx_queues(priv);
 	gfar_free_tx_queues(priv);
@@ -1479,16 +1474,11 @@ register_fail:
 static int gfar_remove(struct platform_device *ofdev)
 {
 	struct gfar_private *priv = platform_get_drvdata(ofdev);
-	struct device_node *np = ofdev->dev.of_node;
 
 	of_node_put(priv->phy_node);
 	of_node_put(priv->tbi_node);
 
 	unregister_netdev(priv->ndev);
-
-	if (of_phy_is_fixed_link(np))
-		of_phy_deregister_fixed_link(np);
-
 	unmap_group_regs(priv);
 	gfar_free_rx_queues(priv);
 	gfar_free_tx_queues(priv);
@@ -1789,7 +1779,6 @@ static int init_phy(struct net_device *dev)
 		GFAR_SUPPORTED_GBIT : 0;
 	phy_interface_t interface;
 	struct phy_device *phydev;
-	struct ethtool_eee edata;
 
 	priv->oldlink = 0;
 	priv->oldspeed = 0;
@@ -1813,10 +1802,6 @@ static int init_phy(struct net_device *dev)
 
 	/* Add support for flow control, but don't advertise it by default */
 	phydev->supported |= (SUPPORTED_Pause | SUPPORTED_Asym_Pause);
-
-	/* disable EEE autoneg, EEE not supported by eTSEC */
-	memset(&edata, 0, sizeof(struct ethtool_eee));
-	phy_ethtool_set_eee(phydev, &edata);
 
 	return 0;
 }
@@ -2014,8 +1999,8 @@ static void free_skb_rx_queue(struct gfar_priv_rx_q *rx_queue)
 		if (!rxb->page)
 			continue;
 
-		dma_unmap_page(rx_queue->dev, rxb->dma,
-			       PAGE_SIZE, DMA_FROM_DEVICE);
+		dma_unmap_single(rx_queue->dev, rxb->dma,
+				 PAGE_SIZE, DMA_FROM_DEVICE);
 		__free_page(rxb->page);
 
 		rxb->page = NULL;
@@ -2290,7 +2275,7 @@ static inline void gfar_tx_checksum(struct sk_buff *skb, struct txfcb *fcb,
 	fcb->flags = flags;
 }
 
-static inline void gfar_tx_vlan(struct sk_buff *skb, struct txfcb *fcb)
+void inline gfar_tx_vlan(struct sk_buff *skb, struct txfcb *fcb)
 {
 	fcb->flags |= TXFCB_VLN;
 	fcb->vlctl = cpu_to_be16(skb_vlan_tag_get(skb));
@@ -2935,35 +2920,22 @@ static irqreturn_t gfar_transmit(int irq, void *grp_id)
 static bool gfar_add_rx_frag(struct gfar_rx_buff *rxb, u32 lstatus,
 			     struct sk_buff *skb, bool first)
 {
-	int size = lstatus & BD_LENGTH_MASK;
+	unsigned int size = lstatus & BD_LENGTH_MASK;
 	struct page *page = rxb->page;
-	bool last = !!(lstatus & BD_LFLAG(RXBD_LAST));
 
 	/* Remove the FCS from the packet length */
-	if (last)
+	if (likely(lstatus & BD_LFLAG(RXBD_LAST)))
 		size -= ETH_FCS_LEN;
 
-	if (likely(first)) {
+	if (likely(first))
 		skb_put(skb, size);
-	} else {
-		/* the last fragments' length contains the full frame length */
-		if (last)
-			size -= skb->len;
-
-		/* Add the last fragment if it contains something other than
-		 * the FCS, otherwise drop it and trim off any part of the FCS
-		 * that was already received.
-		 */
-		if (size > 0)
-			skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags, page,
-					rxb->page_offset + RXBUF_ALIGNMENT,
-					size, GFAR_RXB_TRUESIZE);
-		else if (size < 0)
-			pskb_trim(skb, skb->len + size);
-	}
+	else
+		skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags, page,
+				rxb->page_offset + RXBUF_ALIGNMENT,
+				size, GFAR_RXB_TRUESIZE);
 
 	/* try reuse page */
-	if (unlikely(page_count(page) != 1 || page_is_pfmemalloc(page)))
+	if (unlikely(page_count(page) != 1))
 		return false;
 
 	/* change offset to the other half */
@@ -3075,6 +3047,9 @@ static void gfar_process_frame(struct net_device *ndev, struct sk_buff *skb)
 	if (ndev->features & NETIF_F_RXCSUM)
 		gfar_rx_checksum(skb, fcb);
 
+	/* Tell the skb what kind of packet this is */
+	skb->protocol = eth_type_trans(skb, ndev);
+
 	/* There's need to check for NETIF_F_HW_VLAN_CTAG_RX here.
 	 * Even if vlan rx accel is disabled, on some chips
 	 * RXFCB_VLN is pseudo randomly set.
@@ -3145,15 +3120,13 @@ int gfar_clean_rx_ring(struct gfar_priv_rx_q *rx_queue, int rx_work_limit)
 			continue;
 		}
 
-		gfar_process_frame(ndev, skb);
-
 		/* Increment the number of packets */
 		total_pkts++;
 		total_bytes += skb->len;
 
 		skb_record_rx_queue(skb, rx_queue->qindex);
 
-		skb->protocol = eth_type_trans(skb, ndev);
+		gfar_process_frame(ndev, skb);
 
 		/* Send the packet up the stack */
 		napi_gro_receive(&rx_queue->grp->napi_rx, skb);
@@ -3701,7 +3674,7 @@ static noinline void gfar_update_link_state(struct gfar_private *priv)
 		u32 tempval1 = gfar_read(&regs->maccfg1);
 		u32 tempval = gfar_read(&regs->maccfg2);
 		u32 ecntrl = gfar_read(&regs->ecntrl);
-		u32 tx_flow_oldval = (tempval1 & MACCFG1_TX_FLOW);
+		u32 tx_flow_oldval = (tempval & MACCFG1_TX_FLOW);
 
 		if (phydev->duplex != priv->oldduplex) {
 			if (!(phydev->duplex))

@@ -34,6 +34,7 @@
 #define HTT_RX_RING_REFILL_RESCHED_MS 5
 
 static int ath10k_htt_rx_get_csum_state(struct sk_buff *skb);
+static void ath10k_htt_txrx_compl_task(unsigned long ptr);
 
 static struct sk_buff *
 ath10k_htt_rx_find_skb_paddr(struct ath10k *ar, u32 paddr)
@@ -225,6 +226,7 @@ int ath10k_htt_rx_ring_refill(struct ath10k *ar)
 void ath10k_htt_rx_free(struct ath10k_htt *htt)
 {
 	del_timer_sync(&htt->rx_ring.refill_retry_timer);
+	tasklet_kill(&htt->txrx_compl_task);
 
 	skb_queue_purge(&htt->rx_compl_q);
 	skb_queue_purge(&htt->rx_in_ord_compl_q);
@@ -518,6 +520,9 @@ int ath10k_htt_rx_alloc(struct ath10k_htt *htt)
 	skb_queue_head_init(&htt->tx_fetch_ind_q);
 	atomic_set(&htt->num_mpdus_ready, 0);
 
+	tasklet_init(&htt->txrx_compl_task, ath10k_htt_txrx_compl_task,
+		     (unsigned long)htt);
+
 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "htt rx ring size %d fill_level %d\n",
 		   htt->rx_ring.size, htt->rx_ring.fill_level);
 	return 0;
@@ -548,11 +553,6 @@ static int ath10k_htt_rx_crypto_param_len(struct ath10k *ar,
 		return IEEE80211_TKIP_IV_LEN;
 	case HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2:
 		return IEEE80211_CCMP_HDR_LEN;
-	case HTT_RX_MPDU_ENCRYPT_AES_CCM256_WPA2:
-		return IEEE80211_CCMP_256_HDR_LEN;
-	case HTT_RX_MPDU_ENCRYPT_AES_GCMP_WPA2:
-	case HTT_RX_MPDU_ENCRYPT_AES_GCMP256_WPA2:
-		return IEEE80211_GCMP_HDR_LEN;
 	case HTT_RX_MPDU_ENCRYPT_WEP128:
 	case HTT_RX_MPDU_ENCRYPT_WAPI:
 		break;
@@ -578,11 +578,6 @@ static int ath10k_htt_rx_crypto_tail_len(struct ath10k *ar,
 		return IEEE80211_TKIP_ICV_LEN;
 	case HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2:
 		return IEEE80211_CCMP_MIC_LEN;
-	case HTT_RX_MPDU_ENCRYPT_AES_CCM256_WPA2:
-		return IEEE80211_CCMP_256_MIC_LEN;
-	case HTT_RX_MPDU_ENCRYPT_AES_GCMP_WPA2:
-	case HTT_RX_MPDU_ENCRYPT_AES_GCMP256_WPA2:
-		return IEEE80211_GCMP_MIC_LEN;
 	case HTT_RX_MPDU_ENCRYPT_WEP128:
 	case HTT_RX_MPDU_ENCRYPT_WAPI:
 		break;
@@ -753,7 +748,7 @@ ath10k_htt_rx_h_peer_channel(struct ath10k *ar, struct htt_rx_desc *rxd)
 	if (WARN_ON_ONCE(!arvif))
 		return NULL;
 
-	if (ath10k_mac_vif_chan(arvif->vif, &def))
+	if (WARN_ON(ath10k_mac_vif_chan(arvif->vif, &def)))
 		return NULL;
 
 	return def.chan;
@@ -936,7 +931,7 @@ static void ath10k_process_rx(struct ath10k *ar,
 	*status = *rx_status;
 
 	ath10k_dbg(ar, ATH10K_DBG_DATA,
-		   "rx skb %pK len %u peer %pM %s %s sn %u %s%s%s%s%s %srate_idx %u vht_nss %u freq %u band %u flag 0x%llx fcs-err %i mic-err %i amsdu-more %i\n",
+		   "rx skb %p len %u peer %pM %s %s sn %u %s%s%s%s%s %srate_idx %u vht_nss %u freq %u band %u flag 0x%llx fcs-err %i mic-err %i amsdu-more %i\n",
 		   skb,
 		   skb->len,
 		   ieee80211_get_SA(hdr),
@@ -944,8 +939,7 @@ static void ath10k_process_rx(struct ath10k *ar,
 		   is_multicast_ether_addr(ieee80211_get_DA(hdr)) ?
 							"mcast" : "ucast",
 		   (__le16_to_cpu(hdr->seq_ctrl) & IEEE80211_SCTL_SEQ) >> 4,
-		   (status->flag & (RX_FLAG_HT | RX_FLAG_VHT)) == 0 ?
-							"legacy" : "",
+		   status->flag == 0 ? "legacy" : "",
 		   status->flag & RX_FLAG_HT ? "ht" : "",
 		   status->flag & RX_FLAG_VHT ? "vht" : "",
 		   status->flag & RX_FLAG_40MHZ ? "40" : "",
@@ -963,7 +957,7 @@ static void ath10k_process_rx(struct ath10k *ar,
 	trace_ath10k_rx_hdr(ar, skb->data, skb->len);
 	trace_ath10k_rx_payload(ar, skb->data, skb->len);
 
-	ieee80211_rx_napi(ar->hw, NULL, skb, &ar->napi);
+	ieee80211_rx(ar->hw, skb);
 }
 
 static int ath10k_htt_rx_nwifi_hdrlen(struct ath10k *ar,
@@ -1034,21 +1028,9 @@ static void ath10k_htt_rx_h_undecap_raw(struct ath10k *ar,
 	hdr = (void *)msdu->data;
 
 	/* Tail */
-	if (status->flag & RX_FLAG_IV_STRIPPED) {
+	if (status->flag & RX_FLAG_IV_STRIPPED)
 		skb_trim(msdu, msdu->len -
 			 ath10k_htt_rx_crypto_tail_len(ar, enctype));
-	} else {
-		/* MIC */
-		if ((status->flag & RX_FLAG_MIC_STRIPPED) &&
-		    enctype == HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2)
-			skb_trim(msdu, msdu->len - 8);
-
-		/* ICV */
-		if (status->flag & RX_FLAG_ICV_STRIPPED &&
-		    enctype != HTT_RX_MPDU_ENCRYPT_AES_CCM_WPA2)
-			skb_trim(msdu, msdu->len -
-				 ath10k_htt_rx_crypto_tail_len(ar, enctype));
-	}
 
 	/* MMIC */
 	if ((status->flag & RX_FLAG_MMIC_STRIPPED) &&
@@ -1070,16 +1052,12 @@ static void ath10k_htt_rx_h_undecap_raw(struct ath10k *ar,
 static void ath10k_htt_rx_h_undecap_nwifi(struct ath10k *ar,
 					  struct sk_buff *msdu,
 					  struct ieee80211_rx_status *status,
-					  const u8 first_hdr[64],
-					  enum htt_rx_mpdu_encrypt_type enctype)
+					  const u8 first_hdr[64])
 {
 	struct ieee80211_hdr *hdr;
-	struct htt_rx_desc *rxd;
 	size_t hdr_len;
 	u8 da[ETH_ALEN];
 	u8 sa[ETH_ALEN];
-	int l3_pad_bytes;
-	int bytes_aligned = ar->hw_params.decap_align_bytes;
 
 	/* Delivered decapped frame:
 	 * [nwifi 802.11 header] <-- replaced with 802.11 hdr
@@ -1093,12 +1071,19 @@ static void ath10k_htt_rx_h_undecap_nwifi(struct ath10k *ar,
 	 */
 
 	/* pull decapped header and copy SA & DA */
-	rxd = (void *)msdu->data - sizeof(*rxd);
-
-	l3_pad_bytes = ath10k_rx_desc_get_l3_pad_bytes(&ar->hw_params, rxd);
-	skb_put(msdu, l3_pad_bytes);
-
-	hdr = (struct ieee80211_hdr *)(msdu->data + l3_pad_bytes);
+	if ((ar->hw_params.hw_4addr_pad == ATH10K_HW_4ADDR_PAD_BEFORE) &&
+	    ieee80211_has_a4(((struct ieee80211_hdr *)first_hdr)->frame_control)) {
+		/* The QCA99X0 4 address mode pad 2 bytes at the
+		 * beginning of MSDU
+		 */
+		hdr = (struct ieee80211_hdr *)(msdu->data + 2);
+		/* The skb length need be extended 2 as the 2 bytes at the tail
+		 * be excluded due to the padding
+		 */
+		skb_put(msdu, 2);
+	} else {
+		hdr = (struct ieee80211_hdr *)(msdu->data);
+	}
 
 	hdr_len = ath10k_htt_rx_nwifi_hdrlen(ar, hdr);
 	ether_addr_copy(da, ieee80211_get_DA(hdr));
@@ -1108,14 +1093,6 @@ static void ath10k_htt_rx_h_undecap_nwifi(struct ath10k *ar,
 	/* push original 802.11 header */
 	hdr = (struct ieee80211_hdr *)first_hdr;
 	hdr_len = ieee80211_hdrlen(hdr->frame_control);
-
-	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
-		memcpy(skb_push(msdu,
-				ath10k_htt_rx_crypto_param_len(ar, enctype)),
-		       (void *)hdr + round_up(hdr_len, bytes_aligned),
-			ath10k_htt_rx_crypto_param_len(ar, enctype));
-	}
-
 	memcpy(skb_push(msdu, hdr_len), hdr, hdr_len);
 
 	/* original 802.11 header has a different DA and in
@@ -1135,7 +1112,6 @@ static void *ath10k_htt_rx_h_find_rfc1042(struct ath10k *ar,
 	size_t hdr_len, crypto_len;
 	void *rfc1042;
 	bool is_first, is_last, is_amsdu;
-	int bytes_aligned = ar->hw_params.decap_align_bytes;
 
 	rxd = (void *)msdu->data - sizeof(*rxd);
 	hdr = (void *)rxd->rx_hdr_status;
@@ -1152,8 +1128,8 @@ static void *ath10k_htt_rx_h_find_rfc1042(struct ath10k *ar,
 		hdr_len = ieee80211_hdrlen(hdr->frame_control);
 		crypto_len = ath10k_htt_rx_crypto_param_len(ar, enctype);
 
-		rfc1042 += round_up(hdr_len, bytes_aligned) +
-			   round_up(crypto_len, bytes_aligned);
+		rfc1042 += round_up(hdr_len, 4) +
+			   round_up(crypto_len, 4);
 	}
 
 	if (is_amsdu)
@@ -1174,9 +1150,6 @@ static void ath10k_htt_rx_h_undecap_eth(struct ath10k *ar,
 	void *rfc1042;
 	u8 da[ETH_ALEN];
 	u8 sa[ETH_ALEN];
-	int l3_pad_bytes;
-	struct htt_rx_desc *rxd;
-	int bytes_aligned = ar->hw_params.decap_align_bytes;
 
 	/* Delivered decapped frame:
 	 * [eth header] <-- replaced with 802.11 hdr & rfc1042/llc
@@ -1186,11 +1159,6 @@ static void ath10k_htt_rx_h_undecap_eth(struct ath10k *ar,
 	rfc1042 = ath10k_htt_rx_h_find_rfc1042(ar, msdu, enctype);
 	if (WARN_ON_ONCE(!rfc1042))
 		return;
-
-	rxd = (void *)msdu->data - sizeof(*rxd);
-	l3_pad_bytes = ath10k_rx_desc_get_l3_pad_bytes(&ar->hw_params, rxd);
-	skb_put(msdu, l3_pad_bytes);
-	skb_pull(msdu, l3_pad_bytes);
 
 	/* pull decapped header and copy SA & DA */
 	eth = (struct ethhdr *)msdu->data;
@@ -1205,14 +1173,6 @@ static void ath10k_htt_rx_h_undecap_eth(struct ath10k *ar,
 	/* push original 802.11 header */
 	hdr = (struct ieee80211_hdr *)first_hdr;
 	hdr_len = ieee80211_hdrlen(hdr->frame_control);
-
-	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
-		memcpy(skb_push(msdu,
-				ath10k_htt_rx_crypto_param_len(ar, enctype)),
-		       (void *)hdr + round_up(hdr_len, bytes_aligned),
-			ath10k_htt_rx_crypto_param_len(ar, enctype));
-	}
-
 	memcpy(skb_push(msdu, hdr_len), hdr, hdr_len);
 
 	/* original 802.11 header has a different DA and in
@@ -1226,14 +1186,10 @@ static void ath10k_htt_rx_h_undecap_eth(struct ath10k *ar,
 static void ath10k_htt_rx_h_undecap_snap(struct ath10k *ar,
 					 struct sk_buff *msdu,
 					 struct ieee80211_rx_status *status,
-					 const u8 first_hdr[64],
-					 enum htt_rx_mpdu_encrypt_type enctype)
+					 const u8 first_hdr[64])
 {
 	struct ieee80211_hdr *hdr;
 	size_t hdr_len;
-	int l3_pad_bytes;
-	struct htt_rx_desc *rxd;
-	int bytes_aligned = ar->hw_params.decap_align_bytes;
 
 	/* Delivered decapped frame:
 	 * [amsdu header] <-- replaced with 802.11 hdr
@@ -1241,22 +1197,10 @@ static void ath10k_htt_rx_h_undecap_snap(struct ath10k *ar,
 	 * [payload]
 	 */
 
-	rxd = (void *)msdu->data - sizeof(*rxd);
-	l3_pad_bytes = ath10k_rx_desc_get_l3_pad_bytes(&ar->hw_params, rxd);
-
-	skb_put(msdu, l3_pad_bytes);
-	skb_pull(msdu, sizeof(struct amsdu_subframe_hdr) + l3_pad_bytes);
+	skb_pull(msdu, sizeof(struct amsdu_subframe_hdr));
 
 	hdr = (struct ieee80211_hdr *)first_hdr;
 	hdr_len = ieee80211_hdrlen(hdr->frame_control);
-
-	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
-		memcpy(skb_push(msdu,
-				ath10k_htt_rx_crypto_param_len(ar, enctype)),
-		       (void *)hdr + round_up(hdr_len, bytes_aligned),
-			ath10k_htt_rx_crypto_param_len(ar, enctype));
-	}
-
 	memcpy(skb_push(msdu, hdr_len), hdr, hdr_len);
 }
 
@@ -1291,15 +1235,13 @@ static void ath10k_htt_rx_h_undecap(struct ath10k *ar,
 					    is_decrypted);
 		break;
 	case RX_MSDU_DECAP_NATIVE_WIFI:
-		ath10k_htt_rx_h_undecap_nwifi(ar, msdu, status, first_hdr,
-					      enctype);
+		ath10k_htt_rx_h_undecap_nwifi(ar, msdu, status, first_hdr);
 		break;
 	case RX_MSDU_DECAP_ETHERNET2_DIX:
 		ath10k_htt_rx_h_undecap_eth(ar, msdu, status, first_hdr, enctype);
 		break;
 	case RX_MSDU_DECAP_8023_SNAP_LLC:
-		ath10k_htt_rx_h_undecap_snap(ar, msdu, status, first_hdr,
-					     enctype);
+		ath10k_htt_rx_h_undecap_snap(ar, msdu, status, first_hdr);
 		break;
 	}
 }
@@ -1342,8 +1284,7 @@ static void ath10k_htt_rx_h_csum_offload(struct sk_buff *msdu)
 
 static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 				 struct sk_buff_head *amsdu,
-				 struct ieee80211_rx_status *status,
-				 bool fill_crypt_header)
+				 struct ieee80211_rx_status *status)
 {
 	struct sk_buff *first;
 	struct sk_buff *last;
@@ -1353,6 +1294,7 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 	enum htt_rx_mpdu_encrypt_type enctype;
 	u8 first_hdr[64];
 	u8 *qos;
+	size_t hdr_len;
 	bool has_fcs_err;
 	bool has_crypto_err;
 	bool has_tkip_err;
@@ -1377,17 +1319,15 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 	 * decapped header. It'll be used for undecapping of each MSDU.
 	 */
 	hdr = (void *)rxd->rx_hdr_status;
-	memcpy(first_hdr, hdr, RX_HTT_HDR_STATUS_LEN);
+	hdr_len = ieee80211_hdrlen(hdr->frame_control);
+	memcpy(first_hdr, hdr, hdr_len);
 
 	/* Each A-MSDU subframe will use the original header as the base and be
 	 * reported as a separate MSDU so strip the A-MSDU bit from QoS Ctl.
 	 */
 	hdr = (void *)first_hdr;
-
-	if (ieee80211_is_data_qos(hdr->frame_control)) {
-		qos = ieee80211_get_qos_ctl(hdr);
-		qos[0] &= ~IEEE80211_QOS_CTL_A_MSDU_PRESENT;
-	}
+	qos = ieee80211_get_qos_ctl(hdr);
+	qos[0] &= ~IEEE80211_QOS_CTL_A_MSDU_PRESENT;
 
 	/* Some attention flags are valid only in the last MSDU. */
 	last = skb_peek_tail(amsdu);
@@ -1434,14 +1374,9 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 		status->flag |= RX_FLAG_DECRYPTED;
 
 		if (likely(!is_mgmt))
-			status->flag |= RX_FLAG_MMIC_STRIPPED;
-
-		if (fill_crypt_header)
-			status->flag |= RX_FLAG_MIC_STRIPPED |
-					RX_FLAG_ICV_STRIPPED;
-		else
-			status->flag |= RX_FLAG_IV_STRIPPED;
-	}
+			status->flag |= RX_FLAG_IV_STRIPPED |
+					RX_FLAG_MMIC_STRIPPED;
+}
 
 	skb_queue_walk(amsdu, msdu) {
 		ath10k_htt_rx_h_csum_offload(msdu);
@@ -1457,9 +1392,6 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
 		if (is_mgmt)
 			continue;
 
-		if (fill_crypt_header)
-			continue;
-
 		hdr = (void *)msdu->data;
 		hdr->frame_control &= ~__cpu_to_le16(IEEE80211_FCTL_PROTECTED);
 	}
@@ -1470,9 +1402,6 @@ static void ath10k_htt_rx_h_deliver(struct ath10k *ar,
 				    struct ieee80211_rx_status *status)
 {
 	struct sk_buff *msdu;
-	struct sk_buff *first_subframe;
-
-	first_subframe = skb_peek(amsdu);
 
 	while ((msdu = __skb_dequeue(amsdu))) {
 		/* Setup per-MSDU flags */
@@ -1480,13 +1409,6 @@ static void ath10k_htt_rx_h_deliver(struct ath10k *ar,
 			status->flag &= ~RX_FLAG_AMSDU_MORE;
 		else
 			status->flag |= RX_FLAG_AMSDU_MORE;
-
-		if (msdu == first_subframe) {
-			first_subframe = NULL;
-			status->flag &= ~RX_FLAG_ALLOW_SAME_PN;
-		} else {
-			status->flag |= RX_FLAG_ALLOW_SAME_PN;
-		}
 
 		ath10k_process_rx(ar, status, msdu);
 	}
@@ -1604,7 +1526,7 @@ static int ath10k_htt_rx_handle_amsdu(struct ath10k_htt *htt)
 	struct ath10k *ar = htt->ar;
 	struct ieee80211_rx_status *rx_status = &htt->rx_status;
 	struct sk_buff_head amsdu;
-	int ret, num_msdus;
+	int ret;
 
 	__skb_queue_head_init(&amsdu);
 
@@ -1626,14 +1548,13 @@ static int ath10k_htt_rx_handle_amsdu(struct ath10k_htt *htt)
 		return ret;
 	}
 
-	num_msdus = skb_queue_len(&amsdu);
 	ath10k_htt_rx_h_ppdu(ar, &amsdu, rx_status, 0xffff);
 	ath10k_htt_rx_h_unchain(ar, &amsdu, ret > 0);
 	ath10k_htt_rx_h_filter(ar, &amsdu, rx_status);
-	ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status, true);
+	ath10k_htt_rx_h_mpdu(ar, &amsdu, rx_status);
 	ath10k_htt_rx_h_deliver(ar, &amsdu, rx_status);
 
-	return num_msdus;
+	return 0;
 }
 
 static void ath10k_htt_rx_proc_rx_ind(struct ath10k_htt *htt,
@@ -1657,6 +1578,15 @@ static void ath10k_htt_rx_proc_rx_ind(struct ath10k_htt *htt,
 		mpdu_count += mpdu_ranges[i].mpdu_count;
 
 	atomic_add(mpdu_count, &htt->num_mpdus_ready);
+
+	tasklet_schedule(&htt->txrx_compl_task);
+}
+
+static void ath10k_htt_rx_frag_handler(struct ath10k_htt *htt)
+{
+	atomic_inc(&htt->num_mpdus_ready);
+
+	tasklet_schedule(&htt->txrx_compl_task);
 }
 
 static void ath10k_htt_rx_tx_compl_ind(struct ath10k *ar,
@@ -1841,15 +1771,14 @@ static void ath10k_htt_rx_h_rx_offload_prot(struct ieee80211_rx_status *status,
 			RX_FLAG_MMIC_STRIPPED;
 }
 
-static int ath10k_htt_rx_h_rx_offload(struct ath10k *ar,
-				      struct sk_buff_head *list)
+static void ath10k_htt_rx_h_rx_offload(struct ath10k *ar,
+				       struct sk_buff_head *list)
 {
 	struct ath10k_htt *htt = &ar->htt;
 	struct ieee80211_rx_status *status = &htt->rx_status;
 	struct htt_rx_offload_msdu *rx;
 	struct sk_buff *msdu;
 	size_t offset;
-	int num_msdu = 0;
 
 	while ((msdu = __skb_dequeue(list))) {
 		/* Offloaded frames don't have Rx descriptor. Instead they have
@@ -1889,12 +1818,10 @@ static int ath10k_htt_rx_h_rx_offload(struct ath10k *ar,
 		ath10k_htt_rx_h_rx_offload_prot(status, msdu);
 		ath10k_htt_rx_h_channel(ar, status, NULL, rx->vdev_id);
 		ath10k_process_rx(ar, status, msdu);
-		num_msdu++;
 	}
-	return num_msdu;
 }
 
-static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
+static void ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 {
 	struct ath10k_htt *htt = &ar->htt;
 	struct htt_resp *resp = (void *)skb->data;
@@ -1907,12 +1834,12 @@ static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 	u8 tid;
 	bool offload;
 	bool frag;
-	int ret, num_msdus = 0;
+	int ret;
 
 	lockdep_assert_held(&htt->rx_ring.lock);
 
 	if (htt->rx_confused)
-		return -EIO;
+		return;
 
 	skb_pull(skb, sizeof(resp->hdr));
 	skb_pull(skb, sizeof(resp->rx_in_ord_ind));
@@ -1931,7 +1858,7 @@ static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 
 	if (skb->len < msdu_count * sizeof(*resp->rx_in_ord_ind.msdu_descs)) {
 		ath10k_warn(ar, "dropping invalid in order rx indication\n");
-		return -EINVAL;
+		return;
 	}
 
 	/* The event can deliver more than 1 A-MSDU. Each A-MSDU is later
@@ -1942,14 +1869,14 @@ static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 	if (ret < 0) {
 		ath10k_warn(ar, "failed to pop paddr list: %d\n", ret);
 		htt->rx_confused = true;
-		return -EIO;
+		return;
 	}
 
 	/* Offloaded frames are very different and need to be handled
 	 * separately.
 	 */
 	if (offload)
-		num_msdus = ath10k_htt_rx_h_rx_offload(ar, &list);
+		ath10k_htt_rx_h_rx_offload(ar, &list);
 
 	while (!skb_queue_empty(&list)) {
 		__skb_queue_head_init(&amsdu);
@@ -1962,10 +1889,9 @@ static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 			 * better to report something than nothing though. This
 			 * should still give an idea about rx rate to the user.
 			 */
-			num_msdus += skb_queue_len(&amsdu);
 			ath10k_htt_rx_h_ppdu(ar, &amsdu, status, vdev_id);
 			ath10k_htt_rx_h_filter(ar, &amsdu, status);
-			ath10k_htt_rx_h_mpdu(ar, &amsdu, status, false);
+			ath10k_htt_rx_h_mpdu(ar, &amsdu, status);
 			ath10k_htt_rx_h_deliver(ar, &amsdu, status);
 			break;
 		case -EAGAIN:
@@ -1975,10 +1901,9 @@ static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
 			ath10k_warn(ar, "failed to extract amsdu: %d\n", ret);
 			htt->rx_confused = true;
 			__skb_queue_purge(&list);
-			return -EIO;
+			return;
 		}
 	}
-	return num_msdus;
 }
 
 static void ath10k_htt_rx_tx_fetch_resp_id_confirm(struct ath10k *ar,
@@ -2256,6 +2181,34 @@ static void ath10k_htt_rx_tx_mode_switch_ind(struct ath10k *ar,
 	ath10k_mac_tx_push_pending(ar);
 }
 
+static inline enum nl80211_band phy_mode_to_band(u32 phy_mode)
+{
+	enum nl80211_band band;
+
+	switch (phy_mode) {
+	case MODE_11A:
+	case MODE_11NA_HT20:
+	case MODE_11NA_HT40:
+	case MODE_11AC_VHT20:
+	case MODE_11AC_VHT40:
+	case MODE_11AC_VHT80:
+		band = NL80211_BAND_5GHZ;
+		break;
+	case MODE_11G:
+	case MODE_11B:
+	case MODE_11GONLY:
+	case MODE_11NG_HT20:
+	case MODE_11NG_HT40:
+	case MODE_11AC_VHT20_2G:
+	case MODE_11AC_VHT40_2G:
+	case MODE_11AC_VHT80_2G:
+	default:
+		band = NL80211_BAND_2GHZ;
+	}
+
+	return band;
+}
+
 void ath10k_htt_htc_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 {
 	bool release;
@@ -2337,10 +2290,12 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 			ath10k_htt_tx_mgmt_dec_pending(htt);
 			spin_unlock_bh(&htt->tx_lock);
 		}
+		ath10k_mac_tx_push_pending(ar);
 		break;
 	}
 	case HTT_T2H_MSG_TYPE_TX_COMPL_IND:
 		ath10k_htt_rx_tx_compl_ind(htt->ar, skb);
+		tasklet_schedule(&htt->txrx_compl_task);
 		break;
 	case HTT_T2H_MSG_TYPE_SEC_IND: {
 		struct ath10k *ar = htt->ar;
@@ -2357,7 +2312,7 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 	case HTT_T2H_MSG_TYPE_RX_FRAG_IND: {
 		ath10k_dbg_dump(ar, ATH10K_DBG_HTT_DUMP, NULL, "htt event: ",
 				skb->data, skb->len);
-		atomic_inc(&htt->num_mpdus_ready);
+		ath10k_htt_rx_frag_handler(htt);
 		break;
 	}
 	case HTT_T2H_MSG_TYPE_TEST:
@@ -2380,10 +2335,12 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 		ath10k_htt_rx_delba(ar, resp);
 		break;
 	case HTT_T2H_MSG_TYPE_PKTLOG: {
+		struct ath10k_pktlog_hdr *hdr =
+			(struct ath10k_pktlog_hdr *)resp->pktlog_msg.payload;
+
 		trace_ath10k_htt_pktlog(ar, resp->pktlog_msg.payload,
-					skb->len -
-					offsetof(struct htt_resp,
-						 pktlog_msg.payload));
+					sizeof(*hdr) +
+					__le16_to_cpu(hdr->size));
 		break;
 	}
 	case HTT_T2H_MSG_TYPE_RX_FLUSH: {
@@ -2393,7 +2350,8 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 		break;
 	}
 	case HTT_T2H_MSG_TYPE_RX_IN_ORD_PADDR_IND: {
-		__skb_queue_tail(&htt->rx_in_ord_compl_q, skb);
+		skb_queue_tail(&htt->rx_in_ord_compl_q, skb);
+		tasklet_schedule(&htt->txrx_compl_task);
 		return false;
 	}
 	case HTT_T2H_MSG_TYPE_TX_CREDIT_UPDATE_IND:
@@ -2419,6 +2377,7 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 			break;
 		}
 		skb_queue_tail(&htt->tx_fetch_ind_q, tx_fetch_ind);
+		tasklet_schedule(&htt->txrx_compl_task);
 		break;
 	}
 	case HTT_T2H_MSG_TYPE_TX_FETCH_CONFIRM:
@@ -2447,77 +2406,27 @@ void ath10k_htt_rx_pktlog_completion_handler(struct ath10k *ar,
 }
 EXPORT_SYMBOL(ath10k_htt_rx_pktlog_completion_handler);
 
-int ath10k_htt_txrx_compl_task(struct ath10k *ar, int budget)
+static void ath10k_htt_txrx_compl_task(unsigned long ptr)
 {
-	struct ath10k_htt *htt = &ar->htt;
+	struct ath10k_htt *htt = (struct ath10k_htt *)ptr;
+	struct ath10k *ar = htt->ar;
 	struct htt_tx_done tx_done = {};
+	struct sk_buff_head rx_ind_q;
 	struct sk_buff_head tx_ind_q;
 	struct sk_buff *skb;
 	unsigned long flags;
-	int quota = 0, done, num_rx_msdus;
-	bool resched_napi = false;
+	int num_mpdus;
 
+	__skb_queue_head_init(&rx_ind_q);
 	__skb_queue_head_init(&tx_ind_q);
 
-	/* Since in-ord-ind can deliver more than 1 A-MSDU in single event,
-	 * process it first to utilize full available quota.
-	 */
-	while (quota < budget) {
-		if (skb_queue_empty(&htt->rx_in_ord_compl_q))
-			break;
+	spin_lock_irqsave(&htt->rx_in_ord_compl_q.lock, flags);
+	skb_queue_splice_init(&htt->rx_in_ord_compl_q, &rx_ind_q);
+	spin_unlock_irqrestore(&htt->rx_in_ord_compl_q.lock, flags);
 
-		skb = __skb_dequeue(&htt->rx_in_ord_compl_q);
-		if (!skb) {
-			resched_napi = true;
-			goto exit;
-		}
-
-		spin_lock_bh(&htt->rx_ring.lock);
-		num_rx_msdus = ath10k_htt_rx_in_ord_ind(ar, skb);
-		spin_unlock_bh(&htt->rx_ring.lock);
-		if (num_rx_msdus < 0) {
-			resched_napi = true;
-			goto exit;
-		}
-
-		dev_kfree_skb_any(skb);
-		if (num_rx_msdus > 0)
-			quota += num_rx_msdus;
-
-		if ((quota > ATH10K_NAPI_QUOTA_LIMIT) &&
-		    !skb_queue_empty(&htt->rx_in_ord_compl_q)) {
-			resched_napi = true;
-			goto exit;
-		}
-	}
-
-	while (quota < budget) {
-		/* no more data to receive */
-		if (!atomic_read(&htt->num_mpdus_ready))
-			break;
-
-		num_rx_msdus = ath10k_htt_rx_handle_amsdu(htt);
-		if (num_rx_msdus < 0) {
-			resched_napi = true;
-			goto exit;
-		}
-
-		quota += num_rx_msdus;
-		atomic_dec(&htt->num_mpdus_ready);
-		if ((quota > ATH10K_NAPI_QUOTA_LIMIT) &&
-		    atomic_read(&htt->num_mpdus_ready)) {
-			resched_napi = true;
-			goto exit;
-		}
-	}
-
-	/* From NAPI documentation:
-	 *  The napi poll() function may also process TX completions, in which
-	 *  case if it processes the entire TX ring then it should count that
-	 *  work as the rest of the budget.
-	 */
-	if ((quota < budget) && !kfifo_is_empty(&htt->txdone_fifo))
-		quota = budget;
+	spin_lock_irqsave(&htt->tx_fetch_ind_q.lock, flags);
+	skb_queue_splice_init(&htt->tx_fetch_ind_q, &tx_ind_q);
+	spin_unlock_irqrestore(&htt->tx_fetch_ind_q.lock, flags);
 
 	/* kfifo_get: called only within txrx_tasklet so it's neatly serialized.
 	 * From kfifo_get() documentation:
@@ -2527,24 +2436,29 @@ int ath10k_htt_txrx_compl_task(struct ath10k *ar, int budget)
 	while (kfifo_get(&htt->txdone_fifo, &tx_done))
 		ath10k_txrx_tx_unref(htt, &tx_done);
 
-	ath10k_mac_tx_push_pending(ar);
-
-	spin_lock_irqsave(&htt->tx_fetch_ind_q.lock, flags);
-	skb_queue_splice_init(&htt->tx_fetch_ind_q, &tx_ind_q);
-	spin_unlock_irqrestore(&htt->tx_fetch_ind_q.lock, flags);
-
 	while ((skb = __skb_dequeue(&tx_ind_q))) {
 		ath10k_htt_rx_tx_fetch_ind(ar, skb);
 		dev_kfree_skb_any(skb);
 	}
 
-exit:
-	ath10k_htt_rx_msdu_buff_replenish(htt);
-	/* In case of rx failure or more data to read, report budget
-	 * to reschedule NAPI poll
-	 */
-	done = resched_napi ? budget : quota;
+	ath10k_mac_tx_push_pending(ar);
 
-	return done;
+	num_mpdus = atomic_read(&htt->num_mpdus_ready);
+
+	while (num_mpdus) {
+		if (ath10k_htt_rx_handle_amsdu(htt))
+			break;
+
+		num_mpdus--;
+		atomic_dec(&htt->num_mpdus_ready);
+	}
+
+	while ((skb = __skb_dequeue(&rx_ind_q))) {
+		spin_lock_bh(&htt->rx_ring.lock);
+		ath10k_htt_rx_in_ord_ind(ar, skb);
+		spin_unlock_bh(&htt->rx_ring.lock);
+		dev_kfree_skb_any(skb);
+	}
+
+	ath10k_htt_rx_msdu_buff_replenish(htt);
 }
-EXPORT_SYMBOL(ath10k_htt_txrx_compl_task);

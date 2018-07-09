@@ -198,9 +198,11 @@ find_appropriate_src(struct net *net,
 		     const struct nf_nat_range *range)
 {
 	unsigned int h = hash_by_src(net, tuple);
+	const struct nf_conn_nat *nat;
 	const struct nf_conn *ct;
 
-	hlist_for_each_entry_rcu(ct, &nf_nat_bysource[h], nat_bysource) {
+	hlist_for_each_entry_rcu(nat, &nf_nat_bysource[h], bysource) {
+		ct = nat->ct;
 		if (same_src(ct, tuple) &&
 		    net_eq(net, nf_ct_net(ct)) &&
 		    nf_ct_zone_equal(ct, zone, IP_CT_DIR_ORIGINAL)) {
@@ -422,8 +424,7 @@ nf_nat_setup_info(struct nf_conn *ct,
 			ct->status |= IPS_DST_NAT;
 
 		if (nfct_help(ct))
-			if (!nfct_seqadj_ext_add(ct))
-				return NF_DROP;
+			nfct_seqadj_ext_add(ct);
 	}
 
 	if (maniptype == NF_NAT_MANIP_SRC) {
@@ -434,7 +435,8 @@ nf_nat_setup_info(struct nf_conn *ct,
 		spin_lock_bh(&nf_nat_lock);
 		/* nf_conntrack_alter_reply might re-allocate extension aera */
 		nat = nfct_nat(ct);
-		hlist_add_head_rcu(&ct->nat_bysource,
+		nat->ct = ct;
+		hlist_add_head_rcu(&nat->bysource,
 				   &nf_nat_bysource[srchash]);
 		spin_unlock_bh(&nf_nat_lock);
 	}
@@ -522,6 +524,10 @@ struct nf_nat_proto_clean {
 static int nf_nat_proto_remove(struct nf_conn *i, void *data)
 {
 	const struct nf_nat_proto_clean *clean = data;
+	struct nf_conn_nat *nat = nfct_nat(i);
+
+	if (!nat)
+		return 0;
 
 	if ((clean->l3proto && nf_ct_l3num(i) != clean->l3proto) ||
 	    (clean->l4proto && nf_ct_protonum(i) != clean->l4proto))
@@ -532,10 +538,12 @@ static int nf_nat_proto_remove(struct nf_conn *i, void *data)
 
 static int nf_nat_proto_clean(struct nf_conn *ct, void *data)
 {
+	struct nf_conn_nat *nat = nfct_nat(ct);
+
 	if (nf_nat_proto_remove(ct, data))
 		return 1;
 
-	if ((ct->status & IPS_SRC_NAT_DONE) == 0)
+	if (!nat || !nat->ct)
 		return 0;
 
 	/* This netns is being destroyed, and conntrack has nat null binding.
@@ -544,10 +552,16 @@ static int nf_nat_proto_clean(struct nf_conn *ct, void *data)
 	 * Else, when the conntrack is destoyed, nf_nat_cleanup_conntrack()
 	 * will delete entry from already-freed table.
 	 */
+	if (!del_timer(&ct->timeout))
+		return 1;
+
 	spin_lock_bh(&nf_nat_lock);
-	hlist_del_rcu(&ct->nat_bysource);
+	hlist_del_rcu(&nat->bysource);
 	ct->status &= ~IPS_NAT_DONE_MASK;
+	nat->ct = NULL;
 	spin_unlock_bh(&nf_nat_lock);
+
+	add_timer(&ct->timeout);
 
 	/* don't delete conntrack.  Although that would make things a lot
 	 * simpler, we'd end up flushing all conntracks on nat rmmod.
@@ -672,17 +686,37 @@ EXPORT_SYMBOL_GPL(nf_nat_l3proto_unregister);
 /* No one using conntrack by the time this called. */
 static void nf_nat_cleanup_conntrack(struct nf_conn *ct)
 {
-	if (ct->status & IPS_SRC_NAT_DONE) {
-		spin_lock_bh(&nf_nat_lock);
-		hlist_del_rcu(&ct->nat_bysource);
-		spin_unlock_bh(&nf_nat_lock);
-	}
+	struct nf_conn_nat *nat = nf_ct_ext_find(ct, NF_CT_EXT_NAT);
+
+	if (nat == NULL || nat->ct == NULL)
+		return;
+
+	NF_CT_ASSERT(nat->ct->status & IPS_SRC_NAT_DONE);
+
+	spin_lock_bh(&nf_nat_lock);
+	hlist_del_rcu(&nat->bysource);
+	spin_unlock_bh(&nf_nat_lock);
+}
+
+static void nf_nat_move_storage(void *new, void *old)
+{
+	struct nf_conn_nat *new_nat = new;
+	struct nf_conn_nat *old_nat = old;
+	struct nf_conn *ct = old_nat->ct;
+
+	if (!ct || !(ct->status & IPS_SRC_NAT_DONE))
+		return;
+
+	spin_lock_bh(&nf_nat_lock);
+	hlist_replace_rcu(&old_nat->bysource, &new_nat->bysource);
+	spin_unlock_bh(&nf_nat_lock);
 }
 
 static struct nf_ct_ext_type nat_extend __read_mostly = {
 	.len		= sizeof(struct nf_conn_nat),
 	.align		= __alignof__(struct nf_conn_nat),
 	.destroy	= nf_nat_cleanup_conntrack,
+	.move		= nf_nat_move_storage,
 	.id		= NF_CT_EXT_NAT,
 	.flags		= NF_CT_EXT_F_PREALLOC,
 };
@@ -779,7 +813,7 @@ nfnetlink_parse_nat_setup(struct nf_conn *ct,
 	if (err < 0)
 		return err;
 
-	return nf_nat_setup_info(ct, &range, manip) == NF_DROP ? -ENOMEM : 0;
+	return nf_nat_setup_info(ct, &range, manip);
 }
 #else
 static int
@@ -860,8 +894,6 @@ static void __exit nf_nat_cleanup(void)
 #ifdef CONFIG_XFRM
 	RCU_INIT_POINTER(nf_nat_decode_session_hook, NULL);
 #endif
-	synchronize_rcu();
-
 	for (i = 0; i < NFPROTO_NUMPROTO; i++)
 		kfree(nf_nat_l4protos[i]);
 	synchronize_net();

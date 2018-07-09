@@ -53,24 +53,30 @@
 
 /**
  * i915_check_vgpu - detect virtual GPU
- * @dev_priv: i915 device private
+ * @dev: drm device *
  *
  * This function is called at the initialization stage, to detect whether
  * running on a vGPU.
  */
-void i915_check_vgpu(struct drm_i915_private *dev_priv)
+void i915_check_vgpu(struct drm_device *dev)
 {
-	u64 magic;
-	u16 version_major;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+	uint64_t magic;
+	uint32_t version;
 
 	BUILD_BUG_ON(sizeof(struct vgt_if) != VGT_PVINFO_SIZE);
+
+	if (!IS_HASWELL(dev))
+		return;
 
 	magic = __raw_i915_read64(dev_priv, vgtif_reg(magic));
 	if (magic != VGT_MAGIC)
 		return;
 
-	version_major = __raw_i915_read16(dev_priv, vgtif_reg(version_major));
-	if (version_major < VGT_VERSION_MAJOR) {
+	version = INTEL_VGT_IF_VERSION_ENCODE(
+		__raw_i915_read16(dev_priv, vgtif_reg(version_major)),
+		__raw_i915_read16(dev_priv, vgtif_reg(version_minor)));
+	if (version != INTEL_VGT_IF_VERSION) {
 		DRM_INFO("VGT interface version mismatch!\n");
 		return;
 	}
@@ -92,17 +98,13 @@ static struct _balloon_info_ bl_info;
 
 /**
  * intel_vgt_deballoon - deballoon reserved graphics address trunks
- * @dev_priv: i915 device private data
  *
  * This function is called to deallocate the ballooned-out graphic memory, when
  * driver is unloaded or when ballooning fails.
  */
-void intel_vgt_deballoon(struct drm_i915_private *dev_priv)
+void intel_vgt_deballoon(void)
 {
 	int i;
-
-	if (!intel_vgpu_active(dev_priv))
-		return;
 
 	DRM_DEBUG("VGT deballoon.\n");
 
@@ -134,7 +136,7 @@ static int vgt_balloon_space(struct drm_mm *mm,
 
 /**
  * intel_vgt_balloon - balloon out reserved graphics address trunks
- * @dev_priv: i915 device private data
+ * @dev: drm device
  *
  * This function is called at the initialization stage, to balloon out the
  * graphic address space allocated to other vGPUs, by marking these spaces as
@@ -149,44 +151,42 @@ static int vgt_balloon_space(struct drm_mm *mm,
  * of its graphic space being zero. Yet there are some portions ballooned out(
  * the shadow part, which are marked as reserved by drm allocator). From the
  * host point of view, the graphic address space is partitioned by multiple
- * vGPUs in different VMs. ::
+ * vGPUs in different VMs.
  *
- *                         vGPU1 view         Host view
- *              0 ------> +-----------+     +-----------+
- *                ^       |###########|     |   vGPU3   |
- *                |       |###########|     +-----------+
- *                |       |###########|     |   vGPU2   |
- *                |       +-----------+     +-----------+
- *         mappable GM    | available | ==> |   vGPU1   |
- *                |       +-----------+     +-----------+
- *                |       |###########|     |           |
- *                v       |###########|     |   Host    |
- *                +=======+===========+     +===========+
- *                ^       |###########|     |   vGPU3   |
- *                |       |###########|     +-----------+
- *                |       |###########|     |   vGPU2   |
- *                |       +-----------+     +-----------+
- *       unmappable GM    | available | ==> |   vGPU1   |
- *                |       +-----------+     +-----------+
- *                |       |###########|     |           |
- *                |       |###########|     |   Host    |
- *                v       |###########|     |           |
- *  total GM size ------> +-----------+     +-----------+
+ *                        vGPU1 view         Host view
+ *             0 ------> +-----------+     +-----------+
+ *               ^       |///////////|     |   vGPU3   |
+ *               |       |///////////|     +-----------+
+ *               |       |///////////|     |   vGPU2   |
+ *               |       +-----------+     +-----------+
+ *        mappable GM    | available | ==> |   vGPU1   |
+ *               |       +-----------+     +-----------+
+ *               |       |///////////|     |           |
+ *               v       |///////////|     |   Host    |
+ *               +=======+===========+     +===========+
+ *               ^       |///////////|     |   vGPU3   |
+ *               |       |///////////|     +-----------+
+ *               |       |///////////|     |   vGPU2   |
+ *               |       +-----------+     +-----------+
+ *      unmappable GM    | available | ==> |   vGPU1   |
+ *               |       +-----------+     +-----------+
+ *               |       |///////////|     |           |
+ *               |       |///////////|     |   Host    |
+ *               v       |///////////|     |           |
+ * total GM size ------> +-----------+     +-----------+
  *
  * Returns:
  * zero on success, non-zero if configuration invalid or ballooning failed
  */
-int intel_vgt_balloon(struct drm_i915_private *dev_priv)
+int intel_vgt_balloon(struct drm_device *dev)
 {
+	struct drm_i915_private *dev_priv = to_i915(dev);
 	struct i915_ggtt *ggtt = &dev_priv->ggtt;
 	unsigned long ggtt_end = ggtt->base.start + ggtt->base.total;
 
 	unsigned long mappable_base, mappable_size, mappable_end;
 	unsigned long unmappable_base, unmappable_size, unmappable_end;
 	int ret;
-
-	if (!intel_vgpu_active(dev_priv))
-		return 0;
 
 	mappable_base = I915_READ(vgtif_reg(avail_rs.mappable_gmadr.base));
 	mappable_size = I915_READ(vgtif_reg(avail_rs.mappable_gmadr.size));
@@ -259,6 +259,6 @@ int intel_vgt_balloon(struct drm_i915_private *dev_priv)
 
 err:
 	DRM_ERROR("VGT balloon fail\n");
-	intel_vgt_deballoon(dev_priv);
+	intel_vgt_deballoon();
 	return ret;
 }

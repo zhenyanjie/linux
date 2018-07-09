@@ -271,18 +271,22 @@ static int max8973_set_ramp_delay(struct regulator_dev *rdev,
 	struct max8973_chip *max = rdev_get_drvdata(rdev);
 	unsigned int control;
 	int ret;
+	int ret_val;
 
 	/* Set ramp delay */
-	if (ramp_delay <= 12000)
+	if (ramp_delay < 25000) {
 		control = MAX8973_RAMP_12mV_PER_US;
-	else if (ramp_delay <= 25000)
+		ret_val = 12000;
+	} else if (ramp_delay < 50000) {
 		control = MAX8973_RAMP_25mV_PER_US;
-	else if (ramp_delay <= 50000)
+		ret_val = 25000;
+	} else if (ramp_delay < 200000) {
 		control = MAX8973_RAMP_50mV_PER_US;
-	else if (ramp_delay <= 200000)
+		ret_val = 50000;
+	} else {
 		control = MAX8973_RAMP_200mV_PER_US;
-	else
-		return -EINVAL;
+		ret_val = 200000;
+	}
 
 	ret = regmap_update_bits(max->regmap, MAX8973_CONTROL1,
 			MAX8973_RAMP_MASK, control);
@@ -495,8 +499,7 @@ static irqreturn_t max8973_thermal_irq(int irq, void *data)
 {
 	struct max8973_chip *mchip = data;
 
-	thermal_zone_device_update(mchip->tz_device,
-				   THERMAL_EVENT_UNSPECIFIED);
+	thermal_zone_device_update(mchip->tz_device);
 
 	return IRQ_HANDLED;
 }

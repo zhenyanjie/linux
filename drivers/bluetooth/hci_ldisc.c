@@ -113,21 +113,16 @@ static inline struct sk_buff *hci_uart_dequeue(struct hci_uart *hu)
 {
 	struct sk_buff *skb = hu->tx_skb;
 
-	if (!skb) {
-		if (test_bit(HCI_UART_PROTO_READY, &hu->flags))
-			skb = hu->proto->dequeue(hu);
-	} else {
+	if (!skb)
+		skb = hu->proto->dequeue(hu);
+	else
 		hu->tx_skb = NULL;
-	}
 
 	return skb;
 }
 
 int hci_uart_tx_wakeup(struct hci_uart *hu)
 {
-	if (!test_bit(HCI_UART_PROTO_READY, &hu->flags))
-		return 0;
-
 	if (test_and_set_bit(HCI_UART_SENDING, &hu->tx_state)) {
 		set_bit(HCI_UART_TX_WAKEUP, &hu->tx_state);
 		return 0;
@@ -614,7 +609,7 @@ static int hci_uart_register_dev(struct hci_uart *hu)
 	if (test_bit(HCI_UART_CREATE_AMP, &hu->hdev_flags))
 		hdev->dev_type = HCI_AMP;
 	else
-		hdev->dev_type = HCI_PRIMARY;
+		hdev->dev_type = HCI_BREDR;
 
 	if (test_bit(HCI_UART_INIT_PENDING, &hu->hdev_flags))
 		return 0;
@@ -702,36 +697,34 @@ static int hci_uart_tty_ioctl(struct tty_struct *tty, struct file *file,
 	case HCIUARTSETPROTO:
 		if (!test_and_set_bit(HCI_UART_PROTO_SET, &hu->flags)) {
 			err = hci_uart_set_proto(hu, arg);
-			if (err)
+			if (err) {
 				clear_bit(HCI_UART_PROTO_SET, &hu->flags);
+				return err;
+			}
 		} else
-			err = -EBUSY;
+			return -EBUSY;
 		break;
 
 	case HCIUARTGETPROTO:
 		if (test_bit(HCI_UART_PROTO_SET, &hu->flags))
-			err = hu->proto->id;
-		else
-			err = -EUNATCH;
-		break;
+			return hu->proto->id;
+		return -EUNATCH;
 
 	case HCIUARTGETDEVICE:
 		if (test_bit(HCI_UART_REGISTERED, &hu->flags))
-			err = hu->hdev->id;
-		else
-			err = -EUNATCH;
-		break;
+			return hu->hdev->id;
+		return -EUNATCH;
 
 	case HCIUARTSETFLAGS:
 		if (test_bit(HCI_UART_PROTO_SET, &hu->flags))
-			err = -EBUSY;
-		else
-			err = hci_uart_set_flags(hu, arg);
+			return -EBUSY;
+		err = hci_uart_set_flags(hu, arg);
+		if (err)
+			return err;
 		break;
 
 	case HCIUARTGETFLAGS:
-		err = hu->hdev_flags;
-		break;
+		return hu->hdev_flags;
 
 	default:
 		err = n_tty_ioctl_helper(tty, file, cmd, arg);
@@ -817,9 +810,6 @@ static int __init hci_uart_init(void)
 #ifdef CONFIG_BT_HCIUART_AG6XX
 	ag6xx_init();
 #endif
-#ifdef CONFIG_BT_HCIUART_MRVL
-	mrvl_init();
-#endif
 
 	return 0;
 }
@@ -854,9 +844,6 @@ static void __exit hci_uart_exit(void)
 #endif
 #ifdef CONFIG_BT_HCIUART_AG6XX
 	ag6xx_deinit();
-#endif
-#ifdef CONFIG_BT_HCIUART_MRVL
-	mrvl_deinit();
 #endif
 
 	/* Release tty registration of line discipline */

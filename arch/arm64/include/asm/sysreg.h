@@ -94,19 +94,14 @@
 #define SCTLR_ELx_A	(1 << 1)
 #define SCTLR_ELx_M	1
 
-#define SCTLR_EL2_RES1	((1 << 4)  | (1 << 5)  | (1 << 11) | (1 << 16) | \
-			 (1 << 16) | (1 << 18) | (1 << 22) | (1 << 23) | \
-			 (1 << 28) | (1 << 29))
-
 #define SCTLR_ELx_FLAGS	(SCTLR_ELx_M | SCTLR_ELx_A | SCTLR_ELx_C | \
 			 SCTLR_ELx_SA | SCTLR_ELx_I)
 
 /* SCTLR_EL1 specific flags. */
-#define SCTLR_EL1_UCI		(1 << 26)
 #define SCTLR_EL1_SPAN		(1 << 23)
-#define SCTLR_EL1_UCT		(1 << 15)
 #define SCTLR_EL1_SED		(1 << 8)
 #define SCTLR_EL1_CP15BEN	(1 << 5)
+
 
 /* id_aa64isar0 */
 #define ID_AA64ISAR0_RDM_SHIFT		28
@@ -117,9 +112,6 @@
 #define ID_AA64ISAR0_AES_SHIFT		4
 
 /* id_aa64pfr0 */
-#define ID_AA64PFR0_CSV3_SHIFT		60
-#define ID_AA64PFR0_CSV2_SHIFT		56
-#define ID_AA64PFR0_SVE_SHIFT		32
 #define ID_AA64PFR0_GIC_SHIFT		24
 #define ID_AA64PFR0_ASIMD_SHIFT		20
 #define ID_AA64PFR0_FP_SHIFT		16
@@ -261,6 +253,16 @@ asm(
 "	.endm\n"
 );
 
+static inline void config_sctlr_el1(u32 clear, u32 set)
+{
+	u32 val;
+
+	asm volatile("mrs %0, sctlr_el1" : "=r" (val));
+	val &= ~clear;
+	val |= set;
+	asm volatile("msr sctlr_el1, %0" : : "r" (val));
+}
+
 /*
  * Unlike read_cpuid, calls to read_sysreg are never expected to be
  * optimized away or replaced with synthetic values.
@@ -271,40 +273,11 @@ asm(
 	__val;							\
 })
 
-/*
- * The "Z" constraint normally means a zero immediate, but when combined with
- * the "%x0" template means XZR.
- */
 #define write_sysreg(v, r) do {					\
 	u64 __val = (u64)v;					\
-	asm volatile("msr " __stringify(r) ", %x0"		\
-		     : : "rZ" (__val));				\
+	asm volatile("msr " __stringify(r) ", %0"		\
+		     : : "r" (__val));				\
 } while (0)
-
-/*
- * For registers without architectural names, or simply unsupported by
- * GAS.
- */
-#define read_sysreg_s(r) ({						\
-	u64 __val;							\
-	asm volatile("mrs_s %0, " __stringify(r) : "=r" (__val));	\
-	__val;								\
-})
-
-#define write_sysreg_s(v, r) do {					\
-	u64 __val = (u64)v;						\
-	asm volatile("msr_s " __stringify(r) ", %x0" : : "rZ" (__val));	\
-} while (0)
-
-static inline void config_sctlr_el1(u32 clear, u32 set)
-{
-	u32 val;
-
-	val = read_sysreg(sctlr_el1);
-	val &= ~clear;
-	val |= set;
-	write_sysreg(val, sctlr_el1);
-}
 
 #endif
 

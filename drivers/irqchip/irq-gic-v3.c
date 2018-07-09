@@ -120,10 +120,11 @@ static void gic_redist_wait_for_rwp(void)
 }
 
 #ifdef CONFIG_ARM64
+static DEFINE_STATIC_KEY_FALSE(is_cavium_thunderx);
 
 static u64 __maybe_unused gic_read_iar(void)
 {
-	if (cpus_have_const_cap(ARM64_WORKAROUND_CAVIUM_23154))
+	if (static_branch_unlikely(&is_cavium_thunderx))
 		return gic_read_iar_cavium_thunderx();
 	else
 		return gic_read_iar_common();
@@ -152,7 +153,7 @@ static void gic_enable_redist(bool enable)
 			return;	/* No PM support in this redistributor */
 	}
 
-	while (--count) {
+	while (count--) {
 		val = readl_relaxed(rbase + GICR_WAKER);
 		if (enable ^ (bool)(val & GICR_WAKER_ChildrenAsleep))
 			break;
@@ -494,14 +495,6 @@ static void gic_cpu_sys_reg_init(void)
 	/* Set priority mask register */
 	gic_write_pmr(DEFAULT_PMR_VALUE);
 
-	/*
-	 * Some firmwares hand over to the kernel with the BPR changed from
-	 * its reset value (and with a value large enough to prevent
-	 * any pre-emptive interrupts from working at all). Writing a zero
-	 * to BPR restores is reset value.
-	 */
-	gic_write_bpr1(0);
-
 	if (static_key_true(&supports_deactivate)) {
 		/* EOI drops priority only (mode 1) */
 		gic_write_ctlr(ICC_CTLR_EL1_EOImode_drop);
@@ -545,12 +538,22 @@ static void gic_cpu_init(void)
 }
 
 #ifdef CONFIG_SMP
-
-static int gic_starting_cpu(unsigned int cpu)
+static int gic_secondary_init(struct notifier_block *nfb,
+			      unsigned long action, void *hcpu)
 {
-	gic_cpu_init();
-	return 0;
+	if (action == CPU_STARTING || action == CPU_STARTING_FROZEN)
+		gic_cpu_init();
+	return NOTIFY_OK;
 }
+
+/*
+ * Notifier for enabling the GIC CPU interface. Set an arbitrarily high
+ * priority because the GIC needs to be up before the ARM generic timers.
+ */
+static struct notifier_block gic_cpu_notifier = {
+	.notifier_call = gic_secondary_init,
+	.priority = 100,
+};
 
 static u16 gic_compute_target_list(int *base_cpu, const struct cpumask *mask,
 				   unsigned long cluster_id)
@@ -600,7 +603,7 @@ static void gic_send_sgi(u64 cluster_id, u16 tlist, unsigned int irq)
 	       MPIDR_TO_SGI_AFFINITY(cluster_id, 1)	|
 	       tlist << ICC_SGI1R_TARGET_LIST_SHIFT);
 
-	pr_devel("CPU%d: ICC_SGI1R_EL1 %llx\n", smp_processor_id(), val);
+	pr_debug("CPU%d: ICC_SGI1R_EL1 %llx\n", smp_processor_id(), val);
 	gic_write_sgi1r(val);
 }
 
@@ -615,7 +618,7 @@ static void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
 	 * Ensure that stores to Normal memory are visible to the
 	 * other CPUs before issuing the IPI.
 	 */
-	wmb();
+	smp_wmb();
 
 	for_each_cpu(cpu, mask) {
 		unsigned long cluster_id = cpu_logical_map(cpu) & ~0xffUL;
@@ -632,9 +635,7 @@ static void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
 static void gic_smp_init(void)
 {
 	set_smp_cross_call(gic_raise_softirq);
-	cpuhp_setup_state_nocalls(CPUHP_AP_IRQ_GICV3_STARTING,
-				  "AP_IRQ_GICV3_STARTING", gic_starting_cpu,
-				  NULL);
+	register_cpu_notifier(&gic_cpu_notifier);
 }
 
 static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
@@ -644,9 +645,6 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	void __iomem *reg;
 	int enabled;
 	u64 val;
-
-	if (cpu >= nr_cpu_ids)
-		return -EINVAL;
 
 	if (gic_irq_in_rdist(d))
 		return -EINVAL;
@@ -678,20 +676,13 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 #endif
 
 #ifdef CONFIG_CPU_PM
-/* Check whether it's single security state view */
-static bool gic_dist_security_disabled(void)
-{
-	return readl_relaxed(gic_data.dist_base + GICD_CTLR) & GICD_CTLR_DS;
-}
-
 static int gic_cpu_pm_notifier(struct notifier_block *self,
 			       unsigned long cmd, void *v)
 {
 	if (cmd == CPU_PM_EXIT) {
-		if (gic_dist_security_disabled())
-			gic_enable_redist(true);
+		gic_enable_redist(true);
 		gic_cpu_sys_reg_init();
-	} else if (cmd == CPU_PM_ENTER && gic_dist_security_disabled()) {
+	} else if (cmd == CPU_PM_ENTER) {
 		gic_write_grpen1(0);
 		gic_enable_redist(false);
 	}
@@ -907,12 +898,21 @@ static const struct irq_domain_ops partition_domain_ops = {
 	.select = gic_irq_domain_select,
 };
 
+static void gicv3_enable_quirks(void)
+{
+#ifdef CONFIG_ARM64
+	if (cpus_have_cap(ARM64_WORKAROUND_CAVIUM_23154))
+		static_branch_enable(&is_cavium_thunderx);
+#endif
+}
+
 static int __init gic_init_bases(void __iomem *dist_base,
 				 struct redist_region *rdist_regs,
 				 u32 nr_redist_regions,
 				 u64 redist_stride,
 				 struct fwnode_handle *handle)
 {
+	struct device_node *node;
 	u32 typer;
 	int gic_irqs;
 	int err;
@@ -928,6 +928,8 @@ static int __init gic_init_bases(void __iomem *dist_base,
 	gic_data.redist_regions = rdist_regs;
 	gic_data.nr_redist_regions = nr_redist_regions;
 	gic_data.redist_stride = redist_stride;
+
+	gicv3_enable_quirks();
 
 	/*
 	 * Find out how many interrupts are supported.
@@ -951,8 +953,10 @@ static int __init gic_init_bases(void __iomem *dist_base,
 
 	set_handle_irq(gic_handle_irq);
 
-	if (IS_ENABLED(CONFIG_ARM_GIC_V3_ITS) && gic_dist_supports_lpis())
-		its_init(handle, &gic_data.rdists, gic_data.domain);
+	node = to_of_node(handle);
+	if (IS_ENABLED(CONFIG_ARM_GIC_V3_ITS) && gic_dist_supports_lpis() &&
+	    node) /* Temp hack to prevent ITS init for ACPI */
+		its_init(node, &gic_data.rdists, gic_data.domain);
 
 	gic_smp_init();
 	gic_dist_init();
@@ -1011,18 +1015,18 @@ static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 	int nr_parts;
 	struct partition_affinity *parts;
 
-	parts_node = of_get_child_by_name(gic_node, "ppi-partitions");
+	parts_node = of_find_node_by_name(gic_node, "ppi-partitions");
 	if (!parts_node)
 		return;
 
 	nr_parts = of_get_child_count(parts_node);
 
 	if (!nr_parts)
-		goto out_put_node;
+		return;
 
 	parts = kzalloc(sizeof(*parts) * nr_parts, GFP_KERNEL);
 	if (WARN_ON(!parts))
-		goto out_put_node;
+		return;
 
 	for_each_child_of_node(parts_node, child_part) {
 		struct partition_affinity *part;
@@ -1089,9 +1093,6 @@ static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 
 		gic_data.ppi_descs[i] = desc;
 	}
-
-out_put_node:
-	of_node_put(parts_node);
 }
 
 static void __init gic_of_setup_kvm_info(struct device_node *node)
@@ -1239,10 +1240,6 @@ gic_acpi_parse_madt_gicc(struct acpi_subtable_header *header,
 	u32 size = reg == GIC_PIDR2_ARCH_GICv4 ? SZ_64K * 4 : SZ_64K * 2;
 	void __iomem *redist_base;
 
-	/* GICC entry which has !ACPI_MADT_ENABLED is not unusable so skip */
-	if (!(gicc->flags & ACPI_MADT_ENABLED))
-		return 0;
-
 	redist_base = ioremap(gicc->gicr_base_address, size);
 	if (!redist_base)
 		return -ENOMEM;
@@ -1290,13 +1287,6 @@ static int __init gic_acpi_match_gicc(struct acpi_subtable_header *header,
 	 * GICR base is presented via GICC
 	 */
 	if ((gicc->flags & ACPI_MADT_ENABLED) && gicc->gicr_base_address)
-		return 0;
-
-	/*
-	 * It's perfectly valid firmware can pass disabled GICC entry, driver
-	 * should not treat as errors, skip the entry instead of probe fail.
-	 */
-	if (!(gicc->flags & ACPI_MADT_ENABLED))
 		return 0;
 
 	return -ENODEV;

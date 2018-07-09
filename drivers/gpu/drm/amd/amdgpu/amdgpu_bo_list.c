@@ -94,7 +94,6 @@ static int amdgpu_bo_list_set(struct amdgpu_device *adev,
 	unsigned last_entry = 0, first_userptr = num_entries;
 	unsigned i;
 	int r;
-	unsigned long total_size = 0;
 
 	array = drm_malloc_ab(num_entries, sizeof(struct amdgpu_bo_list_entry));
 	if (!array)
@@ -132,7 +131,7 @@ static int amdgpu_bo_list_set(struct amdgpu_device *adev,
 		entry->priority = min(info[i].bo_priority,
 				      AMDGPU_BO_LIST_MAX_PRIORITY);
 		entry->tv.bo = &entry->robj->tbo;
-		entry->tv.shared = !entry->robj->prime_shared_count;
+		entry->tv.shared = true;
 
 		if (entry->robj->prefered_domains == AMDGPU_GEM_DOMAIN_GDS)
 			gds_obj = entry->robj;
@@ -141,7 +140,6 @@ static int amdgpu_bo_list_set(struct amdgpu_device *adev,
 		if (entry->robj->prefered_domains == AMDGPU_GEM_DOMAIN_OA)
 			oa_obj = entry->robj;
 
-		total_size += amdgpu_bo_size(entry->robj);
 		trace_amdgpu_bo_list_set(list, entry->robj);
 	}
 
@@ -157,7 +155,6 @@ static int amdgpu_bo_list_set(struct amdgpu_device *adev,
 	list->array = array;
 	list->num_entries = num_entries;
 
-	trace_amdgpu_cs_bo_status(list->num_entries, total_size);
 	return 0;
 
 error_free:
@@ -201,10 +198,8 @@ void amdgpu_bo_list_get_list(struct amdgpu_bo_list *list,
 	for (i = 0; i < list->num_entries; i++) {
 		unsigned priority = list->array[i].priority;
 
-		if (!list->array[i].robj->parent)
-			list_add_tail(&list->array[i].tv.head,
-				      &bucket[priority]);
-
+		list_add_tail(&list->array[i].tv.head,
+			      &bucket[priority]);
 		list->array[i].user_pages = NULL;
 	}
 

@@ -30,7 +30,7 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 
-#include <video/omapfb_dss.h>
+#include <video/omapdss.h>
 
 #include "dss.h"
 #include "dss_features.h"

@@ -12,9 +12,8 @@
 #define EVTYP_VT220MSG_MASK	0x00000040
 #define EVTYP_MSG_MASK		0x40000000
 
-static char _sclp_work_area[4096] __aligned(PAGE_SIZE) __section(data);
-static bool have_vt220 __section(data);
-static bool have_linemode __section(data);
+static char _sclp_work_area[4096] __aligned(PAGE_SIZE);
+static bool have_vt220, have_linemode;
 
 static void _sclp_wait_int(void)
 {

@@ -319,34 +319,10 @@ static struct clk emac_clk = {
 	.gpsc		= 1,
 };
 
-/*
- * In order to avoid adding the emac_clk to the clock lookup table twice (and
- * screwing up the linked list in the process) create a separate clock for
- * mdio inheriting the rate from emac_clk.
- */
-static struct clk mdio_clk = {
-	.name		= "mdio",
-	.parent		= &emac_clk,
-};
-
 static struct clk mcasp_clk = {
 	.name		= "mcasp",
 	.parent		= &async3_clk,
 	.lpsc		= DA8XX_LPSC1_McASP0,
-	.gpsc		= 1,
-};
-
-static struct clk mcbsp0_clk = {
-	.name		= "mcbsp0",
-	.parent		= &async3_clk,
-	.lpsc		= DA850_LPSC1_McBSP0,
-	.gpsc		= 1,
-};
-
-static struct clk mcbsp1_clk = {
-	.name		= "mcbsp1",
-	.parent		= &async3_clk,
-	.lpsc		= DA850_LPSC1_McBSP1,
 	.gpsc		= 1,
 };
 
@@ -504,14 +480,11 @@ static struct clk_lookup da850_clks[] = {
 	CLK(NULL,		"arm",		&arm_clk),
 	CLK(NULL,		"rmii",		&rmii_clk),
 	CLK("davinci_emac.1",	NULL,		&emac_clk),
-	CLK("davinci_mdio.0",	"fck",		&mdio_clk),
+	CLK("davinci_mdio.0",	"fck",		&emac_clk),
 	CLK("davinci-mcasp.0",	NULL,		&mcasp_clk),
-	CLK("davinci-mcbsp.0",	NULL,		&mcbsp0_clk),
-	CLK("davinci-mcbsp.1",	NULL,		&mcbsp1_clk),
 	CLK("da8xx_lcdc.0",	"fck",		&lcdc_clk),
 	CLK("da830-mmc.0",	NULL,		&mmcsd0_clk),
 	CLK("da830-mmc.1",	NULL,		&mmcsd1_clk),
-	CLK("ti-aemif",		NULL,		&aemif_clk),
 	CLK(NULL,		"aemif",	&aemif_clk),
 	CLK(NULL,		"usb11",	&usb11_clk),
 	CLK(NULL,		"usb20",	&usb20_clk),

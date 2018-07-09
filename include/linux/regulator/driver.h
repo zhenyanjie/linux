@@ -113,14 +113,10 @@ struct regulator_linear_range {
  *               stabilise after being enabled, in microseconds.
  * @set_ramp_delay: Set the ramp delay for the regulator. The driver should
  *		select ramp delay equal to or less than(closest) ramp_delay.
- * @set_voltage_time: Time taken for the regulator voltage output voltage
- *               to stabilise after being set to a new value, in microseconds.
- *               The function receives the from and to voltage as input, it
- *               should return the worst case.
  * @set_voltage_time_sel: Time taken for the regulator voltage output voltage
  *               to stabilise after being set to a new value, in microseconds.
- *               The function receives the from and to voltage selector as
- *               input, it should return the worst case.
+ *               The function provides the from and to voltage selector, the
+ *               function should return the worst case.
  * @set_soft_start: Enable soft start for the regulator.
  *
  * @set_suspend_voltage: Set the voltage for the regulator when the system
@@ -172,8 +168,6 @@ struct regulator_ops {
 	/* Time taken to enable or set voltage on the regulator */
 	int (*enable_time) (struct regulator_dev *);
 	int (*set_ramp_delay) (struct regulator_dev *, int ramp_delay);
-	int (*set_voltage_time) (struct regulator_dev *, int old_uV,
-				 int new_uV);
 	int (*set_voltage_time_sel) (struct regulator_dev *,
 				     unsigned int old_selector,
 				     unsigned int new_selector);
@@ -424,8 +418,6 @@ struct regulator_dev {
 
 	struct regulator_enable_gpio *ena_pin;
 	unsigned int ena_gpio_state:1;
-
-	unsigned int is_switch:1;
 
 	/* time when this regulator was disabled last time */
 	unsigned long last_off_jiffy;

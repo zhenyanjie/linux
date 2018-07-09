@@ -113,7 +113,7 @@ static const char max44000_int_time_avail_str[] =
 	"0.100 "
 	"0.025 "
 	"0.00625 "
-	"0.0015625";
+	"0.001625";
 
 /* Available scales (internal to ulux) with pretty manual alignment: */
 static const int max44000_scale_avail_ulux_array[] = {
@@ -511,8 +511,7 @@ static irqreturn_t max44000_trigger_handler(int irq, void *p)
 	}
 	mutex_unlock(&data->lock);
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buf,
-					   iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns());
 	iio_trigger_notify_done(indio_dev->trig);
 	return IRQ_HANDLED;
 

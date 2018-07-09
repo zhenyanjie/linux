@@ -258,8 +258,7 @@ static void proc_thermal_notify(acpi_handle handle, u32 event, void *data)
 	switch (event) {
 	case PROC_POWER_CAPABILITY_CHANGED:
 		proc_thermal_read_ppcc(proc_priv);
-		int340x_thermal_zone_device_update(proc_priv->int340x_zone,
-				THERMAL_DEVICE_POWER_CAPABILITY_CHANGED);
+		int340x_thermal_zone_device_update(proc_priv->int340x_zone);
 		break;
 	default:
 		dev_err(proc_priv->dev, "Unsupported event [0x%x]\n", event);

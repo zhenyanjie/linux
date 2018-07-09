@@ -49,7 +49,6 @@
 #include <linux/slab.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
-#include <linux/sctp.h>
 #include <linux/netdevice.h>
 #ifdef CONFIG_NET_CLS_ACT
 #include <net/pkt_sched.h>
@@ -903,7 +902,6 @@ static struct sk_buff *__skb_clone(struct sk_buff *n, struct sk_buff *skb)
 	n->hdr_len = skb->nohdr ? skb_headroom(skb) : skb->hdr_len;
 	n->cloned = 1;
 	n->nohdr = 0;
-	n->peeked = 0;
 	n->destructor = NULL;
 	C(tail);
 	C(end);
@@ -1963,13 +1961,37 @@ static bool __skb_splice_bits(struct sk_buff *skb, struct pipe_inode_info *pipe,
 	return false;
 }
 
+ssize_t skb_socket_splice(struct sock *sk,
+			  struct pipe_inode_info *pipe,
+			  struct splice_pipe_desc *spd)
+{
+	int ret;
+
+	/* Drop the socket lock, otherwise we have reverse
+	 * locking dependencies between sk_lock and i_mutex
+	 * here as compared to sendfile(). We enter here
+	 * with the socket lock held, and splice_to_pipe() will
+	 * grab the pipe inode lock. For sendfile() emulation,
+	 * we call into ->sendpage() with the i_mutex lock held
+	 * and networking will grab the socket lock.
+	 */
+	release_sock(sk);
+	ret = splice_to_pipe(pipe, spd);
+	lock_sock(sk);
+
+	return ret;
+}
+
 /*
  * Map data from the skb to a pipe. Should handle both the linear part,
  * the fragments, and the frag list.
  */
 int skb_splice_bits(struct sk_buff *skb, struct sock *sk, unsigned int offset,
 		    struct pipe_inode_info *pipe, unsigned int tlen,
-		    unsigned int flags)
+		    unsigned int flags,
+		    ssize_t (*splice_cb)(struct sock *,
+					 struct pipe_inode_info *,
+					 struct splice_pipe_desc *))
 {
 	struct partial_page partial[MAX_SKB_FRAGS];
 	struct page *pages[MAX_SKB_FRAGS];
@@ -1986,7 +2008,7 @@ int skb_splice_bits(struct sk_buff *skb, struct sock *sk, unsigned int offset,
 	__skb_splice_bits(skb, pipe, &offset, &tlen, &spd, sk);
 
 	if (spd.nr_pages)
-		ret = splice_to_pipe(pipe, &spd);
+		ret = splice_cb(sk, pipe, &spd);
 
 	return ret;
 }
@@ -2422,25 +2444,6 @@ void skb_queue_purge(struct sk_buff_head *list)
 EXPORT_SYMBOL(skb_queue_purge);
 
 /**
- *	skb_rbtree_purge - empty a skb rbtree
- *	@root: root of the rbtree to empty
- *
- *	Delete all buffers on an &sk_buff rbtree. Each buffer is removed from
- *	the list and one reference dropped. This function does not take
- *	any lock. Synchronization should be handled by the caller (e.g., TCP
- *	out-of-order queue is protected by the socket lock).
- */
-void skb_rbtree_purge(struct rb_root *root)
-{
-	struct sk_buff *skb, *next;
-
-	rbtree_postorder_for_each_entry_safe(skb, next, root, rbnode)
-		kfree_skb(skb);
-
-	*root = RB_ROOT;
-}
-
-/**
  *	skb_queue_head - queue a buffer at the list head
  *	@list: list to use
  *	@newsk: buffer to queue
@@ -2616,8 +2619,7 @@ void skb_split(struct sk_buff *skb, struct sk_buff *skb1, const u32 len)
 {
 	int pos = skb_headlen(skb);
 
-	skb_shinfo(skb1)->tx_flags |= skb_shinfo(skb)->tx_flags &
-				      SKBTX_SHARED_FRAG;
+	skb_shinfo(skb1)->tx_flags = skb_shinfo(skb)->tx_flags & SKBTX_SHARED_FRAG;
 	if (len < pos)	/* Split line is inside header. */
 		skb_split_inside_header(skb, skb1, len, pos);
 	else		/* Second chunk has no header, nothing to copy. */
@@ -3075,41 +3077,11 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	sg = !!(features & NETIF_F_SG);
 	csum = !!can_checksum_protocol(features, proto);
 
-	if (sg && csum && (mss != GSO_BY_FRAGS))  {
-		if (!(features & NETIF_F_GSO_PARTIAL)) {
-			struct sk_buff *iter;
-			unsigned int frag_len;
-
-			if (!list_skb ||
-			    !net_gso_ok(features, skb_shinfo(head_skb)->gso_type))
-				goto normal;
-
-			/* If we get here then all the required
-			 * GSO features except frag_list are supported.
-			 * Try to split the SKB to multiple GSO SKBs
-			 * with no frag_list.
-			 * Currently we can do that only when the buffers don't
-			 * have a linear part and all the buffers except
-			 * the last are of the same length.
-			 */
-			frag_len = list_skb->len;
-			skb_walk_frags(head_skb, iter) {
-				if (frag_len != iter->len && iter->next)
-					goto normal;
-				if (skb_headlen(iter))
-					goto normal;
-
-				len -= iter->len;
-			}
-
-			if (len != frag_len)
-				goto normal;
-		}
-
-		/* GSO partial only requires that we trim off any excess that
-		 * doesn't fit into an MSS sized block, so take care of that
-		 * now.
-		 */
+	/* GSO partial only requires that we trim off any excess that
+	 * doesn't fit into an MSS sized block, so take care of that
+	 * now.
+	 */
+	if (sg && csum && (features & NETIF_F_GSO_PARTIAL)) {
 		partial_segs = len / mss;
 		if (partial_segs > 1)
 			mss *= partial_segs;
@@ -3117,7 +3089,6 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 			partial_segs = 0;
 	}
 
-normal:
 	headroom = skb_headroom(head_skb);
 	pos = skb_headlen(head_skb);
 
@@ -3127,13 +3098,9 @@ normal:
 		int hsize;
 		int size;
 
-		if (unlikely(mss == GSO_BY_FRAGS)) {
-			len = list_skb->len;
-		} else {
-			len = head_skb->len - offset;
-			if (len > mss)
-				len = mss;
-		}
+		len = head_skb->len - offset;
+		if (len > mss)
+			len = mss;
 
 		hsize = skb_headlen(head_skb) - offset;
 		if (hsize < 0)
@@ -3230,8 +3197,8 @@ normal:
 		skb_copy_from_linear_data_offset(head_skb, offset,
 						 skb_put(nskb, hsize), hsize);
 
-		skb_shinfo(nskb)->tx_flags |= skb_shinfo(head_skb)->tx_flags &
-					      SKBTX_SHARED_FRAG;
+		skb_shinfo(nskb)->tx_flags = skb_shinfo(head_skb)->tx_flags &
+			SKBTX_SHARED_FRAG;
 
 		while (pos < offset + len) {
 			if (i >= nfrags) {
@@ -3309,29 +3276,21 @@ perform_csum_check:
 	 */
 	segs->prev = tail;
 
+	/* Update GSO info on first skb in partial sequence. */
 	if (partial_segs) {
-		struct sk_buff *iter;
 		int type = skb_shinfo(head_skb)->gso_type;
-		unsigned short gso_size = skb_shinfo(head_skb)->gso_size;
 
 		/* Update type to add partial and then remove dodgy if set */
-		type |= (features & NETIF_F_GSO_PARTIAL) / NETIF_F_GSO_PARTIAL * SKB_GSO_PARTIAL;
+		type |= SKB_GSO_PARTIAL;
 		type &= ~SKB_GSO_DODGY;
 
 		/* Update GSO info and prepare to start updating headers on
 		 * our way back down the stack of protocols.
 		 */
-		for (iter = segs; iter; iter = iter->next) {
-			skb_shinfo(iter)->gso_size = gso_size;
-			skb_shinfo(iter)->gso_segs = partial_segs;
-			skb_shinfo(iter)->gso_type = type;
-			SKB_GSO_CB(iter)->data_offset = skb_headroom(iter) + doffset;
-		}
-
-		if (tail->len - doffset <= gso_size)
-			skb_shinfo(tail)->gso_size = 0;
-		else if (tail != segs)
-			skb_shinfo(tail)->gso_segs = DIV_ROUND_UP(tail->len - doffset, gso_size);
+		skb_shinfo(segs)->gso_size = skb_shinfo(head_skb)->gso_size;
+		skb_shinfo(segs)->gso_segs = partial_segs;
+		skb_shinfo(segs)->gso_type = type;
+		SKB_GSO_CB(segs)->data_offset = skb_headroom(segs) + doffset;
 	}
 
 	/* Following permits correct backpressure, for protocols
@@ -3461,7 +3420,6 @@ done:
 	NAPI_GRO_CB(skb)->same_flow = 1;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(skb_gro_receive);
 
 void __init skb_init(void)
 {
@@ -3477,17 +3435,23 @@ void __init skb_init(void)
 						NULL);
 }
 
+/**
+ *	skb_to_sgvec - Fill a scatter-gather list from a socket buffer
+ *	@skb: Socket buffer containing the buffers to be mapped
+ *	@sg: The scatter-gather list to map into
+ *	@offset: The offset into the buffer's contents to start mapping
+ *	@len: Length of buffer space to be mapped
+ *
+ *	Fill the specified scatter-gather list with mappings/pointers into a
+ *	region of the buffer space attached to a socket buffer.
+ */
 static int
-__skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset, int len,
-	       unsigned int recursion_level)
+__skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset, int len)
 {
 	int start = skb_headlen(skb);
 	int i, copy = start - offset;
 	struct sk_buff *frag_iter;
 	int elt = 0;
-
-	if (unlikely(recursion_level >= 24))
-		return -EMSGSIZE;
 
 	if (copy > 0) {
 		if (copy > len)
@@ -3507,8 +3471,6 @@ __skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset, int len,
 		end = start + skb_frag_size(&skb_shinfo(skb)->frags[i]);
 		if ((copy = end - offset) > 0) {
 			skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
-			if (unlikely(elt && sg_is_last(&sg[elt - 1])))
-				return -EMSGSIZE;
 
 			if (copy > len)
 				copy = len;
@@ -3523,22 +3485,16 @@ __skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset, int len,
 	}
 
 	skb_walk_frags(skb, frag_iter) {
-		int end, ret;
+		int end;
 
 		WARN_ON(start > offset + len);
 
 		end = start + frag_iter->len;
 		if ((copy = end - offset) > 0) {
-			if (unlikely(elt && sg_is_last(&sg[elt - 1])))
-				return -EMSGSIZE;
-
 			if (copy > len)
 				copy = len;
-			ret = __skb_to_sgvec(frag_iter, sg+elt, offset - start,
-					      copy, recursion_level + 1);
-			if (unlikely(ret < 0))
-				return ret;
-			elt += ret;
+			elt += __skb_to_sgvec(frag_iter, sg+elt, offset - start,
+					      copy);
 			if ((len -= copy) == 0)
 				return elt;
 			offset += copy;
@@ -3548,31 +3504,6 @@ __skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset, int len,
 	BUG_ON(len);
 	return elt;
 }
-
-/**
- *	skb_to_sgvec - Fill a scatter-gather list from a socket buffer
- *	@skb: Socket buffer containing the buffers to be mapped
- *	@sg: The scatter-gather list to map into
- *	@offset: The offset into the buffer's contents to start mapping
- *	@len: Length of buffer space to be mapped
- *
- *	Fill the specified scatter-gather list with mappings/pointers into a
- *	region of the buffer space attached to a socket buffer. Returns either
- *	the number of scatterlist items used, or -EMSGSIZE if the contents
- *	could not fit.
- */
-int skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset, int len)
-{
-	int nsg = __skb_to_sgvec(skb, sg, offset, len, 0);
-
-	if (nsg <= 0)
-		return nsg;
-
-	sg_mark_end(&sg[nsg - 1]);
-
-	return nsg;
-}
-EXPORT_SYMBOL_GPL(skb_to_sgvec);
 
 /* As compared with skb_to_sgvec, skb_to_sgvec_nomark only map skb to given
  * sglist without mark the sg which contain last skb data as the end.
@@ -3596,11 +3527,19 @@ EXPORT_SYMBOL_GPL(skb_to_sgvec);
 int skb_to_sgvec_nomark(struct sk_buff *skb, struct scatterlist *sg,
 			int offset, int len)
 {
-	return __skb_to_sgvec(skb, sg, offset, len, 0);
+	return __skb_to_sgvec(skb, sg, offset, len);
 }
 EXPORT_SYMBOL_GPL(skb_to_sgvec_nomark);
 
+int skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset, int len)
+{
+	int nsg = __skb_to_sgvec(skb, sg, offset, len);
 
+	sg_mark_end(&sg[nsg - 1]);
+
+	return nsg;
+}
+EXPORT_SYMBOL_GPL(skb_to_sgvec);
 
 /**
  *	skb_cow_data - Check that a socket buffer's data buffers are writable
@@ -3738,7 +3677,7 @@ int sock_queue_err_skb(struct sock *sk, struct sk_buff *skb)
 
 	skb_queue_tail(&sk->sk_error_queue, skb);
 	if (!sock_flag(sk, SOCK_DEAD))
-		sk->sk_error_report(sk);
+		sk->sk_data_ready(sk);
 	return 0;
 }
 EXPORT_SYMBOL(sock_queue_err_skb);
@@ -3810,7 +3749,6 @@ static void __skb_complete_tx_timestamp(struct sk_buff *skb,
 	serr->ee.ee_errno = ENOMSG;
 	serr->ee.ee_origin = SO_EE_ORIGIN_TIMESTAMPING;
 	serr->ee.ee_info = tstype;
-	serr->header.h4.iif = skb->dev ? skb->dev->ifindex : 0;
 	if (sk->sk_tsflags & SOF_TIMESTAMPING_OPT_ID) {
 		serr->ee.ee_data = skb_shinfo(skb)->tskey;
 		if (sk->sk_protocol == IPPROTO_TCP &&
@@ -3844,20 +3782,15 @@ void skb_complete_tx_timestamp(struct sk_buff *skb,
 	struct sock *sk = skb->sk;
 
 	if (!skb_may_tx_timestamp(sk, false))
-		goto err;
-
-	/* Take a reference to prevent skb_orphan() from freeing the socket,
-	 * but only if the socket refcount is not zero.
-	 */
-	if (likely(atomic_inc_not_zero(&sk->sk_refcnt))) {
-		*skb_hwtstamps(skb) = *hwtstamps;
-		__skb_complete_tx_timestamp(skb, sk, SCM_TSTAMP_SND);
-		sock_put(sk);
 		return;
-	}
 
-err:
-	kfree_skb(skb);
+	/* take a reference to prevent skb_orphan() from freeing the socket */
+	sock_hold(sk);
+
+	*skb_hwtstamps(skb) = *hwtstamps;
+	__skb_complete_tx_timestamp(skb, sk, SCM_TSTAMP_SND);
+
+	sock_put(sk);
 }
 EXPORT_SYMBOL_GPL(skb_complete_tx_timestamp);
 
@@ -3883,8 +3816,7 @@ void __skb_tstamp_tx(struct sk_buff *orig_skb,
 		return;
 
 	if (tsonly) {
-		skb_shinfo(skb)->tx_flags |= skb_shinfo(orig_skb)->tx_flags &
-					     SKBTX_ANY_TSTAMP;
+		skb_shinfo(skb)->tx_flags = skb_shinfo(orig_skb)->tx_flags;
 		skb_shinfo(skb)->tskey = skb_shinfo(orig_skb)->tskey;
 	}
 
@@ -3909,7 +3841,7 @@ void skb_complete_wifi_ack(struct sk_buff *skb, bool acked)
 {
 	struct sock *sk = skb->sk;
 	struct sock_exterr_skb *serr;
-	int err = 1;
+	int err;
 
 	skb->wifi_acked_valid = 1;
 	skb->wifi_acked = acked;
@@ -3919,15 +3851,14 @@ void skb_complete_wifi_ack(struct sk_buff *skb, bool acked)
 	serr->ee.ee_errno = ENOMSG;
 	serr->ee.ee_origin = SO_EE_ORIGIN_TXSTATUS;
 
-	/* Take a reference to prevent skb_orphan() from freeing the socket,
-	 * but only if the socket refcount is not zero.
-	 */
-	if (likely(atomic_inc_not_zero(&sk->sk_refcnt))) {
-		err = sock_queue_err_skb(sk, skb);
-		sock_put(sk);
-	}
+	/* take a reference to prevent skb_orphan() from freeing the socket */
+	sock_hold(sk);
+
+	err = sock_queue_err_skb(sk, skb);
 	if (err)
 		kfree_skb(skb);
+
+	sock_put(sk);
 }
 EXPORT_SYMBOL_GPL(skb_complete_wifi_ack);
 
@@ -4401,7 +4332,6 @@ void skb_scrub_packet(struct sk_buff *skb, bool xnet)
 	if (!xnet)
 		return;
 
-	ipvs_reset(skb);
 	skb_orphan(skb);
 	skb->mark = 0;
 }
@@ -4430,8 +4360,6 @@ unsigned int skb_gso_transport_seglen(const struct sk_buff *skb)
 			thlen += inner_tcp_hdrlen(skb);
 	} else if (likely(shinfo->gso_type & (SKB_GSO_TCPV4 | SKB_GSO_TCPV6))) {
 		thlen = tcp_hdrlen(skb);
-	} else if (unlikely(shinfo->gso_type & SKB_GSO_SCTP)) {
-		thlen = sizeof(struct sctphdr);
 	}
 	/* UFO sets gso_size to the size of the fragmentation
 	 * payload, i.e. the size of the L4 (UDP) header is already
@@ -4441,52 +4369,15 @@ unsigned int skb_gso_transport_seglen(const struct sk_buff *skb)
 }
 EXPORT_SYMBOL_GPL(skb_gso_transport_seglen);
 
-/**
- * skb_gso_validate_mtu - Return in case such skb fits a given MTU
- *
- * @skb: GSO skb
- * @mtu: MTU to validate against
- *
- * skb_gso_validate_mtu validates if a given skb will fit a wanted MTU
- * once split.
- */
-bool skb_gso_validate_mtu(const struct sk_buff *skb, unsigned int mtu)
-{
-	const struct skb_shared_info *shinfo = skb_shinfo(skb);
-	const struct sk_buff *iter;
-	unsigned int hlen;
-
-	hlen = skb_gso_network_seglen(skb);
-
-	if (shinfo->gso_size != GSO_BY_FRAGS)
-		return hlen <= mtu;
-
-	/* Undo this so we can re-use header sizes */
-	hlen -= GSO_BY_FRAGS;
-
-	skb_walk_frags(skb, iter) {
-		if (hlen + skb_headlen(iter) > mtu)
-			return false;
-	}
-
-	return true;
-}
-EXPORT_SYMBOL_GPL(skb_gso_validate_mtu);
-
 static struct sk_buff *skb_reorder_vlan_header(struct sk_buff *skb)
 {
-	int mac_len;
-
 	if (skb_cow(skb, skb_headroom(skb)) < 0) {
 		kfree_skb(skb);
 		return NULL;
 	}
 
-	mac_len = skb->data - skb_mac_header(skb);
-	if (likely(mac_len > VLAN_HLEN + ETH_TLEN)) {
-		memmove(skb_mac_header(skb) + VLAN_HLEN, skb_mac_header(skb),
-			mac_len - VLAN_HLEN - ETH_TLEN);
-	}
+	memmove(skb->data - ETH_HLEN, skb->data - skb->mac_len - VLAN_HLEN,
+		2 * ETH_ALEN);
 	skb->mac_header += VLAN_HLEN;
 	return skb;
 }
@@ -4543,24 +4434,17 @@ int skb_ensure_writable(struct sk_buff *skb, int write_len)
 }
 EXPORT_SYMBOL(skb_ensure_writable);
 
-/* remove VLAN header from packet and update csum accordingly.
- * expects a non skb_vlan_tag_present skb with a vlan tag payload
- */
-int __skb_vlan_pop(struct sk_buff *skb, u16 *vlan_tci)
+/* remove VLAN header from packet and update csum accordingly. */
+static int __skb_vlan_pop(struct sk_buff *skb, u16 *vlan_tci)
 {
 	struct vlan_hdr *vhdr;
-	int offset = skb->data - skb_mac_header(skb);
+	unsigned int offset = skb->data - skb_mac_header(skb);
 	int err;
 
-	if (WARN_ONCE(offset,
-		      "__skb_vlan_pop got skb with skb->data not at mac header (offset %d)\n",
-		      offset)) {
-		return -EINVAL;
-	}
-
+	__skb_push(skb, offset);
 	err = skb_ensure_writable(skb, VLAN_ETH_HLEN);
 	if (unlikely(err))
-		return err;
+		goto pull;
 
 	skb_postpull_rcsum(skb, skb->data + (2 * ETH_ALEN), VLAN_HLEN);
 
@@ -4577,14 +4461,12 @@ int __skb_vlan_pop(struct sk_buff *skb, u16 *vlan_tci)
 		skb_set_network_header(skb, ETH_HLEN);
 
 	skb_reset_mac_len(skb);
+pull:
+	__skb_pull(skb, offset);
 
 	return err;
 }
-EXPORT_SYMBOL(__skb_vlan_pop);
 
-/* Pop a vlan tag either from hwaccel or from payload.
- * Expects skb->data at mac header.
- */
 int skb_vlan_pop(struct sk_buff *skb)
 {
 	u16 vlan_tci;
@@ -4594,7 +4476,9 @@ int skb_vlan_pop(struct sk_buff *skb)
 	if (likely(skb_vlan_tag_present(skb))) {
 		skb->vlan_tci = 0;
 	} else {
-		if (unlikely(!eth_type_vlan(skb->protocol)))
+		if (unlikely((skb->protocol != htons(ETH_P_8021Q) &&
+			      skb->protocol != htons(ETH_P_8021AD)) ||
+			     skb->len < VLAN_ETH_HLEN))
 			return 0;
 
 		err = __skb_vlan_pop(skb, &vlan_tci);
@@ -4602,7 +4486,9 @@ int skb_vlan_pop(struct sk_buff *skb)
 			return err;
 	}
 	/* move next vlan tag to hw accel tag */
-	if (likely(!eth_type_vlan(skb->protocol)))
+	if (likely((skb->protocol != htons(ETH_P_8021Q) &&
+		    skb->protocol != htons(ETH_P_8021AD)) ||
+		   skb->len < VLAN_ETH_HLEN))
 		return 0;
 
 	vlan_proto = skb->protocol;
@@ -4615,30 +4501,29 @@ int skb_vlan_pop(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(skb_vlan_pop);
 
-/* Push a vlan tag either into hwaccel or into payload (if hwaccel tag present).
- * Expects skb->data at mac header.
- */
 int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci)
 {
 	if (skb_vlan_tag_present(skb)) {
-		int offset = skb->data - skb_mac_header(skb);
+		unsigned int offset = skb->data - skb_mac_header(skb);
 		int err;
 
-		if (WARN_ONCE(offset,
-			      "skb_vlan_push got skb with skb->data not at mac header (offset %d)\n",
-			      offset)) {
-			return -EINVAL;
-		}
-
+		/* __vlan_insert_tag expect skb->data pointing to mac header.
+		 * So change skb->data before calling it and change back to
+		 * original position later
+		 */
+		__skb_push(skb, offset);
 		err = __vlan_insert_tag(skb, skb->vlan_proto,
 					skb_vlan_tag_get(skb));
-		if (err)
+		if (err) {
+			__skb_pull(skb, offset);
 			return err;
+		}
 
 		skb->protocol = skb->vlan_proto;
 		skb->mac_len += VLAN_HLEN;
 
 		skb_postpush_rcsum(skb, skb->data + (2 * ETH_ALEN), VLAN_HLEN);
+		__skb_pull(skb, offset);
 	}
 	__vlan_hwaccel_put_tag(skb, vlan_proto, vlan_tci);
 	return 0;

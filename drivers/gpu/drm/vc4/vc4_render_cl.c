@@ -45,8 +45,6 @@ struct vc4_rcl_setup {
 
 	struct drm_gem_cma_object *rcl;
 	u32 next_offset;
-
-	u32 next_write_bo_index;
 };
 
 static inline void rcl_u8(struct vc4_rcl_setup *setup, u8 val)
@@ -409,8 +407,6 @@ static int vc4_rcl_msaa_surface_setup(struct vc4_exec_info *exec,
 	if (!*obj)
 		return -EINVAL;
 
-	exec->rcl_write_bo[exec->rcl_write_bo_count++] = *obj;
-
 	if (surf->offset & 0xf) {
 		DRM_ERROR("MSAA write must be 16b aligned.\n");
 		return -EINVAL;
@@ -421,8 +417,7 @@ static int vc4_rcl_msaa_surface_setup(struct vc4_exec_info *exec,
 
 static int vc4_rcl_surface_setup(struct vc4_exec_info *exec,
 				 struct drm_gem_cma_object **obj,
-				 struct drm_vc4_submit_rcl_surface *surf,
-				 bool is_write)
+				 struct drm_vc4_submit_rcl_surface *surf)
 {
 	uint8_t tiling = VC4_GET_FIELD(surf->bits,
 				       VC4_LOADSTORE_TILE_BUFFER_TILING);
@@ -445,9 +440,6 @@ static int vc4_rcl_surface_setup(struct vc4_exec_info *exec,
 	if (!*obj)
 		return -EINVAL;
 
-	if (is_write)
-		exec->rcl_write_bo[exec->rcl_write_bo_count++] = *obj;
-
 	if (surf->flags & VC4_SUBMIT_RCL_SURFACE_READ_IS_FULL_RES) {
 		if (surf == &exec->args->zs_write) {
 			DRM_ERROR("general zs write may not be a full-res.\n");
@@ -461,7 +453,7 @@ static int vc4_rcl_surface_setup(struct vc4_exec_info *exec,
 		}
 
 		ret = vc4_full_res_bounds_check(exec, *obj, surf);
-		if (ret)
+		if (!ret)
 			return ret;
 
 		return 0;
@@ -550,8 +542,6 @@ vc4_rcl_render_config_surface_setup(struct vc4_exec_info *exec,
 	if (!*obj)
 		return -EINVAL;
 
-	exec->rcl_write_bo[exec->rcl_write_bo_count++] = *obj;
-
 	if (tiling > VC4_TILING_FORMAT_LT) {
 		DRM_ERROR("Bad tiling format\n");
 		return -EINVAL;
@@ -609,18 +599,15 @@ int vc4_get_rcl(struct drm_device *dev, struct vc4_exec_info *exec)
 	if (ret)
 		return ret;
 
-	ret = vc4_rcl_surface_setup(exec, &setup.color_read, &args->color_read,
-				    false);
+	ret = vc4_rcl_surface_setup(exec, &setup.color_read, &args->color_read);
 	if (ret)
 		return ret;
 
-	ret = vc4_rcl_surface_setup(exec, &setup.zs_read, &args->zs_read,
-				    false);
+	ret = vc4_rcl_surface_setup(exec, &setup.zs_read, &args->zs_read);
 	if (ret)
 		return ret;
 
-	ret = vc4_rcl_surface_setup(exec, &setup.zs_write, &args->zs_write,
-				    true);
+	ret = vc4_rcl_surface_setup(exec, &setup.zs_write, &args->zs_write);
 	if (ret)
 		return ret;
 

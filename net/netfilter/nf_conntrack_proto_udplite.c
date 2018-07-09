@@ -54,8 +54,7 @@ static bool udplite_pkt_to_tuple(const struct sk_buff *skb,
 	const struct udphdr *hp;
 	struct udphdr _hdr;
 
-	/* Actually only need first 4 bytes to get ports. */
-	hp = skb_header_pointer(skb, dataoff, 4, &_hdr);
+	hp = skb_header_pointer(skb, dataoff, sizeof(_hdr), &_hdr);
 	if (hp == NULL)
 		return false;
 

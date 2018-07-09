@@ -19,7 +19,6 @@
 #include <linux/clk-provider.h>
 #include <linux/ioport.h>
 #include <linux/of_address.h>
-#include <linux/of_graph.h>
 #include <linux/of_irq.h>
 #include <linux/regmap.h>
 
@@ -52,22 +51,10 @@ static void sun4i_crtc_atomic_flush(struct drm_crtc *crtc,
 {
 	struct sun4i_crtc *scrtc = drm_crtc_to_sun4i_crtc(crtc);
 	struct sun4i_drv *drv = scrtc->drv;
-	struct drm_pending_vblank_event *event = crtc->state->event;
 
 	DRM_DEBUG_DRIVER("Committing plane changes\n");
 
 	sun4i_backend_commit(drv->backend);
-
-	if (event) {
-		crtc->state->event = NULL;
-
-		spin_lock_irq(&crtc->dev->event_lock);
-		if (drm_crtc_vblank_get(crtc) == 0)
-			drm_crtc_arm_vblank_event(crtc, event);
-		else
-			drm_crtc_send_vblank_event(crtc, event);
-		spin_unlock_irq(&crtc->dev->event_lock);
-	}
 }
 
 static void sun4i_crtc_disable(struct drm_crtc *crtc)
@@ -136,10 +123,6 @@ struct sun4i_crtc *sun4i_crtc_init(struct drm_device *drm)
 	}
 
 	drm_crtc_helper_add(&scrtc->crtc, &sun4i_crtc_helper_funcs);
-
-	/* Set crtc.port to output port node of the tcon */
-	scrtc->crtc.port = of_graph_get_port_by_id(drv->tcon->dev->of_node,
-						   1);
 
 	return scrtc;
 }

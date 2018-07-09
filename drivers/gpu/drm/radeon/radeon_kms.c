@@ -63,10 +63,7 @@ int radeon_driver_unload_kms(struct drm_device *dev)
 	if (rdev->rmmio == NULL)
 		goto done_free;
 
-	if (radeon_is_px(dev)) {
-		pm_runtime_get_sync(dev->dev);
-		pm_runtime_forbid(dev->dev);
-	}
+	pm_runtime_get_sync(dev->dev);
 
 	radeon_kfd_device_fini(rdev);
 
@@ -641,11 +638,11 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 	if (rdev->family >= CHIP_CAYMAN) {
 		struct radeon_fpriv *fpriv;
 		struct radeon_vm *vm;
+		int r;
 
 		fpriv = kzalloc(sizeof(*fpriv), GFP_KERNEL);
 		if (unlikely(!fpriv)) {
-			r = -ENOMEM;
-			goto out_suspend;
+			return -ENOMEM;
 		}
 
 		if (rdev->accel_working) {
@@ -653,14 +650,14 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 			r = radeon_vm_init(rdev, vm);
 			if (r) {
 				kfree(fpriv);
-				goto out_suspend;
+				return r;
 			}
 
 			r = radeon_bo_reserve(rdev->ring_tmp_bo.bo, false);
 			if (r) {
 				radeon_vm_fini(rdev, vm);
 				kfree(fpriv);
-				goto out_suspend;
+				return r;
 			}
 
 			/* map the ib pool buffer read only into
@@ -674,16 +671,15 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 			if (r) {
 				radeon_vm_fini(rdev, vm);
 				kfree(fpriv);
-				goto out_suspend;
+				return r;
 			}
 		}
 		file_priv->driver_priv = fpriv;
 	}
 
-out_suspend:
 	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
-	return r;
+	return 0;
 }
 
 /**
@@ -718,8 +714,6 @@ void radeon_driver_postclose_kms(struct drm_device *dev,
 		kfree(fpriv);
 		file_priv->driver_priv = NULL;
 	}
-	pm_runtime_mark_last_busy(dev->dev);
-	pm_runtime_put_autosuspend(dev->dev);
 }
 
 /**
@@ -735,8 +729,6 @@ void radeon_driver_preclose_kms(struct drm_device *dev,
 				struct drm_file *file_priv)
 {
 	struct radeon_device *rdev = dev->dev_private;
-
-	pm_runtime_get_sync(dev->dev);
 
 	mutex_lock(&rdev->gem.mutex);
 	if (rdev->hyperz_filp == file_priv)

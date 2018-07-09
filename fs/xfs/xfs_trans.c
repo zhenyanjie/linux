@@ -217,7 +217,7 @@ undo_log:
 
 undo_blocks:
 	if (blocks > 0) {
-		xfs_mod_fdblocks(tp->t_mountp, (int64_t)blocks, rsvd);
+		xfs_mod_fdblocks(tp->t_mountp, -((int64_t)blocks), rsvd);
 		tp->t_blk_res = 0;
 	}
 
@@ -260,28 +260,6 @@ xfs_trans_alloc(
 
 	*tpp = tp;
 	return 0;
-}
-
-/*
- * Create an empty transaction with no reservation.  This is a defensive
- * mechanism for routines that query metadata without actually modifying
- * them -- if the metadata being queried is somehow cross-linked (think a
- * btree block pointer that points higher in the tree), we risk deadlock.
- * However, blocks grabbed as part of a transaction can be re-grabbed.
- * The verifiers will notice the corrupt block and the operation will fail
- * back to userspace without deadlocking.
- *
- * Note the zero-length reservation; this transaction MUST be cancelled
- * without any dirty data.
- */
-int
-xfs_trans_alloc_empty(
-	struct xfs_mount		*mp,
-	struct xfs_trans		**tpp)
-{
-	struct xfs_trans_res		resv = {0};
-
-	return xfs_trans_alloc(mp, &resv, 0, 0, XFS_TRANS_NO_WRITECOUNT, tpp);
 }
 
 /*
@@ -340,6 +318,7 @@ xfs_trans_mod_sb(
 		 * in-core superblock's counter.  This should only
 		 * be applied to the on-disk superblock.
 		 */
+		ASSERT(delta < 0);
 		tp->t_res_fdblocks_delta += delta;
 		if (xfs_sb_version_haslazysbcount(&mp->m_sb))
 			flags &= ~XFS_TRANS_SB_DIRTY;

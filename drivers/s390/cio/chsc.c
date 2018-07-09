@@ -95,13 +95,12 @@ struct chsc_ssd_area {
 int chsc_get_ssd_info(struct subchannel_id schid, struct chsc_ssd_info *ssd)
 {
 	struct chsc_ssd_area *ssd_area;
-	unsigned long flags;
 	int ccode;
 	int ret;
 	int i;
 	int mask;
 
-	spin_lock_irqsave(&chsc_page_lock, flags);
+	spin_lock_irq(&chsc_page_lock);
 	memset(chsc_page, 0, PAGE_SIZE);
 	ssd_area = chsc_page;
 	ssd_area->request.length = 0x0010;
@@ -145,7 +144,7 @@ int chsc_get_ssd_info(struct subchannel_id schid, struct chsc_ssd_info *ssd)
 			ssd->fla[i] = ssd_area->fla[i];
 	}
 out:
-	spin_unlock_irqrestore(&chsc_page_lock, flags);
+	spin_unlock_irq(&chsc_page_lock);
 	return ret;
 }
 
@@ -451,7 +450,6 @@ static void chsc_process_sei_link_incident(struct chsc_sei_nt0_area *sei_area)
 
 static void chsc_process_sei_res_acc(struct chsc_sei_nt0_area *sei_area)
 {
-	struct channel_path *chp;
 	struct chp_link link;
 	struct chp_id chpid;
 	int status;
@@ -464,17 +462,10 @@ static void chsc_process_sei_res_acc(struct chsc_sei_nt0_area *sei_area)
 	chpid.id = sei_area->rsid;
 	/* allocate a new channel path structure, if needed */
 	status = chp_get_status(chpid);
-	if (!status)
-		return;
-
-	if (status < 0) {
+	if (status < 0)
 		chp_new(chpid);
-	} else {
-		chp = chpid_to_chp(chpid);
-		mutex_lock(&chp->lock);
-		chp_update_desc(chp);
-		mutex_unlock(&chp->lock);
-	}
+	else if (!status)
+		return;
 	memset(&link, 0, sizeof(struct chp_link));
 	link.chpid = chpid;
 	if ((sei_area->vf & 0xc0) != 0) {
@@ -841,10 +832,9 @@ int __chsc_do_secm(struct channel_subsystem *css, int enable)
 		u32 fmt : 4;
 		u32 : 16;
 	} __attribute__ ((packed)) *secm_area;
-	unsigned long flags;
 	int ret, ccode;
 
-	spin_lock_irqsave(&chsc_page_lock, flags);
+	spin_lock_irq(&chsc_page_lock);
 	memset(chsc_page, 0, PAGE_SIZE);
 	secm_area = chsc_page;
 	secm_area->request.length = 0x0050;
@@ -874,7 +864,7 @@ int __chsc_do_secm(struct channel_subsystem *css, int enable)
 		CIO_CRW_EVENT(2, "chsc: secm failed (rc=%04x)\n",
 			      secm_area->response.code);
 out:
-	spin_unlock_irqrestore(&chsc_page_lock, flags);
+	spin_unlock_irq(&chsc_page_lock);
 	return ret;
 }
 
@@ -917,8 +907,7 @@ int chsc_determine_channel_path_desc(struct chp_id chpid, int fmt, int rfmt,
 	struct chsc_scpd *scpd_area;
 	int ccode, ret;
 
-	if ((rfmt == 1 || rfmt == 0) && c == 1 &&
-	    !css_general_characteristics.fcs)
+	if ((rfmt == 1) && !css_general_characteristics.fcs)
 		return -EINVAL;
 	if ((rfmt == 2) && !css_general_characteristics.cib)
 		return -EINVAL;
@@ -950,6 +939,7 @@ EXPORT_SYMBOL_GPL(chsc_determine_channel_path_desc);
 int chsc_determine_base_channel_path_desc(struct chp_id chpid,
 					  struct channel_path_desc *desc)
 {
+	struct chsc_response_struct *chsc_resp;
 	struct chsc_scpd *scpd_area;
 	unsigned long flags;
 	int ret;
@@ -959,8 +949,8 @@ int chsc_determine_base_channel_path_desc(struct chp_id chpid,
 	ret = chsc_determine_channel_path_desc(chpid, 0, 0, 0, 0, scpd_area);
 	if (ret)
 		goto out;
-
-	memcpy(desc, scpd_area->data, sizeof(*desc));
+	chsc_resp = (void *)&scpd_area->response;
+	memcpy(desc, &chsc_resp->data, sizeof(*desc));
 out:
 	spin_unlock_irqrestore(&chsc_page_lock, flags);
 	return ret;
@@ -969,17 +959,18 @@ out:
 int chsc_determine_fmt1_channel_path_desc(struct chp_id chpid,
 					  struct channel_path_desc_fmt1 *desc)
 {
+	struct chsc_response_struct *chsc_resp;
 	struct chsc_scpd *scpd_area;
 	unsigned long flags;
 	int ret;
 
 	spin_lock_irqsave(&chsc_page_lock, flags);
 	scpd_area = chsc_page;
-	ret = chsc_determine_channel_path_desc(chpid, 0, 1, 1, 0, scpd_area);
+	ret = chsc_determine_channel_path_desc(chpid, 0, 0, 1, 0, scpd_area);
 	if (ret)
 		goto out;
-
-	memcpy(desc, scpd_area->data, sizeof(*desc));
+	chsc_resp = (void *)&scpd_area->response;
+	memcpy(desc, &chsc_resp->data, sizeof(*desc));
 out:
 	spin_unlock_irqrestore(&chsc_page_lock, flags);
 	return ret;
@@ -1002,7 +993,6 @@ chsc_initialize_cmg_chars(struct channel_path *chp, u8 cmcv,
 
 int chsc_get_channel_measurement_chars(struct channel_path *chp)
 {
-	unsigned long flags;
 	int ccode, ret;
 
 	struct {
@@ -1030,9 +1020,9 @@ int chsc_get_channel_measurement_chars(struct channel_path *chp)
 	chp->cmg = -1;
 
 	if (!css_chsc_characteristics.scmc || !css_chsc_characteristics.secm)
-		return -EINVAL;
+		return 0;
 
-	spin_lock_irqsave(&chsc_page_lock, flags);
+	spin_lock_irq(&chsc_page_lock);
 	memset(chsc_page, 0, PAGE_SIZE);
 	scmc_area = chsc_page;
 	scmc_area->request.length = 0x0010;
@@ -1064,7 +1054,7 @@ int chsc_get_channel_measurement_chars(struct channel_path *chp)
 	chsc_initialize_cmg_chars(chp, scmc_area->cmcv,
 				  (struct cmg_chars *) &scmc_area->data);
 out:
-	spin_unlock_irqrestore(&chsc_page_lock, flags);
+	spin_unlock_irq(&chsc_page_lock);
 	return ret;
 }
 
@@ -1145,7 +1135,6 @@ struct css_chsc_char css_chsc_characteristics;
 int __init
 chsc_determine_css_characteristics(void)
 {
-	unsigned long flags;
 	int result;
 	struct {
 		struct chsc_header request;
@@ -1158,7 +1147,7 @@ chsc_determine_css_characteristics(void)
 		u32 chsc_char[508];
 	} __attribute__ ((packed)) *scsc_area;
 
-	spin_lock_irqsave(&chsc_page_lock, flags);
+	spin_lock_irq(&chsc_page_lock);
 	memset(chsc_page, 0, PAGE_SIZE);
 	scsc_area = chsc_page;
 	scsc_area->request.length = 0x0010;
@@ -1180,14 +1169,14 @@ chsc_determine_css_characteristics(void)
 		CIO_CRW_EVENT(2, "chsc: scsc failed (rc=%04x)\n",
 			      scsc_area->response.code);
 exit:
-	spin_unlock_irqrestore(&chsc_page_lock, flags);
+	spin_unlock_irq(&chsc_page_lock);
 	return result;
 }
 
 EXPORT_SYMBOL_GPL(css_general_characteristics);
 EXPORT_SYMBOL_GPL(css_chsc_characteristics);
 
-int chsc_sstpc(void *page, unsigned int op, u16 ctrl, u64 *clock_delta)
+int chsc_sstpc(void *page, unsigned int op, u16 ctrl)
 {
 	struct {
 		struct chsc_header request;
@@ -1197,9 +1186,7 @@ int chsc_sstpc(void *page, unsigned int op, u16 ctrl, u64 *clock_delta)
 		unsigned int ctrl : 16;
 		unsigned int rsvd2[5];
 		struct chsc_header response;
-		unsigned int rsvd3[3];
-		u64 clock_delta;
-		unsigned int rsvd4[2];
+		unsigned int rsvd3[7];
 	} __attribute__ ((packed)) *rr;
 	int rc;
 
@@ -1213,8 +1200,6 @@ int chsc_sstpc(void *page, unsigned int op, u16 ctrl, u64 *clock_delta)
 	if (rc)
 		return -EIO;
 	rc = (rr->response.code == 0x0001) ? 0 : -EIO;
-	if (clock_delta)
-		*clock_delta = rr->clock_delta;
 	return rc;
 }
 

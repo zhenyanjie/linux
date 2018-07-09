@@ -113,7 +113,8 @@ struct iv_tcw_private {
  * and encrypts / decrypts at the same time.
  */
 enum flags { DM_CRYPT_SUSPENDED, DM_CRYPT_KEY_VALID,
-	     DM_CRYPT_SAME_CPU, DM_CRYPT_NO_OFFLOAD };
+	     DM_CRYPT_SAME_CPU, DM_CRYPT_NO_OFFLOAD,
+	     DM_CRYPT_EXIT_THREAD};
 
 /*
  * The fields in here must be read only after initialization.
@@ -180,7 +181,7 @@ struct crypt_config {
 	u8 key[0];
 };
 
-#define MIN_IOS        64
+#define MIN_IOS        16
 
 static void clone_init(struct dm_crypt_io *, struct bio *);
 static void kcryptd_queue_crypt(struct dm_crypt_io *io);
@@ -682,7 +683,7 @@ static int crypt_iv_tcw_whitening(struct crypt_config *cc,
 				  u8 *data)
 {
 	struct iv_tcw_private *tcw = &cc->iv_gen_private.tcw;
-	__le64 sector = cpu_to_le64(dmreq->iv_sector);
+	u64 sector = cpu_to_le64((u64)dmreq->iv_sector);
 	u8 buf[TCW_WHITENING_SIZE];
 	SHASH_DESC_ON_STACK(desc, tcw->crc32_tfm);
 	int i, r;
@@ -721,7 +722,7 @@ static int crypt_iv_tcw_gen(struct crypt_config *cc, u8 *iv,
 			    struct dm_crypt_request *dmreq)
 {
 	struct iv_tcw_private *tcw = &cc->iv_gen_private.tcw;
-	__le64 sector = cpu_to_le64(dmreq->iv_sector);
+	u64 sector = cpu_to_le64((u64)dmreq->iv_sector);
 	u8 *src;
 	int r = 0;
 
@@ -1135,7 +1136,7 @@ static void clone_init(struct dm_crypt_io *io, struct bio *clone)
 	clone->bi_private = io;
 	clone->bi_end_io  = crypt_endio;
 	clone->bi_bdev    = cc->dev->bdev;
-	bio_set_op_attrs(clone, bio_op(io->base_bio), bio_flags(io->base_bio));
+	clone->bi_rw      = io->base_bio->bi_rw;
 }
 
 static int kcryptd_io_read(struct dm_crypt_io *io, gfp_t gfp)
@@ -1206,20 +1207,18 @@ continue_locked:
 		if (!RB_EMPTY_ROOT(&cc->write_tree))
 			goto pop_from_list;
 
-		set_current_state(TASK_INTERRUPTIBLE);
+		if (unlikely(test_bit(DM_CRYPT_EXIT_THREAD, &cc->flags))) {
+			spin_unlock_irq(&cc->write_thread_wait.lock);
+			break;
+		}
+
+		__set_current_state(TASK_INTERRUPTIBLE);
 		__add_wait_queue(&cc->write_thread_wait, &wait);
 
 		spin_unlock_irq(&cc->write_thread_wait.lock);
 
-		if (unlikely(kthread_should_stop())) {
-			set_task_state(current, TASK_RUNNING);
-			remove_wait_queue(&cc->write_thread_wait, &wait);
-			break;
-		}
-
 		schedule();
 
-		set_task_state(current, TASK_RUNNING);
 		spin_lock_irq(&cc->write_thread_wait.lock);
 		__remove_wait_queue(&cc->write_thread_wait, &wait);
 		goto continue_locked;
@@ -1503,15 +1502,12 @@ static int crypt_set_key(struct crypt_config *cc, char *key)
 	if (!cc->key_size && strcmp(key, "-"))
 		goto out;
 
-	/* clear the flag since following operations may invalidate previously valid key */
-	clear_bit(DM_CRYPT_KEY_VALID, &cc->flags);
-
 	if (cc->key_size && crypt_decode_key(cc->key, key, cc->key_size) < 0)
 		goto out;
 
+	set_bit(DM_CRYPT_KEY_VALID, &cc->flags);
+
 	r = crypt_setkey_allcpus(cc);
-	if (!r)
-		set_bit(DM_CRYPT_KEY_VALID, &cc->flags);
 
 out:
 	/* Hex key string not needed after here, so wipe it. */
@@ -1537,8 +1533,13 @@ static void crypt_dtr(struct dm_target *ti)
 	if (!cc)
 		return;
 
-	if (cc->write_thread)
+	if (cc->write_thread) {
+		spin_lock_irq(&cc->write_thread_wait.lock);
+		set_bit(DM_CRYPT_EXIT_THREAD, &cc->flags);
+		wake_up_locked(&cc->write_thread_wait);
+		spin_unlock_irq(&cc->write_thread_wait.lock);
 		kthread_stop(cc->write_thread);
+	}
 
 	if (cc->io_queue)
 		destroy_workqueue(cc->io_queue);
@@ -1910,12 +1911,11 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 	struct crypt_config *cc = ti->private;
 
 	/*
-	 * If bio is REQ_PREFLUSH or REQ_OP_DISCARD, just bypass crypt queues.
-	 * - for REQ_PREFLUSH device-mapper core ensures that no IO is in-flight
-	 * - for REQ_OP_DISCARD caller must use flush if IO ordering matters
+	 * If bio is REQ_FLUSH or REQ_DISCARD, just bypass crypt queues.
+	 * - for REQ_FLUSH device-mapper core ensures that no IO is in-flight
+	 * - for REQ_DISCARD caller must use flush if IO ordering matters
 	 */
-	if (unlikely(bio->bi_opf & REQ_PREFLUSH ||
-	    bio_op(bio) == REQ_OP_DISCARD)) {
+	if (unlikely(bio->bi_rw & (REQ_FLUSH | REQ_DISCARD))) {
 		bio->bi_bdev = cc->dev->bdev;
 		if (bio_sectors(bio))
 			bio->bi_iter.bi_sector = cc->start +

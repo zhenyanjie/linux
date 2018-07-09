@@ -211,7 +211,7 @@ long logfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		li->li_flags = flags;
 		inode_unlock(inode);
 
-		inode->i_ctime = current_time(inode);
+		inode->i_ctime = CURRENT_TIME;
 		mark_inode_dirty_sync(inode);
 		return 0;
 
@@ -244,7 +244,7 @@ static int logfs_setattr(struct dentry *dentry, struct iattr *attr)
 	struct inode *inode = d_inode(dentry);
 	int err = 0;
 
-	err = setattr_prepare(dentry, attr);
+	err = inode_change_ok(inode, attr);
 	if (err)
 		return err;
 

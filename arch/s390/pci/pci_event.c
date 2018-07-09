@@ -145,7 +145,8 @@ static void __zpci_event_availability(struct zpci_ccdf_avail *ccdf)
 	default:
 		break;
 	}
-	pci_dev_put(pdev);
+	if (pdev)
+		pci_dev_put(pdev);
 }
 
 void zpci_event_availability(void *data)

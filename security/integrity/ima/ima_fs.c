@@ -123,6 +123,7 @@ static int ima_measurements_show(struct seq_file *m, void *v)
 	struct ima_template_entry *e;
 	char *template_name;
 	int namelen;
+	u32 pcr = CONFIG_IMA_MEASURE_PCR_IDX;
 	bool is_ima_template = false;
 	int i;
 
@@ -136,10 +137,10 @@ static int ima_measurements_show(struct seq_file *m, void *v)
 
 	/*
 	 * 1st: PCRIndex
-	 * PCR used defaults to the same (config option) in
-	 * little-endian format, unless set in policy
+	 * PCR used is always the same (config option) in
+	 * little-endian format
 	 */
-	ima_putc(m, &e->pcr, sizeof(e->pcr));
+	ima_putc(m, &pcr, sizeof(pcr));
 
 	/* 2nd: template digest */
 	ima_putc(m, e->digest, TPM_DIGEST_SIZE);
@@ -218,7 +219,7 @@ static int ima_ascii_measurements_show(struct seq_file *m, void *v)
 	    e->template_desc->name : e->template_desc->fmt;
 
 	/* 1st: PCR used (config option) */
-	seq_printf(m, "%2d ", e->pcr);
+	seq_printf(m, "%2d ", CONFIG_IMA_MEASURE_PCR_IDX);
 
 	/* 2nd: SHA1 template hash */
 	ima_print_digest(m, e->digest, TPM_DIGEST_SIZE);
@@ -401,7 +402,7 @@ static int ima_release_policy(struct inode *inode, struct file *file)
 	const char *cause = valid_policy ? "completed" : "failed";
 
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
-		return seq_release(inode, file);
+		return 0;
 
 	if (valid_policy && ima_check_policy() < 0) {
 		cause = "failed";

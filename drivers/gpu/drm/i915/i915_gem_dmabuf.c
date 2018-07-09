@@ -23,13 +23,9 @@
  * Authors:
  *	Dave Airlie <airlied@redhat.com>
  */
-
-#include <linux/dma-buf.h>
-#include <linux/reservation.h>
-
 #include <drm/drmP.h>
-
 #include "i915_drv.h"
+#include <linux/dma-buf.h>
 
 static struct drm_i915_gem_object *dma_buf_to_obj(struct dma_buf *buf)
 {
@@ -119,7 +115,7 @@ static void *i915_gem_dmabuf_vmap(struct dma_buf *dma_buf)
 	if (ret)
 		return ERR_PTR(ret);
 
-	addr = i915_gem_object_pin_map(obj, I915_MAP_WB);
+	addr = i915_gem_object_pin_map(obj);
 	mutex_unlock(&dev->struct_mutex);
 
 	return addr;
@@ -222,60 +218,17 @@ static const struct dma_buf_ops i915_dmabuf_ops =  {
 	.end_cpu_access = i915_gem_end_cpu_access,
 };
 
-static void export_fences(struct drm_i915_gem_object *obj,
-			  struct dma_buf *dma_buf)
-{
-	struct reservation_object *resv = dma_buf->resv;
-	struct drm_i915_gem_request *req;
-	unsigned long active;
-	int idx;
-
-	active = __I915_BO_ACTIVE(obj);
-	if (!active)
-		return;
-
-	/* Serialise with execbuf to prevent concurrent fence-loops */
-	mutex_lock(&obj->base.dev->struct_mutex);
-
-	/* Mark the object for future fences before racily adding old fences */
-	obj->base.dma_buf = dma_buf;
-
-	ww_mutex_lock(&resv->lock, NULL);
-
-	for_each_active(active, idx) {
-		req = i915_gem_active_get(&obj->last_read[idx],
-					  &obj->base.dev->struct_mutex);
-		if (!req)
-			continue;
-
-		if (reservation_object_reserve_shared(resv) == 0)
-			reservation_object_add_shared_fence(resv, &req->fence);
-
-		i915_gem_request_put(req);
-	}
-
-	req = i915_gem_active_get(&obj->last_write,
-				  &obj->base.dev->struct_mutex);
-	if (req) {
-		reservation_object_add_excl_fence(resv, &req->fence);
-		i915_gem_request_put(req);
-	}
-
-	ww_mutex_unlock(&resv->lock);
-	mutex_unlock(&obj->base.dev->struct_mutex);
-}
-
 struct dma_buf *i915_gem_prime_export(struct drm_device *dev,
 				      struct drm_gem_object *gem_obj, int flags)
 {
 	struct drm_i915_gem_object *obj = to_intel_bo(gem_obj);
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
-	struct dma_buf *dma_buf;
 
 	exp_info.ops = &i915_dmabuf_ops;
 	exp_info.size = gem_obj->size;
 	exp_info.flags = flags;
 	exp_info.priv = gem_obj;
+
 
 	if (obj->ops->dmabuf_export) {
 		int ret = obj->ops->dmabuf_export(obj);
@@ -283,12 +236,7 @@ struct dma_buf *i915_gem_prime_export(struct drm_device *dev,
 			return ERR_PTR(ret);
 	}
 
-	dma_buf = drm_gem_dmabuf_export(dev, &exp_info);
-	if (IS_ERR(dma_buf))
-		return dma_buf;
-
-	export_fences(obj, dma_buf);
-	return dma_buf;
+	return dma_buf_export(&exp_info);
 }
 
 static int i915_gem_object_get_pages_dmabuf(struct drm_i915_gem_object *obj)
@@ -330,7 +278,8 @@ struct drm_gem_object *i915_gem_prime_import(struct drm_device *dev,
 			 * Importing dmabuf exported from out own gem increases
 			 * refcount on gem itself instead of f_count of dmabuf.
 			 */
-			return &i915_gem_object_get(obj)->base;
+			drm_gem_object_reference(&obj->base);
+			return &obj->base;
 		}
 	}
 
@@ -350,16 +299,6 @@ struct drm_gem_object *i915_gem_prime_import(struct drm_device *dev,
 	drm_gem_private_object_init(dev, &obj->base, dma_buf->size);
 	i915_gem_object_init(obj, &i915_gem_object_dmabuf_ops);
 	obj->base.import_attach = attach;
-
-	/* We use GTT as shorthand for a coherent domain, one that is
-	 * neither in the GPU cache nor in the CPU cache, where all
-	 * writes are immediately visible in memory. (That's not strictly
-	 * true, but it's close! There are internal buffers such as the
-	 * write-combined buffer or a delay through the chipset for GTT
-	 * writes that do require us to treat GTT as a separate cache domain.)
-	 */
-	obj->base.read_domains = I915_GEM_DOMAIN_GTT;
-	obj->base.write_domain = 0;
 
 	return &obj->base;
 

@@ -440,8 +440,10 @@ static bool vnt_alloc_bufs(struct vnt_private *priv)
 
 		/* allocate URBs */
 		tx_context->urb = usb_alloc_urb(0, GFP_KERNEL);
-		if (!tx_context->urb)
+		if (!tx_context->urb) {
+			dev_err(&priv->usb->dev, "alloc tx urb failed\n");
 			goto free_tx;
+		}
 
 		tx_context->in_use = false;
 	}
@@ -460,8 +462,10 @@ static bool vnt_alloc_bufs(struct vnt_private *priv)
 
 		/* allocate URBs */
 		rcb->urb = usb_alloc_urb(0, GFP_KERNEL);
-		if (!rcb->urb)
+		if (!rcb->urb) {
+			dev_err(&priv->usb->dev, "Failed to alloc rx urb\n");
 			goto free_rx_tx;
+		}
 
 		rcb->skb = dev_alloc_skb(priv->rx_buf_sz);
 		if (!rcb->skb)
@@ -475,8 +479,10 @@ static bool vnt_alloc_bufs(struct vnt_private *priv)
 	}
 
 	priv->interrupt_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!priv->interrupt_urb)
+	if (!priv->interrupt_urb) {
+		dev_err(&priv->usb->dev, "Failed to alloc int urb\n");
 		goto free_rx_tx;
+	}
 
 	priv->int_buf.data_buf = kmalloc(MAX_INTERRUPT_SIZE, GFP_KERNEL);
 	if (!priv->int_buf.data_buf) {
@@ -521,9 +527,6 @@ static int vnt_start(struct ieee80211_hw *hw)
 		dev_dbg(&priv->usb->dev, " init register fail\n");
 		goto free_all;
 	}
-
-	if (vnt_key_init_table(priv))
-		goto free_all;
 
 	priv->int_interval = 1;  /* bInterval is set to 1 */
 

@@ -230,7 +230,6 @@ static unsigned long vacancy_only = 0;
 
 static noinline int test_btrfs_get_extent(u32 sectorsize, u32 nodesize)
 {
-	struct btrfs_fs_info *fs_info = NULL;
 	struct inode *inode = NULL;
 	struct btrfs_root *root = NULL;
 	struct extent_map *em = NULL;
@@ -249,15 +248,19 @@ static noinline int test_btrfs_get_extent(u32 sectorsize, u32 nodesize)
 	BTRFS_I(inode)->location.objectid = BTRFS_FIRST_FREE_OBJECTID;
 	BTRFS_I(inode)->location.offset = 0;
 
-	fs_info = btrfs_alloc_dummy_fs_info();
-	if (!fs_info) {
-		test_msg("Couldn't allocate dummy fs info\n");
+	root = btrfs_alloc_dummy_root(sectorsize, nodesize);
+	if (IS_ERR(root)) {
+		test_msg("Couldn't allocate root\n");
 		goto out;
 	}
 
-	root = btrfs_alloc_dummy_root(fs_info, sectorsize, nodesize);
-	if (IS_ERR(root)) {
-		test_msg("Couldn't allocate root\n");
+	/*
+	 * We do this since btrfs_get_extent wants to assign em->bdev to
+	 * root->fs_info->fs_devices->latest_bdev.
+	 */
+	root->fs_info = btrfs_alloc_dummy_fs_info();
+	if (!root->fs_info) {
+		test_msg("Couldn't allocate dummy fs info\n");
 		goto out;
 	}
 
@@ -832,13 +835,11 @@ out:
 		free_extent_map(em);
 	iput(inode);
 	btrfs_free_dummy_root(root);
-	btrfs_free_dummy_fs_info(fs_info);
 	return ret;
 }
 
 static int test_hole_first(u32 sectorsize, u32 nodesize)
 {
-	struct btrfs_fs_info *fs_info = NULL;
 	struct inode *inode = NULL;
 	struct btrfs_root *root = NULL;
 	struct extent_map *em = NULL;
@@ -854,15 +855,15 @@ static int test_hole_first(u32 sectorsize, u32 nodesize)
 	BTRFS_I(inode)->location.objectid = BTRFS_FIRST_FREE_OBJECTID;
 	BTRFS_I(inode)->location.offset = 0;
 
-	fs_info = btrfs_alloc_dummy_fs_info();
-	if (!fs_info) {
-		test_msg("Couldn't allocate dummy fs info\n");
+	root = btrfs_alloc_dummy_root(sectorsize, nodesize);
+	if (IS_ERR(root)) {
+		test_msg("Couldn't allocate root\n");
 		goto out;
 	}
 
-	root = btrfs_alloc_dummy_root(fs_info, sectorsize, nodesize);
-	if (IS_ERR(root)) {
-		test_msg("Couldn't allocate root\n");
+	root->fs_info = btrfs_alloc_dummy_fs_info();
+	if (!root->fs_info) {
+		test_msg("Couldn't allocate dummy fs info\n");
 		goto out;
 	}
 
@@ -933,13 +934,11 @@ out:
 		free_extent_map(em);
 	iput(inode);
 	btrfs_free_dummy_root(root);
-	btrfs_free_dummy_fs_info(fs_info);
 	return ret;
 }
 
 static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 {
-	struct btrfs_fs_info *fs_info = NULL;
 	struct inode *inode = NULL;
 	struct btrfs_root *root = NULL;
 	int ret = -ENOMEM;
@@ -950,15 +949,15 @@ static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 		return ret;
 	}
 
-	fs_info = btrfs_alloc_dummy_fs_info();
-	if (!fs_info) {
-		test_msg("Couldn't allocate dummy fs info\n");
+	root = btrfs_alloc_dummy_root(sectorsize, nodesize);
+	if (IS_ERR(root)) {
+		test_msg("Couldn't allocate root\n");
 		goto out;
 	}
 
-	root = btrfs_alloc_dummy_root(fs_info, sectorsize, nodesize);
-	if (IS_ERR(root)) {
-		test_msg("Couldn't allocate root\n");
+	root->fs_info = btrfs_alloc_dummy_fs_info();
+	if (!root->fs_info) {
+		test_msg("Couldn't allocate dummy fs info\n");
 		goto out;
 	}
 
@@ -968,7 +967,7 @@ static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 	/* [BTRFS_MAX_EXTENT_SIZE] */
 	BTRFS_I(inode)->outstanding_extents++;
 	ret = btrfs_set_extent_delalloc(inode, 0, BTRFS_MAX_EXTENT_SIZE - 1,
-					NULL, 0);
+					NULL);
 	if (ret) {
 		test_msg("btrfs_set_extent_delalloc returned %d\n", ret);
 		goto out;
@@ -984,7 +983,7 @@ static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 	BTRFS_I(inode)->outstanding_extents++;
 	ret = btrfs_set_extent_delalloc(inode, BTRFS_MAX_EXTENT_SIZE,
 					BTRFS_MAX_EXTENT_SIZE + sectorsize - 1,
-					NULL, 0);
+					NULL);
 	if (ret) {
 		test_msg("btrfs_set_extent_delalloc returned %d\n", ret);
 		goto out;
@@ -1019,7 +1018,7 @@ static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 	ret = btrfs_set_extent_delalloc(inode, BTRFS_MAX_EXTENT_SIZE >> 1,
 					(BTRFS_MAX_EXTENT_SIZE >> 1)
 					+ sectorsize - 1,
-					NULL, 0);
+					NULL);
 	if (ret) {
 		test_msg("btrfs_set_extent_delalloc returned %d\n", ret);
 		goto out;
@@ -1042,7 +1041,7 @@ static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 	ret = btrfs_set_extent_delalloc(inode,
 			BTRFS_MAX_EXTENT_SIZE + 2 * sectorsize,
 			(BTRFS_MAX_EXTENT_SIZE << 1) + 3 * sectorsize - 1,
-			NULL, 0);
+			NULL);
 	if (ret) {
 		test_msg("btrfs_set_extent_delalloc returned %d\n", ret);
 		goto out;
@@ -1060,7 +1059,7 @@ static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 	BTRFS_I(inode)->outstanding_extents++;
 	ret = btrfs_set_extent_delalloc(inode,
 			BTRFS_MAX_EXTENT_SIZE + sectorsize,
-			BTRFS_MAX_EXTENT_SIZE + 2 * sectorsize - 1, NULL, 0);
+			BTRFS_MAX_EXTENT_SIZE + 2 * sectorsize - 1, NULL);
 	if (ret) {
 		test_msg("btrfs_set_extent_delalloc returned %d\n", ret);
 		goto out;
@@ -1097,7 +1096,7 @@ static int test_extent_accounting(u32 sectorsize, u32 nodesize)
 	BTRFS_I(inode)->outstanding_extents++;
 	ret = btrfs_set_extent_delalloc(inode,
 			BTRFS_MAX_EXTENT_SIZE + sectorsize,
-			BTRFS_MAX_EXTENT_SIZE + 2 * sectorsize - 1, NULL, 0);
+			BTRFS_MAX_EXTENT_SIZE + 2 * sectorsize - 1, NULL);
 	if (ret) {
 		test_msg("btrfs_set_extent_delalloc returned %d\n", ret);
 		goto out;
@@ -1133,7 +1132,6 @@ out:
 				 NULL, GFP_KERNEL);
 	iput(inode);
 	btrfs_free_dummy_root(root);
-	btrfs_free_dummy_fs_info(fs_info);
 	return ret;
 }
 

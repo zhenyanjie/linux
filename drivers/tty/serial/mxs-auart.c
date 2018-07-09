@@ -1085,7 +1085,7 @@ static void mxs_auart_settermios(struct uart_port *u,
 					AUART_LINECTRL_BAUD_DIV_MAX);
 		baud_max = u->uartclk * 32 / AUART_LINECTRL_BAUD_DIV_MIN;
 		baud = uart_get_baud_rate(u, termios, old, baud_min, baud_max);
-		div = DIV_ROUND_CLOSEST(u->uartclk * 32, baud);
+		div = u->uartclk * 32 / baud;
 	}
 
 	ctrl |= AUART_LINECTRL_BAUD_DIVFRAC(div & 0x3F);
@@ -1317,7 +1317,7 @@ static void mxs_auart_break_ctl(struct uart_port *u, int ctl)
 		mxs_clr(AUART_LINECTRL_BRK, s, REG_LINECTRL);
 }
 
-static const struct uart_ops mxs_auart_ops = {
+static struct uart_ops mxs_auart_ops = {
 	.tx_empty       = mxs_auart_tx_empty,
 	.start_tx       = mxs_auart_start_tx,
 	.stop_tx	= mxs_auart_stop_tx,
@@ -1510,7 +1510,10 @@ static int mxs_get_clks(struct mxs_auart_port *s,
 
 	if (!is_asm9260_auart(s)) {
 		s->clk = devm_clk_get(&pdev->dev, NULL);
-		return PTR_ERR_OR_ZERO(s->clk);
+		if (IS_ERR(s->clk))
+			return PTR_ERR(s->clk);
+
+		return 0;
 	}
 
 	s->clk = devm_clk_get(s->dev, "mod");
@@ -1534,20 +1537,16 @@ static int mxs_get_clks(struct mxs_auart_port *s,
 	err = clk_set_rate(s->clk, clk_get_rate(s->clk_ahb));
 	if (err) {
 		dev_err(s->dev, "Failed to set rate!\n");
-		goto disable_clk_ahb;
+		return err;
 	}
 
 	err = clk_prepare_enable(s->clk);
 	if (err) {
 		dev_err(s->dev, "Failed to enable clk!\n");
-		goto disable_clk_ahb;
+		return err;
 	}
 
 	return 0;
-
-disable_clk_ahb:
-	clk_disable_unprepare(s->clk_ahb);
-	return err;
 }
 
 /*
@@ -1664,10 +1663,6 @@ static int mxs_auart_probe(struct platform_device *pdev)
 		s->port.line = pdev->id < 0 ? 0 : pdev->id;
 	else if (ret < 0)
 		return ret;
-	if (s->port.line >= ARRAY_SIZE(auart_port)) {
-		dev_err(&pdev->dev, "serial%d out of range\n", s->port.line);
-		return -EINVAL;
-	}
 
 	if (of_id) {
 		pdev->id_entry = of_id->data;

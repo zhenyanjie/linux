@@ -47,7 +47,7 @@
 #include <linux/mlx4/qp.h>
 
 #include "mlx4_ib.h"
-#include <rdma/mlx4-abi.h>
+#include "user.h"
 
 static void mlx4_ib_lock_cqs(struct mlx4_ib_cq *send_cq,
 			     struct mlx4_ib_cq *recv_cq);
@@ -232,7 +232,7 @@ static void stamp_send_wqe(struct mlx4_ib_qp *qp, int n, int size)
 		}
 	} else {
 		ctrl = buf = get_send_wqe(qp, n & (qp->sq.wqe_cnt - 1));
-		s = (ctrl->qpn_vlan.fence_size & 0x3f) << 4;
+		s = (ctrl->fence_size & 0x3f) << 4;
 		for (i = 64; i < s; i += 64) {
 			wqe = buf + i;
 			*wqe = cpu_to_be32(0xffffffff);
@@ -264,7 +264,7 @@ static void post_nop_wqe(struct mlx4_ib_qp *qp, int n, int size)
 		inl->byte_count = cpu_to_be32(1 << 31 | (size - s - sizeof *inl));
 	}
 	ctrl->srcrb_flags = 0;
-	ctrl->qpn_vlan.fence_size = size / 16;
+	ctrl->fence_size = size / 16;
 	/*
 	 * Make sure descriptor is fully written before setting ownership bit
 	 * (because HW can start executing as soon as we do).
@@ -1280,8 +1280,7 @@ static int _mlx4_ib_destroy_qp(struct ib_qp *qp)
 	if (is_qp0(dev, mqp))
 		mlx4_CLOSE_PORT(dev->dev, mqp->port);
 
-	if (mqp->mlx4_ib_qp_type == MLX4_IB_QPT_PROXY_GSI &&
-	    dev->qp1_proxy[mqp->port - 1] == mqp) {
+	if (dev->qp1_proxy[mqp->port - 1] == mqp) {
 		mutex_lock(&dev->qp1_proxy_lock[mqp->port - 1]);
 		dev->qp1_proxy[mqp->port - 1] = NULL;
 		mutex_unlock(&dev->qp1_proxy_lock[mqp->port - 1]);
@@ -1669,7 +1668,7 @@ static int __mlx4_ib_modify_qp(struct ib_qp *ibqp,
 			context->mtu_msgmax = (IB_MTU_4096 << 5) |
 					      ilog2(dev->dev->caps.max_gso_sz);
 		else
-			context->mtu_msgmax = (IB_MTU_4096 << 5) | 13;
+			context->mtu_msgmax = (IB_MTU_4096 << 5) | 12;
 	} else if (attr_mask & IB_QP_PATH_MTU) {
 		if (attr->path_mtu < IB_MTU_256 || attr->path_mtu > IB_MTU_4096) {
 			pr_err("path MTU (%u) is invalid\n",
@@ -1765,14 +1764,14 @@ static int __mlx4_ib_modify_qp(struct ib_qp *ibqp,
 		u8 port_num = mlx4_is_bonded(to_mdev(ibqp->device)->dev) ? 1 :
 			attr_mask & IB_QP_PORT ? attr->port_num : qp->port;
 		union ib_gid gid;
-		struct ib_gid_attr gid_attr = {.gid_type = IB_GID_TYPE_IB};
+		struct ib_gid_attr gid_attr;
 		u16 vlan = 0xffff;
 		u8 smac[ETH_ALEN];
 		int status = 0;
 		int is_eth = rdma_cap_eth_ah(&dev->ib_dev, port_num) &&
 			attr->ah_attr.ah_flags & IB_AH_GRH;
 
-		if (is_eth && attr->ah_attr.ah_flags & IB_AH_GRH) {
+		if (is_eth) {
 			int index = attr->ah_attr.grh.sgid_index;
 
 			status = ib_get_cached_gid(ibqp->device, port_num,
@@ -1993,8 +1992,7 @@ static int __mlx4_ib_modify_qp(struct ib_qp *ibqp,
 			ctrl = get_send_wqe(qp, i);
 			ctrl->owner_opcode = cpu_to_be32(1 << 31);
 			if (qp->sq_max_wqes_per_wr == 1)
-				ctrl->qpn_vlan.fence_size =
-						1 << (qp->sq.wqe_shift - 4);
+				ctrl->fence_size = 1 << (qp->sq.wqe_shift - 4);
 
 			stamp_send_wqe(qp, i, 1 << qp->sq.wqe_shift);
 		}
@@ -2406,22 +2404,6 @@ static int build_sriov_qp0_header(struct mlx4_ib_sqp *sqp,
 	return 0;
 }
 
-static u8 sl_to_vl(struct mlx4_ib_dev *dev, u8 sl, int port_num)
-{
-	union sl2vl_tbl_to_u64 tmp_vltab;
-	u8 vl;
-
-	if (sl > 15)
-		return 0xf;
-	tmp_vltab.sl64 = atomic64_read(&dev->sl2vl[port_num - 1]);
-	vl = tmp_vltab.sl8[sl >> 1];
-	if (sl & 1)
-		vl &= 0x0f;
-	else
-		vl >>= 4;
-	return vl;
-}
-
 #define MLX4_ROCEV2_QP1_SPORT 0xC000
 static int build_mlx_header(struct mlx4_ib_sqp *sqp, struct ib_ud_wr *wr,
 			    void *wqe, unsigned *mlx_seg_len)
@@ -2607,12 +2589,7 @@ static int build_mlx_header(struct mlx4_ib_sqp *sqp, struct ib_ud_wr *wr,
 			sqp->ud_header.vlan.tag = cpu_to_be16(vlan | pcp);
 		}
 	} else {
-		sqp->ud_header.lrh.virtual_lane    = !sqp->qp.ibqp.qp_num ? 15 :
-							sl_to_vl(to_mdev(ib_dev),
-								 sqp->ud_header.lrh.service_level,
-								 sqp->qp.port);
-		if (sqp->qp.ibqp.qp_num && sqp->ud_header.lrh.virtual_lane == 15)
-			return -EINVAL;
+		sqp->ud_header.lrh.virtual_lane    = !sqp->qp.ibqp.qp_num ? 15 : 0;
 		if (sqp->ud_header.lrh.destination_lid == IB_LID_PERMISSIVE)
 			sqp->ud_header.lrh.source_lid = IB_LID_PERMISSIVE;
 	}
@@ -3195,8 +3172,8 @@ int mlx4_ib_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 		wmb();
 		*lso_wqe = lso_hdr_sz;
 
-		ctrl->qpn_vlan.fence_size = (wr->send_flags & IB_SEND_FENCE ?
-					     MLX4_WQE_CTRL_FENCE : 0) | size;
+		ctrl->fence_size = (wr->send_flags & IB_SEND_FENCE ?
+				    MLX4_WQE_CTRL_FENCE : 0) | size;
 
 		/*
 		 * Make sure descriptor is fully written before

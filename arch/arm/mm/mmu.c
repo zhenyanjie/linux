@@ -137,7 +137,7 @@ void __init init_default_cache_policy(unsigned long pmd)
 
 	initial_pmd_value = pmd;
 
-	pmd &= PMD_SECT_CACHE_MASK;
+	pmd &= PMD_SECT_TEX(1) | PMD_SECT_BUFFERABLE | PMD_SECT_CACHEABLE;
 
 	for (i = 0; i < ARRAY_SIZE(cache_policies); i++)
 		if (cache_policies[i].pmd == pmd) {
@@ -243,7 +243,7 @@ __setup("noalign", noalign_setup);
 #define PROT_PTE_S2_DEVICE	PROT_PTE_DEVICE
 #define PROT_SECT_DEVICE	PMD_TYPE_SECT|PMD_SECT_AP_WRITE
 
-static struct mem_type mem_types[] __ro_after_init = {
+static struct mem_type mem_types[] = {
 	[MT_DEVICE] = {		  /* Strongly ordered / ARMv6 shared device */
 		.prot_pte	= PROT_PTE_DEVICE | L_PTE_MT_DEV_SHARED |
 				  L_PTE_SHARED,
@@ -728,8 +728,7 @@ static void *__init late_alloc(unsigned long sz)
 {
 	void *ptr = (void *)__get_free_pages(PGALLOC_GFP, get_order(sz));
 
-	if (!ptr || !pgtable_page_ctor(virt_to_page(ptr)))
-		BUG();
+	BUG_ON(!ptr);
 	return ptr;
 }
 
@@ -1152,37 +1151,53 @@ early_param("vmalloc", early_vmalloc);
 
 phys_addr_t arm_lowmem_limit __initdata = 0;
 
-void __init adjust_lowmem_bounds(void)
+void __init sanity_check_meminfo(void)
 {
 	phys_addr_t memblock_limit = 0;
-	u64 vmalloc_limit;
+	int highmem = 0;
+	phys_addr_t vmalloc_limit = __pa(vmalloc_min - 1) + 1;
 	struct memblock_region *reg;
-	phys_addr_t lowmem_limit = 0;
-
-	/*
-	 * Let's use our own (unoptimized) equivalent of __pa() that is
-	 * not affected by wrap-arounds when sizeof(phys_addr_t) == 4.
-	 * The result is used as the upper bound on physical memory address
-	 * and may itself be outside the valid range for which phys_addr_t
-	 * and therefore __pa() is defined.
-	 */
-	vmalloc_limit = (u64)(uintptr_t)vmalloc_min - PAGE_OFFSET + PHYS_OFFSET;
+	bool should_use_highmem = false;
 
 	for_each_memblock(memory, reg) {
 		phys_addr_t block_start = reg->base;
 		phys_addr_t block_end = reg->base + reg->size;
+		phys_addr_t size_limit = reg->size;
 
-		if (reg->base < vmalloc_limit) {
-			if (block_end > lowmem_limit)
-				/*
-				 * Compare as u64 to ensure vmalloc_limit does
-				 * not get truncated. block_end should always
-				 * fit in phys_addr_t so there should be no
-				 * issue with assignment.
-				 */
-				lowmem_limit = min_t(u64,
-							 vmalloc_limit,
-							 block_end);
+		if (reg->base >= vmalloc_limit)
+			highmem = 1;
+		else
+			size_limit = vmalloc_limit - reg->base;
+
+
+		if (!IS_ENABLED(CONFIG_HIGHMEM) || cache_is_vipt_aliasing()) {
+
+			if (highmem) {
+				pr_notice("Ignoring RAM at %pa-%pa (!CONFIG_HIGHMEM)\n",
+					  &block_start, &block_end);
+				memblock_remove(reg->base, reg->size);
+				should_use_highmem = true;
+				continue;
+			}
+
+			if (reg->size > size_limit) {
+				phys_addr_t overlap_size = reg->size - size_limit;
+
+				pr_notice("Truncating RAM at %pa-%pa to -%pa",
+					  &block_start, &block_end, &vmalloc_limit);
+				memblock_remove(vmalloc_limit, overlap_size);
+				block_end = vmalloc_limit;
+				should_use_highmem = true;
+			}
+		}
+
+		if (!highmem) {
+			if (block_end > arm_lowmem_limit) {
+				if (reg->size > size_limit)
+					arm_lowmem_limit = vmalloc_limit;
+				else
+					arm_lowmem_limit = block_end;
+			}
 
 			/*
 			 * Find the first non-pmd-aligned page, and point
@@ -1201,37 +1216,26 @@ void __init adjust_lowmem_bounds(void)
 				if (!IS_ALIGNED(block_start, PMD_SIZE))
 					memblock_limit = block_start;
 				else if (!IS_ALIGNED(block_end, PMD_SIZE))
-					memblock_limit = lowmem_limit;
+					memblock_limit = arm_lowmem_limit;
 			}
 
 		}
 	}
 
-	arm_lowmem_limit = lowmem_limit;
+	if (should_use_highmem)
+		pr_notice("Consider using a HIGHMEM enabled kernel.\n");
 
 	high_memory = __va(arm_lowmem_limit - 1) + 1;
-
-	if (!memblock_limit)
-		memblock_limit = arm_lowmem_limit;
 
 	/*
 	 * Round the memblock limit down to a pmd size.  This
 	 * helps to ensure that we will allocate memory from the
 	 * last full pmd, which should be mapped.
 	 */
-	memblock_limit = round_down(memblock_limit, PMD_SIZE);
-
-	if (!IS_ENABLED(CONFIG_HIGHMEM) || cache_is_vipt_aliasing()) {
-		if (memblock_end_of_DRAM() > arm_lowmem_limit) {
-			phys_addr_t end = memblock_end_of_DRAM();
-
-			pr_notice("Ignoring RAM at %pa-%pa\n",
-				  &memblock_limit, &end);
-			pr_notice("Consider using a HIGHMEM enabled kernel.\n");
-
-			memblock_remove(memblock_limit, end - memblock_limit);
-		}
-	}
+	if (memblock_limit)
+		memblock_limit = round_down(memblock_limit, PMD_SIZE);
+	if (!memblock_limit)
+		memblock_limit = arm_lowmem_limit;
 
 	memblock_set_current_limit(memblock_limit);
 }

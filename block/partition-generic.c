@@ -321,10 +321,8 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
 
 	if (info) {
 		struct partition_meta_info *pinfo = alloc_part_info(disk);
-		if (!pinfo) {
-			err = -ENOMEM;
+		if (!pinfo)
 			goto out_free_stats;
-		}
 		memcpy(pinfo, info, sizeof(*info));
 		p->info = pinfo;
 	}
@@ -449,6 +447,7 @@ rescan:
 
 	if (disk->fops->revalidate_disk)
 		disk->fops->revalidate_disk(disk);
+	blk_integrity_revalidate(disk);
 	check_disk_size_change(disk, bdev);
 	bdev->bd_invalidated = 0;
 	if (!get_capacity(disk) || !(state = check_partition(disk, bdev)))
@@ -496,6 +495,7 @@ rescan:
 	/* add partitions */
 	for (p = 1; p < state->limit; p++) {
 		sector_t size, from;
+		struct partition_meta_info *info = NULL;
 
 		size = state->parts[p].size;
 		if (!size)
@@ -530,6 +530,8 @@ rescan:
 			}
 		}
 
+		if (state->parts[p].has_info)
+			info = &state->parts[p].info;
 		part = add_partition(disk, p, from, size,
 				     state->parts[p].flags,
 				     &state->parts[p].info);

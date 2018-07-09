@@ -776,18 +776,6 @@ bool ci_dpm_vblank_too_short(struct radeon_device *rdev)
 	u32 vblank_time = r600_dpm_get_vblank_time(rdev);
 	u32 switch_limit = pi->mem_gddr5 ? 450 : 300;
 
-	/* disable mclk switching if the refresh is >120Hz, even if the
-        * blanking period would allow it
-        */
-	if (r600_dpm_get_vrefresh(rdev) > 120)
-		return true;
-
-	/* disable mclk switching if the refresh is >120Hz, even if the
-        * blanking period would allow it
-        */
-	if (r600_dpm_get_vrefresh(rdev) > 120)
-		return true;
-
 	if (vblank_time < switch_limit)
 		return true;
 	else
@@ -3855,10 +3843,7 @@ static void ci_find_dpm_states_clocks_in_dpm_table(struct radeon_device *rdev,
 	if (i >= sclk_table->count) {
 		pi->need_update_smu7_dpm_table |= DPMTABLE_OD_UPDATE_SCLK;
 	} else {
-		/* XXX The current code always reprogrammed the sclk levels,
-		 * but we don't currently handle disp sclk requirements
-		 * so just skip it.
-		 */
+		/* XXX check display min clock requirements */
 		if (CISLAND_MINIMUM_ENGINE_CLOCK != CISLAND_MINIMUM_ENGINE_CLOCK)
 			pi->need_update_smu7_dpm_table |= DPMTABLE_UPDATE_SCLK;
 	}

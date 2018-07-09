@@ -104,20 +104,24 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
 	tcp_hdrlen = tcph->doff * 4;
 
-	if (len < tcp_hdrlen || tcp_hdrlen < sizeof(struct tcphdr))
+	if (len < tcp_hdrlen)
 		return -1;
 
 	if (info->mss == XT_TCPMSS_CLAMP_PMTU) {
 		struct net *net = par->net;
 		unsigned int in_mtu = tcpmss_reverse_mtu(net, skb, family);
-		unsigned int min_mtu = min(dst_mtu(skb_dst(skb)), in_mtu);
 
-		if (min_mtu <= minlen) {
+		if (dst_mtu(skb_dst(skb)) <= minlen) {
 			net_err_ratelimited("unknown or invalid path-MTU (%u)\n",
-					    min_mtu);
+					    dst_mtu(skb_dst(skb)));
 			return -1;
 		}
-		newmss = min_mtu - minlen;
+		if (in_mtu <= minlen) {
+			net_err_ratelimited("unknown or invalid path-MTU (%u)\n",
+					    in_mtu);
+			return -1;
+		}
+		newmss = min(dst_mtu(skb_dst(skb)), in_mtu) - minlen;
 	} else
 		newmss = info->mss;
 
@@ -150,10 +154,6 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	 * itself too large. Accept the packet unmodified instead.
 	 */
 	if (len > tcp_hdrlen)
-		return 0;
-
-	/* tcph->doff has 4 bits, do not wrap it to 0 */
-	if (tcp_hdrlen >= 15 * 4)
 		return 0;
 
 	/*

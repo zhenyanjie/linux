@@ -89,8 +89,7 @@ config BINFMT_SCRIPT
 
 config BINFMT_FLAT
 	bool "Kernel support for flat binaries"
-	depends on !MMU || ARM || M68K
-	depends on !FRV || BROKEN
+	depends on !MMU && (!FRV || BROKEN)
 	help
 	  Support uClinux FLAT format binaries.
 

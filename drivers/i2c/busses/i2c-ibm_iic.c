@@ -751,8 +751,10 @@ static int iic_probe(struct platform_device *ofdev)
 	adap->timeout = HZ;
 
 	ret = i2c_add_adapter(adap);
-	if (ret  < 0)
+	if (ret  < 0) {
+		dev_err(&ofdev->dev, "failed to register i2c adapter\n");
 		goto error_cleanup;
+	}
 
 	dev_info(&ofdev->dev, "using %s mode\n",
 		 dev->fast_mode ? "fast (400 kHz)" : "standard (100 kHz)");

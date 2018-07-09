@@ -31,9 +31,7 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/fsl_ifc.h>
-#include <linux/irqdomain.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
+#include <asm/prom.h>
 
 struct fsl_ifc_ctrl *fsl_ifc_ctrl_dev;
 EXPORT_SYMBOL(fsl_ifc_ctrl_dev);

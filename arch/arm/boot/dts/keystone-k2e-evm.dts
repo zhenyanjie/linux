@@ -47,24 +47,16 @@
 	status = "okay";
 };
 
-&keystone_usb0 {
+&usb {
 	status = "okay";
-};
-
-&usb0 {
-	dr_mode = "host";
 };
 
 &usb1_phy {
 	status = "okay";
 };
 
-&keystone_usb1 {
-	status = "okay";
-};
-
 &usb1 {
-	dr_mode = "peripheral";
+	status = "okay";
 };
 
 &i2c0 {

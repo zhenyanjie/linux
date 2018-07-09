@@ -13,7 +13,6 @@
 
 #include "uniperif.h"
 
-#define UNIPERIF_READER_I2S_IN 0 /* reader id connected to I2S/TDM TX bus */
 /*
  * Note: snd_pcm_hardware is linked to DMA controller but is declared here to
  * integrate unireader capability in term of rate and supported channels
@@ -196,7 +195,7 @@ static int uni_reader_prepare(struct snd_pcm_substream *substream,
 	}
 
 	/* Calculate transfer size (in fifo cells and bytes) for frame count */
-	if (reader->type == SND_ST_UNIPERIF_TYPE_TDM) {
+	if (reader->info->type == SND_ST_UNIPERIF_TYPE_TDM) {
 		/* transfer size = unip frame size (in 32 bits FIFO cell) */
 		transfer_size =
 			sti_uniperiph_get_user_frame_size(runtime) / 4;
@@ -281,7 +280,7 @@ static int uni_reader_prepare(struct snd_pcm_substream *substream,
 	SET_UNIPERIF_ITM_BSET_MEM_BLK_READ(reader);
 
 	/* Enable underflow recovery interrupts */
-	if (reader->underflow_enabled) {
+	if (reader->info->underflow_enabled) {
 		SET_UNIPERIF_ITM_BSET_UNDERFLOW_REC_DONE(reader);
 		SET_UNIPERIF_ITM_BSET_UNDERFLOW_REC_FAILED(reader);
 	}
@@ -364,8 +363,6 @@ static int uni_reader_startup(struct snd_pcm_substream *substream,
 	struct uniperif *reader = priv->dai_data.uni;
 	int ret;
 
-	reader->substream = substream;
-
 	if (!UNIPERIF_TYPE_IS_TDM(reader))
 		return 0;
 
@@ -395,7 +392,41 @@ static void uni_reader_shutdown(struct snd_pcm_substream *substream,
 		/* Stop the reader */
 		uni_reader_stop(reader);
 	}
-	reader->substream = NULL;
+}
+
+static int uni_reader_parse_dt(struct platform_device *pdev,
+			       struct uniperif *reader)
+{
+	struct uniperif_info *info;
+	struct device_node *node = pdev->dev.of_node;
+	const char *mode;
+
+	/* Allocate memory for the info structure */
+	info = devm_kzalloc(&pdev->dev, sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	if (of_property_read_u32(node, "st,version", &reader->ver) ||
+	    reader->ver == SND_ST_UNIPERIF_VERSION_UNKNOWN) {
+		dev_err(&pdev->dev, "Unknown uniperipheral version ");
+		return -EINVAL;
+	}
+
+	/* Read the device mode property */
+	if (of_property_read_string(node, "st,mode", &mode)) {
+		dev_err(&pdev->dev, "uniperipheral mode not defined");
+		return -EINVAL;
+	}
+
+	if (strcasecmp(mode, "tdm") == 0)
+		info->type = SND_ST_UNIPERIF_TYPE_TDM;
+	else
+		info->type = SND_ST_UNIPERIF_TYPE_PCM;
+
+	/* Save the info structure */
+	reader->info = info;
+
+	return 0;
 }
 
 static const struct snd_soc_dai_ops uni_reader_dai_ops = {
@@ -416,6 +447,12 @@ int uni_reader_init(struct platform_device *pdev,
 	reader->dev = &pdev->dev;
 	reader->state = UNIPERIF_STATE_STOPPED;
 	reader->dai_ops = &uni_reader_dai_ops;
+
+	ret = uni_reader_parse_dt(pdev, reader);
+	if (ret < 0) {
+		dev_err(reader->dev, "Failed to parse DeviceTree");
+		return ret;
+	}
 
 	if (UNIPERIF_TYPE_IS_TDM(reader))
 		reader->hw = &uni_tdm_hw;

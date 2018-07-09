@@ -132,8 +132,19 @@ static unsigned long clk_pll_recalc_rate(struct clk_hw *hw,
 					 unsigned long parent_rate)
 {
 	struct clk_pll *pll = to_clk_pll(hw);
+	unsigned int pllr;
+	u16 mul;
+	u8 div;
 
-	return (parent_rate / pll->div) * (pll->mul + 1);
+	regmap_read(pll->regmap, PLL_REG(pll->id), &pllr);
+
+	div = PLL_DIV(pllr);
+	mul = PLL_MUL(pllr, pll->layout);
+
+	if (!div || !mul)
+		return 0;
+
+	return (parent_rate / div) * (mul + 1);
 }
 
 static long clk_pll_get_best_div_mul(struct clk_pll *pll, unsigned long rate,
@@ -285,18 +296,17 @@ static const struct clk_ops pll_ops = {
 	.set_rate = clk_pll_set_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91_clk_register_pll(struct regmap *regmap, const char *name,
 		      const char *parent_name, u8 id,
 		      const struct clk_pll_layout *layout,
 		      const struct clk_pll_characteristics *characteristics)
 {
 	struct clk_pll *pll;
-	struct clk_hw *hw;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
 	int offset = PLL_REG(id);
 	unsigned int pllr;
-	int ret;
 
 	if (id > PLL_MAX_ID)
 		return ERR_PTR(-EINVAL);
@@ -320,14 +330,12 @@ at91_clk_register_pll(struct regmap *regmap, const char *name,
 	pll->div = PLL_DIV(pllr);
 	pll->mul = PLL_MUL(pllr, layout);
 
-	hw = &pll->hw;
-	ret = clk_hw_register(NULL, &pll->hw);
-	if (ret) {
+	clk = clk_register(NULL, &pll->hw);
+	if (IS_ERR(clk)) {
 		kfree(pll);
-		hw = ERR_PTR(ret);
 	}
 
-	return hw;
+	return clk;
 }
 
 
@@ -457,7 +465,7 @@ of_at91_clk_pll_setup(struct device_node *np,
 		      const struct clk_pll_layout *layout)
 {
 	u32 id;
-	struct clk_hw *hw;
+	struct clk *clk;
 	struct regmap *regmap;
 	const char *parent_name;
 	const char *name = np->name;
@@ -478,12 +486,12 @@ of_at91_clk_pll_setup(struct device_node *np,
 	if (!characteristics)
 		return;
 
-	hw = at91_clk_register_pll(regmap, name, parent_name, id, layout,
+	clk = at91_clk_register_pll(regmap, name, parent_name, id, layout,
 				    characteristics);
-	if (IS_ERR(hw))
+	if (IS_ERR(clk))
 		goto out_free_characteristics;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 	return;
 
 out_free_characteristics:

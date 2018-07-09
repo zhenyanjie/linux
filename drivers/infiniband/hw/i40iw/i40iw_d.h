@@ -86,7 +86,6 @@
 #define RDMA_OPCODE_MASK        0x0f
 #define RDMA_READ_REQ_OPCODE    1
 #define Q2_BAD_FRAME_OFFSET     72
-#define Q2_FPSN_OFFSET          64
 #define CQE_MAJOR_DRV           0x8000
 
 #define I40IW_TERM_SENT 0x01
@@ -1103,7 +1102,7 @@
 #define I40IWQPC_VLANTAG_MASK (0xffffULL << I40IWQPC_VLANTAG_SHIFT)
 
 #define I40IWQPC_ARPIDX_SHIFT 48
-#define I40IWQPC_ARPIDX_MASK (0xffffULL << I40IWQPC_ARPIDX_SHIFT)
+#define I40IWQPC_ARPIDX_MASK (0xfffULL << I40IWQPC_ARPIDX_SHIFT)
 
 #define I40IWQPC_FLOWLABEL_SHIFT 0
 #define I40IWQPC_FLOWLABEL_MASK (0xfffffUL << I40IWQPC_FLOWLABEL_SHIFT)
@@ -1557,9 +1556,6 @@ enum i40iw_alignment {
 
 #define I40IW_RING_MOVE_TAIL(_ring) \
 	(_ring).tail = ((_ring).tail + 1) % (_ring).size
-
-#define I40IW_RING_MOVE_HEAD_NOCHECK(_ring) \
-	(_ring).head = ((_ring).head + 1) % (_ring).size
 
 #define I40IW_RING_MOVE_TAIL_BY_COUNT(_ring, _count) \
 	(_ring).tail = ((_ring).tail + (_count)) % (_ring).size

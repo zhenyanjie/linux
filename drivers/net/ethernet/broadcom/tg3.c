@@ -8720,10 +8720,6 @@ static void tg3_free_consistent(struct tg3 *tp)
 	tg3_mem_rx_release(tp);
 	tg3_mem_tx_release(tp);
 
-	/* tp->hw_stats can be referenced safely:
-	 *     1. under rtnl_lock
-	 *     2. or under tp->lock if TG3_FLAG_INIT_COMPLETE is set.
-	 */
 	if (tp->hw_stats) {
 		dma_free_coherent(&tp->pdev->dev, sizeof(struct tg3_hw_stats),
 				  tp->hw_stats, tp->stats_mapping);
@@ -10049,16 +10045,6 @@ static int tg3_reset_hw(struct tg3 *tp, bool reset_phy)
 		val |= GRC_MODE_TIME_SYNC_ENABLE;
 
 	tw32(GRC_MODE, tp->grc_mode | val);
-
-	/* On one of the AMD platform, MRRS is restricted to 4000 because of
-	 * south bridge limitation. As a workaround, Driver is setting MRRS
-	 * to 2048 instead of default 4096.
-	 */
-	if (tp->pdev->subsystem_vendor == PCI_VENDOR_ID_DELL &&
-	    tp->pdev->subsystem_device == TG3PCI_SUBDEVICE_ID_DELL_5762) {
-		val = tr32(TG3PCI_DEV_STATUS_CTRL) & ~MAX_READ_REQ_MASK;
-		tw32(TG3PCI_DEV_STATUS_CTRL, val | MAX_READ_REQ_SIZE_2048);
-	}
 
 	/* Setup the timer prescalar register.  Clock is always 66Mhz. */
 	val = tr32(GRC_MISC_CFG);
@@ -12093,107 +12079,95 @@ static int tg3_set_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 	return ret;
 }
 
-static int tg3_get_link_ksettings(struct net_device *dev,
-				  struct ethtool_link_ksettings *cmd)
+static int tg3_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
 	struct tg3 *tp = netdev_priv(dev);
-	u32 supported, advertising;
 
 	if (tg3_flag(tp, USE_PHYLIB)) {
 		struct phy_device *phydev;
 		if (!(tp->phy_flags & TG3_PHYFLG_IS_CONNECTED))
 			return -EAGAIN;
 		phydev = mdiobus_get_phy(tp->mdio_bus, tp->phy_addr);
-		return phy_ethtool_ksettings_get(phydev, cmd);
+		return phy_ethtool_gset(phydev, cmd);
 	}
 
-	supported = (SUPPORTED_Autoneg);
+	cmd->supported = (SUPPORTED_Autoneg);
 
 	if (!(tp->phy_flags & TG3_PHYFLG_10_100_ONLY))
-		supported |= (SUPPORTED_1000baseT_Half |
-			      SUPPORTED_1000baseT_Full);
+		cmd->supported |= (SUPPORTED_1000baseT_Half |
+				   SUPPORTED_1000baseT_Full);
 
 	if (!(tp->phy_flags & TG3_PHYFLG_ANY_SERDES)) {
-		supported |= (SUPPORTED_100baseT_Half |
-			      SUPPORTED_100baseT_Full |
-			      SUPPORTED_10baseT_Half |
-			      SUPPORTED_10baseT_Full |
-			      SUPPORTED_TP);
-		cmd->base.port = PORT_TP;
+		cmd->supported |= (SUPPORTED_100baseT_Half |
+				  SUPPORTED_100baseT_Full |
+				  SUPPORTED_10baseT_Half |
+				  SUPPORTED_10baseT_Full |
+				  SUPPORTED_TP);
+		cmd->port = PORT_TP;
 	} else {
-		supported |= SUPPORTED_FIBRE;
-		cmd->base.port = PORT_FIBRE;
+		cmd->supported |= SUPPORTED_FIBRE;
+		cmd->port = PORT_FIBRE;
 	}
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
-						supported);
 
-	advertising = tp->link_config.advertising;
+	cmd->advertising = tp->link_config.advertising;
 	if (tg3_flag(tp, PAUSE_AUTONEG)) {
 		if (tp->link_config.flowctrl & FLOW_CTRL_RX) {
 			if (tp->link_config.flowctrl & FLOW_CTRL_TX) {
-				advertising |= ADVERTISED_Pause;
+				cmd->advertising |= ADVERTISED_Pause;
 			} else {
-				advertising |= ADVERTISED_Pause |
-					ADVERTISED_Asym_Pause;
+				cmd->advertising |= ADVERTISED_Pause |
+						    ADVERTISED_Asym_Pause;
 			}
 		} else if (tp->link_config.flowctrl & FLOW_CTRL_TX) {
-			advertising |= ADVERTISED_Asym_Pause;
+			cmd->advertising |= ADVERTISED_Asym_Pause;
 		}
 	}
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.advertising,
-						advertising);
-
 	if (netif_running(dev) && tp->link_up) {
-		cmd->base.speed = tp->link_config.active_speed;
-		cmd->base.duplex = tp->link_config.active_duplex;
-		ethtool_convert_legacy_u32_to_link_mode(
-			cmd->link_modes.lp_advertising,
-			tp->link_config.rmt_adv);
-
+		ethtool_cmd_speed_set(cmd, tp->link_config.active_speed);
+		cmd->duplex = tp->link_config.active_duplex;
+		cmd->lp_advertising = tp->link_config.rmt_adv;
 		if (!(tp->phy_flags & TG3_PHYFLG_ANY_SERDES)) {
 			if (tp->phy_flags & TG3_PHYFLG_MDIX_STATE)
-				cmd->base.eth_tp_mdix = ETH_TP_MDI_X;
+				cmd->eth_tp_mdix = ETH_TP_MDI_X;
 			else
-				cmd->base.eth_tp_mdix = ETH_TP_MDI;
+				cmd->eth_tp_mdix = ETH_TP_MDI;
 		}
 	} else {
-		cmd->base.speed = SPEED_UNKNOWN;
-		cmd->base.duplex = DUPLEX_UNKNOWN;
-		cmd->base.eth_tp_mdix = ETH_TP_MDI_INVALID;
+		ethtool_cmd_speed_set(cmd, SPEED_UNKNOWN);
+		cmd->duplex = DUPLEX_UNKNOWN;
+		cmd->eth_tp_mdix = ETH_TP_MDI_INVALID;
 	}
-	cmd->base.phy_address = tp->phy_addr;
-	cmd->base.autoneg = tp->link_config.autoneg;
+	cmd->phy_address = tp->phy_addr;
+	cmd->transceiver = XCVR_INTERNAL;
+	cmd->autoneg = tp->link_config.autoneg;
+	cmd->maxtxpkt = 0;
+	cmd->maxrxpkt = 0;
 	return 0;
 }
 
-static int tg3_set_link_ksettings(struct net_device *dev,
-				  const struct ethtool_link_ksettings *cmd)
+static int tg3_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
 	struct tg3 *tp = netdev_priv(dev);
-	u32 speed = cmd->base.speed;
-	u32 advertising;
+	u32 speed = ethtool_cmd_speed(cmd);
 
 	if (tg3_flag(tp, USE_PHYLIB)) {
 		struct phy_device *phydev;
 		if (!(tp->phy_flags & TG3_PHYFLG_IS_CONNECTED))
 			return -EAGAIN;
 		phydev = mdiobus_get_phy(tp->mdio_bus, tp->phy_addr);
-		return phy_ethtool_ksettings_set(phydev, cmd);
+		return phy_ethtool_sset(phydev, cmd);
 	}
 
-	if (cmd->base.autoneg != AUTONEG_ENABLE &&
-	    cmd->base.autoneg != AUTONEG_DISABLE)
+	if (cmd->autoneg != AUTONEG_ENABLE &&
+	    cmd->autoneg != AUTONEG_DISABLE)
 		return -EINVAL;
 
-	if (cmd->base.autoneg == AUTONEG_DISABLE &&
-	    cmd->base.duplex != DUPLEX_FULL &&
-	    cmd->base.duplex != DUPLEX_HALF)
+	if (cmd->autoneg == AUTONEG_DISABLE &&
+	    cmd->duplex != DUPLEX_FULL &&
+	    cmd->duplex != DUPLEX_HALF)
 		return -EINVAL;
 
-	ethtool_convert_link_mode_to_legacy_u32(&advertising,
-						cmd->link_modes.advertising);
-
-	if (cmd->base.autoneg == AUTONEG_ENABLE) {
+	if (cmd->autoneg == AUTONEG_ENABLE) {
 		u32 mask = ADVERTISED_Autoneg |
 			   ADVERTISED_Pause |
 			   ADVERTISED_Asym_Pause;
@@ -12211,7 +12185,7 @@ static int tg3_set_link_ksettings(struct net_device *dev,
 		else
 			mask |= ADVERTISED_FIBRE;
 
-		if (advertising & ~mask)
+		if (cmd->advertising & ~mask)
 			return -EINVAL;
 
 		mask &= (ADVERTISED_1000baseT_Half |
@@ -12221,13 +12195,13 @@ static int tg3_set_link_ksettings(struct net_device *dev,
 			 ADVERTISED_10baseT_Half |
 			 ADVERTISED_10baseT_Full);
 
-		advertising &= mask;
+		cmd->advertising &= mask;
 	} else {
 		if (tp->phy_flags & TG3_PHYFLG_ANY_SERDES) {
 			if (speed != SPEED_1000)
 				return -EINVAL;
 
-			if (cmd->base.duplex != DUPLEX_FULL)
+			if (cmd->duplex != DUPLEX_FULL)
 				return -EINVAL;
 		} else {
 			if (speed != SPEED_100 &&
@@ -12238,16 +12212,16 @@ static int tg3_set_link_ksettings(struct net_device *dev,
 
 	tg3_full_lock(tp, 0);
 
-	tp->link_config.autoneg = cmd->base.autoneg;
-	if (cmd->base.autoneg == AUTONEG_ENABLE) {
-		tp->link_config.advertising = (advertising |
+	tp->link_config.autoneg = cmd->autoneg;
+	if (cmd->autoneg == AUTONEG_ENABLE) {
+		tp->link_config.advertising = (cmd->advertising |
 					      ADVERTISED_Autoneg);
 		tp->link_config.speed = SPEED_UNKNOWN;
 		tp->link_config.duplex = DUPLEX_UNKNOWN;
 	} else {
 		tp->link_config.advertising = 0;
 		tp->link_config.speed = speed;
-		tp->link_config.duplex = cmd->base.duplex;
+		tp->link_config.duplex = cmd->duplex;
 	}
 
 	tp->phy_flags |= TG3_PHYFLG_USER_CONFIGURED;
@@ -12578,6 +12552,10 @@ static int tg3_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *info,
 				info->data = TG3_RSS_MAX_NUM_QS;
 		}
 
+		/* The first interrupt vector only
+		 * handles link interrupts.
+		 */
+		info->data -= 1;
 		return 0;
 
 	default:
@@ -14036,9 +14014,7 @@ static int tg3_set_coalesce(struct net_device *dev, struct ethtool_coalesce *ec)
 	}
 
 	if ((ec->rx_coalesce_usecs > MAX_RXCOL_TICKS) ||
-	    (!ec->rx_coalesce_usecs) ||
 	    (ec->tx_coalesce_usecs > MAX_TXCOL_TICKS) ||
-	    (!ec->tx_coalesce_usecs) ||
 	    (ec->rx_max_coalesced_frames > MAX_RXMAX_FRAMES) ||
 	    (ec->tx_max_coalesced_frames > MAX_TXMAX_FRAMES) ||
 	    (ec->rx_coalesce_usecs_irq > max_rxcoal_tick_int) ||
@@ -14047,6 +14023,16 @@ static int tg3_set_coalesce(struct net_device *dev, struct ethtool_coalesce *ec)
 	    (ec->tx_max_coalesced_frames_irq > MAX_TXCOAL_MAXF_INT) ||
 	    (ec->stats_block_coalesce_usecs > max_stat_coal_ticks) ||
 	    (ec->stats_block_coalesce_usecs < min_stat_coal_ticks))
+		return -EINVAL;
+
+	/* No rx interrupts will be generated if both are zero */
+	if ((ec->rx_coalesce_usecs == 0) &&
+	    (ec->rx_max_coalesced_frames == 0))
+		return -EINVAL;
+
+	/* No tx interrupts will be generated if both are zero */
+	if ((ec->tx_coalesce_usecs == 0) &&
+	    (ec->tx_max_coalesced_frames == 0))
 		return -EINVAL;
 
 	/* Only copy relevant parameters, ignore all others. */
@@ -14120,6 +14106,8 @@ static int tg3_get_eee(struct net_device *dev, struct ethtool_eee *edata)
 }
 
 static const struct ethtool_ops tg3_ethtool_ops = {
+	.get_settings		= tg3_get_settings,
+	.set_settings		= tg3_set_settings,
 	.get_drvinfo		= tg3_get_drvinfo,
 	.get_regs_len		= tg3_get_regs_len,
 	.get_regs		= tg3_get_regs,
@@ -14152,8 +14140,6 @@ static const struct ethtool_ops tg3_ethtool_ops = {
 	.get_ts_info		= tg3_get_ts_info,
 	.get_eee		= tg3_get_eee,
 	.set_eee		= tg3_set_eee,
-	.get_link_ksettings	= tg3_get_link_ksettings,
-	.set_link_ksettings	= tg3_set_link_ksettings,
 };
 
 static struct rtnl_link_stats64 *tg3_get_stats64(struct net_device *dev,
@@ -14162,7 +14148,7 @@ static struct rtnl_link_stats64 *tg3_get_stats64(struct net_device *dev,
 	struct tg3 *tp = netdev_priv(dev);
 
 	spin_lock_bh(&tp->lock);
-	if (!tp->hw_stats || !tg3_flag(tp, INIT_COMPLETE)) {
+	if (!tp->hw_stats) {
 		*stats = tp->net_stats_prev;
 		spin_unlock_bh(&tp->lock);
 		return stats;
@@ -14237,10 +14223,7 @@ static int tg3_change_mtu(struct net_device *dev, int new_mtu)
 	/* Reset PHY, otherwise the read DMA engine will be in a mode that
 	 * breaks all requests to 256 bytes.
 	 */
-	if (tg3_asic_rev(tp) == ASIC_REV_57766 ||
-	    tg3_asic_rev(tp) == ASIC_REV_5717 ||
-	    tg3_asic_rev(tp) == ASIC_REV_5719 ||
-	    tg3_asic_rev(tp) == ASIC_REV_5720)
+	if (tg3_asic_rev(tp) == ASIC_REV_57766)
 		reset_phy = true;
 
 	err = tg3_restart_hw(tp, reset_phy);
@@ -18151,13 +18134,13 @@ static pci_ers_result_t tg3_io_error_detected(struct pci_dev *pdev,
 
 	rtnl_lock();
 
-	/* We probably don't have netdev yet */
-	if (!netdev || !netif_running(netdev))
-		goto done;
-
 	/* We needn't recover from permanent error */
 	if (state == pci_channel_io_frozen)
 		tp->pcierr_recovery = true;
+
+	/* We probably don't have netdev yet */
+	if (!netdev || !netif_running(netdev))
+		goto done;
 
 	tg3_phy_stop(tp);
 
@@ -18255,7 +18238,7 @@ static void tg3_io_resume(struct pci_dev *pdev)
 
 	rtnl_lock();
 
-	if (!netdev || !netif_running(netdev))
+	if (!netif_running(netdev))
 		goto done;
 
 	tg3_full_lock(tp, 0);

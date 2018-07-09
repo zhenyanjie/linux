@@ -779,7 +779,7 @@ struct comedi_subdinfo {
 	unsigned int flags;
 	unsigned int range_type;
 	unsigned int settling_time_0;
-	unsigned int insn_bits_support;
+	unsigned insn_bits_support;
 	unsigned int unused[8];
 };
 

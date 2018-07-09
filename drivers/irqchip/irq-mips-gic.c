@@ -55,7 +55,6 @@ static unsigned int gic_cpu_pin;
 static unsigned int timer_cpu_pin;
 static struct irq_chip gic_level_irq_controller, gic_edge_irq_controller;
 DECLARE_BITMAP(ipi_resrv, GIC_MAX_INTRS);
-DECLARE_BITMAP(ipi_available, GIC_MAX_INTRS);
 
 static void __gic_irq_dispatch(void);
 
@@ -360,7 +359,7 @@ static void gic_handle_shared_int(bool chained)
 		pending_reg += gic_reg_step;
 		intrmask_reg += gic_reg_step;
 
-		if (!IS_ENABLED(CONFIG_64BIT) || mips_cm_is64)
+		if (!config_enabled(CONFIG_64BIT) || mips_cm_is64)
 			continue;
 
 		pending[i] |= (u64)gic_read(pending_reg) << 32;
@@ -372,13 +371,18 @@ static void gic_handle_shared_int(bool chained)
 	bitmap_and(pending, pending, intrmask, gic_shared_intrs);
 	bitmap_and(pending, pending, pcpu_mask, gic_shared_intrs);
 
-	for_each_set_bit(intr, pending, gic_shared_intrs) {
+	intr = find_first_bit(pending, gic_shared_intrs);
+	while (intr != gic_shared_intrs) {
 		virq = irq_linear_revmap(gic_irq_domain,
 					 GIC_SHARED_TO_HWIRQ(intr));
 		if (chained)
 			generic_handle_irq(virq);
 		else
 			do_IRQ(virq);
+
+		/* go to next pending bit */
+		bitmap_clear(pending, intr, 1);
+		intr = find_first_bit(pending, gic_shared_intrs);
 	}
 }
 
@@ -514,13 +518,18 @@ static void gic_handle_local_int(bool chained)
 
 	bitmap_and(&pending, &pending, &masked, GIC_NUM_LOCAL_INTRS);
 
-	for_each_set_bit(intr, &pending, GIC_NUM_LOCAL_INTRS) {
+	intr = find_first_bit(&pending, GIC_NUM_LOCAL_INTRS);
+	while (intr != GIC_NUM_LOCAL_INTRS) {
 		virq = irq_linear_revmap(gic_irq_domain,
 					 GIC_LOCAL_TO_HWIRQ(intr));
 		if (chained)
 			generic_handle_irq(virq);
 		else
 			do_IRQ(virq);
+
+		/* go to next pending bit */
+		bitmap_clear(&pending, intr, 1);
+		intr = find_first_bit(&pending, GIC_NUM_LOCAL_INTRS);
 	}
 }
 
@@ -747,17 +756,17 @@ static int gic_irq_domain_alloc(struct irq_domain *d, unsigned int virq,
 
 		return gic_setup_dev_chip(d, virq, spec->hwirq);
 	} else {
-		base_hwirq = find_first_bit(ipi_available, gic_shared_intrs);
+		base_hwirq = find_first_bit(ipi_resrv, gic_shared_intrs);
 		if (base_hwirq == gic_shared_intrs) {
 			return -ENOMEM;
 		}
 
 		/* check that we have enough space */
 		for (i = base_hwirq; i < nr_irqs; i++) {
-			if (!test_bit(i, ipi_available))
+			if (!test_bit(i, ipi_resrv))
 				return -EBUSY;
 		}
-		bitmap_clear(ipi_available, base_hwirq, nr_irqs);
+		bitmap_clear(ipi_resrv, base_hwirq, nr_irqs);
 
 		/* map the hwirq for each cpu consecutively */
 		i = 0;
@@ -788,7 +797,7 @@ static int gic_irq_domain_alloc(struct irq_domain *d, unsigned int virq,
 
 	return 0;
 error:
-	bitmap_set(ipi_available, base_hwirq, nr_irqs);
+	bitmap_set(ipi_resrv, base_hwirq, nr_irqs);
 	return ret;
 }
 
@@ -803,7 +812,7 @@ void gic_irq_domain_free(struct irq_domain *d, unsigned int virq,
 		return;
 
 	base_hwirq = GIC_HWIRQ_TO_SHARED(irqd_to_hwirq(data));
-	bitmap_set(ipi_available, base_hwirq, nr_irqs);
+	bitmap_set(ipi_resrv, base_hwirq, nr_irqs);
 }
 
 int gic_irq_domain_match(struct irq_domain *d, struct device_node *node,
@@ -1038,14 +1047,12 @@ static void __init __gic_init(unsigned long gic_base_addr,
 					       &gic_irq_domain_ops, NULL);
 	if (!gic_irq_domain)
 		panic("Failed to add GIC IRQ domain");
-	gic_irq_domain->name = "mips-gic-irq";
 
 	gic_dev_domain = irq_domain_add_hierarchy(gic_irq_domain, 0,
 						  GIC_NUM_LOCAL_INTRS + gic_shared_intrs,
 						  node, &gic_dev_domain_ops, NULL);
 	if (!gic_dev_domain)
 		panic("Failed to add GIC DEV domain");
-	gic_dev_domain->name = "mips-gic-dev";
 
 	gic_ipi_domain = irq_domain_add_hierarchy(gic_irq_domain,
 						  IRQ_DOMAIN_FLAG_IPI_PER_CPU,
@@ -1054,7 +1061,6 @@ static void __init __gic_init(unsigned long gic_base_addr,
 	if (!gic_ipi_domain)
 		panic("Failed to add GIC IPI domain");
 
-	gic_ipi_domain->name = "mips-gic-ipi";
 	gic_ipi_domain->bus_token = DOMAIN_BUS_IPI;
 
 	if (node &&
@@ -1067,7 +1073,6 @@ static void __init __gic_init(unsigned long gic_base_addr,
 			   2 * gic_vpes);
 	}
 
-	bitmap_copy(ipi_available, ipi_resrv, GIC_MAX_INTRS);
 	gic_basic_init();
 }
 
@@ -1117,11 +1122,8 @@ static int __init gic_of_init(struct device_node *node,
 		gic_len = resource_size(&res);
 	}
 
-	if (mips_cm_present()) {
+	if (mips_cm_present())
 		write_gcr_gic_base(gic_base | CM_GCR_GIC_BASE_GICEN_MSK);
-		/* Ensure GIC region is enabled before trying to access it */
-		__sync();
-	}
 	gic_present = true;
 
 	__gic_init(gic_base, gic_len, cpu_vec, 0, node);

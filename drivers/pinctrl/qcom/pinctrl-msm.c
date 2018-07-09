@@ -29,7 +29,6 @@
 #include <linux/spinlock.h>
 #include <linux/reboot.h>
 #include <linux/pm.h>
-#include <linux/log2.h>
 
 #include "../core.h"
 #include "../pinconf.h"
@@ -139,11 +138,10 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
 	const struct msm_pingroup *g;
 	unsigned long flags;
-	u32 val, mask;
+	u32 val;
 	int i;
 
 	g = &pctrl->soc->groups[group];
-	mask = GENMASK(g->mux_bit + order_base_2(g->nfuncs) - 1, g->mux_bit);
 
 	for (i = 0; i < g->nfuncs; i++) {
 		if (g->funcs[i] == function)
@@ -156,7 +154,7 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 	spin_lock_irqsave(&pctrl->lock, flags);
 
 	val = readl(pctrl->regs + g->ctl_reg);
-	val &= ~mask;
+	val &= ~(0x7 << g->mux_bit);
 	val |= i << g->mux_bit;
 	writel(val, pctrl->regs + g->ctl_reg);
 
@@ -593,6 +591,10 @@ static void msm_gpio_irq_unmask(struct irq_data *d)
 	g = &pctrl->soc->groups[d->hwirq];
 
 	spin_lock_irqsave(&pctrl->lock, flags);
+
+	val = readl(pctrl->regs + g->intr_status_reg);
+	val &= ~BIT(g->intr_status_bit);
+	writel(val, pctrl->regs + g->intr_status_reg);
 
 	val = readl(pctrl->regs + g->intr_cfg_reg);
 	val |= BIT(g->intr_enable_bit);

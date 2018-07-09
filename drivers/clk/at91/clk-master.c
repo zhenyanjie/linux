@@ -120,7 +120,7 @@ static const struct clk_ops master_ops = {
 	.get_parent = clk_master_get_parent,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91_clk_register_master(struct regmap *regmap,
 		const char *name, int num_parents,
 		const char **parent_names,
@@ -128,9 +128,8 @@ at91_clk_register_master(struct regmap *regmap,
 		const struct clk_master_characteristics *characteristics)
 {
 	struct clk_master *master;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	struct clk_hw *hw;
-	int ret;
 
 	if (!name || !num_parents || !parent_names)
 		return ERR_PTR(-EINVAL);
@@ -150,14 +149,12 @@ at91_clk_register_master(struct regmap *regmap,
 	master->characteristics = characteristics;
 	master->regmap = regmap;
 
-	hw = &master->hw;
-	ret = clk_hw_register(NULL, &master->hw);
-	if (ret) {
+	clk = clk_register(NULL, &master->hw);
+	if (IS_ERR(clk)) {
 		kfree(master);
-		hw = ERR_PTR(ret);
 	}
 
-	return hw;
+	return clk;
 }
 
 
@@ -201,7 +198,7 @@ static void __init
 of_at91_clk_master_setup(struct device_node *np,
 			 const struct clk_master_layout *layout)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	unsigned int num_parents;
 	const char *parent_names[MASTER_SOURCE_MAX];
 	const char *name = np->name;
@@ -224,13 +221,13 @@ of_at91_clk_master_setup(struct device_node *np,
 	if (IS_ERR(regmap))
 		return;
 
-	hw = at91_clk_register_master(regmap, name, num_parents,
+	clk = at91_clk_register_master(regmap, name, num_parents,
 				       parent_names, layout,
 				       characteristics);
-	if (IS_ERR(hw))
+	if (IS_ERR(clk))
 		goto out_free_characteristics;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 	return;
 
 out_free_characteristics:

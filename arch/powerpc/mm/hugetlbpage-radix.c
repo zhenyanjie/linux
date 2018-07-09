@@ -5,34 +5,39 @@
 #include <asm/cacheflush.h>
 #include <asm/machdep.h>
 #include <asm/mman.h>
-#include <asm/tlb.h>
 
 void radix__flush_hugetlb_page(struct vm_area_struct *vma, unsigned long vmaddr)
 {
-	int psize;
+	unsigned long ap, shift;
 	struct hstate *hstate = hstate_file(vma->vm_file);
 
-	psize = hstate_get_psize(hstate);
-	radix__flush_tlb_page_psize(vma->vm_mm, vmaddr, psize);
+	shift = huge_page_shift(hstate);
+	if (shift == mmu_psize_defs[MMU_PAGE_2M].shift)
+		ap = mmu_get_ap(MMU_PAGE_2M);
+	else if (shift == mmu_psize_defs[MMU_PAGE_1G].shift)
+		ap = mmu_get_ap(MMU_PAGE_1G);
+	else {
+		WARN(1, "Wrong huge page shift\n");
+		return ;
+	}
+	radix___flush_tlb_page(vma->vm_mm, vmaddr, ap, 0);
 }
 
 void radix__local_flush_hugetlb_page(struct vm_area_struct *vma, unsigned long vmaddr)
 {
-	int psize;
+	unsigned long ap, shift;
 	struct hstate *hstate = hstate_file(vma->vm_file);
 
-	psize = hstate_get_psize(hstate);
-	radix__local_flush_tlb_page_psize(vma->vm_mm, vmaddr, psize);
-}
-
-void radix__flush_hugetlb_tlb_range(struct vm_area_struct *vma, unsigned long start,
-				   unsigned long end)
-{
-	int psize;
-	struct hstate *hstate = hstate_file(vma->vm_file);
-
-	psize = hstate_get_psize(hstate);
-	radix__flush_tlb_range_psize(vma->vm_mm, start, end, psize);
+	shift = huge_page_shift(hstate);
+	if (shift == mmu_psize_defs[MMU_PAGE_2M].shift)
+		ap = mmu_get_ap(MMU_PAGE_2M);
+	else if (shift == mmu_psize_defs[MMU_PAGE_1G].shift)
+		ap = mmu_get_ap(MMU_PAGE_1G);
+	else {
+		WARN(1, "Wrong huge page shift\n");
+		return ;
+	}
+	radix___local_flush_tlb_page(vma->vm_mm, vmaddr, ap, 0);
 }
 
 /*
@@ -65,7 +70,7 @@ radix__hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 		addr = ALIGN(addr, huge_page_size(h));
 		vma = find_vma(mm, addr);
 		if (TASK_SIZE - len >= addr &&
-		    (!vma || addr + len <= vm_start_gap(vma)))
+		    (!vma || addr + len <= vma->vm_start))
 			return addr;
 	}
 	/*

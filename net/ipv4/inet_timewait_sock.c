@@ -182,15 +182,13 @@ struct inet_timewait_sock *inet_twsk_alloc(const struct sock *sk,
 		tw->tw_dport	    = inet->inet_dport;
 		tw->tw_family	    = sk->sk_family;
 		tw->tw_reuse	    = sk->sk_reuse;
-		tw->tw_reuseport    = sk->sk_reuseport;
 		tw->tw_hash	    = sk->sk_hash;
 		tw->tw_ipv6only	    = 0;
 		tw->tw_transparent  = inet->transparent;
 		tw->tw_prot	    = sk->sk_prot_creator;
 		atomic64_set(&tw->tw_cookie, atomic64_read(&sk->sk_cookie));
 		twsk_net_set(tw, sock_net(sk));
-		setup_pinned_timer(&tw->tw_timer, tw_timer_handler,
-				   (unsigned long)tw);
+		setup_timer(&tw->tw_timer, tw_timer_handler, (unsigned long)tw);
 		/*
 		 * Because we use RCU lookups, we should not set tw_refcnt
 		 * to a non null value before everything is setup for this
@@ -250,7 +248,7 @@ void __inet_twsk_schedule(struct inet_timewait_sock *tw, int timeo, bool rearm)
 
 	tw->tw_kill = timeo <= 4*HZ;
 	if (!rearm) {
-		BUG_ON(mod_timer(&tw->tw_timer, jiffies + timeo));
+		BUG_ON(mod_timer_pinned(&tw->tw_timer, jiffies + timeo));
 		atomic_inc(&tw->tw_dr->tw_count);
 	} else {
 		mod_timer_pending(&tw->tw_timer, jiffies + timeo);

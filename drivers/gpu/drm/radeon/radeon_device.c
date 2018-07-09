@@ -30,7 +30,6 @@
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/radeon_drm.h>
-#include <linux/pm_runtime.h>
 #include <linux/vgaarb.h>
 #include <linux/vga_switcheroo.h>
 #include <linux/efi.h>
@@ -104,14 +103,6 @@ static const char radeon_family_name[][16] = {
 	"LAST",
 };
 
-#if defined(CONFIG_VGA_SWITCHEROO)
-bool radeon_has_atpx_dgpu_power_cntl(void);
-bool radeon_is_atpx_hybrid(void);
-#else
-static inline bool radeon_has_atpx_dgpu_power_cntl(void) { return false; }
-static inline bool radeon_is_atpx_hybrid(void) { return false; }
-#endif
-
 #define RADEON_PX_QUIRK_DISABLE_PX  (1 << 0)
 #define RADEON_PX_QUIRK_LONG_WAKEUP (1 << 1)
 
@@ -136,10 +127,6 @@ static struct radeon_px_quirk radeon_px_quirk_list[] = {
 	 * https://bugzilla.kernel.org/show_bug.cgi?id=51381
 	 */
 	{ PCI_VENDOR_ID_ATI, 0x6840, 0x1043, 0x2122, RADEON_PX_QUIRK_DISABLE_PX },
-	/* Asus K53TK laptop with AMD A6-3420M APU and Radeon 7670m GPU
-	 * https://bugs.freedesktop.org/show_bug.cgi?id=101491
-	 */
-	{ PCI_VENDOR_ID_ATI, 0x6741, 0x1043, 0x2122, RADEON_PX_QUIRK_DISABLE_PX },
 	/* macbook pro 8.2 */
 	{ PCI_VENDOR_ID_ATI, 0x6741, PCI_VENDOR_ID_APPLE, 0x00e2, RADEON_PX_QUIRK_LONG_WAKEUP },
 	{ 0, 0, 0, 0, 0 },
@@ -171,11 +158,6 @@ static void radeon_device_handle_px_quirks(struct radeon_device *rdev)
 	}
 
 	if (rdev->px_quirk_flags & RADEON_PX_QUIRK_DISABLE_PX)
-		rdev->flags &= ~RADEON_IS_PX;
-
-	/* disable PX is the system doesn't support dGPU power control or hybrid gfx */
-	if (!radeon_is_atpx_hybrid() &&
-	    !radeon_has_atpx_dgpu_power_cntl())
 		rdev->flags &= ~RADEON_IS_PX;
 }
 
@@ -656,7 +638,7 @@ void radeon_gtt_location(struct radeon_device *rdev, struct radeon_mc *mc)
  * Used at driver startup.
  * Returns true if virtual or false if not.
  */
-bool radeon_device_is_virtual(void)
+static bool radeon_device_is_virtual(void)
 {
 #ifdef CONFIG_X86
 	return boot_cpu_has(X86_FEATURE_HYPERVISOR);
@@ -678,9 +660,8 @@ bool radeon_card_posted(struct radeon_device *rdev)
 {
 	uint32_t reg;
 
-	/* for pass through, always force asic_init for CI */
-	if (rdev->family >= CHIP_BONAIRE &&
-	    radeon_device_is_virtual())
+	/* for pass through, always force asic_init */
+	if (radeon_device_is_virtual())
 		return false;
 
 	/* required for EFI mode on macbook2,1 which uses an r5xx asic */
@@ -1545,9 +1526,6 @@ int radeon_device_init(struct radeon_device *rdev,
 	return 0;
 
 failed:
-	/* balance pm_runtime_get_sync() in radeon_driver_unload_kms() */
-	if (radeon_is_px(ddev))
-		pm_runtime_put_noidle(ddev->dev);
 	if (runtime)
 		vga_switcheroo_fini_domain_pm_ops(rdev->dev);
 	return r;
@@ -1674,7 +1652,7 @@ int radeon_suspend_kms(struct drm_device *dev, bool suspend,
 	radeon_agp_suspend(rdev);
 
 	pci_save_state(dev->pdev);
-	if (freeze && rdev->family >= CHIP_CEDAR && !(rdev->flags & RADEON_IS_IGP)) {
+	if (freeze && rdev->family >= CHIP_CEDAR) {
 		rdev->asic->asic_reset(rdev, true);
 		pci_restore_state(dev->pdev);
 	} else if (suspend) {
@@ -1974,3 +1952,14 @@ static void radeon_debugfs_remove_files(struct radeon_device *rdev)
 	}
 #endif
 }
+
+#if defined(CONFIG_DEBUG_FS)
+int radeon_debugfs_init(struct drm_minor *minor)
+{
+	return 0;
+}
+
+void radeon_debugfs_cleanup(struct drm_minor *minor)
+{
+}
+#endif

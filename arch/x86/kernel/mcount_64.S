@@ -7,8 +7,7 @@
 #include <linux/linkage.h>
 #include <asm/ptrace.h>
 #include <asm/ftrace.h>
-#include <asm/export.h>
-#include <asm/nospec-branch.h>
+
 
 	.code64
 	.section .entry.text, "ax"
@@ -18,10 +17,8 @@
 
 #ifdef CC_USING_FENTRY
 # define function_hook	__fentry__
-EXPORT_SYMBOL(__fentry__)
 #else
 # define function_hook	mcount
-EXPORT_SYMBOL(mcount)
 #endif
 
 /* All cases save the original rbp (8 bytes) */
@@ -290,9 +287,8 @@ trace:
 	 * ip and parent ip are used and the list function is called when
 	 * function tracing is enabled.
 	 */
+	call   *ftrace_trace_function
 
-	movq ftrace_trace_function, %r8
-	CALL_NOSPEC %r8
 	restore_mcount_regs
 
 	jmp fgraph_trace
@@ -335,5 +331,5 @@ GLOBAL(return_to_handler)
 	movq 8(%rsp), %rdx
 	movq (%rsp), %rax
 	addq $24, %rsp
-	JMP_NOSPEC %rdi
+	jmp *%rdi
 #endif

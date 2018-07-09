@@ -89,8 +89,7 @@ static int parent_count;
 int mdio_mux_init(struct device *dev,
 		  int (*switch_fn)(int cur, int desired, void *data),
 		  void **mux_handle,
-		  void *data,
-		  struct mii_bus *mux_bus)
+		  void *data)
 {
 	struct device_node *parent_bus_node;
 	struct device_node *child_bus_node;
@@ -102,27 +101,21 @@ int mdio_mux_init(struct device *dev,
 	if (!dev->of_node)
 		return -ENODEV;
 
-	if (!mux_bus) {
-		parent_bus_node = of_parse_phandle(dev->of_node,
-						   "mdio-parent-bus", 0);
+	parent_bus_node = of_parse_phandle(dev->of_node, "mdio-parent-bus", 0);
 
-		if (!parent_bus_node)
-			return -ENODEV;
-
-		parent_bus = of_mdio_find_bus(parent_bus_node);
-		if (!parent_bus) {
-			ret_val = -EPROBE_DEFER;
-			goto err_parent_bus;
-		}
-	} else {
-		parent_bus_node = NULL;
-		parent_bus = mux_bus;
-	}
+	if (!parent_bus_node)
+		return -ENODEV;
 
 	pb = devm_kzalloc(dev, sizeof(*pb), GFP_KERNEL);
 	if (pb == NULL) {
 		ret_val = -ENOMEM;
-		goto err_pb_kz;
+		goto err_parent_bus;
+	}
+
+	parent_bus = of_mdio_find_bus(parent_bus_node);
+	if (parent_bus == NULL) {
+		ret_val = -EPROBE_DEFER;
+		goto err_parent_bus;
 	}
 
 	pb->switch_data = data;
@@ -153,7 +146,6 @@ int mdio_mux_init(struct device *dev,
 		cb->mii_bus = mdiobus_alloc();
 		if (!cb->mii_bus) {
 			ret_val = -ENOMEM;
-			devm_kfree(dev, cb);
 			of_node_put(child_bus_node);
 			break;
 		}
@@ -170,6 +162,7 @@ int mdio_mux_init(struct device *dev,
 			mdiobus_free(cb->mii_bus);
 			devm_kfree(dev, cb);
 		} else {
+			of_node_get(child_bus_node);
 			cb->next = pb->children;
 			pb->children = cb;
 		}
@@ -180,11 +173,9 @@ int mdio_mux_init(struct device *dev,
 		return 0;
 	}
 
-	devm_kfree(dev, pb);
-err_pb_kz:
 	/* balance the reference of_mdio_find_bus() took */
-	if (!mux_bus)
-		put_device(&parent_bus->dev);
+	put_device(&pb->mii_bus->dev);
+
 err_parent_bus:
 	of_node_put(parent_bus_node);
 	return ret_val;

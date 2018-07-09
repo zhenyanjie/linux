@@ -160,6 +160,9 @@ static inline void set_hard_smp_processor_id(int cpu, int phys)
 {
 	paca[cpu].hw_cpu_id = phys;
 }
+
+extern void smp_release_cpus(void);
+
 #else
 /* 32-bit */
 #ifndef CONFIG_SMP
@@ -175,12 +178,6 @@ static inline void set_hard_smp_processor_id(int cpu, int phys)
 }
 #endif /* !CONFIG_SMP */
 #endif /* !CONFIG_PPC64 */
-
-#if defined(CONFIG_PPC64) && (defined(CONFIG_SMP) || defined(CONFIG_KEXEC))
-extern void smp_release_cpus(void);
-#else
-static inline void smp_release_cpus(void) { };
-#endif
 
 extern int smt_enabled_at_boot;
 

@@ -786,8 +786,10 @@ static int mtk_i2c_probe(struct platform_device *pdev)
 
 	i2c_set_adapdata(&i2c->adap, i2c);
 	ret = i2c_add_adapter(&i2c->adap);
-	if (ret)
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to add i2c bus to i2c core\n");
 		return ret;
+	}
 
 	platform_set_drvdata(pdev, i2c);
 

@@ -135,7 +135,7 @@ static void ovs_ct_get_labels(const struct nf_conn *ct,
 	struct nf_conn_labels *cl = ct ? nf_ct_labels_find(ct) : NULL;
 
 	if (cl) {
-		size_t len = sizeof(cl->bits);
+		size_t len = cl->words * sizeof(long);
 
 		if (len > OVS_CT_LABELS_LEN)
 			len = OVS_CT_LABELS_LEN;
@@ -274,7 +274,7 @@ static int ovs_ct_set_labels(struct sk_buff *skb, struct sw_flow_key *key,
 		nf_ct_labels_ext_add(ct);
 		cl = nf_ct_labels_find(ct);
 	}
-	if (!cl || sizeof(cl->bits) < OVS_CT_LABELS_LEN)
+	if (!cl || cl->words * sizeof(long) < OVS_CT_LABELS_LEN)
 		return -ENOSPC;
 
 	err = nf_connlabels_replace(ct, (u32 *)labels, (u32 *)mask,
@@ -367,13 +367,11 @@ static int handle_fragments(struct net *net, struct sw_flow_key *key,
 	} else if (key->eth.type == htons(ETH_P_IPV6)) {
 		enum ip6_defrag_users user = IP6_DEFRAG_CONNTRACK_IN + zone;
 
+		skb_orphan(skb);
 		memset(IP6CB(skb), 0, sizeof(struct inet6_skb_parm));
 		err = nf_ct_frag6_gather(net, skb, user);
-		if (err) {
-			if (err != -EINPROGRESS)
-				kfree_skb(skb);
+		if (err)
 			return err;
-		}
 
 		key->ip.proto = ipv6_hdr(skb)->nexthdr;
 		ovs_cb.mru = IP6CB(skb)->frag_max_size;
@@ -396,38 +394,10 @@ ovs_ct_expect_find(struct net *net, const struct nf_conntrack_zone *zone,
 		   u16 proto, const struct sk_buff *skb)
 {
 	struct nf_conntrack_tuple tuple;
-	struct nf_conntrack_expect *exp;
 
 	if (!nf_ct_get_tuplepr(skb, skb_network_offset(skb), proto, net, &tuple))
 		return NULL;
-
-	exp = __nf_ct_expect_find(net, zone, &tuple);
-	if (exp) {
-		struct nf_conntrack_tuple_hash *h;
-
-		/* Delete existing conntrack entry, if it clashes with the
-		 * expectation.  This can happen since conntrack ALGs do not
-		 * check for clashes between (new) expectations and existing
-		 * conntrack entries.  nf_conntrack_in() will check the
-		 * expectations only if a conntrack entry can not be found,
-		 * which can lead to OVS finding the expectation (here) in the
-		 * init direction, but which will not be removed by the
-		 * nf_conntrack_in() call, if a matching conntrack entry is
-		 * found instead.  In this case all init direction packets
-		 * would be reported as new related packets, while reply
-		 * direction packets would be reported as un-related
-		 * established packets.
-		 */
-		h = nf_conntrack_find_get(net, zone, &tuple);
-		if (h) {
-			struct nf_conn *ct = nf_ct_tuplehash_to_ctrack(h);
-
-			nf_ct_delete(ct, 0, 0);
-			nf_conntrack_put(&ct->ct_general);
-		}
-	}
-
-	return exp;
+	return __nf_ct_expect_find(net, zone, &tuple);
 }
 
 /* This replicates logic from nf_conntrack_core.c that is not exported. */
@@ -463,6 +433,7 @@ ovs_ct_find_existing(struct net *net, const struct nf_conntrack_zone *zone,
 	struct nf_conntrack_l4proto *l4proto;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conntrack_tuple_hash *h;
+	enum ip_conntrack_info ctinfo;
 	struct nf_conn *ct;
 	unsigned int dataoff;
 	u8 protonum;
@@ -487,8 +458,13 @@ ovs_ct_find_existing(struct net *net, const struct nf_conntrack_zone *zone,
 
 	ct = nf_ct_tuplehash_to_ctrack(h);
 
+	ctinfo = ovs_ct_get_info(h);
+	if (ctinfo == IP_CT_NEW) {
+		/* This should not happen. */
+		WARN_ONCE(1, "ovs_ct_find_existing: new packet for %p\n", ct);
+	}
 	skb->nfct = &ct->ct_general;
-	skb->nfctinfo = ovs_ct_get_info(h);
+	skb->nfctinfo = ctinfo;
 	return ct;
 }
 
@@ -541,7 +517,7 @@ static int ovs_ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 	int hooknum, nh_off, err = NF_ACCEPT;
 
 	nh_off = skb_network_offset(skb);
-	skb_pull_rcsum(skb, nh_off);
+	skb_pull(skb, nh_off);
 
 	/* See HOOK2MANIP(). */
 	if (maniptype == NF_NAT_MANIP_SRC)
@@ -606,7 +582,6 @@ static int ovs_ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 	err = nf_nat_packet(ct, ctinfo, hooknum, skb);
 push:
 	skb_push(skb, nh_off);
-	skb_postpush_rcsum(skb, skb->data, nh_off);
 
 	return err;
 }
@@ -859,17 +834,6 @@ static int ovs_ct_lookup(struct net *net, struct sw_flow_key *key,
 	return 0;
 }
 
-static bool labels_nonzero(const struct ovs_key_ct_labels *labels)
-{
-	size_t i;
-
-	for (i = 0; i < sizeof(*labels); i++)
-		if (labels->ct_labels[i])
-			return true;
-
-	return false;
-}
-
 /* Lookup connection and confirm if unconfirmed. */
 static int ovs_ct_commit(struct net *net, struct sw_flow_key *key,
 			 const struct ovs_conntrack_info *info,
@@ -880,60 +844,22 @@ static int ovs_ct_commit(struct net *net, struct sw_flow_key *key,
 	err = __ovs_ct_lookup(net, key, info, skb);
 	if (err)
 		return err;
-
-	/* Apply changes before confirming the connection so that the initial
-	 * conntrack NEW netlink event carries the values given in the CT
-	 * action.
-	 */
-	if (info->mark.mask) {
-		err = ovs_ct_set_mark(skb, key, info->mark.value,
-				      info->mark.mask);
-		if (err)
-			return err;
-	}
-	if (labels_nonzero(&info->labels.mask)) {
-		err = ovs_ct_set_labels(skb, key, &info->labels.value,
-					&info->labels.mask);
-		if (err)
-			return err;
-	}
-	/* This will take care of sending queued events even if the connection
-	 * is already confirmed.
-	 */
+	/* This is a no-op if the connection has already been confirmed. */
 	if (nf_conntrack_confirm(skb) != NF_ACCEPT)
 		return -EINVAL;
 
 	return 0;
 }
 
-/* Trim the skb to the length specified by the IP/IPv6 header,
- * removing any trailing lower-layer padding. This prepares the skb
- * for higher-layer processing that assumes skb->len excludes padding
- * (such as nf_ip_checksum). The caller needs to pull the skb to the
- * network header, and ensure ip_hdr/ipv6_hdr points to valid data.
- */
-static int ovs_skb_network_trim(struct sk_buff *skb)
+static bool labels_nonzero(const struct ovs_key_ct_labels *labels)
 {
-	unsigned int len;
-	int err;
+	size_t i;
 
-	switch (skb->protocol) {
-	case htons(ETH_P_IP):
-		len = ntohs(ip_hdr(skb)->tot_len);
-		break;
-	case htons(ETH_P_IPV6):
-		len = sizeof(struct ipv6hdr)
-			+ ntohs(ipv6_hdr(skb)->payload_len);
-		break;
-	default:
-		len = skb->len;
-	}
+	for (i = 0; i < sizeof(*labels); i++)
+		if (labels->ct_labels[i])
+			return true;
 
-	err = pskb_trim_rcsum(skb, len);
-	if (err)
-		kfree_skb(skb);
-
-	return err;
+	return false;
 }
 
 /* Returns 0 on success, -EINPROGRESS if 'skb' is stolen, or other nonzero
@@ -948,11 +874,7 @@ int ovs_ct_execute(struct net *net, struct sk_buff *skb,
 
 	/* The conntrack module expects to be working at L3. */
 	nh_ofs = skb_network_offset(skb);
-	skb_pull_rcsum(skb, nh_ofs);
-
-	err = ovs_skb_network_trim(skb);
-	if (err)
-		return err;
+	skb_pull(skb, nh_ofs);
 
 	if (key->ip.frag != OVS_FRAG_TYPE_NONE) {
 		err = handle_fragments(net, key, info->zone.id, skb);
@@ -964,9 +886,20 @@ int ovs_ct_execute(struct net *net, struct sk_buff *skb,
 		err = ovs_ct_commit(net, key, info, skb);
 	else
 		err = ovs_ct_lookup(net, key, info, skb);
+	if (err)
+		goto err;
 
+	if (info->mark.mask) {
+		err = ovs_ct_set_mark(skb, key, info->mark.value,
+				      info->mark.mask);
+		if (err)
+			goto err;
+	}
+	if (labels_nonzero(&info->labels.mask))
+		err = ovs_ct_set_labels(skb, key, &info->labels.value,
+					&info->labels.mask);
+err:
 	skb_push(skb, nh_ofs);
-	skb_postpush_rcsum(skb, skb->data, nh_ofs);
 	if (err)
 		kfree_skb(skb);
 	return err;
@@ -1150,8 +1083,8 @@ static int parse_ct(const struct nlattr *attr, struct ovs_conntrack_info *info,
 
 	nla_for_each_nested(a, attr, rem) {
 		int type = nla_type(a);
-		int maxlen;
-		int minlen;
+		int maxlen = ovs_ct_attr_lens[type].maxlen;
+		int minlen = ovs_ct_attr_lens[type].minlen;
 
 		if (type > OVS_CT_ATTR_MAX) {
 			OVS_NLERR(log,
@@ -1159,9 +1092,6 @@ static int parse_ct(const struct nlattr *attr, struct ovs_conntrack_info *info,
 				  type, OVS_CT_ATTR_MAX);
 			return -EINVAL;
 		}
-
-		maxlen = ovs_ct_attr_lens[type].maxlen;
-		minlen = ovs_ct_attr_lens[type].minlen;
 		if (nla_len(a) < minlen || nla_len(a) > maxlen) {
 			OVS_NLERR(log,
 				  "Conntrack attr type has unexpected length (type=%d, length=%d, expected=%d)",
@@ -1225,20 +1155,6 @@ static int parse_ct(const struct nlattr *attr, struct ovs_conntrack_info *info,
 		}
 	}
 
-#ifdef CONFIG_NF_CONNTRACK_MARK
-	if (!info->commit && info->mark.mask) {
-		OVS_NLERR(log,
-			  "Setting conntrack mark requires 'commit' flag.");
-		return -EINVAL;
-	}
-#endif
-#ifdef CONFIG_NF_CONNTRACK_LABELS
-	if (!info->commit && labels_nonzero(&info->labels.mask)) {
-		OVS_NLERR(log,
-			  "Setting conntrack labels requires 'commit' flag.");
-		return -EINVAL;
-	}
-#endif
 	if (rem > 0) {
 		OVS_NLERR(log, "Conntrack attr has %d unknown bytes", rem);
 		return -EINVAL;
@@ -1436,7 +1352,7 @@ static void __ovs_ct_free_action(struct ovs_conntrack_info *ct_info)
 	if (ct_info->helper)
 		module_put(ct_info->helper->me);
 	if (ct_info->ct)
-		nf_ct_tmpl_free(ct_info->ct);
+		nf_ct_put(ct_info->ct);
 }
 
 void ovs_ct_init(struct net *net)

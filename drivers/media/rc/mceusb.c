@@ -887,12 +887,6 @@ static int mceusb_set_tx_mask(struct rc_dev *dev, u32 mask)
 {
 	struct mceusb_dev *ir = dev->priv;
 
-	/* return number of transmitters */
-	int emitters = ir->num_txports ? ir->num_txports : 2;
-
-	if (mask >= (1 << emitters))
-		return emitters;
-
 	if (ir->flags.tx_mask_normal)
 		ir->tx_mask = mask;
 	else
@@ -942,7 +936,7 @@ static int mceusb_set_tx_carrier(struct rc_dev *dev, u32 carrier)
 
 	}
 
-	return 0;
+	return carrier;
 }
 
 /*
@@ -1332,8 +1326,8 @@ static int mceusb_dev_probe(struct usb_interface *intf,
 			}
 		}
 	}
-	if (!ep_in || !ep_out) {
-		dev_dbg(&intf->dev, "required endpoints not found\n");
+	if (ep_in == NULL) {
+		dev_dbg(&intf->dev, "inbound and/or endpoint not found");
 		return -ENODEV;
 	}
 
@@ -1381,13 +1375,8 @@ static int mceusb_dev_probe(struct usb_interface *intf,
 		goto rc_dev_fail;
 
 	/* wire up inbound data handler */
-	if (usb_endpoint_xfer_int(ep_in))
-		usb_fill_int_urb(ir->urb_in, dev, pipe, ir->buf_in, maxp,
-				 mceusb_dev_recv, ir, ep_in->bInterval);
-	else
-		usb_fill_bulk_urb(ir->urb_in, dev, pipe, ir->buf_in, maxp,
-				  mceusb_dev_recv, ir);
-
+	usb_fill_int_urb(ir->urb_in, dev, pipe, ir->buf_in, maxp,
+				mceusb_dev_recv, ir, ep_in->bInterval);
 	ir->urb_in->transfer_dma = ir->dma_in;
 	ir->urb_in->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 

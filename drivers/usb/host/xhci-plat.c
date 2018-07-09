@@ -18,6 +18,7 @@
 #include <linux/platform_device.h>
 #include <linux/usb/phy.h>
 #include <linux/slab.h>
+#include <linux/usb/xhci_pdriver.h>
 #include <linux/acpi.h>
 
 #include "xhci.h"
@@ -137,6 +138,8 @@ MODULE_DEVICE_TABLE(of, usb_xhci_of_match);
 
 static int xhci_plat_probe(struct platform_device *pdev)
 {
+	struct device_node	*node = pdev->dev.of_node;
+	struct usb_xhci_pdata	*pdata = dev_get_platdata(&pdev->dev);
 	const struct of_device_id *match;
 	const struct hc_driver	*driver;
 	struct xhci_hcd		*xhci;
@@ -153,7 +156,7 @@ static int xhci_plat_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
-		return irq;
+		return -ENODEV;
 
 	/* Try to set 64-bit DMA first */
 	if (WARN_ON(!pdev->dev.dma_mask))
@@ -199,7 +202,7 @@ static int xhci_plat_probe(struct platform_device *pdev)
 	}
 
 	xhci = hcd_to_xhci(hcd);
-	match = of_match_node(usb_xhci_of_match, pdev->dev.of_node);
+	match = of_match_node(usb_xhci_of_match, node);
 	if (match) {
 		const struct xhci_plat_priv *priv_match = match->data;
 		struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
@@ -220,11 +223,12 @@ static int xhci_plat_probe(struct platform_device *pdev)
 		goto disable_clk;
 	}
 
-	if (device_property_read_bool(&pdev->dev, "usb3-lpm-capable"))
+	if ((node && of_property_read_bool(node, "usb3-lpm-capable")) ||
+			(pdata && pdata->usb3_lpm_capable))
 		xhci->quirks |= XHCI_LPM_SUPPORT;
 
-	if (device_property_read_bool(&pdev->dev, "quirk-broken-port-ped"))
-		xhci->quirks |= XHCI_BROKEN_PORT_PED;
+	if (HCC_MAX_PSA(xhci->hcc_params) >= 4)
+		xhci->shared_hcd->can_do_streams = 1;
 
 	hcd->usb_phy = devm_usb_get_phy_by_phandle(&pdev->dev, "usb-phy", 0);
 	if (IS_ERR(hcd->usb_phy)) {
@@ -241,9 +245,6 @@ static int xhci_plat_probe(struct platform_device *pdev)
 	ret = usb_add_hcd(hcd, irq, IRQF_SHARED);
 	if (ret)
 		goto disable_usb_phy;
-
-	if (HCC_MAX_PSA(xhci->hcc_params) >= 4)
-		xhci->shared_hcd->can_do_streams = 1;
 
 	ret = usb_add_hcd(xhci->shared_hcd, irq, IRQF_SHARED);
 	if (ret)
@@ -276,8 +277,6 @@ static int xhci_plat_remove(struct platform_device *dev)
 	struct usb_hcd	*hcd = platform_get_drvdata(dev);
 	struct xhci_hcd	*xhci = hcd_to_xhci(hcd);
 	struct clk *clk = xhci->clk;
-
-	xhci->xhc_state |= XHCI_STATE_REMOVING;
 
 	usb_remove_hcd(xhci->shared_hcd);
 	usb_phy_shutdown(hcd->usb_phy);

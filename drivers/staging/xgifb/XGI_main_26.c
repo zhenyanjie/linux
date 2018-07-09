@@ -62,6 +62,7 @@ static int XGIfb_mode_rate_to_dclock(struct vb_device_info *XGI_Pr,
 	unsigned short ModeNo = modeno;
 	unsigned short ModeIdIndex = 0, ClockIndex = 0;
 	unsigned short RefreshRateTableIndex = 0;
+	int Clock;
 
 	InitTo330Pointer(HwDeviceExtension->jChipType, XGI_Pr);
 
@@ -72,7 +73,9 @@ static int XGIfb_mode_rate_to_dclock(struct vb_device_info *XGI_Pr,
 
 	ClockIndex = XGI330_RefIndex[RefreshRateTableIndex].Ext_CRTVCLK;
 
-	return XGI_VCLKData[ClockIndex].CLOCK * 1000;
+	Clock = XGI_VCLKData[ClockIndex].CLOCK * 1000;
+
+	return Clock;
 }
 
 static int XGIfb_mode_rate_to_ddata(struct vb_device_info *XGI_Pr,
@@ -1224,7 +1227,7 @@ static int XGIfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	unsigned int vtotal = 0;
 	unsigned int drate = 0, hrate = 0;
 	int found_mode = 0;
-	int search_idx;
+	int refresh_rate, search_idx;
 
 	if ((var->vmode & FB_VMODE_MASK) == FB_VMODE_NONINTERLACED) {
 		vtotal = var->upper_margin + var->yres + var->lower_margin
@@ -1259,6 +1262,10 @@ static int XGIfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	} else {
 		xgifb_info->refresh_rate = 60;
 	}
+
+	/* Calculation wrong for 1024x600 - force it to 60Hz */
+	if ((var->xres == 1024) && (var->yres == 600))
+		refresh_rate = 60;
 
 	search_idx = 0;
 	while ((XGIbios_mode[search_idx].mode_no != 0) &&
@@ -2078,7 +2085,7 @@ static int __init xgifb_init(void)
 {
 	char *option = NULL;
 
-	if (forcecrt2type)
+	if (forcecrt2type != NULL)
 		XGIfb_search_crt2type(forcecrt2type);
 	if (fb_get_options("xgifb", &option))
 		return -ENODEV;

@@ -70,7 +70,6 @@
 #define SPI_SR			0x2c
 #define SPI_SR_EOQF		0x10000000
 #define SPI_SR_TCFQF		0x80000000
-#define SPI_SR_CLEAR		0xdaad0000
 
 #define SPI_RSER		0x30
 #define SPI_RSER_EOQFE		0x10000000
@@ -160,7 +159,7 @@ struct fsl_dspi {
 	u8			cs;
 	u16			void_write_data;
 	u32			cs_change;
-	const struct fsl_dspi_devtype_data *devtype_data;
+	struct fsl_dspi_devtype_data *devtype_data;
 
 	wait_queue_head_t	waitq;
 	u32			waitflags;
@@ -625,13 +624,10 @@ static int dspi_resume(struct device *dev)
 {
 	struct spi_master *master = dev_get_drvdata(dev);
 	struct fsl_dspi *dspi = spi_master_get_devdata(master);
-	int ret;
 
 	pinctrl_pm_select_default_state(dev);
 
-	ret = clk_prepare_enable(dspi->clk);
-	if (ret)
-		return ret;
+	clk_prepare_enable(dspi->clk);
 	spi_master_resume(master);
 
 	return 0;
@@ -647,11 +643,6 @@ static const struct regmap_config dspi_regmap_config = {
 	.max_register = 0x88,
 };
 
-static void dspi_init(struct fsl_dspi *dspi)
-{
-	regmap_write(dspi->regmap, SPI_SR, SPI_SR_CLEAR);
-}
-
 static int dspi_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -660,6 +651,8 @@ static int dspi_probe(struct platform_device *pdev)
 	struct resource *res;
 	void __iomem *base;
 	int ret = 0, cs_num, bus_num;
+	const struct of_device_id *of_id =
+			of_match_device(fsl_dspi_dt_ids, &pdev->dev);
 
 	master = spi_alloc_master(&pdev->dev, sizeof(struct fsl_dspi));
 	if (!master)
@@ -693,7 +686,7 @@ static int dspi_probe(struct platform_device *pdev)
 	}
 	master->bus_num = bus_num;
 
-	dspi->devtype_data = of_device_get_match_data(&pdev->dev);
+	dspi->devtype_data = (struct fsl_dspi_devtype_data *)of_id->data;
 	if (!dspi->devtype_data) {
 		dev_err(&pdev->dev, "can't get devtype_data\n");
 		ret = -EFAULT;
@@ -715,7 +708,6 @@ static int dspi_probe(struct platform_device *pdev)
 		return PTR_ERR(dspi->regmap);
 	}
 
-	dspi_init(dspi);
 	dspi->irq = platform_get_irq(pdev, 0);
 	if (dspi->irq < 0) {
 		dev_err(&pdev->dev, "can't get platform irq\n");
@@ -736,9 +728,7 @@ static int dspi_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "unable to get clock\n");
 		goto out_master_put;
 	}
-	ret = clk_prepare_enable(dspi->clk);
-	if (ret)
-		goto out_master_put;
+	clk_prepare_enable(dspi->clk);
 
 	master->max_speed_hz =
 		clk_get_rate(dspi->clk) / dspi->devtype_data->max_clock_factor;
@@ -770,6 +760,7 @@ static int dspi_remove(struct platform_device *pdev)
 	/* Disconnect from the SPI framework */
 	clk_disable_unprepare(dspi->clk);
 	spi_unregister_master(dspi->master);
+	spi_master_put(dspi->master);
 
 	return 0;
 }

@@ -5,7 +5,7 @@
  * This file is released under the GPL.
  */
 
-#include "dm-core.h"
+#include "dm.h"
 
 #include <linux/module.h>
 #include <linux/vmalloc.h>
@@ -43,10 +43,8 @@ struct dm_table {
 	struct dm_target *targets;
 
 	struct target_type *immutable_target_type;
-
-	bool integrity_supported:1;
-	bool singleton:1;
-	bool all_blk_mq:1;
+	unsigned integrity_supported:1;
+	unsigned singleton:1;
 
 	/*
 	 * Indicates the rw permissions for the new logical
@@ -208,7 +206,6 @@ int dm_table_create(struct dm_table **result, fmode_t mode,
 		return -ENOMEM;
 	}
 
-	t->type = DM_TYPE_NONE;
 	t->mode = mode;
 	t->md = md;
 	*result = t;
@@ -695,32 +692,37 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 
 	tgt->type = dm_get_target_type(type);
 	if (!tgt->type) {
-		DMERR("%s: %s: unknown target type", dm_device_name(t->md), type);
+		DMERR("%s: %s: unknown target type", dm_device_name(t->md),
+		      type);
 		return -EINVAL;
 	}
 
 	if (dm_target_needs_singleton(tgt->type)) {
 		if (t->num_targets) {
-			tgt->error = "singleton target type must appear alone in table";
-			goto bad;
+			DMERR("%s: target type %s must appear alone in table",
+			      dm_device_name(t->md), type);
+			return -EINVAL;
 		}
-		t->singleton = true;
+		t->singleton = 1;
 	}
 
 	if (dm_target_always_writeable(tgt->type) && !(t->mode & FMODE_WRITE)) {
-		tgt->error = "target type may not be included in a read-only table";
-		goto bad;
+		DMERR("%s: target type %s may not be included in read-only tables",
+		      dm_device_name(t->md), type);
+		return -EINVAL;
 	}
 
 	if (t->immutable_target_type) {
 		if (t->immutable_target_type != tgt->type) {
-			tgt->error = "immutable target type cannot be mixed with other target types";
-			goto bad;
+			DMERR("%s: immutable target type %s cannot be mixed with other target types",
+			      dm_device_name(t->md), t->immutable_target_type->name);
+			return -EINVAL;
 		}
 	} else if (dm_target_is_immutable(tgt->type)) {
 		if (t->num_targets) {
-			tgt->error = "immutable target type cannot be mixed with other target types";
-			goto bad;
+			DMERR("%s: immutable target type %s cannot be mixed with other target types",
+			      dm_device_name(t->md), tgt->type->name);
+			return -EINVAL;
 		}
 		t->immutable_target_type = tgt->type;
 	}
@@ -735,6 +737,7 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 	 */
 	if (!adjoin(t, tgt)) {
 		tgt->error = "Gap in table";
+		r = -EINVAL;
 		goto bad;
 	}
 
@@ -821,69 +824,21 @@ void dm_consume_args(struct dm_arg_set *as, unsigned num_args)
 }
 EXPORT_SYMBOL(dm_consume_args);
 
-static bool __table_type_bio_based(unsigned table_type)
-{
-	return (table_type == DM_TYPE_BIO_BASED ||
-		table_type == DM_TYPE_DAX_BIO_BASED);
-}
-
 static bool __table_type_request_based(unsigned table_type)
 {
 	return (table_type == DM_TYPE_REQUEST_BASED ||
 		table_type == DM_TYPE_MQ_REQUEST_BASED);
 }
 
-void dm_table_set_type(struct dm_table *t, unsigned type)
-{
-	t->type = type;
-}
-EXPORT_SYMBOL_GPL(dm_table_set_type);
-
-static int device_supports_dax(struct dm_target *ti, struct dm_dev *dev,
-			       sector_t start, sector_t len, void *data)
-{
-	struct request_queue *q = bdev_get_queue(dev->bdev);
-
-	return q && blk_queue_dax(q);
-}
-
-static bool dm_table_supports_dax(struct dm_table *t)
-{
-	struct dm_target *ti;
-	unsigned i = 0;
-
-	/* Ensure that all targets support DAX. */
-	while (i < dm_table_get_num_targets(t)) {
-		ti = dm_table_get_target(t, i++);
-
-		if (!ti->type->direct_access)
-			return false;
-
-		if (!ti->type->iterate_devices ||
-		    !ti->type->iterate_devices(ti, device_supports_dax, NULL))
-			return false;
-	}
-
-	return true;
-}
-
-static int dm_table_determine_type(struct dm_table *t)
+static int dm_table_set_type(struct dm_table *t)
 {
 	unsigned i;
 	unsigned bio_based = 0, request_based = 0, hybrid = 0;
-	bool verify_blk_mq = false;
+	bool use_blk_mq = false;
 	struct dm_target *tgt;
 	struct dm_dev_internal *dd;
-	struct list_head *devices = dm_table_get_devices(t);
+	struct list_head *devices;
 	unsigned live_md_type = dm_get_md_type(t->md);
-
-	if (t->type != DM_TYPE_NONE) {
-		/* target already set the table's type */
-		if (t->type == DM_TYPE_BIO_BASED)
-			return 0;
-		BUG_ON(t->type == DM_TYPE_DAX_BIO_BASED);
-		goto verify_rq_based;
-	}
 
 	for (i = 0; i < t->num_targets; i++) {
 		tgt = t->targets + i;
@@ -916,21 +871,11 @@ static int dm_table_determine_type(struct dm_table *t)
 	if (bio_based) {
 		/* We must use this table as bio-based */
 		t->type = DM_TYPE_BIO_BASED;
-		if (dm_table_supports_dax(t) ||
-		    (list_empty(devices) && live_md_type == DM_TYPE_DAX_BIO_BASED))
-			t->type = DM_TYPE_DAX_BIO_BASED;
 		return 0;
 	}
 
 	BUG_ON(!request_based); /* No targets in this table */
 
-	/*
-	 * The only way to establish DM_TYPE_MQ_REQUEST_BASED is by
-	 * having a compatible target use dm_table_set_type.
-	 */
-	t->type = DM_TYPE_REQUEST_BASED;
-
-verify_rq_based:
 	/*
 	 * Request-based dm supports only tables that have a single target now.
 	 * To support multiple targets, request splitting support is needed,
@@ -942,20 +887,8 @@ verify_rq_based:
 		return -EINVAL;
 	}
 
-	if (list_empty(devices)) {
-		int srcu_idx;
-		struct dm_table *live_table = dm_get_live_table(t->md, &srcu_idx);
-
-		/* inherit live table's type and all_blk_mq */
-		if (live_table) {
-			t->type = live_table->type;
-			t->all_blk_mq = live_table->all_blk_mq;
-		}
-		dm_put_live_table(t->md, srcu_idx);
-		return 0;
-	}
-
 	/* Non-request-stackable devices can't be used for request-based dm */
+	devices = dm_table_get_devices(t);
 	list_for_each_entry(dd, devices, list) {
 		struct request_queue *q = bdev_get_queue(dd->dm_dev->bdev);
 
@@ -966,10 +899,10 @@ verify_rq_based:
 		}
 
 		if (q->mq_ops)
-			verify_blk_mq = true;
+			use_blk_mq = true;
 	}
 
-	if (verify_blk_mq) {
+	if (use_blk_mq) {
 		/* verify _all_ devices in the table are blk-mq devices */
 		list_for_each_entry(dd, devices, list)
 			if (!bdev_get_queue(dd->dm_dev->bdev)->mq_ops) {
@@ -977,14 +910,14 @@ verify_rq_based:
 				      " are blk-mq request-stackable");
 				return -EINVAL;
 			}
+		t->type = DM_TYPE_MQ_REQUEST_BASED;
 
-		t->all_blk_mq = true;
-	}
+	} else if (list_empty(devices) && __table_type_request_based(live_md_type)) {
+		/* inherit live MD type */
+		t->type = live_md_type;
 
-	if (t->type == DM_TYPE_MQ_REQUEST_BASED && !t->all_blk_mq) {
-		DMERR("table load rejected: all devices are not blk-mq request-stackable");
-		return -EINVAL;
-	}
+	} else
+		t->type = DM_TYPE_REQUEST_BASED;
 
 	return 0;
 }
@@ -1023,19 +956,14 @@ struct dm_target *dm_table_get_wildcard_target(struct dm_table *t)
 	return NULL;
 }
 
-bool dm_table_bio_based(struct dm_table *t)
-{
-	return __table_type_bio_based(dm_table_get_type(t));
-}
-
 bool dm_table_request_based(struct dm_table *t)
 {
 	return __table_type_request_based(dm_table_get_type(t));
 }
 
-bool dm_table_all_blk_mq_devices(struct dm_table *t)
+bool dm_table_mq_request_based(struct dm_table *t)
 {
-	return t->all_blk_mq;
+	return dm_table_get_type(t) == DM_TYPE_MQ_REQUEST_BASED;
 }
 
 static int dm_table_alloc_md_mempools(struct dm_table *t, struct mapped_device *md)
@@ -1050,7 +978,7 @@ static int dm_table_alloc_md_mempools(struct dm_table *t, struct mapped_device *
 		return -EINVAL;
 	}
 
-	if (__table_type_bio_based(type))
+	if (type == DM_TYPE_BIO_BASED)
 		for (i = 0; i < t->num_targets; i++) {
 			tgt = t->targets + i;
 			per_io_data_size = max(per_io_data_size, tgt->per_io_data_size);
@@ -1178,7 +1106,7 @@ static int dm_table_register_integrity(struct dm_table *t)
 		return 0;
 
 	if (!integrity_profile_exists(dm_disk(md))) {
-		t->integrity_supported = true;
+		t->integrity_supported = 1;
 		/*
 		 * Register integrity profile during table load; we can do
 		 * this because the final profile must match during resume.
@@ -1201,7 +1129,7 @@ static int dm_table_register_integrity(struct dm_table *t)
 	}
 
 	/* Preserve existing integrity profile */
-	t->integrity_supported = true;
+	t->integrity_supported = 1;
 	return 0;
 }
 
@@ -1213,9 +1141,9 @@ int dm_table_complete(struct dm_table *t)
 {
 	int r;
 
-	r = dm_table_determine_type(t);
+	r = dm_table_set_type(t);
 	if (r) {
-		DMERR("unable to determine table type");
+		DMERR("unable to set table type");
 		return r;
 	}
 

@@ -238,8 +238,7 @@ slow:
 		pages += nr;
 
 		ret = get_user_pages_unlocked(start,
-			(end - start) >> PAGE_SHIFT, pages,
-			write ? FOLL_WRITE : 0);
+			(end - start) >> PAGE_SHIFT, write, 0, pages);
 
 		/* Have to be a bit careful with return values */
 		if (nr > 0) {

@@ -74,7 +74,7 @@ void mvs_tag_init(struct mvs_info *mvi)
 		mvs_tag_clear(mvi, i);
 }
 
-static struct mvs_info *mvs_find_dev_mvi(struct domain_device *dev)
+struct mvs_info *mvs_find_dev_mvi(struct domain_device *dev)
 {
 	unsigned long i = 0, j = 0, hi = 0;
 	struct sas_ha_struct *sha = dev->port->ha;
@@ -102,7 +102,7 @@ static struct mvs_info *mvs_find_dev_mvi(struct domain_device *dev)
 
 }
 
-static int mvs_find_dev_phyno(struct domain_device *dev, int *phyno)
+int mvs_find_dev_phyno(struct domain_device *dev, int *phyno)
 {
 	unsigned long i = 0, j = 0, n = 0, num = 0;
 	struct mvs_device *mvi_dev = (struct mvs_device *)dev->lldd_dev;
@@ -791,10 +791,8 @@ static int mvs_task_prep(struct sas_task *task, struct mvs_info *mvi, int is_tmf
 	slot->slot_tag = tag;
 
 	slot->buf = pci_pool_alloc(mvi->dma_pool, GFP_ATOMIC, &slot->buf_dma);
-	if (!slot->buf) {
-		rc = -ENOMEM;
+	if (!slot->buf)
 		goto err_out_tag;
-	}
 	memset(slot->buf, 0, MVS_SLOT_BUF_SZ);
 
 	tei.task = task;
@@ -1160,7 +1158,7 @@ void mvs_port_deformed(struct asd_sas_phy *sas_phy)
 	mvs_port_notify_deformed(sas_phy, 1);
 }
 
-static struct mvs_device *mvs_alloc_dev(struct mvs_info *mvi)
+struct mvs_device *mvs_alloc_dev(struct mvs_info *mvi)
 {
 	u32 dev;
 	for (dev = 0; dev < MVS_MAX_DEVICES; dev++) {
@@ -1177,7 +1175,7 @@ static struct mvs_device *mvs_alloc_dev(struct mvs_info *mvi)
 	return NULL;
 }
 
-static void mvs_free_dev(struct mvs_device *mvi_dev)
+void mvs_free_dev(struct mvs_device *mvi_dev)
 {
 	u32 id = mvi_dev->device_id;
 	memset(mvi_dev, 0, sizeof(*mvi_dev));
@@ -1187,7 +1185,7 @@ static void mvs_free_dev(struct mvs_device *mvi_dev)
 	mvi_dev->taskfileset = MVS_ID_NOT_MAPPED;
 }
 
-static int mvs_dev_found_notify(struct domain_device *dev, int lock)
+int mvs_dev_found_notify(struct domain_device *dev, int lock)
 {
 	unsigned long flags = 0;
 	int res = 0;
@@ -1243,7 +1241,7 @@ int mvs_dev_found(struct domain_device *dev)
 	return mvs_dev_found_notify(dev, 1);
 }
 
-static void mvs_dev_gone_notify(struct domain_device *dev)
+void mvs_dev_gone_notify(struct domain_device *dev)
 {
 	unsigned long flags = 0;
 	struct mvs_device *mvi_dev = dev->lldd_dev;
@@ -1613,7 +1611,7 @@ static int mvs_sata_done(struct mvs_info *mvi, struct sas_task *task,
 	return stat;
 }
 
-static void mvs_set_sense(u8 *buffer, int len, int d_sense,
+void mvs_set_sense(u8 *buffer, int len, int d_sense,
 		int key, int asc, int ascq)
 {
 	memset(buffer, 0, len);
@@ -1652,7 +1650,7 @@ static void mvs_set_sense(u8 *buffer, int len, int d_sense,
 	return;
 }
 
-static void mvs_fill_ssp_resp_iu(struct ssp_response_iu *iu,
+void mvs_fill_ssp_resp_iu(struct ssp_response_iu *iu,
 				u8 key, u8 asc, u8 asc_q)
 {
 	iu->datapres = 2;

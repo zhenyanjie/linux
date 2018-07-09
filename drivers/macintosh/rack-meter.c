@@ -154,8 +154,8 @@ static void rackmeter_do_pause(struct rackmeter *rm, int pause)
 		DBDMA_DO_STOP(rm->dma_regs);
 		return;
 	}
-	memset(rdma->buf1, 0, sizeof(rdma->buf1));
-	memset(rdma->buf2, 0, sizeof(rdma->buf2));
+	memset(rdma->buf1, 0, ARRAY_SIZE(rdma->buf1));
+	memset(rdma->buf2, 0, ARRAY_SIZE(rdma->buf2));
 
 	rm->dma_buf_v->mark = 0;
 
@@ -427,7 +427,7 @@ static int rackmeter_probe(struct macio_dev* mdev,
 	rm->irq = macio_irq(mdev, 1);
 #else
 	rm->irq = irq_of_parse_and_map(i2s, 1);
-	if (!rm->irq ||
+	if (rm->irq == NO_IRQ ||
 	    of_address_to_resource(i2s, 0, &ri2s) ||
 	    of_address_to_resource(i2s, 1, &rdma)) {
 		printk(KERN_ERR

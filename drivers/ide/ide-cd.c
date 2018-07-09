@@ -1593,8 +1593,6 @@ static int idecd_open(struct block_device *bdev, fmode_t mode)
 	struct cdrom_info *info;
 	int rc = -ENXIO;
 
-	check_disk_change(bdev);
-
 	mutex_lock(&ide_cd_mutex);
 	info = ide_cd_get(bdev->bd_disk);
 	if (!info)
@@ -1772,6 +1770,7 @@ static int ide_cd_probe(ide_drive_t *drive)
 	drive->driver_data = info;
 
 	g->minors = 1;
+	g->driverfs_dev = &drive->gendev;
 	g->flags = GENHD_FL_CD | GENHD_FL_REMOVABLE;
 	if (ide_cdrom_setup(drive)) {
 		put_device(&info->dev);
@@ -1781,7 +1780,7 @@ static int ide_cd_probe(ide_drive_t *drive)
 	ide_cd_read_toc(drive, &sense);
 	g->fops = &idecd_ops;
 	g->flags |= GENHD_FL_REMOVABLE | GENHD_FL_BLOCK_EVENTS_ON_EXCL_WRITE;
-	device_add_disk(&drive->gendev, g);
+	add_disk(g);
 	return 0;
 
 out_free_disk:

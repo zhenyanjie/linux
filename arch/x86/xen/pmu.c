@@ -547,11 +547,8 @@ void xen_pmu_init(int cpu)
 	return;
 
 fail:
-	if (err == -EOPNOTSUPP || err == -ENOSYS)
-		pr_info_once("VPMU disabled by hypervisor.\n");
-	else
-		pr_info_once("Could not initialize VPMU for cpu %d, error %d\n",
-			cpu, err);
+	pr_warn_once("Could not initialize VPMU for cpu %d, error %d\n",
+		cpu, err);
 	free_pages((unsigned long)xenpmu_data, 0);
 }
 

@@ -96,23 +96,19 @@ void __show_regs(struct pt_regs *regs)
 	unsigned long flags;
 	char buf[64];
 #ifndef CONFIG_CPU_V7M
-	unsigned int domain, fs;
+	unsigned int domain;
 #ifdef CONFIG_CPU_SW_DOMAIN_PAN
 	/*
 	 * Get the domain register for the parent context. In user
 	 * mode, we don't save the DACR, so lets use what it should
 	 * be. For other modes, we place it after the pt_regs struct.
 	 */
-	if (user_mode(regs)) {
+	if (user_mode(regs))
 		domain = DACR_UACCESS_ENABLE;
-		fs = get_fs();
-	} else {
-		domain = to_svc_pt_regs(regs)->dacr;
-		fs = to_svc_pt_regs(regs)->addr_limit;
-	}
+	else
+		domain = *(unsigned int *)(regs + 1);
 #else
 	domain = get_domain();
-	fs = get_fs();
 #endif
 #endif
 
@@ -148,7 +144,7 @@ void __show_regs(struct pt_regs *regs)
 		if ((domain & domain_mask(DOMAIN_USER)) ==
 		    domain_val(DOMAIN_USER, DOMAIN_NOACCESS))
 			segment = "none";
-		else if (fs == get_ds())
+		else if (get_fs() == get_ds())
 			segment = "kernel";
 		else
 			segment = "user";
@@ -318,7 +314,8 @@ unsigned long get_wchan(struct task_struct *p)
 
 unsigned long arch_randomize_brk(struct mm_struct *mm)
 {
-	return randomize_page(mm->brk, 0x02000000);
+	unsigned long range_end = mm->brk + 0x02000000;
+	return randomize_range(mm->brk, range_end, 0) ? : mm->brk;
 }
 
 #ifdef CONFIG_MMU

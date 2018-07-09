@@ -1320,9 +1320,7 @@ write_data:
 
 		bio->bi_private = rbio;
 		bio->bi_end_io = raid_write_end_io;
-		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
-
-		submit_bio(bio);
+		submit_bio(WRITE, bio);
 	}
 	return;
 
@@ -1575,12 +1573,11 @@ static int raid56_rmw_stripe(struct btrfs_raid_bio *rbio)
 
 		bio->bi_private = rbio;
 		bio->bi_end_io = raid_rmw_end_io;
-		bio_set_op_attrs(bio, REQ_OP_READ, 0);
 
 		btrfs_bio_wq_end_io(rbio->fs_info, bio,
 				    BTRFS_WQ_ENDIO_RAID56);
 
-		submit_bio(bio);
+		submit_bio(READ, bio);
 	}
 	/* the actual write will happen once the reads are done */
 	return 0;
@@ -2100,12 +2097,11 @@ static int __raid56_parity_recover(struct btrfs_raid_bio *rbio)
 
 		bio->bi_private = rbio;
 		bio->bi_end_io = raid_recover_end_io;
-		bio_set_op_attrs(bio, REQ_OP_READ, 0);
 
 		btrfs_bio_wq_end_io(rbio->fs_info, bio,
 				    BTRFS_WQ_ENDIO_RAID56);
 
-		submit_bio(bio);
+		submit_bio(READ, bio);
 	}
 out:
 	return 0;
@@ -2143,10 +2139,7 @@ int raid56_parity_recover(struct btrfs_root *root, struct bio *bio,
 
 	rbio->faila = find_logical_bio_stripe(rbio, bio);
 	if (rbio->faila == -1) {
-		btrfs_warn(root->fs_info,
-	"%s could not find the bad stripe in raid56 so that we cannot recover any more (bio has logical %llu len %llu, bbio has map_type %llu)",
-			   __func__, (u64)bio->bi_iter.bi_sector << 9,
-			   (u64)bio->bi_iter.bi_size, bbio->map_type);
+		BUG();
 		if (generic_io)
 			btrfs_put_bbio(bbio);
 		kfree(rbio);
@@ -2161,21 +2154,11 @@ int raid56_parity_recover(struct btrfs_root *root, struct bio *bio,
 	}
 
 	/*
-	 * Loop retry:
-	 * for 'mirror == 2', reconstruct from all other stripes.
-	 * for 'mirror_num > 2', select a stripe to fail on every retry.
+	 * reconstruct from the q stripe if they are
+	 * asking for mirror 3
 	 */
-	if (mirror_num > 2) {
-		/*
-		 * 'mirror == 3' is to fail the p stripe and
-		 * reconstruct from the q stripe.  'mirror > 3' is to
-		 * fail a data stripe and reconstruct from p+q stripe.
-		 */
-		rbio->failb = rbio->real_stripes - (mirror_num - 1);
-		ASSERT(rbio->failb > 0);
-		if (rbio->failb <= rbio->faila)
-			rbio->failb--;
-	}
+	if (mirror_num == 3)
+		rbio->failb = rbio->real_stripes - 2;
 
 	ret = lock_stripe_add(rbio);
 
@@ -2450,9 +2433,7 @@ submit_write:
 
 		bio->bi_private = rbio;
 		bio->bi_end_io = raid_write_end_io;
-		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
-
-		submit_bio(bio);
+		submit_bio(WRITE, bio);
 	}
 	return;
 
@@ -2629,12 +2610,11 @@ static void raid56_parity_scrub_stripe(struct btrfs_raid_bio *rbio)
 
 		bio->bi_private = rbio;
 		bio->bi_end_io = raid56_parity_scrub_end_io;
-		bio_set_op_attrs(bio, REQ_OP_READ, 0);
 
 		btrfs_bio_wq_end_io(rbio->fs_info, bio,
 				    BTRFS_WQ_ENDIO_RAID56);
 
-		submit_bio(bio);
+		submit_bio(READ, bio);
 	}
 	/* the actual write will happen once the reads are done */
 	return;

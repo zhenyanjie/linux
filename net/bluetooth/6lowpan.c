@@ -627,9 +627,20 @@ static netdev_tx_t bt_xmit(struct sk_buff *skb, struct net_device *netdev)
 	return err < 0 ? NET_XMIT_DROP : err;
 }
 
+static struct lock_class_key bt_tx_busylock;
+static struct lock_class_key bt_netdev_xmit_lock_key;
+
+static void bt_set_lockdep_class_one(struct net_device *dev,
+				     struct netdev_queue *txq,
+				     void *_unused)
+{
+	lockdep_set_class(&txq->_xmit_lock, &bt_netdev_xmit_lock_key);
+}
+
 static int bt_dev_init(struct net_device *dev)
 {
-	netdev_lockdep_set_classes(dev);
+	netdev_for_each_tx_queue(dev, bt_set_lockdep_class_one, NULL);
+	dev->qdisc_tx_busylock = &bt_tx_busylock;
 
 	return 0;
 }
@@ -755,8 +766,7 @@ static void set_ip_addr_bits(u8 addr_type, u8 *addr)
 }
 
 static struct l2cap_chan *add_peer_chan(struct l2cap_chan *chan,
-					struct lowpan_btle_dev *dev,
-					bool new_netdev)
+					struct lowpan_btle_dev *dev)
 {
 	struct lowpan_peer *peer;
 
@@ -787,8 +797,7 @@ static struct l2cap_chan *add_peer_chan(struct l2cap_chan *chan,
 	spin_unlock(&devices_lock);
 
 	/* Notifying peers about us needs to be done without locks held */
-	if (new_netdev)
-		INIT_DELAYED_WORK(&dev->notify_peers, do_notify_peers);
+	INIT_DELAYED_WORK(&dev->notify_peers, do_notify_peers);
 	schedule_delayed_work(&dev->notify_peers, msecs_to_jiffies(100));
 
 	return peer->chan;
@@ -845,7 +854,6 @@ out:
 static inline void chan_ready_cb(struct l2cap_chan *chan)
 {
 	struct lowpan_btle_dev *dev;
-	bool new_netdev = false;
 
 	dev = lookup_dev(chan->conn);
 
@@ -856,13 +864,12 @@ static inline void chan_ready_cb(struct l2cap_chan *chan)
 			l2cap_chan_del(chan, -ENOENT);
 			return;
 		}
-		new_netdev = true;
 	}
 
 	if (!try_module_get(THIS_MODULE))
 		return;
 
-	add_peer_chan(chan, dev, new_netdev);
+	add_peer_chan(chan, dev);
 	ifup(dev->netdev);
 }
 
@@ -1094,6 +1101,7 @@ static int get_l2cap_conn(char *buf, bdaddr_t *addr, u8 *addr_type,
 {
 	struct hci_conn *hcon;
 	struct hci_dev *hdev;
+	bdaddr_t *src = BDADDR_ANY;
 	int n;
 
 	n = sscanf(buf, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx %hhu",
@@ -1104,8 +1112,7 @@ static int get_l2cap_conn(char *buf, bdaddr_t *addr, u8 *addr_type,
 	if (n < 7)
 		return -EINVAL;
 
-	/* The LE_PUBLIC address type is ignored because of BDADDR_ANY */
-	hdev = hci_get_route(addr, BDADDR_ANY, BDADDR_LE_PUBLIC);
+	hdev = hci_get_route(addr, src);
 	if (!hdev)
 		return -ENOENT;
 

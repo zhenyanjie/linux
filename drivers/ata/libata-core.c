@@ -69,7 +69,6 @@
 #include <asm/unaligned.h>
 #include <linux/cdrom.h>
 #include <linux/ratelimit.h>
-#include <linux/leds.h>
 #include <linux/pm_runtime.h>
 #include <linux/platform_device.h>
 
@@ -1239,7 +1238,7 @@ static int ata_read_native_max_address(struct ata_device *dev, u64 *max_sectors)
 	} else
 		tf.command = ATA_CMD_READ_NATIVE_MAX;
 
-	tf.protocol = ATA_PROT_NODATA;
+	tf.protocol |= ATA_PROT_NODATA;
 	tf.device |= ATA_LBA;
 
 	err_mask = ata_exec_internal(dev, &tf, NULL, DMA_NONE, NULL, 0, 0);
@@ -1298,7 +1297,7 @@ static int ata_set_max_sectors(struct ata_device *dev, u64 new_sectors)
 		tf.device |= (new_sectors >> 24) & 0xf;
 	}
 
-	tf.protocol = ATA_PROT_NODATA;
+	tf.protocol |= ATA_PROT_NODATA;
 	tf.device |= ATA_LBA;
 
 	tf.lbal = (new_sectors >> 0) & 0xff;
@@ -1695,8 +1694,6 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 
 		if (qc->err_mask & ~AC_ERR_OTHER)
 			qc->err_mask &= ~AC_ERR_OTHER;
-	} else if (qc->tf.command == ATA_CMD_REQ_SENSE_DATA) {
-		qc->result_tf.command |= ATA_SENSE;
 	}
 
 	/* finish up */
@@ -4318,11 +4315,10 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 	{ "ST380013AS",		"3.20",		ATA_HORKAGE_MAX_SEC_1024 },
 
 	/*
-	 * These devices time out with higher max sects.
+	 * Device times out with higher max sects.
 	 * https://bugzilla.kernel.org/show_bug.cgi?id=121671
 	 */
-	{ "LITEON CX1-JB*-HP",	NULL,		ATA_HORKAGE_MAX_SEC_1024 },
-	{ "LITEON EP1-*",	NULL,		ATA_HORKAGE_MAX_SEC_1024 },
+	{ "LITEON CX1-JB256-HP", NULL,		ATA_HORKAGE_MAX_SEC_1024 },
 
 	/* Devices we expect to fail diagnostics */
 
@@ -4366,10 +4362,6 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 	/* https://bugzilla.kernel.org/show_bug.cgi?id=15573 */
 	{ "C300-CTFDDAC128MAG",	"0001",		ATA_HORKAGE_NONCQ, },
 
-	/* Some Sandisk SSDs lock up hard with NCQ enabled.  Reported on
-	   SD7SN6S256G and SD8SN8U256G */
-	{ "SanDisk SD[78]SN*G",	NULL,		ATA_HORKAGE_NONCQ, },
-
 	/* devices which puke on READ_NATIVE_MAX */
 	{ "HDS724040KLSA80",	"KFAOA20N",	ATA_HORKAGE_BROKEN_HPA, },
 	{ "WDC WD3200JD-00KLB0", "WD-WCAMR1130137", ATA_HORKAGE_BROKEN_HPA },
@@ -4407,28 +4399,7 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 	{ "PIONEER DVD-RW  DVR-212D",	NULL,	ATA_HORKAGE_NOSETXFER },
 	{ "PIONEER DVD-RW  DVR-216D",	NULL,	ATA_HORKAGE_NOSETXFER },
 
-	/* Crucial BX100 SSD 500GB has broken LPM support */
-	{ "CT500BX100SSD1",		NULL,	ATA_HORKAGE_NOLPM },
-
-	/* 512GB MX100 with MU01 firmware has both queued TRIM and LPM issues */
-	{ "Crucial_CT512MX100*",	"MU01",	ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM |
-						ATA_HORKAGE_NOLPM, },
-	/* 512GB MX100 with newer firmware has only LPM issues */
-	{ "Crucial_CT512MX100*",	NULL,	ATA_HORKAGE_ZERO_AFTER_TRIM |
-						ATA_HORKAGE_NOLPM, },
-
-	/* 480GB+ M500 SSDs have both queued TRIM and LPM issues */
-	{ "Crucial_CT480M500*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM |
-						ATA_HORKAGE_NOLPM, },
-	{ "Crucial_CT960M500*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM |
-						ATA_HORKAGE_NOLPM, },
-
 	/* devices that don't properly handle queued TRIM commands */
-	{ "Micron_M500IT_*",		"MU01",	ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM, },
 	{ "Micron_M500_*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
 						ATA_HORKAGE_ZERO_AFTER_TRIM, },
 	{ "Crucial_CT*M500*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
@@ -4439,9 +4410,7 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 						ATA_HORKAGE_ZERO_AFTER_TRIM, },
 	{ "Crucial_CT*MX100*",		"MU01",	ATA_HORKAGE_NO_NCQ_TRIM |
 						ATA_HORKAGE_ZERO_AFTER_TRIM, },
-	{ "Samsung SSD 840*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM, },
-	{ "Samsung SSD 850*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
+	{ "Samsung SSD 8*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
 						ATA_HORKAGE_ZERO_AFTER_TRIM, },
 	{ "FCCT*M500*",			NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
 						ATA_HORKAGE_ZERO_AFTER_TRIM, },
@@ -4879,7 +4848,7 @@ int ata_std_qc_defer(struct ata_queued_cmd *qc)
 {
 	struct ata_link *link = qc->dev->link;
 
-	if (ata_is_ncq(qc->tf.protocol)) {
+	if (qc->tf.protocol == ATA_PROT_NCQ) {
 		if (!ata_tag_valid(link->active_tag))
 			return 0;
 	} else {
@@ -5044,7 +5013,7 @@ void __ata_qc_complete(struct ata_queued_cmd *qc)
 		ata_sg_clean(qc);
 
 	/* command should be marked inactive atomically with qc completion */
-	if (ata_is_ncq(qc->tf.protocol)) {
+	if (qc->tf.protocol == ATA_PROT_NCQ) {
 		link->sactive &= ~(1 << qc->tag);
 		if (!link->sactive)
 			ap->nr_active_links--;
@@ -5081,7 +5050,7 @@ static void ata_verify_xfer(struct ata_queued_cmd *qc)
 {
 	struct ata_device *dev = qc->dev;
 
-	if (!ata_is_data(qc->tf.protocol))
+	if (ata_is_nodata(qc->tf.protocol))
 		return;
 
 	if ((dev->mwdma_mask || dev->udma_mask) && ata_is_pio(qc->tf.protocol))
@@ -5108,9 +5077,6 @@ static void ata_verify_xfer(struct ata_queued_cmd *qc)
 void ata_qc_complete(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
-
-	/* Trigger the LED (if available) */
-	ledtrig_disk_activity();
 
 	/* XXX: New EH and old EH use different mechanisms to
 	 * synchronize EH with regular execution path.
@@ -5167,9 +5133,7 @@ void ata_qc_complete(struct ata_queued_cmd *qc)
 		switch (qc->tf.command) {
 		case ATA_CMD_SET_FEATURES:
 			if (qc->tf.feature != SETFEATURES_WC_ON &&
-			    qc->tf.feature != SETFEATURES_WC_OFF &&
-			    qc->tf.feature != SETFEATURES_RA_ON &&
-			    qc->tf.feature != SETFEATURES_RA_OFF)
+			    qc->tf.feature != SETFEATURES_WC_OFF)
 				break;
 			/* fall through */
 		case ATA_CMD_INIT_DEV_PARAMS: /* CHS translation changed */
@@ -5292,7 +5256,8 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 	 * We guarantee to LLDs that they will have at least one
 	 * non-zero sg if the command is a data command.
 	 */
-	if (ata_is_data(prot) && (!qc->sg || !qc->n_elem || !qc->nbytes))
+	if (WARN_ON_ONCE(ata_is_data(prot) &&
+			 (!qc->sg || !qc->n_elem || !qc->nbytes)))
 		goto sys_err;
 
 	if (ata_is_dma(prot) || (ata_is_pio(prot) &&

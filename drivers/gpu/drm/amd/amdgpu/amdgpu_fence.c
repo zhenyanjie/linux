@@ -68,7 +68,6 @@ int amdgpu_fence_slab_init(void)
 
 void amdgpu_fence_slab_fini(void)
 {
-	rcu_barrier();
 	kmem_cache_destroy(amdgpu_fence_slab);
 }
 /*
@@ -205,25 +204,16 @@ void amdgpu_fence_process(struct amdgpu_ring *ring)
 	if (seq != ring->fence_drv.sync_seq)
 		amdgpu_fence_schedule_fallback(ring);
 
-	if (unlikely(seq == last_seq))
-		return;
-
-	last_seq &= drv->num_fences_mask;
-	seq &= drv->num_fences_mask;
-
-	do {
+	while (last_seq != seq) {
 		struct fence *fence, **ptr;
 
-		++last_seq;
-		last_seq &= drv->num_fences_mask;
-		ptr = &drv->fences[last_seq];
+		ptr = &drv->fences[++last_seq & drv->num_fences_mask];
 
 		/* There is always exactly one thread signaling this fence slot */
 		fence = rcu_dereference_protected(*ptr, 1);
 		RCU_INIT_POINTER(*ptr, NULL);
 
-		if (!fence)
-			continue;
+		BUG_ON(!fence);
 
 		r = fence_signal(fence);
 		if (!r)
@@ -232,7 +222,7 @@ void amdgpu_fence_process(struct amdgpu_ring *ring)
 			BUG();
 
 		fence_put(fence);
-	} while (last_seq != seq);
+	}
 }
 
 /**
@@ -455,7 +445,6 @@ void amdgpu_fence_driver_fini(struct amdgpu_device *adev)
 		for (j = 0; j <= ring->fence_drv.num_fences_mask; ++j)
 			fence_put(ring->fence_drv.fences[j]);
 		kfree(ring->fence_drv.fences);
-		ring->fence_drv.fences = NULL;
 		ring->fence_drv.initialized = false;
 	}
 }

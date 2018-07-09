@@ -15,7 +15,6 @@
 #include <linux/mpage.h>
 #include <linux/sched.h>
 #include <linux/uio.h>
-#include <linux/xattr.h>
 
 #include "hfs_fs.h"
 #include "btree.h"
@@ -129,7 +128,7 @@ static ssize_t hfs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 {
 	struct file *file = iocb->ki_filp;
 	struct address_space *mapping = file->f_mapping;
-	struct inode *inode = mapping->host;
+	struct inode *inode = file_inode(file)->i_mapping->host;
 	size_t count = iov_iter_count(iter);
 	ssize_t ret;
 
@@ -178,7 +177,7 @@ const struct address_space_operations hfs_aops = {
 /*
  * hfs_new_inode
  */
-struct inode *hfs_new_inode(struct inode *dir, const struct qstr *name, umode_t mode)
+struct inode *hfs_new_inode(struct inode *dir, struct qstr *name, umode_t mode)
 {
 	struct super_block *sb = dir->i_sb;
 	struct inode *inode = new_inode(sb);
@@ -194,7 +193,7 @@ struct inode *hfs_new_inode(struct inode *dir, const struct qstr *name, umode_t 
 	inode->i_uid = current_fsuid();
 	inode->i_gid = current_fsgid();
 	set_nlink(inode, 1);
-	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
 	HFS_I(inode)->flags = 0;
 	HFS_I(inode)->rsrc_inode = NULL;
 	HFS_I(inode)->fs_blocks = 0;
@@ -606,7 +605,7 @@ int hfs_inode_setattr(struct dentry *dentry, struct iattr * attr)
 	struct hfs_sb_info *hsb = HFS_SB(inode->i_sb);
 	int error;
 
-	error = setattr_prepare(dentry, attr); /* basic permission checks */
+	error = inode_change_ok(inode, attr); /* basic permission checks */
 	if (error)
 		return error;
 
@@ -688,5 +687,7 @@ static const struct file_operations hfs_file_operations = {
 static const struct inode_operations hfs_file_inode_operations = {
 	.lookup		= hfs_file_lookup,
 	.setattr	= hfs_inode_setattr,
-	.listxattr	= generic_listxattr,
+	.setxattr	= hfs_setxattr,
+	.getxattr	= hfs_getxattr,
+	.listxattr	= hfs_listxattr,
 };

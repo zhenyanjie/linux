@@ -2,6 +2,7 @@
 #include <dt-bindings/clock/bcm2835.h>
 #include <dt-bindings/clock/bcm2835-aux.h>
 #include <dt-bindings/gpio/gpio.h>
+#include "skeleton.dtsi"
 
 /* This include file covers the common peripherals and configuration between
  * bcm2835 and bcm2836 implementations, leaving the CPU configuration to
@@ -12,8 +13,6 @@
 	compatible = "brcm,bcm2835";
 	model = "BCM2835";
 	interrupt-parent = <&intc>;
-	#address-cells = <1>;
-	#size-cells = <1>;
 
 	chosen {
 		bootargs = "earlyprintk console=ttyAMA0";
@@ -104,7 +103,7 @@
 			reg = <0x7e104000 0x10>;
 		};
 
-		mailbox: mailbox@7e00b880 {
+		mailbox: mailbox@7e00b800 {
 			compatible = "brcm,bcm2835-mbox";
 			reg = <0x7e00b880 0x40>;
 			interrupts = <0 1>;
@@ -146,8 +145,8 @@
 
 		i2s: i2s@7e203000 {
 			compatible = "brcm,bcm2835-i2s";
-			reg = <0x7e203000 0x24>;
-			clocks = <&clocks BCM2835_CLOCK_PCM>;
+			reg = <0x7e203000 0x20>,
+			      <0x7e101098 0x02>;
 
 			dmas = <&dma 2>,
 			       <&dma 3>;
@@ -288,10 +287,6 @@
 			compatible = "brcm,bcm2835-usb";
 			reg = <0x7e980000 0x10000>;
 			interrupts = <1 9>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-			clocks = <&clk_usb>;
-			clock-names = "otg";
 		};
 
 		v3d: v3d@7ec00000 {
@@ -319,12 +314,5 @@
 			clock-frequency = <19200000>;
 		};
 
-		clk_usb: clock@4 {
-			compatible = "fixed-clock";
-			reg = <4>;
-			#clock-cells = <0>;
-			clock-output-names = "otg";
-			clock-frequency = <480000000>;
-		};
 	};
 };

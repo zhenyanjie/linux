@@ -722,7 +722,6 @@ static void ipmr_update_thresholds(struct mr_table *mrt, struct mfc_cache *cache
 				cache->mfc_un.res.maxvif = vifi + 1;
 		}
 	}
-	cache->mfc_un.res.lastuse = jiffies;
 }
 
 static int vif_add(struct net *net, struct mr_table *mrt,
@@ -1793,7 +1792,6 @@ static void ip_mr_forward(struct net *net, struct mr_table *mrt,
 	vif = cache->mfc_parent;
 	cache->mfc_un.res.pkt++;
 	cache->mfc_un.res.bytes += skb->len;
-	cache->mfc_un.res.lastuse = jiffies;
 
 	if (cache->mfc_origin == htonl(INADDR_ANY) && true_vifi >= 0) {
 		struct mfc_cache *cache_proxy;
@@ -1929,20 +1927,6 @@ int ip_mr_input(struct sk_buff *skb)
 	struct net *net = dev_net(skb->dev);
 	int local = skb_rtable(skb)->rt_flags & RTCF_LOCAL;
 	struct mr_table *mrt;
-	struct net_device *dev;
-
-	/* skb->dev passed in is the loX master dev for vrfs.
-	 * As there are no vifs associated with loopback devices,
-	 * get the proper interface that does have a vif associated with it.
-	 */
-	dev = skb->dev;
-	if (netif_is_l3_master(skb->dev)) {
-		dev = dev_get_by_index_rcu(net, IPCB(skb)->iif);
-		if (!dev) {
-			kfree_skb(skb);
-			return -ENODEV;
-		}
-	}
 
 	/* Packet is looped back after forward, it should not be
 	 * forwarded second time, but still can be delivered locally.
@@ -1980,7 +1964,7 @@ int ip_mr_input(struct sk_buff *skb)
 	/* already under rcu_read_lock() */
 	cache = ipmr_cache_find(mrt, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
 	if (!cache) {
-		int vif = ipmr_find_vif(mrt, dev);
+		int vif = ipmr_find_vif(mrt, skb->dev);
 
 		if (vif >= 0)
 			cache = ipmr_cache_find_any(mrt, ip_hdr(skb)->daddr,
@@ -2000,7 +1984,7 @@ int ip_mr_input(struct sk_buff *skb)
 		}
 
 		read_lock(&mrt_lock);
-		vif = ipmr_find_vif(mrt, dev);
+		vif = ipmr_find_vif(mrt, skb->dev);
 		if (vif >= 0) {
 			int err2 = ipmr_cache_unresolved(mrt, vif, skb);
 			read_unlock(&mrt_lock);
@@ -2087,11 +2071,10 @@ drop:
 static int __ipmr_fill_mroute(struct mr_table *mrt, struct sk_buff *skb,
 			      struct mfc_cache *c, struct rtmsg *rtm)
 {
-	struct rta_mfc_stats mfcs;
-	struct nlattr *mp_attr;
-	struct rtnexthop *nhp;
-	unsigned long lastuse;
 	int ct;
+	struct rtnexthop *nhp;
+	struct nlattr *mp_attr;
+	struct rta_mfc_stats mfcs;
 
 	/* If cache is unresolved, don't try to parse IIF and OIF */
 	if (c->mfc_parent >= MAXVIFS)
@@ -2120,15 +2103,10 @@ static int __ipmr_fill_mroute(struct mr_table *mrt, struct sk_buff *skb,
 
 	nla_nest_end(skb, mp_attr);
 
-	lastuse = READ_ONCE(c->mfc_un.res.lastuse);
-	lastuse = time_after_eq(jiffies, lastuse) ? jiffies - lastuse : 0;
-
 	mfcs.mfcs_packets = c->mfc_un.res.pkt;
 	mfcs.mfcs_bytes = c->mfc_un.res.bytes;
 	mfcs.mfcs_wrong_if = c->mfc_un.res.wrong_if;
-	if (nla_put_64bit(skb, RTA_MFC_STATS, sizeof(mfcs), &mfcs, RTA_PAD) ||
-	    nla_put_u64_64bit(skb, RTA_EXPIRES, jiffies_to_clock_t(lastuse),
-			      RTA_PAD))
+	if (nla_put_64bit(skb, RTA_MFC_STATS, sizeof(mfcs), &mfcs, RTA_PAD) < 0)
 		return -EMSGSIZE;
 
 	rtm->rtm_type = RTN_MULTICAST;
@@ -2137,7 +2115,7 @@ static int __ipmr_fill_mroute(struct mr_table *mrt, struct sk_buff *skb,
 
 int ipmr_get_route(struct net *net, struct sk_buff *skb,
 		   __be32 saddr, __be32 daddr,
-		   struct rtmsg *rtm, int nowait, u32 portid)
+		   struct rtmsg *rtm, int nowait)
 {
 	struct mfc_cache *cache;
 	struct mr_table *mrt;
@@ -2182,7 +2160,6 @@ int ipmr_get_route(struct net *net, struct sk_buff *skb,
 			return -ENOMEM;
 		}
 
-		NETLINK_CB(skb2).portid = portid;
 		skb_push(skb2, sizeof(struct iphdr));
 		skb_reset_network_header(skb2);
 		iph = ip_hdr(skb2);

@@ -402,8 +402,7 @@ static bool dccp_pkt_to_tuple(const struct sk_buff *skb, unsigned int dataoff,
 {
 	struct dccp_hdr _hdr, *dh;
 
-	/* Actually only need first 4 bytes to get ports. */
-	dh = skb_header_pointer(skb, dataoff, 4, &_hdr);
+	dh = skb_header_pointer(skb, dataoff, sizeof(_hdr), &_hdr);
 	if (dh == NULL)
 		return false;
 

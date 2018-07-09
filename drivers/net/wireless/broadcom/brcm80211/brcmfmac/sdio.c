@@ -313,7 +313,6 @@ struct rte_console {
 
 #define KSO_WAIT_US 50
 #define MAX_KSO_ATTEMPTS (PMU_MAX_TRANSITION_DLY/KSO_WAIT_US)
-#define BRCMF_SDIO_MAX_ACCESS_ERRORS	5
 
 /*
  * Conversion of 802.1D priority to precedence level
@@ -678,7 +677,6 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
 {
 	u8 wr_val = 0, rd_val, cmp_val, bmask;
 	int err = 0;
-	int err_cnt = 0;
 	int try_cnt = 0;
 
 	brcmf_dbg(TRACE, "Enter: on=%d\n", on);
@@ -714,14 +712,9 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
 		 */
 		rd_val = brcmf_sdiod_regrb(bus->sdiodev, SBSDIO_FUNC1_SLEEPCSR,
 					   &err);
-		if (!err) {
-			if ((rd_val & bmask) == cmp_val)
-				break;
-			err_cnt = 0;
-		}
-		/* bail out upon subsequent access errors */
-		if (err && (err_cnt++ > BRCMF_SDIO_MAX_ACCESS_ERRORS))
+		if (((rd_val & bmask) == cmp_val) && !err)
 			break;
+
 		udelay(KSO_WAIT_US);
 		brcmf_sdiod_regwb(bus->sdiodev, SBSDIO_FUNC1_SLEEPCSR,
 				  wr_val, &err);
@@ -1391,7 +1384,8 @@ static int brcmf_sdio_hdparse(struct brcmf_sdio *bus, u8 *header,
 		return -ENXIO;
 	}
 	if (rd->seq_num != rx_seq) {
-		brcmf_dbg(SDIO, "seq %d, expected %d\n", rx_seq, rd->seq_num);
+		brcmf_err("seq %d: sequence number error, expect %d\n",
+			  rx_seq, rd->seq_num);
 		bus->sdcnt.rx_badseq++;
 		rd->seq_num = rx_seq;
 	}
@@ -1660,7 +1654,7 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 					   pfirst->len, pfirst->next,
 					   pfirst->prev);
 			skb_unlink(pfirst, &bus->glom);
-			if (brcmf_sdio_fromevntchan(&dptr[SDPCM_HWHDR_LEN]))
+			if (brcmf_sdio_fromevntchan(pfirst->data))
 				brcmf_rx_event(bus->sdiodev->dev, pfirst);
 			else
 				brcmf_rx_frame(bus->sdiodev->dev, pfirst,
@@ -2049,7 +2043,7 @@ static int brcmf_sdio_txpkt_hdalign(struct brcmf_sdio *bus, struct sk_buff *pkt)
 	return head_pad;
 }
 
-/*
+/**
  * struct brcmf_skbuff_cb reserves first two bytes in sk_buff::cb for
  * bus layer usage.
  */
@@ -3312,6 +3306,10 @@ static int brcmf_sdio_download_firmware(struct brcmf_sdio *bus,
 		goto err;
 	}
 
+	/* Allow full data communication using DPC from now on. */
+	brcmf_sdiod_change_state(bus->sdiodev, BRCMF_SDIOD_DATA);
+	bcmerror = 0;
+
 err:
 	brcmf_sdio_clkctl(bus, CLK_SDONLY, false);
 	sdio_release_host(bus->sdiodev->func[1]);
@@ -3668,7 +3666,7 @@ brcmf_sdio_drivestrengthinit(struct brcmf_sdio_dev *sdiodev,
 		str_shift = 11;
 		break;
 	default:
-		brcmf_dbg(INFO, "No SDIO driver strength init needed for chip %s rev %d pmurev %d\n",
+		brcmf_err("No SDIO Drive strength init done for chip %s rev %d pmurev %d\n",
 			  ci->name, ci->chiprev, ci->pmurev);
 		break;
 	}
@@ -3764,8 +3762,7 @@ static u32 brcmf_sdio_buscore_read32(void *ctx, u32 addr)
 	u32 val, rev;
 
 	val = brcmf_sdiod_regrl(sdiodev, addr, NULL);
-	if ((sdiodev->func[0]->device == SDIO_DEVICE_ID_BROADCOM_4335_4339 ||
-	     sdiodev->func[0]->device == SDIO_DEVICE_ID_BROADCOM_4339) &&
+	if (sdiodev->func[0]->device == SDIO_DEVICE_ID_BROADCOM_4335_4339 &&
 	    addr == CORE_CC_REG(SI_ENUM_BASE, chipid)) {
 		rev = (val & CID_REV_MASK) >> CID_REV_SHIFT;
 		if (rev >= 2) {
@@ -3975,25 +3972,20 @@ static const struct brcmf_bus_ops brcmf_sdio_bus_ops = {
 	.get_memdump = brcmf_sdio_bus_get_memdump,
 };
 
-static void brcmf_sdio_firmware_callback(struct device *dev, int err,
+static void brcmf_sdio_firmware_callback(struct device *dev,
 					 const struct firmware *code,
 					 void *nvram, u32 nvram_len)
 {
-	struct brcmf_bus *bus_if;
-	struct brcmf_sdio_dev *sdiodev;
-	struct brcmf_sdio *bus;
+	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
+	struct brcmf_sdio_dev *sdiodev = bus_if->bus_priv.sdio;
+	struct brcmf_sdio *bus = sdiodev->bus;
+	int err = 0;
 	u8 saveclk;
 
-	brcmf_dbg(TRACE, "Enter: dev=%s, err=%d\n", dev_name(dev), err);
-	bus_if = dev_get_drvdata(dev);
-	sdiodev = bus_if->bus_priv.sdio;
-	if (err)
-		goto fail;
+	brcmf_dbg(TRACE, "Enter: dev=%s\n", dev_name(dev));
 
 	if (!bus_if->drvr)
 		return;
-
-	bus = sdiodev->bus;
 
 	/* try to download image and nvram to the dongle */
 	bus->alp_only = true;
@@ -4055,9 +4047,6 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 	}
 
 	if (err == 0) {
-		/* Allow full data communication using DPC from now on. */
-		brcmf_sdiod_change_state(bus->sdiodev, BRCMF_SDIOD_DATA);
-
 		err = brcmf_sdiod_intr_register(sdiodev);
 		if (err != 0)
 			brcmf_err("intr register failed:%d\n", err);
@@ -4080,7 +4069,6 @@ release:
 	sdio_release_host(sdiodev->func[1]);
 fail:
 	brcmf_dbg(TRACE, "failed: dev=%s, err=%d\n", dev_name(dev), err);
-	device_release_driver(&sdiodev->func[2]->dev);
 	device_release_driver(dev);
 }
 
@@ -4160,6 +4148,11 @@ struct brcmf_sdio *brcmf_sdio_probe(struct brcmf_sdio_dev *sdiodev)
 		brcmf_err("brcmf_attach failed\n");
 		goto fail;
 	}
+
+	/* allocate scatter-gather table. sg support
+	 * will be disabled upon allocation failure.
+	 */
+	brcmf_sdiod_sgtable_alloc(bus->sdiodev);
 
 	/* Query the F2 block size, set roundup accordingly */
 	bus->blocksize = bus->sdiodev->func[2]->cur_blksize;

@@ -17,7 +17,6 @@
 #include <asm/unaligned.h>
 #include <net/mac80211.h>
 #include <crypto/aes.h>
-#include <crypto/algapi.h>
 
 #include "ieee80211_i.h"
 #include "michael.h"
@@ -154,7 +153,7 @@ ieee80211_rx_h_michael_mic_verify(struct ieee80211_rx_data *rx)
 	data_len = skb->len - hdrlen - MICHAEL_MIC_LEN;
 	key = &rx->key->conf.key[NL80211_TKIP_DATA_OFFSET_RX_MIC_KEY];
 	michael_mic(key, hdr, data, data_len, mic);
-	if (crypto_memneq(mic, data + data_len, MICHAEL_MIC_LEN))
+	if (memcmp(mic, data + data_len, MICHAEL_MIC_LEN) != 0)
 		goto mic_fail;
 
 	/* remove Michael MIC from payload */
@@ -295,8 +294,7 @@ ieee80211_crypto_tkip_decrypt(struct ieee80211_rx_data *rx)
 		return RX_DROP_UNUSABLE;
 
 	/* Trim ICV */
-	if (!(status->flag & RX_FLAG_ICV_STRIPPED))
-		skb_trim(skb, skb->len - IEEE80211_TKIP_ICV_LEN);
+	skb_trim(skb, skb->len - IEEE80211_TKIP_ICV_LEN);
 
 	/* Remove IV */
 	memmove(skb->data + IEEE80211_TKIP_IV_LEN, skb->data, hdrlen);
@@ -407,7 +405,7 @@ static int ccmp_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb,
 	u8 *pos;
 	u8 pn[6];
 	u64 pn64;
-	u8 aad[CCM_AAD_LEN];
+	u8 aad[2 * AES_BLOCK_SIZE];
 	u8 b_0[AES_BLOCK_SIZE];
 
 	if (info->control.hw_key &&
@@ -463,8 +461,10 @@ static int ccmp_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb,
 
 	pos += IEEE80211_CCMP_HDR_LEN;
 	ccmp_special_blocks(skb, pn, b_0, aad);
-	return ieee80211_aes_ccm_encrypt(key->u.ccmp.tfm, b_0, aad, pos, len,
-					 skb_put(skb, mic_len), mic_len);
+	ieee80211_aes_ccm_encrypt(key->u.ccmp.tfm, b_0, aad, pos, len,
+				  skb_put(skb, mic_len), mic_len);
+
+	return 0;
 }
 
 
@@ -639,7 +639,7 @@ static int gcmp_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb)
 	u8 *pos;
 	u8 pn[6];
 	u64 pn64;
-	u8 aad[GCM_AAD_LEN];
+	u8 aad[2 * AES_BLOCK_SIZE];
 	u8 j_0[AES_BLOCK_SIZE];
 
 	if (info->control.hw_key &&
@@ -696,8 +696,10 @@ static int gcmp_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb)
 
 	pos += IEEE80211_GCMP_HDR_LEN;
 	gcmp_special_blocks(skb, pn, j_0, aad);
-	return ieee80211_aes_gcm_encrypt(key->u.gcmp.tfm, j_0, aad, pos, len,
-					 skb_put(skb, IEEE80211_GCMP_MIC_LEN));
+	ieee80211_aes_gcm_encrypt(key->u.gcmp.tfm, j_0, aad, pos, len,
+				  skb_put(skb, IEEE80211_GCMP_MIC_LEN));
+
+	return 0;
 }
 
 ieee80211_tx_result
@@ -1049,7 +1051,7 @@ ieee80211_crypto_aes_cmac_decrypt(struct ieee80211_rx_data *rx)
 		bip_aad(skb, aad);
 		ieee80211_aes_cmac(key->u.aes_cmac.tfm, aad,
 				   skb->data + 24, skb->len - 24, mic);
-		if (crypto_memneq(mic, mmie->mic, sizeof(mmie->mic))) {
+		if (memcmp(mic, mmie->mic, sizeof(mmie->mic)) != 0) {
 			key->u.aes_cmac.icverrors++;
 			return RX_DROP_UNUSABLE;
 		}
@@ -1099,7 +1101,7 @@ ieee80211_crypto_aes_cmac_256_decrypt(struct ieee80211_rx_data *rx)
 		bip_aad(skb, aad);
 		ieee80211_aes_cmac_256(key->u.aes_cmac.tfm, aad,
 				       skb->data + 24, skb->len - 24, mic);
-		if (crypto_memneq(mic, mmie->mic, sizeof(mmie->mic))) {
+		if (memcmp(mic, mmie->mic, sizeof(mmie->mic)) != 0) {
 			key->u.aes_cmac.icverrors++;
 			return RX_DROP_UNUSABLE;
 		}
@@ -1121,9 +1123,9 @@ ieee80211_crypto_aes_gmac_encrypt(struct ieee80211_tx_data *tx)
 	struct ieee80211_key *key = tx->key;
 	struct ieee80211_mmie_16 *mmie;
 	struct ieee80211_hdr *hdr;
-	u8 aad[GMAC_AAD_LEN];
+	u8 aad[20];
 	u64 pn64;
-	u8 nonce[GMAC_NONCE_LEN];
+	u8 nonce[12];
 
 	if (WARN_ON(skb_queue_len(&tx->skbs) != 1))
 		return TX_DROP;
@@ -1169,7 +1171,7 @@ ieee80211_crypto_aes_gmac_decrypt(struct ieee80211_rx_data *rx)
 	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
 	struct ieee80211_key *key = rx->key;
 	struct ieee80211_mmie_16 *mmie;
-	u8 aad[GMAC_AAD_LEN], mic[GMAC_MIC_LEN], ipn[6], nonce[GMAC_NONCE_LEN];
+	u8 aad[20], mic[16], ipn[6], nonce[12];
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
 
 	if (!ieee80211_is_mgmt(hdr->frame_control))
@@ -1203,7 +1205,7 @@ ieee80211_crypto_aes_gmac_decrypt(struct ieee80211_rx_data *rx)
 		if (ieee80211_aes_gmac(key->u.aes_gmac.tfm, aad, nonce,
 				       skb->data + 24, skb->len - 24,
 				       mic) < 0 ||
-		    crypto_memneq(mic, mmie->mic, sizeof(mmie->mic))) {
+		    memcmp(mic, mmie->mic, sizeof(mmie->mic)) != 0) {
 			key->u.aes_gmac.icverrors++;
 			return RX_DROP_UNUSABLE;
 		}

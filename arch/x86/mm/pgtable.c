@@ -1,13 +1,12 @@
 #include <linux/mm.h>
 #include <linux/gfp.h>
-#include <linux/hugetlb.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/tlb.h>
 #include <asm/fixmap.h>
 #include <asm/mtrr.h>
 
-#define PGALLOC_GFP (GFP_KERNEL_ACCOUNT | __GFP_NOTRACK | __GFP_ZERO)
+#define PGALLOC_GFP GFP_KERNEL | __GFP_NOTRACK | __GFP_ZERO
 
 #ifdef CONFIG_HIGHPTE
 #define PGALLOC_USER_GFP __GFP_HIGHMEM
@@ -19,7 +18,7 @@ gfp_t __userpte_alloc_gfp = PGALLOC_GFP | PGALLOC_USER_GFP;
 
 pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 {
-	return (pte_t *)__get_free_page(PGALLOC_GFP & ~__GFP_ACCOUNT);
+	return (pte_t *)__get_free_page(PGALLOC_GFP);
 }
 
 pgtable_t pte_alloc_one(struct mm_struct *mm, unsigned long address)
@@ -208,13 +207,9 @@ static int preallocate_pmds(struct mm_struct *mm, pmd_t *pmds[])
 {
 	int i;
 	bool failed = false;
-	gfp_t gfp = PGALLOC_GFP;
-
-	if (mm == &init_mm)
-		gfp &= ~__GFP_ACCOUNT;
 
 	for(i = 0; i < PREALLOCATED_PMDS; i++) {
-		pmd_t *pmd = (pmd_t *)__get_free_page(gfp);
+		pmd_t *pmd = (pmd_t *)__get_free_page(PGALLOC_GFP);
 		if (!pmd)
 			failed = true;
 		if (pmd && !pgtable_pmd_page_ctor(virt_to_page(pmd))) {
@@ -345,15 +340,14 @@ static inline void _pgd_free(pgd_t *pgd)
 		kmem_cache_free(pgd_cache, pgd);
 }
 #else
-
 static inline pgd_t *_pgd_alloc(void)
 {
-	return (pgd_t *)__get_free_pages(PGALLOC_GFP, PGD_ALLOCATION_ORDER);
+	return (pgd_t *)__get_free_page(PGALLOC_GFP);
 }
 
 static inline void _pgd_free(pgd_t *pgd)
 {
-	free_pages((unsigned long)pgd, PGD_ALLOCATION_ORDER);
+	free_page((unsigned long)pgd);
 }
 #endif /* CONFIG_X86_PAE */
 
@@ -578,10 +572,6 @@ int pud_set_huge(pud_t *pud, phys_addr_t addr, pgprot_t prot)
 	    (mtrr != MTRR_TYPE_WRBACK))
 		return 0;
 
-	/* Bail out if we are we on a populated non-leaf entry: */
-	if (pud_present(*pud) && !pud_huge(*pud))
-		return 0;
-
 	prot = pgprot_4k_2_large(prot);
 
 	set_pte((pte_t *)pud, pfn_pte(
@@ -609,10 +599,6 @@ int pmd_set_huge(pmd_t *pmd, phys_addr_t addr, pgprot_t prot)
 			     __func__, addr, addr + PMD_SIZE);
 		return 0;
 	}
-
-	/* Bail out if we are we on a populated non-leaf entry: */
-	if (pmd_present(*pmd) && !pmd_huge(*pmd))
-		return 0;
 
 	prot = pgprot_4k_2_large(prot);
 
@@ -651,53 +637,5 @@ int pmd_clear_huge(pmd_t *pmd)
 	}
 
 	return 0;
-}
-
-/**
- * pud_free_pmd_page - Clear pud entry and free pmd page.
- * @pud: Pointer to a PUD.
- *
- * Context: The pud range has been unmaped and TLB purged.
- * Return: 1 if clearing the entry succeeded. 0 otherwise.
- */
-int pud_free_pmd_page(pud_t *pud)
-{
-	pmd_t *pmd;
-	int i;
-
-	if (pud_none(*pud))
-		return 1;
-
-	pmd = (pmd_t *)pud_page_vaddr(*pud);
-
-	for (i = 0; i < PTRS_PER_PMD; i++)
-		if (!pmd_free_pte_page(&pmd[i]))
-			return 0;
-
-	pud_clear(pud);
-	free_page((unsigned long)pmd);
-
-	return 1;
-}
-
-/**
- * pmd_free_pte_page - Clear pmd entry and free pte page.
- * @pmd: Pointer to a PMD.
- *
- * Context: The pmd range has been unmaped and TLB purged.
- * Return: 1 if clearing the entry succeeded. 0 otherwise.
- */
-int pmd_free_pte_page(pmd_t *pmd)
-{
-	pte_t *pte;
-
-	if (pmd_none(*pmd))
-		return 1;
-
-	pte = (pte_t *)pmd_page_vaddr(*pmd);
-	pmd_clear(pmd);
-	free_page((unsigned long)pte);
-
-	return 1;
 }
 #endif	/* CONFIG_HAVE_ARCH_HUGE_VMAP */

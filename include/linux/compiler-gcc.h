@@ -88,10 +88,6 @@
 #define __weak		__attribute__((weak))
 #define __alias(symbol)	__attribute__((alias(#symbol)))
 
-#ifdef RETPOLINE
-#define __noretpoline __attribute__((indirect_branch("keep")))
-#endif
-
 /*
  * it doesn't make sense on ARM (currently the only user of __naked)
  * to trace naked functions because then mcount is called without
@@ -162,7 +158,7 @@
 #define __compiler_offsetof(a, b)					\
 	__builtin_offsetof(a, b)
 
-#if GCC_VERSION >= 40100
+#if GCC_VERSION >= 40100 && GCC_VERSION < 40600
 # define __compiletime_object_size(obj) __builtin_object_size(obj, 0)
 #endif
 
@@ -191,29 +187,7 @@
 #endif /* __CHECKER__ */
 #endif /* GCC_VERSION >= 40300 */
 
-#if GCC_VERSION >= 40400
-#define __optimize(level)	__attribute__((__optimize__(level)))
-#endif /* GCC_VERSION >= 40400 */
-
 #if GCC_VERSION >= 40500
-
-#ifndef __CHECKER__
-#ifdef LATENT_ENTROPY_PLUGIN
-#define __latent_entropy __attribute__((latent_entropy))
-#endif
-#endif
-
-#ifdef CONFIG_STACK_VALIDATION
-#define annotate_unreachable() ({					\
-	asm("1:\t\n"							\
-	    ".pushsection .discard.unreachable\t\n"			\
-	    ".long 1b\t\n"						\
-	    ".popsection\t\n");						\
-})
-#else
-#define annotate_unreachable()
-#endif
-
 /*
  * Mark a position in code as unreachable.  This can be used to
  * suppress control flow warnings after asm blocks that transfer
@@ -223,8 +197,7 @@
  * this in the preprocessor, but we can live with this because they're
  * unreleased.  Really, we need to have autoconf for the kernel.
  */
-#define unreachable() \
-	do { annotate_unreachable(); __builtin_unreachable(); } while (0)
+#define unreachable() __builtin_unreachable()
 
 /* Mark a function definition as prohibited from being cloned. */
 #define __noclone	__attribute__((__noclone__, __optimize__("no-tracer")))
@@ -269,11 +242,7 @@
  */
 #define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0)
 
-/*
- * sparse (__CHECKER__) pretends to be gcc, but can't do constant
- * folding in __builtin_bswap*() (yet), so don't set these for it.
- */
-#if defined(CONFIG_ARCH_USE_BUILTIN_BSWAP) && !defined(__CHECKER__)
+#ifdef CONFIG_ARCH_USE_BUILTIN_BSWAP
 #if GCC_VERSION >= 40400
 #define __HAVE_BUILTIN_BSWAP32__
 #define __HAVE_BUILTIN_BSWAP64__
@@ -281,11 +250,9 @@
 #if GCC_VERSION >= 40800
 #define __HAVE_BUILTIN_BSWAP16__
 #endif
-#endif /* CONFIG_ARCH_USE_BUILTIN_BSWAP && !__CHECKER__ */
+#endif /* CONFIG_ARCH_USE_BUILTIN_BSWAP */
 
-#if GCC_VERSION >= 70000
-#define KASAN_ABI_VERSION 5
-#elif GCC_VERSION >= 50000
+#if GCC_VERSION >= 50000
 #define KASAN_ABI_VERSION 4
 #elif GCC_VERSION >= 40902
 #define KASAN_ABI_VERSION 3

@@ -11,6 +11,7 @@
 
 #include <linux/threads.h>
 #include <linux/cpumask.h>
+#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/ctype.h>
@@ -108,7 +109,7 @@ static void noop_apic_write(u32 reg, u32 v)
 	WARN_ON_ONCE(boot_cpu_has(X86_FEATURE_APIC) && !disable_apic);
 }
 
-struct apic apic_noop __ro_after_init = {
+struct apic apic_noop = {
 	.name				= "noop",
 	.probe				= noop_probe,
 	.acpi_madt_oem_check		= NULL,
@@ -140,6 +141,7 @@ struct apic apic_noop __ro_after_init = {
 
 	.get_apic_id			= noop_get_apic_id,
 	.set_apic_id			= NULL,
+	.apic_id_mask			= 0x0F << 24,
 
 	.cpu_mask_to_apicid_and		= flat_cpu_mask_to_apicid_and,
 

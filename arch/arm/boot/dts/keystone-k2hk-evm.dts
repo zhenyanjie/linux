@@ -83,12 +83,8 @@
 	status = "okay";
 };
 
-&keystone_usb0 {
+&usb {
 	status = "okay";
-};
-
-&usb0 {
-	dr_mode = "host";
 };
 
 &aemif {

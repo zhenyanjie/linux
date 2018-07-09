@@ -333,11 +333,6 @@ int __init fadump_reserve_mem(void)
 	return 1;
 }
 
-unsigned long __init arch_reserved_kernel_pages(void)
-{
-	return memblock_reserved_size() / PAGE_SIZE;
-}
-
 /* Look for fadump= cmdline option. */
 static int __init early_fadump_param(char *p)
 {
@@ -783,11 +778,7 @@ static int fadump_init_elfcore_header(char *bufp)
 	elf->e_entry = 0;
 	elf->e_phoff = sizeof(struct elfhdr);
 	elf->e_shoff = 0;
-#if defined(_CALL_ELF)
-	elf->e_flags = _CALL_ELF;
-#else
-	elf->e_flags = 0;
-#endif
+	elf->e_flags = ELF_CORE_EFLAGS;
 	elf->e_ehsize = sizeof(struct elfhdr);
 	elf->e_phentsize = sizeof(struct elf_phdr);
 	elf->e_phnum = 0;
@@ -1018,7 +1009,8 @@ static int fadump_invalidate_dump(struct fadump_mem_struct *fdm)
 	} while (wait_time);
 
 	if (rc) {
-		pr_err("Failed to invalidate firmware-assisted dump registration. Unexpected error (%d).\n", rc);
+		printk(KERN_ERR "Failed to invalidate firmware-assisted dump "
+			"rgistration. unexpected error(%d).\n", rc);
 		return rc;
 	}
 	fw_dump.dump_active = 0;
@@ -1033,9 +1025,6 @@ void fadump_cleanup(void)
 		init_fadump_mem_struct(&fdm,
 			be64_to_cpu(fdm_active->cpu_state_data.destination_address));
 		fadump_invalidate_dump(&fdm);
-	} else if (fw_dump.dump_registered) {
-		/* Un-register Firmware-assisted dump if it was registered. */
-		fadump_unregister_dump(&fdm);
 	}
 }
 
@@ -1116,9 +1105,7 @@ static ssize_t fadump_release_memory_store(struct kobject *kobj,
 		 * Take away the '/proc/vmcore'. We are releasing the dump
 		 * memory, hence it will not be valid anymore.
 		 */
-#ifdef CONFIG_PROC_VMCORE
 		vmcore_cleanup();
-#endif
 		fadump_invalidate_release_mem();
 
 	} else

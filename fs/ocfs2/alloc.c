@@ -5922,6 +5922,7 @@ bail:
 }
 
 static int ocfs2_replay_truncate_records(struct ocfs2_super *osb,
+					 handle_t *handle,
 					 struct inode *data_alloc_inode,
 					 struct buffer_head *data_alloc_bh)
 {
@@ -5934,19 +5935,11 @@ static int ocfs2_replay_truncate_records(struct ocfs2_super *osb,
 	struct ocfs2_truncate_log *tl;
 	struct inode *tl_inode = osb->osb_tl_inode;
 	struct buffer_head *tl_bh = osb->osb_tl_bh;
-	handle_t *handle;
 
 	di = (struct ocfs2_dinode *) tl_bh->b_data;
 	tl = &di->id2.i_dealloc;
 	i = le16_to_cpu(tl->tl_used) - 1;
 	while (i >= 0) {
-		handle = ocfs2_start_trans(osb, OCFS2_TRUNCATE_LOG_FLUSH_ONE_REC);
-		if (IS_ERR(handle)) {
-			status = PTR_ERR(handle);
-			mlog_errno(status);
-			goto bail;
-		}
-
 		/* Caller has given us at least enough credits to
 		 * update the truncate log dinode */
 		status = ocfs2_journal_access_di(handle, INODE_CACHE(tl_inode), tl_bh,
@@ -5981,7 +5974,12 @@ static int ocfs2_replay_truncate_records(struct ocfs2_super *osb,
 			}
 		}
 
-		ocfs2_commit_trans(osb, handle);
+		status = ocfs2_extend_trans(handle,
+				OCFS2_TRUNCATE_LOG_FLUSH_ONE_REC);
+		if (status < 0) {
+			mlog_errno(status);
+			goto bail;
+		}
 		i--;
 	}
 
@@ -5996,6 +5994,7 @@ int __ocfs2_flush_truncate_log(struct ocfs2_super *osb)
 {
 	int status;
 	unsigned int num_to_flush;
+	handle_t *handle;
 	struct inode *tl_inode = osb->osb_tl_inode;
 	struct inode *data_alloc_inode = NULL;
 	struct buffer_head *tl_bh = osb->osb_tl_bh;
@@ -6039,11 +6038,21 @@ int __ocfs2_flush_truncate_log(struct ocfs2_super *osb)
 		goto out_mutex;
 	}
 
-	status = ocfs2_replay_truncate_records(osb, data_alloc_inode,
+	handle = ocfs2_start_trans(osb, OCFS2_TRUNCATE_LOG_FLUSH_ONE_REC);
+	if (IS_ERR(handle)) {
+		status = PTR_ERR(handle);
+		mlog_errno(status);
+		goto out_unlock;
+	}
+
+	status = ocfs2_replay_truncate_records(osb, handle, data_alloc_inode,
 					       data_alloc_bh);
 	if (status < 0)
 		mlog_errno(status);
 
+	ocfs2_commit_trans(osb, handle);
+
+out_unlock:
 	brelse(data_alloc_bh);
 	ocfs2_inode_unlock(data_alloc_inode, 1);
 
@@ -6095,43 +6104,6 @@ void ocfs2_schedule_truncate_log_flush(struct ocfs2_super *osb,
 		queue_delayed_work(osb->ocfs2_wq, &osb->osb_truncate_log_wq,
 				   OCFS2_TRUNCATE_LOG_FLUSH_INTERVAL);
 	}
-}
-
-/*
- * Try to flush truncate logs if we can free enough clusters from it.
- * As for return value, "< 0" means error, "0" no space and "1" means
- * we have freed enough spaces and let the caller try to allocate again.
- */
-int ocfs2_try_to_free_truncate_log(struct ocfs2_super *osb,
-					unsigned int needed)
-{
-	tid_t target;
-	int ret = 0;
-	unsigned int truncated_clusters;
-
-	inode_lock(osb->osb_tl_inode);
-	truncated_clusters = osb->truncated_clusters;
-	inode_unlock(osb->osb_tl_inode);
-
-	/*
-	 * Check whether we can succeed in allocating if we free
-	 * the truncate log.
-	 */
-	if (truncated_clusters < needed)
-		goto out;
-
-	ret = ocfs2_flush_truncate_log(osb);
-	if (ret) {
-		mlog_errno(ret);
-		goto out;
-	}
-
-	if (jbd2_journal_start_commit(osb->journal->j_journal, &target)) {
-		jbd2_log_wait_commit(osb->journal->j_journal, target);
-		ret = 1;
-	}
-out:
-	return ret;
 }
 
 static int ocfs2_get_truncate_log_info(struct ocfs2_super *osb,
@@ -6404,33 +6376,42 @@ static int ocfs2_free_cached_blocks(struct ocfs2_super *osb,
 		goto out_mutex;
 	}
 
+	handle = ocfs2_start_trans(osb, OCFS2_SUBALLOC_FREE);
+	if (IS_ERR(handle)) {
+		ret = PTR_ERR(handle);
+		mlog_errno(ret);
+		goto out_unlock;
+	}
+
 	while (head) {
 		if (head->free_bg)
 			bg_blkno = head->free_bg;
 		else
 			bg_blkno = ocfs2_which_suballoc_group(head->free_blk,
 							      head->free_bit);
-		handle = ocfs2_start_trans(osb, OCFS2_SUBALLOC_FREE);
-		if (IS_ERR(handle)) {
-			ret = PTR_ERR(handle);
-			mlog_errno(ret);
-			goto out_unlock;
-		}
-
 		trace_ocfs2_free_cached_blocks(
 		     (unsigned long long)head->free_blk, head->free_bit);
 
 		ret = ocfs2_free_suballoc_bits(handle, inode, di_bh,
 					       head->free_bit, bg_blkno, 1);
-		if (ret)
+		if (ret) {
 			mlog_errno(ret);
+			goto out_journal;
+		}
 
-		ocfs2_commit_trans(osb, handle);
+		ret = ocfs2_extend_trans(handle, OCFS2_SUBALLOC_FREE);
+		if (ret) {
+			mlog_errno(ret);
+			goto out_journal;
+		}
 
 		tmp = head;
 		head = head->free_next;
 		kfree(tmp);
 	}
+
+out_journal:
+	ocfs2_commit_trans(osb, handle);
 
 out_unlock:
 	ocfs2_inode_unlock(inode, 1);
@@ -7293,7 +7274,7 @@ int ocfs2_truncate_inline(struct inode *inode, struct buffer_head *di_bh,
 	}
 
 	inode->i_blocks = ocfs2_inode_sector_count(inode);
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
 
 	di->i_ctime = di->i_mtime = cpu_to_le64(inode->i_ctime.tv_sec);
 	di->i_ctime_nsec = di->i_mtime_nsec = cpu_to_le32(inode->i_ctime.tv_nsec);
@@ -7310,24 +7291,13 @@ out:
 
 static int ocfs2_trim_extent(struct super_block *sb,
 			     struct ocfs2_group_desc *gd,
-			     u64 group, u32 start, u32 count)
+			     u32 start, u32 count)
 {
 	u64 discard, bcount;
-	struct ocfs2_super *osb = OCFS2_SB(sb);
 
 	bcount = ocfs2_clusters_to_blocks(sb, count);
-	discard = ocfs2_clusters_to_blocks(sb, start);
-
-	/*
-	 * For the first cluster group, the gd->bg_blkno is not at the start
-	 * of the group, but at an offset from the start. If we add it while
-	 * calculating discard for first group, we will wrongly start fstrim a
-	 * few blocks after the desried start block and the range can cross
-	 * over into the next cluster group. So, add it only if this is not
-	 * the first cluster group.
-	 */
-	if (group != osb->first_cluster_group_blkno)
-		discard += le64_to_cpu(gd->bg_blkno);
+	discard = le64_to_cpu(gd->bg_blkno) +
+			ocfs2_clusters_to_blocks(sb, start);
 
 	trace_ocfs2_trim_extent(sb, (unsigned long long)discard, bcount);
 
@@ -7335,7 +7305,7 @@ static int ocfs2_trim_extent(struct super_block *sb,
 }
 
 static int ocfs2_trim_group(struct super_block *sb,
-			    struct ocfs2_group_desc *gd, u64 group,
+			    struct ocfs2_group_desc *gd,
 			    u32 start, u32 max, u32 minbits)
 {
 	int ret = 0, count = 0, next;
@@ -7354,7 +7324,7 @@ static int ocfs2_trim_group(struct super_block *sb,
 		next = ocfs2_find_next_bit(bitmap, max, start);
 
 		if ((next - start) >= minbits) {
-			ret = ocfs2_trim_extent(sb, gd, group,
+			ret = ocfs2_trim_extent(sb, gd,
 						start, next - start);
 			if (ret < 0) {
 				mlog_errno(ret);
@@ -7452,8 +7422,7 @@ int ocfs2_trim_fs(struct super_block *sb, struct fstrim_range *range)
 		}
 
 		gd = (struct ocfs2_group_desc *)gd_bh->b_data;
-		cnt = ocfs2_trim_group(sb, gd, group,
-				       first_bit, last_bit, minlen);
+		cnt = ocfs2_trim_group(sb, gd, first_bit, last_bit, minlen);
 		brelse(gd_bh);
 		gd_bh = NULL;
 		if (cnt < 0) {

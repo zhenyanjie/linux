@@ -418,12 +418,8 @@ static int __arm_v7s_map(struct arm_v7s_io_pgtable *data, unsigned long iova,
 			pte |= ARM_V7S_ATTR_NS_TABLE;
 
 		__arm_v7s_set_pte(ptep, pte, 1, cfg);
-	} else if (ARM_V7S_PTE_IS_TABLE(pte, lvl)) {
-		cptep = iopte_deref(pte, lvl);
 	} else {
-		/* We require an unmap first */
-		WARN_ON(!selftest_running);
-		return -EEXIST;
+		cptep = iopte_deref(pte, lvl);
 	}
 
 	/* Rinse, repeat */
@@ -637,10 +633,6 @@ static struct io_pgtable *arm_v7s_alloc_pgtable(struct io_pgtable_cfg *cfg,
 {
 	struct arm_v7s_io_pgtable *data;
 
-#ifdef PHYS_OFFSET
-	if (upper_32_bits(PHYS_OFFSET))
-		return NULL;
-#endif
 	if (cfg->ias > ARM_V7S_ADDR_BITS || cfg->oas > ARM_V7S_ADDR_BITS)
 		return NULL;
 

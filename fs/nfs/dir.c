@@ -232,7 +232,7 @@ int nfs_readdir_make_qstr(struct qstr *string, const char *name, unsigned int le
 	 * in a page cache page which kmemleak does not scan.
 	 */
 	kmemleak_not_leak(string->name);
-	string->hash = full_name_hash(NULL, name, len);
+	string->hash = full_name_hash(name, len);
 	return 0;
 }
 
@@ -435,11 +435,11 @@ int nfs_same_file(struct dentry *dentry, struct nfs_entry *entry)
 		return 0;
 
 	nfsi = NFS_I(inode);
-	if (entry->fattr->fileid != nfsi->fileid)
-		return 0;
-	if (entry->fh->size && nfs_compare_fh(entry->fh, &nfsi->fh) != 0)
-		return 0;
-	return 1;
+	if (entry->fattr->fileid == nfsi->fileid)
+		return 1;
+	if (nfs_compare_fh(entry->fh, &nfsi->fh) == 0)
+		return 1;
+	return 0;
 }
 
 static
@@ -477,7 +477,7 @@ void nfs_force_use_readdirplus(struct inode *dir)
 {
 	if (!list_empty(&NFS_I(dir)->open_files)) {
 		nfs_advise_use_readdirplus(dir);
-		invalidate_mapping_pages(dir->i_mapping, 0, -1);
+		nfs_zap_mapping(dir, dir->i_mapping);
 	}
 }
 
@@ -496,21 +496,13 @@ void nfs_prime_dcache(struct dentry *parent, struct nfs_entry *entry)
 		return;
 	if (!(entry->fattr->valid & NFS_ATTR_FATTR_FSID))
 		return;
-	if (filename.len == 0)
-		return;
-	/* Validate that the name doesn't contain any illegal '\0' */
-	if (strnlen(filename.name, filename.len) != filename.len)
-		return;
-	/* ...or '/' */
-	if (strnchr(filename.name, filename.len, '/'))
-		return;
 	if (filename.name[0] == '.') {
 		if (filename.len == 1)
 			return;
 		if (filename.len == 2 && filename.name[1] == '.')
 			return;
 	}
-	filename.hash = full_name_hash(parent, filename.name, filename.len);
+	filename.hash = full_name_hash(filename.name, filename.len);
 
 	dentry = d_lookup(parent, &filename);
 again:
@@ -525,8 +517,6 @@ again:
 					&entry->fattr->fsid))
 			goto out;
 		if (nfs_same_file(dentry, entry)) {
-			if (!entry->fh->size)
-				goto out;
 			nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
 			status = nfs_refresh_inode(d_inode(dentry), entry->fattr);
 			if (!status)
@@ -538,10 +528,6 @@ again:
 			dentry = NULL;
 			goto again;
 		}
-	}
-	if (!entry->fh->size) {
-		d_lookup_done(dentry);
-		goto out;
 	}
 
 	inode = nfs_fhget(dentry->d_sb, entry->fh, entry->fattr, entry->label);
@@ -748,7 +734,7 @@ struct page *get_cache_page(nfs_readdir_descriptor_t *desc)
 	struct page *page;
 
 	for (;;) {
-		page = read_cache_page(desc->file->f_mapping,
+		page = read_cache_page(file_inode(desc->file)->i_mapping,
 			desc->page_index, (filler_t *)nfs_readdir_filler, desc);
 		if (IS_ERR(page) || grab_page(page))
 			break;
@@ -886,6 +872,17 @@ int uncached_readdir(nfs_readdir_descriptor_t *desc)
 	goto out;
 }
 
+static bool nfs_dir_mapping_need_revalidate(struct inode *dir)
+{
+	struct nfs_inode *nfsi = NFS_I(dir);
+
+	if (nfs_attribute_cache_expired(dir))
+		return true;
+	if (nfsi->cache_validity & NFS_INO_INVALID_DATA)
+		return true;
+	return false;
+}
+
 /* The file offset position represents the dirent entry number.  A
    last cookie cache takes care of the common case of reading the
    whole directory.
@@ -917,7 +914,7 @@ static int nfs_readdir(struct file *file, struct dir_context *ctx)
 	desc->decode = NFS_PROTO(inode)->decode_dirent;
 	desc->plus = nfs_use_readdirplus(inode, ctx) ? 1 : 0;
 
-	if (ctx->pos == 0 || nfs_attribute_cache_expired(inode))
+	if (ctx->pos == 0 || nfs_dir_mapping_need_revalidate(inode))
 		res = nfs_revalidate_mapping(inode, file->f_mapping);
 	if (res < 0)
 		goto out;
@@ -1167,13 +1164,11 @@ static int nfs_lookup_revalidate(struct dentry *dentry, unsigned int flags)
 	/* Force a full look up iff the parent directory has changed */
 	if (!nfs_is_exclusive_create(dir, flags) &&
 	    nfs_check_verifier(dir, dentry, flags & LOOKUP_RCU)) {
-		error = nfs_lookup_verify_inode(inode, flags);
-		if (error) {
+
+		if (nfs_lookup_verify_inode(inode, flags)) {
 			if (flags & LOOKUP_RCU)
 				return -ECHILD;
-			if (error == -ESTALE)
-				goto out_zap_parent;
-			goto out_error;
+			goto out_zap_parent;
 		}
 		goto out_valid;
 	}
@@ -1197,10 +1192,8 @@ static int nfs_lookup_revalidate(struct dentry *dentry, unsigned int flags)
 	trace_nfs_lookup_revalidate_enter(dir, dentry, flags);
 	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, fhandle, fattr, label);
 	trace_nfs_lookup_revalidate_exit(dir, dentry, flags, error);
-	if (error == -ESTALE || error == -ENOENT)
-		goto out_bad;
 	if (error)
-		goto out_error;
+		goto out_bad;
 	if (nfs_compare_fh(NFS_FH(inode), fhandle))
 		goto out_bad;
 	if ((error = nfs_refresh_inode(inode, fattr)) != 0)
@@ -1292,7 +1285,7 @@ static int nfs_weak_revalidate(struct dentry *dentry, unsigned int flags)
 		return 0;
 	}
 
-	error = nfs_lookup_verify_inode(inode, flags);
+	error = nfs_revalidate_inode(NFS_SERVER(inode), inode);
 	dfprintk(LOOKUPCACHE, "NFS: %s: inode %lu is %s\n",
 			__func__, inode->i_ino, error ? "invalid" : "valid");
 	return !error;
@@ -1404,18 +1397,19 @@ struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, unsigned in
 	if (IS_ERR(label))
 		goto out;
 
+	/* Protect against concurrent sillydeletes */
 	trace_nfs_lookup_enter(dir, dentry, flags);
 	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, fhandle, fattr, label);
 	if (error == -ENOENT)
 		goto no_entry;
 	if (error < 0) {
 		res = ERR_PTR(error);
-		goto out_label;
+		goto out_unblock_sillyrename;
 	}
 	inode = nfs_fhget(dentry->d_sb, fhandle, fattr, label);
 	res = ERR_CAST(inode);
 	if (IS_ERR(res))
-		goto out_label;
+		goto out_unblock_sillyrename;
 
 	/* Success: notify readdir to use READDIRPLUS */
 	nfs_advise_use_readdirplus(dir);
@@ -1424,11 +1418,11 @@ no_entry:
 	res = d_splice_alias(inode, dentry);
 	if (res != NULL) {
 		if (IS_ERR(res))
-			goto out_label;
+			goto out_unblock_sillyrename;
 		dentry = res;
 	}
 	nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
-out_label:
+out_unblock_sillyrename:
 	trace_nfs_lookup_exit(dir, dentry, flags, error);
 	nfs4_label_free(label);
 out:
@@ -1443,7 +1437,6 @@ static int nfs4_lookup_revalidate(struct dentry *, unsigned int);
 
 const struct dentry_operations nfs4_dentry_operations = {
 	.d_revalidate	= nfs4_lookup_revalidate,
-	.d_weak_revalidate	= nfs_weak_revalidate,
 	.d_delete	= nfs_dentry_delete,
 	.d_iput		= nfs_dentry_iput,
 	.d_automount	= nfs_d_automount,
@@ -2021,17 +2014,13 @@ EXPORT_SYMBOL_GPL(nfs_link);
  * the rename.
  */
 int nfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-	       struct inode *new_dir, struct dentry *new_dentry,
-	       unsigned int flags)
+		      struct inode *new_dir, struct dentry *new_dentry)
 {
 	struct inode *old_inode = d_inode(old_dentry);
 	struct inode *new_inode = d_inode(new_dentry);
 	struct dentry *dentry = NULL, *rehash = NULL;
 	struct rpc_task *task;
 	int error = -EBUSY;
-
-	if (flags)
-		return -EINVAL;
 
 	dfprintk(VFS, "NFS: rename(%pd2 -> %pd2, ct=%d)\n",
 		 old_dentry, new_dentry,
@@ -2098,7 +2087,7 @@ out:
 		if (new_inode != NULL)
 			nfs_drop_nlink(new_inode);
 		d_move(old_dentry, new_dentry);
-		nfs_set_verifier(old_dentry,
+		nfs_set_verifier(new_dentry,
 					nfs_save_change_attribute(new_dir));
 	} else if (error == -ENOENT)
 		nfs_dentry_handle_enoent(old_dentry);
@@ -2264,37 +2253,21 @@ static struct nfs_access_entry *nfs_access_search_rbtree(struct inode *inode, st
 	return NULL;
 }
 
-static int nfs_access_get_cached(struct inode *inode, struct rpc_cred *cred, struct nfs_access_entry *res, bool may_block)
+static int nfs_access_get_cached(struct inode *inode, struct rpc_cred *cred, struct nfs_access_entry *res)
 {
 	struct nfs_inode *nfsi = NFS_I(inode);
 	struct nfs_access_entry *cache;
-	bool retry = true;
-	int err;
+	int err = -ENOENT;
 
 	spin_lock(&inode->i_lock);
-	for(;;) {
-		if (nfsi->cache_validity & NFS_INO_INVALID_ACCESS)
-			goto out_zap;
-		cache = nfs_access_search_rbtree(inode, cred);
-		err = -ENOENT;
-		if (cache == NULL)
-			goto out;
-		/* Found an entry, is our attribute cache valid? */
-		if (!nfs_attribute_cache_expired(inode) &&
-		    !(nfsi->cache_validity & NFS_INO_INVALID_ATTR))
-			break;
-		err = -ECHILD;
-		if (!may_block)
-			goto out;
-		if (!retry)
-			goto out_zap;
-		spin_unlock(&inode->i_lock);
-		err = __nfs_revalidate_inode(NFS_SERVER(inode), inode);
-		if (err)
-			return err;
-		spin_lock(&inode->i_lock);
-		retry = false;
-	}
+	if (nfsi->cache_validity & NFS_INO_INVALID_ACCESS)
+		goto out_zap;
+	cache = nfs_access_search_rbtree(inode, cred);
+	if (cache == NULL)
+		goto out;
+	if (!nfs_have_delegated_attributes(inode) &&
+	    !time_in_range_open(jiffies, cache->jiffies, cache->jiffies + nfsi->attrtimeo))
+		goto out_stale;
 	res->jiffies = cache->jiffies;
 	res->cred = cache->cred;
 	res->mask = cache->mask;
@@ -2303,6 +2276,12 @@ static int nfs_access_get_cached(struct inode *inode, struct rpc_cred *cred, str
 out:
 	spin_unlock(&inode->i_lock);
 	return err;
+out_stale:
+	rb_erase(&cache->rb_node, &nfsi->access_cache);
+	list_del(&cache->lru);
+	spin_unlock(&inode->i_lock);
+	nfs_access_free_entry(cache);
+	return -ENOENT;
 out_zap:
 	spin_unlock(&inode->i_lock);
 	nfs_access_zap_cache(inode);
@@ -2329,12 +2308,13 @@ static int nfs_access_get_cached_rcu(struct inode *inode, struct rpc_cred *cred,
 		cache = NULL;
 	if (cache == NULL)
 		goto out;
-	err = nfs_revalidate_inode_rcu(NFS_SERVER(inode), inode);
-	if (err)
+	if (!nfs_have_delegated_attributes(inode) &&
+	    !time_in_range_open(jiffies, cache->jiffies, cache->jiffies + nfsi->attrtimeo))
 		goto out;
 	res->jiffies = cache->jiffies;
 	res->cred = cache->cred;
 	res->mask = cache->mask;
+	err = 0;
 out:
 	rcu_read_unlock();
 	return err;
@@ -2423,19 +2403,18 @@ EXPORT_SYMBOL_GPL(nfs_access_set_mask);
 static int nfs_do_access(struct inode *inode, struct rpc_cred *cred, int mask)
 {
 	struct nfs_access_entry cache;
-	bool may_block = (mask & MAY_NOT_BLOCK) == 0;
 	int status;
 
 	trace_nfs_access_enter(inode);
 
 	status = nfs_access_get_cached_rcu(inode, cred, &cache);
 	if (status != 0)
-		status = nfs_access_get_cached(inode, cred, &cache, may_block);
+		status = nfs_access_get_cached(inode, cred, &cache);
 	if (status == 0)
 		goto out_cached;
 
 	status = -ECHILD;
-	if (!may_block)
+	if (mask & MAY_NOT_BLOCK)
 		goto out;
 
 	/* Be clever: ask server to check for all possible rights */

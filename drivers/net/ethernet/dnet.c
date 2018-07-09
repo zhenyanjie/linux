@@ -173,7 +173,7 @@ static int dnet_mdio_write(struct mii_bus *bus, int mii_id, int regnum,
 static void dnet_handle_link_change(struct net_device *dev)
 {
 	struct dnet *bp = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = bp->phy_dev;
 	unsigned long flags;
 	u32 mode_reg, ctl_reg;
 
@@ -295,6 +295,7 @@ static int dnet_mii_probe(struct net_device *dev)
 	bp->link = 0;
 	bp->speed = 0;
 	bp->duplex = -1;
+	bp->phy_dev = phydev;
 
 	return 0;
 }
@@ -628,16 +629,16 @@ static int dnet_open(struct net_device *dev)
 	struct dnet *bp = netdev_priv(dev);
 
 	/* if the phy is not yet register, retry later */
-	if (!dev->phydev)
+	if (!bp->phy_dev)
 		return -EAGAIN;
 
 	napi_enable(&bp->napi);
 	dnet_init_hw(bp);
 
-	phy_start_aneg(dev->phydev);
+	phy_start_aneg(bp->phy_dev);
 
 	/* schedule a link state check */
-	phy_start(dev->phydev);
+	phy_start(bp->phy_dev);
 
 	netif_start_queue(dev);
 
@@ -651,8 +652,8 @@ static int dnet_close(struct net_device *dev)
 	netif_stop_queue(dev);
 	napi_disable(&bp->napi);
 
-	if (dev->phydev)
-		phy_stop(dev->phydev);
+	if (bp->phy_dev)
+		phy_stop(bp->phy_dev);
 
 	dnet_reset_hw(bp);
 	netif_carrier_off(dev);
@@ -730,9 +731,32 @@ static struct net_device_stats *dnet_get_stats(struct net_device *dev)
 	return nstat;
 }
 
+static int dnet_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct dnet *bp = netdev_priv(dev);
+	struct phy_device *phydev = bp->phy_dev;
+
+	if (!phydev)
+		return -ENODEV;
+
+	return phy_ethtool_gset(phydev, cmd);
+}
+
+static int dnet_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct dnet *bp = netdev_priv(dev);
+	struct phy_device *phydev = bp->phy_dev;
+
+	if (!phydev)
+		return -ENODEV;
+
+	return phy_ethtool_sset(phydev, cmd);
+}
+
 static int dnet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
-	struct phy_device *phydev = dev->phydev;
+	struct dnet *bp = netdev_priv(dev);
+	struct phy_device *phydev = bp->phy_dev;
 
 	if (!netif_running(dev))
 		return -EINVAL;
@@ -752,11 +776,11 @@ static void dnet_get_drvinfo(struct net_device *dev,
 }
 
 static const struct ethtool_ops dnet_ethtool_ops = {
+	.get_settings		= dnet_get_settings,
+	.set_settings		= dnet_set_settings,
 	.get_drvinfo		= dnet_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
 	.get_ts_info		= ethtool_op_get_ts_info,
-	.get_link_ksettings     = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings     = phy_ethtool_set_link_ksettings,
 };
 
 static const struct net_device_ops dnet_netdev_ops = {
@@ -851,7 +875,7 @@ static int dnet_probe(struct platform_device *pdev)
 	       (bp->capabilities & DNET_HAS_IRQ) ? "" : "no ",
 	       (bp->capabilities & DNET_HAS_GIGABIT) ? "" : "no ",
 	       (bp->capabilities & DNET_HAS_DMA) ? "" : "no ");
-	phydev = dev->phydev;
+	phydev = bp->phy_dev;
 	phy_attached_info(phydev);
 
 	return 0;
@@ -875,8 +899,8 @@ static int dnet_remove(struct platform_device *pdev)
 
 	if (dev) {
 		bp = netdev_priv(dev);
-		if (dev->phydev)
-			phy_disconnect(dev->phydev);
+		if (bp->phy_dev)
+			phy_disconnect(bp->phy_dev);
 		mdiobus_unregister(bp->mii_bus);
 		mdiobus_free(bp->mii_bus);
 		unregister_netdev(dev);

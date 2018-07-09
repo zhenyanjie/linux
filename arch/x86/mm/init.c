@@ -17,7 +17,6 @@
 #include <asm/proto.h>
 #include <asm/dma.h>		/* for MAX_DMA_PFN */
 #include <asm/microcode.h>
-#include <asm/kaslr.h>
 
 /*
  * We need to define the tracepoints somewhere, and tlb.c
@@ -122,18 +121,8 @@ __ref void *alloc_low_pages(unsigned int num)
 	return __va(pfn << PAGE_SHIFT);
 }
 
-/*
- * By default need 3 4k for initial PMD_SIZE,  3 4k for 0-ISA_END_ADDRESS.
- * With KASLR memory randomization, depending on the machine e820 memory
- * and the PUD alignment. We may need twice more pages when KASLR memory
- * randomization is enabled.
- */
-#ifndef CONFIG_RANDOMIZE_MEMORY
-#define INIT_PGD_PAGE_COUNT      6
-#else
-#define INIT_PGD_PAGE_COUNT      12
-#endif
-#define INIT_PGT_BUF_SIZE	(INIT_PGD_PAGE_COUNT * PAGE_SIZE)
+/* need 3 4k for initial PMD_SIZE,  3 4k for 0-ISA_END_ADDRESS */
+#define INIT_PGT_BUF_SIZE	(6 * PAGE_SIZE)
 RESERVE_BRK(early_pgt_alloc, INIT_PGT_BUF_SIZE);
 void  __init early_alloc_pgt_buf(void)
 {
@@ -177,7 +166,7 @@ static void __init probe_page_size_mask(void)
 		cr4_set_bits_and_update_boot(X86_CR4_PSE);
 
 	/* Enable PGE if available */
-	if (boot_cpu_has(X86_FEATURE_PGE) && !kaiser_enabled) {
+	if (boot_cpu_has(X86_FEATURE_PGE)) {
 		cr4_set_bits_and_update_boot(X86_CR4_PGE);
 		__supported_pte_mask |= _PAGE_GLOBAL;
 	} else
@@ -218,7 +207,7 @@ static int __meminit save_mr(struct map_range *mr, int nr_range,
  * adjust the page_size_mask for small range to go with
  *	big page size instead small one if nearby are ram too.
  */
-static void __ref adjust_range_page_size_mask(struct map_range *mr,
+static void __init_refok adjust_range_page_size_mask(struct map_range *mr,
 							 int nr_range)
 {
 	int i;
@@ -406,7 +395,7 @@ bool pfn_range_is_mapped(unsigned long start_pfn, unsigned long end_pfn)
  * This runs before bootmem is initialized and gets pages directly from
  * the physical memory. To access them they are temporarily mapped.
  */
-unsigned long __ref init_memory_mapping(unsigned long start,
+unsigned long __init_refok init_memory_mapping(unsigned long start,
 					       unsigned long end)
 {
 	struct map_range mr[NR_RANGE_MR];
@@ -601,9 +590,6 @@ void __init init_mem_mapping(void)
 	/* the ISA range is always mapped regardless of memory holes */
 	init_memory_mapping(0, ISA_END_ADDRESS);
 
-	/* Init the trampoline, possibly with KASLR memory offset */
-	init_trampoline();
-
 	/*
 	 * If the allocation is in bottom-up direction, we setup direct mapping
 	 * in bottom-up, otherwise we setup direct mapping in top-down.
@@ -643,42 +629,21 @@ void __init init_mem_mapping(void)
  * devmem_is_allowed() checks to see if /dev/mem access to a certain address
  * is valid. The argument is a physical page number.
  *
- * On x86, access has to be given to the first megabyte of RAM because that
- * area traditionally contains BIOS code and data regions used by X, dosemu,
- * and similar apps. Since they map the entire memory range, the whole range
- * must be allowed (for mapping), but any areas that would otherwise be
- * disallowed are flagged as being "zero filled" instead of rejected.
- * Access has to be given to non-kernel-ram areas as well, these contain the
- * PCI mmio resources as well as potential bios/acpi data regions.
+ *
+ * On x86, access has to be given to the first megabyte of ram because that area
+ * contains BIOS code and data regions used by X and dosemu and similar apps.
+ * Access has to be given to non-kernel-ram areas as well, these contain the PCI
+ * mmio resources as well as potential bios/acpi data regions.
  */
 int devmem_is_allowed(unsigned long pagenr)
 {
-	if (region_intersects(PFN_PHYS(pagenr), PAGE_SIZE,
-				IORESOURCE_SYSTEM_RAM, IORES_DESC_NONE)
-			!= REGION_DISJOINT) {
-		/*
-		 * For disallowed memory regions in the low 1MB range,
-		 * request that the page be shown as all zeros.
-		 */
-		if (pagenr < 256)
-			return 2;
-
+	if (pagenr < 256)
+		return 1;
+	if (iomem_is_exclusive(pagenr << PAGE_SHIFT))
 		return 0;
-	}
-
-	/*
-	 * This must follow RAM test, since System RAM is considered a
-	 * restricted resource under CONFIG_STRICT_IOMEM.
-	 */
-	if (iomem_is_exclusive(pagenr << PAGE_SHIFT)) {
-		/* Low 1MB bypasses iomem restrictions. */
-		if (pagenr < 256)
-			return 1;
-
-		return 0;
-	}
-
-	return 1;
+	if (!page_is_ram(pagenr))
+		return 1;
+	return 0;
 }
 
 void free_init_pages(char *what, unsigned long begin, unsigned long end)
@@ -720,10 +685,8 @@ void free_init_pages(char *what, unsigned long begin, unsigned long end)
 	}
 }
 
-void __ref free_initmem(void)
+void free_initmem(void)
 {
-	e820_reallocate_tables();
-
 	free_init_pages("unused kernel",
 			(unsigned long)(&__init_begin),
 			(unsigned long)(&__init_end));
@@ -766,11 +729,13 @@ void __init zone_sizes_init(void)
 }
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct tlb_state, cpu_tlbstate) = {
+#ifdef CONFIG_SMP
 	.active_mm = &init_mm,
 	.state = 0,
+#endif
 	.cr4 = ~0UL,	/* fail hard if we screw up cr4 shadow initialization */
 };
-EXPORT_PER_CPU_SYMBOL(cpu_tlbstate);
+EXPORT_SYMBOL_GPL(cpu_tlbstate);
 
 void update_cache_mode_entry(unsigned entry, enum page_cache_mode cache)
 {

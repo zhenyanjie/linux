@@ -13,7 +13,6 @@
 
 #include <linux/skbuff.h>
 #include <net/sock.h>
-#include <net/strparser.h>
 #include <uapi/linux/kcm.h>
 
 extern unsigned int kcm_net_id;
@@ -22,8 +21,16 @@ extern unsigned int kcm_net_id;
 #define KCM_STATS_INCR(stat) ((stat)++)
 
 struct kcm_psock_stats {
+	unsigned long long rx_msgs;
+	unsigned long long rx_bytes;
 	unsigned long long tx_msgs;
 	unsigned long long tx_bytes;
+	unsigned int rx_aborts;
+	unsigned int rx_mem_fail;
+	unsigned int rx_need_more_hdr;
+	unsigned int rx_msg_too_big;
+	unsigned int rx_msg_timeouts;
+	unsigned int rx_bad_hdr_len;
 	unsigned long long reserved;
 	unsigned long long unreserved;
 	unsigned int tx_aborts;
@@ -57,6 +64,13 @@ struct kcm_tx_msg {
 	struct sk_buff *last_skb;
 };
 
+struct kcm_rx_msg {
+	int full_len;
+	int accum_len;
+	int offset;
+	int early_eaten;
+};
+
 /* Socket structure for KCM client sockets */
 struct kcm_sock {
 	struct sock sk;
@@ -73,7 +87,6 @@ struct kcm_sock {
 	struct work_struct tx_work;
 	struct list_head wait_psock_list;
 	struct sk_buff *seq_skb;
-	u32 tx_stopped : 1;
 
 	/* Don't use bit fields here, these are set under different locks */
 	bool tx_wait;
@@ -91,11 +104,11 @@ struct bpf_prog;
 /* Structure for an attached lower socket */
 struct kcm_psock {
 	struct sock *sk;
-	struct strparser strp;
 	struct kcm_mux *mux;
 	int index;
 
 	u32 tx_stopped : 1;
+	u32 rx_stopped : 1;
 	u32 done : 1;
 	u32 unattaching : 1;
 
@@ -108,12 +121,18 @@ struct kcm_psock {
 	struct kcm_psock_stats stats;
 
 	/* Receive */
+	struct sk_buff *rx_skb_head;
+	struct sk_buff **rx_skb_nextp;
+	struct sk_buff *ready_rx_msg;
 	struct list_head psock_ready_list;
+	struct work_struct rx_work;
+	struct delayed_work rx_delayed_work;
 	struct bpf_prog *bpf_prog;
 	struct kcm_sock *rx_kcm;
 	unsigned long long saved_rx_bytes;
 	unsigned long long saved_rx_msgs;
-	struct sk_buff *ready_rx_msg;
+	struct timer_list rx_msg_timer;
+	unsigned int rx_need_bytes;
 
 	/* Transmit */
 	struct kcm_sock *tx_kcm;
@@ -127,7 +146,6 @@ struct kcm_net {
 	struct mutex mutex;
 	struct kcm_psock_stats aggregate_psock_stats;
 	struct kcm_mux_stats aggregate_mux_stats;
-	struct strp_aggr_stats aggregate_strp_stats;
 	struct list_head mux_list;
 	int count;
 };
@@ -145,7 +163,6 @@ struct kcm_mux {
 
 	struct kcm_mux_stats stats;
 	struct kcm_psock_stats aggregate_psock_stats;
-	struct strp_aggr_stats aggregate_strp_stats;
 
 	/* Receive */
 	spinlock_t rx_lock ____cacheline_aligned_in_smp;
@@ -173,6 +190,14 @@ static inline void aggregate_psock_stats(struct kcm_psock_stats *stats,
 	/* Save psock statistics in the mux when psock is being unattached. */
 
 #define SAVE_PSOCK_STATS(_stat) (agg_stats->_stat += stats->_stat)
+	SAVE_PSOCK_STATS(rx_msgs);
+	SAVE_PSOCK_STATS(rx_bytes);
+	SAVE_PSOCK_STATS(rx_aborts);
+	SAVE_PSOCK_STATS(rx_mem_fail);
+	SAVE_PSOCK_STATS(rx_need_more_hdr);
+	SAVE_PSOCK_STATS(rx_msg_too_big);
+	SAVE_PSOCK_STATS(rx_msg_timeouts);
+	SAVE_PSOCK_STATS(rx_bad_hdr_len);
 	SAVE_PSOCK_STATS(tx_msgs);
 	SAVE_PSOCK_STATS(tx_bytes);
 	SAVE_PSOCK_STATS(reserved);

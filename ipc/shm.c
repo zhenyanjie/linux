@@ -198,12 +198,6 @@ static int __shm_open(struct vm_area_struct *vma)
 	if (IS_ERR(shp))
 		return PTR_ERR(shp);
 
-	if (shp->shm_file != sfd->file) {
-		/* ID was reused */
-		shm_unlock(shp);
-		return -EINVAL;
-	}
-
 	shp->shm_atim = get_seconds();
 	shp->shm_lprid = task_tgid_vnr(current);
 	shp->shm_nattch++;
@@ -387,17 +381,6 @@ static int shm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return sfd->vm_ops->fault(vma, vmf);
 }
 
-static int shm_split(struct vm_area_struct *vma, unsigned long addr)
-{
-	struct file *file = vma->vm_file;
-	struct shm_file_data *sfd = shm_file_data(file);
-
-	if (sfd->vm_ops && sfd->vm_ops->split)
-		return sfd->vm_ops->split(vma, addr);
-
-	return 0;
-}
-
 #ifdef CONFIG_NUMA
 static int shm_set_policy(struct vm_area_struct *vma, struct mempolicy *new)
 {
@@ -431,9 +414,8 @@ static int shm_mmap(struct file *file, struct vm_area_struct *vma)
 	int ret;
 
 	/*
-	 * In case of remap_file_pages() emulation, the file can represent an
-	 * IPC ID that was removed, and possibly even reused by another shm
-	 * segment already.  Propagate this case as an error to caller.
+	 * In case of remap_file_pages() emulation, the file can represent
+	 * removed IPC ID: propogate shm_lock() error to caller.
 	 */
 	ret =__shm_open(vma);
 	if (ret)
@@ -457,7 +439,6 @@ static int shm_release(struct inode *ino, struct file *file)
 	struct shm_file_data *sfd = shm_file_data(file);
 
 	put_ipc_ns(sfd->ns);
-	fput(sfd->file);
 	shm_file_data(file) = NULL;
 	kfree(sfd);
 	return 0;
@@ -495,15 +476,13 @@ static const struct file_operations shm_file_operations = {
 	.mmap		= shm_mmap,
 	.fsync		= shm_fsync,
 	.release	= shm_release,
+#ifndef CONFIG_MMU
 	.get_unmapped_area	= shm_get_unmapped_area,
+#endif
 	.llseek		= noop_llseek,
 	.fallocate	= shm_fallocate,
 };
 
-/*
- * shm_file_operations_huge is now identical to shm_file_operations,
- * but we keep it distinct for the sake of is_file_shm_hugepages().
- */
 static const struct file_operations shm_file_operations_huge = {
 	.mmap		= shm_mmap,
 	.fsync		= shm_fsync,
@@ -522,7 +501,6 @@ static const struct vm_operations_struct shm_vm_ops = {
 	.open	= shm_open,	/* callback for a new vm-area open */
 	.close	= shm_close,	/* callback for when the vm-area is released */
 	.fault	= shm_fault,
-	.split	= shm_split,
 #if defined(CONFIG_NUMA)
 	.set_policy = shm_set_policy,
 	.get_policy = shm_get_policy,
@@ -786,10 +764,10 @@ static void shm_add_rss_swap(struct shmid_kernel *shp,
 	} else {
 #ifdef CONFIG_SHMEM
 		struct shmem_inode_info *info = SHMEM_I(inode);
-		spin_lock_irq(&info->lock);
+		spin_lock(&info->lock);
 		*rss_add += inode->i_mapping->nrpages;
 		*swp_add += info->swapped;
-		spin_unlock_irq(&info->lock);
+		spin_unlock(&info->lock);
 #else
 		*rss_add += inode->i_mapping->nrpages;
 #endif
@@ -1105,8 +1083,8 @@ out_unlock1:
  * "raddr" thing points to kernel space, and there has to be a wrapper around
  * this.
  */
-long do_shmat(int shmid, char __user *shmaddr, int shmflg,
-	      ulong *raddr, unsigned long shmlba)
+long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr,
+	      unsigned long shmlba)
 {
 	struct shmid_kernel *shp;
 	unsigned long addr;
@@ -1127,17 +1105,9 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 		goto out;
 	else if ((addr = (ulong)shmaddr)) {
 		if (addr & (shmlba - 1)) {
-			if (shmflg & SHM_RND) {
-				addr &= ~(shmlba - 1);  /* round down */
-
-				/*
-				 * Ensure that the round-down is non-nil
-				 * when remapping. This can happen for
-				 * cases when addr < shmlba.
-				 */
-				if (!addr && (shmflg & SHM_REMAP))
-					goto out;
-			} else
+			if (shmflg & SHM_RND)
+				addr &= ~(shmlba - 1);	   /* round down */
+			else
 #ifndef __ARCH_FORCE_SHMLBA
 				if (addr & ~PAGE_MASK)
 #endif
@@ -1223,16 +1193,7 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 	file->f_mapping = shp->shm_file->f_mapping;
 	sfd->id = shp->shm_perm.id;
 	sfd->ns = get_ipc_ns(ns);
-	/*
-	 * We need to take a reference to the real shm file to prevent the
-	 * pointer from becoming stale in cases where the lifetime of the outer
-	 * file extends beyond that of the shm segment.  It's not usually
-	 * possible, but it can happen during remap_file_pages() emulation as
-	 * that unmaps the memory, then does ->mmap() via file reference only.
-	 * We'll deny the ->mmap() if the shm segment was since removed, but to
-	 * detect shm ID reuse we need to compare the file pointers.
-	 */
-	sfd->file = get_file(shp->shm_file);
+	sfd->file = shp->shm_file;
 	sfd->vm_ops = NULL;
 
 	err = security_mmap_file(file, prot, flags);

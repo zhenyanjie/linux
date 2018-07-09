@@ -345,8 +345,8 @@ static int find_portno(struct net_bridge *br)
 static struct net_bridge_port *new_nbp(struct net_bridge *br,
 				       struct net_device *dev)
 {
+	int index;
 	struct net_bridge_port *p;
-	int index, err;
 
 	index = find_portno(br);
 	if (index < 0)
@@ -362,16 +362,11 @@ static struct net_bridge_port *new_nbp(struct net_bridge *br,
 	p->path_cost = port_cost(dev);
 	p->priority = 0x8000 >> BR_PORT_BITS;
 	p->port_no = index;
-	p->flags = BR_LEARNING | BR_FLOOD | BR_MCAST_FLOOD;
+	p->flags = BR_LEARNING | BR_FLOOD;
 	br_init_port(p);
 	br_set_state(p, BR_STATE_DISABLED);
 	br_stp_port_timer_init(p);
-	err = br_multicast_add_port(p);
-	if (err) {
-		dev_put(dev);
-		kfree(p);
-		p = ERR_PTR(err);
-	}
+	br_multicast_add_port(p);
 
 	return p;
 }
@@ -504,8 +499,8 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (dev->netdev_ops->ndo_start_xmit == br_dev_xmit)
 		return -ELOOP;
 
-	/* Device has master upper dev */
-	if (netdev_master_upper_dev_get(dev))
+	/* Device is already being bridged */
+	if (br_port_exists(dev))
 		return -EBUSY;
 
 	/* No bridging devices that dislike that (e.g. wireless) */
@@ -545,10 +540,6 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (err)
 		goto err5;
 
-	err = nbp_switchdev_mark_set(p);
-	if (err)
-		goto err6;
-
 	dev_disable_lro(dev);
 
 	list_add_rcu(&p->list, &br->port_list);
@@ -570,7 +561,7 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	err = nbp_vlan_init(p);
 	if (err) {
 		netdev_err(dev, "failed to initialize vlan filtering on this port\n");
-		goto err7;
+		goto err6;
 	}
 
 	spin_lock_bh(&br->lock);
@@ -593,12 +584,12 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 
 	return 0;
 
-err7:
+err6:
 	list_del_rcu(&p->list);
 	br_fdb_delete_by_port(br, p, 0, 1);
 	nbp_update_port_count(br);
-err6:
 	netdev_upper_dev_unlink(dev, br->dev);
+
 err5:
 	dev->priv_flags &= ~IFF_BRIDGE_PORT;
 	netdev_rx_handler_unregister(dev);

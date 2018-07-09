@@ -4,4 +4,3 @@ fpu_preempt
 vmx_preempt
 fpu_signal
 vmx_signal
-vsx_preempt

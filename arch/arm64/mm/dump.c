@@ -27,7 +27,11 @@
 #include <asm/memory.h>
 #include <asm/pgtable.h>
 #include <asm/pgtable-hwdef.h>
-#include <asm/ptdump.h>
+
+struct addr_marker {
+	unsigned long start_address;
+	const char *name;
+};
 
 static const struct addr_marker address_markers[] = {
 #ifdef CONFIG_KASAN
@@ -242,7 +246,7 @@ static void note_page(struct pg_state *st, unsigned long addr, unsigned level,
 
 static void walk_pte(struct pg_state *st, pmd_t *pmd, unsigned long start)
 {
-	pte_t *pte = pte_offset_kernel(pmd, 0UL);
+	pte_t *pte = pte_offset_kernel(pmd, 0);
 	unsigned long addr;
 	unsigned i;
 
@@ -254,7 +258,7 @@ static void walk_pte(struct pg_state *st, pmd_t *pmd, unsigned long start)
 
 static void walk_pmd(struct pg_state *st, pud_t *pud, unsigned long start)
 {
-	pmd_t *pmd = pmd_offset(pud, 0UL);
+	pmd_t *pmd = pmd_offset(pud, 0);
 	unsigned long addr;
 	unsigned i;
 
@@ -271,7 +275,7 @@ static void walk_pmd(struct pg_state *st, pud_t *pud, unsigned long start)
 
 static void walk_pud(struct pg_state *st, pgd_t *pgd, unsigned long start)
 {
-	pud_t *pud = pud_offset(pgd, 0UL);
+	pud_t *pud = pud_offset(pgd, 0);
 	unsigned long addr;
 	unsigned i;
 
@@ -286,8 +290,7 @@ static void walk_pud(struct pg_state *st, pgd_t *pgd, unsigned long start)
 	}
 }
 
-static void walk_pgd(struct pg_state *st, struct mm_struct *mm,
-		     unsigned long start)
+static void walk_pgd(struct pg_state *st, struct mm_struct *mm, unsigned long start)
 {
 	pgd_t *pgd = pgd_offset(mm, 0UL);
 	unsigned i;
@@ -306,13 +309,12 @@ static void walk_pgd(struct pg_state *st, struct mm_struct *mm,
 
 static int ptdump_show(struct seq_file *m, void *v)
 {
-	struct ptdump_info *info = m->private;
 	struct pg_state st = {
 		.seq = m,
-		.marker = info->markers,
+		.marker = address_markers,
 	};
 
-	walk_pgd(&st, info->mm, info->base_addr);
+	walk_pgd(&st, &init_mm, VA_START);
 
 	note_page(&st, 0, 0, 0);
 	return 0;
@@ -320,7 +322,7 @@ static int ptdump_show(struct seq_file *m, void *v)
 
 static int ptdump_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, ptdump_show, inode->i_private);
+	return single_open(file, ptdump_show, NULL);
 }
 
 static const struct file_operations ptdump_fops = {
@@ -330,7 +332,7 @@ static const struct file_operations ptdump_fops = {
 	.release	= single_release,
 };
 
-int ptdump_register(struct ptdump_info *info, const char *name)
+static int ptdump_init(void)
 {
 	struct dentry *pe;
 	unsigned i, j;
@@ -340,18 +342,8 @@ int ptdump_register(struct ptdump_info *info, const char *name)
 			for (j = 0; j < pg_level[i].num; j++)
 				pg_level[i].mask |= pg_level[i].bits[j].mask;
 
-	pe = debugfs_create_file(name, 0400, NULL, info, &ptdump_fops);
+	pe = debugfs_create_file("kernel_page_tables", 0400, NULL, NULL,
+				 &ptdump_fops);
 	return pe ? 0 : -ENOMEM;
-}
-
-static struct ptdump_info kernel_ptdump_info = {
-	.mm		= &init_mm,
-	.markers	= address_markers,
-	.base_addr	= VA_START,
-};
-
-static int ptdump_init(void)
-{
-	return ptdump_register(&kernel_ptdump_info, "kernel_page_tables");
 }
 device_initcall(ptdump_init);

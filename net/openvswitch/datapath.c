@@ -137,12 +137,10 @@ EXPORT_SYMBOL_GPL(lockdep_ovsl_is_held);
 static struct vport *new_vport(const struct vport_parms *);
 static int queue_gso_packets(struct datapath *dp, struct sk_buff *,
 			     const struct sw_flow_key *,
-			     const struct dp_upcall_info *,
-			     uint32_t cutlen);
+			     const struct dp_upcall_info *);
 static int queue_userspace_packet(struct datapath *dp, struct sk_buff *,
 				  const struct sw_flow_key *,
-				  const struct dp_upcall_info *,
-				  uint32_t cutlen);
+				  const struct dp_upcall_info *);
 
 /* Must be called with rcu_read_lock. */
 static struct datapath *get_dp_rcu(struct net *net, int dp_ifindex)
@@ -277,7 +275,7 @@ void ovs_dp_process_packet(struct sk_buff *skb, struct sw_flow_key *key)
 		upcall.cmd = OVS_PACKET_CMD_MISS;
 		upcall.portid = ovs_vport_find_upcall_portid(p, skb);
 		upcall.mru = OVS_CB(skb)->mru;
-		error = ovs_dp_upcall(dp, skb, key, &upcall, 0);
+		error = ovs_dp_upcall(dp, skb, key, &upcall);
 		if (unlikely(error))
 			kfree_skb(skb);
 		else
@@ -302,8 +300,7 @@ out:
 
 int ovs_dp_upcall(struct datapath *dp, struct sk_buff *skb,
 		  const struct sw_flow_key *key,
-		  const struct dp_upcall_info *upcall_info,
-		  uint32_t cutlen)
+		  const struct dp_upcall_info *upcall_info)
 {
 	struct dp_stats_percpu *stats;
 	int err;
@@ -314,9 +311,9 @@ int ovs_dp_upcall(struct datapath *dp, struct sk_buff *skb,
 	}
 
 	if (!skb_is_gso(skb))
-		err = queue_userspace_packet(dp, skb, key, upcall_info, cutlen);
+		err = queue_userspace_packet(dp, skb, key, upcall_info);
 	else
-		err = queue_gso_packets(dp, skb, key, upcall_info, cutlen);
+		err = queue_gso_packets(dp, skb, key, upcall_info);
 	if (err)
 		goto err;
 
@@ -334,8 +331,7 @@ err:
 
 static int queue_gso_packets(struct datapath *dp, struct sk_buff *skb,
 			     const struct sw_flow_key *key,
-			     const struct dp_upcall_info *upcall_info,
-				 uint32_t cutlen)
+			     const struct dp_upcall_info *upcall_info)
 {
 	unsigned short gso_type = skb_shinfo(skb)->gso_type;
 	struct sw_flow_key later_key;
@@ -364,7 +360,7 @@ static int queue_gso_packets(struct datapath *dp, struct sk_buff *skb,
 		if (gso_type & SKB_GSO_UDP && skb != segs)
 			key = &later_key;
 
-		err = queue_userspace_packet(dp, skb, key, upcall_info, cutlen);
+		err = queue_userspace_packet(dp, skb, key, upcall_info);
 		if (err)
 			break;
 
@@ -383,12 +379,11 @@ static int queue_gso_packets(struct datapath *dp, struct sk_buff *skb,
 }
 
 static size_t upcall_msg_size(const struct dp_upcall_info *upcall_info,
-			      unsigned int hdrlen, int actions_attrlen)
+			      unsigned int hdrlen)
 {
 	size_t size = NLMSG_ALIGN(sizeof(struct ovs_header))
 		+ nla_total_size(hdrlen) /* OVS_PACKET_ATTR_PACKET */
-		+ nla_total_size(ovs_key_attr_size()) /* OVS_PACKET_ATTR_KEY */
-		+ nla_total_size(sizeof(unsigned int)); /* OVS_PACKET_ATTR_LEN */
+		+ nla_total_size(ovs_key_attr_size()); /* OVS_PACKET_ATTR_KEY */
 
 	/* OVS_PACKET_ATTR_USERDATA */
 	if (upcall_info->userdata)
@@ -400,7 +395,7 @@ static size_t upcall_msg_size(const struct dp_upcall_info *upcall_info,
 
 	/* OVS_PACKET_ATTR_ACTIONS */
 	if (upcall_info->actions_len)
-		size += nla_total_size(actions_attrlen);
+		size += nla_total_size(upcall_info->actions_len);
 
 	/* OVS_PACKET_ATTR_MRU */
 	if (upcall_info->mru)
@@ -421,8 +416,7 @@ static void pad_packet(struct datapath *dp, struct sk_buff *skb)
 
 static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 				  const struct sw_flow_key *key,
-				  const struct dp_upcall_info *upcall_info,
-				  uint32_t cutlen)
+				  const struct dp_upcall_info *upcall_info)
 {
 	struct ovs_header *upcall;
 	struct sk_buff *nskb = NULL;
@@ -467,8 +461,7 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 	else
 		hlen = skb->len;
 
-	len = upcall_msg_size(upcall_info, hlen - cutlen,
-			      OVS_CB(skb)->acts_origlen);
+	len = upcall_msg_size(upcall_info, hlen);
 	user_skb = genlmsg_new(len, GFP_ATOMIC);
 	if (!user_skb) {
 		err = -ENOMEM;
@@ -516,25 +509,15 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 		pad_packet(dp, user_skb);
 	}
 
-	/* Add OVS_PACKET_ATTR_LEN when packet is truncated */
-	if (cutlen > 0) {
-		if (nla_put_u32(user_skb, OVS_PACKET_ATTR_LEN,
-				skb->len)) {
-			err = -ENOBUFS;
-			goto out;
-		}
-		pad_packet(dp, user_skb);
-	}
-
 	/* Only reserve room for attribute header, packet data is added
 	 * in skb_zerocopy() */
 	if (!(nla = nla_reserve(user_skb, OVS_PACKET_ATTR_PACKET, 0))) {
 		err = -ENOBUFS;
 		goto out;
 	}
-	nla->nla_len = nla_attr_size(skb->len - cutlen);
+	nla->nla_len = nla_attr_size(skb->len);
 
-	err = skb_zerocopy(user_skb, skb, skb->len - cutlen, hlen);
+	err = skb_zerocopy(user_skb, skb, skb->len, hlen);
 	if (err)
 		goto out;
 
@@ -929,6 +912,7 @@ static int ovs_flow_cmd_new(struct sk_buff *skb, struct genl_info *info)
 	struct sw_flow_mask mask;
 	struct sk_buff *reply;
 	struct datapath *dp;
+	struct sw_flow_key key;
 	struct sw_flow_actions *acts;
 	struct sw_flow_match match;
 	u32 ufid_flags = ovs_nla_get_ufid_flags(a[OVS_FLOW_ATTR_UFID_FLAGS]);
@@ -956,23 +940,19 @@ static int ovs_flow_cmd_new(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	/* Extract key. */
-	ovs_match_init(&match, &new_flow->key, false, &mask);
+	ovs_match_init(&match, &key, &mask);
 	error = ovs_nla_get_match(net, &match, a[OVS_FLOW_ATTR_KEY],
 				  a[OVS_FLOW_ATTR_MASK], log);
 	if (error)
 		goto err_kfree_flow;
 
+	ovs_flow_mask_key(&new_flow->key, &key, true, &mask);
+
 	/* Extract flow identifier. */
 	error = ovs_nla_get_identifier(&new_flow->id, a[OVS_FLOW_ATTR_UFID],
-				       &new_flow->key, log);
+				       &key, log);
 	if (error)
 		goto err_kfree_flow;
-
-	/* unmasked key is needed to match when ufid is not used. */
-	if (ovs_identifier_is_key(&new_flow->id))
-		match.key = new_flow->id.unmasked_key;
-
-	ovs_flow_mask_key(&new_flow->key, &new_flow->key, true, &mask);
 
 	/* Validate actions. */
 	error = ovs_nla_copy_actions(net, a[OVS_FLOW_ATTR_ACTIONS],
@@ -1000,7 +980,7 @@ static int ovs_flow_cmd_new(struct sk_buff *skb, struct genl_info *info)
 	if (ovs_identifier_is_ufid(&new_flow->id))
 		flow = ovs_flow_tbl_lookup_ufid(&dp->table, &new_flow->id);
 	if (!flow)
-		flow = ovs_flow_tbl_lookup(&dp->table, &new_flow->key);
+		flow = ovs_flow_tbl_lookup(&dp->table, &key);
 	if (likely(!flow)) {
 		rcu_assign_pointer(new_flow->sf_acts, acts);
 
@@ -1125,7 +1105,7 @@ static int ovs_flow_cmd_set(struct sk_buff *skb, struct genl_info *info)
 
 	ufid_present = ovs_nla_get_ufid(&sfid, a[OVS_FLOW_ATTR_UFID], log);
 	if (a[OVS_FLOW_ATTR_KEY]) {
-		ovs_match_init(&match, &key, true, &mask);
+		ovs_match_init(&match, &key, &mask);
 		error = ovs_nla_get_match(net, &match, a[OVS_FLOW_ATTR_KEY],
 					  a[OVS_FLOW_ATTR_MASK], log);
 	} else if (!ufid_present) {
@@ -1242,7 +1222,7 @@ static int ovs_flow_cmd_get(struct sk_buff *skb, struct genl_info *info)
 
 	ufid_present = ovs_nla_get_ufid(&ufid, a[OVS_FLOW_ATTR_UFID], log);
 	if (a[OVS_FLOW_ATTR_KEY]) {
-		ovs_match_init(&match, &key, true, NULL);
+		ovs_match_init(&match, &key, NULL);
 		err = ovs_nla_get_match(net, &match, a[OVS_FLOW_ATTR_KEY], NULL,
 					log);
 	} else if (!ufid_present) {
@@ -1301,7 +1281,7 @@ static int ovs_flow_cmd_del(struct sk_buff *skb, struct genl_info *info)
 
 	ufid_present = ovs_nla_get_ufid(&ufid, a[OVS_FLOW_ATTR_UFID], log);
 	if (a[OVS_FLOW_ATTR_KEY]) {
-		ovs_match_init(&match, &key, true, NULL);
+		ovs_match_init(&match, &key, NULL);
 		err = ovs_nla_get_match(net, &match, a[OVS_FLOW_ATTR_KEY],
 					NULL, log);
 		if (unlikely(err))
@@ -2441,7 +2421,3 @@ module_exit(dp_cleanup);
 
 MODULE_DESCRIPTION("Open vSwitch switching datapath");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_GENL_FAMILY(OVS_DATAPATH_FAMILY);
-MODULE_ALIAS_GENL_FAMILY(OVS_VPORT_FAMILY);
-MODULE_ALIAS_GENL_FAMILY(OVS_FLOW_FAMILY);
-MODULE_ALIAS_GENL_FAMILY(OVS_PACKET_FAMILY);

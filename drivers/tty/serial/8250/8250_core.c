@@ -114,7 +114,7 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 	struct list_head *l, *end = NULL;
 	int pass_counter = 0, handled = 0;
 
-	pr_debug("%s(%d): start\n", __func__, irq);
+	DEBUG_INTR("serial8250_interrupt(%d)...", irq);
 
 	spin_lock(&i->lock);
 
@@ -144,7 +144,7 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 
 	spin_unlock(&i->lock);
 
-	pr_debug("%s(%d): end\n", __func__, irq);
+	DEBUG_INTR("end.\n");
 
 	return IRQ_RETVAL(handled);
 }
@@ -546,10 +546,10 @@ static void __init serial8250_isa_init_ports(void)
 
 		port->iobase   = old_serial_port[i].port;
 		port->irq      = irq_canonicalize(old_serial_port[i].irq);
-		port->irqflags = 0;
+		port->irqflags = old_serial_port[i].irqflags;
 		port->uartclk  = old_serial_port[i].baud_base * 16;
 		port->flags    = old_serial_port[i].flags;
-		port->hub6     = 0;
+		port->hub6     = old_serial_port[i].hub6;
 		port->membase  = old_serial_port[i].iomem_base;
 		port->iotype   = old_serial_port[i].io_type;
 		port->regshift = old_serial_port[i].iomem_reg_shift;
@@ -639,7 +639,7 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
 {
 	char match[] = "uart";	/* 8250-specific earlycon name */
 	unsigned char iotype;
-	resource_size_t addr;
+	unsigned long addr;
 	int i;
 
 	if (strncmp(name, match, 4) != 0)

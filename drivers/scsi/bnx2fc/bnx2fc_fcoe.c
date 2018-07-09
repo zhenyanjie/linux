@@ -57,7 +57,7 @@ static struct scsi_host_template bnx2fc_shost_template;
 static struct fc_function_template bnx2fc_transport_function;
 static struct fcoe_sysfs_function_template bnx2fc_fcoe_sysfs_templ;
 static struct fc_function_template bnx2fc_vport_xport_function;
-static int bnx2fc_create(struct net_device *netdev, enum fip_mode fip_mode);
+static int bnx2fc_create(struct net_device *netdev, enum fip_state fip_mode);
 static void __bnx2fc_destroy(struct bnx2fc_interface *interface);
 static int bnx2fc_destroy(struct net_device *net_device);
 static int bnx2fc_enable(struct net_device *netdev);
@@ -486,7 +486,7 @@ static int bnx2fc_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	__skb_queue_tail(&bg->fcoe_rx_list, skb);
 	if (bg->fcoe_rx_list.qlen == 1)
-		wake_up_process(bg->kthread);
+		wake_up_process(bg->thread);
 
 	spin_unlock(&bg->fcoe_rx_list.lock);
 
@@ -625,7 +625,7 @@ static void bnx2fc_recv_frame(struct sk_buff *skb)
  *
  * @arg:	ptr to bnx2fc_percpu_info structure
  */
-static int bnx2fc_percpu_io_thread(void *arg)
+int bnx2fc_percpu_io_thread(void *arg)
 {
 	struct bnx2fc_percpu_s *p = arg;
 	struct bnx2fc_work *work, *tmp;
@@ -670,17 +670,15 @@ static struct fc_host_statistics *bnx2fc_get_host_stats(struct Scsi_Host *shost)
 	if (!fw_stats)
 		return NULL;
 
-	mutex_lock(&hba->hba_stats_mutex);
-
 	bnx2fc_stats = fc_get_host_stats(shost);
 
 	init_completion(&hba->stat_req_done);
 	if (bnx2fc_send_stat_req(hba))
-		goto unlock_stats_mutex;
+		return bnx2fc_stats;
 	rc = wait_for_completion_timeout(&hba->stat_req_done, (2 * HZ));
 	if (!rc) {
 		BNX2FC_HBA_DBG(lport, "FW stat req timed out\n");
-		goto unlock_stats_mutex;
+		return bnx2fc_stats;
 	}
 	BNX2FC_STATS(hba, rx_stat2, fc_crc_cnt);
 	bnx2fc_stats->invalid_crc_count += hba->bfw_stats.fc_crc_cnt;
@@ -702,9 +700,6 @@ static struct fc_host_statistics *bnx2fc_get_host_stats(struct Scsi_Host *shost)
 
 	memcpy(&hba->prev_stats, hba->stats_buffer,
 	       sizeof(struct fcoe_statistics_params));
-
-unlock_stats_mutex:
-	mutex_unlock(&hba->hba_stats_mutex);
 	return bnx2fc_stats;
 }
 
@@ -1353,7 +1348,6 @@ static struct bnx2fc_hba *bnx2fc_hba_create(struct cnic_dev *cnic)
 	}
 	spin_lock_init(&hba->hba_lock);
 	mutex_init(&hba->hba_mutex);
-	mutex_init(&hba->hba_stats_mutex);
 
 	hba->cnic = cnic;
 
@@ -1416,10 +1410,9 @@ bind_err:
 	return NULL;
 }
 
-static struct bnx2fc_interface *
-bnx2fc_interface_create(struct bnx2fc_hba *hba,
-			struct net_device *netdev,
-			enum fip_state fip_mode)
+struct bnx2fc_interface *bnx2fc_interface_create(struct bnx2fc_hba *hba,
+				      struct net_device *netdev,
+				      enum fip_state fip_mode)
 {
 	struct fcoe_ctlr_device *ctlr_dev;
 	struct bnx2fc_interface *interface;
@@ -2267,7 +2260,7 @@ enum bnx2fc_create_link_state {
  * Returns: 0 for success
  */
 static int _bnx2fc_create(struct net_device *netdev,
-			  enum fip_mode fip_mode,
+			  enum fip_state fip_mode,
 			  enum bnx2fc_create_link_state link_state)
 {
 	struct fcoe_ctlr_device *cdev;
@@ -2419,7 +2412,7 @@ mod_err:
  *
  * Returns: 0 for success
  */
-static int bnx2fc_create(struct net_device *netdev, enum fip_mode fip_mode)
+static int bnx2fc_create(struct net_device *netdev, enum fip_state fip_mode)
 {
 	return _bnx2fc_create(netdev, fip_mode, BNX2FC_CREATE_LINK_UP);
 }
@@ -2722,7 +2715,7 @@ static int __init bnx2fc_mod_init(void)
 	}
 	wake_up_process(l2_thread);
 	spin_lock_bh(&bg->fcoe_rx_list.lock);
-	bg->kthread = l2_thread;
+	bg->thread = l2_thread;
 	spin_unlock_bh(&bg->fcoe_rx_list.lock);
 
 	for_each_possible_cpu(cpu) {
@@ -2772,7 +2765,8 @@ static void __exit bnx2fc_mod_exit(void)
 	 * held.
 	 */
 	mutex_lock(&bnx2fc_dev_lock);
-	list_splice_init(&adapter_list, &to_be_deleted);
+	list_splice(&adapter_list, &to_be_deleted);
+	INIT_LIST_HEAD(&adapter_list);
 	adapter_count = 0;
 	mutex_unlock(&bnx2fc_dev_lock);
 
@@ -2794,8 +2788,8 @@ static void __exit bnx2fc_mod_exit(void)
 	/* Destroy global thread */
 	bg = &bnx2fc_global;
 	spin_lock_bh(&bg->fcoe_rx_list.lock);
-	l2_thread = bg->kthread;
-	bg->kthread = NULL;
+	l2_thread = bg->thread;
+	bg->thread = NULL;
 	while ((skb = __skb_dequeue(&bg->fcoe_rx_list)) != NULL)
 		kfree_skb(skb);
 

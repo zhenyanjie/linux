@@ -6,18 +6,10 @@
  */
 
 #include <sys/types.h>
-
-/*
- * glibc 2.26 and later have SIGSYS in siginfo_t. Before that,
- * we need to use the kernel's siginfo.h file and trick glibc
- * into accepting it.
- */
-#if !__GLIBC_PREREQ(2, 26)
-# include <asm/siginfo.h>
-# define __have_siginfo_t 1
-# define __have_sigval_t 1
-# define __have_sigevent_t 1
-#endif
+#include <asm/siginfo.h>
+#define __have_siginfo_t 1
+#define __have_sigval_t 1
+#define __have_sigevent_t 1
 
 #include <errno.h>
 #include <linux/filter.h>
@@ -684,7 +676,7 @@ TEST_F_SIGNAL(TRAP, ign, SIGSYS)
 	syscall(__NR_getpid);
 }
 
-static siginfo_t TRAP_info;
+static struct siginfo TRAP_info;
 static volatile int TRAP_nr;
 static void TRAP_action(int nr, siginfo_t *info, void *void_context)
 {
@@ -1029,8 +1021,8 @@ void tracer_stop(int sig)
 typedef void tracer_func_t(struct __test_metadata *_metadata,
 			   pid_t tracee, int status, void *args);
 
-void start_tracer(struct __test_metadata *_metadata, int fd, pid_t tracee,
-	    tracer_func_t tracer_func, void *args, bool ptrace_syscall)
+void tracer(struct __test_metadata *_metadata, int fd, pid_t tracee,
+	    tracer_func_t tracer_func, void *args)
 {
 	int ret = -1;
 	struct sigaction action = {
@@ -1050,16 +1042,12 @@ void start_tracer(struct __test_metadata *_metadata, int fd, pid_t tracee,
 	/* Wait for attach stop */
 	wait(NULL);
 
-	ret = ptrace(PTRACE_SETOPTIONS, tracee, NULL, ptrace_syscall ?
-						      PTRACE_O_TRACESYSGOOD :
-						      PTRACE_O_TRACESECCOMP);
+	ret = ptrace(PTRACE_SETOPTIONS, tracee, NULL, PTRACE_O_TRACESECCOMP);
 	ASSERT_EQ(0, ret) {
 		TH_LOG("Failed to set PTRACE_O_TRACESECCOMP");
 		kill(tracee, SIGKILL);
 	}
-	ret = ptrace(ptrace_syscall ? PTRACE_SYSCALL : PTRACE_CONT,
-		     tracee, NULL, 0);
-	ASSERT_EQ(0, ret);
+	ptrace(PTRACE_CONT, tracee, NULL, 0);
 
 	/* Unblock the tracee */
 	ASSERT_EQ(1, write(fd, "A", 1));
@@ -1075,13 +1063,12 @@ void start_tracer(struct __test_metadata *_metadata, int fd, pid_t tracee,
 			/* Child is dead. Time to go. */
 			return;
 
-		/* Check if this is a seccomp event. */
-		ASSERT_EQ(!ptrace_syscall, IS_SECCOMP_EVENT(status));
+		/* Make sure this is a seccomp event. */
+		ASSERT_EQ(true, IS_SECCOMP_EVENT(status));
 
 		tracer_func(_metadata, tracee, status, args);
 
-		ret = ptrace(ptrace_syscall ? PTRACE_SYSCALL : PTRACE_CONT,
-			     tracee, NULL, 0);
+		ret = ptrace(PTRACE_CONT, tracee, NULL, NULL);
 		ASSERT_EQ(0, ret);
 	}
 	/* Directly report the status of our test harness results. */
@@ -1092,7 +1079,7 @@ void start_tracer(struct __test_metadata *_metadata, int fd, pid_t tracee,
 void cont_handler(int num)
 { }
 pid_t setup_trace_fixture(struct __test_metadata *_metadata,
-			  tracer_func_t func, void *args, bool ptrace_syscall)
+			  tracer_func_t func, void *args)
 {
 	char sync;
 	int pipefd[2];
@@ -1108,8 +1095,7 @@ pid_t setup_trace_fixture(struct __test_metadata *_metadata,
 	signal(SIGALRM, cont_handler);
 	if (tracer_pid == 0) {
 		close(pipefd[0]);
-		start_tracer(_metadata, pipefd[1], tracee, func, args,
-			     ptrace_syscall);
+		tracer(_metadata, pipefd[1], tracee, func, args);
 		syscall(__NR_exit, 0);
 	}
 	close(pipefd[1]);
@@ -1191,7 +1177,7 @@ FIXTURE_SETUP(TRACE_poke)
 
 	/* Launch tracer. */
 	self->tracer = setup_trace_fixture(_metadata, tracer_poke,
-					   &self->tracer_args, false);
+					   &self->tracer_args);
 }
 
 FIXTURE_TEARDOWN(TRACE_poke)
@@ -1318,7 +1304,7 @@ void change_syscall(struct __test_metadata *_metadata,
 	iov.iov_len = sizeof(regs);
 	ret = ptrace(PTRACE_GETREGSET, tracee, NT_PRSTATUS, &iov);
 #endif
-	EXPECT_EQ(0, ret) {}
+	EXPECT_EQ(0, ret);
 
 #if defined(__x86_64__) || defined(__i386__) || defined(__powerpc__) || \
     defined(__s390__) || defined(__hppa__)
@@ -1413,29 +1399,6 @@ void tracer_syscall(struct __test_metadata *_metadata, pid_t tracee,
 
 }
 
-void tracer_ptrace(struct __test_metadata *_metadata, pid_t tracee,
-		   int status, void *args)
-{
-	int ret, nr;
-	unsigned long msg;
-	static bool entry;
-
-	/* Make sure we got an empty message. */
-	ret = ptrace(PTRACE_GETEVENTMSG, tracee, NULL, &msg);
-	EXPECT_EQ(0, ret);
-	EXPECT_EQ(0, msg);
-
-	/* The only way to tell PTRACE_SYSCALL entry/exit is by counting. */
-	entry = !entry;
-	if (!entry)
-		return;
-
-	nr = get_syscall(_metadata, tracee);
-
-	if (nr == __NR_getpid)
-		change_syscall(_metadata, tracee, __NR_getppid);
-}
-
 FIXTURE_DATA(TRACE_syscall) {
 	struct sock_fprog prog;
 	pid_t tracer, mytid, mypid, parent;
@@ -1477,8 +1440,7 @@ FIXTURE_SETUP(TRACE_syscall)
 	ASSERT_NE(self->parent, self->mypid);
 
 	/* Launch tracer. */
-	self->tracer = setup_trace_fixture(_metadata, tracer_syscall, NULL,
-					   false);
+	self->tracer = setup_trace_fixture(_metadata, tracer_syscall, NULL);
 }
 
 FIXTURE_TEARDOWN(TRACE_syscall)
@@ -1538,130 +1500,6 @@ TEST_F(TRACE_syscall, syscall_dropped)
 	EXPECT_NE(self->mytid, syscall(__NR_gettid));
 }
 
-TEST_F(TRACE_syscall, skip_after_RET_TRACE)
-{
-	struct sock_filter filter[] = {
-		BPF_STMT(BPF_LD|BPF_W|BPF_ABS,
-			offsetof(struct seccomp_data, nr)),
-		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_getppid, 0, 1),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ERRNO | EPERM),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
-	};
-	struct sock_fprog prog = {
-		.len = (unsigned short)ARRAY_SIZE(filter),
-		.filter = filter,
-	};
-	long ret;
-
-	ret = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Install fixture filter. */
-	ret = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &self->prog, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Install "errno on getppid" filter. */
-	ret = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Tracer will redirect getpid to getppid, and we should see EPERM. */
-	EXPECT_EQ(-1, syscall(__NR_getpid));
-	EXPECT_EQ(EPERM, errno);
-}
-
-TEST_F_SIGNAL(TRACE_syscall, kill_after_RET_TRACE, SIGSYS)
-{
-	struct sock_filter filter[] = {
-		BPF_STMT(BPF_LD|BPF_W|BPF_ABS,
-			offsetof(struct seccomp_data, nr)),
-		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_getppid, 0, 1),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_KILL),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
-	};
-	struct sock_fprog prog = {
-		.len = (unsigned short)ARRAY_SIZE(filter),
-		.filter = filter,
-	};
-	long ret;
-
-	ret = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Install fixture filter. */
-	ret = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &self->prog, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Install "death on getppid" filter. */
-	ret = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Tracer will redirect getpid to getppid, and we should die. */
-	EXPECT_NE(self->mypid, syscall(__NR_getpid));
-}
-
-TEST_F(TRACE_syscall, skip_after_ptrace)
-{
-	struct sock_filter filter[] = {
-		BPF_STMT(BPF_LD|BPF_W|BPF_ABS,
-			offsetof(struct seccomp_data, nr)),
-		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_getppid, 0, 1),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ERRNO | EPERM),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
-	};
-	struct sock_fprog prog = {
-		.len = (unsigned short)ARRAY_SIZE(filter),
-		.filter = filter,
-	};
-	long ret;
-
-	/* Swap SECCOMP_RET_TRACE tracer for PTRACE_SYSCALL tracer. */
-	teardown_trace_fixture(_metadata, self->tracer);
-	self->tracer = setup_trace_fixture(_metadata, tracer_ptrace, NULL,
-					   true);
-
-	ret = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Install "errno on getppid" filter. */
-	ret = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Tracer will redirect getpid to getppid, and we should see EPERM. */
-	EXPECT_EQ(-1, syscall(__NR_getpid));
-	EXPECT_EQ(EPERM, errno);
-}
-
-TEST_F_SIGNAL(TRACE_syscall, kill_after_ptrace, SIGSYS)
-{
-	struct sock_filter filter[] = {
-		BPF_STMT(BPF_LD|BPF_W|BPF_ABS,
-			offsetof(struct seccomp_data, nr)),
-		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_getppid, 0, 1),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_KILL),
-		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
-	};
-	struct sock_fprog prog = {
-		.len = (unsigned short)ARRAY_SIZE(filter),
-		.filter = filter,
-	};
-	long ret;
-
-	/* Swap SECCOMP_RET_TRACE tracer for PTRACE_SYSCALL tracer. */
-	teardown_trace_fixture(_metadata, self->tracer);
-	self->tracer = setup_trace_fixture(_metadata, tracer_ptrace, NULL,
-					   true);
-
-	ret = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Install "death on getppid" filter. */
-	ret = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
-	ASSERT_EQ(0, ret);
-
-	/* Tracer will redirect getpid to getppid, and we should die. */
-	EXPECT_NE(self->mypid, syscall(__NR_getpid));
-}
-
 #ifndef __NR_seccomp
 # if defined(__i386__)
 #  define __NR_seccomp 354
@@ -1692,11 +1530,7 @@ TEST_F_SIGNAL(TRACE_syscall, kill_after_ptrace, SIGSYS)
 #endif
 
 #ifndef SECCOMP_FILTER_FLAG_TSYNC
-#define SECCOMP_FILTER_FLAG_TSYNC (1UL << 0)
-#endif
-
-#ifndef SECCOMP_FILTER_FLAG_SPEC_ALLOW
-#define SECCOMP_FILTER_FLAG_SPEC_ALLOW (1UL << 2)
+#define SECCOMP_FILTER_FLAG_TSYNC 1
 #endif
 
 #ifndef seccomp
@@ -1792,78 +1626,6 @@ TEST(seccomp_syscall_mode_lock)
 	ret = seccomp(SECCOMP_SET_MODE_STRICT, 0, NULL);
 	EXPECT_EQ(EINVAL, errno) {
 		TH_LOG("Switched to mode strict!");
-	}
-}
-
-/*
- * Test detection of known and unknown filter flags. Userspace needs to be able
- * to check if a filter flag is supported by the current kernel and a good way
- * of doing that is by attempting to enter filter mode, with the flag bit in
- * question set, and a NULL pointer for the _args_ parameter. EFAULT indicates
- * that the flag is valid and EINVAL indicates that the flag is invalid.
- */
-TEST(detect_seccomp_filter_flags)
-{
-	unsigned int flags[] = { SECCOMP_FILTER_FLAG_TSYNC,
-				 SECCOMP_FILTER_FLAG_SPEC_ALLOW };
-	unsigned int flag, all_flags;
-	int i;
-	long ret;
-
-	/* Test detection of known-good filter flags */
-	for (i = 0, all_flags = 0; i < ARRAY_SIZE(flags); i++) {
-		int bits = 0;
-
-		flag = flags[i];
-		/* Make sure the flag is a single bit! */
-		while (flag) {
-			if (flag & 0x1)
-				bits ++;
-			flag >>= 1;
-		}
-		ASSERT_EQ(1, bits);
-		flag = flags[i];
-
-		ret = seccomp(SECCOMP_SET_MODE_FILTER, flag, NULL);
-		ASSERT_NE(ENOSYS, errno) {
-			TH_LOG("Kernel does not support seccomp syscall!");
-		}
-		EXPECT_EQ(-1, ret);
-		EXPECT_EQ(EFAULT, errno) {
-			TH_LOG("Failed to detect that a known-good filter flag (0x%X) is supported!",
-			       flag);
-		}
-
-		all_flags |= flag;
-	}
-
-	/* Test detection of all known-good filter flags */
-	ret = seccomp(SECCOMP_SET_MODE_FILTER, all_flags, NULL);
-	EXPECT_EQ(-1, ret);
-	EXPECT_EQ(EFAULT, errno) {
-		TH_LOG("Failed to detect that all known-good filter flags (0x%X) are supported!",
-		       all_flags);
-	}
-
-	/* Test detection of an unknown filter flag */
-	flag = -1;
-	ret = seccomp(SECCOMP_SET_MODE_FILTER, flag, NULL);
-	EXPECT_EQ(-1, ret);
-	EXPECT_EQ(EINVAL, errno) {
-		TH_LOG("Failed to detect that an unknown filter flag (0x%X) is unsupported!",
-		       flag);
-	}
-
-	/*
-	 * Test detection of an unknown filter flag that may simply need to be
-	 * added to this test
-	 */
-	flag = flags[ARRAY_SIZE(flags) - 1] << 1;
-	ret = seccomp(SECCOMP_SET_MODE_FILTER, flag, NULL);
-	EXPECT_EQ(-1, ret);
-	EXPECT_EQ(EINVAL, errno) {
-		TH_LOG("Failed to detect that an unknown filter flag (0x%X) is unsupported! Does a new flag need to be added to this test?",
-		       flag);
 	}
 }
 

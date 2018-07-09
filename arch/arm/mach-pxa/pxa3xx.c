@@ -19,7 +19,6 @@
 #include <linux/pm.h>
 #include <linux/platform_device.h>
 #include <linux/irq.h>
-#include <linux/irqchip.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/syscore_ops.h>
@@ -357,16 +356,11 @@ void __init pxa3xx_init_irq(void)
 }
 
 #ifdef CONFIG_OF
-static int __init __init
-pxa3xx_dt_init_irq(struct device_node *node, struct device_node *parent)
+void __init pxa3xx_dt_init_irq(void)
 {
 	__pxa3xx_init_irq();
 	pxa_dt_irq_init(pxa3xx_set_wake);
-	set_handle_irq(ichp_handle_irq);
-
-	return 0;
 }
-IRQCHIP_DECLARE(pxa3xx_intc, "marvell,pxa-intc", pxa3xx_dt_init_irq);
 #endif	/* CONFIG_OF */
 
 static struct map_desc pxa3xx_io_desc[] __initdata = {
@@ -443,6 +437,9 @@ static int __init pxa3xx_init(void)
 		 * bit remains set.
 		 */
 		NDCR = (NDCR & ~NDCR_ND_ARB_EN) | NDCR_ND_ARB_CNTL;
+
+		if ((ret = pxa_init_dma(IRQ_DMA, 32)))
+			return ret;
 
 		pxa3xx_init_pm();
 

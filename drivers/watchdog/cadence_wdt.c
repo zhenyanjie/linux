@@ -269,7 +269,7 @@ static struct watchdog_info cdns_wdt_info = {
 };
 
 /* Watchdog Core Ops */
-static const struct watchdog_ops cdns_wdt_ops = {
+static struct watchdog_ops cdns_wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = cdns_wdt_start,
 	.stop = cdns_wdt_stop,
@@ -424,10 +424,8 @@ static int __maybe_unused cdns_wdt_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct cdns_wdt *wdt = platform_get_drvdata(pdev);
 
-	if (watchdog_active(&wdt->cdns_wdt_device)) {
-		cdns_wdt_stop(&wdt->cdns_wdt_device);
-		clk_disable_unprepare(wdt->clk);
-	}
+	cdns_wdt_stop(&wdt->cdns_wdt_device);
+	clk_disable_unprepare(wdt->clk);
 
 	return 0;
 }
@@ -444,14 +442,12 @@ static int __maybe_unused cdns_wdt_resume(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct cdns_wdt *wdt = platform_get_drvdata(pdev);
 
-	if (watchdog_active(&wdt->cdns_wdt_device)) {
-		ret = clk_prepare_enable(wdt->clk);
-		if (ret) {
-			dev_err(dev, "unable to enable clock\n");
-			return ret;
-		}
-		cdns_wdt_start(&wdt->cdns_wdt_device);
+	ret = clk_prepare_enable(wdt->clk);
+	if (ret) {
+		dev_err(dev, "unable to enable clock\n");
+		return ret;
 	}
+	cdns_wdt_start(&wdt->cdns_wdt_device);
 
 	return 0;
 }

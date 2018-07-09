@@ -41,7 +41,7 @@ int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func)
 	if (!ima_appraise)
 		return 0;
 
-	return ima_match_policy(inode, func, mask, IMA_APPRAISE, NULL);
+	return ima_match_policy(inode, func, mask, IMA_APPRAISE);
 }
 
 static int ima_fix_xattr(struct dentry *dentry,
@@ -165,13 +165,13 @@ enum hash_algo ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value,
 int ima_read_xattr(struct dentry *dentry,
 		   struct evm_ima_xattr_data **xattr_value)
 {
-	ssize_t ret;
+	struct inode *inode = d_backing_inode(dentry);
 
-	ret = vfs_getxattr_alloc(dentry, XATTR_NAME_IMA, (char **)xattr_value,
-				 0, GFP_NOFS);
-	if (ret == -EOPNOTSUPP)
-		ret = 0;
-	return ret;
+	if (!inode->i_op->getxattr)
+		return 0;
+
+	return vfs_getxattr_alloc(dentry, XATTR_NAME_IMA, (char **)xattr_value,
+				  0, GFP_NOFS);
 }
 
 /*
@@ -195,7 +195,7 @@ int ima_appraise_measurement(enum ima_hooks func,
 	enum integrity_status status = INTEGRITY_UNKNOWN;
 	int rc = xattr_len, hash_start = 0;
 
-	if (!(inode->i_opflags & IOP_XATTR))
+	if (!inode->i_op->getxattr)
 		return INTEGRITY_UNKNOWN;
 
 	if (rc <= 0) {
@@ -204,12 +204,10 @@ int ima_appraise_measurement(enum ima_hooks func,
 
 		cause = "missing-hash";
 		status = INTEGRITY_NOLABEL;
-		if (opened & FILE_CREATED)
+		if (opened & FILE_CREATED) {
 			iint->flags |= IMA_NEW_FILE;
-		if ((iint->flags & IMA_NEW_FILE) &&
-		    (!(iint->flags & IMA_DIGSIG_REQUIRED) ||
-		     (inode->i_size == 0)))
 			status = INTEGRITY_PASS;
+		}
 		goto out;
 	}
 
@@ -304,9 +302,6 @@ void ima_update_xattr(struct integrity_iint_cache *iint, struct file *file)
 	if (iint->flags & IMA_DIGSIG)
 		return;
 
-	if (iint->ima_file_status != INTEGRITY_PASS)
-		return;
-
 	rc = ima_collect_measurement(iint, file, NULL, 0, ima_hash_algo);
 	if (rc < 0)
 		return;
@@ -327,10 +322,10 @@ void ima_inode_post_setattr(struct dentry *dentry)
 {
 	struct inode *inode = d_backing_inode(dentry);
 	struct integrity_iint_cache *iint;
-	int must_appraise;
+	int must_appraise, rc;
 
 	if (!(ima_policy_flag & IMA_APPRAISE) || !S_ISREG(inode->i_mode)
-	    || !(inode->i_opflags & IOP_XATTR))
+	    || !inode->i_op->removexattr)
 		return;
 
 	must_appraise = ima_must_appraise(inode, MAY_ACCESS, POST_SETATTR);
@@ -343,7 +338,8 @@ void ima_inode_post_setattr(struct dentry *dentry)
 			iint->flags |= IMA_APPRAISE;
 	}
 	if (!must_appraise)
-		__vfs_removexattr(dentry, XATTR_NAME_IMA);
+		rc = inode->i_op->removexattr(dentry, XATTR_NAME_IMA);
+	return;
 }
 
 /*
@@ -374,7 +370,6 @@ static void ima_reset_appraise_flags(struct inode *inode, int digsig)
 		return;
 
 	iint->flags &= ~IMA_DONE_MASK;
-	iint->measured_pcrs = 0;
 	if (digsig)
 		iint->flags |= IMA_DIGSIG;
 	return;
@@ -389,10 +384,14 @@ int ima_inode_setxattr(struct dentry *dentry, const char *xattr_name,
 	result = ima_protect_xattr(dentry, xattr_name, xattr_value,
 				   xattr_value_len);
 	if (result == 1) {
+		bool digsig;
+
 		if (!xattr_value_len || (xvalue->type >= IMA_XATTR_LAST))
 			return -EINVAL;
-		ima_reset_appraise_flags(d_backing_inode(dentry),
-			 (xvalue->type == EVM_IMA_XATTR_DIGSIG) ? 1 : 0);
+		digsig = (xvalue->type == EVM_IMA_XATTR_DIGSIG);
+		if (!digsig && (ima_appraise & IMA_APPRAISE_ENFORCE))
+			return -EPERM;
+		ima_reset_appraise_flags(d_backing_inode(dentry), digsig);
 		result = 0;
 	}
 	return result;

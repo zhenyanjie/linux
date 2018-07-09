@@ -1480,7 +1480,7 @@ dump_knl_turbo_ratio_limits(void)
 	unsigned int cores[buckets_no];
 	unsigned int ratio[buckets_no];
 
-	get_msr(base_cpu, MSR_TURBO_RATIO_LIMIT, &msr);
+	get_msr(base_cpu, MSR_NHM_TURBO_RATIO_LIMIT, &msr);
 
 	fprintf(outf, "cpu%d: MSR_TURBO_RATIO_LIMIT: 0x%08llx\n",
 		base_cpu, msr);
@@ -2003,10 +2003,8 @@ int snapshot_gfx_mhz(void)
 
 	if (fp == NULL)
 		fp = fopen_or_die("/sys/class/graphics/fb0/device/drm/card0/gt_cur_freq_mhz", "r");
-	else {
+	else
 		rewind(fp);
-		fflush(fp);
-	}
 
 	retval = fscanf(fp, "%d", &gfx_cur_mhz);
 	if (retval != 1)

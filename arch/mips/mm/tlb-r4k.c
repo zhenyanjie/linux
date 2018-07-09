@@ -14,7 +14,7 @@
 #include <linux/smp.h>
 #include <linux/mm.h>
 #include <linux/hugetlb.h>
-#include <linux/export.h>
+#include <linux/module.h>
 
 #include <asm/cpu.h>
 #include <asm/cpu-type.h>
@@ -65,13 +65,10 @@ void local_flush_tlb_all(void)
 	write_c0_entrylo0(0);
 	write_c0_entrylo1(0);
 
-	entry = num_wired_entries();
+	entry = read_c0_wired();
 
-	/*
-	 * Blast 'em all away.
-	 * If there are any wired entries, fall back to iterating
-	 */
-	if (cpu_has_tlbinv && !entry) {
+	/* Blast 'em all away. */
+	if (cpu_has_tlbinv) {
 		if (current_cpu_data.tlbsizevtlb) {
 			write_c0_index(0);
 			mtc0_tlbw_hazard();
@@ -385,7 +382,7 @@ void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 	old_ctx = read_c0_entryhi();
 	htw_stop();
 	old_pagemask = read_c0_pagemask();
-	wired = num_wired_entries();
+	wired = read_c0_wired();
 	write_c0_wired(wired + 1);
 	write_c0_index(wired);
 	tlbw_use_hazard();	/* What is the hazard here? */
@@ -449,7 +446,7 @@ __init int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 	htw_stop();
 	old_ctx = read_c0_entryhi();
 	old_pagemask = read_c0_pagemask();
-	wired = num_wired_entries();
+	wired = read_c0_wired();
 	if (--temp_tlb_entry < wired) {
 		printk(KERN_WARNING
 		       "No TLB space left for add_temporary_entry\n");

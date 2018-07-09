@@ -3,12 +3,9 @@
 
 #include <linux/types.h>
 #include <linux/stacktrace.h>
-#include <linux/stackdepot.h>
 
 struct pglist_data;
 struct page_ext_operations {
-	size_t offset;
-	size_t size;
 	bool (*need)(void);
 	void (*init)(void);
 };
@@ -44,6 +41,13 @@ enum page_ext_flags {
  */
 struct page_ext {
 	unsigned long flags;
+#ifdef CONFIG_PAGE_OWNER
+	unsigned int order;
+	gfp_t gfp_mask;
+	unsigned int nr_entries;
+	int last_migrate_reason;
+	unsigned long trace_entries[8];
+#endif
 };
 
 extern void pgdat_page_ext_init(struct pglist_data *pgdat);

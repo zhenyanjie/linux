@@ -669,7 +669,6 @@ static int radeon_uvd_cs_reg(struct radeon_cs_parser *p,
 				return r;
 			break;
 		case UVD_ENGINE_CNTL:
-		case UVD_NO_OP:
 			break;
 		default:
 			DRM_ERROR("Invalid reg 0x%X!\n",
@@ -754,10 +753,8 @@ static int radeon_uvd_send_msg(struct radeon_device *rdev,
 	ib.ptr[3] = addr >> 32;
 	ib.ptr[4] = PACKET0(UVD_GPCOM_VCPU_CMD, 0);
 	ib.ptr[5] = 0;
-	for (i = 6; i < 16; i += 2) {
-		ib.ptr[i] = PACKET0(UVD_NO_OP, 0);
-		ib.ptr[i+1] = 0;
-	}
+	for (i = 6; i < 16; ++i)
+		ib.ptr[i] = PACKET2(0);
 	ib.length_dw = 16;
 
 	r = radeon_ib_schedule(rdev, &ib, NULL, false);
@@ -995,7 +992,7 @@ int radeon_uvd_calc_upll_dividers(struct radeon_device *rdev,
 		/* calc dclk divider with current vco freq */
 		dclk_div = radeon_uvd_calc_upll_post_div(vco_freq, dclk,
 							 pd_min, pd_even);
-		if (dclk_div > pd_max)
+		if (vclk_div > pd_max)
 			break; /* vco is too big, it has to stop */
 
 		/* calc score with current vco freq */

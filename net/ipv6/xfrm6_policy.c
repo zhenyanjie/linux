@@ -36,7 +36,7 @@ static struct dst_entry *xfrm6_dst_lookup(struct net *net, int tos, int oif,
 	int err;
 
 	memset(&fl6, 0, sizeof(fl6));
-	fl6.flowi6_oif = l3mdev_master_ifindex_by_index(net, oif);
+	fl6.flowi6_oif = oif;
 	fl6.flowi6_flags = FLOWI_FLAG_SKIP_NH_OIF;
 	memcpy(&fl6.daddr, daddr, sizeof(fl6.daddr));
 	if (saddr)
@@ -121,7 +121,7 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 	struct flowi6 *fl6 = &fl->u.ip6;
 	int onlyproto = 0;
 	const struct ipv6hdr *hdr = ipv6_hdr(skb);
-	u32 offset = sizeof(*hdr);
+	u16 offset = sizeof(*hdr);
 	struct ipv6_opt_hdr *exthdr;
 	const unsigned char *nh = skb_network_header(skb);
 	u16 nhoff = IP6CB(skb)->nhoff;
@@ -134,7 +134,7 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 	nexthdr = nh[nhoff];
 
 	if (skb_dst(skb))
-		oif = skb_dst(skb)->dev->ifindex;
+		oif = l3mdev_fib_oif(skb_dst(skb)->dev);
 
 	memset(fl6, 0, sizeof(struct flowi6));
 	fl6->flowi6_mark = skb->mark;
@@ -366,12 +366,12 @@ static void __net_exit xfrm6_net_sysctl_exit(struct net *net)
 		kfree(table);
 }
 #else /* CONFIG_SYSCTL */
-static inline int xfrm6_net_sysctl_init(struct net *net)
+static int inline xfrm6_net_sysctl_init(struct net *net)
 {
 	return 0;
 }
 
-static inline void xfrm6_net_sysctl_exit(struct net *net)
+static void inline xfrm6_net_sysctl_exit(struct net *net)
 {
 }
 #endif

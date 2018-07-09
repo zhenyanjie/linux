@@ -54,26 +54,25 @@ static LIST_HEAD(pcache);
  */
 static u8 *container;
 static size_t container_size;
-static bool ucode_builtin;
 
 static u32 ucode_new_rev;
-static u8 amd_ucode_patch[PATCH_MAX_SIZE];
+u8 amd_ucode_patch[PATCH_MAX_SIZE];
 static u16 this_equiv_id;
 
 static struct cpio_data ucode_cpio;
 
+/*
+ * Microcode patch container file is prepended to the initrd in cpio format.
+ * See Documentation/x86/early-microcode.txt
+ */
+static __initdata char ucode_path[] = "kernel/x86/microcode/AuthenticAMD.bin";
+
 static struct cpio_data __init find_ucode_in_initrd(void)
 {
-#ifdef CONFIG_BLK_DEV_INITRD
+	long offset = 0;
 	char *path;
 	void *start;
 	size_t size;
-
-	/*
-	 * Microcode patch container file is prepended to the initrd in cpio
-	 * format. See Documentation/x86/early-microcode.txt
-	 */
-	static __initdata char ucode_path[] = "kernel/x86/microcode/AuthenticAMD.bin";
 
 #ifdef CONFIG_X86_32
 	struct boot_params *p;
@@ -90,12 +89,9 @@ static struct cpio_data __init find_ucode_in_initrd(void)
 	path    = ucode_path;
 	start   = (void *)(boot_params.hdr.ramdisk_image + PAGE_OFFSET);
 	size    = boot_params.hdr.ramdisk_size;
-#endif /* !CONFIG_X86_32 */
-
-	return find_cpio_data(path, start, size, NULL);
-#else
-	return (struct cpio_data){ NULL, 0, "" };
 #endif
+
+	return find_cpio_data(path, start, size, &offset);
 }
 
 static size_t compute_container_size(u8 *data, u32 total_size)
@@ -134,9 +130,6 @@ static size_t compute_container_size(u8 *data, u32 total_size)
 
 	return size;
 }
-
-static enum ucode_state
-load_microcode_amd(bool save, u8 family, const u8 *data, size_t size);
 
 /*
  * Early load occurs before we can vmalloc(). So we look for the microcode
@@ -285,26 +278,22 @@ static bool __init load_builtin_amd_microcode(struct cpio_data *cp,
 void __init load_ucode_amd_bsp(unsigned int family)
 {
 	struct cpio_data cp;
-	bool *builtin;
 	void **data;
 	size_t *size;
 
 #ifdef CONFIG_X86_32
 	data =  (void **)__pa_nodebug(&ucode_cpio.data);
 	size = (size_t *)__pa_nodebug(&ucode_cpio.size);
-	builtin = (bool *)__pa_nodebug(&ucode_builtin);
 #else
 	data = &ucode_cpio.data;
 	size = &ucode_cpio.size;
-	builtin = &ucode_builtin;
 #endif
 
-	*builtin = load_builtin_amd_microcode(&cp, family);
-	if (!*builtin)
-		cp = find_ucode_in_initrd();
-
-	if (!(cp.data && cp.size))
-		return;
+	cp = find_ucode_in_initrd();
+	if (!cp.data) {
+		if (!load_builtin_amd_microcode(&cp, family))
+			return;
+	}
 
 	*data = cp.data;
 	*size = cp.size;
@@ -363,7 +352,6 @@ void load_ucode_amd_ap(void)
 	unsigned int cpu = smp_processor_id();
 	struct equiv_cpu_entry *eq;
 	struct microcode_amd *mc;
-	u8 *cont = container;
 	u32 rev, eax;
 	u16 eq_id;
 
@@ -380,12 +368,8 @@ void load_ucode_amd_ap(void)
 	if (check_current_patch_level(&rev, false))
 		return;
 
-	/* Add CONFIG_RANDOMIZE_MEMORY offset. */
-	if (!ucode_builtin)
-		cont += PAGE_OFFSET - __PAGE_OFFSET_BASE;
-
 	eax = cpuid_eax(0x00000001);
-	eq  = (struct equiv_cpu_entry *)(cont + CONTAINER_HDR_SZ);
+	eq  = (struct equiv_cpu_entry *)(container + CONTAINER_HDR_SZ);
 
 	eq_id = find_equiv_id(eq, eax);
 	if (!eq_id)
@@ -432,7 +416,7 @@ int __init save_microcode_in_initrd_amd(void)
 	 * We need the physical address of the container for both bitness since
 	 * boot_params.hdr.ramdisk_image is a physical address.
 	 */
-	cont    = __pa_nodebug(container);
+	cont    = __pa(container);
 	cont_va = container;
 #endif
 
@@ -447,14 +431,10 @@ int __init save_microcode_in_initrd_amd(void)
 	else
 		container = cont_va;
 
-	/* Add CONFIG_RANDOMIZE_MEMORY offset. */
-	if (!ucode_builtin)
-		container += PAGE_OFFSET - __PAGE_OFFSET_BASE;
-
 	eax   = cpuid_eax(0x00000001);
 	eax   = ((eax >> 8) & 0xf) + ((eax >> 20) & 0xff);
 
-	ret = load_microcode_amd(true, eax, container, container_size);
+	ret = load_microcode_amd(smp_processor_id(), eax, container, container_size);
 	if (ret != UCODE_OK)
 		retval = -EINVAL;
 
@@ -595,7 +575,6 @@ static unsigned int verify_patch_size(u8 family, u32 patch_size,
 #define F14H_MPB_MAX_SIZE 1824
 #define F15H_MPB_MAX_SIZE 4096
 #define F16H_MPB_MAX_SIZE 3458
-#define F17H_MPB_MAX_SIZE 3200
 
 	switch (family) {
 	case 0x14:
@@ -606,9 +585,6 @@ static unsigned int verify_patch_size(u8 family, u32 patch_size,
 		break;
 	case 0x16:
 		max_size = F16H_MPB_MAX_SIZE;
-		break;
-	case 0x17:
-		max_size = F17H_MPB_MAX_SIZE;
 		break;
 	default:
 		max_size = F1XH_MPB_MAX_SIZE;
@@ -867,8 +843,7 @@ static enum ucode_state __load_microcode_amd(u8 family, const u8 *data,
 	return UCODE_OK;
 }
 
-static enum ucode_state
-load_microcode_amd(bool save, u8 family, const u8 *data, size_t size)
+enum ucode_state load_microcode_amd(int cpu, u8 family, const u8 *data, size_t size)
 {
 	enum ucode_state ret;
 
@@ -882,8 +857,8 @@ load_microcode_amd(bool save, u8 family, const u8 *data, size_t size)
 
 #ifdef CONFIG_X86_32
 	/* save BSP's matching patch for early load */
-	if (save) {
-		struct ucode_patch *p = find_patch(0);
+	if (cpu_data(cpu).cpu_index == boot_cpu_data.cpu_index) {
+		struct ucode_patch *p = find_patch(cpu);
 		if (p) {
 			memset(amd_ucode_patch, 0, PATCH_MAX_SIZE);
 			memcpy(amd_ucode_patch, p->data, min_t(u32, ksize(p->data),
@@ -915,12 +890,11 @@ static enum ucode_state request_microcode_amd(int cpu, struct device *device,
 {
 	char fw_name[36] = "amd-ucode/microcode_amd.bin";
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
-	bool bsp = c->cpu_index == boot_cpu_data.cpu_index;
 	enum ucode_state ret = UCODE_NFOUND;
 	const struct firmware *fw;
 
 	/* reload ucode container only on the boot cpu */
-	if (!refresh_fw || !bsp)
+	if (!refresh_fw || c->cpu_index != boot_cpu_data.cpu_index)
 		return UCODE_OK;
 
 	if (c->x86 >= 0x15)
@@ -937,7 +911,7 @@ static enum ucode_state request_microcode_amd(int cpu, struct device *device,
 		goto fw_release;
 	}
 
-	ret = load_microcode_amd(bsp, c->x86, fw->data, fw->size);
+	ret = load_microcode_amd(cpu, c->x86, fw->data, fw->size);
 
  fw_release:
 	release_firmware(fw);

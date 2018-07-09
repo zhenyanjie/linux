@@ -258,7 +258,8 @@ void pinconf_show_setting(struct seq_file *s,
 	case PIN_MAP_TYPE_CONFIGS_PIN:
 		desc = pin_desc_get(setting->pctldev,
 				    setting->data.configs.group_or_pin);
-		seq_printf(s, "pin %s (%d)", desc->name,
+		seq_printf(s, "pin %s (%d)",
+			   desc->name ? desc->name : "unnamed",
 			   setting->data.configs.group_or_pin);
 		break;
 	case PIN_MAP_TYPE_CONFIGS_GROUP:
@@ -310,7 +311,8 @@ static int pinconf_pins_show(struct seq_file *s, void *what)
 		if (desc == NULL)
 			continue;
 
-		seq_printf(s, "pin %d (%s): ", pin, desc->name);
+		seq_printf(s, "pin %d (%s):", pin,
+			   desc->name ? desc->name : "unnamed");
 
 		pinconf_dump_pin(pctldev, s, pin);
 
@@ -347,7 +349,7 @@ static int pinconf_groups_show(struct seq_file *s, void *what)
 	while (selector < ngroups) {
 		const char *gname = pctlops->get_group_name(pctldev, selector);
 
-		seq_printf(s, "%u (%s): ", selector, gname);
+		seq_printf(s, "%u (%s):", selector, gname);
 		pinconf_dump_group(pctldev, s, selector, gname);
 		seq_printf(s, "\n");
 

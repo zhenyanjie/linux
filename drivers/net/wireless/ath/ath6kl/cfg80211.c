@@ -847,6 +847,8 @@ static int ath6kl_cfg80211_disconnect(struct wiphy *wiphy,
 
 	up(&ar->sem);
 
+	vif->sme_state = SME_DISCONNECTED;
+
 	return 0;
 }
 
@@ -857,11 +859,7 @@ void ath6kl_cfg80211_disconnect_event(struct ath6kl_vif *vif, u8 reason,
 	struct ath6kl *ar = vif->ar;
 
 	if (vif->scan_req) {
-		struct cfg80211_scan_info info = {
-			.aborted = true,
-		};
-
-		cfg80211_scan_done(vif->scan_req, &info);
+		cfg80211_scan_done(vif->scan_req, true);
 		vif->scan_req = NULL;
 	}
 
@@ -1071,9 +1069,6 @@ static int ath6kl_cfg80211_scan(struct wiphy *wiphy,
 void ath6kl_cfg80211_scan_complete_event(struct ath6kl_vif *vif, bool aborted)
 {
 	struct ath6kl *ar = vif->ar;
-	struct cfg80211_scan_info info = {
-		.aborted = aborted,
-	};
 	int i;
 
 	ath6kl_dbg(ATH6KL_DBG_WLAN_CFG, "%s: status%s\n", __func__,
@@ -1094,7 +1089,7 @@ void ath6kl_cfg80211_scan_complete_event(struct ath6kl_vif *vif, bool aborted)
 	}
 
 out:
-	cfg80211_scan_done(vif->scan_req, &info);
+	cfg80211_scan_done(vif->scan_req, aborted);
 	vif->scan_req = NULL;
 }
 
@@ -1109,8 +1104,7 @@ void ath6kl_cfg80211_ch_switch_notify(struct ath6kl_vif *vif, int freq,
 
 	cfg80211_chandef_create(&chandef,
 				ieee80211_get_channel(vif->ar->wiphy, freq),
-				(mode == WMI_11G_HT20 &&
-				 ath6kl_band_2ghz.ht_cap.ht_supported) ?
+				(mode == WMI_11G_HT20) ?
 					NL80211_CHAN_HT20 : NL80211_CHAN_NO_HT);
 
 	mutex_lock(&vif->wdev.mtx);
@@ -1449,14 +1443,14 @@ static int ath6kl_cfg80211_get_txpower(struct wiphy *wiphy,
 		return -EIO;
 
 	if (test_bit(CONNECTED, &vif->flags)) {
-		ar->tx_pwr = 255;
+		ar->tx_pwr = 0;
 
 		if (ath6kl_wmi_get_tx_pwr_cmd(ar->wmi, vif->fw_vif_idx) != 0) {
 			ath6kl_err("ath6kl_wmi_get_tx_pwr_cmd failed\n");
 			return -EIO;
 		}
 
-		wait_event_interruptible_timeout(ar->event_wq, ar->tx_pwr != 255,
+		wait_event_interruptible_timeout(ar->event_wq, ar->tx_pwr != 0,
 						 5 * HZ);
 
 		if (signal_pending(current)) {
@@ -2977,7 +2971,6 @@ static int ath6kl_stop_ap(struct wiphy *wiphy, struct net_device *dev)
 
 	ath6kl_wmi_disconnect_cmd(ar->wmi, vif->fw_vif_idx);
 	clear_bit(CONNECTED, &vif->flags);
-	netif_carrier_off(vif->ndev);
 
 	/* Restore ht setting in firmware */
 	return ath6kl_restore_htcap(vif);
@@ -3621,11 +3614,7 @@ void ath6kl_cfg80211_vif_stop(struct ath6kl_vif *vif, bool wmi_ready)
 	}
 
 	if (vif->scan_req) {
-		struct cfg80211_scan_info info = {
-			.aborted = true,
-		};
-
-		cfg80211_scan_done(vif->scan_req, &info);
+		cfg80211_scan_done(vif->scan_req, true);
 		vif->scan_req = NULL;
 	}
 
@@ -3881,7 +3870,7 @@ int ath6kl_cfg80211_init(struct ath6kl *ar)
 					  BIT(NL80211_IFTYPE_P2P_CLIENT);
 	}
 
-	if (IS_ENABLED(CONFIG_ATH6KL_REGDOMAIN) &&
+	if (config_enabled(CONFIG_ATH6KL_REGDOMAIN) &&
 	    test_bit(ATH6KL_FW_CAPABILITY_REGDOMAIN, ar->fw_capabilities)) {
 		wiphy->reg_notifier = ath6kl_cfg80211_reg_notify;
 		ar->wiphy->features |= NL80211_FEATURE_CELL_BASE_REG_HINTS;

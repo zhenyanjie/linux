@@ -60,52 +60,51 @@ struct page {
 	};
 
 	/* Second double word */
-	union {
-		pgoff_t index;		/* Our offset within mapping. */
-		void *freelist;		/* sl[aou]b first free object */
-		/* page_deferred_list().prev	-- second tail page */
-	};
+	struct {
+		union {
+			pgoff_t index;		/* Our offset within mapping. */
+			void *freelist;		/* sl[aou]b first free object */
+			/* page_deferred_list().prev	-- second tail page */
+		};
 
-	union {
+		union {
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
 	defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
-		/* Used for cmpxchg_double in slub */
-		unsigned long counters;
+			/* Used for cmpxchg_double in slub */
+			unsigned long counters;
 #else
-		/*
-		 * Keep _refcount separate from slub cmpxchg_double data.
-		 * As the rest of the double word is protected by slab_lock
-		 * but _refcount is not.
-		 */
-		unsigned counters;
-#endif
-		struct {
-
-			union {
-				/*
-				 * Count of ptes mapped in mms, to show when
-				 * page is mapped & limit reverse map searches.
-				 *
-				 * Extra information about page type may be
-				 * stored here for pages that are never mapped,
-				 * in which case the value MUST BE <= -2.
-				 * See page-flags.h for more details.
-				 */
-				atomic_t _mapcount;
-
-				unsigned int active;		/* SLAB */
-				struct {			/* SLUB */
-					unsigned inuse:16;
-					unsigned objects:15;
-					unsigned frozen:1;
-				};
-				int units;			/* SLOB */
-			};
 			/*
-			 * Usage count, *USE WRAPPER FUNCTION* when manual
-			 * accounting. See page_ref.h
+			 * Keep _refcount separate from slub cmpxchg_double
+			 * data.  As the rest of the double word is protected by
+			 * slab_lock but _refcount is not.
 			 */
-			atomic_t _refcount;
+			unsigned counters;
+#endif
+
+			struct {
+
+				union {
+					/*
+					 * Count of ptes mapped in mms, to show
+					 * when page is mapped & limit reverse
+					 * map searches.
+					 */
+					atomic_t _mapcount;
+
+					struct { /* SLUB */
+						unsigned inuse:16;
+						unsigned objects:15;
+						unsigned frozen:1;
+					};
+					int units;	/* SLOB */
+				};
+				/*
+				 * Usage count, *USE WRAPPER FUNCTION*
+				 * when manual accounting. See page_ref.h
+				 */
+				atomic_t _refcount;
+			};
+			unsigned int active;	/* SLAB */
 		};
 	};
 
@@ -118,7 +117,7 @@ struct page {
 	 */
 	union {
 		struct list_head lru;	/* Pageout list, eg. active_list
-					 * protected by zone_lru_lock !
+					 * protected by zone->lru_lock !
 					 * Can be used as a generic list
 					 * by the page owner.
 					 */
@@ -473,7 +472,6 @@ struct mm_struct {
 	 */
 	struct task_struct __rcu *owner;
 #endif
-	struct user_namespace *user_ns;
 
 	/* store ref to file /proc/<pid>/exe symlink points to */
 	struct file __rcu *exe_file;
@@ -508,10 +506,6 @@ struct mm_struct {
 	 */
 	bool tlb_flush_pending;
 #endif
-#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
-	/* See flush_tlb_batched_pending() */
-	bool tlb_flush_batched;
-#endif
 	struct uprobes_state uprobes_state;
 #ifdef CONFIG_X86_INTEL_MPX
 	/* address of the bounds directory */
@@ -520,7 +514,9 @@ struct mm_struct {
 #ifdef CONFIG_HUGETLB_PAGE
 	atomic_long_t hugetlb_usage;
 #endif
+#ifdef CONFIG_MMU
 	struct work_struct async_put_work;
+#endif
 };
 
 static inline void mm_init_cpumask(struct mm_struct *mm)
@@ -598,9 +594,6 @@ struct vm_special_mapping {
 	int (*fault)(const struct vm_special_mapping *sm,
 		     struct vm_area_struct *vma,
 		     struct vm_fault *vmf);
-
-	int (*mremap)(const struct vm_special_mapping *sm,
-		     struct vm_area_struct *new_vma);
 };
 
 enum tlb_flush_reason {

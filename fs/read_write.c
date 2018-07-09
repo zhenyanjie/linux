@@ -114,7 +114,7 @@ generic_file_llseek_size(struct file *file, loff_t offset, int whence,
 		 * In the generic case the entire file is data, so as long as
 		 * offset isn't at the end of the file then the offset is data.
 		 */
-		if ((unsigned long long)offset >= eof)
+		if (offset >= eof)
 			return -ENXIO;
 		break;
 	case SEEK_HOLE:
@@ -122,7 +122,7 @@ generic_file_llseek_size(struct file *file, loff_t offset, int whence,
 		 * There is a virtual hole at the end of the file, so as long as
 		 * offset isn't i_size or larger, return i_size.
 		 */
-		if ((unsigned long long)offset >= eof)
+		if (offset >= eof)
 			return -ENXIO;
 		offset = eof;
 		break;
@@ -730,35 +730,6 @@ static ssize_t do_loop_readv_writev(struct file *filp, struct iov_iter *iter,
 /* A write operation does a read from user space and vice versa */
 #define vrfy_dir(type) ((type) == READ ? VERIFY_WRITE : VERIFY_READ)
 
-/**
- * rw_copy_check_uvector() - Copy an array of &struct iovec from userspace
- *     into the kernel and check that it is valid.
- *
- * @type: One of %CHECK_IOVEC_ONLY, %READ, or %WRITE.
- * @uvector: Pointer to the userspace array.
- * @nr_segs: Number of elements in userspace array.
- * @fast_segs: Number of elements in @fast_pointer.
- * @fast_pointer: Pointer to (usually small on-stack) kernel array.
- * @ret_pointer: (output parameter) Pointer to a variable that will point to
- *     either @fast_pointer, a newly allocated kernel array, or NULL,
- *     depending on which array was used.
- *
- * This function copies an array of &struct iovec of @nr_segs from
- * userspace into the kernel and checks that each element is valid (e.g.
- * it does not point to a kernel address or cause overflow by being too
- * large, etc.).
- *
- * As an optimization, the caller may provide a pointer to a small
- * on-stack array in @fast_pointer, typically %UIO_FASTIOV elements long
- * (the size of this array, or 0 if unused, should be given in @fast_segs).
- *
- * @ret_pointer will always point to the array that was used, so the
- * caller must take care not to call kfree() on it e.g. in case the
- * @fast_pointer array was used and it was allocated on the stack.
- *
- * Return: The total number of bytes covered by the iovec array on success
- *   or a negative error code on error.
- */
 ssize_t rw_copy_check_uvector(int type, const struct iovec __user * uvector,
 			      unsigned long nr_segs, unsigned long fast_segs,
 			      struct iovec *fast_pointer,
@@ -1197,15 +1168,6 @@ COMPAT_SYSCALL_DEFINE5(preadv, compat_ulong_t, fd,
 	return do_compat_preadv64(fd, vec, vlen, pos, 0);
 }
 
-#ifdef __ARCH_WANT_COMPAT_SYS_PREADV64V2
-COMPAT_SYSCALL_DEFINE5(preadv64v2, unsigned long, fd,
-		const struct compat_iovec __user *,vec,
-		unsigned long, vlen, loff_t, pos, int, flags)
-{
-	return do_compat_preadv64(fd, vec, vlen, pos, flags);
-}
-#endif
-
 COMPAT_SYSCALL_DEFINE6(preadv2, compat_ulong_t, fd,
 		const struct compat_iovec __user *,vec,
 		compat_ulong_t, vlen, u32, pos_low, u32, pos_high,
@@ -1232,7 +1194,7 @@ static size_t compat_writev(struct file *file,
 	if (!(file->f_mode & FMODE_CAN_WRITE))
 		goto out;
 
-	ret = compat_do_readv_writev(WRITE, file, vec, vlen, pos, flags);
+	ret = compat_do_readv_writev(WRITE, file, vec, vlen, pos, 0);
 
 out:
 	if (ret > 0)
@@ -1302,15 +1264,6 @@ COMPAT_SYSCALL_DEFINE5(pwritev, compat_ulong_t, fd,
 
 	return do_compat_pwritev64(fd, vec, vlen, pos, 0);
 }
-
-#ifdef __ARCH_WANT_COMPAT_SYS_PWRITEV64V2
-COMPAT_SYSCALL_DEFINE5(pwritev64v2, unsigned long, fd,
-		const struct compat_iovec __user *,vec,
-		unsigned long, vlen, loff_t, pos, int, flags)
-{
-	return do_compat_pwritev64(fd, vec, vlen, pos, flags);
-}
-#endif
 
 COMPAT_SYSCALL_DEFINE6(pwritev2, compat_ulong_t, fd,
 		const struct compat_iovec __user *,vec,
@@ -1516,11 +1469,6 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	ssize_t ret;
 
 	if (flags != 0)
-		return -EINVAL;
-
-	if (S_ISDIR(inode_in->i_mode) || S_ISDIR(inode_out->i_mode))
-		return -EISDIR;
-	if (!S_ISREG(inode_in->i_mode) || !S_ISREG(inode_out->i_mode))
 		return -EINVAL;
 
 	ret = rw_verify_area(READ, file_in, &pos_in, len);

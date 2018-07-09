@@ -28,7 +28,7 @@
 #include <linux/acpi_pmtmr.h>
 #include <linux/efi.h>
 #include <linux/cpumask.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/dmi.h>
 #include <linux/irq.h>
 #include <linux/slab.h>
@@ -161,15 +161,13 @@ static int __init acpi_parse_madt(struct acpi_table_header *table)
 /**
  * acpi_register_lapic - register a local apic and generates a logic cpu number
  * @id: local apic id to register
- * @acpiid: ACPI id to register
  * @enabled: this cpu is enabled or not
  *
  * Returns the logic cpu number which maps to the local apic
  */
-static int acpi_register_lapic(int id, u32 acpiid, u8 enabled)
+static int acpi_register_lapic(int id, u8 enabled)
 {
 	unsigned int ver = 0;
-	int cpu;
 
 	if (id >= MAX_LOCAL_APIC) {
 		printk(KERN_INFO PREFIX "skipped apicid that is too big\n");
@@ -184,11 +182,7 @@ static int acpi_register_lapic(int id, u32 acpiid, u8 enabled)
 	if (boot_cpu_physical_apicid != -1U)
 		ver = boot_cpu_apic_version;
 
-	cpu = generic_processor_info(id, ver);
-	if (cpu >= 0)
-		early_per_cpu(x86_cpu_to_acpiid, cpu) = acpiid;
-
-	return cpu;
+	return generic_processor_info(id, ver);
 }
 
 static int __init
@@ -218,7 +212,7 @@ acpi_parse_x2apic(struct acpi_subtable_header *header, const unsigned long end)
 	if (!apic->apic_id_valid(apic_id) && enabled)
 		printk(KERN_WARNING PREFIX "x2apic entry ignored\n");
 	else
-		acpi_register_lapic(apic_id, processor->uid, enabled);
+		acpi_register_lapic(apic_id, enabled);
 #else
 	printk(KERN_WARNING PREFIX "x2apic entry ignored\n");
 #endif
@@ -238,10 +232,6 @@ acpi_parse_lapic(struct acpi_subtable_header * header, const unsigned long end)
 
 	acpi_table_print_madt_entry(header);
 
-	/* Ignore invalid ID */
-	if (processor->id == 0xff)
-		return 0;
-
 	/*
 	 * We need to register disabled CPU as well to permit
 	 * counting disabled CPUs. This allows us to size
@@ -250,7 +240,6 @@ acpi_parse_lapic(struct acpi_subtable_header * header, const unsigned long end)
 	 * when we use CPU hotplug.
 	 */
 	acpi_register_lapic(processor->id,	/* APIC ID */
-			    processor->processor_id, /* ACPI ID */
 			    processor->lapic_flags & ACPI_MADT_ENABLED);
 
 	return 0;
@@ -269,7 +258,6 @@ acpi_parse_sapic(struct acpi_subtable_header *header, const unsigned long end)
 	acpi_table_print_madt_entry(header);
 
 	acpi_register_lapic((processor->id << 8) | processor->eid,/* APIC ID */
-			    processor->processor_id, /* ACPI ID */
 			    processor->lapic_flags & ACPI_MADT_ENABLED);
 
 	return 0;
@@ -285,8 +273,6 @@ acpi_parse_lapic_addr_ovr(struct acpi_subtable_header * header,
 
 	if (BAD_MADT_ENTRY(lapic_addr_ovr, end))
 		return -EINVAL;
-
-	acpi_table_print_madt_entry(header);
 
 	acpi_lapic_addr = lapic_addr_ovr->address;
 
@@ -335,19 +321,20 @@ acpi_parse_lapic_nmi(struct acpi_subtable_header * header, const unsigned long e
 #ifdef CONFIG_X86_IO_APIC
 #define MP_ISA_BUS		0
 
-static int __init mp_register_ioapic_irq(u8 bus_irq, u8 polarity,
-						u8 trigger, u32 gsi);
-
 static void __init mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger,
 					  u32 gsi)
 {
+	int ioapic;
+	int pin;
+	struct mpc_intsrc mp_irq;
+
 	/*
-	 * Check bus_irq boundary.
+	 * Convert 'gsi' to 'ioapic.pin'.
 	 */
-	if (bus_irq >= NR_IRQS_LEGACY) {
-		pr_warn("Invalid bus_irq %u for legacy override\n", bus_irq);
+	ioapic = mp_find_ioapic(gsi);
+	if (ioapic < 0)
 		return;
-	}
+	pin = mp_find_ioapic_pin(ioapic, gsi);
 
 	/*
 	 * TBD: This check is for faulty timer entries, where the override
@@ -357,8 +344,16 @@ static void __init mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger,
 	if ((bus_irq == 0) && (trigger == 3))
 		trigger = 1;
 
-	if (mp_register_ioapic_irq(bus_irq, polarity, trigger, gsi) < 0)
-		return;
+	mp_irq.type = MP_INTSRC;
+	mp_irq.irqtype = mp_INT;
+	mp_irq.irqflag = (trigger << 2) | polarity;
+	mp_irq.srcbus = MP_ISA_BUS;
+	mp_irq.srcbusirq = bus_irq;	/* IRQ */
+	mp_irq.dstapic = mpc_ioapic_id(ioapic); /* APIC ID */
+	mp_irq.dstirq = pin;	/* INTIN# */
+
+	mp_save_irq(&mp_irq);
+
 	/*
 	 * Reset default identity mapping if gsi is also an legacy IRQ,
 	 * otherwise there will be more than one entry with the same GSI
@@ -402,34 +397,6 @@ static int mp_config_acpi_gsi(struct device *dev, u32 gsi, int trigger,
 
 	mp_save_irq(&mp_irq);
 #endif
-	return 0;
-}
-
-static int __init mp_register_ioapic_irq(u8 bus_irq, u8 polarity,
-						u8 trigger, u32 gsi)
-{
-	struct mpc_intsrc mp_irq;
-	int ioapic, pin;
-
-	/* Convert 'gsi' to 'ioapic.pin'(INTIN#) */
-	ioapic = mp_find_ioapic(gsi);
-	if (ioapic < 0) {
-		pr_warn("Failed to find ioapic for gsi : %u\n", gsi);
-		return ioapic;
-	}
-
-	pin = mp_find_ioapic_pin(ioapic, gsi);
-
-	mp_irq.type = MP_INTSRC;
-	mp_irq.irqtype = mp_INT;
-	mp_irq.irqflag = (trigger << 2) | polarity;
-	mp_irq.srcbus = MP_ISA_BUS;
-	mp_irq.srcbusirq = bus_irq;
-	mp_irq.dstapic = mpc_ioapic_id(ioapic);
-	mp_irq.dstirq = pin;
-
-	mp_save_irq(&mp_irq);
-
 	return 0;
 }
 
@@ -477,12 +444,7 @@ static void __init acpi_sci_ioapic_setup(u8 bus_irq, u16 polarity, u16 trigger, 
 	if (acpi_sci_flags & ACPI_MADT_POLARITY_MASK)
 		polarity = acpi_sci_flags & ACPI_MADT_POLARITY_MASK;
 
-	if (bus_irq < NR_IRQS_LEGACY)
-		mp_override_legacy_irq(bus_irq, polarity, trigger, gsi);
-	else
-		mp_register_ioapic_irq(bus_irq, polarity, trigger, gsi);
-
-	acpi_penalize_sci_irq(bus_irq, trigger, polarity);
+	mp_override_legacy_irq(bus_irq, polarity, trigger, gsi);
 
 	/*
 	 * stash over-ride to indicate we've been here
@@ -735,7 +697,7 @@ static void __init acpi_set_irq_model_ioapic(void)
 #ifdef CONFIG_ACPI_HOTPLUG_CPU
 #include <acpi/processor.h>
 
-static int acpi_map_cpu2node(acpi_handle handle, int cpu, int physid)
+static void acpi_map_cpu2node(acpi_handle handle, int cpu, int physid)
 {
 #ifdef CONFIG_ACPI_NUMA
 	int nid;
@@ -746,14 +708,13 @@ static int acpi_map_cpu2node(acpi_handle handle, int cpu, int physid)
 		numa_set_node(cpu, nid);
 	}
 #endif
-	return 0;
 }
 
 int acpi_map_cpu(acpi_handle handle, phys_cpuid_t physid, int *pcpu)
 {
 	int cpu;
 
-	cpu = acpi_register_lapic(physid, U32_MAX, ACPI_MADT_ENABLED);
+	cpu = acpi_register_lapic(physid, ACPI_MADT_ENABLED);
 	if (cpu < 0) {
 		pr_info(PREFIX "Unable to map lapic to logical cpu number\n");
 		return cpu;
@@ -1029,6 +990,21 @@ static int __init acpi_parse_madt_lapic_entries(void)
 	if (!boot_cpu_has(X86_FEATURE_APIC))
 		return -ENODEV;
 
+	/*
+	 * Note that the LAPIC address is obtained from the MADT (32-bit value)
+	 * and (optionally) overridden by a LAPIC_ADDR_OVR entry (64-bit value).
+	 */
+
+	count = acpi_table_parse_madt(ACPI_MADT_TYPE_LOCAL_APIC_OVERRIDE,
+				      acpi_parse_lapic_addr_ovr, 0);
+	if (count < 0) {
+		printk(KERN_ERR PREFIX
+		       "Error parsing LAPIC address override entry\n");
+		return count;
+	}
+
+	register_lapic_address(acpi_lapic_addr);
+
 	count = acpi_table_parse_madt(ACPI_MADT_TYPE_LOCAL_SAPIC,
 				      acpi_parse_sapic, MAX_LOCAL_APIC);
 
@@ -1047,8 +1023,8 @@ static int __init acpi_parse_madt_lapic_entries(void)
 			return ret;
 		}
 
-		count = madt_proc[0].count;
-		x2count = madt_proc[1].count;
+		x2count = madt_proc[0].count;
+		count = madt_proc[1].count;
 	}
 	if (!count && !x2count) {
 		printk(KERN_ERR PREFIX "No LAPIC entries present\n");
@@ -1529,7 +1505,7 @@ void __init acpi_boot_table_init(void)
 	 * If acpi_disabled, bail out
 	 */
 	if (acpi_disabled)
-		return;
+		return; 
 
 	/*
 	 * Initialize the ACPI boot-time table parser.

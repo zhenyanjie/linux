@@ -28,7 +28,6 @@
 #include "qed_reg_addr.h"
 #include "qed_sp.h"
 #include "qed_sriov.h"
-#include "qed_roce.h"
 
 /***************************************************************************
 * Structures & Definitions
@@ -42,7 +41,8 @@
 ***************************************************************************/
 static void qed_spq_blocking_cb(struct qed_hwfn *p_hwfn,
 				void *cookie,
-				union event_ring_data *data, u8 fw_return_code)
+				union event_ring_data *data,
+				u8 fw_return_code)
 {
 	struct qed_spq_comp_done *comp_done;
 
@@ -109,8 +109,9 @@ static int qed_spq_block(struct qed_hwfn *p_hwfn,
 /***************************************************************************
 * SPQ entries inner API
 ***************************************************************************/
-static int qed_spq_fill_entry(struct qed_hwfn *p_hwfn,
-			      struct qed_spq_entry *p_ent)
+static int
+qed_spq_fill_entry(struct qed_hwfn *p_hwfn,
+		   struct qed_spq_entry *p_ent)
 {
 	p_ent->flags = 0;
 
@@ -188,7 +189,8 @@ static void qed_spq_hw_initialize(struct qed_hwfn *p_hwfn,
 }
 
 static int qed_spq_hw_post(struct qed_hwfn *p_hwfn,
-			   struct qed_spq *p_spq, struct qed_spq_entry *p_ent)
+			   struct qed_spq *p_spq,
+			   struct qed_spq_entry *p_ent)
 {
 	struct qed_chain *p_chain = &p_hwfn->p_spq->chain;
 	u16 echo = qed_chain_get_prod_idx(p_chain);
@@ -238,9 +240,6 @@ qed_async_event_completion(struct qed_hwfn *p_hwfn,
 			   struct event_ring_entry *p_eqe)
 {
 	switch (p_eqe->protocol_id) {
-	case PROTOCOLID_ROCE:
-		qed_async_roce_event(p_hwfn, p_eqe);
-		return 0;
 	case PROTOCOLID_COMMON:
 		return qed_sriov_eqe_event(p_hwfn,
 					   p_eqe->opcode,
@@ -256,7 +255,8 @@ qed_async_event_completion(struct qed_hwfn *p_hwfn,
 /***************************************************************************
 * EQ API
 ***************************************************************************/
-void qed_eq_prod_update(struct qed_hwfn *p_hwfn, u16 prod)
+void qed_eq_prod_update(struct qed_hwfn *p_hwfn,
+			u16 prod)
 {
 	u32 addr = GTT_BAR0_MAP_REG_USDM_RAM +
 		   USTORM_EQE_CONS_OFFSET(p_hwfn->rel_pf_id);
@@ -267,7 +267,9 @@ void qed_eq_prod_update(struct qed_hwfn *p_hwfn, u16 prod)
 	mmiowb();
 }
 
-int qed_eq_completion(struct qed_hwfn *p_hwfn, void *cookie)
+int qed_eq_completion(struct qed_hwfn *p_hwfn,
+		      void *cookie)
+
 {
 	struct qed_eq *p_eq = cookie;
 	struct qed_chain *p_chain = &p_eq->chain;
@@ -321,28 +323,35 @@ int qed_eq_completion(struct qed_hwfn *p_hwfn, void *cookie)
 	return rc;
 }
 
-struct qed_eq *qed_eq_alloc(struct qed_hwfn *p_hwfn, u16 num_elem)
+struct qed_eq *qed_eq_alloc(struct qed_hwfn *p_hwfn,
+			    u16 num_elem)
 {
 	struct qed_eq *p_eq;
 
 	/* Allocate EQ struct */
 	p_eq = kzalloc(sizeof(*p_eq), GFP_KERNEL);
-	if (!p_eq)
+	if (!p_eq) {
+		DP_NOTICE(p_hwfn, "Failed to allocate `struct qed_eq'\n");
 		return NULL;
+	}
 
 	/* Allocate and initialize EQ chain*/
 	if (qed_chain_alloc(p_hwfn->cdev,
 			    QED_CHAIN_USE_TO_PRODUCE,
 			    QED_CHAIN_MODE_PBL,
-			    QED_CHAIN_CNT_TYPE_U16,
 			    num_elem,
 			    sizeof(union event_ring_element),
-			    &p_eq->chain))
+			    &p_eq->chain)) {
+		DP_NOTICE(p_hwfn, "Failed to allocate eq chain\n");
 		goto eq_allocate_fail;
+	}
 
 	/* register EQ completion on the SP SB */
-	qed_int_register_cb(p_hwfn, qed_eq_completion,
-			    p_eq, &p_eq->eq_sb_index, &p_eq->p_fw_cons);
+	qed_int_register_cb(p_hwfn,
+			    qed_eq_completion,
+			    p_eq,
+			    &p_eq->eq_sb_index,
+			    &p_eq->p_fw_cons);
 
 	return p_eq;
 
@@ -351,12 +360,14 @@ eq_allocate_fail:
 	return NULL;
 }
 
-void qed_eq_setup(struct qed_hwfn *p_hwfn, struct qed_eq *p_eq)
+void qed_eq_setup(struct qed_hwfn *p_hwfn,
+		  struct qed_eq *p_eq)
 {
 	qed_chain_reset(&p_eq->chain);
 }
 
-void qed_eq_free(struct qed_hwfn *p_hwfn, struct qed_eq *p_eq)
+void qed_eq_free(struct qed_hwfn *p_hwfn,
+		 struct qed_eq *p_eq)
 {
 	if (!p_eq)
 		return;
@@ -367,9 +378,10 @@ void qed_eq_free(struct qed_hwfn *p_hwfn, struct qed_eq *p_eq)
 /***************************************************************************
 * CQE API - manipulate EQ functionality
 ***************************************************************************/
-static int qed_cqe_completion(struct qed_hwfn *p_hwfn,
-			      struct eth_slow_path_rx_cqe *cqe,
-			      enum protocol_type protocol)
+static int qed_cqe_completion(
+	struct qed_hwfn *p_hwfn,
+	struct eth_slow_path_rx_cqe *cqe,
+	enum protocol_type protocol)
 {
 	if (IS_VF(p_hwfn->cdev))
 		return 0;
@@ -400,10 +412,10 @@ int qed_eth_cqe_completion(struct qed_hwfn *p_hwfn,
 ***************************************************************************/
 void qed_spq_setup(struct qed_hwfn *p_hwfn)
 {
-	struct qed_spq *p_spq = p_hwfn->p_spq;
-	struct qed_spq_entry *p_virt = NULL;
-	dma_addr_t p_phys = 0;
-	u32 i, capacity;
+	struct qed_spq		*p_spq	= p_hwfn->p_spq;
+	struct qed_spq_entry	*p_virt = NULL;
+	dma_addr_t		p_phys	= 0;
+	unsigned int		i	= 0;
 
 	INIT_LIST_HEAD(&p_spq->pending);
 	INIT_LIST_HEAD(&p_spq->completion_pending);
@@ -415,8 +427,7 @@ void qed_spq_setup(struct qed_hwfn *p_hwfn)
 	p_phys	= p_spq->p_phys + offsetof(struct qed_spq_entry, ramrod);
 	p_virt	= p_spq->p_virt;
 
-	capacity = qed_chain_get_capacity(&p_spq->chain);
-	for (i = 0; i < capacity; i++) {
+	for (i = 0; i < p_spq->chain.capacity; i++) {
 		DMA_REGPAIR_LE(p_virt->elem.data_ptr, p_phys);
 
 		list_add_tail(&p_virt->list, &p_spq->free_pool);
@@ -444,31 +455,36 @@ void qed_spq_setup(struct qed_hwfn *p_hwfn)
 
 int qed_spq_alloc(struct qed_hwfn *p_hwfn)
 {
-	struct qed_spq_entry *p_virt = NULL;
-	struct qed_spq *p_spq = NULL;
-	dma_addr_t p_phys = 0;
-	u32 capacity;
+	struct qed_spq		*p_spq	= NULL;
+	dma_addr_t		p_phys	= 0;
+	struct qed_spq_entry	*p_virt = NULL;
 
 	/* SPQ struct */
-	p_spq = kzalloc(sizeof(struct qed_spq), GFP_KERNEL);
-	if (!p_spq)
+	p_spq =
+		kzalloc(sizeof(struct qed_spq), GFP_KERNEL);
+	if (!p_spq) {
+		DP_NOTICE(p_hwfn, "Failed to allocate `struct qed_spq'\n");
 		return -ENOMEM;
+	}
 
 	/* SPQ ring  */
 	if (qed_chain_alloc(p_hwfn->cdev,
 			    QED_CHAIN_USE_TO_PRODUCE,
 			    QED_CHAIN_MODE_SINGLE,
-			    QED_CHAIN_CNT_TYPE_U16,
 			    0,   /* N/A when the mode is SINGLE */
 			    sizeof(struct slow_path_element),
-			    &p_spq->chain))
+			    &p_spq->chain)) {
+		DP_NOTICE(p_hwfn, "Failed to allocate spq chain\n");
 		goto spq_allocate_fail;
+	}
 
 	/* allocate and fill the SPQ elements (incl. ramrod data list) */
-	capacity = qed_chain_get_capacity(&p_spq->chain);
 	p_virt = dma_alloc_coherent(&p_hwfn->cdev->pdev->dev,
-				    capacity * sizeof(struct qed_spq_entry),
-				    &p_phys, GFP_KERNEL);
+				    p_spq->chain.capacity *
+				    sizeof(struct qed_spq_entry),
+				    &p_phys,
+				    GFP_KERNEL);
+
 	if (!p_virt)
 		goto spq_allocate_fail;
 
@@ -487,25 +503,25 @@ spq_allocate_fail:
 void qed_spq_free(struct qed_hwfn *p_hwfn)
 {
 	struct qed_spq *p_spq = p_hwfn->p_spq;
-	u32 capacity;
 
 	if (!p_spq)
 		return;
 
-	if (p_spq->p_virt) {
-		capacity = qed_chain_get_capacity(&p_spq->chain);
+	if (p_spq->p_virt)
 		dma_free_coherent(&p_hwfn->cdev->pdev->dev,
-				  capacity *
+				  p_spq->chain.capacity *
 				  sizeof(struct qed_spq_entry),
-				  p_spq->p_virt, p_spq->p_phys);
-	}
+				  p_spq->p_virt,
+				  p_spq->p_phys);
 
 	qed_chain_free(p_hwfn->cdev, &p_spq->chain);
 	;
 	kfree(p_spq);
 }
 
-int qed_spq_get_entry(struct qed_hwfn *p_hwfn, struct qed_spq_entry **pp_ent)
+int
+qed_spq_get_entry(struct qed_hwfn *p_hwfn,
+		  struct qed_spq_entry **pp_ent)
 {
 	struct qed_spq *p_spq = p_hwfn->p_spq;
 	struct qed_spq_entry *p_ent = NULL;
@@ -516,15 +532,14 @@ int qed_spq_get_entry(struct qed_hwfn *p_hwfn, struct qed_spq_entry **pp_ent)
 	if (list_empty(&p_spq->free_pool)) {
 		p_ent = kzalloc(sizeof(*p_ent), GFP_ATOMIC);
 		if (!p_ent) {
-			DP_NOTICE(p_hwfn,
-				  "Failed to allocate an SPQ entry for a pending ramrod\n");
 			rc = -ENOMEM;
 			goto out_unlock;
 		}
 		p_ent->queue = &p_spq->unlimited_pending;
 	} else {
 		p_ent = list_first_entry(&p_spq->free_pool,
-					 struct qed_spq_entry, list);
+					 struct qed_spq_entry,
+					 list);
 		list_del(&p_ent->list);
 		p_ent->queue = &p_spq->pending;
 	}
@@ -543,7 +558,8 @@ static void __qed_spq_return_entry(struct qed_hwfn *p_hwfn,
 	list_add_tail(&p_ent->list, &p_hwfn->p_spq->free_pool);
 }
 
-void qed_spq_return_entry(struct qed_hwfn *p_hwfn, struct qed_spq_entry *p_ent)
+void qed_spq_return_entry(struct qed_hwfn *p_hwfn,
+			  struct qed_spq_entry *p_ent)
 {
 	spin_lock_bh(&p_hwfn->p_spq->lock);
 	__qed_spq_return_entry(p_hwfn, p_ent);
@@ -564,9 +580,10 @@ void qed_spq_return_entry(struct qed_hwfn *p_hwfn, struct qed_spq_entry *p_ent)
  *
  * @return int
  */
-static int qed_spq_add_entry(struct qed_hwfn *p_hwfn,
-			     struct qed_spq_entry *p_ent,
-			     enum spq_priority priority)
+static int
+qed_spq_add_entry(struct qed_hwfn *p_hwfn,
+		  struct qed_spq_entry *p_ent,
+		  enum spq_priority priority)
 {
 	struct qed_spq *p_spq = p_hwfn->p_spq;
 
@@ -581,7 +598,8 @@ static int qed_spq_add_entry(struct qed_hwfn *p_hwfn,
 			struct qed_spq_entry *p_en2;
 
 			p_en2 = list_first_entry(&p_spq->free_pool,
-						 struct qed_spq_entry, list);
+						 struct qed_spq_entry,
+						 list);
 			list_del(&p_en2->list);
 
 			/* Copy the ring element physical pointer to the new
@@ -631,7 +649,8 @@ u32 qed_spq_get_cid(struct qed_hwfn *p_hwfn)
 * Posting new Ramrods
 ***************************************************************************/
 static int qed_spq_post_list(struct qed_hwfn *p_hwfn,
-			     struct list_head *head, u32 keep_reserve)
+			     struct list_head *head,
+			     u32 keep_reserve)
 {
 	struct qed_spq *p_spq = p_hwfn->p_spq;
 	int rc;
@@ -665,7 +684,8 @@ static int qed_spq_pend_post(struct qed_hwfn *p_hwfn)
 			break;
 
 		p_ent = list_first_entry(&p_spq->unlimited_pending,
-					 struct qed_spq_entry, list);
+					 struct qed_spq_entry,
+					 list);
 		if (!p_ent)
 			return -EINVAL;
 
@@ -679,7 +699,8 @@ static int qed_spq_pend_post(struct qed_hwfn *p_hwfn)
 }
 
 int qed_spq_post(struct qed_hwfn *p_hwfn,
-		 struct qed_spq_entry *p_ent, u8 *fw_return_code)
+		 struct qed_spq_entry *p_ent,
+		 u8 *fw_return_code)
 {
 	int rc = 0;
 	struct qed_spq *p_spq = p_hwfn ? p_hwfn->p_spq : NULL;
@@ -776,7 +797,8 @@ int qed_spq_completion(struct qed_hwfn *p_hwfn,
 		return -EINVAL;
 
 	spin_lock_bh(&p_spq->lock);
-	list_for_each_entry_safe(p_ent, tmp, &p_spq->completion_pending, list) {
+	list_for_each_entry_safe(p_ent, tmp, &p_spq->completion_pending,
+				 list) {
 		if (p_ent->elem.hdr.echo == echo) {
 			u16 pos = le16_to_cpu(echo) % SPQ_RING_SIZE;
 
@@ -818,22 +840,15 @@ int qed_spq_completion(struct qed_hwfn *p_hwfn,
 
 	if (!found) {
 		DP_NOTICE(p_hwfn,
-			  "Failed to find an entry this EQE [echo %04x] completes\n",
-			  le16_to_cpu(echo));
+			  "Failed to find an entry this EQE completes\n");
 		return -EEXIST;
 	}
 
-	DP_VERBOSE(p_hwfn, QED_MSG_SPQ,
-		   "Complete EQE [echo %04x]: func %p cookie %p)\n",
-		   le16_to_cpu(echo),
+	DP_VERBOSE(p_hwfn, QED_MSG_SPQ, "Complete: func %p cookie %p)\n",
 		   p_ent->comp_cb.function, p_ent->comp_cb.cookie);
 	if (found->comp_cb.function)
 		found->comp_cb.function(p_hwfn, found->comp_cb.cookie, p_data,
 					fw_return_code);
-	else
-		DP_VERBOSE(p_hwfn,
-			   QED_MSG_SPQ,
-			   "Got a completion without a callback function\n");
 
 	if ((found->comp_mode != QED_SPQ_MODE_EBLOCK) ||
 	    (found->queue == &p_spq->unlimited_pending))
@@ -857,17 +872,21 @@ struct qed_consq *qed_consq_alloc(struct qed_hwfn *p_hwfn)
 
 	/* Allocate ConsQ struct */
 	p_consq = kzalloc(sizeof(*p_consq), GFP_KERNEL);
-	if (!p_consq)
+	if (!p_consq) {
+		DP_NOTICE(p_hwfn, "Failed to allocate `struct qed_consq'\n");
 		return NULL;
+	}
 
 	/* Allocate and initialize EQ chain*/
 	if (qed_chain_alloc(p_hwfn->cdev,
 			    QED_CHAIN_USE_TO_PRODUCE,
 			    QED_CHAIN_MODE_PBL,
-			    QED_CHAIN_CNT_TYPE_U16,
 			    QED_CHAIN_PAGE_SIZE / 0x80,
-			    0x80, &p_consq->chain))
+			    0x80,
+			    &p_consq->chain)) {
+		DP_NOTICE(p_hwfn, "Failed to allocate consq chain");
 		goto consq_allocate_fail;
+	}
 
 	return p_consq;
 
@@ -876,12 +895,14 @@ consq_allocate_fail:
 	return NULL;
 }
 
-void qed_consq_setup(struct qed_hwfn *p_hwfn, struct qed_consq *p_consq)
+void qed_consq_setup(struct qed_hwfn *p_hwfn,
+		     struct qed_consq *p_consq)
 {
 	qed_chain_reset(&p_consq->chain);
 }
 
-void qed_consq_free(struct qed_hwfn *p_hwfn, struct qed_consq *p_consq)
+void qed_consq_free(struct qed_hwfn *p_hwfn,
+		    struct qed_consq *p_consq)
 {
 	if (!p_consq)
 		return;

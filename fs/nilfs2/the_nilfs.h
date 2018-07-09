@@ -43,7 +43,6 @@ enum {
  * struct the_nilfs - struct to supervise multiple nilfs mount points
  * @ns_flags: flags
  * @ns_flushed_device: flag indicating if all volatile data was flushed
- * @ns_sb: back pointer to super block instance
  * @ns_bdev: block device
  * @ns_sem: semaphore for shared states
  * @ns_snapshot_mount_mutex: mutex to protect snapshot mounts
@@ -103,7 +102,6 @@ struct the_nilfs {
 	unsigned long		ns_flags;
 	int			ns_flushed_device;
 
-	struct super_block     *ns_sb;
 	struct block_device    *ns_bdev;
 	struct rw_semaphore	ns_sem;
 	struct mutex		ns_snapshot_mount_mutex;
@@ -122,8 +120,11 @@ struct the_nilfs {
 	unsigned int		ns_sb_update_freq;
 
 	/*
-	 * The following fields are updated by a writable FS-instance.
-	 * These fields are protected by ns_segctor_sem outside load_nilfs().
+	 * Following fields are dedicated to a writable FS-instance.
+	 * Except for the period seeking checkpoint, code outside the segment
+	 * constructor must lock a segment semaphore while accessing these
+	 * fields.
+	 * The writable FS-instance is sole during a lifetime of the_nilfs.
 	 */
 	u64			ns_seg_seq;
 	__u64			ns_segnum;
@@ -280,7 +281,7 @@ static inline int nilfs_sb_will_flip(struct the_nilfs *nilfs)
 }
 
 void nilfs_set_last_segment(struct the_nilfs *, sector_t, u64, __u64);
-struct the_nilfs *alloc_nilfs(struct super_block *sb);
+struct the_nilfs *alloc_nilfs(struct block_device *bdev);
 void destroy_nilfs(struct the_nilfs *nilfs);
 int init_nilfs(struct the_nilfs *nilfs, struct super_block *sb, char *data);
 int load_nilfs(struct the_nilfs *nilfs, struct super_block *sb);

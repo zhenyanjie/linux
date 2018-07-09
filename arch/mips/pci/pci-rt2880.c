@@ -16,6 +16,7 @@
 #include <linux/pci.h>
 #include <linux/io.h>
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/of_irq.h>
 #include <linux/of_pci.h>
@@ -259,6 +260,7 @@ static const struct of_device_id rt288x_pci_match[] = {
 	{ .compatible = "ralink,rt288x-pci" },
 	{},
 };
+MODULE_DEVICE_TABLE(of, rt288x_pci_match);
 
 static struct platform_driver rt288x_pci_driver = {
 	.probe = rt288x_pci_probe,

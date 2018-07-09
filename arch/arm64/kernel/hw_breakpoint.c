@@ -24,7 +24,6 @@
 #include <linux/cpu_pm.h>
 #include <linux/errno.h>
 #include <linux/hw_breakpoint.h>
-#include <linux/kprobes.h>
 #include <linux/perf_event.h>
 #include <linux/ptrace.h>
 #include <linux/smp.h>
@@ -36,7 +35,6 @@
 #include <asm/traps.h>
 #include <asm/cputype.h>
 #include <asm/system_misc.h>
-#include <asm/uaccess.h>
 
 /* Breakpoint currently in use for each BRP. */
 static DEFINE_PER_CPU(struct perf_event *, bp_on_reg[ARM_MAX_BRP]);
@@ -129,7 +127,6 @@ static u64 read_wb_reg(int reg, int n)
 
 	return val;
 }
-NOKPROBE_SYMBOL(read_wb_reg);
 
 static void write_wb_reg(int reg, int n, u64 val)
 {
@@ -143,7 +140,6 @@ static void write_wb_reg(int reg, int n, u64 val)
 	}
 	isb();
 }
-NOKPROBE_SYMBOL(write_wb_reg);
 
 /*
  * Convert a breakpoint privilege level to the corresponding exception
@@ -161,7 +157,6 @@ static enum dbg_active_el debug_exception_level(int privilege)
 		return -EINVAL;
 	}
 }
-NOKPROBE_SYMBOL(debug_exception_level);
 
 enum hw_breakpoint_ops {
 	HW_BREAKPOINT_INSTALL,
@@ -580,7 +575,6 @@ static void toggle_bp_registers(int reg, enum dbg_active_el el, int enable)
 		write_wb_reg(reg, i, ctrl);
 	}
 }
-NOKPROBE_SYMBOL(toggle_bp_registers);
 
 /*
  * Debug exception handlers.
@@ -660,7 +654,6 @@ unlock:
 
 	return 0;
 }
-NOKPROBE_SYMBOL(breakpoint_handler);
 
 static int watchpoint_handler(unsigned long addr, unsigned int esr,
 			      struct pt_regs *regs)
@@ -697,7 +690,7 @@ static int watchpoint_handler(unsigned long addr, unsigned int esr,
 
 		/* Check if the watchpoint value matches. */
 		val = read_wb_reg(AARCH64_DBG_REG_WVR, i);
-		if (val != (untagged_addr(addr) & ~alignment_mask))
+		if (val != (addr & ~alignment_mask))
 			goto unlock;
 
 		/* Possible match, check the byte address select to confirm. */
@@ -763,7 +756,6 @@ unlock:
 
 	return 0;
 }
-NOKPROBE_SYMBOL(watchpoint_handler);
 
 /*
  * Handle single-step exception.
@@ -821,7 +813,6 @@ int reinstall_suspended_bps(struct pt_regs *regs)
 
 	return !handled_exception;
 }
-NOKPROBE_SYMBOL(reinstall_suspended_bps);
 
 /*
  * Context-switcher for restoring suspended breakpoints.
@@ -858,7 +849,7 @@ void hw_breakpoint_thread_switch(struct task_struct *next)
 /*
  * CPU initialisation.
  */
-static int hw_breakpoint_reset(unsigned int cpu)
+static void hw_breakpoint_reset(void *unused)
 {
 	int i;
 	struct perf_event **slots;
@@ -889,14 +880,28 @@ static int hw_breakpoint_reset(unsigned int cpu)
 			write_wb_reg(AARCH64_DBG_REG_WVR, i, 0UL);
 		}
 	}
-
-	return 0;
 }
 
+static int hw_breakpoint_reset_notify(struct notifier_block *self,
+						unsigned long action,
+						void *hcpu)
+{
+	if ((action & ~CPU_TASKS_FROZEN) == CPU_ONLINE) {
+		local_irq_disable();
+		hw_breakpoint_reset(NULL);
+		local_irq_enable();
+	}
+	return NOTIFY_OK;
+}
+
+static struct notifier_block hw_breakpoint_reset_nb = {
+	.notifier_call = hw_breakpoint_reset_notify,
+};
+
 #ifdef CONFIG_CPU_PM
-extern void cpu_suspend_set_dbg_restorer(int (*hw_bp_restore)(unsigned int));
+extern void cpu_suspend_set_dbg_restorer(void (*hw_bp_restore)(void *));
 #else
-static inline void cpu_suspend_set_dbg_restorer(int (*hw_bp_restore)(unsigned int))
+static inline void cpu_suspend_set_dbg_restorer(void (*hw_bp_restore)(void *))
 {
 }
 #endif
@@ -906,13 +911,20 @@ static inline void cpu_suspend_set_dbg_restorer(int (*hw_bp_restore)(unsigned in
  */
 static int __init arch_hw_breakpoint_init(void)
 {
-	int ret;
-
 	core_num_brps = get_num_brps();
 	core_num_wrps = get_num_wrps();
 
 	pr_info("found %d breakpoint and %d watchpoint registers.\n",
 		core_num_brps, core_num_wrps);
+
+	cpu_notifier_register_begin();
+
+	/*
+	 * Reset the breakpoint resources. We assume that a halting
+	 * debugger will leave the world in a nice state for us.
+	 */
+	smp_call_function(hw_breakpoint_reset, NULL, 1);
+	hw_breakpoint_reset(NULL);
 
 	/* Register debug fault handlers. */
 	hook_debug_fault_code(DBG_ESR_EVT_HWBP, breakpoint_handler, SIGTRAP,
@@ -920,20 +932,15 @@ static int __init arch_hw_breakpoint_init(void)
 	hook_debug_fault_code(DBG_ESR_EVT_HWWP, watchpoint_handler, SIGTRAP,
 			      TRAP_HWBKPT, "hw-watchpoint handler");
 
-	/*
-	 * Reset the breakpoint resources. We assume that a halting
-	 * debugger will leave the world in a nice state for us.
-	 */
-	ret = cpuhp_setup_state(CPUHP_AP_PERF_ARM_HW_BREAKPOINT_STARTING,
-			  "CPUHP_AP_PERF_ARM_HW_BREAKPOINT_STARTING",
-			  hw_breakpoint_reset, NULL);
-	if (ret)
-		pr_err("failed to register CPU hotplug notifier: %d\n", ret);
+	/* Register hotplug notifier. */
+	__register_cpu_notifier(&hw_breakpoint_reset_nb);
+
+	cpu_notifier_register_done();
 
 	/* Register cpu_suspend hw breakpoint restore hook */
 	cpu_suspend_set_dbg_restorer(hw_breakpoint_reset);
 
-	return ret;
+	return 0;
 }
 arch_initcall(arch_hw_breakpoint_init);
 

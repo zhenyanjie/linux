@@ -212,6 +212,16 @@ static int dasd_state_known_to_new(struct dasd_device *device)
 {
 	/* Disable extended error reporting for this device. */
 	dasd_eer_disable(device);
+	/* Forget the discipline information. */
+	if (device->discipline) {
+		if (device->discipline->uncheck_device)
+			device->discipline->uncheck_device(device);
+		module_put(device->discipline->owner);
+	}
+	device->discipline = NULL;
+	if (device->base_discipline)
+		module_put(device->base_discipline->owner);
+	device->base_discipline = NULL;
 	device->state = DASD_STATE_NEW;
 
 	if (device->block)
@@ -326,7 +336,6 @@ static int dasd_state_basic_to_ready(struct dasd_device *device)
 {
 	int rc;
 	struct dasd_block *block;
-	struct gendisk *disk;
 
 	rc = 0;
 	block = device->block;
@@ -337,9 +346,6 @@ static int dasd_state_basic_to_ready(struct dasd_device *device)
 		if (rc) {
 			if (rc != -EAGAIN) {
 				device->state = DASD_STATE_UNFMT;
-				disk = device->block->gdp;
-				kobject_uevent(&disk_to_dev(disk)->kobj,
-					       KOBJ_CHANGE);
 				goto out;
 			}
 			return rc;
@@ -1704,11 +1710,8 @@ void dasd_int_handler(struct ccw_device *cdev, unsigned long intparm,
 	/* check for for attention message */
 	if (scsw_dstat(&irb->scsw) & DEV_STAT_ATTENTION) {
 		device = dasd_device_from_cdev_locked(cdev);
-		if (!IS_ERR(device)) {
-			device->discipline->check_attention(device,
-							    irb->esw.esw1.lpum);
-			dasd_put_device(device);
-		}
+		device->discipline->check_attention(device, irb->esw.esw1.lpum);
+		dasd_put_device(device);
 	}
 
 	if (!cqr)
@@ -1950,12 +1953,8 @@ static int __dasd_device_is_unusable(struct dasd_device *device,
 {
 	int mask = ~(DASD_STOPPED_DC_WAIT | DASD_UNRESUMED_PM);
 
-	if (test_bit(DASD_FLAG_OFFLINE, &device->flags) &&
-	    !test_bit(DASD_FLAG_SAFE_OFFLINE_RUNNING, &device->flags)) {
-		/*
-		 * dasd is being set offline
-		 * but it is no safe offline where we have to allow I/O
-		 */
+	if (test_bit(DASD_FLAG_OFFLINE, &device->flags)) {
+		/* dasd is being set offline. */
 		return 1;
 	}
 	if (device->stopped) {
@@ -2272,15 +2271,6 @@ static int _dasd_sleep_on(struct dasd_ccw_req *maincqr, int interruptible)
 		    (!dasd_eer_enabled(device))) {
 			cqr->status = DASD_CQR_FAILED;
 			cqr->intrc = -ENOLINK;
-			continue;
-		}
-		/*
-		 * Don't try to start requests if device is in
-		 * offline processing, it might wait forever
-		 */
-		if (test_bit(DASD_FLAG_OFFLINE, &device->flags)) {
-			cqr->status = DASD_CQR_FAILED;
-			cqr->intrc = -ENODEV;
 			continue;
 		}
 		/*
@@ -3373,22 +3363,6 @@ int dasd_generic_probe(struct ccw_device *cdev,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dasd_generic_probe);
-
-void dasd_generic_free_discipline(struct dasd_device *device)
-{
-	/* Forget the discipline information. */
-	if (device->discipline) {
-		if (device->discipline->uncheck_device)
-			device->discipline->uncheck_device(device);
-		module_put(device->discipline->owner);
-		device->discipline = NULL;
-	}
-	if (device->base_discipline) {
-		module_put(device->base_discipline->owner);
-		device->base_discipline = NULL;
-	}
-}
-EXPORT_SYMBOL_GPL(dasd_generic_free_discipline);
 
 /*
  * This will one day be called from a global not_oper handler.

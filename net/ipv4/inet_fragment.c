@@ -119,9 +119,6 @@ out:
 
 static bool inet_fragq_should_evict(const struct inet_frag_queue *q)
 {
-	if (!hlist_unhashed(&q->list_evictor))
-		return false;
-
 	return q->net->low_thresh == 0 ||
 	       frag_mem_limit(q->net) >= q->net->low_thresh;
 }
@@ -237,8 +234,10 @@ evict_again:
 	cond_resched();
 
 	if (read_seqretry(&f->rnd_seqlock, seq) ||
-	    sum_frag_mem_limit(nf))
+	    percpu_counter_sum(&nf->mem))
 		goto evict_again;
+
+	percpu_counter_destroy(&nf->mem);
 }
 EXPORT_SYMBOL(inet_frags_exit_net);
 
@@ -356,7 +355,7 @@ static struct inet_frag_queue *inet_frag_alloc(struct netns_frags *nf,
 {
 	struct inet_frag_queue *q;
 
-	if (!nf->high_thresh || frag_mem_limit(nf) > nf->high_thresh) {
+	if (frag_mem_limit(nf) > nf->high_thresh) {
 		inet_frag_schedule_worker(f);
 		return NULL;
 	}

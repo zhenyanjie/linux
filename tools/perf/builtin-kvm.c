@@ -24,7 +24,6 @@
 #include <sys/timerfd.h>
 #endif
 
-#include <linux/time64.h>
 #include <termios.h>
 #include <semaphore.h>
 #include <pthread.h>
@@ -363,7 +362,7 @@ static bool handle_end_event(struct perf_kvm_stat *kvm,
 		if (!skip_event(decode)) {
 			pr_info("%" PRIu64 " VM %d, vcpu %d: %s event took %" PRIu64 "usec\n",
 				 sample->time, sample->pid, vcpu_record->vcpu_id,
-				 decode, time_diff / NSEC_PER_USEC);
+				 decode, time_diff/1000);
 		}
 	}
 
@@ -609,15 +608,15 @@ static void print_result(struct perf_kvm_stat *kvm)
 		pr_info("%10llu ", (unsigned long long)ecount);
 		pr_info("%8.2f%% ", (double)ecount / kvm->total_count * 100);
 		pr_info("%8.2f%% ", (double)etime / kvm->total_time * 100);
-		pr_info("%9.2fus ", (double)min / NSEC_PER_USEC);
-		pr_info("%9.2fus ", (double)max / NSEC_PER_USEC);
-		pr_info("%9.2fus ( +-%7.2f%% )", (double)etime / ecount / NSEC_PER_USEC,
+		pr_info("%9.2fus ", (double)min / 1e3);
+		pr_info("%9.2fus ", (double)max / 1e3);
+		pr_info("%9.2fus ( +-%7.2f%% )", (double)etime / ecount/1e3,
 			kvm_event_rel_stddev(vcpu, event));
 		pr_info("\n");
 	}
 
 	pr_info("\nTotal Samples:%" PRIu64 ", Total events handled time:%.2fus.\n\n",
-		kvm->total_count, kvm->total_time / (double)NSEC_PER_USEC);
+		kvm->total_count, kvm->total_time / 1e3);
 
 	if (kvm->lost_events)
 		pr_info("\nLost events: %" PRIu64 "\n\n", kvm->lost_events);
@@ -989,7 +988,7 @@ static int kvm_live_open_events(struct perf_kvm_stat *kvm)
 	 * Note: exclude_{guest,host} do not apply here.
 	 *       This command processes KVM tracepoints from host only
 	 */
-	evlist__for_each_entry(evlist, pos) {
+	evlist__for_each(evlist, pos) {
 		struct perf_event_attr *attr = &pos->attr;
 
 		/* make sure these *are* set */
@@ -1019,13 +1018,13 @@ static int kvm_live_open_events(struct perf_kvm_stat *kvm)
 	err = perf_evlist__open(evlist);
 	if (err < 0) {
 		printf("Couldn't create the events: %s\n",
-		       str_error_r(errno, sbuf, sizeof(sbuf)));
+		       strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out;
 	}
 
 	if (perf_evlist__mmap(evlist, kvm->opts.mmap_pages, false) < 0) {
 		ui__error("Failed to mmap the events: %s\n",
-			  str_error_r(errno, sbuf, sizeof(sbuf)));
+			  strerror_r(errno, sbuf, sizeof(sbuf)));
 		perf_evlist__close(evlist);
 		goto out;
 	}
@@ -1427,9 +1426,11 @@ static int kvm_events_live(struct perf_kvm_stat *kvm,
 	err = kvm_events_live_report(kvm);
 
 out:
-	perf_session__delete(kvm->session);
+	if (kvm->session)
+		perf_session__delete(kvm->session);
 	kvm->session = NULL;
-	perf_evlist__delete(kvm->evlist);
+	if (kvm->evlist)
+		perf_evlist__delete(kvm->evlist);
 
 	return err;
 }

@@ -340,11 +340,6 @@ static int ismt_process_desc(const struct ismt_desc *desc,
 			data->word = dma_buffer[0] | (dma_buffer[1] << 8);
 			break;
 		case I2C_SMBUS_BLOCK_DATA:
-			if (desc->rxbytes != dma_buffer[0] + 1)
-				return -EMSGSIZE;
-
-			memcpy(data->block, dma_buffer, desc->rxbytes);
-			break;
 		case I2C_SMBUS_I2C_BLOCK_DATA:
 			memcpy(&data->block[1], dma_buffer, desc->rxbytes);
 			data->block[0] = desc->rxbytes;
@@ -927,8 +922,10 @@ ismt_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return err;
 
 	err = i2c_add_adapter(&priv->adapter);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "Failed to add SMBus iSMT adapter\n");
 		return -ENODEV;
+	}
 	return 0;
 }
 

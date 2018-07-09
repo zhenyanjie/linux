@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -152,10 +156,10 @@ lstcon_rpc_put(struct lstcon_rpc *crpc)
 	LASSERT(list_empty(&crpc->crp_link));
 
 	for (i = 0; i < bulk->bk_niov; i++) {
-		if (!bulk->bk_iovs[i].bv_page)
+		if (!bulk->bk_iovs[i].kiov_page)
 			continue;
 
-		__free_page(bulk->bk_iovs[i].bv_page);
+		__free_page(bulk->bk_iovs[i].kiov_page);
 	}
 
 	srpc_client_rpc_decref(crpc->crp_rpc);
@@ -705,7 +709,7 @@ lstcon_next_id(int idx, int nkiov, lnet_kiov_t *kiov)
 
 	LASSERT(i < nkiov);
 
-	pid = (lnet_process_id_packed_t *)page_address(kiov[i].bv_page);
+	pid = (lnet_process_id_packed_t *)page_address(kiov[i].kiov_page);
 
 	return &pid[idx % SFW_ID_PER_PAGE];
 }
@@ -849,11 +853,12 @@ lstcon_testrpc_prep(struct lstcon_node *nd, int transop, unsigned feats,
 			      min_t(int, nob, PAGE_SIZE);
 			nob -= len;
 
-			bulk->bk_iovs[i].bv_offset = 0;
-			bulk->bk_iovs[i].bv_len = len;
-			bulk->bk_iovs[i].bv_page = alloc_page(GFP_KERNEL);
+			bulk->bk_iovs[i].kiov_offset = 0;
+			bulk->bk_iovs[i].kiov_len = len;
+			bulk->bk_iovs[i].kiov_page =
+				alloc_page(GFP_KERNEL);
 
-			if (!bulk->bk_iovs[i].bv_page) {
+			if (!bulk->bk_iovs[i].kiov_page) {
 				lstcon_rpc_put(*crpc);
 				return -ENOMEM;
 			}

@@ -123,19 +123,21 @@ static inline unsigned long perf_aux_size(struct ring_buffer *rb)
 	return rb->aux_nr_pages << PAGE_SHIFT;
 }
 
-#define __DEFINE_OUTPUT_COPY_BODY(advance_buf, memcpy_func, ...)	\
+#define DEFINE_OUTPUT_COPY(func_name, memcpy_func)			\
+static inline unsigned long						\
+func_name(struct perf_output_handle *handle,				\
+	  const void *buf, unsigned long len)				\
 {									\
 	unsigned long size, written;					\
 									\
 	do {								\
 		size    = min(handle->size, len);			\
-		written = memcpy_func(__VA_ARGS__);			\
+		written = memcpy_func(handle->addr, buf, size);		\
 		written = size - written;				\
 									\
 		len -= written;						\
 		handle->addr += written;				\
-		if (advance_buf)					\
-			buf += written;					\
+		buf += written;						\
 		handle->size -= written;				\
 		if (!handle->size) {					\
 			struct ring_buffer *rb = handle->rb;		\
@@ -148,21 +150,6 @@ static inline unsigned long perf_aux_size(struct ring_buffer *rb)
 	} while (len && written == size);				\
 									\
 	return len;							\
-}
-
-#define DEFINE_OUTPUT_COPY(func_name, memcpy_func)			\
-static inline unsigned long						\
-func_name(struct perf_output_handle *handle,				\
-	  const void *buf, unsigned long len)				\
-__DEFINE_OUTPUT_COPY_BODY(true, memcpy_func, handle->addr, buf, size)
-
-static inline unsigned long
-__output_custom(struct perf_output_handle *handle, perf_copy_f copy_func,
-		const void *buf, unsigned long len)
-{
-	unsigned long orig_len = len;
-	__DEFINE_OUTPUT_COPY_BODY(false, copy_func, handle->addr, buf,
-				  orig_len - len, size)
 }
 
 static inline unsigned long

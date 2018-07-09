@@ -126,8 +126,7 @@ ssize_t __mei_cl_recv(struct mei_cl *cl, u8 *buf, size_t length)
 		goto out;
 
 	/* wait on event only if there is no other waiter */
-	/* synchronized under device mutex */
-	if (!waitqueue_active(&cl->rx_wait)) {
+	if (list_empty(&cl->rd_completed) && !waitqueue_active(&cl->rx_wait)) {
 
 		mutex_unlock(&bus->device_lock);
 
@@ -143,7 +142,7 @@ ssize_t __mei_cl_recv(struct mei_cl *cl, u8 *buf, size_t length)
 		mutex_lock(&bus->device_lock);
 
 		if (!mei_cl_is_connected(cl)) {
-			rets = -ENODEV;
+			rets = -EBUSY;
 			goto out;
 		}
 	}
@@ -235,7 +234,7 @@ static void mei_cl_bus_event_work(struct work_struct *work)
 	/* Prepare for the next read */
 	if (cldev->events_mask & BIT(MEI_CL_EVENT_RX)) {
 		mutex_lock(&bus->device_lock);
-		mei_cl_read_start(cldev->cl, mei_cl_mtu(cldev->cl), NULL);
+		mei_cl_read_start(cldev->cl, 0, NULL);
 		mutex_unlock(&bus->device_lock);
 	}
 }
@@ -325,7 +324,7 @@ int mei_cldev_register_event_cb(struct mei_cl_device *cldev,
 
 	if (cldev->events_mask & BIT(MEI_CL_EVENT_RX)) {
 		mutex_lock(&bus->device_lock);
-		ret = mei_cl_read_start(cldev->cl, mei_cl_mtu(cldev->cl), NULL);
+		ret = mei_cl_read_start(cldev->cl, 0, NULL);
 		mutex_unlock(&bus->device_lock);
 		if (ret && ret != -EBUSY)
 			return ret;
@@ -408,7 +407,7 @@ bool mei_cldev_enabled(struct mei_cl_device *cldev)
 EXPORT_SYMBOL_GPL(mei_cldev_enabled);
 
 /**
- * mei_cldev_enable - enable me client device
+ * mei_cldev_enable_device - enable me client device
  *     create connection with me client
  *
  * @cldev: me client device
@@ -678,10 +677,8 @@ static ssize_t modalias_show(struct device *dev, struct device_attribute *a,
 {
 	struct mei_cl_device *cldev = to_mei_cl_device(dev);
 	const uuid_le *uuid = mei_me_cl_uuid(cldev->me_cl);
-	u8 version = mei_me_cl_ver(cldev->me_cl);
 
-	return scnprintf(buf, PAGE_SIZE, "mei:%s:%pUl:%02X:",
-			 cldev->name, uuid, version);
+	return scnprintf(buf, PAGE_SIZE, "mei:%s:%pUl:", cldev->name, uuid);
 }
 static DEVICE_ATTR_RO(modalias);
 

@@ -144,72 +144,15 @@ unsigned long __must_check __copy_to_user(void __user *to, const void *from,
 		"	jg	2b\n"				\
 		".popsection\n"					\
 		EX_TABLE(0b,3b) EX_TABLE(1b,3b)			\
-		: "=d" (__rc), "+Q" (*(to))			\
+		: "=d" (__rc), "=Q" (*(to))			\
 		: "d" (size), "Q" (*(from)),			\
 		  "d" (__reg0), "K" (-EFAULT)			\
 		: "cc");					\
 	__rc;							\
 })
 
-static inline int __put_user_fn(void *x, void __user *ptr, unsigned long size)
-{
-	unsigned long spec = 0x810000UL;
-	int rc;
-
-	switch (size) {
-	case 1:
-		rc = __put_get_user_asm((unsigned char __user *)ptr,
-					(unsigned char *)x,
-					size, spec);
-		break;
-	case 2:
-		rc = __put_get_user_asm((unsigned short __user *)ptr,
-					(unsigned short *)x,
-					size, spec);
-		break;
-	case 4:
-		rc = __put_get_user_asm((unsigned int __user *)ptr,
-					(unsigned int *)x,
-					size, spec);
-		break;
-	case 8:
-		rc = __put_get_user_asm((unsigned long __user *)ptr,
-					(unsigned long *)x,
-					size, spec);
-		break;
-	};
-	return rc;
-}
-
-static inline int __get_user_fn(void *x, const void __user *ptr, unsigned long size)
-{
-	unsigned long spec = 0x81UL;
-	int rc;
-
-	switch (size) {
-	case 1:
-		rc = __put_get_user_asm((unsigned char *)x,
-					(unsigned char __user *)ptr,
-					size, spec);
-		break;
-	case 2:
-		rc = __put_get_user_asm((unsigned short *)x,
-					(unsigned short __user *)ptr,
-					size, spec);
-		break;
-	case 4:
-		rc = __put_get_user_asm((unsigned int *)x,
-					(unsigned int __user *)ptr,
-					size, spec);
-		break;
-	case 8:
-		rc = __put_get_user_asm((unsigned long *)x,
-					(unsigned long __user *)ptr,
-					size, spec);
-		break;
-	};
-	return rc;
-}
+#define __put_user_fn(x, ptr, size) __put_get_user_asm(ptr, x, size, 0x810000UL)
+#define __get_user_fn(x, ptr, size) __put_get_user_asm(x, ptr, size, 0x81UL)
 
 #else /* CONFIG_HAVE_MARCH_Z10_FEATURES */
 
@@ -248,7 +191,7 @@ static inline int __get_user_fn(void *x, const void __user *ptr, unsigned long s
 		__put_user_bad();				\
 		break;						\
 	 }							\
-	__builtin_expect(__pu_err, 0);				\
+	__pu_err;						\
 })
 
 #define put_user(x, ptr)					\
@@ -297,7 +240,7 @@ int __put_user_bad(void) __attribute__((noreturn));
 		__get_user_bad();				\
 		break;						\
 	}							\
-	__builtin_expect(__gu_err, 0);				\
+	__gu_err;						\
 })
 
 #define get_user(x, ptr)					\
@@ -310,14 +253,6 @@ int __get_user_bad(void) __attribute__((noreturn));
 
 #define __put_user_unaligned __put_user
 #define __get_user_unaligned __get_user
-
-extern void __compiletime_error("usercopy buffer size is too small")
-__bad_copy_user(void);
-
-static inline void copy_user_overflow(int size, unsigned long count)
-{
-	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
-}
 
 /**
  * copy_to_user: - Copy a block of data into user space.
@@ -339,6 +274,12 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 	might_fault();
 	return __copy_to_user(to, from, n);
 }
+
+void copy_from_user_overflow(void)
+#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
+__compiletime_warning("copy_from_user() buffer size is not provably correct")
+#endif
+;
 
 /**
  * copy_from_user: - Copy a block of data from user space.
@@ -364,10 +305,7 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 
 	might_fault();
 	if (unlikely(sz != -1 && sz < n)) {
-		if (!__builtin_constant_p(n))
-			copy_user_overflow(sz, n);
-		else
-			__bad_copy_user();
+		copy_from_user_overflow();
 		return n;
 	}
 	return __copy_from_user(to, from, n);

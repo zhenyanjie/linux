@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -210,6 +214,7 @@ LU_KEY_INIT_FINI(llog, struct llog_thread_info);
 /* context key: llog_thread_key */
 LU_CONTEXT_KEY_DEFINE(llog, LCT_MD_THREAD | LCT_MG_THREAD | LCT_LOCAL);
 LU_KEY_INIT_GENERIC(llog);
+EXPORT_SYMBOL(llog_thread_key);
 
 int llog_info_init(void)
 {

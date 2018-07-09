@@ -616,10 +616,3 @@ int thread_stack__process(struct thread *thread, struct comm *comm,
 
 	return err;
 }
-
-size_t thread_stack__depth(struct thread *thread)
-{
-	if (!thread->ts)
-		return 0;
-	return thread->ts->cnt;
-}

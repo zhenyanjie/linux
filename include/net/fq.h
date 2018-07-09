@@ -72,12 +72,9 @@ struct fq {
 	u32 flows_cnt;
 	u32 perturbation;
 	u32 limit;
-	u32 memory_limit;
-	u32 memory_usage;
 	u32 quantum;
 	u32 backlog;
 	u32 overlimit;
-	u32 overmemory;
 	u32 collisions;
 };
 

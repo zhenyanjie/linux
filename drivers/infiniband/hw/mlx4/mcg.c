@@ -1045,7 +1045,7 @@ int mlx4_ib_mcg_port_init(struct mlx4_ib_demux_ctx *ctx)
 
 	atomic_set(&ctx->tid, 0);
 	sprintf(name, "mlx4_ib_mcg%d", ctx->port);
-	ctx->mcg_wq = alloc_ordered_workqueue(name, WQ_MEM_RECLAIM);
+	ctx->mcg_wq = create_singlethread_workqueue(name);
 	if (!ctx->mcg_wq)
 		return -ENOMEM;
 
@@ -1102,8 +1102,7 @@ static void _mlx4_ib_mcg_port_cleanup(struct mlx4_ib_demux_ctx *ctx, int destroy
 	while ((p = rb_first(&ctx->mcg_table)) != NULL) {
 		group = rb_entry(p, struct mcast_group, node);
 		if (atomic_read(&group->refcount))
-			mcg_debug_group(group, "group refcount %d!!! (pointer %p)\n",
-					atomic_read(&group->refcount), group);
+			mcg_warn_group(group, "group refcount %d!!! (pointer %p)\n", atomic_read(&group->refcount), group);
 
 		force_clean_group(group);
 	}
@@ -1247,7 +1246,7 @@ void clean_vf_mcast(struct mlx4_ib_demux_ctx *ctx, int slave)
 
 int mlx4_ib_mcg_init(void)
 {
-	clean_wq = alloc_ordered_workqueue("mlx4_ib_mcg", WQ_MEM_RECLAIM);
+	clean_wq = create_singlethread_workqueue("mlx4_ib_mcg");
 	if (!clean_wq)
 		return -ENOMEM;
 

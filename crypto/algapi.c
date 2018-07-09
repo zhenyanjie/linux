@@ -167,18 +167,6 @@ void crypto_remove_spawns(struct crypto_alg *alg, struct list_head *list,
 
 			spawn->alg = NULL;
 			spawns = &inst->alg.cra_users;
-
-			/*
-			 * We may encounter an unregistered instance here, since
-			 * an instance's spawns are set up prior to the instance
-			 * being registered.  An unregistered instance will have
-			 * NULL ->cra_users.next, since ->cra_users isn't
-			 * properly initialized until registration.  But an
-			 * unregistered instance cannot have any users, so treat
-			 * it the same as ->cra_users being empty.
-			 */
-			if (spawns->next == NULL)
-				break;
 		}
 	} while ((spawns = crypto_more_spawns(alg, &stack, &top,
 					      &secondary_spawns)));
@@ -368,7 +356,6 @@ int crypto_register_alg(struct crypto_alg *alg)
 	struct crypto_larval *larval;
 	int err;
 
-	alg->cra_flags &= ~CRYPTO_ALG_DEAD;
 	err = crypto_check_alg(alg);
 	if (err)
 		return err;
@@ -824,21 +811,6 @@ int crypto_attr_u32(struct rtattr *rta, u32 *num)
 }
 EXPORT_SYMBOL_GPL(crypto_attr_u32);
 
-int crypto_inst_setname(struct crypto_instance *inst, const char *name,
-			struct crypto_alg *alg)
-{
-	if (snprintf(inst->alg.cra_name, CRYPTO_MAX_ALG_NAME, "%s(%s)", name,
-		     alg->cra_name) >= CRYPTO_MAX_ALG_NAME)
-		return -ENAMETOOLONG;
-
-	if (snprintf(inst->alg.cra_driver_name, CRYPTO_MAX_ALG_NAME, "%s(%s)",
-		     name, alg->cra_driver_name) >= CRYPTO_MAX_ALG_NAME)
-		return -ENAMETOOLONG;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(crypto_inst_setname);
-
 void *crypto_alloc_instance2(const char *name, struct crypto_alg *alg,
 			     unsigned int head)
 {
@@ -853,8 +825,13 @@ void *crypto_alloc_instance2(const char *name, struct crypto_alg *alg,
 
 	inst = (void *)(p + head);
 
-	err = crypto_inst_setname(inst, name, alg);
-	if (err)
+	err = -ENAMETOOLONG;
+	if (snprintf(inst->alg.cra_name, CRYPTO_MAX_ALG_NAME, "%s(%s)", name,
+		     alg->cra_name) >= CRYPTO_MAX_ALG_NAME)
+		goto err_free_inst;
+
+	if (snprintf(inst->alg.cra_driver_name, CRYPTO_MAX_ALG_NAME, "%s(%s)",
+		     name, alg->cra_driver_name) >= CRYPTO_MAX_ALG_NAME)
 		goto err_free_inst;
 
 	return p;

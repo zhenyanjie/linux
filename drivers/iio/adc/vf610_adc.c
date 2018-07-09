@@ -77,7 +77,7 @@
 #define VF610_ADC_ADSTS_MASK		0x300
 #define VF610_ADC_ADLPC_EN		0x80
 #define VF610_ADC_ADHSC_EN		0x400
-#define VF610_ADC_REFSEL_VALT		0x800
+#define VF610_ADC_REFSEL_VALT		0x100
 #define VF610_ADC_REFSEL_VBG		0x1000
 #define VF610_ADC_ADTRG_HARD		0x2000
 #define VF610_ADC_AVGS_8		0x4000
@@ -594,8 +594,7 @@ static irqreturn_t vf610_adc_isr(int irq, void *dev_id)
 		if (iio_buffer_enabled(indio_dev)) {
 			info->buffer[0] = info->value;
 			iio_push_to_buffers_with_timestamp(indio_dev,
-					info->buffer,
-					iio_get_time_ns(indio_dev));
+					info->buffer, iio_get_time_ns());
 			iio_trigger_notify_done(indio_dev->trig);
 		} else
 			complete(&info->completion);

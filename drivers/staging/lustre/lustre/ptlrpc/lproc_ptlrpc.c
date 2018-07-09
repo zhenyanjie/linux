@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -191,7 +195,7 @@ ptlrpc_ldebugfs_register(struct dentry *root, char *dir,
 	LASSERT(!*debugfs_root_ret);
 	LASSERT(!*stats_ret);
 
-	svc_stats = lprocfs_alloc_stats(EXTRA_MAX_OPCODES + LUSTRE_MAX_OPCODES,
+	svc_stats = lprocfs_alloc_stats(EXTRA_MAX_OPCODES+LUSTRE_MAX_OPCODES,
 					0);
 	if (!svc_stats)
 		return;
@@ -868,8 +872,7 @@ ptlrpc_lprocfs_svc_req_history_next(struct seq_file *s,
 
 		if (i > srhi->srhi_idx) { /* reset iterator for a new CPT */
 			srhi->srhi_req = NULL;
-			seq = 0;
-			srhi->srhi_seq = 0;
+			seq = srhi->srhi_seq = 0;
 		} else { /* the next sequence */
 			seq = srhi->srhi_seq + (1 << svc->srv_cpt_bits);
 		}
@@ -937,7 +940,7 @@ static int ptlrpc_lprocfs_svc_req_history_show(struct seq_file *s, void *iter)
 static int
 ptlrpc_lprocfs_svc_req_history_open(struct inode *inode, struct file *file)
 {
-	static const struct seq_operations sops = {
+	static struct seq_operations sops = {
 		.start = ptlrpc_lprocfs_svc_req_history_start,
 		.stop  = ptlrpc_lprocfs_svc_req_history_stop,
 		.next  = ptlrpc_lprocfs_svc_req_history_next,
@@ -1158,6 +1161,7 @@ void ptlrpc_lprocfs_brw(struct ptlrpc_request *req, int bytes)
 
 	lprocfs_counter_add(svc_stats, idx, bytes);
 }
+
 EXPORT_SYMBOL(ptlrpc_lprocfs_brw);
 
 void ptlrpc_lprocfs_unregister_service(struct ptlrpc_service *svc)

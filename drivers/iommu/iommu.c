@@ -31,11 +31,11 @@
 #include <linux/err.h>
 #include <linux/pci.h>
 #include <linux/bitops.h>
-#include <linux/property.h>
 #include <trace/events/iommu.h>
 
 static struct kset *iommu_group_kset;
-static DEFINE_IDA(iommu_group_ida);
+static struct ida iommu_group_ida;
+static struct mutex iommu_group_mutex;
 
 struct iommu_callback_data {
 	const struct iommu_ops *ops;
@@ -144,7 +144,9 @@ static void iommu_group_release(struct kobject *kobj)
 	if (group->iommu_data_release)
 		group->iommu_data_release(group->iommu_data);
 
-	ida_simple_remove(&iommu_group_ida, group->id);
+	mutex_lock(&iommu_group_mutex);
+	ida_remove(&iommu_group_ida, group->id);
+	mutex_unlock(&iommu_group_mutex);
 
 	if (group->default_domain)
 		iommu_domain_free(group->default_domain);
@@ -184,17 +186,26 @@ struct iommu_group *iommu_group_alloc(void)
 	INIT_LIST_HEAD(&group->devices);
 	BLOCKING_INIT_NOTIFIER_HEAD(&group->notifier);
 
-	ret = ida_simple_get(&iommu_group_ida, 0, 0, GFP_KERNEL);
-	if (ret < 0) {
+	mutex_lock(&iommu_group_mutex);
+
+again:
+	if (unlikely(0 == ida_pre_get(&iommu_group_ida, GFP_KERNEL))) {
 		kfree(group);
-		return ERR_PTR(ret);
+		mutex_unlock(&iommu_group_mutex);
+		return ERR_PTR(-ENOMEM);
 	}
-	group->id = ret;
+
+	if (-EAGAIN == ida_get_new(&iommu_group_ida, &group->id))
+		goto again;
+
+	mutex_unlock(&iommu_group_mutex);
 
 	ret = kobject_init_and_add(&group->kobj, &iommu_group_ktype,
 				   NULL, "%d", group->id);
 	if (ret) {
-		ida_simple_remove(&iommu_group_ida, group->id);
+		mutex_lock(&iommu_group_mutex);
+		ida_remove(&iommu_group_ida, group->id);
+		mutex_unlock(&iommu_group_mutex);
 		kfree(group);
 		return ERR_PTR(ret);
 	}
@@ -337,9 +348,6 @@ static int iommu_group_create_direct_mappings(struct iommu_group *group,
 	list_for_each_entry(entry, &mappings, list) {
 		dma_addr_t start, end, addr;
 
-		if (domain->ops->apply_dm_region)
-			domain->ops->apply_dm_region(dev, domain, entry);
-
 		start = ALIGN(entry->start, pg_size);
 		end   = ALIGN(entry->start + entry->length, pg_size);
 
@@ -383,30 +391,36 @@ int iommu_group_add_device(struct iommu_group *group, struct device *dev)
 	device->dev = dev;
 
 	ret = sysfs_create_link(&dev->kobj, &group->kobj, "iommu_group");
-	if (ret)
-		goto err_free_device;
+	if (ret) {
+		kfree(device);
+		return ret;
+	}
 
 	device->name = kasprintf(GFP_KERNEL, "%s", kobject_name(&dev->kobj));
 rename:
 	if (!device->name) {
-		ret = -ENOMEM;
-		goto err_remove_link;
+		sysfs_remove_link(&dev->kobj, "iommu_group");
+		kfree(device);
+		return -ENOMEM;
 	}
 
 	ret = sysfs_create_link_nowarn(group->devices_kobj,
 				       &dev->kobj, device->name);
 	if (ret) {
+		kfree(device->name);
 		if (ret == -EEXIST && i >= 0) {
 			/*
 			 * Account for the slim chance of collision
 			 * and append an instance to the name.
 			 */
-			kfree(device->name);
 			device->name = kasprintf(GFP_KERNEL, "%s.%d",
 						 kobject_name(&dev->kobj), i++);
 			goto rename;
 		}
-		goto err_free_name;
+
+		sysfs_remove_link(&dev->kobj, "iommu_group");
+		kfree(device);
+		return ret;
 	}
 
 	kobject_get(group->devices_kobj);
@@ -418,10 +432,8 @@ rename:
 	mutex_lock(&group->mutex);
 	list_add_tail(&device->list, &group->devices);
 	if (group->domain)
-		ret = __iommu_attach_device(group->domain, dev);
+		__iommu_attach_device(group->domain, dev);
 	mutex_unlock(&group->mutex);
-	if (ret)
-		goto err_put_group;
 
 	/* Notify any listeners about change to group. */
 	blocking_notifier_call_chain(&group->notifier,
@@ -432,21 +444,6 @@ rename:
 	pr_info("Adding device %s to group %d\n", dev_name(dev), group->id);
 
 	return 0;
-
-err_put_group:
-	mutex_lock(&group->mutex);
-	list_del(&device->list);
-	mutex_unlock(&group->mutex);
-	dev->iommu_group = NULL;
-	kobject_put(group->devices_kobj);
-err_free_name:
-	kfree(device->name);
-err_remove_link:
-	sysfs_remove_link(&dev->kobj, "iommu_group");
-err_free_device:
-	kfree(device);
-	pr_err("Failed to add device %s to group %d: %d\n", dev_name(dev), group->id, ret);
-	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_group_add_device);
 
@@ -1486,6 +1483,9 @@ static int __init iommu_init(void)
 {
 	iommu_group_kset = kset_create_and_add("iommu_groups",
 					       NULL, kernel_kobj);
+	ida_init(&iommu_group_ida);
+	mutex_init(&iommu_group_mutex);
+
 	BUG_ON(!iommu_group_kset);
 
 	return 0;
@@ -1625,60 +1625,3 @@ out:
 
 	return ret;
 }
-
-int iommu_fwspec_init(struct device *dev, struct fwnode_handle *iommu_fwnode,
-		      const struct iommu_ops *ops)
-{
-	struct iommu_fwspec *fwspec = dev->iommu_fwspec;
-
-	if (fwspec)
-		return ops == fwspec->ops ? 0 : -EINVAL;
-
-	fwspec = kzalloc(sizeof(*fwspec), GFP_KERNEL);
-	if (!fwspec)
-		return -ENOMEM;
-
-	of_node_get(to_of_node(iommu_fwnode));
-	fwspec->iommu_fwnode = iommu_fwnode;
-	fwspec->ops = ops;
-	dev->iommu_fwspec = fwspec;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(iommu_fwspec_init);
-
-void iommu_fwspec_free(struct device *dev)
-{
-	struct iommu_fwspec *fwspec = dev->iommu_fwspec;
-
-	if (fwspec) {
-		fwnode_handle_put(fwspec->iommu_fwnode);
-		kfree(fwspec);
-		dev->iommu_fwspec = NULL;
-	}
-}
-EXPORT_SYMBOL_GPL(iommu_fwspec_free);
-
-int iommu_fwspec_add_ids(struct device *dev, u32 *ids, int num_ids)
-{
-	struct iommu_fwspec *fwspec = dev->iommu_fwspec;
-	size_t size;
-	int i;
-
-	if (!fwspec)
-		return -EINVAL;
-
-	size = offsetof(struct iommu_fwspec, ids[fwspec->num_ids + num_ids]);
-	if (size > sizeof(*fwspec)) {
-		fwspec = krealloc(dev->iommu_fwspec, size, GFP_KERNEL);
-		if (!fwspec)
-			return -ENOMEM;
-	}
-
-	for (i = 0; i < num_ids; i++)
-		fwspec->ids[fwspec->num_ids + i] = ids[i];
-
-	fwspec->num_ids += num_ids;
-	dev->iommu_fwspec = fwspec;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(iommu_fwspec_add_ids);

@@ -191,7 +191,6 @@ static void sumo_construct_vid_mapping_table(struct amdgpu_device *adev,
 	vid_mapping_table->num_entries = i;
 }
 
-#if 0
 static const struct kv_lcac_config_values sx_local_cac_cfg_kv[] =
 {
 	{  0,       4,        1    },
@@ -290,7 +289,6 @@ static const struct kv_lcac_config_reg cpl_cac_config_reg[] =
 {
 	{ 0xc0400d80, 0x003e0000, 17, 0x3fc00000, 22, 0x0001fffe, 1, 0x00000001, 0 }
 };
-#endif
 
 static const struct kv_pt_config_reg didt_config_kv[] =
 {
@@ -509,19 +507,19 @@ static int kv_enable_didt(struct amdgpu_device *adev, bool enable)
 	    pi->caps_db_ramping ||
 	    pi->caps_td_ramping ||
 	    pi->caps_tcp_ramping) {
-		adev->gfx.rlc.funcs->enter_safe_mode(adev);
+		gfx_v7_0_enter_rlc_safe_mode(adev);
 
 		if (enable) {
 			ret = kv_program_pt_config_registers(adev, didt_config_kv);
 			if (ret) {
-				adev->gfx.rlc.funcs->exit_safe_mode(adev);
+				gfx_v7_0_exit_rlc_safe_mode(adev);
 				return ret;
 			}
 		}
 
 		kv_do_enable_didt(adev, enable);
 
-		adev->gfx.rlc.funcs->exit_safe_mode(adev);
+		gfx_v7_0_exit_rlc_safe_mode(adev);
 	}
 
 	return 0;
@@ -2845,11 +2843,7 @@ static int kv_dpm_init(struct amdgpu_device *adev)
 		pi->caps_tcp_ramping = true;
 	}
 
-	if (amdgpu_sclk_deep_sleep_en)
-		pi->caps_sclk_ds = true;
-	else
-		pi->caps_sclk_ds = false;
-
+	pi->caps_sclk_ds = true;
 	pi->enable_auto_thermal_throttling = true;
 	pi->disable_nb_ps3_in_battery = false;
 	if (amdgpu_bapm == 0)
@@ -3062,8 +3056,6 @@ dpm_failed:
 static int kv_dpm_sw_fini(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	flush_work(&adev->pm.dpm.thermal.work);
 
 	mutex_lock(&adev->pm.mutex);
 	amdgpu_pm_sysfs_fini(adev);

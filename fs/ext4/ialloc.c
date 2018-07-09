@@ -63,6 +63,44 @@ void ext4_mark_bitmap_end(int start_bit, int end_bit, char *bitmap)
 		memset(bitmap + (i >> 3), 0xff, (end_bit - i) >> 3);
 }
 
+/* Initializes an uninitialized inode bitmap */
+static int ext4_init_inode_bitmap(struct super_block *sb,
+				       struct buffer_head *bh,
+				       ext4_group_t block_group,
+				       struct ext4_group_desc *gdp)
+{
+	struct ext4_group_info *grp;
+	struct ext4_sb_info *sbi = EXT4_SB(sb);
+	J_ASSERT_BH(bh, buffer_locked(bh));
+
+	/* If checksum is bad mark all blocks and inodes use to prevent
+	 * allocation, essentially implementing a per-group read-only flag. */
+	if (!ext4_group_desc_csum_verify(sb, block_group, gdp)) {
+		grp = ext4_get_group_info(sb, block_group);
+		if (!EXT4_MB_GRP_BBITMAP_CORRUPT(grp))
+			percpu_counter_sub(&sbi->s_freeclusters_counter,
+					   grp->bb_free);
+		set_bit(EXT4_GROUP_INFO_BBITMAP_CORRUPT_BIT, &grp->bb_state);
+		if (!EXT4_MB_GRP_IBITMAP_CORRUPT(grp)) {
+			int count;
+			count = ext4_free_inodes_count(sb, gdp);
+			percpu_counter_sub(&sbi->s_freeinodes_counter,
+					   count);
+		}
+		set_bit(EXT4_GROUP_INFO_IBITMAP_CORRUPT_BIT, &grp->bb_state);
+		return -EFSBADCRC;
+	}
+
+	memset(bh->b_data, 0, (EXT4_INODES_PER_GROUP(sb) + 7) / 8);
+	ext4_mark_bitmap_end(EXT4_INODES_PER_GROUP(sb), sb->s_blocksize * 8,
+			bh->b_data);
+	ext4_inode_bitmap_csum_set(sb, block_group, gdp, bh,
+				   EXT4_INODES_PER_GROUP(sb) / 8);
+	ext4_group_desc_csum_set(sb, block_group, gdp);
+
+	return 0;
+}
+
 void ext4_end_bitmap_read(struct buffer_head *bh, int uptodate)
 {
 	if (uptodate) {
@@ -119,7 +157,6 @@ static struct buffer_head *
 ext4_read_inode_bitmap(struct super_block *sb, ext4_group_t block_group)
 {
 	struct ext4_group_desc *desc;
-	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	struct buffer_head *bh = NULL;
 	ext4_fsblk_t bitmap_blk;
 	int err;
@@ -129,12 +166,6 @@ ext4_read_inode_bitmap(struct super_block *sb, ext4_group_t block_group)
 		return ERR_PTR(-EFSCORRUPTED);
 
 	bitmap_blk = ext4_inode_bitmap(sb, desc);
-	if ((bitmap_blk <= le32_to_cpu(sbi->s_es->s_first_data_block)) ||
-	    (bitmap_blk >= ext4_blocks_count(sbi->s_es))) {
-		ext4_error(sb, "Invalid inode bitmap blk %llu in "
-			   "block_group %u", bitmap_blk, block_group);
-		return ERR_PTR(-EFSCORRUPTED);
-	}
 	bh = sb_getblk(sb, bitmap_blk);
 	if (unlikely(!bh)) {
 		ext4_error(sb, "Cannot read inode bitmap - "
@@ -153,14 +184,17 @@ ext4_read_inode_bitmap(struct super_block *sb, ext4_group_t block_group)
 
 	ext4_lock_group(sb, block_group);
 	if (desc->bg_flags & cpu_to_le16(EXT4_BG_INODE_UNINIT)) {
-		memset(bh->b_data, 0, (EXT4_INODES_PER_GROUP(sb) + 7) / 8);
-		ext4_mark_bitmap_end(EXT4_INODES_PER_GROUP(sb),
-				     sb->s_blocksize * 8, bh->b_data);
+		err = ext4_init_inode_bitmap(sb, bh, block_group, desc);
 		set_bitmap_uptodate(bh);
 		set_buffer_uptodate(bh);
 		set_buffer_verified(bh);
 		ext4_unlock_group(sb, block_group);
 		unlock_buffer(bh);
+		if (err) {
+			ext4_error(sb, "Failed to init inode bitmap for group "
+				   "%u: %d", block_group, err);
+			goto out;
+		}
 		return bh;
 	}
 	ext4_unlock_group(sb, block_group);
@@ -180,7 +214,7 @@ ext4_read_inode_bitmap(struct super_block *sb, ext4_group_t block_group)
 	trace_ext4_load_inode_bitmap(sb, block_group);
 	bh->b_end_io = ext4_end_bitmap_read;
 	get_bh(bh);
-	submit_bh(REQ_OP_READ, REQ_META | REQ_PRIO, bh);
+	submit_bh(READ | REQ_META | REQ_PRIO, bh);
 	wait_on_buffer(bh);
 	if (!buffer_uptodate(bh)) {
 		put_bh(bh);
@@ -733,11 +767,11 @@ struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 	if ((ext4_encrypted_inode(dir) ||
 	     DUMMY_ENCRYPTION_ENABLED(EXT4_SB(dir->i_sb))) &&
 	    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode))) {
-		err = fscrypt_get_encryption_info(dir);
+		err = ext4_get_encryption_info(dir);
 		if (err)
 			return ERR_PTR(err);
-		if (!fscrypt_has_encryption_key(dir))
-			return ERR_PTR(-ENOKEY);
+		if (ext4_encryption_info(dir) == NULL)
+			return ERR_PTR(-EPERM);
 		if (!handle)
 			nblocks += EXT4_DATA_TRANS_BLOCKS(dir->i_sb);
 		encrypt = 1;
@@ -768,7 +802,7 @@ struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 	} else
 		inode_init_owner(inode, dir, mode);
 
-	if (ext4_has_feature_project(sb) &&
+	if (EXT4_HAS_RO_COMPAT_FEATURE(sb, EXT4_FEATURE_RO_COMPAT_PROJECT) &&
 	    ext4_test_inode_flag(dir, EXT4_INODE_PROJINHERIT))
 		ei->i_projid = EXT4_I(dir)->i_projid;
 	else
@@ -1081,8 +1115,7 @@ got:
 	}
 
 	if (encrypt) {
-		/* give pointer to avoid set_context with journal ops. */
-		err = fscrypt_inherit_context(dir, inode, &encrypt, true);
+		err = ext4_inherit_context(dir, inode);
 		if (err)
 			goto fail_free_drop;
 	}

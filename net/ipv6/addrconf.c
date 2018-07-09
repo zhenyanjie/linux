@@ -112,27 +112,6 @@ static inline u32 cstamp_delta(unsigned long cstamp)
 	return (cstamp - INITIAL_JIFFIES) * 100UL / HZ;
 }
 
-static inline s32 rfc3315_s14_backoff_init(s32 irt)
-{
-	/* multiply 'initial retransmission time' by 0.9 .. 1.1 */
-	u64 tmp = (900000 + prandom_u32() % 200001) * (u64)irt;
-	do_div(tmp, 1000000);
-	return (s32)tmp;
-}
-
-static inline s32 rfc3315_s14_backoff_update(s32 rt, s32 mrt)
-{
-	/* multiply 'retransmission timeout' by 1.9 .. 2.1 */
-	u64 tmp = (1900000 + prandom_u32() % 200001) * (u64)rt;
-	do_div(tmp, 1000000);
-	if ((s32)tmp > mrt) {
-		/* multiply 'maximum retransmission time' by 0.9 .. 1.1 */
-		tmp = (900000 + prandom_u32() % 200001) * (u64)mrt;
-		do_div(tmp, 1000000);
-	}
-	return (s32)tmp;
-}
-
 #ifdef CONFIG_SYSCTL
 static int addrconf_sysctl_register(struct inet6_dev *idev);
 static void addrconf_sysctl_unregister(struct inet6_dev *idev);
@@ -147,8 +126,9 @@ static inline void addrconf_sysctl_unregister(struct inet6_dev *idev)
 }
 #endif
 
-static void ipv6_regen_rndid(struct inet6_dev *idev);
-static void ipv6_try_regen_rndid(struct inet6_dev *idev, struct in6_addr *tmpaddr);
+static void __ipv6_regen_rndid(struct inet6_dev *idev);
+static void __ipv6_try_regen_rndid(struct inet6_dev *idev, struct in6_addr *tmpaddr);
+static void ipv6_regen_rndid(unsigned long data);
 
 static int ipv6_generate_eui64(u8 *eui, struct net_device *dev);
 static int ipv6_count_addresses(struct inet6_dev *idev);
@@ -183,7 +163,7 @@ static struct rt6_info *addrconf_get_prefix_route(const struct in6_addr *pfx,
 
 static void addrconf_dad_start(struct inet6_ifaddr *ifp);
 static void addrconf_dad_work(struct work_struct *w);
-static void addrconf_dad_completed(struct inet6_ifaddr *ifp, bool bump_id);
+static void addrconf_dad_completed(struct inet6_ifaddr *ifp);
 static void addrconf_dad_run(struct inet6_dev *idev);
 static void addrconf_rs_timer(unsigned long data);
 static void __ipv6_ifa_notify(int event, struct inet6_ifaddr *ifa);
@@ -207,7 +187,6 @@ static struct ipv6_devconf ipv6_devconf __read_mostly = {
 	.dad_transmits		= 1,
 	.rtr_solicits		= MAX_RTR_SOLICITATIONS,
 	.rtr_solicit_interval	= RTR_SOLICITATION_INTERVAL,
-	.rtr_solicit_max_interval = RTR_SOLICITATION_MAX_INTERVAL,
 	.rtr_solicit_delay	= MAX_RTR_SOLICITATION_DELAY,
 	.use_tempaddr		= 0,
 	.temp_valid_lft		= TEMP_VALID_LIFETIME,
@@ -253,7 +232,6 @@ static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
 	.dad_transmits		= 1,
 	.rtr_solicits		= MAX_RTR_SOLICITATIONS,
 	.rtr_solicit_interval	= RTR_SOLICITATION_INTERVAL,
-	.rtr_solicit_max_interval = RTR_SOLICITATION_MAX_INTERVAL,
 	.rtr_solicit_delay	= MAX_RTR_SOLICITATION_DELAY,
 	.use_tempaddr		= 0,
 	.temp_valid_lft		= TEMP_VALID_LIFETIME,
@@ -286,10 +264,10 @@ static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
 	.keep_addr_on_down	= 0,
 };
 
-/* Check if link is ready: is it up and is a valid qdisc available */
-static inline bool addrconf_link_ready(const struct net_device *dev)
+/* Check if a valid qdisc is available */
+static inline bool addrconf_qdisc_ok(const struct net_device *dev)
 {
-	return netif_oper_up(dev) && !qdisc_tx_is_noop(dev);
+	return !qdisc_tx_is_noop(dev);
 }
 
 static void addrconf_del_rs_timer(struct inet6_dev *idev)
@@ -315,9 +293,9 @@ static void addrconf_mod_rs_timer(struct inet6_dev *idev,
 static void addrconf_mod_dad_work(struct inet6_ifaddr *ifp,
 				   unsigned long delay)
 {
-	in6_ifa_hold(ifp);
-	if (mod_delayed_work(addrconf_wq, &ifp->dad_work, delay))
-		in6_ifa_put(ifp);
+	if (!delayed_work_pending(&ifp->dad_work))
+		in6_ifa_hold(ifp);
+	mod_delayed_work(addrconf_wq, &ifp->dad_work, delay);
 }
 
 static int snmp6_alloc_dev(struct inet6_dev *idev)
@@ -408,7 +386,9 @@ static struct inet6_dev *ipv6_add_dev(struct net_device *dev)
 		goto err_release;
 	}
 
-	/* One reference from device. */
+	/* One reference from device.  We must do this before
+	 * we invoke __ipv6_regen_rndid().
+	 */
 	in6_dev_hold(ndev);
 
 	if (dev->flags & (IFF_NOARP | IFF_LOOPBACK))
@@ -422,19 +402,21 @@ static struct inet6_dev *ipv6_add_dev(struct net_device *dev)
 #endif
 
 	INIT_LIST_HEAD(&ndev->tempaddr_list);
-	ndev->desync_factor = U32_MAX;
+	setup_timer(&ndev->regen_timer, ipv6_regen_rndid, (unsigned long)ndev);
 	if ((dev->flags&IFF_LOOPBACK) ||
 	    dev->type == ARPHRD_TUNNEL ||
 	    dev->type == ARPHRD_TUNNEL6 ||
 	    dev->type == ARPHRD_SIT ||
 	    dev->type == ARPHRD_NONE) {
 		ndev->cnf.use_tempaddr = -1;
-	} else
-		ipv6_regen_rndid(ndev);
+	} else {
+		in6_dev_hold(ndev);
+		ipv6_regen_rndid((unsigned long) ndev);
+	}
 
 	ndev->token = in6addr_any;
 
-	if (netif_running(dev) && addrconf_link_ready(dev))
+	if (netif_running(dev) && addrconf_qdisc_ok(dev))
 		ndev->if_flags |= IF_READY;
 
 	ipv6_mc_init_dev(ndev);
@@ -442,6 +424,7 @@ static struct inet6_dev *ipv6_add_dev(struct net_device *dev)
 	err = addrconf_sysctl_register(ndev);
 	if (err) {
 		ipv6_mc_destroy_dev(ndev);
+		del_timer(&ndev->regen_timer);
 		snmp6_unregister_dev(ndev);
 		goto err_release;
 	}
@@ -564,7 +547,7 @@ void inet6_netconf_notify_devconf(struct net *net, int type, int ifindex,
 	struct sk_buff *skb;
 	int err = -ENOBUFS;
 
-	skb = nlmsg_new(inet6_netconf_msgsize_devconf(type), GFP_KERNEL);
+	skb = nlmsg_new(inet6_netconf_msgsize_devconf(type), GFP_ATOMIC);
 	if (!skb)
 		goto errout;
 
@@ -576,7 +559,7 @@ void inet6_netconf_notify_devconf(struct net *net, int type, int ifindex,
 		kfree_skb(skb);
 		goto errout;
 	}
-	rtnl_notify(skb, net, 0, RTNLGRP_IPV6_NETCONF, NULL, GFP_KERNEL);
+	rtnl_notify(skb, net, 0, RTNLGRP_IPV6_NETCONF, NULL, GFP_ATOMIC);
 	return;
 errout:
 	rtnl_set_sk_err(net, RTNLGRP_IPV6_NETCONF, err);
@@ -795,14 +778,7 @@ static int addrconf_fixup_forwarding(struct ctl_table *table, int *p, int newf)
 	}
 
 	if (p == &net->ipv6.devconf_all->forwarding) {
-		int old_dflt = net->ipv6.devconf_dflt->forwarding;
-
 		net->ipv6.devconf_dflt->forwarding = newf;
-		if ((!newf) ^ (!old_dflt))
-			inet6_netconf_notify_devconf(net, NETCONFA_FORWARDING,
-						     NETCONFA_IFINDEX_DEFAULT,
-						     net->ipv6.devconf_dflt);
-
 		addrconf_forward_change(net, newf);
 		if ((!newf) ^ (!old))
 			inet6_netconf_notify_devconf(net, NETCONFA_FORWARDING,
@@ -988,10 +964,7 @@ ipv6_add_addr(struct inet6_dev *idev, const struct in6_addr *addr,
 	INIT_HLIST_NODE(&ifa->addr_lst);
 	ifa->scope = scope;
 	ifa->prefix_len = pfxlen;
-	ifa->flags = flags;
-	/* No need to add the TENTATIVE flag for addresses with NODAD */
-	if (!(flags & IFA_F_NODAD))
-		ifa->flags |= IFA_F_TENTATIVE;
+	ifa->flags = flags | IFA_F_TENTATIVE;
 	ifa->valid_lft = valid_lft;
 	ifa->prefered_lft = prefered_lft;
 	ifa->cstamp = ifa->tstamp = jiffies;
@@ -1187,8 +1160,6 @@ static int ipv6_create_tempaddr(struct inet6_ifaddr *ifp, struct inet6_ifaddr *i
 	int ret = 0;
 	u32 addr_flags;
 	unsigned long now = jiffies;
-	long max_desync_factor;
-	s32 cnf_temp_preferred_lft;
 
 	write_lock_bh(&idev->lock);
 	if (ift) {
@@ -1221,42 +1192,23 @@ retry:
 	}
 	in6_ifa_hold(ifp);
 	memcpy(addr.s6_addr, ifp->addr.s6_addr, 8);
-	ipv6_try_regen_rndid(idev, tmpaddr);
+	__ipv6_try_regen_rndid(idev, tmpaddr);
 	memcpy(&addr.s6_addr[8], idev->rndid, 8);
 	age = (now - ifp->tstamp) / HZ;
-
-	regen_advance = idev->cnf.regen_max_retry *
-			idev->cnf.dad_transmits *
-			NEIGH_VAR(idev->nd_parms, RETRANS_TIME) / HZ;
-
-	/* recalculate max_desync_factor each time and update
-	 * idev->desync_factor if it's larger
-	 */
-	cnf_temp_preferred_lft = READ_ONCE(idev->cnf.temp_prefered_lft);
-	max_desync_factor = min_t(__u32,
-				  idev->cnf.max_desync_factor,
-				  cnf_temp_preferred_lft - regen_advance);
-
-	if (unlikely(idev->desync_factor > max_desync_factor)) {
-		if (max_desync_factor > 0) {
-			get_random_bytes(&idev->desync_factor,
-					 sizeof(idev->desync_factor));
-			idev->desync_factor %= max_desync_factor;
-		} else {
-			idev->desync_factor = 0;
-		}
-	}
-
 	tmp_valid_lft = min_t(__u32,
 			      ifp->valid_lft,
 			      idev->cnf.temp_valid_lft + age);
-	tmp_prefered_lft = cnf_temp_preferred_lft + age -
-			    idev->desync_factor;
-	tmp_prefered_lft = min_t(__u32, ifp->prefered_lft, tmp_prefered_lft);
+	tmp_prefered_lft = min_t(__u32,
+				 ifp->prefered_lft,
+				 idev->cnf.temp_prefered_lft + age -
+				 idev->cnf.max_desync_factor);
 	tmp_plen = ifp->prefix_len;
 	tmp_tstamp = ifp->tstamp;
 	spin_unlock_bh(&ifp->lock);
 
+	regen_advance = idev->cnf.regen_max_retry *
+			idev->cnf.dad_transmits *
+			NEIGH_VAR(idev->nd_parms, RETRANS_TIME) / HZ;
 	write_unlock_bh(&idev->lock);
 
 	/* A temporary address is created only if this calculated Preferred
@@ -1572,28 +1524,6 @@ out:
 	return hiscore_idx;
 }
 
-static int ipv6_get_saddr_master(struct net *net,
-				 const struct net_device *dst_dev,
-				 const struct net_device *master,
-				 struct ipv6_saddr_dst *dst,
-				 struct ipv6_saddr_score *scores,
-				 int hiscore_idx)
-{
-	struct inet6_dev *idev;
-
-	idev = __in6_dev_get(dst_dev);
-	if (idev)
-		hiscore_idx = __ipv6_dev_get_saddr(net, dst, idev,
-						   scores, hiscore_idx);
-
-	idev = __in6_dev_get(master);
-	if (idev)
-		hiscore_idx = __ipv6_dev_get_saddr(net, dst, idev,
-						   scores, hiscore_idx);
-
-	return hiscore_idx;
-}
-
 int ipv6_dev_get_saddr(struct net *net, const struct net_device *dst_dev,
 		       const struct in6_addr *daddr, unsigned int prefs,
 		       struct in6_addr *saddr)
@@ -1647,39 +1577,13 @@ int ipv6_dev_get_saddr(struct net *net, const struct net_device *dst_dev,
 		if (idev)
 			hiscore_idx = __ipv6_dev_get_saddr(net, &dst, idev, scores, hiscore_idx);
 	} else {
-		const struct net_device *master;
-		int master_idx = 0;
-
-		/* if dst_dev exists and is enslaved to an L3 device, then
-		 * prefer addresses from dst_dev and then the master over
-		 * any other enslaved devices in the L3 domain.
-		 */
-		master = l3mdev_master_dev_rcu(dst_dev);
-		if (master) {
-			master_idx = master->ifindex;
-
-			hiscore_idx = ipv6_get_saddr_master(net, dst_dev,
-							    master, &dst,
-							    scores, hiscore_idx);
-
-			if (scores[hiscore_idx].ifa)
-				goto out;
-		}
-
 		for_each_netdev_rcu(net, dev) {
-			/* only consider addresses on devices in the
-			 * same L3 domain
-			 */
-			if (l3mdev_master_ifindex_rcu(dev) != master_idx)
-				continue;
 			idev = __in6_dev_get(dev);
 			if (!idev)
 				continue;
 			hiscore_idx = __ipv6_dev_get_saddr(net, &dst, idev, scores, hiscore_idx);
 		}
 	}
-
-out:
 	rcu_read_unlock();
 
 	hiscore = &scores[hiscore_idx];
@@ -1878,7 +1782,15 @@ static void addrconf_dad_stop(struct inet6_ifaddr *ifp, int dad_failed)
 	if (dad_failed)
 		ifp->flags |= IFA_F_DADFAILED;
 
-	if (ifp->flags&IFA_F_TEMPORARY) {
+	if (ifp->flags&IFA_F_PERMANENT) {
+		spin_lock_bh(&ifp->lock);
+		addrconf_del_dad_work(ifp);
+		ifp->flags |= IFA_F_TENTATIVE;
+		spin_unlock_bh(&ifp->lock);
+		if (dad_failed)
+			ipv6_ifa_notify(0, ifp);
+		in6_ifa_put(ifp);
+	} else if (ifp->flags&IFA_F_TEMPORARY) {
 		struct inet6_ifaddr *ifpub;
 		spin_lock_bh(&ifp->lock);
 		ifpub = ifp->ifpub;
@@ -1891,14 +1803,6 @@ static void addrconf_dad_stop(struct inet6_ifaddr *ifp, int dad_failed)
 			spin_unlock_bh(&ifp->lock);
 		}
 		ipv6_del_addr(ifp);
-	} else if (ifp->flags&IFA_F_PERMANENT || !dad_failed) {
-		spin_lock_bh(&ifp->lock);
-		addrconf_del_dad_work(ifp);
-		ifp->flags |= IFA_F_TENTATIVE;
-		spin_unlock_bh(&ifp->lock);
-		if (dad_failed)
-			ipv6_ifa_notify(0, ifp);
-		in6_ifa_put(ifp);
 	} else {
 		ipv6_del_addr(ifp);
 	}
@@ -1920,6 +1824,7 @@ static int addrconf_dad_end(struct inet6_ifaddr *ifp)
 
 void addrconf_dad_failure(struct inet6_ifaddr *ifp)
 {
+	struct in6_addr addr;
 	struct inet6_dev *idev = ifp->idev;
 	struct net *net = dev_net(ifp->idev->dev);
 
@@ -1981,6 +1886,18 @@ void addrconf_dad_failure(struct inet6_ifaddr *ifp)
 		in6_ifa_put(ifp2);
 lock_errdad:
 		spin_lock_bh(&ifp->lock);
+	} else if (idev->cnf.accept_dad > 1 && !idev->cnf.disable_ipv6) {
+		addr.s6_addr32[0] = htonl(0xfe800000);
+		addr.s6_addr32[1] = 0;
+
+		if (!ipv6_generate_eui64(addr.s6_addr + 8, idev->dev) &&
+		    ipv6_addr_equal(&ifp->addr, &addr)) {
+			/* DAD failed for link-local based on MAC address */
+			idev->cnf.disable_ipv6 = 1;
+
+			pr_info("%s: IPv6 being disabled!\n",
+				ifp->idev->dev->name);
+		}
 	}
 
 errdad:
@@ -2168,7 +2085,7 @@ static int ipv6_inherit_eui64(u8 *eui, struct inet6_dev *idev)
 }
 
 /* (re)generation of randomized interface identifier (RFC 3041 3.2, 3.5) */
-static void ipv6_regen_rndid(struct inet6_dev *idev)
+static void __ipv6_regen_rndid(struct inet6_dev *idev)
 {
 regen:
 	get_random_bytes(idev->rndid, sizeof(idev->rndid));
@@ -2197,10 +2114,43 @@ regen:
 	}
 }
 
-static void  ipv6_try_regen_rndid(struct inet6_dev *idev, struct in6_addr *tmpaddr)
+static void ipv6_regen_rndid(unsigned long data)
+{
+	struct inet6_dev *idev = (struct inet6_dev *) data;
+	unsigned long expires;
+
+	rcu_read_lock_bh();
+	write_lock_bh(&idev->lock);
+
+	if (idev->dead)
+		goto out;
+
+	__ipv6_regen_rndid(idev);
+
+	expires = jiffies +
+		idev->cnf.temp_prefered_lft * HZ -
+		idev->cnf.regen_max_retry * idev->cnf.dad_transmits *
+		NEIGH_VAR(idev->nd_parms, RETRANS_TIME) -
+		idev->cnf.max_desync_factor * HZ;
+	if (time_before(expires, jiffies)) {
+		pr_warn("%s: too short regeneration interval; timer disabled for %s\n",
+			__func__, idev->dev->name);
+		goto out;
+	}
+
+	if (!mod_timer(&idev->regen_timer, expires))
+		in6_dev_hold(idev);
+
+out:
+	write_unlock_bh(&idev->lock);
+	rcu_read_unlock_bh();
+	in6_dev_put(idev);
+}
+
+static void  __ipv6_try_regen_rndid(struct inet6_dev *idev, struct in6_addr *tmpaddr)
 {
 	if (tmpaddr && memcmp(idev->rndid, &tmpaddr->s6_addr[8], 8) == 0)
-		ipv6_regen_rndid(idev);
+		__ipv6_regen_rndid(idev);
 }
 
 /*
@@ -2305,7 +2255,7 @@ static struct inet6_dev *addrconf_add_dev(struct net_device *dev)
 		return ERR_PTR(-EACCES);
 
 	/* Add default multicast route */
-	if (!(dev->flags & IFF_LOOPBACK) && !netif_is_l3_master(dev))
+	if (!(dev->flags & IFF_LOOPBACK))
 		addrconf_add_mroute(dev);
 
 	return idev;
@@ -2341,7 +2291,7 @@ static void manage_tempaddrs(struct inet6_dev *idev,
 			max_valid = 0;
 
 		max_prefered = idev->cnf.temp_prefered_lft -
-			       idev->desync_factor - age;
+			       idev->cnf.max_desync_factor - age;
 		if (max_prefered < 0)
 			max_prefered = 0;
 
@@ -2384,109 +2334,12 @@ static bool is_addr_mode_generate_stable(struct inet6_dev *idev)
 	       idev->addr_gen_mode == IN6_ADDR_GEN_MODE_RANDOM;
 }
 
-int addrconf_prefix_rcv_add_addr(struct net *net, struct net_device *dev,
-				 const struct prefix_info *pinfo,
-				 struct inet6_dev *in6_dev,
-				 const struct in6_addr *addr, int addr_type,
-				 u32 addr_flags, bool sllao, bool tokenized,
-				 __u32 valid_lft, u32 prefered_lft)
-{
-	struct inet6_ifaddr *ifp = ipv6_get_ifaddr(net, addr, dev, 1);
-	int create = 0, update_lft = 0;
-
-	if (!ifp && valid_lft) {
-		int max_addresses = in6_dev->cnf.max_addresses;
-
-#ifdef CONFIG_IPV6_OPTIMISTIC_DAD
-		if (in6_dev->cnf.optimistic_dad &&
-		    !net->ipv6.devconf_all->forwarding && sllao)
-			addr_flags |= IFA_F_OPTIMISTIC;
-#endif
-
-		/* Do not allow to create too much of autoconfigured
-		 * addresses; this would be too easy way to crash kernel.
-		 */
-		if (!max_addresses ||
-		    ipv6_count_addresses(in6_dev) < max_addresses)
-			ifp = ipv6_add_addr(in6_dev, addr, NULL,
-					    pinfo->prefix_len,
-					    addr_type&IPV6_ADDR_SCOPE_MASK,
-					    addr_flags, valid_lft,
-					    prefered_lft);
-
-		if (IS_ERR_OR_NULL(ifp))
-			return -1;
-
-		update_lft = 0;
-		create = 1;
-		spin_lock_bh(&ifp->lock);
-		ifp->flags |= IFA_F_MANAGETEMPADDR;
-		ifp->cstamp = jiffies;
-		ifp->tokenized = tokenized;
-		spin_unlock_bh(&ifp->lock);
-		addrconf_dad_start(ifp);
-	}
-
-	if (ifp) {
-		u32 flags;
-		unsigned long now;
-		u32 stored_lft;
-
-		/* update lifetime (RFC2462 5.5.3 e) */
-		spin_lock_bh(&ifp->lock);
-		now = jiffies;
-		if (ifp->valid_lft > (now - ifp->tstamp) / HZ)
-			stored_lft = ifp->valid_lft - (now - ifp->tstamp) / HZ;
-		else
-			stored_lft = 0;
-		if (!update_lft && !create && stored_lft) {
-			const u32 minimum_lft = min_t(u32,
-				stored_lft, MIN_VALID_LIFETIME);
-			valid_lft = max(valid_lft, minimum_lft);
-
-			/* RFC4862 Section 5.5.3e:
-			 * "Note that the preferred lifetime of the
-			 *  corresponding address is always reset to
-			 *  the Preferred Lifetime in the received
-			 *  Prefix Information option, regardless of
-			 *  whether the valid lifetime is also reset or
-			 *  ignored."
-			 *
-			 * So we should always update prefered_lft here.
-			 */
-			update_lft = 1;
-		}
-
-		if (update_lft) {
-			ifp->valid_lft = valid_lft;
-			ifp->prefered_lft = prefered_lft;
-			ifp->tstamp = now;
-			flags = ifp->flags;
-			ifp->flags &= ~IFA_F_DEPRECATED;
-			spin_unlock_bh(&ifp->lock);
-
-			if (!(flags&IFA_F_TENTATIVE))
-				ipv6_ifa_notify(0, ifp);
-		} else
-			spin_unlock_bh(&ifp->lock);
-
-		manage_tempaddrs(in6_dev, ifp, valid_lft, prefered_lft,
-				 create, now);
-
-		in6_ifa_put(ifp);
-		addrconf_verify();
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(addrconf_prefix_rcv_add_addr);
-
 void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len, bool sllao)
 {
 	struct prefix_info *pinfo;
 	__u32 valid_lft;
 	__u32 prefered_lft;
-	int addr_type, err;
+	int addr_type;
 	u32 addr_flags = 0;
 	struct inet6_dev *in6_dev;
 	struct net *net = dev_net(dev);
@@ -2580,8 +2433,10 @@ void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len, bool sllao)
 	/* Try to figure out our local address for this prefix */
 
 	if (pinfo->autoconf && in6_dev->cnf.autoconf) {
+		struct inet6_ifaddr *ifp;
 		struct in6_addr addr;
-		bool tokenized = false, dev_addr_generated = false;
+		int create = 0, update_lft = 0;
+		bool tokenized = false;
 
 		if (pinfo->prefix_len == 64) {
 			memcpy(&addr, &pinfo->prefix, 8);
@@ -2599,36 +2454,106 @@ void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len, bool sllao)
 				goto ok;
 			} else if (ipv6_generate_eui64(addr.s6_addr + 8, dev) &&
 				   ipv6_inherit_eui64(addr.s6_addr + 8, in6_dev)) {
-				goto put;
-			} else {
-				dev_addr_generated = true;
+				in6_dev_put(in6_dev);
+				return;
 			}
 			goto ok;
 		}
 		net_dbg_ratelimited("IPv6 addrconf: prefix with wrong length %d\n",
 				    pinfo->prefix_len);
-		goto put;
+		in6_dev_put(in6_dev);
+		return;
 
 ok:
-		err = addrconf_prefix_rcv_add_addr(net, dev, pinfo, in6_dev,
-						   &addr, addr_type,
-						   addr_flags, sllao,
-						   tokenized, valid_lft,
-						   prefered_lft);
-		if (err)
-			goto put;
 
-		/* Ignore error case here because previous prefix add addr was
-		 * successful which will be notified.
-		 */
-		ndisc_ops_prefix_rcv_add_addr(net, dev, pinfo, in6_dev, &addr,
-					      addr_type, addr_flags, sllao,
-					      tokenized, valid_lft,
-					      prefered_lft,
-					      dev_addr_generated);
+		ifp = ipv6_get_ifaddr(net, &addr, dev, 1);
+
+		if (!ifp && valid_lft) {
+			int max_addresses = in6_dev->cnf.max_addresses;
+
+#ifdef CONFIG_IPV6_OPTIMISTIC_DAD
+			if (in6_dev->cnf.optimistic_dad &&
+			    !net->ipv6.devconf_all->forwarding && sllao)
+				addr_flags |= IFA_F_OPTIMISTIC;
+#endif
+
+			/* Do not allow to create too much of autoconfigured
+			 * addresses; this would be too easy way to crash kernel.
+			 */
+			if (!max_addresses ||
+			    ipv6_count_addresses(in6_dev) < max_addresses)
+				ifp = ipv6_add_addr(in6_dev, &addr, NULL,
+						    pinfo->prefix_len,
+						    addr_type&IPV6_ADDR_SCOPE_MASK,
+						    addr_flags, valid_lft,
+						    prefered_lft);
+
+			if (IS_ERR_OR_NULL(ifp)) {
+				in6_dev_put(in6_dev);
+				return;
+			}
+
+			update_lft = 0;
+			create = 1;
+			spin_lock_bh(&ifp->lock);
+			ifp->flags |= IFA_F_MANAGETEMPADDR;
+			ifp->cstamp = jiffies;
+			ifp->tokenized = tokenized;
+			spin_unlock_bh(&ifp->lock);
+			addrconf_dad_start(ifp);
+		}
+
+		if (ifp) {
+			u32 flags;
+			unsigned long now;
+			u32 stored_lft;
+
+			/* update lifetime (RFC2462 5.5.3 e) */
+			spin_lock_bh(&ifp->lock);
+			now = jiffies;
+			if (ifp->valid_lft > (now - ifp->tstamp) / HZ)
+				stored_lft = ifp->valid_lft - (now - ifp->tstamp) / HZ;
+			else
+				stored_lft = 0;
+			if (!update_lft && !create && stored_lft) {
+				const u32 minimum_lft = min_t(u32,
+					stored_lft, MIN_VALID_LIFETIME);
+				valid_lft = max(valid_lft, minimum_lft);
+
+				/* RFC4862 Section 5.5.3e:
+				 * "Note that the preferred lifetime of the
+				 *  corresponding address is always reset to
+				 *  the Preferred Lifetime in the received
+				 *  Prefix Information option, regardless of
+				 *  whether the valid lifetime is also reset or
+				 *  ignored."
+				 *
+				 * So we should always update prefered_lft here.
+				 */
+				update_lft = 1;
+			}
+
+			if (update_lft) {
+				ifp->valid_lft = valid_lft;
+				ifp->prefered_lft = prefered_lft;
+				ifp->tstamp = now;
+				flags = ifp->flags;
+				ifp->flags &= ~IFA_F_DEPRECATED;
+				spin_unlock_bh(&ifp->lock);
+
+				if (!(flags&IFA_F_TENTATIVE))
+					ipv6_ifa_notify(0, ifp);
+			} else
+				spin_unlock_bh(&ifp->lock);
+
+			manage_tempaddrs(in6_dev, ifp, valid_lft, prefered_lft,
+					 create, now);
+
+			in6_ifa_put(ifp);
+			addrconf_verify();
+		}
 	}
 	inet6_prefix_notify(RTM_NEWPREFIX, in6_dev, pinfo);
-put:
 	in6_dev_put(in6_dev);
 }
 
@@ -2901,7 +2826,6 @@ static void add_addr(struct inet6_dev *idev, const struct in6_addr *addr,
 		spin_lock_bh(&ifp->lock);
 		ifp->flags &= ~IFA_F_TENTATIVE;
 		spin_unlock_bh(&ifp->lock);
-		rt_genid_bump_ipv6(dev_net(idev->dev));
 		ipv6_ifa_notify(RTM_NEWADDR, ifp);
 		in6_ifa_put(ifp);
 	}
@@ -3004,7 +2928,7 @@ static void init_loopback(struct net_device *dev)
 				 * lo device down, release this obsolete dst and
 				 * reallocate a new router for ifa.
 				 */
-				if (!atomic_read(&sp_ifa->rt->rt6i_ref)) {
+				if (sp_ifa->rt->dst.obsolete > 0) {
 					ip6_rt_put(sp_ifa->rt);
 					sp_ifa->rt = NULL;
 				} else {
@@ -3024,8 +2948,8 @@ static void init_loopback(struct net_device *dev)
 	}
 }
 
-void addrconf_add_linklocal(struct inet6_dev *idev,
-			    const struct in6_addr *addr, u32 flags)
+static void addrconf_add_linklocal(struct inet6_dev *idev,
+				   const struct in6_addr *addr, u32 flags)
 {
 	struct inet6_ifaddr *ifp;
 	u32 addr_flags = flags | IFA_F_PERMANENT;
@@ -3044,7 +2968,6 @@ void addrconf_add_linklocal(struct inet6_dev *idev,
 		in6_ifa_put(ifp);
 	}
 }
-EXPORT_SYMBOL_GPL(addrconf_add_linklocal);
 
 static bool ipv6_reserved_interfaceid(struct in6_addr address)
 {
@@ -3256,24 +3179,14 @@ static void addrconf_gre_config(struct net_device *dev)
 static int fixup_permanent_addr(struct inet6_dev *idev,
 				struct inet6_ifaddr *ifp)
 {
-	/* rt6i_ref == 0 means the host route was removed from the
-	 * FIB, for example, if 'lo' device is taken down. In that
-	 * case regenerate the host route.
-	 */
-	if (!ifp->rt || !atomic_read(&ifp->rt->rt6i_ref)) {
-		struct rt6_info *rt, *prev;
+	if (!ifp->rt) {
+		struct rt6_info *rt;
 
 		rt = addrconf_dst_alloc(idev, &ifp->addr, false);
 		if (unlikely(IS_ERR(rt)))
 			return PTR_ERR(rt);
 
-		/* ifp->rt can be accessed outside of rtnl */
-		spin_lock(&ifp->lock);
-		prev = ifp->rt;
 		ifp->rt = rt;
-		spin_unlock(&ifp->lock);
-
-		ip6_rt_put(prev);
 	}
 
 	if (!(ifp->flags & IFA_F_NOPREFIXROUTE)) {
@@ -3281,8 +3194,7 @@ static int fixup_permanent_addr(struct inet6_dev *idev,
 				      idev->dev, 0, 0);
 	}
 
-	if (ifp->state == INET6_IFADDR_STATE_PREDAD)
-		addrconf_dad_start(ifp);
+	addrconf_dad_start(ifp);
 
 	return 0;
 }
@@ -3302,7 +3214,6 @@ static void addrconf_permanent_addr(struct net_device *dev)
 		if ((ifp->flags & IFA_F_PERMANENT) &&
 		    fixup_permanent_addr(idev, ifp) < 0) {
 			write_unlock_bh(&idev->lock);
-			in6_ifa_hold(ifp);
 			ipv6_del_addr(ifp);
 			write_lock_bh(&idev->lock);
 
@@ -3320,7 +3231,6 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
 	struct netdev_notifier_changeupper_info *info;
 	struct inet6_dev *idev = __in6_dev_get(dev);
-	struct net *net = dev_net(dev);
 	int run_pending = 0;
 	int err;
 
@@ -3336,7 +3246,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 	case NETDEV_CHANGEMTU:
 		/* if MTU under IPV6_MIN_MTU stop IPv6 on this interface. */
 		if (dev->mtu < IPV6_MIN_MTU) {
-			addrconf_ifdown(dev, dev != net->loopback_dev);
+			addrconf_ifdown(dev, 1);
 			break;
 		}
 
@@ -3371,7 +3281,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 			/* restore routes for permanent addresses */
 			addrconf_permanent_addr(dev);
 
-			if (!addrconf_link_ready(dev)) {
+			if (!addrconf_qdisc_ok(dev)) {
 				/* device is not ready yet. */
 				pr_info("ADDRCONF(NETDEV_UP): %s: link is not ready\n",
 					dev->name);
@@ -3386,21 +3296,15 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 				run_pending = 1;
 			}
 		} else if (event == NETDEV_CHANGE) {
-			if (!addrconf_link_ready(dev)) {
+			if (!addrconf_qdisc_ok(dev)) {
 				/* device is still not ready. */
 				break;
 			}
 
 			if (idev) {
-				if (idev->if_flags & IF_READY) {
-					/* device is already configured -
-					 * but resend MLD reports, we might
-					 * have roamed and need to update
-					 * multicast snooping switches
-					 */
-					ipv6_mc_up(idev);
+				if (idev->if_flags & IF_READY)
+					/* device is already configured. */
 					break;
-				}
 				idev->if_flags |= IF_READY;
 			}
 
@@ -3452,7 +3356,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 			 * IPV6_MIN_MTU stop IPv6 on this interface.
 			 */
 			if (dev->mtu < IPV6_MIN_MTU)
-				addrconf_ifdown(dev, dev != net->loopback_dev);
+				addrconf_ifdown(dev, 1);
 		}
 		break;
 
@@ -3503,7 +3407,6 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
  */
 static struct notifier_block ipv6_dev_notf = {
 	.notifier_call = addrconf_notify,
-	.priority = ADDRCONF_NOTIFY_PRIORITY,
 };
 
 static void addrconf_type_change(struct net_device *dev, unsigned long event)
@@ -3600,6 +3503,9 @@ restart:
 	if (!how)
 		idev->if_flags &= ~(IF_RS_SENT|IF_RA_RCVD|IF_READY);
 
+	if (how && del_timer(&idev->regen_timer))
+		in6_dev_put(idev);
+
 	/* Step 3: clear tempaddr list */
 	while (!list_empty(&idev->tempaddr_list)) {
 		ifa = list_first_entry(&idev->tempaddr_list,
@@ -3625,22 +3531,17 @@ restart:
 	INIT_LIST_HEAD(&del_list);
 	list_for_each_entry_safe(ifa, tmp, &idev->addr_list, if_list) {
 		struct rt6_info *rt = NULL;
-		bool keep;
 
 		addrconf_del_dad_work(ifa);
-
-		keep = keep_addr && (ifa->flags & IFA_F_PERMANENT) &&
-			!addr_is_local(&ifa->addr);
-		if (!keep)
-			list_move(&ifa->if_list, &del_list);
 
 		write_unlock_bh(&idev->lock);
 		spin_lock_bh(&ifa->lock);
 
-		if (keep) {
+		if (keep_addr && (ifa->flags & IFA_F_PERMANENT) &&
+		    !addr_is_local(&ifa->addr)) {
 			/* set state to skip the notifier below */
 			state = INET6_IFADDR_STATE_DEAD;
-			ifa->state = INET6_IFADDR_STATE_PREDAD;
+			ifa->state = 0;
 			if (!(ifa->flags & IFA_F_NODAD))
 				ifa->flags |= IFA_F_TENTATIVE;
 
@@ -3649,6 +3550,9 @@ restart:
 		} else {
 			state = ifa->state;
 			ifa->state = INET6_IFADDR_STATE_DEAD;
+
+			list_del(&ifa->if_list);
+			list_add(&ifa->if_list, &del_list);
 		}
 
 		spin_unlock_bh(&ifa->lock);
@@ -3716,7 +3620,7 @@ static void addrconf_rs_timer(unsigned long data)
 	if (idev->if_flags & IF_RA_RCVD)
 		goto out;
 
-	if (idev->rs_probes++ < idev->cnf.rtr_solicits || idev->cnf.rtr_solicits < 0) {
+	if (idev->rs_probes++ < idev->cnf.rtr_solicits) {
 		write_unlock(&idev->lock);
 		if (!ipv6_get_lladdr(dev, &lladdr, IFA_F_TENTATIVE))
 			ndisc_send_rs(dev, &lladdr,
@@ -3725,13 +3629,11 @@ static void addrconf_rs_timer(unsigned long data)
 			goto put;
 
 		write_lock(&idev->lock);
-		idev->rs_interval = rfc3315_s14_backoff_update(
-			idev->rs_interval, idev->cnf.rtr_solicit_max_interval);
 		/* The wait after the last probe can be shorter */
 		addrconf_mod_rs_timer(idev, (idev->rs_probes ==
 					     idev->cnf.rtr_solicits) ?
 				      idev->cnf.rtr_solicit_delay :
-				      idev->rs_interval);
+				      idev->cnf.rtr_solicit_interval);
 	} else {
 		/*
 		 * Note: we do not support deprecated "all on-link"
@@ -3767,7 +3669,7 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 {
 	struct inet6_dev *idev = ifp->idev;
 	struct net_device *dev = idev->dev;
-	bool bump_id, notify = false;
+	bool notify = false;
 
 	addrconf_join_solict(dev, &ifp->addr);
 
@@ -3782,12 +3684,11 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 	    idev->cnf.accept_dad < 1 ||
 	    !(ifp->flags&IFA_F_TENTATIVE) ||
 	    ifp->flags & IFA_F_NODAD) {
-		bump_id = ifp->flags & IFA_F_TENTATIVE;
 		ifp->flags &= ~(IFA_F_TENTATIVE|IFA_F_OPTIMISTIC|IFA_F_DADFAILED);
 		spin_unlock(&ifp->lock);
 		read_unlock_bh(&idev->lock);
 
-		addrconf_dad_completed(ifp, bump_id);
+		addrconf_dad_completed(ifp);
 		return;
 	}
 
@@ -3847,7 +3748,6 @@ static void addrconf_dad_work(struct work_struct *w)
 						struct inet6_ifaddr,
 						dad_work);
 	struct inet6_dev *idev = ifp->idev;
-	bool bump_id, disable_ipv6 = false;
 	struct in6_addr mcaddr;
 
 	enum {
@@ -3865,24 +3765,6 @@ static void addrconf_dad_work(struct work_struct *w)
 	} else if (ifp->state == INET6_IFADDR_STATE_ERRDAD) {
 		action = DAD_ABORT;
 		ifp->state = INET6_IFADDR_STATE_POSTDAD;
-
-		if (idev->cnf.accept_dad > 1 && !idev->cnf.disable_ipv6 &&
-		    !(ifp->flags & IFA_F_STABLE_PRIVACY)) {
-			struct in6_addr addr;
-
-			addr.s6_addr32[0] = htonl(0xfe800000);
-			addr.s6_addr32[1] = 0;
-
-			if (!ipv6_generate_eui64(addr.s6_addr + 8, idev->dev) &&
-			    ipv6_addr_equal(&ifp->addr, &addr)) {
-				/* DAD failed for link-local based on MAC */
-				idev->cnf.disable_ipv6 = 1;
-
-				pr_info("%s: IPv6 being disabled!\n",
-					ifp->idev->dev->name);
-				disable_ipv6 = true;
-			}
-		}
 	}
 	spin_unlock_bh(&ifp->lock);
 
@@ -3892,8 +3774,6 @@ static void addrconf_dad_work(struct work_struct *w)
 	} else if (action == DAD_ABORT) {
 		in6_ifa_hold(ifp);
 		addrconf_dad_stop(ifp, 1);
-		if (disable_ipv6)
-			addrconf_ifdown(idev->dev, 0);
 		goto out;
 	}
 
@@ -3918,12 +3798,11 @@ static void addrconf_dad_work(struct work_struct *w)
 		 * DAD was successful
 		 */
 
-		bump_id = ifp->flags & IFA_F_TENTATIVE;
 		ifp->flags &= ~(IFA_F_TENTATIVE|IFA_F_OPTIMISTIC|IFA_F_DADFAILED);
 		spin_unlock(&ifp->lock);
 		write_unlock_bh(&idev->lock);
 
-		addrconf_dad_completed(ifp, bump_id);
+		addrconf_dad_completed(ifp);
 
 		goto out;
 	}
@@ -3960,7 +3839,7 @@ static bool ipv6_lonely_lladdr(struct inet6_ifaddr *ifp)
 	return true;
 }
 
-static void addrconf_dad_completed(struct inet6_ifaddr *ifp, bool bump_id)
+static void addrconf_dad_completed(struct inet6_ifaddr *ifp)
 {
 	struct net_device *dev = ifp->idev->dev;
 	struct in6_addr lladdr;
@@ -3982,7 +3861,7 @@ static void addrconf_dad_completed(struct inet6_ifaddr *ifp, bool bump_id)
 	send_mld = ifp->scope == IFA_LINK && ipv6_lonely_lladdr(ifp);
 	send_rs = send_mld &&
 		  ipv6_accept_ra(ifp->idev) &&
-		  ifp->idev->cnf.rtr_solicits != 0 &&
+		  ifp->idev->cnf.rtr_solicits > 0 &&
 		  (dev->flags&IFF_LOOPBACK) == 0;
 	read_unlock_bh(&ifp->idev->lock);
 
@@ -4004,23 +3883,13 @@ static void addrconf_dad_completed(struct inet6_ifaddr *ifp, bool bump_id)
 
 		write_lock_bh(&ifp->idev->lock);
 		spin_lock(&ifp->lock);
-		ifp->idev->rs_interval = rfc3315_s14_backoff_init(
-			ifp->idev->cnf.rtr_solicit_interval);
 		ifp->idev->rs_probes = 1;
 		ifp->idev->if_flags |= IF_RS_SENT;
-		addrconf_mod_rs_timer(ifp->idev, ifp->idev->rs_interval);
+		addrconf_mod_rs_timer(ifp->idev,
+				      ifp->idev->cnf.rtr_solicit_interval);
 		spin_unlock(&ifp->lock);
 		write_unlock_bh(&ifp->idev->lock);
 	}
-
-	if (bump_id)
-		rt_genid_bump_ipv6(dev_net(dev));
-
-	/* Make sure that a new temporary address will be created
-	 * before this temporary address becomes deprecated.
-	 */
-	if (ifp->flags & IFA_F_TEMPORARY)
-		addrconf_verify_rtnl();
 }
 
 static void addrconf_dad_run(struct inet6_dev *idev)
@@ -4934,8 +4803,6 @@ static inline void ipv6_store_devconf(struct ipv6_devconf *cnf,
 	array[DEVCONF_RTR_SOLICITS] = cnf->rtr_solicits;
 	array[DEVCONF_RTR_SOLICIT_INTERVAL] =
 		jiffies_to_msecs(cnf->rtr_solicit_interval);
-	array[DEVCONF_RTR_SOLICIT_MAX_INTERVAL] =
-		jiffies_to_msecs(cnf->rtr_solicit_max_interval);
 	array[DEVCONF_RTR_SOLICIT_DELAY] =
 		jiffies_to_msecs(cnf->rtr_solicit_delay);
 	array[DEVCONF_FORCE_MLD_VERSION] = cnf->force_mld_version;
@@ -5006,18 +4873,18 @@ static inline size_t inet6_if_nlmsg_size(void)
 }
 
 static inline void __snmp6_fill_statsdev(u64 *stats, atomic_long_t *mib,
-					int bytes)
+				      int items, int bytes)
 {
 	int i;
-	int pad = bytes - sizeof(u64) * ICMP6_MIB_MAX;
+	int pad = bytes - sizeof(u64) * items;
 	BUG_ON(pad < 0);
 
 	/* Use put_unaligned() because stats may not be aligned for u64. */
-	put_unaligned(ICMP6_MIB_MAX, &stats[0]);
-	for (i = 1; i < ICMP6_MIB_MAX; i++)
+	put_unaligned(items, &stats[0]);
+	for (i = 1; i < items; i++)
 		put_unaligned(atomic_long_read(&mib[i]), &stats[i]);
 
-	memset(&stats[ICMP6_MIB_MAX], 0, pad);
+	memset(&stats[items], 0, pad);
 }
 
 static inline void __snmp6_fill_stats64(u64 *stats, void __percpu *mib,
@@ -5050,7 +4917,7 @@ static void snmp6_fill_stats(u64 *stats, struct inet6_dev *idev, int attrtype,
 				     offsetof(struct ipstats_mib, syncp));
 		break;
 	case IFLA_INET6_ICMP6STATS:
-		__snmp6_fill_statsdev(stats, idev->stats.icmpv6dev->mibs, bytes);
+		__snmp6_fill_statsdev(stats, idev->stats.icmpv6dev->mibs, ICMP6_MIB_MAX, bytes);
 		break;
 	}
 }
@@ -5144,7 +5011,7 @@ static int inet6_set_iftoken(struct inet6_dev *idev, struct in6_addr *token)
 		return -EINVAL;
 	if (!ipv6_accept_ra(idev))
 		return -EINVAL;
-	if (idev->cnf.rtr_solicits == 0)
+	if (idev->cnf.rtr_solicits <= 0)
 		return -EINVAL;
 
 	write_lock_bh(&idev->lock);
@@ -5173,10 +5040,8 @@ update_lft:
 
 	if (update_rs) {
 		idev->if_flags |= IF_RS_SENT;
-		idev->rs_interval = rfc3315_s14_backoff_init(
-			idev->cnf.rtr_solicit_interval);
 		idev->rs_probes = 1;
-		addrconf_mod_rs_timer(idev, idev->rs_interval);
+		addrconf_mod_rs_timer(idev, idev->cnf.rtr_solicit_interval);
 	}
 
 	/* Well, that's kinda nasty ... */
@@ -5447,7 +5312,7 @@ static void __ipv6_ifa_notify(int event, struct inet6_ifaddr *ifp)
 		 * our DAD process, so we don't need
 		 * to do it again
 		 */
-		if (!rcu_access_pointer(ifp->rt->rt6i_node))
+		if (!(ifp->rt->rt6i_node))
 			ip6_ins_rt(ifp->rt);
 		if (ifp->idev->cnf.forwarding)
 			addrconf_join_anycast(ifp);
@@ -5514,6 +5379,20 @@ int addrconf_sysctl_forward(struct ctl_table *ctl, int write,
 }
 
 static
+int addrconf_sysctl_hop_limit(struct ctl_table *ctl, int write,
+                              void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	struct ctl_table lctl;
+	int min_hl = 1, max_hl = 255;
+
+	lctl = *ctl;
+	lctl.extra1 = &min_hl;
+	lctl.extra2 = &max_hl;
+
+	return proc_dointvec_minmax(&lctl, write, buffer, lenp, ppos);
+}
+
+static
 int addrconf_sysctl_mtu(struct ctl_table *ctl, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos)
 {
@@ -5547,7 +5426,8 @@ static void addrconf_disable_change(struct net *net, __s32 newf)
 	struct net_device *dev;
 	struct inet6_dev *idev;
 
-	for_each_netdev(net, dev) {
+	rcu_read_lock();
+	for_each_netdev_rcu(net, dev) {
 		idev = __in6_dev_get(dev);
 		if (idev) {
 			int changed = (!idev->cnf.disable_ipv6) ^ (!newf);
@@ -5556,6 +5436,7 @@ static void addrconf_disable_change(struct net *net, __s32 newf)
 				dev_disable_change(idev);
 		}
 	}
+	rcu_read_unlock();
 }
 
 static int addrconf_disable_ipv6(struct ctl_table *table, int *p, int newf)
@@ -5744,10 +5625,6 @@ int addrconf_sysctl_ignore_routes_with_linkdown(struct ctl_table *ctl,
 	return ret;
 }
 
-static int minus_one = -1;
-static const int one = 1;
-static const int two_five_five = 255;
-
 static const struct ctl_table addrconf_sysctl[] = {
 	{
 		.procname	= "forwarding",
@@ -5761,9 +5638,7 @@ static const struct ctl_table addrconf_sysctl[] = {
 		.data		= &ipv6_devconf.hop_limit,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&one,
-		.extra2		= (void *)&two_five_five,
+		.proc_handler	= addrconf_sysctl_hop_limit,
 	},
 	{
 		.procname	= "mtu",
@@ -5805,19 +5680,11 @@ static const struct ctl_table addrconf_sysctl[] = {
 		.data		= &ipv6_devconf.rtr_solicits,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &minus_one,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "router_solicitation_interval",
 		.data		= &ipv6_devconf.rtr_solicit_interval,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_jiffies,
-	},
-	{
-		.procname	= "router_solicitation_max_interval",
-		.data		= &ipv6_devconf.rtr_solicit_max_interval,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
@@ -6079,7 +5946,7 @@ static const struct ctl_table addrconf_sysctl[] = {
 static int __addrconf_sysctl_register(struct net *net, char *dev_name,
 		struct inet6_dev *idev, struct ipv6_devconf *p)
 {
-	int i, ifindex;
+	int i;
 	struct ctl_table *table;
 	char path[sizeof("net/ipv6/conf/") + IFNAMSIZ];
 
@@ -6089,14 +5956,8 @@ static int __addrconf_sysctl_register(struct net *net, char *dev_name,
 
 	for (i = 0; table[i].data; i++) {
 		table[i].data += (char *)p - (char *)&ipv6_devconf;
-		/* If one of these is already set, then it is not safe to
-		 * overwrite either of them: this makes proc_dointvec_minmax
-		 * usable.
-		 */
-		if (!table[i].extra1 && !table[i].extra2) {
-			table[i].extra1 = idev; /* embedded; no ref */
-			table[i].extra2 = net;
-		}
+		table[i].extra1 = idev; /* embedded; no ref */
+		table[i].extra2 = net;
 	}
 
 	snprintf(path, sizeof(path), "net/ipv6/conf/%s", dev_name);
@@ -6105,13 +5966,6 @@ static int __addrconf_sysctl_register(struct net *net, char *dev_name,
 	if (!p->sysctl_header)
 		goto free;
 
-	if (!strcmp(dev_name, "all"))
-		ifindex = NETCONFA_IFINDEX_ALL;
-	else if (!strcmp(dev_name, "default"))
-		ifindex = NETCONFA_IFINDEX_DEFAULT;
-	else
-		ifindex = idev->dev->ifindex;
-	inet6_netconf_notify_devconf(net, NETCONFA_ALL, ifindex, p);
 	return 0;
 
 free:
@@ -6281,8 +6135,6 @@ int __init addrconf_init(void)
 		err = PTR_ERR(idev);
 		goto errlo;
 	}
-
-	ip6_route_init_special_entries();
 
 	for (i = 0; i < IN6_ADDR_HSIZE; i++)
 		INIT_HLIST_HEAD(&inet6_addr_lst[i]);

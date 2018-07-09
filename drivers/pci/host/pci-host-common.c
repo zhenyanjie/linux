@@ -1,6 +1,4 @@
 /*
- * Generic PCI host driver common code
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -19,10 +17,12 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_pci.h>
-#include <linux/pci-ecam.h>
 #include <linux/platform_device.h>
+
+#include "../ecam.h"
 
 static int gen_pci_parse_request_of_pci_ranges(struct device *dev,
 		       struct list_head *resources, struct resource **bus_range)
@@ -30,42 +30,50 @@ static int gen_pci_parse_request_of_pci_ranges(struct device *dev,
 	int err, res_valid = 0;
 	struct device_node *np = dev->of_node;
 	resource_size_t iobase;
-	struct resource_entry *win, *tmp;
+	struct resource_entry *win;
 
 	err = of_pci_get_host_bridge_resources(np, 0, 0xff, resources, &iobase);
 	if (err)
 		return err;
 
-	err = devm_request_pci_bus_resources(dev, resources);
-	if (err)
-		return err;
-
-	resource_list_for_each_entry_safe(win, tmp, resources) {
-		struct resource *res = win->res;
+	resource_list_for_each_entry(win, resources) {
+		struct resource *parent, *res = win->res;
 
 		switch (resource_type(res)) {
 		case IORESOURCE_IO:
+			parent = &ioport_resource;
 			err = pci_remap_iospace(res, iobase);
 			if (err) {
 				dev_warn(dev, "error %d: failed to map resource %pR\n",
 					 err, res);
-				resource_list_destroy_entry(win);
+				continue;
 			}
 			break;
 		case IORESOURCE_MEM:
+			parent = &iomem_resource;
 			res_valid |= !(res->flags & IORESOURCE_PREFETCH);
 			break;
 		case IORESOURCE_BUS:
 			*bus_range = res;
-			break;
+		default:
+			continue;
 		}
+
+		err = devm_request_resource(dev, parent, res);
+		if (err)
+			goto out_release_res;
 	}
 
-	if (res_valid)
-		return 0;
+	if (!res_valid) {
+		dev_err(dev, "non-prefetchable memory resource required\n");
+		err = -EINVAL;
+		goto out_release_res;
+	}
 
-	dev_err(dev, "non-prefetchable memory resource required\n");
-	return -EINVAL;
+	return 0;
+
+out_release_res:
+	return err;
 }
 
 static void gen_pci_unmap_cfg(void *ptr)
@@ -147,14 +155,7 @@ int pci_host_common_probe(struct platform_device *pdev,
 
 	pci_fixup_irqs(pci_common_swizzle, of_irq_parse_and_map_pci);
 
-	/*
-	 * We insert PCI resources into the iomem_resource and
-	 * ioport_resource trees in either pci_bus_claim_resources()
-	 * or pci_bus_assign_resources().
-	 */
-	if (pci_has_flag(PCI_PROBE_ONLY)) {
-		pci_bus_claim_resources(bus);
-	} else {
+	if (!pci_has_flag(PCI_PROBE_ONLY)) {
 		pci_bus_size_bridges(bus);
 		pci_bus_assign_resources(bus);
 
@@ -165,3 +166,7 @@ int pci_host_common_probe(struct platform_device *pdev,
 	pci_bus_add_devices(bus);
 	return 0;
 }
+
+MODULE_DESCRIPTION("Generic PCI host driver common code");
+MODULE_AUTHOR("Will Deacon <will.deacon@arm.com>");
+MODULE_LICENSE("GPL v2");

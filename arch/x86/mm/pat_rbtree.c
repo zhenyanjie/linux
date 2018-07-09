@@ -11,6 +11,7 @@
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/rbtree_augmented.h>
 #include <linux/sched.h>
 #include <linux/gfp.h>
@@ -254,7 +255,9 @@ struct memtype *rbt_memtype_erase(u64 start, u64 end)
 
 struct memtype *rbt_memtype_lookup(u64 addr)
 {
-	return memtype_rb_lowest_match(&memtype_rbroot, addr, addr + PAGE_SIZE);
+	struct memtype *data;
+	data = memtype_rb_lowest_match(&memtype_rbroot, addr, addr + PAGE_SIZE);
+	return data;
 }
 
 #if defined(CONFIG_DEBUG_FS)

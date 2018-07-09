@@ -21,7 +21,7 @@ static struct sk_buff *__skb_udp_tunnel_segment(struct sk_buff *skb,
 	__be16 new_protocol, bool is_ipv6)
 {
 	int tnl_hlen = skb_inner_mac_header(skb) - skb_transport_header(skb);
-	bool remcsum, need_csum, offload_csum, ufo, gso_partial;
+	bool remcsum, need_csum, offload_csum, ufo;
 	struct sk_buff *segs = ERR_PTR(-EINVAL);
 	struct udphdr *uh = udp_hdr(skb);
 	u16 mac_offset = skb->mac_header;
@@ -29,7 +29,6 @@ static struct sk_buff *__skb_udp_tunnel_segment(struct sk_buff *skb,
 	u16 mac_len = skb->mac_len;
 	int udp_offset, outer_hlen;
 	__wsum partial;
-	bool need_ipsec;
 
 	if (unlikely(!pskb_may_pull(skb, tnl_hlen)))
 		goto out;
@@ -63,10 +62,8 @@ static struct sk_buff *__skb_udp_tunnel_segment(struct sk_buff *skb,
 
 	ufo = !!(skb_shinfo(skb)->gso_type & SKB_GSO_UDP);
 
-	need_ipsec = skb_dst(skb) && dst_xfrm(skb_dst(skb));
 	/* Try to offload checksum if possible */
 	offload_csum = !!(need_csum &&
-			  !need_ipsec &&
 			  (skb->dev->features &
 			   (is_ipv6 ? (NETIF_F_HW_CSUM | NETIF_F_IPV6_CSUM) :
 				      (NETIF_F_HW_CSUM | NETIF_F_IP_CSUM))));
@@ -90,8 +87,6 @@ static struct sk_buff *__skb_udp_tunnel_segment(struct sk_buff *skb,
 				     mac_len);
 		goto out;
 	}
-
-	gso_partial = !!(skb_shinfo(segs)->gso_type & SKB_GSO_PARTIAL);
 
 	outer_hlen = skb_tnl_header_len(skb);
 	udp_offset = outer_hlen - tnl_hlen;
@@ -122,7 +117,7 @@ static struct sk_buff *__skb_udp_tunnel_segment(struct sk_buff *skb,
 		 * will be using a length value equal to only one MSS sized
 		 * segment instead of the entire frame.
 		 */
-		if (gso_partial && skb_is_gso(skb)) {
+		if (skb_is_gso(skb)) {
 			uh->len = htons(skb_shinfo(skb)->gso_size +
 					SKB_GSO_CB(skb)->data_offset +
 					skb->head - (unsigned char *)uh);
@@ -205,9 +200,6 @@ static struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb,
 		goto out;
 	}
 
-	if (!(skb_shinfo(skb)->gso_type & SKB_GSO_UDP))
-		goto out;
-
 	if (!pskb_may_pull(skb, sizeof(struct udphdr)))
 		goto out;
 
@@ -238,7 +230,7 @@ static struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb,
 	if (uh->check == 0)
 		uh->check = CSUM_MANGLED_0;
 
-	skb->ip_summed = CHECKSUM_UNNECESSARY;
+	skb->ip_summed = CHECKSUM_NONE;
 
 	/* If there is no outer header we can fake a checksum offload
 	 * due to the fact that we have already done the checksum in
@@ -301,7 +293,7 @@ unflush:
 
 	skb_gro_pull(skb, sizeof(struct udphdr)); /* pull encapsulating udp header */
 	skb_gro_postpull_rcsum(skb, uh, sizeof(struct udphdr));
-	pp = call_gro_receive_sk(udp_sk(sk)->gro_receive, sk, head, skb);
+	pp = udp_sk(sk)->gro_receive(sk, head, skb);
 
 out_unlock:
 	rcu_read_unlock();

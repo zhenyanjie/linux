@@ -75,7 +75,7 @@ static void start_timer(struct rvt_qp *qp)
  * Note the QP s_lock must be held.
  */
 static int qib_make_rc_ack(struct qib_ibdev *dev, struct rvt_qp *qp,
-			   struct ib_other_headers *ohdr, u32 pmtu)
+			   struct qib_other_headers *ohdr, u32 pmtu)
 {
 	struct rvt_ack_entry *e;
 	u32 hwords;
@@ -154,7 +154,10 @@ static int qib_make_rc_ack(struct qib_ibdev *dev, struct rvt_qp *qp,
 			len = 0;
 			qp->s_ack_state = OP(ATOMIC_ACKNOWLEDGE);
 			ohdr->u.at.aeth = qib_compute_aeth(qp);
-			ib_u64_put(e->atomic_data, &ohdr->u.at.atomic_ack_eth);
+			ohdr->u.at.atomic_ack_eth[0] =
+				cpu_to_be32(e->atomic_data >> 32);
+			ohdr->u.at.atomic_ack_eth[1] =
+				cpu_to_be32(e->atomic_data);
 			hwords += sizeof(ohdr->u.at) / sizeof(u32);
 			bth2 = e->psn & QIB_PSN_MASK;
 			e->sent = 1;
@@ -231,7 +234,7 @@ int qib_make_rc_req(struct rvt_qp *qp, unsigned long *flags)
 {
 	struct qib_qp_priv *priv = qp->priv;
 	struct qib_ibdev *dev = to_idev(qp->ibqp.device);
-	struct ib_other_headers *ohdr;
+	struct qib_other_headers *ohdr;
 	struct rvt_sge_state *ss;
 	struct rvt_swqe *wqe;
 	u32 hwords;
@@ -357,7 +360,7 @@ int qib_make_rc_req(struct rvt_qp *qp, unsigned long *flags)
 		case IB_WR_RDMA_WRITE:
 			if (newreq && !(qp->s_flags & RVT_S_UNLIMITED_CREDIT))
 				qp->s_lsn++;
-			goto no_flow_control;
+			/* FALLTHROUGH */
 		case IB_WR_RDMA_WRITE_WITH_IMM:
 			/* If no credit, return. */
 			if (!(qp->s_flags & RVT_S_UNLIMITED_CREDIT) &&
@@ -365,7 +368,7 @@ int qib_make_rc_req(struct rvt_qp *qp, unsigned long *flags)
 				qp->s_flags |= RVT_S_WAIT_SSN_CREDIT;
 				goto bail;
 			}
-no_flow_control:
+
 			ohdr->u.rc.reth.vaddr =
 				cpu_to_be64(wqe->rdma_wr.remote_addr);
 			ohdr->u.rc.reth.rkey =
@@ -441,18 +444,20 @@ no_flow_control:
 			}
 			if (wqe->atomic_wr.wr.opcode == IB_WR_ATOMIC_CMP_AND_SWP) {
 				qp->s_state = OP(COMPARE_SWAP);
-				put_ib_ateth_swap(wqe->atomic_wr.swap,
-						  &ohdr->u.atomic_eth);
-				put_ib_ateth_compare(wqe->atomic_wr.compare_add,
-						     &ohdr->u.atomic_eth);
+				ohdr->u.atomic_eth.swap_data = cpu_to_be64(
+					wqe->atomic_wr.swap);
+				ohdr->u.atomic_eth.compare_data = cpu_to_be64(
+					wqe->atomic_wr.compare_add);
 			} else {
 				qp->s_state = OP(FETCH_ADD);
-				put_ib_ateth_swap(wqe->atomic_wr.compare_add,
-						  &ohdr->u.atomic_eth);
-				put_ib_ateth_compare(0, &ohdr->u.atomic_eth);
+				ohdr->u.atomic_eth.swap_data = cpu_to_be64(
+					wqe->atomic_wr.compare_add);
+				ohdr->u.atomic_eth.compare_data = 0;
 			}
-			put_ib_ateth_vaddr(wqe->atomic_wr.remote_addr,
-					   &ohdr->u.atomic_eth);
+			ohdr->u.atomic_eth.vaddr[0] = cpu_to_be32(
+				wqe->atomic_wr.remote_addr >> 32);
+			ohdr->u.atomic_eth.vaddr[1] = cpu_to_be32(
+				wqe->atomic_wr.remote_addr);
 			ohdr->u.atomic_eth.rkey = cpu_to_be32(
 				wqe->atomic_wr.rkey);
 			hwords += sizeof(struct ib_atomic_eth) / sizeof(u32);
@@ -627,8 +632,8 @@ void qib_send_rc_ack(struct rvt_qp *qp)
 	u32 hwords;
 	u32 pbufn;
 	u32 __iomem *piobuf;
-	struct ib_header hdr;
-	struct ib_other_headers *ohdr;
+	struct qib_ib_header hdr;
+	struct qib_other_headers *ohdr;
 	u32 control;
 	unsigned long flags;
 
@@ -937,9 +942,9 @@ static void reset_sending_psn(struct rvt_qp *qp, u32 psn)
 /*
  * This should be called with the QP s_lock held and interrupts disabled.
  */
-void qib_rc_send_complete(struct rvt_qp *qp, struct ib_header *hdr)
+void qib_rc_send_complete(struct rvt_qp *qp, struct qib_ib_header *hdr)
 {
-	struct ib_other_headers *ohdr;
+	struct qib_other_headers *ohdr;
 	struct rvt_swqe *wqe;
 	struct ib_wc wc;
 	unsigned i;
@@ -1172,7 +1177,7 @@ static int do_rc_ack(struct rvt_qp *qp, u32 aeth, u32 psn, int opcode,
 				qib_restart_rc(qp, qp->s_last_psn + 1, 0);
 				if (list_empty(&qp->rspwait)) {
 					qp->r_flags |= RVT_R_RSP_SEND;
-					rvt_get_qp(qp);
+					atomic_inc(&qp->refcount);
 					list_add_tail(&qp->rspwait,
 						      &rcd->qp_wait_list);
 				}
@@ -1356,7 +1361,7 @@ static void rdma_seq_err(struct rvt_qp *qp, struct qib_ibport *ibp, u32 psn,
 	qib_restart_rc(qp, qp->s_last_psn + 1, 0);
 	if (list_empty(&qp->rspwait)) {
 		qp->r_flags |= RVT_R_RSP_SEND;
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		list_add_tail(&qp->rspwait, &rcd->qp_wait_list);
 	}
 }
@@ -1378,7 +1383,7 @@ static void rdma_seq_err(struct rvt_qp *qp, struct qib_ibport *ibp, u32 psn,
  * Called at interrupt level.
  */
 static void qib_rc_rcv_resp(struct qib_ibport *ibp,
-			    struct ib_other_headers *ohdr,
+			    struct qib_other_headers *ohdr,
 			    void *data, u32 tlen,
 			    struct rvt_qp *qp,
 			    u32 opcode,
@@ -1458,9 +1463,12 @@ static void qib_rc_rcv_resp(struct qib_ibport *ibp,
 	case OP(ATOMIC_ACKNOWLEDGE):
 	case OP(RDMA_READ_RESPONSE_FIRST):
 		aeth = be32_to_cpu(ohdr->u.aeth);
-		if (opcode == OP(ATOMIC_ACKNOWLEDGE))
-			val = ib_u64_get(&ohdr->u.at.atomic_ack_eth);
-		else
+		if (opcode == OP(ATOMIC_ACKNOWLEDGE)) {
+			__be32 *p = ohdr->u.at.atomic_ack_eth;
+
+			val = ((u64) be32_to_cpu(p[0]) << 32) |
+				be32_to_cpu(p[1]);
+		} else
 			val = 0;
 		if (!do_rc_ack(qp, aeth, psn, opcode, val, rcd) ||
 		    opcode != OP(RDMA_READ_RESPONSE_FIRST))
@@ -1600,7 +1608,7 @@ bail:
  * Return 1 if no more processing is needed; otherwise return 0 to
  * schedule a response to be sent.
  */
-static int qib_rc_rcv_error(struct ib_other_headers *ohdr,
+static int qib_rc_rcv_error(struct qib_other_headers *ohdr,
 			    void *data,
 			    struct rvt_qp *qp,
 			    u32 opcode,
@@ -1632,7 +1640,7 @@ static int qib_rc_rcv_error(struct ib_other_headers *ohdr,
 			 */
 			if (list_empty(&qp->rspwait)) {
 				qp->r_flags |= RVT_R_RSP_NAK;
-				rvt_get_qp(qp);
+				atomic_inc(&qp->refcount);
 				list_add_tail(&qp->rspwait, &rcd->qp_wait_list);
 			}
 		}
@@ -1840,11 +1848,11 @@ static inline void qib_update_ack_queue(struct rvt_qp *qp, unsigned n)
  * for the given QP.
  * Called at interrupt level.
  */
-void qib_rc_rcv(struct qib_ctxtdata *rcd, struct ib_header *hdr,
+void qib_rc_rcv(struct qib_ctxtdata *rcd, struct qib_ib_header *hdr,
 		int has_grh, void *data, u32 tlen, struct rvt_qp *qp)
 {
 	struct qib_ibport *ibp = &rcd->ppd->ibport_data;
-	struct ib_other_headers *ohdr;
+	struct qib_other_headers *ohdr;
 	u32 opcode;
 	u32 hdrsize;
 	u32 psn;
@@ -2067,10 +2075,8 @@ send_last:
 		ret = qib_get_rwqe(qp, 1);
 		if (ret < 0)
 			goto nack_op_err;
-		if (!ret) {
-			rvt_put_ss(&qp->r_sge);
+		if (!ret)
 			goto rnr_nak;
-		}
 		wc.ex.imm_data = ohdr->u.rc.imm_data;
 		hdrsize += 4;
 		wc.wc_flags = IB_WC_WITH_IMM;
@@ -2171,7 +2177,8 @@ send_last:
 			e->rdma_sge.mr = NULL;
 		}
 		ateth = &ohdr->u.atomic_eth;
-		vaddr = get_ib_ateth_vaddr(ateth);
+		vaddr = ((u64) be32_to_cpu(ateth->vaddr[0]) << 32) |
+			be32_to_cpu(ateth->vaddr[1]);
 		if (unlikely(vaddr & (sizeof(u64) - 1)))
 			goto nack_inv_unlck;
 		rkey = be32_to_cpu(ateth->rkey);
@@ -2182,11 +2189,11 @@ send_last:
 			goto nack_acc_unlck;
 		/* Perform atomic OP and save result. */
 		maddr = (atomic64_t *) qp->r_sge.sge.vaddr;
-		sdata = get_ib_ateth_swap(ateth);
+		sdata = be64_to_cpu(ateth->swap_data);
 		e->atomic_data = (opcode == OP(FETCH_ADD)) ?
 			(u64) atomic64_add_return(sdata, maddr) - sdata :
 			(u64) cmpxchg((u64 *) qp->r_sge.sge.vaddr,
-				      get_ib_ateth_compare(ateth),
+				      be64_to_cpu(ateth->compare_data),
 				      sdata);
 		rvt_put_mr(qp->r_sge.sge.mr);
 		qp->r_sge.num_sge = 0;
@@ -2226,7 +2233,7 @@ rnr_nak:
 	/* Queue RNR NAK for later */
 	if (list_empty(&qp->rspwait)) {
 		qp->r_flags |= RVT_R_RSP_NAK;
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		list_add_tail(&qp->rspwait, &rcd->qp_wait_list);
 	}
 	return;
@@ -2238,7 +2245,7 @@ nack_op_err:
 	/* Queue NAK for later */
 	if (list_empty(&qp->rspwait)) {
 		qp->r_flags |= RVT_R_RSP_NAK;
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		list_add_tail(&qp->rspwait, &rcd->qp_wait_list);
 	}
 	return;
@@ -2252,7 +2259,7 @@ nack_inv:
 	/* Queue NAK for later */
 	if (list_empty(&qp->rspwait)) {
 		qp->r_flags |= RVT_R_RSP_NAK;
-		rvt_get_qp(qp);
+		atomic_inc(&qp->refcount);
 		list_add_tail(&qp->rspwait, &rcd->qp_wait_list);
 	}
 	return;

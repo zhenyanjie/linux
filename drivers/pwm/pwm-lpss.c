@@ -27,17 +27,15 @@
 #define PWM_SW_UPDATE			BIT(30)
 #define PWM_BASE_UNIT_SHIFT		8
 #define PWM_ON_TIME_DIV_MASK		0x000000ff
+#define PWM_DIVISION_CORRECTION		0x2
 
 /* Size of each PWM register space if multiple */
 #define PWM_SIZE			0x400
-
-#define MAX_PWMS			4
 
 struct pwm_lpss_chip {
 	struct pwm_chip chip;
 	void __iomem *regs;
 	const struct pwm_lpss_boardinfo *info;
-	u32 saved_ctrl[MAX_PWMS];
 };
 
 /* BayTrail */
@@ -94,8 +92,8 @@ static int pwm_lpss_config(struct pwm_chip *chip, struct pwm_device *pwm,
 			   int duty_ns, int period_ns)
 {
 	struct pwm_lpss_chip *lpwm = to_lpwm(chip);
-	unsigned long long on_time_div;
-	unsigned long c = lpwm->info->clk_rate, base_unit_range;
+	u8 on_time_div;
+	unsigned long c, base_unit_range;
 	unsigned long long base_unit, freq = NSEC_PER_SEC;
 	u32 ctrl;
 
@@ -103,18 +101,21 @@ static int pwm_lpss_config(struct pwm_chip *chip, struct pwm_device *pwm,
 
 	/*
 	 * The equation is:
-	 * base_unit = round(base_unit_range * freq / c)
+	 * base_unit = ((freq / c) * base_unit_range) + correction
 	 */
 	base_unit_range = BIT(lpwm->info->base_unit_bits);
-	freq *= base_unit_range;
+	base_unit = freq * base_unit_range;
 
-	base_unit = DIV_ROUND_CLOSEST_ULL(freq, c);
+	c = lpwm->info->clk_rate;
+	if (!c)
+		return -EINVAL;
+
+	do_div(base_unit, c);
+	base_unit += PWM_DIVISION_CORRECTION;
 
 	if (duty_ns <= 0)
 		duty_ns = 1;
-	on_time_div = 255ULL * duty_ns;
-	do_div(on_time_div, period_ns);
-	on_time_div = 255ULL - on_time_div;
+	on_time_div = 255 - (255 * duty_ns / period_ns);
 
 	pm_runtime_get_sync(chip->dev);
 
@@ -168,11 +169,7 @@ struct pwm_lpss_chip *pwm_lpss_probe(struct device *dev, struct resource *r,
 				     const struct pwm_lpss_boardinfo *info)
 {
 	struct pwm_lpss_chip *lpwm;
-	unsigned long c;
 	int ret;
-
-	if (WARN_ON(info->npwm > MAX_PWMS))
-		return ERR_PTR(-ENODEV);
 
 	lpwm = devm_kzalloc(dev, sizeof(*lpwm), GFP_KERNEL);
 	if (!lpwm)
@@ -183,11 +180,6 @@ struct pwm_lpss_chip *pwm_lpss_probe(struct device *dev, struct resource *r,
 		return ERR_CAST(lpwm->regs);
 
 	lpwm->info = info;
-
-	c = lpwm->info->clk_rate;
-	if (!c)
-		return ERR_PTR(-EINVAL);
-
 	lpwm->chip.dev = dev;
 	lpwm->chip.ops = &pwm_lpss_ops;
 	lpwm->chip.base = -1;
@@ -208,30 +200,6 @@ int pwm_lpss_remove(struct pwm_lpss_chip *lpwm)
 	return pwmchip_remove(&lpwm->chip);
 }
 EXPORT_SYMBOL_GPL(pwm_lpss_remove);
-
-int pwm_lpss_suspend(struct device *dev)
-{
-	struct pwm_lpss_chip *lpwm = dev_get_drvdata(dev);
-	int i;
-
-	for (i = 0; i < lpwm->info->npwm; i++)
-		lpwm->saved_ctrl[i] = readl(lpwm->regs + i * PWM_SIZE + PWM);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pwm_lpss_suspend);
-
-int pwm_lpss_resume(struct device *dev)
-{
-	struct pwm_lpss_chip *lpwm = dev_get_drvdata(dev);
-	int i;
-
-	for (i = 0; i < lpwm->info->npwm; i++)
-		writel(lpwm->saved_ctrl[i], lpwm->regs + i * PWM_SIZE + PWM);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pwm_lpss_resume);
 
 MODULE_DESCRIPTION("PWM driver for Intel LPSS");
 MODULE_AUTHOR("Mika Westerberg <mika.westerberg@linux.intel.com>");

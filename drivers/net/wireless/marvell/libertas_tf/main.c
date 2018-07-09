@@ -16,6 +16,7 @@
 #include <linux/module.h>
 #include "libertas_tf.h"
 
+#define DRIVER_RELEASE_VERSION "004.p0"
 /* thinfirm version: 5.132.X.pX */
 #define LBTF_FW_VER_MIN		0x05840300
 #define LBTF_FW_VER_MAX		0x0584ffff
@@ -25,6 +26,12 @@
 unsigned int lbtf_debug;
 EXPORT_SYMBOL_GPL(lbtf_debug);
 module_param_named(libertas_tf_debug, lbtf_debug, int, 0644);
+
+static const char lbtf_driver_version[] = "THINFIRM-USB8388-" DRIVER_RELEASE_VERSION
+#ifdef DEBUG
+	"-dbg"
+#endif
+	"";
 
 struct workqueue_struct *lbtf_wq;
 
@@ -735,7 +742,7 @@ EXPORT_SYMBOL_GPL(lbtf_bcn_sent);
 static int __init lbtf_init_module(void)
 {
 	lbtf_deb_enter(LBTF_DEB_MAIN);
-	lbtf_wq = alloc_workqueue("libertastf", WQ_MEM_RECLAIM, 0);
+	lbtf_wq = create_workqueue("libertastf");
 	if (lbtf_wq == NULL) {
 		printk(KERN_ERR "libertastf: couldn't create workqueue\n");
 		return -ENOMEM;

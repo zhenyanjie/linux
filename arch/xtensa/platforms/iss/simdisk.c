@@ -86,7 +86,6 @@ static void simdisk_transfer(struct simdisk *dev, unsigned long sector,
 		unsigned long io;
 
 		simc_lseek(dev->fd, offset, SEEK_SET);
-		READ_ONCE(*buffer);
 		if (write)
 			io = simc_write(dev->fd, buffer, nbytes);
 		else

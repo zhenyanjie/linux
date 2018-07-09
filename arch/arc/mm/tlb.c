@@ -793,16 +793,16 @@ char *arc_mmu_mumbojumbo(int cpu_id, char *buf, int len)
 	char super_pg[64] = "";
 
 	if (p_mmu->s_pg_sz_m)
-		scnprintf(super_pg, 64, "%dM Super Page %s",
+		scnprintf(super_pg, 64, "%dM Super Page%s, ",
 			  p_mmu->s_pg_sz_m,
 			  IS_USED_CFG(CONFIG_TRANSPARENT_HUGEPAGE));
 
 	n += scnprintf(buf + n, len - n,
-		      "MMU [v%x]\t: %dk PAGE, %sJTLB %d (%dx%d), uDTLB %d, uITLB %d%s%s\n",
+		      "MMU [v%x]\t: %dk PAGE, %sJTLB %d (%dx%d), uDTLB %d, uITLB %d %s%s\n",
 		       p_mmu->ver, p_mmu->pg_sz_k, super_pg,
 		       p_mmu->sets * p_mmu->ways, p_mmu->sets, p_mmu->ways,
 		       p_mmu->u_dtlb, p_mmu->u_itlb,
-		       IS_AVAIL2(p_mmu->pae, ", PAE40 ", CONFIG_ARC_HAS_PAE40));
+		       IS_AVAIL2(p_mmu->pae, "PAE40 ", CONFIG_ARC_HAS_PAE40));
 
 	return buf;
 }
@@ -895,6 +895,9 @@ void do_tlb_overlap_fault(unsigned long cause, unsigned long address,
 	int set;
 
 	local_irq_save(flags);
+
+	/* re-enable the MMU */
+	write_aux_reg(ARC_REG_PID, MMU_ENABLE | read_aux_reg(ARC_REG_PID));
 
 	/* loop thru all sets of TLB */
 	for (set = 0; set < mmu->sets; set++) {

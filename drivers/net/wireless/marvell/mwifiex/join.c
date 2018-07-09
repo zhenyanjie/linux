@@ -647,12 +647,6 @@ int mwifiex_ret_802_11_associate(struct mwifiex_private *priv,
 	const u8 *ie_ptr;
 	struct ieee80211_ht_operation *assoc_resp_ht_oper;
 
-	if (!priv->attempted_bss_desc) {
-		mwifiex_dbg(priv->adapter, ERROR,
-			    "ASSOC_RESP: failed, association terminated by host\n");
-		goto done;
-	}
-
 	assoc_rsp = (struct ieee_types_assoc_rsp *) &resp->params;
 
 	cap_info = le16_to_cpu(assoc_rsp->cap_info_bitmap);
@@ -669,8 +663,9 @@ int mwifiex_ret_802_11_associate(struct mwifiex_private *priv,
 	priv->assoc_rsp_size = min(le16_to_cpu(resp->size) - S_DS_GEN,
 				   sizeof(priv->assoc_rsp_buf));
 
-	assoc_rsp->a_id = cpu_to_le16(aid);
 	memcpy(priv->assoc_rsp_buf, &resp->params, priv->assoc_rsp_size);
+
+	assoc_rsp->a_id = cpu_to_le16(aid);
 
 	if (status_code) {
 		priv->adapter->dbg.num_cmd_assoc_failure++;
@@ -1275,12 +1270,6 @@ int mwifiex_ret_802_11_ad_hoc(struct mwifiex_private *priv,
 	u16 cmd = le16_to_cpu(resp->command);
 	u8 result;
 
-	if (!priv->attempted_bss_desc) {
-		mwifiex_dbg(priv->adapter, ERROR,
-			    "ADHOC_RESP: failed, association terminated by host\n");
-		goto done;
-	}
-
 	if (cmd == HostCmd_CMD_802_11_AD_HOC_START)
 		result = start_result->result;
 	else
@@ -1292,7 +1281,7 @@ int mwifiex_ret_802_11_ad_hoc(struct mwifiex_private *priv,
 	if (result) {
 		mwifiex_dbg(priv->adapter, ERROR, "ADHOC_RESP: failed\n");
 		if (priv->media_connected)
-			mwifiex_reset_connect_state(priv, result, true);
+			mwifiex_reset_connect_state(priv, result);
 
 		memset(&priv->curr_bss_params.bss_descriptor,
 		       0x00, sizeof(struct mwifiex_bssdescriptor));

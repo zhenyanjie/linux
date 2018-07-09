@@ -274,7 +274,7 @@ static int ad7150_write_event_config(struct iio_dev *indio_dev,
 error_ret:
 	mutex_unlock(&chip->state_lock);
 
-	return ret;
+	return 0;
 }
 
 static int ad7150_read_event_value(struct iio_dev *indio_dev,
@@ -493,7 +493,7 @@ static irqreturn_t ad7150_event_handler(int irq, void *private)
 	struct iio_dev *indio_dev = private;
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
 	u8 int_status;
-	s64 timestamp = iio_get_time_ns(indio_dev);
+	s64 timestamp = iio_get_time_ns();
 	int ret;
 
 	ret = i2c_smbus_read_byte_data(chip->client, AD7150_STATUS);

@@ -20,7 +20,9 @@
 
 #include "fm10k.h"
 #include <linux/vmalloc.h>
-#include <net/udp_tunnel.h>
+#ifdef CONFIG_FM10K_VXLAN
+#include <net/vxlan.h>
+#endif /* CONFIG_FM10K_VXLAN */
 
 /**
  * fm10k_setup_tx_resources - allocate Tx resources (Descriptors)
@@ -384,171 +386,125 @@ static void fm10k_request_glort_range(struct fm10k_intfc *interface)
 }
 
 /**
- * fm10k_free_udp_port_info
+ * fm10k_del_vxlan_port_all
  * @interface: board private structure
  *
- * This function frees both geneve_port and vxlan_port structures
+ * This function frees the entire vxlan_port list
  **/
-static void fm10k_free_udp_port_info(struct fm10k_intfc *interface)
+static void fm10k_del_vxlan_port_all(struct fm10k_intfc *interface)
 {
-	struct fm10k_udp_port *port;
+	struct fm10k_vxlan_port *vxlan_port;
 
-	/* flush all entries from vxlan list */
-	port = list_first_entry_or_null(&interface->vxlan_port,
-					struct fm10k_udp_port, list);
-	while (port) {
-		list_del(&port->list);
-		kfree(port);
-		port = list_first_entry_or_null(&interface->vxlan_port,
-						struct fm10k_udp_port,
-						list);
-	}
-
-	/* flush all entries from geneve list */
-	port = list_first_entry_or_null(&interface->geneve_port,
-					struct fm10k_udp_port, list);
-	while (port) {
-		list_del(&port->list);
-		kfree(port);
-		port = list_first_entry_or_null(&interface->vxlan_port,
-						struct fm10k_udp_port,
-						list);
+	/* flush all entries from list */
+	vxlan_port = list_first_entry_or_null(&interface->vxlan_port,
+					      struct fm10k_vxlan_port, list);
+	while (vxlan_port) {
+		list_del(&vxlan_port->list);
+		kfree(vxlan_port);
+		vxlan_port = list_first_entry_or_null(&interface->vxlan_port,
+						      struct fm10k_vxlan_port,
+						      list);
 	}
 }
 
 /**
- * fm10k_restore_udp_port_info
+ * fm10k_restore_vxlan_port
  * @interface: board private structure
  *
- * This function restores the value in the tunnel_cfg register(s) after reset
+ * This function restores the value in the tunnel_cfg register after reset
  **/
-static void fm10k_restore_udp_port_info(struct fm10k_intfc *interface)
+static void fm10k_restore_vxlan_port(struct fm10k_intfc *interface)
 {
 	struct fm10k_hw *hw = &interface->hw;
-	struct fm10k_udp_port *port;
+	struct fm10k_vxlan_port *vxlan_port;
 
 	/* only the PF supports configuring tunnels */
 	if (hw->mac.type != fm10k_mac_pf)
 		return;
 
-	port = list_first_entry_or_null(&interface->vxlan_port,
-					struct fm10k_udp_port, list);
+	vxlan_port = list_first_entry_or_null(&interface->vxlan_port,
+					      struct fm10k_vxlan_port, list);
 
 	/* restore tunnel configuration register */
 	fm10k_write_reg(hw, FM10K_TUNNEL_CFG,
-			(port ? ntohs(port->port) : 0) |
+			(vxlan_port ? ntohs(vxlan_port->port) : 0) |
 			(ETH_P_TEB << FM10K_TUNNEL_CFG_NVGRE_SHIFT));
-
-	port = list_first_entry_or_null(&interface->geneve_port,
-					struct fm10k_udp_port, list);
-
-	/* restore Geneve tunnel configuration register */
-	fm10k_write_reg(hw, FM10K_TUNNEL_CFG_GENEVE,
-			(port ? ntohs(port->port) : 0));
-}
-
-static struct fm10k_udp_port *
-fm10k_remove_tunnel_port(struct list_head *ports,
-			 struct udp_tunnel_info *ti)
-{
-	struct fm10k_udp_port *port;
-
-	list_for_each_entry(port, ports, list) {
-		if ((port->port == ti->port) &&
-		    (port->sa_family == ti->sa_family)) {
-			list_del(&port->list);
-			return port;
-		}
-	}
-
-	return NULL;
-}
-
-static void fm10k_insert_tunnel_port(struct list_head *ports,
-				     struct udp_tunnel_info *ti)
-{
-	struct fm10k_udp_port *port;
-
-	/* remove existing port entry from the list so that the newest items
-	 * are always at the tail of the list.
-	 */
-	port = fm10k_remove_tunnel_port(ports, ti);
-	if (!port) {
-		port = kmalloc(sizeof(*port), GFP_ATOMIC);
-		if  (!port)
-			return;
-		port->port = ti->port;
-		port->sa_family = ti->sa_family;
-	}
-
-	list_add_tail(&port->list, ports);
 }
 
 /**
- * fm10k_udp_tunnel_add
+ * fm10k_add_vxlan_port
  * @netdev: network interface device structure
- * @ti: Tunnel endpoint information
+ * @sa_family: Address family of new port
+ * @port: port number used for VXLAN
  *
- * This function is called when a new UDP tunnel port has been added.
- * Due to hardware restrictions, only one port per type can be offloaded at
- * once.
+ * This function is called when a new VXLAN interface has added a new port
+ * number to the range that is currently in use for VXLAN.  The new port
+ * number is always added to the tail so that the port number list should
+ * match the order in which the ports were allocated.  The head of the list
+ * is always used as the VXLAN port number for offloads.
  **/
-static void fm10k_udp_tunnel_add(struct net_device *dev,
-				 struct udp_tunnel_info *ti)
-{
+static void fm10k_add_vxlan_port(struct net_device *dev,
+				 sa_family_t sa_family, __be16 port) {
 	struct fm10k_intfc *interface = netdev_priv(dev);
+	struct fm10k_vxlan_port *vxlan_port;
 
 	/* only the PF supports configuring tunnels */
 	if (interface->hw.mac.type != fm10k_mac_pf)
 		return;
 
-	switch (ti->type) {
-	case UDP_TUNNEL_TYPE_VXLAN:
-		fm10k_insert_tunnel_port(&interface->vxlan_port, ti);
-		break;
-	case UDP_TUNNEL_TYPE_GENEVE:
-		fm10k_insert_tunnel_port(&interface->geneve_port, ti);
-		break;
-	default:
-		return;
+	/* existing ports are pulled out so our new entry is always last */
+	fm10k_vxlan_port_for_each(vxlan_port, interface) {
+		if ((vxlan_port->port == port) &&
+		    (vxlan_port->sa_family == sa_family)) {
+			list_del(&vxlan_port->list);
+			goto insert_tail;
+		}
 	}
 
-	fm10k_restore_udp_port_info(interface);
+	/* allocate memory to track ports */
+	vxlan_port = kmalloc(sizeof(*vxlan_port), GFP_ATOMIC);
+	if (!vxlan_port)
+		return;
+	vxlan_port->port = port;
+	vxlan_port->sa_family = sa_family;
+
+insert_tail:
+	/* add new port value to list */
+	list_add_tail(&vxlan_port->list, &interface->vxlan_port);
+
+	fm10k_restore_vxlan_port(interface);
 }
 
 /**
- * fm10k_udp_tunnel_del
+ * fm10k_del_vxlan_port
  * @netdev: network interface device structure
- * @ti: Tunnel endpoint information
+ * @sa_family: Address family of freed port
+ * @port: port number used for VXLAN
  *
- * This function is called when a new UDP tunnel port is deleted. The freed
- * port will be removed from the list, then we reprogram the offloaded port
- * based on the head of the list.
+ * This function is called when a new VXLAN interface has freed a port
+ * number from the range that is currently in use for VXLAN.  The freed
+ * port is removed from the list and the new head is used to determine
+ * the port number for offloads.
  **/
-static void fm10k_udp_tunnel_del(struct net_device *dev,
-				 struct udp_tunnel_info *ti)
-{
+static void fm10k_del_vxlan_port(struct net_device *dev,
+				 sa_family_t sa_family, __be16 port) {
 	struct fm10k_intfc *interface = netdev_priv(dev);
-	struct fm10k_udp_port *port = NULL;
+	struct fm10k_vxlan_port *vxlan_port;
 
 	if (interface->hw.mac.type != fm10k_mac_pf)
 		return;
 
-	switch (ti->type) {
-	case UDP_TUNNEL_TYPE_VXLAN:
-		port = fm10k_remove_tunnel_port(&interface->vxlan_port, ti);
-		break;
-	case UDP_TUNNEL_TYPE_GENEVE:
-		port = fm10k_remove_tunnel_port(&interface->geneve_port, ti);
-		break;
-	default:
-		return;
+	/* find the port in the list and free it */
+	fm10k_vxlan_port_for_each(vxlan_port, interface) {
+		if ((vxlan_port->port == port) &&
+		    (vxlan_port->sa_family == sa_family)) {
+			list_del(&vxlan_port->list);
+			kfree(vxlan_port);
+			break;
+		}
 	}
 
-	/* if we did remove a port we need to free its memory */
-	kfree(port);
-
-	fm10k_restore_udp_port_info(interface);
+	fm10k_restore_vxlan_port(interface);
 }
 
 /**
@@ -597,7 +553,10 @@ int fm10k_open(struct net_device *netdev)
 	if (err)
 		goto err_set_queues;
 
-	udp_tunnel_get_rx_info(netdev);
+#ifdef CONFIG_FM10K_VXLAN
+	/* update VXLAN port configuration */
+	vxlan_get_rx_port(netdev);
+#endif
 
 	fm10k_up(interface);
 
@@ -632,7 +591,7 @@ int fm10k_close(struct net_device *netdev)
 
 	fm10k_qv_free_irq(interface);
 
-	fm10k_free_udp_port_info(interface);
+	fm10k_del_vxlan_port_all(interface);
 
 	fm10k_free_all_tx_resources(interface);
 	fm10k_free_all_rx_resources(interface);
@@ -803,12 +762,8 @@ static int fm10k_update_vid(struct net_device *netdev, u16 vid, bool set)
 	if (vid >= VLAN_N_VID)
 		return -EINVAL;
 
-	/* Verify that we have permission to add VLANs. If this is a request
-	 * to remove a VLAN, we still want to allow the user to remove the
-	 * VLAN device. In that case, we need to clear the bit in the
-	 * active_vlans bitmask.
-	 */
-	if (set && hw->mac.vlan_override)
+	/* Verify we have permission to add VLANs */
+	if (hw->mac.vlan_override)
 		return -EACCES;
 
 	/* update active_vlans bitmask */
@@ -826,12 +781,6 @@ static int fm10k_update_vid(struct net_device *netdev, u16 vid, bool set)
 		else
 			rx_ring->vid &= ~FM10K_VLAN_CLEAR;
 	}
-
-	/* If our VLAN has been overridden, there is no reason to send VLAN
-	 * removal requests as they will be silently ignored.
-	 */
-	if (hw->mac.vlan_override)
-		return 0;
 
 	/* Do not remove default VLAN ID related entries from VLAN and MAC
 	 * tables
@@ -1106,7 +1055,7 @@ void fm10k_restore_rx_state(struct fm10k_intfc *interface)
 	interface->xcast_mode = xcast_mode;
 
 	/* Restore tunnel configuration */
-	fm10k_restore_udp_port_info(interface);
+	fm10k_restore_vxlan_port(interface);
 }
 
 void fm10k_reset_rx_state(struct fm10k_intfc *interface)
@@ -1149,7 +1098,7 @@ static struct rtnl_link_stats64 *fm10k_get_stats64(struct net_device *netdev,
 	rcu_read_lock();
 
 	for (i = 0; i < interface->num_rx_queues; i++) {
-		ring = READ_ONCE(interface->rx_ring[i]);
+		ring = ACCESS_ONCE(interface->rx_ring[i]);
 
 		if (!ring)
 			continue;
@@ -1165,7 +1114,7 @@ static struct rtnl_link_stats64 *fm10k_get_stats64(struct net_device *netdev,
 	}
 
 	for (i = 0; i < interface->num_tx_queues; i++) {
-		ring = READ_ONCE(interface->tx_ring[i]);
+		ring = ACCESS_ONCE(interface->tx_ring[i]);
 
 		if (!ring)
 			continue;
@@ -1350,7 +1299,7 @@ static void *fm10k_dfwd_add_station(struct net_device *dev,
 static void fm10k_dfwd_del_station(struct net_device *dev, void *priv)
 {
 	struct fm10k_intfc *interface = netdev_priv(dev);
-	struct fm10k_l2_accel *l2_accel = READ_ONCE(interface->l2_accel);
+	struct fm10k_l2_accel *l2_accel = ACCESS_ONCE(interface->l2_accel);
 	struct fm10k_dglort_cfg dglort = { 0 };
 	struct fm10k_hw *hw = &interface->hw;
 	struct net_device *sdev = priv;
@@ -1426,8 +1375,8 @@ static const struct net_device_ops fm10k_netdev_ops = {
 	.ndo_set_vf_vlan	= fm10k_ndo_set_vf_vlan,
 	.ndo_set_vf_rate	= fm10k_ndo_set_vf_bw,
 	.ndo_get_vf_config	= fm10k_ndo_get_vf_config,
-	.ndo_udp_tunnel_add	= fm10k_udp_tunnel_add,
-	.ndo_udp_tunnel_del	= fm10k_udp_tunnel_del,
+	.ndo_add_vxlan_port	= fm10k_add_vxlan_port,
+	.ndo_del_vxlan_port	= fm10k_del_vxlan_port,
 	.ndo_dfwd_add_station	= fm10k_dfwd_add_station,
 	.ndo_dfwd_del_station	= fm10k_dfwd_del_station,
 #ifdef CONFIG_NET_POLL_CONTROLLER

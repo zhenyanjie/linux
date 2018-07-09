@@ -1,5 +1,4 @@
 /* Common code for 32 and 64-bit NUMA */
-#include <linux/acpi.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/string.h>
@@ -8,6 +7,7 @@
 #include <linux/memblock.h>
 #include <linux/mmzone.h>
 #include <linux/ctype.h>
+#include <linux/module.h>
 #include <linux/nodemask.h>
 #include <linux/sched.h>
 #include <linux/topology.h>
@@ -15,6 +15,7 @@
 #include <asm/e820.h>
 #include <asm/proto.h>
 #include <asm/dma.h>
+#include <asm/acpi.h>
 #include <asm/amd_nb.h>
 
 #include "numa_internal.h"
@@ -722,19 +723,22 @@ void __init x86_numa_init(void)
 	numa_init(dummy_numa_init);
 }
 
-static void __init init_memory_less_node(int nid)
+static __init int find_near_online_node(int node)
 {
-	unsigned long zones_size[MAX_NR_ZONES] = {0};
-	unsigned long zholes_size[MAX_NR_ZONES] = {0};
+	int n, val;
+	int min_val = INT_MAX;
+	int best_node = -1;
 
-	/* Allocate and initialize node data. Memory-less node is now online.*/
-	alloc_node_data(nid);
-	free_area_init_node(nid, zones_size, 0, zholes_size);
+	for_each_online_node(n) {
+		val = node_distance(node, n);
 
-	/*
-	 * All zonelists will be built later in start_kernel() after per cpu
-	 * areas are initialized.
-	 */
+		if (val < min_val) {
+			min_val = val;
+			best_node = n;
+		}
+	}
+
+	return best_node;
 }
 
 /*
@@ -763,10 +767,8 @@ void __init init_cpu_to_node(void)
 
 		if (node == NUMA_NO_NODE)
 			continue;
-
 		if (!node_online(node))
-			init_memory_less_node(node);
-
+			node = find_near_online_node(node);
 		numa_set_node(cpu, node);
 	}
 }

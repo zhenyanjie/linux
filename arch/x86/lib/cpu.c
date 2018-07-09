@@ -1,5 +1,4 @@
-#include <linux/types.h>
-#include <linux/export.h>
+#include <linux/module.h>
 
 unsigned int x86_family(unsigned int sig)
 {
@@ -18,7 +17,7 @@ unsigned int x86_model(unsigned int sig)
 {
 	unsigned int fam, model;
 
-	fam = x86_family(sig);
+	 fam = x86_family(sig);
 
 	model = (sig >> 4) & 0xf;
 

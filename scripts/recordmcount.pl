@@ -136,7 +136,6 @@ my %text_sections = (
      ".irqentry.text" => 1,
      ".softirqentry.text" => 1,
      ".kprobes.text" => 1,
-     ".cpuidle.text" => 1,
      ".text.unlikely" => 1,
 );
 

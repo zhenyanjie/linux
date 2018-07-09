@@ -977,13 +977,12 @@ int vmw_kms_stdu_surface_dirty(struct vmw_private *dev_priv,
 	struct vmw_framebuffer_surface *vfbs =
 		container_of(framebuffer, typeof(*vfbs), base);
 	struct vmw_stdu_dirty sdirty;
-	struct vmw_validation_ctx ctx;
 	int ret;
 
 	if (!srf)
 		srf = &vfbs->surface->res;
 
-	ret = vmw_kms_helper_resource_prepare(srf, true, &ctx);
+	ret = vmw_kms_helper_resource_prepare(srf, true);
 	if (ret)
 		return ret;
 
@@ -1006,7 +1005,7 @@ int vmw_kms_stdu_surface_dirty(struct vmw_private *dev_priv,
 				   dest_x, dest_y, num_clips, inc,
 				   &sdirty.base);
 out_finish:
-	vmw_kms_helper_resource_finish(&ctx, out_fence);
+	vmw_kms_helper_resource_finish(srf, out_fence);
 
 	return ret;
 }
@@ -1132,6 +1131,9 @@ static int vmw_stdu_init(struct vmw_private *dev_priv, unsigned unit)
 	drm_mode_crtc_set_gamma_size(crtc, 256);
 
 	drm_object_attach_property(&connector->base,
+				   dev->mode_config.dirty_info_property,
+				   1);
+	drm_object_attach_property(&connector->base,
 				   dev_priv->hotplug_mode_update_property, 1);
 	drm_object_attach_property(&connector->base,
 				   dev->mode_config.suggested_x_property, 0);
@@ -1199,6 +1201,10 @@ int vmw_kms_stdu_init_display(struct vmw_private *dev_priv)
 	ret = drm_vblank_init(dev, VMWGFX_NUM_DISPLAY_UNITS);
 	if (unlikely(ret != 0))
 		return ret;
+
+	ret = drm_mode_create_dirty_info_property(dev);
+	if (unlikely(ret != 0))
+		goto err_vblank_cleanup;
 
 	dev_priv->active_display_unit = vmw_du_screen_target;
 

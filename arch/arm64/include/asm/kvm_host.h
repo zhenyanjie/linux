@@ -24,7 +24,6 @@
 
 #include <linux/types.h>
 #include <linux/kvm_types.h>
-#include <asm/cpufeature.h>
 #include <asm/kvm.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_mmio.h>
@@ -48,7 +47,8 @@
 
 int __attribute_const__ kvm_target_cpu(void);
 int kvm_reset_vcpu(struct kvm_vcpu *vcpu);
-int kvm_arch_dev_ioctl_check_extension(struct kvm *kvm, long ext);
+int kvm_arch_dev_ioctl_check_extension(long ext);
+unsigned long kvm_hyp_reset_entry(void);
 void __extended_idmap_trampoline(phys_addr_t boot_pgd, phys_addr_t idmap_start);
 
 struct kvm_arch {
@@ -63,9 +63,6 @@ struct kvm_arch {
 	/* VTTBR value associated with above pgd and vmid */
 	u64    vttbr;
 
-	/* The last vcpu id that ran on each physical CPU */
-	int __percpu *last_vcpu_ran;
-
 	/* The maximum number of vCPUs depends on the used GIC model */
 	int max_vcpus;
 
@@ -74,9 +71,6 @@ struct kvm_arch {
 
 	/* Timer */
 	struct arch_timer_kvm	timer;
-
-	/* Mandated version of PSCI */
-	u32 psci_version;
 };
 
 #define KVM_NR_MEM_OBJS     40
@@ -297,15 +291,15 @@ struct kvm_vcpu_arch {
 #endif
 
 struct kvm_vm_stat {
-	ulong remote_tlb_flush;
+	u32 remote_tlb_flush;
 };
 
 struct kvm_vcpu_stat {
-	u64 halt_successful_poll;
-	u64 halt_attempted_poll;
-	u64 halt_poll_invalid;
-	u64 halt_wakeup;
-	u64 hvc_exit_stat;
+	u32 halt_successful_poll;
+	u32 halt_attempted_poll;
+	u32 halt_poll_invalid;
+	u32 halt_wakeup;
+	u32 hvc_exit_stat;
 	u64 wfe_exit_stat;
 	u64 wfi_exit_stat;
 	u64 mmio_exit_user;
@@ -354,25 +348,28 @@ int kvm_perf_teardown(void);
 
 struct kvm_vcpu *kvm_mpidr_to_vcpu(struct kvm *kvm, unsigned long mpidr);
 
-static inline void __cpu_init_hyp_mode(phys_addr_t pgd_ptr,
+static inline void __cpu_init_hyp_mode(phys_addr_t boot_pgd_ptr,
+				       phys_addr_t pgd_ptr,
 				       unsigned long hyp_stack_ptr,
 				       unsigned long vector_ptr)
 {
 	/*
-	 * Call initialization code, and switch to the full blown HYP code.
-	 * If the cpucaps haven't been finalized yet, something has gone very
-	 * wrong, and hyp will crash and burn when it uses any
-	 * cpus_have_const_cap() wrapper.
+	 * Call initialization code, and switch to the full blown
+	 * HYP code.
 	 */
-	BUG_ON(!static_branch_likely(&arm64_const_caps_ready));
-	__kvm_call_hyp((void *)pgd_ptr, hyp_stack_ptr, vector_ptr);
+	__kvm_call_hyp((void *)boot_pgd_ptr, pgd_ptr,
+		       hyp_stack_ptr, vector_ptr);
 }
 
-void __kvm_hyp_teardown(void);
-static inline void __cpu_reset_hyp_mode(unsigned long vector_ptr,
+static inline void __cpu_reset_hyp_mode(phys_addr_t boot_pgd_ptr,
 					phys_addr_t phys_idmap_start)
 {
-	kvm_call_hyp(__kvm_hyp_teardown, phys_idmap_start);
+	/*
+	 * Call reset code, and switch back to stub hyp vectors.
+	 * Uses __kvm_call_hyp() to avoid kaslr's kvm_ksym_ref() translation.
+	 */
+	__kvm_call_hyp((void *)kvm_hyp_reset_entry(),
+		       boot_pgd_ptr, phys_idmap_start);
 }
 
 static inline void kvm_arch_hardware_unsetup(void) {}
@@ -398,11 +395,6 @@ static inline void __cpu_init_stage2(void)
 
 	WARN_ONCE(parange < 40,
 		  "PARange is %d bits, unsupported configuration!", parange);
-}
-
-static inline bool kvm_arm_harden_branch_predictor(void)
-{
-	return cpus_have_const_cap(ARM64_HARDEN_BRANCH_PREDICTOR);
 }
 
 #endif /* __ARM64_KVM_HOST_H__ */

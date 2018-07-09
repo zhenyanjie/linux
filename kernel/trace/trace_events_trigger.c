@@ -481,10 +481,9 @@ clear_event_triggers(struct trace_array *tr)
 	struct trace_event_file *file;
 
 	list_for_each_entry(file, &tr->events, list) {
-		struct event_trigger_data *data, *n;
-		list_for_each_entry_safe(data, n, &file->triggers, list) {
+		struct event_trigger_data *data;
+		list_for_each_entry_rcu(data, &file->triggers, list) {
 			trace_event_trigger_enable_disable(file, 0);
-			list_del_rcu(&data->list);
 			if (data->ops->free)
 				data->ops->free(data->ops, data);
 		}
@@ -1029,7 +1028,6 @@ static struct event_command trigger_traceon_cmd = {
 static struct event_command trigger_traceoff_cmd = {
 	.name			= "traceoff",
 	.trigger_type		= ETT_TRACE_ONOFF,
-	.flags			= EVENT_CMD_FL_POST_TRIGGER,
 	.func			= event_trigger_callback,
 	.reg			= register_trigger,
 	.unreg			= unregister_trigger,

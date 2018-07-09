@@ -512,6 +512,7 @@ int scm_blk_dev_setup(struct scm_blk_dev *bdev, struct scm_device *scmdev)
 		goto out_queue;
 
 	rq->queuedata = scmdev;
+	bdev->gendisk->driverfs_dev = &scmdev->dev;
 	bdev->gendisk->private_data = scmdev;
 	bdev->gendisk->fops = &scm_blk_devops;
 	bdev->gendisk->queue = rq;
@@ -530,7 +531,7 @@ int scm_blk_dev_setup(struct scm_blk_dev *bdev, struct scm_device *scmdev)
 
 	/* 512 byte sectors */
 	set_capacity(bdev->gendisk, scmdev->size >> 9);
-	device_add_disk(&scmdev->dev, bdev->gendisk);
+	add_disk(bdev->gendisk);
 	return 0;
 
 out_queue:

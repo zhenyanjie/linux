@@ -82,7 +82,8 @@
  * to date before even starting the recursive build, so it's too late
  * at this point anyway.
  *
- * We don't even try to really parse the header files, but
+ * The algorithm to grep for "CONFIG_..." is bit unusual, but should
+ * be fast ;-) We don't even try to really parse the header files, but
  * merely grep, i.e. if CONFIG_FOO is mentioned in a comment, it will
  * be picked up as well. It's not a problem with respect to
  * correctness, since that can only give too many dependencies, thus
@@ -113,6 +114,11 @@
 #include <limits.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+
+#define INT_CONF ntohl(0x434f4e46)
+#define INT_ONFI ntohl(0x4f4e4649)
+#define INT_NFIG ntohl(0x4e464947)
+#define INT_FIG_ ntohl(0x4649475f)
 
 int insert_extra_deps;
 char *target;
@@ -235,22 +241,37 @@ static void use_config(const char *m, int slen)
 	print_config(m, slen);
 }
 
-static void parse_config_file(const char *p)
+static void parse_config_file(const char *map, size_t len)
 {
-	const char *q, *r;
+	const int *end = (const int *) (map + len);
+	/* start at +1, so that p can never be < map */
+	const int *m   = (const int *) map + 1;
+	const char *p, *q;
 
-	while ((p = strstr(p, "CONFIG_"))) {
+	for (; m < end; m++) {
+		if (*m == INT_CONF) { p = (char *) m  ; goto conf; }
+		if (*m == INT_ONFI) { p = (char *) m-1; goto conf; }
+		if (*m == INT_NFIG) { p = (char *) m-2; goto conf; }
+		if (*m == INT_FIG_) { p = (char *) m-3; goto conf; }
+		continue;
+	conf:
+		if (p > map + len - 7)
+			continue;
+		if (memcmp(p, "CONFIG_", 7))
+			continue;
 		p += 7;
-		q = p;
-		while (*q && (isalnum(*q) || *q == '_'))
-			q++;
-		if (memcmp(q - 7, "_MODULE", 7) == 0)
-			r = q - 7;
-		else
-			r = q;
-		if (r > p)
-			use_config(p, r - p);
-		p = q;
+		for (q = p; q < map + len; q++) {
+			if (!(isalnum(*q) || *q == '_'))
+				goto found;
+		}
+		continue;
+
+	found:
+		if (!memcmp(q - 7, "_MODULE", 7))
+			q -= 7;
+		if (q - p < 0)
+			continue;
+		use_config(p, q - p);
 	}
 }
 
@@ -270,7 +291,7 @@ static void do_config_file(const char *filename)
 {
 	struct stat st;
 	int fd;
-	char *map;
+	void *map;
 
 	fd = open(filename, O_RDONLY);
 	if (fd < 0) {
@@ -287,23 +308,18 @@ static void do_config_file(const char *filename)
 		close(fd);
 		return;
 	}
-	map = malloc(st.st_size + 1);
-	if (!map) {
-		perror("fixdep: malloc");
+	map = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if ((long) map == -1) {
+		perror("fixdep: mmap");
 		close(fd);
 		return;
 	}
-	if (read(fd, map, st.st_size) != st.st_size) {
-		perror("fixdep: read");
-		close(fd);
-		return;
-	}
-	map[st.st_size] = '\0';
+
+	parse_config_file(map, st.st_size);
+
+	munmap(map, st.st_size);
+
 	close(fd);
-
-	parse_config_file(map);
-
-	free(map);
 }
 
 /*
@@ -430,8 +446,22 @@ static void print_deps(void)
 	close(fd);
 }
 
+static void traps(void)
+{
+	static char test[] __attribute__((aligned(sizeof(int)))) = "CONF";
+	int *p = (int *)test;
+
+	if (*p != INT_CONF) {
+		fprintf(stderr, "fixdep: sizeof(int) != 4 or wrong endianness? %#x\n",
+			*p);
+		exit(2);
+	}
+}
+
 int main(int argc, char *argv[])
 {
+	traps();
+
 	if (argc == 5 && !strcmp(argv[1], "-e")) {
 		insert_extra_deps = 1;
 		argv++;

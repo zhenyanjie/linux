@@ -36,9 +36,6 @@ void wl1271_scan_complete_work(struct work_struct *work)
 	struct delayed_work *dwork;
 	struct wl1271 *wl;
 	struct wl12xx_vif *wlvif;
-	struct cfg80211_scan_info info = {
-		.aborted = false,
-	};
 	int ret;
 
 	dwork = to_delayed_work(work);
@@ -85,7 +82,7 @@ void wl1271_scan_complete_work(struct work_struct *work)
 
 	wlcore_cmd_regdomain_config_locked(wl);
 
-	ieee80211_scan_completed(wl->hw, &info);
+	ieee80211_scan_completed(wl->hw, false);
 
 out:
 	mutex_unlock(&wl->mutex);

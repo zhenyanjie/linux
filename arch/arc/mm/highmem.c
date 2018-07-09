@@ -61,7 +61,6 @@ void *kmap(struct page *page)
 
 	return kmap_high(page);
 }
-EXPORT_SYMBOL(kmap);
 
 void *kmap_atomic(struct page *page)
 {

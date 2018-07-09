@@ -38,12 +38,6 @@
 #include <asm/context_tracking.h>
 #include <asm/tm.h>
 #include <asm/ppc-opcode.h>
-#include <asm/export.h>
-#ifdef CONFIG_PPC_BOOK3S
-#include <asm/exception-64s.h>
-#else
-#include <asm/exception-64e.h>
-#endif
 
 /*
  * System calls.
@@ -78,7 +72,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_TM)
 	std	r0,GPR0(r1)
 	std	r10,GPR1(r1)
 	beq	2f			/* if from kernel mode */
-	ACCOUNT_CPU_USER_ENTRY(r13, r10, r11)
+	ACCOUNT_CPU_USER_ENTRY(r10, r11)
 2:	std	r2,GPR2(r1)
 	std	r3,GPR3(r1)
 	mfcr	r2
@@ -145,7 +139,7 @@ END_FW_FTR_SECTION_IFSET(FW_FEATURE_SPLPAR)
 #ifdef CONFIG_PPC_BOOK3E
 	wrteei	1
 #else
-	li	r11,MSR_RI
+	ld	r11,PACAKMSR(r13)
 	ori	r11,r11,MSR_EE
 	mtmsrd	r11,1
 #endif /* CONFIG_PPC_BOOK3E */
@@ -201,6 +195,7 @@ system_call:			/* label this so stack traces look sane */
 #ifdef CONFIG_PPC_BOOK3E
 	wrteei	0
 #else
+	ld	r10,PACAKMSR(r13)
 	/*
 	 * For performance reasons we clear RI the same time that we
 	 * clear EE. We only need to clear RI just before we restore r13
@@ -208,7 +203,8 @@ system_call:			/* label this so stack traces look sane */
 	 * We have to be careful to restore RI if we branch anywhere from
 	 * here (eg syscall_exit_work).
 	 */
-	li	r11,0
+	li	r9,MSR_RI
+	andc	r11,r10,r9
 	mtmsrd	r11,1
 #endif /* CONFIG_PPC_BOOK3E */
 
@@ -225,12 +221,13 @@ system_call:			/* label this so stack traces look sane */
 #endif
 2:	addi    r3,r1,STACK_FRAME_OVERHEAD
 #ifdef CONFIG_PPC_BOOK3S
-	li	r10,MSR_RI
 	mtmsrd	r10,1		/* Restore RI */
 #endif
 	bl	restore_math
 #ifdef CONFIG_PPC_BOOK3S
-	li	r11,0
+	ld	r10,PACAKMSR(r13)
+	li	r9,MSR_RI
+	andc	r11,r10,r9 /* Re-clear RI */
 	mtmsrd	r11,1
 #endif
 	ld	r8,_MSR(r1)
@@ -249,30 +246,20 @@ END_FTR_SECTION_IFCLR(CPU_FTR_STCX_CHECKS_ADDRESS)
 	ld	r4,_LINK(r1)
 
 	beq-	1f
-	ACCOUNT_CPU_USER_EXIT(r13, r11, r12)
+	ACCOUNT_CPU_USER_EXIT(r11, r12)
 
 BEGIN_FTR_SECTION
 	HMT_MEDIUM_LOW
 END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 
 	ld	r13,GPR13(r1)	/* only restore r13 if returning to usermode */
-	ld	r2,GPR2(r1)
-	ld	r1,GPR1(r1)
-	mtlr	r4
-	mtcr	r5
-	mtspr	SPRN_SRR0,r7
-	mtspr	SPRN_SRR1,r8
-	RFI_TO_USER
-	b	.	/* prevent speculative execution */
-
-	/* exit to kernel */
 1:	ld	r2,GPR2(r1)
 	ld	r1,GPR1(r1)
 	mtlr	r4
 	mtcr	r5
 	mtspr	SPRN_SRR0,r7
 	mtspr	SPRN_SRR1,r8
-	RFI_TO_KERNEL
+	RFI
 	b	.	/* prevent speculative execution */
 
 syscall_error:	
@@ -321,7 +308,6 @@ syscall_enosys:
 	
 syscall_exit_work:
 #ifdef CONFIG_PPC_BOOK3S
-	li	r10,MSR_RI
 	mtmsrd	r10,1		/* Restore RI */
 #endif
 	/* If TIF_RESTOREALL is set, don't scribble on either r3 or ccr.
@@ -368,7 +354,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 #ifdef CONFIG_PPC_BOOK3E
 	wrteei	1
 #else
-	li	r10,MSR_RI
+	ld	r10,PACAKMSR(r13)
 	ori	r10,r10,MSR_EE
 	mtmsrd	r10,1
 #endif /* CONFIG_PPC_BOOK3E */
@@ -401,7 +387,8 @@ tabort_syscall:
 	mtmsrd	r10, 1
 	mtspr	SPRN_SRR0, r11
 	mtspr	SPRN_SRR1, r12
-	RFI_TO_USER
+
+	rfid
 	b	.	/* prevent speculative execution */
 #endif
 
@@ -466,7 +453,7 @@ _GLOBAL(ret_from_kernel_thread)
 	REST_NVGPRS(r1)
 	mtlr	r14
 	mr	r3,r15
-#ifdef PPC64_ELF_ABI_v2
+#if defined(_CALL_ELF) && _CALL_ELF == 2
 	mr	r12,r14
 #endif
 	blrl
@@ -545,7 +532,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_300)
 #ifdef CONFIG_PPC_STD_MMU_64
 BEGIN_MMU_FTR_SECTION
 	b	2f
-END_MMU_FTR_SECTION_IFSET(MMU_FTR_TYPE_RADIX)
+END_MMU_FTR_SECTION_IFSET(MMU_FTR_RADIX)
 BEGIN_FTR_SECTION
 	clrrdi	r6,r8,28	/* get its ESID */
 	clrrdi	r9,r1,28	/* get current sp ESID */
@@ -586,7 +573,6 @@ END_MMU_FTR_SECTION_IFSET(MMU_FTR_1T_SEGMENT)
 	 * actually hit this code path.
 	 */
 
-	isync
 	slbie	r6
 	slbie	r6		/* Workaround POWER5 < DD2.1 issue */
 	slbmte	r7,r0
@@ -633,7 +619,7 @@ _GLOBAL(ret_from_except_lite)
 #ifdef CONFIG_PPC_BOOK3E
 	wrteei	0
 #else
-	li	r10,MSR_RI
+	ld	r10,PACAKMSR(r13) /* Get kernel MSR without EE */
 	mtmsrd	r10,1		  /* Update machine state */
 #endif /* CONFIG_PPC_BOOK3E */
 
@@ -704,7 +690,7 @@ resume_kernel:
 
 	addi	r8,r1,INT_FRAME_SIZE	/* Get the kprobed function entry */
 
-	ld	r3,GPR1(r1)
+	lwz	r3,GPR1(r1)
 	subi	r3,r3,INT_FRAME_SIZE	/* dst: Allocate a trampoline exception frame */
 	mr	r4,r1			/* src:  current exception frame */
 	mr	r1,r3			/* Reroute the trampoline frame to r1 */
@@ -718,8 +704,8 @@ resume_kernel:
 	addi	r6,r6,8
 	bdnz	2b
 
-	/* Do real store operation to complete stdu */
-	ld	r5,GPR1(r1)
+	/* Do real store operation to complete stwu */
+	lwz	r5,GPR1(r1)
 	std	r8,0(r5)
 
 	/* Clear _TIF_EMULATE_STACK_STORE flag */
@@ -765,7 +751,7 @@ resume_kernel:
 #ifdef CONFIG_PPC_BOOK3E
 	wrteei	0
 #else
-	li	r10,MSR_RI
+	ld	r10,PACAKMSR(r13) /* Get kernel MSR without EE */
 	mtmsrd	r10,1		  /* Update machine state */
 #endif /* CONFIG_PPC_BOOK3E */
 #endif /* CONFIG_PREEMPT */
@@ -855,7 +841,8 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 	 * userspace and we take an exception after restoring r13,
 	 * we end up corrupting the userspace r13 value.
 	 */
-	li	r4,0
+	ld	r4,PACAKMSR(r13) /* Get kernel MSR without EE */
+	andc	r4,r4,r0	 /* r0 contains MSR_RI here */
 	mtmsrd	r4,1
 
 #ifdef CONFIG_PPC_TRANSACTIONAL_MEM
@@ -872,9 +859,9 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 BEGIN_FTR_SECTION
 	mtspr	SPRN_PPR,r2	/* Restore PPR */
 END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
-	ACCOUNT_CPU_USER_EXIT(r13, r2, r4)
+	ACCOUNT_CPU_USER_EXIT(r2, r4)
 	REST_GPR(13, r1)
-
+1:
 	mtspr	SPRN_SRR1,r3
 
 	ld	r2,_CCR(r1)
@@ -887,22 +874,8 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 	ld	r3,GPR3(r1)
 	ld	r4,GPR4(r1)
 	ld	r1,GPR1(r1)
-	RFI_TO_USER
-	b	.	/* prevent speculative execution */
 
-1:	mtspr	SPRN_SRR1,r3
-
-	ld	r2,_CCR(r1)
-	mtcrf	0xFF,r2
-	ld	r2,_NIP(r1)
-	mtspr	SPRN_SRR0,r2
-
-	ld	r0,GPR0(r1)
-	ld	r2,GPR2(r1)
-	ld	r3,GPR3(r1)
-	ld	r4,GPR4(r1)
-	ld	r1,GPR1(r1)
-	RFI_TO_KERNEL
+	rfid
 	b	.	/* prevent speculative execution */
 
 #endif /* CONFIG_PPC_BOOK3E */
@@ -1078,7 +1051,7 @@ _GLOBAL(enter_rtas)
 	
 	mtspr	SPRN_SRR0,r5
 	mtspr	SPRN_SRR1,r6
-	RFI_TO_KERNEL
+	rfid
 	b	.	/* prevent speculative execution */
 
 rtas_return_loc:
@@ -1103,7 +1076,7 @@ rtas_return_loc:
 
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
-	RFI_TO_KERNEL
+	rfid
 	b	.	/* prevent speculative execution */
 
 	.align	3
@@ -1174,7 +1147,7 @@ _GLOBAL(enter_prom)
 	LOAD_REG_IMMEDIATE(r12, MSR_SF | MSR_ISF | MSR_LE)
 	andc	r11,r11,r12
 	mtsrr1	r11
-	RFI_TO_KERNEL
+	rfid
 #endif /* CONFIG_PPC_BOOK3E */
 
 1:	/* Return from OF */
@@ -1207,7 +1180,6 @@ _GLOBAL(enter_prom)
 #ifdef CONFIG_DYNAMIC_FTRACE
 _GLOBAL(mcount)
 _GLOBAL(_mcount)
-EXPORT_SYMBOL(_mcount)
 	mflr	r12
 	mtctr	r12
 	mtlr	r0
@@ -1264,14 +1236,10 @@ _GLOBAL(ftrace_caller)
 	stdu	r1,-SWITCH_FRAME_SIZE(r1)
 
 	/* Save all gprs to pt_regs */
-	SAVE_GPR(0, r1)
-	SAVE_10GPRS(2, r1)
-	SAVE_10GPRS(12, r1)
-	SAVE_10GPRS(22, r1)
-
-	/* Save previous stack pointer (r1) */
-	addi	r8, r1, SWITCH_FRAME_SIZE
-	std	r8, GPR1(r1)
+	SAVE_8GPRS(0,r1)
+	SAVE_8GPRS(8,r1)
+	SAVE_8GPRS(16,r1)
+	SAVE_8GPRS(24,r1)
 
 	/* Load special regs for save below */
 	mfmsr   r8
@@ -1325,10 +1293,10 @@ ftrace_call:
 #endif
 
 	/* Restore gprs */
-	REST_GPR(0,r1)
-	REST_10GPRS(2,r1)
-	REST_10GPRS(12,r1)
-	REST_10GPRS(22,r1)
+	REST_8GPRS(0,r1)
+	REST_8GPRS(8,r1)
+	REST_8GPRS(16,r1)
+	REST_8GPRS(24,r1)
 
 	/* Restore callee's TOC */
 	ld	r2, 24(r1)
@@ -1448,7 +1416,6 @@ livepatch_handler:
 
 #else
 _GLOBAL_TOC(_mcount)
-EXPORT_SYMBOL(_mcount)
 	/* Taken from output of objdump from lib64/glibc */
 	mflr	r3
 	ld	r11, 0(r1)

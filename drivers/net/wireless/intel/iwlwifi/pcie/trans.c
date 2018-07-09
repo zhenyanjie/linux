@@ -608,10 +608,18 @@ static int iwl_pcie_prepare_card_hw(struct iwl_trans *trans)
 /*
  * ucode
  */
-static void iwl_pcie_load_firmware_chunk_fh(struct iwl_trans *trans,
-					    u32 dst_addr, dma_addr_t phy_addr,
-					    u32 byte_cnt)
+static int iwl_pcie_load_firmware_chunk(struct iwl_trans *trans, u32 dst_addr,
+				   dma_addr_t phy_addr, u32 byte_cnt)
 {
+	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
+	unsigned long flags;
+	int ret;
+
+	trans_pcie->ucode_write_complete = false;
+
+	if (!iwl_trans_grab_nic_access(trans, &flags))
+		return -EIO;
+
 	iwl_write32(trans, FH_TCSR_CHNL_TX_CONFIG_REG(FH_SRVC_CHNL),
 		    FH_TCSR_TX_CONFIG_REG_VAL_DMA_CHNL_PAUSE);
 
@@ -634,50 +642,7 @@ static void iwl_pcie_load_firmware_chunk_fh(struct iwl_trans *trans,
 		    FH_TCSR_TX_CONFIG_REG_VAL_DMA_CHNL_ENABLE |
 		    FH_TCSR_TX_CONFIG_REG_VAL_DMA_CREDIT_DISABLE |
 		    FH_TCSR_TX_CONFIG_REG_VAL_CIRQ_HOST_ENDTFD);
-}
 
-static void iwl_pcie_load_firmware_chunk_tfh(struct iwl_trans *trans,
-					     u32 dst_addr, dma_addr_t phy_addr,
-					     u32 byte_cnt)
-{
-	/* Stop DMA channel */
-	iwl_write32(trans, TFH_SRV_DMA_CHNL0_CTRL, 0);
-
-	/* Configure SRAM address */
-	iwl_write32(trans, TFH_SRV_DMA_CHNL0_SRAM_ADDR,
-		    dst_addr);
-
-	/* Configure DRAM address - 64 bit */
-	iwl_write64(trans, TFH_SRV_DMA_CHNL0_DRAM_ADDR, phy_addr);
-
-	/* Configure byte count to transfer */
-	iwl_write32(trans, TFH_SRV_DMA_CHNL0_BC, byte_cnt);
-
-	/* Enable the DRAM2SRAM to start */
-	iwl_write32(trans, TFH_SRV_DMA_CHNL0_CTRL, TFH_SRV_DMA_SNOOP |
-						   TFH_SRV_DMA_TO_DRIVER |
-						   TFH_SRV_DMA_START);
-}
-
-static int iwl_pcie_load_firmware_chunk(struct iwl_trans *trans,
-					u32 dst_addr, dma_addr_t phy_addr,
-					u32 byte_cnt)
-{
-	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-	unsigned long flags;
-	int ret;
-
-	trans_pcie->ucode_write_complete = false;
-
-	if (!iwl_trans_grab_nic_access(trans, &flags))
-		return -EIO;
-
-	if (trans->cfg->use_tfh)
-		iwl_pcie_load_firmware_chunk_tfh(trans, dst_addr, phy_addr,
-						 byte_cnt);
-	else
-		iwl_pcie_load_firmware_chunk_fh(trans, dst_addr, phy_addr,
-						byte_cnt);
 	iwl_trans_release_nic_access(trans, &flags);
 
 	ret = wait_event_timeout(trans_pcie->ucode_write_waitq,
@@ -827,16 +792,10 @@ static int iwl_pcie_load_cpu_sections_8000(struct iwl_trans *trans,
 		if (ret)
 			return ret;
 
-		/* Notify ucode of loaded section number and status */
-		if (trans->cfg->use_tfh) {
-			val = iwl_read_prph(trans, UREG_UCODE_LOAD_STATUS);
-			val = val | (sec_num << shift_param);
-			iwl_write_prph(trans, UREG_UCODE_LOAD_STATUS, val);
-		} else {
-			val = iwl_read_direct32(trans, FH_UCODE_LOAD_STATUS);
-			val = val | (sec_num << shift_param);
-			iwl_write_direct32(trans, FH_UCODE_LOAD_STATUS, val);
-		}
+		/* Notify the ucode of the loaded section number and status */
+		val = iwl_read_direct32(trans, FH_UCODE_LOAD_STATUS);
+		val = val | (sec_num << shift_param);
+		iwl_write_direct32(trans, FH_UCODE_LOAD_STATUS, val);
 		sec_num = (sec_num << 1) | 0x1;
 	}
 
@@ -844,21 +803,10 @@ static int iwl_pcie_load_cpu_sections_8000(struct iwl_trans *trans,
 
 	iwl_enable_interrupts(trans);
 
-	if (trans->cfg->use_tfh) {
-		if (cpu == 1)
-			iwl_write_prph(trans, UREG_UCODE_LOAD_STATUS,
-				       0xFFFF);
-		else
-			iwl_write_prph(trans, UREG_UCODE_LOAD_STATUS,
-				       0xFFFFFFFF);
-	} else {
-		if (cpu == 1)
-			iwl_write_direct32(trans, FH_UCODE_LOAD_STATUS,
-					   0xFFFF);
-		else
-			iwl_write_direct32(trans, FH_UCODE_LOAD_STATUS,
-					   0xFFFFFFFF);
-	}
+	if (cpu == 1)
+		iwl_write_direct32(trans, FH_UCODE_LOAD_STATUS, 0xFFFF);
+	else
+		iwl_write_direct32(trans, FH_UCODE_LOAD_STATUS, 0xFFFFFFFF);
 
 	return 0;
 }
@@ -868,13 +816,17 @@ static int iwl_pcie_load_cpu_sections(struct iwl_trans *trans,
 				      int cpu,
 				      int *first_ucode_section)
 {
+	int shift_param;
 	int i, ret = 0;
 	u32 last_read_idx = 0;
 
-	if (cpu == 1)
+	if (cpu == 1) {
+		shift_param = 0;
 		*first_ucode_section = 0;
-	else
+	} else {
+		shift_param = 16;
 		(*first_ucode_section)++;
+	}
 
 	for (i = *first_ucode_section; i < IWL_UCODE_SECTION_MAX; i++) {
 		last_read_idx = i;
@@ -898,6 +850,14 @@ static int iwl_pcie_load_cpu_sections(struct iwl_trans *trans,
 		if (ret)
 			return ret;
 	}
+
+	if (trans->cfg->device_family == IWL_DEVICE_FAMILY_8000)
+		iwl_set_bits_prph(trans,
+				  CSR_UCODE_LOAD_STATUS_ADDR,
+				  (LMPM_CPU_UCODE_LOADING_COMPLETED |
+				   LMPM_CPU_HDRS_LOADING_COMPLETED |
+				   LMPM_CPU_UCODE_LOADING_STARTED) <<
+					shift_param);
 
 	*first_ucode_section = last_read_idx;
 
@@ -1166,7 +1126,7 @@ static void iwl_pcie_synchronize_irqs(struct iwl_trans *trans)
 	if (trans_pcie->msix_enabled) {
 		int i;
 
-		for (i = 0; i < trans_pcie->alloc_vecs; i++)
+		for (i = 0; i < trans_pcie->allocated_vector; i++)
 			synchronize_irq(trans_pcie->msix_entries[i].vector);
 	} else {
 		synchronize_irq(trans_pcie->pci_dev->irq);
@@ -1325,8 +1285,6 @@ static void iwl_trans_pcie_d3_suspend(struct iwl_trans *trans, bool test,
 	iwl_clear_bit(trans, CSR_GP_CNTRL,
 		      CSR_GP_CNTRL_REG_FLAG_INIT_DONE);
 
-	iwl_pcie_enable_rx_wake(trans, false);
-
 	if (reset) {
 		/*
 		 * reset TX queues -- some of their registers reset during S3
@@ -1351,8 +1309,6 @@ static int iwl_trans_pcie_d3_resume(struct iwl_trans *trans,
 		*status = IWL_D3_STATUS_ALIVE;
 		return 0;
 	}
-
-	iwl_pcie_enable_rx_wake(trans, true);
 
 	/*
 	 * Also enables interrupts - none will happen as the device doesn't
@@ -1425,78 +1381,38 @@ static struct iwl_causes_list causes_list[] = {
 	{MSIX_HW_INT_CAUSES_REG_HAP,		CSR_MSIX_HW_INT_MASK_AD, 0x2E},
 };
 
-static void iwl_pcie_map_non_rx_causes(struct iwl_trans *trans)
-{
-	struct iwl_trans_pcie *trans_pcie =  IWL_TRANS_GET_PCIE_TRANS(trans);
-	int val = trans_pcie->def_irq | MSIX_NON_AUTO_CLEAR_CAUSE;
-	int i;
-
-	/*
-	 * Access all non RX causes and map them to the default irq.
-	 * In case we are missing at least one interrupt vector,
-	 * the first interrupt vector will serve non-RX and FBQ causes.
-	 */
-	for (i = 0; i < ARRAY_SIZE(causes_list); i++) {
-		iwl_write8(trans, CSR_MSIX_IVAR(causes_list[i].addr), val);
-		iwl_clear_bit(trans, causes_list[i].mask_reg,
-			      causes_list[i].cause_num);
-	}
-}
-
-static void iwl_pcie_map_rx_causes(struct iwl_trans *trans)
-{
-	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-	u32 offset =
-		trans_pcie->shared_vec_mask & IWL_SHARED_IRQ_FIRST_RSS ? 1 : 0;
-	u32 val, idx;
-
-	/*
-	 * The first RX queue - fallback queue, which is designated for
-	 * management frame, command responses etc, is always mapped to the
-	 * first interrupt vector. The other RX queues are mapped to
-	 * the other (N - 2) interrupt vectors.
-	 */
-	val = BIT(MSIX_FH_INT_CAUSES_Q(0));
-	for (idx = 1; idx < trans->num_rx_queues; idx++) {
-		iwl_write8(trans, CSR_MSIX_RX_IVAR(idx),
-			   MSIX_FH_INT_CAUSES_Q(idx - offset));
-		val |= BIT(MSIX_FH_INT_CAUSES_Q(idx));
-	}
-	iwl_write32(trans, CSR_MSIX_FH_INT_MASK_AD, ~val);
-
-	val = MSIX_FH_INT_CAUSES_Q(0);
-	if (trans_pcie->shared_vec_mask & IWL_SHARED_IRQ_NON_RX)
-		val |= MSIX_NON_AUTO_CLEAR_CAUSE;
-	iwl_write8(trans, CSR_MSIX_RX_IVAR(0), val);
-
-	if (trans_pcie->shared_vec_mask & IWL_SHARED_IRQ_FIRST_RSS)
-		iwl_write8(trans, CSR_MSIX_RX_IVAR(1), val);
-}
-
 static void iwl_pcie_init_msix(struct iwl_trans_pcie *trans_pcie)
 {
+	u32 val, max_rx_vector, i;
 	struct iwl_trans *trans = trans_pcie->trans;
 
-	if (!trans_pcie->msix_enabled) {
-		if (trans->cfg->mq_rx_supported)
-			iwl_write_prph(trans, UREG_CHICK,
-				       UREG_CHICK_MSI_ENABLE);
+	max_rx_vector = trans_pcie->allocated_vector - 1;
+
+	if (!trans_pcie->msix_enabled)
 		return;
-	}
 
 	iwl_write_prph(trans, UREG_CHICK, UREG_CHICK_MSIX_ENABLE);
 
 	/*
-	 * Each cause from the causes list above and the RX causes is
-	 * represented as a byte in the IVAR table. The first nibble
-	 * represents the bound interrupt vector of the cause, the second
-	 * represents no auto clear for this cause. This will be set if its
-	 * interrupt vector is bound to serve other causes.
+	 * Each cause from the list above and the RX causes is represented as
+	 * a byte in the IVAR table. We access the first (N - 1) bytes and map
+	 * them to the (N - 1) vectors so these vectors will be used as rx
+	 * vectors. Then access all non rx causes and map them to the
+	 * default queue (N'th queue).
 	 */
-	iwl_pcie_map_rx_causes(trans);
+	for (i = 0; i < max_rx_vector; i++) {
+		iwl_write8(trans, CSR_MSIX_RX_IVAR(i), MSIX_FH_INT_CAUSES_Q(i));
+		iwl_clear_bit(trans, CSR_MSIX_FH_INT_MASK_AD,
+			      BIT(MSIX_FH_INT_CAUSES_Q(i)));
+	}
 
-	iwl_pcie_map_non_rx_causes(trans);
-
+	for (i = 0; i < ARRAY_SIZE(causes_list); i++) {
+		val = trans_pcie->default_irq_num |
+			MSIX_NON_AUTO_CLEAR_CAUSE;
+		iwl_write8(trans, CSR_MSIX_IVAR(causes_list[i].addr), val);
+		iwl_clear_bit(trans, causes_list[i].mask_reg,
+			      causes_list[i].cause_num);
+	}
 	trans_pcie->fh_init_mask =
 		~iwl_read32(trans, CSR_MSIX_FH_INT_MASK_AD);
 	trans_pcie->fh_mask = trans_pcie->fh_init_mask;
@@ -1509,55 +1425,40 @@ static void iwl_pcie_set_interrupt_capa(struct pci_dev *pdev,
 					struct iwl_trans *trans)
 {
 	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-	int max_irqs, num_irqs, i, ret;
 	u16 pci_cmd;
+	int max_vector;
+	int ret, i;
 
-	if (!trans->cfg->mq_rx_supported)
-		goto enable_msi;
+	if (trans->cfg->mq_rx_supported) {
+		max_vector = min_t(u32, (num_possible_cpus() + 2),
+				   IWL_MAX_RX_HW_QUEUES);
+		for (i = 0; i < max_vector; i++)
+			trans_pcie->msix_entries[i].entry = i;
 
-	max_irqs = min_t(u32, num_online_cpus() + 2, IWL_MAX_RX_HW_QUEUES);
-	for (i = 0; i < max_irqs; i++)
-		trans_pcie->msix_entries[i].entry = i;
+		ret = pci_enable_msix_range(pdev, trans_pcie->msix_entries,
+					    MSIX_MIN_INTERRUPT_VECTORS,
+					    max_vector);
+		if (ret > 1) {
+			IWL_DEBUG_INFO(trans,
+				       "Enable MSI-X allocate %d interrupt vector\n",
+				       ret);
+			trans_pcie->allocated_vector = ret;
+			trans_pcie->default_irq_num =
+				trans_pcie->allocated_vector - 1;
+			trans_pcie->trans->num_rx_queues =
+				trans_pcie->allocated_vector - 1;
+			trans_pcie->msix_enabled = true;
 
-	num_irqs = pci_enable_msix_range(pdev, trans_pcie->msix_entries,
-					 MSIX_MIN_INTERRUPT_VECTORS,
-					 max_irqs);
-	if (num_irqs < 0) {
+			return;
+		}
 		IWL_DEBUG_INFO(trans,
-			       "Failed to enable msi-x mode (ret %d). Moving to msi mode.\n",
-			       num_irqs);
-		goto enable_msi;
+			       "ret = %d %s move to msi mode\n", ret,
+			       (ret == 1) ?
+			       "can't allocate more than 1 interrupt vector" :
+			       "failed to enable msi-x mode");
+		pci_disable_msix(pdev);
 	}
-	trans_pcie->def_irq = (num_irqs == max_irqs) ? num_irqs - 1 : 0;
 
-	IWL_DEBUG_INFO(trans,
-		       "MSI-X enabled. %d interrupt vectors were allocated\n",
-		       num_irqs);
-
-	/*
-	 * In case the OS provides fewer interrupts than requested, different
-	 * causes will share the same interrupt vector as follows:
-	 * One interrupt less: non rx causes shared with FBQ.
-	 * Two interrupts less: non rx causes shared with FBQ and RSS.
-	 * More than two interrupts: we will use fewer RSS queues.
-	 */
-	if (num_irqs <= max_irqs - 2) {
-		trans_pcie->trans->num_rx_queues = num_irqs + 1;
-		trans_pcie->shared_vec_mask = IWL_SHARED_IRQ_NON_RX |
-			IWL_SHARED_IRQ_FIRST_RSS;
-	} else if (num_irqs == max_irqs - 1) {
-		trans_pcie->trans->num_rx_queues = num_irqs;
-		trans_pcie->shared_vec_mask = IWL_SHARED_IRQ_NON_RX;
-	} else {
-		trans_pcie->trans->num_rx_queues = num_irqs - 1;
-	}
-	WARN_ON(trans_pcie->trans->num_rx_queues > IWL_MAX_RX_HW_QUEUES);
-
-	trans_pcie->alloc_vecs = num_irqs;
-	trans_pcie->msix_enabled = true;
-	return;
-
-enable_msi:
 	ret = pci_enable_msi(pdev);
 	if (ret) {
 		dev_err(&pdev->dev, "pci_enable_msi failed - %d\n", ret);
@@ -1570,57 +1471,36 @@ enable_msi:
 	}
 }
 
-static void iwl_pcie_irq_set_affinity(struct iwl_trans *trans)
-{
-	int iter_rx_q, i, ret, cpu, offset;
-	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-
-	i = trans_pcie->shared_vec_mask & IWL_SHARED_IRQ_FIRST_RSS ? 0 : 1;
-	iter_rx_q = trans_pcie->trans->num_rx_queues - 1 + i;
-	offset = 1 + i;
-	for (; i < iter_rx_q ; i++) {
-		/*
-		 * Get the cpu prior to the place to search
-		 * (i.e. return will be > i - 1).
-		 */
-		cpu = cpumask_next(i - offset, cpu_online_mask);
-		cpumask_set_cpu(cpu, &trans_pcie->affinity_mask[i]);
-		ret = irq_set_affinity_hint(trans_pcie->msix_entries[i].vector,
-					    &trans_pcie->affinity_mask[i]);
-		if (ret)
-			IWL_ERR(trans_pcie->trans,
-				"Failed to set affinity mask for IRQ %d\n",
-				i);
-	}
-}
-
 static int iwl_pcie_init_msix_handler(struct pci_dev *pdev,
 				      struct iwl_trans_pcie *trans_pcie)
 {
-	int i;
+	int i, last_vector;
 
-	for (i = 0; i < trans_pcie->alloc_vecs; i++) {
+	last_vector = trans_pcie->trans->num_rx_queues;
+
+	for (i = 0; i < trans_pcie->allocated_vector; i++) {
 		int ret;
-		struct msix_entry *msix_entry;
 
-		msix_entry = &trans_pcie->msix_entries[i];
-		ret = devm_request_threaded_irq(&pdev->dev,
-						msix_entry->vector,
-						iwl_pcie_msix_isr,
-						(i == trans_pcie->def_irq) ?
-						iwl_pcie_irq_msix_handler :
-						iwl_pcie_irq_rx_msix_handler,
-						IRQF_SHARED,
-						DRV_NAME,
-						msix_entry);
+		ret = request_threaded_irq(trans_pcie->msix_entries[i].vector,
+					   iwl_pcie_msix_isr,
+					   (i == last_vector) ?
+					   iwl_pcie_irq_msix_handler :
+					   iwl_pcie_irq_rx_msix_handler,
+					   IRQF_SHARED,
+					   DRV_NAME,
+					   &trans_pcie->msix_entries[i]);
 		if (ret) {
+			int j;
+
 			IWL_ERR(trans_pcie->trans,
 				"Error allocating IRQ %d\n", i);
-
+			for (j = 0; j < i; j++)
+				free_irq(trans_pcie->msix_entries[j].vector,
+					 &trans_pcie->msix_entries[j]);
+			pci_disable_msix(pdev);
 			return ret;
 		}
 	}
-	iwl_pcie_irq_set_affinity(trans_pcie->trans);
 
 	return 0;
 }
@@ -1749,12 +1629,10 @@ static void iwl_trans_pcie_configure(struct iwl_trans *trans,
 	trans_pcie->rx_page_order =
 		iwl_trans_get_rb_size_order(trans_pcie->rx_buf_size);
 
+	trans_pcie->wide_cmd_header = trans_cfg->wide_cmd_header;
 	trans_pcie->bc_table_dword = trans_cfg->bc_table_dword;
 	trans_pcie->scd_set_active = trans_cfg->scd_set_active;
 	trans_pcie->sw_csum_tx = trans_cfg->sw_csum_tx;
-
-	trans_pcie->page_offs = trans_cfg->cb_data_offs;
-	trans_pcie->dev_cmd_offs = trans_cfg->cb_data_offs + sizeof(void *);
 
 	trans->command_groups = trans_cfg->command_groups;
 	trans->command_groups_size = trans_cfg->command_groups_size;
@@ -1779,16 +1657,22 @@ void iwl_trans_pcie_free(struct iwl_trans *trans)
 	iwl_pcie_rx_free(trans);
 
 	if (trans_pcie->msix_enabled) {
-		for (i = 0; i < trans_pcie->alloc_vecs; i++) {
-			irq_set_affinity_hint(
-				trans_pcie->msix_entries[i].vector,
-				NULL);
-		}
+		for (i = 0; i < trans_pcie->allocated_vector; i++)
+			free_irq(trans_pcie->msix_entries[i].vector,
+				 &trans_pcie->msix_entries[i]);
 
+		pci_disable_msix(trans_pcie->pci_dev);
 		trans_pcie->msix_enabled = false;
 	} else {
+		free_irq(trans_pcie->pci_dev->irq, trans);
+
 		iwl_pcie_free_ict(trans);
+
+		pci_disable_msi(trans_pcie->pci_dev);
 	}
+	iounmap(trans_pcie->hw_base);
+	pci_release_regions(trans_pcie->pci_dev);
+	pci_disable_device(trans_pcie->pci_dev);
 
 	iwl_pcie_free_fw_monitor(trans);
 
@@ -1960,7 +1844,7 @@ static void iwl_trans_pcie_freeze_txq_timer(struct iwl_trans *trans,
 
 		txq->frozen = freeze;
 
-		if (txq->read_ptr == txq->write_ptr)
+		if (txq->q.read_ptr == txq->q.write_ptr)
 			goto next_queue;
 
 		if (freeze) {
@@ -2008,7 +1892,7 @@ static void iwl_trans_pcie_block_txq_ptrs(struct iwl_trans *trans, bool block)
 			txq->block--;
 			if (!txq->block) {
 				iwl_write32(trans, HBUS_TARG_WRPTR,
-					    txq->write_ptr | (i << 8));
+					    txq->q.write_ptr | (i << 8));
 			}
 		} else if (block) {
 			txq->block++;
@@ -2020,22 +1904,62 @@ static void iwl_trans_pcie_block_txq_ptrs(struct iwl_trans *trans, bool block)
 
 #define IWL_FLUSH_WAIT_MS	2000
 
-void iwl_trans_pcie_log_scd_error(struct iwl_trans *trans, struct iwl_txq *txq)
+static int iwl_trans_pcie_wait_txq_empty(struct iwl_trans *trans, u32 txq_bm)
 {
 	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
+	struct iwl_txq *txq;
+	struct iwl_queue *q;
+	int cnt;
+	unsigned long now = jiffies;
 	u32 scd_sram_addr;
 	u8 buf[16];
-	int cnt;
+	int ret = 0;
+
+	/* waiting for all the tx frames complete might take a while */
+	for (cnt = 0; cnt < trans->cfg->base_params->num_of_queues; cnt++) {
+		u8 wr_ptr;
+
+		if (cnt == trans_pcie->cmd_queue)
+			continue;
+		if (!test_bit(cnt, trans_pcie->queue_used))
+			continue;
+		if (!(BIT(cnt) & txq_bm))
+			continue;
+
+		IWL_DEBUG_TX_QUEUES(trans, "Emptying queue %d...\n", cnt);
+		txq = &trans_pcie->txq[cnt];
+		q = &txq->q;
+		wr_ptr = ACCESS_ONCE(q->write_ptr);
+
+		while (q->read_ptr != ACCESS_ONCE(q->write_ptr) &&
+		       !time_after(jiffies,
+				   now + msecs_to_jiffies(IWL_FLUSH_WAIT_MS))) {
+			u8 write_ptr = ACCESS_ONCE(q->write_ptr);
+
+			if (WARN_ONCE(wr_ptr != write_ptr,
+				      "WR pointer moved while flushing %d -> %d\n",
+				      wr_ptr, write_ptr))
+				return -ETIMEDOUT;
+			usleep_range(1000, 2000);
+		}
+
+		if (q->read_ptr != q->write_ptr) {
+			IWL_ERR(trans,
+				"fail to flush all tx fifo queues Q %d\n", cnt);
+			ret = -ETIMEDOUT;
+			break;
+		}
+		IWL_DEBUG_TX_QUEUES(trans, "Queue %d is now empty.\n", cnt);
+	}
+
+	if (!ret)
+		return 0;
 
 	IWL_ERR(trans, "Current SW read_ptr %d write_ptr %d\n",
-		txq->read_ptr, txq->write_ptr);
-
-	if (trans->cfg->use_tfh)
-		/* TODO: access new SCD registers and dump them */
-		return;
+		txq->q.read_ptr, txq->q.write_ptr);
 
 	scd_sram_addr = trans_pcie->scd_base_addr +
-			SCD_TX_STTS_QUEUE_OFFSET(txq->id);
+			SCD_TX_STTS_QUEUE_OFFSET(txq->q.id);
 	iwl_trans_read_mem_bytes(trans, scd_sram_addr, buf, sizeof(buf));
 
 	iwl_print_hex_error(trans, buf, sizeof(buf));
@@ -2064,54 +1988,6 @@ void iwl_trans_pcie_log_scd_error(struct iwl_trans *trans, struct iwl_txq *txq)
 				(TFD_QUEUE_SIZE_MAX - 1),
 			iwl_read_prph(trans, SCD_QUEUE_WRPTR(cnt)));
 	}
-}
-
-static int iwl_trans_pcie_wait_txq_empty(struct iwl_trans *trans, u32 txq_bm)
-{
-	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-	struct iwl_txq *txq;
-	int cnt;
-	unsigned long now = jiffies;
-	int ret = 0;
-
-	/* waiting for all the tx frames complete might take a while */
-	for (cnt = 0; cnt < trans->cfg->base_params->num_of_queues; cnt++) {
-		u8 wr_ptr;
-
-		if (cnt == trans_pcie->cmd_queue)
-			continue;
-		if (!test_bit(cnt, trans_pcie->queue_used))
-			continue;
-		if (!(BIT(cnt) & txq_bm))
-			continue;
-
-		IWL_DEBUG_TX_QUEUES(trans, "Emptying queue %d...\n", cnt);
-		txq = &trans_pcie->txq[cnt];
-		wr_ptr = ACCESS_ONCE(txq->write_ptr);
-
-		while (txq->read_ptr != ACCESS_ONCE(txq->write_ptr) &&
-		       !time_after(jiffies,
-				   now + msecs_to_jiffies(IWL_FLUSH_WAIT_MS))) {
-			u8 write_ptr = ACCESS_ONCE(txq->write_ptr);
-
-			if (WARN_ONCE(wr_ptr != write_ptr,
-				      "WR pointer moved while flushing %d -> %d\n",
-				      wr_ptr, write_ptr))
-				return -ETIMEDOUT;
-			usleep_range(1000, 2000);
-		}
-
-		if (txq->read_ptr != txq->write_ptr) {
-			IWL_ERR(trans,
-				"fail to flush all tx fifo queues Q %d\n", cnt);
-			ret = -ETIMEDOUT;
-			break;
-		}
-		IWL_DEBUG_TX_QUEUES(trans, "Queue %d is now empty.\n", cnt);
-	}
-
-	if (ret)
-		iwl_trans_pcie_log_scd_error(trans, txq);
 
 	return ret;
 }
@@ -2269,6 +2145,7 @@ static ssize_t iwl_dbgfs_tx_queue_read(struct file *file,
 	struct iwl_trans *trans = file->private_data;
 	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
 	struct iwl_txq *txq;
+	struct iwl_queue *q;
 	char *buf;
 	int pos = 0;
 	int cnt;
@@ -2286,9 +2163,10 @@ static ssize_t iwl_dbgfs_tx_queue_read(struct file *file,
 
 	for (cnt = 0; cnt < trans->cfg->base_params->num_of_queues; cnt++) {
 		txq = &trans_pcie->txq[cnt];
+		q = &txq->q;
 		pos += scnprintf(buf + pos, bufsz - pos,
 				"hwq %.2d: read=%u write=%u use=%d stop=%d need_update=%d frozen=%d%s\n",
-				cnt, txq->read_ptr, txq->write_ptr,
+				cnt, q->read_ptr, q->write_ptr,
 				!!test_bit(cnt, trans_pcie->queue_used),
 				 !!test_bit(cnt, trans_pcie->queue_stopped),
 				 txq->need_update, txq->frozen,
@@ -2494,14 +2372,13 @@ err:
 }
 #endif /*CONFIG_IWLWIFI_DEBUGFS */
 
-static u32 iwl_trans_pcie_get_cmdlen(struct iwl_trans *trans, void *tfd)
+static u32 iwl_trans_pcie_get_cmdlen(struct iwl_tfd *tfd)
 {
-	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
 	u32 cmdlen = 0;
 	int i;
 
-	for (i = 0; i < trans_pcie->max_tbs; i++)
-		cmdlen += iwl_pcie_tfd_tb_get_len(trans, tfd, i);
+	for (i = 0; i < IWL_NUM_OF_TBS; i++)
+		cmdlen += iwl_pcie_tfd_tb_get_len(tfd, i);
 
 	return cmdlen;
 }
@@ -2716,7 +2593,7 @@ static struct iwl_trans_dump_data
 
 	/* host commands */
 	len += sizeof(*data) +
-		cmdq->n_window * (sizeof(*txcmd) + TFD_MAX_PAYLOAD_SIZE);
+		cmdq->q.n_window * (sizeof(*txcmd) + TFD_MAX_PAYLOAD_SIZE);
 
 	/* FW monitor */
 	if (trans_pcie->fw_mon_page) {
@@ -2784,13 +2661,12 @@ static struct iwl_trans_dump_data
 	data->type = cpu_to_le32(IWL_FW_ERROR_DUMP_TXCMD);
 	txcmd = (void *)data->data;
 	spin_lock_bh(&cmdq->lock);
-	ptr = cmdq->write_ptr;
-	for (i = 0; i < cmdq->n_window; i++) {
-		u8 idx = get_cmd_index(cmdq, ptr);
+	ptr = cmdq->q.write_ptr;
+	for (i = 0; i < cmdq->q.n_window; i++) {
+		u8 idx = get_cmd_index(&cmdq->q, ptr);
 		u32 caplen, cmdlen;
 
-		cmdlen = iwl_trans_pcie_get_cmdlen(trans, cmdq->tfds +
-						   trans_pcie->tfd_size * ptr);
+		cmdlen = iwl_trans_pcie_get_cmdlen(&cmdq->tfds[ptr]);
 		caplen = min_t(u32, TFD_MAX_PAYLOAD_SIZE, cmdlen);
 
 		if (cmdlen) {
@@ -2824,8 +2700,7 @@ static struct iwl_trans_dump_data
 #ifdef CONFIG_PM_SLEEP
 static int iwl_trans_pcie_suspend(struct iwl_trans *trans)
 {
-	if (trans->runtime_pm_mode == IWL_PLAT_PM_MODE_D0I3 &&
-	    (trans->system_pm_mode == IWL_PLAT_PM_MODE_D0I3))
+	if (trans->runtime_pm_mode == IWL_PLAT_PM_MODE_D0I3)
 		return iwl_pci_fw_enter_d0i3(trans);
 
 	return 0;
@@ -2833,8 +2708,7 @@ static int iwl_trans_pcie_suspend(struct iwl_trans *trans)
 
 static void iwl_trans_pcie_resume(struct iwl_trans *trans)
 {
-	if (trans->runtime_pm_mode == IWL_PLAT_PM_MODE_D0I3 &&
-	    (trans->system_pm_mode == IWL_PLAT_PM_MODE_D0I3))
+	if (trans->runtime_pm_mode == IWL_PLAT_PM_MODE_D0I3)
 		iwl_pci_fw_exit_d0i3(trans);
 }
 #endif /* CONFIG_PM_SLEEP */
@@ -2861,10 +2735,6 @@ static const struct iwl_trans_ops trans_ops_pcie = {
 
 	.txq_disable = iwl_trans_pcie_txq_disable,
 	.txq_enable = iwl_trans_pcie_txq_enable,
-
-	.get_txq_byte_table = iwl_trans_pcie_get_txq_byte_table,
-
-	.txq_set_shared_mode = iwl_trans_pcie_txq_set_shared_mode,
 
 	.wait_tx_queue_empty = iwl_trans_pcie_wait_txq_empty,
 	.freeze_txq_timer = iwl_trans_pcie_freeze_txq_timer,
@@ -2897,14 +2767,12 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 	struct iwl_trans *trans;
 	int ret, addr_size;
 
-	ret = pcim_enable_device(pdev);
-	if (ret)
-		return ERR_PTR(ret);
-
 	trans = iwl_trans_alloc(sizeof(struct iwl_trans_pcie),
 				&pdev->dev, cfg, &trans_ops_pcie, 0);
 	if (!trans)
 		return ERR_PTR(-ENOMEM);
+
+	trans->max_skb_frags = IWL_PCIE_MAX_FRAGS;
 
 	trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
 
@@ -2919,6 +2787,9 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 		goto out_no_pci;
 	}
 
+	ret = pci_enable_device(pdev);
+	if (ret)
+		goto out_no_pci;
 
 	if (!cfg->base_params->pcie_l1_allowed) {
 		/*
@@ -2931,16 +2802,10 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 				       PCIE_LINK_STATE_CLKPM);
 	}
 
-	if (cfg->use_tfh) {
+	if (cfg->mq_rx_supported)
 		addr_size = 64;
-		trans_pcie->max_tbs = IWL_TFH_NUM_TBS;
-		trans_pcie->tfd_size = sizeof(struct iwl_tfh_tfd);
-	} else {
+	else
 		addr_size = 36;
-		trans_pcie->max_tbs = IWL_NUM_OF_TBS;
-		trans_pcie->tfd_size = sizeof(struct iwl_tfd);
-	}
-	trans->max_skb_frags = IWL_PCIE_MAX_FRAGS(trans_pcie);
 
 	pci_set_master(pdev);
 
@@ -2956,21 +2821,21 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 		/* both attempts failed: */
 		if (ret) {
 			dev_err(&pdev->dev, "No suitable DMA available\n");
-			goto out_no_pci;
+			goto out_pci_disable_device;
 		}
 	}
 
-	ret = pcim_iomap_regions_request_all(pdev, BIT(0), DRV_NAME);
+	ret = pci_request_regions(pdev, DRV_NAME);
 	if (ret) {
-		dev_err(&pdev->dev, "pcim_iomap_regions_request_all failed\n");
-		goto out_no_pci;
+		dev_err(&pdev->dev, "pci_request_regions failed\n");
+		goto out_pci_disable_device;
 	}
 
-	trans_pcie->hw_base = pcim_iomap_table(pdev)[0];
+	trans_pcie->hw_base = pci_ioremap_bar(pdev, 0);
 	if (!trans_pcie->hw_base) {
-		dev_err(&pdev->dev, "pcim_iomap_table failed\n");
+		dev_err(&pdev->dev, "pci_ioremap_bar failed\n");
 		ret = -ENODEV;
-		goto out_no_pci;
+		goto out_pci_release_regions;
 	}
 
 	/* We disable the RETRY_TIMEOUT register (0x41) to keep
@@ -2997,7 +2862,7 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 		ret = iwl_pcie_prepare_card_hw(trans);
 		if (ret) {
 			IWL_WARN(trans, "Exit HW not ready\n");
-			goto out_no_pci;
+			goto out_pci_disable_msi;
 		}
 
 		/*
@@ -3014,7 +2879,7 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 				   25000);
 		if (ret < 0) {
 			IWL_DEBUG_INFO(trans, "Failed to wake up the nic\n");
-			goto out_no_pci;
+			goto out_pci_disable_msi;
 		}
 
 		if (iwl_trans_grab_nic_access(trans, &flags)) {
@@ -3046,16 +2911,15 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 
 	if (trans_pcie->msix_enabled) {
 		if (iwl_pcie_init_msix_handler(pdev, trans_pcie))
-			goto out_no_pci;
+			goto out_pci_release_regions;
 	 } else {
 		ret = iwl_pcie_alloc_ict(trans);
 		if (ret)
-			goto out_no_pci;
+			goto out_pci_disable_msi;
 
-		ret = devm_request_threaded_irq(&pdev->dev, pdev->irq,
-						iwl_pcie_isr,
-						iwl_pcie_irq_handler,
-						IRQF_SHARED, DRV_NAME, trans);
+		ret = request_threaded_irq(pdev->irq, iwl_pcie_isr,
+					   iwl_pcie_irq_handler,
+					   IRQF_SHARED, DRV_NAME, trans);
 		if (ret) {
 			IWL_ERR(trans, "Error allocating IRQ %d\n", pdev->irq);
 			goto out_free_ict;
@@ -3073,6 +2937,12 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 
 out_free_ict:
 	iwl_pcie_free_ict(trans);
+out_pci_disable_msi:
+	pci_disable_msi(pdev);
+out_pci_release_regions:
+	pci_release_regions(pdev);
+out_pci_disable_device:
+	pci_disable_device(pdev);
 out_no_pci:
 	free_percpu(trans_pcie->tso_hdr_page);
 	iwl_trans_free(trans);

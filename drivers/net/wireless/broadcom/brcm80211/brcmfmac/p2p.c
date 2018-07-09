@@ -462,23 +462,25 @@ static int brcmf_p2p_set_firmware(struct brcmf_if *ifp, u8 *p2p_mac)
  * @dev_addr: optional device address.
  *
  * P2P needs mac addresses for P2P device and interface. If no device
- * address it specified, these are derived from a random ethernet
- * address.
+ * address it specified, these are derived from the primary net device, ie.
+ * the permanent ethernet address of the device.
  */
 static void brcmf_p2p_generate_bss_mac(struct brcmf_p2p_info *p2p, u8 *dev_addr)
 {
-	bool random_addr = false;
+	struct brcmf_if *pri_ifp = p2p->bss_idx[P2PAPI_BSSCFG_PRIMARY].vif->ifp;
+	bool local_admin = false;
 
-	if (!dev_addr || is_zero_ether_addr(dev_addr))
-		random_addr = true;
+	if (!dev_addr || is_zero_ether_addr(dev_addr)) {
+		dev_addr = pri_ifp->mac_addr;
+		local_admin = true;
+	}
 
-	/* Generate the P2P Device Address obtaining a random ethernet
-	 * address with the locally administered bit set.
+	/* Generate the P2P Device Address.  This consists of the device's
+	 * primary MAC address with the locally administered bit set.
 	 */
-	if (random_addr)
-		eth_random_addr(p2p->dev_addr);
-	else
-		memcpy(p2p->dev_addr, dev_addr, ETH_ALEN);
+	memcpy(p2p->dev_addr, dev_addr, ETH_ALEN);
+	if (local_admin)
+		p2p->dev_addr[0] |= 0x02;
 
 	/* Generate the P2P Interface Address.  If the discovery and connection
 	 * BSSCFGs need to simultaneously co-exist, then this address must be
@@ -1244,7 +1246,7 @@ bool brcmf_p2p_scan_finding_common_channel(struct brcmf_cfg80211_info *cfg,
 		if (!bi->ctl_ch) {
 			ch.chspec = le16_to_cpu(bi->chanspec);
 			cfg->d11inf.decchspec(&ch);
-			bi->ctl_ch = ch.control_ch_num;
+			bi->ctl_ch = ch.chnum;
 		}
 		afx_hdl->peer_chan = bi->ctl_ch;
 		brcmf_dbg(TRACE, "ACTION FRAME SCAN : Peer %pM found, channel : %d\n",
@@ -1383,7 +1385,7 @@ int brcmf_p2p_notify_action_frame_rx(struct brcmf_if *ifp,
 			if (test_bit(BRCMF_P2P_STATUS_FINDING_COMMON_CHANNEL,
 				     &p2p->status) &&
 			    (ether_addr_equal(afx_hdl->tx_dst_addr, e->addr))) {
-				afx_hdl->peer_chan = ch.control_ch_num;
+				afx_hdl->peer_chan = ch.chnum;
 				brcmf_dbg(INFO, "GON request: Peer found, channel=%d\n",
 					  afx_hdl->peer_chan);
 				complete(&afx_hdl->act_frm_scan);
@@ -1426,7 +1428,7 @@ int brcmf_p2p_notify_action_frame_rx(struct brcmf_if *ifp,
 	memcpy(&mgmt_frame->u, frame, mgmt_frame_len);
 	mgmt_frame_len += offsetof(struct ieee80211_mgmt, u);
 
-	freq = ieee80211_channel_to_frequency(ch.control_ch_num,
+	freq = ieee80211_channel_to_frequency(ch.chnum,
 					      ch.band == BRCMU_CHAN_BAND_2G ?
 					      NL80211_BAND_2GHZ :
 					      NL80211_BAND_5GHZ);
@@ -1871,7 +1873,7 @@ s32 brcmf_p2p_notify_rx_mgmt_p2p_probereq(struct brcmf_if *ifp,
 
 	if (test_bit(BRCMF_P2P_STATUS_FINDING_COMMON_CHANNEL, &p2p->status) &&
 	    (ether_addr_equal(afx_hdl->tx_dst_addr, e->addr))) {
-		afx_hdl->peer_chan = ch.control_ch_num;
+		afx_hdl->peer_chan = ch.chnum;
 		brcmf_dbg(INFO, "PROBE REQUEST: Peer found, channel=%d\n",
 			  afx_hdl->peer_chan);
 		complete(&afx_hdl->act_frm_scan);
@@ -1896,7 +1898,7 @@ s32 brcmf_p2p_notify_rx_mgmt_p2p_probereq(struct brcmf_if *ifp,
 
 	mgmt_frame = (u8 *)(rxframe + 1);
 	mgmt_frame_len = e->datalen - sizeof(*rxframe);
-	freq = ieee80211_channel_to_frequency(ch.control_ch_num,
+	freq = ieee80211_channel_to_frequency(ch.chnum,
 					      ch.band == BRCMU_CHAN_BAND_2G ?
 					      NL80211_BAND_2GHZ :
 					      NL80211_BAND_5GHZ);
@@ -2028,6 +2030,8 @@ static int brcmf_p2p_request_p2p_if(struct brcmf_p2p_info *p2p,
 
 	err = brcmf_fil_iovar_data_set(ifp, "p2p_ifadd", &if_request,
 				       sizeof(if_request));
+	if (err)
+		return err;
 
 	return err;
 }
@@ -2072,7 +2076,8 @@ static struct wireless_dev *brcmf_p2p_create_p2pdev(struct brcmf_p2p_info *p2p,
 	if (p2p->bss_idx[P2PAPI_BSSCFG_DEVICE].vif)
 		return ERR_PTR(-ENOSPC);
 
-	p2p_vif = brcmf_alloc_vif(p2p->cfg, NL80211_IFTYPE_P2P_DEVICE);
+	p2p_vif = brcmf_alloc_vif(p2p->cfg, NL80211_IFTYPE_P2P_DEVICE,
+				  false);
 	if (IS_ERR(p2p_vif)) {
 		brcmf_err("could not create discovery vif\n");
 		return (struct wireless_dev *)p2p_vif;
@@ -2172,7 +2177,7 @@ struct wireless_dev *brcmf_p2p_add_vif(struct wiphy *wiphy, const char *name,
 		return ERR_PTR(-EOPNOTSUPP);
 	}
 
-	vif = brcmf_alloc_vif(cfg, type);
+	vif = brcmf_alloc_vif(cfg, type, false);
 	if (IS_ERR(vif))
 		return (struct wireless_dev *)vif;
 	brcmf_cfg80211_arm_vif_event(cfg, vif);
@@ -2236,16 +2241,14 @@ int brcmf_p2p_del_vif(struct wiphy *wiphy, struct wireless_dev *wdev)
 	struct brcmf_cfg80211_info *cfg = wiphy_priv(wiphy);
 	struct brcmf_p2p_info *p2p = &cfg->p2p;
 	struct brcmf_cfg80211_vif *vif;
-	enum nl80211_iftype iftype;
 	bool wait_for_disable = false;
 	int err;
 
 	brcmf_dbg(TRACE, "delete P2P vif\n");
 	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
 
-	iftype = vif->wdev.iftype;
 	brcmf_cfg80211_arm_vif_event(cfg, vif);
-	switch (iftype) {
+	switch (vif->wdev.iftype) {
 	case NL80211_IFTYPE_P2P_CLIENT:
 		if (test_bit(BRCMF_VIF_STATUS_DISCONNECTING, &vif->sme_state))
 			wait_for_disable = true;
@@ -2261,8 +2264,6 @@ int brcmf_p2p_del_vif(struct wiphy *wiphy, struct wireless_dev *wdev)
 			return 0;
 		brcmf_p2p_cancel_remain_on_channel(vif->ifp);
 		brcmf_p2p_deinit_discovery(p2p);
-		break;
-
 	default:
 		return -ENOTSUPP;
 	}
@@ -2275,7 +2276,7 @@ int brcmf_p2p_del_vif(struct wiphy *wiphy, struct wireless_dev *wdev)
 					    BRCMF_P2P_DISABLE_TIMEOUT);
 
 	err = 0;
-	if (iftype != NL80211_IFTYPE_P2P_DEVICE) {
+	if (vif->wdev.iftype != NL80211_IFTYPE_P2P_DEVICE) {
 		brcmf_vif_clear_mgmt_ies(vif);
 		err = brcmf_p2p_release_p2p_if(vif);
 	}
@@ -2288,16 +2289,17 @@ int brcmf_p2p_del_vif(struct wiphy *wiphy, struct wireless_dev *wdev)
 		else
 			err = 0;
 	}
-	brcmf_remove_interface(vif->ifp, true);
+	if (err)
+		brcmf_remove_interface(vif->ifp);
 
 	brcmf_cfg80211_arm_vif_event(cfg, NULL);
-	if (iftype != NL80211_IFTYPE_P2P_DEVICE)
+	if (vif->wdev.iftype != NL80211_IFTYPE_P2P_DEVICE)
 		p2p->bss_idx[P2PAPI_BSSCFG_CONNECTION].vif = NULL;
 
 	return err;
 }
 
-void brcmf_p2p_ifp_removed(struct brcmf_if *ifp, bool rtnl_locked)
+void brcmf_p2p_ifp_removed(struct brcmf_if *ifp)
 {
 	struct brcmf_cfg80211_info *cfg;
 	struct brcmf_cfg80211_vif *vif;
@@ -2306,11 +2308,9 @@ void brcmf_p2p_ifp_removed(struct brcmf_if *ifp, bool rtnl_locked)
 	vif = ifp->vif;
 	cfg = wdev_to_cfg(&vif->wdev);
 	cfg->p2p.bss_idx[P2PAPI_BSSCFG_DEVICE].vif = NULL;
-	if (!rtnl_locked)
-		rtnl_lock();
+	rtnl_lock();
 	cfg80211_unregister_wdev(&vif->wdev);
-	if (!rtnl_locked)
-		rtnl_unlock();
+	rtnl_unlock();
 	brcmf_free_vif(vif);
 }
 
@@ -2396,7 +2396,7 @@ void brcmf_p2p_detach(struct brcmf_p2p_info *p2p)
 	if (vif != NULL) {
 		brcmf_p2p_cancel_remain_on_channel(vif->ifp);
 		brcmf_p2p_deinit_discovery(p2p);
-		brcmf_remove_interface(vif->ifp, false);
+		brcmf_remove_interface(vif->ifp);
 	}
 	/* just set it all to zero */
 	memset(p2p, 0, sizeof(*p2p));

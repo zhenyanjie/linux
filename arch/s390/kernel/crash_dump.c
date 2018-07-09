@@ -71,7 +71,9 @@ struct save_area * __init save_area_alloc(bool is_boot_cpu)
  */
 struct save_area * __init save_area_boot_cpu(void)
 {
-	return list_first_entry_or_null(&dump_save_areas, struct save_area, list);
+	if (list_empty(&dump_save_areas))
+		return NULL;
+	return list_first_entry(&dump_save_areas, struct save_area, list);
 }
 
 /*
@@ -329,11 +331,7 @@ static void *nt_init_name(void *buf, Elf64_Word type, void *desc, int d_len,
 
 static inline void *nt_init(void *buf, Elf64_Word type, void *desc, int d_len)
 {
-	const char *note_name = "LINUX";
-
-	if (type == NT_PRPSINFO || type == NT_PRSTATUS || type == NT_PRFPREG)
-		note_name = KEXEC_CORE_NOTE_NAME;
-	return nt_init_name(buf, type, desc, d_len, note_name);
+	return nt_init_name(buf, type, desc, d_len, KEXEC_CORE_NOTE_NAME);
 }
 
 /*
@@ -427,20 +425,6 @@ static void *nt_vmcoreinfo(void *ptr)
 }
 
 /*
- * Initialize final note (needed for /proc/vmcore code)
- */
-static void *nt_final(void *ptr)
-{
-	Elf64_Nhdr *note;
-
-	note = (Elf64_Nhdr *) ptr;
-	note->n_namesz = 0;
-	note->n_descsz = 0;
-	note->n_type = 0;
-	return PTR_ADD(ptr, sizeof(Elf64_Nhdr));
-}
-
-/*
  * Initialize ELF header (new kernel)
  */
 static void *ehdr_init(Elf64_Ehdr *ehdr, int mem_chunk_cnt)
@@ -527,7 +511,6 @@ static void *notes_init(Elf64_Phdr *phdr, void *ptr, u64 notes_offset)
 		if (sa->prefix != 0)
 			ptr = fill_cpu_elf_notes(ptr, cpu++, sa);
 	ptr = nt_vmcoreinfo(ptr);
-	ptr = nt_final(ptr);
 	memset(phdr, 0, sizeof(*phdr));
 	phdr->p_type = PT_NOTE;
 	phdr->p_offset = notes_offset;

@@ -99,7 +99,7 @@ struct md_rdev {
 	atomic_t	read_errors;	/* number of consecutive read errors that
 					 * we have tried to ignore.
 					 */
-	time64_t	last_read_error;	/* monotonic time since our
+	struct timespec last_read_error;	/* monotonic time since our
 						 * last read error
 						 */
 	atomic_t	corrected_errors; /* number of corrected read errors,
@@ -163,11 +163,6 @@ enum flag_bits {
 				 * than other devices in the array
 				 */
 	ClusterRemove,
-	RemoveSynchronized,	/* synchronize_rcu() was called after
-				 * this device was known to be faulty,
-				 * so it is safe to remove without
-				 * another synchronize_rcu() call.
-				 */
 };
 
 static inline int is_badblock(struct md_rdev *rdev, sector_t s, int sectors,
@@ -201,16 +196,14 @@ struct mddev {
 #define MD_CHANGE_PENDING 2	/* switch from 'clean' to 'active' in progress */
 #define MD_UPDATE_SB_FLAGS (1 | 2 | 4)	/* If these are set, md_update_sb needed */
 #define MD_ARRAY_FIRST_USE 3    /* First use of array, needs initialization */
-#define MD_CLOSING	4	/* If set, we are closing the array, do not open
-				 * it then */
+#define MD_STILL_CLOSED	4	/* If set, then array has not been opened since
+				 * md_ioctl checked on it.
+				 */
 #define MD_JOURNAL_CLEAN 5	/* A raid with journal is already clean */
 #define MD_HAS_JOURNAL	6	/* The raid array has journal feature set */
 #define MD_RELOAD_SB	7	/* Reload the superblock because another node
 				 * updated it.
 				 */
-#define MD_CLUSTER_RESYNC_LOCKED 8 /* cluster raid only, which means node
-				    * already took resync lock, need to
-				    * release the lock */
 
 	int				suspended;
 	atomic_t			active_io;
@@ -431,7 +424,7 @@ struct mddev {
 
 	/* Generic flush handling.
 	 * The last to finish preflush schedules a worker to submit
-	 * the rest of the request (without the REQ_PREFLUSH flag).
+	 * the rest of the request (without the REQ_FLUSH flag).
 	 */
 	struct bio *flush_bio;
 	atomic_t flush_pending;
@@ -625,8 +618,7 @@ extern void md_super_write(struct mddev *mddev, struct md_rdev *rdev,
 			   sector_t sector, int size, struct page *page);
 extern void md_super_wait(struct mddev *mddev);
 extern int sync_page_io(struct md_rdev *rdev, sector_t sector, int size,
-			struct page *page, int op, int op_flags,
-			bool metadata_op);
+			struct page *page, int rw, bool metadata_op);
 extern void md_do_sync(struct md_thread *thread);
 extern void md_new_event(struct mddev *mddev);
 extern int md_allow_write(struct mddev *mddev);

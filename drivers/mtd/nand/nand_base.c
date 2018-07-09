@@ -64,14 +64,8 @@ static int nand_ooblayout_ecc_sp(struct mtd_info *mtd, int section,
 
 	if (!section) {
 		oobregion->offset = 0;
-		if (mtd->oobsize == 16)
-			oobregion->length = 4;
-		else
-			oobregion->length = 3;
+		oobregion->length = 4;
 	} else {
-		if (mtd->oobsize == 8)
-			return -ERANGE;
-
 		oobregion->offset = 6;
 		oobregion->length = ecc->total - 4;
 	}
@@ -143,74 +137,6 @@ const struct mtd_ooblayout_ops nand_ooblayout_lp_ops = {
 	.free = nand_ooblayout_free_lp,
 };
 EXPORT_SYMBOL_GPL(nand_ooblayout_lp_ops);
-
-/*
- * Support the old "large page" layout used for 1-bit Hamming ECC where ECC
- * are placed at a fixed offset.
- */
-static int nand_ooblayout_ecc_lp_hamming(struct mtd_info *mtd, int section,
-					 struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct nand_ecc_ctrl *ecc = &chip->ecc;
-
-	if (section)
-		return -ERANGE;
-
-	switch (mtd->oobsize) {
-	case 64:
-		oobregion->offset = 40;
-		break;
-	case 128:
-		oobregion->offset = 80;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	oobregion->length = ecc->total;
-	if (oobregion->offset + oobregion->length > mtd->oobsize)
-		return -ERANGE;
-
-	return 0;
-}
-
-static int nand_ooblayout_free_lp_hamming(struct mtd_info *mtd, int section,
-					  struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct nand_ecc_ctrl *ecc = &chip->ecc;
-	int ecc_offset = 0;
-
-	if (section < 0 || section > 1)
-		return -ERANGE;
-
-	switch (mtd->oobsize) {
-	case 64:
-		ecc_offset = 40;
-		break;
-	case 128:
-		ecc_offset = 80;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	if (section == 0) {
-		oobregion->offset = 2;
-		oobregion->length = ecc_offset - 2;
-	} else {
-		oobregion->offset = ecc_offset + ecc->total;
-		oobregion->length = mtd->oobsize - oobregion->offset;
-	}
-
-	return 0;
-}
-
-const struct mtd_ooblayout_ops nand_ooblayout_lp_hamming_ops = {
-	.ecc = nand_ooblayout_ecc_lp_hamming,
-	.free = nand_ooblayout_free_lp_hamming,
-};
 
 static int check_offs_len(struct mtd_info *mtd,
 					loff_t ofs, uint64_t len)
@@ -715,8 +641,7 @@ static void nand_command(struct mtd_info *mtd, unsigned int command,
 		chip->cmd_ctrl(mtd, readcmd, ctrl);
 		ctrl &= ~NAND_CTRL_CHANGE;
 	}
-	if (command != NAND_CMD_NONE)
-		chip->cmd_ctrl(mtd, command, ctrl);
+	chip->cmd_ctrl(mtd, command, ctrl);
 
 	/* Address cycle, when necessary */
 	ctrl = NAND_CTRL_ALE | NAND_CTRL_CHANGE;
@@ -745,7 +670,6 @@ static void nand_command(struct mtd_info *mtd, unsigned int command,
 	 */
 	switch (command) {
 
-	case NAND_CMD_NONE:
 	case NAND_CMD_PAGEPROG:
 	case NAND_CMD_ERASE1:
 	case NAND_CMD_ERASE2:
@@ -808,9 +732,7 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 	}
 
 	/* Command latch cycle */
-	if (command != NAND_CMD_NONE)
-		chip->cmd_ctrl(mtd, command,
-			       NAND_NCE | NAND_CLE | NAND_CTRL_CHANGE);
+	chip->cmd_ctrl(mtd, command, NAND_NCE | NAND_CLE | NAND_CTRL_CHANGE);
 
 	if (column != -1 || page_addr != -1) {
 		int ctrl = NAND_CTRL_CHANGE | NAND_NCE | NAND_ALE;
@@ -823,10 +745,7 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 				column >>= 1;
 			chip->cmd_ctrl(mtd, column, ctrl);
 			ctrl &= ~NAND_CTRL_CHANGE;
-
-			/* Only output a single addr cycle for 8bits opcodes. */
-			if (!nand_opcode_8bits(command))
-				chip->cmd_ctrl(mtd, column >> 8, ctrl);
+			chip->cmd_ctrl(mtd, column >> 8, ctrl);
 		}
 		if (page_addr != -1) {
 			chip->cmd_ctrl(mtd, page_addr, ctrl);
@@ -846,7 +765,6 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 	 */
 	switch (command) {
 
-	case NAND_CMD_NONE:
 	case NAND_CMD_CACHEDPROG:
 	case NAND_CMD_PAGEPROG:
 	case NAND_CMD_ERASE1:
@@ -1030,183 +948,6 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *chip)
 }
 
 /**
- * nand_reset_data_interface - Reset data interface and timings
- * @chip: The NAND chip
- *
- * Reset the Data interface and timings to ONFI mode 0.
- *
- * Returns 0 for success or negative error code otherwise.
- */
-static int nand_reset_data_interface(struct nand_chip *chip)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	const struct nand_data_interface *conf;
-	int ret;
-
-	if (!chip->setup_data_interface)
-		return 0;
-
-	/*
-	 * The ONFI specification says:
-	 * "
-	 * To transition from NV-DDR or NV-DDR2 to the SDR data
-	 * interface, the host shall use the Reset (FFh) command
-	 * using SDR timing mode 0. A device in any timing mode is
-	 * required to recognize Reset (FFh) command issued in SDR
-	 * timing mode 0.
-	 * "
-	 *
-	 * Configure the data interface in SDR mode and set the
-	 * timings to timing mode 0.
-	 */
-
-	conf = nand_get_default_data_interface();
-	ret = chip->setup_data_interface(mtd, conf, false);
-	if (ret)
-		pr_err("Failed to configure data interface to SDR timing mode 0\n");
-
-	return ret;
-}
-
-/**
- * nand_setup_data_interface - Setup the best data interface and timings
- * @chip: The NAND chip
- *
- * Find and configure the best data interface and NAND timings supported by
- * the chip and the driver.
- * First tries to retrieve supported timing modes from ONFI information,
- * and if the NAND chip does not support ONFI, relies on the
- * ->onfi_timing_mode_default specified in the nand_ids table.
- *
- * Returns 0 for success or negative error code otherwise.
- */
-static int nand_setup_data_interface(struct nand_chip *chip)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	int ret;
-
-	if (!chip->setup_data_interface || !chip->data_interface)
-		return 0;
-
-	/*
-	 * Ensure the timing mode has been changed on the chip side
-	 * before changing timings on the controller side.
-	 */
-	if (chip->onfi_version &&
-	    (le16_to_cpu(chip->onfi_params.opt_cmd) &
-	     ONFI_OPT_CMD_SET_GET_FEATURES)) {
-		u8 tmode_param[ONFI_SUBFEATURE_PARAM_LEN] = {
-			chip->onfi_timing_mode_default,
-		};
-
-		ret = chip->onfi_set_features(mtd, chip,
-				ONFI_FEATURE_ADDR_TIMING_MODE,
-				tmode_param);
-		if (ret)
-			goto err;
-	}
-
-	ret = chip->setup_data_interface(mtd, chip->data_interface, false);
-err:
-	return ret;
-}
-
-/**
- * nand_init_data_interface - find the best data interface and timings
- * @chip: The NAND chip
- *
- * Find the best data interface and NAND timings supported by the chip
- * and the driver.
- * First tries to retrieve supported timing modes from ONFI information,
- * and if the NAND chip does not support ONFI, relies on the
- * ->onfi_timing_mode_default specified in the nand_ids table. After this
- * function nand_chip->data_interface is initialized with the best timing mode
- * available.
- *
- * Returns 0 for success or negative error code otherwise.
- */
-static int nand_init_data_interface(struct nand_chip *chip)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	int modes, mode, ret;
-
-	if (!chip->setup_data_interface)
-		return 0;
-
-	/*
-	 * First try to identify the best timings from ONFI parameters and
-	 * if the NAND does not support ONFI, fallback to the default ONFI
-	 * timing mode.
-	 */
-	modes = onfi_get_async_timing_mode(chip);
-	if (modes == ONFI_TIMING_MODE_UNKNOWN) {
-		if (!chip->onfi_timing_mode_default)
-			return 0;
-
-		modes = GENMASK(chip->onfi_timing_mode_default, 0);
-	}
-
-	chip->data_interface = kzalloc(sizeof(*chip->data_interface),
-				       GFP_KERNEL);
-	if (!chip->data_interface)
-		return -ENOMEM;
-
-	for (mode = fls(modes) - 1; mode >= 0; mode--) {
-		ret = onfi_init_data_interface(chip, chip->data_interface,
-					       NAND_SDR_IFACE, mode);
-		if (ret)
-			continue;
-
-		ret = chip->setup_data_interface(mtd, chip->data_interface,
-						 true);
-		if (!ret) {
-			chip->onfi_timing_mode_default = mode;
-			break;
-		}
-	}
-
-	return 0;
-}
-
-static void nand_release_data_interface(struct nand_chip *chip)
-{
-	kfree(chip->data_interface);
-}
-
-/**
- * nand_reset - Reset and initialize a NAND device
- * @chip: The NAND chip
- * @chipnr: Internal die id
- *
- * Returns 0 for success or negative error code otherwise
- */
-int nand_reset(struct nand_chip *chip, int chipnr)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	int ret;
-
-	ret = nand_reset_data_interface(chip);
-	if (ret)
-		return ret;
-
-	/*
-	 * The CS line has to be released before we can apply the new NAND
-	 * interface settings, hence this weird ->select_chip() dance.
-	 */
-	chip->select_chip(mtd, chipnr);
-	chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
-	chip->select_chip(mtd, -1);
-
-	chip->select_chip(mtd, chipnr);
-	ret = nand_setup_data_interface(chip);
-	chip->select_chip(mtd, -1);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
-/**
  * __nand_unlock - [REPLACEABLE] unlocks specified locked blocks
  * @mtd: mtd info
  * @ofs: offset to start unlock from
@@ -1275,6 +1016,8 @@ int nand_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	/* Shift to get chip number */
 	chipnr = ofs >> chip->chip_shift;
 
+	chip->select_chip(mtd, chipnr);
+
 	/*
 	 * Reset the chip.
 	 * If we want to check the WP through READ STATUS and check the bit 7
@@ -1282,9 +1025,7 @@ int nand_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	 * some operation can also clear the bit 7 of status register
 	 * eg. erase/program a locked block
 	 */
-	nand_reset(chip, chipnr);
-
-	chip->select_chip(mtd, chipnr);
+	chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
 
 	/* Check, if it is write protected */
 	if (nand_check_wp(mtd)) {
@@ -1334,6 +1075,8 @@ int nand_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	/* Shift to get chip number */
 	chipnr = ofs >> chip->chip_shift;
 
+	chip->select_chip(mtd, chipnr);
+
 	/*
 	 * Reset the chip.
 	 * If we want to check the WP through READ STATUS and check the bit 7
@@ -1341,9 +1084,7 @@ int nand_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	 * some operation can also clear the bit 7 of status register
 	 * eg. erase/program a locked block
 	 */
-	nand_reset(chip, chipnr);
-
-	chip->select_chip(mtd, chipnr);
+	chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
 
 	/* Check, if it is write protected */
 	if (nand_check_wp(mtd)) {
@@ -2325,7 +2066,6 @@ EXPORT_SYMBOL(nand_write_oob_syndrome);
 static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 			    struct mtd_oob_ops *ops)
 {
-	unsigned int max_bitflips = 0;
 	int page, realpage, chipnr;
 	struct nand_chip *chip = mtd_to_nand(mtd);
 	struct mtd_ecc_stats stats;
@@ -2383,8 +2123,6 @@ static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 				nand_wait_ready(mtd);
 		}
 
-		max_bitflips = max_t(unsigned int, max_bitflips, ret);
-
 		readlen -= len;
 		if (!readlen)
 			break;
@@ -2410,7 +2148,7 @@ static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 	if (mtd->ecc_stats.failed - stats.failed)
 		return -EBADMSG;
 
-	return max_bitflips;
+	return  mtd->ecc_stats.corrected - stats.corrected ? -EUCLEAN : 0;
 }
 
 /**
@@ -2424,7 +2162,7 @@ static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 static int nand_read_oob(struct mtd_info *mtd, loff_t from,
 			 struct mtd_oob_ops *ops)
 {
-	int ret;
+	int ret = -ENOTSUPP;
 
 	ops->retlen = 0;
 
@@ -2435,18 +2173,24 @@ static int nand_read_oob(struct mtd_info *mtd, loff_t from,
 		return -EINVAL;
 	}
 
-	if (ops->mode != MTD_OPS_PLACE_OOB &&
-	    ops->mode != MTD_OPS_AUTO_OOB &&
-	    ops->mode != MTD_OPS_RAW)
-		return -ENOTSUPP;
-
 	nand_get_device(mtd, FL_READING);
+
+	switch (ops->mode) {
+	case MTD_OPS_PLACE_OOB:
+	case MTD_OPS_AUTO_OOB:
+	case MTD_OPS_RAW:
+		break;
+
+	default:
+		goto out;
+	}
 
 	if (!ops->datbuf)
 		ret = nand_do_read_oob(mtd, from, ops);
 	else
 		ret = nand_do_read_ops(mtd, from, ops);
 
+out:
 	nand_release_device(mtd);
 	return ret;
 }
@@ -2943,17 +2687,14 @@ static int panic_nand_write(struct mtd_info *mtd, loff_t to, size_t len,
 			    size_t *retlen, const uint8_t *buf)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	int chipnr = (int)(to >> chip->chip_shift);
 	struct mtd_oob_ops ops;
 	int ret;
 
-	/* Grab the device */
-	panic_nand_get_device(chip, mtd, FL_WRITING);
-
-	chip->select_chip(mtd, chipnr);
-
 	/* Wait for the device to get ready */
 	panic_nand_wait(mtd, chip, 400);
+
+	/* Grab the device */
+	panic_nand_get_device(chip, mtd, FL_WRITING);
 
 	memset(&ops, 0, sizeof(ops));
 	ops.len = len;
@@ -3036,6 +2777,10 @@ static int nand_do_write_oob(struct mtd_info *mtd, loff_t to,
 	}
 
 	chipnr = (int)(to >> chip->chip_shift);
+	chip->select_chip(mtd, chipnr);
+
+	/* Shift to get page */
+	page = (int)(to >> chip->page_shift);
 
 	/*
 	 * Reset the chip. Some chips (like the Toshiba TC5832DC found in one
@@ -3043,12 +2788,7 @@ static int nand_do_write_oob(struct mtd_info *mtd, loff_t to,
 	 * if we don't do this. I have no clue why, but I seem to have 'fixed'
 	 * it in the doc2000 driver in August 1999.  dwmw2.
 	 */
-	nand_reset(chip, chipnr);
-
-	chip->select_chip(mtd, chipnr);
-
-	/* Shift to get page */
-	page = (int)(to >> chip->page_shift);
+	chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
 
 	/* Check, if it is write protected */
 	if (nand_check_wp(mtd)) {
@@ -3451,7 +3191,8 @@ static void nand_set_defaults(struct nand_chip *chip, int busw)
 
 	if (!chip->controller) {
 		chip->controller = &chip->hwcontrol;
-		nand_hw_control_init(chip->controller);
+		spin_lock_init(&chip->controller->lock);
+		init_waitqueue_head(&chip->controller->wq);
 	}
 
 }
@@ -4081,14 +3822,14 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 	int i, maf_idx;
 	u8 id_data[8];
 
+	/* Select the device */
+	chip->select_chip(mtd, 0);
+
 	/*
 	 * Reset the chip, required by some chips (e.g. Micron MT29FxGxxxxx)
 	 * after power-up.
 	 */
-	nand_reset(chip, 0);
-
-	/* Select the device */
-	chip->select_chip(mtd, 0);
+	chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
 
 	/* Send the command for reading device ID */
 	chip->cmdfunc(mtd, NAND_CMD_READID, 0x00, -1);
@@ -4372,9 +4113,6 @@ static int nand_dt_init(struct nand_chip *chip)
 	if (ecc_step > 0)
 		chip->ecc.size = ecc_step;
 
-	if (of_property_read_bool(dn, "nand-ecc-maximize"))
-		chip->ecc.options |= NAND_ECC_MAXIMIZE;
-
 	return 0;
 }
 
@@ -4403,15 +4141,6 @@ int nand_scan_ident(struct mtd_info *mtd, int maxchips,
 	if (!mtd->name && mtd->dev.parent)
 		mtd->name = dev_name(mtd->dev.parent);
 
-	if ((!chip->cmdfunc || !chip->select_chip) && !chip->cmd_ctrl) {
-		/*
-		 * Default functions assigned for chip_select() and
-		 * cmdfunc() both expect cmd_ctrl() to be populated,
-		 * so we need to check that that's the case
-		 */
-		pr_err("chip.cmd_ctrl() callback is not provided");
-		return -EINVAL;
-	}
 	/* Set the default functions */
 	nand_set_defaults(chip, chip->options & NAND_BUSWIDTH_16);
 
@@ -4426,31 +4155,13 @@ int nand_scan_ident(struct mtd_info *mtd, int maxchips,
 		return PTR_ERR(type);
 	}
 
-	/* Initialize the ->data_interface field. */
-	ret = nand_init_data_interface(chip);
-	if (ret)
-		return ret;
-
-	/*
-	 * Setup the data interface correctly on the chip and controller side.
-	 * This explicit call to nand_setup_data_interface() is only required
-	 * for the first die, because nand_reset() has been called before
-	 * ->data_interface and ->default_onfi_timing_mode were set.
-	 * For the other dies, nand_reset() will automatically switch to the
-	 * best mode for us.
-	 */
-	ret = nand_setup_data_interface(chip);
-	if (ret)
-		return ret;
-
 	chip->select_chip(mtd, -1);
 
 	/* Check for a chip array */
 	for (i = 1; i < maxchips; i++) {
-		/* See comment in nand_get_flash_type for reset */
-		nand_reset(chip, i);
-
 		chip->select_chip(mtd, i);
+		/* See comment in nand_get_flash_type for reset */
+		chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
 		/* Send the command for reading device ID */
 		chip->cmdfunc(mtd, NAND_CMD_READID, 0x00, -1);
 		/* Read manufacturer and device IDs */
@@ -4510,7 +4221,6 @@ static int nand_set_ecc_soft_ops(struct mtd_info *mtd)
 		ecc->write_page_raw = nand_write_page_raw;
 		ecc->read_oob = nand_read_oob_std;
 		ecc->write_oob = nand_write_oob_std;
-
 		/*
 		* Board driver should supply ecc.size and ecc.strength
 		* values to select how many bits are correctable.
@@ -4533,25 +4243,6 @@ static int nand_set_ecc_soft_ops(struct mtd_info *mtd)
 			}
 
 			mtd_set_ooblayout(mtd, &nand_ooblayout_lp_ops);
-
-		}
-
-		/*
-		 * We can only maximize ECC config when the default layout is
-		 * used, otherwise we don't know how many bytes can really be
-		 * used.
-		 */
-		if (mtd->ooblayout == &nand_ooblayout_lp_ops &&
-		    ecc->options & NAND_ECC_MAXIMIZE) {
-			int steps, bytes;
-
-			/* Always prefer 1k blocks over 512bytes ones */
-			ecc->size = 1024;
-			steps = mtd->writesize / ecc->size;
-
-			/* Reserve 2 bytes for the BBM */
-			bytes = (mtd->oobsize - 2) / steps;
-			ecc->strength = bytes * 8 / fls(8 * ecc->size);
 		}
 
 		/* See nand_bch_init() for details. */
@@ -4652,7 +4343,7 @@ int nand_scan_tail(struct mtd_info *mtd)
 			break;
 		case 64:
 		case 128:
-			mtd_set_ooblayout(mtd, &nand_ooblayout_lp_hamming_ops);
+			mtd_set_ooblayout(mtd, &nand_ooblayout_lp_ops);
 			break;
 		default:
 			WARN(1, "No oob scheme defined for oobsize %d\n",
@@ -4785,11 +4476,6 @@ int nand_scan_tail(struct mtd_info *mtd)
 		goto err_free;
 	}
 	ecc->total = ecc->steps * ecc->bytes;
-	if (ecc->total > mtd->oobsize) {
-		WARN(1, "Total number of ECC bytes exceeded oobsize\n");
-		ret = -EINVAL;
-		goto err_free;
-	}
 
 	/*
 	 * The number of bytes available for a client to place data into
@@ -4915,16 +4601,18 @@ int nand_scan(struct mtd_info *mtd, int maxchips)
 EXPORT_SYMBOL(nand_scan);
 
 /**
- * nand_cleanup - [NAND Interface] Free resources held by the NAND device
- * @chip: NAND chip object
+ * nand_release - [NAND Interface] Free resources held by the NAND device
+ * @mtd: MTD device structure
  */
-void nand_cleanup(struct nand_chip *chip)
+void nand_release(struct mtd_info *mtd)
 {
+	struct nand_chip *chip = mtd_to_nand(mtd);
+
 	if (chip->ecc.mode == NAND_ECC_SOFT &&
 	    chip->ecc.algo == NAND_ECC_BCH)
 		nand_bch_free((struct nand_bch_control *)chip->ecc.priv);
 
-	nand_release_data_interface(chip);
+	mtd_device_unregister(mtd);
 
 	/* Free bad block table memory */
 	kfree(chip->bbt);
@@ -4935,18 +4623,6 @@ void nand_cleanup(struct nand_chip *chip)
 	if (chip->badblock_pattern && chip->badblock_pattern->options
 			& NAND_BBT_DYNAMICSTRUCT)
 		kfree(chip->badblock_pattern);
-}
-EXPORT_SYMBOL_GPL(nand_cleanup);
-
-/**
- * nand_release - [NAND Interface] Unregister the MTD device and free resources
- *		  held by the NAND device
- * @mtd: MTD device structure
- */
-void nand_release(struct mtd_info *mtd)
-{
-	mtd_device_unregister(mtd);
-	nand_cleanup(mtd_to_nand(mtd));
 }
 EXPORT_SYMBOL_GPL(nand_release);
 

@@ -64,7 +64,7 @@ EXPORT_SYMBOL(memstart_addr);
 phys_addr_t kernstart_addr;
 EXPORT_SYMBOL(kernstart_addr);
 
-#ifdef CONFIG_RELOCATABLE
+#ifdef CONFIG_RELOCATABLE_PPC32
 /* Used in __va()/__pa() */
 long long virt_phys_offset;
 EXPORT_SYMBOL(virt_phys_offset);
@@ -79,6 +79,9 @@ EXPORT_SYMBOL(agp_special_page);
 #endif
 
 void MMU_init(void);
+
+/* XXX should be in current.h  -- paulus */
+extern struct task_struct *current_set[NR_CPUS];
 
 /*
  * this tells the system to map all of ram with the segregs
@@ -137,7 +140,7 @@ void __init MMU_init(void)
 	if (memblock.memory.cnt > 1) {
 #ifndef CONFIG_WII
 		memblock_enforce_memory_limit(memblock.memory.regions[0].size);
-		pr_warn("Only using first contiguous memory region\n");
+		printk(KERN_WARNING "Only using first contiguous memory region");
 #else
 		wii_memory_fixups();
 #endif

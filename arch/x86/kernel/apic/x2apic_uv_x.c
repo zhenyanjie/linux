@@ -12,7 +12,7 @@
 #include <linux/proc_fs.h>
 #include <linux/threads.h>
 #include <linux/kernel.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/sched.h>
@@ -223,11 +223,6 @@ static int __init uv_acpi_madt_oem_check(char *oem_id, char *oem_table_id)
 	if (strncmp(oem_id, "SGI", 3) != 0)
 		return 0;
 
-	if (numa_off) {
-		pr_err("UV: NUMA is off, disabling UV support\n");
-		return 0;
-	}
-
 	/* Setup early hub type field in uv_hub_info for Node 0 */
 	uv_cpu_info->p_uv_hub_info = &uv_hub_info_node0;
 
@@ -330,7 +325,7 @@ static __init void build_uv_gr_table(void)
 	struct uv_gam_range_entry *gre = uv_gre_table;
 	struct uv_gam_range_s *grt;
 	unsigned long last_limit = 0, ram_limit = 0;
-	int bytes, i, sid, lsid = -1, indx = 0, lindx = -1;
+	int bytes, i, sid, lsid = -1;
 
 	if (!gre)
 		return;
@@ -361,12 +356,11 @@ static __init void build_uv_gr_table(void)
 		}
 		sid = gre->sockid - _min_socket;
 		if (lsid < sid) {		/* new range */
-			grt = &_gr_table[indx];
-			grt->base = lindx;
+			grt = &_gr_table[sid];
+			grt->base = lsid;
 			grt->nasid = gre->nasid;
 			grt->limit = last_limit = gre->limit;
 			lsid = sid;
-			lindx = indx++;
 			continue;
 		}
 		if (lsid == sid && !ram_limit) {	/* update range */
@@ -377,7 +371,7 @@ static __init void build_uv_gr_table(void)
 		}
 		if (!ram_limit) {		/* non-contiguous ram range */
 			grt++;
-			grt->base = lindx;
+			grt->base = sid - 1;
 			grt->nasid = gre->nasid;
 			grt->limit = last_limit = gre->limit;
 			continue;
@@ -533,8 +527,11 @@ static unsigned int x2apic_get_apic_id(unsigned long x)
 
 static unsigned long set_apic_id(unsigned int id)
 {
-	/* CHECKME: Do we need to mask out the xapic extra bits? */
-	return id;
+	unsigned long x;
+
+	/* maskout x2apic_extra_bits ? */
+	x = id;
+	return x;
 }
 
 static unsigned int uv_read_apic_id(void)
@@ -557,7 +554,7 @@ static int uv_probe(void)
 	return apic == &apic_x2apic_uv_x;
 }
 
-static struct apic apic_x2apic_uv_x __ro_after_init = {
+static struct apic __refdata apic_x2apic_uv_x = {
 
 	.name				= "UV large system",
 	.probe				= uv_probe,
@@ -585,6 +582,7 @@ static struct apic apic_x2apic_uv_x __ro_after_init = {
 
 	.get_apic_id			= x2apic_get_apic_id,
 	.set_apic_id			= set_apic_id,
+	.apic_id_mask			= 0xFFFFFFFFu,
 
 	.cpu_mask_to_apicid_and		= uv_cpu_mask_to_apicid_and,
 
@@ -815,9 +813,9 @@ static __init void map_mmioh_high_uv3(int index, int min_pnode, int max_pnode)
 				l = li;
 			}
 			addr1 = (base << shift) +
-				f * (1ULL << m_io);
+				f * (unsigned long)(1 << m_io);
 			addr2 = (base << shift) +
-				(l + 1) * (1ULL << m_io);
+				(l + 1) * (unsigned long)(1 << m_io);
 			pr_info("UV: %s[%03d..%03d] NASID 0x%04x ADDR 0x%016lx - 0x%016lx\n",
 				id, fi, li, lnasid, addr1, addr2);
 			if (max_io < l)
@@ -921,16 +919,16 @@ static void uv_heartbeat(unsigned long ignored)
 	uv_set_scir_bits(bits);
 
 	/* enable next timer period */
-	mod_timer(timer, jiffies + SCIR_CPU_HB_INTERVAL);
+	mod_timer_pinned(timer, jiffies + SCIR_CPU_HB_INTERVAL);
 }
 
-static int uv_heartbeat_enable(unsigned int cpu)
+static void uv_heartbeat_enable(int cpu)
 {
 	while (!uv_cpu_scir_info(cpu)->enabled) {
 		struct timer_list *timer = &uv_cpu_scir_info(cpu)->timer;
 
 		uv_set_cpu_scir_bits(cpu, SCIR_CPU_HEARTBEAT|SCIR_CPU_ACTIVITY);
-		setup_pinned_timer(timer, uv_heartbeat, cpu);
+		setup_timer(timer, uv_heartbeat, cpu);
 		timer->expires = jiffies + SCIR_CPU_HB_INTERVAL;
 		add_timer_on(timer, cpu);
 		uv_cpu_scir_info(cpu)->enabled = 1;
@@ -938,24 +936,43 @@ static int uv_heartbeat_enable(unsigned int cpu)
 		/* also ensure that boot cpu is enabled */
 		cpu = 0;
 	}
-	return 0;
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
-static int uv_heartbeat_disable(unsigned int cpu)
+static void uv_heartbeat_disable(int cpu)
 {
 	if (uv_cpu_scir_info(cpu)->enabled) {
 		uv_cpu_scir_info(cpu)->enabled = 0;
 		del_timer(&uv_cpu_scir_info(cpu)->timer);
 	}
 	uv_set_cpu_scir_bits(cpu, 0xff);
-	return 0;
+}
+
+/*
+ * cpu hotplug notifier
+ */
+static int uv_scir_cpu_notify(struct notifier_block *self, unsigned long action,
+			      void *hcpu)
+{
+	long cpu = (long)hcpu;
+
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_DOWN_FAILED:
+	case CPU_ONLINE:
+		uv_heartbeat_enable(cpu);
+		break;
+	case CPU_DOWN_PREPARE:
+		uv_heartbeat_disable(cpu);
+		break;
+	default:
+		break;
+	}
+	return NOTIFY_OK;
 }
 
 static __init void uv_scir_register_cpu_notifier(void)
 {
-	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "x86/x2apic-uvx:online",
-				  uv_heartbeat_enable, uv_heartbeat_disable);
+	hotcpu_notifier(uv_scir_cpu_notify, 0);
 }
 
 #else /* !CONFIG_HOTPLUG_CPU */
@@ -1139,18 +1156,19 @@ static void __init decode_gam_rng_tbl(unsigned long ptr)
 	for (; gre->type != UV_GAM_RANGE_TYPE_UNUSED; gre++) {
 		if (!index) {
 			pr_info("UV: GAM Range Table...\n");
-			pr_info("UV:  # %20s %14s %5s %4s %5s %3s %2s\n",
+			pr_info("UV:  # %20s %14s %5s %4s %5s %3s %2s %3s\n",
 				"Range", "", "Size", "Type", "NASID",
-				"SID", "PN");
+				"SID", "PN", "PXM");
 		}
 		pr_info(
-		"UV: %2d: 0x%014lx-0x%014lx %5luG %3d   %04x  %02x %02x\n",
+		"UV: %2d: 0x%014lx-0x%014lx %5luG %3d   %04x  %02x %02x %3d\n",
 			index++,
 			(unsigned long)lgre << UV_GAM_RANGE_SHFT,
 			(unsigned long)gre->limit << UV_GAM_RANGE_SHFT,
 			((unsigned long)(gre->limit - lgre)) >>
 				(30 - UV_GAM_RANGE_SHFT), /* 64M -> 1G */
-			gre->type, gre->nasid, gre->sockid, gre->pnode);
+			gre->type, gre->nasid, gre->sockid,
+			gre->pnode, gre->pxm);
 
 		lgre = gre->limit;
 		if (sock_min > gre->sockid)
@@ -1269,7 +1287,7 @@ static void __init build_socket_tables(void)
 		_pnode_to_socket[i] = SOCK_EMPTY;
 
 	/* fill in pnode/node/addr conversion list values */
-	pr_info("UV: GAM Building socket/pnode conversion tables\n");
+	pr_info("UV: GAM Building socket/pnode/pxm conversion tables\n");
 	for (; gre->type != UV_GAM_RANGE_TYPE_UNUSED; gre++) {
 		if (gre->type == UV_GAM_RANGE_TYPE_HOLE)
 			continue;
@@ -1277,18 +1295,20 @@ static void __init build_socket_tables(void)
 		if (_socket_to_pnode[i] != SOCK_EMPTY)
 			continue;	/* duplicate */
 		_socket_to_pnode[i] = gre->pnode;
+		_socket_to_node[i] = gre->pxm;
 
 		i = gre->pnode - minpnode;
 		_pnode_to_socket[i] = gre->sockid;
 
 		pr_info(
-		"UV: sid:%02x type:%d nasid:%04x pn:%02x pn2s:%2x\n",
+		"UV: sid:%02x type:%d nasid:%04x pn:%02x pxm:%2d pn2s:%2x\n",
 			gre->sockid, gre->type, gre->nasid,
 			_socket_to_pnode[gre->sockid - minsock],
+			_socket_to_node[gre->sockid - minsock],
 			_pnode_to_socket[gre->pnode - minpnode]);
 	}
 
-	/* Set socket -> node values */
+	/* check socket -> node values */
 	lnid = -1;
 	for_each_present_cpu(cpu) {
 		int nid = cpu_to_node(cpu);
@@ -1299,9 +1319,14 @@ static void __init build_socket_tables(void)
 		lnid = nid;
 		apicid = per_cpu(x86_cpu_to_apicid, cpu);
 		sockid = apicid >> uv_cpuid.socketid_shift;
-		_socket_to_node[sockid - minsock] = nid;
-		pr_info("UV: sid:%02x: apicid:%04x node:%2d\n",
-			sockid, apicid, nid);
+		i = sockid - minsock;
+
+		if (nid != _socket_to_node[i]) {
+			pr_warn(
+			"UV: %02x: type:%d socket:%02x PXM:%02x != node:%2d\n",
+				i, sockid, gre->type, _socket_to_node[i], nid);
+			_socket_to_node[i] = nid;
+		}
 	}
 
 	/* Setup physical blade to pnode translation from GAM Range Table */

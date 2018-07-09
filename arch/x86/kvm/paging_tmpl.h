@@ -131,7 +131,7 @@ static inline void FNAME(protect_clean_gpte)(unsigned *access, unsigned gpte)
 static inline int FNAME(is_present_gpte)(unsigned long pte)
 {
 #if PTTYPE != PTTYPE_EPT
-	return pte & PT_PRESENT_MASK;
+	return is_present_gpte(pte);
 #else
 	return pte & 7;
 #endif
@@ -181,19 +181,13 @@ no_present:
 	return true;
 }
 
-/*
- * For PTTYPE_EPT, a page table can be executable but not readable
- * on supported processors. Therefore, set_spte does not automatically
- * set bit 0 if execute only is supported. Here, we repurpose ACC_USER_MASK
- * to signify readability since it isn't used in the EPT case
- */
 static inline unsigned FNAME(gpte_access)(struct kvm_vcpu *vcpu, u64 gpte)
 {
 	unsigned access;
 #if PTTYPE == PTTYPE_EPT
 	access = ((gpte & VMX_EPT_WRITABLE_MASK) ? ACC_WRITE_MASK : 0) |
 		((gpte & VMX_EPT_EXECUTABLE_MASK) ? ACC_EXEC_MASK : 0) |
-		((gpte & VMX_EPT_READABLE_MASK) ? ACC_USER_MASK : 0);
+		ACC_USER_MASK;
 #else
 	BUILD_BUG_ON(ACC_EXEC_MASK != PT_PRESENT_MASK);
 	BUILD_BUG_ON(ACC_EXEC_MASK != 1);
@@ -324,11 +318,10 @@ retry_walk:
 		--walker->level;
 
 		index = PT_INDEX(addr, walker->level);
+
 		table_gfn = gpte_to_gfn(pte);
 		offset    = index * sizeof(pt_element_t);
 		pte_gpa   = gfn_to_gpa(table_gfn) + offset;
-
-		BUG_ON(walker->level < 1);
 		walker->table_gfn[walker->level - 1] = table_gfn;
 		walker->pte_gpa[walker->level - 1] = pte_gpa;
 

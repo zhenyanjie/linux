@@ -458,15 +458,13 @@ static int nsp_gpio_get_strength(struct nsp_gpio *chip, unsigned gpio,
 	return 0;
 }
 
-static int nsp_pin_config_group_get(struct pinctrl_dev *pctldev,
-				    unsigned selector,
+int nsp_pin_config_group_get(struct pinctrl_dev *pctldev, unsigned selector,
 			     unsigned long *config)
 {
 	return 0;
 }
 
-static int nsp_pin_config_group_set(struct pinctrl_dev *pctldev,
-				    unsigned selector,
+int nsp_pin_config_group_set(struct pinctrl_dev *pctldev, unsigned selector,
 			     unsigned long *configs, unsigned num_configs)
 {
 	return 0;
@@ -741,6 +739,6 @@ static struct platform_driver nsp_gpio_driver = {
 
 static int __init nsp_gpio_init(void)
 {
-	return platform_driver_register(&nsp_gpio_driver);
+	return platform_driver_probe(&nsp_gpio_driver, nsp_gpio_probe);
 }
 arch_initcall_sync(nsp_gpio_init);

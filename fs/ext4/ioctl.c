@@ -19,6 +19,8 @@
 #include "ext4_jbd2.h"
 #include "ext4.h"
 
+#define MAX_32_NUM ((((unsigned long long) 1) << 32) - 1)
+
 /**
  * Swap memory between @a and @b for @len bytes.
  *
@@ -306,9 +308,9 @@ static int ext4_ioctl_setproject(struct file *filp, __u32 projid)
 	kprojid_t kprojid;
 	struct ext4_iloc iloc;
 	struct ext4_inode *raw_inode;
-	struct dquot *transfer_to[MAXQUOTAS] = { };
 
-	if (!ext4_has_feature_project(sb)) {
+	if (!EXT4_HAS_RO_COMPAT_FEATURE(sb,
+			EXT4_FEATURE_RO_COMPAT_PROJECT)) {
 		if (projid != EXT4_DEF_PROJID)
 			return -EOPNOTSUPP;
 		else
@@ -359,14 +361,17 @@ static int ext4_ioctl_setproject(struct file *filp, __u32 projid)
 	if (err)
 		goto out_stop;
 
-	transfer_to[PRJQUOTA] = dqget(sb, make_kqid_projid(kprojid));
-	if (!IS_ERR(transfer_to[PRJQUOTA])) {
-		err = __dquot_transfer(inode, transfer_to);
-		dqput(transfer_to[PRJQUOTA]);
-		if (err)
-			goto out_dirty;
-	}
+	if (sb_has_quota_limits_enabled(sb, PRJQUOTA)) {
+		struct dquot *transfer_to[MAXQUOTAS] = { };
 
+		transfer_to[PRJQUOTA] = dqget(sb, make_kqid_projid(kprojid));
+		if (!IS_ERR(transfer_to[PRJQUOTA])) {
+			err = __dquot_transfer(inode, transfer_to);
+			dqput(transfer_to[PRJQUOTA]);
+			if (err)
+				goto out_dirty;
+		}
+	}
 	EXT4_I(inode)->i_projid = kprojid;
 	inode->i_ctime = ext4_current_time(inode);
 out_dirty:
@@ -767,16 +772,25 @@ resizefs_out:
 		return ext4_ext_precache(inode);
 	case EXT4_IOC_SET_ENCRYPTION_POLICY: {
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
-		struct fscrypt_policy policy;
-
-		if (!ext4_has_feature_encrypt(sb))
-			return -EOPNOTSUPP;
+		struct ext4_encryption_policy policy;
+		int err = 0;
 
 		if (copy_from_user(&policy,
-				   (struct fscrypt_policy __user *)arg,
-				   sizeof(policy)))
-			return -EFAULT;
-		return fscrypt_process_policy(filp, &policy);
+				   (struct ext4_encryption_policy __user *)arg,
+				   sizeof(policy))) {
+			err = -EFAULT;
+			goto encryption_policy_out;
+		}
+
+		err = mnt_want_write_file(filp);
+		if (err)
+			goto encryption_policy_out;
+
+		err = ext4_process_policy(&policy, inode);
+
+		mnt_drop_write_file(filp);
+encryption_policy_out:
+		return err;
 #else
 		return -EOPNOTSUPP;
 #endif
@@ -819,12 +833,12 @@ resizefs_out:
 	}
 	case EXT4_IOC_GET_ENCRYPTION_POLICY: {
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
-		struct fscrypt_policy policy;
+		struct ext4_encryption_policy policy;
 		int err = 0;
 
 		if (!ext4_encrypted_inode(inode))
 			return -ENOENT;
-		err = fscrypt_get_policy(inode, &policy);
+		err = ext4_get_policy(inode, &policy);
 		if (err)
 			return err;
 		if (copy_to_user((void __user *)arg, &policy, sizeof(policy)))
@@ -842,7 +856,8 @@ resizefs_out:
 		ext4_get_inode_flags(ei);
 		fa.fsx_xflags = ext4_iflags_to_xflags(ei->i_flags & EXT4_FL_USER_VISIBLE);
 
-		if (ext4_has_feature_project(inode->i_sb)) {
+		if (EXT4_HAS_RO_COMPAT_FEATURE(inode->i_sb,
+				EXT4_FEATURE_RO_COMPAT_PROJECT)) {
 			fa.fsx_projid = (__u32)from_kprojid(&init_user_ns,
 				EXT4_I(inode)->i_projid);
 		}

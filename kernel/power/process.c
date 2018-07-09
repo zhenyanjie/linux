@@ -18,9 +18,8 @@
 #include <linux/workqueue.h>
 #include <linux/kmod.h>
 #include <trace/events/power.h>
-#include <linux/cpuset.h>
 
-/*
+/* 
  * Timeout for stopping processes
  */
 unsigned int __read_mostly freeze_timeout_msecs = 20 * MSEC_PER_SEC;
@@ -90,9 +89,6 @@ static int try_to_freeze_tasks(bool user_only)
 		       elapsed_msecs / 1000, elapsed_msecs % 1000,
 		       todo - wq_busy, wq_busy);
 
-		if (wq_busy)
-			show_workqueue_state();
-
 		if (!wakeup) {
 			read_lock(&tasklist_lock);
 			for_each_process_thread(g, p) {
@@ -145,11 +141,22 @@ int freeze_processes(void)
 	/*
 	 * Now that the whole userspace is frozen we need to disbale
 	 * the OOM killer to disallow any further interference with
-	 * killable tasks. There is no guarantee oom victims will
-	 * ever reach a point they go away we have to wait with a timeout.
+	 * killable tasks.
 	 */
-	if (!error && !oom_killer_disable(msecs_to_jiffies(freeze_timeout_msecs)))
+	if (!error && !oom_killer_disable())
 		error = -EBUSY;
+
+	/*
+	 * There is a hard to fix race between oom_reaper kernel thread
+	 * and oom_killer_disable. oom_reaper calls exit_oom_victim
+	 * before the victim reaches exit_mm so try to freeze all the tasks
+	 * again and catch such a left over task.
+	 */
+	if (!error) {
+		pr_info("Double checking all user space processes after OOM killer disable... ");
+		error = try_to_freeze_tasks(true);
+		pr_cont("\n");
+	}
 
 	if (error)
 		thaw_processes();
@@ -200,8 +207,6 @@ void thaw_processes(void)
 
 	__usermodehelper_set_disable_depth(UMH_FREEZING);
 	thaw_workqueues();
-
-	cpuset_wait_for_hotplug();
 
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, p) {

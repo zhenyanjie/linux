@@ -21,7 +21,6 @@
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
-#include <linux/reset.h>
 #include <linux/slab.h>
 
 #define RNG_CR 0x00
@@ -47,7 +46,6 @@ struct stm32_rng_private {
 	struct hwrng rng;
 	void __iomem *base;
 	struct clk *clk;
-	struct reset_control *rst;
 };
 
 static int stm32_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
@@ -71,12 +69,8 @@ static int stm32_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 		}
 
 		/* If error detected or data not ready... */
-		if (sr != RNG_SR_DRDY) {
-			if (WARN_ONCE(sr & (RNG_SR_SEIS | RNG_SR_CEIS),
-					"bad RNG status - %x\n", sr))
-				writel_relaxed(0, priv->base + RNG_SR);
+		if (sr != RNG_SR_DRDY)
 			break;
-		}
 
 		*(u32 *)data = readl_relaxed(priv->base + RNG_DR);
 
@@ -84,6 +78,10 @@ static int stm32_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 		data += sizeof(u32);
 		max -= sizeof(u32);
 	}
+
+	if (WARN_ONCE(sr & (RNG_SR_SEIS | RNG_SR_CEIS),
+		      "bad RNG status - %x\n", sr))
+		writel_relaxed(0, priv->base + RNG_SR);
 
 	pm_runtime_mark_last_busy((struct device *) priv->rng.priv);
 	pm_runtime_put_sync_autosuspend((struct device *) priv->rng.priv);
@@ -141,13 +139,6 @@ static int stm32_rng_probe(struct platform_device *ofdev)
 	priv->clk = devm_clk_get(&ofdev->dev, NULL);
 	if (IS_ERR(priv->clk))
 		return PTR_ERR(priv->clk);
-
-	priv->rst = devm_reset_control_get(&ofdev->dev, NULL);
-	if (!IS_ERR(priv->rst)) {
-		reset_control_assert(priv->rst);
-		udelay(2);
-		reset_control_deassert(priv->rst);
-	}
 
 	dev_set_drvdata(dev, priv);
 

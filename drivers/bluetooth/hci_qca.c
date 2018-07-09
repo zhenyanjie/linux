@@ -397,7 +397,7 @@ static int qca_open(struct hci_uart *hu)
 	skb_queue_head_init(&qca->txq);
 	skb_queue_head_init(&qca->tx_wait_q);
 	spin_lock_init(&qca->hci_ibs_lock);
-	qca->workqueue = alloc_ordered_workqueue("qca_wq", 0);
+	qca->workqueue = create_singlethread_workqueue("qca_wq");
 	if (!qca->workqueue) {
 		BT_ERR("QCA Workqueue not initialized properly");
 		kfree(qca);
@@ -936,15 +936,6 @@ static int qca_setup(struct hci_uart *hu)
 	if (!ret) {
 		set_bit(STATE_IN_BAND_SLEEP_ENABLED, &qca->flags);
 		qca_debugfs_init(hdev);
-	} else if (ret == -ENOENT) {
-		/* No patch/nvm-config found, run with original fw/config */
-		ret = 0;
-	} else if (ret == -EAGAIN) {
-		/*
-		 * Userspace firmware loader will return -EAGAIN in case no
-		 * patch/nvm-config is found, so run with original fw/config.
-		 */
-		ret = 0;
 	}
 
 	/* Setup bdaddr */

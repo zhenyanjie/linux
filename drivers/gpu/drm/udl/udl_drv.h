@@ -52,7 +52,6 @@ struct udl_device {
 	struct device *dev;
 	struct drm_device *ddev;
 	struct usb_device *udev;
-	struct drm_crtc *crtc;
 
 	int sku_pixel_limit;
 
@@ -88,7 +87,6 @@ struct udl_framebuffer {
 
 /* modeset */
 int udl_modeset_init(struct drm_device *dev);
-void udl_modeset_restore(struct drm_device *dev);
 void udl_modeset_cleanup(struct drm_device *dev);
 int udl_connector_init(struct drm_device *dev, struct drm_encoder *encoder);
 

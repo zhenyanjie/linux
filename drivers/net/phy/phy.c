@@ -148,12 +148,6 @@ static inline int phy_aneg_done(struct phy_device *phydev)
 	if (phydev->drv->aneg_done)
 		return phydev->drv->aneg_done(phydev);
 
-	/* Avoid genphy_aneg_done() if the Clause 45 PHY does not
-	 * implement Clause 22 registers
-	 */
-	if (phydev->is_c45 && !(phydev->c45_ids.devices_in_package & BIT(0)))
-		return -EINVAL;
-
 	return genphy_aneg_done(phydev);
 }
 
@@ -558,18 +552,16 @@ int phy_mii_ioctl(struct phy_device *phydev, struct ifreq *ifr, int cmd)
 EXPORT_SYMBOL(phy_mii_ioctl);
 
 /**
- * phy_start_aneg_priv - start auto-negotiation for this PHY device
+ * phy_start_aneg - start auto-negotiation for this PHY device
  * @phydev: the phy_device struct
- * @sync: indicate whether we should wait for the workqueue cancelation
  *
  * Description: Sanitizes the settings (if we're not autonegotiating
  *   them), and then calls the driver's config_aneg function.
  *   If the PHYCONTROL Layer is operating, we change the state to
  *   reflect the beginning of Auto-negotiation or forcing.
  */
-static int phy_start_aneg_priv(struct phy_device *phydev, bool sync)
+int phy_start_aneg(struct phy_device *phydev)
 {
-	bool trigger = 0;
 	int err;
 
 	mutex_lock(&phydev->lock);
@@ -594,39 +586,9 @@ static int phy_start_aneg_priv(struct phy_device *phydev, bool sync)
 		}
 	}
 
-	/* Re-schedule a PHY state machine to check PHY status because
-	 * negotiation may already be done and aneg interrupt may not be
-	 * generated.
-	 */
-	if (phy_interrupt_is_valid(phydev) && (phydev->state == PHY_AN)) {
-		err = phy_aneg_done(phydev);
-		if (err > 0) {
-			trigger = true;
-			err = 0;
-		}
-	}
-
 out_unlock:
 	mutex_unlock(&phydev->lock);
-
-	if (trigger)
-		phy_trigger_machine(phydev, sync);
-
 	return err;
-}
-
-/**
- * phy_start_aneg - start auto-negotiation for this PHY device
- * @phydev: the phy_device struct
- *
- * Description: Sanitizes the settings (if we're not autonegotiating
- *   them), and then calls the driver's config_aneg function.
- *   If the PHYCONTROL Layer is operating, we change the state to
- *   reflect the beginning of Auto-negotiation or forcing.
- */
-int phy_start_aneg(struct phy_device *phydev)
-{
-	return phy_start_aneg_priv(phydev, true);
 }
 EXPORT_SYMBOL(phy_start_aneg);
 
@@ -646,25 +608,6 @@ void phy_start_machine(struct phy_device *phydev)
 }
 
 /**
- * phy_trigger_machine - trigger the state machine to run
- *
- * @phydev: the phy_device struct
- * @sync: indicate whether we should wait for the workqueue cancelation
- *
- * Description: There has been a change in state which requires that the
- *   state machine runs.
- */
-
-void phy_trigger_machine(struct phy_device *phydev, bool sync)
-{
-	if (sync)
-		cancel_delayed_work_sync(&phydev->state_queue);
-	else
-		cancel_delayed_work(&phydev->state_queue);
-	queue_delayed_work(system_power_efficient_wq, &phydev->state_queue, 0);
-}
-
-/**
  * phy_stop_machine - stop the PHY state machine tracking
  * @phydev: target phy_device struct
  *
@@ -677,7 +620,7 @@ void phy_stop_machine(struct phy_device *phydev)
 	cancel_delayed_work_sync(&phydev->state_queue);
 
 	mutex_lock(&phydev->lock);
-	if (phydev->state > PHY_UP && phydev->state != PHY_HALTED)
+	if (phydev->state > PHY_UP)
 		phydev->state = PHY_UP;
 	mutex_unlock(&phydev->lock);
 }
@@ -696,8 +639,6 @@ static void phy_error(struct phy_device *phydev)
 	mutex_lock(&phydev->lock);
 	phydev->state = PHY_HALTED;
 	mutex_unlock(&phydev->lock);
-
-	phy_trigger_machine(phydev, false);
 }
 
 /**
@@ -859,7 +800,8 @@ void phy_change(struct work_struct *work)
 	}
 
 	/* reschedule state queue work to run as soon as possible */
-	phy_trigger_machine(phydev, true);
+	cancel_delayed_work_sync(&phydev->state_queue);
+	queue_delayed_work(system_power_efficient_wq, &phydev->state_queue, 0);
 	return;
 
 ignore:
@@ -931,7 +873,7 @@ void phy_start(struct phy_device *phydev)
 		break;
 	case PHY_HALTED:
 		/* make sure interrupts are re-enabled for the PHY */
-		if (phy_interrupt_is_valid(phydev)) {
+		if (phydev->irq != PHY_POLL) {
 			err = phy_enable_interrupts(phydev);
 			if (err < 0)
 				break;
@@ -948,8 +890,6 @@ void phy_start(struct phy_device *phydev)
 	/* if phy was suspended, bring the physical link up again */
 	if (do_resume)
 		phy_resume(phydev);
-
-	phy_trigger_machine(phydev, true);
 }
 EXPORT_SYMBOL(phy_start);
 
@@ -1066,15 +1006,6 @@ void phy_state_machine(struct work_struct *work)
 			if (old_link != phydev->link)
 				phydev->state = PHY_CHANGELINK;
 		}
-		/*
-		 * Failsafe: check that nobody set phydev->link=0 between two
-		 * poll cycles, otherwise we won't leave RUNNING state as long
-		 * as link remains down.
-		 */
-		if (!phydev->link && phydev->state == PHY_RUNNING) {
-			phydev->state = PHY_CHANGELINK;
-			phydev_err(phydev, "no link in PHY_RUNNING\n");
-		}
 		break;
 	case PHY_CHANGELINK:
 		err = phy_read_status(phydev);
@@ -1147,7 +1078,7 @@ void phy_state_machine(struct work_struct *work)
 	mutex_unlock(&phydev->lock);
 
 	if (needs_aneg)
-		err = phy_start_aneg_priv(phydev, false);
+		err = phy_start_aneg(phydev);
 	else if (do_suspend)
 		phy_suspend(phydev);
 
@@ -1398,9 +1329,6 @@ EXPORT_SYMBOL(phy_ethtool_get_eee);
 int phy_ethtool_set_eee(struct phy_device *phydev, struct ethtool_eee *data)
 {
 	int val = ethtool_adv_to_mmd_eee_adv_t(data->advertised);
-
-	/* Mask prohibited EEE modes */
-	val &= ~phydev->eee_broken_modes;
 
 	phy_write_mmd_indirect(phydev, MDIO_AN_EEE_ADV, MDIO_MMD_AN, val);
 

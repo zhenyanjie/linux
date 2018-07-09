@@ -1,7 +1,7 @@
 /*
  * AMD Cryptographic Coprocessor (CCP) driver
  *
- * Copyright (C) 2013,2017 Advanced Micro Devices, Inc.
+ * Copyright (C) 2013,2016 Advanced Micro Devices, Inc.
  *
  * Author: Tom Lendacky <thomas.lendacky@amd.com>
  * Author: Gary R Hook <gary.hook@amd.com>
@@ -222,7 +222,6 @@ enum ccp_xts_aes_unit_size {
  * AES operation the new IV overwrites the old IV.
  */
 struct ccp_xts_aes_engine {
-	enum ccp_aes_type type;
 	enum ccp_aes_action action;
 	enum ccp_xts_aes_unit_size unit_size;
 
@@ -239,6 +238,9 @@ struct ccp_xts_aes_engine {
 };
 
 /***** SHA engine *****/
+#define CCP_SHA_BLOCKSIZE               SHA256_BLOCK_SIZE
+#define CCP_SHA_CTXSIZE                 SHA256_DIGEST_SIZE
+
 /**
  * ccp_sha_type - type of SHA operation
  *
@@ -557,7 +559,7 @@ enum ccp_engine {
  * struct ccp_cmd - CPP operation request
  * @entry: list element (ccp driver use only)
  * @work: work element used for callbacks (ccp driver use only)
- * @ccp: CCP device to be run on
+ * @ccp: CCP device to be run on (ccp driver use only)
  * @ret: operation return code (ccp driver use only)
  * @flags: cmd processing flags
  * @engine: CCP operation to perform

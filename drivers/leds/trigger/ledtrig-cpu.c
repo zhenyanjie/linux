@@ -92,22 +92,29 @@ static struct syscore_ops ledtrig_cpu_syscore_ops = {
 	.resume		= ledtrig_cpu_syscore_resume,
 };
 
-static int ledtrig_online_cpu(unsigned int cpu)
+static int ledtrig_cpu_notify(struct notifier_block *self,
+					   unsigned long action, void *hcpu)
 {
-	ledtrig_cpu(CPU_LED_START);
-	return 0;
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_STARTING:
+		ledtrig_cpu(CPU_LED_START);
+		break;
+	case CPU_DYING:
+		ledtrig_cpu(CPU_LED_STOP);
+		break;
+	}
+
+	return NOTIFY_OK;
 }
 
-static int ledtrig_prepare_down_cpu(unsigned int cpu)
-{
-	ledtrig_cpu(CPU_LED_STOP);
-	return 0;
-}
+
+static struct notifier_block ledtrig_cpu_nb = {
+	.notifier_call = ledtrig_cpu_notify,
+};
 
 static int __init ledtrig_cpu_init(void)
 {
 	int cpu;
-	int ret;
 
 	/* Supports up to 9999 cpu cores */
 	BUILD_BUG_ON(CONFIG_NR_CPUS > 9999);
@@ -126,12 +133,7 @@ static int __init ledtrig_cpu_init(void)
 	}
 
 	register_syscore_ops(&ledtrig_cpu_syscore_ops);
-
-	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "AP_LEDTRIG_STARTING",
-				ledtrig_online_cpu, ledtrig_prepare_down_cpu);
-	if (ret < 0)
-		pr_err("CPU hotplug notifier for ledtrig-cpu could not be registered: %d\n",
-		       ret);
+	register_cpu_notifier(&ledtrig_cpu_nb);
 
 	pr_info("ledtrig-cpu: registered to indicate activity on CPUs\n");
 

@@ -18,7 +18,7 @@
 		};
 	};
 
-	memory@80000000 {
+	memory {
 		device_type = "memory";
 		reg = <0x80000000 0x20000000>; /* 512 MB */
 	};
@@ -27,7 +27,7 @@
 		display0 = &lcd;
 	};
 
-	tv: connector {
+	tv: connector@1 {
 		compatible = "connector-analog-tv";
 		label = "tv";
 
@@ -45,28 +45,28 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&led_pins>;
 
-		led1 {
+		led@1 {
 			label = "pandora::sd1";
 			gpios = <&gpio5 0 GPIO_ACTIVE_HIGH>;	/* GPIO_128 */
 			linux,default-trigger = "mmc0";
 			default-state = "off";
 		};
 
-		led2 {
+		led@2 {
 			label = "pandora::sd2";
 			gpios = <&gpio5 1 GPIO_ACTIVE_HIGH>;	/* GPIO_129 */
 			linux,default-trigger = "mmc1";
 			default-state = "off";
 		};
 
-		led3 {
+		led@3 {
 			label = "pandora::bluetooth";
 			gpios = <&gpio5 30 GPIO_ACTIVE_HIGH>;	/* GPIO_158 */
 			linux,default-trigger = "heartbeat";
 			default-state = "off";
 		};
 
-		led4 {
+		led@4 {
 			label = "pandora::wifi";
 			gpios = <&gpio5 31 GPIO_ACTIVE_HIGH>;	/* GPIO_159 */
 			linux,default-trigger = "mmc2";

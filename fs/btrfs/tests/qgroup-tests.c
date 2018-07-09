@@ -63,7 +63,7 @@ static int insert_normal_tree_ref(struct btrfs_root *root, u64 bytenr,
 	btrfs_set_extent_generation(leaf, item, 1);
 	btrfs_set_extent_flags(leaf, item, BTRFS_EXTENT_FLAG_TREE_BLOCK);
 	block_info = (struct btrfs_tree_block_info *)(item + 1);
-	btrfs_set_tree_block_level(leaf, block_info, 0);
+	btrfs_set_tree_block_level(leaf, block_info, 1);
 	iref = (struct btrfs_extent_inline_ref *)(block_info + 1);
 	if (parent > 0) {
 		btrfs_set_extent_inline_ref_type(leaf, iref,
@@ -453,24 +453,22 @@ static int test_multiple_refs(struct btrfs_root *root,
 
 int btrfs_test_qgroups(u32 sectorsize, u32 nodesize)
 {
-	struct btrfs_fs_info *fs_info = NULL;
 	struct btrfs_root *root;
 	struct btrfs_root *tmp_root;
 	int ret = 0;
 
-	fs_info = btrfs_alloc_dummy_fs_info();
-	if (!fs_info) {
-		test_msg("Couldn't allocate dummy fs info\n");
-		return -ENOMEM;
-	}
-
-	root = btrfs_alloc_dummy_root(fs_info, sectorsize, nodesize);
+	root = btrfs_alloc_dummy_root(sectorsize, nodesize);
 	if (IS_ERR(root)) {
 		test_msg("Couldn't allocate root\n");
-		ret = PTR_ERR(root);
-		goto out;
+		return PTR_ERR(root);
 	}
 
+	root->fs_info = btrfs_alloc_dummy_fs_info();
+	if (!root->fs_info) {
+		test_msg("Couldn't allocate dummy fs info\n");
+		ret = -ENOMEM;
+		goto out;
+	}
 	/* We are using this root as our extent root */
 	root->fs_info->extent_root = root;
 
@@ -480,7 +478,7 @@ int btrfs_test_qgroups(u32 sectorsize, u32 nodesize)
 	 */
 	root->fs_info->tree_root = root;
 	root->fs_info->quota_root = root;
-	set_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags);
+	root->fs_info->quota_enabled = 1;
 
 	/*
 	 * Can't use bytenr 0, some things freak out
@@ -497,7 +495,7 @@ int btrfs_test_qgroups(u32 sectorsize, u32 nodesize)
 	btrfs_set_header_nritems(root->node, 0);
 	root->alloc_bytenr += 2 * nodesize;
 
-	tmp_root = btrfs_alloc_dummy_root(fs_info, sectorsize, nodesize);
+	tmp_root = btrfs_alloc_dummy_root(sectorsize, nodesize);
 	if (IS_ERR(tmp_root)) {
 		test_msg("Couldn't allocate a fs root\n");
 		ret = PTR_ERR(tmp_root);
@@ -512,7 +510,7 @@ int btrfs_test_qgroups(u32 sectorsize, u32 nodesize)
 		goto out;
 	}
 
-	tmp_root = btrfs_alloc_dummy_root(fs_info, sectorsize, nodesize);
+	tmp_root = btrfs_alloc_dummy_root(sectorsize, nodesize);
 	if (IS_ERR(tmp_root)) {
 		test_msg("Couldn't allocate a fs root\n");
 		ret = PTR_ERR(tmp_root);
@@ -533,6 +531,5 @@ int btrfs_test_qgroups(u32 sectorsize, u32 nodesize)
 	ret = test_multiple_refs(root, sectorsize, nodesize);
 out:
 	btrfs_free_dummy_root(root);
-	btrfs_free_dummy_fs_info(fs_info);
 	return ret;
 }

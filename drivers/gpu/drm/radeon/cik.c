@@ -53,7 +53,6 @@ MODULE_FIRMWARE("radeon/bonaire_mc.bin");
 MODULE_FIRMWARE("radeon/bonaire_rlc.bin");
 MODULE_FIRMWARE("radeon/bonaire_sdma.bin");
 MODULE_FIRMWARE("radeon/bonaire_smc.bin");
-MODULE_FIRMWARE("radeon/bonaire_k_smc.bin");
 
 MODULE_FIRMWARE("radeon/HAWAII_pfp.bin");
 MODULE_FIRMWARE("radeon/HAWAII_me.bin");
@@ -73,7 +72,6 @@ MODULE_FIRMWARE("radeon/hawaii_mc.bin");
 MODULE_FIRMWARE("radeon/hawaii_rlc.bin");
 MODULE_FIRMWARE("radeon/hawaii_sdma.bin");
 MODULE_FIRMWARE("radeon/hawaii_smc.bin");
-MODULE_FIRMWARE("radeon/hawaii_k_smc.bin");
 
 MODULE_FIRMWARE("radeon/KAVERI_pfp.bin");
 MODULE_FIRMWARE("radeon/KAVERI_me.bin");
@@ -1871,7 +1869,7 @@ int ci_mc_load_microcode(struct radeon_device *rdev)
 {
 	const __be32 *fw_data = NULL;
 	const __le32 *new_fw_data = NULL;
-	u32 running, tmp;
+	u32 running, blackout = 0, tmp;
 	u32 *io_mc_regs = NULL;
 	const __le32 *new_io_mc_regs = NULL;
 	int i, regs_size, ucode_size;
@@ -1912,6 +1910,11 @@ int ci_mc_load_microcode(struct radeon_device *rdev)
 	running = RREG32(MC_SEQ_SUP_CNTL) & RUN_MASK;
 
 	if (running == 0) {
+		if (running) {
+			blackout = RREG32(MC_SHARED_BLACKOUT_CNTL);
+			WREG32(MC_SHARED_BLACKOUT_CNTL, blackout | 1);
+		}
+
 		/* reset the engine and set to writable */
 		WREG32(MC_SEQ_SUP_CNTL, 0x00000008);
 		WREG32(MC_SEQ_SUP_CNTL, 0x00000010);
@@ -1959,6 +1962,9 @@ int ci_mc_load_microcode(struct radeon_device *rdev)
 				break;
 			udelay(1);
 		}
+
+		if (running)
+			WREG32(MC_SHARED_BLACKOUT_CNTL, blackout);
 	}
 
 	return 0;
@@ -1984,17 +1990,12 @@ static int cik_init_microcode(struct radeon_device *rdev)
 	int new_fw = 0;
 	int err;
 	int num_fw;
-	bool new_smc = false;
 
 	DRM_DEBUG("\n");
 
 	switch (rdev->family) {
 	case CHIP_BONAIRE:
 		chip_name = "BONAIRE";
-		if ((rdev->pdev->revision == 0x80) ||
-		    (rdev->pdev->revision == 0x81) ||
-		    (rdev->pdev->device == 0x665f))
-			new_smc = true;
 		new_chip_name = "bonaire";
 		pfp_req_size = CIK_PFP_UCODE_SIZE * 4;
 		me_req_size = CIK_ME_UCODE_SIZE * 4;
@@ -2009,8 +2010,6 @@ static int cik_init_microcode(struct radeon_device *rdev)
 		break;
 	case CHIP_HAWAII:
 		chip_name = "HAWAII";
-		if (rdev->pdev->revision == 0x80)
-			new_smc = true;
 		new_chip_name = "hawaii";
 		pfp_req_size = CIK_PFP_UCODE_SIZE * 4;
 		me_req_size = CIK_ME_UCODE_SIZE * 4;
@@ -2260,10 +2259,7 @@ static int cik_init_microcode(struct radeon_device *rdev)
 			}
 		}
 
-		if (new_smc)
-			snprintf(fw_name, sizeof(fw_name), "radeon/%s_k_smc.bin", new_chip_name);
-		else
-			snprintf(fw_name, sizeof(fw_name), "radeon/%s_smc.bin", new_chip_name);
+		snprintf(fw_name, sizeof(fw_name), "radeon/%s_smc.bin", new_chip_name);
 		err = request_firmware(&rdev->smc_fw, fw_name, rdev->dev);
 		if (err) {
 			snprintf(fw_name, sizeof(fw_name), "radeon/%s_smc.bin", chip_name);
@@ -3244,8 +3240,35 @@ static void cik_gpu_init(struct radeon_device *rdev)
 	case CHIP_KAVERI:
 		rdev->config.cik.max_shader_engines = 1;
 		rdev->config.cik.max_tile_pipes = 4;
-		rdev->config.cik.max_cu_per_sh = 8;
-		rdev->config.cik.max_backends_per_se = 2;
+		if ((rdev->pdev->device == 0x1304) ||
+		    (rdev->pdev->device == 0x1305) ||
+		    (rdev->pdev->device == 0x130C) ||
+		    (rdev->pdev->device == 0x130F) ||
+		    (rdev->pdev->device == 0x1310) ||
+		    (rdev->pdev->device == 0x1311) ||
+		    (rdev->pdev->device == 0x131C)) {
+			rdev->config.cik.max_cu_per_sh = 8;
+			rdev->config.cik.max_backends_per_se = 2;
+		} else if ((rdev->pdev->device == 0x1309) ||
+			   (rdev->pdev->device == 0x130A) ||
+			   (rdev->pdev->device == 0x130D) ||
+			   (rdev->pdev->device == 0x1313) ||
+			   (rdev->pdev->device == 0x131D)) {
+			rdev->config.cik.max_cu_per_sh = 6;
+			rdev->config.cik.max_backends_per_se = 2;
+		} else if ((rdev->pdev->device == 0x1306) ||
+			   (rdev->pdev->device == 0x1307) ||
+			   (rdev->pdev->device == 0x130B) ||
+			   (rdev->pdev->device == 0x130E) ||
+			   (rdev->pdev->device == 0x1315) ||
+			   (rdev->pdev->device == 0x1318) ||
+			   (rdev->pdev->device == 0x131B)) {
+			rdev->config.cik.max_cu_per_sh = 4;
+			rdev->config.cik.max_backends_per_se = 1;
+		} else {
+			rdev->config.cik.max_cu_per_sh = 3;
+			rdev->config.cik.max_backends_per_se = 1;
+		}
 		rdev->config.cik.max_sh_per_se = 1;
 		rdev->config.cik.max_texture_channel_caches = 4;
 		rdev->config.cik.max_gprs = 256;
@@ -4166,7 +4189,11 @@ u32 cik_gfx_get_rptr(struct radeon_device *rdev,
 u32 cik_gfx_get_wptr(struct radeon_device *rdev,
 		     struct radeon_ring *ring)
 {
-	return RREG32(CP_RB0_WPTR);
+	u32 wptr;
+
+	wptr = RREG32(CP_RB0_WPTR);
+
+	return wptr;
 }
 
 void cik_gfx_set_wptr(struct radeon_device *rdev,
@@ -7389,7 +7416,7 @@ static inline void cik_irq_ack(struct radeon_device *rdev)
 		WREG32(DC_HPD5_INT_CONTROL, tmp);
 	}
 	if (rdev->irq.stat_regs.cik.disp_int_cont5 & DC_HPD6_INTERRUPT) {
-		tmp = RREG32(DC_HPD6_INT_CONTROL);
+		tmp = RREG32(DC_HPD5_INT_CONTROL);
 		tmp |= DC_HPDx_INT_ACK;
 		WREG32(DC_HPD6_INT_CONTROL, tmp);
 	}
@@ -7419,7 +7446,7 @@ static inline void cik_irq_ack(struct radeon_device *rdev)
 		WREG32(DC_HPD5_INT_CONTROL, tmp);
 	}
 	if (rdev->irq.stat_regs.cik.disp_int_cont5 & DC_HPD6_RX_INTERRUPT) {
-		tmp = RREG32(DC_HPD6_INT_CONTROL);
+		tmp = RREG32(DC_HPD5_INT_CONTROL);
 		tmp |= DC_HPDx_RX_INT_ACK;
 		WREG32(DC_HPD6_INT_CONTROL, tmp);
 	}
@@ -8176,7 +8203,7 @@ static void cik_uvd_resume(struct radeon_device *rdev)
 		return;
 
 	ring = &rdev->ring[R600_RING_TYPE_UVD_INDEX];
-	r = radeon_ring_init(rdev, ring, ring->ring_size, 0, PACKET0(UVD_NO_OP, 0));
+	r = radeon_ring_init(rdev, ring, ring->ring_size, 0, RADEON_CP_PACKET2);
 	if (r) {
 		dev_err(rdev->dev, "failed initializing UVD ring (%d).\n", r);
 		return;
@@ -8327,8 +8354,7 @@ static int cik_startup(struct radeon_device *rdev)
 		}
 	}
 	rdev->rlc.cs_data = ci_cs_data;
-	rdev->rlc.cp_table_size = ALIGN(CP_ME_TABLE_SIZE * 5 * 4, 2048); /* CP JT */
-	rdev->rlc.cp_table_size += 64 * 1024; /* GDS */
+	rdev->rlc.cp_table_size = CP_ME_TABLE_SIZE * 5 * 4;
 	r = sumo_rlc_init(rdev);
 	if (r) {
 		DRM_ERROR("Failed to init rlc BOs!\n");

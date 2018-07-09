@@ -1,7 +1,7 @@
 #ifndef _LINUX_TIMEKEEPING_H
 #define _LINUX_TIMEKEEPING_H
 
-#include <linux/errno.h>
+#include <asm-generic/errno-base.h>
 
 /* Included from linux/ktime.h */
 

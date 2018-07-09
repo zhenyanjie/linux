@@ -17,7 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 
-#include <video/omapfb_dss.h>
+#include <video/omapdss.h>
 
 #include "dss.h"
 #include "hdmi.h"

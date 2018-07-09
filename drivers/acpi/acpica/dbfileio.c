@@ -46,12 +46,14 @@
 #include "accommon.h"
 #include "acdebug.h"
 #include "actables.h"
+#include <stdio.h>
+#ifdef ACPI_APPLICATION
+#include "acapps.h"
+#endif
 
 #define _COMPONENT          ACPI_CA_DEBUGGER
 ACPI_MODULE_NAME("dbfileio")
 
-#ifdef ACPI_APPLICATION
-#include "acapps.h"
 #ifdef ACPI_DEBUGGER
 /*******************************************************************************
  *
@@ -67,6 +69,8 @@ ACPI_MODULE_NAME("dbfileio")
 void acpi_db_close_debug_file(void)
 {
 
+#ifdef ACPI_APPLICATION
+
 	if (acpi_gbl_debug_file) {
 		fclose(acpi_gbl_debug_file);
 		acpi_gbl_debug_file = NULL;
@@ -74,6 +78,7 @@ void acpi_db_close_debug_file(void)
 		acpi_os_printf("Debug output file %s closed\n",
 			       acpi_gbl_db_debug_filename);
 	}
+#endif
 }
 
 /*******************************************************************************
@@ -91,6 +96,8 @@ void acpi_db_close_debug_file(void)
 void acpi_db_open_debug_file(char *name)
 {
 
+#ifdef ACPI_APPLICATION
+
 	acpi_db_close_debug_file();
 	acpi_gbl_debug_file = fopen(name, "w+");
 	if (!acpi_gbl_debug_file) {
@@ -102,6 +109,8 @@ void acpi_db_open_debug_file(char *name)
 	strncpy(acpi_gbl_db_debug_filename, name,
 		sizeof(acpi_gbl_db_debug_filename));
 	acpi_gbl_db_output_to_file = TRUE;
+
+#endif
 }
 #endif
 
@@ -143,13 +152,12 @@ acpi_status acpi_db_load_tables(struct acpi_new_table_desc *list_head)
 			return (status);
 		}
 
-		acpi_os_printf
-		    ("Acpi table [%4.4s] successfully installed and loaded\n",
-		     table->signature);
+		fprintf(stderr,
+			"Acpi table [%4.4s] successfully installed and loaded\n",
+			table->signature);
 
 		table_list_head = table_list_head->next;
 	}
 
 	return (AE_OK);
 }
-#endif

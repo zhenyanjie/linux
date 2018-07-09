@@ -892,13 +892,7 @@ static struct intel_iommu *device_to_iommu(struct device *dev, u8 *bus, u8 *devf
 		return NULL;
 
 	if (dev_is_pci(dev)) {
-		struct pci_dev *pf_pdev;
-
 		pdev = to_pci_dev(dev);
-		/* VFs aren't listed in scope tables; we need to look up
-		 * the PF instead to find the IOMMU. */
-		pf_pdev = pci_physfn(pdev);
-		dev = &pf_pdev->dev;
 		segment = pci_domain_nr(pdev->bus);
 	} else if (has_acpi_companion(dev))
 		dev = &ACPI_COMPANION(dev)->dev;
@@ -911,13 +905,6 @@ static struct intel_iommu *device_to_iommu(struct device *dev, u8 *bus, u8 *devf
 		for_each_active_dev_scope(drhd->devices,
 					  drhd->devices_cnt, i, tmp) {
 			if (tmp == dev) {
-				/* For a VF use its original BDF# not that of the PF
-				 * which we used for the IOMMU lookup. Strictly speaking
-				 * we could do this for all PCI devices; we only need to
-				 * get the BDF# from the scope table for ACPI matches. */
-				if (pdev && pdev->is_virtfn)
-					goto got_pdev;
-
 				*bus = drhd->devices[i].bus;
 				*devfn = drhd->devices[i].devfn;
 				goto out;
@@ -1144,7 +1131,7 @@ static void dma_pte_free_level(struct dmar_domain *domain, int level,
 		if (!dma_pte_present(pte) || dma_pte_superpage(pte))
 			goto next;
 
-		level_pfn = pfn & level_mask(level);
+		level_pfn = pfn & level_mask(level - 1);
 		level_pte = phys_to_virt(dma_pte_addr(pte));
 
 		if (level > 2)
@@ -1612,7 +1599,8 @@ static void iommu_flush_iotlb_psi(struct intel_iommu *iommu,
 	 * flush. However, device IOTLB doesn't need to be flushed in this case.
 	 */
 	if (!cap_caching_mode(iommu->cap) || !map)
-		iommu_flush_dev_iotlb(domain, addr, mask);
+		iommu_flush_dev_iotlb(get_iommu_domain(iommu, did),
+				      addr, mask);
 }
 
 static void iommu_disable_protect_mem_regions(struct intel_iommu *iommu)
@@ -1684,7 +1672,7 @@ static int iommu_init_domains(struct intel_iommu *iommu)
 		return -ENOMEM;
 	}
 
-	size = (ALIGN(ndomains, 256) >> 8) * sizeof(struct dmar_domain **);
+	size = ((ndomains >> 8) + 1) * sizeof(struct dmar_domain **);
 	iommu->domains = kzalloc(size, GFP_KERNEL);
 
 	if (iommu->domains) {
@@ -1723,7 +1711,6 @@ static void disable_dmar_iommu(struct intel_iommu *iommu)
 	if (!iommu->domains || !iommu->domain_ids)
 		return;
 
-again:
 	spin_lock_irqsave(&device_domain_lock, flags);
 	list_for_each_entry_safe(info, tmp, &device_domain_list, global) {
 		struct dmar_domain *domain;
@@ -1736,19 +1723,10 @@ again:
 
 		domain = info->domain;
 
-		__dmar_remove_one_dev_info(info);
+		dmar_remove_one_dev_info(domain, info->dev);
 
-		if (!domain_type_is_vm_or_si(domain)) {
-			/*
-			 * The domain_exit() function  can't be called under
-			 * device_domain_lock, as it takes this lock itself.
-			 * So release the lock here and re-run the loop
-			 * afterwards.
-			 */
-			spin_unlock_irqrestore(&device_domain_lock, flags);
+		if (!domain_type_is_vm_or_si(domain))
 			domain_exit(domain);
-			goto again;
-		}
 	}
 	spin_unlock_irqrestore(&device_domain_lock, flags);
 
@@ -1759,7 +1737,7 @@ again:
 static void free_dmar_iommu(struct intel_iommu *iommu)
 {
 	if ((iommu->domains) && (iommu->domain_ids)) {
-		int elems = ALIGN(cap_ndoms(iommu->cap), 256) >> 8;
+		int elems = (cap_ndoms(iommu->cap) >> 8) + 1;
 		int i;
 
 		for (i = 0; i < elems; i++)
@@ -2036,28 +2014,6 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 	if (context_present(context))
 		goto out_unlock;
 
-	/*
-	 * For kdump cases, old valid entries may be cached due to the
-	 * in-flight DMA and copied pgtable, but there is no unmapping
-	 * behaviour for them, thus we need an explicit cache flush for
-	 * the newly-mapped device. For kdump, at this point, the device
-	 * is supposed to finish reset at its driver probe stage, so no
-	 * in-flight DMA will exist, and we don't need to worry anymore
-	 * hereafter.
-	 */
-	if (context_copied(context)) {
-		u16 did_old = context_domain_id(context);
-
-		if (did_old >= 0 && did_old < cap_ndoms(iommu->cap)) {
-			iommu->flush.flush_context(iommu, did_old,
-						   (((u16)bus) << 8) | devfn,
-						   DMA_CCMD_MASK_NOBIT,
-						   DMA_CCMD_DEVICE_INVL);
-			iommu->flush.flush_iotlb(iommu, did_old, 0, 0,
-						 DMA_TLB_DSI_FLUSH);
-		}
-	}
-
 	pgd = domain->pgd;
 
 	context_clear_entry(context);
@@ -2244,12 +2200,10 @@ static int __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 		uint64_t tmp;
 
 		if (!sg_res) {
-			unsigned int pgoff = sg->offset & ~PAGE_MASK;
-
 			sg_res = aligned_nrpages(sg->offset, sg->length);
-			sg->dma_address = ((dma_addr_t)iov_pfn << VTD_PAGE_SHIFT) + pgoff;
+			sg->dma_address = ((dma_addr_t)iov_pfn << VTD_PAGE_SHIFT) + sg->offset;
 			sg->dma_length = sg->length;
-			pteval = (sg_phys(sg) - pgoff) | prot;
+			pteval = page_to_phys(sg_page(sg)) | prot;
 			phys_pfn = pteval >> VTD_PAGE_SHIFT;
 		}
 
@@ -2498,14 +2452,19 @@ static int get_last_alias(struct pci_dev *pdev, u16 alias, void *opaque)
 	return 0;
 }
 
-static struct dmar_domain *find_or_alloc_domain(struct device *dev, int gaw)
+/* domain is initialized */
+static struct dmar_domain *get_domain_for_dev(struct device *dev, int gaw)
 {
 	struct device_domain_info *info = NULL;
-	struct dmar_domain *domain = NULL;
+	struct dmar_domain *domain, *tmp;
 	struct intel_iommu *iommu;
 	u16 req_id, dma_alias;
 	unsigned long flags;
 	u8 bus, devfn;
+
+	domain = find_domain(dev);
+	if (domain)
+		return domain;
 
 	iommu = device_to_iommu(dev, &bus, &devfn);
 	if (!iommu)
@@ -2528,9 +2487,9 @@ static struct dmar_domain *find_or_alloc_domain(struct device *dev, int gaw)
 		}
 		spin_unlock_irqrestore(&device_domain_lock, flags);
 
-		/* DMA alias already has a domain, use it */
+		/* DMA alias already has a domain, uses it */
 		if (info)
-			goto out;
+			goto found_domain;
 	}
 
 	/* Allocate and initialize new domain for the device */
@@ -2542,66 +2501,27 @@ static struct dmar_domain *find_or_alloc_domain(struct device *dev, int gaw)
 		return NULL;
 	}
 
-out:
+	/* register PCI DMA alias device */
+	if (dev_is_pci(dev) && req_id != dma_alias) {
+		tmp = dmar_insert_one_dev_info(iommu, PCI_BUS_NUM(dma_alias),
+					       dma_alias & 0xff, NULL, domain);
 
-	return domain;
-}
-
-static struct dmar_domain *set_domain_for_dev(struct device *dev,
-					      struct dmar_domain *domain)
-{
-	struct intel_iommu *iommu;
-	struct dmar_domain *tmp;
-	u16 req_id, dma_alias;
-	u8 bus, devfn;
-
-	iommu = device_to_iommu(dev, &bus, &devfn);
-	if (!iommu)
-		return NULL;
-
-	req_id = ((u16)bus << 8) | devfn;
-
-	if (dev_is_pci(dev)) {
-		struct pci_dev *pdev = to_pci_dev(dev);
-
-		pci_for_each_dma_alias(pdev, get_last_alias, &dma_alias);
-
-		/* register PCI DMA alias device */
-		if (req_id != dma_alias) {
-			tmp = dmar_insert_one_dev_info(iommu, PCI_BUS_NUM(dma_alias),
-					dma_alias & 0xff, NULL, domain);
-
-			if (!tmp || tmp != domain)
-				return tmp;
+		if (!tmp || tmp != domain) {
+			domain_exit(domain);
+			domain = tmp;
 		}
+
+		if (!domain)
+			return NULL;
 	}
 
+found_domain:
 	tmp = dmar_insert_one_dev_info(iommu, bus, devfn, dev, domain);
-	if (!tmp || tmp != domain)
-		return tmp;
 
-	return domain;
-}
-
-static struct dmar_domain *get_domain_for_dev(struct device *dev, int gaw)
-{
-	struct dmar_domain *domain, *tmp;
-
-	domain = find_domain(dev);
-	if (domain)
-		goto out;
-
-	domain = find_or_alloc_domain(dev, gaw);
-	if (!domain)
-		goto out;
-
-	tmp = set_domain_for_dev(dev, domain);
-	if (!tmp || domain != tmp) {
+	if (!tmp || tmp != domain) {
 		domain_exit(domain);
 		domain = tmp;
 	}
-
-out:
 
 	return domain;
 }
@@ -3329,14 +3249,13 @@ static int __init init_dmars(void)
 	iommu_identity_mapping |= IDENTMAP_GFX;
 #endif
 
-	check_tylersburg_isoch();
-
 	if (iommu_identity_mapping) {
 		ret = si_domain_init(hw_pass_through);
 		if (ret)
 			goto free_iommu;
 	}
 
+	check_tylersburg_isoch();
 
 	/*
 	 * If we copied translations from a previous kernel in the kdump
@@ -3475,18 +3394,17 @@ static unsigned long intel_alloc_iova(struct device *dev,
 
 static struct dmar_domain *__get_valid_domain_for_dev(struct device *dev)
 {
-	struct dmar_domain *domain, *tmp;
 	struct dmar_rmrr_unit *rmrr;
+	struct dmar_domain *domain;
 	struct device *i_dev;
 	int i, ret;
 
-	domain = find_domain(dev);
-	if (domain)
-		goto out;
-
-	domain = find_or_alloc_domain(dev, DEFAULT_DOMAIN_ADDRESS_WIDTH);
-	if (!domain)
-		goto out;
+	domain = get_domain_for_dev(dev, DEFAULT_DOMAIN_ADDRESS_WIDTH);
+	if (!domain) {
+		pr_err("Allocating domain for %s failed\n",
+		       dev_name(dev));
+		return NULL;
+	}
 
 	/* We have a new domain - setup possible RMRRs for the device */
 	rcu_read_lock();
@@ -3504,18 +3422,6 @@ static struct dmar_domain *__get_valid_domain_for_dev(struct device *dev)
 		}
 	}
 	rcu_read_unlock();
-
-	tmp = set_domain_for_dev(dev, domain);
-	if (!tmp || domain != tmp) {
-		domain_exit(domain);
-		domain = tmp;
-	}
-
-out:
-
-	if (!domain)
-		pr_err("Allocating domain for %s failed\n", dev_name(dev));
-
 
 	return domain;
 }
@@ -3646,7 +3552,7 @@ error:
 static dma_addr_t intel_map_page(struct device *dev, struct page *page,
 				 unsigned long offset, size_t size,
 				 enum dma_data_direction dir,
-				 unsigned long attrs)
+				 struct dma_attrs *attrs)
 {
 	return __intel_map_single(dev, page_to_phys(page) + offset, size,
 				  dir, *dev->dma_mask);
@@ -3805,14 +3711,14 @@ static void intel_unmap(struct device *dev, dma_addr_t dev_addr, size_t size)
 
 static void intel_unmap_page(struct device *dev, dma_addr_t dev_addr,
 			     size_t size, enum dma_data_direction dir,
-			     unsigned long attrs)
+			     struct dma_attrs *attrs)
 {
 	intel_unmap(dev, dev_addr, size);
 }
 
 static void *intel_alloc_coherent(struct device *dev, size_t size,
 				  dma_addr_t *dma_handle, gfp_t flags,
-				  unsigned long attrs)
+				  struct dma_attrs *attrs)
 {
 	struct page *page = NULL;
 	int order;
@@ -3858,7 +3764,7 @@ static void *intel_alloc_coherent(struct device *dev, size_t size,
 }
 
 static void intel_free_coherent(struct device *dev, size_t size, void *vaddr,
-				dma_addr_t dma_handle, unsigned long attrs)
+				dma_addr_t dma_handle, struct dma_attrs *attrs)
 {
 	int order;
 	struct page *page = virt_to_page(vaddr);
@@ -3873,7 +3779,7 @@ static void intel_free_coherent(struct device *dev, size_t size, void *vaddr,
 
 static void intel_unmap_sg(struct device *dev, struct scatterlist *sglist,
 			   int nelems, enum dma_data_direction dir,
-			   unsigned long attrs)
+			   struct dma_attrs *attrs)
 {
 	dma_addr_t startaddr = sg_dma_address(sglist) & PAGE_MASK;
 	unsigned long nrpages = 0;
@@ -3895,14 +3801,14 @@ static int intel_nontranslate_map_sg(struct device *hddev,
 
 	for_each_sg(sglist, sg, nelems, i) {
 		BUG_ON(!sg_page(sg));
-		sg->dma_address = sg_phys(sg);
+		sg->dma_address = page_to_phys(sg_page(sg)) + sg->offset;
 		sg->dma_length = sg->length;
 	}
 	return nelems;
 }
 
 static int intel_map_sg(struct device *dev, struct scatterlist *sglist, int nelems,
-			enum dma_data_direction dir, unsigned long attrs)
+			enum dma_data_direction dir, struct dma_attrs *attrs)
 {
 	int i;
 	struct dmar_domain *domain;
@@ -5221,25 +5127,6 @@ static void intel_iommu_remove_device(struct device *dev)
 }
 
 #ifdef CONFIG_INTEL_IOMMU_SVM
-#define MAX_NR_PASID_BITS (20)
-static inline unsigned long intel_iommu_get_pts(struct intel_iommu *iommu)
-{
-	/*
-	 * Convert ecap_pss to extend context entry pts encoding, also
-	 * respect the soft pasid_max value set by the iommu.
-	 * - number of PASID bits = ecap_pss + 1
-	 * - number of PASID table entries = 2^(pts + 5)
-	 * Therefore, pts = ecap_pss - 4
-	 * e.g. KBL ecap_pss = 0x13, PASID has 20 bits, pts = 15
-	 */
-	if (ecap_pss(iommu->ecap) < 5)
-		return 0;
-
-	/* pasid_max is encoded as actual number of entries not the bits */
-	return find_first_bit((unsigned long *)&iommu->pasid_max,
-			MAX_NR_PASID_BITS) - 5;
-}
-
 int intel_iommu_enable_pasid(struct intel_iommu *iommu, struct intel_svm_dev *sdev)
 {
 	struct device_domain_info *info;
@@ -5272,9 +5159,7 @@ int intel_iommu_enable_pasid(struct intel_iommu *iommu, struct intel_svm_dev *sd
 
 	if (!(ctx_lo & CONTEXT_PASIDE)) {
 		context[1].hi = (u64)virt_to_phys(iommu->pasid_state_table);
-		context[1].lo = (u64)virt_to_phys(iommu->pasid_table) |
-			intel_iommu_get_pts(iommu);
-
+		context[1].lo = (u64)virt_to_phys(iommu->pasid_table) | ecap_pss(iommu->ecap);
 		wmb();
 		/* CONTEXT_TT_MULTI_LEVEL and CONTEXT_TT_DEV_IOTLB are both
 		 * extended to permit requests-with-PASID if the PASIDE bit

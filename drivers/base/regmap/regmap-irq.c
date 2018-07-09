@@ -268,16 +268,13 @@ static irqreturn_t regmap_irq_thread(int irq, void *d)
 	bool handled = false;
 	u32 reg;
 
-	if (chip->handle_pre_irq)
-		chip->handle_pre_irq(chip->irq_drv_data);
-
 	if (chip->runtime_pm) {
 		ret = pm_runtime_get_sync(map->dev);
 		if (ret < 0) {
 			dev_err(map->dev, "IRQ thread failed to resume: %d\n",
 				ret);
 			pm_runtime_put(map->dev);
-			goto exit;
+			return IRQ_NONE;
 		}
 	}
 
@@ -299,7 +296,7 @@ static irqreturn_t regmap_irq_thread(int irq, void *d)
 		if (ret != 0) {
 			dev_err(map->dev, "Failed to read IRQ status: %d\n",
 				ret);
-			goto exit;
+			return IRQ_NONE;
 		}
 
 		for (i = 0; i < data->chip->num_regs; i++) {
@@ -315,7 +312,7 @@ static irqreturn_t regmap_irq_thread(int irq, void *d)
 				break;
 			default:
 				BUG();
-				goto exit;
+				return IRQ_NONE;
 			}
 		}
 
@@ -332,7 +329,7 @@ static irqreturn_t regmap_irq_thread(int irq, void *d)
 					ret);
 				if (chip->runtime_pm)
 					pm_runtime_put(map->dev);
-				goto exit;
+				return IRQ_NONE;
 			}
 		}
 	}
@@ -367,10 +364,6 @@ static irqreturn_t regmap_irq_thread(int irq, void *d)
 
 	if (chip->runtime_pm)
 		pm_runtime_put(map->dev);
-
-exit:
-	if (chip->handle_post_irq)
-		chip->handle_post_irq(chip->irq_drv_data);
 
 	if (handled)
 		return IRQ_HANDLED;

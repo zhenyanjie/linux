@@ -14,11 +14,12 @@
 
 #include <linux/err.h>
 #include <linux/delay.h>
-#include <crypto/engine.h>
-#include <crypto/internal/hash.h>
 #include "internal.h"
 
 #define CRYPTO_ENGINE_MAX_QLEN 10
+
+void crypto_finalize_request(struct crypto_engine *engine,
+			     struct ablkcipher_request *req, int err);
 
 /**
  * crypto_pump_requests - dequeue one request from engine queue to process
@@ -33,11 +34,10 @@ static void crypto_pump_requests(struct crypto_engine *engine,
 				 bool in_kthread)
 {
 	struct crypto_async_request *async_req, *backlog;
-	struct ahash_request *hreq;
-	struct ablkcipher_request *breq;
+	struct ablkcipher_request *req;
 	unsigned long flags;
 	bool was_busy = false;
-	int ret, rtype;
+	int ret;
 
 	spin_lock_irqsave(&engine->queue_lock, flags);
 
@@ -47,7 +47,7 @@ static void crypto_pump_requests(struct crypto_engine *engine,
 
 	/* If another context is idling then defer */
 	if (engine->idling) {
-		kthread_queue_work(&engine->kworker, &engine->pump_requests);
+		queue_kthread_work(&engine->kworker, &engine->pump_requests);
 		goto out;
 	}
 
@@ -58,7 +58,7 @@ static void crypto_pump_requests(struct crypto_engine *engine,
 
 		/* Only do teardown in the thread */
 		if (!in_kthread) {
-			kthread_queue_work(&engine->kworker,
+			queue_kthread_work(&engine->kworker,
 					   &engine->pump_requests);
 			goto out;
 		}
@@ -82,7 +82,9 @@ static void crypto_pump_requests(struct crypto_engine *engine,
 	if (!async_req)
 		goto out;
 
-	engine->cur_req = async_req;
+	req = ablkcipher_request_cast(async_req);
+
+	engine->cur_req = req;
 	if (backlog)
 		backlog->complete(backlog, -EINPROGRESS);
 
@@ -93,7 +95,6 @@ static void crypto_pump_requests(struct crypto_engine *engine,
 
 	spin_unlock_irqrestore(&engine->queue_lock, flags);
 
-	rtype = crypto_tfm_alg_type(engine->cur_req->tfm);
 	/* Until here we get the request need to be encrypted successfully */
 	if (!was_busy && engine->prepare_crypt_hardware) {
 		ret = engine->prepare_crypt_hardware(engine);
@@ -103,55 +104,24 @@ static void crypto_pump_requests(struct crypto_engine *engine,
 		}
 	}
 
-	switch (rtype) {
-	case CRYPTO_ALG_TYPE_AHASH:
-		hreq = ahash_request_cast(engine->cur_req);
-		if (engine->prepare_hash_request) {
-			ret = engine->prepare_hash_request(engine, hreq);
-			if (ret) {
-				pr_err("failed to prepare request: %d\n", ret);
-				goto req_err;
-			}
-			engine->cur_req_prepared = true;
-		}
-		ret = engine->hash_one_request(engine, hreq);
+	if (engine->prepare_request) {
+		ret = engine->prepare_request(engine, engine->cur_req);
 		if (ret) {
-			pr_err("failed to hash one request from queue\n");
+			pr_err("failed to prepare request: %d\n", ret);
 			goto req_err;
 		}
-		return;
-	case CRYPTO_ALG_TYPE_ABLKCIPHER:
-		breq = ablkcipher_request_cast(engine->cur_req);
-		if (engine->prepare_cipher_request) {
-			ret = engine->prepare_cipher_request(engine, breq);
-			if (ret) {
-				pr_err("failed to prepare request: %d\n", ret);
-				goto req_err;
-			}
-			engine->cur_req_prepared = true;
-		}
-		ret = engine->cipher_one_request(engine, breq);
-		if (ret) {
-			pr_err("failed to cipher one request from queue\n");
-			goto req_err;
-		}
-		return;
-	default:
-		pr_err("failed to prepare request of unknown type\n");
-		return;
+		engine->cur_req_prepared = true;
 	}
 
-req_err:
-	switch (rtype) {
-	case CRYPTO_ALG_TYPE_AHASH:
-		hreq = ahash_request_cast(engine->cur_req);
-		crypto_finalize_hash_request(engine, hreq, ret);
-		break;
-	case CRYPTO_ALG_TYPE_ABLKCIPHER:
-		breq = ablkcipher_request_cast(engine->cur_req);
-		crypto_finalize_cipher_request(engine, breq, ret);
-		break;
+	ret = engine->crypt_one_request(engine, engine->cur_req);
+	if (ret) {
+		pr_err("failed to crypt one request from queue\n");
+		goto req_err;
 	}
+	return;
+
+req_err:
+	crypto_finalize_request(engine, engine->cur_req, ret);
 	return;
 
 out:
@@ -167,14 +137,12 @@ static void crypto_pump_work(struct kthread_work *work)
 }
 
 /**
- * crypto_transfer_cipher_request - transfer the new request into the
- * enginequeue
+ * crypto_transfer_request - transfer the new request into the engine queue
  * @engine: the hardware engine
  * @req: the request need to be listed into the engine queue
  */
-int crypto_transfer_cipher_request(struct crypto_engine *engine,
-				   struct ablkcipher_request *req,
-				   bool need_pump)
+int crypto_transfer_request(struct crypto_engine *engine,
+			    struct ablkcipher_request *req, bool need_pump)
 {
 	unsigned long flags;
 	int ret;
@@ -189,93 +157,51 @@ int crypto_transfer_cipher_request(struct crypto_engine *engine,
 	ret = ablkcipher_enqueue_request(&engine->queue, req);
 
 	if (!engine->busy && need_pump)
-		kthread_queue_work(&engine->kworker, &engine->pump_requests);
+		queue_kthread_work(&engine->kworker, &engine->pump_requests);
 
 	spin_unlock_irqrestore(&engine->queue_lock, flags);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(crypto_transfer_cipher_request);
+EXPORT_SYMBOL_GPL(crypto_transfer_request);
 
 /**
- * crypto_transfer_cipher_request_to_engine - transfer one request to list
- * into the engine queue
+ * crypto_transfer_request_to_engine - transfer one request to list into the
+ * engine queue
  * @engine: the hardware engine
  * @req: the request need to be listed into the engine queue
  */
-int crypto_transfer_cipher_request_to_engine(struct crypto_engine *engine,
-					     struct ablkcipher_request *req)
+int crypto_transfer_request_to_engine(struct crypto_engine *engine,
+				      struct ablkcipher_request *req)
 {
-	return crypto_transfer_cipher_request(engine, req, true);
+	return crypto_transfer_request(engine, req, true);
 }
-EXPORT_SYMBOL_GPL(crypto_transfer_cipher_request_to_engine);
+EXPORT_SYMBOL_GPL(crypto_transfer_request_to_engine);
 
 /**
- * crypto_transfer_hash_request - transfer the new request into the
- * enginequeue
- * @engine: the hardware engine
- * @req: the request need to be listed into the engine queue
- */
-int crypto_transfer_hash_request(struct crypto_engine *engine,
-				 struct ahash_request *req, bool need_pump)
-{
-	unsigned long flags;
-	int ret;
-
-	spin_lock_irqsave(&engine->queue_lock, flags);
-
-	if (!engine->running) {
-		spin_unlock_irqrestore(&engine->queue_lock, flags);
-		return -ESHUTDOWN;
-	}
-
-	ret = ahash_enqueue_request(&engine->queue, req);
-
-	if (!engine->busy && need_pump)
-		kthread_queue_work(&engine->kworker, &engine->pump_requests);
-
-	spin_unlock_irqrestore(&engine->queue_lock, flags);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(crypto_transfer_hash_request);
-
-/**
- * crypto_transfer_hash_request_to_engine - transfer one request to list
- * into the engine queue
- * @engine: the hardware engine
- * @req: the request need to be listed into the engine queue
- */
-int crypto_transfer_hash_request_to_engine(struct crypto_engine *engine,
-					   struct ahash_request *req)
-{
-	return crypto_transfer_hash_request(engine, req, true);
-}
-EXPORT_SYMBOL_GPL(crypto_transfer_hash_request_to_engine);
-
-/**
- * crypto_finalize_cipher_request - finalize one request if the request is done
+ * crypto_finalize_request - finalize one request if the request is done
  * @engine: the hardware engine
  * @req: the request need to be finalized
  * @err: error number
  */
-void crypto_finalize_cipher_request(struct crypto_engine *engine,
-				    struct ablkcipher_request *req, int err)
+void crypto_finalize_request(struct crypto_engine *engine,
+			     struct ablkcipher_request *req, int err)
 {
 	unsigned long flags;
 	bool finalize_cur_req = false;
 	int ret;
 
 	spin_lock_irqsave(&engine->queue_lock, flags);
-	if (engine->cur_req == &req->base)
+	if (engine->cur_req == req)
 		finalize_cur_req = true;
 	spin_unlock_irqrestore(&engine->queue_lock, flags);
 
 	if (finalize_cur_req) {
-		if (engine->cur_req_prepared &&
-		    engine->unprepare_cipher_request) {
-			ret = engine->unprepare_cipher_request(engine, req);
+		if (engine->cur_req_prepared && engine->unprepare_request) {
+			ret = engine->unprepare_request(engine, req);
 			if (ret)
 				pr_err("failed to unprepare request\n");
 		}
+
 		spin_lock_irqsave(&engine->queue_lock, flags);
 		engine->cur_req = NULL;
 		engine->cur_req_prepared = false;
@@ -284,46 +210,9 @@ void crypto_finalize_cipher_request(struct crypto_engine *engine,
 
 	req->base.complete(&req->base, err);
 
-	kthread_queue_work(&engine->kworker, &engine->pump_requests);
+	queue_kthread_work(&engine->kworker, &engine->pump_requests);
 }
-EXPORT_SYMBOL_GPL(crypto_finalize_cipher_request);
-
-/**
- * crypto_finalize_hash_request - finalize one request if the request is done
- * @engine: the hardware engine
- * @req: the request need to be finalized
- * @err: error number
- */
-void crypto_finalize_hash_request(struct crypto_engine *engine,
-				  struct ahash_request *req, int err)
-{
-	unsigned long flags;
-	bool finalize_cur_req = false;
-	int ret;
-
-	spin_lock_irqsave(&engine->queue_lock, flags);
-	if (engine->cur_req == &req->base)
-		finalize_cur_req = true;
-	spin_unlock_irqrestore(&engine->queue_lock, flags);
-
-	if (finalize_cur_req) {
-		if (engine->cur_req_prepared &&
-		    engine->unprepare_hash_request) {
-			ret = engine->unprepare_hash_request(engine, req);
-			if (ret)
-				pr_err("failed to unprepare request\n");
-		}
-		spin_lock_irqsave(&engine->queue_lock, flags);
-		engine->cur_req = NULL;
-		engine->cur_req_prepared = false;
-		spin_unlock_irqrestore(&engine->queue_lock, flags);
-	}
-
-	req->base.complete(&req->base, err);
-
-	kthread_queue_work(&engine->kworker, &engine->pump_requests);
-}
-EXPORT_SYMBOL_GPL(crypto_finalize_hash_request);
+EXPORT_SYMBOL_GPL(crypto_finalize_request);
 
 /**
  * crypto_engine_start - start the hardware engine
@@ -345,7 +234,7 @@ int crypto_engine_start(struct crypto_engine *engine)
 	engine->running = true;
 	spin_unlock_irqrestore(&engine->queue_lock, flags);
 
-	kthread_queue_work(&engine->kworker, &engine->pump_requests);
+	queue_kthread_work(&engine->kworker, &engine->pump_requests);
 
 	return 0;
 }
@@ -360,7 +249,7 @@ EXPORT_SYMBOL_GPL(crypto_engine_start);
 int crypto_engine_stop(struct crypto_engine *engine)
 {
 	unsigned long flags;
-	unsigned int limit = 500;
+	unsigned limit = 500;
 	int ret = 0;
 
 	spin_lock_irqsave(&engine->queue_lock, flags);
@@ -422,7 +311,7 @@ struct crypto_engine *crypto_engine_alloc_init(struct device *dev, bool rt)
 	crypto_init_queue(&engine->queue, CRYPTO_ENGINE_MAX_QLEN);
 	spin_lock_init(&engine->queue_lock);
 
-	kthread_init_worker(&engine->kworker);
+	init_kthread_worker(&engine->kworker);
 	engine->kworker_task = kthread_run(kthread_worker_fn,
 					   &engine->kworker, "%s",
 					   engine->name);
@@ -430,7 +319,7 @@ struct crypto_engine *crypto_engine_alloc_init(struct device *dev, bool rt)
 		dev_err(dev, "failed to create crypto request pump task\n");
 		return NULL;
 	}
-	kthread_init_work(&engine->pump_requests, crypto_pump_work);
+	init_kthread_work(&engine->pump_requests, crypto_pump_work);
 
 	if (engine->rt) {
 		dev_info(dev, "will run requests pump with realtime priority\n");
@@ -455,7 +344,7 @@ int crypto_engine_exit(struct crypto_engine *engine)
 	if (ret)
 		return ret;
 
-	kthread_flush_worker(&engine->kworker);
+	flush_kthread_worker(&engine->kworker);
 	kthread_stop(engine->kworker_task);
 
 	return 0;

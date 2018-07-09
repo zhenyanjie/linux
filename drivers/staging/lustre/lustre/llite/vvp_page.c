@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -43,6 +47,8 @@
 #include <linux/mutex.h>
 #include <linux/page-flags.h>
 #include <linux/pagemap.h>
+
+#include "../include/lustre_lite.h"
 
 #include "llite_internal.h"
 #include "vvp_internal.h"
@@ -241,10 +247,13 @@ static void vvp_vmpage_error(struct inode *inode, struct page *vmpage, int ioret
 		obj->vob_discard_page_warned = 0;
 	} else {
 		SetPageError(vmpage);
-		mapping_set_error(inode->i_mapping, ioret);
+		if (ioret == -ENOSPC)
+			set_bit(AS_ENOSPC, &inode->i_mapping->flags);
+		else
+			set_bit(AS_EIO, &inode->i_mapping->flags);
 
 		if ((ioret == -ESHUTDOWN || ioret == -EINTR) &&
-		    obj->vob_discard_page_warned == 0) {
+		     obj->vob_discard_page_warned == 0) {
 			obj->vob_discard_page_warned = 1;
 			ll_dirty_page_discard_warn(vmpage, ioret);
 		}
@@ -439,10 +448,18 @@ static int vvp_transient_page_prep(const struct lu_env *env,
 	return 0;
 }
 
+static void vvp_transient_page_verify(const struct cl_page *page)
+{
+	struct inode *inode = vvp_object_inode(page->cp_obj);
+
+	LASSERT(!inode_trylock(inode));
+}
+
 static int vvp_transient_page_own(const struct lu_env *env,
 				  const struct cl_page_slice *slice,
 				  struct cl_io *unused, int nonblock)
 {
+	vvp_transient_page_verify(slice->cpl_page);
 	return 0;
 }
 
@@ -450,18 +467,21 @@ static void vvp_transient_page_assume(const struct lu_env *env,
 				      const struct cl_page_slice *slice,
 				      struct cl_io *unused)
 {
+	vvp_transient_page_verify(slice->cpl_page);
 }
 
 static void vvp_transient_page_unassume(const struct lu_env *env,
 					const struct cl_page_slice *slice,
 					struct cl_io *unused)
 {
+	vvp_transient_page_verify(slice->cpl_page);
 }
 
 static void vvp_transient_page_disown(const struct lu_env *env,
 				      const struct cl_page_slice *slice,
 				      struct cl_io *unused)
 {
+	vvp_transient_page_verify(slice->cpl_page);
 }
 
 static void vvp_transient_page_discard(const struct lu_env *env,
@@ -469,6 +489,8 @@ static void vvp_transient_page_discard(const struct lu_env *env,
 				       struct cl_io *unused)
 {
 	struct cl_page *page = slice->cpl_page;
+
+	vvp_transient_page_verify(slice->cpl_page);
 
 	/*
 	 * For transient pages, remove it from the radix tree.
@@ -493,6 +515,7 @@ vvp_transient_page_completion(const struct lu_env *env,
 			      const struct cl_page_slice *slice,
 			      int ioret)
 {
+	vvp_transient_page_verify(slice->cpl_page);
 }
 
 static void vvp_transient_page_fini(const struct lu_env *env,
@@ -503,7 +526,8 @@ static void vvp_transient_page_fini(const struct lu_env *env,
 	struct vvp_object *clobj = cl2vvp(clp->cp_obj);
 
 	vvp_page_fini_common(vpg);
-	atomic_dec(&clobj->vob_transient_pages);
+	LASSERT(!inode_trylock(clobj->vob_inode));
+	clobj->vob_transient_pages--;
 }
 
 static const struct cl_page_operations vvp_transient_page_ops = {
@@ -529,7 +553,7 @@ static const struct cl_page_operations vvp_transient_page_ops = {
 };
 
 int vvp_page_init(const struct lu_env *env, struct cl_object *obj,
-		  struct cl_page *page, pgoff_t index)
+		struct cl_page *page, pgoff_t index)
 {
 	struct vvp_page *vpg = cl_object_page_slice(obj, page);
 	struct page     *vmpage = page->cp_vmpage;
@@ -550,9 +574,10 @@ int vvp_page_init(const struct lu_env *env, struct cl_object *obj,
 	} else {
 		struct vvp_object *clobj = cl2vvp(obj);
 
+		LASSERT(!inode_trylock(clobj->vob_inode));
 		cl_page_slice_add(page, &vpg->vpg_cl, obj, index,
 				  &vvp_transient_page_ops);
-		atomic_inc(&clobj->vob_transient_pages);
+		clobj->vob_transient_pages++;
 	}
 	return 0;
 }

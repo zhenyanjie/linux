@@ -35,7 +35,7 @@ struct mtk_drm_gem_obj {
 	void			*cookie;
 	void			*kvaddr;
 	dma_addr_t		dma_addr;
-	unsigned long		dma_attrs;
+	struct dma_attrs	dma_attrs;
 	struct sg_table		*sg;
 };
 

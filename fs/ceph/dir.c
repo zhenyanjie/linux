@@ -59,7 +59,7 @@ int ceph_init_dentry(struct dentry *dentry)
 
 	di->dentry = dentry;
 	di->lease_session = NULL;
-	di->time = jiffies;
+	dentry->d_time = jiffies;
 	/* avoid reordering d_fsdata setup so that the check above is safe */
 	smp_mb();
 	dentry->d_fsdata = di;
@@ -292,11 +292,6 @@ out:
 		if (ret < 0)
 			err = ret;
 		dput(last);
-		/* last_name no longer match cache index */
-		if (fi->readdir_cache_idx >= 0) {
-			fi->readdir_cache_idx = -1;
-			fi->dir_release_count = 0;
-		}
 	}
 	return err;
 }
@@ -320,7 +315,7 @@ static int ceph_readdir(struct file *file, struct dir_context *ctx)
 	struct ceph_mds_client *mdsc = fsc->mdsc;
 	int i;
 	int err;
-	unsigned frag = -1;
+	u32 ftype;
 	struct ceph_mds_reply_info_parsed *rinfo;
 
 	dout("readdir %p file %p pos %llx\n", inode, file, ctx->pos);
@@ -367,6 +362,7 @@ more:
 	/* do we have the correct frag content buffered? */
 	if (need_send_readdir(fi, ctx->pos)) {
 		struct ceph_mds_request *req;
+		unsigned frag;
 		int op = ceph_snap(inode) == CEPH_SNAPDIR ?
 			CEPH_MDS_OP_LSSNAP : CEPH_MDS_OP_READDIR;
 
@@ -377,11 +373,8 @@ more:
 		}
 
 		if (is_hash_order(ctx->pos)) {
-			/* fragtree isn't always accurate. choose frag
-			 * based on previous reply when possible. */
-			if (frag == (unsigned)-1)
-				frag = ceph_choose_frag(ci, fpos_hash(ctx->pos),
-							NULL, NULL);
+			frag = ceph_choose_frag(ci, fpos_hash(ctx->pos),
+						NULL, NULL);
 		} else {
 			frag = fpos_frag(ctx->pos);
 		}
@@ -504,7 +497,6 @@ more:
 		struct ceph_mds_reply_dir_entry *rde = rinfo->dir_entries + i;
 		struct ceph_vino vino;
 		ino_t ino;
-		u32 ftype;
 
 		BUG_ON(rde->offset < ctx->pos);
 
@@ -527,17 +519,15 @@ more:
 		ctx->pos++;
 	}
 
-	ceph_mdsc_put_request(fi->last_readdir);
-	fi->last_readdir = NULL;
-
 	if (fi->next_offset > 2) {
-		frag = fi->frag;
+		ceph_mdsc_put_request(fi->last_readdir);
+		fi->last_readdir = NULL;
 		goto more;
 	}
 
 	/* more frags? */
 	if (!ceph_frag_is_rightmost(fi->frag)) {
-		frag = ceph_frag_next(fi->frag);
+		unsigned frag = ceph_frag_next(fi->frag);
 		if (is_hash_order(ctx->pos)) {
 			loff_t new_pos = ceph_make_fpos(ceph_frag_value(frag),
 							fi->next_offset, true);
@@ -1071,17 +1061,13 @@ out:
 }
 
 static int ceph_rename(struct inode *old_dir, struct dentry *old_dentry,
-		       struct inode *new_dir, struct dentry *new_dentry,
-		       unsigned int flags)
+		       struct inode *new_dir, struct dentry *new_dentry)
 {
 	struct ceph_fs_client *fsc = ceph_sb_to_client(old_dir->i_sb);
 	struct ceph_mds_client *mdsc = fsc->mdsc;
 	struct ceph_mds_request *req;
 	int op = CEPH_MDS_OP_RENAME;
 	int err;
-
-	if (flags)
-		return -EINVAL;
 
 	if (ceph_snap(old_dir) != ceph_snap(new_dir))
 		return -EXDEV;
@@ -1138,7 +1124,7 @@ static int ceph_rename(struct inode *old_dir, struct dentry *old_dentry,
 void ceph_invalidate_dentry_lease(struct dentry *dentry)
 {
 	spin_lock(&dentry->d_lock);
-	ceph_dentry(dentry)->time = jiffies;
+	dentry->d_time = jiffies;
 	ceph_dentry(dentry)->lease_shared_gen = 0;
 	spin_unlock(&dentry->d_lock);
 }
@@ -1147,8 +1133,7 @@ void ceph_invalidate_dentry_lease(struct dentry *dentry)
  * Check if dentry lease is valid.  If not, delete the lease.  Try to
  * renew if the least is more than half up.
  */
-static int dentry_lease_is_valid(struct dentry *dentry, unsigned int flags,
-				 struct inode *dir)
+static int dentry_lease_is_valid(struct dentry *dentry)
 {
 	struct ceph_dentry_info *di;
 	struct ceph_mds_session *s;
@@ -1156,11 +1141,12 @@ static int dentry_lease_is_valid(struct dentry *dentry, unsigned int flags,
 	u32 gen;
 	unsigned long ttl;
 	struct ceph_mds_session *session = NULL;
+	struct inode *dir = NULL;
 	u32 seq = 0;
 
 	spin_lock(&dentry->d_lock);
 	di = ceph_dentry(dentry);
-	if (di && di->lease_session) {
+	if (di->lease_session) {
 		s = di->lease_session;
 		spin_lock(&s->s_gen_ttl_lock);
 		gen = s->s_cap_gen;
@@ -1168,24 +1154,17 @@ static int dentry_lease_is_valid(struct dentry *dentry, unsigned int flags,
 		spin_unlock(&s->s_gen_ttl_lock);
 
 		if (di->lease_gen == gen &&
-		    time_before(jiffies, di->time) &&
+		    time_before(jiffies, dentry->d_time) &&
 		    time_before(jiffies, ttl)) {
 			valid = 1;
 			if (di->lease_renew_after &&
 			    time_after(jiffies, di->lease_renew_after)) {
-				/*
-				 * We should renew. If we're in RCU walk mode
-				 * though, we can't do that so just return
-				 * -ECHILD.
-				 */
-				if (flags & LOOKUP_RCU) {
-					valid = -ECHILD;
-				} else {
-					session = ceph_get_mds_session(s);
-					seq = di->lease_seq;
-					di->lease_renew_after = 0;
-					di->lease_renew_from = jiffies;
-				}
+				/* we should renew */
+				dir = d_inode(dentry->d_parent);
+				session = ceph_get_mds_session(s);
+				seq = di->lease_seq;
+				di->lease_renew_after = 0;
+				di->lease_renew_from = jiffies;
 			}
 		}
 	}
@@ -1228,18 +1207,14 @@ static int ceph_d_revalidate(struct dentry *dentry, unsigned int flags)
 	struct dentry *parent;
 	struct inode *dir;
 
-	if (flags & LOOKUP_RCU) {
-		parent = ACCESS_ONCE(dentry->d_parent);
-		dir = d_inode_rcu(parent);
-		if (!dir)
-			return -ECHILD;
-	} else {
-		parent = dget_parent(dentry);
-		dir = d_inode(parent);
-	}
+	if (flags & LOOKUP_RCU)
+		return -ECHILD;
 
 	dout("d_revalidate %p '%pd' inode %p offset %lld\n", dentry,
 	     dentry, d_inode(dentry), ceph_dentry(dentry)->offset);
+
+	parent = dget_parent(dentry);
+	dir = d_inode(parent);
 
 	/* always trust cached snapped dentries, snapdir dentry */
 	if (ceph_snap(dir) != CEPH_NOSNAP) {
@@ -1249,53 +1224,41 @@ static int ceph_d_revalidate(struct dentry *dentry, unsigned int flags)
 	} else if (d_really_is_positive(dentry) &&
 		   ceph_snap(d_inode(dentry)) == CEPH_SNAPDIR) {
 		valid = 1;
-	} else {
-		valid = dentry_lease_is_valid(dentry, flags, dir);
-		if (valid == -ECHILD)
-			return valid;
-		if (valid || dir_lease_is_valid(dir, dentry)) {
-			if (d_really_is_positive(dentry))
-				valid = ceph_is_any_caps(d_inode(dentry));
-			else
-				valid = 1;
-		}
+	} else if (dentry_lease_is_valid(dentry) ||
+		   dir_lease_is_valid(dir, dentry)) {
+		if (d_really_is_positive(dentry))
+			valid = ceph_is_any_caps(d_inode(dentry));
+		else
+			valid = 1;
 	}
 
 	if (!valid) {
 		struct ceph_mds_client *mdsc =
 			ceph_sb_to_client(dir->i_sb)->mdsc;
 		struct ceph_mds_request *req;
-		int op, err;
-		u32 mask;
-
-		if (flags & LOOKUP_RCU)
-			return -ECHILD;
+		int op, mask, err;
 
 		op = ceph_snap(dir) == CEPH_SNAPDIR ?
-			CEPH_MDS_OP_LOOKUPSNAP : CEPH_MDS_OP_GETATTR;
+			CEPH_MDS_OP_LOOKUPSNAP : CEPH_MDS_OP_LOOKUP;
 		req = ceph_mdsc_create_request(mdsc, op, USE_ANY_MDS);
 		if (!IS_ERR(req)) {
 			req->r_dentry = dget(dentry);
-			req->r_num_caps = op == CEPH_MDS_OP_GETATTR ? 1 : 2;
+			req->r_num_caps = 2;
 
 			mask = CEPH_STAT_CAP_INODE | CEPH_CAP_AUTH_SHARED;
 			if (ceph_security_xattr_wanted(dir))
 				mask |= CEPH_CAP_XATTR_SHARED;
-			req->r_args.getattr.mask = cpu_to_le32(mask);
+			req->r_args.getattr.mask = mask;
 
+			req->r_locked_dir = dir;
 			err = ceph_mdsc_do_request(mdsc, NULL, req);
-			switch (err) {
-			case 0:
-				if (d_really_is_positive(dentry) &&
-				    d_inode(dentry) == req->r_target_inode)
-					valid = 1;
-				break;
-			case -ENOENT:
-				if (d_really_is_negative(dentry))
-					valid = 1;
-				/* Fallthrough */
-			default:
-				break;
+			if (err == 0 || err == -ENOENT) {
+				if (dentry == req->r_dentry) {
+					valid = !d_unhashed(dentry);
+				} else {
+					d_invalidate(req->r_dentry);
+					err = -EAGAIN;
+				}
 			}
 			ceph_mdsc_put_request(req);
 			dout("d_revalidate %p lookup result=%d\n",
@@ -1310,8 +1273,7 @@ static int ceph_d_revalidate(struct dentry *dentry, unsigned int flags)
 		ceph_dir_clear_complete(dir);
 	}
 
-	if (!(flags & LOOKUP_RCU))
-		dput(parent);
+	dput(parent);
 	return valid;
 }
 
@@ -1324,14 +1286,10 @@ static void ceph_d_release(struct dentry *dentry)
 
 	dout("d_release %p\n", dentry);
 	ceph_dentry_lru_del(dentry);
-
-	spin_lock(&dentry->d_lock);
-	dentry->d_fsdata = NULL;
-	spin_unlock(&dentry->d_lock);
-
 	if (di->lease_session)
 		ceph_put_mds_session(di->lease_session);
 	kmem_cache_free(ceph_dentry_cachep, di);
+	dentry->d_fsdata = NULL;
 }
 
 static int ceph_snapdir_d_revalidate(struct dentry *dentry,
@@ -1505,7 +1463,10 @@ const struct inode_operations ceph_dir_iops = {
 	.permission = ceph_permission,
 	.getattr = ceph_getattr,
 	.setattr = ceph_setattr,
+	.setxattr = generic_setxattr,
+	.getxattr = generic_getxattr,
 	.listxattr = ceph_listxattr,
+	.removexattr = generic_removexattr,
 	.get_acl = ceph_get_acl,
 	.set_acl = ceph_set_acl,
 	.mknod = ceph_mknod,

@@ -14,7 +14,6 @@
 #include <linux/slab.h>
 #include <linux/circ_buf.h>
 #include <linux/poll.h>
-#include <linux/nospec.h>
 
 #include "internal.h"
 
@@ -331,22 +330,15 @@ void *perf_aux_output_begin(struct perf_output_handle *handle,
 	if (!rb)
 		return NULL;
 
-	if (!rb_has_aux(rb))
+	if (!rb_has_aux(rb) || !atomic_inc_not_zero(&rb->aux_refcount))
 		goto err;
 
 	/*
-	 * If aux_mmap_count is zero, the aux buffer is in perf_mmap_close(),
-	 * about to get freed, so we leave immediately.
-	 *
-	 * Checking rb::aux_mmap_count and rb::refcount has to be done in
-	 * the same order, see perf_mmap_close. Otherwise we end up freeing
-	 * aux pages in this path, which is a bug, because in_atomic().
+	 * If rb::aux_mmap_count is zero (and rb_has_aux() above went through),
+	 * the aux buffer is in perf_mmap_close(), about to get freed.
 	 */
 	if (!atomic_read(&rb->aux_mmap_count))
-		goto err;
-
-	if (!atomic_inc_not_zero(&rb->aux_refcount))
-		goto err;
+		goto err_put;
 
 	/*
 	 * Nesting is not supported for AUX area, make sure nested
@@ -845,10 +837,8 @@ perf_mmap_to_page(struct ring_buffer *rb, unsigned long pgoff)
 			return NULL;
 
 		/* AUX space */
-		if (pgoff >= rb->aux_pgoff) {
-			int aux_pgoff = array_index_nospec(pgoff - rb->aux_pgoff, rb->aux_nr_pages);
-			return virt_to_page(rb->aux_pages[aux_pgoff]);
-		}
+		if (pgoff >= rb->aux_pgoff)
+			return virt_to_page(rb->aux_pages[pgoff - rb->aux_pgoff]);
 	}
 
 	return __perf_mmap_to_page(rb, pgoff);

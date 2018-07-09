@@ -19,8 +19,7 @@
 */
 
 #include <linux/errno.h>
-#include <linux/init.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/efi.h>
 #include <linux/bcd.h>
 #include <linux/highmem.h>
@@ -332,6 +331,7 @@ __visible struct pv_cpu_ops pv_cpu_ops = {
 	.read_cr0 = native_read_cr0,
 	.write_cr0 = native_write_cr0,
 	.read_cr4 = native_read_cr4,
+	.read_cr4_safe = native_read_cr4_safe,
 	.write_cr4 = native_write_cr4,
 #ifdef CONFIG_X86_64
 	.read_cr8 = native_read_cr8,
@@ -388,7 +388,7 @@ NOKPROBE_SYMBOL(native_load_idt);
 #define PTE_IDENT	__PV_IS_CALLEE_SAVE(_paravirt_ident_64)
 #endif
 
-struct pv_mmu_ops pv_mmu_ops __ro_after_init = {
+struct pv_mmu_ops pv_mmu_ops = {
 
 	.read_cr2 = native_read_cr2,
 	.write_cr2 = native_write_cr2,

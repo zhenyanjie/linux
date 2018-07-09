@@ -45,9 +45,9 @@ config USB_XHCI_PLATFORM
 	  If unsure, say N.
 
 config USB_XHCI_MTK
-	tristate "xHCI support for Mediatek MT65xx/MT7621"
+	tristate "xHCI support for Mediatek MT65xx"
 	select MFD_SYSCON
-	depends on (MIPS && SOC_MT7621) || ARCH_MEDIATEK || COMPILE_TEST
+	depends on ARCH_MEDIATEK || COMPILE_TEST
 	---help---
 	  Say 'Y' to enable the support for the xHCI host controller
 	  found in Mediatek MT65xx SoCs.
@@ -180,7 +180,7 @@ config USB_EHCI_MXC
 config USB_EHCI_HCD_OMAP
 	tristate "EHCI support for OMAP3 and later chips"
 	depends on ARCH_OMAP
-	depends on NOP_USB_XCEIV
+	select NOP_USB_XCEIV
 	default y
 	---help---
 	  Enables support for the on-chip EHCI controller on
@@ -472,7 +472,7 @@ config USB_OHCI_HCD_AT91
 
 config USB_OHCI_HCD_OMAP3
 	tristate "OHCI support for OMAP3 and later chips"
-	depends on (ARCH_OMAP3 || ARCH_OMAP4 || SOC_OMAP5)
+	depends on (ARCH_OMAP3 || ARCH_OMAP4)
 	default y
 	---help---
 	  Enables support for the on-chip OHCI controller on
@@ -627,6 +627,14 @@ config USB_UHCI_SUPPORT_NON_PCI_HC
 config USB_UHCI_PLATFORM
 	bool
 	default y if ARCH_VT8500
+
+config USB_UHCI_BIG_ENDIAN_MMIO
+	bool
+	default y if SPARC_LEON
+
+config USB_UHCI_BIG_ENDIAN_DESC
+	bool
+	default y if SPARC_LEON
 
 config USB_FHCI_HCD
 	tristate "Freescale QE USB Host Controller support"

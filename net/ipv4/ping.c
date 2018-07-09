@@ -156,18 +156,17 @@ int ping_hash(struct sock *sk)
 void ping_unhash(struct sock *sk)
 {
 	struct inet_sock *isk = inet_sk(sk);
-
 	pr_debug("ping_unhash(isk=%p,isk->num=%u)\n", isk, isk->inet_num);
-	write_lock_bh(&ping_table.lock);
 	if (sk_hashed(sk)) {
+		write_lock_bh(&ping_table.lock);
 		hlist_nulls_del(&sk->sk_nulls_node);
 		sk_nulls_node_init(&sk->sk_nulls_node);
 		sock_put(sk);
 		isk->inet_num = 0;
 		isk->inet_sport = 0;
 		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, -1);
+		write_unlock_bh(&ping_table.lock);
 	}
-	write_unlock_bh(&ping_table.lock);
 }
 EXPORT_SYMBOL_GPL(ping_unhash);
 
@@ -259,7 +258,7 @@ int ping_init_sock(struct sock *sk)
 	struct net *net = sock_net(sk);
 	kgid_t group = current_egid();
 	struct group_info *group_info;
-	int i;
+	int i, j, count;
 	kgid_t low, high;
 	int ret = 0;
 
@@ -271,11 +270,16 @@ int ping_init_sock(struct sock *sk)
 		return 0;
 
 	group_info = get_current_groups();
-	for (i = 0; i < group_info->ngroups; i++) {
-		kgid_t gid = group_info->gid[i];
+	count = group_info->ngroups;
+	for (i = 0; i < group_info->nblocks; i++) {
+		int cp_count = min_t(int, NGROUPS_PER_BLOCK, count);
+		for (j = 0; j < cp_count; j++) {
+			kgid_t gid = group_info->blocks[i][j];
+			if (gid_lte(low, gid) && gid_lte(gid, high))
+				goto out_release_group;
+		}
 
-		if (gid_lte(low, gid) && gid_lte(gid, high))
-			goto out_release_group;
+		count -= cp_count;
 	}
 
 	ret = -EACCES;
@@ -643,8 +647,6 @@ static int ping_v4_push_pending_frames(struct sock *sk, struct pingfakehdr *pfh,
 {
 	struct sk_buff *skb = skb_peek(&sk->sk_write_queue);
 
-	if (!skb)
-		return 0;
 	pfh->wcheck = csum_partial((char *)&pfh->icmph,
 		sizeof(struct icmphdr), pfh->wcheck);
 	pfh->icmph.checksum = csum_fold(pfh->wcheck);
@@ -659,10 +661,6 @@ int ping_common_sendmsg(int family, struct msghdr *msg, size_t len,
 
 	if (len > 0xFFFF)
 		return -EMSGSIZE;
-
-	/* Must have at least a full ICMP header. */
-	if (len < icmph_len)
-		return -EINVAL;
 
 	/*
 	 *	Check the flags.
@@ -775,10 +773,8 @@ static int ping_v4_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	ipc.addr = faddr = daddr;
 
 	if (ipc.opt && ipc.opt->opt.srr) {
-		if (!daddr) {
-			err = -EINVAL;
-			goto out_free;
-		}
+		if (!daddr)
+			return -EINVAL;
 		faddr = ipc.opt->opt.faddr;
 	}
 	tos = get_rttos(&ipc, inet);
@@ -843,7 +839,6 @@ back_from_confirm:
 
 out:
 	ip_rt_put(rt);
-out_free:
 	if (free)
 		kfree(ipc.opt);
 	if (!err) {
@@ -1004,7 +999,7 @@ struct proto ping_prot = {
 	.init =		ping_init_sock,
 	.close =	ping_close,
 	.connect =	ip4_datagram_connect,
-	.disconnect =	__udp_disconnect,
+	.disconnect =	udp_disconnect,
 	.setsockopt =	ip_setsockopt,
 	.getsockopt =	ip_getsockopt,
 	.sendmsg =	ping_v4_sendmsg,

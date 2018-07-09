@@ -112,7 +112,7 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		}
 
 		trace_kvm_mmio(KVM_TRACE_MMIO_READ, len, run->mmio.phys_addr,
-			       &data);
+			       data);
 		data = vcpu_data_host_to_guest(vcpu, data, len);
 		vcpu_set_reg(vcpu, vcpu->arch.mmio_decode.rt, data);
 	}
@@ -125,6 +125,12 @@ static int decode_hsr(struct kvm_vcpu *vcpu, bool *is_write, int *len)
 	unsigned long rt;
 	int access_size;
 	bool sign_extend;
+
+	if (kvm_vcpu_dabt_isextabt(vcpu)) {
+		/* cache operation on I/O addr, tell guest unsupported */
+		kvm_inject_dabt(vcpu, kvm_vcpu_get_hfar(vcpu));
+		return 1;
+	}
 
 	if (kvm_vcpu_dabt_iss1tw(vcpu)) {
 		/* page table accesses IO mem: tell guest to fix its TTBR */
@@ -182,14 +188,14 @@ int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 		data = vcpu_data_guest_to_host(vcpu, vcpu_get_reg(vcpu, rt),
 					       len);
 
-		trace_kvm_mmio(KVM_TRACE_MMIO_WRITE, len, fault_ipa, &data);
+		trace_kvm_mmio(KVM_TRACE_MMIO_WRITE, len, fault_ipa, data);
 		kvm_mmio_write_buf(data_buf, len, data);
 
 		ret = kvm_io_bus_write(vcpu, KVM_MMIO_BUS, fault_ipa, len,
 				       data_buf);
 	} else {
 		trace_kvm_mmio(KVM_TRACE_MMIO_READ_UNSATISFIED, len,
-			       fault_ipa, NULL);
+			       fault_ipa, 0);
 
 		ret = kvm_io_bus_read(vcpu, KVM_MMIO_BUS, fault_ipa, len,
 				      data_buf);

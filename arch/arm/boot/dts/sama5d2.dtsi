@@ -72,40 +72,6 @@
 		};
 	};
 
-	pmu {
-		compatible = "arm,cortex-a5-pmu";
-		interrupts = <2 IRQ_TYPE_LEVEL_HIGH 0>;
-	};
-
-	etb {
-		compatible = "arm,coresight-etb10", "arm,primecell";
-		reg = <0x740000 0x1000>;
-
-		clocks = <&mck>;
-		clock-names = "apb_pclk";
-
-		port {
-			etb_in: endpoint {
-				slave-mode;
-				remote-endpoint = <&etm_out>;
-			};
-		};
-	};
-
-	etm {
-		compatible = "arm,coresight-etm3x", "arm,primecell";
-		reg = <0x73C000 0x1000>;
-
-		clocks = <&mck>;
-		clock-names = "apb_pclk";
-
-		port {
-			etm_out: endpoint {
-				remote-endpoint = <&etb_in>;
-			};
-		};
-	};
-
 	memory {
 		reg = <0x20000000 0x20000000>;
 	};
@@ -146,13 +112,13 @@
 			clock-names = "pclk", "hclk";
 			status = "disabled";
 
-			ep@0 {
+			ep0 {
 				reg = <0>;
 				atmel,fifo-size = <64>;
 				atmel,nb-banks = <1>;
 			};
 
-			ep@1 {
+			ep1 {
 				reg = <1>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <3>;
@@ -160,7 +126,7 @@
 				atmel,can-isoc;
 			};
 
-			ep@2 {
+			ep2 {
 				reg = <2>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <3>;
@@ -168,7 +134,7 @@
 				atmel,can-isoc;
 			};
 
-			ep@3 {
+			ep3 {
 				reg = <3>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
@@ -176,7 +142,7 @@
 				atmel,can-isoc;
 			};
 
-			ep@4 {
+			ep4 {
 				reg = <4>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
@@ -184,7 +150,7 @@
 				atmel,can-isoc;
 			};
 
-			ep@5 {
+			ep5 {
 				reg = <5>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
@@ -192,7 +158,7 @@
 				atmel,can-isoc;
 			};
 
-			ep@6 {
+			ep6 {
 				reg = <6>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
@@ -200,7 +166,7 @@
 				atmel,can-isoc;
 			};
 
-			ep@7 {
+			ep7 {
 				reg = <7>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
@@ -208,56 +174,56 @@
 				atmel,can-isoc;
 			};
 
-			ep@8 {
+			ep8 {
 				reg = <8>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
 				atmel,can-isoc;
 			};
 
-			ep@9 {
+			ep9 {
 				reg = <9>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
 				atmel,can-isoc;
 			};
 
-			ep@10 {
+			ep10 {
 				reg = <10>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
 				atmel,can-isoc;
 			};
 
-			ep@11 {
+			ep11 {
 				reg = <11>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
 				atmel,can-isoc;
 			};
 
-			ep@12 {
+			ep12 {
 				reg = <12>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
 				atmel,can-isoc;
 			};
 
-			ep@13 {
+			ep13 {
 				reg = <13>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
 				atmel,can-isoc;
 			};
 
-			ep@14 {
+			ep14 {
 				reg = <14>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;
 				atmel,can-isoc;
 			};
 
-			ep@15 {
+			ep15 {
 				reg = <15>;
 				atmel,fifo-size = <1024>;
 				atmel,nb-banks = <2>;

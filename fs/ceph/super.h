@@ -62,6 +62,7 @@ struct ceph_mount_options {
 	int cap_release_safety;
 	int max_readdir;       /* max readdir result (entires) */
 	int max_readdir_bytes; /* max readdir result (bytes) */
+	int mds_namespace;
 
 	/*
 	 * everything above this point can be memcmp'd; everything below
@@ -69,7 +70,6 @@ struct ceph_mount_options {
 	 */
 
 	char *snapdir_name;   /* default ".snap" */
-	char *mds_namespace;  /* default NULL */
 	char *server_path;    /* default  "/" */
 };
 
@@ -147,14 +147,6 @@ struct ceph_cap {
 #define CHECK_CAPS_AUTHONLY   2  /* only check auth cap */
 #define CHECK_CAPS_FLUSH      4  /* flush any dirty caps */
 
-struct ceph_cap_flush {
-	u64 tid;
-	int caps; /* 0 means capsnap */
-	bool wake; /* wake up flush waiters when finish ? */
-	struct list_head g_list; // global
-	struct list_head i_list; // per inode
-};
-
 /*
  * Snapped cap state that is pending flush to mds.  When a snapshot occurs,
  * we first complete any in-process sync writes and writeback any dirty
@@ -162,11 +154,10 @@ struct ceph_cap_flush {
  */
 struct ceph_cap_snap {
 	atomic_t nref;
-	struct list_head ci_item;
+	struct ceph_inode_info *ci;
+	struct list_head ci_item, flushing_item;
 
-	struct ceph_cap_flush cap_flush;
-
-	u64 follows;
+	u64 follows, flush_tid;
 	int issued, dirty;
 	struct ceph_snap_context *context;
 
@@ -194,6 +185,16 @@ static inline void ceph_put_cap_snap(struct ceph_cap_snap *capsnap)
 		kfree(capsnap);
 	}
 }
+
+struct ceph_cap_flush {
+	u64 tid;
+	int caps;
+	struct rb_node g_node; // global
+	union {
+		struct rb_node i_node; // inode
+		struct list_head list;
+	};
+};
 
 /*
  * The frag tree describes how a directory is fragmented, potentially across
@@ -245,7 +246,7 @@ struct ceph_dentry_info {
 	unsigned long lease_renew_after, lease_renew_from;
 	struct list_head lru;
 	struct dentry *dentry;
-	unsigned long time;
+	u64 time;
 	u64 offset;
 };
 
@@ -286,6 +287,7 @@ struct ceph_inode_info {
 
 	struct ceph_dir_layout i_dir_layout;
 	struct ceph_file_layout i_layout;
+	size_t i_pool_ns_len;
 	char *i_symlink;
 
 	/* for dirs */
@@ -309,7 +311,7 @@ struct ceph_inode_info {
 	 * overlapping, pipelined cap flushes to the mds.  we can probably
 	 * reduce the tid to 8 bits if we're concerned about inode size. */
 	struct ceph_cap_flush *i_prealloc_cap_flush;
-	struct list_head i_cap_flush_list;
+	struct rb_root i_cap_flush_tree;
 	wait_queue_head_t i_cap_wq;      /* threads waiting on a capability */
 	unsigned long i_hold_caps_min; /* jiffies */
 	unsigned long i_hold_caps_max; /* jiffies */
@@ -320,7 +322,7 @@ struct ceph_inode_info {
 						    dirty|flushing caps */
 	unsigned i_snap_caps;           /* cap bits for snapped files */
 
-	int i_nr_by_mode[CEPH_FILE_MODE_BITS];  /* open file counts */
+	int i_nr_by_mode[CEPH_FILE_MODE_NUM];  /* open file counts */
 
 	struct mutex i_truncate_mutex;
 	u32 i_truncate_seq;        /* last truncate to smaller size */
@@ -469,8 +471,6 @@ static inline struct inode *ceph_find_inode(struct super_block *sb,
 #define CEPH_I_POOL_WR		(1 << 6)  /* can write to pool */
 #define CEPH_I_SEC_INITED	(1 << 7)  /* security initialized */
 #define CEPH_I_CAP_DROPPED	(1 << 8)  /* caps were forcibly dropped */
-#define CEPH_I_KICK_FLUSH	(1 << 9)  /* kick flushing caps */
-#define CEPH_I_FLUSH_SNAPS	(1 << 10) /* need flush snapss */
 
 static inline void __ceph_dir_set_complete(struct ceph_inode_info *ci,
 					   long long release_count,
@@ -750,7 +750,6 @@ extern const struct inode_operations ceph_file_iops;
 extern struct inode *ceph_alloc_inode(struct super_block *sb);
 extern void ceph_destroy_inode(struct inode *inode);
 extern int ceph_drop_inode(struct inode *inode);
-extern void ceph_evict_inode(struct inode *inode);
 
 extern struct inode *ceph_get_inode(struct super_block *sb,
 				    struct ceph_vino vino);
@@ -891,8 +890,9 @@ extern void ceph_get_cap_refs(struct ceph_inode_info *ci, int caps);
 extern void ceph_put_cap_refs(struct ceph_inode_info *ci, int had);
 extern void ceph_put_wrbuffer_cap_refs(struct ceph_inode_info *ci, int nr,
 				       struct ceph_snap_context *snapc);
-extern void ceph_flush_snaps(struct ceph_inode_info *ci,
-			     struct ceph_mds_session **psession);
+extern void __ceph_flush_snaps(struct ceph_inode_info *ci,
+			       struct ceph_mds_session **psession,
+			       int again);
 extern void ceph_check_caps(struct ceph_inode_info *ci, int flags,
 			    struct ceph_mds_session *session);
 extern void ceph_check_delayed_caps(struct ceph_mds_client *mdsc);
@@ -905,11 +905,12 @@ extern int ceph_encode_dentry_release(void **p, struct dentry *dn,
 
 extern int ceph_get_caps(struct ceph_inode_info *ci, int need, int want,
 			 loff_t endoff, int *got, struct page **pinned_page);
-extern int ceph_try_get_caps(struct ceph_inode_info *ci,
-			     int need, int want, int *got);
 
 /* for counting open files by mode */
-extern void __ceph_get_fmode(struct ceph_inode_info *ci, int mode);
+static inline void __ceph_get_fmode(struct ceph_inode_info *ci, int mode)
+{
+	ci->i_nr_by_mode[mode]++;
+}
 extern void ceph_put_fmode(struct ceph_inode_info *ci, int mode);
 
 /* addr.c */
@@ -930,7 +931,6 @@ extern int ceph_atomic_open(struct inode *dir, struct dentry *dentry,
 extern int ceph_release(struct inode *inode, struct file *filp);
 extern void ceph_fill_inline_data(struct inode *inode, struct page *locked_page,
 				  char *data, size_t len);
-extern void ceph_sync_write_wait(struct inode *inode);
 /* dir.c */
 extern const struct file_operations ceph_dir_fops;
 extern const struct file_operations ceph_snapdir_fops;

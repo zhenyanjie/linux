@@ -368,9 +368,9 @@ static void jz4740_mmc_set_irq_enabled(struct jz4740_mmc_host *host,
 		host->irq_mask &= ~irq;
 	else
 		host->irq_mask |= irq;
+	spin_unlock_irqrestore(&host->lock, flags);
 
 	writew(host->irq_mask, host->base + JZ_REG_MMC_IMASK);
-	spin_unlock_irqrestore(&host->lock, flags);
 }
 
 static void jz4740_mmc_clock_enable(struct jz4740_mmc_host *host,
@@ -1068,6 +1068,8 @@ static int jz4740_mmc_probe(struct platform_device* pdev)
 	jz4740_mmc_clock_disable(host);
 	setup_timer(&host->timeout_timer, jz4740_mmc_timeout,
 			(unsigned long)host);
+	/* It is not important when it times out, it just needs to timeout. */
+	set_timer_slack(&host->timeout_timer, HZ);
 
 	host->use_dma = true;
 	if (host->use_dma && jz4740_mmc_acquire_dma_channels(host) != 0)

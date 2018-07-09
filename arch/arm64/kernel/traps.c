@@ -41,7 +41,6 @@
 #include <asm/stacktrace.h>
 #include <asm/exception.h>
 #include <asm/system_misc.h>
-#include <asm/sysreg.h>
 
 static const char *handler[]= {
 	"Synchronous Abort",
@@ -50,17 +49,18 @@ static const char *handler[]= {
 	"Error"
 };
 
-int show_unhandled_signals = 0;
+int show_unhandled_signals = 1;
 
 /*
- * Dump out the contents of some kernel memory nicely...
+ * Dump out the contents of some memory nicely...
  */
 static void dump_mem(const char *lvl, const char *str, unsigned long bottom,
-		     unsigned long top)
+		     unsigned long top, bool compat)
 {
 	unsigned long first;
 	mm_segment_t fs;
 	int i;
+	unsigned int width = compat ? 4 : 8;
 
 	/*
 	 * We need to switch to kernel mode so that we can use __get_user
@@ -78,15 +78,22 @@ static void dump_mem(const char *lvl, const char *str, unsigned long bottom,
 		memset(str, ' ', sizeof(str));
 		str[sizeof(str) - 1] = '\0';
 
-		for (p = first, i = 0; i < (32 / 8)
-					&& p < top; i++, p += 8) {
+		for (p = first, i = 0; i < (32 / width)
+					&& p < top; i++, p += width) {
 			if (p >= bottom && p < top) {
 				unsigned long val;
 
-				if (__get_user(val, (unsigned long *)p) == 0)
-					sprintf(str + i * 17, " %016lx", val);
-				else
-					sprintf(str + i * 17, " ????????????????");
+				if (width == 8) {
+					if (__get_user(val, (unsigned long *)p) == 0)
+						sprintf(str + i * 17, " %016lx", val);
+					else
+						sprintf(str + i * 17, " ????????????????");
+				} else {
+					if (__get_user(val, (unsigned int *)p) == 0)
+						sprintf(str + i * 9, " %08lx", val);
+					else
+						sprintf(str + i * 9, " ????????");
+				}
 			}
 		}
 		printk("%s%04lx:%s\n", lvl, first & 0xffff, str);
@@ -112,7 +119,7 @@ static void __dump_instr(const char *lvl, struct pt_regs *regs)
 	for (i = -4; i < 1; i++) {
 		unsigned int val, bad;
 
-		bad = get_user(val, &((u32 *)addr)[i]);
+		bad = __get_user(val, &((u32 *)addr)[i]);
 
 		if (!bad)
 			p += sprintf(p, i == 0 ? "(%08x) " : "%08x ", val);
@@ -209,7 +216,7 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 				stack = IRQ_STACK_TO_TASK_STACK(irq_stack_ptr);
 
 			dump_mem("", "Exception stack", stack,
-				 stack + sizeof(struct pt_regs));
+				 stack + sizeof(struct pt_regs), false);
 		}
 	}
 }
@@ -247,9 +254,10 @@ static int __die(const char *str, int err, struct thread_info *thread,
 	pr_emerg("Process %.*s (pid: %d, stack limit = 0x%p)\n",
 		 TASK_COMM_LEN, tsk->comm, task_pid_nr(tsk), thread + 1);
 
-	if (!user_mode(regs)) {
+	if (!user_mode(regs) || in_interrupt()) {
 		dump_mem(KERN_EMERG, "Stack: ", regs->sp,
-			 THREAD_SIZE + (unsigned long)task_stack_page(tsk));
+			 THREAD_SIZE + (unsigned long)task_stack_page(tsk),
+			 compat_user_mode(regs));
 		dump_backtrace(regs, tsk);
 		dump_instr(KERN_EMERG, regs);
 	}
@@ -365,59 +373,11 @@ exit:
 	return fn ? fn(regs, instr) : 1;
 }
 
-static void force_signal_inject(int signal, int code, struct pt_regs *regs,
-				unsigned long address)
+asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 {
 	siginfo_t info;
 	void __user *pc = (void __user *)instruction_pointer(regs);
-	const char *desc;
 
-	switch (signal) {
-	case SIGILL:
-		desc = "undefined instruction";
-		break;
-	case SIGSEGV:
-		desc = "illegal memory access";
-		break;
-	default:
-		desc = "bad mode";
-		break;
-	}
-
-	if (unhandled_signal(current, signal) &&
-	    show_unhandled_signals_ratelimited()) {
-		pr_info("%s[%d]: %s: pc=%p\n",
-			current->comm, task_pid_nr(current), desc, pc);
-		dump_instr(KERN_INFO, regs);
-	}
-
-	info.si_signo = signal;
-	info.si_errno = 0;
-	info.si_code  = code;
-	info.si_addr  = pc;
-
-	arm64_notify_die(desc, regs, &info, 0);
-}
-
-/*
- * Set up process info to signal segmentation fault - called on access error.
- */
-void arm64_notify_segfault(struct pt_regs *regs, unsigned long addr)
-{
-	int code;
-
-	down_read(&current->mm->mmap_sem);
-	if (find_vma(current->mm, addr) == NULL)
-		code = SEGV_MAPERR;
-	else
-		code = SEGV_ACCERR;
-	up_read(&current->mm->mmap_sem);
-
-	force_signal_inject(SIGSEGV, code, regs, addr);
-}
-
-asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
-{
 	/* check for AArch32 breakpoint instructions */
 	if (!aarch32_break_handler(regs))
 		return;
@@ -425,105 +385,18 @@ asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 	if (call_undef_hook(regs) == 0)
 		return;
 
-	force_signal_inject(SIGILL, ILL_ILLOPC, regs, 0);
-}
-
-int cpu_enable_cache_maint_trap(void *__unused)
-{
-	config_sctlr_el1(SCTLR_EL1_UCI, 0);
-	return 0;
-}
-
-#define __user_cache_maint(insn, address, res)			\
-	if (address >= user_addr_max())				\
-		res = -EFAULT;					\
-	else							\
-		asm volatile (					\
-			"1:	" insn ", %1\n"			\
-			"	mov	%w0, #0\n"		\
-			"2:\n"					\
-			"	.pushsection .fixup,\"ax\"\n"	\
-			"	.align	2\n"			\
-			"3:	mov	%w0, %w2\n"		\
-			"	b	2b\n"			\
-			"	.popsection\n"			\
-			_ASM_EXTABLE(1b, 3b)			\
-			: "=r" (res)				\
-			: "r" (address), "i" (-EFAULT) )
-
-static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
-{
-	unsigned long address;
-	int rt = (esr & ESR_ELx_SYS64_ISS_RT_MASK) >> ESR_ELx_SYS64_ISS_RT_SHIFT;
-	int crm = (esr & ESR_ELx_SYS64_ISS_CRM_MASK) >> ESR_ELx_SYS64_ISS_CRM_SHIFT;
-	int ret = 0;
-
-	address = (rt == 31) ? 0 : untagged_addr(regs->regs[rt]);
-
-	switch (crm) {
-	case ESR_ELx_SYS64_ISS_CRM_DC_CVAU:	/* DC CVAU, gets promoted */
-		__user_cache_maint("dc civac", address, ret);
-		break;
-	case ESR_ELx_SYS64_ISS_CRM_DC_CVAC:	/* DC CVAC, gets promoted */
-		__user_cache_maint("dc civac", address, ret);
-		break;
-	case ESR_ELx_SYS64_ISS_CRM_DC_CIVAC:	/* DC CIVAC */
-		__user_cache_maint("dc civac", address, ret);
-		break;
-	case ESR_ELx_SYS64_ISS_CRM_IC_IVAU:	/* IC IVAU */
-		__user_cache_maint("ic ivau", address, ret);
-		break;
-	default:
-		force_signal_inject(SIGILL, ILL_ILLOPC, regs, 0);
-		return;
+	if (unhandled_signal(current, SIGILL) && show_unhandled_signals_ratelimited()) {
+		pr_info("%s[%d]: undefined instruction: pc=%p\n",
+			current->comm, task_pid_nr(current), pc);
+		dump_instr(KERN_INFO, regs);
 	}
 
-	if (ret)
-		arm64_notify_segfault(regs, address);
-	else
-		regs->pc += 4;
-}
+	info.si_signo = SIGILL;
+	info.si_errno = 0;
+	info.si_code  = ILL_ILLOPC;
+	info.si_addr  = pc;
 
-static void ctr_read_handler(unsigned int esr, struct pt_regs *regs)
-{
-	int rt = (esr & ESR_ELx_SYS64_ISS_RT_MASK) >> ESR_ELx_SYS64_ISS_RT_SHIFT;
-
-	regs->regs[rt] = arm64_ftr_reg_ctrel0.sys_val;
-	regs->pc += 4;
-}
-
-struct sys64_hook {
-	unsigned int esr_mask;
-	unsigned int esr_val;
-	void (*handler)(unsigned int esr, struct pt_regs *regs);
-};
-
-static struct sys64_hook sys64_hooks[] = {
-	{
-		.esr_mask = ESR_ELx_SYS64_ISS_EL0_CACHE_OP_MASK,
-		.esr_val = ESR_ELx_SYS64_ISS_EL0_CACHE_OP_VAL,
-		.handler = user_cache_maint_handler,
-	},
-	{
-		/* Trap read access to CTR_EL0 */
-		.esr_mask = ESR_ELx_SYS64_ISS_SYS_OP_MASK,
-		.esr_val = ESR_ELx_SYS64_ISS_SYS_CTR_READ,
-		.handler = ctr_read_handler,
-	},
-	{},
-};
-
-asmlinkage void __exception do_sysinstr(unsigned int esr, struct pt_regs *regs)
-{
-	struct sys64_hook *hook;
-
-	for (hook = sys64_hooks; hook->handler; hook++)
-		if ((hook->esr_mask & esr) == hook->esr_val) {
-			hook->handler(esr, regs);
-			return;
-		}
-
-	force_signal_inject(SIGILL, ILL_ILLOPC, regs, 0);
+	arm64_notify_die("Oops - undefined instruction", regs, &info, 0);
 }
 
 long compat_arm_syscall(struct pt_regs *regs);
@@ -592,38 +465,21 @@ static const char *esr_class_str[] = {
 
 const char *esr_get_class_string(u32 esr)
 {
-	return esr_class_str[ESR_ELx_EC(esr)];
+	return esr_class_str[esr >> ESR_ELx_EC_SHIFT];
 }
 
 /*
- * bad_mode handles the impossible case in the exception vector. This is always
- * fatal.
+ * bad_mode handles the impossible case in the exception vector.
  */
 asmlinkage void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
-{
-	console_verbose();
-
-	pr_crit("Bad mode in %s handler detected on CPU%d, code 0x%08x -- %s\n",
-		handler[reason], smp_processor_id(), esr,
-		esr_get_class_string(esr));
-
-	die("Oops - bad mode", regs, 0);
-	local_irq_disable();
-	panic("bad mode");
-}
-
-/*
- * bad_el0_sync handles unexpected, but potentially recoverable synchronous
- * exceptions taken from EL0. Unlike bad_mode, this returns.
- */
-asmlinkage void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr)
 {
 	siginfo_t info;
 	void __user *pc = (void __user *)instruction_pointer(regs);
 	console_verbose();
 
-	pr_crit("Bad EL0 synchronous exception detected on CPU%d, code 0x%08x -- %s\n",
-		smp_processor_id(), esr, esr_get_class_string(esr));
+	pr_crit("Bad mode in %s handler detected on CPU%d, code 0x%08x -- %s\n",
+		handler[reason], smp_processor_id(), esr,
+		esr_get_class_string(esr));
 	__show_regs(regs);
 
 	info.si_signo = SIGILL;
@@ -631,10 +487,7 @@ asmlinkage void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr)
 	info.si_code  = ILL_ILLOPC;
 	info.si_addr  = pc;
 
-	current->thread.fault_address = 0;
-	current->thread.fault_code = 0;
-
-	force_sig_info(info.si_signo, &info, current);
+	arm64_notify_die("Oops - bad mode", regs, &info, 0);
 }
 
 void __pte_error(const char *file, int line, unsigned long val)

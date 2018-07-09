@@ -29,7 +29,6 @@ ACPI_MODULE_NAME("acpi_lpss");
 #ifdef CONFIG_X86_INTEL_LPSS
 
 #include <asm/cpu_device_id.h>
-#include <asm/intel-family.h>
 #include <asm/iosf_mbi.h>
 #include <asm/pmc_atom.h>
 
@@ -75,7 +74,6 @@ struct lpss_device_desc {
 	const char *clk_con_id;
 	unsigned int prv_offset;
 	size_t prv_size_override;
-	struct property_entry *properties;
 	void (*setup)(struct lpss_private_data *pdata);
 };
 
@@ -164,19 +162,11 @@ static const struct lpss_device_desc lpt_i2c_dev_desc = {
 	.prv_offset = 0x800,
 };
 
-static struct property_entry uart_properties[] = {
-	PROPERTY_ENTRY_U32("reg-io-width", 4),
-	PROPERTY_ENTRY_U32("reg-shift", 2),
-	PROPERTY_ENTRY_BOOL("snps,uart-16550-compatible"),
-	{ },
-};
-
 static const struct lpss_device_desc lpt_uart_dev_desc = {
 	.flags = LPSS_CLK | LPSS_CLK_GATE | LPSS_CLK_DIVIDER | LPSS_LTR,
 	.clk_con_id = "baudclk",
 	.prv_offset = 0x800,
 	.setup = lpss_uart_setup,
-	.properties = uart_properties,
 };
 
 static const struct lpss_device_desc lpt_sdio_dev_desc = {
@@ -198,7 +188,6 @@ static const struct lpss_device_desc byt_uart_dev_desc = {
 	.clk_con_id = "baudclk",
 	.prv_offset = 0x800,
 	.setup = lpss_uart_setup,
-	.properties = uart_properties,
 };
 
 static const struct lpss_device_desc bsw_uart_dev_desc = {
@@ -207,7 +196,6 @@ static const struct lpss_device_desc bsw_uart_dev_desc = {
 	.clk_con_id = "baudclk",
 	.prv_offset = 0x800,
 	.setup = lpss_uart_setup,
-	.properties = uart_properties,
 };
 
 static const struct lpss_device_desc byt_spi_dev_desc = {
@@ -241,8 +229,8 @@ static const struct lpss_device_desc bsw_spi_dev_desc = {
 #define ICPU(model)	{ X86_VENDOR_INTEL, 6, model, X86_FEATURE_ANY, }
 
 static const struct x86_cpu_id lpss_cpu_ids[] = {
-	ICPU(INTEL_FAM6_ATOM_SILVERMONT1),	/* Valleyview, Bay Trail */
-	ICPU(INTEL_FAM6_ATOM_AIRMONT),	/* Braswell, Cherry Trail */
+	ICPU(0x37),	/* Valleyview, Bay Trail */
+	ICPU(0x4c),	/* Braswell, Cherry Trail */
 	{}
 };
 
@@ -395,7 +383,7 @@ static int acpi_lpss_create_device(struct acpi_device *adev,
 
 	dev_desc = (const struct lpss_device_desc *)id->driver_data;
 	if (!dev_desc) {
-		pdev = acpi_create_platform_device(adev, NULL);
+		pdev = acpi_create_platform_device(adev);
 		return IS_ERR_OR_NULL(pdev) ? PTR_ERR(pdev) : 1;
 	}
 	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
@@ -452,7 +440,7 @@ static int acpi_lpss_create_device(struct acpi_device *adev,
 	}
 
 	adev->driver_data = pdata;
-	pdev = acpi_create_platform_device(adev, dev_desc->properties);
+	pdev = acpi_create_platform_device(adev);
 	if (!IS_ERR_OR_NULL(pdev)) {
 		return 1;
 	}

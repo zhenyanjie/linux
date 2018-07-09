@@ -189,12 +189,25 @@ u32
 megasas_build_and_issue_cmd(struct megasas_instance *instance,
 			    struct scsi_cmnd *scmd);
 static void megasas_complete_cmd_dpc(unsigned long instance_addr);
+void
+megasas_release_fusion(struct megasas_instance *instance);
+int
+megasas_ioc_init_fusion(struct megasas_instance *instance);
+void
+megasas_free_cmds_fusion(struct megasas_instance *instance);
+u8
+megasas_get_map_info(struct megasas_instance *instance);
+int
+megasas_sync_map_info(struct megasas_instance *instance);
 int
 wait_and_poll(struct megasas_instance *instance, struct megasas_cmd *cmd,
 	int seconds);
+void megasas_reset_reply_desc(struct megasas_instance *instance);
 void megasas_fusion_ocr_wq(struct work_struct *work);
 static int megasas_get_ld_vf_affiliation(struct megasas_instance *instance,
 					 int initial);
+int megasas_check_mpio_paths(struct megasas_instance *instance,
+			     struct scsi_cmnd *scmd);
 
 int
 megasas_issue_dcmd(struct megasas_instance *instance, struct megasas_cmd *cmd)
@@ -1700,13 +1713,16 @@ megasas_queue_command(struct Scsi_Host *shost, struct scsi_cmnd *scmd)
 		goto out_done;
 	}
 
-	/*
-	 * FW takes care of flush cache on its own for Virtual Disk.
-	 * No need to send it down for VD. For JBOD send SYNCHRONIZE_CACHE to FW.
-	 */
-	if ((scmd->cmnd[0] == SYNCHRONIZE_CACHE) && MEGASAS_IS_LOGICAL(scmd)) {
+	switch (scmd->cmnd[0]) {
+	case SYNCHRONIZE_CACHE:
+		/*
+		 * FW takes care of flush cache on its own
+		 * No need to send it down
+		 */
 		scmd->result = DID_OK << 16;
 		goto out_done;
+	default:
+		break;
 	}
 
 	return instance->instancet->build_and_issue_cmd(instance, scmd);
@@ -1901,12 +1917,9 @@ static void megasas_complete_outstanding_ioctls(struct megasas_instance *instanc
 			if (cmd_fusion->sync_cmd_idx != (u32)ULONG_MAX) {
 				cmd_mfi = instance->cmd_list[cmd_fusion->sync_cmd_idx];
 				if (cmd_mfi->sync_cmd &&
-				    (cmd_mfi->frame->hdr.cmd != MFI_CMD_ABORT)) {
-					cmd_mfi->frame->hdr.cmd_status =
-							MFI_STAT_WRONG_STATE;
+					cmd_mfi->frame->hdr.cmd != MFI_CMD_ABORT)
 					megasas_complete_cmd(instance,
 							     cmd_mfi, DID_OK);
-				}
 			}
 		}
 	} else {
@@ -5023,7 +5036,7 @@ static int megasas_init_fw(struct megasas_instance *instance)
 
 	/* Find first memory bar */
 	bar_list = pci_select_bars(instance->pdev, IORESOURCE_MEM);
-	instance->bar = find_first_bit(&bar_list, BITS_PER_LONG);
+	instance->bar = find_first_bit(&bar_list, sizeof(unsigned long));
 	if (pci_request_selected_regions(instance->pdev, 1<<instance->bar,
 					 "megasas: LSI")) {
 		dev_printk(KERN_DEBUG, &instance->pdev->dev, "IO memory region busy!\n");
@@ -5293,8 +5306,7 @@ static int megasas_init_fw(struct megasas_instance *instance)
 		instance->throttlequeuedepth =
 				MEGASAS_THROTTLE_QUEUE_DEPTH;
 
-	if ((resetwaittime < 1) ||
-	    (resetwaittime > MEGASAS_RESET_WAIT_TIME))
+	if (resetwaittime > MEGASAS_RESET_WAIT_TIME)
 		resetwaittime = MEGASAS_RESET_WAIT_TIME;
 
 	if ((scmd_timeout < 10) || (scmd_timeout > MEGASAS_DEFAULT_CMD_TIMEOUT))
@@ -5462,14 +5474,6 @@ megasas_register_aen(struct megasas_instance *instance, u32 seq_num,
 
 		prev_aen.word =
 			le32_to_cpu(instance->aen_cmd->frame->dcmd.mbox.w[1]);
-
-		if ((curr_aen.members.class < MFI_EVT_CLASS_DEBUG) ||
-		    (curr_aen.members.class > MFI_EVT_CLASS_DEAD)) {
-			dev_info(&instance->pdev->dev,
-				 "%s %d out of range class %d send by application\n",
-				 __func__, __LINE__, curr_aen.members.class);
-			return 0;
-		}
 
 		/*
 		 * A class whose enum value is smaller is inclusive of all
@@ -5778,7 +5782,7 @@ static int megasas_probe_one(struct pci_dev *pdev,
 					     &instance->consumer_h);
 
 		if (!instance->producer || !instance->consumer) {
-			dev_printk(KERN_DEBUG, &pdev->dev, "Failed to allocate "
+			dev_printk(KERN_DEBUG, &pdev->dev, "Failed to allocate"
 			       "memory for producer, consumer\n");
 			goto fail_alloc_dma_buf;
 		}
@@ -6707,9 +6711,14 @@ static int megasas_mgmt_ioctl_fw(struct file *file, unsigned long arg)
 	unsigned long flags;
 	u32 wait_time = MEGASAS_RESET_WAIT_TIME;
 
-	ioc = memdup_user(user_ioc, sizeof(*ioc));
-	if (IS_ERR(ioc))
-		return PTR_ERR(ioc);
+	ioc = kmalloc(sizeof(*ioc), GFP_KERNEL);
+	if (!ioc)
+		return -ENOMEM;
+
+	if (copy_from_user(ioc, user_ioc, sizeof(*ioc))) {
+		error = -EFAULT;
+		goto out_kfree_ioc;
+	}
 
 	instance = megasas_lookup_instance(ioc->host_no);
 	if (!instance) {

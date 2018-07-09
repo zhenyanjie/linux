@@ -22,6 +22,7 @@
 #include <linux/list.h>
 #include <linux/bug.h>
 #include <linux/skbuff.h>
+#include <linux/semaphore.h>
 #include <linux/timer.h>
 
 struct ath10k;

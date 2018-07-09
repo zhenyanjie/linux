@@ -306,11 +306,10 @@ static void ur_int_handler(struct ccw_device *cdev, unsigned long intparm,
 {
 	struct urdev *urd;
 
-	if (!IS_ERR(irb)) {
-		TRACE("ur_int_handler: intparm=0x%lx cstat=%02x dstat=%02x res=%u\n",
-		      intparm, irb->scsw.cmd.cstat, irb->scsw.cmd.dstat,
-		      irb->scsw.cmd.count);
-	}
+	TRACE("ur_int_handler: intparm=0x%lx cstat=%02x dstat=%02x res=%u\n",
+	      intparm, irb->scsw.cmd.cstat, irb->scsw.cmd.dstat,
+	      irb->scsw.cmd.count);
+
 	if (!intparm) {
 		TRACE("ur_int_handler: unsolicited interrupt\n");
 		return;

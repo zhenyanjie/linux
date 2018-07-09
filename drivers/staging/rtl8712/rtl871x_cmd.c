@@ -51,14 +51,14 @@
 #include "mlme_osdep.h"
 
 /*
- * Caller and the r8712_cmd_thread can protect cmd_q by spin_lock.
- * No irqsave is necessary.
- */
+Caller and the r8712_cmd_thread can protect cmd_q by spin_lock.
+No irqsave is necessary.
+*/
 
 static sint _init_cmd_priv(struct cmd_priv *pcmdpriv)
 {
-	init_completion(&pcmdpriv->cmd_queue_comp);
-	init_completion(&pcmdpriv->terminate_cmdthread_comp);
+	sema_init(&(pcmdpriv->cmd_queue_sema), 0);
+	sema_init(&(pcmdpriv->terminate_cmdthread_sema), 0);
 
 	_init_queue(&(pcmdpriv->cmd_queue));
 
@@ -66,13 +66,13 @@ static sint _init_cmd_priv(struct cmd_priv *pcmdpriv)
 	pcmdpriv->cmd_seq = 1;
 	pcmdpriv->cmd_allocated_buf = kmalloc(MAX_CMDSZ + CMDBUFF_ALIGN_SZ,
 					      GFP_ATOMIC);
-	if (!pcmdpriv->cmd_allocated_buf)
+	if (pcmdpriv->cmd_allocated_buf == NULL)
 		return _FAIL;
 	pcmdpriv->cmd_buf = pcmdpriv->cmd_allocated_buf  +  CMDBUFF_ALIGN_SZ -
 			    ((addr_t)(pcmdpriv->cmd_allocated_buf) &
 			    (CMDBUFF_ALIGN_SZ - 1));
 	pcmdpriv->rsp_allocated_buf = kmalloc(MAX_RSPSZ + 4, GFP_ATOMIC);
-	if (!pcmdpriv->rsp_allocated_buf)
+	if (pcmdpriv->rsp_allocated_buf == NULL)
 		return _FAIL;
 	pcmdpriv->rsp_buf = pcmdpriv->rsp_allocated_buf  +  4 -
 			    ((addr_t)(pcmdpriv->rsp_allocated_buf) & 3);
@@ -88,7 +88,7 @@ static sint _init_evt_priv(struct evt_priv *pevtpriv)
 	pevtpriv->event_seq = 0;
 	pevtpriv->evt_allocated_buf = kmalloc(MAX_EVTSZ + 4, GFP_ATOMIC);
 
-	if (!pevtpriv->evt_allocated_buf)
+	if (pevtpriv->evt_allocated_buf == NULL)
 		return _FAIL;
 	pevtpriv->evt_buf = pevtpriv->evt_allocated_buf  +  4 -
 			    ((addr_t)(pevtpriv->evt_allocated_buf) & 3);
@@ -110,20 +110,20 @@ static void _free_cmd_priv(struct cmd_priv *pcmdpriv)
 }
 
 /*
- * Calling Context:
- *
- * _enqueue_cmd can only be called between kernel thread,
- * since only spin_lock is used.
- *
- * ISR/Call-Back functions can't call this sub-function.
- *
- */
+Calling Context:
+
+_enqueue_cmd can only be called between kernel thread,
+since only spin_lock is used.
+
+ISR/Call-Back functions can't call this sub-function.
+
+*/
 
 static sint _enqueue_cmd(struct  __queue *queue, struct cmd_obj *obj)
 {
 	unsigned long irqL;
 
-	if (!obj)
+	if (obj == NULL)
 		return _SUCCESS;
 	spin_lock_irqsave(&queue->lock, irqL);
 	list_add_tail(&obj->list, &queue->queue);
@@ -172,7 +172,7 @@ u32 r8712_enqueue_cmd(struct cmd_priv *pcmdpriv, struct cmd_obj *obj)
 	if (pcmdpriv->padapter->eeprompriv.bautoload_fail_flag)
 		return _FAIL;
 	res = _enqueue_cmd(&pcmdpriv->cmd_queue, obj);
-	complete(&pcmdpriv->cmd_queue_comp);
+	up(&pcmdpriv->cmd_queue_sema);
 	return res;
 }
 
@@ -181,7 +181,7 @@ u32 r8712_enqueue_cmd_ex(struct cmd_priv *pcmdpriv, struct cmd_obj *obj)
 	unsigned long irqL;
 	struct  __queue *queue;
 
-	if (!obj)
+	if (obj == NULL)
 		return _SUCCESS;
 	if (pcmdpriv->padapter->eeprompriv.bautoload_fail_flag)
 		return _FAIL;
@@ -189,7 +189,7 @@ u32 r8712_enqueue_cmd_ex(struct cmd_priv *pcmdpriv, struct cmd_obj *obj)
 	spin_lock_irqsave(&queue->lock, irqL);
 	list_add_tail(&obj->list, &queue->queue);
 	spin_unlock_irqrestore(&queue->lock, irqL);
-	complete(&pcmdpriv->cmd_queue_comp);
+	up(&pcmdpriv->cmd_queue_sema);
 	return _SUCCESS;
 }
 
@@ -211,11 +211,11 @@ void r8712_free_cmd_obj(struct cmd_obj *pcmd)
 }
 
 /*
- *	r8712_sitesurvey_cmd(~)
- *		### NOTE:#### (!!!!)
- *		MUST TAKE CARE THAT BEFORE CALLING THIS FUNC,
- *		YOU SHOULD HAVE LOCKED pmlmepriv->lock
- */
+r8712_sitesurvey_cmd(~)
+	### NOTE:#### (!!!!)
+	MUST TAKE CARE THAT BEFORE CALLING THIS FUNC,
+	 YOU SHOULD HAVE LOCKED pmlmepriv->lock
+*/
 u8 r8712_sitesurvey_cmd(struct _adapter *padapter,
 			struct ndis_802_11_ssid *pssid)
 {
@@ -477,7 +477,7 @@ u8 r8712_joinbss_cmd(struct _adapter  *padapter, struct wlan_network *pnetwork)
 		}
 	}
 	psecnetwork = &psecuritypriv->sec_bss;
-	if (!psecnetwork) {
+	if (psecnetwork == NULL) {
 		kfree(pcmd);
 		return _FAIL;
 	}
@@ -491,9 +491,8 @@ u8 r8712_joinbss_cmd(struct _adapter  *padapter, struct wlan_network *pnetwork)
 		memcpy(&psecuritypriv->authenticator_ie[1],
 			&psecnetwork->IEs[12], (256 - 1));
 	psecnetwork->IELength = 0;
-	/*
-	 * If the driver wants to use the bssid to create the connection.
-	 * If not, we copy the connecting AP's MAC address to it so that
+	/* If the driver wants to use the bssid to create the connection.
+	 * If not,  we copy the connecting AP's MAC address to it so that
 	 * the driver just has the bssid information for PMKIDList searching.
 	 */
 	if (!pmlmepriv->assoc_by_bssid)
@@ -520,8 +519,7 @@ u8 r8712_joinbss_cmd(struct _adapter  *padapter, struct wlan_network *pnetwork)
 		}
 	}
 	if (pregistrypriv->ht_enable) {
-		/*
-		 * For WEP mode, we will use the bg mode to do the connection
+		/* For WEP mode, we will use the bg mode to do the connection
 		 * to avoid some IOT issues, especially for Realtek 8192u
 		 * SoftAP.
 		 */
@@ -884,16 +882,16 @@ void r8712_createbss_cmd_callback(struct _adapter *padapter,
 		if (!psta) {
 			psta = r8712_alloc_stainfo(&padapter->stapriv,
 						   pnetwork->MacAddress);
-			if (!psta)
+			if (psta == NULL)
 				goto createbss_cmd_fail;
 		}
 		r8712_indicate_connect(padapter);
 	} else {
 		pwlan = _r8712_alloc_network(pmlmepriv);
-		if (!pwlan) {
+		if (pwlan == NULL) {
 			pwlan = r8712_get_oldest_wlan_network(
 				&pmlmepriv->scanned_queue);
-			if (!pwlan)
+			if (pwlan == NULL)
 				goto createbss_cmd_fail;
 			pwlan->last_scanned = jiffies;
 		} else
@@ -906,10 +904,8 @@ void r8712_createbss_cmd_callback(struct _adapter *padapter,
 			(r8712_get_wlan_bssid_ex_sz(pnetwork)));
 		if (pmlmepriv->fw_state & _FW_UNDER_LINKING)
 			pmlmepriv->fw_state ^= _FW_UNDER_LINKING;
-		/*
-		 * we will set _FW_LINKED when there is one more sat to
-		 * join us (stassoc_event_callback)
-		 */
+		/* we will set _FW_LINKED when there is one more sat to
+		 * join us (stassoc_event_callback) */
 	}
 createbss_cmd_fail:
 	spin_unlock_irqrestore(&pmlmepriv->lock, irqL);
@@ -925,7 +921,7 @@ void r8712_setstaKey_cmdrsp_callback(struct _adapter *padapter,
 	struct sta_info *psta = r8712_get_stainfo(pstapriv,
 						  psetstakey_rsp->addr);
 
-	if (!psta)
+	if (psta == NULL)
 		goto exit;
 	psta->aid = psta->mac_id = psetstakey_rsp->keyid; /*CAM_ID(CAM_ENTRY)*/
 exit:
@@ -945,7 +941,7 @@ void r8712_setassocsta_cmdrsp_callback(struct _adapter *padapter,
 	struct sta_info *psta = r8712_get_stainfo(pstapriv,
 						  passocsta_parm->addr);
 
-	if (!psta)
+	if (psta == NULL)
 		return;
 	psta->aid = psta->mac_id = passocsta_rsp->cam_id;
 	spin_lock_irqsave(&pmlmepriv->lock, irqL);

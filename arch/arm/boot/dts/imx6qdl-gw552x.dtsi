@@ -197,12 +197,6 @@
 	status = "okay";
 };
 
-&wdog1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_wdog>;
-	fsl,ext-reset-output;
-};
-
 &iomuxc {
 	imx6qdl-gw552x {
 		pinctrl_gpio_leds: gpioledsgrp {
@@ -292,11 +286,5 @@
 				MX6QDL_PAD_KEY_ROW1__UART5_RX_DATA	0x1b0b1
 			>;
                 };
-
-		pinctrl_wdog: wdoggrp {
-			fsl,pins = <
-				MX6QDL_PAD_DISP0_DAT8__WDOG1_B		0x1b0b0
-			>;
-		};
 	};
 };

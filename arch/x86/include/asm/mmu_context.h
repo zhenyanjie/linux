@@ -4,7 +4,6 @@
 #include <asm/desc.h>
 #include <linux/atomic.h>
 #include <linux/mm_types.h>
-#include <linux/pkeys.h>
 
 #include <trace/events/tlb.h>
 
@@ -12,9 +11,6 @@
 #include <asm/tlbflush.h>
 #include <asm/paravirt.h>
 #include <asm/mpx.h>
-
-extern atomic64_t last_mm_ctx_id;
-
 #ifndef CONFIG_PARAVIRT
 static inline void paravirt_activate_mm(struct mm_struct *prev,
 					struct mm_struct *next)
@@ -102,24 +98,17 @@ static inline void load_mm_ldt(struct mm_struct *mm)
 
 static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 {
+#ifdef CONFIG_SMP
 	if (this_cpu_read(cpu_tlbstate.state) == TLBSTATE_OK)
 		this_cpu_write(cpu_tlbstate.state, TLBSTATE_LAZY);
+#endif
 }
 
 static inline int init_new_context(struct task_struct *tsk,
 				   struct mm_struct *mm)
 {
-	mm->context.ctx_id = atomic64_inc_return(&last_mm_ctx_id);
-
-	#ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS
-	if (cpu_feature_enabled(X86_FEATURE_OSPKE)) {
-		/* pkey 0 is the default and allocated implicitly */
-		mm->context.pkey_allocation_map = 0x1;
-		/* -1 means unallocated or invalid */
-		mm->context.execute_only_pkey = -1;
-	}
-	#endif
-	return init_new_context_ldt(tsk, mm);
+	init_new_context_ldt(tsk, mm);
+	return 0;
 }
 static inline void destroy_context(struct mm_struct *mm)
 {
@@ -166,7 +155,7 @@ static inline void arch_exit_mmap(struct mm_struct *mm)
 #ifdef CONFIG_X86_64
 static inline bool is_64bit_mm(struct mm_struct *mm)
 {
-	return	!IS_ENABLED(CONFIG_IA32_EMULATION) ||
+	return	!config_enabled(CONFIG_IA32_EMULATION) ||
 		!(mm->context.ia32_compat == TIF_IA32);
 }
 #else
@@ -206,20 +195,16 @@ static inline void arch_unmap(struct mm_struct *mm, struct vm_area_struct *vma,
 		mpx_notify_unmap(mm, vma, start, end);
 }
 
-#ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS
 static inline int vma_pkey(struct vm_area_struct *vma)
 {
+	u16 pkey = 0;
+#ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS
 	unsigned long vma_pkey_mask = VM_PKEY_BIT0 | VM_PKEY_BIT1 |
 				      VM_PKEY_BIT2 | VM_PKEY_BIT3;
-
-	return (vma->vm_flags & vma_pkey_mask) >> VM_PKEY_SHIFT;
-}
-#else
-static inline int vma_pkey(struct vm_area_struct *vma)
-{
-	return 0;
-}
+	pkey = (vma->vm_flags & vma_pkey_mask) >> VM_PKEY_SHIFT;
 #endif
+	return pkey;
+}
 
 static inline bool __pkru_allows_pkey(u16 pkey, bool write)
 {
@@ -273,4 +258,5 @@ static inline bool arch_pte_access_permitted(pte_t pte, bool write)
 {
 	return __pkru_allows_pkey(pte_flags_pkey(pte_flags(pte)), write);
 }
+
 #endif /* _ASM_X86_MMU_CONTEXT_H */

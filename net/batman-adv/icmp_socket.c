@@ -45,7 +45,6 @@
 #include <linux/wait.h>
 
 #include "hard-interface.h"
-#include "log.h"
 #include "originator.h"
 #include "packet.h"
 #include "send.h"

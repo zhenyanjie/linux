@@ -75,49 +75,50 @@ static bool ar9003_hw_per_calibration(struct ath_hw *ah,
 				      struct ath9k_cal_list *currCal)
 {
 	struct ath9k_hw_cal_data *caldata = ah->caldata;
-	const struct ath9k_percal_data *cur_caldata = currCal->calData;
+	/* Cal is assumed not done until explicitly set below */
+	bool iscaldone = false;
 
 	/* Calibration in progress. */
 	if (currCal->calState == CAL_RUNNING) {
 		/* Check to see if it has finished. */
-		if (REG_READ(ah, AR_PHY_TIMING4) & AR_PHY_TIMING4_DO_CAL)
-			return false;
-
-		/*
-		* Accumulate cal measures for active chains
-		*/
-		cur_caldata->calCollect(ah);
-		ah->cal_samples++;
-
-		if (ah->cal_samples >= cur_caldata->calNumSamples) {
-			unsigned int i, numChains = 0;
-			for (i = 0; i < AR9300_MAX_CHAINS; i++) {
-				if (rxchainmask & (1 << i))
-					numChains++;
-			}
-
+		if (!(REG_READ(ah, AR_PHY_TIMING4) & AR_PHY_TIMING4_DO_CAL)) {
 			/*
-			* Process accumulated data
+			* Accumulate cal measures for active chains
 			*/
-			cur_caldata->calPostProc(ah, numChains);
+			currCal->calData->calCollect(ah);
+			ah->cal_samples++;
 
-			/* Calibration has finished. */
-			caldata->CalValid |= cur_caldata->calType;
-			currCal->calState = CAL_DONE;
-			return true;
-		} else {
+			if (ah->cal_samples >=
+			    currCal->calData->calNumSamples) {
+				unsigned int i, numChains = 0;
+				for (i = 0; i < AR9300_MAX_CHAINS; i++) {
+					if (rxchainmask & (1 << i))
+						numChains++;
+				}
+
+				/*
+				* Process accumulated data
+				*/
+				currCal->calData->calPostProc(ah, numChains);
+
+				/* Calibration has finished. */
+				caldata->CalValid |= currCal->calData->calType;
+				currCal->calState = CAL_DONE;
+				iscaldone = true;
+			} else {
 			/*
 			 * Set-up collection of another sub-sample until we
 			 * get desired number
 			 */
 			ar9003_hw_setup_calibration(ah, currCal);
+			}
 		}
-	} else if (!(caldata->CalValid & cur_caldata->calType)) {
+	} else if (!(caldata->CalValid & currCal->calData->calType)) {
 		/* If current cal is marked invalid in channel, kick it off */
 		ath9k_hw_reset_calibration(ah, currCal);
 	}
 
-	return false;
+	return iscaldone;
 }
 
 static int ar9003_hw_calibrate(struct ath_hw *ah, struct ath9k_channel *chan,
@@ -1373,26 +1374,6 @@ static void ar9003_hw_cl_cal_post_proc(struct ath_hw *ah, bool is_reusable)
 	}
 }
 
-static void ar9003_hw_init_cal_common(struct ath_hw *ah)
-{
-	struct ath9k_hw_cal_data *caldata = ah->caldata;
-
-	/* Initialize list pointers */
-	ah->cal_list = ah->cal_list_last = ah->cal_list_curr = NULL;
-
-	INIT_CAL(&ah->iq_caldata);
-	INSERT_CAL(ah, &ah->iq_caldata);
-
-	/* Initialize current pointer to first element in list */
-	ah->cal_list_curr = ah->cal_list;
-
-	if (ah->cal_list_curr)
-		ath9k_hw_reset_calibration(ah, ah->cal_list_curr);
-
-	if (caldata)
-		caldata->CalValid = 0;
-}
-
 static bool ar9003_hw_init_cal_pcoem(struct ath_hw *ah,
 				     struct ath9k_channel *chan)
 {
@@ -1552,7 +1533,21 @@ skip_tx_iqcal:
 	/* Revert chainmask to runtime parameters */
 	ar9003_hw_set_chain_masks(ah, ah->rxchainmask, ah->txchainmask);
 
-	ar9003_hw_init_cal_common(ah);
+	/* Initialize list pointers */
+	ah->cal_list = ah->cal_list_last = ah->cal_list_curr = NULL;
+
+	INIT_CAL(&ah->iq_caldata);
+	INSERT_CAL(ah, &ah->iq_caldata);
+	ath_dbg(common, CALIBRATE, "enabling IQ Calibration\n");
+
+	/* Initialize current pointer to first element in list */
+	ah->cal_list_curr = ah->cal_list;
+
+	if (ah->cal_list_curr)
+		ath9k_hw_reset_calibration(ah, ah->cal_list_curr);
+
+	if (caldata)
+		caldata->CalValid = 0;
 
 	return true;
 }
@@ -1583,6 +1578,8 @@ static bool do_ar9003_agc_cal(struct ath_hw *ah)
 static bool ar9003_hw_init_cal_soc(struct ath_hw *ah,
 				   struct ath9k_channel *chan)
 {
+	struct ath_common *common = ath9k_hw_common(ah);
+	struct ath9k_hw_cal_data *caldata = ah->caldata;
 	bool txiqcal_done = false;
 	bool status = true;
 	bool run_agc_cal = false, sep_iq_cal = false;
@@ -1680,7 +1677,21 @@ skip_tx_iqcal:
 	/* Revert chainmask to runtime parameters */
 	ar9003_hw_set_chain_masks(ah, ah->rxchainmask, ah->txchainmask);
 
-	ar9003_hw_init_cal_common(ah);
+	/* Initialize list pointers */
+	ah->cal_list = ah->cal_list_last = ah->cal_list_curr = NULL;
+
+	INIT_CAL(&ah->iq_caldata);
+	INSERT_CAL(ah, &ah->iq_caldata);
+	ath_dbg(common, CALIBRATE, "enabling IQ Calibration\n");
+
+	/* Initialize current pointer to first element in list */
+	ah->cal_list_curr = ah->cal_list;
+
+	if (ah->cal_list_curr)
+		ath9k_hw_reset_calibration(ah, ah->cal_list_curr);
+
+	if (caldata)
+		caldata->CalValid = 0;
 
 	return true;
 }

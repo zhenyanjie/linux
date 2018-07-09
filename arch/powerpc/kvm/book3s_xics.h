@@ -42,8 +42,6 @@ struct ics_irq_state {
 	u8  lsi;		/* level-sensitive interrupt */
 	u8  asserted; /* Only for LSI */
 	u8  exists;
-	int intr_cpu;
-	u32 host_irq;
 };
 
 /* Atomic ICP state, updated with a single compare & swap */

@@ -806,10 +806,8 @@ static void sctp_cmd_new_state(sctp_cmd_seq_t *cmds,
 
 		/* Set the RCV_SHUTDOWN flag when a SHUTDOWN is received. */
 		if (sctp_state(asoc, SHUTDOWN_RECEIVED) &&
-		    sctp_sstate(sk, ESTABLISHED)) {
-			sk->sk_state = SCTP_SS_CLOSING;
+		    sctp_sstate(sk, ESTABLISHED))
 			sk->sk_shutdown |= RCV_SHUTDOWN;
-		}
 	}
 
 	if (sctp_state(asoc, COOKIE_WAIT)) {
@@ -1020,13 +1018,19 @@ static void sctp_cmd_t1_timer_update(struct sctp_association *asoc,
  * This way the whole message is queued up and bundling if
  * encouraged for small fragments.
  */
-static void sctp_cmd_send_msg(struct sctp_association *asoc,
-			      struct sctp_datamsg *msg, gfp_t gfp)
+static int sctp_cmd_send_msg(struct sctp_association *asoc,
+				struct sctp_datamsg *msg, gfp_t gfp)
 {
 	struct sctp_chunk *chunk;
+	int error = 0;
 
-	list_for_each_entry(chunk, &msg->chunks, frag_list)
-		sctp_outq_tail(&asoc->outqueue, chunk, gfp);
+	list_for_each_entry(chunk, &msg->chunks, frag_list) {
+		error = sctp_outq_tail(&asoc->outqueue, chunk, gfp);
+		if (error)
+			break;
+	}
+
+	return error;
 }
 
 
@@ -1421,7 +1425,8 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 				local_cork = 1;
 			}
 			/* Send a chunk to our peer.  */
-			sctp_outq_tail(&asoc->outqueue, cmd->obj.chunk, gfp);
+			error = sctp_outq_tail(&asoc->outqueue, cmd->obj.chunk,
+					       gfp);
 			break;
 
 		case SCTP_CMD_SEND_PKT:
@@ -1675,7 +1680,7 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 		case SCTP_CMD_FORCE_PRIM_RETRAN:
 			t = asoc->peer.retran_path;
 			asoc->peer.retran_path = asoc->peer.primary_path;
-			sctp_outq_uncork(&asoc->outqueue, gfp);
+			error = sctp_outq_uncork(&asoc->outqueue, gfp);
 			local_cork = 0;
 			asoc->peer.retran_path = t;
 			break;
@@ -1702,7 +1707,7 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 				sctp_outq_cork(&asoc->outqueue);
 				local_cork = 1;
 			}
-			sctp_cmd_send_msg(asoc, cmd->obj.msg, gfp);
+			error = sctp_cmd_send_msg(asoc, cmd->obj.msg, gfp);
 			break;
 		case SCTP_CMD_SEND_NEXT_ASCONF:
 			sctp_cmd_send_asconf(asoc);
@@ -1732,9 +1737,9 @@ out:
 	 */
 	if (asoc && SCTP_EVENT_T_CHUNK == event_type && chunk) {
 		if (chunk->end_of_packet || chunk->singleton)
-			sctp_outq_uncork(&asoc->outqueue, gfp);
+			error = sctp_outq_uncork(&asoc->outqueue, gfp);
 	} else if (local_cork)
-		sctp_outq_uncork(&asoc->outqueue, gfp);
+		error = sctp_outq_uncork(&asoc->outqueue, gfp);
 
 	if (sp->data_ready_signalled)
 		sp->data_ready_signalled = 0;

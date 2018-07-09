@@ -32,9 +32,7 @@
 struct i2c_mux_core {
 	struct i2c_adapter *parent;
 	struct device *dev;
-	unsigned int mux_locked:1;
-	unsigned int arbitrator:1;
-	unsigned int gate:1;
+	bool mux_locked;
 
 	void *priv;
 
@@ -53,9 +51,7 @@ struct i2c_mux_core *i2c_mux_alloc(struct i2c_adapter *parent,
 				   int (*deselect)(struct i2c_mux_core *, u32));
 
 /* flags for i2c_mux_alloc */
-#define I2C_MUX_LOCKED     BIT(0)
-#define I2C_MUX_ARBITRATOR BIT(1)
-#define I2C_MUX_GATE       BIT(2)
+#define I2C_MUX_LOCKED BIT(0)
 
 static inline void *i2c_mux_priv(struct i2c_mux_core *muxc)
 {

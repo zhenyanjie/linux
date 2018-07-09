@@ -94,6 +94,7 @@ struct scsi_device {
 	spinlock_t list_lock;
 	struct list_head cmd_list;	/* queue of in use SCSI Command structures */
 	struct list_head starved_entry;
+	struct scsi_cmnd *current_cmnd;	/* currently active command */
 	unsigned short queue_depth;	/* How deep of a queue we want */
 	unsigned short max_queue_depth;	/* max queue depth */
 	unsigned short last_queue_full_depth; /* These two are used by */
@@ -248,7 +249,6 @@ enum scsi_target_state {
 	STARGET_CREATED = 1,
 	STARGET_RUNNING,
 	STARGET_REMOVE,
-	STARGET_CREATED_REMOVE,
 	STARGET_DEL,
 };
 
@@ -316,7 +316,6 @@ extern void scsi_remove_device(struct scsi_device *);
 extern int scsi_unregister_device_handler(struct scsi_device_handler *scsi_dh);
 void scsi_attach_vpd(struct scsi_device *sdev);
 
-extern struct scsi_device *scsi_device_from_queue(struct request_queue *q);
 extern int scsi_device_get(struct scsi_device *);
 extern void scsi_device_put(struct scsi_device *);
 extern struct scsi_device *scsi_device_lookup(struct Scsi_Host *,

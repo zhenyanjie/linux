@@ -33,7 +33,6 @@
 #include <linux/stringify.h>
 #include <linux/module.h>
 #include <linux/vmalloc.h>
-#include <linux/nospec.h>
 
 #ifdef MODULE_FIRMWARE
 MODULE_FIRMWARE("asihpi/dsp5000.bin");
@@ -112,7 +111,7 @@ long asihpi_hpi_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return -EINVAL;
 
 	hm = kmalloc(sizeof(*hm), GFP_KERNEL);
-	hr = kzalloc(sizeof(*hr), GFP_KERNEL);
+	hr = kmalloc(sizeof(*hr), GFP_KERNEL);
 	if (!hm || !hr) {
 		err = -ENOMEM;
 		goto out;
@@ -183,8 +182,7 @@ long asihpi_hpi_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		struct hpi_adapter *pa = NULL;
 
 		if (hm->h.adapter_index < ARRAY_SIZE(adapters))
-			pa = &adapters[array_index_nospec(hm->h.adapter_index,
-							  ARRAY_SIZE(adapters))];
+			pa = &adapters[hm->h.adapter_index];
 
 		if (!pa || !pa->adapter || !pa->adapter->type) {
 			hpi_init_response(&hr->r0, hm->h.object,

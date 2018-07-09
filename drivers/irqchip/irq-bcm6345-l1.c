@@ -52,6 +52,7 @@
 
 #include <linux/bitops.h>
 #include <linux/cpumask.h>
+#include <linux/kconfig.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>

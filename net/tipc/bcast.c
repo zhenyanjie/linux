@@ -247,16 +247,10 @@ int tipc_bcast_rcv(struct net *net, struct tipc_link *l, struct sk_buff *skb)
  *
  * RCU is locked, no other locks set
  */
-void tipc_bcast_ack_rcv(struct net *net, struct tipc_link *l,
-			struct tipc_msg *hdr)
+void tipc_bcast_ack_rcv(struct net *net, struct tipc_link *l, u32 acked)
 {
 	struct sk_buff_head *inputq = &tipc_bc_base(net)->inputq;
-	u16 acked = msg_bcast_ack(hdr);
 	struct sk_buff_head xmitq;
-
-	/* Ignore bc acks sent by peer before bcast synch point was received */
-	if (msg_bc_ack_invalid(hdr))
-		return;
 
 	__skb_queue_head_init(&xmitq);
 
@@ -275,21 +269,20 @@ void tipc_bcast_ack_rcv(struct net *net, struct tipc_link *l,
  *
  * RCU is locked, no other locks set
  */
-int tipc_bcast_sync_rcv(struct net *net, struct tipc_link *l,
-			struct tipc_msg *hdr)
+void tipc_bcast_sync_rcv(struct net *net, struct tipc_link *l,
+			 struct tipc_msg *hdr)
 {
 	struct sk_buff_head *inputq = &tipc_bc_base(net)->inputq;
 	struct sk_buff_head xmitq;
-	int rc = 0;
 
 	__skb_queue_head_init(&xmitq);
 
 	tipc_bcast_lock(net);
-	if (msg_type(hdr) != STATE_MSG) {
-		tipc_link_bc_init_rcv(l, hdr);
-	} else if (!msg_bc_ack_invalid(hdr)) {
+	if (msg_type(hdr) == STATE_MSG) {
 		tipc_link_bc_ack_rcv(l, msg_bcast_ack(hdr), &xmitq);
-		rc = tipc_link_bc_sync_rcv(l, hdr, &xmitq);
+		tipc_link_bc_sync_rcv(l, hdr, &xmitq);
+	} else {
+		tipc_link_bc_init_rcv(l, hdr);
 	}
 	tipc_bcast_unlock(net);
 
@@ -298,7 +291,6 @@ int tipc_bcast_sync_rcv(struct net *net, struct tipc_link *l,
 	/* Any socket wakeup messages ? */
 	if (!skb_queue_empty(inputq))
 		tipc_sk_rcv(net, inputq);
-	return rc;
 }
 
 /* tipc_bcast_add_peer - add a peer node to broadcast link and bearer

@@ -24,7 +24,7 @@
 static int exynos_drm_alloc_buf(struct exynos_drm_gem *exynos_gem)
 {
 	struct drm_device *dev = exynos_gem->base.dev;
-	unsigned long attr;
+	enum dma_attr attr;
 	unsigned int nr_pages;
 	struct sg_table sgt;
 	int ret = -ENOMEM;
@@ -34,7 +34,7 @@ static int exynos_drm_alloc_buf(struct exynos_drm_gem *exynos_gem)
 		return 0;
 	}
 
-	exynos_gem->dma_attrs = 0;
+	init_dma_attrs(&exynos_gem->dma_attrs);
 
 	/*
 	 * if EXYNOS_BO_CONTIG, fully physically contiguous memory
@@ -42,7 +42,7 @@ static int exynos_drm_alloc_buf(struct exynos_drm_gem *exynos_gem)
 	 * as possible.
 	 */
 	if (!(exynos_gem->flags & EXYNOS_BO_NONCONTIG))
-		exynos_gem->dma_attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+		dma_set_attr(DMA_ATTR_FORCE_CONTIGUOUS, &exynos_gem->dma_attrs);
 
 	/*
 	 * if EXYNOS_BO_WC or EXYNOS_BO_NONCACHABLE, writecombine mapping
@@ -54,8 +54,8 @@ static int exynos_drm_alloc_buf(struct exynos_drm_gem *exynos_gem)
 	else
 		attr = DMA_ATTR_NON_CONSISTENT;
 
-	exynos_gem->dma_attrs |= attr;
-	exynos_gem->dma_attrs |= DMA_ATTR_NO_KERNEL_MAPPING;
+	dma_set_attr(attr, &exynos_gem->dma_attrs);
+	dma_set_attr(DMA_ATTR_NO_KERNEL_MAPPING, &exynos_gem->dma_attrs);
 
 	nr_pages = exynos_gem->size >> PAGE_SHIFT;
 
@@ -67,7 +67,7 @@ static int exynos_drm_alloc_buf(struct exynos_drm_gem *exynos_gem)
 
 	exynos_gem->cookie = dma_alloc_attrs(to_dma_dev(dev), exynos_gem->size,
 					     &exynos_gem->dma_addr, GFP_KERNEL,
-					     exynos_gem->dma_attrs);
+					     &exynos_gem->dma_attrs);
 	if (!exynos_gem->cookie) {
 		DRM_ERROR("failed to allocate buffer.\n");
 		goto err_free;
@@ -75,7 +75,7 @@ static int exynos_drm_alloc_buf(struct exynos_drm_gem *exynos_gem)
 
 	ret = dma_get_sgtable_attrs(to_dma_dev(dev), &sgt, exynos_gem->cookie,
 				    exynos_gem->dma_addr, exynos_gem->size,
-				    exynos_gem->dma_attrs);
+				    &exynos_gem->dma_attrs);
 	if (ret < 0) {
 		DRM_ERROR("failed to get sgtable.\n");
 		goto err_dma_free;
@@ -99,7 +99,7 @@ err_sgt_free:
 	sg_free_table(&sgt);
 err_dma_free:
 	dma_free_attrs(to_dma_dev(dev), exynos_gem->size, exynos_gem->cookie,
-		       exynos_gem->dma_addr, exynos_gem->dma_attrs);
+		       exynos_gem->dma_addr, &exynos_gem->dma_attrs);
 err_free:
 	drm_free_large(exynos_gem->pages);
 
@@ -120,7 +120,7 @@ static void exynos_drm_free_buf(struct exynos_drm_gem *exynos_gem)
 
 	dma_free_attrs(to_dma_dev(dev), exynos_gem->size, exynos_gem->cookie,
 			(dma_addr_t)exynos_gem->dma_addr,
-			exynos_gem->dma_attrs);
+			&exynos_gem->dma_attrs);
 
 	drm_free_large(exynos_gem->pages);
 }
@@ -246,15 +246,6 @@ struct exynos_drm_gem *exynos_drm_gem_create(struct drm_device *dev,
 	if (IS_ERR(exynos_gem))
 		return exynos_gem;
 
-	if (!is_drm_iommu_supported(dev) && (flags & EXYNOS_BO_NONCONTIG)) {
-		/*
-		 * when no IOMMU is available, all allocated buffers are
-		 * contiguous anyway, so drop EXYNOS_BO_NONCONTIG flag
-		 */
-		flags &= ~EXYNOS_BO_NONCONTIG;
-		DRM_WARN("Non-contiguous allocation is not supported without IOMMU, falling back to contiguous buffer\n");
-	}
-
 	/* set memory type and cache attribute from user side. */
 	exynos_gem->flags = flags;
 
@@ -355,7 +346,7 @@ static int exynos_drm_gem_mmap_buffer(struct exynos_drm_gem *exynos_gem,
 
 	ret = dma_mmap_attrs(to_dma_dev(drm_dev), vma, exynos_gem->cookie,
 			     exynos_gem->dma_addr, exynos_gem->size,
-			     exynos_gem->dma_attrs);
+			     &exynos_gem->dma_attrs);
 	if (ret < 0) {
 		DRM_ERROR("failed to mmap.\n");
 		return ret;

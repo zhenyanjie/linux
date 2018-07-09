@@ -37,7 +37,7 @@
 #include <linux/vmalloc.h>
 
 #include "mlx4_ib.h"
-#include <rdma/mlx4-abi.h>
+#include "user.h"
 
 static void *get_wqe(struct mlx4_ib_srq *srq, int n)
 {

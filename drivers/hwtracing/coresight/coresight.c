@@ -257,7 +257,7 @@ static void coresight_disable_source(struct coresight_device *csdev)
 {
 	if (atomic_dec_return(csdev->refcnt) == 0) {
 		if (source_ops(csdev)->disable) {
-			source_ops(csdev)->disable(csdev, NULL);
+			source_ops(csdev)->disable(csdev);
 			csdev->enable = false;
 		}
 	}
@@ -429,7 +429,7 @@ struct list_head *coresight_build_path(struct coresight_device *csdev)
 
 	path = kzalloc(sizeof(struct list_head), GFP_KERNEL);
 	if (!path)
-		return ERR_PTR(-ENOMEM);
+		return NULL;
 
 	INIT_LIST_HEAD(path);
 
@@ -498,9 +498,6 @@ int coresight_enable(struct coresight_device *csdev)
 {
 	int cpu, ret = 0;
 	struct list_head *path;
-	enum coresight_dev_subtype_source subtype;
-
-	subtype = csdev->subtype.source_subtype;
 
 	mutex_lock(&coresight_mutex);
 
@@ -508,16 +505,8 @@ int coresight_enable(struct coresight_device *csdev)
 	if (ret)
 		goto out;
 
-	if (csdev->enable) {
-		/*
-		 * There could be multiple applications driving the software
-		 * source. So keep the refcount for each such user when the
-		 * source is already enabled.
-		 */
-		if (subtype == CORESIGHT_DEV_SUBTYPE_SOURCE_SOFTWARE)
-			atomic_inc(csdev->refcnt);
+	if (csdev->enable)
 		goto out;
-	}
 
 	path = coresight_build_path(csdev);
 	if (IS_ERR(path)) {
@@ -534,7 +523,7 @@ int coresight_enable(struct coresight_device *csdev)
 	if (ret)
 		goto err_source;
 
-	switch (subtype) {
+	switch (csdev->subtype.source_subtype) {
 	case CORESIGHT_DEV_SUBTYPE_SOURCE_PROC:
 		/*
 		 * When working from sysFS it is important to keep track
@@ -736,8 +725,7 @@ static int coresight_orphan_match(struct device *dev, void *data)
 		/* We have found at least one orphan connection */
 		if (conn->child_dev == NULL) {
 			/* Does it match this newly added device? */
-			if (conn->child_name &&
-			    !strcmp(dev_name(&csdev->dev), conn->child_name)) {
+			if (!strcmp(dev_name(&csdev->dev), conn->child_name)) {
 				conn->child_dev = csdev;
 			} else {
 				/* This component still has an orphan */
@@ -905,7 +893,7 @@ struct coresight_device *coresight_register(struct coresight_desc *desc)
 	int nr_refcnts = 1;
 	atomic_t *refcnts = NULL;
 	struct coresight_device *csdev;
-	struct coresight_connection *conns = NULL;
+	struct coresight_connection *conns;
 
 	csdev = kzalloc(sizeof(*csdev), GFP_KERNEL);
 	if (!csdev) {
@@ -933,20 +921,16 @@ struct coresight_device *coresight_register(struct coresight_desc *desc)
 
 	csdev->nr_inport = desc->pdata->nr_inport;
 	csdev->nr_outport = desc->pdata->nr_outport;
+	conns = kcalloc(csdev->nr_outport, sizeof(*conns), GFP_KERNEL);
+	if (!conns) {
+		ret = -ENOMEM;
+		goto err_kzalloc_conns;
+	}
 
-	/* Initialise connections if there is at least one outport */
-	if (csdev->nr_outport) {
-		conns = kcalloc(csdev->nr_outport, sizeof(*conns), GFP_KERNEL);
-		if (!conns) {
-			ret = -ENOMEM;
-			goto err_kzalloc_conns;
-		}
-
-		for (i = 0; i < csdev->nr_outport; i++) {
-			conns[i].outport = desc->pdata->outports[i];
-			conns[i].child_name = desc->pdata->child_names[i];
-			conns[i].child_port = desc->pdata->child_ports[i];
-		}
+	for (i = 0; i < csdev->nr_outport; i++) {
+		conns[i].outport = desc->pdata->outports[i];
+		conns[i].child_name = desc->pdata->child_names[i];
+		conns[i].child_port = desc->pdata->child_ports[i];
 	}
 
 	csdev->conns = conns;

@@ -589,11 +589,7 @@ static int rawv6_push_pending_frames(struct sock *sk, struct flowi6 *fl6,
 	}
 
 	offset += skb_transport_offset(skb);
-	err = skb_copy_bits(skb, offset, &csum, 2);
-	if (err < 0) {
-		ip6_flush_pending_frames(sk);
-		goto out;
-	}
+	BUG_ON(skb_copy_bits(skb, offset, &csum, 2));
 
 	/* in case cksum was not initialized */
 	if (unlikely(csum))
@@ -630,8 +626,6 @@ static int rawv6_send_hdrinc(struct sock *sk, struct msghdr *msg, int length,
 		ipv6_local_error(sk, EMSGSIZE, fl6, rt->dst.dev->mtu);
 		return -EMSGSIZE;
 	}
-	if (length < sizeof(struct ipv6hdr))
-		return -EINVAL;
 	if (flags&MSG_PROBE)
 		goto out;
 
@@ -658,13 +652,6 @@ static int rawv6_send_hdrinc(struct sock *sk, struct msghdr *msg, int length,
 	err = memcpy_from_msg(iph, msg, length);
 	if (err)
 		goto error_fault;
-
-	/* if egress device is enslaved to an L3 master device pass the
-	 * skb to its handler for processing
-	 */
-	skb = l3mdev_ip6_out(sk, skb);
-	if (unlikely(!skb))
-		return 0;
 
 	IP6_UPD_PO_STATS(net, rt->rt6i_idev, IPSTATS_MIB_OUT, skb->len);
 	err = NF_HOOK(NFPROTO_IPV6, NF_INET_LOCAL_OUT, net, sk, skb,
@@ -891,11 +878,6 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	if (inet->hdrincl)
 		fl6.flowi6_flags |= FLOWI_FLAG_KNOWN_NH;
 
-	if (ipc6.tclass < 0)
-		ipc6.tclass = np->tclass;
-
-	fl6.flowlabel = ip6_make_flowinfo(ipc6.tclass, fl6.flowlabel);
-
 	dst = ip6_dst_lookup_flow(sk, &fl6, final_p);
 	if (IS_ERR(dst)) {
 		err = PTR_ERR(dst);
@@ -903,6 +885,9 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	}
 	if (ipc6.hlimit < 0)
 		ipc6.hlimit = ip6_sk_dst_hoplimit(np, &fl6, dst);
+
+	if (ipc6.tclass < 0)
+		ipc6.tclass = np->tclass;
 
 	if (ipc6.dontfrag < 0)
 		ipc6.dontfrag = np->dontfrag;
@@ -1173,7 +1158,8 @@ static int rawv6_ioctl(struct sock *sk, int cmd, unsigned long arg)
 		spin_lock_bh(&sk->sk_receive_queue.lock);
 		skb = skb_peek(&sk->sk_receive_queue);
 		if (skb)
-			amount = skb->len;
+			amount = skb_tail_pointer(skb) -
+				skb_transport_header(skb);
 		spin_unlock_bh(&sk->sk_receive_queue.lock);
 		return put_user(amount, (int __user *)arg);
 	}
@@ -1246,7 +1232,7 @@ struct proto rawv6_prot = {
 	.close		   = rawv6_close,
 	.destroy	   = raw6_destroy,
 	.connect	   = ip6_datagram_connect_v6_only,
-	.disconnect	   = __udp_disconnect,
+	.disconnect	   = udp_disconnect,
 	.ioctl		   = rawv6_ioctl,
 	.init		   = rawv6_init_sk,
 	.setsockopt	   = rawv6_setsockopt,
@@ -1330,7 +1316,7 @@ void raw6_proc_exit(void)
 #endif	/* CONFIG_PROC_FS */
 
 /* Same as inet6_dgram_ops, sans udp_poll.  */
-const struct proto_ops inet6_sockraw_ops = {
+static const struct proto_ops inet6_sockraw_ops = {
 	.family		   = PF_INET6,
 	.owner		   = THIS_MODULE,
 	.release	   = inet6_release,

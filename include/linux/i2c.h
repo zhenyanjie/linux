@@ -126,11 +126,6 @@ i2c_smbus_read_i2c_block_data_or_emulated(const struct i2c_client *client,
 					  u8 command, u8 length, u8 *values);
 #endif /* I2C */
 
-enum i2c_alert_protocol {
-	I2C_PROTOCOL_SMBUS_ALERT,
-	I2C_PROTOCOL_SMBUS_HOST_NOTIFY,
-};
-
 /**
  * struct i2c_driver - represent an I2C device driver
  * @class: What kind of i2c device we instantiate (for detect)
@@ -185,11 +180,8 @@ struct i2c_driver {
 	 * The format and meaning of the data value depends on the protocol.
 	 * For the SMBus alert protocol, there is a single bit of data passed
 	 * as the alert response's low bit ("event flag").
-	 * For the SMBus Host Notify protocol, the data corresponds to the
-	 * 16-bit payload data reported by the slave device acting as master.
 	 */
-	void (*alert)(struct i2c_client *, enum i2c_alert_protocol protocol,
-		      unsigned int data);
+	void (*alert)(struct i2c_client *, unsigned int data);
 
 	/* a ioctl like command that can be used to perform specific functions
 	 * with the device.
@@ -357,11 +349,6 @@ extern int i2c_probe_func_quick_read(struct i2c_adapter *, unsigned short addr);
 extern struct i2c_client *
 i2c_new_dummy(struct i2c_adapter *adap, u16 address);
 
-extern struct i2c_client *
-i2c_new_secondary_device(struct i2c_client *client,
-				const char *name,
-				u16 default_addr);
-
 extern void i2c_unregister_device(struct i2c_client *);
 #endif /* I2C */
 
@@ -424,20 +411,6 @@ struct i2c_algorithm {
 	int (*reg_slave)(struct i2c_client *client);
 	int (*unreg_slave)(struct i2c_client *client);
 #endif
-};
-
-/**
- * struct i2c_lock_operations - represent I2C locking operations
- * @lock_bus: Get exclusive access to an I2C bus segment
- * @trylock_bus: Try to get exclusive access to an I2C bus segment
- * @unlock_bus: Release exclusive access to an I2C bus segment
- *
- * The main operations are wrapped by i2c_lock_bus and i2c_unlock_bus.
- */
-struct i2c_lock_operations {
-	void (*lock_bus)(struct i2c_adapter *, unsigned int flags);
-	int (*trylock_bus)(struct i2c_adapter *, unsigned int flags);
-	void (*unlock_bus)(struct i2c_adapter *, unsigned int flags);
 };
 
 /**
@@ -550,7 +523,6 @@ struct i2c_adapter {
 	void *algo_data;
 
 	/* data fields that are valid for all devices	*/
-	const struct i2c_lock_operations *lock_ops;
 	struct rt_mutex bus_lock;
 	struct rt_mutex mux_lock;
 
@@ -567,6 +539,10 @@ struct i2c_adapter {
 
 	struct i2c_bus_recovery_info *bus_recovery_info;
 	const struct i2c_adapter_quirks *quirks;
+
+	void (*lock_bus)(struct i2c_adapter *, unsigned int flags);
+	int (*trylock_bus)(struct i2c_adapter *, unsigned int flags);
+	void (*unlock_bus)(struct i2c_adapter *, unsigned int flags);
 };
 #define to_i2c_adapter(d) container_of(d, struct i2c_adapter, dev)
 
@@ -608,21 +584,7 @@ int i2c_for_each_dev(void *data, int (*fn)(struct device *, void *));
 static inline void
 i2c_lock_bus(struct i2c_adapter *adapter, unsigned int flags)
 {
-	adapter->lock_ops->lock_bus(adapter, flags);
-}
-
-/**
- * i2c_trylock_bus - Try to get exclusive access to an I2C bus segment
- * @adapter: Target I2C bus segment
- * @flags: I2C_LOCK_ROOT_ADAPTER tries to locks the root i2c adapter,
- *	I2C_LOCK_SEGMENT tries to lock only this branch in the adapter tree
- *
- * Return: true if the I2C bus segment is locked, false otherwise
- */
-static inline int
-i2c_trylock_bus(struct i2c_adapter *adapter, unsigned int flags)
-{
-	return adapter->lock_ops->trylock_bus(adapter, flags);
+	adapter->lock_bus(adapter, flags);
 }
 
 /**
@@ -634,7 +596,7 @@ i2c_trylock_bus(struct i2c_adapter *adapter, unsigned int flags)
 static inline void
 i2c_unlock_bus(struct i2c_adapter *adapter, unsigned int flags)
 {
-	adapter->lock_ops->unlock_bus(adapter, flags);
+	adapter->unlock_bus(adapter, flags);
 }
 
 static inline void
@@ -698,7 +660,6 @@ extern void i2c_clients_command(struct i2c_adapter *adap,
 
 extern struct i2c_adapter *i2c_get_adapter(int nr);
 extern void i2c_put_adapter(struct i2c_adapter *adap);
-extern unsigned int i2c_adapter_depth(struct i2c_adapter *adapter);
 
 void i2c_parse_fw_timings(struct device *dev, struct i2c_timings *t, bool use_defaults);
 
@@ -791,14 +752,5 @@ static inline struct i2c_adapter *of_get_i2c_adapter_by_node(struct device_node 
 	return NULL;
 }
 #endif /* CONFIG_OF */
-
-#if IS_ENABLED(CONFIG_ACPI)
-u32 i2c_acpi_find_bus_speed(struct device *dev);
-#else
-static inline u32 i2c_acpi_find_bus_speed(struct device *dev)
-{
-	return 0;
-}
-#endif /* CONFIG_ACPI */
 
 #endif /* _LINUX_I2C_H */

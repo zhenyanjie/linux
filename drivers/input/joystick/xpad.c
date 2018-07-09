@@ -115,10 +115,6 @@ static bool sticks_to_null;
 module_param(sticks_to_null, bool, S_IRUGO);
 MODULE_PARM_DESC(sticks_to_null, "Do not map sticks at all for unknown pads");
 
-static bool auto_poweroff = true;
-module_param(auto_poweroff, bool, S_IWUSR | S_IRUGO);
-MODULE_PARM_DESC(auto_poweroff, "Power off wireless controllers on suspend");
-
 static const struct xpad_device {
 	u16 idVendor;
 	u16 idProduct;
@@ -201,7 +197,6 @@ static const struct xpad_device {
 	{ 0x1430, 0x8888, "TX6500+ Dance Pad (first generation)", MAP_DPAD_TO_BUTTONS, XTYPE_XBOX },
 	{ 0x146b, 0x0601, "BigBen Interactive XBOX 360 Controller", 0, XTYPE_XBOX360 },
 	{ 0x1532, 0x0037, "Razer Sabertooth", 0, XTYPE_XBOX360 },
-	{ 0x1532, 0x0a03, "Razer Wildcat", 0, XTYPE_XBOXONE },
 	{ 0x15e4, 0x3f00, "Power A Mini Pro Elite", 0, XTYPE_XBOX360 },
 	{ 0x15e4, 0x3f0a, "Xbox Airflo wired controller", 0, XTYPE_XBOX360 },
 	{ 0x15e4, 0x3f10, "Batarang Xbox 360 controller", 0, XTYPE_XBOX360 },
@@ -330,7 +325,6 @@ static struct usb_device_id xpad_table[] = {
 	XPAD_XBOX360_VENDOR(0x24c6),		/* PowerA Controllers */
 	XPAD_XBOXONE_VENDOR(0x24c6),		/* PowerA Controllers */
 	XPAD_XBOX360_VENDOR(0x1532),		/* Razer Sabertooth */
-	XPAD_XBOXONE_VENDOR(0x1532),		/* Razer Wildcat */
 	XPAD_XBOX360_VENDOR(0x15e4),		/* Numark X-Box 360 controllers */
 	XPAD_XBOX360_VENDOR(0x162e),		/* Joytech X-Box 360 controllers */
 	{ }
@@ -1254,36 +1248,6 @@ static void xpad_stop_input(struct usb_xpad *xpad)
 	usb_kill_urb(xpad->irq_in);
 }
 
-static void xpad360w_poweroff_controller(struct usb_xpad *xpad)
-{
-	unsigned long flags;
-	struct xpad_output_packet *packet =
-			&xpad->out_packets[XPAD_OUT_CMD_IDX];
-
-	spin_lock_irqsave(&xpad->odata_lock, flags);
-
-	packet->data[0] = 0x00;
-	packet->data[1] = 0x00;
-	packet->data[2] = 0x08;
-	packet->data[3] = 0xC0;
-	packet->data[4] = 0x00;
-	packet->data[5] = 0x00;
-	packet->data[6] = 0x00;
-	packet->data[7] = 0x00;
-	packet->data[8] = 0x00;
-	packet->data[9] = 0x00;
-	packet->data[10] = 0x00;
-	packet->data[11] = 0x00;
-	packet->len = 12;
-	packet->pending = true;
-
-	/* Reset the sequence so we send out poweroff now */
-	xpad->last_out_packet = -1;
-	xpad_try_sending_next_out_packet(xpad);
-
-	spin_unlock_irqrestore(&xpad->odata_lock, flags);
-}
-
 static int xpad360w_start_input(struct usb_xpad *xpad)
 {
 	int error;
@@ -1378,12 +1342,6 @@ static int xpad_init_input(struct usb_xpad *xpad)
 	input_dev->name = xpad->name;
 	input_dev->phys = xpad->phys;
 	usb_to_input_id(xpad->udev, &input_dev->id);
-
-	if (xpad->xtype == XTYPE_XBOX360W) {
-		/* x360w controllers and the receiver have different ids */
-		input_dev->id.product = 0x02a1;
-	}
-
 	input_dev->dev.parent = &xpad->intf->dev;
 
 	input_set_drvdata(input_dev, xpad);
@@ -1632,15 +1590,6 @@ static int xpad_suspend(struct usb_interface *intf, pm_message_t message)
 		 * or goes away.
 		 */
 		xpad360w_stop_input(xpad);
-
-		/*
-		 * The wireless adapter is going off now, so the
-		 * gamepads are going to become disconnected.
-		 * Unless explicitly disabled, power them down
-		 * so they don't just sit there flashing.
-		 */
-		if (auto_poweroff && xpad->pad_present)
-			xpad360w_poweroff_controller(xpad);
 	} else {
 		mutex_lock(&input->mutex);
 		if (input->users)

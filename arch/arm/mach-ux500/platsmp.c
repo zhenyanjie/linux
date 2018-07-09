@@ -26,6 +26,7 @@
 #include "setup.h"
 
 #include "db8500-regs.h"
+#include "id.h"
 
 /* Magic triggers in backup RAM */
 #define UX500_CPU1_JUMPADDR_OFFSET 0x1FF4

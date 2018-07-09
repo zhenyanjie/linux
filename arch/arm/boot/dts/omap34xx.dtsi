@@ -28,7 +28,7 @@
 		};
 	};
 
-	ocp@68000000 {
+	ocp {
 		omap3_pmx_core2: pinmux@480025d8 {
 			compatible = "ti,omap3-padconf", "pinctrl-single";
 			reg = <0x480025d8 0x24>;

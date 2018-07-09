@@ -70,6 +70,7 @@ struct pasemi_mac {
 	struct pci_dev *pdev;
 	struct pci_dev *dma_pdev;
 	struct pci_dev *iob_pdev;
+	struct phy_device *phydev;
 	struct napi_struct napi;
 
 	int		bufsz; /* RX ring buffer size */

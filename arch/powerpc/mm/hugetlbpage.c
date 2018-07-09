@@ -81,13 +81,6 @@ static int __hugepte_alloc(struct mm_struct *mm, hugepd_t *hpdp,
 	if (! new)
 		return -ENOMEM;
 
-	/*
-	 * Make sure other cpus find the hugepd set only after a
-	 * properly initialized page table is visible to them.
-	 * For more details look for comment in __pte_alloc().
-	 */
-	smp_wmb();
-
 	spin_lock(&mm->page_table_lock);
 #ifdef CONFIG_PPC_FSL_BOOK3E
 	/*
@@ -765,24 +758,6 @@ static int __init add_huge_page_size(unsigned long long size)
 	if ((mmu_psize = shift_to_mmu_psize(shift)) < 0)
 		return -EINVAL;
 
-#ifdef CONFIG_PPC_BOOK3S_64
-	/*
-	 * We need to make sure that for different page sizes reported by
-	 * firmware we only add hugetlb support for page sizes that can be
-	 * supported by linux page table layout.
-	 * For now we have
-	 * Radix: 2M
-	 * Hash: 16M and 16G
-	 */
-	if (radix_enabled()) {
-		if (mmu_psize != MMU_PAGE_2M)
-			return -EINVAL;
-	} else {
-		if (mmu_psize != MMU_PAGE_16M && mmu_psize != MMU_PAGE_16G)
-			return -EINVAL;
-	}
-#endif
-
 	BUG_ON(mmu_psize_defs[mmu_psize].shift != shift);
 
 	/* Return if huge page size has already been setup */
@@ -1037,15 +1012,8 @@ int gup_hugepte(pte_t *ptep, unsigned long sz, unsigned long addr,
 
 	pte = READ_ONCE(*ptep);
 	mask = _PAGE_PRESENT | _PAGE_READ;
-
-	/*
-	 * On some CPUs like the 8xx, _PAGE_RW hence _PAGE_WRITE is defined
-	 * as 0 and _PAGE_RO has to be set when a page is not writable
-	 */
 	if (write)
 		mask |= _PAGE_WRITE;
-	else
-		mask |= _PAGE_RO;
 
 	if ((pte_val(pte) & mask) != mask)
 		return 0;

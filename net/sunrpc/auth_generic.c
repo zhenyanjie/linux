@@ -78,14 +78,6 @@ static struct rpc_cred *generic_bind_cred(struct rpc_task *task,
 	return auth->au_ops->lookup_cred(auth, acred, lookupflags);
 }
 
-static int
-generic_hash_cred(struct auth_cred *acred, unsigned int hashbits)
-{
-	return hash_64(from_kgid(&init_user_ns, acred->gid) |
-		((u64)from_kuid(&init_user_ns, acred->uid) <<
-			(sizeof(gid_t) * 8)), hashbits);
-}
-
 /*
  * Lookup generic creds for current process
  */
@@ -184,8 +176,8 @@ generic_match(struct auth_cred *acred, struct rpc_cred *cred, int flags)
 	if (gcred->acred.group_info->ngroups != acred->group_info->ngroups)
 		goto out_nomatch;
 	for (i = 0; i < gcred->acred.group_info->ngroups; i++) {
-		if (!gid_eq(gcred->acred.group_info->gid[i],
-				acred->group_info->gid[i]))
+		if (!gid_eq(GROUP_AT(gcred->acred.group_info, i),
+				GROUP_AT(acred->group_info, i)))
 			goto out_nomatch;
 	}
 out_match:
@@ -232,7 +224,7 @@ generic_key_timeout(struct rpc_auth *auth, struct rpc_cred *cred)
 
 
 	/* Fast track for non crkey_timeout (no key) underlying credentials */
-	if (auth->au_flags & RPCAUTH_AUTH_NO_CRKEY_TIMEOUT)
+	if (test_bit(RPC_CRED_NO_CRKEY_TIMEOUT, &acred->ac_flags))
 		return 0;
 
 	/* Fast track for the normal case */
@@ -243,6 +235,12 @@ generic_key_timeout(struct rpc_auth *auth, struct rpc_cred *cred)
 	tcred = auth->au_ops->lookup_cred(auth, acred, 0);
 	if (IS_ERR(tcred))
 		return -EACCES;
+
+	if (!tcred->cr_ops->crkey_timeout) {
+		set_bit(RPC_CRED_NO_CRKEY_TIMEOUT, &acred->ac_flags);
+		ret = 0;
+		goto out_put;
+	}
 
 	/* Test for the almost error case */
 	ret = tcred->cr_ops->crkey_timeout(tcred);
@@ -259,6 +257,7 @@ generic_key_timeout(struct rpc_auth *auth, struct rpc_cred *cred)
 		set_bit(RPC_CRED_NOTIFY_TIMEOUT, &acred->ac_flags);
 	}
 
+out_put:
 	put_rpccred(tcred);
 	return ret;
 }
@@ -266,7 +265,6 @@ generic_key_timeout(struct rpc_auth *auth, struct rpc_cred *cred)
 static const struct rpc_authops generic_auth_ops = {
 	.owner = THIS_MODULE,
 	.au_name = "Generic",
-	.hash_cred = generic_hash_cred,
 	.lookup_cred = generic_lookup_cred,
 	.crcreate = generic_create_cred,
 	.key_timeout = generic_key_timeout,

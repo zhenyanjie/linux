@@ -63,8 +63,6 @@
 #include <asm/sclp.h>
 #include <asm/sysinfo.h>
 #include <asm/numa.h>
-#include <asm/alternative.h>
-#include <asm/nospec-branch.h>
 #include "entry.h"
 
 /*
@@ -132,14 +130,17 @@ __setup("condev=", condev_setup);
 
 static void __init set_preferred_console(void)
 {
-	if (CONSOLE_IS_3215 || CONSOLE_IS_SCLP)
+	if (MACHINE_IS_KVM) {
+		if (sclp.has_vt220)
+			add_preferred_console("ttyS", 1, NULL);
+		else if (sclp.has_linemode)
+			add_preferred_console("ttyS", 0, NULL);
+		else
+			add_preferred_console("hvc", 0, NULL);
+	} else if (CONSOLE_IS_3215 || CONSOLE_IS_SCLP)
 		add_preferred_console("ttyS", 0, NULL);
 	else if (CONSOLE_IS_3270)
 		add_preferred_console("tty3270", 0, NULL);
-	else if (CONSOLE_IS_VT220)
-		add_preferred_console("ttyS", 1, NULL);
-	else if (CONSOLE_IS_HVC)
-		add_preferred_console("hvc", 0, NULL);
 }
 
 static int __init conmode_setup(char *str)
@@ -205,13 +206,6 @@ static void __init conmode_default(void)
 			SET_CONSOLE_SCLP;
 #endif
 		}
-	} else if (MACHINE_IS_KVM) {
-		if (sclp.has_vt220 && IS_ENABLED(CONFIG_SCLP_VT220_CONSOLE))
-			SET_CONSOLE_VT220;
-		else if (sclp.has_linemode && IS_ENABLED(CONFIG_SCLP_CONSOLE))
-			SET_CONSOLE_SCLP;
-		else
-			SET_CONSOLE_HVC;
 	} else {
 #if defined(CONFIG_SCLP_CONSOLE) || defined(CONFIG_SCLP_VT220_CONSOLE)
 		SET_CONSOLE_SCLP;
@@ -295,7 +289,7 @@ static int __init parse_vmalloc(char *arg)
 }
 early_param("vmalloc", parse_vmalloc);
 
-void *restart_stack __section(.data);
+void *restart_stack __attribute__((__section__(".data")));
 
 static void __init setup_lowcore(void)
 {
@@ -337,9 +331,7 @@ static void __init setup_lowcore(void)
 	lc->machine_flags = S390_lowcore.machine_flags;
 	lc->stfl_fac_list = S390_lowcore.stfl_fac_list;
 	memcpy(lc->stfle_fac_list, S390_lowcore.stfle_fac_list,
-	       sizeof(lc->stfle_fac_list));
-	memcpy(lc->alt_stfle_fac_list, S390_lowcore.alt_stfle_fac_list,
-	       sizeof(lc->alt_stfle_fac_list));
+	       MAX_FACILITY_BIT/8);
 	if (MACHINE_HAS_VX)
 		lc->vector_save_area_addr =
 			(unsigned long) &lc->vector_save_area;
@@ -376,7 +368,6 @@ static void __init setup_lowcore(void)
 #ifdef CONFIG_SMP
 	lc->spinlock_lockval = arch_spin_lockval(0);
 #endif
-	lc->br_r1_trampoline = 0x07f1;	/* br %r1 */
 
 	set_prefix((u32)(unsigned long) lc);
 	lowcore_ptr[0] = lc;
@@ -441,20 +432,6 @@ static void __init setup_resources(void)
 			}
 		}
 	}
-#ifdef CONFIG_CRASH_DUMP
-	/*
-	 * Re-add removed crash kernel memory as reserved memory. This makes
-	 * sure it will be mapped with the identity mapping and struct pages
-	 * will be created, so it can be resized later on.
-	 * However add it later since the crash kernel resource should not be
-	 * part of the System RAM resource.
-	 */
-	if (crashk_res.end) {
-		memblock_add_node(crashk_res.start, resource_size(&crashk_res), 0);
-		memblock_reserve(crashk_res.start, resource_size(&crashk_res));
-		insert_resource(&iomem_resource, &crashk_res);
-	}
-#endif
 }
 
 static void __init setup_memory_end(void)
@@ -625,6 +602,7 @@ static void __init reserve_crashkernel(void)
 		diag10_range(PFN_DOWN(crash_base), PFN_DOWN(crash_size));
 	crashk_res.start = crash_base;
 	crashk_res.end = crash_base + crash_size - 1;
+	insert_resource(&iomem_resource, &crashk_res);
 	memblock_remove(crash_base, crash_size);
 	pr_info("Reserving %lluMB of memory at %lluMB "
 		"for crashkernel (System RAM: %luMB)\n",
@@ -824,10 +802,10 @@ static void __init setup_randomness(void)
 {
 	struct sysinfo_3_2_2 *vmms;
 
-	vmms = (struct sysinfo_3_2_2 *) memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-	if (stsi(vmms, 3, 2, 2) == 0 && vmms->count)
-		add_device_randomness(&vmms->vm, sizeof(vmms->vm[0]) * vmms->count);
-	memblock_free((unsigned long) vmms, PAGE_SIZE);
+	vmms = (struct sysinfo_3_2_2 *) alloc_page(GFP_KERNEL);
+	if (vmms && stsi(vmms, 3, 2, 2) == 0 && vmms->count)
+		add_device_randomness(&vmms, vmms->count);
+	free_page((unsigned long) vmms);
 }
 
 /*
@@ -876,9 +854,6 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_data = (unsigned long) &_edata;
 	init_mm.brk = (unsigned long) &_end;
 
-	if (IS_ENABLED(CONFIG_EXPOLINE_AUTO))
-		nospec_auto_detect();
-
 	parse_early_param();
 #ifdef CONFIG_CRASH_DUMP
 	/* Deactivate elfcorehdr= kernel parameter */
@@ -926,7 +901,6 @@ void __init setup_arch(char **cmdline_p)
 	setup_vmcoreinfo();
 	setup_lowcore();
 	smp_fill_possible_mask();
-	cpu_detect_mhz_feature();
         cpu_init();
 	numa_setup();
 
@@ -938,10 +912,6 @@ void __init setup_arch(char **cmdline_p)
         /* Setup default console */
 	conmode_default();
 	set_preferred_console();
-
-	apply_alternative_instructions();
-	if (IS_ENABLED(CONFIG_EXPOLINE))
-		nospec_init_branches();
 
 	/* Setup zfcpdump support */
 	setup_zfcpdump();

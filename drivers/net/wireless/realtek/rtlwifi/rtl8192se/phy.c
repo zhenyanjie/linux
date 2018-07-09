@@ -442,8 +442,7 @@ static bool _rtl92s_phy_sw_chnl_step_by_step(struct ieee80211_hw *hw,
 			break;
 		default:
 			RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG,
-				 "switch case %#x not processed\n",
-				 currentcmd->cmdid);
+				 "switch case not processed\n");
 			break;
 		}
 
@@ -649,7 +648,7 @@ bool rtl92s_phy_set_rf_power_state(struct ieee80211_hw *hw,
 			break;
 	default:
 		RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG,
-			 "switch case %#x not processed\n", rfpwr_state);
+			 "switch case not processed\n");
 		bresult = false;
 		break;
 	}

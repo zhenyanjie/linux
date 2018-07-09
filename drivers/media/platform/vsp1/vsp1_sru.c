@@ -37,7 +37,7 @@ static inline void vsp1_sru_write(struct vsp1_sru *sru, struct vsp1_dl_list *dl,
  * Controls
  */
 
-#define V4L2_CID_VSP1_SRU_INTENSITY		(V4L2_CID_USER_BASE | 0x1001)
+#define V4L2_CID_VSP1_SRU_INTENSITY		(V4L2_CID_USER_BASE + 1)
 
 struct vsp1_sru_param {
 	u32 ctrl0;
@@ -128,7 +128,6 @@ static int sru_enum_frame_size(struct v4l2_subdev *subdev,
 	struct vsp1_sru *sru = to_sru(subdev);
 	struct v4l2_subdev_pad_config *config;
 	struct v4l2_mbus_framefmt *format;
-	int ret = 0;
 
 	config = vsp1_entity_get_pad_config(&sru->entity, cfg, fse->which);
 	if (!config)
@@ -136,12 +135,8 @@ static int sru_enum_frame_size(struct v4l2_subdev *subdev,
 
 	format = vsp1_entity_get_pad_format(&sru->entity, config, SRU_PAD_SINK);
 
-	mutex_lock(&sru->entity.lock);
-
-	if (fse->index || fse->code != format->code) {
-		ret = -EINVAL;
-		goto done;
-	}
+	if (fse->index || fse->code != format->code)
+		return -EINVAL;
 
 	if (fse->pad == SRU_PAD_SINK) {
 		fse->min_width = SRU_MIN_SIZE;
@@ -161,9 +156,7 @@ static int sru_enum_frame_size(struct v4l2_subdev *subdev,
 		}
 	}
 
-done:
-	mutex_unlock(&sru->entity.lock);
-	return ret;
+	return 0;
 }
 
 static void sru_try_format(struct vsp1_sru *sru,
@@ -224,15 +217,10 @@ static int sru_set_format(struct v4l2_subdev *subdev,
 	struct vsp1_sru *sru = to_sru(subdev);
 	struct v4l2_subdev_pad_config *config;
 	struct v4l2_mbus_framefmt *format;
-	int ret = 0;
-
-	mutex_lock(&sru->entity.lock);
 
 	config = vsp1_entity_get_pad_config(&sru->entity, cfg, fmt->which);
-	if (!config) {
-		ret = -EINVAL;
-		goto done;
-	}
+	if (!config)
+		return -EINVAL;
 
 	sru_try_format(sru, config, fmt->pad, &fmt->format);
 
@@ -248,12 +236,10 @@ static int sru_set_format(struct v4l2_subdev *subdev,
 		sru_try_format(sru, config, SRU_PAD_SOURCE, format);
 	}
 
-done:
-	mutex_unlock(&sru->entity.lock);
-	return ret;
+	return 0;
 }
 
-static const struct v4l2_subdev_pad_ops sru_pad_ops = {
+static struct v4l2_subdev_pad_ops sru_pad_ops = {
 	.init_cfg = vsp1_entity_init_cfg,
 	.enum_mbus_code = sru_enum_mbus_code,
 	.enum_frame_size = sru_enum_frame_size,
@@ -261,7 +247,7 @@ static const struct v4l2_subdev_pad_ops sru_pad_ops = {
 	.set_fmt = sru_set_format,
 };
 
-static const struct v4l2_subdev_ops sru_ops = {
+static struct v4l2_subdev_ops sru_ops = {
 	.pad    = &sru_pad_ops,
 };
 
@@ -271,17 +257,13 @@ static const struct v4l2_subdev_ops sru_ops = {
 
 static void sru_configure(struct vsp1_entity *entity,
 			  struct vsp1_pipeline *pipe,
-			  struct vsp1_dl_list *dl,
-			  enum vsp1_entity_params params)
+			  struct vsp1_dl_list *dl)
 {
 	const struct vsp1_sru_param *param;
 	struct vsp1_sru *sru = to_sru(&entity->subdev);
 	struct v4l2_mbus_framefmt *input;
 	struct v4l2_mbus_framefmt *output;
 	u32 ctrl0;
-
-	if (params != VSP1_ENTITY_PARAMS_INIT)
-		return;
 
 	input = vsp1_entity_get_pad_format(&sru->entity, sru->entity.config,
 					   SRU_PAD_SINK);
@@ -306,27 +288,8 @@ static void sru_configure(struct vsp1_entity *entity,
 	vsp1_sru_write(sru, dl, VI6_SRU_CTRL2, param->ctrl2);
 }
 
-static unsigned int sru_max_width(struct vsp1_entity *entity,
-				  struct vsp1_pipeline *pipe)
-{
-	struct vsp1_sru *sru = to_sru(&entity->subdev);
-	struct v4l2_mbus_framefmt *input;
-	struct v4l2_mbus_framefmt *output;
-
-	input = vsp1_entity_get_pad_format(&sru->entity, sru->entity.config,
-					   SRU_PAD_SINK);
-	output = vsp1_entity_get_pad_format(&sru->entity, sru->entity.config,
-					    SRU_PAD_SOURCE);
-
-	if (input->width != output->width)
-		return 512;
-	else
-		return 256;
-}
-
 static const struct vsp1_entity_operations sru_entity_ops = {
 	.configure = sru_configure,
-	.max_width = sru_max_width,
 };
 
 /* -----------------------------------------------------------------------------
@@ -345,8 +308,7 @@ struct vsp1_sru *vsp1_sru_create(struct vsp1_device *vsp1)
 	sru->entity.ops = &sru_entity_ops;
 	sru->entity.type = VSP1_ENTITY_SRU;
 
-	ret = vsp1_entity_init(vsp1, &sru->entity, "sru", 2, &sru_ops,
-			       MEDIA_ENT_F_PROC_VIDEO_SCALER);
+	ret = vsp1_entity_init(vsp1, &sru->entity, "sru", 2, &sru_ops);
 	if (ret < 0)
 		return ERR_PTR(ret);
 

@@ -80,7 +80,6 @@ static void vc4_bo_destroy(struct vc4_bo *bo)
 	struct vc4_dev *vc4 = to_vc4_dev(obj->dev);
 
 	if (bo->validated_shader) {
-		kfree(bo->validated_shader->uniform_addr_offsets);
 		kfree(bo->validated_shader->texture_samples);
 		kfree(bo->validated_shader);
 		bo->validated_shader = NULL;
@@ -145,7 +144,7 @@ static struct list_head *vc4_get_cache_list_for_size(struct drm_device *dev,
 	return &vc4->bo_cache.size_list[page_index];
 }
 
-static void vc4_bo_cache_purge(struct drm_device *dev)
+void vc4_bo_cache_purge(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
@@ -292,6 +291,8 @@ static void vc4_bo_cache_free_old(struct drm_device *dev)
 
 /* Called on the last userspace/kernel unreference of the BO.  Returns
  * it to the BO cache if possible, otherwise frees it.
+ *
+ * Note that this is called with the struct_mutex held.
  */
 void vc4_free_object(struct drm_gem_object *gem_bo)
 {
@@ -314,14 +315,6 @@ void vc4_free_object(struct drm_gem_object *gem_bo)
 		goto out;
 	}
 
-	/* If this object was partially constructed but CMA allocation
-	 * had failed, just free it.
-	 */
-	if (!bo->base.vaddr) {
-		vc4_bo_destroy(bo);
-		goto out;
-	}
-
 	cache_list = vc4_get_cache_list_for_size(dev, gem_bo->size);
 	if (!cache_list) {
 		vc4_bo_destroy(bo);
@@ -329,7 +322,6 @@ void vc4_free_object(struct drm_gem_object *gem_bo)
 	}
 
 	if (bo->validated_shader) {
-		kfree(bo->validated_shader->uniform_addr_offsets);
 		kfree(bo->validated_shader->texture_samples);
 		kfree(bo->validated_shader);
 		bo->validated_shader = NULL;

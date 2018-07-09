@@ -24,7 +24,6 @@
 #include "xfs_bit.h"
 #include "xfs_sb.h"
 #include "xfs_mount.h"
-#include "xfs_defer.h"
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
 #include "xfs_inode.h"
@@ -42,9 +41,6 @@
 #include "xfs_trace.h"
 #include "xfs_icache.h"
 #include "xfs_sysfs.h"
-#include "xfs_rmap_btree.h"
-#include "xfs_refcount_btree.h"
-#include "xfs_reflink.h"
 
 
 static DEFINE_MUTEX(xfs_uuid_table_mutex);
@@ -234,8 +230,6 @@ xfs_initialize_perag(
 
 	if (maxagi)
 		*maxagi = index;
-
-	mp->m_ag_prealloc_blocks = xfs_prealloc_blocks(mp);
 	return 0;
 
 out_unwind:
@@ -278,15 +272,13 @@ xfs_readsb(
 	buf_ops = NULL;
 
 	/*
-	 * Allocate a (locked) buffer to hold the superblock. This will be kept
-	 * around at all times to optimize access to the superblock. Therefore,
-	 * set XBF_NO_IOACCT to make sure it doesn't hold the buftarg count
-	 * elevated.
+	 * Allocate a (locked) buffer to hold the superblock.
+	 * This will be kept around at all times to optimize
+	 * access to the superblock.
 	 */
 reread:
 	error = xfs_buf_read_uncached(mp->m_ddev_targp, XFS_SB_DADDR,
-				      BTOBB(sector_size), XBF_NO_IOACCT, &bp,
-				      buf_ops);
+				   BTOBB(sector_size), 0, &bp, buf_ops);
 	if (error) {
 		if (loud)
 			xfs_warn(mp, "SB validate failed with error %d.", error);
@@ -502,7 +494,8 @@ STATIC void
 xfs_set_inoalignment(xfs_mount_t *mp)
 {
 	if (xfs_sb_version_hasalign(&mp->m_sb) &&
-		mp->m_sb.sb_inoalignmt >= xfs_icluster_size_fsb(mp))
+	    mp->m_sb.sb_inoalignmt >=
+	    XFS_B_TO_FSBT(mp, mp->m_inode_cluster_size))
 		mp->m_inoalign_mask = mp->m_sb.sb_inoalignmt - 1;
 	else
 		mp->m_inoalign_mask = 0;
@@ -684,8 +677,6 @@ xfs_mountfs(
 	xfs_bmap_compute_maxlevels(mp, XFS_DATA_FORK);
 	xfs_bmap_compute_maxlevels(mp, XFS_ATTR_FORK);
 	xfs_ialloc_compute_maxlevels(mp);
-	xfs_rmapbt_compute_maxlevels(mp);
-	xfs_refcountbt_compute_maxlevels(mp);
 
 	xfs_set_maxicount(mp);
 
@@ -936,20 +927,6 @@ xfs_mountfs(
 	}
 
 	/*
-	 * Now the log is fully replayed, we can transition to full read-only
-	 * mode for read-only mounts. This will sync all the metadata and clean
-	 * the log so that the recovery we just performed does not have to be
-	 * replayed again on the next mount.
-	 *
-	 * We use the same quiesce mechanism as the rw->ro remount, as they are
-	 * semantically identical operations.
-	 */
-	if ((mp->m_flags & (XFS_MOUNT_RDONLY|XFS_MOUNT_NORECOVERY)) ==
-							XFS_MOUNT_RDONLY) {
-		xfs_quiesce_attr(mp);
-	}
-
-	/*
 	 * Complete the quota initialisation, post-log-replay component.
 	 */
 	if (quotamount) {
@@ -976,36 +953,16 @@ xfs_mountfs(
 		if (error)
 			xfs_warn(mp,
 	"Unable to allocate reserve blocks. Continuing without reserve pool.");
-
-		/* Recover any CoW blocks that never got remapped. */
-		error = xfs_reflink_recover_cow(mp);
-		if (error) {
-			xfs_err(mp,
-	"Error %d recovering leftover CoW allocations.", error);
-			xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
-			goto out_quota;
-		}
-
-		/* Reserve AG blocks for future btree expansion. */
-		error = xfs_fs_reserve_ag_blocks(mp);
-		if (error && error != -ENOSPC)
-			goto out_agresv;
 	}
 
 	return 0;
 
- out_agresv:
-	xfs_fs_unreserve_ag_blocks(mp);
- out_quota:
-	xfs_qm_unmount_quotas(mp);
  out_rtunmount:
 	xfs_rtunmount_inodes(mp);
  out_rele_rip:
 	IRELE(rip);
 	cancel_delayed_work_sync(&mp->m_reclaim_work);
 	xfs_reclaim_inodes(mp, SYNC_WAIT);
-	/* Clean out dquots that might be in memory after quotacheck. */
-	xfs_qm_unmount(mp);
  out_log_dealloc:
 	mp->m_flags |= XFS_MOUNT_UNMOUNTING;
 	xfs_log_mount_cancel(mp);
@@ -1041,9 +998,7 @@ xfs_unmountfs(
 	int			error;
 
 	cancel_delayed_work_sync(&mp->m_eofblocks_work);
-	cancel_delayed_work_sync(&mp->m_cowblocks_work);
 
-	xfs_fs_unreserve_ag_blocks(mp);
 	xfs_qm_unmount_quotas(mp);
 	xfs_rtunmount_inodes(mp);
 	IRELE(mp->m_rootip);
@@ -1259,7 +1214,7 @@ xfs_mod_fdblocks(
 		batch = XFS_FDBLOCKS_BATCH;
 
 	__percpu_counter_add(&mp->m_fdblocks, delta, batch);
-	if (__percpu_counter_compare(&mp->m_fdblocks, mp->m_alloc_set_aside,
+	if (__percpu_counter_compare(&mp->m_fdblocks, XFS_ALLOC_SET_ASIDE(mp),
 				     XFS_FDBLOCKS_BATCH) >= 0) {
 		/* we had space! */
 		return 0;

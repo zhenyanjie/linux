@@ -27,7 +27,7 @@
  *         mapping->i_mmap_rwsem
  *           anon_vma->rwsem
  *             mm->page_table_lock or pte_lock
- *               zone_lru_lock (in mark_page_accessed, isolate_lru_page)
+ *               zone->lru_lock (in mark_page_accessed, isolate_lru_page)
  *               swap_lock (in swap_duplicate, swap_info_get)
  *                 mmlist_lock (in mmput, drain_mmlist and others)
  *                 mapping->private_lock (in __set_page_dirty_buffers)
@@ -617,13 +617,6 @@ static void set_tlb_ubc_flush_pending(struct mm_struct *mm,
 	tlb_ubc->flush_required = true;
 
 	/*
-	 * Ensure compiler does not re-order the setting of tlb_flush_batched
-	 * before the PTE is cleared.
-	 */
-	barrier();
-	mm->tlb_flush_batched = true;
-
-	/*
 	 * If the PTE was dirty then it's best to assume it's writable. The
 	 * caller must use try_to_unmap_flush_dirty() or try_to_unmap_flush()
 	 * before the page is queued for IO.
@@ -649,35 +642,6 @@ static bool should_defer_flush(struct mm_struct *mm, enum ttu_flags flags)
 	put_cpu();
 
 	return should_defer;
-}
-
-/*
- * Reclaim unmaps pages under the PTL but do not flush the TLB prior to
- * releasing the PTL if TLB flushes are batched. It's possible for a parallel
- * operation such as mprotect or munmap to race between reclaim unmapping
- * the page and flushing the page. If this race occurs, it potentially allows
- * access to data via a stale TLB entry. Tracking all mm's that have TLB
- * batching in flight would be expensive during reclaim so instead track
- * whether TLB batching occurred in the past and if so then do a flush here
- * if required. This will cost one additional flush per reclaim cycle paid
- * by the first operation at risk such as mprotect and mumap.
- *
- * This must be called under the PTL so that an access to tlb_flush_batched
- * that is potentially a "reclaim vs mprotect/munmap/etc" race will synchronise
- * via the PTL.
- */
-void flush_tlb_batched_pending(struct mm_struct *mm)
-{
-	if (mm->tlb_flush_batched) {
-		flush_tlb_mm(mm);
-
-		/*
-		 * Do not allow the compiler to re-order the clearing of
-		 * tlb_flush_batched before the tlb is flushed.
-		 */
-		barrier();
-		mm->tlb_flush_batched = false;
-	}
 }
 #else
 static void set_tlb_ubc_flush_pending(struct mm_struct *mm,
@@ -1248,9 +1212,11 @@ void do_page_add_anon_rmap(struct page *page,
 		 * pte lock(a spinlock) is held, which implies preemption
 		 * disabled.
 		 */
-		if (compound)
-			__inc_node_page_state(page, NR_ANON_THPS);
-		__mod_node_page_state(page_pgdat(page), NR_ANON_MAPPED, nr);
+		if (compound) {
+			__inc_zone_page_state(page,
+					      NR_ANON_TRANSPARENT_HUGEPAGES);
+		}
+		__mod_zone_page_state(page_zone(page), NR_ANON_PAGES, nr);
 	}
 	if (unlikely(PageKsm(page)))
 		return;
@@ -1287,14 +1253,14 @@ void page_add_new_anon_rmap(struct page *page,
 		VM_BUG_ON_PAGE(!PageTransHuge(page), page);
 		/* increment count (starts at -1) */
 		atomic_set(compound_mapcount_ptr(page), 0);
-		__inc_node_page_state(page, NR_ANON_THPS);
+		__inc_zone_page_state(page, NR_ANON_TRANSPARENT_HUGEPAGES);
 	} else {
 		/* Anon THP always mapped first with PMD */
 		VM_BUG_ON_PAGE(PageTransCompound(page), page);
 		/* increment count (starts at -1) */
 		atomic_set(&page->_mapcount, 0);
 	}
-	__mod_node_page_state(page_pgdat(page), NR_ANON_MAPPED, nr);
+	__mod_zone_page_state(page_zone(page), NR_ANON_PAGES, nr);
 	__page_set_anon_rmap(page, vma, address, 1);
 }
 
@@ -1304,43 +1270,18 @@ void page_add_new_anon_rmap(struct page *page,
  *
  * The caller needs to hold the pte lock.
  */
-void page_add_file_rmap(struct page *page, bool compound)
+void page_add_file_rmap(struct page *page)
 {
-	int i, nr = 1;
-
-	VM_BUG_ON_PAGE(compound && !PageTransHuge(page), page);
 	lock_page_memcg(page);
-	if (compound && PageTransHuge(page)) {
-		for (i = 0, nr = 0; i < HPAGE_PMD_NR; i++) {
-			if (atomic_inc_and_test(&page[i]._mapcount))
-				nr++;
-		}
-		if (!atomic_inc_and_test(compound_mapcount_ptr(page)))
-			goto out;
-		VM_BUG_ON_PAGE(!PageSwapBacked(page), page);
-		__inc_node_page_state(page, NR_SHMEM_PMDMAPPED);
-	} else {
-		if (PageTransCompound(page) && page_mapping(page)) {
-			VM_WARN_ON_ONCE(!PageLocked(page));
-
-			SetPageDoubleMap(compound_head(page));
-			if (PageMlocked(page))
-				clear_page_mlock(compound_head(page));
-		}
-		if (!atomic_inc_and_test(&page->_mapcount))
-			goto out;
+	if (atomic_inc_and_test(&page->_mapcount)) {
+		__inc_zone_page_state(page, NR_FILE_MAPPED);
+		mem_cgroup_inc_page_stat(page, MEM_CGROUP_STAT_FILE_MAPPED);
 	}
-	__mod_node_page_state(page_pgdat(page), NR_FILE_MAPPED, nr);
-	mem_cgroup_update_page_stat(page, MEM_CGROUP_STAT_FILE_MAPPED, nr);
-out:
 	unlock_page_memcg(page);
 }
 
-static void page_remove_file_rmap(struct page *page, bool compound)
+static void page_remove_file_rmap(struct page *page)
 {
-	int i, nr = 1;
-
-	VM_BUG_ON_PAGE(compound && !PageHead(page), page);
 	lock_page_memcg(page);
 
 	/* Hugepages are not counted in NR_FILE_MAPPED for now. */
@@ -1351,27 +1292,16 @@ static void page_remove_file_rmap(struct page *page, bool compound)
 	}
 
 	/* page still mapped by someone else? */
-	if (compound && PageTransHuge(page)) {
-		for (i = 0, nr = 0; i < HPAGE_PMD_NR; i++) {
-			if (atomic_add_negative(-1, &page[i]._mapcount))
-				nr++;
-		}
-		if (!atomic_add_negative(-1, compound_mapcount_ptr(page)))
-			goto out;
-		VM_BUG_ON_PAGE(!PageSwapBacked(page), page);
-		__dec_node_page_state(page, NR_SHMEM_PMDMAPPED);
-	} else {
-		if (!atomic_add_negative(-1, &page->_mapcount))
-			goto out;
-	}
+	if (!atomic_add_negative(-1, &page->_mapcount))
+		goto out;
 
 	/*
-	 * We use the irq-unsafe __{inc|mod}_zone_page_state because
+	 * We use the irq-unsafe __{inc|mod}_zone_page_stat because
 	 * these counters are not modified in interrupt context, and
 	 * pte lock(a spinlock) is held, which implies preemption disabled.
 	 */
-	__mod_node_page_state(page_pgdat(page), NR_FILE_MAPPED, -nr);
-	mem_cgroup_update_page_stat(page, MEM_CGROUP_STAT_FILE_MAPPED, -nr);
+	__dec_zone_page_state(page, NR_FILE_MAPPED);
+	mem_cgroup_dec_page_stat(page, MEM_CGROUP_STAT_FILE_MAPPED);
 
 	if (unlikely(PageMlocked(page)))
 		clear_page_mlock(page);
@@ -1393,7 +1323,7 @@ static void page_remove_anon_compound_rmap(struct page *page)
 	if (!IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE))
 		return;
 
-	__dec_node_page_state(page, NR_ANON_THPS);
+	__dec_zone_page_state(page, NR_ANON_TRANSPARENT_HUGEPAGES);
 
 	if (TestClearPageDoubleMap(page)) {
 		/*
@@ -1412,7 +1342,7 @@ static void page_remove_anon_compound_rmap(struct page *page)
 		clear_page_mlock(page);
 
 	if (nr) {
-		__mod_node_page_state(page_pgdat(page), NR_ANON_MAPPED, -nr);
+		__mod_zone_page_state(page_zone(page), NR_ANON_PAGES, -nr);
 		deferred_split_huge_page(page);
 	}
 }
@@ -1426,8 +1356,11 @@ static void page_remove_anon_compound_rmap(struct page *page)
  */
 void page_remove_rmap(struct page *page, bool compound)
 {
-	if (!PageAnon(page))
-		return page_remove_file_rmap(page, compound);
+	if (!PageAnon(page)) {
+		VM_BUG_ON_PAGE(compound && !PageHuge(page), page);
+		page_remove_file_rmap(page);
+		return;
+	}
 
 	if (compound)
 		return page_remove_anon_compound_rmap(page);
@@ -1441,7 +1374,7 @@ void page_remove_rmap(struct page *page, bool compound)
 	 * these counters are not modified in interrupt context, and
 	 * pte lock(a spinlock) is held, which implies preemption disabled.
 	 */
-	__dec_node_page_state(page, NR_ANON_MAPPED);
+	__dec_zone_page_state(page, NR_ANON_PAGES);
 
 	if (unlikely(PageMlocked(page)))
 		clear_page_mlock(page);
@@ -1503,14 +1436,8 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	 */
 	if (!(flags & TTU_IGNORE_MLOCK)) {
 		if (vma->vm_flags & VM_LOCKED) {
-			/* PTE-mapped THP are never mlocked */
-			if (!PageTransCompound(page)) {
-				/*
-				 * Holding pte lock, we do *not* need
-				 * mmap_sem here
-				 */
-				mlock_vma_page(page);
-			}
+			/* Holding pte lock, we do *not* need mmap_sem here */
+			mlock_vma_page(page);
 			ret = SWAP_MLOCK;
 			goto out_unmap;
 		}

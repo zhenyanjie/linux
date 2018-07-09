@@ -68,7 +68,6 @@
 			device_type = "cpu";
 			reg = <0x0>;
 			enable-method = "psci";
-			next-level-cache = <&l2>;
 			cpu-idle-states = <&CPU_SLEEP_0>;
 		};
 
@@ -77,7 +76,6 @@
 			device_type = "cpu";
 			reg = <0x1>;
 			enable-method = "psci";
-			next-level-cache = <&l2>;
 			cpu-idle-states = <&CPU_SLEEP_0>;
 		};
 
@@ -86,7 +84,6 @@
 			device_type = "cpu";
 			reg = <0x2>;
 			enable-method = "psci";
-			next-level-cache = <&l2>;
 			cpu-idle-states = <&CPU_SLEEP_0>;
 		};
 
@@ -95,12 +92,7 @@
 			device_type = "cpu";
 			reg = <0x3>;
 			enable-method = "psci";
-			next-level-cache = <&l2>;
 			cpu-idle-states = <&CPU_SLEEP_0>;
-		};
-
-		l2: cache {
-			compatible = "cache";
 		};
 
 		idle-states {
@@ -123,7 +115,7 @@
 	};
 
 	pmu {
-		compatible = "arm,cortex-a53-pmu", "arm,armv8-pmuv3";
+		compatible = "arm,armv8-pmuv3";
 		interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>,
@@ -287,6 +279,7 @@
 				reg = <0x4000 0x100>;
 				clocks = <&osc>;
 				interrupts = <1>;
+				status = "disabled";
 			};
 
 			wdt2: watchdog@5000 {
@@ -294,6 +287,7 @@
 				reg = <0x5000 0x100>;
 				clocks = <&osc>;
 				interrupts = <2>;
+				status = "disabled";
 			};
 
 			sm_gpio0: gpio@8000 {

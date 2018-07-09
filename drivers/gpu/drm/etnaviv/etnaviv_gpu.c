@@ -22,6 +22,8 @@
 #include "etnaviv_gpu.h"
 #include "etnaviv_gem.h"
 #include "etnaviv_mmu.h"
+#include "etnaviv_iommu.h"
+#include "etnaviv_iommu_v2.h"
 #include "common.xml.h"
 #include "state.xml.h"
 #include "state_hi.xml.h"
@@ -327,18 +329,6 @@ static void etnaviv_hw_identify(struct etnaviv_gpu *gpu)
 				gpu->identity.revision = 0x1051;
 			}
 		}
-
-		/*
-		 * NXP likes to call the GPU on the i.MX6QP GC2000+, but in
-		 * reality it's just a re-branded GC3000. We can identify this
-		 * core by the upper half of the revision register being all 1.
-		 * Fix model/rev here, so all other places can refer to this
-		 * core by its real identity.
-		 */
-		if (etnaviv_is_model_rev(gpu, GC2000, 0xffff5450)) {
-			gpu->identity.model = chipModel_GC3000;
-			gpu->identity.revision &= 0xffff;
-		}
 	}
 
 	dev_info(gpu->dev, "model: GC%x, revision: %x\n",
@@ -497,55 +487,6 @@ static int etnaviv_hw_reset(struct etnaviv_gpu *gpu)
 	return 0;
 }
 
-static void etnaviv_gpu_enable_mlcg(struct etnaviv_gpu *gpu)
-{
-	u32 pmc, ppc;
-
-	/* enable clock gating */
-	ppc = gpu_read(gpu, VIVS_PM_POWER_CONTROLS);
-	ppc |= VIVS_PM_POWER_CONTROLS_ENABLE_MODULE_CLOCK_GATING;
-
-	/* Disable stall module clock gating for 4.3.0.1 and 4.3.0.2 revs */
-	if (gpu->identity.revision == 0x4301 ||
-	    gpu->identity.revision == 0x4302)
-		ppc |= VIVS_PM_POWER_CONTROLS_DISABLE_STALL_MODULE_CLOCK_GATING;
-
-	gpu_write(gpu, VIVS_PM_POWER_CONTROLS, ppc);
-
-	pmc = gpu_read(gpu, VIVS_PM_MODULE_CONTROLS);
-
-	/* Disable PA clock gating for GC400+ except for GC420 */
-	if (gpu->identity.model >= chipModel_GC400 &&
-	    gpu->identity.model != chipModel_GC420)
-		pmc |= VIVS_PM_MODULE_CONTROLS_DISABLE_MODULE_CLOCK_GATING_PA;
-
-	/*
-	 * Disable PE clock gating on revs < 5.0.0.0 when HZ is
-	 * present without a bug fix.
-	 */
-	if (gpu->identity.revision < 0x5000 &&
-	    gpu->identity.minor_features0 & chipMinorFeatures0_HZ &&
-	    !(gpu->identity.minor_features1 &
-	      chipMinorFeatures1_DISABLE_PE_GATING))
-		pmc |= VIVS_PM_MODULE_CONTROLS_DISABLE_MODULE_CLOCK_GATING_PE;
-
-	if (gpu->identity.revision < 0x5422)
-		pmc |= BIT(15); /* Unknown bit */
-
-	pmc |= VIVS_PM_MODULE_CONTROLS_DISABLE_MODULE_CLOCK_GATING_RA_HZ;
-	pmc |= VIVS_PM_MODULE_CONTROLS_DISABLE_MODULE_CLOCK_GATING_RA_EZ;
-
-	gpu_write(gpu, VIVS_PM_MODULE_CONTROLS, pmc);
-}
-
-void etnaviv_gpu_start_fe(struct etnaviv_gpu *gpu, u32 address, u16 prefetch)
-{
-	gpu_write(gpu, VIVS_FE_COMMAND_ADDRESS, address);
-	gpu_write(gpu, VIVS_FE_COMMAND_CONTROL,
-		  VIVS_FE_COMMAND_CONTROL_ENABLE |
-		  VIVS_FE_COMMAND_CONTROL_PREFETCH(prefetch));
-}
-
 static void etnaviv_gpu_hw_init(struct etnaviv_gpu *gpu)
 {
 	u16 prefetch;
@@ -565,9 +506,6 @@ static void etnaviv_gpu_hw_init(struct etnaviv_gpu *gpu)
 		gpu_write(gpu, VIVS_MC_DEBUG_MEMORY, mc_memory_debug);
 	}
 
-	/* enable module-level clock gating */
-	etnaviv_gpu_enable_mlcg(gpu);
-
 	/*
 	 * Update GPU AXI cache atttribute to "cacheable, no allocate".
 	 * This is necessary to prevent the iMX6 SoC locking up.
@@ -586,26 +524,37 @@ static void etnaviv_gpu_hw_init(struct etnaviv_gpu *gpu)
 		gpu_write(gpu, VIVS_MC_BUS_CONFIG, bus_config);
 	}
 
-	/* setup the MMU */
-	etnaviv_iommu_restore(gpu);
+	/* set base addresses */
+	gpu_write(gpu, VIVS_MC_MEMORY_BASE_ADDR_RA, gpu->memory_base);
+	gpu_write(gpu, VIVS_MC_MEMORY_BASE_ADDR_FE, gpu->memory_base);
+	gpu_write(gpu, VIVS_MC_MEMORY_BASE_ADDR_TX, gpu->memory_base);
+	gpu_write(gpu, VIVS_MC_MEMORY_BASE_ADDR_PEZ, gpu->memory_base);
+	gpu_write(gpu, VIVS_MC_MEMORY_BASE_ADDR_PE, gpu->memory_base);
+
+	/* setup the MMU page table pointers */
+	etnaviv_iommu_domain_restore(gpu, gpu->mmu->domain);
 
 	/* Start command processor */
 	prefetch = etnaviv_buffer_init(gpu);
 
 	gpu_write(gpu, VIVS_HI_INTR_ENBL, ~0U);
-	etnaviv_gpu_start_fe(gpu, etnaviv_iommu_get_cmdbuf_va(gpu, gpu->buffer),
-			     prefetch);
+	gpu_write(gpu, VIVS_FE_COMMAND_ADDRESS,
+		  gpu->buffer->paddr - gpu->memory_base);
+	gpu_write(gpu, VIVS_FE_COMMAND_CONTROL,
+		  VIVS_FE_COMMAND_CONTROL_ENABLE |
+		  VIVS_FE_COMMAND_CONTROL_PREFETCH(prefetch));
 }
 
 int etnaviv_gpu_init(struct etnaviv_gpu *gpu)
 {
 	int ret, i;
+	struct iommu_domain *iommu;
+	enum etnaviv_iommu_version version;
+	bool mmuv2;
 
 	ret = pm_runtime_get_sync(gpu->dev);
-	if (ret < 0) {
-		dev_err(gpu->dev, "Failed to enable GPU power domain\n");
+	if (ret < 0)
 		return ret;
-	}
 
 	etnaviv_hw_identify(gpu);
 
@@ -642,15 +591,33 @@ int etnaviv_gpu_init(struct etnaviv_gpu *gpu)
 	}
 
 	ret = etnaviv_hw_reset(gpu);
-	if (ret) {
-		dev_err(gpu->dev, "GPU reset failed\n");
+	if (ret)
+		goto fail;
+
+	/* Setup IOMMU.. eventually we will (I think) do this once per context
+	 * and have separate page tables per context.  For now, to keep things
+	 * simple and to get something working, just use a single address space:
+	 */
+	mmuv2 = gpu->identity.minor_features1 & chipMinorFeatures1_MMU_VERSION;
+	dev_dbg(gpu->dev, "mmuv2: %d\n", mmuv2);
+
+	if (!mmuv2) {
+		iommu = etnaviv_iommu_domain_alloc(gpu);
+		version = ETNAVIV_IOMMU_V1;
+	} else {
+		iommu = etnaviv_iommu_v2_domain_alloc(gpu);
+		version = ETNAVIV_IOMMU_V2;
+	}
+
+	if (!iommu) {
+		ret = -ENOMEM;
 		goto fail;
 	}
 
-	gpu->mmu = etnaviv_iommu_new(gpu);
-	if (IS_ERR(gpu->mmu)) {
-		dev_err(gpu->dev, "Failed to instantiate GPU IOMMU\n");
-		ret = PTR_ERR(gpu->mmu);
+	gpu->mmu = etnaviv_iommu_new(gpu, iommu, version);
+	if (!gpu->mmu) {
+		iommu_domain_free(iommu);
+		ret = -ENOMEM;
 		goto fail;
 	}
 
@@ -661,9 +628,7 @@ int etnaviv_gpu_init(struct etnaviv_gpu *gpu)
 		dev_err(gpu->dev, "could not create command buffer\n");
 		goto destroy_iommu;
 	}
-
-	if (gpu->mmu->version == ETNAVIV_IOMMU_V1 &&
-	    gpu->buffer->paddr - gpu->memory_base > 0x80000000) {
+	if (gpu->buffer->paddr - gpu->memory_base > 0x80000000) {
 		ret = -EINVAL;
 		dev_err(gpu->dev,
 			"command buffer outside valid memory window\n");
@@ -853,6 +818,45 @@ int etnaviv_gpu_debugfs(struct etnaviv_gpu *gpu, struct seq_file *m)
 #endif
 
 /*
+ * Power Management:
+ */
+static int enable_clk(struct etnaviv_gpu *gpu)
+{
+	if (gpu->clk_core)
+		clk_prepare_enable(gpu->clk_core);
+	if (gpu->clk_shader)
+		clk_prepare_enable(gpu->clk_shader);
+
+	return 0;
+}
+
+static int disable_clk(struct etnaviv_gpu *gpu)
+{
+	if (gpu->clk_core)
+		clk_disable_unprepare(gpu->clk_core);
+	if (gpu->clk_shader)
+		clk_disable_unprepare(gpu->clk_shader);
+
+	return 0;
+}
+
+static int enable_axi(struct etnaviv_gpu *gpu)
+{
+	if (gpu->clk_bus)
+		clk_prepare_enable(gpu->clk_bus);
+
+	return 0;
+}
+
+static int disable_axi(struct etnaviv_gpu *gpu)
+{
+	if (gpu->clk_bus)
+		clk_disable_unprepare(gpu->clk_bus);
+
+	return 0;
+}
+
+/*
  * Hangcheck detection for locked gpu:
  */
 static void recover_worker(struct work_struct *work)
@@ -891,7 +895,7 @@ static void recover_worker(struct work_struct *work)
 	gpu->completed_fence = gpu->active_fence;
 
 	etnaviv_gpu_hw_init(gpu);
-	gpu->lastctx = NULL;
+	gpu->switch_context = true;
 	gpu->exec_state = -1;
 
 	mutex_unlock(&gpu->lock);
@@ -1124,9 +1128,6 @@ struct etnaviv_cmdbuf *etnaviv_gpu_cmdbuf_new(struct etnaviv_gpu *gpu, u32 size,
 	if (!cmdbuf)
 		return NULL;
 
-	if (gpu->mmu->version == ETNAVIV_IOMMU_V2)
-		size = ALIGN(size, SZ_4K);
-
 	cmdbuf->vaddr = dma_alloc_wc(gpu->dev, size, &cmdbuf->paddr,
 				     GFP_KERNEL);
 	if (!cmdbuf->vaddr) {
@@ -1142,7 +1143,6 @@ struct etnaviv_cmdbuf *etnaviv_gpu_cmdbuf_new(struct etnaviv_gpu *gpu, u32 size,
 
 void etnaviv_gpu_cmdbuf_free(struct etnaviv_cmdbuf *cmdbuf)
 {
-	etnaviv_iommu_put_cmdbuf_va(cmdbuf->gpu, cmdbuf);
 	dma_free_wc(cmdbuf->gpu->dev, cmdbuf->size, cmdbuf->vaddr,
 		    cmdbuf->paddr);
 	kfree(cmdbuf);
@@ -1283,6 +1283,8 @@ int etnaviv_gpu_submit(struct etnaviv_gpu *gpu,
 	if (ret < 0)
 		return ret;
 
+	mutex_lock(&gpu->lock);
+
 	/*
 	 * TODO
 	 *
@@ -1296,10 +1298,8 @@ int etnaviv_gpu_submit(struct etnaviv_gpu *gpu,
 	if (unlikely(event == ~0U)) {
 		DRM_ERROR("no free event\n");
 		ret = -EBUSY;
-		goto out_pm_put;
+		goto out_unlock;
 	}
-
-	mutex_lock(&gpu->lock);
 
 	fence = etnaviv_gpu_fence_alloc(gpu);
 	if (!fence) {
@@ -1348,7 +1348,6 @@ int etnaviv_gpu_submit(struct etnaviv_gpu *gpu,
 out_unlock:
 	mutex_unlock(&gpu->lock);
 
-out_pm_put:
 	etnaviv_gpu_pm_put(gpu);
 
 	return ret;
@@ -1374,21 +1373,6 @@ static irqreturn_t irq_handler(int irq, void *data)
 		if (intr & VIVS_HI_INTR_ACKNOWLEDGE_AXI_BUS_ERROR) {
 			dev_err(gpu->dev, "AXI bus error\n");
 			intr &= ~VIVS_HI_INTR_ACKNOWLEDGE_AXI_BUS_ERROR;
-		}
-
-		if (intr & VIVS_HI_INTR_ACKNOWLEDGE_MMU_EXCEPTION) {
-			int i;
-
-			dev_err_ratelimited(gpu->dev,
-				"MMU fault status 0x%08x\n",
-				gpu_read(gpu, VIVS_MMUv2_STATUS));
-			for (i = 0; i < 4; i++) {
-				dev_err_ratelimited(gpu->dev,
-					"MMU %d fault addr 0x%08x\n",
-					i, gpu_read(gpu,
-					VIVS_MMUv2_EXCEPTION_ADDR(i)));
-			}
-			intr &= ~VIVS_HI_INTR_ACKNOWLEDGE_MMU_EXCEPTION;
 		}
 
 		while ((event = ffs(intr)) != 0) {
@@ -1432,72 +1416,39 @@ static int etnaviv_gpu_clk_enable(struct etnaviv_gpu *gpu)
 {
 	int ret;
 
-	if (gpu->clk_bus) {
-		ret = clk_prepare_enable(gpu->clk_bus);
-		if (ret)
-			return ret;
-	}
+	ret = enable_clk(gpu);
+	if (ret)
+		return ret;
 
-	if (gpu->clk_core) {
-		ret = clk_prepare_enable(gpu->clk_core);
-		if (ret)
-			goto disable_clk_bus;
-	}
-
-	if (gpu->clk_shader) {
-		ret = clk_prepare_enable(gpu->clk_shader);
-		if (ret)
-			goto disable_clk_core;
+	ret = enable_axi(gpu);
+	if (ret) {
+		disable_clk(gpu);
+		return ret;
 	}
 
 	return 0;
-
-disable_clk_core:
-	if (gpu->clk_core)
-		clk_disable_unprepare(gpu->clk_core);
-disable_clk_bus:
-	if (gpu->clk_bus)
-		clk_disable_unprepare(gpu->clk_bus);
-
-	return ret;
 }
 
 static int etnaviv_gpu_clk_disable(struct etnaviv_gpu *gpu)
 {
-	if (gpu->clk_shader)
-		clk_disable_unprepare(gpu->clk_shader);
-	if (gpu->clk_core)
-		clk_disable_unprepare(gpu->clk_core);
-	if (gpu->clk_bus)
-		clk_disable_unprepare(gpu->clk_bus);
+	int ret;
+
+	ret = disable_axi(gpu);
+	if (ret)
+		return ret;
+
+	ret = disable_clk(gpu);
+	if (ret)
+		return ret;
 
 	return 0;
-}
-
-int etnaviv_gpu_wait_idle(struct etnaviv_gpu *gpu, unsigned int timeout_ms)
-{
-	unsigned long timeout = jiffies + msecs_to_jiffies(timeout_ms);
-
-	do {
-		u32 idle = gpu_read(gpu, VIVS_HI_IDLE_STATE);
-
-		if ((idle & gpu->idle_mask) == gpu->idle_mask)
-			return 0;
-
-		if (time_is_before_jiffies(timeout)) {
-			dev_warn(gpu->dev,
-				 "timed out waiting for idle: idle=0x%x\n",
-				 idle);
-			return -ETIMEDOUT;
-		}
-
-		udelay(5);
-	} while (1);
 }
 
 static int etnaviv_gpu_hw_suspend(struct etnaviv_gpu *gpu)
 {
 	if (gpu->buffer) {
+		unsigned long timeout;
+
 		/* Replace the last WAIT with END */
 		etnaviv_buffer_end(gpu);
 
@@ -1506,7 +1457,22 @@ static int etnaviv_gpu_hw_suspend(struct etnaviv_gpu *gpu)
 		 * happen quickly (as the WAIT is only 200 cycles).  If
 		 * we fail, just warn and continue.
 		 */
-		etnaviv_gpu_wait_idle(gpu, 100);
+		timeout = jiffies + msecs_to_jiffies(100);
+		do {
+			u32 idle = gpu_read(gpu, VIVS_HI_IDLE_STATE);
+
+			if ((idle & gpu->idle_mask) == gpu->idle_mask)
+				break;
+
+			if (time_is_before_jiffies(timeout)) {
+				dev_warn(gpu->dev,
+					 "timed out waiting for idle: idle=0x%x\n",
+					 idle);
+				break;
+			}
+
+			udelay(5);
+		} while (1);
 	}
 
 	return etnaviv_gpu_clk_disable(gpu);
@@ -1618,7 +1584,7 @@ static int etnaviv_gpu_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct etnaviv_gpu *gpu;
-	int err;
+	int err = 0;
 
 	gpu = devm_kzalloc(dev, sizeof(*gpu), GFP_KERNEL);
 	if (!gpu)
@@ -1635,15 +1601,16 @@ static int etnaviv_gpu_platform_probe(struct platform_device *pdev)
 	/* Get Interrupt: */
 	gpu->irq = platform_get_irq(pdev, 0);
 	if (gpu->irq < 0) {
-		dev_err(dev, "failed to get irq: %d\n", gpu->irq);
-		return gpu->irq;
+		err = gpu->irq;
+		dev_err(dev, "failed to get irq: %d\n", err);
+		goto fail;
 	}
 
 	err = devm_request_irq(&pdev->dev, gpu->irq, irq_handler, 0,
 			       dev_name(gpu->dev), gpu);
 	if (err) {
 		dev_err(dev, "failed to request IRQ%u: %d\n", gpu->irq, err);
-		return err;
+		goto fail;
 	}
 
 	/* Get Clocks: */
@@ -1677,10 +1644,13 @@ static int etnaviv_gpu_platform_probe(struct platform_device *pdev)
 	err = component_add(&pdev->dev, &gpu_ops);
 	if (err < 0) {
 		dev_err(&pdev->dev, "failed to register component: %d\n", err);
-		return err;
+		goto fail;
 	}
 
 	return 0;
+
+fail:
+	return err;
 }
 
 static int etnaviv_gpu_platform_remove(struct platform_device *pdev)

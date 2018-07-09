@@ -43,9 +43,9 @@
 #include <linux/err.h>
 #include <linux/filter.h>
 #include <linux/audit.h>
+#include <sys/ptrace.h>
 #include <linux/random.h>
 #include <linux/stringify.h>
-#include <linux/time64.h>
 
 #ifndef O_CLOEXEC
 # define O_CLOEXEC		02000000
@@ -333,10 +333,6 @@ static size_t syscall_arg__scnprintf_fd(char *bf, size_t size,
 					struct syscall_arg *arg);
 
 #define SCA_FD syscall_arg__scnprintf_fd
-
-#ifndef AT_FDCWD
-#define AT_FDCWD	-100
-#endif
 
 static size_t syscall_arg__scnprintf_fd_at(char *bf, size_t size,
 					   struct syscall_arg *arg)
@@ -679,10 +675,6 @@ static struct syscall_fmt {
 	{ .name	    = "mlockall",   .errmsg = true,
 	  .arg_scnprintf = { [0] = SCA_HEX, /* addr */ }, },
 	{ .name	    = "mmap",	    .hexret = true,
-/* The standard mmap maps to old_mmap on s390x */
-#if defined(__s390x__)
-	.alias = "old_mmap",
-#endif
 	  .arg_scnprintf = { [0] = SCA_HEX,	  /* addr */
 			     [2] = SCA_MMAP_PROT, /* prot */
 			     [3] = SCA_MMAP_FLAGS, /* flags */ }, },
@@ -746,8 +738,6 @@ static struct syscall_fmt {
 	  .arg_scnprintf = { [1] = SCA_SIGNUM, /* sig */ }, },
 	{ .name	    = "rt_tgsigqueueinfo", .errmsg = true,
 	  .arg_scnprintf = { [2] = SCA_SIGNUM, /* sig */ }, },
-	{ .name	    = "sched_getattr",	      .errmsg = true, },
-	{ .name	    = "sched_setattr",	      .errmsg = true, },
 	{ .name	    = "sched_setscheduler",   .errmsg = true,
 	  .arg_scnprintf = { [1] = SCA_SCHED_POLICY, /* policy */ }, },
 	{ .name	    = "seccomp", .errmsg = true,
@@ -826,21 +816,12 @@ struct syscall {
 	void		    **arg_parm;
 };
 
-/*
- * We need to have this 'calculated' boolean because in some cases we really
- * don't know what is the duration of a syscall, for instance, when we start
- * a session and some threads are waiting for a syscall to finish, say 'poll',
- * in which case all we can do is to print "( ? ) for duration and for the
- * start timestamp.
- */
-static size_t fprintf_duration(unsigned long t, bool calculated, FILE *fp)
+static size_t fprintf_duration(unsigned long t, FILE *fp)
 {
 	double duration = (double)t / NSEC_PER_MSEC;
 	size_t printed = fprintf(fp, "(");
 
-	if (!calculated)
-		printed += fprintf(fp, "     ?   ");
-	else if (duration >= 1.0)
+	if (duration >= 1.0)
 		printed += color_fprintf(fp, PERF_COLOR_RED, "%6.3f ms", duration);
 	else if (duration >= 0.01)
 		printed += color_fprintf(fp, PERF_COLOR_YELLOW, "%6.3f ms", duration);
@@ -1043,25 +1024,11 @@ static bool trace__filter_duration(struct trace *trace, double t)
 	return t < (trace->duration_filter * NSEC_PER_MSEC);
 }
 
-static size_t __trace__fprintf_tstamp(struct trace *trace, u64 tstamp, FILE *fp)
+static size_t trace__fprintf_tstamp(struct trace *trace, u64 tstamp, FILE *fp)
 {
 	double ts = (double)(tstamp - trace->base_time) / NSEC_PER_MSEC;
 
 	return fprintf(fp, "%10.3f ", ts);
-}
-
-/*
- * We're handling tstamp=0 as an undefined tstamp, i.e. like when we are
- * using ttrace->entry_time for a thread that receives a sys_exit without
- * first having received a sys_enter ("poll" issued before tracing session
- * starts, lost sys_enter exit due to ring buffer overflow).
- */
-static size_t trace__fprintf_tstamp(struct trace *trace, u64 tstamp, FILE *fp)
-{
-	if (tstamp > 0)
-		return __trace__fprintf_tstamp(trace, tstamp, fp);
-
-	return fprintf(fp, "         ? ");
 }
 
 static bool done = false;
@@ -1074,10 +1041,10 @@ static void sig_handler(int sig)
 }
 
 static size_t trace__fprintf_entry_head(struct trace *trace, struct thread *thread,
-					u64 duration, bool duration_calculated, u64 tstamp, FILE *fp)
+					u64 duration, u64 tstamp, FILE *fp)
 {
 	size_t printed = trace__fprintf_tstamp(trace, tstamp, fp);
-	printed += fprintf_duration(duration, duration_calculated, fp);
+	printed += fprintf_duration(duration, fp);
 
 	if (trace->multiple_threads) {
 		if (trace->show_comm)
@@ -1280,7 +1247,7 @@ static int trace__validate_ev_qualifier(struct trace *trace)
 
 	i = 0;
 
-	strlist__for_each_entry(pos, trace->ev_qualifier) {
+	strlist__for_each(pos, trace->ev_qualifier) {
 		const char *sc = pos->s;
 		int id = syscalltbl__id(trace->sctbl, sc);
 
@@ -1479,7 +1446,7 @@ static int trace__printf_interrupted_entry(struct trace *trace, struct perf_samp
 
 	duration = sample->time - ttrace->entry_time;
 
-	printed  = trace__fprintf_entry_head(trace, trace->current, duration, true, ttrace->entry_time, trace->output);
+	printed  = trace__fprintf_entry_head(trace, trace->current, duration, sample->time, trace->output);
 	printed += fprintf(trace->output, "%-70s) ...\n", ttrace->entry_str);
 	ttrace->entry_pending = false;
 
@@ -1526,7 +1493,7 @@ static int trace__sys_enter(struct trace *trace, struct perf_evsel *evsel,
 
 	if (sc->is_exit) {
 		if (!(trace->duration_filter || trace->summary_only || trace->min_stack)) {
-			trace__fprintf_entry_head(trace, thread, 0, false, ttrace->entry_time, trace->output);
+			trace__fprintf_entry_head(trace, thread, 1, sample->time, trace->output);
 			fprintf(trace->output, "%-70s)\n", ttrace->entry_str);
 		}
 	} else {
@@ -1574,7 +1541,6 @@ static int trace__sys_exit(struct trace *trace, struct perf_evsel *evsel,
 {
 	long ret;
 	u64 duration = 0;
-	bool duration_calculated = false;
 	struct thread *thread;
 	int id = perf_evsel__sc_tp_uint(evsel, id, sample), err = -1, callchain_ret = 0;
 	struct syscall *sc = trace__syscall_info(trace, evsel, id);
@@ -1605,7 +1571,6 @@ static int trace__sys_exit(struct trace *trace, struct perf_evsel *evsel,
 		duration = sample->time - ttrace->entry_time;
 		if (trace__filter_duration(trace, duration))
 			goto out;
-		duration_calculated = true;
 	} else if (trace->duration_filter)
 		goto out;
 
@@ -1621,7 +1586,7 @@ static int trace__sys_exit(struct trace *trace, struct perf_evsel *evsel,
 	if (trace->summary_only)
 		goto out;
 
-	trace__fprintf_entry_head(trace, thread, duration, duration_calculated, ttrace->entry_time, trace->output);
+	trace__fprintf_entry_head(trace, thread, duration, sample->time, trace->output);
 
 	if (ttrace->entry_pending) {
 		fprintf(trace->output, "%-70s", ttrace->entry_str);
@@ -1636,7 +1601,7 @@ signed_print:
 		fprintf(trace->output, ") = %ld", ret);
 	} else if (ret < 0 && (sc->fmt->errmsg || sc->fmt->errpid)) {
 		char bf[STRERR_BUFSIZE];
-		const char *emsg = str_error_r(-ret, bf, sizeof(bf)),
+		const char *emsg = strerror_r(-ret, bf, sizeof(bf)),
 			   *e = audit_errno_to_name(-ret);
 
 		fprintf(trace->output, ") = -1 %s %s", e, emsg);
@@ -1884,7 +1849,7 @@ static int trace__pgfault(struct trace *trace,
 	thread__find_addr_location(thread, sample->cpumode, MAP__FUNCTION,
 			      sample->ip, &al);
 
-	trace__fprintf_entry_head(trace, thread, 0, true, sample->time, trace->output);
+	trace__fprintf_entry_head(trace, thread, 0, sample->time, trace->output);
 
 	fprintf(trace->output, "%sfault [",
 		evsel->attr.config == PERF_COUNT_SW_PAGE_FAULTS_MAJ ?
@@ -2172,7 +2137,6 @@ out_delete_sys_enter:
 static int trace__set_ev_qualifier_filter(struct trace *trace)
 {
 	int err = -1;
-	struct perf_evsel *sys_exit;
 	char *filter = asprintf_expr_inout_ints("id", !trace->not_ev_qualifier,
 						trace->ev_qualifier_ids.nr,
 						trace->ev_qualifier_ids.entries);
@@ -2180,11 +2144,8 @@ static int trace__set_ev_qualifier_filter(struct trace *trace)
 	if (filter == NULL)
 		goto out_enomem;
 
-	if (!perf_evsel__append_tp_filter(trace->syscalls.events.sys_enter,
-					  filter)) {
-		sys_exit = trace->syscalls.events.sys_exit;
-		err = perf_evsel__append_tp_filter(sys_exit, filter);
-	}
+	if (!perf_evsel__append_filter(trace->syscalls.events.sys_enter, "&&", filter))
+		err = perf_evsel__append_filter(trace->syscalls.events.sys_exit, "&&", filter);
 
 	free(filter);
 out:
@@ -2441,7 +2402,7 @@ out_error_apply_filters:
 	fprintf(trace->output,
 		"Failed to set filter \"%s\" on event %s with %d (%s)\n",
 		evsel->filter, perf_evsel__name(evsel), errno,
-		str_error_r(errno, errbuf, sizeof(errbuf)));
+		strerror_r(errno, errbuf, sizeof(errbuf)));
 	goto out_delete_evlist;
 }
 out_error_mem:
@@ -2522,7 +2483,7 @@ static int trace__replay(struct trace *trace)
 		goto out;
 	}
 
-	evlist__for_each_entry(session->evlist, evsel) {
+	evlist__for_each(session->evlist, evsel) {
 		if (evsel->attr.type == PERF_TYPE_SOFTWARE &&
 		    (evsel->attr.config == PERF_COUNT_SW_PAGE_FAULTS_MAJ ||
 		     evsel->attr.config == PERF_COUNT_SW_PAGE_FAULTS_MIN ||
@@ -2589,7 +2550,7 @@ static size_t thread__dump_stats(struct thread_trace *ttrace,
 	printed += fprintf(fp, "                               (msec)    (msec)    (msec)    (msec)        (%%)\n");
 	printed += fprintf(fp, "   --------------- -------- --------- --------- --------- ---------     ------\n");
 
-	resort_rb__for_each_entry(nd, syscall_stats) {
+	resort_rb__for_each(nd, syscall_stats) {
 		struct stats *stats = syscall_stats_entry->stats;
 		if (stats) {
 			double min = (double)(stats->min) / NSEC_PER_MSEC;
@@ -2666,7 +2627,7 @@ static size_t trace__fprintf_thread_summary(struct trace *trace, FILE *fp)
 		return 0;
 	}
 
-	resort_rb__for_each_entry(nd, threads)
+	resort_rb__for_each(nd, threads)
 		printed += trace__fprintf_thread(fp, threads_entry->thread, trace);
 
 	resort_rb__delete(threads);
@@ -2753,7 +2714,7 @@ static void evlist__set_evsel_handler(struct perf_evlist *evlist, void *handler)
 {
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(evlist, evsel)
+	evlist__for_each(evlist, evsel)
 		evsel->handler = handler;
 }
 

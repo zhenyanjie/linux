@@ -51,7 +51,6 @@
 #define  PMC_CNTRL_CPU_PWRREQ_POLARITY	(1 << 15)  /* CPU pwr req polarity */
 #define  PMC_CNTRL_CPU_PWRREQ_OE	(1 << 16)  /* CPU pwr req enable */
 #define  PMC_CNTRL_INTR_POLARITY	(1 << 17)  /* inverts INTR polarity */
-#define  PMC_CNTRL_MAIN_RST		(1 <<  4)
 
 #define DPD_SAMPLE			0x020
 #define  DPD_SAMPLE_ENABLE		(1 << 0)
@@ -80,14 +79,6 @@
 #define PMC_SENSOR_CTRL			0x1b0
 #define PMC_SENSOR_CTRL_SCRATCH_WRITE	(1 << 2)
 #define PMC_SENSOR_CTRL_ENABLE_RST	(1 << 1)
-
-#define PMC_RST_STATUS			0x1b4
-#define  PMC_RST_STATUS_POR		0
-#define  PMC_RST_STATUS_WATCHDOG	1
-#define  PMC_RST_STATUS_SENSOR		2
-#define  PMC_RST_STATUS_SW_MAIN		3
-#define  PMC_RST_STATUS_LP0		4
-#define  PMC_RST_STATUS_AOTAG		5
 
 #define IO_DPD_REQ			0x1b8
 #define  IO_DPD_REQ_CODE_IDLE		(0 << 30)
@@ -408,7 +399,6 @@ static int tegra_powergate_power_up(struct tegra_powergate *pg,
 disable_clks:
 	tegra_powergate_disable_clocks(pg);
 	usleep_range(10, 20);
-
 powergate_off:
 	tegra_powergate_set(pg->id, false);
 
@@ -446,7 +436,6 @@ assert_resets:
 	usleep_range(10, 20);
 	tegra_powergate_reset_deassert(pg);
 	usleep_range(10, 20);
-
 disable_clks:
 	tegra_powergate_disable_clocks(pg);
 
@@ -551,9 +540,6 @@ int tegra_powergate_sequence_power_up(unsigned int id, struct clk *clk,
 	struct tegra_powergate pg;
 	int err;
 
-	if (!tegra_powergate_is_available(id))
-		return -EINVAL;
-
 	pg.id = id;
 	pg.clks = &clk;
 	pg.num_clks = 1;
@@ -652,10 +638,9 @@ static int tegra_pmc_restart_notify(struct notifier_block *this,
 
 	tegra_pmc_writel(value, PMC_SCRATCH0);
 
-	/* reset everything but PMC_SCRATCH0 and PMC_RST_STATUS */
-	value = tegra_pmc_readl(PMC_CNTRL);
-	value |= PMC_CNTRL_MAIN_RST;
-	tegra_pmc_writel(value, PMC_CNTRL);
+	value = tegra_pmc_readl(0);
+	value |= 0x10;
+	tegra_pmc_writel(value, 0);
 
 	return NOTIFY_DONE;
 }
@@ -737,14 +722,13 @@ static int tegra_powergate_of_get_clks(struct tegra_powergate *pg,
 err:
 	while (i--)
 		clk_put(pg->clks[i]);
-
 	kfree(pg->clks);
 
 	return err;
 }
 
 static int tegra_powergate_of_get_resets(struct tegra_powergate *pg,
-					 struct device_node *np, bool off)
+					 struct device_node *np)
 {
 	struct reset_control *rst;
 	unsigned int i, count;
@@ -764,16 +748,6 @@ static int tegra_powergate_of_get_resets(struct tegra_powergate *pg,
 			err = PTR_ERR(pg->resets[i]);
 			goto error;
 		}
-
-		if (off)
-			err = reset_control_assert(pg->resets[i]);
-		else
-			err = reset_control_deassert(pg->resets[i]);
-
-		if (err) {
-			reset_control_put(pg->resets[i]);
-			goto error;
-		}
 	}
 
 	pg->num_resets = count;
@@ -783,7 +757,6 @@ static int tegra_powergate_of_get_resets(struct tegra_powergate *pg,
 error:
 	while (i--)
 		reset_control_put(pg->resets[i]);
-
 	kfree(pg->resets);
 
 	return err;
@@ -792,19 +765,16 @@ error:
 static void tegra_powergate_add(struct tegra_pmc *pmc, struct device_node *np)
 {
 	struct tegra_powergate *pg;
-	int id, err;
 	bool off;
+	int id;
 
 	pg = kzalloc(sizeof(*pg), GFP_KERNEL);
 	if (!pg)
-		return;
+		goto error;
 
 	id = tegra_powergate_lookup(pmc, np->name);
-	if (id < 0) {
-		dev_err(pmc->dev, "powergate lookup failed for %s: %d\n",
-			np->name, id);
+	if (id < 0)
 		goto free_mem;
-	}
 
 	/*
 	 * Clear the bit for this powergate so it cannot be managed
@@ -818,64 +788,31 @@ static void tegra_powergate_add(struct tegra_pmc *pmc, struct device_node *np)
 	pg->genpd.power_on = tegra_genpd_power_on;
 	pg->pmc = pmc;
 
-	off = !tegra_powergate_is_powered(pg->id);
-
-	err = tegra_powergate_of_get_clks(pg, np);
-	if (err < 0) {
-		dev_err(pmc->dev, "failed to get clocks for %s: %d\n",
-			np->name, err);
+	if (tegra_powergate_of_get_clks(pg, np))
 		goto set_available;
-	}
 
-	err = tegra_powergate_of_get_resets(pg, np, off);
-	if (err < 0) {
-		dev_err(pmc->dev, "failed to get resets for %s: %d\n",
-			np->name, err);
+	if (tegra_powergate_of_get_resets(pg, np))
 		goto remove_clks;
-	}
 
-	if (!IS_ENABLED(CONFIG_PM_GENERIC_DOMAINS))
-		goto power_on_cleanup;
-
-	/*
-	 * FIXME: If XHCI is enabled for Tegra, then power-up the XUSB
-	 * host and super-speed partitions. Once the XHCI driver
-	 * manages the partitions itself this code can be removed. Note
-	 * that we don't register these partitions with the genpd core
-	 * to avoid it from powering down the partitions as they appear
-	 * to be unused.
-	 */
-	if (IS_ENABLED(CONFIG_USB_XHCI_TEGRA) &&
-	    (id == TEGRA_POWERGATE_XUSBA || id == TEGRA_POWERGATE_XUSBC))
-		goto power_on_cleanup;
+	off = !tegra_powergate_is_powered(pg->id);
 
 	pm_genpd_init(&pg->genpd, NULL, off);
 
-	err = of_genpd_add_provider_simple(np, &pg->genpd);
-	if (err < 0) {
-		dev_err(pmc->dev, "failed to add genpd provider for %s: %d\n",
-			np->name, err);
+	if (of_genpd_add_provider_simple(np, &pg->genpd))
 		goto remove_resets;
-	}
 
 	dev_dbg(pmc->dev, "added power domain %s\n", pg->genpd.name);
 
 	return;
 
-power_on_cleanup:
-	if (off)
-		WARN_ON(tegra_powergate_power_up(pg, true));
-
 remove_resets:
 	while (pg->num_resets--)
 		reset_control_put(pg->resets[pg->num_resets]);
-
 	kfree(pg->resets);
 
 remove_clks:
 	while (pg->num_clks--)
 		clk_put(pg->clks[pg->num_clks]);
-
 	kfree(pg->clks);
 
 set_available:
@@ -883,20 +820,16 @@ set_available:
 
 free_mem:
 	kfree(pg);
+
+error:
+	dev_err(pmc->dev, "failed to create power domain for %s\n", np->name);
 }
 
-static void tegra_powergate_init(struct tegra_pmc *pmc,
-				 struct device_node *parent)
+static void tegra_powergate_init(struct tegra_pmc *pmc)
 {
 	struct device_node *np, *child;
-	unsigned int i;
 
-	/* Create a bitmap of the available and valid partitions */
-	for (i = 0; i < pmc->soc->num_powergates; i++)
-		if (pmc->soc->powergates[i])
-			set_bit(i, pmc->powergates_available);
-
-	np = of_get_child_by_name(parent, "powergates");
+	np = of_get_child_by_name(pmc->dev->of_node, "powergates");
 	if (!np)
 		return;
 
@@ -967,8 +900,8 @@ static void tegra_io_rail_unprepare(void)
 
 int tegra_io_rail_power_on(unsigned int id)
 {
-	unsigned long request, status;
-	unsigned int bit;
+	unsigned long request, status, value;
+	unsigned int bit, mask;
 	int err;
 
 	mutex_lock(&pmc->powergates_lock);
@@ -977,9 +910,15 @@ int tegra_io_rail_power_on(unsigned int id)
 	if (err)
 		goto error;
 
-	tegra_pmc_writel(IO_DPD_REQ_CODE_OFF | BIT(bit), request);
+	mask = 1 << bit;
 
-	err = tegra_io_rail_poll(status, BIT(bit), 0, 250);
+	value = tegra_pmc_readl(request);
+	value |= mask;
+	value &= ~IO_DPD_REQ_CODE_MASK;
+	value |= IO_DPD_REQ_CODE_OFF;
+	tegra_pmc_writel(value, request);
+
+	err = tegra_io_rail_poll(status, mask, 0, 250);
 	if (err) {
 		pr_info("tegra_io_rail_poll() failed: %d\n", err);
 		goto error;
@@ -996,8 +935,8 @@ EXPORT_SYMBOL(tegra_io_rail_power_on);
 
 int tegra_io_rail_power_off(unsigned int id)
 {
-	unsigned long request, status;
-	unsigned int bit;
+	unsigned long request, status, value;
+	unsigned int bit, mask;
 	int err;
 
 	mutex_lock(&pmc->powergates_lock);
@@ -1008,9 +947,15 @@ int tegra_io_rail_power_off(unsigned int id)
 		goto error;
 	}
 
-	tegra_pmc_writel(IO_DPD_REQ_CODE_ON | BIT(bit), request);
+	mask = 1 << bit;
 
-	err = tegra_io_rail_poll(status, BIT(bit), BIT(bit), 250);
+	value = tegra_pmc_readl(request);
+	value |= mask;
+	value &= ~IO_DPD_REQ_CODE_MASK;
+	value |= IO_DPD_REQ_CODE_ON;
+	tegra_pmc_writel(value, request);
+
+	err = tegra_io_rail_poll(status, mask, mask, 250);
 	if (err)
 		goto error;
 
@@ -1305,6 +1250,8 @@ static int tegra_pmc_probe(struct platform_device *pdev)
 		return err;
 	}
 
+	tegra_powergate_init(pmc);
+
 	mutex_lock(&pmc->powergates_lock);
 	iounmap(pmc->base);
 	pmc->base = base;
@@ -1538,10 +1485,9 @@ static int __init tegra_pmc_early_init(void)
 	const struct of_device_id *match;
 	struct device_node *np;
 	struct resource regs;
+	unsigned int i;
 	bool invert;
 	u32 value;
-
-	mutex_init(&pmc->powergates_lock);
 
 	np = of_find_matching_node_and_match(NULL, tegra_pmc_match, &match);
 	if (!np) {
@@ -1577,40 +1523,39 @@ static int __init tegra_pmc_early_init(void)
 		 */
 		if (of_address_to_resource(np, 0, &regs) < 0) {
 			pr_err("failed to get PMC registers\n");
-			of_node_put(np);
 			return -ENXIO;
 		}
+
+		pmc->soc = match->data;
 	}
 
 	pmc->base = ioremap_nocache(regs.start, resource_size(&regs));
 	if (!pmc->base) {
 		pr_err("failed to map PMC registers\n");
-		of_node_put(np);
 		return -ENXIO;
 	}
 
-	if (np) {
-		pmc->soc = match->data;
+	/* Create a bit-map of the available and valid partitions */
+	for (i = 0; i < pmc->soc->num_powergates; i++)
+		if (pmc->soc->powergates[i])
+			set_bit(i, pmc->powergates_available);
 
-		tegra_powergate_init(pmc, np);
+	mutex_init(&pmc->powergates_lock);
 
-		/*
-		 * Invert the interrupt polarity if a PMC device tree node
-		 * exists and contains the nvidia,invert-interrupt property.
-		 */
-		invert = of_property_read_bool(np, "nvidia,invert-interrupt");
+	/*
+	 * Invert the interrupt polarity if a PMC device tree node exists and
+	 * contains the nvidia,invert-interrupt property.
+	 */
+	invert = of_property_read_bool(np, "nvidia,invert-interrupt");
 
-		value = tegra_pmc_readl(PMC_CNTRL);
+	value = tegra_pmc_readl(PMC_CNTRL);
 
-		if (invert)
-			value |= PMC_CNTRL_INTR_POLARITY;
-		else
-			value &= ~PMC_CNTRL_INTR_POLARITY;
+	if (invert)
+		value |= PMC_CNTRL_INTR_POLARITY;
+	else
+		value &= ~PMC_CNTRL_INTR_POLARITY;
 
-		tegra_pmc_writel(value, PMC_CNTRL);
-
-		of_node_put(np);
-	}
+	tegra_pmc_writel(value, PMC_CNTRL);
 
 	return 0;
 }

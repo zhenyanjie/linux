@@ -99,7 +99,6 @@ MODULE_PARM_DESC(dvb_mfe_wait_time, "Wait up to <mfe_wait_time> seconds on open(
 static DEFINE_MUTEX(frontend_mutex);
 
 struct dvb_frontend_private {
-	struct kref refcount;
 
 	/* thread/frontend values */
 	struct dvb_device *dvbdev;
@@ -137,23 +136,6 @@ struct dvb_frontend_private {
 	struct media_pipeline pipe;
 #endif
 };
-
-static void dvb_frontend_private_free(struct kref *ref)
-{
-	struct dvb_frontend_private *fepriv =
-		container_of(ref, struct dvb_frontend_private, refcount);
-	kfree(fepriv);
-}
-
-static void dvb_frontend_private_put(struct dvb_frontend_private *fepriv)
-{
-	kref_put(&fepriv->refcount, dvb_frontend_private_free);
-}
-
-static void dvb_frontend_private_get(struct dvb_frontend_private *fepriv)
-{
-	kref_get(&fepriv->refcount);
-}
 
 static void dvb_frontend_wakeup(struct dvb_frontend *fe);
 static int dtv_get_frontend(struct dvb_frontend *fe,
@@ -251,20 +233,8 @@ static void dvb_frontend_add_event(struct dvb_frontend *fe,
 	wake_up_interruptible (&events->wait_queue);
 }
 
-static int dvb_frontend_test_event(struct dvb_frontend_private *fepriv,
-				   struct dvb_fe_events *events)
-{
-	int ret;
-
-	up(&fepriv->sem);
-	ret = events->eventw != events->eventr;
-	down(&fepriv->sem);
-
-	return ret;
-}
-
 static int dvb_frontend_get_event(struct dvb_frontend *fe,
-			          struct dvb_frontend_event *event, int flags)
+			    struct dvb_frontend_event *event, int flags)
 {
 	struct dvb_frontend_private *fepriv = fe->frontend_priv;
 	struct dvb_fe_events *events = &fepriv->events;
@@ -282,8 +252,13 @@ static int dvb_frontend_get_event(struct dvb_frontend *fe,
 		if (flags & O_NONBLOCK)
 			return -EWOULDBLOCK;
 
-		ret = wait_event_interruptible(events->wait_queue,
-					       dvb_frontend_test_event(fepriv, events));
+		up(&fepriv->sem);
+
+		ret = wait_event_interruptible (events->wait_queue,
+						events->eventw != events->eventr);
+
+		if (down_interruptible (&fepriv->sem))
+			return -ERESTARTSYS;
 
 		if (ret < 0)
 			return ret;
@@ -1976,9 +1951,17 @@ static int dvb_frontend_ioctl_properties(struct file *file,
 		if ((tvps->num == 0) || (tvps->num > DTV_IOCTL_MAX_MSGS))
 			return -EINVAL;
 
-		tvp = memdup_user(tvps->props, tvps->num * sizeof(*tvp));
-		if (IS_ERR(tvp))
-			return PTR_ERR(tvp);
+		tvp = kmalloc(tvps->num * sizeof(struct dtv_property), GFP_KERNEL);
+		if (!tvp) {
+			err = -ENOMEM;
+			goto out;
+		}
+
+		if (copy_from_user(tvp, (void __user *)tvps->props,
+				   tvps->num * sizeof(struct dtv_property))) {
+			err = -EFAULT;
+			goto out;
+		}
 
 		for (i = 0; i < tvps->num; i++) {
 			err = dtv_property_process_set(fe, tvp + i, file);
@@ -2001,9 +1984,17 @@ static int dvb_frontend_ioctl_properties(struct file *file,
 		if ((tvps->num == 0) || (tvps->num > DTV_IOCTL_MAX_MSGS))
 			return -EINVAL;
 
-		tvp = memdup_user(tvps->props, tvps->num * sizeof(*tvp));
-		if (IS_ERR(tvp))
-			return PTR_ERR(tvp);
+		tvp = kmalloc(tvps->num * sizeof(struct dtv_property), GFP_KERNEL);
+		if (!tvp) {
+			err = -ENOMEM;
+			goto out;
+		}
+
+		if (copy_from_user(tvp, (void __user *)tvps->props,
+				   tvps->num * sizeof(struct dtv_property))) {
+			err = -EFAULT;
+			goto out;
+		}
 
 		/*
 		 * Let's use our own copy of property cache, in order to
@@ -2552,8 +2543,6 @@ static int dvb_frontend_open(struct inode *inode, struct file *file)
 		fepriv->events.eventr = fepriv->events.eventw = 0;
 	}
 
-	dvb_frontend_private_get(fepriv);
-
 	if (adapter->mfe_shared)
 		mutex_unlock (&adapter->mfe_lock);
 	return ret;
@@ -2601,8 +2590,6 @@ static int dvb_frontend_release(struct inode *inode, struct file *file)
 		if (fe->ops.ts_bus_ctrl)
 			fe->ops.ts_bus_ctrl(fe, 0);
 	}
-
-	dvb_frontend_private_put(fepriv);
 
 	return ret;
 }
@@ -2692,8 +2679,6 @@ int dvb_register_frontend(struct dvb_adapter* dvb,
 	}
 	fepriv = fe->frontend_priv;
 
-	kref_init(&fepriv->refcount);
-
 	sema_init(&fepriv->sem, 1);
 	init_waitqueue_head (&fepriv->wait_queue);
 	init_waitqueue_head (&fepriv->events.wait_queue);
@@ -2728,11 +2713,18 @@ int dvb_unregister_frontend(struct dvb_frontend* fe)
 
 	mutex_lock(&frontend_mutex);
 	dvb_frontend_stop (fe);
+	mutex_unlock(&frontend_mutex);
+
+	if (fepriv->dvbdev->users < -1)
+		wait_event(fepriv->dvbdev->wait_queue,
+				fepriv->dvbdev->users==-1);
+
+	mutex_lock(&frontend_mutex);
 	dvb_unregister_device (fepriv->dvbdev);
 
 	/* fe is invalid now */
+	kfree(fepriv);
 	mutex_unlock(&frontend_mutex);
-	dvb_frontend_private_put(fepriv);
 	return 0;
 }
 EXPORT_SYMBOL(dvb_unregister_frontend);

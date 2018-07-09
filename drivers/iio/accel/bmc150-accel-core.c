@@ -193,6 +193,7 @@ struct bmc150_accel_data {
 	struct regmap *regmap;
 	int irq;
 	struct bmc150_accel_interrupt interrupts[BMC150_ACCEL_INTERRUPTS];
+	atomic_t active_intr;
 	struct bmc150_accel_trigger triggers[BMC150_ACCEL_TRIGGERS];
 	struct mutex mutex;
 	u8 fifo_mode, watermark;
@@ -491,6 +492,11 @@ static int bmc150_accel_set_interrupt(struct bmc150_accel_data *data, int i,
 		dev_err(dev, "Error updating reg_int_en\n");
 		goto out_fix_power_state;
 	}
+
+	if (state)
+		atomic_inc(&data->active_intr);
+	else
+		atomic_dec(&data->active_intr);
 
 	return 0;
 
@@ -898,7 +904,7 @@ static int __bmc150_accel_fifo_flush(struct iio_dev *indio_dev,
 	 */
 	if (!irq) {
 		data->old_timestamp = data->timestamp;
-		data->timestamp = iio_get_time_ns(indio_dev);
+		data->timestamp = iio_get_time_ns();
 	}
 
 	/*
@@ -1300,7 +1306,7 @@ static irqreturn_t bmc150_accel_irq_handler(int irq, void *private)
 	int i;
 
 	data->old_timestamp = data->timestamp;
-	data->timestamp = iio_get_time_ns(indio_dev);
+	data->timestamp = iio_get_time_ns();
 
 	for (i = 0; i < BMC150_ACCEL_TRIGGERS; i++) {
 		if (data->triggers[i].enabled) {
@@ -1703,7 +1709,8 @@ static int bmc150_accel_resume(struct device *dev)
 	struct bmc150_accel_data *data = iio_priv(indio_dev);
 
 	mutex_lock(&data->mutex);
-	bmc150_accel_set_mode(data, BMC150_ACCEL_SLEEP_MODE_NORMAL, 0);
+	if (atomic_read(&data->active_intr))
+		bmc150_accel_set_mode(data, BMC150_ACCEL_SLEEP_MODE_NORMAL, 0);
 	bmc150_accel_fifo_set_mode(data);
 	mutex_unlock(&data->mutex);
 

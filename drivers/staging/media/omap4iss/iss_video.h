@@ -170,6 +170,7 @@ struct iss_video {
 	spinlock_t qlock;		/* protects dmaqueue and error */
 	struct list_head dmaqueue;
 	enum iss_video_dmaqueue_flags dmaqueue_flags;
+	struct vb2_alloc_ctx *alloc_ctx;
 
 	const struct iss_video_operations *ops;
 };

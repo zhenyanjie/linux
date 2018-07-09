@@ -2101,8 +2101,10 @@ int brcmf_fws_process_skb(struct brcmf_if *ifp, struct sk_buff *skb)
 
 	brcmf_dbg(DATA, "tx proto=0x%X\n", ntohs(eh->h_proto));
 	/* determine the priority */
-	if ((skb->priority == 0) || (skb->priority > 7))
+	if (!skb->priority)
 		skb->priority = cfg80211_classify8021d(skb, NULL);
+
+	drvr->tx_multicast += !!multicast;
 
 	if (fws->avoid_queueing) {
 		rc = brcmf_proto_txdata(drvr, ifp->ifidx, 0, skb);

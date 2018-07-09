@@ -73,6 +73,7 @@ struct cpu_mask_set {
 struct hfi1_affinity {
 	struct cpu_mask_set def_intr;
 	struct cpu_mask_set rcv_intr;
+	struct cpu_mask_set proc;
 	struct cpumask real_cpu_mask;
 	/* spin lock to protect affinity struct */
 	spinlock_t lock;
@@ -81,9 +82,11 @@ struct hfi1_affinity {
 struct hfi1_msix_entry;
 
 /* Initialize non-HT cpu cores mask */
-void init_real_cpu_mask(void);
+int init_real_cpu_mask(struct hfi1_devdata *);
 /* Initialize driver affinity data */
-int hfi1_dev_affinity_init(struct hfi1_devdata *);
+void hfi1_dev_affinity_init(struct hfi1_devdata *);
+/* Free driver affinity data */
+void hfi1_dev_affinity_free(struct hfi1_devdata *);
 /*
  * Set IRQ affinity to a CPU. The function will determine the
  * CPU and set the affinity to it.
@@ -98,30 +101,8 @@ void hfi1_put_irq_affinity(struct hfi1_devdata *, struct hfi1_msix_entry *);
  * Determine a CPU affinity for a user process, if the process does not
  * have an affinity set yet.
  */
-int hfi1_get_proc_affinity(int);
+int hfi1_get_proc_affinity(struct hfi1_devdata *, int);
 /* Release a CPU used by a user process. */
-void hfi1_put_proc_affinity(int);
-
-struct hfi1_affinity_node {
-	int node;
-	struct cpu_mask_set def_intr;
-	struct cpu_mask_set rcv_intr;
-	struct cpumask general_intr_mask;
-	struct list_head list;
-};
-
-struct hfi1_affinity_node_list {
-	struct list_head list;
-	struct cpumask real_cpu_mask;
-	struct cpu_mask_set proc;
-	int num_core_siblings;
-	int num_online_nodes;
-	int num_online_cpus;
-	struct mutex lock; /* protects affinity nodes */
-};
-
-int node_affinity_init(void);
-void node_affinity_destroy(void);
-extern struct hfi1_affinity_node_list node_affinity;
+void hfi1_put_proc_affinity(struct hfi1_devdata *, int);
 
 #endif /* _HFI1_AFFINITY_H */

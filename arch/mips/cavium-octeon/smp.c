@@ -271,7 +271,6 @@ static int octeon_cpu_disable(void)
 		return -ENOTSUPP;
 
 	set_cpu_online(cpu, false);
-	calculate_cpu_foreign_map();
 	cpumask_clear_cpu(cpu, &cpu_callin_map);
 	octeon_fixup_irqs();
 
@@ -380,11 +379,29 @@ static int octeon_update_boot_vector(unsigned int cpu)
 	return 0;
 }
 
+static int octeon_cpu_callback(struct notifier_block *nfb,
+	unsigned long action, void *hcpu)
+{
+	unsigned int cpu = (unsigned long)hcpu;
+
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_UP_PREPARE:
+		octeon_update_boot_vector(cpu);
+		break;
+	case CPU_ONLINE:
+		pr_info("Cpu %d online\n", cpu);
+		break;
+	case CPU_DEAD:
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
 static int register_cavium_notifier(void)
 {
-	return cpuhp_setup_state_nocalls(CPUHP_MIPS_SOC_PREPARE,
-					 "mips/cavium:prepare",
-					 octeon_update_boot_vector, NULL);
+	hotcpu_notifier(octeon_cpu_callback, 0);
+	return 0;
 }
 late_initcall(register_cavium_notifier);
 

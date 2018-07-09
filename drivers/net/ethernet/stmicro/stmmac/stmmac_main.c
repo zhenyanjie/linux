@@ -280,20 +280,13 @@ static void stmmac_eee_ctrl_timer(unsigned long arg)
 bool stmmac_eee_init(struct stmmac_priv *priv)
 {
 	unsigned long flags;
-	int interface = priv->plat->interface;
 	bool ret = false;
-
-	if ((interface != PHY_INTERFACE_MODE_MII) &&
-	    (interface != PHY_INTERFACE_MODE_GMII) &&
-	    !phy_interface_mode_is_rgmii(interface))
-		goto out;
 
 	/* Using PCS we cannot dial with the phy registers at this stage
 	 * so we do not support extra feature like EEE.
 	 */
-	if ((priv->hw->pcs == STMMAC_PCS_RGMII) ||
-	    (priv->hw->pcs == STMMAC_PCS_TBI) ||
-	    (priv->hw->pcs == STMMAC_PCS_RTBI))
+	if ((priv->pcs == STMMAC_PCS_RGMII) || (priv->pcs == STMMAC_PCS_TBI) ||
+	    (priv->pcs == STMMAC_PCS_RTBI))
 		goto out;
 
 	/* MAC core supports the EEE feature. */
@@ -346,17 +339,18 @@ out:
 
 /* stmmac_get_tx_hwtstamp - get HW TX timestamps
  * @priv: driver private structure
- * @p : descriptor pointer
+ * @entry : descriptor index to be used.
  * @skb : the socket buffer
  * Description :
  * This function will read timestamp from the descriptor & pass it to stack.
  * and also perform some sanity checks.
  */
 static void stmmac_get_tx_hwtstamp(struct stmmac_priv *priv,
-				   struct dma_desc *p, struct sk_buff *skb)
+				   unsigned int entry, struct sk_buff *skb)
 {
 	struct skb_shared_hwtstamps shhwtstamp;
 	u64 ns;
+	void *desc = NULL;
 
 	if (!priv->hwts_tx_en)
 		return;
@@ -365,55 +359,58 @@ static void stmmac_get_tx_hwtstamp(struct stmmac_priv *priv,
 	if (likely(!skb || !(skb_shinfo(skb)->tx_flags & SKBTX_IN_PROGRESS)))
 		return;
 
+	if (priv->adv_ts)
+		desc = (priv->dma_etx + entry);
+	else
+		desc = (priv->dma_tx + entry);
+
 	/* check tx tstamp status */
-	if (!priv->hw->desc->get_tx_timestamp_status(p)) {
-		/* get the valid tstamp */
-		ns = priv->hw->desc->get_timestamp(p, priv->adv_ts);
+	if (!priv->hw->desc->get_tx_timestamp_status((struct dma_desc *)desc))
+		return;
 
-		memset(&shhwtstamp, 0, sizeof(struct skb_shared_hwtstamps));
-		shhwtstamp.hwtstamp = ns_to_ktime(ns);
+	/* get the valid tstamp */
+	ns = priv->hw->desc->get_timestamp(desc, priv->adv_ts);
 
-		netdev_info(priv->dev, "get valid TX hw timestamp %llu\n", ns);
-		/* pass tstamp to stack */
-		skb_tstamp_tx(skb, &shhwtstamp);
-	}
+	memset(&shhwtstamp, 0, sizeof(struct skb_shared_hwtstamps));
+	shhwtstamp.hwtstamp = ns_to_ktime(ns);
+	/* pass tstamp to stack */
+	skb_tstamp_tx(skb, &shhwtstamp);
 
 	return;
 }
 
 /* stmmac_get_rx_hwtstamp - get HW RX timestamps
  * @priv: driver private structure
- * @p : descriptor pointer
- * @np : next descriptor pointer
+ * @entry : descriptor index to be used.
  * @skb : the socket buffer
  * Description :
  * This function will read received packet's timestamp from the descriptor
  * and pass it to stack. It also perform some sanity checks.
  */
-static void stmmac_get_rx_hwtstamp(struct stmmac_priv *priv, struct dma_desc *p,
-				   struct dma_desc *np, struct sk_buff *skb)
+static void stmmac_get_rx_hwtstamp(struct stmmac_priv *priv,
+				   unsigned int entry, struct sk_buff *skb)
 {
 	struct skb_shared_hwtstamps *shhwtstamp = NULL;
 	u64 ns;
+	void *desc = NULL;
 
 	if (!priv->hwts_rx_en)
 		return;
 
-	/* Check if timestamp is available */
-	if (!priv->hw->desc->get_rx_timestamp_status(p, priv->adv_ts)) {
-		/* For GMAC4, the valid timestamp is from CTX next desc. */
-		if (priv->plat->has_gmac4)
-			ns = priv->hw->desc->get_timestamp(np, priv->adv_ts);
-		else
-			ns = priv->hw->desc->get_timestamp(p, priv->adv_ts);
+	if (priv->adv_ts)
+		desc = (priv->dma_erx + entry);
+	else
+		desc = (priv->dma_rx + entry);
 
-		netdev_info(priv->dev, "get valid RX hw timestamp %llu\n", ns);
-		shhwtstamp = skb_hwtstamps(skb);
-		memset(shhwtstamp, 0, sizeof(struct skb_shared_hwtstamps));
-		shhwtstamp->hwtstamp = ns_to_ktime(ns);
-	} else  {
-		netdev_err(priv->dev, "cannot get RX hw timestamp\n");
-	}
+	/* exit if rx tstamp is not valid */
+	if (!priv->hw->desc->get_rx_timestamp_status(desc, priv->adv_ts))
+		return;
+
+	/* get valid tstamp */
+	ns = priv->hw->desc->get_timestamp(desc, priv->adv_ts);
+	shhwtstamp = skb_hwtstamps(skb);
+	memset(shhwtstamp, 0, sizeof(struct skb_shared_hwtstamps));
+	shhwtstamp->hwtstamp = ns_to_ktime(ns);
 }
 
 /**
@@ -478,10 +475,7 @@ static int stmmac_hwtstamp_ioctl(struct net_device *dev, struct ifreq *ifr)
 			/* PTP v1, UDP, any kind of event packet */
 			config.rx_filter = HWTSTAMP_FILTER_PTP_V1_L4_EVENT;
 			/* take time stamp for all event messages */
-			if (priv->plat->has_gmac4)
-				snap_type_sel = PTP_GMAC4_TCR_SNAPTYPSEL_1;
-			else
-				snap_type_sel = PTP_TCR_SNAPTYPSEL_1;
+			snap_type_sel = PTP_TCR_SNAPTYPSEL_1;
 
 			ptp_over_ipv4_udp = PTP_TCR_TSIPV4ENA;
 			ptp_over_ipv6_udp = PTP_TCR_TSIPV6ENA;
@@ -513,10 +507,7 @@ static int stmmac_hwtstamp_ioctl(struct net_device *dev, struct ifreq *ifr)
 			config.rx_filter = HWTSTAMP_FILTER_PTP_V2_L4_EVENT;
 			ptp_v2 = PTP_TCR_TSVER2ENA;
 			/* take time stamp for all event messages */
-			if (priv->plat->has_gmac4)
-				snap_type_sel = PTP_GMAC4_TCR_SNAPTYPSEL_1;
-			else
-				snap_type_sel = PTP_TCR_SNAPTYPSEL_1;
+			snap_type_sel = PTP_TCR_SNAPTYPSEL_1;
 
 			ptp_over_ipv4_udp = PTP_TCR_TSIPV4ENA;
 			ptp_over_ipv6_udp = PTP_TCR_TSIPV6ENA;
@@ -550,10 +541,7 @@ static int stmmac_hwtstamp_ioctl(struct net_device *dev, struct ifreq *ifr)
 			config.rx_filter = HWTSTAMP_FILTER_PTP_V2_EVENT;
 			ptp_v2 = PTP_TCR_TSVER2ENA;
 			/* take time stamp for all event messages */
-			if (priv->plat->has_gmac4)
-				snap_type_sel = PTP_GMAC4_TCR_SNAPTYPSEL_1;
-			else
-				snap_type_sel = PTP_TCR_SNAPTYPSEL_1;
+			snap_type_sel = PTP_TCR_SNAPTYPSEL_1;
 
 			ptp_over_ipv4_udp = PTP_TCR_TSIPV4ENA;
 			ptp_over_ipv6_udp = PTP_TCR_TSIPV6ENA;
@@ -609,18 +597,17 @@ static int stmmac_hwtstamp_ioctl(struct net_device *dev, struct ifreq *ifr)
 	priv->hwts_tx_en = config.tx_type == HWTSTAMP_TX_ON;
 
 	if (!priv->hwts_tx_en && !priv->hwts_rx_en)
-		priv->hw->ptp->config_hw_tstamping(priv->ptpaddr, 0);
+		priv->hw->ptp->config_hw_tstamping(priv->ioaddr, 0);
 	else {
 		value = (PTP_TCR_TSENA | PTP_TCR_TSCFUPDT | PTP_TCR_TSCTRLSSR |
 			 tstamp_all | ptp_v2 | ptp_over_ethernet |
 			 ptp_over_ipv6_udp | ptp_over_ipv4_udp | ts_event_en |
 			 ts_master_en | snap_type_sel);
-		priv->hw->ptp->config_hw_tstamping(priv->ptpaddr, value);
+		priv->hw->ptp->config_hw_tstamping(priv->ioaddr, value);
 
 		/* program Sub Second Increment reg */
 		sec_inc = priv->hw->ptp->config_sub_second_increment(
-			priv->ptpaddr, priv->clk_ptp_rate,
-			priv->plat->has_gmac4);
+			priv->ioaddr, priv->clk_ptp_rate);
 		temp = div_u64(1000000000ULL, sec_inc);
 
 		/* calculate default added value:
@@ -630,14 +617,14 @@ static int stmmac_hwtstamp_ioctl(struct net_device *dev, struct ifreq *ifr)
 		 */
 		temp = (u64)(temp << 32);
 		priv->default_addend = div_u64(temp, priv->clk_ptp_rate);
-		priv->hw->ptp->config_addend(priv->ptpaddr,
+		priv->hw->ptp->config_addend(priv->ioaddr,
 					     priv->default_addend);
 
 		/* initialize system time */
 		ktime_get_real_ts64(&now);
 
 		/* lower 32 bits of tv_sec are safe until y2106 */
-		priv->hw->ptp->init_systime(priv->ptpaddr, (u32)now.tv_sec,
+		priv->hw->ptp->init_systime(priv->ioaddr, (u32)now.tv_sec,
 					    now.tv_nsec);
 	}
 
@@ -662,35 +649,26 @@ static int stmmac_init_ptp(struct stmmac_priv *priv)
 	if (IS_ERR(priv->clk_ptp_ref)) {
 		priv->clk_ptp_rate = clk_get_rate(priv->stmmac_clk);
 		priv->clk_ptp_ref = NULL;
-		netdev_dbg(priv->dev, "PTP uses main clock\n");
 	} else {
 		clk_prepare_enable(priv->clk_ptp_ref);
 		priv->clk_ptp_rate = clk_get_rate(priv->clk_ptp_ref);
-		netdev_dbg(priv->dev, "PTP rate %d\n", priv->clk_ptp_rate);
 	}
 
 	priv->adv_ts = 0;
-	/* Check if adv_ts can be enabled for dwmac 4.x core */
-	if (priv->plat->has_gmac4 && priv->dma_cap.atime_stamp)
-		priv->adv_ts = 1;
-	/* Dwmac 3.x core with extend_desc can support adv_ts */
-	else if (priv->extend_desc && priv->dma_cap.atime_stamp)
+	if (priv->dma_cap.atime_stamp && priv->extend_desc)
 		priv->adv_ts = 1;
 
-	if (priv->dma_cap.time_stamp)
-		netdev_info(priv->dev, "IEEE 1588-2002 Timestamp supported\n");
+	if (netif_msg_hw(priv) && priv->dma_cap.time_stamp)
+		pr_debug("IEEE 1588-2002 Time Stamp supported\n");
 
-	if (priv->adv_ts)
-		netdev_info(priv->dev,
-			    "IEEE 1588-2008 Advanced Timestamp supported\n");
+	if (netif_msg_hw(priv) && priv->adv_ts)
+		pr_debug("IEEE 1588-2008 Advanced Time Stamp supported\n");
 
 	priv->hw->ptp = &stmmac_ptp;
 	priv->hwts_tx_en = 0;
 	priv->hwts_rx_en = 0;
 
-	stmmac_ptp_register(priv);
-
-	return 0;
+	return stmmac_ptp_register(priv);
 }
 
 static void stmmac_release_ptp(struct stmmac_priv *priv)
@@ -821,10 +799,10 @@ static void stmmac_check_pcs_mode(struct stmmac_priv *priv)
 		    (interface == PHY_INTERFACE_MODE_RGMII_RXID) ||
 		    (interface == PHY_INTERFACE_MODE_RGMII_TXID)) {
 			pr_debug("STMMAC: PCS RGMII support enable\n");
-			priv->hw->pcs = STMMAC_PCS_RGMII;
+			priv->pcs = STMMAC_PCS_RGMII;
 		} else if (interface == PHY_INTERFACE_MODE_SGMII) {
 			pr_debug("STMMAC: PCS SGMII support enable\n");
-			priv->hw->pcs = STMMAC_PCS_SGMII;
+			priv->pcs = STMMAC_PCS_SGMII;
 		}
 	}
 }
@@ -891,13 +869,6 @@ static int stmmac_init_phy(struct net_device *dev)
 		phy_disconnect(phydev);
 		return -ENODEV;
 	}
-
-	/* stmmac_adjust_link will change this to PHY_IGNORE_INTERRUPT to avoid
-	 * subsequent PHY polling, make sure we force a link transition if
-	 * we have a UP/DOWN/UP transition
-	 */
-	if (phydev->is_pseudo_fixed_link)
-		phydev->irq = PHY_POLL;
 
 	pr_debug("stmmac_init_phy:  %s: attached to PHY (UID 0x%x)"
 		 " Link = %d\n", dev->name, phydev->phy_id, phydev->link);
@@ -1343,11 +1314,6 @@ static void stmmac_tx_clean(struct stmmac_priv *priv)
 		if (unlikely(status & tx_dma_own))
 			break;
 
-		/* Make sure descriptor fields are read after reading
-		 * the own bit.
-		 */
-		dma_rmb();
-
 		/* Just consider the last segment and ...*/
 		if (likely(!(status & tx_not_ls))) {
 			/* ... verify the status error condition */
@@ -1357,7 +1323,7 @@ static void stmmac_tx_clean(struct stmmac_priv *priv)
 				priv->dev->stats.tx_packets++;
 				priv->xstats.tx_pkt_n++;
 			}
-			stmmac_get_tx_hwtstamp(priv, p, skb);
+			stmmac_get_tx_hwtstamp(priv, entry, skb);
 		}
 
 		if (likely(priv->tx_skbuff_dma[entry].buf)) {
@@ -1503,13 +1469,10 @@ static void stmmac_mmc_setup(struct stmmac_priv *priv)
 	unsigned int mode = MMC_CNTRL_RESET_ON_READ | MMC_CNTRL_COUNTER_RESET |
 			    MMC_CNTRL_PRESET | MMC_CNTRL_FULL_HALF_PRESET;
 
-	if (priv->synopsys_id >= DWMAC_CORE_4_00) {
-		priv->ptpaddr = priv->ioaddr + PTP_GMAC4_OFFSET;
+	if (priv->synopsys_id >= DWMAC_CORE_4_00)
 		priv->mmcaddr = priv->ioaddr + MMC_GMAC4_OFFSET;
-	} else {
-		priv->ptpaddr = priv->ioaddr + PTP_GMAC3_X_OFFSET;
+	else
 		priv->mmcaddr = priv->ioaddr + MMC_GMAC3_X_OFFSET;
-	}
 
 	dwmac_mmc_intr_all_mask(priv->mmcaddr);
 
@@ -1702,19 +1665,6 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 	if (priv->plat->bus_setup)
 		priv->plat->bus_setup(priv->ioaddr);
 
-	/* PS and related bits will be programmed according to the speed */
-	if (priv->hw->pcs) {
-		int speed = priv->plat->mac_port_sel_speed;
-
-		if ((speed == SPEED_10) || (speed == SPEED_100) ||
-		    (speed == SPEED_1000)) {
-			priv->hw->ps = speed;
-		} else {
-			dev_warn(priv->device, "invalid port speed\n");
-			priv->hw->ps = 0;
-		}
-	}
-
 	/* Initialize the MAC Core */
 	priv->hw->mac->core_init(priv->hw, dev->mtu);
 
@@ -1738,8 +1688,8 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 
 	if (init_ptp) {
 		ret = stmmac_init_ptp(priv);
-		if (ret)
-			netdev_warn(priv->dev, "fail to init PTP.\n");
+		if (ret && ret != -EOPNOTSUPP)
+			pr_warn("%s: failed PTP initialisation\n", __func__);
 	}
 
 #ifdef CONFIG_DEBUG_FS
@@ -1764,8 +1714,8 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 		priv->hw->dma->rx_watchdog(priv->ioaddr, MAX_DMA_RIWT);
 	}
 
-	if (priv->hw->pcs && priv->hw->mac->pcs_ctrl_ane)
-		priv->hw->mac->pcs_ctrl_ane(priv->hw, 1, priv->hw->ps, 0);
+	if (priv->pcs && priv->hw->mac->ctrl_ane)
+		priv->hw->mac->ctrl_ane(priv->hw, 0);
 
 	/*  set TX ring length */
 	if (priv->hw->dma->set_tx_ring_len)
@@ -1798,9 +1748,8 @@ static int stmmac_open(struct net_device *dev)
 
 	stmmac_check_ether_addr(priv);
 
-	if (priv->hw->pcs != STMMAC_PCS_RGMII &&
-	    priv->hw->pcs != STMMAC_PCS_TBI &&
-	    priv->hw->pcs != STMMAC_PCS_RTBI) {
+	if (priv->pcs != STMMAC_PCS_RGMII && priv->pcs != STMMAC_PCS_TBI &&
+	    priv->pcs != STMMAC_PCS_RTBI) {
 		ret = stmmac_init_phy(dev);
 		if (ret) {
 			pr_err("%s: Cannot attach to PHY (error: %d)\n",
@@ -1815,7 +1764,6 @@ static int stmmac_open(struct net_device *dev)
 
 	priv->dma_buf_sz = STMMAC_ALIGN(buf_sz);
 	priv->rx_copybreak = STMMAC_RX_COPYBREAK;
-	priv->mss = 0;
 
 	ret = alloc_dma_desc_resources(priv);
 	if (ret < 0) {
@@ -1974,7 +1922,7 @@ static void stmmac_tso_allocator(struct stmmac_priv *priv, unsigned int des,
 
 		priv->hw->desc->prepare_tso_tx_desc(desc, 0, buff_size,
 			0, 1,
-			(last_segment) && (tmp_len <= TSO_MAX_BUFF_SIZE),
+			(last_segment) && (buff_size < TSO_MAX_BUFF_SIZE),
 			0, 0);
 
 		tmp_len -= TSO_MAX_BUFF_SIZE;
@@ -2141,15 +2089,8 @@ static netdev_tx_t stmmac_tso_xmit(struct sk_buff *skb, struct net_device *dev)
 			tcp_hdrlen(skb) / 4, (skb->len - proto_hdr_len));
 
 	/* If context desc is used to change MSS */
-	if (mss_desc) {
-		/* Make sure that first descriptor has been completely
-		 * written, including its own bit. This is because MSS is
-		 * actually before first descriptor, so we need to make
-		 * sure that MSS's own bit is the last thing written.
-		 */
-		dma_wmb();
+	if (mss_desc)
 		priv->hw->desc->set_tx_owner(mss_desc);
-	}
 
 	/* The own bit must be the latest setting done when prepare the
 	 * descriptor and then barrier is needed to make sure that
@@ -2512,7 +2453,7 @@ static int stmmac_rx(struct stmmac_priv *priv, int limit)
 	if (netif_msg_rx_status(priv)) {
 		void *rx_head;
 
-		pr_info(">>>>>> %s: descriptor ring:\n", __func__);
+		pr_debug("%s: descriptor ring:\n", __func__);
 		if (priv->extend_desc)
 			rx_head = (void *)priv->dma_erx;
 		else
@@ -2523,7 +2464,6 @@ static int stmmac_rx(struct stmmac_priv *priv, int limit)
 	while (count < limit) {
 		int status;
 		struct dma_desc *p;
-		struct dma_desc *np;
 
 		if (priv->extend_desc)
 			p = (struct dma_desc *)(priv->dma_erx + entry);
@@ -2543,11 +2483,9 @@ static int stmmac_rx(struct stmmac_priv *priv, int limit)
 		next_entry = priv->cur_rx;
 
 		if (priv->extend_desc)
-			np = (struct dma_desc *)(priv->dma_erx + next_entry);
+			prefetch(priv->dma_erx + next_entry);
 		else
-			np = priv->dma_rx + next_entry;
-
-		prefetch(np);
+			prefetch(priv->dma_rx + next_entry);
 
 		if ((priv->extend_desc) && (priv->hw->desc->rx_extended_status))
 			priv->hw->desc->rx_extended_status(&priv->dev->stats,
@@ -2599,7 +2537,7 @@ static int stmmac_rx(struct stmmac_priv *priv, int limit)
 				frame_len -= ETH_FCS_LEN;
 
 			if (netif_msg_rx_status(priv)) {
-				pr_info("\tdesc: %p [entry %d] buff=0x%x\n",
+				pr_debug("\tdesc: %p [entry %d] buff=0x%x\n",
 					p, entry, des);
 				if (frame_len > ETH_FRAME_LEN)
 					pr_debug("\tframe size %d, COE: %d\n",
@@ -2656,12 +2594,12 @@ static int stmmac_rx(struct stmmac_priv *priv, int limit)
 						 DMA_FROM_DEVICE);
 			}
 
+			stmmac_get_rx_hwtstamp(priv, entry, skb);
+
 			if (netif_msg_pktdata(priv)) {
 				pr_debug("frame received (%dbytes)", frame_len);
 				print_pkt(skb->data, frame_len);
 			}
-
-			stmmac_get_rx_hwtstamp(priv, p, np, skb);
 
 			stmmac_rx_vlan(priv->dev, skb);
 
@@ -2870,14 +2808,6 @@ static irqreturn_t stmmac_interrupt(int irq, void *dev_id)
 				priv->hw->dma->set_rx_tail_ptr(priv->ioaddr,
 							priv->rx_tail_addr,
 							STMMAC_CHAN0);
-		}
-
-		/* PCS link status */
-		if (priv->hw->pcs) {
-			if (priv->xstats.pcs_link)
-				netif_carrier_on(dev);
-			else
-				netif_carrier_off(dev);
 		}
 	}
 
@@ -3200,7 +3130,6 @@ static int stmmac_hw_init(struct stmmac_priv *priv)
 		 */
 		priv->plat->enh_desc = priv->dma_cap.enh_desc;
 		priv->plat->pmt = priv->dma_cap.pmt_remote_wake_up;
-		priv->hw->pmt = priv->plat->pmt;
 
 		/* TXCOE doesn't work in thresh DMA mode */
 		if (priv->plat->force_thresh_dma_mode)
@@ -3377,6 +3306,12 @@ int stmmac_dvr_probe(struct device *device,
 	spin_lock_init(&priv->lock);
 	spin_lock_init(&priv->tx_lock);
 
+	ret = register_netdev(ndev);
+	if (ret) {
+		pr_err("%s: ERROR %i registering the device\n", __func__, ret);
+		goto error_netdev_register;
+	}
+
 	/* If a specific clk_csr value is passed from the platform
 	 * this means that the CSR Clock Range selection cannot be
 	 * changed at run-time and it is fixed. Viceversa the driver'll try to
@@ -3390,32 +3325,22 @@ int stmmac_dvr_probe(struct device *device,
 
 	stmmac_check_pcs_mode(priv);
 
-	if (priv->hw->pcs != STMMAC_PCS_RGMII  &&
-	    priv->hw->pcs != STMMAC_PCS_TBI &&
-	    priv->hw->pcs != STMMAC_PCS_RTBI) {
+	if (priv->pcs != STMMAC_PCS_RGMII && priv->pcs != STMMAC_PCS_TBI &&
+	    priv->pcs != STMMAC_PCS_RTBI) {
 		/* MDIO bus Registration */
 		ret = stmmac_mdio_register(ndev);
 		if (ret < 0) {
 			pr_debug("%s: MDIO bus (id: %d) registration failed",
 				 __func__, priv->plat->bus_id);
-			goto error_napi_register;
+			goto error_mdio_register;
 		}
 	}
 
-	ret = register_netdev(ndev);
-	if (ret) {
-		pr_err("%s: ERROR %i registering the device\n", __func__, ret);
-		goto error_netdev_register;
-	}
+	return 0;
 
-	return ret;
-
+error_mdio_register:
+	unregister_netdev(ndev);
 error_netdev_register:
-	if (priv->hw->pcs != STMMAC_PCS_RGMII &&
-	    priv->hw->pcs != STMMAC_PCS_TBI &&
-	    priv->hw->pcs != STMMAC_PCS_RTBI)
-		stmmac_mdio_unregister(ndev);
-error_napi_register:
 	netif_napi_del(&priv->napi);
 error_hw_init:
 	clk_disable_unprepare(priv->pclk);
@@ -3451,9 +3376,8 @@ int stmmac_dvr_remove(struct device *dev)
 		reset_control_assert(priv->stmmac_rst);
 	clk_disable_unprepare(priv->pclk);
 	clk_disable_unprepare(priv->stmmac_clk);
-	if (priv->hw->pcs != STMMAC_PCS_RGMII &&
-	    priv->hw->pcs != STMMAC_PCS_TBI &&
-	    priv->hw->pcs != STMMAC_PCS_RTBI)
+	if (priv->pcs != STMMAC_PCS_RGMII && priv->pcs != STMMAC_PCS_TBI &&
+	    priv->pcs != STMMAC_PCS_RTBI)
 		stmmac_mdio_unregister(ndev);
 	free_netdev(ndev);
 

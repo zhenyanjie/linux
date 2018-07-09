@@ -24,15 +24,22 @@
 #include <asm/sysreg.h>
 #include <asm/virt.h>
 
-#include <linux/acpi.h>
 #include <linux/of.h>
 #include <linux/perf/arm_pmu.h>
 #include <linux/platform_device.h>
 
 /*
  * ARMv8 PMUv3 Performance Events handling code.
- * Common event types (some are defined in asm/perf_event.h).
+ * Common event types.
  */
+
+/* Required events. */
+#define ARMV8_PMUV3_PERFCTR_SW_INCR				0x00
+#define ARMV8_PMUV3_PERFCTR_L1D_CACHE_REFILL			0x03
+#define ARMV8_PMUV3_PERFCTR_L1D_CACHE				0x04
+#define ARMV8_PMUV3_PERFCTR_BR_MIS_PRED				0x10
+#define ARMV8_PMUV3_PERFCTR_CPU_CYCLES				0x11
+#define ARMV8_PMUV3_PERFCTR_BR_PRED				0x12
 
 /* At least one of the following is required. */
 #define ARMV8_PMUV3_PERFCTR_INST_RETIRED			0x08
@@ -183,23 +190,13 @@
 #define ARMV8_THUNDER_PERFCTR_L1I_CACHE_PREF_MISS		0xED
 
 /* PMUv3 HW events mapping. */
-
-/*
- * ARMv8 Architectural defined events, not all of these may
- * be supported on any given implementation. Undefined events will
- * be disabled at run-time.
- */
 static const unsigned armv8_pmuv3_perf_map[PERF_COUNT_HW_MAX] = {
 	PERF_MAP_ALL_UNSUPPORTED,
 	[PERF_COUNT_HW_CPU_CYCLES]		= ARMV8_PMUV3_PERFCTR_CPU_CYCLES,
 	[PERF_COUNT_HW_INSTRUCTIONS]		= ARMV8_PMUV3_PERFCTR_INST_RETIRED,
 	[PERF_COUNT_HW_CACHE_REFERENCES]	= ARMV8_PMUV3_PERFCTR_L1D_CACHE,
 	[PERF_COUNT_HW_CACHE_MISSES]		= ARMV8_PMUV3_PERFCTR_L1D_CACHE_REFILL,
-	[PERF_COUNT_HW_BRANCH_INSTRUCTIONS]	= ARMV8_PMUV3_PERFCTR_PC_WRITE_RETIRED,
 	[PERF_COUNT_HW_BRANCH_MISSES]		= ARMV8_PMUV3_PERFCTR_BR_MIS_PRED,
-	[PERF_COUNT_HW_BUS_CYCLES]		= ARMV8_PMUV3_PERFCTR_BUS_CYCLES,
-	[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND]	= ARMV8_PMUV3_PERFCTR_STALL_FRONTEND,
-	[PERF_COUNT_HW_STALLED_CYCLES_BACKEND]	= ARMV8_PMUV3_PERFCTR_STALL_BACKEND,
 };
 
 /* ARM Cortex-A53 HW events mapping. */
@@ -260,15 +257,6 @@ static const unsigned armv8_pmuv3_perf_cache_map[PERF_COUNT_HW_CACHE_MAX]
 	[C(L1D)][C(OP_READ)][C(RESULT_MISS)]	= ARMV8_PMUV3_PERFCTR_L1D_CACHE_REFILL,
 	[C(L1D)][C(OP_WRITE)][C(RESULT_ACCESS)]	= ARMV8_PMUV3_PERFCTR_L1D_CACHE,
 	[C(L1D)][C(OP_WRITE)][C(RESULT_MISS)]	= ARMV8_PMUV3_PERFCTR_L1D_CACHE_REFILL,
-
-	[C(L1I)][C(OP_READ)][C(RESULT_ACCESS)]	= ARMV8_PMUV3_PERFCTR_L1I_CACHE,
-	[C(L1I)][C(OP_READ)][C(RESULT_MISS)]	= ARMV8_PMUV3_PERFCTR_L1I_CACHE_REFILL,
-
-	[C(DTLB)][C(OP_READ)][C(RESULT_MISS)]	= ARMV8_PMUV3_PERFCTR_L1D_TLB_REFILL,
-	[C(DTLB)][C(OP_READ)][C(RESULT_ACCESS)]	= ARMV8_PMUV3_PERFCTR_L1D_TLB,
-
-	[C(ITLB)][C(OP_READ)][C(RESULT_MISS)]	= ARMV8_PMUV3_PERFCTR_L1I_TLB_REFILL,
-	[C(ITLB)][C(OP_READ)][C(RESULT_ACCESS)]	= ARMV8_PMUV3_PERFCTR_L1I_TLB,
 
 	[C(BPU)][C(OP_READ)][C(RESULT_ACCESS)]	= ARMV8_PMUV3_PERFCTR_BR_PRED,
 	[C(BPU)][C(OP_READ)][C(RESULT_MISS)]	= ARMV8_PMUV3_PERFCTR_BR_MIS_PRED,
@@ -533,6 +521,12 @@ static struct attribute *armv8_pmuv3_format_attrs[] = {
 static struct attribute_group armv8_pmuv3_format_attr_group = {
 	.name = "format",
 	.attrs = armv8_pmuv3_format_attrs,
+};
+
+static const struct attribute_group *armv8_pmuv3_attr_groups[] = {
+	&armv8_pmuv3_events_attr_group,
+	&armv8_pmuv3_format_attr_group,
+	NULL,
 };
 
 /*
@@ -871,24 +865,15 @@ static int armv8pmu_set_event_filter(struct hw_perf_event *event,
 
 	if (attr->exclude_idle)
 		return -EPERM;
-
-	/*
-	 * If we're running in hyp mode, then we *are* the hypervisor.
-	 * Therefore we ignore exclude_hv in this configuration, since
-	 * there's no hypervisor to sample anyway. This is consistent
-	 * with other architectures (x86 and Power).
-	 */
-	if (is_kernel_in_hyp_mode()) {
-		if (!attr->exclude_kernel)
-			config_base |= ARMV8_PMU_INCLUDE_EL2;
-	} else {
-		if (attr->exclude_kernel)
-			config_base |= ARMV8_PMU_EXCLUDE_EL1;
-		if (!attr->exclude_hv)
-			config_base |= ARMV8_PMU_INCLUDE_EL2;
-	}
+	if (is_kernel_in_hyp_mode() &&
+	    attr->exclude_kernel != attr->exclude_hv)
+		return -EINVAL;
 	if (attr->exclude_user)
 		config_base |= ARMV8_PMU_EXCLUDE_EL0;
+	if (!is_kernel_in_hyp_mode() && attr->exclude_kernel)
+		config_base |= ARMV8_PMU_EXCLUDE_EL1;
+	if (!attr->exclude_hv)
+		config_base |= ARMV8_PMU_INCLUDE_EL2;
 
 	/*
 	 * Install the filter into config_base as this is used to
@@ -920,22 +905,9 @@ static void armv8pmu_reset(void *info)
 
 static int armv8_pmuv3_map_event(struct perf_event *event)
 {
-	int hw_event_id;
-	struct arm_pmu *armpmu = to_arm_pmu(event->pmu);
-
-	hw_event_id = armpmu_map_event(event, &armv8_pmuv3_perf_map,
-				       &armv8_pmuv3_perf_cache_map,
-				       ARMV8_PMU_EVTYPE_EVENT);
-	if (hw_event_id < 0)
-		return hw_event_id;
-
-	/* disable micro/arch events not supported by this PMU */
-	if ((hw_event_id < ARMV8_PMUV3_MAX_COMMON_EVENTS) &&
-		!test_bit(hw_event_id, armpmu->pmceid_bitmap)) {
-			return -EOPNOTSUPP;
-	}
-
-	return hw_event_id;
+	return armpmu_map_event(event, &armv8_pmuv3_perf_map,
+				&armv8_pmuv3_perf_cache_map,
+				ARMV8_PMU_EVTYPE_EVENT);
 }
 
 static int armv8_a53_map_event(struct perf_event *event)
@@ -1013,10 +985,7 @@ static int armv8_pmuv3_init(struct arm_pmu *cpu_pmu)
 	armv8_pmu_init(cpu_pmu);
 	cpu_pmu->name			= "armv8_pmuv3";
 	cpu_pmu->map_event		= armv8_pmuv3_map_event;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_EVENTS] =
-		&armv8_pmuv3_events_attr_group;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_FORMATS] =
-		&armv8_pmuv3_format_attr_group;
+	cpu_pmu->pmu.attr_groups	= armv8_pmuv3_attr_groups;
 	return armv8pmu_probe_pmu(cpu_pmu);
 }
 
@@ -1025,10 +994,7 @@ static int armv8_a53_pmu_init(struct arm_pmu *cpu_pmu)
 	armv8_pmu_init(cpu_pmu);
 	cpu_pmu->name			= "armv8_cortex_a53";
 	cpu_pmu->map_event		= armv8_a53_map_event;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_EVENTS] =
-		&armv8_pmuv3_events_attr_group;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_FORMATS] =
-		&armv8_pmuv3_format_attr_group;
+	cpu_pmu->pmu.attr_groups	= armv8_pmuv3_attr_groups;
 	return armv8pmu_probe_pmu(cpu_pmu);
 }
 
@@ -1037,10 +1003,7 @@ static int armv8_a57_pmu_init(struct arm_pmu *cpu_pmu)
 	armv8_pmu_init(cpu_pmu);
 	cpu_pmu->name			= "armv8_cortex_a57";
 	cpu_pmu->map_event		= armv8_a57_map_event;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_EVENTS] =
-		&armv8_pmuv3_events_attr_group;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_FORMATS] =
-		&armv8_pmuv3_format_attr_group;
+	cpu_pmu->pmu.attr_groups	= armv8_pmuv3_attr_groups;
 	return armv8pmu_probe_pmu(cpu_pmu);
 }
 
@@ -1049,10 +1012,7 @@ static int armv8_a72_pmu_init(struct arm_pmu *cpu_pmu)
 	armv8_pmu_init(cpu_pmu);
 	cpu_pmu->name			= "armv8_cortex_a72";
 	cpu_pmu->map_event		= armv8_a57_map_event;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_EVENTS] =
-		&armv8_pmuv3_events_attr_group;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_FORMATS] =
-		&armv8_pmuv3_format_attr_group;
+	cpu_pmu->pmu.attr_groups	= armv8_pmuv3_attr_groups;
 	return armv8pmu_probe_pmu(cpu_pmu);
 }
 
@@ -1061,10 +1021,7 @@ static int armv8_thunder_pmu_init(struct arm_pmu *cpu_pmu)
 	armv8_pmu_init(cpu_pmu);
 	cpu_pmu->name			= "armv8_cavium_thunder";
 	cpu_pmu->map_event		= armv8_thunder_map_event;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_EVENTS] =
-		&armv8_pmuv3_events_attr_group;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_FORMATS] =
-		&armv8_pmuv3_format_attr_group;
+	cpu_pmu->pmu.attr_groups	= armv8_pmuv3_attr_groups;
 	return armv8pmu_probe_pmu(cpu_pmu);
 }
 
@@ -1073,10 +1030,7 @@ static int armv8_vulcan_pmu_init(struct arm_pmu *cpu_pmu)
 	armv8_pmu_init(cpu_pmu);
 	cpu_pmu->name			= "armv8_brcm_vulcan";
 	cpu_pmu->map_event		= armv8_vulcan_map_event;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_EVENTS] =
-		&armv8_pmuv3_events_attr_group;
-	cpu_pmu->attr_groups[ARMPMU_ATTR_GROUP_FORMATS] =
-		&armv8_pmuv3_format_attr_group;
+	cpu_pmu->pmu.attr_groups	= armv8_pmuv3_attr_groups;
 	return armv8pmu_probe_pmu(cpu_pmu);
 }
 
@@ -1090,32 +1044,21 @@ static const struct of_device_id armv8_pmu_of_device_ids[] = {
 	{},
 };
 
-/*
- * Non DT systems have their micro/arch events probed at run-time.
- * A fairly complete list of generic events are provided and ones that
- * aren't supported by the current PMU are disabled.
- */
-static const struct pmu_probe_info armv8_pmu_probe_table[] = {
-	PMU_PROBE(0, 0, armv8_pmuv3_init), /* enable all defined counters */
-	{ /* sentinel value */ }
-};
-
 static int armv8_pmu_device_probe(struct platform_device *pdev)
 {
-	if (acpi_disabled)
-		return arm_pmu_device_probe(pdev, armv8_pmu_of_device_ids,
-					    NULL);
-
-	return arm_pmu_device_probe(pdev, armv8_pmu_of_device_ids,
-				    armv8_pmu_probe_table);
+	return arm_pmu_device_probe(pdev, armv8_pmu_of_device_ids, NULL);
 }
 
 static struct platform_driver armv8_pmu_driver = {
 	.driver		= {
-		.name	= ARMV8_PMU_PDEV_NAME,
+		.name	= "armv8-pmu",
 		.of_match_table = armv8_pmu_of_device_ids,
 	},
 	.probe		= armv8_pmu_device_probe,
 };
 
-builtin_platform_driver(armv8_pmu_driver);
+static int __init register_armv8_pmu_driver(void)
+{
+	return platform_driver_register(&armv8_pmu_driver);
+}
+device_initcall(register_armv8_pmu_driver);

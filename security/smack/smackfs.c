@@ -2523,9 +2523,14 @@ static ssize_t smk_write_revoke_subj(struct file *file, const char __user *buf,
 	if (count == 0 || count > SMK_LONGLABEL)
 		return -EINVAL;
 
-	data = memdup_user(buf, count);
-	if (IS_ERR(data))
-		return PTR_ERR(data);
+	data = kzalloc(count, GFP_KERNEL);
+	if (data == NULL)
+		return -ENOMEM;
+
+	if (copy_from_user(data, buf, count) != 0) {
+		rc = -EFAULT;
+		goto out_data;
+	}
 
 	cp = smk_parse_smack(data, count);
 	if (IS_ERR(cp)) {

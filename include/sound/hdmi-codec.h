@@ -36,10 +36,10 @@ struct hdmi_codec_daifmt {
 		HDMI_AC97,
 		HDMI_SPDIF,
 	} fmt;
-	unsigned int bit_clk_inv:1;
-	unsigned int frame_clk_inv:1;
-	unsigned int bit_clk_master:1;
-	unsigned int frame_clk_master:1;
+	int bit_clk_inv:1;
+	int frame_clk_inv:1;
+	int bit_clk_master:1;
+	int frame_clk_master:1;
 };
 
 /*
@@ -53,19 +53,18 @@ struct hdmi_codec_params {
 	int channels;
 };
 
-struct hdmi_codec_pdata;
 struct hdmi_codec_ops {
 	/*
 	 * Called when ASoC starts an audio stream setup.
 	 * Optional
 	 */
-	int (*audio_startup)(struct device *dev, void *data);
+	int (*audio_startup)(struct device *dev);
 
 	/*
 	 * Configures HDMI-encoder for audio stream.
 	 * Mandatory
 	 */
-	int (*hw_params)(struct device *dev, void *data,
+	int (*hw_params)(struct device *dev,
 			 struct hdmi_codec_daifmt *fmt,
 			 struct hdmi_codec_params *hparms);
 
@@ -73,20 +72,19 @@ struct hdmi_codec_ops {
 	 * Shuts down the audio stream.
 	 * Mandatory
 	 */
-	void (*audio_shutdown)(struct device *dev, void *data);
+	void (*audio_shutdown)(struct device *dev);
 
 	/*
 	 * Mute/unmute HDMI audio stream.
 	 * Optional
 	 */
-	int (*digital_mute)(struct device *dev, void *data, bool enable);
+	int (*digital_mute)(struct device *dev, bool enable);
 
 	/*
 	 * Provides EDID-Like-Data from connected HDMI device.
 	 * Optional
 	 */
-	int (*get_eld)(struct device *dev, void *data,
-		       uint8_t *buf, size_t len);
+	int (*get_eld)(struct device *dev, uint8_t *buf, size_t len);
 };
 
 /* HDMI codec initalization data */
@@ -95,7 +93,6 @@ struct hdmi_codec_pdata {
 	uint i2s:1;
 	uint spdif:1;
 	int max_i2s_channels;
-	void *data;
 };
 
 #define HDMI_CODEC_DRV_NAME "hdmi-audio-codec"

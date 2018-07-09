@@ -111,7 +111,7 @@ static void rtl_fw_do_work(const struct firmware *firmware, void *context,
 			if (!err)
 				goto found_alt;
 		}
-		pr_err("Selected firmware is not available\n");
+		pr_err("Firmware %s not available\n", rtlpriv->cfg->fw_name);
 		rtlpriv->max_fw_size = 0;
 		return;
 	}
@@ -526,7 +526,7 @@ static void _rtl_add_wowlan_patterns(struct ieee80211_hw *hw,
 		/* 3. calculate crc */
 		rtl_pattern.crc = _calculate_wol_pattern_crc(content, len);
 		RT_TRACE(rtlpriv, COMP_POWER, DBG_TRACE,
-			 "CRC_Remainder = 0x%x\n", rtl_pattern.crc);
+			 "CRC_Remainder = 0x%x", rtl_pattern.crc);
 
 		/* 4. write crc & mask_for_hw to hw */
 		rtlpriv->cfg->ops->add_wowlan_pattern(hw, &rtl_pattern, i);
@@ -765,8 +765,7 @@ static int rtl_op_config(struct ieee80211_hw *hw, u32 changed)
 					mac->bw_40 = false;
 					mac->bw_80 = false;
 					RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG,
-						 "switch case %#x not processed\n",
-						 channel_type);
+						 "switch case not processed\n");
 					break;
 			}
 		}
@@ -1136,7 +1135,7 @@ static void rtl_op_bss_info_changed(struct ieee80211_hw *hw,
 					mac->mode = WIRELESS_MODE_AC_24G;
 			}
 
-			if (vif->type == NL80211_IFTYPE_STATION)
+			if (vif->type == NL80211_IFTYPE_STATION && sta)
 				rtlpriv->cfg->ops->update_rate_tbl(hw, sta, 0);
 			rcu_read_unlock();
 
@@ -1150,8 +1149,10 @@ static void rtl_op_bss_info_changed(struct ieee80211_hw *hw,
 		} else {
 			mstatus = RT_MEDIA_DISCONNECT;
 
-			if (mac->link_state == MAC80211_LINKED)
-				rtl_lps_leave(hw);
+			if (mac->link_state == MAC80211_LINKED) {
+				rtlpriv->enter_ps = false;
+				schedule_work(&rtlpriv->works.lps_change_work);
+			}
 			if (ppsc->p2p_ps_info.p2p_ps_mode > P2P_PS_NONE)
 				rtl_p2p_ps_cmd(hw, P2P_PS_DISABLE);
 			mac->link_state = MAC80211_NOLINK;
@@ -1429,7 +1430,8 @@ static void rtl_op_sw_scan_start(struct ieee80211_hw *hw,
 	}
 
 	if (mac->link_state == MAC80211_LINKED) {
-		rtl_lps_leave(hw);
+		rtlpriv->enter_ps = false;
+		schedule_work(&rtlpriv->works.lps_change_work);
 		mac->link_state = MAC80211_LINKED_SCANNING;
 	} else {
 		rtl_ips_nic_on(hw);

@@ -28,7 +28,6 @@
  */
 
 #include <linux/export.h>
-#include <linux/kernel.h>
 #include <linux/timex.h>
 #include <linux/capability.h>
 #include <linux/timekeeper_internal.h>
@@ -259,10 +258,9 @@ unsigned int jiffies_to_msecs(const unsigned long j)
 	return (j + (HZ / MSEC_PER_SEC) - 1)/(HZ / MSEC_PER_SEC);
 #else
 # if BITS_PER_LONG == 32
-	return (HZ_TO_MSEC_MUL32 * j + (1ULL << HZ_TO_MSEC_SHR32) - 1) >>
-	       HZ_TO_MSEC_SHR32;
+	return (HZ_TO_MSEC_MUL32 * j) >> HZ_TO_MSEC_SHR32;
 # else
-	return DIV_ROUND_UP(j * HZ_TO_MSEC_NUM, HZ_TO_MSEC_DEN);
+	return (j * HZ_TO_MSEC_NUM) / HZ_TO_MSEC_DEN;
 # endif
 #endif
 }
@@ -782,7 +780,7 @@ struct timespec64 timespec64_add_safe(const struct timespec64 lhs,
 {
 	struct timespec64 res;
 
-	set_normalized_timespec64(&res, (timeu64_t) lhs.tv_sec + rhs.tv_sec,
+	set_normalized_timespec64(&res, lhs.tv_sec + rhs.tv_sec,
 			lhs.tv_nsec + rhs.tv_nsec);
 
 	if (unlikely(res.tv_sec < lhs.tv_sec || res.tv_sec < rhs.tv_sec)) {

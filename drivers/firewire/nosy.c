@@ -566,11 +566,6 @@ add_card(struct pci_dev *dev, const struct pci_device_id *unused)
 
 	lynx->registers = ioremap_nocache(pci_resource_start(dev, 0),
 					  PCILYNX_MAX_REGISTER);
-	if (lynx->registers == NULL) {
-		dev_err(&dev->dev, "Failed to map registers\n");
-		ret = -ENOMEM;
-		goto fail_deallocate_lynx;
-	}
 
 	lynx->rcv_start_pcl = pci_alloc_consistent(lynx->pci_device,
 				sizeof(struct pcl), &lynx->rcv_start_pcl_bus);
@@ -583,7 +578,7 @@ add_card(struct pci_dev *dev, const struct pci_device_id *unused)
 	    lynx->rcv_buffer == NULL) {
 		dev_err(&dev->dev, "Failed to allocate receive buffer\n");
 		ret = -ENOMEM;
-		goto fail_deallocate_buffers;
+		goto fail_deallocate;
 	}
 	lynx->rcv_start_pcl->next	= cpu_to_le32(lynx->rcv_pcl_bus);
 	lynx->rcv_pcl->next		= cpu_to_le32(PCL_NEXT_INVALID);
@@ -646,7 +641,7 @@ add_card(struct pci_dev *dev, const struct pci_device_id *unused)
 		dev_err(&dev->dev,
 			"Failed to allocate shared interrupt %d\n", dev->irq);
 		ret = -EIO;
-		goto fail_deallocate_buffers;
+		goto fail_deallocate;
 	}
 
 	lynx->misc.parent = &dev->dev;
@@ -673,7 +668,7 @@ fail_free_irq:
 	reg_write(lynx, PCI_INT_ENABLE, 0);
 	free_irq(lynx->pci_device->irq, lynx);
 
-fail_deallocate_buffers:
+fail_deallocate:
 	if (lynx->rcv_start_pcl)
 		pci_free_consistent(lynx->pci_device, sizeof(struct pcl),
 				lynx->rcv_start_pcl, lynx->rcv_start_pcl_bus);
@@ -684,8 +679,6 @@ fail_deallocate_buffers:
 		pci_free_consistent(lynx->pci_device, PAGE_SIZE,
 				lynx->rcv_buffer, lynx->rcv_buffer_bus);
 	iounmap(lynx->registers);
-
-fail_deallocate_lynx:
 	kfree(lynx);
 
 fail_disable:

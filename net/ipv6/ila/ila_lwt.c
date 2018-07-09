@@ -26,7 +26,7 @@ static int ila_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 	if (skb->protocol != htons(ETH_P_IPV6))
 		goto drop;
 
-	ila_update_ipv6_locator(skb, ila_params_lwtunnel(dst->lwtstate), true);
+	ila_update_ipv6_locator(skb, ila_params_lwtunnel(dst->lwtstate));
 
 	return dst->lwtstate->orig_output(net, sk, skb);
 
@@ -42,7 +42,7 @@ static int ila_input(struct sk_buff *skb)
 	if (skb->protocol != htons(ETH_P_IPV6))
 		goto drop;
 
-	ila_update_ipv6_locator(skb, ila_params_lwtunnel(dst->lwtstate), false);
+	ila_update_ipv6_locator(skb, ila_params_lwtunnel(dst->lwtstate));
 
 	return dst->lwtstate->orig_input(skb);
 
@@ -51,7 +51,7 @@ drop:
 	return -EINVAL;
 }
 
-static const struct nla_policy ila_nl_policy[ILA_ATTR_MAX + 1] = {
+static struct nla_policy ila_nl_policy[ILA_ATTR_MAX + 1] = {
 	[ILA_ATTR_LOCATOR] = { .type = NLA_U64, },
 	[ILA_ATTR_CSUM_MODE] = { .type = NLA_U8, },
 };
@@ -164,7 +164,6 @@ static const struct lwtunnel_encap_ops ila_encap_ops = {
 	.fill_encap = ila_fill_encap_info,
 	.get_encap_size = ila_encap_nlsize,
 	.cmp_encap = ila_encap_cmp,
-	.owner = THIS_MODULE,
 };
 
 int ila_lwt_init(void)

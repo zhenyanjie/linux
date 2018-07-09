@@ -15,24 +15,16 @@
 #include <byteswap.h>
 #include <linux/kernel.h>
 #include <linux/log2.h>
-#include <linux/time64.h>
 #include <unistd.h>
 #include "callchain.h"
 #include "strlist.h"
 
-#define CALLCHAIN_PARAM_DEFAULT			\
-	.mode		= CHAIN_GRAPH_ABS,	\
-	.min_percent	= 0.5,			\
-	.order		= ORDER_CALLEE,		\
-	.key		= CCKEY_FUNCTION,	\
-	.value		= CCVAL_PERCENT,	\
-
-struct callchain_param callchain_param = {
-	CALLCHAIN_PARAM_DEFAULT
-};
-
-struct callchain_param callchain_param_default = {
-	CALLCHAIN_PARAM_DEFAULT
+struct callchain_param	callchain_param = {
+	.mode	= CHAIN_GRAPH_ABS,
+	.min_percent = 0.5,
+	.order  = ORDER_CALLEE,
+	.key	= CCKEY_FUNCTION,
+	.value	= CCVAL_PERCENT,
 };
 
 /*
@@ -105,17 +97,20 @@ int rm_rf(char *path)
 		scnprintf(namebuf, sizeof(namebuf), "%s/%s",
 			  path, d->d_name);
 
-		/* We have to check symbolic link itself */
-		ret = lstat(namebuf, &statbuf);
+		ret = stat(namebuf, &statbuf);
 		if (ret < 0) {
 			pr_debug("stat failed: %s\n", namebuf);
 			break;
 		}
 
-		if (S_ISDIR(statbuf.st_mode))
-			ret = rm_rf(namebuf);
-		else
+		if (S_ISREG(statbuf.st_mode))
 			ret = unlink(namebuf);
+		else if (S_ISDIR(statbuf.st_mode))
+			ret = rm_rf(namebuf);
+		else {
+			pr_debug("unknown file: %s\n", namebuf);
+			ret = -1;
+		}
 	}
 	closedir(dir);
 
@@ -207,7 +202,7 @@ int copyfile_offset(int ifd, loff_t off_in, int ofd, loff_t off_out, u64 size)
 
 		size -= ret;
 		off_in += ret;
-		off_out += ret;
+		off_out -= ret;
 	}
 	munmap(ptr, off_in + size);
 
@@ -746,20 +741,4 @@ void print_binary(unsigned char *data, size_t len,
 		}
 	}
 	printer(BINARY_PRINT_DATA_END, -1, extra);
-}
-
-int is_printable_array(char *p, unsigned int len)
-{
-	unsigned int i;
-
-	if (!p || !len || p[len - 1] != 0)
-		return 0;
-
-	len--;
-
-	for (i = 0; i < len; i++) {
-		if (!isprint(p[i]) && !isspace(p[i]))
-			return 0;
-	}
-	return 1;
 }

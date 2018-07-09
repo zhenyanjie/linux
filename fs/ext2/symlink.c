@@ -25,7 +25,10 @@ const struct inode_operations ext2_symlink_inode_operations = {
 	.get_link	= page_get_link,
 	.setattr	= ext2_setattr,
 #ifdef CONFIG_EXT2_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= ext2_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 };
  
@@ -34,6 +37,9 @@ const struct inode_operations ext2_fast_symlink_inode_operations = {
 	.get_link	= simple_get_link,
 	.setattr	= ext2_setattr,
 #ifdef CONFIG_EXT2_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= ext2_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 };

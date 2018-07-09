@@ -260,12 +260,14 @@ static int hci_init1_req(struct hci_request *req, unsigned long opt)
 		hci_reset_req(req, 0);
 
 	switch (hdev->dev_type) {
-	case HCI_PRIMARY:
+	case HCI_BREDR:
 		bredr_init(req);
 		break;
+
 	case HCI_AMP:
 		amp_init1(req);
 		break;
+
 	default:
 		BT_ERR("Unknown device type %d", hdev->dev_type);
 		break;
@@ -548,7 +550,6 @@ static void hci_set_event_mask_page_2(struct hci_request *req)
 {
 	struct hci_dev *hdev = req->hdev;
 	u8 events[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-	bool changed = false;
 
 	/* If Connectionless Slave Broadcast master role is supported
 	 * enable all necessary events for it.
@@ -558,7 +559,6 @@ static void hci_set_event_mask_page_2(struct hci_request *req)
 		events[1] |= 0x80;	/* Synchronization Train Complete */
 		events[2] |= 0x10;	/* Slave Page Response Timeout */
 		events[2] |= 0x20;	/* CSB Channel Map Change */
-		changed = true;
 	}
 
 	/* If Connectionless Slave Broadcast slave role is supported
@@ -569,24 +569,13 @@ static void hci_set_event_mask_page_2(struct hci_request *req)
 		events[2] |= 0x02;	/* CSB Receive */
 		events[2] |= 0x04;	/* CSB Timeout */
 		events[2] |= 0x08;	/* Truncated Page Complete */
-		changed = true;
 	}
 
 	/* Enable Authenticated Payload Timeout Expired event if supported */
-	if (lmp_ping_capable(hdev) || hdev->le_features[0] & HCI_LE_PING) {
+	if (lmp_ping_capable(hdev) || hdev->le_features[0] & HCI_LE_PING)
 		events[2] |= 0x80;
-		changed = true;
-	}
 
-	/* Some Broadcom based controllers indicate support for Set Event
-	 * Mask Page 2 command, but then actually do not support it. Since
-	 * the default value is all bits set to zero, the command is only
-	 * required if the event mask has to be changed. In case no change
-	 * to the event mask is needed, skip this command.
-	 */
-	if (changed)
-		hci_req_add(req, HCI_OP_SET_EVENT_MASK_PAGE_2,
-			    sizeof(events), events);
+	hci_req_add(req, HCI_OP_SET_EVENT_MASK_PAGE_2, sizeof(events), events);
 }
 
 static int hci_init3_req(struct hci_request *req, unsigned long opt)
@@ -802,11 +791,11 @@ static int __hci_init(struct hci_dev *hdev)
 	if (err < 0)
 		return err;
 
-	/* HCI_PRIMARY covers both single-mode LE, BR/EDR and dual-mode
+	/* HCI_BREDR covers both single-mode LE, BR/EDR and dual-mode
 	 * BR/EDR/LE type controllers. AMP controllers only need the
 	 * first two stages of init.
 	 */
-	if (hdev->dev_type != HCI_PRIMARY)
+	if (hdev->dev_type != HCI_BREDR)
 		return 0;
 
 	err = __hci_req_sync(hdev, hci_init3_req, 0, HCI_INIT_TIMEOUT, NULL);
@@ -1213,7 +1202,7 @@ int hci_inquiry(void __user *arg)
 		goto done;
 	}
 
-	if (hdev->dev_type != HCI_PRIMARY) {
+	if (hdev->dev_type != HCI_BREDR) {
 		err = -EOPNOTSUPP;
 		goto done;
 	}
@@ -1318,7 +1307,7 @@ static int hci_dev_do_open(struct hci_dev *hdev)
 		 * since AMP controllers do not have an address.
 		 */
 		if (!hci_dev_test_flag(hdev, HCI_USER_CHANNEL) &&
-		    hdev->dev_type == HCI_PRIMARY &&
+		    hdev->dev_type == HCI_BREDR &&
 		    !bacmp(&hdev->bdaddr, BDADDR_ANY) &&
 		    !bacmp(&hdev->static_addr, BDADDR_ANY)) {
 			ret = -EADDRNOTAVAIL;
@@ -1413,7 +1402,7 @@ static int hci_dev_do_open(struct hci_dev *hdev)
 		    !hci_dev_test_flag(hdev, HCI_UNCONFIGURED) &&
 		    !hci_dev_test_flag(hdev, HCI_USER_CHANNEL) &&
 		    hci_dev_test_flag(hdev, HCI_MGMT) &&
-		    hdev->dev_type == HCI_PRIMARY) {
+		    hdev->dev_type == HCI_BREDR) {
 			ret = __hci_req_hci_power_on(hdev);
 			mgmt_power_on(hdev, ret);
 		}
@@ -1574,8 +1563,7 @@ int hci_dev_do_close(struct hci_dev *hdev)
 
 	auto_off = hci_dev_test_and_clear_flag(hdev, HCI_AUTO_OFF);
 
-	if (!auto_off && hdev->dev_type == HCI_PRIMARY &&
-	    !hci_dev_test_flag(hdev, HCI_USER_CHANNEL) &&
+	if (!auto_off && hdev->dev_type == HCI_BREDR &&
 	    hci_dev_test_flag(hdev, HCI_MGMT))
 		__mgmt_power_off(hdev);
 
@@ -1814,7 +1802,7 @@ int hci_dev_cmd(unsigned int cmd, void __user *arg)
 		goto done;
 	}
 
-	if (hdev->dev_type != HCI_PRIMARY) {
+	if (hdev->dev_type != HCI_BREDR) {
 		err = -EOPNOTSUPP;
 		goto done;
 	}
@@ -2055,7 +2043,7 @@ static void hci_power_on(struct work_struct *work)
 	 */
 	if (hci_dev_test_flag(hdev, HCI_RFKILLED) ||
 	    hci_dev_test_flag(hdev, HCI_UNCONFIGURED) ||
-	    (hdev->dev_type == HCI_PRIMARY &&
+	    (hdev->dev_type == HCI_BREDR &&
 	     !bacmp(&hdev->bdaddr, BDADDR_ANY) &&
 	     !bacmp(&hdev->static_addr, BDADDR_ANY))) {
 		hci_dev_clear_flag(hdev, HCI_AUTO_OFF);
@@ -3042,7 +3030,7 @@ int hci_register_dev(struct hci_dev *hdev)
 	 * so the index can be used as the AMP controller ID.
 	 */
 	switch (hdev->dev_type) {
-	case HCI_PRIMARY:
+	case HCI_BREDR:
 		id = ida_simple_get(&hci_index_ida, 0, 0, GFP_KERNEL);
 		break;
 	case HCI_AMP:
@@ -3102,7 +3090,7 @@ int hci_register_dev(struct hci_dev *hdev)
 	hci_dev_set_flag(hdev, HCI_SETUP);
 	hci_dev_set_flag(hdev, HCI_AUTO_OFF);
 
-	if (hdev->dev_type == HCI_PRIMARY) {
+	if (hdev->dev_type == HCI_BREDR) {
 		/* Assume BR/EDR support until proven otherwise (such as
 		 * through reading supported features during init.
 		 */
@@ -3177,8 +3165,6 @@ void hci_unregister_dev(struct hci_dev *hdev)
 	device_del(&hdev->dev);
 
 	debugfs_remove_recursive(hdev->debugfs);
-	kfree_const(hdev->hw_info);
-	kfree_const(hdev->fw_info);
 
 	destroy_workqueue(hdev->workqueue);
 	destroy_workqueue(hdev->req_workqueue);
@@ -3281,28 +3267,6 @@ int hci_recv_diag(struct hci_dev *hdev, struct sk_buff *skb)
 	return 0;
 }
 EXPORT_SYMBOL(hci_recv_diag);
-
-void hci_set_hw_info(struct hci_dev *hdev, const char *fmt, ...)
-{
-	va_list vargs;
-
-	va_start(vargs, fmt);
-	kfree_const(hdev->hw_info);
-	hdev->hw_info = kvasprintf_const(GFP_KERNEL, fmt, vargs);
-	va_end(vargs);
-}
-EXPORT_SYMBOL(hci_set_hw_info);
-
-void hci_set_fw_info(struct hci_dev *hdev, const char *fmt, ...)
-{
-	va_list vargs;
-
-	va_start(vargs, fmt);
-	kfree_const(hdev->fw_info);
-	hdev->fw_info = kvasprintf_const(GFP_KERNEL, fmt, vargs);
-	va_end(vargs);
-}
-EXPORT_SYMBOL(hci_set_fw_info);
 
 /* ---- Interface to upper protocols ---- */
 
@@ -3451,7 +3415,7 @@ static void hci_queue_acl(struct hci_chan *chan, struct sk_buff_head *queue,
 	hci_skb_pkt_type(skb) = HCI_ACLDATA_PKT;
 
 	switch (hdev->dev_type) {
-	case HCI_PRIMARY:
+	case HCI_BREDR:
 		hci_add_acl_hdr(skb, conn->handle, flags);
 		break;
 	case HCI_AMP:
@@ -3862,7 +3826,7 @@ static void hci_sched_acl(struct hci_dev *hdev)
 	BT_DBG("%s", hdev->name);
 
 	/* No ACL link over BR/EDR controller */
-	if (!hci_conn_num(hdev, ACL_LINK) && hdev->dev_type == HCI_PRIMARY)
+	if (!hci_conn_num(hdev, ACL_LINK) && hdev->dev_type == HCI_BREDR)
 		return;
 
 	/* No AMP link over AMP controller */

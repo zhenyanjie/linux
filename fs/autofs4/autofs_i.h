@@ -20,8 +20,7 @@
 #define AUTOFS_IOC_COUNT     32
 
 #define AUTOFS_DEV_IOCTL_IOC_FIRST	(AUTOFS_DEV_IOCTL_VERSION)
-#define AUTOFS_DEV_IOCTL_IOC_COUNT \
-	(AUTOFS_DEV_IOCTL_ISMOUNTPOINT_CMD - AUTOFS_DEV_IOCTL_VERSION_CMD)
+#define AUTOFS_DEV_IOCTL_IOC_COUNT	(AUTOFS_IOC_COUNT - 11)
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -33,6 +32,8 @@
 #include <linux/namei.h>
 #include <asm/current.h>
 #include <linux/uaccess.h>
+
+/* #define DEBUG */
 
 #ifdef pr_fmt
 #undef pr_fmt
@@ -110,6 +111,8 @@ struct autofs_sb_info {
 	int max_proto;
 	unsigned long exp_timeout;
 	unsigned int type;
+	int reghost_enabled;
+	int needs_reghost;
 	struct super_block *sb;
 	struct mutex wq_mutex;
 	struct mutex pipe_mutex;
@@ -268,4 +271,4 @@ static inline void autofs4_del_expiring(struct dentry *dentry)
 	}
 }
 
-void autofs4_kill_sb(struct super_block *);
+extern void autofs4_kill_sb(struct super_block *);

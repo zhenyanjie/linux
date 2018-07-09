@@ -609,7 +609,14 @@ static const struct v4l2_subdev_internal_ops v4l2_flash_subdev_internal_ops = {
 	.close = v4l2_flash_close,
 };
 
-static const struct v4l2_subdev_ops v4l2_flash_subdev_ops;
+static const struct v4l2_subdev_core_ops v4l2_flash_core_ops = {
+	.queryctrl = v4l2_subdev_queryctrl,
+	.querymenu = v4l2_subdev_querymenu,
+};
+
+static const struct v4l2_subdev_ops v4l2_flash_subdev_ops = {
+	.core = &v4l2_flash_core_ops,
+};
 
 struct v4l2_flash *v4l2_flash_init(
 	struct device *dev, struct device_node *of_node,

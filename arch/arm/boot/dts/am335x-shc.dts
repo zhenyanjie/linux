@@ -64,50 +64,50 @@
 
 		compatible = "gpio-leds";
 
-		led1 {
+		led@1 {
 			label = "shc:power:red";
 			gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
 
-		led2 {
+		led@2 {
 			label = "shc:power:bl";
 			gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
 			linux,default-trigger = "timer";
 			default-state = "on";
 		};
 
-		led3 {
+		led@3 {
 			label = "shc:lan:red";
 			gpios = <&gpio0 26 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
 
-		led4 {
+		led@4 {
 			label = "shc:lan:bl";
 			gpios = <&gpio1 17 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
 
-		led5 {
+		led@5 {
 			label = "shc:cloud:red";
 			gpios = <&gpio2 2 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
 
-		led6 {
+		led@6 {
 			label = "shc:cloud:bl";
 			gpios = <&gpio1 18 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
 	};
 
-	memory@80000000 {
+	memory {
 		device_type = "memory";
 		reg = <0x80000000 0x20000000>; /* 512 MB */
 	};
 
-	vmmcsd_fixed: fixedregulator0 {
+	vmmcsd_fixed: fixedregulator@0 {
 		compatible = "regulator-fixed";
 		regulator-name = "vmmcsd_fixed";
 		regulator-min-microvolt = <3300000>;

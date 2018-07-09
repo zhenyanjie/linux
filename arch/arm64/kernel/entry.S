@@ -29,12 +29,8 @@
 #include <asm/esr.h>
 #include <asm/irq.h>
 #include <asm/memory.h>
-#include <asm/mmu.h>
-#include <asm/processor.h>
 #include <asm/thread_info.h>
-#include <asm/asm-uaccess.h>
 #include <asm/unistd.h>
-#include <asm/kernel-pgtable.h>
 
 /*
  * Context tracking subsystem.  Used to instrument transitions
@@ -71,31 +67,8 @@
 #define BAD_FIQ		2
 #define BAD_ERROR	3
 
-	.macro kernel_ventry, el, label, regsize = 64
-	.align 7
-#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
-alternative_if ARM64_UNMAP_KERNEL_AT_EL0
-	.if	\el == 0
-	.if	\regsize == 64
-	mrs	x30, tpidrro_el0
-	msr	tpidrro_el0, xzr
-	.else
-	mov	x30, xzr
-	.endif
-	.endif
-alternative_else_nop_endif
-#endif
-
-	sub	sp, sp, #S_FRAME_SIZE
-	b	el\()\el\()_\label
-	.endm
-
-	.macro tramp_alias, dst, sym
-	mov_q	\dst, TRAMP_VALIAS
-	add	\dst, \dst, #(\sym - .entry.tramp.text)
-	.endm
-
 	.macro	kernel_entry, el, regsize = 64
+	sub	sp, sp, #S_FRAME_SIZE
 	.if	\regsize == 32
 	mov	w0, w0				// zero upper 32 bits of x0
 	.endif
@@ -126,12 +99,12 @@ alternative_else_nop_endif
 	.else
 	add	x21, sp, #S_FRAME_SIZE
 	get_thread_info tsk
-	/* Save the task's original addr_limit and set USER_DS */
+	/* Save the task's original addr_limit and set USER_DS (TASK_SIZE_64) */
 	ldr	x20, [tsk, #TI_ADDR_LIMIT]
 	str	x20, [sp, #S_ORIG_ADDR_LIMIT]
-	mov	x20, #USER_DS
+	mov	x20, #TASK_SIZE_64
 	str	x20, [tsk, #TI_ADDR_LIMIT]
-	/* No need to reset PSTATE.UAO, hardware's already set it to 0 for us */
+	ALTERNATIVE(nop, SET_PSTATE_UAO(0), ARM64_HAS_UAO, CONFIG_ARM64_UAO)
 	.endif /* \el == 0 */
 	mrs	x22, elr_el1
 	mrs	x23, spsr_el1
@@ -176,20 +149,24 @@ alternative_else_nop_endif
 	ct_user_enter
 	ldr	x23, [sp, #S_SP]		// load return stack pointer
 	msr	sp_el0, x23
-	tst	x22, #PSR_MODE32_BIT		// native task?
-	b.eq	3f
-
 #ifdef CONFIG_ARM64_ERRATUM_845719
-alternative_if ARM64_WORKAROUND_845719
+alternative_if_not ARM64_WORKAROUND_845719
+	nop
+	nop
+#ifdef CONFIG_PID_IN_CONTEXTIDR
+	nop
+#endif
+alternative_else
+	tbz	x22, #4, 1f
 #ifdef CONFIG_PID_IN_CONTEXTIDR
 	mrs	x29, contextidr_el1
 	msr	contextidr_el1, x29
 #else
 	msr contextidr_el1, xzr
 #endif
-alternative_else_nop_endif
+1:
+alternative_endif
 #endif
-3:
 	.endif
 	msr	elr_el1, x21			// set up the return data
 	msr	spsr_el1, x22
@@ -210,21 +187,7 @@ alternative_else_nop_endif
 	ldp	x28, x29, [sp, #16 * 14]
 	ldr	lr, [sp, #S_LR]
 	add	sp, sp, #S_FRAME_SIZE		// restore sp
-
-	.if	\el == 0
-alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
-#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
-	bne	4f
-	msr	far_el1, x30
-	tramp_alias	x30, tramp_exit_native
-	br	x30
-4:
-	tramp_alias	x30, tramp_exit_compat
-	br	x30
-#endif
-	.else
-	eret
-	.endif
+	eret					// return to kernel
 	.endm
 
 	.macro	get_thread_info, rd
@@ -295,35 +258,34 @@ tsk	.req	x28		// current thread_info
 /*
  * Exception vectors.
  */
-	.pushsection ".entry.text", "ax"
 
 	.align	11
 ENTRY(vectors)
-	kernel_ventry	1, sync_invalid			// Synchronous EL1t
-	kernel_ventry	1, irq_invalid			// IRQ EL1t
-	kernel_ventry	1, fiq_invalid			// FIQ EL1t
-	kernel_ventry	1, error_invalid		// Error EL1t
+	ventry	el1_sync_invalid		// Synchronous EL1t
+	ventry	el1_irq_invalid			// IRQ EL1t
+	ventry	el1_fiq_invalid			// FIQ EL1t
+	ventry	el1_error_invalid		// Error EL1t
 
-	kernel_ventry	1, sync				// Synchronous EL1h
-	kernel_ventry	1, irq				// IRQ EL1h
-	kernel_ventry	1, fiq_invalid			// FIQ EL1h
-	kernel_ventry	1, error_invalid		// Error EL1h
+	ventry	el1_sync			// Synchronous EL1h
+	ventry	el1_irq				// IRQ EL1h
+	ventry	el1_fiq_invalid			// FIQ EL1h
+	ventry	el1_error_invalid		// Error EL1h
 
-	kernel_ventry	0, sync				// Synchronous 64-bit EL0
-	kernel_ventry	0, irq				// IRQ 64-bit EL0
-	kernel_ventry	0, fiq_invalid			// FIQ 64-bit EL0
-	kernel_ventry	0, error_invalid		// Error 64-bit EL0
+	ventry	el0_sync			// Synchronous 64-bit EL0
+	ventry	el0_irq				// IRQ 64-bit EL0
+	ventry	el0_fiq_invalid			// FIQ 64-bit EL0
+	ventry	el0_error_invalid		// Error 64-bit EL0
 
 #ifdef CONFIG_COMPAT
-	kernel_ventry	0, sync_compat, 32		// Synchronous 32-bit EL0
-	kernel_ventry	0, irq_compat, 32		// IRQ 32-bit EL0
-	kernel_ventry	0, fiq_invalid_compat, 32	// FIQ 32-bit EL0
-	kernel_ventry	0, error_invalid_compat, 32	// Error 32-bit EL0
+	ventry	el0_sync_compat			// Synchronous 32-bit EL0
+	ventry	el0_irq_compat			// IRQ 32-bit EL0
+	ventry	el0_fiq_invalid_compat		// FIQ 32-bit EL0
+	ventry	el0_error_invalid_compat	// Error 32-bit EL0
 #else
-	kernel_ventry	0, sync_invalid, 32		// Synchronous 32-bit EL0
-	kernel_ventry	0, irq_invalid, 32		// IRQ 32-bit EL0
-	kernel_ventry	0, fiq_invalid, 32		// FIQ 32-bit EL0
-	kernel_ventry	0, error_invalid, 32		// Error 32-bit EL0
+	ventry	el0_sync_invalid		// Synchronous 32-bit EL0
+	ventry	el0_irq_invalid			// IRQ 32-bit EL0
+	ventry	el0_fiq_invalid			// FIQ 32-bit EL0
+	ventry	el0_error_invalid		// Error 32-bit EL0
 #endif
 END(vectors)
 
@@ -390,8 +352,6 @@ el1_sync:
 	lsr	x24, x1, #ESR_ELx_EC_SHIFT	// exception class
 	cmp	x24, #ESR_ELx_EC_DABT_CUR	// data abort in EL1
 	b.eq	el1_da
-	cmp	x24, #ESR_ELx_EC_IABT_CUR	// instruction abort in EL1
-	b.eq	el1_ia
 	cmp	x24, #ESR_ELx_EC_SYS64		// configurable trap
 	b.eq	el1_undef
 	cmp	x24, #ESR_ELx_EC_SP_ALIGN	// stack alignment exception
@@ -403,22 +363,16 @@ el1_sync:
 	cmp	x24, #ESR_ELx_EC_BREAKPT_CUR	// debug exception in EL1
 	b.ge	el1_dbg
 	b	el1_inv
-
-el1_ia:
-	/*
-	 * Fall through to the Data abort case
-	 */
 el1_da:
 	/*
 	 * Data abort handling
 	 */
-	mrs	x3, far_el1
+	mrs	x0, far_el1
 	enable_dbg
 	// re-enable interrupts if they were enabled in the aborted context
 	tbnz	x23, #7, 1f			// PSR_I_BIT
 	enable_irq
 1:
-	clear_address_tag x0, x3
 	mov	x2, sp				// struct pt_regs
 	bl	do_mem_abort
 
@@ -512,7 +466,7 @@ el0_sync:
 	cmp	x24, #ESR_ELx_EC_FP_EXC64	// FP/ASIMD exception
 	b.eq	el0_fpsimd_exc
 	cmp	x24, #ESR_ELx_EC_SYS64		// configurable trap
-	b.eq	el0_sys
+	b.eq	el0_undef
 	cmp	x24, #ESR_ELx_EC_SP_ALIGN	// stack alignment exception
 	b.eq	el0_sp_pc
 	cmp	x24, #ESR_ELx_EC_PC_ALIGN	// pc alignment exception
@@ -579,7 +533,7 @@ el0_da:
 	// enable interrupts before calling the main handler
 	enable_dbg_and_irq
 	ct_user_exit
-	clear_address_tag x0, x26
+	bic	x0, x26, #(0xff << 56)
 	mov	x1, x25
 	mov	x2, sp
 	bl	do_mem_abort
@@ -589,15 +543,13 @@ el0_ia:
 	 * Instruction abort handling
 	 */
 	mrs	x26, far_el1
-	msr     daifclr, #(8 | 4 | 1)
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_off
-#endif
+	// enable interrupts before calling the main handler
+	enable_dbg_and_irq
 	ct_user_exit
 	mov	x0, x26
-	mov	x1, x25
+	orr	x1, x25, #1 << 24		// use reserved ISS bit for instruction aborts
 	mov	x2, sp
-	bl	do_el0_ia_bp_hardening
+	bl	do_mem_abort
 	b	ret_to_user
 el0_fpsimd_acc:
 	/*
@@ -624,10 +576,8 @@ el0_sp_pc:
 	 * Stack or PC alignment exception handling
 	 */
 	mrs	x26, far_el1
-	enable_dbg
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_off
-#endif
+	// enable interrupts before calling the main handler
+	enable_dbg_and_irq
 	ct_user_exit
 	mov	x0, x26
 	mov	x1, x25
@@ -643,16 +593,6 @@ el0_undef:
 	ct_user_exit
 	mov	x0, sp
 	bl	do_undefinstr
-	b	ret_to_user
-el0_sys:
-	/*
-	 * System instructions, for trapped cache maintenance instructions
-	 */
-	enable_dbg_and_irq
-	ct_user_exit
-	mov	x0, x25
-	mov	x1, sp
-	bl	do_sysinstr
 	b	ret_to_user
 el0_dbg:
 	/*
@@ -672,7 +612,7 @@ el0_inv:
 	mov	x0, sp
 	mov	x1, #BAD_SYNC
 	mov	x2, x25
-	bl	bad_el0_sync
+	bl	bad_mode
 	b	ret_to_user
 ENDPROC(el0_sync)
 
@@ -686,11 +626,6 @@ el0_irq_naked:
 #endif
 
 	ct_user_exit
-#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
-	tbz	x22, #55, 1f
-	bl	do_el0_irq_bp_hardening
-1:
-#endif
 	irq_handler
 
 #ifdef CONFIG_TRACE_IRQFLAGS
@@ -754,13 +689,18 @@ ret_fast_syscall_trace:
  * Ok, we need to do extra processing, enter the slow path.
  */
 work_pending:
+	tbnz	x1, #TIF_NEED_RESCHED, work_resched
+	/* TIF_SIGPENDING, TIF_NOTIFY_RESUME or TIF_FOREIGN_FPSTATE case */
 	mov	x0, sp				// 'regs'
+	enable_irq				// enable interrupts for do_notify_resume()
 	bl	do_notify_resume
+	b	ret_to_user
+work_resched:
 #ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_on		// enabled while in userspace
+	bl	trace_hardirqs_off		// the IRQs are off here, inform the tracing code
 #endif
-	ldr	x1, [tsk, #TI_FLAGS]		// re-check for single-step
-	b	finish_ret_to_user
+	bl	schedule
+
 /*
  * "slow" syscall return path.
  */
@@ -769,7 +709,6 @@ ret_to_user:
 	ldr	x1, [tsk, #TI_FLAGS]
 	and	x2, x1, #_TIF_WORK_MASK
 	cbnz	x2, work_pending
-finish_ret_to_user:
 	enable_step_tsk x1, x2
 	kernel_exit 0
 ENDPROC(ret_to_user)
@@ -804,7 +743,6 @@ el0_svc_naked:					// compat entry point
 	b.ne	__sys_trace
 	cmp     scno, sc_nr                     // check upper syscall limit
 	b.hs	ni_sys
-	mask_nospec64 scno, sc_nr, x19	// enforce bounds for syscall number
 	ldr	x16, [stbl, scno, lsl #3]	// address in the syscall table
 	blr	x16				// call sys_* routine
 	b	ret_fast_syscall
@@ -850,107 +788,6 @@ __ni_sys_trace:
 	mov	x0, sp
 	bl	do_ni_syscall
 	b	__sys_trace_return
-
-	.popsection				// .entry.text
-
-#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
-/*
- * Exception vectors trampoline.
- */
-	.pushsection ".entry.tramp.text", "ax"
-
-	.macro tramp_map_kernel, tmp
-	mrs	\tmp, ttbr1_el1
-	sub	\tmp, \tmp, #SWAPPER_DIR_SIZE
-	bic	\tmp, \tmp, #USER_ASID_FLAG
-	msr	ttbr1_el1, \tmp
-	.endm
-
-	.macro tramp_unmap_kernel, tmp
-	mrs	\tmp, ttbr1_el1
-	add	\tmp, \tmp, #SWAPPER_DIR_SIZE
-	orr	\tmp, \tmp, #USER_ASID_FLAG
-	msr	ttbr1_el1, \tmp
-	/*
-	 * We avoid running the post_ttbr_update_workaround here because
-	 * it's only needed by Cavium ThunderX, which requires KPTI to be
-	 * disabled.
-	 */
-	.endm
-
-	.macro tramp_ventry, regsize = 64
-	.align	7
-1:
-	.if	\regsize == 64
-	msr	tpidrro_el0, x30	// Restored in kernel_ventry
-	.endif
-	/*
-	 * Defend against branch aliasing attacks by pushing a dummy
-	 * entry onto the return stack and using a RET instruction to
-	 * enter the full-fat kernel vectors.
-	 */
-	bl	2f
-	b	.
-2:
-	tramp_map_kernel	x30
-#ifdef CONFIG_RANDOMIZE_BASE
-	adr	x30, tramp_vectors + PAGE_SIZE
-	isb
-	ldr	x30, [x30]
-#else
-	ldr	x30, =vectors
-#endif
-	prfm	plil1strm, [x30, #(1b - tramp_vectors)]
-	msr	vbar_el1, x30
-	add	x30, x30, #(1b - tramp_vectors)
-	isb
-	ret
-	.endm
-
-	.macro tramp_exit, regsize = 64
-	adr	x30, tramp_vectors
-	msr	vbar_el1, x30
-	tramp_unmap_kernel	x30
-	.if	\regsize == 64
-	mrs	x30, far_el1
-	.endif
-	eret
-	.endm
-
-	.align	11
-ENTRY(tramp_vectors)
-	.space	0x400
-
-	tramp_ventry
-	tramp_ventry
-	tramp_ventry
-	tramp_ventry
-
-	tramp_ventry	32
-	tramp_ventry	32
-	tramp_ventry	32
-	tramp_ventry	32
-END(tramp_vectors)
-
-ENTRY(tramp_exit_native)
-	tramp_exit
-END(tramp_exit_native)
-
-ENTRY(tramp_exit_compat)
-	tramp_exit	32
-END(tramp_exit_compat)
-
-	.ltorg
-	.popsection				// .entry.tramp.text
-#ifdef CONFIG_RANDOMIZE_BASE
-	.pushsection ".rodata", "a"
-	.align PAGE_SHIFT
-	.globl	__entry_tramp_data_start
-__entry_tramp_data_start:
-	.quad	vectors
-	.popsection				// .rodata
-#endif /* CONFIG_RANDOMIZE_BASE */
-#endif /* CONFIG_UNMAP_KERNEL_AT_EL0 */
 
 /*
  * Special system call wrappers.

@@ -176,8 +176,8 @@ static int pic32_dmt_probe(struct platform_device *pdev)
 	struct watchdog_device *wdd = &pic32_dmt_wdd;
 
 	dmt = devm_kzalloc(&pdev->dev, sizeof(*dmt), GFP_KERNEL);
-	if (!dmt)
-		return -ENOMEM;
+	if (IS_ERR(dmt))
+		return PTR_ERR(dmt);
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	dmt->regs = devm_ioremap_resource(&pdev->dev, mem);
@@ -245,6 +245,7 @@ static struct platform_driver pic32_dmt_driver = {
 	.remove		= pic32_dmt_remove,
 	.driver		= {
 		.name		= "pic32-dmt",
+		.owner		= THIS_MODULE,
 		.of_match_table = of_match_ptr(pic32_dmt_of_ids),
 	}
 };

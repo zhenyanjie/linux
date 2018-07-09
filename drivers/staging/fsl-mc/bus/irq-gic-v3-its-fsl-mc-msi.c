@@ -9,6 +9,7 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include "../include/mc-private.h"
 #include <linux/of_device.h>
 #include <linux/of_address.h>
 #include <linux/irqchip/arm-gic-v3.h>
@@ -16,8 +17,8 @@
 #include <linux/msi.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
-#include "../include/mc-bus.h"
-#include "fsl-mc-private.h"
+#include "../include/mc-sys.h"
+#include "dprc-cmd.h"
 
 static struct irq_chip its_msi_irq_chip = {
 	.name = "fsl-mc-bus-msi",
@@ -34,7 +35,7 @@ static int its_fsl_mc_msi_prepare(struct irq_domain *msi_domain,
 	struct fsl_mc_device *mc_bus_dev;
 	struct msi_domain_info *msi_info;
 
-	if (WARN_ON(!dev_is_fsl_mc(dev)))
+	if (WARN_ON(dev->bus != &fsl_mc_bus_type))
 		return -EINVAL;
 
 	mc_bus_dev = to_fsl_mc_device(dev);
@@ -75,8 +76,6 @@ int __init its_fsl_mc_msi_init(void)
 
 	for (np = of_find_matching_node(NULL, its_device_id); np;
 	     np = of_find_matching_node(np, its_device_id)) {
-		if (!of_device_is_available(np))
-			continue;
 		if (!of_property_read_bool(np, "msi-controller"))
 			continue;
 

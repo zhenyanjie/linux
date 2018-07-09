@@ -38,7 +38,7 @@ static int channels = 0x3fff;
 static char *ifname = "wlan%d";
 
 
-static const struct rtl819x_ops rtl819xp_ops = {
+static struct rtl819x_ops rtl819xp_ops = {
 	.nic_type			= NIC_8192E,
 	.get_eeprom_size		= rtl92e_get_eeprom_size,
 	.init_adapter_variable		= rtl92e_init_variables,
@@ -993,8 +993,8 @@ static void _rtl92e_init_priv_lock(struct r8192_priv *priv)
 	spin_lock_init(&priv->irq_th_lock);
 	spin_lock_init(&priv->rf_ps_lock);
 	spin_lock_init(&priv->ps_lock);
-	mutex_init(&priv->wx_mutex);
-	mutex_init(&priv->rf_mutex);
+	sema_init(&priv->wx_sem, 1);
+	sema_init(&priv->rf_sem, 1);
 	mutex_init(&priv->mutex);
 }
 
@@ -1247,7 +1247,7 @@ static void _rtl92e_if_silent_reset(struct net_device *dev)
 
 RESET_START:
 
-		mutex_lock(&priv->wx_mutex);
+		down(&priv->wx_sem);
 
 		if (priv->rtllib->state == RTLLIB_LINKED)
 			rtl92e_leisure_ps_leave(dev);
@@ -1255,7 +1255,7 @@ RESET_START:
 		if (priv->up) {
 			netdev_info(dev, "%s():the driver is not up.\n",
 				    __func__);
-			mutex_unlock(&priv->wx_mutex);
+			up(&priv->wx_sem);
 			return;
 		}
 		priv->up = 0;
@@ -1277,14 +1277,14 @@ RESET_START:
 		rtllib_stop_scan_syncro(ieee);
 
 		if (ieee->state == RTLLIB_LINKED) {
-			mutex_lock(&ieee->wx_mutex);
+			SEM_DOWN_IEEE_WX(&ieee->wx_sem);
 			netdev_info(dev, "ieee->state is RTLLIB_LINKED\n");
 			rtllib_stop_send_beacons(priv->rtllib);
 			del_timer_sync(&ieee->associate_timer);
 			cancel_delayed_work(&ieee->associate_retry_wq);
 			rtllib_stop_scan(ieee);
 			netif_carrier_off(dev);
-			mutex_unlock(&ieee->wx_mutex);
+			SEM_UP_IEEE_WX(&ieee->wx_sem);
 		} else {
 			netdev_info(dev, "ieee->state is NOT LINKED\n");
 			rtllib_softmac_stop_protocol(priv->rtllib, 0, true);
@@ -1292,7 +1292,7 @@ RESET_START:
 
 		rtl92e_dm_backup_state(dev);
 
-		mutex_unlock(&priv->wx_mutex);
+		up(&priv->wx_sem);
 		RT_TRACE(COMP_RESET,
 			 "%s():<==========down process is finished\n",
 			 __func__);
@@ -1982,7 +1982,7 @@ void rtl92e_update_rx_statistics(struct r8192_priv *priv,
 					weighting) / 6;
 }
 
-u8 rtl92e_rx_db_to_percent(s8 antpower)
+u8 rtl92e_rx_db_to_percent(char antpower)
 {
 	if ((antpower <= -100) || (antpower >= 20))
 		return	0;
@@ -1993,9 +1993,9 @@ u8 rtl92e_rx_db_to_percent(s8 antpower)
 
 }	/* QueryRxPwrPercentage */
 
-u8 rtl92e_evm_db_to_percent(s8 value)
+u8 rtl92e_evm_db_to_percent(char value)
 {
-	s8 ret_val;
+	char ret_val;
 
 	ret_val = value;
 
@@ -2179,9 +2179,9 @@ static int _rtl92e_open(struct net_device *dev)
 	struct r8192_priv *priv = rtllib_priv(dev);
 	int ret;
 
-	mutex_lock(&priv->wx_mutex);
+	down(&priv->wx_sem);
 	ret = _rtl92e_try_up(dev);
-	mutex_unlock(&priv->wx_mutex);
+	up(&priv->wx_sem);
 	return ret;
 
 }
@@ -2206,11 +2206,11 @@ static int _rtl92e_close(struct net_device *dev)
 		rtllib_stop_scan(priv->rtllib);
 	}
 
-	mutex_lock(&priv->wx_mutex);
+	down(&priv->wx_sem);
 
 	ret = _rtl92e_down(dev, true);
 
-	mutex_unlock(&priv->wx_mutex);
+	up(&priv->wx_sem);
 
 	return ret;
 
@@ -2242,11 +2242,11 @@ static void _rtl92e_restart(void *data)
 				  reset_wq);
 	struct net_device *dev = priv->rtllib->dev;
 
-	mutex_lock(&priv->wx_mutex);
+	down(&priv->wx_sem);
 
 	rtl92e_commit(dev);
 
-	mutex_unlock(&priv->wx_mutex);
+	up(&priv->wx_sem);
 }
 
 static void _rtl92e_set_multicast(struct net_device *dev)
@@ -2265,12 +2265,12 @@ static int _rtl92e_set_mac_adr(struct net_device *dev, void *mac)
 	struct r8192_priv *priv = rtllib_priv(dev);
 	struct sockaddr *addr = mac;
 
-	mutex_lock(&priv->wx_mutex);
+	down(&priv->wx_sem);
 
 	ether_addr_copy(dev->dev_addr, addr->sa_data);
 
 	schedule_work(&priv->reset_wq);
-	mutex_unlock(&priv->wx_mutex);
+	up(&priv->wx_sem);
 
 	return 0;
 }
@@ -2287,7 +2287,7 @@ static int _rtl92e_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	struct iw_point *p = &wrq->u.data;
 	struct ieee_param *ipw = NULL;
 
-	mutex_lock(&priv->wx_mutex);
+	down(&priv->wx_sem);
 
 	switch (cmd) {
 	case RTL_IOCTL_WPA_SUPPLICANT:
@@ -2393,7 +2393,7 @@ static int _rtl92e_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	}
 
 out:
-	mutex_unlock(&priv->wx_mutex);
+	up(&priv->wx_sem);
 
 	return ret;
 }

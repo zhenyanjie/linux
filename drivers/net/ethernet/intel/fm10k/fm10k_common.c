@@ -207,9 +207,6 @@ s32 fm10k_disable_queues_generic(struct fm10k_hw *hw, u16 q_cnt)
 	/* clear tx_ready to prevent any false hits for reset */
 	hw->mac.tx_ready = false;
 
-	if (FM10K_REMOVED(hw->hw_addr))
-		return 0;
-
 	/* clear the enable bit for all rings */
 	for (i = 0; i < q_cnt; i++) {
 		reg = fm10k_read_reg(hw, FM10K_TXDCTL(i));
@@ -522,12 +519,8 @@ s32 fm10k_get_host_state_generic(struct fm10k_hw *hw, bool *host_ready)
 		goto out;
 
 	/* interface cannot receive traffic without logical ports */
-	if (mac->dglort_map == FM10K_DGLORTMAP_NONE) {
-		if (hw->mac.ops.request_lport_map)
-			ret_val = hw->mac.ops.request_lport_map(hw);
-
+	if (mac->dglort_map == FM10K_DGLORTMAP_NONE)
 		goto out;
-	}
 
 	/* if we passed all the tests above then the switch is ready and we no
 	 * longer need to check for link

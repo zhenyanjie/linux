@@ -4,7 +4,7 @@
 #include "util/evlist.h"
 #include "util/evsel.h"
 #include "util/util.h"
-#include "util/config.h"
+#include "util/cache.h"
 #include "util/symbol.h"
 #include "util/thread.h"
 #include "util/header.h"
@@ -330,7 +330,7 @@ static int build_alloc_func_list(void)
 	}
 
 	kernel_map = machine__kernel_map(machine);
-	if (map__load(kernel_map) < 0) {
+	if (map__load(kernel_map, NULL) < 0) {
 		pr_err("cannot load kernel map\n");
 		return -ENOENT;
 	}
@@ -608,7 +608,6 @@ static const struct {
 	const char *compact;
 } gfp_compact_table[] = {
 	{ "GFP_TRANSHUGE",		"THP" },
-	{ "GFP_TRANSHUGE_LIGHT",	"THL" },
 	{ "GFP_HIGHUSER_MOVABLE",	"HUM" },
 	{ "GFP_HIGHUSER",		"HU" },
 	{ "GFP_USER",			"U" },
@@ -979,7 +978,7 @@ static void __print_slab_result(struct rb_root *root,
 		if (is_caller) {
 			addr = data->call_site;
 			if (!raw_ip)
-				sym = machine__find_kernel_function(machine, addr, &map);
+				sym = machine__find_kernel_function(machine, addr, &map, NULL);
 		} else
 			addr = data->ptr;
 
@@ -1043,7 +1042,8 @@ static void __print_page_alloc_result(struct perf_session *session, int n_lines)
 		char *caller = buf;
 
 		data = rb_entry(next, struct page_stat, node);
-		sym = machine__find_kernel_function(machine, data->callsite, &map);
+		sym = machine__find_kernel_function(machine, data->callsite,
+						    &map, NULL);
 		if (sym && sym->name)
 			caller = sym->name;
 		else
@@ -1085,7 +1085,8 @@ static void __print_page_caller_result(struct perf_session *session, int n_lines
 		char *caller = buf;
 
 		data = rb_entry(next, struct page_stat, node);
-		sym = machine__find_kernel_function(machine, data->callsite, &map);
+		sym = machine__find_kernel_function(machine, data->callsite,
+						    &map, NULL);
 		if (sym && sym->name)
 			caller = sym->name;
 		else
@@ -1353,7 +1354,7 @@ static int __cmd_kmem(struct perf_session *session)
 		goto out;
 	}
 
-	evlist__for_each_entry(session->evlist, evsel) {
+	evlist__for_each(session->evlist, evsel) {
 		if (!strcmp(perf_evsel__name(evsel), "kmem:mm_page_alloc") &&
 		    perf_evsel__field(evsel, "pfn")) {
 			use_pfn = true;

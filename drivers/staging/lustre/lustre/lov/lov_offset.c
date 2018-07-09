@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -70,7 +74,7 @@ pgoff_t lov_stripe_pgoff(struct lov_stripe_md *lsm, pgoff_t stripe_index,
 {
 	loff_t offset;
 
-	offset = lov_stripe_size(lsm, (stripe_index << PAGE_SHIFT) + 1, stripe);
+	offset = lov_stripe_size(lsm, stripe_index << PAGE_SHIFT, stripe);
 	return offset >> PAGE_SHIFT;
 }
 

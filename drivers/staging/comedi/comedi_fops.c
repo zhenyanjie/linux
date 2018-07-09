@@ -81,20 +81,20 @@ struct comedi_file {
 	(COMEDI_NUM_MINORS - COMEDI_NUM_BOARD_MINORS)
 
 static int comedi_num_legacy_minors;
-module_param(comedi_num_legacy_minors, int, 0444);
+module_param(comedi_num_legacy_minors, int, S_IRUGO);
 MODULE_PARM_DESC(comedi_num_legacy_minors,
 		 "number of comedi minor devices to reserve for non-auto-configured devices (default 0)"
 		);
 
 unsigned int comedi_default_buf_size_kb = CONFIG_COMEDI_DEFAULT_BUF_SIZE_KB;
-module_param(comedi_default_buf_size_kb, uint, 0644);
+module_param(comedi_default_buf_size_kb, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(comedi_default_buf_size_kb,
 		 "default asynchronous buffer size in KiB (default "
 		 __MODULE_STRING(CONFIG_COMEDI_DEFAULT_BUF_SIZE_KB) ")");
 
 unsigned int comedi_default_buf_maxsize_kb
 	= CONFIG_COMEDI_DEFAULT_BUF_MAXSIZE_KB;
-module_param(comedi_default_buf_maxsize_kb, uint, 0644);
+module_param(comedi_default_buf_maxsize_kb, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(comedi_default_buf_maxsize_kb,
 		 "default maximum size of asynchronous buffer in KiB (default "
 		 __MODULE_STRING(CONFIG_COMEDI_DEFAULT_BUF_MAXSIZE_KB) ")");
@@ -312,8 +312,8 @@ static void comedi_file_reset(struct file *file)
 	}
 	cfp->last_attached = dev->attached;
 	cfp->last_detach_count = dev->detach_count;
-	WRITE_ONCE(cfp->read_subdev, read_s);
-	WRITE_ONCE(cfp->write_subdev, write_s);
+	ACCESS_ONCE(cfp->read_subdev) = read_s;
+	ACCESS_ONCE(cfp->write_subdev) = write_s;
 }
 
 static void comedi_file_check(struct file *file)
@@ -331,7 +331,7 @@ static struct comedi_subdevice *comedi_file_read_subdevice(struct file *file)
 	struct comedi_file *cfp = file->private_data;
 
 	comedi_file_check(file);
-	return READ_ONCE(cfp->read_subdev);
+	return ACCESS_ONCE(cfp->read_subdev);
 }
 
 static struct comedi_subdevice *comedi_file_write_subdevice(struct file *file)
@@ -339,7 +339,7 @@ static struct comedi_subdevice *comedi_file_write_subdevice(struct file *file)
 	struct comedi_file *cfp = file->private_data;
 
 	comedi_file_check(file);
-	return READ_ONCE(cfp->write_subdev);
+	return ACCESS_ONCE(cfp->write_subdev);
 }
 
 static int resize_async_buffer(struct comedi_device *dev,
@@ -1256,17 +1256,16 @@ static int parse_insn(struct comedi_device *dev, struct comedi_insn *insn,
 		switch (insn->insn) {
 		case INSN_GTOD:
 			{
-				struct timespec64 tv;
+				struct timeval tv;
 
 				if (insn->n != 2) {
 					ret = -EINVAL;
 					break;
 				}
 
-				ktime_get_real_ts64(&tv);
-				/* unsigned data safe until 2106 */
-				data[0] = (unsigned int)tv.tv_sec;
-				data[1] = tv.tv_nsec / NSEC_PER_USEC;
+				do_gettimeofday(&tv);
+				data[0] = tv.tv_sec;
+				data[1] = tv.tv_usec;
 				ret = 2;
 
 				break;
@@ -1993,7 +1992,7 @@ static int do_setrsubd_ioctl(struct comedi_device *dev, unsigned long arg,
 	    !(s_old->async->cmd.flags & CMDF_WRITE))
 		return -EBUSY;
 
-	WRITE_ONCE(cfp->read_subdev, s_new);
+	ACCESS_ONCE(cfp->read_subdev) = s_new;
 	return 0;
 }
 
@@ -2035,7 +2034,7 @@ static int do_setwsubd_ioctl(struct comedi_device *dev, unsigned long arg,
 	    (s_old->async->cmd.flags & CMDF_WRITE))
 		return -EBUSY;
 
-	WRITE_ONCE(cfp->write_subdev, s_new);
+	ACCESS_ONCE(cfp->write_subdev) = s_new;
 	return 0;
 }
 
@@ -2233,7 +2232,7 @@ static int comedi_mmap(struct file *file, struct vm_area_struct *vma)
 		goto done;
 	}
 
-	n_pages = vma_pages(vma);
+	n_pages = size >> PAGE_SHIFT;
 
 	/* get reference to current buf map (if any) */
 	bm = comedi_buf_map_from_subdev_get(s);
@@ -2385,7 +2384,6 @@ static ssize_t comedi_write(struct file *file, const char __user *buf,
 			continue;
 		}
 
-		set_current_state(TASK_RUNNING);
 		wp = async->buf_write_ptr;
 		n1 = min(n, async->prealloc_bufsz - wp);
 		n2 = n - n1;
@@ -2518,8 +2516,6 @@ static ssize_t comedi_read(struct file *file, char __user *buf, size_t nbytes,
 			}
 			continue;
 		}
-
-		set_current_state(TASK_RUNNING);
 		rp = async->buf_read_ptr;
 		n1 = min(n, async->prealloc_bufsz - rp);
 		n2 = n - n1;
@@ -2901,6 +2897,9 @@ static int __init comedi_init(void)
 
 	comedi_class->dev_groups = comedi_dev_groups;
 
+	/* XXX requires /proc interface */
+	comedi_proc_init();
+
 	/* create devices files for legacy/manual use */
 	for (i = 0; i < comedi_num_legacy_minors; i++) {
 		struct comedi_device *dev;
@@ -2908,7 +2907,6 @@ static int __init comedi_init(void)
 		dev = comedi_alloc_board_minor(NULL);
 		if (IS_ERR(dev)) {
 			comedi_cleanup_board_minors();
-			class_destroy(comedi_class);
 			cdev_del(&comedi_cdev);
 			unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0),
 						 COMEDI_NUM_MINORS);
@@ -2917,9 +2915,6 @@ static int __init comedi_init(void)
 		/* comedi_alloc_board_minor() locked the mutex */
 		mutex_unlock(&dev->mutex);
 	}
-
-	/* XXX requires /proc interface */
-	comedi_proc_init();
 
 	return 0;
 }

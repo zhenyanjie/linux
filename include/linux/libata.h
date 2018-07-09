@@ -46,8 +46,7 @@
 #ifdef CONFIG_ATA_NONSTANDARD
 #include <asm/libata-portmap.h>
 #else
-#define ATA_PRIMARY_IRQ(dev)	14
-#define ATA_SECONDARY_IRQ(dev)	15
+#include <asm-generic/libata-portmap.h>
 #endif
 
 /*
@@ -146,6 +145,13 @@ enum {
 	ATA_TFLAG_LBA		= (1 << 4), /* enable LBA */
 	ATA_TFLAG_FUA		= (1 << 5), /* enable FUA */
 	ATA_TFLAG_POLLING	= (1 << 6), /* set nIEN to 1 and use polling */
+
+	/* protocol flags */
+	ATA_PROT_FLAG_PIO	= (1 << 0), /* is PIO */
+	ATA_PROT_FLAG_DMA	= (1 << 1), /* is DMA */
+	ATA_PROT_FLAG_DATA	= ATA_PROT_FLAG_PIO | ATA_PROT_FLAG_DMA,
+	ATA_PROT_FLAG_NCQ	= (1 << 2), /* is NCQ */
+	ATA_PROT_FLAG_ATAPI	= (1 << 3), /* is ATAPI */
 
 	/* struct ata_device stuff */
 	ATA_DFLAG_LBA		= (1 << 0), /* device supports LBA */
@@ -1033,29 +1039,58 @@ extern const unsigned long sata_deb_timing_long[];
 extern struct ata_port_operations ata_dummy_port_ops;
 extern const struct ata_port_info ata_dummy_port_info;
 
-static inline bool ata_is_atapi(u8 prot)
+/*
+ * protocol tests
+ */
+static inline unsigned int ata_prot_flags(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_ATAPI;
+	switch (prot) {
+	case ATA_PROT_NODATA:
+		return 0;
+	case ATA_PROT_PIO:
+		return ATA_PROT_FLAG_PIO;
+	case ATA_PROT_DMA:
+		return ATA_PROT_FLAG_DMA;
+	case ATA_PROT_NCQ:
+		return ATA_PROT_FLAG_DMA | ATA_PROT_FLAG_NCQ;
+	case ATAPI_PROT_NODATA:
+		return ATA_PROT_FLAG_ATAPI;
+	case ATAPI_PROT_PIO:
+		return ATA_PROT_FLAG_ATAPI | ATA_PROT_FLAG_PIO;
+	case ATAPI_PROT_DMA:
+		return ATA_PROT_FLAG_ATAPI | ATA_PROT_FLAG_DMA;
+	}
+	return 0;
 }
 
-static inline bool ata_is_pio(u8 prot)
+static inline int ata_is_atapi(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_PIO;
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_ATAPI;
 }
 
-static inline bool ata_is_dma(u8 prot)
+static inline int ata_is_nodata(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_DMA;
+	return !(ata_prot_flags(prot) & ATA_PROT_FLAG_DATA);
 }
 
-static inline bool ata_is_ncq(u8 prot)
+static inline int ata_is_pio(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_NCQ;
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_PIO;
 }
 
-static inline bool ata_is_data(u8 prot)
+static inline int ata_is_dma(u8 prot)
 {
-	return prot & (ATA_PROT_FLAG_PIO | ATA_PROT_FLAG_DMA);
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_DMA;
+}
+
+static inline int ata_is_ncq(u8 prot)
+{
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_NCQ;
+}
+
+static inline int ata_is_data(u8 prot)
+{
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_DATA;
 }
 
 static inline int is_multi_taskfile(struct ata_taskfile *tf)
@@ -1372,7 +1407,7 @@ static inline bool sata_pmp_attached(struct ata_port *ap)
 	return ap->nr_pmp_links != 0;
 }
 
-static inline bool ata_is_host_link(const struct ata_link *link)
+static inline int ata_is_host_link(const struct ata_link *link)
 {
 	return link == &link->ap->link || link == link->ap->slave_link;
 }
@@ -1387,7 +1422,7 @@ static inline bool sata_pmp_attached(struct ata_port *ap)
 	return false;
 }
 
-static inline bool ata_is_host_link(const struct ata_link *link)
+static inline int ata_is_host_link(const struct ata_link *link)
 {
 	return 1;
 }

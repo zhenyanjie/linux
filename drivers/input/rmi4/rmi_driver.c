@@ -17,6 +17,7 @@
 #include <linux/bitmap.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
+#include <linux/kconfig.h>
 #include <linux/pm.h>
 #include <linux/slab.h>
 #include <linux/of.h>

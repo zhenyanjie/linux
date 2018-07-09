@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -151,11 +155,13 @@ static inline void lustre_cfg_bufs_reset(struct lustre_cfg_bufs *bufs, char *nam
 		lustre_cfg_bufs_set_string(bufs, 0, name);
 }
 
-static inline void *lustre_cfg_buf(struct lustre_cfg *lcfg, __u32 index)
+static inline void *lustre_cfg_buf(struct lustre_cfg *lcfg, int index)
 {
-	__u32 i;
-	size_t offset;
-	__u32 bufcount;
+	int i;
+	int offset;
+	int bufcount;
+
+	LASSERT(index >= 0);
 
 	bufcount = lcfg->lcfg_bufcount;
 	if (index >= bufcount)
@@ -170,7 +176,7 @@ static inline void *lustre_cfg_buf(struct lustre_cfg *lcfg, __u32 index)
 static inline void lustre_cfg_bufs_init(struct lustre_cfg_bufs *bufs,
 					struct lustre_cfg *lcfg)
 {
-	__u32 i;
+	int i;
 
 	bufs->lcfg_bufcount = lcfg->lcfg_bufcount;
 	for (i = 0; i < bufs->lcfg_bufcount; i++) {
@@ -179,7 +185,7 @@ static inline void lustre_cfg_bufs_init(struct lustre_cfg_bufs *bufs,
 	}
 }
 
-static inline char *lustre_cfg_string(struct lustre_cfg *lcfg, __u32 index)
+static inline char *lustre_cfg_string(struct lustre_cfg *lcfg, int index)
 {
 	char *s;
 
@@ -195,8 +201,8 @@ static inline char *lustre_cfg_string(struct lustre_cfg *lcfg, __u32 index)
 	 * of data.  Try to use the padding first though.
 	 */
 	if (s[lcfg->lcfg_buflens[index] - 1] != '\0') {
-		size_t last = min((size_t)lcfg->lcfg_buflens[index],
-				  cfs_size_round(lcfg->lcfg_buflens[index]) - 1);
+		int last = min((int)lcfg->lcfg_buflens[index],
+			       cfs_size_round(lcfg->lcfg_buflens[index]) - 1);
 		char lost = s[last];
 
 		s[last] = '\0';
@@ -208,10 +214,10 @@ static inline char *lustre_cfg_string(struct lustre_cfg *lcfg, __u32 index)
 	return s;
 }
 
-static inline __u32 lustre_cfg_len(__u32 bufcount, __u32 *buflens)
+static inline int lustre_cfg_len(__u32 bufcount, __u32 *buflens)
 {
-	__u32 i;
-	__u32 len;
+	int i;
+	int len;
 
 	len = LCFG_HDR_SIZE(bufcount);
 	for (i = 0; i < bufcount; i++)
@@ -252,7 +258,7 @@ static inline void lustre_cfg_free(struct lustre_cfg *lcfg)
 	return;
 }
 
-static inline int lustre_cfg_sanity_check(void *buf, size_t len)
+static inline int lustre_cfg_sanity_check(void *buf, int len)
 {
 	struct lustre_cfg *lcfg = (struct lustre_cfg *)buf;
 

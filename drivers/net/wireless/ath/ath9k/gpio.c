@@ -22,7 +22,7 @@
 
 #ifdef CONFIG_MAC80211_LEDS
 
-static void ath_fill_led_pin(struct ath_softc *sc)
+void ath_fill_led_pin(struct ath_softc *sc)
 {
 	struct ath_hw *ah = sc->sc_ah;
 

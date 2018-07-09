@@ -106,8 +106,7 @@ static void mtk_rdma_stop(struct mtk_ddp_comp *comp)
 }
 
 static void mtk_rdma_config(struct mtk_ddp_comp *comp, unsigned int width,
-			    unsigned int height, unsigned int vrefresh,
-			    unsigned int bpc)
+			    unsigned int height, unsigned int vrefresh)
 {
 	unsigned int threshold;
 	unsigned int reg;

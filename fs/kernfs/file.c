@@ -275,7 +275,7 @@ static ssize_t kernfs_fop_write(struct file *file, const char __user *user_buf,
 {
 	struct kernfs_open_file *of = kernfs_of(file);
 	const struct kernfs_ops *ops;
-	ssize_t len;
+	size_t len;
 	char *buf;
 
 	if (of->atomic_write_len) {
@@ -911,7 +911,6 @@ const struct file_operations kernfs_file_fops = {
 	.open		= kernfs_fop_open,
 	.release	= kernfs_fop_release,
 	.poll		= kernfs_fop_poll,
-	.fsync		= noop_fsync,
 };
 
 /**

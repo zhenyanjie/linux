@@ -280,7 +280,7 @@ fail:
 	if (locked)
 		mutex_unlock(&trans->transaction->cache_write_mutex);
 	if (ret)
-		btrfs_abort_transaction(trans, ret);
+		btrfs_abort_transaction(trans, root, ret);
 
 	return ret;
 }
@@ -716,7 +716,8 @@ static int __load_free_space_cache(struct btrfs_root *root, struct inode *inode,
 
 	if (BTRFS_I(inode)->generation != generation) {
 		btrfs_err(root->fs_info,
-			"free space inode generation (%llu) did not match free space cache generation (%llu)",
+			"free space inode generation (%llu) "
+			"did not match free space cache generation (%llu)",
 			BTRFS_I(inode)->generation, generation);
 		return 0;
 	}
@@ -878,9 +879,8 @@ int load_free_space_cache(struct btrfs_fs_info *fs_info,
 
 	if (!matched) {
 		__btrfs_remove_free_space_cache(ctl);
-		btrfs_warn(fs_info,
-			   "block group %llu has wrong amount of free space",
-			   block_group->key.objectid);
+		btrfs_warn(fs_info, "block group %llu has wrong amount of free space",
+			block_group->key.objectid);
 		ret = -1;
 	}
 out:
@@ -891,9 +891,8 @@ out:
 		spin_unlock(&block_group->lock);
 		ret = 0;
 
-		btrfs_warn(fs_info,
-			   "failed to load free space cache for block group %llu, rebuilding it now",
-			   block_group->key.objectid);
+		btrfs_warn(fs_info, "failed to load free space cache for block group %llu, rebuilding it now",
+			block_group->key.objectid);
 	}
 
 	iput(inode);
@@ -1253,7 +1252,7 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
 	/* Lock all pages first so we can lock the extent safely. */
 	ret = io_ctl_prepare_pages(io_ctl, inode, 0);
 	if (ret)
-		goto out_unlock;
+		goto out;
 
 	lock_extent_bits(&BTRFS_I(inode)->io_tree, 0, i_size_read(inode) - 1,
 			 &cached_state);
@@ -1346,7 +1345,6 @@ out_nospc_locked:
 out_nospc:
 	cleanup_write_cache_enospc(inode, io_ctl, &cached_state, &bitmap_list);
 
-out_unlock:
 	if (block_group && (block_group->flags & BTRFS_BLOCK_GROUP_DATA))
 		up_write(&block_group->data_rwsem);
 
@@ -2300,8 +2298,7 @@ static void steal_from_bitmap(struct btrfs_free_space_ctl *ctl,
 	}
 }
 
-int __btrfs_add_free_space(struct btrfs_fs_info *fs_info,
-			   struct btrfs_free_space_ctl *ctl,
+int __btrfs_add_free_space(struct btrfs_free_space_ctl *ctl,
 			   u64 offset, u64 bytes)
 {
 	struct btrfs_free_space *info;
@@ -2348,7 +2345,7 @@ out:
 	spin_unlock(&ctl->tree_lock);
 
 	if (ret) {
-		btrfs_crit(fs_info, "unable to add free space :%d", ret);
+		printk(KERN_CRIT "BTRFS: unable to add free space :%d\n", ret);
 		ASSERT(ret != -EEXIST);
 	}
 
@@ -2624,8 +2621,7 @@ out:
 	spin_unlock(&ctl->tree_lock);
 
 	if (align_gap_len)
-		__btrfs_add_free_space(block_group->fs_info, ctl,
-				       align_gap, align_gap_len);
+		__btrfs_add_free_space(ctl, align_gap, align_gap_len);
 	return ret;
 }
 
@@ -3030,7 +3026,7 @@ int btrfs_find_space_cluster(struct btrfs_root *root,
 	 * For metadata, allow allocates with smaller extents.  For
 	 * data, keep it dense.
 	 */
-	if (btrfs_test_opt(root->fs_info, SSD_SPREAD)) {
+	if (btrfs_test_opt(root, SSD_SPREAD)) {
 		cont1_bytes = min_bytes = bytes + empty_size;
 	} else if (block_group->flags & BTRFS_BLOCK_GROUP_METADATA) {
 		cont1_bytes = bytes;
@@ -3474,7 +3470,7 @@ int load_free_ino_cache(struct btrfs_fs_info *fs_info, struct btrfs_root *root)
 	int ret = 0;
 	u64 root_gen = btrfs_root_generation(&root->root_item);
 
-	if (!btrfs_test_opt(root->fs_info, INODE_MAP_CACHE))
+	if (!btrfs_test_opt(root, INODE_MAP_CACHE))
 		return 0;
 
 	/*
@@ -3518,7 +3514,7 @@ int btrfs_write_out_ino_cache(struct btrfs_root *root,
 	struct btrfs_io_ctl io_ctl;
 	bool release_metadata = true;
 
-	if (!btrfs_test_opt(root->fs_info, INODE_MAP_CACHE))
+	if (!btrfs_test_opt(root, INODE_MAP_CACHE))
 		return 0;
 
 	memset(&io_ctl, 0, sizeof(io_ctl));

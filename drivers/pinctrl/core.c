@@ -225,14 +225,13 @@ static void pinctrl_free_pindescs(struct pinctrl_dev *pctldev,
 }
 
 static int pinctrl_register_one_pin(struct pinctrl_dev *pctldev,
-				    const struct pinctrl_pin_desc *pin)
+				    unsigned number, const char *name)
 {
 	struct pin_desc *pindesc;
 
-	pindesc = pin_desc_get(pctldev, pin->number);
+	pindesc = pin_desc_get(pctldev, number);
 	if (pindesc != NULL) {
-		dev_err(pctldev->dev, "pin %d already registered\n",
-			pin->number);
+		dev_err(pctldev->dev, "pin %d already registered\n", number);
 		return -EINVAL;
 	}
 
@@ -246,10 +245,10 @@ static int pinctrl_register_one_pin(struct pinctrl_dev *pctldev,
 	pindesc->pctldev = pctldev;
 
 	/* Copy basic pin info */
-	if (pin->name) {
-		pindesc->name = pin->name;
+	if (name) {
+		pindesc->name = name;
 	} else {
-		pindesc->name = kasprintf(GFP_KERNEL, "PIN%u", pin->number);
+		pindesc->name = kasprintf(GFP_KERNEL, "PIN%u", number);
 		if (pindesc->name == NULL) {
 			kfree(pindesc);
 			return -ENOMEM;
@@ -257,11 +256,9 @@ static int pinctrl_register_one_pin(struct pinctrl_dev *pctldev,
 		pindesc->dynamic_name = true;
 	}
 
-	pindesc->drv_data = pin->drv_data;
-
-	radix_tree_insert(&pctldev->pin_desc_tree, pin->number, pindesc);
+	radix_tree_insert(&pctldev->pin_desc_tree, number, pindesc);
 	pr_debug("registered pin %d (%s) on %s\n",
-		 pin->number, pindesc->name, pctldev->desc->name);
+		 number, pindesc->name, pctldev->desc->name);
 	return 0;
 }
 
@@ -273,7 +270,8 @@ static int pinctrl_register_pins(struct pinctrl_dev *pctldev,
 	int ret = 0;
 
 	for (i = 0; i < num_descs; i++) {
-		ret = pinctrl_register_one_pin(pctldev, &pins[i]);
+		ret = pinctrl_register_one_pin(pctldev,
+					       pins[i].number, pins[i].name);
 		if (ret)
 			return ret;
 	}
@@ -992,15 +990,18 @@ struct pinctrl_state *pinctrl_lookup_state(struct pinctrl *p,
 EXPORT_SYMBOL_GPL(pinctrl_lookup_state);
 
 /**
- * pinctrl_commit_state() - select/activate/program a pinctrl state to HW
+ * pinctrl_select_state() - select/activate/program a pinctrl state to HW
  * @p: the pinctrl handle for the device that requests configuration
  * @state: the state handle to select/activate/program
  */
-static int pinctrl_commit_state(struct pinctrl *p, struct pinctrl_state *state)
+int pinctrl_select_state(struct pinctrl *p, struct pinctrl_state *state)
 {
 	struct pinctrl_setting *setting, *setting2;
 	struct pinctrl_state *old_state = p->state;
 	int ret;
+
+	if (p->state == state)
+		return 0;
 
 	if (p->state) {
 		/*
@@ -1064,19 +1065,6 @@ unapply_new_state:
 		pinctrl_select_state(p, old_state);
 
 	return ret;
-}
-
-/**
- * pinctrl_select_state() - select/activate/program a pinctrl state to HW
- * @p: the pinctrl handle for the device that requests configuration
- * @state: the state handle to select/activate/program
- */
-int pinctrl_select_state(struct pinctrl *p, struct pinctrl_state *state)
-{
-	if (p->state == state)
-		return 0;
-
-	return pinctrl_commit_state(p, state);
 }
 EXPORT_SYMBOL_GPL(pinctrl_select_state);
 
@@ -1246,7 +1234,7 @@ void pinctrl_unregister_map(struct pinctrl_map const *map)
 int pinctrl_force_sleep(struct pinctrl_dev *pctldev)
 {
 	if (!IS_ERR(pctldev->p) && !IS_ERR(pctldev->hog_sleep))
-		return pinctrl_commit_state(pctldev->p, pctldev->hog_sleep);
+		return pinctrl_select_state(pctldev->p, pctldev->hog_sleep);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(pinctrl_force_sleep);
@@ -1258,7 +1246,7 @@ EXPORT_SYMBOL_GPL(pinctrl_force_sleep);
 int pinctrl_force_default(struct pinctrl_dev *pctldev)
 {
 	if (!IS_ERR(pctldev->p) && !IS_ERR(pctldev->hog_default))
-		return pinctrl_commit_state(pctldev->p, pctldev->hog_default);
+		return pinctrl_select_state(pctldev->p, pctldev->hog_default);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(pinctrl_force_default);
@@ -1379,7 +1367,8 @@ static int pinctrl_pins_show(struct seq_file *s, void *what)
 		if (desc == NULL)
 			continue;
 
-		seq_printf(s, "pin %d (%s) ", pin, desc->name);
+		seq_printf(s, "pin %d (%s) ", pin,
+			   desc->name ? desc->name : "unnamed");
 
 		/* Driver-specific info per pin */
 		if (ops->pin_dbg_show)

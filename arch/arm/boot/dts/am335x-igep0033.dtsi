@@ -20,7 +20,7 @@
 		};
 	};
 
-	memory@80000000 {
+	memory {
 		device_type = "memory";
 		reg = <0x80000000 0x10000000>; /* 256 MB */
 	};
@@ -31,14 +31,14 @@
 
 		compatible = "gpio-leds";
 
-		led0 {
+		led@0 {
 			label = "com:green:user";
 			gpios = <&gpio1 23 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
 		};
 	};
 
-	vbat: fixedregulator0 {
+	vbat: fixedregulator@0 {
 		compatible = "regulator-fixed";
 		regulator-name = "vbat";
 		regulator-min-microvolt = <5000000>;
@@ -46,7 +46,7 @@
 		regulator-boot-on;
 	};
 
-	vmmc: fixedregulator1 {
+	vmmc: fixedregulator@0 {
 		compatible = "regulator-fixed";
 		regulator-name = "vmmc";
 		regulator-min-microvolt = <3300000>;
@@ -161,7 +161,7 @@
 
 		#address-cells = <1>;
 		#size-cells = <1>;
-		ti,elm-id = <&elm>;
+		elm_id = <&elm>;
 
 		/* MTD partition table */
 		partition@0 {

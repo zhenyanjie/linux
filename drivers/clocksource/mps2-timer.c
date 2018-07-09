@@ -250,7 +250,7 @@ out:
 	return ret;
 }
 
-static int __init mps2_timer_init(struct device_node *np)
+static void __init mps2_timer_init(struct device_node *np)
 {
 	static int has_clocksource, has_clockevent;
 	int ret;
@@ -259,7 +259,7 @@ static int __init mps2_timer_init(struct device_node *np)
 		ret = mps2_clocksource_init(np);
 		if (!ret) {
 			has_clocksource = 1;
-			return 0;
+			return;
 		}
 	}
 
@@ -267,11 +267,9 @@ static int __init mps2_timer_init(struct device_node *np)
 		ret = mps2_clockevent_init(np);
 		if (!ret) {
 			has_clockevent = 1;
-			return 0;
+			return;
 		}
 	}
-
-	return 0;
 }
 
 CLOCKSOURCE_OF_DECLARE(mps2_timer, "arm,mps2-timer", mps2_timer_init);

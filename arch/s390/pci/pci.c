@@ -354,8 +354,7 @@ static void zpci_irq_handler(struct airq_struct *airq)
 				/* End of second scan with interrupts on. */
 				break;
 			/* First scan complete, reenable interrupts. */
-			if (zpci_set_irq_ctrl(SIC_IRQ_MODE_SINGLE, NULL, PCI_ISC))
-				break;
+			zpci_set_irq_ctrl(SIC_IRQ_MODE_SINGLE, NULL, PCI_ISC);
 			si = 0;
 			continue;
 		}
@@ -855,15 +854,6 @@ void zpci_stop_device(struct zpci_dev *zdev)
 }
 EXPORT_SYMBOL_GPL(zpci_stop_device);
 
-int zpci_report_error(struct pci_dev *pdev,
-		      struct zpci_report_error_header *report)
-{
-	struct zpci_dev *zdev = to_zpci(pdev);
-
-	return sclp_pci_report(report, zdev->fh, zdev->fid);
-}
-EXPORT_SYMBOL(zpci_report_error);
-
 static inline int barsize(u8 size)
 {
 	return (size) ? (1 << size) >> 10 : 0;
@@ -929,7 +919,7 @@ static int __init pci_base_init(void)
 	if (!s390_pci_probe)
 		return 0;
 
-	if (!test_facility(69) || !test_facility(71))
+	if (!test_facility(69) || !test_facility(71) || !test_facility(72))
 		return 0;
 
 	rc = zpci_debug_init();

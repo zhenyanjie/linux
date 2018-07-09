@@ -1278,7 +1278,7 @@ out:
 	return err;
 }
 
-#if IS_ENABLED(CONFIG_IPDDP)
+#if defined(CONFIG_IPDDP) || defined(CONFIG_IPDDP_MODULE)
 static __inline__ int is_ip_over_ddp(struct sk_buff *skb)
 {
 	return skb->data[12] == 22;

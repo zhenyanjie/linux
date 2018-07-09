@@ -231,6 +231,9 @@ ieee80211_get_max_required_bw(struct ieee80211_sub_if_data *sdata)
 		    !(sta->sdata->bss && sta->sdata->bss == sdata->bss))
 			continue;
 
+		if (!sta->uploaded || !test_sta_flag(sta, WLAN_STA_ASSOC))
+			continue;
+
 		max_bw = max(max_bw, ieee80211_get_sta_bw(&sta->sta));
 	}
 	rcu_read_unlock();
@@ -271,7 +274,6 @@ ieee80211_get_chanctx_max_required_bw(struct ieee80211_local *local,
 				    ieee80211_get_max_required_bw(sdata));
 			break;
 		case NL80211_IFTYPE_P2P_DEVICE:
-		case NL80211_IFTYPE_NAN:
 			continue;
 		case NL80211_IFTYPE_ADHOC:
 		case NL80211_IFTYPE_WDS:
@@ -644,9 +646,6 @@ static int ieee80211_assign_vif_chanctx(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_chanctx *curr_ctx = NULL;
 	int ret = 0;
 
-	if (WARN_ON(sdata->vif.type == NL80211_IFTYPE_NAN))
-		return -ENOTSUPP;
-
 	conf = rcu_dereference_protected(sdata->vif.chanctx_conf,
 					 lockdep_is_held(&local->chanctx_mtx));
 
@@ -719,7 +718,6 @@ void ieee80211_recalc_smps_chanctx(struct ieee80211_local *local,
 
 		switch (sdata->vif.type) {
 		case NL80211_IFTYPE_P2P_DEVICE:
-		case NL80211_IFTYPE_NAN:
 			continue;
 		case NL80211_IFTYPE_STATION:
 			if (!sdata->u.mgd.associated)
@@ -982,7 +980,6 @@ ieee80211_vif_chanctx_reservation_complete(struct ieee80211_sub_if_data *sdata)
 	case NL80211_IFTYPE_P2P_CLIENT:
 	case NL80211_IFTYPE_P2P_GO:
 	case NL80211_IFTYPE_P2P_DEVICE:
-	case NL80211_IFTYPE_NAN:
 	case NUM_NL80211_IFTYPES:
 		WARN_ON(1);
 		break;

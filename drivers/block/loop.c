@@ -263,7 +263,7 @@ static int lo_write_bvec(struct file *file, struct bio_vec *bvec, loff_t *ppos)
 	struct iov_iter i;
 	ssize_t bw;
 
-	iov_iter_bvec(&i, ITER_BVEC | WRITE, bvec, 1, bvec->bv_len);
+	iov_iter_bvec(&i, ITER_BVEC, bvec, 1, bvec->bv_len);
 
 	file_start_write(file);
 	bw = vfs_iter_write(file, &i, ppos);
@@ -447,7 +447,7 @@ static int lo_req_flush(struct loop_device *lo, struct request *rq)
 
 static inline void handle_partial_read(struct loop_cmd *cmd, long bytes)
 {
-	if (bytes < 0 || op_is_write(req_op(cmd->rq)))
+	if (bytes < 0 || (cmd->rq->cmd_flags & REQ_WRITE))
 		return;
 
 	if (unlikely(bytes < blk_rq_bytes(cmd->rq))) {
@@ -510,10 +510,14 @@ static int lo_rw_aio(struct loop_device *lo, struct loop_cmd *cmd,
 	return 0;
 }
 
-static int do_req_filebacked(struct loop_device *lo, struct request *rq)
+
+static inline int lo_rw_simple(struct loop_device *lo,
+		struct request *rq, loff_t pos, bool rw)
 {
 	struct loop_cmd *cmd = blk_mq_rq_to_pdu(rq);
-	loff_t pos = ((loff_t) blk_rq_pos(rq) << 9) + lo->lo_offset;
+
+	if (cmd->use_aio)
+		return lo_rw_aio(lo, cmd, pos, rw);
 
 	/*
 	 * lo_write_simple and lo_read_simple should have been covered
@@ -524,30 +528,37 @@ static int do_req_filebacked(struct loop_device *lo, struct request *rq)
 	 * of the req at one time. And direct read IO doesn't need to
 	 * run flush_dcache_page().
 	 */
-	switch (req_op(rq)) {
-	case REQ_OP_FLUSH:
-		return lo_req_flush(lo, rq);
-	case REQ_OP_DISCARD:
-		return lo_discard(lo, rq, pos);
-	case REQ_OP_WRITE:
-		if (lo->transfer)
-			return lo_write_transfer(lo, rq, pos);
-		else if (cmd->use_aio)
-			return lo_rw_aio(lo, cmd, pos, WRITE);
+	if (rw == WRITE)
+		return lo_write_simple(lo, rq, pos);
+	else
+		return lo_read_simple(lo, rq, pos);
+}
+
+static int do_req_filebacked(struct loop_device *lo, struct request *rq)
+{
+	loff_t pos;
+	int ret;
+
+	pos = ((loff_t) blk_rq_pos(rq) << 9) + lo->lo_offset;
+
+	if (rq->cmd_flags & REQ_WRITE) {
+		if (rq->cmd_flags & REQ_FLUSH)
+			ret = lo_req_flush(lo, rq);
+		else if (rq->cmd_flags & REQ_DISCARD)
+			ret = lo_discard(lo, rq, pos);
+		else if (lo->transfer)
+			ret = lo_write_transfer(lo, rq, pos);
 		else
-			return lo_write_simple(lo, rq, pos);
-	case REQ_OP_READ:
+			ret = lo_rw_simple(lo, rq, pos, WRITE);
+
+	} else {
 		if (lo->transfer)
-			return lo_read_transfer(lo, rq, pos);
-		else if (cmd->use_aio)
-			return lo_rw_aio(lo, cmd, pos, READ);
+			ret = lo_read_transfer(lo, rq, pos);
 		else
-			return lo_read_simple(lo, rq, pos);
-	default:
-		WARN_ON_ONCE(1);
-		return -EIO;
-		break;
+			ret = lo_rw_simple(lo, rq, pos, READ);
 	}
+
+	return ret;
 }
 
 struct switch_request {
@@ -612,9 +623,6 @@ static int loop_switch(struct loop_device *lo, struct file *file)
  */
 static int loop_flush(struct loop_device *lo)
 {
-	/* loop not yet configured, no running thread, nothing to flush */
-	if (lo->lo_state != Lo_bound)
-		return 0;
 	return loop_switch(lo, NULL);
 }
 
@@ -843,13 +851,13 @@ static void loop_config_discard(struct loop_device *lo)
 
 static void loop_unprepare_queue(struct loop_device *lo)
 {
-	kthread_flush_worker(&lo->worker);
+	flush_kthread_worker(&lo->worker);
 	kthread_stop(lo->worker_task);
 }
 
 static int loop_prepare_queue(struct loop_device *lo)
 {
-	kthread_init_worker(&lo->worker);
+	init_kthread_worker(&lo->worker);
 	lo->worker_task = kthread_run(kthread_worker_fn,
 			&lo->worker, "loop%d", lo->lo_number);
 	if (IS_ERR(lo->worker_task))
@@ -1100,38 +1108,29 @@ loop_set_status(struct loop_device *lo, const struct loop_info64 *info)
 	if ((unsigned int) info->lo_encrypt_key_size > LO_KEY_SIZE)
 		return -EINVAL;
 
-	/* I/O need to be drained during transfer transition */
-	blk_mq_freeze_queue(lo->lo_queue);
-
 	err = loop_release_xfer(lo);
 	if (err)
-		goto exit;
+		return err;
 
 	if (info->lo_encrypt_type) {
 		unsigned int type = info->lo_encrypt_type;
 
-		if (type >= MAX_LO_CRYPT) {
-			err = -EINVAL;
-			goto exit;
-		}
+		if (type >= MAX_LO_CRYPT)
+			return -EINVAL;
 		xfer = xfer_funcs[type];
-		if (xfer == NULL) {
-			err = -EINVAL;
-			goto exit;
-		}
+		if (xfer == NULL)
+			return -EINVAL;
 	} else
 		xfer = NULL;
 
 	err = loop_init_xfer(lo, xfer, info);
 	if (err)
-		goto exit;
+		return err;
 
 	if (lo->lo_offset != info->lo_offset ||
 	    lo->lo_sizelimit != info->lo_sizelimit)
-		if (figure_loop_size(lo, info->lo_offset, info->lo_sizelimit)) {
-			err = -EFBIG;
-			goto exit;
-		}
+		if (figure_loop_size(lo, info->lo_offset, info->lo_sizelimit))
+			return -EFBIG;
 
 	loop_config_discard(lo);
 
@@ -1149,6 +1148,13 @@ loop_set_status(struct loop_device *lo, const struct loop_info64 *info)
 	     (info->lo_flags & LO_FLAGS_AUTOCLEAR))
 		lo->lo_flags ^= LO_FLAGS_AUTOCLEAR;
 
+	if ((info->lo_flags & LO_FLAGS_PARTSCAN) &&
+	     !(lo->lo_flags & LO_FLAGS_PARTSCAN)) {
+		lo->lo_flags |= LO_FLAGS_PARTSCAN;
+		lo->lo_disk->flags &= ~GENHD_FL_NO_PART_SCAN;
+		loop_reread_partitions(lo, lo->lo_device);
+	}
+
 	lo->lo_encrypt_key_size = info->lo_encrypt_key_size;
 	lo->lo_init[0] = info->lo_init[0];
 	lo->lo_init[1] = info->lo_init[1];
@@ -1161,17 +1167,7 @@ loop_set_status(struct loop_device *lo, const struct loop_info64 *info)
 	/* update dio if lo_offset or transfer is changed */
 	__loop_update_dio(lo, lo->use_dio);
 
- exit:
-	blk_mq_unfreeze_queue(lo->lo_queue);
-
-	if (!err && (info->lo_flags & LO_FLAGS_PARTSCAN) &&
-	     !(lo->lo_flags & LO_FLAGS_PARTSCAN)) {
-		lo->lo_flags |= LO_FLAGS_PARTSCAN;
-		lo->lo_disk->flags &= ~GENHD_FL_NO_PART_SCAN;
-		loop_reread_partitions(lo, lo->lo_device);
-	}
-
-	return err;
+	return 0;
 }
 
 static int
@@ -1565,8 +1561,9 @@ out:
 	return err;
 }
 
-static void __lo_release(struct loop_device *lo)
+static void lo_release(struct gendisk *disk, fmode_t mode)
 {
+	struct loop_device *lo = disk->private_data;
 	int err;
 
 	if (atomic_dec_return(&lo->lo_refcnt))
@@ -1590,13 +1587,6 @@ static void __lo_release(struct loop_device *lo)
 	}
 
 	mutex_unlock(&lo->lo_ctl_mutex);
-}
-
-static void lo_release(struct gendisk *disk, fmode_t mode)
-{
-	mutex_lock(&loop_index_mutex);
-	__lo_release(disk->private_data);
-	mutex_unlock(&loop_index_mutex);
 }
 
 static const struct block_device_operations lo_fops = {
@@ -1667,26 +1657,22 @@ static int loop_queue_rq(struct blk_mq_hw_ctx *hctx,
 	blk_mq_start_request(bd->rq);
 
 	if (lo->lo_state != Lo_bound)
-		return BLK_MQ_RQ_QUEUE_ERROR;
+		return -EIO;
 
-	switch (req_op(cmd->rq)) {
-	case REQ_OP_FLUSH:
-	case REQ_OP_DISCARD:
+	if (lo->use_dio && !(cmd->rq->cmd_flags & (REQ_FLUSH |
+					REQ_DISCARD)))
+		cmd->use_aio = true;
+	else
 		cmd->use_aio = false;
-		break;
-	default:
-		cmd->use_aio = lo->use_dio;
-		break;
-	}
 
-	kthread_queue_work(&lo->worker, &cmd->work);
+	queue_kthread_work(&lo->worker, &cmd->work);
 
 	return BLK_MQ_RQ_QUEUE_OK;
 }
 
 static void loop_handle_cmd(struct loop_cmd *cmd)
 {
-	const bool write = op_is_write(req_op(cmd->rq));
+	const bool write = cmd->rq->cmd_flags & REQ_WRITE;
 	struct loop_device *lo = cmd->rq->q->queuedata;
 	int ret = 0;
 
@@ -1717,13 +1703,14 @@ static int loop_init_request(void *data, struct request *rq,
 	struct loop_cmd *cmd = blk_mq_rq_to_pdu(rq);
 
 	cmd->rq = rq;
-	kthread_init_work(&cmd->work, loop_queue_work);
+	init_kthread_work(&cmd->work, loop_queue_work);
 
 	return 0;
 }
 
 static struct blk_mq_ops loop_mq_ops = {
 	.queue_rq       = loop_queue_rq,
+	.map_queue      = blk_mq_map_queue,
 	.init_request	= loop_init_request,
 };
 
@@ -1778,7 +1765,6 @@ static int loop_add(struct loop_device **l, int i)
 	 */
 	queue_flag_set_unlocked(QUEUE_FLAG_NOMERGES, lo->lo_queue);
 
-	err = -ENOMEM;
 	disk = lo->lo_disk = alloc_disk(1 << part_shift);
 	if (!disk)
 		goto out_free_queue;

@@ -80,13 +80,18 @@ const char *mei_dev_state_str(int state);
 enum iamthif_states {
 	MEI_IAMTHIF_IDLE,
 	MEI_IAMTHIF_WRITING,
+	MEI_IAMTHIF_FLOW_CONTROL,
 	MEI_IAMTHIF_READING,
+	MEI_IAMTHIF_READ_COMPLETE
 };
 
 enum mei_file_transaction_states {
 	MEI_IDLE,
 	MEI_WRITING,
 	MEI_WRITE_COMPLETE,
+	MEI_FLOW_CONTROL,
+	MEI_READING,
+	MEI_READ_COMPLETE
 };
 
 /**
@@ -141,7 +146,7 @@ struct mei_fw_status {
  * @refcnt: struct reference count
  * @props: client properties
  * @client_id: me client id
- * @tx_flow_ctrl_creds: flow control credits
+ * @mei_flow_ctrl_creds: flow control credits
  * @connect_count: number connections to this client
  * @bus_added: added to bus
  */
@@ -150,7 +155,7 @@ struct mei_me_client {
 	struct kref refcnt;
 	struct mei_client_properties props;
 	u8 client_id;
-	u8 tx_flow_ctrl_creds;
+	u8 mei_flow_ctrl_creds;
 	u8 connect_count;
 	u8 bus_added;
 };
@@ -197,11 +202,10 @@ struct mei_cl_cb {
  * @ev_async: event async notification
  * @status: connection status
  * @me_cl: fw client connected
- * @fp: file associated with client
  * @host_client_id: host id
- * @tx_flow_ctrl_creds: transmit flow credentials
- * @rx_flow_ctrl_creds: receive flow credentials
+ * @mei_flow_ctrl_creds: transmit flow credentials
  * @timer_count:  watchdog timer for operation completion
+ * @reserved: reserved for alignment
  * @notify_en: notification - enabled/disabled
  * @notify_ev: pending notification event
  * @writing_state: state of the tx
@@ -221,11 +225,10 @@ struct mei_cl {
 	struct fasync_struct *ev_async;
 	int status;
 	struct mei_me_client *me_cl;
-	const struct file *fp;
 	u8 host_client_id;
-	u8 tx_flow_ctrl_creds;
-	u8 rx_flow_ctrl_creds;
+	u8 mei_flow_ctrl_creds;
 	u8 timer_count;
+	u8 reserved;
 	u8 notify_en;
 	u8 notify_ev;
 	enum mei_file_transaction_states writing_state;
@@ -379,6 +382,7 @@ const char *mei_pg_state_str(enum mei_pg_state state);
  *
  * @hbuf_depth  : depth of hardware host/write buffer is slots
  * @hbuf_is_ready : query if the host host/write buffer is ready
+ * @wr_msg      : the buffer for hbm control messages
  *
  * @version     : HBM protocol version in use
  * @hbm_f_pg_supported  : hbm feature pgi protocol
@@ -397,7 +401,9 @@ const char *mei_pg_state_str(enum mei_pg_state state);
  * @override_fixed_address: force allow fixed address behavior
  *
  * @amthif_cmd_list : amthif list for cmd waiting
+ * @iamthif_fp : file for current amthif operation
  * @iamthif_cl  : amthif host client
+ * @iamthif_current_cb : amthif current operation callback
  * @iamthif_open_count : number of opened amthif connections
  * @iamthif_stall_timer : timer to detect amthif hang
  * @iamthif_state : amthif processor state
@@ -461,6 +467,12 @@ struct mei_device {
 	u8 hbuf_depth;
 	bool hbuf_is_ready;
 
+	/* used for control messages */
+	struct {
+		struct mei_msg_hdr hdr;
+		unsigned char data[128];
+	} wr_msg;
+
 	struct hbm_version version;
 	unsigned int hbm_f_pg_supported:1;
 	unsigned int hbm_f_dc_supported:1;
@@ -479,7 +491,10 @@ struct mei_device {
 
 	/* amthif list for cmd waiting */
 	struct mei_cl_cb amthif_cmd_list;
+	/* driver managed amthif list for reading completed amthif cmd data */
+	const struct file *iamthif_fp;
 	struct mei_cl iamthif_cl;
+	struct mei_cl_cb *iamthif_current_cb;
 	long iamthif_open_count;
 	u32 iamthif_stall_timer;
 	enum iamthif_states iamthif_state;
@@ -548,7 +563,6 @@ void mei_cancel_work(struct mei_device *dev);
  */
 
 void mei_timer(struct work_struct *work);
-void mei_schedule_stall_timer(struct mei_device *dev);
 int mei_irq_read_handler(struct mei_device *dev,
 		struct mei_cl_cb *cmpl_list, s32 *slots);
 
@@ -562,7 +576,11 @@ void mei_amthif_reset_params(struct mei_device *dev);
 
 int mei_amthif_host_init(struct mei_device *dev, struct mei_me_client *me_cl);
 
-unsigned int mei_amthif_poll(struct file *file, poll_table *wait);
+int mei_amthif_read(struct mei_device *dev, struct file *file,
+		char __user *ubuf, size_t length, loff_t *offset);
+
+unsigned int mei_amthif_poll(struct mei_device *dev,
+		struct file *file, poll_table *wait);
 
 int mei_amthif_release(struct mei_device *dev, struct file *file);
 
@@ -652,7 +670,8 @@ static inline size_t mei_hbuf_max_len(const struct mei_device *dev)
 }
 
 static inline int mei_write_message(struct mei_device *dev,
-			struct mei_msg_hdr *hdr, void *buf)
+			struct mei_msg_hdr *hdr,
+			unsigned char *buf)
 {
 	return dev->ops->write(dev, hdr, buf);
 }

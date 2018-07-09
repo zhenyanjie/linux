@@ -25,7 +25,6 @@
 #define IS_VGIC_ADDR_UNDEF(_x)  ((_x) == VGIC_ADDR_UNDEF)
 
 #define INTERRUPT_ID_BITS_SPIS	10
-#define INTERRUPT_ID_BITS_ITS	16
 #define VGIC_PRI_BITS		5
 
 #define vgic_irq_is_sgi(intid) ((intid) < VGIC_NR_SGIS)
@@ -39,12 +38,8 @@ struct vgic_vmcr {
 
 struct vgic_irq *vgic_get_irq(struct kvm *kvm, struct kvm_vcpu *vcpu,
 			      u32 intid);
-void vgic_put_irq(struct kvm *kvm, struct vgic_irq *irq);
 bool vgic_queue_irq_unlock(struct kvm *kvm, struct vgic_irq *irq);
 void vgic_kick_vcpus(struct kvm *kvm);
-
-int vgic_check_ioaddr(struct kvm *kvm, phys_addr_t *ioaddr,
-		      phys_addr_t addr, phys_addr_t alignment);
 
 void vgic_v2_process_maintenance(struct kvm_vcpu *vcpu);
 void vgic_v2_fold_lr_state(struct kvm_vcpu *vcpu);
@@ -64,14 +59,7 @@ int vgic_v2_map_resources(struct kvm *kvm);
 int vgic_register_dist_iodev(struct kvm *kvm, gpa_t dist_base_address,
 			     enum vgic_type);
 
-static inline void vgic_get_irq_kref(struct vgic_irq *irq)
-{
-	if (irq->intid < VGIC_MIN_LPI)
-		return;
-
-	kref_get(&irq->refcount);
-}
-
+#ifdef CONFIG_KVM_ARM_VGIC_V3
 void vgic_v3_process_maintenance(struct kvm_vcpu *vcpu);
 void vgic_v3_fold_lr_state(struct kvm_vcpu *vcpu);
 void vgic_v3_populate_lr(struct kvm_vcpu *vcpu, struct vgic_irq *irq, int lr);
@@ -83,40 +71,60 @@ void vgic_v3_enable(struct kvm_vcpu *vcpu);
 int vgic_v3_probe(const struct gic_kvm_info *info);
 int vgic_v3_map_resources(struct kvm *kvm);
 int vgic_register_redist_iodevs(struct kvm *kvm, gpa_t dist_base_address);
-
-#ifdef CONFIG_KVM_ARM_VGIC_V3_ITS
-int vgic_register_its_iodevs(struct kvm *kvm);
-bool vgic_has_its(struct kvm *kvm);
-int kvm_vgic_register_its_device(void);
-void vgic_enable_lpis(struct kvm_vcpu *vcpu);
-int vgic_its_inject_msi(struct kvm *kvm, struct kvm_msi *msi);
 #else
-static inline int vgic_register_its_iodevs(struct kvm *kvm)
+static inline void vgic_v3_process_maintenance(struct kvm_vcpu *vcpu)
+{
+}
+
+static inline void vgic_v3_fold_lr_state(struct kvm_vcpu *vcpu)
+{
+}
+
+static inline void vgic_v3_populate_lr(struct kvm_vcpu *vcpu,
+				       struct vgic_irq *irq, int lr)
+{
+}
+
+static inline void vgic_v3_clear_lr(struct kvm_vcpu *vcpu, int lr)
+{
+}
+
+static inline void vgic_v3_set_underflow(struct kvm_vcpu *vcpu)
+{
+}
+
+static inline
+void vgic_v3_set_vmcr(struct kvm_vcpu *vcpu, struct vgic_vmcr *vmcr)
+{
+}
+
+static inline
+void vgic_v3_get_vmcr(struct kvm_vcpu *vcpu, struct vgic_vmcr *vmcr)
+{
+}
+
+static inline void vgic_v3_enable(struct kvm_vcpu *vcpu)
+{
+}
+
+static inline int vgic_v3_probe(const struct gic_kvm_info *info)
 {
 	return -ENODEV;
 }
 
-static inline bool vgic_has_its(struct kvm *kvm)
-{
-	return false;
-}
-
-static inline int kvm_vgic_register_its_device(void)
+static inline int vgic_v3_map_resources(struct kvm *kvm)
 {
 	return -ENODEV;
 }
 
-static inline void vgic_enable_lpis(struct kvm_vcpu *vcpu)
-{
-}
-
-static inline int vgic_its_inject_msi(struct kvm *kvm, struct kvm_msi *msi)
+static inline int vgic_register_redist_iodevs(struct kvm *kvm,
+					      gpa_t dist_base_address)
 {
 	return -ENODEV;
 }
 #endif
 
-int kvm_register_vgic_device(unsigned long type);
+void kvm_register_vgic_device(unsigned long type);
 int vgic_lazy_init(struct kvm *kvm);
 int vgic_init(struct kvm *kvm);
 

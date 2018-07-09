@@ -60,7 +60,6 @@ struct net {
 	struct list_head	exit_list;	/* Use only net_mutex */
 
 	struct user_namespace   *user_ns;	/* Owning user namespace */
-	struct ucounts		*ucounts;
 	spinlock_t		nsid_lock;
 	struct idr		netns_ids;
 
@@ -170,7 +169,7 @@ static inline struct net *copy_net_ns(unsigned long flags,
 extern struct list_head net_namespace_list;
 
 struct net *get_net_ns_by_pid(pid_t pid);
-struct net *get_net_ns_by_fd(int fd);
+struct net *get_net_ns_by_fd(int pid);
 
 #ifdef CONFIG_SYSCTL
 void ipx_register_sysctl(void);
@@ -213,11 +212,6 @@ int net_eq(const struct net *net1, const struct net *net2)
 	return net1 == net2;
 }
 
-static inline int check_net(const struct net *net)
-{
-	return atomic_read(&net->count) != 0;
-}
-
 void net_drop_ns(void *);
 
 #else
@@ -238,11 +232,6 @@ static inline struct net *maybe_get_net(struct net *net)
 
 static inline
 int net_eq(const struct net *net1, const struct net *net2)
-{
-	return 1;
-}
-
-static inline int check_net(const struct net *net)
 {
 	return 1;
 }
@@ -286,7 +275,7 @@ static inline struct net *read_pnet(const possible_net_t *pnet)
 #define __net_initconst
 #else
 #define __net_init	__init
-#define __net_exit	__ref
+#define __net_exit	__exit_refok
 #define __net_initdata	__initdata
 #define __net_initconst	__initconst
 #endif

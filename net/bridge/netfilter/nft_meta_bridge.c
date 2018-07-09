@@ -86,7 +86,6 @@ static const struct nft_expr_ops nft_meta_bridge_set_ops = {
 	.init		= nft_meta_set_init,
 	.destroy	= nft_meta_set_destroy,
 	.dump		= nft_meta_set_dump,
-	.validate	= nft_meta_set_validate,
 };
 
 static const struct nft_expr_ops *

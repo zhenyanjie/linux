@@ -477,7 +477,7 @@ static struct rtable *icmp_route_lookup(struct net *net,
 	fl4->flowi4_proto = IPPROTO_ICMP;
 	fl4->fl4_icmp_type = type;
 	fl4->fl4_icmp_code = code;
-	fl4->flowi4_oif = l3mdev_master_ifindex(skb_dst(skb_in)->dev);
+	fl4->flowi4_oif = l3mdev_master_ifindex(skb_in->dev);
 
 	security_skb_classify_flow(skb_in, flowi4_to_flowi(fl4));
 	rt = __ip_route_output_key_hash(net, fl4,
@@ -502,7 +502,7 @@ static struct rtable *icmp_route_lookup(struct net *net,
 	if (err)
 		goto relookup_failed;
 
-	if (inet_addr_type_dev_table(net, skb_dst(skb_in)->dev,
+	if (inet_addr_type_dev_table(net, skb_in->dev,
 				     fl4_dec.saddr) == RTN_LOCAL) {
 		rt2 = __ip_route_output_key(net, &fl4_dec);
 		if (IS_ERR(rt2))
@@ -766,7 +766,7 @@ static bool icmp_tag_validation(int proto)
 }
 
 /*
- *	Handle ICMP_DEST_UNREACH, ICMP_TIME_EXCEEDED, ICMP_QUENCH, and
+ *	Handle ICMP_DEST_UNREACH, ICMP_TIME_EXCEED, ICMP_QUENCH, and
  *	ICMP_PARAMETERPROB.
  */
 
@@ -794,8 +794,7 @@ static bool icmp_unreach(struct sk_buff *skb)
 	if (iph->ihl < 5) /* Mangled header, drop. */
 		goto out_err;
 
-	switch (icmph->type) {
-	case ICMP_DEST_UNREACH:
+	if (icmph->type == ICMP_DEST_UNREACH) {
 		switch (icmph->code & 15) {
 		case ICMP_NET_UNREACH:
 		case ICMP_HOST_UNREACH:
@@ -831,16 +830,8 @@ static bool icmp_unreach(struct sk_buff *skb)
 		}
 		if (icmph->code > NR_ICMP_UNREACH)
 			goto out;
-		break;
-	case ICMP_PARAMETERPROB:
+	} else if (icmph->type == ICMP_PARAMETERPROB)
 		info = ntohl(icmph->un.gateway) >> 24;
-		break;
-	case ICMP_TIME_EXCEEDED:
-		__ICMP_INC_STATS(net, ICMP_MIB_INTIMEEXCDS);
-		if (icmph->code == ICMP_EXC_FRAGTIME)
-			goto out;
-		break;
-	}
 
 	/*
 	 *	Throw it at our lower layers

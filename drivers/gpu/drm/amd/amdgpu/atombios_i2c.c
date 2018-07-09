@@ -27,7 +27,6 @@
 #include "amdgpu.h"
 #include "atom.h"
 #include "amdgpu_atombios.h"
-#include "atombios_i2c.h"
 
 #define TARGET_HW_I2C_CLOCK 50
 

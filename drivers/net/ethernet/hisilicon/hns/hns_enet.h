@@ -54,11 +54,12 @@ struct hns_nic_ops {
 };
 
 struct hns_nic_priv {
-	const struct fwnode_handle      *fwnode;
+	const struct device_node *ae_node;
 	u32 enet_ver;
 	u32 port_id;
 	int phy_mode;
 	int phy_led_val;
+	struct phy_device *phy;
 	struct net_device *netdev;
 	struct device *dev;
 	struct hnae_handle *ae_handle;
@@ -91,8 +92,8 @@ void hns_ethtool_set_ops(struct net_device *ndev);
 void hns_nic_net_reset(struct net_device *ndev);
 void hns_nic_net_reinit(struct net_device *netdev);
 int hns_nic_init_phy(struct net_device *ndev, struct hnae_handle *h);
-netdev_tx_t hns_nic_net_xmit_hw(struct net_device *ndev,
-				struct sk_buff *skb,
-				struct hns_nic_ring_data *ring_data);
+int hns_nic_net_xmit_hw(struct net_device *ndev,
+			struct sk_buff *skb,
+			struct hns_nic_ring_data *ring_data);
 
 #endif	/**__HNS_ENET_H */

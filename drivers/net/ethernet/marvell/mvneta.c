@@ -28,7 +28,6 @@
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
 #include <linux/phy.h>
-#include <linux/phy_fixed.h>
 #include <linux/platform_device.h>
 #include <linux/skbuff.h>
 #include <net/hwbm.h>
@@ -383,8 +382,7 @@ struct mvneta_port {
 	struct mvneta_rx_queue *rxqs;
 	struct mvneta_tx_queue *txqs;
 	struct net_device *dev;
-	struct hlist_node node_online;
-	struct hlist_node node_dead;
+	struct notifier_block cpu_notifier;
 	int rxq_def;
 	/* Protect the access to the percpu interrupt registers,
 	 * ensuring that the configuration remains coherent.
@@ -401,6 +399,7 @@ struct mvneta_port {
 	u16 rx_ring_size;
 
 	struct mii_bus *mii_bus;
+	struct phy_device *phy_dev;
 	phy_interface_t phy_interface;
 	struct device_node *phy_node;
 	unsigned int link;
@@ -575,7 +574,6 @@ struct mvneta_rx_queue {
 	int next_desc_to_proc;
 };
 
-static enum cpuhp_state online_hpstate;
 /* The hardware supports eight (8) rx queues, but we are only allowing
  * the first one to be used. Therefore, let's just allocate one queue.
  */
@@ -637,9 +635,8 @@ static void mvneta_mib_counters_clear(struct mvneta_port *pp)
 }
 
 /* Get System Network Statistics */
-static struct rtnl_link_stats64 *
-mvneta_get_stats64(struct net_device *dev,
-		   struct rtnl_link_stats64 *stats)
+struct rtnl_link_stats64 *mvneta_get_stats64(struct net_device *dev,
+					     struct rtnl_link_stats64 *stats)
 {
 	struct mvneta_port *pp = netdev_priv(dev);
 	unsigned int start;
@@ -1080,7 +1077,6 @@ static void mvneta_port_up(struct mvneta_port *pp)
 	}
 	mvreg_write(pp, MVNETA_TXQ_CMD, q_map);
 
-	q_map = 0;
 	/* Enable all initialized RXQs. */
 	for (queue = 0; queue < rxq_number; queue++) {
 		struct mvneta_rx_queue *rxq = &pp->rxqs[queue];
@@ -1182,10 +1178,6 @@ static void mvneta_port_disable(struct mvneta_port *pp)
 	val = mvreg_read(pp, MVNETA_GMAC_CTRL_0);
 	val &= ~MVNETA_GMAC0_PORT_ENABLE;
 	mvreg_write(pp, MVNETA_GMAC_CTRL_0, val);
-
-	pp->link = 0;
-	pp->duplex = -1;
-	pp->speed = 0;
 
 	udelay(200);
 }
@@ -1910,9 +1902,9 @@ static int mvneta_rx_swbm(struct mvneta_port *pp, int rx_todo,
 
 		if (!mvneta_rxq_desc_is_first_last(rx_status) ||
 		    (rx_status & MVNETA_RXD_ERR_SUMMARY)) {
-			mvneta_rx_error(pp, rx_desc);
 err_drop_frame:
 			dev->stats.rx_errors++;
+			mvneta_rx_error(pp, rx_desc);
 			/* leave the descriptor untouched */
 			continue;
 		}
@@ -2659,7 +2651,6 @@ static int mvneta_poll(struct napi_struct *napi, int budget)
 	u32 cause_rx_tx;
 	int rx_queue;
 	struct mvneta_port *pp = netdev_priv(napi->dev);
-	struct net_device *ndev = pp->dev;
 	struct mvneta_pcpu_port *port = this_cpu_ptr(pp->ports);
 
 	if (!netif_running(pp->dev)) {
@@ -2677,7 +2668,7 @@ static int mvneta_poll(struct napi_struct *napi, int budget)
 				(MVNETA_CAUSE_PHY_STATUS_CHANGE |
 				 MVNETA_CAUSE_LINK_CHANGE |
 				 MVNETA_CAUSE_PSC_SYNC_CHANGE))) {
-			mvneta_fixed_link_update(pp, ndev->phydev);
+			mvneta_fixed_link_update(pp, pp->phy_dev);
 		}
 	}
 
@@ -2927,7 +2918,7 @@ static void mvneta_cleanup_rxqs(struct mvneta_port *pp)
 {
 	int queue;
 
-	for (queue = 0; queue < rxq_number; queue++)
+	for (queue = 0; queue < txq_number; queue++)
 		mvneta_rxq_deinit(pp, &pp->rxqs[queue]);
 }
 
@@ -2972,7 +2963,6 @@ static int mvneta_setup_txqs(struct mvneta_port *pp)
 static void mvneta_start_dev(struct mvneta_port *pp)
 {
 	int cpu;
-	struct net_device *ndev = pp->dev;
 
 	mvneta_max_rx_size_set(pp, pp->pkt_size);
 	mvneta_txq_max_tx_size_set(pp, pp->pkt_size);
@@ -2995,16 +2985,15 @@ static void mvneta_start_dev(struct mvneta_port *pp)
 		    MVNETA_CAUSE_LINK_CHANGE |
 		    MVNETA_CAUSE_PSC_SYNC_CHANGE);
 
-	phy_start(ndev->phydev);
+	phy_start(pp->phy_dev);
 	netif_tx_start_all_queues(pp->dev);
 }
 
 static void mvneta_stop_dev(struct mvneta_port *pp)
 {
 	unsigned int cpu;
-	struct net_device *ndev = pp->dev;
 
-	phy_stop(ndev->phydev);
+	phy_stop(pp->phy_dev);
 
 	for_each_online_cpu(cpu) {
 		struct mvneta_pcpu_port *port = per_cpu_ptr(pp->ports, cpu);
@@ -3177,7 +3166,7 @@ static int mvneta_set_mac_addr(struct net_device *dev, void *addr)
 static void mvneta_adjust_link(struct net_device *ndev)
 {
 	struct mvneta_port *pp = netdev_priv(ndev);
-	struct phy_device *phydev = ndev->phydev;
+	struct phy_device *phydev = pp->phy_dev;
 	int status_change = 0;
 
 	if (phydev->link) {
@@ -3255,6 +3244,7 @@ static int mvneta_mdio_probe(struct mvneta_port *pp)
 	phy_dev->supported &= PHY_GBIT_FEATURES;
 	phy_dev->advertising = phy_dev->supported;
 
+	pp->phy_dev = phy_dev;
 	pp->link    = 0;
 	pp->duplex  = 0;
 	pp->speed   = 0;
@@ -3264,9 +3254,8 @@ static int mvneta_mdio_probe(struct mvneta_port *pp)
 
 static void mvneta_mdio_remove(struct mvneta_port *pp)
 {
-	struct net_device *ndev = pp->dev;
-
-	phy_disconnect(ndev->phydev);
+	phy_disconnect(pp->phy_dev);
+	pp->phy_dev = NULL;
 }
 
 /* Electing a CPU must be done in an atomic way: it should be done
@@ -3322,104 +3311,101 @@ static void mvneta_percpu_elect(struct mvneta_port *pp)
 	}
 };
 
-static int mvneta_cpu_online(unsigned int cpu, struct hlist_node *node)
+static int mvneta_percpu_notifier(struct notifier_block *nfb,
+				  unsigned long action, void *hcpu)
 {
-	int other_cpu;
-	struct mvneta_port *pp = hlist_entry_safe(node, struct mvneta_port,
-						  node_online);
+	struct mvneta_port *pp = container_of(nfb, struct mvneta_port,
+					      cpu_notifier);
+	int cpu = (unsigned long)hcpu, other_cpu;
 	struct mvneta_pcpu_port *port = per_cpu_ptr(pp->ports, cpu);
 
-
-	spin_lock(&pp->lock);
-	/*
-	 * Configuring the driver for a new CPU while the driver is
-	 * stopping is racy, so just avoid it.
-	 */
-	if (pp->is_stopped) {
-		spin_unlock(&pp->lock);
-		return 0;
-	}
-	netif_tx_stop_all_queues(pp->dev);
-
-	/*
-	 * We have to synchronise on tha napi of each CPU except the one
-	 * just being woken up
-	 */
-	for_each_online_cpu(other_cpu) {
-		if (other_cpu != cpu) {
-			struct mvneta_pcpu_port *other_port =
-				per_cpu_ptr(pp->ports, other_cpu);
-
-			napi_synchronize(&other_port->napi);
+	switch (action) {
+	case CPU_ONLINE:
+	case CPU_ONLINE_FROZEN:
+	case CPU_DOWN_FAILED:
+	case CPU_DOWN_FAILED_FROZEN:
+		spin_lock(&pp->lock);
+		/* Configuring the driver for a new CPU while the
+		 * driver is stopping is racy, so just avoid it.
+		 */
+		if (pp->is_stopped) {
+			spin_unlock(&pp->lock);
+			break;
 		}
+		netif_tx_stop_all_queues(pp->dev);
+
+		/* We have to synchronise on tha napi of each CPU
+		 * except the one just being waked up
+		 */
+		for_each_online_cpu(other_cpu) {
+			if (other_cpu != cpu) {
+				struct mvneta_pcpu_port *other_port =
+					per_cpu_ptr(pp->ports, other_cpu);
+
+				napi_synchronize(&other_port->napi);
+			}
+		}
+
+		/* Mask all ethernet port interrupts */
+		on_each_cpu(mvneta_percpu_mask_interrupt, pp, true);
+		napi_enable(&port->napi);
+
+
+		/* Enable per-CPU interrupts on the CPU that is
+		 * brought up.
+		 */
+		mvneta_percpu_enable(pp);
+
+		/* Enable per-CPU interrupt on the one CPU we care
+		 * about.
+		 */
+		mvneta_percpu_elect(pp);
+
+		/* Unmask all ethernet port interrupts */
+		on_each_cpu(mvneta_percpu_unmask_interrupt, pp, true);
+		mvreg_write(pp, MVNETA_INTR_MISC_MASK,
+			MVNETA_CAUSE_PHY_STATUS_CHANGE |
+			MVNETA_CAUSE_LINK_CHANGE |
+			MVNETA_CAUSE_PSC_SYNC_CHANGE);
+		netif_tx_start_all_queues(pp->dev);
+		spin_unlock(&pp->lock);
+		break;
+	case CPU_DOWN_PREPARE:
+	case CPU_DOWN_PREPARE_FROZEN:
+		netif_tx_stop_all_queues(pp->dev);
+		/* Thanks to this lock we are sure that any pending
+		 * cpu election is done
+		 */
+		spin_lock(&pp->lock);
+		/* Mask all ethernet port interrupts */
+		on_each_cpu(mvneta_percpu_mask_interrupt, pp, true);
+		spin_unlock(&pp->lock);
+
+		napi_synchronize(&port->napi);
+		napi_disable(&port->napi);
+		/* Disable per-CPU interrupts on the CPU that is
+		 * brought down.
+		 */
+		mvneta_percpu_disable(pp);
+
+		break;
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
+		/* Check if a new CPU must be elected now this on is down */
+		spin_lock(&pp->lock);
+		mvneta_percpu_elect(pp);
+		spin_unlock(&pp->lock);
+		/* Unmask all ethernet port interrupts */
+		on_each_cpu(mvneta_percpu_unmask_interrupt, pp, true);
+		mvreg_write(pp, MVNETA_INTR_MISC_MASK,
+			MVNETA_CAUSE_PHY_STATUS_CHANGE |
+			MVNETA_CAUSE_LINK_CHANGE |
+			MVNETA_CAUSE_PSC_SYNC_CHANGE);
+		netif_tx_start_all_queues(pp->dev);
+		break;
 	}
 
-	/* Mask all ethernet port interrupts */
-	on_each_cpu(mvneta_percpu_mask_interrupt, pp, true);
-	napi_enable(&port->napi);
-
-	/*
-	 * Enable per-CPU interrupts on the CPU that is
-	 * brought up.
-	 */
-	mvneta_percpu_enable(pp);
-
-	/*
-	 * Enable per-CPU interrupt on the one CPU we care
-	 * about.
-	 */
-	mvneta_percpu_elect(pp);
-
-	/* Unmask all ethernet port interrupts */
-	on_each_cpu(mvneta_percpu_unmask_interrupt, pp, true);
-	mvreg_write(pp, MVNETA_INTR_MISC_MASK,
-		    MVNETA_CAUSE_PHY_STATUS_CHANGE |
-		    MVNETA_CAUSE_LINK_CHANGE |
-		    MVNETA_CAUSE_PSC_SYNC_CHANGE);
-	netif_tx_start_all_queues(pp->dev);
-	spin_unlock(&pp->lock);
-	return 0;
-}
-
-static int mvneta_cpu_down_prepare(unsigned int cpu, struct hlist_node *node)
-{
-	struct mvneta_port *pp = hlist_entry_safe(node, struct mvneta_port,
-						  node_online);
-	struct mvneta_pcpu_port *port = per_cpu_ptr(pp->ports, cpu);
-
-	/*
-	 * Thanks to this lock we are sure that any pending cpu election is
-	 * done.
-	 */
-	spin_lock(&pp->lock);
-	/* Mask all ethernet port interrupts */
-	on_each_cpu(mvneta_percpu_mask_interrupt, pp, true);
-	spin_unlock(&pp->lock);
-
-	napi_synchronize(&port->napi);
-	napi_disable(&port->napi);
-	/* Disable per-CPU interrupts on the CPU that is brought down. */
-	mvneta_percpu_disable(pp);
-	return 0;
-}
-
-static int mvneta_cpu_dead(unsigned int cpu, struct hlist_node *node)
-{
-	struct mvneta_port *pp = hlist_entry_safe(node, struct mvneta_port,
-						  node_dead);
-
-	/* Check if a new CPU must be elected now this on is down */
-	spin_lock(&pp->lock);
-	mvneta_percpu_elect(pp);
-	spin_unlock(&pp->lock);
-	/* Unmask all ethernet port interrupts */
-	on_each_cpu(mvneta_percpu_unmask_interrupt, pp, true);
-	mvreg_write(pp, MVNETA_INTR_MISC_MASK,
-		    MVNETA_CAUSE_PHY_STATUS_CHANGE |
-		    MVNETA_CAUSE_LINK_CHANGE |
-		    MVNETA_CAUSE_PSC_SYNC_CHANGE);
-	netif_tx_start_all_queues(pp->dev);
-	return 0;
+	return NOTIFY_OK;
 }
 
 static int mvneta_open(struct net_device *dev)
@@ -3456,15 +3442,7 @@ static int mvneta_open(struct net_device *dev)
 	/* Register a CPU notifier to handle the case where our CPU
 	 * might be taken offline.
 	 */
-	ret = cpuhp_state_add_instance_nocalls(online_hpstate,
-					       &pp->node_online);
-	if (ret)
-		goto err_free_irq;
-
-	ret = cpuhp_state_add_instance_nocalls(CPUHP_NET_MVNETA_DEAD,
-					       &pp->node_dead);
-	if (ret)
-		goto err_free_online_hp;
+	register_cpu_notifier(&pp->cpu_notifier);
 
 	/* In default link is down */
 	netif_carrier_off(pp->dev);
@@ -3472,19 +3450,15 @@ static int mvneta_open(struct net_device *dev)
 	ret = mvneta_mdio_probe(pp);
 	if (ret < 0) {
 		netdev_err(dev, "cannot probe MDIO bus\n");
-		goto err_free_dead_hp;
+		goto err_free_irq;
 	}
 
 	mvneta_start_dev(pp);
 
 	return 0;
 
-err_free_dead_hp:
-	cpuhp_state_remove_instance_nocalls(CPUHP_NET_MVNETA_DEAD,
-					    &pp->node_dead);
-err_free_online_hp:
-	cpuhp_state_remove_instance_nocalls(online_hpstate, &pp->node_online);
 err_free_irq:
+	unregister_cpu_notifier(&pp->cpu_notifier);
 	on_each_cpu(mvneta_percpu_disable, pp, true);
 	free_percpu_irq(pp->dev->irq, pp->ports);
 err_cleanup_txqs:
@@ -3510,10 +3484,7 @@ static int mvneta_stop(struct net_device *dev)
 
 	mvneta_stop_dev(pp);
 	mvneta_mdio_remove(pp);
-
-	cpuhp_state_remove_instance_nocalls(online_hpstate, &pp->node_online);
-	cpuhp_state_remove_instance_nocalls(CPUHP_NET_MVNETA_DEAD,
-					    &pp->node_dead);
+	unregister_cpu_notifier(&pp->cpu_notifier);
 	on_each_cpu(mvneta_percpu_disable, pp, true);
 	free_percpu_irq(dev->irq, pp->ports);
 	mvneta_cleanup_rxqs(pp);
@@ -3524,31 +3495,42 @@ static int mvneta_stop(struct net_device *dev)
 
 static int mvneta_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
-	if (!dev->phydev)
+	struct mvneta_port *pp = netdev_priv(dev);
+
+	if (!pp->phy_dev)
 		return -ENOTSUPP;
 
-	return phy_mii_ioctl(dev->phydev, ifr, cmd);
+	return phy_mii_ioctl(pp->phy_dev, ifr, cmd);
 }
 
 /* Ethtool methods */
 
-/* Set link ksettings (phy address, speed) for ethtools */
-static int
-mvneta_ethtool_set_link_ksettings(struct net_device *ndev,
-				  const struct ethtool_link_ksettings *cmd)
+/* Get settings (phy address, speed) for ethtools */
+int mvneta_ethtool_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
-	struct mvneta_port *pp = netdev_priv(ndev);
-	struct phy_device *phydev = ndev->phydev;
+	struct mvneta_port *pp = netdev_priv(dev);
+
+	if (!pp->phy_dev)
+		return -ENODEV;
+
+	return phy_ethtool_gset(pp->phy_dev, cmd);
+}
+
+/* Set settings (phy address, speed) for ethtools */
+int mvneta_ethtool_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct mvneta_port *pp = netdev_priv(dev);
+	struct phy_device *phydev = pp->phy_dev;
 
 	if (!phydev)
 		return -ENODEV;
 
-	if ((cmd->base.autoneg == AUTONEG_ENABLE) != pp->use_inband_status) {
+	if ((cmd->autoneg == AUTONEG_ENABLE) != pp->use_inband_status) {
 		u32 val;
 
-		mvneta_set_autoneg(pp, cmd->base.autoneg == AUTONEG_ENABLE);
+		mvneta_set_autoneg(pp, cmd->autoneg == AUTONEG_ENABLE);
 
-		if (cmd->base.autoneg == AUTONEG_DISABLE) {
+		if (cmd->autoneg == AUTONEG_DISABLE) {
 			val = mvreg_read(pp, MVNETA_GMAC_AUTONEG_CONFIG);
 			val &= ~(MVNETA_GMAC_CONFIG_MII_SPEED |
 				 MVNETA_GMAC_CONFIG_GMII_SPEED |
@@ -3565,17 +3547,17 @@ mvneta_ethtool_set_link_ksettings(struct net_device *ndev,
 			mvreg_write(pp, MVNETA_GMAC_AUTONEG_CONFIG, val);
 		}
 
-		pp->use_inband_status = (cmd->base.autoneg == AUTONEG_ENABLE);
+		pp->use_inband_status = (cmd->autoneg == AUTONEG_ENABLE);
 		netdev_info(pp->dev, "autoneg status set to %i\n",
 			    pp->use_inband_status);
 
-		if (netif_running(ndev)) {
+		if (netif_running(dev)) {
 			mvneta_port_down(pp);
 			mvneta_port_up(pp);
 		}
 	}
 
-	return phy_ethtool_ksettings_set(ndev->phydev, cmd);
+	return phy_ethtool_sset(pp->phy_dev, cmd);
 }
 
 /* Set interrupt coalescing for ethtools */
@@ -3839,6 +3821,8 @@ static const struct net_device_ops mvneta_netdev_ops = {
 
 const struct ethtool_ops mvneta_eth_tool_ops = {
 	.get_link       = ethtool_op_get_link,
+	.get_settings   = mvneta_ethtool_get_settings,
+	.set_settings   = mvneta_ethtool_set_settings,
 	.set_coalesce   = mvneta_ethtool_set_coalesce,
 	.get_coalesce   = mvneta_ethtool_get_coalesce,
 	.get_drvinfo    = mvneta_ethtool_get_drvinfo,
@@ -3851,8 +3835,6 @@ const struct ethtool_ops mvneta_eth_tool_ops = {
 	.get_rxnfc	= mvneta_ethtool_get_rxnfc,
 	.get_rxfh	= mvneta_ethtool_get_rxfh,
 	.set_rxfh	= mvneta_ethtool_set_rxfh,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = mvneta_ethtool_set_link_ksettings,
 };
 
 /* Initialize hw */
@@ -4042,6 +4024,7 @@ static int mvneta_probe(struct platform_device *pdev)
 	err = of_property_read_string(dn, "managed", &managed);
 	pp->use_inband_status = (err == 0 &&
 				 strcmp(managed, "in-band-status") == 0);
+	pp->cpu_notifier.notifier_call = mvneta_percpu_notifier;
 
 	pp->rxq_def = rxq_def;
 
@@ -4135,7 +4118,6 @@ static int mvneta_probe(struct platform_device *pdev)
 			pp->bm_priv = NULL;
 		}
 	}
-	of_node_put(bm_node);
 
 	err = mvneta_init(&pdev->dev, pp);
 	if (err < 0)
@@ -4157,7 +4139,7 @@ static int mvneta_probe(struct platform_device *pdev)
 	dev->features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO;
 	dev->hw_features |= dev->features;
 	dev->vlan_features |= dev->features;
-	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
+	dev->priv_flags |= IFF_UNICAST_FLT | IFF_LIVE_ADDR_CHANGE;
 	dev->gso_max_segs = MVNETA_MAX_TSO_SEGS;
 
 	err = register_netdev(dev);
@@ -4197,8 +4179,6 @@ err_clk:
 	clk_disable_unprepare(pp->clk);
 err_put_phy_node:
 	of_node_put(phy_node);
-	if (of_phy_is_fixed_link(dn))
-		of_phy_deregister_fixed_link(dn);
 err_free_irq:
 	irq_dispose_mapping(dev->irq);
 err_free_netdev:
@@ -4210,7 +4190,6 @@ err_free_netdev:
 static int mvneta_remove(struct platform_device *pdev)
 {
 	struct net_device  *dev = platform_get_drvdata(pdev);
-	struct device_node *dn = pdev->dev.of_node;
 	struct mvneta_port *pp = netdev_priv(dev);
 
 	unregister_netdev(dev);
@@ -4218,8 +4197,6 @@ static int mvneta_remove(struct platform_device *pdev)
 	clk_disable_unprepare(pp->clk);
 	free_percpu(pp->ports);
 	free_percpu(pp->stats);
-	if (of_phy_is_fixed_link(dn))
-		of_phy_deregister_fixed_link(dn);
 	irq_dispose_mapping(dev->irq);
 	of_node_put(pp->phy_node);
 	free_netdev(dev);
@@ -4249,42 +4226,7 @@ static struct platform_driver mvneta_driver = {
 	},
 };
 
-static int __init mvneta_driver_init(void)
-{
-	int ret;
-
-	ret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN, "net/mvmeta:online",
-				      mvneta_cpu_online,
-				      mvneta_cpu_down_prepare);
-	if (ret < 0)
-		goto out;
-	online_hpstate = ret;
-	ret = cpuhp_setup_state_multi(CPUHP_NET_MVNETA_DEAD, "net/mvneta:dead",
-				      NULL, mvneta_cpu_dead);
-	if (ret)
-		goto err_dead;
-
-	ret = platform_driver_register(&mvneta_driver);
-	if (ret)
-		goto err;
-	return 0;
-
-err:
-	cpuhp_remove_multi_state(CPUHP_NET_MVNETA_DEAD);
-err_dead:
-	cpuhp_remove_multi_state(online_hpstate);
-out:
-	return ret;
-}
-module_init(mvneta_driver_init);
-
-static void __exit mvneta_driver_exit(void)
-{
-	platform_driver_unregister(&mvneta_driver);
-	cpuhp_remove_multi_state(CPUHP_NET_MVNETA_DEAD);
-	cpuhp_remove_multi_state(online_hpstate);
-}
-module_exit(mvneta_driver_exit);
+module_platform_driver(mvneta_driver);
 
 MODULE_DESCRIPTION("Marvell NETA Ethernet Driver - www.marvell.com");
 MODULE_AUTHOR("Rami Rosen <rosenr@marvell.com>, Thomas Petazzoni <thomas.petazzoni@free-electrons.com>");

@@ -8,7 +8,7 @@
  *  Copyright (c) 2012 David Dillow <dave@thedillows.org>
  *  Copyright (c) 2006-2013 Jiri Kosina
  *  Copyright (c) 2013 Colin Leitner <colin.leitner@gmail.com>
- *  Copyright (c) 2014-2016 Frank Praznik <frank.praznik@gmail.com>
+ *  Copyright (c) 2014 Frank Praznik <frank.praznik@gmail.com>
  */
 
 /*
@@ -51,7 +51,6 @@
 #define NAVIGATION_CONTROLLER_USB BIT(9)
 #define NAVIGATION_CONTROLLER_BT  BIT(10)
 #define SINO_LITE_CONTROLLER      BIT(11)
-#define FUTUREMAX_DANCE_MAT       BIT(12)
 
 #define SIXAXIS_CONTROLLER (SIXAXIS_CONTROLLER_USB | SIXAXIS_CONTROLLER_BT)
 #define MOTION_CONTROLLER (MOTION_CONTROLLER_USB | MOTION_CONTROLLER_BT)
@@ -66,8 +65,6 @@
 				MOTION_CONTROLLER_BT | NAVIGATION_CONTROLLER)
 #define SONY_FF_SUPPORT (SIXAXIS_CONTROLLER | DUALSHOCK4_CONTROLLER |\
 				MOTION_CONTROLLER)
-#define SONY_BT_DEVICE (SIXAXIS_CONTROLLER_BT | DUALSHOCK4_CONTROLLER_BT |\
-			MOTION_CONTROLLER_BT | NAVIGATION_CONTROLLER_BT)
 
 #define MAX_LEDS 4
 
@@ -1051,21 +1048,15 @@ struct sony_sc {
 
 	u8 mac_address[6];
 	u8 worker_initialized;
-	u8 defer_initialization;
 	u8 cable_state;
 	u8 battery_charging;
 	u8 battery_capacity;
 	u8 led_state[MAX_LEDS];
+	u8 resume_led_state[MAX_LEDS];
 	u8 led_delay_on[MAX_LEDS];
 	u8 led_delay_off[MAX_LEDS];
 	u8 led_count;
 };
-
-static inline void sony_schedule_work(struct sony_sc *sc)
-{
-	if (!sc->defer_initialization)
-		schedule_work(&sc->state_worker);
-}
 
 static u8 *sixaxis_fixup(struct hid_device *hdev, u8 *rdesc,
 			     unsigned int *rsize)
@@ -1134,7 +1125,7 @@ static u8 *sony_report_fixup(struct hid_device *hdev, u8 *rdesc,
 {
 	struct sony_sc *sc = hid_get_drvdata(hdev);
 
-	if (sc->quirks & (SINO_LITE_CONTROLLER | FUTUREMAX_DANCE_MAT))
+	if (sc->quirks & SINO_LITE_CONTROLLER)
 		return rdesc;
 
 	/*
@@ -1324,11 +1315,6 @@ static int sony_raw_event(struct hid_device *hdev, struct hid_report *report,
 			size == 64) || ((sc->quirks & DUALSHOCK4_CONTROLLER_BT)
 			&& rd[0] == 0x11 && size == 78)) {
 		dualshock4_parse_report(sc, rd, size);
-	}
-
-	if (sc->defer_initialization) {
-		sc->defer_initialization = 0;
-		sony_schedule_work(sc);
 	}
 
 	return 0;
@@ -1568,7 +1554,7 @@ static void buzz_set_leds(struct sony_sc *sc)
 static void sony_set_leds(struct sony_sc *sc)
 {
 	if (!(sc->quirks & BUZZ_CONTROLLER))
-		sony_schedule_work(sc);
+		schedule_work(&sc->state_worker);
 	else
 		buzz_set_leds(sc);
 }
@@ -1679,7 +1665,7 @@ static int sony_led_blink_set(struct led_classdev *led, unsigned long *delay_on,
 		new_off != drv_data->led_delay_off[n]) {
 		drv_data->led_delay_on[n] = new_on;
 		drv_data->led_delay_off[n] = new_off;
-		sony_schedule_work(drv_data);
+		schedule_work(&drv_data->state_worker);
 	}
 
 	return 0;
@@ -1792,7 +1778,6 @@ static int sony_leds_init(struct sony_sc *sc)
 		led->name = name;
 		led->brightness = sc->led_state[n];
 		led->max_brightness = max_brightness[n];
-		led->flags = LED_CORE_SUSPENDRESUME;
 		led->brightness_get = sony_led_get_brightness;
 		led->brightness_set = sony_led_set_brightness;
 
@@ -1880,17 +1865,6 @@ static void dualshock4_send_output_report(struct sony_sc *sc)
 	u8 *buf = sc->output_report_dmabuf;
 	int offset;
 
-	/*
-	 * NOTE: The buf[1] field of the Bluetooth report controls
-	 * the Dualshock 4 reporting rate.
-	 *
-	 * Known values include:
-	 *
-	 * 0x80 - 1000hz (full speed)
-	 * 0xA0 - 31hz
-	 * 0xB0 - 20hz
-	 * 0xD0 - 66hz
-	 */
 	if (sc->quirks & DUALSHOCK4_CONTROLLER_USB) {
 		memset(buf, 0, DS4_REPORT_0x05_SIZE);
 		buf[0] = 0x05;
@@ -2002,7 +1976,7 @@ static int sony_play_effect(struct input_dev *dev, void *data,
 	sc->left = effect->u.rumble.strong_magnitude / 256;
 	sc->right = effect->u.rumble.weak_magnitude / 256;
 
-	sony_schedule_work(sc);
+	schedule_work(&sc->state_worker);
 	return 0;
 }
 
@@ -2065,11 +2039,8 @@ static int sony_battery_get_property(struct power_supply *psy,
 	return ret;
 }
 
-static int sony_battery_probe(struct sony_sc *sc, int append_dev_id)
+static int sony_battery_probe(struct sony_sc *sc)
 {
-	const char *battery_str_fmt = append_dev_id ?
-		"sony_controller_battery_%pMR_%i" :
-		"sony_controller_battery_%pMR";
 	struct power_supply_config psy_cfg = { .drv_data = sc, };
 	struct hid_device *hdev = sc->hdev;
 	int ret;
@@ -2085,8 +2056,9 @@ static int sony_battery_probe(struct sony_sc *sc, int append_dev_id)
 	sc->battery_desc.get_property = sony_battery_get_property;
 	sc->battery_desc.type = POWER_SUPPLY_TYPE_BATTERY;
 	sc->battery_desc.use_for_apm = 0;
-	sc->battery_desc.name = kasprintf(GFP_KERNEL, battery_str_fmt,
-					  sc->mac_address, sc->device_id);
+	sc->battery_desc.name = kasprintf(GFP_KERNEL,
+					  "sony_controller_battery_%pMR",
+					  sc->mac_address);
 	if (!sc->battery_desc.name)
 		return -ENOMEM;
 
@@ -2122,21 +2094,7 @@ static void sony_battery_remove(struct sony_sc *sc)
  * it will show up as two devices. A global list of connected controllers and
  * their MAC addresses is maintained to ensure that a device is only connected
  * once.
- *
- * Some USB-only devices masquerade as Sixaxis controllers and all have the
- * same dummy Bluetooth address, so a comparison of the connection type is
- * required.  Devices are only rejected in the case where two devices have
- * matching Bluetooth addresses on different bus types.
  */
-static inline int sony_compare_connection_type(struct sony_sc *sc0,
-						struct sony_sc *sc1)
-{
-	const int sc0_not_bt = !(sc0->quirks & SONY_BT_DEVICE);
-	const int sc1_not_bt = !(sc1->quirks & SONY_BT_DEVICE);
-
-	return sc0_not_bt == sc1_not_bt;
-}
-
 static int sony_check_add_dev_list(struct sony_sc *sc)
 {
 	struct sony_sc *entry;
@@ -2149,14 +2107,9 @@ static int sony_check_add_dev_list(struct sony_sc *sc)
 		ret = memcmp(sc->mac_address, entry->mac_address,
 				sizeof(sc->mac_address));
 		if (!ret) {
-			if (sony_compare_connection_type(sc, entry)) {
-				ret = 1;
-			} else {
-				ret = -EEXIST;
-				hid_info(sc->hdev,
-				"controller with MAC address %pMR already connected\n",
+			ret = -EEXIST;
+			hid_info(sc->hdev, "controller with MAC address %pMR already connected\n",
 				sc->mac_address);
-			}
 			goto unlock;
 		}
 	}
@@ -2332,13 +2285,9 @@ static inline void sony_cancel_work_sync(struct sony_sc *sc)
 static int sony_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
 	int ret;
-	int append_dev_id;
 	unsigned long quirks = id->driver_data;
 	struct sony_sc *sc;
 	unsigned int connect_mask = HID_CONNECT_DEFAULT;
-
-	if (!strcmp(hdev->name, "FutureMax Dance Mat"))
-		quirks |= FUTUREMAX_DANCE_MAT;
 
 	sc = devm_kzalloc(&hdev->dev, sizeof(*sc), GFP_KERNEL);
 	if (sc == NULL) {
@@ -2392,16 +2341,9 @@ static int sony_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		 * the Sixaxis does not want the report_id as part of the data
 		 * packet, so we have to discard buf[0] when sending the actual
 		 * control message, even for numbered reports, humpf!
-		 *
-		 * Additionally, the Sixaxis on USB isn't properly initialized
-		 * until the PS logo button is pressed and as such won't retain
-		 * any state set by an output report, so the initial
-		 * configuration report is deferred until the first input
-		 * report arrives.
 		 */
 		hdev->quirks |= HID_QUIRK_NO_OUTPUT_REPORTS_ON_INTR_EP;
 		hdev->quirks |= HID_QUIRK_SKIP_OUTPUT_REPORT_ID;
-		sc->defer_initialization = 1;
 		ret = sixaxis_set_operational_usb(hdev);
 		sony_init_output_report(sc, sixaxis_send_output_report);
 	} else if ((sc->quirks & SIXAXIS_CONTROLLER_BT) ||
@@ -2437,7 +2379,7 @@ static int sony_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	if (ret < 0)
 		goto err_stop;
 
-	ret = append_dev_id = sony_check_add(sc);
+	ret = sony_check_add(sc);
 	if (ret < 0)
 		goto err_stop;
 
@@ -2448,7 +2390,7 @@ static int sony_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	}
 
 	if (sc->quirks & SONY_BATTERY_SUPPORT) {
-		ret = sony_battery_probe(sc, append_dev_id);
+		ret = sony_battery_probe(sc);
 		if (ret < 0)
 			goto err_stop;
 
@@ -2509,32 +2451,45 @@ static void sony_remove(struct hid_device *hdev)
 
 static int sony_suspend(struct hid_device *hdev, pm_message_t message)
 {
-#ifdef CONFIG_SONY_FF
-
-	/* On suspend stop any running force-feedback events */
-	if (SONY_FF_SUPPORT) {
+	/*
+	 * On suspend save the current LED state,
+	 * stop running force-feedback and blank the LEDS.
+	 */
+	if (SONY_LED_SUPPORT || SONY_FF_SUPPORT) {
 		struct sony_sc *sc = hid_get_drvdata(hdev);
 
+#ifdef CONFIG_SONY_FF
 		sc->left = sc->right = 0;
+#endif
+
+		memcpy(sc->resume_led_state, sc->led_state,
+			sizeof(sc->resume_led_state));
+		memset(sc->led_state, 0, sizeof(sc->led_state));
+
 		sony_send_output_report(sc);
 	}
 
-#endif
 	return 0;
 }
 
 static int sony_resume(struct hid_device *hdev)
 {
-	struct sony_sc *sc = hid_get_drvdata(hdev);
+	/* Restore the state of controller LEDs on resume */
+	if (SONY_LED_SUPPORT) {
+		struct sony_sc *sc = hid_get_drvdata(hdev);
 
-	/*
-	 * The Sixaxis and navigation controllers on USB need to be
-	 * reinitialized on resume or they won't behave properly.
-	 */
-	if ((sc->quirks & SIXAXIS_CONTROLLER_USB) ||
-		(sc->quirks & NAVIGATION_CONTROLLER_USB)) {
-		sixaxis_set_operational_usb(sc->hdev);
-		sc->defer_initialization = 1;
+		memcpy(sc->led_state, sc->resume_led_state,
+			sizeof(sc->led_state));
+
+		/*
+		 * The Sixaxis and navigation controllers on USB need to be
+		 * reinitialized on resume or they won't behave properly.
+		 */
+		if ((sc->quirks & SIXAXIS_CONTROLLER_USB) ||
+			(sc->quirks & NAVIGATION_CONTROLLER_USB))
+			sixaxis_set_operational_usb(sc->hdev);
+
+		sony_set_leds(sc);
 	}
 
 	return 0;

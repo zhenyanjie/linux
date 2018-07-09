@@ -61,7 +61,6 @@
 #include <linux/cgroup.h>
 #include <linux/wait.h>
 
-DEFINE_STATIC_KEY_FALSE(cpusets_pre_enable_key);
 DEFINE_STATIC_KEY_FALSE(cpusets_enabled_key);
 
 /* See "Frequency meter" comments, below. */
@@ -175,9 +174,9 @@ typedef enum {
 } cpuset_flagbits_t;
 
 /* convenient tests for these bits */
-static inline bool is_cpuset_online(struct cpuset *cs)
+static inline bool is_cpuset_online(const struct cpuset *cs)
 {
-	return test_bit(CS_ONLINE, &cs->flags) && !css_is_dying(&cs->css);
+	return test_bit(CS_ONLINE, &cs->flags);
 }
 
 static inline int is_cpu_exclusive(const struct cpuset *cs)
@@ -1046,6 +1045,15 @@ static void cpuset_change_task_nodemask(struct task_struct *tsk,
 {
 	bool need_loop;
 
+	/*
+	 * Allow tasks that have access to memory reserves because they have
+	 * been OOM killed to get memory anywhere.
+	 */
+	if (unlikely(test_thread_flag(TIF_MEMDIE)))
+		return;
+	if (current->flags & PF_EXITING) /* Let dying task have memory */
+		return;
+
 	task_lock(tsk);
 	/*
 	 * Determine if a loop is necessary if another thread is doing
@@ -1905,7 +1913,6 @@ static struct cftype files[] = {
 	{
 		.name = "memory_pressure",
 		.read_u64 = cpuset_read_u64,
-		.private = FILE_MEMORY_PRESSURE,
 	},
 
 	{
@@ -2087,7 +2094,7 @@ static void cpuset_bind(struct cgroup_subsys_state *root_css)
  * which could have been changed by cpuset just after it inherits the
  * state from the parent and before it sits on the cgroup's task list.
  */
-static void cpuset_fork(struct task_struct *task)
+void cpuset_fork(struct task_struct *task)
 {
 	if (task_css_is_root(task, cpuset_cgrp_id))
 		return;
@@ -2276,13 +2283,6 @@ retry:
 	mutex_unlock(&cpuset_mutex);
 }
 
-static bool force_rebuild;
-
-void cpuset_force_rebuild(void)
-{
-	force_rebuild = true;
-}
-
 /**
  * cpuset_hotplug_workfn - handle CPU/memory hotunplug for a cpuset
  *
@@ -2357,10 +2357,8 @@ static void cpuset_hotplug_workfn(struct work_struct *work)
 	}
 
 	/* rebuild sched domains if cpus_allowed has changed */
-	if (cpus_updated || force_rebuild) {
-		force_rebuild = false;
+	if (cpus_updated)
 		rebuild_sched_domains();
-	}
 }
 
 void cpuset_update_active_cpus(bool cpu_online)
@@ -2377,11 +2375,6 @@ void cpuset_update_active_cpus(bool cpu_online)
 	 */
 	partition_sched_domains(1, NULL, NULL);
 	schedule_work(&cpuset_hotplug_work);
-}
-
-void cpuset_wait_for_hotplug(void)
-{
-	flush_work(&cpuset_hotplug_work);
 }
 
 /*
@@ -2731,7 +2724,7 @@ void __cpuset_memory_pressure_bump(void)
 int proc_cpuset_show(struct seq_file *m, struct pid_namespace *ns,
 		     struct pid *pid, struct task_struct *tsk)
 {
-	char *buf;
+	char *buf, *p;
 	struct cgroup_subsys_state *css;
 	int retval;
 
@@ -2740,15 +2733,14 @@ int proc_cpuset_show(struct seq_file *m, struct pid_namespace *ns,
 	if (!buf)
 		goto out;
 
+	retval = -ENAMETOOLONG;
 	css = task_get_css(tsk, cpuset_cgrp_id);
-	retval = cgroup_path_ns(css->cgroup, buf, PATH_MAX,
-				current->nsproxy->cgroup_ns);
+	p = cgroup_path_ns(css->cgroup, buf, PATH_MAX,
+			   current->nsproxy->cgroup_ns);
 	css_put(css);
-	if (retval >= PATH_MAX)
-		retval = -ENAMETOOLONG;
-	if (retval < 0)
+	if (!p)
 		goto out_free;
-	seq_puts(m, buf);
+	seq_puts(m, p);
 	seq_putc(m, '\n');
 	retval = 0;
 out_free:

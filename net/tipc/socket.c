@@ -1,7 +1,7 @@
 /*
  * net/tipc/socket.c: TIPC socket API
  *
- * Copyright (c) 2001-2007, 2012-2016, Ericsson AB
+ * Copyright (c) 2001-2007, 2012-2015, Ericsson AB
  * Copyright (c) 2004-2008, 2010-2013, Wind River Systems
  * All rights reserved.
  *
@@ -129,7 +129,53 @@ static const struct proto_ops packet_ops;
 static const struct proto_ops stream_ops;
 static const struct proto_ops msg_ops;
 static struct proto tipc_proto;
+
 static const struct rhashtable_params tsk_rht_params;
+
+/*
+ * Revised TIPC socket locking policy:
+ *
+ * Most socket operations take the standard socket lock when they start
+ * and hold it until they finish (or until they need to sleep).  Acquiring
+ * this lock grants the owner exclusive access to the fields of the socket
+ * data structures, with the exception of the backlog queue.  A few socket
+ * operations can be done without taking the socket lock because they only
+ * read socket information that never changes during the life of the socket.
+ *
+ * Socket operations may acquire the lock for the associated TIPC port if they
+ * need to perform an operation on the port.  If any routine needs to acquire
+ * both the socket lock and the port lock it must take the socket lock first
+ * to avoid the risk of deadlock.
+ *
+ * The dispatcher handling incoming messages cannot grab the socket lock in
+ * the standard fashion, since invoked it runs at the BH level and cannot block.
+ * Instead, it checks to see if the socket lock is currently owned by someone,
+ * and either handles the message itself or adds it to the socket's backlog
+ * queue; in the latter case the queued message is processed once the process
+ * owning the socket lock releases it.
+ *
+ * NOTE: Releasing the socket lock while an operation is sleeping overcomes
+ * the problem of a blocked socket operation preventing any other operations
+ * from occurring.  However, applications must be careful if they have
+ * multiple threads trying to send (or receive) on the same socket, as these
+ * operations might interfere with each other.  For example, doing a connect
+ * and a receive at the same time might allow the receive to consume the
+ * ACK message meant for the connect.  While additional work could be done
+ * to try and overcome this, it doesn't seem to be worthwhile at the present.
+ *
+ * NOTE: Releasing the socket lock while an operation is sleeping also ensures
+ * that another operation that must be performed in a non-blocking manner is
+ * not delayed for very long because the lock has already been taken.
+ *
+ * NOTE: This code assumes that certain fields of a port/socket pair are
+ * constant over its lifetime; such fields can be examined without taking
+ * the socket lock and/or port lock, and do not need to be re-read even
+ * after resuming processing after waiting.  These fields include:
+ *   - socket type
+ *   - pointer to socket sk structure (aka tipc_sock structure)
+ *   - pointer to port structure
+ *   - port reference
+ */
 
 static u32 tsk_own_node(struct tipc_sock *tsk)
 {
@@ -186,7 +232,7 @@ static struct tipc_sock *tipc_sk(const struct sock *sk)
 
 static bool tsk_conn_cong(struct tipc_sock *tsk)
 {
-	return tsk->snt_unacked > tsk->snd_win;
+	return tsk->snt_unacked >= tsk->snd_win;
 }
 
 /* tsk_blocks(): translate a buffer size in bytes to number of
@@ -335,6 +381,8 @@ static int tipc_sk_create(struct net *net, struct socket *sock,
 	INIT_LIST_HEAD(&tsk->publications);
 	msg = &tsk->phdr;
 	tn = net_generic(sock_net(sk), tipc_net_id);
+	tipc_msg_init(tn->own_addr, msg, TIPC_LOW_IMPORTANCE, TIPC_NAMED_MSG,
+		      NAMED_H_SIZE, 0);
 
 	/* Finish initializing socket data structures */
 	sock->ops = ops;
@@ -344,13 +392,6 @@ static int tipc_sk_create(struct net *net, struct socket *sock,
 		pr_warn("Socket create failed; port number exhausted\n");
 		return -EINVAL;
 	}
-
-	/* Ensure tsk is visible before we read own_addr. */
-	smp_mb();
-
-	tipc_msg_init(tn->own_addr, msg, TIPC_LOW_IMPORTANCE, TIPC_NAMED_MSG,
-		      NAMED_H_SIZE, 0);
-
 	msg_set_origport(msg, tsk->portid);
 	setup_timer(&sk->sk_timer, tipc_sk_timeout, (unsigned long)tsk);
 	sk->sk_backlog_rcv = tipc_backlog_rcv;
@@ -2269,27 +2310,24 @@ static int tipc_sk_withdraw(struct tipc_sock *tsk, uint scope,
 void tipc_sk_reinit(struct net *net)
 {
 	struct tipc_net *tn = net_generic(net, tipc_net_id);
-	struct rhashtable_iter iter;
+	const struct bucket_table *tbl;
+	struct rhash_head *pos;
 	struct tipc_sock *tsk;
 	struct tipc_msg *msg;
+	int i;
 
-	rhashtable_walk_enter(&tn->sk_rht, &iter);
-
-	do {
-		tsk = ERR_PTR(rhashtable_walk_start(&iter));
-		if (tsk)
-			continue;
-
-		while ((tsk = rhashtable_walk_next(&iter)) && !IS_ERR(tsk)) {
+	rcu_read_lock();
+	tbl = rht_dereference_rcu((&tn->sk_rht)->tbl, &tn->sk_rht);
+	for (i = 0; i < tbl->size; i++) {
+		rht_for_each_entry_rcu(tsk, pos, tbl, i, node) {
 			spin_lock_bh(&tsk->sk.sk_lock.slock);
 			msg = &tsk->phdr;
 			msg_set_prevnode(msg, tn->own_addr);
 			msg_set_orignode(msg, tn->own_addr);
 			spin_unlock_bh(&tsk->sk.sk_lock.slock);
 		}
-
-		rhashtable_walk_stop(&iter);
-	} while (tsk == ERR_PTR(-EAGAIN));
+	}
+	rcu_read_unlock();
 }
 
 static struct tipc_sock *tipc_sk_lookup(struct net *net, u32 portid)

@@ -11,7 +11,6 @@
 #include <linux/random.h>
 #include <linux/string.h>
 #include <linux/fscrypto.h>
-#include <linux/mount.h>
 
 static int inode_has_encryption_context(struct inode *inode)
 {
@@ -93,46 +92,31 @@ static int create_encryption_context_from_policy(struct inode *inode,
 	return inode->i_sb->s_cop->set_context(inode, &ctx, sizeof(ctx), NULL);
 }
 
-int fscrypt_process_policy(struct file *filp,
+int fscrypt_process_policy(struct inode *inode,
 				const struct fscrypt_policy *policy)
 {
-	struct inode *inode = file_inode(filp);
-	int ret;
-
 	if (!inode_owner_or_capable(inode))
 		return -EACCES;
 
 	if (policy->version != 0)
 		return -EINVAL;
 
-	ret = mnt_want_write_file(filp);
-	if (ret)
-		return ret;
-
-	inode_lock(inode);
-
 	if (!inode_has_encryption_context(inode)) {
 		if (!S_ISDIR(inode->i_mode))
-			ret = -ENOTDIR;
-		else if (!inode->i_sb->s_cop->empty_dir)
-			ret = -EOPNOTSUPP;
-		else if (!inode->i_sb->s_cop->empty_dir(inode))
-			ret = -ENOTEMPTY;
-		else
-			ret = create_encryption_context_from_policy(inode,
-								    policy);
-	} else if (!is_encryption_context_consistent_with_policy(inode,
-								 policy)) {
-		printk(KERN_WARNING
-		       "%s: Policy inconsistent with encryption context\n",
-		       __func__);
-		ret = -EINVAL;
+			return -EINVAL;
+		if (!inode->i_sb->s_cop->empty_dir)
+			return -EOPNOTSUPP;
+		if (!inode->i_sb->s_cop->empty_dir(inode))
+			return -ENOTEMPTY;
+		return create_encryption_context_from_policy(inode, policy);
 	}
 
-	inode_unlock(inode);
+	if (is_encryption_context_consistent_with_policy(inode, policy))
+		return 0;
 
-	mnt_drop_write_file(filp);
-	return ret;
+	printk(KERN_WARNING "%s: Policy inconsistent with encryption context\n",
+	       __func__);
+	return -EINVAL;
 }
 EXPORT_SYMBOL(fscrypt_process_policy);
 
@@ -161,61 +145,22 @@ int fscrypt_get_policy(struct inode *inode, struct fscrypt_policy *policy)
 }
 EXPORT_SYMBOL(fscrypt_get_policy);
 
-/**
- * fscrypt_has_permitted_context() - is a file's encryption policy permitted
- *				     within its directory?
- *
- * @parent: inode for parent directory
- * @child: inode for file being looked up, opened, or linked into @parent
- *
- * Filesystems must call this before permitting access to an inode in a
- * situation where the parent directory is encrypted (either before allowing
- * ->lookup() to succeed, or for a regular file before allowing it to be opened)
- * and before any operation that involves linking an inode into an encrypted
- * directory, including link, rename, and cross rename.  It enforces the
- * constraint that within a given encrypted directory tree, all files use the
- * same encryption policy.  The pre-access check is needed to detect potentially
- * malicious offline violations of this constraint, while the link and rename
- * checks are needed to prevent online violations of this constraint.
- *
- * Return: 1 if permitted, 0 if forbidden.  If forbidden, the caller must fail
- * the filesystem operation with EPERM.
- */
 int fscrypt_has_permitted_context(struct inode *parent, struct inode *child)
 {
-	const struct fscrypt_operations *cops = parent->i_sb->s_cop;
-	const struct fscrypt_info *parent_ci, *child_ci;
-	struct fscrypt_context parent_ctx, child_ctx;
+	struct fscrypt_info *parent_ci, *child_ci;
 	int res;
 
-	/* No restrictions on file types which are never encrypted */
-	if (!S_ISREG(child->i_mode) && !S_ISDIR(child->i_mode) &&
-	    !S_ISLNK(child->i_mode))
-		return 1;
+	if ((parent == NULL) || (child == NULL)) {
+		printk(KERN_ERR	"parent %p child %p\n", parent, child);
+		BUG_ON(1);
+	}
 
-	/* No restrictions if the parent directory is unencrypted */
-	if (!cops->is_encrypted(parent))
+	/* no restrictions if the parent directory is not encrypted */
+	if (!parent->i_sb->s_cop->is_encrypted(parent))
 		return 1;
-
-	/* Encrypted directories must not contain unencrypted files */
-	if (!cops->is_encrypted(child))
+	/* if the child directory is not encrypted, this is always a problem */
+	if (!parent->i_sb->s_cop->is_encrypted(child))
 		return 0;
-
-	/*
-	 * Both parent and child are encrypted, so verify they use the same
-	 * encryption policy.  Compare the fscrypt_info structs if the keys are
-	 * available, otherwise retrieve and compare the fscrypt_contexts.
-	 *
-	 * Note that the fscrypt_context retrieval will be required frequently
-	 * when accessing an encrypted directory tree without the key.
-	 * Performance-wise this is not a big deal because we already don't
-	 * really optimize for file access without the key (to the extent that
-	 * such access is even possible), given that any attempted access
-	 * already causes a fscrypt_context retrieval and keyring search.
-	 *
-	 * In any case, if an unexpected error occurs, fall back to "forbidden".
-	 */
-
 	res = fscrypt_get_encryption_info(parent);
 	if (res)
 		return 0;
@@ -224,32 +169,17 @@ int fscrypt_has_permitted_context(struct inode *parent, struct inode *child)
 		return 0;
 	parent_ci = parent->i_crypt_info;
 	child_ci = child->i_crypt_info;
-
-	if (parent_ci && child_ci) {
-		return memcmp(parent_ci->ci_master_key, child_ci->ci_master_key,
-			      FS_KEY_DESCRIPTOR_SIZE) == 0 &&
-			(parent_ci->ci_data_mode == child_ci->ci_data_mode) &&
-			(parent_ci->ci_filename_mode ==
-			 child_ci->ci_filename_mode) &&
-			(parent_ci->ci_flags == child_ci->ci_flags);
-	}
-
-	res = cops->get_context(parent, &parent_ctx, sizeof(parent_ctx));
-	if (res != sizeof(parent_ctx))
+	if (!parent_ci && !child_ci)
+		return 1;
+	if (!parent_ci || !child_ci)
 		return 0;
 
-	res = cops->get_context(child, &child_ctx, sizeof(child_ctx));
-	if (res != sizeof(child_ctx))
-		return 0;
-
-	return memcmp(parent_ctx.master_key_descriptor,
-		      child_ctx.master_key_descriptor,
-		      FS_KEY_DESCRIPTOR_SIZE) == 0 &&
-		(parent_ctx.contents_encryption_mode ==
-		 child_ctx.contents_encryption_mode) &&
-		(parent_ctx.filenames_encryption_mode ==
-		 child_ctx.filenames_encryption_mode) &&
-		(parent_ctx.flags == child_ctx.flags);
+	return (memcmp(parent_ci->ci_master_key,
+			child_ci->ci_master_key,
+			FS_KEY_DESCRIPTOR_SIZE) == 0 &&
+		(parent_ci->ci_data_mode == child_ci->ci_data_mode) &&
+		(parent_ci->ci_filename_mode == child_ci->ci_filename_mode) &&
+		(parent_ci->ci_flags == child_ci->ci_flags));
 }
 EXPORT_SYMBOL(fscrypt_has_permitted_context);
 

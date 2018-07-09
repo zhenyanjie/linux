@@ -29,48 +29,21 @@
  *
  * Instead, give the HYP mode its own VA region at a fixed offset from
  * the kernel by just masking the top bits (which are all ones for a
- * kernel address). We need to find out how many bits to mask.
+ * kernel address).
  *
- * We want to build a set of page tables that cover both parts of the
- * idmap (the trampoline page used to initialize EL2), and our normal
- * runtime VA space, at the same time.
- *
- * Given that the kernel uses VA_BITS for its entire address space,
- * and that half of that space (VA_BITS - 1) is used for the linear
- * mapping, we can also limit the EL2 space to (VA_BITS - 1).
- *
- * The main question is "Within the VA_BITS space, does EL2 use the
- * top or the bottom half of that space to shadow the kernel's linear
- * mapping?". As we need to idmap the trampoline page, this is
- * determined by the range in which this page lives.
- *
- * If the page is in the bottom half, we have to use the top half. If
- * the page is in the top half, we have to use the bottom half:
- *
- * T = __virt_to_phys(__hyp_idmap_text_start)
- * if (T & BIT(VA_BITS - 1))
- *	HYP_VA_MIN = 0  //idmap in upper half
- * else
- *	HYP_VA_MIN = 1 << (VA_BITS - 1)
- * HYP_VA_MAX = HYP_VA_MIN + (1 << (VA_BITS - 1)) - 1
- *
- * This of course assumes that the trampoline page exists within the
- * VA_BITS range. If it doesn't, then it means we're in the odd case
- * where the kernel idmap (as well as HYP) uses more levels than the
- * kernel runtime page tables (as seen when the kernel is configured
- * for 4k pages, 39bits VA, and yet memory lives just above that
- * limit, forcing the idmap to use 4 levels of page tables while the
- * kernel itself only uses 3). In this particular case, it doesn't
- * matter which side of VA_BITS we use, as we're guaranteed not to
- * conflict with anything.
- *
- * When using VHE, there are no separate hyp mappings and all KVM
- * functionality is already mapped as part of the main kernel
- * mappings, and none of this applies in that case.
+ * ARMv8.1 (using VHE) does have a TTBR1_EL2, and doesn't use these
+ * macros (the entire kernel runs at EL2).
  */
+#define HYP_PAGE_OFFSET_SHIFT	VA_BITS
+#define HYP_PAGE_OFFSET_MASK	((UL(1) << HYP_PAGE_OFFSET_SHIFT) - 1)
+#define HYP_PAGE_OFFSET		(PAGE_OFFSET & HYP_PAGE_OFFSET_MASK)
 
-#define HYP_PAGE_OFFSET_HIGH_MASK	((UL(1) << VA_BITS) - 1)
-#define HYP_PAGE_OFFSET_LOW_MASK	((UL(1) << (VA_BITS - 1)) - 1)
+/*
+ * Our virtual mapping for the idmap-ed MMU-enable code. Must be
+ * shared across all the page-tables. Conveniently, we use the last
+ * possible page, where no kernel mapping will ever exist.
+ */
+#define TRAMPOLINE_VA		(HYP_PAGE_OFFSET_MASK & PAGE_MASK)
 
 #ifdef __ASSEMBLY__
 
@@ -80,29 +53,13 @@
 /*
  * Convert a kernel VA into a HYP VA.
  * reg: VA to be converted.
- *
- * This generates the following sequences:
- * - High mask:
- *		and x0, x0, #HYP_PAGE_OFFSET_HIGH_MASK
- *		nop
- * - Low mask:
- *		and x0, x0, #HYP_PAGE_OFFSET_HIGH_MASK
- *		and x0, x0, #HYP_PAGE_OFFSET_LOW_MASK
- * - VHE:
- *		nop
- *		nop
- *
- * The "low mask" version works because the mask is a strict subset of
- * the "high mask", hence performing the first mask for nothing.
- * Should be completely invisible on any viable CPU.
  */
 .macro kern_hyp_va	reg
-alternative_if_not ARM64_HAS_VIRT_HOST_EXTN
-	and     \reg, \reg, #HYP_PAGE_OFFSET_HIGH_MASK
-alternative_else_nop_endif
-alternative_if ARM64_HYP_OFFSET_LOW
-	and     \reg, \reg, #HYP_PAGE_OFFSET_LOW_MASK
-alternative_else_nop_endif
+alternative_if_not ARM64_HAS_VIRT_HOST_EXTN	
+	and	\reg, \reg, #HYP_PAGE_OFFSET_MASK
+alternative_else
+	nop
+alternative_endif
 .endm
 
 #else
@@ -113,22 +70,7 @@ alternative_else_nop_endif
 #include <asm/mmu_context.h>
 #include <asm/pgtable.h>
 
-static inline unsigned long __kern_hyp_va(unsigned long v)
-{
-	asm volatile(ALTERNATIVE("and %0, %0, %1",
-				 "nop",
-				 ARM64_HAS_VIRT_HOST_EXTN)
-		     : "+r" (v)
-		     : "i" (HYP_PAGE_OFFSET_HIGH_MASK));
-	asm volatile(ALTERNATIVE("nop",
-				 "and %0, %0, %1",
-				 ARM64_HYP_OFFSET_LOW)
-		     : "+r" (v)
-		     : "i" (HYP_PAGE_OFFSET_LOW_MASK));
-	return v;
-}
-
-#define kern_hyp_va(v) 	((typeof(v))(__kern_hyp_va((unsigned long)(v))))
+#define KERN_TO_HYP(kva)	((unsigned long)kva - PAGE_OFFSET + HYP_PAGE_OFFSET)
 
 /*
  * We currently only support a 40bit IPA.
@@ -139,8 +81,9 @@ static inline unsigned long __kern_hyp_va(unsigned long v)
 
 #include <asm/stage2_pgtable.h>
 
-int create_hyp_mappings(void *from, void *to, pgprot_t prot);
+int create_hyp_mappings(void *from, void *to);
 int create_hyp_io_mappings(void *from, void *to, phys_addr_t);
+void free_boot_hyp_pgd(void);
 void free_hyp_pgds(void);
 
 void stage2_unmap_vm(struct kvm *kvm);
@@ -154,6 +97,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu, struct kvm_run *run);
 void kvm_mmu_free_memory_caches(struct kvm_vcpu *vcpu);
 
 phys_addr_t kvm_mmu_get_httbr(void);
+phys_addr_t kvm_mmu_get_boot_httbr(void);
 phys_addr_t kvm_get_idmap_vector(void);
 phys_addr_t kvm_get_idmap_start(void);
 int kvm_mmu_init(void);
@@ -161,6 +105,12 @@ void kvm_clear_hyp_idmap(void);
 
 #define	kvm_set_pte(ptep, pte)		set_pte(ptep, pte)
 #define	kvm_set_pmd(pmdp, pmd)		set_pmd(pmdp, pmd)
+
+static inline void kvm_clean_pgd(pgd_t *pgd) {}
+static inline void kvm_clean_pmd(pmd_t *pmd) {}
+static inline void kvm_clean_pmd_entry(pmd_t *pmd) {}
+static inline void kvm_clean_pte(pte_t *pte) {}
+static inline void kvm_clean_pte_entry(pte_t *pte) {}
 
 static inline pte_t kvm_s2pte_mkwrite(pte_t pte)
 {
@@ -241,7 +191,8 @@ static inline void __coherent_cache_guest_page(struct kvm_vcpu *vcpu,
 {
 	void *va = page_address(pfn_to_page(pfn));
 
-	kvm_flush_dcache_to_poc(va, size);
+	if (!vcpu_has_cache_enabled(vcpu) || ipa_uncached)
+		kvm_flush_dcache_to_poc(va, size);
 
 	if (!icache_is_aliasing()) {		/* PIPT */
 		flush_icache_range((unsigned long)va,
@@ -312,60 +263,6 @@ static inline unsigned int kvm_get_vmid_bits(void)
 
 	return (cpuid_feature_extract_unsigned_field(reg, ID_AA64MMFR1_VMIDBITS_SHIFT) == 2) ? 16 : 8;
 }
-
-/*
- * We are not in the kvm->srcu critical section most of the time, so we take
- * the SRCU read lock here. Since we copy the data from the user page, we
- * can immediately drop the lock again.
- */
-static inline int kvm_read_guest_lock(struct kvm *kvm,
-				      gpa_t gpa, void *data, unsigned long len)
-{
-	int srcu_idx = srcu_read_lock(&kvm->srcu);
-	int ret = kvm_read_guest(kvm, gpa, data, len);
-
-	srcu_read_unlock(&kvm->srcu, srcu_idx);
-
-	return ret;
-}
-
-#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
-#include <asm/mmu.h>
-
-static inline void *kvm_get_hyp_vector(void)
-{
-	struct bp_hardening_data *data = arm64_get_bp_hardening_data();
-	void *vect = kvm_ksym_ref(__kvm_hyp_vector);
-
-	if (data->fn) {
-		vect = __bp_harden_hyp_vecs_start +
-		       data->hyp_vectors_slot * SZ_2K;
-
-		if (!cpus_have_const_cap(ARM64_HAS_VIRT_HOST_EXTN))
-			vect = lm_alias(vect);
-	}
-
-	return vect;
-}
-
-static inline int kvm_map_vectors(void)
-{
-	return create_hyp_mappings(kvm_ksym_ref(__bp_harden_hyp_vecs_start),
-				   kvm_ksym_ref(__bp_harden_hyp_vecs_end),
-				   PAGE_HYP_EXEC);
-}
-
-#else
-static inline void *kvm_get_hyp_vector(void)
-{
-	return kvm_ksym_ref(__kvm_hyp_vector);
-}
-
-static inline int kvm_map_vectors(void)
-{
-	return 0;
-}
-#endif
 
 #endif /* __ASSEMBLY__ */
 #endif /* __ARM64_KVM_MMU_H__ */

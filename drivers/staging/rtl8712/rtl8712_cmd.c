@@ -264,9 +264,9 @@ static struct cmd_obj *cmd_hdl_filter(struct _adapter *padapter,
 		 */
 		if (padapter->pwrctrlpriv.pwr_mode > PS_MODE_ACTIVE) {
 			padapter->pwrctrlpriv.pwr_mode = PS_MODE_ACTIVE;
-			mutex_lock(&padapter->pwrctrlpriv.mutex_lock);
+			_enter_pwrlock(&(padapter->pwrctrlpriv.lock));
 			r8712_set_rpwm(padapter, PS_STATE_S4);
-			mutex_unlock(&padapter->pwrctrlpriv.mutex_lock);
+			up(&(padapter->pwrctrlpriv.lock));
 		}
 		pcmd_r = pcmd;
 		break;
@@ -322,7 +322,7 @@ int r8712_cmd_thread(void *context)
 
 	allow_signal(SIGTERM);
 	while (1) {
-		if (wait_for_completion_interruptible(&pcmdpriv->cmd_queue_comp))
+		if ((_down_sema(&(pcmdpriv->cmd_queue_sema))) == _FAIL)
 			break;
 		if (padapter->bDriverStopped || padapter->bSurpriseRemoved)
 			break;
@@ -395,10 +395,10 @@ _next:
 			}
 			if (pcmd->cmdcode == GEN_CMD_CODE(_SetPwrMode)) {
 				if (padapter->pwrctrlpriv.bSleep) {
-					mutex_lock(&padapter->
-						       pwrctrlpriv.mutex_lock);
+					_enter_pwrlock(&(padapter->
+						       pwrctrlpriv.lock));
 					r8712_set_rpwm(padapter, PS_STATE_S2);
-					mutex_unlock(&padapter->pwrctrlpriv.mutex_lock);
+					up(&padapter->pwrctrlpriv.lock);
 				}
 			}
 			r8712_free_cmd_obj(pcmd);
@@ -420,7 +420,7 @@ _next:
 			break;
 		r8712_free_cmd_obj(pcmd);
 	} while (1);
-	complete(&pcmdpriv->terminate_cmdthread_comp);
+	up(&pcmdpriv->terminate_cmdthread_sema);
 	thread_exit();
 }
 

@@ -18,7 +18,6 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/phy/phy.h>
-#include <linux/phy/tegra/xusb.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
@@ -102,8 +101,7 @@ tegra_xusb_pad_find_phy_node(struct tegra_xusb_pad *pad, unsigned int index)
 	return of_find_node_by_name(np, pad->soc->lanes[index].name);
 }
 
-static int
-tegra_xusb_lane_lookup_function(struct tegra_xusb_lane *lane,
+int tegra_xusb_lane_lookup_function(struct tegra_xusb_lane *lane,
 				    const char *function)
 {
 	unsigned int i;

@@ -155,7 +155,7 @@ static int selinux_set_mapping(struct policydb *pol,
 		}
 
 		k = 0;
-		while (p_in->perms[k]) {
+		while (p_in->perms && p_in->perms[k]) {
 			/* An empty permission string skips ahead */
 			if (!*p_in->perms[k]) {
 				k++;
@@ -543,7 +543,7 @@ static void type_attribute_bounds_av(struct context *scontext,
 				     struct av_decision *avd)
 {
 	struct context lo_scontext;
-	struct context lo_tcontext, *tcontextp = tcontext;
+	struct context lo_tcontext;
 	struct av_decision lo_avd;
 	struct type_datum *source;
 	struct type_datum *target;
@@ -553,41 +553,67 @@ static void type_attribute_bounds_av(struct context *scontext,
 				    scontext->type - 1);
 	BUG_ON(!source);
 
-	if (!source->bounds)
-		return;
-
 	target = flex_array_get_ptr(policydb.type_val_to_struct_array,
 				    tcontext->type - 1);
 	BUG_ON(!target);
 
-	memset(&lo_avd, 0, sizeof(lo_avd));
+	if (source->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
 
-	memcpy(&lo_scontext, scontext, sizeof(lo_scontext));
-	lo_scontext.type = source->bounds;
+		memcpy(&lo_scontext, scontext, sizeof(lo_scontext));
+		lo_scontext.type = source->bounds;
 
-	if (target->bounds) {
-		memcpy(&lo_tcontext, tcontext, sizeof(lo_tcontext));
-		lo_tcontext.type = target->bounds;
-		tcontextp = &lo_tcontext;
+		context_struct_compute_av(&lo_scontext,
+					  tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
 	}
 
-	context_struct_compute_av(&lo_scontext,
-				  tcontextp,
-				  tclass,
-				  &lo_avd,
-				  NULL);
+	if (target->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
 
-	masked = ~lo_avd.allowed & avd->allowed;
+		memcpy(&lo_tcontext, tcontext, sizeof(lo_tcontext));
+		lo_tcontext.type = target->bounds;
 
-	if (likely(!masked))
-		return;		/* no masked permission */
+		context_struct_compute_av(scontext,
+					  &lo_tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
+	}
 
-	/* mask violated permissions */
-	avd->allowed &= ~masked;
+	if (source->bounds && target->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
+		/*
+		 * lo_scontext and lo_tcontext are already
+		 * set up.
+		 */
 
-	/* audit masked permissions */
-	security_dump_masked_av(scontext, tcontext,
-				tclass, masked, "bounds");
+		context_struct_compute_av(&lo_scontext,
+					  &lo_tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
+	}
+
+	if (masked) {
+		/* mask violated permissions */
+		avd->allowed &= ~masked;
+
+		/* audit masked permissions */
+		security_dump_masked_av(scontext, tcontext,
+					tclass, masked, "bounds");
+	}
 }
 
 /*
@@ -853,9 +879,6 @@ int security_bounded_transition(u32 old_sid, u32 new_sid)
 	struct type_datum *type;
 	int index;
 	int rc;
-
-	if (!ss_initialized)
-		return 0;
 
 	read_lock(&policy_rwlock);
 
@@ -1403,24 +1426,26 @@ static int security_context_to_sid_core(const char *scontext, u32 scontext_len,
 	if (!scontext_len)
 		return -EINVAL;
 
-	/* Copy the string to allow changes and ensure a NUL terminator */
-	scontext2 = kmemdup_nul(scontext, scontext_len, gfp_flags);
-	if (!scontext2)
-		return -ENOMEM;
-
 	if (!ss_initialized) {
 		int i;
 
 		for (i = 1; i < SECINITSID_NUM; i++) {
-			if (!strcmp(initial_sid_to_string[i], scontext2)) {
+			if (!strcmp(initial_sid_to_string[i], scontext)) {
 				*sid = i;
-				goto out;
+				return 0;
 			}
 		}
 		*sid = SECINITSID_KERNEL;
-		goto out;
+		return 0;
 	}
 	*sid = SECSID_NULL;
+
+	/* Copy the string so that we can modify the copy as we parse it. */
+	scontext2 = kmalloc(scontext_len + 1, gfp_flags);
+	if (!scontext2)
+		return -ENOMEM;
+	memcpy(scontext2, scontext, scontext_len);
+	scontext2[scontext_len] = 0;
 
 	if (force) {
 		/* Save another copy for storing in uninterpreted form */
@@ -1435,7 +1460,7 @@ static int security_context_to_sid_core(const char *scontext, u32 scontext_len,
 				      scontext_len, &context, def_sid);
 	if (rc == -EINVAL && force) {
 		context.str = str;
-		context.len = strlen(str) + 1;
+		context.len = scontext_len;
 		str = NULL;
 	} else if (rc)
 		goto out_unlock;

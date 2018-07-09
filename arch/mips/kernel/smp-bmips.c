@@ -166,11 +166,11 @@ static void bmips_prepare_cpus(unsigned int max_cpus)
 		return;
 	}
 
-	if (request_irq(IPI0_IRQ, bmips_ipi_interrupt,
-			IRQF_PERCPU | IRQF_NO_SUSPEND, "smp_ipi0", NULL))
+	if (request_irq(IPI0_IRQ, bmips_ipi_interrupt, IRQF_PERCPU,
+			"smp_ipi0", NULL))
 		panic("Can't request IPI0 interrupt");
-	if (request_irq(IPI1_IRQ, bmips_ipi_interrupt,
-			IRQF_PERCPU | IRQF_NO_SUSPEND, "smp_ipi1", NULL))
+	if (request_irq(IPI1_IRQ, bmips_ipi_interrupt, IRQF_PERCPU,
+			"smp_ipi1", NULL))
 		panic("Can't request IPI1 interrupt");
 }
 
@@ -363,7 +363,6 @@ static int bmips_cpu_disable(void)
 	pr_info("SMP: CPU%d is offline\n", cpu);
 
 	set_cpu_online(cpu, false);
-	calculate_cpu_foreign_map();
 	cpumask_clear_cpu(cpu, &cpu_callin_map);
 	clear_c0_status(IE_IRQ5);
 
@@ -587,11 +586,11 @@ void __init bmips_cpu_setup(void)
 
 		/* Flush and enable RAC */
 		cfg = __raw_readl(cbr + BMIPS_RAC_CONFIG);
-		__raw_writel(cfg | 0x100, cbr + BMIPS_RAC_CONFIG);
+		__raw_writel(cfg | 0x100, BMIPS_RAC_CONFIG);
 		__raw_readl(cbr + BMIPS_RAC_CONFIG);
 
 		cfg = __raw_readl(cbr + BMIPS_RAC_CONFIG);
-		__raw_writel(cfg | 0xf, cbr + BMIPS_RAC_CONFIG);
+		__raw_writel(cfg | 0xf, BMIPS_RAC_CONFIG);
 		__raw_readl(cbr + BMIPS_RAC_CONFIG);
 
 		cfg = __raw_readl(cbr + BMIPS_RAC_ADDRESS_RANGE);

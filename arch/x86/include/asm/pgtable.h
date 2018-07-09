@@ -18,18 +18,6 @@
 #ifndef __ASSEMBLY__
 #include <asm/x86_init.h>
 
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
-extern int kaiser_enabled;
-/*
- * Instead of one PGD, we acquire two PGDs.  Being order-1, it is
- * both 8k in size and 8k-aligned.  That lets us just flip bit 12
- * in a pointer to swap between the two 4k halves.
- */
-#else
-#define kaiser_enabled 0
-#endif
-#define PGD_ALLOCATION_ORDER kaiser_enabled
-
 void ptdump_walk_pgd_level(struct seq_file *m, pgd_t *pgd);
 void ptdump_walk_pgd_level_checkwx(void);
 
@@ -492,7 +480,7 @@ pte_t *populate_extra_pte(unsigned long vaddr);
 
 static inline int pte_none(pte_t pte)
 {
-	return !(pte.pte & ~(_PAGE_KNL_ERRATUM_MASK));
+	return !pte.pte;
 }
 
 #define __HAVE_ARCH_PTE_SAME
@@ -564,8 +552,7 @@ static inline int pmd_none(pmd_t pmd)
 {
 	/* Only check low word on 32-bit platforms, since it might be
 	   out of sync with upper half. */
-	unsigned long val = native_pmd_val(pmd);
-	return (val & ~_PAGE_KNL_ERRATUM_MASK) == 0;
+	return (unsigned long)native_pmd_val(pmd) == 0;
 }
 
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
@@ -629,7 +616,7 @@ static inline unsigned long pages_to_mb(unsigned long npg)
 #if CONFIG_PGTABLE_LEVELS > 2
 static inline int pud_none(pud_t pud)
 {
-	return (native_pud_val(pud) & ~(_PAGE_KNL_ERRATUM_MASK)) == 0;
+	return native_pud_val(pud) == 0;
 }
 
 static inline int pud_present(pud_t pud)
@@ -702,27 +689,11 @@ static inline pud_t *pud_offset(pgd_t *pgd, unsigned long address)
 
 static inline int pgd_bad(pgd_t pgd)
 {
-	pgdval_t ignore_flags = _PAGE_USER;
-	/*
-	 * We set NX on KAISER pgds that map userspace memory so
-	 * that userspace can not meaningfully use the kernel
-	 * page table by accident; it will fault on the first
-	 * instruction it tries to run.  See native_set_pgd().
-	 */
-	if (kaiser_enabled)
-		ignore_flags |= _PAGE_NX;
-
-	return (pgd_flags(pgd) & ~ignore_flags) != _KERNPG_TABLE;
+	return (pgd_flags(pgd) & ~_PAGE_USER) != _KERNPG_TABLE;
 }
 
 static inline int pgd_none(pgd_t pgd)
 {
-	/*
-	 * There is no need to do a workaround for the KNL stray
-	 * A/D bit erratum here.  PGDs only point to page tables
-	 * except on 32-bit non-PAE which is not supported on
-	 * KNL.
-	 */
 	return !native_pgd_val(pgd);
 }
 #endif	/* CONFIG_PGTABLE_LEVELS > 3 */
@@ -757,23 +728,6 @@ static inline int pgd_none(pgd_t pgd)
 extern int direct_gbpages;
 void init_mem_mapping(void);
 void early_alloc_pgt_buf(void);
-
-#ifdef CONFIG_X86_64
-/* Realmode trampoline initialization. */
-extern pgd_t trampoline_pgd_entry;
-static inline void __meminit init_trampoline_default(void)
-{
-	/* Default trampoline pgd value */
-	trampoline_pgd_entry = init_level4_pgt[pgd_index(__PAGE_OFFSET)];
-}
-# ifdef CONFIG_RANDOMIZE_MEMORY
-void __meminit init_trampoline(void);
-# else
-#  define init_trampoline init_trampoline_default
-# endif
-#else
-static inline void init_trampoline(void) { }
-#endif
 
 /* local pte updates need not use xchg for locking */
 static inline pte_t native_local_ptep_get_and_clear(pte_t *ptep)
@@ -925,15 +879,7 @@ static inline void pmdp_set_wrprotect(struct mm_struct *mm,
  */
 static inline void clone_pgd_range(pgd_t *dst, pgd_t *src, int count)
 {
-	memcpy(dst, src, count * sizeof(pgd_t));
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
-	if (kaiser_enabled) {
-		/* Clone the shadow pgd part as well */
-		memcpy(native_get_shadow_pgd(dst),
-			native_get_shadow_pgd(src),
-			count * sizeof(pgd_t));
-	}
-#endif
+       memcpy(dst, src, count * sizeof(pgd_t));
 }
 
 #define PTE_SHIFT ilog2(PTRS_PER_PTE)

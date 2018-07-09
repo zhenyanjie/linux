@@ -27,8 +27,7 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_fb_helper.h>
-
-#include "drm_crtc_helper_internal.h"
+#include <drm/drm_dp_aux_dev.h>
 
 MODULE_AUTHOR("David Airlie, Jesse Barnes");
 MODULE_DESCRIPTION("DRM KMS helper");

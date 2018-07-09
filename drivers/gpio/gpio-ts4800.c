@@ -9,7 +9,6 @@
  */
 
 #include <linux/gpio/driver.h>
-#include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
@@ -66,7 +65,6 @@ static const struct of_device_id ts4800_gpio_of_match[] = {
 	{ .compatible = "technologic,ts4800-gpio", },
 	{},
 };
-MODULE_DEVICE_TABLE(of, ts4800_gpio_of_match);
 
 static struct platform_driver ts4800_gpio_driver = {
 	.driver = {

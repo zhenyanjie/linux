@@ -5,8 +5,7 @@
  * Wrappers of assembly checksum functions for x86-64.
  */
 #include <asm/checksum.h>
-#include <linux/export.h>
-#include <linux/uaccess.h>
+#include <linux/module.h>
 #include <asm/smap.h>
 
 /**

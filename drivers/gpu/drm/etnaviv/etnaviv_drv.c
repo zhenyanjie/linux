@@ -91,8 +91,10 @@ static void load_gpu(struct drm_device *dev)
 			int ret;
 
 			ret = etnaviv_gpu_init(g);
-			if (ret)
+			if (ret) {
+				dev_err(g->dev, "hw init failed: %d\n", ret);
 				priv->gpu[i] = NULL;
+			}
 		}
 	}
 }
@@ -488,11 +490,13 @@ static const struct file_operations fops = {
 };
 
 static struct drm_driver etnaviv_drm_driver = {
-	.driver_features    = DRIVER_GEM |
+	.driver_features    = DRIVER_HAVE_IRQ |
+				DRIVER_GEM |
 				DRIVER_PRIME |
 				DRIVER_RENDER,
 	.open               = etnaviv_open,
 	.preclose           = etnaviv_preclose,
+	.set_busid          = drm_platform_set_busid,
 	.gem_free_object_unlocked = etnaviv_gem_free_object,
 	.gem_vm_ops         = &vm_ops,
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
@@ -529,8 +533,10 @@ static int etnaviv_bind(struct device *dev)
 	int ret;
 
 	drm = drm_dev_alloc(&etnaviv_drm_driver, dev);
-	if (IS_ERR(drm))
-		return PTR_ERR(drm);
+	if (!drm)
+		return -ENOMEM;
+
+	drm->platformdev = to_platform_device(dev);
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv) {

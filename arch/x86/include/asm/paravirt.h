@@ -6,7 +6,6 @@
 #ifdef CONFIG_PARAVIRT
 #include <asm/pgtable_types.h>
 #include <asm/asm.h>
-#include <asm/nospec-branch.h>
 
 #include <asm/paravirt_types.h>
 
@@ -80,6 +79,10 @@ static inline void write_cr3(unsigned long x)
 static inline unsigned long __read_cr4(void)
 {
 	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4);
+}
+static inline unsigned long __read_cr4_safe(void)
+{
+	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4_safe);
 }
 
 static inline void __write_cr4(unsigned long x)
@@ -658,6 +661,8 @@ static inline void __set_fixmap(unsigned /* enum fixed_addresses */ idx,
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PARAVIRT_SPINLOCKS)
 
+#ifdef CONFIG_QUEUED_SPINLOCKS
+
 static __always_inline void pv_queued_spin_lock_slowpath(struct qspinlock *lock,
 							u32 val)
 {
@@ -678,6 +683,22 @@ static __always_inline void pv_kick(int cpu)
 {
 	PVOP_VCALL1(pv_lock_ops.kick, cpu);
 }
+
+#else /* !CONFIG_QUEUED_SPINLOCKS */
+
+static __always_inline void __ticket_lock_spinning(struct arch_spinlock *lock,
+							__ticket_t ticket)
+{
+	PVOP_VCALLEE2(pv_lock_ops.lock_spinning, lock, ticket);
+}
+
+static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
+							__ticket_t ticket)
+{
+	PVOP_VCALL2(pv_lock_ops.unlock_kick, lock, ticket);
+}
+
+#endif /* CONFIG_QUEUED_SPINLOCKS */
 
 #endif /* SMP && PARAVIRT_SPINLOCKS */
 
@@ -870,27 +891,23 @@ extern void default_banner(void);
 
 #define INTERRUPT_RETURN						\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_iret), CLBR_NONE,	\
-		  ANNOTATE_RETPOLINE_SAFE;					\
-		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_iret);)
+		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_iret))
 
 #define DISABLE_INTERRUPTS(clobbers)					\
 	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_irq_disable), clobbers, \
 		  PV_SAVE_REGS(clobbers | CLBR_CALLEE_SAVE);		\
-		  ANNOTATE_RETPOLINE_SAFE;					\
 		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_irq_disable);	\
 		  PV_RESTORE_REGS(clobbers | CLBR_CALLEE_SAVE);)
 
 #define ENABLE_INTERRUPTS(clobbers)					\
 	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_irq_enable), clobbers,	\
 		  PV_SAVE_REGS(clobbers | CLBR_CALLEE_SAVE);		\
-		  ANNOTATE_RETPOLINE_SAFE;					\
 		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_irq_enable);	\
 		  PV_RESTORE_REGS(clobbers | CLBR_CALLEE_SAVE);)
 
 #ifdef CONFIG_X86_32
 #define GET_CR0_INTO_EAX				\
 	push %ecx; push %edx;				\
-	ANNOTATE_RETPOLINE_SAFE;				\
 	call PARA_INDIRECT(pv_cpu_ops+PV_CPU_read_cr0);	\
 	pop %edx; pop %ecx
 #else	/* !CONFIG_X86_32 */
@@ -912,13 +929,11 @@ extern void default_banner(void);
  */
 #define SWAPGS								\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_swapgs), CLBR_NONE,	\
-		  ANNOTATE_RETPOLINE_SAFE;					\
-		  call PARA_INDIRECT(pv_cpu_ops+PV_CPU_swapgs);		\
+		  call PARA_INDIRECT(pv_cpu_ops+PV_CPU_swapgs)		\
 		 )
 
 #define GET_CR2_INTO_RAX				\
-	ANNOTATE_RETPOLINE_SAFE;				\
-	call PARA_INDIRECT(pv_mmu_ops+PV_MMU_read_cr2);
+	call PARA_INDIRECT(pv_mmu_ops+PV_MMU_read_cr2)
 
 #define PARAVIRT_ADJUST_EXCEPTION_FRAME					\
 	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_adjust_exception_frame), \
@@ -928,8 +943,7 @@ extern void default_banner(void);
 #define USERGS_SYSRET64							\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_usergs_sysret64),	\
 		  CLBR_NONE,						\
-		  ANNOTATE_RETPOLINE_SAFE;					\
-		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret64);)
+		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret64))
 #endif	/* CONFIG_X86_32 */
 
 #endif /* __ASSEMBLY__ */

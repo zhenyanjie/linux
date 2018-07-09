@@ -235,8 +235,7 @@ ufs_extend_tail(struct inode *inode, u64 writes_to,
 
 	p = ufs_get_direct_data_ptr(uspi, ufsi, block);
 	tmp = ufs_new_fragments(inode, p, lastfrag, ufs_data_ptr_to_cpu(sb, p),
-				new_size - (lastfrag & uspi->s_fpbmask), err,
-				locked_page);
+				new_size, err, locked_page);
 	return tmp != 0;
 }
 
@@ -285,7 +284,7 @@ ufs_inode_getfrag(struct inode *inode, unsigned index,
 			goal += uspi->s_fpb;
 	}
 	tmp = ufs_new_fragments(inode, p, ufs_blknum(new_fragment),
-				goal, nfrags, err, locked_page);
+				goal, uspi->s_fpb, err, locked_page);
 
 	if (!tmp) {
 		*err = -ENOSPC;
@@ -294,7 +293,7 @@ ufs_inode_getfrag(struct inode *inode, unsigned index,
 
 	if (new)
 		*new = 1;
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	if (IS_SYNC(inode))
 		ufs_sync_inode (inode);
 	mark_inode_dirty(inode);
@@ -376,7 +375,7 @@ ufs_inode_getblock(struct inode *inode, u64 ind_block,
 	mark_buffer_dirty(bh);
 	if (IS_SYNC(inode))
 		sync_dirty_buffer(bh);
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
 out:
 	brelse (bh);
@@ -403,9 +402,7 @@ static int ufs_getfrag_block(struct inode *inode, sector_t fragment, struct buff
 
 	if (!create) {
 		phys64 = ufs_frag_map(inode, offsets, depth);
-		if (phys64)
-			map_bh(bh_result, sb, phys64 + frag);
-		return 0;
+		goto out;
 	}
 
         /* This code entered only while writing ....? */
@@ -1188,7 +1185,7 @@ static int ufs_truncate(struct inode *inode, loff_t size)
 	truncate_setsize(inode, size);
 
 	__ufs_truncate_blocks(inode);
-	inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
 out:
 	UFSD("EXIT: err %d\n", err);
@@ -1211,7 +1208,7 @@ int ufs_setattr(struct dentry *dentry, struct iattr *attr)
 	unsigned int ia_valid = attr->ia_valid;
 	int error;
 
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode, attr);
 	if (error)
 		return error;
 

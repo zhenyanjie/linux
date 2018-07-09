@@ -10,7 +10,6 @@
 /include/ "skeleton_hs_idu.dtsi"
 
 / {
-	model = "snps,nsim_hs-smp";
 	compatible = "snps,nsim_hs";
 	interrupt-parent = <&core_intc>;
 

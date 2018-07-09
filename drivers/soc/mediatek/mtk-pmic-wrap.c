@@ -522,7 +522,7 @@ struct pmic_wrapper_type {
 	u32 int_en_all;
 	u32 spi_w;
 	u32 wdt_src;
-	unsigned int has_bridge:1;
+	int has_bridge:1;
 	int (*init_reg_clock)(struct pmic_wrapper *wrp);
 	int (*init_soc_specific)(struct pmic_wrapper *wrp);
 };
@@ -583,7 +583,7 @@ static int pwrap_wait_for_state(struct pmic_wrapper *wrp,
 {
 	unsigned long timeout;
 
-	timeout = jiffies + usecs_to_jiffies(10000);
+	timeout = jiffies + usecs_to_jiffies(255);
 
 	do {
 		if (time_after(jiffies, timeout))

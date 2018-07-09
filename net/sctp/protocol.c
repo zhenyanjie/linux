@@ -240,7 +240,6 @@ static void sctp_v4_from_skb(union sctp_addr *addr, struct sk_buff *skb,
 	port = &addr->v4.sin_port;
 	addr->v4.sin_family = AF_INET;
 
-	/* Always called on head skb, so this is safe */
 	sh = sctp_hdr(skb);
 	if (is_saddr) {
 		*port  = sh->source;
@@ -510,20 +509,22 @@ static void sctp_v4_get_dst(struct sctp_transport *t, union sctp_addr *saddr,
 		if (IS_ERR(rt))
 			continue;
 
+		if (!dst)
+			dst = &rt->dst;
+
 		/* Ensure the src address belongs to the output
 		 * interface.
 		 */
 		odev = __ip_dev_find(sock_net(sk), laddr->a.v4.sin_addr.s_addr,
 				     false);
 		if (!odev || odev->ifindex != fl4->flowi4_oif) {
-			if (!dst)
-				dst = &rt->dst;
-			else
+			if (&rt->dst != dst)
 				dst_release(&rt->dst);
 			continue;
 		}
 
-		dst_release(dst);
+		if (dst != &rt->dst)
+			dst_release(dst);
 		dst = &rt->dst;
 		break;
 	}
@@ -1026,7 +1027,7 @@ static const struct proto_ops inet_seqpacket_ops = {
 	.setsockopt	   = sock_common_setsockopt, /* IP_SOL IP_OPTION is a problem */
 	.getsockopt	   = sock_common_getsockopt,
 	.sendmsg	   = inet_sendmsg,
-	.recvmsg	   = inet_recvmsg,
+	.recvmsg	   = sock_common_recvmsg,
 	.mmap		   = sock_no_mmap,
 	.sendpage	   = sock_no_sendpage,
 #ifdef CONFIG_COMPAT
@@ -1478,8 +1479,7 @@ static __init int sctp_init(void)
 		INIT_HLIST_HEAD(&sctp_port_hashtable[i].chain);
 	}
 
-	status = sctp_transport_hashtable_init();
-	if (status)
+	if (sctp_transport_hashtable_init())
 		goto err_thash_alloc;
 
 	pr_info("Hash tables configured (bind %d/%d)\n", sctp_port_hashsize,
@@ -1515,9 +1515,6 @@ static __init int sctp_init(void)
 	status = sctp_v6_add_protocol();
 	if (status)
 		goto err_v6_add_protocol;
-
-	if (sctp_offload_init() < 0)
-		pr_crit("%s: Cannot add SCTP protocol offload\n", __func__);
 
 out:
 	return status;

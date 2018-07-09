@@ -80,7 +80,7 @@ static void vgacon_deinit(struct vc_data *c);
 static void vgacon_cursor(struct vc_data *c, int mode);
 static int vgacon_switch(struct vc_data *c);
 static int vgacon_blank(struct vc_data *c, int blank, int mode_switch);
-static void vgacon_scrolldelta(struct vc_data *c, int lines);
+static int vgacon_scrolldelta(struct vc_data *c, int lines);
 static int vgacon_set_origin(struct vc_data *c);
 static void vgacon_save_screen(struct vc_data *c);
 static int vgacon_scroll(struct vc_data *c, int t, int b, int dir,
@@ -248,18 +248,18 @@ static void vgacon_restore_screen(struct vc_data *c)
 	}
 }
 
-static void vgacon_scrolldelta(struct vc_data *c, int lines)
+static int vgacon_scrolldelta(struct vc_data *c, int lines)
 {
 	int start, end, count, soff;
 
 	if (!lines) {
 		c->vc_visible_origin = c->vc_origin;
 		vga_set_mem_top(c);
-		return;
+		return 1;
 	}
 
 	if (!vgacon_scrollback)
-		return;
+		return 1;
 
 	if (!vgacon_scrollback_save) {
 		vgacon_cursor(c, CM_ERASE);
@@ -320,6 +320,8 @@ static void vgacon_scrolldelta(struct vc_data *c, int lines)
 			scr_memcpyw(d, s, diff * c->vc_size_row);
 	} else
 		vgacon_cursor(c, CM_MOVE);
+
+	return 1;
 }
 #else
 #define vgacon_scrollback_startup(...) do { } while (0)
@@ -332,7 +334,7 @@ static void vgacon_restore_screen(struct vc_data *c)
 		vgacon_scrolldelta(c, 0);
 }
 
-static void vgacon_scrolldelta(struct vc_data *c, int lines)
+static int vgacon_scrolldelta(struct vc_data *c, int lines)
 {
 	if (!lines)		/* Turn scrollback off */
 		c->vc_visible_origin = c->vc_origin;
@@ -360,6 +362,7 @@ static void vgacon_scrolldelta(struct vc_data *c, int lines)
 		c->vc_visible_origin = vga_vram_base + (p + ul) % we;
 	}
 	vga_set_mem_top(c);
+	return 1;
 }
 #endif /* CONFIG_VGACON_SOFT_SCROLLBACK */
 
@@ -405,10 +408,7 @@ static const char *vgacon_startup(void)
 		vga_video_port_val = VGA_CRT_DM;
 		if ((screen_info.orig_video_ega_bx & 0xff) != 0x10) {
 			static struct resource ega_console_resource =
-			    { .name	= "ega",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3B0,
-			      .end	= 0x3BF };
+			    { .name = "ega", .start = 0x3B0, .end = 0x3BF };
 			vga_video_type = VIDEO_TYPE_EGAM;
 			vga_vram_size = 0x8000;
 			display_desc = "EGA+";
@@ -416,15 +416,9 @@ static const char *vgacon_startup(void)
 					 &ega_console_resource);
 		} else {
 			static struct resource mda1_console_resource =
-			    { .name	= "mda",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3B0,
-			      .end	= 0x3BB };
+			    { .name = "mda", .start = 0x3B0, .end = 0x3BB };
 			static struct resource mda2_console_resource =
-			    { .name	= "mda",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3BF,
-			      .end	= 0x3BF };
+			    { .name = "mda", .start = 0x3BF, .end = 0x3BF };
 			vga_video_type = VIDEO_TYPE_MDA;
 			vga_vram_size = 0x2000;
 			display_desc = "*MDA";
@@ -446,21 +440,15 @@ static const char *vgacon_startup(void)
 			vga_vram_size = 0x8000;
 
 			if (!screen_info.orig_video_isVGA) {
-				static struct resource ega_console_resource =
-				    { .name	= "ega",
-				      .flags	= IORESOURCE_IO,
-				      .start	= 0x3C0,
-				      .end	= 0x3DF };
+				static struct resource ega_console_resource
+				    = { .name = "ega", .start = 0x3C0, .end = 0x3DF };
 				vga_video_type = VIDEO_TYPE_EGAC;
 				display_desc = "EGA";
 				request_resource(&ioport_resource,
 						 &ega_console_resource);
 			} else {
-				static struct resource vga_console_resource =
-				    { .name	= "vga+",
-				      .flags	= IORESOURCE_IO,
-				      .start	= 0x3C0,
-				      .end	= 0x3DF };
+				static struct resource vga_console_resource
+				    = { .name = "vga+", .start = 0x3C0, .end = 0x3DF };
 				vga_video_type = VIDEO_TYPE_VGAC;
 				display_desc = "VGA+";
 				request_resource(&ioport_resource,
@@ -504,10 +492,7 @@ static const char *vgacon_startup(void)
 			}
 		} else {
 			static struct resource cga_console_resource =
-			    { .name	= "cga",
-			      .flags	= IORESOURCE_IO,
-			      .start	= 0x3D4,
-			      .end	= 0x3D5 };
+			    { .name = "cga", .start = 0x3D4, .end = 0x3D5 };
 			vga_video_type = VIDEO_TYPE_CGA;
 			vga_vram_size = 0x2000;
 			display_desc = "*CGA";
@@ -607,7 +592,7 @@ static void vgacon_init(struct vc_data *c, int init)
 static void vgacon_deinit(struct vc_data *c)
 {
 	/* When closing the active console, reset video origin */
-	if (con_is_visible(c)) {
+	if (CON_IS_VISIBLE(c)) {
 		c->vc_visible_origin = vga_vram_base;
 		vga_set_mem_top(c);
 	}
@@ -874,13 +859,16 @@ static void vga_set_palette(struct vc_data *vc, const unsigned char *table)
 	}
 }
 
-static void vgacon_set_palette(struct vc_data *vc, const unsigned char *table)
+static int vgacon_set_palette(struct vc_data *vc, const unsigned char *table)
 {
 #ifdef CAN_LOAD_PALETTE
 	if (vga_video_type != VIDEO_TYPE_VGAC || vga_palette_blanked
-	    || !con_is_visible(vc))
-		return;
+	    || !CON_IS_VISIBLE(vc))
+		return -EINVAL;
 	vga_set_palette(vc, table);
+	return 0;
+#else
+	return -EINVAL;
 #endif
 }
 
@@ -1266,7 +1254,7 @@ static int vgacon_adjust_height(struct vc_data *vc, unsigned fontheight)
 		struct vc_data *c = vc_cons[i].d;
 
 		if (c && c->vc_sw == &vga_con) {
-			if (con_is_visible(c)) {
+			if (CON_IS_VISIBLE(c)) {
 			        /* void size to cause regs to be rewritten */
 				cursor_size_lastfrom = 0;
 				cursor_size_lastto = 0;
@@ -1330,7 +1318,7 @@ static int vgacon_resize(struct vc_data *c, unsigned int width,
 		   return success */
 		return (user) ? 0 : -EINVAL;
 
-	if (con_is_visible(c) && !vga_is_gfx) /* who knows */
+	if (CON_IS_VISIBLE(c) && !vga_is_gfx) /* who knows */
 		vgacon_doresize(c, width, height);
 	return 0;
 }
@@ -1439,6 +1427,7 @@ const struct consw vga_con = {
 	.con_putcs = DUMMY,
 	.con_cursor = vgacon_cursor,
 	.con_scroll = vgacon_scroll,
+	.con_bmove = DUMMY,
 	.con_switch = vgacon_switch,
 	.con_blank = vgacon_blank,
 	.con_font_set = vgacon_font_set,

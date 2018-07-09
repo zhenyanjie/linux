@@ -45,13 +45,11 @@
 #include <linux/slab.h>
 #include <linux/hardirq.h>
 #include <linux/preempt.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/kdebug.h>
 #include <linux/kallsyms.h>
 #include <linux/ftrace.h>
 #include <linux/frame.h>
-#include <linux/kasan.h>
-#include <linux/moduleloader.h>
 
 #include <asm/text-patching.h>
 #include <asm/cacheflush.h>
@@ -167,12 +165,12 @@ NOKPROBE_SYMBOL(skip_prefixes);
  * Returns non-zero if opcode is boostable.
  * RIP relative instructions are adjusted at copying time in 64 bits mode
  */
-int can_boost(kprobe_opcode_t *opcodes, void *addr)
+int can_boost(kprobe_opcode_t *opcodes)
 {
 	kprobe_opcode_t opcode;
 	kprobe_opcode_t *orig_opcodes = opcodes;
 
-	if (search_exception_tables((unsigned long)addr))
+	if (search_exception_tables((unsigned long)opcodes))
 		return 0;	/* Page fault may occur on this address. */
 
 retry:
@@ -200,8 +198,6 @@ retry:
 		return (opcode != 0x62 && opcode != 0x67);
 	case 0x70:
 		return 0; /* can't boost conditional jump */
-	case 0x90:
-		return opcode != 0x9a;	/* can't boost call far */
 	case 0xc0:
 		/* can't boost software-interruptions */
 		return (0xc1 < opcode && opcode < 0xcc) || opcode == 0xcf;
@@ -406,19 +402,9 @@ int __copy_instruction(u8 *dest, u8 *src)
 	return length;
 }
 
-/* Recover page to RW mode before releasing it */
-void free_insn_page(void *page)
-{
-	set_memory_nx((unsigned long)page & PAGE_MASK, 1);
-	set_memory_rw((unsigned long)page & PAGE_MASK, 1);
-	module_memfree(page);
-}
-
 static int arch_copy_kprobe(struct kprobe *p)
 {
 	int ret;
-
-	set_memory_rw((unsigned long)p->ainsn.insn & PAGE_MASK, 1);
 
 	/* Copy an instruction with recovering if other optprobe modifies it.*/
 	ret = __copy_instruction(p->ainsn.insn, p->addr);
@@ -429,12 +415,10 @@ static int arch_copy_kprobe(struct kprobe *p)
 	 * __copy_instruction can modify the displacement of the instruction,
 	 * but it doesn't affect boostable check.
 	 */
-	if (can_boost(p->ainsn.insn, p->addr))
+	if (can_boost(p->ainsn.insn))
 		p->ainsn.boostable = 0;
 	else
 		p->ainsn.boostable = -1;
-
-	set_memory_ro((unsigned long)p->ainsn.insn & PAGE_MASK, 1);
 
 	/* Check whether the instruction modifies Interrupt Flag or not */
 	p->ainsn.if_modifier = is_IF_modifier(p->ainsn.insn);
@@ -1073,10 +1057,9 @@ int setjmp_pre_handler(struct kprobe *p, struct pt_regs *regs)
 	 * tailcall optimization. So, to be absolutely safe
 	 * we also save and restore enough stack bytes to cover
 	 * the argument area.
-	 * Use __memcpy() to avoid KASAN stack out-of-bounds reports as we copy
-	 * raw stack chunk with redzones:
 	 */
-	__memcpy(kcb->jprobes_stack, (kprobe_opcode_t *)addr, MIN_STACK_SIZE(addr));
+	memcpy(kcb->jprobes_stack, (kprobe_opcode_t *)addr,
+	       MIN_STACK_SIZE(addr));
 	regs->flags &= ~X86_EFLAGS_IF;
 	trace_hardirqs_off();
 	regs->ip = (unsigned long)(jp->entry);
@@ -1096,9 +1079,6 @@ NOKPROBE_SYMBOL(setjmp_pre_handler);
 void jprobe_return(void)
 {
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
-
-	/* Unpoison stack redzones in the frames we are going to jump over. */
-	kasan_unpoison_stack_above_sp_to(kcb->jprobe_saved_sp);
 
 	asm volatile (
 #ifdef CONFIG_X86_64
@@ -1138,7 +1118,7 @@ int longjmp_break_handler(struct kprobe *p, struct pt_regs *regs)
 		/* It's OK to start function graph tracing again */
 		unpause_graph_tracing();
 		*regs = kcb->jprobe_saved_regs;
-		__memcpy(saved_sp, kcb->jprobes_stack, MIN_STACK_SIZE(saved_sp));
+		memcpy(saved_sp, kcb->jprobes_stack, MIN_STACK_SIZE(saved_sp));
 		preempt_enable_no_resched();
 		return 1;
 	}

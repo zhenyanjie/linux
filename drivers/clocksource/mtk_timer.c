@@ -181,7 +181,7 @@ static void mtk_timer_enable_irq(struct mtk_clock_event_device *evt, u8 timer)
 			evt->gpt_base + GPT_IRQ_EN_REG);
 }
 
-static int __init mtk_timer_init(struct device_node *node)
+static void __init mtk_timer_init(struct device_node *node)
 {
 	struct mtk_clock_event_device *evt;
 	struct resource res;
@@ -190,7 +190,7 @@ static int __init mtk_timer_init(struct device_node *node)
 
 	evt = kzalloc(sizeof(*evt), GFP_KERNEL);
 	if (!evt)
-		return -ENOMEM;
+		return;
 
 	evt->dev.name = "mtk_tick";
 	evt->dev.rating = 300;
@@ -248,7 +248,7 @@ static int __init mtk_timer_init(struct device_node *node)
 
 	mtk_timer_enable_irq(evt, GPT_CLK_EVT);
 
-	return 0;
+	return;
 
 err_clk_disable:
 	clk_disable_unprepare(clk);
@@ -262,7 +262,5 @@ err_mem:
 	release_mem_region(res.start, resource_size(&res));
 err_kzalloc:
 	kfree(evt);
-
-	return -EINVAL;
 }
 CLOCKSOURCE_OF_DECLARE(mtk_mt6577, "mediatek,mt6577-timer", mtk_timer_init);

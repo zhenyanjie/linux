@@ -813,7 +813,6 @@ static void ideapad_acpi_notify(acpi_handle handle, u32 event, void *data)
 			case 8:
 			case 7:
 			case 6:
-			case 1:
 				ideapad_input_report(priv, vpc_bit);
 				break;
 			case 5:
@@ -932,20 +931,6 @@ static const struct dmi_system_id no_hw_rfkill_list[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo YOGA 900"),
-		},
-	},
-	{
-		.ident = "Lenovo Yoga 900",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_BOARD_NAME, "VIUU4"),
-		},
-	},
-	{
-		.ident = "Lenovo YOGA 910-13IKB",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo YOGA 910-13IKB"),
 		},
 	},
 	{}

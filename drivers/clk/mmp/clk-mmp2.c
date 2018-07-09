@@ -16,7 +16,6 @@
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/err.h>
-#include <linux/clk/mmp.h>
 
 #include "clk.h"
 

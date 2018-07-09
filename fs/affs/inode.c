@@ -219,7 +219,7 @@ affs_notify_change(struct dentry *dentry, struct iattr *attr)
 
 	pr_debug("notify_change(%lu,0x%x)\n", inode->i_ino, attr->ia_valid);
 
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode,attr);
 	if (error)
 		goto out;
 
@@ -309,7 +309,7 @@ affs_new_inode(struct inode *dir)
 	inode->i_gid     = current_fsgid();
 	inode->i_ino     = block;
 	set_nlink(inode, 1);
-	inode->i_mtime   = inode->i_atime = inode->i_ctime = current_time(inode);
+	inode->i_mtime   = inode->i_atime = inode->i_ctime = CURRENT_TIME_SEC;
 	atomic_set(&AFFS_I(inode)->i_opencnt, 0);
 	AFFS_I(inode)->i_blkcnt = 0;
 	AFFS_I(inode)->i_lc = NULL;

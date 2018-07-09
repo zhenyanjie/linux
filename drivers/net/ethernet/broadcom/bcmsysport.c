@@ -58,8 +58,8 @@ BCM_SYSPORT_IO_MACRO(topctrl, SYS_PORT_TOPCTRL_OFFSET);
 static inline void intrl2_##which##_mask_clear(struct bcm_sysport_priv *priv, \
 						u32 mask)		\
 {									\
-	priv->irq##which##_mask &= ~(mask);				\
 	intrl2_##which##_writel(priv, mask, INTRL2_CPU_MASK_CLEAR);	\
+	priv->irq##which##_mask &= ~(mask);				\
 }									\
 static inline void intrl2_##which##_mask_set(struct bcm_sysport_priv *priv, \
 						u32 mask)		\
@@ -96,6 +96,28 @@ static inline void tdma_port_write_desc_addr(struct bcm_sysport_priv *priv,
 }
 
 /* Ethtool operations */
+static int bcm_sysport_set_settings(struct net_device *dev,
+				    struct ethtool_cmd *cmd)
+{
+	struct bcm_sysport_priv *priv = netdev_priv(dev);
+
+	if (!netif_running(dev))
+		return -EINVAL;
+
+	return phy_ethtool_sset(priv->phydev, cmd);
+}
+
+static int bcm_sysport_get_settings(struct net_device *dev,
+				    struct ethtool_cmd *cmd)
+{
+	struct bcm_sysport_priv *priv = netdev_priv(dev);
+
+	if (!netif_running(dev))
+		return -EINVAL;
+
+	return phy_ethtool_gset(priv->phydev, cmd);
+}
+
 static int bcm_sysport_set_rx_csum(struct net_device *dev,
 				   netdev_features_t wanted)
 {
@@ -707,36 +729,46 @@ static unsigned int __bcm_sysport_tx_reclaim(struct bcm_sysport_priv *priv,
 					     struct bcm_sysport_tx_ring *ring)
 {
 	struct net_device *ndev = priv->netdev;
+	unsigned int c_index, last_c_index, last_tx_cn, num_tx_cbs;
 	unsigned int pkts_compl = 0, bytes_compl = 0;
-	unsigned int txbds_processed = 0;
 	struct bcm_sysport_cb *cb;
-	unsigned int txbds_ready;
-	unsigned int c_index;
+	struct netdev_queue *txq;
 	u32 hw_ind;
+
+	txq = netdev_get_tx_queue(ndev, ring->index);
 
 	/* Compute how many descriptors have been processed since last call */
 	hw_ind = tdma_readl(priv, TDMA_DESC_RING_PROD_CONS_INDEX(ring->index));
 	c_index = (hw_ind >> RING_CONS_INDEX_SHIFT) & RING_CONS_INDEX_MASK;
-	txbds_ready = (c_index - ring->c_index) & RING_CONS_INDEX_MASK;
+	ring->p_index = (hw_ind & RING_PROD_INDEX_MASK);
+
+	last_c_index = ring->c_index;
+	num_tx_cbs = ring->size;
+
+	c_index &= (num_tx_cbs - 1);
+
+	if (c_index >= last_c_index)
+		last_tx_cn = c_index - last_c_index;
+	else
+		last_tx_cn = num_tx_cbs - last_c_index + c_index;
 
 	netif_dbg(priv, tx_done, ndev,
-		  "ring=%d old_c_index=%u c_index=%u txbds_ready=%u\n",
-		  ring->index, ring->c_index, c_index, txbds_ready);
+		  "ring=%d c_index=%d last_tx_cn=%d last_c_index=%d\n",
+		  ring->index, c_index, last_tx_cn, last_c_index);
 
-	while (txbds_processed < txbds_ready) {
-		cb = &ring->cbs[ring->clean_index];
+	while (last_tx_cn-- > 0) {
+		cb = ring->cbs + last_c_index;
 		bcm_sysport_tx_reclaim_one(priv, cb, &bytes_compl, &pkts_compl);
 
 		ring->desc_count++;
-		txbds_processed++;
-
-		if (likely(ring->clean_index < ring->size - 1))
-			ring->clean_index++;
-		else
-			ring->clean_index = 0;
+		last_c_index++;
+		last_c_index &= (num_tx_cbs - 1);
 	}
 
 	ring->c_index = c_index;
+
+	if (netif_tx_queue_stopped(txq) && pkts_compl)
+		netif_tx_wake_queue(txq);
 
 	netif_dbg(priv, tx_done, ndev,
 		  "ring=%d c_index=%d pkts_compl=%d, bytes_compl=%d\n",
@@ -749,31 +781,14 @@ static unsigned int __bcm_sysport_tx_reclaim(struct bcm_sysport_priv *priv,
 static unsigned int bcm_sysport_tx_reclaim(struct bcm_sysport_priv *priv,
 					   struct bcm_sysport_tx_ring *ring)
 {
-	struct netdev_queue *txq;
 	unsigned int released;
 	unsigned long flags;
 
-	txq = netdev_get_tx_queue(priv->netdev, ring->index);
-
 	spin_lock_irqsave(&ring->lock, flags);
 	released = __bcm_sysport_tx_reclaim(priv, ring);
-	if (released)
-		netif_tx_wake_queue(txq);
-
 	spin_unlock_irqrestore(&ring->lock, flags);
 
 	return released;
-}
-
-/* Locked version of the per-ring TX reclaim, but does not wake the queue */
-static void bcm_sysport_tx_clean(struct bcm_sysport_priv *priv,
-				 struct bcm_sysport_tx_ring *ring)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&ring->lock, flags);
-	__bcm_sysport_tx_reclaim(priv, ring);
-	spin_unlock_irqrestore(&ring->lock, flags);
 }
 
 static int bcm_sysport_tx_poll(struct napi_struct *napi, int budget)
@@ -1019,18 +1034,6 @@ static netdev_tx_t bcm_sysport_xmit(struct sk_buff *skb,
 		goto out;
 	}
 
-	/* The Ethernet switch we are interfaced with needs packets to be at
-	 * least 64 bytes (including FCS) otherwise they will be discarded when
-	 * they enter the switch port logic. When Broadcom tags are enabled, we
-	 * need to make sure that packets are at least 68 bytes
-	 * (including FCS and tag) because the length verification is done after
-	 * the Broadcom tag is stripped off the ingress packet.
-	 */
-	if (skb_put_padto(skb, ETH_ZLEN + ENET_BRCM_TAG_LEN)) {
-		ret = NETDEV_TX_OK;
-		goto out;
-	}
-
 	/* Insert TSB and checksum infos */
 	if (priv->tsb_en) {
 		skb = bcm_sysport_insert_tsb(skb, dev);
@@ -1040,7 +1043,20 @@ static netdev_tx_t bcm_sysport_xmit(struct sk_buff *skb,
 		}
 	}
 
-	skb_len = skb->len;
+	/* The Ethernet switch we are interfaced with needs packets to be at
+	 * least 64 bytes (including FCS) otherwise they will be discarded when
+	 * they enter the switch port logic. When Broadcom tags are enabled, we
+	 * need to make sure that packets are at least 68 bytes
+	 * (including FCS and tag) because the length verification is done after
+	 * the Broadcom tag is stripped off the ingress packet.
+	 */
+	if (skb_padto(skb, ETH_ZLEN + ENET_BRCM_TAG_LEN)) {
+		ret = NETDEV_TX_OK;
+		goto out;
+	}
+
+	skb_len = skb->len < ETH_ZLEN + ENET_BRCM_TAG_LEN ?
+			ETH_ZLEN + ENET_BRCM_TAG_LEN : skb->len;
 
 	mapping = dma_map_single(kdev, skb->data, skb_len, DMA_TO_DEVICE);
 	if (dma_mapping_error(kdev, mapping)) {
@@ -1111,7 +1127,7 @@ static void bcm_sysport_tx_timeout(struct net_device *dev)
 static void bcm_sysport_adj_link(struct net_device *dev)
 {
 	struct bcm_sysport_priv *priv = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = priv->phydev;
 	unsigned int changed = 0;
 	u32 cmd_bits = 0, reg;
 
@@ -1166,7 +1182,7 @@ static void bcm_sysport_adj_link(struct net_device *dev)
 		umac_writel(priv, reg, UMAC_CMD);
 	}
 
-	phy_print_status(phydev);
+	phy_print_status(priv->phydev);
 }
 
 static int bcm_sysport_init_tx_ring(struct bcm_sysport_priv *priv,
@@ -1203,7 +1219,6 @@ static int bcm_sysport_init_tx_ring(struct bcm_sysport_priv *priv,
 	netif_tx_napi_add(priv->netdev, &ring->napi, bcm_sysport_tx_poll, 64);
 	ring->index = index;
 	ring->size = size;
-	ring->clean_index = 0;
 	ring->alloc_size = ring->size;
 	ring->desc_cpu = p;
 	ring->desc_count = ring->size;
@@ -1260,7 +1275,7 @@ static void bcm_sysport_fini_tx_ring(struct bcm_sysport_priv *priv,
 	napi_disable(&ring->napi);
 	netif_napi_del(&ring->napi);
 
-	bcm_sysport_tx_clean(priv, ring);
+	bcm_sysport_tx_reclaim(priv, ring);
 
 	kfree(ring->cbs);
 	ring->cbs = NULL;
@@ -1510,7 +1525,7 @@ static void bcm_sysport_netif_start(struct net_device *dev)
 	/* Enable RX interrupt and TX ring full interrupt */
 	intrl2_0_mask_clear(priv, INTRL2_0_RDMA_MBDONE | INTRL2_0_TX_RING_FULL);
 
-	phy_start(dev->phydev);
+	phy_start(priv->phydev);
 
 	/* Enable TX interrupts for the 32 TXQs */
 	intrl2_1_mask_clear(priv, 0xffffffff);
@@ -1531,7 +1546,6 @@ static void rbuf_init(struct bcm_sysport_priv *priv)
 static int bcm_sysport_open(struct net_device *dev)
 {
 	struct bcm_sysport_priv *priv = netdev_priv(dev);
-	struct phy_device *phydev;
 	unsigned int i;
 	int ret;
 
@@ -1556,9 +1570,9 @@ static int bcm_sysport_open(struct net_device *dev)
 	/* Read CRC forward */
 	priv->crc_fwd = !!(umac_readl(priv, UMAC_CMD) & CMD_CRC_FWD);
 
-	phydev = of_phy_connect(dev, priv->phy_dn, bcm_sysport_adj_link,
-				0, priv->phy_interface);
-	if (!phydev) {
+	priv->phydev = of_phy_connect(dev, priv->phy_dn, bcm_sysport_adj_link,
+					0, priv->phy_interface);
+	if (!priv->phydev) {
 		netdev_err(dev, "could not attach to PHY\n");
 		return -ENODEV;
 	}
@@ -1636,7 +1650,7 @@ out_free_tx_ring:
 out_free_irq0:
 	free_irq(priv->irq0, dev);
 out_phy_disconnect:
-	phy_disconnect(phydev);
+	phy_disconnect(priv->phydev);
 	return ret;
 }
 
@@ -1647,7 +1661,7 @@ static void bcm_sysport_netif_stop(struct net_device *dev)
 	/* stop all software from updating hardware */
 	netif_tx_stop_all_queues(dev);
 	napi_disable(&priv->napi);
-	phy_stop(dev->phydev);
+	phy_stop(priv->phydev);
 
 	/* mask all interrupts */
 	intrl2_0_mask_set(priv, 0xffffffff);
@@ -1694,12 +1708,14 @@ static int bcm_sysport_stop(struct net_device *dev)
 	free_irq(priv->irq1, dev);
 
 	/* Disconnect from PHY */
-	phy_disconnect(dev->phydev);
+	phy_disconnect(priv->phydev);
 
 	return 0;
 }
 
-static const struct ethtool_ops bcm_sysport_ethtool_ops = {
+static struct ethtool_ops bcm_sysport_ethtool_ops = {
+	.get_settings		= bcm_sysport_get_settings,
+	.set_settings		= bcm_sysport_set_settings,
 	.get_drvinfo		= bcm_sysport_get_drvinfo,
 	.get_msglevel		= bcm_sysport_get_msglvl,
 	.set_msglevel		= bcm_sysport_set_msglvl,
@@ -1711,8 +1727,6 @@ static const struct ethtool_ops bcm_sysport_ethtool_ops = {
 	.set_wol		= bcm_sysport_set_wol,
 	.get_coalesce		= bcm_sysport_get_coalesce,
 	.set_coalesce		= bcm_sysport_set_coalesce,
-	.get_link_ksettings     = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings     = phy_ethtool_set_link_ksettings,
 };
 
 static const struct net_device_ops bcm_sysport_netdev_ops = {
@@ -1762,13 +1776,13 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 	if (priv->irq0 <= 0 || priv->irq1 <= 0) {
 		dev_err(&pdev->dev, "invalid interrupts\n");
 		ret = -EINVAL;
-		goto err_free_netdev;
+		goto err;
 	}
 
 	priv->base = devm_ioremap_resource(&pdev->dev, r);
 	if (IS_ERR(priv->base)) {
 		ret = PTR_ERR(priv->base);
-		goto err_free_netdev;
+		goto err;
 	}
 
 	priv->netdev = dev;
@@ -1786,7 +1800,7 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 		ret = of_phy_register_fixed_link(dn);
 		if (ret) {
 			dev_err(&pdev->dev, "failed to register fixed PHY\n");
-			goto err_free_netdev;
+			goto err;
 		}
 
 		priv->phy_dn = dn;
@@ -1828,7 +1842,7 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 	ret = register_netdev(dev);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register net_device\n");
-		goto err_deregister_fixed_link;
+		goto err;
 	}
 
 	priv->rev = topctrl_readl(priv, REV_CNTL) & REV_MASK;
@@ -1839,11 +1853,7 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 		 priv->base, priv->irq0, priv->irq1, txq, rxq);
 
 	return 0;
-
-err_deregister_fixed_link:
-	if (of_phy_is_fixed_link(dn))
-		of_phy_deregister_fixed_link(dn);
-err_free_netdev:
+err:
 	free_netdev(dev);
 	return ret;
 }
@@ -1851,14 +1861,11 @@ err_free_netdev:
 static int bcm_sysport_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = dev_get_drvdata(&pdev->dev);
-	struct device_node *dn = pdev->dev.of_node;
 
 	/* Not much to do, ndo_close has been called
 	 * and we use managed allocations
 	 */
 	unregister_netdev(dev);
-	if (of_phy_is_fixed_link(dn))
-		of_phy_deregister_fixed_link(dn);
 	free_netdev(dev);
 	dev_set_drvdata(&pdev->dev, NULL);
 
@@ -1922,7 +1929,7 @@ static int bcm_sysport_suspend(struct device *d)
 
 	bcm_sysport_netif_stop(dev);
 
-	phy_suspend(dev->phydev);
+	phy_suspend(priv->phydev);
 
 	netif_device_detach(dev);
 
@@ -2048,7 +2055,7 @@ static int bcm_sysport_resume(struct device *d)
 		goto out_free_rx_ring;
 	}
 
-	phy_resume(dev->phydev);
+	phy_resume(priv->phydev);
 
 	bcm_sysport_netif_start(dev);
 

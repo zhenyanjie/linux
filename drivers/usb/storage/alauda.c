@@ -939,8 +939,10 @@ static int alauda_read_data(struct us_data *us, unsigned long address,
 
 	len = min(sectors, blocksize) * (pagesize + 64);
 	buffer = kmalloc(len, GFP_NOIO);
-	if (!buffer)
+	if (buffer == NULL) {
+		printk(KERN_WARNING "alauda_read_data: Out of memory\n");
 		return USB_STOR_TRANSPORT_ERROR;
+	}
 
 	/* Figure out the initial LBA and page */
 	lba = address >> blockshift;
@@ -1031,15 +1033,18 @@ static int alauda_write_data(struct us_data *us, unsigned long address,
 
 	len = min(sectors, blocksize) * pagesize;
 	buffer = kmalloc(len, GFP_NOIO);
-	if (!buffer)
+	if (buffer == NULL) {
+		printk(KERN_WARNING "alauda_write_data: Out of memory\n");
 		return USB_STOR_TRANSPORT_ERROR;
+	}
 
 	/*
 	 * We also need a temporary block buffer, where we read in the old data,
 	 * overwrite parts with the new data, and manipulate the redundancy data
 	 */
 	blockbuffer = kmalloc((pagesize + 64) * blocksize, GFP_NOIO);
-	if (!blockbuffer) {
+	if (blockbuffer == NULL) {
+		printk(KERN_WARNING "alauda_write_data: Out of memory\n");
 		kfree(buffer);
 		return USB_STOR_TRANSPORT_ERROR;
 	}

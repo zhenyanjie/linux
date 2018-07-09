@@ -115,17 +115,14 @@ static const struct stmmac_stats stmmac_gstrings_stats[] = {
 	STMMAC_STAT(ip_csum_bypassed),
 	STMMAC_STAT(ipv4_pkt_rcvd),
 	STMMAC_STAT(ipv6_pkt_rcvd),
-	STMMAC_STAT(no_ptp_rx_msg_type_ext),
-	STMMAC_STAT(ptp_rx_msg_type_sync),
-	STMMAC_STAT(ptp_rx_msg_type_follow_up),
-	STMMAC_STAT(ptp_rx_msg_type_delay_req),
-	STMMAC_STAT(ptp_rx_msg_type_delay_resp),
-	STMMAC_STAT(ptp_rx_msg_type_pdelay_req),
-	STMMAC_STAT(ptp_rx_msg_type_pdelay_resp),
-	STMMAC_STAT(ptp_rx_msg_type_pdelay_follow_up),
-	STMMAC_STAT(ptp_rx_msg_type_announce),
-	STMMAC_STAT(ptp_rx_msg_type_management),
-	STMMAC_STAT(ptp_rx_msg_pkt_reserved_type),
+	STMMAC_STAT(rx_msg_type_ext_no_ptp),
+	STMMAC_STAT(rx_msg_type_sync),
+	STMMAC_STAT(rx_msg_type_follow_up),
+	STMMAC_STAT(rx_msg_type_delay_req),
+	STMMAC_STAT(rx_msg_type_delay_resp),
+	STMMAC_STAT(rx_msg_type_pdelay_req),
+	STMMAC_STAT(rx_msg_type_pdelay_resp),
+	STMMAC_STAT(rx_msg_type_pdelay_follow_up),
 	STMMAC_STAT(ptp_frame_type),
 	STMMAC_STAT(ptp_ver),
 	STMMAC_STAT(timestamp_dropped),
@@ -279,8 +276,7 @@ static int stmmac_ethtool_getsettings(struct net_device *dev,
 	struct phy_device *phy = priv->phydev;
 	int rc;
 
-	if (priv->hw->pcs & STMMAC_PCS_RGMII ||
-	    priv->hw->pcs & STMMAC_PCS_SGMII) {
+	if ((priv->pcs & STMMAC_PCS_RGMII) || (priv->pcs & STMMAC_PCS_SGMII)) {
 		struct rgmii_adv adv;
 
 		if (!priv->xstats.pcs_link) {
@@ -293,10 +289,10 @@ static int stmmac_ethtool_getsettings(struct net_device *dev,
 		ethtool_cmd_speed_set(cmd, priv->xstats.pcs_speed);
 
 		/* Get and convert ADV/LP_ADV from the HW AN registers */
-		if (!priv->hw->mac->pcs_get_adv_lp)
+		if (!priv->hw->mac->get_adv)
 			return -EOPNOTSUPP;	/* should never happen indeed */
 
-		priv->hw->mac->pcs_get_adv_lp(priv->ioaddr, &adv);
+		priv->hw->mac->get_adv(priv->hw, &adv);
 
 		/* Encoding of PSE bits is defined in 802.3z, 37.2.1.4 */
 
@@ -365,8 +361,7 @@ static int stmmac_ethtool_setsettings(struct net_device *dev,
 	struct phy_device *phy = priv->phydev;
 	int rc;
 
-	if (priv->hw->pcs & STMMAC_PCS_RGMII ||
-	    priv->hw->pcs & STMMAC_PCS_SGMII) {
+	if ((priv->pcs & STMMAC_PCS_RGMII) || (priv->pcs & STMMAC_PCS_SGMII)) {
 		u32 mask = ADVERTISED_Autoneg | ADVERTISED_Pause;
 
 		/* Only support ANE */
@@ -381,11 +376,8 @@ static int stmmac_ethtool_setsettings(struct net_device *dev,
 			ADVERTISED_10baseT_Full);
 
 		spin_lock(&priv->lock);
-
-		if (priv->hw->mac->pcs_ctrl_ane)
-			priv->hw->mac->pcs_ctrl_ane(priv->ioaddr, 1,
-						    priv->hw->ps, 0);
-
+		if (priv->hw->mac->ctrl_ane)
+			priv->hw->mac->ctrl_ane(priv->hw, 1);
 		spin_unlock(&priv->lock);
 
 		return 0;
@@ -460,22 +452,11 @@ stmmac_get_pauseparam(struct net_device *netdev,
 {
 	struct stmmac_priv *priv = netdev_priv(netdev);
 
+	if (priv->pcs)	/* FIXME */
+		return;
+
 	pause->rx_pause = 0;
 	pause->tx_pause = 0;
-
-	if (priv->hw->pcs && priv->hw->mac->pcs_get_adv_lp) {
-		struct rgmii_adv adv_lp;
-
-		pause->autoneg = 1;
-		priv->hw->mac->pcs_get_adv_lp(priv->ioaddr, &adv_lp);
-		if (!adv_lp.pause)
-			return;
-	} else {
-		if (!(priv->phydev->supported & SUPPORTED_Pause) ||
-		    !(priv->phydev->supported & SUPPORTED_Asym_Pause))
-			return;
-	}
-
 	pause->autoneg = priv->phydev->autoneg;
 
 	if (priv->flow_ctrl & FLOW_RX)
@@ -492,19 +473,10 @@ stmmac_set_pauseparam(struct net_device *netdev,
 	struct stmmac_priv *priv = netdev_priv(netdev);
 	struct phy_device *phy = priv->phydev;
 	int new_pause = FLOW_OFF;
+	int ret = 0;
 
-	if (priv->hw->pcs && priv->hw->mac->pcs_get_adv_lp) {
-		struct rgmii_adv adv_lp;
-
-		pause->autoneg = 1;
-		priv->hw->mac->pcs_get_adv_lp(priv->ioaddr, &adv_lp);
-		if (!adv_lp.pause)
-			return -EOPNOTSUPP;
-	} else {
-		if (!(phy->supported & SUPPORTED_Pause) ||
-		    !(phy->supported & SUPPORTED_Asym_Pause))
-			return -EOPNOTSUPP;
-	}
+	if (priv->pcs)	/* FIXME */
+		return -EOPNOTSUPP;
 
 	if (pause->rx_pause)
 		new_pause |= FLOW_RX;
@@ -516,12 +488,11 @@ stmmac_set_pauseparam(struct net_device *netdev,
 
 	if (phy->autoneg) {
 		if (netif_running(netdev))
-			return phy_start_aneg(phy);
-	}
-
-	priv->hw->mac->flow_ctrl(priv->hw, phy->duplex, priv->flow_ctrl,
-				 priv->pause);
-	return 0;
+			ret = phy_start_aneg(phy);
+	} else
+		priv->hw->mac->flow_ctrl(priv->hw, phy->duplex,
+					 priv->flow_ctrl, priv->pause);
+	return ret;
 }
 
 static void stmmac_get_ethtool_stats(struct net_device *dev,

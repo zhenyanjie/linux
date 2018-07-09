@@ -84,16 +84,11 @@ struct ecryptfs_page_crypt_context {
 static inline struct ecryptfs_auth_tok *
 ecryptfs_get_encrypted_key_payload_data(struct key *key)
 {
-	struct encrypted_key_payload *payload;
-
-	if (key->type != &key_type_encrypted)
+	if (key->type == &key_type_encrypted)
+		return (struct ecryptfs_auth_tok *)
+			(&((struct encrypted_key_payload *)key->payload.data[0])->payload_data);
+	else
 		return NULL;
-
-	payload = key->payload.data[0];
-	if (!payload)
-		return ERR_PTR(-EKEYREVOKED);
-
-	return (struct ecryptfs_auth_tok *)payload->payload_data;
 }
 
 static inline struct key *ecryptfs_get_encrypted_key(char *sig)
@@ -119,17 +114,12 @@ static inline struct ecryptfs_auth_tok *
 ecryptfs_get_key_payload_data(struct key *key)
 {
 	struct ecryptfs_auth_tok *auth_tok;
-	const struct user_key_payload *ukp;
 
 	auth_tok = ecryptfs_get_encrypted_key_payload_data(key);
-	if (auth_tok)
+	if (!auth_tok)
+		return (struct ecryptfs_auth_tok *)user_key_payload(key)->data;
+	else
 		return auth_tok;
-
-	ukp = user_key_payload(key);
-	if (!ukp)
-		return ERR_PTR(-EKEYREVOKED);
-
-	return (struct ecryptfs_auth_tok *)ukp->data;
 }
 
 #define ECRYPTFS_MAX_KEYSET_SIZE 1024
@@ -724,7 +714,5 @@ int ecryptfs_set_f_namelen(long *namelen, long lower_namelen,
 			   struct ecryptfs_mount_crypt_stat *mount_crypt_stat);
 int ecryptfs_derive_iv(char *iv, struct ecryptfs_crypt_stat *crypt_stat,
 		       loff_t offset);
-
-extern const struct xattr_handler *ecryptfs_xattr_handlers[];
 
 #endif /* #ifndef ECRYPTFS_KERNEL_H */

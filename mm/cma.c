@@ -54,7 +54,7 @@ unsigned long cma_get_size(const struct cma *cma)
 }
 
 static unsigned long cma_bitmap_aligned_mask(const struct cma *cma,
-					     unsigned int align_order)
+					     int align_order)
 {
 	if (align_order <= cma->order_per_bit)
 		return 0;
@@ -62,14 +62,17 @@ static unsigned long cma_bitmap_aligned_mask(const struct cma *cma,
 }
 
 /*
- * Find the offset of the base PFN from the specified align_order.
- * The value returned is represented in order_per_bits.
+ * Find a PFN aligned to the specified order and return an offset represented in
+ * order_per_bits.
  */
 static unsigned long cma_bitmap_aligned_offset(const struct cma *cma,
-					       unsigned int align_order)
+					       int align_order)
 {
-	return (cma->base_pfn & ((1UL << align_order) - 1))
-		>> cma->order_per_bit;
+	if (align_order <= cma->order_per_bit)
+		return 0;
+
+	return (ALIGN(cma->base_pfn, (1UL << align_order))
+		- cma->base_pfn) >> cma->order_per_bit;
 }
 
 static unsigned long cma_bitmap_pages_to_bits(const struct cma *cma,
@@ -333,7 +336,7 @@ int __init cma_declare_contiguous(phys_addr_t base,
 		 * kmemleak scans/reads tracked objects for pointers to other
 		 * objects but this address isn't mapped and accessible
 		 */
-		kmemleak_ignore_phys(addr);
+		kmemleak_ignore(phys_to_virt(addr));
 		base = addr;
 	}
 
@@ -381,9 +384,6 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align)
 	offset = cma_bitmap_aligned_offset(cma, align);
 	bitmap_maxno = cma_bitmap_maxno(cma);
 	bitmap_count = cma_bitmap_pages_to_bits(cma, count);
-
-	if (bitmap_count > bitmap_maxno)
-		return NULL;
 
 	for (;;) {
 		mutex_lock(&cma->lock);

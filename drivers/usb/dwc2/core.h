@@ -166,7 +166,7 @@ struct dwc2_hsotg_req;
  *          means that it is sending data to the Host.
  * @index: The index for the endpoint registers.
  * @mc: Multi Count - number of transactions per microframe
- * @interval - Interval for periodic endpoints, in frames or microframes.
+ * @interval - Interval for periodic endpoints
  * @name: The name array passed to the USB core.
  * @halted: Set if the endpoint has been halted.
  * @periodic: Set if this is a periodic ep, such as Interrupt
@@ -177,8 +177,6 @@ struct dwc2_hsotg_req;
  * @fifo_load: The amount of data loaded into the FIFO (periodic IN)
  * @last_load: The offset of data for the last start of request.
  * @size_loaded: The last loaded size for DxEPTSIZE for periodic IN
- * @target_frame: Targeted frame num to setup next ISOC transfer
- * @frame_overrun: Indicates SOF number overrun in DSTS
  *
  * This is the driver's state for each registered enpoint, allowing it
  * to keep track of transactions that need doing. Each endpoint has a
@@ -209,15 +207,13 @@ struct dwc2_hsotg_ep {
 	unsigned char           dir_in;
 	unsigned char           index;
 	unsigned char           mc;
-	u16                     interval;
+	unsigned char           interval;
 
 	unsigned int            halted:1;
 	unsigned int            periodic:1;
 	unsigned int            isochronous:1;
 	unsigned int            send_zlp:1;
-	unsigned int            target_frame;
-#define TARGET_FRAME_INITIAL   0xFFFFFFFF
-	bool			frame_overrun;
+	unsigned int            has_correct_parity:1;
 
 	char                    name[10];
 };
@@ -868,7 +864,6 @@ struct dwc2_hsotg {
 	void *priv;
 	int     irq;
 	struct clk *clk;
-	struct reset_control *reset;
 
 	unsigned int queuing_high_bandwidth:1;
 	unsigned int srp_success:1;
@@ -890,7 +885,6 @@ struct dwc2_hsotg {
 #define DWC2_CORE_REV_2_92a	0x4f54292a
 #define DWC2_CORE_REV_2_94a	0x4f54294a
 #define DWC2_CORE_REV_3_00a	0x4f54300a
-#define DWC2_CORE_REV_3_10a	0x4f54310a
 
 #if IS_ENABLED(CONFIG_USB_DWC2_HOST) || IS_ENABLED(CONFIG_USB_DWC2_DUAL_ROLE)
 	union dwc2_hcd_internal_flags {

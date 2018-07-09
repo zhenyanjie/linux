@@ -179,9 +179,9 @@ void rtl92e_ips_leave_wq(void *data)
 	struct net_device *dev = ieee->dev;
 	struct r8192_priv *priv = (struct r8192_priv *)rtllib_priv(dev);
 
-	mutex_lock(&priv->rtllib->ips_mutex);
+	down(&priv->rtllib->ips_sem);
 	rtl92e_ips_leave(dev);
-	mutex_unlock(&priv->rtllib->ips_mutex);
+	up(&priv->rtllib->ips_sem);
 }
 
 void rtl92e_rtllib_ips_leave_wq(struct net_device *dev)
@@ -209,9 +209,9 @@ void rtl92e_rtllib_ips_leave(struct net_device *dev)
 {
 	struct r8192_priv *priv = (struct r8192_priv *)rtllib_priv(dev);
 
-	mutex_lock(&priv->rtllib->ips_mutex);
+	down(&priv->rtllib->ips_sem);
 	rtl92e_ips_leave(dev);
-	mutex_unlock(&priv->rtllib->ips_mutex);
+	up(&priv->rtllib->ips_sem);
 }
 
 static bool _rtl92e_ps_set_mode(struct net_device *dev, u8 rtPsMode)

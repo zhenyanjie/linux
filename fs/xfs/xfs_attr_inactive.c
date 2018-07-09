@@ -302,8 +302,6 @@ xfs_attr3_node_inactive(
 						 &bp, XFS_ATTR_FORK);
 			if (error)
 				return error;
-			node = bp->b_addr;
-			btree = dp->d_ops->node_tree_p(node);
 			child_fsb = be32_to_cpu(btree[i + 1].before);
 			xfs_trans_brelse(*trans, bp);
 		}
@@ -324,7 +322,7 @@ xfs_attr3_node_inactive(
  * Recurse (gasp!) through the attribute nodes until we find leaves.
  * We're doing a depth-first traversal in order to invalidate everything.
  */
-static int
+int
 xfs_attr3_root_inactive(
 	struct xfs_trans	**trans,
 	struct xfs_inode	*dp)

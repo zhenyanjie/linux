@@ -221,7 +221,7 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 		task->num_scatter = qc->n_elem;
 	} else {
 		for_each_sg(qc->sg, sg, qc->n_elem, si)
-			xfer += sg_dma_len(sg);
+			xfer += sg->length;
 
 		task->total_xfer_len = xfer;
 		task->num_scatter = si;
@@ -233,8 +233,15 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 	task->task_state_flags = SAS_TASK_STATE_PENDING;
 	qc->lldd_task = task;
 
-	task->ata_task.use_ncq = ata_is_ncq(qc->tf.protocol);
-	task->ata_task.dma_xfer = ata_is_dma(qc->tf.protocol);
+	switch (qc->tf.protocol) {
+	case ATA_PROT_NCQ:
+		task->ata_task.use_ncq = 1;
+		/* fall through */
+	case ATAPI_PROT_DMA:
+	case ATA_PROT_DMA:
+		task->ata_task.dma_xfer = 1;
+		break;
+	}
 
 	if (qc->scsicmd)
 		ASSIGN_SAS_TASK(qc->scsicmd, task);
@@ -246,7 +253,6 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 		if (qc->scsicmd)
 			ASSIGN_SAS_TASK(qc->scsicmd, NULL);
 		sas_free_task(task);
-		qc->lldd_task = NULL;
 		ret = AC_ERR_SYSTEM;
 	}
 

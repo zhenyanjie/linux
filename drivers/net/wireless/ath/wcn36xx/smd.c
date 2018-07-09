@@ -674,25 +674,22 @@ static int wcn36xx_smd_update_scan_params_rsp(void *buf, size_t len)
 	return 0;
 }
 
-int wcn36xx_smd_update_scan_params(struct wcn36xx *wcn,
-				   u8 *channels, size_t channel_count)
+int wcn36xx_smd_update_scan_params(struct wcn36xx *wcn)
 {
-	struct wcn36xx_hal_update_scan_params_req_ex msg_body;
+	struct wcn36xx_hal_update_scan_params_req msg_body;
 	int ret = 0;
 
 	mutex_lock(&wcn->hal_mutex);
 	INIT_HAL_MSG(msg_body, WCN36XX_HAL_UPDATE_SCAN_PARAM_REQ);
 
-	msg_body.dot11d_enabled	= false;
-	msg_body.dot11d_resolved = true;
-
-	msg_body.channel_count = channel_count;
-	memcpy(msg_body.channels, channels, channel_count);
+	msg_body.dot11d_enabled	= 0;
+	msg_body.dot11d_resolved = 0;
+	msg_body.channel_count = 26;
 	msg_body.active_min_ch_time = 60;
 	msg_body.active_max_ch_time = 120;
 	msg_body.passive_min_ch_time = 60;
 	msg_body.passive_max_ch_time = 110;
-	msg_body.state = PHY_SINGLE_CHANNEL_CENTERED;
+	msg_body.state = 0;
 
 	PREPARE_HAL_BUF(wcn->hal_buf, msg_body);
 
@@ -2229,12 +2226,17 @@ static void wcn36xx_smd_rsp_process(struct wcn36xx *wcn, void *buf, size_t len)
 
 	case WCN36XX_HAL_COEX_IND:
 	case WCN36XX_HAL_AVOID_FREQ_RANGE_IND:
-	case WCN36XX_HAL_DEL_BA_IND:
 	case WCN36XX_HAL_OTA_TX_COMPL_IND:
 	case WCN36XX_HAL_MISSED_BEACON_IND:
 	case WCN36XX_HAL_DELETE_STA_CONTEXT_IND:
-		msg_ind = kmalloc(sizeof(*msg_ind) + len, GFP_KERNEL);
-		if (!msg_ind) {
+		msg_ind = kmalloc(sizeof(*msg_ind), GFP_KERNEL);
+		if (!msg_ind)
+			goto nomem;
+		msg_ind->msg_len = len;
+		msg_ind->msg = kmemdup(buf, len, GFP_KERNEL);
+		if (!msg_ind->msg) {
+			kfree(msg_ind);
+nomem:
 			/*
 			 * FIXME: Do something smarter then just
 			 * printing an error.
@@ -2243,14 +2245,10 @@ static void wcn36xx_smd_rsp_process(struct wcn36xx *wcn, void *buf, size_t len)
 				    msg_header->msg_type);
 			break;
 		}
-
-		msg_ind->msg_len = len;
-		memcpy(msg_ind->msg, buf, len);
-
-		spin_lock(&wcn->hal_ind_lock);
+		mutex_lock(&wcn->hal_ind_mutex);
 		list_add_tail(&msg_ind->list, &wcn->hal_ind_queue);
 		queue_work(wcn->hal_ind_wq, &wcn->hal_ind_work);
-		spin_unlock(&wcn->hal_ind_lock);
+		mutex_unlock(&wcn->hal_ind_mutex);
 		wcn36xx_dbg(WCN36XX_DBG_HAL, "indication arrived\n");
 		break;
 	default:
@@ -2264,9 +2262,8 @@ static void wcn36xx_ind_smd_work(struct work_struct *work)
 		container_of(work, struct wcn36xx, hal_ind_work);
 	struct wcn36xx_hal_msg_header *msg_header;
 	struct wcn36xx_hal_ind_msg *hal_ind_msg;
-	unsigned long flags;
 
-	spin_lock_irqsave(&wcn->hal_ind_lock, flags);
+	mutex_lock(&wcn->hal_ind_mutex);
 
 	hal_ind_msg = list_first_entry(&wcn->hal_ind_queue,
 				       struct wcn36xx_hal_ind_msg,
@@ -2276,7 +2273,6 @@ static void wcn36xx_ind_smd_work(struct work_struct *work)
 
 	switch (msg_header->msg_type) {
 	case WCN36XX_HAL_COEX_IND:
-	case WCN36XX_HAL_DEL_BA_IND:
 	case WCN36XX_HAL_AVOID_FREQ_RANGE_IND:
 		break;
 	case WCN36XX_HAL_OTA_TX_COMPL_IND:
@@ -2299,8 +2295,9 @@ static void wcn36xx_ind_smd_work(struct work_struct *work)
 			      msg_header->msg_type);
 	}
 	list_del(wcn->hal_ind_queue.next);
-	spin_unlock_irqrestore(&wcn->hal_ind_lock, flags);
+	kfree(hal_ind_msg->msg);
 	kfree(hal_ind_msg);
+	mutex_unlock(&wcn->hal_ind_mutex);
 }
 int wcn36xx_smd_open(struct wcn36xx *wcn)
 {
@@ -2313,7 +2310,7 @@ int wcn36xx_smd_open(struct wcn36xx *wcn)
 	}
 	INIT_WORK(&wcn->hal_ind_work, wcn36xx_ind_smd_work);
 	INIT_LIST_HEAD(&wcn->hal_ind_queue);
-	spin_lock_init(&wcn->hal_ind_lock);
+	mutex_init(&wcn->hal_ind_mutex);
 
 	ret = wcn->ctrl_ops->open(wcn, wcn36xx_smd_rsp_process);
 	if (ret) {
@@ -2333,4 +2330,5 @@ void wcn36xx_smd_close(struct wcn36xx *wcn)
 {
 	wcn->ctrl_ops->close();
 	destroy_workqueue(wcn->hal_ind_wq);
+	mutex_destroy(&wcn->hal_ind_mutex);
 }

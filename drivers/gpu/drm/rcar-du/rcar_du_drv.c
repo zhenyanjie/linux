@@ -217,7 +217,7 @@ static struct drm_driver rcar_du_driver = {
 	.get_vblank_counter	= drm_vblank_no_hw_counter,
 	.enable_vblank		= rcar_du_enable_vblank,
 	.disable_vblank		= rcar_du_disable_vblank,
-	.gem_free_object_unlocked = drm_gem_cma_free_object,
+	.gem_free_object	= drm_gem_cma_free_object,
 	.gem_vm_ops		= &drm_gem_cma_vm_ops,
 	.prime_handle_to_fd	= drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,
@@ -278,6 +278,7 @@ static int rcar_du_remove(struct platform_device *pdev)
 	struct rcar_du_device *rcdu = platform_get_drvdata(pdev);
 	struct drm_device *ddev = rcdu->ddev;
 
+	drm_connector_unregister_all(ddev);
 	drm_dev_unregister(ddev);
 
 	if (rcdu->fbdev)
@@ -285,6 +286,7 @@ static int rcar_du_remove(struct platform_device *pdev)
 
 	drm_kms_helper_poll_fini(ddev);
 	drm_mode_config_cleanup(ddev);
+	drm_vblank_cleanup(ddev);
 
 	drm_dev_unref(ddev);
 
@@ -304,7 +306,7 @@ static int rcar_du_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	/* Allocate and initialize the R-Car device structure. */
+	/* Allocate and initialize the DRM and R-Car device structures. */
 	rcdu = devm_kzalloc(&pdev->dev, sizeof(*rcdu), GFP_KERNEL);
 	if (rcdu == NULL)
 		return -ENOMEM;
@@ -314,27 +316,38 @@ static int rcar_du_probe(struct platform_device *pdev)
 	rcdu->dev = &pdev->dev;
 	rcdu->info = of_match_device(rcar_du_of_table, rcdu->dev)->data;
 
+	ddev = drm_dev_alloc(&rcar_du_driver, &pdev->dev);
+	if (!ddev)
+		return -ENOMEM;
+
+	drm_dev_set_unique(ddev, dev_name(&pdev->dev));
+
+	rcdu->ddev = ddev;
+	ddev->dev_private = rcdu;
+
 	platform_set_drvdata(pdev, rcdu);
 
 	/* I/O resources */
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	rcdu->mmio = devm_ioremap_resource(&pdev->dev, mem);
-	if (IS_ERR(rcdu->mmio))
-		return PTR_ERR(rcdu->mmio);
+	if (IS_ERR(rcdu->mmio)) {
+		ret = PTR_ERR(rcdu->mmio);
+		goto error;
+	}
+
+	/* Initialize vertical blanking interrupts handling. Start with vblank
+	 * disabled for all CRTCs.
+	 */
+	ret = drm_vblank_init(ddev, (1 << rcdu->info->num_crtcs) - 1);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to initialize vblank\n");
+		goto error;
+	}
 
 	/* DRM/KMS objects */
-	ddev = drm_dev_alloc(&rcar_du_driver, &pdev->dev);
-	if (IS_ERR(ddev))
-		return PTR_ERR(ddev);
-
-	rcdu->ddev = ddev;
-	ddev->dev_private = rcdu;
-
 	ret = rcar_du_modeset_init(rcdu);
 	if (ret < 0) {
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev,
-				"failed to initialize DRM/KMS (%d)\n", ret);
+		dev_err(&pdev->dev, "failed to initialize DRM/KMS (%d)\n", ret);
 		goto error;
 	}
 
@@ -345,6 +358,10 @@ static int rcar_du_probe(struct platform_device *pdev)
 	 */
 	ret = drm_dev_register(ddev, 0);
 	if (ret)
+		goto error;
+
+	ret = drm_connector_register_all(ddev);
+	if (ret < 0)
 		goto error;
 
 	DRM_INFO("Device %s probed\n", dev_name(&pdev->dev));

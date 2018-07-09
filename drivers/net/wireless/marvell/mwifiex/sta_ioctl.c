@@ -426,10 +426,6 @@ done:
 	if (bss_desc)
 		kfree(bss_desc->beacon_buf);
 	kfree(bss_desc);
-
-	if (ret < 0)
-		priv->attempted_bss_desc = NULL;
-
 	return ret;
 }
 
@@ -574,7 +570,7 @@ int mwifiex_enable_hs(struct mwifiex_adapter *adapter)
 
 	adapter->hs_activate_wait_q_woken = false;
 
-	memset(&hscfg, 0, sizeof(hscfg));
+	memset(&hscfg, 0, sizeof(struct mwifiex_ds_hs_cfg));
 	hscfg.is_invoke_hostcmd = true;
 
 	adapter->hs_enabling = true;
@@ -1138,7 +1134,7 @@ int mwifiex_set_encode(struct mwifiex_private *priv, struct key_params *kp,
 {
 	struct mwifiex_ds_encrypt_key encrypt_key;
 
-	memset(&encrypt_key, 0, sizeof(encrypt_key));
+	memset(&encrypt_key, 0, sizeof(struct mwifiex_ds_encrypt_key));
 	encrypt_key.key_len = key_len;
 	encrypt_key.key_index = key_index;
 
@@ -1159,6 +1155,8 @@ int mwifiex_set_encode(struct mwifiex_private *priv, struct key_params *kp,
 			encrypt_key.is_rx_seq_valid = true;
 		}
 	} else {
+		if (GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_UAP)
+			return 0;
 		encrypt_key.key_disable = true;
 		if (mac_addr)
 			memcpy(encrypt_key.mac_addr, mac_addr, ETH_ALEN);
@@ -1178,7 +1176,7 @@ mwifiex_get_ver_ext(struct mwifiex_private *priv, u32 version_str_sel)
 {
 	struct mwifiex_ver_ext ver_ext;
 
-	memset(&ver_ext, 0, sizeof(ver_ext));
+	memset(&ver_ext, 0, sizeof(struct host_cmd_ds_version_ext));
 	ver_ext.version_str_sel = version_str_sel;
 	if (mwifiex_send_cmd(priv, HostCmd_CMD_VERSION_EXT,
 			     HostCmd_ACT_GEN_GET, 0, &ver_ext, true))
@@ -1249,7 +1247,7 @@ static int mwifiex_reg_mem_ioctl_reg_rw(struct mwifiex_private *priv,
 {
 	u16 cmd_no;
 
-	switch (reg_rw->type) {
+	switch (le32_to_cpu(reg_rw->type)) {
 	case MWIFIEX_REG_MAC:
 		cmd_no = HostCmd_CMD_MAC_REG_ACCESS;
 		break;
@@ -1284,9 +1282,9 @@ mwifiex_reg_write(struct mwifiex_private *priv, u32 reg_type,
 {
 	struct mwifiex_ds_reg_rw reg_rw;
 
-	reg_rw.type = reg_type;
-	reg_rw.offset = reg_offset;
-	reg_rw.value = reg_value;
+	reg_rw.type = cpu_to_le32(reg_type);
+	reg_rw.offset = cpu_to_le32(reg_offset);
+	reg_rw.value = cpu_to_le32(reg_value);
 
 	return mwifiex_reg_mem_ioctl_reg_rw(priv, &reg_rw, HostCmd_ACT_GEN_SET);
 }
@@ -1304,14 +1302,14 @@ mwifiex_reg_read(struct mwifiex_private *priv, u32 reg_type,
 	int ret;
 	struct mwifiex_ds_reg_rw reg_rw;
 
-	reg_rw.type = reg_type;
-	reg_rw.offset = reg_offset;
+	reg_rw.type = cpu_to_le32(reg_type);
+	reg_rw.offset = cpu_to_le32(reg_offset);
 	ret = mwifiex_reg_mem_ioctl_reg_rw(priv, &reg_rw, HostCmd_ACT_GEN_GET);
 
 	if (ret)
 		goto done;
 
-	*value = reg_rw.value;
+	*value = le32_to_cpu(reg_rw.value);
 
 done:
 	return ret;
@@ -1330,16 +1328,15 @@ mwifiex_eeprom_read(struct mwifiex_private *priv, u16 offset, u16 bytes,
 	int ret;
 	struct mwifiex_ds_read_eeprom rd_eeprom;
 
-	rd_eeprom.offset =  offset;
-	rd_eeprom.byte_count = bytes;
+	rd_eeprom.offset = cpu_to_le16((u16) offset);
+	rd_eeprom.byte_count = cpu_to_le16((u16) bytes);
 
 	/* Send request to firmware */
 	ret = mwifiex_send_cmd(priv, HostCmd_CMD_802_11_EEPROM_ACCESS,
 			       HostCmd_ACT_GEN_GET, 0, &rd_eeprom, true);
 
 	if (!ret)
-		memcpy(value, rd_eeprom.value, min((u16)MAX_EEPROM_DATA,
-		       rd_eeprom.byte_count));
+		memcpy(value, rd_eeprom.value, MAX_EEPROM_DATA);
 	return ret;
 }
 

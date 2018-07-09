@@ -1025,8 +1025,6 @@ static void  i40iw_ieq_compl_pfpdu(struct i40iw_puda_rsrc *ieq,
 	u16 txoffset, bufoffset;
 
 	buf = i40iw_puda_get_listbuf(pbufl);
-	if (!buf)
-		return;
 	nextseqnum = buf->seqnum + fpdu_len;
 	txbuf->totallen = buf->hdrlen + fpdu_len;
 	txbuf->data = (u8 *)txbuf->mem.va + buf->hdrlen;
@@ -1050,8 +1048,6 @@ static void  i40iw_ieq_compl_pfpdu(struct i40iw_puda_rsrc *ieq,
 		fpdu_len -= buf->datalen;
 		i40iw_puda_ret_bufpool(ieq, buf);
 		buf = i40iw_puda_get_listbuf(pbufl);
-		if (!buf)
-			return;
 		bufoffset = (u16)(buf->data - (u8 *)buf->mem.va);
 	} while (1);
 
@@ -1320,7 +1316,7 @@ static void i40iw_ieq_handle_exception(struct i40iw_puda_rsrc *ieq,
 	u32 *hw_host_ctx = (u32 *)qp->hw_host_ctx;
 	u32 rcv_wnd = hw_host_ctx[23];
 	/* first partial seq # in q2 */
-	u32 fps = *(u32 *)(qp->q2_buf + Q2_FPSN_OFFSET);
+	u32 fps = qp->q2_buf[16];
 	struct list_head *rxlist = &pfpdu->rxlist;
 	struct list_head *plist;
 

@@ -367,8 +367,7 @@ static void pmap_unschedule(unsigned long *map, int bits_per_period,
  * @fmt:   The format for printf.
  * @...:   The args for printf.
  */
-static __printf(3, 4)
-void cat_printf(char **buf, size_t *size, const char *fmt, ...)
+static void cat_printf(char **buf, size_t *size, const char *fmt, ...)
 {
 	va_list args;
 	int i;

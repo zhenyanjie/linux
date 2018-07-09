@@ -482,10 +482,6 @@ static const struct of_device_id usbhs_of_match[] = {
 		.data = (void *)USBHS_TYPE_RCAR_GEN3,
 	},
 	{
-		.compatible = "renesas,usbhs-r8a7796",
-		.data = (void *)USBHS_TYPE_RCAR_GEN3,
-	},
-	{
 		.compatible = "renesas,rcar-gen2-usbhs",
 		.data = (void *)USBHS_TYPE_RCAR_GEN2,
 	},
@@ -702,7 +698,7 @@ probe_end_fifo_exit:
 probe_end_pipe_exit:
 	usbhs_pipe_remove(priv);
 
-	dev_info(&pdev->dev, "probe failed (%d)\n", ret);
+	dev_info(&pdev->dev, "probe failed\n");
 
 	return ret;
 }
@@ -752,10 +748,8 @@ static int usbhsc_resume(struct device *dev)
 	struct usbhs_priv *priv = dev_get_drvdata(dev);
 	struct platform_device *pdev = usbhs_priv_to_pdev(priv);
 
-	if (!usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL)) {
+	if (!usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL))
 		usbhsc_power_ctrl(priv, 1);
-		usbhs_mod_autonomy_mode(priv);
-	}
 
 	usbhs_platform_call(priv, phy_reset, pdev);
 

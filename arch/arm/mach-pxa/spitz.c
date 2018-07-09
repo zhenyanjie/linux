@@ -13,7 +13,6 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/module.h>	/* symbol_get ; symbol_put */
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/gpio_keys.h>
@@ -465,7 +464,7 @@ static struct gpio_led spitz_gpio_leds[] = {
 	},
 	{
 		.name			= "spitz:green:hddactivity",
-		.default_trigger	= "disk-activity",
+		.default_trigger	= "ide-disk",
 		.gpio			= SPITZ_GPIO_LED_GREEN,
 	},
 };

@@ -97,6 +97,7 @@ static struct acpi_driver fjes_acpi_driver = {
 static struct platform_driver fjes_driver = {
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 	},
 	.probe = fjes_probe,
 	.remove = fjes_remove,
@@ -1186,9 +1187,8 @@ static int fjes_probe(struct platform_device *plat_dev)
 	adapter->force_reset = false;
 	adapter->open_guard = false;
 
-	adapter->txrx_wq = alloc_workqueue(DRV_NAME "/txrx", WQ_MEM_RECLAIM, 0);
-	adapter->control_wq = alloc_workqueue(DRV_NAME "/control",
-					      WQ_MEM_RECLAIM, 0);
+	adapter->txrx_wq = create_workqueue(DRV_NAME "/txrx");
+	adapter->control_wq = create_workqueue(DRV_NAME "/control");
 
 	INIT_WORK(&adapter->tx_stall_task, fjes_tx_stall_task);
 	INIT_WORK(&adapter->raise_intr_rxdata_task,
@@ -1277,7 +1277,7 @@ static void fjes_netdev_setup(struct net_device *netdev)
 	fjes_set_ethtool_ops(netdev);
 	netdev->mtu = fjes_support_mtu[3];
 	netdev->flags |= IFF_BROADCAST;
-	netdev->features |= NETIF_F_HW_VLAN_CTAG_FILTER;
+	netdev->features |= NETIF_F_HW_CSUM | NETIF_F_HW_VLAN_CTAG_FILTER;
 }
 
 static void fjes_irq_watch_task(struct work_struct *work)

@@ -95,6 +95,7 @@ static void flow_cache_gc_task(struct work_struct *work)
 	list_for_each_entry_safe(fce, n, &gc_list, u.gc_list) {
 		flow_entry_kill(fce, xfrm);
 		atomic_dec(&xfrm->flow_cache_gc_count);
+		WARN_ON(atomic_read(&xfrm->flow_cache_gc_count) < 0);
 	}
 }
 
@@ -235,8 +236,9 @@ flow_cache_lookup(struct net *net, const struct flowi *key, u16 family, u8 dir,
 		if (fcp->hash_count > fc->high_watermark)
 			flow_cache_shrink(fc, fcp);
 
-		if (atomic_read(&net->xfrm.flow_cache_gc_count) >
-		    2 * num_online_cpus() * fc->high_watermark) {
+		if (fcp->hash_count > 2 * fc->high_watermark ||
+		    atomic_read(&net->xfrm.flow_cache_gc_count) > fc->high_watermark) {
+			atomic_inc(&net->xfrm.flow_cache_genid);
 			flo = ERR_PTR(-ENOBUFS);
 			goto ret_object;
 		}

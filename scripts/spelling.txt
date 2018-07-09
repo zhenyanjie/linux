@@ -629,6 +629,7 @@ mispelt||misspelt
 miximum||maximum
 mmnemonic||mnemonic
 mnay||many
+modeled||modelled
 modulues||modules
 monochorome||monochrome
 monochromo||monochrome

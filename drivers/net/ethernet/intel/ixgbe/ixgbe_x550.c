@@ -295,12 +295,6 @@ static s32 ixgbe_identify_phy_x550em(struct ixgbe_hw *hw)
 	case IXGBE_DEV_ID_X550EM_A_KR_L:
 		hw->phy.type = ixgbe_phy_x550em_kr;
 		break;
-	case IXGBE_DEV_ID_X550EM_A_10G_T:
-		if (hw->bus.lan_id)
-			hw->phy.phy_semaphore_mask = IXGBE_GSSR_PHY1_SM;
-		else
-			hw->phy.phy_semaphore_mask = IXGBE_GSSR_PHY0_SM;
-		/* Fallthrough */
 	case IXGBE_DEV_ID_X550EM_X_1G_T:
 	case IXGBE_DEV_ID_X550EM_X_10G_T:
 		return ixgbe_identify_phy_generic(hw);
@@ -617,8 +611,6 @@ static s32 ixgbe_read_ee_hostif_buffer_X550(struct ixgbe_hw *hw,
 		/* convert offset from words to bytes */
 		buffer.address = cpu_to_be32((offset + current_word) * 2);
 		buffer.length = cpu_to_be16(words_to_read * 2);
-		buffer.pad2 = 0;
-		buffer.pad3 = 0;
 
 		status = ixgbe_host_interface_command(hw, &buffer,
 						      sizeof(buffer),
@@ -1461,7 +1453,7 @@ ixgbe_setup_mac_link_sfp_x550a(struct ixgbe_hw *hw, ixgbe_link_speed speed,
 	/* Configure internal PHY for KR/KX. */
 	ixgbe_setup_kr_speed_x550em(hw, speed);
 
-	if (hw->phy.mdio.prtad == MDIO_PRTAD_NONE)
+	if (!hw->phy.mdio.prtad || hw->phy.mdio.prtad == 0xFFFF)
 		return IXGBE_ERR_PHY_ADDR_INVALID;
 
 	/* Get external PHY device id */
@@ -1626,8 +1618,6 @@ static void ixgbe_init_mac_link_ops_X550em(struct ixgbe_hw *hw)
 {
 	struct ixgbe_mac_info *mac = &hw->mac;
 
-	mac->ops.setup_fc = ixgbe_setup_fc_x550em;
-
 	switch (mac->ops.get_media_type(hw)) {
 	case ixgbe_media_type_fiber:
 		/* CS4227 does not support autoneg, so disable the laser control
@@ -1637,6 +1627,7 @@ static void ixgbe_init_mac_link_ops_X550em(struct ixgbe_hw *hw)
 		mac->ops.enable_tx_laser = NULL;
 		mac->ops.flap_tx_laser = NULL;
 		mac->ops.setup_link = ixgbe_setup_mac_link_multispeed_fiber;
+		mac->ops.setup_fc = ixgbe_setup_fc_x550em;
 		switch (hw->device_id) {
 		case IXGBE_DEV_ID_X550EM_A_SFP_N:
 			mac->ops.setup_mac_link = ixgbe_setup_mac_link_sfp_n;
@@ -1664,6 +1655,7 @@ static void ixgbe_init_mac_link_ops_X550em(struct ixgbe_hw *hw)
 			mac->ops.setup_link = ixgbe_setup_sgmii;
 		break;
 	default:
+		mac->ops.setup_fc = ixgbe_setup_fc_x550em;
 		break;
 	}
 }
@@ -1934,6 +1926,8 @@ static s32 ixgbe_setup_kr_speed_x550em(struct ixgbe_hw *hw,
 		return status;
 
 	reg_val |= IXGBE_KRM_LINK_CTRL_1_TETH_AN_ENABLE;
+	reg_val &= ~(IXGBE_KRM_LINK_CTRL_1_TETH_AN_FEC_REQ |
+		     IXGBE_KRM_LINK_CTRL_1_TETH_AN_CAP_FEC);
 	reg_val &= ~(IXGBE_KRM_LINK_CTRL_1_TETH_AN_CAP_KR |
 		     IXGBE_KRM_LINK_CTRL_1_TETH_AN_CAP_KX);
 
@@ -1995,11 +1989,12 @@ static s32 ixgbe_setup_kx4_x550em(struct ixgbe_hw *hw)
 /**
  * ixgbe_setup_kr_x550em - Configure the KR PHY
  * @hw: pointer to hardware structure
+ *
+ * Configures the integrated KR PHY for X550EM_x.
  **/
 static s32 ixgbe_setup_kr_x550em(struct ixgbe_hw *hw)
 {
-	/* leave link alone for 2.5G */
-	if (hw->phy.autoneg_advertised & IXGBE_LINK_SPEED_2_5GB_FULL)
+	if (hw->mac.type != ixgbe_mac_X550EM_x)
 		return 0;
 
 	return ixgbe_setup_kr_speed_x550em(hw, hw->phy.autoneg_advertised);
@@ -2117,50 +2112,6 @@ static s32 ixgbe_reset_phy_t_X550em(struct ixgbe_hw *hw)
 
 	/* Configure Link Status Alarm and Temperature Threshold interrupts */
 	return ixgbe_enable_lasi_ext_t_x550em(hw);
-}
-
-/**
- *  ixgbe_led_on_t_x550em - Turns on the software controllable LEDs.
- *  @hw: pointer to hardware structure
- *  @led_idx: led number to turn on
- **/
-static s32 ixgbe_led_on_t_x550em(struct ixgbe_hw *hw, u32 led_idx)
-{
-	u16 phy_data;
-
-	if (led_idx >= IXGBE_X557_MAX_LED_INDEX)
-		return IXGBE_ERR_PARAM;
-
-	/* To turn on the LED, set mode to ON. */
-	hw->phy.ops.read_reg(hw, IXGBE_X557_LED_PROVISIONING + led_idx,
-			     IXGBE_MDIO_VENDOR_SPECIFIC_1_DEV_TYPE, &phy_data);
-	phy_data |= IXGBE_X557_LED_MANUAL_SET_MASK;
-	hw->phy.ops.write_reg(hw, IXGBE_X557_LED_PROVISIONING + led_idx,
-			      IXGBE_MDIO_VENDOR_SPECIFIC_1_DEV_TYPE, phy_data);
-
-	return 0;
-}
-
-/**
- *  ixgbe_led_off_t_x550em - Turns off the software controllable LEDs.
- *  @hw: pointer to hardware structure
- *  @led_idx: led number to turn off
- **/
-static s32 ixgbe_led_off_t_x550em(struct ixgbe_hw *hw, u32 led_idx)
-{
-	u16 phy_data;
-
-	if (led_idx >= IXGBE_X557_MAX_LED_INDEX)
-		return IXGBE_ERR_PARAM;
-
-	/* To turn on the LED, set mode to ON. */
-	hw->phy.ops.read_reg(hw, IXGBE_X557_LED_PROVISIONING + led_idx,
-			     IXGBE_MDIO_VENDOR_SPECIFIC_1_DEV_TYPE, &phy_data);
-	phy_data &= ~IXGBE_X557_LED_MANUAL_SET_MASK;
-	hw->phy.ops.write_reg(hw, IXGBE_X557_LED_PROVISIONING + led_idx,
-			      IXGBE_MDIO_VENDOR_SPECIFIC_1_DEV_TYPE, phy_data);
-
-	return 0;
 }
 
 /** ixgbe_get_lcd_x550em - Determine lowest common denominator
@@ -2393,12 +2344,18 @@ static void ixgbe_read_mng_if_sel_x550em(struct ixgbe_hw *hw)
 	/* If X552 (X550EM_a) and MDIO is connected to external PHY, then set
 	 * PHY address. This register field was has only been used for X552.
 	 */
-	if (hw->mac.type == ixgbe_mac_x550em_a &&
-	    hw->phy.nw_mng_if_sel & IXGBE_NW_MNG_IF_SEL_MDIO_ACT) {
-		hw->phy.mdio.prtad = (hw->phy.nw_mng_if_sel &
-				      IXGBE_NW_MNG_IF_SEL_MDIO_PHY_ADD) >>
-				     IXGBE_NW_MNG_IF_SEL_MDIO_PHY_ADD_SHIFT;
+	if (!hw->phy.nw_mng_if_sel) {
+		if (hw->mac.type == ixgbe_mac_x550em_a) {
+			struct ixgbe_adapter *adapter = hw->back;
+
+			e_warn(drv, "nw_mng_if_sel not set\n");
+		}
+		return;
 	}
+
+	hw->phy.mdio.prtad = (hw->phy.nw_mng_if_sel &
+			      IXGBE_NW_MNG_IF_SEL_MDIO_PHY_ADD) >>
+			     IXGBE_NW_MNG_IF_SEL_MDIO_PHY_ADD_SHIFT;
 }
 
 /** ixgbe_init_phy_ops_X550em - PHY/SFP specific init
@@ -2499,7 +2456,6 @@ static enum ixgbe_media_type ixgbe_get_media_type_X550em(struct ixgbe_hw *hw)
 		break;
 	case IXGBE_DEV_ID_X550EM_X_1G_T:
 	case IXGBE_DEV_ID_X550EM_X_10G_T:
-	case IXGBE_DEV_ID_X550EM_A_10G_T:
 		media_type = ixgbe_media_type_copper;
 		break;
 	default:
@@ -2558,9 +2514,6 @@ static void ixgbe_set_mdio_speed(struct ixgbe_hw *hw)
 
 	switch (hw->device_id) {
 	case IXGBE_DEV_ID_X550EM_X_10G_T:
-	case IXGBE_DEV_ID_X550EM_A_SGMII:
-	case IXGBE_DEV_ID_X550EM_A_SGMII_L:
-	case IXGBE_DEV_ID_X550EM_A_10G_T:
 	case IXGBE_DEV_ID_X550EM_A_SFP:
 		/* Config MDIO clock speed before the first MDIO PHY access */
 		hlreg0 = IXGBE_READ_REG(hw, IXGBE_HLREG0);
@@ -2900,6 +2853,8 @@ static s32 ixgbe_write_phy_reg_x550a(struct ixgbe_hw *hw, u32 reg_addr,
 	.write_analog_reg8		= NULL, \
 	.set_rxpba			= &ixgbe_set_rxpba_generic, \
 	.check_link			= &ixgbe_check_mac_link_generic, \
+	.led_on				= &ixgbe_led_on_generic, \
+	.led_off			= &ixgbe_led_off_generic, \
 	.blink_led_start		= &ixgbe_blink_led_start_X540, \
 	.blink_led_stop			= &ixgbe_blink_led_stop_X540, \
 	.set_rar			= &ixgbe_set_rar_generic, \
@@ -2931,8 +2886,6 @@ static s32 ixgbe_write_phy_reg_x550a(struct ixgbe_hw *hw, u32 reg_addr,
 
 static const struct ixgbe_mac_operations mac_ops_X550 = {
 	X550_COMMON_MAC
-	.led_on			= ixgbe_led_on_generic,
-	.led_off		= ixgbe_led_off_generic,
 	.reset_hw		= &ixgbe_reset_hw_X540,
 	.get_media_type		= &ixgbe_get_media_type_X540,
 	.get_san_mac_addr	= &ixgbe_get_san_mac_addr_generic,
@@ -2951,8 +2904,6 @@ static const struct ixgbe_mac_operations mac_ops_X550 = {
 
 static const struct ixgbe_mac_operations mac_ops_X550EM_x = {
 	X550_COMMON_MAC
-	.led_on			= ixgbe_led_on_t_x550em,
-	.led_off		= ixgbe_led_off_t_x550em,
 	.reset_hw		= &ixgbe_reset_hw_X550em,
 	.get_media_type		= &ixgbe_get_media_type_X550em,
 	.get_san_mac_addr	= NULL,
@@ -2971,8 +2922,6 @@ static const struct ixgbe_mac_operations mac_ops_X550EM_x = {
 
 static struct ixgbe_mac_operations mac_ops_x550em_a = {
 	X550_COMMON_MAC
-	.led_on			= ixgbe_led_on_t_x550em,
-	.led_off		= ixgbe_led_off_t_x550em,
 	.reset_hw		= ixgbe_reset_hw_X550em,
 	.get_media_type		= ixgbe_get_media_type_X550em,
 	.get_san_mac_addr	= NULL,
@@ -3048,8 +2997,6 @@ static const struct ixgbe_phy_operations phy_ops_x550em_a = {
 	.identify		= &ixgbe_identify_phy_x550em,
 	.read_reg		= &ixgbe_read_phy_reg_x550a,
 	.write_reg		= &ixgbe_write_phy_reg_x550a,
-	.read_reg_mdi		= &ixgbe_read_phy_reg_mdi,
-	.write_reg_mdi		= &ixgbe_write_phy_reg_mdi,
 };
 
 static const u32 ixgbe_mvals_X550[IXGBE_MVALS_IDX_LIMIT] = {

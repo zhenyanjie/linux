@@ -29,7 +29,7 @@ static struct dst_entry *__xfrm4_dst_lookup(struct net *net, struct flowi4 *fl4,
 	memset(fl4, 0, sizeof(*fl4));
 	fl4->daddr = daddr->a4;
 	fl4->flowi4_tos = tos;
-	fl4->flowi4_oif = l3mdev_master_ifindex_by_index(net, oif);
+	fl4->flowi4_oif = oif;
 	if (saddr)
 		fl4->saddr = saddr->a4;
 
@@ -97,7 +97,6 @@ static int xfrm4_fill_dst(struct xfrm_dst *xdst, struct net_device *dev,
 	xdst->u.rt.rt_gateway = rt->rt_gateway;
 	xdst->u.rt.rt_uses_gateway = rt->rt_uses_gateway;
 	xdst->u.rt.rt_pmtu = rt->rt_pmtu;
-	xdst->u.rt.rt_mtu_locked = rt->rt_mtu_locked;
 	xdst->u.rt.rt_table_id = rt->rt_table_id;
 	INIT_LIST_HEAD(&xdst->u.rt.rt_uncached);
 
@@ -113,7 +112,7 @@ _decode_session4(struct sk_buff *skb, struct flowi *fl, int reverse)
 	int oif = 0;
 
 	if (skb_dst(skb))
-		oif = skb_dst(skb)->dev->ifindex;
+		oif = l3mdev_fib_oif(skb_dst(skb)->dev);
 
 	memset(fl4, 0, sizeof(struct flowi4));
 	fl4->flowi4_mark = skb->mark;
@@ -296,7 +295,7 @@ static struct ctl_table xfrm4_policy_table[] = {
 	{ }
 };
 
-static __net_init int xfrm4_net_sysctl_init(struct net *net)
+static int __net_init xfrm4_net_sysctl_init(struct net *net)
 {
 	struct ctl_table *table;
 	struct ctl_table_header *hdr;
@@ -324,7 +323,7 @@ err_alloc:
 	return -ENOMEM;
 }
 
-static __net_exit void xfrm4_net_sysctl_exit(struct net *net)
+static void __net_exit xfrm4_net_sysctl_exit(struct net *net)
 {
 	struct ctl_table *table;
 
@@ -337,12 +336,12 @@ static __net_exit void xfrm4_net_sysctl_exit(struct net *net)
 		kfree(table);
 }
 #else /* CONFIG_SYSCTL */
-static inline int xfrm4_net_sysctl_init(struct net *net)
+static int inline xfrm4_net_sysctl_init(struct net *net)
 {
 	return 0;
 }
 
-static inline void xfrm4_net_sysctl_exit(struct net *net)
+static void inline xfrm4_net_sysctl_exit(struct net *net)
 {
 }
 #endif

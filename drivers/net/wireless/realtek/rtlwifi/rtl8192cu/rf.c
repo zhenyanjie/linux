@@ -304,6 +304,9 @@ static void _rtl92c_get_txpower_writeval_by_regulatory(struct ieee80211_hw *hw,
 			writeVal = 0x00000000;
 		if (rtlpriv->dm.dynamic_txhighpower_lvl == TXHIGHPWRLEVEL_BT1)
 			writeVal = writeVal - 0x06060606;
+		else if (rtlpriv->dm.dynamic_txhighpower_lvl ==
+			 TXHIGHPWRLEVEL_BT2)
+			writeVal = writeVal;
 		*(p_outwriteval + rf) = writeVal;
 	}
 }
@@ -462,7 +465,7 @@ static bool _rtl92c_phy_rf6052_config_parafile(struct ieee80211_hw *hw)
 		}
 		if (!rtstatus) {
 			RT_TRACE(rtlpriv, COMP_INIT, DBG_TRACE,
-				 "Radio[%d] Fail!!\n", rfpath);
+				 "Radio[%d] Fail!!", rfpath);
 			goto phy_rf_cfg_fail;
 		}
 	}

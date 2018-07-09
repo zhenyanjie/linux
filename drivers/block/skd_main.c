@@ -597,7 +597,7 @@ static void skd_request_fn(struct request_queue *q)
 		data_dir = rq_data_dir(req);
 		io_flags = req->cmd_flags;
 
-		if (req_op(req) == REQ_OP_FLUSH)
+		if (io_flags & REQ_FLUSH)
 			flush++;
 
 		if (io_flags & REQ_FUA)
@@ -2163,9 +2163,6 @@ static void skd_send_fitmsg(struct skd_device *skdev,
 		 */
 		qcmd |= FIT_QCMD_MSGSIZE_64;
 
-	/* Make sure skd_msg_buf is written before the doorbell is triggered. */
-	smp_wmb();
-
 	SKD_WRITEQ(skdev, qcmd, FIT_Q_COMMAND);
 
 }
@@ -2211,9 +2208,6 @@ static void skd_send_special_fitmsg(struct skd_device *skdev,
 	 */
 	qcmd = skspcl->mb_dma_address;
 	qcmd |= FIT_QCMD_QID_NORMAL + FIT_QCMD_MSGSIZE_128;
-
-	/* Make sure skd_msg_buf is written before the doorbell is triggered. */
-	smp_wmb();
 
 	SKD_WRITEQ(skdev, qcmd, FIT_Q_COMMAND);
 }
@@ -4628,16 +4622,15 @@ static void skd_free_disk(struct skd_device *skdev)
 {
 	struct gendisk *disk = skdev->disk;
 
-	if (disk && (disk->flags & GENHD_FL_UP))
-		del_gendisk(disk);
+	if (disk != NULL) {
+		struct request_queue *q = disk->queue;
 
-	if (skdev->queue) {
-		blk_cleanup_queue(skdev->queue);
-		skdev->queue = NULL;
-		disk->queue = NULL;
+		if (disk->flags & GENHD_FL_UP)
+			del_gendisk(disk);
+		if (q)
+			blk_cleanup_queue(q);
+		put_disk(disk);
 	}
-
-	put_disk(disk);
 	skdev->disk = NULL;
 }
 
@@ -4697,10 +4690,10 @@ static int skd_bdev_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 	return -EIO;
 }
 
-static int skd_bdev_attach(struct device *parent, struct skd_device *skdev)
+static int skd_bdev_attach(struct skd_device *skdev)
 {
 	pr_debug("%s:%s:%d add_disk\n", skdev->name, __func__, __LINE__);
-	device_add_disk(parent, skdev->disk);
+	add_disk(skdev->disk);
 	return 0;
 }
 
@@ -4819,6 +4812,8 @@ static int skd_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	pci_set_drvdata(pdev, skdev);
 
+	skdev->disk->driverfs_dev = &pdev->dev;
+
 	for (i = 0; i < SKD_MAX_BARS; i++) {
 		skdev->mem_phys[i] = pci_resource_start(pdev, i);
 		skdev->mem_size[i] = (u32)pci_resource_len(pdev, i);
@@ -4856,7 +4851,7 @@ static int skd_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 					      (SKD_START_WAIT_SECONDS * HZ));
 	if (skdev->gendisk_on > 0) {
 		/* device came on-line after reset */
-		skd_bdev_attach(&pdev->dev, skdev);
+		skd_bdev_attach(skdev);
 		rc = 0;
 	} else {
 		/* we timed out, something is wrong with the device,

@@ -388,7 +388,7 @@ static int clamp_thread(void *arg)
 		int sleeptime;
 		unsigned long target_jiffies;
 		unsigned int guard;
-		unsigned int compensated_ratio;
+		unsigned int compensation = 0;
 		int interval; /* jiffies to sleep for each attempt */
 		unsigned int duration_jiffies = msecs_to_jiffies(duration);
 		unsigned int window_size_now;
@@ -409,11 +409,8 @@ static int clamp_thread(void *arg)
 		 * c-states, thus we need to compensate the injected idle ratio
 		 * to achieve the actual target reported by the HW.
 		 */
-		compensated_ratio = target_ratio +
-			get_compensation(target_ratio);
-		if (compensated_ratio <= 0)
-			compensated_ratio = 1;
-		interval = duration_jiffies * 100 / compensated_ratio;
+		compensation = get_compensation(target_ratio);
+		interval = duration_jiffies*100/(target_ratio+compensation);
 
 		/* align idle time */
 		target_jiffies = roundup(jiffies, interval);
@@ -650,8 +647,8 @@ static int powerclamp_set_cur_state(struct thermal_cooling_device *cdev,
 		goto exit_set;
 	} else	if (set_target_ratio > 0 && new_target_ratio == 0) {
 		pr_info("Stop forced idle injection\n");
-		end_power_clamp();
 		set_target_ratio = 0;
+		end_power_clamp();
 	} else	/* adjust currently running */ {
 		set_target_ratio = new_target_ratio;
 		/* make new set_target_ratio visible to other cpus */
@@ -669,17 +666,20 @@ static struct thermal_cooling_device_ops powerclamp_cooling_ops = {
 	.set_cur_state = powerclamp_set_cur_state,
 };
 
-static const struct x86_cpu_id __initconst intel_powerclamp_ids[] = {
+static const struct x86_cpu_id intel_powerclamp_ids[] __initconst = {
 	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_MWAIT },
+	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_ARAT },
+	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_NONSTOP_TSC },
+	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_CONSTANT_TSC},
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, intel_powerclamp_ids);
 
 static int __init powerclamp_probe(void)
 {
-
 	if (!x86_match_cpu(intel_powerclamp_ids)) {
-		pr_err("CPU does not support MWAIT");
+		pr_err("Intel powerclamp does not run on family %d model %d\n",
+				boot_cpu_data.x86, boot_cpu_data.x86_model);
 		return -ENODEV;
 	}
 

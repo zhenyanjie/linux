@@ -28,9 +28,6 @@
 
 static struct group_info	*ff_zero_group;
 
-static void ff_layout_read_record_layoutstats_done(struct rpc_task *task,
-		struct nfs_pgio_header *hdr);
-
 static struct pnfs_layout_hdr *
 ff_layout_alloc_layout_hdr(struct inode *inode, gfp_t gfp_flags)
 {
@@ -475,7 +472,6 @@ ff_layout_alloc_lseg(struct pnfs_layout_hdr *lh,
 			goto out_err_free;
 
 		/* fh */
-		rc = -EIO;
 		p = xdr_inline_decode(&stream, 4);
 		if (!p)
 			goto out_err_free;
@@ -1074,6 +1070,9 @@ static int ff_layout_async_handle_error_v4(struct rpc_task *task,
 	struct nfs_client *mds_client = mds_server->nfs_client;
 	struct nfs4_slot_table *tbl = &clp->cl_session->fc_slot_table;
 
+	if (task->tk_status >= 0)
+		return 0;
+
 	switch (task->tk_status) {
 	/* MDS state errors */
 	case -NFS4ERR_DELEG_REVOKED:
@@ -1081,7 +1080,7 @@ static int ff_layout_async_handle_error_v4(struct rpc_task *task,
 	case -NFS4ERR_BAD_STATEID:
 		if (state == NULL)
 			break;
-		nfs_remove_bad_delegation(state->inode, NULL);
+		nfs_remove_bad_delegation(state->inode);
 	case -NFS4ERR_OPENMODE:
 		if (state == NULL)
 			break;
@@ -1174,6 +1173,9 @@ static int ff_layout_async_handle_error_v3(struct rpc_task *task,
 {
 	struct nfs4_deviceid_node *devid = FF_LAYOUT_DEVID_NODE(lseg, idx);
 
+	if (task->tk_status >= 0)
+		return 0;
+
 	switch (task->tk_status) {
 	/* File access problems. Don't mark the device as unavailable */
 	case -EACCES:
@@ -1207,13 +1209,6 @@ static int ff_layout_async_handle_error(struct rpc_task *task,
 					int idx)
 {
 	int vers = clp->cl_nfs_mod->rpc_vers->number;
-
-	if (task->tk_status >= 0)
-		return 0;
-
-	/* Handle the case of an invalid layout segment */
-	if (!pnfs_is_valid_lseg(lseg))
-		return -NFS4ERR_RESET_TO_PNFS;
 
 	switch (vers) {
 	case 3:
@@ -1298,7 +1293,6 @@ static int ff_layout_read_done_cb(struct rpc_task *task,
 					hdr->pgio_mirror_idx + 1,
 					&hdr->pgio_mirror_idx))
 			goto out_eagain;
-		ff_layout_read_record_layoutstats_done(task, hdr);
 		pnfs_read_resend_pnfs(hdr);
 		return task->tk_status;
 	case -NFS4ERR_RESET_TO_MDS:
@@ -1330,16 +1324,15 @@ ff_layout_need_layoutcommit(struct pnfs_layout_segment *lseg)
  * we always send layoutcommit after DS writes.
  */
 static void
-ff_layout_set_layoutcommit(struct inode *inode,
-		struct pnfs_layout_segment *lseg,
-		loff_t end_offset)
+ff_layout_set_layoutcommit(struct nfs_pgio_header *hdr)
 {
-	if (!ff_layout_need_layoutcommit(lseg))
+	if (!ff_layout_need_layoutcommit(hdr->lseg))
 		return;
 
-	pnfs_set_layoutcommit(inode, lseg, end_offset);
-	dprintk("%s inode %lu pls_end_pos %llu\n", __func__, inode->i_ino,
-		(unsigned long long) NFS_I(inode)->layout->plh_lwb);
+	pnfs_set_layoutcommit(hdr->inode, hdr->lseg,
+			hdr->mds_offset + hdr->res.count);
+	dprintk("%s inode %lu pls_end_pos %lu\n", __func__, hdr->inode->i_ino,
+		(unsigned long) NFS_I(hdr->inode)->layout->plh_lwb);
 }
 
 static bool
@@ -1475,7 +1468,6 @@ static void ff_layout_read_release(void *data)
 static int ff_layout_write_done_cb(struct rpc_task *task,
 				struct nfs_pgio_header *hdr)
 {
-	loff_t end_offs = 0;
 	int err;
 
 	trace_nfs4_pnfs_write(hdr, task->tk_status);
@@ -1501,10 +1493,7 @@ static int ff_layout_write_done_cb(struct rpc_task *task,
 
 	if (hdr->res.verf->committed == NFS_FILE_SYNC ||
 	    hdr->res.verf->committed == NFS_DATA_SYNC)
-		end_offs = hdr->mds_offset + (loff_t)hdr->res.count;
-
-	/* Note: if the write is unstable, don't set end_offs until commit */
-	ff_layout_set_layoutcommit(hdr->inode, hdr->lseg, end_offs);
+		ff_layout_set_layoutcommit(hdr);
 
 	/* zero out fattr since we don't care DS attr at all */
 	hdr->fattr.valid = 0;
@@ -1540,7 +1529,8 @@ static int ff_layout_commit_done_cb(struct rpc_task *task,
 		return -EAGAIN;
 	}
 
-	ff_layout_set_layoutcommit(data->inode, data->lseg, data->lwb);
+	if (ff_layout_need_layoutcommit(data->lseg))
+		pnfs_set_layoutcommit(data->inode, data->lseg, data->lwb);
 
 	return 0;
 }

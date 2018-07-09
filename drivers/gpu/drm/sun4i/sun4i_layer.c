@@ -19,12 +19,7 @@
 #include "sun4i_drv.h"
 #include "sun4i_layer.h"
 
-struct sun4i_plane_desc {
-	       enum drm_plane_type     type;
-	       u8                      pipe;
-	       const uint32_t          *formats;
-	       uint32_t                nformats;
-};
+#define SUN4I_NUM_LAYERS	2
 
 static int sun4i_backend_layer_atomic_check(struct drm_plane *plane,
 					    struct drm_plane_state *state)
@@ -70,35 +65,14 @@ static const struct drm_plane_funcs sun4i_backend_layer_funcs = {
 	.update_plane		= drm_atomic_helper_update_plane,
 };
 
-static const uint32_t sun4i_backend_layer_formats_primary[] = {
+static const uint32_t sun4i_backend_layer_formats[] = {
 	DRM_FORMAT_ARGB8888,
-	DRM_FORMAT_RGB888,
 	DRM_FORMAT_XRGB8888,
-};
-
-static const uint32_t sun4i_backend_layer_formats_overlay[] = {
-	DRM_FORMAT_ARGB8888,
 	DRM_FORMAT_RGB888,
-	DRM_FORMAT_XRGB8888,
-};
-
-static const struct sun4i_plane_desc sun4i_backend_planes[] = {
-	{
-		.type = DRM_PLANE_TYPE_PRIMARY,
-		.pipe = 0,
-		.formats = sun4i_backend_layer_formats_primary,
-		.nformats = ARRAY_SIZE(sun4i_backend_layer_formats_primary),
-	},
-	{
-		.type = DRM_PLANE_TYPE_OVERLAY,
-		.pipe = 1,
-		.formats = sun4i_backend_layer_formats_overlay,
-		.nformats = ARRAY_SIZE(sun4i_backend_layer_formats_overlay),
-	},
 };
 
 static struct sun4i_layer *sun4i_layer_init_one(struct drm_device *drm,
-						const struct sun4i_plane_desc *plane)
+						enum drm_plane_type type)
 {
 	struct sun4i_drv *drv = drm->dev_private;
 	struct sun4i_layer *layer;
@@ -110,8 +84,10 @@ static struct sun4i_layer *sun4i_layer_init_one(struct drm_device *drm,
 
 	ret = drm_universal_plane_init(drm, &layer->plane, BIT(0),
 				       &sun4i_backend_layer_funcs,
-				       plane->formats, plane->nformats,
-				       plane->type, NULL);
+				       sun4i_backend_layer_formats,
+				       ARRAY_SIZE(sun4i_backend_layer_formats),
+				       type,
+				       NULL);
 	if (ret) {
 		dev_err(drm->dev, "Couldn't initialize layer\n");
 		return ERR_PTR(ret);
@@ -121,7 +97,7 @@ static struct sun4i_layer *sun4i_layer_init_one(struct drm_device *drm,
 			     &sun4i_backend_layer_helper_funcs);
 	layer->drv = drv;
 
-	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+	if (type == DRM_PLANE_TYPE_PRIMARY)
 		drv->primary = &layer->plane;
 
 	return layer;
@@ -133,8 +109,8 @@ struct sun4i_layer **sun4i_layers_init(struct drm_device *drm)
 	struct sun4i_layer **layers;
 	int i;
 
-	layers = devm_kcalloc(drm->dev, ARRAY_SIZE(sun4i_backend_planes),
-			      sizeof(**layers), GFP_KERNEL);
+	layers = devm_kcalloc(drm->dev, SUN4I_NUM_LAYERS, sizeof(**layers),
+			      GFP_KERNEL);
 	if (!layers)
 		return ERR_PTR(-ENOMEM);
 
@@ -159,11 +135,13 @@ struct sun4i_layer **sun4i_layers_init(struct drm_device *drm)
 	 * SoCs that support it, sprites could fill the need for more
 	 * layers.
 	 */
-	for (i = 0; i < ARRAY_SIZE(sun4i_backend_planes); i++) {
-		const struct sun4i_plane_desc *plane = &sun4i_backend_planes[i];
+	for (i = 0; i < SUN4I_NUM_LAYERS; i++) {
+		enum drm_plane_type type = (i == 0)
+					 ? DRM_PLANE_TYPE_PRIMARY
+					 : DRM_PLANE_TYPE_OVERLAY;
 		struct sun4i_layer *layer = layers[i];
 
-		layer = sun4i_layer_init_one(drm, plane);
+		layer = sun4i_layer_init_one(drm, type);
 		if (IS_ERR(layer)) {
 			dev_err(drm->dev, "Couldn't initialize %s plane\n",
 				i ? "overlay" : "primary");
@@ -171,10 +149,10 @@ struct sun4i_layer **sun4i_layers_init(struct drm_device *drm)
 		};
 
 		DRM_DEBUG_DRIVER("Assigning %s plane to pipe %d\n",
-				 i ? "overlay" : "primary", plane->pipe);
+				 i ? "overlay" : "primary", i);
 		regmap_update_bits(drv->backend->regs, SUN4I_BACKEND_ATTCTL_REG0(i),
 				   SUN4I_BACKEND_ATTCTL_REG0_LAY_PIPESEL_MASK,
-				   SUN4I_BACKEND_ATTCTL_REG0_LAY_PIPESEL(plane->pipe));
+				   SUN4I_BACKEND_ATTCTL_REG0_LAY_PIPESEL(i));
 
 		layer->id = i;
 	};

@@ -40,7 +40,7 @@ int get_gadget_descs(struct vudc *udc)
 	struct usb_ctrlrequest req;
 	int ret;
 
-	if (!udc->driver || !udc->pullup)
+	if (!udc || !udc->driver || !udc->pullup)
 		return -EINVAL;
 
 	req.bRequestType = USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_DEVICE;
@@ -117,14 +117,10 @@ static ssize_t store_sockfd(struct device *dev, struct device_attribute *attr,
 	if (rv != 0)
 		return -EINVAL;
 
-	if (!udc) {
-		dev_err(dev, "no device");
-		return -ENODEV;
-	}
 	spin_lock_irqsave(&udc->lock, flags);
 	/* Don't export what we don't have */
-	if (!udc->driver || !udc->pullup) {
-		dev_err(dev, "gadget not bound");
+	if (!udc || !udc->driver || !udc->pullup) {
+		dev_err(dev, "no device or gadget not bound");
 		ret = -ENODEV;
 		goto unlock;
 	}

@@ -318,8 +318,9 @@ int calc_lanman_hash(const char *password, const char *cryptkey, bool encrypt,
 {
 	int i;
 	int rc;
-	char password_with_pad[CIFS_ENCPWD_SIZE] = {0};
+	char password_with_pad[CIFS_ENCPWD_SIZE];
 
+	memset(password_with_pad, 0, CIFS_ENCPWD_SIZE);
 	if (password)
 		strncpy(password_with_pad, password, CIFS_ENCPWD_SIZE);
 
@@ -807,11 +808,7 @@ calc_seckey(struct cifs_ses *ses)
 	struct crypto_skcipher *tfm_arc4;
 	struct scatterlist sgin, sgout;
 	struct skcipher_request *req;
-	unsigned char *sec_key;
-
-	sec_key = kmalloc(CIFS_SESS_KEY_SIZE, GFP_KERNEL);
-	if (sec_key == NULL)
-		return -ENOMEM;
+	unsigned char sec_key[CIFS_SESS_KEY_SIZE]; /* a nonce */
 
 	get_random_bytes(sec_key, CIFS_SESS_KEY_SIZE);
 
@@ -819,7 +816,7 @@ calc_seckey(struct cifs_ses *ses)
 	if (IS_ERR(tfm_arc4)) {
 		rc = PTR_ERR(tfm_arc4);
 		cifs_dbg(VFS, "could not allocate crypto API arc4\n");
-		goto out;
+		return rc;
 	}
 
 	rc = crypto_skcipher_setkey(tfm_arc4, ses->auth_key.response,
@@ -857,8 +854,7 @@ calc_seckey(struct cifs_ses *ses)
 
 out_free_cipher:
 	crypto_free_skcipher(tfm_arc4);
-out:
-	kfree(sec_key);
+
 	return rc;
 }
 

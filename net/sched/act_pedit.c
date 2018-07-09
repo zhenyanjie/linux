@@ -26,14 +26,13 @@
 #define PEDIT_TAB_MASK	15
 
 static int pedit_net_id;
-static struct tc_action_ops act_pedit_ops;
 
 static const struct nla_policy pedit_policy[TCA_PEDIT_MAX + 1] = {
 	[TCA_PEDIT_PARMS]	= { .len = sizeof(struct tc_pedit) },
 };
 
 static int tcf_pedit_init(struct net *net, struct nlattr *nla,
-			  struct nlattr *est, struct tc_action **a,
+			  struct nlattr *est, struct tc_action *a,
 			  int ovr, int bind)
 {
 	struct tc_action_net *tn = net_generic(net, pedit_net_id);
@@ -62,23 +61,23 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 		if (!parm->nkeys)
 			return -EINVAL;
 		ret = tcf_hash_create(tn, parm->index, est, a,
-				      &act_pedit_ops, bind, false);
+				      sizeof(*p), bind, false);
 		if (ret)
 			return ret;
-		p = to_pedit(*a);
+		p = to_pedit(a);
 		keys = kmalloc(ksize, GFP_KERNEL);
 		if (keys == NULL) {
-			tcf_hash_cleanup(*a, est);
+			tcf_hash_cleanup(a, est);
 			return -ENOMEM;
 		}
 		ret = ACT_P_CREATED;
 	} else {
 		if (bind)
 			return 0;
-		tcf_hash_release(*a, bind);
+		tcf_hash_release(a, bind);
 		if (!ovr)
 			return -EEXIST;
-		p = to_pedit(*a);
+		p = to_pedit(a);
 		if (p->tcfp_nkeys && p->tcfp_nkeys != parm->nkeys) {
 			keys = kmalloc(ksize, GFP_KERNEL);
 			if (keys == NULL)
@@ -97,32 +96,21 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 	memcpy(p->tcfp_keys, parm->keys, ksize);
 	spin_unlock_bh(&p->tcf_lock);
 	if (ret == ACT_P_CREATED)
-		tcf_hash_insert(tn, *a);
+		tcf_hash_insert(tn, a);
 	return ret;
 }
 
 static void tcf_pedit_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_pedit *p = to_pedit(a);
+	struct tcf_pedit *p = a->priv;
 	struct tc_pedit_key *keys = p->tcfp_keys;
 	kfree(keys);
-}
-
-static bool offset_valid(struct sk_buff *skb, int offset)
-{
-	if (offset > 0 && offset > skb->len)
-		return false;
-
-	if  (offset < 0 && -offset > skb_headroom(skb))
-		return false;
-
-	return true;
 }
 
 static int tcf_pedit(struct sk_buff *skb, const struct tc_action *a,
 		     struct tcf_result *res)
 {
-	struct tcf_pedit *p = to_pedit(a);
+	struct tcf_pedit *p = a->priv;
 	int i;
 	unsigned int off;
 
@@ -133,7 +121,7 @@ static int tcf_pedit(struct sk_buff *skb, const struct tc_action *a,
 
 	spin_lock(&p->tcf_lock);
 
-	tcf_lastuse_update(&p->tcf_tm);
+	p->tcf_tm.lastuse = jiffies;
 
 	if (p->tcfp_nkeys > 0) {
 		struct tc_pedit_key *tkey = p->tcfp_keys;
@@ -145,11 +133,6 @@ static int tcf_pedit(struct sk_buff *skb, const struct tc_action *a,
 			if (tkey->offmask) {
 				char *d, _d;
 
-				if (!offset_valid(skb, off + tkey->at)) {
-					pr_info("tc filter pedit 'at' offset %d out of bounds\n",
-						off + tkey->at);
-					goto bad;
-				}
 				d = skb_header_pointer(skb, off + tkey->at, 1,
 						       &_d);
 				if (!d)
@@ -162,10 +145,10 @@ static int tcf_pedit(struct sk_buff *skb, const struct tc_action *a,
 					" offset must be on 32 bit boundaries\n");
 				goto bad;
 			}
-
-			if (!offset_valid(skb, off + offset)) {
-				pr_info("tc filter pedit offset %d out of bounds\n",
-					offset);
+			if (offset > 0 && offset > skb->len) {
+				pr_info("tc filter pedit"
+					" offset %d can't exceed pkt length %d\n",
+				       offset, skb->len);
 				goto bad;
 			}
 
@@ -194,7 +177,7 @@ static int tcf_pedit_dump(struct sk_buff *skb, struct tc_action *a,
 			  int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_pedit *p = to_pedit(a);
+	struct tcf_pedit *p = a->priv;
 	struct tc_pedit *opt;
 	struct tcf_t t;
 	int s;
@@ -217,11 +200,11 @@ static int tcf_pedit_dump(struct sk_buff *skb, struct tc_action *a,
 
 	if (nla_put(skb, TCA_PEDIT_PARMS, s, opt))
 		goto nla_put_failure;
-
-	tcf_tm_dump(&t, &p->tcf_tm);
+	t.install = jiffies_to_clock_t(jiffies - p->tcf_tm.install);
+	t.lastuse = jiffies_to_clock_t(jiffies - p->tcf_tm.lastuse);
+	t.expires = jiffies_to_clock_t(p->tcf_tm.expires);
 	if (nla_put_64bit(skb, TCA_PEDIT_TM, sizeof(t), &t, TCA_PEDIT_PAD))
 		goto nla_put_failure;
-
 	kfree(opt);
 	return skb->len;
 
@@ -233,14 +216,14 @@ nla_put_failure:
 
 static int tcf_pedit_walker(struct net *net, struct sk_buff *skb,
 			    struct netlink_callback *cb, int type,
-			    const struct tc_action_ops *ops)
+			    struct tc_action *a)
 {
 	struct tc_action_net *tn = net_generic(net, pedit_net_id);
 
-	return tcf_generic_walker(tn, skb, cb, type, ops);
+	return tcf_generic_walker(tn, skb, cb, type, a);
 }
 
-static int tcf_pedit_search(struct net *net, struct tc_action **a, u32 index)
+static int tcf_pedit_search(struct net *net, struct tc_action *a, u32 index)
 {
 	struct tc_action_net *tn = net_generic(net, pedit_net_id);
 
@@ -257,7 +240,6 @@ static struct tc_action_ops act_pedit_ops = {
 	.init		=	tcf_pedit_init,
 	.walk		=	tcf_pedit_walker,
 	.lookup		=	tcf_pedit_search,
-	.size		=	sizeof(struct tcf_pedit),
 };
 
 static __net_init int pedit_init_net(struct net *net)

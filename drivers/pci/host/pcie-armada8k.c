@@ -5,9 +5,6 @@
  *
  * Copyright (C) 2016 Marvell Technology Group Ltd.
  *
- * Author: Yehuda Yitshak <yehuday@marvell.com>
- * Author: Shadi Ammouri <shadi@marvell.com>
- *
  * This file is licensed under the terms of the GNU General Public
  * License version 2. This program is licensed "as is" without any
  * warranty of any kind, whether express or implied.
@@ -17,7 +14,7 @@
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/pci.h>
 #include <linux/phy/phy.h>
@@ -29,33 +26,34 @@
 #include "pcie-designware.h"
 
 struct armada8k_pcie {
-	struct pcie_port pp;		/* pp.dbi_base is DT ctrl */
+	void __iomem *base;
 	struct clk *clk;
+	struct pcie_port pp;
 };
 
 #define PCIE_VENDOR_REGS_OFFSET		0x8000
 
-#define PCIE_GLOBAL_CONTROL_REG		(PCIE_VENDOR_REGS_OFFSET + 0x0)
+#define PCIE_GLOBAL_CONTROL_REG		0x0
 #define PCIE_APP_LTSSM_EN		BIT(2)
 #define PCIE_DEVICE_TYPE_SHIFT		4
 #define PCIE_DEVICE_TYPE_MASK		0xF
 #define PCIE_DEVICE_TYPE_RC		0x4 /* Root complex */
 
-#define PCIE_GLOBAL_STATUS_REG		(PCIE_VENDOR_REGS_OFFSET + 0x8)
+#define PCIE_GLOBAL_STATUS_REG		0x8
 #define PCIE_GLB_STS_RDLH_LINK_UP	BIT(1)
 #define PCIE_GLB_STS_PHY_LINK_UP	BIT(9)
 
-#define PCIE_GLOBAL_INT_CAUSE1_REG	(PCIE_VENDOR_REGS_OFFSET + 0x1C)
-#define PCIE_GLOBAL_INT_MASK1_REG	(PCIE_VENDOR_REGS_OFFSET + 0x20)
+#define PCIE_GLOBAL_INT_CAUSE1_REG	0x1C
+#define PCIE_GLOBAL_INT_MASK1_REG	0x20
 #define PCIE_INT_A_ASSERT_MASK		BIT(9)
 #define PCIE_INT_B_ASSERT_MASK		BIT(10)
 #define PCIE_INT_C_ASSERT_MASK		BIT(11)
 #define PCIE_INT_D_ASSERT_MASK		BIT(12)
 
-#define PCIE_ARCACHE_TRC_REG		(PCIE_VENDOR_REGS_OFFSET + 0x50)
-#define PCIE_AWCACHE_TRC_REG		(PCIE_VENDOR_REGS_OFFSET + 0x54)
-#define PCIE_ARUSER_REG			(PCIE_VENDOR_REGS_OFFSET + 0x5C)
-#define PCIE_AWUSER_REG			(PCIE_VENDOR_REGS_OFFSET + 0x60)
+#define PCIE_ARCACHE_TRC_REG		0x50
+#define PCIE_AWCACHE_TRC_REG		0x54
+#define PCIE_ARUSER_REG			0x5C
+#define PCIE_AWUSER_REG			0x60
 /*
  * AR/AW Cache defauls: Normal memory, Write-Back, Read / Write
  * allocate
@@ -71,10 +69,11 @@ struct armada8k_pcie {
 
 static int armada8k_pcie_link_up(struct pcie_port *pp)
 {
+	struct armada8k_pcie *pcie = to_armada8k_pcie(pp);
 	u32 reg;
 	u32 mask = PCIE_GLB_STS_RDLH_LINK_UP | PCIE_GLB_STS_PHY_LINK_UP;
 
-	reg = dw_pcie_readl_rc(pp, PCIE_GLOBAL_STATUS_REG);
+	reg = readl(pcie->base + PCIE_GLOBAL_STATUS_REG);
 
 	if ((reg & mask) == mask)
 		return 1;
@@ -83,50 +82,51 @@ static int armada8k_pcie_link_up(struct pcie_port *pp)
 	return 0;
 }
 
-static void armada8k_pcie_establish_link(struct armada8k_pcie *pcie)
+static void armada8k_pcie_establish_link(struct pcie_port *pp)
 {
-	struct pcie_port *pp = &pcie->pp;
+	struct armada8k_pcie *pcie = to_armada8k_pcie(pp);
+	void __iomem *base = pcie->base;
 	u32 reg;
 
 	if (!dw_pcie_link_up(pp)) {
 		/* Disable LTSSM state machine to enable configuration */
-		reg = dw_pcie_readl_rc(pp, PCIE_GLOBAL_CONTROL_REG);
+		reg = readl(base + PCIE_GLOBAL_CONTROL_REG);
 		reg &= ~(PCIE_APP_LTSSM_EN);
-		dw_pcie_writel_rc(pp, PCIE_GLOBAL_CONTROL_REG, reg);
+		writel(reg, base + PCIE_GLOBAL_CONTROL_REG);
 	}
 
 	/* Set the device to root complex mode */
-	reg = dw_pcie_readl_rc(pp, PCIE_GLOBAL_CONTROL_REG);
+	reg = readl(base + PCIE_GLOBAL_CONTROL_REG);
 	reg &= ~(PCIE_DEVICE_TYPE_MASK << PCIE_DEVICE_TYPE_SHIFT);
 	reg |= PCIE_DEVICE_TYPE_RC << PCIE_DEVICE_TYPE_SHIFT;
-	dw_pcie_writel_rc(pp, PCIE_GLOBAL_CONTROL_REG, reg);
+	writel(reg, base + PCIE_GLOBAL_CONTROL_REG);
 
 	/* Set the PCIe master AxCache attributes */
-	dw_pcie_writel_rc(pp, PCIE_ARCACHE_TRC_REG, ARCACHE_DEFAULT_VALUE);
-	dw_pcie_writel_rc(pp, PCIE_AWCACHE_TRC_REG, AWCACHE_DEFAULT_VALUE);
+	writel(ARCACHE_DEFAULT_VALUE, base + PCIE_ARCACHE_TRC_REG);
+	writel(AWCACHE_DEFAULT_VALUE, base + PCIE_AWCACHE_TRC_REG);
 
 	/* Set the PCIe master AxDomain attributes */
-	reg = dw_pcie_readl_rc(pp, PCIE_ARUSER_REG);
+	reg = readl(base + PCIE_ARUSER_REG);
 	reg &= ~(AX_USER_DOMAIN_MASK << AX_USER_DOMAIN_SHIFT);
 	reg |= DOMAIN_OUTER_SHAREABLE << AX_USER_DOMAIN_SHIFT;
-	dw_pcie_writel_rc(pp, PCIE_ARUSER_REG, reg);
+	writel(reg, base + PCIE_ARUSER_REG);
 
-	reg = dw_pcie_readl_rc(pp, PCIE_AWUSER_REG);
+	reg = readl(base + PCIE_AWUSER_REG);
 	reg &= ~(AX_USER_DOMAIN_MASK << AX_USER_DOMAIN_SHIFT);
 	reg |= DOMAIN_OUTER_SHAREABLE << AX_USER_DOMAIN_SHIFT;
-	dw_pcie_writel_rc(pp, PCIE_AWUSER_REG, reg);
+	writel(reg, base + PCIE_AWUSER_REG);
 
 	/* Enable INT A-D interrupts */
-	reg = dw_pcie_readl_rc(pp, PCIE_GLOBAL_INT_MASK1_REG);
+	reg = readl(base + PCIE_GLOBAL_INT_MASK1_REG);
 	reg |= PCIE_INT_A_ASSERT_MASK | PCIE_INT_B_ASSERT_MASK |
 	       PCIE_INT_C_ASSERT_MASK | PCIE_INT_D_ASSERT_MASK;
-	dw_pcie_writel_rc(pp, PCIE_GLOBAL_INT_MASK1_REG, reg);
+	writel(reg, base + PCIE_GLOBAL_INT_MASK1_REG);
 
 	if (!dw_pcie_link_up(pp)) {
 		/* Configuration done. Start LTSSM */
-		reg = dw_pcie_readl_rc(pp, PCIE_GLOBAL_CONTROL_REG);
+		reg = readl(base + PCIE_GLOBAL_CONTROL_REG);
 		reg |= PCIE_APP_LTSSM_EN;
-		dw_pcie_writel_rc(pp, PCIE_GLOBAL_CONTROL_REG, reg);
+		writel(reg, base + PCIE_GLOBAL_CONTROL_REG);
 	}
 
 	/* Wait until the link becomes active again */
@@ -136,16 +136,15 @@ static void armada8k_pcie_establish_link(struct armada8k_pcie *pcie)
 
 static void armada8k_pcie_host_init(struct pcie_port *pp)
 {
-	struct armada8k_pcie *pcie = to_armada8k_pcie(pp);
-
 	dw_pcie_setup_rc(pp);
-	armada8k_pcie_establish_link(pcie);
+	armada8k_pcie_establish_link(pp);
 }
 
 static irqreturn_t armada8k_pcie_irq_handler(int irq, void *arg)
 {
-	struct armada8k_pcie *pcie = arg;
-	struct pcie_port *pp = &pcie->pp;
+	struct pcie_port *pp = arg;
+	struct armada8k_pcie *pcie = to_armada8k_pcie(pp);
+	void __iomem *base = pcie->base;
 	u32 val;
 
 	/*
@@ -153,8 +152,8 @@ static irqreturn_t armada8k_pcie_irq_handler(int irq, void *arg)
 	 * PCI device. However, they are also latched into the PCIe
 	 * controller, so we simply discard them.
 	 */
-	val = dw_pcie_readl_rc(pp, PCIE_GLOBAL_INT_CAUSE1_REG);
-	dw_pcie_writel_rc(pp, PCIE_GLOBAL_INT_CAUSE1_REG, val);
+	val = readl(base + PCIE_GLOBAL_INT_CAUSE1_REG);
+	writel(val, base + PCIE_GLOBAL_INT_CAUSE1_REG);
 
 	return IRQ_HANDLED;
 }
@@ -164,10 +163,9 @@ static struct pcie_host_ops armada8k_pcie_host_ops = {
 	.host_init = armada8k_pcie_host_init,
 };
 
-static int armada8k_add_pcie_port(struct armada8k_pcie *pcie,
+static int armada8k_add_pcie_port(struct pcie_port *pp,
 				  struct platform_device *pdev)
 {
-	struct pcie_port *pp = &pcie->pp;
 	struct device *dev = &pdev->dev;
 	int ret;
 
@@ -181,7 +179,7 @@ static int armada8k_add_pcie_port(struct armada8k_pcie *pcie,
 	}
 
 	ret = devm_request_irq(dev, pp->irq, armada8k_pcie_irq_handler,
-			       IRQF_SHARED, "armada8k-pcie", pcie);
+			       IRQF_SHARED, "armada8k-pcie", pp);
 	if (ret) {
 		dev_err(dev, "failed to request irq %d\n", pp->irq);
 		return ret;
@@ -216,6 +214,7 @@ static int armada8k_pcie_probe(struct platform_device *pdev)
 
 	pp = &pcie->pp;
 	pp->dev = dev;
+	platform_set_drvdata(pdev, pcie);
 
 	/* Get the dw-pcie unit configuration/control registers base. */
 	base = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ctrl");
@@ -226,7 +225,9 @@ static int armada8k_pcie_probe(struct platform_device *pdev)
 		goto fail;
 	}
 
-	ret = armada8k_add_pcie_port(pcie, pdev);
+	pcie->base = pp->dbi_base + PCIE_VENDOR_REGS_OFFSET;
+
+	ret = armada8k_add_pcie_port(pp, pdev);
 	if (ret)
 		goto fail;
 
@@ -243,6 +244,7 @@ static const struct of_device_id armada8k_pcie_of_match[] = {
 	{ .compatible = "marvell,armada8k-pcie", },
 	{},
 };
+MODULE_DEVICE_TABLE(of, armada8k_pcie_of_match);
 
 static struct platform_driver armada8k_pcie_driver = {
 	.probe		= armada8k_pcie_probe,
@@ -251,4 +253,10 @@ static struct platform_driver armada8k_pcie_driver = {
 		.of_match_table = of_match_ptr(armada8k_pcie_of_match),
 	},
 };
-builtin_platform_driver(armada8k_pcie_driver);
+
+module_platform_driver(armada8k_pcie_driver);
+
+MODULE_DESCRIPTION("Armada 8k PCIe host controller driver");
+MODULE_AUTHOR("Yehuda Yitshak <yehuday@marvell.com>");
+MODULE_AUTHOR("Shadi Ammouri <shadi@marvell.com>");
+MODULE_LICENSE("GPL v2");

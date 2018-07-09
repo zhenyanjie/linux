@@ -44,7 +44,7 @@ static void ath10k_report_offchan_tx(struct ath10k *ar, struct sk_buff *skb)
 	complete(&ar->offchan_tx_completed);
 	ar->offchan_tx_skb = NULL; /* just for sanity */
 
-	ath10k_dbg(ar, ATH10K_DBG_HTT, "completed offchannel skb %pK\n", skb);
+	ath10k_dbg(ar, ATH10K_DBG_HTT, "completed offchannel skb %p\n", skb);
 out:
 	spin_unlock_bh(&ar->data_lock);
 }
@@ -81,11 +81,10 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
 
 	skb_cb = ATH10K_SKB_CB(msdu);
 	txq = skb_cb->txq;
+	artxq = (void *)txq->drv_priv;
 
-	if (txq) {
-		artxq = (void *)txq->drv_priv;
+	if (txq)
 		artxq->num_fw_queued--;
-	}
 
 	ath10k_htt_tx_free_msdu_id(htt, tx_done->msdu_id);
 	ath10k_htt_tx_dec_pending(htt);
@@ -118,7 +117,6 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
 
 	ieee80211_tx_status(htt->ar->hw, msdu);
 	/* we do not own the msdu anymore */
-
 	return 0;
 }
 
@@ -215,7 +213,6 @@ void ath10k_peer_map_event(struct ath10k_htt *htt,
 	ath10k_dbg(ar, ATH10K_DBG_HTT, "htt peer map vdev %d peer %pM id %d\n",
 		   ev->vdev_id, ev->addr, ev->peer_id);
 
-	WARN_ON(ar->peer_map[ev->peer_id] && (ar->peer_map[ev->peer_id] != peer));
 	ar->peer_map[ev->peer_id] = peer;
 	set_bit(ev->peer_id, peer->peer_ids);
 exit:

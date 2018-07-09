@@ -2,7 +2,7 @@
 #include <linux/linkage.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/percpu.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
@@ -44,8 +44,6 @@
 #include <asm/pat.h>
 #include <asm/microcode.h>
 #include <asm/microcode_intel.h>
-#include <asm/intel-family.h>
-#include <asm/cpu_device_id.h>
 
 #ifdef CONFIG_X86_LOCAL_APIC
 #include <asm/uv/uv.h>
@@ -95,7 +93,7 @@ static const struct cpu_dev default_cpu = {
 
 static const struct cpu_dev *this_cpu = &default_cpu;
 
-DEFINE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(struct gdt_page, gdt_page) = { .gdt = {
+DEFINE_PER_CPU_PAGE_ALIGNED(struct gdt_page, gdt_page) = { .gdt = {
 #ifdef CONFIG_X86_64
 	/*
 	 * We need valid kernel segments for data and code in long mode too
@@ -164,24 +162,6 @@ static int __init x86_mpx_setup(char *s)
 	return 1;
 }
 __setup("nompx", x86_mpx_setup);
-
-#ifdef CONFIG_X86_64
-static int __init x86_pcid_setup(char *s)
-{
-	/* require an exact match without trailing characters */
-	if (strlen(s))
-		return 0;
-
-	/* do not emit a message if the feature is not present */
-	if (!boot_cpu_has(X86_FEATURE_PCID))
-		return 1;
-
-	setup_clear_cpu_cap(X86_FEATURE_PCID);
-	pr_info("nopcid: PCID feature disabled\n");
-	return 1;
-}
-__setup("nopcid", x86_pcid_setup);
-#endif
 
 static int __init x86_noinvpcid_setup(char *s)
 {
@@ -326,39 +306,6 @@ static __always_inline void setup_smap(struct cpuinfo_x86 *c)
 	}
 }
 
-static void setup_pcid(struct cpuinfo_x86 *c)
-{
-	if (cpu_has(c, X86_FEATURE_PCID)) {
-		if (cpu_has(c, X86_FEATURE_PGE) || kaiser_enabled) {
-			cr4_set_bits(X86_CR4_PCIDE);
-			/*
-			 * INVPCID has two "groups" of types:
-			 * 1/2: Invalidate an individual address
-			 * 3/4: Invalidate all contexts
-			 *
-			 * 1/2 take a PCID, but 3/4 do not.  So, 3/4
-			 * ignore the PCID argument in the descriptor.
-			 * But, we have to be careful not to call 1/2
-			 * with an actual non-zero PCID in them before
-			 * we do the above cr4_set_bits().
-			 */
-			if (cpu_has(c, X86_FEATURE_INVPCID))
-				set_cpu_cap(c, X86_FEATURE_INVPCID_SINGLE);
-		} else {
-			/*
-			 * flush_tlb_all(), as currently implemented, won't
-			 * work if PCID is on but PGE is not.  Since that
-			 * combination doesn't exist on real hardware, there's
-			 * no reason to try to fully support it, but it's
-			 * polite to avoid corrupting data if we're on
-			 * an improperly configured VM.
-			 */
-			clear_cpu_cap(c, X86_FEATURE_PCID);
-		}
-	}
-	kaiser_setup_pcid();
-}
-
 /*
  * Protection Keys are not available in 32-bit mode.
  */
@@ -482,8 +429,8 @@ static const char *table_lookup_model(struct cpuinfo_x86 *c)
 	return NULL;		/* Not found */
 }
 
-__u32 cpu_caps_cleared[NCAPINTS + NBUGINTS];
-__u32 cpu_caps_set[NCAPINTS + NBUGINTS];
+__u32 cpu_caps_cleared[NCAPINTS];
+__u32 cpu_caps_set[NCAPINTS];
 
 void load_percpu_segment(int cpu)
 {
@@ -699,57 +646,12 @@ void cpu_detect(struct cpuinfo_x86 *c)
 		cpuid(0x00000001, &tfms, &misc, &junk, &cap0);
 		c->x86		= x86_family(tfms);
 		c->x86_model	= x86_model(tfms);
-		c->x86_stepping	= x86_stepping(tfms);
+		c->x86_mask	= x86_stepping(tfms);
 
 		if (cap0 & (1<<19)) {
 			c->x86_clflush_size = ((misc >> 8) & 0xff) * 8;
 			c->x86_cache_alignment = c->x86_clflush_size;
 		}
-	}
-}
-
-static void apply_forced_caps(struct cpuinfo_x86 *c)
-{
-	int i;
-
-	for (i = 0; i < NCAPINTS + NBUGINTS; i++) {
-		c->x86_capability[i] &= ~cpu_caps_cleared[i];
-		c->x86_capability[i] |= cpu_caps_set[i];
-	}
-}
-
-static void init_speculation_control(struct cpuinfo_x86 *c)
-{
-	/*
-	 * The Intel SPEC_CTRL CPUID bit implies IBRS and IBPB support,
-	 * and they also have a different bit for STIBP support. Also,
-	 * a hypervisor might have set the individual AMD bits even on
-	 * Intel CPUs, for finer-grained selection of what's available.
-	 */
-	if (cpu_has(c, X86_FEATURE_SPEC_CTRL)) {
-		set_cpu_cap(c, X86_FEATURE_IBRS);
-		set_cpu_cap(c, X86_FEATURE_IBPB);
-		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
-	}
-
-	if (cpu_has(c, X86_FEATURE_INTEL_STIBP))
-		set_cpu_cap(c, X86_FEATURE_STIBP);
-
-	if (cpu_has(c, X86_FEATURE_SPEC_CTRL_SSBD) ||
-	    cpu_has(c, X86_FEATURE_VIRT_SSBD))
-		set_cpu_cap(c, X86_FEATURE_SSBD);
-
-	if (cpu_has(c, X86_FEATURE_AMD_IBRS)) {
-		set_cpu_cap(c, X86_FEATURE_IBRS);
-		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
-	}
-
-	if (cpu_has(c, X86_FEATURE_AMD_IBPB))
-		set_cpu_cap(c, X86_FEATURE_IBPB);
-
-	if (cpu_has(c, X86_FEATURE_AMD_STIBP)) {
-		set_cpu_cap(c, X86_FEATURE_STIBP);
-		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
 	}
 }
 
@@ -765,16 +667,14 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 		c->x86_capability[CPUID_1_EDX] = edx;
 	}
 
-	/* Thermal and Power Management Leaf: level 0x00000006 (eax) */
-	if (c->cpuid_level >= 0x00000006)
-		c->x86_capability[CPUID_6_EAX] = cpuid_eax(0x00000006);
-
 	/* Additional Intel-defined flags: level 0x00000007 */
 	if (c->cpuid_level >= 0x00000007) {
 		cpuid_count(0x00000007, 0, &eax, &ebx, &ecx, &edx);
+
 		c->x86_capability[CPUID_7_0_EBX] = ebx;
+
+		c->x86_capability[CPUID_6_EAX] = cpuid_eax(0x00000006);
 		c->x86_capability[CPUID_7_ECX] = ecx;
-		c->x86_capability[CPUID_7_EDX] = edx;
 	}
 
 	/* Extended state features: level 0x0000000d */
@@ -847,7 +747,6 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 		c->x86_capability[CPUID_8000_000A_EDX] = cpuid_edx(0x8000000a);
 
 	init_scattered_cpuid_features(c);
-	init_speculation_control(c);
 }
 
 static void identify_cpu_without_cpuid(struct cpuinfo_x86 *c)
@@ -874,75 +773,6 @@ static void identify_cpu_without_cpuid(struct cpuinfo_x86 *c)
 			}
 		}
 #endif
-}
-
-static const __initconst struct x86_cpu_id cpu_no_speculation[] = {
-	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_CEDARVIEW,	X86_FEATURE_ANY },
-	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_CLOVERVIEW,	X86_FEATURE_ANY },
-	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_LINCROFT,	X86_FEATURE_ANY },
-	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_PENWELL,	X86_FEATURE_ANY },
-	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_PINEVIEW,	X86_FEATURE_ANY },
-	{ X86_VENDOR_CENTAUR,	5 },
-	{ X86_VENDOR_INTEL,	5 },
-	{ X86_VENDOR_NSC,	5 },
-	{ X86_VENDOR_ANY,	4 },
-	{}
-};
-
-static const __initconst struct x86_cpu_id cpu_no_meltdown[] = {
-	{ X86_VENDOR_AMD },
-	{}
-};
-
-static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PINEVIEW	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_LINCROFT	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PENWELL		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CLOVERVIEW	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CEDARVIEW	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT1	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT2	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_MERRIFIELD	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE_YONAH		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNL		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNM		},
-	{ X86_VENDOR_CENTAUR,	5,					},
-	{ X86_VENDOR_INTEL,	5,					},
-	{ X86_VENDOR_NSC,	5,					},
-	{ X86_VENDOR_AMD,	0x12,					},
-	{ X86_VENDOR_AMD,	0x11,					},
-	{ X86_VENDOR_AMD,	0x10,					},
-	{ X86_VENDOR_AMD,	0xf,					},
-	{ X86_VENDOR_ANY,	4,					},
-	{}
-};
-
-static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
-{
-	u64 ia32_cap = 0;
-
-	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
-		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
-
-	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
-	   !(ia32_cap & ARCH_CAP_SSB_NO))
-		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
-
-	if (x86_match_cpu(cpu_no_speculation))
-		return;
-
-	setup_force_cpu_bug(X86_BUG_SPECTRE_V1);
-	setup_force_cpu_bug(X86_BUG_SPECTRE_V2);
-
-	if (x86_match_cpu(cpu_no_meltdown))
-		return;
-
-	/* Rogue Data Cache Load? No! */
-	if (ia32_cap & ARCH_CAP_RDCL_NO)
-		return;
-
-	setup_force_cpu_bug(X86_BUG_CPU_MELTDOWN);
 }
 
 /*
@@ -990,18 +820,7 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	}
 
 	setup_force_cpu_cap(X86_FEATURE_ALWAYS);
-
-	cpu_set_bug_bits(c);
-
 	fpu__init_system(c);
-
-#ifdef CONFIG_X86_32
-	/*
-	 * Regardless of whether PCID is enumerated, the SDM says
-	 * that it can't be enabled in 32-bit mode.
-	 */
-	setup_clear_cpu_cap(X86_FEATURE_PCID);
-#endif
 }
 
 void __init early_cpu_init(void)
@@ -1160,27 +979,6 @@ static void x86_init_cache_qos(struct cpuinfo_x86 *c)
 }
 
 /*
- * Validate that ACPI/mptables have the same information about the
- * effective APIC id and update the package map.
- */
-static void validate_apic_and_package_id(struct cpuinfo_x86 *c)
-{
-#ifdef CONFIG_SMP
-	unsigned int apicid, cpu = smp_processor_id();
-
-	apicid = apic->cpu_present_to_apicid(cpu);
-
-	if (apicid != c->apicid) {
-		pr_err(FW_BUG "CPU%u: APIC id mismatch. Firmware: %x APIC: %x\n",
-		       cpu, apicid, c->initial_apicid);
-	}
-	BUG_ON(topology_update_package_map(c->phys_proc_id, cpu));
-#else
-	c->logical_proc_id = 0;
-#endif
-}
-
-/*
  * This does the hard work of actually picking apart the CPU stuff...
  */
 static void identify_cpu(struct cpuinfo_x86 *c)
@@ -1188,14 +986,13 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	int i;
 
 	c->loops_per_jiffy = loops_per_jiffy;
-	c->x86_cache_size = 0;
+	c->x86_cache_size = -1;
 	c->x86_vendor = X86_VENDOR_UNKNOWN;
-	c->x86_model = c->x86_stepping = 0;	/* So far unknown... */
+	c->x86_model = c->x86_mask = 0;	/* So far unknown... */
 	c->x86_vendor_id[0] = '\0'; /* Unset */
 	c->x86_model_id[0] = '\0';  /* Unset */
 	c->x86_max_cores = 1;
 	c->x86_coreid_bits = 0;
-	c->cu_id = 0xff;
 #ifdef CONFIG_X86_64
 	c->x86_clflush_size = 64;
 	c->x86_phys_bits = 36;
@@ -1215,7 +1012,10 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 		this_cpu->c_identify(c);
 
 	/* Clear/Set all flags overridden by options, after probe */
-	apply_forced_caps(c);
+	for (i = 0; i < NCAPINTS; i++) {
+		c->x86_capability[i] &= ~cpu_caps_cleared[i];
+		c->x86_capability[i] |= cpu_caps_set[i];
+	}
 
 #ifdef CONFIG_X86_64
 	c->apicid = apic->phys_pkg_id(c->initial_apicid, 0);
@@ -1240,9 +1040,6 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	/* Set up SMEP/SMAP */
 	setup_smep(c);
 	setup_smap(c);
-
-	/* Set up PCID */
-	setup_pcid(c);
 
 	/*
 	 * The vendor-specific functions might have changed features.
@@ -1277,7 +1074,10 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	 * Clear/Set all flags overridden by options, need do it
 	 * before following smp all cpus cap AND.
 	 */
-	apply_forced_caps(c);
+	for (i = 0; i < NCAPINTS; i++) {
+		c->x86_capability[i] &= ~cpu_caps_cleared[i];
+		c->x86_capability[i] |= cpu_caps_set[i];
+	}
 
 	/*
 	 * On SMP, boot_cpu_data holds the common feature set between
@@ -1303,6 +1103,8 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 #ifdef CONFIG_NUMA
 	numa_add_cpu(smp_processor_id());
 #endif
+	/* The boot/hotplug time assigment got cleared, restore it */
+	c->logical_proc_id = topology_phys_to_logical_pkg(c->phys_proc_id);
 }
 
 /*
@@ -1358,8 +1160,6 @@ void identify_secondary_cpu(struct cpuinfo_x86 *c)
 	enable_sep_cpu();
 #endif
 	mtrr_ap_init();
-	validate_apic_and_package_id(c);
-	x86_spec_ctrl_setup_ap();
 }
 
 struct msr_range {
@@ -1436,8 +1236,8 @@ void print_cpu_info(struct cpuinfo_x86 *c)
 
 	pr_cont(" (family: 0x%x, model: 0x%x", c->x86, c->x86_model);
 
-	if (c->x86_stepping || c->cpuid_level >= 0)
-		pr_cont(", stepping: 0x%x)\n", c->x86_stepping);
+	if (c->x86_mask || c->cpuid_level >= 0)
+		pr_cont(", stepping: 0x%x)\n", c->x86_mask);
 	else
 		pr_cont(")\n");
 
@@ -1454,7 +1254,7 @@ static __init int setup_disablecpuid(char *arg)
 {
 	int bit;
 
-	if (get_option(&arg, &bit) && bit >= 0 && bit < NCAPINTS * 32)
+	if (get_option(&arg, &bit) && bit < NCAPINTS*32)
 		setup_clear_cpu_cap(bit);
 	else
 		return 0;
@@ -1464,14 +1264,9 @@ static __init int setup_disablecpuid(char *arg)
 __setup("clearcpuid=", setup_disablecpuid);
 
 #ifdef CONFIG_X86_64
-struct desc_ptr idt_descr __ro_after_init = {
-	.size = NR_VECTORS * 16 - 1,
-	.address = (unsigned long) idt_table,
-};
-const struct desc_ptr debug_idt_descr = {
-	.size = NR_VECTORS * 16 - 1,
-	.address = (unsigned long) debug_idt_table,
-};
+struct desc_ptr idt_descr = { NR_VECTORS * 16 - 1, (unsigned long) idt_table };
+struct desc_ptr debug_idt_descr = { NR_VECTORS * 16 - 1,
+				    (unsigned long) debug_idt_table };
 
 DEFINE_PER_CPU_FIRST(union irq_stack_union,
 		     irq_stack_union) __aligned(PAGE_SIZE) __visible;
@@ -1485,7 +1280,7 @@ DEFINE_PER_CPU(struct task_struct *, current_task) ____cacheline_aligned =
 EXPORT_PER_CPU_SYMBOL(current_task);
 
 DEFINE_PER_CPU(char *, irq_stack_ptr) =
-	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE;
+	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE - 64;
 
 DEFINE_PER_CPU(unsigned int, irq_count) __visible = -1;
 
@@ -1503,12 +1298,17 @@ static const unsigned int exception_stack_sizes[N_EXCEPTION_STACKS] = {
 	  [DEBUG_STACK - 1]			= DEBUG_STKSZ
 };
 
-DEFINE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(char, exception_stacks
+static DEFINE_PER_CPU_PAGE_ALIGNED(char, exception_stacks
 	[(N_EXCEPTION_STACKS - 1) * EXCEPTION_STKSZ + DEBUG_STKSZ]);
 
 /* May not be marked __init: used by software suspend */
 void syscall_init(void)
 {
+	/*
+	 * LSTAR and STAR live in a bit strange symbiosis.
+	 * They both write to the same internal register. STAR allows to
+	 * set CS/DS but only a 32bit target. LSTAR sets the 64bit rip.
+	 */
 	wrmsr(MSR_STAR, 0, (__USER32_CS << 16) | __KERNEL_CS);
 	wrmsrl(MSR_LSTAR, (unsigned long)entry_SYSCALL_64);
 
@@ -1651,7 +1451,7 @@ void cpu_init(void)
 	struct task_struct *me;
 	struct tss_struct *t;
 	unsigned long v;
-	int cpu = raw_smp_processor_id();
+	int cpu = stack_smp_processor_id();
 	int i;
 
 	wait_for_master_cpu(cpu);
@@ -1661,14 +1461,6 @@ void cpu_init(void)
 	 * try to read it.
 	 */
 	cr4_init_shadow();
-	if (!kaiser_enabled) {
-		/*
-		 * secondary_startup_64() deferred setting PGE in cr4:
-		 * probe_page_size_mask() sets it on the boot cpu,
-		 * but it needs to be set on each secondary cpu.
-		 */
-		cr4_set_bits(X86_CR4_PGE);
-	}
 
 	/*
 	 * Load microcode on this cpu if a valid microcode is available.

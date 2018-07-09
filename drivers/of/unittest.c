@@ -155,20 +155,20 @@ static void __init of_unittest_dynamic(void)
 	/* Add a new property - should pass*/
 	prop->name = "new-property";
 	prop->value = "new-property-data";
-	prop->length = strlen(prop->value) + 1;
+	prop->length = strlen(prop->value);
 	unittest(of_add_property(np, prop) == 0, "Adding a new property failed\n");
 
 	/* Try to add an existing property - should fail */
 	prop++;
 	prop->name = "new-property";
 	prop->value = "new-property-data-should-fail";
-	prop->length = strlen(prop->value) + 1;
+	prop->length = strlen(prop->value);
 	unittest(of_add_property(np, prop) != 0,
 		 "Adding an existing property should have failed\n");
 
 	/* Try to modify an existing property - should pass */
 	prop->value = "modify-property-data-should-pass";
-	prop->length = strlen(prop->value) + 1;
+	prop->length = strlen(prop->value);
 	unittest(of_update_property(np, prop) == 0,
 		 "Updating an existing property should have passed\n");
 
@@ -176,7 +176,7 @@ static void __init of_unittest_dynamic(void)
 	prop++;
 	prop->name = "modify-property";
 	prop->value = "modify-missing-property-data-should-pass";
-	prop->length = strlen(prop->value) + 1;
+	prop->length = strlen(prop->value);
 	unittest(of_update_property(np, prop) == 0,
 		 "Updating a missing property should have passed\n");
 
@@ -771,7 +771,7 @@ static void __init of_unittest_platform_populate(void)
 	};
 
 	np = of_find_node_by_path("/testcase-data");
-	of_platform_default_populate(np, NULL, NULL);
+	of_platform_populate(np, of_default_bus_match_table, NULL, NULL);
 
 	/* Test that a missing irq domain returns -EPROBE_DEFER */
 	np = of_find_node_by_path("/testcase-data/testcase-device1");
@@ -1871,7 +1871,8 @@ static void __init of_unittest_overlay(void)
 		goto out;
 	}
 
-	ret = of_platform_default_populate(bus_np, NULL, NULL);
+	ret = of_platform_populate(bus_np, of_default_bus_match_table,
+			NULL, NULL);
 	if (ret != 0) {
 		unittest(0, "could not populate bus @ \"%s\"\n", bus_path);
 		goto out;

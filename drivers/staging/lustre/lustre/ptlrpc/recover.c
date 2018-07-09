@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -201,6 +205,7 @@ int ptlrpc_resend(struct obd_import *imp)
 
 	return 0;
 }
+EXPORT_SYMBOL(ptlrpc_resend);
 
 /**
  * Go through all requests in delayed list and wake their threads
@@ -220,6 +225,7 @@ void ptlrpc_wake_delayed(struct obd_import *imp)
 	}
 	spin_unlock(&imp->imp_lock);
 }
+EXPORT_SYMBOL(ptlrpc_wake_delayed);
 
 void ptlrpc_request_handle_notconn(struct ptlrpc_request *failed_req)
 {

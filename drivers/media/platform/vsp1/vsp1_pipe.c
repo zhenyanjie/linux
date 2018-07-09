@@ -136,22 +136,16 @@ static const struct vsp1_format_info vsp1_video_formats[] = {
 	  3, { 8, 8, 8 }, false, true, 1, 1, false },
 };
 
-/**
+/*
  * vsp1_get_format_info - Retrieve format information for a 4CC
- * @vsp1: the VSP1 device
  * @fourcc: the format 4CC
  *
  * Return a pointer to the format information structure corresponding to the
  * given V4L2 format 4CC, or NULL if no corresponding format can be found.
  */
-const struct vsp1_format_info *vsp1_get_format_info(struct vsp1_device *vsp1,
-						    u32 fourcc)
+const struct vsp1_format_info *vsp1_get_format_info(u32 fourcc)
 {
 	unsigned int i;
-
-	/* Special case, the VYUY format is supported on Gen2 only. */
-	if (vsp1->info->gen != 2 && fourcc == V4L2_PIX_FMT_VYUY)
-		return NULL;
 
 	for (i = 0; i < ARRAY_SIZE(vsp1_video_formats); ++i) {
 		const struct vsp1_format_info *info = &vsp1_video_formats[i];
@@ -296,8 +290,6 @@ void vsp1_pipeline_frame_end(struct vsp1_pipeline *pipe)
 
 	if (pipe->frame_end)
 		pipe->frame_end(pipe);
-
-	pipe->sequence++;
 }
 
 /*
@@ -307,20 +299,42 @@ void vsp1_pipeline_frame_end(struct vsp1_pipeline *pipe)
  * to be scaled, we disable alpha scaling when the UDS input has a fixed alpha
  * value. The UDS then outputs a fixed alpha value which needs to be programmed
  * from the input RPF alpha.
+ *
+ * This function can only be called from a subdev s_stream handler as it
+ * requires a valid display list context.
  */
 void vsp1_pipeline_propagate_alpha(struct vsp1_pipeline *pipe,
-				   struct vsp1_dl_list *dl, unsigned int alpha)
+				   struct vsp1_entity *input,
+				   struct vsp1_dl_list *dl,
+				   unsigned int alpha)
 {
-	if (!pipe->uds)
-		return;
+	struct vsp1_entity *entity;
+	struct media_pad *pad;
 
-	/* The BRU background color has a fixed alpha value set to 255, the
-	 * output alpha value is thus always equal to 255.
-	 */
-	if (pipe->uds_input->type == VSP1_ENTITY_BRU)
-		alpha = 255;
+	pad = media_entity_remote_pad(&input->pads[RWPF_PAD_SOURCE]);
 
-	vsp1_uds_set_alpha(pipe->uds, dl, alpha);
+	while (pad) {
+		if (!is_media_entity_v4l2_subdev(pad->entity))
+			break;
+
+		entity = to_vsp1_entity(media_entity_to_v4l2_subdev(pad->entity));
+
+		/* The BRU background color has a fixed alpha value set to 255,
+		 * the output alpha value is thus always equal to 255.
+		 */
+		if (entity->type == VSP1_ENTITY_BRU)
+			alpha = 255;
+
+		if (entity->type == VSP1_ENTITY_UDS) {
+			struct vsp1_uds *uds = to_uds(&entity->subdev);
+
+			vsp1_uds_set_alpha(uds, dl, alpha);
+			break;
+		}
+
+		pad = &entity->pads[entity->source_pad];
+		pad = media_entity_remote_pad(pad);
+	}
 }
 
 void vsp1_pipelines_suspend(struct vsp1_device *vsp1)
@@ -371,10 +385,9 @@ void vsp1_pipelines_suspend(struct vsp1_device *vsp1)
 
 void vsp1_pipelines_resume(struct vsp1_device *vsp1)
 {
-	unsigned long flags;
 	unsigned int i;
 
-	/* Resume all running pipelines. */
+	/* Resume pipeline all running pipelines. */
 	for (i = 0; i < vsp1->info->wpf_count; ++i) {
 		struct vsp1_rwpf *wpf = vsp1->wpf[i];
 		struct vsp1_pipeline *pipe;
@@ -386,9 +399,7 @@ void vsp1_pipelines_resume(struct vsp1_device *vsp1)
 		if (pipe == NULL)
 			continue;
 
-		spin_lock_irqsave(&pipe->irqlock, flags);
 		if (vsp1_pipeline_ready(pipe))
 			vsp1_pipeline_run(pipe);
-		spin_unlock_irqrestore(&pipe->irqlock, flags);
 	}
 }

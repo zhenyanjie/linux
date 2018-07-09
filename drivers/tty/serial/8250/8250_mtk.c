@@ -62,7 +62,7 @@ mtk8250_set_termios(struct uart_port *port, struct ktermios *termios,
 	 */
 	baud = uart_get_baud_rate(port, termios, old,
 				  port->uartclk / 16 / 0xffff,
-				  port->uartclk);
+				  port->uartclk / 16);
 
 	if (baud <= 115200) {
 		serial_port_out(port, UART_MTK_HIGHS, 0x0);
@@ -76,6 +76,10 @@ mtk8250_set_termios(struct uart_port *port, struct ktermios *termios,
 		quot = DIV_ROUND_UP(port->uartclk, 4 * baud);
 	} else {
 		serial_port_out(port, UART_MTK_HIGHS, 0x3);
+
+		/* Set to highest baudrate supported */
+		if (baud >= 1152000)
+			baud = 921600;
 		quot = DIV_ROUND_UP(port->uartclk, 256 * baud);
 	}
 
@@ -297,7 +301,7 @@ static struct platform_driver mtk8250_platform_driver = {
 };
 module_platform_driver(mtk8250_platform_driver);
 
-#ifdef CONFIG_SERIAL_8250_CONSOLE
+#if defined(CONFIG_SERIAL_8250_CONSOLE) && !defined(MODULE)
 static int __init early_mtk8250_setup(struct earlycon_device *device,
 					const char *options)
 {

@@ -133,7 +133,7 @@ static struct inode *tracefs_get_inode(struct super_block *sb)
 	struct inode *inode = new_inode(sb);
 	if (inode) {
 		inode->i_ino = get_next_ino();
-		inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	}
 	return inode;
 }
@@ -541,6 +541,9 @@ void tracefs_remove(struct dentry *dentry)
 		return;
 
 	parent = dentry->d_parent;
+	if (!parent || !parent->d_inode)
+		return;
+
 	inode_lock(parent->d_inode);
 	ret = __tracefs_remove(dentry, parent);
 	inode_unlock(parent->d_inode);
@@ -561,6 +564,10 @@ void tracefs_remove_recursive(struct dentry *dentry)
 	struct dentry *child, *parent;
 
 	if (IS_ERR_OR_NULL(dentry))
+		return;
+
+	parent = dentry->d_parent;
+	if (!parent || !parent->d_inode)
 		return;
 
 	parent = dentry;

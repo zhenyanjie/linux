@@ -11,7 +11,7 @@
  *
  */
 
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
@@ -60,8 +60,6 @@ ssize_t led_trigger_store(struct device *dev, struct device_attribute *attr,
 			goto unlock;
 		}
 	}
-	/* we come here only if buf matches no trigger */
-	ret = -EINVAL;
 	up_read(&triggers_list_lock);
 
 unlock:
@@ -81,23 +79,21 @@ ssize_t led_trigger_show(struct device *dev, struct device_attribute *attr,
 	down_read(&led_cdev->trigger_lock);
 
 	if (!led_cdev->trigger)
-		len += scnprintf(buf+len, PAGE_SIZE - len, "[none] ");
+		len += sprintf(buf+len, "[none] ");
 	else
-		len += scnprintf(buf+len, PAGE_SIZE - len, "none ");
+		len += sprintf(buf+len, "none ");
 
 	list_for_each_entry(trig, &trigger_list, next_trig) {
 		if (led_cdev->trigger && !strcmp(led_cdev->trigger->name,
 							trig->name))
-			len += scnprintf(buf+len, PAGE_SIZE - len, "[%s] ",
-					 trig->name);
+			len += sprintf(buf+len, "[%s] ", trig->name);
 		else
-			len += scnprintf(buf+len, PAGE_SIZE - len, "%s ",
-					 trig->name);
+			len += sprintf(buf+len, "%s ", trig->name);
 	}
 	up_read(&led_cdev->trigger_lock);
 	up_read(&triggers_list_lock);
 
-	len += scnprintf(len+buf, PAGE_SIZE - len, "\n");
+	len += sprintf(len+buf, "\n");
 	return len;
 }
 EXPORT_SYMBOL_GPL(led_trigger_show);
@@ -109,9 +105,6 @@ void led_trigger_set(struct led_classdev *led_cdev, struct led_trigger *trig)
 	char *event = NULL;
 	char *envp[2];
 	const char *name;
-
-	if (!led_cdev->trigger && !trig)
-		return;
 
 	name = trig ? trig->name : "none";
 	event = kasprintf(GFP_KERNEL, "TRIGGER=%s", name);
@@ -141,9 +134,7 @@ void led_trigger_set(struct led_classdev *led_cdev, struct led_trigger *trig)
 	if (event) {
 		envp[0] = event;
 		envp[1] = NULL;
-		if (kobject_uevent_env(&led_cdev->dev->kobj, KOBJ_CHANGE, envp))
-			dev_err(led_cdev->dev,
-				"%s: Error sending uevent\n", __func__);
+		kobject_uevent_env(&led_cdev->dev->kobj, KOBJ_CHANGE, envp);
 		kfree(event);
 	}
 }
@@ -364,3 +355,7 @@ void led_trigger_unregister_simple(struct led_trigger *trig)
 	kfree(trig);
 }
 EXPORT_SYMBOL_GPL(led_trigger_unregister_simple);
+
+MODULE_AUTHOR("Richard Purdie");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("LED Triggers Core");

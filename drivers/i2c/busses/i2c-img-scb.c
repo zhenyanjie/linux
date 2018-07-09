@@ -1394,8 +1394,10 @@ static int img_i2c_probe(struct platform_device *pdev)
 		goto disable_clk;
 
 	ret = i2c_add_numbered_adapter(&i2c->adap);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to add adapter\n");
 		goto disable_clk;
+	}
 
 	return 0;
 

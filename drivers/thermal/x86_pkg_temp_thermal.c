@@ -348,8 +348,7 @@ static void pkg_temp_thermal_threshold_work_fn(struct work_struct *work)
 	}
 	if (notify) {
 		pr_debug("thermal_zone_device_update\n");
-		thermal_zone_device_update(phdev->tzone,
-					   THERMAL_EVENT_UNSPECIFIED);
+		thermal_zone_device_update(phdev->tzone);
 	}
 }
 

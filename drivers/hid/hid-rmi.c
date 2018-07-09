@@ -110,8 +110,8 @@ struct rmi_data {
 	u8 *writeReport;
 	u8 *readReport;
 
-	u32 input_report_size;
-	u32 output_report_size;
+	int input_report_size;
+	int output_report_size;
 
 	unsigned long flags;
 
@@ -188,16 +188,10 @@ static int rmi_set_page(struct hid_device *hdev, u8 page)
 static int rmi_set_mode(struct hid_device *hdev, u8 mode)
 {
 	int ret;
-	const u8 txbuf[2] = {RMI_SET_RMI_MODE_REPORT_ID, mode};
-	u8 *buf;
+	u8 txbuf[2] = {RMI_SET_RMI_MODE_REPORT_ID, mode};
 
-	buf = kmemdup(txbuf, sizeof(txbuf), GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	ret = hid_hw_raw_request(hdev, RMI_SET_RMI_MODE_REPORT_ID, buf,
+	ret = hid_hw_raw_request(hdev, RMI_SET_RMI_MODE_REPORT_ID, txbuf,
 			sizeof(txbuf), HID_FEATURE_REPORT, HID_REQ_SET_REPORT);
-	kfree(buf);
 	if (ret < 0) {
 		dev_err(&hdev->dev, "unable to set rmi mode to %d (%d)\n", mode,
 			ret);

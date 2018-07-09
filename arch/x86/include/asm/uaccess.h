@@ -11,7 +11,6 @@
 #include <asm/asm.h>
 #include <asm/page.h>
 #include <asm/smap.h>
-#include <asm/extable.h>
 
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
@@ -30,12 +29,12 @@
 #define USER_DS 	MAKE_MM_SEG(TASK_SIZE_MAX)
 
 #define get_ds()	(KERNEL_DS)
-#define get_fs()	(current->thread.addr_limit)
-#define set_fs(x)	(current->thread.addr_limit = (x))
+#define get_fs()	(current_thread_info()->addr_limit)
+#define set_fs(x)	(current_thread_info()->addr_limit = (x))
 
 #define segment_eq(a, b)	((a).seg == (b).seg)
 
-#define user_addr_max() (current->thread.addr_limit.seg)
+#define user_addr_max() (current_thread_info()->addr_limit.seg)
 #define __addr_ok(addr) 	\
 	((unsigned long __force)(addr) < user_addr_max())
 
@@ -68,12 +67,6 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
 	__chk_range_not_ok((unsigned long __force)(addr), size, limit); \
 })
 
-#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
-# define WARN_ON_IN_IRQ()	WARN_ON_ONCE(!in_task())
-#else
-# define WARN_ON_IN_IRQ()
-#endif
-
 /**
  * access_ok: - Checks if a user space pointer is valid
  * @type: Type of access: %VERIFY_READ or %VERIFY_WRITE.  Note that
@@ -94,11 +87,39 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
  * checks that the pointer is in the user space range - after calling
  * this function, memory access functions may still return -EFAULT.
  */
-#define access_ok(type, addr, size)					\
-({									\
-	WARN_ON_IN_IRQ();						\
-	likely(!__range_not_ok(addr, size, user_addr_max()));		\
-})
+#define access_ok(type, addr, size) \
+	likely(!__range_not_ok(addr, size, user_addr_max()))
+
+/*
+ * The exception table consists of triples of addresses relative to the
+ * exception table entry itself. The first address is of an instruction
+ * that is allowed to fault, the second is the target at which the program
+ * should continue. The third is a handler function to deal with the fault
+ * caused by the instruction in the first field.
+ *
+ * All the routines below use bits of fixup code that are out of line
+ * with the main instruction path.  This means when everything is well,
+ * we don't even have to jump over them.  Further, they do not intrude
+ * on our cache or tlb entries.
+ */
+
+struct exception_table_entry {
+	int insn, fixup, handler;
+};
+
+#define ARCH_HAS_RELATIVE_EXTABLE
+
+#define swap_ex_entry_fixup(a, b, tmp, delta)			\
+	do {							\
+		(a)->fixup = (b)->fixup + (delta);		\
+		(b)->fixup = (tmp).fixup - (delta);		\
+		(a)->handler = (b)->handler + (delta);		\
+		(b)->handler = (tmp).handler - (delta);		\
+	} while (0)
+
+extern int fixup_exception(struct pt_regs *regs, int trapnr);
+extern bool ex_has_fault_handler(unsigned long ip);
+extern void early_fixup_exception(struct pt_regs *regs, int trapnr);
 
 /*
  * These are the main single-value transfer routines.  They automatically
@@ -123,11 +144,6 @@ extern int __get_user_bad(void);
 
 #define __uaccess_begin() stac()
 #define __uaccess_end()   clac()
-#define __uaccess_begin_nospec()	\
-({					\
-	stac();				\
-	barrier_nospec();		\
-})
 
 /*
  * This is a type: either unsigned long, if the argument fits into
@@ -326,26 +342,7 @@ do {									\
 } while (0)
 
 #ifdef CONFIG_X86_32
-#define __get_user_asm_u64(x, ptr, retval, errret)			\
-({									\
-	__typeof__(ptr) __ptr = (ptr);					\
-	asm volatile("\n"					\
-		     "1:	movl %2,%%eax\n"			\
-		     "2:	movl %3,%%edx\n"			\
-		     "3:\n"				\
-		     ".section .fixup,\"ax\"\n"				\
-		     "4:	mov %4,%0\n"				\
-		     "	xorl %%eax,%%eax\n"				\
-		     "	xorl %%edx,%%edx\n"				\
-		     "	jmp 3b\n"					\
-		     ".previous\n"					\
-		     _ASM_EXTABLE(1b, 4b)				\
-		     _ASM_EXTABLE(2b, 4b)				\
-		     : "=r" (retval), "=&A"(x)				\
-		     : "m" (__m(__ptr)), "m" __m(((u32 *)(__ptr)) + 1),	\
-		       "i" (errret), "0" (retval));			\
-})
-
+#define __get_user_asm_u64(x, ptr, retval, errret)	(x) = __get_user_bad()
 #define __get_user_asm_ex_u64(x, ptr)			(x) = __get_user_bad()
 #else
 #define __get_user_asm_u64(x, ptr, retval, errret) \
@@ -436,8 +433,8 @@ do {									\
 #define __get_user_nocheck(x, ptr, size)				\
 ({									\
 	int __gu_err;							\
-	__inttype(*(ptr)) __gu_val;					\
-	__uaccess_begin_nospec();					\
+	unsigned long __gu_val;						\
+	__uaccess_begin();						\
 	__get_user_size(__gu_val, (ptr), (size), __gu_err, -EFAULT);	\
 	__uaccess_end();						\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
@@ -475,17 +472,13 @@ struct __large_struct { unsigned long buf[100]; };
  * uaccess_try and catch
  */
 #define uaccess_try	do {						\
-	current->thread.uaccess_err = 0;				\
+	current_thread_info()->uaccess_err = 0;				\
 	__uaccess_begin();						\
 	barrier();
 
-#define uaccess_try_nospec do {						\
-	current->thread.uaccess_err = 0;				\
-	__uaccess_begin_nospec();					\
-
 #define uaccess_catch(err)						\
 	__uaccess_end();						\
-	(err) |= (current->thread.uaccess_err ? -EFAULT : 0);		\
+	(err) |= (current_thread_info()->uaccess_err ? -EFAULT : 0);	\
 } while (0)
 
 /**
@@ -547,7 +540,7 @@ struct __large_struct { unsigned long buf[100]; };
  *	get_user_ex(...);
  * } get_user_catch(err)
  */
-#define get_user_try		uaccess_try_nospec
+#define get_user_try		uaccess_try
 #define get_user_catch(err)	uaccess_catch(err)
 
 #define get_user_ex(x, ptr)	do {					\
@@ -582,7 +575,7 @@ extern void __cmpxchg_wrong_size(void)
 	__typeof__(ptr) __uval = (uval);				\
 	__typeof__(*(ptr)) __old = (old);				\
 	__typeof__(*(ptr)) __new = (new);				\
-	__uaccess_begin_nospec();					\
+	__uaccess_begin();						\
 	switch (size) {							\
 	case 1:								\
 	{								\
@@ -689,15 +682,44 @@ unsigned long __must_check _copy_from_user(void *to, const void __user *from,
 unsigned long __must_check _copy_to_user(void __user *to, const void *from,
 					 unsigned n);
 
-extern void __compiletime_error("usercopy buffer size is too small")
-__bad_copy_user(void);
+#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
+# define copy_user_diag __compiletime_error
+#else
+# define copy_user_diag __compiletime_warning
+#endif
 
-static inline void copy_user_overflow(int size, unsigned long count)
+extern void copy_user_diag("copy_from_user() buffer size is too small")
+copy_from_user_overflow(void);
+extern void copy_user_diag("copy_to_user() buffer size is too small")
+copy_to_user_overflow(void) __asm__("copy_from_user_overflow");
+
+#undef copy_user_diag
+
+#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
+
+extern void
+__compiletime_warning("copy_from_user() buffer size is not provably correct")
+__copy_from_user_overflow(void) __asm__("copy_from_user_overflow");
+#define __copy_from_user_overflow(size, count) __copy_from_user_overflow()
+
+extern void
+__compiletime_warning("copy_to_user() buffer size is not provably correct")
+__copy_to_user_overflow(void) __asm__("copy_from_user_overflow");
+#define __copy_to_user_overflow(size, count) __copy_to_user_overflow()
+
+#else
+
+static inline void
+__copy_from_user_overflow(int size, unsigned long count)
 {
 	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
 }
 
-static __always_inline unsigned long __must_check
+#define __copy_to_user_overflow __copy_from_user_overflow
+
+#endif
+
+static inline unsigned long __must_check
 copy_from_user(void *to, const void __user *from, unsigned long n)
 {
 	int sz = __compiletime_object_size(to);
@@ -706,18 +728,35 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 
 	kasan_check_write(to, n);
 
-	if (likely(sz < 0 || sz >= n)) {
-		check_object_size(to, n, false);
+	/*
+	 * While we would like to have the compiler do the checking for us
+	 * even in the non-constant size case, any false positives there are
+	 * a problem (especially when DEBUG_STRICT_USER_COPY_CHECKS, but even
+	 * without - the [hopefully] dangerous looking nature of the warning
+	 * would make people go look at the respecitive call sites over and
+	 * over again just to find that there's no problem).
+	 *
+	 * And there are cases where it's just not realistic for the compiler
+	 * to prove the count to be in range. For example when multiple call
+	 * sites of a helper function - perhaps in different source files -
+	 * all doing proper range checking, yet the helper function not doing
+	 * so again.
+	 *
+	 * Therefore limit the compile time checking to the constant size
+	 * case, and do only runtime checking for non-constant sizes.
+	 */
+
+	if (likely(sz < 0 || sz >= n))
 		n = _copy_from_user(to, from, n);
-	} else if (!__builtin_constant_p(n))
-		copy_user_overflow(sz, n);
+	else if(__builtin_constant_p(n))
+		copy_from_user_overflow();
 	else
-		__bad_copy_user();
+		__copy_from_user_overflow(sz, n);
 
 	return n;
 }
 
-static __always_inline unsigned long __must_check
+static inline unsigned long __must_check
 copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	int sz = __compiletime_object_size(from);
@@ -726,16 +765,19 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 
 	might_fault();
 
-	if (likely(sz < 0 || sz >= n)) {
-		check_object_size(from, n, true);
+	/* See the comment in copy_from_user() above. */
+	if (likely(sz < 0 || sz >= n))
 		n = _copy_to_user(to, from, n);
-	} else if (!__builtin_constant_p(n))
-		copy_user_overflow(sz, n);
+	else if(__builtin_constant_p(n))
+		copy_to_user_overflow();
 	else
-		__bad_copy_user();
+		__copy_to_user_overflow(sz, n);
 
 	return n;
 }
+
+#undef __copy_from_user_overflow
+#undef __copy_to_user_overflow
 
 /*
  * We rely on the nested NMI work to allow atomic faults from the NMI path; the
@@ -755,21 +797,21 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 #define user_access_begin()	__uaccess_begin()
 #define user_access_end()	__uaccess_end()
 
-#define unsafe_put_user(x, ptr, err_label)					\
-do {										\
+#define unsafe_put_user(x, ptr)						\
+({										\
 	int __pu_err;								\
 	__put_user_size((x), (ptr), sizeof(*(ptr)), __pu_err, -EFAULT);		\
-	if (unlikely(__pu_err)) goto err_label;					\
-} while (0)
+	__builtin_expect(__pu_err, 0);						\
+})
 
-#define unsafe_get_user(x, ptr, err_label)					\
-do {										\
+#define unsafe_get_user(x, ptr)						\
+({										\
 	int __gu_err;								\
 	unsigned long __gu_val;							\
 	__get_user_size(__gu_val, (ptr), sizeof(*(ptr)), __gu_err, -EFAULT);	\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;				\
-	if (unlikely(__gu_err)) goto err_label;					\
-} while (0)
+	__builtin_expect(__gu_err, 0);						\
+})
 
 #endif /* _ASM_X86_UACCESS_H */
 

@@ -66,6 +66,7 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <linux/gfp.h>
+#include <net/mac80211.h>
 
 extern struct iwl_mod_params iwlwifi_mod_params;
 
@@ -86,10 +87,9 @@ enum iwl_disable_11n {
 };
 
 enum iwl_amsdu_size {
-	IWL_AMSDU_DEF = 0,
-	IWL_AMSDU_4K = 1,
-	IWL_AMSDU_8K = 2,
-	IWL_AMSDU_12K = 3,
+	IWL_AMSDU_4K = 0,
+	IWL_AMSDU_8K = 1,
+	IWL_AMSDU_12K = 2,
 };
 
 enum iwl_uapsd_disable {
@@ -105,7 +105,7 @@ enum iwl_uapsd_disable {
  * @sw_crypto: using hardware encryption, default = 0
  * @disable_11n: disable 11n capabilities, default = 0,
  *	use IWL_[DIS,EN]ABLE_HT_* constants
- * @amsdu_size: See &enum iwl_amsdu_size.
+ * @amsdu_size: enable 8K amsdu size, default = 4K. enum iwl_amsdu_size.
  * @restart_fw: restart firmware, default = 1
  * @bt_coex_active: enable bt coex, default = true
  * @led_mode: system default, default = 0

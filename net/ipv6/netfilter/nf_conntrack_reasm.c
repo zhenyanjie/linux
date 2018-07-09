@@ -230,7 +230,7 @@ static int nf_ct_frag6_queue(struct frag_queue *fq, struct sk_buff *skb,
 
 	if ((unsigned int)end > IPV6_MAXPLEN) {
 		pr_debug("offset is too large.\n");
-		return -EINVAL;
+		return -1;
 	}
 
 	ecn = ip6_frag_ecn(ipv6_hdr(skb));
@@ -263,8 +263,7 @@ static int nf_ct_frag6_queue(struct frag_queue *fq, struct sk_buff *skb,
 			 * this case. -DaveM
 			 */
 			pr_debug("end of fragment not rounded to 8 bytes.\n");
-			inet_frag_kill(&fq->q, &nf_frags);
-			return -EPROTO;
+			return -1;
 		}
 		if (end > fq->q.len) {
 			/* Some bits beyond end -> corruption. */
@@ -358,7 +357,7 @@ found:
 discard_fq:
 	inet_frag_kill(&fq->q, &nf_frags);
 err:
-	return -EINVAL;
+	return -1;
 }
 
 /*
@@ -567,7 +566,6 @@ find_prev_fhdr(struct sk_buff *skb, u8 *prevhdrp, int *prevhoff, int *fhoff)
 
 int nf_ct_frag6_gather(struct net *net, struct sk_buff *skb, u32 user)
 {
-	u16 savethdr = skb->transport_header;
 	struct net_device *dev = skb->dev;
 	int fhoff, nhoff, ret;
 	struct frag_hdr *fhdr;
@@ -578,11 +576,11 @@ int nf_ct_frag6_gather(struct net *net, struct sk_buff *skb, u32 user)
 	/* Jumbo payload inhibits frag. header */
 	if (ipv6_hdr(skb)->payload_len == 0) {
 		pr_debug("payload len = 0\n");
-		return 0;
+		return -EINVAL;
 	}
 
 	if (find_prev_fhdr(skb, &prevhdr, &nhoff, &fhoff) < 0)
-		return 0;
+		return -EINVAL;
 
 	if (!pskb_may_pull(skb, fhoff + sizeof(*fhdr)))
 		return -ENOMEM;
@@ -591,7 +589,6 @@ int nf_ct_frag6_gather(struct net *net, struct sk_buff *skb, u32 user)
 	hdr = ipv6_hdr(skb);
 	fhdr = (struct frag_hdr *)skb_transport_header(skb);
 
-	skb_orphan(skb);
 	fq = fq_find(net, fhdr->identification, user, &hdr->saddr, &hdr->daddr,
 		     skb->dev ? skb->dev->ifindex : 0, ip6_frag_ecn(hdr));
 	if (fq == NULL) {
@@ -601,12 +598,8 @@ int nf_ct_frag6_gather(struct net *net, struct sk_buff *skb, u32 user)
 
 	spin_lock_bh(&fq->q.lock);
 
-	ret = nf_ct_frag6_queue(fq, skb, fhdr, nhoff);
-	if (ret < 0) {
-		if (ret == -EPROTO) {
-			skb->transport_header = savethdr;
-			ret = 0;
-		}
+	if (nf_ct_frag6_queue(fq, skb, fhdr, nhoff) < 0) {
+		ret = -EINVAL;
 		goto out_unlock;
 	}
 
@@ -628,12 +621,18 @@ EXPORT_SYMBOL_GPL(nf_ct_frag6_gather);
 
 static int nf_ct_net_init(struct net *net)
 {
+	int res;
+
 	net->nf_frag.frags.high_thresh = IPV6_FRAG_HIGH_THRESH;
 	net->nf_frag.frags.low_thresh = IPV6_FRAG_LOW_THRESH;
 	net->nf_frag.frags.timeout = IPV6_FRAG_TIMEOUT;
-	inet_frags_init_net(&net->nf_frag.frags);
-
-	return nf_ct_frag6_sysctl_register(net);
+	res = inet_frags_init_net(&net->nf_frag.frags);
+	if (res)
+		return res;
+	res = nf_ct_frag6_sysctl_register(net);
+	if (res)
+		inet_frags_uninit_net(&net->nf_frag.frags);
+	return res;
 }
 
 static void nf_ct_net_exit(struct net *net)

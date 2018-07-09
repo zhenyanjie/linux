@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -51,7 +55,9 @@
 
 #define DEBUG_SUBSYSTEM S_LLITE
 
+#include "../include/lustre_lite.h"
 #include "llite_internal.h"
+#include "../include/linux/lustre_compat25.h"
 
 /**
  * Implements Linux VM address_space::invalidatepage() method. This method is
@@ -159,7 +165,7 @@ static int ll_releasepage(struct page *vmpage, gfp_t gfp_mask)
 	return result;
 }
 
-#define MAX_DIRECTIO_SIZE (2 * 1024 * 1024 * 1024UL)
+#define MAX_DIRECTIO_SIZE (2*1024*1024*1024UL)
 
 static inline int ll_get_user_pages(int rw, unsigned long user_addr,
 				    size_t size, struct page ***pages,
@@ -212,10 +218,10 @@ ssize_t ll_direct_rw_pages(const struct lu_env *env, struct cl_io *io,
 	int i;
 	ssize_t rc = 0;
 	loff_t file_offset  = pv->ldp_start_offset;
-	size_t size = pv->ldp_size;
+	long size	   = pv->ldp_size;
 	int page_count      = pv->ldp_nr;
 	struct page **pages = pv->ldp_pages;
-	size_t page_size = cl_page_size(obj);
+	long page_size      = cl_page_size(obj);
 	bool do_io;
 	int  io_pages       = 0;
 
@@ -344,6 +350,7 @@ static ssize_t ll_direct_IO_26(struct kiocb *iocb, struct iov_iter *iter)
 	struct cl_io *io;
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file->f_mapping->host;
+	struct vvp_object *obj = cl_inode2vvp(inode);
 	loff_t file_offset = iocb->ki_pos;
 	ssize_t count = iov_iter_count(iter);
 	ssize_t tot_bytes = 0, result = 0;
@@ -353,10 +360,6 @@ static ssize_t ll_direct_IO_26(struct kiocb *iocb, struct iov_iter *iter)
 
 	if (!lli->lli_has_smd)
 		return -EBADF;
-
-	/* Check EOF by ourselves */
-	if (iov_iter_rw(iter) == READ && file_offset >= i_size_read(inode))
-		return 0;
 
 	/* FIXME: io smaller than PAGE_SIZE is broken on ia64 ??? */
 	if ((file_offset & ~PAGE_MASK) || (count & ~PAGE_MASK))
@@ -376,6 +379,14 @@ static ssize_t ll_direct_IO_26(struct kiocb *iocb, struct iov_iter *iter)
 	io = vvp_env_io(env)->vui_cl.cis_io;
 	LASSERT(io);
 
+	/* 0. Need locking between buffered and direct access. and race with
+	 *    size changing by concurrent truncates and writes.
+	 * 1. Need inode mutex to operate transient pages.
+	 */
+	if (iov_iter_rw(iter) == READ)
+		inode_lock(inode);
+
+	LASSERT(obj->vob_transient_pages == 0);
 	while (iov_iter_count(iter)) {
 		struct page **pages;
 		size_t offs;
@@ -423,6 +434,10 @@ static ssize_t ll_direct_IO_26(struct kiocb *iocb, struct iov_iter *iter)
 		file_offset += result;
 	}
 out:
+	LASSERT(obj->vob_transient_pages == 0);
+	if (iov_iter_rw(iter) == READ)
+		inode_unlock(inode);
+
 	if (tot_bytes > 0) {
 		struct vvp_io *vio = vvp_env_io(env);
 
@@ -474,7 +489,7 @@ static int ll_write_begin(struct file *file, struct address_space *mapping,
 			  struct page **pagep, void **fsdata)
 {
 	struct ll_cl_context *lcc;
-	const struct lu_env  *env;
+	struct lu_env  *env;
 	struct cl_io   *io;
 	struct cl_page *page;
 	struct cl_object *clob = ll_i2info(mapping->host)->lli_clob;
@@ -486,9 +501,9 @@ static int ll_write_begin(struct file *file, struct address_space *mapping,
 
 	CDEBUG(D_VFSTRACE, "Writing %lu of %d to %d bytes\n", index, from, len);
 
-	lcc = ll_cl_find(file);
-	if (!lcc) {
-		result = -EIO;
+	lcc = ll_cl_init(file, NULL);
+	if (IS_ERR(lcc)) {
+		result = PTR_ERR(lcc);
 		goto out;
 	}
 
@@ -564,6 +579,8 @@ out:
 			unlock_page(vmpage);
 			put_page(vmpage);
 		}
+		if (!IS_ERR(lcc))
+			ll_cl_fini(lcc);
 	} else {
 		*pagep = vmpage;
 		*fsdata = lcc;
@@ -576,7 +593,7 @@ static int ll_write_end(struct file *file, struct address_space *mapping,
 			struct page *vmpage, void *fsdata)
 {
 	struct ll_cl_context *lcc = fsdata;
-	const struct lu_env *env;
+	struct lu_env *env;
 	struct cl_io *io;
 	struct vvp_io *vio;
 	struct cl_page *page;
@@ -605,13 +622,6 @@ static int ll_write_end(struct file *file, struct address_space *mapping,
 			LASSERT(from == 0);
 		vio->u.write.vui_to = from + copied;
 
-		/*
-		 * To address the deadlock in balance_dirty_pages() where
-		 * this dirty page may be written back in the same thread.
-		 */
-		if (PageDirty(vmpage))
-			unplug = true;
-
 		/* We may have one full RPC, commit it soon */
 		if (plist->pl_nr >= PTLRPC_MAX_BRW_PAGES)
 			unplug = true;
@@ -621,10 +631,6 @@ static int ll_write_end(struct file *file, struct address_space *mapping,
 	} else {
 		cl_page_disown(env, io, page);
 
-		lcc->lcc_page = NULL;
-		lu_ref_del(&page->cp_reference, "cl_io", io);
-		cl_page_put(env, page);
-
 		/* page list is not contiguous now, commit it now */
 		unplug = true;
 	}
@@ -633,6 +639,7 @@ static int ll_write_end(struct file *file, struct address_space *mapping,
 	    file->f_flags & O_SYNC || IS_SYNC(file_inode(file)))
 		result = vvp_io_write_commit(env, io);
 
+	ll_cl_fini(lcc);
 	return result >= 0 ? copied : result;
 }
 

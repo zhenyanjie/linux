@@ -97,7 +97,6 @@ SECTIONS
 		_stext = .;
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		ENTRY_TEXT
@@ -105,13 +104,6 @@ SECTIONS
 		SOFTIRQENTRY_TEXT
 		*(.fixup)
 		*(.gnu.warning)
-
-#ifdef CONFIG_RETPOLINE
-		__indirect_thunk_start = .;
-		*(.text.__x86.indirect_thunk)
-		__indirect_thunk_end = .;
-#endif
-
 		/* End of text section */
 		_etext = .;
 	} :text = 0x9090
@@ -352,6 +344,7 @@ SECTIONS
 	DISCARDS
 	/DISCARD/ : {
 		*(.eh_frame)
+		*(__func_stack_frame_non_standard)
 	}
 }
 

@@ -159,11 +159,7 @@
 	.endm
 
 	.macro	save_and_disable_irqs_notrace, oldcpsr
-#ifdef CONFIG_CPU_V7M
-	mrs	\oldcpsr, primask
-#else
 	mrs	\oldcpsr, cpsr
-#endif
 	disable_irq_notrace
 	.endm
 
@@ -484,13 +480,13 @@ THUMB(	orr	\reg , \reg , #PSR_T_BIT	)
 	.macro	uaccess_save, tmp
 #ifdef CONFIG_CPU_SW_DOMAIN_PAN
 	mrc	p15, 0, \tmp, c3, c0, 0
-	str	\tmp, [sp, #SVC_DACR]
+	str	\tmp, [sp, #S_FRAME_SIZE]
 #endif
 	.endm
 
 	.macro	uaccess_restore
 #ifdef CONFIG_CPU_SW_DOMAIN_PAN
-	ldr	r0, [sp, #SVC_DACR]
+	ldr	r0, [sp, #S_FRAME_SIZE]
 	mcr	p15, 0, r0, c3, c0, 0
 #endif
 	.endm
@@ -515,33 +511,5 @@ THUMB(	orr	\reg , \reg , #PSR_T_BIT	)
 	nop
 #endif
 	.endm
-
-	.macro	bug, msg, line
-#ifdef CONFIG_THUMB2_KERNEL
-1:	.inst	0xde02
-#else
-1:	.inst	0xe7f001f2
-#endif
-#ifdef CONFIG_DEBUG_BUGVERBOSE
-	.pushsection .rodata.str, "aMS", %progbits, 1
-2:	.asciz	"\msg"
-	.popsection
-	.pushsection __bug_table, "aw"
-	.align	2
-	.word	1b, 2b
-	.hword	\line
-	.popsection
-#endif
-	.endm
-
-#ifdef CONFIG_KPROBES
-#define _ASM_NOKPROBE(entry)				\
-	.pushsection "_kprobe_blacklist", "aw" ;	\
-	.balign 4 ;					\
-	.long entry;					\
-	.popsection
-#else
-#define _ASM_NOKPROBE(entry)
-#endif
 
 #endif /* __ASM_ASSEMBLER_H__ */

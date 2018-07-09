@@ -162,7 +162,7 @@ static int read_sb_page(struct mddev *mddev, loff_t offset,
 
 		if (sync_page_io(rdev, target,
 				 roundup(size, bdev_logical_block_size(rdev->bdev)),
-				 page, REQ_OP_READ, 0, true)) {
+				 page, READ, true)) {
 			page->index = index;
 			return 0;
 		}
@@ -297,7 +297,7 @@ static void write_page(struct bitmap *bitmap, struct page *page, int wait)
 			atomic_inc(&bitmap->pending_writes);
 			set_buffer_locked(bh);
 			set_buffer_mapped(bh);
-			submit_bh(REQ_OP_WRITE, REQ_SYNC, bh);
+			submit_bh(WRITE | REQ_SYNC, bh);
 			bh = bh->b_this_page;
 		}
 
@@ -392,7 +392,7 @@ static int read_page(struct file *file, unsigned long index,
 			atomic_inc(&bitmap->pending_writes);
 			set_buffer_locked(bh);
 			set_buffer_mapped(bh);
-			submit_bh(REQ_OP_READ, 0, bh);
+			submit_bh(READ, bh);
 		}
 		block++;
 		bh = bh->b_this_page;
@@ -1903,8 +1903,10 @@ int bitmap_copy_from_slot(struct mddev *mddev, int slot,
 	struct bitmap_counts *counts;
 	struct bitmap *bitmap = bitmap_create(mddev, slot);
 
-	if (IS_ERR(bitmap))
+	if (IS_ERR(bitmap)) {
+		bitmap_free(bitmap);
 		return PTR_ERR(bitmap);
+	}
 
 	rv = bitmap_init_from_disk(bitmap, 0);
 	if (rv)
@@ -1991,11 +1993,6 @@ int bitmap_resize(struct bitmap *bitmap, sector_t blocks,
 	int ret = 0;
 	long pages;
 	struct bitmap_page *new_bp;
-
-	if (bitmap->storage.file && !init) {
-		pr_info("md: cannot resize file-based bitmap\n");
-		return -EINVAL;
-	}
 
 	if (chunksize == 0) {
 		/* If there is enough space, leave the chunk size unchanged,
@@ -2084,7 +2081,6 @@ int bitmap_resize(struct bitmap *bitmap, sector_t blocks,
 				for (k = 0; k < page; k++) {
 					kfree(new_bp[k].map);
 				}
-				kfree(new_bp);
 
 				/* restore some fields from old_counts */
 				bitmap->counts.bp = old_counts.bp;
@@ -2133,14 +2129,6 @@ int bitmap_resize(struct bitmap *bitmap, sector_t blocks,
 				old_blocks = new_blocks;
 		}
 		block += old_blocks;
-	}
-
-	if (bitmap->counts.bp != old_counts.bp) {
-		unsigned long k;
-		for (k = 0; k < old_counts.pages; k++)
-			if (!old_counts.bp[k].hijacked)
-				kfree(old_counts.bp[k].map);
-		kfree(old_counts.bp);
 	}
 
 	if (!init) {
@@ -2195,29 +2183,19 @@ location_show(struct mddev *mddev, char *page)
 static ssize_t
 location_store(struct mddev *mddev, const char *buf, size_t len)
 {
-	int rv;
 
-	rv = mddev_lock(mddev);
-	if (rv)
-		return rv;
 	if (mddev->pers) {
-		if (!mddev->pers->quiesce) {
-			rv = -EBUSY;
-			goto out;
-		}
-		if (mddev->recovery || mddev->sync_thread) {
-			rv = -EBUSY;
-			goto out;
-		}
+		if (!mddev->pers->quiesce)
+			return -EBUSY;
+		if (mddev->recovery || mddev->sync_thread)
+			return -EBUSY;
 	}
 
 	if (mddev->bitmap || mddev->bitmap_info.file ||
 	    mddev->bitmap_info.offset) {
 		/* bitmap already configured.  Only option is to clear it */
-		if (strncmp(buf, "none", 4) != 0) {
-			rv = -EBUSY;
-			goto out;
-		}
+		if (strncmp(buf, "none", 4) != 0)
+			return -EBUSY;
 		if (mddev->pers) {
 			mddev->pers->quiesce(mddev, 1);
 			bitmap_destroy(mddev);
@@ -2236,25 +2214,21 @@ location_store(struct mddev *mddev, const char *buf, size_t len)
 			/* nothing to be done */;
 		else if (strncmp(buf, "file:", 5) == 0) {
 			/* Not supported yet */
-			rv = -EINVAL;
-			goto out;
+			return -EINVAL;
 		} else {
+			int rv;
 			if (buf[0] == '+')
 				rv = kstrtoll(buf+1, 10, &offset);
 			else
 				rv = kstrtoll(buf, 10, &offset);
 			if (rv)
-				goto out;
-			if (offset == 0) {
-				rv = -EINVAL;
-				goto out;
-			}
+				return rv;
+			if (offset == 0)
+				return -EINVAL;
 			if (mddev->bitmap_info.external == 0 &&
 			    mddev->major_version == 0 &&
-			    offset != mddev->bitmap_info.default_offset) {
-				rv = -EINVAL;
-				goto out;
-			}
+			    offset != mddev->bitmap_info.default_offset)
+				return -EINVAL;
 			mddev->bitmap_info.offset = offset;
 			if (mddev->pers) {
 				struct bitmap *bitmap;
@@ -2271,7 +2245,7 @@ location_store(struct mddev *mddev, const char *buf, size_t len)
 				mddev->pers->quiesce(mddev, 0);
 				if (rv) {
 					bitmap_destroy(mddev);
-					goto out;
+					return rv;
 				}
 			}
 		}
@@ -2283,11 +2257,6 @@ location_store(struct mddev *mddev, const char *buf, size_t len)
 		set_bit(MD_CHANGE_DEVS, &mddev->flags);
 		md_wakeup_thread(mddev->thread);
 	}
-	rv = 0;
-out:
-	mddev_unlock(mddev);
-	if (rv)
-		return rv;
 	return len;
 }
 

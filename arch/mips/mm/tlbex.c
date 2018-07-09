@@ -762,8 +762,7 @@ static void build_huge_update_entries(u32 **p, unsigned int pte,
 static void build_huge_handler_tail(u32 **p, struct uasm_reloc **r,
 				    struct uasm_label **l,
 				    unsigned int pte,
-				    unsigned int ptr,
-				    unsigned int flush)
+				    unsigned int ptr)
 {
 #ifdef CONFIG_SMP
 	UASM_i_SC(p, pte, 0, ptr);
@@ -772,22 +771,6 @@ static void build_huge_handler_tail(u32 **p, struct uasm_reloc **r,
 #else
 	UASM_i_SW(p, pte, 0, ptr);
 #endif
-	if (cpu_has_ftlb && flush) {
-		BUG_ON(!cpu_has_tlbinv);
-
-		UASM_i_MFC0(p, ptr, C0_ENTRYHI);
-		uasm_i_ori(p, ptr, ptr, MIPS_ENTRYHI_EHINV);
-		UASM_i_MTC0(p, ptr, C0_ENTRYHI);
-		build_tlb_write_entry(p, l, r, tlb_indexed);
-
-		uasm_i_xori(p, ptr, ptr, MIPS_ENTRYHI_EHINV);
-		UASM_i_MTC0(p, ptr, C0_ENTRYHI);
-		build_huge_update_entries(p, pte, ptr);
-		build_huge_tlb_write_entry(p, l, r, pte, tlb_random, 0);
-
-		return;
-	}
-
 	build_huge_update_entries(p, pte, ptr);
 	build_huge_tlb_write_entry(p, l, r, pte, tlb_indexed, 0);
 }
@@ -905,7 +888,7 @@ build_get_pgd_vmalloc64(u32 **p, struct uasm_label **l, struct uasm_reloc **r,
 		}
 	}
 	if (!did_vmalloc_branch) {
-		if (single_insn_swpd) {
+		if (uasm_in_compat_space_p(swpd) && !uasm_rel_lo(swpd)) {
 			uasm_il_b(p, r, label_vmalloc_done);
 			uasm_i_lui(p, ptr, uasm_rel_hi(swpd));
 		} else {
@@ -1042,7 +1025,7 @@ static void build_update_entries(u32 **p, unsigned int tmp, unsigned int ptep)
 	pte_off_odd += offsetof(pte_t, pte_high);
 #endif
 
-	if (IS_ENABLED(CONFIG_XPA)) {
+	if (config_enabled(CONFIG_XPA)) {
 		uasm_i_lw(p, tmp, pte_off_even, ptep); /* even pte */
 		UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL));
 		UASM_i_MTC0(p, tmp, C0_ENTRYLO0);
@@ -1660,7 +1643,7 @@ iPTE_SW(u32 **p, struct uasm_reloc **r, unsigned int pte, unsigned int ptr,
 	unsigned int hwmode = mode & (_PAGE_VALID | _PAGE_DIRTY);
 	unsigned int swmode = mode & ~hwmode;
 
-	if (IS_ENABLED(CONFIG_XPA) && !cpu_has_64bits) {
+	if (config_enabled(CONFIG_XPA) && !cpu_has_64bits) {
 		uasm_i_lui(p, scratch, swmode >> 16);
 		uasm_i_or(p, pte, pte, scratch);
 		BUG_ON(swmode & 0xffff);
@@ -2214,7 +2197,7 @@ static void build_r4000_tlb_load_handler(void)
 		uasm_l_tlbl_goaround2(&l, p);
 	}
 	uasm_i_ori(&p, wr.r1, wr.r1, (_PAGE_ACCESSED | _PAGE_VALID));
-	build_huge_handler_tail(&p, &r, &l, wr.r1, wr.r2, 1);
+	build_huge_handler_tail(&p, &r, &l, wr.r1, wr.r2);
 #endif
 
 	uasm_l_nopage_tlbl(&l, p);
@@ -2269,7 +2252,7 @@ static void build_r4000_tlb_store_handler(void)
 	build_tlb_probe_entry(&p);
 	uasm_i_ori(&p, wr.r1, wr.r1,
 		   _PAGE_ACCESSED | _PAGE_MODIFIED | _PAGE_VALID | _PAGE_DIRTY);
-	build_huge_handler_tail(&p, &r, &l, wr.r1, wr.r2, 1);
+	build_huge_handler_tail(&p, &r, &l, wr.r1, wr.r2);
 #endif
 
 	uasm_l_nopage_tlbs(&l, p);
@@ -2325,7 +2308,7 @@ static void build_r4000_tlb_modify_handler(void)
 	build_tlb_probe_entry(&p);
 	uasm_i_ori(&p, wr.r1, wr.r1,
 		   _PAGE_ACCESSED | _PAGE_MODIFIED | _PAGE_VALID | _PAGE_DIRTY);
-	build_huge_handler_tail(&p, &r, &l, wr.r1, wr.r2, 0);
+	build_huge_handler_tail(&p, &r, &l, wr.r1, wr.r2);
 #endif
 
 	uasm_l_nopage_tlbm(&l, p);
@@ -2449,7 +2432,7 @@ static void config_htw_params(void)
 		pwsize |= ilog2(PTRS_PER_PMD) << MIPS_PWSIZE_MDW_SHIFT;
 
 	/* Set pointer size to size of directory pointers */
-	if (IS_ENABLED(CONFIG_64BIT))
+	if (config_enabled(CONFIG_64BIT))
 		pwsize |= MIPS_PWSIZE_PS_MASK;
 	/* PTEs may be multiple pointers long (e.g. with XPA) */
 	pwsize |= ((PTE_T_LOG2 - PGD_T_LOG2) << MIPS_PWSIZE_PTEW_SHIFT)
@@ -2465,7 +2448,7 @@ static void config_htw_params(void)
 	 * the pwctl fields.
 	 */
 	config = 1 << MIPS_PWCTL_PWEN_SHIFT;
-	if (IS_ENABLED(CONFIG_64BIT))
+	if (config_enabled(CONFIG_64BIT))
 		config |= MIPS_PWCTL_XU_MASK;
 	write_c0_pwctl(config);
 	pr_info("Hardware Page Table Walker enabled\n");
@@ -2539,7 +2522,7 @@ void build_tlb_refill_handler(void)
 	 */
 	static int run_once = 0;
 
-	if (IS_ENABLED(CONFIG_XPA) && !cpu_has_rixi)
+	if (config_enabled(CONFIG_XPA) && !cpu_has_rixi)
 		panic("Kernels supporting XPA currently require CPUs with RIXI");
 
 	output_pgtable_bits_defines();

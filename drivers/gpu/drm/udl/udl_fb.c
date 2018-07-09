@@ -158,15 +158,10 @@ static int udl_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	unsigned long start = vma->vm_start;
 	unsigned long size = vma->vm_end - vma->vm_start;
-	unsigned long offset;
+	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned long page, pos;
 
-	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT))
-		return -EINVAL;
-
-	offset = vma->vm_pgoff << PAGE_SHIFT;
-
-	if (offset > info->fix.smem_len || size > info->fix.smem_len - offset)
+	if (offset + size > info->fix.smem_len)
 		return -EINVAL;
 
 	pos = (unsigned long)info->fix.smem_start + offset;
@@ -208,7 +203,6 @@ static int udl_fb_open(struct fb_info *info, int user)
 
 	ufbdev->fb_count++;
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
 	if (fb_defio && (info->fbdefio == NULL)) {
 		/* enable defio at last moment if not disabled by client */
 
@@ -224,7 +218,6 @@ static int udl_fb_open(struct fb_info *info, int user)
 		info->fbdefio = fbdefio;
 		fb_deferred_io_init(info);
 	}
-#endif
 
 	pr_notice("open /dev/fb%d user=%d fb_info=%p count=%d\n",
 		  info->node, user, info, ufbdev->fb_count);
@@ -242,14 +235,12 @@ static int udl_fb_release(struct fb_info *info, int user)
 
 	ufbdev->fb_count--;
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
 	if ((ufbdev->fb_count == 0) && (info->fbdefio)) {
 		fb_deferred_io_cleanup(info);
 		kfree(info->fbdefio);
 		info->fbdefio = NULL;
 		info->fbops->fb_mmap = udl_fb_mmap;
 	}
-#endif
 
 	pr_warn("released /dev/fb%d user=%d count=%d\n",
 		info->node, user, ufbdev->fb_count);

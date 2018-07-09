@@ -1477,8 +1477,7 @@ EXPORT_SYMBOL(fman_port_cfg_buf_prefix_content);
  */
 int fman_port_disable(struct fman_port *port)
 {
-	u32 __iomem *bmi_cfg_reg, *bmi_status_reg;
-	u32 tmp;
+	u32 __iomem *bmi_cfg_reg, *bmi_status_reg, tmp;
 	bool rx_port, failure = false;
 	int count;
 
@@ -1554,8 +1553,7 @@ EXPORT_SYMBOL(fman_port_disable);
  */
 int fman_port_enable(struct fman_port *port)
 {
-	u32 __iomem *bmi_cfg_reg;
-	u32 tmp;
+	u32 __iomem *bmi_cfg_reg, tmp;
 	bool rx_port;
 
 	if (!is_init_done(port->cfg))
@@ -1625,7 +1623,7 @@ static int fman_port_probe(struct platform_device *of_dev)
 	struct device_node *fm_node, *port_node;
 	struct resource res;
 	struct resource *dev_res;
-	u32 val;
+	const u32 *u32_prop;
 	int err = 0, lenp;
 	enum fman_port_type port_type;
 	u16 port_speed;
@@ -1654,20 +1652,28 @@ static int fman_port_probe(struct platform_device *of_dev)
 		goto return_err;
 	}
 
-	err = of_property_read_u32(port_node, "cell-index", &val);
-	if (err) {
-		dev_err(port->dev, "%s: reading cell-index for %s failed\n",
+	u32_prop = (const u32 *)of_get_property(port_node, "cell-index", &lenp);
+	if (!u32_prop) {
+		dev_err(port->dev, "%s: of_get_property(%s, cell-index) failed\n",
 			__func__, port_node->full_name);
 		err = -EINVAL;
 		goto return_err;
 	}
-	port_id = (u8)val;
+	if (WARN_ON(lenp != sizeof(u32))) {
+		err = -EINVAL;
+		goto return_err;
+	}
+	port_id = (u8)fdt32_to_cpu(u32_prop[0]);
+
 	port->dts_params.id = port_id;
 
 	if (of_device_is_compatible(port_node, "fsl,fman-v3-port-tx")) {
 		port_type = FMAN_PORT_TYPE_TX;
 		port_speed = 1000;
-		if (of_find_property(port_node, "fsl,fman-10g-port", &lenp))
+		u32_prop = (const u32 *)of_get_property(port_node,
+							"fsl,fman-10g-port",
+							&lenp);
+		if (u32_prop)
 			port_speed = 10000;
 
 	} else if (of_device_is_compatible(port_node, "fsl,fman-v2-port-tx")) {
@@ -1680,7 +1686,9 @@ static int fman_port_probe(struct platform_device *of_dev)
 	} else if (of_device_is_compatible(port_node, "fsl,fman-v3-port-rx")) {
 		port_type = FMAN_PORT_TYPE_RX;
 		port_speed = 1000;
-		if (of_find_property(port_node, "fsl,fman-10g-port", &lenp))
+		u32_prop = (const u32 *)of_get_property(port_node,
+						  "fsl,fman-10g-port", &lenp);
+		if (u32_prop)
 			port_speed = 10000;
 
 	} else if (of_device_is_compatible(port_node, "fsl,fman-v2-port-rx")) {
@@ -1735,7 +1743,7 @@ static int fman_port_probe(struct platform_device *of_dev)
 
 	port->dts_params.base_addr = devm_ioremap(port->dev, res.start,
 						  resource_size(&res));
-	if (!port->dts_params.base_addr)
+	if (port->dts_params.base_addr == 0)
 		dev_err(port->dev, "%s: devm_ioremap() failed\n", __func__);
 
 	dev_set_drvdata(&of_dev->dev, port);
@@ -1767,25 +1775,4 @@ static struct platform_driver fman_port_driver = {
 	.probe = fman_port_probe,
 };
 
-static int __init fman_port_load(void)
-{
-	int err;
-
-	pr_debug("FSL DPAA FMan driver\n");
-
-	err = platform_driver_register(&fman_port_driver);
-	if (err < 0)
-		pr_err("Error, platform_driver_register() = %d\n", err);
-
-	return err;
-}
-module_init(fman_port_load);
-
-static void __exit fman_port_unload(void)
-{
-	platform_driver_unregister(&fman_port_driver);
-}
-module_exit(fman_port_unload);
-
-MODULE_LICENSE("Dual BSD/GPL");
-MODULE_DESCRIPTION("Freescale DPAA Frame Manager Port driver");
+builtin_platform_driver(fman_port_driver);

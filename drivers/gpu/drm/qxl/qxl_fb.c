@@ -24,6 +24,7 @@
  *     David Airlie
  */
 #include <linux/module.h>
+#include <linux/fb.h>
 
 #include "drmP.h"
 #include "drm/drm.h"
@@ -72,12 +73,10 @@ static void qxl_fb_image_init(struct qxl_fb_image *qxl_fb_image,
 	}
 }
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
 static struct fb_deferred_io qxl_defio = {
 	.delay		= QXL_DIRTY_DELAY,
 	.deferred_io	= drm_fb_helper_deferred_io,
 };
-#endif
 
 static struct fb_ops qxlfb_ops = {
 	.owner = THIS_MODULE,
@@ -132,6 +131,10 @@ static int qxlfb_create_pinned_object(struct qxl_fbdev *qfbdev,
 	int ret;
 	int aligned_size, size;
 	int height = mode_cmd->height;
+	int bpp;
+	int depth;
+
+	drm_fb_get_bpp_depth(mode_cmd->pixel_format, &bpp, &depth);
 
 	size = mode_cmd->pitches[0] * height;
 	aligned_size = ALIGN(size, PAGE_SIZE);
@@ -314,10 +317,8 @@ static int qxlfb_create(struct qxl_fbdev *qfbdev,
 		goto out_destroy_fbi;
 	}
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
 	info->fbdefio = &qxl_defio;
 	fb_deferred_io_init(info);
-#endif
 
 	qdev->fbdev_info = info;
 	qdev->fbdev_qfb = &qfbdev->qfb;
@@ -387,11 +388,9 @@ static const struct drm_fb_helper_funcs qxl_fb_helper_funcs = {
 
 int qxl_fbdev_init(struct qxl_device *qdev)
 {
-	int ret = 0;
-
-#ifdef CONFIG_DRM_FBDEV_EMULATION
 	struct qxl_fbdev *qfbdev;
 	int bpp_sel = 32; /* TODO: parameter from somewhere? */
+	int ret;
 
 	qfbdev = kzalloc(sizeof(struct qxl_fbdev), GFP_KERNEL);
 	if (!qfbdev)
@@ -425,8 +424,6 @@ fini:
 	drm_fb_helper_fini(&qfbdev->helper);
 free:
 	kfree(qfbdev);
-#endif
-
 	return ret;
 }
 
@@ -442,9 +439,6 @@ void qxl_fbdev_fini(struct qxl_device *qdev)
 
 void qxl_fbdev_set_suspend(struct qxl_device *qdev, int state)
 {
-	if (!qdev->mode_info.qfbdev)
-		return;
-
 	drm_fb_helper_set_suspend(&qdev->mode_info.qfbdev->helper, state);
 }
 

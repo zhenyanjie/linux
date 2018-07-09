@@ -24,7 +24,7 @@ struct dax_pmem {
 	struct completion cmp;
 };
 
-static struct dax_pmem *to_dax_pmem(struct percpu_ref *ref)
+struct dax_pmem *to_dax_pmem(struct percpu_ref *ref)
 {
 	return container_of(ref, struct dax_pmem, ref);
 }
@@ -44,6 +44,7 @@ static void dax_pmem_percpu_exit(void *data)
 
 	dev_dbg(dax_pmem->dev, "%s\n", __func__);
 	percpu_ref_exit(ref);
+	wait_for_completion(&dax_pmem->cmp);
 }
 
 static void dax_pmem_percpu_kill(void *data)
@@ -53,17 +54,16 @@ static void dax_pmem_percpu_kill(void *data)
 
 	dev_dbg(dax_pmem->dev, "%s\n", __func__);
 	percpu_ref_kill(ref);
-	wait_for_completion(&dax_pmem->cmp);
 }
 
 static int dax_pmem_probe(struct device *dev)
 {
+	int rc;
 	void *addr;
 	struct resource res;
-	struct dax_dev *dax_dev;
-	int rc, id, region_id;
 	struct nd_pfn_sb *pfn_sb;
 	struct dax_pmem *dax_pmem;
+	struct nd_region *nd_region;
 	struct nd_namespace_io *nsio;
 	struct dax_region *dax_region;
 	struct nd_namespace_common *ndns;
@@ -77,9 +77,7 @@ static int dax_pmem_probe(struct device *dev)
 	nsio = to_nd_namespace_io(&ndns->dev);
 
 	/* parse the 'pfn' info block via ->rw_bytes */
-	rc = devm_nsio_enable(dev, nsio);
-	if (rc)
-		return rc;
+	devm_nsio_enable(dev, nsio);
 	altmap = nvdimm_setup_pfn(nd_pfn, &res, &__altmap);
 	if (IS_ERR(altmap))
 		return PTR_ERR(altmap);
@@ -104,39 +102,38 @@ static int dax_pmem_probe(struct device *dev)
 	if (rc)
 		return rc;
 
-	rc = devm_add_action_or_reset(dev, dax_pmem_percpu_exit,
-							&dax_pmem->ref);
-	if (rc)
+	rc = devm_add_action(dev, dax_pmem_percpu_exit, &dax_pmem->ref);
+	if (rc) {
+		dax_pmem_percpu_exit(&dax_pmem->ref);
 		return rc;
+	}
 
 	addr = devm_memremap_pages(dev, &res, &dax_pmem->ref, altmap);
 	if (IS_ERR(addr))
 		return PTR_ERR(addr);
 
-	rc = devm_add_action_or_reset(dev, dax_pmem_percpu_kill,
-							&dax_pmem->ref);
-	if (rc)
+	rc = devm_add_action(dev, dax_pmem_percpu_kill, &dax_pmem->ref);
+	if (rc) {
+		dax_pmem_percpu_kill(&dax_pmem->ref);
 		return rc;
+	}
 
 	/* adjust the dax_region resource to the start of data */
 	res.start += le64_to_cpu(pfn_sb->dataoff);
 
-	rc = sscanf(dev_name(&ndns->dev), "namespace%d.%d", &region_id, &id);
-	if (rc != 2)
-		return -EINVAL;
-
-	dax_region = alloc_dax_region(dev, region_id, &res,
+	nd_region = to_nd_region(dev->parent);
+	dax_region = alloc_dax_region(dev, nd_region->id, &res,
 			le32_to_cpu(pfn_sb->align), addr, PFN_DEV|PFN_MAP);
 	if (!dax_region)
 		return -ENOMEM;
 
 	/* TODO: support for subdividing a dax region... */
-	dax_dev = devm_create_dax_dev(dax_region, id, &res, 1);
+	rc = devm_create_dax_dev(dax_region, &res, 1);
 
 	/* child dax_dev instances now own the lifetime of the dax_region */
 	dax_region_put(dax_region);
 
-	return PTR_ERR_OR_ZERO(dax_dev);
+	return rc;
 }
 
 static struct nd_device_driver dax_pmem_driver = {

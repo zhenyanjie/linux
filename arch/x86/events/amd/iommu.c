@@ -12,7 +12,7 @@
  */
 
 #include <linux/perf_event.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/cpumask.h>
 #include <linux/slab.h>
 

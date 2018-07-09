@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -222,7 +226,7 @@ static void osc_lock_lvb_update(const struct lu_env *env,
 		ldlm_lock_allow_match_locked(dlmlock);
 	}
 
-	cl_object_attr_update(env, obj, attr, valid);
+	cl_object_attr_set(env, obj, attr, valid);
 	cl_object_attr_unlock(obj);
 }
 
@@ -467,7 +471,7 @@ static int osc_dlm_blocking_ast0(const struct lu_env *env,
 		 */
 		attr->cat_kms = ldlm_extent_shift_kms(dlmlock, old_kms);
 
-		cl_object_attr_update(env, obj, attr, CAT_KMS);
+		cl_object_attr_set(env, obj, attr, CAT_KMS);
 		cl_object_attr_unlock(obj);
 		unlock_res_and_lock(dlmlock);
 
@@ -634,10 +638,11 @@ static int weigh_cb(const struct lu_env *env, struct cl_io *io,
 
 	if (cl_page_is_vmlocked(env, page) ||
 	    PageDirty(page->cp_vmpage) || PageWriteback(page->cp_vmpage)
-	   )
+	   ) {
+		(*(unsigned long *)cbdata)++;
 		return CLP_GANG_ABORT;
+	}
 
-	*(pgoff_t *)cbdata = osc_index(ops) + 1;
 	return CLP_GANG_OKAY;
 }
 
@@ -647,7 +652,7 @@ static unsigned long osc_lock_weight(const struct lu_env *env,
 {
 	struct cl_io *io = &osc_env_info(env)->oti_io;
 	struct cl_object *obj = cl_object_top(&oscobj->oo_cl);
-	pgoff_t page_index;
+	unsigned long npages = 0;
 	int result;
 
 	io->ci_obj = obj;
@@ -656,12 +661,11 @@ static unsigned long osc_lock_weight(const struct lu_env *env,
 	if (result != 0)
 		return result;
 
-	page_index = cl_index(obj, extent->start);
 	do {
 		result = osc_page_gang_lookup(env, io, oscobj,
-					      page_index,
+					      cl_index(obj, extent->start),
 					      cl_index(obj, extent->end),
-					      weigh_cb, (void *)&page_index);
+					      weigh_cb, (void *)&npages);
 		if (result == CLP_GANG_ABORT)
 			break;
 		if (result == CLP_GANG_RESCHED)
@@ -669,7 +673,7 @@ static unsigned long osc_lock_weight(const struct lu_env *env,
 	} while (result != CLP_GANG_OKAY);
 	cl_io_fini(env, io);
 
-	return result == CLP_GANG_ABORT ? 1 : 0;
+	return npages;
 }
 
 /**
@@ -699,7 +703,7 @@ unsigned long osc_ldlm_weigh_ast(struct ldlm_lock *dlmlock)
 
 	LASSERT(dlmlock->l_resource->lr_type == LDLM_EXTENT);
 	obj = dlmlock->l_ast_data;
-	if (!obj) {
+	if (obj) {
 		weight = 1;
 		goto out;
 	}
@@ -1116,8 +1120,7 @@ static void osc_lock_set_writer(const struct lu_env *env,
 		}
 	} else {
 		LASSERT(cl_io_is_mkwrite(io));
-		io_start = io->u.ci_fault.ft_index;
-		io_end = io->u.ci_fault.ft_index;
+		io_start = io_end = io->u.ci_fault.ft_index;
 	}
 
 	if (descr->cld_mode >= CLM_WRITE &&
@@ -1168,7 +1171,7 @@ int osc_lock_init(const struct lu_env *env,
 		osc_lock_set_writer(env, io, obj, oscl);
 
 
-	LDLM_DEBUG_NOLOCK("lock %p, osc lock %p, flags %llx",
+	LDLM_DEBUG_NOLOCK("lock %p, osc lock %p, flags %llx\n",
 			  lock, oscl, oscl->ols_flags);
 
 	return 0;

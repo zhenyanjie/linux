@@ -137,6 +137,8 @@ isert_create_qp(struct isert_conn *isert_conn,
 	attr.cap.max_recv_wr = ISERT_QP_MAX_RECV_DTOS + 1;
 	attr.cap.max_rdma_ctxs = ISCSI_DEF_XMIT_CMDS_MAX;
 	attr.cap.max_send_sge = device->ib_device->attrs.max_sge;
+	isert_conn->max_sge = min(device->ib_device->attrs.max_sge,
+				  device->ib_device->attrs.max_sge_rd);
 	attr.cap.max_recv_sge = 1;
 	attr.sq_sig_type = IB_SIGNAL_REQ_WR;
 	attr.qp_type = IB_QPT_RC;
@@ -309,7 +311,7 @@ isert_create_device_ib_res(struct isert_device *device)
 	if (ret)
 		goto out;
 
-	device->pd = ib_alloc_pd(ib_dev, 0);
+	device->pd = ib_alloc_pd(ib_dev);
 	if (IS_ERR(device->pd)) {
 		ret = PTR_ERR(device->pd);
 		isert_err("failed to allocate pd, device %p, ret=%d\n",
@@ -403,7 +405,6 @@ isert_init_conn(struct isert_conn *isert_conn)
 	INIT_LIST_HEAD(&isert_conn->node);
 	init_completion(&isert_conn->login_comp);
 	init_completion(&isert_conn->login_req_comp);
-	init_waitqueue_head(&isert_conn->rem_wait);
 	kref_init(&isert_conn->kref);
 	mutex_init(&isert_conn->mutex);
 	INIT_WORK(&isert_conn->release_work, isert_release_work);
@@ -449,7 +450,7 @@ isert_alloc_login_buf(struct isert_conn *isert_conn,
 
 	isert_conn->login_rsp_buf = kzalloc(ISER_RX_PAYLOAD_SIZE, GFP_KERNEL);
 	if (!isert_conn->login_rsp_buf) {
-		ret = -ENOMEM;
+		isert_err("Unable to allocate isert_conn->login_rspbuf\n");
 		goto out_unmap_login_req_buf;
 	}
 
@@ -579,8 +580,7 @@ isert_connect_release(struct isert_conn *isert_conn)
 	BUG_ON(!device);
 
 	isert_free_rx_descriptors(isert_conn);
-	if (isert_conn->cm_id &&
-	    !isert_conn->dev_removed)
+	if (isert_conn->cm_id)
 		rdma_destroy_id(isert_conn->cm_id);
 
 	if (isert_conn->qp) {
@@ -595,10 +595,7 @@ isert_connect_release(struct isert_conn *isert_conn)
 
 	isert_device_put(device);
 
-	if (isert_conn->dev_removed)
-		wake_up_interruptible(&isert_conn->rem_wait);
-	else
-		kfree(isert_conn);
+	kfree(isert_conn);
 }
 
 static void
@@ -747,7 +744,6 @@ isert_connect_error(struct rdma_cm_id *cma_id)
 {
 	struct isert_conn *isert_conn = cma_id->qp->qp_context;
 
-	ib_drain_qp(isert_conn->qp);
 	list_del_init(&isert_conn->node);
 	isert_conn->cm_id = NULL;
 	isert_put_conn(isert_conn);
@@ -759,7 +755,6 @@ static int
 isert_cma_handler(struct rdma_cm_id *cma_id, struct rdma_cm_event *event)
 {
 	struct isert_np *isert_np = cma_id->context;
-	struct isert_conn *isert_conn;
 	int ret = 0;
 
 	isert_info("%s (%d): status %d id %p np %p\n",
@@ -780,21 +775,10 @@ isert_cma_handler(struct rdma_cm_id *cma_id, struct rdma_cm_event *event)
 		break;
 	case RDMA_CM_EVENT_ADDR_CHANGE:    /* FALLTHRU */
 	case RDMA_CM_EVENT_DISCONNECTED:   /* FALLTHRU */
+	case RDMA_CM_EVENT_DEVICE_REMOVAL: /* FALLTHRU */
 	case RDMA_CM_EVENT_TIMEWAIT_EXIT:  /* FALLTHRU */
 		ret = isert_disconnected_handler(cma_id, event->event);
 		break;
-	case RDMA_CM_EVENT_DEVICE_REMOVAL:
-		isert_conn = cma_id->qp->qp_context;
-		isert_conn->dev_removed = true;
-		isert_disconnected_handler(cma_id, event->event);
-		wait_event_interruptible(isert_conn->rem_wait,
-					 isert_conn->state == ISER_CONN_DOWN);
-		kfree(isert_conn);
-		/*
-		 * return non-zero from the callback to destroy
-		 * the rdma cm id
-		 */
-		return 1;
 	case RDMA_CM_EVENT_REJECTED:       /* FALLTHRU */
 	case RDMA_CM_EVENT_UNREACHABLE:    /* FALLTHRU */
 	case RDMA_CM_EVENT_CONNECT_ERROR:
@@ -879,22 +863,6 @@ isert_login_post_send(struct isert_conn *isert_conn, struct iser_tx_desc *tx_des
 }
 
 static void
-__isert_create_send_desc(struct isert_device *device,
-			 struct iser_tx_desc *tx_desc)
-{
-
-	memset(&tx_desc->iser_header, 0, sizeof(struct iser_ctrl));
-	tx_desc->iser_header.flags = ISCSI_CTRL;
-
-	tx_desc->num_sge = 1;
-
-	if (tx_desc->tx_sg[0].lkey != device->pd->local_dma_lkey) {
-		tx_desc->tx_sg[0].lkey = device->pd->local_dma_lkey;
-		isert_dbg("tx_desc %p lkey mismatch, fixing\n", tx_desc);
-	}
-}
-
-static void
 isert_create_send_desc(struct isert_conn *isert_conn,
 		       struct isert_cmd *isert_cmd,
 		       struct iser_tx_desc *tx_desc)
@@ -905,7 +873,15 @@ isert_create_send_desc(struct isert_conn *isert_conn,
 	ib_dma_sync_single_for_cpu(ib_dev, tx_desc->dma_addr,
 				   ISER_HEADERS_LEN, DMA_TO_DEVICE);
 
-	__isert_create_send_desc(device, tx_desc);
+	memset(&tx_desc->iser_header, 0, sizeof(struct iser_ctrl));
+	tx_desc->iser_header.flags = ISCSI_CTRL;
+
+	tx_desc->num_sge = 1;
+
+	if (tx_desc->tx_sg[0].lkey != device->pd->local_dma_lkey) {
+		tx_desc->tx_sg[0].lkey = device->pd->local_dma_lkey;
+		isert_dbg("tx_desc %p lkey mismatch, fixing\n", tx_desc);
+	}
 }
 
 static int
@@ -995,7 +971,7 @@ isert_put_login_tx(struct iscsi_conn *conn, struct iscsi_login *login,
 	struct iser_tx_desc *tx_desc = &isert_conn->login_tx_desc;
 	int ret;
 
-	__isert_create_send_desc(device, tx_desc);
+	isert_create_send_desc(isert_conn, NULL, tx_desc);
 
 	memcpy(&tx_desc->iscsi_header, &login->rsp[0],
 	       sizeof(struct iscsi_hdr));
@@ -1456,7 +1432,7 @@ static void
 isert_login_recv_done(struct ib_cq *cq, struct ib_wc *wc)
 {
 	struct isert_conn *isert_conn = wc->qp->qp_context;
-	struct ib_device *ib_dev = isert_conn->device->ib_device;
+	struct ib_device *ib_dev = isert_conn->cm_id->device;
 
 	if (unlikely(wc->status != IB_WC_SUCCESS)) {
 		isert_print_wc(wc, "login recv");
@@ -2090,7 +2066,7 @@ isert_set_sig_attrs(struct se_cmd *se_cmd, struct ib_sig_attrs *sig_attrs)
 
 	sig_attrs->check_mask =
 	       (se_cmd->prot_checks & TARGET_DIF_CHECK_GUARD  ? 0xc0 : 0) |
-	       (se_cmd->prot_checks & TARGET_DIF_CHECK_APPTAG ? 0x30 : 0) |
+	       (se_cmd->prot_checks & TARGET_DIF_CHECK_REFTAG ? 0x30 : 0) |
 	       (se_cmd->prot_checks & TARGET_DIF_CHECK_REFTAG ? 0x0f : 0);
 	return 0;
 }
@@ -2105,9 +2081,6 @@ isert_rdma_rw_ctx_post(struct isert_cmd *cmd, struct isert_conn *conn,
 	u64 addr;
 	u32 rkey, offset;
 	int ret;
-
-	if (cmd->ctx_init_done)
-		goto rdma_ctx_post;
 
 	if (dir == DMA_FROM_DEVICE) {
 		addr = cmd->write_va;
@@ -2136,15 +2109,11 @@ isert_rdma_rw_ctx_post(struct isert_cmd *cmd, struct isert_conn *conn,
 				se_cmd->t_data_sg, se_cmd->t_data_nents,
 				offset, addr, rkey, dir);
 	}
-
 	if (ret < 0) {
 		isert_err("Cmd: %p failed to prepare RDMA res\n", cmd);
 		return ret;
 	}
 
-	cmd->ctx_init_done = true;
-
-rdma_ctx_post:
 	ret = rdma_rw_ctx_post(&cmd->rw, conn->qp, port_num, cqe, chain_wr);
 	if (ret < 0)
 		isert_err("Cmd: %p failed to post RDMA res\n", cmd);

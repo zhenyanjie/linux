@@ -166,10 +166,14 @@ static struct usbhsh_request *usbhsh_ureq_alloc(struct usbhsh_hpriv *hpriv,
 					       gfp_t mem_flags)
 {
 	struct usbhsh_request *ureq;
+	struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
+	struct device *dev = usbhs_priv_to_dev(priv);
 
 	ureq = kzalloc(sizeof(struct usbhsh_request), mem_flags);
-	if (!ureq)
+	if (!ureq) {
+		dev_err(dev, "ureq alloc fail\n");
 		return NULL;
+	}
 
 	usbhs_pkt_init(&ureq->pkt);
 	ureq->urb = urb;
@@ -384,8 +388,10 @@ static int usbhsh_endpoint_attach(struct usbhsh_hpriv *hpriv,
 	unsigned long flags;
 
 	uep = kzalloc(sizeof(struct usbhsh_ep), mem_flags);
-	if (!uep)
+	if (!uep) {
+		dev_err(dev, "usbhsh_ep alloc fail\n");
 		return -ENOMEM;
+	}
 
 	/********************  spin lock ********************/
 	usbhs_lock(priv, flags);

@@ -465,12 +465,12 @@ static int ni6501_alloc_usb_buffers(struct comedi_device *dev)
 	struct ni6501_private *devpriv = dev->private;
 	size_t size;
 
-	size = usb_endpoint_maxp(devpriv->ep_rx);
+	size = le16_to_cpu(devpriv->ep_rx->wMaxPacketSize);
 	devpriv->usb_rx_buf = kzalloc(size, GFP_KERNEL);
 	if (!devpriv->usb_rx_buf)
 		return -ENOMEM;
 
-	size = usb_endpoint_maxp(devpriv->ep_tx);
+	size = le16_to_cpu(devpriv->ep_tx->wMaxPacketSize);
 	devpriv->usb_tx_buf = kzalloc(size, GFP_KERNEL);
 	if (!devpriv->usb_tx_buf) {
 		kfree(devpriv->usb_rx_buf);

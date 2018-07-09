@@ -909,7 +909,7 @@ static int open_file_eeprom(struct inode *inode, struct file *file)
 	struct ath5k_hw *ah = inode->i_private;
 	bool res;
 	int i, ret;
-	u32 eesize;	/* NB: in 16-bit words */
+	u32 eesize;
 	u16 val, *buf;
 
 	/* Get eeprom size */
@@ -932,17 +932,14 @@ static int open_file_eeprom(struct inode *inode, struct file *file)
 
 	/* Create buffer and read in eeprom */
 
-	buf = vmalloc(eesize * 2);
+	buf = vmalloc(eesize);
 	if (!buf) {
 		ret = -ENOMEM;
 		goto err;
 	}
 
 	for (i = 0; i < eesize; ++i) {
-		if (!ath5k_hw_nvram_read(ah, i, &val)) {
-			ret = -EIO;
-			goto freebuf;
-		}
+		AR5K_EEPROM_READ(i, val);
 		buf[i] = val;
 	}
 
@@ -955,7 +952,7 @@ static int open_file_eeprom(struct inode *inode, struct file *file)
 	}
 
 	ep->buf = buf;
-	ep->len = eesize * 2;
+	ep->len = i;
 
 	file->private_data = (void *)ep;
 

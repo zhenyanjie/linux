@@ -1,16 +1,12 @@
-#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <linux/types.h>
 #include "perf.h"
 #include "debug.h"
 #include "tests/tests.h"
 #include "cloexec.h"
-#include "util.h"
 #include "arch-tests.h"
 
 static u64 rdpmc(unsigned int counter)
@@ -115,14 +111,14 @@ static int __test__rdpmc(void)
 	if (fd < 0) {
 		pr_err("Error: sys_perf_event_open() syscall returned "
 		       "with %d (%s)\n", fd,
-		       str_error_r(errno, sbuf, sizeof(sbuf)));
+		       strerror_r(errno, sbuf, sizeof(sbuf)));
 		return -1;
 	}
 
 	addr = mmap(NULL, page_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (addr == (void *)(-1)) {
 		pr_err("Error: mmap() syscall returned with (%s)\n",
-		       str_error_r(errno, sbuf, sizeof(sbuf)));
+		       strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_close;
 	}
 

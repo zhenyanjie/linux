@@ -220,8 +220,7 @@ static int hfsplus_sync_fs(struct super_block *sb, int wait)
 
 	error2 = hfsplus_submit_bio(sb,
 				   sbi->part_start + HFSPLUS_VOLHEAD_SECTOR,
-				   sbi->s_vhdr_buf, NULL, REQ_OP_WRITE,
-				   WRITE_SYNC);
+				   sbi->s_vhdr_buf, NULL, WRITE_SYNC);
 	if (!error)
 		error = error2;
 	if (!write_backup)
@@ -229,8 +228,7 @@ static int hfsplus_sync_fs(struct super_block *sb, int wait)
 
 	error2 = hfsplus_submit_bio(sb,
 				  sbi->part_start + sbi->sect_count - 2,
-				  sbi->s_backup_vhdr_buf, NULL, REQ_OP_WRITE,
-				  WRITE_SYNC);
+				  sbi->s_backup_vhdr_buf, NULL, WRITE_SYNC);
 	if (!error)
 		error2 = error;
 out:
@@ -588,7 +586,6 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 
 out_put_hidden_dir:
-	cancel_delayed_work_sync(&sbi->sync_work);
 	iput(sbi->hidden_dir);
 out_put_root:
 	dput(sb->s_root);

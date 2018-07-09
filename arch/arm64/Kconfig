@@ -3,20 +3,16 @@ config ARM64
 	select ACPI_CCA_REQUIRED if ACPI
 	select ACPI_GENERIC_GSI if ACPI
 	select ACPI_REDUCED_HARDWARE_ONLY if ACPI
-	select ACPI_MCFG if ACPI
-	select ACPI_SPCR_TABLE if ACPI
-	select ARCH_CLOCKSOURCE_DATA
 	select ARCH_HAS_DEVMEM_IS_ALLOWED
-	select ARCH_HAS_ACPI_TABLE_UPGRADE if ACPI
+	select ARCH_HAS_ATOMIC64_DEC_IF_POSITIVE
 	select ARCH_HAS_ELF_RANDOMIZE
 	select ARCH_HAS_GCOV_PROFILE_ALL
-	select ARCH_HAS_GIGANTIC_PAGE
-	select ARCH_HAS_KCOV
 	select ARCH_HAS_SG_CHAIN
 	select ARCH_HAS_TICK_BROADCAST if GENERIC_CLOCKEVENTS_BROADCAST
 	select ARCH_USE_CMPXCHG_LOCKREF
 	select ARCH_SUPPORTS_ATOMIC_RMW
 	select ARCH_SUPPORTS_NUMA_BALANCING
+	select ARCH_WANT_OPTIONAL_GPIOLIB
 	select ARCH_WANT_COMPAT_IPC_PARSE_VERSION
 	select ARCH_WANT_FRAME_POINTERS
 	select ARCH_HAS_UBSAN_SANITIZE_ALL
@@ -24,9 +20,9 @@ config ARM64
 	select ARM_ARCH_TIMER
 	select ARM_GIC
 	select AUDIT_ARCH_COMPAT_GENERIC
-	select ARM_GIC_V2M if PCI
+	select ARM_GIC_V2M if PCI_MSI
 	select ARM_GIC_V3
-	select ARM_GIC_V3_ITS if PCI
+	select ARM_GIC_V3_ITS if PCI_MSI
 	select ARM_PSCI_FW
 	select BUILDTIME_EXTABLE_SORT
 	select CLONE_BACKWARDS
@@ -55,7 +51,6 @@ config ARM64
 	select HAVE_ALIGNED_STRUCT_PAGE if SLUB
 	select HAVE_ARCH_AUDITSYSCALL
 	select HAVE_ARCH_BITREVERSE
-	select HAVE_ARCH_HARDENED_USERCOPY
 	select HAVE_ARCH_HUGE_VMAP
 	select HAVE_ARCH_JUMP_LABEL
 	select HAVE_ARCH_KASAN if SPARSEMEM_VMEMMAP && !(ARM64_16K_PAGES && ARM64_VA_BITS_48)
@@ -81,7 +76,6 @@ config ARM64
 	select HAVE_FTRACE_MCOUNT_RECORD
 	select HAVE_FUNCTION_TRACER
 	select HAVE_FUNCTION_GRAPH_TRACER
-	select HAVE_GCC_PLUGINS
 	select HAVE_GENERIC_DMA_COHERENT
 	select HAVE_HW_BREAKPOINT if PERF_EVENTS
 	select HAVE_IRQ_TIME_ACCOUNTING
@@ -91,11 +85,8 @@ config ARM64
 	select HAVE_PERF_EVENTS
 	select HAVE_PERF_REGS
 	select HAVE_PERF_USER_STACK_DUMP
-	select HAVE_REGS_AND_STACK_ACCESS_API
 	select HAVE_RCU_TABLE_FREE
 	select HAVE_SYSCALL_TRACEPOINTS
-	select HAVE_KPROBES
-	select HAVE_KRETPROBES if HAVE_KPROBES
 	select IOMMU_DMA if IOMMU_SUPPORT
 	select IRQ_DOMAIN
 	select IRQ_FORCED_THREADING
@@ -103,8 +94,9 @@ config ARM64
 	select NO_BOOTMEM
 	select OF
 	select OF_EARLY_FLATTREE
+	select OF_NUMA if NUMA && OF
 	select OF_RESERVED_MEM
-	select PCI_ECAM if ACPI
+	select PERF_USE_VMALLOC
 	select POWER_RESET
 	select POWER_SUPPLY
 	select SPARSE_IRQ
@@ -119,9 +111,6 @@ config ARCH_PHYS_ADDR_T_64BIT
 	def_bool y
 
 config MMU
-	def_bool y
-
-config DEBUG_RODATA
 	def_bool y
 
 config ARM64_PAGE_SHIFT
@@ -417,27 +406,18 @@ config ARM64_ERRATUM_845719
 
 config ARM64_ERRATUM_843419
 	bool "Cortex-A53: 843419: A load or store might access an incorrect address"
+	depends on MODULES
 	default y
-	select ARM64_MODULE_CMODEL_LARGE if MODULES
+	select ARM64_MODULE_CMODEL_LARGE
 	help
-	  This option links the kernel with '--fix-cortex-a53-843419' and
-	  builds modules using the large memory model in order to avoid the use
-	  of the ADRP instruction, which can cause a subsequent memory access
-	  to use an incorrect address on Cortex-A53 parts up to r0p4.
+	  This option builds kernel modules using the large memory model in
+	  order to avoid the use of the ADRP instruction, which can cause
+	  a subsequent memory access to use an incorrect address on Cortex-A53
+	  parts up to r0p4.
 
-	  If unsure, say Y.
-
-config ARM64_ERRATUM_1024718
-	bool "Cortex-A55: 1024718: Update of DBM/AP bits without break before make might result in incorrect update"
-	default y
-	help
-	  This option adds work around for Arm Cortex-A55 Erratum 1024718.
-
-	  Affected Cortex-A55 cores (r0p0, r0p1, r1p0) could cause incorrect
-	  update of the hardware dirty bit when the DBM/AP bits are updated
-	  without a break-before-make. The work around is to disable the usage
-	  of hardware DBM locally on the affected cores. CPUs not affected by
-	  erratum will continue to use the feature.
+	  Note that the kernel itself must be linked with a version of ld
+	  which fixes potentially affected ADRP instructions through the
+	  use of veneers.
 
 	  If unsure, say Y.
 
@@ -485,16 +465,6 @@ config CAVIUM_ERRATUM_27456
 	  instructions may cause the icache to become corrupted if it
 	  contains data for a non-current ASID.  The fix is to
 	  invalidate the icache when changing the mm context.
-
-	  If unsure, say Y.
-
-config QCOM_QDF2400_ERRATUM_0065
-	bool "QDF2400 E0065: Incorrect GITS_TYPER.ITT_Entry_size"
-	default y
-	help
-	  On Qualcomm Datacenter Technologies QDF2400 SoC, ITS hardware reports
-	  ITE size incorrectly. The GITS_TYPER.ITT_Entry_size field should have
-	  been indicated as 16Bytes (0xf), not 8Bytes (0x7).
 
 	  If unsure, say Y.
 
@@ -603,8 +573,7 @@ config HOTPLUG_CPU
 # Common NUMA Features
 config NUMA
 	bool "Numa Memory Allocation and Scheduler Support"
-	select ACPI_NUMA if ACPI
-	select OF_NUMA
+	depends on SMP
 	help
 	  Enable NUMA (Non Uniform Memory Access) support.
 
@@ -625,18 +594,11 @@ config USE_PERCPU_NUMA_NODE_ID
 	def_bool y
 	depends on NUMA
 
-config HAVE_SETUP_PER_CPU_AREA
-	def_bool y
-	depends on NUMA
-
-config NEED_PER_CPU_EMBED_FIRST_CHUNK
-	def_bool y
-	depends on NUMA
-
 source kernel/Kconfig.preempt
 source kernel/Kconfig.hz
 
 config ARCH_SUPPORTS_DEBUG_PAGEALLOC
+	depends on !HIBERNATION
 	def_bool y
 
 config ARCH_HAS_HOLES_MEMORYMODEL
@@ -702,16 +664,6 @@ config PARAVIRT_TIME_ACCOUNTING
 
 	  If in doubt, say N here.
 
-config KEXEC
-	depends on PM_SLEEP_SMP
-	select KEXEC_CORE
-	bool "kexec system call"
-	---help---
-	  kexec is a system call that implements the ability to shutdown your
-	  current kernel, and to start another kernel.  It is like a reboot
-	  but it is independent of the system firmware.   And like a reboot
-	  you can start any kernel with it, not just Linux.
-
 config XEN_DOM0
 	def_bool y
 	depends on XEN
@@ -746,35 +698,6 @@ config FORCE_MAX_ZONEORDER
 
 	  However for 4K, we choose a higher default value, 11 as opposed to 10, giving us
 	  4M allocations matching the default size used by generic code.
-
-config UNMAP_KERNEL_AT_EL0
-	bool "Unmap kernel when running in userspace (aka \"KAISER\")" if EXPERT
-	default y
-	help
-	  Speculation attacks against some high-performance processors can
-	  be used to bypass MMU permission checks and leak kernel data to
-	  userspace. This can be defended against by unmapping the kernel
-	  when running in userspace, mapping it back in on exception entry
-	  via a trampoline page in the vector table.
-
-	  If unsure, say Y.
-
-config HARDEN_BRANCH_PREDICTOR
-	bool "Harden the branch predictor against aliasing attacks" if EXPERT
-	default y
-	help
-	  Speculation attacks against some high-performance processors rely on
-	  being able to manipulate the branch predictor for a victim context by
-	  executing aliasing branches in the attacker context.  Such attacks
-	  can be partially mitigated against by clearing internal branch
-	  predictor state and limiting the prediction logic in some situations.
-
-	  This config option will take CPU-specific actions to harden the
-	  branch predictor against aliasing attacks and may rely on specific
-	  instruction sequences or control bits being set by the system
-	  firmware.
-
-	  If unsure, say Y.
 
 menuconfig ARMV8_DEPRECATED
 	bool "Emulate deprecated/obsolete ARMv8 instructions"
@@ -968,7 +891,7 @@ config RANDOMIZE_BASE
 
 config RANDOMIZE_MODULE_REGION_FULL
 	bool "Randomize the module region independently from the core kernel"
-	depends on RANDOMIZE_BASE && !DYNAMIC_FTRACE
+	depends on RANDOMIZE_BASE
 	default y
 	help
 	  Randomizes the location of the module region without considering the
@@ -1050,7 +973,7 @@ source "fs/Kconfig.binfmt"
 config COMPAT
 	bool "Kernel support for 32-bit EL0"
 	depends on ARM64_4K_PAGES || EXPERT
-	select COMPAT_BINFMT_ELF if BINFMT_ELF
+	select COMPAT_BINFMT_ELF
 	select HAVE_UID16
 	select OLD_SIGSUSPEND3
 	select COMPAT_OLD_SIGACTION

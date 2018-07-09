@@ -114,8 +114,6 @@ MODULE_PARM_DESC(sdma_comp_size, "Size of User SDMA completion ring. Default: 12
 #define KDETH_HCRC_LOWER_SHIFT    24
 #define KDETH_HCRC_LOWER_MASK     0xff
 
-#define AHG_KDETH_INTR_SHIFT 12
-
 #define PBC2LRH(x) ((((x) & 0xfff) << 2) - 4)
 #define LRH2PBC(x) ((((x) >> 2) + 1) & 0xfff)
 
@@ -147,7 +145,7 @@ MODULE_PARM_DESC(sdma_comp_size, "Size of User SDMA completion ring. Default: 12
 /* Last packet in the request */
 #define TXREQ_FLAGS_REQ_LAST_PKT BIT(0)
 
-/* SDMA request flag bits */
+#define SDMA_REQ_IN_USE     0
 #define SDMA_REQ_FOR_THREAD 1
 #define SDMA_REQ_SEND_DONE  2
 #define SDMA_REQ_HAVE_AHG   3
@@ -185,18 +183,16 @@ struct user_sdma_iovec {
 	struct sdma_mmu_node *node;
 };
 
+#define SDMA_CACHE_NODE_EVICT 0
+
 struct sdma_mmu_node {
 	struct mmu_rb_node rb;
+	struct list_head list;
 	struct hfi1_user_sdma_pkt_q *pq;
 	atomic_t refcount;
 	struct page **pages;
 	unsigned npages;
-};
-
-/* evict operation argument */
-struct evict_data {
-	u32 cleared;	/* count evicted so far */
-	u32 target;	/* target count to evict */
+	unsigned long flags;
 };
 
 struct user_sdma_request {
@@ -309,16 +305,14 @@ static int defer_packet_queue(
 	unsigned seq);
 static void activate_packet_queue(struct iowait *, int);
 static bool sdma_rb_filter(struct mmu_rb_node *, unsigned long, unsigned long);
-static int sdma_rb_insert(void *, struct mmu_rb_node *);
-static int sdma_rb_evict(void *arg, struct mmu_rb_node *mnode,
-			 void *arg2, bool *stop);
-static void sdma_rb_remove(void *, struct mmu_rb_node *);
-static int sdma_rb_invalidate(void *, struct mmu_rb_node *);
+static int sdma_rb_insert(struct rb_root *, struct mmu_rb_node *);
+static void sdma_rb_remove(struct rb_root *, struct mmu_rb_node *,
+			   struct mm_struct *);
+static int sdma_rb_invalidate(struct rb_root *, struct mmu_rb_node *);
 
 static struct mmu_rb_ops sdma_rb_ops = {
 	.filter = sdma_rb_filter,
 	.insert = sdma_rb_insert,
-	.evict = sdma_rb_evict,
 	.remove = sdma_rb_remove,
 	.invalidate = sdma_rb_invalidate
 };
@@ -403,11 +397,6 @@ int hfi1_user_sdma_alloc_queues(struct hfi1_ctxtdata *uctxt, struct file *fp)
 	if (!pq->reqs)
 		goto pq_reqs_nomem;
 
-	memsize = BITS_TO_LONGS(hfi1_sdma_comp_ring_size) * sizeof(long);
-	pq->req_in_use = kzalloc(memsize, GFP_KERNEL);
-	if (!pq->req_in_use)
-		goto pq_reqs_no_in_use;
-
 	INIT_LIST_HEAD(&pq->list);
 	pq->dd = dd;
 	pq->ctxt = uctxt->ctxt;
@@ -416,8 +405,9 @@ int hfi1_user_sdma_alloc_queues(struct hfi1_ctxtdata *uctxt, struct file *fp)
 	pq->state = SDMA_PKT_Q_INACTIVE;
 	atomic_set(&pq->n_reqs, 0);
 	init_waitqueue_head(&pq->wait);
-	atomic_set(&pq->n_locked, 0);
-	pq->mm = fd->mm;
+	pq->sdma_rb_root = RB_ROOT;
+	INIT_LIST_HEAD(&pq->evict);
+	spin_lock_init(&pq->evict_lock);
 
 	iowait_init(&pq->busy, 0, NULL, defer_packet_queue,
 		    activate_packet_queue, NULL);
@@ -447,8 +437,7 @@ int hfi1_user_sdma_alloc_queues(struct hfi1_ctxtdata *uctxt, struct file *fp)
 	cq->nentries = hfi1_sdma_comp_ring_size;
 	fd->cq = cq;
 
-	ret = hfi1_mmu_rb_register(pq, pq->mm, &sdma_rb_ops, dd->pport->hfi1_wq,
-				   &pq->handler);
+	ret = hfi1_mmu_rb_register(&pq->sdma_rb_root, &sdma_rb_ops);
 	if (ret) {
 		dd_dev_err(dd, "Failed to register with MMU %d", ret);
 		goto done;
@@ -464,8 +453,6 @@ cq_comps_nomem:
 cq_nomem:
 	kmem_cache_destroy(pq->txreq_cache);
 pq_txreq_nomem:
-	kfree(pq->req_in_use);
-pq_reqs_no_in_use:
 	kfree(pq->reqs);
 pq_reqs_nomem:
 	kfree(pq);
@@ -485,9 +472,8 @@ int hfi1_user_sdma_free_queues(struct hfi1_filedata *fd)
 	hfi1_cdbg(SDMA, "[%u:%u:%u] Freeing user SDMA queues", uctxt->dd->unit,
 		  uctxt->ctxt, fd->subctxt);
 	pq = fd->pq;
+	hfi1_mmu_rb_unregister(&pq->sdma_rb_root);
 	if (pq) {
-		if (pq->handler)
-			hfi1_mmu_rb_unregister(pq->handler);
 		spin_lock_irqsave(&uctxt->sdma_qlock, flags);
 		if (!list_empty(&pq->list))
 			list_del_init(&pq->list);
@@ -498,7 +484,6 @@ int hfi1_user_sdma_free_queues(struct hfi1_filedata *fd)
 			pq->wait,
 			(ACCESS_ONCE(pq->state) == SDMA_PKT_Q_INACTIVE));
 		kfree(pq->reqs);
-		kfree(pq->req_in_use);
 		kmem_cache_destroy(pq->txreq_cache);
 		kfree(pq);
 		fd->pq = NULL;
@@ -511,31 +496,10 @@ int hfi1_user_sdma_free_queues(struct hfi1_filedata *fd)
 	return 0;
 }
 
-static u8 dlid_to_selector(u16 dlid)
-{
-	static u8 mapping[256];
-	static int initialized;
-	static u8 next;
-	int hash;
-
-	if (!initialized) {
-		memset(mapping, 0xFF, 256);
-		initialized = 1;
-	}
-
-	hash = ((dlid >> 8) ^ dlid) & 0xFF;
-	if (mapping[hash] == 0xFF) {
-		mapping[hash] = next;
-		next = (next + 1) & 0x7F;
-	}
-
-	return mapping[hash];
-}
-
 int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 				   unsigned long dim, unsigned long *count)
 {
-	int ret = 0, i;
+	int ret = 0, i = 0;
 	struct hfi1_filedata *fd = fp->private_data;
 	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_user_sdma_pkt_q *pq = fd->pq;
@@ -547,8 +511,6 @@ int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 	struct user_sdma_request *req;
 	u8 opcode, sc, vl;
 	int req_queued = 0;
-	u16 dlid;
-	u32 selector;
 
 	if (iovec[idx].iov_len < sizeof(info) + sizeof(req->hdr)) {
 		hfi1_cdbg(
@@ -567,48 +529,30 @@ int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 
 	trace_hfi1_sdma_user_reqinfo(dd, uctxt->ctxt, fd->subctxt,
 				     (u16 *)&info);
-
-	if (info.comp_idx >= hfi1_sdma_comp_ring_size) {
-		hfi1_cdbg(SDMA,
-			  "[%u:%u:%u:%u] Invalid comp index",
-			  dd->unit, uctxt->ctxt, fd->subctxt, info.comp_idx);
-		return -EINVAL;
+	if (cq->comps[info.comp_idx].status == QUEUED ||
+	    test_bit(SDMA_REQ_IN_USE, &pq->reqs[info.comp_idx].flags)) {
+		hfi1_cdbg(SDMA, "[%u:%u:%u] Entry %u is in QUEUED state",
+			  dd->unit, uctxt->ctxt, fd->subctxt,
+			  info.comp_idx);
+		return -EBADSLT;
 	}
-
-	/*
-	 * Sanity check the header io vector count.  Need at least 1 vector
-	 * (header) and cannot be larger than the actual io vector count.
-	 */
-	if (req_iovcnt(info.ctrl) < 1 || req_iovcnt(info.ctrl) > dim) {
-		hfi1_cdbg(SDMA,
-			  "[%u:%u:%u:%u] Invalid iov count %d, dim %ld",
-			  dd->unit, uctxt->ctxt, fd->subctxt, info.comp_idx,
-			  req_iovcnt(info.ctrl), dim);
-		return -EINVAL;
-	}
-
 	if (!info.fragsize) {
 		hfi1_cdbg(SDMA,
 			  "[%u:%u:%u:%u] Request does not specify fragsize",
 			  dd->unit, uctxt->ctxt, fd->subctxt, info.comp_idx);
 		return -EINVAL;
 	}
-
-	/* Try to claim the request. */
-	if (test_and_set_bit(info.comp_idx, pq->req_in_use)) {
-		hfi1_cdbg(SDMA, "[%u:%u:%u] Entry %u is in use",
-			  dd->unit, uctxt->ctxt, fd->subctxt,
-			  info.comp_idx);
-		return -EBADSLT;
-	}
 	/*
-	 * All safety checks have been done and this request has been claimed.
+	 * We've done all the safety checks that we can up to this point,
+	 * "allocate" the request entry.
 	 */
 	hfi1_cdbg(SDMA, "[%u:%u:%u] Using req/comp entry %u\n", dd->unit,
 		  uctxt->ctxt, fd->subctxt, info.comp_idx);
 	req = pq->reqs + info.comp_idx;
 	memset(req, 0, sizeof(*req));
-	req->data_iovs = req_iovcnt(info.ctrl) - 1; /* subtract header vector */
+	/* Mark the request as IN_USE before we start filling it in. */
+	set_bit(SDMA_REQ_IN_USE, &req->flags);
+	req->data_iovs = req_iovcnt(info.ctrl) - 1;
 	req->pq = pq;
 	req->cq = cq;
 	req->status = -1;
@@ -616,22 +560,13 @@ int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 
 	memcpy(&req->info, &info, sizeof(info));
 
-	if (req_opcode(info.ctrl) == EXPECTED) {
-		/* expected must have a TID info and at least one data vector */
-		if (req->data_iovs < 2) {
-			SDMA_DBG(req,
-				 "Not enough vectors for expected request");
-			ret = -EINVAL;
-			goto free_req;
-		}
+	if (req_opcode(info.ctrl) == EXPECTED)
 		req->data_iovs--;
-	}
 
 	if (!info.npkts || req->data_iovs > MAX_VECTORS_PER_REQ) {
 		SDMA_DBG(req, "Too many vectors (%u/%u)", req->data_iovs,
 			 MAX_VECTORS_PER_REQ);
-		ret = -EINVAL;
-		goto free_req;
+		return -EINVAL;
 	}
 	/* Copy the header from the user buffer */
 	ret = copy_from_user(&req->hdr, iovec[idx].iov_base + sizeof(info),
@@ -699,7 +634,7 @@ int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 	idx++;
 
 	/* Save all the IO vector structures */
-	for (i = 0; i < req->data_iovs; i++) {
+	while (i < req->data_iovs) {
 		INIT_LIST_HEAD(&req->iovs[i].list);
 		memcpy(&req->iovs[i].iov, iovec + idx++, sizeof(struct iovec));
 		ret = pin_vector_pages(req, &req->iovs[i]);
@@ -707,7 +642,7 @@ int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 			req->status = ret;
 			goto free_req;
 		}
-		req->data_len += req->iovs[i].iov.iov_len;
+		req->data_len += req->iovs[i++].iov.iov_len;
 	}
 	SDMA_DBG(req, "total data length %u", req->data_len);
 
@@ -751,11 +686,10 @@ int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 		idx++;
 	}
 
-	dlid = be16_to_cpu(req->hdr.lrh[1]);
-	selector = dlid_to_selector(dlid);
-	selector += uctxt->ctxt + fd->subctxt;
-	req->sde = sdma_select_user_engine(dd, selector, vl);
-
+	/* Have to select the engine */
+	req->sde = sdma_select_engine_vl(dd,
+					 (u32)(uctxt->ctxt + fd->subctxt),
+					 vl);
 	if (!req->sde || !sdma_running(req->sde)) {
 		ret = -ECOMM;
 		goto free_req;
@@ -832,21 +766,14 @@ static inline u32 compute_data_length(struct user_sdma_request *req,
 	 * The size of the data of the first packet is in the header
 	 * template. However, it includes the header and ICRC, which need
 	 * to be subtracted.
-	 * The minimum representable packet data length in a header is 4 bytes,
-	 * therefore, when the data length request is less than 4 bytes, there's
-	 * only one packet, and the packet data length is equal to that of the
-	 * request data length.
 	 * The size of the remaining packets is the minimum of the frag
 	 * size (MTU) or remaining data in the request.
 	 */
 	u32 len;
 
 	if (!req->seqnum) {
-		if (req->data_len < sizeof(u32))
-			len = req->data_len;
-		else
-			len = ((be16_to_cpu(req->hdr.lrh[2]) << 2) -
-			       (sizeof(tx->hdr) - 4));
+		len = ((be16_to_cpu(req->hdr.lrh[2]) << 2) -
+		       (sizeof(tx->hdr) - 4));
 	} else if (req_opcode(req->info.ctrl) == EXPECTED) {
 		u32 tidlen = EXP_TID_GET(req->tids[req->tididx], LEN) *
 			PAGE_SIZE;
@@ -876,13 +803,6 @@ static inline u32 compute_data_length(struct user_sdma_request *req,
 	return len;
 }
 
-static inline u32 pad_len(u32 len)
-{
-	if (len & (sizeof(u32) - 1))
-		len += sizeof(u32) - (len & (sizeof(u32) - 1));
-	return len;
-}
-
 static inline u32 get_lrh_len(struct hfi1_pkt_header hdr, u32 len)
 {
 	/* (Size of complete header - size of PBC) + 4B ICRC + data length */
@@ -891,7 +811,7 @@ static inline u32 get_lrh_len(struct hfi1_pkt_header hdr, u32 len)
 
 static int user_sdma_send_pkts(struct user_sdma_request *req, unsigned maxpkts)
 {
-	int ret = 0, count;
+	int ret = 0;
 	unsigned npkts = 0;
 	struct user_sdma_txreq *tx = NULL;
 	struct hfi1_user_sdma_pkt_q *pq = NULL;
@@ -974,8 +894,7 @@ static int user_sdma_send_pkts(struct user_sdma_request *req, unsigned maxpkts)
 		if (test_bit(SDMA_REQ_HAVE_AHG, &req->flags)) {
 			if (!req->seqnum) {
 				u16 pbclen = le16_to_cpu(req->hdr.pbc[0]);
-				u32 lrhlen = get_lrh_len(req->hdr,
-							 pad_len(datalen));
+				u32 lrhlen = get_lrh_len(req->hdr, datalen);
 				/*
 				 * Copy the request header into the tx header
 				 * because the HW needs a cacheline-aligned
@@ -1087,18 +1006,23 @@ static int user_sdma_send_pkts(struct user_sdma_request *req, unsigned maxpkts)
 		npkts++;
 	}
 dosend:
-	ret = sdma_send_txlist(req->sde, &pq->busy, &req->txps, &count);
-	req->seqsubmitted += count;
-	if (req->seqsubmitted == req->info.npkts) {
-		set_bit(SDMA_REQ_SEND_DONE, &req->flags);
-		/*
-		 * The txreq has already been submitted to the HW queue
-		 * so we can free the AHG entry now. Corruption will not
-		 * happen due to the sequential manner in which
-		 * descriptors are processed.
-		 */
-		if (test_bit(SDMA_REQ_HAVE_AHG, &req->flags))
-			sdma_ahg_free(req->sde, req->ahg_idx);
+	ret = sdma_send_txlist(req->sde, &pq->busy, &req->txps);
+	if (list_empty(&req->txps)) {
+		req->seqsubmitted = req->seqnum;
+		if (req->seqnum == req->info.npkts) {
+			set_bit(SDMA_REQ_SEND_DONE, &req->flags);
+			/*
+			 * The txreq has already been submitted to the HW queue
+			 * so we can free the AHG entry now. Corruption will not
+			 * happen due to the sequential manner in which
+			 * descriptors are processed.
+			 */
+			if (test_bit(SDMA_REQ_HAVE_AHG, &req->flags))
+				sdma_ahg_free(req->sde, req->ahg_idx);
+		}
+	} else if (ret > 0) {
+		req->seqsubmitted += ret;
+		ret = 0;
 	}
 	return ret;
 
@@ -1124,27 +1048,42 @@ static inline int num_user_pages(const struct iovec *iov)
 
 static u32 sdma_cache_evict(struct hfi1_user_sdma_pkt_q *pq, u32 npages)
 {
-	struct evict_data evict_data;
+	u32 cleared = 0;
+	struct sdma_mmu_node *node, *ptr;
+	struct list_head to_evict = LIST_HEAD_INIT(to_evict);
 
-	evict_data.cleared = 0;
-	evict_data.target = npages;
-	hfi1_mmu_rb_evict(pq->handler, &evict_data);
-	return evict_data.cleared;
+	spin_lock(&pq->evict_lock);
+	list_for_each_entry_safe_reverse(node, ptr, &pq->evict, list) {
+		/* Make sure that no one is still using the node. */
+		if (!atomic_read(&node->refcount)) {
+			set_bit(SDMA_CACHE_NODE_EVICT, &node->flags);
+			list_del_init(&node->list);
+			list_add(&node->list, &to_evict);
+			cleared += node->npages;
+			if (cleared >= npages)
+				break;
+		}
+	}
+	spin_unlock(&pq->evict_lock);
+
+	list_for_each_entry_safe(node, ptr, &to_evict, list)
+		hfi1_mmu_rb_remove(&pq->sdma_rb_root, &node->rb);
+
+	return cleared;
 }
 
 static int pin_vector_pages(struct user_sdma_request *req,
-			    struct user_sdma_iovec *iovec)
-{
+			    struct user_sdma_iovec *iovec) {
 	int ret = 0, pinned, npages, cleared;
 	struct page **pages;
 	struct hfi1_user_sdma_pkt_q *pq = req->pq;
 	struct sdma_mmu_node *node = NULL;
 	struct mmu_rb_node *rb_node;
 
-	rb_node = hfi1_mmu_rb_extract(pq->handler,
+	rb_node = hfi1_mmu_rb_extract(&pq->sdma_rb_root,
 				      (unsigned long)iovec->iov.iov_base,
 				      iovec->iov.iov_len);
-	if (rb_node)
+	if (rb_node && !IS_ERR(rb_node))
 		node = container_of(rb_node, struct sdma_mmu_node, rb);
 	else
 		rb_node = NULL;
@@ -1157,6 +1096,7 @@ static int pin_vector_pages(struct user_sdma_request *req,
 		node->rb.addr = (unsigned long)iovec->iov.iov_base;
 		node->pq = pq;
 		atomic_set(&node->refcount, 0);
+		INIT_LIST_HEAD(&node->list);
 	}
 
 	npages = num_user_pages(&iovec->iov);
@@ -1171,14 +1111,28 @@ static int pin_vector_pages(struct user_sdma_request *req,
 
 		npages -= node->npages;
 
+		/*
+		 * If rb_node is NULL, it means that this is brand new node
+		 * and, therefore not on the eviction list.
+		 * If, however, the rb_node is non-NULL, it means that the
+		 * node is already in RB tree and, therefore on the eviction
+		 * list (nodes are unconditionally inserted in the eviction
+		 * list). In that case, we have to remove the node prior to
+		 * calling the eviction function in order to prevent it from
+		 * freeing this node.
+		 */
+		if (rb_node) {
+			spin_lock(&pq->evict_lock);
+			list_del_init(&node->list);
+			spin_unlock(&pq->evict_lock);
+		}
 retry:
-		if (!hfi1_can_pin_pages(pq->dd, pq->mm,
-					atomic_read(&pq->n_locked), npages)) {
+		if (!hfi1_can_pin_pages(pq->dd, pq->n_locked, npages)) {
 			cleared = sdma_cache_evict(pq, npages);
 			if (cleared >= npages)
 				goto retry;
 		}
-		pinned = hfi1_acquire_user_pages(pq->mm,
+		pinned = hfi1_acquire_user_pages(
 			((unsigned long)iovec->iov.iov_base +
 			 (node->npages * PAGE_SIZE)), npages, 0,
 			pages + node->npages);
@@ -1188,7 +1142,7 @@ retry:
 			goto bail;
 		}
 		if (pinned != npages) {
-			unpin_vector_pages(pq->mm, pages, node->npages,
+			unpin_vector_pages(current->mm, pages, node->npages,
 					   pinned);
 			ret = -EFAULT;
 			goto bail;
@@ -1198,22 +1152,28 @@ retry:
 		node->pages = pages;
 		node->npages += pinned;
 		npages = node->npages;
-		atomic_add(pinned, &pq->n_locked);
+		spin_lock(&pq->evict_lock);
+		list_add(&node->list, &pq->evict);
+		pq->n_locked += pinned;
+		spin_unlock(&pq->evict_lock);
 	}
 	iovec->pages = node->pages;
 	iovec->npages = npages;
 	iovec->node = node;
 
-	ret = hfi1_mmu_rb_insert(req->pq->handler, &node->rb);
+	ret = hfi1_mmu_rb_insert(&req->pq->sdma_rb_root, &node->rb);
 	if (ret) {
-		atomic_sub(node->npages, &pq->n_locked);
-		iovec->node = NULL;
+		spin_lock(&pq->evict_lock);
+		if (!list_empty(&node->list))
+			list_del(&node->list);
+		pq->n_locked -= node->npages;
+		spin_unlock(&pq->evict_lock);
 		goto bail;
 	}
 	return 0;
 bail:
 	if (rb_node)
-		unpin_vector_pages(pq->mm, node->pages, 0, node->npages);
+		unpin_vector_pages(current->mm, node->pages, 0, node->npages);
 	kfree(node);
 	return ret;
 }
@@ -1221,7 +1181,7 @@ bail:
 static void unpin_vector_pages(struct mm_struct *mm, struct page **pages,
 			       unsigned start, unsigned npages)
 {
-	hfi1_release_user_pages(mm, pages + start, npages, false);
+	hfi1_release_user_pages(mm, pages + start, npages, 0);
 	kfree(pages);
 }
 
@@ -1232,14 +1192,16 @@ static int check_header_template(struct user_sdma_request *req,
 	/*
 	 * Perform safety checks for any type of packet:
 	 *    - transfer size is multiple of 64bytes
-	 *    - packet length is multiple of 4 bytes
+	 *    - packet length is multiple of 4bytes
+	 *    - entire request length is multiple of 4bytes
 	 *    - packet length is not larger than MTU size
 	 *
 	 * These checks are only done for the first packet of the
 	 * transfer since the header is "given" to us by user space.
 	 * For the remainder of the packets we compute the values.
 	 */
-	if (req->info.fragsize % PIO_BLOCK_SIZE || lrhlen & 0x3 ||
+	if (req->info.fragsize % PIO_BLOCK_SIZE ||
+	    lrhlen & 0x3 || req->data_len & 0x3  ||
 	    lrhlen > get_lrh_len(*hdr, req->info.fragsize))
 		return -EINVAL;
 
@@ -1301,7 +1263,7 @@ static int set_txreq_header(struct user_sdma_request *req,
 	struct hfi1_pkt_header *hdr = &tx->hdr;
 	u16 pbclen;
 	int ret;
-	u32 tidval = 0, lrhlen = get_lrh_len(*hdr, pad_len(datalen));
+	u32 tidval = 0, lrhlen = get_lrh_len(*hdr, datalen);
 
 	/* Copy the header template to the request before modification */
 	memcpy(hdr, &req->hdr, sizeof(*hdr));
@@ -1412,7 +1374,7 @@ static int set_txreq_header_ahg(struct user_sdma_request *req,
 	struct hfi1_user_sdma_pkt_q *pq = req->pq;
 	struct hfi1_pkt_header *hdr = &req->hdr;
 	u16 pbclen = le16_to_cpu(hdr->pbc[0]);
-	u32 val32, tidval = 0, lrhlen = get_lrh_len(*hdr, pad_len(len));
+	u32 val32, tidval = 0, lrhlen = get_lrh_len(*hdr, len);
 
 	if (PBC2LRH(pbclen) != lrhlen) {
 		/* PBC.PbcLengthDWs */
@@ -1474,8 +1436,7 @@ static int set_txreq_header_ahg(struct user_sdma_request *req,
 		/* Clear KDETH.SH on last packet */
 		if (unlikely(tx->flags & TXREQ_FLAGS_REQ_LAST_PKT)) {
 			val |= cpu_to_le16(KDETH_GET(hdr->kdeth.ver_tid_offset,
-						     INTR) <<
-					   AHG_KDETH_INTR_SHIFT);
+								INTR) >> 16);
 			val &= cpu_to_le16(~(1U << 13));
 			AHG_HEADER_SET(req->ahg, diff, 7, 16, 14, val);
 		} else {
@@ -1573,14 +1534,14 @@ static void user_sdma_free_request(struct user_sdma_request *req, bool unpin)
 				continue;
 
 			if (unpin)
-				hfi1_mmu_rb_remove(req->pq->handler,
+				hfi1_mmu_rb_remove(&req->pq->sdma_rb_root,
 						   &node->rb);
 			else
 				atomic_dec(&node->refcount);
 		}
 	}
 	kfree(req->tids);
-	clear_bit(req->info.comp_idx, req->pq->req_in_use);
+	clear_bit(SDMA_REQ_IN_USE, &req->flags);
 }
 
 static inline void set_comp_state(struct hfi1_user_sdma_pkt_q *pq,
@@ -1603,7 +1564,7 @@ static bool sdma_rb_filter(struct mmu_rb_node *node, unsigned long addr,
 	return (bool)(node->addr == addr);
 }
 
-static int sdma_rb_insert(void *arg, struct mmu_rb_node *mnode)
+static int sdma_rb_insert(struct rb_root *root, struct mmu_rb_node *mnode)
 {
 	struct sdma_mmu_node *node =
 		container_of(mnode, struct sdma_mmu_node, rb);
@@ -1612,45 +1573,48 @@ static int sdma_rb_insert(void *arg, struct mmu_rb_node *mnode)
 	return 0;
 }
 
-/*
- * Return 1 to remove the node from the rb tree and call the remove op.
- *
- * Called with the rb tree lock held.
- */
-static int sdma_rb_evict(void *arg, struct mmu_rb_node *mnode,
-			 void *evict_arg, bool *stop)
-{
-	struct sdma_mmu_node *node =
-		container_of(mnode, struct sdma_mmu_node, rb);
-	struct evict_data *evict_data = evict_arg;
-
-	/* is this node still being used? */
-	if (atomic_read(&node->refcount))
-		return 0; /* keep this node */
-
-	/* this node will be evicted, add its pages to our count */
-	evict_data->cleared += node->npages;
-
-	/* have enough pages been cleared? */
-	if (evict_data->cleared >= evict_data->target)
-		*stop = true;
-
-	return 1; /* remove this node */
-}
-
-static void sdma_rb_remove(void *arg, struct mmu_rb_node *mnode)
+static void sdma_rb_remove(struct rb_root *root, struct mmu_rb_node *mnode,
+			   struct mm_struct *mm)
 {
 	struct sdma_mmu_node *node =
 		container_of(mnode, struct sdma_mmu_node, rb);
 
-	atomic_sub(node->npages, &node->pq->n_locked);
+	spin_lock(&node->pq->evict_lock);
+	/*
+	 * We've been called by the MMU notifier but this node has been
+	 * scheduled for eviction. The eviction function will take care
+	 * of freeing this node.
+	 * We have to take the above lock first because we are racing
+	 * against the setting of the bit in the eviction function.
+	 */
+	if (mm && test_bit(SDMA_CACHE_NODE_EVICT, &node->flags)) {
+		spin_unlock(&node->pq->evict_lock);
+		return;
+	}
 
-	unpin_vector_pages(node->pq->mm, node->pages, 0, node->npages);
+	if (!list_empty(&node->list))
+		list_del(&node->list);
+	node->pq->n_locked -= node->npages;
+	spin_unlock(&node->pq->evict_lock);
 
+	/*
+	 * If mm is set, we are being called by the MMU notifier and we
+	 * should not pass a mm_struct to unpin_vector_page(). This is to
+	 * prevent a deadlock when hfi1_release_user_pages() attempts to
+	 * take the mmap_sem, which the MMU notifier has already taken.
+	 */
+	unpin_vector_pages(mm ? NULL : current->mm, node->pages, 0,
+			   node->npages);
+	/*
+	 * If called by the MMU notifier, we have to adjust the pinned
+	 * page count ourselves.
+	 */
+	if (mm)
+		mm->pinned_vm -= node->npages;
 	kfree(node);
 }
 
-static int sdma_rb_invalidate(void *arg, struct mmu_rb_node *mnode)
+static int sdma_rb_invalidate(struct rb_root *root, struct mmu_rb_node *mnode)
 {
 	struct sdma_mmu_node *node =
 		container_of(mnode, struct sdma_mmu_node, rb);

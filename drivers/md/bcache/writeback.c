@@ -20,8 +20,7 @@
 static void __update_writeback_rate(struct cached_dev *dc)
 {
 	struct cache_set *c = dc->disk.c;
-	uint64_t cache_sectors = c->nbuckets * c->sb.bucket_size -
-				bcache_flash_devs_sectors_dirty(c);
+	uint64_t cache_sectors = c->nbuckets * c->sb.bucket_size;
 	uint64_t cache_dirty_target =
 		div_u64(cache_sectors * dc->writeback_percent, 100);
 
@@ -129,8 +128,11 @@ static void write_dirty_finish(struct closure *cl)
 	struct dirty_io *io = container_of(cl, struct dirty_io, cl);
 	struct keybuf_key *w = io->bio.bi_private;
 	struct cached_dev *dc = io->dc;
+	struct bio_vec *bv;
+	int i;
 
-	bio_free_pages(&io->bio);
+	bio_for_each_segment_all(bv, &io->bio, i)
+		__free_page(bv->bv_page);
 
 	/* This is kind of a dumb way of signalling errors. */
 	if (KEY_DIRTY(&w->key)) {
@@ -180,14 +182,14 @@ static void write_dirty(struct closure *cl)
 	struct keybuf_key *w = io->bio.bi_private;
 
 	dirty_init(w);
-	bio_set_op_attrs(&io->bio, REQ_OP_WRITE, 0);
+	io->bio.bi_rw		= WRITE;
 	io->bio.bi_iter.bi_sector = KEY_START(&w->key);
 	io->bio.bi_bdev		= io->dc->bdev;
 	io->bio.bi_end_io	= dirty_endio;
 
 	closure_bio_submit(&io->bio, cl);
 
-	continue_at(cl, write_dirty_finish, io->dc->writeback_write_wq);
+	continue_at(cl, write_dirty_finish, system_wq);
 }
 
 static void read_dirty_endio(struct bio *bio)
@@ -207,7 +209,7 @@ static void read_dirty_submit(struct closure *cl)
 
 	closure_bio_submit(&io->bio, cl);
 
-	continue_at(cl, write_dirty, io->dc->writeback_write_wq);
+	continue_at(cl, write_dirty, system_wq);
 }
 
 static void read_dirty(struct cached_dev *dc)
@@ -249,10 +251,10 @@ static void read_dirty(struct cached_dev *dc)
 		io->dc		= dc;
 
 		dirty_init(w);
-		bio_set_op_attrs(&io->bio, REQ_OP_READ, 0);
 		io->bio.bi_iter.bi_sector = PTR_OFFSET(&w->key, 0);
 		io->bio.bi_bdev		= PTR_CACHE(dc->disk.c,
 						    &w->key, 0)->bdev;
+		io->bio.bi_rw		= READ;
 		io->bio.bi_end_io	= read_dirty_endio;
 
 		if (bio_alloc_pages(&io->bio, GFP_KERNEL))
@@ -420,27 +422,18 @@ static int bch_writeback_thread(void *arg)
 
 	while (!kthread_should_stop()) {
 		down_write(&dc->writeback_lock);
-		set_current_state(TASK_INTERRUPTIBLE);
-		/*
-		 * If the bache device is detaching, skip here and continue
-		 * to perform writeback. Otherwise, if no dirty data on cache,
-		 * or there is dirty data on cache but writeback is disabled,
-		 * the writeback thread should sleep here and wait for others
-		 * to wake up it.
-		 */
-		if (!test_bit(BCACHE_DEV_DETACHING, &dc->disk.flags) &&
-		    (!atomic_read(&dc->has_dirty) || !dc->writeback_running)) {
+		if (!atomic_read(&dc->has_dirty) ||
+		    (!test_bit(BCACHE_DEV_DETACHING, &dc->disk.flags) &&
+		     !dc->writeback_running)) {
 			up_write(&dc->writeback_lock);
+			set_current_state(TASK_INTERRUPTIBLE);
 
-			if (kthread_should_stop()) {
-				set_current_state(TASK_RUNNING);
+			if (kthread_should_stop())
 				return 0;
-			}
 
 			schedule();
 			continue;
 		}
-		set_current_state(TASK_RUNNING);
 
 		searched_full_index = refill_dirty(dc);
 
@@ -450,14 +443,6 @@ static int bch_writeback_thread(void *arg)
 			cached_dev_put(dc);
 			SET_BDEV_STATE(&dc->sb, BDEV_STATE_CLEAN);
 			bch_write_bdev_super(dc, NULL);
-			/*
-			 * If bcache device is detaching via sysfs interface,
-			 * writeback thread should stop after there is no dirty
-			 * data on cache. BCACHE_DEV_DETACHING flag is set in
-			 * bch_cached_dev_detach().
-			 */
-			if (test_bit(BCACHE_DEV_DETACHING, &dc->disk.flags))
-				break;
 		}
 
 		up_write(&dc->writeback_lock);
@@ -500,17 +485,17 @@ static int sectors_dirty_init_fn(struct btree_op *_op, struct btree *b,
 	return MAP_CONTINUE;
 }
 
-void bch_sectors_dirty_init(struct bcache_device *d)
+void bch_sectors_dirty_init(struct cached_dev *dc)
 {
 	struct sectors_dirty_init op;
 
 	bch_btree_op_init(&op.op, -1);
-	op.inode = d->id;
+	op.inode = dc->disk.id;
 
-	bch_btree_map_keys(&op.op, d->c, &KEY(op.inode, 0, 0),
+	bch_btree_map_keys(&op.op, dc->disk.c, &KEY(op.inode, 0, 0),
 			   sectors_dirty_init_fn, 0);
 
-	d->sectors_dirty_last = bcache_dev_sectors_dirty(d);
+	dc->disk.sectors_dirty_last = bcache_dev_sectors_dirty(&dc->disk);
 }
 
 void bch_cached_dev_writeback_init(struct cached_dev *dc)
@@ -534,11 +519,6 @@ void bch_cached_dev_writeback_init(struct cached_dev *dc)
 
 int bch_cached_dev_writeback_start(struct cached_dev *dc)
 {
-	dc->writeback_write_wq = alloc_workqueue("bcache_writeback_wq",
-						WQ_MEM_RECLAIM, 0);
-	if (!dc->writeback_write_wq)
-		return -ENOMEM;
-
 	dc->writeback_thread = kthread_create(bch_writeback_thread, dc,
 					      "bcache_writeback");
 	if (IS_ERR(dc->writeback_thread))

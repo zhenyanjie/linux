@@ -109,7 +109,7 @@ unsigned int kobjsize(const void *objp)
 	return PAGE_SIZE << compound_order(page);
 }
 
-static long __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
+long __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 		      unsigned long start, unsigned long nr_pages,
 		      unsigned int foll_flags, struct page **pages,
 		      struct vm_area_struct **vmas, int *nonblocking)
@@ -160,25 +160,33 @@ finish_or_fault:
  * - don't permit access to VMAs that don't support it, such as I/O mappings
  */
 long get_user_pages(unsigned long start, unsigned long nr_pages,
-		    unsigned int gup_flags, struct page **pages,
+		    int write, int force, struct page **pages,
 		    struct vm_area_struct **vmas)
 {
-	return __get_user_pages(current, current->mm, start, nr_pages,
-				gup_flags, pages, vmas, NULL);
+	int flags = 0;
+
+	if (write)
+		flags |= FOLL_WRITE;
+	if (force)
+		flags |= FOLL_FORCE;
+
+	return __get_user_pages(current, current->mm, start, nr_pages, flags,
+				pages, vmas, NULL);
 }
 EXPORT_SYMBOL(get_user_pages);
 
 long get_user_pages_locked(unsigned long start, unsigned long nr_pages,
-			    unsigned int gup_flags, struct page **pages,
+			    int write, int force, struct page **pages,
 			    int *locked)
 {
-	return get_user_pages(start, nr_pages, gup_flags, pages, NULL);
+	return get_user_pages(start, nr_pages, write, force, pages, NULL);
 }
 EXPORT_SYMBOL(get_user_pages_locked);
 
 long __get_user_pages_unlocked(struct task_struct *tsk, struct mm_struct *mm,
 			       unsigned long start, unsigned long nr_pages,
-			       struct page **pages, unsigned int gup_flags)
+			       int write, int force, struct page **pages,
+			       unsigned int gup_flags)
 {
 	long ret;
 	down_read(&mm->mmap_sem);
@@ -190,10 +198,10 @@ long __get_user_pages_unlocked(struct task_struct *tsk, struct mm_struct *mm,
 EXPORT_SYMBOL(__get_user_pages_unlocked);
 
 long get_user_pages_unlocked(unsigned long start, unsigned long nr_pages,
-			     struct page **pages, unsigned int gup_flags)
+			     int write, int force, struct page **pages)
 {
 	return __get_user_pages_unlocked(current, current->mm, start, nr_pages,
-					 pages, gup_flags);
+					 write, force, pages, 0);
 }
 EXPORT_SYMBOL(get_user_pages_unlocked);
 
@@ -1801,18 +1809,16 @@ int filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 }
 EXPORT_SYMBOL(filemap_fault);
 
-void filemap_map_pages(struct fault_env *fe,
-		pgoff_t start_pgoff, pgoff_t end_pgoff)
+void filemap_map_pages(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	BUG();
 }
 EXPORT_SYMBOL(filemap_map_pages);
 
-int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
-		unsigned long addr, void *buf, int len, unsigned int gup_flags)
+static int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
+		unsigned long addr, void *buf, int len, int write)
 {
 	struct vm_area_struct *vma;
-	int write = gup_flags & FOLL_WRITE;
 
 	down_read(&mm->mmap_sem);
 
@@ -1847,22 +1853,21 @@ int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
  * @addr:	start address to access
  * @buf:	source or destination buffer
  * @len:	number of bytes to transfer
- * @gup_flags:	flags modifying lookup behaviour
+ * @write:	whether the access is a write
  *
  * The caller must hold a reference on @mm.
  */
 int access_remote_vm(struct mm_struct *mm, unsigned long addr,
-		void *buf, int len, unsigned int gup_flags)
+		void *buf, int len, int write)
 {
-	return __access_remote_vm(NULL, mm, addr, buf, len, gup_flags);
+	return __access_remote_vm(NULL, mm, addr, buf, len, write);
 }
 
 /*
  * Access another process' address space.
  * - source/target buffer must be kernel space
  */
-int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, int len,
-		unsigned int gup_flags)
+int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, int len, int write)
 {
 	struct mm_struct *mm;
 
@@ -1873,7 +1878,7 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, in
 	if (!mm)
 		return 0;
 
-	len = __access_remote_vm(tsk, mm, addr, buf, len, gup_flags);
+	len = __access_remote_vm(tsk, mm, addr, buf, len, write);
 
 	mmput(mm);
 	return len;

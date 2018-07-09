@@ -16,7 +16,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/irqchip.h>
 #include <linux/suspend.h>
 #include <linux/platform_device.h>
 #include <linux/syscore_ops.h>
@@ -234,15 +233,11 @@ void __init pxa27x_init_irq(void)
 	pxa_init_irq(34, pxa27x_set_wake);
 }
 
-static int __init
-pxa27x_dt_init_irq(struct device_node *node, struct device_node *parent)
+void __init pxa27x_dt_init_irq(void)
 {
-	pxa_dt_irq_init(pxa27x_set_wake);
-	set_handle_irq(ichp_handle_irq);
-
-	return 0;
+	if (IS_ENABLED(CONFIG_OF))
+		pxa_dt_irq_init(pxa27x_set_wake);
 }
-IRQCHIP_DECLARE(pxa27x_intc, "marvell,pxa-intc", pxa27x_dt_init_irq);
 
 static struct map_desc pxa27x_io_desc[] __initdata = {
 	{	/* Mem Ctl */
@@ -304,6 +299,9 @@ static int __init pxa27x_init(void)
 	if (cpu_is_pxa27x()) {
 
 		reset_status = RCSR;
+
+		if ((ret = pxa_init_dma(IRQ_DMA, 32)))
+			return ret;
 
 		pxa27x_init_pm();
 

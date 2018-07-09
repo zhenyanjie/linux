@@ -353,10 +353,6 @@ struct hash_mac_addr {
 	u8 addr[ETH_ALEN];
 };
 
-struct mbox_list {
-	struct list_head list;
-};
-
 /*
  * Per-"adapter" (Virtual Function) information.
  */
@@ -390,10 +386,6 @@ struct adapter {
 
 	/* various locks */
 	spinlock_t stats_lock;
-
-	/* lock for mailbox cmd list */
-	spinlock_t mbox_lock;
-	struct mbox_list mlist;
 
 	/* support for mailbox command/reply logging */
 #define T4VF_OS_LOG_MBOX_CMDS 256

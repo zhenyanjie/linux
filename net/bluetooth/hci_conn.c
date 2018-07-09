@@ -613,7 +613,7 @@ int hci_conn_del(struct hci_conn *conn)
 	return 0;
 }
 
-struct hci_dev *hci_get_route(bdaddr_t *dst, bdaddr_t *src, uint8_t src_type)
+struct hci_dev *hci_get_route(bdaddr_t *dst, bdaddr_t *src)
 {
 	int use_src = bacmp(src, BDADDR_ANY);
 	struct hci_dev *hdev = NULL, *d;
@@ -625,7 +625,7 @@ struct hci_dev *hci_get_route(bdaddr_t *dst, bdaddr_t *src, uint8_t src_type)
 	list_for_each_entry(d, &hci_dev_list, list) {
 		if (!test_bit(HCI_UP, &d->flags) ||
 		    hci_dev_test_flag(d, HCI_USER_CHANNEL) ||
-		    d->dev_type != HCI_PRIMARY)
+		    d->dev_type != HCI_BREDR)
 			continue;
 
 		/* Simple routing:
@@ -634,29 +634,7 @@ struct hci_dev *hci_get_route(bdaddr_t *dst, bdaddr_t *src, uint8_t src_type)
 		 */
 
 		if (use_src) {
-			bdaddr_t id_addr;
-			u8 id_addr_type;
-
-			if (src_type == BDADDR_BREDR) {
-				if (!lmp_bredr_capable(d))
-					continue;
-				bacpy(&id_addr, &d->bdaddr);
-				id_addr_type = BDADDR_BREDR;
-			} else {
-				if (!lmp_le_capable(d))
-					continue;
-
-				hci_copy_identity_address(d, &id_addr,
-							  &id_addr_type);
-
-				/* Convert from HCI to three-value type */
-				if (id_addr_type == ADDR_LE_DEV_PUBLIC)
-					id_addr_type = BDADDR_LE_PUBLIC;
-				else
-					id_addr_type = BDADDR_LE_RANDOM;
-			}
-
-			if (!bacmp(&id_addr, src) && id_addr_type == src_type) {
+			if (!bacmp(&d->bdaddr, src)) {
 				hdev = d; break;
 			}
 		} else {
@@ -749,31 +727,18 @@ static bool conn_use_rpa(struct hci_conn *conn)
 }
 
 static void hci_req_add_le_create_conn(struct hci_request *req,
-				       struct hci_conn *conn,
-				       bdaddr_t *direct_rpa)
+				       struct hci_conn *conn)
 {
 	struct hci_cp_le_create_conn cp;
 	struct hci_dev *hdev = conn->hdev;
 	u8 own_addr_type;
 
-	/* If direct address was provided we use it instead of current
-	 * address.
+	/* Update random address, but set require_privacy to false so
+	 * that we never connect with an non-resolvable address.
 	 */
-	if (direct_rpa) {
-		if (bacmp(&req->hdev->random_addr, direct_rpa))
-			hci_req_add(req, HCI_OP_LE_SET_RANDOM_ADDR, 6,
-								direct_rpa);
-
-		/* direct address is always RPA */
-		own_addr_type = ADDR_LE_DEV_RANDOM;
-	} else {
-		/* Update random address, but set require_privacy to false so
-		 * that we never connect with an non-resolvable address.
-		 */
-		if (hci_update_random_address(req, false, conn_use_rpa(conn),
-					      &own_addr_type))
-			return;
-	}
+	if (hci_update_random_address(req, false, conn_use_rpa(conn),
+				      &own_addr_type))
+		return;
 
 	memset(&cp, 0, sizeof(cp));
 
@@ -838,7 +803,7 @@ static void hci_req_directed_advertising(struct hci_request *req,
 
 struct hci_conn *hci_connect_le(struct hci_dev *hdev, bdaddr_t *dst,
 				u8 dst_type, u8 sec_level, u16 conn_timeout,
-				u8 role, bdaddr_t *direct_rpa)
+				u8 role)
 {
 	struct hci_conn_params *params;
 	struct hci_conn *conn;
@@ -953,7 +918,7 @@ struct hci_conn *hci_connect_le(struct hci_dev *hdev, bdaddr_t *dst,
 		hci_dev_set_flag(hdev, HCI_LE_SCAN_INTERRUPTED);
 	}
 
-	hci_req_add_le_create_conn(&req, conn, direct_rpa);
+	hci_req_add_le_create_conn(&req, conn);
 
 create_conn:
 	err = hci_req_run(&req, create_le_conn_complete);

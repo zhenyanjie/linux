@@ -5,7 +5,7 @@
  */
 #include <linux/sched.h>		/* test_thread_flag(), ...	*/
 #include <linux/kdebug.h>		/* oops_begin/end, ...		*/
-#include <linux/extable.h>		/* search_exception_tables	*/
+#include <linux/module.h>		/* search_exception_table	*/
 #include <linux/bootmem.h>		/* max_low_pfn			*/
 #include <linux/kprobes.h>		/* NOKPROBE_SYMBOL, ...		*/
 #include <linux/mmiotrace.h>		/* kmmio_handler, ...		*/
@@ -191,15 +191,15 @@ is_prefetch(struct pt_regs *regs, unsigned long error_code, unsigned long addr)
  * 6. T1   : reaches here, sees vma_pkey(vma)=5, when we really
  *	     faulted on a pte with its pkey=4.
  */
-static void fill_sig_info_pkey(int si_signo, int si_code, siginfo_t *info,
-		u32 *pkey)
+static void fill_sig_info_pkey(int si_code, siginfo_t *info,
+		struct vm_area_struct *vma)
 {
 	/* This is effectively an #ifdef */
 	if (!boot_cpu_has(X86_FEATURE_OSPKE))
 		return;
 
 	/* Fault not from Protection Keys: nothing to do */
-	if ((si_code != SEGV_PKUERR) || (si_signo != SIGSEGV))
+	if (si_code != SEGV_PKUERR)
 		return;
 	/*
 	 * force_sig_info_fault() is called from a number of
@@ -208,7 +208,7 @@ static void fill_sig_info_pkey(int si_signo, int si_code, siginfo_t *info,
 	 * valid VMA, so we should never reach this without a
 	 * valid VMA.
 	 */
-	if (!pkey) {
+	if (!vma) {
 		WARN_ONCE(1, "PKU fault with no VMA passed in");
 		info->si_pkey = 0;
 		return;
@@ -218,12 +218,13 @@ static void fill_sig_info_pkey(int si_signo, int si_code, siginfo_t *info,
 	 * absolutely guranteed to be 100% accurate because of
 	 * the race explained above.
 	 */
-	info->si_pkey = *pkey;
+	info->si_pkey = vma_pkey(vma);
 }
 
 static void
 force_sig_info_fault(int si_signo, int si_code, unsigned long address,
-		     struct task_struct *tsk, u32 *pkey, int fault)
+		     struct task_struct *tsk, struct vm_area_struct *vma,
+		     int fault)
 {
 	unsigned lsb = 0;
 	siginfo_t info;
@@ -238,7 +239,7 @@ force_sig_info_fault(int si_signo, int si_code, unsigned long address,
 		lsb = PAGE_SHIFT;
 	info.si_addr_lsb = lsb;
 
-	fill_sig_info_pkey(si_signo, si_code, &info, pkey);
+	fill_sig_info_pkey(si_code, &info, vma);
 
 	force_sig_info(si_signo, &info, tsk);
 }
@@ -343,7 +344,7 @@ static noinline int vmalloc_fault(unsigned long address)
 	if (!pmd_k)
 		return -1;
 
-	if (pmd_large(*pmd_k))
+	if (pmd_huge(*pmd_k))
 		return 0;
 
 	pte_k = pte_offset_kernel(pmd_k, address);
@@ -438,7 +439,7 @@ static noinline int vmalloc_fault(unsigned long address)
 	 * happen within a race in page table update. In the later
 	 * case just flush:
 	 */
-	pgd = (pgd_t *)__va(read_cr3()) + pgd_index(address);
+	pgd = pgd_offset(current->active_mm, address);
 	pgd_ref = pgd_offset_k(address);
 	if (pgd_none(*pgd_ref))
 		return -1;
@@ -463,7 +464,7 @@ static noinline int vmalloc_fault(unsigned long address)
 	if (pud_none(*pud) || pud_pfn(*pud) != pud_pfn(*pud_ref))
 		BUG();
 
-	if (pud_large(*pud))
+	if (pud_huge(*pud))
 		return 0;
 
 	pmd = pmd_offset(pud, address);
@@ -474,7 +475,7 @@ static noinline int vmalloc_fault(unsigned long address)
 	if (pmd_none(*pmd) || pmd_pfn(*pmd) != pmd_pfn(*pmd_ref))
 		BUG();
 
-	if (pmd_large(*pmd))
+	if (pmd_huge(*pmd))
 		return 0;
 
 	pte_ref = pte_offset_kernel(pmd_ref, address);
@@ -717,6 +718,8 @@ no_context(struct pt_regs *regs, unsigned long error_code,
 	struct task_struct *tsk = current;
 	unsigned long flags;
 	int sig;
+	/* No context means no VMA to pass down */
+	struct vm_area_struct *vma = NULL;
 
 	/* Are we prepared to handle this kernel fault? */
 	if (fixup_exception(regs, X86_TRAP_PF)) {
@@ -734,14 +737,14 @@ no_context(struct pt_regs *regs, unsigned long error_code,
 		 * In this case we need to make sure we're not recursively
 		 * faulting through the emulate_vsyscall() logic.
 		 */
-		if (current->thread.sig_on_uaccess_err && signal) {
+		if (current_thread_info()->sig_on_uaccess_error && signal) {
 			tsk->thread.trap_nr = X86_TRAP_PF;
 			tsk->thread.error_code = error_code | PF_USER;
 			tsk->thread.cr2 = address;
 
 			/* XXX: hwpoison faults will set the wrong code. */
 			force_sig_info_fault(signal, si_code, address,
-					     tsk, NULL, 0);
+					     tsk, vma, 0);
 		}
 
 		/*
@@ -749,38 +752,6 @@ no_context(struct pt_regs *regs, unsigned long error_code,
 		 */
 		return;
 	}
-
-#ifdef CONFIG_VMAP_STACK
-	/*
-	 * Stack overflow?  During boot, we can fault near the initial
-	 * stack in the direct map, but that's not an overflow -- check
-	 * that we're in vmalloc space to avoid this.
-	 */
-	if (is_vmalloc_addr((void *)address) &&
-	    (((unsigned long)tsk->stack - 1 - address < PAGE_SIZE) ||
-	     address - ((unsigned long)tsk->stack + THREAD_SIZE) < PAGE_SIZE)) {
-		register void *__sp asm("rsp");
-		unsigned long stack = this_cpu_read(orig_ist.ist[DOUBLEFAULT_STACK]) - sizeof(void *);
-		/*
-		 * We're likely to be running with very little stack space
-		 * left.  It's plausible that we'd hit this condition but
-		 * double-fault even before we get this far, in which case
-		 * we're fine: the double-fault handler will deal with it.
-		 *
-		 * We don't want to make it all the way into the oops code
-		 * and then double-fault, though, because we're likely to
-		 * break the console driver and lose most of the stack dump.
-		 */
-		asm volatile ("movq %[stack], %%rsp\n\t"
-			      "call handle_stack_overflow\n\t"
-			      "1: jmp 1b"
-			      : "+r" (__sp)
-			      : "D" ("kernel stack overflow (page fault)"),
-				"S" (regs), "d" (address),
-				[stack] "rm" (stack));
-		unreachable();
-	}
-#endif
 
 	/*
 	 * 32-bit:
@@ -850,7 +821,8 @@ show_signal_msg(struct pt_regs *regs, unsigned long error_code,
 
 static void
 __bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
-		       unsigned long address, u32 *pkey, int si_code)
+		       unsigned long address, struct vm_area_struct *vma,
+		       int si_code)
 {
 	struct task_struct *tsk = current;
 
@@ -898,7 +870,7 @@ __bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 		tsk->thread.error_code	= error_code;
 		tsk->thread.trap_nr	= X86_TRAP_PF;
 
-		force_sig_info_fault(SIGSEGV, si_code, address, tsk, pkey, 0);
+		force_sig_info_fault(SIGSEGV, si_code, address, tsk, vma, 0);
 
 		return;
 	}
@@ -911,9 +883,9 @@ __bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 
 static noinline void
 bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
-		     unsigned long address, u32 *pkey)
+		     unsigned long address, struct vm_area_struct *vma)
 {
-	__bad_area_nosemaphore(regs, error_code, address, pkey, SEGV_MAPERR);
+	__bad_area_nosemaphore(regs, error_code, address, vma, SEGV_MAPERR);
 }
 
 static void
@@ -921,10 +893,6 @@ __bad_area(struct pt_regs *regs, unsigned long error_code,
 	   unsigned long address,  struct vm_area_struct *vma, int si_code)
 {
 	struct mm_struct *mm = current->mm;
-	u32 pkey;
-
-	if (vma)
-		pkey = vma_pkey(vma);
 
 	/*
 	 * Something tried to access memory that isn't in our memory map..
@@ -932,8 +900,7 @@ __bad_area(struct pt_regs *regs, unsigned long error_code,
 	 */
 	up_read(&mm->mmap_sem);
 
-	__bad_area_nosemaphore(regs, error_code, address,
-			       (vma) ? &pkey : NULL, si_code);
+	__bad_area_nosemaphore(regs, error_code, address, vma, si_code);
 }
 
 static noinline void
@@ -976,7 +943,7 @@ bad_area_access_error(struct pt_regs *regs, unsigned long error_code,
 
 static void
 do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
-	  u32 *pkey, unsigned int fault)
+	  struct vm_area_struct *vma, unsigned int fault)
 {
 	struct task_struct *tsk = current;
 	int code = BUS_ADRERR;
@@ -1003,12 +970,13 @@ do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 		code = BUS_MCEERR_AR;
 	}
 #endif
-	force_sig_info_fault(SIGBUS, code, address, tsk, pkey, fault);
+	force_sig_info_fault(SIGBUS, code, address, tsk, vma, fault);
 }
 
 static noinline void
 mm_fault_error(struct pt_regs *regs, unsigned long error_code,
-	       unsigned long address, u32 *pkey, unsigned int fault)
+	       unsigned long address, struct vm_area_struct *vma,
+	       unsigned int fault)
 {
 	if (fatal_signal_pending(current) && !(error_code & PF_USER)) {
 		no_context(regs, error_code, address, 0, 0);
@@ -1032,9 +1000,9 @@ mm_fault_error(struct pt_regs *regs, unsigned long error_code,
 	} else {
 		if (fault & (VM_FAULT_SIGBUS|VM_FAULT_HWPOISON|
 			     VM_FAULT_HWPOISON_LARGE))
-			do_sigbus(regs, error_code, address, pkey, fault);
+			do_sigbus(regs, error_code, address, vma, fault);
 		else if (fault & VM_FAULT_SIGSEGV)
-			bad_area_nosemaphore(regs, error_code, address, pkey);
+			bad_area_nosemaphore(regs, error_code, address, vma);
 		else
 			BUG();
 	}
@@ -1144,15 +1112,6 @@ access_error(unsigned long error_code, struct vm_area_struct *vma)
 {
 	/* This is only called for the current mm, so: */
 	bool foreign = false;
-
-	/*
-	 * Read or write was blocked by protection keys.  This is
-	 * always an unconditional error and can never result in
-	 * a follow-up action to resolve the fault, like a COW.
-	 */
-	if (error_code & PF_PK)
-		return 1;
-
 	/*
 	 * Make sure to check the VMA so that we do not perform
 	 * faults just to hit a PF_PK as soon as we fill in a
@@ -1220,7 +1179,6 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 	struct mm_struct *mm;
 	int fault, major = 0;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
-	u32 pkey;
 
 	tsk = current;
 	mm = tsk->mm;
@@ -1394,18 +1352,8 @@ good_area:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.  Since we never set FAULT_FLAG_RETRY_NOWAIT, if
 	 * we get VM_FAULT_RETRY back, the mmap_sem has been unlocked.
-	 *
-	 * Note that handle_userfault() may also release and reacquire mmap_sem
-	 * (and not return with VM_FAULT_RETRY), when returning to userland to
-	 * repeat the page fault later with a VM_FAULT_NOPAGE retval
-	 * (potentially after handling any pending signal during the return to
-	 * userland). The return to userland is identified whenever
-	 * FAULT_FLAG_USER|FAULT_FLAG_KILLABLE are both set in flags.
-	 * Thus we have to be careful about not touching vma after handling the
-	 * fault, so we read the pkey beforehand.
 	 */
-	pkey = vma_pkey(vma);
-	fault = handle_mm_fault(vma, address, flags);
+	fault = handle_mm_fault(mm, vma, address, flags);
 	major |= fault & VM_FAULT_MAJOR;
 
 	/*
@@ -1433,7 +1381,7 @@ good_area:
 
 	up_read(&mm->mmap_sem);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
-		mm_fault_error(regs, error_code, address, &pkey, fault);
+		mm_fault_error(regs, error_code, address, vma, fault);
 		return;
 	}
 

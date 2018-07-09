@@ -72,6 +72,7 @@ struct hidma_lldev {
 
 	u32 tre_write_offset;           /* TRE write location              */
 	struct tasklet_struct task;	/* task delivering notifications   */
+	struct tasklet_struct rst_task;	/* task to reset HW                */
 	DECLARE_KFIFO_PTR(handoff_fifo,
 		struct hidma_tre *);    /* pending TREs FIFO               */
 };
@@ -88,7 +89,6 @@ struct hidma_chan {
 	bool				allocated;
 	char				dbg_name[16];
 	u32				dma_sig;
-	dma_cookie_t			last_success;
 
 	/*
 	 * active descriptor on this channel

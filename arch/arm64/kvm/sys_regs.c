@@ -36,7 +36,6 @@
 #include <asm/kvm_host.h>
 #include <asm/kvm_mmu.h>
 #include <asm/perf_event.h>
-#include <asm/sysreg.h>
 
 #include <trace/events/kvm.h>
 
@@ -68,9 +67,11 @@ static u32 get_ccsidr(u32 csselr)
 
 	/* Make sure noone else changes CSSELR during this! */
 	local_irq_disable();
-	write_sysreg(csselr, csselr_el1);
+	/* Put value into CSSELR */
+	asm volatile("msr csselr_el1, %x0" : : "r" (csselr));
 	isb();
-	ccsidr = read_sysreg(ccsidr_el1);
+	/* Read result out of CCSIDR */
+	asm volatile("mrs %0, ccsidr_el1" : "=r" (ccsidr));
 	local_irq_enable();
 
 	return ccsidr;
@@ -173,7 +174,9 @@ static bool trap_dbgauthstatus_el1(struct kvm_vcpu *vcpu,
 	if (p->is_write) {
 		return ignore_write(vcpu, p);
 	} else {
-		p->regval = read_sysreg(dbgauthstatus_el1);
+		u32 val;
+		asm volatile("mrs %0, dbgauthstatus_el1" : "=r" (val));
+		p->regval = val;
 		return true;
 	}
 }
@@ -426,7 +429,10 @@ static void reset_wcr(struct kvm_vcpu *vcpu,
 
 static void reset_amair_el1(struct kvm_vcpu *vcpu, const struct sys_reg_desc *r)
 {
-	vcpu_sys_reg(vcpu, AMAIR_EL1) = read_sysreg(amair_el1);
+	u64 amair;
+
+	asm volatile("mrs %0, amair_el1\n" : "=r" (amair));
+	vcpu_sys_reg(vcpu, AMAIR_EL1) = amair;
 }
 
 static void reset_mpidr(struct kvm_vcpu *vcpu, const struct sys_reg_desc *r)
@@ -450,9 +456,8 @@ static void reset_pmcr(struct kvm_vcpu *vcpu, const struct sys_reg_desc *r)
 {
 	u64 pmcr, val;
 
-	pmcr = read_sysreg(pmcr_el0);
-	/*
-	 * Writable bits of PMCR_EL0 (ARMV8_PMU_PMCR_MASK) are reset to UNKNOWN
+	asm volatile("mrs %0, pmcr_el0\n" : "=r" (pmcr));
+	/* Writable bits of PMCR_EL0 (ARMV8_PMU_PMCR_MASK) is reset to UNKNOWN
 	 * except PMCR.E resetting to zero.
 	 */
 	val = ((pmcr & ~ARMV8_PMU_PMCR_MASK)
@@ -552,9 +557,9 @@ static bool access_pmceid(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 		return false;
 
 	if (!(p->Op2 & 1))
-		pmceid = read_sysreg(pmceid0_el0);
+		asm volatile("mrs %0, pmceid0_el0\n" : "=r" (pmceid));
 	else
-		pmceid = read_sysreg(pmceid1_el0);
+		asm volatile("mrs %0, pmceid1_el0\n" : "=r" (pmceid));
 
 	p->regval = pmceid;
 
@@ -597,14 +602,8 @@ static bool access_pmu_evcntr(struct kvm_vcpu *vcpu,
 
 			idx = ARMV8_PMU_CYCLE_IDX;
 		} else {
-			return false;
+			BUG();
 		}
-	} else if (r->CRn == 0 && r->CRm == 9) {
-		/* PMCCNTR */
-		if (pmu_access_event_counter_el0_disabled(vcpu))
-			return false;
-
-		idx = ARMV8_PMU_CYCLE_IDX;
 	} else if (r->CRn == 14 && (r->CRm & 12) == 8) {
 		/* PMEVCNTRn_EL0 */
 		if (pmu_access_event_counter_el0_disabled(vcpu))
@@ -612,7 +611,7 @@ static bool access_pmu_evcntr(struct kvm_vcpu *vcpu,
 
 		idx = ((r->CRm & 3) << 3) | (r->Op2 & 7);
 	} else {
-		return false;
+		BUG();
 	}
 
 	if (!pmu_counter_idx_valid(vcpu, idx))
@@ -823,6 +822,14 @@ static bool access_pmuserenr(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 /*
  * Architected system registers.
  * Important: Must be sorted ascending by Op0, Op1, CRn, CRm, Op2
+ *
+ * We could trap ID_DFR0 and tell the guest we don't support performance
+ * monitoring.  Unfortunately the patch to make the kernel check ID_DFR0 was
+ * NAKed, so it will read the PMCR anyway.
+ *
+ * Therefore we tell the guest we have 0 counters.  Unfortunately, we
+ * must always support PMCCNTR (the cycle counter): we just RAZ/WI for
+ * all PM registers, which doesn't crash the guest kernel at least.
  *
  * Debug handling: We do trap most, if not all debug related system
  * registers. The implementation is good enough to ensure that a guest
@@ -1353,7 +1360,7 @@ static const struct sys_reg_desc cp15_regs[] = {
 	{ Op1( 0), CRn(10), CRm( 3), Op2( 1), access_vm_reg, NULL, c10_AMAIR1 },
 
 	/* ICC_SRE */
-	{ Op1( 0), CRn(12), CRm(12), Op2( 5), access_gic_sre },
+	{ Op1( 0), CRn(12), CRm(12), Op2( 5), trap_raz_wi },
 
 	{ Op1( 0), CRn(13), CRm( 0), Op2( 1), access_vm_reg, NULL, c13_CID },
 
@@ -1539,7 +1546,7 @@ static void unhandled_cp_access(struct kvm_vcpu *vcpu,
 				struct sys_reg_params *params)
 {
 	u8 hsr_ec = kvm_vcpu_trap_get_class(vcpu);
-	int cp = -1;
+	int cp;
 
 	switch(hsr_ec) {
 	case ESR_ELx_EC_CP15_32:
@@ -1551,7 +1558,7 @@ static void unhandled_cp_access(struct kvm_vcpu *vcpu,
 		cp = 14;
 		break;
 	default:
-		WARN_ON(1);
+		WARN_ON((cp = -1));
 	}
 
 	kvm_err("Unsupported guest CP%d access at: %08lx\n",
@@ -1573,8 +1580,8 @@ static int kvm_handle_cp_64(struct kvm_vcpu *vcpu,
 {
 	struct sys_reg_params params;
 	u32 hsr = kvm_vcpu_get_hsr(vcpu);
-	int Rt = kvm_vcpu_sys_get_rt(vcpu);
-	int Rt2 = (hsr >> 10) & 0x1f;
+	int Rt = (hsr >> 5) & 0xf;
+	int Rt2 = (hsr >> 10) & 0xf;
 
 	params.is_aarch32 = true;
 	params.is_32bit = false;
@@ -1625,7 +1632,7 @@ static int kvm_handle_cp_32(struct kvm_vcpu *vcpu,
 {
 	struct sys_reg_params params;
 	u32 hsr = kvm_vcpu_get_hsr(vcpu);
-	int Rt  = kvm_vcpu_sys_get_rt(vcpu);
+	int Rt  = (hsr >> 5) & 0xf;
 
 	params.is_aarch32 = true;
 	params.is_32bit = true;
@@ -1740,7 +1747,7 @@ int kvm_handle_sys_reg(struct kvm_vcpu *vcpu, struct kvm_run *run)
 {
 	struct sys_reg_params params;
 	unsigned long esr = kvm_vcpu_get_hsr(vcpu);
-	int Rt = kvm_vcpu_sys_get_rt(vcpu);
+	int Rt = (esr >> 5) & 0x1f;
 	int ret;
 
 	trace_kvm_handle_sys_reg(esr);
@@ -1834,7 +1841,11 @@ static const struct sys_reg_desc *index_to_sys_reg_desc(struct kvm_vcpu *vcpu,
 	static void get_##reg(struct kvm_vcpu *v,			\
 			      const struct sys_reg_desc *r)		\
 	{								\
-		((struct sys_reg_desc *)r)->val = read_sysreg(reg);	\
+		u64 val;						\
+									\
+		asm volatile("mrs %0, " __stringify(reg) "\n"		\
+			     : "=r" (val));				\
+		((struct sys_reg_desc *)r)->val = val;			\
 	}
 
 FUNCTION_INVARIANT(midr_el1)

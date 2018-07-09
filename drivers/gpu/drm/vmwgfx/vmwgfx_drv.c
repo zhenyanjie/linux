@@ -199,14 +199,9 @@ static const struct drm_ioctl_desc vmw_ioctls[] = {
 	VMW_IOCTL_DEF(VMW_PRESENT_READBACK,
 		      vmw_present_readback_ioctl,
 		      DRM_MASTER | DRM_AUTH),
-	/*
-	 * The permissions of the below ioctl are overridden in
-	 * vmw_generic_ioctl(). We require either
-	 * DRM_MASTER or capable(CAP_SYS_ADMIN).
-	 */
 	VMW_IOCTL_DEF(VMW_UPDATE_LAYOUT,
 		      vmw_kms_update_layout_ioctl,
-		      DRM_RENDER_ALLOW),
+		      DRM_MASTER | DRM_CONTROL_ALLOW),
 	VMW_IOCTL_DEF(VMW_CREATE_SHADER,
 		      vmw_shader_define_ioctl,
 		      DRM_AUTH | DRM_RENDER_ALLOW),
@@ -246,15 +241,15 @@ static int vmwgfx_pm_notifier(struct notifier_block *nb, unsigned long val,
 			      void *ptr);
 
 MODULE_PARM_DESC(enable_fbdev, "Enable vmwgfx fbdev");
-module_param_named(enable_fbdev, enable_fbdev, int, S_IRUSR | S_IWUSR);
+module_param_named(enable_fbdev, enable_fbdev, int, 0600);
 MODULE_PARM_DESC(force_dma_api, "Force using the DMA API for TTM pages");
-module_param_named(force_dma_api, vmw_force_iommu, int, S_IRUSR | S_IWUSR);
+module_param_named(force_dma_api, vmw_force_iommu, int, 0600);
 MODULE_PARM_DESC(restrict_iommu, "Try to limit IOMMU usage for TTM pages");
-module_param_named(restrict_iommu, vmw_restrict_iommu, int, S_IRUSR | S_IWUSR);
+module_param_named(restrict_iommu, vmw_restrict_iommu, int, 0600);
 MODULE_PARM_DESC(force_coherent, "Force coherent TTM pages");
-module_param_named(force_coherent, vmw_force_coherent, int, S_IRUSR | S_IWUSR);
+module_param_named(force_coherent, vmw_force_coherent, int, 0600);
 MODULE_PARM_DESC(restrict_dma_mask, "Restrict DMA mask to 44 bits with IOMMU");
-module_param_named(restrict_dma_mask, vmw_restrict_dma_mask, int, S_IRUSR | S_IWUSR);
+module_param_named(restrict_dma_mask, vmw_restrict_dma_mask, int, 0600);
 MODULE_PARM_DESC(assume_16bpp, "Assume 16-bpp when filtering modes");
 module_param_named(assume_16bpp, vmw_assume_16bpp, int, 0600);
 
@@ -721,7 +716,7 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 		 * allocation taken by fbdev
 		 */
 		if (!(dev_priv->capabilities & SVGA_CAP_3D))
-			mem_size *= 3;
+			mem_size *= 2;
 
 		dev_priv->max_mob_pages = mem_size * 1024 / PAGE_SIZE;
 		dev_priv->prim_bb_mem =
@@ -1058,14 +1053,15 @@ static struct vmw_master *vmw_master_check(struct drm_device *dev,
 	struct vmw_fpriv *vmw_fp = vmw_fpriv(file_priv);
 	struct vmw_master *vmaster;
 
-	if (!drm_is_primary_client(file_priv) || !(flags & DRM_AUTH))
+	if (file_priv->minor->type != DRM_MINOR_LEGACY ||
+	    !(flags & DRM_AUTH))
 		return NULL;
 
 	ret = mutex_lock_interruptible(&dev->master_mutex);
 	if (unlikely(ret != 0))
 		return ERR_PTR(-ERESTARTSYS);
 
-	if (drm_is_current_master(file_priv)) {
+	if (file_priv->is_master) {
 		mutex_unlock(&dev->master_mutex);
 		return NULL;
 	}
@@ -1130,10 +1126,6 @@ static long vmw_generic_ioctl(struct file *filp, unsigned int cmd,
 
 			return (long) vmw_execbuf_ioctl(dev, arg, file_priv,
 							_IOC_SIZE(cmd));
-		} else if (nr == DRM_COMMAND_BASE + DRM_VMW_UPDATE_LAYOUT) {
-			if (!drm_is_current_master(file_priv) &&
-			    !capable(CAP_SYS_ADMIN))
-				return -EACCES;
 		}
 
 		if (unlikely(ioctl->cmd != cmd))
@@ -1248,7 +1240,8 @@ static int vmw_master_set(struct drm_device *dev,
 }
 
 static void vmw_master_drop(struct drm_device *dev,
-			    struct drm_file *file_priv)
+			    struct drm_file *file_priv,
+			    bool from_release)
 {
 	struct vmw_private *dev_priv = vmw_priv(dev);
 	struct vmw_fpriv *vmw_fp = vmw_fpriv(file_priv);

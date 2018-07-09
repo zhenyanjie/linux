@@ -39,7 +39,7 @@
  * chooses what to send (buffer address, length). The destination
  * side keeps a supply of "anonymous receive buffers" available and
  * it handles incoming data as it arrives (when the destination
- * receives an interrupt).
+ * recieves an interrupt).
  *
  * The sender may send a simple buffer (address/length) or it may
  * send a small list of buffers.  When a small list is sent, hardware
@@ -433,13 +433,6 @@ void ath10k_ce_rx_update_write_idx(struct ath10k_ce_pipe *pipe, u32 nentries)
 	unsigned int nentries_mask = dest_ring->nentries_mask;
 	unsigned int write_index = dest_ring->write_index;
 	u32 ctrl_addr = pipe->ctrl_addr;
-	u32 cur_write_idx = ath10k_ce_dest_ring_write_index_get(ar, ctrl_addr);
-
-	/* Prevent CE ring stuck issue that will occur when ring is full.
-	 * Make sure that write index is 1 less than read index.
-	 */
-	if ((cur_write_idx + nentries)  == dest_ring->sw_index)
-		nentries -= 1;
 
 	write_index = CE_RING_IDX_ADD(nentries_mask, write_index, nentries);
 	ath10k_ce_dest_ring_write_index_set(ar, ctrl_addr, write_index);
@@ -847,7 +840,7 @@ static int ath10k_ce_init_src_ring(struct ath10k *ar,
 	ath10k_ce_src_ring_highmark_set(ar, ctrl_addr, nentries);
 
 	ath10k_dbg(ar, ATH10K_DBG_BOOT,
-		   "boot init ce src ring id %d entries %d base_addr %pK\n",
+		   "boot init ce src ring id %d entries %d base_addr %p\n",
 		   ce_id, nentries, src_ring->base_addr_owner_space);
 
 	return 0;
@@ -881,7 +874,7 @@ static int ath10k_ce_init_dest_ring(struct ath10k *ar,
 	ath10k_ce_dest_ring_highmark_set(ar, ctrl_addr, nentries);
 
 	ath10k_dbg(ar, ATH10K_DBG_BOOT,
-		   "boot ce dest ring id %d entries %d base_addr %pK\n",
+		   "boot ce dest ring id %d entries %d base_addr %p\n",
 		   ce_id, nentries, dest_ring->base_addr_owner_space);
 
 	return 0;
@@ -1059,7 +1052,7 @@ int ath10k_ce_alloc_pipe(struct ath10k *ar, int ce_id,
 	 */
 	BUILD_BUG_ON(2 * TARGET_NUM_MSDU_DESC >
 		     (CE_HTT_H2T_MSG_SRC_NENTRIES - 1));
-	BUILD_BUG_ON(2 * TARGET_10_4_NUM_MSDU_DESC_PFC >
+	BUILD_BUG_ON(2 * TARGET_10X_NUM_MSDU_DESC >
 		     (CE_HTT_H2T_MSG_SRC_NENTRIES - 1));
 	BUILD_BUG_ON(2 * TARGET_TLV_NUM_MSDU_DESC >
 		     (CE_HTT_H2T_MSG_SRC_NENTRIES - 1));

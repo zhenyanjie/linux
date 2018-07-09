@@ -522,11 +522,6 @@ static int srpt_refresh_port(struct srpt_port *sport)
 	if (ret)
 		goto err_query_port;
 
-	snprintf(sport->port_guid, sizeof(sport->port_guid),
-		"0x%016llx%016llx",
-		be64_to_cpu(sport->gid.global.subnet_prefix),
-		be64_to_cpu(sport->gid.global.interface_id));
-
 	if (!sport->mad_agent) {
 		memset(&reg_req, 0, sizeof(reg_req));
 		reg_req.mgmt_class = IB_MGMT_CLASS_DEVICE_MGMT;
@@ -992,7 +987,8 @@ static int srpt_init_ch_qp(struct srpt_rdma_ch *ch, struct ib_qp *qp)
 		return -ENOMEM;
 
 	attr->qp_state = IB_QPS_INIT;
-	attr->qp_access_flags = IB_ACCESS_LOCAL_WRITE;
+	attr->qp_access_flags = IB_ACCESS_LOCAL_WRITE | IB_ACCESS_REMOTE_READ |
+	    IB_ACCESS_REMOTE_WRITE;
 	attr->port_num = ch->sport->port;
 	attr->pkey_index = 0;
 
@@ -2266,7 +2262,7 @@ static void srpt_queue_response(struct se_cmd *cmd)
 		container_of(cmd, struct srpt_send_ioctx, cmd);
 	struct srpt_rdma_ch *ch = ioctx->ch;
 	struct srpt_device *sdev = ch->sport->sdev;
-	struct ib_send_wr send_wr, *first_wr = &send_wr, *bad_wr;
+	struct ib_send_wr send_wr, *first_wr = NULL, *bad_wr;
 	struct ib_sge sge;
 	enum srpt_command_state state;
 	unsigned long flags;
@@ -2292,8 +2288,12 @@ static void srpt_queue_response(struct se_cmd *cmd)
 	}
 	spin_unlock_irqrestore(&ioctx->spinlock, flags);
 
-	if (unlikely(WARN_ON_ONCE(state == SRPT_STATE_CMD_RSP_SENT)))
+	if (unlikely(transport_check_aborted_status(&ioctx->cmd, false)
+		     || WARN_ON_ONCE(state == SRPT_STATE_CMD_RSP_SENT))) {
+		atomic_inc(&ch->req_lim_delta);
+		srpt_abort_cmd(ioctx);
 		return;
+	}
 
 	/* For read commands, transfer the data to the initiator. */
 	if (ioctx->cmd.data_direction == DMA_FROM_DEVICE &&
@@ -2303,8 +2303,11 @@ static void srpt_queue_response(struct se_cmd *cmd)
 			struct srpt_rw_ctx *ctx = &ioctx->rw_ctxs[i];
 
 			first_wr = rdma_rw_ctx_wrs(&ctx->rw, ch->qp,
-					ch->sport->port, NULL, first_wr);
+					ch->sport->port, NULL,
+					first_wr ? first_wr : &send_wr);
 		}
+	} else {
+		first_wr = &send_wr;
 	}
 
 	if (state != SRPT_STATE_MGMT)
@@ -2475,7 +2478,7 @@ static void srpt_add_one(struct ib_device *device)
 	init_waitqueue_head(&sdev->ch_releaseQ);
 	mutex_init(&sdev->mutex);
 
-	sdev->pd = ib_alloc_pd(device, 0);
+	sdev->pd = ib_alloc_pd(device);
 	if (IS_ERR(sdev->pd))
 		goto free_dev;
 
@@ -2548,6 +2551,10 @@ static void srpt_add_one(struct ib_device *device)
 			       sdev->device->name, i);
 			goto err_ring;
 		}
+		snprintf(sport->port_guid, sizeof(sport->port_guid),
+			"0x%016llx%016llx",
+			be64_to_cpu(sport->gid.global.subnet_prefix),
+			be64_to_cpu(sport->gid.global.interface_id));
 	}
 
 	spin_lock(&srpt_dev_lock);
@@ -2666,8 +2673,7 @@ static void srpt_release_cmd(struct se_cmd *se_cmd)
 	struct srpt_rdma_ch *ch = ioctx->ch;
 	unsigned long flags;
 
-	WARN_ON_ONCE(ioctx->state != SRPT_STATE_DONE &&
-		     !(ioctx->cmd.transport_state & CMD_T_ABORTED));
+	WARN_ON(ioctx->state != SRPT_STATE_DONE);
 
 	if (ioctx->n_rw_ctx) {
 		srpt_free_rw_ctxs(ch, ioctx);
@@ -2746,7 +2752,7 @@ static int srpt_parse_i_port_id(u8 i_port_id[16], const char *name)
 {
 	const char *p;
 	unsigned len, count, leading_zero_bytes;
-	int ret;
+	int ret, rc;
 
 	p = name;
 	if (strncasecmp(p, "0x", 2) == 0)
@@ -2758,9 +2764,10 @@ static int srpt_parse_i_port_id(u8 i_port_id[16], const char *name)
 	count = min(len / 2, 16U);
 	leading_zero_bytes = 16 - count;
 	memset(i_port_id, 0, leading_zero_bytes);
-	ret = hex2bin(i_port_id + leading_zero_bytes, p, count);
-	if (ret < 0)
-		pr_debug("hex2bin failed for srpt_parse_i_port_id: %d\n", ret);
+	rc = hex2bin(i_port_id + leading_zero_bytes, p, count);
+	if (rc < 0)
+		pr_debug("hex2bin failed for srpt_parse_i_port_id: %d\n", rc);
+	ret = 0;
 out:
 	return ret;
 }

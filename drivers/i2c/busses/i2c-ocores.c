@@ -379,7 +379,6 @@ static int ocores_i2c_of_probe(struct platform_device *pdev,
 			if (!clock_frequency_present) {
 				dev_err(&pdev->dev,
 					"Missing required parameter 'opencores,ip-clock-frequency'\n");
-				clk_disable_unprepare(i2c->clk);
 				return -ENODEV;
 			}
 			i2c->ip_clock_khz = clock_frequency / 1000;
@@ -468,21 +467,20 @@ static int ocores_i2c_probe(struct platform_device *pdev)
 		default:
 			dev_err(&pdev->dev, "Unsupported I/O width (%d)\n",
 				i2c->reg_io_width);
-			ret = -EINVAL;
-			goto err_clk;
+			return -EINVAL;
 		}
 	}
 
 	ret = ocores_init(&pdev->dev, i2c);
 	if (ret)
-		goto err_clk;
+		return ret;
 
 	init_waitqueue_head(&i2c->wait);
 	ret = devm_request_irq(&pdev->dev, irq, ocores_isr, 0,
 			       pdev->name, i2c);
 	if (ret) {
 		dev_err(&pdev->dev, "Cannot claim IRQ\n");
-		goto err_clk;
+		return ret;
 	}
 
 	/* hook up driver to tree */
@@ -494,8 +492,10 @@ static int ocores_i2c_probe(struct platform_device *pdev)
 
 	/* add i2c adapter to i2c tree */
 	ret = i2c_add_adapter(&i2c->adap);
-	if (ret)
-		goto err_clk;
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to add adapter\n");
+		return ret;
+	}
 
 	/* add in known devices to the bus */
 	if (pdata) {
@@ -504,10 +504,6 @@ static int ocores_i2c_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-
-err_clk:
-	clk_disable_unprepare(i2c->clk);
-	return ret;
 }
 
 static int ocores_i2c_remove(struct platform_device *pdev)

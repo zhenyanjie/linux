@@ -113,10 +113,10 @@ DEVICE_PARAM(ShortRetryLimit, "Short frame retry limits");
 DEVICE_PARAM(LongRetryLimit, "long frame retry limits");
 
 /* BasebandType[] baseband type selected
- * 0: indicate 802.11a type
- * 1: indicate 802.11b type
- * 2: indicate 802.11g type
- */
+   0: indicate 802.11a type
+   1: indicate 802.11b type
+   2: indicate 802.11g type
+*/
 #define BBP_TYPE_MIN     0
 #define BBP_TYPE_MAX     2
 #define BBP_TYPE_DEF     2
@@ -477,7 +477,7 @@ static bool device_init_rings(struct vnt_private *priv)
 					     CB_MAX_BUF_SIZE,
 					     &priv->tx_bufs_dma0,
 					     GFP_ATOMIC);
-	if (!priv->tx0_bufs) {
+	if (priv->tx0_bufs == NULL) {
 		dev_err(&priv->pcid->dev, "allocate buf dma memory failed\n");
 
 		dma_free_coherent(&priv->pcid->dev,
@@ -735,7 +735,7 @@ static bool device_alloc_rx_buf(struct vnt_private *priv,
 	struct vnt_rd_info *rd_info = rd->rd_info;
 
 	rd_info->skb = dev_alloc_skb((int)priv->rx_buf_sz);
-	if (!rd_info->skb)
+	if (rd_info->skb == NULL)
 		return false;
 
 	rd_info->skb_dma =
@@ -1698,10 +1698,9 @@ static int vt6655_suspend(struct pci_dev *pcid, pm_message_t state)
 	MACbShutdown(priv);
 
 	pci_disable_device(pcid);
+	pci_set_power_state(pcid, pci_choose_state(pcid, state));
 
 	spin_unlock_irqrestore(&priv->lock, flags);
-
-	pci_set_power_state(pcid, pci_choose_state(pcid, state));
 
 	return 0;
 }

@@ -905,7 +905,7 @@ static int blkcg_print_stat(struct seq_file *sf, void *v)
 	return 0;
 }
 
-static struct cftype blkcg_files[] = {
+struct cftype blkcg_files[] = {
 	{
 		.name = "stat",
 		.flags = CFTYPE_NOT_ON_ROOT,
@@ -914,7 +914,7 @@ static struct cftype blkcg_files[] = {
 	{ }	/* terminate */
 };
 
-static struct cftype blkcg_legacy_files[] = {
+struct cftype blkcg_legacy_files[] = {
 	{
 		.name = "reset_stats",
 		.write_u64 = blkcg_reset_stats,
@@ -1078,8 +1078,10 @@ int blkcg_init_queue(struct request_queue *q)
 	if (preloaded)
 		radix_tree_preload_end();
 
-	if (IS_ERR(blkg))
+	if (IS_ERR(blkg)) {
+		blkg_free(new_blkg);
 		return PTR_ERR(blkg);
+	}
 
 	q->root_blkg = blkg;
 	q->root_rl.blkg = blkg;
@@ -1338,8 +1340,10 @@ int blkcg_policy_register(struct blkcg_policy *pol)
 			struct blkcg_policy_data *cpd;
 
 			cpd = pol->cpd_alloc_fn(GFP_KERNEL);
-			if (!cpd)
+			if (!cpd) {
+				mutex_unlock(&blkcg_pol_mutex);
 				goto err_free_cpds;
+			}
 
 			blkcg->cpd[pol->plid] = cpd;
 			cpd->blkcg = blkcg;

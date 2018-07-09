@@ -67,7 +67,6 @@ struct nfs4_stateid_struct {
 		NFS4_DELEGATION_STATEID_TYPE,
 		NFS4_LAYOUT_STATEID_TYPE,
 		NFS4_PNFS_DS_STATEID_TYPE,
-		NFS4_REVOKED_STATEID_TYPE,
 	} type;
 };
 
@@ -282,7 +281,7 @@ enum nfsstat4 {
 
 static inline bool seqid_mutating_err(u32 err)
 {
-	/* See RFC 7530, section 9.1.7 */
+	/* rfc 3530 section 8.1.5: */
 	switch (err) {
 	case NFS4ERR_STALE_CLIENTID:
 	case NFS4ERR_STALE_STATEID:
@@ -291,7 +290,6 @@ static inline bool seqid_mutating_err(u32 err)
 	case NFS4ERR_BADXDR:
 	case NFS4ERR_RESOURCE:
 	case NFS4ERR_NOFILEHANDLE:
-	case NFS4ERR_MOVED:
 		return false;
 	};
 	return true;
@@ -643,17 +641,6 @@ enum pnfs_update_layout_reason {
 	PNFS_UPDATE_LAYOUT_BLOCKED,
 	PNFS_UPDATE_LAYOUT_INVALID_OPEN,
 	PNFS_UPDATE_LAYOUT_SEND_LAYOUTGET,
-};
-
-#define NFS4_OP_MAP_NUM_LONGS					\
-	DIV_ROUND_UP(LAST_NFS4_OP, 8 * sizeof(unsigned long))
-#define NFS4_OP_MAP_NUM_WORDS \
-	(NFS4_OP_MAP_NUM_LONGS * sizeof(unsigned long) / sizeof(u32))
-struct nfs4_op_map {
-	union {
-		unsigned long longs[NFS4_OP_MAP_NUM_LONGS];
-		u32 words[NFS4_OP_MAP_NUM_WORDS];
-	} u;
 };
 
 #endif

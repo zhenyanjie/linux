@@ -39,8 +39,7 @@ static inline int scan_ppa_idx(int row, int blkid)
 	return (row * MAX_BLKS_PR_SYSBLK) + blkid;
 }
 
-static void nvm_sysblk_to_cpu(struct nvm_sb_info *info,
-			      struct nvm_system_block *sb)
+void nvm_sysblk_to_cpu(struct nvm_sb_info *info, struct nvm_system_block *sb)
 {
 	info->seqnr = be32_to_cpu(sb->seqnr);
 	info->erase_cnt = be32_to_cpu(sb->erase_cnt);
@@ -49,8 +48,7 @@ static void nvm_sysblk_to_cpu(struct nvm_sb_info *info,
 	info->fs_ppa.ppa = be64_to_cpu(sb->fs_ppa);
 }
 
-static void nvm_cpu_to_sysblk(struct nvm_system_block *sb,
-			      struct nvm_sb_info *info)
+void nvm_cpu_to_sysblk(struct nvm_system_block *sb, struct nvm_sb_info *info)
 {
 	sb->magic = cpu_to_be32(NVM_SYSBLK_MAGIC);
 	sb->seqnr = cpu_to_be32(info->seqnr);
@@ -88,7 +86,7 @@ static int nvm_setup_sysblks(struct nvm_dev *dev, struct ppa_addr *sysblk_ppas)
 	return nr_rows;
 }
 
-static void nvm_setup_sysblk_scan(struct nvm_dev *dev, struct sysblk_scan *s,
+void nvm_setup_sysblk_scan(struct nvm_dev *dev, struct sysblk_scan *s,
 						struct ppa_addr *sysblk_ppas)
 {
 	memset(s, 0, sizeof(struct sysblk_scan));

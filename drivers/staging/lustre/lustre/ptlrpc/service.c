@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -1005,10 +1009,6 @@ ptlrpc_at_remove_timed(struct ptlrpc_request *req)
 	array->paa_count--;
 }
 
-/*
- * Attempt to extend the request deadline by sending an early reply to the
- * client.
- */
 static int ptlrpc_at_send_early_reply(struct ptlrpc_request *req)
 {
 	struct ptlrpc_service_part *svcpt = req->rq_rqbd->rqbd_svcpt;
@@ -1043,26 +1043,24 @@ static int ptlrpc_at_send_early_reply(struct ptlrpc_request *req)
 		return -ENOSYS;
 	}
 
-	/*
-	 * We want to extend the request deadline by at_extra seconds,
-	 * so we set our service estimate to reflect how much time has
-	 * passed since this request arrived plus an additional
-	 * at_extra seconds. The client will calculate the new deadline
-	 * based on this service estimate (plus some additional time to
-	 * account for network latency). See ptlrpc_at_recv_early_reply
+	/* Fake our processing time into the future to ask the clients
+	 * for some extra amount of time
 	 */
 	at_measured(&svcpt->scp_at_estimate, at_extra +
 		    ktime_get_real_seconds() - req->rq_arrival_time.tv_sec);
-	newdl = req->rq_arrival_time.tv_sec + at_get(&svcpt->scp_at_estimate);
 
 	/* Check to see if we've actually increased the deadline -
 	 * we may be past adaptive_max
 	 */
-	if (req->rq_deadline >= newdl) {
+	if (req->rq_deadline >= req->rq_arrival_time.tv_sec +
+	    at_get(&svcpt->scp_at_estimate)) {
 		DEBUG_REQ(D_WARNING, req, "Couldn't add any time (%ld/%lld), not sending early reply\n",
-			  olddl, newdl - ktime_get_real_seconds());
+			  olddl, req->rq_arrival_time.tv_sec +
+			  at_get(&svcpt->scp_at_estimate) -
+			  ktime_get_real_seconds());
 		return -ETIMEDOUT;
 	}
+	newdl = ktime_get_real_seconds() + at_get(&svcpt->scp_at_estimate);
 
 	reqcopy = ptlrpc_request_cache_alloc(GFP_NOFS);
 	if (!reqcopy)
@@ -1264,15 +1262,20 @@ static int ptlrpc_server_hpreq_init(struct ptlrpc_service_part *svcpt,
 		 */
 		if (req->rq_ops->hpreq_check) {
 			rc = req->rq_ops->hpreq_check(req);
-			if (rc == -ESTALE) {
-				req->rq_status = rc;
-				ptlrpc_error(req);
-			}
-			/** can only return error,
-			 * 0 for normal request,
-			 *  or 1 for high priority request
+			/**
+			 * XXX: Out of all current
+			 * ptlrpc_hpreq_ops::hpreq_check(), only
+			 * ldlm_cancel_hpreq_check() can return an error code;
+			 * other functions assert in similar places, which seems
+			 * odd. What also does not seem right is that handlers
+			 * for those RPCs do not assert on the same checks, but
+			 * rather handle the error cases. e.g. see
+			 * ost_rw_hpreq_check(), and ost_brw_read(),
+			 * ost_brw_write().
 			 */
-			LASSERT(rc <= 1);
+			if (rc < 0)
+				return rc;
+			LASSERT(rc == 0 || rc == 1);
 		}
 
 		spin_lock_bh(&req->rq_export->exp_rpc_lock);
@@ -1983,12 +1986,11 @@ ptlrpc_wait_event(struct ptlrpc_service_part *svcpt,
 	cond_resched();
 
 	l_wait_event_exclusive_head(svcpt->scp_waitq,
-				    ptlrpc_thread_stopping(thread) ||
-				    ptlrpc_server_request_incoming(svcpt) ||
-				    ptlrpc_server_request_pending(svcpt,
-								  false) ||
-				    ptlrpc_rqbd_pending(svcpt) ||
-				    ptlrpc_at_check(svcpt), &lwi);
+				ptlrpc_thread_stopping(thread) ||
+				ptlrpc_server_request_incoming(svcpt) ||
+				ptlrpc_server_request_pending(svcpt, false) ||
+				ptlrpc_rqbd_pending(svcpt) ||
+				ptlrpc_at_check(svcpt), &lwi);
 
 	if (ptlrpc_thread_stopping(thread))
 		return -EINTR;
@@ -2051,7 +2053,7 @@ static int ptlrpc_main(void *arg)
 	}
 
 	rc = lu_context_init(&env->le_ctx,
-			     svc->srv_ctx_tags | LCT_REMEMBER | LCT_NOREF);
+			     svc->srv_ctx_tags|LCT_REMEMBER|LCT_NOREF);
 	if (rc)
 		goto out_srv_fini;
 
@@ -2351,7 +2353,7 @@ static void ptlrpc_svcpt_stop_threads(struct ptlrpc_service_part *svcpt)
 
 	while (!list_empty(&zombie)) {
 		thread = list_entry(zombie.next,
-				    struct ptlrpc_thread, t_link);
+					struct ptlrpc_thread, t_link);
 		list_del(&thread->t_link);
 		kfree(thread);
 	}
@@ -2400,6 +2402,7 @@ int ptlrpc_start_threads(struct ptlrpc_service *svc)
 	ptlrpc_stop_all_threads(svc);
 	return rc;
 }
+EXPORT_SYMBOL(ptlrpc_start_threads);
 
 int ptlrpc_start_thread(struct ptlrpc_service_part *svcpt, int wait)
 {
@@ -2540,8 +2543,8 @@ int ptlrpc_hr_init(void)
 		LASSERT(hrp->hrp_nthrs > 0);
 		hrp->hrp_thrs =
 			kzalloc_node(hrp->hrp_nthrs * sizeof(*hrt), GFP_NOFS,
-				     cfs_cpt_spread_node(ptlrpc_hr.hr_cpt_table,
-							 i));
+				cfs_cpt_spread_node(ptlrpc_hr.hr_cpt_table,
+						    i));
 		if (!hrp->hrp_thrs) {
 			rc = -ENOMEM;
 			goto out;
@@ -2594,8 +2597,7 @@ static void ptlrpc_wait_replies(struct ptlrpc_service_part *svcpt)
 						     NULL, NULL);
 
 		rc = l_wait_event(svcpt->scp_waitq,
-				  atomic_read(&svcpt->scp_nreps_difficult) == 0,
-				  &lwi);
+		     atomic_read(&svcpt->scp_nreps_difficult) == 0, &lwi);
 		if (rc == 0)
 			break;
 		CWARN("Unexpectedly long timeout %s %p\n",
@@ -2641,7 +2643,7 @@ ptlrpc_service_unlink_rqbd(struct ptlrpc_service *svc)
 		 * event with its 'unlink' flag set for each posted rqbd
 		 */
 		list_for_each_entry(rqbd, &svcpt->scp_rqbd_posted,
-				    rqbd_list) {
+					rqbd_list) {
 			rc = LNetMDUnlink(rqbd->rqbd_md_h);
 			LASSERT(rc == 0 || rc == -ENOENT);
 		}

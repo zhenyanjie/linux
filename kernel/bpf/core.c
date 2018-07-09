@@ -458,7 +458,6 @@ noinline u64 __bpf_call_base(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5)
 }
 EXPORT_SYMBOL_GPL(__bpf_call_base);
 
-#ifndef CONFIG_BPF_JIT_ALWAYS_ON
 /**
  *	__bpf_prog_run - run eBPF program on a given context
  *	@ctx: is the data we are operating on
@@ -642,7 +641,7 @@ select_insn:
 		DST = tmp;
 		CONT;
 	ALU_MOD_X:
-		if (unlikely((u32)SRC == 0))
+		if (unlikely(SRC == 0))
 			return 0;
 		tmp = (u32) DST;
 		DST = do_div(tmp, (u32) SRC);
@@ -661,7 +660,7 @@ select_insn:
 		DST = div64_u64(DST, SRC);
 		CONT;
 	ALU_DIV_X:
-		if (unlikely((u32)SRC == 0))
+		if (unlikely(SRC == 0))
 			return 0;
 		tmp = (u32) DST;
 		do_div(tmp, (u32) SRC);
@@ -716,17 +715,18 @@ select_insn:
 		struct bpf_map *map = (struct bpf_map *) (unsigned long) BPF_R2;
 		struct bpf_array *array = container_of(map, struct bpf_array, map);
 		struct bpf_prog *prog;
-		u32 index = BPF_R3;
+		u64 index = BPF_R3;
 
 		if (unlikely(index >= array->map.max_entries))
 			goto out;
+
 		if (unlikely(tail_call_cnt > MAX_TAIL_CALL_CNT))
 			goto out;
 
 		tail_call_cnt++;
 
 		prog = READ_ONCE(array->ptrs[index]);
-		if (!prog)
+		if (unlikely(!prog))
 			goto out;
 
 		/* ARG1 at this point is guaranteed to point to CTX from
@@ -924,13 +924,6 @@ load_byte:
 }
 STACK_FRAME_NON_STANDARD(__bpf_prog_run); /* jump table */
 
-#else
-static unsigned int __bpf_prog_ret0(void *ctx, const struct bpf_insn *insn)
-{
-	return 0;
-}
-#endif
-
 bool bpf_prog_array_compatible(struct bpf_array *array,
 			       const struct bpf_prog *fp)
 {
@@ -978,11 +971,7 @@ static int bpf_check_tail_call(const struct bpf_prog *fp)
  */
 struct bpf_prog *bpf_prog_select_runtime(struct bpf_prog *fp, int *err)
 {
-#ifndef CONFIG_BPF_JIT_ALWAYS_ON
 	fp->bpf_func = (void *) __bpf_prog_run;
-#else
-	fp->bpf_func = (void *) __bpf_prog_ret0;
-#endif
 
 	/* eBPF JITs can rewrite the program in case constant
 	 * blinding is active. However, in case of error during
@@ -991,12 +980,6 @@ struct bpf_prog *bpf_prog_select_runtime(struct bpf_prog *fp, int *err)
 	 * be JITed, but falls back to the interpreter.
 	 */
 	fp = bpf_int_jit_compile(fp);
-#ifdef CONFIG_BPF_JIT_ALWAYS_ON
-	if (!fp->jited) {
-		*err = -ENOTSUPP;
-		return fp;
-	}
-#endif
 	bpf_prog_lock_ro(fp);
 
 	/* The tail call compatibility check can only be done at
@@ -1036,7 +1019,7 @@ void bpf_user_rnd_init_once(void)
 	prandom_init_once(&bpf_user_rnd_state);
 }
 
-BPF_CALL_0(bpf_user_rnd_u32)
+u64 bpf_user_rnd_u32(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5)
 {
 	/* Should someone ever have the rather unwise idea to use some
 	 * of the registers passed into this function, then note that
@@ -1049,7 +1032,7 @@ BPF_CALL_0(bpf_user_rnd_u32)
 
 	state = &get_cpu_var(bpf_user_rnd_state);
 	res = prandom_u32_state(state);
-	put_cpu_var(bpf_user_rnd_state);
+	put_cpu_var(state);
 
 	return res;
 }
@@ -1072,11 +1055,9 @@ const struct bpf_func_proto * __weak bpf_get_trace_printk_proto(void)
 	return NULL;
 }
 
-u64 __weak
-bpf_event_output(struct bpf_map *map, u64 flags, void *meta, u64 meta_size,
-		 void *ctx, u64 ctx_size, bpf_ctx_copy_t ctx_copy)
+const struct bpf_func_proto * __weak bpf_get_event_output_proto(void)
 {
-	return -ENOTSUPP;
+	return NULL;
 }
 
 /* Always built-in helper functions. */

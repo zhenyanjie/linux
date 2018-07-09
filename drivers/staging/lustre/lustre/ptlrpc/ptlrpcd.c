@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -157,9 +161,9 @@ static int ptlrpcd_users;
 
 void ptlrpcd_wake(struct ptlrpc_request *req)
 {
-	struct ptlrpc_request_set *set = req->rq_set;
+	struct ptlrpc_request_set *rq_set = req->rq_set;
 
-	wake_up(&set->set_waitq);
+	wake_up(&rq_set->set_waitq);
 }
 EXPORT_SYMBOL(ptlrpcd_wake);
 
@@ -412,7 +416,7 @@ static int ptlrpcd(void *arg)
 	 * an argument, describing its "scope".
 	 */
 	rc = lu_context_init(&env.le_ctx,
-			     LCT_CL_THREAD | LCT_REMEMBER | LCT_NOREF);
+			     LCT_CL_THREAD|LCT_REMEMBER|LCT_NOREF);
 	if (rc == 0) {
 		rc = lu_context_init(env.le_ses,
 				     LCT_SESSION | LCT_REMEMBER | LCT_NOREF);
@@ -567,7 +571,7 @@ int ptlrpcd_start(struct ptlrpcd_ctl *pc)
 	 * ptlrpcd thread (or a thread-set) has to be given an argument,
 	 * describing its "scope".
 	 */
-	rc = lu_context_init(&pc->pc_env.le_ctx, LCT_CL_THREAD | LCT_REMEMBER);
+	rc = lu_context_init(&pc->pc_env.le_ctx, LCT_CL_THREAD|LCT_REMEMBER);
 	if (rc != 0)
 		goto out;
 

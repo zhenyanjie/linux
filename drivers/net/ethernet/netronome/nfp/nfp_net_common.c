@@ -41,6 +41,7 @@
  *          Chris Telfer <chris.telfer@netronome.com>
  */
 
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -60,7 +61,6 @@
 
 #include <linux/ktime.h>
 
-#include <net/pkt_cls.h>
 #include <net/vxlan.h>
 
 #include "nfp_net_ctrl.h"
@@ -854,8 +854,6 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 
 	netdev_tx_sent_queue(nd_q, txbuf->real_len);
 
-	skb_tx_timestamp(skb);
-
 	tx_ring->wr_p += nr_frags + 1;
 	if (nfp_net_tx_ring_should_stop(tx_ring))
 		nfp_net_tx_ring_stop(nd_q, tx_ring);
@@ -868,10 +866,13 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 		tx_ring->wr_ptr_add = 0;
 	}
 
+	skb_tx_timestamp(skb);
+
 	return NETDEV_TX_OK;
 
 err_unmap:
-	while (--f >= 0) {
+	--f;
+	while (f >= 0) {
 		frag = &skb_shinfo(skb)->frags[f];
 		dma_unmap_page(&nn->pdev->dev,
 			       tx_ring->txbufs[wr_idx].dma_addr,
@@ -1292,70 +1293,36 @@ static void nfp_net_rx_csum(struct nfp_net *nn, struct nfp_net_r_vector *r_vec,
 	}
 }
 
+/**
+ * nfp_net_set_hash() - Set SKB hash data
+ * @netdev: adapter's net_device structure
+ * @skb:   SKB to set the hash data on
+ * @rxd:   RX descriptor
+ *
+ * The RSS hash and hash-type are pre-pended to the packet data.
+ * Extract and decode it and set the skb fields.
+ */
 static void nfp_net_set_hash(struct net_device *netdev, struct sk_buff *skb,
-			     unsigned int type, __be32 *hash)
-{
-	if (!(netdev->features & NETIF_F_RXHASH))
-		return;
-
-	switch (type) {
-	case NFP_NET_RSS_IPV4:
-	case NFP_NET_RSS_IPV6:
-	case NFP_NET_RSS_IPV6_EX:
-		skb_set_hash(skb, get_unaligned_be32(hash), PKT_HASH_TYPE_L3);
-		break;
-	default:
-		skb_set_hash(skb, get_unaligned_be32(hash), PKT_HASH_TYPE_L4);
-		break;
-	}
-}
-
-static void
-nfp_net_set_hash_desc(struct net_device *netdev, struct sk_buff *skb,
-		      struct nfp_net_rx_desc *rxd)
+			     struct nfp_net_rx_desc *rxd)
 {
 	struct nfp_net_rx_hash *rx_hash;
 
-	if (!(rxd->rxd.flags & PCIE_DESC_RX_RSS))
+	if (!(rxd->rxd.flags & PCIE_DESC_RX_RSS) ||
+	    !(netdev->features & NETIF_F_RXHASH))
 		return;
 
 	rx_hash = (struct nfp_net_rx_hash *)(skb->data - sizeof(*rx_hash));
 
-	nfp_net_set_hash(netdev, skb, get_unaligned_be32(&rx_hash->hash_type),
-			 &rx_hash->hash);
-}
-
-static void *
-nfp_net_parse_meta(struct net_device *netdev, struct sk_buff *skb,
-		   int meta_len)
-{
-	u8 *data = skb->data - meta_len;
-	u32 meta_info;
-
-	meta_info = get_unaligned_be32(data);
-	data += 4;
-
-	while (meta_info) {
-		switch (meta_info & NFP_NET_META_FIELD_MASK) {
-		case NFP_NET_META_HASH:
-			meta_info >>= NFP_NET_META_FIELD_SIZE;
-			nfp_net_set_hash(netdev, skb,
-					 meta_info & NFP_NET_META_FIELD_MASK,
-					 (__be32 *)data);
-			data += 4;
-			break;
-		case NFP_NET_META_MARK:
-			skb->mark = get_unaligned_be32(data);
-			data += 4;
-			break;
-		default:
-			return NULL;
-		}
-
-		meta_info >>= NFP_NET_META_FIELD_SIZE;
+	switch (be32_to_cpu(rx_hash->hash_type)) {
+	case NFP_NET_RSS_IPV4:
+	case NFP_NET_RSS_IPV6:
+	case NFP_NET_RSS_IPV6_EX:
+		skb_set_hash(skb, be32_to_cpu(rx_hash->hash), PKT_HASH_TYPE_L3);
+		break;
+	default:
+		skb_set_hash(skb, be32_to_cpu(rx_hash->hash), PKT_HASH_TYPE_L4);
+		break;
 	}
-
-	return data;
 }
 
 /**
@@ -1472,28 +1439,17 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 			skb_reserve(skb, nn->rx_offset);
 		skb_put(skb, data_len - meta_len);
 
+		nfp_net_set_hash(nn->netdev, skb, rxd);
+
+		/* Pad small frames to minimum */
+		if (skb_put_padto(skb, 60))
+			break;
+
 		/* Stats update */
 		u64_stats_update_begin(&r_vec->rx_sync);
 		r_vec->rx_pkts++;
 		r_vec->rx_bytes += skb->len;
 		u64_stats_update_end(&r_vec->rx_sync);
-
-		if (nn->fw_ver.major <= 3) {
-			nfp_net_set_hash_desc(nn->netdev, skb, rxd);
-		} else if (meta_len) {
-			void *end;
-
-			end = nfp_net_parse_meta(nn->netdev, skb, meta_len);
-			if (unlikely(end != skb->data)) {
-				u64_stats_update_begin(&r_vec->rx_sync);
-				r_vec->rx_drops++;
-				u64_stats_update_end(&r_vec->rx_sync);
-
-				dev_kfree_skb_any(skb);
-				nn_warn_ratelimit(nn, "invalid RX packet metadata\n");
-				continue;
-			}
-		}
 
 		skb_record_rx_queue(skb, rx_ring->idx);
 		skb->protocol = eth_type_trans(skb, nn->netdev);
@@ -1889,14 +1845,13 @@ void nfp_net_coalesce_write_cfg(struct nfp_net *nn)
 }
 
 /**
- * nfp_net_write_mac_addr() - Write mac address to the device control BAR
+ * nfp_net_write_mac_addr() - Write mac address to device registers
  * @nn:      NFP Net device to reconfigure
+ * @mac:     Six-byte MAC address to be written
  *
- * Writes the MAC address from the netdev to the device control BAR.  Does not
- * perform the required reconfig.  We do a bit of byte swapping dance because
- * firmware is LE.
+ * We do a bit of byte swapping dance because firmware is LE.
  */
-static void nfp_net_write_mac_addr(struct nfp_net *nn)
+static void nfp_net_write_mac_addr(struct nfp_net *nn, const u8 *mac)
 {
 	nn_writel(nn, NFP_NET_CFG_MACADDR + 0,
 		  get_unaligned_be32(nn->netdev->dev_addr));
@@ -1997,7 +1952,7 @@ static int __nfp_net_set_config_and_enable(struct nfp_net *nn)
 	nn_writeq(nn, NFP_NET_CFG_RXRS_ENABLE, nn->num_rx_rings == 64 ?
 		  0xffffffffffffffffULL : ((u64)1 << nn->num_rx_rings) - 1);
 
-	nfp_net_write_mac_addr(nn);
+	nfp_net_write_mac_addr(nn, nn->netdev->dev_addr);
 
 	nn_writel(nn, NFP_NET_CFG_MTU, nn->netdev->mtu);
 	nn_writel(nn, NFP_NET_CFG_FLBUFSZ, nn->fl_bufsz);
@@ -2024,7 +1979,7 @@ static int __nfp_net_set_config_and_enable(struct nfp_net *nn)
 	if (nn->ctrl & NFP_NET_CFG_CTRL_VXLAN) {
 		memset(&nn->vxlan_ports, 0, sizeof(nn->vxlan_ports));
 		memset(&nn->vxlan_usecnt, 0, sizeof(nn->vxlan_usecnt));
-		udp_tunnel_get_rx_info(nn->netdev);
+		vxlan_get_rx_port(nn->netdev);
 	}
 
 	return err;
@@ -2093,16 +2048,12 @@ static int nfp_net_netdev_open(struct net_device *netdev)
 
 	nn->rx_rings = kcalloc(nn->num_rx_rings, sizeof(*nn->rx_rings),
 			       GFP_KERNEL);
-	if (!nn->rx_rings) {
-		err = -ENOMEM;
+	if (!nn->rx_rings)
 		goto err_free_lsc;
-	}
 	nn->tx_rings = kcalloc(nn->num_tx_rings, sizeof(*nn->tx_rings),
 			       GFP_KERNEL);
-	if (!nn->tx_rings) {
-		err = -ENOMEM;
+	if (!nn->tx_rings)
 		goto err_free_rx_rings;
-	}
 
 	for (r = 0; r < nn->num_r_vecs; r++) {
 		err = nfp_net_prepare_vector(nn, &nn->r_vecs[r], r);
@@ -2435,31 +2386,6 @@ static struct rtnl_link_stats64 *nfp_net_stat64(struct net_device *netdev,
 	return stats;
 }
 
-static bool nfp_net_ebpf_capable(struct nfp_net *nn)
-{
-	if (nn->cap & NFP_NET_CFG_CTRL_BPF &&
-	    nn_readb(nn, NFP_NET_CFG_BPF_ABI) == NFP_NET_BPF_ABI)
-		return true;
-	return false;
-}
-
-static int
-nfp_net_setup_tc(struct net_device *netdev, u32 handle, __be16 proto,
-		 struct tc_to_netdev *tc)
-{
-	struct nfp_net *nn = netdev_priv(netdev);
-
-	if (TC_H_MAJ(handle) != TC_H_MAJ(TC_H_INGRESS))
-		return -ENOTSUPP;
-	if (proto != htons(ETH_P_ALL))
-		return -ENOTSUPP;
-
-	if (tc->type == TC_SETUP_CLSBPF && nfp_net_ebpf_capable(nn))
-		return nfp_net_bpf_offload(nn, handle, proto, tc->cls_bpf);
-
-	return -EINVAL;
-}
-
 static int nfp_net_set_features(struct net_device *netdev,
 				netdev_features_t features)
 {
@@ -2512,11 +2438,6 @@ static int nfp_net_set_features(struct net_device *netdev,
 			new_ctrl |= NFP_NET_CFG_CTRL_GATHER;
 		else
 			new_ctrl &= ~NFP_NET_CFG_CTRL_GATHER;
-	}
-
-	if (changed & NETIF_F_HW_TC && nn->ctrl & NFP_NET_CFG_CTRL_BPF) {
-		nn_err(nn, "Cannot disable HW TC offload while in use\n");
-		return -EBUSY;
 	}
 
 	nn_dbg(nn, "Feature change 0x%llx -> 0x%llx (changed=0x%llx)\n",
@@ -2630,33 +2551,27 @@ static int nfp_net_find_vxlan_idx(struct nfp_net *nn, __be16 port)
 }
 
 static void nfp_net_add_vxlan_port(struct net_device *netdev,
-				   struct udp_tunnel_info *ti)
+				   sa_family_t sa_family, __be16 port)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
 	int idx;
 
-	if (ti->type != UDP_TUNNEL_TYPE_VXLAN)
-		return;
-
-	idx = nfp_net_find_vxlan_idx(nn, ti->port);
+	idx = nfp_net_find_vxlan_idx(nn, port);
 	if (idx == -ENOSPC)
 		return;
 
 	if (!nn->vxlan_usecnt[idx]++)
-		nfp_net_set_vxlan_port(nn, idx, ti->port);
+		nfp_net_set_vxlan_port(nn, idx, port);
 }
 
 static void nfp_net_del_vxlan_port(struct net_device *netdev,
-				   struct udp_tunnel_info *ti)
+				   sa_family_t sa_family, __be16 port)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
 	int idx;
 
-	if (ti->type != UDP_TUNNEL_TYPE_VXLAN)
-		return;
-
-	idx = nfp_net_find_vxlan_idx(nn, ti->port);
-	if (idx == -ENOSPC || !nn->vxlan_usecnt[idx])
+	idx = nfp_net_find_vxlan_idx(nn, port);
+	if (!nn->vxlan_usecnt[idx] || idx == -ENOSPC)
 		return;
 
 	if (!--nn->vxlan_usecnt[idx])
@@ -2668,15 +2583,14 @@ static const struct net_device_ops nfp_net_netdev_ops = {
 	.ndo_stop		= nfp_net_netdev_close,
 	.ndo_start_xmit		= nfp_net_tx,
 	.ndo_get_stats64	= nfp_net_stat64,
-	.ndo_setup_tc		= nfp_net_setup_tc,
 	.ndo_tx_timeout		= nfp_net_tx_timeout,
 	.ndo_set_rx_mode	= nfp_net_set_rx_mode,
 	.ndo_change_mtu		= nfp_net_change_mtu,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_set_features	= nfp_net_set_features,
 	.ndo_features_check	= nfp_net_features_check,
-	.ndo_udp_tunnel_add	= nfp_net_add_vxlan_port,
-	.ndo_udp_tunnel_del	= nfp_net_del_vxlan_port,
+	.ndo_add_vxlan_port     = nfp_net_add_vxlan_port,
+	.ndo_del_vxlan_port     = nfp_net_del_vxlan_port,
 };
 
 /**
@@ -2694,7 +2608,7 @@ void nfp_net_info(struct nfp_net *nn)
 		nn->fw_ver.resv, nn->fw_ver.class,
 		nn->fw_ver.major, nn->fw_ver.minor,
 		nn->max_mtu);
-	nn_info(nn, "CAP: %#x %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
+	nn_info(nn, "CAP: %#x %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
 		nn->cap,
 		nn->cap & NFP_NET_CFG_CTRL_PROMISC  ? "PROMISC "  : "",
 		nn->cap & NFP_NET_CFG_CTRL_L2BC     ? "L2BCFILT " : "",
@@ -2711,8 +2625,7 @@ void nfp_net_info(struct nfp_net *nn)
 		nn->cap & NFP_NET_CFG_CTRL_MSIXAUTO ? "AUTOMASK " : "",
 		nn->cap & NFP_NET_CFG_CTRL_IRQMOD   ? "IRQMOD "   : "",
 		nn->cap & NFP_NET_CFG_CTRL_VXLAN    ? "VXLAN "    : "",
-		nn->cap & NFP_NET_CFG_CTRL_NVGRE    ? "NVGRE "	  : "",
-		nfp_net_ebpf_capable(nn)            ? "BPF "	  : "");
+		nn->cap & NFP_NET_CFG_CTRL_NVGRE    ? "NVGRE "	  : "");
 }
 
 /**
@@ -2755,13 +2668,10 @@ struct nfp_net *nfp_net_netdev_alloc(struct pci_dev *pdev,
 	nn->rxd_cnt = NFP_NET_RX_DESCS_DEFAULT;
 
 	spin_lock_init(&nn->reconfig_lock);
-	spin_lock_init(&nn->rx_filter_lock);
 	spin_lock_init(&nn->link_status_lock);
 
 	setup_timer(&nn->reconfig_timer,
 		    nfp_net_reconfig_timer, (unsigned long)nn);
-	setup_timer(&nn->rx_filter_stats_timer,
-		    nfp_net_filter_stats_timer, (unsigned long)nn);
 
 	return nn;
 }
@@ -2823,7 +2733,7 @@ int nfp_net_netdev_init(struct net_device *netdev)
 	nn->cap = nn_readl(nn, NFP_NET_CFG_CAP);
 	nn->max_mtu = nn_readl(nn, NFP_NET_CFG_MAX_MTU);
 
-	nfp_net_write_mac_addr(nn);
+	nfp_net_write_mac_addr(nn, nn->netdev->dev_addr);
 
 	/* Set default MTU and Freelist buffer size */
 	if (nn->max_mtu < NFP_NET_DEFAULT_MTU)
@@ -2882,9 +2792,6 @@ int nfp_net_netdev_init(struct net_device *netdev)
 	}
 
 	netdev->features = netdev->hw_features;
-
-	if (nfp_net_ebpf_capable(nn))
-		netdev->hw_features |= NETIF_F_HW_TC;
 
 	/* Advertise but disable TSO by default. */
 	netdev->features &= ~(NETIF_F_TSO | NETIF_F_TSO6);

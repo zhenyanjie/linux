@@ -170,8 +170,7 @@ void __puthex(unsigned long value)
 }
 
 #if CONFIG_X86_NEED_RELOCS
-static void handle_relocations(void *output, unsigned long output_len,
-			       unsigned long virt_addr)
+static void handle_relocations(void *output, unsigned long output_len)
 {
 	int *reloc;
 	unsigned long delta, map, ptr;
@@ -183,6 +182,11 @@ static void handle_relocations(void *output, unsigned long output_len,
 	 * and where it was actually loaded.
 	 */
 	delta = min_addr - LOAD_PHYSICAL_ADDR;
+	if (!delta) {
+		debug_putstr("No relocation needed... ");
+		return;
+	}
+	debug_putstr("Performing relocations... ");
 
 	/*
 	 * The kernel contains a table of relocation addresses. Those
@@ -192,20 +196,6 @@ static void handle_relocations(void *output, unsigned long output_len,
 	 * This will involve subtracting out the base address of the kernel.
 	 */
 	map = delta - __START_KERNEL_map;
-
-	/*
-	 * 32-bit always performs relocations. 64-bit relocations are only
-	 * needed if KASLR has chosen a different starting address offset
-	 * from __START_KERNEL_map.
-	 */
-	if (IS_ENABLED(CONFIG_X86_64))
-		delta = virt_addr - LOAD_PHYSICAL_ADDR;
-
-	if (!delta) {
-		debug_putstr("No relocation needed... ");
-		return;
-	}
-	debug_putstr("Performing relocations... ");
 
 	/*
 	 * Process relocations: 32 bit relocations first then 64 bit after.
@@ -260,8 +250,7 @@ static void handle_relocations(void *output, unsigned long output_len,
 #endif
 }
 #else
-static inline void handle_relocations(void *output, unsigned long output_len,
-				      unsigned long virt_addr)
+static inline void handle_relocations(void *output, unsigned long output_len)
 { }
 #endif
 
@@ -299,10 +288,6 @@ static void parse_elf(void *output)
 
 		switch (phdr->p_type) {
 		case PT_LOAD:
-#ifdef CONFIG_X86_64
-			if ((phdr->p_align % 0x200000) != 0)
-				error("Alignment of LOAD segment isn't multiple of 2MB");
-#endif
 #ifdef CONFIG_RELOCATABLE
 			dest = output;
 			dest += (phdr->p_paddr - LOAD_PHYSICAL_ADDR);
@@ -342,7 +327,7 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 				  unsigned long output_len)
 {
 	const unsigned long kernel_total_size = VO__end - VO__text;
-	unsigned long virt_addr = LOAD_PHYSICAL_ADDR;
+	unsigned char *output_orig = output;
 
 	/* Retain x86 boot parameters pointer passed from startup_32/64. */
 	boot_params = rmode;
@@ -381,16 +366,13 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 	 * the entire decompressed kernel plus relocation table, or the
 	 * entire decompressed kernel plus .bss and .brk sections.
 	 */
-	choose_random_location((unsigned long)input_data, input_len,
-				(unsigned long *)&output,
-				max(output_len, kernel_total_size),
-				&virt_addr);
+	output = choose_random_location((unsigned long)input_data, input_len,
+					(unsigned long)output,
+					max(output_len, kernel_total_size));
 
 	/* Validate memory location choices. */
 	if ((unsigned long)output & (MIN_KERNEL_ALIGN - 1))
-		error("Destination physical address inappropriately aligned");
-	if (virt_addr & (MIN_KERNEL_ALIGN - 1))
-		error("Destination virtual address inappropriately aligned");
+		error("Destination address inappropriately aligned");
 #ifdef CONFIG_X86_64
 	if (heap > 0x3fffffffffffUL)
 		error("Destination address too large");
@@ -400,16 +382,19 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 #endif
 #ifndef CONFIG_RELOCATABLE
 	if ((unsigned long)output != LOAD_PHYSICAL_ADDR)
-		error("Destination address does not match LOAD_PHYSICAL_ADDR");
-	if (virt_addr != LOAD_PHYSICAL_ADDR)
-		error("Destination virtual address changed when not relocatable");
+		error("Wrong destination address");
 #endif
 
 	debug_putstr("\nDecompressing Linux... ");
 	__decompress(input_data, input_len, NULL, NULL, output, output_len,
 			NULL, error);
 	parse_elf(output);
-	handle_relocations(output, output_len, virt_addr);
+	/*
+	 * 32-bit always performs relocations. 64-bit relocations are only
+	 * needed if kASLR has chosen a different load address.
+	 */
+	if (!IS_ENABLED(CONFIG_X86_64) || output != output_orig)
+		handle_relocations(output, output_len);
 	debug_putstr("done.\nBooting the kernel.\n");
 	return output;
 }

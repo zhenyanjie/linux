@@ -22,11 +22,10 @@ struct device_node;
 struct hisi_reset_controller;
 
 #ifdef CONFIG_RESET_CONTROLLER
-struct hisi_reset_controller *hisi_reset_init(struct platform_device *pdev);
+struct hisi_reset_controller *hisi_reset_init(struct device_node *np);
 void hisi_reset_exit(struct hisi_reset_controller *rstc);
 #else
-static inline
-struct hisi_reset_controller *hisi_reset_init(struct platform_device *pdev)
+static inline hisi_reset_controller *hisi_reset_init(struct device_node *np)
 {
 	return 0;
 }

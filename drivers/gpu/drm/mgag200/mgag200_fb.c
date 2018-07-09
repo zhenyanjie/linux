@@ -15,6 +15,8 @@
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_crtc_helper.h>
 
+#include <linux/fb.h>
+
 #include "mgag200_drv.h"
 
 static void mga_dirty_update(struct mga_fbdev *mfbdev,
@@ -183,10 +185,8 @@ static int mgag200fb_create(struct drm_fb_helper *helper,
 	}
 
 	sysram = vmalloc(size);
-	if (!sysram) {
-		ret = -ENOMEM;
+	if (!sysram)
 		goto err_sysram;
-	}
 
 	info = drm_fb_helper_alloc_fbi(helper);
 	if (IS_ERR(info)) {

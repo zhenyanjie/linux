@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -163,7 +167,7 @@ static spinlock_t *cl_object_attr_guard(struct cl_object *o)
  *
  * Prevents data-attributes from changing, until lock is released by
  * cl_object_attr_unlock(). This has to be called before calls to
- * cl_object_attr_get(), cl_object_attr_update().
+ * cl_object_attr_get(), cl_object_attr_set().
  */
 void cl_object_attr_lock(struct cl_object *o)
 	__acquires(cl_object_attr_guard(o))
@@ -217,11 +221,11 @@ EXPORT_SYMBOL(cl_object_attr_get);
  * Updates data-attributes of an object \a obj.
  *
  * Only attributes, mentioned in a validness bit-mask \a v are
- * updated. Calls cl_object_operations::coo_attr_update() on every layer,
- * bottom to top.
+ * updated. Calls cl_object_operations::coo_attr_set() on every layer, bottom
+ * to top.
  */
-int cl_object_attr_update(const struct lu_env *env, struct cl_object *obj,
-			  const struct cl_attr *attr, unsigned int v)
+int cl_object_attr_set(const struct lu_env *env, struct cl_object *obj,
+		       const struct cl_attr *attr, unsigned v)
 {
 	struct lu_object_header *top;
 	int result;
@@ -231,9 +235,8 @@ int cl_object_attr_update(const struct lu_env *env, struct cl_object *obj,
 	top = obj->co_lu.lo_header;
 	result = 0;
 	list_for_each_entry_reverse(obj, &top->loh_layers, co_lu.lo_linkage) {
-		if (obj->co_ops->coo_attr_update) {
-			result = obj->co_ops->coo_attr_update(env, obj, attr,
-							      v);
+		if (obj->co_ops->coo_attr_set) {
+			result = obj->co_ops->coo_attr_set(env, obj, attr, v);
 			if (result != 0) {
 				if (result > 0)
 					result = 0;
@@ -243,7 +246,7 @@ int cl_object_attr_update(const struct lu_env *env, struct cl_object *obj,
 	}
 	return result;
 }
-EXPORT_SYMBOL(cl_object_attr_update);
+EXPORT_SYMBOL(cl_object_attr_set);
 
 /**
  * Notifies layers (bottom-to-top) that glimpse AST was received.
@@ -322,27 +325,6 @@ int cl_object_prune(const struct lu_env *env, struct cl_object *obj)
 EXPORT_SYMBOL(cl_object_prune);
 
 /**
- * Get stripe information of this object.
- */
-int cl_object_getstripe(const struct lu_env *env, struct cl_object *obj,
-			struct lov_user_md __user *uarg)
-{
-	struct lu_object_header *top;
-	int result = 0;
-
-	top = obj->co_lu.lo_header;
-	list_for_each_entry(obj, &top->loh_layers, co_lu.lo_linkage) {
-		if (obj->co_ops->coo_getstripe) {
-			result = obj->co_ops->coo_getstripe(env, obj, uarg);
-			if (result)
-			break;
-		}
-	}
-	return result;
-}
-EXPORT_SYMBOL(cl_object_getstripe);
-
-/**
  * Helper function removing all object locks, and marking object for
  * deletion. All object pages must have been deleted at this point.
  *
@@ -399,7 +381,7 @@ static void cl_env_percpu_refill(void);
  */
 int cl_site_init(struct cl_site *s, struct cl_device *d)
 {
-	size_t i;
+	int i;
 	int result;
 
 	result = lu_site_init(&s->cs_lu, &d->cd_lu_dev);
@@ -433,7 +415,7 @@ static struct cache_stats cl_env_stats = {
  */
 int cl_site_stats_print(const struct cl_site *site, struct seq_file *m)
 {
-	size_t i;
+	int i;
 	static const char *pstate[] = {
 		[CPS_CACHED]  = "c",
 		[CPS_OWNED]   = "o",
@@ -595,7 +577,7 @@ static inline struct cl_env *cl_env_fetch(void)
 {
 	struct cl_env *cle;
 
-	cle = cfs_hash_lookup(cl_env_hash, (void *)(long)current->pid);
+	cle = cfs_hash_lookup(cl_env_hash, (void *) (long) current->pid);
 	LASSERT(ergo(cle, cle->ce_magic == &cl_env_init0));
 	return cle;
 }
@@ -606,7 +588,7 @@ static inline void cl_env_attach(struct cl_env *cle)
 		int rc;
 
 		LASSERT(!cle->ce_owner);
-		cle->ce_owner = (void *)(long)current->pid;
+		cle->ce_owner = (void *) (long) current->pid;
 		rc = cfs_hash_add_unique(cl_env_hash, cle->ce_owner,
 					 &cle->ce_node);
 		LASSERT(rc == 0);
@@ -617,7 +599,7 @@ static inline void cl_env_do_detach(struct cl_env *cle)
 {
 	void *cookie;
 
-	LASSERT(cle->ce_owner == (void *)(long)current->pid);
+	LASSERT(cle->ce_owner == (void *) (long) current->pid);
 	cookie = cfs_hash_del(cl_env_hash, cle->ce_owner,
 			      &cle->ce_node);
 	LASSERT(cookie == cle);
@@ -1022,7 +1004,7 @@ static int cl_env_percpu_init(void)
 		 * thus we must uninitialize up to i, the rest are undefined.
 		 */
 		for (j = 0; j < i; j++) {
-			cle = &cl_env_percpu[j];
+			cle = &cl_env_percpu[i];
 			lu_context_exit(&cle->ce_ses);
 			lu_context_fini(&cle->ce_ses);
 			lu_env_fini(&cle->ce_lu);
@@ -1148,7 +1130,7 @@ static void *cl_key_init(const struct lu_context *ctx,
 
 	info = cl0_key_init(ctx, key);
 	if (!IS_ERR(info)) {
-		size_t i;
+		int i;
 
 		for (i = 0; i < ARRAY_SIZE(info->clt_counters); ++i)
 			lu_ref_init(&info->clt_counters[i].ctc_locks_locked);
@@ -1160,7 +1142,7 @@ static void cl_key_fini(const struct lu_context *ctx,
 			struct lu_context_key *key, void *data)
 {
 	struct cl_thread_info *info;
-	size_t i;
+	int i;
 
 	info = data;
 	for (i = 0; i < ARRAY_SIZE(info->clt_counters); ++i)
@@ -1172,7 +1154,7 @@ static void cl_key_exit(const struct lu_context *ctx,
 			struct lu_context_key *key, void *data)
 {
 	struct cl_thread_info *info = data;
-	size_t i;
+	int i;
 
 	for (i = 0; i < ARRAY_SIZE(info->clt_counters); ++i) {
 		LASSERT(info->clt_counters[i].ctc_nr_held == 0);

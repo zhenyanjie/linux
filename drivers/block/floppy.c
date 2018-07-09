@@ -3818,9 +3818,8 @@ static int __floppy_read_block_0(struct block_device *bdev, int drive)
 	bio.bi_flags |= (1 << BIO_QUIET);
 	bio.bi_private = &cbdata;
 	bio.bi_end_io = floppy_rb0_cb;
-	bio_set_op_attrs(&bio, REQ_OP_READ, 0);
 
-	submit_bio(&bio);
+	submit_bio(READ, &bio);
 	process_fd_request();
 
 	init_completion(&cbdata.complete);
@@ -4346,7 +4345,8 @@ static int __init do_floppy_init(void)
 		/* to be cleaned up... */
 		disks[drive]->private_data = (void *)(long)drive;
 		disks[drive]->flags |= GENHD_FL_REMOVABLE;
-		device_add_disk(&floppy_device[drive].dev, disks[drive]);
+		disks[drive]->driverfs_dev = &floppy_device[drive].dev;
+		add_disk(disks[drive]);
 	}
 
 	return 0;

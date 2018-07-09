@@ -29,8 +29,8 @@ struct gpmc_nand_regs;
 struct gpmc_nand_ops *gpmc_omap_get_nand_ops(struct gpmc_nand_regs *regs,
 					     int cs);
 #else
-static inline struct gpmc_nand_ops *gpmc_omap_get_nand_ops(struct gpmc_nand_regs *regs,
-							   int cs)
+static inline gpmc_nand_ops *gpmc_omap_get_nand_ops(struct gpmc_nand_regs *regs,
+						    int cs)
 {
 	return NULL;
 }
@@ -88,11 +88,10 @@ static inline int gpmc_nand_init(struct omap_nand_platform_data *d,
 #endif
 
 #if IS_ENABLED(CONFIG_MTD_ONENAND_OMAP2)
-extern int gpmc_onenand_init(struct omap_onenand_platform_data *d);
+extern void gpmc_onenand_init(struct omap_onenand_platform_data *d);
 #else
 #define board_onenand_data	NULL
-static inline int gpmc_onenand_init(struct omap_onenand_platform_data *d)
+static inline void gpmc_onenand_init(struct omap_onenand_platform_data *d)
 {
-	return 0;
 }
 #endif

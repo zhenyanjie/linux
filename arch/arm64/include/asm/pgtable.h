@@ -71,8 +71,9 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 #define pte_young(pte)		(!!(pte_val(pte) & PTE_AF))
 #define pte_special(pte)	(!!(pte_val(pte) & PTE_SPECIAL))
 #define pte_write(pte)		(!!(pte_val(pte) & PTE_WRITE))
-#define pte_user_exec(pte)	(!(pte_val(pte) & PTE_UXN))
+#define pte_exec(pte)		(!(pte_val(pte) & PTE_UXN))
 #define pte_cont(pte)		(!!(pte_val(pte) & PTE_CONT))
+#define pte_user(pte)		(!!(pte_val(pte) & PTE_USER))
 
 #ifdef CONFIG_ARM64_HW_AFDBM
 #define pte_hw_dirty(pte)	(pte_write(pte) && !(pte_val(pte) & PTE_RDONLY))
@@ -83,16 +84,10 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 #define pte_dirty(pte)		(pte_sw_dirty(pte) || pte_hw_dirty(pte))
 
 #define pte_valid(pte)		(!!(pte_val(pte) & PTE_VALID))
-/*
- * Execute-only user mappings do not have the PTE_USER bit set. All valid
- * kernel mappings have the PTE_UXN bit set.
- */
 #define pte_valid_not_user(pte) \
-	((pte_val(pte) & (PTE_VALID | PTE_USER | PTE_UXN)) == (PTE_VALID | PTE_UXN))
+	((pte_val(pte) & (PTE_VALID | PTE_USER)) == PTE_VALID)
 #define pte_valid_young(pte) \
 	((pte_val(pte) & (PTE_VALID | PTE_AF)) == (PTE_VALID | PTE_AF))
-#define pte_valid_user(pte) \
-	((pte_val(pte) & (PTE_VALID | PTE_USER)) == (PTE_VALID | PTE_USER))
 
 /*
  * Could the pte be present in the TLB? We must check mm_tlb_flush_pending
@@ -101,18 +96,6 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
  */
 #define pte_accessible(mm, pte)	\
 	(mm_tlb_flush_pending(mm) ? pte_present(pte) : pte_valid_young(pte))
-
-/*
- * p??_access_permitted() is true for valid user mappings (subject to the
- * write permission check) other than user execute-only which do not have the
- * PTE_USER bit set. PROT_NONE mappings do not have the PTE_VALID bit set.
- */
-#define pte_access_permitted(pte, write) \
-	(pte_valid_user(pte) && (!(write) || pte_write(pte)))
-#define pmd_access_permitted(pmd, write) \
-	(pte_access_permitted(pmd_pte(pmd), (write)))
-#define pud_access_permitted(pud, write) \
-	(pte_access_permitted(pud_pte(pud), (write)))
 
 static inline pte_t clear_pte_bit(pte_t pte, pgprot_t prot)
 {
@@ -172,16 +155,6 @@ static inline pte_t pte_mknoncont(pte_t pte)
 	return clear_pte_bit(pte, __pgprot(PTE_CONT));
 }
 
-static inline pte_t pte_clear_rdonly(pte_t pte)
-{
-	return clear_pte_bit(pte, __pgprot(PTE_RDONLY));
-}
-
-static inline pte_t pte_mkpresent(pte_t pte)
-{
-	return set_pte_bit(pte, __pgprot(PTE_VALID));
-}
-
 static inline pmd_t pmd_mkcont(pmd_t pmd)
 {
 	return __pmd(pmd_val(pmd) | PMD_SECT_CONT);
@@ -229,7 +202,7 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 			pte_val(pte) &= ~PTE_RDONLY;
 		else
 			pte_val(pte) |= PTE_RDONLY;
-		if (pte_user_exec(pte) && !pte_special(pte))
+		if (pte_user(pte) && pte_exec(pte) && !pte_special(pte))
 			__sync_icache_dcache(pte, addr);
 	}
 
@@ -249,23 +222,6 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 	}
 
 	set_pte(ptep, pte);
-}
-
-#define __HAVE_ARCH_PTE_SAME
-static inline int pte_same(pte_t pte_a, pte_t pte_b)
-{
-	pteval_t lhs, rhs;
-
-	lhs = pte_val(pte_a);
-	rhs = pte_val(pte_b);
-
-	if (pte_present(pte_a))
-		lhs &= ~PTE_RDONLY;
-
-	if (pte_present(pte_b))
-		rhs &= ~PTE_RDONLY;
-
-	return (lhs == rhs);
 }
 
 /*
@@ -692,7 +648,6 @@ static inline void pmdp_set_wrprotect(struct mm_struct *mm,
 
 extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
 extern pgd_t idmap_pg_dir[PTRS_PER_PGD];
-extern pgd_t tramp_pg_dir[PTRS_PER_PGD];
 
 /*
  * Encode and decode a swap entry:

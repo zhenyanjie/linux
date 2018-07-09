@@ -93,29 +93,6 @@ bool regmap_writeable(struct regmap *map, unsigned int reg)
 	return true;
 }
 
-bool regmap_cached(struct regmap *map, unsigned int reg)
-{
-	int ret;
-	unsigned int val;
-
-	if (map->cache_type == REGCACHE_NONE)
-		return false;
-
-	if (!map->cache_ops)
-		return false;
-
-	if (map->max_register && reg > map->max_register)
-		return false;
-
-	map->lock(map->lock_arg);
-	ret = regcache_read(map, reg, &val);
-	map->unlock(map->lock_arg);
-	if (ret)
-		return false;
-
-	return true;
-}
-
 bool regmap_readable(struct regmap *map, unsigned int reg)
 {
 	if (!map->reg_read)
@@ -772,9 +749,6 @@ struct regmap *__regmap_init(struct device *dev,
 		case REGMAP_ENDIAN_BIG:
 			map->format.format_reg = regmap_format_16_be;
 			break;
-		case REGMAP_ENDIAN_LITTLE:
-			map->format.format_reg = regmap_format_16_le;
-			break;
 		case REGMAP_ENDIAN_NATIVE:
 			map->format.format_reg = regmap_format_16_native;
 			break;
@@ -794,9 +768,6 @@ struct regmap *__regmap_init(struct device *dev,
 		case REGMAP_ENDIAN_BIG:
 			map->format.format_reg = regmap_format_32_be;
 			break;
-		case REGMAP_ENDIAN_LITTLE:
-			map->format.format_reg = regmap_format_32_le;
-			break;
 		case REGMAP_ENDIAN_NATIVE:
 			map->format.format_reg = regmap_format_32_native;
 			break;
@@ -810,9 +781,6 @@ struct regmap *__regmap_init(struct device *dev,
 		switch (reg_endian) {
 		case REGMAP_ENDIAN_BIG:
 			map->format.format_reg = regmap_format_64_be;
-			break;
-		case REGMAP_ENDIAN_LITTLE:
-			map->format.format_reg = regmap_format_64_le;
 			break;
 		case REGMAP_ENDIAN_NATIVE:
 			map->format.format_reg = regmap_format_64_native;
@@ -1328,26 +1296,12 @@ static int _regmap_select_page(struct regmap *map, unsigned int *reg,
 	return 0;
 }
 
-static void regmap_set_work_buf_flag_mask(struct regmap *map, int max_bytes,
-					  unsigned long mask)
-{
-	u8 *buf;
-	int i;
-
-	if (!mask || !map->work_buf)
-		return;
-
-	buf = map->work_buf;
-
-	for (i = 0; i < max_bytes; i++)
-		buf[i] |= (mask >> (8 * i)) & 0xff;
-}
-
 int _regmap_raw_write(struct regmap *map, unsigned int reg,
 		      const void *val, size_t val_len)
 {
 	struct regmap_range_node *range;
 	unsigned long flags;
+	u8 *u8 = map->work_buf;
 	void *work_val = map->work_buf + map->format.reg_bytes +
 		map->format.pad_bytes;
 	void *buf;
@@ -1416,8 +1370,8 @@ int _regmap_raw_write(struct regmap *map, unsigned int reg,
 	}
 
 	map->format.format_reg(map->work_buf, reg, map->reg_shift);
-	regmap_set_work_buf_flag_mask(map, map->format.reg_bytes,
-				      map->write_flag_mask);
+
+	u8[0] |= map->write_flag_mask;
 
 	/*
 	 * Essentially all I/O mechanisms will be faster with a single
@@ -1520,12 +1474,6 @@ int _regmap_raw_write(struct regmap *map, unsigned int reg,
 		ret = map->bus->write(map->bus_context, buf, len);
 
 		kfree(buf);
-	} else if (ret != 0 && !map->cache_bypass && map->format.parse_val) {
-		/* regcache_drop_region() takes lock that we already have,
-		 * thus call map->cache_ops->drop() directly
-		 */
-		if (map->cache_ops && map->cache_ops->drop)
-			map->cache_ops->drop(map, reg, reg + 1);
 	}
 
 	trace_regmap_hw_write_done(map, reg, val_len / map->format.val_bytes);
@@ -1736,7 +1684,7 @@ int regmap_raw_write(struct regmap *map, unsigned int reg,
 		return -EINVAL;
 	if (val_len % map->format.val_bytes)
 		return -EINVAL;
-	if (map->max_raw_write && map->max_raw_write < val_len)
+	if (map->max_raw_write && map->max_raw_write > val_len)
 		return -E2BIG;
 
 	map->lock(map->lock_arg);
@@ -1829,6 +1777,8 @@ int regmap_bulk_write(struct regmap *map, unsigned int reg, const void *val,
 	size_t val_bytes = map->format.val_bytes;
 	size_t total_size = val_bytes * val_count;
 
+	if (map->bus && !map->format.parse_inplace)
+		return -EINVAL;
 	if (!IS_ALIGNED(reg, map->reg_stride))
 		return -EINVAL;
 
@@ -1839,8 +1789,7 @@ int regmap_bulk_write(struct regmap *map, unsigned int reg, const void *val,
 	 *
 	 * The first if block is used for memory mapped io. It does not allow
 	 * val_bytes of 3 for example.
-	 * The second one is for busses that do not provide raw I/O.
-	 * The third one is used for busses which do not have these limitations
+	 * The second one is used for busses which do not have this limitation
 	 * and can write arbitrary value lengths.
 	 */
 	if (!map->bus) {
@@ -1876,32 +1825,6 @@ int regmap_bulk_write(struct regmap *map, unsigned int reg, const void *val,
 		}
 out:
 		map->unlock(map->lock_arg);
-	} else if (map->bus && !map->format.parse_inplace) {
-		const u8 *u8 = val;
-		const u16 *u16 = val;
-		const u32 *u32 = val;
-		unsigned int ival;
-
-		for (i = 0; i < val_count; i++) {
-			switch (map->format.val_bytes) {
-			case 4:
-				ival = u32[i];
-				break;
-			case 2:
-				ival = u16[i];
-				break;
-			case 1:
-				ival = u8[i];
-				break;
-			default:
-				return -EINVAL;
-			}
-
-			ret = regmap_write(map, reg + (i * map->reg_stride),
-					   ival);
-			if (ret)
-				return ret;
-		}
 	} else if (map->use_single_write ||
 		   (map->max_raw_write && map->max_raw_write < total_size)) {
 		int chunk_stride = map->reg_stride;
@@ -2297,6 +2220,7 @@ static int _regmap_raw_read(struct regmap *map, unsigned int reg, void *val,
 			    unsigned int val_len)
 {
 	struct regmap_range_node *range;
+	u8 *u8 = map->work_buf;
 	int ret;
 
 	WARN_ON(!map->bus);
@@ -2313,8 +2237,15 @@ static int _regmap_raw_read(struct regmap *map, unsigned int reg, void *val,
 	}
 
 	map->format.format_reg(map->work_buf, reg, map->reg_shift);
-	regmap_set_work_buf_flag_mask(map, map->format.reg_bytes,
-				      map->read_flag_mask);
+
+	/*
+	 * Some buses or devices flag reads by setting the high bits in the
+	 * register address; since it's always the high bits for all
+	 * current formats we can do this here rather than in
+	 * formatting.  This may break if we get interesting formats.
+	 */
+	u8[0] |= map->read_flag_mask;
+
 	trace_regmap_hw_read_start(map, reg, val_len / map->format.val_bytes);
 
 	ret = map->bus->read(map->bus_context, map->work_buf,

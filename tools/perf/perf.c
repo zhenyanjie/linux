@@ -10,7 +10,7 @@
 
 #include "util/env.h"
 #include <subcmd/exec-cmd.h>
-#include "util/config.h"
+#include "util/cache.h"
 #include "util/quote.h"
 #include <subcmd/run-command.h>
 #include "util/parse-events.h"
@@ -139,6 +139,8 @@ struct option options[] = {
 	OPT_ARGUMENT("html-path", "html-path"),
 	OPT_ARGUMENT("paginate", "paginate"),
 	OPT_ARGUMENT("no-pager", "no-pager"),
+	OPT_ARGUMENT("perf-dir", "perf-dir"),
+	OPT_ARGUMENT("work-tree", "work-tree"),
 	OPT_ARGUMENT("debugfs-dir", "debugfs-dir"),
 	OPT_ARGUMENT("buildid-dir", "buildid-dir"),
 	OPT_ARGUMENT("list-cmds", "list-cmds"),
@@ -196,6 +198,35 @@ static int handle_options(const char ***argv, int *argc, int *envchanged)
 			use_pager = 1;
 		} else if (!strcmp(cmd, "--no-pager")) {
 			use_pager = 0;
+			if (envchanged)
+				*envchanged = 1;
+		} else if (!strcmp(cmd, "--perf-dir")) {
+			if (*argc < 2) {
+				fprintf(stderr, "No directory given for --perf-dir.\n");
+				usage(perf_usage_string);
+			}
+			setenv(PERF_DIR_ENVIRONMENT, (*argv)[1], 1);
+			if (envchanged)
+				*envchanged = 1;
+			(*argv)++;
+			(*argc)--;
+			handled++;
+		} else if (!prefixcmp(cmd, CMD_PERF_DIR)) {
+			setenv(PERF_DIR_ENVIRONMENT, cmd + strlen(CMD_PERF_DIR), 1);
+			if (envchanged)
+				*envchanged = 1;
+		} else if (!strcmp(cmd, "--work-tree")) {
+			if (*argc < 2) {
+				fprintf(stderr, "No directory given for --work-tree.\n");
+				usage(perf_usage_string);
+			}
+			setenv(PERF_WORK_TREE_ENVIRONMENT, (*argv)[1], 1);
+			if (envchanged)
+				*envchanged = 1;
+			(*argv)++;
+			(*argc)--;
+		} else if (!prefixcmp(cmd, CMD_WORK_TREE)) {
+			setenv(PERF_WORK_TREE_ENVIRONMENT, cmd + strlen(CMD_WORK_TREE), 1);
 			if (envchanged)
 				*envchanged = 1;
 		} else if (!strcmp(cmd, "--debugfs-dir")) {
@@ -332,6 +363,11 @@ const char perf_version_string[] = PERF_VERSION;
 
 #define RUN_SETUP	(1<<0)
 #define USE_PAGER	(1<<1)
+/*
+ * require working tree to be present -- anything uses this needs
+ * RUN_SETUP for reading from the configuration file.
+ */
+#define NEED_WORK_TREE	(1<<2)
 
 static int run_builtin(struct cmd_struct *p, int argc, const char **argv)
 {
@@ -355,7 +391,6 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv)
 
 	perf_env__set_cmdline(&perf_env, argc, argv);
 	status = p->fn(argc, argv, prefix);
-	perf_config__exit();
 	exit_browser(status);
 	perf_env__exit(&perf_env);
 	bpf__clear();
@@ -374,7 +409,7 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv)
 	/* Check for ENOSPC and EIO errors.. */
 	if (fflush(stdout)) {
 		fprintf(stderr, "write failure on standard output: %s",
-			str_error_r(errno, sbuf, sizeof(sbuf)));
+			strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out;
 	}
 	if (ferror(stdout)) {
@@ -383,7 +418,7 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv)
 	}
 	if (fclose(stdout)) {
 		fprintf(stderr, "close failed on standard output: %s",
-			str_error_r(errno, sbuf, sizeof(sbuf)));
+			strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out;
 	}
 	status = 0;
@@ -497,16 +532,6 @@ void pthread__unblock_sigwinch(void)
 	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }
 
-#ifdef _SC_LEVEL1_DCACHE_LINESIZE
-#define cache_line_size(cacheline_sizep) *cacheline_sizep = sysconf(_SC_LEVEL1_DCACHE_LINESIZE)
-#else
-static void cache_line_size(int *cacheline_sizep)
-{
-	if (sysfs__read_int("devices/system/cpu/cpu0/cache/index0/coherency_line_size", cacheline_sizep))
-		pr_debug("cannot determine cache line size");
-}
-#endif
-
 int main(int argc, const char **argv)
 {
 	const char *cmd;
@@ -519,7 +544,7 @@ int main(int argc, const char **argv)
 
 	/* The page_size is placed in util object. */
 	page_size = sysconf(_SC_PAGE_SIZE);
-	cache_line_size(&cacheline_size);
+	cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
 
 	if (sysctl__read_int("kernel/perf_event_max_stack", &value) == 0)
 		sysctl_perf_event_max_stack = value;
@@ -533,7 +558,6 @@ int main(int argc, const char **argv)
 
 	srandom(time(NULL));
 
-	perf_config__init();
 	perf_config(perf_default_config, NULL);
 	set_buildid_dir(NULL);
 
@@ -625,7 +649,7 @@ int main(int argc, const char **argv)
 	}
 
 	fprintf(stderr, "Failed to run command '%s': %s\n",
-		cmd, str_error_r(errno, sbuf, sizeof(sbuf)));
+		cmd, strerror_r(errno, sbuf, sizeof(sbuf)));
 out:
 	return 1;
 }

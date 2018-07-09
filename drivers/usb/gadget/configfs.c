@@ -269,7 +269,6 @@ static ssize_t gadget_dev_desc_UDC_store(struct config_item *item,
 		ret = unregister_gadget(gi);
 		if (ret)
 			goto err;
-		kfree(name);
 	} else {
 		if (gi->composite.gadget_driver.udc_name) {
 			ret = -EBUSY;
@@ -1141,12 +1140,11 @@ static struct configfs_attribute *interf_grp_attrs[] = {
 	NULL
 };
 
-struct config_group *usb_os_desc_prepare_interf_dir(
-		struct config_group *parent,
-		int n_interf,
-		struct usb_os_desc **desc,
-		char **names,
-		struct module *owner)
+int usb_os_desc_prepare_interf_dir(struct config_group *parent,
+				   int n_interf,
+				   struct usb_os_desc **desc,
+				   char **names,
+				   struct module *owner)
 {
 	struct config_group *os_desc_group;
 	struct config_item_type *os_desc_type, *interface_type;
@@ -1158,7 +1156,7 @@ struct config_group *usb_os_desc_prepare_interf_dir(
 
 	char *vlabuf = kzalloc(vla_group_size(data_chunk), GFP_KERNEL);
 	if (!vlabuf)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
 	os_desc_group = vla_ptr(vlabuf, data_chunk, os_desc_group);
 	os_desc_type = vla_ptr(vlabuf, data_chunk, os_desc_type);
@@ -1183,7 +1181,7 @@ struct config_group *usb_os_desc_prepare_interf_dir(
 		configfs_add_default_group(&d->group, os_desc_group);
 	}
 
-	return os_desc_group;
+	return 0;
 }
 EXPORT_SYMBOL(usb_os_desc_prepare_interf_dir);
 
@@ -1213,9 +1211,8 @@ static void purge_configs_funcs(struct gadget_info *gi)
 
 			list_move_tail(&f->list, &cfg->func_list);
 			if (f->unbind) {
-				dev_dbg(&gi->cdev.gadget->dev,
-				         "unbind function '%s'/%p\n",
-				         f->name, f);
+				dev_err(&gi->cdev.gadget->dev, "unbind function"
+						" '%s'/%p\n", f->name, f);
 				f->unbind(c, f);
 			}
 		}
@@ -1493,9 +1490,7 @@ void unregister_gadget_item(struct config_item *item)
 {
 	struct gadget_info *gi = to_gadget_info(item);
 
-	mutex_lock(&gi->lock);
 	unregister_gadget(gi);
-	mutex_unlock(&gi->lock);
 }
 EXPORT_SYMBOL_GPL(unregister_gadget_item);
 

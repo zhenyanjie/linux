@@ -35,7 +35,6 @@
 #include <linux/etherdevice.h>
 
 #include <linux/mlx4/cmd.h>
-#include <linux/mlx4/qp.h>
 #include <linux/export.h>
 
 #include "mlx4.h"
@@ -619,8 +618,8 @@ static int remove_promisc_qp(struct mlx4_dev *dev, u8 port,
 				err = mlx4_READ_ENTRY(dev,
 						      entry->index,
 						      mailbox);
-				if (err)
-					goto out_mailbox;
+					if (err)
+						goto out_mailbox;
 				members_count =
 					be32_to_cpu(mgm->members_count) &
 					0xffffff;
@@ -658,8 +657,8 @@ static int remove_promisc_qp(struct mlx4_dev *dev, u8 port,
 				err = mlx4_WRITE_ENTRY(dev,
 						       entry->index,
 						       mailbox);
-				if (err)
-					goto out_mailbox;
+					if (err)
+						goto out_mailbox;
 			}
 		}
 	}
@@ -986,21 +985,16 @@ int mlx4_flow_attach(struct mlx4_dev *dev,
 	if (IS_ERR(mailbox))
 		return PTR_ERR(mailbox);
 
-	if (!mlx4_qp_lookup(dev, rule->qpn)) {
-		mlx4_err_rule(dev, "QP doesn't exist\n", rule);
-		ret = -EINVAL;
-		goto out;
-	}
-
 	trans_rule_ctrl_to_hw(rule, mailbox->buf);
 
 	size += sizeof(struct mlx4_net_trans_rule_hw_ctrl);
 
 	list_for_each_entry(cur, &rule->list, list) {
 		ret = parse_trans_rule(dev, cur, mailbox->buf + size);
-		if (ret < 0)
-			goto out;
-
+		if (ret < 0) {
+			mlx4_free_cmd_mailbox(dev, mailbox);
+			return ret;
+		}
 		size += ret;
 	}
 
@@ -1027,7 +1021,6 @@ int mlx4_flow_attach(struct mlx4_dev *dev,
 		}
 	}
 
-out:
 	mlx4_free_cmd_mailbox(dev, mailbox);
 
 	return ret;
@@ -1464,12 +1457,7 @@ EXPORT_SYMBOL_GPL(mlx4_multicast_detach);
 int mlx4_flow_steer_promisc_add(struct mlx4_dev *dev, u8 port,
 				u32 qpn, enum mlx4_net_trans_promisc_mode mode)
 {
-	struct mlx4_net_trans_rule rule = {
-		.queue_mode = MLX4_NET_TRANS_Q_FIFO,
-		.exclusive = 0,
-		.allow_loopback = 1,
-	};
-
+	struct mlx4_net_trans_rule rule;
 	u64 *regid_p;
 
 	switch (mode) {

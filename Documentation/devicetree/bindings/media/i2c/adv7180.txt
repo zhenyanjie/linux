@@ -15,11 +15,6 @@ Required Properties :
 		"adi,adv7282"
 		"adi,adv7282-m"
 
-Optional Properties :
-- powerdown-gpios: reference to the GPIO connected to the powerdown pin,
-  if any.
-
-
 Example:
 
 	i2c0@1c22000 {

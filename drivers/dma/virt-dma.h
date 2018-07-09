@@ -45,8 +45,6 @@ static inline struct virt_dma_chan *to_virt_chan(struct dma_chan *chan)
 void vchan_dma_desc_free_list(struct virt_dma_chan *vc, struct list_head *head);
 void vchan_init(struct virt_dma_chan *vc, struct dma_device *dmadev);
 struct virt_dma_desc *vchan_find_desc(struct virt_dma_chan *, dma_cookie_t);
-extern dma_cookie_t vchan_tx_submit(struct dma_async_tx_descriptor *);
-extern int vchan_tx_desc_free(struct dma_async_tx_descriptor *);
 
 /**
  * vchan_tx_prep - prepare a descriptor
@@ -57,6 +55,8 @@ extern int vchan_tx_desc_free(struct dma_async_tx_descriptor *);
 static inline struct dma_async_tx_descriptor *vchan_tx_prep(struct virt_dma_chan *vc,
 	struct virt_dma_desc *vd, unsigned long tx_flags)
 {
+	extern dma_cookie_t vchan_tx_submit(struct dma_async_tx_descriptor *);
+	extern int vchan_tx_desc_free(struct dma_async_tx_descriptor *);
 	unsigned long flags;
 
 	dma_async_tx_descriptor_init(&vd->tx, &vc->chan);
@@ -123,8 +123,10 @@ static inline void vchan_cyclic_callback(struct virt_dma_desc *vd)
  */
 static inline struct virt_dma_desc *vchan_next_desc(struct virt_dma_chan *vc)
 {
-	return list_first_entry_or_null(&vc->desc_issued,
-					struct virt_dma_desc, node);
+	if (list_empty(&vc->desc_issued))
+		return NULL;
+
+	return list_first_entry(&vc->desc_issued, struct virt_dma_desc, node);
 }
 
 /**

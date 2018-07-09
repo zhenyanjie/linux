@@ -135,7 +135,6 @@ extern void init_apic_mappings(void);
 void register_lapic_address(unsigned long address);
 extern void setup_boot_APIC_clock(void);
 extern void setup_secondary_APIC_clock(void);
-extern void lapic_update_tsc_freq(void);
 extern int APIC_init_uniprocessor(void);
 
 #ifdef CONFIG_X86_64
@@ -171,7 +170,6 @@ static inline void init_apic_mappings(void) { }
 static inline void disable_local_APIC(void) { }
 # define setup_boot_APIC_clock x86_init_noop
 # define setup_secondary_APIC_clock x86_init_noop
-static inline void lapic_update_tsc_freq(void) { }
 #endif /* !CONFIG_X86_LOCAL_APIC */
 
 #ifdef CONFIG_X86_X2APIC
@@ -302,6 +300,7 @@ struct apic {
 
 	unsigned int (*get_apic_id)(unsigned long x);
 	unsigned long (*set_apic_id)(unsigned int id);
+	unsigned long apic_id_mask;
 
 	int (*cpu_mask_to_apicid_and)(const struct cpumask *cpumask,
 				      const struct cpumask *andmask,
@@ -650,8 +649,8 @@ static inline void entering_ack_irq(void)
 
 static inline void ipi_entering_ack_irq(void)
 {
-	irq_enter();
 	ack_APIC_irq();
+	irq_enter();
 }
 
 static inline void exiting_irq(void)
@@ -661,8 +660,9 @@ static inline void exiting_irq(void)
 
 static inline void exiting_ack_irq(void)
 {
-	ack_APIC_irq();
 	irq_exit();
+	/* Ack only at the end to avoid potential reentry */
+	ack_APIC_irq();
 }
 
 extern void ioapic_zap_locks(void);

@@ -21,7 +21,6 @@
 #include <string.h>
 #include <sys/time.h>
 #include <errno.h>
-#include <linux/time64.h>
 
 #define K 1024
 
@@ -90,7 +89,7 @@ static u64 get_cycles(void)
 
 static double timeval2double(struct timeval *ts)
 {
-	return (double)ts->tv_sec + (double)ts->tv_usec / (double)USEC_PER_SEC;
+	return (double)ts->tv_sec + (double)ts->tv_usec / (double)1000000;
 }
 
 #define print_bps(x) do {						\

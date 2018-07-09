@@ -648,10 +648,6 @@ static int match_pci_device(struct device *dev, int index,
 					(modpath->mod == PCI_FUNC(devfn)));
 	}
 
-	/* index might be out of bounds for bc[] */
-	if (index >= 6)
-		return 0;
-
 	id = PCI_SLOT(pdev->devfn) | (PCI_FUNC(pdev->devfn) << 5);
 	return (modpath->bc[index] == id);
 }
@@ -877,11 +873,11 @@ static void print_parisc_device(struct parisc_device *dev)
 
 	if (dev->num_addrs) {
 		int k;
-		pr_cont(", additional addresses: ");
+		printk(", additional addresses: ");
 		for (k = 0; k < dev->num_addrs; k++)
-			pr_cont("0x%lx ", dev->addr[k]);
+			printk("0x%lx ", dev->addr[k]);
 	}
-	pr_cont("\n");
+	printk("\n");
 }
 
 /**

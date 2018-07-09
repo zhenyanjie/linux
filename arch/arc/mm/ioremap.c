@@ -19,7 +19,7 @@ static inline bool arc_uncached_addr_space(phys_addr_t paddr)
 	if (is_isa_arcompact()) {
 		if (paddr >= ARC_UNCACHED_ADDR_SPACE)
 			return true;
-	} else if (paddr >= perip_base && paddr <= perip_end) {
+	} else if (paddr >= perip_base && paddr <= 0xFFFFFFFF) {
 		return true;
 	}
 
@@ -49,7 +49,7 @@ EXPORT_SYMBOL(ioremap);
 /*
  * ioremap with access flags
  * Cache semantics wise it is same as ioremap - "forced" uncached.
- * However unlike vanilla ioremap which bypasses ARC MMU for addresses in
+ * However unline vanilla ioremap which bypasses ARC MMU for addresses in
  * ARC hardware uncached region, this one still goes thru the MMU as caller
  * might need finer access control (R/W/X)
  */

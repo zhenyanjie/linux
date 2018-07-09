@@ -346,9 +346,6 @@ static int idmouse_probe(struct usb_interface *interface,
 	if (iface_desc->desc.bInterfaceClass != 0x0A)
 		return -ENODEV;
 
-	if (iface_desc->desc.bNumEndpoints < 1)
-		return -ENODEV;
-
 	/* allocate memory for our device state and initialize it */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (dev == NULL)
@@ -369,6 +366,7 @@ static int idmouse_probe(struct usb_interface *interface,
 			kmalloc(IMGSIZE + dev->bulk_in_size, GFP_KERNEL);
 
 		if (!dev->bulk_in_buffer) {
+			dev_err(&interface->dev, "Unable to allocate input buffer.\n");
 			idmouse_delete(dev);
 			return -ENOMEM;
 		}

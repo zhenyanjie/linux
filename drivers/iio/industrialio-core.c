@@ -80,7 +80,6 @@ static const char * const iio_chan_type_name_spec[] = {
 	[IIO_RESISTANCE] = "resistance",
 	[IIO_PH] = "ph",
 	[IIO_UVINDEX] = "uvindex",
-	[IIO_ELECTRICALCONDUCTIVITY] = "electricalconductivity",
 };
 
 static const char * const iio_modifier_names[] = {
@@ -178,86 +177,6 @@ ssize_t iio_read_const_attr(struct device *dev,
 }
 EXPORT_SYMBOL(iio_read_const_attr);
 
-static int iio_device_set_clock(struct iio_dev *indio_dev, clockid_t clock_id)
-{
-	int ret;
-	const struct iio_event_interface *ev_int = indio_dev->event_interface;
-
-	ret = mutex_lock_interruptible(&indio_dev->mlock);
-	if (ret)
-		return ret;
-	if ((ev_int && iio_event_enabled(ev_int)) ||
-	    iio_buffer_enabled(indio_dev)) {
-		mutex_unlock(&indio_dev->mlock);
-		return -EBUSY;
-	}
-	indio_dev->clock_id = clock_id;
-	mutex_unlock(&indio_dev->mlock);
-
-	return 0;
-}
-
-/**
- * iio_get_time_ns() - utility function to get a time stamp for events etc
- * @indio_dev: device
- */
-s64 iio_get_time_ns(const struct iio_dev *indio_dev)
-{
-	struct timespec tp;
-
-	switch (iio_device_get_clock(indio_dev)) {
-	case CLOCK_REALTIME:
-		ktime_get_real_ts(&tp);
-		break;
-	case CLOCK_MONOTONIC:
-		ktime_get_ts(&tp);
-		break;
-	case CLOCK_MONOTONIC_RAW:
-		getrawmonotonic(&tp);
-		break;
-	case CLOCK_REALTIME_COARSE:
-		tp = current_kernel_time();
-		break;
-	case CLOCK_MONOTONIC_COARSE:
-		tp = get_monotonic_coarse();
-		break;
-	case CLOCK_BOOTTIME:
-		get_monotonic_boottime(&tp);
-		break;
-	case CLOCK_TAI:
-		timekeeping_clocktai(&tp);
-		break;
-	default:
-		BUG();
-	}
-
-	return timespec_to_ns(&tp);
-}
-EXPORT_SYMBOL(iio_get_time_ns);
-
-/**
- * iio_get_time_res() - utility function to get time stamp clock resolution in
- *                      nano seconds.
- * @indio_dev: device
- */
-unsigned int iio_get_time_res(const struct iio_dev *indio_dev)
-{
-	switch (iio_device_get_clock(indio_dev)) {
-	case CLOCK_REALTIME:
-	case CLOCK_MONOTONIC:
-	case CLOCK_MONOTONIC_RAW:
-	case CLOCK_BOOTTIME:
-	case CLOCK_TAI:
-		return hrtimer_resolution;
-	case CLOCK_REALTIME_COARSE:
-	case CLOCK_MONOTONIC_COARSE:
-		return LOW_RES_NSEC;
-	default:
-		BUG();
-	}
-}
-EXPORT_SYMBOL(iio_get_time_res);
-
 static int __init iio_init(void)
 {
 	int ret;
@@ -306,10 +225,8 @@ static ssize_t iio_debugfs_read_reg(struct file *file, char __user *userbuf,
 	ret = indio_dev->info->debugfs_reg_access(indio_dev,
 						  indio_dev->cached_reg_addr,
 						  0, &val);
-	if (ret) {
+	if (ret)
 		dev_err(indio_dev->dev.parent, "%s: read failed\n", __func__);
-		return ret;
-	}
 
 	len = snprintf(buf, sizeof(buf), "0x%X\n", val);
 
@@ -1071,91 +988,11 @@ static ssize_t iio_show_dev_name(struct device *dev,
 
 static DEVICE_ATTR(name, S_IRUGO, iio_show_dev_name, NULL);
 
-static ssize_t iio_show_timestamp_clock(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	const struct iio_dev *indio_dev = dev_to_iio_dev(dev);
-	const clockid_t clk = iio_device_get_clock(indio_dev);
-	const char *name;
-	ssize_t sz;
-
-	switch (clk) {
-	case CLOCK_REALTIME:
-		name = "realtime\n";
-		sz = sizeof("realtime\n");
-		break;
-	case CLOCK_MONOTONIC:
-		name = "monotonic\n";
-		sz = sizeof("monotonic\n");
-		break;
-	case CLOCK_MONOTONIC_RAW:
-		name = "monotonic_raw\n";
-		sz = sizeof("monotonic_raw\n");
-		break;
-	case CLOCK_REALTIME_COARSE:
-		name = "realtime_coarse\n";
-		sz = sizeof("realtime_coarse\n");
-		break;
-	case CLOCK_MONOTONIC_COARSE:
-		name = "monotonic_coarse\n";
-		sz = sizeof("monotonic_coarse\n");
-		break;
-	case CLOCK_BOOTTIME:
-		name = "boottime\n";
-		sz = sizeof("boottime\n");
-		break;
-	case CLOCK_TAI:
-		name = "tai\n";
-		sz = sizeof("tai\n");
-		break;
-	default:
-		BUG();
-	}
-
-	memcpy(buf, name, sz);
-	return sz;
-}
-
-static ssize_t iio_store_timestamp_clock(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t len)
-{
-	clockid_t clk;
-	int ret;
-
-	if (sysfs_streq(buf, "realtime"))
-		clk = CLOCK_REALTIME;
-	else if (sysfs_streq(buf, "monotonic"))
-		clk = CLOCK_MONOTONIC;
-	else if (sysfs_streq(buf, "monotonic_raw"))
-		clk = CLOCK_MONOTONIC_RAW;
-	else if (sysfs_streq(buf, "realtime_coarse"))
-		clk = CLOCK_REALTIME_COARSE;
-	else if (sysfs_streq(buf, "monotonic_coarse"))
-		clk = CLOCK_MONOTONIC_COARSE;
-	else if (sysfs_streq(buf, "boottime"))
-		clk = CLOCK_BOOTTIME;
-	else if (sysfs_streq(buf, "tai"))
-		clk = CLOCK_TAI;
-	else
-		return -EINVAL;
-
-	ret = iio_device_set_clock(dev_to_iio_dev(dev), clk);
-	if (ret)
-		return ret;
-
-	return len;
-}
-
-static DEVICE_ATTR(current_timestamp_clock, S_IRUGO | S_IWUSR,
-		   iio_show_timestamp_clock, iio_store_timestamp_clock);
-
 static int iio_device_register_sysfs(struct iio_dev *indio_dev)
 {
 	int i, ret = 0, attrcount, attrn, attrcount_orig = 0;
 	struct iio_dev_attr *p;
-	struct attribute **attr, *clk = NULL;
+	struct attribute **attr;
 
 	/* First count elements in any existing group */
 	if (indio_dev->info->attrs) {
@@ -1170,24 +1007,15 @@ static int iio_device_register_sysfs(struct iio_dev *indio_dev)
 	 */
 	if (indio_dev->channels)
 		for (i = 0; i < indio_dev->num_channels; i++) {
-			const struct iio_chan_spec *chan =
-				&indio_dev->channels[i];
-
-			if (chan->type == IIO_TIMESTAMP)
-				clk = &dev_attr_current_timestamp_clock.attr;
-
-			ret = iio_device_add_channel_sysfs(indio_dev, chan);
+			ret = iio_device_add_channel_sysfs(indio_dev,
+							   &indio_dev
+							   ->channels[i]);
 			if (ret < 0)
 				goto error_clear_attrs;
 			attrcount += ret;
 		}
 
-	if (indio_dev->event_interface)
-		clk = &dev_attr_current_timestamp_clock.attr;
-
 	if (indio_dev->name)
-		attrcount++;
-	if (clk)
 		attrcount++;
 
 	indio_dev->chan_attr_group.attrs = kcalloc(attrcount + 1,
@@ -1209,8 +1037,6 @@ static int iio_device_register_sysfs(struct iio_dev *indio_dev)
 		indio_dev->chan_attr_group.attrs[attrn++] = &p->dev_attr.attr;
 	if (indio_dev->name)
 		indio_dev->chan_attr_group.attrs[attrn++] = &dev_attr_name.attr;
-	if (clk)
-		indio_dev->chan_attr_group.attrs[attrn++] = clk;
 
 	indio_dev->groups[indio_dev->groupcounter++] =
 		&indio_dev->chan_attr_group;
@@ -1310,7 +1136,7 @@ static void devm_iio_device_release(struct device *dev, void *res)
 	iio_device_free(*(struct iio_dev **)res);
 }
 
-int devm_iio_device_match(struct device *dev, void *res, void *data)
+static int devm_iio_device_match(struct device *dev, void *res, void *data)
 {
 	struct iio_dev **r = res;
 	if (!r || !*r) {
@@ -1319,7 +1145,6 @@ int devm_iio_device_match(struct device *dev, void *res, void *data)
 	}
 	return *r == data;
 }
-EXPORT_SYMBOL_GPL(devm_iio_device_match);
 
 /**
  * devm_iio_device_alloc - Resource-managed iio_device_alloc()

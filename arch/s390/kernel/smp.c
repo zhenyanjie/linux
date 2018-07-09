@@ -205,7 +205,6 @@ static int pcpu_alloc_lowcore(struct pcpu *pcpu, int cpu)
 	lc->panic_stack = panic_stack + PANIC_FRAME_OFFSET;
 	lc->cpu_nr = cpu;
 	lc->spinlock_lockval = arch_spin_lockval(cpu);
-	lc->br_r1_trampoline = 0x07f1;	/* br %r1 */
 	if (MACHINE_HAS_VX)
 		lc->vector_save_area_addr =
 			(unsigned long) &lc->vector_save_area;
@@ -243,8 +242,10 @@ static void pcpu_prepare_secondary(struct pcpu *pcpu, int cpu)
 {
 	struct lowcore *lc = pcpu->lowcore;
 
-	cpumask_set_cpu(cpu, &init_mm.context.cpu_attach_mask);
+	if (MACHINE_HAS_TLB_LC)
+		cpumask_set_cpu(cpu, &init_mm.context.cpu_attach_mask);
 	cpumask_set_cpu(cpu, mm_cpumask(&init_mm));
+	atomic_inc(&init_mm.context.attach_count);
 	lc->cpu_nr = cpu;
 	lc->spinlock_lockval = arch_spin_lockval(cpu);
 	lc->percpu_offset = __per_cpu_offset[cpu];
@@ -254,9 +255,7 @@ static void pcpu_prepare_secondary(struct pcpu *pcpu, int cpu)
 	__ctl_store(lc->cregs_save_area, 0, 15);
 	save_access_regs((unsigned int *) lc->access_regs_save_area);
 	memcpy(lc->stfle_fac_list, S390_lowcore.stfle_fac_list,
-	       sizeof(lc->stfle_fac_list));
-	memcpy(lc->alt_stfle_fac_list, S390_lowcore.alt_stfle_fac_list,
-	       sizeof(lc->alt_stfle_fac_list));
+	       MAX_FACILITY_BIT/8);
 }
 
 static void pcpu_attach_task(struct pcpu *pcpu, struct task_struct *tsk)
@@ -305,7 +304,6 @@ static void pcpu_delegate(struct pcpu *pcpu, void (*func)(void *),
 	mem_assign_absolute(lc->restart_fn, (unsigned long) func);
 	mem_assign_absolute(lc->restart_data, (unsigned long) data);
 	mem_assign_absolute(lc->restart_source, source_cpu);
-	__bpon();
 	asm volatile(
 		"0:	sigp	0,%0,%2	# sigp restart to target cpu\n"
 		"	brc	2,0b	# busy, try again\n"
@@ -322,11 +320,17 @@ static void pcpu_delegate(struct pcpu *pcpu, void (*func)(void *),
  */
 static int pcpu_set_smt(unsigned int mtid)
 {
+	register unsigned long reg1 asm ("1") = (unsigned long) mtid;
 	int cc;
 
 	if (smp_cpu_mtid == mtid)
 		return 0;
-	cc = __pcpu_sigp(0, SIGP_SET_MULTI_THREADING, mtid, NULL);
+	asm volatile(
+		"	sigp	%1,0,%2	# sigp set multi-threading\n"
+		"	ipm	%0\n"
+		"	srl	%0,28\n"
+		: "=d" (cc) : "d" (reg1), "K" (SIGP_SET_MULTI_THREADING)
+		: "cc");
 	if (cc == 0) {
 		smp_cpu_mtid = mtid;
 		smp_cpu_mt_shift = 0;
@@ -872,14 +876,15 @@ void __cpu_die(unsigned int cpu)
 	while (!pcpu_stopped(pcpu))
 		cpu_relax();
 	pcpu_free_lowcore(pcpu);
+	atomic_dec(&init_mm.context.attach_count);
 	cpumask_clear_cpu(cpu, mm_cpumask(&init_mm));
-	cpumask_clear_cpu(cpu, &init_mm.context.cpu_attach_mask);
+	if (MACHINE_HAS_TLB_LC)
+		cpumask_clear_cpu(cpu, &init_mm.context.cpu_attach_mask);
 }
 
 void __noreturn cpu_die(void)
 {
 	idle_task_exit();
-	__bpon();
 	pcpu_sigp_retry(pcpu_devices + smp_processor_id(), SIGP_STOP, 0);
 	for (;;) ;
 }
@@ -892,7 +897,7 @@ void __init smp_fill_possible_mask(void)
 
 	sclp_max = max(sclp.mtid, sclp.mtid_cp) + 1;
 	sclp_max = min(smp_max_threads, sclp_max);
-	sclp_max = (sclp.max_cores * sclp_max) ?: nr_cpu_ids;
+	sclp_max = sclp.max_cores * sclp_max ?: nr_cpu_ids;
 	possible = setup_possible_cpus ?: nr_cpu_ids;
 	possible = min(possible, sclp_max);
 	for (cpu = 0; cpu < possible && cpu < nr_cpu_ids; cpu++)

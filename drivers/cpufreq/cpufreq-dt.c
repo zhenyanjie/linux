@@ -25,10 +25,7 @@
 #include <linux/slab.h>
 #include <linux/thermal.h>
 
-#include "cpufreq-dt.h"
-
 struct private_data {
-	struct opp_table *opp_table;
 	struct device *cpu_dev;
 	struct thermal_cooling_device *cdev;
 	const char *reg_name;
@@ -144,7 +141,6 @@ static int resources_available(void)
 static int cpufreq_init(struct cpufreq_policy *policy)
 {
 	struct cpufreq_frequency_table *freq_table;
-	struct opp_table *opp_table = NULL;
 	struct private_data *priv;
 	struct device *cpu_dev;
 	struct clk *cpu_clk;
@@ -188,9 +184,8 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 	 */
 	name = find_supply_name(cpu_dev);
 	if (name) {
-		opp_table = dev_pm_opp_set_regulator(cpu_dev, name);
-		if (IS_ERR(opp_table)) {
-			ret = PTR_ERR(opp_table);
+		ret = dev_pm_opp_set_regulator(cpu_dev, name);
+		if (ret) {
 			dev_err(cpu_dev, "Failed to set regulator for cpu%d: %d\n",
 				policy->cpu, ret);
 			goto out_put_clk;
@@ -240,7 +235,6 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 	}
 
 	priv->reg_name = name;
-	priv->opp_table = opp_table;
 
 	ret = dev_pm_opp_init_cpufreq_table(cpu_dev, &freq_table);
 	if (ret) {
@@ -289,7 +283,7 @@ out_free_priv:
 out_free_opp:
 	dev_pm_opp_of_cpumask_remove_table(policy->cpus);
 	if (name)
-		dev_pm_opp_put_regulator(opp_table);
+		dev_pm_opp_put_regulator(cpu_dev);
 out_put_clk:
 	clk_put(cpu_clk);
 
@@ -304,7 +298,7 @@ static int cpufreq_exit(struct cpufreq_policy *policy)
 	dev_pm_opp_free_cpufreq_table(priv->cpu_dev, &policy->freq_table);
 	dev_pm_opp_of_cpumask_remove_table(policy->related_cpus);
 	if (priv->reg_name)
-		dev_pm_opp_put_regulator(priv->opp_table);
+		dev_pm_opp_put_regulator(priv->cpu_dev);
 
 	clk_put(policy->clk);
 	kfree(priv);
@@ -359,7 +353,6 @@ static struct cpufreq_driver dt_cpufreq_driver = {
 
 static int dt_cpufreq_probe(struct platform_device *pdev)
 {
-	struct cpufreq_dt_platform_data *data = dev_get_platdata(&pdev->dev);
 	int ret;
 
 	/*
@@ -373,8 +366,7 @@ static int dt_cpufreq_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	if (data && data->have_governor_per_policy)
-		dt_cpufreq_driver.flags |= CPUFREQ_HAVE_GOVERNOR_PER_POLICY;
+	dt_cpufreq_driver.driver_data = dev_get_platdata(&pdev->dev);
 
 	ret = cpufreq_register_driver(&dt_cpufreq_driver);
 	if (ret)

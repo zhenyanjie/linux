@@ -13,11 +13,6 @@
 		};
 	};
 
-	memory@80000000 {
-		device_type = "memory";
-		reg = <0x80000000 0>;
-	};
-
 	leds {
 		compatible = "gpio-leds";
 		user0 {
@@ -51,7 +46,6 @@
 		linux,mtd-name = "micron,mt29f4g16abbda3w";
 		nand-bus-width = <16>;
 		ti,nand-ecc-opt = "bch8";
-		rb-gpios = <&gpmc 0 GPIO_ACTIVE_HIGH>; /* gpmc_wait0 */
 		gpmc,sync-clk-ps = <0>;
 		gpmc,cs-on-ns = <0>;
 		gpmc,cs-rd-off-ns = <44>;
@@ -100,8 +94,6 @@
 };
 
 &i2c1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&i2c1_pins>;
 	clock-frequency = <2600000>;
 
 	twl: twl@48 {
@@ -123,7 +115,7 @@
 &i2c3 {
 	clock-frequency = <400000>;
 	at24@50 {
-		compatible = "atmel,24c64";
+		compatible = "at24,24c02";
 		readonly;
 		reg = <0x50>;
 	};
@@ -207,12 +199,6 @@
 			OMAP3_CORE1_IOPAD(0x21b4, PIN_INPUT | MUX_MODE0)	/* hsusb0_data5.hsusb0_data5 */
 			OMAP3_CORE1_IOPAD(0x21b6, PIN_INPUT | MUX_MODE0)	/* hsusb0_data6.hsusb0_data6 */
 			OMAP3_CORE1_IOPAD(0x21b8, PIN_INPUT | MUX_MODE0)	/* hsusb0_data7.hsusb0_data7 */
-		>;
-	};
-	i2c1_pins: pinmux_i2c1_pins {
-		pinctrl-single,pins = <
-			OMAP3_CORE1_IOPAD(0x21ba, PIN_INPUT | MUX_MODE0)        /* i2c1_scl.i2c1_scl */
-			OMAP3_CORE1_IOPAD(0x21bc, PIN_INPUT | MUX_MODE0)        /* i2c1_sda.i2c1_sda */
 		>;
 	};
 };

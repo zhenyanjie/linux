@@ -102,25 +102,26 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 {
 	struct mei_device *dev = cl->dev;
 	struct mei_cl_cb *cb;
+	unsigned char *buffer = NULL;
 	size_t buf_sz;
 
 	cb = list_first_entry_or_null(&cl->rd_pending, struct mei_cl_cb, list);
 	if (!cb) {
-		if (!mei_cl_is_fixed_address(cl)) {
-			cl_err(dev, cl, "pending read cb not found\n");
-			goto discard;
-		}
-		cb = mei_cl_alloc_cb(cl, mei_cl_mtu(cl), MEI_FOP_READ, cl->fp);
-		if (!cb)
-			goto discard;
-		list_add_tail(&cb->list, &cl->rd_pending);
+		cl_err(dev, cl, "pending read cb not found\n");
+		goto out;
 	}
 
 	if (!mei_cl_is_connected(cl)) {
 		cl_dbg(dev, cl, "not connected\n");
-		list_move_tail(&cb->list, &complete_list->list);
 		cb->status = -ENODEV;
-		goto discard;
+		goto out;
+	}
+
+	if (cb->buf.size == 0 || cb->buf.data == NULL) {
+		cl_err(dev, cl, "response buffer is not allocated.\n");
+		list_move_tail(&cb->list, &complete_list->list);
+		cb->status = -ENOMEM;
+		goto out;
 	}
 
 	buf_sz = mei_hdr->length + cb->buf_idx;
@@ -131,19 +132,25 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 
 		list_move_tail(&cb->list, &complete_list->list);
 		cb->status = -EMSGSIZE;
-		goto discard;
+		goto out;
 	}
 
 	if (cb->buf.size < buf_sz) {
 		cl_dbg(dev, cl, "message overflow. size %zu len %d idx %zu\n",
 			cb->buf.size, mei_hdr->length, cb->buf_idx);
+		buffer = krealloc(cb->buf.data, buf_sz, GFP_KERNEL);
 
-		list_move_tail(&cb->list, &complete_list->list);
-		cb->status = -EMSGSIZE;
-		goto discard;
+		if (!buffer) {
+			cb->status = -ENOMEM;
+			list_move_tail(&cb->list, &complete_list->list);
+			goto out;
+		}
+		cb->buf.data = buffer;
+		cb->buf.size = buf_sz;
 	}
 
-	mei_read_slots(dev, cb->buf.data + cb->buf_idx, mei_hdr->length);
+	buffer = cb->buf.data + cb->buf_idx;
+	mei_read_slots(dev, buffer, mei_hdr->length);
 
 	cb->buf_idx += mei_hdr->length;
 
@@ -155,10 +162,10 @@ int mei_cl_irq_read_msg(struct mei_cl *cl,
 		pm_request_autosuspend(dev->dev);
 	}
 
-	return 0;
+out:
+	if (!buffer)
+		mei_irq_discard_msg(dev, mei_hdr);
 
-discard:
-	mei_irq_discard_msg(dev, mei_hdr);
 	return 0;
 }
 
@@ -208,9 +215,6 @@ static int mei_cl_irq_read(struct mei_cl *cl, struct mei_cl_cb *cb,
 	u32 msg_slots;
 	int slots;
 	int ret;
-
-	if (!list_empty(&cl->rd_pending))
-		return 0;
 
 	msg_slots = mei_data2slots(sizeof(struct hbm_flow_control));
 	slots = mei_hbuf_empty_slots(dev);
@@ -459,19 +463,6 @@ static void mei_connect_timeout(struct mei_cl *cl)
 	mei_reset(dev);
 }
 
-#define MEI_STALL_TIMER_FREQ (2 * HZ)
-/**
- * mei_schedule_stall_timer - re-arm stall_timer work
- *
- * Schedule stall timer
- *
- * @dev: the device structure
- */
-void mei_schedule_stall_timer(struct mei_device *dev)
-{
-	schedule_delayed_work(&dev->timer_work, MEI_STALL_TIMER_FREQ);
-}
-
 /**
  * mei_timer - timer function.
  *
@@ -481,9 +472,10 @@ void mei_schedule_stall_timer(struct mei_device *dev)
 void mei_timer(struct work_struct *work)
 {
 	struct mei_cl *cl;
+
 	struct mei_device *dev = container_of(work,
 					struct mei_device, timer_work.work);
-	bool reschedule_timer = false;
+
 
 	mutex_lock(&dev->device_lock);
 
@@ -498,7 +490,6 @@ void mei_timer(struct work_struct *work)
 				mei_reset(dev);
 				goto out;
 			}
-			reschedule_timer = true;
 		}
 	}
 
@@ -513,7 +504,6 @@ void mei_timer(struct work_struct *work)
 				mei_connect_timeout(cl);
 				goto out;
 			}
-			reschedule_timer = true;
 		}
 	}
 
@@ -524,16 +514,19 @@ void mei_timer(struct work_struct *work)
 		if (--dev->iamthif_stall_timer == 0) {
 			dev_err(dev->dev, "timer: amthif  hanged.\n");
 			mei_reset(dev);
+			dev->iamthif_canceled = false;
+			dev->iamthif_state = MEI_IAMTHIF_IDLE;
 
+			mei_io_cb_free(dev->iamthif_current_cb);
+			dev->iamthif_current_cb = NULL;
+
+			dev->iamthif_fp = NULL;
 			mei_amthif_run_next_cmd(dev);
-			goto out;
 		}
-		reschedule_timer = true;
 	}
 
 out:
-	if (dev->dev_state != MEI_DEV_DISABLED && reschedule_timer)
-		mei_schedule_stall_timer(dev);
-
+	if (dev->dev_state != MEI_DEV_DISABLED)
+		schedule_delayed_work(&dev->timer_work, 2 * HZ);
 	mutex_unlock(&dev->device_lock);
 }

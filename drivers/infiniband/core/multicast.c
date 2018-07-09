@@ -93,6 +93,18 @@ enum {
 
 struct mcast_member;
 
+/*
+* There are 4 types of join states:
+* FullMember, NonMember, SendOnlyNonMember, SendOnlyFullMember.
+*/
+enum {
+	FULLMEMBER_JOIN,
+	NONMEMBER_JOIN,
+	SENDONLY_NONMEBER_JOIN,
+	SENDONLY_FULLMEMBER_JOIN,
+	NUM_JOIN_MEMBERSHIP_TYPES,
+};
+
 struct mcast_group {
 	struct ib_sa_mcmember_rec rec;
 	struct rb_node		node;
@@ -518,11 +530,8 @@ static void join_handler(int status, struct ib_sa_mcmember_rec *rec,
 		process_join_error(group, status);
 	else {
 		int mgids_changed, is_mgid0;
-
-		if (ib_find_pkey(group->port->dev->device,
-				 group->port->port_num, be16_to_cpu(rec->pkey),
-				 &pkey_index))
-			pkey_index = MCAST_INVALID_PKEY_INDEX;
+		ib_find_pkey(group->port->dev->device, group->port->port_num,
+			     be16_to_cpu(rec->pkey), &pkey_index);
 
 		spin_lock_irq(&group->port->lock);
 		if (group->state == MCAST_BUSY &&
@@ -724,19 +733,21 @@ int ib_init_ah_from_mcmember(struct ib_device *device, u8 port_num,
 {
 	int ret;
 	u16 gid_index;
+	u8 p;
 
-	/* GID table is not based on the netdevice for IB link layer,
-	 * so ignore ndev during search.
-	 */
-	if (rdma_protocol_ib(device, port_num))
-		ndev = NULL;
-	else if (!rdma_protocol_roce(device, port_num))
-		return -EINVAL;
-
-	ret = ib_find_cached_gid_by_port(device, &rec->port_gid,
-					 gid_type, port_num,
-					 ndev,
+	if (rdma_protocol_roce(device, port_num)) {
+		ret = ib_find_cached_gid_by_port(device, &rec->port_gid,
+						 gid_type, port_num,
+						 ndev,
+						 &gid_index);
+	} else if (rdma_protocol_ib(device, port_num)) {
+		ret = ib_find_cached_gid(device, &rec->port_gid,
+					 IB_GID_TYPE_IB, NULL, &p,
 					 &gid_index);
+	} else {
+		ret = -EINVAL;
+	}
+
 	if (ret)
 		return ret;
 
@@ -874,7 +885,7 @@ int mcast_init(void)
 {
 	int ret;
 
-	mcast_wq = alloc_ordered_workqueue("ib_mcast", WQ_MEM_RECLAIM);
+	mcast_wq = create_singlethread_workqueue("ib_mcast");
 	if (!mcast_wq)
 		return -ENOMEM;
 

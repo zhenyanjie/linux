@@ -82,30 +82,13 @@ drm_mode_validate_flag(const struct drm_display_mode *mode,
 
 static int drm_helper_probe_add_cmdline_mode(struct drm_connector *connector)
 {
-	struct drm_cmdline_mode *cmdline_mode;
 	struct drm_display_mode *mode;
 
-	cmdline_mode = &connector->cmdline_mode;
-	if (!cmdline_mode->specified)
+	if (!connector->cmdline_mode.specified)
 		return 0;
-
-	/* Only add a GTF mode if we find no matching probed modes */
-	list_for_each_entry(mode, &connector->probed_modes, head) {
-		if (mode->hdisplay != cmdline_mode->xres ||
-		    mode->vdisplay != cmdline_mode->yres)
-			continue;
-
-		if (cmdline_mode->refresh_specified) {
-			/* The probed mode's vrefresh is set until later */
-			if (drm_mode_vrefresh(mode) != cmdline_mode->refresh)
-				continue;
-		}
-
-		return 0;
-	}
 
 	mode = drm_mode_create_from_cmdline_mode(connector->dev,
-						 cmdline_mode);
+						 &connector->cmdline_mode);
 	if (mode == NULL)
 		return 0;
 
@@ -129,7 +112,6 @@ void drm_kms_helper_poll_enable_locked(struct drm_device *dev)
 {
 	bool poll = false;
 	struct drm_connector *connector;
-	unsigned long delay = DRM_OUTPUT_POLL_PERIOD;
 
 	WARN_ON(!mutex_is_locked(&dev->mode_config.mutex));
 
@@ -142,23 +124,8 @@ void drm_kms_helper_poll_enable_locked(struct drm_device *dev)
 			poll = true;
 	}
 
-	if (dev->mode_config.delayed_event) {
-		/*
-		 * FIXME:
-		 *
-		 * Use short (1s) delay to handle the initial delayed event.
-		 * This delay should not be needed, but Optimus/nouveau will
-		 * fail in a mysterious way if the delayed event is handled as
-		 * soon as possible like it is done in
-		 * drm_helper_probe_single_connector_modes() in case the poll
-		 * was enabled before.
-		 */
-		poll = true;
-		delay = HZ;
-	}
-
 	if (poll)
-		schedule_delayed_work(&dev->mode_config.output_poll_work, delay);
+		schedule_delayed_work(&dev->mode_config.output_poll_work, DRM_OUTPUT_POLL_PERIOD);
 }
 EXPORT_SYMBOL(drm_kms_helper_poll_enable_locked);
 
@@ -459,26 +426,6 @@ out:
 	if (repoll)
 		schedule_delayed_work(delayed_work, DRM_OUTPUT_POLL_PERIOD);
 }
-
-/**
- * drm_kms_helper_is_poll_worker - is %current task an output poll worker?
- *
- * Determine if %current task is an output poll worker.  This can be used
- * to select distinct code paths for output polling versus other contexts.
- *
- * One use case is to avoid a deadlock between the output poll worker and
- * the autosuspend worker wherein the latter waits for polling to finish
- * upon calling drm_kms_helper_poll_disable(), while the former waits for
- * runtime suspend to finish upon calling pm_runtime_get_sync() in a
- * connector ->detect hook.
- */
-bool drm_kms_helper_is_poll_worker(void)
-{
-	struct work_struct *work = current_work();
-
-	return work && work->func == output_poll_execute;
-}
-EXPORT_SYMBOL(drm_kms_helper_is_poll_worker);
 
 /**
  * drm_kms_helper_poll_disable - disable output polling

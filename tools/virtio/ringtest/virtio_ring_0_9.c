@@ -194,16 +194,24 @@ void *get_buf(unsigned *lenp, void **bufp)
 	return datap;
 }
 
-bool used_empty()
+void poll_used(void)
 {
-	unsigned short last_used_idx = guest.last_used_idx;
 #ifdef RING_POLL
-	unsigned short head = last_used_idx & (ring_size - 1);
-	unsigned index = ring.used->ring[head].id;
+	unsigned head = (ring_size - 1) & guest.last_used_idx;
 
-	return (index ^ last_used_idx ^ 0x8000) & ~(ring_size - 1);
+	for (;;) {
+		unsigned index = ring.used->ring[head].id;
+
+		if ((index ^ guest.last_used_idx ^ 0x8000) & ~(ring_size - 1))
+			busy_wait();
+		else
+			break;
+	}
 #else
-	return ring.used->idx == last_used_idx;
+	unsigned head = guest.last_used_idx;
+
+	while (ring.used->idx == head)
+		busy_wait();
 #endif
 }
 
@@ -216,11 +224,22 @@ void disable_call()
 
 bool enable_call()
 {
-	vring_used_event(&ring) = guest.last_used_idx;
+	unsigned short last_used_idx;
+
+	vring_used_event(&ring) = (last_used_idx = guest.last_used_idx);
 	/* Flush call index write */
 	/* Barrier D (for pairing) */
 	smp_mb();
-	return used_empty();
+#ifdef RING_POLL
+	{
+		unsigned short head = last_used_idx & (ring_size - 1);
+		unsigned index = ring.used->ring[head].id;
+
+		return (index ^ last_used_idx ^ 0x8000) & ~(ring_size - 1);
+	}
+#else
+	return ring.used->idx == last_used_idx;
+#endif
 }
 
 void kick_available(void)
@@ -247,21 +266,36 @@ void disable_kick()
 
 bool enable_kick()
 {
-	vring_avail_event(&ring) = host.used_idx;
+	unsigned head = host.used_idx;
+
+	vring_avail_event(&ring) = head;
 	/* Barrier C (for pairing) */
 	smp_mb();
-	return avail_empty();
+#ifdef RING_POLL
+	{
+		unsigned index = ring.avail->ring[head & (ring_size - 1)];
+
+		return (index ^ head ^ 0x8000) & ~(ring_size - 1);
+	}
+#else
+	return head == ring.avail->idx;
+#endif
 }
 
-bool avail_empty()
+void poll_avail(void)
 {
 	unsigned head = host.used_idx;
 #ifdef RING_POLL
-	unsigned index = ring.avail->ring[head & (ring_size - 1)];
-
-	return ((index ^ head ^ 0x8000) & ~(ring_size - 1));
+	for (;;) {
+		unsigned index = ring.avail->ring[head & (ring_size - 1)];
+		if ((index ^ head ^ 0x8000) & ~(ring_size - 1))
+			busy_wait();
+		else
+			break;
+	}
 #else
-	return head == ring.avail->idx;
+	while (ring.avail->idx == head)
+		busy_wait();
 #endif
 }
 

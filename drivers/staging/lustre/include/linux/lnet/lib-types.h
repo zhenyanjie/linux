@@ -38,7 +38,6 @@
 #include <linux/kthread.h>
 #include <linux/uio.h>
 #include <linux/types.h>
-#include <linux/completion.h>
 
 #include "types.h"
 #include "lnetctl.h"
@@ -220,7 +219,10 @@ typedef struct lnet_lnd {
 	 * credit if the LND does flow control.
 	 */
 	int (*lnd_recv)(struct lnet_ni *ni, void *private, lnet_msg_t *msg,
-			int delayed, struct iov_iter *to, unsigned int rlen);
+			int delayed, unsigned int niov,
+			struct kvec *iov, lnet_kiov_t *kiov,
+			unsigned int offset, unsigned int mlen,
+			unsigned int rlen);
 
 	/*
 	 * lnet_parse() has had to delay processing of this message
@@ -275,8 +277,6 @@ typedef struct lnet_ni {
 	struct lnet_ioctl_config_lnd_tunables *ni_lnd_tunables;
 	/* equivalent interfaces to use */
 	char			 *ni_interfaces[LNET_MAX_INTERFACES];
-	/* original net namespace */
-	struct net		 *ni_net_ns;
 } lnet_ni_t;
 
 #define LNET_PROTO_PING_MATCHBITS	0x8000000000000000LL
@@ -610,7 +610,7 @@ typedef struct {
 	/* rcd ready for free */
 	struct list_head		  ln_rcd_zombie;
 	/* serialise startup/shutdown */
-	struct completion		  ln_rc_signal;
+	struct semaphore		  ln_rc_signal;
 
 	struct mutex			  ln_api_mutex;
 	struct mutex			  ln_lnd_mutex;

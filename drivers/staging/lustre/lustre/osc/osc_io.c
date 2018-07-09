@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -109,11 +113,11 @@ static int osc_io_submit(const struct lu_env *env,
 
 	struct cl_page_list *qin = &queue->c2_qin;
 	struct cl_page_list *qout = &queue->c2_qout;
-	unsigned int queued = 0;
+	int queued = 0;
 	int result = 0;
 	int cmd;
 	int brw_flags;
-	unsigned int max_pages;
+	int max_pages;
 
 	LASSERT(qin->pl_nr > 0);
 
@@ -163,19 +167,14 @@ static int osc_io_submit(const struct lu_env *env,
 			continue;
 		}
 
+		cl_page_list_move(qout, qin, page);
 		spin_lock(&oap->oap_lock);
-		oap->oap_async_flags = ASYNC_URGENT | ASYNC_READY;
+		oap->oap_async_flags = ASYNC_URGENT|ASYNC_READY;
 		oap->oap_async_flags |= ASYNC_COUNT_STABLE;
 		spin_unlock(&oap->oap_lock);
 
 		osc_page_submit(env, opg, crt, brw_flags);
 		list_add_tail(&oap->oap_pending_item, &list);
-
-		if (page->cp_sync_io)
-			cl_page_list_move(qout, qin, page);
-		else /* async IO */
-			cl_page_list_del(env, qin, page);
-
 		if (++queued == max_pages) {
 			queued = 0;
 			result = osc_queue_sync_pages(env, osc, &list, cmd,
@@ -200,7 +199,7 @@ static int osc_io_submit(const struct lu_env *env,
  * Expand stripe KMS if necessary.
  */
 static void osc_page_touch_at(const struct lu_env *env,
-			      struct cl_object *obj, pgoff_t idx, size_t to)
+			      struct cl_object *obj, pgoff_t idx, unsigned to)
 {
 	struct lov_oinfo *loi = cl2osc(obj)->oo_oinfo;
 	struct cl_attr *attr = &osc_env_info(env)->oti_attr;
@@ -222,8 +221,7 @@ static void osc_page_touch_at(const struct lu_env *env,
 	       kms > loi->loi_kms ? "" : "not ", loi->loi_kms, kms,
 	       loi->loi_lvb.lvb_size);
 
-	attr->cat_ctime = LTIME_S(CURRENT_TIME);
-	attr->cat_mtime = attr->cat_ctime;
+	attr->cat_mtime = attr->cat_ctime = LTIME_S(CURRENT_TIME);
 	valid = CAT_MTIME | CAT_CTIME;
 	if (kms > loi->loi_kms) {
 		attr->cat_kms = kms;
@@ -233,7 +231,7 @@ static void osc_page_touch_at(const struct lu_env *env,
 		attr->cat_size = kms;
 		valid |= CAT_SIZE;
 	}
-	cl_object_attr_update(env, obj, attr, valid);
+	cl_object_attr_set(env, obj, attr, valid);
 	cl_object_attr_unlock(obj);
 }
 
@@ -319,8 +317,8 @@ static int osc_io_rw_iter_init(const struct lu_env *env,
 	struct osc_object *osc = cl2osc(ios->cis_obj);
 	struct client_obd *cli = osc_cli(osc);
 	unsigned long c;
-	unsigned long npages;
-	unsigned long max_pages;
+	unsigned int npages;
+	unsigned int max_pages;
 
 	if (cl_io_is_append(io))
 		return 0;
@@ -333,15 +331,15 @@ static int osc_io_rw_iter_init(const struct lu_env *env,
 	if (npages > max_pages)
 		npages = max_pages;
 
-	c = atomic_long_read(cli->cl_lru_left);
+	c = atomic_read(cli->cl_lru_left);
 	if (c < npages && osc_lru_reclaim(cli) > 0)
-		c = atomic_long_read(cli->cl_lru_left);
+		c = atomic_read(cli->cl_lru_left);
 	while (c >= npages) {
-		if (c == atomic_long_cmpxchg(cli->cl_lru_left, c, c - npages)) {
+		if (c == atomic_cmpxchg(cli->cl_lru_left, c, c - npages)) {
 			oio->oi_lru_reserved = npages;
 			break;
 		}
-		c = atomic_long_read(cli->cl_lru_left);
+		c = atomic_read(cli->cl_lru_left);
 	}
 
 	return 0;
@@ -355,7 +353,7 @@ static void osc_io_rw_iter_fini(const struct lu_env *env,
 	struct client_obd *cli = osc_cli(osc);
 
 	if (oio->oi_lru_reserved > 0) {
-		atomic_long_add(oio->oi_lru_reserved, cli->cl_lru_left);
+		atomic_add(oio->oi_lru_reserved, cli->cl_lru_left);
 		oio->oi_lru_reserved = 0;
 	}
 	oio->oi_write_osclock = NULL;
@@ -369,7 +367,7 @@ static int osc_io_fault_start(const struct lu_env *env,
 
 	io = ios->cis_io;
 	fio = &io->u.ci_fault;
-	CDEBUG(D_INFO, "%lu %d %zu\n",
+	CDEBUG(D_INFO, "%lu %d %d\n",
 	       fio->ft_index, fio->ft_writable, fio->ft_nob);
 	/*
 	 * If mapping is writeable, adjust kms to cover this page,
@@ -460,8 +458,7 @@ static int osc_io_setattr_start(const struct lu_env *env,
 			unsigned int cl_valid = 0;
 
 			if (ia_valid & ATTR_SIZE) {
-				attr->cat_size = size;
-				attr->cat_kms = size;
+				attr->cat_size = attr->cat_kms = size;
 				cl_valid = CAT_SIZE | CAT_KMS;
 			}
 			if (ia_valid & ATTR_MTIME_SET) {
@@ -476,21 +473,18 @@ static int osc_io_setattr_start(const struct lu_env *env,
 				attr->cat_ctime = lvb->lvb_ctime;
 				cl_valid |= CAT_CTIME;
 			}
-			result = cl_object_attr_update(env, obj, attr,
-						       cl_valid);
+			result = cl_object_attr_set(env, obj, attr, cl_valid);
 		}
 		cl_object_attr_unlock(obj);
 	}
 	memset(oa, 0, sizeof(*oa));
 	if (result == 0) {
 		oa->o_oi = loi->loi_oi;
-		obdo_set_parent_fid(oa, io->u.ci_setattr.sa_parent_fid);
-		oa->o_stripe_idx = io->u.ci_setattr.sa_stripe_index;
 		oa->o_mtime = attr->cat_mtime;
 		oa->o_atime = attr->cat_atime;
 		oa->o_ctime = attr->cat_ctime;
-		oa->o_valid |= OBD_MD_FLID | OBD_MD_FLGROUP | OBD_MD_FLATIME |
-			       OBD_MD_FLCTIME | OBD_MD_FLMTIME;
+		oa->o_valid = OBD_MD_FLID | OBD_MD_FLGROUP | OBD_MD_FLATIME |
+			OBD_MD_FLCTIME | OBD_MD_FLMTIME;
 		if (ia_valid & ATTR_SIZE) {
 			oa->o_size = size;
 			oa->o_blocks = OBD_OBJECT_EOF;
@@ -532,8 +526,7 @@ static void osc_io_setattr_end(const struct lu_env *env,
 
 	if (cbargs->opc_rpc_sent) {
 		wait_for_completion(&cbargs->opc_sync);
-		result = cbargs->opc_rc;
-		io->ci_result = cbargs->opc_rc;
+		result = io->ci_result = cbargs->opc_rc;
 	}
 	if (result == 0) {
 		if (oio->oi_lockless) {
@@ -567,7 +560,7 @@ static int osc_io_read_start(const struct lu_env *env,
 	if (!slice->cis_io->ci_noatime) {
 		cl_object_attr_lock(obj);
 		attr->cat_atime = ktime_get_real_seconds();
-		rc = cl_object_attr_update(env, obj, attr, CAT_ATIME);
+		rc = cl_object_attr_set(env, obj, attr, CAT_ATIME);
 		cl_object_attr_unlock(obj);
 	}
 	return rc;
@@ -582,9 +575,8 @@ static int osc_io_write_start(const struct lu_env *env,
 
 	OBD_FAIL_TIMEOUT(OBD_FAIL_OSC_DELAY_SETTIME, 1);
 	cl_object_attr_lock(obj);
-	attr->cat_ctime = ktime_get_real_seconds();
-	attr->cat_mtime = attr->cat_ctime;
-	rc = cl_object_attr_update(env, obj, attr, CAT_MTIME | CAT_CTIME);
+	attr->cat_mtime = attr->cat_ctime = ktime_get_real_seconds();
+	rc = cl_object_attr_set(env, obj, attr, CAT_MTIME | CAT_CTIME);
 	cl_object_attr_unlock(obj);
 
 	return rc;

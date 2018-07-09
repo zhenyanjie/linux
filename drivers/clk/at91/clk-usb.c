@@ -192,14 +192,13 @@ static const struct clk_ops at91sam9n12_usb_ops = {
 	.set_rate = at91sam9x5_clk_usb_set_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91sam9x5_clk_register_usb(struct regmap *regmap, const char *name,
 			    const char **parent_names, u8 num_parents)
 {
 	struct at91sam9x5_clk_usb *usb;
-	struct clk_hw *hw;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	int ret;
 
 	usb = kzalloc(sizeof(*usb), GFP_KERNEL);
 	if (!usb)
@@ -215,24 +214,20 @@ at91sam9x5_clk_register_usb(struct regmap *regmap, const char *name,
 	usb->hw.init = &init;
 	usb->regmap = regmap;
 
-	hw = &usb->hw;
-	ret = clk_hw_register(NULL, &usb->hw);
-	if (ret) {
+	clk = clk_register(NULL, &usb->hw);
+	if (IS_ERR(clk))
 		kfree(usb);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
-static struct clk_hw * __init
+static struct clk * __init
 at91sam9n12_clk_register_usb(struct regmap *regmap, const char *name,
 			     const char *parent_name)
 {
 	struct at91sam9x5_clk_usb *usb;
-	struct clk_hw *hw;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	int ret;
 
 	usb = kzalloc(sizeof(*usb), GFP_KERNEL);
 	if (!usb)
@@ -247,14 +242,11 @@ at91sam9n12_clk_register_usb(struct regmap *regmap, const char *name,
 	usb->hw.init = &init;
 	usb->regmap = regmap;
 
-	hw = &usb->hw;
-	ret = clk_hw_register(NULL, &usb->hw);
-	if (ret) {
+	clk = clk_register(NULL, &usb->hw);
+	if (IS_ERR(clk))
 		kfree(usb);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 static unsigned long at91rm9200_clk_usb_recalc_rate(struct clk_hw *hw,
@@ -342,14 +334,13 @@ static const struct clk_ops at91rm9200_usb_ops = {
 	.set_rate = at91rm9200_clk_usb_set_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91rm9200_clk_register_usb(struct regmap *regmap, const char *name,
 			    const char *parent_name, const u32 *divisors)
 {
 	struct at91rm9200_clk_usb *usb;
-	struct clk_hw *hw;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	int ret;
 
 	usb = kzalloc(sizeof(*usb), GFP_KERNEL);
 	if (!usb)
@@ -365,19 +356,16 @@ at91rm9200_clk_register_usb(struct regmap *regmap, const char *name,
 	usb->regmap = regmap;
 	memcpy(usb->divisors, divisors, sizeof(usb->divisors));
 
-	hw = &usb->hw;
-	ret = clk_hw_register(NULL, &usb->hw);
-	if (ret) {
+	clk = clk_register(NULL, &usb->hw);
+	if (IS_ERR(clk))
 		kfree(usb);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 static void __init of_at91sam9x5_clk_usb_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	unsigned int num_parents;
 	const char *parent_names[USB_SOURCE_MAX];
 	const char *name = np->name;
@@ -395,19 +383,19 @@ static void __init of_at91sam9x5_clk_usb_setup(struct device_node *np)
 	if (IS_ERR(regmap))
 		return;
 
-	hw = at91sam9x5_clk_register_usb(regmap, name, parent_names,
-					 num_parents);
-	if (IS_ERR(hw))
+	clk = at91sam9x5_clk_register_usb(regmap, name, parent_names,
+					  num_parents);
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(at91sam9x5_clk_usb, "atmel,at91sam9x5-clk-usb",
 	       of_at91sam9x5_clk_usb_setup);
 
 static void __init of_at91sam9n12_clk_usb_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	const char *parent_name;
 	const char *name = np->name;
 	struct regmap *regmap;
@@ -422,18 +410,18 @@ static void __init of_at91sam9n12_clk_usb_setup(struct device_node *np)
 	if (IS_ERR(regmap))
 		return;
 
-	hw = at91sam9n12_clk_register_usb(regmap, name, parent_name);
-	if (IS_ERR(hw))
+	clk = at91sam9n12_clk_register_usb(regmap, name, parent_name);
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(at91sam9n12_clk_usb, "atmel,at91sam9n12-clk-usb",
 	       of_at91sam9n12_clk_usb_setup);
 
 static void __init of_at91rm9200_clk_usb_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	const char *parent_name;
 	const char *name = np->name;
 	u32 divisors[4] = {0, 0, 0, 0};
@@ -452,11 +440,12 @@ static void __init of_at91rm9200_clk_usb_setup(struct device_node *np)
 	regmap = syscon_node_to_regmap(of_get_parent(np));
 	if (IS_ERR(regmap))
 		return;
-	hw = at91rm9200_clk_register_usb(regmap, name, parent_name, divisors);
-	if (IS_ERR(hw))
+
+	clk = at91rm9200_clk_register_usb(regmap, name, parent_name, divisors);
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(at91rm9200_clk_usb, "atmel,at91rm9200-clk-usb",
 	       of_at91rm9200_clk_usb_setup);

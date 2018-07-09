@@ -110,7 +110,13 @@ static void __init omap2_init_processor_devices(void)
 
 int __init omap_pm_clkdms_setup(struct clockdomain *clkdm, void *unused)
 {
-	clkdm_allow_idle(clkdm);
+	/* XXX The usecount test is racy */
+	if ((clkdm->flags & CLKDM_CAN_ENABLE_AUTO) &&
+	    !(clkdm->flags & CLKDM_MISSING_IDLE_REPORTING))
+		clkdm_allow_idle(clkdm);
+	else if (clkdm->flags & CLKDM_CAN_FORCE_SLEEP &&
+		 clkdm->usecount == 0)
+		clkdm_sleep(clkdm);
 	return 0;
 }
 
@@ -225,7 +231,7 @@ static void omap_pm_end(void)
 	cpu_idle_poll_ctrl(false);
 }
 
-static void omap_pm_wake(void)
+static void omap_pm_finish(void)
 {
 	if (cpu_is_omap34xx())
 		omap_prcm_irq_complete();
@@ -235,7 +241,7 @@ static const struct platform_suspend_ops omap_pm_ops = {
 	.begin		= omap_pm_begin,
 	.end		= omap_pm_end,
 	.enter		= omap_pm_enter,
-	.wake		= omap_pm_wake,
+	.finish		= omap_pm_finish,
 	.valid		= suspend_valid_only_mem,
 };
 

@@ -1079,7 +1079,7 @@ int bnx2fc_eh_device_reset(struct scsi_cmnd *sc_cmd)
 	return bnx2fc_initiate_tmf(sc_cmd, FCP_TMF_LUN_RESET);
 }
 
-static int bnx2fc_abts_cleanup(struct bnx2fc_cmd *io_req)
+int bnx2fc_abts_cleanup(struct bnx2fc_cmd *io_req)
 {
 	struct bnx2fc_rport *tgt = io_req->tgt;
 	int rc = SUCCESS;
@@ -1758,7 +1758,7 @@ static void bnx2fc_parse_fcp_rsp(struct bnx2fc_cmd *io_req,
 		if ((fcp_rsp_len == 4) || (fcp_rsp_len == 8)) {
 			/* Only for task management function */
 			io_req->fcp_rsp_code = rq_data[3];
-			BNX2FC_IO_DBG(io_req, "fcp_rsp_code = %d\n",
+			printk(KERN_ERR PFX "fcp_rsp_code = %d\n",
 				io_req->fcp_rsp_code);
 		}
 
@@ -1869,7 +1869,6 @@ void bnx2fc_process_scsi_cmd_compl(struct bnx2fc_cmd *io_req,
 		/* we will not receive ABTS response for this IO */
 		BNX2FC_IO_DBG(io_req, "Timer context finished processing "
 			   "this scsi cmd\n");
-		return;
 	}
 
 	/* Cancel the timeout_work, as we received IO completion */

@@ -743,45 +743,15 @@ xfs_log_mount_finish(
 	struct xfs_mount	*mp)
 {
 	int	error = 0;
-	bool	readonly = (mp->m_flags & XFS_MOUNT_RDONLY);
 
 	if (mp->m_flags & XFS_MOUNT_NORECOVERY) {
 		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
 		return 0;
-	} else if (readonly) {
-		/* Allow unlinked processing to proceed */
-		mp->m_flags &= ~XFS_MOUNT_RDONLY;
 	}
 
-	/*
-	 * During the second phase of log recovery, we need iget and
-	 * iput to behave like they do for an active filesystem.
-	 * xfs_fs_drop_inode needs to be able to prevent the deletion
-	 * of inodes before we're done replaying log items on those
-	 * inodes.  Turn it off immediately after recovery finishes
-	 * so that we don't leak the quota inodes if subsequent mount
-	 * activities fail.
-	 *
-	 * We let all inodes involved in redo item processing end up on
-	 * the LRU instead of being evicted immediately so that if we do
-	 * something to an unlinked inode, the irele won't cause
-	 * premature truncation and freeing of the inode, which results
-	 * in log recovery failure.  We have to evict the unreferenced
-	 * lru inodes after clearing MS_ACTIVE because we don't
-	 * otherwise clean up the lru if there's a subsequent failure in
-	 * xfs_mountfs, which leads to us leaking the inodes if nothing
-	 * else (e.g. quotacheck) references the inodes before the
-	 * mount failure occurs.
-	 */
-	mp->m_super->s_flags |= MS_ACTIVE;
 	error = xlog_recover_finish(mp->m_log);
 	if (!error)
 		xfs_log_work_queue(mp);
-	mp->m_super->s_flags &= ~MS_ACTIVE;
-	evict_inodes(mp->m_super);
-
-	if (readonly)
-		mp->m_flags |= XFS_MOUNT_RDONLY;
 
 	return error;
 }
@@ -818,7 +788,7 @@ xfs_log_mount_cancel(
  * As far as I know, there weren't any dependencies on the old behaviour.
  */
 
-static int
+int
 xfs_log_unmount_write(xfs_mount_t *mp)
 {
 	struct xlog	 *log = mp->m_log;
@@ -831,14 +801,11 @@ xfs_log_unmount_write(xfs_mount_t *mp)
 	int		 error;
 
 	/*
-	 * Don't write out unmount record on norecovery mounts or ro devices.
+	 * Don't write out unmount record on read-only mounts.
 	 * Or, if we are doing a forced umount (typically because of IO errors).
 	 */
-	if (mp->m_flags & XFS_MOUNT_NORECOVERY ||
-	    xfs_readonly_buftarg(log->l_mp->m_logdev_targp)) {
-		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
+	if (mp->m_flags & XFS_MOUNT_RDONLY)
 		return 0;
-	}
 
 	error = _xfs_log_force(mp, XFS_LOG_SYNC, NULL);
 	ASSERT(error || !(XLOG_FORCED_SHUTDOWN(log)));
@@ -1069,7 +1036,7 @@ xfs_log_space_wake(
  * there's no point in running a dummy transaction at this point because we
  * can't start trying to idle the log until both the CIL and AIL are empty.
  */
-static int
+int
 xfs_log_need_covered(xfs_mount_t *mp)
 {
 	struct xlog	*log = mp->m_log;
@@ -1210,7 +1177,7 @@ xlog_space_left(
  * The log manager needs its own routine, in order to control what
  * happens with the buffer after the write completes.
  */
-static void
+void
 xlog_iodone(xfs_buf_t *bp)
 {
 	struct xlog_in_core	*iclog = bp->b_fspriv;
@@ -1326,7 +1293,7 @@ void
 xfs_log_work_queue(
 	struct xfs_mount        *mp)
 {
-	queue_delayed_work(mp->m_sync_workqueue, &mp->m_log->l_work,
+	queue_delayed_work(mp->m_log_workqueue, &mp->m_log->l_work,
 				msecs_to_jiffies(xfs_syncd_centisecs * 10));
 }
 
@@ -1335,7 +1302,7 @@ xfs_log_work_queue(
  * disk. If there is nothing dirty, then we might need to cover the log to
  * indicate that the filesystem is idle.
  */
-static void
+void
 xfs_log_worker(
 	struct work_struct	*work)
 {
@@ -1448,7 +1415,7 @@ xlog_alloc_log(
 	 */
 	error = -ENOMEM;
 	bp = xfs_buf_alloc(mp->m_logdev_targp, XFS_BUF_DADDR_NULL,
-			   BTOBB(log->l_iclog_size), XBF_NO_IOACCT);
+			   BTOBB(log->l_iclog_size), 0);
 	if (!bp)
 		goto out_free_log;
 
@@ -1487,8 +1454,7 @@ xlog_alloc_log(
 		prev_iclog = iclog;
 
 		bp = xfs_buf_get_uncached(mp->m_logdev_targp,
-					  BTOBB(log->l_iclog_size),
-					  XBF_NO_IOACCT);
+						BTOBB(log->l_iclog_size), 0);
 		if (!bp)
 			goto out_free_iclog;
 
@@ -3337,6 +3303,8 @@ maybe_sleep:
 		 */
 		if (iclog->ic_state & XLOG_STATE_IOERROR)
 			return -EIO;
+		if (log_flushed)
+			*log_flushed = 1;
 	} else {
 
 no_sleep:
@@ -3355,8 +3323,12 @@ xfs_log_force(
 	xfs_mount_t	*mp,
 	uint		flags)
 {
+	int	error;
+
 	trace_xfs_log_force(mp, 0, _RET_IP_);
-	_xfs_log_force(mp, flags, NULL);
+	error = _xfs_log_force(mp, flags, NULL);
+	if (error)
+		xfs_warn(mp, "%s: error %d returned.", __func__, error);
 }
 
 /*
@@ -3440,6 +3412,8 @@ try_again:
 
 				xlog_wait(&iclog->ic_prev->ic_write_wait,
 							&log->l_icloglock);
+				if (log_flushed)
+					*log_flushed = 1;
 				already_slept = 1;
 				goto try_again;
 			}
@@ -3473,6 +3447,9 @@ try_again:
 			 */
 			if (iclog->ic_state & XLOG_STATE_IOERROR)
 				return -EIO;
+
+			if (log_flushed)
+				*log_flushed = 1;
 		} else {		/* just return */
 			spin_unlock(&log->l_icloglock);
 		}
@@ -3495,8 +3472,12 @@ xfs_log_force_lsn(
 	xfs_lsn_t	lsn,
 	uint		flags)
 {
+	int	error;
+
 	trace_xfs_log_force(mp, lsn, _RET_IP_);
-	_xfs_log_force_lsn(mp, lsn, flags, NULL);
+	error = _xfs_log_force_lsn(mp, lsn, flags, NULL);
+	if (error)
+		xfs_warn(mp, "%s: error %d returned.", __func__, error);
 }
 
 /*

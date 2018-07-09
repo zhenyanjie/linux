@@ -68,7 +68,6 @@
 struct dw2102_state {
 	u8 initialized;
 	u8 last_lock;
-	u8 data[MAX_XFER_SIZE + 4];
 	struct i2c_client *i2c_client_demod;
 	struct i2c_client *i2c_client_tuner;
 
@@ -205,20 +204,6 @@ static int dw2102_serit_i2c_transfer(struct i2c_adapter *adap,
 
 	switch (num) {
 	case 2:
-		if (msg[0].len != 1) {
-			warn("i2c rd: len=%d is not 1!\n",
-			     msg[0].len);
-			num = -EOPNOTSUPP;
-			break;
-		}
-
-		if (2 + msg[1].len > sizeof(buf6)) {
-			warn("i2c rd: len=%d is too big!\n",
-			     msg[1].len);
-			num = -EOPNOTSUPP;
-			break;
-		}
-
 		/* read si2109 register by number */
 		buf6[0] = msg[0].addr << 1;
 		buf6[1] = msg[0].len;
@@ -234,13 +219,6 @@ static int dw2102_serit_i2c_transfer(struct i2c_adapter *adap,
 	case 1:
 		switch (msg[0].addr) {
 		case 0x68:
-			if (2 + msg[0].len > sizeof(buf6)) {
-				warn("i2c wr: len=%d is too big!\n",
-				     msg[0].len);
-				num = -EOPNOTSUPP;
-				break;
-			}
-
 			/* write to si2109 register */
 			buf6[0] = msg[0].addr << 1;
 			buf6[1] = msg[0].len;
@@ -283,13 +261,6 @@ static int dw2102_earda_i2c_transfer(struct i2c_adapter *adap, struct i2c_msg ms
 		/* read */
 		/* first write first register number */
 		u8 ibuf[MAX_XFER_SIZE], obuf[3];
-
-		if (2 + msg[0].len != sizeof(obuf)) {
-			warn("i2c rd: len=%d is not 1!\n",
-			     msg[0].len);
-			ret = -EOPNOTSUPP;
-			goto unlock;
-		}
 
 		if (2 + msg[1].len > sizeof(ibuf)) {
 			warn("i2c rd: len=%d is too big!\n",
@@ -491,12 +462,6 @@ static int dw3101_i2c_transfer(struct i2c_adapter *adap, struct i2c_msg msg[],
 		/* first write first register number */
 		u8 ibuf[MAX_XFER_SIZE], obuf[3];
 
-		if (2 + msg[0].len != sizeof(obuf)) {
-			warn("i2c rd: len=%d is not 1!\n",
-			     msg[0].len);
-			ret = -EOPNOTSUPP;
-			goto unlock;
-		}
 		if (2 + msg[1].len > sizeof(ibuf)) {
 			warn("i2c rd: len=%d is too big!\n",
 			     msg[1].len);
@@ -697,92 +662,62 @@ static int su3000_i2c_transfer(struct i2c_adapter *adap, struct i2c_msg msg[],
 								int num)
 {
 	struct dvb_usb_device *d = i2c_get_adapdata(adap);
-	struct dw2102_state *state;
+	u8 obuf[0x40], ibuf[0x40];
 
 	if (!d)
 		return -ENODEV;
-
-	state = d->priv;
-
 	if (mutex_lock_interruptible(&d->i2c_mutex) < 0)
 		return -EAGAIN;
-	if (mutex_lock_interruptible(&d->data_mutex) < 0) {
-		mutex_unlock(&d->i2c_mutex);
-		return -EAGAIN;
-	}
 
 	switch (num) {
 	case 1:
 		switch (msg[0].addr) {
 		case SU3000_STREAM_CTRL:
-			state->data[0] = msg[0].buf[0] + 0x36;
-			state->data[1] = 3;
-			state->data[2] = 0;
-			if (dvb_usb_generic_rw(d, state->data, 3,
-					state->data, 0, 0) < 0)
+			obuf[0] = msg[0].buf[0] + 0x36;
+			obuf[1] = 3;
+			obuf[2] = 0;
+			if (dvb_usb_generic_rw(d, obuf, 3, ibuf, 0, 0) < 0)
 				err("i2c transfer failed.");
 			break;
 		case DW2102_RC_QUERY:
-			state->data[0] = 0x10;
-			if (dvb_usb_generic_rw(d, state->data, 1,
-					state->data, 2, 0) < 0)
+			obuf[0] = 0x10;
+			if (dvb_usb_generic_rw(d, obuf, 1, ibuf, 2, 0) < 0)
 				err("i2c transfer failed.");
-			msg[0].buf[1] = state->data[0];
-			msg[0].buf[0] = state->data[1];
+			msg[0].buf[1] = ibuf[0];
+			msg[0].buf[0] = ibuf[1];
 			break;
 		default:
-			if (3 + msg[0].len > sizeof(state->data)) {
-				warn("i2c wr: len=%d is too big!\n",
-				     msg[0].len);
-				num = -EOPNOTSUPP;
-				break;
-			}
-
 			/* always i2c write*/
-			state->data[0] = 0x08;
-			state->data[1] = msg[0].addr;
-			state->data[2] = msg[0].len;
+			obuf[0] = 0x08;
+			obuf[1] = msg[0].addr;
+			obuf[2] = msg[0].len;
 
-			memcpy(&state->data[3], msg[0].buf, msg[0].len);
+			memcpy(&obuf[3], msg[0].buf, msg[0].len);
 
-			if (dvb_usb_generic_rw(d, state->data, msg[0].len + 3,
-						state->data, 1, 0) < 0)
+			if (dvb_usb_generic_rw(d, obuf, msg[0].len + 3,
+						ibuf, 1, 0) < 0)
 				err("i2c transfer failed.");
 
 		}
 		break;
 	case 2:
 		/* always i2c read */
-		if (4 + msg[0].len > sizeof(state->data)) {
-			warn("i2c rd: len=%d is too big!\n",
-			     msg[0].len);
-			num = -EOPNOTSUPP;
-			break;
-		}
-		if (1 + msg[1].len > sizeof(state->data)) {
-			warn("i2c rd: len=%d is too big!\n",
-			     msg[1].len);
-			num = -EOPNOTSUPP;
-			break;
-		}
+		obuf[0] = 0x09;
+		obuf[1] = msg[0].len;
+		obuf[2] = msg[1].len;
+		obuf[3] = msg[0].addr;
+		memcpy(&obuf[4], msg[0].buf, msg[0].len);
 
-		state->data[0] = 0x09;
-		state->data[1] = msg[0].len;
-		state->data[2] = msg[1].len;
-		state->data[3] = msg[0].addr;
-		memcpy(&state->data[4], msg[0].buf, msg[0].len);
-
-		if (dvb_usb_generic_rw(d, state->data, msg[0].len + 4,
-					state->data, msg[1].len + 1, 0) < 0)
+		if (dvb_usb_generic_rw(d, obuf, msg[0].len + 4,
+					ibuf, msg[1].len + 1, 0) < 0)
 			err("i2c transfer failed.");
 
-		memcpy(msg[1].buf, &state->data[1], msg[1].len);
+		memcpy(msg[1].buf, &ibuf[1], msg[1].len);
 		break;
 	default:
 		warn("more than 2 i2c messages at a time is not handled yet.");
 		break;
 	}
-	mutex_unlock(&d->data_mutex);
 	mutex_unlock(&d->i2c_mutex);
 	return num;
 }
@@ -910,23 +845,17 @@ static int su3000_streaming_ctrl(struct dvb_usb_adapter *adap, int onoff)
 static int su3000_power_ctrl(struct dvb_usb_device *d, int i)
 {
 	struct dw2102_state *state = (struct dw2102_state *)d->priv;
-	int ret = 0;
+	u8 obuf[] = {0xde, 0};
 
-	info("%s: %d, initialized %d", __func__, i, state->initialized);
+	info("%s: %d, initialized %d\n", __func__, i, state->initialized);
 
 	if (i && !state->initialized) {
-		mutex_lock(&d->data_mutex);
-
-		state->data[0] = 0xde;
-		state->data[1] = 0;
-
 		state->initialized = 1;
 		/* reset board */
-		ret = dvb_usb_generic_rw(d, state->data, 2, NULL, 0, 0);
-		mutex_unlock(&d->data_mutex);
+		dvb_usb_generic_rw(d, obuf, 2, NULL, 0, 0);
 	}
 
-	return ret;
+	return 0;
 }
 
 static int su3000_read_mac_address(struct dvb_usb_device *d, u8 mac[6])
@@ -965,7 +894,7 @@ static int su3000_identify_state(struct usb_device *udev,
 				 struct dvb_usb_device_description **desc,
 				 int *cold)
 {
-	info("%s", __func__);
+	info("%s\n", __func__);
 
 	*cold = 0;
 	return 0;
@@ -1203,7 +1132,7 @@ static int dw2104_frontend_attach(struct dvb_usb_adapter *d)
 				tuner_ops->set_bandwidth = stb6100_set_bandw;
 				tuner_ops->get_bandwidth = stb6100_get_bandw;
 				d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-				info("Attached STV0900+STB6100!");
+				info("Attached STV0900+STB6100!\n");
 				return 0;
 			}
 		}
@@ -1217,7 +1146,7 @@ static int dw2104_frontend_attach(struct dvb_usb_adapter *d)
 					&dw2104_stv6110_config,
 					&d->dev->i2c_adap)) {
 				d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-				info("Attached STV0900+STV6110A!");
+				info("Attached STV0900+STV6110A!\n");
 				return 0;
 			}
 		}
@@ -1228,7 +1157,7 @@ static int dw2104_frontend_attach(struct dvb_usb_adapter *d)
 				&d->dev->i2c_adap);
 		if (d->fe_adap[0].fe != NULL) {
 			d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-			info("Attached cx24116!");
+			info("Attached cx24116!\n");
 			return 0;
 		}
 	}
@@ -1239,7 +1168,7 @@ static int dw2104_frontend_attach(struct dvb_usb_adapter *d)
 		dvb_attach(ts2020_attach, d->fe_adap[0].fe,
 			&dw2104_ts2020_config, &d->dev->i2c_adap);
 		d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-		info("Attached DS3000!");
+		info("Attached DS3000!\n");
 		return 0;
 	}
 
@@ -1258,7 +1187,7 @@ static int dw2102_frontend_attach(struct dvb_usb_adapter *d)
 					&d->dev->i2c_adap);
 		if (d->fe_adap[0].fe != NULL) {
 			d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-			info("Attached si21xx!");
+			info("Attached si21xx!\n");
 			return 0;
 		}
 	}
@@ -1270,7 +1199,7 @@ static int dw2102_frontend_attach(struct dvb_usb_adapter *d)
 			if (dvb_attach(stb6000_attach, d->fe_adap[0].fe, 0x61,
 					&d->dev->i2c_adap)) {
 				d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-				info("Attached stv0288!");
+				info("Attached stv0288!\n");
 				return 0;
 			}
 		}
@@ -1282,7 +1211,7 @@ static int dw2102_frontend_attach(struct dvb_usb_adapter *d)
 					&d->dev->i2c_adap);
 		if (d->fe_adap[0].fe != NULL) {
 			d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-			info("Attached stv0299!");
+			info("Attached stv0299!\n");
 			return 0;
 		}
 	}
@@ -1294,7 +1223,7 @@ static int dw3101_frontend_attach(struct dvb_usb_adapter *d)
 	d->fe_adap[0].fe = dvb_attach(tda10023_attach, &dw3101_tda10023_config,
 				&d->dev->i2c_adap, 0x48);
 	if (d->fe_adap[0].fe != NULL) {
-		info("Attached tda10023!");
+		info("Attached tda10023!\n");
 		return 0;
 	}
 	return -EIO;
@@ -1308,7 +1237,7 @@ static int zl100313_frontend_attach(struct dvb_usb_adapter *d)
 		if (dvb_attach(zl10039_attach, d->fe_adap[0].fe, 0x60,
 				&d->dev->i2c_adap)) {
 			d->fe_adap[0].fe->ops.set_voltage = dw210x_set_voltage;
-			info("Attached zl100313+zl10039!");
+			info("Attached zl100313+zl10039!\n");
 			return 0;
 		}
 	}
@@ -1333,7 +1262,7 @@ static int stv0288_frontend_attach(struct dvb_usb_adapter *d)
 
 	dw210x_op_rw(d->dev->udev, 0x8a, 0, 0, obuf, 2, DW210X_WRITE_MSG);
 
-	info("Attached stv0288+stb6000!");
+	info("Attached stv0288+stb6000!\n");
 
 	return 0;
 
@@ -1358,7 +1287,7 @@ static int ds3000_frontend_attach(struct dvb_usb_adapter *d)
 
 	dw210x_op_rw(d->dev->udev, 0x8a, 0, 0, obuf, 2, DW210X_WRITE_MSG);
 
-	info("Attached ds3000+ts2020!");
+	info("Attached ds3000+ts2020!\n");
 
 	return 0;
 }
@@ -1376,157 +1305,134 @@ static int prof_7500_frontend_attach(struct dvb_usb_adapter *d)
 
 	dw210x_op_rw(d->dev->udev, 0x8a, 0, 0, obuf, 2, DW210X_WRITE_MSG);
 
-	info("Attached STV0900+STB6100A!");
+	info("Attached STV0900+STB6100A!\n");
 
 	return 0;
 }
 
-static int su3000_frontend_attach(struct dvb_usb_adapter *adap)
+static int su3000_frontend_attach(struct dvb_usb_adapter *d)
 {
-	struct dvb_usb_device *d = adap->dev;
-	struct dw2102_state *state = d->priv;
+	u8 obuf[3] = { 0xe, 0x80, 0 };
+	u8 ibuf[] = { 0 };
 
-	mutex_lock(&d->data_mutex);
-
-	state->data[0] = 0xe;
-	state->data[1] = 0x80;
-	state->data[2] = 0;
-
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x02;
-	state->data[2] = 1;
+	obuf[0] = 0xe;
+	obuf[1] = 0x02;
+	obuf[2] = 1;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 	msleep(300);
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x83;
-	state->data[2] = 0;
+	obuf[0] = 0xe;
+	obuf[1] = 0x83;
+	obuf[2] = 0;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x83;
-	state->data[2] = 1;
+	obuf[0] = 0xe;
+	obuf[1] = 0x83;
+	obuf[2] = 1;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0x51;
+	obuf[0] = 0x51;
 
-	if (dvb_usb_generic_rw(d, state->data, 1, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 1, ibuf, 1, 0) < 0)
 		err("command 0x51 transfer failed.");
 
-	mutex_unlock(&d->data_mutex);
-
-	adap->fe_adap[0].fe = dvb_attach(ds3000_attach, &su3000_ds3000_config,
-					&d->i2c_adap);
-	if (adap->fe_adap[0].fe == NULL)
+	d->fe_adap[0].fe = dvb_attach(ds3000_attach, &su3000_ds3000_config,
+					&d->dev->i2c_adap);
+	if (d->fe_adap[0].fe == NULL)
 		return -EIO;
 
-	if (dvb_attach(ts2020_attach, adap->fe_adap[0].fe,
+	if (dvb_attach(ts2020_attach, d->fe_adap[0].fe,
 				&dw2104_ts2020_config,
-				&d->i2c_adap)) {
-		info("Attached DS3000/TS2020!");
+				&d->dev->i2c_adap)) {
+		info("Attached DS3000/TS2020!\n");
 		return 0;
 	}
 
-	info("Failed to attach DS3000/TS2020!");
+	info("Failed to attach DS3000/TS2020!\n");
 	return -EIO;
 }
 
-static int t220_frontend_attach(struct dvb_usb_adapter *adap)
+static int t220_frontend_attach(struct dvb_usb_adapter *d)
 {
-	struct dvb_usb_device *d = adap->dev;
-	struct dw2102_state *state = d->priv;
+	u8 obuf[3] = { 0xe, 0x87, 0 };
+	u8 ibuf[] = { 0 };
 
-	mutex_lock(&d->data_mutex);
-
-	state->data[0] = 0xe;
-	state->data[1] = 0x87;
-	state->data[2] = 0x0;
-
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x86;
-	state->data[2] = 1;
+	obuf[0] = 0xe;
+	obuf[1] = 0x86;
+	obuf[2] = 1;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x80;
-	state->data[2] = 0;
+	obuf[0] = 0xe;
+	obuf[1] = 0x80;
+	obuf[2] = 0;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
 	msleep(50);
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x80;
-	state->data[2] = 1;
+	obuf[0] = 0xe;
+	obuf[1] = 0x80;
+	obuf[2] = 1;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0x51;
+	obuf[0] = 0x51;
 
-	if (dvb_usb_generic_rw(d, state->data, 1, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 1, ibuf, 1, 0) < 0)
 		err("command 0x51 transfer failed.");
 
-	mutex_unlock(&d->data_mutex);
-
-	adap->fe_adap[0].fe = dvb_attach(cxd2820r_attach, &cxd2820r_config,
-					&d->i2c_adap, NULL);
-	if (adap->fe_adap[0].fe != NULL) {
-		if (dvb_attach(tda18271_attach, adap->fe_adap[0].fe, 0x60,
-					&d->i2c_adap, &tda18271_config)) {
-			info("Attached TDA18271HD/CXD2820R!");
+	d->fe_adap[0].fe = dvb_attach(cxd2820r_attach, &cxd2820r_config,
+					&d->dev->i2c_adap, NULL);
+	if (d->fe_adap[0].fe != NULL) {
+		if (dvb_attach(tda18271_attach, d->fe_adap[0].fe, 0x60,
+					&d->dev->i2c_adap, &tda18271_config)) {
+			info("Attached TDA18271HD/CXD2820R!\n");
 			return 0;
 		}
 	}
 
-	info("Failed to attach TDA18271HD/CXD2820R!");
+	info("Failed to attach TDA18271HD/CXD2820R!\n");
 	return -EIO;
 }
 
-static int m88rs2000_frontend_attach(struct dvb_usb_adapter *adap)
+static int m88rs2000_frontend_attach(struct dvb_usb_adapter *d)
 {
-	struct dvb_usb_device *d = adap->dev;
-	struct dw2102_state *state = d->priv;
+	u8 obuf[] = { 0x51 };
+	u8 ibuf[] = { 0 };
 
-	mutex_lock(&d->data_mutex);
-
-	state->data[0] = 0x51;
-
-	if (dvb_usb_generic_rw(d, state->data, 1, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d->dev, obuf, 1, ibuf, 1, 0) < 0)
 		err("command 0x51 transfer failed.");
 
-	mutex_unlock(&d->data_mutex);
+	d->fe_adap[0].fe = dvb_attach(m88rs2000_attach, &s421_m88rs2000_config,
+					&d->dev->i2c_adap);
 
-	adap->fe_adap[0].fe = dvb_attach(m88rs2000_attach,
-					&s421_m88rs2000_config,
-					&d->i2c_adap);
-
-	if (adap->fe_adap[0].fe == NULL)
+	if (d->fe_adap[0].fe == NULL)
 		return -EIO;
 
-	if (dvb_attach(ts2020_attach, adap->fe_adap[0].fe,
+	if (dvb_attach(ts2020_attach, d->fe_adap[0].fe,
 				&dw2104_ts2020_config,
-				&d->i2c_adap)) {
-		info("Attached RS2000/TS2020!");
+				&d->dev->i2c_adap)) {
+		info("Attached RS2000/TS2020!\n");
 		return 0;
 	}
 
-	info("Failed to attach RS2000/TS2020!");
+	info("Failed to attach RS2000/TS2020!\n");
 	return -EIO;
 }
 
@@ -1534,49 +1440,43 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 {
 	struct dvb_usb_device *d = adap->dev;
 	struct dw2102_state *state = d->priv;
+	u8 obuf[3] = { 0xe, 0x80, 0 };
+	u8 ibuf[] = { 0 };
 	struct i2c_adapter *i2c_adapter;
 	struct i2c_client *client;
 	struct i2c_board_info board_info;
 	struct m88ds3103_platform_data m88ds3103_pdata = {};
 	struct ts2020_config ts2020_config = {};
 
-	mutex_lock(&d->data_mutex);
-
-	state->data[0] = 0xe;
-	state->data[1] = 0x80;
-	state->data[2] = 0x0;
-
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x02;
-	state->data[2] = 1;
+	obuf[0] = 0xe;
+	obuf[1] = 0x02;
+	obuf[2] = 1;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 	msleep(300);
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x83;
-	state->data[2] = 0;
+	obuf[0] = 0xe;
+	obuf[1] = 0x83;
+	obuf[2] = 0;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0xe;
-	state->data[1] = 0x83;
-	state->data[2] = 1;
+	obuf[0] = 0xe;
+	obuf[1] = 0x83;
+	obuf[2] = 1;
 
-	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d, obuf, 3, ibuf, 1, 0) < 0)
 		err("command 0x0e transfer failed.");
 
-	state->data[0] = 0x51;
+	obuf[0] = 0x51;
 
-	if (dvb_usb_generic_rw(d, state->data, 1, state->data, 1, 0) < 0)
+	if (dvb_usb_generic_rw(d, obuf, 1, ibuf, 1, 0) < 0)
 		err("command 0x51 transfer failed.");
-
-	mutex_unlock(&d->data_mutex);
 
 	/* attach demod */
 	m88ds3103_pdata.clk = 27000000;
@@ -1741,7 +1641,6 @@ enum dw2102_table_entry {
 	TEVII_S421,
 	TEVII_S632,
 	TERRATEC_CINERGY_S2_R2,
-	TERRATEC_CINERGY_S2_R3,
 	GOTVIEW_SAT_HD,
 	GENIATECH_T220,
 	TECHNOTREND_S2_4600,
@@ -1770,7 +1669,6 @@ static struct usb_device_id dw2102_table[] = {
 	[TEVII_S421] = {USB_DEVICE(0x9022, USB_PID_TEVII_S421)},
 	[TEVII_S632] = {USB_DEVICE(0x9022, USB_PID_TEVII_S632)},
 	[TERRATEC_CINERGY_S2_R2] = {USB_DEVICE(USB_VID_TERRATEC, USB_PID_TERRATEC_CINERGY_S2_R2)},
-	[TERRATEC_CINERGY_S2_R3] = {USB_DEVICE(USB_VID_TERRATEC, USB_PID_TERRATEC_CINERGY_S2_R3)},
 	[GOTVIEW_SAT_HD] = {USB_DEVICE(0x1FE1, USB_PID_GOTVIEW_SAT_HD)},
 	[GENIATECH_T220] = {USB_DEVICE(0x1f4d, 0xD220)},
 	[TECHNOTREND_S2_4600] = {USB_DEVICE(USB_VID_TECHNOTREND,
@@ -2185,7 +2083,7 @@ static struct dvb_usb_device_properties su3000_properties = {
 		}},
 		}
 	},
-	.num_device_descs = 6,
+	.num_device_descs = 5,
 	.devices = {
 		{ "SU3000HD DVB-S USB2.0",
 			{ &dw2102_table[GENIATECH_SU3000], NULL },
@@ -2201,10 +2099,6 @@ static struct dvb_usb_device_properties su3000_properties = {
 		},
 		{ "Terratec Cinergy S2 USB HD Rev.2",
 			{ &dw2102_table[TERRATEC_CINERGY_S2_R2], NULL },
-			{ NULL },
-		},
-		{ "Terratec Cinergy S2 USB HD Rev.3",
-			{ &dw2102_table[TERRATEC_CINERGY_S2_R3], NULL },
 			{ NULL },
 		},
 		{ "GOTVIEW Satellite HD",

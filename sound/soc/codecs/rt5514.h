@@ -12,8 +12,6 @@
 #ifndef __RT5514_H__
 #define __RT5514_H__
 
-#include <linux/clk.h>
-
 #define RT5514_DEVICE_ID			0x10ec5514
 
 #define RT5514_RESET				0x2000
@@ -196,8 +194,8 @@
 #define RT5514_AD_AD_MIX_BIT			10
 #define RT5514_AD_AD_MUTE			(0x1 << 7)
 #define RT5514_AD_AD_MUTE_BIT			7
-#define RT5514_AD_GAIN_MASK			(0x3f << 1)
-#define RT5514_AD_GAIN_SFT			1
+#define RT5514_AD_GAIN_MASK			(0x7f << 0)
+#define RT5514_AD_GAIN_SFT			0
 
 /*  RT5514_ANA_CTRL_MICBST (0x2220) */
 #define RT5514_SEL_BSTL_MASK			(0xf << 4)
@@ -227,9 +225,6 @@
 #define RT5514_PLL_INP_MAX			40000000
 #define RT5514_PLL_INP_MIN			256000
 
-#define RT5514_FIRMWARE1	"rt5514_dsp_fw1.bin"
-#define RT5514_FIRMWARE2	"rt5514_dsp_fw2.bin"
-
 /* System Clock Source */
 enum {
 	RT5514_SCLK_S_MCLK,
@@ -245,7 +240,6 @@ enum {
 struct rt5514_priv {
 	struct snd_soc_codec *codec;
 	struct regmap *i2c_regmap, *regmap;
-	struct clk *mclk;
 	int sysclk;
 	int sysclk_src;
 	int lrck;
@@ -253,7 +247,6 @@ struct rt5514_priv {
 	int pll_src;
 	int pll_in;
 	int pll_out;
-	int dsp_enabled;
 };
 
 #endif /* __RT5514_H__ */

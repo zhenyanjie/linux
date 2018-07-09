@@ -9,26 +9,21 @@
 
 #include "blk.h"
 
-/*
- * Append a bio to a passthrough request.  Only works can be merged into
- * the request based on the driver constraints.
- */
-int blk_rq_append_bio(struct request *rq, struct bio *bio)
+int blk_rq_append_bio(struct request_queue *q, struct request *rq,
+		      struct bio *bio)
 {
-	if (!rq->bio) {
-		blk_rq_bio_prep(rq->q, rq, bio);
-	} else {
-		if (!ll_back_merge_fn(rq->q, rq, bio))
-			return -EINVAL;
-
+	if (!rq->bio)
+		blk_rq_bio_prep(q, rq, bio);
+	else if (!ll_back_merge_fn(q, rq, bio))
+		return -EINVAL;
+	else {
 		rq->biotail->bi_next = bio;
 		rq->biotail = bio;
+
 		rq->__data_len += bio->bi_iter.bi_size;
 	}
-
 	return 0;
 }
-EXPORT_SYMBOL(blk_rq_append_bio);
 
 static int __blk_rq_unmap_user(struct bio *bio)
 {
@@ -76,7 +71,7 @@ static int __blk_rq_map_user_iov(struct request *rq,
 	 */
 	bio_get(bio);
 
-	ret = blk_rq_append_bio(rq, bio);
+	ret = blk_rq_append_bio(q, rq, bio);
 	if (ret) {
 		bio_endio(bio);
 		__blk_rq_unmap_user(orig_bio);
@@ -116,10 +111,7 @@ int blk_rq_map_user_iov(struct request_queue *q, struct request *rq,
 	unsigned long align = q->dma_pad_mask | queue_dma_alignment(q);
 	struct bio *bio = NULL;
 	struct iov_iter i;
-	int ret = -EINVAL;
-
-	if (!iter_is_iovec(iter))
-		goto fail;
+	int ret;
 
 	if (map_data)
 		copy = true;
@@ -143,9 +135,8 @@ int blk_rq_map_user_iov(struct request_queue *q, struct request *rq,
 
 unmap_rq:
 	__blk_rq_unmap_user(bio);
-fail:
 	rq->bio = NULL;
-	return ret;
+	return -EINVAL;
 }
 EXPORT_SYMBOL(blk_rq_map_user_iov);
 
@@ -233,12 +224,12 @@ int blk_rq_map_kern(struct request_queue *q, struct request *rq, void *kbuf,
 		return PTR_ERR(bio);
 
 	if (!reading)
-		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
+		bio->bi_rw |= REQ_WRITE;
 
 	if (do_copy)
 		rq->cmd_flags |= REQ_COPY_USER;
 
-	ret = blk_rq_append_bio(rq, bio);
+	ret = blk_rq_append_bio(q, rq, bio);
 	if (unlikely(ret)) {
 		/* request is too big */
 		bio_put(bio);

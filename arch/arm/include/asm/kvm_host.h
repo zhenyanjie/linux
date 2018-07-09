@@ -39,12 +39,7 @@
 
 #include <kvm/arm_vgic.h>
 
-
-#ifdef CONFIG_ARM_GIC_V3
-#define KVM_MAX_VCPUS VGIC_V3_MAX_CPUS
-#else
 #define KVM_MAX_VCPUS VGIC_V2_MAX_CPUS
-#endif
 
 #define KVM_REQ_VCPU_EXIT	8
 
@@ -56,9 +51,6 @@ void kvm_reset_coprocs(struct kvm_vcpu *vcpu);
 struct kvm_arch {
 	/* VTTBR value associated with below pgd and vmid */
 	u64    vttbr;
-
-	/* The last vcpu id that ran on each physical CPU */
-	int __percpu *last_vcpu_ran;
 
 	/* Timer */
 	struct arch_timer_kvm	timer;
@@ -78,9 +70,6 @@ struct kvm_arch {
 	/* Interrupt controller */
 	struct vgic_dist	vgic;
 	int max_vcpus;
-
-	/* Mandated version of PSCI */
-	u32 psci_version;
 };
 
 #define KVM_NR_MEM_OBJS     40
@@ -194,15 +183,15 @@ struct kvm_vcpu_arch {
 };
 
 struct kvm_vm_stat {
-	ulong remote_tlb_flush;
+	u32 remote_tlb_flush;
 };
 
 struct kvm_vcpu_stat {
-	u64 halt_successful_poll;
-	u64 halt_attempted_poll;
-	u64 halt_poll_invalid;
-	u64 halt_wakeup;
-	u64 hvc_exit_stat;
+	u32 halt_successful_poll;
+	u32 halt_attempted_poll;
+	u32 halt_poll_invalid;
+	u32 halt_wakeup;
+	u32 hvc_exit_stat;
 	u64 wfe_exit_stat;
 	u64 wfi_exit_stat;
 	u64 mmio_exit_user;
@@ -252,7 +241,8 @@ int kvm_arm_coproc_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *);
 int handle_exit(struct kvm_vcpu *vcpu, struct kvm_run *run,
 		int exception_index);
 
-static inline void __cpu_init_hyp_mode(phys_addr_t pgd_ptr,
+static inline void __cpu_init_hyp_mode(phys_addr_t boot_pgd_ptr,
+				       phys_addr_t pgd_ptr,
 				       unsigned long hyp_stack_ptr,
 				       unsigned long vector_ptr)
 {
@@ -261,13 +251,18 @@ static inline void __cpu_init_hyp_mode(phys_addr_t pgd_ptr,
 	 * code. The init code doesn't need to preserve these
 	 * registers as r0-r3 are already callee saved according to
 	 * the AAPCS.
-	 * Note that we slightly misuse the prototype by casting the
+	 * Note that we slightly misuse the prototype by casing the
 	 * stack pointer to a void *.
-
-	 * The PGDs are always passed as the third argument, in order
-	 * to be passed into r2-r3 to the init code (yes, this is
-	 * compliant with the PCS!).
+	 *
+	 * We don't have enough registers to perform the full init in
+	 * one go.  Install the boot PGD first, and then install the
+	 * runtime PGD, stack pointer and vectors. The PGDs are always
+	 * passed as the third argument, in order to be passed into
+	 * r2-r3 to the init code (yes, this is compliant with the
+	 * PCS!).
 	 */
+
+	kvm_call_hyp(NULL, 0, boot_pgd_ptr);
 
 	kvm_call_hyp((void*)hyp_stack_ptr, vector_ptr, pgd_ptr);
 }
@@ -277,13 +272,16 @@ static inline void __cpu_init_stage2(void)
 	kvm_call_hyp(__init_stage2_translation);
 }
 
-static inline void __cpu_reset_hyp_mode(unsigned long vector_ptr,
+static inline void __cpu_reset_hyp_mode(phys_addr_t boot_pgd_ptr,
 					phys_addr_t phys_idmap_start)
 {
-	kvm_call_hyp((void *)virt_to_idmap(__kvm_hyp_reset), vector_ptr);
+	/*
+	 * TODO
+	 * kvm_call_reset(boot_pgd_ptr, phys_idmap_start);
+	 */
 }
 
-static inline int kvm_arch_dev_ioctl_check_extension(struct kvm *kvm, long ext)
+static inline int kvm_arch_dev_ioctl_check_extension(long ext)
 {
 	return 0;
 }
@@ -319,12 +317,6 @@ static inline int kvm_arm_vcpu_arch_has_attr(struct kvm_vcpu *vcpu,
 					     struct kvm_device_attr *attr)
 {
 	return -ENXIO;
-}
-
-static inline bool kvm_arm_harden_branch_predictor(void)
-{
-	/* No way to detect it yet, pretend it is not there. */
-	return false;
 }
 
 #endif /* __ARM_KVM_HOST_H__ */

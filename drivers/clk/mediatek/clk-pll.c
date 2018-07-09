@@ -302,10 +302,7 @@ static struct clk *mtk_clk_register_pll(const struct mtk_pll_data *data,
 
 	init.name = data->name;
 	init.ops = &mtk_pll_ops;
-	if (data->parent_name)
-		init.parent_names = &data->parent_name;
-	else
-		init.parent_names = &parent_name;
+	init.parent_names = &parent_name;
 	init.num_parents = 1;
 
 	clk = clk_register(NULL, &pll->hw);
@@ -316,7 +313,7 @@ static struct clk *mtk_clk_register_pll(const struct mtk_pll_data *data,
 	return clk;
 }
 
-void mtk_clk_register_plls(struct device_node *node,
+void __init mtk_clk_register_plls(struct device_node *node,
 		const struct mtk_pll_data *plls, int num_plls, struct clk_onecell_data *clk_data)
 {
 	void __iomem *base;

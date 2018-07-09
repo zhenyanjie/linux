@@ -56,9 +56,8 @@ static void tegra_atomic_complete(struct tegra_drm *tegra,
 	 */
 
 	drm_atomic_helper_commit_modeset_disables(drm, state);
+	drm_atomic_helper_commit_planes(drm, state, false);
 	drm_atomic_helper_commit_modeset_enables(drm, state);
-	drm_atomic_helper_commit_planes(drm, state,
-					DRM_PLANE_COMMIT_ACTIVE_ONLY);
 
 	drm_atomic_helper_wait_for_vblanks(drm, state);
 
@@ -94,7 +93,7 @@ static int tegra_atomic_commit(struct drm_device *drm,
 	 * the software side now.
 	 */
 
-	drm_atomic_helper_swap_state(state, true);
+	drm_atomic_helper_swap_state(drm, state);
 
 	if (nonblock)
 		tegra_atomic_schedule(tegra, state);
@@ -983,8 +982,8 @@ static int host1x_drm_probe(struct host1x_device *dev)
 	int err;
 
 	drm = drm_dev_alloc(driver, &dev->dev);
-	if (IS_ERR(drm))
-		return PTR_ERR(drm);
+	if (!drm)
+		return -ENOMEM;
 
 	dev_set_drvdata(&dev->dev, drm);
 

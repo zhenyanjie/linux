@@ -261,17 +261,6 @@ static void __team_option_inst_mark_removed_port(struct team *team,
 	}
 }
 
-static bool __team_option_inst_tmp_find(const struct list_head *opts,
-					const struct team_option_inst *needle)
-{
-	struct team_option_inst *opt_inst;
-
-	list_for_each_entry(opt_inst, opts, tmp_list)
-		if (opt_inst == needle)
-			return true;
-	return false;
-}
-
 static int __team_options_register(struct team *team,
 				   const struct team_option *option,
 				   size_t option_count)
@@ -1004,8 +993,7 @@ static void team_port_disable(struct team *team,
 static void ___team_compute_features(struct team *team)
 {
 	struct team_port *port;
-	netdev_features_t vlan_features = TEAM_VLAN_FEATURES &
-					  NETIF_F_ALL_FOR_ALL;
+	u32 vlan_features = TEAM_VLAN_FEATURES & NETIF_F_ALL_FOR_ALL;
 	netdev_features_t enc_features  = TEAM_ENC_FEATURES;
 	unsigned short max_hard_header_len = ETH_HLEN;
 	unsigned int dst_release_flag = IFF_XMIT_DST_RELEASE |
@@ -1079,10 +1067,13 @@ static void team_port_leave(struct team *team, struct team_port *port)
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
-static int __team_port_enable_netpoll(struct team_port *port)
+static int team_port_enable_netpoll(struct team *team, struct team_port *port)
 {
 	struct netpoll *np;
 	int err;
+
+	if (!team->dev->npinfo)
+		return 0;
 
 	np = kzalloc(sizeof(*np), GFP_KERNEL);
 	if (!np)
@@ -1095,14 +1086,6 @@ static int __team_port_enable_netpoll(struct team_port *port)
 	}
 	port->np = np;
 	return err;
-}
-
-static int team_port_enable_netpoll(struct team_port *port)
-{
-	if (!port->team->dev->npinfo)
-		return 0;
-
-	return __team_port_enable_netpoll(port);
 }
 
 static void team_port_disable_netpoll(struct team_port *port)
@@ -1119,7 +1102,7 @@ static void team_port_disable_netpoll(struct team_port *port)
 	kfree(np);
 }
 #else
-static int team_port_enable_netpoll(struct team_port *port)
+static int team_port_enable_netpoll(struct team *team, struct team_port *port)
 {
 	return 0;
 }
@@ -1220,6 +1203,11 @@ static int team_port_add(struct team *team, struct net_device *port_dev)
 		goto err_dev_open;
 	}
 
+	netif_addr_lock_bh(dev);
+	dev_uc_sync_multiple(port_dev, dev);
+	dev_mc_sync_multiple(port_dev, dev);
+	netif_addr_unlock_bh(dev);
+
 	err = vlan_vids_add_by_dev(port_dev, dev);
 	if (err) {
 		netdev_err(dev, "Failed to add vlan ids to device %s\n",
@@ -1227,7 +1215,7 @@ static int team_port_add(struct team *team, struct net_device *port_dev)
 		goto err_vids_add;
 	}
 
-	err = team_port_enable_netpoll(port);
+	err = team_port_enable_netpoll(team, port);
 	if (err) {
 		netdev_err(dev, "Failed to enable netpoll on device %s\n",
 			   portname);
@@ -1259,11 +1247,6 @@ static int team_port_add(struct team *team, struct net_device *port_dev)
 		goto err_option_port_add;
 	}
 
-	netif_addr_lock_bh(dev);
-	dev_uc_sync_multiple(port_dev, dev);
-	dev_mc_sync_multiple(port_dev, dev);
-	netif_addr_unlock_bh(dev);
-
 	port->index = -1;
 	list_add_tail_rcu(&port->list, &team->port_list);
 	team_port_enable(team, port);
@@ -1288,6 +1271,8 @@ err_enable_netpoll:
 	vlan_vids_del_by_dev(port_dev, dev);
 
 err_vids_add:
+	dev_uc_unsync(port_dev, dev);
+	dev_mc_unsync(port_dev, dev);
 	dev_close(port_dev);
 
 err_dev_open:
@@ -1591,6 +1576,23 @@ static const struct team_option team_options[] = {
 	},
 };
 
+static struct lock_class_key team_netdev_xmit_lock_key;
+static struct lock_class_key team_netdev_addr_lock_key;
+static struct lock_class_key team_tx_busylock_key;
+
+static void team_set_lockdep_class_one(struct net_device *dev,
+				       struct netdev_queue *txq,
+				       void *unused)
+{
+	lockdep_set_class(&txq->_xmit_lock, &team_netdev_xmit_lock_key);
+}
+
+static void team_set_lockdep_class(struct net_device *dev)
+{
+	lockdep_set_class(&dev->addr_list_lock, &team_netdev_addr_lock_key);
+	netdev_for_each_tx_queue(dev, team_set_lockdep_class_one, NULL);
+	dev->qdisc_tx_busylock = &team_tx_busylock_key;
+}
 
 static int team_init(struct net_device *dev)
 {
@@ -1626,7 +1628,7 @@ static int team_init(struct net_device *dev)
 		goto err_options_register;
 	netif_carrier_off(dev);
 
-	netdev_lockdep_set_classes(dev);
+	team_set_lockdep_class(dev);
 
 	return 0;
 
@@ -1925,7 +1927,7 @@ static int team_netpoll_setup(struct net_device *dev,
 
 	mutex_lock(&team->lock);
 	list_for_each_entry(port, &team->port_list, list) {
-		err = __team_port_enable_netpoll(port);
+		err = team_port_enable_netpoll(team, port);
 		if (err) {
 			__team_netpoll_cleanup(team);
 			break;
@@ -2017,8 +2019,6 @@ static const struct net_device_ops team_netdev_ops = {
 	.ndo_add_slave		= team_add_slave,
 	.ndo_del_slave		= team_del_slave,
 	.ndo_fix_features	= team_fix_features,
-	.ndo_neigh_construct	= netdev_default_l2upper_neigh_construct,
-	.ndo_neigh_destroy	= netdev_default_l2upper_neigh_destroy,
 	.ndo_change_carrier     = team_change_carrier,
 	.ndo_bridge_setlink	= switchdev_port_bridge_setlink,
 	.ndo_bridge_getlink	= switchdev_port_bridge_getlink,
@@ -2381,10 +2381,8 @@ start_again:
 
 	hdr = genlmsg_put(skb, portid, seq, &team_nl_family, flags | NLM_F_MULTI,
 			  TEAM_CMD_OPTIONS_GET);
-	if (!hdr) {
-		nlmsg_free(skb);
+	if (!hdr)
 		return -EMSGSIZE;
-	}
 
 	if (nla_put_u32(skb, TEAM_ATTR_TEAM_IFINDEX, team->dev->ifindex))
 		goto nla_put_failure;
@@ -2418,7 +2416,7 @@ send_done:
 	if (!nlh) {
 		err = __send_and_alloc_skb(&skb, team, portid, send_func);
 		if (err)
-			return err;
+			goto errout;
 		goto send_done;
 	}
 
@@ -2586,14 +2584,6 @@ static int team_nl_cmd_options_set(struct sk_buff *skb, struct genl_info *info)
 			if (err)
 				goto team_put;
 			opt_inst->changed = true;
-
-			/* dumb/evil user-space can send us duplicate opt,
-			 * keep only the last one
-			 */
-			if (__team_option_inst_tmp_find(&opt_inst_list,
-							opt_inst))
-				continue;
-
 			list_add(&opt_inst->tmp_list, &opt_inst_list);
 		}
 		if (!opt_found) {
@@ -2664,10 +2654,8 @@ start_again:
 
 	hdr = genlmsg_put(skb, portid, seq, &team_nl_family, flags | NLM_F_MULTI,
 			  TEAM_CMD_PORT_LIST_GET);
-	if (!hdr) {
-		nlmsg_free(skb);
+	if (!hdr)
 		return -EMSGSIZE;
-	}
 
 	if (nla_put_u32(skb, TEAM_ATTR_TEAM_IFINDEX, team->dev->ifindex))
 		goto nla_put_failure;
@@ -2711,7 +2699,7 @@ send_done:
 	if (!nlh) {
 		err = __send_and_alloc_skb(&skb, team, portid, send_func);
 		if (err)
-			return err;
+			goto errout;
 		goto send_done;
 	}
 

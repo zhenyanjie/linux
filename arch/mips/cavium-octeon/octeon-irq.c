@@ -1260,7 +1260,7 @@ static int octeon_irq_gpio_map(struct irq_domain *d,
 
 	line = (hw + gpiod->base_hwirq) >> 6;
 	bit = (hw + gpiod->base_hwirq) & 63;
-	if (line >= ARRAY_SIZE(octeon_irq_ciu_to_irq) ||
+	if (line > ARRAY_SIZE(octeon_irq_ciu_to_irq) ||
 		octeon_irq_ciu_to_irq[line][bit] != 0)
 		return -EINVAL;
 
@@ -1542,6 +1542,10 @@ static int __init octeon_irq_init_ciu(
 			goto err;
 	}
 
+	r = octeon_irq_force_ciu_mapping(ciu_domain, OCTEON_IRQ_USB0, 0, 56);
+	if (r)
+		goto err;
+
 	r = octeon_irq_force_ciu_mapping(ciu_domain, OCTEON_IRQ_TWSI2, 0, 59);
 	if (r)
 		goto err;
@@ -1554,6 +1558,10 @@ static int __init octeon_irq_init_ciu(
 		if (r)
 			goto err;
 	}
+
+	r = octeon_irq_force_ciu_mapping(ciu_domain, OCTEON_IRQ_USB1, 1, 17);
+	if (r)
+		goto err;
 
 	/* Enable the CIU lines */
 	set_c0_status(STATUSF_IP3 | STATUSF_IP2);
@@ -1618,12 +1626,6 @@ static int __init octeon_irq_init_gpio(
 		pr_warn("Cannot allocate memory for GPIO irq_domain.\n");
 		return -ENOMEM;
 	}
-
-	/*
-	 * Clear the OF_POPULATED flag that was set by of_irq_init()
-	 * so that all GPIO devices will be probed.
-	 */
-	of_node_clear_flag(gpio_node, OF_POPULATED);
 
 	return 0;
 }
@@ -2075,6 +2077,10 @@ static int __init octeon_irq_init_ciu2(
 			goto err;
 	}
 
+	r = octeon_irq_force_ciu_mapping(ciu_domain, OCTEON_IRQ_USB0, 3, 44);
+	if (r)
+		goto err;
+
 	for (i = 0; i < 4; i++) {
 		r = octeon_irq_force_ciu_mapping(
 			ciu_domain, i + OCTEON_IRQ_PCI_INT0, 4, i);
@@ -2271,19 +2277,17 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 
 	parent_irq = irq_of_parse_and_map(ciu_node, 0);
 	if (!parent_irq) {
-		pr_err("ERROR: Couldn't acquire parent_irq for %s\n",
+		pr_err("ERROR: Couldn't acquire parent_irq for %s\n.",
 			ciu_node->name);
 		return -EINVAL;
 	}
 
 	host_data = kzalloc(sizeof(*host_data), GFP_KERNEL);
-	if (!host_data)
-		return -ENOMEM;
 	raw_spin_lock_init(&host_data->lock);
 
 	addr = of_get_address(ciu_node, 0, NULL, NULL);
 	if (!addr) {
-		pr_err("ERROR: Couldn't acquire reg(0) %s\n", ciu_node->name);
+		pr_err("ERROR: Couldn't acquire reg(0) %s\n.", ciu_node->name);
 		return -EINVAL;
 	}
 	host_data->raw_reg = (u64)phys_to_virt(
@@ -2291,7 +2295,7 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 
 	addr = of_get_address(ciu_node, 1, NULL, NULL);
 	if (!addr) {
-		pr_err("ERROR: Couldn't acquire reg(1) %s\n", ciu_node->name);
+		pr_err("ERROR: Couldn't acquire reg(1) %s\n.", ciu_node->name);
 		return -EINVAL;
 	}
 	host_data->en_reg = (u64)phys_to_virt(
@@ -2299,7 +2303,7 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 
 	r = of_property_read_u32(ciu_node, "cavium,max-bits", &val);
 	if (r) {
-		pr_err("ERROR: Couldn't read cavium,max-bits from %s\n",
+		pr_err("ERROR: Couldn't read cavium,max-bits from %s\n.",
 			ciu_node->name);
 		return r;
 	}
@@ -2309,7 +2313,7 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 					   &octeon_irq_domain_cib_ops,
 					   host_data);
 	if (!cib_domain) {
-		pr_err("ERROR: Couldn't irq_domain_add_linear()\n");
+		pr_err("ERROR: Couldn't irq_domain_add_linear()\n.");
 		return -ENOMEM;
 	}
 

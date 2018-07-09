@@ -199,7 +199,7 @@ static noinline_for_stack char *translate_scan(struct _adapter *padapter,
 	iwe.cmd = SIOCGIWMODE;
 	memcpy((u8 *)&cap, r8712_get_capability_from_ie(pnetwork->network.IEs),
 		2);
-	le16_to_cpus(&cap);
+	cap = le16_to_cpu(cap);
 	if (cap & (WLAN_CAPABILITY_IBSS | WLAN_CAPABILITY_BSS)) {
 		if (cap & WLAN_CAPABILITY_BSS)
 			iwe.u.mode = (u32)IW_MODE_MASTER;
@@ -1976,9 +1976,9 @@ static int r871x_get_ap_info(struct net_device *dev,
 	if (pdata->length >= 32) {
 		if (copy_from_user(data, pdata->pointer, 32))
 			return -EINVAL;
-		data[32] = 0;
+                data[32] = 0;
 	} else {
-		return -EINVAL;
+		 return -EINVAL;
 	}
 	spin_lock_irqsave(&(pmlmepriv->scanned_queue.lock), irqL);
 	phead = &queue->queue;

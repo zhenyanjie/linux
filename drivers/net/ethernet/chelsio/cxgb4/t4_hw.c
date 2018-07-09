@@ -1,7 +1,7 @@
 /*
  * This file is part of the Chelsio T4 Ethernet driver for Linux.
  *
- * Copyright (c) 2003-2016 Chelsio Communications, Inc. All rights reserved.
+ * Copyright (c) 2003-2014 Chelsio Communications, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -317,12 +317,12 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 
 	if (v != MBOX_OWNER_DRV) {
 		ret = (v == MBOX_OWNER_FW) ? -EBUSY : -ETIMEDOUT;
-		t4_record_mbox(adap, cmd, size, access, ret);
+		t4_record_mbox(adap, cmd, MBOX_LEN, access, ret);
 		return ret;
 	}
 
 	/* Copy in the new mailbox command and send it on its way ... */
-	t4_record_mbox(adap, cmd, size, access, 0);
+	t4_record_mbox(adap, cmd, MBOX_LEN, access, 0);
 	for (i = 0; i < size; i += 8)
 		t4_write_reg64(adap, data_reg + i, be64_to_cpu(*p++));
 
@@ -371,7 +371,7 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 	}
 
 	ret = (pcie_fw & PCIE_FW_ERR_F) ? -ENXIO : -ETIMEDOUT;
-	t4_record_mbox(adap, cmd, size, access, ret);
+	t4_record_mbox(adap, cmd, MBOX_LEN, access, ret);
 	dev_err(adap->pdev_dev, "command %#x in mailbox %d timed out\n",
 		*(const u8 *)cmd, mbox);
 	t4_report_fw_error(adap);
@@ -2596,6 +2596,7 @@ void t4_get_regs(struct adapter *adap, void *buf, size_t buf_size)
 }
 
 #define EEPROM_STAT_ADDR   0x7bfc
+#define VPD_SIZE           0x800
 #define VPD_BASE           0x400
 #define VPD_BASE_OLD       0
 #define VPD_LEN            1024
@@ -2632,6 +2633,15 @@ int t4_get_raw_vpd_params(struct adapter *adapter, struct vpd_params *p)
 	vpd = vmalloc(VPD_LEN);
 	if (!vpd)
 		return -ENOMEM;
+
+	/* We have two VPD data structures stored in the adapter VPD area.
+	 * By default, Linux calculates the size of the VPD area by traversing
+	 * the first VPD area at offset 0x0, so we need to tell the OS what
+	 * our real VPD size is.
+	 */
+	ret = pci_set_vpd_size(adapter->pdev, VPD_SIZE);
+	if (ret < 0)
+		goto out;
 
 	/* Card information normally starts at VPD_BASE but early cards had
 	 * it at 0.
@@ -2719,7 +2729,7 @@ int t4_get_raw_vpd_params(struct adapter *adapter, struct vpd_params *p)
 
 out:
 	vfree(vpd);
-	return ret < 0 ? ret : 0;
+	return ret;
 }
 
 /**
@@ -3617,8 +3627,7 @@ void t4_ulprx_read_la(struct adapter *adap, u32 *la_buf)
 }
 
 #define ADVERT_MASK (FW_PORT_CAP_SPEED_100M | FW_PORT_CAP_SPEED_1G |\
-		     FW_PORT_CAP_SPEED_10G | FW_PORT_CAP_SPEED_25G | \
-		     FW_PORT_CAP_SPEED_40G | FW_PORT_CAP_SPEED_100G | \
+		     FW_PORT_CAP_SPEED_10G | FW_PORT_CAP_SPEED_40G | \
 		     FW_PORT_CAP_ANEG)
 
 /**
@@ -6185,18 +6194,13 @@ int t4_fw_upgrade(struct adapter *adap, unsigned int mbox,
 	if (!t4_fw_matches_chip(adap, fw_hdr))
 		return -EINVAL;
 
-	/* Disable FW_OK flag so that mbox commands with FW_OK flag set
-	 * wont be sent when we are flashing FW.
-	 */
-	adap->flags &= ~FW_OK;
-
 	ret = t4_fw_halt(adap, mbox, force);
 	if (ret < 0 && !force)
-		goto out;
+		return ret;
 
 	ret = t4_load_fw(adap, fw_data, size);
 	if (ret < 0)
-		goto out;
+		return ret;
 
 	/*
 	 * Older versions of the firmware don't understand the new
@@ -6207,17 +6211,7 @@ int t4_fw_upgrade(struct adapter *adap, unsigned int mbox,
 	 * its header flags to see if it advertises the capability.
 	 */
 	reset = ((be32_to_cpu(fw_hdr->flags) & FW_HDR_FLAGS_RESET_HALT) == 0);
-	ret = t4_fw_restart(adap, mbox, reset);
-
-	/* Grab potentially new Firmware Device Log parameters so we can see
-	 * how healthy the new Firmware is.  It's okay to contact the new
-	 * Firmware for these parameters even though, as far as it's
-	 * concerned, we've never said "HELLO" to it ...
-	 */
-	(void)t4_init_devlog_params(adap);
-out:
-	adap->flags |= FW_OK;
-	return ret;
+	return t4_fw_restart(adap, mbox, reset);
 }
 
 /**
@@ -7202,12 +7196,8 @@ void t4_handle_get_port_info(struct port_info *pi, const __be64 *rpl)
 		speed = 1000;
 	else if (stat & FW_PORT_CMD_LSPEED_V(FW_PORT_CAP_SPEED_10G))
 		speed = 10000;
-	else if (stat & FW_PORT_CMD_LSPEED_V(FW_PORT_CAP_SPEED_25G))
-		speed = 25000;
 	else if (stat & FW_PORT_CMD_LSPEED_V(FW_PORT_CAP_SPEED_40G))
 		speed = 40000;
-	else if (stat & FW_PORT_CMD_LSPEED_V(FW_PORT_CAP_SPEED_100G))
-		speed = 100000;
 
 	lc = &pi->link_cfg;
 
@@ -7229,7 +7219,6 @@ void t4_handle_get_port_info(struct port_info *pi, const __be64 *rpl)
 		lc->speed = speed;
 		lc->fc = fc;
 		lc->supported = be16_to_cpu(p->u.info.pcap);
-		lc->lp_advertising = be16_to_cpu(p->u.info.lpacap);
 		t4_os_link_changed(adap, pi->port_id, link_ok);
 	}
 }
@@ -7295,7 +7284,6 @@ static void get_pci_mode(struct adapter *adapter, struct pci_params *p)
 static void init_link_config(struct link_config *lc, unsigned int caps)
 {
 	lc->supported = caps;
-	lc->lp_advertising = 0;
 	lc->requested_speed = 0;
 	lc->speed = 0;
 	lc->requested_fc = lc->fc = PAUSE_RX | PAUSE_TX;
@@ -7856,6 +7844,7 @@ int t4_port_init(struct adapter *adap, int mbox, int pf, int vf)
 			return ret;
 
 		memcpy(adap->port[i]->dev_addr, addr, ETH_ALEN);
+		adap->port[i]->dev_port = j;
 		j++;
 	}
 	return 0;
@@ -8088,16 +8077,7 @@ int t4_cim_read_la(struct adapter *adap, u32 *la_buf, unsigned int *wrptr)
 		ret = t4_cim_read(adap, UP_UP_DBG_LA_DATA_A, 1, &la_buf[i]);
 		if (ret)
 			break;
-
-		/* Bits 0-3 of UpDbgLaRdPtr can be between 0000 to 1001 to
-		 * identify the 32-bit portion of the full 312-bit data
-		 */
-		if (is_t6(adap->params.chip) && (idx & 0xf) >= 9)
-			idx = (idx & 0xff0) + 0x10;
-		else
-			idx++;
-		/* address can't exceed 0xfff */
-		idx &= UPDBGLARDPTR_M;
+		idx = (idx + 1) & UPDBGLARDPTR_M;
 	}
 restart:
 	if (cfg & UPDBGLAEN_F) {
@@ -8281,74 +8261,4 @@ void t4_idma_monitor(struct adapter *adapter,
 			 debug0, debug11);
 		t4_sge_decode_idma_state(adapter, idma->idma_state[i]);
 	}
-}
-
-/**
- *	t4_set_vf_mac - Set MAC address for the specified VF
- *	@adapter: The adapter
- *	@vf: one of the VFs instantiated by the specified PF
- *	@naddr: the number of MAC addresses
- *	@addr: the MAC address(es) to be set to the specified VF
- */
-int t4_set_vf_mac_acl(struct adapter *adapter, unsigned int vf,
-		      unsigned int naddr, u8 *addr)
-{
-	struct fw_acl_mac_cmd cmd;
-
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.op_to_vfn = cpu_to_be32(FW_CMD_OP_V(FW_ACL_MAC_CMD) |
-				    FW_CMD_REQUEST_F |
-				    FW_CMD_WRITE_F |
-				    FW_ACL_MAC_CMD_PFN_V(adapter->pf) |
-				    FW_ACL_MAC_CMD_VFN_V(vf));
-
-	/* Note: Do not enable the ACL */
-	cmd.en_to_len16 = cpu_to_be32((unsigned int)FW_LEN16(cmd));
-	cmd.nmac = naddr;
-
-	switch (adapter->pf) {
-	case 3:
-		memcpy(cmd.macaddr3, addr, sizeof(cmd.macaddr3));
-		break;
-	case 2:
-		memcpy(cmd.macaddr2, addr, sizeof(cmd.macaddr2));
-		break;
-	case 1:
-		memcpy(cmd.macaddr1, addr, sizeof(cmd.macaddr1));
-		break;
-	case 0:
-		memcpy(cmd.macaddr0, addr, sizeof(cmd.macaddr0));
-		break;
-	}
-
-	return t4_wr_mbox(adapter, adapter->mbox, &cmd, sizeof(cmd), &cmd);
-}
-
-int t4_sched_params(struct adapter *adapter, int type, int level, int mode,
-		    int rateunit, int ratemode, int channel, int class,
-		    int minrate, int maxrate, int weight, int pktsize)
-{
-	struct fw_sched_cmd cmd;
-
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.op_to_write = cpu_to_be32(FW_CMD_OP_V(FW_SCHED_CMD) |
-				      FW_CMD_REQUEST_F |
-				      FW_CMD_WRITE_F);
-	cmd.retval_len16 = cpu_to_be32(FW_LEN16(cmd));
-
-	cmd.u.params.sc = FW_SCHED_SC_PARAMS;
-	cmd.u.params.type = type;
-	cmd.u.params.level = level;
-	cmd.u.params.mode = mode;
-	cmd.u.params.ch = channel;
-	cmd.u.params.cl = class;
-	cmd.u.params.unit = rateunit;
-	cmd.u.params.rate = ratemode;
-	cmd.u.params.min = cpu_to_be32(minrate);
-	cmd.u.params.max = cpu_to_be32(maxrate);
-	cmd.u.params.weight = cpu_to_be16(weight);
-	cmd.u.params.pktsize = cpu_to_be16(pktsize);
-
-	return t4_wr_mbox_meat(adapter, adapter->mbox, &cmd, sizeof(cmd),
-			       NULL, 1);
 }

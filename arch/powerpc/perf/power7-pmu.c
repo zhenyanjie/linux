@@ -416,7 +416,7 @@ static struct attribute *power7_pmu_format_attr[] = {
 	NULL,
 };
 
-static struct attribute_group power7_pmu_format_group = {
+struct attribute_group power7_pmu_format_group = {
 	.name = "format",
 	.attrs = power7_pmu_format_attr,
 };

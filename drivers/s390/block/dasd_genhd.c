@@ -45,6 +45,7 @@ int dasd_gendisk_alloc(struct dasd_block *block)
 	gdp->major = DASD_MAJOR;
 	gdp->first_minor = base->devindex << DASD_PARTN_BITS;
 	gdp->fops = &dasd_device_operations;
+	gdp->driverfs_dev = &base->cdev->dev;
 
 	/*
 	 * Set device name.
@@ -75,7 +76,7 @@ int dasd_gendisk_alloc(struct dasd_block *block)
 	gdp->queue = block->request_queue;
 	block->gdp = gdp;
 	set_capacity(block->gdp, 0);
-	device_add_disk(&base->cdev->dev, block->gdp);
+	add_disk(block->gdp);
 	return 0;
 }
 

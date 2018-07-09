@@ -26,6 +26,7 @@
 #include <asm/pgalloc.h>
 #include <asm/sun3-head.h>
 #include <asm/sun3mmu.h>
+#include <asm/rtc.h>
 #include <asm/machdep.h>
 #include <asm/machines.h>
 #include <asm/idprom.h>

@@ -15,7 +15,6 @@ const char *ceph_entity_type_name(int type)
 	default: return "unknown";
 	}
 }
-EXPORT_SYMBOL(ceph_entity_type_name);
 
 const char *ceph_osd_op_name(int op)
 {

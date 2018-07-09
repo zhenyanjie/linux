@@ -68,7 +68,6 @@ static inline u32 ila_locator_hash(struct ila_locator loc)
 {
 	u32 *v = (u32 *)loc.v32;
 
-	__ila_hash_secret_init();
 	return jhash_2words(v[0], v[1], hashrnd);
 }
 
@@ -129,7 +128,7 @@ static struct genl_family ila_nl_family = {
 	.parallel_ops	= true,
 };
 
-static const struct nla_policy ila_nl_policy[ILA_ATTR_MAX + 1] = {
+static struct nla_policy ila_nl_policy[ILA_ATTR_MAX + 1] = {
 	[ILA_ATTR_LOCATOR] = { .type = NLA_U64, },
 	[ILA_ATTR_LOCATOR_MATCH] = { .type = NLA_U64, },
 	[ILA_ATTR_IFINDEX] = { .type = NLA_U32, },
@@ -211,14 +210,14 @@ static void ila_free_cb(void *ptr, void *arg)
 	}
 }
 
-static int ila_xlat_addr(struct sk_buff *skb, bool set_csum_neutral);
+static int ila_xlat_addr(struct sk_buff *skb);
 
 static unsigned int
 ila_nf_input(void *priv,
 	     struct sk_buff *skb,
 	     const struct nf_hook_state *state)
 {
-	ila_xlat_addr(skb, false);
+	ila_xlat_addr(skb);
 	return NF_ACCEPT;
 }
 
@@ -598,7 +597,7 @@ static struct pernet_operations ila_net_ops = {
 	.size = sizeof(struct ila_net),
 };
 
-static int ila_xlat_addr(struct sk_buff *skb, bool set_csum_neutral)
+static int ila_xlat_addr(struct sk_buff *skb)
 {
 	struct ila_map *ila;
 	struct ipv6hdr *ip6h = ipv6_hdr(skb);
@@ -617,7 +616,7 @@ static int ila_xlat_addr(struct sk_buff *skb, bool set_csum_neutral)
 
 	ila = ila_lookup_wildcards(iaddr, skb->dev->ifindex, ilan);
 	if (ila)
-		ila_update_ipv6_locator(skb, &ila->xp.ip, set_csum_neutral);
+		ila_update_ipv6_locator(skb, &ila->xp.ip);
 
 	rcu_read_unlock();
 

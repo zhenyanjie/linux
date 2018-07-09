@@ -69,13 +69,15 @@ static irqreturn_t
 nvkm_pci_intr(int irq, void *arg)
 {
 	struct nvkm_pci *pci = arg;
-	struct nvkm_device *device = pci->subdev.device;
+	struct nvkm_mc *mc = pci->subdev.device->mc;
 	bool handled = false;
-	nvkm_mc_intr_unarm(device);
-	if (pci->msi)
-		pci->func->msi_rearm(pci);
-	nvkm_mc_intr(device, &handled);
-	nvkm_mc_intr_rearm(device);
+	if (likely(mc)) {
+		nvkm_mc_intr_unarm(mc);
+		if (pci->msi)
+			pci->func->msi_rearm(pci);
+		nvkm_mc_intr(mc, &handled);
+		nvkm_mc_intr_rearm(mc);
+	}
 	return handled ? IRQ_HANDLED : IRQ_NONE;
 }
 
@@ -136,13 +138,6 @@ nvkm_pci_init(struct nvkm_subdev *subdev)
 		return ret;
 
 	pci->irq = pdev->irq;
-
-	/* Ensure MSI interrupts are armed, for the case where there are
-	 * already interrupts pending (for whatever reason) at load time.
-	 */
-	if (pci->msi)
-		pci->func->msi_rearm(pci);
-
 	return ret;
 }
 
@@ -198,10 +193,6 @@ nvkm_pci_new_(const struct nvkm_pci_func *func, struct nvkm_device *device,
 			break;
 		}
 	}
-
-#ifdef __BIG_ENDIAN
-	pci->msi = false;
-#endif
 
 	pci->msi = nvkm_boolopt(device->cfgopt, "NvMSI", pci->msi);
 	if (pci->msi && func->msi_rearm) {

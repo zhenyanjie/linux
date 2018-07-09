@@ -27,19 +27,18 @@
 
 #define NR_syscalls	__NR_syscalls
 
-/* Generic syscall (fs/filesystems.c - lost in asm-generic/unistd.h */
-#define __NR_sysfs		(__NR_arch_specific_syscall + 3)
-
 /* ARC specific syscall */
 #define __NR_cacheflush		(__NR_arch_specific_syscall + 0)
 #define __NR_arc_settls		(__NR_arch_specific_syscall + 1)
 #define __NR_arc_gettls		(__NR_arch_specific_syscall + 2)
-#define __NR_arc_usr_cmpxchg	(__NR_arch_specific_syscall + 4)
 
 __SYSCALL(__NR_cacheflush, sys_cacheflush)
 __SYSCALL(__NR_arc_settls, sys_arc_settls)
 __SYSCALL(__NR_arc_gettls, sys_arc_gettls)
-__SYSCALL(__NR_arc_usr_cmpxchg, sys_arc_usr_cmpxchg)
+
+
+/* Generic syscall (fs/filesystems.c - lost in asm-generic/unistd.h */
+#define __NR_sysfs		(__NR_arch_specific_syscall + 3)
 __SYSCALL(__NR_sysfs, sys_sysfs)
 
 #undef __SYSCALL

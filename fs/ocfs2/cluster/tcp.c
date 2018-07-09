@@ -1618,12 +1618,16 @@ static void o2net_start_connect(struct work_struct *work)
 
 	/* watch for racing with tearing a node down */
 	node = o2nm_get_node_by_num(o2net_num_from_nn(nn));
-	if (node == NULL)
+	if (node == NULL) {
+		ret = 0;
 		goto out;
+	}
 
 	mynode = o2nm_get_node_by_num(o2nm_this_node());
-	if (mynode == NULL)
+	if (mynode == NULL) {
+		ret = 0;
 		goto out;
+	}
 
 	spin_lock(&nn->nn_lock);
 	/*
@@ -2104,7 +2108,7 @@ int o2net_start_listening(struct o2nm_node *node)
 	BUG_ON(o2net_listen_sock != NULL);
 
 	mlog(ML_KTHREAD, "starting o2net thread...\n");
-	o2net_wq = alloc_ordered_workqueue("o2net", WQ_MEM_RECLAIM);
+	o2net_wq = create_singlethread_workqueue("o2net");
 	if (o2net_wq == NULL) {
 		mlog(ML_ERROR, "unable to launch o2net thread\n");
 		return -ENOMEM; /* ? */

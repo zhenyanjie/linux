@@ -548,6 +548,7 @@ static void ses_enclosure_data_process(struct enclosure_device *edev,
 					ecomp = &edev->component[components++];
 
 				if (!IS_ERR(ecomp)) {
+					ses_get_power_status(edev, ecomp);
 					if (addl_desc_ptr)
 						ses_process_descriptor(
 							ecomp,
@@ -578,18 +579,15 @@ static void ses_enclosure_data_process(struct enclosure_device *edev,
 }
 
 static void ses_match_to_enclosure(struct enclosure_device *edev,
-				   struct scsi_device *sdev,
-				   int refresh)
+				   struct scsi_device *sdev)
 {
-	struct scsi_device *edev_sdev = to_scsi_device(edev->edev.parent);
 	struct efd efd = {
 		.addr = 0,
 	};
 
-	if (refresh)
-		ses_enclosure_data_process(edev, edev_sdev, 0);
+	ses_enclosure_data_process(edev, to_scsi_device(edev->edev.parent), 0);
 
-	if (scsi_is_sas_rphy(sdev->sdev_target->dev.parent))
+	if (scsi_is_sas_rphy(&sdev->sdev_gendev))
 		efd.addr = sas_get_address(sdev);
 
 	if (efd.addr) {
@@ -618,7 +616,7 @@ static int ses_intf_add(struct device *cdev,
 		struct enclosure_device *prev = NULL;
 
 		while ((edev = enclosure_find(&sdev->host->shost_gendev, prev)) != NULL) {
-			ses_match_to_enclosure(edev, sdev, 1);
+			ses_match_to_enclosure(edev, sdev);
 			prev = edev;
 		}
 		return -ENODEV;
@@ -730,7 +728,7 @@ static int ses_intf_add(struct device *cdev,
 	shost_for_each_device(tmp_sdev, sdev->host) {
 		if (tmp_sdev->lun != 0 || scsi_device_enclosure(tmp_sdev))
 			continue;
-		ses_match_to_enclosure(edev, tmp_sdev, 0);
+		ses_match_to_enclosure(edev, tmp_sdev);
 	}
 
 	return 0;
@@ -780,8 +778,6 @@ static void ses_intf_remove_enclosure(struct scsi_device *sdev)
 	if (!edev)
 		return;
 
-	enclosure_unregister(edev);
-
 	ses_dev = edev->scratch;
 	edev->scratch = NULL;
 
@@ -793,6 +789,7 @@ static void ses_intf_remove_enclosure(struct scsi_device *sdev)
 	kfree(edev->component[0].scratch);
 
 	put_device(&edev->edev);
+	enclosure_unregister(edev);
 }
 
 static void ses_intf_remove(struct device *cdev,

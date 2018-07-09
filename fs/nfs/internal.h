@@ -58,9 +58,6 @@ struct nfs_clone_mount {
  */
 #define NFS_UNSPEC_PORT		(-1)
 
-#define NFS_UNSPEC_RETRANS	(UINT_MAX)
-#define NFS_UNSPEC_TIMEO	(UINT_MAX)
-
 /*
  * Maximum number of pages that readdir can use for creating
  * a vmapped array of pages.
@@ -69,16 +66,13 @@ struct nfs_clone_mount {
 
 struct nfs_client_initdata {
 	unsigned long init_flags;
-	const char *hostname;			/* Hostname of the server */
-	const struct sockaddr *addr;		/* Address of the server */
-	const char *nodename;			/* Hostname of the client */
-	const char *ip_addr;			/* IP address of the client */
+	const char *hostname;
+	const struct sockaddr *addr;
 	size_t addrlen;
 	struct nfs_subversion *nfs_mod;
 	int proto;
 	u32 minorversion;
 	struct net *net;
-	const struct rpc_timeout *timeparms;
 };
 
 /*
@@ -153,13 +147,14 @@ extern void nfs_umount(const struct nfs_mount_request *info);
 extern const struct rpc_program nfs_program;
 extern void nfs_clients_init(struct net *net);
 extern struct nfs_client *nfs_alloc_client(const struct nfs_client_initdata *);
-int nfs_create_rpc_client(struct nfs_client *, const struct nfs_client_initdata *, rpc_authflavor_t);
+int nfs_create_rpc_client(struct nfs_client *, const struct rpc_timeout *, rpc_authflavor_t);
 struct nfs_client *nfs_get_client(const struct nfs_client_initdata *,
+				  const struct rpc_timeout *, const char *,
 				  rpc_authflavor_t);
 int nfs_probe_fsinfo(struct nfs_server *server, struct nfs_fh *, struct nfs_fattr *);
 void nfs_server_insert_lists(struct nfs_server *);
 void nfs_server_remove_lists(struct nfs_server *);
-void nfs_init_timeout_values(struct rpc_timeout *to, int proto, int timeo, int retrans);
+void nfs_init_timeout_values(struct rpc_timeout *, int, unsigned int, unsigned int);
 int nfs_init_server_rpcclient(struct nfs_server *, const struct rpc_timeout *t,
 		rpc_authflavor_t);
 struct nfs_server *nfs_alloc_server(void);
@@ -189,7 +184,7 @@ extern struct nfs_server *nfs_clone_server(struct nfs_server *,
 					   rpc_authflavor_t);
 extern int nfs_wait_client_init_complete(const struct nfs_client *clp);
 extern void nfs_mark_client_ready(struct nfs_client *clp, int state);
-extern struct nfs_client *nfs4_set_ds_client(struct nfs_server *mds_srv,
+extern struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
 					     const struct sockaddr *ds_addr,
 					     int ds_addrlen, int ds_proto,
 					     unsigned int ds_timeo,
@@ -198,7 +193,7 @@ extern struct nfs_client *nfs4_set_ds_client(struct nfs_server *mds_srv,
 					     rpc_authflavor_t au_flavor);
 extern struct rpc_clnt *nfs4_find_or_create_ds_client(struct nfs_client *,
 						struct inode *);
-extern struct nfs_client *nfs3_set_ds_client(struct nfs_server *mds_srv,
+extern struct nfs_client *nfs3_set_ds_client(struct nfs_client *mds_clp,
 			const struct sockaddr *ds_addr, int ds_addrlen,
 			int ds_proto, unsigned int ds_timeo,
 			unsigned int ds_retrans, rpc_authflavor_t au_flavor);
@@ -248,6 +243,7 @@ int nfs_iocounter_wait(struct nfs_lock_context *l_ctx);
 extern const struct nfs_pageio_ops nfs_pgio_rw_ops;
 struct nfs_pgio_header *nfs_pgio_header_alloc(const struct nfs_rw_ops *);
 void nfs_pgio_header_free(struct nfs_pgio_header *);
+void nfs_pgio_data_destroy(struct nfs_pgio_header *);
 int nfs_generic_pgio(struct nfs_pageio_descriptor *, struct nfs_pgio_header *);
 int nfs_initiate_pgio(struct rpc_clnt *clnt, struct nfs_pgio_header *hdr,
 		      struct rpc_cred *cred, const struct nfs_rpc_ops *rpc_ops,
@@ -342,7 +338,8 @@ nfs4_label_copy(struct nfs4_label *dst, struct nfs4_label *src)
 /* proc.c */
 void nfs_close_context(struct nfs_open_context *ctx, int is_sync);
 extern struct nfs_client *nfs_init_client(struct nfs_client *clp,
-			   const struct nfs_client_initdata *);
+			   const struct rpc_timeout *timeparms,
+			   const char *ip_addr);
 
 /* dir.c */
 extern void nfs_force_use_readdirplus(struct inode *dir);
@@ -358,13 +355,14 @@ int nfs_unlink(struct inode *, struct dentry *);
 int nfs_symlink(struct inode *, struct dentry *, const char *);
 int nfs_link(struct dentry *, struct inode *, struct dentry *);
 int nfs_mknod(struct inode *, struct dentry *, umode_t, dev_t);
-int nfs_rename(struct inode *, struct dentry *,
-	       struct inode *, struct dentry *, unsigned int);
+int nfs_rename(struct inode *, struct dentry *, struct inode *, struct dentry *);
 
 /* file.c */
 int nfs_file_fsync(struct file *file, loff_t start, loff_t end, int datasync);
 loff_t nfs_file_llseek(struct file *, loff_t, int);
 ssize_t nfs_file_read(struct kiocb *, struct iov_iter *);
+ssize_t nfs_file_splice_read(struct file *, loff_t *, struct pipe_inode_info *,
+			     size_t, unsigned int);
 int nfs_file_mmap(struct file *, struct vm_area_struct *);
 ssize_t nfs_file_write(struct kiocb *, struct iov_iter *);
 int nfs_file_release(struct inode *, struct file *);
@@ -412,19 +410,6 @@ extern int __init register_nfs_fs(void);
 extern void __exit unregister_nfs_fs(void);
 extern bool nfs_sb_active(struct super_block *sb);
 extern void nfs_sb_deactive(struct super_block *sb);
-
-/* io.c */
-extern void nfs_start_io_read(struct inode *inode);
-extern void nfs_end_io_read(struct inode *inode);
-extern void nfs_start_io_write(struct inode *inode);
-extern void nfs_end_io_write(struct inode *inode);
-extern void nfs_start_io_direct(struct inode *inode);
-extern void nfs_end_io_direct(struct inode *inode);
-
-static inline bool nfs_file_io_is_buffered(struct nfs_inode *nfsi)
-{
-	return test_bit(NFS_INO_ODIRECT, &nfsi->flags) == 0;
-}
 
 /* namespace.c */
 #define NFS_PATH_CANONICAL 1
@@ -511,39 +496,15 @@ void nfs_init_cinfo(struct nfs_commit_info *cinfo,
 		    struct inode *inode,
 		    struct nfs_direct_req *dreq);
 int nfs_key_timeout_notify(struct file *filp, struct inode *inode);
-bool nfs_ctx_key_to_expire(struct nfs_open_context *ctx, struct inode *inode);
+bool nfs_ctx_key_to_expire(struct nfs_open_context *ctx);
 void nfs_pageio_stop_mirroring(struct nfs_pageio_descriptor *pgio);
-
-int nfs_filemap_write_and_wait_range(struct address_space *mapping,
-		loff_t lstart, loff_t lend);
-
-#ifdef CONFIG_NFS_V4_1
-static inline
-void nfs_clear_pnfs_ds_commit_verifiers(struct pnfs_ds_commit_info *cinfo)
-{
-	int i;
-
-	for (i = 0; i < cinfo->nbuckets; i++)
-		cinfo->buckets[i].direct_verf.committed = NFS_INVALID_STABLE_HOW;
-}
-#else
-static inline
-void nfs_clear_pnfs_ds_commit_verifiers(struct pnfs_ds_commit_info *cinfo)
-{
-}
-#endif
 
 #ifdef CONFIG_MIGRATION
 extern int nfs_migrate_page(struct address_space *,
 		struct page *, struct page *, enum migrate_mode);
+#else
+#define nfs_migrate_page NULL
 #endif
-
-static inline int
-nfs_write_verifier_cmp(const struct nfs_write_verifier *v1,
-		const struct nfs_write_verifier *v2)
-{
-	return memcmp(v1->data, v2->data, sizeof(v1->data));
-}
 
 /* unlink.c */
 extern struct rpc_task *
@@ -558,17 +519,16 @@ void nfs_init_cinfo_from_dreq(struct nfs_commit_info *cinfo,
 extern ssize_t nfs_dreq_bytes_left(struct nfs_direct_req *dreq);
 
 /* nfs4proc.c */
+extern void __nfs4_read_done_cb(struct nfs_pgio_header *);
 extern struct nfs_client *nfs4_init_client(struct nfs_client *clp,
-			    const struct nfs_client_initdata *);
+			    const struct rpc_timeout *timeparms,
+			    const char *ip_addr);
 extern int nfs40_walk_client_list(struct nfs_client *clp,
 				struct nfs_client **result,
 				struct rpc_cred *cred);
 extern int nfs41_walk_client_list(struct nfs_client *clp,
 				struct nfs_client **result,
 				struct rpc_cred *cred);
-extern int nfs4_test_session_trunk(struct rpc_clnt *,
-				struct rpc_xprt *,
-				void *);
 
 static inline struct inode *nfs_igrab_and_active(struct inode *inode)
 {
@@ -663,7 +623,7 @@ void nfs_mark_page_unstable(struct page *page, struct nfs_commit_info *cinfo)
 	if (!cinfo->dreq) {
 		struct inode *inode = page_file_mapping(page)->host;
 
-		inc_node_page_state(page, NR_UNSTABLE_NFS);
+		inc_zone_page_state(page, NR_UNSTABLE_NFS);
 		inc_wb_stat(&inode_to_bdi(inode)->wb, WB_RECLAIMABLE);
 		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
 	}
@@ -678,11 +638,11 @@ unsigned int nfs_page_length(struct page *page)
 	loff_t i_size = i_size_read(page_file_mapping(page)->host);
 
 	if (i_size > 0) {
-		pgoff_t index = page_index(page);
+		pgoff_t page_index = page_file_index(page);
 		pgoff_t end_index = (i_size - 1) >> PAGE_SHIFT;
-		if (index < end_index)
+		if (page_index < end_index)
 			return PAGE_SIZE;
-		if (index == end_index)
+		if (page_index == end_index)
 			return ((i_size - 1) & ~PAGE_MASK) + 1;
 	}
 	return 0;

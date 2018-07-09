@@ -1139,8 +1139,10 @@ static int cxacru_bind(struct usbatm_data *usbatm_instance,
 
 	/* instance init */
 	instance = kzalloc(sizeof(*instance), GFP_KERNEL);
-	if (!instance)
+	if (!instance) {
+		usb_dbg(usbatm_instance, "cxacru_bind: no memory for instance data\n");
 		return -ENOMEM;
+	}
 
 	instance->usbatm = usbatm_instance;
 	instance->modem_type = (struct cxacru_modem_type *) id->driver_info;
@@ -1166,11 +1168,13 @@ static int cxacru_bind(struct usbatm_data *usbatm_instance,
 	}
 	instance->rcv_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!instance->rcv_urb) {
+		usb_dbg(usbatm_instance, "cxacru_bind: no memory for rcv_urb\n");
 		ret = -ENOMEM;
 		goto fail;
 	}
 	instance->snd_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!instance->snd_urb) {
+		usb_dbg(usbatm_instance, "cxacru_bind: no memory for snd_urb\n");
 		ret = -ENOMEM;
 		goto fail;
 	}

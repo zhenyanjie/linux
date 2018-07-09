@@ -21,8 +21,7 @@
  *
  */
 
-#include <linux/init.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <asm/processor.h>
 #include <asm/hypervisor.h>
 
@@ -85,15 +84,4 @@ bool __init hypervisor_x2apic_available(void)
 	return x86_hyper                   &&
 	       x86_hyper->x2apic_available &&
 	       x86_hyper->x2apic_available();
-}
-
-void hypervisor_pin_vcpu(int cpu)
-{
-	if (!x86_hyper)
-		return;
-
-	if (x86_hyper->pin_vcpu)
-		x86_hyper->pin_vcpu(cpu);
-	else
-		WARN_ONCE(1, "vcpu pinning requested but not supported!\n");
 }

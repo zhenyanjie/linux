@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
-#include <sys/ioctl.h>
 #include "pager.h"
 #include "run-command.h"
 #include "sigchain.h"
@@ -15,7 +14,6 @@
  */
 
 static int spawned_pager;
-static int pager_columns;
 
 void pager_init(const char *pager_env)
 {
@@ -29,13 +27,10 @@ static void pager_preexec(void)
 	 * have real input
 	 */
 	fd_set in;
-	fd_set exception;
 
 	FD_ZERO(&in);
-	FD_ZERO(&exception);
 	FD_SET(0, &in);
-	FD_SET(0, &exception);
-	select(1, &in, NULL, &exception, NULL);
+	select(1, &in, NULL, &in, NULL);
 
 	setenv("LESS", "FRSX", 0);
 }
@@ -63,12 +58,9 @@ static void wait_for_pager_signal(int signo)
 void setup_pager(void)
 {
 	const char *pager = getenv(subcmd_config.pager_env);
-	struct winsize sz;
 
 	if (!isatty(1))
 		return;
-	if (ioctl(1, TIOCGWINSZ, &sz) == 0)
-		pager_columns = sz.ws_col;
 	if (!pager)
 		pager = getenv("PAGER");
 	if (!(pager || access("/usr/bin/pager", X_OK)))
@@ -105,15 +97,4 @@ void setup_pager(void)
 int pager_in_use(void)
 {
 	return spawned_pager;
-}
-
-int pager_get_columns(void)
-{
-	char *s;
-
-	s = getenv("COLUMNS");
-	if (s)
-		return atoi(s);
-
-	return (pager_columns ? pager_columns : 80) - 2;
 }

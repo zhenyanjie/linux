@@ -47,9 +47,9 @@
 #define CREATE_TRACE_POINTS
 #include "trace.h"
 
-u8 ibhdr_exhdr_len(struct ib_header *hdr)
+u8 ibhdr_exhdr_len(struct hfi1_ib_header *hdr)
 {
-	struct ib_other_headers *ohdr;
+	struct hfi1_other_headers *ohdr;
 	u8 opcode;
 	u8 lnh = (u8)(be16_to_cpu(hdr->lrh[0]) & 3);
 
@@ -67,10 +67,15 @@ u8 ibhdr_exhdr_len(struct ib_header *hdr)
 #define AETH_PRN "aeth syn 0x%.2x %s msn 0x%.8x"
 #define DETH_PRN "deth qkey 0x%.8x sqpn 0x%.6x"
 #define IETH_PRN "ieth rkey 0x%.8x"
-#define ATOMICACKETH_PRN "origdata %llx"
-#define ATOMICETH_PRN "vaddr 0x%llx rkey 0x%.8x sdata %llx cdata %llx"
+#define ATOMICACKETH_PRN "origdata %lld"
+#define ATOMICETH_PRN "vaddr 0x%llx rkey 0x%.8x sdata %lld cdata %lld"
 
 #define OP(transport, op) IB_OPCODE_## transport ## _ ## op
+
+static u64 ib_u64_get(__be32 *p)
+{
+	return ((u64)be32_to_cpu(p[0]) << 32) | be32_to_cpu(p[1]);
+}
 
 static const char *parse_syndrome(u8 syndrome)
 {
@@ -108,7 +113,8 @@ const char *parse_everbs_hdrs(
 	case OP(RC, RDMA_WRITE_ONLY_WITH_IMMEDIATE):
 	case OP(UC, RDMA_WRITE_ONLY_WITH_IMMEDIATE):
 		trace_seq_printf(p, RETH_PRN " " IMM_PRN,
-				 get_ib_reth_vaddr(&eh->rc.reth),
+				 (unsigned long long)ib_u64_get(
+				 (__be32 *)&eh->rc.reth.vaddr),
 				 be32_to_cpu(eh->rc.reth.rkey),
 				 be32_to_cpu(eh->rc.reth.length),
 				 be32_to_cpu(eh->rc.imm_data));
@@ -120,7 +126,8 @@ const char *parse_everbs_hdrs(
 	case OP(RC, RDMA_WRITE_ONLY):
 	case OP(UC, RDMA_WRITE_ONLY):
 		trace_seq_printf(p, RETH_PRN,
-				 get_ib_reth_vaddr(&eh->rc.reth),
+				 (unsigned long long)ib_u64_get(
+				 (__be32 *)&eh->rc.reth.vaddr),
 				 be32_to_cpu(eh->rc.reth.rkey),
 				 be32_to_cpu(eh->rc.reth.length));
 		break;
@@ -138,16 +145,20 @@ const char *parse_everbs_hdrs(
 				 be32_to_cpu(eh->at.aeth) >> 24,
 				 parse_syndrome(be32_to_cpu(eh->at.aeth) >> 24),
 				 be32_to_cpu(eh->at.aeth) & HFI1_MSN_MASK,
-				 ib_u64_get(&eh->at.atomic_ack_eth));
+				 (unsigned long long)
+				 ib_u64_get(eh->at.atomic_ack_eth));
 		break;
 	/* atomiceth */
 	case OP(RC, COMPARE_SWAP):
 	case OP(RC, FETCH_ADD):
 		trace_seq_printf(p, ATOMICETH_PRN,
-				 get_ib_ateth_vaddr(&eh->atomic_eth),
+				 (unsigned long long)ib_u64_get(
+				 eh->atomic_eth.vaddr),
 				 eh->atomic_eth.rkey,
-				 get_ib_ateth_swap(&eh->atomic_eth),
-				 get_ib_ateth_compare(&eh->atomic_eth));
+				 (unsigned long long)ib_u64_get(
+				 (__be32 *)&eh->atomic_eth.swap_data),
+				 (unsigned long long)ib_u64_get(
+				 (__be32 *)&eh->atomic_eth.compare_data));
 		break;
 	/* deth */
 	case OP(UD, SEND_ONLY):

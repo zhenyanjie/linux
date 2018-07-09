@@ -456,8 +456,7 @@ static int ip6_frag_reasm(struct frag_queue *fq, struct sk_buff *prev,
 	skb_network_header(head)[nhoff] = skb_transport_header(head)[0];
 	memmove(head->head + sizeof(struct frag_hdr), head->head,
 		(head->data - head->head) - sizeof(struct frag_hdr));
-	if (skb_mac_header_was_set(head))
-		head->mac_header += sizeof(struct frag_hdr);
+	head->mac_header += sizeof(struct frag_hdr);
 	head->network_header += sizeof(struct frag_hdr);
 
 	skb_reset_transport_header(head);
@@ -709,13 +708,19 @@ static void ip6_frags_sysctl_unregister(void)
 
 static int __net_init ipv6_frags_init_net(struct net *net)
 {
+	int res;
+
 	net->ipv6.frags.high_thresh = IPV6_FRAG_HIGH_THRESH;
 	net->ipv6.frags.low_thresh = IPV6_FRAG_LOW_THRESH;
 	net->ipv6.frags.timeout = IPV6_FRAG_TIMEOUT;
 
-	inet_frags_init_net(&net->ipv6.frags);
-
-	return ip6_frags_ns_sysctl_register(net);
+	res = inet_frags_init_net(&net->ipv6.frags);
+	if (res)
+		return res;
+	res = ip6_frags_ns_sysctl_register(net);
+	if (res)
+		inet_frags_uninit_net(&net->ipv6.frags);
+	return res;
 }
 
 static void __net_exit ipv6_frags_exit_net(struct net *net)

@@ -1672,15 +1672,11 @@ __ieee80211_sta_handle_tspec_ac_params(struct ieee80211_sub_if_data *sdata)
 			     non_acm_ac++)
 				if (!(sdata->wmm_acm & BIT(7 - 2 * non_acm_ac)))
 					break;
-			/* Usually the loop will result in using BK even if it
-			 * requires admission control, but such a configuration
-			 * makes no sense and we have to transmit somehow - the
-			 * AC selection does the same thing.
-			 * If we started out trying to downgrade from BK, then
-			 * the extra condition here might be needed.
+			/* The loop will result in using BK even if it requires
+			 * admission control, such configuration makes no sense
+			 * and we have to transmit somehow - the AC selection
+			 * does the same thing.
 			 */
-			if (non_acm_ac >= IEEE80211_NUM_ACS)
-				non_acm_ac = IEEE80211_AC_BK;
 			if (drv_conf_tx(local, sdata, ac,
 					&sdata->tx_conf[non_acm_ac]))
 				sdata_err(sdata,
@@ -1851,15 +1847,10 @@ static u32 ieee80211_handle_bss_capability(struct ieee80211_sub_if_data *sdata,
 					   u16 capab, bool erp_valid, u8 erp)
 {
 	struct ieee80211_bss_conf *bss_conf = &sdata->vif.bss_conf;
-	struct ieee80211_supported_band *sband;
 	u32 changed = 0;
 	bool use_protection;
 	bool use_short_preamble;
 	bool use_short_slot;
-
-	sband = ieee80211_get_sband(sdata);
-	if (!sband)
-		return changed;
 
 	if (erp_valid) {
 		use_protection = (erp & WLAN_ERP_USE_PROTECTION) != 0;
@@ -1870,7 +1861,7 @@ static u32 ieee80211_handle_bss_capability(struct ieee80211_sub_if_data *sdata,
 	}
 
 	use_short_slot = !!(capab & WLAN_CAPABILITY_SHORT_SLOT_TIME);
-	if (sband->band == NL80211_BAND_5GHZ)
+	if (ieee80211_get_sdata_band(sdata) == NL80211_BAND_5GHZ)
 		use_short_slot = true;
 
 	if (use_protection != bss_conf->use_cts_prot) {
@@ -2515,7 +2506,7 @@ static void ieee80211_destroy_auth_data(struct ieee80211_sub_if_data *sdata,
 }
 
 static void ieee80211_destroy_assoc_data(struct ieee80211_sub_if_data *sdata,
-					 bool assoc, bool abandon)
+					 bool assoc)
 {
 	struct ieee80211_mgd_assoc_data *assoc_data = sdata->u.mgd.assoc_data;
 
@@ -2538,9 +2529,6 @@ static void ieee80211_destroy_assoc_data(struct ieee80211_sub_if_data *sdata,
 		mutex_lock(&sdata->local->mtx);
 		ieee80211_vif_release_channel(sdata);
 		mutex_unlock(&sdata->local->mtx);
-
-		if (abandon)
-			cfg80211_abandon_assoc(sdata->dev, assoc_data->bss);
 	}
 
 	kfree(assoc_data);
@@ -2770,7 +2758,7 @@ static void ieee80211_rx_mgmt_deauth(struct ieee80211_sub_if_data *sdata,
 			   bssid, reason_code,
 			   ieee80211_get_reason_code_string(reason_code));
 
-		ieee80211_destroy_assoc_data(sdata, false, true);
+		ieee80211_destroy_assoc_data(sdata, false);
 
 		cfg80211_rx_mlme_mgmt(sdata->dev, (u8 *)mgmt, len);
 		return;
@@ -2999,12 +2987,7 @@ static bool ieee80211_assoc_success(struct ieee80211_sub_if_data *sdata,
 		goto out;
 	}
 
-	sband = ieee80211_get_sband(sdata);
-	if (!sband) {
-		mutex_unlock(&sdata->local->sta_mtx);
-		ret = false;
-		goto out;
-	}
+	sband = local->hw.wiphy->bands[ieee80211_get_sdata_band(sdata)];
 
 	/* Set up internal HT/VHT capabilities */
 	if (elems.ht_cap_elem && !(ifmgd->flags & IEEE80211_STA_DISABLE_HT))
@@ -3180,14 +3163,14 @@ static void ieee80211_rx_mgmt_assoc_resp(struct ieee80211_sub_if_data *sdata,
 	if (status_code != WLAN_STATUS_SUCCESS) {
 		sdata_info(sdata, "%pM denied association (code=%d)\n",
 			   mgmt->sa, status_code);
-		ieee80211_destroy_assoc_data(sdata, false, false);
+		ieee80211_destroy_assoc_data(sdata, false);
 		event.u.mlme.status = MLME_DENIED;
 		event.u.mlme.reason = status_code;
 		drv_event_callback(sdata->local, sdata, &event);
 	} else {
 		if (!ieee80211_assoc_success(sdata, bss, mgmt, len)) {
 			/* oops -- internal error -- send timeout for now */
-			ieee80211_destroy_assoc_data(sdata, false, false);
+			ieee80211_destroy_assoc_data(sdata, false);
 			cfg80211_assoc_timeout(sdata->dev, bss);
 			return;
 		}
@@ -3200,7 +3183,7 @@ static void ieee80211_rx_mgmt_assoc_resp(struct ieee80211_sub_if_data *sdata,
 		 * recalc after assoc_data is NULL but before associated
 		 * is set can cause the interface to go idle
 		 */
-		ieee80211_destroy_assoc_data(sdata, true, false);
+		ieee80211_destroy_assoc_data(sdata, true);
 
 		/* get uapsd queues configuration */
 		uapsd_queues = 0;
@@ -3899,7 +3882,7 @@ void ieee80211_sta_work(struct ieee80211_sub_if_data *sdata)
 				.u.mlme.status = MLME_TIMEOUT,
 			};
 
-			ieee80211_destroy_assoc_data(sdata, false, false);
+			ieee80211_destroy_assoc_data(sdata, false);
 			cfg80211_assoc_timeout(sdata->dev, bss);
 			drv_event_callback(sdata->local, sdata, &event);
 		}
@@ -4038,7 +4021,7 @@ void ieee80211_mgd_quiesce(struct ieee80211_sub_if_data *sdata)
 					       WLAN_REASON_DEAUTH_LEAVING,
 					       false, frame_buf);
 		if (ifmgd->assoc_data)
-			ieee80211_destroy_assoc_data(sdata, false, true);
+			ieee80211_destroy_assoc_data(sdata, false);
 		if (ifmgd->auth_data)
 			ieee80211_destroy_auth_data(sdata, false);
 		cfg80211_tx_mlme_mgmt(sdata->dev, frame_buf,
@@ -4331,10 +4314,6 @@ static int ieee80211_prep_connection(struct ieee80211_sub_if_data *sdata,
 
 	if (WARN_ON(!ifmgd->auth_data && !ifmgd->assoc_data))
 		return -EINVAL;
-
-	/* If a reconfig is happening, bail out */
-	if (local->in_reconfig)
-		return -EBUSY;
 
 	if (assoc) {
 		rcu_read_lock();
@@ -4924,7 +4903,7 @@ int ieee80211_mgd_deauth(struct ieee80211_sub_if_data *sdata,
 					       IEEE80211_STYPE_DEAUTH,
 					       req->reason_code, tx,
 					       frame_buf);
-		ieee80211_destroy_assoc_data(sdata, false, true);
+		ieee80211_destroy_assoc_data(sdata, false);
 		ieee80211_report_disconnect(sdata, frame_buf,
 					    sizeof(frame_buf), true,
 					    req->reason_code);
@@ -4999,7 +4978,7 @@ void ieee80211_mgd_stop(struct ieee80211_sub_if_data *sdata)
 	sdata_lock(sdata);
 	if (ifmgd->assoc_data) {
 		struct cfg80211_bss *bss = ifmgd->assoc_data->bss;
-		ieee80211_destroy_assoc_data(sdata, false, false);
+		ieee80211_destroy_assoc_data(sdata, false);
 		cfg80211_assoc_timeout(sdata->dev, bss);
 	}
 	if (ifmgd->auth_data)

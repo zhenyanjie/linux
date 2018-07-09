@@ -2329,8 +2329,8 @@ static void ata_eh_link_autopsy(struct ata_link *link)
 		if (dev->flags & ATA_DFLAG_DUBIOUS_XFER)
 			eflags |= ATA_EFLAG_DUBIOUS_XFER;
 		ehc->i.action |= ata_eh_speed_down(dev, eflags, all_err_mask);
-		trace_ata_eh_link_autopsy(dev, ehc->i.action, all_err_mask);
 	}
+	trace_ata_eh_link_autopsy(dev, ehc->i.action, all_err_mask);
 	DPRINTK("EXIT\n");
 }
 
@@ -2607,13 +2607,9 @@ static void ata_eh_link_report(struct ata_link *link)
 				[DMA_FROM_DEVICE]	= "in",
 			};
 			static const char *prot_str[] = {
-				[ATA_PROT_UNKNOWN]	= "unknown",
-				[ATA_PROT_NODATA]	= "nodata",
 				[ATA_PROT_PIO]		= "pio",
 				[ATA_PROT_DMA]		= "dma",
-				[ATA_PROT_NCQ]		= "ncq dma",
-				[ATA_PROT_NCQ_NODATA]	= "ncq nodata",
-				[ATAPI_PROT_NODATA]	= "nodata",
+				[ATA_PROT_NCQ]		= "ncq",
 				[ATAPI_PROT_PIO]	= "pio",
 				[ATAPI_PROT_DMA]	= "dma",
 			};
@@ -3181,7 +3177,7 @@ static void ata_eh_park_issue_cmd(struct ata_device *dev, int park)
 	}
 
 	tf.flags |= ATA_TFLAG_DEVICE | ATA_TFLAG_ISADDR;
-	tf.protocol = ATA_PROT_NODATA;
+	tf.protocol |= ATA_PROT_NODATA;
 	err_mask = ata_exec_internal(dev, &tf, NULL, DMA_NONE, NULL, 0, 0);
 	if (park && (err_mask || tf.lbal != 0xc4)) {
 		ata_dev_err(dev, "head unload failed!\n");

@@ -19,9 +19,7 @@
 #define pr_fmt(fmt) "CPU features: " fmt
 
 #include <linux/bsearch.h>
-#include <linux/cpumask.h>
 #include <linux/sort.h>
-#include <linux/stop_machine.h>
 #include <linux/types.h>
 #include <asm/cpu.h>
 #include <asm/cpufeature.h>
@@ -47,10 +45,6 @@ unsigned int compat_elf_hwcap2 __read_mostly;
 #endif
 
 DECLARE_BITMAP(cpu_hwcaps, ARM64_NCAPS);
-EXPORT_SYMBOL(cpu_hwcaps);
-
-DEFINE_STATIC_KEY_ARRAY_FALSE(cpu_hwcap_keys, ARM64_NCAPS);
-EXPORT_SYMBOL(cpu_hwcap_keys);
 
 #define __ARM64_FTR_BITS(SIGNED, STRICT, TYPE, SHIFT, WIDTH, SAFE_VAL) \
 	{						\
@@ -80,7 +74,7 @@ static bool __maybe_unused
 cpufeature_pan_not_uao(const struct arm64_cpu_capabilities *entry, int __unused);
 
 
-static const struct arm64_ftr_bits ftr_id_aa64isar0[] = {
+static struct arm64_ftr_bits ftr_id_aa64isar0[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 32, 32, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64ISAR0_RDM_SHIFT, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 24, 4, 0),
@@ -93,10 +87,8 @@ static const struct arm64_ftr_bits ftr_id_aa64isar0[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_aa64pfr0[] = {
-	ARM64_FTR_BITS(FTR_NONSTRICT, FTR_LOWER_SAFE, ID_AA64PFR0_CSV3_SHIFT, 4, 0),
-	ARM64_FTR_BITS(FTR_NONSTRICT, FTR_LOWER_SAFE, ID_AA64PFR0_CSV2_SHIFT, 4, 0),
-	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 32, 24, 0),
+static struct arm64_ftr_bits ftr_id_aa64pfr0[] = {
+	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 32, 32, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 28, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64PFR0_GIC_SHIFT, 4, 0),
 	S_ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, ID_AA64PFR0_ASIMD_SHIFT, 4, ID_AA64PFR0_ASIMD_NI),
@@ -109,7 +101,7 @@ static const struct arm64_ftr_bits ftr_id_aa64pfr0[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_aa64mmfr0[] = {
+static struct arm64_ftr_bits ftr_id_aa64mmfr0[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 32, 32, 0),
 	S_ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64MMFR0_TGRAN4_SHIFT, 4, ID_AA64MMFR0_TGRAN4_NI),
 	S_ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64MMFR0_TGRAN64_SHIFT, 4, ID_AA64MMFR0_TGRAN64_NI),
@@ -127,7 +119,7 @@ static const struct arm64_ftr_bits ftr_id_aa64mmfr0[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_aa64mmfr1[] = {
+static struct arm64_ftr_bits ftr_id_aa64mmfr1[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 32, 32, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, ID_AA64MMFR1_PAN_SHIFT, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64MMFR1_LOR_SHIFT, 4, 0),
@@ -138,7 +130,7 @@ static const struct arm64_ftr_bits ftr_id_aa64mmfr1[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_aa64mmfr2[] = {
+static struct arm64_ftr_bits ftr_id_aa64mmfr2[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64MMFR2_LVA_SHIFT, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64MMFR2_IESB_SHIFT, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_AA64MMFR2_LSM_SHIFT, 4, 0),
@@ -147,7 +139,7 @@ static const struct arm64_ftr_bits ftr_id_aa64mmfr2[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_ctr[] = {
+static struct arm64_ftr_bits ftr_ctr[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 31, 1, 1),	/* RAO */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 28, 3, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_HIGHER_SAFE, 24, 4, 0),	/* CWG */
@@ -155,21 +147,15 @@ static const struct arm64_ftr_bits ftr_ctr[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 16, 4, 1),	/* DminLine */
 	/*
 	 * Linux can handle differing I-cache policies. Userspace JITs will
-	 * make use of *minLine.
-	 * If we have differing I-cache policies, report it as the weakest - AIVIVT.
+	 * make use of *minLine
 	 */
-	ARM64_FTR_BITS(FTR_NONSTRICT, FTR_EXACT, 14, 2, ICACHE_POLICY_AIVIVT),	/* L1Ip */
+	ARM64_FTR_BITS(FTR_NONSTRICT, FTR_EXACT, 14, 2, 0),	/* L1Ip */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 4, 10, 0),	/* RAZ */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 0, 4, 0),	/* IminLine */
 	ARM64_FTR_END,
 };
 
-struct arm64_ftr_reg arm64_ftr_reg_ctrel0 = {
-	.name		= "SYS_CTR_EL0",
-	.ftr_bits	= ftr_ctr
-};
-
-static const struct arm64_ftr_bits ftr_id_mmfr0[] = {
+static struct arm64_ftr_bits ftr_id_mmfr0[] = {
 	S_ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 28, 4, 0xf),	/* InnerShr */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 24, 4, 0),	/* FCSE */
 	ARM64_FTR_BITS(FTR_NONSTRICT, FTR_LOWER_SAFE, 20, 4, 0),	/* AuxReg */
@@ -181,7 +167,7 @@ static const struct arm64_ftr_bits ftr_id_mmfr0[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_aa64dfr0[] = {
+static struct arm64_ftr_bits ftr_id_aa64dfr0[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 32, 32, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, ID_AA64DFR0_CTX_CMPS_SHIFT, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, ID_AA64DFR0_WRPS_SHIFT, 4, 0),
@@ -192,14 +178,14 @@ static const struct arm64_ftr_bits ftr_id_aa64dfr0[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_mvfr2[] = {
+static struct arm64_ftr_bits ftr_mvfr2[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 8, 24, 0),	/* RAZ */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 4, 4, 0),		/* FPMisc */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 0, 4, 0),		/* SIMDMisc */
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_dczid[] = {
+static struct arm64_ftr_bits ftr_dczid[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 5, 27, 0),	/* RAZ */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 4, 1, 1),		/* DZP */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 0, 4, 0),	/* BS */
@@ -207,7 +193,7 @@ static const struct arm64_ftr_bits ftr_dczid[] = {
 };
 
 
-static const struct arm64_ftr_bits ftr_id_isar5[] = {
+static struct arm64_ftr_bits ftr_id_isar5[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_ISAR5_RDM_SHIFT, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 20, 4, 0),	/* RAZ */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, ID_ISAR5_CRC32_SHIFT, 4, 0),
@@ -218,14 +204,14 @@ static const struct arm64_ftr_bits ftr_id_isar5[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_mmfr4[] = {
+static struct arm64_ftr_bits ftr_id_mmfr4[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 8, 24, 0),	/* RAZ */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 4, 4, 0),		/* ac2 */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 0, 4, 0),		/* RAZ */
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_pfr0[] = {
+static struct arm64_ftr_bits ftr_id_pfr0[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 16, 16, 0),	/* RAZ */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 12, 4, 0),	/* State3 */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 8, 4, 0),		/* State2 */
@@ -234,7 +220,7 @@ static const struct arm64_ftr_bits ftr_id_pfr0[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_id_dfr0[] = {
+static struct arm64_ftr_bits ftr_id_dfr0[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 28, 4, 0),
 	S_ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 24, 4, 0xf),	/* PerfMon */
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 20, 4, 0),
@@ -252,7 +238,7 @@ static const struct arm64_ftr_bits ftr_id_dfr0[] = {
  * 0. Covers the following 32bit registers:
  * id_isar[0-4], id_mmfr[1-3], id_pfr1, mvfr[0-1]
  */
-static const struct arm64_ftr_bits ftr_generic_32bits[] = {
+static struct arm64_ftr_bits ftr_generic_32bits[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 28, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 24, 4, 0),
 	ARM64_FTR_BITS(FTR_STRICT, FTR_LOWER_SAFE, 20, 4, 0),
@@ -264,32 +250,29 @@ static const struct arm64_ftr_bits ftr_generic_32bits[] = {
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_generic[] = {
+static struct arm64_ftr_bits ftr_generic[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 0, 64, 0),
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_generic32[] = {
+static struct arm64_ftr_bits ftr_generic32[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 0, 32, 0),
 	ARM64_FTR_END,
 };
 
-static const struct arm64_ftr_bits ftr_aa64raz[] = {
+static struct arm64_ftr_bits ftr_aa64raz[] = {
 	ARM64_FTR_BITS(FTR_STRICT, FTR_EXACT, 0, 64, 0),
 	ARM64_FTR_END,
 };
 
-#define ARM64_FTR_REG(id, table) {		\
-	.sys_id = id,				\
-	.reg = 	&(struct arm64_ftr_reg){	\
+#define ARM64_FTR_REG(id, table)		\
+	{					\
+		.sys_id = id,			\
 		.name = #id,			\
 		.ftr_bits = &((table)[0]),	\
-	}}
+	}
 
-static const struct __ftr_reg_entry {
-	u32			sys_id;
-	struct arm64_ftr_reg 	*reg;
-} arm64_ftr_regs[] = {
+static struct arm64_ftr_reg arm64_ftr_regs[] = {
 
 	/* Op1 = 0, CRn = 0, CRm = 1 */
 	ARM64_FTR_REG(SYS_ID_PFR0_EL1, ftr_id_pfr0),
@@ -332,7 +315,7 @@ static const struct __ftr_reg_entry {
 	ARM64_FTR_REG(SYS_ID_AA64MMFR2_EL1, ftr_id_aa64mmfr2),
 
 	/* Op1 = 3, CRn = 0, CRm = 0 */
-	{ SYS_CTR_EL0, &arm64_ftr_reg_ctrel0 },
+	ARM64_FTR_REG(SYS_CTR_EL0, ftr_ctr),
 	ARM64_FTR_REG(SYS_DCZID_EL0, ftr_dczid),
 
 	/* Op1 = 3, CRn = 14, CRm = 0 */
@@ -341,7 +324,7 @@ static const struct __ftr_reg_entry {
 
 static int search_cmp_ftr_reg(const void *id, const void *regp)
 {
-	return (int)(unsigned long)id - (int)((const struct __ftr_reg_entry *)regp)->sys_id;
+	return (int)(unsigned long)id - (int)((const struct arm64_ftr_reg *)regp)->sys_id;
 }
 
 /*
@@ -356,20 +339,14 @@ static int search_cmp_ftr_reg(const void *id, const void *regp)
  */
 static struct arm64_ftr_reg *get_arm64_ftr_reg(u32 sys_id)
 {
-	const struct __ftr_reg_entry *ret;
-
-	ret = bsearch((const void *)(unsigned long)sys_id,
+	return bsearch((const void *)(unsigned long)sys_id,
 			arm64_ftr_regs,
 			ARRAY_SIZE(arm64_ftr_regs),
 			sizeof(arm64_ftr_regs[0]),
 			search_cmp_ftr_reg);
-	if (ret)
-		return ret->reg;
-	return NULL;
 }
 
-static u64 arm64_ftr_set_value(const struct arm64_ftr_bits *ftrp, s64 reg,
-			       s64 ftr_val)
+static u64 arm64_ftr_set_value(struct arm64_ftr_bits *ftrp, s64 reg, s64 ftr_val)
 {
 	u64 mask = arm64_ftr_mask(ftrp);
 
@@ -378,8 +355,7 @@ static u64 arm64_ftr_set_value(const struct arm64_ftr_bits *ftrp, s64 reg,
 	return reg;
 }
 
-static s64 arm64_ftr_safe_value(const struct arm64_ftr_bits *ftrp, s64 new,
-				s64 cur)
+static s64 arm64_ftr_safe_value(struct arm64_ftr_bits *ftrp, s64 new, s64 cur)
 {
 	s64 ret = 0;
 
@@ -400,13 +376,27 @@ static s64 arm64_ftr_safe_value(const struct arm64_ftr_bits *ftrp, s64 new,
 	return ret;
 }
 
+static int __init sort_cmp_ftr_regs(const void *a, const void *b)
+{
+	return ((const struct arm64_ftr_reg *)a)->sys_id -
+		 ((const struct arm64_ftr_reg *)b)->sys_id;
+}
+
+static void __init swap_ftr_regs(void *a, void *b, int size)
+{
+	struct arm64_ftr_reg tmp = *(struct arm64_ftr_reg *)a;
+	*(struct arm64_ftr_reg *)a = *(struct arm64_ftr_reg *)b;
+	*(struct arm64_ftr_reg *)b = tmp;
+}
+
 static void __init sort_ftr_regs(void)
 {
-	int i;
-
-	/* Check that the array is sorted so that we can do the binary search */
-	for (i = 1; i < ARRAY_SIZE(arm64_ftr_regs); i++)
-		BUG_ON(arm64_ftr_regs[i].sys_id < arm64_ftr_regs[i - 1].sys_id);
+	/* Keep the array sorted so that we can do the binary search */
+	sort(arm64_ftr_regs,
+		ARRAY_SIZE(arm64_ftr_regs),
+		sizeof(arm64_ftr_regs[0]),
+		sort_cmp_ftr_regs,
+		swap_ftr_regs);
 }
 
 /*
@@ -417,7 +407,7 @@ static void __init init_cpu_ftr_reg(u32 sys_reg, u64 new)
 {
 	u64 val = 0;
 	u64 strict_mask = ~0x0ULL;
-	const struct arm64_ftr_bits *ftrp;
+	struct arm64_ftr_bits *ftrp;
 	struct arm64_ftr_reg *reg = get_arm64_ftr_reg(sys_reg);
 
 	BUG_ON(!reg);
@@ -474,7 +464,7 @@ void __init init_cpu_features(struct cpuinfo_arm64 *info)
 
 static void update_cpu_ftr_reg(struct arm64_ftr_reg *reg, u64 new)
 {
-	const struct arm64_ftr_bits *ftrp;
+	struct arm64_ftr_bits *ftrp;
 
 	for (ftrp = reg->ftr_bits; ftrp->width; ftrp++) {
 		s64 ftr_cur = arm64_ftr_value(ftrp, reg->sys_val);
@@ -656,15 +646,15 @@ static u64 __raw_read_system_reg(u32 sys_id)
 	case SYS_ID_ISAR2_EL1:		return read_cpuid(ID_ISAR2_EL1);
 	case SYS_ID_ISAR3_EL1:		return read_cpuid(ID_ISAR3_EL1);
 	case SYS_ID_ISAR4_EL1:		return read_cpuid(ID_ISAR4_EL1);
-	case SYS_ID_ISAR5_EL1:		return read_cpuid(ID_ISAR5_EL1);
+	case SYS_ID_ISAR5_EL1:		return read_cpuid(ID_ISAR4_EL1);
 	case SYS_MVFR0_EL1:		return read_cpuid(MVFR0_EL1);
 	case SYS_MVFR1_EL1:		return read_cpuid(MVFR1_EL1);
 	case SYS_MVFR2_EL1:		return read_cpuid(MVFR2_EL1);
 
 	case SYS_ID_AA64PFR0_EL1:	return read_cpuid(ID_AA64PFR0_EL1);
-	case SYS_ID_AA64PFR1_EL1:	return read_cpuid(ID_AA64PFR1_EL1);
+	case SYS_ID_AA64PFR1_EL1:	return read_cpuid(ID_AA64PFR0_EL1);
 	case SYS_ID_AA64DFR0_EL1:	return read_cpuid(ID_AA64DFR0_EL1);
-	case SYS_ID_AA64DFR1_EL1:	return read_cpuid(ID_AA64DFR1_EL1);
+	case SYS_ID_AA64DFR1_EL1:	return read_cpuid(ID_AA64DFR0_EL1);
 	case SYS_ID_AA64MMFR0_EL1:	return read_cpuid(ID_AA64MMFR0_EL1);
 	case SYS_ID_AA64MMFR1_EL1:	return read_cpuid(ID_AA64MMFR1_EL1);
 	case SYS_ID_AA64MMFR2_EL1:	return read_cpuid(ID_AA64MMFR2_EL1);
@@ -735,99 +725,6 @@ static bool runs_at_el2(const struct arm64_cpu_capabilities *entry, int __unused
 {
 	return is_kernel_in_hyp_mode();
 }
-
-static bool hyp_offset_low(const struct arm64_cpu_capabilities *entry,
-			   int __unused)
-{
-	phys_addr_t idmap_addr = virt_to_phys(__hyp_idmap_text_start);
-
-	/*
-	 * Activate the lower HYP offset only if:
-	 * - the idmap doesn't clash with it,
-	 * - the kernel is not running at EL2.
-	 */
-	return idmap_addr > GENMASK(VA_BITS - 2, 0) && !is_kernel_in_hyp_mode();
-}
-
-#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
-static int __kpti_forced; /* 0: not forced, >0: forced on, <0: forced off */
-
-static bool unmap_kernel_at_el0(const struct arm64_cpu_capabilities *entry,
-				int __unused)
-{
-	char const *str = "command line option";
-	u64 pfr0 = read_system_reg(SYS_ID_AA64PFR0_EL1);
-
-	/*
-	 * For reasons that aren't entirely clear, enabling KPTI on Cavium
-	 * ThunderX leads to apparent I-cache corruption of kernel text, which
-	 * ends as well as you might imagine. Don't even try.
-	 */
-	if (cpus_have_const_cap(ARM64_WORKAROUND_CAVIUM_27456)) {
-		str = "ARM64_WORKAROUND_CAVIUM_27456";
-		__kpti_forced = -1;
-	}
-
-	/* Forced? */
-	if (__kpti_forced) {
-		pr_info_once("kernel page table isolation forced %s by %s\n",
-			     __kpti_forced > 0 ? "ON" : "OFF", str);
-		return __kpti_forced > 0;
-	}
-
-	/* Useful for KASLR robustness */
-	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE))
-		return true;
-
-	/* Don't force KPTI for CPUs that are not vulnerable */
-	switch (read_cpuid_id() & MIDR_CPU_MODEL_MASK) {
-	case MIDR_CAVIUM_THUNDERX2:
-	case MIDR_BRCM_VULCAN:
-		return false;
-	}
-
-	/* Defer to CPU feature registers */
-	return !cpuid_feature_extract_unsigned_field(pfr0,
-						     ID_AA64PFR0_CSV3_SHIFT);
-}
-
-static int kpti_install_ng_mappings(void *__unused)
-{
-	typedef void (kpti_remap_fn)(int, int, phys_addr_t);
-	extern kpti_remap_fn idmap_kpti_install_ng_mappings;
-	kpti_remap_fn *remap_fn;
-
-	static bool kpti_applied = false;
-	int cpu = smp_processor_id();
-
-	if (kpti_applied)
-		return 0;
-
-	remap_fn = (void *)__pa_symbol(idmap_kpti_install_ng_mappings);
-
-	cpu_install_idmap();
-	remap_fn(cpu, num_online_cpus(), __pa_symbol(swapper_pg_dir));
-	cpu_uninstall_idmap();
-
-	if (!cpu)
-		kpti_applied = true;
-
-	return 0;
-}
-
-static int __init parse_kpti(char *str)
-{
-	bool enabled;
-	int ret = strtobool(str, &enabled);
-
-	if (ret)
-		return ret;
-
-	__kpti_forced = enabled ? 1 : -1;
-	return 0;
-}
-early_param("kpti", parse_kpti);
-#endif	/* CONFIG_UNMAP_KERNEL_AT_EL0 */
 
 static const struct arm64_cpu_capabilities arm64_features[] = {
 	{
@@ -906,21 +803,6 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.field_pos = ID_AA64PFR0_EL0_SHIFT,
 		.min_field_value = ID_AA64PFR0_EL0_32BIT_64BIT,
 	},
-	{
-		.desc = "Reduced HYP mapping offset",
-		.capability = ARM64_HYP_OFFSET_LOW,
-		.def_scope = SCOPE_SYSTEM,
-		.matches = hyp_offset_low,
-	},
-#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
-	{
-		.desc = "Kernel page table isolation (KPTI)",
-		.capability = ARM64_UNMAP_KERNEL_AT_EL0,
-		.def_scope = SCOPE_SYSTEM,
-		.matches = unmap_kernel_at_el0,
-		.enable = kpti_install_ng_mappings,
-	},
-#endif
 	{},
 };
 
@@ -1014,25 +896,6 @@ static void __init setup_elf_hwcaps(const struct arm64_cpu_capabilities *hwcaps)
 			cap_set_elf_hwcap(hwcaps);
 }
 
-/*
- * Check if the current CPU has a given feature capability.
- * Should be called from non-preemptible context.
- */
-static bool __this_cpu_has_cap(const struct arm64_cpu_capabilities *cap_array,
-			       unsigned int cap)
-{
-	const struct arm64_cpu_capabilities *caps;
-
-	if (WARN_ON(preemptible()))
-		return false;
-
-	for (caps = cap_array; caps->matches; caps++)
-		if (caps->capability == cap &&
-		    caps->matches(caps, SCOPE_LOCAL_CPU))
-			return true;
-	return false;
-}
-
 void update_cpu_capabilities(const struct arm64_cpu_capabilities *caps,
 			    const char *info)
 {
@@ -1050,27 +913,12 @@ void update_cpu_capabilities(const struct arm64_cpu_capabilities *caps,
  * Run through the enabled capabilities and enable() it on all active
  * CPUs
  */
-void __init enable_cpu_capabilities(const struct arm64_cpu_capabilities *caps)
+static void __init
+enable_cpu_capabilities(const struct arm64_cpu_capabilities *caps)
 {
-	for (; caps->matches; caps++) {
-		unsigned int num = caps->capability;
-
-		if (!cpus_have_cap(num))
-			continue;
-
-		/* Ensure cpus_have_const_cap(num) works */
-		static_branch_enable(&cpu_hwcap_keys[num]);
-
-		if (caps->enable) {
-			/*
-			 * Use stop_machine() as it schedules the work allowing
-			 * us to modify PSTATE, instead of on_each_cpu() which
-			 * uses an IPI, giving us a PSTATE that disappears when
-			 * we return.
-			 */
-			stop_machine(caps->enable, (void *)caps, cpu_online_mask);
-		}
-	}
+	for (; caps->matches; caps++)
+		if (caps->enable && cpus_have_cap(caps->capability))
+			on_each_cpu(caps->enable, NULL, true);
 }
 
 /*
@@ -1111,9 +959,8 @@ verify_local_elf_hwcaps(const struct arm64_cpu_capabilities *caps)
 }
 
 static void
-verify_local_cpu_features(const struct arm64_cpu_capabilities *caps_list)
+verify_local_cpu_features(const struct arm64_cpu_capabilities *caps)
 {
-	const struct arm64_cpu_capabilities *caps = caps_list;
 	for (; caps->matches; caps++) {
 		if (!cpus_have_cap(caps->capability))
 			continue;
@@ -1121,13 +968,13 @@ verify_local_cpu_features(const struct arm64_cpu_capabilities *caps_list)
 		 * If the new CPU misses an advertised feature, we cannot proceed
 		 * further, park the cpu.
 		 */
-		if (!__this_cpu_has_cap(caps_list, caps->capability)) {
+		if (!caps->matches(caps, SCOPE_LOCAL_CPU)) {
 			pr_crit("CPU%d: missing feature: %s\n",
 					smp_processor_id(), caps->desc);
 			cpu_die_early();
 		}
 		if (caps->enable)
-			caps->enable((void *)caps);
+			caps->enable(NULL);
 	}
 }
 
@@ -1139,33 +986,23 @@ verify_local_cpu_features(const struct arm64_cpu_capabilities *caps_list)
  * cannot do anything to fix it up and could cause unexpected failures. So
  * we park the CPU.
  */
-static void verify_local_cpu_capabilities(void)
+void verify_local_cpu_capabilities(void)
 {
-	verify_local_cpu_errata_workarounds();
+
+	check_early_cpu_features();
+
+	/*
+	 * If we haven't computed the system capabilities, there is nothing
+	 * to verify.
+	 */
+	if (!sys_caps_initialised)
+		return;
+
+	verify_local_cpu_errata();
 	verify_local_cpu_features(arm64_features);
 	verify_local_elf_hwcaps(arm64_elf_hwcaps);
 	if (system_supports_32bit_el0())
 		verify_local_elf_hwcaps(compat_elf_hwcaps);
-}
-
-void check_local_cpu_capabilities(void)
-{
-	/*
-	 * All secondary CPUs should conform to the early CPU features
-	 * in use by the kernel based on boot CPU.
-	 */
-	check_early_cpu_features();
-
-	/*
-	 * If we haven't finalised the system capabilities, this CPU gets
-	 * a chance to update the errata work arounds.
-	 * Otherwise, this CPU should verify that it has all the system
-	 * advertised capabilities.
-	 */
-	if (!sys_caps_initialised)
-		update_cpu_errata_workarounds();
-	else
-		verify_local_cpu_capabilities();
 }
 
 static void __init setup_feature_capabilities(void)
@@ -1174,20 +1011,22 @@ static void __init setup_feature_capabilities(void)
 	enable_cpu_capabilities(arm64_features);
 }
 
-DEFINE_STATIC_KEY_FALSE(arm64_const_caps_ready);
-EXPORT_SYMBOL(arm64_const_caps_ready);
-
-static void __init mark_const_caps_ready(void)
-{
-	static_branch_enable(&arm64_const_caps_ready);
-}
-
-extern const struct arm64_cpu_capabilities arm64_errata[];
-
+/*
+ * Check if the current CPU has a given feature capability.
+ * Should be called from non-preemptible context.
+ */
 bool this_cpu_has_cap(unsigned int cap)
 {
-	return (__this_cpu_has_cap(arm64_features, cap) ||
-		__this_cpu_has_cap(arm64_errata, cap));
+	const struct arm64_cpu_capabilities *caps;
+
+	if (WARN_ON(preemptible()))
+		return false;
+
+	for (caps = arm64_features; caps->desc; caps++)
+		if (caps->capability == cap && caps->matches)
+			return caps->matches(caps, SCOPE_LOCAL_CPU);
+
+	return false;
 }
 
 void __init setup_cpu_features(void)
@@ -1197,8 +1036,6 @@ void __init setup_cpu_features(void)
 
 	/* Set the CPU feature capabilies */
 	setup_feature_capabilities();
-	enable_errata_workarounds();
-	mark_const_caps_ready();
 	setup_elf_hwcaps(arm64_elf_hwcaps);
 
 	if (system_supports_32bit_el0())
@@ -1223,5 +1060,5 @@ void __init setup_cpu_features(void)
 static bool __maybe_unused
 cpufeature_pan_not_uao(const struct arm64_cpu_capabilities *entry, int __unused)
 {
-	return (cpus_have_const_cap(ARM64_HAS_PAN) && !cpus_have_const_cap(ARM64_HAS_UAO));
+	return (cpus_have_cap(ARM64_HAS_PAN) && !cpus_have_cap(ARM64_HAS_UAO));
 }

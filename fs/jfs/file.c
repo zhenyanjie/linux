@@ -103,7 +103,7 @@ int jfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	struct inode *inode = d_inode(dentry);
 	int rc;
 
-	rc = setattr_prepare(dentry, iattr);
+	rc = inode_change_ok(inode, iattr);
 	if (rc)
 		return rc;
 
@@ -140,7 +140,10 @@ int jfs_setattr(struct dentry *dentry, struct iattr *iattr)
 }
 
 const struct inode_operations jfs_file_inode_operations = {
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= jfs_listxattr,
+	.removexattr	= generic_removexattr,
 	.setattr	= jfs_setattr,
 #ifdef CONFIG_JFS_POSIX_ACL
 	.get_acl	= jfs_get_acl,

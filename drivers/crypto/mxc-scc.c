@@ -668,9 +668,7 @@ static int mxc_scc_probe(struct platform_device *pdev)
 		return PTR_ERR(scc->clk);
 	}
 
-	ret = clk_prepare_enable(scc->clk);
-	if (ret)
-		return ret;
+	clk_prepare_enable(scc->clk);
 
 	/* clear error status register */
 	writel(0x0, scc->base + SCC_SCM_ERROR_STATUS);

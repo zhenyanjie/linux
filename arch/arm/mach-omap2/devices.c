@@ -67,7 +67,7 @@ omap_postcore_initcall(omap3_l3_init);
 
 static inline void omap_init_sti(void) {}
 
-#if IS_ENABLED(CONFIG_SPI_OMAP24XX)
+#if defined(CONFIG_SPI_OMAP24XX) || defined(CONFIG_SPI_OMAP24XX_MODULE)
 
 #include <linux/platform_data/spi-omap2-mcspi.h>
 
@@ -163,8 +163,9 @@ static void __init omap_init_aes(void)
 
 /*-------------------------------------------------------------------------*/
 
-#if IS_ENABLED(CONFIG_VIDEO_OMAP2_VOUT)
-#if IS_ENABLED(CONFIG_FB_OMAP2)
+#if defined(CONFIG_VIDEO_OMAP2_VOUT) || \
+	defined(CONFIG_VIDEO_OMAP2_VOUT_MODULE)
+#if defined(CONFIG_FB_OMAP2) || defined(CONFIG_FB_OMAP2_MODULE)
 static struct resource omap_vout_resource[3 - CONFIG_FB_OMAP2_NUM_FBS] = {
 };
 #else

@@ -37,7 +37,6 @@
 #define IWPM_MAPINFO_HASH_MASK	(IWPM_MAPINFO_HASH_SIZE - 1)
 #define IWPM_REMINFO_HASH_SIZE	64
 #define IWPM_REMINFO_HASH_MASK	(IWPM_REMINFO_HASH_SIZE - 1)
-#define IWPM_MSG_SIZE		512
 
 static LIST_HEAD(iwpm_nlmsg_req_list);
 static DEFINE_SPINLOCK(iwpm_nlmsg_req_lock);
@@ -453,7 +452,7 @@ struct sk_buff *iwpm_create_nlmsg(u32 nl_op, struct nlmsghdr **nlh,
 {
 	struct sk_buff *skb = NULL;
 
-	skb = dev_alloc_skb(IWPM_MSG_SIZE);
+	skb = dev_alloc_skb(NLMSG_GOODSIZE);
 	if (!skb) {
 		pr_err("%s Unable to allocate skb\n", __func__);
 		goto create_nlmsg_exit;
@@ -664,7 +663,6 @@ int iwpm_send_mapinfo(u8 nl_client, int iwpm_pid)
 	}
 	skb_num++;
 	spin_lock_irqsave(&iwpm_mapinfo_lock, flags);
-	ret = -EINVAL;
 	for (i = 0; i < IWPM_MAPINFO_HASH_SIZE; i++) {
 		hlist_for_each_entry(map_info, &iwpm_hash_bucket[i],
 				     hlist_node) {

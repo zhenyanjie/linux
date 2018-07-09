@@ -330,13 +330,6 @@ static bool drm_dp_sideband_msg_build(struct drm_dp_sideband_msg_rx *msg,
 			return false;
 		}
 
-		/*
-		 * ignore out-of-order messages or messages that are part of a
-		 * failed transaction
-		 */
-		if (!recv_hdr.somt && !msg->have_somt)
-			return false;
-
 		/* get length contained in this portion */
 		msg->curchunk_len = recv_hdr.msg_len;
 		msg->curchunk_hdrlen = hdrlen;
@@ -921,7 +914,6 @@ static void drm_dp_destroy_port(struct kref *kref)
 		/* no need to clean up vcpi
 		 * as if we have no connector we never setup a vcpi */
 		drm_dp_port_teardown_pdt(port, port->pdt);
-		port->pdt = DP_PEER_DEVICE_NONE;
 	}
 	kfree(port);
 }
@@ -1167,9 +1159,7 @@ static void drm_dp_add_port(struct drm_dp_mst_branch *mstb,
 			drm_dp_put_port(port);
 			goto out;
 		}
-		if ((port->pdt == DP_PEER_DEVICE_DP_LEGACY_CONV ||
-		     port->pdt == DP_PEER_DEVICE_SST_SINK) &&
-		    port->port_num >= DP_MST_LOGICAL_PORT_0) {
+		if (port->port_num >= DP_MST_LOGICAL_PORT_0) {
 			port->cached_edid = drm_get_edid(port->connector, &port->aux.ddc);
 			drm_mode_connector_set_tile_property(port->connector);
 		}
@@ -1503,8 +1493,11 @@ static void process_single_down_tx_qlock(struct drm_dp_mst_topology_mgr *mgr)
 	WARN_ON(!mutex_is_locked(&mgr->qlock));
 
 	/* construct a chunk from the first msg in the tx_msg queue */
-	if (list_empty(&mgr->tx_msg_downq))
+	if (list_empty(&mgr->tx_msg_downq)) {
+		mgr->tx_down_in_progress = false;
 		return;
+	}
+	mgr->tx_down_in_progress = true;
 
 	txmsg = list_first_entry(&mgr->tx_msg_downq, struct drm_dp_sideband_msg_tx, next);
 	ret = process_single_tx_qlock(mgr, txmsg, false);
@@ -1518,6 +1511,10 @@ static void process_single_down_tx_qlock(struct drm_dp_mst_topology_mgr *mgr)
 			txmsg->dst->tx_slots[txmsg->seqno] = NULL;
 		txmsg->state = DRM_DP_SIDEBAND_TX_TIMEOUT;
 		wake_up(&mgr->tx_waitq);
+	}
+	if (list_empty(&mgr->tx_msg_downq)) {
+		mgr->tx_down_in_progress = false;
+		return;
 	}
 }
 
@@ -1541,7 +1538,7 @@ static void drm_dp_queue_down_tx(struct drm_dp_mst_topology_mgr *mgr,
 {
 	mutex_lock(&mgr->qlock);
 	list_add_tail(&txmsg->next, &mgr->tx_msg_downq);
-	if (list_is_singular(&mgr->tx_msg_downq))
+	if (!mgr->tx_down_in_progress)
 		process_single_down_tx_qlock(mgr);
 	mutex_unlock(&mgr->qlock);
 }
@@ -1824,7 +1821,7 @@ int drm_dp_update_payload_part1(struct drm_dp_mst_topology_mgr *mgr)
 				mgr->payloads[i].vcpi = req_payload.vcpi;
 			} else if (mgr->payloads[i].num_slots) {
 				mgr->payloads[i].num_slots = 0;
-				drm_dp_destroy_payload_step1(mgr, port, mgr->payloads[i].vcpi, &mgr->payloads[i]);
+				drm_dp_destroy_payload_step1(mgr, port, port->vcpi.vcpi, &mgr->payloads[i]);
 				req_payload.payload_state = mgr->payloads[i].payload_state;
 				mgr->payloads[i].start_slot = 0;
 			}
@@ -2175,7 +2172,7 @@ out_unlock:
 }
 EXPORT_SYMBOL(drm_dp_mst_topology_mgr_resume);
 
-static bool drm_dp_get_one_sb_msg(struct drm_dp_mst_topology_mgr *mgr, bool up)
+static void drm_dp_get_one_sb_msg(struct drm_dp_mst_topology_mgr *mgr, bool up)
 {
 	int len;
 	u8 replyblock[32];
@@ -2190,12 +2187,12 @@ static bool drm_dp_get_one_sb_msg(struct drm_dp_mst_topology_mgr *mgr, bool up)
 			       replyblock, len);
 	if (ret != len) {
 		DRM_DEBUG_KMS("failed to read DPCD down rep %d %d\n", len, ret);
-		return false;
+		return;
 	}
 	ret = drm_dp_sideband_msg_build(msg, replyblock, len, true);
 	if (!ret) {
 		DRM_DEBUG_KMS("sideband msg build failed %d\n", replyblock[0]);
-		return false;
+		return;
 	}
 	replylen = msg->curchunk_len + msg->curchunk_hdrlen;
 
@@ -2207,32 +2204,21 @@ static bool drm_dp_get_one_sb_msg(struct drm_dp_mst_topology_mgr *mgr, bool up)
 		ret = drm_dp_dpcd_read(mgr->aux, basereg + curreply,
 				    replyblock, len);
 		if (ret != len) {
-			DRM_DEBUG_KMS("failed to read a chunk (len %d, ret %d)\n",
-				      len, ret);
-			return false;
+			DRM_DEBUG_KMS("failed to read a chunk\n");
 		}
-
 		ret = drm_dp_sideband_msg_build(msg, replyblock, len, false);
-		if (!ret) {
+		if (ret == false)
 			DRM_DEBUG_KMS("failed to build sideband msg\n");
-			return false;
-		}
-
 		curreply += len;
 		replylen -= len;
 	}
-	return true;
 }
 
 static int drm_dp_mst_handle_down_rep(struct drm_dp_mst_topology_mgr *mgr)
 {
 	int ret = 0;
 
-	if (!drm_dp_get_one_sb_msg(mgr, false)) {
-		memset(&mgr->down_rep_recv, 0,
-		       sizeof(struct drm_dp_sideband_msg_rx));
-		return 0;
-	}
+	drm_dp_get_one_sb_msg(mgr, false);
 
 	if (mgr->down_rep_recv.have_eomt) {
 		struct drm_dp_sideband_msg_tx *txmsg;
@@ -2288,12 +2274,7 @@ static int drm_dp_mst_handle_down_rep(struct drm_dp_mst_topology_mgr *mgr)
 static int drm_dp_mst_handle_up_req(struct drm_dp_mst_topology_mgr *mgr)
 {
 	int ret = 0;
-
-	if (!drm_dp_get_one_sb_msg(mgr, true)) {
-		memset(&mgr->up_req_recv, 0,
-		       sizeof(struct drm_dp_sideband_msg_rx));
-		return 0;
-	}
+	drm_dp_get_one_sb_msg(mgr, true);
 
 	if (mgr->up_req_recv.have_eomt) {
 		struct drm_dp_sideband_msg_req_body msg;
@@ -2345,9 +2326,7 @@ static int drm_dp_mst_handle_up_req(struct drm_dp_mst_topology_mgr *mgr)
 			DRM_DEBUG_KMS("Got RSN: pn: %d avail_pbn %d\n", msg.u.resource_stat.port_number, msg.u.resource_stat.available_pbn);
 		}
 
-		if (mstb)
-			drm_dp_put_mst_branch_device(mstb);
-
+		drm_dp_put_mst_branch_device(mstb);
 		memset(&mgr->up_req_recv, 0, sizeof(struct drm_dp_sideband_msg_rx));
 	}
 	return ret;
@@ -2393,7 +2372,6 @@ EXPORT_SYMBOL(drm_dp_mst_hpd_irq);
 
 /**
  * drm_dp_mst_detect_port() - get connection status for an MST port
- * @connector: DRM connector for this port
  * @mgr: manager for this port
  * @port: unverified pointer to a port
  *
@@ -2909,7 +2887,7 @@ static void drm_dp_tx_work(struct work_struct *work)
 	struct drm_dp_mst_topology_mgr *mgr = container_of(work, struct drm_dp_mst_topology_mgr, tx_work);
 
 	mutex_lock(&mgr->qlock);
-	if (!list_empty(&mgr->tx_msg_downq))
+	if (mgr->tx_down_in_progress)
 		process_single_down_tx_qlock(mgr);
 	mutex_unlock(&mgr->qlock);
 }
@@ -2947,7 +2925,6 @@ static void drm_dp_destroy_connector_work(struct work_struct *work)
 		mgr->cbs->destroy_connector(mgr, port->connector);
 
 		drm_dp_port_teardown_pdt(port, port->pdt);
-		port->pdt = DP_PEER_DEVICE_NONE;
 
 		if (!port->input && port->vcpi.vcpi > 0) {
 			drm_dp_mst_reset_vcpi_slots(mgr, port);

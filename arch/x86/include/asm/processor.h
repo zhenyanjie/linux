@@ -88,7 +88,7 @@ struct cpuinfo_x86 {
 	__u8			x86;		/* CPU family */
 	__u8			x86_vendor;	/* CPU vendor */
 	__u8			x86_model;
-	__u8			x86_stepping;
+	__u8			x86_mask;
 #ifdef CONFIG_X86_32
 	char			wp_works_ok;	/* It doesn't on 386's */
 
@@ -104,7 +104,6 @@ struct cpuinfo_x86 {
 	__u8			x86_phys_bits;
 	/* CPUID returned core id bits: */
 	__u8			x86_coreid_bits;
-	__u8			cu_id;
 	/* Max extended CPUID function supported: */
 	__u32			extended_cpuid_level;
 	/* Maximum supported CPUID level, -1=no CPUID: */
@@ -113,7 +112,7 @@ struct cpuinfo_x86 {
 	char			x86_vendor_id[16];
 	char			x86_model_id[64];
 	/* in KB - valid for CPUS which support this call: */
-	unsigned int		x86_cache_size;
+	int			x86_cache_size;
 	int			x86_cache_alignment;	/* In bytes */
 	/* Cache QoS architectural values: */
 	int			x86_cache_max_rmid;	/* max index */
@@ -156,8 +155,8 @@ extern struct cpuinfo_x86	boot_cpu_data;
 extern struct cpuinfo_x86	new_cpu_data;
 
 extern struct tss_struct	doublefault_tss;
-extern __u32			cpu_caps_cleared[NCAPINTS + NBUGINTS];
-extern __u32			cpu_caps_set[NCAPINTS + NBUGINTS];
+extern __u32			cpu_caps_cleared[NCAPINTS];
+extern __u32			cpu_caps_set[NCAPINTS];
 
 #ifdef CONFIG_SMP
 DECLARE_PER_CPU_READ_MOSTLY(struct cpuinfo_x86, cpu_info);
@@ -308,7 +307,7 @@ struct tss_struct {
 
 } ____cacheline_aligned;
 
-DECLARE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(struct tss_struct, cpu_tss);
+DECLARE_PER_CPU_SHARED_ALIGNED(struct tss_struct, cpu_tss);
 
 #ifdef CONFIG_X86_32
 DECLARE_PER_CPU(unsigned long, cpu_current_top_of_stack);
@@ -368,14 +367,9 @@ DECLARE_PER_CPU(struct irq_stack *, hardirq_stack);
 DECLARE_PER_CPU(struct irq_stack *, softirq_stack);
 #endif	/* X86_64 */
 
-extern unsigned int fpu_kernel_xstate_size;
-extern unsigned int fpu_user_xstate_size;
+extern unsigned int xstate_size;
 
 struct perf_event;
-
-typedef struct {
-	unsigned long		seg;
-} mm_segment_t;
 
 struct thread_struct {
 	/* Cached TLS descriptors: */
@@ -390,7 +384,9 @@ struct thread_struct {
 	unsigned short		fsindex;
 	unsigned short		gsindex;
 #endif
-
+#ifdef CONFIG_X86_32
+	unsigned long		ip;
+#endif
 #ifdef CONFIG_X86_64
 	unsigned long		fsbase;
 	unsigned long		gsbase;
@@ -423,11 +419,6 @@ struct thread_struct {
 	/* Max allowed port in the bitmap, in bytes: */
 	unsigned		io_bitmap_max;
 
-	mm_segment_t		addr_limit;
-
-	unsigned int		sig_on_uaccess_err:1;
-	unsigned int		uaccess_err:1;	/* uaccess failed */
-
 	/* Floating point and extended processor state */
 	struct fpu		fpu;
 	/*
@@ -435,15 +426,6 @@ struct thread_struct {
 	 * the end.
 	 */
 };
-
-/*
- * Thread-synchronous status.
- *
- * This is different from the flags in that nobody else
- * ever touches our thread-synchronous status, so we don't
- * have to worry about atomic accesses.
- */
-#define TS_COMPAT		0x0002	/* 32bit syscall active (64BIT)*/
 
 /*
  * Set IOPL bits in EFLAGS from given mask
@@ -507,6 +489,11 @@ static inline void load_sp0(struct tss_struct *tss,
 
 #define set_iopl_mask native_set_iopl_mask
 #endif /* CONFIG_PARAVIRT */
+
+typedef struct {
+	unsigned long		seg;
+} mm_segment_t;
+
 
 /* Free all resources held by a thread. */
 extern void release_thread(struct task_struct *);
@@ -594,7 +581,7 @@ static inline void sync_core(void)
 {
 	int tmp;
 
-#ifdef CONFIG_X86_32
+#ifdef CONFIG_M486
 	/*
 	 * Do a CPUID if available, otherwise do a jump.  The jump
 	 * can conveniently enough be the jump around CPUID.
@@ -729,8 +716,9 @@ static inline void spin_lock_prefetch(const void *x)
 	.sp0			= TOP_OF_INIT_STACK,			  \
 	.sysenter_cs		= __KERNEL_CS,				  \
 	.io_bitmap_ptr		= NULL,					  \
-	.addr_limit		= KERNEL_DS,				  \
 }
+
+extern unsigned long thread_saved_pc(struct task_struct *tsk);
 
 /*
  * TOP_OF_KERNEL_STACK_PADDING reserves 8 bytes on top of the ring0 stack.
@@ -777,17 +765,20 @@ static inline void spin_lock_prefetch(const void *x)
 #define STACK_TOP		TASK_SIZE
 #define STACK_TOP_MAX		TASK_SIZE_MAX
 
-#define INIT_THREAD  {						\
-	.sp0			= TOP_OF_INIT_STACK,		\
-	.addr_limit		= KERNEL_DS,			\
+#define INIT_THREAD  { \
+	.sp0 = TOP_OF_INIT_STACK \
 }
+
+/*
+ * Return saved PC of a blocked thread.
+ * What is this good for? it will be always the scheduler or ret_from_fork.
+ */
+#define thread_saved_pc(t)	READ_ONCE_NOCHECK(*(unsigned long *)((t)->thread.sp - 8))
 
 #define task_pt_regs(tsk)	((struct pt_regs *)(tsk)->thread.sp0 - 1)
 extern unsigned long KSTK_ESP(struct task_struct *task);
 
 #endif /* CONFIG_X86_64 */
-
-extern unsigned long thread_saved_pc(struct task_struct *tsk);
 
 extern void start_thread(struct pt_regs *regs, unsigned long new_ip,
 					       unsigned long new_sp);

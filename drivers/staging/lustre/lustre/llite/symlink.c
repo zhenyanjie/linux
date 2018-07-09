@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -35,6 +39,7 @@
 #include <linux/stat.h>
 #define DEBUG_SUBSYSTEM S_LLITE
 
+#include "../include/lustre_lite.h"
 #include "llite_internal.h"
 
 static int ll_readlink_internal(struct inode *inode,
@@ -79,17 +84,17 @@ static int ll_readlink_internal(struct inode *inode,
 	}
 
 	body = req_capsule_server_get(&(*request)->rq_pill, &RMF_MDT_BODY);
-	if ((body->mbo_valid & OBD_MD_LINKNAME) == 0) {
+	if ((body->valid & OBD_MD_LINKNAME) == 0) {
 		CERROR("OBD_MD_LINKNAME not set on reply\n");
 		rc = -EPROTO;
 		goto failed;
 	}
 
 	LASSERT(symlen != 0);
-	if (body->mbo_eadatasize != symlen) {
+	if (body->eadatasize != symlen) {
 		CERROR("%s: inode "DFID": symlink length %d not expected %d\n",
 		       ll_get_fsname(inode->i_sb, NULL, 0),
-		       PFID(ll_inode2fid(inode)), body->mbo_eadatasize - 1,
+		       PFID(ll_inode2fid(inode)), body->eadatasize - 1,
 		       symlen - 1);
 		rc = -EPROTO;
 		goto failed;
@@ -154,5 +159,8 @@ const struct inode_operations ll_fast_symlink_inode_operations = {
 	.get_link	= ll_get_link,
 	.getattr	= ll_getattr,
 	.permission	= ll_inode_permission,
+	.setxattr	= ll_setxattr,
+	.getxattr	= ll_getxattr,
 	.listxattr	= ll_listxattr,
+	.removexattr	= ll_removexattr,
 };

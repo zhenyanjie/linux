@@ -57,7 +57,10 @@ static int fsl_tcon_init_regmap(struct device *dev,
 
 	tcon->regs = devm_regmap_init_mmio(dev, regs,
 					   &fsl_tcon_regmap_config);
-	return PTR_ERR_OR_ZERO(tcon->regs);
+	if (IS_ERR(tcon->regs))
+		return PTR_ERR(tcon->regs);
+
+	return 0;
 }
 
 struct fsl_tcon *fsl_tcon_init(struct device *dev)
@@ -89,13 +92,8 @@ struct fsl_tcon *fsl_tcon_init(struct device *dev)
 		goto err_node_put;
 	}
 
-	ret = clk_prepare_enable(tcon->ipg_clk);
-	if (ret) {
-		dev_err(dev, "Couldn't enable the TCON clock\n");
-		goto err_node_put;
-	}
+	clk_prepare_enable(tcon->ipg_clk);
 
-	of_node_put(np);
 	dev_info(dev, "Using TCON in bypass mode\n");
 
 	return tcon;

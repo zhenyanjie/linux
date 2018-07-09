@@ -73,9 +73,6 @@ enum mixer_version_id {
 enum mixer_flag_bits {
 	MXR_BIT_POWERED,
 	MXR_BIT_VSYNC,
-	MXR_BIT_INTERLACE,
-	MXR_BIT_VP_ENABLED,
-	MXR_BIT_HAS_SCLK,
 };
 
 static const uint32_t mixer_formats[] = {
@@ -101,6 +98,9 @@ struct mixer_context {
 	struct exynos_drm_plane	planes[MIXER_WIN_NR];
 	int			pipe;
 	unsigned long		flags;
+	bool			interlace;
+	bool			vp_enabled;
+	bool			has_sclk;
 
 	struct mixer_resources	mixer_res;
 	enum mixer_version_id	mxr_ver;
@@ -346,7 +346,7 @@ static void mixer_vsync_set_update(struct mixer_context *ctx, bool enable)
 	mixer_reg_writemask(res, MXR_STATUS, enable ?
 			MXR_STATUS_SYNC_ENABLE : 0, MXR_STATUS_SYNC_ENABLE);
 
-	if (test_bit(MXR_BIT_VP_ENABLED, &ctx->flags))
+	if (ctx->vp_enabled)
 		vp_reg_write(res, VP_SHADOW_UPDATE, enable ?
 			VP_SHADOW_UPDATE_ENABLE : 0);
 }
@@ -357,8 +357,8 @@ static void mixer_cfg_scan(struct mixer_context *ctx, unsigned int height)
 	u32 val;
 
 	/* choosing between interlace and progressive mode */
-	val = test_bit(MXR_BIT_INTERLACE, &ctx->flags) ?
-		MXR_CFG_SCAN_INTERLACE : MXR_CFG_SCAN_PROGRESSIVE;
+	val = (ctx->interlace ? MXR_CFG_SCAN_INTERLACE :
+				MXR_CFG_SCAN_PROGRESSIVE);
 
 	if (ctx->mxr_ver != MXR_VER_128_0_0_184) {
 		/* choosing between proper HD and SD mode */
@@ -436,10 +436,9 @@ static void mixer_cfg_layer(struct mixer_context *ctx, unsigned int win,
 		mixer_reg_writemask(res, MXR_LAYER_CFG,
 				    MXR_LAYER_CFG_GRP1_VAL(priority),
 				    MXR_LAYER_CFG_GRP1_MASK);
-
 		break;
 	case VP_DEFAULT_WIN:
-		if (test_bit(MXR_BIT_VP_ENABLED, &ctx->flags)) {
+		if (ctx->vp_enabled) {
 			vp_reg_writemask(res, VP_ENABLE, val, VP_ENABLE_ON);
 			mixer_reg_writemask(res, MXR_CFG, val,
 				MXR_CFG_VP_ENABLE);
@@ -478,7 +477,6 @@ static void vp_video_buffer(struct mixer_context *ctx,
 	struct drm_display_mode *mode = &state->base.crtc->state->adjusted_mode;
 	struct mixer_resources *res = &ctx->mixer_res;
 	struct drm_framebuffer *fb = state->base.fb;
-	unsigned int priority = state->base.normalized_zpos + 1;
 	unsigned long flags;
 	dma_addr_t luma_addr[2], chroma_addr[2];
 	bool tiled_mode = false;
@@ -502,7 +500,7 @@ static void vp_video_buffer(struct mixer_context *ctx,
 	chroma_addr[0] = exynos_drm_fb_dma_addr(fb, 1);
 
 	if (mode->flags & DRM_MODE_FLAG_INTERLACE) {
-		__set_bit(MXR_BIT_INTERLACE, &ctx->flags);
+		ctx->interlace = true;
 		if (tiled_mode) {
 			luma_addr[1] = luma_addr[0] + 0x40;
 			chroma_addr[1] = chroma_addr[0] + 0x40;
@@ -511,7 +509,7 @@ static void vp_video_buffer(struct mixer_context *ctx,
 			chroma_addr[1] = chroma_addr[0] + fb->pitches[0];
 		}
 	} else {
-		__clear_bit(MXR_BIT_INTERLACE, &ctx->flags);
+		ctx->interlace = false;
 		luma_addr[1] = 0;
 		chroma_addr[1] = 0;
 	}
@@ -519,7 +517,7 @@ static void vp_video_buffer(struct mixer_context *ctx,
 	spin_lock_irqsave(&res->reg_slock, flags);
 
 	/* interlace or progressive scan mode */
-	val = (test_bit(MXR_BIT_INTERLACE, &ctx->flags) ? ~0 : 0);
+	val = (ctx->interlace ? ~0 : 0);
 	vp_reg_writemask(res, VP_MODE, val, VP_MODE_LINE_SKIP);
 
 	/* setup format */
@@ -542,7 +540,7 @@ static void vp_video_buffer(struct mixer_context *ctx,
 
 	vp_reg_write(res, VP_DST_WIDTH, state->crtc.w);
 	vp_reg_write(res, VP_DST_H_POSITION, state->crtc.x);
-	if (test_bit(MXR_BIT_INTERLACE, &ctx->flags)) {
+	if (ctx->interlace) {
 		vp_reg_write(res, VP_DST_HEIGHT, state->crtc.h / 2);
 		vp_reg_write(res, VP_DST_V_POSITION, state->crtc.y / 2);
 	} else {
@@ -563,7 +561,7 @@ static void vp_video_buffer(struct mixer_context *ctx,
 
 	mixer_cfg_scan(ctx, mode->vdisplay);
 	mixer_cfg_rgb_fmt(ctx, mode->vdisplay);
-	mixer_cfg_layer(ctx, plane->index, priority, true);
+	mixer_cfg_layer(ctx, plane->index, state->zpos + 1, true);
 	mixer_cfg_vp_blend(ctx);
 	mixer_run(ctx);
 
@@ -588,7 +586,6 @@ static void mixer_graph_buffer(struct mixer_context *ctx,
 	struct drm_display_mode *mode = &state->base.crtc->state->adjusted_mode;
 	struct mixer_resources *res = &ctx->mixer_res;
 	struct drm_framebuffer *fb = state->base.fb;
-	unsigned int priority = state->base.normalized_zpos + 1;
 	unsigned long flags;
 	unsigned int win = plane->index;
 	unsigned int x_ratio = 0, y_ratio = 0;
@@ -637,9 +634,9 @@ static void mixer_graph_buffer(struct mixer_context *ctx,
 	src_y_offset = 0;
 
 	if (mode->flags & DRM_MODE_FLAG_INTERLACE)
-		__set_bit(MXR_BIT_INTERLACE, &ctx->flags);
+		ctx->interlace = true;
 	else
-		__clear_bit(MXR_BIT_INTERLACE, &ctx->flags);
+		ctx->interlace = false;
 
 	spin_lock_irqsave(&res->reg_slock, flags);
 
@@ -680,7 +677,7 @@ static void mixer_graph_buffer(struct mixer_context *ctx,
 
 	mixer_cfg_scan(ctx, mode->vdisplay);
 	mixer_cfg_rgb_fmt(ctx, mode->vdisplay);
-	mixer_cfg_layer(ctx, win, priority, true);
+	mixer_cfg_layer(ctx, win, state->zpos + 1, true);
 	mixer_cfg_gfx_blend(ctx, win, is_alpha_format(fb->pixel_format));
 
 	/* layer update mandatory for mixer 16.0.33.0 */
@@ -698,10 +695,10 @@ static void mixer_graph_buffer(struct mixer_context *ctx,
 static void vp_win_reset(struct mixer_context *ctx)
 {
 	struct mixer_resources *res = &ctx->mixer_res;
-	unsigned int tries = 100;
+	int tries = 100;
 
 	vp_reg_write(res, VP_SRESET, VP_SRESET_PROCESSING);
-	while (tries--) {
+	for (tries = 100; tries; --tries) {
 		/* waiting until VP_SRESET_PROCESSING is 0 */
 		if (~vp_reg_read(res, VP_SRESET) & VP_SRESET_PROCESSING)
 			break;
@@ -734,7 +731,7 @@ static void mixer_win_reset(struct mixer_context *ctx)
 	mixer_reg_write(res, MXR_BG_COLOR1, 0x008080);
 	mixer_reg_write(res, MXR_BG_COLOR2, 0x008080);
 
-	if (test_bit(MXR_BIT_VP_ENABLED, &ctx->flags)) {
+	if (ctx->vp_enabled) {
 		/* configuration of Video Processor Registers */
 		vp_win_reset(ctx);
 		vp_default_filter(res);
@@ -743,7 +740,7 @@ static void mixer_win_reset(struct mixer_context *ctx)
 	/* disable all layers */
 	mixer_reg_writemask(res, MXR_CFG, 0, MXR_CFG_GRP0_ENABLE);
 	mixer_reg_writemask(res, MXR_CFG, 0, MXR_CFG_GRP1_ENABLE);
-	if (test_bit(MXR_BIT_VP_ENABLED, &ctx->flags))
+	if (ctx->vp_enabled)
 		mixer_reg_writemask(res, MXR_CFG, 0, MXR_CFG_VP_ENABLE);
 
 	spin_unlock_irqrestore(&res->reg_slock, flags);
@@ -754,6 +751,7 @@ static irqreturn_t mixer_irq_handler(int irq, void *arg)
 	struct mixer_context *ctx = arg;
 	struct mixer_resources *res = &ctx->mixer_res;
 	u32 val, base, shadow;
+	int win;
 
 	spin_lock(&res->reg_slock);
 
@@ -767,7 +765,7 @@ static irqreturn_t mixer_irq_handler(int irq, void *arg)
 		val &= ~MXR_INT_STATUS_VSYNC;
 
 		/* interlace scan need to check shadow register */
-		if (test_bit(MXR_BIT_INTERLACE, &ctx->flags)) {
+		if (ctx->interlace) {
 			base = mixer_reg_read(res, MXR_GRAPHIC_BASE(0));
 			shadow = mixer_reg_read(res, MXR_GRAPHIC_BASE_S(0));
 			if (base != shadow)
@@ -780,6 +778,14 @@ static irqreturn_t mixer_irq_handler(int irq, void *arg)
 		}
 
 		drm_crtc_handle_vblank(&ctx->crtc->base);
+		for (win = 0 ; win < MIXER_WIN_NR ; win++) {
+			struct exynos_drm_plane *plane = &ctx->planes[win];
+
+			if (!plane->pending_fb)
+				continue;
+
+			exynos_drm_crtc_finish_update(ctx->crtc, plane);
+		}
 	}
 
 out:
@@ -859,7 +865,7 @@ static int vp_resources_init(struct mixer_context *mixer_ctx)
 		return -ENODEV;
 	}
 
-	if (test_bit(MXR_BIT_HAS_SCLK, &mixer_ctx->flags)) {
+	if (mixer_ctx->has_sclk) {
 		mixer_res->sclk_mixer = devm_clk_get(dev, "sclk_mixer");
 		if (IS_ERR(mixer_res->sclk_mixer)) {
 			dev_err(dev, "failed to get clock 'sclk_mixer'\n");
@@ -909,7 +915,7 @@ static int mixer_initialize(struct mixer_context *mixer_ctx,
 		return ret;
 	}
 
-	if (test_bit(MXR_BIT_VP_ENABLED, &mixer_ctx->flags)) {
+	if (mixer_ctx->vp_enabled) {
 		/* acquire vp resources: regs, irqs, clocks */
 		ret = vp_resources_init(mixer_ctx);
 		if (ret) {
@@ -1152,8 +1158,7 @@ static int mixer_bind(struct device *dev, struct device *manager, void *data)
 		return ret;
 
 	for (i = 0; i < MIXER_WIN_NR; i++) {
-		if (i == VP_DEFAULT_WIN && !test_bit(MXR_BIT_VP_ENABLED,
-						     &ctx->flags))
+		if (i == VP_DEFAULT_WIN && !ctx->vp_enabled)
 			continue;
 
 		ret = exynos_plane_init(drm_dev, &ctx->planes[i], i,
@@ -1208,12 +1213,9 @@ static int mixer_probe(struct platform_device *pdev)
 
 	ctx->pdev = pdev;
 	ctx->dev = dev;
+	ctx->vp_enabled = drv->is_vp_enabled;
+	ctx->has_sclk = drv->has_sclk;
 	ctx->mxr_ver = drv->version;
-
-	if (drv->is_vp_enabled)
-		__set_bit(MXR_BIT_VP_ENABLED, &ctx->flags);
-	if (drv->has_sclk)
-		__set_bit(MXR_BIT_HAS_SCLK, &ctx->flags);
 
 	platform_set_drvdata(pdev, ctx);
 
@@ -1240,9 +1242,9 @@ static int __maybe_unused exynos_mixer_suspend(struct device *dev)
 
 	clk_disable_unprepare(res->hdmi);
 	clk_disable_unprepare(res->mixer);
-	if (test_bit(MXR_BIT_VP_ENABLED, &ctx->flags)) {
+	if (ctx->vp_enabled) {
 		clk_disable_unprepare(res->vp);
-		if (test_bit(MXR_BIT_HAS_SCLK, &ctx->flags))
+		if (ctx->has_sclk)
 			clk_disable_unprepare(res->sclk_mixer);
 	}
 
@@ -1265,14 +1267,14 @@ static int __maybe_unused exynos_mixer_resume(struct device *dev)
 		DRM_ERROR("Failed to prepare_enable the hdmi clk [%d]\n", ret);
 		return ret;
 	}
-	if (test_bit(MXR_BIT_VP_ENABLED, &ctx->flags)) {
+	if (ctx->vp_enabled) {
 		ret = clk_prepare_enable(res->vp);
 		if (ret < 0) {
 			DRM_ERROR("Failed to prepare_enable the vp clk [%d]\n",
 				  ret);
 			return ret;
 		}
-		if (test_bit(MXR_BIT_HAS_SCLK, &ctx->flags)) {
+		if (ctx->has_sclk) {
 			ret = clk_prepare_enable(res->sclk_mixer);
 			if (ret < 0) {
 				DRM_ERROR("Failed to prepare_enable the " \

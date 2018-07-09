@@ -228,7 +228,7 @@ check_XRC (struct ccw1         *de_ccw,
 	data->ga_extended |= 0x08; /* switch on 'Time Stamp Valid'   */
 	data->ga_extended |= 0x02; /* switch on 'Extended Parameter' */
 
-	rc = get_phys_clock(&data->ep_sys_time);
+	rc = get_sync_clock(&data->ep_sys_time);
 	/* Ignore return code if sync clock is switched off. */
 	if (rc == -EOPNOTSUPP || rc == -EACCES)
 		rc = 0;
@@ -339,7 +339,7 @@ static int check_XRC_on_prefix(struct PFX_eckd_data *pfxdata,
 	pfxdata->define_extent.ga_extended |= 0x02; /* 'Extended Parameter' */
 	pfxdata->validity.time_stamp = 1;	    /* 'Time Stamp Valid'   */
 
-	rc = get_phys_clock(&pfxdata->define_extent.ep_sys_time);
+	rc = get_sync_clock(&pfxdata->define_extent.ep_sys_time);
 	/* Ignore return code if sync clock is switched off. */
 	if (rc == -EOPNOTSUPP || rc == -EACCES)
 		rc = 0;
@@ -521,12 +521,10 @@ static int prefix_LRE(struct ccw1 *ccw, struct PFX_eckd_data *pfxdata,
 	pfxdata->validity.define_extent = 1;
 
 	/* private uid is kept up to date, conf_data may be outdated */
-	if (startpriv->uid.type == UA_BASE_PAV_ALIAS)
+	if (startpriv->uid.type != UA_BASE_DEVICE) {
 		pfxdata->validity.verify_base = 1;
-
-	if (startpriv->uid.type == UA_HYPER_PAV_ALIAS) {
-		pfxdata->validity.verify_base = 1;
-		pfxdata->validity.hyper_pav = 1;
+		if (startpriv->uid.type == UA_HYPER_PAV_ALIAS)
+			pfxdata->validity.hyper_pav = 1;
 	}
 
 	/* define extend data (mostly)*/
@@ -1207,7 +1205,7 @@ static int verify_fcx_max_data(struct dasd_device *device, __u8 lpm)
 				 mdc, lpm);
 			return mdc;
 		}
-		fcx_max_data = (u32)mdc * FCX_MAX_DATA_FACTOR;
+		fcx_max_data = mdc * FCX_MAX_DATA_FACTOR;
 		if (fcx_max_data < private->fcx_max_data) {
 			dev_warn(&device->cdev->dev,
 				 "The maximum data size for zHPF requests %u "
@@ -1677,7 +1675,7 @@ static u32 get_fcx_max_data(struct dasd_device *device)
 			 " data size for zHPF requests failed\n");
 		return 0;
 	} else
-		return (u32)mdc * FCX_MAX_DATA_FACTOR;
+		return mdc * FCX_MAX_DATA_FACTOR;
 }
 
 /*
@@ -3473,12 +3471,10 @@ static int prepare_itcw(struct itcw *itcw,
 	pfxdata.validity.define_extent = 1;
 
 	/* private uid is kept up to date, conf_data may be outdated */
-	if (startpriv->uid.type == UA_BASE_PAV_ALIAS)
+	if (startpriv->uid.type != UA_BASE_DEVICE) {
 		pfxdata.validity.verify_base = 1;
-
-	if (startpriv->uid.type == UA_HYPER_PAV_ALIAS) {
-		pfxdata.validity.verify_base = 1;
-		pfxdata.validity.hyper_pav = 1;
+		if (startpriv->uid.type == UA_HYPER_PAV_ALIAS)
+			pfxdata.validity.hyper_pav = 1;
 	}
 
 	switch (cmd) {
@@ -5082,8 +5078,6 @@ static int dasd_eckd_read_message_buffer(struct dasd_device *device,
 		return PTR_ERR(cqr);
 	}
 
-	cqr->lpm = lpum;
-retry:
 	cqr->startdev = device;
 	cqr->memdev = device;
 	cqr->block = NULL;
@@ -5128,14 +5122,6 @@ retry:
 			(prssdp + 1);
 		memcpy(messages, message_buf,
 		       sizeof(struct dasd_rssd_messages));
-	} else if (cqr->lpm) {
-		/*
-		 * on z/VM we might not be able to do I/O on the requested path
-		 * but instead we get the required information on any path
-		 * so retry with open path mask
-		 */
-		cqr->lpm = 0;
-		goto retry;
 	} else
 		DBF_EVENT_DEVID(DBF_WARNING, device->cdev,
 				"Reading messages failed with rc=%d\n"
@@ -5205,7 +5191,7 @@ static int dasd_eckd_query_host_access(struct dasd_device *device,
 
 	cqr->buildclk = get_tod_clock();
 	cqr->status = DASD_CQR_FILLED;
-	rc = dasd_sleep_on_interruptible(cqr);
+	rc = dasd_sleep_on(cqr);
 	if (rc == 0) {
 		*data = *host_access;
 	} else {

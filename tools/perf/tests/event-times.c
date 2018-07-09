@@ -37,7 +37,7 @@ static int attach__enable_on_exec(struct perf_evlist *evlist)
 	err = perf_evlist__open(evlist);
 	if (err < 0) {
 		pr_debug("perf_evlist__open: %s\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		return err;
 	}
 
@@ -200,7 +200,8 @@ static int test_times(int (attach)(struct perf_evlist *),
 		 count.ena, count.run);
 
 out_err:
-	perf_evlist__delete(evlist);
+	if (evlist)
+		perf_evlist__delete(evlist);
 	return !err ? TEST_OK : TEST_FAIL;
 }
 

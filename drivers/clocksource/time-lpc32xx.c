@@ -288,16 +288,16 @@ err_clk_enable:
  * This function asserts that we have exactly one clocksource and one
  * clock_event_device in the end.
  */
-static int __init lpc32xx_timer_init(struct device_node *np)
+static void __init lpc32xx_timer_init(struct device_node *np)
 {
 	static int has_clocksource, has_clockevent;
-	int ret = 0;
+	int ret;
 
 	if (!has_clocksource) {
 		ret = lpc32xx_clocksource_init(np);
 		if (!ret) {
 			has_clocksource = 1;
-			return 0;
+			return;
 		}
 	}
 
@@ -305,10 +305,8 @@ static int __init lpc32xx_timer_init(struct device_node *np)
 		ret = lpc32xx_clockevent_init(np);
 		if (!ret) {
 			has_clockevent = 1;
-			return 0;
+			return;
 		}
 	}
-
-	return ret;
 }
 CLOCKSOURCE_OF_DECLARE(lpc32xx_timer, "nxp,lpc3220-timer", lpc32xx_timer_init);

@@ -13,6 +13,7 @@
 #include <linux/bpf.h>
 #include <linux/jhash.h>
 #include <linux/filter.h>
+#include <linux/vmalloc.h>
 #include "percpu_freelist.h"
 
 struct bucket {
@@ -25,16 +26,9 @@ struct bpf_htab {
 	struct bucket *buckets;
 	void *elems;
 	struct pcpu_freelist freelist;
-	void __percpu *extra_elems;
 	atomic_t count;	/* number of elements in this hashtable */
 	u32 n_buckets;	/* number of hash buckets */
 	u32 elem_size;	/* size of each element in bytes */
-};
-
-enum extra_elem_state {
-	HTAB_NOT_AN_EXTRA_ELEM = 0,
-	HTAB_EXTRA_ELEM_FREE,
-	HTAB_EXTRA_ELEM_USED
 };
 
 /* each htab element is struct htab_elem + key + value */
@@ -44,10 +38,7 @@ struct htab_elem {
 		struct bpf_htab *htab;
 		struct pcpu_freelist_node fnode;
 	};
-	union {
-		struct rcu_head rcu;
-		enum extra_elem_state state;
-	};
+	struct rcu_head rcu;
 	u32 hash;
 	char key[0] __aligned(8);
 };
@@ -83,15 +74,14 @@ static void htab_free_elems(struct bpf_htab *htab)
 		free_percpu(pptr);
 	}
 free_elems:
-	bpf_map_area_free(htab->elems);
+	vfree(htab->elems);
 }
 
 static int prealloc_elems_and_freelist(struct bpf_htab *htab)
 {
 	int err = -ENOMEM, i;
 
-	htab->elems = bpf_map_area_alloc(htab->elem_size *
-					 htab->map.max_entries);
+	htab->elems = vzalloc(htab->elem_size * htab->map.max_entries);
 	if (!htab->elems)
 		return -ENOMEM;
 
@@ -121,23 +111,6 @@ skip_percpu_elems:
 free_elems:
 	htab_free_elems(htab);
 	return err;
-}
-
-static int alloc_extra_elems(struct bpf_htab *htab)
-{
-	void __percpu *pptr;
-	int cpu;
-
-	pptr = __alloc_percpu_gfp(htab->elem_size, 8, GFP_USER | __GFP_NOWARN);
-	if (!pptr)
-		return -ENOMEM;
-
-	for_each_possible_cpu(cpu) {
-		((struct htab_elem *)per_cpu_ptr(pptr, cpu))->state =
-			HTAB_EXTRA_ELEM_FREE;
-	}
-	htab->extra_elems = pptr;
-	return 0;
 }
 
 /* Called from syscall */
@@ -212,8 +185,6 @@ static struct bpf_map *htab_map_alloc(union bpf_attr *attr)
 	if (percpu)
 		cost += (u64) round_up(htab->map.value_size, 8) *
 			num_possible_cpus() * htab->map.max_entries;
-	else
-	       cost += (u64) htab->elem_size * num_possible_cpus();
 
 	if (cost >= U32_MAX - PAGE_SIZE)
 		/* make sure page count doesn't overflow */
@@ -227,34 +198,30 @@ static struct bpf_map *htab_map_alloc(union bpf_attr *attr)
 		goto free_htab;
 
 	err = -ENOMEM;
-	htab->buckets = bpf_map_area_alloc(htab->n_buckets *
-					   sizeof(struct bucket));
-	if (!htab->buckets)
-		goto free_htab;
+	htab->buckets = kmalloc_array(htab->n_buckets, sizeof(struct bucket),
+				      GFP_USER | __GFP_NOWARN);
+
+	if (!htab->buckets) {
+		htab->buckets = vmalloc(htab->n_buckets * sizeof(struct bucket));
+		if (!htab->buckets)
+			goto free_htab;
+	}
 
 	for (i = 0; i < htab->n_buckets; i++) {
 		INIT_HLIST_HEAD(&htab->buckets[i].head);
 		raw_spin_lock_init(&htab->buckets[i].lock);
 	}
 
-	if (!percpu) {
-		err = alloc_extra_elems(htab);
+	if (!(attr->map_flags & BPF_F_NO_PREALLOC)) {
+		err = prealloc_elems_and_freelist(htab);
 		if (err)
 			goto free_buckets;
 	}
 
-	if (!(attr->map_flags & BPF_F_NO_PREALLOC)) {
-		err = prealloc_elems_and_freelist(htab);
-		if (err)
-			goto free_extra_elems;
-	}
-
 	return &htab->map;
 
-free_extra_elems:
-	free_percpu(htab->extra_elems);
 free_buckets:
-	bpf_map_area_free(htab->buckets);
+	kvfree(htab->buckets);
 free_htab:
 	kfree(htab);
 	return ERR_PTR(err);
@@ -326,14 +293,11 @@ static int htab_map_get_next_key(struct bpf_map *map, void *key, void *next_key)
 	struct hlist_head *head;
 	struct htab_elem *l, *next_l;
 	u32 hash, key_size;
-	int i = 0;
+	int i;
 
 	WARN_ON_ONCE(!rcu_read_lock_held());
 
 	key_size = map->key_size;
-
-	if (!key)
-		goto find_first_elem;
 
 	hash = htab_map_hash(key, key_size);
 
@@ -342,8 +306,10 @@ static int htab_map_get_next_key(struct bpf_map *map, void *key, void *next_key)
 	/* lookup the key */
 	l = lookup_elem_raw(head, hash, key, key_size);
 
-	if (!l)
+	if (!l) {
+		i = 0;
 		goto find_first_elem;
+	}
 
 	/* key was found, get next key in the same bucket */
 	next_l = hlist_entry_safe(rcu_dereference_raw(hlist_next_rcu(&l->hash_node)),
@@ -383,6 +349,7 @@ static void htab_elem_free(struct bpf_htab *htab, struct htab_elem *l)
 	if (htab->map.map_type == BPF_MAP_TYPE_PERCPU_HASH)
 		free_percpu(htab_elem_get_ptr(l, htab->map.key_size));
 	kfree(l);
+
 }
 
 static void htab_elem_free_rcu(struct rcu_head *head)
@@ -403,11 +370,6 @@ static void htab_elem_free_rcu(struct rcu_head *head)
 
 static void free_htab_elem(struct bpf_htab *htab, struct htab_elem *l)
 {
-	if (l->state == HTAB_EXTRA_ELEM_USED) {
-		l->state = HTAB_EXTRA_ELEM_FREE;
-		return;
-	}
-
 	if (!(htab->map.map_flags & BPF_F_NO_PREALLOC)) {
 		pcpu_freelist_push(&htab->freelist, &l->fnode);
 	} else {
@@ -419,44 +381,25 @@ static void free_htab_elem(struct bpf_htab *htab, struct htab_elem *l)
 
 static struct htab_elem *alloc_htab_elem(struct bpf_htab *htab, void *key,
 					 void *value, u32 key_size, u32 hash,
-					 bool percpu, bool onallcpus,
-					 bool old_elem_exists)
+					 bool percpu, bool onallcpus)
 {
 	u32 size = htab->map.value_size;
 	bool prealloc = !(htab->map.map_flags & BPF_F_NO_PREALLOC);
 	struct htab_elem *l_new;
 	void __percpu *pptr;
-	int err = 0;
 
 	if (prealloc) {
 		l_new = (struct htab_elem *)pcpu_freelist_pop(&htab->freelist);
 		if (!l_new)
-			err = -E2BIG;
+			return ERR_PTR(-E2BIG);
 	} else {
 		if (atomic_inc_return(&htab->count) > htab->map.max_entries) {
 			atomic_dec(&htab->count);
-			err = -E2BIG;
-		} else {
-			l_new = kmalloc(htab->elem_size,
-					GFP_ATOMIC | __GFP_NOWARN);
-			if (!l_new)
-				return ERR_PTR(-ENOMEM);
-		}
-	}
-
-	if (err) {
-		if (!old_elem_exists)
-			return ERR_PTR(err);
-
-		/* if we're updating the existing element and the hash table
-		 * is full, use per-cpu extra elems
-		 */
-		l_new = this_cpu_ptr(htab->extra_elems);
-		if (l_new->state != HTAB_EXTRA_ELEM_FREE)
 			return ERR_PTR(-E2BIG);
-		l_new->state = HTAB_EXTRA_ELEM_USED;
-	} else {
-		l_new->state = HTAB_NOT_AN_EXTRA_ELEM;
+		}
+		l_new = kmalloc(htab->elem_size, GFP_ATOMIC | __GFP_NOWARN);
+		if (!l_new)
+			return ERR_PTR(-ENOMEM);
 	}
 
 	memcpy(l_new->key, key, key_size);
@@ -546,8 +489,7 @@ static int htab_map_update_elem(struct bpf_map *map, void *key, void *value,
 	if (ret)
 		goto err;
 
-	l_new = alloc_htab_elem(htab, key, value, key_size, hash, false, false,
-				!!l_old);
+	l_new = alloc_htab_elem(htab, key, value, key_size, hash, false, false);
 	if (IS_ERR(l_new)) {
 		/* all pre-allocated elements are in use or memory exhausted */
 		ret = PTR_ERR(l_new);
@@ -621,7 +563,7 @@ static int __htab_percpu_map_update_elem(struct bpf_map *map, void *key,
 		}
 	} else {
 		l_new = alloc_htab_elem(htab, key, value, key_size,
-					hash, true, onallcpus, false);
+					hash, true, onallcpus);
 		if (IS_ERR(l_new)) {
 			ret = PTR_ERR(l_new);
 			goto err;
@@ -684,8 +626,7 @@ static void delete_all_elements(struct bpf_htab *htab)
 
 		hlist_for_each_entry_safe(l, n, head, hash_node) {
 			hlist_del_rcu(&l->hash_node);
-			if (l->state != HTAB_EXTRA_ELEM_USED)
-				htab_elem_free(htab, l);
+			htab_elem_free(htab, l);
 		}
 	}
 }
@@ -711,8 +652,7 @@ static void htab_map_free(struct bpf_map *map)
 		htab_free_elems(htab);
 		pcpu_freelist_destroy(&htab->freelist);
 	}
-	free_percpu(htab->extra_elems);
-	bpf_map_area_free(htab->buckets);
+	kvfree(htab->buckets);
 	kfree(htab);
 }
 

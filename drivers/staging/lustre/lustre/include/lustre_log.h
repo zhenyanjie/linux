@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -277,11 +281,12 @@ static inline void llog_ctxt_put(struct llog_ctxt *ctxt)
 	__llog_ctxt_put(NULL, ctxt);
 }
 
-static inline void llog_group_init(struct obd_llog_group *olg)
+static inline void llog_group_init(struct obd_llog_group *olg, int group)
 {
 	init_waitqueue_head(&olg->olg_waitq);
 	spin_lock_init(&olg->olg_lock);
 	mutex_init(&olg->olg_cat_processing);
+	olg->olg_seq = group;
 }
 
 static inline int llog_group_set_ctxt(struct obd_llog_group *olg,

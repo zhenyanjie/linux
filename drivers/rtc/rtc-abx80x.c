@@ -643,15 +643,17 @@ static int abx80x_probe(struct i2c_client *client,
 		return err;
 	}
 
-	err = devm_add_action_or_reset(&client->dev,
-				       rtc_calib_remove_sysfs_group,
-				       &client->dev);
-	if (err)
+	err = devm_add_action(&client->dev, rtc_calib_remove_sysfs_group,
+			      &client->dev);
+	if (err) {
+		rtc_calib_remove_sysfs_group(&client->dev);
 		dev_err(&client->dev,
 			"Failed to add sysfs cleanup action: %d\n",
 			err);
+		return err;
+	}
 
-	return err;
+	return 0;
 }
 
 static int abx80x_remove(struct i2c_client *client)

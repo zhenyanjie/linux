@@ -94,12 +94,6 @@ nfsd_cross_mnt(struct svc_rqst *rqstp, struct dentry **dpp,
 	err = follow_down(&path);
 	if (err < 0)
 		goto out;
-	if (path.mnt == exp->ex_path.mnt && path.dentry == dentry &&
-	    nfsd_mountpoint(dentry, exp) == 2) {
-		/* This is only a mountpoint in some other namespace */
-		path_put(&path);
-		goto out;
-	}
 
 	exp2 = rqst_exp_get_by_name(rqstp, &path);
 	if (IS_ERR(exp2)) {
@@ -173,26 +167,16 @@ static int nfsd_lookup_parent(struct svc_rqst *rqstp, struct dentry *dparent, st
 /*
  * For nfsd purposes, we treat V4ROOT exports as though there was an
  * export at *every* directory.
- * We return:
- * '1' if this dentry *must* be an export point,
- * '2' if it might be, if there is really a mount here, and
- * '0' if there is no chance of an export point here.
  */
 int nfsd_mountpoint(struct dentry *dentry, struct svc_export *exp)
 {
-	if (!d_inode(dentry))
-		return 0;
-	if (exp->ex_flags & NFSEXP_V4ROOT)
+	if (d_mountpoint(dentry))
 		return 1;
 	if (nfsd4_is_junction(dentry))
 		return 1;
-	if (d_mountpoint(dentry))
-		/*
-		 * Might only be a mountpoint in a different namespace,
-		 * but we need to check.
-		 */
-		return 2;
-	return 0;
+	if (!(exp->ex_flags & NFSEXP_V4ROOT))
+		return 0;
+	return d_inode(dentry) != NULL;
 }
 
 __be32
@@ -393,7 +377,7 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 	__be32		err;
 	int		host_err;
 	bool		get_write_count;
-	bool		size_change = (iap->ia_valid & ATTR_SIZE);
+	int		size_change = 0;
 
 	if (iap->ia_valid & (ATTR_ATIME | ATTR_MTIME | ATTR_SIZE))
 		accmode |= NFSD_MAY_WRITE|NFSD_MAY_OWNER_OVERRIDE;
@@ -406,11 +390,11 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 	/* Get inode */
 	err = fh_verify(rqstp, fhp, ftype, accmode);
 	if (err)
-		return err;
+		goto out;
 	if (get_write_count) {
 		host_err = fh_want_write(fhp);
 		if (host_err)
-			goto out;
+			return nfserrno(host_err);
 	}
 
 	dentry = fhp->fh_dentry;
@@ -421,28 +405,20 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 		iap->ia_valid &= ~ATTR_MODE;
 
 	if (!iap->ia_valid)
-		return 0;
+		goto out;
 
 	nfsd_sanitize_attrs(inode, iap);
 
-	if (check_guard && guardtime != inode->i_ctime.tv_sec)
-		return nfserr_notsync;
-
 	/*
 	 * The size case is special, it changes the file in addition to the
-	 * attributes, and file systems don't expect it to be mixed with
-	 * "random" attribute changes.  We thus split out the size change
-	 * into a separate call to ->setattr, and do the rest as a separate
-	 * setattr call.
+	 * attributes.
 	 */
-	if (size_change) {
+	if (iap->ia_valid & ATTR_SIZE) {
 		err = nfsd_get_write_access(rqstp, fhp, iap);
 		if (err)
-			return err;
-	}
+			goto out;
+		size_change = 1;
 
-	fh_lock(fhp);
-	if (size_change) {
 		/*
 		 * RFC5661, Section 18.30.4:
 		 *   Changing the size of a file with SETATTR indirectly
@@ -450,36 +426,29 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 		 *
 		 * (and similar for the older RFCs)
 		 */
-		struct iattr size_attr = {
-			.ia_valid	= ATTR_SIZE | ATTR_CTIME | ATTR_MTIME,
-			.ia_size	= iap->ia_size,
-		};
-
-		host_err = notify_change(dentry, &size_attr, NULL);
-		if (host_err)
-			goto out_unlock;
-		iap->ia_valid &= ~ATTR_SIZE;
-
-		/*
-		 * Avoid the additional setattr call below if the only other
-		 * attribute that the client sends is the mtime, as we update
-		 * it as part of the size change above.
-		 */
-		if ((iap->ia_valid & ~ATTR_MTIME) == 0)
-			goto out_unlock;
+		if (iap->ia_size != i_size_read(inode))
+			iap->ia_valid |= ATTR_MTIME;
 	}
 
 	iap->ia_valid |= ATTR_CTIME;
-	host_err = notify_change(dentry, iap, NULL);
 
-out_unlock:
+	if (check_guard && guardtime != inode->i_ctime.tv_sec) {
+		err = nfserr_notsync;
+		goto out_put_write_access;
+	}
+
+	fh_lock(fhp);
+	host_err = notify_change(dentry, iap, NULL);
 	fh_unlock(fhp);
+	err = nfserrno(host_err);
+
+out_put_write_access:
 	if (size_change)
 		put_write_access(inode);
+	if (!err)
+		err = nfserrno(commit_metadata(fhp));
 out:
-	if (!host_err)
-		host_err = commit_metadata(fhp);
-	return nfserrno(host_err);
+	return err;
 }
 
 #if defined(CONFIG_NFSD_V4)
@@ -542,22 +511,6 @@ __be32 nfsd4_clone_file_range(struct file *src, u64 src_pos, struct file *dst,
 {
 	return nfserrno(vfs_clone_file_range(src, src_pos, dst, dst_pos,
 			count));
-}
-
-ssize_t nfsd_copy_file_range(struct file *src, u64 src_pos, struct file *dst,
-			     u64 dst_pos, u64 count)
-{
-
-	/*
-	 * Limit copy to 4MB to prevent indefinitely blocking an nfsd
-	 * thread and client rpc slot.  The choice of 4MB is somewhat
-	 * arbitrary.  We might instead base this on r/wsize, or make it
-	 * tunable, or use a time instead of a byte limit, or implement
-	 * asynchronous copy.  In theory a client could also recognize a
-	 * limit like this and pipeline multiple COPY requests.
-	 */
-	count = min_t(u64, count, 1 << 22);
-	return vfs_copy_file_range(src, src_pos, dst, dst_pos, count, 0);
 }
 
 __be32 nfsd4_vfs_fallocate(struct svc_rqst *rqstp, struct svc_fh *fhp,
@@ -1182,37 +1135,96 @@ nfsd_check_ignore_resizing(struct iattr *iap)
 		iap->ia_valid &= ~ATTR_SIZE;
 }
 
-/* The parent directory should already be locked: */
+/*
+ * Create a file (regular, directory, device, fifo); UNIX sockets 
+ * not yet implemented.
+ * If the response fh has been verified, the parent directory should
+ * already be locked. Note that the parent directory is left locked.
+ *
+ * N.B. Every call to nfsd_create needs an fh_put for _both_ fhp and resfhp
+ */
 __be32
-nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
+nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 		char *fname, int flen, struct iattr *iap,
 		int type, dev_t rdev, struct svc_fh *resfhp)
 {
-	struct dentry	*dentry, *dchild;
+	struct dentry	*dentry, *dchild = NULL;
 	struct inode	*dirp;
 	__be32		err;
 	__be32		err2;
 	int		host_err;
 
+	err = nfserr_perm;
+	if (!flen)
+		goto out;
+	err = nfserr_exist;
+	if (isdotent(fname, flen))
+		goto out;
+
+	err = fh_verify(rqstp, fhp, S_IFDIR, NFSD_MAY_CREATE);
+	if (err)
+		goto out;
+
 	dentry = fhp->fh_dentry;
 	dirp = d_inode(dentry);
 
-	dchild = dget(resfhp->fh_dentry);
-	if (!fhp->fh_locked) {
-		WARN_ONCE(1, "nfsd_create: parent %pd2 not locked!\n",
-				dentry);
-		err = nfserr_io;
+	err = nfserr_notdir;
+	if (!dirp->i_op->lookup)
 		goto out;
-	}
+	/*
+	 * Check whether the response file handle has been verified yet.
+	 * If it has, the parent directory should already be locked.
+	 */
+	if (!resfhp->fh_dentry) {
+		host_err = fh_want_write(fhp);
+		if (host_err)
+			goto out_nfserr;
 
-	err = nfsd_permission(rqstp, fhp->fh_export, dentry, NFSD_MAY_CREATE);
-	if (err)
-		goto out;
+		/* called from nfsd_proc_mkdir, or possibly nfsd3_proc_create */
+		fh_lock_nested(fhp, I_MUTEX_PARENT);
+		dchild = lookup_one_len(fname, dentry, flen);
+		host_err = PTR_ERR(dchild);
+		if (IS_ERR(dchild))
+			goto out_nfserr;
+		err = fh_compose(resfhp, fhp->fh_export, dchild, fhp);
+		if (err)
+			goto out;
+	} else {
+		/* called from nfsd_proc_create */
+		dchild = dget(resfhp->fh_dentry);
+		if (!fhp->fh_locked) {
+			/* not actually possible */
+			printk(KERN_ERR
+				"nfsd_create: parent %pd2 not locked!\n",
+				dentry);
+			err = nfserr_io;
+			goto out;
+		}
+	}
+	/*
+	 * Make sure the child dentry is still negative ...
+	 */
+	err = nfserr_exist;
+	if (d_really_is_positive(dchild)) {
+		dprintk("nfsd_create: dentry %pd/%pd not negative!\n",
+			dentry, dchild);
+		goto out; 
+	}
 
 	if (!(iap->ia_valid & ATTR_MODE))
 		iap->ia_mode = 0;
 	iap->ia_mode = (iap->ia_mode & S_IALLUGO) | type;
 
+	err = nfserr_inval;
+	if (!S_ISREG(type) && !S_ISDIR(type) && !special_file(type)) {
+		printk(KERN_WARNING "nfsd: bad file type %o in nfsd_create\n",
+		       type);
+		goto out;
+	}
+
+	/*
+	 * Get the dir op function pointer.
+	 */
 	err = 0;
 	host_err = 0;
 	switch (type) {
@@ -1230,10 +1242,6 @@ nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	case S_IFSOCK:
 		host_err = vfs_mknod(dirp, dchild, iap->ia_mode, rdev);
 		break;
-	default:
-		printk(KERN_WARNING "nfsd: bad file type %o in nfsd_create\n",
-		       type);
-		host_err = -EINVAL;
 	}
 	if (host_err < 0)
 		goto out_nfserr;
@@ -1243,7 +1251,7 @@ nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	/*
 	 * nfsd_create_setattr already committed the child.  Transactional
 	 * filesystems had a chance to commit changes for both parent and
-	 * child simultaneously making the following commit_metadata a
+	 * child * simultaneously making the following commit_metadata a
 	 * noop.
 	 */
 	err2 = nfserrno(commit_metadata(fhp));
@@ -1255,59 +1263,13 @@ nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	if (!err)
 		err = fh_update(resfhp);
 out:
-	dput(dchild);
+	if (dchild && !IS_ERR(dchild))
+		dput(dchild);
 	return err;
 
 out_nfserr:
 	err = nfserrno(host_err);
 	goto out;
-}
-
-/*
- * Create a filesystem object (regular, directory, special).
- * Note that the parent directory is left locked.
- *
- * N.B. Every call to nfsd_create needs an fh_put for _both_ fhp and resfhp
- */
-__be32
-nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
-		char *fname, int flen, struct iattr *iap,
-		int type, dev_t rdev, struct svc_fh *resfhp)
-{
-	struct dentry	*dentry, *dchild = NULL;
-	struct inode	*dirp;
-	__be32		err;
-	int		host_err;
-
-	if (isdotent(fname, flen))
-		return nfserr_exist;
-
-	err = fh_verify(rqstp, fhp, S_IFDIR, NFSD_MAY_NOP);
-	if (err)
-		return err;
-
-	dentry = fhp->fh_dentry;
-	dirp = d_inode(dentry);
-
-	host_err = fh_want_write(fhp);
-	if (host_err)
-		return nfserrno(host_err);
-
-	fh_lock_nested(fhp, I_MUTEX_PARENT);
-	dchild = lookup_one_len(fname, dentry, flen);
-	host_err = PTR_ERR(dchild);
-	if (IS_ERR(dchild))
-		return nfserrno(host_err);
-	err = fh_compose(resfhp, fhp->fh_export, dchild, fhp);
-	/*
-	 * We unconditionally drop our ref to dchild as fh_compose will have
-	 * already grabbed its own ref for it.
-	 */
-	dput(dchild);
-	if (err)
-		return err;
-	return nfsd_create_locked(rqstp, fhp, fname, flen, iap, type,
-					rdev, resfhp);
 }
 
 #ifdef CONFIG_NFSD_V3
@@ -1341,6 +1303,12 @@ do_nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 
 	dentry = fhp->fh_dentry;
 	dirp = d_inode(dentry);
+
+	/* Get all the sanity checks out of the way before
+	 * we lock the parent. */
+	err = nfserr_notdir;
+	if (!dirp->i_op->lookup)
+		goto out;
 
 	host_err = fh_want_write(fhp);
 	if (host_err)

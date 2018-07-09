@@ -127,7 +127,9 @@ int show_interrupts(struct seq_file *p, void *v)
 			seq_printf(p, "CPU%d       ", cpu);
 		seq_putc(p, '\n');
 	}
-	if (index < NR_IRQS_BASE) {
+	if (index < NR_IRQS) {
+		if (index >= NR_IRQS_BASE)
+			goto out;
 		seq_printf(p, "%s: ", irqclass_main_desc[index].name);
 		irq = irqclass_main_desc[index].irq;
 		for_each_online_cpu(cpu)
@@ -135,9 +137,6 @@ int show_interrupts(struct seq_file *p, void *v)
 		seq_putc(p, '\n');
 		goto out;
 	}
-	if (index > NR_IRQS_BASE)
-		goto out;
-
 	for (index = 0; index < NR_ARCH_IRQS; index++) {
 		seq_printf(p, "%s: ", irqclass_sub_desc[index].name);
 		irq = irqclass_sub_desc[index].irq;
@@ -173,9 +172,10 @@ void do_softirq_own_stack(void)
 		new -= STACK_FRAME_OVERHEAD;
 		((struct stack_frame *) new)->back_chain = old;
 		asm volatile("   la    15,0(%0)\n"
-			     "   brasl 14,__do_softirq\n"
+			     "   basr  14,%2\n"
 			     "   la    15,0(%1)\n"
-			     : : "a" (new), "a" (old)
+			     : : "a" (new), "a" (old),
+			         "a" (__do_softirq)
 			     : "0", "1", "2", "3", "4", "5", "14",
 			       "cc", "memory" );
 	} else {

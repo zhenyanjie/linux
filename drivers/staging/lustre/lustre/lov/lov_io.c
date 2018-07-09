@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -87,9 +91,6 @@ static void lov_io_sub_inherit(struct cl_io *io, struct lov_io *lio,
 	case CIT_SETATTR: {
 		io->u.ci_setattr.sa_attr = parent->u.ci_setattr.sa_attr;
 		io->u.ci_setattr.sa_valid = parent->u.ci_setattr.sa_valid;
-		io->u.ci_setattr.sa_stripe_index = stripe;
-		io->u.ci_setattr.sa_parent_fid =
-					parent->u.ci_setattr.sa_parent_fid;
 		if (cl_io_is_trunc(io)) {
 			loff_t new_size = parent->u.ci_setattr.sa_attr.lvb_size;
 
@@ -247,12 +248,14 @@ void lov_sub_put(struct lov_io_sub *sub)
 
 int lov_page_stripe(const struct cl_page *page)
 {
+	struct lovsub_object *subobj;
 	const struct cl_page_slice *slice;
 
-	slice = cl_page_at(page, &lov_device_type);
+	slice = cl_page_at(page, &lovsub_device_type);
 	LASSERT(slice->cpl_obj);
 
-	return cl2lov_page(slice)->lps_stripe;
+	subobj = cl2lovsub(slice->cpl_obj);
+	return subobj->lso_index;
 }
 
 struct lov_io_sub *lov_page_subio(const struct lu_env *env, struct lov_io *lio,
@@ -299,8 +302,8 @@ static int lov_io_subio_init(const struct lu_env *env, struct lov_io *lio,
 	return result;
 }
 
-static int lov_io_slice_init(struct lov_io *lio, struct lov_object *obj,
-			     struct cl_io *io)
+static void lov_io_slice_init(struct lov_io *lio,
+			      struct lov_object *obj, struct cl_io *io)
 {
 	io->ci_result = 0;
 	lio->lis_object = obj;
@@ -315,15 +318,6 @@ static int lov_io_slice_init(struct lov_io *lio, struct lov_object *obj,
 		lio->lis_io_endpos = lio->lis_endpos;
 		if (cl_io_is_append(io)) {
 			LASSERT(io->ci_type == CIT_WRITE);
-
-			/*
-			 * If there is LOV EA hole, then we may cannot locate
-			 * the current file-tail exactly.
-			 */
-			if (unlikely(obj->lo_lsm->lsm_pattern &
-				     LOV_PATTERN_F_HOLE))
-				return -EIO;
-
 			lio->lis_pos = 0;
 			lio->lis_endpos = OBD_OBJECT_EOF;
 		}
@@ -359,7 +353,6 @@ static int lov_io_slice_init(struct lov_io *lio, struct lov_object *obj,
 	default:
 		LBUG();
 	}
-	return 0;
 }
 
 static void lov_io_fini(const struct lu_env *env, const struct cl_io_slice *ios)
@@ -881,7 +874,7 @@ int lov_io_init_raid0(const struct lu_env *env, struct cl_object *obj,
 	struct lov_object   *lov = cl2lov(obj);
 
 	INIT_LIST_HEAD(&lio->lis_active);
-	io->ci_result = lov_io_slice_init(lio, lov, io);
+	lov_io_slice_init(lio, lov, io);
 	if (io->ci_result == 0) {
 		io->ci_result = lov_io_subio_init(env, lio, io);
 		if (io->ci_result == 0) {

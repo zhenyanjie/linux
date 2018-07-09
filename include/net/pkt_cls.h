@@ -59,8 +59,7 @@ tcf_unbind_filter(struct tcf_proto *tp, struct tcf_result *r)
 struct tcf_exts {
 #ifdef CONFIG_NET_CLS_ACT
 	__u32	type; /* for backward compat(TCA_OLD_COMPAT) */
-	int nr_actions;
-	struct tc_action **actions;
+	struct list_head actions;
 #endif
 	/* Map to export classifier specific extension TLV types to the
 	 * generic extensions API. Unsupported extensions must be set to 0.
@@ -69,19 +68,14 @@ struct tcf_exts {
 	int police;
 };
 
-static inline int tcf_exts_init(struct tcf_exts *exts, int action, int police)
+static inline void tcf_exts_init(struct tcf_exts *exts, int action, int police)
 {
 #ifdef CONFIG_NET_CLS_ACT
 	exts->type = 0;
-	exts->nr_actions = 0;
-	exts->actions = kcalloc(TCA_ACT_MAX_PRIO, sizeof(struct tc_action *),
-				GFP_KERNEL);
-	if (!exts->actions)
-		return -ENOMEM;
+	INIT_LIST_HEAD(&exts->actions);
 #endif
 	exts->action = action;
 	exts->police = police;
-	return 0;
 }
 
 /**
@@ -95,7 +89,7 @@ static inline int
 tcf_exts_is_predicative(struct tcf_exts *exts)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	return exts->nr_actions;
+	return !list_empty(&exts->actions);
 #else
 	return 0;
 #endif
@@ -114,20 +108,6 @@ tcf_exts_is_available(struct tcf_exts *exts)
 	return tcf_exts_is_predicative(exts);
 }
 
-static inline void tcf_exts_to_list(const struct tcf_exts *exts,
-				    struct list_head *actions)
-{
-#ifdef CONFIG_NET_CLS_ACT
-	int i;
-
-	for (i = 0; i < exts->nr_actions; i++) {
-		struct tc_action *a = exts->actions[i];
-
-		list_add_tail(&a->list, actions);
-	}
-#endif
-}
-
 /**
  * tcf_exts_exec - execute tc filter extensions
  * @skb: socket buffer
@@ -144,24 +124,11 @@ tcf_exts_exec(struct sk_buff *skb, struct tcf_exts *exts,
 	       struct tcf_result *res)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	if (exts->nr_actions)
-		return tcf_action_exec(skb, exts->actions, exts->nr_actions,
-				       res);
+	if (!list_empty(&exts->actions))
+		return tcf_action_exec(skb, &exts->actions, res);
 #endif
 	return 0;
 }
-
-#ifdef CONFIG_NET_CLS_ACT
-
-#define tc_no_actions(_exts)  ((_exts)->nr_actions == 0)
-#define tc_single_action(_exts) ((_exts)->nr_actions == 1)
-
-#else /* CONFIG_NET_CLS_ACT */
-
-#define tc_no_actions(_exts) true
-#define tc_single_action(_exts) false
-
-#endif /* CONFIG_NET_CLS_ACT */
 
 int tcf_exts_validate(struct net *net, struct tcf_proto *tp,
 		      struct nlattr **tb, struct nlattr *rate_tlv,
@@ -473,33 +440,6 @@ struct tc_cls_flower_offload {
 	struct fl_flow_key *mask;
 	struct fl_flow_key *key;
 	struct tcf_exts *exts;
-};
-
-enum tc_matchall_command {
-	TC_CLSMATCHALL_REPLACE,
-	TC_CLSMATCHALL_DESTROY,
-};
-
-struct tc_cls_matchall_offload {
-	enum tc_matchall_command command;
-	struct tcf_exts *exts;
-	unsigned long cookie;
-};
-
-enum tc_clsbpf_command {
-	TC_CLSBPF_ADD,
-	TC_CLSBPF_REPLACE,
-	TC_CLSBPF_DESTROY,
-	TC_CLSBPF_STATS,
-};
-
-struct tc_cls_bpf_offload {
-	enum tc_clsbpf_command command;
-	struct tcf_exts *exts;
-	struct bpf_prog *prog;
-	const char *name;
-	bool exts_integrated;
-	u32 gen_flags;
 };
 
 #endif

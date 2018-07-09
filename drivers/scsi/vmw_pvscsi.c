@@ -17,7 +17,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
  *
- * Maintained by: Jim Gill <jgill@vmware.com>
+ * Maintained by: Arvind Kumar <arvindkumar@vmware.com>
  *
  */
 
@@ -793,7 +793,6 @@ static int pvscsi_abort(struct scsi_cmnd *cmd)
 	unsigned long flags;
 	int result = SUCCESS;
 	DECLARE_COMPLETION_ONSTACK(abort_cmp);
-	int done;
 
 	scmd_printk(KERN_DEBUG, cmd, "task abort on host %u, %p\n",
 		    adapter->host->host_no, cmd);
@@ -825,10 +824,10 @@ static int pvscsi_abort(struct scsi_cmnd *cmd)
 	pvscsi_abort_cmd(adapter, ctx);
 	spin_unlock_irqrestore(&adapter->hw_lock, flags);
 	/* Wait for 2 secs for the completion. */
-	done = wait_for_completion_timeout(&abort_cmp, msecs_to_jiffies(2000));
+	wait_for_completion_timeout(&abort_cmp, msecs_to_jiffies(2000));
 	spin_lock_irqsave(&adapter->hw_lock, flags);
 
-	if (!done) {
+	if (!completion_done(&abort_cmp)) {
 		/*
 		 * Failed to abort the command, unmark the fact that it
 		 * was requested to be aborted.

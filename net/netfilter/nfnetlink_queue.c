@@ -443,7 +443,7 @@ nfqnl_build_packet_message(struct net *net, struct nfqnl_instance *queue,
 	skb = alloc_skb(size, GFP_ATOMIC);
 	if (!skb) {
 		skb_tx_error(entskb);
-		goto nlmsg_failure;
+		return NULL;
 	}
 
 	nlh = nlmsg_put(skb, 0, 0,
@@ -452,7 +452,7 @@ nfqnl_build_packet_message(struct net *net, struct nfqnl_instance *queue,
 	if (!nlh) {
 		skb_tx_error(entskb);
 		kfree_skb(skb);
-		goto nlmsg_failure;
+		return NULL;
 	}
 	nfmsg = nlmsg_data(nlh);
 	nfmsg->nfgen_family = entry->state.pf;
@@ -598,17 +598,12 @@ nfqnl_build_packet_message(struct net *net, struct nfqnl_instance *queue,
 	}
 
 	nlh->nlmsg_len = skb->len;
-	if (seclen)
-		security_release_secctx(secdata, seclen);
 	return skb;
 
 nla_put_failure:
 	skb_tx_error(entskb);
 	kfree_skb(skb);
 	net_err_ratelimited("nf_queue: error creating packet message\n");
-nlmsg_failure:
-	if (seclen)
-		security_release_secctx(secdata, seclen);
 	return NULL;
 }
 
@@ -745,7 +740,7 @@ nfqnl_enqueue_packet(struct nf_queue_entry *entry, unsigned int queuenum)
 	struct net *net = entry->state.net;
 	struct nfnl_queue_net *q = nfnl_queue_pernet(net);
 
-	/* rcu_read_lock()ed by nf_hook_thresh */
+	/* rcu_read_lock()ed by nf_hook_slow() */
 	queue = instance_lookup(q, queuenum);
 	if (!queue)
 		return -ESRCH;
@@ -922,14 +917,12 @@ static struct notifier_block nfqnl_dev_notifier = {
 	.notifier_call	= nfqnl_rcv_dev_event,
 };
 
-static int nf_hook_cmp(struct nf_queue_entry *entry, unsigned long entry_ptr)
+static int nf_hook_cmp(struct nf_queue_entry *entry, unsigned long ops_ptr)
 {
-	return rcu_access_pointer(entry->state.hook_entries) ==
-		(struct nf_hook_entry *)entry_ptr;
+	return entry->elem == (struct nf_hook_ops *)ops_ptr;
 }
 
-static void nfqnl_nf_hook_drop(struct net *net,
-			       const struct nf_hook_entry *hook)
+static void nfqnl_nf_hook_drop(struct net *net, struct nf_hook_ops *hook)
 {
 	struct nfnl_queue_net *q = nfnl_queue_pernet(net);
 	int i;
@@ -1152,8 +1145,10 @@ static int nfqnl_recv_verdict(struct net *net, struct sock *ctnl,
 	struct nfnl_queue_net *q = nfnl_queue_pernet(net);
 	int err;
 
-	queue = verdict_instance_lookup(q, queue_num,
-					NETLINK_CB(skb).portid);
+	queue = instance_lookup(q, queue_num);
+	if (!queue)
+		queue = verdict_instance_lookup(q, queue_num,
+						NETLINK_CB(skb).portid);
 	if (IS_ERR(queue))
 		return PTR_ERR(queue);
 
@@ -1529,16 +1524,9 @@ static int __init nfnetlink_queue_init(void)
 		goto cleanup_netlink_notifier;
 	}
 
-	status = register_netdevice_notifier(&nfqnl_dev_notifier);
-	if (status < 0) {
-		pr_err("nf_queue: failed to register netdevice notifier\n");
-		goto cleanup_netlink_subsys;
-	}
-
+	register_netdevice_notifier(&nfqnl_dev_notifier);
 	return status;
 
-cleanup_netlink_subsys:
-	nfnetlink_subsys_unregister(&nfqnl_subsys);
 cleanup_netlink_notifier:
 	netlink_unregister_notifier(&nfqnl_rtnl_notifier);
 	unregister_pernet_subsys(&nfnl_queue_net_ops);

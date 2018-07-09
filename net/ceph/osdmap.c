@@ -295,7 +295,6 @@ static struct crush_map *crush_decode(void *pbyval, void *end)
 		u32 yes;
 		struct crush_rule *r;
 
-		err = -EINVAL;
 		ceph_decode_32_safe(p, end, yes, bad);
 		if (!yes) {
 			dout("crush_decode NO rule %d off %x %p to %p\n",
@@ -1335,6 +1334,7 @@ static int decode_new_up_state_weight(void **p, void *end,
 		if ((map->osd_state[osd] & CEPH_OSD_EXISTS) &&
 		    (xorstate & CEPH_OSD_EXISTS)) {
 			pr_info("osd%d does not exist\n", osd);
+			map->osd_weight[osd] = CEPH_OSD_IN;
 			ret = set_primary_affinity(map, osd,
 						   CEPH_OSD_DEFAULT_PRIMARY_AFFINITY);
 			if (ret)
@@ -1509,24 +1509,6 @@ bad:
 		crush_destroy(newcrush);
 	return ERR_PTR(err);
 }
-
-void ceph_oloc_copy(struct ceph_object_locator *dest,
-		    const struct ceph_object_locator *src)
-{
-	WARN_ON(!ceph_oloc_empty(dest));
-	WARN_ON(dest->pool_ns); /* empty() only covers ->pool */
-
-	dest->pool = src->pool;
-	if (src->pool_ns)
-		dest->pool_ns = ceph_get_string(src->pool_ns);
-}
-EXPORT_SYMBOL(ceph_oloc_copy);
-
-void ceph_oloc_destroy(struct ceph_object_locator *oloc)
-{
-	ceph_put_string(oloc->pool_ns);
-}
-EXPORT_SYMBOL(ceph_oloc_destroy);
 
 void ceph_oid_copy(struct ceph_object_id *dest,
 		   const struct ceph_object_id *src)
@@ -1788,9 +1770,9 @@ int ceph_calc_file_object_mapping(struct ceph_file_layout *layout,
 				   u64 *ono,
 				   u64 *oxoff, u64 *oxlen)
 {
-	u32 osize = layout->object_size;
-	u32 su = layout->stripe_unit;
-	u32 sc = layout->stripe_count;
+	u32 osize = le32_to_cpu(layout->fl_object_size);
+	u32 su = le32_to_cpu(layout->fl_stripe_unit);
+	u32 sc = le32_to_cpu(layout->fl_stripe_count);
 	u32 bl, stripeno, stripepos, objsetno;
 	u32 su_per_object;
 	u64 t, su_offset;
@@ -1862,34 +1844,12 @@ int ceph_object_locator_to_pg(struct ceph_osdmap *osdmap,
 	if (!pi)
 		return -ENOENT;
 
-	if (!oloc->pool_ns) {
-		raw_pgid->pool = oloc->pool;
-		raw_pgid->seed = ceph_str_hash(pi->object_hash, oid->name,
-					     oid->name_len);
-		dout("%s %s -> raw_pgid %llu.%x\n", __func__, oid->name,
-		     raw_pgid->pool, raw_pgid->seed);
-	} else {
-		char stack_buf[256];
-		char *buf = stack_buf;
-		int nsl = oloc->pool_ns->len;
-		size_t total = nsl + 1 + oid->name_len;
+	raw_pgid->pool = oloc->pool;
+	raw_pgid->seed = ceph_str_hash(pi->object_hash, oid->name,
+				       oid->name_len);
 
-		if (total > sizeof(stack_buf)) {
-			buf = kmalloc(total, GFP_NOIO);
-			if (!buf)
-				return -ENOMEM;
-		}
-		memcpy(buf, oloc->pool_ns->str, nsl);
-		buf[nsl] = '\037';
-		memcpy(buf + nsl + 1, oid->name, oid->name_len);
-		raw_pgid->pool = oloc->pool;
-		raw_pgid->seed = ceph_str_hash(pi->object_hash, buf, total);
-		if (buf != stack_buf)
-			kfree(buf);
-		dout("%s %s ns %.*s -> raw_pgid %llu.%x\n", __func__,
-		     oid->name, nsl, oloc->pool_ns->str,
-		     raw_pgid->pool, raw_pgid->seed);
-	}
+	dout("%s %s -> raw_pgid %llu.%x\n", __func__, oid->name,
+	     raw_pgid->pool, raw_pgid->seed);
 	return 0;
 }
 EXPORT_SYMBOL(ceph_object_locator_to_pg);

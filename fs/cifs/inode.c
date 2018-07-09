@@ -701,18 +701,6 @@ cgfi_exit:
 	return rc;
 }
 
-/* Simple function to return a 64 bit hash of string.  Rarely called */
-static __u64 simple_hashstr(const char *str)
-{
-	const __u64 hash_mult =  1125899906842597L; /* a big enough prime */
-	__u64 hash = 0;
-
-	while (*str)
-		hash = (hash + (__u64) *str++) * hash_mult;
-
-	return hash;
-}
-
 int
 cifs_get_inode_info(struct inode **inode, const char *full_path,
 		    FILE_ALL_INFO *data, struct super_block *sb, int xid,
@@ -822,14 +810,6 @@ cifs_get_inode_info(struct inode **inode, const char *full_path,
 						 tmprc);
 					fattr.cf_uniqueid = iunique(sb, ROOT_I);
 					cifs_autodisable_serverino(cifs_sb);
-				} else if ((fattr.cf_uniqueid == 0) &&
-						strlen(full_path) == 0) {
-					/* some servers ret bad root ino ie 0 */
-					cifs_dbg(FYI, "Invalid (0) inodenum\n");
-					fattr.cf_flags |=
-						CIFS_FATTR_FAKE_ROOT_INO;
-					fattr.cf_uniqueid =
-						simple_hashstr(tcon->treeName);
 				}
 			}
 		} else
@@ -846,16 +826,6 @@ cifs_get_inode_info(struct inode **inode, const char *full_path,
 				&fattr.cf_uniqueid, data);
 			if (tmprc)
 				fattr.cf_uniqueid = CIFS_I(*inode)->uniqueid;
-			else if ((fattr.cf_uniqueid == 0) &&
-					strlen(full_path) == 0) {
-				/*
-				 * Reuse existing root inode num since
-				 * inum zero for root causes ls of . and .. to
-				 * not be returned
-				 */
-				cifs_dbg(FYI, "Srv ret 0 inode num for root\n");
-				fattr.cf_uniqueid = CIFS_I(*inode)->uniqueid;
-			}
 		} else
 			fattr.cf_uniqueid = CIFS_I(*inode)->uniqueid;
 	}
@@ -917,9 +887,6 @@ cifs_get_inode_info(struct inode **inode, const char *full_path,
 	}
 
 cgii_exit:
-	if ((*inode) && ((*inode)->i_ino == 0))
-		cifs_dbg(FYI, "inode number of zero returned\n");
-
 	kfree(buf);
 	cifs_put_tlink(tlink);
 	return rc;
@@ -1984,7 +1951,7 @@ int cifs_revalidate_dentry_attr(struct dentry *dentry)
 
 	cifs_dbg(FYI, "Update attributes: %s inode 0x%p count %d dentry: 0x%p d_time %ld jiffies %ld\n",
 		 full_path, inode, inode->i_count.counter,
-		 dentry, cifs_get_time(dentry), jiffies);
+		 dentry, dentry->d_time, jiffies);
 
 	if (cifs_sb_master_tcon(CIFS_SB(sb))->unix_ext)
 		rc = cifs_get_inode_info_unix(&inode, full_path, sb, xid);
@@ -2187,7 +2154,7 @@ cifs_setattr_unix(struct dentry *direntry, struct iattr *attrs)
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_PERM)
 		attrs->ia_valid |= ATTR_FORCE;
 
-	rc = setattr_prepare(direntry, attrs);
+	rc = inode_change_ok(inode, attrs);
 	if (rc < 0)
 		goto out;
 
@@ -2327,7 +2294,7 @@ cifs_setattr_nounix(struct dentry *direntry, struct iattr *attrs)
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_PERM)
 		attrs->ia_valid |= ATTR_FORCE;
 
-	rc = setattr_prepare(direntry, attrs);
+	rc = inode_change_ok(inode, attrs);
 	if (rc < 0) {
 		free_xid(xid);
 		return rc;

@@ -75,7 +75,6 @@ enum {
 int handle_mmio_page_fault(struct kvm_vcpu *vcpu, u64 addr, bool direct);
 void kvm_init_shadow_mmu(struct kvm_vcpu *vcpu);
 void kvm_init_shadow_ept_mmu(struct kvm_vcpu *vcpu, bool execonly);
-bool kvm_can_do_async_pf(struct kvm_vcpu *vcpu);
 
 static inline unsigned int kvm_mmu_available_pages(struct kvm *kvm)
 {
@@ -92,6 +91,11 @@ static inline int kvm_mmu_reload(struct kvm_vcpu *vcpu)
 		return 0;
 
 	return kvm_mmu_load(vcpu);
+}
+
+static inline int is_present_gpte(unsigned long pte)
+{
+	return pte & PT_PRESENT_MASK;
 }
 
 /*

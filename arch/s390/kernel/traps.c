@@ -14,12 +14,11 @@
  */
 #include <linux/kprobes.h>
 #include <linux/kdebug.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/ptrace.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
-#include <asm/uaccess.h>
 #include <asm/fpu/api.h>
 #include "entry.h"
 

@@ -199,7 +199,7 @@ static void armada_drm_plane_work_run(struct armada_crtc *dcrtc,
 	/* Handle any pending frame work. */
 	if (work) {
 		work->fn(dcrtc, plane, work);
-		drm_crtc_vblank_put(&dcrtc->crtc);
+		drm_vblank_put(dcrtc->crtc.dev, dcrtc->num);
 	}
 
 	wake_up(&plane->frame_wait);
@@ -210,7 +210,7 @@ int armada_drm_plane_work_queue(struct armada_crtc *dcrtc,
 {
 	int ret;
 
-	ret = drm_crtc_vblank_get(&dcrtc->crtc);
+	ret = drm_vblank_get(dcrtc->crtc.dev, dcrtc->num);
 	if (ret) {
 		DRM_ERROR("failed to acquire vblank counter\n");
 		return ret;
@@ -218,7 +218,7 @@ int armada_drm_plane_work_queue(struct armada_crtc *dcrtc,
 
 	ret = cmpxchg(&plane->work, NULL, work) ? -EBUSY : 0;
 	if (ret)
-		drm_crtc_vblank_put(&dcrtc->crtc);
+		drm_vblank_put(dcrtc->crtc.dev, dcrtc->num);
 
 	return ret;
 }
@@ -234,7 +234,7 @@ struct armada_plane_work *armada_drm_plane_work_cancel(
 	struct armada_plane_work *work = xchg(&plane->work, NULL);
 
 	if (work)
-		drm_crtc_vblank_put(&dcrtc->crtc);
+		drm_vblank_put(dcrtc->crtc.dev, dcrtc->num);
 
 	return work;
 }
@@ -260,7 +260,7 @@ static void armada_drm_crtc_complete_frame_work(struct armada_crtc *dcrtc,
 
 	if (fwork->event) {
 		spin_lock_irqsave(&dev->event_lock, flags);
-		drm_crtc_send_vblank_event(&dcrtc->crtc, fwork->event);
+		drm_send_vblank_event(dev, dcrtc->num, fwork->event);
 		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
 
@@ -332,19 +332,17 @@ static void armada_drm_crtc_dpms(struct drm_crtc *crtc, int dpms)
 {
 	struct armada_crtc *dcrtc = drm_to_armada_crtc(crtc);
 
-	if (dpms_blanked(dcrtc->dpms) != dpms_blanked(dpms)) {
+	if (dcrtc->dpms != dpms) {
+		dcrtc->dpms = dpms;
+		if (!IS_ERR(dcrtc->clk) && !dpms_blanked(dpms))
+			WARN_ON(clk_prepare_enable(dcrtc->clk));
+		armada_drm_crtc_update(dcrtc);
+		if (!IS_ERR(dcrtc->clk) && dpms_blanked(dpms))
+			clk_disable_unprepare(dcrtc->clk);
 		if (dpms_blanked(dpms))
 			armada_drm_vblank_off(dcrtc);
-		else if (!IS_ERR(dcrtc->clk))
-			WARN_ON(clk_prepare_enable(dcrtc->clk));
-		dcrtc->dpms = dpms;
-		armada_drm_crtc_update(dcrtc);
-		if (!dpms_blanked(dpms))
+		else
 			drm_crtc_vblank_on(&dcrtc->crtc);
-		else if (!IS_ERR(dcrtc->clk))
-			clk_disable_unprepare(dcrtc->clk);
-	} else if (dcrtc->dpms != dpms) {
-		dcrtc->dpms = dpms;
 	}
 }
 
@@ -412,7 +410,7 @@ static void armada_drm_crtc_irq(struct armada_crtc *dcrtc, u32 stat)
 		DRM_ERROR("graphics underflow on crtc %u\n", dcrtc->num);
 
 	if (stat & VSYNC_IRQ)
-		drm_crtc_handle_vblank(&dcrtc->crtc);
+		drm_handle_vblank(dcrtc->crtc.dev, dcrtc->num);
 
 	spin_lock(&dcrtc->irq_lock);
 	ovl_plane = dcrtc->plane;
@@ -594,9 +592,9 @@ static int armada_drm_crtc_mode_set(struct drm_crtc *crtc,
 
 	if (interlaced ^ dcrtc->interlaced) {
 		if (adj->flags & DRM_MODE_FLAG_INTERLACE)
-			drm_crtc_vblank_get(&dcrtc->crtc);
+			drm_vblank_get(dcrtc->crtc.dev, dcrtc->num);
 		else
-			drm_crtc_vblank_put(&dcrtc->crtc);
+			drm_vblank_put(dcrtc->crtc.dev, dcrtc->num);
 		dcrtc->interlaced = interlaced;
 	}
 
@@ -1178,13 +1176,17 @@ static int armada_drm_crtc_create(struct drm_device *drm, struct device *dev,
 
 	ret = devm_request_irq(dev, irq, armada_drm_irq, 0, "armada_drm_crtc",
 			       dcrtc);
-	if (ret < 0)
-		goto err_crtc;
+	if (ret < 0) {
+		kfree(dcrtc);
+		return ret;
+	}
 
 	if (dcrtc->variant->init) {
 		ret = dcrtc->variant->init(dcrtc, dev);
-		if (ret)
-			goto err_crtc;
+		if (ret) {
+			kfree(dcrtc);
+			return ret;
+		}
 	}
 
 	/* Ensure AXI pipeline is enabled */
@@ -1195,15 +1197,13 @@ static int armada_drm_crtc_create(struct drm_device *drm, struct device *dev,
 	dcrtc->crtc.port = port;
 
 	primary = kzalloc(sizeof(*primary), GFP_KERNEL);
-	if (!primary) {
-		ret = -ENOMEM;
-		goto err_crtc;
-	}
+	if (!primary)
+		return -ENOMEM;
 
 	ret = armada_drm_plane_init(primary);
 	if (ret) {
 		kfree(primary);
-		goto err_crtc;
+		return ret;
 	}
 
 	ret = drm_universal_plane_init(drm, &primary->base, 0,
@@ -1213,7 +1213,7 @@ static int armada_drm_crtc_create(struct drm_device *drm, struct device *dev,
 				       DRM_PLANE_TYPE_PRIMARY, NULL);
 	if (ret) {
 		kfree(primary);
-		goto err_crtc;
+		return ret;
 	}
 
 	ret = drm_crtc_init_with_planes(drm, &dcrtc->crtc, &primary->base, NULL,
@@ -1232,9 +1232,6 @@ static int armada_drm_crtc_create(struct drm_device *drm, struct device *dev,
 
 err_crtc_init:
 	primary->base.funcs->destroy(&primary->base);
-err_crtc:
-	kfree(dcrtc);
-
 	return ret;
 }
 

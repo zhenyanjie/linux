@@ -370,13 +370,13 @@ static int amd_pmu_cpu_prepare(int cpu)
 	WARN_ON_ONCE(cpuc->amd_nb);
 
 	if (!x86_pmu.amd_nb_constraints)
-		return 0;
+		return NOTIFY_OK;
 
 	cpuc->amd_nb = amd_alloc_nb(cpu);
 	if (!cpuc->amd_nb)
-		return -ENOMEM;
+		return NOTIFY_BAD;
 
-	return 0;
+	return NOTIFY_OK;
 }
 
 static void amd_pmu_cpu_starting(int cpu)
@@ -662,13 +662,7 @@ static int __init amd_core_pmu_init(void)
 		pr_cont("Fam15h ");
 		x86_pmu.get_event_constraints = amd_get_event_constraints_f15h;
 		break;
-	case 0x17:
-		pr_cont("Fam17h ");
-		/*
-		 * In family 17h, there are no event constraints in the PMC hardware.
-		 * We fallback to using default amd_get_event_constraints.
-		 */
-		break;
+
 	default:
 		pr_err("core perfctr but no constraints; unknown hardware!\n");
 		return -ENODEV;

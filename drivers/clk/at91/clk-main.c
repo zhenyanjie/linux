@@ -128,16 +128,15 @@ static const struct clk_ops main_osc_ops = {
 	.is_prepared = clk_main_osc_is_prepared,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91_clk_register_main_osc(struct regmap *regmap,
 			   const char *name,
 			   const char *parent_name,
 			   bool bypass)
 {
 	struct clk_main_osc *osc;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	struct clk_hw *hw;
-	int ret;
 
 	if (!name || !parent_name)
 		return ERR_PTR(-EINVAL);
@@ -161,19 +160,16 @@ at91_clk_register_main_osc(struct regmap *regmap,
 				   AT91_PMC_MOSCEN,
 				   AT91_PMC_OSCBYPASS | AT91_PMC_KEY);
 
-	hw = &osc->hw;
-	ret = clk_hw_register(NULL, &osc->hw);
-	if (ret) {
+	clk = clk_register(NULL, &osc->hw);
+	if (IS_ERR(clk))
 		kfree(osc);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 static void __init of_at91rm9200_clk_main_osc_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	const char *name = np->name;
 	const char *parent_name;
 	struct regmap *regmap;
@@ -187,11 +183,11 @@ static void __init of_at91rm9200_clk_main_osc_setup(struct device_node *np)
 	if (IS_ERR(regmap))
 		return;
 
-	hw = at91_clk_register_main_osc(regmap, name, parent_name, bypass);
-	if (IS_ERR(hw))
+	clk = at91_clk_register_main_osc(regmap, name, parent_name, bypass);
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(at91rm9200_clk_main_osc, "atmel,at91rm9200-clk-main-osc",
 	       of_at91rm9200_clk_main_osc_setup);
@@ -275,15 +271,14 @@ static const struct clk_ops main_rc_osc_ops = {
 	.recalc_accuracy = clk_main_rc_osc_recalc_accuracy,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91_clk_register_main_rc_osc(struct regmap *regmap,
 			      const char *name,
 			      u32 frequency, u32 accuracy)
 {
 	struct clk_main_rc_osc *osc;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	struct clk_hw *hw;
-	int ret;
 
 	if (!name || !frequency)
 		return ERR_PTR(-EINVAL);
@@ -303,19 +298,16 @@ at91_clk_register_main_rc_osc(struct regmap *regmap,
 	osc->frequency = frequency;
 	osc->accuracy = accuracy;
 
-	hw = &osc->hw;
-	ret = clk_hw_register(NULL, hw);
-	if (ret) {
+	clk = clk_register(NULL, &osc->hw);
+	if (IS_ERR(clk))
 		kfree(osc);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 static void __init of_at91sam9x5_clk_main_rc_osc_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	u32 frequency = 0;
 	u32 accuracy = 0;
 	const char *name = np->name;
@@ -329,11 +321,11 @@ static void __init of_at91sam9x5_clk_main_rc_osc_setup(struct device_node *np)
 	if (IS_ERR(regmap))
 		return;
 
-	hw = at91_clk_register_main_rc_osc(regmap, name, frequency, accuracy);
-	if (IS_ERR(hw))
+	clk = at91_clk_register_main_rc_osc(regmap, name, frequency, accuracy);
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(at91sam9x5_clk_main_rc_osc, "atmel,at91sam9x5-clk-main-rc-osc",
 	       of_at91sam9x5_clk_main_rc_osc_setup);
@@ -403,15 +395,14 @@ static const struct clk_ops rm9200_main_ops = {
 	.recalc_rate = clk_rm9200_main_recalc_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91_clk_register_rm9200_main(struct regmap *regmap,
 			      const char *name,
 			      const char *parent_name)
 {
 	struct clk_rm9200_main *clkmain;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
-	struct clk_hw *hw;
-	int ret;
 
 	if (!name)
 		return ERR_PTR(-EINVAL);
@@ -432,19 +423,16 @@ at91_clk_register_rm9200_main(struct regmap *regmap,
 	clkmain->hw.init = &init;
 	clkmain->regmap = regmap;
 
-	hw = &clkmain->hw;
-	ret = clk_hw_register(NULL, &clkmain->hw);
-	if (ret) {
+	clk = clk_register(NULL, &clkmain->hw);
+	if (IS_ERR(clk))
 		kfree(clkmain);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 static void __init of_at91rm9200_clk_main_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	const char *parent_name;
 	const char *name = np->name;
 	struct regmap *regmap;
@@ -456,11 +444,11 @@ static void __init of_at91rm9200_clk_main_setup(struct device_node *np)
 	if (IS_ERR(regmap))
 		return;
 
-	hw = at91_clk_register_rm9200_main(regmap, name, parent_name);
-	if (IS_ERR(hw))
+	clk = at91_clk_register_rm9200_main(regmap, name, parent_name);
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(at91rm9200_clk_main, "atmel,at91rm9200-clk-main",
 	       of_at91rm9200_clk_main_setup);
@@ -541,17 +529,16 @@ static const struct clk_ops sam9x5_main_ops = {
 	.get_parent = clk_sam9x5_main_get_parent,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 at91_clk_register_sam9x5_main(struct regmap *regmap,
 			      const char *name,
 			      const char **parent_names,
 			      int num_parents)
 {
 	struct clk_sam9x5_main *clkmain;
+	struct clk *clk = NULL;
 	struct clk_init_data init;
 	unsigned int status;
-	struct clk_hw *hw;
-	int ret;
 
 	if (!name)
 		return ERR_PTR(-EINVAL);
@@ -574,19 +561,16 @@ at91_clk_register_sam9x5_main(struct regmap *regmap,
 	regmap_read(clkmain->regmap, AT91_CKGR_MOR, &status);
 	clkmain->parent = status & AT91_PMC_MOSCEN ? 1 : 0;
 
-	hw = &clkmain->hw;
-	ret = clk_hw_register(NULL, &clkmain->hw);
-	if (ret) {
+	clk = clk_register(NULL, &clkmain->hw);
+	if (IS_ERR(clk))
 		kfree(clkmain);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 static void __init of_at91sam9x5_clk_main_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	const char *parent_names[2];
 	unsigned int num_parents;
 	const char *name = np->name;
@@ -603,12 +587,12 @@ static void __init of_at91sam9x5_clk_main_setup(struct device_node *np)
 
 	of_property_read_string(np, "clock-output-names", &name);
 
-	hw = at91_clk_register_sam9x5_main(regmap, name, parent_names,
+	clk = at91_clk_register_sam9x5_main(regmap, name, parent_names,
 					    num_parents);
-	if (IS_ERR(hw))
+	if (IS_ERR(clk))
 		return;
 
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(at91sam9x5_clk_main, "atmel,at91sam9x5-clk-main",
 	       of_at91sam9x5_clk_main_setup);

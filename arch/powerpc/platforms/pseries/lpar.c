@@ -45,7 +45,6 @@
 #include <asm/plpar_wrappers.h>
 #include <asm/kexec.h>
 #include <asm/fadump.h>
-#include <asm/asm-prototypes.h>
 
 #include "pseries.h"
 
@@ -145,7 +144,7 @@ static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 			 hpte_group, vpn,  pa, rflags, vflags, psize);
 
 	hpte_v = hpte_encode_v(vpn, psize, apsize, ssize) | vflags | HPTE_V_VALID;
-	hpte_r = hpte_encode_r(pa, psize, apsize) | rflags;
+	hpte_r = hpte_encode_r(pa, psize, apsize, ssize) | rflags;
 
 	if (!(vflags & HPTE_V_BOLTED))
 		pr_devel(" hpte_v=%016lx, hpte_r=%016lx\n", hpte_v, hpte_r);
@@ -261,8 +260,24 @@ static void pSeries_lpar_hptab_clear(void)
 	 * This is also called on boot when a fadump happens. In that case we
 	 * must not change the exception endian mode.
 	 */
-	if (firmware_has_feature(FW_FEATURE_SET_MODE) && !is_fadump_active())
-		pseries_big_endian_exceptions();
+	if (firmware_has_feature(FW_FEATURE_SET_MODE) && !is_fadump_active()) {
+		long rc;
+
+		rc = pseries_big_endian_exceptions();
+		/*
+		 * At this point it is unlikely panic() will get anything
+		 * out to the user, but at least this will stop us from
+		 * continuing on further and creating an even more
+		 * difficult to debug situation.
+		 *
+		 * There is a known problem when kdump'ing, if cpus are offline
+		 * the above call will fail. Rather than panicking again, keep
+		 * going and hope the kdump kernel is also little endian, which
+		 * it usually is.
+		 */
+		if (rc && !kdump_in_progress())
+			panic("Could not enable big endian exceptions");
+	}
 #endif
 }
 
@@ -279,18 +294,13 @@ static long pSeries_lpar_hpte_updatepp(unsigned long slot,
 				       int ssize, unsigned long inv_flags)
 {
 	unsigned long lpar_rc;
-	unsigned long flags;
+	unsigned long flags = (newpp & 7) | H_AVPN;
 	unsigned long want_v;
 
 	want_v = hpte_encode_avpn(vpn, psize, ssize);
 
 	pr_devel("    update: avpnv=%016lx, hash=%016lx, f=%lx, psize: %d ...",
 		 want_v, slot, flags, psize);
-
-	flags = (newpp & 7) | H_AVPN;
-	if (mmu_has_feature(MMU_FTR_KERNEL_RO))
-		/* Move pp0 into bit 8 (IBM 55) */
-		flags |= (newpp & HPTE_R_PP0) >> 55;
 
 	lpar_rc = plpar_pte_protect(flags, slot, want_v);
 
@@ -363,10 +373,6 @@ static void pSeries_lpar_hpte_updateboltedpp(unsigned long newpp,
 	BUG_ON(slot == -1);
 
 	flags = newpp & 7;
-	if (mmu_has_feature(MMU_FTR_KERNEL_RO))
-		/* Move pp0 into bit 8 (IBM 55) */
-		flags |= (newpp & HPTE_R_PP0) >> 55;
-
 	lpar_rc = plpar_pte_protect(flags, slot, 0);
 
 	BUG_ON(lpar_rc != H_SUCCESS);
@@ -402,7 +408,7 @@ static void __pSeries_lpar_hugepage_invalidate(unsigned long *slot,
 					     unsigned long *vpn, int count,
 					     int psize, int ssize)
 {
-	unsigned long param[PLPAR_HCALL9_BUFSIZE];
+	unsigned long param[8];
 	int i = 0, pix = 0, rc;
 	unsigned long flags = 0;
 	int lock_tlbie = !mmu_has_feature(MMU_FTR_LOCKLESS_TLBIE);
@@ -531,7 +537,7 @@ static void pSeries_lpar_flush_hash_range(unsigned long number, int local)
 	unsigned long flags = 0;
 	struct ppc64_tlb_batch *batch = this_cpu_ptr(&ppc64_tlb_batch);
 	int lock_tlbie = !mmu_has_feature(MMU_FTR_LOCKLESS_TLBIE);
-	unsigned long param[PLPAR_HCALL9_BUFSIZE];
+	unsigned long param[9];
 	unsigned long hash, index, shift, hidx, slot;
 	real_pte_t pte;
 	int psize, ssize;
@@ -598,17 +604,17 @@ static int __init disable_bulk_remove(char *str)
 
 __setup("bulk_remove=", disable_bulk_remove);
 
-void __init hpte_init_pseries(void)
+void __init hpte_init_lpar(void)
 {
-	mmu_hash_ops.hpte_invalidate	 = pSeries_lpar_hpte_invalidate;
-	mmu_hash_ops.hpte_updatepp	 = pSeries_lpar_hpte_updatepp;
-	mmu_hash_ops.hpte_updateboltedpp = pSeries_lpar_hpte_updateboltedpp;
-	mmu_hash_ops.hpte_insert	 = pSeries_lpar_hpte_insert;
-	mmu_hash_ops.hpte_remove	 = pSeries_lpar_hpte_remove;
-	mmu_hash_ops.hpte_removebolted   = pSeries_lpar_hpte_removebolted;
-	mmu_hash_ops.flush_hash_range	 = pSeries_lpar_flush_hash_range;
-	mmu_hash_ops.hpte_clear_all      = pSeries_lpar_hptab_clear;
-	mmu_hash_ops.hugepage_invalidate = pSeries_lpar_hugepage_invalidate;
+	ppc_md.hpte_invalidate	= pSeries_lpar_hpte_invalidate;
+	ppc_md.hpte_updatepp	= pSeries_lpar_hpte_updatepp;
+	ppc_md.hpte_updateboltedpp = pSeries_lpar_hpte_updateboltedpp;
+	ppc_md.hpte_insert	= pSeries_lpar_hpte_insert;
+	ppc_md.hpte_remove	= pSeries_lpar_hpte_remove;
+	ppc_md.hpte_removebolted = pSeries_lpar_hpte_removebolted;
+	ppc_md.flush_hash_range	= pSeries_lpar_flush_hash_range;
+	ppc_md.hpte_clear_all   = pSeries_lpar_hptab_clear;
+	ppc_md.hugepage_invalidate = pSeries_lpar_hugepage_invalidate;
 }
 
 #ifdef CONFIG_PPC_SMLPAR

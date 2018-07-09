@@ -20,7 +20,6 @@
 
 #include "main.h"
 
-struct seq_file;
 struct sk_buff;
 
 /**
@@ -46,8 +45,6 @@ batadv_mcast_forw_mode(struct batadv_priv *bat_priv, struct sk_buff *skb,
 		       struct batadv_orig_node **mcast_single_orig);
 
 void batadv_mcast_init(struct batadv_priv *bat_priv);
-
-int batadv_mcast_flags_seq_print_text(struct seq_file *seq, void *offset);
 
 void batadv_mcast_free(struct batadv_priv *bat_priv);
 

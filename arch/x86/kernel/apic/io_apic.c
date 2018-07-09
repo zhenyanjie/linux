@@ -39,7 +39,7 @@
 #include <linux/mc146818rtc.h>
 #include <linux/compiler.h>
 #include <linux/acpi.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/syscore_ops.h>
 #include <linux/freezer.h>
 #include <linux/kthread.h>
@@ -981,7 +981,7 @@ static int alloc_irq_from_domain(struct irq_domain *domain, int ioapic, u32 gsi,
 
 	return __irq_domain_alloc_irqs(domain, irq, 1,
 				       ioapic_alloc_attr_node(info),
-				       info, legacy, NULL);
+				       info, legacy);
 }
 
 /*
@@ -1014,8 +1014,7 @@ static int alloc_isa_irq_from_domain(struct irq_domain *domain,
 					  info->ioapic_pin))
 			return -ENOMEM;
 	} else {
-		irq = __irq_domain_alloc_irqs(domain, irq, 1, node, info, true,
-					      NULL);
+		irq = __irq_domain_alloc_irqs(domain, irq, 1, node, info, true);
 		if (irq >= 0) {
 			irq_data = irq_domain_get_irq_data(domain, irq);
 			data = irq_data->chip_data;
@@ -1876,7 +1875,6 @@ static struct irq_chip ioapic_chip __read_mostly = {
 	.irq_ack		= irq_chip_ack_parent,
 	.irq_eoi		= ioapic_ack_level,
 	.irq_set_affinity	= ioapic_set_affinity,
-	.irq_retrigger		= irq_chip_retrigger_hierarchy,
 	.flags			= IRQCHIP_SKIP_SET_WAKE,
 };
 
@@ -1888,7 +1886,6 @@ static struct irq_chip ioapic_ir_chip __read_mostly = {
 	.irq_ack		= irq_chip_ack_parent,
 	.irq_eoi		= ioapic_ir_ack_level,
 	.irq_set_affinity	= ioapic_set_affinity,
-	.irq_retrigger		= irq_chip_retrigger_hierarchy,
 	.flags			= IRQCHIP_SKIP_SET_WAKE,
 };
 
@@ -2116,9 +2113,8 @@ static inline void __init check_timer(void)
 			int idx;
 			idx = find_irq_entry(apic1, pin1, mp_INT);
 			if (idx != -1 && irq_trigger(idx))
-				unmask_ioapic_irq(irq_get_irq_data(0));
+				unmask_ioapic_irq(irq_get_chip_data(0));
 		}
-		irq_domain_deactivate_irq(irq_data);
 		irq_domain_activate_irq(irq_data);
 		if (timer_irq_works()) {
 			if (disable_timer_pin_1 > 0)
@@ -2140,7 +2136,6 @@ static inline void __init check_timer(void)
 		 * legacy devices should be connected to IO APIC #0
 		 */
 		replace_pin_at_irq_node(data, node, apic1, pin1, apic2, pin2);
-		irq_domain_deactivate_irq(irq_data);
 		irq_domain_activate_irq(irq_data);
 		legacy_pic->unmask(0);
 		if (timer_irq_works()) {
@@ -2572,25 +2567,29 @@ static struct resource * __init ioapic_setup_resources(void)
 	unsigned long n;
 	struct resource *res;
 	char *mem;
-	int i;
+	int i, num = 0;
 
-	if (nr_ioapics == 0)
+	for_each_ioapic(i)
+		num++;
+	if (num == 0)
 		return NULL;
 
 	n = IOAPIC_RESOURCE_NAME_SIZE + sizeof(struct resource);
-	n *= nr_ioapics;
+	n *= num;
 
 	mem = alloc_bootmem(n);
 	res = (void *)mem;
 
-	mem += sizeof(struct resource) * nr_ioapics;
+	mem += sizeof(struct resource) * num;
 
+	num = 0;
 	for_each_ioapic(i) {
-		res[i].name = mem;
-		res[i].flags = IORESOURCE_MEM | IORESOURCE_BUSY;
+		res[num].name = mem;
+		res[num].flags = IORESOURCE_MEM | IORESOURCE_BUSY;
 		snprintf(mem, IOAPIC_RESOURCE_NAME_SIZE, "IOAPIC %u", i);
 		mem += IOAPIC_RESOURCE_NAME_SIZE;
-		ioapics[i].iomem_res = &res[i];
+		ioapics[i].iomem_res = &res[num];
+		num++;
 	}
 
 	ioapic_resources = res;

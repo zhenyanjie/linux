@@ -69,28 +69,10 @@ static int i2c_demux_activate_master(struct i2c_demux_pinctrl_priv *priv, u32 ne
 		goto err_with_revert;
 	}
 
-	/*
-	 * Check if there are pinctrl states at all. Note: we cant' use
-	 * devm_pinctrl_get_select() because we need to distinguish between
-	 * the -ENODEV from devm_pinctrl_get() and pinctrl_lookup_state().
-	 */
-	p = devm_pinctrl_get(adap->dev.parent);
+	p = devm_pinctrl_get_select(adap->dev.parent, priv->bus_name);
 	if (IS_ERR(p)) {
 		ret = PTR_ERR(p);
-		/* continue if just no pinctrl states (e.g. i2c-gpio), otherwise exit */
-		if (ret != -ENODEV)
-			goto err_with_put;
-	} else {
-		/* there are states. check and use them */
-		struct pinctrl_state *s = pinctrl_lookup_state(p, priv->bus_name);
-
-		if (IS_ERR(s)) {
-			ret = PTR_ERR(s);
-			goto err_with_put;
-		}
-		ret = pinctrl_select_state(p, s);
-		if (ret < 0)
-			goto err_with_put;
+		goto err_with_put;
 	}
 
 	priv->chan[new_chan].parent_adap = adap;
@@ -123,7 +105,6 @@ static int i2c_demux_activate_master(struct i2c_demux_pinctrl_priv *priv, u32 ne
 	of_changeset_revert(&priv->chan[new_chan].chgset);
  err:
 	dev_err(priv->dev, "failed to setup demux-adapter %d (%d)\n", new_chan, ret);
-	priv->cur_chan = -EINVAL;
 	return ret;
 }
 

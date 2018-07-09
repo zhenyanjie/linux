@@ -379,11 +379,6 @@ static ssize_t queue_wc_store(struct request_queue *q, const char *page,
 	return count;
 }
 
-static ssize_t queue_dax_show(struct request_queue *q, char *page)
-{
-	return queue_var_show(blk_queue_dax(q), page);
-}
-
 static struct queue_sysfs_entry queue_requests_entry = {
 	.attr = {.name = "nr_requests", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_requests_show,
@@ -521,11 +516,6 @@ static struct queue_sysfs_entry queue_wc_entry = {
 	.store = queue_wc_store,
 };
 
-static struct queue_sysfs_entry queue_dax_entry = {
-	.attr = {.name = "dax", .mode = S_IRUGO },
-	.show = queue_dax_show,
-};
-
 static struct attribute *default_attrs[] = {
 	&queue_requests_entry.attr,
 	&queue_ra_entry.attr,
@@ -552,7 +542,6 @@ static struct attribute *default_attrs[] = {
 	&queue_random_entry.attr,
 	&queue_poll_entry.attr,
 	&queue_wc_entry.attr,
-	&queue_dax_entry.attr,
 	NULL,
 };
 
@@ -704,7 +693,7 @@ int blk_register_queue(struct gendisk *disk)
 	kobject_uevent(&q->kobj, KOBJ_ADD);
 
 	if (q->mq_ops)
-		blk_mq_register_dev(dev, q);
+		blk_mq_register_disk(disk);
 
 	if (!q->request_fn)
 		return 0;
@@ -729,7 +718,7 @@ void blk_unregister_queue(struct gendisk *disk)
 		return;
 
 	if (q->mq_ops)
-		blk_mq_unregister_dev(disk_to_dev(disk), q);
+		blk_mq_unregister_disk(disk);
 
 	if (q->request_fn)
 		elv_unregister_queue(q);

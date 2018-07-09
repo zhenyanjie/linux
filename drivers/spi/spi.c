@@ -37,7 +37,6 @@
 #include <linux/kthread.h>
 #include <linux/ioport.h>
 #include <linux/acpi.h>
-#include <linux/highmem.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/spi.h>
@@ -621,12 +620,8 @@ void spi_unregister_device(struct spi_device *spi)
 	if (!spi)
 		return;
 
-	if (spi->dev.of_node) {
+	if (spi->dev.of_node)
 		of_node_clear_flag(spi->dev.of_node, OF_POPULATED);
-		of_node_put(spi->dev.of_node);
-	}
-	if (ACPI_COMPANION(&spi->dev))
-		acpi_device_clear_enumerated(ACPI_COMPANION(&spi->dev));
 	device_unregister(&spi->dev);
 }
 EXPORT_SYMBOL_GPL(spi_unregister_device);
@@ -712,13 +707,6 @@ static int spi_map_buf(struct spi_master *master, struct device *dev,
 {
 	const bool vmalloced_buf = is_vmalloc_addr(buf);
 	unsigned int max_seg_size = dma_get_max_seg_size(dev);
-#ifdef CONFIG_HIGHMEM
-	const bool kmap_buf = ((unsigned long)buf >= PKMAP_BASE &&
-				(unsigned long)buf < (PKMAP_BASE +
-					(LAST_PKMAP * PAGE_SIZE)));
-#else
-	const bool kmap_buf = false;
-#endif
 	int desc_len;
 	int sgs;
 	struct page *vm_page;
@@ -726,7 +714,7 @@ static int spi_map_buf(struct spi_master *master, struct device *dev,
 	size_t min;
 	int i, ret;
 
-	if (vmalloced_buf || kmap_buf) {
+	if (vmalloced_buf) {
 		desc_len = min_t(int, max_seg_size, PAGE_SIZE);
 		sgs = DIV_ROUND_UP(len + offset_in_page(buf), desc_len);
 	} else if (virt_addr_valid(buf)) {
@@ -742,19 +730,10 @@ static int spi_map_buf(struct spi_master *master, struct device *dev,
 
 	for (i = 0; i < sgs; i++) {
 
-		if (vmalloced_buf || kmap_buf) {
-			/*
-			 * Next scatterlist entry size is the minimum between
-			 * the desc_len and the remaining buffer length that
-			 * fits in a page.
-			 */
-			min = min_t(size_t, desc_len,
-				    min_t(size_t, len,
-					  PAGE_SIZE - offset_in_page(buf)));
-			if (vmalloced_buf)
-				vm_page = vmalloc_to_page(buf);
-			else
-				vm_page = kmap_to_page(buf);
+		if (vmalloced_buf) {
+			min = min_t(size_t,
+				    len, desc_len - offset_in_page(buf));
+			vm_page = vmalloc_to_page(buf);
 			if (!vm_page) {
 				sg_free_table(sgt);
 				return -ENOMEM;
@@ -805,12 +784,12 @@ static int __spi_map_msg(struct spi_master *master, struct spi_message *msg)
 	if (master->dma_tx)
 		tx_dev = master->dma_tx->device->dev;
 	else
-		tx_dev = master->dev.parent;
+		tx_dev = &master->dev;
 
 	if (master->dma_rx)
 		rx_dev = master->dma_rx->device->dev;
 	else
-		rx_dev = master->dev.parent;
+		rx_dev = &master->dev;
 
 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
 		if (!master->can_dma(master, msg->spi, xfer))
@@ -852,12 +831,12 @@ static int __spi_unmap_msg(struct spi_master *master, struct spi_message *msg)
 	if (master->dma_tx)
 		tx_dev = master->dma_tx->device->dev;
 	else
-		tx_dev = master->dev.parent;
+		tx_dev = &master->dev;
 
 	if (master->dma_rx)
 		rx_dev = master->dma_rx->device->dev;
 	else
-		rx_dev = master->dev.parent;
+		rx_dev = &master->dev;
 
 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
 		if (!master->can_dma(master, msg->spi, xfer))
@@ -870,20 +849,6 @@ static int __spi_unmap_msg(struct spi_master *master, struct spi_message *msg)
 	return 0;
 }
 #else /* !CONFIG_HAS_DMA */
-static inline int spi_map_buf(struct spi_master *master,
-			      struct device *dev, struct sg_table *sgt,
-			      void *buf, size_t len,
-			      enum dma_data_direction dir)
-{
-	return -EINVAL;
-}
-
-static inline void spi_unmap_buf(struct spi_master *master,
-				 struct device *dev, struct sg_table *sgt,
-				 enum dma_data_direction dir)
-{
-}
-
 static inline int __spi_map_msg(struct spi_master *master,
 				struct spi_message *msg)
 {
@@ -979,7 +944,7 @@ static int spi_transfer_one_message(struct spi_master *master,
 	struct spi_transfer *xfer;
 	bool keep_cs = false;
 	int ret = 0;
-	unsigned long long ms = 1;
+	unsigned long ms = 1;
 	struct spi_statistics *statm = &master->statistics;
 	struct spi_statistics *stats = &msg->spi->statistics;
 
@@ -1010,12 +975,8 @@ static int spi_transfer_one_message(struct spi_master *master,
 
 			if (ret > 0) {
 				ret = 0;
-				ms = 8LL * 1000LL * xfer->len;
-				do_div(ms, xfer->speed_hz);
-				ms += ms + 200; /* some tolerance */
-
-				if (ms > UINT_MAX)
-					ms = UINT_MAX;
+				ms = xfer->len * 8 * 1000 / xfer->speed_hz;
+				ms += ms + 100; /* some tolerance */
 
 				ms = wait_for_completion_timeout(&master->xfer_completion,
 								 msecs_to_jiffies(ms));
@@ -1094,6 +1055,7 @@ EXPORT_SYMBOL_GPL(spi_finalize_current_transfer);
  * __spi_pump_messages - function which processes spi message queue
  * @master: master to process queue for
  * @in_kthread: true if we are in the context of the message pump thread
+ * @bus_locked: true if the bus mutex is held when calling this function
  *
  * This function checks if there is any spi message in the queue that
  * needs processing and if so call out to the driver to initialize hardware
@@ -1103,7 +1065,8 @@ EXPORT_SYMBOL_GPL(spi_finalize_current_transfer);
  * inside spi_sync(); the queue extraction handling at the top of the
  * function should deal with this safely.
  */
-static void __spi_pump_messages(struct spi_master *master, bool in_kthread)
+static void __spi_pump_messages(struct spi_master *master, bool in_kthread,
+				bool bus_locked)
 {
 	unsigned long flags;
 	bool was_busy = false;
@@ -1120,7 +1083,7 @@ static void __spi_pump_messages(struct spi_master *master, bool in_kthread)
 
 	/* If another context is idling the device then defer */
 	if (master->idling) {
-		kthread_queue_work(&master->kworker, &master->pump_messages);
+		queue_kthread_work(&master->kworker, &master->pump_messages);
 		spin_unlock_irqrestore(&master->queue_lock, flags);
 		return;
 	}
@@ -1134,7 +1097,7 @@ static void __spi_pump_messages(struct spi_master *master, bool in_kthread)
 
 		/* Only do teardown in the thread */
 		if (!in_kthread) {
-			kthread_queue_work(&master->kworker,
+			queue_kthread_work(&master->kworker,
 					   &master->pump_messages);
 			spin_unlock_irqrestore(&master->queue_lock, flags);
 			return;
@@ -1175,14 +1138,11 @@ static void __spi_pump_messages(struct spi_master *master, bool in_kthread)
 		master->busy = true;
 	spin_unlock_irqrestore(&master->queue_lock, flags);
 
-	mutex_lock(&master->io_mutex);
-
 	if (!was_busy && master->auto_runtime_pm) {
 		ret = pm_runtime_get_sync(master->dev.parent);
 		if (ret < 0) {
 			dev_err(&master->dev, "Failed to power device: %d\n",
 				ret);
-			mutex_unlock(&master->io_mutex);
 			return;
 		}
 	}
@@ -1198,10 +1158,12 @@ static void __spi_pump_messages(struct spi_master *master, bool in_kthread)
 
 			if (master->auto_runtime_pm)
 				pm_runtime_put(master->dev.parent);
-			mutex_unlock(&master->io_mutex);
 			return;
 		}
 	}
+
+	if (!bus_locked)
+		mutex_lock(&master->bus_lock_mutex);
 
 	trace_spi_message_start(master->cur_msg);
 
@@ -1232,7 +1194,8 @@ static void __spi_pump_messages(struct spi_master *master, bool in_kthread)
 	}
 
 out:
-	mutex_unlock(&master->io_mutex);
+	if (!bus_locked)
+		mutex_unlock(&master->bus_lock_mutex);
 
 	/* Prod the scheduler in case transfer_one() was busy waiting */
 	if (!ret)
@@ -1248,7 +1211,7 @@ static void spi_pump_messages(struct kthread_work *work)
 	struct spi_master *master =
 		container_of(work, struct spi_master, pump_messages);
 
-	__spi_pump_messages(master, true);
+	__spi_pump_messages(master, true, master->bus_lock_flag);
 }
 
 static int spi_init_queue(struct spi_master *master)
@@ -1258,7 +1221,7 @@ static int spi_init_queue(struct spi_master *master)
 	master->running = false;
 	master->busy = false;
 
-	kthread_init_worker(&master->kworker);
+	init_kthread_worker(&master->kworker);
 	master->kworker_task = kthread_run(kthread_worker_fn,
 					   &master->kworker, "%s",
 					   dev_name(&master->dev));
@@ -1266,7 +1229,7 @@ static int spi_init_queue(struct spi_master *master)
 		dev_err(&master->dev, "failed to create message pump task\n");
 		return PTR_ERR(master->kworker_task);
 	}
-	kthread_init_work(&master->pump_messages, spi_pump_messages);
+	init_kthread_work(&master->pump_messages, spi_pump_messages);
 
 	/*
 	 * Master config will indicate if this controller should run the
@@ -1339,7 +1302,7 @@ void spi_finalize_current_message(struct spi_master *master)
 	spin_lock_irqsave(&master->queue_lock, flags);
 	master->cur_msg = NULL;
 	master->cur_msg_prepared = false;
-	kthread_queue_work(&master->kworker, &master->pump_messages);
+	queue_kthread_work(&master->kworker, &master->pump_messages);
 	spin_unlock_irqrestore(&master->queue_lock, flags);
 
 	trace_spi_message_done(mesg);
@@ -1365,7 +1328,7 @@ static int spi_start_queue(struct spi_master *master)
 	master->cur_msg = NULL;
 	spin_unlock_irqrestore(&master->queue_lock, flags);
 
-	kthread_queue_work(&master->kworker, &master->pump_messages);
+	queue_kthread_work(&master->kworker, &master->pump_messages);
 
 	return 0;
 }
@@ -1412,7 +1375,7 @@ static int spi_destroy_queue(struct spi_master *master)
 	ret = spi_stop_queue(master);
 
 	/*
-	 * kthread_flush_worker will block until all work is done.
+	 * flush_kthread_worker will block until all work is done.
 	 * If the reason that stop_queue timed out is that the work will never
 	 * finish, then it does no good to call flush/stop thread, so
 	 * return anyway.
@@ -1422,7 +1385,7 @@ static int spi_destroy_queue(struct spi_master *master)
 		return ret;
 	}
 
-	kthread_flush_worker(&master->kworker);
+	flush_kthread_worker(&master->kworker);
 	kthread_stop(master->kworker_task);
 
 	return 0;
@@ -1446,7 +1409,7 @@ static int __spi_queued_transfer(struct spi_device *spi,
 
 	list_add_tail(&msg->queue, &master->queue);
 	if (!master->busy && need_pump)
-		kthread_queue_work(&master->kworker, &master->pump_messages);
+		queue_kthread_work(&master->kworker, &master->pump_messages);
 
 	spin_unlock_irqrestore(&master->queue_lock, flags);
 	return 0;
@@ -1597,13 +1560,11 @@ of_register_spi_device(struct spi_master *master, struct device_node *nc)
 	if (rc) {
 		dev_err(&master->dev, "spi_device register error %s\n",
 			nc->full_name);
-		goto err_of_node_put;
+		goto err_out;
 	}
 
 	return spi;
 
-err_of_node_put:
-	of_node_put(nc);
 err_out:
 	spi_dev_put(spi);
 	return ERR_PTR(rc);
@@ -1628,11 +1589,9 @@ static void of_register_spi_devices(struct spi_master *master)
 		if (of_node_test_and_set_flag(nc, OF_POPULATED))
 			continue;
 		spi = of_register_spi_device(master, nc);
-		if (IS_ERR(spi)) {
+		if (IS_ERR(spi))
 			dev_warn(&master->dev, "Failed to create SPI device for %s\n",
 				nc->full_name);
-			of_node_clear_flag(nc, OF_POPULATED);
-		}
 	}
 }
 #else
@@ -1687,15 +1646,18 @@ static int acpi_spi_add_resource(struct acpi_resource *ares, void *data)
 	return 1;
 }
 
-static acpi_status acpi_register_spi_device(struct spi_master *master,
-					    struct acpi_device *adev)
+static acpi_status acpi_spi_add_device(acpi_handle handle, u32 level,
+				       void *data, void **return_value)
 {
+	struct spi_master *master = data;
 	struct list_head resource_list;
+	struct acpi_device *adev;
 	struct spi_device *spi;
 	int ret;
 
-	if (acpi_bus_get_status(adev) || !adev->status.present ||
-	    acpi_device_enumerated(adev))
+	if (acpi_bus_get_device(handle, &adev))
+		return AE_OK;
+	if (acpi_bus_get_status(adev) || !adev->status.present)
 		return AE_OK;
 
 	spi = spi_alloc_device(master);
@@ -1721,8 +1683,6 @@ static acpi_status acpi_register_spi_device(struct spi_master *master,
 	if (spi->irq < 0)
 		spi->irq = acpi_dev_gpio_irq_get(adev, 0);
 
-	acpi_device_set_enumerated(adev);
-
 	adev->power.flags.ignore_parent = true;
 	strlcpy(spi->modalias, acpi_device_hid(adev), sizeof(spi->modalias));
 	if (spi_add_device(spi)) {
@@ -1733,18 +1693,6 @@ static acpi_status acpi_register_spi_device(struct spi_master *master,
 	}
 
 	return AE_OK;
-}
-
-static acpi_status acpi_spi_add_device(acpi_handle handle, u32 level,
-				       void *data, void **return_value)
-{
-	struct spi_master *master = data;
-	struct acpi_device *adev;
-
-	if (acpi_bus_get_device(handle, &adev))
-		return AE_OK;
-
-	return acpi_register_spi_device(master, adev);
 }
 
 static void acpi_register_spi_devices(struct spi_master *master)
@@ -1925,7 +1873,6 @@ int spi_register_master(struct spi_master *master)
 	spin_lock_init(&master->queue_lock);
 	spin_lock_init(&master->bus_lock_spinlock);
 	mutex_init(&master->bus_lock_mutex);
-	mutex_init(&master->io_mutex);
 	master->bus_lock_flag = 0;
 	init_completion(&master->xfer_completion);
 	if (!master->max_dma_len)
@@ -2778,7 +2725,6 @@ int spi_flash_read(struct spi_device *spi,
 
 {
 	struct spi_master *master = spi->master;
-	struct device *rx_dev = NULL;
 	int ret;
 
 	if ((msg->opcode_nbits == SPI_NBITS_DUAL ||
@@ -2804,24 +2750,9 @@ int spi_flash_read(struct spi_device *spi,
 			return ret;
 		}
 	}
-
 	mutex_lock(&master->bus_lock_mutex);
-	mutex_lock(&master->io_mutex);
-	if (master->dma_rx) {
-		rx_dev = master->dma_rx->device->dev;
-		ret = spi_map_buf(master, rx_dev, &msg->rx_sg,
-				  msg->buf, msg->len,
-				  DMA_FROM_DEVICE);
-		if (!ret)
-			msg->cur_msg_mapped = true;
-	}
 	ret = master->spi_flash_read(spi, msg);
-	if (msg->cur_msg_mapped)
-		spi_unmap_buf(master, rx_dev, &msg->rx_sg,
-			      DMA_FROM_DEVICE);
-	mutex_unlock(&master->io_mutex);
 	mutex_unlock(&master->bus_lock_mutex);
-
 	if (master->auto_runtime_pm)
 		pm_runtime_put(master->dev.parent);
 
@@ -2841,7 +2772,8 @@ static void spi_complete(void *arg)
 	complete(arg);
 }
 
-static int __spi_sync(struct spi_device *spi, struct spi_message *message)
+static int __spi_sync(struct spi_device *spi, struct spi_message *message,
+		      int bus_locked)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	int status;
@@ -2858,6 +2790,9 @@ static int __spi_sync(struct spi_device *spi, struct spi_message *message)
 
 	SPI_STATISTICS_INCREMENT_FIELD(&master->statistics, spi_sync);
 	SPI_STATISTICS_INCREMENT_FIELD(&spi->statistics, spi_sync);
+
+	if (!bus_locked)
+		mutex_lock(&master->bus_lock_mutex);
 
 	/* If we're not using the legacy transfer method then we will
 	 * try to transfer in the calling context so special case.
@@ -2876,6 +2811,9 @@ static int __spi_sync(struct spi_device *spi, struct spi_message *message)
 		status = spi_async_locked(spi, message);
 	}
 
+	if (!bus_locked)
+		mutex_unlock(&master->bus_lock_mutex);
+
 	if (status == 0) {
 		/* Push out the messages in the calling context if we
 		 * can.
@@ -2885,7 +2823,7 @@ static int __spi_sync(struct spi_device *spi, struct spi_message *message)
 						       spi_sync_immediate);
 			SPI_STATISTICS_INCREMENT_FIELD(&spi->statistics,
 						       spi_sync_immediate);
-			__spi_pump_messages(master, false);
+			__spi_pump_messages(master, false, bus_locked);
 		}
 
 		wait_for_completion(&done);
@@ -2918,13 +2856,7 @@ static int __spi_sync(struct spi_device *spi, struct spi_message *message)
  */
 int spi_sync(struct spi_device *spi, struct spi_message *message)
 {
-	int ret;
-
-	mutex_lock(&spi->master->bus_lock_mutex);
-	ret = __spi_sync(spi, message);
-	mutex_unlock(&spi->master->bus_lock_mutex);
-
-	return ret;
+	return __spi_sync(spi, message, spi->master->bus_lock_flag);
 }
 EXPORT_SYMBOL_GPL(spi_sync);
 
@@ -2946,7 +2878,7 @@ EXPORT_SYMBOL_GPL(spi_sync);
  */
 int spi_sync_locked(struct spi_device *spi, struct spi_message *message)
 {
-	return __spi_sync(spi, message);
+	return __spi_sync(spi, message, 1);
 }
 EXPORT_SYMBOL_GPL(spi_sync_locked);
 
@@ -3143,7 +3075,6 @@ static int of_spi_notify(struct notifier_block *nb, unsigned long action,
 		if (IS_ERR(spi)) {
 			pr_err("%s: failed to create for '%s'\n",
 					__func__, rd->dn->full_name);
-			of_node_clear_flag(rd->dn, OF_POPULATED);
 			return notifier_from_errno(PTR_ERR(spi));
 		}
 		break;
@@ -3176,77 +3107,6 @@ static struct notifier_block spi_of_notifier = {
 extern struct notifier_block spi_of_notifier;
 #endif /* IS_ENABLED(CONFIG_OF_DYNAMIC) */
 
-#if IS_ENABLED(CONFIG_ACPI)
-static int spi_acpi_master_match(struct device *dev, const void *data)
-{
-	return ACPI_COMPANION(dev->parent) == data;
-}
-
-static int spi_acpi_device_match(struct device *dev, void *data)
-{
-	return ACPI_COMPANION(dev) == data;
-}
-
-static struct spi_master *acpi_spi_find_master_by_adev(struct acpi_device *adev)
-{
-	struct device *dev;
-
-	dev = class_find_device(&spi_master_class, NULL, adev,
-				spi_acpi_master_match);
-	if (!dev)
-		return NULL;
-
-	return container_of(dev, struct spi_master, dev);
-}
-
-static struct spi_device *acpi_spi_find_device_by_adev(struct acpi_device *adev)
-{
-	struct device *dev;
-
-	dev = bus_find_device(&spi_bus_type, NULL, adev, spi_acpi_device_match);
-
-	return dev ? to_spi_device(dev) : NULL;
-}
-
-static int acpi_spi_notify(struct notifier_block *nb, unsigned long value,
-			   void *arg)
-{
-	struct acpi_device *adev = arg;
-	struct spi_master *master;
-	struct spi_device *spi;
-
-	switch (value) {
-	case ACPI_RECONFIG_DEVICE_ADD:
-		master = acpi_spi_find_master_by_adev(adev->parent);
-		if (!master)
-			break;
-
-		acpi_register_spi_device(master, adev);
-		put_device(&master->dev);
-		break;
-	case ACPI_RECONFIG_DEVICE_REMOVE:
-		if (!acpi_device_enumerated(adev))
-			break;
-
-		spi = acpi_spi_find_device_by_adev(adev);
-		if (!spi)
-			break;
-
-		spi_unregister_device(spi);
-		put_device(&spi->dev);
-		break;
-	}
-
-	return NOTIFY_OK;
-}
-
-static struct notifier_block spi_acpi_notifier = {
-	.notifier_call = acpi_spi_notify,
-};
-#else
-extern struct notifier_block spi_acpi_notifier;
-#endif
-
 static int __init spi_init(void)
 {
 	int	status;
@@ -3267,8 +3127,6 @@ static int __init spi_init(void)
 
 	if (IS_ENABLED(CONFIG_OF_DYNAMIC))
 		WARN_ON(of_reconfig_notifier_register(&spi_of_notifier));
-	if (IS_ENABLED(CONFIG_ACPI))
-		WARN_ON(acpi_reconfig_notifier_register(&spi_acpi_notifier));
 
 	return 0;
 

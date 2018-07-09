@@ -20,12 +20,8 @@ static int clps711x_gpio_probe(struct platform_device *pdev)
 	void __iomem *dat, *dir;
 	struct gpio_chip *gc;
 	struct resource *res;
-	int err, id;
+	int err, id = np ? of_alias_get_id(np, "gpio") : pdev->id;
 
-	if (!np)
-		return -ENODEV;
-
-	id = of_alias_get_id(np, "gpio");
 	if ((id < 0) || (id > 4))
 		return -ENODEV;
 
@@ -67,7 +63,7 @@ static int clps711x_gpio_probe(struct platform_device *pdev)
 		break;
 	}
 
-	gc->base = -1;
+	gc->base = id * 8;
 	gc->owner = THIS_MODULE;
 	platform_set_drvdata(pdev, gc);
 
@@ -75,7 +71,7 @@ static int clps711x_gpio_probe(struct platform_device *pdev)
 }
 
 static const struct of_device_id __maybe_unused clps711x_gpio_ids[] = {
-	{ .compatible = "cirrus,ep7209-gpio" },
+	{ .compatible = "cirrus,clps711x-gpio" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, clps711x_gpio_ids);

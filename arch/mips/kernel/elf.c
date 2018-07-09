@@ -8,12 +8,9 @@
  * option) any later version.
  */
 
-#include <linux/binfmts.h>
 #include <linux/elf.h>
-#include <linux/export.h>
 #include <linux/sched.h>
 
-#include <asm/cpu-features.h>
 #include <asm/cpu-info.h>
 
 /* Whether to accept legacy-NaN and 2008-NaN user binaries.  */
@@ -182,7 +179,7 @@ int arch_check_elf(void *_ehdr, bool has_interpreter, void *_interp_ehdr,
 			return -ELIBBAD;
 	}
 
-	if (!IS_ENABLED(CONFIG_MIPS_O32_FP64_SUPPORT))
+	if (!config_enabled(CONFIG_MIPS_O32_FP64_SUPPORT))
 		return 0;
 
 	fp_abi = state->fp_abi;
@@ -257,7 +254,7 @@ int arch_check_elf(void *_ehdr, bool has_interpreter, void *_interp_ehdr,
 	else if ((prog_req.fr1 && prog_req.frdefault) ||
 		 (prog_req.single && !prog_req.frdefault))
 		/* Make sure 64-bit MIPS III/IV/64R1 will not pick FR1 */
-		state->overall_fp_mode = ((raw_current_cpu_data.fpu_id & MIPS_FPIR_F64) &&
+		state->overall_fp_mode = ((current_cpu_data.fpu_id & MIPS_FPIR_F64) &&
 					  cpu_has_mips_r2_r6) ?
 					  FP_FR1 : FP_FR0;
 	else if (prog_req.fr1)
@@ -288,7 +285,7 @@ void mips_set_personality_fp(struct arch_elf_state *state)
 	 * not be worried about N32/N64 binaries.
 	 */
 
-	if (!IS_ENABLED(CONFIG_MIPS_O32_FP64_SUPPORT))
+	if (!config_enabled(CONFIG_MIPS_O32_FP64_SUPPORT))
 		return;
 
 	switch (state->overall_fp_mode) {
@@ -329,19 +326,3 @@ void mips_set_personality_nan(struct arch_elf_state *state)
 		BUG();
 	}
 }
-
-int mips_elf_read_implies_exec(void *elf_ex, int exstack)
-{
-	if (exstack != EXSTACK_DISABLE_X) {
-		/* The binary doesn't request a non-executable stack */
-		return 1;
-	}
-
-	if (!cpu_has_rixi) {
-		/* The CPU doesn't support non-executable memory */
-		return 1;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL(mips_elf_read_implies_exec);

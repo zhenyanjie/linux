@@ -71,7 +71,7 @@
 			reg-io-width = <4>;
 		};
 
-		arcpct0: pct {
+		arcpmu0: pmu {
 			compatible = "snps,arc700-pct";
 		};
 	};

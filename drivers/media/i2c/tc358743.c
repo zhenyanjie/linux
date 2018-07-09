@@ -89,6 +89,8 @@ struct tc358743_state {
 	struct v4l2_ctrl *audio_sampling_rate_ctrl;
 	struct v4l2_ctrl *audio_present_ctrl;
 
+	/* work queues */
+	struct workqueue_struct *work_queues;
 	struct delayed_work delayed_work_enable_hotplug;
 
 	/* edid  */
@@ -193,61 +195,57 @@ static void i2c_wr(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n)
 	}
 }
 
-static noinline u32 i2c_rdreg(struct v4l2_subdev *sd, u16 reg, u32 n)
-{
-	__le32 val = 0;
-
-	i2c_rd(sd, reg, (u8 __force *)&val, n);
-
-	return le32_to_cpu(val);
-}
-
-static noinline void i2c_wrreg(struct v4l2_subdev *sd, u16 reg, u32 val, u32 n)
-{
-	__le32 raw = cpu_to_le32(val);
-
-	i2c_wr(sd, reg, (u8 __force *)&raw, n);
-}
-
 static u8 i2c_rd8(struct v4l2_subdev *sd, u16 reg)
 {
-	return i2c_rdreg(sd, reg, 1);
+	u8 val;
+
+	i2c_rd(sd, reg, &val, 1);
+
+	return val;
 }
 
 static void i2c_wr8(struct v4l2_subdev *sd, u16 reg, u8 val)
 {
-	i2c_wrreg(sd, reg, val, 1);
+	i2c_wr(sd, reg, &val, 1);
 }
 
 static void i2c_wr8_and_or(struct v4l2_subdev *sd, u16 reg,
 		u8 mask, u8 val)
 {
-	i2c_wrreg(sd, reg, (i2c_rdreg(sd, reg, 1) & mask) | val, 1);
+	i2c_wr8(sd, reg, (i2c_rd8(sd, reg) & mask) | val);
 }
 
 static u16 i2c_rd16(struct v4l2_subdev *sd, u16 reg)
 {
-	return i2c_rdreg(sd, reg, 2);
+	u16 val;
+
+	i2c_rd(sd, reg, (u8 *)&val, 2);
+
+	return val;
 }
 
 static void i2c_wr16(struct v4l2_subdev *sd, u16 reg, u16 val)
 {
-	i2c_wrreg(sd, reg, val, 2);
+	i2c_wr(sd, reg, (u8 *)&val, 2);
 }
 
 static void i2c_wr16_and_or(struct v4l2_subdev *sd, u16 reg, u16 mask, u16 val)
 {
-	i2c_wrreg(sd, reg, (i2c_rdreg(sd, reg, 2) & mask) | val, 2);
+	i2c_wr16(sd, reg, (i2c_rd16(sd, reg) & mask) | val);
 }
 
 static u32 i2c_rd32(struct v4l2_subdev *sd, u16 reg)
 {
-	return i2c_rdreg(sd, reg, 4);
+	u32 val;
+
+	i2c_rd(sd, reg, (u8 *)&val, 4);
+
+	return val;
 }
 
 static void i2c_wr32(struct v4l2_subdev *sd, u16 reg, u32 val)
 {
-	i2c_wrreg(sd, reg, val, 4);
+	i2c_wr(sd, reg, (u8 *)&val, 4);
 }
 
 /* --------------- STATUS --------------- */
@@ -427,7 +425,8 @@ static void tc358743_enable_edid(struct v4l2_subdev *sd)
 
 	/* Enable hotplug after 100 ms. DDC access to EDID is also enabled when
 	 * hotplug is enabled. See register DDC_CTL */
-	schedule_delayed_work(&state->delayed_work_enable_hotplug, HZ / 10);
+	queue_delayed_work(state->work_queues,
+			   &state->delayed_work_enable_hotplug, HZ / 10);
 
 	tc358743_enable_interrupts(sd, true);
 	tc358743_s_ctrl_detect_tx_5v(sd);
@@ -1240,7 +1239,7 @@ static int tc358743_g_register(struct v4l2_subdev *sd,
 
 	reg->size = tc358743_get_reg_size(reg->reg);
 
-	reg->val = i2c_rdreg(sd, reg->reg, reg->size);
+	i2c_rd(sd, reg->reg, (u8 *)&reg->val, reg->size);
 
 	return 0;
 }
@@ -1266,7 +1265,7 @@ static int tc358743_s_register(struct v4l2_subdev *sd,
 	    reg->reg == BCAPS)
 		return 0;
 
-	i2c_wrreg(sd, (u16)reg->reg, reg->val,
+	i2c_wr(sd, (u16)reg->reg, (u8 *)&reg->val,
 			tc358743_get_reg_size(reg->reg));
 
 	return 0;
@@ -1885,6 +1884,14 @@ static int tc358743_probe(struct i2c_client *client,
 		goto err_hdl;
 	}
 
+	/* work queues */
+	state->work_queues = create_singlethread_workqueue(client->name);
+	if (!state->work_queues) {
+		v4l2_err(sd, "Could not create work queue\n");
+		err = -ENOMEM;
+		goto err_hdl;
+	}
+
 	state->pad.flags = MEDIA_PAD_FL_SOURCE;
 	err = media_entity_pads_init(&sd->entity, 1, &state->pad);
 	if (err < 0)
@@ -1933,6 +1940,7 @@ static int tc358743_probe(struct i2c_client *client,
 
 err_work_queues:
 	cancel_delayed_work(&state->delayed_work_enable_hotplug);
+	destroy_workqueue(state->work_queues);
 	mutex_destroy(&state->confctl_mutex);
 err_hdl:
 	media_entity_cleanup(&sd->entity);
@@ -1946,6 +1954,7 @@ static int tc358743_remove(struct i2c_client *client)
 	struct tc358743_state *state = to_state(sd);
 
 	cancel_delayed_work(&state->delayed_work_enable_hotplug);
+	destroy_workqueue(state->work_queues);
 	v4l2_async_unregister_subdev(sd);
 	v4l2_device_unregister_subdev(sd);
 	mutex_destroy(&state->confctl_mutex);

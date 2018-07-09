@@ -854,7 +854,7 @@ void tsl2x7x_prox_calculate(int *data, int length,
 		tmp = data[i] - statP->mean;
 		sample_sum += tmp * tmp;
 	}
-	statP->stddev = int_sqrt((long)sample_sum / length);
+	statP->stddev = int_sqrt((long)sample_sum) / length;
 }
 
 /**
@@ -1554,7 +1554,7 @@ static irqreturn_t tsl2x7x_event_handler(int irq, void *private)
 {
 	struct iio_dev *indio_dev = private;
 	struct tsl2X7X_chip *chip = iio_priv(indio_dev);
-	s64 timestamp = iio_get_time_ns(indio_dev);
+	s64 timestamp = iio_get_time_ns();
 	int ret;
 	u8 value;
 

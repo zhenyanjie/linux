@@ -101,7 +101,7 @@ KERNEL_ATTR_RO(kexec_loaded);
 static ssize_t kexec_crash_loaded_show(struct kobject *kobj,
 				       struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", kexec_crash_loaded());
+	return sprintf(buf, "%d\n", !!kexec_crash_image);
 }
 KERNEL_ATTR_RO(kexec_crash_loaded);
 
@@ -128,8 +128,8 @@ KERNEL_ATTR_RW(kexec_crash_size);
 static ssize_t vmcoreinfo_show(struct kobject *kobj,
 			       struct kobj_attribute *attr, char *buf)
 {
-	phys_addr_t vmcore_base = paddr_vmcoreinfo_note();
-	return sprintf(buf, "%pa %x\n", &vmcore_base,
+	return sprintf(buf, "%lx %x\n",
+		       paddr_vmcoreinfo_note(),
 		       (unsigned int)sizeof(vmcoreinfo_note));
 }
 KERNEL_ATTR_RO(vmcoreinfo);

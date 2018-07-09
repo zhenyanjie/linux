@@ -432,8 +432,10 @@ static int i2c_lpc2k_probe(struct platform_device *pdev)
 	i2c->adap.dev.of_node = pdev->dev.of_node;
 
 	ret = i2c_add_adapter(&i2c->adap);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to add adapter!\n");
 		goto fail_clk;
+	}
 
 	dev_info(&pdev->dev, "LPC2K I2C adapter\n");
 

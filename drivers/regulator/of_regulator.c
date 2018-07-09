@@ -163,9 +163,6 @@ static void of_get_regulation_constraints(struct device_node *np,
 					"regulator-suspend-microvolt", &pval))
 			suspend_state->uV = pval;
 
-		if (i == PM_SUSPEND_MEM)
-			constraints->initial_state = PM_SUSPEND_MEM;
-
 		of_node_put(suspend_np);
 		suspend_state = NULL;
 		suspend_np = NULL;
@@ -282,7 +279,6 @@ int of_regulator_match(struct device *dev, struct device_node *node,
 				dev_err(dev,
 					"failed to parse DT for regulator %s\n",
 					child->name);
-				of_node_put(child);
 				return -EINVAL;
 			}
 			match->of_node = of_node_get(child);

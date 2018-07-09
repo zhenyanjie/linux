@@ -82,7 +82,6 @@ struct eth_dev {
 #define	WORK_RX_MEMORY		0
 
 	bool			zlp;
-	bool			no_skb_reserve;
 	u8			host_mac[ETH_ALEN];
 	u8			dev_mac[ETH_ALEN];
 };
@@ -234,8 +233,7 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 	 * but on at least one, checksumming fails otherwise.  Note:
 	 * RNDIS headers involve variable numbers of LE32 values.
 	 */
-	if (likely(!dev->no_skb_reserve))
-		skb_reserve(skb, NET_IP_ALIGN);
+	skb_reserve(skb, NET_IP_ALIGN);
 
 	req->buf = skb->data;
 	req->length = size;
@@ -558,8 +556,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 			/* Multi frame CDC protocols may store the frame for
 			 * later which is not a dropped frame.
 			 */
-			if (dev->port_usb &&
-					dev->port_usb->supports_multi_frame)
+			if (dev->port_usb->supports_multi_frame)
 				goto multiframe;
 			goto drop;
 		}
@@ -571,8 +568,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	req->complete = tx_complete;
 
 	/* NCM requires no zlp if transfer is dwNtbInMaxSize */
-	if (dev->port_usb &&
-	    dev->port_usb->is_fixed &&
+	if (dev->port_usb->is_fixed &&
 	    length == dev->port_usb->fixed_in_len &&
 	    (length % in->maxpacket) == 0)
 		req->zero = 0;
@@ -587,6 +583,13 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 		length++;
 
 	req->length = length;
+
+	/* throttle high/super speed IRQ rate back slightly */
+	if (gadget_is_dualspeed(dev->gadget))
+		req->no_interrupt = (dev->gadget->speed == USB_SPEED_HIGH ||
+				     dev->gadget->speed == USB_SPEED_SUPER)
+			? ((atomic_read(&dev->tx_qlen) % dev->qmult) != 0)
+			: 0;
 
 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
 	switch (retval) {
@@ -1059,7 +1062,6 @@ struct net_device *gether_connect(struct gether *link)
 
 	if (result == 0) {
 		dev->zlp = link->is_zlp_ok;
-		dev->no_skb_reserve = link->no_skb_reserve;
 		DBG(dev, "qlen %d\n", qlen(dev->gadget, dev->qmult));
 
 		dev->header_len = link->header_len;

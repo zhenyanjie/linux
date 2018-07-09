@@ -324,7 +324,7 @@ static void vmw_hw_surface_destroy(struct vmw_resource *res)
 	if (res->id != -1) {
 
 		cmd = vmw_fifo_reserve(dev_priv, vmw_surface_destroy_size());
-		if (unlikely(!cmd)) {
+		if (unlikely(cmd == NULL)) {
 			DRM_ERROR("Failed reserving FIFO space for surface "
 				  "destruction.\n");
 			return;
@@ -397,7 +397,7 @@ static int vmw_legacy_srf_create(struct vmw_resource *res)
 
 	submit_size = vmw_surface_define_size(srf);
 	cmd = vmw_fifo_reserve(dev_priv, submit_size);
-	if (unlikely(!cmd)) {
+	if (unlikely(cmd == NULL)) {
 		DRM_ERROR("Failed reserving FIFO space for surface "
 			  "creation.\n");
 		ret = -ENOMEM;
@@ -446,10 +446,11 @@ static int vmw_legacy_srf_dma(struct vmw_resource *res,
 	uint8_t *cmd;
 	struct vmw_private *dev_priv = res->dev_priv;
 
-	BUG_ON(!val_buf->bo);
+	BUG_ON(val_buf->bo == NULL);
+
 	submit_size = vmw_surface_dma_size(srf);
 	cmd = vmw_fifo_reserve(dev_priv, submit_size);
-	if (unlikely(!cmd)) {
+	if (unlikely(cmd == NULL)) {
 		DRM_ERROR("Failed reserving FIFO space for surface "
 			  "DMA.\n");
 		return -ENOMEM;
@@ -537,7 +538,7 @@ static int vmw_legacy_srf_destroy(struct vmw_resource *res)
 
 	submit_size = vmw_surface_destroy_size();
 	cmd = vmw_fifo_reserve(dev_priv, submit_size);
-	if (unlikely(!cmd)) {
+	if (unlikely(cmd == NULL)) {
 		DRM_ERROR("Failed reserving FIFO space for surface "
 			  "eviction.\n");
 		return -ENOMEM;
@@ -577,7 +578,7 @@ static int vmw_surface_init(struct vmw_private *dev_priv,
 	int ret;
 	struct vmw_resource *res = &srf->res;
 
-	BUG_ON(!res_free);
+	BUG_ON(res_free == NULL);
 	if (!dev_priv->has_mob)
 		vmw_fifo_resource_inc(dev_priv);
 	ret = vmw_resource_init(dev_priv, res, true, res_free,
@@ -699,6 +700,7 @@ int vmw_surface_define_ioctl(struct drm_device *dev, void *data,
 	struct drm_vmw_surface_create_req *req = &arg->req;
 	struct drm_vmw_surface_arg *rep = &arg->rep;
 	struct ttm_object_file *tfile = vmw_fpriv(file_priv)->tfile;
+	struct drm_vmw_size __user *user_sizes;
 	int ret;
 	int i, j;
 	uint32_t cur_bo_offset;
@@ -713,14 +715,11 @@ int vmw_surface_define_ioctl(struct drm_device *dev, void *data,
 			128;
 
 	num_sizes = 0;
-	for (i = 0; i < DRM_VMW_MAX_SURFACE_FACES; ++i) {
-		if (req->mip_levels[i] > DRM_VMW_MAX_MIP_LEVELS)
-			return -EINVAL;
+	for (i = 0; i < DRM_VMW_MAX_SURFACE_FACES; ++i)
 		num_sizes += req->mip_levels[i];
-	}
 
-	if (num_sizes > DRM_VMW_MAX_SURFACE_FACES * DRM_VMW_MAX_MIP_LEVELS ||
-	    num_sizes == 0)
+	if (num_sizes > DRM_VMW_MAX_SURFACE_FACES *
+	    DRM_VMW_MAX_MIP_LEVELS)
 		return -EINVAL;
 
 	size = vmw_user_surface_size + 128 +
@@ -749,7 +748,7 @@ int vmw_surface_define_ioctl(struct drm_device *dev, void *data,
 	}
 
 	user_srf = kzalloc(sizeof(*user_srf), GFP_KERNEL);
-	if (unlikely(!user_srf)) {
+	if (unlikely(user_srf == NULL)) {
 		ret = -ENOMEM;
 		goto out_no_user_srf;
 	}
@@ -764,19 +763,27 @@ int vmw_surface_define_ioctl(struct drm_device *dev, void *data,
 	memcpy(srf->mip_levels, req->mip_levels, sizeof(srf->mip_levels));
 	srf->num_sizes = num_sizes;
 	user_srf->size = size;
-	srf->sizes = memdup_user((struct drm_vmw_size __user *)(unsigned long)
-				 req->size_addr,
-				 sizeof(*srf->sizes) * srf->num_sizes);
-	if (IS_ERR(srf->sizes)) {
-		ret = PTR_ERR(srf->sizes);
+
+	srf->sizes = kmalloc(srf->num_sizes * sizeof(*srf->sizes), GFP_KERNEL);
+	if (unlikely(srf->sizes == NULL)) {
+		ret = -ENOMEM;
 		goto out_no_sizes;
 	}
-	srf->offsets = kmalloc_array(srf->num_sizes,
-				     sizeof(*srf->offsets),
-				     GFP_KERNEL);
-	if (unlikely(!srf->offsets)) {
+	srf->offsets = kmalloc(srf->num_sizes * sizeof(*srf->offsets),
+			       GFP_KERNEL);
+	if (unlikely(srf->offsets == NULL)) {
 		ret = -ENOMEM;
 		goto out_no_offsets;
+	}
+
+	user_sizes = (struct drm_vmw_size __user *)(unsigned long)
+	    req->size_addr;
+
+	ret = copy_from_user(srf->sizes, user_sizes,
+			     srf->num_sizes * sizeof(*srf->sizes));
+	if (unlikely(ret != 0)) {
+		ret = -EFAULT;
+		goto out_no_copy;
 	}
 
 	srf->base_size = *srf->sizes;
@@ -894,16 +901,17 @@ vmw_surface_handle_reference(struct vmw_private *dev_priv,
 	uint32_t handle;
 	struct ttm_base_object *base;
 	int ret;
-	bool require_exist = false;
 
 	if (handle_type == DRM_VMW_HANDLE_PRIME) {
 		ret = ttm_prime_fd_to_handle(tfile, u_handle, &handle);
 		if (unlikely(ret != 0))
 			return ret;
 	} else {
-		if (unlikely(drm_is_render_client(file_priv)))
-			require_exist = true;
-
+		if (unlikely(drm_is_render_client(file_priv))) {
+			DRM_ERROR("Render client refused legacy "
+				  "surface reference.\n");
+			return -EACCES;
+		}
 		if (ACCESS_ONCE(vmw_fpriv(file_priv)->locked_master)) {
 			DRM_ERROR("Locked master refused legacy "
 				  "surface reference.\n");
@@ -915,7 +923,7 @@ vmw_surface_handle_reference(struct vmw_private *dev_priv,
 
 	ret = -EINVAL;
 	base = ttm_base_object_lookup_for_ref(dev_priv->tdev, handle);
-	if (unlikely(!base)) {
+	if (unlikely(base == NULL)) {
 		DRM_ERROR("Could not find surface to reference.\n");
 		goto out_no_lookup;
 	}
@@ -931,14 +939,17 @@ vmw_surface_handle_reference(struct vmw_private *dev_priv,
 
 		/*
 		 * Make sure the surface creator has the same
-		 * authenticating master, or is already registered with us.
+		 * authenticating master.
 		 */
 		if (drm_is_primary_client(file_priv) &&
-		    user_srf->master != file_priv->master)
-			require_exist = true;
+		    user_srf->master != file_priv->master) {
+			DRM_ERROR("Trying to reference surface outside of"
+				  " master domain.\n");
+			ret = -EACCES;
+			goto out_bad_resource;
+		}
 
-		ret = ttm_ref_object_add(tfile, base, TTM_REF_USAGE, NULL,
-					 require_exist);
+		ret = ttm_ref_object_add(tfile, base, TTM_REF_USAGE, NULL);
 		if (unlikely(ret != 0)) {
 			DRM_ERROR("Could not add a reference to a surface.\n");
 			goto out_bad_resource;
@@ -1058,7 +1069,7 @@ static int vmw_gb_surface_create(struct vmw_resource *res)
 
 	cmd = vmw_fifo_reserve(dev_priv, submit_len);
 	cmd2 = (typeof(cmd2))cmd;
-	if (unlikely(!cmd)) {
+	if (unlikely(cmd == NULL)) {
 		DRM_ERROR("Failed reserving FIFO space for surface "
 			  "creation.\n");
 		ret = -ENOMEM;
@@ -1124,7 +1135,7 @@ static int vmw_gb_surface_bind(struct vmw_resource *res,
 	submit_size = sizeof(*cmd1) + (res->backup_dirty ? sizeof(*cmd2) : 0);
 
 	cmd1 = vmw_fifo_reserve(dev_priv, submit_size);
-	if (unlikely(!cmd1)) {
+	if (unlikely(cmd1 == NULL)) {
 		DRM_ERROR("Failed reserving FIFO space for surface "
 			  "binding.\n");
 		return -ENOMEM;
@@ -1174,7 +1185,7 @@ static int vmw_gb_surface_unbind(struct vmw_resource *res,
 
 	submit_size = sizeof(*cmd3) + (readback ? sizeof(*cmd1) : sizeof(*cmd2));
 	cmd = vmw_fifo_reserve(dev_priv, submit_size);
-	if (unlikely(!cmd)) {
+	if (unlikely(cmd == NULL)) {
 		DRM_ERROR("Failed reserving FIFO space for surface "
 			  "unbinding.\n");
 		return -ENOMEM;
@@ -1233,7 +1244,7 @@ static int vmw_gb_surface_destroy(struct vmw_resource *res)
 	vmw_binding_res_list_scrub(&res->binding_head);
 
 	cmd = vmw_fifo_reserve(dev_priv, sizeof(*cmd));
-	if (unlikely(!cmd)) {
+	if (unlikely(cmd == NULL)) {
 		DRM_ERROR("Failed reserving FIFO space for surface "
 			  "destruction.\n");
 		mutex_unlock(&dev_priv->binding_mutex);
@@ -1275,12 +1286,9 @@ int vmw_gb_surface_define_ioctl(struct drm_device *dev, void *data,
 	struct ttm_object_file *tfile = vmw_fpriv(file_priv)->tfile;
 	int ret;
 	uint32_t size;
-	uint32_t backup_handle = 0;
+	uint32_t backup_handle;
 
 	if (req->multisample_count != 0)
-		return -EINVAL;
-
-	if (req->mip_levels > DRM_VMW_MAX_MIP_LEVELS)
 		return -EINVAL;
 
 	if (unlikely(vmw_user_surface_size == 0))
@@ -1318,16 +1326,12 @@ int vmw_gb_surface_define_ioctl(struct drm_device *dev, void *data,
 		ret = vmw_user_dmabuf_lookup(tfile, req->buffer_handle,
 					     &res->backup,
 					     &user_srf->backup_base);
-		if (ret == 0) {
-			if (res->backup->base.num_pages * PAGE_SIZE <
-			    res->backup_size) {
-				DRM_ERROR("Surface backup buffer is too small.\n");
-				vmw_dmabuf_unreference(&res->backup);
-				ret = -EINVAL;
-				goto out_unlock;
-			} else {
-				backup_handle = req->buffer_handle;
-			}
+		if (ret == 0 && res->backup->base.num_pages * PAGE_SIZE <
+		    res->backup_size) {
+			DRM_ERROR("Surface backup buffer is too small.\n");
+			vmw_dmabuf_unreference(&res->backup);
+			ret = -EINVAL;
+			goto out_unlock;
 		}
 	} else if (req->drm_surface_flags & drm_vmw_surface_flag_create_buffer)
 		ret = vmw_user_dmabuf_alloc(dev_priv, tfile,
@@ -1406,7 +1410,7 @@ int vmw_gb_surface_reference_ioctl(struct drm_device *dev, void *data,
 
 	user_srf = container_of(base, struct vmw_user_surface, prime.base);
 	srf = &user_srf->srf;
-	if (!srf->res.backup) {
+	if (srf->res.backup == NULL) {
 		DRM_ERROR("Shared GB surface is missing a backup buffer.\n");
 		goto out_bad_resource;
 	}
@@ -1520,7 +1524,7 @@ int vmw_surface_gb_priv_define(struct drm_device *dev,
 	}
 
 	user_srf = kzalloc(sizeof(*user_srf), GFP_KERNEL);
-	if (unlikely(!user_srf)) {
+	if (unlikely(user_srf == NULL)) {
 		ret = -ENOMEM;
 		goto out_no_user_srf;
 	}

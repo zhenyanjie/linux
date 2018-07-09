@@ -52,7 +52,7 @@ MODULE_AUTHOR("Paul E. McKenney <paulmck@linux.vnet.ibm.com>");
 
 #define PERF_FLAG "-perf:"
 #define PERFOUT_STRING(s) \
-	pr_alert("%s" PERF_FLAG " %s\n", perf_type, s)
+	pr_alert("%s" PERF_FLAG s "\n", perf_type)
 #define VERBOSE_PERFOUT_STRING(s) \
 	do { if (verbose) pr_alert("%s" PERF_FLAG " %s\n", perf_type, s); } while (0)
 #define VERBOSE_PERFOUT_ERRSTRING(s) \
@@ -96,7 +96,12 @@ static int rcu_perf_writer_state;
 #define MAX_MEAS 10000
 #define MIN_MEAS 100
 
-static int perf_runnable = IS_ENABLED(MODULE);
+#if defined(MODULE) || defined(CONFIG_RCU_PERF_TEST_RUNNABLE)
+#define RCUPERF_RUNNABLE_INIT 1
+#else
+#define RCUPERF_RUNNABLE_INIT 0
+#endif
+static int perf_runnable = RCUPERF_RUNNABLE_INIT;
 module_param(perf_runnable, int, 0444);
 MODULE_PARM_DESC(perf_runnable, "Start rcuperf at boot");
 
@@ -400,8 +405,9 @@ rcu_perf_writer(void *arg)
 			sp.sched_priority = 0;
 			sched_setscheduler_nocheck(current,
 						   SCHED_NORMAL, &sp);
-			pr_alert("%s%s rcu_perf_writer %ld has %d measurements\n",
-				 perf_type, PERF_FLAG, me, MIN_MEAS);
+			pr_alert("%s" PERF_FLAG
+				 "rcu_perf_writer %ld has %d measurements\n",
+				 perf_type, me, MIN_MEAS);
 			if (atomic_inc_return(&n_rcu_perf_writer_finished) >=
 			    nrealwriters) {
 				schedule_timeout_interruptible(10);
@@ -637,10 +643,8 @@ rcu_perf_init(void)
 		writer_durations[i] =
 			kcalloc(MAX_MEAS, sizeof(*writer_durations[i]),
 				GFP_KERNEL);
-		if (!writer_durations[i]) {
-			firsterr = -ENOMEM;
+		if (!writer_durations[i])
 			goto unwind;
-		}
 		firsterr = torture_create_kthread(rcu_perf_writer, (void *)i,
 						  writer_tasks[i]);
 		if (firsterr)

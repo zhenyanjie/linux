@@ -53,9 +53,10 @@ __invalid:
 	b	.
 
 	/*
-	 * x0: HYP pgd
-	 * x1: HYP stack
-	 * x2: HYP vectors
+	 * x0: HYP boot pgd
+	 * x1: HYP pgd
+	 * x2: HYP stack
+	 * x3: HYP vectors
 	 */
 __do_hyp_init:
 
@@ -102,36 +103,77 @@ __do_hyp_init:
 	tlbi	alle2
 	dsb	sy
 
-	/*
-	 * Preserve all the RES1 bits while setting the default flags,
-	 * as well as the EE bit on BE. Drop the A flag since the compiler
-	 * is allowed to generate unaligned accesses.
-	 */
-	ldr	x4, =(SCTLR_EL2_RES1 | (SCTLR_ELx_FLAGS & ~SCTLR_ELx_A))
-CPU_BE(	orr	x4, x4, #SCTLR_ELx_EE)
+	mrs	x4, sctlr_el2
+	and	x4, x4, #SCTLR_ELx_EE	// preserve endianness of EL2
+	ldr	x5, =SCTLR_ELx_FLAGS
+	orr	x4, x4, x5
 	msr	sctlr_el2, x4
 	isb
 
+	/* Skip the trampoline dance if we merged the boot and runtime PGDs */
+	cmp	x0, x1
+	b.eq	merged
+
+	/* MMU is now enabled. Get ready for the trampoline dance */
+	ldr	x4, =TRAMPOLINE_VA
+	adr	x5, target
+	bfi	x4, x5, #0, #PAGE_SHIFT
+	br	x4
+
+target: /* We're now in the trampoline code, switch page tables */
+	msr	ttbr0_el2, x1
+	isb
+
+	/* Invalidate the old TLBs */
+	tlbi	alle2
+	dsb	sy
+
+merged:
 	/* Set the stack and new vectors */
-	kern_hyp_va	x1
-	mov	sp, x1
 	kern_hyp_va	x2
-	msr	vbar_el2, x2
+	mov	sp, x2
+	kern_hyp_va	x3
+	msr	vbar_el2, x3
 
 	/* Hello, World! */
 	eret
 ENDPROC(__kvm_hyp_init)
 
 	/*
-	 * Reset kvm back to the hyp stub.
+	 * Reset kvm back to the hyp stub. This is the trampoline dance in
+	 * reverse. If kvm used an extended idmap, __extended_idmap_trampoline
+	 * calls this code directly in the idmap. In this case switching to the
+	 * boot tables is a no-op.
+	 *
+	 * x0: HYP boot pgd
+	 * x1: HYP phys_idmap_start
 	 */
 ENTRY(__kvm_hyp_reset)
+	/* We're in trampoline code in VA, switch back to boot page tables */
+	msr	ttbr0_el2, x0
+	isb
+
+	/* Ensure the PA branch doesn't find a stale tlb entry or stale code. */
+	ic	iallu
+	tlbi	alle2
+	dsb	sy
+	isb
+
+	/* Branch into PA space */
+	adr	x0, 1f
+	bfi	x1, x0, #0, #PAGE_SHIFT
+	br	x1
+
 	/* We're now in idmap, disable MMU */
-	mrs	x0, sctlr_el2
+1:	mrs	x0, sctlr_el2
 	ldr	x1, =SCTLR_ELx_FLAGS
 	bic	x0, x0, x1		// Clear SCTL_M and etc
 	msr	sctlr_el2, x0
 	isb
+
+	/* Invalidate the old TLBs */
+	tlbi	alle2
+	dsb	sy
 
 	/* Install stub vectors */
 	adr_l	x0, __hyp_stub_vectors

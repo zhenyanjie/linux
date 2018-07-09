@@ -54,7 +54,7 @@
 		};
 	};
 
-	memory@80000000 {
+	memory {
 		device_type = "memory";
 		reg = <0x80000000 0x10000000>; /* 256 MB */
 	};
@@ -142,18 +142,6 @@
 		compatible = "nokia,n900-battery";
 		io-channels = <&twl_madc 0>, <&twl_madc 4>, <&twl_madc 12>;
 		io-channel-names = "temp", "bsi", "vbat";
-	};
-
-	pwm9: dmtimer-pwm {
-		compatible = "ti,omap-dmtimer-pwm";
-		#pwm-cells = <3>;
-		ti,timers = <&timer9>;
-		ti,clock-source = <0x00>; /* timer_sys_ck */
-	};
-
-	ir: n900-ir {
-		compatible = "nokia,n900-ir";
-		pwms = <&pwm9 0 26316 0>; /* 38000 Hz */
 	};
 };
 
@@ -734,8 +722,6 @@
 	vmmc_aux-supply = <&vsim>;
 	bus-width = <8>;
 	non-removable;
-	no-sdio;
-	no-sd;
 };
 
 &mmc3 {

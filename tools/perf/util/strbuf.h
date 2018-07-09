@@ -40,9 +40,6 @@
 
 #include <assert.h>
 #include <stdarg.h>
-#include <stddef.h>
-#include <string.h>
-#include <sys/types.h>
 
 extern char strbuf_slopbuf[];
 struct strbuf {
@@ -66,8 +63,9 @@ static inline ssize_t strbuf_avail(const struct strbuf *sb) {
 int strbuf_grow(struct strbuf *buf, size_t);
 
 static inline int strbuf_setlen(struct strbuf *sb, size_t len) {
+	int ret;
 	if (!sb->alloc) {
-		int ret = strbuf_grow(sb, 0);
+		ret = strbuf_grow(sb, 0);
 		if (ret)
 			return ret;
 	}

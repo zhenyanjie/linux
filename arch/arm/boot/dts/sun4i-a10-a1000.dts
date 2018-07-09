@@ -72,9 +72,8 @@
 		};
 
 		blue {
-			label = "a1000:blue:pwr";
+			label = "a1000:blue:usr";
 			gpios = <&pio 7 20 GPIO_ACTIVE_HIGH>;
-			default-state = "on";
 		};
 	};
 

@@ -56,12 +56,13 @@ static inline int gup_pte_range(pmd_t *pmdp, pmd_t pmd, unsigned long addr,
 static inline int gup_huge_pmd(pmd_t *pmdp, pmd_t pmd, unsigned long addr,
 		unsigned long end, int write, struct page **pages, int *nr)
 {
+	unsigned long mask, result;
 	struct page *head, *page;
-	unsigned long mask;
 	int refs;
 
-	mask = (write ? _SEGMENT_ENTRY_PROTECT : 0) | _SEGMENT_ENTRY_INVALID;
-	if ((pmd_val(pmd) & mask) != 0)
+	result = write ? 0 : _SEGMENT_ENTRY_PROTECT;
+	mask = result | _SEGMENT_ENTRY_INVALID;
+	if ((pmd_val(pmd) & mask) != result)
 		return 0;
 	VM_BUG_ON(!pfn_valid(pmd_val(pmd) >> PAGE_SHIFT));
 
@@ -127,44 +128,6 @@ static inline int gup_pmd_range(pud_t *pudp, pud_t pud, unsigned long addr,
 	return 1;
 }
 
-static int gup_huge_pud(pud_t *pudp, pud_t pud, unsigned long addr,
-		unsigned long end, int write, struct page **pages, int *nr)
-{
-	struct page *head, *page;
-	unsigned long mask;
-	int refs;
-
-	mask = (write ? _REGION_ENTRY_PROTECT : 0) | _REGION_ENTRY_INVALID;
-	if ((pud_val(pud) & mask) != 0)
-		return 0;
-	VM_BUG_ON(!pfn_valid(pud_pfn(pud)));
-
-	refs = 0;
-	head = pud_page(pud);
-	page = head + ((addr & ~PUD_MASK) >> PAGE_SHIFT);
-	do {
-		VM_BUG_ON_PAGE(compound_head(page) != head, page);
-		pages[*nr] = page;
-		(*nr)++;
-		page++;
-		refs++;
-	} while (addr += PAGE_SIZE, addr != end);
-
-	if (!page_cache_add_speculative(head, refs)) {
-		*nr -= refs;
-		return 0;
-	}
-
-	if (unlikely(pud_val(pud) != pud_val(*pudp))) {
-		*nr -= refs;
-		while (refs--)
-			put_page(head);
-		return 0;
-	}
-
-	return 1;
-}
-
 static inline int gup_pud_range(pgd_t *pgdp, pgd_t pgd, unsigned long addr,
 		unsigned long end, int write, struct page **pages, int *nr)
 {
@@ -181,12 +144,7 @@ static inline int gup_pud_range(pgd_t *pgdp, pgd_t pgd, unsigned long addr,
 		next = pud_addr_end(addr, end);
 		if (pud_none(pud))
 			return 0;
-		if (unlikely(pud_large(pud))) {
-			if (!gup_huge_pud(pudp, pud, addr, next, write, pages,
-					  nr))
-				return 0;
-		} else if (!gup_pmd_range(pudp, pud, addr, next, write, pages,
-					  nr))
+		if (!gup_pmd_range(pudp, pud, addr, next, write, pages, nr))
 			return 0;
 	} while (pudp++, addr = next, addr != end);
 
@@ -265,8 +223,7 @@ int get_user_pages_fast(unsigned long start, int nr_pages, int write,
 	/* Try to get the remaining pages with get_user_pages */
 	start += nr << PAGE_SHIFT;
 	pages += nr;
-	ret = get_user_pages_unlocked(start, nr_pages - nr, pages,
-				      write ? FOLL_WRITE : 0);
+	ret = get_user_pages_unlocked(start, nr_pages - nr, write, 0, pages);
 	/* Have to be a bit careful with return values */
 	if (nr > 0)
 		ret = (ret < 0) ? nr : ret + nr;

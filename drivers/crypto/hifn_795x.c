@@ -636,12 +636,20 @@ struct hifn_request_context {
 
 static inline u32 hifn_read_0(struct hifn_device *dev, u32 reg)
 {
-	return readl(dev->bar[0] + reg);
+	u32 ret;
+
+	ret = readl(dev->bar[0] + reg);
+
+	return ret;
 }
 
 static inline u32 hifn_read_1(struct hifn_device *dev, u32 reg)
 {
-	return readl(dev->bar[1] + reg);
+	u32 ret;
+
+	ret = readl(dev->bar[1] + reg);
+
+	return ret;
 }
 
 static inline void hifn_write_0(struct hifn_device *dev, u32 reg, u32 val)

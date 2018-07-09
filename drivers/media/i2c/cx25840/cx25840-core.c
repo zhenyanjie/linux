@@ -420,13 +420,11 @@ static void cx25840_initialize(struct i2c_client *client)
 	INIT_WORK(&state->fw_work, cx25840_work_handler);
 	init_waitqueue_head(&state->fw_wait);
 	q = create_singlethread_workqueue("cx25840_fw");
-	if (q) {
-		prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
-		queue_work(q, &state->fw_work);
-		schedule();
-		finish_wait(&state->fw_wait, &wait);
-		destroy_workqueue(q);
-	}
+	prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
+	queue_work(q, &state->fw_work);
+	schedule();
+	finish_wait(&state->fw_wait, &wait);
+	destroy_workqueue(q);
 
 	/* 6. */
 	cx25840_write(client, 0x115, 0x8c);
@@ -636,13 +634,11 @@ static void cx23885_initialize(struct i2c_client *client)
 	INIT_WORK(&state->fw_work, cx25840_work_handler);
 	init_waitqueue_head(&state->fw_wait);
 	q = create_singlethread_workqueue("cx25840_fw");
-	if (q) {
-		prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
-		queue_work(q, &state->fw_work);
-		schedule();
-		finish_wait(&state->fw_wait, &wait);
-		destroy_workqueue(q);
-	}
+	prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
+	queue_work(q, &state->fw_work);
+	schedule();
+	finish_wait(&state->fw_wait, &wait);
+	destroy_workqueue(q);
 
 	/* Call the cx23888 specific std setup func, we no longer rely on
 	 * the generic cx24840 func.
@@ -756,13 +752,11 @@ static void cx231xx_initialize(struct i2c_client *client)
 	INIT_WORK(&state->fw_work, cx25840_work_handler);
 	init_waitqueue_head(&state->fw_wait);
 	q = create_singlethread_workqueue("cx25840_fw");
-	if (q) {
-		prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
-		queue_work(q, &state->fw_work);
-		schedule();
-		finish_wait(&state->fw_wait, &wait);
-		destroy_workqueue(q);
-	}
+	prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
+	queue_work(q, &state->fw_work);
+	schedule();
+	finish_wait(&state->fw_wait, &wait);
+	destroy_workqueue(q);
 
 	cx25840_std_setup(client);
 
@@ -5048,6 +5042,13 @@ static const struct v4l2_ctrl_ops cx25840_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops cx25840_core_ops = {
 	.log_status = cx25840_log_status,
+	.g_ctrl = v4l2_subdev_g_ctrl,
+	.s_ctrl = v4l2_subdev_s_ctrl,
+	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
+	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
+	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
+	.queryctrl = v4l2_subdev_queryctrl,
+	.querymenu = v4l2_subdev_querymenu,
 	.reset = cx25840_reset,
 	.load_fw = cx25840_load_fw,
 	.s_io_pin_config = common_s_io_pin_config,

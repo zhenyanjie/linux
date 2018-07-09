@@ -28,7 +28,6 @@
 #include "cifs_unicode.h"
 #include "smb2status.h"
 #include "smb2glob.h"
-#include "cifs_ioctl.h"
 
 static int
 change_conf(struct TCP_Server_Info *server)
@@ -71,10 +70,6 @@ smb2_add_credits(struct TCP_Server_Info *server, const unsigned int add,
 	spin_lock(&server->req_lock);
 	val = server->ops->get_credits_field(server, optype);
 	*val += add;
-	if (*val > 65000) {
-		*val = 65000; /* Don't get near 64K credits, avoid srv bugs */
-		printk_once(KERN_WARNING "server overflowed SMB3 credits\n");
-	}
 	server->in_flight--;
 	if (server->in_flight == 0 && (optype & CIFS_OP_MASK) != CIFS_NEG_OP)
 		rc = change_conf(server);
@@ -292,7 +287,7 @@ SMB3_request_interfaces(const unsigned int xid, struct cifs_tcon *tcon)
 		cifs_dbg(FYI, "Link Speed %lld\n",
 			le64_to_cpu(out_buf->LinkSpeed));
 	}
-	kfree(out_buf);
+
 	return rc;
 }
 #endif /* STATS2 */
@@ -546,7 +541,6 @@ smb2_set_fid(struct cifsFileInfo *cfile, struct cifs_fid *fid, __u32 oplock)
 	server->ops->set_oplock_level(cinode, oplock, fid->epoch,
 				      &fid->purge_cache);
 	cinode->can_cache_brlcks = CIFS_CACHE_WRITE(cinode);
-	memcpy(cfile->fid.create_guid, fid->create_guid, 16);
 }
 
 static void
@@ -705,7 +699,6 @@ smb2_clone_range(const unsigned int xid,
 
 cchunk_out:
 	kfree(pcchunk);
-	kfree(retbuf);
 	return rc;
 }
 
@@ -830,6 +823,7 @@ smb2_duplicate_extents(const unsigned int xid,
 {
 	int rc;
 	unsigned int ret_data_len;
+	char *retbuf = NULL;
 	struct duplicate_extents_to_file dup_ext_buf;
 	struct cifs_tcon *tcon = tlink_tcon(trgtfile->tlink);
 
@@ -855,7 +849,7 @@ smb2_duplicate_extents(const unsigned int xid,
 			FSCTL_DUPLICATE_EXTENTS_TO_FILE,
 			true /* is_fsctl */, (char *)&dup_ext_buf,
 			sizeof(struct duplicate_extents_to_file),
-			NULL,
+			(char **)&retbuf,
 			&ret_data_len);
 
 	if (ret_data_len > 0)
@@ -878,6 +872,7 @@ smb3_set_integrity(const unsigned int xid, struct cifs_tcon *tcon,
 		   struct cifsFileInfo *cfile)
 {
 	struct fsctl_set_integrity_information_req integr_info;
+	char *retbuf = NULL;
 	unsigned int ret_data_len;
 
 	integr_info.ChecksumAlgorithm = cpu_to_le16(CHECKSUM_TYPE_UNCHANGED);
@@ -889,54 +884,9 @@ smb3_set_integrity(const unsigned int xid, struct cifs_tcon *tcon,
 			FSCTL_SET_INTEGRITY_INFORMATION,
 			true /* is_fsctl */, (char *)&integr_info,
 			sizeof(struct fsctl_set_integrity_information_req),
-			NULL,
-			&ret_data_len);
-
-}
-
-static int
-smb3_enum_snapshots(const unsigned int xid, struct cifs_tcon *tcon,
-		   struct cifsFileInfo *cfile, void __user *ioc_buf)
-{
-	char *retbuf = NULL;
-	unsigned int ret_data_len = 0;
-	int rc;
-	struct smb_snapshot_array snapshot_in;
-
-	rc = SMB2_ioctl(xid, tcon, cfile->fid.persistent_fid,
-			cfile->fid.volatile_fid,
-			FSCTL_SRV_ENUMERATE_SNAPSHOTS,
-			true /* is_fsctl */, NULL, 0 /* no input data */,
 			(char **)&retbuf,
 			&ret_data_len);
-	cifs_dbg(FYI, "enum snaphots ioctl returned %d and ret buflen is %d\n",
-			rc, ret_data_len);
-	if (rc)
-		return rc;
 
-	if (ret_data_len && (ioc_buf != NULL) && (retbuf != NULL)) {
-		/* Fixup buffer */
-		if (copy_from_user(&snapshot_in, ioc_buf,
-		    sizeof(struct smb_snapshot_array))) {
-			rc = -EFAULT;
-			kfree(retbuf);
-			return rc;
-		}
-		if (snapshot_in.snapshot_array_size < sizeof(struct smb_snapshot_array)) {
-			rc = -ERANGE;
-			kfree(retbuf);
-			return rc;
-		}
-
-		if (ret_data_len > snapshot_in.snapshot_array_size)
-			ret_data_len = snapshot_in.snapshot_array_size;
-
-		if (copy_to_user(ioc_buf, retbuf, ret_data_len))
-			rc = -EFAULT;
-	}
-
-	kfree(retbuf);
-	return rc;
 }
 
 static int
@@ -964,7 +914,7 @@ smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 	rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, NULL);
 	kfree(utf16_path);
 	if (rc) {
-		cifs_dbg(FYI, "open dir failed rc=%d\n", rc);
+		cifs_dbg(VFS, "open dir failed\n");
 		return rc;
 	}
 
@@ -974,7 +924,7 @@ smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 	rc = SMB2_query_directory(xid, tcon, fid->persistent_fid,
 				  fid->volatile_fid, 0, srch_inf);
 	if (rc) {
-		cifs_dbg(FYI, "query directory failed rc=%d\n", rc);
+		cifs_dbg(VFS, "query directory failed\n");
 		SMB2_close(xid, tcon, fid->persistent_fid, fid->volatile_fid);
 	}
 	return rc;
@@ -1015,18 +965,6 @@ smb2_is_status_pending(char *buf, struct TCP_Server_Info *server, int length)
 		wake_up(&server->request_q);
 	}
 
-	return true;
-}
-
-static bool
-smb2_is_session_expired(char *buf)
-{
-	struct smb2_hdr *hdr = (struct smb2_hdr *)buf;
-
-	if (hdr->Status != STATUS_NETWORK_SESSION_EXPIRED)
-		return false;
-
-	cifs_dbg(FYI, "Session expired\n");
 	return true;
 }
 
@@ -1103,7 +1041,7 @@ smb2_set_lease_key(struct inode *inode, struct cifs_fid *fid)
 static void
 smb2_new_lease_key(struct cifs_fid *fid)
 {
-	generate_random_uuid(fid->lease_key);
+	get_random_bytes(fid->lease_key, SMB2_LEASE_KEY_SIZE);
 }
 
 #define SMB2_SYMLINK_STRUCT_SIZE \
@@ -1578,7 +1516,6 @@ struct smb_version_operations smb20_operations = {
 	.clear_stats = smb2_clear_stats,
 	.print_stats = smb2_print_stats,
 	.is_oplock_break = smb2_is_valid_oplock_break,
-	.handle_cancelled_mid = smb2_handle_cancelled_mid,
 	.downgrade_oplock = smb2_downgrade_oplock,
 	.need_neg = smb2_need_neg,
 	.negotiate = smb2_negotiate,
@@ -1606,8 +1543,6 @@ struct smb_version_operations smb20_operations = {
 	.rename = smb2_rename_path,
 	.create_hardlink = smb2_create_hardlink,
 	.query_symlink = smb2_query_symlink,
-	.query_mf_symlink = smb3_query_mf_symlink,
-	.create_mf_symlink = smb3_create_mf_symlink,
 	.open = smb2_open_file,
 	.set_fid = smb2_set_fid,
 	.close = smb2_close_file,
@@ -1621,7 +1556,6 @@ struct smb_version_operations smb20_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1660,7 +1594,6 @@ struct smb_version_operations smb21_operations = {
 	.clear_stats = smb2_clear_stats,
 	.print_stats = smb2_print_stats,
 	.is_oplock_break = smb2_is_valid_oplock_break,
-	.handle_cancelled_mid = smb2_handle_cancelled_mid,
 	.downgrade_oplock = smb2_downgrade_oplock,
 	.need_neg = smb2_need_neg,
 	.negotiate = smb2_negotiate,
@@ -1703,7 +1636,6 @@ struct smb_version_operations smb21_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1720,7 +1652,6 @@ struct smb_version_operations smb21_operations = {
 	.clone_range = smb2_clone_range,
 	.wp_retry_size = smb2_wp_retry_size,
 	.dir_needs_close = smb2_dir_needs_close,
-	.enum_snapshots = smb3_enum_snapshots,
 };
 
 struct smb_version_operations smb30_operations = {
@@ -1744,7 +1675,6 @@ struct smb_version_operations smb30_operations = {
 	.print_stats = smb2_print_stats,
 	.dump_share_caps = smb2_dump_share_caps,
 	.is_oplock_break = smb2_is_valid_oplock_break,
-	.handle_cancelled_mid = smb2_handle_cancelled_mid,
 	.downgrade_oplock = smb2_downgrade_oplock,
 	.need_neg = smb2_need_neg,
 	.negotiate = smb2_negotiate,
@@ -1787,7 +1717,6 @@ struct smb_version_operations smb30_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1809,7 +1738,6 @@ struct smb_version_operations smb30_operations = {
 	.wp_retry_size = smb2_wp_retry_size,
 	.dir_needs_close = smb2_dir_needs_close,
 	.fallocate = smb3_fallocate,
-	.enum_snapshots = smb3_enum_snapshots,
 };
 
 #ifdef CONFIG_CIFS_SMB311
@@ -1834,7 +1762,6 @@ struct smb_version_operations smb311_operations = {
 	.print_stats = smb2_print_stats,
 	.dump_share_caps = smb2_dump_share_caps,
 	.is_oplock_break = smb2_is_valid_oplock_break,
-	.handle_cancelled_mid = smb2_handle_cancelled_mid,
 	.downgrade_oplock = smb2_downgrade_oplock,
 	.need_neg = smb2_need_neg,
 	.negotiate = smb2_negotiate,
@@ -1877,7 +1804,6 @@ struct smb_version_operations smb311_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1899,7 +1825,6 @@ struct smb_version_operations smb311_operations = {
 	.wp_retry_size = smb2_wp_retry_size,
 	.dir_needs_close = smb2_dir_needs_close,
 	.fallocate = smb3_fallocate,
-	.enum_snapshots = smb3_enum_snapshots,
 };
 #endif /* CIFS_SMB311 */
 

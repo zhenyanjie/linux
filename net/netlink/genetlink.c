@@ -404,7 +404,7 @@ int __genl_register_family(struct genl_family *family)
 
 	err = genl_validate_assign_mc_groups(family);
 	if (err)
-		goto errout_free;
+		goto errout_locked;
 
 	list_add_tail(&family->family_list, genl_family_chain(family->id));
 	genl_unlock_all();
@@ -417,8 +417,6 @@ int __genl_register_family(struct genl_family *family)
 
 	return 0;
 
-errout_free:
-	kfree(family->attrbuf);
 errout_locked:
 	genl_unlock_all();
 errout:
@@ -979,7 +977,7 @@ static int genl_ctrl_event(int event, struct genl_family *family,
 	return 0;
 }
 
-static const struct genl_ops genl_ctrl_ops[] = {
+static struct genl_ops genl_ctrl_ops[] = {
 	{
 		.cmd		= CTRL_CMD_GETFAMILY,
 		.doit		= ctrl_getfamily,
@@ -988,7 +986,7 @@ static const struct genl_ops genl_ctrl_ops[] = {
 	},
 };
 
-static const struct genl_multicast_group genl_ctrl_groups[] = {
+static struct genl_multicast_group genl_ctrl_groups[] = {
 	{ .name = "notify", },
 };
 
@@ -1103,7 +1101,6 @@ static int genlmsg_mcast(struct sk_buff *skb, u32 portid, unsigned long group,
 {
 	struct sk_buff *tmp;
 	struct net *net, *prev = NULL;
-	bool delivered = false;
 	int err;
 
 	for_each_net_rcu(net) {
@@ -1115,21 +1112,14 @@ static int genlmsg_mcast(struct sk_buff *skb, u32 portid, unsigned long group,
 			}
 			err = nlmsg_multicast(prev->genl_sock, tmp,
 					      portid, group, flags);
-			if (!err)
-				delivered = true;
-			else if (err != -ESRCH)
+			if (err)
 				goto error;
 		}
 
 		prev = net;
 	}
 
-	err = nlmsg_multicast(prev->genl_sock, skb, portid, group, flags);
-	if (!err)
-		delivered = true;
-	else if (err != -ESRCH)
-		return err;
-	return delivered ? 0 : -ESRCH;
+	return nlmsg_multicast(prev->genl_sock, skb, portid, group, flags);
  error:
 	kfree_skb(skb);
 	return err;

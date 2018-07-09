@@ -14,7 +14,6 @@
 #include <linux/regmap.h>
 
 #include "sun4i_tcon.h"
-#include "sun4i_dotclock.h"
 
 struct sun4i_dclk {
 	struct clk_hw	hw;
@@ -62,7 +61,7 @@ static unsigned long sun4i_dclk_recalc_rate(struct clk_hw *hw,
 	regmap_read(dclk->regmap, SUN4I_TCON0_DCLK_REG, &val);
 
 	val >>= SUN4I_TCON0_DCLK_DIV_SHIFT;
-	val &= (1 << SUN4I_TCON0_DCLK_DIV_WIDTH) - 1;
+	val &= SUN4I_TCON0_DCLK_DIV_WIDTH;
 
 	if (!val)
 		val = 1;
@@ -77,7 +76,7 @@ static long sun4i_dclk_round_rate(struct clk_hw *hw, unsigned long rate,
 	u8 best_div = 1;
 	int i;
 
-	for (i = 6; i <= 127; i++) {
+	for (i = 6; i < 127; i++) {
 		unsigned long ideal = rate * i;
 		unsigned long rounded;
 
@@ -90,8 +89,7 @@ static long sun4i_dclk_round_rate(struct clk_hw *hw, unsigned long rate,
 			goto out;
 		}
 
-		if (abs(rate - rounded / i) <
-		    abs(rate - best_parent / best_div)) {
+		if ((rounded < ideal) && (rounded > best_parent)) {
 			best_parent = rounded;
 			best_div = i;
 		}
@@ -129,13 +127,10 @@ static int sun4i_dclk_get_phase(struct clk_hw *hw)
 static int sun4i_dclk_set_phase(struct clk_hw *hw, int degrees)
 {
 	struct sun4i_dclk *dclk = hw_to_dclk(hw);
-	u32 val = degrees / 120;
-
-	val <<= 28;
 
 	regmap_update_bits(dclk->regmap, SUN4I_TCON0_IO_POL_REG,
 			   GENMASK(29, 28),
-			   val);
+			   degrees / 120);
 
 	return 0;
 }

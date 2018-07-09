@@ -13,6 +13,8 @@
 #ifndef DIB3000MC_H
 #define DIB3000MC_H
 
+#include <linux/kconfig.h>
+
 #include "dibx000_common.h"
 
 struct dib3000mc_config {

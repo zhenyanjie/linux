@@ -15,11 +15,8 @@
 
 #define arch_spin_is_locked(x)	((x)->slock != __ARCH_SPIN_LOCK_UNLOCKED__)
 #define arch_spin_lock_flags(lock, flags)	arch_spin_lock(lock)
-
-static inline void arch_spin_unlock_wait(arch_spinlock_t *lock)
-{
-	smp_cond_load_acquire(&lock->slock, !VAL);
-}
+#define arch_spin_unlock_wait(x) \
+	do { while (arch_spin_is_locked(x)) cpu_relax(); } while (0)
 
 #ifdef CONFIG_ARC_HAS_LLSC
 

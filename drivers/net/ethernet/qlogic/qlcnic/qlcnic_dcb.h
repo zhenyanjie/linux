@@ -45,6 +45,7 @@ struct qlcnic_dcb {
 static inline void qlcnic_clear_dcb_ops(struct qlcnic_dcb *dcb)
 {
 	kfree(dcb);
+	dcb = NULL;
 }
 
 static inline int qlcnic_dcb_get_hw_capability(struct qlcnic_dcb *dcb)

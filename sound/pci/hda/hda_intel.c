@@ -54,7 +54,6 @@
 /* for snoop control */
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
-#include <asm/cpufeature.h>
 #endif
 #include <sound/core.h>
 #include <sound/initval.h>
@@ -184,10 +183,6 @@ static int power_save = CONFIG_SND_HDA_POWER_SAVE_DEFAULT;
 module_param(power_save, xint, 0644);
 MODULE_PARM_DESC(power_save, "Automatic power-saving timeout "
 		 "(in second, 0 = disable).");
-
-static bool pm_blacklist = true;
-module_param(pm_blacklist, bool, 0644);
-MODULE_PARM_DESC(pm_blacklist, "Enable power-management blacklist");
 
 /* reset the HD-audio controller in power save mode.
  * this may give more power-saving, but will take longer time to
@@ -345,7 +340,8 @@ enum {
 
 /* quirks for Nvidia */
 #define AZX_DCAPS_PRESET_NVIDIA \
-	(AZX_DCAPS_NO_MSI | AZX_DCAPS_CORBRP_SELF_CLEAR |\
+	(AZX_DCAPS_NO_MSI | /*AZX_DCAPS_ALIGN_BUFSIZE |*/ \
+	 AZX_DCAPS_NO_64BIT | AZX_DCAPS_CORBRP_SELF_CLEAR |\
 	 AZX_DCAPS_SNOOP_TYPE(NVIDIA))
 
 #define AZX_DCAPS_PRESET_CTHDA \
@@ -373,10 +369,8 @@ enum {
 #define IS_KBL_LP(pci) ((pci)->vendor == 0x8086 && (pci)->device == 0x9d71)
 #define IS_KBL_H(pci) ((pci)->vendor == 0x8086 && (pci)->device == 0xa2f0)
 #define IS_BXT(pci) ((pci)->vendor == 0x8086 && (pci)->device == 0x5a98)
-#define IS_GLK(pci) ((pci)->vendor == 0x8086 && (pci)->device == 0x3198)
 #define IS_SKL_PLUS(pci) (IS_SKL(pci) || IS_SKL_LP(pci) || IS_BXT(pci)) || \
-			IS_KBL(pci) || IS_KBL_LP(pci) || IS_KBL_H(pci)	|| \
-			IS_GLK(pci)
+			IS_KBL(pci) || IS_KBL_LP(pci) || IS_KBL_H(pci)
 
 static char *driver_short_names[] = {
 	[AZX_DRIVER_ICH] = "HDA Intel",
@@ -1514,8 +1508,7 @@ static void azx_check_snoop_available(struct azx *chip)
 		 */
 		u8 val;
 		pci_read_config_byte(chip->pci, 0x42, &val);
-		if (!(val & 0x80) && (chip->pci->revision == 0x30 ||
-				      chip->pci->revision == 0x20))
+		if (!(val & 0x80) && chip->pci->revision == 0x30)
 			snoop = false;
 	}
 
@@ -1670,22 +1663,6 @@ static int azx_first_init(struct azx *chip)
 		return -ENXIO;
 	}
 
-	if (IS_SKL_PLUS(pci))
-		snd_hdac_bus_parse_capabilities(bus);
-
-	/*
-	 * Some Intel CPUs has always running timer (ART) feature and
-	 * controller may have Global time sync reporting capability, so
-	 * check both of these before declaring synchronized time reporting
-	 * capability SNDRV_PCM_INFO_HAS_LINK_SYNCHRONIZED_ATIME
-	 */
-	chip->gts_present = false;
-
-#ifdef CONFIG_X86
-	if (bus->ppcap && boot_cpu_has(X86_FEATURE_ART))
-		chip->gts_present = true;
-#endif
-
 	if (chip->msi) {
 		if (chip->driver_caps & AZX_DCAPS_NO_MSI64) {
 			dev_dbg(card->dev, "Disabling 64bit MSI\n");
@@ -1721,10 +1698,6 @@ static int azx_first_init(struct azx *chip)
 			pci_dev_put(p_smbus);
 		}
 	}
-
-	/* NVidia hardware normally only supports up to 40 bits of DMA */
-	if (chip->pci->vendor == PCI_VENDOR_ID_NVIDIA)
-		dma_bits = 40;
 
 	/* disable 64bit DMA address on some devices */
 	if (chip->driver_caps & AZX_DCAPS_NO_64BIT) {
@@ -2049,26 +2022,6 @@ out_free:
 	return err;
 }
 
-#ifdef CONFIG_PM
-/* On some boards setting power_save to a non 0 value leads to clicking /
- * popping sounds when ever we enter/leave powersaving mode. Ideally we would
- * figure out how to avoid these sounds, but that is not always feasible.
- * So we keep a list of devices where we disable powersaving as its known
- * to causes problems on these devices.
- */
-static struct snd_pci_quirk power_save_blacklist[] = {
-	/* https://bugzilla.redhat.com/show_bug.cgi?id=1525104 */
-	SND_PCI_QUIRK(0x1849, 0x0c0c, "Asrock B85M-ITX", 0),
-	/* https://bugzilla.redhat.com/show_bug.cgi?id=1525104 */
-	SND_PCI_QUIRK(0x1043, 0x8733, "Asus Prime X370-Pro", 0),
-	/* https://bugzilla.redhat.com/show_bug.cgi?id=1572975 */
-	SND_PCI_QUIRK(0x17aa, 0x36a7, "Lenovo C50 All in one", 0),
-	/* https://bugzilla.kernel.org/show_bug.cgi?id=198611 */
-	SND_PCI_QUIRK(0x17aa, 0x2227, "Lenovo X1 Carbon 3rd Gen", 0),
-	{}
-};
-#endif /* CONFIG_PM */
-
 /* number of codec slots for each chipset: 0 = default slots (i.e. 4) */
 static unsigned int azx_max_codecs[AZX_NUM_DRIVERS] = {
 	[AZX_DRIVER_NVIDIA] = 8,
@@ -2081,7 +2034,6 @@ static int azx_probe_continue(struct azx *chip)
 	struct hdac_bus *bus = azx_bus(chip);
 	struct pci_dev *pci = chip->pci;
 	int dev = chip->dev_index;
-	int val;
 	int err;
 
 	hda->probe_continued = 1;
@@ -2157,21 +2109,7 @@ static int azx_probe_continue(struct azx *chip)
 
 	chip->running = 1;
 	azx_add_card_list(chip);
-
-	val = power_save;
-#ifdef CONFIG_PM
-	if (pm_blacklist) {
-		const struct snd_pci_quirk *q;
-
-		q = snd_pci_quirk_lookup(chip->pci, power_save_blacklist);
-		if (q && val) {
-			dev_info(chip->card->dev, "device %04x:%04x is on the power_save blacklist, forcing power_save to 0\n",
-				 q->subvendor, q->subdevice);
-			val = 0;
-		}
-	}
-#endif /* CONFIG_PM */
-	snd_hda_set_power_save(&chip->bus, val * 1000);
+	snd_hda_set_power_save(&chip->bus, power_save * 1000);
 	if (azx_has_pm_runtime(chip) || hda->use_vga_switcheroo)
 		pm_runtime_put_autosuspend(&pci->dev);
 
@@ -2197,20 +2135,7 @@ static void azx_remove(struct pci_dev *pci)
 		/* cancel the pending probing work */
 		chip = card->private_data;
 		hda = container_of(chip, struct hda_intel, chip);
-		/* FIXME: below is an ugly workaround.
-		 * Both device_release_driver() and driver_probe_device()
-		 * take *both* the device's and its parent's lock before
-		 * calling the remove() and probe() callbacks.  The codec
-		 * probe takes the locks of both the codec itself and its
-		 * parent, i.e. the PCI controller dev.  Meanwhile, when
-		 * the PCI controller is unbound, it takes its lock, too
-		 * ==> ouch, a deadlock!
-		 * As a workaround, we unlock temporarily here the controller
-		 * device during cancel_work_sync() call.
-		 */
-		device_unlock(&pci->dev);
 		cancel_work_sync(&hda->probe_work);
-		device_lock(&pci->dev);
 
 		snd_card_free(card);
 	}
@@ -2252,9 +2177,9 @@ static const struct pci_device_id azx_ids[] = {
 	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH },
 	/* Lewisburg */
 	{ PCI_DEVICE(0x8086, 0xa1f0),
-	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_SKYLAKE },
+	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH },
 	{ PCI_DEVICE(0x8086, 0xa270),
-	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_SKYLAKE },
+	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH },
 	/* Lynx Point-LP */
 	{ PCI_DEVICE(0x8086, 0x9c20),
 	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH },
@@ -2346,9 +2271,6 @@ static const struct pci_device_id azx_ids[] = {
 	  .driver_data = AZX_DRIVER_ATI | AZX_DCAPS_PRESET_ATI_SB },
 	/* AMD Hudson */
 	{ PCI_DEVICE(0x1022, 0x780d),
-	  .driver_data = AZX_DRIVER_GENERIC | AZX_DCAPS_PRESET_ATI_SB },
-	/* AMD Raven */
-	{ PCI_DEVICE(0x1022, 0x15e3),
 	  .driver_data = AZX_DRIVER_GENERIC | AZX_DCAPS_PRESET_ATI_SB },
 	/* ATI HDMI */
 	{ PCI_DEVICE(0x1002, 0x0002),

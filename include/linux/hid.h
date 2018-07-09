@@ -801,7 +801,7 @@ extern int hidinput_connect(struct hid_device *hid, unsigned int force);
 extern void hidinput_disconnect(struct hid_device *);
 
 int hid_set_field(struct hid_field *, unsigned, __s32);
-int hid_input_report(struct hid_device *, int type, u8 *, u32, int);
+int hid_input_report(struct hid_device *, int type, u8 *, int, int);
 int hidinput_find_field(struct hid_device *hid, unsigned int type, unsigned int code, struct hid_field **field);
 struct hid_field *hidinput_get_led_field(struct hid_device *hid);
 unsigned int hidinput_count_leds(struct hid_device *hid);
@@ -837,7 +837,7 @@ __u32 hid_field_extract(const struct hid_device *hid, __u8 *report,
  */
 static inline void hid_device_io_start(struct hid_device *hid) {
 	if (hid->io_started) {
-		dev_warn(&hid->dev, "io already started\n");
+		dev_warn(&hid->dev, "io already started");
 		return;
 	}
 	hid->io_started = true;
@@ -857,7 +857,7 @@ static inline void hid_device_io_start(struct hid_device *hid) {
  */
 static inline void hid_device_io_stop(struct hid_device *hid) {
 	if (!hid->io_started) {
-		dev_warn(&hid->dev, "io already stopped\n");
+		dev_warn(&hid->dev, "io already stopped");
 		return;
 	}
 	hid->io_started = false;
@@ -1106,13 +1106,13 @@ static inline void hid_hw_wait(struct hid_device *hdev)
  *
  * @report: the report we want to know the length
  */
-static inline u32 hid_report_len(struct hid_report *report)
+static inline int hid_report_len(struct hid_report *report)
 {
 	/* equivalent to DIV_ROUND_UP(report->size, 8) + !!(report->id > 0) */
 	return ((report->size - 1) >> 3) + 1 + (report->id > 0);
 }
 
-int hid_report_raw_event(struct hid_device *hid, int type, u8 *data, u32 size,
+int hid_report_raw_event(struct hid_device *hid, int type, u8 *data, int size,
 		int interrupt);
 
 /* HID quirks API */

@@ -138,7 +138,7 @@ static void vol_release(struct device *dev)
 {
 	struct ubi_volume *vol = container_of(dev, struct ubi_volume, dev);
 
-	ubi_eba_replace_table(vol, NULL);
+	kfree(vol->eba_tbl);
 	kfree(vol);
 }
 
@@ -158,7 +158,6 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 	int i, err, vol_id = req->vol_id, do_free = 1;
 	struct ubi_volume *vol;
 	struct ubi_vtbl_record vtbl_rec;
-	struct ubi_eba_table *eba_tbl = NULL;
 	dev_t dev;
 
 	if (ubi->ro_mode)
@@ -242,13 +241,14 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 	if (err)
 		goto out_acc;
 
-	eba_tbl = ubi_eba_create_table(vol, vol->reserved_pebs);
-	if (IS_ERR(eba_tbl)) {
-		err = PTR_ERR(eba_tbl);
+	vol->eba_tbl = kmalloc(vol->reserved_pebs * sizeof(int), GFP_KERNEL);
+	if (!vol->eba_tbl) {
+		err = -ENOMEM;
 		goto out_acc;
 	}
 
-	ubi_eba_replace_table(vol, eba_tbl);
+	for (i = 0; i < vol->reserved_pebs; i++)
+		vol->eba_tbl[i] = UBI_LEB_UNMAPPED;
 
 	if (vol->vol_type == UBI_DYNAMIC_VOLUME) {
 		vol->used_ebs = vol->reserved_pebs;
@@ -264,12 +264,6 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 		else
 			vol->last_eb_bytes = vol->usable_leb_size;
 	}
-
-	/* Make volume "available" before it becomes accessible via sysfs */
-	spin_lock(&ubi->volumes_lock);
-	ubi->volumes[vol_id] = vol;
-	ubi->vol_count += 1;
-	spin_unlock(&ubi->volumes_lock);
 
 	/* Register character device for the volume */
 	cdev_init(&vol->cdev, &ubi_vol_cdev_operations);
@@ -310,6 +304,11 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 	if (err)
 		goto out_sysfs;
 
+	spin_lock(&ubi->volumes_lock);
+	ubi->volumes[vol_id] = vol;
+	ubi->vol_count += 1;
+	spin_unlock(&ubi->volumes_lock);
+
 	ubi_volume_notify(ubi, vol, UBI_VOLUME_ADDED);
 	self_check_volumes(ubi);
 	return err;
@@ -329,12 +328,8 @@ out_sysfs:
 out_cdev:
 	cdev_del(&vol->cdev);
 out_mapping:
-	spin_lock(&ubi->volumes_lock);
-	ubi->volumes[vol_id] = NULL;
-	ubi->vol_count -= 1;
-	spin_unlock(&ubi->volumes_lock);
 	if (do_free)
-		ubi_eba_destroy_table(eba_tbl);
+		kfree(vol->eba_tbl);
 out_acc:
 	spin_lock(&ubi->volumes_lock);
 	ubi->rsvd_pebs -= vol->reserved_pebs;
@@ -432,11 +427,10 @@ out_unlock:
  */
 int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
 {
-	int i, err, pebs;
+	int i, err, pebs, *new_mapping;
 	struct ubi_volume *vol = desc->vol;
 	struct ubi_device *ubi = vol->ubi;
 	struct ubi_vtbl_record vtbl_rec;
-	struct ubi_eba_table *new_eba_tbl = NULL;
 	int vol_id = vol->vol_id;
 
 	if (ubi->ro_mode)
@@ -456,9 +450,12 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
 	if (reserved_pebs == vol->reserved_pebs)
 		return 0;
 
-	new_eba_tbl = ubi_eba_create_table(vol, reserved_pebs);
-	if (IS_ERR(new_eba_tbl))
-		return PTR_ERR(new_eba_tbl);
+	new_mapping = kmalloc(reserved_pebs * sizeof(int), GFP_KERNEL);
+	if (!new_mapping)
+		return -ENOMEM;
+
+	for (i = 0; i < reserved_pebs; i++)
+		new_mapping[i] = UBI_LEB_UNMAPPED;
 
 	spin_lock(&ubi->volumes_lock);
 	if (vol->ref_count > 1) {
@@ -484,8 +481,10 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
 		}
 		ubi->avail_pebs -= pebs;
 		ubi->rsvd_pebs += pebs;
-		ubi_eba_copy_table(vol, new_eba_tbl, vol->reserved_pebs);
-		ubi_eba_replace_table(vol, new_eba_tbl);
+		for (i = 0; i < vol->reserved_pebs; i++)
+			new_mapping[i] = vol->eba_tbl[i];
+		kfree(vol->eba_tbl);
+		vol->eba_tbl = new_mapping;
 		spin_unlock(&ubi->volumes_lock);
 	}
 
@@ -499,8 +498,10 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
 		ubi->rsvd_pebs += pebs;
 		ubi->avail_pebs -= pebs;
 		ubi_update_reserved(ubi);
-		ubi_eba_copy_table(vol, new_eba_tbl, reserved_pebs);
-		ubi_eba_replace_table(vol, new_eba_tbl);
+		for (i = 0; i < reserved_pebs; i++)
+			new_mapping[i] = vol->eba_tbl[i];
+		kfree(vol->eba_tbl);
+		vol->eba_tbl = new_mapping;
 		spin_unlock(&ubi->volumes_lock);
 	}
 
@@ -542,7 +543,7 @@ out_acc:
 		spin_unlock(&ubi->volumes_lock);
 	}
 out_free:
-	kfree(new_eba_tbl);
+	kfree(new_mapping);
 	return err;
 }
 

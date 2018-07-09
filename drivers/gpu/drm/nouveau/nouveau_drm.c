@@ -22,11 +22,13 @@
  * Authors: Ben Skeggs
  */
 
+#include <linux/apple-gmux.h>
 #include <linux/console.h>
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/pm_runtime.h>
+#include <linux/vgaarb.h>
 #include <linux/vga_switcheroo.h>
 
 #include "drmP.h"
@@ -198,7 +200,6 @@ nouveau_accel_init(struct nouveau_drm *drm)
 		case KEPLER_CHANNEL_GPFIFO_A:
 		case KEPLER_CHANNEL_GPFIFO_B:
 		case MAXWELL_CHANNEL_GPFIFO_A:
-		case PASCAL_CHANNEL_GPFIFO_A:
 			ret = nvc0_fence_create(drm);
 			break;
 		default:
@@ -314,7 +315,13 @@ static int nouveau_drm_probe(struct pci_dev *pdev,
 	bool boot = false;
 	int ret;
 
-	if (vga_switcheroo_client_probe_defer(pdev))
+	/*
+	 * apple-gmux is needed on dual GPU MacBook Pro
+	 * to probe the panel if we're the inactive GPU.
+	 */
+	if (IS_ENABLED(CONFIG_VGA_ARB) && IS_ENABLED(CONFIG_VGA_SWITCHEROO) &&
+	    apple_gmux_present() && pdev != vga_default_device() &&
+	    !vga_switcheroo_handler_flags())
 		return -EPROBE_DEFER;
 
 	/* We need to check that the chipset is supported before booting
@@ -351,7 +358,7 @@ static int nouveau_drm_probe(struct pci_dev *pdev,
 	boot = pdev->resource[PCI_ROM_RESOURCE].flags & IORESOURCE_ROM_SHADOW;
 #endif
 	if (nouveau_modeset != 2)
-		drm_fb_helper_remove_conflicting_framebuffers(aper, "nouveaufb", boot);
+		remove_conflicting_framebuffers(aper, "nouveaufb", boot);
 	kfree(aper);
 
 	ret = nvkm_device_pci_new(pdev, nouveau_config, nouveau_debug,
@@ -440,11 +447,6 @@ nouveau_drm_load(struct drm_device *dev, unsigned long flags)
 	nouveau_vga_init(drm);
 
 	if (drm->device.info.family >= NV_DEVICE_INFO_V0_TESLA) {
-		if (!nvxx_device(&drm->device)->mmu) {
-			ret = -ENOSYS;
-			goto fail_device;
-		}
-
 		ret = nvkm_vm_new(nvxx_device(&drm->device), 0, (1ULL << 40),
 				  0x1000, NULL, &drm->client.vm);
 		if (ret)
@@ -483,9 +485,6 @@ nouveau_drm_load(struct drm_device *dev, unsigned long flags)
 		pm_runtime_allow(dev->dev);
 		pm_runtime_mark_last_busy(dev->dev);
 		pm_runtime_put(dev->dev);
-	} else {
-		/* enable polling for external displays */
-		drm_kms_helper_poll_enable(dev);
 	}
 	return 0;
 
@@ -508,11 +507,7 @@ nouveau_drm_unload(struct drm_device *dev)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
 
-	if (nouveau_runtime_pm != 0) {
-		pm_runtime_get_sync(dev->dev);
-		pm_runtime_forbid(dev->dev);
-	}
-
+	pm_runtime_get_sync(dev->dev);
 	nouveau_fbcon_fini(dev);
 	nouveau_accel_fini(drm);
 	nouveau_hwmon_fini(dev);
@@ -764,7 +759,7 @@ nouveau_pmops_runtime_resume(struct device *dev)
 	pci_set_master(pdev);
 
 	ret = nouveau_do_resume(drm_dev, true);
-
+	drm_kms_helper_poll_enable(drm_dev);
 	/* do magic */
 	nvif_mask(&device->object, 0x088488, (1 << 25), (1 << 25));
 	vga_switcheroo_set_dynamic_switch(pdev, VGA_SWITCHEROO_ON);
@@ -984,7 +979,7 @@ driver_stub = {
 	.gem_prime_vmap = nouveau_gem_prime_vmap,
 	.gem_prime_vunmap = nouveau_gem_prime_vunmap,
 
-	.gem_free_object_unlocked = nouveau_gem_object_del,
+	.gem_free_object = nouveau_gem_object_del,
 	.gem_open_object = nouveau_gem_object_open,
 	.gem_close_object = nouveau_gem_object_close,
 
@@ -1070,8 +1065,8 @@ nouveau_platform_device_create(const struct nvkm_device_tegra_func *func,
 		goto err_free;
 
 	drm = drm_dev_alloc(&driver_platform, &pdev->dev);
-	if (IS_ERR(drm)) {
-		err = PTR_ERR(drm);
+	if (!drm) {
+		err = -ENOMEM;
 		goto err_free;
 	}
 
@@ -1092,6 +1087,7 @@ nouveau_drm_init(void)
 	driver_pci = driver_stub;
 	driver_pci.set_busid = drm_pci_set_busid;
 	driver_platform = driver_stub;
+	driver_platform.set_busid = drm_platform_set_busid;
 
 	nouveau_display_options();
 

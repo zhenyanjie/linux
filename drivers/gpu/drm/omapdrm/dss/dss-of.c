@@ -18,7 +18,8 @@
 #include <linux/of.h>
 #include <linux/seq_file.h>
 
-#include "omapdss.h"
+#include <video/omapdss.h>
+
 #include "dss.h"
 
 struct device_node *

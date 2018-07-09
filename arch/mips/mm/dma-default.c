@@ -11,7 +11,7 @@
 #include <linux/types.h>
 #include <linux/dma-mapping.h>
 #include <linux/mm.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/scatterlist.h>
 #include <linux/string.h>
 #include <linux/gfp.h>
@@ -24,15 +24,14 @@
 
 #include <dma-coherence.h>
 
-#if defined(CONFIG_DMA_MAYBE_COHERENT) && !defined(CONFIG_DMA_PERDEV_COHERENT)
-/* User defined DMA coherency from command line. */
-enum coherent_io_user_state coherentio = IO_COHERENCE_DEFAULT;
+#ifdef CONFIG_DMA_MAYBE_COHERENT
+int coherentio = 0;	/* User defined DMA coherency from command line. */
 EXPORT_SYMBOL_GPL(coherentio);
 int hw_coherentio = 0;	/* Actual hardware supported DMA coherency setting. */
 
 static int __init setcoherentio(char *str)
 {
-	coherentio = IO_COHERENCE_ENABLED;
+	coherentio = 1;
 	pr_info("Hardware DMA cache coherency (command line)\n");
 	return 0;
 }
@@ -40,7 +39,7 @@ early_param("coherentio", setcoherentio);
 
 static int __init setnocoherentio(char *str)
 {
-	coherentio = IO_COHERENCE_DISABLED;
+	coherentio = 0;
 	pr_info("Software DMA cache coherency (command line)\n");
 	return 0;
 }
@@ -132,7 +131,7 @@ static void *mips_dma_alloc_noncoherent(struct device *dev, size_t size,
 }
 
 static void *mips_dma_alloc_coherent(struct device *dev, size_t size,
-	dma_addr_t *dma_handle, gfp_t gfp, unsigned long attrs)
+	dma_addr_t * dma_handle, gfp_t gfp, struct dma_attrs *attrs)
 {
 	void *ret;
 	struct page *page = NULL;
@@ -142,7 +141,7 @@ static void *mips_dma_alloc_coherent(struct device *dev, size_t size,
 	 * XXX: seems like the coherent and non-coherent implementations could
 	 * be consolidated.
 	 */
-	if (attrs & DMA_ATTR_NON_CONSISTENT)
+	if (dma_get_attr(DMA_ATTR_NON_CONSISTENT, attrs))
 		return mips_dma_alloc_noncoherent(dev, size, dma_handle, gfp);
 
 	gfp = massage_gfp_flags(dev, gfp);
@@ -161,7 +160,8 @@ static void *mips_dma_alloc_coherent(struct device *dev, size_t size,
 	*dma_handle = plat_map_dma_mem(dev, ret, size);
 	if (!plat_device_is_coherent(dev)) {
 		dma_cache_wback_inv((unsigned long) ret, size);
-		ret = UNCAC_ADDR(ret);
+		if (!hw_coherentio)
+			ret = UNCAC_ADDR(ret);
 	}
 
 	return ret;
@@ -176,20 +176,20 @@ static void mips_dma_free_noncoherent(struct device *dev, size_t size,
 }
 
 static void mips_dma_free_coherent(struct device *dev, size_t size, void *vaddr,
-	dma_addr_t dma_handle, unsigned long attrs)
+	dma_addr_t dma_handle, struct dma_attrs *attrs)
 {
 	unsigned long addr = (unsigned long) vaddr;
 	unsigned int count = PAGE_ALIGN(size) >> PAGE_SHIFT;
 	struct page *page = NULL;
 
-	if (attrs & DMA_ATTR_NON_CONSISTENT) {
+	if (dma_get_attr(DMA_ATTR_NON_CONSISTENT, attrs)) {
 		mips_dma_free_noncoherent(dev, size, vaddr, dma_handle);
 		return;
 	}
 
 	plat_unmap_dma_mem(dev, dma_handle, size, DMA_BIDIRECTIONAL);
 
-	if (!plat_device_is_coherent(dev))
+	if (!plat_device_is_coherent(dev) && !hw_coherentio)
 		addr = CAC_ADDR(addr);
 
 	page = virt_to_page((void *) addr);
@@ -200,7 +200,7 @@ static void mips_dma_free_coherent(struct device *dev, size_t size, void *vaddr,
 
 static int mips_dma_mmap(struct device *dev, struct vm_area_struct *vma,
 	void *cpu_addr, dma_addr_t dma_addr, size_t size,
-	unsigned long attrs)
+	struct dma_attrs *attrs)
 {
 	unsigned long user_count = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 	unsigned long count = PAGE_ALIGN(size) >> PAGE_SHIFT;
@@ -209,12 +209,12 @@ static int mips_dma_mmap(struct device *dev, struct vm_area_struct *vma,
 	unsigned long pfn;
 	int ret = -ENXIO;
 
-	if (!plat_device_is_coherent(dev))
+	if (!plat_device_is_coherent(dev) && !hw_coherentio)
 		addr = CAC_ADDR(addr);
 
 	pfn = page_to_pfn(virt_to_page((void *)addr));
 
-	if (attrs & DMA_ATTR_WRITE_COMBINE)
+	if (dma_get_attr(DMA_ATTR_WRITE_COMBINE, attrs))
 		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 	else
 		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
@@ -291,7 +291,7 @@ static inline void __dma_sync(struct page *page,
 }
 
 static void mips_dma_unmap_page(struct device *dev, dma_addr_t dma_addr,
-	size_t size, enum dma_data_direction direction, unsigned long attrs)
+	size_t size, enum dma_data_direction direction, struct dma_attrs *attrs)
 {
 	if (cpu_needs_post_dma_flush(dev))
 		__dma_sync(dma_addr_to_page(dev, dma_addr),
@@ -301,7 +301,7 @@ static void mips_dma_unmap_page(struct device *dev, dma_addr_t dma_addr,
 }
 
 static int mips_dma_map_sg(struct device *dev, struct scatterlist *sglist,
-	int nents, enum dma_data_direction direction, unsigned long attrs)
+	int nents, enum dma_data_direction direction, struct dma_attrs *attrs)
 {
 	int i;
 	struct scatterlist *sg;
@@ -322,7 +322,7 @@ static int mips_dma_map_sg(struct device *dev, struct scatterlist *sglist,
 
 static dma_addr_t mips_dma_map_page(struct device *dev, struct page *page,
 	unsigned long offset, size_t size, enum dma_data_direction direction,
-	unsigned long attrs)
+	struct dma_attrs *attrs)
 {
 	if (!plat_device_is_coherent(dev))
 		__dma_sync(page, offset, size, direction);
@@ -332,7 +332,7 @@ static dma_addr_t mips_dma_map_page(struct device *dev, struct page *page,
 
 static void mips_dma_unmap_sg(struct device *dev, struct scatterlist *sglist,
 	int nhwentries, enum dma_data_direction direction,
-	unsigned long attrs)
+	struct dma_attrs *attrs)
 {
 	int i;
 	struct scatterlist *sg;

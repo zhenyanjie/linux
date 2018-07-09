@@ -76,8 +76,6 @@ static const struct fm10k_stats fm10k_gstrings_global_stats[] = {
 	FM10K_STAT("mac_rules_used", hw.swapi.mac.used),
 	FM10K_STAT("mac_rules_avail", hw.swapi.mac.avail),
 
-	FM10K_STAT("reset_while_pending", hw.mac.reset_while_pending),
-
 	FM10K_STAT("tx_hang_count", tx_timeout_count),
 };
 
@@ -942,7 +940,7 @@ static void fm10k_self_test(struct net_device *dev,
 
 	memset(data, 0, sizeof(*data) * FM10K_TEST_LEN);
 
-	if (FM10K_REMOVED(hw->hw_addr)) {
+	if (FM10K_REMOVED(hw)) {
 		netif_err(interface, drv, dev,
 			  "Interface removed - test blocked\n");
 		eth_test->flags |= ETH_TEST_FL_FAILED;
@@ -966,7 +964,7 @@ static int fm10k_set_priv_flags(struct net_device *netdev, u32 priv_flags)
 	return 0;
 }
 
-static u32 fm10k_get_reta_size(struct net_device __always_unused *netdev)
+u32 fm10k_get_reta_size(struct net_device __always_unused *netdev)
 {
 	return FM10K_RETA_SIZE * FM10K_RETA_ENTRIES_PER_REG;
 }
@@ -1182,7 +1180,6 @@ static const struct ethtool_ops fm10k_ethtool_ops = {
 	.set_rxfh		= fm10k_set_rssh,
 	.get_channels		= fm10k_get_channels,
 	.set_channels		= fm10k_set_channels,
-	.get_ts_info		= ethtool_op_get_ts_info,
 };
 
 void fm10k_set_ethtool_ops(struct net_device *dev)

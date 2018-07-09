@@ -50,7 +50,7 @@
 #define HCR_BSU		(3 << 10)
 #define HCR_BSU_IS	(UL(1) << 10)
 #define HCR_FB		(UL(1) << 9)
-#define HCR_VSE		(UL(1) << 8)
+#define HCR_VA		(UL(1) << 8)
 #define HCR_VI		(UL(1) << 7)
 #define HCR_VF		(UL(1) << 6)
 #define HCR_AMO		(UL(1) << 5)
@@ -80,7 +80,7 @@
 #define HCR_GUEST_FLAGS (HCR_TSC | HCR_TSW | HCR_TWE | HCR_TWI | HCR_VM | \
 			 HCR_TVM | HCR_BSU_IS | HCR_FB | HCR_TAC | \
 			 HCR_AMO | HCR_SWIO | HCR_TIDCP | HCR_RW)
-#define HCR_VIRT_EXCP_MASK (HCR_VSE | HCR_VI | HCR_VF)
+#define HCR_VIRT_EXCP_MASK (HCR_VA | HCR_VI | HCR_VF)
 #define HCR_INT_OVERRIDE   (HCR_FMO | HCR_IMO)
 #define HCR_HOST_VHE_FLAGS (HCR_RW | HCR_TGE | HCR_E2H)
 
@@ -170,14 +170,15 @@
 #define VTCR_EL2_FLAGS			(VTCR_EL2_COMMON_BITS | VTCR_EL2_TGRAN_FLAGS)
 #define VTTBR_X				(VTTBR_X_TGRAN_MAGIC - VTCR_EL2_T0SZ_IPA)
 
-#define VTTBR_BADDR_MASK  (((UL(1) << (PHYS_MASK_SHIFT - VTTBR_X)) - 1) << VTTBR_X)
+#define VTTBR_BADDR_SHIFT (VTTBR_X - 1)
+#define VTTBR_BADDR_MASK  (((UL(1) << (PHYS_MASK_SHIFT - VTTBR_X)) - 1) << VTTBR_BADDR_SHIFT)
 #define VTTBR_VMID_SHIFT  (UL(48))
 #define VTTBR_VMID_MASK(size) (_AT(u64, (1 << size) - 1) << VTTBR_VMID_SHIFT)
 
 /* Hyp System Trap Register */
 #define HSTR_EL2_T(x)	(1 << x)
 
-/* Hyp Coprocessor Trap Register Shifts */
+/* Hyp Coproccessor Trap Register Shifts */
 #define CPTR_EL2_TFP_SHIFT 10
 
 /* Hyp Coprocessor Trap Register */

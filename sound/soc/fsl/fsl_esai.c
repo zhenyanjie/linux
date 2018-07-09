@@ -77,19 +77,19 @@ static irqreturn_t esai_isr(int irq, void *devid)
 	regmap_read(esai_priv->regmap, REG_ESAI_ESR, &esr);
 
 	if (esr & ESAI_ESR_TINIT_MASK)
-		dev_dbg(&pdev->dev, "isr: Transmission Initialized\n");
+		dev_dbg(&pdev->dev, "isr: Transmition Initialized\n");
 
 	if (esr & ESAI_ESR_RFF_MASK)
 		dev_warn(&pdev->dev, "isr: Receiving overrun\n");
 
 	if (esr & ESAI_ESR_TFE_MASK)
-		dev_warn(&pdev->dev, "isr: Transmission underrun\n");
+		dev_warn(&pdev->dev, "isr: Transmition underrun\n");
 
 	if (esr & ESAI_ESR_TLS_MASK)
 		dev_dbg(&pdev->dev, "isr: Just transmitted the last slot\n");
 
 	if (esr & ESAI_ESR_TDE_MASK)
-		dev_dbg(&pdev->dev, "isr: Transmission data exception\n");
+		dev_dbg(&pdev->dev, "isr: Transmition data exception\n");
 
 	if (esr & ESAI_ESR_TED_MASK)
 		dev_dbg(&pdev->dev, "isr: Transmitting even slots\n");
@@ -144,13 +144,6 @@ static int fsl_esai_divisor_cal(struct snd_soc_dai *dai, bool tx, u32 ratio,
 	ratio /= 2;
 
 	psr = ratio <= 256 * maxfp ? ESAI_xCCR_xPSR_BYPASS : ESAI_xCCR_xPSR_DIV8;
-
-	/* Do not loop-search if PM (1 ~ 256) alone can serve the ratio */
-	if (ratio <= 256) {
-		pm = ratio;
-		fp = 1;
-		goto out;
-	}
 
 	/* Set the max fluctuation -- 0.1% of the max devisor */
 	savesub = (psr ? 1 : 8)  * 256 * maxfp / 1000;
@@ -788,7 +781,7 @@ static const struct regmap_config fsl_esai_regmap_config = {
 	.readable_reg = fsl_esai_readable_reg,
 	.volatile_reg = fsl_esai_volatile_reg,
 	.writeable_reg = fsl_esai_writeable_reg,
-	.cache_type = REGCACHE_FLAT,
+	.cache_type = REGCACHE_RBTREE,
 };
 
 static int fsl_esai_probe(struct platform_device *pdev)

@@ -796,15 +796,10 @@ void lbs_scan_done(struct lbs_private *priv)
 {
 	WARN_ON(!priv->scan_req);
 
-	if (priv->internal_scan) {
+	if (priv->internal_scan)
 		kfree(priv->scan_req);
-	} else {
-		struct cfg80211_scan_info info = {
-			.aborted = false,
-		};
-
-		cfg80211_scan_done(priv->scan_req, &info);
-	}
+	else
+		cfg80211_scan_done(priv->scan_req, false);
 
 	priv->scan_req = NULL;
 }
@@ -2044,8 +2039,8 @@ static int lbs_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
 
 
 
-static int lbs_set_power_mgmt(struct wiphy *wiphy, struct net_device *dev,
-			      bool enabled, int timeout)
+int lbs_set_power_mgmt(struct wiphy *wiphy, struct net_device *dev,
+		       bool enabled, int timeout)
 {
 	struct lbs_private *priv = wiphy_priv(wiphy);
 

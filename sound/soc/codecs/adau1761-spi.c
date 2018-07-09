@@ -48,7 +48,7 @@ static int adau1761_spi_probe(struct spi_device *spi)
 
 static int adau1761_spi_remove(struct spi_device *spi)
 {
-	adau17x1_remove(&spi->dev);
+	snd_soc_unregister_codec(&spi->dev);
 	return 0;
 }
 

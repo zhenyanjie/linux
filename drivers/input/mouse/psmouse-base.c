@@ -937,21 +937,6 @@ static void psmouse_apply_defaults(struct psmouse *psmouse)
 	psmouse->pt_deactivate = NULL;
 }
 
-static bool psmouse_do_detect(int (*detect)(struct psmouse *, bool),
-			      struct psmouse *psmouse, bool allow_passthrough,
-			      bool set_properties)
-{
-	if (psmouse->ps2dev.serio->id.type == SERIO_PS_PSTHRU &&
-	    !allow_passthrough) {
-		return false;
-	}
-
-	if (set_properties)
-		psmouse_apply_defaults(psmouse);
-
-	return detect(psmouse, set_properties) == 0;
-}
-
 static bool psmouse_try_protocol(struct psmouse *psmouse,
 				 enum psmouse_type type,
 				 unsigned int *max_proto,
@@ -963,8 +948,15 @@ static bool psmouse_try_protocol(struct psmouse *psmouse,
 	if (!proto)
 		return false;
 
-	if (!psmouse_do_detect(proto->detect, psmouse, proto->try_passthru,
-			       set_properties))
+	if (psmouse->ps2dev.serio->id.type == SERIO_PS_PSTHRU &&
+	    !proto->try_passthru) {
+		return false;
+	}
+
+	if (set_properties)
+		psmouse_apply_defaults(psmouse);
+
+	if (proto->detect(psmouse, set_properties) != 0)
 		return false;
 
 	if (set_properties && proto->init && init_allowed) {
@@ -996,8 +988,8 @@ static int psmouse_extensions(struct psmouse *psmouse,
 	 * Always check for focaltech, this is safe as it uses pnp-id
 	 * matching.
 	 */
-	if (psmouse_do_detect(focaltech_detect,
-			      psmouse, false, set_properties)) {
+	if (psmouse_try_protocol(psmouse, PSMOUSE_FOCALTECH,
+				 &max_proto, set_properties, false)) {
 		if (max_proto > PSMOUSE_IMEX &&
 		    IS_ENABLED(CONFIG_MOUSE_PS2_FOCALTECH) &&
 		    (!set_properties || focaltech_init(psmouse) == 0)) {
@@ -1043,8 +1035,8 @@ static int psmouse_extensions(struct psmouse *psmouse,
 	 * probing for IntelliMouse.
 	 */
 	if (max_proto > PSMOUSE_PS2 &&
-	    psmouse_do_detect(synaptics_detect,
-			      psmouse, false, set_properties)) {
+	    psmouse_try_protocol(psmouse, PSMOUSE_SYNAPTICS, &max_proto,
+				 set_properties, false)) {
 		synaptics_hardware = true;
 
 		if (max_proto > PSMOUSE_IMEX) {
@@ -1123,6 +1115,10 @@ static int psmouse_extensions(struct psmouse *psmouse,
 		if (psmouse_try_protocol(psmouse, PSMOUSE_TOUCHKIT_PS2,
 					 &max_proto, set_properties, true))
 			return PSMOUSE_TOUCHKIT_PS2;
+
+		if (psmouse_try_protocol(psmouse, PSMOUSE_BYD,
+					 &max_proto, set_properties, true))
+			return PSMOUSE_BYD;
 	}
 
 	/*
@@ -1920,7 +1916,7 @@ static int __init psmouse_init(void)
 	synaptics_module_init();
 	hgpk_module_init();
 
-	kpsmoused_wq = alloc_ordered_workqueue("kpsmoused", 0);
+	kpsmoused_wq = create_singlethread_workqueue("kpsmoused");
 	if (!kpsmoused_wq) {
 		pr_err("failed to create kpsmoused workqueue\n");
 		return -ENOMEM;

@@ -806,15 +806,24 @@ static struct metag_pmu _metag_pmu = {
 };
 
 /* PMU CPU hotplug notifier */
-static int metag_pmu_starting_cpu(unsigned int cpu)
+static int metag_pmu_cpu_notify(struct notifier_block *b, unsigned long action,
+				void *hcpu)
 {
+	unsigned int cpu = (unsigned int)hcpu;
 	struct cpu_hw_events *cpuc = &per_cpu(cpu_hw_events, cpu);
+
+	if ((action & ~CPU_TASKS_FROZEN) != CPU_STARTING)
+		return NOTIFY_DONE;
 
 	memset(cpuc, 0, sizeof(struct cpu_hw_events));
 	raw_spin_lock_init(&cpuc->pmu_lock);
 
-	return 0;
+	return NOTIFY_OK;
 }
+
+static struct notifier_block metag_pmu_notifier = {
+	.notifier_call = metag_pmu_cpu_notify,
+};
 
 /* PMU Initialisation */
 static int __init init_hw_perf_events(void)
@@ -867,13 +876,16 @@ static int __init init_hw_perf_events(void)
 	metag_out32(0, PERF_COUNT(0));
 	metag_out32(0, PERF_COUNT(1));
 
-	cpuhp_setup_state(CPUHP_AP_PERF_METAG_STARTING,
-			  "AP_PERF_METAG_STARTING", metag_pmu_starting_cpu,
-			  NULL);
+	for_each_possible_cpu(cpu) {
+		struct cpu_hw_events *cpuc = &per_cpu(cpu_hw_events, cpu);
 
+		memset(cpuc, 0, sizeof(struct cpu_hw_events));
+		raw_spin_lock_init(&cpuc->pmu_lock);
+	}
+
+	register_cpu_notifier(&metag_pmu_notifier);
 	ret = perf_pmu_register(&pmu, metag_pmu->name, PERF_TYPE_RAW);
-	if (ret)
-		cpuhp_remove_state_nocalls(CPUHP_AP_PERF_METAG_STARTING);
+out:
 	return ret;
 }
 early_initcall(init_hw_perf_events);

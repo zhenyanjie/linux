@@ -482,11 +482,11 @@ static int bcm2048_set_rds_no_lock(struct bcm2048_device *bdev, u8 rds_on)
 					   flags);
 		memset(&bdev->rds_info, 0, sizeof(bdev->rds_info));
 	}
-	if (err)
-		return err;
 
-	return bcm2048_send_command(bdev, BCM2048_I2C_FM_RDS_SYSTEM,
-				    bdev->cache_fm_rds_system);
+	err = bcm2048_send_command(bdev, BCM2048_I2C_FM_RDS_SYSTEM,
+				   bdev->cache_fm_rds_system);
+
+	return err;
 }
 
 static int bcm2048_get_rds_no_lock(struct bcm2048_device *bdev)
@@ -1834,7 +1834,9 @@ static int bcm2048_deinit(struct bcm2048_device *bdev)
 	if (err < 0)
 		return err;
 
-	return bcm2048_set_power_state(bdev, BCM2048_POWER_OFF);
+	err = bcm2048_set_power_state(bdev, BCM2048_POWER_OFF);
+
+	return err;
 }
 
 /*
@@ -1993,7 +1995,9 @@ static ssize_t bcm2048_##prop##_read(struct device *dev,		\
 									\
 	value = bcm2048_get_##prop(bdev);				\
 									\
-	return sprintf(buf, mask "\n", value);				\
+	value = sprintf(buf, mask "\n", value);				\
+									\
+	return value;							\
 }
 
 #define DEFINE_SYSFS_PROPERTY(prop, signal, size, mask, check)		\

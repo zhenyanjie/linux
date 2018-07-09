@@ -1425,8 +1425,10 @@ omap_i2c_probe(struct platform_device *pdev)
 	/* i2c device drivers may be active on return from add_adapter() */
 	adap->nr = pdev->id;
 	r = i2c_add_numbered_adapter(adap);
-	if (r)
+	if (r) {
+		dev_err(omap->dev, "failure adding adapter\n");
 		goto err_unuse_clocks;
+	}
 
 	dev_info(omap->dev, "bus %d rev%d.%d at %d kHz\n", adap->nr,
 		 major, minor, omap->speed);

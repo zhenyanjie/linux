@@ -60,6 +60,7 @@ int r8712_os_recvbuf_resource_alloc(struct _adapter *padapter,
 	if (!precvbuf->purb)
 		res = _FAIL;
 	precvbuf->pskb = NULL;
+	precvbuf->reuse = false;
 	precvbuf->pallocated_buf = NULL;
 	precvbuf->pbuf = NULL;
 	precvbuf->pdata = NULL;

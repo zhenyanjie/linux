@@ -950,7 +950,6 @@ static void prepare_start_command(struct pxa3xx_nand_info *info, int command)
 
 	switch (command) {
 	case NAND_CMD_READ0:
-	case NAND_CMD_READOOB:
 	case NAND_CMD_PAGEPROG:
 		info->use_ecc = 1;
 		break;
@@ -1811,7 +1810,8 @@ static int alloc_nand_resource(struct platform_device *pdev)
 		chip->cmdfunc		= nand_cmdfunc;
 	}
 
-	nand_hw_control_init(chip->controller);
+	spin_lock_init(&chip->controller->lock);
+	init_waitqueue_head(&chip->controller->wq);
 	info->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(info->clk)) {
 		dev_err(&pdev->dev, "failed to get nand clock\n");

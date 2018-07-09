@@ -116,7 +116,6 @@ struct eeh_ops *eeh_ops = NULL;
 
 /* Lock to avoid races due to multiple reports of an error */
 DEFINE_RAW_SPINLOCK(confirm_error_lock);
-EXPORT_SYMBOL_GPL(confirm_error_lock);
 
 /* Lock to protect passed flags */
 static DEFINE_MUTEX(eeh_dev_mutex);
@@ -169,10 +168,10 @@ static size_t eeh_dump_dev_log(struct eeh_dev *edev, char *buf, size_t len)
 	int n = 0, l = 0;
 	char buffer[128];
 
-	n += scnprintf(buf+n, len-n, "%04x:%02x:%02x.%01x\n",
+	n += scnprintf(buf+n, len-n, "%04x:%02x:%02x:%01x\n",
 		       edev->phb->global_number, pdn->busno,
 		       PCI_SLOT(pdn->devfn), PCI_FUNC(pdn->devfn));
-	pr_warn("EEH: of node=%04x:%02x:%02x.%01x\n",
+	pr_warn("EEH: of node=%04x:%02x:%02x:%01x\n",
 		edev->phb->global_number, pdn->busno,
 		PCI_SLOT(pdn->devfn), PCI_FUNC(pdn->devfn));
 
@@ -298,17 +297,9 @@ void eeh_slot_error_detail(struct eeh_pe *pe, int severity)
 	 *
 	 * For pHyp, we have to enable IO for log retrieval. Otherwise,
 	 * 0xFF's is always returned from PCI config space.
-	 *
-	 * When the @severity is EEH_LOG_PERM, the PE is going to be
-	 * removed. Prior to that, the drivers for devices included in
-	 * the PE will be closed. The drivers rely on working IO path
-	 * to bring the devices to quiet state. Otherwise, PCI traffic
-	 * from those devices after they are removed is like to cause
-	 * another unexpected EEH error.
 	 */
 	if (!(pe->type & EEH_PE_PHB)) {
-		if (eeh_has_flag(EEH_ENABLE_IO_FOR_LOG) ||
-		    severity == EEH_LOG_PERM)
+		if (eeh_has_flag(EEH_ENABLE_IO_FOR_LOG))
 			eeh_pci_enable(pe, EEH_OPT_THAW_MMIO);
 
 		/*
@@ -1053,7 +1044,7 @@ int eeh_init(void)
 	if (eeh_enabled())
 		pr_info("EEH: PCI Enhanced I/O Error Handling Enabled\n");
 	else
-		pr_info("EEH: No capable adapters found\n");
+		pr_warn("EEH: No capable adapters found\n");
 
 	return ret;
 }
@@ -1511,7 +1502,6 @@ int eeh_pe_set_option(struct eeh_pe *pe, int option)
 		break;
 	case EEH_OPT_THAW_MMIO:
 	case EEH_OPT_THAW_DMA:
-	case EEH_OPT_FREEZE_PE:
 		if (!eeh_ops || !eeh_ops->set_option) {
 			ret = -ENOENT;
 			break;
