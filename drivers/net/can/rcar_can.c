@@ -508,8 +508,7 @@ static int rcar_can_open(struct net_device *ndev)
 
 	err = clk_prepare_enable(priv->clk);
 	if (err) {
-		netdev_err(ndev,
-			   "failed to enable peripheral clock, error %d\n",
+		netdev_err(ndev, "failed to enable periperal clock, error %d\n",
 			   err);
 		goto out;
 	}
@@ -527,8 +526,7 @@ static int rcar_can_open(struct net_device *ndev)
 	napi_enable(&priv->napi);
 	err = request_irq(ndev->irq, rcar_can_interrupt, 0, ndev->name, ndev);
 	if (err) {
-		netdev_err(ndev, "request_irq(%d) failed, error %d\n",
-			   ndev->irq, err);
+		netdev_err(ndev, "error requesting interrupt %d\n", ndev->irq);
 		goto out_close;
 	}
 	can_led_event(ndev, CAN_LED_EVENT_OPEN);
@@ -785,8 +783,7 @@ static int rcar_can_probe(struct platform_device *pdev)
 	priv->clk = devm_clk_get(&pdev->dev, "clkp1");
 	if (IS_ERR(priv->clk)) {
 		err = PTR_ERR(priv->clk);
-		dev_err(&pdev->dev, "cannot get peripheral clock, error %d\n",
-			err);
+		dev_err(&pdev->dev, "cannot get peripheral clock: %d\n", err);
 		goto fail_clk;
 	}
 
@@ -798,7 +795,7 @@ static int rcar_can_probe(struct platform_device *pdev)
 	priv->can_clk = devm_clk_get(&pdev->dev, clock_names[clock_select]);
 	if (IS_ERR(priv->can_clk)) {
 		err = PTR_ERR(priv->can_clk);
-		dev_err(&pdev->dev, "cannot get CAN clock, error %d\n", err);
+		dev_err(&pdev->dev, "cannot get CAN clock: %d\n", err);
 		goto fail_clk;
 	}
 

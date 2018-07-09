@@ -1259,10 +1259,15 @@ static s32 fm10k_mbx_process_error(struct fm10k_hw *hw,
 				   struct fm10k_mbx_info *mbx)
 {
 	const u32 *hdr = &mbx->mbx_hdr;
+	s32 err_no;
 	u16 head;
 
 	/* we will need to pull all of the fields for verification */
 	head = FM10K_MSG_HDR_FIELD_GET(*hdr, HEAD);
+
+	/* we only have lower 10 bits of error number so add upper bits */
+	err_no = FM10K_MSG_HDR_FIELD_GET(*hdr, ERR_NO);
+	err_no |= ~FM10K_MSG_HDR_MASK(ERR_NO);
 
 	switch (mbx->state) {
 	case FM10K_STATE_OPEN:
@@ -1962,9 +1967,10 @@ static void fm10k_sm_mbx_create_reply(struct fm10k_hw *hw,
  *  function can also be used to respond to an error as the connection
  *  resetting would also be a means of dealing with errors.
  **/
-static void fm10k_sm_mbx_process_reset(struct fm10k_hw *hw,
-				       struct fm10k_mbx_info *mbx)
+static s32 fm10k_sm_mbx_process_reset(struct fm10k_hw *hw,
+				      struct fm10k_mbx_info *mbx)
 {
+	s32 err = 0;
 	const enum fm10k_mbx_state state = mbx->state;
 
 	switch (state) {
@@ -1977,6 +1983,7 @@ static void fm10k_sm_mbx_process_reset(struct fm10k_hw *hw,
 	case FM10K_STATE_OPEN:
 		/* flush any incomplete work */
 		fm10k_sm_mbx_connect_reset(mbx);
+		err = FM10K_ERR_RESET_REQUESTED;
 		break;
 	case FM10K_STATE_CONNECT:
 		/* Update remote value to match local value */
@@ -1986,6 +1993,8 @@ static void fm10k_sm_mbx_process_reset(struct fm10k_hw *hw,
 	}
 
 	fm10k_sm_mbx_create_reply(hw, mbx, mbx->tail);
+
+	return err;
 }
 
 /**
@@ -2066,7 +2075,7 @@ static s32 fm10k_sm_mbx_process(struct fm10k_hw *hw,
 
 	switch (FM10K_MSG_HDR_FIELD_GET(mbx->mbx_hdr, SM_VER)) {
 	case 0:
-		fm10k_sm_mbx_process_reset(hw, mbx);
+		err = fm10k_sm_mbx_process_reset(hw, mbx);
 		break;
 	case FM10K_SM_MBX_VERSION:
 		err = fm10k_sm_mbx_process_version_1(hw, mbx);

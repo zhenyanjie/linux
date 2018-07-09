@@ -141,7 +141,7 @@ int perf_output_begin(struct perf_output_handle *handle,
 	perf_output_get_handle(handle);
 
 	do {
-		tail = READ_ONCE_CTRL(rb->user_page->data_tail);
+		tail = ACCESS_ONCE(rb->user_page->data_tail);
 		offset = head = local_read(&rb->head);
 		if (!rb->overwrite &&
 		    unlikely(CIRC_SPACE(head, tail, perf_data_size(rb)) < size))
@@ -347,6 +347,7 @@ void perf_aux_output_end(struct perf_output_handle *handle, unsigned long size,
 			 bool truncated)
 {
 	struct ring_buffer *rb = handle->rb;
+	bool wakeup = truncated;
 	unsigned long aux_head;
 	u64 flags = 0;
 
@@ -375,9 +376,16 @@ void perf_aux_output_end(struct perf_output_handle *handle, unsigned long size,
 	aux_head = rb->user_page->aux_head = local_read(&rb->aux_head);
 
 	if (aux_head - local_read(&rb->aux_wakeup) >= rb->aux_watermark) {
-		perf_output_wakeup(handle);
+		wakeup = true;
 		local_add(rb->aux_watermark, &rb->aux_wakeup);
 	}
+
+	if (wakeup) {
+		if (truncated)
+			handle->event->pending_disable = 1;
+		perf_output_wakeup(handle);
+	}
+
 	handle->event = NULL;
 
 	local_set(&rb->aux_nest, 0);
@@ -437,10 +445,7 @@ static struct page *rb_alloc_aux_page(int node, int order)
 
 	if (page && order) {
 		/*
-		 * Communicate the allocation size to the driver:
-		 * if we managed to secure a high-order allocation,
-		 * set its first page's private to this order;
-		 * !PagePrivate(page) means it's just a normal page.
+		 * Communicate the allocation size to the driver
 		 */
 		split_page(page, order);
 		SetPagePrivate(page);

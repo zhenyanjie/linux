@@ -207,14 +207,6 @@ static void intel_disable_crt(struct intel_encoder *encoder)
 	intel_crt_set_dpms(encoder, DRM_MODE_DPMS_OFF);
 }
 
-static void pch_disable_crt(struct intel_encoder *encoder)
-{
-}
-
-static void pch_post_disable_crt(struct intel_encoder *encoder)
-{
-	intel_disable_crt(encoder);
-}
 
 static void hsw_crt_post_disable(struct intel_encoder *encoder)
 {
@@ -234,6 +226,53 @@ static void intel_enable_crt(struct intel_encoder *encoder)
 	struct intel_crt *crt = intel_encoder_to_crt(encoder);
 
 	intel_crt_set_dpms(encoder, crt->connector->base.dpms);
+}
+
+/* Special dpms function to support cloning between dvo/sdvo/crt. */
+static void intel_crt_dpms(struct drm_connector *connector, int mode)
+{
+	struct drm_device *dev = connector->dev;
+	struct intel_encoder *encoder = intel_attached_encoder(connector);
+	struct drm_crtc *crtc;
+	int old_dpms;
+
+	/* PCH platforms and VLV only support on/off. */
+	if (INTEL_INFO(dev)->gen >= 5 && mode != DRM_MODE_DPMS_ON)
+		mode = DRM_MODE_DPMS_OFF;
+
+	if (mode == connector->dpms)
+		return;
+
+	old_dpms = connector->dpms;
+	connector->dpms = mode;
+
+	/* Only need to change hw state when actually enabled */
+	crtc = encoder->base.crtc;
+	if (!crtc) {
+		encoder->connectors_active = false;
+		return;
+	}
+
+	/* We need the pipe to run for anything but OFF. */
+	if (mode == DRM_MODE_DPMS_OFF)
+		encoder->connectors_active = false;
+	else
+		encoder->connectors_active = true;
+
+	/* We call connector dpms manually below in case pipe dpms doesn't
+	 * change due to cloning. */
+	if (mode < old_dpms) {
+		/* From off to on, enable the pipe first. */
+		intel_crtc_update_dpms(crtc);
+
+		intel_crt_set_dpms(encoder, mode);
+	} else {
+		intel_crt_set_dpms(encoder, mode);
+
+		intel_crtc_update_dpms(crtc);
+	}
+
+	intel_modeset_check_state(connector->dev);
 }
 
 static enum drm_mode_status
@@ -273,8 +312,14 @@ static bool intel_crt_compute_config(struct intel_encoder *encoder,
 		pipe_config->has_pch_encoder = true;
 
 	/* LPT FDI RX only supports 8bpc. */
-	if (HAS_PCH_LPT(dev))
+	if (HAS_PCH_LPT(dev)) {
+		if (pipe_config->bw_constrained && pipe_config->pipe_bpp < 24) {
+			DRM_DEBUG_KMS("LPT only supports 24bpp\n");
+			return false;
+		}
+
 		pipe_config->pipe_bpp = 24;
+	}
 
 	/* FDI must always be 2.7 GHz */
 	if (HAS_DDI(dev)) {
@@ -461,6 +506,7 @@ static bool intel_crt_detect_ddc(struct drm_connector *connector)
 	struct drm_i915_private *dev_priv = crt->base.base.dev->dev_private;
 	struct edid *edid;
 	struct i2c_adapter *i2c;
+	bool ret = false;
 
 	BUG_ON(crt->base.type != INTEL_OUTPUT_ANALOG);
 
@@ -477,17 +523,17 @@ static bool intel_crt_detect_ddc(struct drm_connector *connector)
 		 */
 		if (!is_digital) {
 			DRM_DEBUG_KMS("CRT detected via DDC:0x50 [EDID]\n");
-			return true;
+			ret = true;
+		} else {
+			DRM_DEBUG_KMS("CRT not detected via DDC:0x50 [EDID reports a digital panel]\n");
 		}
-
-		DRM_DEBUG_KMS("CRT not detected via DDC:0x50 [EDID reports a digital panel]\n");
 	} else {
 		DRM_DEBUG_KMS("CRT not detected via DDC:0x50 [no valid EDID found]\n");
 	}
 
 	kfree(edid);
 
-	return false;
+	return ret;
 }
 
 static enum drm_connector_status
@@ -708,7 +754,7 @@ static int intel_crt_get_modes(struct drm_connector *connector)
 		goto out;
 
 	/* Try to probe digital port for output in DVI-I -> VGA mode. */
-	i2c = intel_gmbus_get_adapter(dev_priv, GMBUS_PIN_DPB);
+	i2c = intel_gmbus_get_adapter(dev_priv, GMBUS_PORT_DPB);
 	ret = intel_crt_ddc_get_modes(connector, i2c);
 
 out:
@@ -751,7 +797,7 @@ static void intel_crt_reset(struct drm_connector *connector)
 
 static const struct drm_connector_funcs intel_crt_connector_funcs = {
 	.reset = intel_crt_reset,
-	.dpms = drm_atomic_helper_connector_dpms,
+	.dpms = intel_crt_dpms,
 	.detect = intel_crt_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = intel_crt_destroy,
@@ -849,12 +895,7 @@ void intel_crt_init(struct drm_device *dev)
 		crt->adpa_reg = ADPA;
 
 	crt->base.compute_config = intel_crt_compute_config;
-	if (HAS_PCH_SPLIT(dev) && !HAS_DDI(dev)) {
-		crt->base.disable = pch_disable_crt;
-		crt->base.post_disable = pch_post_disable_crt;
-	} else {
-		crt->base.disable = intel_disable_crt;
-	}
+	crt->base.disable = intel_disable_crt;
 	crt->base.enable = intel_enable_crt;
 	if (I915_HAS_HOTPLUG(dev))
 		crt->base.hpd_pin = HPD_CRT;

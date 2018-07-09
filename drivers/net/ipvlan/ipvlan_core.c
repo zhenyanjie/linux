@@ -85,9 +85,11 @@ void ipvlan_ht_addr_add(struct ipvl_dev *ipvlan, struct ipvl_addr *addr)
 		hlist_add_head_rcu(&addr->hlnode, &port->hlhead[hash]);
 }
 
-void ipvlan_ht_addr_del(struct ipvl_addr *addr)
+void ipvlan_ht_addr_del(struct ipvl_addr *addr, bool sync)
 {
 	hlist_del_init_rcu(&addr->hlnode);
+	if (sync)
+		synchronize_rcu();
 }
 
 struct ipvl_addr *ipvlan_find_addr(const struct ipvl_dev *ipvlan,
@@ -187,69 +189,62 @@ unsigned int ipvlan_mac_hash(const unsigned char *addr)
 	return hash & IPVLAN_MAC_FILTER_MASK;
 }
 
-void ipvlan_process_multicast(struct work_struct *work)
+static void ipvlan_multicast_frame(struct ipvl_port *port, struct sk_buff *skb,
+				   const struct ipvl_dev *in_dev, bool local)
 {
-	struct ipvl_port *port = container_of(work, struct ipvl_port, wq);
-	struct ethhdr *ethh;
+	struct ethhdr *eth = eth_hdr(skb);
 	struct ipvl_dev *ipvlan;
-	struct sk_buff *skb, *nskb;
-	struct sk_buff_head list;
+	struct sk_buff *nskb;
 	unsigned int len;
 	unsigned int mac_hash;
 	int ret;
-	u8 pkt_type;
-	bool hlocal, dlocal;
 
-	__skb_queue_head_init(&list);
+	if (skb->protocol == htons(ETH_P_PAUSE))
+		return;
 
-	spin_lock_bh(&port->backlog.lock);
-	skb_queue_splice_tail_init(&port->backlog, &list);
-	spin_unlock_bh(&port->backlog.lock);
+	rcu_read_lock();
+	list_for_each_entry_rcu(ipvlan, &port->ipvlans, pnode) {
+		if (local && (ipvlan == in_dev))
+			continue;
 
-	while ((skb = __skb_dequeue(&list)) != NULL) {
-		ethh = eth_hdr(skb);
-		hlocal = ether_addr_equal(ethh->h_source, port->dev->dev_addr);
-		mac_hash = ipvlan_mac_hash(ethh->h_dest);
+		mac_hash = ipvlan_mac_hash(eth->h_dest);
+		if (!test_bit(mac_hash, ipvlan->mac_filters))
+			continue;
 
-		if (ether_addr_equal(ethh->h_dest, port->dev->broadcast))
-			pkt_type = PACKET_BROADCAST;
+		ret = NET_RX_DROP;
+		len = skb->len + ETH_HLEN;
+		nskb = skb_clone(skb, GFP_ATOMIC);
+		if (!nskb)
+			goto mcast_acct;
+
+		if (ether_addr_equal(eth->h_dest, ipvlan->phy_dev->broadcast))
+			nskb->pkt_type = PACKET_BROADCAST;
 		else
-			pkt_type = PACKET_MULTICAST;
+			nskb->pkt_type = PACKET_MULTICAST;
 
-		dlocal = false;
-		rcu_read_lock();
-		list_for_each_entry_rcu(ipvlan, &port->ipvlans, pnode) {
-			if (hlocal && (ipvlan->dev == skb->dev)) {
-				dlocal = true;
-				continue;
-			}
-			if (!test_bit(mac_hash, ipvlan->mac_filters))
-				continue;
+		nskb->dev = ipvlan->dev;
+		if (local)
+			ret = dev_forward_skb(ipvlan->dev, nskb);
+		else
+			ret = netif_rx(nskb);
+mcast_acct:
+		ipvlan_count_rx(ipvlan, len, ret == NET_RX_SUCCESS, true);
+	}
+	rcu_read_unlock();
 
-			ret = NET_RX_DROP;
-			len = skb->len + ETH_HLEN;
-			nskb = skb_clone(skb, GFP_ATOMIC);
-			if (!nskb)
-				goto acct;
-
-			nskb->pkt_type = pkt_type;
-			nskb->dev = ipvlan->dev;
-			if (hlocal)
-				ret = dev_forward_skb(ipvlan->dev, nskb);
+	/* Locally generated? ...Forward a copy to the main-device as
+	 * well. On the RX side we'll ignore it (wont give it to any
+	 * of the virtual devices.
+	 */
+	if (local) {
+		nskb = skb_clone(skb, GFP_ATOMIC);
+		if (nskb) {
+			if (ether_addr_equal(eth->h_dest, port->dev->broadcast))
+				nskb->pkt_type = PACKET_BROADCAST;
 			else
-				ret = netif_rx(nskb);
-acct:
-			ipvlan_count_rx(ipvlan, len, ret == NET_RX_SUCCESS, true);
-		}
-		rcu_read_unlock();
+				nskb->pkt_type = PACKET_MULTICAST;
 
-		if (dlocal) {
-			/* If the packet originated here, send it out. */
-			skb->dev = port->dev;
-			skb->pkt_type = pkt_type;
-			dev_queue_xmit(skb);
-		} else {
-			kfree_skb(skb);
+			dev_forward_skb(port->dev, nskb);
 		}
 	}
 }
@@ -280,6 +275,10 @@ static int ipvlan_rcv_frame(struct ipvl_addr *addr, struct sk_buff *skb,
 		if (dev_forward_skb(ipvlan->dev, skb) == NET_RX_SUCCESS)
 			success = true;
 	} else {
+		if (!ether_addr_equal_64bits(eth_hdr(skb)->h_dest,
+					     ipvlan->phy_dev->dev_addr))
+			skb->pkt_type = PACKET_OTHERHOST;
+
 		ret = RX_HANDLER_ANOTHER;
 		success = true;
 	}
@@ -350,6 +349,7 @@ static int ipvlan_process_v4_outbound(struct sk_buff *skb)
 		.flowi4_oif = dev_get_iflink(dev),
 		.flowi4_tos = RT_TOS(ip4h->tos),
 		.flowi4_flags = FLOWI_FLAG_ANYSRC,
+		.flowi4_mark = skb->mark,
 		.daddr = ip4h->daddr,
 		.saddr = ip4h->saddr,
 	};
@@ -451,26 +451,6 @@ out:
 	return ret;
 }
 
-static void ipvlan_multicast_enqueue(struct ipvl_port *port,
-				     struct sk_buff *skb)
-{
-	if (skb->protocol == htons(ETH_P_PAUSE)) {
-		kfree_skb(skb);
-		return;
-	}
-
-	spin_lock(&port->backlog.lock);
-	if (skb_queue_len(&port->backlog) < IPVLAN_QBACKLOG_LIMIT) {
-		__skb_queue_tail(&port->backlog, skb);
-		spin_unlock(&port->backlog.lock);
-		schedule_work(&port->wq);
-	} else {
-		spin_unlock(&port->backlog.lock);
-		atomic_long_inc(&skb->dev->rx_dropped);
-		kfree_skb(skb);
-	}
-}
-
 static int ipvlan_xmit_mode_l3(struct sk_buff *skb, struct net_device *dev)
 {
 	const struct ipvl_dev *ipvlan = netdev_priv(dev);
@@ -518,8 +498,11 @@ static int ipvlan_xmit_mode_l2(struct sk_buff *skb, struct net_device *dev)
 		return dev_forward_skb(ipvlan->phy_dev, skb);
 
 	} else if (is_multicast_ether_addr(eth->h_dest)) {
-		ipvlan_multicast_enqueue(ipvlan->port, skb);
-		return NET_XMIT_SUCCESS;
+		u8 ip_summed = skb->ip_summed;
+
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
+		ipvlan_multicast_frame(ipvlan->port, skb, ipvlan, true);
+		skb->ip_summed = ip_summed;
 	}
 
 	skb->dev = ipvlan->phy_dev;
@@ -529,7 +512,7 @@ static int ipvlan_xmit_mode_l2(struct sk_buff *skb, struct net_device *dev)
 int ipvlan_queue_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ipvl_dev *ipvlan = netdev_priv(dev);
-	struct ipvl_port *port = ipvlan_port_get_rcu_bh(ipvlan->phy_dev);
+	struct ipvl_port *port = ipvlan_port_get_rcu(ipvlan->phy_dev);
 
 	if (!port)
 		goto out;
@@ -603,18 +586,8 @@ static rx_handler_result_t ipvlan_handle_mode_l2(struct sk_buff **pskb,
 	int addr_type;
 
 	if (is_multicast_ether_addr(eth->h_dest)) {
-		if (ipvlan_external_frame(skb, port)) {
-			struct sk_buff *nskb = skb_clone(skb, GFP_ATOMIC);
-
-			/* External frames are queued for device local
-			 * distribution, but a copy is given to master
-			 * straight away to avoid sending duplicates later
-			 * when work-queue processes this frame. This is
-			 * achieved by returning RX_HANDLER_PASS.
-			 */
-			if (nskb)
-				ipvlan_multicast_enqueue(port, nskb);
-		}
+		if (ipvlan_external_frame(skb, port))
+			ipvlan_multicast_frame(port, skb, NULL, false);
 	} else {
 		struct ipvl_addr *addr;
 

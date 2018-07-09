@@ -135,7 +135,6 @@ static int x86_pmu_extra_regs(u64 config, struct perf_event *event)
 }
 
 static atomic_t active_events;
-static atomic_t pmc_refcount;
 static DEFINE_MUTEX(pmc_reserve_mutex);
 
 #ifdef CONFIG_X86_LOCAL_APIC
@@ -188,8 +187,8 @@ static void release_pmc_hardware(void) {}
 
 static bool check_hw_exists(void)
 {
-	u64 val, val_fail, val_new= ~0;
-	int i, reg, reg_fail, ret = 0;
+	u64 val, val_fail = -1, val_new= ~0;
+	int i, reg, reg_fail = -1, ret = 0;
 	int bios_fail = 0;
 	int reg_safe = -1;
 
@@ -272,7 +271,6 @@ msr_fail:
 static void hw_perf_event_destroy(struct perf_event *event)
 {
 	x86_release_hardware();
-	atomic_dec(&active_events);
 }
 
 void hw_perf_lbr_event_destroy(struct perf_event *event)
@@ -326,16 +324,16 @@ int x86_reserve_hardware(void)
 {
 	int err = 0;
 
-	if (!atomic_inc_not_zero(&pmc_refcount)) {
+	if (!atomic_inc_not_zero(&active_events)) {
 		mutex_lock(&pmc_reserve_mutex);
-		if (atomic_read(&pmc_refcount) == 0) {
+		if (atomic_read(&active_events) == 0) {
 			if (!reserve_pmc_hardware())
 				err = -EBUSY;
 			else
 				reserve_ds_buffers();
 		}
 		if (!err)
-			atomic_inc(&pmc_refcount);
+			atomic_inc(&active_events);
 		mutex_unlock(&pmc_reserve_mutex);
 	}
 
@@ -344,7 +342,7 @@ int x86_reserve_hardware(void)
 
 void x86_release_hardware(void)
 {
-	if (atomic_dec_and_mutex_lock(&pmc_refcount, &pmc_reserve_mutex)) {
+	if (atomic_dec_and_mutex_lock(&active_events, &pmc_reserve_mutex)) {
 		release_pmc_hardware();
 		release_ds_buffers();
 		mutex_unlock(&pmc_reserve_mutex);
@@ -357,30 +355,28 @@ void x86_release_hardware(void)
  */
 int x86_add_exclusive(unsigned int what)
 {
-	int i;
+	int ret = -EBUSY, i;
 
-	if (!atomic_inc_not_zero(&x86_pmu.lbr_exclusive[what])) {
-		mutex_lock(&pmc_reserve_mutex);
-		for (i = 0; i < ARRAY_SIZE(x86_pmu.lbr_exclusive); i++) {
-			if (i != what && atomic_read(&x86_pmu.lbr_exclusive[i]))
-				goto fail_unlock;
-		}
-		atomic_inc(&x86_pmu.lbr_exclusive[what]);
-		mutex_unlock(&pmc_reserve_mutex);
+	if (atomic_inc_not_zero(&x86_pmu.lbr_exclusive[what]))
+		return 0;
+
+	mutex_lock(&pmc_reserve_mutex);
+	for (i = 0; i < ARRAY_SIZE(x86_pmu.lbr_exclusive); i++) {
+		if (i != what && atomic_read(&x86_pmu.lbr_exclusive[i]))
+			goto out;
 	}
 
-	atomic_inc(&active_events);
-	return 0;
+	atomic_inc(&x86_pmu.lbr_exclusive[what]);
+	ret = 0;
 
-fail_unlock:
+out:
 	mutex_unlock(&pmc_reserve_mutex);
-	return -EBUSY;
+	return ret;
 }
 
 void x86_del_exclusive(unsigned int what)
 {
 	atomic_dec(&x86_pmu.lbr_exclusive[what]);
-	atomic_dec(&active_events);
 }
 
 int x86_setup_perfctr(struct perf_event *event)
@@ -561,7 +557,6 @@ static int __x86_pmu_event_init(struct perf_event *event)
 	if (err)
 		return err;
 
-	atomic_inc(&active_events);
 	event->destroy = hw_perf_event_destroy;
 
 	event->hw.idx = -1;
@@ -900,7 +895,10 @@ int x86_schedule_events(struct cpu_hw_events *cpuc, int n, int *assign)
 			if (x86_pmu.commit_scheduling)
 				x86_pmu.commit_scheduling(cpuc, i, assign[i]);
 		}
-	} else {
+	}
+
+	if (!assign || unsched) {
+
 		for (i = 0; i < n; i++) {
 			e = cpuc->event_list[i];
 			/*
@@ -1113,16 +1111,13 @@ int x86_perf_event_set_period(struct perf_event *event)
 
 	per_cpu(pmc_prev_left[idx], smp_processor_id()) = left;
 
-	if (!(hwc->flags & PERF_X86_EVENT_AUTO_RELOAD) ||
-	    local64_read(&hwc->prev_count) != (u64)-left) {
-		/*
-		 * The hw event starts counting from this event offset,
-		 * mark it to be able to extra future deltas:
-		 */
-		local64_set(&hwc->prev_count, (u64)-left);
+	/*
+	 * The hw event starts counting from this event offset,
+	 * mark it to be able to extra future deltas:
+	 */
+	local64_set(&hwc->prev_count, (u64)-left);
 
-		wrmsrl(hwc->event_base, (u64)(-left) & x86_pmu.cntval_mask);
-	}
+	wrmsrl(hwc->event_base, (u64)(-left) & x86_pmu.cntval_mask);
 
 	/*
 	 * Due to erratum on certan cpu we need
@@ -1434,10 +1429,6 @@ perf_event_nmi_handler(unsigned int cmd, struct pt_regs *regs)
 	u64 finish_clock;
 	int ret;
 
-	/*
-	 * All PMUs/events that share this PMI handler should make sure to
-	 * increment active_events for their events.
-	 */
 	if (!atomic_read(&active_events))
 		return NMI_DONE;
 
@@ -1551,7 +1542,7 @@ static void __init filter_events(struct attribute **attrs)
 }
 
 /* Merge two pointer arrays */
-__init struct attribute **merge_attr(struct attribute **a, struct attribute **b)
+static __init struct attribute **merge_attr(struct attribute **a, struct attribute **b)
 {
 	struct attribute **new;
 	int j, i;
@@ -1956,8 +1947,8 @@ static int x86_pmu_event_init(struct perf_event *event)
 
 static void refresh_pce(void *ignored)
 {
-	if (current->mm)
-		load_mm_cr4(current->mm);
+	if (current->active_mm)
+		load_mm_cr4(current->active_mm);
 }
 
 static void x86_pmu_event_mapped(struct perf_event *event)
@@ -2179,7 +2170,6 @@ static unsigned long get_segment_base(unsigned int segment)
 	int idx = segment >> 3;
 
 	if ((segment & SEGMENT_TI_MASK) == SEGMENT_LDT) {
-#ifdef CONFIG_MODIFY_LDT_SYSCALL
 		struct ldt_struct *ldt;
 
 		if (idx > LDT_ENTRIES)
@@ -2191,9 +2181,6 @@ static unsigned long get_segment_base(unsigned int segment)
 			return 0;
 
 		desc = &ldt->entries[idx];
-#else
-		return 0;
-#endif
 	} else {
 		if (idx > GDT_ENTRIES)
 			return 0;
@@ -2204,7 +2191,7 @@ static unsigned long get_segment_base(unsigned int segment)
 	return get_desc_base(desc);
 }
 
-#ifdef CONFIG_IA32_EMULATION
+#ifdef CONFIG_COMPAT
 
 #include <asm/compat.h>
 

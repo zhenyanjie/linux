@@ -860,7 +860,7 @@ static int sh_msiof_transfer_one(struct spi_master *master,
 				break;
 			copy32 = copy_bswap32;
 		} else if (bits <= 16) {
-			if (l & 1)
+			if (l & 3)
 				break;
 			copy32 = copy_wswap32;
 		} else {
@@ -1266,8 +1266,13 @@ static int sh_msiof_spi_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct platform_device_id spi_driver_ids[] = {
+static struct platform_device_id spi_driver_ids[] = {
 	{ "spi_sh_msiof",	(kernel_ulong_t)&sh_data },
+	{ "spi_r8a7790_msiof",	(kernel_ulong_t)&r8a779x_data },
+	{ "spi_r8a7791_msiof",	(kernel_ulong_t)&r8a779x_data },
+	{ "spi_r8a7792_msiof",	(kernel_ulong_t)&r8a779x_data },
+	{ "spi_r8a7793_msiof",	(kernel_ulong_t)&r8a779x_data },
+	{ "spi_r8a7794_msiof",	(kernel_ulong_t)&r8a779x_data },
 	{},
 };
 MODULE_DEVICE_TABLE(platform, spi_driver_ids);

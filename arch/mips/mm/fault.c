@@ -21,10 +21,10 @@
 #include <linux/module.h>
 #include <linux/kprobes.h>
 #include <linux/perf_event.h>
-#include <linux/uaccess.h>
 
 #include <asm/branch.h>
 #include <asm/mmu_context.h>
+#include <asm/uaccess.h>
 #include <asm/ptrace.h>
 #include <asm/highmem.h>		/* For VMALLOC_END */
 #include <linux/kdebug.h>
@@ -57,10 +57,12 @@ static void __kprobes __do_page_fault(struct pt_regs *regs, unsigned long write,
 
 #ifdef CONFIG_KPROBES
 	/*
-	 * This is to notify the fault handler of the kprobes.
+	 * This is to notify the fault handler of the kprobes.	The
+	 * exception code is redundant as it is also carried in REGS,
+	 * but we pass it anyhow.
 	 */
 	if (notify_die(DIE_PAGE_FAULT, "page fault", regs, -1,
-		       current->thread.trap_nr, SIGSEGV) == NOTIFY_STOP)
+		       (regs->cp0_cause >> 2) & 0x1f, SIGSEGV) == NOTIFY_STOP)
 		return;
 #endif
 
@@ -92,7 +94,7 @@ static void __kprobes __do_page_fault(struct pt_regs *regs, unsigned long write,
 	 * If we're in an interrupt or have no user
 	 * context, we must not take the fault..
 	 */
-	if (faulthandler_disabled() || !mm)
+	if (in_atomic() || !mm)
 		goto bad_area_nosemaphore;
 
 	if (user_mode(regs))
@@ -131,8 +133,7 @@ good_area:
 #endif
 				goto bad_area;
 			}
-			if (!(vma->vm_flags & VM_READ) &&
-			    exception_epc(regs) != address) {
+			if (!(vma->vm_flags & VM_READ)) {
 #if 0
 				pr_notice("Cpu%d[%s:%d:%0*lx:%ld:%0*lx] RI violation\n",
 					  raw_smp_processor_id(),
@@ -222,7 +223,6 @@ bad_area_nosemaphore:
 			print_vma_addr(" ", regs->regs[31]);
 			pr_info("\n");
 		}
-		current->thread.trap_nr = (regs->cp0_cause >> 2) & 0x1f;
 		info.si_signo = SIGSEGV;
 		info.si_errno = 0;
 		/* info.si_code has been set above */
@@ -281,7 +281,6 @@ do_sigbus:
 		       field, (unsigned long) regs->cp0_epc,
 		       field, (unsigned long) regs->regs[31]);
 #endif
-	current->thread.trap_nr = (regs->cp0_cause >> 2) & 0x1f;
 	tsk->thread.cp0_badvaddr = address;
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;

@@ -177,8 +177,8 @@ size_t vme_get_size(struct vme_resource *resource)
 }
 EXPORT_SYMBOL(vme_get_size);
 
-int vme_check_window(u32 aspace, unsigned long long vme_base,
-		     unsigned long long size)
+static int vme_check_window(u32 aspace, unsigned long long vme_base,
+	unsigned long long size)
 {
 	int retval = 0;
 
@@ -199,8 +199,10 @@ int vme_check_window(u32 aspace, unsigned long long vme_base,
 			retval = -EFAULT;
 		break;
 	case VME_A64:
-		if ((size != 0) && (vme_base > U64_MAX + 1 - size))
-			retval = -EFAULT;
+		/*
+		 * Any value held in an unsigned long long can be used as the
+		 * base
+		 */
 		break;
 	case VME_CRCSR:
 		if (((vme_base + size) > VME_CRCSR_MAX) ||
@@ -221,7 +223,6 @@ int vme_check_window(u32 aspace, unsigned long long vme_base,
 
 	return retval;
 }
-EXPORT_SYMBOL(vme_check_window);
 
 /*
  * Request a slave image with specific attributes, return some unique

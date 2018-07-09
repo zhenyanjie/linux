@@ -25,7 +25,7 @@ struct iio_dummy_regs;
  * @accel_calibscale:		cache for acceleration calibscale
  * @lock:			lock to ensure state is consistent
  * @event_irq:			irq number for event line (faked)
- * @event_val:			cache for event threshold value
+ * @event_val:			cache for event theshold value
  * @event_en:			cache of whether event is enabled
  */
 struct iio_dummy_state {
@@ -79,7 +79,7 @@ int iio_simple_dummy_write_event_value(struct iio_dev *indio_dev,
 				       int val2);
 
 int iio_simple_dummy_events_register(struct iio_dev *indio_dev);
-void iio_simple_dummy_events_unregister(struct iio_dev *indio_dev);
+int iio_simple_dummy_events_unregister(struct iio_dev *indio_dev);
 
 #else /* Stubs for when events are disabled at compile time */
 
@@ -89,9 +89,11 @@ iio_simple_dummy_events_register(struct iio_dev *indio_dev)
 	return 0;
 };
 
-static inline void
+static inline int
 iio_simple_dummy_events_unregister(struct iio_dev *indio_dev)
-{ };
+{
+	return 0;
+};
 
 #endif /* CONFIG_IIO_SIMPLE_DUMMY_EVENTS*/
 
@@ -119,7 +121,6 @@ static inline int iio_simple_dummy_configure_buffer(struct iio_dev *indio_dev)
 {
 	return 0;
 };
-
 static inline
 void iio_simple_dummy_unconfigure_buffer(struct iio_dev *indio_dev)
 {};

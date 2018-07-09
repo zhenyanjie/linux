@@ -125,6 +125,16 @@ static const struct reg_default aic3x_reg[] = {
 	{ 108, 0x00 }, { 109, 0x00 },
 };
 
+static bool aic3x_volatile_reg(struct device *dev, unsigned int reg)
+{
+	switch (reg) {
+	case AIC3X_RESET:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static const struct regmap_config aic3x_regmap = {
 	.reg_bits = 8,
 	.val_bits = 8,
@@ -132,6 +142,9 @@ static const struct regmap_config aic3x_regmap = {
 	.max_register = DAC_ICC_ADJ,
 	.reg_defaults = aic3x_reg,
 	.num_reg_defaults = ARRAY_SIZE(aic3x_reg),
+
+	.volatile_reg = aic3x_volatile_reg,
+
 	.cache_type = REGCACHE_RBTREE,
 };
 
@@ -147,7 +160,6 @@ static int snd_soc_dapm_put_volsw_aic3x(struct snd_kcontrol *kcontrol,
 					struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_codec *codec = snd_soc_dapm_kcontrol_codec(kcontrol);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	unsigned int reg = mc->reg;
@@ -180,7 +192,7 @@ static int snd_soc_dapm_put_volsw_aic3x(struct snd_kcontrol *kcontrol,
 		update.mask = mask;
 		update.val = val;
 
-		snd_soc_dapm_mixer_update_power(dapm, kcontrol, connect,
+		snd_soc_dapm_mixer_update_power(&codec->dapm, kcontrol, connect,
 			&update);
 	}
 
@@ -980,7 +992,7 @@ static const struct snd_soc_dapm_route intercon_3007[] = {
 static int aic3x_add_widgets(struct snd_soc_codec *codec)
 {
 	struct aic3x_priv *aic3x = snd_soc_codec_get_drvdata(codec);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
 
 	switch (aic3x->model) {
 	case AIC3X_MODEL_3X:
@@ -1385,7 +1397,7 @@ static int aic3x_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_ON:
 		break;
 	case SND_SOC_BIAS_PREPARE:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_STANDBY &&
+		if (codec->dapm.bias_level == SND_SOC_BIAS_STANDBY &&
 		    aic3x->master) {
 			/* enable pll */
 			snd_soc_update_bits(codec, AIC3X_PLL_PROGA_REG,
@@ -1395,7 +1407,7 @@ static int aic3x_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_STANDBY:
 		if (!aic3x->power)
 			aic3x_set_power(codec, 1);
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_PREPARE &&
+		if (codec->dapm.bias_level == SND_SOC_BIAS_PREPARE &&
 		    aic3x->master) {
 			/* disable pll */
 			snd_soc_update_bits(codec, AIC3X_PLL_PROGA_REG,
@@ -1407,6 +1419,7 @@ static int aic3x_set_bias_level(struct snd_soc_codec *codec,
 			aic3x_set_power(codec, 0);
 		break;
 	}
+	codec->dapm.bias_level = level;
 
 	return 0;
 }
@@ -1509,17 +1522,14 @@ static int aic3x_init(struct snd_soc_codec *codec)
 	snd_soc_write(codec, PGAL_2_LLOPM_VOL, DEFAULT_VOL);
 	snd_soc_write(codec, PGAR_2_RLOPM_VOL, DEFAULT_VOL);
 
-	/* On tlv320aic3104, these registers are reserved and must not be written */
-	if (aic3x->model != AIC3X_MODEL_3104) {
-		/* Line2 to HP Bypass default volume, disconnect from Output Mixer */
-		snd_soc_write(codec, LINE2L_2_HPLOUT_VOL, DEFAULT_VOL);
-		snd_soc_write(codec, LINE2R_2_HPROUT_VOL, DEFAULT_VOL);
-		snd_soc_write(codec, LINE2L_2_HPLCOM_VOL, DEFAULT_VOL);
-		snd_soc_write(codec, LINE2R_2_HPRCOM_VOL, DEFAULT_VOL);
-		/* Line2 Line Out default volume, disconnect from Output Mixer */
-		snd_soc_write(codec, LINE2L_2_LLOPM_VOL, DEFAULT_VOL);
-		snd_soc_write(codec, LINE2R_2_RLOPM_VOL, DEFAULT_VOL);
-	}
+	/* Line2 to HP Bypass default volume, disconnect from Output Mixer */
+	snd_soc_write(codec, LINE2L_2_HPLOUT_VOL, DEFAULT_VOL);
+	snd_soc_write(codec, LINE2R_2_HPROUT_VOL, DEFAULT_VOL);
+	snd_soc_write(codec, LINE2L_2_HPLCOM_VOL, DEFAULT_VOL);
+	snd_soc_write(codec, LINE2R_2_HPRCOM_VOL, DEFAULT_VOL);
+	/* Line2 Line Out default volume, disconnect from Output Mixer */
+	snd_soc_write(codec, LINE2L_2_LLOPM_VOL, DEFAULT_VOL);
+	snd_soc_write(codec, LINE2R_2_RLOPM_VOL, DEFAULT_VOL);
 
 	switch (aic3x->model) {
 	case AIC3X_MODEL_3X:
@@ -1671,7 +1681,7 @@ static const struct i2c_device_id aic3x_i2c_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, aic3x_i2c_id);
 
-static const struct reg_sequence aic3007_class_d[] = {
+static const struct reg_default aic3007_class_d[] = {
 	/* Class-D speaker driver init; datasheet p. 46 */
 	{ AIC3X_PAGE_SELECT, 0x0D },
 	{ 0xD, 0x0D },
@@ -1828,6 +1838,7 @@ MODULE_DEVICE_TABLE(of, tlv320aic3x_of_match);
 static struct i2c_driver aic3x_i2c_driver = {
 	.driver = {
 		.name = "tlv320aic3x-codec",
+		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(tlv320aic3x_of_match),
 	},
 	.probe	= aic3x_i2c_probe,

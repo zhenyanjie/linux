@@ -42,7 +42,6 @@ my $output_multiline = 1;
 my $output_separator = ", ";
 my $output_roles = 0;
 my $output_rolestats = 1;
-my $output_section_maxlen = 50;
 my $scm = 0;
 my $web = 0;
 my $subsystem = 0;
@@ -187,27 +186,6 @@ if (-f $conf) {
     unshift(@ARGV, @conf_args) if @conf_args;
 }
 
-my @ignore_emails = ();
-my $ignore_file = which_conf(".get_maintainer.ignore");
-if (-f $ignore_file) {
-    open(my $ignore, '<', "$ignore_file")
-	or warn "$P: Can't find a readable .get_maintainer.ignore file $!\n";
-    while (<$ignore>) {
-	my $line = $_;
-
-	$line =~ s/\s*\n?$//;
-	$line =~ s/^\s*//;
-	$line =~ s/\s+$//;
-	$line =~ s/#.*$//;
-
-	next if ($line =~ m/^\s*$/);
-	if (rfc822_valid($line)) {
-	    push(@ignore_emails, $line);
-	}
-    }
-    close($ignore);
-}
-
 if (!GetOptions(
 		'email!' => \$email,
 		'git!' => \$email_git,
@@ -305,7 +283,7 @@ open (my $maint, '<', "${lk_path}MAINTAINERS")
 while (<$maint>) {
     my $line = $_;
 
-    if ($line =~ m/^([A-Z]):\s*(.*)/) {
+    if ($line =~ m/^(\C):\s*(.*)/) {
 	my $type = $1;
 	my $value = $2;
 
@@ -535,22 +513,12 @@ if ($web) {
 
 exit($exit);
 
-sub ignore_email_address {
-    my ($address) = @_;
-
-    foreach my $ignore (@ignore_emails) {
-	return 1 if ($ignore eq $address);
-    }
-
-    return 0;
-}
-
 sub range_is_maintained {
     my ($start, $end) = @_;
 
     for (my $i = $start; $i < $end; $i++) {
 	my $line = $typevalue[$i];
-	if ($line =~ m/^([A-Z]):\s*(.*)/) {
+	if ($line =~ m/^(\C):\s*(.*)/) {
 	    my $type = $1;
 	    my $value = $2;
 	    if ($type eq 'S') {
@@ -568,7 +536,7 @@ sub range_has_maintainer {
 
     for (my $i = $start; $i < $end; $i++) {
 	my $line = $typevalue[$i];
-	if ($line =~ m/^([A-Z]):\s*(.*)/) {
+	if ($line =~ m/^(\C):\s*(.*)/) {
 	    my $type = $1;
 	    my $value = $2;
 	    if ($type eq 'M') {
@@ -617,7 +585,7 @@ sub get_maintainers {
 
 	    for ($i = $start; $i < $end; $i++) {
 		my $line = $typevalue[$i];
-		if ($line =~ m/^([A-Z]):\s*(.*)/) {
+		if ($line =~ m/^(\C):\s*(.*)/) {
 		    my $type = $1;
 		    my $value = $2;
 		    if ($type eq 'X') {
@@ -632,7 +600,7 @@ sub get_maintainers {
 	    if (!$exclude) {
 		for ($i = $start; $i < $end; $i++) {
 		    my $line = $typevalue[$i];
-		    if ($line =~ m/^([A-Z]):\s*(.*)/) {
+		    if ($line =~ m/^(\C):\s*(.*)/) {
 			my $type = $1;
 			my $value = $2;
 			if ($type eq 'F') {
@@ -933,7 +901,7 @@ sub find_first_section {
 
     while ($index < @typevalue) {
 	my $tv = $typevalue[$index];
-	if (($tv =~ m/^([A-Z]):\s*(.*)/)) {
+	if (($tv =~ m/^(\C):\s*(.*)/)) {
 	    last;
 	}
 	$index++;
@@ -947,7 +915,7 @@ sub find_starting_index {
 
     while ($index > 0) {
 	my $tv = $typevalue[$index];
-	if (!($tv =~ m/^([A-Z]):\s*(.*)/)) {
+	if (!($tv =~ m/^(\C):\s*(.*)/)) {
 	    last;
 	}
 	$index--;
@@ -961,7 +929,7 @@ sub find_ending_index {
 
     while ($index < @typevalue) {
 	my $tv = $typevalue[$index];
-	if (!($tv =~ m/^([A-Z]):\s*(.*)/)) {
+	if (!($tv =~ m/^(\C):\s*(.*)/)) {
 	    last;
 	}
 	$index++;
@@ -979,15 +947,15 @@ sub get_maintainer_role {
 
     my $role = "unknown";
     my $subsystem = $typevalue[$start];
-    if ($output_section_maxlen && length($subsystem) > $output_section_maxlen) {
-	$subsystem = substr($subsystem, 0, $output_section_maxlen - 3);
+    if (length($subsystem) > 20) {
+	$subsystem = substr($subsystem, 0, 17);
 	$subsystem =~ s/\s*$//;
 	$subsystem = $subsystem . "...";
     }
 
     for ($i = $start + 1; $i < $end; $i++) {
 	my $tv = $typevalue[$i];
-	if ($tv =~ m/^([A-Z]):\s*(.*)/) {
+	if ($tv =~ m/^(\C):\s*(.*)/) {
 	    my $ptype = $1;
 	    my $pvalue = $2;
 	    if ($ptype eq "S") {
@@ -1022,8 +990,8 @@ sub get_list_role {
     my $end = find_ending_index($index);
 
     my $subsystem = $typevalue[$start];
-    if ($output_section_maxlen && length($subsystem) > $output_section_maxlen) {
-	$subsystem = substr($subsystem, 0, $output_section_maxlen - 3);
+    if (length($subsystem) > 20) {
+	$subsystem = substr($subsystem, 0, 17);
 	$subsystem =~ s/\s*$//;
 	$subsystem = $subsystem . "...";
     }
@@ -1046,7 +1014,7 @@ sub add_categories {
 
     for ($i = $start + 1; $i < $end; $i++) {
 	my $tv = $typevalue[$i];
-	if ($tv =~ m/^([A-Z]):\s*(.*)/) {
+	if ($tv =~ m/^(\C):\s*(.*)/) {
 	    my $ptype = $1;
 	    my $pvalue = $2;
 	    if ($ptype eq "L") {
@@ -1088,7 +1056,7 @@ sub add_categories {
 		if ($name eq "") {
 		    if ($i > 0) {
 			my $tv = $typevalue[$i - 1];
-			if ($tv =~ m/^([A-Z]):\s*(.*)/) {
+			if ($tv =~ m/^(\C):\s*(.*)/) {
 			    if ($1 eq "P") {
 				$name = $2;
 				$pvalue = format_email($name, $address, $email_usename);
@@ -1105,7 +1073,7 @@ sub add_categories {
 		if ($name eq "") {
 		    if ($i > 0) {
 			my $tv = $typevalue[$i - 1];
-			if ($tv =~ m/^([A-Z]):\s*(.*)/) {
+			if ($tv =~ m/^(\C):\s*(.*)/) {
 			    if ($1 eq "P") {
 				$name = $2;
 				$pvalue = format_email($name, $address, $email_usename);
@@ -1900,7 +1868,6 @@ sub vcs_assign {
 	my $percent = $sign_offs * 100 / $divisor;
 
 	$percent = 100 if ($percent > 100);
-	next if (ignore_email_address($line));
 	$count++;
 	last if ($sign_offs < $email_git_min_signatures ||
 		 $count > $email_git_max_maintainers ||

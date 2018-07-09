@@ -133,6 +133,8 @@ struct tpm_chip *tpmm_chip_alloc(struct device *dev,
 	chip->cdev.owner = chip->pdev->driver->owner;
 	chip->cdev.kobj.parent = &chip->dev.kobj;
 
+	devm_add_action(dev, (void (*)(void *)) put_device, &chip->dev);
+
 	return chip;
 }
 EXPORT_SYMBOL_GPL(tpmm_chip_alloc);
@@ -168,7 +170,7 @@ static int tpm_dev_add_device(struct tpm_chip *chip)
 static void tpm_dev_del_device(struct tpm_chip *chip)
 {
 	cdev_del(&chip->cdev);
-	device_unregister(&chip->dev);
+	device_del(&chip->dev);
 }
 
 static int tpm1_chip_register(struct tpm_chip *chip)
@@ -231,7 +233,7 @@ int tpm_chip_register(struct tpm_chip *chip)
 
 	/* Make the chip available. */
 	spin_lock(&driver_lock);
-	list_add_tail_rcu(&chip->list, &tpm_chip_list);
+	list_add_rcu(&chip->list, &tpm_chip_list);
 	spin_unlock(&driver_lock);
 
 	chip->flags |= TPM_CHIP_FLAG_REGISTERED;

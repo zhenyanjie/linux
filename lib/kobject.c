@@ -234,14 +234,12 @@ static int kobject_add_internal(struct kobject *kobj)
 
 		/* be noisy on error issues */
 		if (error == -EEXIST)
-			WARN(1, "%s failed for %s with "
-			     "-EEXIST, don't try to register things with "
-			     "the same name in the same directory.\n",
-			     __func__, kobject_name(kobj));
+			pr_err("%s failed for %s with -EEXIST, don't try to register things with the same name in the same directory.\n",
+			       __func__, kobject_name(kobj));
 		else
-			WARN(1, "%s failed for %s (error: %d parent: %s)\n",
-			     __func__, kobject_name(kobj), error,
-			     parent ? kobject_name(parent) : "'none'");
+			pr_err("%s failed for %s (error: %d parent: %s)\n",
+			       __func__, kobject_name(kobj), error,
+			       parent ? kobject_name(parent) : "'none'");
 	} else
 		kobj->state_in_sysfs = 1;
 
@@ -257,20 +255,23 @@ static int kobject_add_internal(struct kobject *kobj)
 int kobject_set_name_vargs(struct kobject *kobj, const char *fmt,
 				  va_list vargs)
 {
+	const char *old_name = kobj->name;
 	char *s;
 
 	if (kobj->name && !fmt)
 		return 0;
 
-	s = kvasprintf(GFP_KERNEL, fmt, vargs);
-	if (!s)
+	kobj->name = kvasprintf(GFP_KERNEL, fmt, vargs);
+	if (!kobj->name) {
+		kobj->name = old_name;
 		return -ENOMEM;
+	}
 
 	/* ewww... some of these buggers have '/' in the name ... */
-	strreplace(s, '/', '!');
-	kfree(kobj->name);
-	kobj->name = s;
+	while ((s = strchr(kobj->name, '/')))
+		s[0] = '!';
 
+	kfree(old_name);
 	return 0;
 }
 
@@ -337,9 +338,8 @@ error:
 }
 EXPORT_SYMBOL(kobject_init);
 
-static __printf(3, 0) int kobject_add_varg(struct kobject *kobj,
-					   struct kobject *parent,
-					   const char *fmt, va_list vargs)
+static int kobject_add_varg(struct kobject *kobj, struct kobject *parent,
+			    const char *fmt, va_list vargs)
 {
 	int retval;
 
@@ -546,7 +546,6 @@ out:
 	kfree(devpath);
 	return error;
 }
-EXPORT_SYMBOL_GPL(kobject_move);
 
 /**
  * kobject_del - unlink kobject from hierarchy.

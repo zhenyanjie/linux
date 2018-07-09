@@ -230,12 +230,9 @@ skip_key_lookup:
 	if (cand)
 		return cand;
 
-	t = rcu_dereference(itn->collect_md_tun);
-	if (t)
-		return t;
-
 	if (itn->fb_tunnel_dev && itn->fb_tunnel_dev->flags & IFF_UP)
 		return netdev_priv(itn->fb_tunnel_dev);
+
 
 	return NULL;
 }
@@ -264,15 +261,11 @@ static void ip_tunnel_add(struct ip_tunnel_net *itn, struct ip_tunnel *t)
 {
 	struct hlist_head *head = ip_bucket(itn, &t->parms);
 
-	if (t->collect_md)
-		rcu_assign_pointer(itn->collect_md_tun, t);
 	hlist_add_head_rcu(&t->hash_node, head);
 }
 
-static void ip_tunnel_del(struct ip_tunnel_net *itn, struct ip_tunnel *t)
+static void ip_tunnel_del(struct ip_tunnel *t)
 {
-	if (t->collect_md)
-		rcu_assign_pointer(itn->collect_md_tun, NULL);
 	hlist_del_init_rcu(&t->hash_node);
 }
 
@@ -308,13 +301,14 @@ static struct net_device *__ip_tunnel_create(struct net *net,
 	struct net_device *dev;
 	char name[IFNAMSIZ];
 
-	if (parms->name[0])
-		strlcpy(name, parms->name, IFNAMSIZ);
-	else {
-		if (strlen(ops->kind) > (IFNAMSIZ - 3)) {
-			err = -E2BIG;
+	err = -E2BIG;
+	if (parms->name[0]) {
+		if (!dev_valid_name(parms->name))
 			goto failed;
-		}
+		strlcpy(name, parms->name, IFNAMSIZ);
+	} else {
+		if (strlen(ops->kind) > (IFNAMSIZ - 3))
+			goto failed;
 		strlcpy(name, ops->kind, IFNAMSIZ);
 		strncat(name, "%d", 2);
 	}
@@ -400,8 +394,8 @@ static int ip_tunnel_bind_dev(struct net_device *dev)
 	dev->needed_headroom = t_hlen + hlen;
 	mtu -= (dev->hard_header_len + t_hlen);
 
-	if (mtu < 68)
-		mtu = 68;
+	if (mtu < IPV4_MIN_MTU)
+		mtu = IPV4_MIN_MTU;
 
 	return mtu;
 }
@@ -426,8 +420,7 @@ static struct ip_tunnel *ip_tunnel_create(struct net *net,
 }
 
 int ip_tunnel_rcv(struct ip_tunnel *tunnel, struct sk_buff *skb,
-		  const struct tnl_ptk_info *tpi, struct metadata_dst *tun_dst,
-		  bool log_ecn_error)
+		  const struct tnl_ptk_info *tpi, bool log_ecn_error)
 {
 	struct pcpu_sw_netstats *tstats;
 	const struct iphdr *iph = ip_hdr(skb);
@@ -485,9 +478,6 @@ int ip_tunnel_rcv(struct ip_tunnel *tunnel, struct sk_buff *skb,
 	} else {
 		skb->dev = tunnel->dev;
 	}
-
-	if (tun_dst)
-		skb_dst_set(skb, (struct dst_entry *)tun_dst);
 
 	gro_cells_receive(&tunnel->gro_cells, skb);
 	return 0;
@@ -663,6 +653,8 @@ void ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev,
 	inner_iph = (const struct iphdr *)skb_inner_network_header(skb);
 	connected = (tunnel->parms.iph.daddr != 0);
 
+	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
+
 	dst = tnl_params->daddr;
 	if (dst == 0) {
 		/* NBMA tunnel */
@@ -760,7 +752,6 @@ void ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev,
 				tunnel->err_time + IPTUNNEL_ERR_TIMEO)) {
 			tunnel->err_count--;
 
-			memset(IPCB(skb), 0, sizeof(*IPCB(skb)));
 			dst_link_failure(skb);
 		} else
 			tunnel->err_count = 0;
@@ -817,7 +808,7 @@ static void ip_tunnel_update(struct ip_tunnel_net *itn,
 			     struct ip_tunnel_parm *p,
 			     bool set_mtu)
 {
-	ip_tunnel_del(itn, t);
+	ip_tunnel_del(t);
 	t->parms.iph.saddr = p->iph.saddr;
 	t->parms.iph.daddr = p->iph.daddr;
 	t->parms.i_key = p->i_key;
@@ -978,7 +969,7 @@ void ip_tunnel_dellink(struct net_device *dev, struct list_head *head)
 	itn = net_generic(tunnel->net, tunnel->ip_tnl_net_id);
 
 	if (itn->fb_tunnel_dev != dev) {
-		ip_tunnel_del(itn, netdev_priv(dev));
+		ip_tunnel_del(netdev_priv(dev));
 		unregister_netdevice_queue(dev, head);
 	}
 }
@@ -1083,13 +1074,8 @@ int ip_tunnel_newlink(struct net_device *dev, struct nlattr *tb[],
 	nt = netdev_priv(dev);
 	itn = net_generic(net, nt->ip_tnl_net_id);
 
-	if (nt->collect_md) {
-		if (rtnl_dereference(itn->collect_md_tun))
-			return -EEXIST;
-	} else {
-		if (ip_tunnel_find(itn, p, dev->type))
-			return -EEXIST;
-	}
+	if (ip_tunnel_find(itn, p, dev->type))
+		return -EEXIST;
 
 	nt->net = net;
 	nt->parms = *p;
@@ -1105,6 +1091,7 @@ int ip_tunnel_newlink(struct net_device *dev, struct nlattr *tb[],
 		dev->mtu = mtu;
 
 	ip_tunnel_add(itn, nt);
+
 out:
 	return err;
 }
@@ -1178,10 +1165,6 @@ int ip_tunnel_init(struct net_device *dev)
 	iph->version		= 4;
 	iph->ihl		= 5;
 
-	if (tunnel->collect_md) {
-		dev->features |= NETIF_F_NETNS_LOCAL;
-		netif_keep_dst(dev);
-	}
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ip_tunnel_init);
@@ -1195,7 +1178,7 @@ void ip_tunnel_uninit(struct net_device *dev)
 	itn = net_generic(net, tunnel->ip_tnl_net_id);
 	/* fb_tunnel_dev will be unregisted in net-exit call. */
 	if (itn->fb_tunnel_dev != dev)
-		ip_tunnel_del(itn, netdev_priv(dev));
+		ip_tunnel_del(netdev_priv(dev));
 
 	ip_tunnel_dst_reset_all(tunnel);
 }

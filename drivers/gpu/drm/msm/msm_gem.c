@@ -89,13 +89,16 @@ static struct page **get_pages(struct drm_gem_object *obj)
 			return p;
 		}
 
+		msm_obj->pages = p;
+
 		msm_obj->sgt = drm_prime_pages_to_sg(p, npages);
 		if (IS_ERR(msm_obj->sgt)) {
-			dev_err(dev->dev, "failed to allocate sgt\n");
-			return ERR_CAST(msm_obj->sgt);
-		}
+			void *ptr = ERR_CAST(msm_obj->sgt);
 
-		msm_obj->pages = p;
+			dev_err(dev->dev, "failed to allocate sgt\n");
+			msm_obj->sgt = NULL;
+			return ptr;
+		}
 
 		/* For non-cached buffers, ensure the new pages are clean
 		 * because display controller, GPU, etc. are not coherent:
@@ -119,7 +122,10 @@ static void put_pages(struct drm_gem_object *obj)
 		if (msm_obj->flags & (MSM_BO_WC|MSM_BO_UNCACHED))
 			dma_unmap_sg(obj->dev->dev, msm_obj->sgt->sgl,
 					msm_obj->sgt->nents, DMA_BIDIRECTIONAL);
-		sg_free_table(msm_obj->sgt);
+
+		if (msm_obj->sgt)
+			sg_free_table(msm_obj->sgt);
+
 		kfree(msm_obj->sgt);
 
 		if (use_pages(obj))
@@ -448,7 +454,8 @@ void msm_gem_move_to_inactive(struct drm_gem_object *obj)
 	list_add_tail(&msm_obj->mm_list, &priv->inactive_list);
 }
 
-int msm_gem_cpu_prep(struct drm_gem_object *obj, uint32_t op, ktime_t *timeout)
+int msm_gem_cpu_prep(struct drm_gem_object *obj, uint32_t op,
+		struct timespec *timeout)
 {
 	struct drm_device *dev = obj->dev;
 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
@@ -460,7 +467,7 @@ int msm_gem_cpu_prep(struct drm_gem_object *obj, uint32_t op, ktime_t *timeout)
 		if (op & MSM_PREP_NOSYNC)
 			timeout = NULL;
 
-		ret = msm_wait_fence(dev, fence, timeout, true);
+		ret = msm_wait_fence_interruptable(dev, fence, timeout);
 	}
 
 	/* TODO cache maintenance */
@@ -539,7 +546,6 @@ void msm_gem_free_object(struct drm_gem_object *obj)
 		if (msm_obj->pages)
 			drm_free_large(msm_obj->pages);
 
-		drm_prime_gem_destroy(obj, msm_obj->sgt);
 	} else {
 		vunmap(msm_obj->vaddr);
 		put_pages(obj);

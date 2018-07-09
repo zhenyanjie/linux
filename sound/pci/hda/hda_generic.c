@@ -3188,6 +3188,7 @@ static int check_dyn_adc_switch(struct hda_codec *codec)
 						spec->input_paths[i][nums]);
 					spec->input_paths[i][nums] =
 						spec->input_paths[i][n];
+					spec->input_paths[i][n] = 0;
 				}
 			}
 			nums++;
@@ -3992,6 +3993,8 @@ static hda_nid_t set_path_power(struct hda_codec *codec, hda_nid_t nid,
 
 	for (n = 0; n < spec->paths.used; n++) {
 		path = snd_array_elem(&spec->paths, n);
+		if (!path->depth)
+			continue;
 		if (path->path[0] == nid ||
 		    path->path[path->depth - 1] == nid) {
 			bool pin_old = path->pin_enabled;
@@ -5219,7 +5222,7 @@ static int alt_playback_pcm_open(struct hda_pcm_stream *hinfo,
 	int err = 0;
 
 	mutex_lock(&spec->pcm_mutex);
-	if (spec->indep_hp && !spec->indep_hp_enabled)
+	if (!spec->indep_hp_enabled)
 		err = -EBUSY;
 	else
 		spec->active_streams |= 1 << STREAM_INDEP_HP;

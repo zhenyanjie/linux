@@ -33,13 +33,13 @@
 #include <linux/ratelimit.h>
 #include <linux/context_tracking.h>
 #include <linux/hugetlb.h>
-#include <linux/uaccess.h>
 
 #include <asm/firmware.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
+#include <asm/uaccess.h>
 #include <asm/tlbflush.h>
 #include <asm/siginfo.h>
 #include <asm/debug.h>
@@ -272,16 +272,15 @@ int __kprobes do_page_fault(struct pt_regs *regs, unsigned long address,
 	if (!arch_irq_disabled_regs(regs))
 		local_irq_enable();
 
-	if (faulthandler_disabled() || mm == NULL) {
+	if (in_atomic() || mm == NULL) {
 		if (!user_mode(regs)) {
 			rc = SIGSEGV;
 			goto bail;
 		}
-		/* faulthandler_disabled() in user mode is really bad,
+		/* in_atomic() in user mode is really bad,
 		   as is current->mm == NULL. */
 		printk(KERN_EMERG "Page fault in user mode with "
-		       "faulthandler_disabled() = %d mm = %p\n",
-		       faulthandler_disabled(), mm);
+		       "in_atomic() = %d mm = %p\n", in_atomic(), mm);
 		printk(KERN_EMERG "NIP = %lx  MSR = %lx\n",
 		       regs->nip, regs->msr);
 		die("Weird page fault", regs, SIGSEGV);
@@ -294,7 +293,7 @@ int __kprobes do_page_fault(struct pt_regs *regs, unsigned long address,
 	 * can result in fault, which will cause a deadlock when called with
 	 * mmap_sem held
 	 */
-	if (user_mode(regs))
+	if (!is_exec && user_mode(regs))
 		store_update_sp = store_updates_sp(regs);
 
 	if (user_mode(regs))
@@ -528,10 +527,6 @@ void bad_page_fault(struct pt_regs *regs, unsigned long address, int sig)
 	case 0x480:
 		printk(KERN_ALERT "Unable to handle kernel paging request for "
 			"instruction fetch\n");
-		break;
-	case 0x600:
-		printk(KERN_ALERT "Unable to handle kernel paging request for "
-			"unaligned access at address 0x%08lx\n", regs->dar);
 		break;
 	default:
 		printk(KERN_ALERT "Unable to handle kernel paging request for "

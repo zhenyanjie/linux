@@ -542,28 +542,13 @@ void shmem_truncate_range(struct inode *inode, loff_t lstart, loff_t lend)
 }
 EXPORT_SYMBOL_GPL(shmem_truncate_range);
 
-static int shmem_getattr(struct vfsmount *mnt, struct dentry *dentry,
-			 struct kstat *stat)
-{
-	struct inode *inode = dentry->d_inode;
-	struct shmem_inode_info *info = SHMEM_I(inode);
-
-	spin_lock(&info->lock);
-	shmem_recalc_inode(inode);
-	spin_unlock(&info->lock);
-
-	generic_fillattr(inode, stat);
-
-	return 0;
-}
-
 static int shmem_setattr(struct dentry *dentry, struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
 	struct shmem_inode_info *info = SHMEM_I(inode);
 	int error;
 
-	error = inode_change_ok(inode, attr);
+	error = setattr_prepare(dentry, attr);
 	if (error)
 		return error;
 
@@ -584,7 +569,7 @@ static int shmem_setattr(struct dentry *dentry, struct iattr *attr)
 			i_size_write(inode, newsize);
 			inode->i_ctime = inode->i_mtime = CURRENT_TIME;
 		}
-		if (newsize <= oldsize) {
+		if (newsize < oldsize) {
 			loff_t holebegin = round_up(newsize, PAGE_SIZE);
 			unmap_mapping_range(inode->i_mapping, holebegin, 0, 1);
 			shmem_truncate_range(inode, newsize, (loff_t)-1);
@@ -2152,9 +2137,11 @@ static long shmem_fallocate(struct file *file, int mode, loff_t offset,
 									NULL);
 		if (error) {
 			/* Remove the !PageUptodate pages we added */
-			shmem_undo_range(inode,
-				(loff_t)start << PAGE_CACHE_SHIFT,
-				(loff_t)index << PAGE_CACHE_SHIFT, true);
+			if (index > start) {
+				shmem_undo_range(inode,
+				    (loff_t)start << PAGE_CACHE_SHIFT,
+				    ((loff_t)index << PAGE_CACHE_SHIFT) - 1, true);
+			}
 			goto undone;
 		}
 
@@ -2466,7 +2453,6 @@ static int shmem_symlink(struct inode *dir, struct dentry *dentry, const char *s
 			return -ENOMEM;
 		}
 		inode->i_op = &shmem_short_symlink_operations;
-		inode->i_link = info->symlink;
 	} else {
 		error = shmem_getpage(inode, 0, &page, SGP_WRITE, NULL);
 		if (error) {
@@ -2490,23 +2476,30 @@ static int shmem_symlink(struct inode *dir, struct dentry *dentry, const char *s
 	return 0;
 }
 
-static const char *shmem_follow_link(struct dentry *dentry, void **cookie)
+static void *shmem_follow_short_symlink(struct dentry *dentry, struct nameidata *nd)
+{
+	nd_set_link(nd, SHMEM_I(d_inode(dentry))->symlink);
+	return NULL;
+}
+
+static void *shmem_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct page *page = NULL;
 	int error = shmem_getpage(d_inode(dentry), 0, &page, SGP_READ, NULL);
-	if (error)
-		return ERR_PTR(error);
-	unlock_page(page);
-	*cookie = page;
-	return kmap(page);
+	nd_set_link(nd, error ? ERR_PTR(error) : kmap(page));
+	if (page)
+		unlock_page(page);
+	return page;
 }
 
-static void shmem_put_link(struct inode *unused, void *cookie)
+static void shmem_put_link(struct dentry *dentry, struct nameidata *nd, void *cookie)
 {
-	struct page *page = cookie;
-	kunmap(page);
-	mark_page_accessed(page);
-	page_cache_release(page);
+	if (!IS_ERR(nd_get_link(nd))) {
+		struct page *page = cookie;
+		kunmap(page);
+		mark_page_accessed(page);
+		page_cache_release(page);
+	}
 }
 
 #ifdef CONFIG_TMPFS_XATTR
@@ -2651,7 +2644,7 @@ static ssize_t shmem_listxattr(struct dentry *dentry, char *buffer, size_t size)
 
 static const struct inode_operations shmem_short_symlink_operations = {
 	.readlink	= generic_readlink,
-	.follow_link	= simple_follow_link,
+	.follow_link	= shmem_follow_short_symlink,
 #ifdef CONFIG_TMPFS_XATTR
 	.setxattr	= shmem_setxattr,
 	.getxattr	= shmem_getxattr,
@@ -3137,7 +3130,6 @@ static const struct file_operations shmem_file_operations = {
 };
 
 static const struct inode_operations shmem_inode_operations = {
-	.getattr	= shmem_getattr,
 	.setattr	= shmem_setattr,
 #ifdef CONFIG_TMPFS_XATTR
 	.setxattr	= shmem_setxattr,
@@ -3379,8 +3371,8 @@ put_path:
  * shmem_kernel_file_setup - get an unlinked file living in tmpfs which must be
  * 	kernel internal.  There will be NO LSM permission checks against the
  * 	underlying inode.  So users of this interface must do LSM checks at a
- *	higher layer.  The users are the big_key and shm implementations.  LSM
- *	checks are provided at the key or shm level rather than the inode.
+ * 	higher layer.  The one user is the big_key implementation.  LSM checks
+ * 	are provided at the key level rather than the inode level.
  * @name: name for dentry (to be seen in /proc/<pid>/maps
  * @size: size to be set for the file
  * @flags: VM_NORESERVE suppresses pre-accounting of the entire object size

@@ -552,7 +552,7 @@ int hibernation_platform_enter(void)
 
 	error = disable_nonboot_cpus();
 	if (error)
-		goto Enable_cpus;
+		goto Platform_finish;
 
 	local_irq_disable();
 	syscore_suspend();
@@ -568,8 +568,6 @@ int hibernation_platform_enter(void)
  Power_up:
 	syscore_resume();
 	local_irq_enable();
-
- Enable_cpus:
 	enable_nonboot_cpus();
 
  Platform_finish:

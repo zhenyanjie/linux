@@ -1,5 +1,4 @@
 #include <linux/list.h>
-#include <linux/compiler.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -113,11 +112,7 @@ static int perf_pmu__parse_scale(struct perf_pmu_alias *alias, char *dir, char *
 	if (sret < 0)
 		goto error;
 
-	if (scale[sret - 1] == '\n')
-		scale[sret - 1] = '\0';
-	else
-		scale[sret] = '\0';
-
+	scale[sret] = '\0';
 	/*
 	 * save current locale
 	 */
@@ -153,16 +148,13 @@ static int perf_pmu__parse_unit(struct perf_pmu_alias *alias, char *dir, char *n
 	if (fd == -1)
 		return -1;
 
-		sret = read(fd, alias->unit, UNIT_MAX_LEN);
+	sret = read(fd, alias->unit, UNIT_MAX_LEN);
 	if (sret < 0)
 		goto error;
 
 	close(fd);
 
-	if (alias->unit[sret - 1] == '\n')
-		alias->unit[sret - 1] = '\0';
-	else
-		alias->unit[sret] = '\0';
+	alias->unit[sret] = '\0';
 
 	return 0;
 error:
@@ -206,11 +198,16 @@ static int perf_pmu__parse_snapshot(struct perf_pmu_alias *alias,
 	return 0;
 }
 
-static int __perf_pmu__new_alias(struct list_head *list, char *dir, char *name,
-				 char *desc __maybe_unused, char *val)
+static int perf_pmu__new_alias(struct list_head *list, char *dir, char *name, FILE *file)
 {
 	struct perf_pmu_alias *alias;
+	char buf[256];
 	int ret;
+
+	ret = fread(buf, 1, sizeof(buf), file);
+	if (ret == 0)
+		return -EINVAL;
+	buf[ret] = 0;
 
 	alias = malloc(sizeof(*alias));
 	if (!alias)
@@ -221,41 +218,24 @@ static int __perf_pmu__new_alias(struct list_head *list, char *dir, char *name,
 	alias->unit[0] = '\0';
 	alias->per_pkg = false;
 
-	ret = parse_events_terms(&alias->terms, val);
+	ret = parse_events_terms(&alias->terms, buf);
 	if (ret) {
-		pr_err("Cannot parse alias %s: %d\n", val, ret);
 		free(alias);
 		return ret;
 	}
 
 	alias->name = strdup(name);
-	if (dir) {
-		/*
-		 * load unit name and scale if available
-		 */
-		perf_pmu__parse_unit(alias, dir, name);
-		perf_pmu__parse_scale(alias, dir, name);
-		perf_pmu__parse_per_pkg(alias, dir, name);
-		perf_pmu__parse_snapshot(alias, dir, name);
-	}
+	/*
+	 * load unit name and scale if available
+	 */
+	perf_pmu__parse_unit(alias, dir, name);
+	perf_pmu__parse_scale(alias, dir, name);
+	perf_pmu__parse_per_pkg(alias, dir, name);
+	perf_pmu__parse_snapshot(alias, dir, name);
 
 	list_add_tail(&alias->list, list);
 
 	return 0;
-}
-
-static int perf_pmu__new_alias(struct list_head *list, char *dir, char *name, FILE *file)
-{
-	char buf[256];
-	int ret;
-
-	ret = fread(buf, 1, sizeof(buf), file);
-	if (ret == 0)
-		return -EINVAL;
-
-	buf[ret] = 0;
-
-	return __perf_pmu__new_alias(list, dir, name, NULL, buf);
 }
 
 static inline bool pmu_alias_info_file(char *name)
@@ -283,13 +263,12 @@ static int pmu_aliases_parse(char *dir, struct list_head *head)
 {
 	struct dirent *evt_ent;
 	DIR *event_dir;
-	int ret = 0;
 
 	event_dir = opendir(dir);
 	if (!event_dir)
 		return -EINVAL;
 
-	while (!ret && (evt_ent = readdir(event_dir))) {
+	while ((evt_ent = readdir(event_dir))) {
 		char path[PATH_MAX];
 		char *name = evt_ent->d_name;
 		FILE *file;
@@ -305,17 +284,19 @@ static int pmu_aliases_parse(char *dir, struct list_head *head)
 
 		snprintf(path, PATH_MAX, "%s/%s", dir, name);
 
-		ret = -EINVAL;
 		file = fopen(path, "r");
-		if (!file)
-			break;
+		if (!file) {
+			pr_debug("Cannot open %s\n", path);
+			continue;
+		}
 
-		ret = perf_pmu__new_alias(head, dir, name, file);
+		if (perf_pmu__new_alias(head, dir, name, file) < 0)
+			pr_debug("Cannot set up %s\n", name);
 		fclose(file);
 	}
 
 	closedir(event_dir);
-	return ret;
+	return 0;
 }
 
 /*
@@ -449,7 +430,7 @@ static struct cpu_map *pmu_cpumask(const char *name)
 	return cpus;
 }
 
-struct perf_event_attr * __weak
+struct perf_event_attr *__attribute__((weak))
 perf_pmu__get_default_config(struct perf_pmu *pmu __maybe_unused)
 {
 	return NULL;
@@ -538,7 +519,7 @@ struct perf_pmu *perf_pmu__find(const char *name)
 }
 
 static struct perf_pmu_format *
-pmu_find_format(struct list_head *formats, const char *name)
+pmu_find_format(struct list_head *formats, char *name)
 {
 	struct perf_pmu_format *format;
 
@@ -547,21 +528,6 @@ pmu_find_format(struct list_head *formats, const char *name)
 			return format;
 
 	return NULL;
-}
-
-__u64 perf_pmu__format_bits(struct list_head *formats, const char *name)
-{
-	struct perf_pmu_format *format = pmu_find_format(formats, name);
-	__u64 bits = 0;
-	int fbit;
-
-	if (!format)
-		return 0;
-
-	for_each_set_bit(fbit, format->bits, PERF_PMU_FORMAT_BITS)
-		bits |= 1ULL << fbit;
-
-	return bits;
 }
 
 /*
@@ -583,18 +549,6 @@ static void pmu_format_value(unsigned long *format, __u64 value, __u64 *v,
 		else if (zero)
 			*v &= ~(1llu << fbit);
 	}
-}
-
-static __u64 pmu_format_max_value(const unsigned long *format)
-{
-	int w;
-
-	w = bitmap_weight(format, PERF_PMU_FORMAT_BITS);
-	if (!w)
-		return 0;
-	if (w < 64)
-		return (1ULL << w) - 1;
-	return -1;
 }
 
 /*
@@ -626,40 +580,6 @@ static int pmu_resolve_param_term(struct parse_events_term *term,
 	return -1;
 }
 
-static char *formats_error_string(struct list_head *formats)
-{
-	struct perf_pmu_format *format;
-	char *err, *str;
-	static const char *static_terms = "config,config1,config2,name,"
-					  "period,freq,branch_type,time,"
-					  "call-graph,stack-size\n";
-	unsigned i = 0;
-
-	if (!asprintf(&str, "valid terms:"))
-		return NULL;
-
-	/* sysfs exported terms */
-	list_for_each_entry(format, formats, list) {
-		char c = i++ ? ',' : ' ';
-
-		err = str;
-		if (!asprintf(&str, "%s%c%s", err, c, format->name))
-			goto fail;
-		free(err);
-	}
-
-	/* static terms */
-	err = str;
-	if (!asprintf(&str, "%s,%s", err, static_terms))
-		goto fail;
-
-	free(err);
-	return str;
-fail:
-	free(err);
-	return NULL;
-}
-
 /*
  * Setup one of config[12] attr members based on the
  * user input data - term parameter.
@@ -668,11 +588,11 @@ static int pmu_config_term(struct list_head *formats,
 			   struct perf_event_attr *attr,
 			   struct parse_events_term *term,
 			   struct list_head *head_terms,
-			   bool zero, struct parse_events_error *err)
+			   bool zero)
 {
 	struct perf_pmu_format *format;
 	__u64 *vp;
-	__u64 val, max_val;
+	__u64 val;
 
 	/*
 	 * If this is a parameter we've already used for parameterized-eval,
@@ -692,11 +612,6 @@ static int pmu_config_term(struct list_head *formats,
 	if (!format) {
 		if (verbose)
 			printf("Invalid event/parameter '%s'\n", term->config);
-		if (err) {
-			err->idx  = term->err_term;
-			err->str  = strdup("unknown term");
-			err->help = formats_error_string(formats);
-		}
 		return -EINVAL;
 	}
 
@@ -722,14 +637,9 @@ static int pmu_config_term(struct list_head *formats,
 		val = term->val.num;
 	else if (term->type_val == PARSE_EVENTS__TERM_TYPE_STR) {
 		if (strcmp(term->val.str, "?")) {
-			if (verbose) {
+			if (verbose)
 				pr_info("Invalid sysfs entry %s=%s\n",
 						term->config, term->val.str);
-			}
-			if (err) {
-				err->idx = term->err_val;
-				err->str = strdup("expected numeric value");
-			}
 			return -EINVAL;
 		}
 
@@ -738,22 +648,6 @@ static int pmu_config_term(struct list_head *formats,
 	} else
 		return -EINVAL;
 
-	max_val = pmu_format_max_value(format->bits);
-	if (val > max_val) {
-		if (err) {
-			err->idx = term->err_val;
-			if (asprintf(&err->str,
-				     "value too big for format, maximum is %llu",
-				     (unsigned long long)max_val) < 0)
-				err->str = strdup("value too big for format");
-			return -EINVAL;
-		}
-		/*
-		 * Assume we don't care if !err, in which case the value will be
-		 * silently truncated.
-		 */
-	}
-
 	pmu_format_value(format->bits, val, vp, zero);
 	return 0;
 }
@@ -761,13 +655,12 @@ static int pmu_config_term(struct list_head *formats,
 int perf_pmu__config_terms(struct list_head *formats,
 			   struct perf_event_attr *attr,
 			   struct list_head *head_terms,
-			   bool zero, struct parse_events_error *err)
+			   bool zero)
 {
 	struct parse_events_term *term;
 
 	list_for_each_entry(term, head_terms, list) {
-		if (pmu_config_term(formats, attr, term, head_terms,
-				    zero, err))
+		if (pmu_config_term(formats, attr, term, head_terms, zero))
 			return -EINVAL;
 	}
 
@@ -780,14 +673,12 @@ int perf_pmu__config_terms(struct list_head *formats,
  * 2) pmu format definitions - specified by pmu parameter
  */
 int perf_pmu__config(struct perf_pmu *pmu, struct perf_event_attr *attr,
-		     struct list_head *head_terms,
-		     struct parse_events_error *err)
+		     struct list_head *head_terms)
 {
 	bool zero = !!pmu->default_config;
 
 	attr->type = pmu->type;
-	return perf_pmu__config_terms(&pmu->format, attr, head_terms,
-				      zero, err);
+	return perf_pmu__config_terms(&pmu->format, attr, head_terms, zero);
 }
 
 static struct perf_pmu_alias *pmu_find_alias(struct perf_pmu *pmu,

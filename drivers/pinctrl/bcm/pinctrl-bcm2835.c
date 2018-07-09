@@ -473,8 +473,6 @@ static void bcm2835_gpio_irq_disable(struct irq_data *data)
 
 	spin_lock_irqsave(&pc->irq_lock[bank], flags);
 	bcm2835_gpio_irq_config(pc, gpio, false);
-	/* Clear events that were latched prior to clearing event sources */
-	bcm2835_gpio_set_bit(pc, GPEDS0, gpio);
 	clear_bit(offset, &pc->enabled_irq_map[bank]);
 	spin_unlock_irqrestore(&pc->irq_lock[bank], flags);
 }
@@ -586,9 +584,9 @@ static int bcm2835_gpio_irq_set_type(struct irq_data *data, unsigned int type)
 		ret = __bcm2835_gpio_irq_set_type_disabled(pc, gpio, type);
 
 	if (type & IRQ_TYPE_EDGE_BOTH)
-		irq_set_handler_locked(data, handle_edge_irq);
+		__irq_set_handler_locked(data->irq, handle_edge_irq);
 	else
-		irq_set_handler_locked(data, handle_level_irq);
+		__irq_set_handler_locked(data->irq, handle_level_irq);
 
 	spin_unlock_irqrestore(&pc->irq_lock[bank], flags);
 
@@ -788,7 +786,7 @@ static int bcm2835_pctl_dt_node_to_map(struct pinctrl_dev *pctldev,
 		}
 		if (num_pulls) {
 			err = of_property_read_u32_index(np, "brcm,pull",
-					(num_funcs > 1) ? i : 0, &pull);
+					(num_pulls > 1) ? i : 0, &pull);
 			if (err)
 				goto out;
 			err = bcm2835_pctl_dt_node_to_map_pull(pc, np, pin,
@@ -989,6 +987,7 @@ static int bcm2835_pinctrl_probe(struct platform_device *pdev)
 		irq_set_chip_and_handler(irq, &bcm2835_gpio_irq_chip,
 				handle_level_irq);
 		irq_set_chip_data(irq, pc);
+		set_irq_flags(irq, IRQF_VALID);
 	}
 
 	for (i = 0; i < BCM2835_NUM_BANKS; i++) {
@@ -1037,9 +1036,9 @@ static int bcm2835_pinctrl_probe(struct platform_device *pdev)
 	}
 
 	pc->pctl_dev = pinctrl_register(&bcm2835_pinctrl_desc, dev, pc);
-	if (IS_ERR(pc->pctl_dev)) {
+	if (!pc->pctl_dev) {
 		gpiochip_remove(&pc->gpio_chip);
-		return PTR_ERR(pc->pctl_dev);
+		return -EINVAL;
 	}
 
 	pc->gpio_range = bcm2835_pinctrl_gpio_range;

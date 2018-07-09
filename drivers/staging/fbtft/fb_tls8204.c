@@ -35,9 +35,7 @@
 #define WIDTH		84
 #define HEIGHT		48
 #define TXBUFLEN	WIDTH
-
-/* gamma is used to control contrast in this driver */
-#define DEFAULT_GAMMA	"40"
+#define DEFAULT_GAMMA	"40" /* gamma is used to control contrast in this driver */
 
 static unsigned bs = 4;
 module_param(bs, uint, 0);
@@ -53,8 +51,7 @@ static int init_display(struct fbtft_par *par)
 	write_reg(par, 0x21); /* 5:1  1
 				 2:0  PD - Powerdown control: chip is active
 				 1:0  V  - Entry mode: horizontal addressing
-				 0:1  H  - Extended instruction set control:
-						extended
+				 0:1  H  - Extended instruction set control: extended
 			      */
 
 	/* H=1 Bias system */
@@ -86,9 +83,7 @@ static int init_display(struct fbtft_par *par)
 
 static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
 {
-	fbtft_par_dbg(DEBUG_SET_ADDR_WIN, par,
-		      "%s(xs=%d, ys=%d, xe=%d, ye=%d)\n",
-		      __func__, xs, ys, xe, ye);
+	fbtft_par_dbg(DEBUG_SET_ADDR_WIN, par, "%s(xs=%d, ys=%d, xe=%d, ye=%d)\n", __func__, xs, ys, xe, ye);
 
 	/* H=0 Set X address of RAM */
 	write_reg(par, 0x80); /* 7:1  1
@@ -120,7 +115,6 @@ static int write_vmem(struct fbtft_par *par, size_t offset, size_t len)
 
 		for (x = 0; x < WIDTH; x++) {
 			u8 ch = 0;
-
 			for (i = 0; i < 8*WIDTH; i += WIDTH) {
 				ch >>= 1;
 				if (vmem16[(y*8*WIDTH)+i+x])

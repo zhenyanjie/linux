@@ -46,11 +46,19 @@ static void tcp_write_err(struct sock *sk)
  * to prevent DoS attacks. It is called when a retransmission timeout
  * or zero probe timeout occurs on orphaned socket.
  *
+ * Also close if our net namespace is exiting; in that case there is no
+ * hope of ever communicating again since all netns interfaces are already
+ * down (or about to be down), and we need to release our dst references,
+ * which have been moved to the netns loopback interface, so the namespace
+ * can finish exiting.  This condition is only possible if we are a kernel
+ * socket, as those do not hold references to the namespace.
+ *
  * Criteria is still not confirmed experimentally and may change.
  * We kill the socket, if:
  * 1. If number of orphaned sockets exceeds an administratively configured
  *    limit.
  * 2. If we have strong memory pressure.
+ * 3. If our net namespace is exiting.
  */
 static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 {
@@ -79,6 +87,13 @@ static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPABORTONMEMORY);
 		return 1;
 	}
+
+	if (!check_net(sock_net(sk))) {
+		/* Not possible to send reset; just close */
+		tcp_done(sk);
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -223,7 +238,8 @@ void tcp_delack_timer_handler(struct sock *sk)
 
 	sk_mem_reclaim_partial(sk);
 
-	if (sk->sk_state == TCP_CLOSE || !(icsk->icsk_ack.pending & ICSK_ACK_TIMER))
+	if (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)) ||
+	    !(icsk->icsk_ack.pending & ICSK_ACK_TIMER))
 		goto out;
 
 	if (time_after(icsk->icsk_ack.timeout, jiffies)) {
@@ -259,7 +275,7 @@ void tcp_delack_timer_handler(struct sock *sk)
 	}
 
 out:
-	if (tcp_under_memory_pressure(sk))
+	if (sk_under_memory_pressure(sk))
 		sk_mem_reclaim(sk);
 }
 
@@ -504,7 +520,8 @@ void tcp_write_timer_handler(struct sock *sk)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int event;
 
-	if (sk->sk_state == TCP_CLOSE || !icsk->icsk_pending)
+	if (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)) ||
+	    !icsk->icsk_pending)
 		goto out;
 
 	if (time_after(icsk->icsk_timeout, jiffies)) {
@@ -628,7 +645,7 @@ static void tcp_keepalive_timer (unsigned long data)
 			tcp_write_err(sk);
 			goto out;
 		}
-		if (tcp_write_wakeup(sk, LINUX_MIB_TCPKEEPALIVE) <= 0) {
+		if (tcp_write_wakeup(sk) <= 0) {
 			icsk->icsk_probes_out++;
 			elapsed = keepalive_intvl_when(tp);
 		} else {
@@ -661,3 +678,4 @@ void tcp_init_xmit_timers(struct sock *sk)
 	inet_csk_init_xmit_timers(sk, &tcp_write_timer, &tcp_delack_timer,
 				  &tcp_keepalive_timer);
 }
+EXPORT_SYMBOL(tcp_init_xmit_timers);

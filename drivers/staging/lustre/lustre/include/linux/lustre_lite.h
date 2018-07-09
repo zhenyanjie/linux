@@ -44,6 +44,7 @@
 
 #include <linux/fs.h>
 #include <linux/dcache.h>
+#include <linux/proc_fs.h>
 
 #include "../obd_class.h"
 #include "../lustre_net.h"

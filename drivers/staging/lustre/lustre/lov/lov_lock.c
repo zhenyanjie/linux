@@ -314,7 +314,7 @@ static int lov_lock_sub_init(const struct lu_env *env,
 			nr++;
 	}
 	LASSERT(nr > 0);
-	lck->lls_sub = libcfs_kvzalloc(nr * sizeof(lck->lls_sub[0]), GFP_NOFS);
+	OBD_ALLOC_LARGE(lck->lls_sub, nr * sizeof(lck->lls_sub[0]));
 	if (lck->lls_sub == NULL)
 		return -ENOMEM;
 
@@ -441,7 +441,8 @@ static void lov_lock_fini(const struct lu_env *env,
 			 * a reference on its parent.
 			 */
 			LASSERT(lck->lls_sub[i].sub_lock == NULL);
-		kvfree(lck->lls_sub);
+		OBD_FREE_LARGE(lck->lls_sub,
+			       lck->lls_nr * sizeof(lck->lls_sub[0]));
 	}
 	OBD_SLAB_FREE_PTR(lck, lov_lock_kmem);
 }

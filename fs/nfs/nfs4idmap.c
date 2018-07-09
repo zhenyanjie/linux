@@ -184,7 +184,7 @@ static struct key_type key_type_id_resolver = {
 	.read		= user_read,
 };
 
-int nfs_idmap_init(void)
+static int nfs_idmap_init_keyring(void)
 {
 	struct cred *cred;
 	struct key *keyring;
@@ -230,7 +230,7 @@ failed_put_cred:
 	return ret;
 }
 
-void nfs_idmap_quit(void)
+static void nfs_idmap_quit_keyring(void)
 {
 	key_revoke(id_resolver_cache->thread_keyring);
 	unregister_key_type(&key_type_id_resolver);
@@ -492,6 +492,21 @@ nfs_idmap_delete(struct nfs_client *clp)
 	kfree(idmap);
 }
 
+int nfs_idmap_init(void)
+{
+	int ret;
+	ret = nfs_idmap_init_keyring();
+	if (ret != 0)
+		goto out;
+out:
+	return ret;
+}
+
+void nfs_idmap_quit(void)
+{
+	nfs_idmap_quit_keyring();
+}
+
 static int nfs_idmap_prepare_message(char *desc, struct idmap *idmap,
 				     struct idmap_msg *im,
 				     struct rpc_pipe_msg *msg)
@@ -567,9 +582,13 @@ static int nfs_idmap_legacy_upcall(struct key_construction *cons,
 	struct idmap_msg *im;
 	struct idmap *idmap = (struct idmap *)aux;
 	struct key *key = cons->key;
-	int ret = -ENOMEM;
+	int ret = -ENOKEY;
+
+	if (!aux)
+		goto out1;
 
 	/* msg and im are freed in idmap_pipe_destroy_msg */
+	ret = -ENOMEM;
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
 		goto out1;

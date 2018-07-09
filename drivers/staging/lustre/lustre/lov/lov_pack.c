@@ -192,13 +192,13 @@ int lov_packmd(struct obd_export *exp, struct lov_mds_md **lmmp,
 	if (*lmmp && !lsm) {
 		stripe_count = le16_to_cpu((*lmmp)->lmm_stripe_count);
 		lmm_size = lov_mds_md_size(stripe_count, lmm_magic);
-		kvfree(*lmmp);
+		OBD_FREE_LARGE(*lmmp, lmm_size);
 		*lmmp = NULL;
 		return 0;
 	}
 
 	if (!*lmmp) {
-		*lmmp = libcfs_kvzalloc(lmm_size, GFP_NOFS);
+		OBD_ALLOC_LARGE(*lmmp, lmm_size);
 		if (!*lmmp)
 			return -ENOMEM;
 	}
@@ -285,7 +285,7 @@ static int lov_verify_lmm(void *lmm, int lmm_bytes, __u16 *stripe_count)
 		CERROR("bad disk LOV MAGIC: 0x%08X; dumping LMM (size=%d):\n",
 		       le32_to_cpu(*(__u32 *)lmm), lmm_bytes);
 		sz = lmm_bytes * 2 + 1;
-		buffer = libcfs_kvzalloc(sz, GFP_NOFS);
+		OBD_ALLOC_LARGE(buffer, sz);
 		if (buffer != NULL) {
 			int i;
 
@@ -293,7 +293,7 @@ static int lov_verify_lmm(void *lmm, int lmm_bytes, __u16 *stripe_count)
 				sprintf(buffer+2*i, "%.2X", ((char *)lmm)[i]);
 			buffer[sz - 1] = '\0';
 			CERROR("%s\n", buffer);
-			kvfree(buffer);
+			OBD_FREE_LARGE(buffer, sz);
 		}
 		return -EINVAL;
 	}
@@ -367,11 +367,9 @@ int lov_unpackmd(struct obd_export *exp,  struct lov_stripe_md **lsmp,
 		if (rc)
 			return rc;
 		magic = le32_to_cpu(lmm->lmm_magic);
-		pattern = le32_to_cpu(lmm->lmm_pattern);
 	} else {
 		magic = LOV_MAGIC;
 		stripe_count = lov_get_stripecnt(lov, magic, 0);
-		pattern = LOV_PATTERN_RAID0;
 	}
 
 	/* If we aren't passed an lsmp struct, we just want the size */
@@ -386,6 +384,7 @@ int lov_unpackmd(struct obd_export *exp,  struct lov_stripe_md **lsmp,
 		return 0;
 	}
 
+	pattern = le32_to_cpu(lmm->lmm_pattern);
 	lsm_size = lov_alloc_memmd(lsmp, stripe_count, pattern, magic);
 	if (lsm_size < 0)
 		return lsm_size;
@@ -421,17 +420,9 @@ int lov_getstripe(struct obd_export *exp, struct lov_stripe_md *lsm,
 	struct lov_mds_md *lmmk = NULL;
 	int rc, lmm_size;
 	int lum_size;
-	mm_segment_t seg;
 
 	if (!lsm)
 		return -ENODATA;
-
-	/*
-	 * "Switch to kernel segment" to allow copying from kernel space by
-	 * copy_{to,from}_user().
-	 */
-	seg = get_fs();
-	set_fs(KERNEL_DS);
 
 	/* we only need the header part from user space to get lmm_magic and
 	 * lmm_stripe_count, (the header part is common to v1 and v3) */
@@ -507,6 +498,5 @@ int lov_getstripe(struct obd_export *exp, struct lov_stripe_md *lsm,
 
 	obd_free_diskmd(exp, &lmmk);
 out_set:
-	set_fs(seg);
 	return rc;
 }

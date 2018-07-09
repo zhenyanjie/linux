@@ -32,11 +32,11 @@ static struct task_struct *producer;
 static struct task_struct *consumer;
 static unsigned long read;
 
-static unsigned int disable_reader;
+static int disable_reader;
 module_param(disable_reader, uint, 0644);
 MODULE_PARM_DESC(disable_reader, "only run producer");
 
-static unsigned int write_iteration = 50;
+static int write_iteration = 50;
 module_param(write_iteration, uint, 0644);
 MODULE_PARM_DESC(write_iteration, "# of writes between timestamp readings");
 
@@ -46,16 +46,16 @@ static int consumer_nice = MAX_NICE;
 static int producer_fifo = -1;
 static int consumer_fifo = -1;
 
-module_param(producer_nice, int, 0644);
+module_param(producer_nice, uint, 0644);
 MODULE_PARM_DESC(producer_nice, "nice prio for producer");
 
-module_param(consumer_nice, int, 0644);
+module_param(consumer_nice, uint, 0644);
 MODULE_PARM_DESC(consumer_nice, "nice prio for consumer");
 
-module_param(producer_fifo, int, 0644);
+module_param(producer_fifo, uint, 0644);
 MODULE_PARM_DESC(producer_fifo, "fifo prio for producer");
 
-module_param(consumer_fifo, int, 0644);
+module_param(consumer_fifo, uint, 0644);
 MODULE_PARM_DESC(consumer_fifo, "fifo prio for consumer");
 
 static int read_events;
@@ -263,8 +263,6 @@ static void ring_buffer_producer(void)
 		if (cnt % wakeup_interval)
 			cond_resched();
 #endif
-		if (kthread_should_stop())
-			kill_test = 1;
 
 	} while (ktime_before(end_time, timeout) && !kill_test);
 	trace_printk("End ring buffer hammer\n");
@@ -287,7 +285,7 @@ static void ring_buffer_producer(void)
 	entries = ring_buffer_entries(buffer);
 	overruns = ring_buffer_overruns(buffer);
 
-	if (kill_test && !kthread_should_stop())
+	if (kill_test)
 		trace_printk("ERROR!\n");
 
 	if (!disable_reader) {
@@ -381,7 +379,7 @@ static int ring_buffer_consumer_thread(void *arg)
 	}
 	__set_current_state(TASK_RUNNING);
 
-	if (!kthread_should_stop())
+	if (kill_test)
 		wait_to_die();
 
 	return 0;
@@ -401,16 +399,13 @@ static int ring_buffer_producer_thread(void *arg)
 		}
 
 		ring_buffer_producer();
-		if (kill_test)
-			goto out_kill;
 
 		trace_printk("Sleeping for 10 secs\n");
 		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(HZ * SLEEP_TIME);
 	}
 
-out_kill:
-	if (!kthread_should_stop())
+	if (kill_test)
 		wait_to_die();
 
 	return 0;

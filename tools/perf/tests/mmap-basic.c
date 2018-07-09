@@ -23,8 +23,10 @@ int test__basic_mmap(void)
 	struct cpu_map *cpus;
 	struct perf_evlist *evlist;
 	cpu_set_t cpu_set;
-	const char *syscall_names[] = { "getsid", "getppid", "getpgid", };
-	pid_t (*syscalls[])(void) = { (void *)getsid, getppid, (void*)getpgid };
+	const char *syscall_names[] = { "getsid", "getppid", "getpgrp",
+					"getpgid", };
+	pid_t (*syscalls[])(void) = { (void *)getsid, getppid, getpgrp,
+				      (void*)getpgid };
 #define nsyscalls ARRAY_SIZE(syscall_names)
 	unsigned int nr_events[nsyscalls],
 		     expected_nr_events[nsyscalls], i, j;
@@ -140,8 +142,8 @@ out_delete_evlist:
 	cpus	= NULL;
 	threads = NULL;
 out_free_cpus:
-	cpu_map__put(cpus);
+	cpu_map__delete(cpus);
 out_free_threads:
-	thread_map__put(threads);
+	thread_map__delete(threads);
 	return err;
 }

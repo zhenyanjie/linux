@@ -33,7 +33,7 @@
 #include <linux/string.h>
 #include <linux/bitops.h>
 #include <linux/rcupdate.h>
-#include <linux/preempt.h>		/* in_interrupt() */
+#include <linux/preempt_mask.h>		/* in_interrupt() */
 
 
 /*
@@ -65,8 +65,7 @@ static struct kmem_cache *radix_tree_node_cachep;
  */
 struct radix_tree_preload {
 	int nr;
-	/* nodes->private_data points to next preallocated node */
-	struct radix_tree_node *nodes;
+	struct radix_tree_node *nodes[RADIX_TREE_PRELOAD_SIZE];
 };
 static DEFINE_PER_CPU(struct radix_tree_preload, radix_tree_preloads) = { 0, };
 
@@ -198,9 +197,8 @@ radix_tree_node_alloc(struct radix_tree_root *root)
 		 */
 		rtp = this_cpu_ptr(&radix_tree_preloads);
 		if (rtp->nr) {
-			ret = rtp->nodes;
-			rtp->nodes = ret->private_data;
-			ret->private_data = NULL;
+			ret = rtp->nodes[rtp->nr - 1];
+			rtp->nodes[rtp->nr - 1] = NULL;
 			rtp->nr--;
 		}
 		/*
@@ -259,20 +257,17 @@ static int __radix_tree_preload(gfp_t gfp_mask)
 
 	preempt_disable();
 	rtp = this_cpu_ptr(&radix_tree_preloads);
-	while (rtp->nr < RADIX_TREE_PRELOAD_SIZE) {
+	while (rtp->nr < ARRAY_SIZE(rtp->nodes)) {
 		preempt_enable();
 		node = kmem_cache_alloc(radix_tree_node_cachep, gfp_mask);
 		if (node == NULL)
 			goto out;
 		preempt_disable();
 		rtp = this_cpu_ptr(&radix_tree_preloads);
-		if (rtp->nr < RADIX_TREE_PRELOAD_SIZE) {
-			node->private_data = rtp->nodes;
-			rtp->nodes = node;
-			rtp->nr++;
-		} else {
+		if (rtp->nr < ARRAY_SIZE(rtp->nodes))
+			rtp->nodes[rtp->nr++] = node;
+		else
 			kmem_cache_free(radix_tree_node_cachep, node);
-		}
 	}
 	ret = 0;
 out:
@@ -1019,9 +1014,13 @@ radix_tree_gang_lookup(struct radix_tree_root *root, void **results,
 		return 0;
 
 	radix_tree_for_each_slot(slot, root, &iter, first_index) {
-		results[ret] = indirect_to_ptr(rcu_dereference_raw(*slot));
+		results[ret] = rcu_dereference_raw(*slot);
 		if (!results[ret])
 			continue;
+		if (radix_tree_is_indirect_ptr(results[ret])) {
+			slot = radix_tree_iter_retry(&iter);
+			continue;
+		}
 		if (++ret == max_items)
 			break;
 	}
@@ -1098,9 +1097,13 @@ radix_tree_gang_lookup_tag(struct radix_tree_root *root, void **results,
 		return 0;
 
 	radix_tree_for_each_tagged(slot, root, &iter, first_index, tag) {
-		results[ret] = indirect_to_ptr(rcu_dereference_raw(*slot));
+		results[ret] = rcu_dereference_raw(*slot);
 		if (!results[ret])
 			continue;
+		if (radix_tree_is_indirect_ptr(results[ret])) {
+			slot = radix_tree_iter_retry(&iter);
+			continue;
+		}
 		if (++ret == max_items)
 			break;
 	}
@@ -1468,16 +1471,15 @@ static int radix_tree_callback(struct notifier_block *nfb,
 {
        int cpu = (long)hcpu;
        struct radix_tree_preload *rtp;
-       struct radix_tree_node *node;
 
        /* Free per-cpu pool of perloaded nodes */
        if (action == CPU_DEAD || action == CPU_DEAD_FROZEN) {
                rtp = &per_cpu(radix_tree_preloads, cpu);
                while (rtp->nr) {
-			node = rtp->nodes;
-			rtp->nodes = node->private_data;
-			kmem_cache_free(radix_tree_node_cachep, node);
-			rtp->nr--;
+                       kmem_cache_free(radix_tree_node_cachep,
+                                       rtp->nodes[rtp->nr-1]);
+                       rtp->nodes[rtp->nr-1] = NULL;
+                       rtp->nr--;
                }
        }
        return NOTIFY_OK;

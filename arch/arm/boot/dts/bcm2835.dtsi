@@ -1,5 +1,4 @@
-#include <dt-bindings/pinctrl/bcm2835.h>
-#include "skeleton.dtsi"
+/include/ "skeleton.dtsi"
 
 / {
 	compatible = "brcm,bcm2835";
@@ -15,7 +14,6 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges = <0x7e000000 0x20000000 0x02000000>;
-		dma-ranges = <0x40000000 0x00000000 0x20000000>;
 
 		timer@7e003000 {
 			compatible = "brcm,bcm2835-system-timer";
@@ -60,13 +58,6 @@
 		rng@7e104000 {
 			compatible = "brcm,bcm2835-rng";
 			reg = <0x7e104000 0x10>;
-		};
-
-		mailbox: mailbox@7e00b800 {
-			compatible = "brcm,bcm2835-mbox";
-			reg = <0x7e00b880 0x40>;
-			interrupts = <0 1>;
-			#mbox-cells = <0>;
 		};
 
 		gpio: gpio@7e200000 {
@@ -121,7 +112,7 @@
 			status = "disabled";
 		};
 
-		i2c0: i2c@7e205000 {
+		i2c0: i2c@20205000 {
 			compatible = "brcm,bcm2835-i2c";
 			reg = <0x7e205000 0x1000>;
 			interrupts = <2 21>;

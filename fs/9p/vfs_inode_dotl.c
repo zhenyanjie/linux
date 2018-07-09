@@ -87,6 +87,9 @@ static int v9fs_test_inode_dotl(struct inode *inode, void *data)
 
 	if (v9inode->qid.type != st->qid.type)
 		return 0;
+
+	if (v9inode->qid.path != st->qid.path)
+		return 0;
 	return 1;
 }
 
@@ -560,7 +563,7 @@ int v9fs_vfs_setattr_dotl(struct dentry *dentry, struct iattr *iattr)
 
 	p9_debug(P9_DEBUG_VFS, "\n");
 
-	retval = inode_change_ok(inode, iattr);
+	retval = setattr_prepare(dentry, iattr);
 	if (retval)
 		return retval;
 
@@ -904,24 +907,41 @@ error:
 /**
  * v9fs_vfs_follow_link_dotl - follow a symlink path
  * @dentry: dentry for symlink
- * @cookie: place to pass the data to put_link()
+ * @nd: nameidata
+ *
  */
 
-static const char *
-v9fs_vfs_follow_link_dotl(struct dentry *dentry, void **cookie)
+static void *
+v9fs_vfs_follow_link_dotl(struct dentry *dentry, struct nameidata *nd)
 {
-	struct p9_fid *fid = v9fs_fid_lookup(dentry);
-	char *target;
 	int retval;
+	struct p9_fid *fid;
+	char *link = __getname();
+	char *target;
 
 	p9_debug(P9_DEBUG_VFS, "%pd\n", dentry);
 
-	if (IS_ERR(fid))
-		return ERR_CAST(fid);
+	if (!link) {
+		link = ERR_PTR(-ENOMEM);
+		goto ndset;
+	}
+	fid = v9fs_fid_lookup(dentry);
+	if (IS_ERR(fid)) {
+		__putname(link);
+		link = ERR_CAST(fid);
+		goto ndset;
+	}
 	retval = p9_client_readlink(fid, &target);
-	if (retval)
-		return ERR_PTR(retval);
-	return *cookie = target;
+	if (!retval) {
+		strcpy(link, target);
+		kfree(target);
+		goto ndset;
+	}
+	__putname(link);
+	link = ERR_PTR(retval);
+ndset:
+	nd_set_link(nd, link);
+	return NULL;
 }
 
 int v9fs_refresh_inode_dotl(struct p9_fid *fid, struct inode *inode)
@@ -988,7 +1008,7 @@ const struct inode_operations v9fs_file_inode_operations_dotl = {
 const struct inode_operations v9fs_symlink_inode_operations_dotl = {
 	.readlink = generic_readlink,
 	.follow_link = v9fs_vfs_follow_link_dotl,
-	.put_link = kfree_put_link,
+	.put_link = v9fs_vfs_put_link,
 	.getattr = v9fs_vfs_getattr_dotl,
 	.setattr = v9fs_vfs_setattr_dotl,
 	.setxattr = generic_setxattr,

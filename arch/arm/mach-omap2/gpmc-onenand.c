@@ -216,11 +216,11 @@ static void omap2_onenand_calc_sync_timings(struct gpmc_timings *t,
 
 	div = gpmc_calc_divider(min_gpmc_clk_period);
 	gpmc_clk_ns = gpmc_ticks_to_ns(div);
-	if (gpmc_clk_ns < 15) /* >66MHz */
+	if (gpmc_clk_ns < 15) /* >66Mhz */
 		onenand_flags |= ONENAND_FLAG_HF;
 	else
 		onenand_flags &= ~ONENAND_FLAG_HF;
-	if (gpmc_clk_ns < 12) /* >83MHz */
+	if (gpmc_clk_ns < 12) /* >83Mhz */
 		onenand_flags |= ONENAND_FLAG_VHF;
 	else
 		onenand_flags &= ~ONENAND_FLAG_VHF;
@@ -363,7 +363,7 @@ static int gpmc_onenand_setup(void __iomem *onenand_base, int *freq_ptr)
 	return ret;
 }
 
-void gpmc_onenand_init(struct omap_onenand_platform_data *_onenand_data)
+int gpmc_onenand_init(struct omap_onenand_platform_data *_onenand_data)
 {
 	int err;
 	struct device *dev = &gpmc_onenand_device.dev;
@@ -389,15 +389,17 @@ void gpmc_onenand_init(struct omap_onenand_platform_data *_onenand_data)
 	if (err < 0) {
 		dev_err(dev, "Cannot request GPMC CS %d, error %d\n",
 			gpmc_onenand_data->cs, err);
-		return;
+		return err;
 	}
 
 	gpmc_onenand_resource.end = gpmc_onenand_resource.start +
 							ONENAND_IO_SIZE - 1;
 
-	if (platform_device_register(&gpmc_onenand_device) < 0) {
+	err = platform_device_register(&gpmc_onenand_device);
+	if (err) {
 		dev_err(dev, "Unable to register OneNAND device\n");
 		gpmc_cs_free(gpmc_onenand_data->cs);
-		return;
 	}
+
+	return err;
 }

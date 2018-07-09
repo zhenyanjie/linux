@@ -70,8 +70,6 @@ enum iio_modifier {
 	IIO_MOD_WALKING,
 	IIO_MOD_STILL,
 	IIO_MOD_ROOT_SUM_SQUARED_X_Y_Z,
-	IIO_MOD_I,
-	IIO_MOD_Q,
 };
 
 enum iio_event_type {

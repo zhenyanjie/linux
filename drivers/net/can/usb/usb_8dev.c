@@ -461,9 +461,10 @@ static void usb_8dev_rx_err_msg(struct usb_8dev_priv *priv,
 	priv->bec.txerr = txerr;
 	priv->bec.rxerr = rxerr;
 
+	netif_rx(skb);
+
 	stats->rx_packets++;
 	stats->rx_bytes += cf->can_dlc;
-	netif_rx(skb);
 }
 
 /* Read data and status frames */
@@ -493,9 +494,10 @@ static void usb_8dev_rx_can_msg(struct usb_8dev_priv *priv,
 		else
 			memcpy(cf->data, msg->data, cf->can_dlc);
 
+		netif_rx(skb);
+
 		stats->rx_packets++;
 		stats->rx_bytes += cf->can_dlc;
-		netif_rx(skb);
 
 		can_led_event(priv->netdev, CAN_LED_EVENT_RX);
 	} else {
@@ -526,6 +528,8 @@ static void usb_8dev_read_bulk_callback(struct urb *urb)
 		break;
 
 	case -ENOENT:
+	case -EPIPE:
+	case -EPROTO:
 	case -ESHUTDOWN:
 		return;
 
@@ -956,8 +960,8 @@ static int usb_8dev_probe(struct usb_interface *intf,
 	for (i = 0; i < MAX_TX_URBS; i++)
 		priv->tx_contexts[i].echo_index = MAX_TX_URBS;
 
-	priv->cmd_msg_buffer = kzalloc(sizeof(struct usb_8dev_cmd_msg),
-				      GFP_KERNEL);
+	priv->cmd_msg_buffer = devm_kzalloc(&intf->dev, sizeof(struct usb_8dev_cmd_msg),
+					    GFP_KERNEL);
 	if (!priv->cmd_msg_buffer)
 		goto cleanup_candev;
 
@@ -971,7 +975,7 @@ static int usb_8dev_probe(struct usb_interface *intf,
 	if (err) {
 		netdev_err(netdev,
 			"couldn't register CAN device: %d\n", err);
-		goto cleanup_cmd_msg_buffer;
+		goto cleanup_candev;
 	}
 
 	err = usb_8dev_cmd_version(priv, &version);
@@ -991,9 +995,6 @@ static int usb_8dev_probe(struct usb_interface *intf,
 
 cleanup_unregister_candev:
 	unregister_netdev(priv->netdev);
-
-cleanup_cmd_msg_buffer:
-	kfree(priv->cmd_msg_buffer);
 
 cleanup_candev:
 	free_candev(netdev);

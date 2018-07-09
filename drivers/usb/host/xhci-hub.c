@@ -276,6 +276,9 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 
 	ret = 0;
 	virt_dev = xhci->devs[slot_id];
+	if (!virt_dev)
+		return -ENODEV;
+
 	cmd = xhci_alloc_command(xhci, false, true, GFP_NOIO);
 	if (!cmd) {
 		xhci_dbg(xhci, "Couldn't allocate command structure.\n");
@@ -290,15 +293,25 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 						     GFP_NOWAIT);
 			if (!command) {
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				xhci_free_command(xhci, cmd);
-				return -ENOMEM;
-
+				ret = -ENOMEM;
+				goto cmd_cleanup;
 			}
-			xhci_queue_stop_endpoint(xhci, command, slot_id, i,
-						 suspend);
+
+			ret = xhci_queue_stop_endpoint(xhci, command, slot_id,
+						       i, suspend);
+			if (ret) {
+				spin_unlock_irqrestore(&xhci->lock, flags);
+				xhci_free_command(xhci, command);
+				goto cmd_cleanup;
+			}
 		}
 	}
-	xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
+	ret = xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
+	if (ret) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		goto cmd_cleanup;
+	}
+
 	xhci_ring_cmd_db(xhci);
 	spin_unlock_irqrestore(&xhci->lock, flags);
 
@@ -309,6 +322,8 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 		xhci_warn(xhci, "Timeout while waiting for stop endpoint command\n");
 		ret = -ETIME;
 	}
+
+cmd_cleanup:
 	xhci_free_command(xhci, cmd);
 	return ret;
 }
@@ -648,6 +663,9 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 			clear_bit(wIndex, &bus_state->resuming_ports);
 
 			set_bit(wIndex, &bus_state->rexit_ports);
+
+			xhci_test_and_clear_bit(xhci, port_array, wIndex,
+						PORT_PLC);
 			xhci_set_link_state(xhci, port_array, wIndex,
 					XDEV_U0);
 
@@ -1221,6 +1239,35 @@ int xhci_bus_suspend(struct usb_hcd *hcd)
 	return 0;
 }
 
+/*
+ * Workaround for missing Cold Attach Status (CAS) if device re-plugged in S3.
+ * warm reset a USB3 device stuck in polling or compliance mode after resume.
+ * See Intel 100/c230 series PCH specification update Doc #332692-006 Errata #8
+ */
+static bool xhci_port_missing_cas_quirk(int port_index,
+					     __le32 __iomem **port_array)
+{
+	u32 portsc;
+
+	portsc = readl(port_array[port_index]);
+
+	/* if any of these are set we are not stuck */
+	if (portsc & (PORT_CONNECT | PORT_CAS))
+		return false;
+
+	if (((portsc & PORT_PLS_MASK) != XDEV_POLLING) &&
+	    ((portsc & PORT_PLS_MASK) != XDEV_COMP_MODE))
+		return false;
+
+	/* clear wakeup/change bits, and do a warm port reset */
+	portsc &= ~(PORT_RWC_BITS | PORT_CEC | PORT_WAKE_BITS);
+	portsc |= PORT_WR;
+	writel(portsc, port_array[port_index]);
+	/* flush write */
+	readl(port_array[port_index]);
+	return true;
+}
+
 int xhci_bus_resume(struct usb_hcd *hcd)
 {
 	struct xhci_hcd	*xhci = hcd_to_xhci(hcd);
@@ -1229,10 +1276,6 @@ int xhci_bus_resume(struct usb_hcd *hcd)
 	struct xhci_bus_state *bus_state;
 	u32 temp;
 	unsigned long flags;
-	unsigned long port_was_suspended = 0;
-	bool need_usb2_u3_exit = false;
-	int slot_id;
-	int sret;
 
 	max_ports = xhci_get_ports(hcd, &port_array);
 	bus_state = &xhci->bus_state[hcd_index(hcd)];
@@ -1256,53 +1299,54 @@ int xhci_bus_resume(struct usb_hcd *hcd)
 		/* Check whether need resume ports. If needed
 		   resume port and disable remote wakeup */
 		u32 temp;
+		int slot_id;
 
 		temp = readl(port_array[port_index]);
+
+		/* warm reset CAS limited ports stuck in polling/compliance */
+		if ((xhci->quirks & XHCI_MISSING_CAS) &&
+		    (hcd->speed >= HCD_USB3) &&
+		    xhci_port_missing_cas_quirk(port_index, port_array)) {
+			xhci_dbg(xhci, "reset stuck port %d\n", port_index);
+			continue;
+		}
 		if (DEV_SUPERSPEED(temp))
 			temp &= ~(PORT_RWC_BITS | PORT_CEC | PORT_WAKE_BITS);
 		else
 			temp &= ~(PORT_RWC_BITS | PORT_WAKE_BITS);
 		if (test_bit(port_index, &bus_state->bus_suspended) &&
 		    (temp & PORT_PLS_MASK)) {
-			set_bit(port_index, &port_was_suspended);
-			if (!DEV_SUPERSPEED(temp)) {
+			if (DEV_SUPERSPEED(temp)) {
+				xhci_set_link_state(xhci, port_array,
+							port_index, XDEV_U0);
+			} else {
 				xhci_set_link_state(xhci, port_array,
 						port_index, XDEV_RESUME);
-				need_usb2_u3_exit = true;
+
+				spin_unlock_irqrestore(&xhci->lock, flags);
+				msleep(20);
+				spin_lock_irqsave(&xhci->lock, flags);
+
+				xhci_set_link_state(xhci, port_array,
+							port_index, XDEV_U0);
 			}
+			/* wait for the port to enter U0 and report port link
+			 * state change.
+			 */
+			spin_unlock_irqrestore(&xhci->lock, flags);
+			msleep(20);
+			spin_lock_irqsave(&xhci->lock, flags);
+
+			/* Clear PLC */
+			xhci_test_and_clear_bit(xhci, port_array, port_index,
+						PORT_PLC);
+
+			slot_id = xhci_find_slot_id_by_port(hcd,
+					xhci, port_index + 1);
+			if (slot_id)
+				xhci_ring_device(xhci, slot_id);
 		} else
 			writel(temp, port_array[port_index]);
-	}
-
-	if (need_usb2_u3_exit) {
-		spin_unlock_irqrestore(&xhci->lock, flags);
-		msleep(20);
-		spin_lock_irqsave(&xhci->lock, flags);
-	}
-
-	port_index = max_ports;
-	while (port_index--) {
-		if (!(port_was_suspended & BIT(port_index)))
-			continue;
-		/* Clear PLC to poll it later after XDEV_U0 */
-		xhci_test_and_clear_bit(xhci, port_array, port_index, PORT_PLC);
-		xhci_set_link_state(xhci, port_array, port_index, XDEV_U0);
-	}
-
-	port_index = max_ports;
-	while (port_index--) {
-		if (!(port_was_suspended & BIT(port_index)))
-			continue;
-		/* Poll and Clear PLC */
-		sret = xhci_handshake(port_array[port_index], PORT_PLC,
-				      PORT_PLC, 10 * 1000);
-		if (sret)
-			xhci_warn(xhci, "port %d resume PLC timeout\n",
-				  port_index);
-		xhci_test_and_clear_bit(xhci, port_array, port_index, PORT_PLC);
-		slot_id = xhci_find_slot_id_by_port(hcd, xhci, port_index + 1);
-		if (slot_id)
-			xhci_ring_device(xhci, slot_id);
 	}
 
 	(void) readl(&xhci->op_regs->command);

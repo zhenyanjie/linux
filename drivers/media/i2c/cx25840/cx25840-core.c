@@ -420,11 +420,13 @@ static void cx25840_initialize(struct i2c_client *client)
 	INIT_WORK(&state->fw_work, cx25840_work_handler);
 	init_waitqueue_head(&state->fw_wait);
 	q = create_singlethread_workqueue("cx25840_fw");
-	prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
-	queue_work(q, &state->fw_work);
-	schedule();
-	finish_wait(&state->fw_wait, &wait);
-	destroy_workqueue(q);
+	if (q) {
+		prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
+		queue_work(q, &state->fw_work);
+		schedule();
+		finish_wait(&state->fw_wait, &wait);
+		destroy_workqueue(q);
+	}
 
 	/* 6. */
 	cx25840_write(client, 0x115, 0x8c);
@@ -631,11 +633,13 @@ static void cx23885_initialize(struct i2c_client *client)
 	INIT_WORK(&state->fw_work, cx25840_work_handler);
 	init_waitqueue_head(&state->fw_wait);
 	q = create_singlethread_workqueue("cx25840_fw");
-	prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
-	queue_work(q, &state->fw_work);
-	schedule();
-	finish_wait(&state->fw_wait, &wait);
-	destroy_workqueue(q);
+	if (q) {
+		prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
+		queue_work(q, &state->fw_work);
+		schedule();
+		finish_wait(&state->fw_wait, &wait);
+		destroy_workqueue(q);
+	}
 
 	/* Call the cx23888 specific std setup func, we no longer rely on
 	 * the generic cx24840 func.
@@ -746,11 +750,13 @@ static void cx231xx_initialize(struct i2c_client *client)
 	INIT_WORK(&state->fw_work, cx25840_work_handler);
 	init_waitqueue_head(&state->fw_wait);
 	q = create_singlethread_workqueue("cx25840_fw");
-	prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
-	queue_work(q, &state->fw_work);
-	schedule();
-	finish_wait(&state->fw_wait, &wait);
-	destroy_workqueue(q);
+	if (q) {
+		prepare_to_wait(&state->fw_wait, &wait, TASK_UNINTERRUPTIBLE);
+		queue_work(q, &state->fw_work);
+		schedule();
+		finish_wait(&state->fw_wait, &wait);
+		destroy_workqueue(q);
+	}
 
 	cx25840_std_setup(client);
 
@@ -971,7 +977,7 @@ static void input_change(struct i2c_client *client)
 		   not used by any public broadcast network, force
 		   6.5 MHz carrier to be interpreted as System DK,
 		   this avoids DK audio detection instability */
-		cx25840_write(client, 0x80b, 0x00);
+	       cx25840_write(client, 0x80b, 0x00);
 	} else if (std & V4L2_STD_SECAM) {
 		/* Autodetect audio standard and audio system */
 		cx25840_write(client, 0x808, 0xff);
@@ -1366,17 +1372,14 @@ static int cx25840_s_ctrl(struct v4l2_ctrl *ctrl)
 
 /* ----------------------------------------------------------------------- */
 
-static int cx25840_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_format *format)
+static int cx25840_s_mbus_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *fmt)
 {
-	struct v4l2_mbus_framefmt *fmt = &format->format;
 	struct cx25840_state *state = to_state(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int HSC, VSC, Vsrc, Hsrc, filter, Vlines;
 	int is_50Hz = !(state->std & V4L2_STD_525_60);
 
-	if (format->pad || fmt->code != MEDIA_BUS_FMT_FIXED)
+	if (fmt->code != MEDIA_BUS_FMT_FIXED)
 		return -EINVAL;
 
 	fmt->field = V4L2_FIELD_INTERLACED;
@@ -1406,8 +1409,6 @@ static int cx25840_set_fmt(struct v4l2_subdev *sd,
 				fmt->width, fmt->height);
 		return -ERANGE;
 	}
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-		return 0;
 
 	HSC = (Hsrc * (1 << 20)) / fmt->width - (1 << 20);
 	VSC = (1 << 16) - (Vsrc * (1 << 9) / Vlines - (1 << 9));
@@ -5073,6 +5074,7 @@ static const struct v4l2_subdev_video_ops cx25840_video_ops = {
 	.s_std = cx25840_s_std,
 	.g_std = cx25840_g_std,
 	.s_routing = cx25840_s_video_routing,
+	.s_mbus_fmt = cx25840_s_mbus_fmt,
 	.s_stream = cx25840_s_stream,
 	.g_input_status = cx25840_g_input_status,
 };
@@ -5084,17 +5086,12 @@ static const struct v4l2_subdev_vbi_ops cx25840_vbi_ops = {
 	.g_sliced_fmt = cx25840_g_sliced_fmt,
 };
 
-static const struct v4l2_subdev_pad_ops cx25840_pad_ops = {
-	.set_fmt = cx25840_set_fmt,
-};
-
 static const struct v4l2_subdev_ops cx25840_ops = {
 	.core = &cx25840_core_ops,
 	.tuner = &cx25840_tuner_ops,
 	.audio = &cx25840_audio_ops,
 	.video = &cx25840_video_ops,
 	.vbi = &cx25840_vbi_ops,
-	.pad = &cx25840_pad_ops,
 	.ir = &cx25840_ir_ops,
 };
 
@@ -5348,6 +5345,7 @@ MODULE_DEVICE_TABLE(i2c, cx25840_id);
 
 static struct i2c_driver cx25840_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "cx25840",
 	},
 	.probe		= cx25840_probe,

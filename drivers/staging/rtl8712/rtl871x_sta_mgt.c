@@ -270,10 +270,12 @@ void r8712_init_bcmc_stainfo(struct _adapter *padapter)
 
 struct sta_info *r8712_get_bcmc_stainfo(struct _adapter *padapter)
 {
+	struct sta_info *psta;
 	struct sta_priv *pstapriv = &padapter->stapriv;
 	u8 bc_addr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
-	return r8712_get_stainfo(pstapriv, bc_addr);
+	psta = r8712_get_stainfo(pstapriv, bc_addr);
+	return psta;
 }
 
 

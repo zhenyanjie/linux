@@ -11,11 +11,12 @@
  */
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/irqchip.h>
 #include <linux/irqdomain.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/slab.h>
+
+#include "irqchip.h"
 
 #define IRQ_FREE	-1
 #define IRQ_RESERVED	-2
@@ -192,7 +193,8 @@ static const struct irq_domain_ops crossbar_domain_ops = {
 
 static int __init crossbar_of_init(struct device_node *node)
 {
-	int i, size, max = 0, reserved = 0, entry;
+	int i, size, reserved = 0;
+	u32 max = 0, entry, reg_size;
 	const __be32 *irqsr;
 	int ret = -ENOMEM;
 
@@ -269,9 +271,9 @@ static int __init crossbar_of_init(struct device_node *node)
 	if (!cb->register_offsets)
 		goto err_irq_map;
 
-	of_property_read_u32(node, "ti,reg-size", &size);
+	of_property_read_u32(node, "ti,reg-size", &reg_size);
 
-	switch (size) {
+	switch (reg_size) {
 	case 1:
 		cb->write = crossbar_writeb;
 		break;
@@ -297,7 +299,7 @@ static int __init crossbar_of_init(struct device_node *node)
 			continue;
 
 		cb->register_offsets[i] = reserved;
-		reserved += size;
+		reserved += reg_size;
 	}
 
 	of_property_read_u32(node, "ti,irqs-safe-map", &cb->safe_map);

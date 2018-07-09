@@ -112,11 +112,9 @@ void timer_init(void)
 
 void set_sigstack(void *sig_stack, int size)
 {
-	stack_t stack = {
-		.ss_flags = 0,
-		.ss_sp = sig_stack,
-		.ss_size = size - sizeof(void *)
-	};
+	stack_t stack = ((stack_t) { .ss_flags	= 0,
+				     .ss_sp	= (__ptr_t) sig_stack,
+				     .ss_size 	= size - sizeof(void *) });
 
 	if (sigaltstack(&stack, NULL) != 0)
 		panic("enabling signal stack failed, errno = %d\n", errno);
@@ -137,7 +135,7 @@ static void (*handlers[_NSIG])(int sig, struct siginfo *si, mcontext_t *mc) = {
 
 static void hard_handler(int sig, siginfo_t *si, void *p)
 {
-	struct ucontext *uc = p;
+	ucontext_t *uc = p;
 	mcontext_t *mc = &uc->uc_mcontext;
 	unsigned long pending = 1UL << sig;
 

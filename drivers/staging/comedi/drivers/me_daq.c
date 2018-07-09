@@ -173,7 +173,8 @@ struct me_private_data {
 
 static inline void sleep(unsigned sec)
 {
-	schedule_timeout_interruptible(sec * HZ);
+	__set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(sec * HZ);
 }
 
 static int me_dio_insn_config(struct comedi_device *dev,

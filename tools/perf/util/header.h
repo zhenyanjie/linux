@@ -30,7 +30,6 @@ enum {
 	HEADER_BRANCH_STACK,
 	HEADER_PMU_MAPPINGS,
 	HEADER_GROUP_DESC,
-	HEADER_AUXTRACE,
 	HEADER_LAST_FEATURE,
 	HEADER_FEAT_BITS	= 256,
 };
@@ -66,7 +65,7 @@ struct perf_header;
 int perf_file_header__read(struct perf_file_header *header,
 			   struct perf_header *ph, int fd);
 
-struct perf_env {
+struct perf_session_env {
 	char			*hostname;
 	char			*os_release;
 	char			*version;
@@ -84,7 +83,6 @@ struct perf_env {
 	int			nr_pmu_mappings;
 	int			nr_groups;
 	char			*cmdline;
-	const char		**cmdline_argv;
 	char			*sibling_cores;
 	char			*sibling_threads;
 	char			*numa_nodes;
@@ -98,7 +96,7 @@ struct perf_header {
 	u64				data_size;
 	u64				feat_offset;
 	DECLARE_BITMAP(adds_features, HEADER_FEAT_BITS);
-	struct perf_env 	env;
+	struct perf_session_env 	env;
 };
 
 struct perf_evlist;

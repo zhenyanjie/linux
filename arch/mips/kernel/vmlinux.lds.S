@@ -125,14 +125,8 @@ SECTIONS
 	.exit.data : {
 		EXIT_DATA
 	}
-#ifdef CONFIG_SMP
+
 	PERCPU_SECTION(1 << CONFIG_MIPS_L1_CACHE_SHIFT)
-#endif
-#ifdef CONFIG_MIPS_RAW_APPENDED_DTB
-	__appended_dtb = .;
-	/* leave space for appended DTB */
-	. += 0x100000;
-#endif
 	/*
 	 * Align to 64K in attempt to eliminate holes before the
 	 * .bss..swapper_pg_dir section at the start of .bss.  This
@@ -147,7 +141,7 @@ SECTIONS
 	 * Force .bss to 64K alignment so that .bss..swapper_pg_dir
 	 * gets that alignment.	 .sbss should be empty, so there will be
 	 * no holes after __init_end. */
-	BSS_SECTION(0, 0x10000, 0)
+	BSS_SECTION(0, 0x10000, 8)
 
 	_end = . ;
 

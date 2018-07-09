@@ -48,8 +48,7 @@ void br_stp_enable_bridge(struct net_bridge *br)
 	struct net_bridge_port *p;
 
 	spin_lock_bh(&br->lock);
-	if (br->stp_enabled == BR_KERNEL_STP)
-		mod_timer(&br->hello_timer, jiffies + br->hello_time);
+	mod_timer(&br->hello_timer, jiffies + br->hello_time);
 	mod_timer(&br->gc_timer, jiffies + HZ/10);
 
 	br_config_bpdu_generation(br);
@@ -112,7 +111,7 @@ void br_stp_disable_port(struct net_bridge_port *p)
 	del_timer(&p->forward_delay_timer);
 	del_timer(&p->hold_timer);
 
-	br_fdb_delete_by_port(br, p, 0, 0);
+	br_fdb_delete_by_port(br, p, 0);
 	br_multicast_disable_port(p);
 
 	br_configuration_update(br);
@@ -128,7 +127,6 @@ static void br_stp_start(struct net_bridge *br)
 	int r;
 	char *argv[] = { BR_STP_PROG, br->dev->name, "start", NULL };
 	char *envp[] = { NULL };
-	struct net_bridge_port *p;
 
 	if (net_eq(dev_net(br->dev), &init_net))
 		r = call_usermodehelper(BR_STP_PROG, argv, envp, UMH_WAIT_PROC);
@@ -145,10 +143,6 @@ static void br_stp_start(struct net_bridge *br)
 	if (r == 0) {
 		br->stp_enabled = BR_USER_STP;
 		br_debug(br, "userspace STP started\n");
-		/* Stop hello and hold timers */
-		del_timer(&br->hello_timer);
-		list_for_each_entry(p, &br->port_list, list)
-			del_timer(&p->hold_timer);
 	} else {
 		br->stp_enabled = BR_KERNEL_STP;
 		br_debug(br, "using kernel STP\n");
@@ -165,17 +159,12 @@ static void br_stp_stop(struct net_bridge *br)
 	int r;
 	char *argv[] = { BR_STP_PROG, br->dev->name, "stop", NULL };
 	char *envp[] = { NULL };
-	struct net_bridge_port *p;
 
 	if (br->stp_enabled == BR_USER_STP) {
 		r = call_usermodehelper(BR_STP_PROG, argv, envp, UMH_WAIT_PROC);
 		br_info(br, "userspace STP stopped, return code %d\n", r);
 
 		/* To start timers on any ports left in blocking */
-		mod_timer(&br->hello_timer, jiffies + br->hello_time);
-		list_for_each_entry(p, &br->port_list, list)
-			mod_timer(&p->hold_timer,
-				  round_jiffies(jiffies + BR_HOLD_TIME));
 		spin_lock_bh(&br->lock);
 		br_port_state_selection(br);
 		spin_unlock_bh(&br->lock);

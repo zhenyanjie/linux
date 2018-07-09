@@ -379,7 +379,7 @@ static inline void cls_parse_isr(struct dgnc_board *brd, uint port)
 		return;
 
 	ch = brd->channels[port];
-	if (ch->magic != DGNC_CHANNEL_MAGIC)
+	if (!ch || ch->magic != DGNC_CHANNEL_MAGIC)
 		return;
 
 	/* Here we try to figure out what caused the interrupt to happen */
@@ -714,6 +714,8 @@ static void cls_tasklet(unsigned long data)
 		/* Loop on each port */
 		for (i = 0; i < ports; i++) {
 			ch = bd->channels[i];
+			if (!ch)
+				continue;
 
 			/*
 			 * NOTE: Remember you CANNOT hold any channel

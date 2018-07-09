@@ -115,14 +115,6 @@ EXPORT_SYMBOL(synchronize_irq);
 #ifdef CONFIG_SMP
 cpumask_var_t irq_default_affinity;
 
-static int __irq_can_set_affinity(struct irq_desc *desc)
-{
-	if (!desc || !irqd_can_balance(&desc->irq_data) ||
-	    !desc->irq_data.chip || !desc->irq_data.chip->irq_set_affinity)
-		return 0;
-	return 1;
-}
-
 /**
  *	irq_can_set_affinity - Check if the affinity of a given irq can be set
  *	@irq:		Interrupt to check
@@ -130,7 +122,13 @@ static int __irq_can_set_affinity(struct irq_desc *desc)
  */
 int irq_can_set_affinity(unsigned int irq)
 {
-	return __irq_can_set_affinity(irq_to_desc(irq));
+	struct irq_desc *desc = irq_to_desc(irq);
+
+	if (!desc || !irqd_can_balance(&desc->irq_data) ||
+	    !desc->irq_data.chip || !desc->irq_data.chip->irq_set_affinity)
+		return 0;
+
+	return 1;
 }
 
 /**
@@ -192,7 +190,7 @@ int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	switch (ret) {
 	case IRQ_SET_MASK_OK:
 	case IRQ_SET_MASK_OK_DONE:
-		cpumask_copy(desc->irq_common_data.affinity, mask);
+		cpumask_copy(data->affinity, mask);
 	case IRQ_SET_MASK_OK_NOCOPY:
 		irq_set_thread_affinity(desc);
 		ret = 0;
@@ -258,37 +256,6 @@ int irq_set_affinity_hint(unsigned int irq, const struct cpumask *m)
 }
 EXPORT_SYMBOL_GPL(irq_set_affinity_hint);
 
-/**
- *	irq_set_vcpu_affinity - Set vcpu affinity for the interrupt
- *	@irq: interrupt number to set affinity
- *	@vcpu_info: vCPU specific data
- *
- *	This function uses the vCPU specific data to set the vCPU
- *	affinity for an irq. The vCPU specific data is passed from
- *	outside, such as KVM. One example code path is as below:
- *	KVM -> IOMMU -> irq_set_vcpu_affinity().
- */
-int irq_set_vcpu_affinity(unsigned int irq, void *vcpu_info)
-{
-	unsigned long flags;
-	struct irq_desc *desc = irq_get_desc_lock(irq, &flags, 0);
-	struct irq_data *data;
-	struct irq_chip *chip;
-	int ret = -ENOSYS;
-
-	if (!desc)
-		return -EINVAL;
-
-	data = irq_desc_get_irq_data(desc);
-	chip = irq_data_get_irq_chip(data);
-	if (chip && chip->irq_set_vcpu_affinity)
-		ret = chip->irq_set_vcpu_affinity(data, vcpu_info);
-	irq_put_desc_unlock(desc, flags);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(irq_set_vcpu_affinity);
-
 static void irq_affinity_notify(struct work_struct *work)
 {
 	struct irq_affinity_notify *notify =
@@ -304,7 +271,7 @@ static void irq_affinity_notify(struct work_struct *work)
 	if (irq_move_pending(&desc->irq_data))
 		irq_get_pending(cpumask, desc);
 	else
-		cpumask_copy(cpumask, desc->irq_common_data.affinity);
+		cpumask_copy(cpumask, desc->irq_data.affinity);
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
 
 	notify->notify(notify, cpumask);
@@ -361,13 +328,14 @@ EXPORT_SYMBOL_GPL(irq_set_affinity_notifier);
 /*
  * Generic version of the affinity autoselector.
  */
-static int setup_affinity(struct irq_desc *desc, struct cpumask *mask)
+static int
+setup_affinity(unsigned int irq, struct irq_desc *desc, struct cpumask *mask)
 {
 	struct cpumask *set = irq_default_affinity;
-	int node = irq_desc_get_node(desc);
+	int node = desc->irq_data.node;
 
 	/* Excludes PER_CPU and NO_BALANCE interrupts */
-	if (!__irq_can_set_affinity(desc))
+	if (!irq_can_set_affinity(irq))
 		return 0;
 
 	/*
@@ -375,9 +343,9 @@ static int setup_affinity(struct irq_desc *desc, struct cpumask *mask)
 	 * one of the targets is online.
 	 */
 	if (irqd_has_set(&desc->irq_data, IRQD_AFFINITY_SET)) {
-		if (cpumask_intersects(desc->irq_common_data.affinity,
+		if (cpumask_intersects(desc->irq_data.affinity,
 				       cpu_online_mask))
-			set = desc->irq_common_data.affinity;
+			set = desc->irq_data.affinity;
 		else
 			irqd_clear(&desc->irq_data, IRQD_AFFINITY_SET);
 	}
@@ -394,10 +362,10 @@ static int setup_affinity(struct irq_desc *desc, struct cpumask *mask)
 	return 0;
 }
 #else
-/* Wrapper for ALPHA specific affinity selector magic */
-static inline int setup_affinity(struct irq_desc *d, struct cpumask *mask)
+static inline int
+setup_affinity(unsigned int irq, struct irq_desc *d, struct cpumask *mask)
 {
-	return irq_select_affinity(irq_desc_get_irq(d));
+	return irq_select_affinity(irq);
 }
 #endif
 
@@ -411,20 +379,20 @@ int irq_select_affinity_usr(unsigned int irq, struct cpumask *mask)
 	int ret;
 
 	raw_spin_lock_irqsave(&desc->lock, flags);
-	ret = setup_affinity(desc, mask);
+	ret = setup_affinity(irq, desc, mask);
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
 	return ret;
 }
 
 #else
 static inline int
-setup_affinity(struct irq_desc *desc, struct cpumask *mask)
+setup_affinity(unsigned int irq, struct irq_desc *desc, struct cpumask *mask)
 {
 	return 0;
 }
 #endif
 
-void __disable_irq(struct irq_desc *desc)
+void __disable_irq(struct irq_desc *desc, unsigned int irq)
 {
 	if (!desc->depth++)
 		irq_disable(desc);
@@ -437,7 +405,7 @@ static int __disable_irq_nosync(unsigned int irq)
 
 	if (!desc)
 		return -EINVAL;
-	__disable_irq(desc);
+	__disable_irq(desc, irq);
 	irq_put_desc_busunlock(desc, flags);
 	return 0;
 }
@@ -504,13 +472,12 @@ bool disable_hardirq(unsigned int irq)
 }
 EXPORT_SYMBOL_GPL(disable_hardirq);
 
-void __enable_irq(struct irq_desc *desc)
+void __enable_irq(struct irq_desc *desc, unsigned int irq)
 {
 	switch (desc->depth) {
 	case 0:
  err_out:
-		WARN(1, KERN_WARNING "Unbalanced enable for IRQ %d\n",
-		     irq_desc_get_irq(desc));
+		WARN(1, KERN_WARNING "Unbalanced enable for IRQ %d\n", irq);
 		break;
 	case 1: {
 		if (desc->istate & IRQS_SUSPENDED)
@@ -518,7 +485,7 @@ void __enable_irq(struct irq_desc *desc)
 		/* Prevent probing on this irq: */
 		irq_settings_set_noprobe(desc);
 		irq_enable(desc);
-		check_irq_resend(desc);
+		check_irq_resend(desc, irq);
 		/* fall-through */
 	}
 	default:
@@ -548,7 +515,7 @@ void enable_irq(unsigned int irq)
 		 KERN_ERR "enable_irq before setup/request_irq: irq %u\n", irq))
 		goto out;
 
-	__enable_irq(desc);
+	__enable_irq(desc, irq);
 out:
 	irq_put_desc_busunlock(desc, flags);
 }
@@ -639,7 +606,8 @@ int can_request_irq(unsigned int irq, unsigned long irqflags)
 	return canrequest;
 }
 
-int __irq_set_trigger(struct irq_desc *desc, unsigned long flags)
+int __irq_set_trigger(struct irq_desc *desc, unsigned int irq,
+		      unsigned long flags)
 {
 	struct irq_chip *chip = desc->irq_data.chip;
 	int ret, unmask = 0;
@@ -649,8 +617,7 @@ int __irq_set_trigger(struct irq_desc *desc, unsigned long flags)
 		 * IRQF_TRIGGER_* but the PIC does not support multiple
 		 * flow-types?
 		 */
-		pr_debug("No set_type function for IRQ %d (%s)\n",
-			 irq_desc_get_irq(desc),
+		pr_debug("No set_type function for IRQ %d (%s)\n", irq,
 			 chip ? (chip->name ? : "unknown") : "unknown");
 		return 0;
 	}
@@ -687,7 +654,7 @@ int __irq_set_trigger(struct irq_desc *desc, unsigned long flags)
 		break;
 	default:
 		pr_err("Setting trigger mode %lu for irq %u failed (%pF)\n",
-		       flags, irq_desc_get_irq(desc), chip->irq_set_type);
+		       flags, irq, chip->irq_set_type);
 	}
 	if (unmask)
 		unmask_irq(desc);
@@ -829,8 +796,8 @@ irq_thread_check_affinity(struct irq_desc *desc, struct irqaction *action)
 	 * This code is triggered unconditionally. Check the affinity
 	 * mask pointer. For CPU_MASK_OFFSTACK=n this is optimized out.
 	 */
-	if (desc->irq_common_data.affinity)
-		cpumask_copy(mask, desc->irq_common_data.affinity);
+	if (desc->irq_data.affinity)
+		cpumask_copy(mask, desc->irq_data.affinity);
 	else
 		valid = false;
 	raw_spin_unlock_irq(&desc->lock);
@@ -1128,8 +1095,10 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * set the trigger type must match. Also all must
 		 * agree on ONESHOT.
 		 */
+		unsigned int oldtype = irqd_get_trigger_type(&desc->irq_data);
+
 		if (!((old->flags & new->flags) & IRQF_SHARED) ||
-		    ((old->flags ^ new->flags) & IRQF_TRIGGER_MASK) ||
+		    (oldtype != (new->flags & IRQF_TRIGGER_MASK)) ||
 		    ((old->flags ^ new->flags) & IRQF_ONESHOT))
 			goto mismatch;
 
@@ -1223,11 +1192,13 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 
 		/* Setup the type (level, edge polarity) if configured: */
 		if (new->flags & IRQF_TRIGGER_MASK) {
-			ret = __irq_set_trigger(desc,
-						new->flags & IRQF_TRIGGER_MASK);
+			ret = __irq_set_trigger(desc, irq,
+					new->flags & IRQF_TRIGGER_MASK);
 
-			if (ret)
+			if (ret) {
+				irq_release_resources(desc);
 				goto out_mask;
+			}
 		}
 
 		desc->istate &= ~(IRQS_AUTODETECT | IRQS_SPURIOUS_DISABLED | \
@@ -1255,7 +1226,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		}
 
 		/* Set default affinity mask once everything is setup */
-		setup_affinity(desc, mask);
+		setup_affinity(irq, desc, mask);
 
 	} else if (new->flags & IRQF_TRIGGER_MASK) {
 		unsigned int nmsk = new->flags & IRQF_TRIGGER_MASK;
@@ -1282,7 +1253,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 */
 	if (shared && (desc->istate & IRQS_SPURIOUS_DISABLED)) {
 		desc->istate &= ~IRQS_SPURIOUS_DISABLED;
-		__enable_irq(desc);
+		__enable_irq(desc, irq);
 	}
 
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
@@ -1652,7 +1623,7 @@ void enable_percpu_irq(unsigned int irq, unsigned int type)
 	if (type != IRQ_TYPE_NONE) {
 		int ret;
 
-		ret = __irq_set_trigger(desc, type);
+		ret = __irq_set_trigger(desc, irq, type);
 
 		if (ret) {
 			WARN(1, "failed to set type for IRQ%d\n", irq);
@@ -1877,7 +1848,6 @@ int irq_get_irqchip_state(unsigned int irq, enum irqchip_irq_state which,
 	irq_put_desc_busunlock(desc, flags);
 	return err;
 }
-EXPORT_SYMBOL_GPL(irq_get_irqchip_state);
 
 /**
  *	irq_set_irqchip_state - set the state of a forwarded interrupt.
@@ -1923,4 +1893,3 @@ int irq_set_irqchip_state(unsigned int irq, enum irqchip_irq_state which,
 	irq_put_desc_busunlock(desc, flags);
 	return err;
 }
-EXPORT_SYMBOL_GPL(irq_set_irqchip_state);

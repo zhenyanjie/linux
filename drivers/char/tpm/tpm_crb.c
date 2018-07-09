@@ -68,8 +68,7 @@ struct crb_control_area {
 	u32 int_enable;
 	u32 int_sts;
 	u32 cmd_size;
-	u32 cmd_pa_low;
-	u32 cmd_pa_high;
+	u64 cmd_pa;
 	u32 rsp_size;
 	u64 rsp_pa;
 } __packed;
@@ -118,8 +117,7 @@ static int crb_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 
 	memcpy_fromio(buf, priv->rsp, 6);
 	expected = be32_to_cpup((__be32 *) &buf[2]);
-
-	if (expected > count)
+	if (expected > count || expected < 6)
 		return -EIO;
 
 	memcpy_fromio(&buf[6], &priv->rsp[6], expected - 6);
@@ -264,8 +262,8 @@ static int crb_acpi_add(struct acpi_device *device)
 		return -ENOMEM;
 	}
 
-	pa = ((u64) le32_to_cpu(ioread32(&priv->cca->cmd_pa_high)) << 32) |
-		(u64) le32_to_cpu(ioread32(&priv->cca->cmd_pa_low));
+	memcpy_fromio(&pa, &priv->cca->cmd_pa, 8);
+	pa = le64_to_cpu(pa);
 	priv->cmd = devm_ioremap_nocache(dev, pa,
 					 ioread32(&priv->cca->cmd_size));
 	if (!priv->cmd) {
@@ -310,10 +308,10 @@ static int crb_acpi_remove(struct acpi_device *device)
 	struct device *dev = &device->dev;
 	struct tpm_chip *chip = dev_get_drvdata(dev);
 
-	tpm_chip_unregister(chip);
-
 	if (chip->flags & TPM_CHIP_FLAG_TPM2)
 		tpm2_shutdown(chip, TPM2_SU_CLEAR);
+
+	tpm_chip_unregister(chip);
 
 	return 0;
 }

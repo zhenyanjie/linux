@@ -95,7 +95,6 @@
  */
 
 #define MLX4_EN_PRIV_FLAGS_BLUEFLAME 1
-#define MLX4_EN_PRIV_FLAGS_PHV	     2
 
 #define MLX4_EN_WATCHDOG_TIMEOUT	(15 * HZ)
 
@@ -340,7 +339,7 @@ struct mlx4_en_cq {
 	struct napi_struct	napi;
 	int size;
 	int buf_size;
-	int vector;
+	unsigned vector;
 	enum cq_type is_tx;
 	u16 moder_time;
 	u16 moder_cnt;
@@ -409,7 +408,6 @@ struct mlx4_en_dev {
 	struct cyclecounter	cycles;
 	struct timecounter	clock;
 	unsigned long		last_overflow_check;
-	unsigned long		overflow_period;
 	struct ptp_clock	*ptp_clock;
 	struct ptp_clock_info	ptp_clock_info;
 	struct notifier_block	nb;
@@ -568,7 +566,6 @@ struct mlx4_en_priv {
 #endif
 	struct mlx4_en_perf_stats pstats;
 	struct mlx4_en_pkt_stats pkstats;
-	struct mlx4_en_counter_stats pf_stats;
 	struct mlx4_en_flow_stats_rx rx_priority_flowstats[MLX4_NUM_PRIORITIES];
 	struct mlx4_en_flow_stats_tx tx_priority_flowstats[MLX4_NUM_PRIORITIES];
 	struct mlx4_en_flow_stats_rx rx_flowstats;
@@ -584,7 +581,6 @@ struct mlx4_en_priv {
 	struct device *ddev;
 	struct hlist_head mac_hash[MLX4_EN_MAC_HASH_SIZE];
 	struct hwtstamp_config hwtstamp_config;
-	u32 counter_index;
 
 #ifdef CONFIG_MLX4_EN_DCB
 	struct ieee_ets ets;

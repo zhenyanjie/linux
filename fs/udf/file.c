@@ -152,6 +152,8 @@ out:
 	mutex_unlock(&inode->i_mutex);
 
 	if (retval > 0) {
+		ssize_t err;
+
 		mark_inode_dirty(inode);
 		err = generic_write_sync(file, iocb->ki_pos - retval, retval);
 		if (err < 0)
@@ -250,7 +252,7 @@ static int udf_setattr(struct dentry *dentry, struct iattr *attr)
 	struct inode *inode = d_inode(dentry);
 	int error;
 
-	error = inode_change_ok(inode, attr);
+	error = setattr_prepare(dentry, attr);
 	if (error)
 		return error;
 

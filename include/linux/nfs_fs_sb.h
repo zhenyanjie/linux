@@ -173,11 +173,6 @@ struct nfs_server {
 						   set of attributes supported
 						   on this filesystem excluding
 						   the label support bit. */
-	u32			exclcreat_bitmask[3];
-						/* V4 bitmask representing the
-						   set of attributes supported
-						   on this filesystem for the
-						   exclusive create. */
 	u32			cache_consistency_bitmask[3];
 						/* V4 bitmask representing the subset
 						   of change attribute, size, ctime
@@ -242,6 +237,5 @@ struct nfs_server {
 #define NFS_CAP_SEEK		(1U << 19)
 #define NFS_CAP_ALLOCATE	(1U << 20)
 #define NFS_CAP_DEALLOCATE	(1U << 21)
-#define NFS_CAP_LAYOUTSTATS	(1U << 22)
 
 #endif

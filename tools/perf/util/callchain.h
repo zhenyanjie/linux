@@ -72,10 +72,6 @@ extern struct callchain_param callchain_param;
 struct callchain_list {
 	u64			ip;
 	struct map_symbol	ms;
-	struct /* for TUI */ {
-		bool		unfolded;
-		bool		has_children;
-	};
 	char		       *srcline;
 	struct list_head	list;
 };
@@ -177,8 +173,7 @@ int fill_callchain_info(struct addr_location *al, struct callchain_cursor_node *
 			bool hide_unresolved);
 
 extern const char record_callchain_help[];
-extern int parse_callchain_record(const char *arg, struct callchain_param *param);
-int parse_callchain_record_opt(const char *arg, struct callchain_param *param);
+int parse_callchain_record_opt(const char *arg);
 int parse_callchain_report_opt(const char *arg);
 int perf_callchain_config(const char *var, const char *value);
 

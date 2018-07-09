@@ -174,8 +174,12 @@ static void cs_automute(struct hda_codec *codec)
 	snd_hda_gen_update_outputs(codec);
 
 	if (spec->gpio_eapd_hp || spec->gpio_eapd_speaker) {
-		spec->gpio_data = spec->gen.hp_jack_present ?
-			spec->gpio_eapd_hp : spec->gpio_eapd_speaker;
+		if (spec->gen.automute_speaker)
+			spec->gpio_data = spec->gen.hp_jack_present ?
+				spec->gpio_eapd_hp : spec->gpio_eapd_speaker;
+		else
+			spec->gpio_data =
+				spec->gpio_eapd_hp | spec->gpio_eapd_speaker;
 		snd_hda_codec_write(codec, 0x01, 0,
 				    AC_VERB_SET_GPIO_DATA, spec->gpio_data);
 	}
@@ -390,6 +394,7 @@ static const struct snd_pci_quirk cs420x_fixup_tbl[] = {
 	/*SND_PCI_QUIRK(0x8086, 0x7270, "IMac 27 Inch", CS420X_IMAC27),*/
 
 	/* codec SSID */
+	SND_PCI_QUIRK(0x106b, 0x0600, "iMac 14,1", CS420X_IMAC27_122),
 	SND_PCI_QUIRK(0x106b, 0x1c00, "MacBookPro 8,1", CS420X_MBP81),
 	SND_PCI_QUIRK(0x106b, 0x2000, "iMac 12,2", CS420X_IMAC27_122),
 	SND_PCI_QUIRK(0x106b, 0x2800, "MacBookPro 10,1", CS420X_MBP101),
@@ -584,7 +589,6 @@ static int patch_cs420x(struct hda_codec *codec)
 	if (!spec)
 		return -ENOMEM;
 
-	codec->patch_ops = cs_patch_ops;
 	spec->gen.automute_hook = cs_automute;
 	codec->single_adc_amp = 1;
 
@@ -595,6 +599,8 @@ static int patch_cs420x(struct hda_codec *codec)
 	err = cs_parse_auto_config(codec);
 	if (err < 0)
 		goto error;
+
+	codec->patch_ops = cs_patch_ops;
 
 	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PROBE);
 
@@ -765,7 +771,6 @@ static int patch_cs4208(struct hda_codec *codec)
 	if (!spec)
 		return -ENOMEM;
 
-	codec->patch_ops = cs_patch_ops;
 	spec->gen.automute_hook = cs_automute;
 	/* exclude NID 0x10 (HP) from output volumes due to different steps */
 	spec->gen.out_vol_mask = 1ULL << 0x10;
@@ -783,6 +788,8 @@ static int patch_cs4208(struct hda_codec *codec)
 	err = cs_parse_auto_config(codec);
 	if (err < 0)
 		goto error;
+
+	codec->patch_ops = cs_patch_ops;
 
 	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PROBE);
 
@@ -1174,7 +1181,6 @@ static int patch_cs4210(struct hda_codec *codec)
 	if (!spec)
 		return -ENOMEM;
 
-	codec->patch_ops = cs421x_patch_ops;
 	spec->gen.automute_hook = cs_automute;
 
 	snd_hda_pick_fixup(codec, cs421x_models, cs421x_fixup_tbl,
@@ -1191,6 +1197,8 @@ static int patch_cs4210(struct hda_codec *codec)
 	err = cs421x_parse_auto_config(codec);
 	if (err < 0)
 		goto error;
+
+	codec->patch_ops = cs421x_patch_ops;
 
 	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PROBE);
 
@@ -1210,12 +1218,11 @@ static int patch_cs4213(struct hda_codec *codec)
 	if (!spec)
 		return -ENOMEM;
 
-	codec->patch_ops = cs421x_patch_ops;
-
 	err = cs421x_parse_auto_config(codec);
 	if (err < 0)
 		goto error;
 
+	codec->patch_ops = cs421x_patch_ops;
 	return 0;
 
  error:

@@ -906,8 +906,10 @@ struct lu_env *cl_env_nested_get(struct cl_env_nest *nest)
 	if (env != NULL) {
 		if (!cl_io_is_going(env))
 			return env;
-		cl_env_put(env, &nest->cen_refcheck);
-		nest->cen_cookie = cl_env_reenter();
+		else {
+			cl_env_put(env, &nest->cen_refcheck);
+			nest->cen_cookie = cl_env_reenter();
+		}
 	}
 	env = cl_env_get(&nest->cen_refcheck);
 	if (IS_ERR(env)) {

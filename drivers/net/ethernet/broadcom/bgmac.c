@@ -255,15 +255,16 @@ static void bgmac_dma_tx_free(struct bgmac *bgmac, struct bgmac_dma_ring *ring)
 	while (ring->start != ring->end) {
 		int slot_idx = ring->start % BGMAC_TX_RING_SLOTS;
 		struct bgmac_slot_info *slot = &ring->slots[slot_idx];
-		u32 ctl1;
+		u32 ctl0, ctl1;
 		int len;
 
 		if (slot_idx == empty_slot)
 			break;
 
+		ctl0 = le32_to_cpu(ring->cpu_base[slot_idx].ctl0);
 		ctl1 = le32_to_cpu(ring->cpu_base[slot_idx].ctl1);
 		len = ctl1 & BGMAC_DESC_CTL1_LEN;
-		if (ctl1 & BGMAC_DESC_CTL0_SOF)
+		if (ctl0 & BGMAC_DESC_CTL0_SOF)
 			/* Unmap no longer used buffer */
 			dma_unmap_single(dma_dev, slot->dma_addr, len,
 					 DMA_TO_DEVICE);
@@ -466,6 +467,11 @@ static int bgmac_dma_rx_read(struct bgmac *bgmac, struct bgmac_dma_ring *ring,
 			len -= ETH_FCS_LEN;
 
 			skb = build_skb(buf, BGMAC_RX_ALLOC_SIZE);
+			if (unlikely(!skb)) {
+				bgmac_err(bgmac, "build_skb failed\n");
+				put_page(virt_to_head_page(buf));
+				break;
+			}
 			skb_put(skb, BGMAC_RX_FRAME_OFFSET +
 				BGMAC_RX_BUF_OFFSET + len);
 			skb_pull(skb, BGMAC_RX_FRAME_OFFSET +
@@ -1299,7 +1305,8 @@ static int bgmac_open(struct net_device *net_dev)
 
 	phy_start(bgmac->phy_dev);
 
-	netif_carrier_on(net_dev);
+	netif_start_queue(net_dev);
+
 	return 0;
 }
 
@@ -1447,7 +1454,7 @@ static int bgmac_fixed_phy_register(struct bgmac *bgmac)
 	struct phy_device *phy_dev;
 	int err;
 
-	phy_dev = fixed_phy_register(PHY_POLL, &fphy_status, -1, NULL);
+	phy_dev = fixed_phy_register(PHY_POLL, &fphy_status, NULL);
 	if (!phy_dev || IS_ERR(phy_dev)) {
 		bgmac_err(bgmac, "Failed to register fixed PHY device\n");
 		return -ENODEV;
@@ -1549,20 +1556,11 @@ static int bgmac_probe(struct bcma_device *core)
 	struct net_device *net_dev;
 	struct bgmac *bgmac;
 	struct ssb_sprom *sprom = &core->bus->sprom;
-	u8 *mac;
+	u8 *mac = core->core_unit ? sprom->et1mac : sprom->et0mac;
 	int err;
 
-	switch (core->core_unit) {
-	case 0:
-		mac = sprom->et0mac;
-		break;
-	case 1:
-		mac = sprom->et1mac;
-		break;
-	case 2:
-		mac = sprom->et2mac;
-		break;
-	default:
+	/* We don't support 2nd, 3rd, ... units, SPROM has to be adjusted */
+	if (core->core_unit > 1) {
 		pr_err("Unsupported core_unit %d\n", core->core_unit);
 		return -ENOTSUPP;
 	}
@@ -1572,6 +1570,11 @@ static int bgmac_probe(struct bcma_device *core)
 		eth_random_addr(mac);
 		dev_warn(&core->dev, "Using random MAC: %pM\n", mac);
 	}
+
+	/* This (reset &) enable is not preset in specs or reference driver but
+	 * Broadcom does it in arch PCI code when enabling fake PCI device.
+	 */
+	bcma_core_enable(core, 0);
 
 	/* Allocation and references */
 	net_dev = alloc_etherdev(sizeof(*bgmac));
@@ -1597,17 +1600,8 @@ static int bgmac_probe(struct bcma_device *core)
 	}
 	bgmac->cmn = core->bus->drv_gmac_cmn.core;
 
-	switch (core->core_unit) {
-	case 0:
-		bgmac->phyaddr = sprom->et0phyaddr;
-		break;
-	case 1:
-		bgmac->phyaddr = sprom->et1phyaddr;
-		break;
-	case 2:
-		bgmac->phyaddr = sprom->et2phyaddr;
-		break;
-	}
+	bgmac->phyaddr = core->core_unit ? sprom->et1phyaddr :
+			 sprom->et0phyaddr;
 	bgmac->phyaddr &= BGMAC_PHY_MASK;
 	if (bgmac->phyaddr == BGMAC_PHY_MASK) {
 		bgmac_err(bgmac, "No PHY found\n");

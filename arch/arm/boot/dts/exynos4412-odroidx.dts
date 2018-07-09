@@ -38,6 +38,14 @@
 		};
 	};
 
+	serial@13820000 {
+		status = "okay";
+	};
+
+	serial@13830000 {
+		status = "okay";
+	};
+
 	gpio_keys {
 		pinctrl-0 = <&gpio_power_key &gpio_home_key>;
 
@@ -74,12 +82,4 @@
 		samsung,pins = "gpx2-2";
 		samsung,pin-pud = <0>;
 	};
-};
-
-&serial_2 {
-	status = "okay";
-};
-
-&serial_3 {
-	status = "okay";
 };

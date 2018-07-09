@@ -12,9 +12,7 @@
 #include <linux/sched.h>
 #include <linux/rwsem.h>
 #include <linux/hugetlb.h>
-
 #include <asm/pgtable.h>
-#include <asm/tlbflush.h>
 
 #include "internal.h"
 
@@ -34,28 +32,14 @@ static struct page *no_page_table(struct vm_area_struct *vma,
 	return NULL;
 }
 
-static int follow_pfn_pte(struct vm_area_struct *vma, unsigned long address,
-		pte_t *pte, unsigned int flags)
+/*
+ * FOLL_FORCE can write to even unwritable pte's, but only
+ * after we've gone through a COW cycle and they are dirty.
+ */
+static inline bool can_follow_write_pte(pte_t pte, unsigned int flags)
 {
-	/* No page to get reference */
-	if (flags & FOLL_GET)
-		return -EFAULT;
-
-	if (flags & FOLL_TOUCH) {
-		pte_t entry = *pte;
-
-		if (flags & FOLL_WRITE)
-			entry = pte_mkdirty(entry);
-		entry = pte_mkyoung(entry);
-
-		if (!pte_same(*pte, entry)) {
-			set_pte_at(vma->vm_mm, address, pte, entry);
-			update_mmu_cache(vma, address, pte);
-		}
-	}
-
-	/* Proper page table entry exists, but no corresponding struct page */
-	return -EEXIST;
+	return pte_write(pte) ||
+		((flags & FOLL_FORCE) && (flags & FOLL_COW) && pte_dirty(pte));
 }
 
 static struct page *follow_page_pte(struct vm_area_struct *vma,
@@ -92,28 +76,17 @@ retry:
 	}
 	if ((flags & FOLL_NUMA) && pte_protnone(pte))
 		goto no_page;
-	if ((flags & FOLL_WRITE) && !pte_write(pte)) {
+	if ((flags & FOLL_WRITE) && !can_follow_write_pte(pte, flags)) {
 		pte_unmap_unlock(ptep, ptl);
 		return NULL;
 	}
 
 	page = vm_normal_page(vma, address, pte);
 	if (unlikely(!page)) {
-		if (flags & FOLL_DUMP) {
-			/* Avoid special (like zero) pages in core dumps */
-			page = ERR_PTR(-EFAULT);
-			goto out;
-		}
-
-		if (is_zero_pfn(pte_pfn(pte))) {
-			page = pte_page(pte);
-		} else {
-			int ret;
-
-			ret = follow_pfn_pte(vma, address, ptep, flags);
-			page = ERR_PTR(ret);
-			goto out;
-		}
+		if ((flags & FOLL_DUMP) ||
+		    !is_zero_pfn(pte_pfn(pte)))
+			goto bad_page;
+		page = pte_page(pte);
 	}
 
 	if (flags & FOLL_GET)
@@ -151,9 +124,12 @@ retry:
 			unlock_page(page);
 		}
 	}
-out:
 	pte_unmap_unlock(ptep, ptl);
 	return page;
+bad_page:
+	pte_unmap_unlock(ptep, ptl);
+	return ERR_PTR(-EFAULT);
+
 no_page:
 	pte_unmap_unlock(ptep, ptl);
 	if (!pte_none(pte))
@@ -299,11 +275,6 @@ static int faultin_page(struct task_struct *tsk, struct vm_area_struct *vma,
 	unsigned int fault_flags = 0;
 	int ret;
 
-	/* For mm_populate(), just skip the stack guard page. */
-	if ((*flags & FOLL_POPULATE) &&
-			(stack_guard_page_start(vma, address) ||
-			 stack_guard_page_end(vma, address + PAGE_SIZE)))
-		return -ENOENT;
 	if (*flags & FOLL_WRITE)
 		fault_flags |= FAULT_FLAG_WRITE;
 	if (nonblocking)
@@ -349,7 +320,7 @@ static int faultin_page(struct task_struct *tsk, struct vm_area_struct *vma,
 	 * reCOWed by userspace write).
 	 */
 	if ((ret & VM_FAULT_WRITE) && !(vma->vm_flags & VM_WRITE))
-		*flags &= ~FOLL_WRITE;
+	        *flags |= FOLL_COW;
 	return 0;
 }
 
@@ -523,15 +494,9 @@ retry:
 				goto next_page;
 			}
 			BUG();
-		} else if (PTR_ERR(page) == -EEXIST) {
-			/*
-			 * Proper page table entry exists, but no corresponding
-			 * struct page.
-			 */
-			goto next_page;
-		} else if (IS_ERR(page)) {
-			return i ? i : PTR_ERR(page);
 		}
+		if (IS_ERR(page))
+			return i ? i : PTR_ERR(page);
 		if (pages) {
 			pages[i] = page;
 			flush_anon_page(vma, page, start);

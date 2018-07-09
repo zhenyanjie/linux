@@ -337,20 +337,18 @@ static inline enum page_cache_mode pgprot2cachemode(pgprot_t pgprot)
 }
 static inline pgprot_t pgprot_4k_2_large(pgprot_t pgprot)
 {
+	pgprotval_t val = pgprot_val(pgprot);
 	pgprot_t new;
-	unsigned long val;
 
-	val = pgprot_val(pgprot);
 	pgprot_val(new) = (val & ~(_PAGE_PAT | _PAGE_PAT_LARGE)) |
 		((val & _PAGE_PAT) << (_PAGE_BIT_PAT_LARGE - _PAGE_BIT_PAT));
 	return new;
 }
 static inline pgprot_t pgprot_large_2_4k(pgprot_t pgprot)
 {
+	pgprotval_t val = pgprot_val(pgprot);
 	pgprot_t new;
-	unsigned long val;
 
-	val = pgprot_val(pgprot);
 	pgprot_val(new) = (val & ~(_PAGE_PAT | _PAGE_PAT_LARGE)) |
 			  ((val & _PAGE_PAT_LARGE) >>
 			   (_PAGE_BIT_PAT_LARGE - _PAGE_BIT_PAT));
@@ -366,9 +364,6 @@ extern int nx_enabled;
 
 #define pgprot_writecombine	pgprot_writecombine
 extern pgprot_t pgprot_writecombine(pgprot_t prot);
-
-#define pgprot_writethrough	pgprot_writethrough
-extern pgprot_t pgprot_writethrough(pgprot_t prot);
 
 /* Indicate that x86 has its own track and untrack pfn vma functions */
 #define __HAVE_PFNMAP_TRACKING

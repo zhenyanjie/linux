@@ -86,7 +86,7 @@ void giveup_fpu_maybe_transactional(struct task_struct *tsk)
 	if (tsk == current && tsk->thread.regs &&
 	    MSR_TM_ACTIVE(tsk->thread.regs->msr) &&
 	    !test_thread_flag(TIF_RESTORE_TM)) {
-		tsk->thread.ckpt_regs.msr = tsk->thread.regs->msr;
+		tsk->thread.tm_orig_msr = tsk->thread.regs->msr;
 		set_thread_flag(TIF_RESTORE_TM);
 	}
 
@@ -104,7 +104,7 @@ void giveup_altivec_maybe_transactional(struct task_struct *tsk)
 	if (tsk == current && tsk->thread.regs &&
 	    MSR_TM_ACTIVE(tsk->thread.regs->msr) &&
 	    !test_thread_flag(TIF_RESTORE_TM)) {
-		tsk->thread.ckpt_regs.msr = tsk->thread.regs->msr;
+		tsk->thread.tm_orig_msr = tsk->thread.regs->msr;
 		set_thread_flag(TIF_RESTORE_TM);
 	}
 
@@ -209,7 +209,8 @@ void enable_kernel_vsx(void)
 	WARN_ON(preemptible());
 
 #ifdef CONFIG_SMP
-	if (current->thread.regs && (current->thread.regs->msr & MSR_VSX))
+	if (current->thread.regs &&
+	    (current->thread.regs->msr & (MSR_VSX|MSR_VEC|MSR_FP)))
 		giveup_vsx(current);
 	else
 		giveup_vsx(NULL);	/* just enable vsx for kernel - force */
@@ -231,7 +232,7 @@ void flush_vsx_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		preempt_disable();
-		if (tsk->thread.regs->msr & MSR_VSX) {
+		if (tsk->thread.regs->msr & (MSR_VSX|MSR_VEC|MSR_FP)) {
 #ifdef CONFIG_SMP
 			BUG_ON(tsk != current);
 #endif
@@ -540,7 +541,7 @@ static void tm_reclaim_thread(struct thread_struct *thr,
 	 * the thread will no longer be transactional.
 	 */
 	if (test_ti_thread_flag(ti, TIF_RESTORE_TM)) {
-		msr_diff = thr->ckpt_regs.msr & ~thr->regs->msr;
+		msr_diff = thr->tm_orig_msr & ~thr->regs->msr;
 		if (msr_diff & MSR_FP)
 			memcpy(&thr->transact_fp, &thr->fp_state,
 			       sizeof(struct thread_fp_state));
@@ -609,10 +610,10 @@ static inline void tm_reclaim_task(struct task_struct *tsk)
 	/* Stash the original thread MSR, as giveup_fpu et al will
 	 * modify it.  We hold onto it to see whether the task used
 	 * FP & vector regs.  If the TIF_RESTORE_TM flag is set,
-	 * ckpt_regs.msr is already set.
+	 * tm_orig_msr is already set.
 	 */
 	if (!test_ti_thread_flag(task_thread_info(tsk), TIF_RESTORE_TM))
-		thr->ckpt_regs.msr = thr->regs->msr;
+		thr->tm_orig_msr = thr->regs->msr;
 
 	TM_DEBUG("--- tm_reclaim on pid %d (NIP=%lx, "
 		 "ccr=%lx, msr=%lx, trap=%lx)\n",
@@ -681,7 +682,7 @@ static inline void tm_recheckpoint_new_task(struct task_struct *new)
 		tm_restore_sprs(&new->thread);
 		return;
 	}
-	msr = new->thread.ckpt_regs.msr;
+	msr = new->thread.tm_orig_msr;
 	/* Recheckpoint to restore original checkpointed register state. */
 	TM_DEBUG("*** tm_recheckpoint of pid %d "
 		 "(new->msr 0x%lx, new->origmsr 0x%lx)\n",
@@ -741,7 +742,7 @@ void restore_tm_state(struct pt_regs *regs)
 	if (!MSR_TM_ACTIVE(regs->msr))
 		return;
 
-	msr_diff = current->thread.ckpt_regs.msr & ~regs->msr;
+	msr_diff = current->thread.tm_orig_msr & ~regs->msr;
 	msr_diff &= MSR_FP | MSR_VEC | MSR_VSX;
 	if (msr_diff & MSR_FP) {
 		fp_enable();
@@ -1127,6 +1128,7 @@ static void setup_ksp_vsid(struct task_struct *p, unsigned long sp)
 /*
  * Copy a thread..
  */
+extern unsigned long dscr_default; /* defined in arch/powerpc/kernel/sysfs.c */
 
 /*
  * Copy architecture-specific thread state
@@ -1238,6 +1240,16 @@ void start_thread(struct pt_regs *regs, unsigned long start, unsigned long sp)
 		struct pt_regs *regs = task_stack_page(current) + THREAD_SIZE;
 		current->thread.regs = regs - 1;
 	}
+
+#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
+	/*
+	 * Clear any transactional state, we're exec()ing. The cause is
+	 * not important as there will never be a recheckpoint so it's not
+	 * user visible.
+	 */
+	if (MSR_TM_SUSPENDED(mfmsr()))
+		tm_reclaim_current(0);
+#endif
 
 	memset(regs->gpr, 0, sizeof(regs->gpr));
 	regs->ctr = 0;

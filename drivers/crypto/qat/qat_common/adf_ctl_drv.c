@@ -198,7 +198,7 @@ static int adf_copy_key_value_data(struct adf_accel_dev *accel_dev,
 			goto out_err;
 		}
 
-		params_head = section.params;
+		params_head = section_head->params;
 
 		while (params_head) {
 			if (copy_from_user(&key_val, (void __user *)params_head,
@@ -398,9 +398,10 @@ static int adf_ctl_ioctl_get_status(struct file *fp, unsigned int cmd,
 	}
 
 	accel_dev = adf_devmgr_get_dev_by_id(dev_info.accel_id);
-	if (!accel_dev)
+	if (!accel_dev) {
+		pr_err("QAT: Device %d not found\n", dev_info.accel_id);
 		return -ENODEV;
-
+	}
 	hw_data = accel_dev->hw_device;
 	dev_info.state = adf_dev_started(accel_dev) ? DEV_UP : DEV_DOWN;
 	dev_info.num_ae = hw_data->get_num_aes(hw_data);
@@ -494,7 +495,6 @@ static void __exit adf_unregister_ctl_device_driver(void)
 	adf_exit_aer();
 	qat_crypto_unregister();
 	qat_algs_exit();
-	adf_clean_vf_map(false);
 	mutex_destroy(&adf_ctl_lock);
 }
 
@@ -504,4 +504,3 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Intel");
 MODULE_DESCRIPTION("Intel(R) QuickAssist Technology");
 MODULE_ALIAS_CRYPTO("intel_qat");
-MODULE_VERSION(ADF_DRV_VERSION);

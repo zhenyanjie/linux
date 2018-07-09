@@ -80,7 +80,6 @@
 #include <linux/stat.h>
 #include <linux/string.h>
 #include <linux/blkdev.h>
-#include <linux/backing-dev.h>
 #include <linux/init.h>
 #include <linux/parser.h>
 #include <linux/buffer_head.h>
@@ -93,6 +92,22 @@
 #include "ufs.h"
 #include "swab.h"
 #include "util.h"
+
+void lock_ufs(struct super_block *sb)
+{
+	struct ufs_sb_info *sbi = UFS_SB(sb);
+
+	mutex_lock(&sbi->mutex);
+	sbi->mutex_owner = current;
+}
+
+void unlock_ufs(struct super_block *sb)
+{
+	struct ufs_sb_info *sbi = UFS_SB(sb);
+
+	sbi->mutex_owner = NULL;
+	mutex_unlock(&sbi->mutex);
+}
 
 static struct inode *ufs_nfs_get_inode(struct super_block *sb, u64 ino, u32 generation)
 {
@@ -678,6 +693,7 @@ static int ufs_sync_fs(struct super_block *sb, int wait)
 	struct ufs_super_block_third * usb3;
 	unsigned flags;
 
+	lock_ufs(sb);
 	mutex_lock(&UFS_SB(sb)->s_lock);
 
 	UFSD("ENTER\n");
@@ -697,6 +713,7 @@ static int ufs_sync_fs(struct super_block *sb, int wait)
 
 	UFSD("EXIT\n");
 	mutex_unlock(&UFS_SB(sb)->s_lock);
+	unlock_ufs(sb);
 
 	return 0;
 }
@@ -740,10 +757,28 @@ static void ufs_put_super(struct super_block *sb)
 
 	ubh_brelse_uspi (sbi->s_uspi);
 	kfree (sbi->s_uspi);
+	mutex_destroy(&sbi->mutex);
 	kfree (sbi);
 	sb->s_fs_info = NULL;
 	UFSD("EXIT\n");
 	return;
+}
+
+static u64 ufs_max_bytes(struct super_block *sb)
+{
+	struct ufs_sb_private_info *uspi = UFS_SB(sb)->s_uspi;
+	int bits = uspi->s_apbshift;
+	u64 res;
+
+	if (bits > 21)
+		res = ~0ULL;
+	else
+		res = UFS_NDADDR + (1LL << bits) + (1LL << (2*bits)) +
+			(1LL << (3*bits));
+
+	if (res >= (MAX_LFS_FILESIZE >> uspi->s_bshift))
+		return MAX_LFS_FILESIZE;
+	return res << uspi->s_bshift;
 }
 
 static int ufs_fill_super(struct super_block *sb, void *data, int silent)
@@ -782,6 +817,7 @@ static int ufs_fill_super(struct super_block *sb, void *data, int silent)
 
 	UFSD("flag %u\n", (int)(sb->s_flags & MS_RDONLY));
 	
+	mutex_init(&sbi->mutex);
 	mutex_init(&sbi->s_lock);
 	spin_lock_init(&sbi->work_lock);
 	INIT_DELAYED_WORK(&sbi->sync_work, delayed_sync_fs);
@@ -812,9 +848,8 @@ static int ufs_fill_super(struct super_block *sb, void *data, int silent)
 	uspi->s_dirblksize = UFS_SECTOR_SIZE;
 	super_block_offset=UFS_SBLOCK;
 
-	/* Keep 2Gig file limit. Some UFS variants need to override 
-	   this but as I don't know which I'll let those in the know loosen
-	   the rules */
+	sb->s_maxbytes = MAX_LFS_FILESIZE;
+
 	switch (sbi->s_mount_opt & UFS_MOUNT_UFSTYPE) {
 	case UFS_MOUNT_UFSTYPE_44BSD:
 		UFSD("ufstype=44bsd\n");
@@ -1212,6 +1247,7 @@ magic_found:
 			    "fast symlink size (%u)\n", uspi->s_maxsymlinklen);
 		uspi->s_maxsymlinklen = maxsymlen;
 	}
+	sb->s_maxbytes = ufs_max_bytes(sb);
 	sb->s_max_links = UFS_LINK_MAX;
 
 	inode = ufs_iget(sb, UFS_ROOTINO);
@@ -1237,6 +1273,7 @@ magic_found:
 	return 0;
 
 failed:
+	mutex_destroy(&sbi->mutex);
 	if (ubh)
 		ubh_brelse_uspi (uspi);
 	kfree (uspi);
@@ -1259,6 +1296,7 @@ static int ufs_remount (struct super_block *sb, int *mount_flags, char *data)
 	unsigned flags;
 
 	sync_filesystem(sb);
+	lock_ufs(sb);
 	mutex_lock(&UFS_SB(sb)->s_lock);
 	uspi = UFS_SB(sb)->s_uspi;
 	flags = UFS_SB(sb)->s_flags;
@@ -1274,6 +1312,7 @@ static int ufs_remount (struct super_block *sb, int *mount_flags, char *data)
 	ufs_set_opt (new_mount_opt, ONERROR_LOCK);
 	if (!ufs_parse_options (data, &new_mount_opt)) {
 		mutex_unlock(&UFS_SB(sb)->s_lock);
+		unlock_ufs(sb);
 		return -EINVAL;
 	}
 	if (!(new_mount_opt & UFS_MOUNT_UFSTYPE)) {
@@ -1281,12 +1320,14 @@ static int ufs_remount (struct super_block *sb, int *mount_flags, char *data)
 	} else if ((new_mount_opt & UFS_MOUNT_UFSTYPE) != ufstype) {
 		pr_err("ufstype can't be changed during remount\n");
 		mutex_unlock(&UFS_SB(sb)->s_lock);
+		unlock_ufs(sb);
 		return -EINVAL;
 	}
 
 	if ((*mount_flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY)) {
 		UFS_SB(sb)->s_mount_opt = new_mount_opt;
 		mutex_unlock(&UFS_SB(sb)->s_lock);
+		unlock_ufs(sb);
 		return 0;
 	}
 	
@@ -1310,6 +1351,7 @@ static int ufs_remount (struct super_block *sb, int *mount_flags, char *data)
 #ifndef CONFIG_UFS_FS_WRITE
 		pr_err("ufs was compiled with read-only support, can't be mounted as read-write\n");
 		mutex_unlock(&UFS_SB(sb)->s_lock);
+		unlock_ufs(sb);
 		return -EINVAL;
 #else
 		if (ufstype != UFS_MOUNT_UFSTYPE_SUN && 
@@ -1319,11 +1361,13 @@ static int ufs_remount (struct super_block *sb, int *mount_flags, char *data)
 		    ufstype != UFS_MOUNT_UFSTYPE_UFS2) {
 			pr_err("this ufstype is read-only supported\n");
 			mutex_unlock(&UFS_SB(sb)->s_lock);
+			unlock_ufs(sb);
 			return -EINVAL;
 		}
 		if (!ufs_read_cylinder_structures(sb)) {
 			pr_err("failed during remounting\n");
 			mutex_unlock(&UFS_SB(sb)->s_lock);
+			unlock_ufs(sb);
 			return -EPERM;
 		}
 		sb->s_flags &= ~MS_RDONLY;
@@ -1331,6 +1375,7 @@ static int ufs_remount (struct super_block *sb, int *mount_flags, char *data)
 	}
 	UFS_SB(sb)->s_mount_opt = new_mount_opt;
 	mutex_unlock(&UFS_SB(sb)->s_lock);
+	unlock_ufs(sb);
 	return 0;
 }
 
@@ -1362,7 +1407,8 @@ static int ufs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	struct ufs_super_block_third *usb3;
 	u64 id = huge_encode_dev(sb->s_bdev->bd_dev);
 
-	mutex_lock(&UFS_SB(sb)->s_lock);
+	lock_ufs(sb);
+
 	usb3 = ubh_get_usb_third(uspi);
 	
 	if ((flags & UFS_TYPE_MASK) == UFS_TYPE_UFS2) {
@@ -1383,7 +1429,7 @@ static int ufs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_fsid.val[0] = (u32)id;
 	buf->f_fsid.val[1] = (u32)(id >> 32);
 
-	mutex_unlock(&UFS_SB(sb)->s_lock);
+	unlock_ufs(sb);
 
 	return 0;
 }
@@ -1399,8 +1445,6 @@ static struct inode *ufs_alloc_inode(struct super_block *sb)
 		return NULL;
 
 	ei->vfs_inode.i_version = 1;
-	seqlock_init(&ei->meta_lock);
-	mutex_init(&ei->truncate_mutex);
 	return &ei->vfs_inode;
 }
 

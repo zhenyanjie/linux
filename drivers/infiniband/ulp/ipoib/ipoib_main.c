@@ -48,9 +48,6 @@
 
 #include <linux/jhash.h>
 #include <net/arp.h>
-#include <net/addrconf.h>
-#include <linux/inetdevice.h>
-#include <rdma/ib_cache.h>
 
 #define DRV_VERSION "1.0.0"
 
@@ -92,19 +89,41 @@ struct workqueue_struct *ipoib_workqueue;
 struct ib_sa_client ipoib_sa_client;
 
 static void ipoib_add_one(struct ib_device *device);
-static void ipoib_remove_one(struct ib_device *device, void *client_data);
+static void ipoib_remove_one(struct ib_device *device);
 static void ipoib_neigh_reclaim(struct rcu_head *rp);
-static struct net_device *ipoib_get_net_dev_by_params(
-		struct ib_device *dev, u8 port, u16 pkey,
-		const union ib_gid *gid, const struct sockaddr *addr,
-		void *client_data);
 
 static struct ib_client ipoib_client = {
 	.name   = "ipoib",
 	.add    = ipoib_add_one,
-	.remove = ipoib_remove_one,
-	.get_net_dev_by_params = ipoib_get_net_dev_by_params,
+	.remove = ipoib_remove_one
 };
+
+#ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
+static int ipoib_netdev_event(struct notifier_block *this,
+			      unsigned long event, void *ptr)
+{
+	struct netdev_notifier_info *ni = ptr;
+	struct net_device *dev = ni->dev;
+
+	if (dev->netdev_ops->ndo_open != ipoib_open)
+		return NOTIFY_DONE;
+
+	switch (event) {
+	case NETDEV_REGISTER:
+		ipoib_create_debug_files(dev);
+		break;
+	case NETDEV_CHANGENAME:
+		ipoib_delete_debug_files(dev);
+		ipoib_create_debug_files(dev);
+		break;
+	case NETDEV_UNREGISTER:
+		ipoib_delete_debug_files(dev);
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
+#endif
 
 int ipoib_open(struct net_device *dev)
 {
@@ -198,7 +217,7 @@ static netdev_features_t ipoib_fix_features(struct net_device *dev, netdev_featu
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 
 	if (test_bit(IPOIB_FLAG_ADMIN_CM, &priv->flags))
-		features &= ~(NETIF_F_IP_CSUM | NETIF_F_TSO);
+		features &= ~(NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO);
 
 	return features;
 }
@@ -230,225 +249,6 @@ static int ipoib_change_mtu(struct net_device *dev, int new_mtu)
 	return 0;
 }
 
-/* Called with an RCU read lock taken */
-static bool ipoib_is_dev_match_addr_rcu(const struct sockaddr *addr,
-					struct net_device *dev)
-{
-	struct net *net = dev_net(dev);
-	struct in_device *in_dev;
-	struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-	struct sockaddr_in6 *addr_in6 = (struct sockaddr_in6 *)addr;
-	__be32 ret_addr;
-
-	switch (addr->sa_family) {
-	case AF_INET:
-		in_dev = in_dev_get(dev);
-		if (!in_dev)
-			return false;
-
-		ret_addr = inet_confirm_addr(net, in_dev, 0,
-					     addr_in->sin_addr.s_addr,
-					     RT_SCOPE_HOST);
-		in_dev_put(in_dev);
-		if (ret_addr)
-			return true;
-
-		break;
-	case AF_INET6:
-		if (IS_ENABLED(CONFIG_IPV6) &&
-		    ipv6_chk_addr(net, &addr_in6->sin6_addr, dev, 1))
-			return true;
-
-		break;
-	}
-	return false;
-}
-
-/**
- * Find the master net_device on top of the given net_device.
- * @dev: base IPoIB net_device
- *
- * Returns the master net_device with a reference held, or the same net_device
- * if no master exists.
- */
-static struct net_device *ipoib_get_master_net_dev(struct net_device *dev)
-{
-	struct net_device *master;
-
-	rcu_read_lock();
-	master = netdev_master_upper_dev_get_rcu(dev);
-	if (master)
-		dev_hold(master);
-	rcu_read_unlock();
-
-	if (master)
-		return master;
-
-	dev_hold(dev);
-	return dev;
-}
-
-/**
- * Find a net_device matching the given address, which is an upper device of
- * the given net_device.
- * @addr: IP address to look for.
- * @dev: base IPoIB net_device
- *
- * If found, returns the net_device with a reference held. Otherwise return
- * NULL.
- */
-static struct net_device *ipoib_get_net_dev_match_addr(
-		const struct sockaddr *addr, struct net_device *dev)
-{
-	struct net_device *upper,
-			  *result = NULL;
-	struct list_head *iter;
-
-	rcu_read_lock();
-	if (ipoib_is_dev_match_addr_rcu(addr, dev)) {
-		dev_hold(dev);
-		result = dev;
-		goto out;
-	}
-
-	netdev_for_each_all_upper_dev_rcu(dev, upper, iter) {
-		if (ipoib_is_dev_match_addr_rcu(addr, upper)) {
-			dev_hold(upper);
-			result = upper;
-			break;
-		}
-	}
-out:
-	rcu_read_unlock();
-	return result;
-}
-
-/* returns the number of IPoIB netdevs on top a given ipoib device matching a
- * pkey_index and address, if one exists.
- *
- * @found_net_dev: contains a matching net_device if the return value >= 1,
- * with a reference held. */
-static int ipoib_match_gid_pkey_addr(struct ipoib_dev_priv *priv,
-				     const union ib_gid *gid,
-				     u16 pkey_index,
-				     const struct sockaddr *addr,
-				     int nesting,
-				     struct net_device **found_net_dev)
-{
-	struct ipoib_dev_priv *child_priv;
-	struct net_device *net_dev = NULL;
-	int matches = 0;
-
-	if (priv->pkey_index == pkey_index &&
-	    (!gid || !memcmp(gid, &priv->local_gid, sizeof(*gid)))) {
-		if (!addr) {
-			net_dev = ipoib_get_master_net_dev(priv->dev);
-		} else {
-			/* Verify the net_device matches the IP address, as
-			 * IPoIB child devices currently share a GID. */
-			net_dev = ipoib_get_net_dev_match_addr(addr, priv->dev);
-		}
-		if (net_dev) {
-			if (!*found_net_dev)
-				*found_net_dev = net_dev;
-			else
-				dev_put(net_dev);
-			++matches;
-		}
-	}
-
-	/* Check child interfaces */
-	down_read_nested(&priv->vlan_rwsem, nesting);
-	list_for_each_entry(child_priv, &priv->child_intfs, list) {
-		matches += ipoib_match_gid_pkey_addr(child_priv, gid,
-						    pkey_index, addr,
-						    nesting + 1,
-						    found_net_dev);
-		if (matches > 1)
-			break;
-	}
-	up_read(&priv->vlan_rwsem);
-
-	return matches;
-}
-
-/* Returns the number of matching net_devs found (between 0 and 2). Also
- * return the matching net_device in the @net_dev parameter, holding a
- * reference to the net_device, if the number of matches >= 1 */
-static int __ipoib_get_net_dev_by_params(struct list_head *dev_list, u8 port,
-					 u16 pkey_index,
-					 const union ib_gid *gid,
-					 const struct sockaddr *addr,
-					 struct net_device **net_dev)
-{
-	struct ipoib_dev_priv *priv;
-	int matches = 0;
-
-	*net_dev = NULL;
-
-	list_for_each_entry(priv, dev_list, list) {
-		if (priv->port != port)
-			continue;
-
-		matches += ipoib_match_gid_pkey_addr(priv, gid, pkey_index,
-						     addr, 0, net_dev);
-		if (matches > 1)
-			break;
-	}
-
-	return matches;
-}
-
-static struct net_device *ipoib_get_net_dev_by_params(
-		struct ib_device *dev, u8 port, u16 pkey,
-		const union ib_gid *gid, const struct sockaddr *addr,
-		void *client_data)
-{
-	struct net_device *net_dev;
-	struct list_head *dev_list = client_data;
-	u16 pkey_index;
-	int matches;
-	int ret;
-
-	if (!rdma_protocol_ib(dev, port))
-		return NULL;
-
-	ret = ib_find_cached_pkey(dev, port, pkey, &pkey_index);
-	if (ret)
-		return NULL;
-
-	if (!dev_list)
-		return NULL;
-
-	/* See if we can find a unique device matching the L2 parameters */
-	matches = __ipoib_get_net_dev_by_params(dev_list, port, pkey_index,
-						gid, NULL, &net_dev);
-
-	switch (matches) {
-	case 0:
-		return NULL;
-	case 1:
-		return net_dev;
-	}
-
-	dev_put(net_dev);
-
-	/* Couldn't find a unique device with L2 parameters only. Use L3
-	 * address to uniquely match the net device */
-	matches = __ipoib_get_net_dev_by_params(dev_list, port, pkey_index,
-						gid, addr, &net_dev);
-	switch (matches) {
-	case 0:
-		return NULL;
-	default:
-		dev_warn_ratelimited(&dev->dev,
-				     "duplicate IP address detected\n");
-		/* Fall through */
-	case 1:
-		return net_dev;
-	}
-}
-
 int ipoib_set_mode(struct net_device *dev, const char *buf)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
@@ -459,13 +259,11 @@ int ipoib_set_mode(struct net_device *dev, const char *buf)
 		ipoib_warn(priv, "enabling connected mode "
 			   "will cause multicast packet drops\n");
 		netdev_update_features(dev);
-		dev_set_mtu(dev, ipoib_cm_max_mtu(dev));
 		rtnl_unlock();
 		priv->tx_wr.send_flags &= ~IB_SEND_IP_CSUM;
 
 		ipoib_flush_paths(dev);
-		rtnl_lock();
-		return 0;
+		return (!rtnl_trylock()) ? -EBUSY : 0;
 	}
 
 	if (!strcmp(buf, "datagram\n")) {
@@ -474,8 +272,7 @@ int ipoib_set_mode(struct net_device *dev, const char *buf)
 		dev_set_mtu(dev, min(priv->mcast_mtu, dev->mtu));
 		rtnl_unlock();
 		ipoib_flush_paths(dev);
-		rtnl_lock();
-		return 0;
+		return (!rtnl_trylock()) ? -EBUSY : 0;
 	}
 
 	return -EINVAL;
@@ -691,6 +488,22 @@ static void path_rec_completion(int status,
 	spin_lock_irqsave(&priv->lock, flags);
 
 	if (!IS_ERR_OR_NULL(ah)) {
+		/*
+		 * pathrec.dgid is used as the database key from the LLADDR,
+		 * it must remain unchanged even if the SA returns a different
+		 * GID to use in the AH.
+		 */
+		if (memcmp(pathrec->dgid.raw, path->pathrec.dgid.raw,
+			   sizeof(union ib_gid))) {
+			ipoib_dbg(
+				priv,
+				"%s got PathRec for gid %pI6 while asked for %pI6\n",
+				dev->name, pathrec->dgid.raw,
+				path->pathrec.dgid.raw);
+			memcpy(pathrec->dgid.raw, path->pathrec.dgid.raw,
+			       sizeof(union ib_gid));
+		}
+
 		path->pathrec = *pathrec;
 
 		old_ah   = path->ah;
@@ -1149,9 +962,6 @@ static void __ipoib_reap_neigh(struct ipoib_dev_priv *priv)
 	unsigned long dt;
 	unsigned long flags;
 	int i;
-	LIST_HEAD(remove_list);
-	struct ipoib_mcast *mcast, *tmcast;
-	struct net_device *dev = priv->dev;
 
 	if (test_bit(IPOIB_STOP_NEIGH_GC, &priv->flags))
 		return;
@@ -1179,24 +989,11 @@ static void __ipoib_reap_neigh(struct ipoib_dev_priv *priv)
 							  lockdep_is_held(&priv->lock))) != NULL) {
 			/* was the neigh idle for two GC periods */
 			if (time_after(neigh_obsolete, neigh->alive)) {
-				u8 *mgid = neigh->daddr + 4;
-
-				/* Is this multicast ? */
-				if (*mgid == 0xff) {
-					mcast = __ipoib_mcast_find(dev, mgid);
-
-					if (mcast && test_bit(IPOIB_MCAST_FLAG_SENDONLY, &mcast->flags)) {
-						list_del(&mcast->list);
-						rb_erase(&mcast->rb_node, &priv->multicast_tree);
-						list_add_tail(&mcast->list, &remove_list);
-					}
-				}
-
 				rcu_assign_pointer(*np,
 						   rcu_dereference_protected(neigh->hnext,
 									     lockdep_is_held(&priv->lock)));
 				/* remove from path/mc list */
-				list_del(&neigh->list);
+				list_del_init(&neigh->list);
 				call_rcu(&neigh->rcu, ipoib_neigh_reclaim);
 			} else {
 				np = &neigh->hnext;
@@ -1207,10 +1004,6 @@ static void __ipoib_reap_neigh(struct ipoib_dev_priv *priv)
 
 out_unlock:
 	spin_unlock_irqrestore(&priv->lock, flags);
-	list_for_each_entry_safe(mcast, tmcast, &remove_list, list) {
-		ipoib_mcast_leave(dev, mcast);
-		ipoib_mcast_free(mcast);
-	}
 }
 
 static void ipoib_reap_neigh(struct work_struct *work)
@@ -1363,7 +1156,7 @@ void ipoib_neigh_free(struct ipoib_neigh *neigh)
 					   rcu_dereference_protected(neigh->hnext,
 								     lockdep_is_held(&priv->lock)));
 			/* remove from parent list */
-			list_del(&neigh->list);
+			list_del_init(&neigh->list);
 			call_rcu(&neigh->rcu, ipoib_neigh_reclaim);
 			return;
 		} else {
@@ -1376,7 +1169,7 @@ static int ipoib_neigh_hash_init(struct ipoib_dev_priv *priv)
 {
 	struct ipoib_neigh_table *ntbl = &priv->ntbl;
 	struct ipoib_neigh_hash *htbl;
-	struct ipoib_neigh __rcu **buckets;
+	struct ipoib_neigh **buckets;
 	u32 size;
 
 	clear_bit(IPOIB_NEIGH_TBL_FLUSH, &priv->flags);
@@ -1394,7 +1187,7 @@ static int ipoib_neigh_hash_init(struct ipoib_dev_priv *priv)
 	htbl->size = size;
 	htbl->mask = (size - 1);
 	htbl->buckets = buckets;
-	RCU_INIT_POINTER(ntbl->htbl, htbl);
+	ntbl->htbl = htbl;
 	htbl->ntbl = ntbl;
 	atomic_set(&ntbl->entries, 0);
 
@@ -1448,7 +1241,7 @@ void ipoib_del_neighs_by_gid(struct net_device *dev, u8 *gid)
 						   rcu_dereference_protected(neigh->hnext,
 									     lockdep_is_held(&priv->lock)));
 				/* remove from parent list */
-				list_del(&neigh->list);
+				list_del_init(&neigh->list);
 				call_rcu(&neigh->rcu, ipoib_neigh_reclaim);
 			} else {
 				np = &neigh->hnext;
@@ -1490,7 +1283,7 @@ static void ipoib_flush_neighs(struct ipoib_dev_priv *priv)
 					   rcu_dereference_protected(neigh->hnext,
 								     lockdep_is_held(&priv->lock)));
 			/* remove from path/mc list */
-			list_del(&neigh->list);
+			list_del_init(&neigh->list);
 			call_rcu(&neigh->rcu, ipoib_neigh_reclaim);
 		}
 	}
@@ -1578,8 +1371,6 @@ void ipoib_dev_cleanup(struct net_device *dev)
 	LIST_HEAD(head);
 
 	ASSERT_RTNL();
-
-	ipoib_delete_debug_files(dev);
 
 	/* Delete any child interfaces first */
 	list_for_each_entry_safe(cpriv, tcpriv, &priv->child_intfs, list) {
@@ -1825,8 +1616,7 @@ static struct net_device *ipoib_add_port(const char *format,
 	SET_NETDEV_DEV(priv->dev, hca->dma_device);
 	priv->dev->dev_id = port - 1;
 
-	result = ib_query_port(hca, port, &attr);
-	if (!result)
+	if (!ib_query_port(hca, port, &attr))
 		priv->max_ib_mtu = ib_mtu_enum_to_int(attr.max_mtu);
 	else {
 		printk(KERN_WARNING "%s: ib_query_port %d failed\n",
@@ -1847,8 +1637,7 @@ static struct net_device *ipoib_add_port(const char *format,
 		goto device_init_failed;
 	}
 
-	result = ipoib_set_dev_features(priv, hca);
-	if (result)
+	if (ipoib_set_dev_features(priv, hca))
 		goto device_init_failed;
 
 	/*
@@ -1892,8 +1681,6 @@ static struct net_device *ipoib_add_port(const char *format,
 		goto register_failed;
 	}
 
-	ipoib_create_debug_files(priv->dev);
-
 	if (ipoib_cm_add_mode_attr(priv->dev))
 		goto sysfs_failed;
 	if (ipoib_add_pkey_attr(priv->dev))
@@ -1908,7 +1695,6 @@ static struct net_device *ipoib_add_port(const char *format,
 	return priv->dev;
 
 sysfs_failed:
-	ipoib_delete_debug_files(priv->dev);
 	unregister_netdev(priv->dev);
 
 register_failed:
@@ -1934,8 +1720,10 @@ static void ipoib_add_one(struct ib_device *device)
 	struct list_head *dev_list;
 	struct net_device *dev;
 	struct ipoib_dev_priv *priv;
-	int p;
-	int count = 0;
+	int s, e, p;
+
+	if (rdma_node_get_transport(device->node_type) != RDMA_TRANSPORT_IB)
+		return;
 
 	dev_list = kmalloc(sizeof *dev_list, GFP_KERNEL);
 	if (!dev_list)
@@ -1943,30 +1731,36 @@ static void ipoib_add_one(struct ib_device *device)
 
 	INIT_LIST_HEAD(dev_list);
 
-	for (p = rdma_start_port(device); p <= rdma_end_port(device); ++p) {
-		if (!rdma_protocol_ib(device, p))
+	if (device->node_type == RDMA_NODE_IB_SWITCH) {
+		s = 0;
+		e = 0;
+	} else {
+		s = 1;
+		e = device->phys_port_cnt;
+	}
+
+	for (p = s; p <= e; ++p) {
+		if (rdma_port_get_link_layer(device, p) != IB_LINK_LAYER_INFINIBAND)
 			continue;
 		dev = ipoib_add_port("ib%d", device, p);
 		if (!IS_ERR(dev)) {
 			priv = netdev_priv(dev);
 			list_add_tail(&priv->list, dev_list);
-			count++;
 		}
-	}
-
-	if (!count) {
-		kfree(dev_list);
-		return;
 	}
 
 	ib_set_client_data(device, &ipoib_client, dev_list);
 }
 
-static void ipoib_remove_one(struct ib_device *device, void *client_data)
+static void ipoib_remove_one(struct ib_device *device)
 {
 	struct ipoib_dev_priv *priv, *tmp;
-	struct list_head *dev_list = client_data;
+	struct list_head *dev_list;
 
+	if (rdma_node_get_transport(device->node_type) != RDMA_TRANSPORT_IB)
+		return;
+
+	dev_list = ib_get_client_data(device, &ipoib_client);
 	if (!dev_list)
 		return;
 
@@ -1989,6 +1783,12 @@ static void ipoib_remove_one(struct ib_device *device, void *client_data)
 
 	kfree(dev_list);
 }
+
+#ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
+static struct notifier_block ipoib_netdev_notifier = {
+	.notifier_call = ipoib_netdev_event,
+};
+#endif
 
 static int __init ipoib_init_module(void)
 {
@@ -2041,6 +1841,9 @@ static int __init ipoib_init_module(void)
 	if (ret)
 		goto err_client;
 
+#ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
+	register_netdevice_notifier(&ipoib_netdev_notifier);
+#endif
 	return 0;
 
 err_client:
@@ -2058,6 +1861,9 @@ err_fs:
 
 static void __exit ipoib_cleanup_module(void)
 {
+#ifdef CONFIG_INFINIBAND_IPOIB_DEBUG
+	unregister_netdevice_notifier(&ipoib_netdev_notifier);
+#endif
 	ipoib_netlink_fini();
 	ib_unregister_client(&ipoib_client);
 	ib_sa_unregister_client(&ipoib_sa_client);

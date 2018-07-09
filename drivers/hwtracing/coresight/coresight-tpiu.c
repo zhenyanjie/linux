@@ -17,10 +17,9 @@
 #include <linux/io.h>
 #include <linux/err.h>
 #include <linux/slab.h>
-#include <linux/pm_runtime.h>
+#include <linux/clk.h>
 #include <linux/coresight.h>
 #include <linux/amba/bus.h>
-#include <linux/clk.h>
 
 #include "coresight-priv.h"
 
@@ -45,20 +44,23 @@
 #define TPIU_ITATBCTR0		0xef8
 
 /** register definition **/
+/* FFSR - 0x300 */
+#define FFSR_FT_STOPPED		BIT(1)
 /* FFCR - 0x304 */
 #define FFCR_FON_MAN		BIT(6)
+#define FFCR_STOP_FI		BIT(12)
 
 /**
  * @base:	memory mapped base address for this component.
  * @dev:	the device entity associated to this component.
- * @atclk:	optional clock for the core parts of the TPIU.
  * @csdev:	component vitals needed by the framework.
+ * @clk:	the clock this component is associated to.
  */
 struct tpiu_drvdata {
 	void __iomem		*base;
 	struct device		*dev;
-	struct clk		*atclk;
 	struct coresight_device	*csdev;
+	struct clk		*clk;
 };
 
 static void tpiu_enable_hw(struct tpiu_drvdata *drvdata)
@@ -73,8 +75,12 @@ static void tpiu_enable_hw(struct tpiu_drvdata *drvdata)
 static int tpiu_enable(struct coresight_device *csdev)
 {
 	struct tpiu_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
+	int ret;
 
-	pm_runtime_get_sync(csdev->dev.parent);
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
 	tpiu_enable_hw(drvdata);
 
 	dev_info(drvdata->dev, "TPIU enabled\n");
@@ -85,10 +91,14 @@ static void tpiu_disable_hw(struct tpiu_drvdata *drvdata)
 {
 	CS_UNLOCK(drvdata->base);
 
-	/* Clear formatter controle reg. */
-	writel_relaxed(0x0, drvdata->base + TPIU_FFCR);
+	/* Clear formatter and stop on flush */
+	writel_relaxed(FFCR_STOP_FI, drvdata->base + TPIU_FFCR);
 	/* Generate manual flush */
-	writel_relaxed(FFCR_FON_MAN, drvdata->base + TPIU_FFCR);
+	writel_relaxed(FFCR_STOP_FI | FFCR_FON_MAN, drvdata->base + TPIU_FFCR);
+	/* Wait for flush to complete */
+	coresight_timeout(drvdata->base, TPIU_FFCR, FFCR_FON_MAN, 0);
+	/* Wait for formatter to stop */
+	coresight_timeout(drvdata->base, TPIU_FFSR, FFSR_FT_STOPPED, 1);
 
 	CS_LOCK(drvdata->base);
 }
@@ -98,7 +108,8 @@ static void tpiu_disable(struct coresight_device *csdev)
 	struct tpiu_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 
 	tpiu_disable_hw(drvdata);
-	pm_runtime_put(csdev->dev.parent);
+
+	clk_disable_unprepare(drvdata->clk);
 
 	dev_info(drvdata->dev, "TPIU disabled\n");
 }
@@ -135,12 +146,6 @@ static int tpiu_probe(struct amba_device *adev, const struct amba_id *id)
 		return -ENOMEM;
 
 	drvdata->dev = &adev->dev;
-	drvdata->atclk = devm_clk_get(&adev->dev, "atclk"); /* optional */
-	if (!IS_ERR(drvdata->atclk)) {
-		ret = clk_prepare_enable(drvdata->atclk);
-		if (ret)
-			return ret;
-	}
 	dev_set_drvdata(dev, drvdata);
 
 	/* Validity for the resource is already checked by the AMBA core */
@@ -150,10 +155,15 @@ static int tpiu_probe(struct amba_device *adev, const struct amba_id *id)
 
 	drvdata->base = base;
 
+	drvdata->clk = adev->pclk;
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
 	/* Disable tpiu to support older devices */
 	tpiu_disable_hw(drvdata);
 
-	pm_runtime_put(&adev->dev);
+	clk_disable_unprepare(drvdata->clk);
 
 	desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
 	if (!desc)
@@ -180,40 +190,10 @@ static int tpiu_remove(struct amba_device *adev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int tpiu_runtime_suspend(struct device *dev)
-{
-	struct tpiu_drvdata *drvdata = dev_get_drvdata(dev);
-
-	if (drvdata && !IS_ERR(drvdata->atclk))
-		clk_disable_unprepare(drvdata->atclk);
-
-	return 0;
-}
-
-static int tpiu_runtime_resume(struct device *dev)
-{
-	struct tpiu_drvdata *drvdata = dev_get_drvdata(dev);
-
-	if (drvdata && !IS_ERR(drvdata->atclk))
-		clk_prepare_enable(drvdata->atclk);
-
-	return 0;
-}
-#endif
-
-static const struct dev_pm_ops tpiu_dev_pm_ops = {
-	SET_RUNTIME_PM_OPS(tpiu_runtime_suspend, tpiu_runtime_resume, NULL)
-};
-
 static struct amba_id tpiu_ids[] = {
 	{
 		.id	= 0x0003b912,
 		.mask	= 0x0003ffff,
-	},
-	{
-		.id	= 0x0004b912,
-		.mask	= 0x0007ffff,
 	},
 	{ 0, 0},
 };
@@ -222,7 +202,6 @@ static struct amba_driver tpiu_driver = {
 	.drv = {
 		.name	= "coresight-tpiu",
 		.owner	= THIS_MODULE,
-		.pm	= &tpiu_dev_pm_ops,
 	},
 	.probe		= tpiu_probe,
 	.remove		= tpiu_remove,

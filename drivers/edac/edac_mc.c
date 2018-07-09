@@ -30,15 +30,10 @@
 #include <linux/bitops.h>
 #include <asm/uaccess.h>
 #include <asm/page.h>
+#include <asm/edac.h>
 #include "edac_core.h"
 #include "edac_module.h"
 #include <ras/ras_event.h>
-
-#ifdef CONFIG_EDAC_ATOMIC_SCRUB
-#include <asm/edac.h>
-#else
-#define edac_atomic_scrub(va, size) do { } while (0)
-#endif
 
 /* lock to memory controller's control array */
 static DEFINE_MUTEX(mem_ctls_mutex);
@@ -586,18 +581,10 @@ static void edac_mc_workq_setup(struct mem_ctl_info *mci, unsigned msec,
  */
 static void edac_mc_workq_teardown(struct mem_ctl_info *mci)
 {
-	int status;
+	mci->op_state = OP_OFFLINE;
 
-	if (mci->op_state != OP_RUNNING_POLL)
-		return;
-
-	status = cancel_delayed_work(&mci->work);
-	if (status == 0) {
-		edac_dbg(0, "not canceled, flush the queue\n");
-
-		/* workq instance might be running, wait for it */
-		flush_workqueue(edac_workqueue);
-	}
+	cancel_delayed_work_sync(&mci->work);
+	flush_workqueue(edac_workqueue);
 }
 
 /*
@@ -879,7 +866,7 @@ static void edac_mc_scrub_block(unsigned long page, unsigned long offset,
 	virt_addr = kmap_atomic(pg);
 
 	/* Perform architecture specific atomic scrub operation */
-	edac_atomic_scrub(virt_addr + offset, size);
+	atomic_scrub(virt_addr + offset, size);
 
 	/* Unmap and complete */
 	kunmap_atomic(virt_addr);

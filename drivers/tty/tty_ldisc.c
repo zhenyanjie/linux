@@ -22,7 +22,10 @@
 #undef LDISC_DEBUG_HANGUP
 
 #ifdef LDISC_DEBUG_HANGUP
-#define tty_ldisc_debug(tty, f, args...)	tty_debug(tty, f, ##args)
+#define tty_ldisc_debug(tty, f, args...) ({				       \
+	char __b[64];							       \
+	printk(KERN_DEBUG "%s: %s: " f, __func__, tty_name(tty, __b), ##args); \
+})
 #else
 #define tty_ldisc_debug(tty, f, args...)
 #endif
@@ -168,12 +171,11 @@ static struct tty_ldisc *tty_ldisc_get(struct tty_struct *tty, int disc)
 			return ERR_CAST(ldops);
 	}
 
-	ld = kmalloc(sizeof(struct tty_ldisc), GFP_KERNEL);
-	if (ld == NULL) {
-		put_ldops(ldops);
-		return ERR_PTR(-ENOMEM);
-	}
-
+	/*
+	 * There is no way to handle allocation failure of only 16 bytes.
+	 * Let's simplify error handling and save more memory.
+	 */
+	ld = kmalloc(sizeof(struct tty_ldisc), GFP_KERNEL | __GFP_NOFAIL);
 	ld->ops = ldops;
 	ld->tty = tty;
 
@@ -447,8 +449,6 @@ static int tty_ldisc_open(struct tty_struct *tty, struct tty_ldisc *ld)
 		ret = ld->ops->open(tty);
 		if (ret)
 			clear_bit(TTY_LDISC_OPEN, &tty->flags);
-
-		tty_ldisc_debug(tty, "%p: opened\n", tty->ldisc);
 		return ret;
 	}
 	return 0;
@@ -469,7 +469,6 @@ static void tty_ldisc_close(struct tty_struct *tty, struct tty_ldisc *ld)
 	clear_bit(TTY_LDISC_OPEN, &tty->flags);
 	if (ld->ops->close)
 		ld->ops->close(tty);
-	tty_ldisc_debug(tty, "%p: closed\n", tty->ldisc);
 }
 
 /**
@@ -483,6 +482,7 @@ static void tty_ldisc_close(struct tty_struct *tty, struct tty_ldisc *ld)
 
 static void tty_ldisc_restore(struct tty_struct *tty, struct tty_ldisc *old)
 {
+	char buf[64];
 	struct tty_ldisc *new_ldisc;
 	int r;
 
@@ -503,7 +503,7 @@ static void tty_ldisc_restore(struct tty_struct *tty, struct tty_ldisc *old)
 		if (r < 0)
 			panic("Couldn't open N_TTY ldisc for "
 			      "%s --- error %d.",
-			      tty_name(tty), r);
+			      tty_name(tty, buf), r);
 	}
 }
 
@@ -663,7 +663,7 @@ void tty_ldisc_hangup(struct tty_struct *tty)
 	int reset = tty->driver->flags & TTY_DRIVER_RESET_TERMIOS;
 	int err = 0;
 
-	tty_ldisc_debug(tty, "%p: closing\n", tty->ldisc);
+	tty_ldisc_debug(tty, "closing ldisc: %p\n", tty->ldisc);
 
 	ld = tty_ldisc_ref(tty);
 	if (ld != NULL) {
@@ -713,7 +713,7 @@ void tty_ldisc_hangup(struct tty_struct *tty)
 	if (reset)
 		tty_reset_termios(tty);
 
-	tty_ldisc_debug(tty, "%p: re-opened\n", tty->ldisc);
+	tty_ldisc_debug(tty, "re-opened ldisc: %p\n", tty->ldisc);
 }
 
 /**
@@ -777,6 +777,8 @@ void tty_ldisc_release(struct tty_struct *tty)
 	 * it does not race with the set_ldisc code path.
 	 */
 
+	tty_ldisc_debug(tty, "closing ldisc: %p\n", tty->ldisc);
+
 	tty_ldisc_lock_pair(tty, o_tty);
 	tty_ldisc_kill(tty);
 	if (o_tty)
@@ -786,7 +788,7 @@ void tty_ldisc_release(struct tty_struct *tty)
 	/* And the memory resources remaining (buffers, termios) will be
 	   disposed of when the kref hits zero */
 
-	tty_ldisc_debug(tty, "released\n");
+	tty_ldisc_debug(tty, "ldisc closed\n");
 }
 
 /**
@@ -797,12 +799,13 @@ void tty_ldisc_release(struct tty_struct *tty)
  *	the tty structure is not completely set up when this call is made.
  */
 
-void tty_ldisc_init(struct tty_struct *tty)
+int tty_ldisc_init(struct tty_struct *tty)
 {
 	struct tty_ldisc *ld = tty_ldisc_get(tty, N_TTY);
 	if (IS_ERR(ld))
-		panic("n_tty: init_tty");
+		return PTR_ERR(ld);
 	tty->ldisc = ld;
+	return 0;
 }
 
 /**

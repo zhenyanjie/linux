@@ -295,6 +295,34 @@ static void vfio_group_put(struct vfio_group *group)
 	kref_put_mutex(&group->kref, vfio_group_release, &vfio.group_lock);
 }
 
+struct vfio_group_put_work {
+	struct work_struct work;
+	struct vfio_group *group;
+};
+
+static void vfio_group_put_bg(struct work_struct *work)
+{
+	struct vfio_group_put_work *do_work;
+
+	do_work = container_of(work, struct vfio_group_put_work, work);
+
+	vfio_group_put(do_work->group);
+	kfree(do_work);
+}
+
+static void vfio_group_schedule_put(struct vfio_group *group)
+{
+	struct vfio_group_put_work *do_work;
+
+	do_work = kmalloc(sizeof(*do_work), GFP_KERNEL);
+	if (WARN_ON(!do_work))
+		return;
+
+	INIT_WORK(&do_work->work, vfio_group_put_bg);
+	do_work->group = group;
+	schedule_work(&do_work->work);
+}
+
 /* Assume group_lock or group reference is held */
 static void vfio_group_get(struct vfio_group *group)
 {
@@ -601,7 +629,14 @@ static int vfio_iommu_group_notifier(struct notifier_block *nb,
 		break;
 	}
 
-	vfio_group_put(group);
+	/*
+	 * If we're the last reference to the group, the group will be
+	 * released, which includes unregistering the iommu group notifier.
+	 * We hold a read-lock on that notifier list, unregistering needs
+	 * a write-lock... deadlock.  Release our reference asynchronously
+	 * to avoid that situation.
+	 */
+	vfio_group_schedule_put(group);
 	return NOTIFY_OK;
 }
 
@@ -661,50 +696,22 @@ int vfio_add_group_dev(struct device *dev,
 EXPORT_SYMBOL_GPL(vfio_add_group_dev);
 
 /**
- * Get a reference to the vfio_device for a device.  Even if the
- * caller thinks they own the device, they could be racing with a
- * release call path, so we can't trust drvdata for the shortcut.
- * Go the long way around, from the iommu_group to the vfio_group
- * to the vfio_device.
+ * Get a reference to the vfio_device for a device that is known to
+ * be bound to a vfio driver.  The driver implicitly holds a
+ * vfio_device reference between vfio_add_group_dev and
+ * vfio_del_group_dev.  We can therefore use drvdata to increment
+ * that reference from the struct device.  This additional
+ * reference must be released by calling vfio_device_put.
  */
 struct vfio_device *vfio_device_get_from_dev(struct device *dev)
 {
-	struct iommu_group *iommu_group;
-	struct vfio_group *group;
-	struct vfio_device *device;
+	struct vfio_device *device = dev_get_drvdata(dev);
 
-	iommu_group = iommu_group_get(dev);
-	if (!iommu_group)
-		return NULL;
-
-	group = vfio_group_get_from_iommu(iommu_group);
-	iommu_group_put(iommu_group);
-	if (!group)
-		return NULL;
-
-	device = vfio_group_get_device(group, dev);
-	vfio_group_put(group);
+	vfio_device_get(device);
 
 	return device;
 }
 EXPORT_SYMBOL_GPL(vfio_device_get_from_dev);
-
-static struct vfio_device *vfio_device_get_from_name(struct vfio_group *group,
-						     char *buf)
-{
-	struct vfio_device *device;
-
-	mutex_lock(&group->device_lock);
-	list_for_each_entry(device, &group->device_list, group_next) {
-		if (!strcmp(dev_name(device->dev), buf)) {
-			vfio_device_get(device);
-			break;
-		}
-	}
-	mutex_unlock(&group->device_lock);
-
-	return device;
-}
 
 /*
  * Caller must hold a reference to the vfio_device
@@ -1215,53 +1222,53 @@ static int vfio_group_get_device_fd(struct vfio_group *group, char *buf)
 {
 	struct vfio_device *device;
 	struct file *filep;
-	int ret;
+	int ret = -ENODEV;
 
 	if (0 == atomic_read(&group->container_users) ||
 	    !group->container->iommu_driver || !vfio_group_viable(group))
 		return -EINVAL;
 
-	device = vfio_device_get_from_name(group, buf);
-	if (!device)
-		return -ENODEV;
+	mutex_lock(&group->device_lock);
+	list_for_each_entry(device, &group->device_list, group_next) {
+		if (strcmp(dev_name(device->dev), buf))
+			continue;
 
-	ret = device->ops->open(device->device_data);
-	if (ret) {
-		vfio_device_put(device);
-		return ret;
+		ret = device->ops->open(device->device_data);
+		if (ret)
+			break;
+		/*
+		 * We can't use anon_inode_getfd() because we need to modify
+		 * the f_mode flags directly to allow more than just ioctls
+		 */
+		ret = get_unused_fd_flags(O_CLOEXEC);
+		if (ret < 0) {
+			device->ops->release(device->device_data);
+			break;
+		}
+
+		filep = anon_inode_getfile("[vfio-device]", &vfio_device_fops,
+					   device, O_RDWR);
+		if (IS_ERR(filep)) {
+			put_unused_fd(ret);
+			ret = PTR_ERR(filep);
+			device->ops->release(device->device_data);
+			break;
+		}
+
+		/*
+		 * TODO: add an anon_inode interface to do this.
+		 * Appears to be missing by lack of need rather than
+		 * explicitly prevented.  Now there's need.
+		 */
+		filep->f_mode |= (FMODE_LSEEK | FMODE_PREAD | FMODE_PWRITE);
+
+		vfio_device_get(device);
+		atomic_inc(&group->container_users);
+
+		fd_install(ret, filep);
+		break;
 	}
-
-	/*
-	 * We can't use anon_inode_getfd() because we need to modify
-	 * the f_mode flags directly to allow more than just ioctls
-	 */
-	ret = get_unused_fd_flags(O_CLOEXEC);
-	if (ret < 0) {
-		device->ops->release(device->device_data);
-		vfio_device_put(device);
-		return ret;
-	}
-
-	filep = anon_inode_getfile("[vfio-device]", &vfio_device_fops,
-				   device, O_RDWR);
-	if (IS_ERR(filep)) {
-		put_unused_fd(ret);
-		ret = PTR_ERR(filep);
-		device->ops->release(device->device_data);
-		vfio_device_put(device);
-		return ret;
-	}
-
-	/*
-	 * TODO: add an anon_inode interface to do this.
-	 * Appears to be missing by lack of need rather than
-	 * explicitly prevented.  Now there's need.
-	 */
-	filep->f_mode |= (FMODE_LSEEK | FMODE_PREAD | FMODE_PWRITE);
-
-	atomic_inc(&group->container_users);
-
-	fd_install(ret, filep);
+	mutex_unlock(&group->device_lock);
 
 	return ret;
 }
@@ -1531,6 +1538,15 @@ void vfio_group_put_external_user(struct vfio_group *group)
 	vfio_group_try_dissolve_container(group);
 }
 EXPORT_SYMBOL_GPL(vfio_group_put_external_user);
+
+bool vfio_external_group_match_file(struct vfio_group *test_group,
+				    struct file *filep)
+{
+	struct vfio_group *group = filep->private_data;
+
+	return (filep->f_op == &vfio_group_fops) && (group == test_group);
+}
+EXPORT_SYMBOL_GPL(vfio_external_group_match_file);
 
 int vfio_external_user_iommu_id(struct vfio_group *group)
 {

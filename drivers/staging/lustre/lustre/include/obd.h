@@ -244,12 +244,11 @@ struct obd_type {
 	struct list_head typ_chain;
 	struct obd_ops *typ_dt_ops;
 	struct md_ops *typ_md_ops;
-	struct dentry *typ_debugfs_entry;
+	struct proc_dir_entry *typ_procroot;
 	char *typ_name;
 	int  typ_refcnt;
 	struct lu_device_type *typ_lu;
 	spinlock_t obd_type_lock;
-	struct kobject *typ_kobj;
 };
 
 struct brw_page {
@@ -545,7 +544,7 @@ struct pool_desc {
 	struct lov_qos_rr     pool_rr;		/* round robin qos */
 	struct hlist_node      pool_hash;	      /* access by poolname */
 	struct list_head	    pool_list;	      /* serial access */
-	struct dentry		*pool_debugfs_entry;	/* file in /proc */
+	struct proc_dir_entry *pool_proc_entry;	/* file in /proc */
 	struct obd_device    *pool_lobd;	/* obd of the lov/lod to which
 						*  this pool belongs */
 };
@@ -566,15 +565,13 @@ struct lov_obd {
 	int		     lov_pool_count;
 	struct cfs_hash	     *lov_pools_hash_body; /* used for key access */
 	struct list_head	lov_pool_list; /* used for sequential access */
-	struct dentry		*lov_pool_debugfs_entry;
+	struct proc_dir_entry   *lov_pool_proc_entry;
 	enum lustre_sec_part    lov_sp_me;
 
 	/* Cached LRU pages from upper layer */
 	void		       *lov_cache;
 
 	struct rw_semaphore     lov_notify_lock;
-
-	struct kobject		*lov_tgts_kobj;
 };
 
 struct lmv_tgt_desc {
@@ -613,7 +610,6 @@ struct lmv_obd {
 	struct lmv_tgt_desc	**tgts;
 
 	struct obd_connect_data	conn_data;
-	struct kobject		*lmv_tgts_kobj;
 };
 
 struct niobuf_local {
@@ -845,6 +841,9 @@ struct obd_device {
 	struct cfs_hash	     *obd_uuid_hash;
 	/* nid-export hash body */
 	struct cfs_hash	     *obd_nid_hash;
+	/* nid stats body */
+	struct cfs_hash	     *obd_nid_stats_hash;
+	struct list_head	      obd_nid_stats;
 	atomic_t	    obd_refcount;
 	wait_queue_head_t	     obd_refcount_waitq;
 	struct list_head	      obd_exports;
@@ -914,8 +913,10 @@ struct obd_device {
 	unsigned int	   md_cntr_base;
 	struct lprocfs_stats  *md_stats;
 
-	struct dentry		*obd_debugfs_entry;
-	struct dentry		*obd_svc_debugfs_entry;
+	struct proc_dir_entry  *obd_proc_entry;
+	void		  *obd_proc_private; /* type private PDEs */
+	struct proc_dir_entry  *obd_proc_exports_entry;
+	struct proc_dir_entry  *obd_svc_procroot;
 	struct lprocfs_stats  *obd_svc_stats;
 	atomic_t	   obd_evict_inprogress;
 	wait_queue_head_t	    obd_evict_inprogress_waitq;
@@ -935,9 +936,6 @@ struct obd_device {
 	struct lu_ref	  obd_reference;
 
 	int		       obd_conn_inprogress;
-
-	struct kobject		obd_kobj; /* sysfs object */
-	struct completion	obd_kobj_unregister;
 };
 
 #define OBD_LLOG_FL_SENDNOW     0x0001
@@ -1472,7 +1470,7 @@ static inline bool filename_is_volatile(const char *name, int namelen, int *idx)
 	}
 	/* we have an idx, read it */
 	start = name + LUSTRE_VOLATILE_HDR_LEN + 1;
-	*idx = simple_strtoul(start, &end, 0);
+	*idx = strtoul(start, &end, 0);
 	/* error cases:
 	 * no digit, no trailing :, negative value
 	 */

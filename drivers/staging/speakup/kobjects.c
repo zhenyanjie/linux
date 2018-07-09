@@ -240,8 +240,7 @@ static ssize_t keymap_show(struct kobject *kobj, struct kobj_attribute *attr,
 	cp += sprintf(cp, "%d, %d, %d,\n", KEY_MAP_VER, num_keys, nstates);
 	cp1 += 2; /* now pointing at shift states */
 	/* dump num_keys+1 as first row is shift states + flags,
-	 * each subsequent row is key + states
-	 */
+	 * each subsequent row is key + states */
 	for (n = 0; n <= num_keys; n++) {
 		for (i = 0; i <= nstates; i++) {
 			ch = *cp1++;
@@ -831,7 +830,9 @@ static ssize_t message_show(struct kobject *kobj,
 	struct msg_group_t *group = spk_find_msg_group(attr->attr.name);
 	unsigned long flags;
 
-	BUG_ON(!group);
+	if (WARN_ON(!group))
+		return -EINVAL;
+
 	spin_lock_irqsave(&speakup_info.spinlock, flags);
 	retval = message_show_helper(buf, group->start, group->end);
 	spin_unlock_irqrestore(&speakup_info.spinlock, flags);
@@ -843,7 +844,9 @@ static ssize_t message_store(struct kobject *kobj, struct kobj_attribute *attr,
 {
 	struct msg_group_t *group = spk_find_msg_group(attr->attr.name);
 
-	BUG_ON(!group);
+	if (WARN_ON(!group))
+		return -EINVAL;
+
 	return message_store_helper(buf, count, group);
 }
 

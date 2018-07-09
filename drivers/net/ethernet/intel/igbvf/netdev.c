@@ -319,7 +319,6 @@ static bool igbvf_clean_rx_irq(struct igbvf_adapter *adapter,
 			dma_unmap_single(&pdev->dev, buffer_info->dma,
 					 adapter->rx_ps_hdr_size,
 					 DMA_FROM_DEVICE);
-			buffer_info->dma = 0;
 			skb_put(skb, hlen);
 		}
 
@@ -809,7 +808,7 @@ static bool igbvf_clean_tx_irq(struct igbvf_ring *tx_ring)
 			break;
 
 		/* prevent any other reads prior to eop_desc */
-		read_barrier_depends();
+		smp_rmb();
 
 		/* if DD is not set pending work has not been completed */
 		if (!(eop_desc->wb.status & cpu_to_le32(E1000_TXD_STAT_DD)))

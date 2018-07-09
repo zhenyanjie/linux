@@ -106,6 +106,9 @@ static int cache_shared_cpu_map_setup(unsigned int cpu)
 	unsigned int index;
 	int ret;
 
+	if (this_cpu_ci->cpu_map_populated)
+		return 0;
+
 	ret = cache_setup_of_node(cpu);
 	if (ret)
 		return ret;
@@ -198,12 +201,12 @@ static int detect_cache_attributes(unsigned int cpu)
 	if (ret)
 		goto free_ci;
 	/*
-	 * For systems using DT for cache hierarchy, of_node and shared_cpu_map
+	 * For systems using DT for cache hierarcy, of_node and shared_cpu_map
 	 * will be set up here only if they are not populated already
 	 */
 	ret = cache_shared_cpu_map_setup(cpu);
 	if (ret) {
-		pr_warn("Unable to detect cache hierarchy from DT for CPU %d\n",
+		pr_warn("Unable to detect cache hierarcy from DT for CPU %d\n",
 			cpu);
 		goto free_ci;
 	}

@@ -154,6 +154,7 @@ struct bcma_host_ops {
 #define BCMA_CORE_DEFAULT		0xFFF
 
 #define BCMA_MAX_NR_CORES		16
+#define BCMA_CORE_SIZE			0x1000
 
 /* Chip IDs of PCIe devices */
 #define BCMA_CHIP_ID_BCM4313	0x4313
@@ -304,15 +305,6 @@ int __bcma_driver_register(struct bcma_driver *drv, struct module *owner);
 	__bcma_driver_register(drv, THIS_MODULE)
 
 extern void bcma_driver_unregister(struct bcma_driver *drv);
-
-/* module_bcma_driver() - Helper macro for drivers that don't do
- * anything special in module init/exit.  This eliminates a lot of
- * boilerplate.  Each module may only use this macro once, and
- * calling it replaces module_init() and module_exit()
- */
-#define module_bcma_driver(__bcma_driver) \
-	module_driver(__bcma_driver, bcma_driver_register, \
-			bcma_driver_unregister)
 
 /* Set a fallback SPROM.
  * See kdoc at the function definition for complete documentation. */

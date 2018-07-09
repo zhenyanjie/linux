@@ -186,11 +186,19 @@ static ssize_t at24_eeprom_read(struct at24_data *at24, char *buf,
 	if (count > io_limit)
 		count = io_limit;
 
-	if (at24->use_smbus) {
+	switch (at24->use_smbus) {
+	case I2C_SMBUS_I2C_BLOCK_DATA:
 		/* Smaller eeproms can work given some SMBus extension calls */
 		if (count > I2C_SMBUS_BLOCK_MAX)
 			count = I2C_SMBUS_BLOCK_MAX;
-	} else {
+		break;
+	case I2C_SMBUS_WORD_DATA:
+		count = 2;
+		break;
+	case I2C_SMBUS_BYTE_DATA:
+		count = 1;
+		break;
+	default:
 		/*
 		 * When we have a better choice than SMBus calls, use a
 		 * combined I2C message. Write address; then read up to
@@ -221,10 +229,27 @@ static ssize_t at24_eeprom_read(struct at24_data *at24, char *buf,
 	timeout = jiffies + msecs_to_jiffies(write_timeout);
 	do {
 		read_time = jiffies;
-		if (at24->use_smbus) {
-			status = i2c_smbus_read_i2c_block_data_or_emulated(client, offset,
-									   count, buf);
-		} else {
+		switch (at24->use_smbus) {
+		case I2C_SMBUS_I2C_BLOCK_DATA:
+			status = i2c_smbus_read_i2c_block_data(client, offset,
+					count, buf);
+			break;
+		case I2C_SMBUS_WORD_DATA:
+			status = i2c_smbus_read_word_data(client, offset);
+			if (status >= 0) {
+				buf[0] = status & 0xff;
+				buf[1] = status >> 8;
+				status = count;
+			}
+			break;
+		case I2C_SMBUS_BYTE_DATA:
+			status = i2c_smbus_read_byte_data(client, offset);
+			if (status >= 0) {
+				buf[0] = status;
+				status = count;
+			}
+			break;
+		default:
 			status = i2c_transfer(client->adapter, msg, 2);
 			if (status == 2)
 				status = count;
@@ -249,6 +274,9 @@ static ssize_t at24_read(struct at24_data *at24,
 
 	if (unlikely(!count))
 		return count;
+
+	if (off + count > at24->chip.byte_len)
+		return -EINVAL;
 
 	/*
 	 * Read data from chip, protecting against concurrent updates
@@ -303,6 +331,9 @@ static ssize_t at24_eeprom_write(struct at24_data *at24, const char *buf,
 	ssize_t status = 0;
 	unsigned long timeout, write_time;
 	unsigned next_page;
+
+	if (offset + count > at24->chip.byte_len)
+		return -EINVAL;
 
 	/* Get corresponding I2C address and adjust offset */
 	client = at24_translate_offset(at24, &offset);
@@ -412,6 +443,9 @@ static ssize_t at24_bin_write(struct file *filp, struct kobject *kobj,
 		char *buf, loff_t off, size_t count)
 {
 	struct at24_data *at24;
+
+	if (unlikely(off >= attr->size))
+		return -EFBIG;
 
 	at24 = dev_get_drvdata(container_of(kobj, struct device, kobj));
 	return at24_write(at24, buf, off, count);
@@ -661,6 +695,7 @@ static int at24_remove(struct i2c_client *client)
 static struct i2c_driver at24_driver = {
 	.driver = {
 		.name = "at24",
+		.owner = THIS_MODULE,
 	},
 	.probe = at24_probe,
 	.remove = at24_remove,

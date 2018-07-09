@@ -35,7 +35,7 @@
 #include <linux/time.h>
 #include <linux/cpu.h>
 #include <linux/prefetch.h>
-#include <linux/trace_events.h>
+#include <linux/ftrace_event.h>
 
 #include "rcu.h"
 
@@ -48,6 +48,39 @@ static void __call_rcu(struct rcu_head *head,
 		       struct rcu_ctrlblk *rcp);
 
 #include "tiny_plugin.h"
+
+/*
+ * Enter idle, which is an extended quiescent state if we have fully
+ * entered that mode.
+ */
+void rcu_idle_enter(void)
+{
+}
+EXPORT_SYMBOL_GPL(rcu_idle_enter);
+
+/*
+ * Exit an interrupt handler towards idle.
+ */
+void rcu_irq_exit(void)
+{
+}
+EXPORT_SYMBOL_GPL(rcu_irq_exit);
+
+/*
+ * Exit idle, so that we are no longer in an extended quiescent state.
+ */
+void rcu_idle_exit(void)
+{
+}
+EXPORT_SYMBOL_GPL(rcu_idle_exit);
+
+/*
+ * Enter an interrupt handler, moving away from idle.
+ */
+void rcu_irq_enter(void)
+{
+}
+EXPORT_SYMBOL_GPL(rcu_irq_enter);
 
 #if defined(CONFIG_DEBUG_LOCK_ALLOC) || defined(CONFIG_RCU_TRACE)
 
@@ -191,10 +224,10 @@ static void rcu_process_callbacks(struct softirq_action *unused)
  */
 void synchronize_sched(void)
 {
-	RCU_LOCKDEP_WARN(lock_is_held(&rcu_bh_lock_map) ||
-			 lock_is_held(&rcu_lock_map) ||
-			 lock_is_held(&rcu_sched_lock_map),
-			 "Illegal synchronize_sched() in RCU read-side critical section");
+	rcu_lockdep_assert(!lock_is_held(&rcu_bh_lock_map) &&
+			   !lock_is_held(&rcu_lock_map) &&
+			   !lock_is_held(&rcu_sched_lock_map),
+			   "Illegal synchronize_sched() in RCU read-side critical section");
 	cond_resched();
 }
 EXPORT_SYMBOL_GPL(synchronize_sched);

@@ -2,7 +2,7 @@
  * This file contains error reporting code.
  *
  * Copyright (c) 2014 Samsung Electronics Co., Ltd.
- * Author: Andrey Ryabinin <ryabinin.a.a@gmail.com>
+ * Author: Andrey Ryabinin <a.ryabinin@samsung.com>
  *
  * Some of code borrowed from https://github.com/xairy/linux by
  *        Andrey Konovalov <adech.fo@gmail.com>
@@ -13,6 +13,7 @@
  *
  */
 
+#include <linux/ftrace.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/printk.h>
@@ -222,6 +223,8 @@ void kasan_report(unsigned long addr, size_t size,
 
 	if (likely(!kasan_enabled()))
 		return;
+
+	disable_trace_on_warning();
 
 	info.access_addr = (void *)addr;
 	info.access_size = size;

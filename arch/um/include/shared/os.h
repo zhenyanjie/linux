@@ -301,6 +301,4 @@ extern int get_pty(void);
 /* sys-$ARCH/task_size.c */
 extern unsigned long os_get_top_address(void);
 
-long syscall(long number, ...);
-
 #endif

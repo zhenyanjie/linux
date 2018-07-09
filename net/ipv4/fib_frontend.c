@@ -45,8 +45,6 @@
 #include <net/ip_fib.h>
 #include <net/rtnetlink.h>
 #include <net/xfrm.h>
-#include <net/vrf.h>
-#include <trace/events/fib.h>
 
 #ifndef CONFIG_IP_MULTIPLE_TABLES
 
@@ -213,12 +211,12 @@ void fib_flush_external(struct net *net)
  */
 static inline unsigned int __inet_dev_addr_type(struct net *net,
 						const struct net_device *dev,
-						__be32 addr, u32 tb_id)
+						__be32 addr)
 {
 	struct flowi4		fl4 = { .daddr = addr };
 	struct fib_result	res;
 	unsigned int ret = RTN_BROADCAST;
-	struct fib_table *table;
+	struct fib_table *local_table;
 
 	if (ipv4_is_zeronet(addr) || ipv4_is_lbcast(addr))
 		return RTN_BROADCAST;
@@ -227,10 +225,10 @@ static inline unsigned int __inet_dev_addr_type(struct net *net,
 
 	rcu_read_lock();
 
-	table = fib_get_table(net, tb_id);
-	if (table) {
+	local_table = fib_get_table(net, RT_TABLE_LOCAL);
+	if (local_table) {
 		ret = RTN_UNICAST;
-		if (!fib_table_lookup(table, &fl4, &res, FIB_LOOKUP_NOREF)) {
+		if (!fib_table_lookup(local_table, &fl4, &res, FIB_LOOKUP_NOREF)) {
 			if (!dev || dev == res.fi->fib_dev)
 				ret = res.type;
 		}
@@ -240,39 +238,18 @@ static inline unsigned int __inet_dev_addr_type(struct net *net,
 	return ret;
 }
 
-unsigned int inet_addr_type_table(struct net *net, __be32 addr, u32 tb_id)
-{
-	return __inet_dev_addr_type(net, NULL, addr, tb_id);
-}
-EXPORT_SYMBOL(inet_addr_type_table);
-
 unsigned int inet_addr_type(struct net *net, __be32 addr)
 {
-	return __inet_dev_addr_type(net, NULL, addr, RT_TABLE_LOCAL);
+	return __inet_dev_addr_type(net, NULL, addr);
 }
 EXPORT_SYMBOL(inet_addr_type);
 
 unsigned int inet_dev_addr_type(struct net *net, const struct net_device *dev,
 				__be32 addr)
 {
-	u32 rt_table = vrf_dev_table(dev) ? : RT_TABLE_LOCAL;
-
-	return __inet_dev_addr_type(net, dev, addr, rt_table);
+	return __inet_dev_addr_type(net, dev, addr);
 }
 EXPORT_SYMBOL(inet_dev_addr_type);
-
-/* inet_addr_type with dev == NULL but using the table from a dev
- * if one is associated
- */
-unsigned int inet_addr_type_dev_table(struct net *net,
-				      const struct net_device *dev,
-				      __be32 addr)
-{
-	u32 rt_table = vrf_dev_table(dev) ? : RT_TABLE_LOCAL;
-
-	return __inet_dev_addr_type(net, NULL, addr, rt_table);
-}
-EXPORT_SYMBOL(inet_addr_type_dev_table);
 
 __be32 fib_compute_spec_dst(struct sk_buff *skb)
 {
@@ -303,8 +280,7 @@ __be32 fib_compute_spec_dst(struct sk_buff *skb)
 		fl4.flowi4_tos = RT_TOS(ip_hdr(skb)->tos);
 		fl4.flowi4_scope = scope;
 		fl4.flowi4_mark = IN_DEV_SRC_VMARK(in_dev) ? skb->mark : 0;
-		fl4.flowi4_tun_key.tun_id = 0;
-		if (!fib_lookup(net, &fl4, &res, 0))
+		if (!fib_lookup(net, &fl4, &res))
 			return FIB_RES_PREFSRC(net, res);
 	} else {
 		scope = RT_SCOPE_LINK;
@@ -332,24 +308,18 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	bool dev_match;
 
 	fl4.flowi4_oif = 0;
-	fl4.flowi4_iif = vrf_master_ifindex_rcu(dev);
-	if (!fl4.flowi4_iif)
-		fl4.flowi4_iif = oif ? : LOOPBACK_IFINDEX;
+	fl4.flowi4_iif = oif ? : LOOPBACK_IFINDEX;
 	fl4.daddr = src;
 	fl4.saddr = dst;
 	fl4.flowi4_tos = tos;
 	fl4.flowi4_scope = RT_SCOPE_UNIVERSE;
-	fl4.flowi4_tun_key.tun_id = 0;
-	fl4.flowi4_flags = 0;
 
 	no_addr = idev->ifa_list == NULL;
 
 	fl4.flowi4_mark = IN_DEV_SRC_VMARK(idev) ? skb->mark : 0;
 
-	trace_fib_validate_source(dev, &fl4);
-
 	net = dev_net(dev);
-	if (fib_lookup(net, &fl4, &res, 0))
+	if (fib_lookup(net, &fl4, &res))
 		goto last_resort;
 	if (res.type != RTN_UNICAST &&
 	    (res.type != RTN_LOCAL || !IN_DEV_ACCEPT_LOCAL(idev)))
@@ -365,9 +335,6 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 		struct fib_nh *nh = &res.fi->fib_nh[ret];
 
 		if (nh->nh_dev == dev) {
-			dev_match = true;
-			break;
-		} else if (vrf_master_ifindex_rcu(nh->nh_dev) == dev->ifindex) {
 			dev_match = true;
 			break;
 		}
@@ -387,7 +354,7 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	fl4.flowi4_oif = dev->ifindex;
 
 	ret = 0;
-	if (fib_lookup(net, &fl4, &res, FIB_LOOKUP_IGNORE_LINKSTATE) == 0) {
+	if (fib_lookup(net, &fl4, &res) == 0) {
 		if (res.type == RTN_UNICAST)
 			ret = FIB_RES_NH(res).nh_scope >= RT_SCOPE_HOST;
 	}
@@ -527,12 +494,9 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 
 	addr = sk_extract_addr(&rt->rt_gateway);
 	if (rt->rt_gateway.sa_family == AF_INET && addr) {
-		unsigned int addr_type;
-
 		cfg->fc_gw = addr;
-		addr_type = inet_addr_type_table(net, addr, cfg->fc_table);
 		if (rt->rt_flags & RTF_GATEWAY &&
-		    addr_type == RTN_UNICAST)
+		    inet_addr_type(net, addr) == RTN_UNICAST)
 			cfg->fc_scope = RT_SCOPE_UNIVERSE;
 	}
 
@@ -627,8 +591,6 @@ const struct nla_policy rtm_ipv4_policy[RTA_MAX + 1] = {
 	[RTA_METRICS]		= { .type = NLA_NESTED },
 	[RTA_MULTIPATH]		= { .len = sizeof(struct rtnexthop) },
 	[RTA_FLOW]		= { .type = NLA_U32 },
-	[RTA_ENCAP_TYPE]	= { .type = NLA_U16 },
-	[RTA_ENCAP]		= { .type = NLA_NESTED },
 };
 
 static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
@@ -693,12 +655,6 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 			break;
 		case RTA_TABLE:
 			cfg->fc_table = nla_get_u32(attr);
-			break;
-		case RTA_ENCAP:
-			cfg->fc_encap = attr;
-			break;
-		case RTA_ENCAP_TYPE:
-			cfg->fc_encap_type = nla_get_u16(attr);
 			break;
 		}
 	}
@@ -804,7 +760,6 @@ out:
 static void fib_magic(int cmd, int type, __be32 dst, int dst_len, struct in_ifaddr *ifa)
 {
 	struct net *net = dev_net(ifa->ifa_dev->dev);
-	u32 tb_id = vrf_dev_table_rtnl(ifa->ifa_dev->dev);
 	struct fib_table *tb;
 	struct fib_config cfg = {
 		.fc_protocol = RTPROT_KERNEL,
@@ -819,10 +774,11 @@ static void fib_magic(int cmd, int type, __be32 dst, int dst_len, struct in_ifad
 		},
 	};
 
-	if (!tb_id)
-		tb_id = (type == RTN_UNICAST) ? RT_TABLE_MAIN : RT_TABLE_LOCAL;
+	if (type == RTN_UNICAST)
+		tb = fib_new_table(net, RT_TABLE_MAIN);
+	else
+		tb = fib_new_table(net, RT_TABLE_LOCAL);
 
-	tb = fib_new_table(net, tb_id);
 	if (!tb)
 		return;
 
@@ -905,7 +861,11 @@ void fib_del_ifaddr(struct in_ifaddr *ifa, struct in_ifaddr *iprim)
 	if (ifa->ifa_flags & IFA_F_SECONDARY) {
 		prim = inet_ifa_byprefix(in_dev, any, ifa->ifa_mask);
 		if (!prim) {
-			pr_warn("%s: bug: prim == NULL\n", __func__);
+			/* if the device has been deleted, we don't perform
+			 * address promotion
+			 */
+			if (!in_dev->dead)
+				pr_warn("%s: bug: prim == NULL\n", __func__);
 			return;
 		}
 		if (iprim && iprim != prim) {
@@ -919,6 +879,9 @@ void fib_del_ifaddr(struct in_ifaddr *ifa, struct in_ifaddr *iprim)
 			  any, ifa->ifa_prefixlen, prim);
 		subnet = 1;
 	}
+
+	if (in_dev->dead)
+		goto no_promotions;
 
 	/* Deletion is more complicated than add.
 	 * We should take care of not to delete too much :-)
@@ -995,6 +958,7 @@ void fib_del_ifaddr(struct in_ifaddr *ifa, struct in_ifaddr *iprim)
 		}
 	}
 
+no_promotions:
 	if (!(ok & BRD_OK))
 		fib_magic(RTM_DELROUTE, RTN_BROADCAST, ifa->ifa_broadcast, 32, prim);
 	if (subnet && ifa->ifa_prefixlen < 31) {
@@ -1004,14 +968,11 @@ void fib_del_ifaddr(struct in_ifaddr *ifa, struct in_ifaddr *iprim)
 			fib_magic(RTM_DELROUTE, RTN_BROADCAST, any, 32, prim);
 	}
 	if (!(ok & LOCAL_OK)) {
-		unsigned int addr_type;
-
 		fib_magic(RTM_DELROUTE, RTN_LOCAL, ifa->ifa_local, 32, prim);
 
 		/* Check, that this local address finally disappeared. */
-		addr_type = inet_addr_type_dev_table(dev_net(dev), dev,
-						     ifa->ifa_local);
-		if (gone && addr_type != RTN_LOCAL) {
+		if (gone &&
+		    inet_addr_type(dev_net(dev), ifa->ifa_local) != RTN_LOCAL) {
 			/* And the last, but not the least thing.
 			 * We must flush stray FIB entries.
 			 *
@@ -1072,7 +1033,8 @@ static void nl_fib_input(struct sk_buff *skb)
 
 	net = sock_net(skb->sk);
 	nlh = nlmsg_hdr(skb);
-	if (skb->len < NLMSG_HDRLEN || skb->len < nlh->nlmsg_len ||
+	if (skb->len < nlmsg_total_size(sizeof(*frn)) ||
+	    skb->len < nlh->nlmsg_len ||
 	    nlmsg_len(nlh) < sizeof(*frn))
 		return;
 
@@ -1110,10 +1072,9 @@ static void nl_fib_lookup_exit(struct net *net)
 	net->ipv4.fibnl = NULL;
 }
 
-static void fib_disable_ip(struct net_device *dev, unsigned long event,
-			   bool force)
+static void fib_disable_ip(struct net_device *dev, int force)
 {
-	if (fib_sync_down_dev(dev, event, force))
+	if (fib_sync_down_dev(dev, force))
 		fib_flush(dev_net(dev));
 	rt_cache_flush(dev_net(dev));
 	arp_ifdown(dev);
@@ -1129,7 +1090,7 @@ static int fib_inetaddr_event(struct notifier_block *this, unsigned long event, 
 	case NETDEV_UP:
 		fib_add_ifaddr(ifa);
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-		fib_sync_up(dev, RTNH_F_DEAD);
+		fib_sync_up(dev);
 #endif
 		atomic_inc(&net->ipv4.dev_addr_genid);
 		rt_cache_flush(dev_net(dev));
@@ -1141,7 +1102,7 @@ static int fib_inetaddr_event(struct notifier_block *this, unsigned long event, 
 			/* Last address was deleted from this interface.
 			 * Disable IP.
 			 */
-			fib_disable_ip(dev, event, true);
+			fib_disable_ip(dev, 1);
 		} else {
 			rt_cache_flush(dev_net(dev));
 		}
@@ -1155,10 +1116,9 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
 	struct in_device *in_dev;
 	struct net *net = dev_net(dev);
-	unsigned int flags;
 
 	if (event == NETDEV_UNREGISTER) {
-		fib_disable_ip(dev, event, true);
+		fib_disable_ip(dev, 2);
 		rt_flush_dev(dev);
 		return NOTIFY_DONE;
 	}
@@ -1173,22 +1133,16 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 			fib_add_ifaddr(ifa);
 		} endfor_ifa(in_dev);
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-		fib_sync_up(dev, RTNH_F_DEAD);
+		fib_sync_up(dev);
 #endif
 		atomic_inc(&net->ipv4.dev_addr_genid);
 		rt_cache_flush(net);
 		break;
 	case NETDEV_DOWN:
-		fib_disable_ip(dev, event, false);
+		fib_disable_ip(dev, 0);
 		break;
-	case NETDEV_CHANGE:
-		flags = dev_get_flags(dev);
-		if (flags & (IFF_RUNNING | IFF_LOWER_UP))
-			fib_sync_up(dev, RTNH_F_LINKDOWN);
-		else
-			fib_sync_down_dev(dev, event, false);
-		/* fall through */
 	case NETDEV_CHANGEMTU:
+	case NETDEV_CHANGE:
 		rt_cache_flush(net);
 		break;
 	}
@@ -1227,7 +1181,7 @@ fail:
 
 static void ip_fib_net_exit(struct net *net)
 {
-	unsigned int i;
+	int i;
 
 	rtnl_lock();
 #ifdef CONFIG_IP_MULTIPLE_TABLES
@@ -1235,7 +1189,12 @@ static void ip_fib_net_exit(struct net *net)
 	RCU_INIT_POINTER(net->ipv4.fib_main, NULL);
 	RCU_INIT_POINTER(net->ipv4.fib_default, NULL);
 #endif
-	for (i = 0; i < FIB_TABLE_HASHSZ; i++) {
+	/* Destroy the tables in reverse order to guarantee that the
+	 * local table, ID 255, is destroyed before the main table, ID
+	 * 254. This is necessary as the local table may contain
+	 * references to data contained in the main table.
+	 */
+	for (i = FIB_TABLE_HASHSZ - 1; i >= 0; i--) {
 		struct hlist_head *head = &net->ipv4.fib_table_hash[i];
 		struct hlist_node *tmp;
 		struct fib_table *tb;
@@ -1294,13 +1253,14 @@ static struct pernet_operations fib_net_ops = {
 
 void __init ip_fib_init(void)
 {
-	rtnl_register(PF_INET, RTM_NEWROUTE, inet_rtm_newroute, NULL, NULL);
-	rtnl_register(PF_INET, RTM_DELROUTE, inet_rtm_delroute, NULL, NULL);
-	rtnl_register(PF_INET, RTM_GETROUTE, NULL, inet_dump_fib, NULL);
+	fib_trie_init();
 
 	register_pernet_subsys(&fib_net_ops);
+
 	register_netdevice_notifier(&fib_netdev_notifier);
 	register_inetaddr_notifier(&fib_inetaddr_notifier);
 
-	fib_trie_init();
+	rtnl_register(PF_INET, RTM_NEWROUTE, inet_rtm_newroute, NULL, NULL);
+	rtnl_register(PF_INET, RTM_DELROUTE, inet_rtm_delroute, NULL, NULL);
+	rtnl_register(PF_INET, RTM_GETROUTE, NULL, inet_dump_fib, NULL);
 }

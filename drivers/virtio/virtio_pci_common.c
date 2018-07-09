@@ -502,10 +502,17 @@ static int virtio_pci_probe(struct pci_dev *pci_dev,
 	INIT_LIST_HEAD(&vp_dev->virtqueues);
 	spin_lock_init(&vp_dev->lock);
 
+	/* Disable MSI/MSIX to bring device to a known good state. */
+	pci_msi_off(pci_dev);
+
 	/* enable the device */
 	rc = pci_enable_device(pci_dev);
 	if (rc)
 		goto err_enable_device;
+
+	rc = pci_request_regions(pci_dev, "virtio-pci");
+	if (rc)
+		goto err_request_regions;
 
 	if (force_legacy) {
 		rc = virtio_pci_legacy_probe(vp_dev);
@@ -536,6 +543,8 @@ err_register:
 	else
 	     virtio_pci_modern_remove(vp_dev);
 err_probe:
+	pci_release_regions(pci_dev);
+err_request_regions:
 	pci_disable_device(pci_dev);
 err_enable_device:
 	kfree(vp_dev);
@@ -545,6 +554,7 @@ err_enable_device:
 static void virtio_pci_remove(struct pci_dev *pci_dev)
 {
 	struct virtio_pci_device *vp_dev = pci_get_drvdata(pci_dev);
+	struct device *dev = get_device(&vp_dev->vdev.dev);
 
 	unregister_virtio_device(&vp_dev->vdev);
 
@@ -553,7 +563,9 @@ static void virtio_pci_remove(struct pci_dev *pci_dev)
 	else
 		virtio_pci_modern_remove(vp_dev);
 
+	pci_release_regions(pci_dev);
 	pci_disable_device(pci_dev);
+	put_device(dev);
 }
 
 static struct pci_driver virtio_pci_driver = {

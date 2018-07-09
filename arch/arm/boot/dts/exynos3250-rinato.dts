@@ -16,7 +16,6 @@
 #include "exynos3250.dtsi"
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/clock/samsung,s2mps11.h>
 
 / {
 	model = "Samsung Rinato board";
@@ -107,21 +106,6 @@
 		min-microvolt = <1100000>;
 		max-microvolt = <2700000>;
 	};
-
-	thermal-zones {
-		cpu_thermal: cpu-thermal {
-			cooling-maps {
-				map0 {
-					/* Corresponds to 500MHz */
-					cooling-device = <&cpu0 5 5>;
-				};
-				map1 {
-					/* Corresponds to 200MHz */
-					cooling-device = <&cpu0 8 8>;
-				};
-			};
-		};
-	};
 };
 
 &adc {
@@ -147,13 +131,8 @@
 	};
 };
 
-&cpu0 {
-	cpu0-supply = <&buck2_reg>;
-};
-
 &exynos_usbphy {
 	status = "okay";
-	vbus-supply = <&safeout_reg>;
 };
 
 &hsotg {
@@ -588,10 +567,6 @@
 	status = "okay";
 };
 
-&jpeg {
-	status = "okay";
-};
-
 &mshc_0 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -630,7 +605,7 @@
 };
 
 &rtc {
-	clocks = <&cmu CLK_RTC>, <&s2mps14_osc S2MPS11_CLK_AP>;
+	clocks = <&cmu CLK_RTC>, <&s2mps14_osc 0>;
 	clock-names = "rtc", "rtc_src";
 	status = "okay";
 };

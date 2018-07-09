@@ -22,7 +22,6 @@
 
 #include "ext4_jbd2.h"
 #include "truncate.h"
-#include <linux/dax.h>
 #include <linux/uio.h>
 
 #include <trace/events/ext4.h>
@@ -577,8 +576,6 @@ int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 		ar.flags = EXT4_MB_HINT_DATA;
 	if (flags & EXT4_GET_BLOCKS_DELALLOC_RESERVE)
 		ar.flags |= EXT4_MB_DELALLOC_RESERVED;
-	if (flags & EXT4_GET_BLOCKS_METADATA_NOFAIL)
-		ar.flags |= EXT4_MB_USE_RESERVED;
 
 	ar.goal = ext4_find_goal(inode, map->m_lblk, partial);
 

@@ -79,8 +79,7 @@ static int iio_bfin_tmr_set_state(struct iio_trigger *trig, bool state)
 }
 
 static ssize_t iio_bfin_tmr_frequency_store(struct device *dev,
-					    struct device_attribute *attr,
-					    const char *buf, size_t count)
+		struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct iio_trigger *trig = to_iio_trigger(dev);
 	struct bfin_tmr_state *st = iio_trigger_get_drvdata(trig);
@@ -117,8 +116,8 @@ static ssize_t iio_bfin_tmr_frequency_store(struct device *dev,
 }
 
 static ssize_t iio_bfin_tmr_frequency_show(struct device *dev,
-					   struct device_attribute *attr,
-					   char *buf)
+				 struct device_attribute *attr,
+				 char *buf)
 {
 	struct iio_trigger *trig = to_iio_trigger(dev);
 	struct bfin_tmr_state *st = iio_trigger_get_drvdata(trig);
@@ -259,7 +258,7 @@ out_free_irq:
 out1:
 	iio_trigger_unregister(st->trig);
 out:
-	iio_trigger_put(st->trig);
+	iio_trigger_free(st->trig);
 	return ret;
 }
 
@@ -272,7 +271,7 @@ static int iio_bfin_tmr_trigger_remove(struct platform_device *pdev)
 		peripheral_free(st->t->pin);
 	free_irq(st->irq, st);
 	iio_trigger_unregister(st->trig);
-	iio_trigger_put(st->trig);
+	iio_trigger_free(st->trig);
 
 	return 0;
 }

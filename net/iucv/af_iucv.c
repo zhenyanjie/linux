@@ -535,12 +535,12 @@ static void iucv_sock_init(struct sock *sk, struct sock *parent)
 		sk->sk_type = parent->sk_type;
 }
 
-static struct sock *iucv_sock_alloc(struct socket *sock, int proto, gfp_t prio, int kern)
+static struct sock *iucv_sock_alloc(struct socket *sock, int proto, gfp_t prio)
 {
 	struct sock *sk;
 	struct iucv_sock *iucv;
 
-	sk = sk_alloc(&init_net, PF_IUCV, prio, &iucv_proto, kern);
+	sk = sk_alloc(&init_net, PF_IUCV, prio, &iucv_proto);
 	if (!sk)
 		return NULL;
 	iucv = iucv_sk(sk);
@@ -602,7 +602,7 @@ static int iucv_sock_create(struct net *net, struct socket *sock, int protocol,
 		return -ESOCKTNOSUPPORT;
 	}
 
-	sk = iucv_sock_alloc(sock, protocol, GFP_KERNEL, kern);
+	sk = iucv_sock_alloc(sock, protocol, GFP_KERNEL);
 	if (!sk)
 		return -ENOMEM;
 
@@ -707,6 +707,9 @@ static int iucv_sock_bind(struct socket *sock, struct sockaddr *addr,
 
 	/* Verify the input sockaddr */
 	if (!addr || addr->sa_family != AF_IUCV)
+		return -EINVAL;
+
+	if (addr_len < sizeof(struct sockaddr_iucv))
 		return -EINVAL;
 
 	lock_sock(sk);
@@ -1723,7 +1726,7 @@ static int iucv_callback_connreq(struct iucv_path *path,
 	}
 
 	/* Create the new socket */
-	nsk = iucv_sock_alloc(NULL, sk->sk_type, GFP_ATOMIC, 0);
+	nsk = iucv_sock_alloc(NULL, sk->sk_type, GFP_ATOMIC);
 	if (!nsk) {
 		err = pr_iucv->path_sever(path, user_data);
 		iucv_path_free(path);
@@ -1933,7 +1936,7 @@ static int afiucv_hs_callback_syn(struct sock *sk, struct sk_buff *skb)
 		goto out;
 	}
 
-	nsk = iucv_sock_alloc(NULL, sk->sk_type, GFP_ATOMIC, 0);
+	nsk = iucv_sock_alloc(NULL, sk->sk_type, GFP_ATOMIC);
 	bh_lock_sock(sk);
 	if ((sk->sk_state != IUCV_LISTEN) ||
 	    sk_acceptq_is_full(sk) ||
@@ -2379,9 +2382,11 @@ static int afiucv_iucv_init(void)
 	af_iucv_dev->driver = &af_iucv_driver;
 	err = device_register(af_iucv_dev);
 	if (err)
-		goto out_driver;
+		goto out_iucv_dev;
 	return 0;
 
+out_iucv_dev:
+	put_device(af_iucv_dev);
 out_driver:
 	driver_unregister(&af_iucv_driver);
 out_iucv:

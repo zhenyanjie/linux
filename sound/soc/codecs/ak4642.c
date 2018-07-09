@@ -493,6 +493,7 @@ static int ak4642_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_update_bits(codec, PW_MGMT1, PMVCM, PMVCM);
 		break;
 	}
+	codec->dapm.bias_level = level;
 
 	return 0;
 }
@@ -549,6 +550,7 @@ static const struct regmap_config ak4642_regmap = {
 	.max_register		= FIL1_3,
 	.reg_defaults		= ak4642_reg,
 	.num_reg_defaults	= NUM_AK4642_REG_DEFAULTS,
+	.cache_type		= REGCACHE_RBTREE,
 };
 
 static const struct regmap_config ak4643_regmap = {
@@ -557,6 +559,7 @@ static const struct regmap_config ak4643_regmap = {
 	.max_register		= SPK_MS,
 	.reg_defaults		= ak4643_reg,
 	.num_reg_defaults	= ARRAY_SIZE(ak4643_reg),
+	.cache_type		= REGCACHE_RBTREE,
 };
 
 static const struct regmap_config ak4648_regmap = {
@@ -565,6 +568,7 @@ static const struct regmap_config ak4648_regmap = {
 	.max_register		= EQ_FBEQE,
 	.reg_defaults		= ak4648_reg,
 	.num_reg_defaults	= ARRAY_SIZE(ak4648_reg),
+	.cache_type		= REGCACHE_RBTREE,
 };
 
 static const struct ak4642_drvdata ak4642_drvdata = {
@@ -645,6 +649,7 @@ MODULE_DEVICE_TABLE(i2c, ak4642_i2c_id);
 static struct i2c_driver ak4642_i2c_driver = {
 	.driver = {
 		.name = "ak4642-codec",
+		.owner = THIS_MODULE,
 		.of_match_table = ak4642_of_match,
 	},
 	.probe		= ak4642_i2c_probe,

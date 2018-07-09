@@ -1454,6 +1454,7 @@ static int rtl8187_probe(struct usb_interface *intf,
 		goto err_free_dev;
 	}
 	mutex_init(&priv->io_mutex);
+	mutex_init(&priv->conf_mutex);
 
 	SET_IEEE80211_DEV(dev, &intf->dev);
 	usb_set_intfdata(intf, dev);
@@ -1478,9 +1479,9 @@ static int rtl8187_probe(struct usb_interface *intf,
 	dev->wiphy->bands[IEEE80211_BAND_2GHZ] = &priv->band;
 
 
-	ieee80211_hw_set(dev, RX_INCLUDES_FCS);
-	ieee80211_hw_set(dev, HOST_BROADCAST_PS_BUFFERING);
-	ieee80211_hw_set(dev, SIGNAL_DBM);
+	dev->flags = IEEE80211_HW_HOST_BROADCAST_PS_BUFFERING |
+		     IEEE80211_HW_SIGNAL_DBM |
+		     IEEE80211_HW_RX_INCLUDES_FCS;
 	/* Initialize rate-control variables */
 	dev->max_rates = 1;
 	dev->max_rate_tries = RETRY_COUNT;
@@ -1627,7 +1628,6 @@ static int rtl8187_probe(struct usb_interface *intf,
 		printk(KERN_ERR "rtl8187: Cannot register device\n");
 		goto err_free_dmabuf;
 	}
-	mutex_init(&priv->conf_mutex);
 	skb_queue_head_init(&priv->b_tx_status.queue);
 
 	wiphy_info(dev->wiphy, "hwaddr %pM, %s V%d + %s, rfkill mask %d\n",

@@ -54,29 +54,24 @@ static inline void pci_iov_set_numvfs(struct pci_dev *dev, int nr_virtfn)
  * The PF consumes one bus number.  NumVFs, First VF Offset, and VF Stride
  * determine how many additional bus numbers will be consumed by VFs.
  *
- * Iterate over all valid NumVFs, validate offset and stride, and calculate
- * the maximum number of bus numbers that could ever be required.
+ * Iterate over all valid NumVFs and calculate the maximum number of bus
+ * numbers that could ever be required.
  */
-static int compute_max_vf_buses(struct pci_dev *dev)
+static inline u8 virtfn_max_buses(struct pci_dev *dev)
 {
 	struct pci_sriov *iov = dev->sriov;
-	int nr_virtfn, busnr, rc = 0;
+	int nr_virtfn;
+	u8 max = 0;
+	int busnr;
 
-	for (nr_virtfn = iov->total_VFs; nr_virtfn; nr_virtfn--) {
+	for (nr_virtfn = 1; nr_virtfn <= iov->total_VFs; nr_virtfn++) {
 		pci_iov_set_numvfs(dev, nr_virtfn);
-		if (!iov->offset || (nr_virtfn > 1 && !iov->stride)) {
-			rc = -EIO;
-			goto out;
-		}
-
 		busnr = pci_iov_virtfn_bus(dev, nr_virtfn - 1);
-		if (busnr > iov->max_VF_buses)
-			iov->max_VF_buses = busnr;
+		if (busnr > max)
+			max = busnr;
 	}
 
-out:
-	pci_iov_set_numvfs(dev, 0);
-	return rc;
+	return max;
 }
 
 static struct pci_bus *virtfn_add_bus(struct pci_bus *bus, int busnr)
@@ -161,7 +156,6 @@ static int virtfn_add(struct pci_dev *dev, int id, int reset)
 	pci_device_add(virtfn, virtfn->bus);
 	mutex_unlock(&iov->dev->sriov->lock);
 
-	pci_bus_add_device(virtfn);
 	sprintf(buf, "virtfn%u", id);
 	rc = sysfs_create_link(&dev->dev.kobj, &virtfn->dev.kobj, buf);
 	if (rc)
@@ -171,6 +165,8 @@ static int virtfn_add(struct pci_dev *dev, int id, int reset)
 		goto failed2;
 
 	kobject_uevent(&virtfn->dev.kobj, KOBJ_CHANGE);
+
+	pci_bus_add_device(virtfn);
 
 	return 0;
 
@@ -307,13 +303,6 @@ static int sriov_enable(struct pci_dev *dev, int nr_virtfn)
 			return rc;
 	}
 
-	pci_iov_set_numvfs(dev, nr_virtfn);
-	iov->ctrl |= PCI_SRIOV_CTRL_VFE | PCI_SRIOV_CTRL_MSE;
-	pci_cfg_access_lock(dev);
-	pci_write_config_word(dev, iov->pos + PCI_SRIOV_CTRL, iov->ctrl);
-	msleep(100);
-	pci_cfg_access_unlock(dev);
-
 	iov->initial_VFs = initial;
 	if (nr_virtfn < initial)
 		initial = nr_virtfn;
@@ -323,6 +312,13 @@ static int sriov_enable(struct pci_dev *dev, int nr_virtfn)
 			retval);
 		return retval;
 	}
+
+	pci_iov_set_numvfs(dev, nr_virtfn);
+	iov->ctrl |= PCI_SRIOV_CTRL_VFE | PCI_SRIOV_CTRL_MSE;
+	pci_cfg_access_lock(dev);
+	pci_write_config_word(dev, iov->pos + PCI_SRIOV_CTRL, iov->ctrl);
+	msleep(100);
+	pci_cfg_access_unlock(dev);
 
 	for (i = 0; i < initial; i++) {
 		rc = virtfn_add(dev, i, 0);
@@ -389,7 +385,7 @@ static int sriov_init(struct pci_dev *dev, int pos)
 	int rc;
 	int nres;
 	u32 pgsz;
-	u16 ctrl, total;
+	u16 ctrl, total, offset, stride;
 	struct pci_sriov *iov;
 	struct resource *res;
 	struct pci_dev *pdev;
@@ -419,6 +415,11 @@ static int sriov_init(struct pci_dev *dev, int pos)
 
 found:
 	pci_write_config_word(dev, pos + PCI_SRIOV_CTRL, ctrl);
+	pci_write_config_word(dev, pos + PCI_SRIOV_NUM_VF, 0);
+	pci_read_config_word(dev, pos + PCI_SRIOV_VF_OFFSET, &offset);
+	pci_read_config_word(dev, pos + PCI_SRIOV_VF_STRIDE, &stride);
+	if (!offset || (total > 1 && !stride))
+		return -EIO;
 
 	pci_read_config_dword(dev, pos + PCI_SRIOV_SUP_PGSIZE, &pgsz);
 	i = PAGE_SHIFT > 12 ? PAGE_SHIFT - 12 : 0;
@@ -456,6 +457,8 @@ found:
 	iov->nres = nres;
 	iov->ctrl = ctrl;
 	iov->total_VFs = total;
+	iov->offset = offset;
+	iov->stride = stride;
 	iov->pgsz = pgsz;
 	iov->self = dev;
 	pci_read_config_dword(dev, pos + PCI_SRIOV_CAP, &iov->cap);
@@ -472,15 +475,10 @@ found:
 
 	dev->sriov = iov;
 	dev->is_physfn = 1;
-	rc = compute_max_vf_buses(dev);
-	if (rc)
-		goto fail_max_buses;
+	iov->max_VF_buses = virtfn_max_buses(dev);
 
 	return 0;
 
-fail_max_buses:
-	dev->sriov = NULL;
-	dev->is_physfn = 0;
 failed:
 	for (i = 0; i < PCI_SRIOV_NUM_BARS; i++) {
 		res = &dev->resource[i + PCI_IOV_RESOURCES];
@@ -555,21 +553,61 @@ void pci_iov_release(struct pci_dev *dev)
 }
 
 /**
- * pci_iov_resource_bar - get position of the SR-IOV BAR
+ * pci_iov_update_resource - update a VF BAR
  * @dev: the PCI device
  * @resno: the resource number
  *
- * Returns position of the BAR encapsulated in the SR-IOV capability.
+ * Update a VF BAR in the SR-IOV capability of a PF.
  */
-int pci_iov_resource_bar(struct pci_dev *dev, int resno)
+void pci_iov_update_resource(struct pci_dev *dev, int resno)
 {
-	if (resno < PCI_IOV_RESOURCES || resno > PCI_IOV_RESOURCE_END)
-		return 0;
+	struct pci_sriov *iov = dev->is_physfn ? dev->sriov : NULL;
+	struct resource *res = dev->resource + resno;
+	int vf_bar = resno - PCI_IOV_RESOURCES;
+	struct pci_bus_region region;
+	u16 cmd;
+	u32 new;
+	int reg;
 
-	BUG_ON(!dev->is_physfn);
+	/*
+	 * The generic pci_restore_bars() path calls this for all devices,
+	 * including VFs and non-SR-IOV devices.  If this is not a PF, we
+	 * have nothing to do.
+	 */
+	if (!iov)
+		return;
 
-	return dev->sriov->pos + PCI_SRIOV_BAR +
-		4 * (resno - PCI_IOV_RESOURCES);
+	pci_read_config_word(dev, iov->pos + PCI_SRIOV_CTRL, &cmd);
+	if ((cmd & PCI_SRIOV_CTRL_VFE) && (cmd & PCI_SRIOV_CTRL_MSE)) {
+		dev_WARN(&dev->dev, "can't update enabled VF BAR%d %pR\n",
+			 vf_bar, res);
+		return;
+	}
+
+	/*
+	 * Ignore unimplemented BARs, unused resource slots for 64-bit
+	 * BARs, and non-movable resources, e.g., those described via
+	 * Enhanced Allocation.
+	 */
+	if (!res->flags)
+		return;
+
+	if (res->flags & IORESOURCE_UNSET)
+		return;
+
+	if (res->flags & IORESOURCE_PCI_FIXED)
+		return;
+
+	pcibios_resource_to_bus(dev->bus, &region, res);
+	new = region.start;
+	new |= res->flags & ~PCI_BASE_ADDRESS_MEM_MASK;
+
+	reg = iov->pos + PCI_SRIOV_BAR + 4 * vf_bar;
+	pci_write_config_dword(dev, reg, new);
+	if (res->flags & IORESOURCE_MEM_64) {
+		new = region.start >> 16 >> 16;
+		pci_write_config_dword(dev, reg + 4, new);
+	}
 }
 
 resource_size_t __weak pcibios_iov_resource_alignment(struct pci_dev *dev,

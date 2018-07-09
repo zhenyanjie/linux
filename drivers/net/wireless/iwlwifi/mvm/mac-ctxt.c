@@ -852,7 +852,7 @@ static int iwl_mvm_mac_ctxt_cmd_listener(struct iwl_mvm *mvm,
 				       MAC_FILTER_IN_BEACON |
 				       MAC_FILTER_IN_PROBE_REQUEST |
 				       MAC_FILTER_IN_CRC32);
-	ieee80211_hw_set(mvm->hw, RX_INCLUDES_FCS);
+	mvm->hw->flags |= IEEE80211_HW_RX_INCLUDES_FCS;
 
 	return iwl_mvm_mac_ctxt_send_cmd(mvm, &cmd);
 }
@@ -1270,7 +1270,7 @@ int iwl_mvm_mac_ctxt_remove(struct iwl_mvm *mvm, struct ieee80211_vif *vif)
 	mvmvif->uploaded = false;
 
 	if (vif->type == NL80211_IFTYPE_MONITOR)
-		__clear_bit(IEEE80211_HW_RX_INCLUDES_FCS, mvm->hw->flags);
+		mvm->hw->flags &= ~IEEE80211_HW_RX_INCLUDES_FCS;
 
 	return 0;
 }
@@ -1312,8 +1312,9 @@ static void iwl_mvm_csa_count_down(struct iwl_mvm *mvm,
 	}
 }
 
-void iwl_mvm_rx_beacon_notif(struct iwl_mvm *mvm,
-			     struct iwl_rx_cmd_buffer *rxb)
+int iwl_mvm_rx_beacon_notif(struct iwl_mvm *mvm,
+			    struct iwl_rx_cmd_buffer *rxb,
+			    struct iwl_device_cmd *cmd)
 {
 	struct iwl_rx_packet *pkt = rxb_addr(rxb);
 	struct iwl_extended_beacon_notif *beacon = (void *)pkt->data;
@@ -1364,6 +1365,8 @@ void iwl_mvm_rx_beacon_notif(struct iwl_mvm *mvm,
 			RCU_INIT_POINTER(mvm->csa_tx_blocked_vif, NULL);
 		}
 	}
+
+	return 0;
 }
 
 static void iwl_mvm_beacon_loss_iterator(void *_data, u8 *mac,
@@ -1412,8 +1415,9 @@ static void iwl_mvm_beacon_loss_iterator(void *_data, u8 *mac,
 		iwl_mvm_fw_dbg_collect_trig(mvm, trigger, NULL);
 }
 
-void iwl_mvm_rx_missed_beacons_notif(struct iwl_mvm *mvm,
-				     struct iwl_rx_cmd_buffer *rxb)
+int iwl_mvm_rx_missed_beacons_notif(struct iwl_mvm *mvm,
+				    struct iwl_rx_cmd_buffer *rxb,
+				    struct iwl_device_cmd *cmd)
 {
 	struct iwl_rx_packet *pkt = rxb_addr(rxb);
 	struct iwl_missed_beacons_notif *mb = (void *)pkt->data;
@@ -1430,4 +1434,5 @@ void iwl_mvm_rx_missed_beacons_notif(struct iwl_mvm *mvm,
 						   IEEE80211_IFACE_ITER_NORMAL,
 						   iwl_mvm_beacon_loss_iterator,
 						   mb);
+	return 0;
 }

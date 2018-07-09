@@ -990,6 +990,7 @@ static irqreturn_t fm10k_msix_mbx_pf(int __always_unused irq, void *data)
 	struct fm10k_hw *hw = &interface->hw;
 	struct fm10k_mbx_info *mbx = &hw->mbx;
 	u32 eicr;
+	s32 err = 0;
 
 	/* unmask any set bits related to this interrupt */
 	eicr = fm10k_read_reg(hw, FM10K_EICR);
@@ -1005,11 +1006,14 @@ static irqreturn_t fm10k_msix_mbx_pf(int __always_unused irq, void *data)
 
 	/* service mailboxes */
 	if (fm10k_mbx_trylock(interface)) {
-		mbx->ops.process(hw, mbx);
+		err = mbx->ops.process(hw, mbx);
 		/* handle VFLRE events */
 		fm10k_iov_event(interface);
 		fm10k_mbx_unlock(interface);
 	}
+
+	if (err == FM10K_ERR_RESET_REQUESTED)
+		interface->flags |= FM10K_FLAG_RESET_REQUESTED;
 
 	/* if switch toggled state we should reset GLORTs */
 	if (eicr & FM10K_EICR_SWITCHNOTREADY) {
@@ -1559,7 +1563,6 @@ void fm10k_down(struct fm10k_intfc *interface)
 
 	/* free any buffers still on the rings */
 	fm10k_clean_all_tx_rings(interface);
-	fm10k_clean_all_rx_rings(interface);
 }
 
 /**
@@ -1741,18 +1744,30 @@ static int fm10k_probe(struct pci_dev *pdev,
 	struct fm10k_intfc *interface;
 	struct fm10k_hw *hw;
 	int err;
+	u64 dma_mask;
 
 	err = pci_enable_device_mem(pdev);
 	if (err)
 		return err;
 
-	err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(48));
-	if (err)
+	/* By default fm10k only supports a 48 bit DMA mask */
+	dma_mask = DMA_BIT_MASK(48) | dma_get_required_mask(&pdev->dev);
+
+	if ((dma_mask <= DMA_BIT_MASK(32)) ||
+	    dma_set_mask_and_coherent(&pdev->dev, dma_mask)) {
+		dma_mask &= DMA_BIT_MASK(32);
+
 		err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-	if (err) {
-		dev_err(&pdev->dev,
-			"DMA configuration failed: %d\n", err);
-		goto err_dma;
+		err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+		if (err) {
+			err = dma_set_coherent_mask(&pdev->dev,
+						    DMA_BIT_MASK(32));
+			if (err) {
+				dev_err(&pdev->dev,
+					"No usable DMA configuration, aborting\n");
+				goto err_dma;
+			}
+		}
 	}
 
 	err = pci_request_selected_regions(pdev,
@@ -1761,7 +1776,7 @@ static int fm10k_probe(struct pci_dev *pdev,
 					   fm10k_driver_name);
 	if (err) {
 		dev_err(&pdev->dev,
-			"pci_request_selected_regions failed: %d\n", err);
+			"pci_request_selected_regions failed 0x%x\n", err);
 		goto err_pci_reg;
 	}
 

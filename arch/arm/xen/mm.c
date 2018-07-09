@@ -15,10 +15,10 @@
 #include <xen/xen.h>
 #include <xen/interface/grant_table.h>
 #include <xen/interface/memory.h>
-#include <xen/page.h>
 #include <xen/swiotlb-xen.h>
 
 #include <asm/cacheflush.h>
+#include <asm/xen/page.h>
 #include <asm/xen/hypercall.h>
 #include <asm/xen/interface.h>
 
@@ -139,9 +139,9 @@ void __xen_dma_sync_single_for_device(struct device *hwdev,
 
 bool xen_arch_need_swiotlb(struct device *dev,
 			   unsigned long pfn,
-			   unsigned long bfn)
+			   unsigned long mfn)
 {
-	return (!hypercall_cflush && (pfn != bfn) && !is_device_dma_coherent(dev));
+	return (!hypercall_cflush && (pfn != mfn) && !is_device_dma_coherent(dev));
 }
 
 int xen_create_contiguous_region(phys_addr_t pstart, unsigned int order,
@@ -180,6 +180,7 @@ static struct dma_map_ops xen_swiotlb_dma_ops = {
 	.unmap_page = xen_swiotlb_unmap_page,
 	.dma_supported = xen_swiotlb_dma_supported,
 	.set_dma_mask = xen_swiotlb_set_dma_mask,
+	.mmap = xen_swiotlb_dma_mmap,
 };
 
 int __init xen_mm_init(void)

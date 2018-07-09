@@ -47,11 +47,9 @@ static unsigned long debug;
 module_param(debug, ulong, 0);
 MODULE_PARM_DESC(debug, "override device debug level");
 
-#ifdef CONFIG_HAS_DMA
 static bool dma = true;
 module_param(dma, bool, 0);
 MODULE_PARM_DESC(dma, "Use DMA buffer");
-#endif
 
 
 void fbtft_dbg_hex(const struct device *dev, int groupsize,
@@ -486,7 +484,7 @@ static void fbtft_deferred_io(struct fb_info *info, struct list_head *pagelist)
 		index = page->index << PAGE_SHIFT;
 		y_low = index / info->fix.line_length;
 		y_high = (index + PAGE_SIZE - 1) / info->fix.line_length;
-		dev_dbg(info->device,
+		fbtft_dev_dbg(DEBUG_DEFERRED_IO, par, info->device,
 			"page->index=%lu y_low=%d y_high=%d\n",
 			page->index, y_low, y_high);
 		if (y_high > info->var.yres - 1)
@@ -507,7 +505,7 @@ static void fbtft_fb_fillrect(struct fb_info *info,
 {
 	struct fbtft_par *par = info->par;
 
-	dev_dbg(info->dev,
+	fbtft_dev_dbg(DEBUG_FB_FILLRECT, par, info->dev,
 		"%s: dx=%d, dy=%d, width=%d, height=%d\n",
 		__func__, rect->dx, rect->dy, rect->width, rect->height);
 	sys_fillrect(info, rect);
@@ -520,7 +518,7 @@ static void fbtft_fb_copyarea(struct fb_info *info,
 {
 	struct fbtft_par *par = info->par;
 
-	dev_dbg(info->dev,
+	fbtft_dev_dbg(DEBUG_FB_COPYAREA, par, info->dev,
 		"%s: dx=%d, dy=%d, width=%d, height=%d\n",
 		__func__,  area->dx, area->dy, area->width, area->height);
 	sys_copyarea(info, area);
@@ -533,7 +531,7 @@ static void fbtft_fb_imageblit(struct fb_info *info,
 {
 	struct fbtft_par *par = info->par;
 
-	dev_dbg(info->dev,
+	fbtft_dev_dbg(DEBUG_FB_IMAGEBLIT, par, info->dev,
 		"%s: dx=%d, dy=%d, width=%d, height=%d\n",
 		__func__,  image->dx, image->dy, image->width, image->height);
 	sys_imageblit(info, image);
@@ -547,7 +545,7 @@ static ssize_t fbtft_fb_write(struct fb_info *info, const char __user *buf,
 	struct fbtft_par *par = info->par;
 	ssize_t res;
 
-	dev_dbg(info->dev,
+	fbtft_dev_dbg(DEBUG_FB_WRITE, par, info->dev,
 		"%s: count=%zd, ppos=%llu\n", __func__,  count, *ppos);
 	res = fb_sys_write(info, buf, count, ppos);
 
@@ -570,10 +568,11 @@ static int fbtft_fb_setcolreg(unsigned regno, unsigned red, unsigned green,
 			      unsigned blue, unsigned transp,
 			      struct fb_info *info)
 {
+	struct fbtft_par *par = info->par;
 	unsigned val;
 	int ret = 1;
 
-	dev_dbg(info->dev,
+	fbtft_dev_dbg(DEBUG_FB_SETCOLREG, par, info->dev,
 		"%s(regno=%u, red=0x%X, green=0x%X, blue=0x%X, trans=0x%X)\n",
 		__func__, regno, red, green, blue, transp);
 
@@ -600,7 +599,7 @@ static int fbtft_fb_blank(int blank, struct fb_info *info)
 	struct fbtft_par *par = info->par;
 	int ret = -EINVAL;
 
-	dev_dbg(info->dev, "%s(blank=%d)\n",
+	fbtft_dev_dbg(DEBUG_FB_BLANK, par, info->dev, "%s(blank=%d)\n",
 		__func__, blank);
 
 	if (!par->fbtftops.blank)
@@ -677,13 +676,13 @@ static void fbtft_merge_fbtftops(struct fbtft_ops *dst, struct fbtft_ops *src)
  *
  */
 struct fb_info *fbtft_framebuffer_alloc(struct fbtft_display *display,
-					struct device *dev,
-					struct fbtft_platform_data *pdata)
+					struct device *dev)
 {
 	struct fb_info *info;
 	struct fbtft_par *par;
 	struct fb_ops *fbops = NULL;
 	struct fb_deferred_io *fbdefio = NULL;
+	struct fbtft_platform_data *pdata = dev->platform_data;
 	u8 *vmem = NULL;
 	void *txbuf = NULL;
 	void *buf = NULL;
@@ -828,7 +827,7 @@ struct fb_info *fbtft_framebuffer_alloc(struct fbtft_display *display,
 
 	par = info->par;
 	par->info = info;
-	par->pdata = pdata;
+	par->pdata = dev->platform_data;
 	par->debug = display->debug;
 	par->buf = buf;
 	spin_lock_init(&par->dirty_lock);
@@ -857,13 +856,10 @@ struct fb_info *fbtft_framebuffer_alloc(struct fbtft_display *display,
 #endif
 
 	if (txbuflen > 0) {
-#ifdef CONFIG_HAS_DMA
 		if (dma) {
 			dev->coherent_dma_mask = ~0;
 			txbuf = dmam_alloc_coherent(dev, txbuflen, &par->txbuf.dma, GFP_DMA);
-		} else
-#endif
-		{
+		} else {
 			txbuf = devm_kzalloc(par->info->device, txbuflen, GFP_KERNEL);
 		}
 		if (!txbuf)
@@ -1066,6 +1062,8 @@ static int fbtft_init_display_dt(struct fbtft_par *par)
 	const __be32 *p;
 	u32 val;
 	int buf[64], i, j;
+	char msg[128];
+	char str[16];
 
 	fbtft_par_dbg(DEBUG_INIT_DISPLAY, par, "%s()\n", __func__);
 
@@ -1076,11 +1074,6 @@ static int fbtft_init_display_dt(struct fbtft_par *par)
 	p = of_prop_next_u32(prop, NULL, &val);
 	if (!p)
 		return -EINVAL;
-
-	par->fbtftops.reset(par);
-	if (par->gpio.cs != -1)
-		gpio_set_value(par->gpio.cs, 0);  /* Activate chip */
-
 	while (p) {
 		if (val & FBTFT_OF_INIT_CMD) {
 			val &= 0xFFFF;
@@ -1096,11 +1089,13 @@ static int fbtft_init_display_dt(struct fbtft_par *par)
 				p = of_prop_next_u32(prop, p, &val);
 			}
 			/* make debug message */
+			msg[0] = '\0';
+			for (j = 0; j < i; j++) {
+				snprintf(str, 128, " %02X", buf[j]);
+				strcat(msg, str);
+			}
 			fbtft_par_dbg(DEBUG_INIT_DISPLAY, par,
-				"init: write_register:\n");
-			for (j = 0; j < i; j++)
-				fbtft_par_dbg(DEBUG_INIT_DISPLAY, par,
-					      "buf[%d] = %02X\n", j, buf[j]);
+				"init: write_register:%s\n", msg);
 
 			par->fbtftops.write_register(par, i,
 				buf[0], buf[1], buf[2], buf[3],
@@ -1265,11 +1260,12 @@ EXPORT_SYMBOL(fbtft_init_display);
  */
 static int fbtft_verify_gpios(struct fbtft_par *par)
 {
-	struct fbtft_platform_data *pdata = par->pdata;
+	struct fbtft_platform_data *pdata;
 	int i;
 
 	fbtft_par_dbg(DEBUG_VERIFY_GPIOS, par, "%s()\n", __func__);
 
+	pdata = par->info->device->platform_data;
 	if (pdata->display.buswidth != 9 && par->startbyte == 0 &&
 							par->gpio.dc < 0) {
 		dev_err(par->info->device,
@@ -1387,9 +1383,10 @@ int fbtft_probe_common(struct fbtft_display *display,
 		pdata = fbtft_probe_dt(dev);
 		if (IS_ERR(pdata))
 			return PTR_ERR(pdata);
+		dev->platform_data = pdata;
 	}
 
-	info = fbtft_framebuffer_alloc(display, dev, pdata);
+	info = fbtft_framebuffer_alloc(display, dev);
 	if (!info)
 		return -ENOMEM;
 
@@ -1436,11 +1433,15 @@ int fbtft_probe_common(struct fbtft_display *display,
 
 	/* 9-bit SPI setup */
 	if (par->spi && display->buswidth == 9) {
-		if (par->spi->master->bits_per_word_mask & SPI_BPW_MASK(9)) {
-			par->spi->bits_per_word = 9;
-		} else {
+		par->spi->bits_per_word = 9;
+		ret = par->spi->master->setup(par->spi);
+		if (ret) {
 			dev_warn(&par->spi->dev,
 				"9-bit SPI not available, emulating using 8-bit.\n");
+			par->spi->bits_per_word = 8;
+			ret = par->spi->master->setup(par->spi);
+			if (ret)
+				goto out_release;
 			/* allocate buffer with room for dc bits */
 			par->extra = devm_kzalloc(par->info->device,
 				par->txbuf.len + (par->txbuf.len / 8) + 8,

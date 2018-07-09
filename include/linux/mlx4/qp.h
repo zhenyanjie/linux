@@ -272,8 +272,7 @@ enum {
 	MLX4_WQE_CTRL_SOLICITED		= 1 << 1,
 	MLX4_WQE_CTRL_IP_CSUM		= 1 << 4,
 	MLX4_WQE_CTRL_TCP_UDP_CSUM	= 1 << 5,
-	MLX4_WQE_CTRL_INS_CVLAN		= 1 << 6,
-	MLX4_WQE_CTRL_INS_SVLAN		= 1 << 7,
+	MLX4_WQE_CTRL_INS_VLAN		= 1 << 6,
 	MLX4_WQE_CTRL_STRONG_ORDER	= 1 << 7,
 	MLX4_WQE_CTRL_FORCE_LOOPBACK	= 1 << 0,
 };
@@ -451,6 +450,7 @@ struct mlx4_update_qp_params {
 	u16	rate_val;
 };
 
+struct mlx4_qp *mlx4_qp_lookup(struct mlx4_dev *dev, u32 qpn);
 int mlx4_update_qp(struct mlx4_dev *dev, u32 qpn,
 		   enum mlx4_update_qp_attr attr,
 		   struct mlx4_update_qp_params *params);

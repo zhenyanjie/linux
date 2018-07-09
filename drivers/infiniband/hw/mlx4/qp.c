@@ -1292,18 +1292,14 @@ static int _mlx4_set_path(struct mlx4_ib_dev *dev, const struct ib_ah_attr *ah,
 		path->static_rate = 0;
 
 	if (ah->ah_flags & IB_AH_GRH) {
-		int real_sgid_index = mlx4_ib_gid_index_to_real_index(dev,
-								      port,
-								      ah->grh.sgid_index);
-
-		if (real_sgid_index >= dev->dev->caps.gid_table_len[port]) {
+		if (ah->grh.sgid_index >= dev->dev->caps.gid_table_len[port]) {
 			pr_err("sgid_index (%u) too large. max is %d\n",
-			       real_sgid_index, dev->dev->caps.gid_table_len[port] - 1);
+			       ah->grh.sgid_index, dev->dev->caps.gid_table_len[port] - 1);
 			return -1;
 		}
 
 		path->grh_mylmc |= 1 << 7;
-		path->mgid_index = real_sgid_index;
+		path->mgid_index = ah->grh.sgid_index;
 		path->hop_limit  = ah->grh.hop_limit;
 		path->tclass_flowlabel =
 			cpu_to_be32((ah->grh.traffic_class << 20) |
@@ -1500,7 +1496,7 @@ static int __mlx4_ib_modify_qp(struct ib_qp *ibqp,
 			context->mtu_msgmax = (IB_MTU_4096 << 5) |
 					      ilog2(dev->dev->caps.max_gso_sz);
 		else
-			context->mtu_msgmax = (IB_MTU_4096 << 5) | 12;
+			context->mtu_msgmax = (IB_MTU_4096 << 5) | 13;
 	} else if (attr_mask & IB_QP_PATH_MTU) {
 		if (attr->path_mtu < IB_MTU_256 || attr->path_mtu > IB_MTU_4096) {
 			pr_err("path MTU (%u) is invalid\n",
@@ -1543,13 +1539,12 @@ static int __mlx4_ib_modify_qp(struct ib_qp *ibqp,
 	}
 
 	if (cur_state == IB_QPS_INIT && new_state == IB_QPS_RTR) {
-		if (dev->counters[qp->port - 1].index != -1) {
+		if (dev->counters[qp->port - 1] != -1) {
 			context->pri_path.counter_index =
-					dev->counters[qp->port - 1].index;
+						dev->counters[qp->port - 1];
 			optpar |= MLX4_QP_OPTPAR_COUNTER_INDEX;
 		} else
-			context->pri_path.counter_index =
-				MLX4_SINK_COUNTER_INDEX(dev->dev);
+			context->pri_path.counter_index = 0xff;
 
 		if (qp->flags & MLX4_IB_QP_NETIF) {
 			mlx4_ib_steer_qp_reg(dev, qp, 1);

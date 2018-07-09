@@ -26,16 +26,16 @@
 
 #include <asm/processor.h>
 #include <asm/ucontext.h>
-#include <asm/fpu/internal.h>
-#include <asm/fpu/signal.h>
+#include <asm/i387.h>
+#include <asm/fpu-internal.h>
 #include <asm/vdso.h>
 #include <asm/mce.h>
 #include <asm/sighandling.h>
-#include <asm/vm86.h>
 
 #ifdef CONFIG_X86_64
 #include <asm/proto.h>
 #include <asm/ia32_unistd.h>
+#include <asm/sys_ia32.h>
 #endif /* CONFIG_X86_64 */
 
 #include <asm/syscall.h>
@@ -110,7 +110,7 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		get_user_ex(buf, &sc->fpstate);
 	} get_user_catch(err);
 
-	err |= fpu__restore_sig(buf, config_enabled(CONFIG_X86_32));
+	err |= restore_xstate_sig(buf, config_enabled(CONFIG_X86_32));
 
 	force_iret();
 
@@ -205,7 +205,6 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 	unsigned long sp = regs->sp;
 	unsigned long buf_fx = 0;
 	int onsigstack = on_sig_stack(sp);
-	struct fpu *fpu = &current->thread.fpu;
 
 	/* redzone */
 	if (config_enabled(CONFIG_X86_64))
@@ -225,9 +224,9 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 		}
 	}
 
-	if (fpu->fpstate_active) {
-		sp = fpu__alloc_mathframe(sp, config_enabled(CONFIG_X86_32),
-					  &buf_fx, &math_size);
+	if (used_math()) {
+		sp = alloc_mathframe(sp, config_enabled(CONFIG_X86_32),
+				     &buf_fx, &math_size);
 		*fpstate = (void __user *)sp;
 	}
 
@@ -241,8 +240,8 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 		return (void __user *)-1L;
 
 	/* save i387 and extended state */
-	if (fpu->fpstate_active &&
-	    copy_fpstate_to_sigframe(*fpstate, (void __user *)buf_fx, math_size) < 0)
+	if (used_math() &&
+	    save_xstate_sig(*fpstate, (void __user *)buf_fx, math_size) < 0)
 		return (void __user *)-1L;
 
 	return (void __user *)sp;
@@ -590,22 +589,6 @@ badframe:
 	return 0;
 }
 
-static inline int is_ia32_compat_frame(void)
-{
-	return config_enabled(CONFIG_IA32_EMULATION) &&
-	       test_thread_flag(TIF_IA32);
-}
-
-static inline int is_ia32_frame(void)
-{
-	return config_enabled(CONFIG_X86_32) || is_ia32_compat_frame();
-}
-
-static inline int is_x32_frame(void)
-{
-	return config_enabled(CONFIG_X86_X32_ABI) && test_thread_flag(TIF_X32);
-}
-
 static int
 setup_rt_frame(struct ksignal *ksig, struct pt_regs *regs)
 {
@@ -630,10 +613,6 @@ static void
 handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 {
 	bool stepping, failed;
-	struct fpu *fpu = &current->thread.fpu;
-
-	if (v8086_mode(regs))
-		save_v86_state((struct kernel_vm86_regs *) regs, VM86_SIGNAL);
 
 	/* Are we from a system call? */
 	if (syscall_get_nr(current, regs) >= 0) {
@@ -682,8 +661,8 @@ handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 		/*
 		 * Ensure the signal handler starts with the new fpu state.
 		 */
-		if (fpu->fpstate_active)
-			fpu__clear(fpu);
+		if (used_math())
+			fpu_reset_state(current);
 	}
 	signal_setup_done(failed, ksig, stepping);
 }
@@ -703,7 +682,7 @@ static inline unsigned long get_nr_restart_syscall(const struct pt_regs *regs)
  * want to handle. Thus you cannot kill init even with a SIGKILL even by
  * mistake.
  */
-void do_signal(struct pt_regs *regs)
+static void do_signal(struct pt_regs *regs)
 {
 	struct ksignal ksig;
 
@@ -736,6 +715,32 @@ void do_signal(struct pt_regs *regs)
 	 * back.
 	 */
 	restore_saved_sigmask();
+}
+
+/*
+ * notification of userspace execution resumption
+ * - triggered by the TIF_WORK_MASK flags
+ */
+__visible void
+do_notify_resume(struct pt_regs *regs, void *unused, __u32 thread_info_flags)
+{
+	user_exit();
+
+	if (thread_info_flags & _TIF_UPROBE)
+		uprobe_notify_resume(regs);
+
+	/* deal with pending signal delivery */
+	if (thread_info_flags & _TIF_SIGPENDING)
+		do_signal(regs);
+
+	if (thread_info_flags & _TIF_NOTIFY_RESUME) {
+		clear_thread_flag(TIF_NOTIFY_RESUME);
+		tracehook_notify_resume(regs);
+	}
+	if (thread_info_flags & _TIF_USER_RETURN_NOTIFY)
+		fire_user_return_notifiers();
+
+	user_enter();
 }
 
 void signal_fault(struct pt_regs *regs, void __user *frame, char *where)

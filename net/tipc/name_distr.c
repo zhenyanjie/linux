@@ -67,6 +67,8 @@ static void publ_to_item(struct distr_item *i, struct publication *p)
 
 /**
  * named_prepare_buf - allocate & initialize a publication message
+ *
+ * The buffer returned is of size INT_H_SIZE + payload size
  */
 static struct sk_buff *named_prepare_buf(struct net *net, u32 type, u32 size,
 					 u32 dest)
@@ -96,13 +98,13 @@ void named_cluster_distribute(struct net *net, struct sk_buff *skb)
 		dnode = node->addr;
 		if (in_own_node(net, dnode))
 			continue;
-		if (!tipc_node_is_up(node))
+		if (!tipc_node_active_links(node))
 			continue;
 		oskb = pskb_copy(skb, GFP_ATOMIC);
 		if (!oskb)
 			break;
 		msg_set_destnode(buf_msg(oskb), dnode);
-		tipc_node_xmit_skb(net, oskb, dnode, dnode);
+		tipc_link_xmit_skb(net, oskb, dnode, dnode);
 	}
 	rcu_read_unlock();
 
@@ -171,9 +173,9 @@ static void named_distribute(struct net *net, struct sk_buff_head *list,
 	struct publication *publ;
 	struct sk_buff *skb = NULL;
 	struct distr_item *item = NULL;
-	uint msg_dsz = (tipc_node_get_mtu(net, dnode, 0) / ITEM_SIZE) *
-			ITEM_SIZE;
-	uint msg_rem = msg_dsz;
+	u32 msg_dsz = ((tipc_node_get_mtu(net, dnode, 0) - INT_H_SIZE) /
+			ITEM_SIZE) * ITEM_SIZE;
+	u32 msg_rem = msg_dsz;
 
 	list_for_each_entry(publ, pls, local_list) {
 		/* Prepare next buffer: */
@@ -223,7 +225,7 @@ void tipc_named_node_up(struct net *net, u32 dnode)
 			 &tn->nametbl->publ_list[TIPC_ZONE_SCOPE]);
 	rcu_read_unlock();
 
-	tipc_node_xmit(net, &head, dnode, dnode);
+	tipc_link_xmit(net, &head, dnode, dnode);
 }
 
 static void tipc_publ_subscribe(struct net *net, struct publication *publ,

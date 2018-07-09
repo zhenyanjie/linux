@@ -35,10 +35,9 @@
 #define _LINUX_RDS_H
 
 #include <linux/types.h>
+#include <linux/socket.h>		/* For __kernel_sockaddr_storage. */
 
 #define RDS_IB_ABI_VERSION		0x301
-
-#define	SOL_RDS		276
 
 /*
  * setsockopt/getsockopt for SOL_RDS
@@ -50,14 +49,6 @@
 #define RDS_RECVERR			5
 #define RDS_CONG_MONITOR		6
 #define RDS_GET_MR_FOR_DEST		7
-#define SO_RDS_TRANSPORT		8
-
-/* supported values for SO_RDS_TRANSPORT */
-#define	RDS_TRANS_IB	0
-#define	RDS_TRANS_IWARP	1
-#define	RDS_TRANS_TCP	2
-#define RDS_TRANS_COUNT	3
-#define	RDS_TRANS_NONE	(~0)
 
 /*
  * Control message types for SOL_RDS.
@@ -223,7 +214,7 @@ struct rds_get_mr_args {
 };
 
 struct rds_get_mr_for_dest_args {
-	struct sockaddr_storage	dest_addr;
+	struct __kernel_sockaddr_storage dest_addr;
 	struct rds_iovec 	vec;
 	uint64_t		cookie_addr;
 	uint64_t		flags;

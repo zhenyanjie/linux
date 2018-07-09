@@ -107,10 +107,6 @@ static void lov_putref(struct obd_device *obd)
 			/* Disconnect */
 			__lov_del_obd(obd, tgt);
 		}
-
-		if (lov->lov_tgts_kobj)
-			kobject_put(lov->lov_tgts_kobj);
-
 	} else {
 		mutex_unlock(&lov->lov_lock);
 	}
@@ -131,6 +127,7 @@ int lov_connect_obd(struct obd_device *obd, __u32 index, int activate,
 	struct obd_device *tgt_obd;
 	static struct obd_uuid lov_osc_uuid = { "LOV_OSC_UUID" };
 	struct obd_import *imp;
+	struct proc_dir_entry *lov_proc_dir;
 	int rc;
 
 	if (!lov->lov_tgts[index])
@@ -189,10 +186,28 @@ int lov_connect_obd(struct obd_device *obd, __u32 index, int activate,
 	CDEBUG(D_CONFIG, "Connected tgt idx %d %s (%s) %sactive\n", index,
 	       obd_uuid2str(tgt_uuid), tgt_obd->obd_name, activate ? "":"in");
 
-	if (lov->lov_tgts_kobj)
-		/* Even if we failed, that's ok */
-		rc = sysfs_create_link(lov->lov_tgts_kobj, &tgt_obd->obd_kobj,
-				       tgt_obd->obd_name);
+	lov_proc_dir = obd->obd_proc_private;
+	if (lov_proc_dir) {
+		struct obd_device *osc_obd = lov->lov_tgts[index]->ltd_exp->exp_obd;
+		struct proc_dir_entry *osc_symlink;
+
+		LASSERT(osc_obd != NULL);
+		LASSERT(osc_obd->obd_magic == OBD_DEVICE_MAGIC);
+		LASSERT(osc_obd->obd_type->typ_name != NULL);
+
+		osc_symlink = lprocfs_add_symlink(osc_obd->obd_name,
+						  lov_proc_dir,
+						  "../../../%s/%s",
+						  osc_obd->obd_type->typ_name,
+						  osc_obd->obd_name);
+		if (osc_symlink == NULL) {
+			CERROR("could not register LOV target /proc/fs/lustre/%s/%s/target_obds/%s.",
+			       obd->obd_type->typ_name, obd->obd_name,
+			       osc_obd->obd_name);
+			lprocfs_remove(&lov_proc_dir);
+			obd->obd_proc_private = NULL;
+		}
+	}
 
 	return 0;
 }
@@ -224,10 +239,6 @@ static int lov_connect(const struct lu_env *env,
 		lov->lov_ocd = *data;
 
 	obd_getref(obd);
-
-	lov->lov_tgts_kobj = kobject_create_and_add("target_obds",
-						    &obd->obd_kobj);
-
 	for (i = 0; i < lov->desc.ld_tgt_count; i++) {
 		tgt = lov->lov_tgts[i];
 		if (!tgt || obd_uuid_empty(&tgt->ltd_uuid))
@@ -257,6 +268,7 @@ static int lov_connect(const struct lu_env *env,
 
 static int lov_disconnect_obd(struct obd_device *obd, struct lov_tgt_desc *tgt)
 {
+	struct proc_dir_entry *lov_proc_dir;
 	struct lov_obd *lov = &obd->u.lov;
 	struct obd_device *osc_obd;
 	int rc;
@@ -272,10 +284,10 @@ static int lov_disconnect_obd(struct obd_device *obd, struct lov_tgt_desc *tgt)
 	}
 
 	if (osc_obd) {
-		if (lov->lov_tgts_kobj)
-			sysfs_remove_link(lov->lov_tgts_kobj,
-					  osc_obd->obd_name);
-
+		lov_proc_dir = obd->obd_proc_private;
+		if (lov_proc_dir) {
+			lprocfs_remove_proc_entry(osc_obd->obd_name, lov_proc_dir);
+		}
 		/* Pass it on to our clients.
 		 * XXX This should be an argument to disconnect,
 		 * XXX not a back-door flag on the OBD.  Ah well.
@@ -325,7 +337,6 @@ static int lov_disconnect(struct obd_export *exp)
 			lov_del_target(obd, i, NULL, lov->lov_tgts[i]->ltd_gen);
 		}
 	}
-
 	obd_putref(obd);
 
 out:
@@ -543,7 +554,7 @@ static int lov_add_target(struct obd_device *obd, struct obd_uuid *uuidp,
 		newsize = max_t(__u32, lov->lov_tgt_size, 2);
 		while (newsize < index + 1)
 			newsize <<= 1;
-		newtgts = kcalloc(newsize, sizeof(*newtgts), GFP_NOFS);
+		OBD_ALLOC(newtgts, sizeof(*newtgts) * newsize);
 		if (newtgts == NULL) {
 			mutex_unlock(&lov->lov_lock);
 			return -ENOMEM;
@@ -559,13 +570,14 @@ static int lov_add_target(struct obd_device *obd, struct obd_uuid *uuidp,
 		lov->lov_tgts = newtgts;
 		lov->lov_tgt_size = newsize;
 		smp_rmb();
-		kfree(old);
+		if (old)
+			OBD_FREE(old, sizeof(*old) * oldsize);
 
 		CDEBUG(D_CONFIG, "tgts: %p size: %d\n",
 		       lov->lov_tgts, lov->lov_tgt_size);
 	}
 
-	tgt = kzalloc(sizeof(*tgt), GFP_NOFS);
+	OBD_ALLOC_PTR(tgt);
 	if (!tgt) {
 		mutex_unlock(&lov->lov_lock);
 		return -ENOMEM;
@@ -574,7 +586,7 @@ static int lov_add_target(struct obd_device *obd, struct obd_uuid *uuidp,
 	rc = lov_ost_pool_add(&lov->lov_packed, index, lov->lov_tgt_size);
 	if (rc) {
 		mutex_unlock(&lov->lov_lock);
-		kfree(tgt);
+		OBD_FREE_PTR(tgt);
 		return rc;
 	}
 
@@ -700,7 +712,7 @@ static void __lov_del_obd(struct obd_device *obd, struct lov_tgt_desc *tgt)
 	if (tgt->ltd_exp)
 		lov_disconnect_obd(obd, tgt);
 
-	kfree(tgt);
+	OBD_FREE_PTR(tgt);
 
 	/* Manual cleanup - no cleanup logs to clean up the osc's.  We must
 	   do it ourselves. And we can't do it from lov_cleanup,
@@ -810,16 +822,21 @@ int lov_setup(struct obd_device *obd, struct lustre_cfg *lcfg)
 		goto out;
 
 	lprocfs_lov_init_vars(&lvars);
-	lprocfs_obd_setup(obd, lvars.obd_vars, lvars.sysfs_vars);
+	lprocfs_obd_setup(obd, lvars.obd_vars);
+#if defined (CONFIG_PROC_FS)
+	{
+		int rc1;
 
-	rc = ldebugfs_seq_create(obd->obd_debugfs_entry, "target_obd",
-				 0444, &lov_proc_target_fops, obd);
-	if (rc)
-		CWARN("Error adding the target_obd file\n");
+		rc1 = lprocfs_seq_create(obd->obd_proc_entry, "target_obd",
+					0444, &lov_proc_target_fops, obd);
+		if (rc1)
+			CWARN("Error adding the target_obd file\n");
+	}
+#endif
+	lov->lov_pool_proc_entry = lprocfs_register("pools",
+						    obd->obd_proc_entry,
+						    NULL, NULL);
 
-	lov->lov_pool_debugfs_entry = ldebugfs_register("pools",
-						     obd->obd_debugfs_entry,
-						     NULL, NULL);
 	return 0;
 
 out:
@@ -886,7 +903,8 @@ static int lov_cleanup(struct obd_device *obd)
 			lov_del_target(obd, i, NULL, 0);
 		}
 		obd_putref(obd);
-		kfree(lov->lov_tgts);
+		OBD_FREE(lov->lov_tgts, sizeof(*lov->lov_tgts) *
+			 lov->lov_tgt_size);
 		lov->lov_tgt_size = 0;
 	}
 	return 0;
@@ -976,8 +994,8 @@ static int lov_recreate(struct obd_export *exp, struct obdo *src_oa,
 	LASSERT(src_oa->o_valid & OBD_MD_FLFLAGS &&
 		src_oa->o_flags & OBD_FL_RECREATE_OBJS);
 
-	obj_mdp = kzalloc(sizeof(*obj_mdp), GFP_NOFS);
-	if (!obj_mdp)
+	OBD_ALLOC(obj_mdp, sizeof(*obj_mdp));
+	if (obj_mdp == NULL)
 		return -ENOMEM;
 
 	ost_idx = src_oa->o_nlink;
@@ -1014,7 +1032,7 @@ static int lov_recreate(struct obd_export *exp, struct obdo *src_oa,
 	rc = obd_create(NULL, lov->lov_tgts[ost_idx]->ltd_exp,
 			src_oa, &obj_mdp, oti);
 out:
-	kfree(obj_mdp);
+	OBD_FREE(obj_mdp, sizeof(*obj_mdp));
 	return rc;
 }
 
@@ -1401,7 +1419,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 		__u32 flags;
 
 		memcpy(&index, data->ioc_inlbuf2, sizeof(__u32));
-		if (index >= count)
+		if ((index >= count))
 			return -ENODEV;
 
 		if (!lov->lov_tgts[index])
@@ -1440,7 +1458,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 		__u32 *genp;
 
 		len = 0;
-		if (obd_ioctl_getdata(&buf, &len, uarg))
+		if (obd_ioctl_getdata(&buf, &len, (void *)uarg))
 			return -EINVAL;
 
 		data = (struct obd_ioctl_data *)buf;
@@ -1473,7 +1491,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 			*genp = lov->lov_tgts[i]->ltd_gen;
 		}
 
-		if (copy_to_user(uarg, buf, len))
+		if (copy_to_user((void *)uarg, buf, len))
 			rc = -EFAULT;
 		obd_ioctl_freedata(buf, len);
 		break;
@@ -1514,7 +1532,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 			return -EAGAIN;
 
 		LASSERT(tgt && tgt->ltd_exp);
-		oqctl = kzalloc(sizeof(*oqctl), GFP_NOFS);
+		OBD_ALLOC_PTR(oqctl);
 		if (!oqctl)
 			return -ENOMEM;
 
@@ -1525,7 +1543,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 			qctl->qc_valid = QC_OSTIDX;
 			qctl->obd_uuid = tgt->ltd_uuid;
 		}
-		kfree(oqctl);
+		OBD_FREE_PTR(oqctl);
 		break;
 	}
 	default: {
@@ -1738,7 +1756,7 @@ static int lov_fiemap(struct lov_obd *lov, __u32 keylen, void *key,
 	if (fiemap_count_to_size(fm_key->fiemap.fm_extent_count) < buffer_size)
 		buffer_size = fiemap_count_to_size(fm_key->fiemap.fm_extent_count);
 
-	fm_local = libcfs_kvzalloc(buffer_size, GFP_NOFS);
+	OBD_ALLOC_LARGE(fm_local, buffer_size);
 	if (fm_local == NULL) {
 		rc = -ENOMEM;
 		goto out;
@@ -1944,7 +1962,7 @@ skip_last_device_calc:
 	fiemap->fm_mapped_extents = current_extent;
 
 out:
-	kvfree(fm_local);
+	OBD_FREE_LARGE(fm_local, buffer_size);
 	return rc;
 }
 
@@ -2349,7 +2367,7 @@ static int __init lov_init(void)
 	}
 	lprocfs_lov_init_vars(&lvars);
 
-	rc = class_register_type(&lov_obd_ops, NULL,
+	rc = class_register_type(&lov_obd_ops, NULL, lvars.module_vars,
 				 LUSTRE_LOV_NAME, &lov_device_type);
 
 	if (rc) {

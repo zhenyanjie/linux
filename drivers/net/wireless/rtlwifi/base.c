@@ -394,18 +394,20 @@ static void _rtl_init_mac80211(struct ieee80211_hw *hw)
 		}
 	}
 	/* <5> set hw caps */
-	ieee80211_hw_set(hw, SIGNAL_DBM);
-	ieee80211_hw_set(hw, RX_INCLUDES_FCS);
-	ieee80211_hw_set(hw, AMPDU_AGGREGATION);
-	ieee80211_hw_set(hw, CONNECTION_MONITOR);
-	ieee80211_hw_set(hw, MFP_CAPABLE);
-	ieee80211_hw_set(hw, REPORTS_TX_ACK_STATUS);
+	hw->flags = IEEE80211_HW_SIGNAL_DBM |
+	    IEEE80211_HW_RX_INCLUDES_FCS |
+	    IEEE80211_HW_AMPDU_AGGREGATION |
+	    IEEE80211_HW_CONNECTION_MONITOR |
+	    /* IEEE80211_HW_SUPPORTS_CQM_RSSI | */
+	    IEEE80211_HW_MFP_CAPABLE |
+	    IEEE80211_HW_REPORTS_TX_ACK_STATUS | 0;
 
 	/* swlps or hwlps has been set in diff chip in init_sw_vars */
-	if (rtlpriv->psc.swctrl_lps) {
-		ieee80211_hw_set(hw, SUPPORTS_PS);
-		ieee80211_hw_set(hw, PS_NULLFUNC_STACK);
-	}
+	if (rtlpriv->psc.swctrl_lps)
+		hw->flags |= IEEE80211_HW_SUPPORTS_PS |
+			IEEE80211_HW_PS_NULLFUNC_STACK |
+			/* IEEE80211_HW_SUPPORTS_DYNAMIC_PS | */
+			0;
 	hw->wiphy->interface_modes =
 	    BIT(NL80211_IFTYPE_AP) |
 	    BIT(NL80211_IFTYPE_STATION) |
@@ -1660,9 +1662,9 @@ void rtl_watchdog_wq_callback(void *data)
 		if (((rtlpriv->link_info.num_rx_inperiod +
 		      rtlpriv->link_info.num_tx_inperiod) > 8) ||
 		    (rtlpriv->link_info.num_rx_inperiod > 2))
-			rtl_lps_enter(hw);
-		else
 			rtl_lps_leave(hw);
+		else
+			rtl_lps_enter(hw);
 	}
 
 	rtlpriv->link_info.num_rx_inperiod = 0;

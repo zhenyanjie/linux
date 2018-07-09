@@ -65,6 +65,18 @@ static const struct of_device_id of_coherency_table[] = {
 int ll_enable_coherency(void);
 void ll_add_cpu_to_smp_group(void);
 
+int set_cpu_coherent(void)
+{
+	if (!coherency_base) {
+		pr_warn("Can't make current CPU cache coherent.\n");
+		pr_warn("Coherency fabric is not initialized\n");
+		return 1;
+	}
+
+	ll_add_cpu_to_smp_group();
+	return ll_enable_coherency();
+}
+
 static int mvebu_hwcc_notifier(struct notifier_block *nb,
 			       unsigned long event, void *__dev)
 {
@@ -104,22 +116,16 @@ static void __init armada_370_coherency_init(struct device_node *np)
 }
 
 /*
- * This ioremap hook is used on Armada 375/38x to ensure that PCIe
- * memory areas are mapped as MT_UNCACHED instead of MT_DEVICE. This
- * is needed as a workaround for a deadlock issue between the PCIe
- * interface and the cache controller.
+ * This ioremap hook is used on Armada 375/38x to ensure that all MMIO
+ * areas are mapped as MT_UNCACHED instead of MT_DEVICE. This is
+ * needed for the HW I/O coherency mechanism to work properly without
+ * deadlock.
  */
 static void __iomem *
-armada_pcie_wa_ioremap_caller(phys_addr_t phys_addr, size_t size,
-			      unsigned int mtype, void *caller)
+armada_wa_ioremap_caller(phys_addr_t phys_addr, size_t size,
+			 unsigned int mtype, void *caller)
 {
-	struct resource pcie_mem;
-
-	mvebu_mbus_get_pcie_mem_aperture(&pcie_mem);
-
-	if (pcie_mem.start <= phys_addr && (phys_addr + size) <= pcie_mem.end)
-		mtype = MT_UNCACHED;
-
+	mtype = MT_UNCACHED;
 	return __arm_ioremap_caller(phys_addr, size, mtype, caller);
 }
 
@@ -128,7 +134,7 @@ static void __init armada_375_380_coherency_init(struct device_node *np)
 	struct device_node *cache_dn;
 
 	coherency_cpu_base = of_iomap(np, 0);
-	arch_ioremap_caller = armada_pcie_wa_ioremap_caller;
+	arch_ioremap_caller = armada_wa_ioremap_caller;
 
 	/*
 	 * We should switch the PL310 to I/O coherency mode only if
@@ -192,23 +198,6 @@ static int coherency_type(void)
 	of_node_put(np);
 
 	return type;
-}
-
-int set_cpu_coherent(void)
-{
-	int type = coherency_type();
-
-	if (type == COHERENCY_FABRIC_TYPE_ARMADA_370_XP) {
-		if (!coherency_base) {
-			pr_warn("Can't make current CPU cache coherent.\n");
-			pr_warn("Coherency fabric is not initialized\n");
-			return 1;
-		}
-		ll_add_cpu_to_smp_group();
-		return ll_enable_coherency();
-	}
-
-	return 0;
 }
 
 int coherency_available(void)

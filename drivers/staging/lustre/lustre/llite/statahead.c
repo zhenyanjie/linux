@@ -312,7 +312,7 @@ static void ll_sa_entry_cleanup(struct ll_statahead_info *sai,
 		entry->se_minfo = NULL;
 		ll_intent_release(&minfo->mi_it);
 		iput(minfo->mi_dir);
-		kfree(minfo);
+		OBD_FREE_PTR(minfo);
 	}
 
 	if (req) {
@@ -336,7 +336,7 @@ static void ll_sa_entry_put(struct ll_statahead_info *sai,
 		ll_sa_entry_cleanup(sai, entry);
 		iput(entry->se_inode);
 
-		kfree(entry);
+		OBD_FREE(entry, entry->se_size);
 		atomic_dec(&sai->sai_cache_count);
 	}
 }
@@ -544,7 +544,7 @@ static void ll_sai_put(struct ll_statahead_info *sai)
 		LASSERT(agl_list_empty(sai));
 
 		iput(inode);
-		kfree(sai);
+		OBD_FREE_PTR(sai);
 	}
 }
 
@@ -772,7 +772,7 @@ out:
 	if (rc != 0) {
 		ll_intent_release(it);
 		iput(dir);
-		kfree(minfo);
+		OBD_FREE_PTR(minfo);
 	}
 	if (sai != NULL)
 		ll_sai_put(sai);
@@ -786,8 +786,8 @@ static void sa_args_fini(struct md_enqueue_info *minfo,
 	iput(minfo->mi_dir);
 	capa_put(minfo->mi_data.op_capa1);
 	capa_put(minfo->mi_data.op_capa2);
-	kfree(minfo);
-	kfree(einfo);
+	OBD_FREE_PTR(minfo);
+	OBD_FREE_PTR(einfo);
 }
 
 /**
@@ -816,15 +816,15 @@ static int sa_args_init(struct inode *dir, struct inode *child,
 
 	minfo = kzalloc(sizeof(*minfo), GFP_NOFS);
 	if (!minfo) {
-		kfree(einfo);
+		OBD_FREE_PTR(einfo);
 		return -ENOMEM;
 	}
 
 	op_data = ll_prep_md_op_data(&minfo->mi_data, dir, child, qstr->name,
 				     qstr->len, 0, LUSTRE_OPC_ANY, NULL);
 	if (IS_ERR(op_data)) {
-		kfree(einfo);
-		kfree(minfo);
+		OBD_FREE_PTR(einfo);
+		OBD_FREE_PTR(minfo);
 		return PTR_ERR(op_data);
 	}
 
@@ -1719,7 +1719,8 @@ int do_statahead_enter(struct inode *dir, struct dentry **dentryp,
 	return -EAGAIN;
 
 out:
-	kfree(sai);
+	if (sai != NULL)
+		OBD_FREE_PTR(sai);
 	spin_lock(&lli->lli_sa_lock);
 	lli->lli_opendir_key = NULL;
 	lli->lli_opendir_pid = 0;

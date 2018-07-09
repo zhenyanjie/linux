@@ -114,19 +114,16 @@ void tcp_unregister_congestion_control(struct tcp_congestion_ops *ca)
 }
 EXPORT_SYMBOL_GPL(tcp_unregister_congestion_control);
 
-u32 tcp_ca_get_key_by_name(const char *name, bool *ecn_ca)
+u32 tcp_ca_get_key_by_name(const char *name)
 {
 	const struct tcp_congestion_ops *ca;
-	u32 key = TCP_CA_UNSPEC;
+	u32 key;
 
 	might_sleep();
 
 	rcu_read_lock();
 	ca = __tcp_ca_find_autoload(name);
-	if (ca) {
-		key = ca->key;
-		*ecn_ca = ca->flags & TCP_CONG_NEEDS_ECN;
-	}
+	key = ca ? ca->key : TCP_CA_UNSPEC;
 	rcu_read_unlock();
 
 	return key;
@@ -179,6 +176,7 @@ void tcp_init_congestion_control(struct sock *sk)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 
+	tcp_sk(sk)->prior_ssthresh = 0;
 	if (icsk->icsk_ca_ops->init)
 		icsk->icsk_ca_ops->init(sk);
 }
@@ -368,8 +366,10 @@ int tcp_set_congestion_control(struct sock *sk, const char *name)
  */
 u32 tcp_slow_start(struct tcp_sock *tp, u32 acked)
 {
-	u32 cwnd = min(tp->snd_cwnd + acked, tp->snd_ssthresh);
+	u32 cwnd = tp->snd_cwnd + acked;
 
+	if (cwnd > tp->snd_ssthresh)
+		cwnd = tp->snd_ssthresh + 1;
 	acked -= cwnd - tp->snd_cwnd;
 	tp->snd_cwnd = min(cwnd, tp->snd_cwnd_clamp);
 
@@ -414,7 +414,7 @@ void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 		return;
 
 	/* In "safe" area, increase. */
-	if (tcp_in_slow_start(tp)) {
+	if (tp->snd_cwnd <= tp->snd_ssthresh) {
 		acked = tcp_slow_start(tp, acked);
 		if (!acked)
 			return;

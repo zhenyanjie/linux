@@ -89,6 +89,27 @@ static int adau17x1_pll_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static int adau17x1_adc_fixup(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct adau *adau = snd_soc_codec_get_drvdata(codec);
+
+	/*
+	 * If we are capturing, toggle the ADOSR bit in Converter Control 0 to
+	 * avoid losing SNR (workaround from ADI). This must be done after
+	 * the ADC(s) have been enabled. According to the data sheet, it is
+	 * normally illegal to set this bit when the sampling rate is 96 kHz,
+	 * but according to ADI it is acceptable for this workaround.
+	 */
+	regmap_update_bits(adau->regmap, ADAU17X1_CONVERTER0,
+		ADAU17X1_CONVERTER0_ADOSR, ADAU17X1_CONVERTER0_ADOSR);
+	regmap_update_bits(adau->regmap, ADAU17X1_CONVERTER0,
+		ADAU17X1_CONVERTER0_ADOSR, 0);
+
+	return 0;
+}
+
 static const char * const adau17x1_mono_stereo_text[] = {
 	"Stereo",
 	"Mono Left Channel (L+R)",
@@ -120,7 +141,8 @@ static const struct snd_soc_dapm_widget adau17x1_dapm_widgets[] = {
 	SND_SOC_DAPM_MUX("Right DAC Mode Mux", SND_SOC_NOPM, 0, 0,
 		&adau17x1_dac_mode_mux),
 
-	SND_SOC_DAPM_ADC("Left Decimator", NULL, ADAU17X1_ADC_CONTROL, 0, 0),
+	SND_SOC_DAPM_ADC_E("Left Decimator", NULL, ADAU17X1_ADC_CONTROL, 0, 0,
+			   adau17x1_adc_fixup, SND_SOC_DAPM_POST_PMU),
 	SND_SOC_DAPM_ADC("Right Decimator", NULL, ADAU17X1_ADC_CONTROL, 1, 0),
 	SND_SOC_DAPM_DAC("Left DAC", NULL, ADAU17X1_DAC_CONTROL0, 0, 0),
 	SND_SOC_DAPM_DAC("Right DAC", NULL, ADAU17X1_DAC_CONTROL0, 1, 0),
@@ -155,7 +177,6 @@ static int adau17x1_dsp_mux_enum_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_codec *codec = snd_soc_dapm_kcontrol_codec(kcontrol);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 	struct adau *adau = snd_soc_codec_get_drvdata(codec);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	struct snd_soc_dapm_update update;
@@ -189,7 +210,7 @@ static int adau17x1_dsp_mux_enum_put(struct snd_kcontrol *kcontrol,
 		update.reg = reg;
 		update.val = val;
 
-		snd_soc_dapm_mux_update_power(dapm, kcontrol,
+		snd_soc_dapm_mux_update_power(&codec->dapm, kcontrol,
 				ucontrol->value.enumerated.item[0], e, &update);
 	}
 
@@ -445,8 +466,8 @@ static int adau17x1_set_dai_pll(struct snd_soc_dai *dai, int pll_id,
 static int adau17x1_set_dai_sysclk(struct snd_soc_dai *dai,
 		int clk_id, unsigned int freq, int dir)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(dai->codec);
 	struct adau *adau = snd_soc_codec_get_drvdata(dai->codec);
+	struct snd_soc_dapm_context *dapm = &dai->codec->dapm;
 
 	switch (clk_id) {
 	case ADAU17X1_CLK_SRC_MCLK:
@@ -805,7 +826,6 @@ EXPORT_SYMBOL_GPL(adau17x1_setup_firmware);
 
 int adau17x1_add_widgets(struct snd_soc_codec *codec)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 	struct adau *adau = snd_soc_codec_get_drvdata(codec);
 	int ret;
 
@@ -813,13 +833,14 @@ int adau17x1_add_widgets(struct snd_soc_codec *codec)
 		ARRAY_SIZE(adau17x1_controls));
 	if (ret)
 		return ret;
-	ret = snd_soc_dapm_new_controls(dapm, adau17x1_dapm_widgets,
+	ret = snd_soc_dapm_new_controls(&codec->dapm, adau17x1_dapm_widgets,
 		ARRAY_SIZE(adau17x1_dapm_widgets));
 	if (ret)
 		return ret;
 
 	if (adau17x1_has_dsp(adau)) {
-		ret = snd_soc_dapm_new_controls(dapm, adau17x1_dsp_dapm_widgets,
+		ret = snd_soc_dapm_new_controls(&codec->dapm,
+			adau17x1_dsp_dapm_widgets,
 			ARRAY_SIZE(adau17x1_dsp_dapm_widgets));
 		if (ret)
 			return ret;
@@ -841,20 +862,21 @@ EXPORT_SYMBOL_GPL(adau17x1_add_widgets);
 
 int adau17x1_add_routes(struct snd_soc_codec *codec)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 	struct adau *adau = snd_soc_codec_get_drvdata(codec);
 	int ret;
 
-	ret = snd_soc_dapm_add_routes(dapm, adau17x1_dapm_routes,
+	ret = snd_soc_dapm_add_routes(&codec->dapm, adau17x1_dapm_routes,
 		ARRAY_SIZE(adau17x1_dapm_routes));
 	if (ret)
 		return ret;
 
 	if (adau17x1_has_dsp(adau)) {
-		ret = snd_soc_dapm_add_routes(dapm, adau17x1_dsp_dapm_routes,
+		ret = snd_soc_dapm_add_routes(&codec->dapm,
+			adau17x1_dsp_dapm_routes,
 			ARRAY_SIZE(adau17x1_dsp_dapm_routes));
 	} else {
-		ret = snd_soc_dapm_add_routes(dapm, adau17x1_no_dsp_dapm_routes,
+		ret = snd_soc_dapm_add_routes(&codec->dapm,
+			adau17x1_no_dsp_dapm_routes,
 			ARRAY_SIZE(adau17x1_no_dsp_dapm_routes));
 	}
 	return ret;

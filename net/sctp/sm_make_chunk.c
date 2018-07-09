@@ -1367,10 +1367,14 @@ static struct sctp_chunk *_sctp_make_chunk(const struct sctp_association *asoc,
 	sctp_chunkhdr_t *chunk_hdr;
 	struct sk_buff *skb;
 	struct sock *sk;
+	int chunklen;
+
+	chunklen = sizeof(*chunk_hdr) + paylen;
+	if (chunklen > SCTP_MAX_CHUNK_LEN)
+		goto nodata;
 
 	/* No need to allocate LL here, as this is only a chunk. */
-	skb = alloc_skb(WORD_ROUND(sizeof(sctp_chunkhdr_t) + paylen),
-			GFP_ATOMIC);
+	skb = alloc_skb(chunklen, GFP_ATOMIC);
 	if (!skb)
 		goto nodata;
 
@@ -3090,19 +3094,8 @@ static __be16 sctp_process_asconf_param(struct sctp_association *asoc,
 			sctp_assoc_set_primary(asoc, asconf->transport);
 			sctp_assoc_del_nonprimary_peers(asoc,
 							asconf->transport);
-			return SCTP_ERROR_NO_ERROR;
-		}
-
-		/* If the address is not part of the association, the
-		 * ASCONF-ACK with Error Cause Indication Parameter
-		 * which including cause of Unresolvable Address should
-		 * be sent.
-		 */
-		peer = sctp_assoc_lookup_paddr(asoc, &addr);
-		if (!peer)
-			return SCTP_ERROR_DNS_FAILED;
-
-		sctp_assoc_rm_peer(asoc, peer);
+		} else
+			sctp_assoc_del_peer(asoc, &addr);
 		break;
 	case SCTP_PARAM_SET_PRIMARY:
 		/* ADDIP Section 4.2.4
@@ -3143,17 +3136,10 @@ bool sctp_verify_asconf(const struct sctp_association *asoc,
 		case SCTP_PARAM_IPV4_ADDRESS:
 			if (length != sizeof(sctp_ipv4addr_param_t))
 				return false;
-			/* ensure there is only one addr param and it's in the
-			 * beginning of addip_hdr params, or we reject it.
-			 */
-			if (param.v != addip->addip_hdr.params)
-				return false;
 			addr_param_seen = true;
 			break;
 		case SCTP_PARAM_IPV6_ADDRESS:
 			if (length != sizeof(sctp_ipv6addr_param_t))
-				return false;
-			if (param.v != addip->addip_hdr.params)
 				return false;
 			addr_param_seen = true;
 			break;

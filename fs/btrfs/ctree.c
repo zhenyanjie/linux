@@ -1159,10 +1159,8 @@ static noinline int __btrfs_cow_block(struct btrfs_trans_handle *trans,
 
 	if (test_bit(BTRFS_ROOT_REF_COWS, &root->state)) {
 		ret = btrfs_reloc_cow_block(trans, root, buf, cow);
-		if (ret) {
-			btrfs_abort_transaction(trans, root, ret);
+		if (ret)
 			return ret;
-		}
 	}
 
 	if (buf == root->node) {
@@ -1441,9 +1439,8 @@ get_old_root(struct btrfs_root *root, u64 time_seq)
 		btrfs_tree_read_unlock(eb_root);
 		free_extent_buffer(eb_root);
 		old = read_tree_block(root, logical, 0);
-		if (WARN_ON(IS_ERR(old) || !extent_buffer_uptodate(old))) {
-			if (!IS_ERR(old))
-				free_extent_buffer(old);
+		if (WARN_ON(!old || !extent_buffer_uptodate(old))) {
+			free_extent_buffer(old);
 			btrfs_warn(root->fs_info,
 				"failed to read tree block %llu from get_old_root", logical);
 		} else {
@@ -1551,6 +1548,7 @@ noinline int btrfs_cow_block(struct btrfs_trans_handle *trans,
 		       trans->transid, root->fs_info->generation);
 
 	if (!should_cow_block(trans, root, buf)) {
+		trans->dirty = true;
 		*cow_ret = buf;
 		return 0;
 	}
@@ -1688,9 +1686,7 @@ int btrfs_realloc_node(struct btrfs_trans_handle *trans,
 		if (!cur || !uptodate) {
 			if (!cur) {
 				cur = read_tree_block(root, blocknr, gen);
-				if (IS_ERR(cur)) {
-					return PTR_ERR(cur);
-				} else if (!extent_buffer_uptodate(cur)) {
+				if (!cur || !extent_buffer_uptodate(cur)) {
 					free_extent_buffer(cur);
 					return -EIO;
 				}
@@ -1869,9 +1865,8 @@ static noinline struct extent_buffer *read_node_slot(struct btrfs_root *root,
 
 	eb = read_tree_block(root, btrfs_node_blockptr(parent, slot),
 			     btrfs_node_ptr_generation(parent, slot));
-	if (IS_ERR(eb) || !extent_buffer_uptodate(eb)) {
-		if (!IS_ERR(eb))
-			free_extent_buffer(eb);
+	if (eb && !extent_buffer_uptodate(eb)) {
+		free_extent_buffer(eb);
 		eb = NULL;
 	}
 
@@ -2500,7 +2495,7 @@ read_block_for_search(struct btrfs_trans_handle *trans,
 
 	ret = -EAGAIN;
 	tmp = read_tree_block(root, blocknr, 0);
-	if (!IS_ERR(tmp)) {
+	if (tmp) {
 		/*
 		 * If the read above didn't mark this buffer up to date,
 		 * it will never end up being up to date.  Set ret to EIO now
@@ -2773,8 +2768,10 @@ again:
 			 * then we don't want to set the path blocking,
 			 * so we test it here
 			 */
-			if (!should_cow_block(trans, root, b))
+			if (!should_cow_block(trans, root, b)) {
+				trans->dirty = true;
 				goto cow_done;
+			}
 
 			/*
 			 * must have write locks on this node and the

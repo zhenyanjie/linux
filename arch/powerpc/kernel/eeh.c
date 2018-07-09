@@ -144,6 +144,8 @@ struct eeh_stats {
 
 static struct eeh_stats eeh_stats;
 
+#define IS_BRIDGE(class_code) (((class_code)<<16) == PCI_BASE_CLASS_BRIDGE)
+
 static int __init eeh_setup(char *str)
 {
 	if (!strcmp(str, "off"))
@@ -304,9 +306,17 @@ void eeh_slot_error_detail(struct eeh_pe *pe, int severity)
 	 *
 	 * For pHyp, we have to enable IO for log retrieval. Otherwise,
 	 * 0xFF's is always returned from PCI config space.
+	 *
+	 * When the @severity is EEH_LOG_PERM, the PE is going to be
+	 * removed. Prior to that, the drivers for devices included in
+	 * the PE will be closed. The drivers rely on working IO path
+	 * to bring the devices to quiet state. Otherwise, PCI traffic
+	 * from those devices after they are removed is like to cause
+	 * another unexpected EEH error.
 	 */
 	if (!(pe->type & EEH_PE_PHB)) {
-		if (eeh_has_flag(EEH_ENABLE_IO_FOR_LOG))
+		if (eeh_has_flag(EEH_ENABLE_IO_FOR_LOG) ||
+		    severity == EEH_LOG_PERM)
 			eeh_pci_enable(pe, EEH_OPT_THAW_MMIO);
 
 		/*
@@ -676,7 +686,7 @@ int eeh_pci_enable(struct eeh_pe *pe, int function)
 	/* Check if the request is finished successfully */
 	if (active_flag) {
 		rc = eeh_ops->wait_state(pe, PCI_BUS_RESET_WAIT_MSEC);
-		if (rc <= 0)
+		if (rc < 0)
 			return rc;
 
 		if (rc & active_flag)
@@ -732,7 +742,7 @@ static void *eeh_restore_dev_state(void *data, void *userdata)
 
 	/* The caller should restore state for the specified device */
 	if (pdev != dev)
-		pci_restore_state(pdev);
+		pci_save_state(pdev);
 
 	return NULL;
 }
@@ -765,14 +775,14 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state stat
 		eeh_pe_state_clear(pe, EEH_PE_ISOLATED);
 		break;
 	case pcie_hot_reset:
-		eeh_pe_state_mark_with_cfg(pe, EEH_PE_ISOLATED);
+		eeh_pe_state_mark(pe, EEH_PE_ISOLATED);
 		eeh_ops->set_option(pe, EEH_OPT_FREEZE_PE);
 		eeh_pe_dev_traverse(pe, eeh_disable_and_save_dev_state, dev);
 		eeh_pe_state_mark(pe, EEH_PE_CFG_BLOCKED);
 		eeh_ops->reset(pe, EEH_RESET_HOT);
 		break;
 	case pcie_warm_reset:
-		eeh_pe_state_mark_with_cfg(pe, EEH_PE_ISOLATED);
+		eeh_pe_state_mark(pe, EEH_PE_ISOLATED);
 		eeh_ops->set_option(pe, EEH_OPT_FREEZE_PE);
 		eeh_pe_dev_traverse(pe, eeh_disable_and_save_dev_state, dev);
 		eeh_pe_state_mark(pe, EEH_PE_CFG_BLOCKED);
@@ -1071,7 +1081,7 @@ void eeh_add_device_early(struct pci_dn *pdn)
 	struct pci_controller *phb;
 	struct eeh_dev *edev = pdn_to_eeh_dev(pdn);
 
-	if (!edev || !eeh_enabled())
+	if (!edev)
 		return;
 
 	if (!eeh_has_flag(EEH_PROBE_MODE_DEVTREE))
@@ -1425,11 +1435,13 @@ static int dev_has_iommu_table(struct device *dev, void *data)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct pci_dev **ppdev = data;
+	struct iommu_table *tbl;
 
 	if (!dev)
 		return 0;
 
-	if (dev->iommu_group) {
+	tbl = get_iommu_table_base(dev);
+	if (tbl && tbl->it_group) {
 		*ppdev = pdev;
 		return 1;
 	}
@@ -1657,41 +1669,6 @@ int eeh_pe_configure(struct eeh_pe *pe)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(eeh_pe_configure);
-
-/**
- * eeh_pe_inject_err - Injecting the specified PCI error to the indicated PE
- * @pe: the indicated PE
- * @type: error type
- * @function: error function
- * @addr: address
- * @mask: address mask
- *
- * The routine is called to inject the specified PCI error, which
- * is determined by @type and @function, to the indicated PE for
- * testing purpose.
- */
-int eeh_pe_inject_err(struct eeh_pe *pe, int type, int func,
-		      unsigned long addr, unsigned long mask)
-{
-	/* Invalid PE ? */
-	if (!pe)
-		return -ENODEV;
-
-	/* Unsupported operation ? */
-	if (!eeh_ops || !eeh_ops->err_inject)
-		return -ENOENT;
-
-	/* Check on PCI error type */
-	if (type != EEH_ERR_TYPE_32 && type != EEH_ERR_TYPE_64)
-		return -EINVAL;
-
-	/* Check on PCI error function */
-	if (func < EEH_ERR_FUNC_MIN || func > EEH_ERR_FUNC_MAX)
-		return -EINVAL;
-
-	return eeh_ops->err_inject(pe, type, func, addr, mask);
-}
-EXPORT_SYMBOL_GPL(eeh_pe_inject_err);
 
 static int proc_eeh_show(struct seq_file *m, void *v)
 {

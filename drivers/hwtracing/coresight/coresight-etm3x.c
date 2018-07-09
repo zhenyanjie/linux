@@ -23,14 +23,13 @@
 #include <linux/smp.h>
 #include <linux/sysfs.h>
 #include <linux/stat.h>
-#include <linux/pm_runtime.h>
+#include <linux/clk.h>
 #include <linux/cpu.h>
 #include <linux/of.h>
 #include <linux/coresight.h>
 #include <linux/amba/bus.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
-#include <linux/clk.h>
 #include <asm/sections.h>
 
 #include "coresight-etm.h"
@@ -237,11 +236,8 @@ static void etm_set_default(struct etm_drvdata *drvdata)
 
 	drvdata->seq_curr_state = 0x0;
 	drvdata->ctxid_idx = 0x0;
-	for (i = 0; i < drvdata->nr_ctxid_cmp; i++) {
-		drvdata->ctxid_pid[i] = 0x0;
-		drvdata->ctxid_vpid[i] = 0x0;
-	}
-
+	for (i = 0; i < drvdata->nr_ctxid_cmp; i++)
+		drvdata->ctxid_val[i] = 0x0;
 	drvdata->ctxid_mask = 0x0;
 }
 
@@ -292,7 +288,7 @@ static void etm_enable_hw(void *info)
 	for (i = 0; i < drvdata->nr_ext_out; i++)
 		etm_writel(drvdata, ETM_DEFAULT_EVENT_VAL, ETMEXTOUTEVRn(i));
 	for (i = 0; i < drvdata->nr_ctxid_cmp; i++)
-		etm_writel(drvdata, drvdata->ctxid_pid[i], ETMCIDCVRn(i));
+		etm_writel(drvdata, drvdata->ctxid_val[i], ETMCIDCVRn(i));
 	etm_writel(drvdata, drvdata->ctxid_mask, ETMCIDCMR);
 	etm_writel(drvdata, drvdata->sync_freq, ETMSYNCFR);
 	/* No external input selected */
@@ -329,7 +325,9 @@ static int etm_trace_id(struct coresight_device *csdev)
 
 	if (!drvdata->enable)
 		return drvdata->traceid;
-	pm_runtime_get_sync(csdev->dev.parent);
+
+	if (clk_prepare_enable(drvdata->clk))
+		goto out;
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
@@ -338,8 +336,8 @@ static int etm_trace_id(struct coresight_device *csdev)
 	CS_LOCK(drvdata->base);
 
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
-	pm_runtime_put(csdev->dev.parent);
-
+	clk_disable_unprepare(drvdata->clk);
+out:
 	return trace_id;
 }
 
@@ -348,7 +346,10 @@ static int etm_enable(struct coresight_device *csdev)
 	struct etm_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 	int ret;
 
-	pm_runtime_get_sync(csdev->dev.parent);
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		goto err_clk;
+
 	spin_lock(&drvdata->spinlock);
 
 	/*
@@ -372,7 +373,8 @@ static int etm_enable(struct coresight_device *csdev)
 	return 0;
 err:
 	spin_unlock(&drvdata->spinlock);
-	pm_runtime_put(csdev->dev.parent);
+	clk_disable_unprepare(drvdata->clk);
+err_clk:
 	return ret;
 }
 
@@ -421,7 +423,8 @@ static void etm_disable(struct coresight_device *csdev)
 
 	spin_unlock(&drvdata->spinlock);
 	put_online_cpus();
-	pm_runtime_put(csdev->dev.parent);
+
+	clk_disable_unprepare(drvdata->clk);
 
 	dev_info(drvdata->dev, "ETM tracing disabled\n");
 }
@@ -471,10 +474,14 @@ static DEVICE_ATTR_RO(nr_ctxid_cmp);
 static ssize_t etmsr_show(struct device *dev,
 			  struct device_attribute *attr, char *buf)
 {
+	int ret;
 	unsigned long flags, val;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
-	pm_runtime_get_sync(drvdata->dev);
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	CS_UNLOCK(drvdata->base);
 
@@ -482,7 +489,7 @@ static ssize_t etmsr_show(struct device *dev,
 
 	CS_LOCK(drvdata->base);
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
-	pm_runtime_put(drvdata->dev);
+	clk_disable_unprepare(drvdata->clk);
 
 	return sprintf(buf, "%#lx\n", val);
 }
@@ -1310,6 +1317,7 @@ static DEVICE_ATTR_RW(seq_13_event);
 static ssize_t seq_curr_state_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
+	int ret;
 	unsigned long val, flags;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
@@ -1318,7 +1326,10 @@ static ssize_t seq_curr_state_show(struct device *dev,
 		goto out;
 	}
 
-	pm_runtime_get_sync(drvdata->dev);
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
 	CS_UNLOCK(drvdata->base);
@@ -1326,7 +1337,7 @@ static ssize_t seq_curr_state_show(struct device *dev,
 	CS_LOCK(drvdata->base);
 
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
-	pm_runtime_put(drvdata->dev);
+	clk_disable_unprepare(drvdata->clk);
 out:
 	return sprintf(buf, "%#lx\n", val);
 }
@@ -1389,41 +1400,38 @@ static ssize_t ctxid_idx_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(ctxid_idx);
 
-static ssize_t ctxid_pid_show(struct device *dev,
+static ssize_t ctxid_val_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
 	unsigned long val;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
 	spin_lock(&drvdata->spinlock);
-	val = drvdata->ctxid_vpid[drvdata->ctxid_idx];
+	val = drvdata->ctxid_val[drvdata->ctxid_idx];
 	spin_unlock(&drvdata->spinlock);
 
 	return sprintf(buf, "%#lx\n", val);
 }
 
-static ssize_t ctxid_pid_store(struct device *dev,
+static ssize_t ctxid_val_store(struct device *dev,
 			       struct device_attribute *attr,
 			       const char *buf, size_t size)
 {
 	int ret;
-	unsigned long vpid, pid;
+	unsigned long val;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
-	ret = kstrtoul(buf, 16, &vpid);
+	ret = kstrtoul(buf, 16, &val);
 	if (ret)
 		return ret;
 
-	pid = coresight_vpid_to_pid(vpid);
-
 	spin_lock(&drvdata->spinlock);
-	drvdata->ctxid_pid[drvdata->ctxid_idx] = pid;
-	drvdata->ctxid_vpid[drvdata->ctxid_idx] = vpid;
+	drvdata->ctxid_val[drvdata->ctxid_idx] = val;
 	spin_unlock(&drvdata->spinlock);
 
 	return size;
 }
-static DEVICE_ATTR_RW(ctxid_pid);
+static DEVICE_ATTR_RW(ctxid_val);
 
 static ssize_t ctxid_mask_show(struct device *dev,
 			       struct device_attribute *attr, char *buf)
@@ -1513,7 +1521,10 @@ static ssize_t status_show(struct device *dev,
 	unsigned long flags;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
-	pm_runtime_get_sync(drvdata->dev);
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
 	CS_UNLOCK(drvdata->base);
@@ -1539,7 +1550,7 @@ static ssize_t status_show(struct device *dev,
 	CS_LOCK(drvdata->base);
 
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
-	pm_runtime_put(drvdata->dev);
+	clk_disable_unprepare(drvdata->clk);
 
 	return ret;
 }
@@ -1548,6 +1559,7 @@ static DEVICE_ATTR_RO(status);
 static ssize_t traceid_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
+	int ret;
 	unsigned long val, flags;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
@@ -1556,7 +1568,10 @@ static ssize_t traceid_show(struct device *dev,
 		goto out;
 	}
 
-	pm_runtime_get_sync(drvdata->dev);
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	CS_UNLOCK(drvdata->base);
 
@@ -1564,7 +1579,7 @@ static ssize_t traceid_show(struct device *dev,
 
 	CS_LOCK(drvdata->base);
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
-	pm_runtime_put(drvdata->dev);
+	clk_disable_unprepare(drvdata->clk);
 out:
 	return sprintf(buf, "%#lx\n", val);
 }
@@ -1615,7 +1630,7 @@ static struct attribute *coresight_etm_attrs[] = {
 	&dev_attr_seq_13_event.attr,
 	&dev_attr_seq_curr_state.attr,
 	&dev_attr_ctxid_idx.attr,
-	&dev_attr_ctxid_pid.attr,
+	&dev_attr_ctxid_val.attr,
 	&dev_attr_ctxid_mask.attr,
 	&dev_attr_sync_freq.attr,
 	&dev_attr_timestamp_event.attr,
@@ -1802,12 +1817,10 @@ static int etm_probe(struct amba_device *adev, const struct amba_id *id)
 
 	spin_lock_init(&drvdata->spinlock);
 
-	drvdata->atclk = devm_clk_get(&adev->dev, "atclk"); /* optional */
-	if (!IS_ERR(drvdata->atclk)) {
-		ret = clk_prepare_enable(drvdata->atclk);
-		if (ret)
-			return ret;
-	}
+	drvdata->clk = adev->pclk;
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
 
 	drvdata->cpu = pdata ? pdata->cpu : 0;
 
@@ -1832,6 +1845,8 @@ static int etm_probe(struct amba_device *adev, const struct amba_id *id)
 	}
 	etm_init_default_data(drvdata);
 
+	clk_disable_unprepare(drvdata->clk);
+
 	desc->type = CORESIGHT_DEV_TYPE_SOURCE;
 	desc->subtype.source_subtype = CORESIGHT_DEV_SUBTYPE_SOURCE_PROC;
 	desc->ops = &etm_cs_ops;
@@ -1844,8 +1859,7 @@ static int etm_probe(struct amba_device *adev, const struct amba_id *id)
 		goto err_arch_supported;
 	}
 
-	pm_runtime_put(&adev->dev);
-	dev_info(dev, "%s initialized\n", (char *)id->data);
+	dev_info(dev, "ETM initialized\n");
 
 	if (boot_enable) {
 		coresight_enable(drvdata->csdev);
@@ -1855,6 +1869,7 @@ static int etm_probe(struct amba_device *adev, const struct amba_id *id)
 	return 0;
 
 err_arch_supported:
+	clk_disable_unprepare(drvdata->clk);
 	if (--etm_count == 0)
 		unregister_hotcpu_notifier(&etm_cpu_notifier);
 	return ret;
@@ -1871,57 +1886,22 @@ static int etm_remove(struct amba_device *adev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int etm_runtime_suspend(struct device *dev)
-{
-	struct etm_drvdata *drvdata = dev_get_drvdata(dev);
-
-	if (drvdata && !IS_ERR(drvdata->atclk))
-		clk_disable_unprepare(drvdata->atclk);
-
-	return 0;
-}
-
-static int etm_runtime_resume(struct device *dev)
-{
-	struct etm_drvdata *drvdata = dev_get_drvdata(dev);
-
-	if (drvdata && !IS_ERR(drvdata->atclk))
-		clk_prepare_enable(drvdata->atclk);
-
-	return 0;
-}
-#endif
-
-static const struct dev_pm_ops etm_dev_pm_ops = {
-	SET_RUNTIME_PM_OPS(etm_runtime_suspend, etm_runtime_resume, NULL)
-};
-
 static struct amba_id etm_ids[] = {
 	{	/* ETM 3.3 */
 		.id	= 0x0003b921,
 		.mask	= 0x0003ffff,
-		.data	= "ETM 3.3",
 	},
 	{	/* ETM 3.5 */
 		.id	= 0x0003b956,
 		.mask	= 0x0003ffff,
-		.data	= "ETM 3.5",
 	},
 	{	/* PTM 1.0 */
 		.id	= 0x0003b950,
 		.mask	= 0x0003ffff,
-		.data	= "PTM 1.0",
 	},
 	{	/* PTM 1.1 */
 		.id	= 0x0003b95f,
 		.mask	= 0x0003ffff,
-		.data	= "PTM 1.1",
-	},
-	{	/* PTM 1.1 Qualcomm */
-		.id	= 0x0003006f,
-		.mask	= 0x0003ffff,
-		.data	= "PTM 1.1",
 	},
 	{ 0, 0},
 };
@@ -1930,14 +1910,23 @@ static struct amba_driver etm_driver = {
 	.drv = {
 		.name	= "coresight-etm3x",
 		.owner	= THIS_MODULE,
-		.pm	= &etm_dev_pm_ops,
 	},
 	.probe		= etm_probe,
 	.remove		= etm_remove,
 	.id_table	= etm_ids,
 };
 
-module_amba_driver(etm_driver);
+int __init etm_init(void)
+{
+	return amba_driver_register(&etm_driver);
+}
+module_init(etm_init);
+
+void __exit etm_exit(void)
+{
+	amba_driver_unregister(&etm_driver);
+}
+module_exit(etm_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("CoreSight Program Flow Trace driver");

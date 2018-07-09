@@ -356,7 +356,12 @@ int cx231xx_send_vendor_cmd(struct cx231xx *dev,
 	 */
 	if ((ven_req->wLength > 4) && ((ven_req->bRequest == 0x4) ||
 					(ven_req->bRequest == 0x5) ||
-					(ven_req->bRequest == 0x6))) {
+					(ven_req->bRequest == 0x6) ||
+
+					/* Internal Master 3 Bus can send
+					 * and receive only 4 bytes per time
+					 */
+					(ven_req->bRequest == 0x2))) {
 		unsend_size = 0;
 		pdata = ven_req->pBuff;
 
@@ -653,20 +658,22 @@ int cx231xx_demod_reset(struct cx231xx *dev)
 
 	cx231xx_coredbg("Enter cx231xx_demod_reset()\n");
 
-	value[1] = (u8) 0x3;
-	status = cx231xx_write_ctrl_reg(dev, VRT_SET_REGISTER,
-					PWR_CTL_EN, value, 4);
-	msleep(10);
+		value[1] = (u8) 0x3;
+		status = cx231xx_write_ctrl_reg(dev, VRT_SET_REGISTER,
+						PWR_CTL_EN, value, 4);
+			msleep(10);
 
-	value[1] = (u8) 0x0;
-	status = cx231xx_write_ctrl_reg(dev, VRT_SET_REGISTER,
-					PWR_CTL_EN, value, 4);
-	msleep(10);
+		value[1] = (u8) 0x0;
+		status = cx231xx_write_ctrl_reg(dev, VRT_SET_REGISTER,
+						PWR_CTL_EN, value, 4);
+			msleep(10);
 
-	value[1] = (u8) 0x3;
-	status = cx231xx_write_ctrl_reg(dev, VRT_SET_REGISTER,
-					PWR_CTL_EN, value, 4);
-	msleep(10);
+		value[1] = (u8) 0x3;
+		status = cx231xx_write_ctrl_reg(dev, VRT_SET_REGISTER,
+						PWR_CTL_EN, value, 4);
+			msleep(10);
+
+
 
 	status = cx231xx_read_ctrl_reg(dev, VRT_GET_REGISTER, PWR_CTL_EN,
 				 value, 4);

@@ -632,16 +632,14 @@ static int acpi_freeze_prepare(void)
 	acpi_enable_wakeup_devices(ACPI_STATE_S0);
 	acpi_enable_all_wakeup_gpes();
 	acpi_os_wait_events_complete();
-	if (acpi_sci_irq_valid())
-		enable_irq_wake(acpi_sci_irq);
+	enable_irq_wake(acpi_gbl_FADT.sci_interrupt);
 	return 0;
 }
 
 static void acpi_freeze_restore(void)
 {
 	acpi_disable_wakeup_devices(ACPI_STATE_S0);
-	if (acpi_sci_irq_valid())
-		disable_irq_wake(acpi_sci_irq);
+	disable_irq_wake(acpi_gbl_FADT.sci_interrupt);
 	acpi_enable_all_runtime_gpes();
 }
 

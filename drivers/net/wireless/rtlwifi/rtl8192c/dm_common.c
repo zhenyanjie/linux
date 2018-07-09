@@ -39,7 +39,6 @@
 #define BT_RSSI_STATE_SPECIAL_LOW	BIT_OFFSET_LEN_MASK_32(2, 1)
 #define BT_RSSI_STATE_BG_EDCA_LOW	BIT_OFFSET_LEN_MASK_32(3, 1)
 #define BT_RSSI_STATE_TXPOWER_LOW	BIT_OFFSET_LEN_MASK_32(4, 1)
-#define BT_MASK				0x00ffffff
 
 #define RTLPRIV			(struct rtl_priv *)
 #define GET_UNDECORATED_AVERAGE_RSSI(_priv)	\
@@ -313,7 +312,7 @@ static void rtl92c_dm_ctrl_initgain_by_rssi(struct ieee80211_hw *hw)
 	struct dig_t *digtable = &rtlpriv->dm_digtable;
 	u32 isbt;
 
-	/* modify DIG lower bound, deal with abnormally large false alarm */
+	/* modify DIG lower bound, deal with abnorally large false alarm */
 	if (rtlpriv->falsealm_cnt.cnt_all > 10000) {
 		digtable->large_fa_hit++;
 		if (digtable->forbidden_igi < digtable->cur_igvalue) {
@@ -1170,22 +1169,23 @@ static void rtl92c_dm_check_txpower_tracking_thermal_meter(
 						struct ieee80211_hw *hw)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
+	static u8 tm_trigger;
 
 	if (!rtlpriv->dm.txpower_tracking)
 		return;
 
-	if (!rtlpriv->dm.tm_trigger) {
+	if (!tm_trigger) {
 		rtl_set_rfreg(hw, RF90_PATH_A, RF_T_METER, RFREG_OFFSET_MASK,
 			      0x60);
 		RT_TRACE(rtlpriv, COMP_POWER_TRACKING, DBG_LOUD,
 			 "Trigger 92S Thermal Meter!!\n");
-		rtlpriv->dm.tm_trigger = 1;
+		tm_trigger = 1;
 		return;
 	} else {
 		RT_TRACE(rtlpriv, COMP_POWER_TRACKING, DBG_LOUD,
 			 "Schedule TxPowerTracking direct call!!\n");
 		rtl92c_dm_txpower_tracking_directcall(hw);
-		rtlpriv->dm.tm_trigger = 0;
+		tm_trigger = 0;
 	}
 }
 
@@ -1537,11 +1537,13 @@ static bool rtl92c_bt_state_change(struct ieee80211_hw *hw)
 		return false;
 
 	bt_state = rtl_read_byte(rtlpriv, 0x4fd);
-	bt_tx = rtl_read_dword(rtlpriv, 0x488) & BT_MASK;
-	bt_pri = rtl_read_dword(rtlpriv, 0x48c) & BT_MASK;
+	bt_tx = rtl_read_dword(rtlpriv, 0x488);
+	bt_tx = bt_tx & 0x00ffffff;
+	bt_pri = rtl_read_dword(rtlpriv, 0x48c);
+	bt_pri = bt_pri & 0x00ffffff;
 	polling = rtl_read_dword(rtlpriv, 0x490);
 
-	if (bt_tx == BT_MASK && bt_pri == BT_MASK &&
+	if (bt_tx == 0xffffffff && bt_pri == 0xffffffff &&
 	    polling == 0xffffffff && bt_state == 0xff)
 		return false;
 

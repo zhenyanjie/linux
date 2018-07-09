@@ -262,7 +262,7 @@ static int twl6040_vibra_probe(struct platform_device *pdev)
 	int vddvibr_uV = 0;
 	int error;
 
-	twl6040_core_node = of_find_node_by_name(twl6040_core_dev->of_node,
+	twl6040_core_node = of_get_child_by_name(twl6040_core_dev->of_node,
 						 "vibra");
 	if (!twl6040_core_node) {
 		dev_err(&pdev->dev, "parent of node is missing?\n");
@@ -308,8 +308,7 @@ static int twl6040_vibra_probe(struct platform_device *pdev)
 	mutex_init(&info->mutex);
 
 	error = devm_request_threaded_irq(&pdev->dev, info->irq, NULL,
-					  twl6040_vib_irq_handler,
-					  IRQF_ONESHOT,
+					  twl6040_vib_irq_handler, 0,
 					  "twl6040_irq_vib", info);
 	if (error) {
 		dev_err(info->dev, "VIB IRQ request failed: %d\n", error);

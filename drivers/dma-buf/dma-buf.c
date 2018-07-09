@@ -29,7 +29,6 @@
 #include <linux/anon_inodes.h>
 #include <linux/export.h>
 #include <linux/debugfs.h>
-#include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/poll.h>
 #include <linux/reservation.h>
@@ -73,7 +72,6 @@ static int dma_buf_release(struct inode *inode, struct file *file)
 	if (dmabuf->resv == (struct reservation_object *)&dmabuf[1])
 		reservation_object_fini(dmabuf->resv);
 
-	module_put(dmabuf->owner);
 	kfree(dmabuf);
 	return 0;
 }
@@ -287,7 +285,6 @@ struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info)
 	struct reservation_object *resv = exp_info->resv;
 	struct file *file;
 	size_t alloc_size = sizeof(struct dma_buf);
-
 	if (!exp_info->resv)
 		alloc_size += sizeof(struct reservation_object);
 	else
@@ -305,20 +302,14 @@ struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info)
 		return ERR_PTR(-EINVAL);
 	}
 
-	if (!try_module_get(exp_info->owner))
-		return ERR_PTR(-ENOENT);
-
 	dmabuf = kzalloc(alloc_size, GFP_KERNEL);
-	if (!dmabuf) {
-		module_put(exp_info->owner);
+	if (dmabuf == NULL)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	dmabuf->priv = exp_info->priv;
 	dmabuf->ops = exp_info->ops;
 	dmabuf->size = exp_info->size;
 	dmabuf->exp_name = exp_info->exp_name;
-	dmabuf->owner = exp_info->owner;
 	init_waitqueue_head(&dmabuf->poll);
 	dmabuf->cb_excl.poll = dmabuf->cb_shared.poll = &dmabuf->poll;
 	dmabuf->cb_excl.active = dmabuf->cb_shared.active = 0;
@@ -554,8 +545,7 @@ int dma_buf_begin_cpu_access(struct dma_buf *dmabuf, size_t start, size_t len,
 		return -EINVAL;
 
 	if (dmabuf->ops->begin_cpu_access)
-		ret = dmabuf->ops->begin_cpu_access(dmabuf, start,
-							len, direction);
+		ret = dmabuf->ops->begin_cpu_access(dmabuf, start, len, direction);
 
 	return ret;
 }
@@ -659,7 +649,7 @@ EXPORT_SYMBOL_GPL(dma_buf_kunmap);
  * @dmabuf:	[in]	buffer that should back the vma
  * @vma:	[in]	vma for the mmap
  * @pgoff:	[in]	offset in pages where this mmap should start within the
- *			dma-buf buffer.
+ * 			dma-buf buffer.
  *
  * This function adjusts the passed in vma so that it points at the file of the
  * dma_buf operation. It also adjusts the starting pgoff and does bounds
@@ -836,7 +826,6 @@ static int dma_buf_describe(struct seq_file *s)
 static int dma_buf_show(struct seq_file *s, void *unused)
 {
 	void (*func)(struct seq_file *) = s->private;
-
 	func(s);
 	return 0;
 }
@@ -858,9 +847,7 @@ static struct dentry *dma_buf_debugfs_dir;
 static int dma_buf_init_debugfs(void)
 {
 	int err = 0;
-
 	dma_buf_debugfs_dir = debugfs_create_dir("dma_buf", NULL);
-
 	if (IS_ERR(dma_buf_debugfs_dir)) {
 		err = PTR_ERR(dma_buf_debugfs_dir);
 		dma_buf_debugfs_dir = NULL;

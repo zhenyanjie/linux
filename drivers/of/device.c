@@ -163,18 +163,6 @@ void of_device_unregister(struct platform_device *ofdev)
 }
 EXPORT_SYMBOL(of_device_unregister);
 
-const void *of_device_get_match_data(const struct device *dev)
-{
-	const struct of_device_id *match;
-
-	match = of_match_device(dev->driver->of_match_table, dev);
-	if (!match)
-		return NULL;
-
-	return match->data;
-}
-EXPORT_SYMBOL(of_device_get_match_data);
-
 ssize_t of_device_get_modalias(struct device *dev, char *str, ssize_t len)
 {
 	const char *compat;
@@ -222,8 +210,9 @@ ssize_t of_device_get_modalias(struct device *dev, char *str, ssize_t len)
 			str[i] = '_';
 	}
 
-	return tsize;
+	return repend;
 }
+EXPORT_SYMBOL_GPL(of_device_get_modalias);
 
 /**
  * of_device_uevent - Display OF related uevent information
@@ -286,3 +275,4 @@ int of_device_uevent_modalias(struct device *dev, struct kobj_uevent_env *env)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(of_device_uevent_modalias);

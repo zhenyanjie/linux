@@ -262,12 +262,22 @@ out:
 	spin_unlock_irqrestore(&zdev->iommu_bitmap_lock, flags);
 }
 
+int dma_set_mask(struct device *dev, u64 mask)
+{
+	if (!dev->dma_mask || !dma_supported(dev, mask))
+		return -EIO;
+
+	*dev->dma_mask = mask;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(dma_set_mask);
+
 static dma_addr_t s390_dma_map_pages(struct device *dev, struct page *page,
 				     unsigned long offset, size_t size,
 				     enum dma_data_direction direction,
 				     struct dma_attrs *attrs)
 {
-	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));
+	struct zpci_dev *zdev = get_zdev(to_pci_dev(dev));
 	unsigned long nr_pages, iommu_page_index;
 	unsigned long pa = page_to_phys(page) + offset;
 	int flags = ZPCI_PTE_VALID;
@@ -306,7 +316,7 @@ static void s390_dma_unmap_pages(struct device *dev, dma_addr_t dma_addr,
 				 size_t size, enum dma_data_direction direction,
 				 struct dma_attrs *attrs)
 {
-	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));
+	struct zpci_dev *zdev = get_zdev(to_pci_dev(dev));
 	unsigned long iommu_page_index;
 	int npages;
 
@@ -327,7 +337,7 @@ static void *s390_dma_alloc(struct device *dev, size_t size,
 			    dma_addr_t *dma_handle, gfp_t flag,
 			    struct dma_attrs *attrs)
 {
-	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));
+	struct zpci_dev *zdev = get_zdev(to_pci_dev(dev));
 	struct page *page;
 	unsigned long pa;
 	dma_addr_t map;
@@ -357,7 +367,7 @@ static void s390_dma_free(struct device *dev, size_t size,
 			  void *pa, dma_addr_t dma_handle,
 			  struct dma_attrs *attrs)
 {
-	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));
+	struct zpci_dev *zdev = get_zdev(to_pci_dev(dev));
 
 	size = PAGE_ALIGN(size);
 	atomic64_sub(size / PAGE_SIZE, &zdev->allocated_pages);
@@ -422,7 +432,7 @@ int zpci_dma_init_device(struct zpci_dev *zdev)
 	zdev->dma_table = dma_alloc_cpu_table();
 	if (!zdev->dma_table) {
 		rc = -ENOMEM;
-		goto out_clean;
+		goto out;
 	}
 
 	zdev->iommu_size = (unsigned long) high_memory - PAGE_OFFSET;
@@ -430,7 +440,7 @@ int zpci_dma_init_device(struct zpci_dev *zdev)
 	zdev->iommu_bitmap = vzalloc(zdev->iommu_pages / 8);
 	if (!zdev->iommu_bitmap) {
 		rc = -ENOMEM;
-		goto out_reg;
+		goto free_dma_table;
 	}
 
 	rc = zpci_register_ioat(zdev,
@@ -439,12 +449,16 @@ int zpci_dma_init_device(struct zpci_dev *zdev)
 				zdev->start_dma + zdev->iommu_size - 1,
 				(u64) zdev->dma_table);
 	if (rc)
-		goto out_reg;
-	return 0;
+		goto free_bitmap;
 
-out_reg:
+	return 0;
+free_bitmap:
+	vfree(zdev->iommu_bitmap);
+	zdev->iommu_bitmap = NULL;
+free_dma_table:
 	dma_free_cpu_table(zdev->dma_table);
-out_clean:
+	zdev->dma_table = NULL;
+out:
 	return rc;
 }
 

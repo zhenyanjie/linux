@@ -72,7 +72,6 @@ static int __init parse_options(struct earlycon_device *device, char *options)
 
 	switch (port->iotype) {
 	case UPIO_MEM32:
-	case UPIO_MEM32BE:
 		port->regshift = 2;	/* fall-through */
 	case UPIO_MEM:
 		port->mapbase = addr;
@@ -91,11 +90,9 @@ static int __init parse_options(struct earlycon_device *device, char *options)
 		strlcpy(device->options, options, length);
 	}
 
-	if (port->iotype == UPIO_MEM || port->iotype == UPIO_MEM32 ||
-	    port->iotype == UPIO_MEM32BE)
+	if (port->iotype == UPIO_MEM || port->iotype == UPIO_MEM32)
 		pr_info("Early serial console at MMIO%s 0x%llx (options '%s')\n",
-			(port->iotype == UPIO_MEM) ? "" :
-			(port->iotype == UPIO_MEM32) ? "32" : "32be",
+			(port->iotype == UPIO_MEM32) ? "32" : "",
 			(unsigned long long)port->mapbase,
 			device->options);
 	else
@@ -136,7 +133,7 @@ static int __init register_earlycon(char *buf, const struct earlycon_id *match)
  *
  *	Registers the earlycon console matching the earlycon specified
  *	in the param string @buf. Acceptable param strings are of the form
- *	   <name>,io|mmio|mmio32|mmio32be,<addr>,<options>
+ *	   <name>,io|mmio|mmio32,<addr>,<options>
  *	   <name>,0x<addr>,<options>
  *	   <name>,<options>
  *	   <name>

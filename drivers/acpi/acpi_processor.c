@@ -170,7 +170,7 @@ static int acpi_processor_hotadd_init(struct acpi_processor *pr)
 	acpi_status status;
 	int ret;
 
-	if (invalid_phys_cpuid(pr->phys_id))
+	if (pr->phys_id == PHYS_CPUID_INVALID)
 		return -ENODEV;
 
 	status = acpi_evaluate_integer(pr->handle, "_STA", NULL, &sta);
@@ -215,7 +215,8 @@ static int acpi_processor_get_info(struct acpi_device *device)
 	union acpi_object object = { 0 };
 	struct acpi_buffer buffer = { sizeof(union acpi_object), &object };
 	struct acpi_processor *pr = acpi_driver_data(device);
-	int device_declaration = 0;
+	phys_cpuid_t phys_id;
+	int cpu_index, device_declaration = 0;
 	acpi_status status = AE_OK;
 	static int cpu0_initialized;
 	unsigned long long value;
@@ -262,28 +263,29 @@ static int acpi_processor_get_info(struct acpi_device *device)
 		pr->acpi_id = value;
 	}
 
-	pr->phys_id = acpi_get_phys_id(pr->handle, device_declaration,
-					pr->acpi_id);
-	if (invalid_phys_cpuid(pr->phys_id))
+	phys_id = acpi_get_phys_id(pr->handle, device_declaration, pr->acpi_id);
+	if (phys_id == PHYS_CPUID_INVALID)
 		acpi_handle_debug(pr->handle, "failed to get CPU physical ID.\n");
+	pr->phys_id = phys_id;
 
-	pr->id = acpi_map_cpuid(pr->phys_id, pr->acpi_id);
+	cpu_index = acpi_map_cpuid(pr->phys_id, pr->acpi_id);
 	if (!cpu0_initialized && !acpi_has_cpu_in_madt()) {
 		cpu0_initialized = 1;
 		/*
 		 * Handle UP system running SMP kernel, with no CPU
 		 * entry in MADT
 		 */
-		if (invalid_logical_cpuid(pr->id) && (num_online_cpus() == 1))
-			pr->id = 0;
+		if ((cpu_index == -1) && (num_online_cpus() == 1))
+			cpu_index = 0;
 	}
+	pr->id = cpu_index;
 
 	/*
 	 *  Extra Processor objects may be enumerated on MP systems with
 	 *  less than the max # of CPUs. They should be ignored _iff
 	 *  they are physically not present.
 	 */
-	if (invalid_logical_cpuid(pr->id)) {
+	if (pr->id == -1) {
 		int ret = acpi_processor_hotadd_init(pr);
 		if (ret)
 			return ret;
@@ -313,15 +315,6 @@ static int acpi_processor_get_info(struct acpi_device *device)
 		pr->throttling.duty_width = acpi_gbl_FADT.duty_width;
 
 		pr->pblk = object.processor.pblk_address;
-
-		/*
-		 * We don't care about error returns - we just try to mark
-		 * these reserved so that nobody else is confused into thinking
-		 * that this region might be unused..
-		 *
-		 * (In particular, allocating the IO range for Cardbus)
-		 */
-		request_region(pr->throttling.address, 6, "ACPI CPU throttle");
 	}
 
 	/*
@@ -473,6 +466,58 @@ static void acpi_processor_remove(struct acpi_device *device)
 }
 #endif /* CONFIG_ACPI_HOTPLUG_CPU */
 
+#ifdef CONFIG_X86
+static bool acpi_hwp_native_thermal_lvt_set;
+static acpi_status __init acpi_hwp_native_thermal_lvt_osc(acpi_handle handle,
+							  u32 lvl,
+							  void *context,
+							  void **rv)
+{
+	u8 sb_uuid_str[] = "4077A616-290C-47BE-9EBD-D87058713953";
+	u32 capbuf[2];
+	struct acpi_osc_context osc_context = {
+		.uuid_str = sb_uuid_str,
+		.rev = 1,
+		.cap.length = 8,
+		.cap.pointer = capbuf,
+	};
+
+	if (acpi_hwp_native_thermal_lvt_set)
+		return AE_CTRL_TERMINATE;
+
+	capbuf[0] = 0x0000;
+	capbuf[1] = 0x1000; /* set bit 12 */
+
+	if (ACPI_SUCCESS(acpi_run_osc(handle, &osc_context))) {
+		if (osc_context.ret.pointer && osc_context.ret.length > 1) {
+			u32 *capbuf_ret = osc_context.ret.pointer;
+
+			if (capbuf_ret[1] & 0x1000) {
+				acpi_handle_info(handle,
+					"_OSC native thermal LVT Acked\n");
+				acpi_hwp_native_thermal_lvt_set = true;
+			}
+		}
+		kfree(osc_context.ret.pointer);
+	}
+
+	return AE_OK;
+}
+
+void __init acpi_early_processor_osc(void)
+{
+	if (boot_cpu_has(X86_FEATURE_HWP)) {
+		acpi_walk_namespace(ACPI_TYPE_PROCESSOR, ACPI_ROOT_OBJECT,
+				    ACPI_UINT32_MAX,
+				    acpi_hwp_native_thermal_lvt_osc,
+				    NULL, NULL, NULL);
+		acpi_get_devices(ACPI_PROCESSOR_DEVICE_HID,
+				 acpi_hwp_native_thermal_lvt_osc,
+				 NULL, NULL);
+	}
+}
+#endif
+
 /*
  * The following ACPI IDs are known to be suitable for representing as
  * processor devices.
@@ -485,7 +530,7 @@ static const struct acpi_device_id processor_device_ids[] = {
 	{ }
 };
 
-static struct acpi_scan_handler processor_handler = {
+static struct acpi_scan_handler __refdata processor_handler = {
 	.ids = processor_device_ids,
 	.attach = acpi_processor_add,
 #ifdef CONFIG_ACPI_HOTPLUG_CPU

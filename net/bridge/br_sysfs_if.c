@@ -160,7 +160,7 @@ static BRPORT_ATTR(hold_timer, S_IRUGO, show_hold_timer, NULL);
 
 static int store_flush(struct net_bridge_port *p, unsigned long v)
 {
-	br_fdb_delete_by_port(p->br, p, 0, 0); // Don't delete local entry
+	br_fdb_delete_by_port(p->br, p, 0); // Don't delete local entry
 	return 0;
 }
 static BRPORT_ATTR(flush, S_IWUSR, NULL, store_flush);
@@ -228,6 +228,9 @@ static ssize_t brport_show(struct kobject *kobj,
 {
 	struct brport_attribute *brport_attr = to_brport_attr(attr);
 	struct net_bridge_port *p = to_brport(kobj);
+
+	if (!brport_attr->show)
+		return -EINVAL;
 
 	return brport_attr->show(p, buf);
 }

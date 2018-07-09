@@ -3068,7 +3068,7 @@ static int __lock_is_held(struct lockdep_map *lock);
 static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 			  int trylock, int read, int check, int hardirqs_off,
 			  struct lockdep_map *nest_lock, unsigned long ip,
-			  int references, int pin_count)
+			  int references)
 {
 	struct task_struct *curr = current;
 	struct lock_class *class = NULL;
@@ -3128,10 +3128,17 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 	if (depth) {
 		hlock = curr->held_locks + depth - 1;
 		if (hlock->class_idx == class_idx && nest_lock) {
-			if (hlock->references)
+			if (hlock->references) {
+				/*
+				 * Check: unsigned int references:12, overflow.
+				 */
+				if (DEBUG_LOCKS_WARN_ON(hlock->references == (1 << 12)-1))
+					return 0;
+
 				hlock->references++;
-			else
+			} else {
 				hlock->references = 2;
+			}
 
 			return 1;
 		}
@@ -3157,7 +3164,6 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 	hlock->waittime_stamp = 0;
 	hlock->holdtime_stamp = lockstat_clock();
 #endif
-	hlock->pin_count = pin_count;
 
 	if (check && !mark_irqflags(curr, hlock))
 		return 0;
@@ -3261,6 +3267,26 @@ print_unlock_imbalance_bug(struct task_struct *curr, struct lockdep_map *lock,
 	return 0;
 }
 
+/*
+ * Common debugging checks for both nested and non-nested unlock:
+ */
+static int check_unlock(struct task_struct *curr, struct lockdep_map *lock,
+			unsigned long ip)
+{
+	if (unlikely(!debug_locks))
+		return 0;
+	/*
+	 * Lockdep should run with IRQs disabled, recursion, head-ache, etc..
+	 */
+	if (DEBUG_LOCKS_WARN_ON(!irqs_disabled()))
+		return 0;
+
+	if (curr->lockdep_depth <= 0)
+		return print_unlock_imbalance_bug(curr, lock, ip);
+
+	return 1;
+}
+
 static int match_held_lock(struct held_lock *hlock, struct lockdep_map *lock)
 {
 	if (hlock->instance == lock)
@@ -3343,7 +3369,7 @@ found_it:
 			hlock_class(hlock)->subclass, hlock->trylock,
 				hlock->read, hlock->check, hlock->hardirqs_off,
 				hlock->nest_lock, hlock->acquire_ip,
-				hlock->references, hlock->pin_count))
+				hlock->references))
 			return 0;
 	}
 
@@ -3357,35 +3383,31 @@ found_it:
 }
 
 /*
- * Remove the lock to the list of currently held locks - this gets
- * called on mutex_unlock()/spin_unlock*() (or on a failed
- * mutex_lock_interruptible()).
- *
- * @nested is an hysterical artifact, needs a tree wide cleanup.
+ * Remove the lock to the list of currently held locks in a
+ * potentially non-nested (out of order) manner. This is a
+ * relatively rare operation, as all the unlock APIs default
+ * to nested mode (which uses lock_release()):
  */
 static int
-__lock_release(struct lockdep_map *lock, int nested, unsigned long ip)
+lock_release_non_nested(struct task_struct *curr,
+			struct lockdep_map *lock, unsigned long ip)
 {
-	struct task_struct *curr = current;
 	struct held_lock *hlock, *prev_hlock;
 	unsigned int depth;
 	int i;
-
-	if (unlikely(!debug_locks))
-		return 0;
-
-	depth = curr->lockdep_depth;
-	/*
-	 * So we're all set to release this lock.. wait what lock? We don't
-	 * own any locks, you've been drinking again?
-	 */
-	if (DEBUG_LOCKS_WARN_ON(depth <= 0))
-		 return print_unlock_imbalance_bug(curr, lock, ip);
 
 	/*
 	 * Check whether the lock exists in the current stack
 	 * of held locks:
 	 */
+	depth = curr->lockdep_depth;
+	/*
+	 * So we're all set to release this lock.. wait what lock? We don't
+	 * own any locks, you've been drinking again?
+	 */
+	if (DEBUG_LOCKS_WARN_ON(!depth))
+		return 0;
+
 	prev_hlock = NULL;
 	for (i = depth-1; i >= 0; i--) {
 		hlock = curr->held_locks + i;
@@ -3403,8 +3425,6 @@ __lock_release(struct lockdep_map *lock, int nested, unsigned long ip)
 found_it:
 	if (hlock->instance == lock)
 		lock_release_holdtime(hlock);
-
-	WARN(hlock->pin_count, "releasing a pinned lock\n");
 
 	if (hlock->references) {
 		hlock->references--;
@@ -3433,7 +3453,7 @@ found_it:
 			hlock_class(hlock)->subclass, hlock->trylock,
 				hlock->read, hlock->check, hlock->hardirqs_off,
 				hlock->nest_lock, hlock->acquire_ip,
-				hlock->references, hlock->pin_count))
+				hlock->references))
 			return 0;
 	}
 
@@ -3443,8 +3463,76 @@ found_it:
 	 */
 	if (DEBUG_LOCKS_WARN_ON(curr->lockdep_depth != depth - 1))
 		return 0;
-
 	return 1;
+}
+
+/*
+ * Remove the lock to the list of currently held locks - this gets
+ * called on mutex_unlock()/spin_unlock*() (or on a failed
+ * mutex_lock_interruptible()). This is done for unlocks that nest
+ * perfectly. (i.e. the current top of the lock-stack is unlocked)
+ */
+static int lock_release_nested(struct task_struct *curr,
+			       struct lockdep_map *lock, unsigned long ip)
+{
+	struct held_lock *hlock;
+	unsigned int depth;
+
+	/*
+	 * Pop off the top of the lock stack:
+	 */
+	depth = curr->lockdep_depth - 1;
+	hlock = curr->held_locks + depth;
+
+	/*
+	 * Is the unlock non-nested:
+	 */
+	if (hlock->instance != lock || hlock->references)
+		return lock_release_non_nested(curr, lock, ip);
+	curr->lockdep_depth--;
+
+	/*
+	 * No more locks, but somehow we've got hash left over, who left it?
+	 */
+	if (DEBUG_LOCKS_WARN_ON(!depth && (hlock->prev_chain_key != 0)))
+		return 0;
+
+	curr->curr_chain_key = hlock->prev_chain_key;
+
+	lock_release_holdtime(hlock);
+
+#ifdef CONFIG_DEBUG_LOCKDEP
+	hlock->prev_chain_key = 0;
+	hlock->class_idx = 0;
+	hlock->acquire_ip = 0;
+	hlock->irq_context = 0;
+#endif
+	return 1;
+}
+
+/*
+ * Remove the lock to the list of currently held locks - this gets
+ * called on mutex_unlock()/spin_unlock*() (or on a failed
+ * mutex_lock_interruptible()). This is done for unlocks that nest
+ * perfectly. (i.e. the current top of the lock-stack is unlocked)
+ */
+static void
+__lock_release(struct lockdep_map *lock, int nested, unsigned long ip)
+{
+	struct task_struct *curr = current;
+
+	if (!check_unlock(curr, lock, ip))
+		return;
+
+	if (nested) {
+		if (!lock_release_nested(curr, lock, ip))
+			return;
+	} else {
+		if (!lock_release_non_nested(curr, lock, ip))
+			return;
+	}
+
+	check_chain_key(curr);
 }
 
 static int __lock_is_held(struct lockdep_map *lock)
@@ -3460,49 +3548,6 @@ static int __lock_is_held(struct lockdep_map *lock)
 	}
 
 	return 0;
-}
-
-static void __lock_pin_lock(struct lockdep_map *lock)
-{
-	struct task_struct *curr = current;
-	int i;
-
-	if (unlikely(!debug_locks))
-		return;
-
-	for (i = 0; i < curr->lockdep_depth; i++) {
-		struct held_lock *hlock = curr->held_locks + i;
-
-		if (match_held_lock(hlock, lock)) {
-			hlock->pin_count++;
-			return;
-		}
-	}
-
-	WARN(1, "pinning an unheld lock\n");
-}
-
-static void __lock_unpin_lock(struct lockdep_map *lock)
-{
-	struct task_struct *curr = current;
-	int i;
-
-	if (unlikely(!debug_locks))
-		return;
-
-	for (i = 0; i < curr->lockdep_depth; i++) {
-		struct held_lock *hlock = curr->held_locks + i;
-
-		if (match_held_lock(hlock, lock)) {
-			if (WARN(!hlock->pin_count, "unpinning an unpinned lock\n"))
-				return;
-
-			hlock->pin_count--;
-			return;
-		}
-	}
-
-	WARN(1, "unpinning an unheld lock\n");
 }
 
 /*
@@ -3583,7 +3628,7 @@ void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 	current->lockdep_recursion = 1;
 	trace_lock_acquire(lock, subclass, trylock, read, check, nest_lock, ip);
 	__lock_acquire(lock, subclass, trylock, read, check,
-		       irqs_disabled_flags(flags), nest_lock, ip, 0, 0);
+		       irqs_disabled_flags(flags), nest_lock, ip, 0);
 	current->lockdep_recursion = 0;
 	raw_local_irq_restore(flags);
 }
@@ -3601,8 +3646,7 @@ void lock_release(struct lockdep_map *lock, int nested,
 	check_flags(flags);
 	current->lockdep_recursion = 1;
 	trace_lock_release(lock, ip);
-	if (__lock_release(lock, nested, ip))
-		check_chain_key(current);
+	__lock_release(lock, nested, ip);
 	current->lockdep_recursion = 0;
 	raw_local_irq_restore(flags);
 }
@@ -3627,40 +3671,6 @@ int lock_is_held(struct lockdep_map *lock)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(lock_is_held);
-
-void lock_pin_lock(struct lockdep_map *lock)
-{
-	unsigned long flags;
-
-	if (unlikely(current->lockdep_recursion))
-		return;
-
-	raw_local_irq_save(flags);
-	check_flags(flags);
-
-	current->lockdep_recursion = 1;
-	__lock_pin_lock(lock);
-	current->lockdep_recursion = 0;
-	raw_local_irq_restore(flags);
-}
-EXPORT_SYMBOL_GPL(lock_pin_lock);
-
-void lock_unpin_lock(struct lockdep_map *lock)
-{
-	unsigned long flags;
-
-	if (unlikely(current->lockdep_recursion))
-		return;
-
-	raw_local_irq_save(flags);
-	check_flags(flags);
-
-	current->lockdep_recursion = 1;
-	__lock_unpin_lock(lock);
-	current->lockdep_recursion = 0;
-	raw_local_irq_restore(flags);
-}
-EXPORT_SYMBOL_GPL(lock_unpin_lock);
 
 void lockdep_set_current_reclaim_state(gfp_t gfp_mask)
 {
@@ -4064,7 +4074,8 @@ void __init lockdep_info(void)
 
 #ifdef CONFIG_DEBUG_LOCKDEP
 	if (lockdep_init_error) {
-		printk("WARNING: lockdep init error: lock '%s' was acquired before lockdep_init().\n", lock_init_error);
+		printk("WARNING: lockdep init error! lock-%s was acquired"
+			"before lockdep_init\n", lock_init_error);
 		printk("Call stack leading to lockdep invocation was:\n");
 		print_stack_trace(&lockdep_init_trace, 0);
 	}

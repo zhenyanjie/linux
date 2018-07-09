@@ -50,6 +50,7 @@ enum iser_ib_op_code {
 enum iser_conn_state {
 	ISER_CONN_INIT,
 	ISER_CONN_UP,
+	ISER_CONN_BOUND,
 	ISER_CONN_FULL_FEATURE,
 	ISER_CONN_TERMINATING,
 	ISER_CONN_DOWN,
@@ -113,6 +114,7 @@ enum {
 };
 
 struct isert_rdma_wr {
+	struct list_head	wr_list;
 	struct isert_cmd	*isert_cmd;
 	enum iser_ib_op_code	iser_ib_op;
 	struct ib_sge		*ib_sge;
@@ -133,13 +135,14 @@ struct isert_cmd {
 	uint64_t		write_va;
 	u64			pdu_buf_dma;
 	u32			pdu_buf_len;
+	u32			read_va_off;
+	u32			write_va_off;
+	u32			rdma_wr_num;
 	struct isert_conn	*conn;
 	struct iscsi_cmd	*iscsi_cmd;
 	struct iser_tx_desc	tx_desc;
-	struct iser_rx_desc	*rx_desc;
 	struct isert_rdma_wr	rdma_wr;
 	struct work_struct	comp_work;
-	struct scatterlist	sg;
 };
 
 struct isert_device;
@@ -157,10 +160,11 @@ struct isert_conn {
 	u64			login_req_dma;
 	int			login_req_len;
 	u64			login_rsp_dma;
+	unsigned int		rx_desc_head;
 	struct iser_rx_desc	*rx_descs;
-	struct ib_recv_wr	rx_wr[ISERT_QP_MAX_RECV_DTOS];
+	struct ib_recv_wr	rx_wr[ISERT_MIN_POSTED_RX];
 	struct iscsi_conn	*conn;
-	struct list_head	node;
+	struct list_head	accept_node;
 	struct completion	login_comp;
 	struct completion	login_req_comp;
 	struct iser_tx_desc	login_tx_desc;
@@ -206,6 +210,7 @@ struct isert_device {
 	int			refcount;
 	struct ib_device	*ib_device;
 	struct ib_pd		*pd;
+	struct ib_mr		*mr;
 	struct isert_comp	*comps;
 	int                     comps_used;
 	struct list_head	dev_node;
@@ -219,9 +224,9 @@ struct isert_device {
 
 struct isert_np {
 	struct iscsi_np         *np;
-	struct semaphore	sem;
-	struct rdma_cm_id	*cm_id;
-	struct mutex		mutex;
-	struct list_head	accepted;
-	struct list_head	pending;
+	struct semaphore	np_sem;
+	struct rdma_cm_id	*np_cm_id;
+	struct mutex		np_accept_mutex;
+	struct list_head	np_accept_list;
+	struct completion	np_login_comp;
 };

@@ -186,7 +186,13 @@ static void __init zynq_map_io(void)
 
 static void __init zynq_irq_init(void)
 {
+	gic_set_irqchip_flags(IRQCHIP_SKIP_SET_WAKE | IRQCHIP_MASK_ON_SUSPEND);
 	irqchip_init();
+}
+
+static void zynq_system_reset(enum reboot_mode mode, const char *cmd)
+{
+	zynq_slcr_system_reset();
 }
 
 static const char * const zynq_dt_match[] = {
@@ -196,8 +202,8 @@ static const char * const zynq_dt_match[] = {
 
 DT_MACHINE_START(XILINX_EP107, "Xilinx Zynq Platform")
 	/* 64KB way size, 8-way associativity, parity disabled */
-	.l2c_aux_val    = 0x00400000,
-	.l2c_aux_mask	= 0xffbfffff,
+	.l2c_aux_val	= 0x00000000,
+	.l2c_aux_mask	= 0xffffffff,
 	.smp		= smp_ops(zynq_smp_ops),
 	.map_io		= zynq_map_io,
 	.init_irq	= zynq_irq_init,
@@ -206,4 +212,5 @@ DT_MACHINE_START(XILINX_EP107, "Xilinx Zynq Platform")
 	.init_time	= zynq_timer_init,
 	.dt_compat	= zynq_dt_match,
 	.reserve	= zynq_memory_init,
+	.restart	= zynq_system_reset,
 MACHINE_END

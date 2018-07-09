@@ -122,11 +122,13 @@ module_param(low_power, int, 0644);
 MODULE_PARM_DESC(ifname, " Net interface name, wlan%d=default");
 MODULE_PARM_DESC(initmac, "MAC-Address, default: use FUSE");
 
+static uint loadparam(struct _adapter *padapter, struct  net_device *pnetdev);
 static int netdev_open(struct net_device *pnetdev);
 static int netdev_close(struct net_device *pnetdev);
 
-static void loadparam(struct _adapter *padapter, struct  net_device *pnetdev)
+static uint loadparam(struct _adapter *padapter, struct  net_device *pnetdev)
 {
+	uint status = _SUCCESS;
 	struct registry_priv  *registry_par = &padapter->registrypriv;
 
 	registry_par->chip_version = (u8)chip_version;
@@ -170,6 +172,7 @@ static void loadparam(struct _adapter *padapter, struct  net_device *pnetdev)
 	registry_par->low_power = (u8)low_power;
 	registry_par->wifi_test = (u8) wifi_test;
 	r8712_initmac = initmac;
+	return status;
 }
 
 static int r871x_net_set_mac_address(struct net_device *pnetdev, void *p)
@@ -178,7 +181,7 @@ static int r871x_net_set_mac_address(struct net_device *pnetdev, void *p)
 	struct sockaddr *addr = p;
 
 	if (padapter->bup == false)
-		ether_addr_copy(pnetdev->dev_addr, addr->sa_data);
+		memcpy(pnetdev->dev_addr, addr->sa_data, ETH_ALEN);
 	return 0;
 }
 
@@ -225,6 +228,7 @@ struct net_device *r8712_init_netdev(void)
 	pnetdev->watchdog_timeo = HZ; /* 1 second timeout */
 	pnetdev->wireless_handlers = (struct iw_handler_def *)
 				     &r871x_handlers_def;
+	/*step 2.*/
 	loadparam(padapter, pnetdev);
 	netif_carrier_off(pnetdev);
 	padapter->pid = 0;  /* Initial the PID value used for HW PBC.*/

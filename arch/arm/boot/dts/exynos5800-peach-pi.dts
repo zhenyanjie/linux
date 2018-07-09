@@ -995,7 +995,7 @@
 	};
 };
 
-&serial_3 {
+&uart_3 {
 	status = "okay";
 };
 

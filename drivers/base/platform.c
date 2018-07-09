@@ -609,19 +609,6 @@ int __init_or_module __platform_driver_probe(struct platform_driver *drv,
 {
 	int retval, code;
 
-	if (drv->driver.probe_type == PROBE_PREFER_ASYNCHRONOUS) {
-		pr_err("%s: drivers registered with %s can not be probed asynchronously\n",
-			 drv->driver.name, __func__);
-		return -EINVAL;
-	}
-
-	/*
-	 * We have to run our probes synchronously because we check if
-	 * we find any devices to bind to and exit with error if there
-	 * are any.
-	 */
-	drv->driver.probe_type = PROBE_FORCE_SYNCHRONOUS;
-
 	/*
 	 * Prevent driver from requesting probe deferral to avoid further
 	 * futile probe attempts.
@@ -742,9 +729,10 @@ static ssize_t driver_override_store(struct device *dev,
 				     const char *buf, size_t count)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	char *driver_override, *old = pdev->driver_override, *cp;
+	char *driver_override, *old, *cp;
 
-	if (count > PATH_MAX)
+	/* We need to keep extra room for a newline */
+	if (count >= (PAGE_SIZE - 1))
 		return -EINVAL;
 
 	driver_override = kstrndup(buf, count, GFP_KERNEL);
@@ -755,12 +743,15 @@ static ssize_t driver_override_store(struct device *dev,
 	if (cp)
 		*cp = '\0';
 
+	device_lock(dev);
+	old = pdev->driver_override;
 	if (strlen(driver_override)) {
 		pdev->driver_override = driver_override;
 	} else {
 		kfree(driver_override);
 		pdev->driver_override = NULL;
 	}
+	device_unlock(dev);
 
 	kfree(old);
 
@@ -771,8 +762,12 @@ static ssize_t driver_override_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
+	ssize_t len;
 
-	return sprintf(buf, "%s\n", pdev->driver_override);
+	device_lock(dev);
+	len = sprintf(buf, "%s\n", pdev->driver_override);
+	device_unlock(dev);
+	return len;
 }
 static DEVICE_ATTR_RW(driver_override);
 

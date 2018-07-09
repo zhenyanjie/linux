@@ -16,7 +16,6 @@
 #include <linux/kernel.h>
 #include <linux/leds.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
 #include <linux/slab.h>
@@ -192,17 +191,15 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 			goto err;
 		}
 
-		np = to_of_node(child);
+		np = of_node(child);
 
 		if (fwnode_property_present(child, "label")) {
 			fwnode_property_read_string(child, "label", &led.name);
 		} else {
 			if (IS_ENABLED(CONFIG_OF) && !led.name && np)
 				led.name = np->name;
-			if (!led.name) {
-				ret = -EINVAL;
-				goto err;
-			}
+			if (!led.name)
+				return ERR_PTR(-EINVAL);
 		}
 		fwnode_property_read_string(child, "linux,default-trigger",
 					    &led.default_trigger);
@@ -220,19 +217,18 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 		if (fwnode_property_present(child, "retain-state-suspended"))
 			led.retain_state_suspended = 1;
 
-		ret = create_gpio_led(&led, &priv->leds[priv->num_leds],
+		ret = create_gpio_led(&led, &priv->leds[priv->num_leds++],
 				      dev, NULL);
 		if (ret < 0) {
 			fwnode_handle_put(child);
 			goto err;
 		}
-		priv->num_leds++;
 	}
 
 	return priv;
 
 err:
-	for (count = priv->num_leds - 1; count >= 0; count--)
+	for (count = priv->num_leds - 2; count >= 0; count--)
 		delete_gpio_led(&priv->leds[count]);
 	return ERR_PTR(ret);
 }

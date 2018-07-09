@@ -25,44 +25,6 @@
 
 static DEFINE_MUTEX(driver_lock);
 
-static const struct vfio_platform_reset_combo reset_lookup_table[] = {
-	{
-		.compat = "calxeda,hb-xgmac",
-		.reset_function_name = "vfio_platform_calxedaxgmac_reset",
-		.module_name = "vfio-platform-calxedaxgmac",
-	},
-};
-
-static void vfio_platform_get_reset(struct vfio_platform_device *vdev,
-				    struct device *dev)
-{
-	const char *compat;
-	int (*reset)(struct vfio_platform_device *);
-	int ret, i;
-
-	ret = device_property_read_string(dev, "compatible", &compat);
-	if (ret)
-		return;
-
-	for (i = 0 ; i < ARRAY_SIZE(reset_lookup_table); i++) {
-		if (!strcmp(reset_lookup_table[i].compat, compat)) {
-			request_module(reset_lookup_table[i].module_name);
-			reset = __symbol_get(
-				reset_lookup_table[i].reset_function_name);
-			if (reset) {
-				vdev->reset = reset;
-				return;
-			}
-		}
-	}
-}
-
-static void vfio_platform_put_reset(struct vfio_platform_device *vdev)
-{
-	if (vdev->reset)
-		symbol_put_addr(vdev->reset);
-}
-
 static int vfio_platform_regions_init(struct vfio_platform_device *vdev)
 {
 	int cnt = 0, i;
@@ -138,8 +100,6 @@ static void vfio_platform_release(void *device_data)
 	mutex_lock(&driver_lock);
 
 	if (!(--vdev->refcnt)) {
-		if (vdev->reset)
-			vdev->reset(vdev);
 		vfio_platform_regions_cleanup(vdev);
 		vfio_platform_irq_cleanup(vdev);
 	}
@@ -167,9 +127,6 @@ static int vfio_platform_open(void *device_data)
 		ret = vfio_platform_irq_init(vdev);
 		if (ret)
 			goto err_irq;
-
-		if (vdev->reset)
-			vdev->reset(vdev);
 	}
 
 	vdev->refcnt++;
@@ -202,13 +159,12 @@ static long vfio_platform_ioctl(void *device_data,
 		if (info.argsz < minsz)
 			return -EINVAL;
 
-		if (vdev->reset)
-			vdev->flags |= VFIO_DEVICE_FLAGS_RESET;
 		info.flags = vdev->flags;
 		info.num_regions = vdev->num_regions;
 		info.num_irqs = vdev->num_irqs;
 
-		return copy_to_user((void __user *)arg, &info, minsz);
+		return copy_to_user((void __user *)arg, &info, minsz) ?
+			-EFAULT : 0;
 
 	} else if (cmd == VFIO_DEVICE_GET_REGION_INFO) {
 		struct vfio_region_info info;
@@ -229,7 +185,8 @@ static long vfio_platform_ioctl(void *device_data,
 		info.size = vdev->regions[info.index].size;
 		info.flags = vdev->regions[info.index].flags;
 
-		return copy_to_user((void __user *)arg, &info, minsz);
+		return copy_to_user((void __user *)arg, &info, minsz) ?
+			-EFAULT : 0;
 
 	} else if (cmd == VFIO_DEVICE_GET_IRQ_INFO) {
 		struct vfio_irq_info info;
@@ -248,7 +205,8 @@ static long vfio_platform_ioctl(void *device_data,
 		info.flags = vdev->irqs[info.index].flags;
 		info.count = vdev->irqs[info.index].count;
 
-		return copy_to_user((void __user *)arg, &info, minsz);
+		return copy_to_user((void __user *)arg, &info, minsz) ?
+			-EFAULT : 0;
 
 	} else if (cmd == VFIO_DEVICE_SET_IRQS) {
 		struct vfio_irq_set hdr;
@@ -297,12 +255,8 @@ static long vfio_platform_ioctl(void *device_data,
 
 		return ret;
 
-	} else if (cmd == VFIO_DEVICE_RESET) {
-		if (vdev->reset)
-			return vdev->reset(vdev);
-		else
-			return -EINVAL;
-	}
+	} else if (cmd == VFIO_DEVICE_RESET)
+		return -EINVAL;
 
 	return -ENOTTY;
 }
@@ -551,8 +505,6 @@ int vfio_platform_probe_common(struct vfio_platform_device *vdev,
 		return ret;
 	}
 
-	vfio_platform_get_reset(vdev, dev);
-
 	mutex_init(&vdev->igate);
 
 	return 0;
@@ -564,11 +516,8 @@ struct vfio_platform_device *vfio_platform_remove_common(struct device *dev)
 	struct vfio_platform_device *vdev;
 
 	vdev = vfio_del_group_dev(dev);
-
-	if (vdev) {
-		vfio_platform_put_reset(vdev);
+	if (vdev)
 		iommu_group_put(dev->iommu_group);
-	}
 
 	return vdev;
 }

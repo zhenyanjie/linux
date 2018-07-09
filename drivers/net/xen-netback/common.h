@@ -195,23 +195,21 @@ struct xenvif_queue { /* Per-queue data for xenvif */
 	unsigned long   remaining_credit;
 	struct timer_list credit_timeout;
 	u64 credit_window_start;
+	bool rate_limited;
 
 	/* Statistics */
 	struct xenvif_stats stats;
 };
 
+/* Maximum number of Rx slots a to-guest packet may use, including the
+ * slot needed for GSO meta-data.
+ */
+#define XEN_NETBK_RX_SLOTS_MAX (MAX_SKB_FRAGS + 1)
+
 enum state_bit_shift {
 	/* This bit marks that the vif is connected */
 	VIF_STATUS_CONNECTED,
 };
-
-struct xenvif_mcast_addr {
-	struct list_head entry;
-	struct rcu_head rcu;
-	u8 addr[6];
-};
-
-#define XEN_NETBK_MCAST_MAX 64
 
 struct xenvif {
 	/* Unique identifier for this interface. */
@@ -219,8 +217,6 @@ struct xenvif {
 	unsigned int     handle;
 
 	u8               fe_dev_addr[6];
-	struct list_head fe_mcast_addr;
-	unsigned int     fe_mcast_count;
 
 	/* Frontend feature information. */
 	int gso_mask;
@@ -229,7 +225,6 @@ struct xenvif {
 	u8 can_sg:1;
 	u8 ip_csum:1;
 	u8 ipv6_csum:1;
-	u8 multicast_control:1;
 
 	/* Is this interface disabled? True when backend discovers
 	 * frontend is rogue.
@@ -312,6 +307,11 @@ int xenvif_dealloc_kthread(void *data);
 
 void xenvif_rx_queue_tail(struct xenvif_queue *queue, struct sk_buff *skb);
 
+/* Determine whether the needed number of slots (req) are available,
+ * and set req_event if not.
+ */
+bool xenvif_rx_ring_slots_available(struct xenvif_queue *queue, int needed);
+
 void xenvif_carrier_on(struct xenvif *vif);
 
 /* Callback from stack when TX packet can be released */
@@ -325,6 +325,9 @@ static inline pending_ring_idx_t nr_pending_reqs(struct xenvif_queue *queue)
 	return MAX_PENDING_REQS -
 		queue->pending_prod + queue->pending_cons;
 }
+
+/* Callback from stack when TX packet can be released */
+void xenvif_zerocopy_callback(struct ubuf_info *ubuf, bool zerocopy_success);
 
 irqreturn_t xenvif_interrupt(int irq, void *dev_id);
 
@@ -341,9 +344,5 @@ extern struct dentry *xen_netback_dbg_root;
 void xenvif_skb_zerocopy_prepare(struct xenvif_queue *queue,
 				 struct sk_buff *skb);
 void xenvif_skb_zerocopy_complete(struct xenvif_queue *queue);
-
-/* Multicast control */
-bool xenvif_mcast_match(struct xenvif *vif, const u8 *addr);
-void xenvif_mcast_addr_list_free(struct xenvif *vif);
 
 #endif /* __XEN_NETBACK__COMMON_H__ */

@@ -855,7 +855,7 @@ next_slot:
 						disk_bytenr, num_bytes, 0,
 						root->root_key.objectid,
 						new_key.objectid,
-						start - extent_offset);
+						start - extent_offset, 1);
 				BUG_ON(ret); /* -ENOMEM */
 			}
 			key.offset = start;
@@ -933,7 +933,7 @@ delete_extent_item:
 						disk_bytenr, num_bytes, 0,
 						root->root_key.objectid,
 						key.objectid, key.offset -
-						extent_offset);
+						extent_offset, 0);
 				BUG_ON(ret); /* -ENOMEM */
 				inode_sub_bytes(inode,
 						extent_end - key.offset);
@@ -1212,7 +1212,7 @@ again:
 
 		ret = btrfs_inc_extent_ref(trans, root, bytenr, num_bytes, 0,
 					   root->root_key.objectid,
-					   ino, orig_offset);
+					   ino, orig_offset, 1);
 		BUG_ON(ret); /* -ENOMEM */
 
 		if (split == start) {
@@ -1239,7 +1239,7 @@ again:
 		del_nr++;
 		ret = btrfs_free_extent(trans, root, bytenr, num_bytes,
 					0, root->root_key.objectid,
-					ino, orig_offset);
+					ino, orig_offset, 0);
 		BUG_ON(ret); /* -ENOMEM */
 	}
 	other_start = 0;
@@ -1256,7 +1256,7 @@ again:
 		del_nr++;
 		ret = btrfs_free_extent(trans, root, bytenr, num_bytes,
 					0, root->root_key.objectid,
-					ino, orig_offset);
+					ino, orig_offset, 0);
 		BUG_ON(ret); /* -ENOMEM */
 	}
 	if (del_nr == 0) {
@@ -1756,7 +1756,7 @@ static ssize_t btrfs_file_write_iter(struct kiocb *iocb,
 	}
 
 	current->backing_dev_info = inode_to_bdi(inode);
-	err = file_remove_privs(file);
+	err = file_remove_suid(file);
 	if (err) {
 		mutex_unlock(&inode->i_mutex);
 		goto out;
@@ -1876,13 +1876,7 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 	struct btrfs_log_ctx ctx;
 	int ret = 0;
 	bool full_sync = 0;
-	u64 len;
 
-	/*
-	 * The range length can be represented by u64, we have to do the typecasts
-	 * to avoid signed overflow if it's [0, LLONG_MAX] eg. from fsync()
-	 */
-	len = (u64)end - (u64)start + 1;
 	trace_btrfs_sync_file(file, datasync);
 
 	/*
@@ -1910,7 +1904,7 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 		 * all extents are persisted and the respective file extent
 		 * items are in the fs/subvol btree.
 		 */
-		ret = btrfs_wait_ordered_range(inode, start, len);
+		ret = btrfs_wait_ordered_range(inode, start, end - start + 1);
 	} else {
 		/*
 		 * Start any new ordered operations before starting to log the
@@ -1982,10 +1976,8 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 	 */
 	smp_mb();
 	if (btrfs_inode_in_log(inode, root->fs_info->generation) ||
-	    (BTRFS_I(inode)->last_trans <=
-	     root->fs_info->last_trans_committed &&
-	     (full_sync ||
-	      !btrfs_have_ordered_extents_in_range(inode, start, len)))) {
+	    (full_sync && BTRFS_I(inode)->last_trans <=
+	     root->fs_info->last_trans_committed)) {
 		/*
 		 * We'v had everything committed since the last time we were
 		 * modified so clear this flag in case it was set for whatever
@@ -2070,7 +2062,8 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 			}
 		}
 		if (!full_sync) {
-			ret = btrfs_wait_ordered_range(inode, start, len);
+			ret = btrfs_wait_ordered_range(inode, start,
+						       end - start + 1);
 			if (ret) {
 				btrfs_end_transaction(trans, root);
 				goto out;
@@ -2596,7 +2589,7 @@ static long btrfs_fallocate(struct file *file, int mode,
 					alloc_start);
 		if (ret)
 			goto out;
-	} else if (offset + len > inode->i_size) {
+	} else {
 		/*
 		 * If we are fallocating from the end of the file onward we
 		 * need to zero out the end of the page if i_size lands in the
@@ -2826,7 +2819,7 @@ const struct file_operations btrfs_file_operations = {
 	.fallocate	= btrfs_fallocate,
 	.unlocked_ioctl	= btrfs_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl	= btrfs_ioctl,
+	.compat_ioctl	= btrfs_compat_ioctl,
 #endif
 };
 

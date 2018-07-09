@@ -17,11 +17,11 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
-
-#include "omap_dmm_tiler.h"
 #include "omap_drv.h"
+#include "omap_dmm_tiler.h"
+
+#include "drm_crtc.h"
+#include "drm_crtc_helper.h"
 
 /*
  * framebuffer funcs
@@ -89,8 +89,6 @@ struct omap_framebuffer {
 	int pin_count;
 	const struct format *format;
 	struct plane planes[4];
-	/* lock for pinning (pin_count and planes.paddr) */
-	struct mutex lock;
 };
 
 static int omap_framebuffer_create_handle(struct drm_framebuffer *fb,
@@ -252,11 +250,8 @@ int omap_framebuffer_pin(struct drm_framebuffer *fb)
 	struct omap_framebuffer *omap_fb = to_omap_framebuffer(fb);
 	int ret, i, n = drm_format_num_planes(fb->pixel_format);
 
-	mutex_lock(&omap_fb->lock);
-
 	if (omap_fb->pin_count > 0) {
 		omap_fb->pin_count++;
-		mutex_unlock(&omap_fb->lock);
 		return 0;
 	}
 
@@ -270,8 +265,6 @@ int omap_framebuffer_pin(struct drm_framebuffer *fb)
 
 	omap_fb->pin_count++;
 
-	mutex_unlock(&omap_fb->lock);
-
 	return 0;
 
 fail:
@@ -281,33 +274,32 @@ fail:
 		plane->paddr = 0;
 	}
 
-	mutex_unlock(&omap_fb->lock);
-
 	return ret;
 }
 
 /* unpin, no longer being scanned out: */
-void omap_framebuffer_unpin(struct drm_framebuffer *fb)
+int omap_framebuffer_unpin(struct drm_framebuffer *fb)
 {
 	struct omap_framebuffer *omap_fb = to_omap_framebuffer(fb);
-	int i, n = drm_format_num_planes(fb->pixel_format);
-
-	mutex_lock(&omap_fb->lock);
+	int ret, i, n = drm_format_num_planes(fb->pixel_format);
 
 	omap_fb->pin_count--;
 
-	if (omap_fb->pin_count > 0) {
-		mutex_unlock(&omap_fb->lock);
-		return;
-	}
+	if (omap_fb->pin_count > 0)
+		return 0;
 
 	for (i = 0; i < n; i++) {
 		struct plane *plane = &omap_fb->planes[i];
-		omap_gem_put_paddr(plane->bo);
+		ret = omap_gem_put_paddr(plane->bo);
+		if (ret)
+			goto fail;
 		plane->paddr = 0;
 	}
 
-	mutex_unlock(&omap_fb->lock);
+	return 0;
+
+fail:
+	return ret;
 }
 
 struct drm_gem_object *omap_framebuffer_bo(struct drm_framebuffer *fb, int p)
@@ -419,7 +411,6 @@ struct drm_framebuffer *omap_framebuffer_init(struct drm_device *dev,
 
 	fb = &omap_fb->base;
 	omap_fb->format = format;
-	mutex_init(&omap_fb->lock);
 
 	for (i = 0; i < n; i++) {
 		struct plane *plane = &omap_fb->planes[i];

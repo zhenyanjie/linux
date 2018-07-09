@@ -31,14 +31,12 @@
 #include <linux/bug.h>
 #include <linux/compiler.h>
 #include <linux/sort.h>
-#include <linux/psci.h>
 
 #include <asm/unified.h>
 #include <asm/cp15.h>
 #include <asm/cpu.h>
 #include <asm/cputype.h>
 #include <asm/elf.h>
-#include <asm/fixmap.h>
 #include <asm/procinfo.h>
 #include <asm/psci.h>
 #include <asm/sections.h>
@@ -48,7 +46,6 @@
 #include <asm/cacheflush.h>
 #include <asm/cachetype.h>
 #include <asm/tlbflush.h>
-#include <asm/xen/hypervisor.h>
 
 #include <asm/prom.h>
 #include <asm/mach/arch.h>
@@ -78,7 +75,8 @@ __setup("fpe=", fpe_setup);
 
 extern void init_default_cache_policy(unsigned long);
 extern void paging_init(const struct machine_desc *desc);
-extern void early_paging_init(const struct machine_desc *);
+extern void early_paging_init(const struct machine_desc *,
+			      struct proc_info_list *);
 extern void sanity_check_meminfo(void);
 extern enum reboot_mode reboot_mode;
 extern void setup_dma_zone(const struct machine_desc *desc);
@@ -94,9 +92,6 @@ unsigned int __atags_pointer __initdata;
 
 unsigned int system_rev;
 EXPORT_SYMBOL(system_rev);
-
-const char *system_serial;
-EXPORT_SYMBOL(system_serial);
 
 unsigned int system_serial_low;
 EXPORT_SYMBOL(system_serial_low);
@@ -844,25 +839,8 @@ arch_initcall(customize_machine);
 
 static int __init init_machine_late(void)
 {
-	struct device_node *root;
-	int ret;
-
 	if (machine_desc->init_late)
 		machine_desc->init_late();
-
-	root = of_find_node_by_path("/");
-	if (root) {
-		ret = of_property_read_string(root, "serial-number",
-					      &system_serial);
-		if (ret)
-			system_serial = NULL;
-	}
-
-	if (!system_serial)
-		system_serial = kasprintf(GFP_KERNEL, "%08x%08x",
-					  system_serial_high,
-					  system_serial_low);
-
 	return 0;
 }
 late_initcall(init_machine_late);
@@ -956,14 +934,9 @@ void __init setup_arch(char **cmdline_p)
 	strlcpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);
 	*cmdline_p = cmd_line;
 
-	if (IS_ENABLED(CONFIG_FIX_EARLYCON_MEM))
-		early_fixmap_init();
-
 	parse_early_param();
 
-#ifdef CONFIG_MMU
-	early_paging_init(mdesc);
-#endif
+	early_paging_init(mdesc, lookup_processor_type(read_cpuid_id()));
 	setup_dma_zone(mdesc);
 	sanity_check_meminfo();
 	arm_memblock_init(mdesc);
@@ -977,8 +950,7 @@ void __init setup_arch(char **cmdline_p)
 	unflatten_device_tree();
 
 	arm_dt_init_cpu_maps();
-	psci_dt_init();
-	xen_early_init();
+	psci_init();
 #ifdef CONFIG_SMP
 	if (is_smp()) {
 		if (!mdesc->smp_init || !mdesc->smp_init()) {
@@ -1020,7 +992,7 @@ static int __init topology_init(void)
 
 	for_each_possible_cpu(cpu) {
 		struct cpuinfo_arm *cpuinfo = &per_cpu(cpu_data, cpu);
-		cpuinfo->cpu.hotpluggable = platform_can_hotplug_cpu(cpu);
+		cpuinfo->cpu.hotpluggable = 1;
 		register_cpu(&cpuinfo->cpu, cpu);
 	}
 
@@ -1137,7 +1109,8 @@ static int c_show(struct seq_file *m, void *v)
 
 	seq_printf(m, "Hardware\t: %s\n", machine_name);
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
-	seq_printf(m, "Serial\t\t: %s\n", system_serial);
+	seq_printf(m, "Serial\t\t: %08x%08x\n",
+		   system_serial_high, system_serial_low);
 
 	return 0;
 }

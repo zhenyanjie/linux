@@ -19,6 +19,8 @@
 #ifndef _TSTYPE_H_
 #define _TSTYPE_H_
 #include "rtl819x_Qos.h"
+#define TS_SETUP_TIMEOUT	60
+#define TS_INACT_TIMEOUT	60
 #define TS_ADDBA_DELAY		60
 
 #define TOTAL_TS_NUM		16
@@ -33,7 +35,7 @@ struct ts_common_info {
 	struct list_head		List;
 	struct timer_list		SetupTimer;
 	struct timer_list		InactTimer;
-	u8				Addr[ETH_ALEN];
+	u8				Addr[6];
 	union tspec_body TSpec;
 	union qos_tclas TClass[TCLAS_NUM];
 	u8				TClasProc;
@@ -65,6 +67,7 @@ struct rx_ts_record {
 	u8				num;
 };
 
+void _setup_timer(struct timer_list *, void *, unsigned long);
 
 
 #endif

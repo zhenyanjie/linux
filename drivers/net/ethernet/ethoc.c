@@ -706,6 +706,8 @@ static int ethoc_open(struct net_device *dev)
 	if (ret)
 		return ret;
 
+	napi_enable(&priv->napi);
+
 	ethoc_init_ring(priv, dev->mem_start);
 	ethoc_reset(priv);
 
@@ -718,7 +720,6 @@ static int ethoc_open(struct net_device *dev)
 	}
 
 	phy_start(priv->phy);
-	napi_enable(&priv->napi);
 
 	if (netif_msg_ifup(priv)) {
 		dev_info(&dev->dev, "I/O: %08lx Memory: %08lx-%08lx\n",
@@ -1132,6 +1133,10 @@ static int ethoc_probe(struct platform_device *pdev)
 		memcpy(netdev->dev_addr, pdata->hwaddr, IFHWADDRLEN);
 		priv->phy_id = pdata->phy_id;
 	} else {
+		priv->phy_id = -1;
+
+#ifdef CONFIG_OF
+		{
 		const uint8_t *mac;
 
 		mac = of_get_property(pdev->dev.of_node,
@@ -1139,7 +1144,8 @@ static int ethoc_probe(struct platform_device *pdev)
 				      NULL);
 		if (mac)
 			memcpy(netdev->dev_addr, mac, IFHWADDRLEN);
-		priv->phy_id = -1;
+		}
+#endif
 	}
 
 	/* Check that the given MAC address is valid. If it isn't, read the

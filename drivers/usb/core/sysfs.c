@@ -531,44 +531,6 @@ static ssize_t usb2_lpm_besl_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(usb2_lpm_besl);
 
-static ssize_t usb3_hardware_lpm_u1_show(struct device *dev,
-				      struct device_attribute *attr, char *buf)
-{
-	struct usb_device *udev = to_usb_device(dev);
-	const char *p;
-
-	usb_lock_device(udev);
-
-	if (udev->usb3_lpm_u1_enabled)
-		p = "enabled";
-	else
-		p = "disabled";
-
-	usb_unlock_device(udev);
-
-	return sprintf(buf, "%s\n", p);
-}
-static DEVICE_ATTR_RO(usb3_hardware_lpm_u1);
-
-static ssize_t usb3_hardware_lpm_u2_show(struct device *dev,
-				      struct device_attribute *attr, char *buf)
-{
-	struct usb_device *udev = to_usb_device(dev);
-	const char *p;
-
-	usb_lock_device(udev);
-
-	if (udev->usb3_lpm_u2_enabled)
-		p = "enabled";
-	else
-		p = "disabled";
-
-	usb_unlock_device(udev);
-
-	return sprintf(buf, "%s\n", p);
-}
-static DEVICE_ATTR_RO(usb3_hardware_lpm_u2);
-
 static struct attribute *usb2_hardware_lpm_attr[] = {
 	&dev_attr_usb2_hardware_lpm.attr,
 	&dev_attr_usb2_lpm_l1_timeout.attr,
@@ -578,16 +540,6 @@ static struct attribute *usb2_hardware_lpm_attr[] = {
 static struct attribute_group usb2_hardware_lpm_attr_group = {
 	.name	= power_group_name,
 	.attrs	= usb2_hardware_lpm_attr,
-};
-
-static struct attribute *usb3_hardware_lpm_attr[] = {
-	&dev_attr_usb3_hardware_lpm_u1.attr,
-	&dev_attr_usb3_hardware_lpm_u2.attr,
-	NULL,
-};
-static struct attribute_group usb3_hardware_lpm_attr_group = {
-	.name	= power_group_name,
-	.attrs	= usb3_hardware_lpm_attr,
 };
 
 static struct attribute *power_attrs[] = {
@@ -612,10 +564,6 @@ static int add_power_attributes(struct device *dev)
 		if (udev->usb2_hw_lpm_capable == 1)
 			rc = sysfs_merge_group(&dev->kobj,
 					&usb2_hardware_lpm_attr_group);
-		if (udev->speed == USB_SPEED_SUPER &&
-				udev->lpm_capable == 1)
-			rc = sysfs_merge_group(&dev->kobj,
-					&usb3_hardware_lpm_attr_group);
 	}
 
 	return rc;

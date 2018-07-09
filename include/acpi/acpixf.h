@@ -46,7 +46,7 @@
 
 /* Current ACPICA subsystem version in YYYYMMDD format */
 
-#define ACPI_CA_VERSION                 0x20150818
+#define ACPI_CA_VERSION                 0x20150410
 
 #include <acpi/acconfig.h>
 #include <acpi/actypes.h>
@@ -229,11 +229,6 @@ ACPI_INIT_GLOBAL(u8, acpi_gbl_disable_auto_repair, FALSE);
 ACPI_INIT_GLOBAL(u8, acpi_gbl_disable_ssdt_table_install, FALSE);
 
 /*
- * Optionally enable runtime namespace override.
- */
-ACPI_INIT_GLOBAL(u8, acpi_gbl_runtime_namespace_override, TRUE);
-
-/*
  * We keep track of the latest version of Windows that has been requested by
  * the BIOS. ACPI 5.0.
  */
@@ -251,9 +246,7 @@ ACPI_INIT_GLOBAL(u8, acpi_gbl_reduced_hardware, FALSE);
  * traced each time it is executed.
  */
 ACPI_INIT_GLOBAL(u32, acpi_gbl_trace_flags, 0);
-ACPI_INIT_GLOBAL(const char *, acpi_gbl_trace_method_name, NULL);
-ACPI_INIT_GLOBAL(u32, acpi_gbl_trace_dbg_level, ACPI_TRACE_LEVEL_DEFAULT);
-ACPI_INIT_GLOBAL(u32, acpi_gbl_trace_dbg_layer, ACPI_TRACE_LAYER_DEFAULT);
+ACPI_INIT_GLOBAL(acpi_name, acpi_gbl_trace_method_name, 0);
 
 /*
  * Runtime configuration of debug output control masks. We want the debug
@@ -506,7 +499,7 @@ ACPI_EXTERNAL_RETURN_STATUS(acpi_status
 					   acpi_object_handler handler,
 					   void **data))
 ACPI_EXTERNAL_RETURN_STATUS(acpi_status
-			     acpi_debug_trace(const char *name, u32 debug_level,
+			     acpi_debug_trace(char *name, u32 debug_level,
 					      u32 debug_layer, u32 flags))
 
 /*
@@ -830,12 +823,8 @@ ACPI_EXTERNAL_RETURN_STATUS(acpi_status
 ACPI_EXTERNAL_RETURN_STATUS(acpi_status acpi_leave_sleep_state(u8 sleep_state))
 
 ACPI_HW_DEPENDENT_RETURN_STATUS(acpi_status
-				acpi_set_firmware_waking_vectors
-				(acpi_physical_address physical_address,
-				 acpi_physical_address physical_address64))
-ACPI_HW_DEPENDENT_RETURN_STATUS(acpi_status
-				 acpi_set_firmware_waking_vector(u32
-								 physical_address))
+				acpi_set_firmware_waking_vector(u32
+								physical_address))
 #if ACPI_MACHINE_WIDTH == 64
 ACPI_HW_DEPENDENT_RETURN_STATUS(acpi_status
 				acpi_set_firmware_waking_vector64(u64
@@ -909,17 +898,9 @@ ACPI_DBG_DEPENDENT_RETURN_VOID(ACPI_PRINTF_LIKE(6)
 						     const char *module_name,
 						     u32 component_id,
 						     const char *format, ...))
-
-ACPI_DBG_DEPENDENT_RETURN_VOID(void
-			       acpi_trace_point(acpi_trace_event_type type,
-						u8 begin,
-						u8 *aml, char *pathname))
 ACPI_APP_DEPENDENT_RETURN_VOID(ACPI_PRINTF_LIKE(1)
 				void ACPI_INTERNAL_VAR_XFACE
 				acpi_log_error(const char *format, ...))
- acpi_status acpi_initialize_debugger(void);
-
-void acpi_terminate_debugger(void);
 
 /*
  * Divergences

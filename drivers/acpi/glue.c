@@ -13,7 +13,6 @@
 #include <linux/slab.h>
 #include <linux/rwsem.h>
 #include <linux/acpi.h>
-#include <linux/dma-mapping.h>
 
 #include "internal.h"
 
@@ -98,7 +97,15 @@ static int find_child_checks(struct acpi_device *adev, bool check_children)
 	if (check_children && list_empty(&adev->children))
 		return -ENODEV;
 
-	return sta_present ? FIND_CHILD_MAX_SCORE : FIND_CHILD_MIN_SCORE;
+	/*
+	 * If the device has a _HID (or _CID) returning a valid ACPI/PNP
+	 * device ID, it is better to make it look less attractive here, so that
+	 * the other device with the same _ADR value (that may not have a valid
+	 * device ID) can be matched going forward.  [This means a second spec
+	 * violation in a row, so whatever we do here is best effort anyway.]
+	 */
+	return sta_present && list_empty(&adev->pnp.ids) ?
+			FIND_CHILD_MAX_SCORE : FIND_CHILD_MIN_SCORE;
 }
 
 struct acpi_device *acpi_find_child_device(struct acpi_device *parent,
@@ -168,7 +175,6 @@ int acpi_bind_one(struct device *dev, struct acpi_device *acpi_dev)
 	struct list_head *physnode_list;
 	unsigned int node_id;
 	int retval = -EINVAL;
-	bool coherent;
 
 	if (has_acpi_companion(dev)) {
 		if (acpi_dev) {
@@ -224,9 +230,6 @@ int acpi_bind_one(struct device *dev, struct acpi_device *acpi_dev)
 
 	if (!has_acpi_companion(dev))
 		ACPI_COMPANION_SET(dev, acpi_dev);
-
-	if (acpi_check_dma(acpi_dev, &coherent))
-		arch_setup_dma_ops(dev, 0, 0, NULL, coherent);
 
 	acpi_physnode_link_name(physical_node_name, node_id);
 	retval = sysfs_create_link(&acpi_dev->dev.kobj, &dev->kobj,

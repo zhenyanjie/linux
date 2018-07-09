@@ -319,8 +319,7 @@ static int hvc_install(struct tty_driver *driver, struct tty_struct *tty)
 	int rc;
 
 	/* Auto increments kref reference if found. */
-	hp = hvc_get_by_index(tty->index);
-	if (!hp)
+	if (!(hp = hvc_get_by_index(tty->index)))
 		return -ENODEV;
 
 	tty->driver_data = hp;

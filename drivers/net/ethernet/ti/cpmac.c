@@ -41,8 +41,6 @@
 #include <linux/gpio.h>
 #include <linux/atomic.h>
 
-#include <asm/mach-ar7/ar7.h>
-
 MODULE_AUTHOR("Eugene Konev <ejka@imfi.kspu.ru>");
 MODULE_DESCRIPTION("TI AR7 ethernet driver (CPMAC)");
 MODULE_LICENSE("GPL");
@@ -1237,7 +1235,7 @@ int cpmac_init(void)
 		goto fail_alloc;
 	}
 
-#warning FIXME: unhardcode gpio&reset bits
+	/* FIXME: unhardcode gpio&reset bits */
 	ar7_gpio_disable(26);
 	ar7_gpio_disable(27);
 	ar7_device_reset(AR7_RESET_BIT_CPMAC_LO);

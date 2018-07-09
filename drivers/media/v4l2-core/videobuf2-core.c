@@ -30,8 +30,6 @@
 #include <media/v4l2-common.h>
 #include <media/videobuf2-core.h>
 
-#include <trace/events/v4l2.h>
-
 static int debug;
 module_param(debug, int, 0644);
 
@@ -184,7 +182,6 @@ module_param(debug, int, 0644);
 				 V4L2_BUF_FLAG_KEYFRAME | V4L2_BUF_FLAG_TIMECODE)
 
 static void __vb2_queue_cancel(struct vb2_queue *q);
-static void __enqueue_in_driver(struct vb2_buffer *vb);
 
 /**
  * __vb2_buf_mem_alloc() - allocate video memory for the given buffer
@@ -717,7 +714,6 @@ static void __fill_v4l2_buffer(struct vb2_buffer *vb, struct v4l2_buffer *b)
 		break;
 	case VB2_BUF_STATE_PREPARING:
 	case VB2_BUF_STATE_DEQUEUED:
-	case VB2_BUF_STATE_REQUEUEING:
 		/* nothing */
 		break;
 	}
@@ -1126,7 +1122,7 @@ EXPORT_SYMBOL_GPL(vb2_create_bufs);
  */
 void *vb2_plane_vaddr(struct vb2_buffer *vb, unsigned int plane_no)
 {
-	if (plane_no > vb->num_planes || !vb->planes[plane_no].mem_priv)
+	if (plane_no >= vb->num_planes || !vb->planes[plane_no].mem_priv)
 		return NULL;
 
 	return call_ptr_memop(vb, vaddr, vb->planes[plane_no].mem_priv);
@@ -1157,9 +1153,8 @@ EXPORT_SYMBOL_GPL(vb2_plane_cookie);
 /**
  * vb2_buffer_done() - inform videobuf that an operation on a buffer is finished
  * @vb:		vb2_buffer returned from the driver
- * @state:	either VB2_BUF_STATE_DONE if the operation finished successfully,
- *		VB2_BUF_STATE_ERROR if the operation finished with an error or
- *		VB2_BUF_STATE_QUEUED if the driver wants to requeue buffers.
+ * @state:	either VB2_BUF_STATE_DONE if the operation finished successfully
+ *		or VB2_BUF_STATE_ERROR if the operation finished with an error.
  *		If start_streaming fails then it should return buffers with state
  *		VB2_BUF_STATE_QUEUED to put them back into the queue.
  *
@@ -1185,8 +1180,7 @@ void vb2_buffer_done(struct vb2_buffer *vb, enum vb2_buffer_state state)
 
 	if (WARN_ON(state != VB2_BUF_STATE_DONE &&
 		    state != VB2_BUF_STATE_ERROR &&
-		    state != VB2_BUF_STATE_QUEUED &&
-		    state != VB2_BUF_STATE_REQUEUEING))
+		    state != VB2_BUF_STATE_QUEUED))
 		state = VB2_BUF_STATE_ERROR;
 
 #ifdef CONFIG_VIDEO_ADV_DEBUG
@@ -1203,32 +1197,19 @@ void vb2_buffer_done(struct vb2_buffer *vb, enum vb2_buffer_state state)
 	for (plane = 0; plane < vb->num_planes; ++plane)
 		call_void_memop(vb, finish, vb->planes[plane].mem_priv);
 
+	/* Add the buffer to the done buffers list */
 	spin_lock_irqsave(&q->done_lock, flags);
-	if (state == VB2_BUF_STATE_QUEUED ||
-	    state == VB2_BUF_STATE_REQUEUEING) {
-		vb->state = VB2_BUF_STATE_QUEUED;
-	} else {
-		/* Add the buffer to the done buffers list */
+	vb->state = state;
+	if (state != VB2_BUF_STATE_QUEUED)
 		list_add_tail(&vb->done_entry, &q->done_list);
-		vb->state = state;
-	}
 	atomic_dec(&q->owned_by_drv_count);
 	spin_unlock_irqrestore(&q->done_lock, flags);
 
-	trace_vb2_buf_done(q, vb);
+	if (state == VB2_BUF_STATE_QUEUED)
+		return;
 
-	switch (state) {
-	case VB2_BUF_STATE_QUEUED:
-		return;
-	case VB2_BUF_STATE_REQUEUEING:
-		if (q->start_streaming_called)
-			__enqueue_in_driver(vb);
-		return;
-	default:
-		/* Inform any processes that may be waiting for buffers */
-		wake_up(&q->done_wq);
-		break;
-	}
+	/* Inform any processes that may be waiting for buffers */
+	wake_up(&q->done_wq);
 }
 EXPORT_SYMBOL_GPL(vb2_buffer_done);
 
@@ -1258,19 +1239,19 @@ EXPORT_SYMBOL_GPL(vb2_discard_done);
 
 static void vb2_warn_zero_bytesused(struct vb2_buffer *vb)
 {
-	static bool check_once;
+	static bool __check_once __read_mostly;
 
-	if (check_once)
+	if (__check_once)
 		return;
 
-	check_once = true;
-	WARN_ON(1);
+	__check_once = true;
+	__WARN();
 
-	pr_warn("use of bytesused == 0 is deprecated and will be removed in the future,\n");
+	pr_warn_once("use of bytesused == 0 is deprecated and will be removed in the future,\n");
 	if (vb->vb2_queue->allow_zero_bytesused)
-		pr_warn("use VIDIOC_DECODER_CMD(V4L2_DEC_CMD_STOP) instead.\n");
+		pr_warn_once("use VIDIOC_DECODER_CMD(V4L2_DEC_CMD_STOP) instead.\n");
 	else
-		pr_warn("use the actual size instead.\n");
+		pr_warn_once("use the actual size instead.\n");
 }
 
 /**
@@ -1643,8 +1624,6 @@ static void __enqueue_in_driver(struct vb2_buffer *vb)
 	vb->state = VB2_BUF_STATE_ACTIVE;
 	atomic_inc(&q->owned_by_drv_count);
 
-	trace_vb2_buf_queue(q, vb);
-
 	/* sync buffers */
 	for (plane = 0; plane < vb->num_planes; ++plane)
 		call_void_memop(vb, prepare, vb->planes[plane].mem_priv);
@@ -1691,7 +1670,9 @@ static int __buf_prepare(struct vb2_buffer *vb, const struct v4l2_buffer *b)
 		ret = __qbuf_mmap(vb, b);
 		break;
 	case V4L2_MEMORY_USERPTR:
+		down_read(&current->mm->mmap_sem);
 		ret = __qbuf_userptr(vb, b);
+		up_read(&current->mm->mmap_sem);
 		break;
 	case V4L2_MEMORY_DMABUF:
 		ret = __qbuf_dmabuf(vb, b);
@@ -1892,8 +1873,6 @@ static int vb2_internal_qbuf(struct vb2_queue *q, struct v4l2_buffer *b)
 			vb->v4l2_buf.timecode = b->timecode;
 	}
 
-	trace_vb2_qbuf(q, vb);
-
 	/*
 	 * If already streaming, give the buffer to driver for processing.
 	 * If not, the buffer will be given to driver on next streamon.
@@ -1977,11 +1956,6 @@ static int __vb2_wait_for_done_vb(struct vb2_queue *q, int nonblocking)
 		if (q->error) {
 			dprintk(1, "Queue in error state, will not wait for buffers\n");
 			return -EIO;
-		}
-
-		if (q->last_buffer_dequeued) {
-			dprintk(3, "last buffer dequeued already, will not wait for buffers\n");
-			return -EPIPE;
 		}
 
 		if (!list_empty(&q->done_list)) {
@@ -2139,18 +2113,17 @@ static int vb2_internal_dqbuf(struct vb2_queue *q, struct v4l2_buffer *b, bool n
 	/* Remove from videobuf queue */
 	list_del(&vb->queued_entry);
 	q->queued_count--;
-
-	trace_vb2_dqbuf(q, vb);
-
-	if (!V4L2_TYPE_IS_OUTPUT(q->type) &&
-	    vb->v4l2_buf.flags & V4L2_BUF_FLAG_LAST)
-		q->last_buffer_dequeued = true;
 	/* go back to dequeued state */
 	__vb2_dqbuf(vb);
 
 	dprintk(1, "dqbuf of buffer %d, with state %d\n",
 			vb->v4l2_buf.index, vb->state);
 
+	/*
+	 * After calling the VIDIOC_DQBUF V4L2_BUF_FLAG_DONE must be
+	 * cleared.
+	 */
+	b->flags &= ~V4L2_BUF_FLAG_DONE;
 	return 0;
 }
 
@@ -2358,7 +2331,6 @@ static int vb2_internal_streamoff(struct vb2_queue *q, enum v4l2_buf_type type)
 	 */
 	__vb2_queue_cancel(q);
 	q->waiting_for_buffers = !V4L2_TYPE_IS_OUTPUT(q->type);
-	q->last_buffer_dequeued = false;
 
 	dprintk(3, "successful\n");
 	return 0;
@@ -2695,22 +2667,14 @@ unsigned int vb2_poll(struct vb2_queue *q, struct file *file, poll_table *wait)
 		return res | POLLERR;
 
 	/*
-	 * For output streams you can write as long as there are fewer buffers
-	 * queued than there are buffers available.
+	 * For output streams you can call write() as long as there are fewer
+	 * buffers queued than there are buffers available.
 	 */
-	if (V4L2_TYPE_IS_OUTPUT(q->type) && q->queued_count < q->num_buffers)
+	if (V4L2_TYPE_IS_OUTPUT(q->type) && q->fileio && q->queued_count < q->num_buffers)
 		return res | POLLOUT | POLLWRNORM;
 
-	if (list_empty(&q->done_list)) {
-		/*
-		 * If the last buffer was dequeued from a capture queue,
-		 * return immediately. DQBUF will return -EPIPE.
-		 */
-		if (q->last_buffer_dequeued)
-			return res | POLLIN | POLLRDNORM;
-
+	if (list_empty(&q->done_list))
 		poll_wait(file, &q->done_wq, wait);
-	}
 
 	/*
 	 * Take first buffer available for dequeuing.

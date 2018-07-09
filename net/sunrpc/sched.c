@@ -273,10 +273,9 @@ static inline void rpc_task_set_debuginfo(struct rpc_task *task)
 
 static void rpc_set_active(struct rpc_task *task)
 {
-	trace_rpc_task_begin(task->tk_client, task, NULL);
-
 	rpc_task_set_debuginfo(task);
 	set_bit(RPC_TASK_ACTIVE, &task->tk_runstate);
+	trace_rpc_task_begin(task->tk_client, task, NULL);
 }
 
 /*
@@ -1092,10 +1091,14 @@ void
 rpc_destroy_mempool(void)
 {
 	rpciod_stop();
-	mempool_destroy(rpc_buffer_mempool);
-	mempool_destroy(rpc_task_mempool);
-	kmem_cache_destroy(rpc_task_slabp);
-	kmem_cache_destroy(rpc_buffer_slabp);
+	if (rpc_buffer_mempool)
+		mempool_destroy(rpc_buffer_mempool);
+	if (rpc_task_mempool)
+		mempool_destroy(rpc_task_mempool);
+	if (rpc_task_slabp)
+		kmem_cache_destroy(rpc_task_slabp);
+	if (rpc_buffer_slabp)
+		kmem_cache_destroy(rpc_buffer_slabp);
 	rpc_destroy_wait_queue(&delay_queue);
 }
 

@@ -19,8 +19,6 @@
  ******************************************************************************/
 #define _IOCTL_LINUX_C_
 
-#include <linux/ieee80211.h>
-
 #include <osdep_service.h>
 #include <drv_types.h>
 #include <wlan_bssdef.h>
@@ -179,8 +177,8 @@ static char *translate_scan(struct adapter *padapter,
 
 	cap = le16_to_cpu(le_tmp);
 
-	if (!WLAN_CAPABILITY_IS_STA_BSS(cap)) {
-		if (cap & WLAN_CAPABILITY_ESS)
+	if (cap & (WLAN_CAPABILITY_IBSS | WLAN_CAPABILITY_BSS)) {
+		if (cap & WLAN_CAPABILITY_BSS)
 			iwe.u.mode = IW_MODE_MASTER;
 		else
 			iwe.u.mode = IW_MODE_ADHOC;
@@ -1399,19 +1397,13 @@ static int rtw_wx_get_essid(struct net_device *dev,
 	if ((check_fwstate(pmlmepriv, _FW_LINKED)) ||
 	    (check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE))) {
 		len = pcur_bss->Ssid.SsidLength;
-
-		wrqu->essid.length = len;
-
 		memcpy(extra, pcur_bss->Ssid.Ssid, len);
-
-		wrqu->essid.flags = 1;
 	} else {
-		ret = -1;
-		goto exit;
+		len = 0;
+		*extra = 0;
 	}
-
-exit:
-
+	wrqu->essid.length = len;
+	wrqu->essid.flags = 1;
 
 	return ret;
 }
@@ -1627,7 +1619,7 @@ static int rtw_wx_set_enc(struct net_device *dev,
 		padapter->securitypriv.ndisencryptstatus = Ndis802_11EncryptionDisabled;
 		padapter->securitypriv.dot11PrivacyAlgrthm = _NO_PRIVACY_;
 		padapter->securitypriv.dot118021XGrpPrivacy = _NO_PRIVACY_;
-		padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_Open;
+		padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_Open; /* open system */
 		authmode = Ndis802_11AuthModeOpen;
 		padapter->securitypriv.ndisauthtype = authmode;
 
@@ -1666,7 +1658,7 @@ static int rtw_wx_set_enc(struct net_device *dev,
 		DBG_88E("rtw_wx_set_enc():erq->flags = 0x%x\n", erq->flags);
 
 		padapter->securitypriv.ndisencryptstatus = Ndis802_11Encryption1Enabled;/* Ndis802_11EncryptionDisabled; */
-		padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_Open;
+		padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_Open; /* open system */
 		padapter->securitypriv.dot11PrivacyAlgrthm = _NO_PRIVACY_;
 		padapter->securitypriv.dot118021XGrpPrivacy = _NO_PRIVACY_;
 		authmode = Ndis802_11AuthModeOpen;
@@ -1857,7 +1849,7 @@ static int rtw_wx_set_auth(struct net_device *dev,
 			padapter->securitypriv.ndisencryptstatus = Ndis802_11EncryptionDisabled;
 			padapter->securitypriv.dot11PrivacyAlgrthm = _NO_PRIVACY_;
 			padapter->securitypriv.dot118021XGrpPrivacy = _NO_PRIVACY_;
-			padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_Open;
+			padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_Open; /* open system */
 			padapter->securitypriv.ndisauthtype = Ndis802_11AuthModeOpen;
 		}
 
@@ -1871,7 +1863,7 @@ static int rtw_wx_set_auth(struct net_device *dev,
 			rtw_disassoc_cmd(padapter, 500, false);
 			DBG_88E("%s...call rtw_indicate_disconnect\n ", __func__);
 			rtw_indicate_disconnect(padapter);
-			rtw_free_assoc_resources(padapter);
+			rtw_free_assoc_resources(padapter, 1);
 		}
 		ret = wpa_set_auth_algs(dev, (u32)param->value);
 		break;
@@ -2485,13 +2477,16 @@ static int rtw_set_beacon(struct net_device *dev, struct ieee_param *param, int 
 
 static int rtw_hostapd_sta_flush(struct net_device *dev)
 {
+	int ret = 0;
 	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(dev);
 
 	DBG_88E("%s\n", __func__);
 
 	flush_all_cam_entry(padapter);	/* clear CAM */
 
-	return rtw_sta_flush(padapter);
+	ret = rtw_sta_flush(padapter);
+
+	return ret;
 }
 
 static int rtw_add_sta(struct net_device *dev, struct ieee_param *param)
@@ -2663,8 +2658,7 @@ static int rtw_get_sta_wpaie(struct net_device *dev, struct ieee_param *param)
 
 	psta = rtw_get_stainfo(pstapriv, param->sta_addr);
 	if (psta) {
-		if (psta->wpa_ie[0] == WLAN_EID_RSN ||
-		    psta->wpa_ie[0] == WLAN_EID_VENDOR_SPECIFIC) {
+		if ((psta->wpa_ie[0] == WLAN_EID_RSN) || (psta->wpa_ie[0] == WLAN_EID_GENERIC)) {
 			int wpa_ie_len;
 			int copy_len;
 
@@ -2807,6 +2801,7 @@ static int rtw_set_hidden_ssid(struct net_device *dev, struct ieee_param *param,
 
 static int rtw_ioctl_acl_remove_sta(struct net_device *dev, struct ieee_param *param, int len)
 {
+	int ret = 0;
 	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(dev);
 	struct mlme_priv *pmlmepriv = &(padapter->mlmepriv);
 
@@ -2817,11 +2812,13 @@ static int rtw_ioctl_acl_remove_sta(struct net_device *dev, struct ieee_param *p
 	    param->sta_addr[2] == 0xff && param->sta_addr[3] == 0xff &&
 	    param->sta_addr[4] == 0xff && param->sta_addr[5] == 0xff)
 		return -EINVAL;
-	return rtw_acl_remove_sta(padapter, param->sta_addr);
+	ret = rtw_acl_remove_sta(padapter, param->sta_addr);
+	return ret;
 }
 
 static int rtw_ioctl_acl_add_sta(struct net_device *dev, struct ieee_param *param, int len)
 {
+	int ret = 0;
 	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(dev);
 	struct mlme_priv *pmlmepriv = &(padapter->mlmepriv);
 
@@ -2832,7 +2829,8 @@ static int rtw_ioctl_acl_add_sta(struct net_device *dev, struct ieee_param *para
 	    param->sta_addr[2] == 0xff && param->sta_addr[3] == 0xff &&
 	    param->sta_addr[4] == 0xff && param->sta_addr[5] == 0xff)
 		return -EINVAL;
-	return rtw_acl_add_sta(padapter, param->sta_addr);
+	ret = rtw_acl_add_sta(padapter, param->sta_addr);
+	return ret;
 }
 
 static int rtw_ioctl_set_macaddr_acl(struct net_device *dev, struct ieee_param *param, int len)

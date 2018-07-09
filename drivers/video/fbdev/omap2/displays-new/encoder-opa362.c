@@ -201,9 +201,15 @@ static int opa362_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, ddata);
 
-	gpio = devm_gpiod_get_optional(&pdev->dev, "enable", GPIOD_OUT_LOW);
-	if (IS_ERR(gpio))
-		return PTR_ERR(gpio);
+	gpio = devm_gpiod_get(&pdev->dev, "enable");
+	if (IS_ERR(gpio)) {
+		if (PTR_ERR(gpio) != -ENOENT)
+			return PTR_ERR(gpio);
+
+		gpio = NULL;
+	} else {
+		gpiod_direction_output(gpio, 0);
+	}
 
 	ddata->enable_gpio = gpio;
 
@@ -266,6 +272,7 @@ static struct platform_driver opa362_driver = {
 	.remove	= __exit_p(opa362_remove),
 	.driver	= {
 		.name	= "amplifier-opa362",
+		.owner	= THIS_MODULE,
 		.of_match_table = opa362_of_match,
 		.suppress_bind_attrs = true,
 	},

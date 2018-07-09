@@ -39,7 +39,6 @@ struct efi __read_mostly efi = {
 	.fw_vendor  = EFI_INVALID_TABLE_ADDR,
 	.runtime    = EFI_INVALID_TABLE_ADDR,
 	.config_table  = EFI_INVALID_TABLE_ADDR,
-	.esrt       = EFI_INVALID_TABLE_ADDR,
 };
 EXPORT_SYMBOL(efi);
 
@@ -70,7 +69,7 @@ static int __init parse_efi_cmdline(char *str)
 }
 early_param("efi", parse_efi_cmdline);
 
-struct kobject *efi_kobj;
+static struct kobject *efi_kobj;
 
 /*
  * Let's not leave out systab information that snuck into
@@ -90,15 +89,10 @@ static ssize_t systab_show(struct kobject *kobj,
 		str += sprintf(str, "ACPI20=0x%lx\n", efi.acpi20);
 	if (efi.acpi != EFI_INVALID_TABLE_ADDR)
 		str += sprintf(str, "ACPI=0x%lx\n", efi.acpi);
-	/*
-	 * If both SMBIOS and SMBIOS3 entry points are implemented, the
-	 * SMBIOS3 entry point shall be preferred, so we list it first to
-	 * let applications stop parsing after the first match.
-	 */
-	if (efi.smbios3 != EFI_INVALID_TABLE_ADDR)
-		str += sprintf(str, "SMBIOS3=0x%lx\n", efi.smbios3);
 	if (efi.smbios != EFI_INVALID_TABLE_ADDR)
 		str += sprintf(str, "SMBIOS=0x%lx\n", efi.smbios);
+	if (efi.smbios3 != EFI_INVALID_TABLE_ADDR)
+		str += sprintf(str, "SMBIOS3=0x%lx\n", efi.smbios3);
 	if (efi.hcdp != EFI_INVALID_TABLE_ADDR)
 		str += sprintf(str, "HCDP=0x%lx\n", efi.hcdp);
 	if (efi.boot_info != EFI_INVALID_TABLE_ADDR)
@@ -176,6 +170,7 @@ static int generic_ops_register(void)
 {
 	generic_ops.get_variable = efi.get_variable;
 	generic_ops.set_variable = efi.set_variable;
+	generic_ops.set_variable_nonblocking = efi.set_variable_nonblocking;
 	generic_ops.get_next_variable = efi.get_next_variable;
 	generic_ops.query_variable_store = efi_query_variable_store;
 
@@ -241,116 +236,6 @@ err_put:
 
 subsys_initcall(efisubsys_init);
 
-/*
- * Find the efi memory descriptor for a given physical address.  Given a
- * physicall address, determine if it exists within an EFI Memory Map entry,
- * and if so, populate the supplied memory descriptor with the appropriate
- * data.
- */
-int __init efi_mem_desc_lookup(u64 phys_addr, efi_memory_desc_t *out_md)
-{
-	struct efi_memory_map *map = efi.memmap;
-	void *p, *e;
-
-	if (!efi_enabled(EFI_MEMMAP)) {
-		pr_err_once("EFI_MEMMAP is not enabled.\n");
-		return -EINVAL;
-	}
-
-	if (!map) {
-		pr_err_once("efi.memmap is not set.\n");
-		return -EINVAL;
-	}
-	if (!out_md) {
-		pr_err_once("out_md is null.\n");
-		return -EINVAL;
-        }
-	if (WARN_ON_ONCE(!map->phys_map))
-		return -EINVAL;
-	if (WARN_ON_ONCE(map->nr_map == 0) || WARN_ON_ONCE(map->desc_size == 0))
-		return -EINVAL;
-
-	e = map->phys_map + map->nr_map * map->desc_size;
-	for (p = map->phys_map; p < e; p += map->desc_size) {
-		efi_memory_desc_t *md;
-		u64 size;
-		u64 end;
-
-		/*
-		 * If a driver calls this after efi_free_boot_services,
-		 * ->map will be NULL, and the target may also not be mapped.
-		 * So just always get our own virtual map on the CPU.
-		 *
-		 */
-		md = early_memremap((phys_addr_t)p, sizeof (*md));
-		if (!md) {
-			pr_err_once("early_memremap(%p, %zu) failed.\n",
-				    p, sizeof (*md));
-			return -ENOMEM;
-		}
-
-		if (!(md->attribute & EFI_MEMORY_RUNTIME) &&
-		    md->type != EFI_BOOT_SERVICES_DATA &&
-		    md->type != EFI_RUNTIME_SERVICES_DATA) {
-			early_memunmap(md, sizeof (*md));
-			continue;
-		}
-
-		size = md->num_pages << EFI_PAGE_SHIFT;
-		end = md->phys_addr + size;
-		if (phys_addr >= md->phys_addr && phys_addr < end) {
-			memcpy(out_md, md, sizeof(*out_md));
-			early_memunmap(md, sizeof (*md));
-			return 0;
-		}
-
-		early_memunmap(md, sizeof (*md));
-	}
-	pr_err_once("requested map not found.\n");
-	return -ENOENT;
-}
-
-/*
- * Calculate the highest address of an efi memory descriptor.
- */
-u64 __init efi_mem_desc_end(efi_memory_desc_t *md)
-{
-	u64 size = md->num_pages << EFI_PAGE_SHIFT;
-	u64 end = md->phys_addr + size;
-	return end;
-}
-
-/*
- * We can't ioremap data in EFI boot services RAM, because we've already mapped
- * it as RAM.  So, look it up in the existing EFI memory map instead.  Only
- * callable after efi_enter_virtual_mode and before efi_free_boot_services.
- */
-void __iomem *efi_lookup_mapped_addr(u64 phys_addr)
-{
-	struct efi_memory_map *map;
-	void *p;
-	map = efi.memmap;
-	if (!map)
-		return NULL;
-	if (WARN_ON(!map->map))
-		return NULL;
-	for (p = map->map; p < map->map_end; p += map->desc_size) {
-		efi_memory_desc_t *md = p;
-		u64 size = md->num_pages << EFI_PAGE_SHIFT;
-		u64 end = md->phys_addr + size;
-		if (!(md->attribute & EFI_MEMORY_RUNTIME) &&
-		    md->type != EFI_BOOT_SERVICES_CODE &&
-		    md->type != EFI_BOOT_SERVICES_DATA)
-			continue;
-		if (!md->virt_addr)
-			continue;
-		if (phys_addr >= md->phys_addr && phys_addr < end) {
-			phys_addr += md->virt_addr - md->phys_addr;
-			return (__force void __iomem *)(unsigned long)phys_addr;
-		}
-	}
-	return NULL;
-}
 
 static __initdata efi_config_table_type_t common_tables[] = {
 	{ACPI_20_TABLE_GUID, "ACPI 2.0", &efi.acpi20},
@@ -361,7 +246,6 @@ static __initdata efi_config_table_type_t common_tables[] = {
 	{SMBIOS_TABLE_GUID, "SMBIOS", &efi.smbios},
 	{SMBIOS3_TABLE_GUID, "SMBIOS 3.0", &efi.smbios3},
 	{UGA_IO_PROTOCOL_GUID, "UGA", &efi.uga},
-	{EFI_SYSTEM_RESOURCE_TABLE_GUID, "ESRT", &efi.esrt},
 	{NULL_GUID, NULL, NULL},
 };
 

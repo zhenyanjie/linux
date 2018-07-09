@@ -78,7 +78,6 @@ init_exit:
 	mutex_unlock(&iwpm_admin_lock);
 	if (!ret) {
 		iwpm_set_valid(nl_client, 1);
-		iwpm_set_registration(nl_client, IWPM_REG_UNDEF);
 		pr_debug("%s: Mapinfo and reminfo tables are created\n",
 				__func__);
 	}
@@ -107,7 +106,6 @@ int iwpm_exit(u8 nl_client)
 	}
 	mutex_unlock(&iwpm_admin_lock);
 	iwpm_set_valid(nl_client, 0);
-	iwpm_set_registration(nl_client, IWPM_REG_UNDEF);
 	return 0;
 }
 EXPORT_SYMBOL(iwpm_exit);
@@ -399,21 +397,15 @@ void iwpm_set_valid(u8 nl_client, int valid)
 }
 
 /* valid client */
-u32 iwpm_get_registration(u8 nl_client)
+int iwpm_registered_client(u8 nl_client)
 {
 	return iwpm_admin.reg_list[nl_client];
 }
 
 /* valid client */
-void iwpm_set_registration(u8 nl_client, u32 reg)
+void iwpm_set_registered(u8 nl_client, int reg)
 {
 	iwpm_admin.reg_list[nl_client] = reg;
-}
-
-/* valid client */
-u32 iwpm_check_registration(u8 nl_client, u32 reg)
-{
-	return (iwpm_get_registration(nl_client) & reg);
 }
 
 int iwpm_compare_sockaddr(struct sockaddr_storage *a_sockaddr,
@@ -662,6 +654,7 @@ int iwpm_send_mapinfo(u8 nl_client, int iwpm_pid)
 	}
 	skb_num++;
 	spin_lock_irqsave(&iwpm_mapinfo_lock, flags);
+	ret = -EINVAL;
 	for (i = 0; i < IWPM_MAPINFO_HASH_SIZE; i++) {
 		hlist_for_each_entry(map_info, &iwpm_hash_bucket[i],
 				     hlist_node) {

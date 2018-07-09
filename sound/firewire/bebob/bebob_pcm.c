@@ -157,7 +157,7 @@ pcm_open(struct snd_pcm_substream *substream)
 	struct snd_bebob *bebob = substream->private_data;
 	struct snd_bebob_rate_spec *spec = bebob->spec->rate;
 	unsigned int sampling_rate;
-	enum snd_bebob_clock_type src;
+	bool internal;
 	int err;
 
 	err = snd_bebob_stream_lock_try(bebob);
@@ -168,7 +168,7 @@ pcm_open(struct snd_pcm_substream *substream)
 	if (err < 0)
 		goto err_locked;
 
-	err = snd_bebob_stream_get_clock_src(bebob, &src);
+	err = snd_bebob_stream_check_internal_clock(bebob, &internal);
 	if (err < 0)
 		goto err_locked;
 
@@ -176,7 +176,7 @@ pcm_open(struct snd_pcm_substream *substream)
 	 * When source of clock is internal or any PCM stream are running,
 	 * the available sampling rate is limited at current sampling rate.
 	 */
-	if (src == SND_BEBOB_CLOCK_TYPE_EXTERNAL ||
+	if (!internal ||
 	    amdtp_stream_pcm_running(&bebob->tx_stream) ||
 	    amdtp_stream_pcm_running(&bebob->rx_stream)) {
 		err = spec->get(bebob, &sampling_rate);
@@ -211,38 +211,26 @@ pcm_capture_hw_params(struct snd_pcm_substream *substream,
 		      struct snd_pcm_hw_params *hw_params)
 {
 	struct snd_bebob *bebob = substream->private_data;
-	int err;
-
-	err = snd_pcm_lib_alloc_vmalloc_buffer(substream,
-					       params_buffer_bytes(hw_params));
-	if (err < 0)
-		return err;
 
 	if (substream->runtime->status->state == SNDRV_PCM_STATE_OPEN)
-		atomic_inc(&bebob->substreams_counter);
+		atomic_inc(&bebob->capture_substreams);
 	amdtp_stream_set_pcm_format(&bebob->tx_stream,
 				    params_format(hw_params));
-
-	return 0;
+	return snd_pcm_lib_alloc_vmalloc_buffer(substream,
+						params_buffer_bytes(hw_params));
 }
 static int
 pcm_playback_hw_params(struct snd_pcm_substream *substream,
 		       struct snd_pcm_hw_params *hw_params)
 {
 	struct snd_bebob *bebob = substream->private_data;
-	int err;
-
-	err = snd_pcm_lib_alloc_vmalloc_buffer(substream,
-					       params_buffer_bytes(hw_params));
-	if (err < 0)
-		return err;
 
 	if (substream->runtime->status->state == SNDRV_PCM_STATE_OPEN)
-		atomic_inc(&bebob->substreams_counter);
+		atomic_inc(&bebob->playback_substreams);
 	amdtp_stream_set_pcm_format(&bebob->rx_stream,
 				    params_format(hw_params));
-
-	return 0;
+	return snd_pcm_lib_alloc_vmalloc_buffer(substream,
+						params_buffer_bytes(hw_params));
 }
 
 static int
@@ -251,7 +239,7 @@ pcm_capture_hw_free(struct snd_pcm_substream *substream)
 	struct snd_bebob *bebob = substream->private_data;
 
 	if (substream->runtime->status->state != SNDRV_PCM_STATE_OPEN)
-		atomic_dec(&bebob->substreams_counter);
+		atomic_dec(&bebob->capture_substreams);
 
 	snd_bebob_stream_stop_duplex(bebob);
 
@@ -263,7 +251,7 @@ pcm_playback_hw_free(struct snd_pcm_substream *substream)
 	struct snd_bebob *bebob = substream->private_data;
 
 	if (substream->runtime->status->state != SNDRV_PCM_STATE_OPEN)
-		atomic_dec(&bebob->substreams_counter);
+		atomic_dec(&bebob->playback_substreams);
 
 	snd_bebob_stream_stop_duplex(bebob);
 

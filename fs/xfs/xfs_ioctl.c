@@ -336,7 +336,7 @@ xfs_set_dmattrs(
 	tp = xfs_trans_alloc(mp, XFS_TRANS_SET_DMATTRS);
 	error = xfs_trans_reserve(tp, &M_RES(mp)->tr_ichange, 0, 0);
 	if (error) {
-		xfs_trans_cancel(tp);
+		xfs_trans_cancel(tp, 0);
 		return error;
 	}
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
@@ -346,7 +346,7 @@ xfs_set_dmattrs(
 	ip->i_d.di_dmstate  = state;
 
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
-	error = xfs_trans_commit(tp);
+	error = xfs_trans_commit(tp, 0);
 
 	return error;
 }
@@ -402,6 +402,7 @@ xfs_attrlist_by_handle(
 {
 	int			error = -ENOMEM;
 	attrlist_cursor_kern_t	*cursor;
+	struct xfs_fsop_attrlist_handlereq __user	*p = arg;
 	xfs_fsop_attrlist_handlereq_t al_hreq;
 	struct dentry		*dentry;
 	char			*kbuf;
@@ -433,6 +434,11 @@ xfs_attrlist_by_handle(
 					al_hreq.flags, cursor);
 	if (error)
 		goto out_kfree;
+
+	if (copy_to_user(&p->pos, cursor, sizeof(attrlist_cursor_kern_t))) {
+		error = -EFAULT;
+		goto out_kfree;
+	}
 
 	if (copy_to_user(al_hreq.buffer, kbuf, al_hreq.buflen))
 		error = -EFAULT;
@@ -720,7 +726,7 @@ xfs_ioc_space(
 		iattr.ia_valid = ATTR_SIZE;
 		iattr.ia_size = bf->l_start;
 
-		error = xfs_setattr_size(ip, &iattr);
+		error = xfs_vn_setattr_size(filp->f_path.dentry, &iattr);
 		break;
 	default:
 		ASSERT(0);
@@ -1076,7 +1082,7 @@ xfs_ioctl_setattr_get_trans(
 	return tp;
 
 out_cancel:
-	xfs_trans_cancel(tp);
+	xfs_trans_cancel(tp, 0);
 	return ERR_PTR(error);
 }
 
@@ -1253,7 +1259,7 @@ xfs_ioctl_setattr(
 	else
 		ip->i_d.di_extsize = 0;
 
-	code = xfs_trans_commit(tp);
+	code = xfs_trans_commit(tp, 0);
 
 	/*
 	 * Release any dquot(s) the inode had kept before chown.
@@ -1265,7 +1271,7 @@ xfs_ioctl_setattr(
 	return code;
 
 error_trans_cancel:
-	xfs_trans_cancel(tp);
+	xfs_trans_cancel(tp, 0);
 error_free_dquots:
 	xfs_qm_dqrele(udqp);
 	xfs_qm_dqrele(pdqp);
@@ -1338,11 +1344,11 @@ xfs_ioc_setxflags(
 
 	error = xfs_ioctl_setattr_xflags(tp, ip, &fa);
 	if (error) {
-		xfs_trans_cancel(tp);
+		xfs_trans_cancel(tp, 0);
 		goto out_drop_write;
 	}
 
-	error = xfs_trans_commit(tp);
+	error = xfs_trans_commit(tp, 0);
 out_drop_write:
 	mnt_drop_write_file(filp);
 	return error;
@@ -1368,10 +1374,11 @@ xfs_ioc_getbmap(
 	unsigned int		cmd,
 	void			__user *arg)
 {
-	struct getbmapx		bmx;
+	struct getbmapx		bmx = { 0 };
 	int			error;
 
-	if (copy_from_user(&bmx, arg, sizeof(struct getbmapx)))
+	/* struct getbmap is a strict subset of struct getbmapx. */
+	if (copy_from_user(&bmx, arg, offsetof(struct getbmapx, bmv_iflags)))
 		return -EFAULT;
 
 	if (bmx.bmv_count < 2)

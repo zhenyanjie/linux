@@ -243,6 +243,7 @@ struct ost_id {
 
 #define LL_IOC_LMV_SETSTRIPE	    _IOWR('f', 240, struct lmv_user_md)
 #define LL_IOC_LMV_GETSTRIPE	    _IOWR('f', 241, struct lmv_user_md)
+#define LL_IOC_REMOVE_ENTRY	    _IOWR('f', 242, __u64)
 #define LL_IOC_SET_LEASE		_IOWR('f', 243, long)
 #define LL_IOC_GET_LEASE		_IO('f', 244)
 #define LL_IOC_HSM_IMPORT		_IOWR('f', 245, struct hsm_user_import)
@@ -406,7 +407,7 @@ static inline int lmv_user_md_size(int stripes, int lmm_magic)
 		      stripes * sizeof(struct lmv_user_mds_data);
 }
 
-void lustre_swab_lmv_user_md(struct lmv_user_md *lum);
+extern void lustre_swab_lmv_user_md(struct lmv_user_md *lum);
 
 struct ll_recreate_obj {
 	__u64 lrc_id;
@@ -1065,23 +1066,21 @@ struct hsm_action_item {
  * \retval buffer
  */
 static inline char *hai_dump_data_field(struct hsm_action_item *hai,
-					char *buffer, int len)
+					char *buffer, size_t len)
 {
-	int i, sz, data_len;
+	int i, data_len;
 	char *ptr;
 
 	ptr = buffer;
-	sz = len;
 	data_len = hai->hai_len - sizeof(*hai);
-	for (i = 0 ; (i < data_len) && (sz > 0) ; i++) {
-		int cnt;
-
-		cnt = snprintf(ptr, sz, "%.2X",
-			       (unsigned char)hai->hai_data[i]);
-		ptr += cnt;
-		sz -= cnt;
+	for (i = 0; (i < data_len) && (len > 2); i++) {
+		snprintf(ptr, 3, "%02X", (unsigned char)hai->hai_data[i]);
+		ptr += 2;
+		len -= 2;
 	}
+
 	*ptr = '\0';
+
 	return buffer;
 }
 

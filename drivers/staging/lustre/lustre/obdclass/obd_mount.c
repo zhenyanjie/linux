@@ -84,8 +84,8 @@ int lustre_process_log(struct super_block *sb, char *logname,
 	LASSERT(mgc);
 	LASSERT(cfg);
 
-	bufs = kzalloc(sizeof(*bufs), GFP_NOFS);
-	if (!bufs)
+	OBD_ALLOC_PTR(bufs);
+	if (bufs == NULL)
 		return -ENOMEM;
 
 	/* mgc_process_config */
@@ -97,7 +97,7 @@ int lustre_process_log(struct super_block *sb, char *logname,
 	rc = obd_process_config(mgc, sizeof(*lcfg), lcfg);
 	lustre_cfg_free(lcfg);
 
-	kfree(bufs);
+	OBD_FREE_PTR(bufs);
 
 	if (rc == -EINVAL)
 		LCONSOLE_ERROR_MSG(0x15b, "%s: The configuration from log '%s' failed from the MGS (%d).  Make sure this client and the MGS are running compatible versions of Lustre.\n",
@@ -147,7 +147,7 @@ int do_lcfg(char *cfgname, lnet_nid_t nid, int cmd,
 	    char *s1, char *s2, char *s3, char *s4)
 {
 	struct lustre_cfg_bufs bufs;
-	struct lustre_cfg     *lcfg = NULL;
+	struct lustre_cfg    * lcfg = NULL;
 	int rc;
 
 	CDEBUG(D_TRACE, "lcfg %s %#x %s %s %s %s\n", cfgname,
@@ -247,18 +247,18 @@ int lustre_start_mgc(struct super_block *sb)
 	mutex_lock(&mgc_start_lock);
 
 	len = strlen(LUSTRE_MGC_OBDNAME) + strlen(libcfs_nid2str(nid)) + 1;
-	mgcname = kasprintf(GFP_NOFS,
-			    "%s%s", LUSTRE_MGC_OBDNAME, libcfs_nid2str(nid));
-	niduuid = kasprintf(GFP_NOFS, "%s_%x", mgcname, i);
+	OBD_ALLOC(mgcname, len);
+	OBD_ALLOC(niduuid, len + 2);
 	if (!mgcname || !niduuid) {
 		rc = -ENOMEM;
 		goto out_free;
 	}
+	sprintf(mgcname, "%s%s", LUSTRE_MGC_OBDNAME, libcfs_nid2str(nid));
 
 	mgssec = lsi->lsi_lmd->lmd_mgssec ? lsi->lsi_lmd->lmd_mgssec : "";
 
-	data = kzalloc(sizeof(*data), GFP_NOFS);
-	if (!data) {
+	OBD_ALLOC_PTR(data);
+	if (data == NULL) {
 		rc = -ENOMEM;
 		goto out_free;
 	}
@@ -326,6 +326,7 @@ int lustre_start_mgc(struct super_block *sb)
 
 	/* Add the primary nids for the MGS */
 	i = 0;
+	sprintf(niduuid, "%s_%x", mgcname, i);
 	if (IS_SERVER(lsi)) {
 		ptr = lsi->lsi_lmd->lmd_mgs;
 		if (IS_MGS(lsi)) {
@@ -374,7 +375,7 @@ int lustre_start_mgc(struct super_block *sb)
 	lsi->lsi_lmd->lmd_mgs_failnodes = 1;
 
 	/* Random uuid for MGC allows easier reconnects */
-	uuid = kzalloc(sizeof(*uuid), GFP_NOFS);
+	OBD_ALLOC_PTR(uuid);
 	if (!uuid) {
 		rc = -ENOMEM;
 		goto out_free;
@@ -387,7 +388,7 @@ int lustre_start_mgc(struct super_block *sb)
 	rc = lustre_start_simple(mgcname, LUSTRE_MGC_NAME,
 				 (char *)uuid->uuid, LUSTRE_MGS_OBDNAME,
 				 niduuid, NULL, NULL);
-	kfree(uuid);
+	OBD_FREE_PTR(uuid);
 	if (rc)
 		goto out_free;
 
@@ -463,9 +464,12 @@ out:
 out_free:
 	mutex_unlock(&mgc_start_lock);
 
-	kfree(data);
-	kfree(mgcname);
-	kfree(niduuid);
+	if (data)
+		OBD_FREE_PTR(data);
+	if (mgcname)
+		OBD_FREE(mgcname, len);
+	if (niduuid)
+		OBD_FREE(niduuid, len + 2);
 	return rc;
 }
 
@@ -509,7 +513,7 @@ static int lustre_stop_mgc(struct super_block *sb)
 	/* Save the obdname for cleaning the nid uuids, which are
 	   obdname_XX */
 	len = strlen(obd->obd_name) + 6;
-	niduuid = kzalloc(len, GFP_NOFS);
+	OBD_ALLOC(niduuid, len);
 	if (niduuid) {
 		strcpy(niduuid, obd->obd_name);
 		ptr = niduuid + strlen(niduuid);
@@ -534,7 +538,8 @@ static int lustre_stop_mgc(struct super_block *sb)
 			       niduuid, rc);
 	}
 out:
-	kfree(niduuid);
+	if (niduuid)
+		OBD_FREE(niduuid, len);
 
 	/* class_import_put will get rid of the additional connections */
 	mutex_unlock(&mgc_start_lock);
@@ -547,12 +552,12 @@ struct lustre_sb_info *lustre_init_lsi(struct super_block *sb)
 {
 	struct lustre_sb_info *lsi;
 
-	lsi = kzalloc(sizeof(*lsi), GFP_NOFS);
+	OBD_ALLOC_PTR(lsi);
 	if (!lsi)
 		return NULL;
-	lsi->lsi_lmd = kzalloc(sizeof(*lsi->lsi_lmd), GFP_NOFS);
+	OBD_ALLOC_PTR(lsi->lsi_lmd);
 	if (!lsi->lsi_lmd) {
-		kfree(lsi);
+		OBD_FREE_PTR(lsi);
 		return NULL;
 	}
 
@@ -580,21 +585,36 @@ static int lustre_free_lsi(struct super_block *sb)
 	LASSERT(atomic_read(&lsi->lsi_mounts) == 0);
 
 	if (lsi->lsi_lmd != NULL) {
-		kfree(lsi->lsi_lmd->lmd_dev);
-		kfree(lsi->lsi_lmd->lmd_profile);
-		kfree(lsi->lsi_lmd->lmd_mgssec);
-		kfree(lsi->lsi_lmd->lmd_opts);
+		if (lsi->lsi_lmd->lmd_dev != NULL)
+			OBD_FREE(lsi->lsi_lmd->lmd_dev,
+				 strlen(lsi->lsi_lmd->lmd_dev) + 1);
+		if (lsi->lsi_lmd->lmd_profile != NULL)
+			OBD_FREE(lsi->lsi_lmd->lmd_profile,
+				 strlen(lsi->lsi_lmd->lmd_profile) + 1);
+		if (lsi->lsi_lmd->lmd_mgssec != NULL)
+			OBD_FREE(lsi->lsi_lmd->lmd_mgssec,
+				 strlen(lsi->lsi_lmd->lmd_mgssec) + 1);
+		if (lsi->lsi_lmd->lmd_opts != NULL)
+			OBD_FREE(lsi->lsi_lmd->lmd_opts,
+				 strlen(lsi->lsi_lmd->lmd_opts) + 1);
 		if (lsi->lsi_lmd->lmd_exclude_count)
-			kfree(lsi->lsi_lmd->lmd_exclude);
-		kfree(lsi->lsi_lmd->lmd_mgs);
-		kfree(lsi->lsi_lmd->lmd_osd_type);
-		kfree(lsi->lsi_lmd->lmd_params);
+			OBD_FREE(lsi->lsi_lmd->lmd_exclude,
+				 sizeof(lsi->lsi_lmd->lmd_exclude[0]) *
+				 lsi->lsi_lmd->lmd_exclude_count);
+		if (lsi->lsi_lmd->lmd_mgs != NULL)
+			OBD_FREE(lsi->lsi_lmd->lmd_mgs,
+				 strlen(lsi->lsi_lmd->lmd_mgs) + 1);
+		if (lsi->lsi_lmd->lmd_osd_type != NULL)
+			OBD_FREE(lsi->lsi_lmd->lmd_osd_type,
+				 strlen(lsi->lsi_lmd->lmd_osd_type) + 1);
+		if (lsi->lsi_lmd->lmd_params != NULL)
+			OBD_FREE(lsi->lsi_lmd->lmd_params, 4096);
 
-		kfree(lsi->lsi_lmd);
+		OBD_FREE(lsi->lsi_lmd, sizeof(*lsi->lsi_lmd));
 	}
 
 	LASSERT(lsi->lsi_llsbi == NULL);
-	kfree(lsi);
+	OBD_FREE(lsi, sizeof(*lsi));
 	s2lsi_nocast(sb) = NULL;
 
 	return 0;
@@ -826,7 +846,7 @@ static int lmd_make_exclusion(struct lustre_mount_data *lmd, const char *ptr)
 	devmax = strlen(ptr) / 8 + 1;
 
 	/* temp storage until we figure out how many we have */
-	exclude_list = kcalloc(devmax, sizeof(index), GFP_NOFS);
+	OBD_ALLOC(exclude_list, sizeof(index) * devmax);
 	if (!exclude_list)
 		return -ENOMEM;
 
@@ -855,8 +875,8 @@ static int lmd_make_exclusion(struct lustre_mount_data *lmd, const char *ptr)
 
 	if (lmd->lmd_exclude_count) {
 		/* permanent, freed in lustre_free_lsi */
-		lmd->lmd_exclude = kcalloc(lmd->lmd_exclude_count,
-					   sizeof(index), GFP_NOFS);
+		OBD_ALLOC(lmd->lmd_exclude, sizeof(index) *
+			  lmd->lmd_exclude_count);
 		if (lmd->lmd_exclude) {
 			memcpy(lmd->lmd_exclude, exclude_list,
 			       sizeof(index) * lmd->lmd_exclude_count);
@@ -865,7 +885,7 @@ static int lmd_make_exclusion(struct lustre_mount_data *lmd, const char *ptr)
 			lmd->lmd_exclude_count = 0;
 		}
 	}
-	kfree(exclude_list);
+	OBD_FREE(exclude_list, sizeof(index) * devmax);
 	return rc;
 }
 
@@ -874,8 +894,10 @@ static int lmd_parse_mgssec(struct lustre_mount_data *lmd, char *ptr)
 	char   *tail;
 	int     length;
 
-	kfree(lmd->lmd_mgssec);
-	lmd->lmd_mgssec = NULL;
+	if (lmd->lmd_mgssec != NULL) {
+		OBD_FREE(lmd->lmd_mgssec, strlen(lmd->lmd_mgssec) + 1);
+		lmd->lmd_mgssec = NULL;
+	}
 
 	tail = strchr(ptr, ',');
 	if (tail == NULL)
@@ -883,8 +905,8 @@ static int lmd_parse_mgssec(struct lustre_mount_data *lmd, char *ptr)
 	else
 		length = tail - ptr;
 
-	lmd->lmd_mgssec = kzalloc(length + 1, GFP_NOFS);
-	if (!lmd->lmd_mgssec)
+	OBD_ALLOC(lmd->lmd_mgssec, length + 1);
+	if (lmd->lmd_mgssec == NULL)
 		return -ENOMEM;
 
 	memcpy(lmd->lmd_mgssec, ptr, length);
@@ -900,8 +922,10 @@ static int lmd_parse_string(char **handle, char *ptr)
 	if ((handle == NULL) || (ptr == NULL))
 		return -EINVAL;
 
-	kfree(*handle);
-	*handle = NULL;
+	if (*handle != NULL) {
+		OBD_FREE(*handle, strlen(*handle) + 1);
+		*handle = NULL;
+	}
 
 	tail = strchr(ptr, ',');
 	if (tail == NULL)
@@ -909,8 +933,8 @@ static int lmd_parse_string(char **handle, char *ptr)
 	else
 		length = tail - ptr;
 
-	*handle = kzalloc(length + 1, GFP_NOFS);
-	if (!*handle)
+	OBD_ALLOC(*handle, length + 1);
+	if (*handle == NULL)
 		return -ENOMEM;
 
 	memcpy(*handle, ptr, length);
@@ -939,15 +963,15 @@ static int lmd_parse_mgs(struct lustre_mount_data *lmd, char **ptr)
 	if (lmd->lmd_mgs != NULL)
 		oldlen = strlen(lmd->lmd_mgs) + 1;
 
-	mgsnid = kzalloc(oldlen + length + 1, GFP_NOFS);
-	if (!mgsnid)
+	OBD_ALLOC(mgsnid, oldlen + length + 1);
+	if (mgsnid == NULL)
 		return -ENOMEM;
 
 	if (lmd->lmd_mgs != NULL) {
 		/* Multiple mgsnid= are taken to mean failover locations */
 		memcpy(mgsnid, lmd->lmd_mgs, oldlen);
 		mgsnid[oldlen - 1] = ':';
-		kfree(lmd->lmd_mgs);
+		OBD_FREE(lmd->lmd_mgs, oldlen);
 	}
 	memcpy(mgsnid + oldlen, *ptr, length);
 	mgsnid[oldlen + length] = '\0';
@@ -981,8 +1005,8 @@ static int lmd_parse(char *options, struct lustre_mount_data *lmd)
 	}
 	lmd->lmd_magic = LMD_MAGIC;
 
-	lmd->lmd_params = kzalloc(4096, GFP_NOFS);
-	if (!lmd->lmd_params)
+	OBD_ALLOC(lmd->lmd_params, 4096);
+	if (lmd->lmd_params == NULL)
 		return -ENOMEM;
 	lmd->lmd_params[0] = '\0';
 
@@ -1119,13 +1143,14 @@ static int lmd_parse(char *options, struct lustre_mount_data *lmd)
 		/* Remove leading /s from fsname */
 		while (*++s1 == '/') ;
 		/* Freed in lustre_free_lsi */
-		lmd->lmd_profile = kasprintf(GFP_NOFS, "%s-client", s1);
+		OBD_ALLOC(lmd->lmd_profile, strlen(s1) + 8);
 		if (!lmd->lmd_profile)
 			return -ENOMEM;
+		sprintf(lmd->lmd_profile, "%s-client", s1);
 	}
 
 	/* Freed in lustre_free_lsi */
-	lmd->lmd_dev = kzalloc(strlen(devname) + 1, GFP_NOFS);
+	OBD_ALLOC(lmd->lmd_dev, strlen(devname) + 1);
 	if (!lmd->lmd_dev)
 		return -ENOMEM;
 	strcpy(lmd->lmd_dev, devname);
@@ -1136,7 +1161,7 @@ static int lmd_parse(char *options, struct lustre_mount_data *lmd)
 		*s1-- = 0;
 	if (*options != 0) {
 		/* Freed in lustre_free_lsi */
-		lmd->lmd_opts = kzalloc(strlen(options) + 1, GFP_NOFS);
+		OBD_ALLOC(lmd->lmd_opts, strlen(options) + 1);
 		if (!lmd->lmd_opts)
 			return -ENOMEM;
 		strcpy(lmd->lmd_opts, options);
@@ -1279,7 +1304,7 @@ struct file_system_type lustre_fs_type = {
 	.mount	= lustre_mount,
 	.kill_sb      = lustre_kill_super,
 	.fs_flags     = FS_BINARY_MOUNTDATA | FS_REQUIRES_DEV |
-			FS_RENAME_DOES_D_MOVE,
+			FS_HAS_FIEMAP | FS_RENAME_DOES_D_MOVE,
 };
 MODULE_ALIAS_FS("lustre");
 

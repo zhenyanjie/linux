@@ -3,6 +3,8 @@
  *
  *
  * This file is part of Express Card USB Driver
+ *
+ * $Id:
  *====================================================
  */
 

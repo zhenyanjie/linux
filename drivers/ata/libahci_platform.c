@@ -514,11 +514,10 @@ int ahci_platform_init_host(struct platform_device *pdev,
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq <= 0) {
-		dev_err(dev, "no irq\n");
-		return -EINVAL;
+		if (irq != -EPROBE_DEFER)
+			dev_err(dev, "no irq\n");
+		return irq;
 	}
-
-	hpriv->irq = irq;
 
 	/* prepare host */
 	pi.private_data = (void *)(unsigned long)hpriv->flags;
@@ -590,7 +589,7 @@ int ahci_platform_init_host(struct platform_device *pdev,
 	ahci_init_controller(host);
 	ahci_print_info(host, "platform");
 
-	return ahci_host_activate(host, sht);
+	return ahci_host_activate(host, irq, sht);
 }
 EXPORT_SYMBOL_GPL(ahci_platform_init_host);
 

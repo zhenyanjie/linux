@@ -730,13 +730,11 @@ static int hostfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, 
 
 	init_special_inode(inode, mode, dev);
 	err = do_mknod(name, mode, MAJOR(dev), MINOR(dev));
-	if (!err)
+	if (err)
 		goto out_free;
 
 	err = read_name(inode, name);
 	__putname(name);
-	if (err)
-		goto out_put;
 	if (err)
 		goto out_put;
 
@@ -814,7 +812,7 @@ static int hostfs_setattr(struct dentry *dentry, struct iattr *attr)
 
 	int fd = HOSTFS_I(inode)->fd;
 
-	err = inode_change_ok(inode, attr);
+	err = setattr_prepare(dentry, attr);
 	if (err)
 		return err;
 
@@ -892,7 +890,7 @@ static const struct inode_operations hostfs_dir_iops = {
 	.setattr	= hostfs_setattr,
 };
 
-static const char *hostfs_follow_link(struct dentry *dentry, void **cookie)
+static void *hostfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	char *link = __getname();
 	if (link) {
@@ -906,18 +904,21 @@ static const char *hostfs_follow_link(struct dentry *dentry, void **cookie)
 		}
 		if (err < 0) {
 			__putname(link);
-			return ERR_PTR(err);
+			link = ERR_PTR(err);
 		}
 	} else {
-		return ERR_PTR(-ENOMEM);
+		link = ERR_PTR(-ENOMEM);
 	}
 
-	return *cookie = link;
+	nd_set_link(nd, link);
+	return NULL;
 }
 
-static void hostfs_put_link(struct inode *unused, void *cookie)
+static void hostfs_put_link(struct dentry *dentry, struct nameidata *nd, void *cookie)
 {
-	__putname(cookie);
+	char *s = nd_get_link(nd);
+	if (!IS_ERR(s))
+		__putname(s);
 }
 
 static const struct inode_operations hostfs_link_iops = {

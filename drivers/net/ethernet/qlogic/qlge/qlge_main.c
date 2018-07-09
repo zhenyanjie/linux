@@ -1648,7 +1648,18 @@ static void ql_process_mac_rx_skb(struct ql_adapter *qdev,
 		return;
 	}
 	skb_reserve(new_skb, NET_IP_ALIGN);
+
+	pci_dma_sync_single_for_cpu(qdev->pdev,
+				    dma_unmap_addr(sbq_desc, mapaddr),
+				    dma_unmap_len(sbq_desc, maplen),
+				    PCI_DMA_FROMDEVICE);
+
 	memcpy(skb_put(new_skb, length), skb->data, length);
+
+	pci_dma_sync_single_for_device(qdev->pdev,
+				       dma_unmap_addr(sbq_desc, mapaddr),
+				       dma_unmap_len(sbq_desc, maplen),
+				       PCI_DMA_FROMDEVICE);
 	skb = new_skb;
 
 	/* Frame error, so drop the packet. */
@@ -3871,6 +3882,9 @@ static int ql_adapter_reset(struct ql_adapter *qdev)
 		return status;
 	}
 
+	end_jiffies = jiffies +
+		max((unsigned long)1, usecs_to_jiffies(30));
+
 	/* Check if bit is set then skip the mailbox command and
 	 * clear the bit, else we are in normal reset process.
 	 */
@@ -3885,7 +3899,6 @@ static int ql_adapter_reset(struct ql_adapter *qdev)
 
 	ql_write32(qdev, RST_FO, (RST_FO_FR << 16) | RST_FO_FR);
 
-	end_jiffies = jiffies + usecs_to_jiffies(30);
 	do {
 		value = ql_read32(qdev, RST_FO);
 		if ((value & RST_FO_FR) == 0)

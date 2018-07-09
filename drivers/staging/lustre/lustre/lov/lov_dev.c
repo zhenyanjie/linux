@@ -285,10 +285,10 @@ static void lov_emerg_free(struct lov_device_emerg **emrg, int nr)
 			LASSERT(em->emrg_page_list.pl_nr == 0);
 			if (em->emrg_env != NULL)
 				cl_env_put(em->emrg_env, &em->emrg_refcheck);
-			kfree(em);
+			OBD_FREE_PTR(em);
 		}
 	}
-	kfree(emrg);
+	OBD_FREE(emrg, nr * sizeof(emrg[0]));
 }
 
 static struct lu_device *lov_device_free(const struct lu_env *env,
@@ -298,10 +298,11 @@ static struct lu_device *lov_device_free(const struct lu_env *env,
 	const int	  nr = ld->ld_target_nr;
 
 	cl_device_fini(lu2cl_dev(d));
-	kfree(ld->ld_target);
+	if (ld->ld_target != NULL)
+		OBD_FREE(ld->ld_target, nr * sizeof(ld->ld_target[0]));
 	if (ld->ld_emrg != NULL)
 		lov_emerg_free(ld->ld_emrg, nr);
-	kfree(ld);
+	OBD_FREE_PTR(ld);
 	return NULL;
 }
 
@@ -322,13 +323,13 @@ static struct lov_device_emerg **lov_emerg_alloc(int nr)
 	int i;
 	int result;
 
-	emerg = kcalloc(nr, sizeof(emerg[0]), GFP_NOFS);
+	OBD_ALLOC(emerg, nr * sizeof(emerg[0]));
 	if (emerg == NULL)
 		return ERR_PTR(-ENOMEM);
 	for (result = i = 0; i < nr && result == 0; i++) {
 		struct lov_device_emerg *em;
 
-		em = kzalloc(sizeof(*em), GFP_NOFS);
+		OBD_ALLOC_PTR(em);
 		if (em != NULL) {
 			emerg[i] = em;
 			cl_page_list_init(&em->emrg_page_list);
@@ -368,12 +369,12 @@ static int lov_expand_targets(const struct lu_env *env, struct lov_device *dev)
 		if (IS_ERR(emerg))
 			return PTR_ERR(emerg);
 
-		newd = kcalloc(tgt_size, sz, GFP_NOFS);
+		OBD_ALLOC(newd, tgt_size * sz);
 		if (newd != NULL) {
 			mutex_lock(&dev->ld_mutex);
 			if (sub_size > 0) {
 				memcpy(newd, dev->ld_target, sub_size * sz);
-				kfree(dev->ld_target);
+				OBD_FREE(dev->ld_target, sub_size * sz);
 			}
 			dev->ld_target    = newd;
 			dev->ld_target_nr = tgt_size;
@@ -477,8 +478,8 @@ static struct lu_device *lov_device_alloc(const struct lu_env *env,
 	struct obd_device *obd;
 	int rc;
 
-	ld = kzalloc(sizeof(*ld), GFP_NOFS);
-	if (!ld)
+	OBD_ALLOC_PTR(ld);
+	if (ld == NULL)
 		return ERR_PTR(-ENOMEM);
 
 	cl_device_init(&ld->ld_cl, t);

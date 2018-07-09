@@ -29,8 +29,8 @@ struct mbus_dram_target_info
 	struct mbus_dram_window {
 		u8	cs_index;
 		u8	mbus_attr;
-		u32	base;
-		u32	size;
+		u64	base;
+		u64	size;
 	} cs[4];
 };
 
@@ -54,13 +54,8 @@ struct mbus_dram_target_info
  */
 #ifdef CONFIG_PLAT_ORION
 extern const struct mbus_dram_target_info *mv_mbus_dram_info(void);
-extern const struct mbus_dram_target_info *mv_mbus_dram_info_nooverlap(void);
 #else
 static inline const struct mbus_dram_target_info *mv_mbus_dram_info(void)
-{
-	return NULL;
-}
-static inline const struct mbus_dram_target_info *mv_mbus_dram_info_nooverlap(void)
 {
 	return NULL;
 }

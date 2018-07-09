@@ -107,8 +107,7 @@ static int altera_gpio_irq_set_type(struct irq_data *d,
 	return -EINVAL;
 }
 
-static unsigned int altera_gpio_irq_startup(struct irq_data *d)
-{
+static unsigned int altera_gpio_irq_startup(struct irq_data *d) {
 	altera_gpio_irq_unmask(d);
 
 	return 0;
@@ -201,7 +200,8 @@ static int altera_gpio_direction_output(struct gpio_chip *gc,
 	return 0;
 }
 
-static void altera_gpio_irq_edge_handler(struct irq_desc *desc)
+static void altera_gpio_irq_edge_handler(unsigned int irq,
+					struct irq_desc *desc)
 {
 	struct altera_gpio_chip *altera_gc;
 	struct irq_chip *chip;
@@ -230,7 +230,8 @@ static void altera_gpio_irq_edge_handler(struct irq_desc *desc)
 }
 
 
-static void altera_gpio_irq_leveL_high_handler(struct irq_desc *desc)
+static void altera_gpio_irq_leveL_high_handler(unsigned int irq,
+					      struct irq_desc *desc)
 {
 	struct altera_gpio_chip *altera_gc;
 	struct irq_chip *chip;
@@ -336,9 +337,9 @@ static int altera_gpio_remove(struct platform_device *pdev)
 {
 	struct altera_gpio_chip *altera_gc = platform_get_drvdata(pdev);
 
-	of_mm_gpiochip_remove(&altera_gc->mmchip);
+	gpiochip_remove(&altera_gc->mmchip.gc);
 
-	return 0;
+	return -EIO;
 }
 
 static const struct of_device_id altera_gpio_of_match[] = {

@@ -364,7 +364,7 @@ struct vnt_private {
 	/* Power save */
 	u16 current_aid;
 
-	/* Beacon related */
+	/* Beacon releated */
 	u16 seq_counter;
 
 	enum vnt_cmd_state command_state;

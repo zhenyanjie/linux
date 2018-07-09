@@ -212,9 +212,7 @@ static struct ipv6_devconf ipv6_devconf __read_mostly = {
 	.accept_ra_mtu		= 1,
 	.stable_secret		= {
 		.initialized = false,
-	},
-	.use_oif_addrs_only	= 0,
-	.ignore_routes_with_linkdown = 0,
+	}
 };
 
 static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
@@ -257,8 +255,6 @@ static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
 	.stable_secret		= {
 		.initialized = false,
 	},
-	.use_oif_addrs_only	= 0,
-	.ignore_routes_with_linkdown = 0,
 };
 
 /* Check if a valid qdisc is available */
@@ -290,9 +286,9 @@ static void addrconf_mod_rs_timer(struct inet6_dev *idev,
 static void addrconf_mod_dad_work(struct inet6_ifaddr *ifp,
 				   unsigned long delay)
 {
-	if (!delayed_work_pending(&ifp->dad_work))
-		in6_ifa_hold(ifp);
-	mod_delayed_work(addrconf_wq, &ifp->dad_work, delay);
+	in6_ifa_hold(ifp);
+	if (mod_delayed_work(addrconf_wq, &ifp->dad_work, delay))
+		in6_ifa_put(ifp);
 }
 
 static int snmp6_alloc_dev(struct inet6_dev *idev)
@@ -481,9 +477,6 @@ static int inet6_netconf_msgsize_devconf(int type)
 	if (type == -1 || type == NETCONFA_PROXY_NEIGH)
 		size += nla_total_size(4);
 
-	if (type == -1 || type == NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN)
-		size += nla_total_size(4);
-
 	return size;
 }
 
@@ -518,11 +511,6 @@ static int inet6_netconf_fill_devconf(struct sk_buff *skb, int ifindex,
 #endif
 	if ((type == -1 || type == NETCONFA_PROXY_NEIGH) &&
 	    nla_put_s32(skb, NETCONFA_PROXY_NEIGH, devconf->proxy_ndp) < 0)
-		goto nla_put_failure;
-
-	if ((type == -1 || type == NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN) &&
-	    nla_put_s32(skb, NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN,
-			devconf->ignore_routes_with_linkdown) < 0)
 		goto nla_put_failure;
 
 	nlmsg_end(skb, nlh);
@@ -561,7 +549,6 @@ static const struct nla_policy devconf_ipv6_policy[NETCONFA_MAX+1] = {
 	[NETCONFA_IFINDEX]	= { .len = sizeof(int) },
 	[NETCONFA_FORWARDING]	= { .len = sizeof(int) },
 	[NETCONFA_PROXY_NEIGH]	= { .len = sizeof(int) },
-	[NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN]	= { .len = sizeof(int) },
 };
 
 static int inet6_netconf_get_devconf(struct sk_buff *in_skb,
@@ -582,7 +569,7 @@ static int inet6_netconf_get_devconf(struct sk_buff *in_skb,
 	if (err < 0)
 		goto errout;
 
-	err = EINVAL;
+	err = -EINVAL;
 	if (!tb[NETCONFA_IFINDEX])
 		goto errout;
 
@@ -784,63 +771,6 @@ static int addrconf_fixup_forwarding(struct ctl_table *table, int *p, int newf)
 		rt6_purge_dflt_routers(net);
 	return 1;
 }
-
-static void addrconf_linkdown_change(struct net *net, __s32 newf)
-{
-	struct net_device *dev;
-	struct inet6_dev *idev;
-
-	for_each_netdev(net, dev) {
-		idev = __in6_dev_get(dev);
-		if (idev) {
-			int changed = (!idev->cnf.ignore_routes_with_linkdown) ^ (!newf);
-
-			idev->cnf.ignore_routes_with_linkdown = newf;
-			if (changed)
-				inet6_netconf_notify_devconf(dev_net(dev),
-							     NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN,
-							     dev->ifindex,
-							     &idev->cnf);
-		}
-	}
-}
-
-static int addrconf_fixup_linkdown(struct ctl_table *table, int *p, int newf)
-{
-	struct net *net;
-	int old;
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-
-	net = (struct net *)table->extra2;
-	old = *p;
-	*p = newf;
-
-	if (p == &net->ipv6.devconf_dflt->ignore_routes_with_linkdown) {
-		if ((!newf) ^ (!old))
-			inet6_netconf_notify_devconf(net,
-						     NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN,
-						     NETCONFA_IFINDEX_DEFAULT,
-						     net->ipv6.devconf_dflt);
-		rtnl_unlock();
-		return 0;
-	}
-
-	if (p == &net->ipv6.devconf_all->ignore_routes_with_linkdown) {
-		net->ipv6.devconf_dflt->ignore_routes_with_linkdown = newf;
-		addrconf_linkdown_change(net, newf);
-		if ((!newf) ^ (!old))
-			inet6_netconf_notify_devconf(net,
-						     NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN,
-						     NETCONFA_IFINDEX_ALL,
-						     net->ipv6.devconf_all);
-	}
-	rtnl_unlock();
-
-	return 1;
-}
-
 #endif
 
 /* Nobody refers to this ifaddr, destroy it */
@@ -956,7 +886,10 @@ ipv6_add_addr(struct inet6_dev *idev, const struct in6_addr *addr,
 	INIT_HLIST_NODE(&ifa->addr_lst);
 	ifa->scope = scope;
 	ifa->prefix_len = pfxlen;
-	ifa->flags = flags | IFA_F_TENTATIVE;
+	ifa->flags = flags;
+	/* No need to add the TENTATIVE flag for addresses with NODAD */
+	if (!(flags & IFA_F_NODAD))
+		ifa->flags |= IFA_F_TENTATIVE;
 	ifa->valid_lft = valid_lft;
 	ifa->prefered_lft = prefered_lft;
 	ifa->cstamp = ifa->tstamp = jiffies;
@@ -1437,96 +1370,15 @@ out:
 	return ret;
 }
 
-static int __ipv6_dev_get_saddr(struct net *net,
-				struct ipv6_saddr_dst *dst,
-				struct inet6_dev *idev,
-				struct ipv6_saddr_score *scores,
-				int hiscore_idx)
-{
-	struct ipv6_saddr_score *score = &scores[1 - hiscore_idx], *hiscore = &scores[hiscore_idx];
-
-	read_lock_bh(&idev->lock);
-	list_for_each_entry(score->ifa, &idev->addr_list, if_list) {
-		int i;
-
-		/*
-		 * - Tentative Address (RFC2462 section 5.4)
-		 *  - A tentative address is not considered
-		 *    "assigned to an interface" in the traditional
-		 *    sense, unless it is also flagged as optimistic.
-		 * - Candidate Source Address (section 4)
-		 *  - In any case, anycast addresses, multicast
-		 *    addresses, and the unspecified address MUST
-		 *    NOT be included in a candidate set.
-		 */
-		if ((score->ifa->flags & IFA_F_TENTATIVE) &&
-		    (!(score->ifa->flags & IFA_F_OPTIMISTIC)))
-			continue;
-
-		score->addr_type = __ipv6_addr_type(&score->ifa->addr);
-
-		if (unlikely(score->addr_type == IPV6_ADDR_ANY ||
-			     score->addr_type & IPV6_ADDR_MULTICAST)) {
-			net_dbg_ratelimited("ADDRCONF: unspecified / multicast address assigned as unicast address on %s",
-					    idev->dev->name);
-			continue;
-		}
-
-		score->rule = -1;
-		bitmap_zero(score->scorebits, IPV6_SADDR_RULE_MAX);
-
-		for (i = 0; i < IPV6_SADDR_RULE_MAX; i++) {
-			int minihiscore, miniscore;
-
-			minihiscore = ipv6_get_saddr_eval(net, hiscore, dst, i);
-			miniscore = ipv6_get_saddr_eval(net, score, dst, i);
-
-			if (minihiscore > miniscore) {
-				if (i == IPV6_SADDR_RULE_SCOPE &&
-				    score->scopedist > 0) {
-					/*
-					 * special case:
-					 * each remaining entry
-					 * has too small (not enough)
-					 * scope, because ifa entries
-					 * are sorted by their scope
-					 * values.
-					 */
-					goto out;
-				}
-				break;
-			} else if (minihiscore < miniscore) {
-				if (hiscore->ifa)
-					in6_ifa_put(hiscore->ifa);
-
-				in6_ifa_hold(score->ifa);
-
-				swap(hiscore, score);
-				hiscore_idx = 1 - hiscore_idx;
-
-				/* restore our iterator */
-				score->ifa = hiscore->ifa;
-
-				break;
-			}
-		}
-	}
-out:
-	read_unlock_bh(&idev->lock);
-	return hiscore_idx;
-}
-
 int ipv6_dev_get_saddr(struct net *net, const struct net_device *dst_dev,
 		       const struct in6_addr *daddr, unsigned int prefs,
 		       struct in6_addr *saddr)
 {
-	struct ipv6_saddr_score scores[2], *hiscore;
+	struct ipv6_saddr_score scores[2],
+				*score = &scores[0], *hiscore = &scores[1];
 	struct ipv6_saddr_dst dst;
-	struct inet6_dev *idev;
 	struct net_device *dev;
 	int dst_type;
-	bool use_oif_addr = false;
-	int hiscore_idx = 0;
 
 	dst_type = __ipv6_addr_type(daddr);
 	dst.addr = daddr;
@@ -1535,50 +1387,105 @@ int ipv6_dev_get_saddr(struct net *net, const struct net_device *dst_dev,
 	dst.label = ipv6_addr_label(net, daddr, dst_type, dst.ifindex);
 	dst.prefs = prefs;
 
-	scores[hiscore_idx].rule = -1;
-	scores[hiscore_idx].ifa = NULL;
+	hiscore->rule = -1;
+	hiscore->ifa = NULL;
 
 	rcu_read_lock();
 
-	/* Candidate Source Address (section 4)
-	 *  - multicast and link-local destination address,
-	 *    the set of candidate source address MUST only
-	 *    include addresses assigned to interfaces
-	 *    belonging to the same link as the outgoing
-	 *    interface.
-	 * (- For site-local destination addresses, the
-	 *    set of candidate source addresses MUST only
-	 *    include addresses assigned to interfaces
-	 *    belonging to the same site as the outgoing
-	 *    interface.)
-	 *  - "It is RECOMMENDED that the candidate source addresses
-	 *    be the set of unicast addresses assigned to the
-	 *    interface that will be used to send to the destination
-	 *    (the 'outgoing' interface)." (RFC 6724)
-	 */
-	if (dst_dev) {
-		idev = __in6_dev_get(dst_dev);
-		if ((dst_type & IPV6_ADDR_MULTICAST) ||
-		    dst.scope <= IPV6_ADDR_SCOPE_LINKLOCAL ||
-		    (idev && idev->cnf.use_oif_addrs_only)) {
-			use_oif_addr = true;
-		}
-	}
+	for_each_netdev_rcu(net, dev) {
+		struct inet6_dev *idev;
 
-	if (use_oif_addr) {
-		if (idev)
-			hiscore_idx = __ipv6_dev_get_saddr(net, &dst, idev, scores, hiscore_idx);
-	} else {
-		for_each_netdev_rcu(net, dev) {
-			idev = __in6_dev_get(dev);
-			if (!idev)
+		/* Candidate Source Address (section 4)
+		 *  - multicast and link-local destination address,
+		 *    the set of candidate source address MUST only
+		 *    include addresses assigned to interfaces
+		 *    belonging to the same link as the outgoing
+		 *    interface.
+		 * (- For site-local destination addresses, the
+		 *    set of candidate source addresses MUST only
+		 *    include addresses assigned to interfaces
+		 *    belonging to the same site as the outgoing
+		 *    interface.)
+		 */
+		if (((dst_type & IPV6_ADDR_MULTICAST) ||
+		     dst.scope <= IPV6_ADDR_SCOPE_LINKLOCAL) &&
+		    dst.ifindex && dev->ifindex != dst.ifindex)
+			continue;
+
+		idev = __in6_dev_get(dev);
+		if (!idev)
+			continue;
+
+		read_lock_bh(&idev->lock);
+		list_for_each_entry(score->ifa, &idev->addr_list, if_list) {
+			int i;
+
+			/*
+			 * - Tentative Address (RFC2462 section 5.4)
+			 *  - A tentative address is not considered
+			 *    "assigned to an interface" in the traditional
+			 *    sense, unless it is also flagged as optimistic.
+			 * - Candidate Source Address (section 4)
+			 *  - In any case, anycast addresses, multicast
+			 *    addresses, and the unspecified address MUST
+			 *    NOT be included in a candidate set.
+			 */
+			if ((score->ifa->flags & IFA_F_TENTATIVE) &&
+			    (!(score->ifa->flags & IFA_F_OPTIMISTIC)))
 				continue;
-			hiscore_idx = __ipv6_dev_get_saddr(net, &dst, idev, scores, hiscore_idx);
+
+			score->addr_type = __ipv6_addr_type(&score->ifa->addr);
+
+			if (unlikely(score->addr_type == IPV6_ADDR_ANY ||
+				     score->addr_type & IPV6_ADDR_MULTICAST)) {
+				net_dbg_ratelimited("ADDRCONF: unspecified / multicast address assigned as unicast address on %s",
+						    dev->name);
+				continue;
+			}
+
+			score->rule = -1;
+			bitmap_zero(score->scorebits, IPV6_SADDR_RULE_MAX);
+
+			for (i = 0; i < IPV6_SADDR_RULE_MAX; i++) {
+				int minihiscore, miniscore;
+
+				minihiscore = ipv6_get_saddr_eval(net, hiscore, &dst, i);
+				miniscore = ipv6_get_saddr_eval(net, score, &dst, i);
+
+				if (minihiscore > miniscore) {
+					if (i == IPV6_SADDR_RULE_SCOPE &&
+					    score->scopedist > 0) {
+						/*
+						 * special case:
+						 * each remaining entry
+						 * has too small (not enough)
+						 * scope, because ifa entries
+						 * are sorted by their scope
+						 * values.
+						 */
+						goto try_nextdev;
+					}
+					break;
+				} else if (minihiscore < miniscore) {
+					if (hiscore->ifa)
+						in6_ifa_put(hiscore->ifa);
+
+					in6_ifa_hold(score->ifa);
+
+					swap(hiscore, score);
+
+					/* restore our iterator */
+					score->ifa = hiscore->ifa;
+
+					break;
+				}
+			}
 		}
+try_nextdev:
+		read_unlock_bh(&idev->lock);
 	}
 	rcu_read_unlock();
 
-	hiscore = &scores[hiscore_idx];
 	if (!hiscore->ifa)
 		return -EADDRNOTAVAIL;
 
@@ -1771,17 +1678,7 @@ struct inet6_ifaddr *ipv6_get_ifaddr(struct net *net, const struct in6_addr *add
 
 static void addrconf_dad_stop(struct inet6_ifaddr *ifp, int dad_failed)
 {
-	if (ifp->flags&IFA_F_PERMANENT) {
-		spin_lock_bh(&ifp->lock);
-		addrconf_del_dad_work(ifp);
-		ifp->flags |= IFA_F_TENTATIVE;
-		if (dad_failed)
-			ifp->flags |= IFA_F_DADFAILED;
-		spin_unlock_bh(&ifp->lock);
-		if (dad_failed)
-			ipv6_ifa_notify(0, ifp);
-		in6_ifa_put(ifp);
-	} else if (ifp->flags&IFA_F_TEMPORARY) {
+	if (ifp->flags&IFA_F_TEMPORARY) {
 		struct inet6_ifaddr *ifpub;
 		spin_lock_bh(&ifp->lock);
 		ifpub = ifp->ifpub;
@@ -1794,6 +1691,16 @@ static void addrconf_dad_stop(struct inet6_ifaddr *ifp, int dad_failed)
 			spin_unlock_bh(&ifp->lock);
 		}
 		ipv6_del_addr(ifp);
+	} else if (ifp->flags&IFA_F_PERMANENT || !dad_failed) {
+		spin_lock_bh(&ifp->lock);
+		addrconf_del_dad_work(ifp);
+		ifp->flags |= IFA_F_TENTATIVE;
+		if (dad_failed)
+			ifp->flags |= IFA_F_DADFAILED;
+		spin_unlock_bh(&ifp->lock);
+		if (dad_failed)
+			ipv6_ifa_notify(0, ifp);
+		in6_ifa_put(ifp);
 	} else {
 		ipv6_del_addr(ifp);
 	}
@@ -1897,6 +1804,7 @@ errdad:
 	spin_unlock_bh(&ifp->lock);
 
 	addrconf_mod_dad_work(ifp, 0);
+	in6_ifa_put(ifp);
 }
 
 /* Join to solicited addr multicast group.
@@ -1948,6 +1856,37 @@ static void addrconf_leave_anycast(struct inet6_ifaddr *ifp)
 	if (ipv6_addr_any(&addr))
 		return;
 	__ipv6_dev_ac_dec(ifp->idev, &addr);
+}
+
+static int addrconf_ifid_eui48(u8 *eui, struct net_device *dev)
+{
+	if (dev->addr_len != ETH_ALEN)
+		return -1;
+	memcpy(eui, dev->dev_addr, 3);
+	memcpy(eui + 5, dev->dev_addr + 3, 3);
+
+	/*
+	 * The zSeries OSA network cards can be shared among various
+	 * OS instances, but the OSA cards have only one MAC address.
+	 * This leads to duplicate address conflicts in conjunction
+	 * with IPv6 if more than one instance uses the same card.
+	 *
+	 * The driver for these cards can deliver a unique 16-bit
+	 * identifier for each instance sharing the same card.  It is
+	 * placed instead of 0xFFFE in the interface identifier.  The
+	 * "u" bit of the interface identifier is not inverted in this
+	 * case.  Hence the resulting interface identifier has local
+	 * scope according to RFC2373.
+	 */
+	if (dev->dev_id) {
+		eui[3] = (dev->dev_id >> 8) & 0xFF;
+		eui[4] = dev->dev_id & 0xFF;
+	} else {
+		eui[3] = 0xFF;
+		eui[4] = 0xFE;
+		eui[0] ^= 2;
+	}
+	return 0;
 }
 
 static int addrconf_ifid_eui64(u8 *eui, struct net_device *dev)
@@ -2195,8 +2134,6 @@ static struct rt6_info *addrconf_get_prefix_route(const struct in6_addr *pfx,
 	fn = fib6_locate(&table->tb6_root, pfx, plen, NULL, 0);
 	if (!fn)
 		goto out;
-
-	noflags |= RTF_CACHE;
 	for (rt = fn->leaf; rt; rt = rt->dst.rt6_next) {
 		if (rt->dst.dev->ifindex != dev->ifindex)
 			continue;
@@ -3126,8 +3063,6 @@ static void addrconf_gre_config(struct net_device *dev)
 	}
 
 	addrconf_addr_gen(idev, true);
-	if (dev->flags & IFF_POINTOPOINT)
-		addrconf_add_mroute(dev);
 }
 #endif
 
@@ -3136,6 +3071,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 {
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
 	struct inet6_dev *idev = __in6_dev_get(dev);
+	struct net *net = dev_net(dev);
 	int run_pending = 0;
 	int err;
 
@@ -3178,9 +3114,15 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 			}
 
 			if (idev) {
-				if (idev->if_flags & IF_READY)
-					/* device is already configured. */
+				if (idev->if_flags & IF_READY) {
+					/* device is already configured -
+					 * but resend MLD reports, we might
+					 * have roamed and need to update
+					 * multicast snooping switches
+					 */
+					ipv6_mc_up(idev);
 					break;
+				}
 				idev->if_flags |= IF_READY;
 			}
 
@@ -3232,7 +3174,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 			 * IPV6_MIN_MTU stop IPv6 on this interface.
 			 */
 			if (dev->mtu < IPV6_MIN_MTU)
-				addrconf_ifdown(dev, 1);
+				addrconf_ifdown(dev, dev != net->loopback_dev);
 		}
 		break;
 
@@ -3291,6 +3233,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
  */
 static struct notifier_block ipv6_dev_notf = {
 	.notifier_call = addrconf_notify,
+	.priority = ADDRCONF_NOTIFY_PRIORITY,
 };
 
 static void addrconf_type_change(struct net_device *dev, unsigned long event)
@@ -3492,6 +3435,7 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 {
 	struct inet6_dev *idev = ifp->idev;
 	struct net_device *dev = idev->dev;
+	bool notify = false;
 
 	addrconf_join_solict(dev, &ifp->addr);
 
@@ -3537,7 +3481,7 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 			/* Because optimistic nodes can use this address,
 			 * notify listeners. If DAD fails, RTM_DELADDR is sent.
 			 */
-			ipv6_ifa_notify(RTM_NEWADDR, ifp);
+			notify = true;
 		}
 	}
 
@@ -3545,6 +3489,8 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 out:
 	spin_unlock(&ifp->lock);
 	read_unlock_bh(&idev->lock);
+	if (notify)
+		ipv6_ifa_notify(RTM_NEWADDR, ifp);
 }
 
 static void addrconf_dad_start(struct inet6_ifaddr *ifp)
@@ -3592,6 +3538,7 @@ static void addrconf_dad_work(struct work_struct *w)
 		addrconf_dad_begin(ifp);
 		goto out;
 	} else if (action == DAD_ABORT) {
+		in6_ifa_hold(ifp);
 		addrconf_dad_stop(ifp, 1);
 		goto out;
 	}
@@ -4662,9 +4609,7 @@ static inline void ipv6_store_devconf(struct ipv6_devconf *cnf,
 	array[DEVCONF_SUPPRESS_FRAG_NDISC] = cnf->suppress_frag_ndisc;
 	array[DEVCONF_ACCEPT_RA_FROM_LOCAL] = cnf->accept_ra_from_local;
 	array[DEVCONF_ACCEPT_RA_MTU] = cnf->accept_ra_mtu;
-	array[DEVCONF_IGNORE_ROUTES_WITH_LINKDOWN] = cnf->ignore_routes_with_linkdown;
 	/* we omit DEVCONF_STABLE_SECRET for now */
-	array[DEVCONF_USE_OIF_ADDRS_ONLY] = cnf->use_oif_addrs_only;
 }
 
 static inline size_t inet6_ifla6_size(void)
@@ -4684,7 +4629,6 @@ static inline size_t inet6_if_nlmsg_size(void)
 	       + nla_total_size(MAX_ADDR_LEN) /* IFLA_ADDRESS */
 	       + nla_total_size(4) /* IFLA_MTU */
 	       + nla_total_size(4) /* IFLA_LINK */
-	       + nla_total_size(1) /* IFLA_OPERSTATE */
 	       + nla_total_size(inet6_ifla6_size()); /* IFLA_PROTINFO */
 }
 
@@ -4704,24 +4648,18 @@ static inline void __snmp6_fill_statsdev(u64 *stats, atomic_long_t *mib,
 }
 
 static inline void __snmp6_fill_stats64(u64 *stats, void __percpu *mib,
-					int bytes, size_t syncpoff)
+				      int items, int bytes, size_t syncpoff)
 {
-	int i, c;
-	u64 buff[IPSTATS_MIB_MAX];
-	int pad = bytes - sizeof(u64) * IPSTATS_MIB_MAX;
-
+	int i;
+	int pad = bytes - sizeof(u64) * items;
 	BUG_ON(pad < 0);
 
-	memset(buff, 0, sizeof(buff));
-	buff[0] = IPSTATS_MIB_MAX;
+	/* Use put_unaligned() because stats may not be aligned for u64. */
+	put_unaligned(items, &stats[0]);
+	for (i = 1; i < items; i++)
+		put_unaligned(snmp_fold_field64(mib, i, syncpoff), &stats[i]);
 
-	for_each_possible_cpu(c) {
-		for (i = 1; i < IPSTATS_MIB_MAX; i++)
-			buff[i] += snmp_get_cpu_field64(mib, c, i, syncpoff);
-	}
-
-	memcpy(stats, buff, IPSTATS_MIB_MAX * sizeof(u64));
-	memset(&stats[IPSTATS_MIB_MAX], 0, pad);
+	memset(&stats[items], 0, pad);
 }
 
 static void snmp6_fill_stats(u64 *stats, struct inet6_dev *idev, int attrtype,
@@ -4729,8 +4667,8 @@ static void snmp6_fill_stats(u64 *stats, struct inet6_dev *idev, int attrtype,
 {
 	switch (attrtype) {
 	case IFLA_INET6_STATS:
-		__snmp6_fill_stats64(stats, idev->stats.ipv6, bytes,
-				     offsetof(struct ipstats_mib, syncp));
+		__snmp6_fill_stats64(stats, idev->stats.ipv6,
+				     IPSTATS_MIB_MAX, bytes, offsetof(struct ipstats_mib, syncp));
 		break;
 	case IFLA_INET6_ICMP6STATS:
 		__snmp6_fill_statsdev(stats, idev->stats.icmpv6dev->mibs, ICMP6_MIB_MAX, bytes);
@@ -4947,9 +4885,7 @@ static int inet6_fill_ifinfo(struct sk_buff *skb, struct inet6_dev *idev,
 	     nla_put(skb, IFLA_ADDRESS, dev->addr_len, dev->dev_addr)) ||
 	    nla_put_u32(skb, IFLA_MTU, dev->mtu) ||
 	    (dev->ifindex != dev_get_iflink(dev) &&
-	     nla_put_u32(skb, IFLA_LINK, dev_get_iflink(dev))) ||
-	    nla_put_u8(skb, IFLA_OPERSTATE,
-		       netif_running(dev) ? dev->operstate : IF_OPER_DOWN))
+	     nla_put_u32(skb, IFLA_LINK, dev_get_iflink(dev))))
 		goto nla_put_failure;
 	protoinfo = nla_nest_start(skb, IFLA_PROTINFO);
 	if (!protoinfo)
@@ -5136,12 +5072,13 @@ static void __ipv6_ifa_notify(int event, struct inet6_ifaddr *ifp)
 
 			rt = addrconf_get_prefix_route(&ifp->peer_addr, 128,
 						       ifp->idev->dev, 0, 0);
-			if (rt)
-				ip6_del_rt(rt);
+			if (rt && ip6_del_rt(rt))
+				dst_free(&rt->dst);
 		}
 		dst_hold(&ifp->rt->dst);
 
-		ip6_del_rt(ifp->rt);
+		if (ip6_del_rt(ifp->rt))
+			dst_free(&ifp->rt->dst);
 
 		rt_genid_bump_ipv6(net);
 		break;
@@ -5388,34 +5325,6 @@ out:
 	rtnl_unlock();
 
 	return err;
-}
-
-static
-int addrconf_sysctl_ignore_routes_with_linkdown(struct ctl_table *ctl,
-						int write,
-						void __user *buffer,
-						size_t *lenp,
-						loff_t *ppos)
-{
-	int *valp = ctl->data;
-	int val = *valp;
-	loff_t pos = *ppos;
-	struct ctl_table lctl;
-	int ret;
-
-	/* ctl->data points to idev->cnf.ignore_routes_when_linkdown
-	 * we should not modify it until we get the rtnl lock.
-	 */
-	lctl = *ctl;
-	lctl.data = &val;
-
-	ret = proc_dointvec(&lctl, write, buffer, lenp, ppos);
-
-	if (write)
-		ret = addrconf_fixup_linkdown(ctl, valp, val);
-	if (ret)
-		*ppos = pos;
-	return ret;
 }
 
 static struct addrconf_sysctl_table
@@ -5704,20 +5613,6 @@ static struct addrconf_sysctl_table
 			.proc_handler	= addrconf_sysctl_stable_secret,
 		},
 		{
-			.procname       = "use_oif_addrs_only",
-			.data           = &ipv6_devconf.use_oif_addrs_only,
-			.maxlen         = sizeof(int),
-			.mode           = 0644,
-			.proc_handler   = proc_dointvec,
-		},
-		{
-			.procname	= "ignore_routes_with_linkdown",
-			.data		= &ipv6_devconf.ignore_routes_with_linkdown,
-			.maxlen		= sizeof(int),
-			.mode		= 0644,
-			.proc_handler	= addrconf_sysctl_ignore_routes_with_linkdown,
-		},
-		{
 			/* sentinel */
 		}
 	},
@@ -5916,6 +5811,8 @@ int __init addrconf_init(void)
 		err = PTR_ERR(idev);
 		goto errlo;
 	}
+
+	ip6_route_init_special_entries();
 
 	for (i = 0; i < IN6_ADDR_HSIZE; i++)
 		INIT_HLIST_HEAD(&inet6_addr_lst[i]);

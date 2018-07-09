@@ -314,10 +314,9 @@ static int ptp_gianfar_adjtime(struct ptp_clock_info *ptp, s64 delta)
 	now = tmr_cnt_read(etsects);
 	now += delta;
 	tmr_cnt_write(etsects, now);
+	set_fipers(etsects);
 
 	spin_unlock_irqrestore(&etsects->lock, flags);
-
-	set_fipers(etsects);
 
 	return 0;
 }
@@ -557,7 +556,6 @@ static const struct of_device_id match_table[] = {
 	{ .compatible = "fsl,etsec-ptp" },
 	{},
 };
-MODULE_DEVICE_TABLE(of, match_table);
 
 static struct platform_driver gianfar_ptp_driver = {
 	.driver = {

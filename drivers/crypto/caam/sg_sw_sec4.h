@@ -15,6 +15,7 @@ static inline void dma_to_sec4_sg_one(struct sec4_sg_entry *sec4_sg_ptr,
 {
 	sec4_sg_ptr->ptr = dma;
 	sec4_sg_ptr->len = len;
+	sec4_sg_ptr->reserved = 0;
 	sec4_sg_ptr->buf_pool_id = 0;
 	sec4_sg_ptr->offset = offset;
 #ifdef DEBUG
@@ -54,21 +55,6 @@ static inline void sg_to_sec4_sg_last(struct scatterlist *sg, int sg_count,
 	sec4_sg_ptr->len |= SEC4_SG_LEN_FIN;
 }
 
-static inline struct sec4_sg_entry *sg_to_sec4_sg_len(
-	struct scatterlist *sg, unsigned int total,
-	struct sec4_sg_entry *sec4_sg_ptr)
-{
-	do {
-		unsigned int len = min(sg_dma_len(sg), total);
-
-		dma_to_sec4_sg_one(sec4_sg_ptr, sg_dma_address(sg), len, 0);
-		sec4_sg_ptr++;
-		sg = sg_next(sg);
-		total -= len;
-	} while (total);
-	return sec4_sg_ptr - 1;
-}
-
 /* count number of elements in scatterlist */
 static inline int __sg_count(struct scatterlist *sg_list, int nbytes,
 			     bool *chained)
@@ -99,51 +85,34 @@ static inline int sg_count(struct scatterlist *sg_list, int nbytes,
 	return sg_nents;
 }
 
-static inline void dma_unmap_sg_chained(
-	struct device *dev, struct scatterlist *sg, unsigned int nents,
-	enum dma_data_direction dir, bool chained)
+static int dma_map_sg_chained(struct device *dev, struct scatterlist *sg,
+			      unsigned int nents, enum dma_data_direction dir,
+			      bool chained)
 {
 	if (unlikely(chained)) {
 		int i;
-		struct scatterlist *tsg = sg;
-
-		/*
-		 * Use a local copy of the sg pointer to avoid moving the
-		 * head of the list pointed to by sg as we walk the list.
-		 */
 		for (i = 0; i < nents; i++) {
-			dma_unmap_sg(dev, tsg, 1, dir);
-			tsg = sg_next(tsg);
+			dma_map_sg(dev, sg, 1, dir);
+			sg = sg_next(sg);
 		}
-	} else if (nents) {
-		dma_unmap_sg(dev, sg, nents, dir);
+	} else {
+		dma_map_sg(dev, sg, nents, dir);
 	}
+	return nents;
 }
 
-static inline int dma_map_sg_chained(
-	struct device *dev, struct scatterlist *sg, unsigned int nents,
-	enum dma_data_direction dir, bool chained)
+static int dma_unmap_sg_chained(struct device *dev, struct scatterlist *sg,
+				unsigned int nents, enum dma_data_direction dir,
+				bool chained)
 {
 	if (unlikely(chained)) {
 		int i;
-		struct scatterlist *tsg = sg;
-
-		/*
-		 * Use a local copy of the sg pointer to avoid moving the
-		 * head of the list pointed to by sg as we walk the list.
-		 */
 		for (i = 0; i < nents; i++) {
-			if (!dma_map_sg(dev, tsg, 1, dir)) {
-				dma_unmap_sg_chained(dev, sg, i, dir,
-						     chained);
-				nents = 0;
-				break;
-			}
-
-			tsg = sg_next(tsg);
+			dma_unmap_sg(dev, sg, 1, dir);
+			sg = sg_next(sg);
 		}
-	} else
-		nents = dma_map_sg(dev, sg, nents, dir);
-
+	} else {
+		dma_unmap_sg(dev, sg, nents, dir);
+	}
 	return nents;
 }

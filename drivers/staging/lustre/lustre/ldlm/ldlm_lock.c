@@ -208,7 +208,8 @@ void ldlm_lock_put(struct ldlm_lock *lock)
 			lock->l_export = NULL;
 		}
 
-		kfree(lock->l_lvb_data);
+		if (lock->l_lvb_data != NULL)
+			OBD_FREE(lock->l_lvb_data, lock->l_lvb_len);
 
 		ldlm_interval_free(ldlm_interval_detach(lock));
 		lu_ref_fini(&lock->l_reference);
@@ -571,6 +572,13 @@ struct ldlm_lock *__ldlm_handle2lock(const struct lustre_handle *handle,
 	if (lock == NULL)
 		return NULL;
 
+	if (lock->l_export && lock->l_export->exp_failed) {
+		CDEBUG(D_INFO, "lock export failed: lock %p, exp %p\n",
+		       lock, lock->l_export);
+		LDLM_LOCK_PUT(lock);
+		return NULL;
+	}
+
 	/* It's unlikely but possible that someone marked the lock as
 	 * destroyed after we did handle2object on it */
 	if (flags == 0 && ((lock->l_flags & LDLM_FL_DESTROYED) == 0)) {
@@ -931,9 +939,7 @@ static void search_granted_lock(struct list_head *queue,
 			prev->mode_link = &mode_end->l_sl_mode;
 			prev->policy_link = &req->l_sl_policy;
 			return;
-		}
-
-		if (lock->l_resource->lr_type == LDLM_IBITS) {
+		} else if (lock->l_resource->lr_type == LDLM_IBITS) {
 			for (;;) {
 				policy_end =
 					list_entry(lock->l_sl_policy.prev,
@@ -969,10 +975,11 @@ static void search_granted_lock(struct list_head *queue,
 			prev->mode_link = &mode_end->l_sl_mode;
 			prev->policy_link = &req->l_sl_policy;
 			return;
+		} else {
+			LDLM_ERROR(lock,
+				   "is not LDLM_PLAIN or LDLM_IBITS lock");
+			LBUG();
 		}
-
-		LDLM_ERROR(lock, "is not LDLM_PLAIN or LDLM_IBITS lock");
-		LBUG();
 	}
 
 	/* insert point is last lock on the queue,
@@ -1527,8 +1534,8 @@ struct ldlm_lock *ldlm_lock_create(struct ldlm_namespace *ns,
 
 	if (lvb_len) {
 		lock->l_lvb_len = lvb_len;
-		lock->l_lvb_data = kzalloc(lvb_len, GFP_NOFS);
-		if (!lock->l_lvb_data)
+		OBD_ALLOC(lock->l_lvb_data, lvb_len);
+		if (lock->l_lvb_data == NULL)
 			goto out;
 	}
 
@@ -1791,7 +1798,7 @@ int ldlm_work_gl_ast_lock(struct ptlrpc_request_set *rqset, void *opaq)
 	LDLM_LOCK_RELEASE(lock);
 
 	if ((gl_work->gl_flags & LDLM_GL_WORK_NOFREE) == 0)
-		kfree(gl_work);
+		OBD_FREE_PTR(gl_work);
 
 	return rc;
 }
@@ -1812,8 +1819,8 @@ int ldlm_run_ast_work(struct ldlm_namespace *ns, struct list_head *rpc_list,
 	if (list_empty(rpc_list))
 		return 0;
 
-	arg = kzalloc(sizeof(*arg), GFP_NOFS);
-	if (!arg)
+	OBD_ALLOC_PTR(arg);
+	if (arg == NULL)
 		return -ENOMEM;
 
 	atomic_set(&arg->restart, 0);
@@ -1857,7 +1864,7 @@ int ldlm_run_ast_work(struct ldlm_namespace *ns, struct list_head *rpc_list,
 	rc = atomic_read(&arg->restart) ? -ERESTART : 0;
 	goto out;
 out:
-	kfree(arg);
+	OBD_FREE_PTR(arg);
 	return rc;
 }
 

@@ -557,7 +557,7 @@ early_idt_handler_common:
 	cld
 
 	cmpl $2,(%esp)		# X86_TRAP_NMI
-	je .Lis_nmi		# Ignore NMI
+	je is_nmi		# Ignore NMI
 
 	cmpl $2,%ss:early_recursion_flag
 	je hlt_loop
@@ -610,7 +610,7 @@ ex_entry:
 	pop %ecx
 	pop %eax
 	decl %ss:early_recursion_flag
-.Lis_nmi:
+is_nmi:
 	addl $8,%esp		/* drop vector number and error code */
 	iret
 ENDPROC(early_idt_handler_common)
@@ -670,14 +670,17 @@ __PAGE_ALIGNED_BSS
 initial_pg_pmd:
 	.fill 1024*KPMDS,4,0
 #else
-ENTRY(initial_page_table)
+.globl initial_page_table
+initial_page_table:
 	.fill 1024,4,0
 #endif
 initial_pg_fixmap:
 	.fill 1024,4,0
-ENTRY(empty_zero_page)
+.globl empty_zero_page
+empty_zero_page:
 	.fill 4096,1,0
-ENTRY(swapper_pg_dir)
+.globl swapper_pg_dir
+swapper_pg_dir:
 	.fill 1024,4,0
 
 /*

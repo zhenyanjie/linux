@@ -99,6 +99,10 @@ static bool nf_nat_ipv6_manip_pkt(struct sk_buff *skb,
 	    !l4proto->manip_pkt(skb, &nf_nat_l3proto_ipv6, iphdroff, hdroff,
 				target, maniptype))
 		return false;
+
+	/* must reload, offset might have changed */
+	ipv6h = (void *)skb->data + iphdroff;
+
 manip_addr:
 	if (maniptype == NF_NAT_MANIP_SRC)
 		ipv6h->saddr = target->src.u3.in6;
@@ -124,7 +128,7 @@ static void nf_nat_ipv6_csum_update(struct sk_buff *skb,
 		newip = &t->dst.u3.in6;
 	}
 	inet_proto_csum_replace16(check, skb, oldip->s6_addr32,
-				  newip->s6_addr32, true);
+				  newip->s6_addr32, 1);
 }
 
 static void nf_nat_ipv6_csum_recalc(struct sk_buff *skb,
@@ -155,7 +159,7 @@ static void nf_nat_ipv6_csum_recalc(struct sk_buff *skb,
 		}
 	} else
 		inet_proto_csum_replace2(check, skb,
-					 htons(oldlen), htons(datalen), true);
+					 htons(oldlen), htons(datalen), 1);
 }
 
 #if IS_ENABLED(CONFIG_NF_CT_NETLINK)

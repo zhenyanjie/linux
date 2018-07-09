@@ -21,7 +21,6 @@
 #include <linux/cpu.h>
 #include <linux/seq_file.h>
 #include <linux/irq.h>
-#include <linux/nmi.h>
 #include <linux/percpu.h>
 #include <linux/clockchips.h>
 #include <linux/completion.h>
@@ -73,7 +72,6 @@ enum ipi_msg_type {
 	IPI_CPU_STOP,
 	IPI_IRQ_WORK,
 	IPI_COMPLETION,
-	IPI_CPU_BACKTRACE = 15,
 };
 
 static DECLARE_COMPLETION(cpu_running);
@@ -88,11 +86,9 @@ void __init smp_set_ops(struct smp_operations *ops)
 
 static unsigned long get_arch_pgd(pgd_t *pgd)
 {
-#ifdef CONFIG_ARM_LPAE
-	return __phys_to_pfn(virt_to_phys(pgd));
-#else
-	return virt_to_phys(pgd);
-#endif
+	phys_addr_t pgdir = virt_to_idmap(pgd);
+	BUG_ON(pgdir & ARCH_PGD_MASK);
+	return pgdir >> ARCH_PGD_SHIFT;
 }
 
 int __cpu_up(unsigned int cpu, struct task_struct *idle)
@@ -112,7 +108,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 #endif
 
 #ifdef CONFIG_MMU
-	secondary_data.pgdir = virt_to_phys(idmap_pgd);
+	secondary_data.pgdir = get_arch_pgd(idmap_pgd);
 	secondary_data.swapper_pg_dir = get_arch_pgd(swapper_pg_dir);
 #endif
 	sync_cache_w(&secondary_data);
@@ -177,26 +173,13 @@ static int platform_cpu_disable(unsigned int cpu)
 	if (smp_ops.cpu_disable)
 		return smp_ops.cpu_disable(cpu);
 
-	return 0;
-}
-
-int platform_can_hotplug_cpu(unsigned int cpu)
-{
-	/* cpu_die must be specified to support hotplug */
-	if (!smp_ops.cpu_die)
-		return 0;
-
-	if (smp_ops.cpu_can_disable)
-		return smp_ops.cpu_can_disable(cpu);
-
 	/*
 	 * By default, allow disabling all CPUs except the first one,
 	 * since this is special on a lot of platforms, e.g. because
 	 * of clock tick interrupts.
 	 */
-	return cpu != 0;
+	return cpu == 0 ? -EPERM : 0;
 }
-
 /*
  * __cpu_disable runs on the processor to be shutdown.
  */
@@ -268,7 +251,7 @@ void __cpu_die(unsigned int cpu)
  * of the other hotplug-cpu capable cores, so presumably coming
  * out of idle fixes this.
  */
-void arch_cpu_idle_dead(void)
+void __ref cpu_die(void)
 {
 	unsigned int cpu = smp_processor_id();
 
@@ -645,12 +628,6 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 		irq_exit();
 		break;
 
-	case IPI_CPU_BACKTRACE:
-		irq_enter();
-		nmi_cpu_backtrace(regs);
-		irq_exit();
-		break;
-
 	default:
 		pr_crit("CPU%u: Unknown IPI message 0x%x\n",
 		        cpu, ipinr);
@@ -745,13 +722,3 @@ static int __init register_cpufreq_notifier(void)
 core_initcall(register_cpufreq_notifier);
 
 #endif
-
-static void raise_nmi(cpumask_t *mask)
-{
-	smp_cross_call(mask, IPI_CPU_BACKTRACE);
-}
-
-void arch_trigger_all_cpu_backtrace(bool include_self)
-{
-	nmi_trigger_all_cpu_backtrace(include_self, raise_nmi);
-}

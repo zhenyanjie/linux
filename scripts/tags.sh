@@ -106,6 +106,7 @@ all_compiled_sources()
 		case "$i" in
 			*.[cS])
 				j=${i/\.[cS]/\.o}
+				j="${j#$tree}"
 				if [ -e $j ]; then
 					echo $i
 				fi
@@ -154,7 +155,7 @@ exuberant()
 {
 	all_target_sources | xargs $1 -a                        \
 	-I __initdata,__exitdata,__initconst,			\
-	-I __initdata_memblock					\
+	-I __cpuinitdata,__initdata_memblock			\
 	-I __refdata,__attribute,__maybe_unused,__always_unused \
 	-I __acquires,__releases,__deprecated			\
 	-I __read_mostly,__aligned,____cacheline_aligned        \
@@ -170,9 +171,7 @@ exuberant()
 	--regex-c='/^SYSCALL_DEFINE[[:digit:]]?\(([^,)]*).*/sys_\1/' \
 	--regex-c='/^COMPAT_SYSCALL_DEFINE[[:digit:]]?\(([^,)]*).*/compat_sys_\1/' \
 	--regex-c++='/^TRACE_EVENT\(([^,)]*).*/trace_\1/'		\
-	--regex-c++='/^TRACE_EVENT\(([^,)]*).*/trace_\1_rcuidle/'	\
 	--regex-c++='/^DEFINE_EVENT\([^,)]*, *([^,)]*).*/trace_\1/'	\
-	--regex-c++='/^DEFINE_EVENT\([^,)]*, *([^,)]*).*/trace_\1_rcuidle/' \
 	--regex-c++='/PAGEFLAG\(([^,)]*).*/Page\1/'			\
 	--regex-c++='/PAGEFLAG\(([^,)]*).*/SetPage\1/'			\
 	--regex-c++='/PAGEFLAG\(([^,)]*).*/ClearPage\1/'		\
@@ -235,9 +234,7 @@ emacs()
 	--regex='/^SYSCALL_DEFINE[0-9]?(\([^,)]*\).*/sys_\1/'   \
 	--regex='/^COMPAT_SYSCALL_DEFINE[0-9]?(\([^,)]*\).*/compat_sys_\1/' \
 	--regex='/^TRACE_EVENT(\([^,)]*\).*/trace_\1/'		\
-	--regex='/^TRACE_EVENT(\([^,)]*\).*/trace_\1_rcuidle/'	\
 	--regex='/^DEFINE_EVENT([^,)]*, *\([^,)]*\).*/trace_\1/' \
-	--regex='/^DEFINE_EVENT([^,)]*, *\([^,)]*\).*/trace_\1_rcuidle/' \
 	--regex='/PAGEFLAG(\([^,)]*\).*/Page\1/'			\
 	--regex='/PAGEFLAG(\([^,)]*\).*/SetPage\1/'		\
 	--regex='/PAGEFLAG(\([^,)]*\).*/ClearPage\1/'		\

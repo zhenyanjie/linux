@@ -467,6 +467,7 @@ void ahci_save_initial_config(struct device *dev, struct ahci_host_priv *hpriv)
 		dev_info(dev, "forcing port_map 0x%x -> 0x%x\n",
 			 port_map, hpriv->force_port_map);
 		port_map = hpriv->force_port_map;
+		hpriv->saved_port_map = port_map;
 	}
 
 	if (hpriv->mask_port_map) {
@@ -1266,15 +1267,6 @@ static int ahci_exec_polled_cmd(struct ata_port *ap, int pmp,
 	ata_tf_to_fis(tf, pmp, is_cmd, fis);
 	ahci_fill_cmd_slot(pp, 0, cmd_fis_len | flags | (pmp << 12));
 
-	/* set port value for softreset of Port Multiplier */
-	if (pp->fbs_enabled && pp->fbs_last_dev != pmp) {
-		tmp = readl(port_mmio + PORT_FBS);
-		tmp &= ~(PORT_FBS_DEV_MASK | PORT_FBS_DEC);
-		tmp |= pmp << PORT_FBS_DEV_OFFSET;
-		writel(tmp, port_mmio + PORT_FBS);
-		pp->fbs_last_dev = pmp;
-	}
-
 	/* issue & wait */
 	writel(1, port_mmio + PORT_CMD_ISSUE);
 
@@ -1834,9 +1826,27 @@ static irqreturn_t ahci_multi_irqs_intr(int irq, void *dev_instance)
 	return IRQ_WAKE_THREAD;
 }
 
-static u32 ahci_handle_port_intr(struct ata_host *host, u32 irq_masked)
+static irqreturn_t ahci_single_irq_intr(int irq, void *dev_instance)
 {
+	struct ata_host *host = dev_instance;
+	struct ahci_host_priv *hpriv;
 	unsigned int i, handled = 0;
+	void __iomem *mmio;
+	u32 irq_stat, irq_masked;
+
+	VPRINTK("ENTER\n");
+
+	hpriv = host->private_data;
+	mmio = hpriv->mmio;
+
+	/* sigh.  0xffffffff is a valid return from h/w */
+	irq_stat = readl(mmio + HOST_IRQ_STAT);
+	if (!irq_stat)
+		return IRQ_NONE;
+
+	irq_masked = irq_stat & hpriv->port_map;
+
+	spin_lock(&host->lock);
 
 	for (i = 0; i < host->n_ports; i++) {
 		struct ata_port *ap;
@@ -1858,70 +1868,6 @@ static u32 ahci_handle_port_intr(struct ata_host *host, u32 irq_masked)
 		handled = 1;
 	}
 
-	return handled;
-}
-
-static irqreturn_t ahci_single_edge_irq_intr(int irq, void *dev_instance)
-{
-	struct ata_host *host = dev_instance;
-	struct ahci_host_priv *hpriv;
-	unsigned int rc = 0;
-	void __iomem *mmio;
-	u32 irq_stat, irq_masked;
-
-	VPRINTK("ENTER\n");
-
-	hpriv = host->private_data;
-	mmio = hpriv->mmio;
-
-	/* sigh.  0xffffffff is a valid return from h/w */
-	irq_stat = readl(mmio + HOST_IRQ_STAT);
-	if (!irq_stat)
-		return IRQ_NONE;
-
-	irq_masked = irq_stat & hpriv->port_map;
-
-	spin_lock(&host->lock);
-
-	/*
-	 * HOST_IRQ_STAT behaves as edge triggered latch meaning that
-	 * it should be cleared before all the port events are cleared.
-	 */
-	writel(irq_stat, mmio + HOST_IRQ_STAT);
-
-	rc = ahci_handle_port_intr(host, irq_masked);
-
-	spin_unlock(&host->lock);
-
-	VPRINTK("EXIT\n");
-
-	return IRQ_RETVAL(rc);
-}
-
-static irqreturn_t ahci_single_level_irq_intr(int irq, void *dev_instance)
-{
-	struct ata_host *host = dev_instance;
-	struct ahci_host_priv *hpriv;
-	unsigned int rc = 0;
-	void __iomem *mmio;
-	u32 irq_stat, irq_masked;
-
-	VPRINTK("ENTER\n");
-
-	hpriv = host->private_data;
-	mmio = hpriv->mmio;
-
-	/* sigh.  0xffffffff is a valid return from h/w */
-	irq_stat = readl(mmio + HOST_IRQ_STAT);
-	if (!irq_stat)
-		return IRQ_NONE;
-
-	irq_masked = irq_stat & hpriv->port_map;
-
-	spin_lock(&host->lock);
-
-	rc = ahci_handle_port_intr(host, irq_masked);
-
 	/* HOST_IRQ_STAT behaves as level triggered latch meaning that
 	 * it should be cleared after all the port events are cleared;
 	 * otherwise, it will raise a spurious interrupt after each
@@ -1937,7 +1883,7 @@ static irqreturn_t ahci_single_level_irq_intr(int irq, void *dev_instance)
 
 	VPRINTK("EXIT\n");
 
-	return IRQ_RETVAL(rc);
+	return IRQ_RETVAL(handled);
 }
 
 unsigned int ahci_qc_issue(struct ata_queued_cmd *qc)
@@ -2352,7 +2298,7 @@ static int ahci_port_start(struct ata_port *ap)
 	/*
 	 * Switch to per-port locking in case each port has its own MSI vector.
 	 */
-	if (hpriv->flags & AHCI_HFLAG_MULTI_MSI) {
+	if ((hpriv->flags & AHCI_HFLAG_MULTI_MSI)) {
 		spin_lock_init(&pp->lock);
 		ap->lock = &pp->lock;
 	}
@@ -2480,10 +2426,7 @@ static int ahci_host_activate_multi_irqs(struct ata_host *host, int irq,
 	rc = ata_host_start(host);
 	if (rc)
 		return rc;
-	/*
-	 * Requests IRQs according to AHCI-1.1 when multiple MSIs were
-	 * allocated. That is one MSI per port, starting from @irq.
-	 */
+
 	for (i = 0; i < host->n_ports; i++) {
 		struct ahci_port_priv *pp = host->ports[i]->private_data;
 
@@ -2522,7 +2465,12 @@ out_free_irqs:
 /**
  *	ahci_host_activate - start AHCI host, request IRQs and register it
  *	@host: target ATA host
+ *	@irq: base IRQ number to request
  *	@sht: scsi_host_template to use when registering the host
+ *
+ *	Similar to ata_host_activate, but requests IRQs according to AHCI-1.1
+ *	when multiple MSIs were allocated. That is one MSI per port, starting
+ *	from @irq.
  *
  *	LOCKING:
  *	Inherited from calling layer (may sleep).
@@ -2530,19 +2478,16 @@ out_free_irqs:
  *	RETURNS:
  *	0 on success, -errno otherwise.
  */
-int ahci_host_activate(struct ata_host *host, struct scsi_host_template *sht)
+int ahci_host_activate(struct ata_host *host, int irq,
+		       struct scsi_host_template *sht)
 {
 	struct ahci_host_priv *hpriv = host->private_data;
-	int irq = hpriv->irq;
 	int rc;
 
 	if (hpriv->flags & AHCI_HFLAG_MULTI_MSI)
 		rc = ahci_host_activate_multi_irqs(host, irq, sht);
-	else if (hpriv->flags & AHCI_HFLAG_EDGE_IRQ)
-		rc = ata_host_activate(host, irq, ahci_single_edge_irq_intr,
-				       IRQF_SHARED, sht);
 	else
-		rc = ata_host_activate(host, irq, ahci_single_level_irq_intr,
+		rc = ata_host_activate(host, irq, ahci_single_irq_intr,
 				       IRQF_SHARED, sht);
 	return rc;
 }

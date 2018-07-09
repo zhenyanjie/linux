@@ -34,6 +34,7 @@
 #include <linux/kexec.h>
 #include <linux/crash_dump.h>
 #include <linux/root_dev.h>
+#include <linux/clk-provider.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
 #include <linux/smp.h>
@@ -45,7 +46,6 @@
 #include <linux/of_platform.h>
 #include <linux/efi.h>
 #include <linux/personality.h>
-#include <linux/psci.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -61,8 +61,9 @@
 #include <asm/tlbflush.h>
 #include <asm/traps.h>
 #include <asm/memblock.h>
+#include <asm/psci.h>
 #include <asm/efi.h>
-#include <asm/xen/hypervisor.h>
+#include <asm/virt.h>
 
 unsigned long elf_hwcap __read_mostly;
 EXPORT_SYMBOL_GPL(elf_hwcap);
@@ -104,6 +105,18 @@ static struct resource mem_res[] = {
 #define kernel_code mem_res[0]
 #define kernel_data mem_res[1]
 
+void __init early_print(const char *str, ...)
+{
+	char buf[256];
+	va_list ap;
+
+	va_start(ap, str);
+	vsnprintf(buf, sizeof(buf), str, ap);
+	va_end(ap);
+
+	printk("%s", buf);
+}
+
 /*
  * The recorded values of x0 .. x3 upon kernel entry.
  */
@@ -129,6 +142,7 @@ bool arch_match_cpu_phys_id(int cpu, u64 phys_id)
 }
 
 struct mpidr_hash mpidr_hash;
+#ifdef CONFIG_SMP
 /**
  * smp_build_mpidr_hash - Pre-compute shifts required at each affinity
  *			  level in order to build a linear index from an
@@ -194,11 +208,35 @@ static void __init smp_build_mpidr_hash(void)
 		pr_warn("Large number of MPIDR hash buckets detected\n");
 	__flush_dcache_area(&mpidr_hash, sizeof(struct mpidr_hash));
 }
+#endif
+
+static void __init hyp_mode_check(void)
+{
+	if (is_hyp_mode_available())
+		pr_info("CPU: All CPU(s) started at EL2\n");
+	else if (is_hyp_mode_mismatched())
+		WARN_TAINT(1, TAINT_CPU_OUT_OF_SPEC,
+			   "CPU: CPUs started in inconsistent modes");
+	else
+		pr_info("CPU: All CPU(s) started at EL1\n");
+}
+
+void __init do_post_cpus_up_work(void)
+{
+	hyp_mode_check();
+	apply_alternatives_all();
+}
+
+#ifdef CONFIG_UP_LATE_INIT
+void __init up_late_init(void)
+{
+	do_post_cpus_up_work();
+}
+#endif /* CONFIG_UP_LATE_INIT */
 
 static void __init setup_processor(void)
 {
-	u64 features;
-	s64 block;
+	u64 features, block;
 	u32 cwg;
 	int cls;
 
@@ -228,8 +266,8 @@ static void __init setup_processor(void)
 	 * for non-negative values. Negative values are reserved.
 	 */
 	features = read_cpuid(ID_AA64ISAR0_EL1);
-	block = cpuid_feature_extract_field(features, 4);
-	if (block > 0) {
+	block = (features >> 4) & 0xf;
+	if (!(block & 0x8)) {
 		switch (block) {
 		default:
 		case 2:
@@ -241,36 +279,26 @@ static void __init setup_processor(void)
 		}
 	}
 
-	if (cpuid_feature_extract_field(features, 8) > 0)
+	block = (features >> 8) & 0xf;
+	if (block && !(block & 0x8))
 		elf_hwcap |= HWCAP_SHA1;
 
-	if (cpuid_feature_extract_field(features, 12) > 0)
+	block = (features >> 12) & 0xf;
+	if (block && !(block & 0x8))
 		elf_hwcap |= HWCAP_SHA2;
 
-	if (cpuid_feature_extract_field(features, 16) > 0)
+	block = (features >> 16) & 0xf;
+	if (block && !(block & 0x8))
 		elf_hwcap |= HWCAP_CRC32;
-
-	block = cpuid_feature_extract_field(features, 20);
-	if (block > 0) {
-		switch (block) {
-		default:
-		case 2:
-			elf_hwcap |= HWCAP_ATOMICS;
-		case 1:
-			/* RESERVED */
-		case 0:
-			break;
-		}
-	}
 
 #ifdef CONFIG_COMPAT
 	/*
 	 * ID_ISAR5_EL1 carries similar information as above, but pertaining to
-	 * the AArch32 32-bit execution state.
+	 * the Aarch32 32-bit execution state.
 	 */
 	features = read_cpuid(ID_ISAR5_EL1);
-	block = cpuid_feature_extract_field(features, 4);
-	if (block > 0) {
+	block = (features >> 4) & 0xf;
+	if (!(block & 0x8)) {
 		switch (block) {
 		default:
 		case 2:
@@ -282,27 +310,28 @@ static void __init setup_processor(void)
 		}
 	}
 
-	if (cpuid_feature_extract_field(features, 8) > 0)
+	block = (features >> 8) & 0xf;
+	if (block && !(block & 0x8))
 		compat_elf_hwcap2 |= COMPAT_HWCAP2_SHA1;
 
-	if (cpuid_feature_extract_field(features, 12) > 0)
+	block = (features >> 12) & 0xf;
+	if (block && !(block & 0x8))
 		compat_elf_hwcap2 |= COMPAT_HWCAP2_SHA2;
 
-	if (cpuid_feature_extract_field(features, 16) > 0)
+	block = (features >> 16) & 0xf;
+	if (block && !(block & 0x8))
 		compat_elf_hwcap2 |= COMPAT_HWCAP2_CRC32;
 #endif
 }
 
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
-	void *dt_virt = fixmap_remap_fdt(dt_phys);
-
-	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
-		pr_crit("\n"
-			"Error: invalid device tree blob at physical address %pa (virtual address 0x%p)\n"
-			"The dtb must be 8-byte aligned and must not exceed 2 MB in size\n"
-			"\nPlease check your bootloader.",
-			&dt_phys, dt_virt);
+	if (!dt_phys || !early_init_dt_scan(phys_to_virt(dt_phys))) {
+		early_print("\n"
+			"Error: invalid device tree blob at physical address 0x%p (virtual address 0x%p)\n"
+			"The dtb must be 8-byte aligned and passed in the first 512MB of memory\n"
+			"\nPlease check your bootloader.\n",
+			dt_phys, phys_to_virt(dt_phys));
 
 		while (true)
 			cpu_relax();
@@ -339,74 +368,13 @@ static void __init request_standard_resources(void)
 	}
 }
 
-#ifdef CONFIG_BLK_DEV_INITRD
-/*
- * Relocate initrd if it is not completely within the linear mapping.
- * This would be the case if mem= cuts out all or part of it.
- */
-static void __init relocate_initrd(void)
-{
-	phys_addr_t orig_start = __virt_to_phys(initrd_start);
-	phys_addr_t orig_end = __virt_to_phys(initrd_end);
-	phys_addr_t ram_end = memblock_end_of_DRAM();
-	phys_addr_t new_start;
-	unsigned long size, to_free = 0;
-	void *dest;
-
-	if (orig_end <= ram_end)
-		return;
-
-	/*
-	 * Any of the original initrd which overlaps the linear map should
-	 * be freed after relocating.
-	 */
-	if (orig_start < ram_end)
-		to_free = ram_end - orig_start;
-
-	size = orig_end - orig_start;
-	if (!size)
-		return;
-
-	/* initrd needs to be relocated completely inside linear mapping */
-	new_start = memblock_find_in_range(0, PFN_PHYS(max_pfn),
-					   size, PAGE_SIZE);
-	if (!new_start)
-		panic("Cannot relocate initrd of size %ld\n", size);
-	memblock_reserve(new_start, size);
-
-	initrd_start = __phys_to_virt(new_start);
-	initrd_end   = initrd_start + size;
-
-	pr_info("Moving initrd from [%llx-%llx] to [%llx-%llx]\n",
-		orig_start, orig_start + size - 1,
-		new_start, new_start + size - 1);
-
-	dest = (void *)initrd_start;
-
-	if (to_free) {
-		memcpy(dest, (void *)__phys_to_virt(orig_start), to_free);
-		dest += to_free;
-	}
-
-	copy_from_early_mem(dest, orig_start + to_free, size - to_free);
-
-	if (to_free) {
-		pr_info("Freeing original RAMDISK from [%llx-%llx]\n",
-			orig_start, orig_start + to_free - 1);
-		memblock_free(orig_start, to_free);
-	}
-}
-#else
-static inline void __init relocate_initrd(void)
-{
-}
-#endif
-
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
 
 void __init setup_arch(char **cmdline_p)
 {
 	setup_processor();
+
+	setup_machine_fdt(__fdt_pointer);
 
 	init_mm.start_code = (unsigned long) _text;
 	init_mm.end_code   = (unsigned long) _etext;
@@ -417,8 +385,6 @@ void __init setup_arch(char **cmdline_p)
 
 	early_fixmap_init();
 	early_ioremap_init();
-
-	setup_machine_fdt(__fdt_pointer);
 
 	parse_early_param();
 
@@ -435,7 +401,6 @@ void __init setup_arch(char **cmdline_p)
 	acpi_boot_table_init();
 
 	paging_init();
-	relocate_initrd();
 	request_standard_resources();
 
 	early_ioremap_reset();
@@ -443,14 +408,18 @@ void __init setup_arch(char **cmdline_p)
 	if (acpi_disabled) {
 		unflatten_device_tree();
 		psci_dt_init();
+		cpu_read_bootcpu_ops();
+#ifdef CONFIG_SMP
+		of_smp_init_cpus();
+#endif
 	} else {
 		psci_acpi_init();
+		acpi_init_cpus();
 	}
-	xen_early_init();
 
-	cpu_read_bootcpu_ops();
-	smp_init_cpus();
+#ifdef CONFIG_SMP
 	smp_build_mpidr_hash();
+#endif
 
 #ifdef CONFIG_VT
 #if defined(CONFIG_VGA_CONSOLE)
@@ -469,13 +438,8 @@ void __init setup_arch(char **cmdline_p)
 
 static int __init arm64_device_init(void)
 {
-	if (of_have_populated_dt()) {
-		of_iommu_init();
-		of_platform_populate(NULL, of_default_bus_match_table,
-				     NULL, NULL);
-	} else if (acpi_disabled) {
-		pr_crit("Device tree not populated\n");
-	}
+	of_iommu_init();
+	of_platform_populate(NULL, of_default_bus_match_table, NULL, NULL);
 	return 0;
 }
 arch_initcall_sync(arm64_device_init);
@@ -503,7 +467,6 @@ static const char *hwcap_str[] = {
 	"sha1",
 	"sha2",
 	"crc32",
-	"atomics",
 	NULL
 };
 
@@ -556,7 +519,9 @@ static int c_show(struct seq_file *m, void *v)
 		 * online processors, looking for lines beginning with
 		 * "processor".  Give glibc what it expects.
 		 */
+#ifdef CONFIG_SMP
 		seq_printf(m, "processor\t: %d\n", i);
+#endif
 
 		seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
 			   loops_per_jiffy / (500000UL/HZ),

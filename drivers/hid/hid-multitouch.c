@@ -309,41 +309,6 @@ static struct attribute_group mt_attribute_group = {
 	.attrs = sysfs_attrs
 };
 
-static void mt_get_feature(struct hid_device *hdev, struct hid_report *report)
-{
-	struct mt_device *td = hid_get_drvdata(hdev);
-	int ret, size = hid_report_len(report);
-	u8 *buf;
-
-	/*
-	 * Only fetch the feature report if initial reports are not already
-	 * been retrieved. Currently this is only done for Windows 8 touch
-	 * devices.
-	 */
-	if (!(hdev->quirks & HID_QUIRK_NO_INIT_REPORTS))
-		return;
-	if (td->mtclass.name != MT_CLS_WIN_8)
-		return;
-
-	buf = hid_alloc_report_buf(report, GFP_KERNEL);
-	if (!buf)
-		return;
-
-	ret = hid_hw_raw_request(hdev, report->id, buf, size,
-				 HID_FEATURE_REPORT, HID_REQ_GET_REPORT);
-	if (ret < 0) {
-		dev_warn(&hdev->dev, "failed to fetch feature %d\n",
-			 report->id);
-	} else {
-		ret = hid_report_raw_event(hdev, HID_FEATURE_REPORT, buf,
-					   size, 0);
-		if (ret)
-			dev_warn(&hdev->dev, "failed to report feature\n");
-	}
-
-	kfree(buf);
-}
-
 static void mt_feature_mapping(struct hid_device *hdev,
 		struct hid_field *field, struct hid_usage *usage)
 {
@@ -373,8 +338,6 @@ static void mt_feature_mapping(struct hid_device *hdev,
 
 		break;
 	case HID_DG_CONTACTMAX:
-		mt_get_feature(hdev, field->report);
-
 		td->maxcontact_report_id = field->report->id;
 		td->maxcontacts = field->value[0];
 		if (!td->maxcontacts &&
@@ -391,7 +354,6 @@ static void mt_feature_mapping(struct hid_device *hdev,
 			break;
 		}
 
-		mt_get_feature(hdev, field->report);
 		if (field->value[usage->usage_index] == MT_BUTTONTYPE_CLICKPAD)
 			td->is_buttonpad = true;
 
@@ -827,15 +789,8 @@ static int mt_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 	/*
 	 * some egalax touchscreens have "application == HID_DG_TOUCHSCREEN"
 	 * for the stylus.
-	 * The check for mt_report_id ensures we don't process
-	 * HID_DG_CONTACTCOUNT from the pen report as it is outside the physical
-	 * collection, but within the report ID.
 	 */
 	if (field->physical == HID_DG_STYLUS)
-		return 0;
-	else if ((field->physical == 0) &&
-		 (field->report->id != td->mt_report_id) &&
-		 (td->mt_report_id != -1))
 		return 0;
 
 	if (field->application == HID_DG_TOUCHSCREEN ||
@@ -1075,13 +1030,8 @@ static int mt_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		 * reports. Fortunately, the Win8 spec says that all touches
 		 * should be sent during each report, making the initialization
 		 * of input reports unnecessary.
-		 *
-		 * In addition some touchpads do not behave well if we read
-		 * all feature reports from them. Instead we prevent
-		 * initial report fetching and then selectively fetch each
-		 * report we are interested in.
 		 */
-		hdev->quirks |= HID_QUIRK_NO_INIT_REPORTS;
+		hdev->quirks |= HID_QUIRK_NO_INIT_INPUT_REPORTS;
 
 	td = devm_kzalloc(&hdev->dev, sizeof(struct mt_device), GFP_KERNEL);
 	if (!td) {
@@ -1198,14 +1148,6 @@ static const struct hid_device_id mt_devices[] = {
 	{  .driver_data = MT_CLS_NSMU,
 		MT_USB_DEVICE(USB_VENDOR_ID_CHUNGHWAT,
 			USB_DEVICE_ID_CHUNGHWAT_MULTITOUCH) },
-
-	/* CJTouch panels */
-	{ .driver_data = MT_CLS_NSMU,
-		MT_USB_DEVICE(USB_VENDOR_ID_CJTOUCH,
-			USB_DEVICE_ID_CJTOUCH_MULTI_TOUCH_0020) },
-	{ .driver_data = MT_CLS_NSMU,
-		MT_USB_DEVICE(USB_VENDOR_ID_CJTOUCH,
-			USB_DEVICE_ID_CJTOUCH_MULTI_TOUCH_0040) },
 
 	/* CVTouch panels */
 	{ .driver_data = MT_CLS_NSMU,

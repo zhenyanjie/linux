@@ -49,6 +49,7 @@
 
 static cfs_hash_ops_t uuid_hash_ops;
 static cfs_hash_ops_t nid_hash_ops;
+static cfs_hash_ops_t nid_stat_hash_ops;
 
 /*********** string parsing utils *********/
 
@@ -382,6 +383,7 @@ int class_attach(struct lustre_cfg *lcfg)
 	INIT_LIST_HEAD(&obd->obd_unlinked_exports);
 	INIT_LIST_HEAD(&obd->obd_delayed_exports);
 	INIT_LIST_HEAD(&obd->obd_exports_timed);
+	INIT_LIST_HEAD(&obd->obd_nid_stats);
 	spin_lock_init(&obd->obd_nid_lock);
 	spin_lock_init(&obd->obd_dev_lock);
 	mutex_init(&obd->obd_dev_mutex);
@@ -484,6 +486,7 @@ int class_setup(struct obd_device *obd, struct lustre_cfg *lcfg)
 	obd->obd_starting = 1;
 	obd->obd_uuid_hash = NULL;
 	obd->obd_nid_hash = NULL;
+	obd->obd_nid_stats_hash = NULL;
 	spin_unlock(&obd->obd_dev_lock);
 
 	/* create an uuid-export lustre hash */
@@ -508,6 +511,19 @@ int class_setup(struct obd_device *obd, struct lustre_cfg *lcfg)
 					    CFS_HASH_MAX_THETA,
 					    &nid_hash_ops, CFS_HASH_DEFAULT);
 	if (!obd->obd_nid_hash) {
+		err = -ENOMEM;
+		goto err_hash;
+	}
+
+	/* create a nid-stats lustre hash */
+	obd->obd_nid_stats_hash = cfs_hash_create("NID_STATS",
+						  HASH_NID_STATS_CUR_BITS,
+						  HASH_NID_STATS_MAX_BITS,
+						  HASH_NID_STATS_BKT_BITS, 0,
+						  CFS_HASH_MIN_THETA,
+						  CFS_HASH_MAX_THETA,
+						  &nid_stat_hash_ops, CFS_HASH_DEFAULT);
+	if (!obd->obd_nid_stats_hash) {
 		err = -ENOMEM;
 		goto err_hash;
 	}
@@ -550,6 +566,10 @@ err_hash:
 	if (obd->obd_nid_hash) {
 		cfs_hash_putref(obd->obd_nid_hash);
 		obd->obd_nid_hash = NULL;
+	}
+	if (obd->obd_nid_stats_hash) {
+		cfs_hash_putref(obd->obd_nid_stats_hash);
+		obd->obd_nid_stats_hash = NULL;
 	}
 	obd->obd_starting = 0;
 	CERROR("setup %s failed (%d)\n", obd->obd_name, err);
@@ -672,6 +692,12 @@ int class_cleanup(struct obd_device *obd, struct lustre_cfg *lcfg)
 	if (obd->obd_nid_hash) {
 		cfs_hash_putref(obd->obd_nid_hash);
 		obd->obd_nid_hash = NULL;
+	}
+
+	/* destroy a nid-stats hash body */
+	if (obd->obd_nid_stats_hash) {
+		cfs_hash_putref(obd->obd_nid_stats_hash);
+		obd->obd_nid_stats_hash = NULL;
 	}
 
 	class_decref(obd, "setup", obd);
@@ -834,43 +860,48 @@ int class_add_profile(int proflen, char *prof, int osclen, char *osc,
 
 	CDEBUG(D_CONFIG, "Add profile %s\n", prof);
 
-	lprof = kzalloc(sizeof(*lprof), GFP_NOFS);
-	if (!lprof)
+	OBD_ALLOC(lprof, sizeof(*lprof));
+	if (lprof == NULL)
 		return -ENOMEM;
 	INIT_LIST_HEAD(&lprof->lp_list);
 
 	LASSERT(proflen == (strlen(prof) + 1));
-	lprof->lp_profile = kmemdup(prof, proflen, GFP_NOFS);
+	OBD_ALLOC(lprof->lp_profile, proflen);
 	if (lprof->lp_profile == NULL) {
 		err = -ENOMEM;
-		goto free_lprof;
+		goto out;
 	}
+	memcpy(lprof->lp_profile, prof, proflen);
 
 	LASSERT(osclen == (strlen(osc) + 1));
-	lprof->lp_dt = kmemdup(osc, osclen, GFP_NOFS);
+	OBD_ALLOC(lprof->lp_dt, osclen);
 	if (lprof->lp_dt == NULL) {
 		err = -ENOMEM;
-		goto free_lp_profile;
+		goto out;
 	}
+	memcpy(lprof->lp_dt, osc, osclen);
 
 	if (mdclen > 0) {
 		LASSERT(mdclen == (strlen(mdc) + 1));
-		lprof->lp_md = kmemdup(mdc, mdclen, GFP_NOFS);
+		OBD_ALLOC(lprof->lp_md, mdclen);
 		if (lprof->lp_md == NULL) {
 			err = -ENOMEM;
-			goto free_lp_dt;
+			goto out;
 		}
+		memcpy(lprof->lp_md, mdc, mdclen);
 	}
 
 	list_add(&lprof->lp_list, &lustre_profile_list);
 	return err;
 
-free_lp_dt:
-	kfree(lprof->lp_dt);
-free_lp_profile:
-	kfree(lprof->lp_profile);
-free_lprof:
-	kfree(lprof);
+out:
+	if (lprof->lp_md)
+		OBD_FREE(lprof->lp_md, mdclen);
+	if (lprof->lp_dt)
+		OBD_FREE(lprof->lp_dt, osclen);
+	if (lprof->lp_profile)
+		OBD_FREE(lprof->lp_profile, proflen);
+	OBD_FREE(lprof, sizeof(*lprof));
 	return err;
 }
 
@@ -883,10 +914,11 @@ void class_del_profile(const char *prof)
 	lprof = class_get_profile(prof);
 	if (lprof) {
 		list_del(&lprof->lp_list);
-		kfree(lprof->lp_profile);
-		kfree(lprof->lp_dt);
-		kfree(lprof->lp_md);
-		kfree(lprof);
+		OBD_FREE(lprof->lp_profile, strlen(lprof->lp_profile) + 1);
+		OBD_FREE(lprof->lp_dt, strlen(lprof->lp_dt) + 1);
+		if (lprof->lp_md)
+			OBD_FREE(lprof->lp_md, strlen(lprof->lp_md) + 1);
+		OBD_FREE(lprof, sizeof(*lprof));
 	}
 }
 EXPORT_SYMBOL(class_del_profile);
@@ -898,10 +930,11 @@ void class_del_profiles(void)
 
 	list_for_each_entry_safe(lprof, n, &lustre_profile_list, lp_list) {
 		list_del(&lprof->lp_list);
-		kfree(lprof->lp_profile);
-		kfree(lprof->lp_dt);
-		kfree(lprof->lp_md);
-		kfree(lprof);
+		OBD_FREE(lprof->lp_profile, strlen(lprof->lp_profile) + 1);
+		OBD_FREE(lprof->lp_dt, strlen(lprof->lp_dt) + 1);
+		if (lprof->lp_md)
+			OBD_FREE(lprof->lp_md, strlen(lprof->lp_md) + 1);
+		OBD_FREE(lprof, sizeof(*lprof));
 	}
 }
 EXPORT_SYMBOL(class_del_profiles);
@@ -978,17 +1011,17 @@ struct lustre_cfg *lustre_cfg_rename(struct lustre_cfg *cfg,
 
 	new_len = LUSTRE_CFG_BUFLEN(cfg, 1) + strlen(new_name) - name_len;
 
-	new_param = kzalloc(new_len, GFP_NOFS);
-	if (!new_param)
+	OBD_ALLOC(new_param, new_len);
+	if (new_param == NULL)
 		return ERR_PTR(-ENOMEM);
 
 	strcpy(new_param, new_name);
 	if (value != NULL)
 		strcat(new_param, value);
 
-	bufs = kzalloc(sizeof(*bufs), GFP_NOFS);
-	if (!bufs) {
-		kfree(new_param);
+	OBD_ALLOC_PTR(bufs);
+	if (bufs == NULL) {
+		OBD_FREE(new_param, new_len);
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -998,8 +1031,8 @@ struct lustre_cfg *lustre_cfg_rename(struct lustre_cfg *cfg,
 
 	new_cfg = lustre_cfg_new(cfg->lcfg_command, bufs);
 
-	kfree(new_param);
-	kfree(bufs);
+	OBD_FREE(new_param, new_len);
+	OBD_FREE_PTR(bufs);
 	if (new_cfg == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -1123,7 +1156,12 @@ int class_process_config(struct lustre_cfg *lcfg)
 		goto out;
 	}
 	case LCFG_SET_LDLM_TIMEOUT: {
-		/* ldlm_timeout is not used on the client */
+		CDEBUG(D_IOCTL, "changing lustre ldlm_timeout from %d to %d\n",
+		       ldlm_timeout, lcfg->lcfg_num);
+		ldlm_timeout = max(lcfg->lcfg_num, 1U);
+		if (ldlm_timeout >= obd_timeout)
+			ldlm_timeout = max(obd_timeout / 3, 1U);
+		ldlm_timeout_set = 1;
 		err = 0;
 		goto out;
 	}
@@ -1455,8 +1493,8 @@ int class_config_llog_handler(const struct lu_env *env,
 			inst = 1;
 			inst_len = LUSTRE_CFG_BUFLEN(lcfg, 0) +
 				   sizeof(clli->cfg_instance) * 2 + 4;
-			inst_name = kzalloc(inst_len, GFP_NOFS);
-			if (!inst_name) {
+			OBD_ALLOC(inst_name, inst_len);
+			if (inst_name == NULL) {
 				rc = -ENOMEM;
 				goto out;
 			}
@@ -1518,7 +1556,7 @@ int class_config_llog_handler(const struct lu_env *env,
 		lustre_cfg_free(lcfg_new);
 
 		if (inst)
-			kfree(inst_name);
+			OBD_FREE(inst_name, inst_len);
 		break;
 	}
 	default:
@@ -1633,8 +1671,8 @@ int class_config_dump_handler(const struct lu_env *env,
 	char	*outstr;
 	int	 rc = 0;
 
-	outstr = kzalloc(256, GFP_NOFS);
-	if (!outstr)
+	OBD_ALLOC(outstr, 256);
+	if (outstr == NULL)
 		return -ENOMEM;
 
 	if (rec->lrh_type == OBD_CFG_REC) {
@@ -1645,7 +1683,7 @@ int class_config_dump_handler(const struct lu_env *env,
 		rc = -EINVAL;
 	}
 
-	kfree(outstr);
+	OBD_FREE(outstr, 256);
 	return rc;
 }
 
@@ -1858,4 +1896,58 @@ static cfs_hash_ops_t nid_hash_ops = {
 	.hs_object      = nid_export_object,
 	.hs_get	 = nid_export_get,
 	.hs_put_locked  = nid_export_put_locked,
+};
+
+
+/*
+ * nid<->nidstats hash operations
+ */
+
+static void *
+nidstats_key(struct hlist_node *hnode)
+{
+	struct nid_stat *ns;
+
+	ns = hlist_entry(hnode, struct nid_stat, nid_hash);
+
+	return &ns->nid;
+}
+
+static int
+nidstats_keycmp(const void *key, struct hlist_node *hnode)
+{
+	return *(lnet_nid_t *)nidstats_key(hnode) == *(lnet_nid_t *)key;
+}
+
+static void *
+nidstats_object(struct hlist_node *hnode)
+{
+	return hlist_entry(hnode, struct nid_stat, nid_hash);
+}
+
+static void
+nidstats_get(struct cfs_hash *hs, struct hlist_node *hnode)
+{
+	struct nid_stat *ns;
+
+	ns = hlist_entry(hnode, struct nid_stat, nid_hash);
+	nidstat_getref(ns);
+}
+
+static void
+nidstats_put_locked(struct cfs_hash *hs, struct hlist_node *hnode)
+{
+	struct nid_stat *ns;
+
+	ns = hlist_entry(hnode, struct nid_stat, nid_hash);
+	nidstat_putref(ns);
+}
+
+static cfs_hash_ops_t nid_stat_hash_ops = {
+	.hs_hash	= nid_hash,
+	.hs_key	 = nidstats_key,
+	.hs_keycmp      = nidstats_keycmp,
+	.hs_object      = nidstats_object,
+	.hs_get	 = nidstats_get,
+	.hs_put_locked  = nidstats_put_locked,
 };

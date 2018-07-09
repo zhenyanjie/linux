@@ -34,8 +34,10 @@ static void rtl8192_parse_pci_configuration(struct pci_dev *pdev,
 	u16 LinkCtrlReg;
 
 	pcie_capability_read_word(priv->pdev, PCI_EXP_LNKCTL, &LinkCtrlReg);
+	priv->NdisAdapter.LinkCtrlReg = (u8)LinkCtrlReg;
 
-	RT_TRACE(COMP_INIT, "Link Control Register =%x\n", LinkCtrlReg);
+	RT_TRACE(COMP_INIT, "Link Control Register =%x\n",
+		 priv->NdisAdapter.LinkCtrlReg);
 
 	pci_read_config_byte(pdev, 0x98, &tmp);
 	tmp |= BIT4;
@@ -45,7 +47,7 @@ static void rtl8192_parse_pci_configuration(struct pci_dev *pdev,
 	pci_write_config_byte(pdev, 0x70f, tmp);
 }
 
-bool rtl92e_check_adapter(struct pci_dev *pdev, struct net_device *dev)
+bool rtl8192_pci_findadapter(struct pci_dev *pdev, struct net_device *dev)
 {
 	struct r8192_priv *priv = (struct r8192_priv *)rtllib_priv(dev);
 	u16 VenderID;
@@ -60,7 +62,7 @@ bool rtl92e_check_adapter(struct pci_dev *pdev, struct net_device *dev)
 
 	priv->card_8192 = priv->ops->nic_type;
 
-	if (DeviceID == 0x8192) {
+	if (DeviceID == 0x8172) {
 		switch (RevisionID) {
 		case HAL_HW_PCI_REVISION_ID_8192PCIE:
 			dev_info(&pdev->dev,

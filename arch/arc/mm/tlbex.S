@@ -35,6 +35,8 @@
  * Rahul Trivedi, Amit Bhor: Codito Technologies 2004
  */
 
+	.cpu A7
+
 #include <linux/linkage.h>
 #include <asm/entry.h>
 #include <asm/mmu.h>
@@ -44,7 +46,6 @@
 #include <asm/processor.h>
 #include <asm/tlb-mmu1.h>
 
-#ifdef CONFIG_ISA_ARCOMPACT
 ;-----------------------------------------------------------------
 ; ARC700 Exception Handling doesn't auto-switch stack and it only provides
 ; ONE scratch AUX reg "ARC_REG_SCRATCH_DATA0"
@@ -121,24 +122,6 @@ ex_saved_reg1:
 	ld_s  r0, [r0]
 #endif
 .endm
-
-#else	/* ARCv2 */
-
-.macro TLBMISS_FREEUP_REGS
-	PUSH  r0
-	PUSH  r1
-	PUSH  r2
-	PUSH  r3
-.endm
-
-.macro TLBMISS_RESTORE_REGS
-	POP   r3
-	POP   r2
-	POP   r1
-	POP   r0
-.endm
-
-#endif
 
 ;============================================================================
 ;  Troubleshooting Stuff
@@ -258,7 +241,6 @@ ex_saved_reg1:
 ; Commit the TLB entry into MMU
 
 .macro COMMIT_ENTRY_TO_MMU
-#if (CONFIG_ARC_MMU_VER < 4)
 
 	/* Get free TLB slot: Set = computed from vaddr, way = random */
 	sr  TLBGetIndex, [ARC_REG_TLBCOMMAND]
@@ -268,10 +250,6 @@ ex_saved_reg1:
 	sr TLBWriteNI, [ARC_REG_TLBCOMMAND]
 #else
 	sr TLBWrite, [ARC_REG_TLBCOMMAND]
-#endif
-
-#else
-	sr TLBInsertEntry, [ARC_REG_TLBCOMMAND]
 #endif
 .endm
 
@@ -313,7 +291,6 @@ ENTRY(EV_TLBMissI)
 	CONV_PTE_TO_TLB
 	COMMIT_ENTRY_TO_MMU
 	TLBMISS_RESTORE_REGS
-EV_TLBMissI_fast_ret:	; additional label for VDK OS-kit instrumentation
 	rtie
 
 END(EV_TLBMissI)
@@ -379,7 +356,6 @@ ENTRY(EV_TLBMissD)
 
 	COMMIT_ENTRY_TO_MMU
 	TLBMISS_RESTORE_REGS
-EV_TLBMissD_fast_ret:	; additional label for VDK OS-kit instrumentation
 	rtie
 
 ;-------- Common routine to call Linux Page Fault Handler -----------
@@ -390,5 +366,19 @@ do_slow_path_pf:
 
 	; Slow path TLB Miss handled as a regular ARC Exception
 	; (stack switching / save the complete reg-file).
-	b  call_do_page_fault
+	EXCEPTION_PROLOGUE
+
+	; ------- setup args for Linux Page fault Hanlder ---------
+	mov_s r1, sp
+	lr    r0, [efa]
+
+	; We don't want exceptions to be disabled while the fault is handled.
+	; Now that we have saved the context we return from exception hence
+	; exceptions get re-enable
+
+	FAKE_RET_FROM_EXCPN  r9
+
+	bl  do_page_fault
+	b   ret_from_exception
+
 END(EV_TLBMissD)

@@ -255,7 +255,7 @@ static void imx6q_enable_wb(bool enable)
 	writel_relaxed(val, ccm_base + CCR);
 }
 
-int imx6_set_lpm(enum mxc_cpu_pwr_mode mode)
+int imx6q_set_lpm(enum mxc_cpu_pwr_mode mode)
 {
 	u32 val = readl_relaxed(ccm_base + CLPCR);
 
@@ -288,7 +288,7 @@ int imx6_set_lpm(enum mxc_cpu_pwr_mode mode)
 		val |= 0x3 << BP_CLPCR_STBY_COUNT;
 		val |= BM_CLPCR_VSTBY;
 		val |= BM_CLPCR_SBYOS;
-		if (cpu_is_imx6sl())
+		if (cpu_is_imx6sl() || cpu_is_imx6sx())
 			val |= BM_CLPCR_BYPASS_PMIC_READY;
 		if (cpu_is_imx6sl() || cpu_is_imx6sx())
 			val |= BM_CLPCR_BYP_MMDC_CH0_LPM_HS;
@@ -340,7 +340,7 @@ static int imx6q_pm_enter(suspend_state_t state)
 {
 	switch (state) {
 	case PM_SUSPEND_STANDBY:
-		imx6_set_lpm(STOP_POWER_ON);
+		imx6q_set_lpm(STOP_POWER_ON);
 		imx6q_set_int_mem_clk_lpm(true);
 		imx_gpc_pre_suspend(false);
 		if (cpu_is_imx6sl())
@@ -350,10 +350,10 @@ static int imx6q_pm_enter(suspend_state_t state)
 		if (cpu_is_imx6sl())
 			imx6sl_set_wait_clk(false);
 		imx_gpc_post_resume();
-		imx6_set_lpm(WAIT_CLOCKED);
+		imx6q_set_lpm(WAIT_CLOCKED);
 		break;
 	case PM_SUSPEND_MEM:
-		imx6_set_lpm(STOP_POWER_OFF);
+		imx6q_set_lpm(STOP_POWER_OFF);
 		imx6q_set_int_mem_clk_lpm(false);
 		imx6q_enable_wb(true);
 		/*
@@ -373,7 +373,7 @@ static int imx6q_pm_enter(suspend_state_t state)
 		imx6_enable_rbc(false);
 		imx6q_enable_wb(false);
 		imx6q_set_int_mem_clk_lpm(true);
-		imx6_set_lpm(WAIT_CLOCKED);
+		imx6q_set_lpm(WAIT_CLOCKED);
 		break;
 	default:
 		return -EINVAL;
@@ -391,6 +391,11 @@ static const struct platform_suspend_ops imx6q_pm_ops = {
 	.enter = imx6q_pm_enter,
 	.valid = imx6q_pm_valid,
 };
+
+void __init imx6q_pm_set_ccm_base(void __iomem *base)
+{
+	ccm_base = base;
+}
 
 static int __init imx6_pm_get_base(struct imx6_pm_base *base,
 				const char *compat)
@@ -451,7 +456,7 @@ static int __init imx6q_suspend_init(const struct imx6_pm_socdata *socdata)
 		goto put_node;
 	}
 
-	ocram_pool = gen_pool_get(&pdev->dev, NULL);
+	ocram_pool = dev_get_gen_pool(&pdev->dev);
 	if (!ocram_pool) {
 		pr_warn("%s: ocram pool unavailable!\n", __func__);
 		ret = -ENODEV;
@@ -477,7 +482,8 @@ static int __init imx6q_suspend_init(const struct imx6_pm_socdata *socdata)
 
 	/*
 	 * ccm physical address is not used by asm code currently,
-	 * so get ccm virtual address directly.
+	 * so get ccm virtual address directly, as we already have
+	 * it from ccm driver.
 	 */
 	pm_info->ccm_base.vbase = ccm_base;
 
@@ -562,7 +568,7 @@ static void __init imx6_pm_common_init(const struct imx6_pm_socdata
 
 	/*
 	 * This is for SW workaround step #1 of ERR007265, see comments
-	 * in imx6_set_lpm for details of this errata.
+	 * in imx6q_set_lpm for details of this errata.
 	 * Force IOMUXC irq pending, so that the interrupt to GPC can be
 	 * used to deassert dsm_request signal when the signal gets
 	 * asserted unexpectedly.
@@ -571,24 +577,6 @@ static void __init imx6_pm_common_init(const struct imx6_pm_socdata
 	if (!IS_ERR(gpr))
 		regmap_update_bits(gpr, IOMUXC_GPR1, IMX6Q_GPR1_GINT,
 				   IMX6Q_GPR1_GINT);
-}
-
-void __init imx6_pm_ccm_init(const char *ccm_compat)
-{
-	struct device_node *np;
-	u32 val;
-
-	np = of_find_compatible_node(NULL, NULL, ccm_compat);
-	ccm_base = of_iomap(np, 0);
-	BUG_ON(!ccm_base);
-
-	/*
-	 * Initialize CCM_CLPCR_LPM into RUN mode to avoid ARM core
-	 * clock being shut down unexpectedly by WAIT mode.
-	 */
-	val = readl_relaxed(ccm_base + CLPCR);
-	val &= ~BM_CLPCR_LPM;
-	writel_relaxed(val, ccm_base + CLPCR);
 }
 
 void __init imx6q_pm_init(void)

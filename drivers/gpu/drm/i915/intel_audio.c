@@ -28,6 +28,7 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_edid.h>
+#include "intel_drv.h"
 #include "i915_drv.h"
 
 /**
@@ -41,8 +42,7 @@
  *
  * The disable sequences must be performed before disabling the transcoder or
  * port. The enable sequences may only be performed after enabling the
- * transcoder and port, and after completed link training. Therefore the audio
- * enable/disable sequences are part of the modeset sequence.
+ * transcoder and port, and after completed link training.
  *
  * The codec and controller sequences could be done either parallel or serial,
  * but generally the ELDV/PD change in the codec sequence indicates to the audio
@@ -270,9 +270,6 @@ static void ilk_audio_codec_disable(struct intel_encoder *encoder)
 	DRM_DEBUG_KMS("Disable audio codec on port %c, pipe %c\n",
 		      port_name(port), pipe_name(pipe));
 
-	if (WARN_ON(port == PORT_A))
-		return;
-
 	if (HAS_PCH_IBX(dev_priv->dev)) {
 		aud_config = IBX_AUD_CFG(pipe);
 		aud_cntrl_st2 = IBX_AUD_CNTL_ST2;
@@ -294,7 +291,12 @@ static void ilk_audio_codec_disable(struct intel_encoder *encoder)
 		tmp |= AUD_CONFIG_N_VALUE_INDEX;
 	I915_WRITE(aud_config, tmp);
 
-	eldv = IBX_ELD_VALID(port);
+	if (WARN_ON(!port)) {
+		eldv = IBX_ELD_VALID(PORT_B) | IBX_ELD_VALID(PORT_C) |
+			IBX_ELD_VALID(PORT_D);
+	} else {
+		eldv = IBX_ELD_VALID(port);
+	}
 
 	/* Invalidate ELD */
 	tmp = I915_READ(aud_cntrl_st2);
@@ -324,9 +326,6 @@ static void ilk_audio_codec_enable(struct drm_connector *connector,
 	DRM_DEBUG_KMS("Enable audio codec on port %c, pipe %c, %u bytes ELD\n",
 		      port_name(port), pipe_name(pipe), drm_eld_size(eld));
 
-	if (WARN_ON(port == PORT_A))
-		return;
-
 	/*
 	 * FIXME: We're supposed to wait for vblank here, but we have vblanks
 	 * disabled during the mode set. The proper fix would be to push the
@@ -351,7 +350,12 @@ static void ilk_audio_codec_enable(struct drm_connector *connector,
 		aud_cntrl_st2 = CPT_AUD_CNTRL_ST2;
 	}
 
-	eldv = IBX_ELD_VALID(port);
+	if (WARN_ON(!port)) {
+		eldv = IBX_ELD_VALID(PORT_B) | IBX_ELD_VALID(PORT_C) |
+			IBX_ELD_VALID(PORT_D);
+	} else {
+		eldv = IBX_ELD_VALID(port);
+	}
 
 	/* Invalidate ELD */
 	tmp = I915_READ(aud_cntrl_st2);
@@ -400,9 +404,6 @@ void intel_audio_codec_enable(struct intel_encoder *intel_encoder)
 	struct drm_connector *connector;
 	struct drm_device *dev = encoder->dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
-	struct i915_audio_component *acomp = dev_priv->audio_component;
-	struct intel_digital_port *intel_dig_port = enc_to_dig_port(encoder);
-	enum port port = intel_dig_port->port;
 
 	connector = drm_select_eld(encoder, mode);
 	if (!connector)
@@ -423,32 +424,22 @@ void intel_audio_codec_enable(struct intel_encoder *intel_encoder)
 
 	if (dev_priv->display.audio_codec_enable)
 		dev_priv->display.audio_codec_enable(connector, intel_encoder, mode);
-
-	if (acomp && acomp->audio_ops && acomp->audio_ops->pin_eld_notify)
-		acomp->audio_ops->pin_eld_notify(acomp->audio_ops->audio_ptr, (int) port);
 }
 
 /**
  * intel_audio_codec_disable - Disable the audio codec for HD audio
- * @intel_encoder: encoder on which to disable audio
+ * @encoder: encoder on which to disable audio
  *
  * The disable sequences must be performed before disabling the transcoder or
  * port.
  */
-void intel_audio_codec_disable(struct intel_encoder *intel_encoder)
+void intel_audio_codec_disable(struct intel_encoder *encoder)
 {
-	struct drm_encoder *encoder = &intel_encoder->base;
-	struct drm_device *dev = encoder->dev;
+	struct drm_device *dev = encoder->base.dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
-	struct i915_audio_component *acomp = dev_priv->audio_component;
-	struct intel_digital_port *intel_dig_port = enc_to_dig_port(encoder);
-	enum port port = intel_dig_port->port;
 
 	if (dev_priv->display.audio_codec_disable)
-		dev_priv->display.audio_codec_disable(intel_encoder);
-
-	if (acomp && acomp->audio_ops && acomp->audio_ops->pin_eld_notify)
-		acomp->audio_ops->pin_eld_notify(acomp->audio_ops->audio_ptr, (int) port);
+		dev_priv->display.audio_codec_disable(encoder);
 }
 
 /**
@@ -484,32 +475,6 @@ static void i915_audio_component_put_power(struct device *dev)
 	intel_display_power_put(dev_to_i915(dev), POWER_DOMAIN_AUDIO);
 }
 
-static void i915_audio_component_codec_wake_override(struct device *dev,
-						     bool enable)
-{
-	struct drm_i915_private *dev_priv = dev_to_i915(dev);
-	u32 tmp;
-
-	if (!IS_SKYLAKE(dev_priv))
-		return;
-
-	/*
-	 * Enable/disable generating the codec wake signal, overriding the
-	 * internal logic to generate the codec wake to controller.
-	 */
-	tmp = I915_READ(HSW_AUD_CHICKENBIT);
-	tmp &= ~SKL_AUD_CODEC_WAKE_SIGNAL;
-	I915_WRITE(HSW_AUD_CHICKENBIT, tmp);
-	usleep_range(1000, 1500);
-
-	if (enable) {
-		tmp = I915_READ(HSW_AUD_CHICKENBIT);
-		tmp |= SKL_AUD_CODEC_WAKE_SIGNAL;
-		I915_WRITE(HSW_AUD_CHICKENBIT, tmp);
-		usleep_range(1000, 1500);
-	}
-}
-
 /* Get CDCLK in kHz  */
 static int i915_audio_component_get_cdclk_freq(struct device *dev)
 {
@@ -520,8 +485,7 @@ static int i915_audio_component_get_cdclk_freq(struct device *dev)
 		return -ENODEV;
 
 	intel_display_power_get(dev_priv, POWER_DOMAIN_AUDIO);
-	ret = dev_priv->display.get_display_clock_speed(dev_priv->dev);
-
+	ret = intel_ddi_get_cdclk_freq(dev_priv);
 	intel_display_power_put(dev_priv, POWER_DOMAIN_AUDIO);
 
 	return ret;
@@ -531,7 +495,6 @@ static const struct i915_audio_component_ops i915_audio_component_ops = {
 	.owner		= THIS_MODULE,
 	.get_power	= i915_audio_component_get_power,
 	.put_power	= i915_audio_component_put_power,
-	.codec_wake_override = i915_audio_component_codec_wake_override,
 	.get_cdclk_freq	= i915_audio_component_get_cdclk_freq,
 };
 
@@ -539,16 +502,12 @@ static int i915_audio_component_bind(struct device *i915_dev,
 				     struct device *hda_dev, void *data)
 {
 	struct i915_audio_component *acomp = data;
-	struct drm_i915_private *dev_priv = dev_to_i915(i915_dev);
 
 	if (WARN_ON(acomp->ops || acomp->dev))
 		return -EEXIST;
 
-	drm_modeset_lock_all(dev_priv->dev);
 	acomp->ops = &i915_audio_component_ops;
 	acomp->dev = i915_dev;
-	dev_priv->audio_component = acomp;
-	drm_modeset_unlock_all(dev_priv->dev);
 
 	return 0;
 }
@@ -557,13 +516,9 @@ static void i915_audio_component_unbind(struct device *i915_dev,
 					struct device *hda_dev, void *data)
 {
 	struct i915_audio_component *acomp = data;
-	struct drm_i915_private *dev_priv = dev_to_i915(i915_dev);
 
-	drm_modeset_lock_all(dev_priv->dev);
 	acomp->ops = NULL;
 	acomp->dev = NULL;
-	dev_priv->audio_component = NULL;
-	drm_modeset_unlock_all(dev_priv->dev);
 }
 
 static const struct component_ops i915_audio_component_bind_ops = {

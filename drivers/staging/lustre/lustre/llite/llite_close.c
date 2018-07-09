@@ -305,7 +305,7 @@ out:
 	ll_finish_md_op_data(op_data);
 	if (och) {
 		md_clear_open_replay_data(ll_i2sbi(inode)->ll_md_exp, och);
-		kfree(och);
+		OBD_FREE_PTR(och);
 	}
 }
 
@@ -374,7 +374,7 @@ int ll_close_thread_start(struct ll_close_queue **lcq_ret)
 
 	task = kthread_run(ll_close_thread, lcq, "ll_close");
 	if (IS_ERR(task)) {
-		kfree(lcq);
+		OBD_FREE(lcq, sizeof(*lcq));
 		return PTR_ERR(task);
 	}
 
@@ -389,5 +389,5 @@ void ll_close_thread_shutdown(struct ll_close_queue *lcq)
 	atomic_inc(&lcq->lcq_stop);
 	wake_up(&lcq->lcq_waitq);
 	wait_for_completion(&lcq->lcq_comp);
-	kfree(lcq);
+	OBD_FREE(lcq, sizeof(*lcq));
 }

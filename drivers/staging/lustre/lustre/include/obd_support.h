@@ -56,7 +56,9 @@ extern unsigned int obd_dump_on_eviction;
 /* obd_timeout should only be used for recovery, not for
    networking / disk / timings affected by load (use Adaptive Timeouts) */
 extern unsigned int obd_timeout;	  /* seconds */
+extern unsigned int ldlm_timeout;	 /* seconds */
 extern unsigned int obd_timeout_set;
+extern unsigned int ldlm_timeout_set;
 extern unsigned int at_min;
 extern unsigned int at_max;
 extern unsigned int at_history;
@@ -103,6 +105,8 @@ int obd_alloc_fail(const void *ptr, const char *name, const char *type,
 
 /* Timeout definitions */
 #define OBD_TIMEOUT_DEFAULT	     100
+#define LDLM_TIMEOUT_DEFAULT	    20
+#define MDS_LDLM_TIMEOUT_DEFAULT	6
 /* Time to wait for all clients to reconnect during recovery (hard limit) */
 #define OBD_RECOVERY_TIME_HARD	  (obd_timeout * 9)
 /* Time to wait for all clients to reconnect during recovery (soft limit) */
@@ -501,8 +505,11 @@ int obd_alloc_fail(const void *ptr, const char *name, const char *type,
 #define OBD_FAIL_ONCE			   CFS_FAIL_ONCE
 #define OBD_FAILED			      CFS_FAILED
 
-void obd_update_maxusage(void);
+extern atomic_t libcfs_kmemory;
 
+extern void obd_update_maxusage(void);
+
+#if defined (CONFIG_PROC_FS)
 #define obd_memory_add(size)						  \
 	lprocfs_counter_add(obd_memory, OBD_MEMORY_STAT, (long)(size))
 #define obd_memory_sub(size)						  \
@@ -520,8 +527,48 @@ void obd_update_maxusage(void);
 	lprocfs_stats_collector(obd_memory, OBD_MEMORY_PAGES_STAT,	    \
 				LPROCFS_FIELDS_FLAGS_SUM)
 
-__u64 obd_memory_max(void);
-__u64 obd_pages_max(void);
+extern __u64 obd_memory_max(void);
+extern __u64 obd_pages_max(void);
+
+#else
+
+extern __u64 obd_alloc;
+extern __u64 obd_pages;
+
+extern __u64 obd_max_alloc;
+extern __u64 obd_max_pages;
+
+static inline void obd_memory_add(long size)
+{
+	obd_alloc += size;
+	if (obd_alloc > obd_max_alloc)
+		obd_max_alloc = obd_alloc;
+}
+
+static inline void obd_memory_sub(long size)
+{
+	obd_alloc -= size;
+}
+
+static inline void obd_pages_add(int order)
+{
+	obd_pages += 1<< order;
+	if (obd_pages > obd_max_pages)
+		obd_max_pages = obd_pages;
+}
+
+static inline void obd_pages_sub(int order)
+{
+	obd_pages -= 1<< order;
+}
+
+#define obd_memory_sum() (obd_alloc)
+#define obd_pages_sum()  (obd_pages)
+
+#define obd_memory_max() (obd_max_alloc)
+#define obd_pages_max() (obd_max_pages)
+
+#endif
 
 #define OBD_DEBUG_MEMUSAGE (1)
 
@@ -616,8 +663,8 @@ do {									      \
 	if (unlikely((ptr) == NULL)) {					\
 		CERROR("vmalloc of '" #ptr "' (%d bytes) failed\n",	   \
 		       (int)(size));					  \
-		CERROR("%llu total bytes allocated by Lustre\n",	      \
-		       obd_memory_sum());				      \
+		CERROR("%llu total bytes allocated by Lustre, %d by LNET\n", \
+		       obd_memory_sum(), atomic_read(&libcfs_kmemory));   \
 	} else {							      \
 		OBD_ALLOC_POST(ptr, size, "vmalloced");		       \
 	}								     \
@@ -629,20 +676,37 @@ do {									      \
 	 __OBD_VMALLOC_VEROBSE(ptr, cptab, cpt, size)
 
 
+/* Allocations above this size are considered too big and could not be done
+ * atomically.
+ *
+ * Be very careful when changing this value, especially when decreasing it,
+ * since vmalloc in Linux doesn't perform well on multi-cores system, calling
+ * vmalloc in critical path would hurt performance badly. See LU-66.
+ */
+#define OBD_ALLOC_BIG (4 * PAGE_CACHE_SIZE)
+
 #define OBD_ALLOC_LARGE(ptr, size)					    \
 do {									  \
-	ptr = libcfs_kvzalloc(size, GFP_NOFS);				  \
+	if (size > OBD_ALLOC_BIG)					     \
+		OBD_VMALLOC(ptr, size);				       \
+	else								  \
+		OBD_ALLOC(ptr, size);					 \
 } while (0)
 
 #define OBD_CPT_ALLOC_LARGE(ptr, cptab, cpt, size)			      \
 do {									      \
-	ptr = libcfs_kvzalloc_cpt(cptab, cpt, size, GFP_NOFS);		      \
+	if (size > OBD_ALLOC_BIG)					      \
+		OBD_CPT_VMALLOC(ptr, cptab, cpt, size);			      \
+	else								      \
+		OBD_CPT_ALLOC(ptr, cptab, cpt, size);			      \
 } while (0)
 
 #define OBD_FREE_LARGE(ptr, size)					     \
 do {									  \
-	(void)(size);							\
-	kvfree(ptr);							  \
+	if (size > OBD_ALLOC_BIG)					     \
+		OBD_VFREE(ptr, size);					 \
+	else								  \
+		OBD_FREE(ptr, size);					  \
 } while (0)
 
 
@@ -763,10 +827,12 @@ do {									      \
 		       "failed\n", (int)1,				    \
 		       (__u64)(1 << PAGE_CACHE_SHIFT));			 \
 		CERROR("%llu total bytes and %llu total pages "	   \
-		       "(%llu bytes) allocated by Lustre\n",		      \
+		       "(%llu bytes) allocated by Lustre, "		\
+		       "%d total bytes by LNET\n",			    \
 		       obd_memory_sum(),				      \
 		       obd_pages_sum() << PAGE_CACHE_SHIFT,		     \
-		       obd_pages_sum());				       \
+		       obd_pages_sum(),				       \
+		       atomic_read(&libcfs_kmemory));		     \
 	} else {							      \
 		obd_pages_add(0);					     \
 		CDEBUG(D_MALLOC, "alloc_pages '" #ptr "': %d page(s) / "      \

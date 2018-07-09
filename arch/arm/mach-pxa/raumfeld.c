@@ -56,6 +56,7 @@
 
 #include "generic.h"
 #include "devices.h"
+#include "clock.h"
 
 /* common GPIO	definitions */
 

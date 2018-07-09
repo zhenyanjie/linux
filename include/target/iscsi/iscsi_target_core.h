@@ -5,6 +5,7 @@
 #include <linux/configfs.h>
 #include <net/sock.h>
 #include <net/tcp.h>
+#include <scsi/scsi_cmnd.h>
 #include <scsi/iscsi_proto.h>
 #include <target/target_core_base.h>
 
@@ -62,8 +63,6 @@
 /* T10 protection information disabled by default */
 #define TA_DEFAULT_T10_PI		0
 #define TA_DEFAULT_FABRIC_PROT_TYPE	0
-/* TPG status needs to be enabled to return sendtargets discovery endpoint info */
-#define TA_DEFAULT_TPG_ENABLED_SENDTARGETS 1
 
 #define ISCSI_IOV_DATA_BUFFER		5
 
@@ -249,6 +248,10 @@ struct iscsi_conn_ops {
 	u8	DataDigest;			/* [0,1] == [None,CRC32C] */
 	u32	MaxRecvDataSegmentLength;	/* [512..2**24-1] */
 	u32	MaxXmitDataSegmentLength;	/* [512..2**24-1] */
+	u8	OFMarker;			/* [0,1] == [No,Yes] */
+	u8	IFMarker;			/* [0,1] == [No,Yes] */
+	u32	OFMarkInt;			/* [1..65535] */
+	u32	IFMarkInt;			/* [1..65535] */
 	/*
 	 * iSER specific connection parameters
 	 */
@@ -519,6 +522,7 @@ struct iscsi_conn {
 	u16			cid;
 	/* Remote TCP Port */
 	u16			login_port;
+	u16			local_port;
 	int			net_size;
 	int			login_family;
 	u32			auth_id;
@@ -528,8 +532,15 @@ struct iscsi_conn {
 	u32			exp_statsn;
 	/* Per connection status sequence number */
 	u32			stat_sn;
-	struct sockaddr_storage login_sockaddr;
-	struct sockaddr_storage local_sockaddr;
+	/* IFMarkInt's Current Value */
+	u32			if_marker;
+	/* OFMarkInt's Current Value */
+	u32			of_marker;
+	/* Used for calculating OFMarker offset to next PDU */
+	u32			of_marker_offset;
+#define IPV6_ADDRESS_SPACE				48
+	unsigned char		login_ip[IPV6_ADDRESS_SPACE];
+	unsigned char		local_ip[IPV6_ADDRESS_SPACE];
 	int			conn_usage_count;
 	int			conn_waiting_on_uc;
 	atomic_t		check_immediate_queue;
@@ -554,6 +565,7 @@ struct iscsi_conn {
 #define LOGIN_FLAGS_READ_ACTIVE		1
 #define LOGIN_FLAGS_CLOSED		2
 #define LOGIN_FLAGS_READY		4
+#define LOGIN_FLAGS_INITIAL_PDU		8
 	unsigned long		login_flags;
 	struct delayed_work	login_work;
 	struct delayed_work	login_cleanup_work;
@@ -570,8 +582,8 @@ struct iscsi_conn {
 	spinlock_t		response_queue_lock;
 	spinlock_t		state_lock;
 	/* libcrypto RX and TX contexts for crc32c */
-	struct hash_desc	conn_rx_hash;
-	struct hash_desc	conn_tx_hash;
+	struct ahash_request	*conn_rx_hash;
+	struct ahash_request	*conn_tx_hash;
 	/* Used for scheduling TX and RX connection kthreads */
 	cpumask_var_t		conn_cpumask;
 	unsigned int		conn_rx_reset_cpumask:1;
@@ -636,7 +648,7 @@ struct iscsi_session {
 	/* session wide counter: expected command sequence number */
 	u32			exp_cmd_sn;
 	/* session wide counter: maximum allowed command sequence number */
-	atomic_t		max_cmd_sn;
+	u32			max_cmd_sn;
 	struct list_head	sess_ooo_cmdsn_list;
 
 	/* LIO specific session ID */
@@ -745,10 +757,10 @@ struct iscsi_node_stat_grps {
 };
 
 struct iscsi_node_acl {
-	struct se_node_acl	se_node_acl;
 	struct iscsi_node_attrib node_attrib;
 	struct iscsi_node_auth	node_auth;
 	struct iscsi_node_stat_grps node_stat_grps;
+	struct se_node_acl	se_node_acl;
 };
 
 struct iscsi_tpg_attrib {
@@ -764,7 +776,6 @@ struct iscsi_tpg_attrib {
 	u32			default_erl;
 	u8			t10_pi;
 	u32			fabric_prot_type;
-	u32			tpg_enabled_sendtargets;
 	struct iscsi_portal_group *tpg;
 };
 
@@ -774,13 +785,15 @@ struct iscsi_np {
 	int			np_sock_type;
 	enum np_thread_state_table np_thread_state;
 	bool                    enabled;
+	atomic_t		np_reset_count;
 	enum iscsi_timer_flags_table np_login_timer_flags;
 	u32			np_exports;
 	enum np_flags_table	np_flags;
+	u16			np_port;
 	spinlock_t		np_thread_lock;
 	struct completion	np_restart_comp;
 	struct socket		*np_socket;
-	struct sockaddr_storage np_sockaddr;
+	struct __kernel_sockaddr_storage np_sockaddr;
 	struct task_struct	*np_thread;
 	struct timer_list	np_login_timer;
 	void			*np_context;

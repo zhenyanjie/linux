@@ -265,7 +265,7 @@ enum nfsstat4 {
 
 static inline bool seqid_mutating_err(u32 err)
 {
-	/* rfc 3530 section 8.1.5: */
+	/* See RFC 7530, section 9.1.7 */
 	switch (err) {
 	case NFS4ERR_STALE_CLIENTID:
 	case NFS4ERR_STALE_STATEID:
@@ -274,6 +274,7 @@ static inline bool seqid_mutating_err(u32 err)
 	case NFS4ERR_BADXDR:
 	case NFS4ERR_RESOURCE:
 	case NFS4ERR_NOFILEHANDLE:
+	case NFS4ERR_MOVED:
 		return false;
 	};
 	return true;
@@ -500,7 +501,6 @@ enum {
 	NFSPROC4_CLNT_SEEK,
 	NFSPROC4_CLNT_ALLOCATE,
 	NFSPROC4_CLNT_DEALLOCATE,
-	NFSPROC4_CLNT_LAYOUTSTATS,
 };
 
 /* nfs41 types */
@@ -546,24 +546,6 @@ enum pnfs_notify_deviceid_type4 {
 	NOTIFY_DEVICEID4_CHANGE = 1 << 1,
 	NOTIFY_DEVICEID4_DELETE = 1 << 2,
 };
-
-enum pnfs_block_volume_type {
-	PNFS_BLOCK_VOLUME_SIMPLE	= 0,
-	PNFS_BLOCK_VOLUME_SLICE		= 1,
-	PNFS_BLOCK_VOLUME_CONCAT	= 2,
-	PNFS_BLOCK_VOLUME_STRIPE	= 3,
-};
-
-enum pnfs_block_extent_state {
-	PNFS_BLOCK_READWRITE_DATA	= 0,
-	PNFS_BLOCK_READ_DATA		= 1,
-	PNFS_BLOCK_INVALID_DATA		= 2,
-	PNFS_BLOCK_NONE_DATA		= 3,
-};
-
-/* on the wire size of a block layout extent */
-#define PNFS_BLOCK_EXTENT_SIZE \
-	(7 * sizeof(__be32) + NFS4_DEVICEID4_SIZE)
 
 #define NFL4_UFLG_MASK			0x0000003F
 #define NFL4_UFLG_DENSE			0x00000001

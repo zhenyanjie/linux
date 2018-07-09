@@ -14,12 +14,10 @@
 #define CIF_MCCK_PENDING	0	/* machine check handling is pending */
 #define CIF_ASCE		1	/* user asce needs fixup / uaccess */
 #define CIF_NOHZ_DELAY		2	/* delay HZ disable for a tick */
-#define CIF_FPU			3	/* restore vector registers */
 
 #define _CIF_MCCK_PENDING	(1<<CIF_MCCK_PENDING)
 #define _CIF_ASCE		(1<<CIF_ASCE)
 #define _CIF_NOHZ_DELAY		(1<<CIF_NOHZ_DELAY)
-#define _CIF_FPU		(1<<CIF_FPU)
 
 #ifndef __ASSEMBLY__
 
@@ -30,7 +28,6 @@
 #include <asm/ptrace.h>
 #include <asm/setup.h>
 #include <asm/runtime_instr.h>
-#include <asm/fpu-internal.h>
 
 static inline void set_cpu_flag(int flag)
 {
@@ -69,7 +66,8 @@ extern void execve_tail(void);
  * User space process size: 2GB for 31 bit, 4TB or 8PT for 64 bit.
  */
 
-#define TASK_SIZE_OF(tsk)	((tsk)->mm->context.asce_limit)
+#define TASK_SIZE_OF(tsk)	((tsk)->mm ? \
+				 (tsk)->mm->context.asce_limit : TASK_MAX_SIZE)
 #define TASK_UNMAPPED_BASE	(test_thread_flag(TIF_31BIT) ? \
 					(1UL << 30) : (1UL << 41))
 #define TASK_SIZE		TASK_SIZE_OF(current)
@@ -88,7 +86,7 @@ typedef struct {
  * Thread structure
  */
 struct thread_struct {
-	struct fpu fpu;			/* FP and VX register save area */
+	s390_fp_regs fp_regs;
 	unsigned int  acrs[NUM_ACRS];
         unsigned long ksp;              /* kernel stack pointer             */
 	mm_segment_t mm_segment;
@@ -104,6 +102,7 @@ struct thread_struct {
 	struct runtime_instr_cb *ri_cb;
 	int ri_signum;
 	unsigned char trap_tdb[256];	/* Transaction abort diagnose block */
+	__vector128 *vxrs;		/* Vector register save area */
 };
 
 /* Flag to disable transactions. */
@@ -157,7 +156,7 @@ struct stack_frame {
 	regs->psw.mask	= PSW_USER_BITS | PSW_MASK_BA;			\
 	regs->psw.addr	= new_psw | PSW_ADDR_AMODE;			\
 	regs->gprs[15]	= new_stackp;					\
-	crst_table_downgrade(current->mm, 1UL << 31);			\
+	crst_table_downgrade(current->mm);				\
 	execve_tail();							\
 } while (0)
 
@@ -230,17 +229,6 @@ static inline void __load_psw_mask (unsigned long mask)
 		"	lpswe	%1\n"
 		"1:"
 		: "=&d" (addr), "=Q" (psw) : "Q" (psw) : "memory", "cc");
-}
-
-/*
- * Extract current PSW mask
- */
-static inline unsigned long __extract_psw(void)
-{
-	unsigned int reg1, reg2;
-
-	asm volatile("epsw %0,%1" : "=d" (reg1), "=a" (reg2));
-	return (((unsigned long) reg1) << 32) | ((unsigned long) reg2);
 }
 
 /*
@@ -348,6 +336,25 @@ extern void memcpy_absolute(void *, void *, size_t);
 	BUILD_BUG_ON(sizeof(__tmp) != sizeof(val));		\
 	memcpy_absolute(&(dest), &__tmp, sizeof(__tmp));	\
 }
+
+/*
+ * Helper macro for exception table entries
+ */
+#define EX_TABLE(_fault, _target)	\
+	".section __ex_table,\"a\"\n"	\
+	".align	4\n"			\
+	".long	(" #_fault ") - .\n"	\
+	".long	(" #_target ") - .\n"	\
+	".previous\n"
+
+#else /* __ASSEMBLY__ */
+
+#define EX_TABLE(_fault, _target)	\
+	.section __ex_table,"a"	;	\
+	.align	4 ;			\
+	.long	(_fault) - . ;		\
+	.long	(_target) - . ;		\
+	.previous
 
 #endif /* __ASSEMBLY__ */
 

@@ -282,34 +282,26 @@ restart:
 		/* The transport either sends the whole rdma or none of it */
 		if (rm->rdma.op_active && !conn->c_xmit_rdma_sent) {
 			rm->m_final_op = &rm->rdma;
-			/* The transport owns the mapped memory for now.
-			 * You can't unmap it while it's on the send queue
-			 */
-			set_bit(RDS_MSG_MAPPED, &rm->m_flags);
 			ret = conn->c_trans->xmit_rdma(conn, &rm->rdma);
-			if (ret) {
-				clear_bit(RDS_MSG_MAPPED, &rm->m_flags);
-				wake_up_interruptible(&rm->m_flush_wait);
+			if (ret)
 				break;
-			}
 			conn->c_xmit_rdma_sent = 1;
 
+			/* The transport owns the mapped memory for now.
+			 * You can't unmap it while it's on the send queue */
+			set_bit(RDS_MSG_MAPPED, &rm->m_flags);
 		}
 
 		if (rm->atomic.op_active && !conn->c_xmit_atomic_sent) {
 			rm->m_final_op = &rm->atomic;
-			/* The transport owns the mapped memory for now.
-			 * You can't unmap it while it's on the send queue
-			 */
-			set_bit(RDS_MSG_MAPPED, &rm->m_flags);
 			ret = conn->c_trans->xmit_atomic(conn, &rm->atomic);
-			if (ret) {
-				clear_bit(RDS_MSG_MAPPED, &rm->m_flags);
-				wake_up_interruptible(&rm->m_flush_wait);
+			if (ret)
 				break;
-			}
 			conn->c_xmit_atomic_sent = 1;
 
+			/* The transport owns the mapped memory for now.
+			 * You can't unmap it while it's on the send queue */
+			set_bit(RDS_MSG_MAPPED, &rm->m_flags);
 		}
 
 		/*
@@ -419,8 +411,7 @@ over_batch:
 	 */
 	if (ret == 0) {
 		smp_mb();
-		if ((test_bit(0, &conn->c_map_queued) ||
-		     !list_empty(&conn->c_send_queue)) &&
+		if (!list_empty(&conn->c_send_queue) &&
 		    send_gen == conn->c_send_gen) {
 			rds_stats_inc(s_send_lock_queue_raced);
 			goto restart;
@@ -463,12 +454,14 @@ void rds_rdma_send_complete(struct rds_message *rm, int status)
 	struct rm_rdma_op *ro;
 	struct rds_notifier *notifier;
 	unsigned long flags;
+	unsigned int notify = 0;
 
 	spin_lock_irqsave(&rm->m_rs_lock, flags);
 
+	notify =  rm->rdma.op_notify | rm->data.op_notify;
 	ro = &rm->rdma;
 	if (test_bit(RDS_MSG_ON_SOCK, &rm->m_flags) &&
-	    ro->op_active && ro->op_notify && ro->op_notifier) {
+	    ro->op_active && notify && ro->op_notifier) {
 		notifier = ro->op_notifier;
 		rs = rm->m_rs;
 		sock_hold(rds_rs_to_sk(rs));
@@ -778,22 +771,8 @@ void rds_send_drop_to(struct rds_sock *rs, struct sockaddr_in *dest)
 	while (!list_empty(&list)) {
 		rm = list_entry(list.next, struct rds_message, m_sock_item);
 		list_del_init(&rm->m_sock_item);
+
 		rds_message_wait(rm);
-
-		/* just in case the code above skipped this message
-		 * because RDS_MSG_ON_CONN wasn't set, run it again here
-		 * taking m_rs_lock is the only thing that keeps us
-		 * from racing with ack processing.
-		 */
-		spin_lock_irqsave(&rm->m_rs_lock, flags);
-
-		spin_lock(&rs->rs_lock);
-		__rds_send_complete(rs, rm, RDS_RDMA_CANCELED);
-		spin_unlock(&rs->rs_lock);
-
-		rm->m_rs = NULL;
-		spin_unlock_irqrestore(&rm->m_rs_lock, flags);
-
 		rds_message_put(rm);
 	}
 }
@@ -953,6 +932,11 @@ static int rds_cmsg_send(struct rds_sock *rs, struct rds_message *rm,
 			ret = rds_cmsg_rdma_map(rs, rm, cmsg);
 			if (!ret)
 				*allocated_mr = 1;
+			else if (ret == -ENODEV)
+				/* Accommodate the get_mr() case which can fail
+				 * if connection isn't established yet.
+				 */
+				ret = -EAGAIN;
 			break;
 		case RDS_CMSG_ATOMIC_CSWP:
 		case RDS_CMSG_ATOMIC_FADD:
@@ -1017,11 +1001,6 @@ int rds_sendmsg(struct socket *sock, struct msghdr *msg, size_t payload_len)
 	}
 	release_sock(sk);
 
-	if (payload_len > rds_sk_sndbuf(rs)) {
-		ret = -EMSGSIZE;
-		goto out;
-	}
-
 	/* size of rm including all sgs */
 	ret = rds_rm_size(msg, payload_len);
 	if (ret < 0)
@@ -1053,8 +1032,7 @@ int rds_sendmsg(struct socket *sock, struct msghdr *msg, size_t payload_len)
 	if (rs->rs_conn && rs->rs_conn->c_faddr == daddr)
 		conn = rs->rs_conn;
 	else {
-		conn = rds_conn_create_outgoing(sock_net(sock->sk),
-						rs->rs_bound_addr, daddr,
+		conn = rds_conn_create_outgoing(rs->rs_bound_addr, daddr,
 					rs->rs_transport,
 					sock->sk->sk_allocation);
 		if (IS_ERR(conn)) {
@@ -1066,8 +1044,12 @@ int rds_sendmsg(struct socket *sock, struct msghdr *msg, size_t payload_len)
 
 	/* Parse any control messages the user may have included. */
 	ret = rds_cmsg_send(rs, rm, msg, &allocated_mr);
-	if (ret)
+	if (ret) {
+		/* Trigger connection so that its ready for the next retry */
+		if (ret ==  -EAGAIN)
+			rds_conn_connect_if_down(conn);
 		goto out;
+	}
 
 	if (rm->rdma.op_active && !conn->c_trans->xmit_rdma) {
 		printk_ratelimited(KERN_NOTICE "rdma_op %p conn xmit_rdma %p\n",
@@ -1094,7 +1076,11 @@ int rds_sendmsg(struct socket *sock, struct msghdr *msg, size_t payload_len)
 	while (!rds_send_queue_rm(rs, conn, rm, rs->rs_bound_port,
 				  dport, &queued)) {
 		rds_stats_inc(s_send_queue_full);
-
+		/* XXX make sure this is reasonable */
+		if (payload_len > rds_sk_sndbuf(rs)) {
+			ret = -EMSGSIZE;
+			goto out;
+		}
 		if (nonblock) {
 			ret = -EAGAIN;
 			goto out;

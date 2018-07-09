@@ -20,6 +20,7 @@
 #include <linux/err.h>
 
 #include "g_zero.h"
+#include "gadget_chips.h"
 #include "u_f.h"
 
 /*
@@ -41,6 +42,11 @@
  * queues are relatively independent, will receive a range of packet sizes,
  * and can often be made to run out completely.  Those issues are important
  * when stress testing peripheral controller drivers.
+ *
+ *
+ * This is currently packaged as a configuration driver, which can't be
+ * combined with other functions to make composite devices.  However, it
+ * can be combined with other independent configurations.
  */
 struct f_sourcesink {
 	struct usb_function	function;
@@ -299,12 +305,6 @@ static struct usb_gadget_strings *sourcesink_strings[] = {
 static inline struct usb_request *ss_alloc_ep_req(struct usb_ep *ep, int len)
 {
 	return alloc_ep_req(ep, len, buflen);
-}
-
-void free_ep_req(struct usb_ep *ep, struct usb_request *req)
-{
-	kfree(req->buf);
-	usb_ep_free_request(ep, req);
 }
 
 static void disable_ep(struct usb_composite_dev *cdev, struct usb_ep *ep)

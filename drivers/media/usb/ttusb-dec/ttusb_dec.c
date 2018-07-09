@@ -593,9 +593,14 @@ static void ttusb_dec_process_packet(struct ttusb_dec *dec)
 
 static void swap_bytes(u8 *b, int length)
 {
+	u8 c;
+
 	length -= length % 2;
-	for (; length; b += 2, length -= 2)
-		swap(*b, *(b + 1));
+	for (; length; b += 2, length -= 2) {
+		c = *b;
+		*b = *(b + 1);
+		*(b + 1) = c;
+	}
 }
 
 static void ttusb_dec_process_urb_frame(struct ttusb_dec *dec, u8 *b,
@@ -1426,8 +1431,8 @@ static int ttusb_dec_init_stb(struct ttusb_dec *dec)
 			       __func__, model);
 			return -ENOENT;
 		}
-		if (version >= 0x01770000)
-			dec->can_playback = 1;
+			if (version >= 0x01770000)
+				dec->can_playback = 1;
 	}
 	return 0;
 }

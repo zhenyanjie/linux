@@ -641,15 +641,17 @@ static struct fc_host_statistics *bnx2fc_get_host_stats(struct Scsi_Host *shost)
 	if (!fw_stats)
 		return NULL;
 
+	mutex_lock(&hba->hba_stats_mutex);
+
 	bnx2fc_stats = fc_get_host_stats(shost);
 
 	init_completion(&hba->stat_req_done);
 	if (bnx2fc_send_stat_req(hba))
-		return bnx2fc_stats;
+		goto unlock_stats_mutex;
 	rc = wait_for_completion_timeout(&hba->stat_req_done, (2 * HZ));
 	if (!rc) {
 		BNX2FC_HBA_DBG(lport, "FW stat req timed out\n");
-		return bnx2fc_stats;
+		goto unlock_stats_mutex;
 	}
 	BNX2FC_STATS(hba, rx_stat2, fc_crc_cnt);
 	bnx2fc_stats->invalid_crc_count += hba->bfw_stats.fc_crc_cnt;
@@ -671,6 +673,9 @@ static struct fc_host_statistics *bnx2fc_get_host_stats(struct Scsi_Host *shost)
 
 	memcpy(&hba->prev_stats, hba->stats_buffer,
 	       sizeof(struct fcoe_statistics_params));
+
+unlock_stats_mutex:
+	mutex_unlock(&hba->hba_stats_mutex);
 	return bnx2fc_stats;
 }
 
@@ -1303,6 +1308,7 @@ static struct bnx2fc_hba *bnx2fc_hba_create(struct cnic_dev *cnic)
 	}
 	spin_lock_init(&hba->hba_lock);
 	mutex_init(&hba->hba_mutex);
+	mutex_init(&hba->hba_stats_mutex);
 
 	hba->cnic = cnic;
 
@@ -2051,49 +2057,9 @@ static int bnx2fc_disable(struct net_device *netdev)
 	return rc;
 }
 
-static uint bnx2fc_npiv_create_vports(struct fc_lport *lport,
-				      struct cnic_fc_npiv_tbl *npiv_tbl)
-{
-	struct fc_vport_identifiers vpid;
-	uint i, created = 0;
-
-	if (npiv_tbl->count > MAX_NPIV_ENTRIES) {
-		BNX2FC_HBA_DBG(lport, "Exceeded count max of npiv table\n");
-		goto done;
-	}
-
-	/* Sanity check the first entry to make sure it's not 0 */
-	if (wwn_to_u64(npiv_tbl->wwnn[0]) == 0 &&
-	    wwn_to_u64(npiv_tbl->wwpn[0]) == 0) {
-		BNX2FC_HBA_DBG(lport, "First NPIV table entries invalid.\n");
-		goto done;
-	}
-
-	vpid.roles = FC_PORT_ROLE_FCP_INITIATOR;
-	vpid.vport_type = FC_PORTTYPE_NPIV;
-	vpid.disable = false;
-
-	for (i = 0; i < npiv_tbl->count; i++) {
-		vpid.node_name = wwn_to_u64(npiv_tbl->wwnn[i]);
-		vpid.port_name = wwn_to_u64(npiv_tbl->wwpn[i]);
-		scnprintf(vpid.symbolic_name, sizeof(vpid.symbolic_name),
-		    "NPIV[%u]:%016llx-%016llx",
-		    created, vpid.port_name, vpid.node_name);
-		if (fc_vport_create(lport->host, 0, &vpid))
-			created++;
-		else
-			BNX2FC_HBA_DBG(lport, "Failed to create vport\n");
-	}
-done:
-	return created;
-}
-
 static int __bnx2fc_enable(struct fcoe_ctlr *ctlr)
 {
 	struct bnx2fc_interface *interface = fcoe_ctlr_priv(ctlr);
-	struct bnx2fc_hba *hba;
-	struct cnic_fc_npiv_tbl npiv_tbl;
-	struct fc_lport *lport;
 
 	if (interface->enabled == false) {
 		if (!ctlr->lp) {
@@ -2104,32 +2070,6 @@ static int __bnx2fc_enable(struct fcoe_ctlr *ctlr)
 			interface->enabled = true;
 		}
 	}
-
-	/* Create static NPIV ports if any are contained in NVRAM */
-	hba = interface->hba;
-	lport = ctlr->lp;
-
-	if (!hba)
-		goto done;
-
-	if (!hba->cnic)
-		goto done;
-
-	if (!lport)
-		goto done;
-
-	if (!lport->host)
-		goto done;
-
-	if (!hba->cnic->get_fc_npiv_tbl)
-		goto done;
-
-	memset(&npiv_tbl, 0, sizeof(npiv_tbl));
-	if (hba->cnic->get_fc_npiv_tbl(hba->cnic, &npiv_tbl))
-		goto done;
-
-	bnx2fc_npiv_create_vports(lport, &npiv_tbl);
-done:
 	return 0;
 }
 

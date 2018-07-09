@@ -3,6 +3,7 @@
  * Copyright (C) 2006, 2007 David S. Miller (davem@davemloft.net)
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/tty.h>
@@ -396,6 +397,12 @@ static struct uart_driver sunhv_reg = {
 
 static struct uart_port *sunhv_port;
 
+void sunhv_migrate_hvcons_irq(int cpu)
+{
+	/* Migrate hvcons irq to param cpu */
+	irq_force_affinity(sunhv_port->irq, cpumask_of(cpu));
+}
+
 /* Copy 's' into the con_write_page, decoding "\n" into
  * "\r\n" along the way.  We have to return two lengths
  * because the caller needs to know how much to advance
@@ -620,6 +627,7 @@ static const struct of_device_id hv_match[] = {
 	},
 	{},
 };
+MODULE_DEVICE_TABLE(of, hv_match);
 
 static struct platform_driver hv_driver = {
 	.driver = {
@@ -637,11 +645,16 @@ static int __init sunhv_init(void)
 
 	return platform_driver_register(&hv_driver);
 }
-device_initcall(sunhv_init);
 
-#if 0 /* ...def MODULE ; never supported as such */
+static void __exit sunhv_exit(void)
+{
+	platform_driver_unregister(&hv_driver);
+}
+
+module_init(sunhv_init);
+module_exit(sunhv_exit);
+
 MODULE_AUTHOR("David S. Miller");
 MODULE_DESCRIPTION("SUN4V Hypervisor console driver");
 MODULE_VERSION("2.0");
 MODULE_LICENSE("GPL");
-#endif

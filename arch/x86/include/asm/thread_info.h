@@ -27,17 +27,14 @@
  * Without this offset, that can result in a page fault.  (We are
  * careful that, in this case, the value we read doesn't matter.)
  *
- * In vm86 mode, the hardware frame is much longer still, so add 16
- * bytes to make room for the real-mode segments.
+ * In vm86 mode, the hardware frame is much longer still, but we neither
+ * access the extra members from NMI context, nor do we write such a
+ * frame at sp0 at all.
  *
  * x86_64 has a fixed-length stack frame.
  */
 #ifdef CONFIG_X86_32
-# ifdef CONFIG_VM86
-#  define TOP_OF_KERNEL_STACK_PADDING 16
-# else
-#  define TOP_OF_KERNEL_STACK_PADDING 8
-# endif
+# define TOP_OF_KERNEL_STACK_PADDING 8
 #else
 # define TOP_OF_KERNEL_STACK_PADDING 0
 #endif
@@ -143,10 +140,26 @@ struct thread_info {
 	 _TIF_SECCOMP | _TIF_SINGLESTEP | _TIF_SYSCALL_TRACEPOINT |	\
 	 _TIF_NOHZ)
 
+/* work to do in syscall_trace_leave() */
+#define _TIF_WORK_SYSCALL_EXIT	\
+	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | _TIF_SINGLESTEP |	\
+	 _TIF_SYSCALL_TRACEPOINT | _TIF_NOHZ)
+
+/* work to do on interrupt/exception return */
+#define _TIF_WORK_MASK							\
+	(0x0000FFFF &							\
+	 ~(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT|			\
+	   _TIF_SINGLESTEP|_TIF_SECCOMP|_TIF_SYSCALL_EMU))
+
 /* work to do on any return to user space */
 #define _TIF_ALLWORK_MASK						\
 	((0x0000FFFF & ~_TIF_SECCOMP) | _TIF_SYSCALL_TRACEPOINT |	\
 	_TIF_NOHZ)
+
+/* Only used for 64 bit */
+#define _TIF_DO_NOTIFY_MASK						\
+	(_TIF_SIGPENDING | _TIF_NOTIFY_RESUME |				\
+	 _TIF_USER_RETURN_NOTIFY | _TIF_UPROBE)
 
 /* flags to check in __switch_to() */
 #define _TIF_WORK_CTXSW							\
@@ -164,31 +177,18 @@ struct thread_info {
  */
 #ifndef __ASSEMBLY__
 
+DECLARE_PER_CPU(unsigned long, kernel_stack);
+
 static inline struct thread_info *current_thread_info(void)
 {
 	return (struct thread_info *)(current_top_of_stack() - THREAD_SIZE);
 }
 
-static inline unsigned long current_stack_pointer(void)
-{
-	unsigned long sp;
-#ifdef CONFIG_X86_64
-	asm("mov %%rsp,%0" : "=g" (sp));
-#else
-	asm("mov %%esp,%0" : "=g" (sp));
-#endif
-	return sp;
-}
-
 #else /* !__ASSEMBLY__ */
-
-#ifdef CONFIG_X86_64
-# define cpu_current_top_of_stack (cpu_tss + TSS_sp0)
-#endif
 
 /* Load thread_info address into "reg" */
 #define GET_THREAD_INFO(reg) \
-	_ASM_MOV PER_CPU_VAR(cpu_current_top_of_stack),reg ; \
+	_ASM_MOV PER_CPU_VAR(kernel_stack),reg ; \
 	_ASM_SUB $(THREAD_SIZE),reg ;
 
 /*

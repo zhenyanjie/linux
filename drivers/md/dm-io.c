@@ -134,13 +134,12 @@ static void dec_count(struct io *io, unsigned int region, int error)
 		complete_io(io);
 }
 
-static void endio(struct bio *bio)
+static void endio(struct bio *bio, int error)
 {
 	struct io *io;
 	unsigned region;
-	int error;
 
-	if (bio->bi_error && bio_data_dir(bio) == READ)
+	if (error && bio_data_dir(bio) == READ)
 		zero_fill_bio(bio);
 
 	/*
@@ -148,7 +147,6 @@ static void endio(struct bio *bio)
 	 */
 	retrieve_io_and_region_from_bio(bio, &io, &region);
 
-	error = bio->bi_error;
 	bio_put(bio);
 
 	dec_count(io, region, error);
@@ -301,6 +299,7 @@ static void do_region(int rw, unsigned region, struct dm_io_region *where,
 	else if (rw & REQ_WRITE_SAME)
 		special_cmd_max_sectors = q->limits.max_write_same_sectors;
 	if ((rw & (REQ_DISCARD | REQ_WRITE_SAME)) && special_cmd_max_sectors == 0) {
+		atomic_inc(&io->count);
 		dec_count(io, region, -EOPNOTSUPP);
 		return;
 	}
@@ -316,7 +315,7 @@ static void do_region(int rw, unsigned region, struct dm_io_region *where,
 		if ((rw & REQ_DISCARD) || (rw & REQ_WRITE_SAME))
 			num_bvecs = 1;
 		else
-			num_bvecs = min_t(int, BIO_MAX_PAGES,
+			num_bvecs = min_t(int, bio_get_nr_vecs(where->bdev),
 					  dm_sector_div_up(remaining, (PAGE_SIZE >> SECTOR_SHIFT)));
 
 		bio = bio_alloc_bioset(GFP_NOIO, num_bvecs, io->client->bios);

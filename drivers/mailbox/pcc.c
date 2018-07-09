@@ -198,7 +198,7 @@ static int pcc_send_data(struct mbox_chan *chan, void *data)
 	return 0;
 }
 
-static const struct mbox_chan_ops pcc_chan_ops = {
+static struct mbox_chan_ops pcc_chan_ops = {
 	.send_data = pcc_send_data,
 };
 
@@ -352,10 +352,4 @@ static int __init pcc_init(void)
 
 	return 0;
 }
-
-/*
- * Make PCC init postcore so that users of this mailbox
- * such as the ACPI Processor driver have it available
- * at their init.
- */
-postcore_initcall(pcc_init);
+device_initcall(pcc_init);

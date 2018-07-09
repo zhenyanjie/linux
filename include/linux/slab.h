@@ -185,7 +185,7 @@ size_t ksize(const void *);
  * (PAGE_SIZE*2).  Larger requests are passed to the page allocator.
  */
 #define KMALLOC_SHIFT_HIGH	(PAGE_SHIFT + 1)
-#define KMALLOC_SHIFT_MAX	(MAX_ORDER + PAGE_SHIFT)
+#define KMALLOC_SHIFT_MAX	(MAX_ORDER + PAGE_SHIFT - 1)
 #ifndef KMALLOC_SHIFT_LOW
 #define KMALLOC_SHIFT_LOW	3
 #endif
@@ -198,7 +198,7 @@ size_t ksize(const void *);
  * be allocated from the same page.
  */
 #define KMALLOC_SHIFT_HIGH	PAGE_SHIFT
-#define KMALLOC_SHIFT_MAX	30
+#define KMALLOC_SHIFT_MAX	(MAX_ORDER + PAGE_SHIFT - 1)
 #ifndef KMALLOC_SHIFT_LOW
 #define KMALLOC_SHIFT_LOW	3
 #endif
@@ -240,8 +240,8 @@ extern struct kmem_cache *kmalloc_dma_caches[KMALLOC_SHIFT_HIGH + 1];
  * belongs to.
  * 0 = zero alloc
  * 1 =  65 .. 96 bytes
- * 2 = 129 .. 192 bytes
- * n = 2^(n-1)+1 .. 2^n
+ * 2 = 120 .. 192 bytes
+ * n = 2^(n-1) .. 2^n -1
  */
 static __always_inline int kmalloc_index(size_t size)
 {
@@ -289,16 +289,6 @@ static __always_inline int kmalloc_index(size_t size)
 void *__kmalloc(size_t size, gfp_t flags);
 void *kmem_cache_alloc(struct kmem_cache *, gfp_t flags);
 void kmem_cache_free(struct kmem_cache *, void *);
-
-/*
- * Bulk allocation and freeing operations. These are accellerated in an
- * allocator specific way to avoid taking locks repeatedly or building
- * metadata structures unnecessarily.
- *
- * Note that interrupts must be enabled when calling these functions.
- */
-void kmem_cache_free_bulk(struct kmem_cache *, size_t, void **);
-bool kmem_cache_alloc_bulk(struct kmem_cache *, gfp_t, size_t, void **);
 
 #ifdef CONFIG_NUMA
 void *__kmalloc_node(size_t size, gfp_t flags, int node);

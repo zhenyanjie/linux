@@ -85,7 +85,7 @@ struct lowpan_dev {
 
 static inline struct lowpan_dev *lowpan_dev(const struct net_device *netdev)
 {
-	return (struct lowpan_dev *)lowpan_priv(netdev)->priv;
+	return netdev_priv(netdev);
 }
 
 static inline void peer_add(struct lowpan_dev *dev, struct lowpan_peer *peer)
@@ -192,7 +192,7 @@ static inline struct lowpan_peer *peer_lookup_dst(struct lowpan_dev *dev,
 		if (ipv6_addr_any(nexthop))
 			return NULL;
 	} else {
-		nexthop = rt6_nexthop(rt, daddr);
+		nexthop = rt6_nexthop(rt);
 
 		/* We need to remember the address because it is needed
 		 * by bt_xmit() when sending the packet. In bt_xmit(), the
@@ -848,36 +848,20 @@ static int setup_netdev(struct l2cap_chan *chan, struct lowpan_dev **dev)
 	struct net_device *netdev;
 	int err = 0;
 
-	netdev = alloc_netdev(LOWPAN_PRIV_SIZE(sizeof(struct lowpan_dev)),
-			      IFACE_NAME_TEMPLATE, NET_NAME_UNKNOWN,
-			      netdev_setup);
+	netdev = alloc_netdev(sizeof(struct lowpan_dev), IFACE_NAME_TEMPLATE,
+			      NET_NAME_UNKNOWN, netdev_setup);
 	if (!netdev)
 		return -ENOMEM;
 
 	set_dev_addr(netdev, &chan->src, chan->src_type);
 
 	netdev->netdev_ops = &netdev_ops;
-	SET_NETDEV_DEV(netdev, &chan->conn->hcon->hdev->dev);
+	SET_NETDEV_DEV(netdev, &chan->conn->hcon->dev);
 	SET_NETDEV_DEVTYPE(netdev, &bt_type);
-
-	*dev = lowpan_dev(netdev);
-	(*dev)->netdev = netdev;
-	(*dev)->hdev = chan->conn->hcon->hdev;
-	INIT_LIST_HEAD(&(*dev)->peers);
-
-	spin_lock(&devices_lock);
-	INIT_LIST_HEAD(&(*dev)->list);
-	list_add_rcu(&(*dev)->list, &bt_6lowpan_devices);
-	spin_unlock(&devices_lock);
-
-	lowpan_netdev_setup(netdev, LOWPAN_LLTYPE_BTLE);
 
 	err = register_netdev(netdev);
 	if (err < 0) {
 		BT_INFO("register_netdev failed %d", err);
-		spin_lock(&devices_lock);
-		list_del_rcu(&(*dev)->list);
-		spin_unlock(&devices_lock);
 		free_netdev(netdev);
 		goto out;
 	}
@@ -886,6 +870,16 @@ static int setup_netdev(struct l2cap_chan *chan, struct lowpan_dev **dev)
 	       netdev->ifindex, &chan->dst, chan->dst_type,
 	       &chan->src, chan->src_type);
 	set_bit(__LINK_STATE_PRESENT, &netdev->state);
+
+	*dev = netdev_priv(netdev);
+	(*dev)->netdev = netdev;
+	(*dev)->hdev = chan->conn->hcon->hdev;
+	INIT_LIST_HEAD(&(*dev)->peers);
+
+	spin_lock(&devices_lock);
+	INIT_LIST_HEAD(&(*dev)->list);
+	list_add_rcu(&(*dev)->list, &bt_6lowpan_devices);
+	spin_unlock(&devices_lock);
 
 	return 0;
 
@@ -934,7 +928,7 @@ static void delete_netdev(struct work_struct *work)
 
 	unregister_netdev(entry->netdev);
 
-	/* The entry pointer is deleted by the netdev destructor. */
+	/* The entry pointer is deleted in device_event() */
 }
 
 static void chan_close_cb(struct l2cap_chan *chan)
@@ -943,7 +937,7 @@ static void chan_close_cb(struct l2cap_chan *chan)
 	struct lowpan_dev *dev = NULL;
 	struct lowpan_peer *peer;
 	int err = -ENOENT;
-	bool last = false, remove = true;
+	bool last = false, removed = true;
 
 	BT_DBG("chan %p conn %p", chan, chan->conn);
 
@@ -954,7 +948,7 @@ static void chan_close_cb(struct l2cap_chan *chan)
 		/* If conn is set, then the netdev is also there and we should
 		 * not remove it.
 		 */
-		remove = false;
+		removed = false;
 	}
 
 	spin_lock(&devices_lock);
@@ -983,7 +977,7 @@ static void chan_close_cb(struct l2cap_chan *chan)
 
 		ifdown(dev->netdev);
 
-		if (remove) {
+		if (!removed) {
 			INIT_WORK(&entry->delete_netdev, delete_netdev);
 			schedule_work(&entry->delete_netdev);
 		}
@@ -1214,6 +1208,8 @@ static void disconnect_all_peers(void)
 
 		list_del_rcu(&peer->list);
 		kfree_rcu(peer, rcu);
+
+		module_put(THIS_MODULE);
 	}
 	spin_unlock(&devices_lock);
 }
@@ -1422,6 +1418,7 @@ static int device_event(struct notifier_block *unused,
 				BT_DBG("Unregistered netdev %s %p",
 				       netdev->name, netdev);
 				list_del(&entry->list);
+				kfree(entry);
 				break;
 			}
 		}

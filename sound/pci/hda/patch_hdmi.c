@@ -37,8 +37,6 @@
 #include <sound/jack.h>
 #include <sound/asoundef.h>
 #include <sound/tlv.h>
-#include <sound/hdaudio.h>
-#include <sound/hda_i915.h>
 #include "hda_codec.h"
 #include "hda_local.h"
 #include "hda_jack.h"
@@ -89,7 +87,7 @@ struct hdmi_spec_per_pin {
 	bool non_pcm;
 	bool chmap_set;		/* channel-map override by ALSA API? */
 	unsigned char chmap[8]; /* ALSA API channel-map */
-#ifdef CONFIG_SND_PROC_FS
+#ifdef CONFIG_PROC_FS
 	struct snd_info_entry *proc_entry;
 #endif
 };
@@ -147,9 +145,6 @@ struct hdmi_spec {
 	 */
 	struct hda_multi_out multiout;
 	struct hda_pcm_stream pcm_playback;
-
-	/* i915/powerwell (Haswell+/Valleyview+) specific */
-	struct i915_audio_component_audio_ops i915_audio_ops;
 };
 
 
@@ -555,7 +550,7 @@ static void hdmi_set_channel_count(struct hda_codec *codec,
  * ELD proc files
  */
 
-#ifdef CONFIG_SND_PROC_FS
+#ifdef CONFIG_PROC_FS
 static void print_eld_info(struct snd_info_entry *entry,
 			   struct snd_info_buffer *buffer)
 {
@@ -598,8 +593,8 @@ static int eld_proc_new(struct hdmi_spec_per_pin *per_pin, int index)
 
 static void eld_proc_free(struct hdmi_spec_per_pin *per_pin)
 {
-	if (!per_pin->codec->bus->shutdown) {
-		snd_info_free_entry(per_pin->proc_entry);
+	if (!per_pin->codec->bus->shutdown && per_pin->proc_entry) {
+		snd_device_free(per_pin->codec->card, per_pin->proc_entry);
 		per_pin->proc_entry = NULL;
 	}
 }
@@ -1531,6 +1526,57 @@ static int hdmi_read_pin_conn(struct hda_codec *codec, int pin_idx)
 	return 0;
 }
 
+/* update per_pin ELD from the given new ELD;
+ * setup info frame and notification accordingly
+ */
+static void update_eld(struct hda_codec *codec,
+		       struct hdmi_spec_per_pin *per_pin,
+		       struct hdmi_eld *eld)
+{
+	struct hdmi_eld *pin_eld = &per_pin->sink_eld;
+	bool old_eld_valid = pin_eld->eld_valid;
+	bool eld_changed;
+
+	if (eld->eld_valid)
+		snd_hdmi_show_eld(codec, &eld->info);
+
+	eld_changed = (pin_eld->eld_valid != eld->eld_valid);
+	if (eld->eld_valid && pin_eld->eld_valid)
+		if (pin_eld->eld_size != eld->eld_size ||
+		    memcmp(pin_eld->eld_buffer, eld->eld_buffer,
+			   eld->eld_size) != 0)
+			eld_changed = true;
+
+	pin_eld->monitor_present = eld->monitor_present;
+	pin_eld->eld_valid = eld->eld_valid;
+	pin_eld->eld_size = eld->eld_size;
+	if (eld->eld_valid)
+		memcpy(pin_eld->eld_buffer, eld->eld_buffer, eld->eld_size);
+	pin_eld->info = eld->info;
+
+	/*
+	 * Re-setup pin and infoframe. This is needed e.g. when
+	 * - sink is first plugged-in
+	 * - transcoder can change during stream playback on Haswell
+	 *   and this can make HW reset converter selection on a pin.
+	 */
+	if (eld->eld_valid && !old_eld_valid && per_pin->setup) {
+		if (is_haswell_plus(codec) || is_valleyview_plus(codec)) {
+			intel_verify_pin_cvt_connect(codec, per_pin);
+			intel_not_share_assigned_cvt(codec, per_pin->pin_nid,
+						     per_pin->mux_idx);
+		}
+
+		hdmi_setup_audio_infoframe(codec, per_pin, per_pin->non_pcm);
+	}
+
+	if (eld_changed)
+		snd_ctl_notify(codec->card,
+			       SNDRV_CTL_EVENT_MASK_VALUE |
+			       SNDRV_CTL_EVENT_MASK_INFO,
+			       &per_pin->eld_ctl->id);
+}
+
 static bool hdmi_present_sense(struct hdmi_spec_per_pin *per_pin, int repoll)
 {
 	struct hda_jack_tbl *jack;
@@ -1548,8 +1594,6 @@ static bool hdmi_present_sense(struct hdmi_spec_per_pin *per_pin, int repoll)
 	 * the unsolicited response to avoid custom WARs.
 	 */
 	int present;
-	bool update_eld = false;
-	bool eld_changed = false;
 	bool ret;
 
 	snd_hda_power_up_pm(codec);
@@ -1557,6 +1601,8 @@ static bool hdmi_present_sense(struct hdmi_spec_per_pin *per_pin, int repoll)
 
 	mutex_lock(&per_pin->lock);
 	pin_eld->monitor_present = !!(present & AC_PINSENSE_PRESENCE);
+	eld->monitor_present = pin_eld->monitor_present;
+
 	if (pin_eld->monitor_present)
 		eld->eld_valid  = !!(present & AC_PINSENSE_ELDV);
 	else
@@ -1576,61 +1622,13 @@ static bool hdmi_present_sense(struct hdmi_spec_per_pin *per_pin, int repoll)
 						    eld->eld_size) < 0)
 				eld->eld_valid = false;
 		}
-
-		if (eld->eld_valid) {
-			snd_hdmi_show_eld(codec, &eld->info);
-			update_eld = true;
-		}
-		else if (repoll) {
-			schedule_delayed_work(&per_pin->work,
-					      msecs_to_jiffies(300));
-			goto unlock;
-		}
 	}
 
-	if (pin_eld->eld_valid != eld->eld_valid)
-		eld_changed = true;
+	if (!eld->eld_valid && repoll)
+		schedule_delayed_work(&per_pin->work, msecs_to_jiffies(300));
+	else
+		update_eld(codec, per_pin, eld);
 
-	if (pin_eld->eld_valid && !eld->eld_valid)
-		update_eld = true;
-
-	if (update_eld) {
-		bool old_eld_valid = pin_eld->eld_valid;
-		pin_eld->eld_valid = eld->eld_valid;
-		if (pin_eld->eld_size != eld->eld_size ||
-			      memcmp(pin_eld->eld_buffer, eld->eld_buffer,
-				     eld->eld_size) != 0) {
-			memcpy(pin_eld->eld_buffer, eld->eld_buffer,
-			       eld->eld_size);
-			eld_changed = true;
-		}
-		pin_eld->eld_size = eld->eld_size;
-		pin_eld->info = eld->info;
-
-		/*
-		 * Re-setup pin and infoframe. This is needed e.g. when
-		 * - sink is first plugged-in (infoframe is not set up if !monitor_present)
-		 * - transcoder can change during stream playback on Haswell
-		 *   and this can make HW reset converter selection on a pin.
-		 */
-		if (eld->eld_valid && !old_eld_valid && per_pin->setup) {
-			if (is_haswell_plus(codec) ||
-				is_valleyview_plus(codec)) {
-				intel_verify_pin_cvt_connect(codec, per_pin);
-				intel_not_share_assigned_cvt(codec, pin_nid,
-							per_pin->mux_idx);
-			}
-
-			hdmi_setup_audio_infoframe(codec, per_pin,
-						   per_pin->non_pcm);
-		}
-	}
-
-	if (eld_changed)
-		snd_ctl_notify(codec->card,
-			       SNDRV_CTL_EVENT_MASK_VALUE | SNDRV_CTL_EVENT_MASK_INFO,
-			       &per_pin->eld_ctl->id);
- unlock:
 	ret = !repoll || !pin_eld->monitor_present || pin_eld->eld_valid;
 
 	jack = snd_hda_jack_tbl_get(codec, pin_nid);
@@ -2056,7 +2054,9 @@ static int generic_hdmi_build_pcms(struct hda_codec *codec)
 	for (pin_idx = 0; pin_idx < spec->num_pins; pin_idx++) {
 		struct hda_pcm *info;
 		struct hda_pcm_stream *pstr;
+		struct hdmi_spec_per_pin *per_pin;
 
+		per_pin = get_pin(spec, pin_idx);
 		info = snd_hda_codec_pcm_new(codec, "HDMI %d", pin_idx);
 		if (!info)
 			return -ENOMEM;
@@ -2086,7 +2086,7 @@ static int generic_hdmi_build_jack(struct hda_codec *codec, int pin_idx)
 		strncat(hdmi_str, " Phantom",
 			sizeof(hdmi_str) - strlen(hdmi_str) - 1);
 
-	return snd_hda_jack_add_kctl(codec, per_pin->pin_nid, hdmi_str);
+	return snd_hda_jack_add_kctl(codec, per_pin->pin_nid, hdmi_str, 0);
 }
 
 static int generic_hdmi_build_controls(struct hda_codec *codec)
@@ -2197,9 +2197,6 @@ static void generic_hdmi_free(struct hda_codec *codec)
 {
 	struct hdmi_spec *spec = codec->spec;
 	int pin_idx;
-
-	if (is_haswell_plus(codec) || is_valleyview_plus(codec))
-		snd_hdac_i915_register_notifier(NULL);
 
 	for (pin_idx = 0; pin_idx < spec->num_pins; pin_idx++) {
 		struct hdmi_spec_per_pin *per_pin = get_pin(spec, pin_idx);
@@ -2326,20 +2323,6 @@ static void haswell_set_power_state(struct hda_codec *codec, hda_nid_t fg,
 	snd_hda_codec_set_power_to_all(codec, fg, power_state);
 }
 
-static void intel_pin_eld_notify(void *audio_ptr, int port)
-{
-	struct hda_codec *codec = audio_ptr;
-	int pin_nid = port + 0x04;
-
-	/* skip notification during system suspend (but not in runtime PM);
-	 * the state will be updated at resume
-	 */
-	if (snd_power_get_state(codec->card) != SNDRV_CTL_POWER_D0)
-		return;
-
-	check_presence_and_report(codec, pin_nid);
-}
-
 static int patch_generic_hdmi(struct hda_codec *codec)
 {
 	struct hdmi_spec *spec;
@@ -2357,21 +2340,8 @@ static int patch_generic_hdmi(struct hda_codec *codec)
 		intel_haswell_fixup_enable_dp12(codec);
 	}
 
-	/* For Valleyview/Cherryview, only the display codec is in the display
-	 * power well and can use link_power ops to request/release the power.
-	 * For Haswell/Broadwell, the controller is also in the power well and
-	 * can cover the codec power request, and so need not set this flag.
-	 * For previous platforms, there is no such power well feature.
-	 */
-	if (is_valleyview_plus(codec) || is_skylake(codec))
-		codec->core.link_power_control = 1;
-
-	if (is_haswell_plus(codec) || is_valleyview_plus(codec)) {
+	if (is_haswell_plus(codec) || is_valleyview_plus(codec))
 		codec->depop_delay = 0;
-		spec->i915_audio_ops.audio_ptr = codec;
-		spec->i915_audio_ops.pin_eld_notify = intel_pin_eld_notify;
-		snd_hdac_i915_register_notifier(&spec->i915_audio_ops);
-	}
 
 	if (hdmi_parse_codec(codec) < 0) {
 		codec->spec = NULL;
@@ -2383,10 +2353,6 @@ static int patch_generic_hdmi(struct hda_codec *codec)
 		codec->patch_ops.set_power_state = haswell_set_power_state;
 		codec->dp_mst = true;
 	}
-
-	/* Enable runtime pm for HDMI audio codec of HSW/BDW/SKL/BYT/BSW */
-	if (is_haswell_plus(codec) || is_valleyview_plus(codec))
-		codec->auto_runtime_pm = 1;
 
 	generic_hdmi_init_per_pins(codec);
 
@@ -2962,171 +2928,6 @@ static int patch_nvhdmi(struct hda_codec *codec)
 }
 
 /*
- * The HDA codec on NVIDIA Tegra contains two scratch registers that are
- * accessed using vendor-defined verbs. These registers can be used for
- * interoperability between the HDA and HDMI drivers.
- */
-
-/* Audio Function Group node */
-#define NVIDIA_AFG_NID 0x01
-
-/*
- * The SCRATCH0 register is used to notify the HDMI codec of changes in audio
- * format. On Tegra, bit 31 is used as a trigger that causes an interrupt to
- * be raised in the HDMI codec. The remainder of the bits is arbitrary. This
- * implementation stores the HDA format (see AC_FMT_*) in bits [15:0] and an
- * additional bit (at position 30) to signal the validity of the format.
- *
- * | 31      | 30    | 29  16 | 15   0 |
- * +---------+-------+--------+--------+
- * | TRIGGER | VALID | UNUSED | FORMAT |
- * +-----------------------------------|
- *
- * Note that for the trigger bit to take effect it needs to change value
- * (i.e. it needs to be toggled).
- */
-#define NVIDIA_GET_SCRATCH0		0xfa6
-#define NVIDIA_SET_SCRATCH0_BYTE0	0xfa7
-#define NVIDIA_SET_SCRATCH0_BYTE1	0xfa8
-#define NVIDIA_SET_SCRATCH0_BYTE2	0xfa9
-#define NVIDIA_SET_SCRATCH0_BYTE3	0xfaa
-#define NVIDIA_SCRATCH_TRIGGER (1 << 7)
-#define NVIDIA_SCRATCH_VALID   (1 << 6)
-
-#define NVIDIA_GET_SCRATCH1		0xfab
-#define NVIDIA_SET_SCRATCH1_BYTE0	0xfac
-#define NVIDIA_SET_SCRATCH1_BYTE1	0xfad
-#define NVIDIA_SET_SCRATCH1_BYTE2	0xfae
-#define NVIDIA_SET_SCRATCH1_BYTE3	0xfaf
-
-/*
- * The format parameter is the HDA audio format (see AC_FMT_*). If set to 0,
- * the format is invalidated so that the HDMI codec can be disabled.
- */
-static void tegra_hdmi_set_format(struct hda_codec *codec, unsigned int format)
-{
-	unsigned int value;
-
-	/* bits [31:30] contain the trigger and valid bits */
-	value = snd_hda_codec_read(codec, NVIDIA_AFG_NID, 0,
-				   NVIDIA_GET_SCRATCH0, 0);
-	value = (value >> 24) & 0xff;
-
-	/* bits [15:0] are used to store the HDA format */
-	snd_hda_codec_write(codec, NVIDIA_AFG_NID, 0,
-			    NVIDIA_SET_SCRATCH0_BYTE0,
-			    (format >> 0) & 0xff);
-	snd_hda_codec_write(codec, NVIDIA_AFG_NID, 0,
-			    NVIDIA_SET_SCRATCH0_BYTE1,
-			    (format >> 8) & 0xff);
-
-	/* bits [16:24] are unused */
-	snd_hda_codec_write(codec, NVIDIA_AFG_NID, 0,
-			    NVIDIA_SET_SCRATCH0_BYTE2, 0);
-
-	/*
-	 * Bit 30 signals that the data is valid and hence that HDMI audio can
-	 * be enabled.
-	 */
-	if (format == 0)
-		value &= ~NVIDIA_SCRATCH_VALID;
-	else
-		value |= NVIDIA_SCRATCH_VALID;
-
-	/*
-	 * Whenever the trigger bit is toggled, an interrupt is raised in the
-	 * HDMI codec. The HDMI driver will use that as trigger to update its
-	 * configuration.
-	 */
-	value ^= NVIDIA_SCRATCH_TRIGGER;
-
-	snd_hda_codec_write(codec, NVIDIA_AFG_NID, 0,
-			    NVIDIA_SET_SCRATCH0_BYTE3, value);
-}
-
-static int tegra_hdmi_pcm_prepare(struct hda_pcm_stream *hinfo,
-				  struct hda_codec *codec,
-				  unsigned int stream_tag,
-				  unsigned int format,
-				  struct snd_pcm_substream *substream)
-{
-	int err;
-
-	err = generic_hdmi_playback_pcm_prepare(hinfo, codec, stream_tag,
-						format, substream);
-	if (err < 0)
-		return err;
-
-	/* notify the HDMI codec of the format change */
-	tegra_hdmi_set_format(codec, format);
-
-	return 0;
-}
-
-static int tegra_hdmi_pcm_cleanup(struct hda_pcm_stream *hinfo,
-				  struct hda_codec *codec,
-				  struct snd_pcm_substream *substream)
-{
-	/* invalidate the format in the HDMI codec */
-	tegra_hdmi_set_format(codec, 0);
-
-	return generic_hdmi_playback_pcm_cleanup(hinfo, codec, substream);
-}
-
-static struct hda_pcm *hda_find_pcm_by_type(struct hda_codec *codec, int type)
-{
-	struct hdmi_spec *spec = codec->spec;
-	unsigned int i;
-
-	for (i = 0; i < spec->num_pins; i++) {
-		struct hda_pcm *pcm = get_pcm_rec(spec, i);
-
-		if (pcm->pcm_type == type)
-			return pcm;
-	}
-
-	return NULL;
-}
-
-static int tegra_hdmi_build_pcms(struct hda_codec *codec)
-{
-	struct hda_pcm_stream *stream;
-	struct hda_pcm *pcm;
-	int err;
-
-	err = generic_hdmi_build_pcms(codec);
-	if (err < 0)
-		return err;
-
-	pcm = hda_find_pcm_by_type(codec, HDA_PCM_TYPE_HDMI);
-	if (!pcm)
-		return -ENODEV;
-
-	/*
-	 * Override ->prepare() and ->cleanup() operations to notify the HDMI
-	 * codec about format changes.
-	 */
-	stream = &pcm->stream[SNDRV_PCM_STREAM_PLAYBACK];
-	stream->ops.prepare = tegra_hdmi_pcm_prepare;
-	stream->ops.cleanup = tegra_hdmi_pcm_cleanup;
-
-	return 0;
-}
-
-static int patch_tegra_hdmi(struct hda_codec *codec)
-{
-	int err;
-
-	err = patch_generic_hdmi(codec);
-	if (err)
-		return err;
-
-	codec->patch_ops.build_pcms = tegra_hdmi_build_pcms;
-
-	return 0;
-}
-
-/*
  * ATI/AMD-specific implementations
  */
 
@@ -3525,10 +3326,7 @@ static const struct hda_codec_preset snd_hda_preset_hdmi[] = {
 { .id = 0x10de001a, .name = "GPU 1a HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de001b, .name = "GPU 1b HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de001c, .name = "GPU 1c HDMI/DP",	.patch = patch_nvhdmi },
-{ .id = 0x10de0020, .name = "Tegra30 HDMI",	.patch = patch_tegra_hdmi },
-{ .id = 0x10de0022, .name = "Tegra114 HDMI",	.patch = patch_tegra_hdmi },
-{ .id = 0x10de0028, .name = "Tegra124 HDMI",	.patch = patch_tegra_hdmi },
-{ .id = 0x10de0029, .name = "Tegra210 HDMI/DP",	.patch = patch_tegra_hdmi },
+{ .id = 0x10de0028, .name = "Tegra12x HDMI",	.patch = patch_nvhdmi },
 { .id = 0x10de0040, .name = "GPU 40 HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de0041, .name = "GPU 41 HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de0042, .name = "GPU 42 HDMI/DP",	.patch = patch_nvhdmi },
@@ -3541,6 +3339,8 @@ static const struct hda_codec_preset snd_hda_preset_hdmi[] = {
 { .id = 0x10de0071, .name = "GPU 71 HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de0072, .name = "GPU 72 HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de007d, .name = "GPU 7d HDMI/DP",	.patch = patch_nvhdmi },
+{ .id = 0x10de0082, .name = "GPU 82 HDMI/DP",	.patch = patch_nvhdmi },
+{ .id = 0x10de0083, .name = "GPU 83 HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de8001, .name = "MCP73 HDMI",	.patch = patch_nvhdmi_2ch },
 { .id = 0x11069f80, .name = "VX900 HDMI/DP",	.patch = patch_via_hdmi },
 { .id = 0x11069f81, .name = "VX900 HDMI/DP",	.patch = patch_via_hdmi },
@@ -3556,7 +3356,6 @@ static const struct hda_codec_preset snd_hda_preset_hdmi[] = {
 { .id = 0x80862807, .name = "Haswell HDMI",	.patch = patch_generic_hdmi },
 { .id = 0x80862808, .name = "Broadwell HDMI",	.patch = patch_generic_hdmi },
 { .id = 0x80862809, .name = "Skylake HDMI",	.patch = patch_generic_hdmi },
-{ .id = 0x8086280a, .name = "Broxton HDMI",	.patch = patch_generic_hdmi },
 { .id = 0x80862880, .name = "CedarTrail HDMI",	.patch = patch_generic_hdmi },
 { .id = 0x80862882, .name = "Valleyview2 HDMI",	.patch = patch_generic_hdmi },
 { .id = 0x80862883, .name = "Braswell HDMI",	.patch = patch_generic_hdmi },
@@ -3622,7 +3421,6 @@ MODULE_ALIAS("snd-hda-codec-id:80862806");
 MODULE_ALIAS("snd-hda-codec-id:80862807");
 MODULE_ALIAS("snd-hda-codec-id:80862808");
 MODULE_ALIAS("snd-hda-codec-id:80862809");
-MODULE_ALIAS("snd-hda-codec-id:8086280a");
 MODULE_ALIAS("snd-hda-codec-id:80862880");
 MODULE_ALIAS("snd-hda-codec-id:80862882");
 MODULE_ALIAS("snd-hda-codec-id:80862883");

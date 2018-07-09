@@ -409,7 +409,7 @@ struct xlog {
 
 	/* The following field are used for debugging; need to hold icloglock */
 #ifdef DEBUG
-	void			*l_iclog_bak[XLOG_MAX_ICLOGS];
+	char			*l_iclog_bak[XLOG_MAX_ICLOGS];
 #endif
 
 };
@@ -426,8 +426,6 @@ xlog_recover(
 extern int
 xlog_recover_finish(
 	struct xlog		*log);
-extern int
-xlog_recover_cancel(struct xlog *);
 
 extern __le32	 xlog_cksum(struct xlog *log, struct xlog_rec_header *rhead,
 			    char *dp, int size);

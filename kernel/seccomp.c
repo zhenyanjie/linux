@@ -175,15 +175,16 @@ static int seccomp_check_filter(struct sock_filter *filter, unsigned int flen)
  */
 static u32 seccomp_run_filters(struct seccomp_data *sd)
 {
+	struct seccomp_filter *f = ACCESS_ONCE(current->seccomp.filter);
 	struct seccomp_data sd_local;
 	u32 ret = SECCOMP_RET_ALLOW;
-	/* Make sure cross-thread synced filter points somewhere sane. */
-	struct seccomp_filter *f =
-			lockless_dereference(current->seccomp.filter);
 
 	/* Ensure unexpected behavior doesn't result in failing open. */
 	if (unlikely(WARN_ON(f == NULL)))
 		return SECCOMP_RET_KILL;
+
+	/* Make sure cross-thread synced filter points somewhere sane. */
+	smp_read_barrier_depends();
 
 	if (!sd) {
 		populate_seccomp_data(&sd_local);
@@ -316,24 +317,24 @@ static inline void seccomp_sync_threads(void)
 		put_seccomp_filter(thread);
 		smp_store_release(&thread->seccomp.filter,
 				  caller->seccomp.filter);
+
+		/*
+		 * Don't let an unprivileged task work around
+		 * the no_new_privs restriction by creating
+		 * a thread that sets it up, enters seccomp,
+		 * then dies.
+		 */
+		if (task_no_new_privs(caller))
+			task_set_no_new_privs(thread);
+
 		/*
 		 * Opt the other thread into seccomp if needed.
 		 * As threads are considered to be trust-realm
 		 * equivalent (see ptrace_may_access), it is safe to
 		 * allow one thread to transition the other.
 		 */
-		if (thread->seccomp.mode == SECCOMP_MODE_DISABLED) {
-			/*
-			 * Don't let an unprivileged task work around
-			 * the no_new_privs restriction by creating
-			 * a thread that sets it up, enters seccomp,
-			 * then dies.
-			 */
-			if (task_no_new_privs(caller))
-				task_set_no_new_privs(thread);
-
+		if (thread->seccomp.mode == SECCOMP_MODE_DISABLED)
 			seccomp_assign_mode(thread, SECCOMP_MODE_FILTER);
-		}
 	}
 }
 
@@ -345,13 +346,16 @@ static inline void seccomp_sync_threads(void)
  */
 static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 {
-	struct seccomp_filter *sfilter;
-	int ret;
+	struct seccomp_filter *filter;
+	unsigned long fp_size;
+	struct sock_filter *fp;
+	int new_len;
+	long ret;
 
 	if (fprog->len == 0 || fprog->len > BPF_MAXINSNS)
 		return ERR_PTR(-EINVAL);
-
 	BUG_ON(INT_MAX / fprog->len < sizeof(struct sock_filter));
+	fp_size = fprog->len * sizeof(struct sock_filter);
 
 	/*
 	 * Installing a seccomp filter requires that the task has
@@ -364,21 +368,60 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 				     CAP_SYS_ADMIN) != 0)
 		return ERR_PTR(-EACCES);
 
-	/* Allocate a new seccomp_filter */
-	sfilter = kzalloc(sizeof(*sfilter), GFP_KERNEL | __GFP_NOWARN);
-	if (!sfilter)
+	fp = kzalloc(fp_size, GFP_KERNEL|__GFP_NOWARN);
+	if (!fp)
 		return ERR_PTR(-ENOMEM);
 
-	ret = bpf_prog_create_from_user(&sfilter->prog, fprog,
-					seccomp_check_filter);
-	if (ret < 0) {
-		kfree(sfilter);
-		return ERR_PTR(ret);
-	}
+	/* Copy the instructions from fprog. */
+	ret = -EFAULT;
+	if (copy_from_user(fp, fprog->filter, fp_size))
+		goto free_prog;
 
-	atomic_set(&sfilter->usage, 1);
+	/* Check and rewrite the fprog via the skb checker */
+	ret = bpf_check_classic(fp, fprog->len);
+	if (ret)
+		goto free_prog;
 
-	return sfilter;
+	/* Check and rewrite the fprog for seccomp use */
+	ret = seccomp_check_filter(fp, fprog->len);
+	if (ret)
+		goto free_prog;
+
+	/* Convert 'sock_filter' insns to 'bpf_insn' insns */
+	ret = bpf_convert_filter(fp, fprog->len, NULL, &new_len);
+	if (ret)
+		goto free_prog;
+
+	/* Allocate a new seccomp_filter */
+	ret = -ENOMEM;
+	filter = kzalloc(sizeof(struct seccomp_filter),
+			 GFP_KERNEL|__GFP_NOWARN);
+	if (!filter)
+		goto free_prog;
+
+	filter->prog = bpf_prog_alloc(bpf_prog_size(new_len), __GFP_NOWARN);
+	if (!filter->prog)
+		goto free_filter;
+
+	ret = bpf_convert_filter(fp, fprog->len, filter->prog->insnsi, &new_len);
+	if (ret)
+		goto free_filter_prog;
+
+	kfree(fp);
+	atomic_set(&filter->usage, 1);
+	filter->prog->len = new_len;
+
+	bpf_prog_select_runtime(filter->prog);
+
+	return filter;
+
+free_filter_prog:
+	__bpf_prog_free(filter->prog);
+free_filter:
+	kfree(filter);
+free_prog:
+	kfree(fp);
+	return ERR_PTR(ret);
 }
 
 /**
@@ -548,11 +591,7 @@ void secure_computing_strict(int this_syscall)
 {
 	int mode = current->seccomp.mode;
 
-	if (config_enabled(CONFIG_CHECKPOINT_RESTORE) &&
-	    unlikely(current->ptrace & PT_SUSPEND_SECCOMP))
-		return;
-
-	if (mode == SECCOMP_MODE_DISABLED)
+	if (mode == 0)
 		return;
 	else if (mode == SECCOMP_MODE_STRICT)
 		__secure_computing_strict(this_syscall);
@@ -652,10 +691,6 @@ u32 seccomp_phase1(struct seccomp_data *sd)
 	int mode = current->seccomp.mode;
 	int this_syscall = sd ? sd->nr :
 		syscall_get_nr(current, task_pt_regs(current));
-
-	if (config_enabled(CONFIG_CHECKPOINT_RESTORE) &&
-	    unlikely(current->ptrace & PT_SUSPEND_SECCOMP))
-		return SECCOMP_PHASE1_OK;
 
 	switch (mode) {
 	case SECCOMP_MODE_STRICT:

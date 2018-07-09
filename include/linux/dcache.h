@@ -327,8 +327,7 @@ static inline unsigned d_count(const struct dentry *dentry)
 /*
  * helper function for dentry_operations.d_dname() members
  */
-extern __printf(4, 5)
-char *dynamic_dname(struct dentry *, char *, int, const char *, ...);
+extern char *dynamic_dname(struct dentry *, char *, int, const char *, ...);
 extern char *simple_dname(struct dentry *, char *, int);
 
 extern char *__d_path(const struct path *, const struct path *, char *, int);
@@ -409,9 +408,7 @@ static inline bool d_mountpoint(const struct dentry *dentry)
  */
 static inline unsigned __d_entry_type(const struct dentry *dentry)
 {
-	unsigned type = READ_ONCE(dentry->d_flags);
-	smp_rmb();
-	return type & DCACHE_ENTRY_TYPE;
+	return dentry->d_flags & DCACHE_ENTRY_TYPE;
 }
 
 static inline bool d_is_miss(const struct dentry *dentry)
@@ -506,11 +503,6 @@ static inline bool d_really_is_negative(const struct dentry *dentry)
 static inline bool d_really_is_positive(const struct dentry *dentry)
 {
 	return dentry->d_inode != NULL;
-}
-
-static inline int simple_positive(struct dentry *dentry)
-{
-	return d_really_is_positive(dentry) && !d_unhashed(dentry);
 }
 
 extern void d_set_fallthru(struct dentry *dentry);

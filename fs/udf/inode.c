@@ -1235,8 +1235,8 @@ int udf_setsize(struct inode *inode, loff_t newsize)
 			return err;
 		}
 set_size:
-		truncate_setsize(inode, newsize);
 		up_write(&iinfo->i_data_sem);
+		truncate_setsize(inode, newsize);
 	} else {
 		if (iinfo->i_alloc_type == ICBTAG_FLAG_AD_IN_ICB) {
 			down_write(&iinfo->i_data_sem);
@@ -1253,9 +1253,9 @@ set_size:
 					  udf_get_block);
 		if (err)
 			return err;
+		truncate_setsize(inode, newsize);
 		down_write(&iinfo->i_data_sem);
 		udf_clear_extent_cache(inode);
-		truncate_setsize(inode, newsize);
 		udf_truncate_extents(inode);
 		up_write(&iinfo->i_data_sem);
 	}
@@ -1652,9 +1652,17 @@ static int udf_update_inode(struct inode *inode, int do_sync)
 		       iinfo->i_ext.i_data, inode->i_sb->s_blocksize -
 					sizeof(struct unallocSpaceEntry));
 		use->descTag.tagIdent = cpu_to_le16(TAG_IDENT_USE);
-		crclen = sizeof(struct unallocSpaceEntry);
+		use->descTag.tagLocation =
+				cpu_to_le32(iinfo->i_location.logicalBlockNum);
+		crclen = sizeof(struct unallocSpaceEntry) +
+				iinfo->i_lenAlloc - sizeof(struct tag);
+		use->descTag.descCRCLength = cpu_to_le16(crclen);
+		use->descTag.descCRC = cpu_to_le16(crc_itu_t(0, (char *)use +
+							   sizeof(struct tag),
+							   crclen));
+		use->descTag.tagChecksum = udf_tag_checksum(&use->descTag);
 
-		goto finish;
+		goto out;
 	}
 
 	if (UDF_QUERY_FLAG(inode->i_sb, UDF_FLAG_UID_FORGET))
@@ -1774,8 +1782,6 @@ static int udf_update_inode(struct inode *inode, int do_sync)
 		efe->descTag.tagIdent = cpu_to_le16(TAG_IDENT_EFE);
 		crclen = sizeof(struct extendedFileEntry);
 	}
-
-finish:
 	if (iinfo->i_strat4096) {
 		fe->icbTag.strategyType = cpu_to_le16(4096);
 		fe->icbTag.strategyParameter = cpu_to_le16(1);
@@ -1785,9 +1791,7 @@ finish:
 		fe->icbTag.numEntries = cpu_to_le16(1);
 	}
 
-	if (iinfo->i_use)
-		fe->icbTag.fileType = ICBTAG_FILE_TYPE_USE;
-	else if (S_ISDIR(inode->i_mode))
+	if (S_ISDIR(inode->i_mode))
 		fe->icbTag.fileType = ICBTAG_FILE_TYPE_DIRECTORY;
 	else if (S_ISREG(inode->i_mode))
 		fe->icbTag.fileType = ICBTAG_FILE_TYPE_REGULAR;
@@ -1824,6 +1828,7 @@ finish:
 						  crclen));
 	fe->descTag.tagChecksum = udf_tag_checksum(&fe->descTag);
 
+out:
 	set_buffer_uptodate(bh);
 	unlock_buffer(bh);
 
@@ -2047,14 +2052,29 @@ void udf_write_aext(struct inode *inode, struct extent_position *epos,
 		epos->offset += adsize;
 }
 
+/*
+ * Only 1 indirect extent in a row really makes sense but allow upto 16 in case
+ * someone does some weird stuff.
+ */
+#define UDF_MAX_INDIR_EXTS 16
+
 int8_t udf_next_aext(struct inode *inode, struct extent_position *epos,
 		     struct kernel_lb_addr *eloc, uint32_t *elen, int inc)
 {
 	int8_t etype;
+	unsigned int indirections = 0;
 
 	while ((etype = udf_current_aext(inode, epos, eloc, elen, inc)) ==
 	       (EXT_NEXT_EXTENT_ALLOCDECS >> 30)) {
 		int block;
+
+		if (++indirections > UDF_MAX_INDIR_EXTS) {
+			udf_err(inode->i_sb,
+				"too many indirect extents in inode %lu\n",
+				inode->i_ino);
+			return -1;
+		}
+
 		epos->block = *eloc;
 		epos->offset = sizeof(struct allocExtDesc);
 		brelse(epos->bh);

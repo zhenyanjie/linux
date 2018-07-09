@@ -301,12 +301,13 @@ static void esd_usb2_rx_event(struct esd_usb2_net_priv *priv,
 			cf->data[7] = rxerr;
 		}
 
+		netif_rx(skb);
+
 		priv->bec.txerr = txerr;
 		priv->bec.rxerr = rxerr;
 
 		stats->rx_packets++;
 		stats->rx_bytes += cf->can_dlc;
-		netif_rx(skb);
 	}
 }
 
@@ -334,7 +335,7 @@ static void esd_usb2_rx_can_msg(struct esd_usb2_net_priv *priv,
 		}
 
 		cf->can_id = id & ESD_IDMASK;
-		cf->can_dlc = get_can_dlc(msg->msg.rx.dlc);
+		cf->can_dlc = get_can_dlc(msg->msg.rx.dlc & ~ESD_RTR);
 
 		if (id & ESD_EXTID)
 			cf->can_id |= CAN_EFF_FLAG;
@@ -346,9 +347,10 @@ static void esd_usb2_rx_can_msg(struct esd_usb2_net_priv *priv,
 				cf->data[i] = msg->msg.rx.data[i];
 		}
 
+		netif_rx(skb);
+
 		stats->rx_packets++;
 		stats->rx_bytes += cf->can_dlc;
-		netif_rx(skb);
 	}
 
 	return;
@@ -394,6 +396,8 @@ static void esd_usb2_read_bulk_callback(struct urb *urb)
 		break;
 
 	case -ENOENT:
+	case -EPIPE:
+	case -EPROTO:
 	case -ESHUTDOWN:
 		return;
 

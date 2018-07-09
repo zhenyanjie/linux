@@ -39,6 +39,36 @@
 #include "rds.h"
 #include "ib.h"
 
+static char *rds_ib_event_type_strings[] = {
+#define RDS_IB_EVENT_STRING(foo) \
+		[IB_EVENT_##foo] = __stringify(IB_EVENT_##foo)
+	RDS_IB_EVENT_STRING(CQ_ERR),
+	RDS_IB_EVENT_STRING(QP_FATAL),
+	RDS_IB_EVENT_STRING(QP_REQ_ERR),
+	RDS_IB_EVENT_STRING(QP_ACCESS_ERR),
+	RDS_IB_EVENT_STRING(COMM_EST),
+	RDS_IB_EVENT_STRING(SQ_DRAINED),
+	RDS_IB_EVENT_STRING(PATH_MIG),
+	RDS_IB_EVENT_STRING(PATH_MIG_ERR),
+	RDS_IB_EVENT_STRING(DEVICE_FATAL),
+	RDS_IB_EVENT_STRING(PORT_ACTIVE),
+	RDS_IB_EVENT_STRING(PORT_ERR),
+	RDS_IB_EVENT_STRING(LID_CHANGE),
+	RDS_IB_EVENT_STRING(PKEY_CHANGE),
+	RDS_IB_EVENT_STRING(SM_CHANGE),
+	RDS_IB_EVENT_STRING(SRQ_ERR),
+	RDS_IB_EVENT_STRING(SRQ_LIMIT_REACHED),
+	RDS_IB_EVENT_STRING(QP_LAST_WQE_REACHED),
+	RDS_IB_EVENT_STRING(CLIENT_REREGISTER),
+#undef RDS_IB_EVENT_STRING
+};
+
+static char *rds_ib_event_str(enum ib_event_type type)
+{
+	return rds_str_array(rds_ib_event_type_strings,
+			     ARRAY_SIZE(rds_ib_event_type_strings), type);
+};
+
 /*
  * Set the selected protocol version
  */
@@ -135,7 +165,7 @@ void rds_ib_cm_connect_complete(struct rds_connection *conn, struct rdma_cm_even
 	rds_ib_recv_init_ring(ic);
 	/* Post receive buffers - as a side effect, this will update
 	 * the posted credit count. */
-	rds_ib_recv_refill(conn, 1, GFP_KERNEL);
+	rds_ib_recv_refill(conn, 1);
 
 	/* Tune RNR behavior */
 	rds_ib_tune_rnr(ic, &qp_attr);
@@ -213,7 +243,7 @@ static void rds_ib_cm_fill_conn_param(struct rds_connection *conn,
 static void rds_ib_cq_event_handler(struct ib_event *event, void *data)
 {
 	rdsdebug("event %u (%s) data %p\n",
-		 event->event, ib_event_msg(event->event), data);
+		 event->event, rds_ib_event_str(event->event), data);
 }
 
 static void rds_ib_qp_event_handler(struct ib_event *event, void *data)
@@ -222,7 +252,7 @@ static void rds_ib_qp_event_handler(struct ib_event *event, void *data)
 	struct rds_ib_connection *ic = conn->c_transport_data;
 
 	rdsdebug("conn %p ic %p event %u (%s)\n", conn, ic, event->event,
-		 ib_event_msg(event->event));
+		 rds_ib_event_str(event->event));
 
 	switch (event->event) {
 	case IB_EVENT_COMM_EST:
@@ -231,7 +261,7 @@ static void rds_ib_qp_event_handler(struct ib_event *event, void *data)
 	default:
 		rdsdebug("Fatal QP Event %u (%s) "
 			"- connection %pI4->%pI4, reconnecting\n",
-			event->event, ib_event_msg(event->event),
+			event->event, rds_ib_event_str(event->event),
 			&conn->c_laddr, &conn->c_faddr);
 		rds_conn_drop(conn);
 		break;
@@ -247,7 +277,6 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	struct rds_ib_connection *ic = conn->c_transport_data;
 	struct ib_device *dev = ic->i_cm_id->device;
 	struct ib_qp_init_attr attr;
-	struct ib_cq_init_attr cq_attr = {};
 	struct rds_ib_device *rds_ibdev;
 	int ret;
 
@@ -269,39 +298,38 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 
 	/* Protection domain and memory range */
 	ic->i_pd = rds_ibdev->pd;
+	ic->i_mr = rds_ibdev->mr;
 
-	cq_attr.cqe = ic->i_send_ring.w_nr + 1;
 	ic->i_send_cq = ib_create_cq(dev, rds_ib_send_cq_comp_handler,
 				     rds_ib_cq_event_handler, conn,
-				     &cq_attr);
+				     ic->i_send_ring.w_nr + 1, 0);
 	if (IS_ERR(ic->i_send_cq)) {
 		ret = PTR_ERR(ic->i_send_cq);
 		ic->i_send_cq = NULL;
 		rdsdebug("ib_create_cq send failed: %d\n", ret);
-		goto out;
+		goto rds_ibdev_out;
 	}
 
-	cq_attr.cqe = ic->i_recv_ring.w_nr;
 	ic->i_recv_cq = ib_create_cq(dev, rds_ib_recv_cq_comp_handler,
 				     rds_ib_cq_event_handler, conn,
-				     &cq_attr);
+				     ic->i_recv_ring.w_nr, 0);
 	if (IS_ERR(ic->i_recv_cq)) {
 		ret = PTR_ERR(ic->i_recv_cq);
 		ic->i_recv_cq = NULL;
 		rdsdebug("ib_create_cq recv failed: %d\n", ret);
-		goto out;
+		goto send_cq_out;
 	}
 
 	ret = ib_req_notify_cq(ic->i_send_cq, IB_CQ_NEXT_COMP);
 	if (ret) {
 		rdsdebug("ib_req_notify_cq send failed: %d\n", ret);
-		goto out;
+		goto recv_cq_out;
 	}
 
 	ret = ib_req_notify_cq(ic->i_recv_cq, IB_CQ_SOLICITED);
 	if (ret) {
 		rdsdebug("ib_req_notify_cq recv failed: %d\n", ret);
-		goto out;
+		goto recv_cq_out;
 	}
 
 	/* XXX negotiate max send/recv with remote? */
@@ -325,7 +353,7 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	ret = rdma_create_qp(ic->i_cm_id, ic->i_pd, &attr);
 	if (ret) {
 		rdsdebug("rdma_create_qp failed: %d\n", ret);
-		goto out;
+		goto recv_cq_out;
 	}
 
 	ic->i_send_hdrs = ib_dma_alloc_coherent(dev,
@@ -335,7 +363,7 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	if (!ic->i_send_hdrs) {
 		ret = -ENOMEM;
 		rdsdebug("ib_dma_alloc_coherent send failed\n");
-		goto out;
+		goto qp_out;
 	}
 
 	ic->i_recv_hdrs = ib_dma_alloc_coherent(dev,
@@ -345,7 +373,7 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	if (!ic->i_recv_hdrs) {
 		ret = -ENOMEM;
 		rdsdebug("ib_dma_alloc_coherent recv failed\n");
-		goto out;
+		goto send_hdrs_dma_out;
 	}
 
 	ic->i_ack = ib_dma_alloc_coherent(dev, sizeof(struct rds_header),
@@ -353,7 +381,7 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	if (!ic->i_ack) {
 		ret = -ENOMEM;
 		rdsdebug("ib_dma_alloc_coherent ack failed\n");
-		goto out;
+		goto recv_hdrs_dma_out;
 	}
 
 	ic->i_sends = vzalloc_node(ic->i_send_ring.w_nr * sizeof(struct rds_ib_send_work),
@@ -361,7 +389,7 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	if (!ic->i_sends) {
 		ret = -ENOMEM;
 		rdsdebug("send allocation failed\n");
-		goto out;
+		goto ack_dma_out;
 	}
 
 	ic->i_recvs = vzalloc_node(ic->i_recv_ring.w_nr * sizeof(struct rds_ib_recv_work),
@@ -369,16 +397,41 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	if (!ic->i_recvs) {
 		ret = -ENOMEM;
 		rdsdebug("recv allocation failed\n");
-		goto out;
+		goto sends_out;
 	}
 
 	rds_ib_recv_init_ack(ic);
 
-	rdsdebug("conn %p pd %p cq %p %p\n", conn, ic->i_pd,
+	rdsdebug("conn %p pd %p mr %p cq %p %p\n", conn, ic->i_pd, ic->i_mr,
 		 ic->i_send_cq, ic->i_recv_cq);
 
-out:
+	return ret;
+
+sends_out:
+	vfree(ic->i_sends);
+ack_dma_out:
+	ib_dma_free_coherent(dev, sizeof(struct rds_header),
+			     ic->i_ack, ic->i_ack_dma);
+recv_hdrs_dma_out:
+	ib_dma_free_coherent(dev, ic->i_recv_ring.w_nr *
+					sizeof(struct rds_header),
+					ic->i_recv_hdrs, ic->i_recv_hdrs_dma);
+send_hdrs_dma_out:
+	ib_dma_free_coherent(dev, ic->i_send_ring.w_nr *
+					sizeof(struct rds_header),
+					ic->i_send_hdrs, ic->i_send_hdrs_dma);
+qp_out:
+	rdma_destroy_qp(ic->i_cm_id);
+recv_cq_out:
+	if (!ib_destroy_cq(ic->i_recv_cq))
+		ic->i_recv_cq = NULL;
+send_cq_out:
+	if (!ib_destroy_cq(ic->i_send_cq))
+		ic->i_send_cq = NULL;
+rds_ibdev_out:
+	rds_ib_remove_conn(rds_ibdev, conn);
 	rds_ib_dev_put(rds_ibdev);
+
 	return ret;
 }
 
@@ -447,9 +500,8 @@ int rds_ib_cm_handle_connect(struct rdma_cm_id *cm_id,
 		 (unsigned long long)be64_to_cpu(lguid),
 		 (unsigned long long)be64_to_cpu(fguid));
 
-	/* RDS/IB is not currently netns aware, thus init_net */
-	conn = rds_conn_create(&init_net, dp->dp_daddr, dp->dp_saddr,
-			       &rds_ib_transport, GFP_KERNEL);
+	conn = rds_conn_create(dp->dp_daddr, dp->dp_saddr, &rds_ib_transport,
+			       GFP_KERNEL);
 	if (IS_ERR(conn)) {
 		rdsdebug("rds_conn_create failed (%ld)\n", PTR_ERR(conn));
 		conn = NULL;
@@ -639,15 +691,6 @@ void rds_ib_conn_shutdown(struct rds_connection *conn)
 			   (atomic_read(&ic->i_signaled_sends) == 0));
 		tasklet_kill(&ic->i_recv_tasklet);
 
-		/* first destroy the ib state that generates callbacks */
-		if (ic->i_cm_id->qp)
-			rdma_destroy_qp(ic->i_cm_id);
-		if (ic->i_send_cq)
-			ib_destroy_cq(ic->i_send_cq);
-		if (ic->i_recv_cq)
-			ib_destroy_cq(ic->i_recv_cq);
-
-		/* then free the resources that ib callbacks use */
 		if (ic->i_send_hdrs)
 			ib_dma_free_coherent(dev,
 					   ic->i_send_ring.w_nr *
@@ -671,6 +714,12 @@ void rds_ib_conn_shutdown(struct rds_connection *conn)
 		if (ic->i_recvs)
 			rds_ib_recv_clear_ring(ic);
 
+		if (ic->i_cm_id->qp)
+			rdma_destroy_qp(ic->i_cm_id);
+		if (ic->i_send_cq)
+			ib_destroy_cq(ic->i_send_cq);
+		if (ic->i_recv_cq)
+			ib_destroy_cq(ic->i_recv_cq);
 		rdma_destroy_id(ic->i_cm_id);
 
 		/*
@@ -681,6 +730,7 @@ void rds_ib_conn_shutdown(struct rds_connection *conn)
 
 		ic->i_cm_id = NULL;
 		ic->i_pd = NULL;
+		ic->i_mr = NULL;
 		ic->i_send_cq = NULL;
 		ic->i_recv_cq = NULL;
 		ic->i_send_hdrs = NULL;

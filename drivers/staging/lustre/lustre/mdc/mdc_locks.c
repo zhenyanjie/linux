@@ -746,7 +746,7 @@ static int mdc_finish_enqueue(struct obd_export *exp,
 		LDLM_DEBUG(lock, "layout lock returned by: %s, lvb_len: %d\n",
 			ldlm_it2str(it->it_op), lvb_len);
 
-		lmm = libcfs_kvzalloc(lvb_len, GFP_NOFS);
+		OBD_ALLOC_LARGE(lmm, lvb_len);
 		if (lmm == NULL) {
 			LDLM_LOCK_PUT(lock);
 			return -ENOMEM;
@@ -763,7 +763,7 @@ static int mdc_finish_enqueue(struct obd_export *exp,
 		}
 		unlock_res_and_lock(lock);
 		if (lmm != NULL)
-			kvfree(lmm);
+			OBD_FREE_LARGE(lmm, lvb_len);
 	}
 	if (lock != NULL)
 		LDLM_LOCK_PUT(lock);
@@ -1251,7 +1251,7 @@ static int mdc_intent_getattr_async_interpret(const struct lu_env *env,
 	rc = mdc_finish_intent_lock(exp, req, &minfo->mi_data, it, lockh);
 
 out:
-	kfree(einfo);
+	OBD_FREE_PTR(einfo);
 	minfo->mi_cb(req, minfo, rc);
 	return 0;
 }

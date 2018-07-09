@@ -417,9 +417,11 @@ static int spdif_set_sample_rate(struct snd_pcm_substream *substream,
 	if (clk != STC_TXCLK_SPDIF_ROOT)
 		goto clk_set_bypass;
 
-	/* The S/PDIF block needs a clock of 64 * fs * txclk_df */
-	ret = clk_set_rate(spdif_priv->txclk[rate],
-			   64 * sample_rate * txclk_df);
+	/*
+	 * The S/PDIF block needs a clock of 64 * fs * txclk_df.
+	 * So request 64 * fs * (txclk_df + 1) to get rounded.
+	 */
+	ret = clk_set_rate(spdif_priv->txclk[rate], 64 * sample_rate * (txclk_df + 1));
 	if (ret) {
 		dev_err(&pdev->dev, "failed to set tx clock rate\n");
 		return ret;
@@ -454,8 +456,7 @@ static int fsl_spdif_startup(struct snd_pcm_substream *substream,
 	struct fsl_spdif_priv *spdif_priv = snd_soc_dai_get_drvdata(rtd->cpu_dai);
 	struct platform_device *pdev = spdif_priv->pdev;
 	struct regmap *regmap = spdif_priv->regmap;
-	u32 scr, mask;
-	int i;
+	u32 scr, mask, i;
 	int ret;
 
 	/* Reset module and interrupts only for first initialization */
@@ -483,18 +484,13 @@ static int fsl_spdif_startup(struct snd_pcm_substream *substream,
 		mask = SCR_TXFIFO_AUTOSYNC_MASK | SCR_TXFIFO_CTRL_MASK |
 			SCR_TXSEL_MASK | SCR_USRC_SEL_MASK |
 			SCR_TXFIFO_FSEL_MASK;
-		for (i = 0; i < SPDIF_TXRATE_MAX; i++) {
-			ret = clk_prepare_enable(spdif_priv->txclk[i]);
-			if (ret)
-				goto disable_txclk;
-		}
+		for (i = 0; i < SPDIF_TXRATE_MAX; i++)
+			clk_prepare_enable(spdif_priv->txclk[i]);
 	} else {
 		scr = SCR_RXFIFO_FSEL_IF8 | SCR_RXFIFO_AUTOSYNC;
 		mask = SCR_RXFIFO_FSEL_MASK | SCR_RXFIFO_AUTOSYNC_MASK|
 			SCR_RXFIFO_CTL_MASK | SCR_RXFIFO_OFF_MASK;
-		ret = clk_prepare_enable(spdif_priv->rxclk);
-		if (ret)
-			goto err;
+		clk_prepare_enable(spdif_priv->rxclk);
 	}
 	regmap_update_bits(regmap, REG_SPDIF_SCR, mask, scr);
 
@@ -503,9 +499,6 @@ static int fsl_spdif_startup(struct snd_pcm_substream *substream,
 
 	return 0;
 
-disable_txclk:
-	for (i--; i >= 0; i--)
-		clk_disable_unprepare(spdif_priv->txclk[i]);
 err:
 	clk_disable_unprepare(spdif_priv->coreclk);
 
@@ -716,7 +709,7 @@ static int fsl_spdif_subcode_get(struct snd_kcontrol *kcontrol,
 	return ret;
 }
 
-/* Q-subcode information. The byte size is SPDIF_UBITS_SIZE/8 */
+/* Q-subcode infomation. The byte size is SPDIF_UBITS_SIZE/8 */
 static int fsl_spdif_qinfo(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_info *uinfo)
 {
@@ -748,7 +741,7 @@ static int fsl_spdif_qget(struct snd_kcontrol *kcontrol,
 	return ret;
 }
 
-/* Valid bit information */
+/* Valid bit infomation */
 static int fsl_spdif_vbit_info(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_info *uinfo)
 {
@@ -776,7 +769,7 @@ static int fsl_spdif_vbit_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-/* DPLL lock information */
+/* DPLL lock infomation */
 static int fsl_spdif_rxrate_info(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_info *uinfo)
 {
@@ -1067,7 +1060,7 @@ static u32 fsl_spdif_txclk_caldiv(struct fsl_spdif_priv *spdif_priv,
 
 	for (sysclk_df = sysclk_dfmin; sysclk_df <= sysclk_dfmax; sysclk_df++) {
 		for (txclk_df = 1; txclk_df <= 128; txclk_df++) {
-			rate_ideal = rate[index] * txclk_df * 64;
+			rate_ideal = rate[index] * (txclk_df + 1) * 64;
 			if (round)
 				rate_actual = clk_round_rate(clk, rate_ideal);
 			else
@@ -1264,7 +1257,7 @@ static int fsl_spdif_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = imx_pcm_dma_init(pdev, IMX_SPDIF_DMABUF_SIZE);
+	ret = imx_pcm_dma_init(pdev);
 	if (ret)
 		dev_err(&pdev->dev, "imx_pcm_dma_init failed: %d\n", ret);
 

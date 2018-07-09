@@ -163,7 +163,7 @@ xattr_getsecurity(struct inode *inode, const char *name, void *value,
 	}
 	memcpy(value, buffer, len);
 out:
-	security_release_secctx(buffer, len);
+	kfree(buffer);
 out_noalloc:
 	return len;
 }
@@ -298,18 +298,18 @@ vfs_removexattr(struct dentry *dentry, const char *name)
 
 	mutex_lock(&inode->i_mutex);
 	error = security_inode_removexattr(dentry, name);
-	if (error)
-		goto out;
+	if (error) {
+		mutex_unlock(&inode->i_mutex);
+		return error;
+	}
 
 	error = inode->i_op->removexattr(dentry, name);
+	mutex_unlock(&inode->i_mutex);
 
 	if (!error) {
 		fsnotify_xattr(dentry);
 		evm_inode_post_removexattr(dentry, name);
 	}
-
-out:
-	mutex_unlock(&inode->i_mutex);
 	return error;
 }
 EXPORT_SYMBOL_GPL(vfs_removexattr);
@@ -442,7 +442,7 @@ getxattr(struct dentry *d, const char __user *name, void __user *value,
 			size = XATTR_SIZE_MAX;
 		kvalue = kzalloc(size, GFP_KERNEL | __GFP_NOWARN);
 		if (!kvalue) {
-			vvalue = vmalloc(size);
+			vvalue = vzalloc(size);
 			if (!vvalue)
 				return -ENOMEM;
 			kvalue = vvalue;

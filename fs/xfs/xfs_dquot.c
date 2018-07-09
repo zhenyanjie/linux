@@ -251,7 +251,7 @@ xfs_qm_init_dquot_blk(
 		d->dd_diskdq.d_id = cpu_to_be32(curid);
 		d->dd_diskdq.d_flags = type;
 		if (xfs_sb_version_hascrc(&mp->m_sb)) {
-			uuid_copy(&d->dd_uuid, &mp->m_sb.sb_meta_uuid);
+			uuid_copy(&d->dd_uuid, &mp->m_sb.sb_uuid);
 			xfs_update_cksum((char *)d, sizeof(struct xfs_dqblk),
 					 XFS_DQUOT_CRC_OFF);
 		}
@@ -568,6 +568,8 @@ xfs_qm_dqread(
 	struct xfs_buf		*bp;
 	struct xfs_trans	*tp = NULL;
 	int			error;
+	int			cancelflags = 0;
+
 
 	dqp = kmem_zone_zalloc(xfs_qm_dqzone, KM_SLEEP);
 
@@ -615,6 +617,7 @@ xfs_qm_dqread(
 					  XFS_QM_DQALLOC_SPACE_RES(mp), 0);
 		if (error)
 			goto error1;
+		cancelflags = XFS_TRANS_RELEASE_LOG_RES;
 	}
 
 	/*
@@ -629,6 +632,7 @@ xfs_qm_dqread(
 		 * allocate (ENOENT).
 		 */
 		trace_xfs_dqread_fail(dqp);
+		cancelflags |= XFS_TRANS_ABORT;
 		goto error1;
 	}
 
@@ -666,7 +670,7 @@ xfs_qm_dqread(
 	xfs_trans_brelse(tp, bp);
 
 	if (tp) {
-		error = xfs_trans_commit(tp);
+		error = xfs_trans_commit(tp, XFS_TRANS_RELEASE_LOG_RES);
 		if (error)
 			goto error0;
 	}
@@ -676,7 +680,7 @@ xfs_qm_dqread(
 
 error1:
 	if (tp)
-		xfs_trans_cancel(tp);
+		xfs_trans_cancel(tp, cancelflags);
 error0:
 	xfs_qm_dqdestroy(dqp);
 	*O_dqpp = NULL;
@@ -954,8 +958,12 @@ xfs_qm_dqflush(
 		struct xfs_log_item	*lip = &dqp->q_logitem.qli_item;
 		dqp->dq_flags &= ~XFS_DQ_DIRTY;
 
-		xfs_trans_ail_remove(lip, SHUTDOWN_CORRUPT_INCORE);
-
+		spin_lock(&mp->m_ail->xa_lock);
+		if (lip->li_flags & XFS_LI_IN_AIL)
+			xfs_trans_ail_delete(mp->m_ail, lip,
+					     SHUTDOWN_CORRUPT_INCORE);
+		else
+			spin_unlock(&mp->m_ail->xa_lock);
 		error = -EIO;
 		goto out_unlock;
 	}
