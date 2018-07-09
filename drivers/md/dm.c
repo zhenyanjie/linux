@@ -24,7 +24,6 @@
 #include <linux/ktime.h>
 #include <linux/elevator.h> /* for rq_end_sector() */
 #include <linux/blk-mq.h>
-#include <linux/pr.h>
 
 #include <trace/events/block.h>
 
@@ -556,16 +555,18 @@ static int dm_blk_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 	return dm_get_geometry(md, geo);
 }
 
-static int dm_get_live_table_for_ioctl(struct mapped_device *md,
-		struct dm_target **tgt, struct block_device **bdev,
-		fmode_t *mode, int *srcu_idx)
+static int dm_blk_ioctl(struct block_device *bdev, fmode_t mode,
+			unsigned int cmd, unsigned long arg)
 {
+	struct mapped_device *md = bdev->bd_disk->private_data;
+	int srcu_idx;
 	struct dm_table *map;
-	int r;
+	struct dm_target *tgt;
+	int r = -ENOTTY;
 
 retry:
-	r = -ENOTTY;
-	map = dm_get_live_table(md, srcu_idx);
+	map = dm_get_live_table(md, &srcu_idx);
+
 	if (!map || !dm_table_get_size(map))
 		goto out;
 
@@ -573,9 +574,8 @@ retry:
 	if (dm_table_get_num_targets(map) != 1)
 		goto out;
 
-	*tgt = dm_table_get_target(map, 0);
-
-	if (!(*tgt)->type->prepare_ioctl)
+	tgt = dm_table_get_target(map, 0);
+	if (!tgt->type->ioctl)
 		goto out;
 
 	if (dm_suspended_md(md)) {
@@ -583,47 +583,16 @@ retry:
 		goto out;
 	}
 
-	r = (*tgt)->type->prepare_ioctl(*tgt, bdev, mode);
-	if (r < 0)
-		goto out;
-
-	return r;
+	r = tgt->type->ioctl(tgt, cmd, arg);
 
 out:
-	dm_put_live_table(md, *srcu_idx);
-	if (r == -ENOTCONN && !fatal_signal_pending(current)) {
+	dm_put_live_table(md, srcu_idx);
+
+	if (r == -ENOTCONN) {
 		msleep(10);
 		goto retry;
 	}
-	return r;
-}
 
-static int dm_blk_ioctl(struct block_device *bdev, fmode_t mode,
-			unsigned int cmd, unsigned long arg)
-{
-	struct mapped_device *md = bdev->bd_disk->private_data;
-	struct dm_target *tgt;
-	struct block_device *tgt_bdev = NULL;
-	int srcu_idx, r;
-
-	r = dm_get_live_table_for_ioctl(md, &tgt, &tgt_bdev, &mode, &srcu_idx);
-	if (r < 0)
-		return r;
-
-	if (r > 0) {
-		/*
-		 * Target determined this ioctl is being issued against
-		 * a logical partition of the parent bdev; so extra
-		 * validation is needed.
-		 */
-		r = scsi_verify_blk_ioctl(NULL, cmd);
-		if (r)
-			goto out;
-	}
-
-	r =  __blkdev_driver_ioctl(tgt_bdev, mode, cmd, arg);
-out:
-	dm_put_live_table(md, srcu_idx);
 	return r;
 }
 
@@ -1109,8 +1078,12 @@ static void rq_completed(struct mapped_device *md, int rw, bool run_queue)
 	 * back into ->request_fn() could deadlock attempting to grab the
 	 * queue lock again.
 	 */
-	if (!md->queue->mq_ops && run_queue)
-		blk_run_queue_async(md->queue);
+	if (run_queue) {
+		if (md->queue->mq_ops)
+			blk_mq_run_hw_queues(md->queue, true);
+		else
+			blk_run_queue_async(md->queue);
+	}
 
 	/*
 	 * dm_put() must be at the end of this function. See the comment above
@@ -1187,8 +1160,6 @@ static void dm_unprep_request(struct request *rq)
 
 	if (clone)
 		free_rq_clone(clone);
-	else if (!tio->md->queue->mq_ops)
-		free_rq_tio(tio);
 }
 
 /*
@@ -1210,9 +1181,9 @@ static void dm_requeue_original_request(struct mapped_device *md,
 {
 	int rw = rq_data_dir(rq);
 
-	rq_end_stats(md, rq);
 	dm_unprep_request(rq);
 
+	rq_end_stats(md, rq);
 	if (!rq->q->mq_ops)
 		old_requeue_request(rq);
 	else {
@@ -1332,10 +1303,7 @@ static void dm_complete_request(struct request *rq, int error)
 	struct dm_rq_target_io *tio = tio_from_request(rq);
 
 	tio->error = error;
-	if (!rq->q->mq_ops)
-		blk_complete_request(rq);
-	else
-		blk_mq_complete_request(rq, error);
+	blk_complete_request(rq);
 }
 
 /*
@@ -1757,7 +1725,7 @@ static void __split_and_process_bio(struct mapped_device *md,
  * The request function that just remaps the bio built up by
  * dm_merge_bvec.
  */
-static blk_qc_t dm_make_request(struct request_queue *q, struct bio *bio)
+static void dm_make_request(struct request_queue *q, struct bio *bio)
 {
 	int rw = bio_data_dir(bio);
 	struct mapped_device *md = q->queuedata;
@@ -1765,6 +1733,8 @@ static blk_qc_t dm_make_request(struct request_queue *q, struct bio *bio)
 	struct dm_table *map;
 
 	map = dm_get_live_table(md, &srcu_idx);
+
+	blk_queue_split(q, &bio, q->bio_split);
 
 	generic_start_io_acct(rw, bio_sectors(bio), &dm_disk(md)->part0);
 
@@ -1776,12 +1746,12 @@ static blk_qc_t dm_make_request(struct request_queue *q, struct bio *bio)
 			queue_io(md, bio);
 		else
 			bio_io_error(bio);
-		return BLK_QC_T_NONE;
+		return;
 	}
 
 	__split_and_process_bio(md, map, bio);
 	dm_put_live_table(md, srcu_idx);
-	return BLK_QC_T_NONE;
+	return;
 }
 
 int dm_request_based(struct mapped_device *md)
@@ -2255,8 +2225,10 @@ static void cleanup_mapped_device(struct mapped_device *md)
 		destroy_workqueue(md->wq);
 	if (md->kworker_task)
 		kthread_stop(md->kworker_task);
-	mempool_destroy(md->io_pool);
-	mempool_destroy(md->rq_pool);
+	if (md->io_pool)
+		mempool_destroy(md->io_pool);
+	if (md->rq_pool)
+		mempool_destroy(md->rq_pool);
 	if (md->bs)
 		bioset_free(md->bs);
 
@@ -2266,6 +2238,8 @@ static void cleanup_mapped_device(struct mapped_device *md)
 		spin_lock(&_minor_lock);
 		md->disk->private_data = NULL;
 		spin_unlock(&_minor_lock);
+		if (blk_get_integrity(md->disk))
+			blk_integrity_unregister(md->disk);
 		del_gendisk(md->disk);
 		put_disk(md->disk);
 	}
@@ -2791,12 +2765,6 @@ int dm_setup_md_queue(struct mapped_device *md)
 	case DM_TYPE_BIO_BASED:
 		dm_init_old_md_queue(md);
 		blk_queue_make_request(md->queue, dm_make_request);
-		/*
-		 * DM handles splitting bios as needed.  Free the bio_split bioset
-		 * since it won't be used (saves 1 process per bio-based DM device).
-		 */
-		bioset_free(md->queue->bio_split);
-		md->queue->bio_split = NULL;
 		break;
 	}
 
@@ -3543,8 +3511,11 @@ void dm_free_md_mempools(struct dm_md_mempools *pools)
 	if (!pools)
 		return;
 
-	mempool_destroy(pools->io_pool);
-	mempool_destroy(pools->rq_pool);
+	if (pools->io_pool)
+		mempool_destroy(pools->io_pool);
+
+	if (pools->rq_pool)
+		mempool_destroy(pools->rq_pool);
 
 	if (pools->bs)
 		bioset_free(pools->bs);
@@ -3552,133 +3523,11 @@ void dm_free_md_mempools(struct dm_md_mempools *pools)
 	kfree(pools);
 }
 
-static int dm_pr_register(struct block_device *bdev, u64 old_key, u64 new_key,
-		u32 flags)
-{
-	struct mapped_device *md = bdev->bd_disk->private_data;
-	const struct pr_ops *ops;
-	struct dm_target *tgt;
-	fmode_t mode;
-	int srcu_idx, r;
-
-	r = dm_get_live_table_for_ioctl(md, &tgt, &bdev, &mode, &srcu_idx);
-	if (r < 0)
-		return r;
-
-	ops = bdev->bd_disk->fops->pr_ops;
-	if (ops && ops->pr_register)
-		r = ops->pr_register(bdev, old_key, new_key, flags);
-	else
-		r = -EOPNOTSUPP;
-
-	dm_put_live_table(md, srcu_idx);
-	return r;
-}
-
-static int dm_pr_reserve(struct block_device *bdev, u64 key, enum pr_type type,
-		u32 flags)
-{
-	struct mapped_device *md = bdev->bd_disk->private_data;
-	const struct pr_ops *ops;
-	struct dm_target *tgt;
-	fmode_t mode;
-	int srcu_idx, r;
-
-	r = dm_get_live_table_for_ioctl(md, &tgt, &bdev, &mode, &srcu_idx);
-	if (r < 0)
-		return r;
-
-	ops = bdev->bd_disk->fops->pr_ops;
-	if (ops && ops->pr_reserve)
-		r = ops->pr_reserve(bdev, key, type, flags);
-	else
-		r = -EOPNOTSUPP;
-
-	dm_put_live_table(md, srcu_idx);
-	return r;
-}
-
-static int dm_pr_release(struct block_device *bdev, u64 key, enum pr_type type)
-{
-	struct mapped_device *md = bdev->bd_disk->private_data;
-	const struct pr_ops *ops;
-	struct dm_target *tgt;
-	fmode_t mode;
-	int srcu_idx, r;
-
-	r = dm_get_live_table_for_ioctl(md, &tgt, &bdev, &mode, &srcu_idx);
-	if (r < 0)
-		return r;
-
-	ops = bdev->bd_disk->fops->pr_ops;
-	if (ops && ops->pr_release)
-		r = ops->pr_release(bdev, key, type);
-	else
-		r = -EOPNOTSUPP;
-
-	dm_put_live_table(md, srcu_idx);
-	return r;
-}
-
-static int dm_pr_preempt(struct block_device *bdev, u64 old_key, u64 new_key,
-		enum pr_type type, bool abort)
-{
-	struct mapped_device *md = bdev->bd_disk->private_data;
-	const struct pr_ops *ops;
-	struct dm_target *tgt;
-	fmode_t mode;
-	int srcu_idx, r;
-
-	r = dm_get_live_table_for_ioctl(md, &tgt, &bdev, &mode, &srcu_idx);
-	if (r < 0)
-		return r;
-
-	ops = bdev->bd_disk->fops->pr_ops;
-	if (ops && ops->pr_preempt)
-		r = ops->pr_preempt(bdev, old_key, new_key, type, abort);
-	else
-		r = -EOPNOTSUPP;
-
-	dm_put_live_table(md, srcu_idx);
-	return r;
-}
-
-static int dm_pr_clear(struct block_device *bdev, u64 key)
-{
-	struct mapped_device *md = bdev->bd_disk->private_data;
-	const struct pr_ops *ops;
-	struct dm_target *tgt;
-	fmode_t mode;
-	int srcu_idx, r;
-
-	r = dm_get_live_table_for_ioctl(md, &tgt, &bdev, &mode, &srcu_idx);
-	if (r < 0)
-		return r;
-
-	ops = bdev->bd_disk->fops->pr_ops;
-	if (ops && ops->pr_clear)
-		r = ops->pr_clear(bdev, key);
-	else
-		r = -EOPNOTSUPP;
-
-	dm_put_live_table(md, srcu_idx);
-	return r;
-}
-
-static const struct pr_ops dm_pr_ops = {
-	.pr_register	= dm_pr_register,
-	.pr_reserve	= dm_pr_reserve,
-	.pr_release	= dm_pr_release,
-	.pr_preempt	= dm_pr_preempt,
-	.pr_clear	= dm_pr_clear,
-};
-
 static const struct block_device_operations dm_blk_dops = {
 	.open = dm_blk_open,
 	.release = dm_blk_close,
 	.ioctl = dm_blk_ioctl,
 	.getgeo = dm_blk_getgeo,
-	.pr_ops = &dm_pr_ops,
 	.owner = THIS_MODULE
 };
 

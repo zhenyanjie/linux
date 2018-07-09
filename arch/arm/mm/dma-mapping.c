@@ -651,12 +651,12 @@ static void *__dma_alloc(struct device *dev, size_t size, dma_addr_t *handle,
 
 	if (nommu())
 		addr = __alloc_simple_buffer(dev, size, gfp, &page);
-	else if (dev_get_cma_area(dev) && (gfp & __GFP_DIRECT_RECLAIM))
+	else if (dev_get_cma_area(dev) && (gfp & __GFP_WAIT))
 		addr = __alloc_from_contiguous(dev, size, prot, &page,
 					       caller, want_vaddr);
 	else if (is_coherent)
 		addr = __alloc_simple_buffer(dev, size, gfp, &page);
-	else if (!gfpflags_allow_blocking(gfp))
+	else if (!(gfp & __GFP_WAIT))
 		addr = __alloc_from_pool(size, &page);
 	else
 		addr = __alloc_remap_buffer(dev, size, gfp, prot, &page,
@@ -1200,7 +1200,10 @@ error:
 	while (i--)
 		if (pages[i])
 			__free_pages(pages[i], 0);
-	kvfree(pages);
+	if (array_size <= PAGE_SIZE)
+		kfree(pages);
+	else
+		vfree(pages);
 	return NULL;
 }
 
@@ -1208,6 +1211,7 @@ static int __iommu_free_buffer(struct device *dev, struct page **pages,
 			       size_t size, struct dma_attrs *attrs)
 {
 	int count = size >> PAGE_SHIFT;
+	int array_size = count * sizeof(struct page *);
 	int i;
 
 	if (dma_get_attr(DMA_ATTR_FORCE_CONTIGUOUS, attrs)) {
@@ -1218,7 +1222,10 @@ static int __iommu_free_buffer(struct device *dev, struct page **pages,
 				__free_pages(pages[i], 0);
 	}
 
-	kvfree(pages);
+	if (array_size <= PAGE_SIZE)
+		kfree(pages);
+	else
+		vfree(pages);
 	return 0;
 }
 
@@ -1356,7 +1363,7 @@ static void *arm_iommu_alloc_attrs(struct device *dev, size_t size,
 	*handle = DMA_ERROR_CODE;
 	size = PAGE_ALIGN(size);
 
-	if (!gfpflags_allow_blocking(gfp))
+	if (!(gfp & __GFP_WAIT))
 		return __iommu_alloc_atomic(dev, size, handle);
 
 	/*
@@ -1514,7 +1521,7 @@ static int __map_sg_chunk(struct device *dev, struct scatterlist *sg,
 		return -ENOMEM;
 
 	for (count = 0, s = sg; count < (size >> PAGE_SHIFT); s = sg_next(s)) {
-		phys_addr_t phys = page_to_phys(sg_page(s));
+		phys_addr_t phys = sg_phys(s) & PAGE_MASK;
 		unsigned int len = PAGE_ALIGN(s->offset + s->length);
 
 		if (!is_coherent &&

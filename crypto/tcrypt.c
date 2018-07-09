@@ -48,8 +48,6 @@
 #define ENCRYPT 1
 #define DECRYPT 0
 
-#define MAX_DIGEST_SIZE		64
-
 /*
  * return a string with the driver name
  */
@@ -952,7 +950,7 @@ static void test_ahash_speed(const char *algo, unsigned int secs,
 	struct tcrypt_result tresult;
 	struct ahash_request *req;
 	struct crypto_ahash *tfm;
-	char *output;
+	static char output[1024];
 	int i, ret;
 
 	tfm = crypto_alloc_ahash(algo, 0, 0);
@@ -965,9 +963,9 @@ static void test_ahash_speed(const char *algo, unsigned int secs,
 	printk(KERN_INFO "\ntesting speed of async %s (%s)\n", algo,
 			get_driver_name(crypto_ahash, tfm));
 
-	if (crypto_ahash_digestsize(tfm) > MAX_DIGEST_SIZE) {
-		pr_err("digestsize(%u) > %d\n", crypto_ahash_digestsize(tfm),
-		       MAX_DIGEST_SIZE);
+	if (crypto_ahash_digestsize(tfm) > sizeof(output)) {
+		pr_err("digestsize(%u) > outputbuffer(%zu)\n",
+		       crypto_ahash_digestsize(tfm), sizeof(output));
 		goto out;
 	}
 
@@ -981,10 +979,6 @@ static void test_ahash_speed(const char *algo, unsigned int secs,
 	init_completion(&tresult.completion);
 	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
 				   tcrypt_complete, &tresult);
-
-	output = kmalloc(MAX_DIGEST_SIZE, GFP_KERNEL);
-	if (!output)
-		goto out_nomem;
 
 	for (i = 0; speed[i].blen != 0; i++) {
 		if (speed[i].blen > TVMEMSIZE * PAGE_SIZE) {
@@ -1012,9 +1006,6 @@ static void test_ahash_speed(const char *algo, unsigned int secs,
 		}
 	}
 
-	kfree(output);
-
-out_nomem:
 	ahash_request_free(req);
 
 out:
@@ -1789,7 +1780,7 @@ static int do_test(const char *alg, u32 type, u32 mask, int m)
 		test_aead_speed("rfc4106(gcm(aes))", ENCRYPT, sec,
 				NULL, 0, 16, 16, aead_speed_template_20);
 		test_aead_speed("gcm(aes)", ENCRYPT, sec,
-				NULL, 0, 16, 8, speed_template_16_24_32);
+				NULL, 0, 16, 8, aead_speed_template_20);
 		break;
 
 	case 212:

@@ -140,10 +140,8 @@ static int tegra_wdt_set_timeout(struct watchdog_device *wdd,
 {
 	wdd->timeout = timeout;
 
-	if (watchdog_active(wdd)) {
-		tegra_wdt_stop(wdd);
+	if (watchdog_active(wdd))
 		return tegra_wdt_start(wdd);
-	}
 
 	return 0;
 }

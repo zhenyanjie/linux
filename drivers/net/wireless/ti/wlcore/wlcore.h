@@ -310,12 +310,15 @@ struct wl1271 {
 	/* FW memory block size */
 	u32 fw_mem_block_size;
 
+	/* Sysfs FW log entry readers wait queue */
+	wait_queue_head_t fwlog_waitq;
+
 	/* Hardware recovery work */
 	struct work_struct recovery_work;
 	bool watchdog_recovery;
 
 	/* Reg domain last configuration */
-	u32 reg_ch_conf_last[2]  __aligned(8);
+	u32 reg_ch_conf_last[2];
 	/* Reg domain pending configuration */
 	u32 reg_ch_conf_pending[2];
 

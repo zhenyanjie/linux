@@ -131,7 +131,6 @@ void imx6q_pm_init(void);
 void imx6dl_pm_init(void);
 void imx6sl_pm_init(void);
 void imx6sx_pm_init(void);
-void imx6ul_pm_init(void);
 
 #ifdef CONFIG_PM
 void imx51_pm_init(void);
@@ -153,7 +152,7 @@ void imx_init_l2cache(void);
 static inline void imx_init_l2cache(void) {}
 #endif
 
-extern const struct smp_operations imx_smp_ops;
-extern const struct smp_operations ls1021a_smp_ops;
+extern struct smp_operations imx_smp_ops;
+extern struct smp_operations ls1021a_smp_ops;
 
 #endif

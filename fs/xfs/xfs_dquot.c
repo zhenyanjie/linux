@@ -75,9 +75,9 @@ xfs_qm_dqdestroy(
 	ASSERT(list_empty(&dqp->q_lru));
 
 	mutex_destroy(&dqp->q_qlock);
-
-	XFS_STATS_DEC(dqp->q_mount, xs_qm_dquot);
 	kmem_zone_free(xfs_qm_dqzone, dqp);
+
+	XFS_STATS_DEC(xs_qm_dquot);
 }
 
 /*
@@ -306,7 +306,7 @@ xfs_qm_dqalloc(
 	xfs_fsblock_t	firstblock;
 	xfs_bmap_free_t flist;
 	xfs_bmbt_irec_t map;
-	int		nmaps, error;
+	int		nmaps, error, committed;
 	xfs_buf_t	*bp;
 	xfs_trans_t	*tp = *tpp;
 
@@ -379,12 +379,11 @@ xfs_qm_dqalloc(
 
 	xfs_trans_bhold(tp, bp);
 
-	error = xfs_bmap_finish(tpp, &flist, NULL);
-	if (error)
+	if ((error = xfs_bmap_finish(tpp, &flist, &committed))) {
 		goto error1;
+	}
 
-	/* Transaction was committed? */
-	if (*tpp != tp) {
+	if (committed) {
 		tp = *tpp;
 		xfs_trans_bjoin(tp, bp);
 	} else {
@@ -394,9 +393,9 @@ xfs_qm_dqalloc(
 	*O_bpp = bp;
 	return 0;
 
-error1:
+      error1:
 	xfs_bmap_cancel(&flist);
-error0:
+      error0:
 	xfs_iunlock(quotip, XFS_ILOCK_EXCL);
 
 	return error;
@@ -606,7 +605,7 @@ xfs_qm_dqread(
 		break;
 	}
 
-	XFS_STATS_INC(mp, xs_qm_dquot);
+	XFS_STATS_INC(xs_qm_dquot);
 
 	trace_xfs_dqread(dqp);
 
@@ -748,12 +747,12 @@ restart:
 		mutex_unlock(&qi->qi_tree_lock);
 
 		trace_xfs_dqget_hit(dqp);
-		XFS_STATS_INC(mp, xs_qm_dqcachehits);
+		XFS_STATS_INC(xs_qm_dqcachehits);
 		*O_dqpp = dqp;
 		return 0;
 	}
 	mutex_unlock(&qi->qi_tree_lock);
-	XFS_STATS_INC(mp, xs_qm_dqcachemisses);
+	XFS_STATS_INC(xs_qm_dqcachemisses);
 
 	/*
 	 * Dquot cache miss. We don't want to keep the inode lock across
@@ -807,7 +806,7 @@ restart:
 		mutex_unlock(&qi->qi_tree_lock);
 		trace_xfs_dqget_dup(dqp);
 		xfs_qm_dqdestroy(dqp);
-		XFS_STATS_INC(mp, xs_qm_dquot_dups);
+		XFS_STATS_INC(xs_qm_dquot_dups);
 		goto restart;
 	}
 
@@ -847,7 +846,7 @@ xfs_qm_dqput(
 		trace_xfs_dqput_free(dqp);
 
 		if (list_lru_add(&qi->qi_lru, &dqp->q_lru))
-			XFS_STATS_INC(dqp->q_mount, xs_qm_dquot_unused);
+			XFS_STATS_INC(xs_qm_dquot_unused);
 	}
 	xfs_dqunlock(dqp);
 }

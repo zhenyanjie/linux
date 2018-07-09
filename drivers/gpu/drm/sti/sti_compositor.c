@@ -263,7 +263,7 @@ static int sti_compositor_remove(struct platform_device *pdev)
 	return 0;
 }
 
-struct platform_driver sti_compositor_driver = {
+static struct platform_driver sti_compositor_driver = {
 	.driver = {
 		.name = "sti-compositor",
 		.of_match_table = compositor_of_match,
@@ -271,6 +271,8 @@ struct platform_driver sti_compositor_driver = {
 	.probe = sti_compositor_probe,
 	.remove = sti_compositor_remove,
 };
+
+module_platform_driver(sti_compositor_driver);
 
 MODULE_AUTHOR("Benjamin Gaignard <benjamin.gaignard@st.com>");
 MODULE_DESCRIPTION("STMicroelectronics SoC DRM driver");

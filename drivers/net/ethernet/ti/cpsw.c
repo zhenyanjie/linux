@@ -29,7 +29,6 @@
 #include <linux/workqueue.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
-#include <linux/gpio.h>
 #include <linux/of.h>
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
@@ -1159,8 +1158,8 @@ static void cpsw_slave_open(struct cpsw_slave *slave, struct cpsw_priv *priv)
 			slave->data->phy_id, slave->slave_num);
 		slave->phy = NULL;
 	} else {
-		phy_attached_info(slave->phy);
-
+		dev_info(priv->dev, "phy found : id is : 0x%x\n",
+			 slave->phy->phy_id);
 		phy_start(slave->phy);
 
 		/* Configure GMII_SEL register */
@@ -1790,6 +1789,7 @@ static void cpsw_get_drvinfo(struct net_device *ndev,
 	strlcpy(info->driver, "cpsw", sizeof(info->driver));
 	strlcpy(info->version, "1.0", sizeof(info->version));
 	strlcpy(info->bus_info, priv->pdev->name, sizeof(info->bus_info));
+	info->regdump_len = cpsw_get_regs_len(ndev);
 }
 
 static u32 cpsw_get_msglevel(struct net_device *ndev)
@@ -2026,8 +2026,11 @@ static int cpsw_probe_dt(struct cpsw_priv *priv,
 	for_each_child_of_node(node, slave_node) {
 		struct cpsw_slave_data *slave_data = data->slave_data + i;
 		const void *mac_addr = NULL;
+		u32 phyid;
 		int lenp;
 		const __be32 *parp;
+		struct device_node *mdio_node;
+		struct platform_device *mdio;
 
 		/* This is no slave child node, continue */
 		if (strcmp(slave_node->name, "slave"))
@@ -2035,46 +2038,20 @@ static int cpsw_probe_dt(struct cpsw_priv *priv,
 
 		priv->phy_node = of_parse_phandle(slave_node, "phy-handle", 0);
 		parp = of_get_property(slave_node, "phy_id", &lenp);
-		if (of_phy_is_fixed_link(slave_node)) {
-			struct device_node *phy_node;
-			struct phy_device *phy_dev;
-
-			/* In the case of a fixed PHY, the DT node associated
-			 * to the PHY is the Ethernet MAC DT node.
-			 */
-			ret = of_phy_register_fixed_link(slave_node);
-			if (ret)
-				return ret;
-			phy_node = of_node_get(slave_node);
-			phy_dev = of_phy_find_device(phy_node);
-			if (!phy_dev)
-				return -ENODEV;
-			snprintf(slave_data->phy_id, sizeof(slave_data->phy_id),
-				 PHY_ID_FMT, phy_dev->mdio.bus->id,
-				 phy_dev->mdio.addr);
-		} else if (parp) {
-			u32 phyid;
-			struct device_node *mdio_node;
-			struct platform_device *mdio;
-
-			if (lenp != (sizeof(__be32) * 2)) {
-				dev_err(&pdev->dev, "Invalid slave[%d] phy_id property\n", i);
-				goto no_phy_slave;
-			}
-			mdio_node = of_find_node_by_phandle(be32_to_cpup(parp));
-			phyid = be32_to_cpup(parp+1);
-			mdio = of_find_device_by_node(mdio_node);
-			of_node_put(mdio_node);
-			if (!mdio) {
-				dev_err(&pdev->dev, "Missing mdio platform device\n");
-				return -EINVAL;
-			}
-			snprintf(slave_data->phy_id, sizeof(slave_data->phy_id),
-				 PHY_ID_FMT, mdio->name, phyid);
-		} else {
-			dev_err(&pdev->dev, "No slave[%d] phy_id or fixed-link property\n", i);
+		if ((parp == NULL) || (lenp != (sizeof(void *) * 2))) {
+			dev_err(&pdev->dev, "Missing slave[%d] phy_id property\n", i);
 			goto no_phy_slave;
 		}
+		mdio_node = of_find_node_by_phandle(be32_to_cpup(parp));
+		phyid = be32_to_cpup(parp+1);
+		mdio = of_find_device_by_node(mdio_node);
+		of_node_put(mdio_node);
+		if (!mdio) {
+			dev_err(&pdev->dev, "Missing mdio platform device\n");
+			return -EINVAL;
+		}
+		snprintf(slave_data->phy_id, sizeof(slave_data->phy_id),
+			 PHY_ID_FMT, mdio->name, phyid);
 		slave_data->phy_if = of_get_phy_mode(slave_node);
 		if (slave_data->phy_if < 0) {
 			dev_err(&pdev->dev, "Missing or malformed slave[%d] phy-mode property\n",
@@ -2087,10 +2064,13 @@ no_phy_slave:
 		if (mac_addr) {
 			memcpy(slave_data->mac_addr, mac_addr, ETH_ALEN);
 		} else {
-			ret = ti_cm_get_macid(&pdev->dev, i,
-					      slave_data->mac_addr);
-			if (ret)
-				return ret;
+			if (of_machine_is_compatible("ti,am33xx")) {
+				ret = cpsw_am33xx_cm_get_macid(&pdev->dev,
+							0x630, i,
+							slave_data->mac_addr);
+				if (ret)
+					return ret;
+			}
 		}
 		if (data->dual_emac) {
 			if (of_property_read_u32(slave_node, "dual_emac_res_vlan",
@@ -2234,7 +2214,6 @@ static int cpsw_probe(struct platform_device *pdev)
 	void __iomem			*ss_regs;
 	struct resource			*res, *ss_res;
 	const struct of_device_id	*of_id;
-	struct gpio_descs		*mode;
 	u32 slave_offset, sliver_offset, slave_size;
 	int ret = 0, i;
 	int irq;
@@ -2257,13 +2236,6 @@ static int cpsw_probe(struct platform_device *pdev)
 	if (!priv->cpts) {
 		dev_err(&pdev->dev, "error allocating cpts\n");
 		ret = -ENOMEM;
-		goto clean_ndev_ret;
-	}
-
-	mode = devm_gpiod_get_array_optional(&pdev->dev, "mode", GPIOD_OUT_LOW);
-	if (IS_ERR(mode)) {
-		ret = PTR_ERR(mode);
-		dev_err(&pdev->dev, "gpio request failed, ret %d\n", ret);
 		goto clean_ndev_ret;
 	}
 
@@ -2428,7 +2400,7 @@ static int cpsw_probe(struct platform_device *pdev)
 	ndev->irq = platform_get_irq(pdev, 1);
 	if (ndev->irq < 0) {
 		dev_err(priv->dev, "error getting irq resource\n");
-		ret = ndev->irq;
+		ret = -ENOENT;
 		goto clean_ale_ret;
 	}
 
@@ -2449,10 +2421,8 @@ static int cpsw_probe(struct platform_device *pdev)
 
 	/* RX IRQ */
 	irq = platform_get_irq(pdev, 1);
-	if (irq < 0) {
-		ret = irq;
+	if (irq < 0)
 		goto clean_ale_ret;
-	}
 
 	priv->irqs_table[0] = irq;
 	ret = devm_request_irq(&pdev->dev, irq, cpsw_rx_interrupt,
@@ -2464,10 +2434,8 @@ static int cpsw_probe(struct platform_device *pdev)
 
 	/* TX IRQ */
 	irq = platform_get_irq(pdev, 2);
-	if (irq < 0) {
-		ret = irq;
+	if (irq < 0)
 		goto clean_ale_ret;
-	}
 
 	priv->irqs_table[1] = irq;
 	ret = devm_request_irq(&pdev->dev, irq, cpsw_tx_interrupt,
@@ -2483,7 +2451,7 @@ static int cpsw_probe(struct platform_device *pdev)
 	ndev->netdev_ops = &cpsw_netdev_ops;
 	ndev->ethtool_ops = &cpsw_ethtool_ops;
 	netif_napi_add(ndev, &priv->napi_rx, cpsw_rx_poll, CPSW_POLL_WEIGHT);
-	netif_tx_napi_add(ndev, &priv->napi_tx, cpsw_tx_poll, CPSW_POLL_WEIGHT);
+	netif_napi_add(ndev, &priv->napi_tx, cpsw_tx_poll, CPSW_POLL_WEIGHT);
 
 	/* register the network device */
 	SET_NETDEV_DEV(ndev, &pdev->dev);
@@ -2617,7 +2585,17 @@ static struct platform_driver cpsw_driver = {
 	.remove = cpsw_remove,
 };
 
-module_platform_driver(cpsw_driver);
+static int __init cpsw_init(void)
+{
+	return platform_driver_register(&cpsw_driver);
+}
+late_initcall(cpsw_init);
+
+static void __exit cpsw_exit(void)
+{
+	platform_driver_unregister(&cpsw_driver);
+}
+module_exit(cpsw_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Cyril Chemparathy <cyril@ti.com>");

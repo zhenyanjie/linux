@@ -152,7 +152,7 @@ static void lcdc_write(unsigned int val, unsigned int addr)
 
 struct da8xx_fb_par {
 	struct device		*dev;
-	dma_addr_t		p_palette_base;
+	resource_size_t p_palette_base;
 	unsigned char *v_palette_base;
 	dma_addr_t		vram_phys;
 	unsigned long		vram_size;
@@ -209,7 +209,8 @@ static struct fb_videomode known_lcd_panels[] = {
 		.lower_margin   = 2,
 		.hsync_len      = 0,
 		.vsync_len      = 0,
-		.sync           = FB_SYNC_CLK_INVERT,
+		.sync           = FB_SYNC_CLK_INVERT |
+			FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 	},
 	/* Sharp LK043T1DG01 */
 	[1] = {
@@ -223,7 +224,7 @@ static struct fb_videomode known_lcd_panels[] = {
 		.lower_margin   = 2,
 		.hsync_len      = 41,
 		.vsync_len      = 10,
-		.sync           = 0,
+		.sync           = FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		.flag           = 0,
 	},
 	[2] = {
@@ -238,7 +239,7 @@ static struct fb_videomode known_lcd_panels[] = {
 		.lower_margin   = 10,
 		.hsync_len      = 10,
 		.vsync_len      = 10,
-		.sync           = 0,
+		.sync           = FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 		.flag           = 0,
 	},
 	[3] = {
@@ -1427,7 +1428,7 @@ static int fb_probe(struct platform_device *device)
 
 	par->vram_virt = dma_alloc_coherent(NULL,
 					    par->vram_size,
-					    &par->vram_phys,
+					    (resource_size_t *) &par->vram_phys,
 					    GFP_KERNEL | GFP_DMA);
 	if (!par->vram_virt) {
 		dev_err(&device->dev,
@@ -1447,7 +1448,7 @@ static int fb_probe(struct platform_device *device)
 
 	/* allocate palette buffer */
 	par->v_palette_base = dma_zalloc_coherent(NULL, PALETTE_SIZE,
-						  &par->p_palette_base,
+						  (resource_size_t *)&par->p_palette_base,
 						  GFP_KERNEL | GFP_DMA);
 	if (!par->v_palette_base) {
 		dev_err(&device->dev,

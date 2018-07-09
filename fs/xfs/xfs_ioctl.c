@@ -40,7 +40,6 @@
 #include "xfs_symlink.h"
 #include "xfs_trans.h"
 #include "xfs_pnfs.h"
-#include "xfs_acl.h"
 
 #include <linux/capability.h>
 #include <linux/dcache.h>
@@ -412,7 +411,7 @@ xfs_attrlist_by_handle(
 	if (copy_from_user(&al_hreq, arg, sizeof(xfs_fsop_attrlist_handlereq_t)))
 		return -EFAULT;
 	if (al_hreq.buflen < sizeof(struct attrlist) ||
-	    al_hreq.buflen > XFS_XATTR_LIST_MAX)
+	    al_hreq.buflen > XATTR_LIST_MAX)
 		return -EINVAL;
 
 	/*
@@ -456,7 +455,7 @@ xfs_attrmulti_attr_get(
 	unsigned char		*kbuf;
 	int			error = -EFAULT;
 
-	if (*len > XFS_XATTR_SIZE_MAX)
+	if (*len > XATTR_SIZE_MAX)
 		return -EINVAL;
 	kbuf = kmem_zalloc_large(*len, KM_SLEEP);
 	if (!kbuf)
@@ -483,22 +482,17 @@ xfs_attrmulti_attr_set(
 	__uint32_t		flags)
 {
 	unsigned char		*kbuf;
-	int			error;
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;
-	if (len > XFS_XATTR_SIZE_MAX)
+	if (len > XATTR_SIZE_MAX)
 		return -EINVAL;
 
 	kbuf = memdup_user(ubuf, len);
 	if (IS_ERR(kbuf))
 		return PTR_ERR(kbuf);
 
-	error = xfs_attr_set(XFS_I(inode), name, kbuf, len, flags);
-	if (!error)
-		xfs_forget_acl(inode, name, flags);
-	kfree(kbuf);
-	return error;
+	return xfs_attr_set(XFS_I(inode), name, kbuf, len, flags);
 }
 
 int
@@ -507,14 +501,9 @@ xfs_attrmulti_attr_remove(
 	unsigned char		*name,
 	__uint32_t		flags)
 {
-	int			error;
-
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
 		return -EPERM;
-	error = xfs_attr_remove(XFS_I(inode), name, flags);
-	if (!error)
-		xfs_forget_acl(inode, name, flags);
-	return error;
+	return xfs_attr_remove(XFS_I(inode), name, flags);
 }
 
 STATIC int
@@ -859,25 +848,25 @@ xfs_merge_ioc_xflags(
 	unsigned int	xflags = start;
 
 	if (flags & FS_IMMUTABLE_FL)
-		xflags |= FS_XFLAG_IMMUTABLE;
+		xflags |= XFS_XFLAG_IMMUTABLE;
 	else
-		xflags &= ~FS_XFLAG_IMMUTABLE;
+		xflags &= ~XFS_XFLAG_IMMUTABLE;
 	if (flags & FS_APPEND_FL)
-		xflags |= FS_XFLAG_APPEND;
+		xflags |= XFS_XFLAG_APPEND;
 	else
-		xflags &= ~FS_XFLAG_APPEND;
+		xflags &= ~XFS_XFLAG_APPEND;
 	if (flags & FS_SYNC_FL)
-		xflags |= FS_XFLAG_SYNC;
+		xflags |= XFS_XFLAG_SYNC;
 	else
-		xflags &= ~FS_XFLAG_SYNC;
+		xflags &= ~XFS_XFLAG_SYNC;
 	if (flags & FS_NOATIME_FL)
-		xflags |= FS_XFLAG_NOATIME;
+		xflags |= XFS_XFLAG_NOATIME;
 	else
-		xflags &= ~FS_XFLAG_NOATIME;
+		xflags &= ~XFS_XFLAG_NOATIME;
 	if (flags & FS_NODUMP_FL)
-		xflags |= FS_XFLAG_NODUMP;
+		xflags |= XFS_XFLAG_NODUMP;
 	else
-		xflags &= ~FS_XFLAG_NODUMP;
+		xflags &= ~XFS_XFLAG_NODUMP;
 
 	return xflags;
 }
@@ -945,51 +934,40 @@ xfs_set_diflags(
 	unsigned int		xflags)
 {
 	unsigned int		di_flags;
-	uint64_t		di_flags2;
 
 	/* can't set PREALLOC this way, just preserve it */
 	di_flags = (ip->i_d.di_flags & XFS_DIFLAG_PREALLOC);
-	if (xflags & FS_XFLAG_IMMUTABLE)
+	if (xflags & XFS_XFLAG_IMMUTABLE)
 		di_flags |= XFS_DIFLAG_IMMUTABLE;
-	if (xflags & FS_XFLAG_APPEND)
+	if (xflags & XFS_XFLAG_APPEND)
 		di_flags |= XFS_DIFLAG_APPEND;
-	if (xflags & FS_XFLAG_SYNC)
+	if (xflags & XFS_XFLAG_SYNC)
 		di_flags |= XFS_DIFLAG_SYNC;
-	if (xflags & FS_XFLAG_NOATIME)
+	if (xflags & XFS_XFLAG_NOATIME)
 		di_flags |= XFS_DIFLAG_NOATIME;
-	if (xflags & FS_XFLAG_NODUMP)
+	if (xflags & XFS_XFLAG_NODUMP)
 		di_flags |= XFS_DIFLAG_NODUMP;
-	if (xflags & FS_XFLAG_NODEFRAG)
+	if (xflags & XFS_XFLAG_NODEFRAG)
 		di_flags |= XFS_DIFLAG_NODEFRAG;
-	if (xflags & FS_XFLAG_FILESTREAM)
+	if (xflags & XFS_XFLAG_FILESTREAM)
 		di_flags |= XFS_DIFLAG_FILESTREAM;
 	if (S_ISDIR(ip->i_d.di_mode)) {
-		if (xflags & FS_XFLAG_RTINHERIT)
+		if (xflags & XFS_XFLAG_RTINHERIT)
 			di_flags |= XFS_DIFLAG_RTINHERIT;
-		if (xflags & FS_XFLAG_NOSYMLINKS)
+		if (xflags & XFS_XFLAG_NOSYMLINKS)
 			di_flags |= XFS_DIFLAG_NOSYMLINKS;
-		if (xflags & FS_XFLAG_EXTSZINHERIT)
+		if (xflags & XFS_XFLAG_EXTSZINHERIT)
 			di_flags |= XFS_DIFLAG_EXTSZINHERIT;
-		if (xflags & FS_XFLAG_PROJINHERIT)
+		if (xflags & XFS_XFLAG_PROJINHERIT)
 			di_flags |= XFS_DIFLAG_PROJINHERIT;
 	} else if (S_ISREG(ip->i_d.di_mode)) {
-		if (xflags & FS_XFLAG_REALTIME)
+		if (xflags & XFS_XFLAG_REALTIME)
 			di_flags |= XFS_DIFLAG_REALTIME;
-		if (xflags & FS_XFLAG_EXTSIZE)
+		if (xflags & XFS_XFLAG_EXTSIZE)
 			di_flags |= XFS_DIFLAG_EXTSIZE;
 	}
+
 	ip->i_d.di_flags = di_flags;
-
-	/* diflags2 only valid for v3 inodes. */
-	if (ip->i_d.di_version < 3)
-		return;
-
-	di_flags2 = 0;
-	if (xflags & FS_XFLAG_DAX)
-		di_flags2 |= XFS_DIFLAG2_DAX;
-
-	ip->i_d.di_flags2 = di_flags2;
-
 }
 
 STATIC void
@@ -999,27 +977,22 @@ xfs_diflags_to_linux(
 	struct inode		*inode = VFS_I(ip);
 	unsigned int		xflags = xfs_ip2xflags(ip);
 
-	if (xflags & FS_XFLAG_IMMUTABLE)
+	if (xflags & XFS_XFLAG_IMMUTABLE)
 		inode->i_flags |= S_IMMUTABLE;
 	else
 		inode->i_flags &= ~S_IMMUTABLE;
-	if (xflags & FS_XFLAG_APPEND)
+	if (xflags & XFS_XFLAG_APPEND)
 		inode->i_flags |= S_APPEND;
 	else
 		inode->i_flags &= ~S_APPEND;
-	if (xflags & FS_XFLAG_SYNC)
+	if (xflags & XFS_XFLAG_SYNC)
 		inode->i_flags |= S_SYNC;
 	else
 		inode->i_flags &= ~S_SYNC;
-	if (xflags & FS_XFLAG_NOATIME)
+	if (xflags & XFS_XFLAG_NOATIME)
 		inode->i_flags |= S_NOATIME;
 	else
 		inode->i_flags &= ~S_NOATIME;
-	if (xflags & FS_XFLAG_DAX)
-		inode->i_flags |= S_DAX;
-	else
-		inode->i_flags &= ~S_DAX;
-
 }
 
 static int
@@ -1032,11 +1005,11 @@ xfs_ioctl_setattr_xflags(
 
 	/* Can't change realtime flag if any extents are allocated. */
 	if ((ip->i_d.di_nextents || ip->i_delayed_blks) &&
-	    XFS_IS_REALTIME_INODE(ip) != (fa->fsx_xflags & FS_XFLAG_REALTIME))
+	    XFS_IS_REALTIME_INODE(ip) != (fa->fsx_xflags & XFS_XFLAG_REALTIME))
 		return -EINVAL;
 
 	/* If realtime flag is set then must have realtime device */
-	if (fa->fsx_xflags & FS_XFLAG_REALTIME) {
+	if (fa->fsx_xflags & XFS_XFLAG_REALTIME) {
 		if (mp->m_sb.sb_rblocks == 0 || mp->m_sb.sb_rextsize == 0 ||
 		    (ip->i_d.di_extsize % mp->m_sb.sb_rextsize))
 			return -EINVAL;
@@ -1047,7 +1020,7 @@ xfs_ioctl_setattr_xflags(
 	 * we have appropriate permission.
 	 */
 	if (((ip->i_d.di_flags & (XFS_DIFLAG_IMMUTABLE | XFS_DIFLAG_APPEND)) ||
-	     (fa->fsx_xflags & (FS_XFLAG_IMMUTABLE | FS_XFLAG_APPEND))) &&
+	     (fa->fsx_xflags & (XFS_XFLAG_IMMUTABLE | XFS_XFLAG_APPEND))) &&
 	    !capable(CAP_LINUX_IMMUTABLE))
 		return -EPERM;
 
@@ -1055,7 +1028,7 @@ xfs_ioctl_setattr_xflags(
 	xfs_diflags_to_linux(ip);
 	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
-	XFS_STATS_INC(mp, xs_ig_attrchg);
+	XFS_STATS_INC(xs_ig_attrchg);
 	return 0;
 }
 
@@ -1111,8 +1084,8 @@ out_cancel:
  * extent size hint validation is somewhat cumbersome. Rules are:
  *
  * 1. extent size hint is only valid for directories and regular files
- * 2. FS_XFLAG_EXTSIZE is only valid for regular files
- * 3. FS_XFLAG_EXTSZINHERIT is only valid for directories.
+ * 2. XFS_XFLAG_EXTSIZE is only valid for regular files
+ * 3. XFS_XFLAG_EXTSZINHERIT is only valid for directories.
  * 4. can only be changed on regular files if no extents are allocated
  * 5. can be changed on directories at any time
  * 6. extsize hint of 0 turns off hints, clears inode flags.
@@ -1128,10 +1101,10 @@ xfs_ioctl_setattr_check_extsize(
 {
 	struct xfs_mount	*mp = ip->i_mount;
 
-	if ((fa->fsx_xflags & FS_XFLAG_EXTSIZE) && !S_ISREG(ip->i_d.di_mode))
+	if ((fa->fsx_xflags & XFS_XFLAG_EXTSIZE) && !S_ISREG(ip->i_d.di_mode))
 		return -EINVAL;
 
-	if ((fa->fsx_xflags & FS_XFLAG_EXTSZINHERIT) &&
+	if ((fa->fsx_xflags & XFS_XFLAG_EXTSZINHERIT) &&
 	    !S_ISDIR(ip->i_d.di_mode))
 		return -EINVAL;
 
@@ -1148,7 +1121,7 @@ xfs_ioctl_setattr_check_extsize(
 			return -EINVAL;
 
 		if (XFS_IS_REALTIME_INODE(ip) ||
-		    (fa->fsx_xflags & FS_XFLAG_REALTIME)) {
+		    (fa->fsx_xflags & XFS_XFLAG_REALTIME)) {
 			size = mp->m_sb.sb_rextsize << mp->m_sb.sb_blocklog;
 		} else {
 			size = mp->m_sb.sb_blocksize;
@@ -1159,7 +1132,7 @@ xfs_ioctl_setattr_check_extsize(
 		if (fa->fsx_extsize % size)
 			return -EINVAL;
 	} else
-		fa->fsx_xflags &= ~(FS_XFLAG_EXTSIZE | FS_XFLAG_EXTSZINHERIT);
+		fa->fsx_xflags &= ~(XFS_XFLAG_EXTSIZE | XFS_XFLAG_EXTSZINHERIT);
 
 	return 0;
 }
@@ -1184,7 +1157,7 @@ xfs_ioctl_setattr_check_projid(
 
 	if (xfs_get_projid(ip) != fa->fsx_projid)
 		return -EINVAL;
-	if ((fa->fsx_xflags & FS_XFLAG_PROJINHERIT) !=
+	if ((fa->fsx_xflags & XFS_XFLAG_PROJINHERIT) !=
 	    (ip->i_d.di_flags & XFS_DIFLAG_PROJINHERIT))
 		return -EINVAL;
 

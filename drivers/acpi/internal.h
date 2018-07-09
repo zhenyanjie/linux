@@ -21,7 +21,7 @@
 #define PREFIX "ACPI: "
 
 acpi_status acpi_os_initialize1(void);
-void init_acpi_device_notify(void);
+int init_acpi_device_notify(void);
 int acpi_scan_init(void);
 void acpi_pci_root_init(void);
 void acpi_pci_link_init(void);
@@ -86,14 +86,6 @@ bool acpi_scan_is_offline(struct acpi_device *adev, bool uevent);
 #define ACPI_STA_DEFAULT (ACPI_STA_DEVICE_PRESENT | ACPI_STA_DEVICE_ENABLED | \
 			  ACPI_STA_DEVICE_UI | ACPI_STA_DEVICE_FUNCTIONING)
 
-extern struct list_head acpi_bus_id_list;
-
-struct acpi_device_bus_id {
-	char bus_id[15];
-	unsigned int instance_no;
-	struct list_head node;
-};
-
 int acpi_device_add(struct acpi_device *device,
 		    void (*release)(struct device *));
 void acpi_init_device_object(struct acpi_device *device, acpi_handle handle,
@@ -138,12 +130,6 @@ void acpi_early_processor_set_pdc(void);
 static inline void acpi_early_processor_set_pdc(void) {}
 #endif
 
-#ifdef CONFIG_X86
-void acpi_early_processor_osc(void);
-#else
-static inline void acpi_early_processor_osc(void) {}
-#endif
-
 /* --------------------------------------------------------------------------
                                   Embedded Controller
    -------------------------------------------------------------------------- */
@@ -152,7 +138,7 @@ struct acpi_ec {
 	unsigned long gpe;
 	unsigned long command_addr;
 	unsigned long data_addr;
-	bool global_lock;
+	unsigned long global_lock;
 	unsigned long flags;
 	unsigned long reference_count;
 	struct mutex mutex;
@@ -193,13 +179,13 @@ static inline int acpi_sleep_init(void) { return -ENXIO; }
 #endif
 
 #ifdef CONFIG_ACPI_SLEEP
-void acpi_sleep_proc_init(void);
+int acpi_sleep_proc_init(void);
 int suspend_nvs_alloc(void);
 void suspend_nvs_free(void);
 int suspend_nvs_save(void);
 void suspend_nvs_restore(void);
 #else
-static inline void acpi_sleep_proc_init(void) {}
+static inline int acpi_sleep_proc_init(void) { return 0; }
 static inline int suspend_nvs_alloc(void) { return 0; }
 static inline void suspend_nvs_free(void) {}
 static inline int suspend_nvs_save(void) { return 0; }

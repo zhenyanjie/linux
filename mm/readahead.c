@@ -17,7 +17,6 @@
 #include <linux/pagemap.h>
 #include <linux/syscalls.h>
 #include <linux/file.h>
-#include <linux/mm_inline.h>
 
 #include "internal.h"
 
@@ -32,6 +31,8 @@ file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping)
 	ra->prev_pos = -1;
 }
 EXPORT_SYMBOL_GPL(file_ra_state_init);
+
+#define list_to_page(head) (list_entry((head)->prev, struct page, lru))
 
 /*
  * see if a page needs releasing upon read_cache_pages() failure
@@ -63,7 +64,7 @@ static void read_cache_pages_invalidate_pages(struct address_space *mapping,
 	struct page *victim;
 
 	while (!list_empty(pages)) {
-		victim = lru_to_page(pages);
+		victim = list_to_page(pages);
 		list_del(&victim->lru);
 		read_cache_pages_invalidate_page(mapping, victim);
 	}
@@ -86,10 +87,10 @@ int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 	int ret = 0;
 
 	while (!list_empty(pages)) {
-		page = lru_to_page(pages);
+		page = list_to_page(pages);
 		list_del(&page->lru);
 		if (add_to_page_cache_lru(page, mapping, page->index,
-				mapping_gfp_constraint(mapping, GFP_KERNEL))) {
+				GFP_KERNEL & mapping_gfp_mask(mapping))) {
 			read_cache_pages_invalidate_page(mapping, page);
 			continue;
 		}
@@ -124,10 +125,10 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 	}
 
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
-		struct page *page = lru_to_page(pages);
+		struct page *page = list_to_page(pages);
 		list_del(&page->lru);
 		if (!add_to_page_cache_lru(page, mapping, page->index,
-				mapping_gfp_constraint(mapping, GFP_KERNEL))) {
+				GFP_KERNEL & mapping_gfp_mask(mapping))) {
 			mapping->a_ops->readpage(filp, page);
 		}
 		page_cache_release(page);
@@ -212,7 +213,7 @@ int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	if (unlikely(!mapping->a_ops->readpage && !mapping->a_ops->readpages))
 		return -EINVAL;
 
-	nr_to_read = min(nr_to_read, inode_to_bdi(mapping->host)->ra_pages);
+	nr_to_read = max_sane_readahead(nr_to_read);
 	while (nr_to_read) {
 		int err;
 
@@ -229,6 +230,16 @@ int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 		nr_to_read -= this_chunk;
 	}
 	return 0;
+}
+
+#define MAX_READAHEAD   ((512*4096)/PAGE_CACHE_SIZE)
+/*
+ * Given a desired number of PAGE_CACHE_SIZE readahead pages, return a
+ * sensible upper limit.
+ */
+unsigned long max_sane_readahead(unsigned long nr)
+{
+	return min(nr, MAX_READAHEAD);
 }
 
 /*
@@ -369,7 +380,7 @@ ondemand_readahead(struct address_space *mapping,
 		   bool hit_readahead_marker, pgoff_t offset,
 		   unsigned long req_size)
 {
-	unsigned long max = ra->ra_pages;
+	unsigned long max = max_sane_readahead(ra->ra_pages);
 	pgoff_t prev_offset;
 
 	/*

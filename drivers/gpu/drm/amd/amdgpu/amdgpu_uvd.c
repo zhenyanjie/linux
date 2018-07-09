@@ -53,7 +53,6 @@
 #define FIRMWARE_TONGA		"amdgpu/tonga_uvd.bin"
 #define FIRMWARE_CARRIZO	"amdgpu/carrizo_uvd.bin"
 #define FIRMWARE_FIJI		"amdgpu/fiji_uvd.bin"
-#define FIRMWARE_STONEY		"amdgpu/stoney_uvd.bin"
 
 /**
  * amdgpu_uvd_cs_ctx - Command submission parser context
@@ -84,7 +83,6 @@ MODULE_FIRMWARE(FIRMWARE_MULLINS);
 MODULE_FIRMWARE(FIRMWARE_TONGA);
 MODULE_FIRMWARE(FIRMWARE_CARRIZO);
 MODULE_FIRMWARE(FIRMWARE_FIJI);
-MODULE_FIRMWARE(FIRMWARE_STONEY);
 
 static void amdgpu_uvd_note_usage(struct amdgpu_device *adev);
 static void amdgpu_uvd_idle_work_handler(struct work_struct *work);
@@ -126,9 +124,6 @@ int amdgpu_uvd_sw_init(struct amdgpu_device *adev)
 	case CHIP_CARRIZO:
 		fw_name = FIRMWARE_CARRIZO;
 		break;
-	case CHIP_STONEY:
-		fw_name = FIRMWARE_STONEY;
-		break;
 	default:
 		return -EINVAL;
 	}
@@ -155,9 +150,6 @@ int amdgpu_uvd_sw_init(struct amdgpu_device *adev)
 	version_minor = (le32_to_cpu(hdr->ucode_version) >> 8) & 0xff;
 	DRM_INFO("Found UVD firmware Version: %hu.%hu Family ID: %hu\n",
 		version_major, version_minor, family_id);
-
-	adev->uvd.fw_version = ((version_major << 24) | (version_minor << 16) |
-				(family_id << 8));
 
 	bo_size = AMDGPU_GPU_PAGE_ALIGN(le32_to_cpu(hdr->ucode_size_bytes) + 8)
 		 +  AMDGPU_UVD_STACK_SIZE + AMDGPU_UVD_HEAP_SIZE;
@@ -275,8 +267,6 @@ int amdgpu_uvd_resume(struct amdgpu_device *adev)
 	offset = le32_to_cpu(hdr->ucode_array_offset_bytes);
 	memcpy(adev->uvd.cpu_addr, (adev->uvd.fw->data) + offset,
 		(adev->uvd.fw->size) - offset);
-
-	cancel_delayed_work_sync(&adev->uvd.idle_work);
 
 	size = amdgpu_bo_size(adev->uvd.vcpu_bo);
 	size -= le32_to_cpu(hdr->ucode_size_bytes);

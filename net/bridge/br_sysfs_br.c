@@ -22,6 +22,7 @@
 
 #include "br_private.h"
 
+#define to_dev(obj)	container_of(obj, struct device, kobj)
 #define to_bridge(cd)	((struct net_bridge *)netdev_priv(to_net_dev(cd)))
 
 /*
@@ -101,15 +102,8 @@ static ssize_t ageing_time_show(struct device *d,
 
 static int set_ageing_time(struct net_bridge *br, unsigned long val)
 {
-	int ret;
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-
-	ret = br_set_ageing_time(br, val);
-	rtnl_unlock();
-
-	return ret;
+	br->ageing_time = clock_t_to_jiffies(val);
+	return 0;
 }
 
 static ssize_t ageing_time_store(struct device *d,
@@ -813,7 +807,7 @@ static ssize_t brforward_read(struct file *filp, struct kobject *kobj,
 			      struct bin_attribute *bin_attr,
 			      char *buf, loff_t off, size_t count)
 {
-	struct device *dev = kobj_to_dev(kobj);
+	struct device *dev = to_dev(kobj);
 	struct net_bridge *br = to_bridge(dev);
 	int n;
 

@@ -51,8 +51,6 @@ extern struct bus_type spi_bus_type;
  * @bytes_tx:      number of bytes sent to device
  * @bytes_rx:      number of bytes received from device
  *
- * @transfer_bytes_histo:
- *                 transfer bytes histogramm
  */
 struct spi_statistics {
 	spinlock_t		lock; /* lock for the whole structure */
@@ -70,8 +68,6 @@ struct spi_statistics {
 	unsigned long long	bytes_rx;
 	unsigned long long	bytes_tx;
 
-#define SPI_STATISTICS_HISTO_SIZE 17
-	unsigned long transfer_bytes_histo[SPI_STATISTICS_HISTO_SIZE];
 };
 
 void spi_statistics_add_transfer_stats(struct spi_statistics *stats,
@@ -254,7 +250,7 @@ static inline struct spi_driver *to_spi_driver(struct device_driver *drv)
 	return drv ? container_of(drv, struct spi_driver, driver) : NULL;
 }
 
-extern int __spi_register_driver(struct module *owner, struct spi_driver *sdrv);
+extern int spi_register_driver(struct spi_driver *sdrv);
 
 /**
  * spi_unregister_driver - reverse effect of spi_register_driver
@@ -266,10 +262,6 @@ static inline void spi_unregister_driver(struct spi_driver *sdrv)
 	if (sdrv)
 		driver_unregister(&sdrv->driver);
 }
-
-/* use a define to avoid include chaining to get THIS_MODULE */
-#define spi_register_driver(driver) \
-	__spi_register_driver(THIS_MODULE, driver)
 
 /**
  * module_spi_driver() - Helper macro for registering a SPI driver
@@ -424,12 +416,6 @@ struct spi_master {
 #define SPI_MASTER_NO_TX	BIT(2)		/* can't do buffer write */
 #define SPI_MASTER_MUST_RX      BIT(3)		/* requires rx */
 #define SPI_MASTER_MUST_TX      BIT(4)		/* requires tx */
-
-	/*
-	 * on some hardware transfer size may be constrained
-	 * the limit may depend on device transfer settings
-	 */
-	size_t (*max_transfer_size)(struct spi_device *spi);
 
 	/* lock and mutex for SPI bus locking */
 	spinlock_t		bus_lock_spinlock;
@@ -768,15 +754,10 @@ struct spi_message {
 	void			*state;
 };
 
-static inline void spi_message_init_no_memset(struct spi_message *m)
-{
-	INIT_LIST_HEAD(&m->transfers);
-}
-
 static inline void spi_message_init(struct spi_message *m)
 {
 	memset(m, 0, sizeof *m);
-	spi_message_init_no_memset(m);
+	INIT_LIST_HEAD(&m->transfers);
 }
 
 static inline void
@@ -843,15 +824,6 @@ extern int spi_async(struct spi_device *spi, struct spi_message *message);
 extern int spi_async_locked(struct spi_device *spi,
 			    struct spi_message *message);
 
-static inline size_t
-spi_max_transfer_size(struct spi_device *spi)
-{
-	struct spi_master *master = spi->master;
-	if (!master->max_transfer_size)
-		return SIZE_MAX;
-	return master->max_transfer_size(spi);
-}
-
 /*---------------------------------------------------------------------------*/
 
 /* All these synchronous SPI transfer routines are utilities layered
@@ -871,10 +843,8 @@ extern int spi_bus_unlock(struct spi_master *master);
  * @len: data buffer size
  * Context: can sleep
  *
- * This function writes the buffer @buf.
+ * This writes the buffer and returns zero or a negative error code.
  * Callable only from contexts that can sleep.
- *
- * Return: zero on success, else a negative error code.
  */
 static inline int
 spi_write(struct spi_device *spi, const void *buf, size_t len)
@@ -897,10 +867,8 @@ spi_write(struct spi_device *spi, const void *buf, size_t len)
  * @len: data buffer size
  * Context: can sleep
  *
- * This function reads the buffer @buf.
+ * This reads the buffer and returns zero or a negative error code.
  * Callable only from contexts that can sleep.
- *
- * Return: zero on success, else a negative error code.
  */
 static inline int
 spi_read(struct spi_device *spi, void *buf, size_t len)
@@ -927,7 +895,7 @@ spi_read(struct spi_device *spi, void *buf, size_t len)
  *
  * For more specific semantics see spi_sync().
  *
- * Return: Return: zero on success, else a negative error code.
+ * It returns zero on success, else a negative error code.
  */
 static inline int
 spi_sync_transfer(struct spi_device *spi, struct spi_transfer *xfers,
@@ -951,10 +919,9 @@ extern int spi_write_then_read(struct spi_device *spi,
  * @cmd: command to be written before data is read back
  * Context: can sleep
  *
- * Callable only from contexts that can sleep.
- *
- * Return: the (unsigned) eight bit number returned by the
- * device, or else a negative error code.
+ * This returns the (unsigned) eight bit number returned by the
+ * device, or else a negative error code.  Callable only from
+ * contexts that can sleep.
  */
 static inline ssize_t spi_w8r8(struct spi_device *spi, u8 cmd)
 {
@@ -973,13 +940,12 @@ static inline ssize_t spi_w8r8(struct spi_device *spi, u8 cmd)
  * @cmd: command to be written before data is read back
  * Context: can sleep
  *
+ * This returns the (unsigned) sixteen bit number returned by the
+ * device, or else a negative error code.  Callable only from
+ * contexts that can sleep.
+ *
  * The number is returned in wire-order, which is at least sometimes
  * big-endian.
- *
- * Callable only from contexts that can sleep.
- *
- * Return: the (unsigned) sixteen bit number returned by the
- * device, or else a negative error code.
  */
 static inline ssize_t spi_w8r16(struct spi_device *spi, u8 cmd)
 {
@@ -998,13 +964,13 @@ static inline ssize_t spi_w8r16(struct spi_device *spi, u8 cmd)
  * @cmd: command to be written before data is read back
  * Context: can sleep
  *
+ * This returns the (unsigned) sixteen bit number returned by the device in cpu
+ * endianness, or else a negative error code. Callable only from contexts that
+ * can sleep.
+ *
  * This function is similar to spi_w8r16, with the exception that it will
  * convert the read 16 bit data word from big-endian to native endianness.
  *
- * Callable only from contexts that can sleep.
- *
- * Return: the (unsigned) sixteen bit number returned by the device in cpu
- * endianness, or else a negative error code.
  */
 static inline ssize_t spi_w8r16be(struct spi_device *spi, u8 cmd)
 
@@ -1135,7 +1101,12 @@ spi_add_device(struct spi_device *spi);
 extern struct spi_device *
 spi_new_device(struct spi_master *, struct spi_board_info *);
 
-extern void spi_unregister_device(struct spi_device *spi);
+static inline void
+spi_unregister_device(struct spi_device *spi)
+{
+	if (spi)
+		device_unregister(&spi->dev);
+}
 
 extern const struct spi_device_id *
 spi_get_device_id(const struct spi_device *sdev);

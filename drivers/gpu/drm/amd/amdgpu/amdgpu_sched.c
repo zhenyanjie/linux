@@ -26,7 +26,6 @@
 #include <linux/sched.h>
 #include <drm/drmP.h>
 #include "amdgpu.h"
-#include "amdgpu_trace.h"
 
 static struct fence *amdgpu_sched_dependency(struct amd_sched_job *sched_job)
 {
@@ -45,20 +44,24 @@ static struct fence *amdgpu_sched_run_job(struct amd_sched_job *sched_job)
 		return NULL;
 	}
 	job = to_amdgpu_job(sched_job);
-	trace_amdgpu_sched_run_job(job);
-	r = amdgpu_ib_schedule(job->adev, job->num_ibs, job->ibs, job->owner);
+	mutex_lock(&job->job_lock);
+	r = amdgpu_ib_schedule(job->adev,
+			       job->num_ibs,
+			       job->ibs,
+			       job->base.owner);
 	if (r) {
 		DRM_ERROR("Error scheduling IBs (%d)\n", r);
 		goto err;
 	}
 
-	fence = job->ibs[job->num_ibs - 1].fence;
-	fence_get(&fence->base);
+	fence = amdgpu_fence_ref(job->ibs[job->num_ibs - 1].fence);
 
 err:
 	if (job->free_job)
 		job->free_job(job);
 
+	mutex_unlock(&job->job_lock);
+	fence_put(&job->base.s_fence->base);
 	kfree(job);
 	return fence ? &fence->base : NULL;
 }
@@ -84,19 +87,21 @@ int amdgpu_sched_ib_submit_kernel_helper(struct amdgpu_device *adev,
 			return -ENOMEM;
 		job->base.sched = &ring->sched;
 		job->base.s_entity = &adev->kernel_ctx.rings[ring->idx].entity;
-		job->base.s_fence = amd_sched_fence_create(job->base.s_entity, owner);
-		if (!job->base.s_fence) {
-			kfree(job);
-			return -ENOMEM;
-		}
-		*f = fence_get(&job->base.s_fence->base);
-
 		job->adev = adev;
 		job->ibs = ibs;
 		job->num_ibs = num_ibs;
-		job->owner = owner;
+		job->base.owner = owner;
+		mutex_init(&job->job_lock);
 		job->free_job = free_job;
-		amd_sched_entity_push_job(&job->base);
+		mutex_lock(&job->job_lock);
+		r = amd_sched_entity_push_job(&job->base);
+		if (r) {
+			mutex_unlock(&job->job_lock);
+			kfree(job);
+			return r;
+		}
+		*f = fence_get(&job->base.s_fence->base);
+		mutex_unlock(&job->job_lock);
 	} else {
 		r = amdgpu_ib_schedule(adev, num_ibs, ibs, owner);
 		if (r)

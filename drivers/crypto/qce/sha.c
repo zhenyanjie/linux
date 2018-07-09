@@ -51,8 +51,9 @@ static void qce_ahash_done(void *data)
 	if (error)
 		dev_dbg(qce->dev, "ahash dma termination error (%d)\n", error);
 
-	dma_unmap_sg(qce->dev, req->src, rctx->src_nents, DMA_TO_DEVICE);
-	dma_unmap_sg(qce->dev, &rctx->result_sg, 1, DMA_FROM_DEVICE);
+	qce_unmapsg(qce->dev, req->src, rctx->src_nents, DMA_TO_DEVICE,
+		    rctx->src_chained);
+	qce_unmapsg(qce->dev, &rctx->result_sg, 1, DMA_FROM_DEVICE, 0);
 
 	memcpy(rctx->digest, result->auth_iv, digestsize);
 	if (req->result)
@@ -91,19 +92,16 @@ static int qce_ahash_async_req_handle(struct crypto_async_request *async_req)
 		rctx->authklen = AES_KEYSIZE_128;
 	}
 
-	rctx->src_nents = sg_nents_for_len(req->src, req->nbytes);
-	if (rctx->src_nents < 0) {
-		dev_err(qce->dev, "Invalid numbers of src SG.\n");
-		return rctx->src_nents;
-	}
-
-	ret = dma_map_sg(qce->dev, req->src, rctx->src_nents, DMA_TO_DEVICE);
+	rctx->src_nents = qce_countsg(req->src, req->nbytes,
+				      &rctx->src_chained);
+	ret = qce_mapsg(qce->dev, req->src, rctx->src_nents, DMA_TO_DEVICE,
+			rctx->src_chained);
 	if (ret < 0)
 		return ret;
 
 	sg_init_one(&rctx->result_sg, qce->dma.result_buf, QCE_RESULT_BUF_SZ);
 
-	ret = dma_map_sg(qce->dev, &rctx->result_sg, 1, DMA_FROM_DEVICE);
+	ret = qce_mapsg(qce->dev, &rctx->result_sg, 1, DMA_FROM_DEVICE, 0);
 	if (ret < 0)
 		goto error_unmap_src;
 
@@ -123,9 +121,10 @@ static int qce_ahash_async_req_handle(struct crypto_async_request *async_req)
 error_terminate:
 	qce_dma_terminate_all(&qce->dma);
 error_unmap_dst:
-	dma_unmap_sg(qce->dev, &rctx->result_sg, 1, DMA_FROM_DEVICE);
+	qce_unmapsg(qce->dev, &rctx->result_sg, 1, DMA_FROM_DEVICE, 0);
 error_unmap_src:
-	dma_unmap_sg(qce->dev, req->src, rctx->src_nents, DMA_TO_DEVICE);
+	qce_unmapsg(qce->dev, req->src, rctx->src_nents, DMA_TO_DEVICE,
+		    rctx->src_chained);
 	return ret;
 }
 

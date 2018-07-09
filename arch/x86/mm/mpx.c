@@ -123,7 +123,7 @@ static int get_reg_offset(struct insn *insn, struct pt_regs *regs,
 		break;
 	}
 
-	if (regno >= nr_registers) {
+	if (regno > nr_registers) {
 		WARN_ONCE(1, "decoded an instruction with an invalid register");
 		return -EINVAL;
 	}
@@ -237,8 +237,7 @@ bad_opcode:
  */
 siginfo_t *mpx_generate_siginfo(struct pt_regs *regs)
 {
-	const struct mpx_bndreg_state *bndregs;
-	const struct mpx_bndreg *bndreg;
+	const struct bndreg *bndregs, *bndreg;
 	siginfo_t *info = NULL;
 	struct insn insn;
 	uint8_t bndregno;
@@ -259,13 +258,13 @@ siginfo_t *mpx_generate_siginfo(struct pt_regs *regs)
 		goto err_out;
 	}
 	/* get bndregs field from current task's xsave area */
-	bndregs = get_xsave_field_ptr(XFEATURE_MASK_BNDREGS);
+	bndregs = get_xsave_field_ptr(XSTATE_BNDREGS);
 	if (!bndregs) {
 		err = -EINVAL;
 		goto err_out;
 	}
 	/* now go select the individual register in the set of 4 */
-	bndreg = &bndregs->bndreg[bndregno];
+	bndreg = &bndregs[bndregno];
 
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info) {
@@ -307,7 +306,7 @@ err_out:
 
 static __user void *mpx_get_bounds_dir(void)
 {
-	const struct mpx_bndcsr *bndcsr;
+	const struct bndcsr *bndcsr;
 
 	if (!cpu_feature_enabled(X86_FEATURE_MPX))
 		return MPX_INVALID_BOUNDS_DIR;
@@ -316,7 +315,7 @@ static __user void *mpx_get_bounds_dir(void)
 	 * The bounds directory pointer is stored in a register
 	 * only accessible if we first do an xsave.
 	 */
-	bndcsr = get_xsave_field_ptr(XFEATURE_MASK_BNDCSR);
+	bndcsr = get_xsave_field_ptr(XSTATE_BNDCSR);
 	if (!bndcsr)
 		return MPX_INVALID_BOUNDS_DIR;
 
@@ -490,10 +489,10 @@ out_unmap:
 static int do_mpx_bt_fault(void)
 {
 	unsigned long bd_entry, bd_base;
-	const struct mpx_bndcsr *bndcsr;
+	const struct bndcsr *bndcsr;
 	struct mm_struct *mm = current->mm;
 
-	bndcsr = get_xsave_field_ptr(XFEATURE_MASK_BNDCSR);
+	bndcsr = get_xsave_field_ptr(XSTATE_BNDCSR);
 	if (!bndcsr)
 		return -EINVAL;
 	/*

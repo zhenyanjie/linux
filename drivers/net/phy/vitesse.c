@@ -66,7 +66,6 @@
 #define PHY_ID_VSC8244			0x000fc6c0
 #define PHY_ID_VSC8514			0x00070670
 #define PHY_ID_VSC8574			0x000704a0
-#define PHY_ID_VSC8601			0x00070420
 #define PHY_ID_VSC8662			0x00070660
 #define PHY_ID_VSC8221			0x000fc550
 #define PHY_ID_VSC8211			0x000fc4b0
@@ -134,8 +133,7 @@ static int vsc82xx_config_intr(struct phy_device *phydev)
 			(phydev->drv->phy_id == PHY_ID_VSC8234 ||
 			 phydev->drv->phy_id == PHY_ID_VSC8244 ||
 			 phydev->drv->phy_id == PHY_ID_VSC8514 ||
-			 phydev->drv->phy_id == PHY_ID_VSC8574 ||
-			 phydev->drv->phy_id == PHY_ID_VSC8601) ?
+			 phydev->drv->phy_id == PHY_ID_VSC8574) ?
 				MII_VSC8244_IMASK_MASK :
 				MII_VSC8221_IMASK_MASK);
 	else {
@@ -236,6 +234,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
+	.driver         = { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= PHY_ID_VSC8244,
 	.name		= "Vitesse VSC8244",
@@ -247,6 +246,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= PHY_ID_VSC8514,
 	.name		= "Vitesse VSC8514",
@@ -258,6 +258,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id         = PHY_ID_VSC8574,
 	.name           = "Vitesse VSC8574",
@@ -269,17 +270,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
-}, {
-	.phy_id         = PHY_ID_VSC8601,
-	.name           = "Vitesse VSC8601",
-	.phy_id_mask    = 0x000ffff0,
-	.features       = PHY_GBIT_FEATURES,
-	.flags          = PHY_HAS_INTERRUPT,
-	.config_init    = &genphy_config_init,
-	.config_aneg    = &genphy_config_aneg,
-	.read_status    = &genphy_read_status,
-	.ack_interrupt  = &vsc824x_ack_interrupt,
-	.config_intr    = &vsc82xx_config_intr,
+	.driver         = { .owner = THIS_MODULE,},
 }, {
 	.phy_id         = PHY_ID_VSC8662,
 	.name           = "Vitesse VSC8662",
@@ -291,6 +282,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
 	.config_intr    = &vsc82xx_config_intr,
+	.driver         = { .owner = THIS_MODULE,},
 }, {
 	/* Vitesse 8221 */
 	.phy_id		= PHY_ID_VSC8221,
@@ -303,6 +295,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	/* Vitesse 8211 */
 	.phy_id		= PHY_ID_VSC8211,
@@ -315,6 +308,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &vsc824x_ack_interrupt,
 	.config_intr	= &vsc82xx_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 } };
 
 module_phy_driver(vsc82xx_driver);

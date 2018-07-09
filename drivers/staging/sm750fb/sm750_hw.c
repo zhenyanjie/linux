@@ -1,39 +1,42 @@
 #include <linux/version.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/string.h>
-#include <linux/mm.h>
-#include <linux/slab.h>
-#include <linux/delay.h>
-#include <linux/fb.h>
-#include <linux/ioport.h>
-#include <linux/init.h>
-#include <linux/pci.h>
-#include <linux/vmalloc.h>
-#include <linux/pagemap.h>
+#include<linux/module.h>
+#include<linux/kernel.h>
+#include<linux/errno.h>
+#include<linux/string.h>
+#include<linux/mm.h>
+#include<linux/slab.h>
+#include<linux/delay.h>
+#include<linux/fb.h>
+#include<linux/ioport.h>
+#include<linux/init.h>
+#include<linux/pci.h>
+#include<linux/vmalloc.h>
+#include<linux/pagemap.h>
 #include <linux/console.h>
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
 #endif
-#include <linux/platform_device.h>
-#include <linux/screen_info.h>
-#include <linux/sizes.h>
+#include<linux/platform_device.h>
+#include<linux/screen_info.h>
 
 #include "sm750.h"
+#include "sm750_hw.h"
 #include "ddk750.h"
 #include "sm750_accel.h"
 
-int hw_sm750_map(struct sm750_dev *sm750_dev, struct pci_dev *pdev)
+int hw_sm750_map(struct lynx_share *share, struct pci_dev *pdev)
 {
 	int ret;
+	struct sm750_share *spec_share;
 
+
+	spec_share = container_of(share, struct sm750_share, share);
 	ret = 0;
 
-	sm750_dev->vidreg_start  = pci_resource_start(pdev, 1);
-	sm750_dev->vidreg_size = SZ_2M;
+	share->vidreg_start  = pci_resource_start(pdev, 1);
+	share->vidreg_size = MB(2);
 
-	pr_info("mmio phyAddr = %lx\n", sm750_dev->vidreg_start);
+	pr_info("mmio phyAddr = %lx\n", share->vidreg_start);
 
 	/* reserve the vidreg space of smi adaptor
 	 * if you do this, u need to add release region code
@@ -47,41 +50,48 @@ int hw_sm750_map(struct sm750_dev *sm750_dev, struct pci_dev *pdev)
 	}
 
 	/* now map mmio and vidmem*/
-	sm750_dev->pvReg = ioremap_nocache(sm750_dev->vidreg_start,
-					   sm750_dev->vidreg_size);
-	if (!sm750_dev->pvReg) {
+	share->pvReg = ioremap_nocache(share->vidreg_start, share->vidreg_size);
+	if (!share->pvReg) {
 		pr_err("mmio failed\n");
 		ret = -EFAULT;
 		goto exit;
 	} else {
-		pr_info("mmio virtual addr = %p\n", sm750_dev->pvReg);
+		pr_info("mmio virtual addr = %p\n", share->pvReg);
 	}
 
 
-	sm750_dev->accel.dprBase = sm750_dev->pvReg + DE_BASE_ADDR_TYPE1;
-	sm750_dev->accel.dpPortBase = sm750_dev->pvReg + DE_PORT_ADDR_TYPE1;
+	share->accel.dprBase = share->pvReg + DE_BASE_ADDR_TYPE1;
+	share->accel.dpPortBase = share->pvReg + DE_PORT_ADDR_TYPE1;
 
-	ddk750_set_mmio(sm750_dev->pvReg, sm750_dev->devid, sm750_dev->revid);
+	ddk750_set_mmio(share->pvReg, share->devid, share->revid);
 
-	sm750_dev->vidmem_start = pci_resource_start(pdev, 0);
+	share->vidmem_start = pci_resource_start(pdev, 0);
 	/* don't use pdev_resource[x].end - resource[x].start to
 	 * calculate the resource size,its only the maximum available
 	 * size but not the actual size,use
-	 * @ddk750_getVMSize function can be safe.
+	 * @hw_sm750_getVMSize function can be safe.
 	 * */
-	sm750_dev->vidmem_size = ddk750_getVMSize();
+	share->vidmem_size = hw_sm750_getVMSize(share);
 	pr_info("video memory phyAddr = %lx, size = %u bytes\n",
-		sm750_dev->vidmem_start, sm750_dev->vidmem_size);
+	share->vidmem_start, share->vidmem_size);
 
 	/* reserve the vidmem space of smi adaptor */
-	sm750_dev->pvMem = ioremap_wc(sm750_dev->vidmem_start,
-				      sm750_dev->vidmem_size);
-	if (!sm750_dev->pvMem) {
+#if 0
+	ret = pci_request_region(pdev, 0, _moduleName_);
+	if (ret) {
+		pr_err("Can not request PCI regions.\n");
+		goto exit;
+	}
+#endif
+
+	share->pvMem = ioremap_wc(share->vidmem_start, share->vidmem_size);
+
+	if (!share->pvMem) {
 		pr_err("Map video memory failed\n");
 		ret = -EFAULT;
 		goto exit;
 	} else {
-		pr_info("video memory vaddr = %p\n", sm750_dev->pvMem);
+		pr_info("video memory vaddr = %p\n", share->pvMem);
 	}
 exit:
 	return ret;
@@ -89,11 +99,13 @@ exit:
 
 
 
-int hw_sm750_inithw(struct sm750_dev *sm750_dev, struct pci_dev *pdev)
+int hw_sm750_inithw(struct lynx_share *share, struct pci_dev *pdev)
 {
+	struct sm750_share *spec_share;
 	struct init_status *parm;
 
-	parm = &sm750_dev->initParm;
+	spec_share = container_of(share, struct sm750_share, share);
+	parm = &spec_share->state.initParm;
 	if (parm->chip_clk == 0)
 		parm->chip_clk = (getChipType() == SM750LE) ?
 						DEFAULT_SM750LE_CHIP_CLOCK :
@@ -104,16 +116,22 @@ int hw_sm750_inithw(struct sm750_dev *sm750_dev, struct pci_dev *pdev)
 	if (parm->master_clk == 0)
 		parm->master_clk = parm->chip_clk/3;
 
-	ddk750_initHw((initchip_param_t *)&sm750_dev->initParm);
+	ddk750_initHw((initchip_param_t *)&spec_share->state.initParm);
 	/* for sm718,open pci burst */
-	if (sm750_dev->devid == 0x718) {
+	if (share->devid == 0x718) {
 		POKE32(SYSTEM_CTRL,
 				FIELD_SET(PEEK32(SYSTEM_CTRL), SYSTEM_CTRL, PCI_BURST, ON));
 	}
 
+	/* sm750 use sii164, it can be setup with default value
+	 * by on power, so initDVIDisp can be skipped */
+#if 0
+	ddk750_initDVIDisp();
+#endif
+
 	if (getChipType() != SM750LE) {
 		/* does user need CRT ?*/
-		if (sm750_dev->nocrt) {
+		if (spec_share->state.nocrt) {
 			POKE32(MISC_CTRL,
 					FIELD_SET(PEEK32(MISC_CTRL),
 					MISC_CTRL,
@@ -135,7 +153,7 @@ int hw_sm750_inithw(struct sm750_dev *sm750_dev, struct pci_dev *pdev)
 					DPMS, VPHP));
 		}
 
-		switch (sm750_dev->pnltype) {
+		switch (spec_share->state.pnltype) {
 		case sm750_doubleTFT:
 		case sm750_24TFT:
 		case sm750_dualTFT:
@@ -143,7 +161,7 @@ int hw_sm750_inithw(struct sm750_dev *sm750_dev, struct pci_dev *pdev)
 			FIELD_VALUE(PEEK32(PANEL_DISPLAY_CTRL),
 						PANEL_DISPLAY_CTRL,
 						TFT_DISP,
-						sm750_dev->pnltype));
+						spec_share->state.pnltype));
 		break;
 		}
 	} else {
@@ -151,30 +169,48 @@ int hw_sm750_inithw(struct sm750_dev *sm750_dev, struct pci_dev *pdev)
 		/* Set up GPIO for software I2C to program DVI chip in the
 		   Xilinx SP605 board, in order to have video signal.
 		 */
-	sm750_sw_i2c_init(0, 1);
+	swI2CInit(0, 1);
 
 
 	/* Customer may NOT use CH7301 DVI chip, which has to be
 	   initialized differently.
 	*/
-	if (sm750_sw_i2c_read_reg(0xec, 0x4a) == 0x95) {
+	if (swI2CReadReg(0xec, 0x4a) == 0x95) {
 		/* The following register values for CH7301 are from
 		   Chrontel app note and our experiment.
 		*/
 			pr_info("yes,CH7301 DVI chip found\n");
-		sm750_sw_i2c_write_reg(0xec, 0x1d, 0x16);
-		sm750_sw_i2c_write_reg(0xec, 0x21, 0x9);
-		sm750_sw_i2c_write_reg(0xec, 0x49, 0xC0);
+		swI2CWriteReg(0xec, 0x1d, 0x16);
+		swI2CWriteReg(0xec, 0x21, 0x9);
+		swI2CWriteReg(0xec, 0x49, 0xC0);
 			pr_info("okay,CH7301 DVI chip setup done\n");
 	}
 	}
 
 	/* init 2d engine */
-	if (!sm750_dev->accel_off)
-		hw_sm750_initAccel(sm750_dev);
+	if (!share->accel_off)
+		hw_sm750_initAccel(share);
 
 	return 0;
 }
+
+
+resource_size_t hw_sm750_getVMSize(struct lynx_share *share)
+{
+	resource_size_t ret;
+
+	ret = ddk750_getVMSize();
+	return ret;
+}
+
+
+
+int hw_sm750_output_checkMode(struct lynxfb_output *output, struct fb_var_screeninfo *var)
+{
+
+	return 0;
+}
+
 
 int hw_sm750_output_setMode(struct lynxfb_output *output,
 									struct fb_var_screeninfo *var, struct fb_fix_screeninfo *fix)
@@ -218,19 +254,25 @@ int hw_sm750_output_setMode(struct lynxfb_output *output,
 	return ret;
 }
 
+void hw_sm750_output_clear(struct lynxfb_output *output)
+{
+
+	return;
+}
+
 int hw_sm750_crtc_checkMode(struct lynxfb_crtc *crtc, struct fb_var_screeninfo *var)
 {
-	struct sm750_dev *sm750_dev;
-	struct lynxfb_par *par = container_of(crtc, struct lynxfb_par, crtc);
+	struct lynx_share *share;
 
-	sm750_dev = par->dev;
+
+	share = container_of(crtc, struct lynxfb_par, crtc)->share;
 
 	switch (var->bits_per_pixel) {
 	case 8:
 	case 16:
 		break;
 	case 32:
-		if (sm750_dev->revid == SM750LE_REVISION_ID) {
+		if (share->revid == SM750LE_REVISION_ID) {
 			pr_debug("750le do not support 32bpp\n");
 			return -EINVAL;
 		}
@@ -255,15 +297,15 @@ int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
 	u32 reg;
 	mode_parameter_t modparm;
 	clock_type_t clock;
-	struct sm750_dev *sm750_dev;
+	struct lynx_share *share;
 	struct lynxfb_par *par;
 
 
 	ret = 0;
 	par = container_of(crtc, struct lynxfb_par, crtc);
-	sm750_dev = par->dev;
-
-	if (!sm750_dev->accel_off) {
+	share = par->share;
+#if 1
+	if (!share->accel_off) {
 		/* set 2d engine pixel format according to mode bpp */
 		switch (var->bits_per_pixel) {
 		case 8:
@@ -277,8 +319,9 @@ int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
 			fmt = 2;
 			break;
 		}
-		hw_set2dformat(&sm750_dev->accel, fmt);
+		hw_set2dformat(&share->accel, fmt);
 	}
+#endif
 
 	/* set timing */
 	modparm.pixel_clock = ps_to_hz(var->pixclock);
@@ -316,7 +359,7 @@ int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
 
 		reg = var->xres * (var->bits_per_pixel >> 3);
 		/* crtc->channel is not equal to par->index on numeric,be aware of that */
-		reg = ALIGN(reg, crtc->line_pad);
+		reg = PADDING(crtc->line_pad, reg);
 
 		POKE32(PANEL_FB_WIDTH,
 			FIELD_VALUE(0, PANEL_FB_WIDTH, WIDTH, reg)|
@@ -348,7 +391,7 @@ int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
 		POKE32(CRT_FB_ADDRESS, crtc->oScreen);
 		reg = var->xres * (var->bits_per_pixel >> 3);
 		/* crtc->channel is not equal to par->index on numeric,be aware of that */
-		reg = ALIGN(reg, crtc->line_pad);
+		reg = PADDING(crtc->line_pad, reg);
 
 		POKE32(CRT_FB_WIDTH,
 			FIELD_VALUE(0, CRT_FB_WIDTH, WIDTH, reg)|
@@ -366,6 +409,12 @@ exit:
 	return ret;
 }
 
+void hw_sm750_crtc_clear(struct lynxfb_crtc *crtc)
+{
+
+	return;
+}
+
 int hw_sm750_setColReg(struct lynxfb_crtc *crtc, ushort index,
 								ushort red, ushort green, ushort blue)
 {
@@ -380,23 +429,41 @@ int hw_sm750le_setBLANK(struct lynxfb_output *output, int blank)
 	int dpms, crtdb;
 
 	switch (blank) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_UNBLANK:
+#else
+	case VESA_NO_BLANKING:
+#endif
 		dpms = CRT_DISPLAY_CTRL_DPMS_0;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_OFF;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_NORMAL:
 		dpms = CRT_DISPLAY_CTRL_DPMS_0;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
 		break;
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_VSYNC_SUSPEND:
+#else
+	case VESA_VSYNC_SUSPEND:
+#endif
 		dpms = CRT_DISPLAY_CTRL_DPMS_2;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_HSYNC_SUSPEND:
+#else
+	case VESA_HSYNC_SUSPEND:
+#endif
 		dpms = CRT_DISPLAY_CTRL_DPMS_1;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_POWERDOWN:
+#else
+	case VESA_POWERDOWN:
+#endif
 		dpms = CRT_DISPLAY_CTRL_DPMS_3;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
 		break;
@@ -418,29 +485,47 @@ int hw_sm750_setBLANK(struct lynxfb_output *output, int blank)
 	dpms = pps = crtdb = 0;
 
 	switch (blank) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_UNBLANK:
+#else
+	case VESA_NO_BLANKING:
+#endif
 		pr_info("flag = FB_BLANK_UNBLANK\n");
 		dpms = SYSTEM_CTRL_DPMS_VPHP;
 		pps = PANEL_DISPLAY_CTRL_DATA_ENABLE;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_OFF;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_NORMAL:
 		pr_info("flag = FB_BLANK_NORMAL\n");
 		dpms = SYSTEM_CTRL_DPMS_VPHP;
 		pps = PANEL_DISPLAY_CTRL_DATA_DISABLE;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
 		break;
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_VSYNC_SUSPEND:
+#else
+	case VESA_VSYNC_SUSPEND:
+#endif
 		dpms = SYSTEM_CTRL_DPMS_VNHP;
 		pps = PANEL_DISPLAY_CTRL_DATA_DISABLE;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_HSYNC_SUSPEND:
+#else
+	case VESA_HSYNC_SUSPEND:
+#endif
 		dpms = SYSTEM_CTRL_DPMS_VPHN;
 		pps = PANEL_DISPLAY_CTRL_DATA_DISABLE;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
 	case FB_BLANK_POWERDOWN:
+#else
+	case VESA_POWERDOWN:
+#endif
 		dpms = SYSTEM_CTRL_DPMS_VNHN;
 		pps = PANEL_DISPLAY_CTRL_DATA_DISABLE;
 		crtdb = CRT_DISPLAY_CTRL_BLANK_ON;
@@ -460,7 +545,7 @@ int hw_sm750_setBLANK(struct lynxfb_output *output, int blank)
 }
 
 
-void hw_sm750_initAccel(struct sm750_dev *sm750_dev)
+void hw_sm750_initAccel(struct lynx_share *share)
 {
 	u32 reg;
 
@@ -487,7 +572,7 @@ void hw_sm750_initAccel(struct sm750_dev *sm750_dev)
 	}
 
 	/* call 2d init */
-	sm750_dev->accel.de_init(&sm750_dev->accel);
+	share->accel.de_init(&share->accel);
 }
 
 int hw_sm750le_deWait(void)

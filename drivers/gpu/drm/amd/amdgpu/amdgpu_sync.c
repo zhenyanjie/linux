@@ -87,15 +87,6 @@ static bool amdgpu_sync_test_owner(struct fence *f, void *owner)
 	return false;
 }
 
-static void amdgpu_sync_keep_later(struct fence **keep, struct fence *fence)
-{
-	if (*keep && fence_is_later(*keep, fence))
-		return;
-
-	fence_put(*keep);
-	*keep = fence_get(fence);
-}
-
 /**
  * amdgpu_sync_fence - remember to sync to this fence
  *
@@ -108,21 +99,35 @@ int amdgpu_sync_fence(struct amdgpu_device *adev, struct amdgpu_sync *sync,
 {
 	struct amdgpu_sync_entry *e;
 	struct amdgpu_fence *fence;
+	struct amdgpu_fence *other;
+	struct fence *tmp, *later;
 
 	if (!f)
 		return 0;
 
 	if (amdgpu_sync_same_dev(adev, f) &&
-	    amdgpu_sync_test_owner(f, AMDGPU_FENCE_OWNER_VM))
-		amdgpu_sync_keep_later(&sync->last_vm_update, f);
+	    amdgpu_sync_test_owner(f, AMDGPU_FENCE_OWNER_VM)) {
+		if (sync->last_vm_update) {
+			tmp = sync->last_vm_update;
+			BUG_ON(f->context != tmp->context);
+			later = (f->seqno - tmp->seqno <= INT_MAX) ? f : tmp;
+			sync->last_vm_update = fence_get(later);
+			fence_put(tmp);
+		} else
+			sync->last_vm_update = fence_get(f);
+	}
 
 	fence = to_amdgpu_fence(f);
 	if (!fence || fence->ring->adev != adev) {
 		hash_for_each_possible(sync->fences, e, node, f->context) {
+			struct fence *new;
 			if (unlikely(e->fence->context != f->context))
 				continue;
-
-			amdgpu_sync_keep_later(&e->fence, f);
+			new = fence_get(fence_later(e->fence, f));
+			if (new) {
+				fence_put(e->fence);
+				e->fence = new;
+			}
 			return 0;
 		}
 
@@ -135,7 +140,10 @@ int amdgpu_sync_fence(struct amdgpu_device *adev, struct amdgpu_sync *sync,
 		return 0;
 	}
 
-	amdgpu_sync_keep_later(&sync->sync_to[fence->ring->idx], f);
+	other = sync->sync_to[fence->ring->idx];
+	sync->sync_to[fence->ring->idx] = amdgpu_fence_ref(
+		amdgpu_fence_later(fence, other));
+	amdgpu_fence_unref(&other);
 
 	return 0;
 }
@@ -191,8 +199,8 @@ int amdgpu_sync_resv(struct amdgpu_device *adev,
 			 * for other VM updates and moves.
 			 */
 			fence_owner = amdgpu_sync_get_owner(f);
-			if ((owner != AMDGPU_FENCE_OWNER_UNDEFINED) &&
-			    (fence_owner != AMDGPU_FENCE_OWNER_UNDEFINED) &&
+			if ((owner != AMDGPU_FENCE_OWNER_MOVE) &&
+			    (fence_owner != AMDGPU_FENCE_OWNER_MOVE) &&
 			    ((owner == AMDGPU_FENCE_OWNER_VM) !=
 			     (fence_owner == AMDGPU_FENCE_OWNER_VM)))
 				continue;
@@ -254,11 +262,11 @@ int amdgpu_sync_wait(struct amdgpu_sync *sync)
 		return 0;
 
 	for (i = 0; i < AMDGPU_MAX_RINGS; ++i) {
-		struct fence *fence = sync->sync_to[i];
+		struct amdgpu_fence *fence = sync->sync_to[i];
 		if (!fence)
 			continue;
 
-		r = fence_wait(fence, false);
+		r = fence_wait(&fence->base, false);
 		if (r)
 			return r;
 	}
@@ -283,18 +291,12 @@ int amdgpu_sync_rings(struct amdgpu_sync *sync,
 	int i, r;
 
 	for (i = 0; i < AMDGPU_MAX_RINGS; ++i) {
-		struct amdgpu_ring *other = adev->rings[i];
+		struct amdgpu_fence *fence = sync->sync_to[i];
 		struct amdgpu_semaphore *semaphore;
-		struct amdgpu_fence *fence;
-
-		if (!sync->sync_to[i])
-			continue;
-
-		fence = to_amdgpu_fence(sync->sync_to[i]);
+		struct amdgpu_ring *other = adev->rings[i];
 
 		/* check if we really need to sync */
-		if (!amdgpu_enable_scheduler &&
-		    !amdgpu_fence_need_sync(fence, ring))
+		if (!amdgpu_fence_need_sync(fence, ring))
 			continue;
 
 		/* prevent GPU deadlocks */
@@ -303,14 +305,8 @@ int amdgpu_sync_rings(struct amdgpu_sync *sync,
 			return -EINVAL;
 		}
 
-		if (amdgpu_enable_scheduler || !amdgpu_enable_semaphores) {
-			r = fence_wait(sync->sync_to[i], true);
-			if (r)
-				return r;
-			continue;
-		}
-
-		if (count >= AMDGPU_NUM_SYNCS) {
+		if (amdgpu_enable_scheduler || !amdgpu_enable_semaphores ||
+		    (count >= AMDGPU_NUM_SYNCS)) {
 			/* not enough room, wait manually */
 			r = fence_wait(&fence->base, false);
 			if (r)
@@ -382,7 +378,7 @@ void amdgpu_sync_free(struct amdgpu_device *adev,
 		amdgpu_semaphore_free(adev, &sync->semaphores[i], fence);
 
 	for (i = 0; i < AMDGPU_MAX_RINGS; ++i)
-		fence_put(sync->sync_to[i]);
+		amdgpu_fence_unref(&sync->sync_to[i]);
 
 	fence_put(sync->last_vm_update);
 }

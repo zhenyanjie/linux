@@ -1028,22 +1028,18 @@ void musb_start(struct musb *musb)
 {
 	void __iomem    *regs = musb->mregs;
 	u8              devctl = musb_readb(regs, MUSB_DEVCTL);
-	u8		power;
 
 	dev_dbg(musb->controller, "<== devctl %02x\n", devctl);
 
 	musb_enable_interrupts(musb);
 	musb_writeb(regs, MUSB_TESTMODE, 0);
 
-	power = MUSB_POWER_ISOUPDATE;
-	/*
-	 * treating UNKNOWN as unspecified maximum speed, in which case
-	 * we will default to high-speed.
-	 */
-	if (musb->config->maximum_speed == USB_SPEED_HIGH ||
-			musb->config->maximum_speed == USB_SPEED_UNKNOWN)
-		power |= MUSB_POWER_HSENAB;
-	musb_writeb(regs, MUSB_POWER, power);
+	/* put into basic highspeed mode and start session */
+	musb_writeb(regs, MUSB_POWER, MUSB_POWER_ISOUPDATE
+			| MUSB_POWER_HSENAB
+			/* ENSUSPEND wedges tusb */
+			/* | MUSB_POWER_ENSUSPEND */
+		   );
 
 	musb->is_active = 0;
 	devctl = musb_readb(regs, MUSB_DEVCTL);
@@ -1360,7 +1356,8 @@ static int ep_config_from_table(struct musb *musb)
 		break;
 	}
 
-	pr_debug("%s: setup fifo_mode %d\n", musb_driver_name, fifo_mode);
+	printk(KERN_DEBUG "%s: setup fifo_mode %d\n",
+			musb_driver_name, fifo_mode);
 
 
 done:
@@ -1389,7 +1386,7 @@ done:
 		musb->nr_endpoints = max(epn, musb->nr_endpoints);
 	}
 
-	pr_debug("%s: %d/%d max ep, %d/%d memory\n",
+	printk(KERN_DEBUG "%s: %d/%d max ep, %d/%d memory\n",
 			musb_driver_name,
 			n + 1, musb->config->num_eps * 2 - 1,
 			offset, (1 << (musb->config->ram_bits + 2)));
@@ -1490,7 +1487,8 @@ static int musb_core_init(u16 musb_type, struct musb *musb)
 	if (reg & MUSB_CONFIGDATA_SOFTCONE)
 		strcat(aInfo, ", SoftConn");
 
-	pr_debug("%s: ConfigData=0x%02x (%s)\n", musb_driver_name, reg, aInfo);
+	printk(KERN_DEBUG "%s: ConfigData=0x%02x (%s)\n",
+			musb_driver_name, reg, aInfo);
 
 	aDate[0] = 0;
 	if (MUSB_CONTROLLER_MHDRC == musb_type) {
@@ -1500,8 +1498,9 @@ static int musb_core_init(u16 musb_type, struct musb *musb)
 		musb->is_multipoint = 0;
 		type = "";
 #ifndef	CONFIG_USB_OTG_BLACKLIST_HUB
-		pr_err("%s: kernel must blacklist external hubs\n",
-		       musb_driver_name);
+		printk(KERN_ERR
+			"%s: kernel must blacklist external hubs\n",
+			musb_driver_name);
 #endif
 	}
 
@@ -1510,8 +1509,8 @@ static int musb_core_init(u16 musb_type, struct musb *musb)
 	snprintf(aRevision, 32, "%d.%d%s", MUSB_HWVERS_MAJOR(musb->hwvers),
 		MUSB_HWVERS_MINOR(musb->hwvers),
 		(musb->hwvers & MUSB_HWVERS_RC) ? "RC" : "");
-	pr_debug("%s: %sHDRC RTL version %s %s\n",
-		 musb_driver_name, type, aRevision, aDate);
+	printk(KERN_DEBUG "%s: %sHDRC RTL version %s %s\n",
+			musb_driver_name, type, aRevision, aDate);
 
 	/* configure ep0 */
 	musb_configure_ep0(musb);
@@ -1665,7 +1664,7 @@ EXPORT_SYMBOL_GPL(musb_interrupt);
 static bool use_dma = 1;
 
 /* "modprobe ... use_dma=0" etc */
-module_param(use_dma, bool, 0644);
+module_param(use_dma, bool, 0);
 MODULE_PARM_DESC(use_dma, "enable/disable use of DMA");
 
 void musb_dma_completion(struct musb *musb, u8 epnum, u8 transmit)
@@ -1701,23 +1700,6 @@ EXPORT_SYMBOL_GPL(musb_dma_completion);
 #else
 #define use_dma			0
 #endif
-
-static void (*musb_phy_callback)(enum musb_vbus_id_status status);
-
-/*
- * musb_mailbox - optional phy notifier function
- * @status phy state change
- *
- * Optionally gets called from the USB PHY. Note that the USB PHY must be
- * disabled at the point the phy_callback is registered or unregistered.
- */
-void musb_mailbox(enum musb_vbus_id_status status)
-{
-	if (musb_phy_callback)
-		musb_phy_callback(status);
-
-};
-EXPORT_SYMBOL_GPL(musb_mailbox);
 
 /*-------------------------------------------------------------------------*/
 
@@ -1789,20 +1771,13 @@ musb_vbus_show(struct device *dev, struct device_attribute *attr, char *buf)
 	unsigned long	flags;
 	unsigned long	val;
 	int		vbus;
-	u8		devctl;
 
 	spin_lock_irqsave(&musb->lock, flags);
 	val = musb->a_wait_bcon;
+	/* FIXME get_vbus_status() is normally #defined as false...
+	 * and is effectively TUSB-specific.
+	 */
 	vbus = musb_platform_get_vbus_status(musb);
-	if (vbus < 0) {
-		/* Use default MUSB method by means of DEVCTL register */
-		devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
-		if ((devctl & MUSB_DEVCTL_VBUS)
-				== (3 << MUSB_DEVCTL_VBUS_SHIFT))
-			vbus = 1;
-		else
-			vbus = 0;
-	}
 	spin_unlock_irqrestore(&musb->lock, flags);
 
 	return sprintf(buf, "Vbus %s, timeout %lu msec\n",
@@ -2031,6 +2006,7 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
 	/* We need musb_read/write functions initialized for PM */
 	pm_runtime_use_autosuspend(musb->controller);
 	pm_runtime_set_autosuspend_delay(musb->controller, 200);
+	pm_runtime_irq_safe(musb->controller);
 	pm_runtime_enable(musb->controller);
 
 	/* The musb_platform_init() call:
@@ -2108,7 +2084,6 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
 #ifndef CONFIG_MUSB_PIO_ONLY
 	if (!musb->ops->dma_init || !musb->ops->dma_exit) {
 		dev_err(dev, "DMA controller not set\n");
-		status = -ENODEV;
 		goto fail2;
 	}
 	musb_dma_controller_create = musb->ops->dma_init;
@@ -2131,14 +2106,7 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
 		musb->xceiv->io_ops = &musb_ulpi_access;
 	}
 
-	if (musb->ops->phy_callback)
-		musb_phy_callback = musb->ops->phy_callback;
-
 	pm_runtime_get_sync(musb->controller);
-
-	status = usb_phy_init(musb->xceiv);
-	if (status < 0)
-		goto err_usb_phy_init;
 
 	if (use_dma && dev->dma_mask) {
 		musb->dma_controller =
@@ -2239,12 +2207,6 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
 
 	pm_runtime_put(musb->controller);
 
-	/*
-	 * For why this is currently needed, see commit 3e43a0725637
-	 * ("usb: musb: core: add pm_runtime_irq_safe()")
-	 */
-	pm_runtime_irq_safe(musb->controller);
-
 	return 0;
 
 fail5:
@@ -2260,11 +2222,7 @@ fail3:
 	cancel_delayed_work_sync(&musb->deassert_reset_work);
 	if (musb->dma_controller)
 		musb_dma_controller_destroy(musb->dma_controller);
-
 fail2_5:
-	usb_phy_shutdown(musb->xceiv);
-
-err_usb_phy_init:
 	pm_runtime_put_sync(musb->controller);
 
 fail2:
@@ -2320,12 +2278,9 @@ static int musb_remove(struct platform_device *pdev)
 	 */
 	musb_exit_debugfs(musb);
 	musb_shutdown(pdev);
-	musb_phy_callback = NULL;
 
 	if (musb->dma_controller)
 		musb_dma_controller_destroy(musb->dma_controller);
-
-	usb_phy_shutdown(musb->xceiv);
 
 	cancel_work_sync(&musb->irq_work);
 	cancel_delayed_work_sync(&musb->finish_resume_work);

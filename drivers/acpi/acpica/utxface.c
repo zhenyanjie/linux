@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -66,6 +66,23 @@ acpi_status __init acpi_terminate(void)
 	acpi_status status;
 
 	ACPI_FUNCTION_TRACE(acpi_terminate);
+
+	/* Just exit if subsystem is already shutdown */
+
+	if (acpi_gbl_shutdown) {
+		ACPI_ERROR((AE_INFO, "ACPI Subsystem is already terminated"));
+		return_ACPI_STATUS(AE_OK);
+	}
+
+	/* Subsystem appears active, go ahead and shut it down */
+
+	acpi_gbl_shutdown = TRUE;
+	acpi_gbl_startup_flags = 0;
+	ACPI_DEBUG_PRINT((ACPI_DB_INFO, "Shutting down ACPI Subsystem\n"));
+
+	/* Terminate the AML Debugger if present */
+
+	ACPI_DEBUGGER_EXEC(acpi_gbl_db_terminate_threads = TRUE);
 
 	/* Shutdown and free all resources */
 
@@ -154,6 +171,7 @@ acpi_status acpi_get_system_info(struct acpi_buffer * out_buffer)
 	 * Populate the return buffer
 	 */
 	info_ptr = (struct acpi_system_info *)out_buffer->pointer;
+
 	info_ptr->acpi_ca_version = ACPI_CA_VERSION;
 
 	/* System flags (ACPI capabilities) */
@@ -215,6 +233,7 @@ acpi_status acpi_get_statistics(struct acpi_statistics *stats)
 	/* Other counters */
 
 	stats->method_count = acpi_method_count;
+
 	return_ACPI_STATUS(AE_OK);
 }
 
@@ -251,7 +270,7 @@ acpi_install_initialization_handler(acpi_init_handler handler, u32 function)
 }
 
 ACPI_EXPORT_SYMBOL(acpi_install_initialization_handler)
-#endif
+#endif				/*  ACPI_FUTURE_USAGE  */
 
 /*****************************************************************************
  *

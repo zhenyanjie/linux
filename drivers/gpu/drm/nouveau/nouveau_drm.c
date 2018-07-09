@@ -37,16 +37,12 @@
 #include <core/pci.h>
 #include <core/tegra.h>
 
-#include <nvif/class.h>
-#include <nvif/cl0002.h>
-#include <nvif/cla06f.h>
-#include <nvif/if0004.h>
-
 #include "nouveau_drm.h"
 #include "nouveau_dma.h"
 #include "nouveau_ttm.h"
 #include "nouveau_gem.h"
 #include "nouveau_vga.h"
+#include "nouveau_sysfs.h"
 #include "nouveau_hwmon.h"
 #include "nouveau_acpi.h"
 #include "nouveau_bios.h"
@@ -212,7 +208,7 @@ nouveau_accel_init(struct nouveau_drm *drm)
 	}
 
 	if (device->info.family >= NV_DEVICE_INFO_V0_KEPLER) {
-		ret = nouveau_channel_new(drm, &drm->device,
+		ret = nouveau_channel_new(drm, &drm->device, NVDRM_CHAN + 1,
 					  KEPLER_CHANNEL_GPFIFO_A_V0_ENGINE_CE0|
 					  KEPLER_CHANNEL_GPFIFO_A_V0_ENGINE_CE1,
 					  0, &drm->cechan);
@@ -225,7 +221,7 @@ nouveau_accel_init(struct nouveau_drm *drm)
 	if (device->info.chipset >= 0xa3 &&
 	    device->info.chipset != 0xaa &&
 	    device->info.chipset != 0xac) {
-		ret = nouveau_channel_new(drm, &drm->device,
+		ret = nouveau_channel_new(drm, &drm->device, NVDRM_CHAN + 1,
 					  NvDmaFB, NvDmaTT, &drm->cechan);
 		if (ret)
 			NV_ERROR(drm, "failed to create ce channel, %d\n", ret);
@@ -237,7 +233,8 @@ nouveau_accel_init(struct nouveau_drm *drm)
 		arg1 = NvDmaTT;
 	}
 
-	ret = nouveau_channel_new(drm, &drm->device, arg0, arg1, &drm->channel);
+	ret = nouveau_channel_new(drm, &drm->device, NVDRM_CHAN, arg0, arg1,
+				 &drm->channel);
 	if (ret) {
 		NV_ERROR(drm, "failed to create kernel channel, %d\n", ret);
 		nouveau_accel_fini(drm);
@@ -260,8 +257,8 @@ nouveau_accel_init(struct nouveau_drm *drm)
 		}
 
 		ret = nvif_notify_init(&drm->nvsw, nouveau_flip_complete,
-				       false, NV04_NVSW_NTFY_UEVENT,
-				       NULL, 0, 0, &drm->flip);
+				       false, NVSW_NTFY_UEVENT, NULL, 0, 0,
+				       &drm->flip);
 		if (ret == 0)
 			ret = nvif_notify_get(&drm->flip);
 		if (ret) {
@@ -406,7 +403,8 @@ nouveau_drm_load(struct drm_device *dev, unsigned long flags)
 
 	nouveau_get_hdmi_dev(drm);
 
-	ret = nvif_device_init(&drm->client.base.object, 0, NV_DEVICE,
+	ret = nvif_device_init(&drm->client.base.object,
+			       NVDRM_DEVICE, NV_DEVICE,
 			       &(struct nv_device_v0) {
 					.device = ~0,
 			       }, sizeof(struct nv_device_v0),
@@ -452,7 +450,7 @@ nouveau_drm_load(struct drm_device *dev, unsigned long flags)
 			goto fail_dispinit;
 	}
 
-	nouveau_debugfs_init(drm);
+	nouveau_sysfs_init(dev);
 	nouveau_hwmon_init(dev);
 	nouveau_accel_init(drm);
 	nouveau_fbcon_init(dev);
@@ -490,7 +488,7 @@ nouveau_drm_unload(struct drm_device *dev)
 	nouveau_fbcon_fini(dev);
 	nouveau_accel_fini(drm);
 	nouveau_hwmon_fini(dev);
-	nouveau_debugfs_fini(drm);
+	nouveau_sysfs_fini(dev);
 
 	if (dev->mode_config.num_crtc)
 		nouveau_display_fini(dev);
@@ -864,18 +862,18 @@ nouveau_drm_postclose(struct drm_device *dev, struct drm_file *fpriv)
 
 static const struct drm_ioctl_desc
 nouveau_ioctls[] = {
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GETPARAM, nouveau_abi16_ioctl_getparam, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_SETPARAM, nouveau_abi16_ioctl_setparam, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_ALLOC, nouveau_abi16_ioctl_channel_alloc, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_FREE, nouveau_abi16_ioctl_channel_free, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GROBJ_ALLOC, nouveau_abi16_ioctl_grobj_alloc, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_NOTIFIEROBJ_ALLOC, nouveau_abi16_ioctl_notifierobj_alloc, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GPUOBJ_FREE, nouveau_abi16_ioctl_gpuobj_free, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_NEW, nouveau_gem_ioctl_new, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_PUSHBUF, nouveau_gem_ioctl_pushbuf, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_PREP, nouveau_gem_ioctl_cpu_prep, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_FINI, nouveau_gem_ioctl_cpu_fini, DRM_AUTH|DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_INFO, nouveau_gem_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GETPARAM, nouveau_abi16_ioctl_getparam, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_SETPARAM, nouveau_abi16_ioctl_setparam, DRM_UNLOCKED|DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_ALLOC, nouveau_abi16_ioctl_channel_alloc, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_CHANNEL_FREE, nouveau_abi16_ioctl_channel_free, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GROBJ_ALLOC, nouveau_abi16_ioctl_grobj_alloc, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_NOTIFIEROBJ_ALLOC, nouveau_abi16_ioctl_notifierobj_alloc, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GPUOBJ_FREE, nouveau_abi16_ioctl_gpuobj_free, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_NEW, nouveau_gem_ioctl_new, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_PUSHBUF, nouveau_gem_ioctl_pushbuf, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_PREP, nouveau_gem_ioctl_cpu_prep, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_CPU_FINI, nouveau_gem_ioctl_cpu_fini, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(NOUVEAU_GEM_INFO, nouveau_gem_ioctl_info, DRM_UNLOCKED|DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 long
@@ -932,11 +930,11 @@ driver_stub = {
 	.lastclose = nouveau_vga_lastclose,
 
 #if defined(CONFIG_DEBUG_FS)
-	.debugfs_init = nouveau_drm_debugfs_init,
-	.debugfs_cleanup = nouveau_drm_debugfs_cleanup,
+	.debugfs_init = nouveau_debugfs_init,
+	.debugfs_cleanup = nouveau_debugfs_takedown,
 #endif
 
-	.get_vblank_counter = drm_vblank_no_hw_counter,
+	.get_vblank_counter = drm_vblank_count,
 	.enable_vblank = nouveau_display_vblank_enable,
 	.disable_vblank = nouveau_display_vblank_disable,
 	.get_scanout_position = nouveau_display_scanoutpos,
@@ -1007,6 +1005,7 @@ static void nouveau_display_options(void)
 	DRM_DEBUG_DRIVER("... modeset      : %d\n", nouveau_modeset);
 	DRM_DEBUG_DRIVER("... runpm        : %d\n", nouveau_runtime_pm);
 	DRM_DEBUG_DRIVER("... vram_pushbuf : %d\n", nouveau_vram_pushbuf);
+	DRM_DEBUG_DRIVER("... pstate       : %d\n", nouveau_pstate);
 }
 
 static const struct dev_pm_ops nouveau_pm_ops = {
@@ -1031,14 +1030,13 @@ nouveau_drm_pci_driver = {
 };
 
 struct drm_device *
-nouveau_platform_device_create(const struct nvkm_device_tegra_func *func,
-			       struct platform_device *pdev,
+nouveau_platform_device_create(struct platform_device *pdev,
 			       struct nvkm_device **pdevice)
 {
 	struct drm_device *drm;
 	int err;
 
-	err = nvkm_device_tegra_new(func, pdev, nouveau_config, nouveau_debug,
+	err = nvkm_device_tegra_new(pdev, nouveau_config, nouveau_debug,
 				    true, true, ~0ULL, pdevice);
 	if (err)
 		goto err_free;
@@ -1048,6 +1046,10 @@ nouveau_platform_device_create(const struct nvkm_device_tegra_func *func,
 		err = -ENOMEM;
 		goto err_free;
 	}
+
+	err = drm_dev_set_unique(drm, "%s", dev_name(&pdev->dev));
+	if (err < 0)
+		goto err_free;
 
 	drm->platformdev = pdev;
 	platform_set_drvdata(pdev, drm);

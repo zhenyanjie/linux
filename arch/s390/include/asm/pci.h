@@ -45,8 +45,7 @@ struct zpci_fmb {
 	u64 rpcit_ops;
 	u64 dma_rbytes;
 	u64 dma_wbytes;
-	u64 pad[2];
-} __packed __aligned(128);
+} __packed __aligned(16);
 
 enum zpci_state {
 	ZPCI_FN_STATE_RESERVED,
@@ -62,8 +61,6 @@ struct zpci_bar_struct {
 	u16		map_idx;	/* index into bar mapping array */
 	u8		size;		/* order 2 exponent */
 };
-
-struct s390_domain;
 
 /* Private data per function */
 struct zpci_dev {
@@ -121,8 +118,6 @@ struct zpci_dev {
 
 	struct dentry	*debugfs_dev;
 	struct dentry	*debugfs_perf;
-
-	struct s390_domain *s390_domain; /* s390 IOMMU domain data */
 };
 
 static inline bool zdev_enabled(struct zpci_dev *zdev)

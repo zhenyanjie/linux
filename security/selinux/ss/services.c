@@ -778,8 +778,8 @@ out:
 	return -EPERM;
 }
 
-static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
-					  u16 orig_tclass, bool user)
+int security_validate_transition(u32 oldsid, u32 newsid, u32 tasksid,
+				 u16 orig_tclass)
 {
 	struct context *ocontext;
 	struct context *ncontext;
@@ -794,12 +794,11 @@ static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
 
 	read_lock(&policy_rwlock);
 
-	if (!user)
-		tclass = unmap_class(orig_tclass);
-	else
-		tclass = orig_tclass;
+	tclass = unmap_class(orig_tclass);
 
 	if (!tclass || tclass > policydb.p_classes.nprim) {
+		printk(KERN_ERR "SELinux: %s:  unrecognized class %d\n",
+			__func__, tclass);
 		rc = -EINVAL;
 		goto out;
 	}
@@ -833,13 +832,8 @@ static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
 	while (constraint) {
 		if (!constraint_expr_eval(ocontext, ncontext, tcontext,
 					  constraint->expr)) {
-			if (user)
-				rc = -EPERM;
-			else
-				rc = security_validtrans_handle_fail(ocontext,
-								     ncontext,
-								     tcontext,
-								     tclass);
+			rc = security_validtrans_handle_fail(ocontext, ncontext,
+							     tcontext, tclass);
 			goto out;
 		}
 		constraint = constraint->next;
@@ -848,20 +842,6 @@ static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
 out:
 	read_unlock(&policy_rwlock);
 	return rc;
-}
-
-int security_validate_transition_user(u32 oldsid, u32 newsid, u32 tasksid,
-					u16 tclass)
-{
-	return security_compute_validatetrans(oldsid, newsid, tasksid,
-						tclass, true);
-}
-
-int security_validate_transition(u32 oldsid, u32 newsid, u32 tasksid,
-				 u16 orig_tclass)
-{
-	return security_compute_validatetrans(oldsid, newsid, tasksid,
-						orig_tclass, false);
 }
 
 /*
@@ -1238,10 +1218,13 @@ static int context_struct_to_string(struct context *context, char **scontext, u3
 	/*
 	 * Copy the user name, role name and type name into the context.
 	 */
-	scontextp += sprintf(scontextp, "%s:%s:%s",
+	sprintf(scontextp, "%s:%s:%s",
 		sym_name(&policydb, SYM_USERS, context->user - 1),
 		sym_name(&policydb, SYM_ROLES, context->role - 1),
 		sym_name(&policydb, SYM_TYPES, context->type - 1));
+	scontextp += strlen(sym_name(&policydb, SYM_USERS, context->user - 1)) +
+		     1 + strlen(sym_name(&policydb, SYM_ROLES, context->role - 1)) +
+		     1 + strlen(sym_name(&policydb, SYM_TYPES, context->type - 1));
 
 	mls_sid_to_context(context, &scontextp);
 
@@ -1276,12 +1259,12 @@ static int security_sid_to_context_core(u32 sid, char **scontext,
 			*scontext_len = strlen(initial_sid_to_string[sid]) + 1;
 			if (!scontext)
 				goto out;
-			scontextp = kmemdup(initial_sid_to_string[sid],
-					    *scontext_len, GFP_ATOMIC);
+			scontextp = kmalloc(*scontext_len, GFP_ATOMIC);
 			if (!scontextp) {
 				rc = -ENOMEM;
 				goto out;
 			}
+			strcpy(scontextp, initial_sid_to_string[sid]);
 			*scontext = scontextp;
 			goto out;
 		}
@@ -1491,11 +1474,6 @@ int security_context_to_sid(const char *scontext, u32 scontext_len, u32 *sid,
 {
 	return security_context_to_sid_core(scontext, scontext_len,
 					    sid, SECSID_NULL, gfp, 0);
-}
-
-int security_context_str_to_sid(const char *scontext, u32 *sid, gfp_t gfp)
-{
-	return security_context_to_sid(scontext, strlen(scontext), sid, gfp);
 }
 
 /**
@@ -2626,12 +2604,18 @@ int security_get_bools(int *len, char ***names, int **values)
 		goto err;
 
 	for (i = 0; i < *len; i++) {
+		size_t name_len;
+
 		(*values)[i] = policydb.bool_val_to_struct[i]->state;
+		name_len = strlen(sym_name(&policydb, SYM_BOOLS, i)) + 1;
 
 		rc = -ENOMEM;
-		(*names)[i] = kstrdup(sym_name(&policydb, SYM_BOOLS, i), GFP_ATOMIC);
+		(*names)[i] = kmalloc(sizeof(char) * name_len, GFP_ATOMIC);
 		if (!(*names)[i])
 			goto err;
+
+		strncpy((*names)[i], sym_name(&policydb, SYM_BOOLS, i), name_len);
+		(*names)[i][name_len - 1] = 0;
 	}
 	rc = 0;
 out:

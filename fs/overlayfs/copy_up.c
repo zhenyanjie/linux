@@ -22,9 +22,9 @@
 
 int ovl_copy_xattr(struct dentry *old, struct dentry *new)
 {
-	ssize_t list_size, size, value_size = 0;
-	char *buf, *name, *value = NULL;
-	int uninitialized_var(error);
+	ssize_t list_size, size;
+	char *buf, *name, *value;
+	int error;
 
 	if (!old->d_inode->i_op->getxattr ||
 	    !new->d_inode->i_op->getxattr)
@@ -41,40 +41,29 @@ int ovl_copy_xattr(struct dentry *old, struct dentry *new)
 	if (!buf)
 		return -ENOMEM;
 
+	error = -ENOMEM;
+	value = kmalloc(XATTR_SIZE_MAX, GFP_KERNEL);
+	if (!value)
+		goto out;
+
 	list_size = vfs_listxattr(old, buf, list_size);
 	if (list_size <= 0) {
 		error = list_size;
-		goto out;
+		goto out_free_value;
 	}
 
 	for (name = buf; name < (buf + list_size); name += strlen(name) + 1) {
-retry:
-		size = vfs_getxattr(old, name, value, value_size);
-		if (size == -ERANGE)
-			size = vfs_getxattr(old, name, NULL, 0);
-
-		if (size < 0) {
+		size = vfs_getxattr(old, name, value, XATTR_SIZE_MAX);
+		if (size <= 0) {
 			error = size;
-			break;
+			goto out_free_value;
 		}
-
-		if (size > value_size) {
-			void *new;
-
-			new = krealloc(value, size, GFP_KERNEL);
-			if (!new) {
-				error = -ENOMEM;
-				break;
-			}
-			value = new;
-			value_size = size;
-			goto retry;
-		}
-
 		error = vfs_setxattr(new, name, value, size, 0);
 		if (error)
-			break;
+			goto out_free_value;
 	}
+
+out_free_value:
 	kfree(value);
 out:
 	kfree(buf);
@@ -206,7 +195,8 @@ int ovl_set_attr(struct dentry *upperdentry, struct kstat *stat)
 
 static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 			      struct dentry *dentry, struct path *lowerpath,
-			      struct kstat *stat, const char *link)
+			      struct kstat *stat, struct iattr *attr,
+			      const char *link)
 {
 	struct inode *wdir = workdir->d_inode;
 	struct inode *udir = upperdir->d_inode;
@@ -248,9 +238,11 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 	if (err)
 		goto out_cleanup;
 
-	inode_lock(newdentry->d_inode);
+	mutex_lock(&newdentry->d_inode->i_mutex);
 	err = ovl_set_attr(newdentry, stat);
-	inode_unlock(newdentry->d_inode);
+	if (!err && attr)
+		err = notify_change(newdentry, attr, NULL);
+	mutex_unlock(&newdentry->d_inode->i_mutex);
 	if (err)
 		goto out_cleanup;
 
@@ -294,7 +286,8 @@ out_cleanup:
  * that point the file will have already been copied up anyway.
  */
 int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
-		    struct path *lowerpath, struct kstat *stat)
+		    struct path *lowerpath, struct kstat *stat,
+		    struct iattr *attr)
 {
 	struct dentry *workdir = ovl_workdir(dentry);
 	int err;
@@ -352,19 +345,26 @@ int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	}
 	upperdentry = ovl_dentry_upper(dentry);
 	if (upperdentry) {
-		/* Raced with another copy-up?  Nothing to do, then... */
+		unlock_rename(workdir, upperdir);
 		err = 0;
-		goto out_unlock;
+		/* Raced with another copy-up?  Do the setattr here */
+		if (attr) {
+			mutex_lock(&upperdentry->d_inode->i_mutex);
+			err = notify_change(upperdentry, attr, NULL);
+			mutex_unlock(&upperdentry->d_inode->i_mutex);
+		}
+		goto out_put_cred;
 	}
 
 	err = ovl_copy_up_locked(workdir, upperdir, dentry, lowerpath,
-				 stat, link);
+				 stat, attr, link);
 	if (!err) {
 		/* Restore timestamps on parent (best effort) */
 		ovl_set_timestamps(upperdir, &pstat);
 	}
 out_unlock:
 	unlock_rename(workdir, upperdir);
+out_put_cred:
 	revert_creds(old_cred);
 	put_cred(override_cred);
 
@@ -406,7 +406,7 @@ int ovl_copy_up(struct dentry *dentry)
 		ovl_path_lower(next, &lowerpath);
 		err = vfs_getattr(&lowerpath, &stat);
 		if (!err)
-			err = ovl_copy_up_one(parent, next, &lowerpath, &stat);
+			err = ovl_copy_up_one(parent, next, &lowerpath, &stat, NULL);
 
 		dput(parent);
 		dput(next);

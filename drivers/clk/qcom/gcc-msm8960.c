@@ -2753,7 +2753,7 @@ static struct clk_rcg ce3_src = {
 	},
 	.freq_tbl = clk_tbl_ce3,
 	.clkr = {
-		.enable_reg = 0x36c0,
+		.enable_reg = 0x2c08,
 		.enable_mask = BIT(7),
 		.hw.init = &(struct clk_init_data){
 			.name = "ce3_src",
@@ -2769,7 +2769,7 @@ static struct clk_branch ce3_core_clk = {
 	.halt_reg = 0x2fdc,
 	.halt_bit = 5,
 	.clkr = {
-		.enable_reg = 0x36cc,
+		.enable_reg = 0x36c4,
 		.enable_mask = BIT(4),
 		.hw.init = &(struct clk_init_data){
 			.name = "ce3_core_clk",
@@ -3503,43 +3503,29 @@ MODULE_DEVICE_TABLE(of, gcc_msm8960_match_table);
 
 static int gcc_msm8960_probe(struct platform_device *pdev)
 {
+	struct clk *clk;
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *match;
-	struct platform_device *tsens;
-	int ret;
 
 	match = of_match_device(gcc_msm8960_match_table, &pdev->dev);
 	if (!match)
 		return -EINVAL;
 
-	ret = qcom_cc_register_board_clk(dev, "cxo_board", "cxo", 19200000);
-	if (ret)
-		return ret;
+	/* Temporary until RPM clocks supported */
+	clk = clk_register_fixed_rate(dev, "cxo", NULL, CLK_IS_ROOT, 19200000);
+	if (IS_ERR(clk))
+		return PTR_ERR(clk);
 
-	ret = qcom_cc_register_board_clk(dev, "pxo_board", "pxo", 27000000);
-	if (ret)
-		return ret;
+	clk = clk_register_fixed_rate(dev, "pxo", NULL, CLK_IS_ROOT, 27000000);
+	if (IS_ERR(clk))
+		return PTR_ERR(clk);
 
-	ret = qcom_cc_probe(pdev, match->data);
-	if (ret)
-		return ret;
-
-	tsens = platform_device_register_data(&pdev->dev, "qcom-tsens", -1,
-					      NULL, 0);
-	if (IS_ERR(tsens))
-		return PTR_ERR(tsens);
-
-	platform_set_drvdata(pdev, tsens);
-
-	return 0;
+	return qcom_cc_probe(pdev, match->data);
 }
 
 static int gcc_msm8960_remove(struct platform_device *pdev)
 {
-	struct platform_device *tsens = platform_get_drvdata(pdev);
-
-	platform_device_unregister(tsens);
-
+	qcom_cc_remove(pdev);
 	return 0;
 }
 

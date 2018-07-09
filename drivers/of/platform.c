@@ -31,7 +31,6 @@ const struct of_device_id of_default_bus_match_table[] = {
 #endif /* CONFIG_ARM_AMBA */
 	{} /* Empty terminated list */
 };
-EXPORT_SYMBOL(of_default_bus_match_table);
 
 static int of_dev_node_match(struct device *dev, void *data)
 {
@@ -406,10 +405,8 @@ int of_platform_bus_probe(struct device_node *root,
 		if (!of_match_node(matches, child))
 			continue;
 		rc = of_platform_bus_create(child, matches, NULL, parent, false);
-		if (rc) {
-			of_node_put(child);
+		if (rc)
 			break;
-		}
 	}
 
 	of_node_put(root);
@@ -450,10 +447,8 @@ int of_platform_populate(struct device_node *root,
 
 	for_each_child_of_node(root, child) {
 		rc = of_platform_bus_create(child, matches, lookup, parent, true);
-		if (rc) {
-			of_node_put(child);
+		if (rc)
 			break;
-		}
 	}
 	of_node_set_flag(root, OF_POPULATED_BUS);
 

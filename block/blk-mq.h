@@ -25,9 +25,12 @@ struct blk_mq_ctx {
 	struct kobject		kobj;
 } ____cacheline_aligned_in_smp;
 
+void __blk_mq_complete_request(struct request *rq);
 void blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async);
 void blk_mq_freeze_queue(struct request_queue *q);
 void blk_mq_free_queue(struct request_queue *q);
+void blk_mq_clone_flush_request(struct request *flush_rq,
+		struct request *orig_rq);
 int blk_mq_update_nr_requests(struct request_queue *q, unsigned int nr);
 void blk_mq_wake_waiters(struct request_queue *q);
 
@@ -96,7 +99,8 @@ static inline void blk_mq_put_ctx(struct blk_mq_ctx *ctx)
 struct blk_mq_alloc_data {
 	/* input parameter */
 	struct request_queue *q;
-	unsigned int flags;
+	gfp_t gfp;
+	bool reserved;
 
 	/* input & output parameter */
 	struct blk_mq_ctx *ctx;
@@ -104,11 +108,13 @@ struct blk_mq_alloc_data {
 };
 
 static inline void blk_mq_set_alloc_data(struct blk_mq_alloc_data *data,
-		struct request_queue *q, unsigned int flags,
-		struct blk_mq_ctx *ctx, struct blk_mq_hw_ctx *hctx)
+		struct request_queue *q, gfp_t gfp, bool reserved,
+		struct blk_mq_ctx *ctx,
+		struct blk_mq_hw_ctx *hctx)
 {
 	data->q = q;
-	data->flags = flags;
+	data->gfp = gfp;
+	data->reserved = reserved;
 	data->ctx = ctx;
 	data->hctx = hctx;
 }

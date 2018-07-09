@@ -76,7 +76,7 @@
 				pmic: act8865@5b {
 					compatible = "active-semi,act8865";
 					reg = <0x5b>;
-					status = "disabled";
+					status = "okay";
 
 					regulators {
 						vcc_1v8_reg: DCDC_REG1 {
@@ -303,7 +303,6 @@
 		regulator-name = "mmc0-card-supply";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
-		regulator-always-on;
 	};
 
 	gpio_keys {
@@ -316,7 +315,7 @@
 			label = "PB_USER";
 			gpios = <&pioE 29 GPIO_ACTIVE_LOW>;
 			linux,code = <0x104>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 

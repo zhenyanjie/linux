@@ -27,7 +27,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -283,7 +283,8 @@ static struct cl_page *cl_page_alloc(const struct lu_env *env,
 	struct cl_page	  *page;
 	struct lu_object_header *head;
 
-	page = kzalloc(cl_object_header(o)->coh_page_bufsize, GFP_NOFS);
+	OBD_ALLOC_GFP(page, cl_object_header(o)->coh_page_bufsize,
+			GFP_NOFS);
 	if (page != NULL) {
 		int result = 0;
 
@@ -440,6 +441,7 @@ struct cl_page *cl_page_find(const struct lu_env *env, struct cl_object *o,
 	return cl_page_find0(env, o, idx, vmpage, type, NULL);
 }
 EXPORT_SYMBOL(cl_page_find);
+
 
 struct cl_page *cl_page_find_sub(const struct lu_env *env, struct cl_object *o,
 				 pgoff_t idx, struct page *vmpage,
@@ -901,6 +903,7 @@ int cl_page_own_try(const struct lu_env *env, struct cl_io *io,
 	return cl_page_own0(env, io, pg, 1);
 }
 EXPORT_SYMBOL(cl_page_own_try);
+
 
 /**
  * Assume page ownership.

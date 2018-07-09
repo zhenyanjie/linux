@@ -100,24 +100,18 @@
 
 struct device_node;
 
+void gic_init_bases(unsigned int, int, void __iomem *, void __iomem *,
+		    u32 offset, struct device_node *);
 void gic_cascade_irq(unsigned int gic_nr, unsigned int irq);
 int gic_cpu_if_down(unsigned int gic_nr);
 
-/*
- * Subdrivers that need some preparatory work can initialize their
- * chips and call this to register their GICs.
- */
-int gic_of_init(struct device_node *node, struct device_node *parent);
+static inline void gic_init(unsigned int nr, int start,
+			    void __iomem *dist , void __iomem *cpu)
+{
+	gic_init_bases(nr, start, dist, cpu, 0, NULL);
+}
 
-/*
- * Legacy platforms not converted to DT yet must use this to init
- * their GIC
- */
-void gic_init(unsigned int nr, int start,
-	      void __iomem *dist , void __iomem *cpu);
-
-int gicv2m_init(struct fwnode_handle *parent_handle,
-		struct irq_domain *parent);
+int gicv2m_of_init(struct device_node *node, struct irq_domain *parent);
 
 void gic_send_sgi(unsigned int cpu_id, unsigned int irq);
 int gic_get_cpu_id(unsigned int cpu);

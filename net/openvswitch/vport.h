@@ -70,7 +70,7 @@ struct vport_portids {
 
 /**
  * struct vport - one port within a datapath
- * @dev: Pointer to net_device.
+ * @rcu: RCU callback head for deferred destruction.
  * @dp: Datapath to which this port belongs.
  * @upcall_portids: RCU protected 'struct vport_portids'.
  * @port_no: Index into @dp's @ports array.
@@ -78,7 +78,6 @@ struct vport_portids {
  * @dp_hash_node: Element in @datapath->ports hash table in datapath.c.
  * @ops: Class structure.
  * @detach_list: list used for detaching vport in net-exit call.
- * @rcu: RCU callback head for deferred destruction.
  */
 struct vport {
 	struct net_device *dev;
@@ -141,7 +140,7 @@ struct vport_ops {
 	int (*set_options)(struct vport *, struct nlattr *);
 	int (*get_options)(const struct vport *, struct sk_buff *);
 
-	netdev_tx_t (*send) (struct sk_buff *skb);
+	void (*send)(struct vport *, struct sk_buff *);
 	struct module *owner;
 	struct list_head list;
 };
@@ -185,19 +184,24 @@ static inline struct vport *vport_from_priv(void *priv)
 int ovs_vport_receive(struct vport *, struct sk_buff *,
 		      const struct ip_tunnel_info *);
 
+static inline void ovs_skb_postpush_rcsum(struct sk_buff *skb,
+				      const void *start, unsigned int len)
+{
+	if (skb->ip_summed == CHECKSUM_COMPLETE)
+		skb->csum = csum_add(skb->csum, csum_partial(start, len, 0));
+}
+
 static inline const char *ovs_vport_name(struct vport *vport)
 {
 	return vport->dev->name;
 }
 
-int __ovs_vport_ops_register(struct vport_ops *ops);
-#define ovs_vport_ops_register(ops)		\
-	({					\
-		(ops)->owner = THIS_MODULE;	\
-		__ovs_vport_ops_register(ops);	\
-	})
-
+int ovs_vport_ops_register(struct vport_ops *ops);
 void ovs_vport_ops_unregister(struct vport_ops *ops);
-void ovs_vport_send(struct vport *vport, struct sk_buff *skb);
+
+static inline void ovs_vport_send(struct vport *vport, struct sk_buff *skb)
+{
+	vport->ops->send(vport, skb);
+}
 
 #endif /* vport.h */

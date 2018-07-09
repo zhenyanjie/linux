@@ -62,7 +62,6 @@ static void ipt_destroy_target(struct xt_entry_target *t)
 	struct xt_tgdtor_param par = {
 		.target   = t->u.kernel.target,
 		.targinfo = t->data,
-		.family   = NFPROTO_IPV4,
 	};
 	if (par.target->destroy != NULL)
 		par.target->destroy(&par);
@@ -190,13 +189,11 @@ static int tcf_ipt(struct sk_buff *skb, const struct tc_action *a,
 	 * worry later - danger - this API seems to have changed
 	 * from earlier kernels
 	 */
-	par.net	     = dev_net(skb->dev);
 	par.in       = skb->dev;
 	par.out      = NULL;
 	par.hooknum  = ipt->tcfi_hook;
 	par.target   = ipt->tcfi_t->u.kernel.target;
 	par.targinfo = ipt->tcfi_t->data;
-	par.family   = NFPROTO_IPV4;
 	ret = par.target->target(skb, &par);
 
 	switch (ret) {

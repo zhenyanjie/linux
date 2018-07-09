@@ -436,15 +436,9 @@ static void emu_update_cpu_topology(void)
  */
 static unsigned long emu_setup_size_adjust(unsigned long size)
 {
-	unsigned long size_new;
-
 	size = size ? : CONFIG_EMU_SIZE;
-	size_new = roundup(size, memory_block_size_bytes());
-	if (size_new == size)
-		return size;
-	pr_warn("Increasing memory stripe size from %ld MB to %ld MB\n",
-		size >> 20, size_new >> 20);
-	return size_new;
+	size = roundup(size, memory_block_size_bytes());
+	return size;
 }
 
 /*

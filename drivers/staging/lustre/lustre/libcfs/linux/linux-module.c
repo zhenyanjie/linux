@@ -62,6 +62,7 @@ int libcfs_ioctl_getdata(char *buf, char *end, void *arg)
 		return -EINVAL;
 	}
 
+
 	if (hdr->ioc_len < sizeof(struct libcfs_ioctl_data)) {
 		CERROR("PORTALS: user buffer too small for ioctl\n");
 		return -EINVAL;

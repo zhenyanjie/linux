@@ -5,7 +5,7 @@
 menu "Performance monitor support"
 
 config ARM_PMU
-	depends on PERF_EVENTS && (ARM || ARM64)
+	depends on PERF_EVENTS && ARM
 	bool "ARM PMU framework"
 	default y
 	help

@@ -124,7 +124,7 @@ static char *hfi1_devnode(struct device *dev, umode_t *mode)
 }
 
 static const char *hfi1_class_name_user = "hfi1_user";
-static const char *class_name_user(void)
+const char *class_name_user(void)
 {
 	return hfi1_class_name_user;
 }

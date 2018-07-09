@@ -11,7 +11,7 @@ struct vm86;
 #include <asm/math_emu.h>
 #include <asm/segment.h>
 #include <asm/types.h>
-#include <uapi/asm/sigcontext.h>
+#include <asm/sigcontext.h>
 #include <asm/current.h>
 #include <asm/cpufeature.h>
 #include <asm/page.h>
@@ -557,12 +557,12 @@ static inline unsigned int cpuid_edx(unsigned int op)
 }
 
 /* REP NOP (PAUSE) is a good thing to insert into busy-wait loops. */
-static __always_inline void rep_nop(void)
+static inline void rep_nop(void)
 {
 	asm volatile("rep; nop" ::: "memory");
 }
 
-static __always_inline void cpu_relax(void)
+static inline void cpu_relax(void)
 {
 	rep_nop();
 }
@@ -766,7 +766,7 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
  * Return saved PC of a blocked thread.
  * What is this good for? it will be always the scheduler or ret_from_fork.
  */
-#define thread_saved_pc(t)	READ_ONCE_NOCHECK(*(unsigned long *)((t)->thread.sp - 8))
+#define thread_saved_pc(t)	(*(unsigned long *)((t)->thread.sp - 8))
 
 #define task_pt_regs(tsk)	((struct pt_regs *)(tsk)->thread.sp0 - 1)
 extern unsigned long KSTK_ESP(struct task_struct *task);

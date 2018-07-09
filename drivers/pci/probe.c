@@ -6,15 +6,12 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/pci.h>
-#include <linux/of_device.h>
 #include <linux/of_pci.h>
 #include <linux/pci_hotplug.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/cpumask.h>
 #include <linux/pci-aspm.h>
-#include <linux/aer.h>
-#include <linux/acpi.h>
 #include <asm-generic/pci-bridge.h>
 #include "pci.h"
 
@@ -318,9 +315,6 @@ out:
 static void pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
 {
 	unsigned int pos, reg;
-
-	if (dev->non_compliant_bars)
-		return;
 
 	for (pos = 0; pos < howmany; pos++) {
 		struct resource *res = &dev->resource[pos];
@@ -675,8 +669,6 @@ static struct irq_domain *pci_host_bridge_msi_domain(struct pci_bus *bus)
 	 * should be called from here.
 	 */
 	d = pci_host_bridge_of_msi_domain(bus);
-	if (!d)
-		d = pci_host_bridge_acpi_msi_domain(bus);
 
 	return d;
 }
@@ -1112,11 +1104,14 @@ static int pci_cfg_space_size_ext(struct pci_dev *dev)
 	int pos = PCI_CFG_SPACE_SIZE;
 
 	if (pci_read_config_dword(dev, pos, &status) != PCIBIOS_SUCCESSFUL)
-		return PCI_CFG_SPACE_SIZE;
+		goto fail;
 	if (status == 0xffffffff || pci_ext_cfg_is_aliased(dev))
-		return PCI_CFG_SPACE_SIZE;
+		goto fail;
 
 	return PCI_CFG_SPACE_EXP_SIZE;
+
+ fail:
+	return PCI_CFG_SPACE_SIZE;
 }
 
 int pci_cfg_space_size(struct pci_dev *dev)
@@ -1129,23 +1124,25 @@ int pci_cfg_space_size(struct pci_dev *dev)
 	if (class == PCI_CLASS_BRIDGE_HOST)
 		return pci_cfg_space_size_ext(dev);
 
-	if (pci_is_pcie(dev))
-		return pci_cfg_space_size_ext(dev);
+	if (!pci_is_pcie(dev)) {
+		pos = pci_find_capability(dev, PCI_CAP_ID_PCIX);
+		if (!pos)
+			goto fail;
 
-	pos = pci_find_capability(dev, PCI_CAP_ID_PCIX);
-	if (!pos)
-		return PCI_CFG_SPACE_SIZE;
+		pci_read_config_dword(dev, pos + PCI_X_STATUS, &status);
+		if (!(status & (PCI_X_STATUS_266MHZ | PCI_X_STATUS_533MHZ)))
+			goto fail;
+	}
 
-	pci_read_config_dword(dev, pos + PCI_X_STATUS, &status);
-	if (status & (PCI_X_STATUS_266MHZ | PCI_X_STATUS_533MHZ))
-		return pci_cfg_space_size_ext(dev);
+	return pci_cfg_space_size_ext(dev);
 
+ fail:
 	return PCI_CFG_SPACE_SIZE;
 }
 
 #define LEGACY_IO_RESOURCE	(IORESOURCE_IO | IORESOURCE_PCI_FIXED)
 
-static void pci_msi_setup_pci_dev(struct pci_dev *dev)
+void pci_msi_setup_pci_dev(struct pci_dev *dev)
 {
 	/*
 	 * Disable the MSI hardware to avoid screaming interrupts
@@ -1174,7 +1171,6 @@ static void pci_msi_setup_pci_dev(struct pci_dev *dev)
 int pci_setup_device(struct pci_dev *dev)
 {
 	u32 class;
-	u16 cmd;
 	u8 hdr_type;
 	int pos = 0;
 	struct pci_bus_region region;
@@ -1213,20 +1209,12 @@ int pci_setup_device(struct pci_dev *dev)
 	/* "Unknown power state" */
 	dev->current_state = PCI_UNKNOWN;
 
+	pci_msi_setup_pci_dev(dev);
+
 	/* Early fixups, before probing the BARs */
 	pci_fixup_device(pci_fixup_early, dev);
 	/* device class may be changed after fixup */
 	class = dev->class >> 8;
-
-	if (dev->non_compliant_bars) {
-		pci_read_config_word(dev, PCI_COMMAND, &cmd);
-		if (cmd & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) {
-			dev_info(&dev->dev, "device has non-compliant BARs; disabling IO/MEM decoding\n");
-			cmd &= ~PCI_COMMAND_IO;
-			cmd &= ~PCI_COMMAND_MEMORY;
-			pci_write_config_word(dev, PCI_COMMAND, cmd);
-		}
-	}
 
 	switch (dev->hdr_type) {		    /* header type */
 	case PCI_HEADER_TYPE_NORMAL:		    /* standard header */
@@ -1609,11 +1597,8 @@ static struct pci_dev *pci_scan_device(struct pci_bus *bus, int devfn)
 
 static void pci_init_capabilities(struct pci_dev *dev)
 {
-	/* Enhanced Allocation */
-	pci_ea_init(dev);
-
-	/* Setup MSI caps & disable MSI/MSI-X interrupts */
-	pci_msi_setup_pci_dev(dev);
+	/* MSI/MSI-X list */
+	pci_msi_init_pci_dev(dev);
 
 	/* Buffers for saving PCIe and PCI-X capabilities */
 	pci_allocate_cap_save_buffers(dev);
@@ -1635,80 +1620,17 @@ static void pci_init_capabilities(struct pci_dev *dev)
 
 	/* Enable ACS P2P upstream forwarding */
 	pci_enable_acs(dev);
-
-	pci_cleanup_aer_error_status_regs(dev);
-}
-
-/*
- * This is the equivalent of pci_host_bridge_msi_domain that acts on
- * devices. Firmware interfaces that can select the MSI domain on a
- * per-device basis should be called from here.
- */
-static struct irq_domain *pci_dev_msi_domain(struct pci_dev *dev)
-{
-	struct irq_domain *d;
-
-	/*
-	 * If a domain has been set through the pcibios_add_device
-	 * callback, then this is the one (platform code knows best).
-	 */
-	d = dev_get_msi_domain(&dev->dev);
-	if (d)
-		return d;
-
-	/*
-	 * Let's see if we have a firmware interface able to provide
-	 * the domain.
-	 */
-	d = pci_msi_get_device_domain(dev);
-	if (d)
-		return d;
-
-	return NULL;
 }
 
 static void pci_set_msi_domain(struct pci_dev *dev)
 {
-	struct irq_domain *d;
-
 	/*
-	 * If the platform or firmware interfaces cannot supply a
-	 * device-specific MSI domain, then inherit the default domain
-	 * from the host bridge itself.
+	 * If no domain has been set through the pcibios_add_device
+	 * callback, inherit the default from the bus device.
 	 */
-	d = pci_dev_msi_domain(dev);
-	if (!d)
-		d = dev_get_msi_domain(&dev->bus->dev);
-
-	dev_set_msi_domain(&dev->dev, d);
-}
-
-/**
- * pci_dma_configure - Setup DMA configuration
- * @dev: ptr to pci_dev struct of the PCI device
- *
- * Function to update PCI devices's DMA configuration using the same
- * info from the OF node or ACPI node of host bridge's parent (if any).
- */
-static void pci_dma_configure(struct pci_dev *dev)
-{
-	struct device *bridge = pci_get_host_bridge_device(dev);
-
-	if (IS_ENABLED(CONFIG_OF) &&
-		bridge->parent && bridge->parent->of_node) {
-			of_dma_configure(&dev->dev, bridge->parent->of_node);
-	} else if (has_acpi_companion(bridge)) {
-		struct acpi_device *adev = to_acpi_device_node(bridge->fwnode);
-		enum dev_dma_attr attr = acpi_get_dma_attr(adev);
-
-		if (attr == DEV_DMA_NOT_SUPPORTED)
-			dev_warn(&dev->dev, "DMA not supported.\n");
-		else
-			arch_setup_dma_ops(&dev->dev, 0, 0, NULL,
-					   attr == DEV_DMA_COHERENT);
-	}
-
-	pci_put_host_bridge_device(bridge);
+	if (!dev_get_msi_domain(&dev->dev))
+		dev_set_msi_domain(&dev->dev,
+				   dev_get_msi_domain(&dev->bus->dev));
 }
 
 void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)
@@ -1724,7 +1646,7 @@ void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)
 	dev->dev.dma_mask = &dev->dma_mask;
 	dev->dev.dma_parms = &dev->dma_parms;
 	dev->dev.coherent_dma_mask = 0xffffffffull;
-	pci_dma_configure(dev);
+	of_pci_dma_configure(dev);
 
 	pci_set_dma_max_seg_size(dev, 65536);
 	pci_set_dma_seg_boundary(dev, 0xffffffff);

@@ -29,7 +29,6 @@
 #include <linux/clk-provider.h>
 #include <linux/memblock.h>
 #include <linux/screen_info.h>
-#include <linux/clocksource.h>
 
 #include <asm/setup.h>
 #include <asm/irq.h>
@@ -207,14 +206,14 @@ device_initcall(device_probe);
 #define get_wait(base, addr) ({		\
 	int baddr;			\
 	baddr = ((addr) / 0x200000 * 2);			     \
-	w *= (readw((base) + 2) & (3 << baddr)) + 1;		     \
+	w *= (ctrl_inw((unsigned long)(base) + 2) & (3 << baddr)) + 1;	\
 	})
 #endif
 #if defined(CONFIG_CPU_H8S)
 #define get_wait(base, addr) ({		\
 	int baddr;			\
 	baddr = ((addr) / 0x200000 * 16);			     \
-	w *= (readl((base) + 2) & (7 << baddr)) + 1;	\
+	w *= (ctrl_inl((unsigned long)(base) + 2) & (7 << baddr)) + 1;	\
 	})
 #endif
 
@@ -228,8 +227,8 @@ static __init int access_timing(void)
 
 	bsc = of_find_compatible_node(NULL, NULL, "renesas,h8300-bsc");
 	base = of_iomap(bsc, 0);
-	w = (readb(base + 0) & bit)?2:1;
-	if (readb(base + 1) & bit)
+	w = (ctrl_inb((unsigned long)base + 0) & bit)?2:1;
+	if (ctrl_inb((unsigned long)base + 1) & bit)
 		w *= get_wait(base, addr);
 	else
 		w *= 2;
@@ -253,5 +252,4 @@ void __init calibrate_delay(void)
 void __init time_init(void)
 {
 	of_clk_init(NULL);
-	clocksource_probe();
 }

@@ -311,7 +311,7 @@ static int bcm63xx_external_irq_set_type(struct irq_data *d,
 		break;
 
 	default:
-		pr_err("bogus flow type combination given !\n");
+		printk(KERN_ERR "bogus flow type combination given !\n");
 		return -EINVAL;
 	}
 

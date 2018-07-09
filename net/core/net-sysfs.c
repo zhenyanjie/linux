@@ -471,8 +471,7 @@ static ssize_t phys_switch_id_show(struct device *dev,
 
 	if (dev_isalive(netdev)) {
 		struct switchdev_attr attr = {
-			.orig_dev = netdev,
-			.id = SWITCHDEV_ATTR_ID_PORT_PARENT_ID,
+			.id = SWITCHDEV_ATTR_PORT_PARENT_ID,
 			.flags = SWITCHDEV_F_NO_RECURSE,
 		};
 
@@ -1004,12 +1003,15 @@ static ssize_t show_trans_timeout(struct netdev_queue *queue,
 }
 
 #ifdef CONFIG_XPS
-static unsigned int get_netdev_queue_index(struct netdev_queue *queue)
+static inline unsigned int get_netdev_queue_index(struct netdev_queue *queue)
 {
 	struct net_device *dev = queue->dev;
-	unsigned int i;
+	int i;
 
-	i = queue - dev->_tx;
+	for (i = 0; i < dev->num_tx_queues; i++)
+		if (queue == &dev->_tx[i])
+			break;
+
 	BUG_ON(i >= dev->num_tx_queues);
 
 	return i;
@@ -1453,8 +1455,8 @@ static void netdev_release(struct device *d)
 
 static const void *net_namespace(struct device *d)
 {
-	struct net_device *dev = to_net_dev(d);
-
+	struct net_device *dev;
+	dev = container_of(d, struct net_device, dev);
 	return dev_net(dev);
 }
 

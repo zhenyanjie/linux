@@ -10,7 +10,7 @@
 
 static inline int atomic_read(const atomic_t *v)
 {
-	return READ_ONCE((v)->counter);
+	return (v)->counter;
 }
 
 /*

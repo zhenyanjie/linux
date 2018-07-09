@@ -79,8 +79,8 @@ struct dcon_priv {
 
 	/* Variables used during switches */
 	bool switched;
-	ktime_t irq_time;
-	ktime_t load_time;
+	struct timespec irq_time;
+	struct timespec load_time;
 
 	/* Current output type; true == mono, false == color */
 	bool mono;

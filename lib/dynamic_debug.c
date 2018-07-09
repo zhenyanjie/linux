@@ -42,7 +42,7 @@ extern struct _ddebug __stop___verbose[];
 
 struct ddebug_table {
 	struct list_head link;
-	const char *mod_name;
+	char *mod_name;
 	unsigned int num_ddebugs;
 	struct _ddebug *ddebugs;
 };
@@ -657,9 +657,14 @@ static ssize_t ddebug_proc_write(struct file *file, const char __user *ubuf,
 		pr_warn("expected <%d bytes into control\n", USER_BUF_PAGE);
 		return -E2BIG;
 	}
-	tmpbuf = memdup_user_nul(ubuf, len);
-	if (IS_ERR(tmpbuf))
-		return PTR_ERR(tmpbuf);
+	tmpbuf = kmalloc(len + 1, GFP_KERNEL);
+	if (!tmpbuf)
+		return -ENOMEM;
+	if (copy_from_user(tmpbuf, ubuf, len)) {
+		kfree(tmpbuf);
+		return -EFAULT;
+	}
+	tmpbuf[len] = '\0';
 	vpr_info("read %d bytes from userspace\n", (int)len);
 
 	ret = ddebug_exec_queries(tmpbuf, NULL);
@@ -836,12 +841,12 @@ int ddebug_add_module(struct _ddebug *tab, unsigned int n,
 			     const char *name)
 {
 	struct ddebug_table *dt;
-	const char *new_name;
+	char *new_name;
 
 	dt = kzalloc(sizeof(*dt), GFP_KERNEL);
 	if (dt == NULL)
 		return -ENOMEM;
-	new_name = kstrdup_const(name, GFP_KERNEL);
+	new_name = kstrdup(name, GFP_KERNEL);
 	if (new_name == NULL) {
 		kfree(dt);
 		return -ENOMEM;
@@ -902,7 +907,7 @@ int ddebug_dyndbg_module_param_cb(char *param, char *val, const char *module)
 static void ddebug_table_free(struct ddebug_table *dt)
 {
 	list_del_init(&dt->link);
-	kfree_const(dt->mod_name);
+	kfree(dt->mod_name);
 	kfree(dt);
 }
 

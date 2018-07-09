@@ -41,13 +41,11 @@ static unsigned long clk_frac_recalc_rate(struct clk_hw *hw,
 {
 	struct clk_frac *frac = to_clk_frac(hw);
 	u32 div;
-	u64 tmp_rate;
 
 	div = readl_relaxed(frac->reg) >> frac->shift;
 	div &= (1 << frac->width) - 1;
 
-	tmp_rate = (u64)parent_rate * div;
-	return tmp_rate >> frac->width;
+	return (parent_rate >> frac->width) * div;
 }
 
 static long clk_frac_round_rate(struct clk_hw *hw, unsigned long rate,
@@ -56,7 +54,7 @@ static long clk_frac_round_rate(struct clk_hw *hw, unsigned long rate,
 	struct clk_frac *frac = to_clk_frac(hw);
 	unsigned long parent_rate = *prate;
 	u32 div;
-	u64 tmp, tmp_rate, result;
+	u64 tmp;
 
 	if (rate > parent_rate)
 		return -EINVAL;
@@ -69,11 +67,7 @@ static long clk_frac_round_rate(struct clk_hw *hw, unsigned long rate,
 	if (!div)
 		return -EINVAL;
 
-	tmp_rate = (u64)parent_rate * div;
-	result = tmp_rate >> frac->width;
-	if ((result << frac->width) < tmp_rate)
-		result += 1;
-	return result;
+	return (parent_rate >> frac->width) * div;
 }
 
 static int clk_frac_set_rate(struct clk_hw *hw, unsigned long rate,

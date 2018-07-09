@@ -1031,12 +1031,12 @@ static inline int cache_free_alien(struct kmem_cache *cachep, void *objp)
 }
 
 /*
- * Construct gfp mask to allocate from a specific node but do not direct reclaim
- * or warn about failures. kswapd may still wake to reclaim in the background.
+ * Construct gfp mask to allocate from a specific node but do not invoke reclaim
+ * or warn about failures.
  */
 static inline gfp_t gfp_exact_node(gfp_t flags)
 {
-	return (flags | __GFP_THISNODE | __GFP_NOWARN) & ~__GFP_DIRECT_RECLAIM;
+	return (flags | __GFP_THISNODE | __GFP_NOWARN) & ~__GFP_WAIT;
 }
 #endif
 
@@ -1593,14 +1593,13 @@ static struct page *kmem_getpages(struct kmem_cache *cachep, gfp_t flags,
 	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
 		flags |= __GFP_RECLAIMABLE;
 
+	if (memcg_charge_slab(cachep, flags, cachep->gfporder))
+		return NULL;
+
 	page = __alloc_pages_node(nodeid, flags | __GFP_NOTRACK, cachep->gfporder);
 	if (!page) {
+		memcg_uncharge_slab(cachep, cachep->gfporder);
 		slab_out_of_memory(cachep, flags, nodeid);
-		return NULL;
-	}
-
-	if (memcg_charge_slab(page, flags, cachep->gfporder, cachep)) {
-		__free_pages(page, cachep->gfporder);
 		return NULL;
 	}
 
@@ -1655,7 +1654,8 @@ static void kmem_freepages(struct kmem_cache *cachep, struct page *page)
 
 	if (current->reclaim_state)
 		current->reclaim_state->reclaimed_slab += nr_freed;
-	__free_kmem_pages(page, cachep->gfporder);
+	__free_pages(page, cachep->gfporder);
+	memcg_uncharge_slab(cachep, cachep->gfporder);
 }
 
 static void kmem_rcu_free(struct rcu_head *head)
@@ -1889,10 +1889,21 @@ static void slab_destroy(struct kmem_cache *cachep, struct page *page)
 
 	freelist = page->freelist;
 	slab_destroy_debugcheck(cachep, page);
-	if (unlikely(cachep->flags & SLAB_DESTROY_BY_RCU))
-		call_rcu(&page->rcu_head, kmem_rcu_free);
-	else
+	if (unlikely(cachep->flags & SLAB_DESTROY_BY_RCU)) {
+		struct rcu_head *head;
+
+		/*
+		 * RCU free overloads the RCU head over the LRU.
+		 * slab_page has been overloeaded over the LRU,
+		 * however it is not used from now on so that
+		 * we can use it safely.
+		 */
+		head = (void *)&page->rcu_head;
+		call_rcu(head, kmem_rcu_free);
+
+	} else {
 		kmem_freepages(cachep, page);
+	}
 
 	/*
 	 * From now on, we don't use freelist
@@ -2275,7 +2286,7 @@ __kmem_cache_create (struct kmem_cache *cachep, unsigned long flags)
 
 	err = setup_cpu_cache(cachep, gfp);
 	if (err) {
-		__kmem_cache_release(cachep);
+		__kmem_cache_shutdown(cachep);
 		return err;
 	}
 
@@ -2414,13 +2425,12 @@ int __kmem_cache_shrink(struct kmem_cache *cachep, bool deactivate)
 
 int __kmem_cache_shutdown(struct kmem_cache *cachep)
 {
-	return __kmem_cache_shrink(cachep, false);
-}
-
-void __kmem_cache_release(struct kmem_cache *cachep)
-{
 	int i;
 	struct kmem_cache_node *n;
+	int rc = __kmem_cache_shrink(cachep, false);
+
+	if (rc)
+		return rc;
 
 	free_percpu(cachep->cpu_cache);
 
@@ -2431,6 +2441,7 @@ void __kmem_cache_release(struct kmem_cache *cachep)
 		kfree(n);
 		cachep->node[i] = NULL;
 	}
+	return 0;
 }
 
 /*
@@ -2622,7 +2633,7 @@ static int cache_grow(struct kmem_cache *cachep,
 
 	offset *= cachep->colour_off;
 
-	if (gfpflags_allow_blocking(local_flags))
+	if (local_flags & __GFP_WAIT)
 		local_irq_enable();
 
 	/*
@@ -2652,7 +2663,7 @@ static int cache_grow(struct kmem_cache *cachep,
 
 	cache_init_objs(cachep, page);
 
-	if (gfpflags_allow_blocking(local_flags))
+	if (local_flags & __GFP_WAIT)
 		local_irq_disable();
 	check_irq_off();
 	spin_lock(&n->list_lock);
@@ -2666,7 +2677,7 @@ static int cache_grow(struct kmem_cache *cachep,
 opps1:
 	kmem_freepages(cachep, page);
 failed:
-	if (gfpflags_allow_blocking(local_flags))
+	if (local_flags & __GFP_WAIT)
 		local_irq_disable();
 	return 0;
 }
@@ -2756,21 +2767,6 @@ static void *cache_free_debugcheck(struct kmem_cache *cachep, void *objp,
 #define cache_free_debugcheck(x,objp,z) (objp)
 #endif
 
-static struct page *get_first_slab(struct kmem_cache_node *n)
-{
-	struct page *page;
-
-	page = list_first_entry_or_null(&n->slabs_partial,
-			struct page, lru);
-	if (!page) {
-		n->free_touched = 1;
-		page = list_first_entry_or_null(&n->slabs_free,
-				struct page, lru);
-	}
-
-	return page;
-}
-
 static void *cache_alloc_refill(struct kmem_cache *cachep, gfp_t flags,
 							bool force_refill)
 {
@@ -2806,12 +2802,18 @@ retry:
 	}
 
 	while (batchcount > 0) {
+		struct list_head *entry;
 		struct page *page;
 		/* Get slab alloc is to come from. */
-		page = get_first_slab(n);
-		if (!page)
-			goto must_grow;
+		entry = n->slabs_partial.next;
+		if (entry == &n->slabs_partial) {
+			n->free_touched = 1;
+			entry = n->slabs_free.next;
+			if (entry == &n->slabs_free)
+				goto must_grow;
+		}
 
+		page = list_entry(entry, struct page, lru);
 		check_spinlock_acquired(cachep);
 
 		/*
@@ -2867,7 +2869,7 @@ force_grow:
 static inline void cache_alloc_debugcheck_before(struct kmem_cache *cachep,
 						gfp_t flags)
 {
-	might_sleep_if(gfpflags_allow_blocking(flags));
+	might_sleep_if(flags & __GFP_WAIT);
 #if DEBUG
 	kmem_flagcheck(cachep, flags);
 #endif
@@ -3055,11 +3057,11 @@ retry:
 		 */
 		struct page *page;
 
-		if (gfpflags_allow_blocking(local_flags))
+		if (local_flags & __GFP_WAIT)
 			local_irq_enable();
 		kmem_flagcheck(cache, flags);
 		page = kmem_getpages(cache, local_flags, numa_mem_id());
-		if (gfpflags_allow_blocking(local_flags))
+		if (local_flags & __GFP_WAIT)
 			local_irq_disable();
 		if (page) {
 			/*
@@ -3094,6 +3096,7 @@ retry:
 static void *____cache_alloc_node(struct kmem_cache *cachep, gfp_t flags,
 				int nodeid)
 {
+	struct list_head *entry;
 	struct page *page;
 	struct kmem_cache_node *n;
 	void *obj;
@@ -3106,10 +3109,15 @@ static void *____cache_alloc_node(struct kmem_cache *cachep, gfp_t flags,
 retry:
 	check_irq_off();
 	spin_lock(&n->list_lock);
-	page = get_first_slab(n);
-	if (!page)
-		goto must_grow;
+	entry = n->slabs_partial.next;
+	if (entry == &n->slabs_partial) {
+		n->free_touched = 1;
+		entry = n->slabs_free.next;
+		if (entry == &n->slabs_free)
+			goto must_grow;
+	}
 
+	page = list_entry(entry, struct page, lru);
 	check_spinlock_acquired_node(cachep, nodeid);
 
 	STATS_INC_NODEALLOCS(cachep);
@@ -3341,12 +3349,17 @@ free_done:
 #if STATS
 	{
 		int i = 0;
-		struct page *page;
+		struct list_head *p;
 
-		list_for_each_entry(page, &n->slabs_free, lru) {
+		p = n->slabs_free.next;
+		while (p != &(n->slabs_free)) {
+			struct page *page;
+
+			page = list_entry(p, struct page, lru);
 			BUG_ON(page->active);
 
 			i++;
+			p = p->next;
 		}
 		STATS_SET_FREEABLE(cachep, i);
 	}
@@ -3417,7 +3430,7 @@ void kmem_cache_free_bulk(struct kmem_cache *s, size_t size, void **p)
 }
 EXPORT_SYMBOL(kmem_cache_free_bulk);
 
-int kmem_cache_alloc_bulk(struct kmem_cache *s, gfp_t flags, size_t size,
+bool kmem_cache_alloc_bulk(struct kmem_cache *s, gfp_t flags, size_t size,
 								void **p)
 {
 	return __kmem_cache_alloc_bulk(s, flags, size, p);

@@ -281,7 +281,7 @@ int mei_hbm_start_req(struct mei_device *dev)
 	return 0;
 }
 
-/**
+/*
  * mei_hbm_enum_clients_req - sends enumeration client request message.
  *
  * @dev: the device structure
@@ -314,7 +314,7 @@ static int mei_hbm_enum_clients_req(struct mei_device *dev)
 	return 0;
 }
 
-/**
+/*
  * mei_hbm_me_cl_add - add new me client to the list
  *
  * @dev: the device structure
@@ -569,7 +569,7 @@ static int mei_hbm_prop_req(struct mei_device *dev)
 	return 0;
 }
 
-/**
+/*
  * mei_hbm_pg - sends pg command
  *
  * @dev: the device structure
@@ -873,7 +873,8 @@ static int mei_hbm_fw_disconnect_req(struct mei_device *dev,
 		cb = mei_io_cb_init(cl, MEI_FOP_DISCONNECT_RSP, NULL);
 		if (!cb)
 			return -ENOMEM;
-		list_add_tail(&cb->list, &dev->ctrl_wr_list.list);
+		cl_dbg(dev, cl, "add disconnect response as first\n");
+		list_add(&cb->list, &dev->ctrl_wr_list.list);
 	}
 	return 0;
 }

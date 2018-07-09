@@ -768,7 +768,7 @@ bool RFvWriteWakeProgSyn(struct vnt_private *priv, unsigned char byRFType,
  */
 bool RFbSetPower(
 	struct vnt_private *priv,
-	unsigned int rate,
+	unsigned int uRATE,
 	u16 uCH
 )
 {
@@ -782,7 +782,7 @@ bool RFbSetPower(
 	if ((uCH < 1) || (uCH > CB_MAX_CHANNEL))
 		return false;
 
-	switch (rate) {
+	switch (uRATE) {
 	case RATE_1M:
 	case RATE_2M:
 	case RATE_5M:
@@ -818,7 +818,7 @@ bool RFbSetPower(
 	if (priv->byCurPwr == byPwr)
 		return true;
 
-	bResult = RFbRawSetPower(priv, byPwr, rate);
+	bResult = RFbRawSetPower(priv, byPwr, uRATE);
 	if (bResult)
 		priv->byCurPwr = byPwr;
 
@@ -842,7 +842,7 @@ bool RFbSetPower(
 bool RFbRawSetPower(
 	struct vnt_private *priv,
 	unsigned char byPwr,
-	unsigned int rate
+	unsigned int uRATE
 )
 {
 	bool bResult = true;
@@ -854,7 +854,7 @@ bool RFbRawSetPower(
 	switch (priv->byRFType) {
 	case RF_AIROHA:
 		bResult &= IFRFbWriteEmbedded(priv, dwAL2230PowerTable[byPwr]);
-		if (rate <= RATE_11M)
+		if (uRATE <= RATE_11M)
 			bResult &= IFRFbWriteEmbedded(priv, 0x0001B400+(BY_AL2230_REG_LEN<<3)+IFREGCTL_REGW);
 		else
 			bResult &= IFRFbWriteEmbedded(priv, 0x0005A400+(BY_AL2230_REG_LEN<<3)+IFREGCTL_REGW);
@@ -863,7 +863,7 @@ bool RFbRawSetPower(
 
 	case RF_AL2230S:
 		bResult &= IFRFbWriteEmbedded(priv, dwAL2230PowerTable[byPwr]);
-		if (rate <= RATE_11M) {
+		if (uRATE <= RATE_11M) {
 			bResult &= IFRFbWriteEmbedded(priv, 0x040C1400+(BY_AL2230_REG_LEN<<3)+IFREGCTL_REGW);
 			bResult &= IFRFbWriteEmbedded(priv, 0x00299B00+(BY_AL2230_REG_LEN<<3)+IFREGCTL_REGW);
 		} else {

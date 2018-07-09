@@ -25,37 +25,49 @@
 #include "f2fs.h"
 #include "xattr.h"
 
-static int f2fs_xattr_generic_get(const struct xattr_handler *handler,
-		struct dentry *dentry, const char *name, void *buffer,
-		size_t size)
+static size_t f2fs_xattr_generic_list(struct dentry *dentry, char *list,
+		size_t list_size, const char *name, size_t len, int type)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(dentry->d_sb);
+	int total_len, prefix_len = 0;
+	const char *prefix = NULL;
 
-	switch (handler->flags) {
+	switch (type) {
 	case F2FS_XATTR_INDEX_USER:
 		if (!test_opt(sbi, XATTR_USER))
 			return -EOPNOTSUPP;
+		prefix = XATTR_USER_PREFIX;
+		prefix_len = XATTR_USER_PREFIX_LEN;
 		break;
 	case F2FS_XATTR_INDEX_TRUSTED:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
+		prefix = XATTR_TRUSTED_PREFIX;
+		prefix_len = XATTR_TRUSTED_PREFIX_LEN;
 		break;
 	case F2FS_XATTR_INDEX_SECURITY:
+		prefix = XATTR_SECURITY_PREFIX;
+		prefix_len = XATTR_SECURITY_PREFIX_LEN;
 		break;
 	default:
 		return -EINVAL;
 	}
-	return f2fs_getxattr(d_inode(dentry), handler->flags, name,
-			     buffer, size, NULL);
+
+	total_len = prefix_len + len + 1;
+	if (list && total_len <= list_size) {
+		memcpy(list, prefix, prefix_len);
+		memcpy(list + prefix_len, name, len);
+		list[prefix_len + len] = '\0';
+	}
+	return total_len;
 }
 
-static int f2fs_xattr_generic_set(const struct xattr_handler *handler,
-		struct dentry *dentry, const char *name, const void *value,
-		size_t size, int flags)
+static int f2fs_xattr_generic_get(struct dentry *dentry, const char *name,
+		void *buffer, size_t size, int type)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(dentry->d_sb);
 
-	switch (handler->flags) {
+	switch (type) {
 	case F2FS_XATTR_INDEX_USER:
 		if (!test_opt(sbi, XATTR_USER))
 			return -EOPNOTSUPP;
@@ -69,39 +81,72 @@ static int f2fs_xattr_generic_set(const struct xattr_handler *handler,
 	default:
 		return -EINVAL;
 	}
-	return f2fs_setxattr(d_inode(dentry), handler->flags, name,
+	if (strcmp(name, "") == 0)
+		return -EINVAL;
+	return f2fs_getxattr(d_inode(dentry), type, name, buffer, size, NULL);
+}
+
+static int f2fs_xattr_generic_set(struct dentry *dentry, const char *name,
+		const void *value, size_t size, int flags, int type)
+{
+	struct f2fs_sb_info *sbi = F2FS_SB(dentry->d_sb);
+
+	switch (type) {
+	case F2FS_XATTR_INDEX_USER:
+		if (!test_opt(sbi, XATTR_USER))
+			return -EOPNOTSUPP;
+		break;
+	case F2FS_XATTR_INDEX_TRUSTED:
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
+		break;
+	case F2FS_XATTR_INDEX_SECURITY:
+		break;
+	default:
+		return -EINVAL;
+	}
+	if (strcmp(name, "") == 0)
+		return -EINVAL;
+
+	return f2fs_setxattr(d_inode(dentry), type, name,
 					value, size, NULL, flags);
 }
 
-static bool f2fs_xattr_user_list(struct dentry *dentry)
+static size_t f2fs_xattr_advise_list(struct dentry *dentry, char *list,
+		size_t list_size, const char *name, size_t len, int type)
 {
-	struct f2fs_sb_info *sbi = F2FS_SB(dentry->d_sb);
+	const char *xname = F2FS_SYSTEM_ADVISE_PREFIX;
+	size_t size;
 
-	return test_opt(sbi, XATTR_USER);
+	if (type != F2FS_XATTR_INDEX_ADVISE)
+		return 0;
+
+	size = strlen(xname) + 1;
+	if (list && size <= list_size)
+		memcpy(list, xname, size);
+	return size;
 }
 
-static bool f2fs_xattr_trusted_list(struct dentry *dentry)
-{
-	return capable(CAP_SYS_ADMIN);
-}
-
-static int f2fs_xattr_advise_get(const struct xattr_handler *handler,
-		struct dentry *dentry, const char *name, void *buffer,
-		size_t size)
+static int f2fs_xattr_advise_get(struct dentry *dentry, const char *name,
+		void *buffer, size_t size, int type)
 {
 	struct inode *inode = d_inode(dentry);
+
+	if (strcmp(name, "") != 0)
+		return -EINVAL;
 
 	if (buffer)
 		*((char *)buffer) = F2FS_I(inode)->i_advise;
 	return sizeof(char);
 }
 
-static int f2fs_xattr_advise_set(const struct xattr_handler *handler,
-		struct dentry *dentry, const char *name, const void *value,
-		size_t size, int flags)
+static int f2fs_xattr_advise_set(struct dentry *dentry, const char *name,
+		const void *value, size_t size, int flags, int type)
 {
 	struct inode *inode = d_inode(dentry);
 
+	if (strcmp(name, "") != 0)
+		return -EINVAL;
 	if (!inode_owner_or_capable(inode))
 		return -EPERM;
 	if (value == NULL)
@@ -140,7 +185,7 @@ int f2fs_init_security(struct inode *inode, struct inode *dir,
 const struct xattr_handler f2fs_xattr_user_handler = {
 	.prefix	= XATTR_USER_PREFIX,
 	.flags	= F2FS_XATTR_INDEX_USER,
-	.list	= f2fs_xattr_user_list,
+	.list	= f2fs_xattr_generic_list,
 	.get	= f2fs_xattr_generic_get,
 	.set	= f2fs_xattr_generic_set,
 };
@@ -148,14 +193,15 @@ const struct xattr_handler f2fs_xattr_user_handler = {
 const struct xattr_handler f2fs_xattr_trusted_handler = {
 	.prefix	= XATTR_TRUSTED_PREFIX,
 	.flags	= F2FS_XATTR_INDEX_TRUSTED,
-	.list	= f2fs_xattr_trusted_list,
+	.list	= f2fs_xattr_generic_list,
 	.get	= f2fs_xattr_generic_get,
 	.set	= f2fs_xattr_generic_set,
 };
 
 const struct xattr_handler f2fs_xattr_advise_handler = {
-	.name	= F2FS_SYSTEM_ADVISE_NAME,
+	.prefix = F2FS_SYSTEM_ADVISE_PREFIX,
 	.flags	= F2FS_XATTR_INDEX_ADVISE,
+	.list   = f2fs_xattr_advise_list,
 	.get    = f2fs_xattr_advise_get,
 	.set    = f2fs_xattr_advise_set,
 };
@@ -163,6 +209,7 @@ const struct xattr_handler f2fs_xattr_advise_handler = {
 const struct xattr_handler f2fs_xattr_security_handler = {
 	.prefix	= XATTR_SECURITY_PREFIX,
 	.flags	= F2FS_XATTR_INDEX_SECURITY,
+	.list	= f2fs_xattr_generic_list,
 	.get	= f2fs_xattr_generic_get,
 	.set	= f2fs_xattr_generic_set,
 };
@@ -410,27 +457,20 @@ ssize_t f2fs_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size)
 	list_for_each_xattr(entry, base_addr) {
 		const struct xattr_handler *handler =
 			f2fs_xattr_handler(entry->e_name_index);
-		const char *prefix;
-		size_t prefix_len;
 		size_t size;
 
-		if (!handler || (handler->list && !handler->list(dentry)))
+		if (!handler)
 			continue;
 
-		prefix = handler->prefix ?: handler->name;
-		prefix_len = strlen(prefix);
-		size = prefix_len + entry->e_name_len + 1;
-		if (buffer) {
-			if (size > rest) {
-				error = -ERANGE;
-				goto cleanup;
-			}
-			memcpy(buffer, prefix, prefix_len);
-			buffer += prefix_len;
-			memcpy(buffer, entry->e_name, entry->e_name_len);
-			buffer += entry->e_name_len;
-			*buffer++ = 0;
+		size = handler->list(dentry, buffer, rest, entry->e_name,
+				entry->e_name_len, handler->flags);
+		if (buffer && size > rest) {
+			error = -ERANGE;
+			goto cleanup;
 		}
+
+		if (buffer)
+			buffer += size;
 		rest -= size;
 	}
 	error = buffer_size - rest;
@@ -571,7 +611,7 @@ int f2fs_setxattr(struct inode *inode, int index, const char *name,
 	if (ipage)
 		return __f2fs_setxattr(inode, index, name, value,
 						size, ipage, flags);
-	f2fs_balance_fs(sbi, true);
+	f2fs_balance_fs(sbi);
 
 	f2fs_lock_op(sbi);
 	/* protect xattr_ver */
@@ -580,6 +620,5 @@ int f2fs_setxattr(struct inode *inode, int index, const char *name,
 	up_write(&F2FS_I(inode)->i_sem);
 	f2fs_unlock_op(sbi);
 
-	f2fs_update_time(sbi, REQ_TIME);
 	return err;
 }

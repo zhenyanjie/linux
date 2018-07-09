@@ -98,8 +98,7 @@ static int tc_shutdown(struct clock_event_device *d)
 
 	__raw_writel(0xff, regs + ATMEL_TC_REG(2, IDR));
 	__raw_writel(ATMEL_TC_CLKDIS, regs + ATMEL_TC_REG(2, CCR));
-	if (!clockevent_state_detached(d))
-		clk_disable(tcd->clk);
+	clk_disable(tcd->clk);
 
 	return 0;
 }
@@ -194,17 +193,10 @@ static int __init setup_clkevents(struct atmel_tc *tc, int clk32k_divisor_idx)
 	struct clk *t2_clk = tc->clk[2];
 	int irq = tc->irq[2];
 
-	ret = clk_prepare_enable(tc->slow_clk);
-	if (ret)
-		return ret;
-
 	/* try to enable t2 clk to avoid future errors in mode change */
 	ret = clk_prepare_enable(t2_clk);
-	if (ret) {
-		clk_disable_unprepare(tc->slow_clk);
+	if (ret)
 		return ret;
-	}
-
 	clk_disable(t2_clk);
 
 	clkevt.regs = tc->regs;
@@ -216,8 +208,7 @@ static int __init setup_clkevents(struct atmel_tc *tc, int clk32k_divisor_idx)
 
 	ret = request_irq(irq, ch2_irq, IRQF_TIMER, "tc_clkevt", &clkevt);
 	if (ret) {
-		clk_unprepare(t2_clk);
-		clk_disable_unprepare(tc->slow_clk);
+		clk_disable_unprepare(t2_clk);
 		return ret;
 	}
 

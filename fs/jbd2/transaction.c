@@ -764,11 +764,13 @@ void jbd2_journal_unlock_updates (journal_t *journal)
 
 static void warn_dirty_buffer(struct buffer_head *bh)
 {
+	char b[BDEVNAME_SIZE];
+
 	printk(KERN_WARNING
-	       "JBD2: Spotted dirty metadata buffer (dev = %pg, blocknr = %llu). "
+	       "JBD2: Spotted dirty metadata buffer (dev = %s, blocknr = %llu). "
 	       "There's a risk of filesystem corruption in case of system "
 	       "crash.\n",
-	       bh->b_bdev, (unsigned long long)bh->b_blocknr);
+	       bdevname(bh->b_bdev, b), (unsigned long long)bh->b_blocknr);
 }
 
 /* Call t_frozen trigger and copy buffer data into jh->b_frozen_data. */
@@ -1939,8 +1941,8 @@ out:
  * @journal: journal for operation
  * @page: to try and free
  * @gfp_mask: we use the mask to detect how hard should we try to release
- * buffers. If __GFP_DIRECT_RECLAIM and __GFP_FS is set, we wait for commit
- * code to release the buffers.
+ * buffers. If __GFP_WAIT and __GFP_FS is set, we wait for commit code to
+ * release the buffers.
  *
  *
  * For all the buffers on this page,

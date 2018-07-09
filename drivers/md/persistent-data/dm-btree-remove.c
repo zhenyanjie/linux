@@ -165,9 +165,9 @@ static int init_child(struct dm_btree_info *info, struct dm_btree_value_type *vt
 	return 0;
 }
 
-static void exit_child(struct dm_btree_info *info, struct child *c)
+static int exit_child(struct dm_btree_info *info, struct child *c)
 {
-	dm_tm_unlock(info->tm, c->block);
+	return dm_tm_unlock(info->tm, c->block);
 }
 
 static void shift(struct btree_node *left, struct btree_node *right, int count)
@@ -249,10 +249,13 @@ static int rebalance2(struct shadow_spine *s, struct dm_btree_info *info,
 
 	__rebalance2(info, parent, &left, &right);
 
-	exit_child(info, &left);
-	exit_child(info, &right);
+	r = exit_child(info, &left);
+	if (r) {
+		exit_child(info, &right);
+		return r;
+	}
 
-	return 0;
+	return exit_child(info, &right);
 }
 
 /*
@@ -391,9 +394,22 @@ static int rebalance3(struct shadow_spine *s, struct dm_btree_info *info,
 
 	__rebalance3(info, parent, &left, &center, &right);
 
-	exit_child(info, &left);
-	exit_child(info, &center);
-	exit_child(info, &right);
+	r = exit_child(info, &left);
+	if (r) {
+		exit_child(info, &center);
+		exit_child(info, &right);
+		return r;
+	}
+
+	r = exit_child(info, &center);
+	if (r) {
+		exit_child(info, &right);
+		return r;
+	}
+
+	r = exit_child(info, &right);
+	if (r)
+		return r;
 
 	return 0;
 }
@@ -417,7 +433,9 @@ static int rebalance_children(struct shadow_spine *s,
 
 		memcpy(n, dm_block_data(child),
 		       dm_bm_block_size(dm_tm_get_bm(info->tm)));
-		dm_tm_unlock(info->tm, child);
+		r = dm_tm_unlock(info->tm, child);
+		if (r)
+			return r;
 
 		dm_tm_dec(info->tm, dm_block_location(child));
 		return 0;

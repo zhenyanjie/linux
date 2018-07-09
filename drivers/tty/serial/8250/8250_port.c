@@ -284,7 +284,7 @@ static void default_serial_dl_write(struct uart_8250_port *up, int value)
 	serial_out(up, UART_DLM, value >> 8 & 0xff);
 }
 
-#ifdef CONFIG_SERIAL_8250_RT288X
+#if defined(CONFIG_MIPS_ALCHEMY) || defined(CONFIG_SERIAL_8250_RT288X)
 
 /* Au1x00/RT288x UART hardware has a weird register layout */
 static const s8 au_io_in_map[8] = {
@@ -368,18 +368,6 @@ static void mem_serial_out(struct uart_port *p, int offset, int value)
 	writeb(value, p->membase + offset);
 }
 
-static void mem16_serial_out(struct uart_port *p, int offset, int value)
-{
-	offset = offset << p->regshift;
-	writew(value, p->membase + offset);
-}
-
-static unsigned int mem16_serial_in(struct uart_port *p, int offset)
-{
-	offset = offset << p->regshift;
-	return readw(p->membase + offset);
-}
-
 static void mem32_serial_out(struct uart_port *p, int offset, int value)
 {
 	offset = offset << p->regshift;
@@ -437,11 +425,6 @@ static void set_io_from_upio(struct uart_port *p)
 		p->serial_out = mem_serial_out;
 		break;
 
-	case UPIO_MEM16:
-		p->serial_in = mem16_serial_in;
-		p->serial_out = mem16_serial_out;
-		break;
-
 	case UPIO_MEM32:
 		p->serial_in = mem32_serial_in;
 		p->serial_out = mem32_serial_out;
@@ -452,7 +435,7 @@ static void set_io_from_upio(struct uart_port *p)
 		p->serial_out = mem32be_serial_out;
 		break;
 
-#ifdef CONFIG_SERIAL_8250_RT288X
+#if defined(CONFIG_MIPS_ALCHEMY) || defined(CONFIG_SERIAL_8250_RT288X)
 	case UPIO_AU:
 		p->serial_in = au_serial_in;
 		p->serial_out = au_serial_out;
@@ -476,7 +459,6 @@ serial_port_out_sync(struct uart_port *p, int offset, int value)
 {
 	switch (p->iotype) {
 	case UPIO_MEM:
-	case UPIO_MEM16:
 	case UPIO_MEM32:
 	case UPIO_MEM32BE:
 	case UPIO_AU:
@@ -731,16 +713,22 @@ static int size_fifo(struct uart_8250_port *up)
  */
 static unsigned int autoconfig_read_divisor_id(struct uart_8250_port *p)
 {
-	unsigned char old_lcr;
-	unsigned int id, old_dl;
+	unsigned char old_dll, old_dlm, old_lcr;
+	unsigned int id;
 
 	old_lcr = serial_in(p, UART_LCR);
 	serial_out(p, UART_LCR, UART_LCR_CONF_MODE_A);
-	old_dl = serial_dl_read(p);
-	serial_dl_write(p, 0);
-	id = serial_dl_read(p);
-	serial_dl_write(p, old_dl);
 
+	old_dll = serial_in(p, UART_DLL);
+	old_dlm = serial_in(p, UART_DLM);
+
+	serial_out(p, UART_DLL, 0);
+	serial_out(p, UART_DLM, 0);
+
+	id = serial_in(p, UART_DLL) | serial_in(p, UART_DLM) << 8;
+
+	serial_out(p, UART_DLL, old_dll);
+	serial_out(p, UART_DLM, old_dlm);
 	serial_out(p, UART_LCR, old_lcr);
 
 	return id;
@@ -1258,9 +1246,6 @@ static void autoconfig_irq(struct uart_8250_port *up)
 		inb_p(ICP);
 	}
 
-	if (uart_console(port))
-		console_lock();
-
 	/* forget possible initially masked and pending IRQ */
 	probe_irq_off(probe_irq_on());
 	save_mcr = serial_in(up, UART_MCR);
@@ -1291,9 +1276,6 @@ static void autoconfig_irq(struct uart_8250_port *up)
 
 	if (port->flags & UPF_FOURPORT)
 		outb_p(save_ICP, ICP);
-
-	if (uart_console(port))
-		console_unlock();
 
 	port->irq = (irq > 0) ? irq : 0;
 }
@@ -1825,6 +1807,9 @@ int serial8250_do_startup(struct uart_port *port)
 	unsigned char lsr, iir;
 	int retval;
 
+	if (port->type == PORT_8250_CIR)
+		return -ENODEV;
+
 	if (!port->fifosize)
 		port->fifosize = uart_config[port->type].fifo_size;
 	if (!up->tx_loadsz)
@@ -2245,23 +2230,6 @@ static void serial8250_set_divisor(struct uart_port *port, unsigned int baud,
 		serial_port_out(port, 0x2, quot_frac);
 }
 
-static unsigned int
-serial8250_get_baud_rate(struct uart_port *port, struct ktermios *termios,
-			 struct ktermios *old)
-{
-	unsigned int tolerance = port->uartclk / 100;
-
-	/*
-	 * Ask the core to calculate the divisor for us.
-	 * Allow 1% tolerance at the upper limit so uart clks marginally
-	 * slower than nominal still match standard baud rates without
-	 * causing transmission errors.
-	 */
-	return uart_get_baud_rate(port, termios, old,
-				  port->uartclk / 16 / 0xffff,
-				  (port->uartclk + tolerance) / 16);
-}
-
 void
 serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
 		          struct ktermios *old)
@@ -2273,7 +2241,12 @@ serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
 
 	cval = serial8250_compute_lcr(up, termios->c_cflag);
 
-	baud = serial8250_get_baud_rate(port, termios, old);
+	/*
+	 * Ask the core to calculate the divisor for us.
+	 */
+	baud = uart_get_baud_rate(port, termios, old,
+				  port->uartclk / 16 / 0xffff,
+				  port->uartclk / 16);
 	quot = serial8250_get_divisor(up, baud, &frac);
 
 	/*
@@ -2474,7 +2447,6 @@ static int serial8250_request_std_resource(struct uart_8250_port *up)
 	case UPIO_TSI:
 	case UPIO_MEM32:
 	case UPIO_MEM32BE:
-	case UPIO_MEM16:
 	case UPIO_MEM:
 		if (!port->mapbase)
 			break;
@@ -2512,7 +2484,6 @@ static void serial8250_release_std_resource(struct uart_8250_port *up)
 	case UPIO_TSI:
 	case UPIO_MEM32:
 	case UPIO_MEM32BE:
-	case UPIO_MEM16:
 	case UPIO_MEM:
 		if (!port->mapbase)
 			break;
@@ -2542,8 +2513,14 @@ static void serial8250_release_port(struct uart_port *port)
 static int serial8250_request_port(struct uart_port *port)
 {
 	struct uart_8250_port *up = up_to_u8250p(port);
+	int ret;
 
-	return serial8250_request_std_resource(up);
+	if (port->type == PORT_8250_CIR)
+		return -ENODEV;
+
+	ret = serial8250_request_std_resource(up);
+
+	return ret;
 }
 
 static int fcr_get_rxtrig_bytes(struct uart_8250_port *up)
@@ -2691,6 +2668,9 @@ static void serial8250_config_port(struct uart_port *port, int flags)
 	struct uart_8250_port *up = up_to_u8250p(port);
 	int ret;
 
+	if (port->type == PORT_8250_CIR)
+		return;
+
 	/*
 	 * Find the region that we can probe for.  This in turn
 	 * tells us whether we can probe for the type of port.
@@ -2825,27 +2805,6 @@ static void serial8250_console_putchar(struct uart_port *port, int ch)
 }
 
 /*
- *	Restore serial console when h/w power-off detected
- */
-static void serial8250_console_restore(struct uart_8250_port *up)
-{
-	struct uart_port *port = &up->port;
-	struct ktermios termios;
-	unsigned int baud, quot, frac = 0;
-
-	termios.c_cflag = port->cons->cflag;
-	if (port->state->port.tty && termios.c_cflag == 0)
-		termios.c_cflag = port->state->port.tty->termios.c_cflag;
-
-	baud = serial8250_get_baud_rate(port, &termios, NULL);
-	quot = serial8250_get_divisor(up, baud, &frac);
-
-	serial8250_set_divisor(port, baud, quot, frac);
-	serial_port_out(port, UART_LCR, up->lcr);
-	serial_port_out(port, UART_MCR, UART_MCR_DTR | UART_MCR_RTS);
-}
-
-/*
  *	Print a string to the serial port trying not to disturb
  *	any possible real use of the port...
  *
@@ -2882,7 +2841,22 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
 
 	/* check scratch reg to see if port powered off during system sleep */
 	if (up->canary && (up->canary != serial_port_in(port, UART_SCR))) {
-		serial8250_console_restore(up);
+		struct ktermios termios;
+		unsigned int baud, quot, frac = 0;
+
+		termios.c_cflag = port->cons->cflag;
+		if (port->state->port.tty && termios.c_cflag == 0)
+			termios.c_cflag = port->state->port.tty->termios.c_cflag;
+
+		baud = uart_get_baud_rate(port, &termios, NULL,
+					  port->uartclk / 16 / 0xffff,
+					  port->uartclk / 16);
+		quot = serial8250_get_divisor(up, baud, &frac);
+
+		serial8250_set_divisor(port, baud, quot, frac);
+		serial_port_out(port, UART_LCR, up->lcr);
+		serial_port_out(port, UART_MCR, UART_MCR_DTR | UART_MCR_RTS);
+
 		up->canary = 0;
 	}
 

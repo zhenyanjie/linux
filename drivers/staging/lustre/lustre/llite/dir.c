@@ -27,7 +27,7 @@
  * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -239,6 +239,12 @@ static int ll_dir_filler(void *_hash, struct page *page0)
 	return rc;
 }
 
+static void ll_check_page(struct inode *dir, struct page *page)
+{
+	/* XXX: check page format later */
+	SetPageChecked(page);
+}
+
 void ll_release_page(struct page *page, int remove)
 {
 	kunmap(page);
@@ -426,8 +432,7 @@ struct page *ll_get_dir_page(struct inode *dir, __u64 hash,
 		goto fail;
 	}
 	if (!PageChecked(page))
-		/* XXX: check page format later */
-		SetPageChecked(page);
+		ll_check_page(dir, page);
 	if (PageError(page)) {
 		CERROR("page error: "DFID" at %llu: rc %d\n",
 		       PFID(ll_inode2fid(dir)), hash, -5);
@@ -636,7 +641,7 @@ static int ll_send_mgc_param(struct obd_export *mgc, char *string)
 	if (!msp)
 		return -ENOMEM;
 
-	strlcpy(msp->mgs_param, string, sizeof(msp->mgs_param));
+	strncpy(msp->mgs_param, string, MGS_PARAM_MAXLEN);
 	rc = obd_set_info_async(NULL, mgc, sizeof(KEY_SET_INFO), KEY_SET_INFO,
 				sizeof(struct mgs_send_param), msp, NULL);
 	if (rc)
@@ -655,7 +660,7 @@ static int ll_dir_setdirstripe(struct inode *dir, struct lmv_user_md *lump,
 	int mode;
 	int err;
 
-	mode = (~current_umask() & 0755) | S_IFDIR;
+	mode = (0755 & ~current_umask()) | S_IFDIR;
 	op_data = ll_prep_md_op_data(NULL, dir, NULL, filename,
 				     strlen(filename), mode, LUSTRE_OPC_MKDIR,
 				     lump);
@@ -833,11 +838,11 @@ int ll_dir_getstripe(struct inode *inode, struct lov_mds_md **lmmp,
 	/* We don't swab objects for directories */
 	switch (le32_to_cpu(lmm->lmm_magic)) {
 	case LOV_MAGIC_V1:
-		if (cpu_to_le32(LOV_MAGIC) != LOV_MAGIC)
+		if (LOV_MAGIC != cpu_to_le32(LOV_MAGIC))
 			lustre_swab_lov_user_md_v1((struct lov_user_md_v1 *)lmm);
 		break;
 	case LOV_MAGIC_V3:
-		if (cpu_to_le32(LOV_MAGIC) != LOV_MAGIC)
+		if (LOV_MAGIC != cpu_to_le32(LOV_MAGIC))
 			lustre_swab_lov_user_md_v3((struct lov_user_md_v3 *)lmm);
 		break;
 	default:
@@ -901,6 +906,7 @@ static int ll_ioc_copy_start(struct super_block *sb, struct hsm_copy *copy)
 	hpk.hpk_flags = 0;
 	hpk.hpk_errval = 0;
 	hpk.hpk_data_version = 0;
+
 
 	/* For archive request, we need to read the current file version. */
 	if (copy->hc_hai.hai_action == HSMA_ARCHIVE) {
@@ -1040,6 +1046,7 @@ progress:
 
 	return rc;
 }
+
 
 static int copy_and_ioctl(int cmd, struct obd_export *exp,
 			  const void __user *data, size_t size)
@@ -1547,7 +1554,7 @@ out_req:
 
 		switch (lmm->lmm_magic) {
 		case LOV_USER_MAGIC_V1:
-			if (cpu_to_le32(LOV_USER_MAGIC_V1) == LOV_USER_MAGIC_V1)
+			if (LOV_USER_MAGIC_V1 == cpu_to_le32(LOV_USER_MAGIC_V1))
 				break;
 			/* swab objects first so that stripes num will be sane */
 			lustre_swab_lov_user_md_objects(
@@ -1556,7 +1563,7 @@ out_req:
 			lustre_swab_lov_user_md_v1((struct lov_user_md_v1 *)lmm);
 			break;
 		case LOV_USER_MAGIC_V3:
-			if (cpu_to_le32(LOV_USER_MAGIC_V3) == LOV_USER_MAGIC_V3)
+			if (LOV_USER_MAGIC_V3 == cpu_to_le32(LOV_USER_MAGIC_V3))
 				break;
 			/* swab objects first so that stripes num will be sane */
 			lustre_swab_lov_user_md_objects(
@@ -1727,9 +1734,6 @@ out_quotactl:
 	}
 	case OBD_IOC_CHANGELOG_SEND:
 	case OBD_IOC_CHANGELOG_CLEAR:
-		if (!capable(CFS_CAP_SYS_ADMIN))
-			return -EPERM;
-
 		rc = copy_and_ioctl(cmd, sbi->ll_md_exp, (void *)arg,
 				    sizeof(struct ioc_changelog));
 		return rc;
@@ -1858,7 +1862,7 @@ static loff_t ll_dir_seek(struct file *file, loff_t offset, int origin)
 	int api32 = ll_need_32bit_api(sbi);
 	loff_t ret = -EINVAL;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	switch (origin) {
 	case SEEK_SET:
 		break;
@@ -1896,7 +1900,7 @@ static loff_t ll_dir_seek(struct file *file, loff_t offset, int origin)
 	goto out;
 
 out:
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	return ret;
 }
 

@@ -23,7 +23,7 @@
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2012, 2015, Intel Corporation.
+ * Copyright (c) 2012 - 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -443,8 +443,8 @@ int lnet_del_route(__u32 net, lnet_nid_t gw_nid);
 void lnet_destroy_routes(void);
 int lnet_get_route(int idx, __u32 *net, __u32 *hops,
 		   lnet_nid_t *gateway, __u32 *alive, __u32 *priority);
-void lnet_router_debugfs_init(void);
-void lnet_router_debugfs_fini(void);
+void lnet_proc_init(void);
+void lnet_proc_fini(void);
 int  lnet_rtrpools_alloc(int im_a_router);
 void lnet_rtrpools_free(void);
 lnet_remotenet_t *lnet_find_net_locked(__u32 net);

@@ -76,8 +76,7 @@ bool __ieee80211_recalc_txpower(struct ieee80211_sub_if_data *sdata)
 void ieee80211_recalc_txpower(struct ieee80211_sub_if_data *sdata,
 			      bool update_bss)
 {
-	if (__ieee80211_recalc_txpower(sdata) ||
-	    (update_bss && ieee80211_sdata_running(sdata)))
+	if (__ieee80211_recalc_txpower(sdata) || update_bss)
 		ieee80211_bss_info_change_notify(sdata, BSS_CHANGED_TXPOWER);
 }
 
@@ -662,13 +661,11 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 		}
 
 		/*
-		 * Set default queue parameters so drivers don't
+		 * set default queue parameters so drivers don't
 		 * need to initialise the hardware if the hardware
-		 * doesn't start up with sane defaults.
-		 * Enable QoS for anything but station interfaces.
+		 * doesn't start up with sane defaults
 		 */
-		ieee80211_set_wmm_default(sdata, true,
-			sdata->vif.type != NL80211_IFTYPE_STATION);
+		ieee80211_set_wmm_default(sdata, true);
 	}
 
 	set_bit(SDATA_STATE_RUNNING, &sdata->state);
@@ -712,7 +709,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 	if (hw_reconf_flags)
 		ieee80211_hw_config(local, hw_reconf_flags);
 
-	ieee80211_recalc_ps(local);
+	ieee80211_recalc_ps(local, -1);
 
 	if (sdata->vif.type == NL80211_IFTYPE_MONITOR ||
 	    sdata->vif.type == NL80211_IFTYPE_AP_VLAN) {
@@ -977,10 +974,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 	if (sdata->vif.txq) {
 		struct txq_info *txqi = to_txq_info(sdata->vif.txq);
 
-		spin_lock_bh(&txqi->queue.lock);
 		ieee80211_purge_tx_queue(&local->hw, &txqi->queue);
-		spin_unlock_bh(&txqi->queue.lock);
-
 		atomic_set(&sdata->txqs_len[txqi->txq.ac], 0);
 	}
 
@@ -1022,7 +1016,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 			drv_remove_interface(local, sdata);
 	}
 
-	ieee80211_recalc_ps(local);
+	ieee80211_recalc_ps(local, -1);
 
 	if (cancel_scan)
 		flush_delayed_work(&local->scan_work);
@@ -1210,7 +1204,7 @@ static void ieee80211_iface_work(struct work_struct *work)
 	if (!ieee80211_sdata_running(sdata))
 		return;
 
-	if (test_bit(SCAN_SW_SCANNING, &local->scanning))
+	if (local->scanning)
 		return;
 
 	if (!ieee80211_can_run_worker(local))
@@ -1750,7 +1744,7 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 
 		ret = dev_alloc_name(ndev, ndev->name);
 		if (ret < 0) {
-			ieee80211_if_free(ndev);
+			free_netdev(ndev);
 			return ret;
 		}
 
@@ -1836,7 +1830,7 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 
 		ret = register_netdevice(ndev);
 		if (ret) {
-			ieee80211_if_free(ndev);
+			free_netdev(ndev);
 			return ret;
 		}
 	}
@@ -1865,7 +1859,6 @@ void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata)
 		unregister_netdevice(sdata->dev);
 	} else {
 		cfg80211_unregister_wdev(&sdata->wdev);
-		ieee80211_teardown_sdata(sdata);
 		kfree(sdata);
 	}
 }
@@ -1875,6 +1868,7 @@ void ieee80211_sdata_stop(struct ieee80211_sub_if_data *sdata)
 	if (WARN_ON_ONCE(!test_bit(SDATA_STATE_RUNNING, &sdata->state)))
 		return;
 	ieee80211_do_stop(sdata, true);
+	ieee80211_teardown_sdata(sdata);
 }
 
 void ieee80211_remove_interfaces(struct ieee80211_local *local)

@@ -80,7 +80,7 @@ static void __init setup_node_to_cpumask_map(void)
 		setup_nr_node_ids();
 
 	/* allocate the map */
-	for_each_node(node)
+	for (node = 0; node < nr_node_ids; node++)
 		alloc_bootmem_cpumask_var(&node_to_cpumask_map[node]);
 
 	/* cpumask_of_node() will now work */
@@ -276,6 +276,7 @@ static int of_node_to_nid_single(struct device_node *device)
 /* Walk the device tree upwards, looking for an associativity id */
 int of_node_to_nid(struct device_node *device)
 {
+	struct device_node *tmp;
 	int nid = -1;
 
 	of_node_get(device);
@@ -284,7 +285,9 @@ int of_node_to_nid(struct device_node *device)
 		if (nid != -1)
 			break;
 
-		device = of_get_next_parent(device);
+	        tmp = device;
+		device = of_get_parent(tmp);
+		of_node_put(tmp);
 	}
 	of_node_put(device);
 

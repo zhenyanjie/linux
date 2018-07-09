@@ -436,9 +436,14 @@ static struct pinctrl_desc as3722_pinctrl_desc = {
 	.owner = THIS_MODULE,
 };
 
+static inline struct as3722_pctrl_info *to_as_pci(struct gpio_chip *chip)
+{
+	return container_of(chip, struct as3722_pctrl_info, gpio_chip);
+}
+
 static int as3722_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct as3722_pctrl_info *as_pci = gpiochip_get_data(chip);
+	struct as3722_pctrl_info *as_pci = to_as_pci(chip);
 	struct as3722 *as3722 = as_pci->as3722;
 	int ret;
 	u32 reg;
@@ -486,7 +491,7 @@ static int as3722_gpio_get(struct gpio_chip *chip, unsigned offset)
 static void as3722_gpio_set(struct gpio_chip *chip, unsigned offset,
 		int value)
 {
-	struct as3722_pctrl_info *as_pci = gpiochip_get_data(chip);
+	struct as3722_pctrl_info *as_pci = to_as_pci(chip);
 	struct as3722 *as3722 = as_pci->as3722;
 	int en_invert;
 	u32 val;
@@ -526,16 +531,26 @@ static int as3722_gpio_direction_output(struct gpio_chip *chip,
 
 static int as3722_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 {
-	struct as3722_pctrl_info *as_pci = gpiochip_get_data(chip);
+	struct as3722_pctrl_info *as_pci = to_as_pci(chip);
 
 	return as3722_irq_get_virq(as_pci->as3722, offset);
+}
+
+static int as3722_gpio_request(struct gpio_chip *chip, unsigned offset)
+{
+	return pinctrl_request_gpio(chip->base + offset);
+}
+
+static void as3722_gpio_free(struct gpio_chip *chip, unsigned offset)
+{
+	pinctrl_free_gpio(chip->base + offset);
 }
 
 static const struct gpio_chip as3722_gpio_chip = {
 	.label			= "as3722-gpio",
 	.owner			= THIS_MODULE,
-	.request		= gpiochip_generic_request,
-	.free			= gpiochip_generic_free,
+	.request		= as3722_gpio_request,
+	.free			= as3722_gpio_free,
 	.get			= as3722_gpio_get,
 	.set			= as3722_gpio_set,
 	.direction_input	= as3722_gpio_direction_input,
@@ -577,9 +592,9 @@ static int as3722_pinctrl_probe(struct platform_device *pdev)
 	}
 
 	as_pci->gpio_chip = as3722_gpio_chip;
-	as_pci->gpio_chip.parent = &pdev->dev;
+	as_pci->gpio_chip.dev = &pdev->dev;
 	as_pci->gpio_chip.of_node = pdev->dev.parent->of_node;
-	ret = gpiochip_add_data(&as_pci->gpio_chip, as_pci);
+	ret = gpiochip_add(&as_pci->gpio_chip);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Couldn't register gpiochip, %d\n", ret);
 		goto fail_chip_add;

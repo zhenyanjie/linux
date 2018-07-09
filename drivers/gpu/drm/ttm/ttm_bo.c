@@ -176,7 +176,7 @@ void ttm_bo_add_to_lru(struct ttm_buffer_object *bo)
 		list_add_tail(&bo->lru, &man->lru);
 		kref_get(&bo->list_kref);
 
-		if (bo->ttm && !(bo->ttm->page_flags & TTM_PAGE_FLAG_SG)) {
+		if (bo->ttm != NULL) {
 			list_add_tail(&bo->swap, &bo->glob->swap_lru);
 			kref_get(&bo->list_kref);
 		}
@@ -227,18 +227,6 @@ void ttm_bo_del_sub_from_lru(struct ttm_buffer_object *bo)
 	ttm_bo_list_ref_sub(bo, put_count, true);
 }
 EXPORT_SYMBOL(ttm_bo_del_sub_from_lru);
-
-void ttm_bo_move_to_lru_tail(struct ttm_buffer_object *bo)
-{
-	int put_count = 0;
-
-	lockdep_assert_held(&bo->resv->lock.base);
-
-	put_count = ttm_bo_del_from_lru(bo);
-	ttm_bo_list_ref_sub(bo, put_count, true);
-	ttm_bo_add_to_lru(bo);
-}
-EXPORT_SYMBOL(ttm_bo_move_to_lru_tail);
 
 /*
  * Call bo->mutex locked.
@@ -1182,14 +1170,8 @@ int ttm_bo_init(struct ttm_bo_device *bdev,
 	if (likely(!ret))
 		ret = ttm_bo_validate(bo, placement, interruptible, false);
 
-	if (!resv) {
+	if (!resv)
 		ttm_bo_unreserve(bo);
-
-	} else if (!(bo->mem.placement & TTM_PL_FLAG_NO_EVICT)) {
-		spin_lock(&bo->glob->lru_lock);
-		ttm_bo_add_to_lru(bo);
-		spin_unlock(&bo->glob->lru_lock);
-	}
 
 	if (unlikely(ret))
 		ttm_bo_unref(&bo);

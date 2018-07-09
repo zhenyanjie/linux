@@ -322,7 +322,8 @@ static int stm32_startup(struct uart_port *port)
 	u32 val;
 	int ret;
 
-	ret = request_irq(port->irq, stm32_interrupt, 0, name, port);
+	ret = request_irq(port->irq, stm32_interrupt, IRQF_NO_SUSPEND,
+			  name, port);
 	if (ret)
 		return ret;
 

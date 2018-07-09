@@ -41,16 +41,13 @@
 static bool cache_defer_req(struct cache_req *req, struct cache_head *item);
 static void cache_revisit_request(struct cache_head *item);
 
-static void cache_init(struct cache_head *h, struct cache_detail *detail)
+static void cache_init(struct cache_head *h)
 {
 	time_t now = seconds_since_boot();
 	INIT_HLIST_NODE(&h->cache_list);
 	h->flags = 0;
 	kref_init(&h->ref);
 	h->expiry_time = now + CACHE_NEW_EXPIRY;
-	if (now <= detail->flush_time)
-		/* ensure it isn't already expired */
-		now = detail->flush_time + 1;
 	h->last_refresh = now;
 }
 
@@ -84,7 +81,7 @@ struct cache_head *sunrpc_cache_lookup(struct cache_detail *detail,
 	 * we might get lose if we need to
 	 * cache_put it soon.
 	 */
-	cache_init(new, detail);
+	cache_init(new);
 	detail->init(new, key);
 
 	write_lock(&detail->hash_lock);
@@ -119,15 +116,10 @@ EXPORT_SYMBOL_GPL(sunrpc_cache_lookup);
 
 static void cache_dequeue(struct cache_detail *detail, struct cache_head *ch);
 
-static void cache_fresh_locked(struct cache_head *head, time_t expiry,
-			       struct cache_detail *detail)
+static void cache_fresh_locked(struct cache_head *head, time_t expiry)
 {
-	time_t now = seconds_since_boot();
-	if (now <= detail->flush_time)
-		/* ensure it isn't immediately treated as expired */
-		now = detail->flush_time + 1;
 	head->expiry_time = expiry;
-	head->last_refresh = now;
+	head->last_refresh = seconds_since_boot();
 	smp_wmb(); /* paired with smp_rmb() in cache_is_valid() */
 	set_bit(CACHE_VALID, &head->flags);
 }
@@ -157,7 +149,7 @@ struct cache_head *sunrpc_cache_update(struct cache_detail *detail,
 				set_bit(CACHE_NEGATIVE, &old->flags);
 			else
 				detail->update(old, new);
-			cache_fresh_locked(old, new->expiry_time, detail);
+			cache_fresh_locked(old, new->expiry_time);
 			write_unlock(&detail->hash_lock);
 			cache_fresh_unlocked(old, detail);
 			return old;
@@ -170,7 +162,7 @@ struct cache_head *sunrpc_cache_update(struct cache_detail *detail,
 		cache_put(old, detail);
 		return NULL;
 	}
-	cache_init(tmp, detail);
+	cache_init(tmp);
 	detail->init(tmp, old);
 
 	write_lock(&detail->hash_lock);
@@ -181,8 +173,8 @@ struct cache_head *sunrpc_cache_update(struct cache_detail *detail,
 	hlist_add_head(&tmp->cache_list, &detail->hash_table[hash]);
 	detail->entries++;
 	cache_get(tmp);
-	cache_fresh_locked(tmp, new->expiry_time, detail);
-	cache_fresh_locked(old, 0, detail);
+	cache_fresh_locked(tmp, new->expiry_time);
+	cache_fresh_locked(old, 0);
 	write_unlock(&detail->hash_lock);
 	cache_fresh_unlocked(tmp, detail);
 	cache_fresh_unlocked(old, detail);
@@ -227,8 +219,7 @@ static int try_to_negate_entry(struct cache_detail *detail, struct cache_head *h
 	rv = cache_is_valid(h);
 	if (rv == -EAGAIN) {
 		set_bit(CACHE_NEGATIVE, &h->flags);
-		cache_fresh_locked(h, seconds_since_boot()+CACHE_NEW_EXPIRY,
-				   detail);
+		cache_fresh_locked(h, seconds_since_boot()+CACHE_NEW_EXPIRY);
 		rv = -ENOENT;
 	}
 	write_unlock(&detail->hash_lock);
@@ -496,13 +487,10 @@ EXPORT_SYMBOL_GPL(cache_flush);
 
 void cache_purge(struct cache_detail *detail)
 {
-	time_t now = seconds_since_boot();
-	if (detail->flush_time >= now)
-		now = detail->flush_time + 1;
-	/* 'now' is the maximum value any 'last_refresh' can have */
-	detail->flush_time = now;
+	detail->flush_time = LONG_MAX;
 	detail->nextcheck = seconds_since_boot();
 	cache_flush();
+	detail->flush_time = 1;
 }
 EXPORT_SYMBOL_GPL(cache_purge);
 
@@ -771,7 +759,7 @@ static ssize_t cache_read(struct file *filp, char __user *buf, size_t count,
 	if (count == 0)
 		return 0;
 
-	inode_lock(inode); /* protect against multiple concurrent
+	mutex_lock(&inode->i_mutex); /* protect against multiple concurrent
 			      * readers on this file */
  again:
 	spin_lock(&queue_lock);
@@ -784,7 +772,7 @@ static ssize_t cache_read(struct file *filp, char __user *buf, size_t count,
 	}
 	if (rp->q.list.next == &cd->queue) {
 		spin_unlock(&queue_lock);
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 		WARN_ON_ONCE(rp->offset);
 		return 0;
 	}
@@ -838,7 +826,7 @@ static ssize_t cache_read(struct file *filp, char __user *buf, size_t count,
 	}
 	if (err == -EAGAIN)
 		goto again;
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	return err ? err :  count;
 }
 
@@ -909,9 +897,9 @@ static ssize_t cache_write(struct file *filp, const char __user *buf,
 	if (!cd->cache_parse)
 		goto out;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	ret = cache_downcall(mapping, buf, count, cd);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 out:
 	return ret;
 }
@@ -1182,14 +1170,14 @@ int sunrpc_cache_pipe_upcall(struct cache_detail *detail, struct cache_head *h)
 	}
 
 	crq->q.reader = 0;
+	crq->item = cache_get(h);
 	crq->buf = buf;
 	crq->len = 0;
 	crq->readers = 0;
 	spin_lock(&queue_lock);
-	if (test_bit(CACHE_PENDING, &h->flags)) {
-		crq->item = cache_get(h);
+	if (test_bit(CACHE_PENDING, &h->flags))
 		list_add_tail(&crq->q.list, &detail->queue);
-	} else
+	else
 		/* Lost a race, no longer PENDING, so don't enqueue */
 		ret = -EAGAIN;
 	spin_unlock(&queue_lock);
@@ -1225,7 +1213,7 @@ int qword_get(char **bpp, char *dest, int bufsize)
 	if (bp[0] == '\\' && bp[1] == 'x') {
 		/* HEX STRING */
 		bp += 2;
-		while (len < bufsize - 1) {
+		while (len < bufsize) {
 			int h, l;
 
 			h = hex_to_bin(bp[0]);
@@ -1448,7 +1436,6 @@ static ssize_t write_flush(struct file *file, const char __user *buf,
 {
 	char tbuf[20];
 	char *bp, *ep;
-	time_t then, now;
 
 	if (*ppos || count > sizeof(tbuf)-1)
 		return -EINVAL;
@@ -1460,22 +1447,8 @@ static ssize_t write_flush(struct file *file, const char __user *buf,
 		return -EINVAL;
 
 	bp = tbuf;
-	then = get_expiry(&bp);
-	now = seconds_since_boot();
-	cd->nextcheck = now;
-	/* Can only set flush_time to 1 second beyond "now", or
-	 * possibly 1 second beyond flushtime.  This is because
-	 * flush_time never goes backwards so it mustn't get too far
-	 * ahead of time.
-	 */
-	if (then >= now) {
-		/* Want to flush everything, so behave like cache_purge() */
-		if (cd->flush_time >= now)
-			now = cd->flush_time + 1;
-		then = now;
-	}
-
-	cd->flush_time = then;
+	cd->flush_time = get_expiry(&bp);
+	cd->nextcheck = seconds_since_boot();
 	cache_flush();
 
 	*ppos += count;

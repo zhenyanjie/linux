@@ -9,11 +9,10 @@ struct drm_display_mode;
 struct drm_encoder;
 struct drm_fbdev_cma;
 struct drm_framebuffer;
-struct drm_plane;
 struct imx_drm_crtc;
 struct platform_device;
 
-unsigned int imx_drm_crtc_id(struct imx_drm_crtc *crtc);
+int imx_drm_crtc_id(struct imx_drm_crtc *crtc);
 
 struct imx_drm_crtc_helper_funcs {
 	int (*enable_vblank)(struct drm_crtc *crtc);
@@ -25,7 +24,7 @@ struct imx_drm_crtc_helper_funcs {
 };
 
 int imx_drm_add_crtc(struct drm_device *drm, struct drm_crtc *crtc,
-		struct imx_drm_crtc **new_crtc, struct drm_plane *primary_plane,
+		struct imx_drm_crtc **new_crtc,
 		const struct imx_drm_crtc_helper_funcs *imx_helper_funcs,
 		struct device_node *port);
 int imx_drm_remove_crtc(struct imx_drm_crtc *);

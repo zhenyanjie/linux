@@ -37,10 +37,7 @@
 #include <asm/cputype.h>
 #include <asm/exception.h>
 
-#include "irq-gic-common.h"
-
-#define ITS_FLAGS_CMDQ_NEEDS_FLUSHING		(1ULL << 0)
-#define ITS_FLAGS_WORKAROUND_CAVIUM_22375	(1ULL << 1)
+#define ITS_FLAGS_CMDQ_NEEDS_FLUSHING		(1 << 0)
 
 #define RDIST_FLAGS_PROPBASE_NEEDS_FLUSHING	(1 << 0)
 
@@ -66,10 +63,7 @@ struct its_node {
 	unsigned long		phys_base;
 	struct its_cmd_block	*cmd_base;
 	struct its_cmd_block	*cmd_write;
-	struct {
-		void		*base;
-		u32		order;
-	} tables[GITS_BASER_NR_REGS];
+	void			*tables[GITS_BASER_NR_REGS];
 	struct its_collection	*collections;
 	struct list_head	its_device_list;
 	u64			flags;
@@ -77,9 +71,6 @@ struct its_node {
 };
 
 #define ITS_ITT_ALIGN		SZ_256
-
-/* Convert page order to size in bytes */
-#define PAGE_ORDER_TO_SIZE(o)	(PAGE_SIZE << (o))
 
 struct event_lpi_map {
 	unsigned long		*lpi_map;
@@ -603,6 +594,11 @@ static void its_unmask_irq(struct irq_data *d)
 	lpi_set_config(d, true);
 }
 
+static void its_eoi_irq(struct irq_data *d)
+{
+	gic_write_eoir(d->hwirq);
+}
+
 static int its_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 			    bool force)
 {
@@ -639,7 +635,7 @@ static struct irq_chip its_irq_chip = {
 	.name			= "ITS",
 	.irq_mask		= its_mask_irq,
 	.irq_unmask		= its_unmask_irq,
-	.irq_eoi		= irq_chip_eoi_parent,
+	.irq_eoi		= its_eoi_irq,
 	.irq_set_affinity	= its_set_affinity,
 	.irq_compose_msi_msg	= its_irq_compose_msi_msg,
 };
@@ -808,10 +804,9 @@ static void its_free_tables(struct its_node *its)
 	int i;
 
 	for (i = 0; i < GITS_BASER_NR_REGS; i++) {
-		if (its->tables[i].base) {
-			free_pages((unsigned long)its->tables[i].base,
-				   its->tables[i].order);
-			its->tables[i].base = NULL;
+		if (its->tables[i]) {
+			free_page((unsigned long)its->tables[i]);
+			its->tables[i] = NULL;
 		}
 	}
 }
@@ -822,29 +817,14 @@ static int its_alloc_tables(const char *node_name, struct its_node *its)
 	int i;
 	int psz = SZ_64K;
 	u64 shr = GITS_BASER_InnerShareable;
-	u64 cache;
-	u64 typer;
-	u32 ids;
-
-	if (its->flags & ITS_FLAGS_WORKAROUND_CAVIUM_22375) {
-		/*
-		 * erratum 22375: only alloc 8MB table size
-		 * erratum 24313: ignore memory access type
-		 */
-		cache	= 0;
-		ids	= 0x14;			/* 20 bits, 8MB */
-	} else {
-		cache	= GITS_BASER_WaWb;
-		typer	= readq_relaxed(its->base + GITS_TYPER);
-		ids	= GITS_TYPER_DEVBITS(typer);
-	}
+	u64 cache = GITS_BASER_WaWb;
 
 	for (i = 0; i < GITS_BASER_NR_REGS; i++) {
 		u64 val = readq_relaxed(its->base + GITS_BASER + i * 8);
 		u64 type = GITS_BASER_TYPE(val);
 		u64 entry_size = GITS_BASER_ENTRY_SIZE(val);
 		int order = get_order(psz);
-		int alloc_pages;
+		int alloc_size;
 		u64 tmp;
 		void *base;
 
@@ -860,6 +840,9 @@ static int its_alloc_tables(const char *node_name, struct its_node *its)
 		 * For other tables, only allocate a single page.
 		 */
 		if (type == GITS_BASER_TYPE_DEVICE) {
+			u64 typer = readq_relaxed(its->base + GITS_TYPER);
+			u32 ids = GITS_TYPER_DEVBITS(typer);
+
 			/*
 			 * 'order' was initialized earlier to the default page
 			 * granule of the the ITS.  We can't have an allocation
@@ -875,23 +858,14 @@ static int its_alloc_tables(const char *node_name, struct its_node *its)
 			}
 		}
 
-retry_alloc_baser:
-		alloc_pages = (PAGE_ORDER_TO_SIZE(order) / psz);
-		if (alloc_pages > GITS_BASER_PAGES_MAX) {
-			alloc_pages = GITS_BASER_PAGES_MAX;
-			order = get_order(GITS_BASER_PAGES_MAX * psz);
-			pr_warn("%s: Device Table too large, reduce its page order to %u (%u pages)\n",
-				node_name, order, alloc_pages);
-		}
-
+		alloc_size = (1 << order) * PAGE_SIZE;
 		base = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, order);
 		if (!base) {
 			err = -ENOMEM;
 			goto out_free;
 		}
 
-		its->tables[i].base = base;
-		its->tables[i].order = order;
+		its->tables[i] = base;
 
 retry_baser:
 		val = (virt_to_phys(base) 				 |
@@ -913,7 +887,7 @@ retry_baser:
 			break;
 		}
 
-		val |= alloc_pages - 1;
+		val |= (alloc_size / psz) - 1;
 
 		writeq_relaxed(val, its->base + GITS_BASER + i * 8);
 		tmp = readq_relaxed(its->base + GITS_BASER + i * 8);
@@ -929,7 +903,7 @@ retry_baser:
 			shr = tmp & GITS_BASER_SHAREABILITY_MASK;
 			if (!shr) {
 				cache = GITS_BASER_nC;
-				__flush_dcache_area(base, PAGE_ORDER_TO_SIZE(order));
+				__flush_dcache_area(base, alloc_size);
 			}
 			goto retry_baser;
 		}
@@ -940,16 +914,13 @@ retry_baser:
 			 * size and retry. If we reach 4K, then
 			 * something is horribly wrong...
 			 */
-			free_pages((unsigned long)base, order);
-			its->tables[i].base = NULL;
-
 			switch (psz) {
 			case SZ_16K:
 				psz = SZ_4K;
-				goto retry_alloc_baser;
+				goto retry_baser;
 			case SZ_64K:
 				psz = SZ_16K;
-				goto retry_alloc_baser;
+				goto retry_baser;
 			}
 		}
 
@@ -962,7 +933,7 @@ retry_baser:
 		}
 
 		pr_info("ITS: allocated %d %s @%lx (psz %dK, shr %d)\n",
-			(int)(PAGE_ORDER_TO_SIZE(order) / entry_size),
+			(int)(alloc_size / entry_size),
 			its_base_type_string[type],
 			(unsigned long)virt_to_phys(base),
 			psz / SZ_1K, (int)shr >> GITS_BASER_SHAREABILITY_SHIFT);
@@ -1270,19 +1241,15 @@ static int its_irq_gic_domain_alloc(struct irq_domain *domain,
 				    unsigned int virq,
 				    irq_hw_number_t hwirq)
 {
-	struct irq_fwspec fwspec;
+	struct of_phandle_args args;
 
-	if (irq_domain_get_of_node(domain->parent)) {
-		fwspec.fwnode = domain->parent->fwnode;
-		fwspec.param_count = 3;
-		fwspec.param[0] = GIC_IRQ_TYPE_LPI;
-		fwspec.param[1] = hwirq;
-		fwspec.param[2] = IRQ_TYPE_EDGE_RISING;
-	} else {
-		return -EINVAL;
-	}
+	args.np = domain->parent->of_node;
+	args.args_count = 3;
+	args.args[0] = GIC_IRQ_TYPE_LPI;
+	args.args[1] = hwirq;
+	args.args[2] = IRQ_TYPE_EDGE_RISING;
 
-	return irq_domain_alloc_irqs_parent(domain, virq, 1, &fwspec);
+	return irq_domain_alloc_irqs_parent(domain, virq, 1, &args);
 }
 
 static int its_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
@@ -1403,33 +1370,6 @@ static int its_force_quiescent(void __iomem *base)
 	}
 }
 
-static void __maybe_unused its_enable_quirk_cavium_22375(void *data)
-{
-	struct its_node *its = data;
-
-	its->flags |= ITS_FLAGS_WORKAROUND_CAVIUM_22375;
-}
-
-static const struct gic_quirk its_quirks[] = {
-#ifdef CONFIG_CAVIUM_ERRATUM_22375
-	{
-		.desc	= "ITS: Cavium errata 22375, 24313",
-		.iidr	= 0xa100034c,	/* ThunderX pass 1.x */
-		.mask	= 0xffff0fff,
-		.init	= its_enable_quirk_cavium_22375,
-	},
-#endif
-	{
-	}
-};
-
-static void its_enable_quirks(struct its_node *its)
-{
-	u32 iidr = readl_relaxed(its->base + GITS_IIDR);
-
-	gic_enable_quirks(iidr, its_quirks, its);
-}
-
 static int its_probe(struct device_node *node, struct irq_domain *parent)
 {
 	struct resource res;
@@ -1487,8 +1427,6 @@ static int its_probe(struct device_node *node, struct irq_domain *parent)
 		goto out_free_its;
 	}
 	its->cmd_write = its->cmd_base;
-
-	its_enable_quirks(its);
 
 	err = its_alloc_tables(node->full_name, its);
 	if (err)

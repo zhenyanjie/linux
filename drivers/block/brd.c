@@ -19,9 +19,6 @@
 #include <linux/radix-tree.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
-#ifdef CONFIG_BLK_DEV_RAM_DAX
-#include <linux/pfn_t.h>
-#endif
 
 #include <asm/uaccess.h>
 
@@ -326,7 +323,7 @@ out:
 	return err;
 }
 
-static blk_qc_t brd_make_request(struct request_queue *q, struct bio *bio)
+static void brd_make_request(struct request_queue *q, struct bio *bio)
 {
 	struct block_device *bdev = bio->bi_bdev;
 	struct brd_device *brd = bdev->bd_disk->private_data;
@@ -340,9 +337,6 @@ static blk_qc_t brd_make_request(struct request_queue *q, struct bio *bio)
 		goto io_error;
 
 	if (unlikely(bio->bi_rw & REQ_DISCARD)) {
-		if (sector & ((PAGE_SIZE >> SECTOR_SHIFT) - 1) ||
-		    bio->bi_iter.bi_size & ~PAGE_MASK)
-			goto io_error;
 		discard_from_brd(brd, sector, bio->bi_iter.bi_size);
 		goto out;
 	}
@@ -364,10 +358,9 @@ static blk_qc_t brd_make_request(struct request_queue *q, struct bio *bio)
 
 out:
 	bio_endio(bio);
-	return BLK_QC_T_NONE;
+	return;
 io_error:
 	bio_io_error(bio);
-	return BLK_QC_T_NONE;
 }
 
 static int brd_rw_page(struct block_device *bdev, sector_t sector,
@@ -381,7 +374,7 @@ static int brd_rw_page(struct block_device *bdev, sector_t sector,
 
 #ifdef CONFIG_BLK_DEV_RAM_DAX
 static long brd_direct_access(struct block_device *bdev, sector_t sector,
-			void __pmem **kaddr, pfn_t *pfn)
+			void __pmem **kaddr, unsigned long *pfn)
 {
 	struct brd_device *brd = bdev->bd_disk->private_data;
 	struct page *page;
@@ -392,7 +385,7 @@ static long brd_direct_access(struct block_device *bdev, sector_t sector,
 	if (!page)
 		return -ENOSPC;
 	*kaddr = (void __pmem *)page_address(page);
-	*pfn = page_to_pfn_t(page);
+	*pfn = page_to_pfn(page);
 
 	return PAGE_SIZE;
 }

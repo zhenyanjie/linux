@@ -172,7 +172,7 @@ static ssize_t store_remove_id(struct device_driver *driver, const char *buf,
 	__u32 vendor, device, subvendor = PCI_ANY_ID,
 		subdevice = PCI_ANY_ID, class = 0, class_mask = 0;
 	int fields = 0;
-	size_t retval = -ENODEV;
+	int retval = -ENODEV;
 
 	fields = sscanf(buf, "%x %x %x %x %x %x",
 			&vendor, &device, &subvendor, &subdevice,
@@ -190,13 +190,15 @@ static ssize_t store_remove_id(struct device_driver *driver, const char *buf,
 		    !((id->class ^ class) & class_mask)) {
 			list_del(&dynid->node);
 			kfree(dynid);
-			retval = count;
+			retval = 0;
 			break;
 		}
 	}
 	spin_unlock(&pdrv->dynids.lock);
 
-	return retval;
+	if (retval)
+		return retval;
+	return count;
 }
 static DRIVER_ATTR(remove_id, S_IWUSR, NULL, store_remove_id);
 
@@ -682,16 +684,10 @@ static int pci_pm_prepare(struct device *dev)
 	return pci_dev_keep_suspended(to_pci_dev(dev));
 }
 
-static void pci_pm_complete(struct device *dev)
-{
-	pci_dev_complete_resume(to_pci_dev(dev));
-	pm_complete_with_resume_check(dev);
-}
 
 #else /* !CONFIG_PM_SLEEP */
 
 #define pci_pm_prepare	NULL
-#define pci_pm_complete	NULL
 
 #endif /* !CONFIG_PM_SLEEP */
 
@@ -1146,21 +1142,9 @@ static int pci_pm_runtime_suspend(struct device *dev)
 	pci_dev->state_saved = false;
 	pci_dev->no_d3cold = false;
 	error = pm->runtime_suspend(dev);
-	if (error) {
-		/*
-		 * -EBUSY and -EAGAIN is used to request the runtime PM core
-		 * to schedule a new suspend, so log the event only with debug
-		 * log level.
-		 */
-		if (error == -EBUSY || error == -EAGAIN)
-			dev_dbg(dev, "can't suspend now (%pf returned %d)\n",
-				pm->runtime_suspend, error);
-		else
-			dev_err(dev, "can't suspend (%pf returned %d)\n",
-				pm->runtime_suspend, error);
-
+	suspend_report_result(pm->runtime_suspend, error);
+	if (error)
 		return error;
-	}
 	if (!pci_dev->d3cold_allowed)
 		pci_dev->no_d3cold = true;
 
@@ -1234,7 +1218,6 @@ static int pci_pm_runtime_idle(struct device *dev)
 
 static const struct dev_pm_ops pci_dev_pm_ops = {
 	.prepare = pci_pm_prepare,
-	.complete = pci_pm_complete,
 	.suspend = pci_pm_suspend,
 	.resume = pci_pm_resume,
 	.freeze = pci_pm_freeze,

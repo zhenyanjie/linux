@@ -73,6 +73,8 @@
 #include "../../include/lustre_ver.h"
 #include "../../include/lustre/lustre_build_version.h"
 
+int proc_version;
+
 /* buffer MUST be at least the size of obd_ioctl_hdr */
 int obd_ioctl_getdata(char **buf, int *len, void *arg)
 {
@@ -212,6 +214,7 @@ struct miscdevice obd_psdev = {
 	.name  = OBD_DEV_NAME,
 	.fops  = &obd_psdev_fops,
 };
+
 
 static ssize_t version_show(struct kobject *kobj, struct attribute *attr,
 			    char *buf)

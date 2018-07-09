@@ -19,6 +19,8 @@ DPMS_t;
 
 void ddk750_setDPMS(DPMS_t);
 
+unsigned int getPowerMode(void);
+
 /*
  * This function sets the current power mode
  */
@@ -35,6 +37,11 @@ void setCurrentGate(unsigned int gate);
 void enable2DEngine(unsigned int enable);
 
 /*
+ * This function enable/disable the ZV Port
+ */
+void enableZVPort(unsigned int enable);
+
+/*
  * This function enable/disable the DMA Engine
  */
 void enableDMA(unsigned int enable);
@@ -45,9 +52,19 @@ void enableDMA(unsigned int enable);
 void enableGPIO(unsigned int enable);
 
 /*
+ * This function enable/disable the PWM Engine
+ */
+void enablePWM(unsigned int enable);
+
+/*
  * This function enable/disable the I2C Engine
  */
 void enableI2C(unsigned int enable);
+
+/*
+ * This function enable/disable the SSP.
+ */
+void enableSSP(unsigned int enable);
 
 
 #endif

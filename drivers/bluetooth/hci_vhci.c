@@ -50,18 +50,22 @@ struct vhci_data {
 	wait_queue_head_t read_wait;
 	struct sk_buff_head readq;
 
-	struct mutex open_mutex;
 	struct delayed_work open_timeout;
 };
 
 static int vhci_open_dev(struct hci_dev *hdev)
 {
+	set_bit(HCI_RUNNING, &hdev->flags);
+
 	return 0;
 }
 
 static int vhci_close_dev(struct hci_dev *hdev)
 {
 	struct vhci_data *data = hci_get_drvdata(hdev);
+
+	if (!test_and_clear_bit(HCI_RUNNING, &hdev->flags))
+		return 0;
 
 	skb_queue_purge(&data->readq);
 
@@ -81,21 +85,21 @@ static int vhci_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 {
 	struct vhci_data *data = hci_get_drvdata(hdev);
 
-	memcpy(skb_push(skb, 1), &hci_skb_pkt_type(skb), 1);
+	if (!test_bit(HCI_RUNNING, &hdev->flags))
+		return -EBUSY;
+
+	memcpy(skb_push(skb, 1), &bt_cb(skb)->pkt_type, 1);
 	skb_queue_tail(&data->readq, skb);
 
 	wake_up_interruptible(&data->read_wait);
 	return 0;
 }
 
-static int __vhci_create_device(struct vhci_data *data, __u8 opcode)
+static int vhci_create_device(struct vhci_data *data, __u8 opcode)
 {
 	struct hci_dev *hdev;
 	struct sk_buff *skb;
 	__u8 dev_type;
-
-	if (data->hdev)
-		return -EBADFD;
 
 	/* bits 0-1 are dev_type (BR/EDR or AMP) */
 	dev_type = opcode & 0x03;
@@ -144,7 +148,7 @@ static int __vhci_create_device(struct vhci_data *data, __u8 opcode)
 		return -EBUSY;
 	}
 
-	hci_skb_pkt_type(skb) = HCI_VENDOR_PKT;
+	bt_cb(skb)->pkt_type = HCI_VENDOR_PKT;
 
 	*skb_put(skb, 1) = 0xff;
 	*skb_put(skb, 1) = opcode;
@@ -153,17 +157,6 @@ static int __vhci_create_device(struct vhci_data *data, __u8 opcode)
 
 	wake_up_interruptible(&data->read_wait);
 	return 0;
-}
-
-static int vhci_create_device(struct vhci_data *data, __u8 opcode)
-{
-	int err;
-
-	mutex_lock(&data->open_mutex);
-	err = __vhci_create_device(data, opcode);
-	mutex_unlock(&data->open_mutex);
-
-	return err;
 }
 
 static inline ssize_t vhci_get_user(struct vhci_data *data,
@@ -198,12 +191,17 @@ static inline ssize_t vhci_get_user(struct vhci_data *data,
 			return -ENODEV;
 		}
 
-		hci_skb_pkt_type(skb) = pkt_type;
+		bt_cb(skb)->pkt_type = pkt_type;
 
 		ret = hci_recv_frame(data->hdev, skb);
 		break;
 
 	case HCI_VENDOR_PKT:
+		if (data->hdev) {
+			kfree_skb(skb);
+			return -EBADFD;
+		}
+
 		cancel_delayed_work_sync(&data->open_timeout);
 
 		opcode = *((__u8 *) skb->data);
@@ -244,7 +242,7 @@ static inline ssize_t vhci_put_user(struct vhci_data *data,
 
 	data->hdev->stat.byte_tx += len;
 
-	switch (hci_skb_pkt_type(skb)) {
+	switch (bt_cb(skb)->pkt_type) {
 	case HCI_COMMAND_PKT:
 		data->hdev->stat.cmd_tx++;
 		break;
@@ -330,7 +328,6 @@ static int vhci_open(struct inode *inode, struct file *file)
 	skb_queue_head_init(&data->readq);
 	init_waitqueue_head(&data->read_wait);
 
-	mutex_init(&data->open_mutex);
 	INIT_DELAYED_WORK(&data->open_timeout, vhci_open_timeout);
 
 	file->private_data = data;
@@ -344,18 +341,15 @@ static int vhci_open(struct inode *inode, struct file *file)
 static int vhci_release(struct inode *inode, struct file *file)
 {
 	struct vhci_data *data = file->private_data;
-	struct hci_dev *hdev;
+	struct hci_dev *hdev = data->hdev;
 
 	cancel_delayed_work_sync(&data->open_timeout);
-
-	hdev = data->hdev;
 
 	if (hdev) {
 		hci_unregister_dev(hdev);
 		hci_free_dev(hdev);
 	}
 
-	skb_queue_purge(&data->readq);
 	file->private_data = NULL;
 	kfree(data);
 

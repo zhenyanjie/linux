@@ -110,7 +110,7 @@ static int fsl_msi_init_allocator(struct fsl_msi *msi_data)
 	int rc, hwirq;
 
 	rc = msi_bitmap_alloc(&msi_data->bitmap, NR_MSI_IRQS_MAX,
-			      irq_domain_get_of_node(msi_data->irqhost));
+			      msi_data->irqhost->of_node);
 	if (rc)
 		return rc;
 

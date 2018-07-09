@@ -443,14 +443,9 @@ static ssize_t ppp_read(struct file *file, char __user *buf,
 			 * network traffic (demand mode).
 			 */
 			struct ppp *ppp = PF_TO_PPP(pf);
-
-			ppp_recv_lock(ppp);
 			if (ppp->n_channels == 0 &&
-			    (ppp->flags & SC_LOOP_TRAFFIC) == 0) {
-				ppp_recv_unlock(ppp);
+			    (ppp->flags & SC_LOOP_TRAFFIC) == 0)
 				break;
-			}
-			ppp_recv_unlock(ppp);
 		}
 		ret = -EAGAIN;
 		if (file->f_flags & O_NONBLOCK)
@@ -537,12 +532,9 @@ static unsigned int ppp_poll(struct file *file, poll_table *wait)
 	else if (pf->kind == INTERFACE) {
 		/* see comment in ppp_read */
 		struct ppp *ppp = PF_TO_PPP(pf);
-
-		ppp_recv_lock(ppp);
 		if (ppp->n_channels == 0 &&
 		    (ppp->flags & SC_LOOP_TRAFFIC) == 0)
 			mask |= POLLIN | POLLRDNORM;
-		ppp_recv_unlock(ppp);
 	}
 
 	return mask;
@@ -575,7 +567,7 @@ static int get_filter(void __user *arg, struct sock_filter **p)
 
 static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	struct ppp_file *pf;
+	struct ppp_file *pf = file->private_data;
 	struct ppp *ppp;
 	int err = -EFAULT, val, val2, i;
 	struct ppp_idle idle;
@@ -585,14 +577,9 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	void __user *argp = (void __user *)arg;
 	int __user *p = argp;
 
-	mutex_lock(&ppp_mutex);
-
-	pf = file->private_data;
-	if (!pf) {
-		err = ppp_unattached_ioctl(current->nsproxy->net_ns,
-					   pf, file, cmd, arg);
-		goto out;
-	}
+	if (!pf)
+		return ppp_unattached_ioctl(current->nsproxy->net_ns,
+					pf, file, cmd, arg);
 
 	if (cmd == PPPIOCDETACH) {
 		/*
@@ -607,6 +594,7 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		 * this fd and reopening /dev/ppp.
 		 */
 		err = -EINVAL;
+		mutex_lock(&ppp_mutex);
 		if (pf->kind == INTERFACE) {
 			ppp = PF_TO_PPP(pf);
 			rtnl_lock();
@@ -620,13 +608,15 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		} else
 			pr_warn("PPPIOCDETACH file->f_count=%ld\n",
 				atomic_long_read(&file->f_count));
-		goto out;
+		mutex_unlock(&ppp_mutex);
+		return err;
 	}
 
 	if (pf->kind == CHANNEL) {
 		struct channel *pch;
 		struct ppp_channel *chan;
 
+		mutex_lock(&ppp_mutex);
 		pch = PF_TO_CHANNEL(pf);
 
 		switch (cmd) {
@@ -648,16 +638,17 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				err = chan->ops->ioctl(chan, cmd, arg);
 			up_read(&pch->chan_sem);
 		}
-		goto out;
+		mutex_unlock(&ppp_mutex);
+		return err;
 	}
 
 	if (pf->kind != INTERFACE) {
 		/* can't happen */
 		pr_err("PPP: not interface or channel??\n");
-		err = -EINVAL;
-		goto out;
+		return -EINVAL;
 	}
 
+	mutex_lock(&ppp_mutex);
 	ppp = PF_TO_PPP(pf);
 	switch (cmd) {
 	case PPPIOCSMRU:
@@ -832,10 +823,7 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	default:
 		err = -ENOTTY;
 	}
-
-out:
 	mutex_unlock(&ppp_mutex);
-
 	return err;
 }
 
@@ -848,6 +836,7 @@ static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
 	struct ppp_net *pn;
 	int __user *p = (int __user *)arg;
 
+	mutex_lock(&ppp_mutex);
 	switch (cmd) {
 	case PPPIOCNEWUNIT:
 		/* Create a new ppp unit */
@@ -897,7 +886,7 @@ static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
 	default:
 		err = -ENOTTY;
 	}
-
+	mutex_unlock(&ppp_mutex);
 	return err;
 }
 
@@ -1149,15 +1138,9 @@ static const struct net_device_ops ppp_netdev_ops = {
 	.ndo_get_stats64 = ppp_get_stats64,
 };
 
-static struct device_type ppp_type = {
-	.name = "ppp",
-};
-
 static void ppp_setup(struct net_device *dev)
 {
 	dev->netdev_ops = &ppp_netdev_ops;
-	SET_NETDEV_DEVTYPE(dev, &ppp_type);
-
 	dev->hard_header_len = PPP_HDRLEN;
 	dev->mtu = PPP_MRU;
 	dev->addr_len = 0;
@@ -2307,7 +2290,7 @@ int ppp_register_net_channel(struct net *net, struct ppp_channel *chan)
 
 	pch->ppp = NULL;
 	pch->chan = chan;
-	pch->chan_net = get_net(net);
+	pch->chan_net = net;
 	chan->ppp = pch;
 	init_ppp_file(&pch->file, CHANNEL);
 	pch->file.hdrlen = chan->hdrlen;
@@ -2404,8 +2387,6 @@ ppp_unregister_channel(struct ppp_channel *chan)
 	spin_lock_bh(&pn->all_channels_lock);
 	list_del(&pch->list);
 	spin_unlock_bh(&pn->all_channels_lock);
-	put_net(pch->chan_net);
-	pch->chan_net = NULL;
 
 	pch->file.dead = 1;
 	wake_up_interruptible(&pch->file.rwait);
@@ -2739,7 +2720,8 @@ static struct ppp *ppp_create_interface(struct net *net, int unit,
 	int ret = -ENOMEM;
 	int i;
 
-	dev = alloc_netdev(sizeof(struct ppp), "", NET_NAME_ENUM, ppp_setup);
+	dev = alloc_netdev(sizeof(struct ppp), "", NET_NAME_UNKNOWN,
+			   ppp_setup);
 	if (!dev)
 		goto out1;
 
@@ -2821,7 +2803,6 @@ static struct ppp *ppp_create_interface(struct net *net, int unit,
 
 out2:
 	mutex_unlock(&pn->all_ppp_mutex);
-	rtnl_unlock();
 	free_netdev(dev);
 out1:
 	*retp = ret;

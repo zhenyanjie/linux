@@ -19,6 +19,7 @@
 #include <linux/sched.h>
 #include <net/nfc/nci_core.h>
 
+#include "ndlc.h"
 #include "st-nci.h"
 
 #define NDLC_TIMER_T1		100
@@ -265,8 +266,7 @@ static void ndlc_t2_timeout(unsigned long data)
 }
 
 int ndlc_probe(void *phy_id, struct nfc_phy_ops *phy_ops, struct device *dev,
-	       int phy_headroom, int phy_tailroom, struct llt_ndlc **ndlc_id,
-	       struct st_nci_se_status *se_status)
+	       int phy_headroom, int phy_tailroom, struct llt_ndlc **ndlc_id)
 {
 	struct llt_ndlc *ndlc;
 
@@ -296,7 +296,7 @@ int ndlc_probe(void *phy_id, struct nfc_phy_ops *phy_ops, struct device *dev,
 
 	INIT_WORK(&ndlc->sm_work, llt_ndlc_sm_work);
 
-	return st_nci_probe(ndlc, phy_headroom, phy_tailroom, se_status);
+	return st_nci_probe(ndlc, phy_headroom, phy_tailroom);
 }
 EXPORT_SYMBOL(ndlc_probe);
 

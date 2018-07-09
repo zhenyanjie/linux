@@ -25,7 +25,7 @@ static int l2_line_sz;
 int ioc_exists;
 volatile int slc_enable = 1, ioc_enable = 1;
 
-void (*_cache_line_loop_ic_fn)(phys_addr_t paddr, unsigned long vaddr,
+void (*_cache_line_loop_ic_fn)(unsigned long paddr, unsigned long vaddr,
 			       unsigned long sz, const int cacheop);
 
 void (*__dma_cache_wback_inv)(unsigned long start, unsigned long sz);
@@ -37,6 +37,7 @@ char *arc_cache_mumbojumbo(int c, char *buf, int len)
 	int n = 0;
 	struct cpuinfo_arc_cache *p;
 
+#define IS_USED_RUN(v)		((v) ? "" : "(disabled) ")
 #define PR_CACHE(p, cfg, str)						\
 	if (!(p)->ver)							\
 		n += scnprintf(buf + n, len - n, str"\t\t: N/A\n");	\
@@ -46,7 +47,7 @@ char *arc_cache_mumbojumbo(int c, char *buf, int len)
 			(p)->sz_k, (p)->assoc, (p)->line_len,		\
 			(p)->vipt ? "VIPT" : "PIPT",			\
 			(p)->alias ? " aliasing" : "",			\
-			IS_USED_CFG(cfg));
+			IS_ENABLED(cfg) ? "" : " (not used)");
 
 	PR_CACHE(&cpuinfo_arc700[c].icache, CONFIG_ARC_HAS_ICACHE, "I-Cache");
 	PR_CACHE(&cpuinfo_arc700[c].dcache, CONFIG_ARC_HAS_DCACHE, "D-Cache");
@@ -62,7 +63,7 @@ char *arc_cache_mumbojumbo(int c, char *buf, int len)
 
 	if (ioc_exists)
 		n += scnprintf(buf + n, len - n, "IOC\t\t:%s\n",
-				IS_DISABLED_RUN(ioc_enable));
+				IS_USED_RUN(ioc_enable));
 
 	return buf;
 }
@@ -216,7 +217,7 @@ slc_chk:
  */
 
 static inline
-void __cache_line_loop_v2(phys_addr_t paddr, unsigned long vaddr,
+void __cache_line_loop_v2(unsigned long paddr, unsigned long vaddr,
 			  unsigned long sz, const int op)
 {
 	unsigned int aux_cmd;
@@ -253,12 +254,8 @@ void __cache_line_loop_v2(phys_addr_t paddr, unsigned long vaddr,
 	}
 }
 
-/*
- * For ARC700 MMUv3 I-cache and D-cache flushes
- * Also reused for HS38 aliasing I-cache configuration
- */
 static inline
-void __cache_line_loop_v3(phys_addr_t paddr, unsigned long vaddr,
+void __cache_line_loop_v3(unsigned long paddr, unsigned long vaddr,
 			  unsigned long sz, const int op)
 {
 	unsigned int aux_cmd, aux_tag;
@@ -293,16 +290,6 @@ void __cache_line_loop_v3(phys_addr_t paddr, unsigned long vaddr,
 	if (full_page)
 		write_aux_reg(aux_tag, paddr);
 
-	/*
-	 * This is technically for MMU v4, using the MMU v3 programming model
-	 * Special work for HS38 aliasing I-cache configuratino with PAE40
-	 *   - upper 8 bits of paddr need to be written into PTAG_HI
-	 *   - (and needs to be written before the lower 32 bits)
-	 * Note that PTAG_HI is hoisted outside the line loop
-	 */
-	if (is_pae40_enabled() && op == OP_INV_IC)
-		write_aux_reg(ARC_REG_IC_PTAG_HI, (u64)paddr >> 32);
-
 	while (num_lines-- > 0) {
 		if (!full_page) {
 			write_aux_reg(aux_tag, paddr);
@@ -315,20 +302,14 @@ void __cache_line_loop_v3(phys_addr_t paddr, unsigned long vaddr,
 }
 
 /*
- * In HS38x (MMU v4), I-cache is VIPT (can alias), D-cache is PIPT
- * Here's how cache ops are implemented
+ * In HS38x (MMU v4), although icache is VIPT, only paddr is needed for cache
+ * maintenance ops (in IVIL reg), as long as icache doesn't alias.
  *
- *  - D-cache: only paddr needed (in DC_IVDL/DC_FLDL)
- *  - I-cache Non Aliasing: Despite VIPT, only paddr needed (in IC_IVIL)
- *  - I-cache Aliasing: Both vaddr and paddr needed (in IC_IVIL, IC_PTAG
- *    respectively, similar to MMU v3 programming model, hence
- *    __cache_line_loop_v3() is used)
- *
- * If PAE40 is enabled, independent of aliasing considerations, the higher bits
- * needs to be written into PTAG_HI
+ * For Aliasing icache, vaddr is also needed (in IVIL), while paddr is
+ * specified in PTAG (similar to MMU v3)
  */
 static inline
-void __cache_line_loop_v4(phys_addr_t paddr, unsigned long vaddr,
+void __cache_line_loop_v4(unsigned long paddr, unsigned long vaddr,
 			  unsigned long sz, const int cacheop)
 {
 	unsigned int aux_cmd;
@@ -354,22 +335,6 @@ void __cache_line_loop_v4(phys_addr_t paddr, unsigned long vaddr,
 	}
 
 	num_lines = DIV_ROUND_UP(sz, L1_CACHE_BYTES);
-
-	/*
-	 * For HS38 PAE40 configuration
-	 *   - upper 8 bits of paddr need to be written into PTAG_HI
-	 *   - (and needs to be written before the lower 32 bits)
-	 */
-	if (is_pae40_enabled()) {
-		if (cacheop == OP_INV_IC)
-			/*
-			 * Non aliasing I-cache in HS38,
-			 * aliasing I-cache handled in __cache_line_loop_v3()
-			 */
-			write_aux_reg(ARC_REG_IC_PTAG_HI, (u64)paddr >> 32);
-		else
-			write_aux_reg(ARC_REG_DC_PTAG_HI, (u64)paddr >> 32);
-	}
 
 	while (num_lines-- > 0) {
 		write_aux_reg(aux_cmd, paddr);
@@ -448,7 +413,7 @@ static inline void __dc_entire_op(const int op)
 /*
  * D-Cache Line ops: Per Line INV (discard or wback+discard) or FLUSH (wback)
  */
-static inline void __dc_line_op(phys_addr_t paddr, unsigned long vaddr,
+static inline void __dc_line_op(unsigned long paddr, unsigned long vaddr,
 				unsigned long sz, const int op)
 {
 	unsigned long flags;
@@ -481,7 +446,7 @@ static inline void __ic_entire_inv(void)
 }
 
 static inline void
-__ic_line_inv_vaddr_local(phys_addr_t paddr, unsigned long vaddr,
+__ic_line_inv_vaddr_local(unsigned long paddr, unsigned long vaddr,
 			  unsigned long sz)
 {
 	unsigned long flags;
@@ -498,7 +463,7 @@ __ic_line_inv_vaddr_local(phys_addr_t paddr, unsigned long vaddr,
 #else
 
 struct ic_inv_args {
-	phys_addr_t paddr, vaddr;
+	unsigned long paddr, vaddr;
 	int sz;
 };
 
@@ -509,7 +474,7 @@ static void __ic_line_inv_vaddr_helper(void *info)
         __ic_line_inv_vaddr_local(ic_inv->paddr, ic_inv->vaddr, ic_inv->sz);
 }
 
-static void __ic_line_inv_vaddr(phys_addr_t paddr, unsigned long vaddr,
+static void __ic_line_inv_vaddr(unsigned long paddr, unsigned long vaddr,
 				unsigned long sz)
 {
 	struct ic_inv_args ic_inv = {
@@ -530,7 +495,7 @@ static void __ic_line_inv_vaddr(phys_addr_t paddr, unsigned long vaddr,
 
 #endif /* CONFIG_ARC_HAS_ICACHE */
 
-noinline void slc_op(phys_addr_t paddr, unsigned long sz, const int op)
+noinline void slc_op(unsigned long paddr, unsigned long sz, const int op)
 {
 #ifdef CONFIG_ISA_ARCV2
 	/*
@@ -617,10 +582,10 @@ void flush_dcache_page(struct page *page)
 	 */
 	if (!mapping_mapped(mapping)) {
 		clear_bit(PG_dc_clean, &page->flags);
-	} else if (page_mapcount(page)) {
+	} else if (page_mapped(page)) {
 
 		/* kernel reading from page with U-mapping */
-		phys_addr_t paddr = (unsigned long)page_address(page);
+		unsigned long paddr = (unsigned long)page_address(page);
 		unsigned long vaddr = page->index << PAGE_CACHE_SHIFT;
 
 		if (addr_not_cache_congruent(paddr, vaddr))
@@ -768,14 +733,14 @@ EXPORT_SYMBOL(flush_icache_range);
  *    builtin kernel page will not have any virtual mappings.
  *    kprobe on loadable module will be kernel vaddr.
  */
-void __sync_icache_dcache(phys_addr_t paddr, unsigned long vaddr, int len)
+void __sync_icache_dcache(unsigned long paddr, unsigned long vaddr, int len)
 {
 	__dc_line_op(paddr, vaddr, len, OP_FLUSH_N_INV);
 	__ic_line_inv_vaddr(paddr, vaddr, len);
 }
 
 /* wrapper to compile time eliminate alignment checks in flush loop */
-void __inv_icache_page(phys_addr_t paddr, unsigned long vaddr)
+void __inv_icache_page(unsigned long paddr, unsigned long vaddr)
 {
 	__ic_line_inv_vaddr(paddr, vaddr, PAGE_SIZE);
 }
@@ -784,7 +749,7 @@ void __inv_icache_page(phys_addr_t paddr, unsigned long vaddr)
  * wrapper to clearout kernel or userspace mappings of a page
  * For kernel mappings @vaddr == @paddr
  */
-void __flush_dcache_page(phys_addr_t paddr, unsigned long vaddr)
+void __flush_dcache_page(unsigned long paddr, unsigned long vaddr)
 {
 	__dc_line_op(paddr, vaddr & PAGE_MASK, PAGE_SIZE, OP_FLUSH_N_INV);
 }
@@ -842,8 +807,8 @@ void flush_anon_page(struct vm_area_struct *vma, struct page *page,
 void copy_user_highpage(struct page *to, struct page *from,
 	unsigned long u_vaddr, struct vm_area_struct *vma)
 {
-	void *kfrom = kmap_atomic(from);
-	void *kto = kmap_atomic(to);
+	unsigned long kfrom = (unsigned long)page_address(from);
+	unsigned long kto = (unsigned long)page_address(to);
 	int clean_src_k_mappings = 0;
 
 	/*
@@ -853,16 +818,13 @@ void copy_user_highpage(struct page *to, struct page *from,
 	 *
 	 * Note that while @u_vaddr refers to DST page's userspace vaddr, it is
 	 * equally valid for SRC page as well
-	 *
-	 * For !VIPT cache, all of this gets compiled out as
-	 * addr_not_cache_congruent() is 0
 	 */
-	if (page_mapcount(from) && addr_not_cache_congruent(kfrom, u_vaddr)) {
-		__flush_dcache_page((unsigned long)kfrom, u_vaddr);
+	if (page_mapped(from) && addr_not_cache_congruent(kfrom, u_vaddr)) {
+		__flush_dcache_page(kfrom, u_vaddr);
 		clean_src_k_mappings = 1;
 	}
 
-	copy_page(kto, kfrom);
+	copy_page((void *)kto, (void *)kfrom);
 
 	/*
 	 * Mark DST page K-mapping as dirty for a later finalization by
@@ -879,14 +841,11 @@ void copy_user_highpage(struct page *to, struct page *from,
 	 * sync the kernel mapping back to physical page
 	 */
 	if (clean_src_k_mappings) {
-		__flush_dcache_page((unsigned long)kfrom, (unsigned long)kfrom);
+		__flush_dcache_page(kfrom, kfrom);
 		set_bit(PG_dc_clean, &from->flags);
 	} else {
 		clear_bit(PG_dc_clean, &from->flags);
 	}
-
-	kunmap_atomic(kto);
-	kunmap_atomic(kfrom);
 }
 
 void clear_user_page(void *to, unsigned long u_vaddr, struct page *page)

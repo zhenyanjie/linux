@@ -32,10 +32,6 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
 #include <linux/compat.h>
-#include <linux/sched.h>
-#include <linux/fs.h>
-#include <linux/path.h>
-#include <linux/timekeeping.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -120,26 +116,6 @@ int cn_esc_printf(struct core_name *cn, const char *fmt, ...)
 	va_start(arg, fmt);
 	ret = cn_vprintf(cn, fmt, arg);
 	va_end(arg);
-
-	if (ret == 0) {
-		/*
-		 * Ensure that this coredump name component can't cause the
-		 * resulting corefile path to consist of a ".." or ".".
-		 */
-		if ((cn->used - cur == 1 && cn->corename[cur] == '.') ||
-				(cn->used - cur == 2 && cn->corename[cur] == '.'
-				&& cn->corename[cur+1] == '.'))
-			cn->corename[cur] = '!';
-
-		/*
-		 * Empty names are fishy and could be used to create a "//" in a
-		 * corefile name, causing the coredump to happen one directory
-		 * level too high. Enforce that all components of the core
-		 * pattern are at least one character long.
-		 */
-		if (cn->used == cur)
-			ret = cn_printf(cn, "!");
-	}
 
 	for (; cur < cn->used; ++cur) {
 		if (cn->corename[cur] == '/')
@@ -256,10 +232,9 @@ static int format_corename(struct core_name *cn, struct coredump_params *cprm)
 				break;
 			/* UNIX time of coredump */
 			case 't': {
-				time64_t time;
-
-				time = ktime_get_real_seconds();
-				err = cn_printf(cn, "%lld", time);
+				struct timeval tv;
+				do_gettimeofday(&tv);
+				err = cn_printf(cn, "%lu", tv.tv_sec);
 				break;
 			}
 			/* hostname */
@@ -305,24 +280,23 @@ out:
 	return ispipe;
 }
 
-static int zap_process(struct task_struct *start, int exit_code, int flags)
+static int zap_process(struct task_struct *start, int exit_code)
 {
 	struct task_struct *t;
 	int nr = 0;
 
-	/* ignore all signals except SIGKILL, see prepare_signal() */
-	start->signal->flags = SIGNAL_GROUP_COREDUMP | flags;
 	start->signal->group_exit_code = exit_code;
 	start->signal->group_stop_count = 0;
 
-	for_each_thread(start, t) {
+	t = start;
+	do {
 		task_clear_jobctl_pending(t, JOBCTL_PENDING_MASK);
 		if (t != current && t->mm) {
 			sigaddset(&t->pending.signal, SIGKILL);
 			signal_wake_up(t, 1);
 			nr++;
 		}
-	}
+	} while_each_thread(start, t);
 
 	return nr;
 }
@@ -337,8 +311,10 @@ static int zap_threads(struct task_struct *tsk, struct mm_struct *mm,
 	spin_lock_irq(&tsk->sighand->siglock);
 	if (!signal_group_exit(tsk->signal)) {
 		mm->core_state = core_state;
+		nr = zap_process(tsk, exit_code);
 		tsk->signal->group_exit_task = tsk;
-		nr = zap_process(tsk, exit_code, 0);
+		/* ignore all signals except SIGKILL, see prepare_signal() */
+		tsk->signal->flags = SIGNAL_GROUP_COREDUMP;
 		clear_tsk_thread_flag(tsk, TIF_SIGPENDING);
 	}
 	spin_unlock_irq(&tsk->sighand->siglock);
@@ -384,18 +360,18 @@ static int zap_threads(struct task_struct *tsk, struct mm_struct *mm,
 			continue;
 		if (g->flags & PF_KTHREAD)
 			continue;
-
-		for_each_thread(g, p) {
-			if (unlikely(!p->mm))
-				continue;
-			if (unlikely(p->mm == mm)) {
-				lock_task_sighand(p, &flags);
-				nr += zap_process(p, exit_code,
-							SIGNAL_GROUP_EXIT);
-				unlock_task_sighand(p, &flags);
+		p = g;
+		do {
+			if (p->mm) {
+				if (unlikely(p->mm == mm)) {
+					lock_task_sighand(p, &flags);
+					nr += zap_process(p, exit_code);
+					p->signal->flags = SIGNAL_GROUP_EXIT;
+					unlock_task_sighand(p, &flags);
+				}
+				break;
 			}
-			break;
-		}
+		} while_each_thread(g, p);
 	}
 	rcu_read_unlock();
 done:
@@ -652,8 +628,6 @@ void do_coredump(const siginfo_t *siginfo)
 		}
 	} else {
 		struct inode *inode;
-		int open_flags = O_CREAT | O_RDWR | O_NOFOLLOW |
-				 O_LARGEFILE | O_EXCL;
 
 		if (cprm.limit < binfmt->min_coredump)
 			goto fail_unlock;
@@ -692,27 +666,10 @@ void do_coredump(const siginfo_t *siginfo)
 		 * what matters is that at least one of the two processes
 		 * writes its coredump successfully, not which one.
 		 */
-		if (need_suid_safe) {
-			/*
-			 * Using user namespaces, normal user tasks can change
-			 * their current->fs->root to point to arbitrary
-			 * directories. Since the intention of the "only dump
-			 * with a fully qualified path" rule is to control where
-			 * coredumps may be placed using root privileges,
-			 * current->fs->root must not be used. Instead, use the
-			 * root directory of init_task.
-			 */
-			struct path root;
-
-			task_lock(&init_task);
-			get_fs_root(init_task.fs, &root);
-			task_unlock(&init_task);
-			cprm.file = file_open_root(root.dentry, root.mnt,
-				cn.corename, open_flags, 0600);
-			path_put(&root);
-		} else {
-			cprm.file = filp_open(cn.corename, open_flags, 0600);
-		}
+		cprm.file = filp_open(cn.corename,
+				 O_CREAT | 2 | O_NOFOLLOW |
+				 O_LARGEFILE | O_EXCL,
+				 0600);
 		if (IS_ERR(cprm.file))
 			goto fail_unlock;
 

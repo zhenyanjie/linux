@@ -161,7 +161,7 @@ static int v9fs_file_do_lock(struct file *filp, int cmd, struct file_lock *fl)
 	if ((fl->fl_flags & FL_POSIX) != FL_POSIX)
 		BUG();
 
-	res = locks_lock_file_wait(filp, fl);
+	res = posix_lock_file_wait(filp, fl);
 	if (res < 0)
 		goto out;
 
@@ -231,8 +231,7 @@ out_unlock:
 	if (res < 0 && fl->fl_type != F_UNLCK) {
 		fl_type = fl->fl_type;
 		fl->fl_type = F_UNLCK;
-		/* Even if this fails we want to return the remote error */
-		locks_lock_file_wait(filp, fl);
+		res = posix_lock_file_wait(filp, fl);
 		fl->fl_type = fl_type;
 	}
 out:
@@ -449,14 +448,14 @@ static int v9fs_file_fsync(struct file *filp, loff_t start, loff_t end,
 	if (retval)
 		return retval;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	p9_debug(P9_DEBUG_VFS, "filp %p datasync %x\n", filp, datasync);
 
 	fid = filp->private_data;
 	v9fs_blank_wstat(&wstat);
 
 	retval = p9_client_wstat(fid, &wstat);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 
 	return retval;
 }
@@ -472,13 +471,13 @@ int v9fs_file_fsync_dotl(struct file *filp, loff_t start, loff_t end,
 	if (retval)
 		return retval;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	p9_debug(P9_DEBUG_VFS, "filp %p datasync %x\n", filp, datasync);
 
 	fid = filp->private_data;
 
 	retval = p9_client_fsync(fid, datasync);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 
 	return retval;
 }

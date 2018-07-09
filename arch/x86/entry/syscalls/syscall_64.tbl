@@ -331,8 +331,6 @@
 322	64	execveat		stub_execveat
 323	common	userfaultfd		sys_userfaultfd
 324	common	membarrier		sys_membarrier
-325	common	mlock2			sys_mlock2
-326	common	copy_file_range		sys_copy_file_range
 
 400 common  lwip_closesock      sys_lwip_closesock
 401 common  send            sys_send

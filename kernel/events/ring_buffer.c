@@ -3,7 +3,7 @@
  *
  *  Copyright (C) 2008 Thomas Gleixner <tglx@linutronix.de>
  *  Copyright (C) 2008-2011 Red Hat, Inc., Ingo Molnar
- *  Copyright (C) 2008-2011 Red Hat, Inc., Peter Zijlstra
+ *  Copyright (C) 2008-2011 Red Hat, Inc., Peter Zijlstra <pzijlstr@redhat.com>
  *  Copyright  ©  2009 Paul Mackerras, IBM Corp. <paulus@au1.ibm.com>
  *
  * For licensing details see kernel-base/COPYING
@@ -141,7 +141,7 @@ int perf_output_begin(struct perf_output_handle *handle,
 	perf_output_get_handle(handle);
 
 	do {
-		tail = READ_ONCE(rb->user_page->data_tail);
+		tail = READ_ONCE_CTRL(rb->user_page->data_tail);
 		offset = head = local_read(&rb->head);
 		if (!rb->overwrite &&
 		    unlikely(CIRC_SPACE(head, tail, perf_data_size(rb)) < size))
@@ -347,7 +347,6 @@ void perf_aux_output_end(struct perf_output_handle *handle, unsigned long size,
 			 bool truncated)
 {
 	struct ring_buffer *rb = handle->rb;
-	bool wakeup = truncated;
 	unsigned long aux_head;
 	u64 flags = 0;
 
@@ -376,16 +375,9 @@ void perf_aux_output_end(struct perf_output_handle *handle, unsigned long size,
 	aux_head = rb->user_page->aux_head = local_read(&rb->aux_head);
 
 	if (aux_head - local_read(&rb->aux_wakeup) >= rb->aux_watermark) {
-		wakeup = true;
+		perf_output_wakeup(handle);
 		local_add(rb->aux_watermark, &rb->aux_wakeup);
 	}
-
-	if (wakeup) {
-		if (truncated)
-			handle->event->pending_disable = 1;
-		perf_output_wakeup(handle);
-	}
-
 	handle->event = NULL;
 
 	local_set(&rb->aux_nest, 0);
@@ -465,25 +457,6 @@ static void rb_free_aux_page(struct ring_buffer *rb, int idx)
 	ClearPagePrivate(page);
 	page->mapping = NULL;
 	__free_page(page);
-}
-
-static void __rb_free_aux(struct ring_buffer *rb)
-{
-	int pg;
-
-	if (rb->aux_priv) {
-		rb->free_aux(rb->aux_priv);
-		rb->free_aux = NULL;
-		rb->aux_priv = NULL;
-	}
-
-	if (rb->aux_nr_pages) {
-		for (pg = 0; pg < rb->aux_nr_pages; pg++)
-			rb_free_aux_page(rb, pg);
-
-		kfree(rb->aux_pages);
-		rb->aux_nr_pages = 0;
-	}
 }
 
 int rb_alloc_aux(struct ring_buffer *rb, struct perf_event *event,
@@ -574,9 +547,28 @@ out:
 	if (!ret)
 		rb->aux_pgoff = pgoff;
 	else
-		__rb_free_aux(rb);
+		rb_free_aux(rb);
 
 	return ret;
+}
+
+static void __rb_free_aux(struct ring_buffer *rb)
+{
+	int pg;
+
+	if (rb->aux_priv) {
+		rb->free_aux(rb->aux_priv);
+		rb->free_aux = NULL;
+		rb->aux_priv = NULL;
+	}
+
+	if (rb->aux_nr_pages) {
+		for (pg = 0; pg < rb->aux_nr_pages; pg++)
+			rb_free_aux_page(rb, pg);
+
+		kfree(rb->aux_pages);
+		rb->aux_nr_pages = 0;
+	}
 }
 
 void rb_free_aux(struct ring_buffer *rb)

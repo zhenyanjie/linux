@@ -31,13 +31,13 @@
 #include "sys_regs.h"
 
 static bool access_actlr(struct kvm_vcpu *vcpu,
-			 struct sys_reg_params *p,
+			 const struct sys_reg_params *p,
 			 const struct sys_reg_desc *r)
 {
 	if (p->is_write)
 		return ignore_write(vcpu, p);
 
-	p->regval = vcpu_sys_reg(vcpu, ACTLR_EL1);
+	*vcpu_reg(vcpu, p->Rt) = vcpu_sys_reg(vcpu, ACTLR_EL1);
 	return true;
 }
 

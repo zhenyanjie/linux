@@ -212,7 +212,7 @@ static unsigned long __init xen_find_pfn_range(unsigned long *min_pfn)
 		e_pfn = PFN_DOWN(entry->addr + entry->size);
 
 		/* We only care about E820 after this */
-		if (e_pfn <= *min_pfn)
+		if (e_pfn < *min_pfn)
 			continue;
 
 		s_pfn = PFN_UP(entry->addr);
@@ -393,9 +393,6 @@ static unsigned long __init xen_set_identity_and_remap_chunk(
 	unsigned long i = 0;
 	unsigned long n = end_pfn - start_pfn;
 
-	if (remap_pfn == 0)
-		remap_pfn = nr_pages;
-
 	while (i < n) {
 		unsigned long cur_pfn = start_pfn + i;
 		unsigned long left = n - i;
@@ -441,29 +438,17 @@ static unsigned long __init xen_set_identity_and_remap_chunk(
 	return remap_pfn;
 }
 
-static unsigned long __init xen_count_remap_pages(
-	unsigned long start_pfn, unsigned long end_pfn, unsigned long nr_pages,
-	unsigned long remap_pages)
-{
-	if (start_pfn >= nr_pages)
-		return remap_pages;
-
-	return remap_pages + min(end_pfn, nr_pages) - start_pfn;
-}
-
-static unsigned long __init xen_foreach_remap_area(unsigned long nr_pages,
-	unsigned long (*func)(unsigned long start_pfn, unsigned long end_pfn,
-			      unsigned long nr_pages, unsigned long last_val))
+static void __init xen_set_identity_and_remap(unsigned long nr_pages)
 {
 	phys_addr_t start = 0;
-	unsigned long ret_val = 0;
+	unsigned long last_pfn = nr_pages;
 	const struct e820entry *entry = xen_e820_map;
 	int i;
 
 	/*
 	 * Combine non-RAM regions and gaps until a RAM region (or the
-	 * end of the map) is reached, then call the provided function
-	 * to perform its duty on the non-RAM region.
+	 * end of the map) is reached, then set the 1:1 map and
+	 * remap the memory in those non-RAM regions.
 	 *
 	 * The combined non-RAM regions are rounded to a whole number
 	 * of pages so any partial pages are accessible via the 1:1
@@ -481,13 +466,14 @@ static unsigned long __init xen_foreach_remap_area(unsigned long nr_pages,
 				end_pfn = PFN_UP(entry->addr);
 
 			if (start_pfn < end_pfn)
-				ret_val = func(start_pfn, end_pfn, nr_pages,
-					       ret_val);
+				last_pfn = xen_set_identity_and_remap_chunk(
+						start_pfn, end_pfn, nr_pages,
+						last_pfn);
 			start = end;
 		}
 	}
 
-	return ret_val;
+	pr_info("Released %ld page(s)\n", xen_released_pages);
 }
 
 /*
@@ -608,6 +594,35 @@ static void __init xen_ignore_unusable(void)
 		if (entry->type == E820_UNUSABLE)
 			entry->type = E820_RAM;
 	}
+}
+
+static unsigned long __init xen_count_remap_pages(unsigned long max_pfn)
+{
+	unsigned long extra = 0;
+	unsigned long start_pfn, end_pfn;
+	const struct e820entry *entry = xen_e820_map;
+	int i;
+
+	end_pfn = 0;
+	for (i = 0; i < xen_e820_map_entries; i++, entry++) {
+		start_pfn = PFN_DOWN(entry->addr);
+		/* Adjacent regions on non-page boundaries handling! */
+		end_pfn = min(end_pfn, start_pfn);
+
+		if (start_pfn >= max_pfn)
+			return extra + max_pfn - end_pfn;
+
+		/* Add any holes in map to result. */
+		extra += start_pfn - end_pfn;
+
+		end_pfn = PFN_UP(entry->addr + entry->size);
+		end_pfn = min(end_pfn, max_pfn);
+
+		if (entry->type != E820_RAM)
+			extra += end_pfn - start_pfn;
+	}
+
+	return extra;
 }
 
 bool __init xen_is_e820_reserved(phys_addr_t start, phys_addr_t size)
@@ -789,7 +804,7 @@ char * __init xen_memory_setup(void)
 	max_pages = xen_get_max_pages();
 
 	/* How many extra pages do we need due to remapping? */
-	max_pages += xen_foreach_remap_area(max_pfn, xen_count_remap_pages);
+	max_pages += xen_count_remap_pages(max_pfn);
 
 	if (max_pages > max_pfn)
 		extra_pages += max_pages - max_pfn;
@@ -814,8 +829,6 @@ char * __init xen_memory_setup(void)
 	addr = xen_e820_map[0].addr;
 	size = xen_e820_map[0].size;
 	while (i < xen_e820_map_entries) {
-		bool discard = false;
-
 		chunk_size = size;
 		type = xen_e820_map[i].type;
 
@@ -830,11 +843,10 @@ char * __init xen_memory_setup(void)
 				xen_add_extra_mem(pfn_s, n_pfns);
 				xen_max_p2m_pfn = pfn_s + n_pfns;
 			} else
-				discard = true;
+				type = E820_UNUSABLE;
 		}
 
-		if (!discard)
-			xen_align_and_add_e820_region(addr, chunk_size, type);
+		xen_align_and_add_e820_region(addr, chunk_size, type);
 
 		addr += chunk_size;
 		size -= chunk_size;
@@ -907,9 +919,7 @@ char * __init xen_memory_setup(void)
 	 * Set identity map on non-RAM pages and prepare remapping the
 	 * underlying RAM.
 	 */
-	xen_foreach_remap_area(max_pfn, xen_set_identity_and_remap_chunk);
-
-	pr_info("Released %ld page(s)\n", xen_released_pages);
+	xen_set_identity_and_remap(max_pfn);
 
 	return "Xen";
 }
@@ -955,8 +965,17 @@ char * __init xen_auto_xlated_memory_setup(void)
 static void __init fiddle_vdso(void)
 {
 #ifdef CONFIG_X86_32
-	u32 *mask = vdso_image_32.data +
-		vdso_image_32.sym_VDSO32_NOTE_MASK;
+	/*
+	 * This could be called before selected_vdso32 is initialized, so
+	 * just fiddle with both possible images.  vdso_image_32_syscall
+	 * can't be selected, since it only exists on 64-bit systems.
+	 */
+	u32 *mask;
+	mask = vdso_image_32_int80.data +
+		vdso_image_32_int80.sym_VDSO32_NOTE_MASK;
+	*mask |= 1 << VDSO_NOTE_NONEGSEG_BIT;
+	mask = vdso_image_32_sysenter.data +
+		vdso_image_32_sysenter.sym_VDSO32_NOTE_MASK;
 	*mask |= 1 << VDSO_NOTE_NONEGSEG_BIT;
 #endif
 }

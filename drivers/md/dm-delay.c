@@ -122,7 +122,6 @@ static void flush_expired_bios(struct work_struct *work)
  *    <device> <offset> <delay> [<write_device> <write_offset> <write_delay>]
  *
  * With separate write parameters, the first set is only used for reads.
- * Offsets are specified in sectors.
  * Delays are specified in milliseconds.
  */
 static int delay_ctr(struct dm_target *ti, unsigned int argc, char **argv)
@@ -133,7 +132,7 @@ static int delay_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int ret;
 
 	if (argc != 3 && argc != 6) {
-		ti->error = "Requires exactly 3 or 6 arguments";
+		ti->error = "requires exactly 3 or 6 arguments";
 		return -EINVAL;
 	}
 
@@ -238,7 +237,7 @@ static int delay_bio(struct delay_c *dc, int delay, struct bio *bio)
 	unsigned long expires = 0;
 
 	if (!delay || !atomic_read(&dc->may_delay))
-		return DM_MAPIO_REMAPPED;
+		return 1;
 
 	delayed = dm_per_bio_data(bio, sizeof(struct dm_delay_info));
 
@@ -258,7 +257,7 @@ static int delay_bio(struct delay_c *dc, int delay, struct bio *bio)
 
 	queue_timeout(dc, expires);
 
-	return DM_MAPIO_SUBMITTED;
+	return 0;
 }
 
 static void delay_presuspend(struct dm_target *ti)

@@ -197,13 +197,13 @@ struct audit_chunk *audit_tree_lookup(const struct inode *inode)
 	return NULL;
 }
 
-bool audit_tree_match(struct audit_chunk *chunk, struct audit_tree *tree)
+int audit_tree_match(struct audit_chunk *chunk, struct audit_tree *tree)
 {
 	int n;
 	for (n = 0; n < chunk->count; n++)
 		if (chunk->owners[n].owner == tree)
-			return true;
-	return false;
+			return 1;
+	return 0;
 }
 
 /* tagging and untagging inodes with trees */

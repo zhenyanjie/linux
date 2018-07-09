@@ -29,18 +29,18 @@
 
 static FILE *f;
 static char log_name[MAX_LOG_NAME];
-bool intel_pt_enable_logging;
+static bool enable_logging;
 
 void intel_pt_log_enable(void)
 {
-	intel_pt_enable_logging = true;
+	enable_logging = true;
 }
 
 void intel_pt_log_disable(void)
 {
 	if (f)
 		fflush(f);
-	intel_pt_enable_logging = false;
+	enable_logging = false;
 }
 
 void intel_pt_log_set_name(const char *name)
@@ -80,7 +80,7 @@ static void intel_pt_print_no_data(uint64_t pos, int indent)
 
 static int intel_pt_log_open(void)
 {
-	if (!intel_pt_enable_logging)
+	if (!enable_logging)
 		return -1;
 
 	if (f)
@@ -91,15 +91,15 @@ static int intel_pt_log_open(void)
 
 	f = fopen(log_name, "w+");
 	if (!f) {
-		intel_pt_enable_logging = false;
+		enable_logging = false;
 		return -1;
 	}
 
 	return 0;
 }
 
-void __intel_pt_log_packet(const struct intel_pt_pkt *packet, int pkt_len,
-			   uint64_t pos, const unsigned char *buf)
+void intel_pt_log_packet(const struct intel_pt_pkt *packet, int pkt_len,
+			 uint64_t pos, const unsigned char *buf)
 {
 	char desc[INTEL_PT_PKT_DESC_MAX];
 
@@ -111,7 +111,7 @@ void __intel_pt_log_packet(const struct intel_pt_pkt *packet, int pkt_len,
 	fprintf(f, "%s\n", desc);
 }
 
-void __intel_pt_log_insn(struct intel_pt_insn *intel_pt_insn, uint64_t ip)
+void intel_pt_log_insn(struct intel_pt_insn *intel_pt_insn, uint64_t ip)
 {
 	char desc[INTEL_PT_INSN_DESC_MAX];
 	size_t len = intel_pt_insn->length;
@@ -128,8 +128,7 @@ void __intel_pt_log_insn(struct intel_pt_insn *intel_pt_insn, uint64_t ip)
 		fprintf(f, "Bad instruction!\n");
 }
 
-void __intel_pt_log_insn_no_data(struct intel_pt_insn *intel_pt_insn,
-				 uint64_t ip)
+void intel_pt_log_insn_no_data(struct intel_pt_insn *intel_pt_insn, uint64_t ip)
 {
 	char desc[INTEL_PT_INSN_DESC_MAX];
 
@@ -143,7 +142,7 @@ void __intel_pt_log_insn_no_data(struct intel_pt_insn *intel_pt_insn,
 		fprintf(f, "Bad instruction!\n");
 }
 
-void __intel_pt_log(const char *fmt, ...)
+void intel_pt_log(const char *fmt, ...)
 {
 	va_list args;
 

@@ -529,7 +529,7 @@ static void __eoi_ioapic_pin(int apic, int pin, int vector)
 	}
 }
 
-static void eoi_ioapic_pin(int vector, struct mp_chip_data *data)
+void eoi_ioapic_pin(int vector, struct mp_chip_data *data)
 {
 	unsigned long flags;
 	struct irq_pin_list *entry;
@@ -2521,7 +2521,6 @@ void __init setup_ioapic_dest(void)
 {
 	int pin, ioapic, irq, irq_entry;
 	const struct cpumask *mask;
-	struct irq_desc *desc;
 	struct irq_data *idata;
 	struct irq_chip *chip;
 
@@ -2537,9 +2536,7 @@ void __init setup_ioapic_dest(void)
 		if (irq < 0 || !mp_init_irq_at_boot(ioapic, irq))
 			continue;
 
-		desc = irq_to_desc(irq);
-		raw_spin_lock_irq(&desc->lock);
-		idata = irq_desc_get_irq_data(desc);
+		idata = irq_get_irq_data(irq);
 
 		/*
 		 * Honour affinities which have been set in early boot
@@ -2553,7 +2550,6 @@ void __init setup_ioapic_dest(void)
 		/* Might be lapic_chip for irq 0 */
 		if (chip->irq_set_affinity)
 			chip->irq_set_affinity(idata, mask, false);
-		raw_spin_unlock_irq(&desc->lock);
 	}
 }
 #endif

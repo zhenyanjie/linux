@@ -20,7 +20,6 @@
 #define _RTL8188E_XMIT_C_
 #include <osdep_service.h>
 #include <drv_types.h>
-#include <mon.h>
 #include <wifi.h>
 #include <osdep_intf.h>
 #include <usb_ops_linux.h>
@@ -463,26 +462,30 @@ s32 rtl8188eu_xmitframe_complete(struct adapter *adapt, struct xmit_priv *pxmitp
 	}
 
 	/* 3 1. pick up first frame */
-	rtw_free_xmitframe(pxmitpriv, pxmitframe);
+	do {
+		rtw_free_xmitframe(pxmitpriv, pxmitframe);
 
-	pxmitframe = rtw_dequeue_xframe(pxmitpriv, pxmitpriv->hwxmits, pxmitpriv->hwxmit_entry);
-	if (pxmitframe == NULL) {
-		/*  no more xmit frame, release xmit buffer */
-		rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
-		return false;
-	}
+		pxmitframe = rtw_dequeue_xframe(pxmitpriv, pxmitpriv->hwxmits, pxmitpriv->hwxmit_entry);
+		if (pxmitframe == NULL) {
+			/*  no more xmit frame, release xmit buffer */
+			rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
+			return false;
+		}
 
-	pxmitframe->pxmitbuf = pxmitbuf;
-	pxmitframe->buf_addr = pxmitbuf->pbuf;
-	pxmitbuf->priv_data = pxmitframe;
+		pxmitframe->pxmitbuf = pxmitbuf;
+		pxmitframe->buf_addr = pxmitbuf->pbuf;
+		pxmitbuf->priv_data = pxmitframe;
 
-	pxmitframe->agg_num = 1; /*  alloc xmitframe should assign to 1. */
-	pxmitframe->pkt_offset = 1; /*  first frame of aggregation, reserve offset */
+		pxmitframe->agg_num = 1; /*  alloc xmitframe should assign to 1. */
+		pxmitframe->pkt_offset = 1; /*  first frame of aggregation, reserve offset */
 
-	rtw_xmitframe_coalesce(adapt, pxmitframe->pkt, pxmitframe);
+		rtw_xmitframe_coalesce(adapt, pxmitframe->pkt, pxmitframe);
 
-	/*  always return ndis_packet after rtw_xmitframe_coalesce */
-	rtw_os_xmit_complete(adapt, pxmitframe);
+		/*  always return ndis_packet after rtw_xmitframe_coalesce */
+		rtw_os_xmit_complete(adapt, pxmitframe);
+
+		break;
+	} while (1);
 
 	/* 3 2. aggregate same priority and same DA(AP or STA) frames */
 	pfirstframe = pxmitframe;
@@ -646,7 +649,7 @@ static s32 pre_xmitframe(struct adapter *adapt, struct xmit_frame *pxmitframe)
 		goto enqueue;
 
 	pxmitbuf = rtw_alloc_xmitbuf(pxmitpriv);
-	if (!pxmitbuf)
+	if (pxmitbuf == NULL)
 		goto enqueue;
 
 	spin_unlock_bh(&pxmitpriv->lock);
@@ -681,9 +684,6 @@ enqueue:
 
 s32 rtl8188eu_mgnt_xmit(struct adapter *adapt, struct xmit_frame *pmgntframe)
 {
-	struct xmit_priv *xmitpriv = &adapt->xmitpriv;
-
-	rtl88eu_mon_xmit_hook(adapt->pmondev, pmgntframe, xmitpriv->frag_len);
 	return rtw_dump_xframe(adapt, pmgntframe);
 }
 

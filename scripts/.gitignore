@@ -8,7 +8,6 @@ unifdef
 ihex2fw
 recordmcount
 docproc
-check-lc_ctype
 sortextable
 asn1_compiler
 extract-cert

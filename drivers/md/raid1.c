@@ -90,8 +90,6 @@ static void r1bio_pool_free(void *r1_bio, void *data)
 #define RESYNC_PAGES ((RESYNC_BLOCK_SIZE + PAGE_SIZE-1) / PAGE_SIZE)
 #define RESYNC_WINDOW (RESYNC_BLOCK_SIZE * RESYNC_DEPTH)
 #define RESYNC_WINDOW_SECTORS (RESYNC_WINDOW >> 9)
-#define CLUSTER_RESYNC_WINDOW (16 * RESYNC_WINDOW)
-#define CLUSTER_RESYNC_WINDOW_SECTORS (CLUSTER_RESYNC_WINDOW >> 9)
 #define NEXT_NORMALIO_DISTANCE (3 * RESYNC_WINDOW_SECTORS)
 
 static void * r1buf_pool_alloc(gfp_t gfp_flags, void *data)
@@ -1044,7 +1042,7 @@ static void raid1_unplug(struct blk_plug_cb *cb, bool from_schedule)
 	kfree(plug);
 }
 
-static void raid1_make_request(struct mddev *mddev, struct bio * bio)
+static void make_request(struct mddev *mddev, struct bio * bio)
 {
 	struct r1conf *conf = mddev->private;
 	struct raid1_info *mirror;
@@ -1422,7 +1420,7 @@ read_again:
 	wake_up(&conf->wait_barrier);
 }
 
-static void raid1_status(struct seq_file *seq, struct mddev *mddev)
+static void status(struct seq_file *seq, struct mddev *mddev)
 {
 	struct r1conf *conf = mddev->private;
 	int i;
@@ -1439,7 +1437,7 @@ static void raid1_status(struct seq_file *seq, struct mddev *mddev)
 	seq_printf(seq, "]");
 }
 
-static void raid1_error(struct mddev *mddev, struct md_rdev *rdev)
+static void error(struct mddev *mddev, struct md_rdev *rdev)
 {
 	char b[BDEVNAME_SIZE];
 	struct r1conf *conf = mddev->private;
@@ -1589,20 +1587,8 @@ static int raid1_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 	if (mddev->recovery_disabled == conf->recovery_disabled)
 		return -EBUSY;
 
-	if (md_integrity_add_rdev(rdev, mddev))
-		return -ENXIO;
-
 	if (rdev->raid_disk >= 0)
 		first = last = rdev->raid_disk;
-
-	/*
-	 * find the disk ... but prefer rdev->saved_raid_disk
-	 * if possible.
-	 */
-	if (rdev->saved_raid_disk >= 0 &&
-	    rdev->saved_raid_disk >= first &&
-	    conf->mirrors[rdev->saved_raid_disk].rdev == NULL)
-		first = last = rdev->saved_raid_disk;
 
 	for (mirror = first; mirror <= last; mirror++) {
 		p = conf->mirrors+mirror;
@@ -1635,6 +1621,7 @@ static int raid1_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 			break;
 		}
 	}
+	md_integrity_add_rdev(rdev, mddev);
 	if (mddev->queue && blk_queue_discard(bdev_get_queue(rdev->bdev)))
 		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, mddev->queue);
 	print_conf(conf);
@@ -2274,7 +2261,6 @@ static void handle_write_finished(struct r1conf *conf, struct r1bio *r1_bio)
 	if (fail) {
 		spin_lock_irq(&conf->device_lock);
 		list_add(&r1_bio->retry_list, &conf->bio_end_io_list);
-		conf->nr_queued++;
 		spin_unlock_irq(&conf->device_lock);
 		md_wakeup_thread(conf->mddev->thread);
 	} else {
@@ -2392,10 +2378,8 @@ static void raid1d(struct md_thread *thread)
 		LIST_HEAD(tmp);
 		spin_lock_irqsave(&conf->device_lock, flags);
 		if (!test_bit(MD_CHANGE_PENDING, &mddev->flags)) {
-			while (!list_empty(&conf->bio_end_io_list)) {
-				list_move(conf->bio_end_io_list.prev, &tmp);
-				conf->nr_queued--;
-			}
+			list_add(&tmp, &conf->bio_end_io_list);
+			list_del_init(&conf->bio_end_io_list);
 		}
 		spin_unlock_irqrestore(&conf->device_lock, flags);
 		while (!list_empty(&tmp)) {
@@ -2475,8 +2459,7 @@ static int init_resync(struct r1conf *conf)
  * that can be installed to exclude normal IO requests.
  */
 
-static sector_t raid1_sync_request(struct mddev *mddev, sector_t sector_nr,
-				   int *skipped)
+static sector_t sync_request(struct mddev *mddev, sector_t sector_nr, int *skipped)
 {
 	struct r1conf *conf = mddev->private;
 	struct r1bio *r1_bio;
@@ -2510,11 +2493,6 @@ static sector_t raid1_sync_request(struct mddev *mddev, sector_t sector_nr,
 
 		bitmap_close_sync(mddev->bitmap);
 		close_sync(conf);
-
-		if (mddev_is_clustered(mddev)) {
-			conf->cluster_sync_low = 0;
-			conf->cluster_sync_high = 0;
-		}
 		return 0;
 	}
 
@@ -2535,12 +2513,7 @@ static sector_t raid1_sync_request(struct mddev *mddev, sector_t sector_nr,
 		return sync_blocks;
 	}
 
-	/* we are incrementing sector_nr below. To be safe, we check against
-	 * sector_nr + two times RESYNC_SECTORS
-	 */
-
-	bitmap_cond_end_sync(mddev->bitmap, sector_nr,
-		mddev_is_clustered(mddev) && (sector_nr + 2 * RESYNC_SECTORS > conf->cluster_sync_high));
+	bitmap_cond_end_sync(mddev->bitmap, sector_nr);
 	r1_bio = mempool_alloc(conf->r1buf_pool, GFP_NOIO);
 
 	raise_barrier(conf, sector_nr);
@@ -2731,16 +2704,6 @@ static sector_t raid1_sync_request(struct mddev *mddev, sector_t sector_nr,
  bio_full:
 	r1_bio->sectors = nr_sectors;
 
-	if (mddev_is_clustered(mddev) &&
-			conf->cluster_sync_high < sector_nr + nr_sectors) {
-		conf->cluster_sync_low = mddev->curr_resync_completed;
-		conf->cluster_sync_high = conf->cluster_sync_low + CLUSTER_RESYNC_WINDOW_SECTORS;
-		/* Send resync message */
-		md_cluster_ops->resync_info_update(mddev,
-				conf->cluster_sync_low,
-				conf->cluster_sync_high);
-	}
-
 	/* For a user-requested sync, we read all readable devices and do a
 	 * compare
 	 */
@@ -2894,7 +2857,7 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 }
 
 static void raid1_free(struct mddev *mddev, void *priv);
-static int raid1_run(struct mddev *mddev)
+static int run(struct mddev *mddev)
 {
 	struct r1conf *conf;
 	int i;
@@ -3055,11 +3018,9 @@ static int raid1_reshape(struct mddev *mddev)
 		return -EINVAL;
 	}
 
-	if (!mddev_is_clustered(mddev)) {
-		err = md_allow_write(mddev);
-		if (err)
-			return err;
-	}
+	err = md_allow_write(mddev);
+	if (err)
+		return err;
 
 	raid_disks = mddev->raid_disks + mddev->delta_disks;
 
@@ -3174,15 +3135,15 @@ static struct md_personality raid1_personality =
 	.name		= "raid1",
 	.level		= 1,
 	.owner		= THIS_MODULE,
-	.make_request	= raid1_make_request,
-	.run		= raid1_run,
+	.make_request	= make_request,
+	.run		= run,
 	.free		= raid1_free,
-	.status		= raid1_status,
-	.error_handler	= raid1_error,
+	.status		= status,
+	.error_handler	= error,
 	.hot_add_disk	= raid1_add_disk,
 	.hot_remove_disk= raid1_remove_disk,
 	.spare_active	= raid1_spare_active,
-	.sync_request	= raid1_sync_request,
+	.sync_request	= sync_request,
 	.resize		= raid1_resize,
 	.size		= raid1_size,
 	.check_reshape	= raid1_reshape,

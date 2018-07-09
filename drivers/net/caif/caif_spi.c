@@ -730,13 +730,10 @@ int cfspi_spi_probe(struct platform_device *pdev)
 	int res;
 	dev = (struct cfspi_dev *)pdev->dev.platform_data;
 
-	if (!dev)
-		return -ENODEV;
-
 	ndev = alloc_netdev(sizeof(struct cfspi), "cfspi%d",
 			    NET_NAME_UNKNOWN, cfspi_setup);
-	if (!ndev)
-		return -ENOMEM;
+	if (!dev)
+		return -ENODEV;
 
 	cfspi = netdev_priv(ndev);
 	netif_stop_queue(ndev);

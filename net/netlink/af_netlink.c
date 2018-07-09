@@ -1305,7 +1305,7 @@ static int netlink_release(struct socket *sock)
 
 	skb_queue_purge(&sk->sk_write_queue);
 
-	if (nlk->portid && nlk->bound) {
+	if (nlk->portid) {
 		struct netlink_notify n = {
 						.net = sock_net(sk),
 						.protocol = sk->sk_protocol,
@@ -2116,7 +2116,7 @@ int netlink_broadcast_filtered(struct sock *ssk, struct sk_buff *skb, u32 portid
 	consume_skb(info.skb2);
 
 	if (info.delivered) {
-		if (info.congested && gfpflags_allow_blocking(allocation))
+		if (info.congested && (allocation & __GFP_WAIT))
 			yield();
 		return 0;
 	}
@@ -2831,8 +2831,7 @@ static int netlink_dump(struct sock *sk)
 	 * reasonable static buffer based on the expected largest dump of a
 	 * single netdev. The outcome is MSG_TRUNC error.
 	 */
-	if (!netlink_rx_is_mmaped(sk))
-		skb_reserve(skb, skb_tailroom(skb) - alloc_size);
+	skb_reserve(skb, skb_tailroom(skb) - alloc_size);
 	netlink_skb_set_owner_r(skb, sk);
 
 	len = cb->dump(skb, cb);
@@ -2916,7 +2915,6 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 
 	cb = &nlk->cb;
 	memset(cb, 0, sizeof(*cb));
-	cb->start = control->start;
 	cb->dump = control->dump;
 	cb->done = control->done;
 	cb->nlh = nlh;
@@ -2928,9 +2926,6 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 	nlk->cb_running = true;
 
 	mutex_unlock(nlk->cb_mutex);
-
-	if (cb->start)
-		cb->start(cb);
 
 	ret = netlink_dump(sk);
 	sock_put(sk);

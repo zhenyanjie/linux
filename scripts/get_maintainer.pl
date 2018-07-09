@@ -16,9 +16,7 @@ my $P = $0;
 my $V = '0.26';
 
 use Getopt::Long qw(:config no_auto_abbrev);
-use Cwd;
 
-my $cur_path = fastgetcwd() . '/';
 my $lk_path = "./";
 my $email = 1;
 my $email_usename = 1;
@@ -431,8 +429,6 @@ foreach my $file (@ARGV) {
 	}
     }
     if ($from_filename) {
-	$file =~ s/^\Q${cur_path}\E//;	#strip any absolute path
-	$file =~ s/^\Q${lk_path}\E//;	#or the path to the lk tree
 	push(@files, $file);
 	if ($file ne "MAINTAINERS" && -f $file && ($keywords || $file_emails)) {
 	    open(my $f, '<', $file)
@@ -785,7 +781,6 @@ MAINTAINER field selection options:
     --git-max-maintainers => maximum maintainers to add (default: $email_git_max_maintainers)
     --git-min-percent => minimum percentage of commits required (default: $email_git_min_percent)
     --git-blame => use git blame to find modified commits for patch or file
-    --git-blame-signatures => when used with --git-blame, also include all commit signers
     --git-since => git history to use (default: $email_git_since)
     --hg-since => hg history to use (default: $email_hg_since)
     --interactive => display a menu (mostly useful if used with the --git option)
@@ -817,7 +812,7 @@ Other options:
   --help => show this help information
 
 Default options:
-  [--email --nogit --git-fallback --m --r --n --l --multiline --pattern-depth=0
+  [--email --nogit --git-fallback --m --n --l --multiline -pattern-depth=0
    --remove-duplicates --rolestats]
 
 Notes:
@@ -849,9 +844,6 @@ Notes:
       Entries in this file can be any command line argument.
       This file is prepended to any additional command line arguments.
       Multiple lines and # comments are allowed.
-  Most options have both positive and negative forms.
-      The negative forms for --<foo> are --no<foo> and --no-<foo>.
-
 EOT
 }
 
@@ -978,20 +970,6 @@ sub find_ending_index {
     return $index;
 }
 
-sub get_subsystem_name {
-    my ($index) = @_;
-
-    my $start = find_starting_index($index);
-
-    my $subsystem = $typevalue[$start];
-    if ($output_section_maxlen && length($subsystem) > $output_section_maxlen) {
-	$subsystem = substr($subsystem, 0, $output_section_maxlen - 3);
-	$subsystem =~ s/\s*$//;
-	$subsystem = $subsystem . "...";
-    }
-    return $subsystem;
-}
-
 sub get_maintainer_role {
     my ($index) = @_;
 
@@ -1000,7 +978,12 @@ sub get_maintainer_role {
     my $end = find_ending_index($index);
 
     my $role = "unknown";
-    my $subsystem = get_subsystem_name($index);
+    my $subsystem = $typevalue[$start];
+    if ($output_section_maxlen && length($subsystem) > $output_section_maxlen) {
+	$subsystem = substr($subsystem, 0, $output_section_maxlen - 3);
+	$subsystem =~ s/\s*$//;
+	$subsystem = $subsystem . "...";
+    }
 
     for ($i = $start + 1; $i < $end; $i++) {
 	my $tv = $typevalue[$i];
@@ -1034,7 +1017,16 @@ sub get_maintainer_role {
 sub get_list_role {
     my ($index) = @_;
 
-    my $subsystem = get_subsystem_name($index);
+    my $i;
+    my $start = find_starting_index($index);
+    my $end = find_ending_index($index);
+
+    my $subsystem = $typevalue[$start];
+    if ($output_section_maxlen && length($subsystem) > $output_section_maxlen) {
+	$subsystem = substr($subsystem, 0, $output_section_maxlen - 3);
+	$subsystem =~ s/\s*$//;
+	$subsystem = $subsystem . "...";
+    }
 
     if ($subsystem eq "THE REST") {
 	$subsystem = "";
@@ -1122,8 +1114,7 @@ sub add_categories {
 		    }
 		}
 		if ($email_reviewer) {
-		    my $subsystem = get_subsystem_name($i);
-		    push_email_addresses($pvalue, "reviewer:$subsystem");
+		    push_email_addresses($pvalue, 'reviewer');
 		}
 	    } elsif ($ptype eq "T") {
 		push(@scm, $pvalue);

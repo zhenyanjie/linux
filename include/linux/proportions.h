@@ -1,7 +1,7 @@
 /*
  * FLoating proportions
  *
- *  Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra
+ *  Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra <pzijlstr@redhat.com>
  *
  * This file contains the public data structure and API definitions.
  */

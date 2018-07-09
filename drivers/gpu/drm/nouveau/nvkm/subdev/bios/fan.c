@@ -83,7 +83,6 @@ nvbios_fan_parse(struct nvkm_bios *bios, struct nvbios_therm_fan *fan)
 			fan->type = NVBIOS_THERM_FAN_UNK;
 		}
 
-		fan->fan_mode = NVBIOS_THERM_FAN_LINEAR;
 		fan->min_duty = nvbios_rd08(bios, data + 0x02);
 		fan->max_duty = nvbios_rd08(bios, data + 0x03);
 

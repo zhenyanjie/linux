@@ -93,6 +93,23 @@ ENTRY(instr_service)
 END(instr_service)
 
 ; ---------------------------------------------
+; Memory Error Exception Handler
+; ---------------------------------------------
+
+ENTRY(mem_service)
+
+	EXCEPTION_PROLOGUE
+
+	lr  r0, [efa]
+	mov r1, sp
+
+	FAKE_RET_FROM_EXCPN
+
+	bl  do_memory_error
+	b   ret_from_exception
+END(mem_service)
+
+; ---------------------------------------------
 ; Machine Check Exception Handler
 ; ---------------------------------------------
 

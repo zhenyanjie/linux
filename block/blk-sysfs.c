@@ -147,9 +147,10 @@ static ssize_t queue_discard_granularity_show(struct request_queue *q, char *pag
 
 static ssize_t queue_discard_max_hw_show(struct request_queue *q, char *page)
 {
+	unsigned long long val;
 
-	return sprintf(page, "%llu\n",
-		(unsigned long long)q->limits.max_hw_discard_sectors << 9);
+	val = q->limits.max_hw_discard_sectors << 9;
+	return sprintf(page, "%llu\n", val);
 }
 
 static ssize_t queue_discard_max_show(struct request_queue *q, char *page)
@@ -203,9 +204,6 @@ queue_max_sectors_store(struct request_queue *q, const char *page, size_t count)
 
 	if (ret < 0)
 		return ret;
-
-	max_hw_sectors_kb = min_not_zero(max_hw_sectors_kb, (unsigned long)
-					 q->limits.max_dev_sectors >> 1);
 
 	if (max_sectors_kb > max_hw_sectors_kb || max_sectors_kb < page_kb)
 		return -EINVAL;
@@ -316,34 +314,6 @@ queue_rq_affinity_store(struct request_queue *q, const char *page, size_t count)
 	}
 	spin_unlock_irq(q->queue_lock);
 #endif
-	return ret;
-}
-
-static ssize_t queue_poll_show(struct request_queue *q, char *page)
-{
-	return queue_var_show(test_bit(QUEUE_FLAG_POLL, &q->queue_flags), page);
-}
-
-static ssize_t queue_poll_store(struct request_queue *q, const char *page,
-				size_t count)
-{
-	unsigned long poll_on;
-	ssize_t ret;
-
-	if (!q->mq_ops || !q->mq_ops->poll)
-		return -EINVAL;
-
-	ret = queue_var_store(&poll_on, page, count);
-	if (ret < 0)
-		return ret;
-
-	spin_lock_irq(q->queue_lock);
-	if (poll_on)
-		queue_flag_set(QUEUE_FLAG_POLL, q);
-	else
-		queue_flag_clear(QUEUE_FLAG_POLL, q);
-	spin_unlock_irq(q->queue_lock);
-
 	return ret;
 }
 
@@ -472,12 +442,6 @@ static struct queue_sysfs_entry queue_random_entry = {
 	.store = queue_store_random,
 };
 
-static struct queue_sysfs_entry queue_poll_entry = {
-	.attr = {.name = "io_poll", .mode = S_IRUGO | S_IWUSR },
-	.show = queue_poll_show,
-	.store = queue_poll_store,
-};
-
 static struct attribute *default_attrs[] = {
 	&queue_requests_entry.attr,
 	&queue_ra_entry.attr,
@@ -502,7 +466,6 @@ static struct attribute *default_attrs[] = {
 	&queue_rq_affinity_entry.attr,
 	&queue_iostats_entry.attr,
 	&queue_random_entry.attr,
-	&queue_poll_entry.attr,
 	NULL,
 };
 
@@ -637,8 +600,9 @@ int blk_register_queue(struct gendisk *disk)
 	 */
 	if (!blk_queue_init_done(q)) {
 		queue_flag_set_unlocked(QUEUE_FLAG_INIT_DONE, q);
-		percpu_ref_switch_to_percpu(&q->q_usage_counter);
 		blk_queue_bypass_end(q);
+		if (q->mq_ops)
+			blk_mq_finish_init(q);
 	}
 
 	ret = blk_trace_init_sysfs(dev);

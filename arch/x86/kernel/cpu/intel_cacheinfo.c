@@ -157,7 +157,7 @@ struct _cpuid4_info_regs {
 	struct amd_northbridge *nb;
 };
 
-static unsigned short num_cache_leaves;
+unsigned short			num_cache_leaves;
 
 /* AMD doesn't have CPUID4. Emulate it here to report the same
    information to the user.  This makes some assumptions about the machine:
@@ -326,7 +326,7 @@ static void amd_calc_l3_indices(struct amd_northbridge *nb)
  *
  * @returns: the disabled index if used or negative value if slot free.
  */
-static int amd_get_l3_disable_slot(struct amd_northbridge *nb, unsigned slot)
+int amd_get_l3_disable_slot(struct amd_northbridge *nb, unsigned slot)
 {
 	unsigned int reg = 0;
 
@@ -403,8 +403,8 @@ static void amd_l3_disable_index(struct amd_northbridge *nb, int cpu,
  *
  * @return: 0 on success, error status on failure
  */
-static int amd_set_l3_disable_slot(struct amd_northbridge *nb, int cpu,
-			    unsigned slot, unsigned long index)
+int amd_set_l3_disable_slot(struct amd_northbridge *nb, int cpu, unsigned slot,
+			    unsigned long index)
 {
 	int ret = 0;
 
@@ -591,7 +591,7 @@ cpuid4_cache_lookup_regs(int index, struct _cpuid4_info_regs *this_leaf)
 	unsigned		edx;
 
 	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD) {
-		if (boot_cpu_has(X86_FEATURE_TOPOEXT))
+		if (cpu_has_topoext)
 			cpuid_count(0x8000001d, index, &eax.full,
 				    &ebx.full, &ecx.full, &edx);
 		else
@@ -637,7 +637,7 @@ static int find_num_cache_leaves(struct cpuinfo_x86 *c)
 void init_amd_cacheinfo(struct cpuinfo_x86 *c)
 {
 
-	if (boot_cpu_has(X86_FEATURE_TOPOEXT)) {
+	if (cpu_has_topoext) {
 		num_cache_leaves = find_num_cache_leaves(c);
 	} else if (c->extended_cpuid_level >= 0x80000006) {
 		if (cpuid_edx(0x80000006) & 0xf000)
@@ -809,7 +809,7 @@ static int __cache_amd_cpumap_setup(unsigned int cpu, int index,
 	struct cacheinfo *this_leaf;
 	int i, sibling;
 
-	if (boot_cpu_has(X86_FEATURE_TOPOEXT)) {
+	if (cpu_has_topoext) {
 		unsigned int apicid, nshared, first, last;
 
 		this_leaf = this_cpu_ci->info_list + index;

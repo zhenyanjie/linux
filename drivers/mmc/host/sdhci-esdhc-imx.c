@@ -76,7 +76,6 @@
 #define ESDHC_STD_TUNING_EN		(1 << 24)
 /* NOTE: the minimum valid tuning start tap for mx6sl is 1 */
 #define ESDHC_TUNING_START_TAP		0x1
-#define ESDHC_TUNING_STEP_MASK		0x00070000
 #define ESDHC_TUNING_STEP_SHIFT		16
 
 /* pinctrl state */
@@ -490,11 +489,9 @@ static void esdhc_writew_le(struct sdhci_host *host, u16 val, int reg)
 				m |= ESDHC_MIX_CTRL_FBCLK_SEL;
 				tuning_ctrl = readl(host->ioaddr + ESDHC_TUNING_CTRL);
 				tuning_ctrl |= ESDHC_STD_TUNING_EN | ESDHC_TUNING_START_TAP;
-				if (imx_data->boarddata.tuning_step) {
-					tuning_ctrl &= ~ESDHC_TUNING_STEP_MASK;
+				if (imx_data->boarddata.tuning_step)
 					tuning_ctrl |= imx_data->boarddata.tuning_step << ESDHC_TUNING_STEP_SHIFT;
-				}
-				writel(tuning_ctrl, host->ioaddr + ESDHC_TUNING_CTRL);
+					writel(tuning_ctrl, host->ioaddr + ESDHC_TUNING_CTRL);
 			} else {
 				v &= ~ESDHC_MIX_CTRL_EXE_TUNE;
 			}
@@ -762,7 +759,7 @@ static int esdhc_executing_tuning(struct sdhci_host *host, u32 opcode)
 	min = ESDHC_TUNE_CTRL_MIN;
 	while (min < ESDHC_TUNE_CTRL_MAX) {
 		esdhc_prepare_tuning(host, min);
-		if (!mmc_send_tuning(host->mmc, opcode, NULL))
+		if (!mmc_send_tuning(host->mmc))
 			break;
 		min += ESDHC_TUNE_CTRL_STEP;
 	}
@@ -771,7 +768,7 @@ static int esdhc_executing_tuning(struct sdhci_host *host, u32 opcode)
 	max = min + ESDHC_TUNE_CTRL_STEP;
 	while (max < ESDHC_TUNE_CTRL_MAX) {
 		esdhc_prepare_tuning(host, max);
-		if (mmc_send_tuning(host->mmc, opcode, NULL)) {
+		if (mmc_send_tuning(host->mmc)) {
 			max -= ESDHC_TUNE_CTRL_STEP;
 			break;
 		}
@@ -781,7 +778,7 @@ static int esdhc_executing_tuning(struct sdhci_host *host, u32 opcode)
 	/* use average delay to get the best timing */
 	avg = (min + max) / 2;
 	esdhc_prepare_tuning(host, avg);
-	ret = mmc_send_tuning(host->mmc, opcode, NULL);
+	ret = mmc_send_tuning(host->mmc);
 	esdhc_post_tuning(host);
 
 	dev_dbg(mmc_dev(host->mmc), "tunning %s at 0x%x ret %d\n",

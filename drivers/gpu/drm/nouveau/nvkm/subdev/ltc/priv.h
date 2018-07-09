@@ -17,9 +17,6 @@ struct nvkm_ltc_func {
 	int zbc;
 	void (*zbc_clear_color)(struct nvkm_ltc *, int, const u32[4]);
 	void (*zbc_clear_depth)(struct nvkm_ltc *, int, const u32);
-
-	void (*invalidate)(struct nvkm_ltc *);
-	void (*flush)(struct nvkm_ltc *);
 };
 
 int gf100_ltc_oneinit(struct nvkm_ltc *);
@@ -29,12 +26,4 @@ void gf100_ltc_cbc_clear(struct nvkm_ltc *, u32, u32);
 void gf100_ltc_cbc_wait(struct nvkm_ltc *);
 void gf100_ltc_zbc_clear_color(struct nvkm_ltc *, int, const u32[4]);
 void gf100_ltc_zbc_clear_depth(struct nvkm_ltc *, int, const u32);
-void gf100_ltc_invalidate(struct nvkm_ltc *);
-void gf100_ltc_flush(struct nvkm_ltc *);
-
-void gm107_ltc_intr(struct nvkm_ltc *);
-void gm107_ltc_cbc_clear(struct nvkm_ltc *, u32, u32);
-void gm107_ltc_cbc_wait(struct nvkm_ltc *);
-void gm107_ltc_zbc_clear_color(struct nvkm_ltc *, int, const u32[4]);
-void gm107_ltc_zbc_clear_depth(struct nvkm_ltc *, int, const u32);
 #endif

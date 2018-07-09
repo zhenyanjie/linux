@@ -30,9 +30,7 @@
 
 #ifdef CONFIG_ARM64_64K_PAGES
 #define TCR_TG_FLAGS	TCR_TG0_64K | TCR_TG1_64K
-#elif defined(CONFIG_ARM64_16K_PAGES)
-#define TCR_TG_FLAGS	TCR_TG0_16K | TCR_TG1_16K
-#else /* CONFIG_ARM64_4K_PAGES */
+#else
 #define TCR_TG_FLAGS	TCR_TG0_4K | TCR_TG1_4K
 #endif
 
@@ -133,12 +131,14 @@ ENDPROC(cpu_do_resume)
  *	- pgd_phys - physical address of new TTB
  */
 ENTRY(cpu_do_switch_mm)
-	mmid	x1, x1				// get mm->context.id
+	mmid	w1, x1				// get mm->context.id
 	bfi	x0, x1, #48, #16		// set the ASID
 	msr	ttbr0_el1, x0			// set TTBR0
 	isb
 	ret
 ENDPROC(cpu_do_switch_mm)
+
+	.section ".text.init", #alloc, #execinstr
 
 /*
  *	__cpu_setup
@@ -147,8 +147,8 @@ ENDPROC(cpu_do_switch_mm)
  *	value of the SCTLR_EL1 register.
  */
 ENTRY(__cpu_setup)
-	tlbi	vmalle1				// Invalidate local TLB
-	dsb	nsh
+	tlbi	vmalle1is			// invalidate I + D TLBs
+	dsb	ish
 
 	mov	x0, #3 << 20
 	msr	cpacr_el1, x0			// Enable FP/ASIMD
@@ -165,14 +165,12 @@ ENTRY(__cpu_setup)
 	 *   DEVICE_GRE		010	00001100
 	 *   NORMAL_NC		011	01000100
 	 *   NORMAL		100	11111111
-	 *   NORMAL_WT		101	10111011
 	 */
 	ldr	x5, =MAIR(0x00, MT_DEVICE_nGnRnE) | \
 		     MAIR(0x04, MT_DEVICE_nGnRE) | \
 		     MAIR(0x0c, MT_DEVICE_GRE) | \
 		     MAIR(0x44, MT_NORMAL_NC) | \
-		     MAIR(0xff, MT_NORMAL) | \
-		     MAIR(0xbb, MT_NORMAL_WT)
+		     MAIR(0xff, MT_NORMAL)
 	msr	mair_el1, x5
 	/*
 	 * Prepare SCTLR

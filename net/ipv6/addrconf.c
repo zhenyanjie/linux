@@ -70,7 +70,7 @@
 #include <net/sock.h>
 #include <net/snmp.h>
 
-#include <net/6lowpan.h>
+#include <net/af_ieee802154.h>
 #include <net/firewire.h>
 #include <net/ipv6.h>
 #include <net/protocol.h>
@@ -81,7 +81,6 @@
 #include <net/ip.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
-#include <net/l3mdev.h>
 #include <linux/if_tunnel.h>
 #include <linux/rtnetlink.h>
 #include <linux/netconf.h>
@@ -583,7 +582,7 @@ static int inet6_netconf_get_devconf(struct sk_buff *in_skb,
 	if (err < 0)
 		goto errout;
 
-	err = -EINVAL;
+	err = EINVAL;
 	if (!tb[NETCONFA_IFINDEX])
 		goto errout;
 
@@ -1772,13 +1771,12 @@ struct inet6_ifaddr *ipv6_get_ifaddr(struct net *net, const struct in6_addr *add
 
 static void addrconf_dad_stop(struct inet6_ifaddr *ifp, int dad_failed)
 {
-	if (dad_failed)
-		ifp->flags |= IFA_F_DADFAILED;
-
 	if (ifp->flags&IFA_F_PERMANENT) {
 		spin_lock_bh(&ifp->lock);
 		addrconf_del_dad_work(ifp);
 		ifp->flags |= IFA_F_TENTATIVE;
+		if (dad_failed)
+			ifp->flags |= IFA_F_DADFAILED;
 		spin_unlock_bh(&ifp->lock);
 		if (dad_failed)
 			ipv6_ifa_notify(0, ifp);
@@ -1954,9 +1952,9 @@ static void addrconf_leave_anycast(struct inet6_ifaddr *ifp)
 
 static int addrconf_ifid_eui64(u8 *eui, struct net_device *dev)
 {
-	if (dev->addr_len != EUI64_ADDR_LEN)
+	if (dev->addr_len != IEEE802154_ADDR_LEN)
 		return -1;
-	memcpy(eui, dev->dev_addr, EUI64_ADDR_LEN);
+	memcpy(eui, dev->dev_addr, 8);
 	eui[0] ^= 2;
 	return 0;
 }
@@ -2048,6 +2046,7 @@ static int ipv6_generate_eui64(u8 *eui, struct net_device *dev)
 	case ARPHRD_IPGRE:
 		return addrconf_ifid_gre(eui, dev);
 	case ARPHRD_6LOWPAN:
+	case ARPHRD_IEEE802154:
 		return addrconf_ifid_eui64(eui, dev);
 	case ARPHRD_IEEE1394:
 		return addrconf_ifid_ieee1394(eui, dev);
@@ -2154,7 +2153,7 @@ addrconf_prefix_route(struct in6_addr *pfx, int plen, struct net_device *dev,
 		      unsigned long expires, u32 flags)
 {
 	struct fib6_config cfg = {
-		.fc_table = l3mdev_fib_table(dev) ? : RT6_TABLE_PREFIX,
+		.fc_table = RT6_TABLE_PREFIX,
 		.fc_metric = IP6_RT_PRIO_ADDRCONF,
 		.fc_ifindex = dev->ifindex,
 		.fc_expires = expires,
@@ -2187,9 +2186,8 @@ static struct rt6_info *addrconf_get_prefix_route(const struct in6_addr *pfx,
 	struct fib6_node *fn;
 	struct rt6_info *rt = NULL;
 	struct fib6_table *table;
-	u32 tb_id = l3mdev_fib_table(dev) ? : RT6_TABLE_PREFIX;
 
-	table = fib6_get_table(dev_net(dev), tb_id);
+	table = fib6_get_table(dev_net(dev), RT6_TABLE_PREFIX);
 	if (!table)
 		return NULL;
 
@@ -2220,7 +2218,7 @@ out:
 static void addrconf_add_mroute(struct net_device *dev)
 {
 	struct fib6_config cfg = {
-		.fc_table = l3mdev_fib_table(dev) ? : RT6_TABLE_LOCAL,
+		.fc_table = RT6_TABLE_LOCAL,
 		.fc_metric = IP6_RT_PRIO_ADDRCONF,
 		.fc_ifindex = dev->ifindex,
 		.fc_dst_len = 8,
@@ -2318,12 +2316,6 @@ static void manage_tempaddrs(struct inet6_dev *idev,
 	} else {
 		read_unlock_bh(&idev->lock);
 	}
-}
-
-static bool is_addr_mode_generate_stable(struct inet6_dev *idev)
-{
-	return idev->addr_gen_mode == IN6_ADDR_GEN_MODE_STABLE_PRIVACY ||
-	       idev->addr_gen_mode == IN6_ADDR_GEN_MODE_RANDOM;
 }
 
 void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len, bool sllao)
@@ -2439,7 +2431,8 @@ void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len, bool sllao)
 				       in6_dev->token.s6_addr + 8, 8);
 				read_unlock_bh(&in6_dev->lock);
 				tokenized = true;
-			} else if (is_addr_mode_generate_stable(in6_dev) &&
+			} else if (in6_dev->addr_gen_mode ==
+				   IN6_ADDR_GEN_MODE_STABLE_PRIVACY &&
 				   !ipv6_generate_stable_address(&addr, 0,
 								 in6_dev)) {
 				addr_flags |= IFA_F_STABLE_PRIVACY;
@@ -3039,39 +3032,19 @@ retry:
 	return 0;
 }
 
-static void ipv6_gen_mode_random_init(struct inet6_dev *idev)
-{
-	struct ipv6_stable_secret *s = &idev->cnf.stable_secret;
-
-	if (s->initialized)
-		return;
-	s = &idev->cnf.stable_secret;
-	get_random_bytes(&s->secret, sizeof(s->secret));
-	s->initialized = true;
-}
-
 static void addrconf_addr_gen(struct inet6_dev *idev, bool prefix_route)
 {
 	struct in6_addr addr;
 
-	/* no link local addresses on L3 master devices */
-	if (netif_is_l3_master(idev->dev))
-		return;
-
 	ipv6_addr_set(&addr, htonl(0xFE800000), 0, 0, 0);
 
-	switch (idev->addr_gen_mode) {
-	case IN6_ADDR_GEN_MODE_RANDOM:
-		ipv6_gen_mode_random_init(idev);
-		/* fallthrough */
-	case IN6_ADDR_GEN_MODE_STABLE_PRIVACY:
+	if (idev->addr_gen_mode == IN6_ADDR_GEN_MODE_STABLE_PRIVACY) {
 		if (!ipv6_generate_stable_address(&addr, 0, idev))
 			addrconf_add_linklocal(idev, &addr,
 					       IFA_F_STABLE_PRIVACY);
 		else if (prefix_route)
 			addrconf_prefix_route(&addr, 64, idev->dev, 0, 0);
-		break;
-	case IN6_ADDR_GEN_MODE_EUI64:
+	} else if (idev->addr_gen_mode == IN6_ADDR_GEN_MODE_EUI64) {
 		/* addrconf_add_linklocal also adds a prefix_route and we
 		 * only need to care about prefix routes if ipv6_generate_eui64
 		 * couldn't generate one.
@@ -3080,11 +3053,6 @@ static void addrconf_addr_gen(struct inet6_dev *idev, bool prefix_route)
 			addrconf_add_linklocal(idev, &addr, 0);
 		else if (prefix_route)
 			addrconf_prefix_route(&addr, 64, idev->dev, 0, 0);
-		break;
-	case IN6_ADDR_GEN_MODE_NONE:
-	default:
-		/* will not add any link local address */
-		break;
 	}
 }
 
@@ -3098,10 +3066,10 @@ static void addrconf_dev_config(struct net_device *dev)
 	    (dev->type != ARPHRD_FDDI) &&
 	    (dev->type != ARPHRD_ARCNET) &&
 	    (dev->type != ARPHRD_INFINIBAND) &&
+	    (dev->type != ARPHRD_IEEE802154) &&
 	    (dev->type != ARPHRD_IEEE1394) &&
 	    (dev->type != ARPHRD_TUNNEL6) &&
-	    (dev->type != ARPHRD_6LOWPAN) &&
-	    (dev->type != ARPHRD_NONE)) {
+	    (dev->type != ARPHRD_6LOWPAN)) {
 		/* Alas, we support only Ethernet autoconfiguration. */
 		return;
 	}
@@ -3109,11 +3077,6 @@ static void addrconf_dev_config(struct net_device *dev)
 	idev = addrconf_add_dev(dev);
 	if (IS_ERR(idev))
 		return;
-
-	/* this device type has no EUI support */
-	if (dev->type == ARPHRD_NONE &&
-	    idev->addr_gen_mode == IN6_ADDR_GEN_MODE_EUI64)
-		idev->addr_gen_mode = IN6_ADDR_GEN_MODE_RANDOM;
 
 	addrconf_addr_gen(idev, false);
 }
@@ -3185,32 +3148,6 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 		}
 		break;
 
-	case NETDEV_CHANGEMTU:
-		/* if MTU under IPV6_MIN_MTU stop IPv6 on this interface. */
-		if (dev->mtu < IPV6_MIN_MTU) {
-			addrconf_ifdown(dev, 1);
-			break;
-		}
-
-		if (idev) {
-			rt6_mtu_change(dev, dev->mtu);
-			idev->cnf.mtu6 = dev->mtu;
-			break;
-		}
-
-		/* allocate new idev */
-		idev = ipv6_add_dev(dev);
-		if (IS_ERR(idev))
-			break;
-
-		/* device is still not ready */
-		if (!(idev->if_flags & IF_READY))
-			break;
-
-		run_pending = 1;
-
-		/* fall through */
-
 	case NETDEV_UP:
 	case NETDEV_CHANGE:
 		if (dev->flags & IFF_SLAVE)
@@ -3234,7 +3171,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 				idev->if_flags |= IF_READY;
 				run_pending = 1;
 			}
-		} else if (event == NETDEV_CHANGE) {
+		} else {
 			if (!addrconf_qdisc_ok(dev)) {
 				/* device is still not ready. */
 				break;
@@ -3299,6 +3236,24 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 		}
 		break;
 
+	case NETDEV_CHANGEMTU:
+		if (idev && dev->mtu >= IPV6_MIN_MTU) {
+			rt6_mtu_change(dev, dev->mtu);
+			idev->cnf.mtu6 = dev->mtu;
+			break;
+		}
+
+		if (!idev && dev->mtu >= IPV6_MIN_MTU) {
+			idev = ipv6_add_dev(dev);
+			if (!IS_ERR(idev))
+				break;
+		}
+
+		/*
+		 * if MTU under IPV6_MIN_MTU.
+		 * Stop IPv6 on this interface.
+		 */
+
 	case NETDEV_DOWN:
 	case NETDEV_UNREGISTER:
 		/*
@@ -3324,8 +3279,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 
 	case NETDEV_PRE_TYPE_CHANGE:
 	case NETDEV_POST_TYPE_CHANGE:
-		if (idev)
-			addrconf_type_change(dev, event);
+		addrconf_type_change(dev, event);
 		break;
 	}
 
@@ -3538,7 +3492,6 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 {
 	struct inet6_dev *idev = ifp->idev;
 	struct net_device *dev = idev->dev;
-	bool notify = false;
 
 	addrconf_join_solict(dev, &ifp->addr);
 
@@ -3584,7 +3537,7 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 			/* Because optimistic nodes can use this address,
 			 * notify listeners. If DAD fails, RTM_DELADDR is sent.
 			 */
-			notify = true;
+			ipv6_ifa_notify(RTM_NEWADDR, ifp);
 		}
 	}
 
@@ -3592,8 +3545,6 @@ static void addrconf_dad_begin(struct inet6_ifaddr *ifp)
 out:
 	spin_unlock(&ifp->lock);
 	read_unlock_bh(&idev->lock);
-	if (notify)
-		ipv6_ifa_notify(RTM_NEWADDR, ifp);
 }
 
 static void addrconf_dad_start(struct inet6_ifaddr *ifp)
@@ -3683,7 +3634,7 @@ static void addrconf_dad_work(struct work_struct *w)
 
 	/* send a neighbour solicitation for our addr */
 	addrconf_addr_solict_mult(&ifp->addr, &mcaddr);
-	ndisc_send_ns(ifp->idev->dev, &ifp->addr, &mcaddr, &in6addr_any);
+	ndisc_send_ns(ifp->idev->dev, NULL, &ifp->addr, &mcaddr, &in6addr_any);
 out:
 	in6_ifa_put(ifp);
 	rtnl_unlock();
@@ -4787,8 +4738,7 @@ static void snmp6_fill_stats(u64 *stats, struct inet6_dev *idev, int attrtype,
 	}
 }
 
-static int inet6_fill_ifla6_attrs(struct sk_buff *skb, struct inet6_dev *idev,
-				  u32 ext_filter_mask)
+static int inet6_fill_ifla6_attrs(struct sk_buff *skb, struct inet6_dev *idev)
 {
 	struct nlattr *nla;
 	struct ifla_cacheinfo ci;
@@ -4807,9 +4757,6 @@ static int inet6_fill_ifla6_attrs(struct sk_buff *skb, struct inet6_dev *idev,
 	ipv6_store_devconf(&idev->cnf, nla_data(nla), nla_len(nla));
 
 	/* XXX - MC not implemented */
-
-	if (ext_filter_mask & RTEXT_FILTER_SKIP_STATS)
-		return 0;
 
 	nla = nla_reserve(skb, IFLA_INET6_STATS, IPSTATS_MIB_MAX * sizeof(u64));
 	if (!nla)
@@ -4838,8 +4785,7 @@ nla_put_failure:
 	return -EMSGSIZE;
 }
 
-static size_t inet6_get_link_af_size(const struct net_device *dev,
-				     u32 ext_filter_mask)
+static size_t inet6_get_link_af_size(const struct net_device *dev)
 {
 	if (!__in6_dev_get(dev))
 		return 0;
@@ -4847,15 +4793,14 @@ static size_t inet6_get_link_af_size(const struct net_device *dev,
 	return inet6_ifla6_size();
 }
 
-static int inet6_fill_link_af(struct sk_buff *skb, const struct net_device *dev,
-			      u32 ext_filter_mask)
+static int inet6_fill_link_af(struct sk_buff *skb, const struct net_device *dev)
 {
 	struct inet6_dev *idev = __in6_dev_get(dev);
 
 	if (!idev)
 		return -ENODATA;
 
-	if (inet6_fill_ifla6_attrs(skb, idev, ext_filter_mask) < 0)
+	if (inet6_fill_ifla6_attrs(skb, idev) < 0)
 		return -EMSGSIZE;
 
 	return 0;
@@ -4962,8 +4907,7 @@ static int inet6_set_link_af(struct net_device *dev, const struct nlattr *nla)
 
 		if (mode != IN6_ADDR_GEN_MODE_EUI64 &&
 		    mode != IN6_ADDR_GEN_MODE_NONE &&
-		    mode != IN6_ADDR_GEN_MODE_STABLE_PRIVACY &&
-		    mode != IN6_ADDR_GEN_MODE_RANDOM)
+		    mode != IN6_ADDR_GEN_MODE_STABLE_PRIVACY)
 			return -EINVAL;
 
 		if (mode == IN6_ADDR_GEN_MODE_STABLE_PRIVACY &&
@@ -5011,7 +4955,7 @@ static int inet6_fill_ifinfo(struct sk_buff *skb, struct inet6_dev *idev,
 	if (!protoinfo)
 		goto nla_put_failure;
 
-	if (inet6_fill_ifla6_attrs(skb, idev, 0) < 0)
+	if (inet6_fill_ifla6_attrs(skb, idev) < 0)
 		goto nla_put_failure;
 
 	nla_nest_end(skb, protoinfo);
@@ -5239,20 +5183,6 @@ int addrconf_sysctl_forward(struct ctl_table *ctl, int write,
 	if (ret)
 		*ppos = pos;
 	return ret;
-}
-
-static
-int addrconf_sysctl_hop_limit(struct ctl_table *ctl, int write,
-                              void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	struct ctl_table lctl;
-	int min_hl = 1, max_hl = 255;
-
-	lctl = *ctl;
-	lctl.extra1 = &min_hl;
-	lctl.extra2 = &max_hl;
-
-	return proc_dointvec_minmax(&lctl, write, buffer, lenp, ppos);
 }
 
 static
@@ -5507,7 +5437,7 @@ static struct addrconf_sysctl_table
 			.data		= &ipv6_devconf.hop_limit,
 			.maxlen		= sizeof(int),
 			.mode		= 0644,
-			.proc_handler	= addrconf_sysctl_hop_limit,
+			.proc_handler	= proc_dointvec,
 		},
 		{
 			.procname	= "mtu",

@@ -74,8 +74,8 @@ struct netfront_cb {
 
 #define GRANT_INVALID_REF	0
 
-#define NET_TX_RING_SIZE __CONST_RING_SIZE(xen_netif_tx, XEN_PAGE_SIZE)
-#define NET_RX_RING_SIZE __CONST_RING_SIZE(xen_netif_rx, XEN_PAGE_SIZE)
+#define NET_TX_RING_SIZE __CONST_RING_SIZE(xen_netif_tx, PAGE_SIZE)
+#define NET_RX_RING_SIZE __CONST_RING_SIZE(xen_netif_rx, PAGE_SIZE)
 
 /* Minimum number of Rx slots (includes slot for GSO metadata). */
 #define NET_RX_SLOTS_MIN (XEN_NETIF_NR_SLOTS_MIN + 1)
@@ -291,7 +291,7 @@ static void xennet_alloc_rx_buffers(struct netfront_queue *queue)
 		struct sk_buff *skb;
 		unsigned short id;
 		grant_ref_t ref;
-		struct page *page;
+		unsigned long gfn;
 		struct xen_netif_rx_request *req;
 
 		skb = xennet_alloc_one_rx_buffer(queue);
@@ -307,13 +307,14 @@ static void xennet_alloc_rx_buffers(struct netfront_queue *queue)
 		BUG_ON((signed short)ref < 0);
 		queue->grant_rx_ref[id] = ref;
 
-		page = skb_frag_page(&skb_shinfo(skb)->frags[0]);
+		gfn = xen_page_to_gfn(skb_frag_page(&skb_shinfo(skb)->frags[0]));
 
 		req = RING_GET_REQUEST(&queue->rx, req_prod);
-		gnttab_page_grant_foreign_access_ref_one(ref,
-							 queue->info->xbdev->otherend_id,
-							 page,
-							 0);
+		gnttab_grant_foreign_access_ref(ref,
+						queue->info->xbdev->otherend_id,
+						gfn,
+						0);
+
 		req->id = id;
 		req->gref = ref;
 	}
@@ -364,7 +365,6 @@ static void xennet_tx_buf_gc(struct netfront_queue *queue)
 	RING_IDX cons, prod;
 	unsigned short id;
 	struct sk_buff *skb;
-	bool more_to_do;
 
 	BUG_ON(!netif_carrier_ok(queue->info->netdev));
 
@@ -399,39 +399,41 @@ static void xennet_tx_buf_gc(struct netfront_queue *queue)
 
 		queue->tx.rsp_cons = prod;
 
-		RING_FINAL_CHECK_FOR_RESPONSES(&queue->tx, more_to_do);
-	} while (more_to_do);
+		/*
+		 * Set a new event, then check for race with update of tx_cons.
+		 * Note that it is essential to schedule a callback, no matter
+		 * how few buffers are pending. Even if there is space in the
+		 * transmit ring, higher layers may be blocked because too much
+		 * data is outstanding: in such cases notification from Xen is
+		 * likely to be the only kick that we'll get.
+		 */
+		queue->tx.sring->rsp_event =
+			prod + ((queue->tx.sring->req_prod - prod) >> 1) + 1;
+		mb();		/* update shared area */
+	} while ((cons == prod) && (prod != queue->tx.sring->rsp_prod));
 
 	xennet_maybe_wake_tx(queue);
 }
 
-struct xennet_gnttab_make_txreq {
-	struct netfront_queue *queue;
-	struct sk_buff *skb;
-	struct page *page;
-	struct xen_netif_tx_request *tx; /* Last request */
-	unsigned int size;
-};
-
-static void xennet_tx_setup_grant(unsigned long gfn, unsigned int offset,
-				  unsigned int len, void *data)
+static struct xen_netif_tx_request *xennet_make_one_txreq(
+	struct netfront_queue *queue, struct sk_buff *skb,
+	struct page *page, unsigned int offset, unsigned int len)
 {
-	struct xennet_gnttab_make_txreq *info = data;
 	unsigned int id;
 	struct xen_netif_tx_request *tx;
 	grant_ref_t ref;
-	/* convenient aliases */
-	struct page *page = info->page;
-	struct netfront_queue *queue = info->queue;
-	struct sk_buff *skb = info->skb;
+
+	len = min_t(unsigned int, PAGE_SIZE - offset, len);
 
 	id = get_id_from_freelist(&queue->tx_skb_freelist, queue->tx_skbs);
 	tx = RING_GET_REQUEST(&queue->tx, queue->tx.req_prod_pvt++);
 	ref = gnttab_claim_grant_reference(&queue->gref_tx_head);
 	BUG_ON((signed short)ref < 0);
 
-	gnttab_grant_foreign_access_ref(ref, queue->info->xbdev->otherend_id,
-					gfn, GNTMAP_readonly);
+	gnttab_grant_foreign_access_ref(ref,
+					queue->info->xbdev->otherend_id,
+					xen_page_to_gfn(page),
+					GNTMAP_readonly);
 
 	queue->tx_skbs[id].skb = skb;
 	queue->grant_tx_page[id] = page;
@@ -443,34 +445,7 @@ static void xennet_tx_setup_grant(unsigned long gfn, unsigned int offset,
 	tx->size = len;
 	tx->flags = 0;
 
-	info->tx = tx;
-	info->size += tx->size;
-}
-
-static struct xen_netif_tx_request *xennet_make_first_txreq(
-	struct netfront_queue *queue, struct sk_buff *skb,
-	struct page *page, unsigned int offset, unsigned int len)
-{
-	struct xennet_gnttab_make_txreq info = {
-		.queue = queue,
-		.skb = skb,
-		.page = page,
-		.size = 0,
-	};
-
-	gnttab_for_one_grant(page, offset, len, xennet_tx_setup_grant, &info);
-
-	return info.tx;
-}
-
-static void xennet_make_one_txreq(unsigned long gfn, unsigned int offset,
-				  unsigned int len, void *data)
-{
-	struct xennet_gnttab_make_txreq *info = data;
-
-	info->tx->flags |= XEN_NETTXF_more_data;
-	skb_get(info->skb);
-	xennet_tx_setup_grant(gfn, offset, len, data);
+	return tx;
 }
 
 static struct xen_netif_tx_request *xennet_make_txreqs(
@@ -478,30 +453,20 @@ static struct xen_netif_tx_request *xennet_make_txreqs(
 	struct sk_buff *skb, struct page *page,
 	unsigned int offset, unsigned int len)
 {
-	struct xennet_gnttab_make_txreq info = {
-		.queue = queue,
-		.skb = skb,
-		.tx = tx,
-	};
-
 	/* Skip unused frames from start of page */
 	page += offset >> PAGE_SHIFT;
 	offset &= ~PAGE_MASK;
 
 	while (len) {
-		info.page = page;
-		info.size = 0;
-
-		gnttab_foreach_grant_in_range(page, offset, len,
-					      xennet_make_one_txreq,
-					      &info);
-
+		tx->flags |= XEN_NETTXF_more_data;
+		tx = xennet_make_one_txreq(queue, skb_get(skb),
+					   page, offset, len);
 		page++;
 		offset = 0;
-		len -= info.size;
+		len -= tx->size;
 	}
 
-	return info.tx;
+	return tx;
 }
 
 /*
@@ -511,10 +476,9 @@ static struct xen_netif_tx_request *xennet_make_txreqs(
 static int xennet_count_skb_slots(struct sk_buff *skb)
 {
 	int i, frags = skb_shinfo(skb)->nr_frags;
-	int slots;
+	int pages;
 
-	slots = gnttab_count_grant(offset_in_page(skb->data),
-				   skb_headlen(skb));
+	pages = PFN_UP(offset_in_page(skb->data) + skb_headlen(skb));
 
 	for (i = 0; i < frags; i++) {
 		skb_frag_t *frag = skb_shinfo(skb)->frags + i;
@@ -524,10 +488,10 @@ static int xennet_count_skb_slots(struct sk_buff *skb)
 		/* Skip unused frames from start of page */
 		offset &= ~PAGE_MASK;
 
-		slots += gnttab_count_grant(offset, size);
+		pages += PFN_UP(offset + size);
 	}
 
-	return slots;
+	return pages;
 }
 
 static u16 xennet_select_queue(struct net_device *dev, struct sk_buff *skb,
@@ -547,8 +511,6 @@ static u16 xennet_select_queue(struct net_device *dev, struct sk_buff *skb,
 
 	return queue_idx;
 }
-
-#define MAX_XEN_SKB_FRAGS (65536 / XEN_PAGE_SIZE + 1)
 
 static int xennet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
@@ -584,7 +546,7 @@ static int xennet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	slots = xennet_count_skb_slots(skb);
-	if (unlikely(slots > MAX_XEN_SKB_FRAGS + 1)) {
+	if (unlikely(slots > MAX_SKB_FRAGS + 1)) {
 		net_dbg_ratelimited("xennet: skb rides the rocket: %d slots, %d bytes\n",
 				    slots, skb->len);
 		if (skb_linearize(skb))
@@ -605,13 +567,10 @@ static int xennet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	/* First request for the linear area. */
-	first_tx = tx = xennet_make_first_txreq(queue, skb,
-						page, offset, len);
-	offset += tx->size;
-	if (offset == PAGE_SIZE) {
-		page++;
-		offset = 0;
-	}
+	first_tx = tx = xennet_make_one_txreq(queue, skb,
+					      page, offset, len);
+	page++;
+	offset = 0;
 	len -= tx->size;
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL)
@@ -773,7 +732,7 @@ static int xennet_get_responses(struct netfront_queue *queue,
 
 	for (;;) {
 		if (unlikely(rx->status < 0 ||
-			     rx->offset + rx->status > XEN_PAGE_SIZE)) {
+			     rx->offset + rx->status > PAGE_SIZE)) {
 			if (net_ratelimit())
 				dev_warn(dev, "rx->offset: %u, size: %d\n",
 					 rx->offset, rx->status);
@@ -1537,7 +1496,7 @@ static int setup_netfront(struct xenbus_device *dev,
 		goto fail;
 	}
 	SHARED_RING_INIT(txs);
-	FRONT_RING_INIT(&queue->tx, txs, XEN_PAGE_SIZE);
+	FRONT_RING_INIT(&queue->tx, txs, PAGE_SIZE);
 
 	err = xenbus_grant_ring(dev, txs, 1, &gref);
 	if (err < 0)
@@ -1551,7 +1510,7 @@ static int setup_netfront(struct xenbus_device *dev,
 		goto alloc_rx_ring_fail;
 	}
 	SHARED_RING_INIT(rxs);
-	FRONT_RING_INIT(&queue->rx, rxs, XEN_PAGE_SIZE);
+	FRONT_RING_INIT(&queue->rx, rxs, PAGE_SIZE);
 
 	err = xenbus_grant_ring(dev, rxs, 1, &gref);
 	if (err < 0)
@@ -1860,22 +1819,19 @@ again:
 		goto destroy_ring;
 	}
 
-	if (xenbus_exists(XBT_NIL,
-			  info->xbdev->otherend, "multi-queue-max-queues")) {
-		/* Write the number of queues */
-		err = xenbus_printf(xbt, dev->nodename,
-				    "multi-queue-num-queues", "%u", num_queues);
-		if (err) {
-			message = "writing multi-queue-num-queues";
-			goto abort_transaction_no_dev_fatal;
-		}
-	}
-
 	if (num_queues == 1) {
 		err = write_queue_xenstore_keys(&info->queues[0], &xbt, 0); /* flat */
 		if (err)
 			goto abort_transaction_no_dev_fatal;
 	} else {
+		/* Write the number of queues */
+		err = xenbus_printf(xbt, dev->nodename, "multi-queue-num-queues",
+				    "%u", num_queues);
+		if (err) {
+			message = "writing multi-queue-num-queues";
+			goto abort_transaction_no_dev_fatal;
+		}
+
 		/* Write the keys for each queue */
 		for (i = 0; i < num_queues; ++i) {
 			queue = &info->queues[i];

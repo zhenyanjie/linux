@@ -137,7 +137,7 @@ static const match_table_t tokens = {
 };
 
 
-STATIC int
+STATIC unsigned long
 suffix_kstrtoint(char *s, unsigned int base, int *res)
 {
 	int	last, shift_left_factor = 0, _res;
@@ -838,18 +838,17 @@ xfs_init_mount_workqueues(
 		goto out_destroy_unwritten;
 
 	mp->m_reclaim_workqueue = alloc_workqueue("xfs-reclaim/%s",
-			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_fsname);
+			WQ_FREEZABLE, 0, mp->m_fsname);
 	if (!mp->m_reclaim_workqueue)
 		goto out_destroy_cil;
 
 	mp->m_log_workqueue = alloc_workqueue("xfs-log/%s",
-			WQ_MEM_RECLAIM|WQ_FREEZABLE|WQ_HIGHPRI, 0,
-			mp->m_fsname);
+			WQ_FREEZABLE|WQ_HIGHPRI, 0, mp->m_fsname);
 	if (!mp->m_log_workqueue)
 		goto out_destroy_reclaim;
 
 	mp->m_eofblocks_workqueue = alloc_workqueue("xfs-eofblocks/%s",
-			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_fsname);
+			WQ_FREEZABLE, 0, mp->m_fsname);
 	if (!mp->m_eofblocks_workqueue)
 		goto out_destroy_log;
 
@@ -923,7 +922,7 @@ xfs_fs_destroy_inode(
 
 	trace_xfs_destroy_inode(ip);
 
-	XFS_STATS_INC(ip->i_mount, vn_reclaim);
+	XFS_STATS_INC(vn_reclaim);
 
 	ASSERT(XFS_FORCED_SHUTDOWN(ip->i_mount) || ip->i_delayed_blks == 0);
 
@@ -984,8 +983,8 @@ xfs_fs_evict_inode(
 
 	truncate_inode_pages_final(&inode->i_data);
 	clear_inode(inode);
-	XFS_STATS_INC(ip->i_mount, vn_rele);
-	XFS_STATS_INC(ip->i_mount, vn_remove);
+	XFS_STATS_INC(vn_rele);
+	XFS_STATS_INC(vn_remove);
 
 	xfs_inactive(ip);
 }
@@ -1233,16 +1232,6 @@ xfs_fs_remount(
 			return -EINVAL;
 		}
 
-		if (XFS_SB_VERSION_NUM(sbp) == XFS_SB_VERSION_5 &&
-		    xfs_sb_has_ro_compat_feature(sbp,
-					XFS_SB_FEAT_RO_COMPAT_UNKNOWN)) {
-			xfs_warn(mp,
-"ro->rw transition prohibited on unknown (0x%x) ro-compat filesystem",
-				(sbp->sb_features_ro_compat &
-					XFS_SB_FEAT_RO_COMPAT_UNKNOWN));
-			return -EINVAL;
-		}
-
 		mp->m_flags &= ~XFS_MOUNT_RDONLY;
 
 		/*
@@ -1485,16 +1474,9 @@ xfs_fs_fill_super(
 	if (error)
 		goto out_destroy_workqueues;
 
-	/* Allocate stats memory before we do operations that might use it */
-	mp->m_stats.xs_stats = alloc_percpu(struct xfsstats);
-	if (!mp->m_stats.xs_stats) {
-		error = -ENOMEM;
-		goto out_destroy_counters;
-	}
-
 	error = xfs_readsb(mp, flags);
 	if (error)
-		goto out_free_stats;
+		goto out_destroy_counters;
 
 	error = xfs_finish_flags(mp);
 	if (error)
@@ -1563,11 +1545,9 @@ xfs_fs_fill_super(
 	xfs_filestream_unmount(mp);
  out_free_sb:
 	xfs_freesb(mp);
- out_free_stats:
-	free_percpu(mp->m_stats.xs_stats);
  out_destroy_counters:
 	xfs_destroy_percpu_counters(mp);
- out_destroy_workqueues:
+out_destroy_workqueues:
 	xfs_destroy_mount_workqueues(mp);
  out_close_devices:
 	xfs_close_devices(mp);
@@ -1594,7 +1574,6 @@ xfs_fs_put_super(
 	xfs_unmountfs(mp);
 
 	xfs_freesb(mp);
-	free_percpu(mp->m_stats.xs_stats);
 	xfs_destroy_percpu_counters(mp);
 	xfs_destroy_mount_workqueues(mp);
 	xfs_close_devices(mp);
@@ -1724,8 +1703,8 @@ xfs_init_zones(void)
 
 	xfs_inode_zone =
 		kmem_zone_init_flags(sizeof(xfs_inode_t), "xfs_inode",
-			KM_ZONE_HWALIGN | KM_ZONE_RECLAIM | KM_ZONE_SPREAD |
-			KM_ZONE_ACCOUNT, xfs_fs_inode_init_once);
+			KM_ZONE_HWALIGN | KM_ZONE_RECLAIM | KM_ZONE_SPREAD,
+			xfs_fs_inode_init_once);
 	if (!xfs_inode_zone)
 		goto out_destroy_efi_zone;
 
@@ -1859,32 +1838,19 @@ init_xfs_fs(void)
 	xfs_kset = kset_create_and_add("xfs", NULL, fs_kobj);
 	if (!xfs_kset) {
 		error = -ENOMEM;
-		goto out_sysctl_unregister;
+		goto out_sysctl_unregister;;
 	}
-
-	xfsstats.xs_kobj.kobject.kset = xfs_kset;
-
-	xfsstats.xs_stats = alloc_percpu(struct xfsstats);
-	if (!xfsstats.xs_stats) {
-		error = -ENOMEM;
-		goto out_kset_unregister;
-	}
-
-	error = xfs_sysfs_init(&xfsstats.xs_kobj, &xfs_stats_ktype, NULL,
-			       "stats");
-	if (error)
-		goto out_free_stats;
 
 #ifdef DEBUG
 	xfs_dbg_kobj.kobject.kset = xfs_kset;
 	error = xfs_sysfs_init(&xfs_dbg_kobj, &xfs_dbg_ktype, NULL, "debug");
 	if (error)
-		goto out_remove_stats_kobj;
+		goto out_kset_unregister;
 #endif
 
 	error = xfs_qm_init();
 	if (error)
-		goto out_remove_dbg_kobj;
+		goto out_remove_kobj;
 
 	error = register_filesystem(&xfs_fs_type);
 	if (error)
@@ -1893,15 +1859,11 @@ init_xfs_fs(void)
 
  out_qm_exit:
 	xfs_qm_exit();
- out_remove_dbg_kobj:
+ out_remove_kobj:
 #ifdef DEBUG
 	xfs_sysfs_del(&xfs_dbg_kobj);
- out_remove_stats_kobj:
-#endif
-	xfs_sysfs_del(&xfsstats.xs_kobj);
- out_free_stats:
-	free_percpu(xfsstats.xs_stats);
  out_kset_unregister:
+#endif
 	kset_unregister(xfs_kset);
  out_sysctl_unregister:
 	xfs_sysctl_unregister();
@@ -1927,8 +1889,6 @@ exit_xfs_fs(void)
 #ifdef DEBUG
 	xfs_sysfs_del(&xfs_dbg_kobj);
 #endif
-	xfs_sysfs_del(&xfsstats.xs_kobj);
-	free_percpu(xfsstats.xs_stats);
 	kset_unregister(xfs_kset);
 	xfs_sysctl_unregister();
 	xfs_cleanup_procfs();
@@ -1936,7 +1896,6 @@ exit_xfs_fs(void)
 	xfs_mru_cache_uninit();
 	xfs_destroy_workqueues();
 	xfs_destroy_zones();
-	xfs_uuid_table_free();
 }
 
 module_init(init_xfs_fs);

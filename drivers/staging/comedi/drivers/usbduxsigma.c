@@ -66,22 +66,22 @@
 #define USBDUXSUB_CPUCS 0xE600
 
 /* 300Hz max frequ under PWM */
-#define MIN_PWM_PERIOD  ((long)(1E9 / 300))
+#define MIN_PWM_PERIOD  ((long)(1E9/300))
 
 /* Default PWM frequency */
-#define PWM_DEFAULT_PERIOD ((long)(1E9 / 100))
+#define PWM_DEFAULT_PERIOD ((long)(1E9/100))
 
 /* Number of channels (16 AD and offset)*/
 #define NUMCHANNELS 16
 
 /* Size of one A/D value */
-#define SIZEADIN          ((sizeof(u32)))
+#define SIZEADIN          ((sizeof(uint32_t)))
 
 /*
  * Size of the async input-buffer IN BYTES, the DIO state is transmitted
  * as the first byte.
  */
-#define SIZEINBUF         (((NUMCHANNELS + 1) * SIZEADIN))
+#define SIZEINBUF         (((NUMCHANNELS+1)*SIZEADIN))
 
 /* 16 bytes. */
 #define SIZEINSNBUF       16
@@ -90,20 +90,20 @@
 #define NUMOUTCHANNELS    8
 
 /* size of one value for the D/A converter: channel and value */
-#define SIZEDAOUT          ((sizeof(u8) + sizeof(uint16_t)))
+#define SIZEDAOUT          ((sizeof(uint8_t)+sizeof(uint16_t)))
 
 /*
  * Size of the output-buffer in bytes
  * Actually only the first 4 triplets are used but for the
  * high speed mode we need to pad it to 8 (microframes).
  */
-#define SIZEOUTBUF         ((8 * SIZEDAOUT))
+#define SIZEOUTBUF         ((8*SIZEDAOUT))
 
 /*
  * Size of the buffer for the dux commands: just now max size is determined
  * by the analogue out + command byte + panic bytes...
  */
-#define SIZEOFDUXBUFFER    ((8 * SIZEDAOUT + 2))
+#define SIZEOFDUXBUFFER    ((8*SIZEDAOUT+2))
 
 /* Number of in-URBs which receive the data: min=2 */
 #define NUMOFINBUFFERSFULL     5
@@ -150,13 +150,13 @@ struct usbduxsigma_private {
 	/* PWM period */
 	unsigned int pwm_period;
 	/* PWM internal delay for the GPIF in the FX2 */
-	u8 pwm_delay;
+	uint8_t pwm_delay;
 	/* size of the PWM buffer which holds the bit pattern */
 	int pwm_buf_sz;
 	/* input buffer for the ISO-transfer */
 	__be32 *in_buf;
 	/* input buffer for single insn */
-	u8 *insn_buf;
+	uint8_t *insn_buf;
 
 	unsigned high_speed:1;
 	unsigned ai_cmd_running:1;
@@ -172,8 +172,8 @@ struct usbduxsigma_private {
 	/* interval in frames/uframes */
 	unsigned int ai_interval;
 	/* commands */
-	u8 *dux_commands;
-	struct mutex mut;
+	uint8_t *dux_commands;
+	struct semaphore sem;
 };
 
 static void usbduxsigma_unlink_urbs(struct urb **urbs, int num_urbs)
@@ -199,10 +199,10 @@ static int usbduxsigma_ai_cancel(struct comedi_device *dev,
 {
 	struct usbduxsigma_private *devpriv = dev->private;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 	/* unlink only if it is really running */
 	usbduxsigma_ai_stop(dev, devpriv->ai_cmd_running);
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return 0;
 }
@@ -214,7 +214,7 @@ static void usbduxsigma_ai_handle_urb(struct comedi_device *dev,
 	struct usbduxsigma_private *devpriv = dev->private;
 	struct comedi_async *async = s->async;
 	struct comedi_cmd *cmd = &async->cmd;
-	u32 val;
+	uint32_t val;
 	int ret;
 	int i;
 
@@ -223,14 +223,15 @@ static void usbduxsigma_ai_handle_urb(struct comedi_device *dev,
 		if (devpriv->ai_counter == 0) {
 			devpriv->ai_counter = devpriv->ai_timer;
 
-			/*
-			 * Get the data from the USB bus and hand it over
-			 * to comedi. Note, first byte is the DIO state.
-			 */
+			/* get the data from the USB bus
+			   and hand it over to comedi */
 			for (i = 0; i < cmd->chanlist_len; i++) {
-				val = be32_to_cpu(devpriv->in_buf[i + 1]);
+				/* transfer data,
+				   note first byte is the DIO state */
+				val = be32_to_cpu(devpriv->in_buf[i+1]);
 				val &= 0x00ffffff; /* strip status byte */
-				val = comedi_offset_munge(s, val);
+				val ^= 0x00800000; /* convert to unsigned */
+
 				if (!comedi_buf_write_samples(s, &val, 1))
 					return;
 			}
@@ -325,10 +326,10 @@ static int usbduxsigma_ao_cancel(struct comedi_device *dev,
 {
 	struct usbduxsigma_private *devpriv = dev->private;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 	/* unlink only if it is really running */
 	usbduxsigma_ao_stop(dev, devpriv->ao_cmd_running);
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return 0;
 }
@@ -340,7 +341,7 @@ static void usbduxsigma_ao_handle_urb(struct comedi_device *dev,
 	struct usbduxsigma_private *devpriv = dev->private;
 	struct comedi_async *async = s->async;
 	struct comedi_cmd *cmd = &async->cmd;
-	u8 *datap;
+	uint8_t *datap;
 	int ret;
 	int i;
 
@@ -552,12 +553,13 @@ static int usbduxsigma_ai_cmdtest(struct comedi_device *dev,
  * range is the range value from comedi
  */
 static void create_adc_command(unsigned int chan,
-			       u8 *muxsg0, u8 *muxsg1)
+			       uint8_t *muxsg0,
+			       uint8_t *muxsg1)
 {
 	if (chan < 8)
 		(*muxsg0) = (*muxsg0) | (1 << chan);
 	else if (chan < 16)
-		(*muxsg1) = (*muxsg1) | (1 << (chan - 8));
+		(*muxsg1) = (*muxsg1) | (1 << (chan-8));
 }
 
 static int usbbuxsigma_send_cmd(struct comedi_device *dev, int cmd_type)
@@ -609,19 +611,19 @@ static int usbduxsigma_ai_inttrig(struct comedi_device *dev,
 	if (trig_num != cmd->start_arg)
 		return -EINVAL;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 	if (!devpriv->ai_cmd_running) {
 		devpriv->ai_cmd_running = 1;
 		ret = usbduxsigma_submit_urbs(dev, devpriv->ai_urbs,
 					      devpriv->n_ai_urbs, 1);
 		if (ret < 0) {
 			devpriv->ai_cmd_running = 0;
-			mutex_unlock(&devpriv->mut);
+			up(&devpriv->sem);
 			return ret;
 		}
 		s->async->inttrig = NULL;
 	}
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return 1;
 }
@@ -632,13 +634,13 @@ static int usbduxsigma_ai_cmd(struct comedi_device *dev,
 	struct usbduxsigma_private *devpriv = dev->private;
 	struct comedi_cmd *cmd = &s->async->cmd;
 	unsigned int len = cmd->chanlist_len;
-	u8 muxsg0 = 0;
-	u8 muxsg1 = 0;
-	u8 sysred = 0;
+	uint8_t muxsg0 = 0;
+	uint8_t muxsg1 = 0;
+	uint8_t sysred = 0;
 	int ret;
 	int i;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 
 	if (devpriv->high_speed) {
 		/*
@@ -673,7 +675,7 @@ static int usbduxsigma_ai_cmd(struct comedi_device *dev,
 
 	ret = usbbuxsigma_send_cmd(dev, USBBUXSIGMA_AD_CMD);
 	if (ret < 0) {
-		mutex_unlock(&devpriv->mut);
+		up(&devpriv->sem);
 		return ret;
 	}
 
@@ -686,7 +688,7 @@ static int usbduxsigma_ai_cmd(struct comedi_device *dev,
 					      devpriv->n_ai_urbs, 1);
 		if (ret < 0) {
 			devpriv->ai_cmd_running = 0;
-			mutex_unlock(&devpriv->mut);
+			up(&devpriv->sem);
 			return ret;
 		}
 		s->async->inttrig = NULL;
@@ -694,7 +696,7 @@ static int usbduxsigma_ai_cmd(struct comedi_device *dev,
 		s->async->inttrig = usbduxsigma_ai_inttrig;
 	}
 
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return 0;
 }
@@ -706,15 +708,15 @@ static int usbduxsigma_ai_insn_read(struct comedi_device *dev,
 {
 	struct usbduxsigma_private *devpriv = dev->private;
 	unsigned int chan = CR_CHAN(insn->chanspec);
-	u8 muxsg0 = 0;
-	u8 muxsg1 = 0;
-	u8 sysred = 0;
+	uint8_t muxsg0 = 0;
+	uint8_t muxsg1 = 0;
+	uint8_t sysred = 0;
 	int ret;
 	int i;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 	if (devpriv->ai_cmd_running) {
-		mutex_unlock(&devpriv->mut);
+		up(&devpriv->sem);
 		return -EBUSY;
 	}
 
@@ -731,16 +733,16 @@ static int usbduxsigma_ai_insn_read(struct comedi_device *dev,
 	/* adc commands */
 	ret = usbbuxsigma_send_cmd(dev, USBDUXSIGMA_SINGLE_AD_CMD);
 	if (ret < 0) {
-		mutex_unlock(&devpriv->mut);
+		up(&devpriv->sem);
 		return ret;
 	}
 
 	for (i = 0; i < insn->n; i++) {
-		u32 val;
+		uint32_t val;
 
 		ret = usbduxsigma_receive_cmd(dev, USBDUXSIGMA_SINGLE_AD_CMD);
 		if (ret < 0) {
-			mutex_unlock(&devpriv->mut);
+			up(&devpriv->sem);
 			return ret;
 		}
 
@@ -748,9 +750,11 @@ static int usbduxsigma_ai_insn_read(struct comedi_device *dev,
 		val = be32_to_cpu(get_unaligned((__be32
 						 *)(devpriv->insn_buf + 1)));
 		val &= 0x00ffffff;	/* strip status byte */
-		data[i] = comedi_offset_munge(s, val);
+		val ^= 0x00800000;	/* convert to unsigned */
+
+		data[i] = val;
 	}
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return insn->n;
 }
@@ -763,9 +767,9 @@ static int usbduxsigma_ao_insn_read(struct comedi_device *dev,
 	struct usbduxsigma_private *devpriv = dev->private;
 	int ret;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 	ret = comedi_readback_insn_read(dev, s, insn, data);
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return ret;
 }
@@ -780,9 +784,9 @@ static int usbduxsigma_ao_insn_write(struct comedi_device *dev,
 	int ret;
 	int i;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 	if (devpriv->ao_cmd_running) {
-		mutex_unlock(&devpriv->mut);
+		up(&devpriv->sem);
 		return -EBUSY;
 	}
 
@@ -792,12 +796,12 @@ static int usbduxsigma_ao_insn_write(struct comedi_device *dev,
 		devpriv->dux_commands[3] = chan;	/* channel number */
 		ret = usbbuxsigma_send_cmd(dev, USBDUXSIGMA_DA_CMD);
 		if (ret < 0) {
-			mutex_unlock(&devpriv->mut);
+			up(&devpriv->sem);
 			return ret;
 		}
 		s->readback[chan] = data[i];
 	}
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return insn->n;
 }
@@ -813,19 +817,19 @@ static int usbduxsigma_ao_inttrig(struct comedi_device *dev,
 	if (trig_num != cmd->start_arg)
 		return -EINVAL;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 	if (!devpriv->ao_cmd_running) {
 		devpriv->ao_cmd_running = 1;
 		ret = usbduxsigma_submit_urbs(dev, devpriv->ao_urbs,
 					      devpriv->n_ao_urbs, 0);
 		if (ret < 0) {
 			devpriv->ao_cmd_running = 0;
-			mutex_unlock(&devpriv->mut);
+			up(&devpriv->sem);
 			return ret;
 		}
 		s->async->inttrig = NULL;
 	}
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return 1;
 }
@@ -856,7 +860,7 @@ static int usbduxsigma_ao_cmdtest(struct comedi_device *dev,
 	err |= comedi_check_trigger_src(&cmd->stop_src, TRIG_COUNT | TRIG_NONE);
 
 	if (err) {
-		mutex_unlock(&devpriv->mut);
+		up(&devpriv->sem);
 		return 1;
 	}
 
@@ -905,7 +909,7 @@ static int usbduxsigma_ao_cmd(struct comedi_device *dev,
 	struct comedi_cmd *cmd = &s->async->cmd;
 	int ret;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 
 	/*
 	 * For now, only "scan" timing is supported.  A future version may
@@ -924,7 +928,7 @@ static int usbduxsigma_ao_cmd(struct comedi_device *dev,
 					      devpriv->n_ao_urbs, 0);
 		if (ret < 0) {
 			devpriv->ao_cmd_running = 0;
-			mutex_unlock(&devpriv->mut);
+			up(&devpriv->sem);
 			return ret;
 		}
 		s->async->inttrig = NULL;
@@ -932,7 +936,7 @@ static int usbduxsigma_ao_cmd(struct comedi_device *dev,
 		s->async->inttrig = usbduxsigma_ao_inttrig;
 	}
 
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return 0;
 }
@@ -963,7 +967,7 @@ static int usbduxsigma_dio_insn_bits(struct comedi_device *dev,
 	struct usbduxsigma_private *devpriv = dev->private;
 	int ret;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 
 	comedi_dio_update_state(s, data);
 
@@ -990,7 +994,7 @@ static int usbduxsigma_dio_insn_bits(struct comedi_device *dev,
 	ret = insn->n;
 
 done:
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 
 	return ret;
 }
@@ -1216,10 +1220,9 @@ static int usbduxsigma_pwm_config(struct comedi_device *dev,
 
 static int usbduxsigma_getstatusinfo(struct comedi_device *dev, int chan)
 {
-	struct comedi_subdevice *s = dev->read_subdev;
 	struct usbduxsigma_private *devpriv = dev->private;
-	u8 sysred;
-	u32 val;
+	uint8_t sysred;
+	uint32_t val;
 	int ret;
 
 	switch (chan) {
@@ -1261,8 +1264,9 @@ static int usbduxsigma_getstatusinfo(struct comedi_device *dev, int chan)
 	/* 32 bits big endian from the A/D converter */
 	val = be32_to_cpu(get_unaligned((__be32 *)(devpriv->insn_buf + 1)));
 	val &= 0x00ffffff;	/* strip status byte */
+	val ^= 0x00800000;	/* convert to unsigned */
 
-	return (int)comedi_offset_munge(s, val);
+	return (int)val;
 }
 
 static int usbduxsigma_firmware_upload(struct comedi_device *dev,
@@ -1270,8 +1274,8 @@ static int usbduxsigma_firmware_upload(struct comedi_device *dev,
 				       unsigned long context)
 {
 	struct usb_device *usb = comedi_to_usb_dev(dev);
-	u8 *buf;
-	u8 *tmp;
+	uint8_t *buf;
+	uint8_t *tmp;
 	int ret;
 
 	if (!data)
@@ -1462,7 +1466,7 @@ static int usbduxsigma_auto_attach(struct comedi_device *dev,
 	if (!devpriv)
 		return -ENOMEM;
 
-	mutex_init(&devpriv->mut);
+	sema_init(&devpriv->sem, 1);
 
 	usb_set_intfdata(intf, devpriv);
 
@@ -1576,7 +1580,7 @@ static void usbduxsigma_detach(struct comedi_device *dev)
 	if (!devpriv)
 		return;
 
-	mutex_lock(&devpriv->mut);
+	down(&devpriv->sem);
 
 	/* force unlink all urbs */
 	usbduxsigma_ai_stop(dev, 1);
@@ -1585,7 +1589,7 @@ static void usbduxsigma_detach(struct comedi_device *dev)
 
 	usbduxsigma_free_usb_buffers(dev);
 
-	mutex_unlock(&devpriv->mut);
+	up(&devpriv->sem);
 }
 
 static struct comedi_driver usbduxsigma_driver = {

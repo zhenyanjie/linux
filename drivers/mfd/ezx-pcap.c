@@ -513,6 +513,7 @@ static struct spi_driver ezxpcap_driver = {
 	.remove = ezx_pcap_remove,
 	.driver = {
 		.name	= "ezx-pcap",
+		.owner	= THIS_MODULE,
 	},
 };
 

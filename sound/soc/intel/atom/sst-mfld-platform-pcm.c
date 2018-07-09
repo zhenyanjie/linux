@@ -98,7 +98,6 @@ static struct sst_dev_stream_map dpcm_strm_map[] = {
 	{MERR_DPCM_AUDIO, 0, SNDRV_PCM_STREAM_PLAYBACK, PIPE_MEDIA1_IN, SST_TASK_ID_MEDIA, 0},
 	{MERR_DPCM_COMPR, 0, SNDRV_PCM_STREAM_PLAYBACK, PIPE_MEDIA0_IN, SST_TASK_ID_MEDIA, 0},
 	{MERR_DPCM_AUDIO, 0, SNDRV_PCM_STREAM_CAPTURE, PIPE_PCM1_OUT, SST_TASK_ID_MEDIA, 0},
-	{MERR_DPCM_DEEP_BUFFER, 0, SNDRV_PCM_STREAM_PLAYBACK, PIPE_MEDIA3_IN, SST_TASK_ID_MEDIA, 0},
 };
 
 static int sst_media_digital_mute(struct snd_soc_dai *dai, int mute, int stream)
@@ -369,6 +368,23 @@ static void sst_media_close(struct snd_pcm_substream *substream,
 	kfree(stream);
 }
 
+static inline unsigned int get_current_pipe_id(struct snd_soc_dai *dai,
+					       struct snd_pcm_substream *substream)
+{
+	struct sst_data *sst = snd_soc_dai_get_drvdata(dai);
+	struct sst_dev_stream_map *map = sst->pdata->pdev_strm_map;
+	struct sst_runtime_stream *stream =
+			substream->runtime->private_data;
+	u32 str_id = stream->stream_info.str_id;
+	unsigned int pipe_id;
+
+	pipe_id = map[str_id].device_id;
+
+	dev_dbg(dai->dev, "got pipe_id = %#x for str_id = %d\n",
+			pipe_id, str_id);
+	return pipe_id;
+}
+
 static int sst_media_prepare(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
@@ -501,34 +517,26 @@ static struct snd_soc_dai_driver sst_platform_dai[] = {
 		.channels_min = SST_STEREO,
 		.channels_max = SST_STEREO,
 		.rates = SNDRV_PCM_RATE_44100|SNDRV_PCM_RATE_48000,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
 	},
 	.capture = {
 		.stream_name = "Headset Capture",
 		.channels_min = 1,
 		.channels_max = 2,
 		.rates = SNDRV_PCM_RATE_44100|SNDRV_PCM_RATE_48000,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE,
-	},
-},
-{
-	.name = "deepbuffer-cpu-dai",
-	.ops = &sst_media_dai_ops,
-	.playback = {
-		.stream_name = "Deepbuffer Playback",
-		.channels_min = SST_STEREO,
-		.channels_max = SST_STEREO,
-		.rates = SNDRV_PCM_RATE_44100|SNDRV_PCM_RATE_48000,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
 	},
 },
 {
 	.name = "compress-cpu-dai",
-	.compress_new = snd_soc_new_compress,
+	.compress_dai = 1,
 	.ops = &sst_compr_dai_ops,
 	.playback = {
 		.stream_name = "Compress Playback",
-		.channels_min = 1,
+		.channels_min = SST_STEREO,
+		.channels_max = SST_STEREO,
+		.rates = SNDRV_PCM_RATE_48000,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
 	},
 },
 /* BE CPU  Dais */
@@ -769,15 +777,15 @@ static int sst_platform_remove(struct platform_device *pdev)
 static int sst_soc_prepare(struct device *dev)
 {
 	struct sst_data *drv = dev_get_drvdata(dev);
-	struct snd_soc_pcm_runtime *rtd;
+	int i;
 
 	/* suspend all pcms first */
 	snd_soc_suspend(drv->soc_card->dev);
 	snd_soc_poweroff(drv->soc_card->dev);
 
 	/* set the SSPs to idle */
-	list_for_each_entry(rtd, &drv->soc_card->rtd_list, list) {
-		struct snd_soc_dai *dai = rtd->cpu_dai;
+	for (i = 0; i < drv->soc_card->num_rtd; i++) {
+		struct snd_soc_dai *dai = drv->soc_card->rtd[i].cpu_dai;
 
 		if (dai->active) {
 			send_ssp_cmd(dai, dai->name, 0);
@@ -791,11 +799,11 @@ static int sst_soc_prepare(struct device *dev)
 static void sst_soc_complete(struct device *dev)
 {
 	struct sst_data *drv = dev_get_drvdata(dev);
-	struct snd_soc_pcm_runtime *rtd;
+	int i;
 
 	/* restart SSPs */
-	list_for_each_entry(rtd, &drv->soc_card->rtd_list, list) {
-		struct snd_soc_dai *dai = rtd->cpu_dai;
+	for (i = 0; i < drv->soc_card->num_rtd; i++) {
+		struct snd_soc_dai *dai = drv->soc_card->rtd[i].cpu_dai;
 
 		if (dai->active) {
 			sst_handle_vb_timer(dai, true);

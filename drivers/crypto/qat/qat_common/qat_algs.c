@@ -62,13 +62,13 @@
 #include "icp_qat_fw.h"
 #include "icp_qat_fw_la.h"
 
-#define QAT_AES_HW_CONFIG_ENC(alg, mode) \
-	ICP_QAT_HW_CIPHER_CONFIG_BUILD(mode, alg, \
+#define QAT_AES_HW_CONFIG_CBC_ENC(alg) \
+	ICP_QAT_HW_CIPHER_CONFIG_BUILD(ICP_QAT_HW_CIPHER_CBC_MODE, alg, \
 				       ICP_QAT_HW_CIPHER_NO_CONVERT, \
 				       ICP_QAT_HW_CIPHER_ENCRYPT)
 
-#define QAT_AES_HW_CONFIG_DEC(alg, mode) \
-	ICP_QAT_HW_CIPHER_CONFIG_BUILD(mode, alg, \
+#define QAT_AES_HW_CONFIG_CBC_DEC(alg) \
+	ICP_QAT_HW_CIPHER_CONFIG_BUILD(ICP_QAT_HW_CIPHER_CBC_MODE, alg, \
 				       ICP_QAT_HW_CIPHER_KEY_CONVERT, \
 				       ICP_QAT_HW_CIPHER_DECRYPT)
 
@@ -271,8 +271,7 @@ static void qat_alg_init_common_hdr(struct icp_qat_fw_comn_req_hdr *header)
 
 static int qat_alg_aead_init_enc_session(struct crypto_aead *aead_tfm,
 					 int alg,
-					 struct crypto_authenc_keys *keys,
-					 int mode)
+					 struct crypto_authenc_keys *keys)
 {
 	struct qat_alg_aead_ctx *ctx = crypto_aead_ctx(aead_tfm);
 	unsigned int digestsize = crypto_aead_authsize(aead_tfm);
@@ -289,7 +288,7 @@ static int qat_alg_aead_init_enc_session(struct crypto_aead *aead_tfm,
 	struct icp_qat_fw_auth_cd_ctrl_hdr *hash_cd_ctrl = ptr;
 
 	/* CD setup */
-	cipher->aes.cipher_config.val = QAT_AES_HW_CONFIG_ENC(alg, mode);
+	cipher->aes.cipher_config.val = QAT_AES_HW_CONFIG_CBC_ENC(alg);
 	memcpy(cipher->aes.key, keys->enckey, keys->enckeylen);
 	hash->sha.inner_setup.auth_config.config =
 		ICP_QAT_HW_AUTH_CONFIG_BUILD(ICP_QAT_HW_AUTH_MODE1,
@@ -352,8 +351,7 @@ static int qat_alg_aead_init_enc_session(struct crypto_aead *aead_tfm,
 
 static int qat_alg_aead_init_dec_session(struct crypto_aead *aead_tfm,
 					 int alg,
-					 struct crypto_authenc_keys *keys,
-					 int mode)
+					 struct crypto_authenc_keys *keys)
 {
 	struct qat_alg_aead_ctx *ctx = crypto_aead_ctx(aead_tfm);
 	unsigned int digestsize = crypto_aead_authsize(aead_tfm);
@@ -375,7 +373,7 @@ static int qat_alg_aead_init_dec_session(struct crypto_aead *aead_tfm,
 		sizeof(struct icp_qat_fw_la_cipher_req_params));
 
 	/* CD setup */
-	cipher->aes.cipher_config.val = QAT_AES_HW_CONFIG_DEC(alg, mode);
+	cipher->aes.cipher_config.val = QAT_AES_HW_CONFIG_CBC_DEC(alg);
 	memcpy(cipher->aes.key, keys->enckey, keys->enckeylen);
 	hash->sha.inner_setup.auth_config.config =
 		ICP_QAT_HW_AUTH_CONFIG_BUILD(ICP_QAT_HW_AUTH_MODE1,
@@ -466,7 +464,7 @@ static void qat_alg_ablkcipher_init_com(struct qat_alg_ablkcipher_ctx *ctx,
 
 static void qat_alg_ablkcipher_init_enc(struct qat_alg_ablkcipher_ctx *ctx,
 					int alg, const uint8_t *key,
-					unsigned int keylen, int mode)
+					unsigned int keylen)
 {
 	struct icp_qat_hw_cipher_algo_blk *enc_cd = ctx->enc_cd;
 	struct icp_qat_fw_la_bulk_req *req = &ctx->enc_fw_req;
@@ -474,12 +472,12 @@ static void qat_alg_ablkcipher_init_enc(struct qat_alg_ablkcipher_ctx *ctx,
 
 	qat_alg_ablkcipher_init_com(ctx, req, enc_cd, key, keylen);
 	cd_pars->u.s.content_desc_addr = ctx->enc_cd_paddr;
-	enc_cd->aes.cipher_config.val = QAT_AES_HW_CONFIG_ENC(alg, mode);
+	enc_cd->aes.cipher_config.val = QAT_AES_HW_CONFIG_CBC_ENC(alg);
 }
 
 static void qat_alg_ablkcipher_init_dec(struct qat_alg_ablkcipher_ctx *ctx,
 					int alg, const uint8_t *key,
-					unsigned int keylen, int mode)
+					unsigned int keylen)
 {
 	struct icp_qat_hw_cipher_algo_blk *dec_cd = ctx->dec_cd;
 	struct icp_qat_fw_la_bulk_req *req = &ctx->dec_fw_req;
@@ -487,48 +485,29 @@ static void qat_alg_ablkcipher_init_dec(struct qat_alg_ablkcipher_ctx *ctx,
 
 	qat_alg_ablkcipher_init_com(ctx, req, dec_cd, key, keylen);
 	cd_pars->u.s.content_desc_addr = ctx->dec_cd_paddr;
-
-	if (mode != ICP_QAT_HW_CIPHER_CTR_MODE)
-		dec_cd->aes.cipher_config.val =
-					QAT_AES_HW_CONFIG_DEC(alg, mode);
-	else
-		dec_cd->aes.cipher_config.val =
-					QAT_AES_HW_CONFIG_ENC(alg, mode);
+	dec_cd->aes.cipher_config.val = QAT_AES_HW_CONFIG_CBC_DEC(alg);
 }
 
-static int qat_alg_validate_key(int key_len, int *alg, int mode)
+static int qat_alg_validate_key(int key_len, int *alg)
 {
-	if (mode != ICP_QAT_HW_CIPHER_XTS_MODE) {
-		switch (key_len) {
-		case AES_KEYSIZE_128:
-			*alg = ICP_QAT_HW_CIPHER_ALGO_AES128;
-			break;
-		case AES_KEYSIZE_192:
-			*alg = ICP_QAT_HW_CIPHER_ALGO_AES192;
-			break;
-		case AES_KEYSIZE_256:
-			*alg = ICP_QAT_HW_CIPHER_ALGO_AES256;
-			break;
-		default:
-			return -EINVAL;
-		}
-	} else {
-		switch (key_len) {
-		case AES_KEYSIZE_128 << 1:
-			*alg = ICP_QAT_HW_CIPHER_ALGO_AES128;
-			break;
-		case AES_KEYSIZE_256 << 1:
-			*alg = ICP_QAT_HW_CIPHER_ALGO_AES256;
-			break;
-		default:
-			return -EINVAL;
-		}
+	switch (key_len) {
+	case AES_KEYSIZE_128:
+		*alg = ICP_QAT_HW_CIPHER_ALGO_AES128;
+		break;
+	case AES_KEYSIZE_192:
+		*alg = ICP_QAT_HW_CIPHER_ALGO_AES192;
+		break;
+	case AES_KEYSIZE_256:
+		*alg = ICP_QAT_HW_CIPHER_ALGO_AES256;
+		break;
+	default:
+		return -EINVAL;
 	}
 	return 0;
 }
 
-static int qat_alg_aead_init_sessions(struct crypto_aead *tfm, const u8 *key,
-				      unsigned int keylen,  int mode)
+static int qat_alg_aead_init_sessions(struct crypto_aead *tfm,
+				      const uint8_t *key, unsigned int keylen)
 {
 	struct crypto_authenc_keys keys;
 	int alg;
@@ -536,13 +515,13 @@ static int qat_alg_aead_init_sessions(struct crypto_aead *tfm, const u8 *key,
 	if (crypto_authenc_extractkeys(&keys, key, keylen))
 		goto bad_key;
 
-	if (qat_alg_validate_key(keys.enckeylen, &alg, mode))
+	if (qat_alg_validate_key(keys.enckeylen, &alg))
 		goto bad_key;
 
-	if (qat_alg_aead_init_enc_session(tfm, alg, &keys, mode))
+	if (qat_alg_aead_init_enc_session(tfm, alg, &keys))
 		goto error;
 
-	if (qat_alg_aead_init_dec_session(tfm, alg, &keys, mode))
+	if (qat_alg_aead_init_dec_session(tfm, alg, &keys))
 		goto error;
 
 	return 0;
@@ -555,16 +534,15 @@ error:
 
 static int qat_alg_ablkcipher_init_sessions(struct qat_alg_ablkcipher_ctx *ctx,
 					    const uint8_t *key,
-					    unsigned int keylen,
-					    int mode)
+					    unsigned int keylen)
 {
 	int alg;
 
-	if (qat_alg_validate_key(keylen, &alg, mode))
+	if (qat_alg_validate_key(keylen, &alg))
 		goto bad_key;
 
-	qat_alg_ablkcipher_init_enc(ctx, alg, key, keylen, mode);
-	qat_alg_ablkcipher_init_dec(ctx, alg, key, keylen, mode);
+	qat_alg_ablkcipher_init_enc(ctx, alg, key, keylen);
+	qat_alg_ablkcipher_init_dec(ctx, alg, key, keylen);
 	return 0;
 bad_key:
 	crypto_tfm_set_flags(ctx->tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
@@ -608,8 +586,7 @@ static int qat_alg_aead_setkey(struct crypto_aead *tfm, const uint8_t *key,
 			goto out_free_enc;
 		}
 	}
-	if (qat_alg_aead_init_sessions(tfm, key, keylen,
-				       ICP_QAT_HW_CIPHER_CBC_MODE))
+	if (qat_alg_aead_init_sessions(tfm, key, keylen))
 		goto out_free_all;
 
 	return 0;
@@ -899,8 +876,8 @@ static int qat_alg_aead_enc(struct aead_request *areq)
 }
 
 static int qat_alg_ablkcipher_setkey(struct crypto_ablkcipher *tfm,
-				     const u8 *key, unsigned int keylen,
-				     int mode)
+				     const uint8_t *key,
+				     unsigned int keylen)
 {
 	struct qat_alg_ablkcipher_ctx *ctx = crypto_ablkcipher_ctx(tfm);
 	struct device *dev;
@@ -941,7 +918,7 @@ static int qat_alg_ablkcipher_setkey(struct crypto_ablkcipher *tfm,
 		}
 	}
 	spin_unlock(&ctx->lock);
-	if (qat_alg_ablkcipher_init_sessions(ctx, key, keylen, mode))
+	if (qat_alg_ablkcipher_init_sessions(ctx, key, keylen))
 		goto out_free_all;
 
 	return 0;
@@ -957,27 +934,6 @@ out_free_enc:
 			  ctx->enc_cd, ctx->enc_cd_paddr);
 	ctx->enc_cd = NULL;
 	return -ENOMEM;
-}
-
-static int qat_alg_ablkcipher_cbc_setkey(struct crypto_ablkcipher *tfm,
-					 const u8 *key, unsigned int keylen)
-{
-	return qat_alg_ablkcipher_setkey(tfm, key, keylen,
-					 ICP_QAT_HW_CIPHER_CBC_MODE);
-}
-
-static int qat_alg_ablkcipher_ctr_setkey(struct crypto_ablkcipher *tfm,
-					 const u8 *key, unsigned int keylen)
-{
-	return qat_alg_ablkcipher_setkey(tfm, key, keylen,
-					 ICP_QAT_HW_CIPHER_CTR_MODE);
-}
-
-static int qat_alg_ablkcipher_xts_setkey(struct crypto_ablkcipher *tfm,
-					 const u8 *key, unsigned int keylen)
-{
-	return qat_alg_ablkcipher_setkey(tfm, key, keylen,
-					 ICP_QAT_HW_CIPHER_XTS_MODE);
 }
 
 static int qat_alg_ablkcipher_encrypt(struct ablkcipher_request *req)
@@ -1215,51 +1171,7 @@ static struct crypto_alg qat_algs[] = { {
 	.cra_exit = qat_alg_ablkcipher_exit,
 	.cra_u = {
 		.ablkcipher = {
-			.setkey = qat_alg_ablkcipher_cbc_setkey,
-			.decrypt = qat_alg_ablkcipher_decrypt,
-			.encrypt = qat_alg_ablkcipher_encrypt,
-			.min_keysize = AES_MIN_KEY_SIZE,
-			.max_keysize = AES_MAX_KEY_SIZE,
-			.ivsize = AES_BLOCK_SIZE,
-		},
-	},
-}, {
-	.cra_name = "ctr(aes)",
-	.cra_driver_name = "qat_aes_ctr",
-	.cra_priority = 4001,
-	.cra_flags = CRYPTO_ALG_TYPE_ABLKCIPHER | CRYPTO_ALG_ASYNC,
-	.cra_blocksize = AES_BLOCK_SIZE,
-	.cra_ctxsize = sizeof(struct qat_alg_ablkcipher_ctx),
-	.cra_alignmask = 0,
-	.cra_type = &crypto_ablkcipher_type,
-	.cra_module = THIS_MODULE,
-	.cra_init = qat_alg_ablkcipher_init,
-	.cra_exit = qat_alg_ablkcipher_exit,
-	.cra_u = {
-		.ablkcipher = {
-			.setkey = qat_alg_ablkcipher_ctr_setkey,
-			.decrypt = qat_alg_ablkcipher_decrypt,
-			.encrypt = qat_alg_ablkcipher_encrypt,
-			.min_keysize = AES_MIN_KEY_SIZE,
-			.max_keysize = AES_MAX_KEY_SIZE,
-			.ivsize = AES_BLOCK_SIZE,
-		},
-	},
-}, {
-	.cra_name = "xts(aes)",
-	.cra_driver_name = "qat_aes_xts",
-	.cra_priority = 4001,
-	.cra_flags = CRYPTO_ALG_TYPE_ABLKCIPHER | CRYPTO_ALG_ASYNC,
-	.cra_blocksize = AES_BLOCK_SIZE,
-	.cra_ctxsize = sizeof(struct qat_alg_ablkcipher_ctx),
-	.cra_alignmask = 0,
-	.cra_type = &crypto_ablkcipher_type,
-	.cra_module = THIS_MODULE,
-	.cra_init = qat_alg_ablkcipher_init,
-	.cra_exit = qat_alg_ablkcipher_exit,
-	.cra_u = {
-		.ablkcipher = {
-			.setkey = qat_alg_ablkcipher_xts_setkey,
+			.setkey = qat_alg_ablkcipher_setkey,
 			.decrypt = qat_alg_ablkcipher_decrypt,
 			.encrypt = qat_alg_ablkcipher_encrypt,
 			.min_keysize = AES_MIN_KEY_SIZE,
@@ -1300,7 +1212,7 @@ unreg_algs:
 	goto unlock;
 }
 
-void qat_algs_unregister(void)
+int qat_algs_unregister(void)
 {
 	mutex_lock(&algs_lock);
 	if (--active_devs != 0)
@@ -1311,4 +1223,14 @@ void qat_algs_unregister(void)
 
 unlock:
 	mutex_unlock(&algs_lock);
+	return 0;
+}
+
+int qat_algs_init(void)
+{
+	return 0;
+}
+
+void qat_algs_exit(void)
+{
 }

@@ -81,10 +81,16 @@ static struct mbox_controller pcc_mbox_ctrl = {};
  */
 static struct mbox_chan *get_pcc_channel(int id)
 {
+	struct mbox_chan *pcc_chan;
+
 	if (id < 0 || id > pcc_mbox_ctrl.num_chans)
 		return ERR_PTR(-ENOENT);
 
-	return &pcc_mbox_channels[id];
+	pcc_chan = (struct mbox_chan *)
+		(unsigned long) pcc_mbox_channels +
+		(id * sizeof(*pcc_chan));
+
+	return pcc_chan;
 }
 
 /**
@@ -116,7 +122,7 @@ struct mbox_chan *pcc_mbox_request_channel(struct mbox_client *cl,
 	 */
 	chan = get_pcc_channel(subspace_id);
 
-	if (IS_ERR(chan) || chan->cl) {
+	if (!chan || chan->cl) {
 		dev_err(dev, "Channel not found for idx: %d\n", subspace_id);
 		return ERR_PTR(-EBUSY);
 	}

@@ -86,7 +86,6 @@ static const u32 host_save_user_msrs[] = {
 	MSR_FS_BASE,
 #endif
 	MSR_IA32_SYSENTER_CS, MSR_IA32_SYSENTER_ESP, MSR_IA32_SYSENTER_EIP,
-	MSR_TSC_AUX,
 };
 
 #define NR_HOST_SAVE_USER_MSRS ARRAY_SIZE(host_save_user_msrs)
@@ -136,7 +135,6 @@ struct vcpu_svm {
 	uint64_t asid_generation;
 	uint64_t sysenter_esp;
 	uint64_t sysenter_eip;
-	uint64_t tsc_aux;
 
 	u64 next_rip;
 
@@ -160,8 +158,7 @@ struct vcpu_svm {
 	unsigned long int3_rip;
 	u32 apf_reason;
 
-	/* cached guest cpuid flags for faster access */
-	bool nrips_enabled	: 1;
+	u64  tsc_ratio;
 };
 
 static DEFINE_PER_CPU(u64, current_tsc_ratio);
@@ -214,6 +211,7 @@ static int nested_svm_intercept(struct vcpu_svm *svm);
 static int nested_svm_vmexit(struct vcpu_svm *svm);
 static int nested_svm_check_exception(struct vcpu_svm *svm, unsigned nr,
 				      bool has_error_code, u32 error_code);
+static u64 __scale_tsc(u64 ratio, u64 tsc);
 
 enum {
 	VMCB_INTERCEPTS, /* Intercept vectors, TSC offset,
@@ -893,9 +891,20 @@ static __init int svm_hardware_setup(void)
 		kvm_enable_efer_bits(EFER_FFXSR);
 
 	if (boot_cpu_has(X86_FEATURE_TSCRATEMSR)) {
+		u64 max;
+
 		kvm_has_tsc_control = true;
-		kvm_max_tsc_scaling_ratio = TSC_RATIO_MAX;
-		kvm_tsc_scaling_ratio_frac_bits = 32;
+
+		/*
+		 * Make sure the user can only configure tsc_khz values that
+		 * fit into a signed integer.
+		 * A min value is not calculated needed because it will always
+		 * be 1 on all machines and a value of 0 is used to disable
+		 * tsc-scaling for the vcpu.
+		 */
+		max = min(0x7fffffffULL, __scale_tsc(tsc_khz, TSC_RATIO_MAX));
+
+		kvm_max_guest_tsc_khz = max;
 	}
 
 	if (nested) {
@@ -959,6 +968,68 @@ static void init_sys_seg(struct vmcb_seg *seg, uint32_t type)
 	seg->base = 0;
 }
 
+static u64 __scale_tsc(u64 ratio, u64 tsc)
+{
+	u64 mult, frac, _tsc;
+
+	mult  = ratio >> 32;
+	frac  = ratio & ((1ULL << 32) - 1);
+
+	_tsc  = tsc;
+	_tsc *= mult;
+	_tsc += (tsc >> 32) * frac;
+	_tsc += ((tsc & ((1ULL << 32) - 1)) * frac) >> 32;
+
+	return _tsc;
+}
+
+static u64 svm_scale_tsc(struct kvm_vcpu *vcpu, u64 tsc)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+	u64 _tsc = tsc;
+
+	if (svm->tsc_ratio != TSC_RATIO_DEFAULT)
+		_tsc = __scale_tsc(svm->tsc_ratio, tsc);
+
+	return _tsc;
+}
+
+static void svm_set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz, bool scale)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+	u64 ratio;
+	u64 khz;
+
+	/* Guest TSC same frequency as host TSC? */
+	if (!scale) {
+		svm->tsc_ratio = TSC_RATIO_DEFAULT;
+		return;
+	}
+
+	/* TSC scaling supported? */
+	if (!boot_cpu_has(X86_FEATURE_TSCRATEMSR)) {
+		if (user_tsc_khz > tsc_khz) {
+			vcpu->arch.tsc_catchup = 1;
+			vcpu->arch.tsc_always_catchup = 1;
+		} else
+			WARN(1, "user requested TSC rate below hardware speed\n");
+		return;
+	}
+
+	khz = user_tsc_khz;
+
+	/* TSC scaling required  - calculate ratio */
+	ratio = khz << 32;
+	do_div(ratio, tsc_khz);
+
+	if (ratio == 0 || ratio & TSC_RATIO_RSVD) {
+		WARN_ONCE(1, "Invalid TSC ratio - virtual-tsc-khz=%u\n",
+				user_tsc_khz);
+		return;
+	}
+	svm->tsc_ratio             = ratio;
+}
+
 static u64 svm_read_tsc_offset(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
@@ -985,9 +1056,15 @@ static void svm_write_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 }
 
-static void svm_adjust_tsc_offset_guest(struct kvm_vcpu *vcpu, s64 adjustment)
+static void svm_adjust_tsc_offset(struct kvm_vcpu *vcpu, s64 adjustment, bool host)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
+
+	if (host) {
+		if (svm->tsc_ratio != TSC_RATIO_DEFAULT)
+			WARN_ON(adjustment < 0);
+		adjustment = svm_scale_tsc(vcpu, (u64)adjustment);
+	}
 
 	svm->vmcb->control.tsc_offset += adjustment;
 	if (is_guest_mode(vcpu))
@@ -998,6 +1075,15 @@ static void svm_adjust_tsc_offset_guest(struct kvm_vcpu *vcpu, s64 adjustment)
 				     svm->vmcb->control.tsc_offset);
 
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
+}
+
+static u64 svm_compute_tsc_offset(struct kvm_vcpu *vcpu, u64 target_tsc)
+{
+	u64 tsc;
+
+	tsc = svm_scale_tsc(vcpu, rdtsc());
+
+	return target_tsc - tsc;
 }
 
 static void init_vmcb(struct vcpu_svm *svm)
@@ -1148,6 +1234,8 @@ static struct kvm_vcpu *svm_create_vcpu(struct kvm *kvm, unsigned int id)
 		goto out;
 	}
 
+	svm->tsc_ratio = TSC_RATIO_DEFAULT;
+
 	err = kvm_vcpu_init(&svm->vcpu, kvm, id);
 	if (err)
 		goto free_svm;
@@ -1233,16 +1321,11 @@ static void svm_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 	for (i = 0; i < NR_HOST_SAVE_USER_MSRS; i++)
 		rdmsrl(host_save_user_msrs[i], svm->host_user_msrs[i]);
 
-	if (static_cpu_has(X86_FEATURE_TSCRATEMSR)) {
-		u64 tsc_ratio = vcpu->arch.tsc_scaling_ratio;
-		if (tsc_ratio != __this_cpu_read(current_tsc_ratio)) {
-			__this_cpu_write(current_tsc_ratio, tsc_ratio);
-			wrmsrl(MSR_AMD64_TSC_RATIO, tsc_ratio);
-		}
+	if (static_cpu_has(X86_FEATURE_TSCRATEMSR) &&
+	    svm->tsc_ratio != __this_cpu_read(current_tsc_ratio)) {
+		__this_cpu_write(current_tsc_ratio, svm->tsc_ratio);
+		wrmsrl(MSR_AMD64_TSC_RATIO, svm->tsc_ratio);
 	}
-	/* This assumes that the kernel never uses MSR_TSC_AUX */
-	if (static_cpu_has(X86_FEATURE_RDTSCP))
-		wrmsrl(MSR_TSC_AUX, svm->tsc_aux);
 }
 
 static void svm_vcpu_put(struct kvm_vcpu *vcpu)
@@ -2281,9 +2364,7 @@ static int nested_svm_vmexit(struct vcpu_svm *svm)
 	nested_vmcb->control.exit_info_2       = vmcb->control.exit_info_2;
 	nested_vmcb->control.exit_int_info     = vmcb->control.exit_int_info;
 	nested_vmcb->control.exit_int_info_err = vmcb->control.exit_int_info_err;
-
-	if (svm->nrips_enabled)
-		nested_vmcb->control.next_rip  = vmcb->control.next_rip;
+	nested_vmcb->control.next_rip          = vmcb->control.next_rip;
 
 	/*
 	 * If we emulate a VMRUN/#VMEXIT in the same host #vmexit cycle we have
@@ -2978,7 +3059,7 @@ static int cr8_write_interception(struct vcpu_svm *svm)
 	u8 cr8_prev = kvm_get_cr8(&svm->vcpu);
 	/* instruction emulation calls kvm_set_cr8() */
 	r = cr_interception(svm);
-	if (lapic_in_kernel(&svm->vcpu))
+	if (irqchip_in_kernel(svm->vcpu.kvm))
 		return r;
 	if (cr8_prev <= kvm_get_cr8(&svm->vcpu))
 		return r;
@@ -2989,7 +3070,8 @@ static int cr8_write_interception(struct vcpu_svm *svm)
 static u64 svm_read_l1_tsc(struct kvm_vcpu *vcpu, u64 host_tsc)
 {
 	struct vmcb *vmcb = get_host_vmcb(to_svm(vcpu));
-	return vmcb->control.tsc_offset + host_tsc;
+	return vmcb->control.tsc_offset +
+		svm_scale_tsc(vcpu, host_tsc);
 }
 
 static int svm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
@@ -2999,7 +3081,7 @@ static int svm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	switch (msr_info->index) {
 	case MSR_IA32_TSC: {
 		msr_info->data = svm->vmcb->control.tsc_offset +
-			kvm_scale_tsc(vcpu, rdtsc());
+			svm_scale_tsc(vcpu, rdtsc());
 
 		break;
 	}
@@ -3029,11 +3111,6 @@ static int svm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	case MSR_IA32_SYSENTER_ESP:
 		msr_info->data = svm->sysenter_esp;
 		break;
-	case MSR_TSC_AUX:
-		if (!boot_cpu_has(X86_FEATURE_RDTSCP))
-			return 1;
-		msr_info->data = svm->tsc_aux;
-		break;
 	/*
 	 * Nobody will change the following 5 values in the VMCB so we can
 	 * safely return them on rdmsr. They will always be 0 until LBRV is
@@ -3062,23 +3139,6 @@ static int svm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		break;
 	case MSR_IA32_UCODE_REV:
 		msr_info->data = 0x01000065;
-		break;
-	case MSR_F15H_IC_CFG: {
-
-		int family, model;
-
-		family = guest_cpuid_family(vcpu);
-		model  = guest_cpuid_model(vcpu);
-
-		if (family < 0 || model < 0)
-			return kvm_get_msr_common(vcpu, msr_info);
-
-		msr_info->data = 0;
-
-		if (family == 0x15 &&
-		    (model >= 0x2 && model < 0x20))
-			msr_info->data = 0x1E;
-		}
 		break;
 	default:
 		return kvm_get_msr_common(vcpu, msr_info);
@@ -3172,18 +3232,6 @@ static int svm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
 		svm->sysenter_esp = data;
 		svm->vmcb->save.sysenter_esp = data;
 		break;
-	case MSR_TSC_AUX:
-		if (!boot_cpu_has(X86_FEATURE_RDTSCP))
-			return 1;
-
-		/*
-		 * This is rare, so we update the MSR here instead of using
-		 * direct_access_msrs.  Doing that would require a rdmsr in
-		 * svm_vcpu_put.
-		 */
-		svm->tsc_aux = data;
-		wrmsrl(MSR_TSC_AUX, svm->tsc_aux);
-		break;
 	case MSR_IA32_DEBUGCTLMSR:
 		if (!boot_cpu_has(X86_FEATURE_LBRV)) {
 			vcpu_unimpl(vcpu, "%s: MSR_IA32_DEBUGCTL 0x%llx, nop\n",
@@ -3245,11 +3293,24 @@ static int msr_interception(struct vcpu_svm *svm)
 
 static int interrupt_window_interception(struct vcpu_svm *svm)
 {
+	struct kvm_run *kvm_run = svm->vcpu.run;
+
 	kvm_make_request(KVM_REQ_EVENT, &svm->vcpu);
 	svm_clear_vintr(svm);
 	svm->vmcb->control.int_ctl &= ~V_IRQ_MASK;
 	mark_dirty(svm->vmcb, VMCB_INTR);
 	++svm->vcpu.stat.irq_window_exits;
+	/*
+	 * If the user space waits to inject interrupts, exit as soon as
+	 * possible
+	 */
+	if (!irqchip_in_kernel(svm->vcpu.kvm) &&
+	    kvm_run->request_interrupt_window &&
+	    !kvm_cpu_has_interrupt(&svm->vcpu)) {
+		kvm_run->exit_reason = KVM_EXIT_IRQ_WINDOW_OPEN;
+		return 0;
+	}
+
 	return 1;
 }
 
@@ -3461,8 +3522,6 @@ static int handle_exit(struct kvm_vcpu *vcpu)
 	struct kvm_run *kvm_run = vcpu->run;
 	u32 exit_code = svm->vmcb->control.exit_code;
 
-	trace_kvm_exit(exit_code, vcpu, KVM_ISA_SVM);
-
 	if (!is_cr_intercept(svm, INTERCEPT_CR0_WRITE))
 		vcpu->arch.cr0 = svm->vmcb->save.cr0;
 	if (npt_enabled)
@@ -3600,13 +3659,9 @@ static void svm_set_virtual_x2apic_mode(struct kvm_vcpu *vcpu, bool set)
 	return;
 }
 
-static bool svm_get_enable_apicv(void)
+static int svm_vm_has_apicv(struct kvm *kvm)
 {
-	return false;
-}
-
-static void svm_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu)
-{
+	return 0;
 }
 
 static void svm_load_eoi_exitmap(struct kvm_vcpu *vcpu, u64 *eoi_exit_bitmap)
@@ -3937,6 +3992,8 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 	vcpu->arch.regs[VCPU_REGS_RSP] = svm->vmcb->save.rsp;
 	vcpu->arch.regs[VCPU_REGS_RIP] = svm->vmcb->save.rip;
 
+	trace_kvm_exit(svm->vmcb->control.exit_code, vcpu, KVM_ISA_SVM);
+
 	if (unlikely(svm->vmcb->control.exit_code == SVM_EXIT_NMI))
 		kvm_before_handle_nmi(&svm->vcpu);
 
@@ -4040,10 +4097,6 @@ static u64 svm_get_mt_mask(struct kvm_vcpu *vcpu, gfn_t gfn, bool is_mmio)
 
 static void svm_cpuid_update(struct kvm_vcpu *vcpu)
 {
-	struct vcpu_svm *svm = to_svm(vcpu);
-
-	/* Update nrips enabled cache */
-	svm->nrips_enabled = !!guest_cpuid_has_nrips(&svm->vcpu);
 }
 
 static void svm_set_supported_cpuid(u32 func, struct kvm_cpuid_entry2 *entry)
@@ -4080,7 +4133,7 @@ static int svm_get_lpage_level(void)
 
 static bool svm_rdtscp_supported(void)
 {
-	return boot_cpu_has(X86_FEATURE_RDTSCP);
+	return false;
 }
 
 static bool svm_invpcid_supported(void)
@@ -4322,7 +4375,7 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.vcpu_load = svm_vcpu_load,
 	.vcpu_put = svm_vcpu_put,
 
-	.update_bp_intercept = update_bp_intercept,
+	.update_db_bp_intercept = update_bp_intercept,
 	.get_msr = svm_get_msr,
 	.set_msr = svm_set_msr,
 	.get_segment_base = svm_get_segment_base,
@@ -4371,8 +4424,7 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.enable_irq_window = enable_irq_window,
 	.update_cr8_intercept = update_cr8_intercept,
 	.set_virtual_x2apic_mode = svm_set_virtual_x2apic_mode,
-	.get_enable_apicv = svm_get_enable_apicv,
-	.refresh_apicv_exec_ctrl = svm_refresh_apicv_exec_ctrl,
+	.vm_has_apicv = svm_vm_has_apicv,
 	.load_eoi_exitmap = svm_load_eoi_exitmap,
 	.sync_pir_to_irr = svm_sync_pir_to_irr,
 
@@ -4395,9 +4447,11 @@ static struct kvm_x86_ops svm_x86_ops = {
 
 	.has_wbinvd_exit = svm_has_wbinvd_exit,
 
+	.set_tsc_khz = svm_set_tsc_khz,
 	.read_tsc_offset = svm_read_tsc_offset,
 	.write_tsc_offset = svm_write_tsc_offset,
-	.adjust_tsc_offset_guest = svm_adjust_tsc_offset_guest,
+	.adjust_tsc_offset = svm_adjust_tsc_offset,
+	.compute_tsc_offset = svm_compute_tsc_offset,
 	.read_l1_tsc = svm_read_l1_tsc,
 
 	.set_tdp_cr3 = set_tdp_cr3,

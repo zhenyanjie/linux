@@ -87,10 +87,6 @@ ieee802154_subif_frame(struct ieee802154_sub_if_data *sdata,
 
 	skb->dev = sdata->dev;
 
-	/* TODO this should be moved after netif_receive_skb call, otherwise
-	 * wireshark will show a mac header with security fields and the
-	 * payload is already decrypted.
-	 */
 	rc = mac802154_llsec_decrypt(&sdata->sec, skb);
 	if (rc) {
 		pr_debug("decryption failed: %i\n", rc);
@@ -217,7 +213,8 @@ __ieee802154_rx_handle_packet(struct ieee802154_local *local,
 		break;
 	}
 
-	kfree_skb(skb);
+	if (skb)
+		kfree_skb(skb);
 }
 
 static void

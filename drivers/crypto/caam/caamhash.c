@@ -134,15 +134,6 @@ struct caam_hash_state {
 	int current_buf;
 };
 
-struct caam_export_state {
-	u8 buf[CAAM_MAX_HASH_BLOCK_SIZE];
-	u8 caam_ctx[MAX_CTX_LEN];
-	int buflen;
-	int (*update)(struct ahash_request *req);
-	int (*final)(struct ahash_request *req);
-	int (*finup)(struct ahash_request *req);
-};
-
 /* Common job descriptor seq in/out ptr routines */
 
 /* Map state->caam_ctx, and append seq_out_ptr command that points to it */
@@ -190,9 +181,10 @@ static inline dma_addr_t buf_map_to_sec4_sg(struct device *jrdev,
 /* Map req->src and put it in link table */
 static inline void src_map_to_sec4_sg(struct device *jrdev,
 				      struct scatterlist *src, int src_nents,
-				      struct sec4_sg_entry *sec4_sg)
+				      struct sec4_sg_entry *sec4_sg,
+				      bool chained)
 {
-	dma_map_sg(jrdev, src, src_nents, DMA_TO_DEVICE);
+	dma_map_sg_chained(jrdev, src, src_nents, DMA_TO_DEVICE, chained);
 	sg_to_sec4_sg_last(src, src_nents, sec4_sg, 0);
 }
 
@@ -593,6 +585,7 @@ badkey:
  * ahash_edesc - s/w-extended ahash descriptor
  * @dst_dma: physical mapped address of req->result
  * @sec4_sg_dma: physical mapped address of h/w link table
+ * @chained: if source is chained
  * @src_nents: number of segments in input scatterlist
  * @sec4_sg_bytes: length of dma mapped sec4_sg space
  * @sec4_sg: pointer to h/w link table
@@ -601,6 +594,7 @@ badkey:
 struct ahash_edesc {
 	dma_addr_t dst_dma;
 	dma_addr_t sec4_sg_dma;
+	bool chained;
 	int src_nents;
 	int sec4_sg_bytes;
 	struct sec4_sg_entry *sec4_sg;
@@ -612,7 +606,8 @@ static inline void ahash_unmap(struct device *dev,
 			struct ahash_request *req, int dst_len)
 {
 	if (edesc->src_nents)
-		dma_unmap_sg(dev, req->src, edesc->src_nents, DMA_TO_DEVICE);
+		dma_unmap_sg_chained(dev, req->src, edesc->src_nents,
+				     DMA_TO_DEVICE, edesc->chained);
 	if (edesc->dst_dma)
 		dma_unmap_single(dev, edesc->dst_dma, dst_len, DMA_FROM_DEVICE);
 
@@ -793,6 +788,7 @@ static int ahash_update_ctx(struct ahash_request *req)
 	dma_addr_t ptr = ctx->sh_desc_update_dma;
 	int src_nents, sec4_sg_bytes, sec4_sg_src_index;
 	struct ahash_edesc *edesc;
+	bool chained = false;
 	int ret = 0;
 	int sh_len;
 
@@ -801,12 +797,8 @@ static int ahash_update_ctx(struct ahash_request *req)
 	to_hash = in_len - *next_buflen;
 
 	if (to_hash) {
-		src_nents = sg_nents_for_len(req->src,
-					     req->nbytes - (*next_buflen));
-		if (src_nents < 0) {
-			dev_err(jrdev, "Invalid number of src SG.\n");
-			return src_nents;
-		}
+		src_nents = __sg_count(req->src, req->nbytes - (*next_buflen),
+				       &chained);
 		sec4_sg_src_index = 1 + (*buflen ? 1 : 0);
 		sec4_sg_bytes = (sec4_sg_src_index + src_nents) *
 				 sizeof(struct sec4_sg_entry);
@@ -824,6 +816,7 @@ static int ahash_update_ctx(struct ahash_request *req)
 		}
 
 		edesc->src_nents = src_nents;
+		edesc->chained = chained;
 		edesc->sec4_sg_bytes = sec4_sg_bytes;
 		edesc->sec4_sg = (void *)edesc + sizeof(struct ahash_edesc) +
 				 DESC_JOB_IO_LEN;
@@ -840,7 +833,8 @@ static int ahash_update_ctx(struct ahash_request *req)
 
 		if (src_nents) {
 			src_map_to_sec4_sg(jrdev, req->src, src_nents,
-					   edesc->sec4_sg + sec4_sg_src_index);
+					   edesc->sec4_sg + sec4_sg_src_index,
+					   chained);
 			if (*next_buflen)
 				scatterwalk_map_and_copy(next_buf, req->src,
 							 to_hash - *buflen,
@@ -1002,14 +996,11 @@ static int ahash_finup_ctx(struct ahash_request *req)
 	int src_nents;
 	int digestsize = crypto_ahash_digestsize(ahash);
 	struct ahash_edesc *edesc;
+	bool chained = false;
 	int ret = 0;
 	int sh_len;
 
-	src_nents = sg_nents_for_len(req->src, req->nbytes);
-	if (src_nents < 0) {
-		dev_err(jrdev, "Invalid number of src SG.\n");
-		return src_nents;
-	}
+	src_nents = __sg_count(req->src, req->nbytes, &chained);
 	sec4_sg_src_index = 1 + (buflen ? 1 : 0);
 	sec4_sg_bytes = (sec4_sg_src_index + src_nents) *
 			 sizeof(struct sec4_sg_entry);
@@ -1027,6 +1018,7 @@ static int ahash_finup_ctx(struct ahash_request *req)
 	init_job_desc_shared(desc, ptr, sh_len, HDR_SHARE_DEFER | HDR_REVERSE);
 
 	edesc->src_nents = src_nents;
+	edesc->chained = chained;
 	edesc->sec4_sg_bytes = sec4_sg_bytes;
 	edesc->sec4_sg = (void *)edesc + sizeof(struct ahash_edesc) +
 			 DESC_JOB_IO_LEN;
@@ -1041,7 +1033,7 @@ static int ahash_finup_ctx(struct ahash_request *req)
 						last_buflen);
 
 	src_map_to_sec4_sg(jrdev, req->src, src_nents, edesc->sec4_sg +
-			   sec4_sg_src_index);
+			   sec4_sg_src_index, chained);
 
 	edesc->sec4_sg_dma = dma_map_single(jrdev, edesc->sec4_sg,
 					    sec4_sg_bytes, DMA_TO_DEVICE);
@@ -1089,16 +1081,14 @@ static int ahash_digest(struct ahash_request *req)
 	int src_nents, sec4_sg_bytes;
 	dma_addr_t src_dma;
 	struct ahash_edesc *edesc;
+	bool chained = false;
 	int ret = 0;
 	u32 options;
 	int sh_len;
 
-	src_nents = sg_count(req->src, req->nbytes);
-	if (src_nents < 0) {
-		dev_err(jrdev, "Invalid number of src SG.\n");
-		return src_nents;
-	}
-	dma_map_sg(jrdev, req->src, src_nents ? : 1, DMA_TO_DEVICE);
+	src_nents = sg_count(req->src, req->nbytes, &chained);
+	dma_map_sg_chained(jrdev, req->src, src_nents ? : 1, DMA_TO_DEVICE,
+			   chained);
 	sec4_sg_bytes = src_nents * sizeof(struct sec4_sg_entry);
 
 	/* allocate space for base edesc and hw desc commands, link tables */
@@ -1112,6 +1102,7 @@ static int ahash_digest(struct ahash_request *req)
 			  DESC_JOB_IO_LEN;
 	edesc->sec4_sg_bytes = sec4_sg_bytes;
 	edesc->src_nents = src_nents;
+	edesc->chained = chained;
 
 	sh_len = desc_len(sh_desc);
 	desc = edesc->hw_desc;
@@ -1237,6 +1228,7 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 	struct ahash_edesc *edesc;
 	u32 *desc, *sh_desc = ctx->sh_desc_update_first;
 	dma_addr_t ptr = ctx->sh_desc_update_first_dma;
+	bool chained = false;
 	int ret = 0;
 	int sh_len;
 
@@ -1244,12 +1236,8 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 	to_hash = in_len - *next_buflen;
 
 	if (to_hash) {
-		src_nents = sg_nents_for_len(req->src,
-					     req->nbytes - (*next_buflen));
-		if (src_nents < 0) {
-			dev_err(jrdev, "Invalid number of src SG.\n");
-			return src_nents;
-		}
+		src_nents = __sg_count(req->src, req->nbytes - (*next_buflen),
+				       &chained);
 		sec4_sg_bytes = (1 + src_nents) *
 				sizeof(struct sec4_sg_entry);
 
@@ -1266,6 +1254,7 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 		}
 
 		edesc->src_nents = src_nents;
+		edesc->chained = chained;
 		edesc->sec4_sg_bytes = sec4_sg_bytes;
 		edesc->sec4_sg = (void *)edesc + sizeof(struct ahash_edesc) +
 				 DESC_JOB_IO_LEN;
@@ -1274,7 +1263,7 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 		state->buf_dma = buf_map_to_sec4_sg(jrdev, edesc->sec4_sg,
 						    buf, *buflen);
 		src_map_to_sec4_sg(jrdev, req->src, src_nents,
-				   edesc->sec4_sg + 1);
+				   edesc->sec4_sg + 1, chained);
 		if (*next_buflen) {
 			scatterwalk_map_and_copy(next_buf, req->src,
 						 to_hash - *buflen,
@@ -1354,14 +1343,11 @@ static int ahash_finup_no_ctx(struct ahash_request *req)
 	int sec4_sg_bytes, sec4_sg_src_index, src_nents;
 	int digestsize = crypto_ahash_digestsize(ahash);
 	struct ahash_edesc *edesc;
+	bool chained = false;
 	int sh_len;
 	int ret = 0;
 
-	src_nents = sg_nents_for_len(req->src, req->nbytes);
-	if (src_nents < 0) {
-		dev_err(jrdev, "Invalid number of src SG.\n");
-		return src_nents;
-	}
+	src_nents = __sg_count(req->src, req->nbytes, &chained);
 	sec4_sg_src_index = 2;
 	sec4_sg_bytes = (sec4_sg_src_index + src_nents) *
 			 sizeof(struct sec4_sg_entry);
@@ -1379,6 +1365,7 @@ static int ahash_finup_no_ctx(struct ahash_request *req)
 	init_job_desc_shared(desc, ptr, sh_len, HDR_SHARE_DEFER | HDR_REVERSE);
 
 	edesc->src_nents = src_nents;
+	edesc->chained = chained;
 	edesc->sec4_sg_bytes = sec4_sg_bytes;
 	edesc->sec4_sg = (void *)edesc + sizeof(struct ahash_edesc) +
 			 DESC_JOB_IO_LEN;
@@ -1387,7 +1374,8 @@ static int ahash_finup_no_ctx(struct ahash_request *req)
 						state->buf_dma, buflen,
 						last_buflen);
 
-	src_map_to_sec4_sg(jrdev, req->src, src_nents, edesc->sec4_sg + 1);
+	src_map_to_sec4_sg(jrdev, req->src, src_nents, edesc->sec4_sg + 1,
+			   chained);
 
 	edesc->sec4_sg_dma = dma_map_single(jrdev, edesc->sec4_sg,
 					    sec4_sg_bytes, DMA_TO_DEVICE);
@@ -1441,6 +1429,7 @@ static int ahash_update_first(struct ahash_request *req)
 	dma_addr_t src_dma;
 	u32 options;
 	struct ahash_edesc *edesc;
+	bool chained = false;
 	int ret = 0;
 	int sh_len;
 
@@ -1449,12 +1438,10 @@ static int ahash_update_first(struct ahash_request *req)
 	to_hash = req->nbytes - *next_buflen;
 
 	if (to_hash) {
-		src_nents = sg_count(req->src, req->nbytes - (*next_buflen));
-		if (src_nents < 0) {
-			dev_err(jrdev, "Invalid number of src SG.\n");
-			return src_nents;
-		}
-		dma_map_sg(jrdev, req->src, src_nents ? : 1, DMA_TO_DEVICE);
+		src_nents = sg_count(req->src, req->nbytes - (*next_buflen),
+				     &chained);
+		dma_map_sg_chained(jrdev, req->src, src_nents ? : 1,
+				   DMA_TO_DEVICE, chained);
 		sec4_sg_bytes = src_nents * sizeof(struct sec4_sg_entry);
 
 		/*
@@ -1470,6 +1457,7 @@ static int ahash_update_first(struct ahash_request *req)
 		}
 
 		edesc->src_nents = src_nents;
+		edesc->chained = chained;
 		edesc->sec4_sg_bytes = sec4_sg_bytes;
 		edesc->sec4_sg = (void *)edesc + sizeof(struct ahash_edesc) +
 				 DESC_JOB_IO_LEN;
@@ -1586,42 +1574,25 @@ static int ahash_final(struct ahash_request *req)
 
 static int ahash_export(struct ahash_request *req, void *out)
 {
+	struct crypto_ahash *ahash = crypto_ahash_reqtfm(req);
+	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
 	struct caam_hash_state *state = ahash_request_ctx(req);
-	struct caam_export_state *export = out;
-	int len;
-	u8 *buf;
 
-	if (state->current_buf) {
-		buf = state->buf_1;
-		len = state->buflen_1;
-	} else {
-		buf = state->buf_0;
-		len = state->buflen_0;
-	}
-
-	memcpy(export->buf, buf, len);
-	memcpy(export->caam_ctx, state->caam_ctx, sizeof(export->caam_ctx));
-	export->buflen = len;
-	export->update = state->update;
-	export->final = state->final;
-	export->finup = state->finup;
-
+	memcpy(out, ctx, sizeof(struct caam_hash_ctx));
+	memcpy(out + sizeof(struct caam_hash_ctx), state,
+	       sizeof(struct caam_hash_state));
 	return 0;
 }
 
 static int ahash_import(struct ahash_request *req, const void *in)
 {
+	struct crypto_ahash *ahash = crypto_ahash_reqtfm(req);
+	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
 	struct caam_hash_state *state = ahash_request_ctx(req);
-	const struct caam_export_state *export = in;
 
-	memset(state, 0, sizeof(*state));
-	memcpy(state->buf_0, export->buf, export->buflen);
-	memcpy(state->caam_ctx, export->caam_ctx, sizeof(state->caam_ctx));
-	state->buflen_0 = export->buflen;
-	state->update = export->update;
-	state->final = export->final;
-	state->finup = export->finup;
-
+	memcpy(ctx, in, sizeof(struct caam_hash_ctx));
+	memcpy(state, in + sizeof(struct caam_hash_ctx),
+	       sizeof(struct caam_hash_state));
 	return 0;
 }
 
@@ -1655,9 +1626,8 @@ static struct caam_hash_template driver_hash[] = {
 			.setkey = ahash_setkey,
 			.halg = {
 				.digestsize = SHA1_DIGEST_SIZE,
-				.statesize = sizeof(struct caam_export_state),
+				},
 			},
-		},
 		.alg_type = OP_ALG_ALGSEL_SHA1,
 		.alg_op = OP_ALG_ALGSEL_SHA1 | OP_ALG_AAI_HMAC,
 	}, {
@@ -1677,9 +1647,8 @@ static struct caam_hash_template driver_hash[] = {
 			.setkey = ahash_setkey,
 			.halg = {
 				.digestsize = SHA224_DIGEST_SIZE,
-				.statesize = sizeof(struct caam_export_state),
+				},
 			},
-		},
 		.alg_type = OP_ALG_ALGSEL_SHA224,
 		.alg_op = OP_ALG_ALGSEL_SHA224 | OP_ALG_AAI_HMAC,
 	}, {
@@ -1699,9 +1668,8 @@ static struct caam_hash_template driver_hash[] = {
 			.setkey = ahash_setkey,
 			.halg = {
 				.digestsize = SHA256_DIGEST_SIZE,
-				.statesize = sizeof(struct caam_export_state),
+				},
 			},
-		},
 		.alg_type = OP_ALG_ALGSEL_SHA256,
 		.alg_op = OP_ALG_ALGSEL_SHA256 | OP_ALG_AAI_HMAC,
 	}, {
@@ -1721,9 +1689,8 @@ static struct caam_hash_template driver_hash[] = {
 			.setkey = ahash_setkey,
 			.halg = {
 				.digestsize = SHA384_DIGEST_SIZE,
-				.statesize = sizeof(struct caam_export_state),
+				},
 			},
-		},
 		.alg_type = OP_ALG_ALGSEL_SHA384,
 		.alg_op = OP_ALG_ALGSEL_SHA384 | OP_ALG_AAI_HMAC,
 	}, {
@@ -1743,9 +1710,8 @@ static struct caam_hash_template driver_hash[] = {
 			.setkey = ahash_setkey,
 			.halg = {
 				.digestsize = SHA512_DIGEST_SIZE,
-				.statesize = sizeof(struct caam_export_state),
+				},
 			},
-		},
 		.alg_type = OP_ALG_ALGSEL_SHA512,
 		.alg_op = OP_ALG_ALGSEL_SHA512 | OP_ALG_AAI_HMAC,
 	}, {
@@ -1765,9 +1731,8 @@ static struct caam_hash_template driver_hash[] = {
 			.setkey = ahash_setkey,
 			.halg = {
 				.digestsize = MD5_DIGEST_SIZE,
-				.statesize = sizeof(struct caam_export_state),
+				},
 			},
-		},
 		.alg_type = OP_ALG_ALGSEL_MD5,
 		.alg_op = OP_ALG_ALGSEL_MD5 | OP_ALG_AAI_HMAC,
 	},
@@ -1987,9 +1952,8 @@ static int __init caam_algapi_hash_init(void)
 
 		err = crypto_register_ahash(&t_alg->ahash_alg);
 		if (err) {
-			pr_warn("%s alg registration failed: %d\n",
-				t_alg->ahash_alg.halg.base.cra_driver_name,
-				err);
+			pr_warn("%s alg registration failed\n",
+				t_alg->ahash_alg.halg.base.cra_driver_name);
 			kfree(t_alg);
 		} else
 			list_add_tail(&t_alg->entry, &hash_list);
@@ -2004,9 +1968,8 @@ static int __init caam_algapi_hash_init(void)
 
 		err = crypto_register_ahash(&t_alg->ahash_alg);
 		if (err) {
-			pr_warn("%s alg registration failed: %d\n",
-				t_alg->ahash_alg.halg.base.cra_driver_name,
-				err);
+			pr_warn("%s alg registration failed\n",
+				t_alg->ahash_alg.halg.base.cra_driver_name);
 			kfree(t_alg);
 		} else
 			list_add_tail(&t_alg->entry, &hash_list);

@@ -19,7 +19,7 @@
 #include <linux/err.h>
 #include <linux/fs.h>
 #include <linux/list.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/swap.h>
 #include "ion_priv.h"
@@ -174,4 +174,10 @@ static int __init ion_page_pool_init(void)
 {
 	return 0;
 }
-device_initcall(ion_page_pool_init);
+
+static void __exit ion_page_pool_exit(void)
+{
+}
+
+module_init(ion_page_pool_init);
+module_exit(ion_page_pool_exit);

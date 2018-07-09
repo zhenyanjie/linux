@@ -2,7 +2,7 @@
  * Runtime locking correctness validator
  *
  *  Copyright (C) 2006,2007 Red Hat, Inc., Ingo Molnar <mingo@redhat.com>
- *  Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra
+ *  Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra <pzijlstr@redhat.com>
  *
  * see Documentation/locking/lockdep-design.txt for more details.
  */
@@ -66,7 +66,7 @@ struct lock_class {
 	/*
 	 * class-hash:
 	 */
-	struct hlist_node		hash_entry;
+	struct list_head		hash_entry;
 
 	/*
 	 * global list of all lock-classes:
@@ -199,7 +199,7 @@ struct lock_chain {
 	u8				irq_context;
 	u8				depth;
 	u16				base;
-	struct hlist_node		entry;
+	struct list_head		entry;
 	u64				chain_key;
 };
 

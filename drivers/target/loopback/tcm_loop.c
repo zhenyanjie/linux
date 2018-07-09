@@ -34,6 +34,7 @@
 
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
+#include <target/target_core_fabric_configfs.h>
 
 #include "tcm_loop.h"
 
@@ -376,6 +377,7 @@ static struct scsi_host_template tcm_loop_driver_template = {
 	.use_clustering		= DISABLE_CLUSTERING,
 	.slave_alloc		= tcm_loop_slave_alloc,
 	.module			= THIS_MODULE,
+	.use_blk_tags		= 1,
 	.track_queue_depth	= 1,
 };
 
@@ -761,20 +763,21 @@ static void tcm_loop_port_unlink(
 
 /* End items for tcm_loop_port_cit */
 
-static ssize_t tcm_loop_tpg_attrib_fabric_prot_type_show(
-		struct config_item *item, char *page)
+static ssize_t tcm_loop_tpg_attrib_show_fabric_prot_type(
+	struct se_portal_group *se_tpg,
+	char *page)
 {
-	struct se_portal_group *se_tpg = attrib_to_tpg(item);
 	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg, struct tcm_loop_tpg,
 						   tl_se_tpg);
 
 	return sprintf(page, "%d\n", tl_tpg->tl_fabric_prot_type);
 }
 
-static ssize_t tcm_loop_tpg_attrib_fabric_prot_type_store(
-		struct config_item *item, const char *page, size_t count)
+static ssize_t tcm_loop_tpg_attrib_store_fabric_prot_type(
+	struct se_portal_group *se_tpg,
+	const char *page,
+	size_t count)
 {
-	struct se_portal_group *se_tpg = attrib_to_tpg(item);
 	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg, struct tcm_loop_tpg,
 						   tl_se_tpg);
 	unsigned long val;
@@ -793,10 +796,10 @@ static ssize_t tcm_loop_tpg_attrib_fabric_prot_type_store(
 	return count;
 }
 
-CONFIGFS_ATTR(tcm_loop_tpg_attrib_, fabric_prot_type);
+TF_TPG_ATTRIB_ATTR(tcm_loop, fabric_prot_type, S_IRUGO | S_IWUSR);
 
 static struct configfs_attribute *tcm_loop_tpg_attrib_attrs[] = {
-	&tcm_loop_tpg_attrib_attr_fabric_prot_type,
+	&tcm_loop_tpg_attrib_fabric_prot_type.attr,
 	NULL,
 };
 
@@ -891,9 +894,10 @@ static int tcm_loop_drop_nexus(
 
 /* End items for tcm_loop_nexus_cit */
 
-static ssize_t tcm_loop_tpg_nexus_show(struct config_item *item, char *page)
+static ssize_t tcm_loop_tpg_show_nexus(
+	struct se_portal_group *se_tpg,
+	char *page)
 {
-	struct se_portal_group *se_tpg = to_tpg(item);
 	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg,
 			struct tcm_loop_tpg, tl_se_tpg);
 	struct tcm_loop_nexus *tl_nexus;
@@ -909,10 +913,11 @@ static ssize_t tcm_loop_tpg_nexus_show(struct config_item *item, char *page)
 	return ret;
 }
 
-static ssize_t tcm_loop_tpg_nexus_store(struct config_item *item,
-		const char *page, size_t count)
+static ssize_t tcm_loop_tpg_store_nexus(
+	struct se_portal_group *se_tpg,
+	const char *page,
+	size_t count)
 {
-	struct se_portal_group *se_tpg = to_tpg(item);
 	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg,
 			struct tcm_loop_tpg, tl_se_tpg);
 	struct tcm_loop_hba *tl_hba = tl_tpg->tl_hba;
@@ -987,10 +992,12 @@ check_newline:
 	return count;
 }
 
-static ssize_t tcm_loop_tpg_transport_status_show(struct config_item *item,
-		char *page)
+TF_TPG_BASE_ATTR(tcm_loop, nexus, S_IRUGO | S_IWUSR);
+
+static ssize_t tcm_loop_tpg_show_transport_status(
+	struct se_portal_group *se_tpg,
+	char *page)
 {
-	struct se_portal_group *se_tpg = to_tpg(item);
 	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg,
 			struct tcm_loop_tpg, tl_se_tpg);
 	const char *status = NULL;
@@ -1013,10 +1020,11 @@ static ssize_t tcm_loop_tpg_transport_status_show(struct config_item *item,
 	return ret;
 }
 
-static ssize_t tcm_loop_tpg_transport_status_store(struct config_item *item,
-		const char *page, size_t count)
+static ssize_t tcm_loop_tpg_store_transport_status(
+	struct se_portal_group *se_tpg,
+	const char *page,
+	size_t count)
 {
-	struct se_portal_group *se_tpg = to_tpg(item);
 	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg,
 			struct tcm_loop_tpg, tl_se_tpg);
 
@@ -1036,26 +1044,11 @@ static ssize_t tcm_loop_tpg_transport_status_store(struct config_item *item,
 	return -EINVAL;
 }
 
-static ssize_t tcm_loop_tpg_address_show(struct config_item *item,
-					 char *page)
-{
-	struct se_portal_group *se_tpg = to_tpg(item);
-	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg,
-			struct tcm_loop_tpg, tl_se_tpg);
-	struct tcm_loop_hba *tl_hba = tl_tpg->tl_hba;
-
-	return snprintf(page, PAGE_SIZE, "%d:0:%d\n",
-			tl_hba->sh->host_no, tl_tpg->tl_tpgt);
-}
-
-CONFIGFS_ATTR(tcm_loop_tpg_, nexus);
-CONFIGFS_ATTR(tcm_loop_tpg_, transport_status);
-CONFIGFS_ATTR_RO(tcm_loop_tpg_, address);
+TF_TPG_BASE_ATTR(tcm_loop, transport_status, S_IRUGO | S_IWUSR);
 
 static struct configfs_attribute *tcm_loop_tpg_attrs[] = {
-	&tcm_loop_tpg_attr_nexus,
-	&tcm_loop_tpg_attr_transport_status,
-	&tcm_loop_tpg_attr_address,
+	&tcm_loop_tpg_nexus.attr,
+	&tcm_loop_tpg_transport_status.attr,
 	NULL,
 };
 
@@ -1223,15 +1216,17 @@ static void tcm_loop_drop_scsi_hba(
 }
 
 /* Start items for tcm_loop_cit */
-static ssize_t tcm_loop_wwn_version_show(struct config_item *item, char *page)
+static ssize_t tcm_loop_wwn_show_attr_version(
+	struct target_fabric_configfs *tf,
+	char *page)
 {
 	return sprintf(page, "TCM Loopback Fabric module %s\n", TCM_LOOP_VERSION);
 }
 
-CONFIGFS_ATTR_RO(tcm_loop_wwn_, version);
+TF_WWN_ATTR_RO(tcm_loop, version);
 
 static struct configfs_attribute *tcm_loop_wwn_attrs[] = {
-	&tcm_loop_wwn_attr_version,
+	&tcm_loop_wwn_version.attr,
 	NULL,
 };
 

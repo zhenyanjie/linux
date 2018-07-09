@@ -25,45 +25,19 @@ void intel_pt_log_enable(void);
 void intel_pt_log_disable(void);
 void intel_pt_log_set_name(const char *name);
 
-void __intel_pt_log_packet(const struct intel_pt_pkt *packet, int pkt_len,
-			   uint64_t pos, const unsigned char *buf);
+void intel_pt_log_packet(const struct intel_pt_pkt *packet, int pkt_len,
+			 uint64_t pos, const unsigned char *buf);
 
 struct intel_pt_insn;
 
-void __intel_pt_log_insn(struct intel_pt_insn *intel_pt_insn, uint64_t ip);
-void __intel_pt_log_insn_no_data(struct intel_pt_insn *intel_pt_insn,
-				 uint64_t ip);
+void intel_pt_log_insn(struct intel_pt_insn *intel_pt_insn, uint64_t ip);
+void intel_pt_log_insn_no_data(struct intel_pt_insn *intel_pt_insn,
+			       uint64_t ip);
 
 __attribute__((format(printf, 1, 2)))
-void __intel_pt_log(const char *fmt, ...);
-
-#define intel_pt_log(fmt, ...) \
-	do { \
-		if (intel_pt_enable_logging) \
-			__intel_pt_log(fmt, ##__VA_ARGS__); \
-	} while (0)
-
-#define intel_pt_log_packet(arg, ...) \
-	do { \
-		if (intel_pt_enable_logging) \
-			__intel_pt_log_packet(arg, ##__VA_ARGS__); \
-	} while (0)
-
-#define intel_pt_log_insn(arg, ...) \
-	do { \
-		if (intel_pt_enable_logging) \
-			__intel_pt_log_insn(arg, ##__VA_ARGS__); \
-	} while (0)
-
-#define intel_pt_log_insn_no_data(arg, ...) \
-	do { \
-		if (intel_pt_enable_logging) \
-			__intel_pt_log_insn_no_data(arg, ##__VA_ARGS__); \
-	} while (0)
+void intel_pt_log(const char *fmt, ...);
 
 #define x64_fmt "0x%" PRIx64
-
-extern bool intel_pt_enable_logging;
 
 static inline void intel_pt_log_at(const char *msg, uint64_t u)
 {

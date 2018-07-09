@@ -51,7 +51,7 @@ DEFINE_IDA(blk_queue_ida);
 /*
  * For the allocated request tables
  */
-struct kmem_cache *request_cachep;
+struct kmem_cache *request_cachep = NULL;
 
 /*
  * For queue allocation
@@ -205,22 +205,6 @@ void blk_delay_queue(struct request_queue *q, unsigned long msecs)
 				   msecs_to_jiffies(msecs));
 }
 EXPORT_SYMBOL(blk_delay_queue);
-
-/**
- * blk_start_queue_async - asynchronously restart a previously stopped queue
- * @q:    The &struct request_queue in question
- *
- * Description:
- *   blk_start_queue_async() will clear the stop flag on the queue, and
- *   ensure that the request_fn for the queue is run from an async
- *   context.
- **/
-void blk_start_queue_async(struct request_queue *q)
-{
-	queue_flag_clear(QUEUE_FLAG_STOPPED, q);
-	blk_run_queue_async(q);
-}
-EXPORT_SYMBOL(blk_start_queue_async);
 
 /**
  * blk_start_queue - restart a previously stopped queue
@@ -570,15 +554,15 @@ void blk_cleanup_queue(struct request_queue *q)
 	 * Drain all requests queued before DYING marking. Set DEAD flag to
 	 * prevent that q->request_fn() gets invoked after draining finished.
 	 */
-	blk_freeze_queue(q);
-	spin_lock_irq(lock);
-	if (!q->mq_ops)
+	if (q->mq_ops) {
+		blk_mq_freeze_queue(q);
+		spin_lock_irq(lock);
+	} else {
+		spin_lock_irq(lock);
 		__blk_drain_queue(q, true);
+	}
 	queue_flag_set(QUEUE_FLAG_DEAD, q);
 	spin_unlock_irq(lock);
-
-	/* for synchronous bio-based driver finish in-flight integrity i/o */
-	blk_flush_integrity();
 
 	/* @q won't process any more request, flush async actions */
 	del_timer_sync(&q->backing_dev_info.laptop_mode_wb_timer);
@@ -586,7 +570,6 @@ void blk_cleanup_queue(struct request_queue *q)
 
 	if (q->mq_ops)
 		blk_mq_free_queue(q);
-	percpu_ref_exit(&q->q_usage_counter);
 
 	spin_lock_irq(lock);
 	if (q->queue_lock != &q->__queue_lock)
@@ -645,47 +628,6 @@ struct request_queue *blk_alloc_queue(gfp_t gfp_mask)
 	return blk_alloc_queue_node(gfp_mask, NUMA_NO_NODE);
 }
 EXPORT_SYMBOL(blk_alloc_queue);
-
-int blk_queue_enter(struct request_queue *q, bool nowait)
-{
-	while (true) {
-		int ret;
-
-		if (percpu_ref_tryget_live(&q->q_usage_counter))
-			return 0;
-
-		if (nowait)
-			return -EBUSY;
-
-		ret = wait_event_interruptible(q->mq_freeze_wq,
-				!atomic_read(&q->mq_freeze_depth) ||
-				blk_queue_dying(q));
-		if (blk_queue_dying(q))
-			return -ENODEV;
-		if (ret)
-			return ret;
-	}
-}
-
-void blk_queue_exit(struct request_queue *q)
-{
-	percpu_ref_put(&q->q_usage_counter);
-}
-
-static void blk_queue_usage_counter_release(struct percpu_ref *ref)
-{
-	struct request_queue *q =
-		container_of(ref, struct request_queue, q_usage_counter);
-
-	wake_up_all(&q->mq_freeze_wq);
-}
-
-static void blk_rq_timed_out_timer(unsigned long data)
-{
-	struct request_queue *q = (struct request_queue *)data;
-
-	kblockd_schedule_work(&q->timeout_work);
-}
 
 struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 {
@@ -748,22 +690,11 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 
 	init_waitqueue_head(&q->mq_freeze_wq);
 
-	/*
-	 * Init percpu_ref in atomic mode so that it's faster to shutdown.
-	 * See blk_register_queue() for details.
-	 */
-	if (percpu_ref_init(&q->q_usage_counter,
-				blk_queue_usage_counter_release,
-				PERCPU_REF_INIT_ATOMIC, GFP_KERNEL))
-		goto fail_bdi;
-
 	if (blkcg_init_queue(q))
-		goto fail_ref;
+		goto fail_bdi;
 
 	return q;
 
-fail_ref:
-	percpu_ref_exit(&q->q_usage_counter);
 fail_bdi:
 	bdi_destroy(&q->backing_dev_info);
 fail_split:
@@ -832,7 +763,7 @@ blk_init_queue_node(request_fn_proc *rfn, spinlock_t *lock, int node_id)
 }
 EXPORT_SYMBOL(blk_init_queue_node);
 
-static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio);
+static void blk_queue_bio(struct request_queue *q, struct bio *bio);
 
 struct request_queue *
 blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
@@ -848,7 +779,6 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
 	if (blk_init_rl(&q->root_rl, q, GFP_KERNEL))
 		goto fail;
 
-	INIT_WORK(&q->timeout_work, blk_timeout_work);
 	q->request_fn		= rfn;
 	q->prep_rq_fn		= NULL;
 	q->unprep_rq_fn		= NULL;
@@ -1230,8 +1160,8 @@ rq_starved:
  * @bio: bio to allocate request for (can be %NULL)
  * @gfp_mask: allocation mask
  *
- * Get a free request from @q.  If %__GFP_DIRECT_RECLAIM is set in @gfp_mask,
- * this function keeps retrying under memory pressure and fails iff @q is dead.
+ * Get a free request from @q.  If %__GFP_WAIT is set in @gfp_mask, this
+ * function keeps retrying under memory pressure and fails iff @q is dead.
  *
  * Must be called with @q->queue_lock held and,
  * Returns ERR_PTR on failure, with @q->queue_lock held.
@@ -1251,7 +1181,7 @@ retry:
 	if (!IS_ERR(rq))
 		return rq;
 
-	if (!gfpflags_allow_blocking(gfp_mask) || unlikely(blk_queue_dying(q))) {
+	if (!(gfp_mask & __GFP_WAIT) || unlikely(blk_queue_dying(q))) {
 		blk_put_rl(rl);
 		return rq;
 	}
@@ -1300,9 +1230,7 @@ static struct request *blk_old_get_request(struct request_queue *q, int rw,
 struct request *blk_get_request(struct request_queue *q, int rw, gfp_t gfp_mask)
 {
 	if (q->mq_ops)
-		return blk_mq_alloc_request(q, rw,
-			(gfp_mask & __GFP_DIRECT_RECLAIM) ?
-				0 : BLK_MQ_REQ_NOWAIT);
+		return blk_mq_alloc_request(q, rw, gfp_mask, false);
 	else
 		return blk_old_get_request(q, rw, gfp_mask);
 }
@@ -1331,11 +1259,11 @@ EXPORT_SYMBOL(blk_get_request);
  * BUG.
  *
  * WARNING: When allocating/cloning a bio-chain, careful consideration should be
- * given to how you allocate bios. In particular, you cannot use
- * __GFP_DIRECT_RECLAIM for anything but the first bio in the chain. Otherwise
- * you risk waiting for IO completion of a bio that hasn't been submitted yet,
- * thus resulting in a deadlock. Alternatively bios should be allocated using
- * bio_kmalloc() instead of bio_alloc(), as that avoids the mempool deadlock.
+ * given to how you allocate bios. In particular, you cannot use __GFP_WAIT for
+ * anything but the first bio in the chain. Otherwise you risk waiting for IO
+ * completion of a bio that hasn't been submitted yet, thus resulting in a
+ * deadlock. Alternatively bios should be allocated using bio_kmalloc() instead
+ * of bio_alloc(), as that avoids the mempool deadlock.
  * If possible a big IO should be split into smaller parts when allocation
  * fails. Partial allocation should not be an error, or you risk a live-lock.
  */
@@ -1601,9 +1529,6 @@ bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
  * @q: request_queue new bio is being queued at
  * @bio: new bio being queued
  * @request_count: out parameter for number of traversed plugged requests
- * @same_queue_rq: pointer to &struct request that gets filled in when
- * another request associated with @q is found on the plug list
- * (optional, may be %NULL)
  *
  * Determine whether @bio being queued on @q can be merged with a request
  * on %current's plugged list.  Returns %true if merge was successful,
@@ -1669,30 +1594,6 @@ out:
 	return ret;
 }
 
-unsigned int blk_plug_queued_count(struct request_queue *q)
-{
-	struct blk_plug *plug;
-	struct request *rq;
-	struct list_head *plug_list;
-	unsigned int ret = 0;
-
-	plug = current->plug;
-	if (!plug)
-		goto out;
-
-	if (q->mq_ops)
-		plug_list = &plug->mq_list;
-	else
-		plug_list = &plug->list;
-
-	list_for_each_entry(rq, plug_list, queuelist) {
-		if (rq->q == q)
-			ret++;
-	}
-out:
-	return ret;
-}
-
 void init_request_from_bio(struct request *req, struct bio *bio)
 {
 	req->cmd_type = REQ_TYPE_FS;
@@ -1707,7 +1608,7 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 	blk_rq_bio_prep(req->q, req, bio);
 }
 
-static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
+static void blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
 	const bool sync = !!(bio->bi_rw & REQ_SYNC);
 	struct blk_plug *plug;
@@ -1727,7 +1628,7 @@ static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
 	if (bio_integrity_enabled(bio) && bio_integrity_prep(bio)) {
 		bio->bi_error = -EIO;
 		bio_endio(bio);
-		return BLK_QC_T_NONE;
+		return;
 	}
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
@@ -1740,11 +1641,9 @@ static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 * Check if we can merge with the plugged list before grabbing
 	 * any locks.
 	 */
-	if (!blk_queue_nomerges(q)) {
-		if (blk_attempt_plug_merge(q, bio, &request_count, NULL))
-			return BLK_QC_T_NONE;
-	} else
-		request_count = blk_plug_queued_count(q);
+	if (!blk_queue_nomerges(q) &&
+	    blk_attempt_plug_merge(q, bio, &request_count, NULL))
+		return;
 
 	spin_lock_irq(q->queue_lock);
 
@@ -1820,8 +1719,6 @@ get_rq:
 out_unlock:
 		spin_unlock_irq(q->queue_lock);
 	}
-
-	return BLK_QC_T_NONE;
 }
 
 /*
@@ -2027,13 +1924,12 @@ end_io:
  * a lower device by calling into generic_make_request recursively, which
  * means the bio should NOT be touched after the call to ->make_request_fn.
  */
-blk_qc_t generic_make_request(struct bio *bio)
+void generic_make_request(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack;
-	blk_qc_t ret = BLK_QC_T_NONE;
 
 	if (!generic_make_request_checks(bio))
-		goto out;
+		return;
 
 	/*
 	 * We only want one ->make_request_fn to be active at a time, else
@@ -2047,7 +1943,7 @@ blk_qc_t generic_make_request(struct bio *bio)
 	 */
 	if (current->bio_list) {
 		bio_list_add(current->bio_list, bio);
-		goto out;
+		return;
 	}
 
 	/* following loop may be a bit non-obvious, and so deserves some
@@ -2070,23 +1966,11 @@ blk_qc_t generic_make_request(struct bio *bio)
 	do {
 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
 
-		if (likely(blk_queue_enter(q, false) == 0)) {
-			ret = q->make_request_fn(q, bio);
+		q->make_request_fn(q, bio);
 
-			blk_queue_exit(q);
-
-			bio = bio_list_pop(current->bio_list);
-		} else {
-			struct bio *bio_next = bio_list_pop(current->bio_list);
-
-			bio_io_error(bio);
-			bio = bio_next;
-		}
+		bio = bio_list_pop(current->bio_list);
 	} while (bio);
 	current->bio_list = NULL; /* deactivate */
-
-out:
-	return ret;
 }
 EXPORT_SYMBOL(generic_make_request);
 
@@ -2100,7 +1984,7 @@ EXPORT_SYMBOL(generic_make_request);
  * interfaces; @bio must be presetup and ready for I/O.
  *
  */
-blk_qc_t submit_bio(int rw, struct bio *bio)
+void submit_bio(int rw, struct bio *bio)
 {
 	bio->bi_rw |= rw;
 
@@ -2134,7 +2018,7 @@ blk_qc_t submit_bio(int rw, struct bio *bio)
 		}
 	}
 
-	return generic_make_request(bio);
+	generic_make_request(bio);
 }
 EXPORT_SYMBOL(submit_bio);
 
@@ -2198,7 +2082,7 @@ int blk_insert_cloned_request(struct request_queue *q, struct request *rq)
 	if (q->mq_ops) {
 		if (blk_queue_io_stat(q))
 			blk_account_io_start(rq, true);
-		blk_mq_insert_request(rq, false, true, false);
+		blk_mq_insert_request(rq, false, true, true);
 		return 0;
 	}
 
@@ -2455,16 +2339,14 @@ struct request *blk_peek_request(struct request_queue *q)
 
 			rq = NULL;
 			break;
-		} else if (ret == BLKPREP_KILL || ret == BLKPREP_INVALID) {
-			int err = (ret == BLKPREP_INVALID) ? -EREMOTEIO : -EIO;
-
+		} else if (ret == BLKPREP_KILL) {
 			rq->cmd_flags |= REQ_QUIET;
 			/*
 			 * Mark this request as started so we don't trigger
 			 * any debug logic in the end I/O path.
 			 */
 			blk_start_request(rq);
-			__blk_end_request_all(rq, err);
+			__blk_end_request_all(rq, -EIO);
 		} else {
 			printk(KERN_ERR "%s: bad return=%d\n", __func__, ret);
 			break;
@@ -3335,47 +3217,6 @@ void blk_finish_plug(struct blk_plug *plug)
 }
 EXPORT_SYMBOL(blk_finish_plug);
 
-bool blk_poll(struct request_queue *q, blk_qc_t cookie)
-{
-	struct blk_plug *plug;
-	long state;
-
-	if (!q->mq_ops || !q->mq_ops->poll || !blk_qc_t_valid(cookie) ||
-	    !test_bit(QUEUE_FLAG_POLL, &q->queue_flags))
-		return false;
-
-	plug = current->plug;
-	if (plug)
-		blk_flush_plug_list(plug, false);
-
-	state = current->state;
-	while (!need_resched()) {
-		unsigned int queue_num = blk_qc_t_to_queue_num(cookie);
-		struct blk_mq_hw_ctx *hctx = q->queue_hw_ctx[queue_num];
-		int ret;
-
-		hctx->poll_invoked++;
-
-		ret = q->mq_ops->poll(hctx, blk_qc_t_to_tag(cookie));
-		if (ret > 0) {
-			hctx->poll_success++;
-			set_current_state(TASK_RUNNING);
-			return true;
-		}
-
-		if (signal_pending_state(state, current))
-			set_current_state(TASK_RUNNING);
-
-		if (current->state == TASK_RUNNING)
-			return true;
-		if (ret < 0)
-			break;
-		cpu_relax();
-	}
-
-	return false;
-}
-
 #ifdef CONFIG_PM
 /**
  * blk_pm_runtime_init - Block layer runtime PM initialization routine
@@ -3432,9 +3273,6 @@ int blk_pre_runtime_suspend(struct request_queue *q)
 {
 	int ret = 0;
 
-	if (!q->dev)
-		return ret;
-
 	spin_lock_irq(q->queue_lock);
 	if (q->nr_pending) {
 		ret = -EBUSY;
@@ -3462,9 +3300,6 @@ EXPORT_SYMBOL(blk_pre_runtime_suspend);
  */
 void blk_post_runtime_suspend(struct request_queue *q, int err)
 {
-	if (!q->dev)
-		return;
-
 	spin_lock_irq(q->queue_lock);
 	if (!err) {
 		q->rpm_status = RPM_SUSPENDED;
@@ -3489,9 +3324,6 @@ EXPORT_SYMBOL(blk_post_runtime_suspend);
  */
 void blk_pre_runtime_resume(struct request_queue *q)
 {
-	if (!q->dev)
-		return;
-
 	spin_lock_irq(q->queue_lock);
 	q->rpm_status = RPM_RESUMING;
 	spin_unlock_irq(q->queue_lock);
@@ -3514,9 +3346,6 @@ EXPORT_SYMBOL(blk_pre_runtime_resume);
  */
 void blk_post_runtime_resume(struct request_queue *q, int err)
 {
-	if (!q->dev)
-		return;
-
 	spin_lock_irq(q->queue_lock);
 	if (!err) {
 		q->rpm_status = RPM_ACTIVE;
@@ -3545,7 +3374,7 @@ int __init blk_dev_init(void)
 	request_cachep = kmem_cache_create("blkdev_requests",
 			sizeof(struct request), 0, SLAB_PANIC, NULL);
 
-	blk_requestq_cachep = kmem_cache_create("request_queue",
+	blk_requestq_cachep = kmem_cache_create("blkdev_queue",
 			sizeof(struct request_queue), 0, SLAB_PANIC, NULL);
 
 	return 0;

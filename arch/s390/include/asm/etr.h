@@ -211,9 +211,8 @@ static inline int etr_ptff(void *ptff_block, unsigned int func)
 #define ETR_PTFF_SGS	0x43	/* set gross steering rate */
 
 /* Functions needed by the machine check handler */
-int etr_switch_to_local(void);
-int etr_sync_check(void);
-void etr_queue_work(void);
+void etr_switch_to_local(void);
+void etr_sync_check(void);
 
 /* notifier for syncs */
 extern struct atomic_notifier_head s390_epoch_delta_notifier;
@@ -254,8 +253,7 @@ struct stp_sstpi {
 } __attribute__ ((packed));
 
 /* Functions needed by the machine check handler */
-int stp_sync_check(void);
-int stp_island_check(void);
-void stp_queue_work(void);
+void stp_sync_check(void);
+void stp_island_check(void);
 
 #endif /* __S390_ETR_H */

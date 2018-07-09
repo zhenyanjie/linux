@@ -2,7 +2,7 @@
  * mm/page-writeback.c
  *
  * Copyright (C) 2002, Linus Torvalds.
- * Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra
+ * Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra <pzijlstr@redhat.com>
  *
  * Contains functions related to writing back dirty pages at the
  * address_space level.
@@ -278,12 +278,7 @@ static unsigned long zone_dirtyable_memory(struct zone *zone)
 	unsigned long nr_pages;
 
 	nr_pages = zone_page_state(zone, NR_FREE_PAGES);
-	/*
-	 * Pages reserved for the kernel should not be considered
-	 * dirtyable, to prevent a situation where reclaim has to
-	 * clean pages in order to balance the zones.
-	 */
-	nr_pages -= min(nr_pages, zone->totalreserve_pages);
+	nr_pages -= min(nr_pages, zone->dirty_balance_reserve);
 
 	nr_pages += zone_page_state(zone, NR_INACTIVE_FILE);
 	nr_pages += zone_page_state(zone, NR_ACTIVE_FILE);
@@ -337,12 +332,7 @@ static unsigned long global_dirtyable_memory(void)
 	unsigned long x;
 
 	x = global_page_state(NR_FREE_PAGES);
-	/*
-	 * Pages reserved for the kernel should not be considered
-	 * dirtyable, to prevent a situation where reclaim has to
-	 * clean pages in order to balance the zones.
-	 */
-	x -= min(x, totalreserve_pages);
+	x -= min(x, dirty_balance_reserve);
 
 	x += global_page_state(NR_INACTIVE_FILE);
 	x += global_page_state(NR_ACTIVE_FILE);
@@ -1552,9 +1542,7 @@ static void balance_dirty_pages(struct address_space *mapping,
 	for (;;) {
 		unsigned long now = jiffies;
 		unsigned long dirty, thresh, bg_thresh;
-		unsigned long m_dirty = 0;	/* stop bogus uninit warnings */
-		unsigned long m_thresh = 0;
-		unsigned long m_bg_thresh = 0;
+		unsigned long m_dirty, m_thresh, m_bg_thresh;
 
 		/*
 		 * Unstable writes are a feature of certain networked
@@ -1909,8 +1897,7 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
 	if (gdtc->dirty > gdtc->bg_thresh)
 		return true;
 
-	if (wb_stat(wb, WB_RECLAIMABLE) >
-	    wb_calc_thresh(gdtc->wb, gdtc->bg_thresh))
+	if (wb_stat(wb, WB_RECLAIMABLE) > __wb_calc_thresh(gdtc))
 		return true;
 
 	if (mdtc) {
@@ -1924,8 +1911,7 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
 		if (mdtc->dirty > mdtc->bg_thresh)
 			return true;
 
-		if (wb_stat(wb, WB_RECLAIMABLE) >
-		    wb_calc_thresh(mdtc->wb, mdtc->bg_thresh))
+		if (wb_stat(wb, WB_RECLAIMABLE) > __wb_calc_thresh(mdtc))
 			return true;
 	}
 

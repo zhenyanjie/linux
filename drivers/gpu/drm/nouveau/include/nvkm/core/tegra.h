@@ -4,7 +4,6 @@
 #include <core/mm.h>
 
 struct nvkm_device_tegra {
-	const struct nvkm_device_tegra_func *func;
 	struct nvkm_device device;
 	struct platform_device *pdev;
 	int irq;
@@ -29,17 +28,7 @@ struct nvkm_device_tegra {
 	int gpu_speedo;
 };
 
-struct nvkm_device_tegra_func {
-	/*
-	 * If an IOMMU is used, indicates which address bit will trigger a
-	 * IOMMU translation when set (when this bit is not set, IOMMU is
-	 * bypassed). A value of 0 means an IOMMU is never used.
-	 */
-	u8 iommu_bit;
-};
-
-int nvkm_device_tegra_new(const struct nvkm_device_tegra_func *,
-			  struct platform_device *,
+int nvkm_device_tegra_new(struct platform_device *,
 			  const char *cfg, const char *dbg,
 			  bool detect, bool mmio, u64 subdev_mask,
 			  struct nvkm_device **);

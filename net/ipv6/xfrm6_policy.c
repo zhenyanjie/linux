@@ -20,7 +20,7 @@
 #include <net/ip.h>
 #include <net/ipv6.h>
 #include <net/ip6_route.h>
-#include <net/l3mdev.h>
+#include <net/vrf.h>
 #if IS_ENABLED(CONFIG_IPV6_MIP6)
 #include <net/mip6.h>
 #endif
@@ -133,8 +133,10 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 
 	nexthdr = nh[nhoff];
 
-	if (skb_dst(skb))
-		oif = l3mdev_fib_oif(skb_dst(skb)->dev);
+	if (skb_dst(skb)) {
+		oif = vrf_master_ifindex(skb_dst(skb)->dev) ?
+			: skb_dst(skb)->dev->ifindex;
+	}
 
 	memset(fl6, 0, sizeof(struct flowi6));
 	fl6->flowi6_mark = skb->mark;
@@ -288,7 +290,7 @@ static struct dst_ops xfrm6_dst_ops_template = {
 	.destroy =		xfrm6_dst_destroy,
 	.ifdown =		xfrm6_dst_ifdown,
 	.local_out =		__ip6_local_out,
-	.gc_thresh =		INT_MAX,
+	.gc_thresh =		32768,
 };
 
 static struct xfrm_policy_afinfo xfrm6_policy_afinfo = {

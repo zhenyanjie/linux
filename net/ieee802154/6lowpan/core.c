@@ -61,7 +61,7 @@ static struct header_ops lowpan_header_ops = {
 static struct lock_class_key lowpan_tx_busylock;
 static struct lock_class_key lowpan_netdev_xmit_lock_key;
 
-static void lowpan_set_lockdep_class_one(struct net_device *ldev,
+static void lowpan_set_lockdep_class_one(struct net_device *dev,
 					 struct netdev_queue *txq,
 					 void *_unused)
 {
@@ -69,47 +69,35 @@ static void lowpan_set_lockdep_class_one(struct net_device *ldev,
 			  &lowpan_netdev_xmit_lock_key);
 }
 
-static int lowpan_dev_init(struct net_device *ldev)
+static int lowpan_dev_init(struct net_device *dev)
 {
-	netdev_for_each_tx_queue(ldev, lowpan_set_lockdep_class_one, NULL);
-	ldev->qdisc_tx_busylock = &lowpan_tx_busylock;
-	return 0;
-}
-
-static int lowpan_open(struct net_device *dev)
-{
-	if (!open_count)
-		lowpan_rx_init();
-	open_count++;
-	return 0;
-}
-
-static int lowpan_stop(struct net_device *dev)
-{
-	open_count--;
-	if (!open_count)
-		lowpan_rx_exit();
+	netdev_for_each_tx_queue(dev, lowpan_set_lockdep_class_one, NULL);
+	dev->qdisc_tx_busylock = &lowpan_tx_busylock;
 	return 0;
 }
 
 static const struct net_device_ops lowpan_netdev_ops = {
 	.ndo_init		= lowpan_dev_init,
 	.ndo_start_xmit		= lowpan_xmit,
-	.ndo_open		= lowpan_open,
-	.ndo_stop		= lowpan_stop,
 };
 
-static void lowpan_setup(struct net_device *ldev)
+static void lowpan_setup(struct net_device *dev)
 {
-	memset(ldev->broadcast, 0xff, IEEE802154_ADDR_LEN);
-	/* We need an ipv6hdr as minimum len when calling xmit */
-	ldev->hard_header_len	= sizeof(struct ipv6hdr);
-	ldev->flags		= IFF_BROADCAST | IFF_MULTICAST;
+	dev->addr_len		= IEEE802154_ADDR_LEN;
+	memset(dev->broadcast, 0xff, IEEE802154_ADDR_LEN);
+	dev->type		= ARPHRD_6LOWPAN;
+	/* Frame Control + Sequence Number + Address fields + Security Header */
+	dev->hard_header_len	= 2 + 1 + 20 + 14;
+	dev->needed_tailroom	= 2; /* FCS */
+	dev->mtu		= IPV6_MIN_MTU;
+	dev->priv_flags		|= IFF_NO_QUEUE;
+	dev->flags		= IFF_BROADCAST | IFF_MULTICAST;
+	dev->watchdog_timeo	= 0;
 
-	ldev->netdev_ops	= &lowpan_netdev_ops;
-	ldev->header_ops	= &lowpan_header_ops;
-	ldev->destructor	= free_netdev;
-	ldev->features		|= NETIF_F_NETNS_LOCAL;
+	dev->netdev_ops		= &lowpan_netdev_ops;
+	dev->header_ops		= &lowpan_header_ops;
+	dev->destructor		= free_netdev;
+	dev->features		|= NETIF_F_NETNS_LOCAL;
 }
 
 static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[])
@@ -121,10 +109,10 @@ static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[])
 	return 0;
 }
 
-static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
+static int lowpan_newlink(struct net *src_net, struct net_device *dev,
 			  struct nlattr *tb[], struct nlattr *data[])
 {
-	struct net_device *wdev;
+	struct net_device *real_dev;
 	int ret;
 
 	ASSERT_RTNL();
@@ -132,54 +120,58 @@ static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
 	pr_debug("adding new link\n");
 
 	if (!tb[IFLA_LINK] ||
-	    !net_eq(dev_net(ldev), &init_net))
+	    !net_eq(dev_net(dev), &init_net))
 		return -EINVAL;
-	/* find and hold wpan device */
-	wdev = dev_get_by_index(dev_net(ldev), nla_get_u32(tb[IFLA_LINK]));
-	if (!wdev)
+	/* find and hold real wpan device */
+	real_dev = dev_get_by_index(dev_net(dev), nla_get_u32(tb[IFLA_LINK]));
+	if (!real_dev)
 		return -ENODEV;
-	if (wdev->type != ARPHRD_IEEE802154) {
-		dev_put(wdev);
+	if (real_dev->type != ARPHRD_IEEE802154) {
+		dev_put(real_dev);
 		return -EINVAL;
 	}
 
-	if (wdev->ieee802154_ptr->lowpan_dev) {
-		dev_put(wdev);
+	if (real_dev->ieee802154_ptr->lowpan_dev) {
+		dev_put(real_dev);
 		return -EBUSY;
 	}
 
-	lowpan_dev_info(ldev)->wdev = wdev;
+	lowpan_dev_info(dev)->real_dev = real_dev;
 	/* Set the lowpan hardware address to the wpan hardware address. */
-	memcpy(ldev->dev_addr, wdev->dev_addr, IEEE802154_ADDR_LEN);
-	/* We need headroom for possible wpan_dev_hard_header call and tailroom
-	 * for encryption/fcs handling. The lowpan interface will replace
-	 * the IPv6 header with 6LoWPAN header. At worst case the 6LoWPAN
-	 * header has LOWPAN_IPHC_MAX_HEADER_LEN more bytes than the IPv6
-	 * header.
-	 */
-	ldev->needed_headroom = LOWPAN_IPHC_MAX_HEADER_LEN +
-				wdev->needed_headroom;
-	ldev->needed_tailroom = wdev->needed_tailroom;
+	memcpy(dev->dev_addr, real_dev->dev_addr, IEEE802154_ADDR_LEN);
 
-	ret = lowpan_register_netdevice(ldev, LOWPAN_LLTYPE_IEEE802154);
+	lowpan_netdev_setup(dev, LOWPAN_LLTYPE_IEEE802154);
+
+	ret = register_netdevice(dev);
 	if (ret < 0) {
-		dev_put(wdev);
+		dev_put(real_dev);
 		return ret;
 	}
 
-	wdev->ieee802154_ptr->lowpan_dev = ldev;
+	real_dev->ieee802154_ptr->lowpan_dev = dev;
+	if (!open_count)
+		lowpan_rx_init();
+
+	open_count++;
+
 	return 0;
 }
 
-static void lowpan_dellink(struct net_device *ldev, struct list_head *head)
+static void lowpan_dellink(struct net_device *dev, struct list_head *head)
 {
-	struct net_device *wdev = lowpan_dev_info(ldev)->wdev;
+	struct lowpan_dev_info *lowpan_dev = lowpan_dev_info(dev);
+	struct net_device *real_dev = lowpan_dev->real_dev;
 
 	ASSERT_RTNL();
 
-	wdev->ieee802154_ptr->lowpan_dev = NULL;
-	lowpan_unregister_netdevice(ldev);
-	dev_put(wdev);
+	open_count--;
+
+	if (!open_count)
+		lowpan_rx_exit();
+
+	real_dev->ieee802154_ptr->lowpan_dev = NULL;
+	unregister_netdevice(dev);
+	dev_put(real_dev);
 }
 
 static struct rtnl_link_ops lowpan_link_ops __read_mostly = {
@@ -204,9 +196,9 @@ static inline void lowpan_netlink_fini(void)
 static int lowpan_device_event(struct notifier_block *unused,
 			       unsigned long event, void *ptr)
 {
-	struct net_device *wdev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
 
-	if (wdev->type != ARPHRD_IEEE802154)
+	if (dev->type != ARPHRD_IEEE802154)
 		goto out;
 
 	switch (event) {
@@ -215,8 +207,8 @@ static int lowpan_device_event(struct notifier_block *unused,
 		 * also delete possible lowpan interfaces which belongs
 		 * to the wpan interface.
 		 */
-		if (wdev->ieee802154_ptr->lowpan_dev)
-			lowpan_dellink(wdev->ieee802154_ptr->lowpan_dev, NULL);
+		if (dev->ieee802154_ptr && dev->ieee802154_ptr->lowpan_dev)
+			lowpan_dellink(dev->ieee802154_ptr->lowpan_dev, NULL);
 		break;
 	default:
 		break;

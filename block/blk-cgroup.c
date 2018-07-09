@@ -788,7 +788,6 @@ int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
 {
 	struct gendisk *disk;
 	struct blkcg_gq *blkg;
-	struct module *owner;
 	unsigned int major, minor;
 	int key_len, part, ret;
 	char *body;
@@ -805,9 +804,7 @@ int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
 	if (!disk)
 		return -ENODEV;
 	if (part) {
-		owner = disk->fops->owner;
 		put_disk(disk);
-		module_put(owner);
 		return -ENODEV;
 	}
 
@@ -823,9 +820,7 @@ int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
 		ret = PTR_ERR(blkg);
 		rcu_read_unlock();
 		spin_unlock_irq(disk->queue->queue_lock);
-		owner = disk->fops->owner;
 		put_disk(disk);
-		module_put(owner);
 		/*
 		 * If queue was bypassing, we should retry.  Do so after a
 		 * short msleep().  It isn't strictly necessary but queue
@@ -856,13 +851,9 @@ EXPORT_SYMBOL_GPL(blkg_conf_prep);
 void blkg_conf_finish(struct blkg_conf_ctx *ctx)
 	__releases(ctx->disk->queue->queue_lock) __releases(rcu)
 {
-	struct module *owner;
-
 	spin_unlock_irq(ctx->disk->queue->queue_lock);
 	rcu_read_unlock();
-	owner = ctx->disk->fops->owner;
 	put_disk(ctx->disk);
-	module_put(owner);
 }
 EXPORT_SYMBOL_GPL(blkg_conf_finish);
 
@@ -908,7 +899,6 @@ static int blkcg_print_stat(struct seq_file *sf, void *v)
 struct cftype blkcg_files[] = {
 	{
 		.name = "stat",
-		.flags = CFTYPE_NOT_ON_ROOT,
 		.seq_show = blkcg_print_stat,
 	},
 	{ }	/* terminate */
@@ -1136,15 +1126,15 @@ void blkcg_exit_queue(struct request_queue *q)
  * of the main cic data structures.  For now we allow a task to change
  * its cgroup only if it's the only owner of its ioc.
  */
-static int blkcg_can_attach(struct cgroup_taskset *tset)
+static int blkcg_can_attach(struct cgroup_subsys_state *css,
+			    struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
-	struct cgroup_subsys_state *dst_css;
 	struct io_context *ioc;
 	int ret = 0;
 
 	/* task_lock() is needed to avoid races with exit_io_context() */
-	cgroup_taskset_for_each(task, dst_css, tset) {
+	cgroup_taskset_for_each(task, tset) {
 		task_lock(task);
 		ioc = task->io_context;
 		if (ioc && atomic_read(&ioc->nr_tasks) > 1)

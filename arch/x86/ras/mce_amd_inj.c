@@ -17,11 +17,7 @@
 #include <linux/cpu.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
-#include <linux/pci.h>
-
 #include <asm/mce.h>
-#include <asm/amd_nb.h>
-#include <asm/irq_vectors.h>
 
 #include "../kernel/cpu/mcheck/mce-internal.h"
 
@@ -34,21 +30,16 @@ static struct dentry *dfs_inj;
 static u8 n_banks;
 
 #define MAX_FLAG_OPT_SIZE	3
-#define NBCFG			0x44
 
 enum injection_type {
 	SW_INJ = 0,	/* SW injection, simply decode the error */
 	HW_INJ,		/* Trigger a #MC */
-	DFR_INT_INJ,    /* Trigger Deferred error interrupt */
-	THR_INT_INJ,    /* Trigger threshold interrupt */
 	N_INJ_TYPES,
 };
 
 static const char * const flags_options[] = {
 	[SW_INJ] = "sw",
 	[HW_INJ] = "hw",
-	[DFR_INT_INJ] = "df",
-	[THR_INT_INJ] = "th",
 	NULL
 };
 
@@ -138,9 +129,12 @@ static ssize_t flags_write(struct file *filp, const char __user *ubuf,
 {
 	char buf[MAX_FLAG_OPT_SIZE], *__buf;
 	int err;
+	size_t ret;
 
 	if (cnt > MAX_FLAG_OPT_SIZE)
-		return -EINVAL;
+		cnt = MAX_FLAG_OPT_SIZE;
+
+	ret = cnt;
 
 	if (copy_from_user(&buf, ubuf, cnt))
 		return -EFAULT;
@@ -156,9 +150,9 @@ static ssize_t flags_write(struct file *filp, const char __user *ubuf,
 		return err;
 	}
 
-	*ppos += cnt;
+	*ppos += ret;
 
-	return cnt;
+	return ret;
 }
 
 static const struct file_operations flags_fops = {
@@ -191,55 +185,6 @@ static void trigger_mce(void *info)
 	asm volatile("int $18");
 }
 
-static void trigger_dfr_int(void *info)
-{
-	asm volatile("int %0" :: "i" (DEFERRED_ERROR_VECTOR));
-}
-
-static void trigger_thr_int(void *info)
-{
-	asm volatile("int %0" :: "i" (THRESHOLD_APIC_VECTOR));
-}
-
-static u32 get_nbc_for_node(int node_id)
-{
-	struct cpuinfo_x86 *c = &boot_cpu_data;
-	u32 cores_per_node;
-
-	cores_per_node = c->x86_max_cores / amd_get_nodes_per_socket();
-
-	return cores_per_node * node_id;
-}
-
-static void toggle_nb_mca_mst_cpu(u16 nid)
-{
-	struct pci_dev *F3 = node_to_amd_nb(nid)->misc;
-	u32 val;
-	int err;
-
-	if (!F3)
-		return;
-
-	err = pci_read_config_dword(F3, NBCFG, &val);
-	if (err) {
-		pr_err("%s: Error reading F%dx%03x.\n",
-		       __func__, PCI_FUNC(F3->devfn), NBCFG);
-		return;
-	}
-
-	if (val & BIT(27))
-		return;
-
-	pr_err("%s: Set D18F3x44[NbMcaToMstCpuEn] which BIOS hasn't done.\n",
-	       __func__);
-
-	val |= BIT(27);
-	err = pci_write_config_dword(F3, NBCFG, val);
-	if (err)
-		pr_err("%s: Error writing F%dx%03x.\n",
-		       __func__, PCI_FUNC(F3->devfn), NBCFG);
-}
-
 static void do_inject(void)
 {
 	u64 mcg_status = 0;
@@ -259,26 +204,6 @@ static void do_inject(void)
 
 	if (!(i_mce.status & MCI_STATUS_PCC))
 		mcg_status |= MCG_STATUS_RIPV;
-
-	/*
-	 * Ensure necessary status bits for deferred errors:
-	 * - MCx_STATUS[Deferred]: make sure it is a deferred error
-	 * - MCx_STATUS[UC] cleared: deferred errors are _not_ UC
-	 */
-	if (inj_type == DFR_INT_INJ) {
-		i_mce.status |= MCI_STATUS_DEFERRED;
-		i_mce.status |= (i_mce.status & ~MCI_STATUS_UC);
-	}
-
-	/*
-	 * For multi node CPUs, logging and reporting of bank 4 errors happens
-	 * only on the node base core. Refer to D18F3x44[NbMcaToMstCpuEn] for
-	 * Fam10h and later BKDGs.
-	 */
-	if (static_cpu_has(X86_FEATURE_AMD_DCM) && b == 4) {
-		toggle_nb_mca_mst_cpu(amd_get_nb_id(cpu));
-		cpu = get_nbc_for_node(amd_get_nb_id(cpu));
-	}
 
 	get_online_cpus();
 	if (!cpu_online(cpu))
@@ -300,16 +225,7 @@ static void do_inject(void)
 
 	toggle_hw_mce_inject(cpu, false);
 
-	switch (inj_type) {
-	case DFR_INT_INJ:
-		smp_call_function_single(cpu, trigger_dfr_int, NULL, 0);
-		break;
-	case THR_INT_INJ:
-		smp_call_function_single(cpu, trigger_thr_int, NULL, 0);
-		break;
-	default:
-		smp_call_function_single(cpu, trigger_mce, NULL, 0);
-	}
+	smp_call_function_single(cpu, trigger_mce, NULL, 0);
 
 err:
 	put_online_cpus();
@@ -374,11 +290,6 @@ static const char readme_msg[] =
 "\t    handle the error. Be warned: might cause system panic if MCi_STATUS[PCC] \n"
 "\t    is set. Therefore, consider setting (debugfs_mountpoint)/mce/fake_panic \n"
 "\t    before injecting.\n"
-"\t  - \"df\": Trigger APIC interrupt for Deferred error. Causes deferred \n"
-"\t    error APIC interrupt handler to handle the error if the feature is \n"
-"\t    is present in hardware. \n"
-"\t  - \"th\": Trigger APIC interrupt for Threshold errors. Causes threshold \n"
-"\t    APIC interrupt handler to handle the error. \n"
 "\n";
 
 static ssize_t

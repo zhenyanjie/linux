@@ -493,8 +493,7 @@ int dlm_launch_thread(struct dlm_ctxt *dlm)
 {
 	mlog(0, "Starting dlm_thread...\n");
 
-	dlm->dlm_thread_task = kthread_run(dlm_thread, dlm, "dlm-%s",
-			dlm->name);
+	dlm->dlm_thread_task = kthread_run(dlm_thread, dlm, "dlm_thread");
 	if (IS_ERR(dlm->dlm_thread_task)) {
 		mlog_errno(PTR_ERR(dlm->dlm_thread_task));
 		dlm->dlm_thread_task = NULL;

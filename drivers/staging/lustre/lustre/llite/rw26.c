@@ -298,10 +298,7 @@ ssize_t ll_direct_rw_pages(const struct lu_env *env, struct cl_io *io,
 		}
 
 		if (likely(do_io)) {
-			/*
-			 * Add a page to the incoming page list of 2-queue.
-			 */
-			cl_page_list_add(&queue->c2_qin, clp);
+			cl_2queue_add(queue, clp);
 
 			/*
 			 * Set page clip to tell transfer formation engine
@@ -403,7 +400,7 @@ static ssize_t ll_direct_IO_26(struct kiocb *iocb, struct iov_iter *iter,
 	 * 1. Need inode mutex to operate transient pages.
 	 */
 	if (iov_iter_rw(iter) == READ)
-		inode_lock(inode);
+		mutex_lock(&inode->i_mutex);
 
 	LASSERT(obj->cob_transient_pages == 0);
 	while (iov_iter_count(iter)) {
@@ -421,7 +418,6 @@ static ssize_t ll_direct_IO_26(struct kiocb *iocb, struct iov_iter *iter,
 		result = iov_iter_get_pages_alloc(iter, &pages, count, &offs);
 		if (likely(result > 0)) {
 			int n = DIV_ROUND_UP(result + offs, PAGE_SIZE);
-
 			result = ll_direct_IO_26_seg(env, io, iov_iter_rw(iter),
 						     inode, file->f_mapping,
 						     result, file_offset, pages,
@@ -454,7 +450,7 @@ static ssize_t ll_direct_IO_26(struct kiocb *iocb, struct iov_iter *iter,
 out:
 	LASSERT(obj->cob_transient_pages == 0);
 	if (iov_iter_rw(iter) == READ)
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 
 	if (tot_bytes > 0) {
 		if (iov_iter_rw(iter) == WRITE) {

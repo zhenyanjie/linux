@@ -63,7 +63,8 @@ static int brownstone_wm8994_hw_params(struct snd_pcm_substream *substream,
 		sysclk    = params_rate(params) * 512;
 		sspa_mclk = params_rate(params) * 64;
 	}
-	sspa_div = freq_out / sspa_mclk;
+	sspa_div = freq_out;
+	do_div(sspa_div, sspa_mclk);
 
 	snd_soc_dai_set_sysclk(cpu_dai, MMP_SSPA_CLK_AUDIO, freq_out, 0);
 	snd_soc_dai_set_pll(cpu_dai, MMP_SYSCLK, 0, freq_out, sysclk);
@@ -115,11 +116,17 @@ static int brownstone_probe(struct platform_device *pdev)
 	int ret;
 
 	brownstone.dev = &pdev->dev;
-	ret = devm_snd_soc_register_card(&pdev->dev, &brownstone);
+	ret = snd_soc_register_card(&brownstone);
 	if (ret)
 		dev_err(&pdev->dev, "snd_soc_register_card() failed: %d\n",
 				ret);
 	return ret;
+}
+
+static int brownstone_remove(struct platform_device *pdev)
+{
+	snd_soc_unregister_card(&brownstone);
+	return 0;
 }
 
 static struct platform_driver mmp_driver = {
@@ -128,6 +135,7 @@ static struct platform_driver mmp_driver = {
 		.pm     = &snd_soc_pm_ops,
 	},
 	.probe		= brownstone_probe,
+	.remove		= brownstone_remove,
 };
 
 module_platform_driver(mmp_driver);

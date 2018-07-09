@@ -5,7 +5,7 @@
  *  Copyright (C) 2008-2009 Red Hat, Inc., Ingo Molnar
  *  Copyright (C) 2009 Jaswinder Singh Rajput
  *  Copyright (C) 2009 Advanced Micro Devices, Inc., Robert Richter
- *  Copyright (C) 2008-2009 Red Hat, Inc., Peter Zijlstra
+ *  Copyright (C) 2008-2009 Red Hat, Inc., Peter Zijlstra <pzijlstr@redhat.com>
  *  Copyright (C) 2009 Intel Corporation, <markus.t.metzger@intel.com>
  *  Copyright (C) 2009 Google, Inc., Stephane Eranian
  *
@@ -14,7 +14,17 @@
 
 #include <linux/perf_event.h>
 
-/* To enable MSR tracing please use the generic trace points. */
+#if 0
+#undef wrmsrl
+#define wrmsrl(msr, val) 						\
+do {									\
+	unsigned int _msr = (msr);					\
+	u64 _val = (val);						\
+	trace_printk("wrmsrl(%x, %Lx)\n", (unsigned int)(_msr),		\
+			(unsigned long long)(_val));			\
+	native_write_msr((_msr), (u32)(_val), (u32)(_val >> 32));	\
+} while (0)
+#endif
 
 /*
  *          |   NHM/WSM    |      SNB     |
@@ -186,7 +196,7 @@ struct cpu_hw_events {
 
 	int			n_excl; /* the number of exclusive events */
 
-	unsigned int		txn_flags;
+	unsigned int		group_flag;
 	int			is_fake;
 
 	/*
@@ -308,10 +318,6 @@ struct cpu_hw_events {
 #define INTEL_UEVENT_CONSTRAINT(c, n)	\
 	EVENT_CONSTRAINT(c, n, INTEL_ARCH_EVENT_MASK)
 
-/* Constraint on specific umask bit only + event */
-#define INTEL_UBIT_EVENT_CONSTRAINT(c, n)	\
-	EVENT_CONSTRAINT(c, n, ARCH_PERFMON_EVENTSEL_EVENT|(c))
-
 /* Like UEVENT_CONSTRAINT, but match flags too */
 #define INTEL_FLAGS_UEVENT_CONSTRAINT(c, n)	\
 	EVENT_CONSTRAINT(c, n, INTEL_ARCH_EVENT_MASK|X86_ALL_EVENT_FLAGS)
@@ -381,7 +387,7 @@ struct cpu_hw_events {
 /* Check flags and event code/umask, and set the HSW N/A flag */
 #define INTEL_FLAGS_UEVENT_CONSTRAINT_DATALA_NA(code, n) \
 	__EVENT_CONSTRAINT(code, n, 			\
-			  INTEL_ARCH_EVENT_MASK|X86_ALL_EVENT_FLAGS, \
+			  INTEL_ARCH_EVENT_MASK|INTEL_ARCH_EVENT_MASK, \
 			  HWEIGHT(n), 0, PERF_X86_EVENT_PEBS_NA_HSW)
 
 
@@ -583,10 +589,8 @@ struct x86_pmu {
 			bts_active	:1,
 			pebs		:1,
 			pebs_active	:1,
-			pebs_broken	:1,
-			pebs_prec_dist	:1;
+			pebs_broken	:1;
 	int		pebs_record_size;
-	int		pebs_buffer_size;
 	void		(*drain_pebs)(struct pt_regs *regs);
 	struct event_constraint *pebs_constraints;
 	void		(*pebs_aliases)(struct perf_event *event);
@@ -623,7 +627,6 @@ struct x86_perf_task_context {
 	u64 lbr_from[MAX_LBR_ENTRIES];
 	u64 lbr_to[MAX_LBR_ENTRIES];
 	u64 lbr_info[MAX_LBR_ENTRIES];
-	int tos;
 	int lbr_callstack_users;
 	int lbr_stack_state;
 };
@@ -902,10 +905,6 @@ void intel_pmu_lbr_init_snb(void);
 void intel_pmu_lbr_init_hsw(void);
 
 void intel_pmu_lbr_init_skl(void);
-
-void intel_pmu_lbr_init_knl(void);
-
-void intel_pmu_pebs_data_source_nhm(void);
 
 int intel_pmu_setup_lbr_filter(struct perf_event *event);
 

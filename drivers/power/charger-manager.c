@@ -1581,10 +1581,8 @@ static struct charger_desc *of_cm_parse_desc(struct device *dev)
 				cables = devm_kzalloc(dev, sizeof(*cables)
 						* chg_regs->num_cables,
 						GFP_KERNEL);
-				if (!cables) {
-					of_node_put(child);
+				if (!cables)
 					return ERR_PTR(-ENOMEM);
-				}
 
 				chg_regs->cables = cables;
 

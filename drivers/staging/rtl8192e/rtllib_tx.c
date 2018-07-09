@@ -11,6 +11,10 @@
   FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
   more details.
 
+  You should have received a copy of the GNU General Public License along with
+  this program; if not, write to the Free Software Foundation, Inc., 59
+  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
   The full GNU General Public License is included in this distribution in the
   file called LICENSE.
 
@@ -483,7 +487,7 @@ static void rtllib_query_protectionmode(struct rtllib_device *ieee,
 	if (ieee->current_network.capability & WLAN_CAPABILITY_SHORT_PREAMBLE)
 		tcb_desc->bUseShortPreamble = true;
 	if (ieee->iw_mode == IW_MODE_MASTER)
-		goto NO_PROTECTION;
+			goto NO_PROTECTION;
 	return;
 NO_PROTECTION:
 	tcb_desc->bRTSEnable	= false;
@@ -631,10 +635,10 @@ static int rtllib_xmit_inter(struct sk_buff *skb, struct net_device *dev)
 		}
 
 		if (skb->len > 282) {
-			if (ether_type == ETH_P_IP) {
+			if (ETH_P_IP == ether_type) {
 				const struct iphdr *ip = (struct iphdr *)
 					((u8 *)skb->data+14);
-				if (ip->protocol == IPPROTO_UDP) {
+				if (IPPROTO_UDP == ip->protocol) {
 					struct udphdr *udp;
 
 					udp = (struct udphdr *)((u8 *)ip +
@@ -647,7 +651,7 @@ static int rtllib_xmit_inter(struct sk_buff *skb, struct net_device *dev)
 						ieee->LPSDelayCnt = 200;
 					}
 				}
-			} else if (ether_type == ETH_P_ARP) {
+			} else if (ETH_P_ARP == ether_type) {
 				netdev_info(ieee->dev,
 					    "=================>DHCP Protocol start tx ARP pkt!!\n");
 				bdhcp = true;

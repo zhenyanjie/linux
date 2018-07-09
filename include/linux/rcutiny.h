@@ -83,7 +83,7 @@ static inline void synchronize_sched_expedited(void)
 }
 
 static inline void kfree_call_rcu(struct rcu_head *head,
-				  rcu_callback_t func)
+				  void (*func)(struct rcu_head *rcu))
 {
 	call_rcu(head, func);
 }
@@ -181,14 +181,6 @@ static inline void rcu_irq_enter(void)
 {
 }
 
-static inline void rcu_irq_exit_irqson(void)
-{
-}
-
-static inline void rcu_irq_enter_irqson(void)
-{
-}
-
 static inline void rcu_irq_exit(void)
 {
 }
@@ -224,7 +216,6 @@ static inline bool rcu_is_watching(void)
 
 static inline void rcu_all_qs(void)
 {
-	barrier(); /* Avoid RCU read-side critical sections leaking across. */
 }
 
 #endif /* __LINUX_RCUTINY_H */

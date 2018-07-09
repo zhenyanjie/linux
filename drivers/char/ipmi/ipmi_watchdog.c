@@ -153,9 +153,6 @@ static int timeout = 10;
 /* The pre-timeout is disabled by default. */
 static int pretimeout;
 
-/* Default timeout to set on panic */
-static int panic_wdt_timeout = 255;
-
 /* Default action is to reset the board on a timeout. */
 static unsigned char action_val = WDOG_TIMEOUT_RESET;
 
@@ -295,9 +292,6 @@ MODULE_PARM_DESC(timeout, "Timeout value in seconds.");
 
 module_param(pretimeout, timeout, 0644);
 MODULE_PARM_DESC(pretimeout, "Pretimeout value in seconds.");
-
-module_param(panic_wdt_timeout, timeout, 0644);
-MODULE_PARM_DESC(timeout, "Timeout value on kernel panic in seconds.");
 
 module_param_cb(action, &param_ops_str, action_op, 0644);
 MODULE_PARM_DESC(action, "Timeout action. One of: "
@@ -1195,7 +1189,7 @@ static int wdog_panic_handler(struct notifier_block *this,
 		/* Make sure we do this only once. */
 		panic_event_handled = 1;
 
-		timeout = panic_wdt_timeout;
+		timeout = 255;
 		pretimeout = 0;
 		panic_halt_ipmi_set_timeout();
 	}

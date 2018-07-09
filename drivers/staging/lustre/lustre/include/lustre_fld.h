@@ -27,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2013, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -61,6 +61,7 @@ enum {
 	LUSTRE_CLI_FLD_HASH_RRB
 };
 
+
 struct lu_fld_target {
 	struct list_head	       ft_chain;
 	struct obd_export       *ft_exp;
@@ -69,6 +70,10 @@ struct lu_fld_target {
 };
 
 struct lu_server_fld {
+	/**
+	 * /fld file object device */
+	struct dt_object	*lsf_obj;
+
 	/**
 	 * super sequence controller export, needed to forward fld
 	 * lookup  request. */

@@ -444,7 +444,9 @@ static int nbd_thread_recv(struct nbd_device *nbd)
 	spin_unlock_irqrestore(&nbd->tasks_lock, flags);
 
 	if (signal_pending(current)) {
-		ret = kernel_dequeue_signal(NULL);
+		siginfo_t info;
+
+		ret = dequeue_signal_lock(current, &current->blocked, &info);
 		dev_warn(nbd_to_dev(nbd), "pid %d, %s, got signal %d\n",
 			 task_pid_nr(current), current->comm, ret);
 		mutex_lock(&nbd->tx_lock);
@@ -558,8 +560,11 @@ static int nbd_thread_send(void *data)
 					 !list_empty(&nbd->waiting_queue));
 
 		if (signal_pending(current)) {
-			int ret = kernel_dequeue_signal(NULL);
+			siginfo_t info;
+			int ret;
 
+			ret = dequeue_signal_lock(current, &current->blocked,
+						  &info);
 			dev_warn(nbd_to_dev(nbd), "pid %d, %s, got signal %d\n",
 				 task_pid_nr(current), current->comm, ret);
 			mutex_lock(&nbd->tx_lock);
@@ -587,8 +592,10 @@ static int nbd_thread_send(void *data)
 	spin_unlock_irqrestore(&nbd->tasks_lock, flags);
 
 	/* Clear maybe pending signals */
-	if (signal_pending(current))
-		kernel_dequeue_signal(NULL);
+	if (signal_pending(current)) {
+		siginfo_t info;
+		dequeue_signal_lock(current, &current->blocked, &info);
+	}
 
 	return 0;
 }
@@ -618,8 +625,8 @@ static void nbd_request_handler(struct request_queue *q)
 			req, req->cmd_type);
 
 		if (unlikely(!nbd->sock)) {
-			dev_err_ratelimited(disk_to_dev(nbd->disk),
-					    "Attempted send on closed socket\n");
+			dev_err(disk_to_dev(nbd->disk),
+				"Attempted send on closed socket\n");
 			req->errors++;
 			nbd_end_request(nbd, req);
 			spin_lock_irq(q->queue_lock);
@@ -827,7 +834,6 @@ static const struct block_device_operations nbd_fops =
 {
 	.owner =	THIS_MODULE,
 	.ioctl =	nbd_ioctl,
-	.compat_ioctl =	nbd_ioctl,
 };
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)

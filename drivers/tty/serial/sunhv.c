@@ -148,10 +148,8 @@ static int receive_chars_read(struct uart_port *port)
 			uart_handle_dcd_change(port, 1);
 		}
 
-		if (port->sysrq != 0 &&  *con_read_page) {
-			for (i = 0; i < bytes_read; i++)
-				uart_handle_sysrq_char(port, con_read_page[i]);
-		}
+		for (i = 0; i < bytes_read; i++)
+			uart_handle_sysrq_char(port, con_read_page[i]);
 
 		if (port->state == NULL)
 			continue;
@@ -170,17 +168,17 @@ struct sunhv_ops {
 	int (*receive_chars)(struct uart_port *port);
 };
 
-static const struct sunhv_ops bychar_ops = {
+static struct sunhv_ops bychar_ops = {
 	.transmit_chars = transmit_chars_putchar,
 	.receive_chars = receive_chars_getchar,
 };
 
-static const struct sunhv_ops bywrite_ops = {
+static struct sunhv_ops bywrite_ops = {
 	.transmit_chars = transmit_chars_write,
 	.receive_chars = receive_chars_read,
 };
 
-static const struct sunhv_ops *sunhv_ops = &bychar_ops;
+static struct sunhv_ops *sunhv_ops = &bychar_ops;
 
 static struct tty_port *receive_chars(struct uart_port *port)
 {

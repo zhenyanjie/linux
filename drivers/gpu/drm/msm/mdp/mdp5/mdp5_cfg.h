@@ -61,12 +61,7 @@ struct mdp5_smp_block {
 	int mmb_size;			/* MMB: size in bytes */
 	uint32_t clients[MAX_CLIENTS];	/* SMP port allocation /pipe */
 	mdp5_smp_state_t reserved_state;/* SMP MMBs statically allocated */
-	uint8_t reserved[MAX_CLIENTS];	/* # of MMBs allocated per client */
-};
-
-struct mdp5_mdp_block {
-	MDP5_SUB_BLOCK_DEFINITION;
-	uint32_t caps;			/* MDP capabilities: MDP_CAP_xxx bits */
+	int reserved[MAX_CLIENTS];	/* # of MMBs allocated per client */
 };
 
 #define MDP5_INTF_NUM_MAX	5
@@ -79,7 +74,7 @@ struct mdp5_intf_block {
 struct mdp5_cfg_hw {
 	char  *name;
 
-	struct mdp5_mdp_block mdp;
+	struct mdp5_sub_block mdp;
 	struct mdp5_smp_block smp;
 	struct mdp5_ctl_block ctl;
 	struct mdp5_pipe_block pipe_vig;
@@ -89,8 +84,6 @@ struct mdp5_cfg_hw {
 	struct mdp5_sub_block dspp;
 	struct mdp5_sub_block ad;
 	struct mdp5_sub_block pp;
-	struct mdp5_sub_block dsc;
-	struct mdp5_sub_block cdm;
 	struct mdp5_intf_block intf;
 
 	uint32_t max_clk;

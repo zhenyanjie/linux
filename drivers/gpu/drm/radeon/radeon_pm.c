@@ -276,12 +276,8 @@ static void radeon_pm_set_clocks(struct radeon_device *rdev)
 	if (rdev->irq.installed) {
 		for (i = 0; i < rdev->num_crtc; i++) {
 			if (rdev->pm.active_crtcs & (1 << i)) {
-				/* This can fail if a modeset is in progress */
-				if (drm_vblank_get(rdev->ddev, i) == 0)
-					rdev->pm.req_vblank |= (1 << i);
-				else
-					DRM_DEBUG_DRIVER("crtc %d no vblank, can glitch\n",
-							 i);
+				rdev->pm.req_vblank |= (1 << i);
+				drm_vblank_get(rdev->ddev, i);
 			}
 		}
 	}
@@ -717,7 +713,7 @@ static struct attribute *hwmon_attributes[] = {
 static umode_t hwmon_attributes_visible(struct kobject *kobj,
 					struct attribute *attr, int index)
 {
-	struct device *dev = kobj_to_dev(kobj);
+	struct device *dev = container_of(kobj, struct device, kobj);
 	struct radeon_device *rdev = dev_get_drvdata(dev);
 	umode_t effective_mode = attr->mode;
 
@@ -1082,6 +1078,10 @@ force:
 	/* update displays */
 	radeon_dpm_display_configuration_changed(rdev);
 
+	rdev->pm.dpm.current_active_crtcs = rdev->pm.dpm.new_active_crtcs;
+	rdev->pm.dpm.current_active_crtc_count = rdev->pm.dpm.new_active_crtc_count;
+	rdev->pm.dpm.single_display = single_display;
+
 	/* wait for the rings to drain */
 	for (i = 0; i < RADEON_NUM_RINGS; i++) {
 		struct radeon_ring *ring = &rdev->ring[i];
@@ -1096,10 +1096,6 @@ force:
 	rdev->pm.dpm.current_ps = rdev->pm.dpm.requested_ps;
 
 	radeon_dpm_post_set_power_state(rdev);
-
-	rdev->pm.dpm.current_active_crtcs = rdev->pm.dpm.new_active_crtcs;
-	rdev->pm.dpm.current_active_crtc_count = rdev->pm.dpm.new_active_crtc_count;
-	rdev->pm.dpm.single_display = single_display;
 
 	if (rdev->asic->dpm.force_performance_level) {
 		if (rdev->pm.dpm.thermal_active) {
@@ -1546,7 +1542,8 @@ int radeon_pm_late_init(struct radeon_device *rdev)
 				ret = device_create_file(rdev->dev, &dev_attr_power_method);
 				if (ret)
 					DRM_ERROR("failed to create device file for power method\n");
-				rdev->pm.sysfs_initialized = true;
+				if (!ret)
+					rdev->pm.sysfs_initialized = true;
 			}
 
 			mutex_lock(&rdev->pm.mutex);
@@ -1760,11 +1757,7 @@ static bool radeon_pm_in_vbl(struct radeon_device *rdev)
 	 */
 	for (crtc = 0; (crtc < rdev->num_crtc) && in_vbl; crtc++) {
 		if (rdev->pm.active_crtcs & (1 << crtc)) {
-			vbl_status = radeon_get_crtc_scanoutpos(rdev->ddev,
-								crtc,
-								USE_REAL_VBLANKSTART,
-								&vpos, &hpos, NULL, NULL,
-								&rdev->mode_info.crtcs[crtc]->base.hwmode);
+			vbl_status = radeon_get_crtc_scanoutpos(rdev->ddev, crtc, 0, &vpos, &hpos, NULL, NULL);
 			if ((vbl_status & DRM_SCANOUTPOS_VALID) &&
 			    !(vbl_status & DRM_SCANOUTPOS_IN_VBLANK))
 				in_vbl = false;

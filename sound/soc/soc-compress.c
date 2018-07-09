@@ -612,15 +612,8 @@ static struct snd_compr_ops soc_compr_dyn_ops = {
 	.get_codec_caps = soc_compr_get_codec_caps
 };
 
-/**
- * snd_soc_new_compress - create a new compress.
- *
- * @rtd: The runtime for which we will create compress
- * @num: the device index number (zero based - shared with normal PCMs)
- *
- * Return: 0 for success, else error.
- */
-int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
+/* create a new compress */
+int soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
 {
 	struct snd_soc_codec *codec = rtd->codec;
 	struct snd_soc_platform *platform = rtd->platform;
@@ -706,13 +699,7 @@ int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num)
 		compr->ops->copy = soc_compr_copy;
 
 	mutex_init(&compr->lock);
-
-	snprintf(new_name, sizeof(new_name), "%s %s-%d",
-		 rtd->dai_link->stream_name,
-		 rtd->codec_dai->name, num);
-
-	ret = snd_compress_new(rtd->card->snd_card, num, direction,
-				new_name, compr);
+	ret = snd_compress_new(rtd->card->snd_card, num, direction, compr);
 	if (ret < 0) {
 		pr_err("compress asoc: can't create compress for codec %s\n",
 			codec->component.name);
@@ -733,4 +720,3 @@ compr_err:
 	kfree(compr);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(snd_soc_new_compress);

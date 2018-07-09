@@ -21,20 +21,6 @@
 
 #include "internals.h"
 
-static irqreturn_t bad_chained_irq(int irq, void *dev_id)
-{
-	WARN_ONCE(1, "Chained irq %d should not call an action\n", irq);
-	return IRQ_NONE;
-}
-
-/*
- * Chained handlers should never call action on their IRQ. This default
- * action will emit warning if such thing happens.
- */
-struct irqaction chained_action = {
-	.handler = bad_chained_irq,
-};
-
 /**
  *	irq_set_chip - set the irq chip for an irq
  *	@irq:	irq number
@@ -241,13 +227,6 @@ void irq_enable(struct irq_desc *desc)
  * disabled. If an interrupt happens, then the interrupt flow
  * handler masks the line at the hardware level and marks it
  * pending.
- *
- * If the interrupt chip does not implement the irq_disable callback,
- * a driver can disable the lazy approach for a particular irq line by
- * calling 'irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY)'. This can
- * be used for devices which cannot disable the interrupt at the
- * device level under certain circumstances and have to use
- * disable_irq[_nosync] instead.
  */
 void irq_disable(struct irq_desc *desc)
 {
@@ -255,8 +234,6 @@ void irq_disable(struct irq_desc *desc)
 	if (desc->irq_data.chip->irq_disable) {
 		desc->irq_data.chip->irq_disable(&desc->irq_data);
 		irq_state_set_masked(desc);
-	} else if (irq_settings_disable_unlazy(desc)) {
-		mask_irq(desc);
 	}
 }
 
@@ -338,6 +315,7 @@ void handle_nested_irq(unsigned int irq)
 	raw_spin_lock_irq(&desc->lock);
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	action = desc->action;
 	if (unlikely(!action || irqd_irq_disabled(&desc->irq_data))) {
@@ -345,7 +323,6 @@ void handle_nested_irq(unsigned int irq)
 		goto out_unlock;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	irqd_set(&desc->irq_data, IRQD_IRQ_INPROGRESS);
 	raw_spin_unlock_irq(&desc->lock);
 
@@ -412,13 +389,13 @@ void handle_simple_irq(struct irq_desc *desc)
 		goto out_unlock;
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	if (unlikely(!desc->action || irqd_irq_disabled(&desc->irq_data))) {
 		desc->istate |= IRQS_PENDING;
 		goto out_unlock;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	handle_irq_event(desc);
 
 out_unlock:
@@ -462,6 +439,7 @@ void handle_level_irq(struct irq_desc *desc)
 		goto out_unlock;
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	/*
 	 * If its disabled or no action available
@@ -472,7 +450,6 @@ void handle_level_irq(struct irq_desc *desc)
 		goto out_unlock;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	handle_irq_event(desc);
 
 	cond_unmask_irq(desc);
@@ -532,6 +509,7 @@ void handle_fasteoi_irq(struct irq_desc *desc)
 		goto out;
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	/*
 	 * If its disabled or no action available
@@ -543,7 +521,6 @@ void handle_fasteoi_irq(struct irq_desc *desc)
 		goto out;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	if (desc->istate & IRQS_ONESHOT)
 		mask_irq(desc);
 
@@ -692,7 +669,7 @@ void handle_percpu_irq(struct irq_desc *desc)
 	if (chip->irq_ack)
 		chip->irq_ack(&desc->irq_data);
 
-	handle_irq_event_percpu(desc);
+	handle_irq_event_percpu(desc, desc->action);
 
 	if (chip->irq_eoi)
 		chip->irq_eoi(&desc->irq_data);
@@ -769,8 +746,6 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 		if (desc->irq_data.chip != &no_irq_chip)
 			mask_ack_irq(desc);
 		irq_state_set_disabled(desc);
-		if (is_chained)
-			desc->action = NULL;
 		desc->depth = 1;
 	}
 	desc->handle_irq = handle;
@@ -780,7 +755,6 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 		irq_settings_set_noprobe(desc);
 		irq_settings_set_norequest(desc);
 		irq_settings_set_nothread(desc);
-		desc->action = &chained_action;
 		irq_startup(desc, true);
 	}
 }
@@ -950,7 +924,6 @@ void irq_chip_ack_parent(struct irq_data *data)
 	data = data->parent_data;
 	data->chip->irq_ack(data);
 }
-EXPORT_SYMBOL_GPL(irq_chip_ack_parent);
 
 /**
  * irq_chip_mask_parent - Mask the parent interrupt

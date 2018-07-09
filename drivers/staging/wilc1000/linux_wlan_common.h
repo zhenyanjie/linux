@@ -12,6 +12,7 @@ enum debug_region {
 	RX_debug,
 	Lock_debug,
 	Tcp_enhance,
+	/*Added by amr - BugID_4720*/
 	Spin_debug,
 
 	Init_debug,
@@ -38,18 +39,21 @@ enum debug_region {
 #define FIRM_DBG                (1 << Firmware_debug)
 
 #if defined (WILC_DEBUGFS)
-extern atomic_t WILC_REGION;
-extern atomic_t WILC_DEBUG_LEVEL;
+int wilc_debugfs_init(void);
+void wilc_debugfs_remove(void);
 
-#define DEBUG           BIT(0)
-#define INFO            BIT(1)
-#define WRN             BIT(2)
-#define ERR             BIT(3)
+extern atomic_t REGION;
+extern atomic_t DEBUG_LEVEL;
+
+#define DEBUG           (1 << 0)
+#define INFO            (1 << 1)
+#define WRN             (1 << 2)
+#define ERR             (1 << 3)
 
 #define PRINT_D(region, ...)						\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & DEBUG) &&	\
-		   ((atomic_read(&WILC_REGION)) & (region))) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & DEBUG) &&		\
+		   ((atomic_read(&REGION)) & (region))) {		\
 			printk("DBG [%s: %d]", __func__, __LINE__);	\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -57,8 +61,8 @@ extern atomic_t WILC_DEBUG_LEVEL;
 
 #define PRINT_INFO(region, ...)						\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & INFO) &&	\
-		   ((atomic_read(&WILC_REGION)) & (region))) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & INFO) &&		\
+		   ((atomic_read(&REGION)) & (region))) {		\
 			printk("INFO [%s]", __func__);			\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -66,8 +70,8 @@ extern atomic_t WILC_DEBUG_LEVEL;
 
 #define PRINT_WRN(region, ...)						\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & WRN) &&	\
-		   ((atomic_read(&WILC_REGION)) & (region))) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & WRN) &&		\
+		   ((atomic_read(&REGION)) & (region))) {		\
 			printk("WRN [%s: %d]", __func__, __LINE__);	\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -75,7 +79,7 @@ extern atomic_t WILC_DEBUG_LEVEL;
 
 #define PRINT_ER(...)							\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & ERR)) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & ERR)) {		\
 			printk("ERR [%s: %d]", __func__, __LINE__);	\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -118,19 +122,25 @@ extern atomic_t WILC_DEBUG_LEVEL;
 		printk("ERR [%s: %d]", __func__, __LINE__);		\
 		printk(__VA_ARGS__);					\
 	} while (0)
-
 #endif
 
 #define FN_IN   /* PRINT_D(">>> \n") */
 #define FN_OUT  /* PRINT_D("<<<\n") */
 
+#ifdef MEMORY_STATIC
 #define LINUX_RX_SIZE	(96 * 1024)
+#endif
 #define LINUX_TX_SIZE	(64 * 1024)
 
 
 #define WILC_MULTICAST_TABLE_SIZE	8
 
-#if defined (BEAGLE_BOARD)
+#if defined (NM73131_0_BOARD)
+
+#define MODALIAS "wilc_spi"
+#define GPIO_NUM	IRQ_WILC1000_GPIO
+
+#elif defined (BEAGLE_BOARD)
 	#define SPI_CHANNEL	4
 
 	#if SPI_CHANNEL == 4
@@ -140,6 +150,9 @@ extern atomic_t WILC_DEBUG_LEVEL;
 		#define MODALIAS	"wilc_spi3"
 		#define GPIO_NUM	133
 	#endif
+#elif defined(PANDA_BOARD)
+	#define MODALIAS	"WILC_SPI"
+	#define GPIO_NUM	139
 #elif defined(PLAT_WMS8304)             /* rachel */
 	#define MODALIAS	"wilc_spi"
 	#define GPIO_NUM	139
@@ -163,4 +176,7 @@ extern atomic_t WILC_DEBUG_LEVEL;
 	#define MODALIAS	"WILC_SPI"
 	#define GPIO_NUM	0x44
 #endif
+
+
+void linux_wlan_enable_irq(void);
 #endif

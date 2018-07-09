@@ -1423,7 +1423,7 @@ static unsigned int fanout_demux_bpf(struct packet_fanout *f,
 	rcu_read_lock();
 	prog = rcu_dereference(f->bpf_prog);
 	if (prog)
-		ret = bpf_prog_run_clear_cb(prog, skb) % num;
+		ret = BPF_PROG_RUN(prog, skb) % num;
 	rcu_read_unlock();
 
 	return ret;
@@ -1439,17 +1439,17 @@ static int packet_rcv_fanout(struct sk_buff *skb, struct net_device *dev,
 {
 	struct packet_fanout *f = pt->af_packet_priv;
 	unsigned int num = READ_ONCE(f->num_members);
-	struct net *net = read_pnet(&f->net);
 	struct packet_sock *po;
 	unsigned int idx;
 
-	if (!net_eq(dev_net(dev), net) || !num) {
+	if (!net_eq(dev_net(dev), read_pnet(&f->net)) ||
+	    !num) {
 		kfree_skb(skb);
 		return 0;
 	}
 
 	if (fanout_has_flag(f, PACKET_FANOUT_FLAG_DEFRAG)) {
-		skb = ip_check_defrag(net, skb, IP_DEFRAG_AF_PACKET);
+		skb = ip_check_defrag(skb, IP_DEFRAG_AF_PACKET);
 		if (!skb)
 			return 0;
 	}
@@ -1519,10 +1519,10 @@ static void __fanout_unlink(struct sock *sk, struct packet_sock *po)
 
 static bool match_fanout_group(struct packet_type *ptype, struct sock *sk)
 {
-	if (sk->sk_family != PF_PACKET)
-		return false;
+	if (ptype->af_packet_priv == (void *)((struct packet_sock *)sk)->fanout)
+		return true;
 
-	return ptype->af_packet_priv == pkt_sk(sk)->fanout;
+	return false;
 }
 
 static void fanout_init_data(struct packet_fanout *f)
@@ -1567,7 +1567,7 @@ static int fanout_set_data_cbpf(struct packet_sock *po, char __user *data,
 	if (copy_from_user(&fprog, data, len))
 		return -EFAULT;
 
-	ret = bpf_prog_create_from_user(&new, &fprog, NULL, false);
+	ret = bpf_prog_create_from_user(&new, &fprog, NULL);
 	if (ret)
 		return ret;
 
@@ -1916,10 +1916,6 @@ retry:
 		goto retry;
 	}
 
-	if (!dev_validate_header(dev, skb->data, len)) {
-		err = -EINVAL;
-		goto out_unlock;
-	}
 	if (len > (dev->mtu + dev->hard_header_len + extra_len) &&
 	    !packet_extra_vlan_len_allowed(dev, skb)) {
 		err = -EMSGSIZE;
@@ -1949,16 +1945,16 @@ out_free:
 	return err;
 }
 
-static unsigned int run_filter(struct sk_buff *skb,
-			       const struct sock *sk,
-			       unsigned int res)
+static unsigned int run_filter(const struct sk_buff *skb,
+				      const struct sock *sk,
+				      unsigned int res)
 {
 	struct sk_filter *filter;
 
 	rcu_read_lock();
 	filter = rcu_dereference(sk->sk_filter);
 	if (filter != NULL)
-		res = bpf_prog_run_clear_cb(filter->prog, skb);
+		res = SK_RUN_FILTER(filter, skb);
 	rcu_read_unlock();
 
 	return res;
@@ -2330,6 +2326,18 @@ static void tpacket_destruct_skb(struct sk_buff *skb)
 	sock_wfree(skb);
 }
 
+static bool ll_header_truncated(const struct net_device *dev, int len)
+{
+	/* net device doesn't like empty head */
+	if (unlikely(len <= dev->hard_header_len)) {
+		net_warn_ratelimited("%s: packet size is too short (%d <= %d)\n",
+				     current->comm, len, dev->hard_header_len);
+		return true;
+	}
+
+	return false;
+}
+
 static void tpacket_set_protocol(const struct net_device *dev,
 				 struct sk_buff *skb)
 {
@@ -2412,19 +2420,19 @@ static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 		if (unlikely(err < 0))
 			return -EINVAL;
 	} else if (dev->hard_header_len) {
-		int hdrlen = min_t(int, dev->hard_header_len, tp_len);
+		if (ll_header_truncated(dev, tp_len))
+			return -EINVAL;
 
 		skb_push(skb, dev->hard_header_len);
-		err = skb_store_bits(skb, 0, data, hdrlen);
+		err = skb_store_bits(skb, 0, data,
+				dev->hard_header_len);
 		if (unlikely(err))
 			return err;
-		if (!dev_validate_header(dev, skb->data, hdrlen))
-			return -EINVAL;
 		if (!skb->protocol)
 			tpacket_set_protocol(dev, skb);
 
-		data += hdrlen;
-		to_write -= hdrlen;
+		data += dev->hard_header_len;
+		to_write -= dev->hard_header_len;
 	}
 
 	offset = offset_in_page(data);
@@ -2632,7 +2640,6 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
 	__be16 proto;
 	unsigned char *addr;
 	int err, reserve = 0;
-	struct sockcm_cookie sockc;
 	struct virtio_net_hdr vnet_hdr = { 0 };
 	int offset = 0;
 	int vnet_hdr_len;
@@ -2667,13 +2674,6 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
 	err = -ENETDOWN;
 	if (unlikely(!(dev->flags & IFF_UP)))
 		goto out_unlock;
-
-	sockc.mark = sk->sk_mark;
-	if (msg->msg_controllen) {
-		err = sock_cmsg_send(sk, msg, &sockc);
-		if (unlikely(err))
-			goto out_unlock;
-	}
 
 	if (sock->type == SOCK_RAW)
 		reserve = dev->hard_header_len;
@@ -2755,18 +2755,15 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
 		offset = dev_hard_header(skb, dev, ntohs(proto), addr, NULL, len);
 		if (unlikely(offset < 0))
 			goto out_free;
+	} else {
+		if (ll_header_truncated(dev, len))
+			goto out_free;
 	}
 
 	/* Returns -EFAULT on error */
 	err = skb_copy_datagram_from_iter(skb, offset, &msg->msg_iter, len);
 	if (err)
 		goto out_free;
-
-	if (sock->type == SOCK_RAW &&
-	    !dev_validate_header(dev, skb->data, len)) {
-		err = -EINVAL;
-		goto out_free;
-	}
 
 	sock_tx_timestamp(sk, &skb_shinfo(skb)->tx_flags);
 
@@ -2779,7 +2776,7 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
 	skb->protocol = proto;
 	skb->dev = dev;
 	skb->priority = sk->sk_priority;
-	skb->mark = sockc.mark;
+	skb->mark = sk->sk_mark;
 
 	packet_pick_tx_queue(dev, skb);
 
@@ -3436,7 +3433,6 @@ static int packet_mc_add(struct sock *sk, struct packet_mreq_max *mreq)
 	i->ifindex = mreq->mr_ifindex;
 	i->alen = mreq->mr_alen;
 	memcpy(i->addr, mreq->mr_address, i->alen);
-	memset(i->addr + i->alen, 0, sizeof(i->addr) - i->alen);
 	i->count = 1;
 	i->next = po->mclist;
 	po->mclist = i;
@@ -4105,7 +4101,7 @@ static int packet_set_ring(struct sock *sk, union tpacket_req_u *req_u,
 		err = -EINVAL;
 		if (unlikely((int)req->tp_block_size <= 0))
 			goto out;
-		if (unlikely(!PAGE_ALIGNED(req->tp_block_size)))
+		if (unlikely(req->tp_block_size & (PAGE_SIZE - 1)))
 			goto out;
 		if (po->tp_version >= TPACKET_V3 &&
 		    (int)(req->tp_block_size -
@@ -4117,8 +4113,8 @@ static int packet_set_ring(struct sock *sk, union tpacket_req_u *req_u,
 		if (unlikely(req->tp_frame_size & (TPACKET_ALIGNMENT - 1)))
 			goto out;
 
-		rb->frames_per_block = req->tp_block_size / req->tp_frame_size;
-		if (unlikely(rb->frames_per_block == 0))
+		rb->frames_per_block = req->tp_block_size/req->tp_frame_size;
+		if (unlikely(rb->frames_per_block <= 0))
 			goto out;
 		if (unlikely((rb->frames_per_block * req->tp_block_nr) !=
 					req->tp_frame_nr))

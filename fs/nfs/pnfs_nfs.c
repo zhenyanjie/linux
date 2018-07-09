@@ -246,23 +246,6 @@ void pnfs_fetch_commit_bucket_list(struct list_head *pages,
 
 }
 
-/* Helper function for pnfs_generic_commit_pagelist to catch an empty
- * page list. This can happen when two commits race. */
-static bool
-pnfs_generic_commit_cancel_empty_pagelist(struct list_head *pages,
-					  struct nfs_commit_data *data,
-					  struct nfs_commit_info *cinfo)
-{
-	if (list_empty(pages)) {
-		if (atomic_dec_and_test(&cinfo->mds->rpcs_out))
-			wake_up_atomic_t(&cinfo->mds->rpcs_out);
-		nfs_commitdata_release(data);
-		return true;
-	}
-
-	return false;
-}
-
 /* This follows nfs_commit_list pretty closely */
 int
 pnfs_generic_commit_pagelist(struct inode *inode, struct list_head *mds_pages,
@@ -283,25 +266,23 @@ pnfs_generic_commit_pagelist(struct inode *inode, struct list_head *mds_pages,
 		} else {
 			nfs_retry_commit(mds_pages, NULL, cinfo, 0);
 			pnfs_generic_retry_commit(cinfo, 0);
+			cinfo->completion_ops->error_cleanup(NFS_I(inode));
 			return -ENOMEM;
 		}
 	}
 
 	nreq += pnfs_generic_alloc_ds_commits(cinfo, &list);
 
-	if (nreq == 0)
+	if (nreq == 0) {
+		cinfo->completion_ops->error_cleanup(NFS_I(inode));
 		goto out;
+	}
 
 	atomic_add(nreq, &cinfo->mds->rpcs_out);
 
 	list_for_each_entry_safe(data, tmp, &list, pages) {
 		list_del_init(&data->pages);
 		if (data->ds_commit_index < 0) {
-			/* another commit raced with us */
-			if (pnfs_generic_commit_cancel_empty_pagelist(mds_pages,
-				data, cinfo))
-				continue;
-
 			nfs_init_commit(data, mds_pages, NULL, cinfo);
 			nfs_initiate_commit(NFS_CLIENT(inode), data,
 					    NFS_PROTO(data->inode),
@@ -310,12 +291,6 @@ pnfs_generic_commit_pagelist(struct inode *inode, struct list_head *mds_pages,
 			LIST_HEAD(pages);
 
 			pnfs_fetch_commit_bucket_list(&pages, data, cinfo);
-
-			/* another commit raced with us */
-			if (pnfs_generic_commit_cancel_empty_pagelist(&pages,
-				data, cinfo))
-				continue;
-
 			nfs_init_commit(data, &pages, data->lseg, cinfo);
 			initiate_commit(data, how);
 		}
@@ -896,11 +871,6 @@ pnfs_layout_mark_request_commit(struct nfs_page *req,
 	buckets = cinfo->ds->buckets;
 	list = &buckets[ds_commit_idx].written;
 	if (list_empty(list)) {
-		if (!pnfs_is_valid_lseg(lseg)) {
-			spin_unlock(cinfo->lock);
-			cinfo->completion_ops->resched_write(cinfo, req);
-			return;
-		}
 		/* Non-empty buckets hold a reference on the lseg.  That ref
 		 * is normally transferred to the COMMIT call and released
 		 * there.  It could also be released if the last req is pulled

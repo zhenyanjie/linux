@@ -49,8 +49,6 @@ static struct napi_struct cvm_oct_napi;
 
 /**
  * cvm_oct_do_interrupt - interrupt handler.
- * @cpl: Interrupt number. Unused
- * @dev_id: Cookie to identify the device. Unused
  *
  * The interrupt occurs whenever the POW has packets in our group.
  *
@@ -104,7 +102,7 @@ static inline int cvm_oct_check_rcv_error(cvmx_wqe_t *work)
 		    cvmx_read_csr(CVMX_GMXX_RXX_FRM_CTL(index, interface));
 		if (gmxx_rxx_frm_ctl.s.pre_chk == 0) {
 
-			u8 *ptr =
+			uint8_t *ptr =
 			    cvmx_phys_to_ptr(work->packet_ptr.s.addr);
 			int i = 0;
 
@@ -165,8 +163,8 @@ static inline int cvm_oct_check_rcv_error(cvmx_wqe_t *work)
 static int cvm_oct_napi_poll(struct napi_struct *napi, int budget)
 {
 	const int	coreid = cvmx_get_core_num();
-	u64	old_group_mask;
-	u64	old_scratch;
+	uint64_t	old_group_mask;
+	uint64_t	old_scratch;
 	int		rx_count = 0;
 	int		did_work_request = 0;
 	int		packet_not_copied;
@@ -286,7 +284,7 @@ static int cvm_oct_napi_poll(struct napi_struct *napi, int budget)
 			 * entirely stored in the work entry.
 			 */
 			if (unlikely(work->word2.s.bufs == 0)) {
-				u8 *ptr = work->packet_data;
+				uint8_t *ptr = work->packet_data;
 
 				if (likely(!work->word2.s.not_IP)) {
 					/*

@@ -97,7 +97,7 @@ static u32 __init r8a7779_read_mode_pins(void)
 static void __init r8a7779_init_time(void)
 {
 	r8a7779_clocks_init(r8a7779_read_mode_pins());
-	clocksource_probe();
+	clocksource_of_init();
 }
 
 static const char *const r8a7779_compat_dt[] __initconst = {

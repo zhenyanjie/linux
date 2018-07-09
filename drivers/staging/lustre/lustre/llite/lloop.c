@@ -257,9 +257,9 @@ static int do_bio_lustrebacked(struct lloop_device *lo, struct bio *head)
 	 *    be asked to write less pages once, this purely depends on
 	 *    implementation. Anyway, we should be careful to avoid deadlocking.
 	 */
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	bytes = ll_direct_rw_pages(env, io, rw, inode, pvec);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	cl_io_fini(env, io);
 	return (bytes == pvec->ldp_size) ? 0 : (int)bytes;
 }
@@ -315,6 +315,7 @@ static unsigned int loop_get_bio(struct lloop_device *lo, struct bio **req)
 		if (page_count + (*bio)->bi_vcnt > LLOOP_MAX_SEGMENTS)
 			break;
 
+
 		page_count += (*bio)->bi_vcnt;
 		count++;
 		bio = &(*bio)->bi_next;
@@ -333,7 +334,7 @@ static unsigned int loop_get_bio(struct lloop_device *lo, struct bio **req)
 	return count;
 }
 
-static blk_qc_t loop_make_request(struct request_queue *q, struct bio *old_bio)
+static void loop_make_request(struct request_queue *q, struct bio *old_bio)
 {
 	struct lloop_device *lo = q->queuedata;
 	int rw = bio_rw(old_bio);
@@ -364,20 +365,18 @@ static blk_qc_t loop_make_request(struct request_queue *q, struct bio *old_bio)
 		goto err;
 	}
 	loop_add_bio(lo, old_bio);
-	return BLK_QC_T_NONE;
+	return;
 err:
 	bio_io_error(old_bio);
-	return BLK_QC_T_NONE;
 }
+
 
 static inline void loop_handle_bio(struct lloop_device *lo, struct bio *bio)
 {
 	int ret;
-
 	ret = do_bio_lustrebacked(lo, bio);
 	while (bio) {
 		struct bio *tmp = bio->bi_next;
-
 		bio->bi_next = NULL;
 		bio->bi_error = ret;
 		bio_endio(bio);
@@ -431,7 +430,6 @@ static int loop_thread(void *data)
 		wait_event(lo->lo_bh_wait, loop_active(lo));
 		if (!atomic_read(&lo->lo_pending)) {
 			int exiting = 0;
-
 			spin_lock_irq(&lo->lo_lock);
 			exiting = (lo->lo_state == LLOOP_RUNDOWN);
 			spin_unlock_irq(&lo->lo_lock);
@@ -877,6 +875,6 @@ module_exit(lloop_exit);
 
 module_param(max_loop, int, 0444);
 MODULE_PARM_DESC(max_loop, "maximum of lloop_device");
-MODULE_AUTHOR("OpenSFS, Inc. <http://www.lustre.org/>");
+MODULE_AUTHOR("Sun Microsystems, Inc. <http://www.lustre.org/>");
 MODULE_DESCRIPTION("Lustre virtual block device");
 MODULE_LICENSE("GPL");

@@ -42,13 +42,6 @@ static enum {
 #define LBR_FAR_BIT		8 /* do not capture far branches */
 #define LBR_CALL_STACK_BIT	9 /* enable call stack */
 
-/*
- * Following bit only exists in Linux; we mask it out before writing it to
- * the actual MSR. But it helps the constraint perf code to understand
- * that this is a separate configuration.
- */
-#define LBR_NO_INFO_BIT	       63 /* don't read LBR_INFO. */
-
 #define LBR_KERNEL	(1 << LBR_KERNEL_BIT)
 #define LBR_USER	(1 << LBR_USER_BIT)
 #define LBR_JCC		(1 << LBR_JCC_BIT)
@@ -59,7 +52,6 @@ static enum {
 #define LBR_IND_JMP	(1 << LBR_IND_JMP_BIT)
 #define LBR_FAR		(1 << LBR_FAR_BIT)
 #define LBR_CALL_STACK	(1 << LBR_CALL_STACK_BIT)
-#define LBR_NO_INFO	(1ULL << LBR_NO_INFO_BIT)
 
 #define LBR_PLM (LBR_KERNEL | LBR_USER)
 
@@ -159,10 +151,10 @@ static void __intel_pmu_lbr_enable(bool pmi)
 	 * No need to reprogram LBR_SELECT in a PMI, as it
 	 * did not change.
 	 */
-	if (cpuc->lbr_sel)
-		lbr_select = cpuc->lbr_sel->config & x86_pmu.lbr_sel_mask;
-	if (!pmi && cpuc->lbr_sel)
+	if (cpuc->lbr_sel && !pmi) {
+		lbr_select = cpuc->lbr_sel->config;
 		wrmsrl(MSR_LBR_SELECT, lbr_select);
+	}
 
 	rdmsrl(MSR_IA32_DEBUGCTLMSR, debugctl);
 	orig_debugctl = debugctl;
@@ -247,7 +239,7 @@ static void __intel_pmu_lbr_restore(struct x86_perf_task_context *task_ctx)
 	}
 
 	mask = x86_pmu.lbr_nr - 1;
-	tos = task_ctx->tos;
+	tos = intel_pmu_lbr_tos();
 	for (i = 0; i < tos; i++) {
 		lbr_idx = (tos - i) & mask;
 		wrmsrl(x86_pmu.lbr_from + lbr_idx, task_ctx->lbr_from[i]);
@@ -255,7 +247,6 @@ static void __intel_pmu_lbr_restore(struct x86_perf_task_context *task_ctx)
 		if (x86_pmu.intel_cap.lbr_format == LBR_FORMAT_INFO)
 			wrmsrl(MSR_LBR_INFO_0 + lbr_idx, task_ctx->lbr_info[i]);
 	}
-	wrmsrl(x86_pmu.lbr_tos, tos);
 	task_ctx->lbr_stack_state = LBR_NONE;
 }
 
@@ -279,7 +270,6 @@ static void __intel_pmu_lbr_save(struct x86_perf_task_context *task_ctx)
 		if (x86_pmu.intel_cap.lbr_format == LBR_FORMAT_INFO)
 			rdmsrl(MSR_LBR_INFO_0 + lbr_idx, task_ctx->lbr_info[i]);
 	}
-	task_ctx->tos = tos;
 	task_ctx->lbr_stack_state = LBR_VALID;
 }
 
@@ -430,7 +420,6 @@ static void intel_pmu_lbr_read_32(struct cpu_hw_events *cpuc)
  */
 static void intel_pmu_lbr_read_64(struct cpu_hw_events *cpuc)
 {
-	bool need_info = false;
 	unsigned long mask = x86_pmu.lbr_nr - 1;
 	int lbr_format = x86_pmu.intel_cap.lbr_format;
 	u64 tos = intel_pmu_lbr_tos();
@@ -438,11 +427,8 @@ static void intel_pmu_lbr_read_64(struct cpu_hw_events *cpuc)
 	int out = 0;
 	int num = x86_pmu.lbr_nr;
 
-	if (cpuc->lbr_sel) {
-		need_info = !(cpuc->lbr_sel->config & LBR_NO_INFO);
-		if (cpuc->lbr_sel->config & LBR_CALL_STACK)
-			num = tos;
-	}
+	if (cpuc->lbr_sel->config & LBR_CALL_STACK)
+		num = tos;
 
 	for (i = 0; i < num; i++) {
 		unsigned long lbr_idx = (tos - i) & mask;
@@ -454,7 +440,7 @@ static void intel_pmu_lbr_read_64(struct cpu_hw_events *cpuc)
 		rdmsrl(x86_pmu.lbr_from + lbr_idx, from);
 		rdmsrl(x86_pmu.lbr_to   + lbr_idx, to);
 
-		if (lbr_format == LBR_FORMAT_INFO && need_info) {
+		if (lbr_format == LBR_FORMAT_INFO) {
 			u64 info;
 
 			rdmsrl(MSR_LBR_INFO_0 + lbr_idx, info);
@@ -569,8 +555,6 @@ static int intel_pmu_setup_sw_lbr_filter(struct perf_event *event)
 	if (br_type & PERF_SAMPLE_BRANCH_IND_JUMP)
 		mask |= X86_BR_IND_JMP;
 
-	if (br_type & PERF_SAMPLE_BRANCH_CALL)
-		mask |= X86_BR_CALL | X86_BR_ZERO_CALL;
 	/*
 	 * stash actual user request into reg, it may
 	 * be used by fixup code for some CPU
@@ -602,7 +586,6 @@ static int intel_pmu_setup_hw_lbr_filter(struct perf_event *event)
 		if (v != LBR_IGN)
 			mask |= v;
 	}
-
 	reg = &event->hw.branch_reg;
 	reg->idx = EXTRA_REG_LBR;
 
@@ -612,11 +595,6 @@ static int intel_pmu_setup_hw_lbr_filter(struct perf_event *event)
 	 * (~mask & LBR_SEL_MASK) | (mask & ~LBR_SEL_MASK)
 	 */
 	reg->config = mask ^ x86_pmu.lbr_sel_mask;
-
-	if ((br_type & PERF_SAMPLE_BRANCH_NO_CYCLES) &&
-	    (br_type & PERF_SAMPLE_BRANCH_NO_FLAGS) &&
-	    (x86_pmu.intel_cap.lbr_format == LBR_FORMAT_INFO))
-		reg->config |= LBR_NO_INFO;
 
 	return 0;
 }
@@ -912,7 +890,6 @@ static const int snb_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
 	[PERF_SAMPLE_BRANCH_IND_CALL_SHIFT]	= LBR_IND_CALL,
 	[PERF_SAMPLE_BRANCH_COND_SHIFT]		= LBR_JCC,
 	[PERF_SAMPLE_BRANCH_IND_JUMP_SHIFT]	= LBR_IND_JMP,
-	[PERF_SAMPLE_BRANCH_CALL_SHIFT]		= LBR_REL_CALL,
 };
 
 static const int hsw_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
@@ -928,7 +905,6 @@ static const int hsw_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
 	[PERF_SAMPLE_BRANCH_CALL_STACK_SHIFT]	= LBR_REL_CALL | LBR_IND_CALL
 						| LBR_RETURN | LBR_CALL_STACK,
 	[PERF_SAMPLE_BRANCH_IND_JUMP_SHIFT]	= LBR_IND_JMP,
-	[PERF_SAMPLE_BRANCH_CALL_SHIFT]		= LBR_REL_CALL,
 };
 
 /* core */
@@ -1044,19 +1020,5 @@ void __init intel_pmu_lbr_init_atom(void)
 	 * SW branch filter usage:
 	 * - compensate for lack of HW filter
 	 */
-	pr_cont("8-deep LBR, ");
-}
-
-/* Knights Landing */
-void intel_pmu_lbr_init_knl(void)
-{
-	x86_pmu.lbr_nr	   = 8;
-	x86_pmu.lbr_tos    = MSR_LBR_TOS;
-	x86_pmu.lbr_from   = MSR_LBR_NHM_FROM;
-	x86_pmu.lbr_to     = MSR_LBR_NHM_TO;
-
-	x86_pmu.lbr_sel_mask = LBR_SEL_MASK;
-	x86_pmu.lbr_sel_map  = snb_lbr_sel_map;
-
 	pr_cont("8-deep LBR, ");
 }

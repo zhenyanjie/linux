@@ -33,7 +33,6 @@
 #include "xfs_trans.h"
 #include "xfs_buf_item.h"
 #include "xfs_cksum.h"
-#include "xfs_log.h"
 
 /*
  * Local function declarations.
@@ -165,8 +164,6 @@ xfs_dir3_leaf_verify(
 			return false;
 		if (be64_to_cpu(leaf3->info.blkno) != bp->b_bn)
 			return false;
-		if (!xfs_log_check_lsn(mp, be64_to_cpu(leaf3->info.lsn)))
-			return false;
 	} else {
 		if (leaf->hdr.info.magic != cpu_to_be16(magic))
 			return false;
@@ -245,13 +242,11 @@ xfs_dir3_leafn_write_verify(
 }
 
 const struct xfs_buf_ops xfs_dir3_leaf1_buf_ops = {
-	.name = "xfs_dir3_leaf1",
 	.verify_read = xfs_dir3_leaf1_read_verify,
 	.verify_write = xfs_dir3_leaf1_write_verify,
 };
 
 const struct xfs_buf_ops xfs_dir3_leafn_buf_ops = {
-	.name = "xfs_dir3_leafn",
 	.verify_read = xfs_dir3_leafn_read_verify,
 	.verify_write = xfs_dir3_leafn_write_verify,
 };

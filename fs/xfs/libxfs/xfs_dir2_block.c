@@ -34,7 +34,6 @@
 #include "xfs_error.h"
 #include "xfs_trace.h"
 #include "xfs_cksum.h"
-#include "xfs_log.h"
 
 /*
  * Local function prototypes.
@@ -71,8 +70,6 @@ xfs_dir3_block_verify(
 		if (!uuid_equal(&hdr3->uuid, &mp->m_sb.sb_meta_uuid))
 			return false;
 		if (be64_to_cpu(hdr3->blkno) != bp->b_bn)
-			return false;
-		if (!xfs_log_check_lsn(mp, be64_to_cpu(hdr3->lsn)))
 			return false;
 	} else {
 		if (hdr3->magic != cpu_to_be32(XFS_DIR2_BLOCK_MAGIC))
@@ -123,7 +120,6 @@ xfs_dir3_block_write_verify(
 }
 
 const struct xfs_buf_ops xfs_dir3_block_buf_ops = {
-	.name = "xfs_dir3_block",
 	.verify_read = xfs_dir3_block_read_verify,
 	.verify_write = xfs_dir3_block_write_verify,
 };

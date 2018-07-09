@@ -496,6 +496,9 @@ static int jfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	jfs_info("In jfs_read_super: s_flags=0x%lx", sb->s_flags);
 
+	if (!new_valid_dev(sb->s_bdev->bd_dev))
+		return -EOVERFLOW;
+
 	sbi = kzalloc(sizeof(struct jfs_sb_info), GFP_KERNEL);
 	if (!sbi)
 		return -ENOMEM;
@@ -792,7 +795,7 @@ static ssize_t jfs_quota_write(struct super_block *sb, int type,
 	struct buffer_head tmp_bh;
 	struct buffer_head *bh;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	while (towrite > 0) {
 		tocopy = sb->s_blocksize - offset < towrite ?
 				sb->s_blocksize - offset : towrite;
@@ -824,7 +827,7 @@ static ssize_t jfs_quota_write(struct super_block *sb, int type,
 	}
 out:
 	if (len == towrite) {
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 		return err;
 	}
 	if (inode->i_size < off+len-towrite)
@@ -832,7 +835,7 @@ out:
 	inode->i_version++;
 	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	mark_inode_dirty(inode);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	return len - towrite;
 }
 
@@ -898,7 +901,7 @@ static int __init init_jfs_fs(void)
 
 	jfs_inode_cachep =
 	    kmem_cache_create("jfs_ip", sizeof(struct jfs_inode_info), 0,
-			    SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD|SLAB_ACCOUNT,
+			    SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD,
 			    init_once);
 	if (jfs_inode_cachep == NULL)
 		return -ENOMEM;

@@ -99,6 +99,17 @@ nfs4_callback_up(struct svc_serv *serv)
 }
 
 #if defined(CONFIG_NFS_V4_1)
+static int nfs41_callback_up_net(struct svc_serv *serv, struct net *net)
+{
+	/*
+	 * Create an svc_sock for the back channel service that shares the
+	 * fore channel connection.
+	 * Returns the input port (0) and sets the svc_serv bc_xprt on success
+	 */
+	return svc_create_xprt(serv, "tcp-bc", net, PF_INET, 0,
+			      SVC_SOCK_ANONYMOUS);
+}
+
 /*
  * The callback service for NFSv4.1 callbacks
  */
@@ -173,6 +184,11 @@ static inline void nfs_callback_bc_serv(u32 minorversion, struct rpc_xprt *xprt,
 		xprt->bc_serv = serv;
 }
 #else
+static int nfs41_callback_up_net(struct svc_serv *serv, struct net *net)
+{
+	return 0;
+}
+
 static void nfs_minorversion_callback_svc_setup(struct svc_serv *serv,
 		struct svc_rqst **rqstpp, int (**callback_svc)(void *vrqstp))
 {
@@ -243,8 +259,7 @@ static void nfs_callback_down_net(u32 minorversion, struct svc_serv *serv, struc
 	svc_shutdown_net(serv, net);
 }
 
-static int nfs_callback_up_net(int minorversion, struct svc_serv *serv,
-			       struct net *net, struct rpc_xprt *xprt)
+static int nfs_callback_up_net(int minorversion, struct svc_serv *serv, struct net *net)
 {
 	struct nfs_net *nn = net_generic(net, nfs_net_id);
 	int ret;
@@ -260,11 +275,20 @@ static int nfs_callback_up_net(int minorversion, struct svc_serv *serv,
 		goto err_bind;
 	}
 
-	ret = -EPROTONOSUPPORT;
-	if (minorversion == 0)
-		ret = nfs4_callback_up_net(serv, net);
-	else if (xprt->ops->bc_up)
-		ret = xprt->ops->bc_up(serv, net);
+	switch (minorversion) {
+		case 0:
+			ret = nfs4_callback_up_net(serv, net);
+			break;
+		case 1:
+		case 2:
+			ret = nfs41_callback_up_net(serv, net);
+			break;
+		default:
+			printk(KERN_ERR "NFS: unknown callback version: %d\n",
+					minorversion);
+			ret = -EINVAL;
+			break;
+	}
 
 	if (ret < 0) {
 		printk(KERN_ERR "NFS: callback service start failed\n");
@@ -340,7 +364,7 @@ int nfs_callback_up(u32 minorversion, struct rpc_xprt *xprt)
 		goto err_create;
 	}
 
-	ret = nfs_callback_up_net(minorversion, serv, net, xprt);
+	ret = nfs_callback_up_net(minorversion, serv, net);
 	if (ret < 0)
 		goto err_net;
 

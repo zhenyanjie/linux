@@ -385,6 +385,32 @@ static void s3c24xx_uart_copy_rx_to_tty(struct s3c24xx_uart_port *ourport,
 	}
 }
 
+static int s3c24xx_serial_rx_fifocnt(struct s3c24xx_uart_port *ourport,
+				     unsigned long ufstat);
+
+static void uart_rx_drain_fifo(struct s3c24xx_uart_port *ourport)
+{
+	struct uart_port *port = &ourport->port;
+	struct tty_port *tty = &port->state->port;
+	unsigned int ch, ufstat;
+	unsigned int count;
+
+	ufstat = rd_regl(port, S3C2410_UFSTAT);
+	count = s3c24xx_serial_rx_fifocnt(ourport, ufstat);
+
+	if (!count)
+		return;
+
+	while (count-- > 0) {
+		ch = rd_regb(port, S3C2410_URXH);
+
+		ourport->port.icount.rx++;
+		tty_insert_flip_char(tty, ch, TTY_NORMAL);
+	}
+
+	tty_flip_buffer_push(tty);
+}
+
 static void s3c24xx_serial_stop_rx(struct uart_port *port)
 {
 	struct s3c24xx_uart_port *ourport = to_ourport(port);
@@ -547,9 +573,7 @@ static void enable_rx_pio(struct s3c24xx_uart_port *ourport)
 	ourport->rx_mode = S3C24XX_RX_PIO;
 }
 
-static void s3c24xx_serial_rx_drain_fifo(struct s3c24xx_uart_port *ourport);
-
-static irqreturn_t s3c24xx_serial_rx_chars_dma(void *dev_id)
+static irqreturn_t s3c24xx_serial_rx_chars_dma(int irq, void *dev_id)
 {
 	unsigned int utrstat, ufstat, received;
 	struct s3c24xx_uart_port *ourport = dev_id;
@@ -582,7 +606,7 @@ static irqreturn_t s3c24xx_serial_rx_chars_dma(void *dev_id)
 		enable_rx_pio(ourport);
 	}
 
-	s3c24xx_serial_rx_drain_fifo(ourport);
+	uart_rx_drain_fifo(ourport);
 
 	if (tty) {
 		tty_flip_buffer_push(t);
@@ -597,11 +621,15 @@ finish:
 	return IRQ_HANDLED;
 }
 
-static void s3c24xx_serial_rx_drain_fifo(struct s3c24xx_uart_port *ourport)
+static irqreturn_t s3c24xx_serial_rx_chars_pio(int irq, void *dev_id)
 {
+	struct s3c24xx_uart_port *ourport = dev_id;
 	struct uart_port *port = &ourport->port;
 	unsigned int ufcon, ch, flag, ufstat, uerstat;
+	unsigned long flags;
 	int max_count = port->fifosize;
+
+	spin_lock_irqsave(&port->lock, flags);
 
 	while (max_count-- > 0) {
 		ufcon = rd_regl(port, S3C2410_UFCON);
@@ -626,7 +654,9 @@ static void s3c24xx_serial_rx_drain_fifo(struct s3c24xx_uart_port *ourport)
 					ufcon |= S3C2410_UFCON_RESETRX;
 					wr_regl(port, S3C2410_UFCON, ufcon);
 					rx_enabled(port) = 1;
-					return;
+					spin_unlock_irqrestore(&port->lock,
+							flags);
+					goto out;
 				}
 				continue;
 			}
@@ -646,7 +676,7 @@ static void s3c24xx_serial_rx_drain_fifo(struct s3c24xx_uart_port *ourport)
 				dbg("break!\n");
 				port->icount.brk++;
 				if (uart_handle_break(port))
-					continue; /* Ignore character */
+					goto ignore_char;
 			}
 
 			if (uerstat & S3C2410_UERSTAT_FRAME)
@@ -666,25 +696,19 @@ static void s3c24xx_serial_rx_drain_fifo(struct s3c24xx_uart_port *ourport)
 		}
 
 		if (uart_handle_sysrq_char(port, ch))
-			continue; /* Ignore character */
+			goto ignore_char;
 
 		uart_insert_char(port, uerstat, S3C2410_UERSTAT_OVERRUN,
 				 ch, flag);
+
+ignore_char:
+		continue;
 	}
 
-	tty_flip_buffer_push(&port->state->port);
-}
-
-static irqreturn_t s3c24xx_serial_rx_chars_pio(void *dev_id)
-{
-	struct s3c24xx_uart_port *ourport = dev_id;
-	struct uart_port *port = &ourport->port;
-	unsigned long flags;
-
-	spin_lock_irqsave(&port->lock, flags);
-	s3c24xx_serial_rx_drain_fifo(ourport);
 	spin_unlock_irqrestore(&port->lock, flags);
+	tty_flip_buffer_push(&port->state->port);
 
+out:
 	return IRQ_HANDLED;
 }
 
@@ -694,8 +718,8 @@ static irqreturn_t s3c24xx_serial_rx_chars(int irq, void *dev_id)
 	struct s3c24xx_uart_port *ourport = dev_id;
 
 	if (ourport->dma && ourport->dma->rx_chan)
-		return s3c24xx_serial_rx_chars_dma(dev_id);
-	return s3c24xx_serial_rx_chars_pio(dev_id);
+		return s3c24xx_serial_rx_chars_dma(irq, dev_id);
+	return s3c24xx_serial_rx_chars_pio(irq, dev_id);
 }
 
 static irqreturn_t s3c24xx_serial_tx_chars(int irq, void *id)
@@ -1263,14 +1287,14 @@ static void s3c24xx_serial_set_termios(struct uart_port *port,
 	/* check to see if we need  to change clock source */
 
 	if (ourport->baudclk != clk) {
-		clk_prepare_enable(clk);
-
 		s3c24xx_serial_setsource(port, clk_sel);
 
 		if (!IS_ERR(ourport->baudclk)) {
 			clk_disable_unprepare(ourport->baudclk);
 			ourport->baudclk = ERR_PTR(-EINVAL);
 		}
+
+		clk_prepare_enable(clk);
 
 		ourport->baudclk = clk;
 		ourport->baudclk_rate = clk ? clk_get_rate(clk) : 0;

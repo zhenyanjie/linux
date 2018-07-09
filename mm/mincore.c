@@ -117,8 +117,7 @@ static int mincore_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	unsigned char *vec = walk->private;
 	int nr = (end - addr) >> PAGE_SHIFT;
 
-	ptl = pmd_trans_huge_lock(pmd, vma);
-	if (ptl) {
+	if (pmd_trans_huge_lock(pmd, vma, &ptl) == 1) {
 		memset(vec, 1, nr);
 		spin_unlock(ptl);
 		goto out;
@@ -235,7 +234,7 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 
 	/* This also avoids any overflows on PAGE_CACHE_ALIGN */
 	pages = len >> PAGE_SHIFT;
-	pages += (offset_in_page(len)) != 0;
+	pages += (len & ~PAGE_MASK) != 0;
 
 	if (!access_ok(VERIFY_WRITE, vec, pages))
 		return -EFAULT;

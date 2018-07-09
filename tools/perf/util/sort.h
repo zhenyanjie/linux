@@ -18,7 +18,7 @@
 #include "debug.h"
 #include "header.h"
 
-#include <subcmd/parse-options.h>
+#include "parse-options.h"
 #include "parse-events.h"
 #include "hist.h"
 #include "thread.h"
@@ -34,7 +34,6 @@ extern int have_ignore_callees;
 extern int sort__need_collapse;
 extern int sort__has_parent;
 extern int sort__has_sym;
-extern int sort__has_socket;
 extern enum sort_mode sort__mode;
 extern struct sort_entry sort_comm;
 extern struct sort_entry sort_dso;
@@ -91,7 +90,6 @@ struct hist_entry {
 	struct comm		*comm;
 	u64			ip;
 	u64			transaction;
-	s32			socket;
 	s32			cpu;
 	u8			cpumode;
 
@@ -122,9 +120,6 @@ struct hist_entry {
 	struct branch_info	*branch_info;
 	struct hists		*hists;
 	struct mem_info		*mem_info;
-	void			*raw_data;
-	u32			raw_size;
-	void			*trace_output;
 	struct callchain_root	callchain[0]; /* must be last member */
 };
 
@@ -167,7 +162,6 @@ enum sort_mode {
 	SORT_MODE__MEMORY,
 	SORT_MODE__TOP,
 	SORT_MODE__DIFF,
-	SORT_MODE__TRACEPOINT,
 };
 
 enum sort_type {
@@ -178,13 +172,11 @@ enum sort_type {
 	SORT_SYM,
 	SORT_PARENT,
 	SORT_CPU,
-	SORT_SOCKET,
 	SORT_SRCLINE,
 	SORT_SRCFILE,
 	SORT_LOCAL_WEIGHT,
 	SORT_GLOBAL_WEIGHT,
 	SORT_TRANSACTION,
-	SORT_TRACE,
 
 	/* branch stack specific sort keys */
 	__SORT_BRANCH_STACK,
@@ -206,7 +198,6 @@ enum sort_type {
 	SORT_MEM_LVL,
 	SORT_MEM_SNOOP,
 	SORT_MEM_DCACHELINE,
-	SORT_MEM_IADDR_SYMBOL,
 };
 
 /*
@@ -214,6 +205,8 @@ enum sort_type {
  */
 
 struct sort_entry {
+	struct list_head list;
+
 	const char *se_header;
 
 	int64_t (*se_cmp)(struct hist_entry *, struct hist_entry *);
@@ -227,17 +220,14 @@ struct sort_entry {
 extern struct sort_entry sort_thread;
 extern struct list_head hist_entry__sort_list;
 
-struct perf_evlist;
-struct pevent;
-int setup_sorting(struct perf_evlist *evlist);
+int setup_sorting(void);
 int setup_output_field(void);
 void reset_output_field(void);
+extern int sort_dimension__add(const char *);
 void sort__setup_elide(FILE *fp);
 void perf_hpp__set_elide(int idx, bool elide);
 
 int report_parse_ignore_callees_opt(const struct option *opt, const char *arg, int unset);
 
 bool is_strict_order(const char *order);
-
-int hpp_dimension__add_output(unsigned col);
 #endif	/* __PERF_SORT_H */

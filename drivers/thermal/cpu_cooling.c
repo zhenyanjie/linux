@@ -377,28 +377,26 @@ static u32 cpu_power_to_freq(struct cpufreq_cooling_device *cpufreq_device,
  * get_load() - get load for a cpu since last updated
  * @cpufreq_device:	&struct cpufreq_cooling_device for this cpu
  * @cpu:	cpu number
- * @cpu_idx:	index of the cpu in cpufreq_device->allowed_cpus
  *
  * Return: The average load of cpu @cpu in percentage since this
  * function was last called.
  */
-static u32 get_load(struct cpufreq_cooling_device *cpufreq_device, int cpu,
-		    int cpu_idx)
+static u32 get_load(struct cpufreq_cooling_device *cpufreq_device, int cpu)
 {
 	u32 load;
 	u64 now, now_idle, delta_time, delta_idle;
 
 	now_idle = get_cpu_idle_time(cpu, &now, 0);
-	delta_idle = now_idle - cpufreq_device->time_in_idle[cpu_idx];
-	delta_time = now - cpufreq_device->time_in_idle_timestamp[cpu_idx];
+	delta_idle = now_idle - cpufreq_device->time_in_idle[cpu];
+	delta_time = now - cpufreq_device->time_in_idle_timestamp[cpu];
 
 	if (delta_time <= delta_idle)
 		load = 0;
 	else
 		load = div64_u64(100 * (delta_time - delta_idle), delta_time);
 
-	cpufreq_device->time_in_idle[cpu_idx] = now_idle;
-	cpufreq_device->time_in_idle_timestamp[cpu_idx] = now;
+	cpufreq_device->time_in_idle[cpu] = now_idle;
+	cpufreq_device->time_in_idle_timestamp[cpu] = now;
 
 	return load;
 }
@@ -593,14 +591,15 @@ static int cpufreq_get_requested_power(struct thermal_cooling_device *cdev,
 	if (trace_thermal_power_cpu_get_power_enabled()) {
 		u32 ncpus = cpumask_weight(&cpufreq_device->allowed_cpus);
 
-		load_cpu = kcalloc(ncpus, sizeof(*load_cpu), GFP_KERNEL);
+		load_cpu = devm_kcalloc(&cdev->device, ncpus, sizeof(*load_cpu),
+					GFP_KERNEL);
 	}
 
 	for_each_cpu(cpu, &cpufreq_device->allowed_cpus) {
 		u32 load;
 
 		if (cpu_online(cpu))
-			load = get_load(cpufreq_device, cpu, i);
+			load = get_load(cpufreq_device, cpu);
 		else
 			load = 0;
 
@@ -616,7 +615,8 @@ static int cpufreq_get_requested_power(struct thermal_cooling_device *cdev,
 	dynamic_power = get_dynamic_power(cpufreq_device, freq);
 	ret = get_static_power(cpufreq_device, tz, freq, &static_power);
 	if (ret) {
-		kfree(load_cpu);
+		if (load_cpu)
+			devm_kfree(&cdev->device, load_cpu);
 		return ret;
 	}
 
@@ -625,7 +625,7 @@ static int cpufreq_get_requested_power(struct thermal_cooling_device *cdev,
 			&cpufreq_device->allowed_cpus,
 			freq, load_cpu, i, dynamic_power, static_power);
 
-		kfree(load_cpu);
+		devm_kfree(&cdev->device, load_cpu);
 	}
 
 	*power = static_power + dynamic_power;

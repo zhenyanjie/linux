@@ -5,7 +5,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <linux/bitmap.h>
 #include "asm/bug.h"
 
 static struct cpu_map *cpu_map__default_new(void)
@@ -180,56 +179,6 @@ out:
 	return cpus;
 }
 
-static struct cpu_map *cpu_map__from_entries(struct cpu_map_entries *cpus)
-{
-	struct cpu_map *map;
-
-	map = cpu_map__empty_new(cpus->nr);
-	if (map) {
-		unsigned i;
-
-		for (i = 0; i < cpus->nr; i++) {
-			/*
-			 * Special treatment for -1, which is not real cpu number,
-			 * and we need to use (int) -1 to initialize map[i],
-			 * otherwise it would become 65535.
-			 */
-			if (cpus->cpu[i] == (u16) -1)
-				map->map[i] = -1;
-			else
-				map->map[i] = (int) cpus->cpu[i];
-		}
-	}
-
-	return map;
-}
-
-static struct cpu_map *cpu_map__from_mask(struct cpu_map_mask *mask)
-{
-	struct cpu_map *map;
-	int nr, nbits = mask->nr * mask->long_size * BITS_PER_BYTE;
-
-	nr = bitmap_weight(mask->mask, nbits);
-
-	map = cpu_map__empty_new(nr);
-	if (map) {
-		int cpu, i = 0;
-
-		for_each_set_bit(cpu, mask->mask, nbits)
-			map->map[i++] = cpu;
-	}
-	return map;
-
-}
-
-struct cpu_map *cpu_map__new_data(struct cpu_map_data *data)
-{
-	if (data->type == PERF_CPU_MAP__CPUS)
-		return cpu_map__from_entries((struct cpu_map_entries *)data->data);
-	else
-		return cpu_map__from_mask((struct cpu_map_mask *)data->data);
-}
-
 size_t cpu_map__fprintf(struct cpu_map *map, FILE *fp)
 {
 	int i;
@@ -248,23 +197,6 @@ struct cpu_map *cpu_map__dummy_new(void)
 	if (cpus != NULL) {
 		cpus->nr = 1;
 		cpus->map[0] = -1;
-		atomic_set(&cpus->refcnt, 1);
-	}
-
-	return cpus;
-}
-
-struct cpu_map *cpu_map__empty_new(int nr)
-{
-	struct cpu_map *cpus = malloc(sizeof(*cpus) + sizeof(int) * nr);
-
-	if (cpus != NULL) {
-		int i;
-
-		cpus->nr = nr;
-		for (i = 0; i < nr; i++)
-			cpus->map[i] = -1;
-
 		atomic_set(&cpus->refcnt, 1);
 	}
 
@@ -293,32 +225,32 @@ void cpu_map__put(struct cpu_map *map)
 		cpu_map__delete(map);
 }
 
-static int cpu__get_topology_int(int cpu, const char *name, int *value)
+int cpu_map__get_socket(struct cpu_map *map, int idx)
 {
+	FILE *fp;
+	const char *mnt;
 	char path[PATH_MAX];
-
-	snprintf(path, PATH_MAX,
-		"devices/system/cpu/cpu%d/topology/%s", cpu, name);
-
-	return sysfs__read_int(path, value);
-}
-
-int cpu_map__get_socket_id(int cpu)
-{
-	int value, ret = cpu__get_topology_int(cpu, "physical_package_id", &value);
-	return ret ?: value;
-}
-
-int cpu_map__get_socket(struct cpu_map *map, int idx, void *data __maybe_unused)
-{
-	int cpu;
+	int cpu, ret;
 
 	if (idx > map->nr)
 		return -1;
 
 	cpu = map->map[idx];
 
-	return cpu_map__get_socket_id(cpu);
+	mnt = sysfs__mountpoint();
+	if (!mnt)
+		return -1;
+
+	snprintf(path, PATH_MAX,
+		"%s/devices/system/cpu/cpu%d/topology/physical_package_id",
+		mnt, cpu);
+
+	fp = fopen(path, "r");
+	if (!fp)
+		return -1;
+	ret = fscanf(fp, "%d", &cpu);
+	fclose(fp);
+	return ret == 1 ? cpu : -1;
 }
 
 static int cmp_ids(const void *a, const void *b)
@@ -326,9 +258,8 @@ static int cmp_ids(const void *a, const void *b)
 	return *(int *)a - *(int *)b;
 }
 
-int cpu_map__build_map(struct cpu_map *cpus, struct cpu_map **res,
-		       int (*f)(struct cpu_map *map, int cpu, void *data),
-		       void *data)
+static int cpu_map__build_map(struct cpu_map *cpus, struct cpu_map **res,
+			      int (*f)(struct cpu_map *map, int cpu))
 {
 	struct cpu_map *c;
 	int nr = cpus->nr;
@@ -340,7 +271,7 @@ int cpu_map__build_map(struct cpu_map *cpus, struct cpu_map **res,
 		return -1;
 
 	for (cpu = 0; cpu < nr; cpu++) {
-		s1 = f(cpus, cpu, data);
+		s1 = f(cpus, cpu);
 		for (s2 = 0; s2 < c->nr; s2++) {
 			if (s1 == c->map[s2])
 				break;
@@ -353,29 +284,40 @@ int cpu_map__build_map(struct cpu_map *cpus, struct cpu_map **res,
 	/* ensure we process id in increasing order */
 	qsort(c->map, c->nr, sizeof(int), cmp_ids);
 
-	atomic_set(&c->refcnt, 1);
+	atomic_set(&cpus->refcnt, 1);
 	*res = c;
 	return 0;
 }
 
-int cpu_map__get_core_id(int cpu)
+int cpu_map__get_core(struct cpu_map *map, int idx)
 {
-	int value, ret = cpu__get_topology_int(cpu, "core_id", &value);
-	return ret ?: value;
-}
-
-int cpu_map__get_core(struct cpu_map *map, int idx, void *data)
-{
-	int cpu, s;
+	FILE *fp;
+	const char *mnt;
+	char path[PATH_MAX];
+	int cpu, ret, s;
 
 	if (idx > map->nr)
 		return -1;
 
 	cpu = map->map[idx];
 
-	cpu = cpu_map__get_core_id(cpu);
+	mnt = sysfs__mountpoint();
+	if (!mnt)
+		return -1;
 
-	s = cpu_map__get_socket(map, idx, data);
+	snprintf(path, PATH_MAX,
+		"%s/devices/system/cpu/cpu%d/topology/core_id",
+		mnt, cpu);
+
+	fp = fopen(path, "r");
+	if (!fp)
+		return -1;
+	ret = fscanf(fp, "%d", &cpu);
+	fclose(fp);
+	if (ret != 1)
+		return -1;
+
+	s = cpu_map__get_socket(map, idx);
 	if (s == -1)
 		return -1;
 
@@ -390,12 +332,12 @@ int cpu_map__get_core(struct cpu_map *map, int idx, void *data)
 
 int cpu_map__build_socket_map(struct cpu_map *cpus, struct cpu_map **sockp)
 {
-	return cpu_map__build_map(cpus, sockp, cpu_map__get_socket, NULL);
+	return cpu_map__build_map(cpus, sockp, cpu_map__get_socket);
 }
 
 int cpu_map__build_core_map(struct cpu_map *cpus, struct cpu_map **corep)
 {
-	return cpu_map__build_map(cpus, corep, cpu_map__get_core, NULL);
+	return cpu_map__build_map(cpus, corep, cpu_map__get_core);
 }
 
 /* setup simple routines to easily access node numbers given a cpu number */

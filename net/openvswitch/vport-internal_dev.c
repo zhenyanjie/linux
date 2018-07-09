@@ -242,21 +242,22 @@ static void internal_dev_destroy(struct vport *vport)
 	rtnl_unlock();
 }
 
-static netdev_tx_t internal_dev_recv(struct sk_buff *skb)
+static void internal_dev_recv(struct vport *vport, struct sk_buff *skb)
 {
-	struct net_device *netdev = skb->dev;
+	struct net_device *netdev = vport->dev;
 	struct pcpu_sw_netstats *stats;
 
 	if (unlikely(!(netdev->flags & IFF_UP))) {
 		kfree_skb(skb);
 		netdev->stats.rx_dropped++;
-		return NETDEV_TX_OK;
+		return;
 	}
 
 	skb_dst_drop(skb);
 	nf_reset(skb);
 	secpath_reset(skb);
 
+	skb->dev = netdev;
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, netdev);
 	skb_postpull_rcsum(skb, eth_hdr(skb), ETH_HLEN);
@@ -268,7 +269,6 @@ static netdev_tx_t internal_dev_recv(struct sk_buff *skb)
 	u64_stats_update_end(&stats->syncp);
 
 	netif_rx(skb);
-	return NETDEV_TX_OK;
 }
 
 static struct vport_ops ovs_internal_vport_ops = {

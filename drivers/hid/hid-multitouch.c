@@ -272,7 +272,7 @@ static ssize_t mt_show_quirks(struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct mt_device *td = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%u\n", td->mtclass.quirks);
@@ -282,7 +282,7 @@ static ssize_t mt_set_quirks(struct device *dev,
 			  struct device_attribute *attr,
 			  const char *buf, size_t count)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct mt_device *td = hid_get_drvdata(hdev);
 
 	unsigned long val;
@@ -396,11 +396,6 @@ static void mt_feature_mapping(struct hid_device *hdev,
 			td->is_buttonpad = true;
 
 		break;
-	case 0xff0000c5:
-		/* Retrieve the Win8 blob once to enable some devices */
-		if (usage->usage_index == 0)
-			mt_get_feature(hdev, field->report);
-		break;
 	}
 }
 
@@ -502,11 +497,6 @@ static int mt_touch_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 			mt_store_field(usage, td, hi);
 			return 1;
 		case HID_DG_CONFIDENCE:
-			if (cls->name == MT_CLS_WIN_8 &&
-				field->application == HID_DG_TOUCHPAD) {
-				cls->quirks &= ~MT_QUIRK_ALWAYS_VALID;
-				cls->quirks |= MT_QUIRK_VALID_IS_CONFIDENCE;
-			}
 			mt_store_field(usage, td, hi);
 			return 1;
 		case HID_DG_TIPSWITCH:
@@ -784,13 +774,12 @@ static void mt_touch_report(struct hid_device *hid, struct hid_report *report)
 		mt_sync_frame(td, report->field[0]->hidinput->input);
 }
 
-static int mt_touch_input_configured(struct hid_device *hdev,
+static void mt_touch_input_configured(struct hid_device *hdev,
 					struct hid_input *hi)
 {
 	struct mt_device *td = hid_get_drvdata(hdev);
 	struct mt_class *cls = &td->mtclass;
 	struct input_dev *input = hi->input;
-	int ret;
 
 	if (!td->maxcontacts)
 		td->maxcontacts = MT_DEFAULT_MAXCONTACT;
@@ -812,12 +801,9 @@ static int mt_touch_input_configured(struct hid_device *hdev,
 	if (td->is_buttonpad)
 		__set_bit(INPUT_PROP_BUTTONPAD, input->propbit);
 
-	ret = input_mt_init_slots(input, td->maxcontacts, td->mt_flags);
-	if (ret)
-		return ret;
+	input_mt_init_slots(input, td->maxcontacts, td->mt_flags);
 
 	td->mt_flags = 0;
-	return 0;
 }
 
 static int mt_input_mapping(struct hid_device *hdev, struct hid_input *hi,
@@ -993,19 +979,15 @@ static void mt_post_parse(struct mt_device *td)
 		cls->quirks &= ~MT_QUIRK_CONTACT_CNT_ACCURATE;
 }
 
-static int mt_input_configured(struct hid_device *hdev, struct hid_input *hi)
+static void mt_input_configured(struct hid_device *hdev, struct hid_input *hi)
 {
 	struct mt_device *td = hid_get_drvdata(hdev);
 	char *name;
 	const char *suffix = NULL;
 	struct hid_field *field = hi->report->field[0];
-	int ret;
 
-	if (hi->report->id == td->mt_report_id) {
-		ret = mt_touch_input_configured(hdev, hi);
-		if (ret)
-			return ret;
-	}
+	if (hi->report->id == td->mt_report_id)
+		mt_touch_input_configured(hdev, hi);
 
 	/*
 	 * some egalax touchscreens have "application == HID_DG_TOUCHSCREEN"
@@ -1035,9 +1017,6 @@ static int mt_input_configured(struct hid_device *hdev, struct hid_input *hi)
 		case HID_DG_TOUCHSCREEN:
 			/* we do not set suffix = "Touchscreen" */
 			break;
-		case HID_DG_TOUCHPAD:
-			suffix = "Touchpad";
-			break;
 		case HID_GD_SYSTEM_CONTROL:
 			suffix = "System Control";
 			break;
@@ -1059,8 +1038,6 @@ static int mt_input_configured(struct hid_device *hdev, struct hid_input *hi)
 			hi->input->name = name;
 		}
 	}
-
-	return 0;
 }
 
 static int mt_probe(struct hid_device *hdev, const struct hid_device_id *id)

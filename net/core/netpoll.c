@@ -140,7 +140,7 @@ static void queue_process(struct work_struct *work)
  * case. Further, we test the poll_owner to avoid recursion on UP
  * systems where the lock doesn't exist.
  */
-static void poll_one_napi(struct napi_struct *napi)
+static int poll_one_napi(struct napi_struct *napi, int budget)
 {
 	int work = 0;
 
@@ -149,33 +149,33 @@ static void poll_one_napi(struct napi_struct *napi)
 	 * holding the napi->poll_lock.
 	 */
 	if (!test_bit(NAPI_STATE_SCHED, &napi->state))
-		return;
+		return budget;
 
 	/* If we set this bit but see that it has already been set,
 	 * that indicates that napi has been disabled and we need
 	 * to abort this operation
 	 */
 	if (test_and_set_bit(NAPI_STATE_NPSVC, &napi->state))
-		return;
+		goto out;
 
-	/* We explicilty pass the polling call a budget of 0 to
-	 * indicate that we are clearing the Tx path only.
-	 */
-	work = napi->poll(napi, 0);
-	WARN_ONCE(work, "%pF exceeded budget in poll\n", napi->poll);
+	work = napi->poll(napi, budget);
+	WARN_ONCE(work > budget, "%pF exceeded budget in poll\n", napi->poll);
 	trace_napi_poll(napi);
 
 	clear_bit(NAPI_STATE_NPSVC, &napi->state);
+
+out:
+	return budget - work;
 }
 
-static void poll_napi(struct net_device *dev)
+static void poll_napi(struct net_device *dev, int budget)
 {
 	struct napi_struct *napi;
 
 	list_for_each_entry(napi, &dev->napi_list, dev_list) {
 		if (napi->poll_owner != smp_processor_id() &&
 		    spin_trylock(&napi->poll_lock)) {
-			poll_one_napi(napi);
+			budget = poll_one_napi(napi, budget);
 			spin_unlock(&napi->poll_lock);
 		}
 	}
@@ -185,6 +185,7 @@ static void netpoll_poll_dev(struct net_device *dev)
 {
 	const struct net_device_ops *ops;
 	struct netpoll_info *ni = rcu_dereference_bh(dev->npinfo);
+	int budget = 0;
 
 	/* Don't do any rx activity if the dev_lock mutex is held
 	 * the dev_open/close paths use this to block netpoll activity
@@ -207,7 +208,7 @@ static void netpoll_poll_dev(struct net_device *dev)
 	/* Process pending work on NIC */
 	ops->ndo_poll_controller(dev);
 
-	poll_napi(dev);
+	poll_napi(dev, budget);
 
 	up(&ni->dev_lock);
 

@@ -271,8 +271,7 @@ static s32 dump_mgntframe_and_wait_ack(struct adapter *padapter,
 	if (padapter->bSurpriseRemoved || padapter->bDriverStopped)
 		return -1;
 
-	if (mutex_lock_interruptible(&pxmitpriv->ack_tx_mutex))
-		return _FAIL;
+	_enter_critical_mutex(&pxmitpriv->ack_tx_mutex, NULL);
 	pxmitpriv->ack_tx = true;
 
 	pmgntframe->ack_report = 1;
@@ -283,7 +282,7 @@ static s32 dump_mgntframe_and_wait_ack(struct adapter *padapter,
 	pxmitpriv->ack_tx = false;
 	mutex_unlock(&pxmitpriv->ack_tx_mutex);
 
-	return ret;
+	 return ret;
 }
 
 static int update_hidden_ssid(u8 *ies, u32 ies_len, u8 hidden_ssid_mode)
@@ -418,7 +417,7 @@ static void issue_beacon(struct adapter *padapter, int timeout_ms)
 
 	/*  supported rates... */
 	rate_len = rtw_get_rateset_len(cur_network->SupportedRates);
-	pframe = rtw_set_ie(pframe, _SUPPORTEDRATES_IE_, min_t(unsigned int, rate_len, 8), cur_network->SupportedRates, &pattrib->pktlen);
+	pframe = rtw_set_ie(pframe, _SUPPORTEDRATES_IE_, ((rate_len > 8) ? 8 : rate_len), cur_network->SupportedRates, &pattrib->pktlen);
 
 	/*  DS parameter set */
 	pframe = rtw_set_ie(pframe, _DSSET_IE_, 1, (unsigned char *)&(cur_network->Configuration.DSConfig), &pattrib->pktlen);
@@ -578,7 +577,7 @@ static void issue_probersp(struct adapter *padapter, unsigned char *da)
 
 		/*  supported rates... */
 		rate_len = rtw_get_rateset_len(cur_network->SupportedRates);
-		pframe = rtw_set_ie(pframe, _SUPPORTEDRATES_IE_, min_t(unsigned int, rate_len, 8), cur_network->SupportedRates, &pattrib->pktlen);
+		pframe = rtw_set_ie(pframe, _SUPPORTEDRATES_IE_, ((rate_len > 8) ? 8 : rate_len), cur_network->SupportedRates, &pattrib->pktlen);
 
 		/*  DS parameter set */
 		pframe = rtw_set_ie(pframe, _DSSET_IE_, 1, (unsigned char *)&(cur_network->Configuration.DSConfig), &pattrib->pktlen);
@@ -609,7 +608,7 @@ static void issue_probersp(struct adapter *padapter, unsigned char *da)
 	return;
 }
 
-static int issue_probereq(struct adapter *padapter, struct ndis_802_11_ssid *pssid, u8 *da, bool wait_ack)
+static int _issue_probereq(struct adapter *padapter, struct ndis_802_11_ssid *pssid, u8 *da, int wait_ack)
 {
 	int ret = _FAIL;
 	struct xmit_frame		*pmgntframe;
@@ -702,16 +701,22 @@ exit:
 	return ret;
 }
 
+static inline void issue_probereq(struct adapter *padapter,
+				  struct ndis_802_11_ssid *pssid, u8 *da)
+{
+	_issue_probereq(padapter, pssid, da, false);
+}
+
 static int issue_probereq_ex(struct adapter *padapter,
 			     struct ndis_802_11_ssid *pssid, u8 *da,
 			     int try_cnt, int wait_ms)
 {
 	int ret;
 	int i = 0;
-	unsigned long start = jiffies;
+	u32 start = jiffies;
 
 	do {
-		ret = issue_probereq(padapter, pssid, da, wait_ms > 0 ? true : false);
+		ret = _issue_probereq(padapter, pssid, da, wait_ms > 0 ? true : false);
 
 		i++;
 
@@ -732,13 +737,11 @@ static int issue_probereq_ex(struct adapter *padapter,
 		if (da)
 			DBG_88E(FUNC_ADPT_FMT" to %pM, ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), da, rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 		else
 			DBG_88E(FUNC_ADPT_FMT", ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 	}
 exit:
 	return ret;
@@ -809,20 +812,17 @@ static void issue_auth(struct adapter *padapter, struct sta_info *psta,
 			le_val16 = 0;
 		}
 
-		pframe = rtw_set_fixed_ie(pframe, _AUTH_ALGM_NUM_, &le_val16,
-					  &pattrib->pktlen);
+		pframe = rtw_set_fixed_ie(pframe, _AUTH_ALGM_NUM_, (unsigned char *)&le_val16, &(pattrib->pktlen));
 
 		/*  setting auth seq number */
 		val16 = (u16)psta->auth_seq;
 		le_val16 = cpu_to_le16(val16);
-		pframe = rtw_set_fixed_ie(pframe, _AUTH_SEQ_NUM_, &le_val16,
-					  &pattrib->pktlen);
+		pframe = rtw_set_fixed_ie(pframe, _AUTH_SEQ_NUM_, (unsigned char *)&le_val16, &(pattrib->pktlen));
 
 		/*  setting status code... */
 		val16 = status;
 		le_val16 = cpu_to_le16(val16);
-		pframe = rtw_set_fixed_ie(pframe, _STATUS_CODE_,
-					  &le_val16, &pattrib->pktlen);
+		pframe = rtw_set_fixed_ie(pframe, _STATUS_CODE_, (unsigned char *)&le_val16, &(pattrib->pktlen));
 
 		/*  added challenging text... */
 		if ((psta->auth_seq == 2) && (psta->state & WIFI_FW_AUTH_STATE) && (use_shared_key == 1))
@@ -844,27 +844,23 @@ static void issue_auth(struct adapter *padapter, struct sta_info *psta,
 		if ((pmlmeinfo->auth_seq == 3) && (pmlmeinfo->state & WIFI_FW_AUTH_STATE) && (use_shared_key == 1)) {
 			val32 = (pmlmeinfo->iv++) | (pmlmeinfo->key_index << 30);
 			le_tmp32 = cpu_to_le32(val32);
-			pframe = rtw_set_fixed_ie(pframe, 4, &le_tmp32,
-						  &pattrib->pktlen);
+			pframe = rtw_set_fixed_ie(pframe, 4, (unsigned char *)&le_tmp32, &(pattrib->pktlen));
 
 			pattrib->iv_len = 4;
 		}
 
 		le_tmp16 = cpu_to_le16(val16);
-		pframe = rtw_set_fixed_ie(pframe, _AUTH_ALGM_NUM_, &le_tmp16,
-					  &pattrib->pktlen);
+		pframe = rtw_set_fixed_ie(pframe, _AUTH_ALGM_NUM_, (unsigned char *)&le_tmp16, &(pattrib->pktlen));
 
 		/*  setting auth seq number */
 		val16 = pmlmeinfo->auth_seq;
 		le_tmp16 = cpu_to_le16(val16);
-		pframe = rtw_set_fixed_ie(pframe, _AUTH_SEQ_NUM_, &le_tmp16,
-					  &pattrib->pktlen);
+		pframe = rtw_set_fixed_ie(pframe, _AUTH_SEQ_NUM_, (unsigned char *)&le_tmp16, &(pattrib->pktlen));
 
 
 		/*  setting status code... */
 		le_tmp16 = cpu_to_le16(status);
-		pframe = rtw_set_fixed_ie(pframe, _STATUS_CODE_, &le_tmp16,
-					  &pattrib->pktlen);
+		pframe = rtw_set_fixed_ie(pframe, _STATUS_CODE_, (unsigned char *)&le_tmp16, &(pattrib->pktlen));
 
 		/*  then checking to see if sending challenging text... */
 		if ((pmlmeinfo->auth_seq == 3) && (pmlmeinfo->state & WIFI_FW_AUTH_STATE) && (use_shared_key == 1)) {
@@ -948,14 +944,13 @@ static void issue_asocrsp(struct adapter *padapter, unsigned short status,
 	/* capability */
 	val = *(unsigned short *)rtw_get_capability_from_ie(ie);
 
-	pframe = rtw_set_fixed_ie(pframe, _CAPABILITY_, &val, &pattrib->pktlen);
+	pframe = rtw_set_fixed_ie(pframe, _CAPABILITY_ , (unsigned char *)&val, &(pattrib->pktlen));
 
 	lestatus = cpu_to_le16(status);
-	pframe = rtw_set_fixed_ie(pframe, _STATUS_CODE_, &lestatus,
-				  &pattrib->pktlen);
+	pframe = rtw_set_fixed_ie(pframe , _STATUS_CODE_ , (unsigned char *)&lestatus, &(pattrib->pktlen));
 
 	leval = cpu_to_le16(pstat->aid | BIT(14) | BIT(15));
-	pframe = rtw_set_fixed_ie(pframe, _ASOC_ID_, &leval, &pattrib->pktlen);
+	pframe = rtw_set_fixed_ie(pframe, _ASOC_ID_ , (unsigned char *)&leval, &(pattrib->pktlen));
 
 	if (pstat->bssratelen <= 8) {
 		pframe = rtw_set_ie(pframe, _SUPPORTEDRATES_IE_, pstat->bssratelen, pstat->bssrateset, &(pattrib->pktlen));
@@ -1177,7 +1172,7 @@ static void issue_assocreq(struct adapter *padapter)
 	}
 
 	/* vendor specific IE, such as WPA, WMM, WPS */
-	for (i = sizeof(struct ndis_802_11_fixed_ie); i < pmlmeinfo->network.IELength; i += (pIE->Length + 2)) {
+	for (i = sizeof(struct ndis_802_11_fixed_ie); i < pmlmeinfo->network.IELength;) {
 		pIE = (struct ndis_802_11_var_ie *)(pmlmeinfo->network.IEs + i);
 
 		switch (pIE->ElementID) {
@@ -1198,6 +1193,7 @@ static void issue_assocreq(struct adapter *padapter)
 		default:
 			break;
 		}
+		i += (pIE->Length + 2);
 	}
 
 	if (pmlmeinfo->assoc_AP_vendor == HT_IOT_PEER_REALTEK)
@@ -1295,7 +1291,7 @@ int issue_nulldata(struct adapter *padapter, unsigned char *da, unsigned int pow
 {
 	int ret;
 	int i = 0;
-	unsigned long start = jiffies;
+	u32 start = jiffies;
 	struct mlme_ext_priv	*pmlmeext = &(padapter->mlmeextpriv);
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 	struct wlan_bssid_ex    *pnetwork = &(pmlmeinfo->network);
@@ -1325,13 +1321,11 @@ int issue_nulldata(struct adapter *padapter, unsigned char *da, unsigned int pow
 		if (da)
 			DBG_88E(FUNC_ADPT_FMT" to %pM, ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), da, rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 		else
 			DBG_88E(FUNC_ADPT_FMT", ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 	}
 exit:
 	return ret;
@@ -1422,7 +1416,7 @@ int issue_qos_nulldata(struct adapter *padapter, unsigned char *da, u16 tid, int
 {
 	int ret;
 	int i = 0;
-	unsigned long start = jiffies;
+	u32 start = jiffies;
 	struct mlme_ext_priv	*pmlmeext = &(padapter->mlmeextpriv);
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 	struct wlan_bssid_ex    *pnetwork = &(pmlmeinfo->network);
@@ -1452,13 +1446,11 @@ int issue_qos_nulldata(struct adapter *padapter, unsigned char *da, u16 tid, int
 		if (da)
 			DBG_88E(FUNC_ADPT_FMT" to %pM, ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), da, rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 		else
 			DBG_88E(FUNC_ADPT_FMT", ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 	}
 exit:
 	return ret;
@@ -1507,8 +1499,7 @@ static int _issue_deauth(struct adapter *padapter, unsigned char *da, unsigned s
 	pattrib->pktlen = sizeof(struct rtw_ieee80211_hdr_3addr);
 
 	le_tmp = cpu_to_le16(reason);
-	pframe = rtw_set_fixed_ie(pframe, _RSON_CODE_, &le_tmp,
-				  &pattrib->pktlen);
+	pframe = rtw_set_fixed_ie(pframe, _RSON_CODE_ , (unsigned char *)&le_tmp, &(pattrib->pktlen));
 
 	pattrib->last_txcmdsz = pattrib->pktlen;
 
@@ -1536,7 +1527,7 @@ static int issue_deauth_ex(struct adapter *padapter, u8 *da,
 {
 	int ret;
 	int i = 0;
-	unsigned long start = jiffies;
+	u32 start = jiffies;
 
 	do {
 		ret = _issue_deauth(padapter, da, reason, wait_ms > 0 ? true : false);
@@ -1559,13 +1550,11 @@ static int issue_deauth_ex(struct adapter *padapter, u8 *da,
 		if (da)
 			DBG_88E(FUNC_ADPT_FMT" to %pM, ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), da, rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 		else
 			DBG_88E(FUNC_ADPT_FMT", ch:%u%s, %d/%d in %u ms\n",
 				FUNC_ADPT_ARG(padapter), rtw_get_oper_ch(padapter),
-				ret == _SUCCESS ? ", acked" : "", i, try_cnt,
-				jiffies_to_msecs(jiffies - start));
+				ret == _SUCCESS ? ", acked" : "", i, try_cnt, rtw_get_passing_time_ms(start));
 	}
 exit:
 	return ret;
@@ -1698,13 +1687,11 @@ static void issue_action_BA(struct adapter *padapter, unsigned char *raddr,
 
 			BA_para_set = 0x1002 | ((status & 0xf) << 2); /* immediate ack & 64 buffer size */
 			le_tmp = cpu_to_le16(BA_para_set);
-			pframe = rtw_set_fixed_ie(pframe, 2, &(le_tmp),
-						  &pattrib->pktlen);
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&(le_tmp)), &(pattrib->pktlen));
 
 			BA_timeout_value = 5000;/*  5ms */
 			le_tmp = cpu_to_le16(BA_timeout_value);
-			pframe = rtw_set_fixed_ie(pframe, 2, &(le_tmp),
-						  &pattrib->pktlen);
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&(le_tmp)), &(pattrib->pktlen));
 
 			psta = rtw_get_stainfo(pstapriv, raddr);
 			if (psta != NULL) {
@@ -1717,21 +1704,13 @@ static void issue_action_BA(struct adapter *padapter, unsigned char *raddr,
 				BA_starting_seqctrl = start_seq << 4;
 			}
 			le_tmp = cpu_to_le16(BA_starting_seqctrl);
-			pframe = rtw_set_fixed_ie(pframe, 2, &(le_tmp),
-						  &pattrib->pktlen);
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&(le_tmp)), &(pattrib->pktlen));
 			break;
 		case 1: /* ADDBA rsp */
-		{
-			struct ADDBA_request *ADDBA_req = &pmlmeinfo->ADDBA_req;
+			pframe = rtw_set_fixed_ie(pframe, 1, &(pmlmeinfo->ADDBA_req.dialog_token), &(pattrib->pktlen));
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&status), &(pattrib->pktlen));
 
-			pframe = rtw_set_fixed_ie(pframe, 1,
-						  &ADDBA_req->dialog_token,
-						  &pattrib->pktlen);
-			pframe = rtw_set_fixed_ie(pframe, 2, &status,
-						  &pattrib->pktlen);
-
-			BA_para_set = le16_to_cpu(ADDBA_req->BA_para_set) &
-				      0x3f;
+			BA_para_set = le16_to_cpu(pmlmeinfo->ADDBA_req.BA_para_set) & 0x3f;
 			rtw_hal_get_def_var(padapter, HW_VAR_MAX_RX_AMPDU_FACTOR, &max_rx_ampdu_factor);
 			switch (max_rx_ampdu_factor) {
 			case MAX_AMPDU_FACTOR_64K:
@@ -1757,23 +1736,17 @@ static void issue_action_BA(struct adapter *padapter, unsigned char *raddr,
 				BA_para_set = BA_para_set | BIT(0);
 			le_tmp = cpu_to_le16(BA_para_set);
 
-			pframe = rtw_set_fixed_ie(pframe, 2, &(le_tmp),
-						  &pattrib->pktlen);
-			pframe = rtw_set_fixed_ie(pframe, 2,
-						  &ADDBA_req->BA_timeout_value,
-						  &pattrib->pktlen);
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&(le_tmp)), &(pattrib->pktlen));
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&(pmlmeinfo->ADDBA_req.BA_timeout_value)), &(pattrib->pktlen));
 			break;
-		}
 		case 2:/* DELBA */
 			BA_para_set = (status & 0x1F) << 3;
 			le_tmp = cpu_to_le16(BA_para_set);
-			pframe = rtw_set_fixed_ie(pframe, 2, &(le_tmp),
-						  &pattrib->pktlen);
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&(le_tmp)), &(pattrib->pktlen));
 
 			reason_code = 37;/* Requested from peer STA as it does not want to use the mechanism */
 			le_tmp = cpu_to_le16(reason_code);
-			pframe = rtw_set_fixed_ie(pframe, 2, &(le_tmp),
-						  &pattrib->pktlen);
+			pframe = rtw_set_fixed_ie(pframe, 2, (unsigned char *)(&(le_tmp)), &(pattrib->pktlen));
 			break;
 		default:
 			break;
@@ -1967,7 +1940,7 @@ unsigned int send_beacon(struct adapter *padapter)
 	int	issue = 0;
 	int poll = 0;
 
-	unsigned long start = jiffies;
+	u32 start = jiffies;
 
 	rtw_hal_set_hwreg(padapter, HW_VAR_BCN_VALID, NULL);
 	do {
@@ -1983,16 +1956,13 @@ unsigned int send_beacon(struct adapter *padapter)
 	if (padapter->bSurpriseRemoved || padapter->bDriverStopped)
 		return _FAIL;
 	if (!bxmitok) {
-		DBG_88E("%s fail! %u ms\n", __func__,
-			jiffies_to_msecs(jiffies - start));
+		DBG_88E("%s fail! %u ms\n", __func__, rtw_get_passing_time_ms(start));
 		return _FAIL;
 	} else {
-		u32 passing_time = jiffies_to_msecs(jiffies - start);
+		u32 passing_time = rtw_get_passing_time_ms(start);
 
 		if (passing_time > 100 || issue > 3)
-			DBG_88E("%s success, issue:%d, poll:%d, %u ms\n",
-				__func__, issue, poll,
-				jiffies_to_msecs(jiffies - start));
+			DBG_88E("%s success, issue:%d, poll:%d, %u ms\n", __func__, issue, poll, rtw_get_passing_time_ms(start));
 		return _SUCCESS;
 	}
 }
@@ -2034,28 +2004,24 @@ static void site_survey(struct adapter *padapter)
 			for (i = 0; i < RTW_SSID_SCAN_AMOUNT; i++) {
 				if (pmlmeext->sitesurvey_res.ssid[i].SsidLength) {
 					/* todo: to issue two probe req??? */
-					issue_probereq(padapter,
-					&(pmlmeext->sitesurvey_res.ssid[i]),
-								NULL, false);
+					issue_probereq(padapter, &(pmlmeext->sitesurvey_res.ssid[i]), NULL);
 					/* msleep(SURVEY_TO>>1); */
-					issue_probereq(padapter,
-					&(pmlmeext->sitesurvey_res.ssid[i]),
-								NULL, false);
+					issue_probereq(padapter, &(pmlmeext->sitesurvey_res.ssid[i]), NULL);
 				}
 			}
 
 			if (pmlmeext->sitesurvey_res.scan_mode == SCAN_ACTIVE) {
 				/* todo: to issue two probe req??? */
-				issue_probereq(padapter, NULL, NULL, false);
+				issue_probereq(padapter, NULL, NULL);
 				/* msleep(SURVEY_TO>>1); */
-				issue_probereq(padapter, NULL, NULL, false);
+				issue_probereq(padapter, NULL, NULL);
 			}
 
 			if (pmlmeext->sitesurvey_res.scan_mode == SCAN_ACTIVE) {
 				/* todo: to issue two probe req??? */
-				issue_probereq(padapter, NULL, NULL, false);
+				issue_probereq(padapter, NULL, NULL);
 				/* msleep(SURVEY_TO>>1); */
-				issue_probereq(padapter, NULL, NULL, false);
+				issue_probereq(padapter, NULL, NULL);
 			}
 		}
 
@@ -3247,7 +3213,7 @@ static unsigned int OnAssocReq(struct adapter *padapter,
 			pstat->flags |= WLAN_STA_WPS;
 			copy_len = 0;
 		} else {
-			copy_len = min_t(int, wpa_ie_len + 2, sizeof(pstat->wpa_ie));
+			copy_len = ((wpa_ie_len+2) > sizeof(pstat->wpa_ie)) ? (sizeof(pstat->wpa_ie)) : (wpa_ie_len+2);
 		}
 		if (copy_len > 0)
 			memcpy(pstat->wpa_ie, wpa_ie-2, copy_len);
@@ -3517,6 +3483,7 @@ static unsigned int OnAssocRsp(struct adapter *padapter,
 	pmlmeinfo->state &= (~WIFI_FW_ASSOC_STATE);
 	pmlmeinfo->state |= WIFI_FW_ASSOC_SUCCESS;
 
+	/* Update Basic Rate Table for spec, 2010-12-28 , by thomas */
 	UpdateBrateTbl(padapter, pmlmeinfo->network.SupportedRates);
 
 report_assoc_result:
@@ -3935,7 +3902,7 @@ static unsigned int OnAction(struct adapter *padapter,
 
 	category = frame_body[0];
 
-	for (i = 0; i < ARRAY_SIZE(OnAction_tbl); i++) {
+	for (i = 0; i < sizeof(OnAction_tbl)/sizeof(struct action_handler); i++) {
 		ptable = &OnAction_tbl[i];
 		if (category == ptable->num)
 			ptable->func(padapter, precv_frame);
@@ -4210,13 +4177,10 @@ void mgt_dispatcher(struct adapter *padapter, struct recv_frame *precv_frame)
 
 	RT_TRACE(_module_rtl871x_mlme_c_, _drv_info_,
 		 ("+mgt_dispatcher: type(0x%x) subtype(0x%x)\n",
-		  (unsigned int)GetFrameType(pframe),
-		  (unsigned int)GetFrameSubType(pframe)));
+		  GetFrameType(pframe), GetFrameSubType(pframe)));
 
 	if (GetFrameType(pframe) != WIFI_MGT_TYPE) {
-		RT_TRACE(_module_rtl871x_mlme_c_, _drv_err_,
-			 ("mgt_dispatcher: type(0x%x) error!\n",
-			  (unsigned int)GetFrameType(pframe)));
+		RT_TRACE(_module_rtl871x_mlme_c_, _drv_err_, ("mgt_dispatcher: type(0x%x) error!\n", GetFrameType(pframe)));
 		return;
 	}
 
@@ -4829,18 +4793,9 @@ void linked_status_chk(struct adapter *padapter)
 			} else {
 				if (rx_chk != _SUCCESS) {
 					if (pmlmeext->retry == 0) {
-						issue_probereq(padapter,
-						&pmlmeinfo->network.Ssid,
-						pmlmeinfo->network.MacAddress,
-									false);
-						issue_probereq(padapter,
-						&pmlmeinfo->network.Ssid,
-						pmlmeinfo->network.MacAddress,
-									false);
-						issue_probereq(padapter,
-						&pmlmeinfo->network.Ssid,
-						pmlmeinfo->network.MacAddress,
-									false);
+						issue_probereq(padapter, &pmlmeinfo->network.Ssid, pmlmeinfo->network.MacAddress);
+						issue_probereq(padapter, &pmlmeinfo->network.Ssid, pmlmeinfo->network.MacAddress);
+						issue_probereq(padapter, &pmlmeinfo->network.Ssid, pmlmeinfo->network.MacAddress);
 					}
 				}
 
@@ -5429,8 +5384,9 @@ u8 set_stakey_hdl(struct adapter *padapter, u8 *pbuf)
 
 			cam_id = psta->mac_id + 3;/* 0~3 for default key, cmd_id = macid + 3, macid = aid+1; */
 
-			DBG_88E("Write CAM, mac_addr =%pM, cam_entry=%d\n",
-				pparm->addr, cam_id);
+			DBG_88E("Write CAM, mac_addr =%x:%x:%x:%x:%x:%x, cam_entry=%d\n", pparm->addr[0],
+				pparm->addr[1], pparm->addr[2], pparm->addr[3], pparm->addr[4],
+				pparm->addr[5], cam_id);
 
 			write_cam(padapter, cam_id, ctrl, pparm->addr, pparm->key);
 

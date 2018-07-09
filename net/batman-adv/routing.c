@@ -104,15 +104,6 @@ static void _batadv_update_route(struct batadv_priv *bat_priv,
 		neigh_node = NULL;
 
 	spin_lock_bh(&orig_node->neigh_list_lock);
-	/* curr_router used earlier may not be the current orig_ifinfo->router
-	 * anymore because it was dereferenced outside of the neigh_list_lock
-	 * protected region. After the new best neighbor has replace the current
-	 * best neighbor the reference counter needs to decrease. Consequently,
-	 * the code needs to ensure the curr_router variable contains a pointer
-	 * to the replaced best neighbor.
-	 */
-	curr_router = rcu_dereference_protected(orig_ifinfo->router, true);
-
 	rcu_assign_pointer(orig_ifinfo->router, neigh_node);
 	spin_unlock_bh(&orig_node->neigh_list_lock);
 	batadv_orig_ifinfo_free_ref(orig_ifinfo);
@@ -506,9 +497,9 @@ batadv_find_router(struct batadv_priv *bat_priv,
 		/* alternative candidate should be good enough to be
 		 * considered
 		 */
-		if (!bao->bat_neigh_is_similar_or_better(cand_router,
-							 cand->if_outgoing,
-							 router, recv_if))
+		if (!bao->bat_neigh_is_equiv_or_better(cand_router,
+						       cand->if_outgoing,
+						       router, recv_if))
 			goto next;
 
 		/* don't use the same router twice */
@@ -845,7 +836,6 @@ int batadv_recv_unicast_packet(struct sk_buff *skb,
 	u8 *orig_addr;
 	struct batadv_orig_node *orig_node = NULL;
 	int check, hdr_size = sizeof(*unicast_packet);
-	enum batadv_subtype subtype;
 	bool is4addr;
 
 	unicast_packet = (struct batadv_unicast_packet *)skb->data;
@@ -873,20 +863,10 @@ int batadv_recv_unicast_packet(struct sk_buff *skb,
 	/* packet for me */
 	if (batadv_is_my_mac(bat_priv, unicast_packet->dest)) {
 		if (is4addr) {
-			subtype = unicast_4addr_packet->subtype;
-			batadv_dat_inc_counter(bat_priv, subtype);
-
-			/* Only payload data should be considered for speedy
-			 * join. For example, DAT also uses unicast 4addr
-			 * types, but those packets should not be considered
-			 * for speedy join, since the clients do not actually
-			 * reside at the sending originator.
-			 */
-			if (subtype == BATADV_P_DATA) {
-				orig_addr = unicast_4addr_packet->src;
-				orig_node = batadv_orig_hash_find(bat_priv,
-								  orig_addr);
-			}
+			batadv_dat_inc_counter(bat_priv,
+					       unicast_4addr_packet->subtype);
+			orig_addr = unicast_4addr_packet->src;
+			orig_node = batadv_orig_hash_find(bat_priv, orig_addr);
 		}
 
 		if (batadv_dat_snoop_incoming_arp_request(bat_priv, skb,

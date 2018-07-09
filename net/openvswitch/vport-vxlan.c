@@ -90,9 +90,7 @@ static struct vport *vxlan_tnl_create(const struct vport_parms *parms)
 	int err;
 	struct vxlan_config conf = {
 		.no_share = true,
-		.flags = VXLAN_F_COLLECT_METADATA | VXLAN_F_UDP_ZERO_CSUM6_RX,
-		/* Don't restrict the packets that can be sent by MTU */
-		.mtu = IP_MAX_MTU,
+		.flags = VXLAN_F_COLLECT_METADATA,
 	};
 
 	if (!options) {
@@ -153,7 +151,7 @@ static struct vport_ops ovs_vxlan_netdev_vport_ops = {
 	.create			= vxlan_create,
 	.destroy		= ovs_netdev_tunnel_destroy,
 	.get_options		= vxlan_get_options,
-	.send			= dev_queue_xmit,
+	.send			= ovs_netdev_send,
 };
 
 static int __init ovs_vxlan_tnl_init(void)

@@ -30,7 +30,7 @@ static LIST_HEAD(regmap_debugfs_early_list);
 static DEFINE_MUTEX(regmap_debugfs_early_lock);
 
 /* Calculate the length of a fixed format  */
-static size_t regmap_calc_reg_len(int max_val)
+static size_t regmap_calc_reg_len(int max_val, char *buf, size_t buf_size)
 {
 	return snprintf(NULL, 0, "%x", max_val);
 }
@@ -173,7 +173,8 @@ static inline void regmap_calc_tot_len(struct regmap *map,
 {
 	/* Calculate the length of a fixed format  */
 	if (!map->debugfs_tot_len) {
-		map->debugfs_reg_len = regmap_calc_reg_len(map->max_register),
+		map->debugfs_reg_len = regmap_calc_reg_len(map->max_register,
+							   buf, count);
 		map->debugfs_val_len = 2 * map->format.val_bytes;
 		map->debugfs_tot_len = map->debugfs_reg_len +
 			map->debugfs_val_len + 3;      /* : \n */
@@ -337,7 +338,6 @@ static ssize_t regmap_reg_ranges_read_file(struct file *file,
 	char *buf;
 	char *entry;
 	int ret;
-	unsigned entry_len;
 
 	if (*ppos < 0 || !count)
 		return -EINVAL;
@@ -365,15 +365,18 @@ static ssize_t regmap_reg_ranges_read_file(struct file *file,
 	p = 0;
 	mutex_lock(&map->cache_lock);
 	list_for_each_entry(c, &map->debugfs_off_cache, list) {
-		entry_len = snprintf(entry, PAGE_SIZE, "%x-%x\n",
-				     c->base_reg, c->max_reg);
+		snprintf(entry, PAGE_SIZE, "%x-%x",
+			 c->base_reg, c->max_reg);
 		if (p >= *ppos) {
-			if (buf_pos + entry_len > count)
+			if (buf_pos + 1 + strlen(entry) > count)
 				break;
-			memcpy(buf + buf_pos, entry, entry_len);
-			buf_pos += entry_len;
+			snprintf(buf + buf_pos, count - buf_pos,
+				 "%s", entry);
+			buf_pos += strlen(entry);
+			buf[buf_pos] = '\n';
+			buf_pos++;
 		}
-		p += entry_len;
+		p += strlen(entry) + 1;
 	}
 	mutex_unlock(&map->cache_lock);
 
@@ -397,39 +400,72 @@ static const struct file_operations regmap_reg_ranges_fops = {
 	.llseek = default_llseek,
 };
 
-static int regmap_access_show(struct seq_file *s, void *ignored)
+static ssize_t regmap_access_read_file(struct file *file,
+				       char __user *user_buf, size_t count,
+				       loff_t *ppos)
 {
-	struct regmap *map = s->private;
-	int i, reg_len;
+	int reg_len, tot_len;
+	size_t buf_pos = 0;
+	loff_t p = 0;
+	ssize_t ret;
+	int i;
+	struct regmap *map = file->private_data;
+	char *buf;
 
-	reg_len = regmap_calc_reg_len(map->max_register);
+	if (*ppos < 0 || !count)
+		return -EINVAL;
+
+	buf = kmalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	/* Calculate the length of a fixed format  */
+	reg_len = regmap_calc_reg_len(map->max_register, buf, count);
+	tot_len = reg_len + 10; /* ': R W V P\n' */
 
 	for (i = 0; i <= map->max_register; i += map->reg_stride) {
 		/* Ignore registers which are neither readable nor writable */
 		if (!regmap_readable(map, i) && !regmap_writeable(map, i))
 			continue;
 
-		/* Format the register */
-		seq_printf(s, "%.*x: %c %c %c %c\n", reg_len, i,
-			   regmap_readable(map, i) ? 'y' : 'n',
-			   regmap_writeable(map, i) ? 'y' : 'n',
-			   regmap_volatile(map, i) ? 'y' : 'n',
-			   regmap_precious(map, i) ? 'y' : 'n');
+		/* If we're in the region the user is trying to read */
+		if (p >= *ppos) {
+			/* ...but not beyond it */
+			if (buf_pos + tot_len + 1 >= count)
+				break;
+
+			/* Format the register */
+			snprintf(buf + buf_pos, count - buf_pos,
+				 "%.*x: %c %c %c %c\n",
+				 reg_len, i,
+				 regmap_readable(map, i) ? 'y' : 'n',
+				 regmap_writeable(map, i) ? 'y' : 'n',
+				 regmap_volatile(map, i) ? 'y' : 'n',
+				 regmap_precious(map, i) ? 'y' : 'n');
+
+			buf_pos += tot_len;
+		}
+		p += tot_len;
 	}
 
-	return 0;
-}
+	ret = buf_pos;
 
-static int access_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, regmap_access_show, inode->i_private);
+	if (copy_to_user(user_buf, buf, buf_pos)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	*ppos += buf_pos;
+
+out:
+	kfree(buf);
+	return ret;
 }
 
 static const struct file_operations regmap_access_fops = {
-	.open		= access_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
+	.open = simple_open,
+	.read = regmap_access_read_file,
+	.llseek = default_llseek,
 };
 
 static ssize_t regmap_cache_only_write_file(struct file *file,

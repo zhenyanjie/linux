@@ -22,7 +22,6 @@
 #include <linux/if_vlan.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <net/inet_sock.h>
 
 #include <net/pkt_cls.h>
 #include <net/ip.h>
@@ -198,11 +197,8 @@ static u32 flow_get_rtclassid(const struct sk_buff *skb)
 
 static u32 flow_get_skuid(const struct sk_buff *skb)
 {
-	struct sock *sk = skb_to_full_sk(skb);
-
-	if (sk && sk->sk_socket && sk->sk_socket->file) {
-		kuid_t skuid = sk->sk_socket->file->f_cred->fsuid;
-
+	if (skb->sk && skb->sk->sk_socket && skb->sk->sk_socket->file) {
+		kuid_t skuid = skb->sk->sk_socket->file->f_cred->fsuid;
 		return from_kuid(&init_user_ns, skuid);
 	}
 	return 0;
@@ -210,11 +206,8 @@ static u32 flow_get_skuid(const struct sk_buff *skb)
 
 static u32 flow_get_skgid(const struct sk_buff *skb)
 {
-	struct sock *sk = skb_to_full_sk(skb);
-
-	if (sk && sk->sk_socket && sk->sk_socket->file) {
-		kgid_t skgid = sk->sk_socket->file->f_cred->fsgid;
-
+	if (skb->sk && skb->sk->sk_socket && skb->sk->sk_socket->file) {
+		kgid_t skgid = skb->sk->sk_socket->file->f_cred->fsgid;
 		return from_kgid(&init_user_ns, skgid);
 	}
 	return 0;

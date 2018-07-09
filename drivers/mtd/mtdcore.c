@@ -32,7 +32,6 @@
 #include <linux/err.h>
 #include <linux/ioctl.h>
 #include <linux/init.h>
-#include <linux/of.h>
 #include <linux/proc_fs.h>
 #include <linux/idr.h>
 #include <linux/backing-dev.h>
@@ -388,14 +387,6 @@ int add_mtd_device(struct mtd_info *mtd)
 	struct mtd_notifier *not;
 	int i, error;
 
-	/*
-	 * May occur, for instance, on buggy drivers which call
-	 * mtd_device_parse_register() multiple times on the same master MTD,
-	 * especially with CONFIG_MTD_PARTITIONED_MASTER=y.
-	 */
-	if (WARN_ONCE(mtd->backing_dev_info, "MTD already registered\n"))
-		return -EEXIST;
-
 	mtd->backing_dev_info = &mtd_bdi;
 
 	BUG_ON(mtd->writesize == 0);
@@ -439,14 +430,13 @@ int add_mtd_device(struct mtd_info *mtd)
 	}
 
 	/* Caller should have set dev.parent to match the
-	 * physical device, if appropriate.
+	 * physical device.
 	 */
 	mtd->dev.type = &mtd_devtype;
 	mtd->dev.class = &mtd_class;
 	mtd->dev.devt = MTD_DEVT(i);
 	dev_set_name(&mtd->dev, "mtd%d", i);
 	dev_set_drvdata(&mtd->dev, mtd);
-	of_node_get(mtd_get_of_node(mtd));
 	error = device_register(&mtd->dev);
 	if (error)
 		goto fail_added;
@@ -469,7 +459,6 @@ int add_mtd_device(struct mtd_info *mtd)
 	return 0;
 
 fail_added:
-	of_node_put(mtd_get_of_node(mtd));
 	idr_remove(&mtd_idr, i);
 fail_locked:
 	mutex_unlock(&mtd_table_mutex);
@@ -511,7 +500,6 @@ int del_mtd_device(struct mtd_info *mtd)
 		device_unregister(&mtd->dev);
 
 		idr_remove(&mtd_idr, mtd->index);
-		of_node_put(mtd_get_of_node(mtd));
 
 		module_put(THIS_MODULE);
 		ret = 0;
@@ -523,10 +511,9 @@ out_error:
 }
 
 static int mtd_add_device_partitions(struct mtd_info *mtd,
-				     struct mtd_partitions *parts)
+				     struct mtd_partition *real_parts,
+				     int nbparts)
 {
-	const struct mtd_partition *real_parts = parts->parts;
-	int nbparts = parts->nr_parts;
 	int ret;
 
 	if (nbparts == 0 || IS_ENABLED(CONFIG_MTD_PARTITIONED_MASTER)) {
@@ -545,21 +532,6 @@ static int mtd_add_device_partitions(struct mtd_info *mtd,
 	return 0;
 }
 
-/*
- * Set a few defaults based on the parent devices, if not provided by the
- * driver
- */
-static void mtd_set_dev_defaults(struct mtd_info *mtd)
-{
-	if (mtd->dev.parent) {
-		if (!mtd->owner && mtd->dev.parent->driver)
-			mtd->owner = mtd->dev.parent->driver->owner;
-		if (!mtd->name)
-			mtd->name = dev_name(mtd->dev.parent);
-	} else {
-		pr_debug("mtd device won't show a device symlink in sysfs\n");
-	}
-}
 
 /**
  * mtd_device_parse_register - parse partitions and register an MTD device.
@@ -595,31 +567,21 @@ int mtd_device_parse_register(struct mtd_info *mtd, const char * const *types,
 			      const struct mtd_partition *parts,
 			      int nr_parts)
 {
-	struct mtd_partitions parsed;
 	int ret;
+	struct mtd_partition *real_parts = NULL;
 
-	mtd_set_dev_defaults(mtd);
-
-	memset(&parsed, 0, sizeof(parsed));
-
-	ret = parse_mtd_partitions(mtd, types, &parsed, parser_data);
-	if ((ret < 0 || parsed.nr_parts == 0) && parts && nr_parts) {
-		/* Fall back to driver-provided partitions */
-		parsed = (struct mtd_partitions){
-			.parts		= parts,
-			.nr_parts	= nr_parts,
-		};
-	} else if (ret < 0) {
-		/* Didn't come up with parsed OR fallback partitions */
-		pr_info("mtd: failed to find partitions; one or more parsers reports errors (%d)\n",
-			ret);
-		/* Don't abort on errors; we can still use unpartitioned MTD */
-		memset(&parsed, 0, sizeof(parsed));
+	ret = parse_mtd_partitions(mtd, types, &real_parts, parser_data);
+	if (ret <= 0 && nr_parts && parts) {
+		real_parts = kmemdup(parts, sizeof(*parts) * nr_parts,
+				     GFP_KERNEL);
+		if (!real_parts)
+			ret = -ENOMEM;
+		else
+			ret = nr_parts;
 	}
 
-	ret = mtd_add_device_partitions(mtd, &parsed);
-	if (ret)
-		goto out;
+	if (ret >= 0)
+		ret = mtd_add_device_partitions(mtd, real_parts, ret);
 
 	/*
 	 * FIXME: some drivers unfortunately call this function more than once.
@@ -629,16 +591,12 @@ int mtd_device_parse_register(struct mtd_info *mtd, const char * const *types,
 	 * does cause problems with parse_mtd_partitions() above (e.g.,
 	 * cmdlineparts will register partitions more than once).
 	 */
-	WARN_ONCE(mtd->_reboot && mtd->reboot_notifier.notifier_call,
-		  "MTD already registered\n");
 	if (mtd->_reboot && !mtd->reboot_notifier.notifier_call) {
 		mtd->reboot_notifier.notifier_call = mtd_reboot_notifier;
 		register_reboot_notifier(&mtd->reboot_notifier);
 	}
 
-out:
-	/* Cleanup any parsed partitions */
-	mtd_part_parser_cleanup(&parsed);
+	kfree(real_parts);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(mtd_device_parse_register);
@@ -1230,7 +1188,8 @@ EXPORT_SYMBOL_GPL(mtd_writev);
  */
 void *mtd_kmalloc_up_to(const struct mtd_info *mtd, size_t *size)
 {
-	gfp_t flags = __GFP_NOWARN | __GFP_DIRECT_RECLAIM | __GFP_NORETRY;
+	gfp_t flags = __GFP_NOWARN | __GFP_WAIT |
+		       __GFP_NORETRY | __GFP_NO_KSWAPD;
 	size_t min_alloc = max_t(size_t, mtd->writesize, PAGE_SIZE);
 	void *kbuf;
 
@@ -1342,7 +1301,6 @@ static void __exit cleanup_mtd(void)
 		remove_proc_entry("mtd", NULL);
 	class_unregister(&mtd_class);
 	bdi_destroy(&mtd_bdi);
-	idr_destroy(&mtd_idr);
 }
 
 module_init(init_mtd);

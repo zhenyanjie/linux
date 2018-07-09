@@ -48,11 +48,11 @@ static struct cpufreq_policy *next_policy(struct cpufreq_policy *policy,
 					  bool active)
 {
 	do {
-		/* No more policies in the list */
-		if (list_is_last(&policy->policy_list, &cpufreq_policy_list))
-			return NULL;
-
 		policy = list_next_entry(policy, policy_list);
+
+		/* No more policies in the list */
+		if (&policy->policy_list == &cpufreq_policy_list)
+			return NULL;
 	} while (!suitable_policy(policy, active));
 
 	return policy;
@@ -843,11 +843,18 @@ static ssize_t store(struct kobject *kobj, struct attribute *attr,
 
 	down_write(&policy->rwsem);
 
+	/* Updating inactive policies is invalid, so avoid doing that. */
+	if (unlikely(policy_is_inactive(policy))) {
+		ret = -EBUSY;
+		goto unlock_policy_rwsem;
+	}
+
 	if (fattr->store)
 		ret = fattr->store(policy, buf, count);
 	else
 		ret = -EIO;
 
+unlock_policy_rwsem:
 	up_write(&policy->rwsem);
 unlock:
 	put_online_cpus();
@@ -872,6 +879,49 @@ static struct kobj_type ktype_cpufreq = {
 	.default_attrs	= default_attrs,
 	.release	= cpufreq_sysfs_release,
 };
+
+struct kobject *cpufreq_global_kobject;
+EXPORT_SYMBOL(cpufreq_global_kobject);
+
+static int cpufreq_global_kobject_usage;
+
+int cpufreq_get_global_kobject(void)
+{
+	if (!cpufreq_global_kobject_usage++)
+		return kobject_add(cpufreq_global_kobject,
+				&cpu_subsys.dev_root->kobj, "%s", "cpufreq");
+
+	return 0;
+}
+EXPORT_SYMBOL(cpufreq_get_global_kobject);
+
+void cpufreq_put_global_kobject(void)
+{
+	if (!--cpufreq_global_kobject_usage)
+		kobject_del(cpufreq_global_kobject);
+}
+EXPORT_SYMBOL(cpufreq_put_global_kobject);
+
+int cpufreq_sysfs_create_file(const struct attribute *attr)
+{
+	int ret = cpufreq_get_global_kobject();
+
+	if (!ret) {
+		ret = sysfs_create_file(cpufreq_global_kobject, attr);
+		if (ret)
+			cpufreq_put_global_kobject();
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(cpufreq_sysfs_create_file);
+
+void cpufreq_sysfs_remove_file(const struct attribute *attr)
+{
+	sysfs_remove_file(cpufreq_global_kobject, attr);
+	cpufreq_put_global_kobject();
+}
+EXPORT_SYMBOL(cpufreq_sysfs_remove_file);
 
 static int add_cpu_dev_symlink(struct cpufreq_policy *policy, int cpu)
 {
@@ -910,6 +960,9 @@ static int cpufreq_add_dev_symlink(struct cpufreq_policy *policy)
 
 	/* Some related CPUs might not be present (physically hotplugged) */
 	for_each_cpu(j, policy->real_cpus) {
+		if (j == policy->kobj_cpu)
+			continue;
+
 		ret = add_cpu_dev_symlink(policy, j);
 		if (ret)
 			break;
@@ -923,8 +976,12 @@ static void cpufreq_remove_dev_symlink(struct cpufreq_policy *policy)
 	unsigned int j;
 
 	/* Some related CPUs might not be present (physically hotplugged) */
-	for_each_cpu(j, policy->real_cpus)
+	for_each_cpu(j, policy->real_cpus) {
+		if (j == policy->kobj_cpu)
+			continue;
+
 		remove_cpu_dev_symlink(policy, j);
+	}
 }
 
 static int cpufreq_add_dev_interface(struct cpufreq_policy *policy)
@@ -976,14 +1033,10 @@ static int cpufreq_init_policy(struct cpufreq_policy *policy)
 
 	new_policy.governor = gov;
 
-	/* Use the default policy if there is no last_policy. */
-	if (cpufreq_driver->setpolicy) {
-		if (policy->last_policy)
-			new_policy.policy = policy->last_policy;
-		else
-			cpufreq_parse_governor(gov->name, &new_policy.policy,
-					       NULL);
-	}
+	/* Use the default policy if its valid. */
+	if (cpufreq_driver->setpolicy)
+		cpufreq_parse_governor(gov->name, &new_policy.policy, NULL);
+
 	/* set default policy */
 	return cpufreq_set_policy(policy, &new_policy);
 }
@@ -1026,6 +1079,7 @@ static struct cpufreq_policy *cpufreq_policy_alloc(unsigned int cpu)
 {
 	struct device *dev = get_cpu_device(cpu);
 	struct cpufreq_policy *policy;
+	int ret;
 
 	if (WARN_ON(!dev))
 		return NULL;
@@ -1043,7 +1097,13 @@ static struct cpufreq_policy *cpufreq_policy_alloc(unsigned int cpu)
 	if (!zalloc_cpumask_var(&policy->real_cpus, GFP_KERNEL))
 		goto err_free_rcpumask;
 
-	kobject_init(&policy->kobj, &ktype_cpufreq);
+	ret = kobject_init_and_add(&policy->kobj, &ktype_cpufreq, &dev->kobj,
+				   "cpufreq");
+	if (ret) {
+		pr_err("%s: failed to init policy->kobj: %d\n", __func__, ret);
+		goto err_free_real_cpus;
+	}
+
 	INIT_LIST_HEAD(&policy->policy_list);
 	init_rwsem(&policy->rwsem);
 	spin_lock_init(&policy->transition_lock);
@@ -1052,8 +1112,14 @@ static struct cpufreq_policy *cpufreq_policy_alloc(unsigned int cpu)
 	INIT_WORK(&policy->update, handle_update);
 
 	policy->cpu = cpu;
+
+	/* Set this once on allocation */
+	policy->kobj_cpu = cpu;
+
 	return policy;
 
+err_free_real_cpus:
+	free_cpumask_var(policy->real_cpus);
 err_free_rcpumask:
 	free_cpumask_var(policy->related_cpus);
 err_free_cpumask:
@@ -1155,19 +1221,9 @@ static int cpufreq_online(unsigned int cpu)
 
 	if (new_policy) {
 		/* related_cpus should at least include policy->cpus. */
-		cpumask_copy(policy->related_cpus, policy->cpus);
+		cpumask_or(policy->related_cpus, policy->related_cpus, policy->cpus);
 		/* Remember CPUs present at the policy creation time. */
 		cpumask_and(policy->real_cpus, policy->cpus, cpu_present_mask);
-
-		/* Name and add the kobject */
-		ret = kobject_add(&policy->kobj, cpufreq_global_kobject,
-				  "policy%u",
-				  cpumask_first(policy->related_cpus));
-		if (ret) {
-			pr_err("%s: failed to add policy->kobj: %d\n", __func__,
-			       ret);
-			goto out_exit_policy;
-		}
 	}
 
 	/*
@@ -1334,8 +1390,6 @@ static void cpufreq_offline_prepare(unsigned int cpu)
 		if (has_target())
 			strncpy(policy->last_governor, policy->governor->name,
 				CPUFREQ_NAME_LEN);
-		else
-			policy->last_policy = policy->policy;
 	} else if (cpu == policy->cpu) {
 		/* Nominate new CPU */
 		policy->cpu = cpumask_any(policy->cpus);
@@ -1407,10 +1461,28 @@ static void cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif)
 	}
 
 	cpumask_clear_cpu(cpu, policy->real_cpus);
-	remove_cpu_dev_symlink(policy, cpu);
 
-	if (cpumask_empty(policy->real_cpus))
+	if (cpumask_empty(policy->real_cpus)) {
 		cpufreq_policy_free(policy, true);
+		return;
+	}
+
+	if (cpu != policy->kobj_cpu) {
+		remove_cpu_dev_symlink(policy, cpu);
+	} else {
+		/*
+		 * The CPU owning the policy object is going away.  Move it to
+		 * another suitable CPU.
+		 */
+		unsigned int new_cpu = cpumask_first(policy->real_cpus);
+		struct device *new_dev = get_cpu_device(new_cpu);
+
+		dev_dbg(dev, "%s: Moving policy object to CPU%u\n", __func__, new_cpu);
+
+		sysfs_remove_link(&new_dev->kobj, "cpufreq");
+		policy->kobj_cpu = new_cpu;
+		WARN_ON(kobject_move(&policy->kobj, &new_dev->kobj));
+	}
 }
 
 static void handle_update(struct work_struct *work)
@@ -2330,16 +2402,30 @@ int cpufreq_boost_trigger_state(int state)
 	return ret;
 }
 
-static bool cpufreq_boost_supported(void)
+int cpufreq_boost_supported(void)
 {
-	return likely(cpufreq_driver) && cpufreq_driver->set_boost;
+	if (likely(cpufreq_driver))
+		return cpufreq_driver->boost_supported;
+
+	return 0;
 }
+EXPORT_SYMBOL_GPL(cpufreq_boost_supported);
 
 static int create_boost_sysfs_file(void)
 {
 	int ret;
 
-	ret = sysfs_create_file(cpufreq_global_kobject, &boost.attr);
+	if (!cpufreq_boost_supported())
+		return 0;
+
+	/*
+	 * Check if driver provides function to enable boost -
+	 * if not, use cpufreq_boost_set_sw as default
+	 */
+	if (!cpufreq_driver->set_boost)
+		cpufreq_driver->set_boost = cpufreq_boost_set_sw;
+
+	ret = cpufreq_sysfs_create_file(&boost.attr);
 	if (ret)
 		pr_err("%s: cannot register global BOOST sysfs file\n",
 		       __func__);
@@ -2350,7 +2436,7 @@ static int create_boost_sysfs_file(void)
 static void remove_boost_sysfs_file(void)
 {
 	if (cpufreq_boost_supported())
-		sysfs_remove_file(cpufreq_global_kobject, &boost.attr);
+		cpufreq_sysfs_remove_file(&boost.attr);
 }
 
 int cpufreq_enable_boost_support(void)
@@ -2361,7 +2447,7 @@ int cpufreq_enable_boost_support(void)
 	if (cpufreq_boost_supported())
 		return 0;
 
-	cpufreq_driver->set_boost = cpufreq_boost_set_sw;
+	cpufreq_driver->boost_supported = true;
 
 	/* This will get removed on driver unregister */
 	return create_boost_sysfs_file();
@@ -2421,11 +2507,9 @@ int cpufreq_register_driver(struct cpufreq_driver *driver_data)
 	if (driver_data->setpolicy)
 		driver_data->flags |= CPUFREQ_CONST_LOOPS;
 
-	if (cpufreq_boost_supported()) {
-		ret = create_boost_sysfs_file();
-		if (ret)
-			goto err_null_driver;
-	}
+	ret = create_boost_sysfs_file();
+	if (ret)
+		goto err_null_driver;
 
 	ret = subsys_interface_register(&cpufreq_interface);
 	if (ret)
@@ -2500,15 +2584,12 @@ static struct syscore_ops cpufreq_syscore_ops = {
 	.shutdown = cpufreq_suspend,
 };
 
-struct kobject *cpufreq_global_kobject;
-EXPORT_SYMBOL(cpufreq_global_kobject);
-
 static int __init cpufreq_core_init(void)
 {
 	if (cpufreq_disabled())
 		return -ENODEV;
 
-	cpufreq_global_kobject = kobject_create_and_add("cpufreq", &cpu_subsys.dev_root->kobj);
+	cpufreq_global_kobject = kobject_create();
 	BUG_ON(!cpufreq_global_kobject);
 
 	register_syscore_ops(&cpufreq_syscore_ops);

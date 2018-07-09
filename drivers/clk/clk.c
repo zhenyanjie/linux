@@ -272,7 +272,7 @@ late_initcall_sync(clk_disable_unused);
 
 /***    helper functions   ***/
 
-const char *__clk_get_name(const struct clk *clk)
+const char *__clk_get_name(struct clk *clk)
 {
 	return !clk ? NULL : clk->core->name;
 }
@@ -425,11 +425,6 @@ EXPORT_SYMBOL_GPL(clk_hw_get_flags);
 bool clk_hw_is_prepared(const struct clk_hw *hw)
 {
 	return clk_core_is_prepared(hw->core);
-}
-
-bool clk_hw_is_enabled(const struct clk_hw *hw)
-{
-	return clk_core_is_enabled(hw->core);
 }
 
 bool __clk_is_enabled(struct clk *clk)
@@ -1443,15 +1438,6 @@ static void clk_change_rate(struct clk_core *core)
 	else if (core->parent)
 		best_parent_rate = core->parent->rate;
 
-	if (core->flags & CLK_SET_RATE_UNGATE) {
-		unsigned long flags;
-
-		clk_core_prepare(core);
-		flags = clk_enable_lock();
-		clk_core_enable(core);
-		clk_enable_unlock(flags);
-	}
-
 	if (core->new_parent && core->new_parent != core->parent) {
 		old_parent = __clk_set_parent_before(core, core->new_parent);
 		trace_clk_set_parent(core, core->new_parent);
@@ -1477,15 +1463,6 @@ static void clk_change_rate(struct clk_core *core)
 	trace_clk_set_rate_complete(core, core->new_rate);
 
 	core->rate = clk_recalc(core, best_parent_rate);
-
-	if (core->flags & CLK_SET_RATE_UNGATE) {
-		unsigned long flags;
-
-		flags = clk_enable_lock();
-		clk_core_disable(core);
-		clk_enable_unlock(flags);
-		clk_core_unprepare(core);
-	}
 
 	if (core->notifier_count && old_rate != core->rate)
 		__clk_notify(core, POST_RATE_CHANGE, old_rate, core->rate);
@@ -1708,7 +1685,7 @@ static struct clk_core *__clk_init_parent(struct clk_core *core)
 			"%s: multi-parent clocks must implement .get_parent\n",
 			__func__);
 		goto out;
-	}
+	};
 
 	/*
 	 * Do our best to cache parent clocks in core->parents.  This prevents
@@ -1962,7 +1939,7 @@ bool clk_is_match(const struct clk *p, const struct clk *q)
 	if (p == q)
 		return true;
 
-	/* true if clk->core pointers match. Avoid dereferencing garbage */
+	/* true if clk->core pointers match. Avoid derefing garbage */
 	if (!IS_ERR_OR_NULL(p) && !IS_ERR_OR_NULL(q))
 		if (p->core == q->core)
 			return true;
@@ -2500,7 +2477,7 @@ struct clk *__clk_create_clk(struct clk_hw *hw, const char *dev_id,
 	struct clk *clk;
 
 	/* This is to allow this function to be chained to others */
-	if (IS_ERR_OR_NULL(hw))
+	if (!hw || IS_ERR(hw))
 		return (struct clk *) hw;
 
 	clk = kzalloc(sizeof(*clk), GFP_KERNEL);
@@ -2824,9 +2801,10 @@ void __clk_put(struct clk *clk)
  * re-enter into the clk framework by calling any top-level clk APIs;
  * this will cause a nested prepare_lock mutex.
  *
- * In all notification cases (pre, post and abort rate change) the original
- * clock rate is passed to the callback via struct clk_notifier_data.old_rate
- * and the new frequency is passed via struct clk_notifier_data.new_rate.
+ * In all notification cases cases (pre, post and abort rate change) the
+ * original clock rate is passed to the callback via struct
+ * clk_notifier_data.old_rate and the new frequency is passed via struct
+ * clk_notifier_data.new_rate.
  *
  * clk_notifier_register() must be called from non-atomic context.
  * Returns -EINVAL if called with null arguments, -ENOMEM upon
@@ -2954,7 +2932,7 @@ struct clk *of_clk_src_onecell_get(struct of_phandle_args *clkspec, void *data)
 	unsigned int idx = clkspec->args[0];
 
 	if (idx >= clk_data->clk_num) {
-		pr_err("%s: invalid clock index %u\n", __func__, idx);
+		pr_err("%s: invalid clock index %d\n", __func__, idx);
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -3077,7 +3055,9 @@ const char *of_clk_get_parent_name(struct device_node *np, int index)
 	u32 pv;
 	int rc;
 	int count;
-	struct clk *clk;
+
+	if (index < 0)
+		return NULL;
 
 	rc = of_parse_phandle_with_args(np, "clocks", "#clock-cells", index,
 					&clkspec);
@@ -3097,31 +3077,11 @@ const char *of_clk_get_parent_name(struct device_node *np, int index)
 		}
 		count++;
 	}
-	/* We went off the end of 'clock-indices' without finding it */
-	if (prop && !vp)
-		return NULL;
 
 	if (of_property_read_string_index(clkspec.np, "clock-output-names",
 					  index,
-					  &clk_name) < 0) {
-		/*
-		 * Best effort to get the name if the clock has been
-		 * registered with the framework. If the clock isn't
-		 * registered, we return the node name as the name of
-		 * the clock as long as #clock-cells = 0.
-		 */
-		clk = of_clk_get_from_provider(&clkspec);
-		if (IS_ERR(clk)) {
-			if (clkspec.args_count == 0)
-				clk_name = clkspec.np->name;
-			else
-				clk_name = NULL;
-		} else {
-			clk_name = __clk_get_name(clk);
-			clk_put(clk);
-		}
-	}
-
+					  &clk_name) < 0)
+		clk_name = clkspec.np->name;
 
 	of_node_put(clkspec.np);
 	return clk_name;
@@ -3219,15 +3179,13 @@ void __init of_clk_init(const struct of_device_id *matches)
 			list_for_each_entry_safe(clk_provider, next,
 						 &clk_provider_list, node) {
 				list_del(&clk_provider->node);
-				of_node_put(clk_provider->np);
 				kfree(clk_provider);
 			}
-			of_node_put(np);
 			return;
 		}
 
 		parent->clk_init_cb = match->data;
-		parent->np = of_node_get(np);
+		parent->np = np;
 		list_add_tail(&parent->node, &clk_provider_list);
 	}
 
@@ -3241,7 +3199,6 @@ void __init of_clk_init(const struct of_device_id *matches)
 				of_clk_set_defaults(clk_provider->np, true);
 
 				list_del(&clk_provider->node);
-				of_node_put(clk_provider->np);
 				kfree(clk_provider);
 				is_init_done = true;
 			}

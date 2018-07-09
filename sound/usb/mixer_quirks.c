@@ -339,7 +339,7 @@ static int snd_audigy2nx_led_put(struct snd_kcontrol *kcontrol,
 	struct usb_mixer_elem_list *list = snd_kcontrol_chip(kcontrol);
 	struct usb_mixer_interface *mixer = list->mixer;
 	int index = kcontrol->private_value & 0xff;
-	unsigned int value = ucontrol->value.integer.value[0];
+	int value = ucontrol->value.integer.value[0];
 	int old_value = kcontrol->private_value >> 8;
 	int err;
 
@@ -1519,11 +1519,7 @@ static int snd_microii_spdif_default_get(struct snd_kcontrol *kcontrol,
 
 	/* use known values for that card: interface#1 altsetting#1 */
 	iface = usb_ifnum_to_if(chip->dev, 1);
-	if (!iface || iface->num_altsetting < 2)
-		return -EINVAL;
 	alts = &iface->altsetting[1];
-	if (get_iface_desc(alts)->bNumEndpoints < 1)
-		return -EINVAL;
 	ep = get_endpoint(alts, 0)->bEndpointAddress;
 
 	err = snd_usb_ctl_msg(chip->dev,

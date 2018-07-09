@@ -175,7 +175,9 @@ static struct cpufreq_driver tegra_cpufreq_driver = {
 	.exit			= tegra_cpu_exit,
 	.name			= "tegra",
 	.attr			= cpufreq_generic_attr,
+#ifdef CONFIG_PM
 	.suspend		= cpufreq_generic_suspend,
+#endif
 };
 
 static int __init tegra_cpufreq_init(void)

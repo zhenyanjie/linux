@@ -82,27 +82,33 @@ module_param_named(enabled, zswap_enabled, bool, 0644);
 
 /* Crypto compressor to use */
 #define ZSWAP_COMPRESSOR_DEFAULT "lzo"
-static char *zswap_compressor = ZSWAP_COMPRESSOR_DEFAULT;
+static char zswap_compressor[CRYPTO_MAX_ALG_NAME] = ZSWAP_COMPRESSOR_DEFAULT;
+static struct kparam_string zswap_compressor_kparam = {
+	.string =	zswap_compressor,
+	.maxlen =	sizeof(zswap_compressor),
+};
 static int zswap_compressor_param_set(const char *,
 				      const struct kernel_param *);
 static struct kernel_param_ops zswap_compressor_param_ops = {
 	.set =		zswap_compressor_param_set,
-	.get =		param_get_charp,
-	.free =		param_free_charp,
+	.get =		param_get_string,
 };
 module_param_cb(compressor, &zswap_compressor_param_ops,
-		&zswap_compressor, 0644);
+		&zswap_compressor_kparam, 0644);
 
 /* Compressed storage zpool to use */
 #define ZSWAP_ZPOOL_DEFAULT "zbud"
-static char *zswap_zpool_type = ZSWAP_ZPOOL_DEFAULT;
+static char zswap_zpool_type[32 /* arbitrary */] = ZSWAP_ZPOOL_DEFAULT;
+static struct kparam_string zswap_zpool_kparam = {
+	.string =	zswap_zpool_type,
+	.maxlen =	sizeof(zswap_zpool_type),
+};
 static int zswap_zpool_param_set(const char *, const struct kernel_param *);
 static struct kernel_param_ops zswap_zpool_param_ops = {
-	.set =		zswap_zpool_param_set,
-	.get =		param_get_charp,
-	.free =		param_free_charp,
+	.set =	zswap_zpool_param_set,
+	.get =	param_get_string,
 };
-module_param_cb(zpool, &zswap_zpool_param_ops, &zswap_zpool_type, 0644);
+module_param_cb(zpool, &zswap_zpool_param_ops, &zswap_zpool_kparam, 0644);
 
 /* The maximum percentage of memory that the compressed pool can occupy */
 static unsigned int zswap_max_pool_percent = 20;
@@ -170,8 +176,6 @@ static struct zswap_tree *zswap_trees[MAX_SWAPFILES];
 static LIST_HEAD(zswap_pools);
 /* protects zswap_pools list modification */
 static DEFINE_SPINLOCK(zswap_pools_lock);
-/* pool counter to provide unique names to zpool */
-static atomic_t zswap_pools_count = ATOMIC_INIT(0);
 
 /* used by param callback function */
 static bool zswap_init_started;
@@ -338,7 +342,7 @@ static void zswap_entry_put(struct zswap_tree *tree,
 static struct zswap_entry *zswap_entry_find_get(struct rb_root *root,
 				pgoff_t offset)
 {
-	struct zswap_entry *entry;
+	struct zswap_entry *entry = NULL;
 
 	entry = zswap_rb_search(root, offset);
 	if (entry)
@@ -543,7 +547,6 @@ static struct zswap_pool *zswap_pool_last_get(void)
 	return last;
 }
 
-/* type and compressor must be null-terminated */
 static struct zswap_pool *zswap_pool_find_get(char *type, char *compressor)
 {
 	struct zswap_pool *pool;
@@ -551,9 +554,10 @@ static struct zswap_pool *zswap_pool_find_get(char *type, char *compressor)
 	assert_spin_locked(&zswap_pools_lock);
 
 	list_for_each_entry_rcu(pool, &zswap_pools, list) {
-		if (strcmp(pool->tfm_name, compressor))
+		if (strncmp(pool->tfm_name, compressor, sizeof(pool->tfm_name)))
 			continue;
-		if (strcmp(zpool_get_type(pool->zpool), type))
+		if (strncmp(zpool_get_type(pool->zpool), type,
+			    sizeof(zswap_zpool_type)))
 			continue;
 		/* if we can't get it, it's about to be destroyed */
 		if (!zswap_pool_get(pool))
@@ -567,8 +571,7 @@ static struct zswap_pool *zswap_pool_find_get(char *type, char *compressor)
 static struct zswap_pool *zswap_pool_create(char *type, char *compressor)
 {
 	struct zswap_pool *pool;
-	char name[38]; /* 'zswap' + 32 char (max) num + \0 */
-	gfp_t gfp = __GFP_NORETRY | __GFP_NOWARN | __GFP_KSWAPD_RECLAIM;
+	gfp_t gfp = __GFP_NORETRY | __GFP_NOWARN;
 
 	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
 	if (!pool) {
@@ -576,10 +579,7 @@ static struct zswap_pool *zswap_pool_create(char *type, char *compressor)
 		return NULL;
 	}
 
-	/* unique name for each pool specifically required by zsmalloc */
-	snprintf(name, 38, "zswap%x", atomic_inc_return(&zswap_pools_count));
-
-	pool->zpool = zpool_create_pool(type, name, gfp, &zswap_zpool_ops);
+	pool->zpool = zpool_create_pool(type, "zswap", gfp, &zswap_zpool_ops);
 	if (!pool->zpool) {
 		pr_err("%s zpool not available\n", type);
 		goto error;
@@ -615,29 +615,19 @@ error:
 	return NULL;
 }
 
-static __init struct zswap_pool *__zswap_pool_create_fallback(void)
+static struct zswap_pool *__zswap_pool_create_fallback(void)
 {
 	if (!crypto_has_comp(zswap_compressor, 0, 0)) {
-		if (!strcmp(zswap_compressor, ZSWAP_COMPRESSOR_DEFAULT)) {
-			pr_err("default compressor %s not available\n",
-			       zswap_compressor);
-			return NULL;
-		}
 		pr_err("compressor %s not available, using default %s\n",
 		       zswap_compressor, ZSWAP_COMPRESSOR_DEFAULT);
-		param_free_charp(&zswap_compressor);
-		zswap_compressor = ZSWAP_COMPRESSOR_DEFAULT;
+		strncpy(zswap_compressor, ZSWAP_COMPRESSOR_DEFAULT,
+			sizeof(zswap_compressor));
 	}
 	if (!zpool_has_pool(zswap_zpool_type)) {
-		if (!strcmp(zswap_zpool_type, ZSWAP_ZPOOL_DEFAULT)) {
-			pr_err("default zpool %s not available\n",
-			       zswap_zpool_type);
-			return NULL;
-		}
 		pr_err("zpool %s not available, using default %s\n",
 		       zswap_zpool_type, ZSWAP_ZPOOL_DEFAULT);
-		param_free_charp(&zswap_zpool_type);
-		zswap_zpool_type = ZSWAP_ZPOOL_DEFAULT;
+		strncpy(zswap_zpool_type, ZSWAP_ZPOOL_DEFAULT,
+			sizeof(zswap_zpool_type));
 	}
 
 	return zswap_pool_create(zswap_zpool_type, zswap_compressor);
@@ -694,39 +684,43 @@ static void zswap_pool_put(struct zswap_pool *pool)
 * param callbacks
 **********************************/
 
-/* val must be a null-terminated string */
 static int __zswap_param_set(const char *val, const struct kernel_param *kp,
 			     char *type, char *compressor)
 {
 	struct zswap_pool *pool, *put_pool = NULL;
-	char *s = strstrip((char *)val);
+	char str[kp->str->maxlen], *s;
 	int ret;
 
-	/* no change required */
-	if (!strcmp(s, *(char **)kp->arg))
-		return 0;
+	/*
+	 * kp is either zswap_zpool_kparam or zswap_compressor_kparam, defined
+	 * at the top of this file, so maxlen is CRYPTO_MAX_ALG_NAME (64) or
+	 * 32 (arbitrary).
+	 */
+	strlcpy(str, val, kp->str->maxlen);
+	s = strim(str);
 
 	/* if this is load-time (pre-init) param setting,
 	 * don't create a pool; that's done during init.
 	 */
 	if (!zswap_init_started)
-		return param_set_charp(s, kp);
+		return param_set_copystring(s, kp);
+
+	/* no change required */
+	if (!strncmp(kp->str->string, s, kp->str->maxlen))
+		return 0;
 
 	if (!type) {
-		if (!zpool_has_pool(s)) {
-			pr_err("zpool %s not available\n", s);
-			return -ENOENT;
-		}
 		type = s;
-	} else if (!compressor) {
-		if (!crypto_has_comp(s, 0, 0)) {
-			pr_err("compressor %s not available\n", s);
+		if (!zpool_has_pool(type)) {
+			pr_err("zpool %s not available\n", type);
 			return -ENOENT;
 		}
+	} else if (!compressor) {
 		compressor = s;
-	} else {
-		WARN_ON(1);
-		return -EINVAL;
+		if (!crypto_has_comp(compressor, 0, 0)) {
+			pr_err("compressor %s not available\n", compressor);
+			return -ENOENT;
+		}
 	}
 
 	spin_lock(&zswap_pools_lock);
@@ -742,7 +736,7 @@ static int __zswap_param_set(const char *val, const struct kernel_param *kp,
 	}
 
 	if (pool)
-		ret = param_set_charp(s, kp);
+		ret = param_set_copystring(s, kp);
 	else
 		ret = -EINVAL;
 
@@ -1017,8 +1011,7 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 	/* store */
 	len = dlen + sizeof(struct zswap_header);
 	ret = zpool_malloc(entry->pool->zpool, len,
-			   __GFP_NORETRY | __GFP_NOWARN | __GFP_KSWAPD_RECLAIM,
-			   &handle);
+			   __GFP_NORETRY | __GFP_NOWARN, &handle);
 	if (ret == -ENOSPC) {
 		zswap_reject_compress_poor++;
 		goto put_dstmem;

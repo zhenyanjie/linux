@@ -10,7 +10,6 @@
 #define FS_NFS_NFS4FLEXFILELAYOUT_H
 
 #define FF_FLAGS_NO_LAYOUTCOMMIT 1
-#define FF_FLAGS_NO_IO_THRU_MDS 2
 
 #include "../pnfs.h"
 
@@ -85,7 +84,6 @@ struct nfs4_ff_layout_mirror {
 	struct nfs4_ff_layoutstat	write_stat;
 	ktime_t				start_time;
 	ktime_t				last_report_time;
-	u32				report_interval;
 };
 
 struct nfs4_ff_layout_segment {
@@ -145,12 +143,6 @@ static inline u32
 FF_LAYOUT_MIRROR_COUNT(struct pnfs_layout_segment *lseg)
 {
 	return FF_LAYOUT_LSEG(lseg)->mirror_array_cnt;
-}
-
-static inline bool
-ff_layout_no_fallback_to_mds(struct pnfs_layout_segment *lseg)
-{
-	return FF_LAYOUT_LSEG(lseg)->flags & FF_FLAGS_NO_IO_THRU_MDS;
 }
 
 static inline bool

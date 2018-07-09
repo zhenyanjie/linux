@@ -958,8 +958,7 @@ static void cached_dev_nodata(struct closure *cl)
 
 /* Cached devices - read & write stuff */
 
-static blk_qc_t cached_dev_make_request(struct request_queue *q,
-					struct bio *bio)
+static void cached_dev_make_request(struct request_queue *q, struct bio *bio)
 {
 	struct search *s;
 	struct bcache_device *d = bio->bi_bdev->bd_disk->private_data;
@@ -998,8 +997,6 @@ static blk_qc_t cached_dev_make_request(struct request_queue *q,
 		else
 			generic_make_request(bio);
 	}
-
-	return BLK_QC_T_NONE;
 }
 
 static int cached_dev_ioctl(struct bcache_device *d, fmode_t mode,
@@ -1073,8 +1070,7 @@ static void flash_dev_nodata(struct closure *cl)
 	continue_at(cl, search_free, NULL);
 }
 
-static blk_qc_t flash_dev_make_request(struct request_queue *q,
-					     struct bio *bio)
+static void flash_dev_make_request(struct request_queue *q, struct bio *bio)
 {
 	struct search *s;
 	struct closure *cl;
@@ -1097,7 +1093,7 @@ static blk_qc_t flash_dev_make_request(struct request_queue *q,
 		continue_at_nobarrier(&s->cl,
 				      flash_dev_nodata,
 				      bcache_wq);
-		return BLK_QC_T_NONE;
+		return;
 	} else if (rw) {
 		bch_keybuf_check_overlapping(&s->iop.c->moving_gc_keys,
 					&KEY(d->id, bio->bi_iter.bi_sector, 0),
@@ -1113,7 +1109,6 @@ static blk_qc_t flash_dev_make_request(struct request_queue *q,
 	}
 
 	continue_at(cl, search_free, NULL);
-	return BLK_QC_T_NONE;
 }
 
 static int flash_dev_ioctl(struct bcache_device *d, fmode_t mode,

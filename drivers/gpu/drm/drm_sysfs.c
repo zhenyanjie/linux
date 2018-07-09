@@ -30,8 +30,6 @@ static struct device_type drm_sysfs_device_minor = {
 	.name = "drm_minor"
 };
 
-struct class *drm_class;
-
 /**
  * __drm_class_suspend - internal DRM class suspend routine
  * @dev: Linux device to suspend
@@ -114,34 +112,41 @@ static CLASS_ATTR_STRING(version, S_IRUGO,
 		CORE_DATE);
 
 /**
- * drm_sysfs_init - initialize sysfs helpers
+ * drm_sysfs_create - create a struct drm_sysfs_class structure
+ * @owner: pointer to the module that is to "own" this struct drm_sysfs_class
+ * @name: pointer to a string for the name of this class.
  *
- * This is used to create the DRM class, which is the implicit parent of any
- * other top-level DRM sysfs objects.
+ * This is used to create DRM class pointer that can then be used
+ * in calls to drm_sysfs_device_add().
  *
- * You must call drm_sysfs_destroy() to release the allocated resources.
- *
- * Return: 0 on success, negative error code on failure.
+ * Note, the pointer created here is to be destroyed when finished by making a
+ * call to drm_sysfs_destroy().
  */
-int drm_sysfs_init(void)
+struct class *drm_sysfs_create(struct module *owner, char *name)
 {
+	struct class *class;
 	int err;
 
-	drm_class = class_create(THIS_MODULE, "drm");
-	if (IS_ERR(drm_class))
-		return PTR_ERR(drm_class);
-
-	drm_class->pm = &drm_class_dev_pm_ops;
-
-	err = class_create_file(drm_class, &class_attr_version.attr);
-	if (err) {
-		class_destroy(drm_class);
-		drm_class = NULL;
-		return err;
+	class = class_create(owner, name);
+	if (IS_ERR(class)) {
+		err = PTR_ERR(class);
+		goto err_out;
 	}
 
-	drm_class->devnode = drm_devnode;
-	return 0;
+	class->pm = &drm_class_dev_pm_ops;
+
+	err = class_create_file(class, &class_attr_version.attr);
+	if (err)
+		goto err_out_class;
+
+	class->devnode = drm_devnode;
+
+	return class;
+
+err_out_class:
+	class_destroy(class);
+err_out:
+	return ERR_PTR(err);
 }
 
 /**
@@ -151,7 +156,7 @@ int drm_sysfs_init(void)
  */
 void drm_sysfs_destroy(void)
 {
-	if (IS_ERR_OR_NULL(drm_class))
+	if ((drm_class == NULL) || (IS_ERR(drm_class)))
 		return;
 	class_remove_file(drm_class, &class_attr_version.attr);
 	class_destroy(drm_class);
@@ -167,35 +172,47 @@ static ssize_t status_store(struct device *device,
 {
 	struct drm_connector *connector = to_drm_connector(device);
 	struct drm_device *dev = connector->dev;
-	enum drm_connector_force old_force;
+	enum drm_connector_status old_status;
 	int ret;
 
 	ret = mutex_lock_interruptible(&dev->mode_config.mutex);
 	if (ret)
 		return ret;
 
-	old_force = connector->force;
+	old_status = connector->status;
 
-	if (sysfs_streq(buf, "detect"))
+	if (sysfs_streq(buf, "detect")) {
 		connector->force = 0;
-	else if (sysfs_streq(buf, "on"))
+		connector->status = connector->funcs->detect(connector, true);
+	} else if (sysfs_streq(buf, "on")) {
 		connector->force = DRM_FORCE_ON;
-	else if (sysfs_streq(buf, "on-digital"))
+	} else if (sysfs_streq(buf, "on-digital")) {
 		connector->force = DRM_FORCE_ON_DIGITAL;
-	else if (sysfs_streq(buf, "off"))
+	} else if (sysfs_streq(buf, "off")) {
 		connector->force = DRM_FORCE_OFF;
-	else
+	} else
 		ret = -EINVAL;
 
-	if (old_force != connector->force || !connector->force) {
-		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] force updated from %d to %d or reprobing\n",
+	if (ret == 0 && connector->force) {
+		if (connector->force == DRM_FORCE_ON ||
+		    connector->force == DRM_FORCE_ON_DIGITAL)
+			connector->status = connector_status_connected;
+		else
+			connector->status = connector_status_disconnected;
+		if (connector->funcs->force)
+			connector->funcs->force(connector);
+	}
+
+	if (old_status != connector->status) {
+		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] status updated from %d to %d\n",
 			      connector->base.id,
 			      connector->name,
-			      old_force, connector->force);
+			      old_status, connector->status);
 
-		connector->funcs->fill_modes(connector,
-					     dev->mode_config.max_width,
-					     dev->mode_config.max_height);
+		dev->mode_config.delayed_event = true;
+		if (dev->mode_config.poll_enabled)
+			schedule_delayed_work(&dev->mode_config.output_poll_work,
+					      0);
 	}
 
 	mutex_unlock(&dev->mode_config.mutex);
@@ -240,33 +257,27 @@ static ssize_t edid_show(struct file *filp, struct kobject *kobj,
 			 struct bin_attribute *attr, char *buf, loff_t off,
 			 size_t count)
 {
-	struct device *connector_dev = kobj_to_dev(kobj);
+	struct device *connector_dev = container_of(kobj, struct device, kobj);
 	struct drm_connector *connector = to_drm_connector(connector_dev);
 	unsigned char *edid;
 	size_t size;
-	ssize_t ret = 0;
 
-	mutex_lock(&connector->dev->mode_config.mutex);
 	if (!connector->edid_blob_ptr)
-		goto unlock;
+		return 0;
 
 	edid = connector->edid_blob_ptr->data;
 	size = connector->edid_blob_ptr->length;
 	if (!edid)
-		goto unlock;
+		return 0;
 
 	if (off >= size)
-		goto unlock;
+		return 0;
 
 	if (off + count > size)
 		count = size - off;
 	memcpy(buf, edid + off, count);
 
-	ret = count;
-unlock:
-	mutex_unlock(&connector->dev->mode_config.mutex);
-
-	return ret;
+	return count;
 }
 
 static ssize_t modes_show(struct device *device,
@@ -277,12 +288,10 @@ static ssize_t modes_show(struct device *device,
 	struct drm_display_mode *mode;
 	int written = 0;
 
-	mutex_lock(&connector->dev->mode_config.mutex);
 	list_for_each_entry(mode, &connector->modes, head) {
 		written += snprintf(buf + written, PAGE_SIZE - written, "%s\n",
 				    mode->name);
 	}
-	mutex_unlock(&connector->dev->mode_config.mutex);
 
 	return written;
 }

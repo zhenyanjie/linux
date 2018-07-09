@@ -399,8 +399,13 @@ static int auo_pixcir_stop(struct auo_pixcir_ts *ts)
 static int auo_pixcir_input_open(struct input_dev *dev)
 {
 	struct auo_pixcir_ts *ts = input_get_drvdata(dev);
+	int ret;
 
-	return auo_pixcir_start(ts);
+	ret = auo_pixcir_start(ts);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static void auo_pixcir_input_close(struct input_dev *dev)

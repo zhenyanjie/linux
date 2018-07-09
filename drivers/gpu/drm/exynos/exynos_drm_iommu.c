@@ -139,5 +139,6 @@ void drm_iommu_detach_device(struct drm_device *drm_dev,
 	if (!mapping || !mapping->domain)
 		return;
 
-	arm_iommu_detach_device(subdrv_dev);
+	iommu_detach_device(mapping->domain, subdrv_dev);
+	drm_release_iommu_mapping(drm_dev);
 }

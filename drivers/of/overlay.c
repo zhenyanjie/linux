@@ -149,7 +149,6 @@ static int of_overlay_apply_one(struct of_overlay *ov,
 			pr_err("%s: Failed to apply single node @%s/%s\n",
 					__func__, target->full_name,
 					child->name);
-			of_node_put(child);
 			return ret;
 		}
 	}
@@ -379,9 +378,9 @@ int of_overlay_create(struct device_node *tree)
 	}
 
 	/* apply the changeset */
-	err = __of_changeset_apply(&ov->cset);
+	err = of_changeset_apply(&ov->cset);
 	if (err) {
-		pr_err("%s: __of_changeset_apply() failed for tree@%s\n",
+		pr_err("%s: of_changeset_apply() failed for tree@%s\n",
 				__func__, tree->full_name);
 		goto err_revert_overlay;
 	}
@@ -418,10 +417,8 @@ static int overlay_subtree_check(struct device_node *tree,
 		return 1;
 
 	for_each_child_of_node(tree, child) {
-		if (overlay_subtree_check(child, dn)) {
-			of_node_put(child);
+		if (overlay_subtree_check(child, dn))
 			return 1;
-		}
 	}
 
 	return 0;
@@ -511,7 +508,7 @@ int of_overlay_destroy(int id)
 
 
 	list_del(&ov->node);
-	__of_changeset_revert(&ov->cset);
+	of_changeset_revert(&ov->cset);
 	of_free_overlay_info(ov);
 	idr_remove(&ov_idr, id);
 	of_changeset_destroy(&ov->cset);
@@ -542,7 +539,7 @@ int of_overlay_destroy_all(void)
 	/* the tail of list is guaranteed to be safe to remove */
 	list_for_each_entry_safe_reverse(ov, ovn, &ov_list, node) {
 		list_del(&ov->node);
-		__of_changeset_revert(&ov->cset);
+		of_changeset_revert(&ov->cset);
 		of_free_overlay_info(ov);
 		idr_remove(&ov_idr, ov->id);
 		kfree(ov);

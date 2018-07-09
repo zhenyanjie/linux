@@ -122,11 +122,11 @@ enum max77843_muic_charger_type {
 static const unsigned int max77843_extcon_cable[] = {
 	EXTCON_USB,
 	EXTCON_USB_HOST,
-	EXTCON_CHG_USB_DCP,
-	EXTCON_CHG_USB_CDP,
-	EXTCON_CHG_USB_FAST,
-	EXTCON_CHG_USB_SLOW,
-	EXTCON_DISP_MHL,
+	EXTCON_TA,
+	EXTCON_CHARGE_DOWNSTREAM,
+	EXTCON_FAST_CHARGER,
+	EXTCON_SLOW_CHARGER,
+	EXTCON_MHL,
 	EXTCON_JIG,
 	EXTCON_NONE,
 };
@@ -355,7 +355,7 @@ static int max77843_muic_adc_gnd_handler(struct max77843_muic_info *info)
 		if (ret < 0)
 			return ret;
 
-		extcon_set_cable_state_(info->edev, EXTCON_DISP_MHL, attached);
+		extcon_set_cable_state_(info->edev, EXTCON_MHL, attached);
 		break;
 	default:
 		dev_err(info->dev, "failed to detect %s accessory(gnd:0x%x)\n",
@@ -494,7 +494,7 @@ static int max77843_muic_chg_handler(struct max77843_muic_info *info)
 		if (ret < 0)
 			return ret;
 
-		extcon_set_cable_state_(info->edev, EXTCON_CHG_USB_CDP,
+		extcon_set_cable_state_(info->edev, EXTCON_CHARGE_DOWNSTREAM,
 					attached);
 		break;
 	case MAX77843_MUIC_CHG_DEDICATED:
@@ -504,8 +504,7 @@ static int max77843_muic_chg_handler(struct max77843_muic_info *info)
 		if (ret < 0)
 			return ret;
 
-		extcon_set_cable_state_(info->edev, EXTCON_CHG_USB_DCP,
-					attached);
+		extcon_set_cable_state_(info->edev, EXTCON_TA, attached);
 		break;
 	case MAX77843_MUIC_CHG_SPECIAL_500MA:
 		ret = max77843_muic_set_path(info,
@@ -514,7 +513,7 @@ static int max77843_muic_chg_handler(struct max77843_muic_info *info)
 		if (ret < 0)
 			return ret;
 
-		extcon_set_cable_state_(info->edev, EXTCON_CHG_USB_SLOW,
+		extcon_set_cable_state_(info->edev, EXTCON_SLOW_CHARGER,
 					attached);
 		break;
 	case MAX77843_MUIC_CHG_SPECIAL_1A:
@@ -524,7 +523,7 @@ static int max77843_muic_chg_handler(struct max77843_muic_info *info)
 		if (ret < 0)
 			return ret;
 
-		extcon_set_cable_state_(info->edev, EXTCON_CHG_USB_FAST,
+		extcon_set_cable_state_(info->edev, EXTCON_FAST_CHARGER,
 					attached);
 		break;
 	case MAX77843_MUIC_CHG_GND:
@@ -533,11 +532,9 @@ static int max77843_muic_chg_handler(struct max77843_muic_info *info)
 
 		/* Charger cable on MHL accessory is attach or detach */
 		if (gnd_type == MAX77843_MUIC_GND_MHL_VB)
-			extcon_set_cable_state_(info->edev, EXTCON_CHG_USB_DCP,
-						true);
+			extcon_set_cable_state_(info->edev, EXTCON_TA, true);
 		else if (gnd_type == MAX77843_MUIC_GND_MHL)
-			extcon_set_cable_state_(info->edev, EXTCON_CHG_USB_DCP,
-						false);
+			extcon_set_cable_state_(info->edev, EXTCON_TA, false);
 		break;
 	case MAX77843_MUIC_CHG_NONE:
 		break;
@@ -803,7 +800,7 @@ static int max77843_muic_probe(struct platform_device *pdev)
 	/* Clear IRQ bits before request IRQs */
 	ret = regmap_bulk_read(max77843->regmap_muic,
 			MAX77843_MUIC_REG_INT1, info->status,
-			MAX77843_MUIC_STATUS_NUM);
+			MAX77843_MUIC_IRQ_NUM);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to Clear IRQ bits\n");
 		goto err_muic_irq;
@@ -811,7 +808,7 @@ static int max77843_muic_probe(struct platform_device *pdev)
 
 	for (i = 0; i < ARRAY_SIZE(max77843_muic_irqs); i++) {
 		struct max77843_muic_irq *muic_irq = &max77843_muic_irqs[i];
-		int virq = 0;
+		unsigned int virq = 0;
 
 		virq = regmap_irq_get_virq(max77843->irq_data_muic,
 				muic_irq->irq);

@@ -173,10 +173,8 @@
 /* mux clocks */
 #define CLK_MOUT_HDMI		1024
 #define CLK_MOUT_GPLL		1025
-#define CLK_MOUT_ACLK200_DISP1_SUB	1026
-#define CLK_MOUT_ACLK300_DISP1_SUB	1027
 
 /* must be greater than maximal clock id */
-#define CLK_NR_CLKS		1028
+#define CLK_NR_CLKS		1026
 
 #endif /* _DT_BINDINGS_CLOCK_EXYNOS_5250_H */

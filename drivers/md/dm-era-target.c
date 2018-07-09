@@ -343,9 +343,7 @@ static int superblock_all_zeroes(struct dm_block_manager *bm, bool *result)
 		}
 	}
 
-	dm_bm_unlock(b);
-
-	return 0;
+	return dm_bm_unlock(b);
 }
 
 /*----------------------------------------------------------------*/
@@ -584,9 +582,7 @@ static int open_metadata(struct era_metadata *md)
 	md->metadata_snap = le64_to_cpu(disk->metadata_snap);
 	md->archived_writesets = true;
 
-	dm_bm_unlock(sblock);
-
-	return 0;
+	return dm_bm_unlock(sblock);
 
 bad:
 	dm_bm_unlock(sblock);
@@ -1050,7 +1046,12 @@ static int metadata_take_snap(struct era_metadata *md)
 
 	md->metadata_snap = dm_block_location(clone);
 
-	dm_tm_unlock(md->tm, clone);
+	r = dm_tm_unlock(md->tm, clone);
+	if (r) {
+		DMERR("%s: couldn't unlock clone", __func__);
+		md->metadata_snap = SUPERBLOCK_LOCATION;
+		return r;
+	}
 
 	return 0;
 }

@@ -112,8 +112,7 @@ struct iv_tcw_private {
  * and encrypts / decrypts at the same time.
  */
 enum flags { DM_CRYPT_SUSPENDED, DM_CRYPT_KEY_VALID,
-	     DM_CRYPT_SAME_CPU, DM_CRYPT_NO_OFFLOAD,
-	     DM_CRYPT_EXIT_THREAD};
+	     DM_CRYPT_SAME_CPU, DM_CRYPT_NO_OFFLOAD };
 
 /*
  * The fields in here must be read only after initialization.
@@ -995,7 +994,7 @@ static struct bio *crypt_alloc_buffer(struct dm_crypt_io *io, unsigned size)
 	struct bio_vec *bvec;
 
 retry:
-	if (unlikely(gfp_mask & __GFP_DIRECT_RECLAIM))
+	if (unlikely(gfp_mask & __GFP_WAIT))
 		mutex_lock(&cc->bio_alloc_lock);
 
 	clone = bio_alloc_bioset(GFP_NOIO, nr_iovecs, cc->bs);
@@ -1011,7 +1010,7 @@ retry:
 		if (!page) {
 			crypt_free_buffer_pages(cc, clone);
 			bio_put(clone);
-			gfp_mask |= __GFP_DIRECT_RECLAIM;
+			gfp_mask |= __GFP_WAIT;
 			goto retry;
 		}
 
@@ -1028,7 +1027,7 @@ retry:
 	}
 
 return_clone:
-	if (unlikely(gfp_mask & __GFP_DIRECT_RECLAIM))
+	if (unlikely(gfp_mask & __GFP_WAIT))
 		mutex_unlock(&cc->bio_alloc_lock);
 
 	return clone;
@@ -1204,18 +1203,20 @@ continue_locked:
 		if (!RB_EMPTY_ROOT(&cc->write_tree))
 			goto pop_from_list;
 
-		if (unlikely(test_bit(DM_CRYPT_EXIT_THREAD, &cc->flags))) {
-			spin_unlock_irq(&cc->write_thread_wait.lock);
-			break;
-		}
-
 		__set_current_state(TASK_INTERRUPTIBLE);
 		__add_wait_queue(&cc->write_thread_wait, &wait);
 
 		spin_unlock_irq(&cc->write_thread_wait.lock);
 
+		if (unlikely(kthread_should_stop())) {
+			set_task_state(current, TASK_RUNNING);
+			remove_wait_queue(&cc->write_thread_wait, &wait);
+			break;
+		}
+
 		schedule();
 
+		set_task_state(current, TASK_RUNNING);
 		spin_lock_irq(&cc->write_thread_wait.lock);
 		__remove_wait_queue(&cc->write_thread_wait, &wait);
 		goto continue_locked;
@@ -1530,13 +1531,8 @@ static void crypt_dtr(struct dm_target *ti)
 	if (!cc)
 		return;
 
-	if (cc->write_thread) {
-		spin_lock_irq(&cc->write_thread_wait.lock);
-		set_bit(DM_CRYPT_EXIT_THREAD, &cc->flags);
-		wake_up_locked(&cc->write_thread_wait);
-		spin_unlock_irq(&cc->write_thread_wait.lock);
+	if (cc->write_thread)
 		kthread_stop(cc->write_thread);
-	}
 
 	if (cc->io_queue)
 		destroy_workqueue(cc->io_queue);
@@ -1548,8 +1544,10 @@ static void crypt_dtr(struct dm_target *ti)
 	if (cc->bs)
 		bioset_free(cc->bs);
 
-	mempool_destroy(cc->page_pool);
-	mempool_destroy(cc->req_pool);
+	if (cc->page_pool)
+		mempool_destroy(cc->page_pool);
+	if (cc->req_pool)
+		mempool_destroy(cc->req_pool);
 
 	if (cc->iv_gen_ops && cc->iv_gen_ops->dtr)
 		cc->iv_gen_ops->dtr(cc);

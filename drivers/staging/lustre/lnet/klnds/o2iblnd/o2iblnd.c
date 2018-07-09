@@ -27,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -2070,13 +2070,32 @@ static int kiblnd_net_init_pools(kib_net_t *net, __u32 *cpts, int ncpts)
 
 static int kiblnd_hdev_get_attr(kib_hca_dev_t *hdev)
 {
+	struct ib_device_attr *attr;
+	int rc;
+
 	/* It's safe to assume a HCA can handle a page size
 	 * matching that of the native system */
 	hdev->ibh_page_shift = PAGE_SHIFT;
 	hdev->ibh_page_size  = 1 << PAGE_SHIFT;
 	hdev->ibh_page_mask  = ~((__u64)hdev->ibh_page_size - 1);
 
-	hdev->ibh_mr_size = hdev->ibh_ibdev->attrs.max_mr_size;
+	LIBCFS_ALLOC(attr, sizeof(*attr));
+	if (attr == NULL) {
+		CERROR("Out of memory\n");
+		return -ENOMEM;
+	}
+
+	rc = ib_query_device(hdev->ibh_ibdev, attr);
+	if (rc == 0)
+		hdev->ibh_mr_size = attr->max_mr_size;
+
+	LIBCFS_FREE(attr, sizeof(*attr));
+
+	if (rc != 0) {
+		CERROR("Failed to query IB device: %d\n", rc);
+		return rc;
+	}
+
 	if (hdev->ibh_mr_size == ~0ULL) {
 		hdev->ibh_mr_shift = 64;
 		return 0;
@@ -2135,23 +2154,23 @@ static int kiblnd_hdev_setup_mrs(kib_hca_dev_t *hdev)
 	if (rc != 0)
 		return rc;
 
-	LIBCFS_ALLOC(hdev->ibh_mrs, 1 * sizeof(*hdev->ibh_mrs));
-	if (hdev->ibh_mrs == NULL) {
-		CERROR("Failed to allocate MRs table\n");
-		return -ENOMEM;
-	}
+		LIBCFS_ALLOC(hdev->ibh_mrs, 1 * sizeof(*hdev->ibh_mrs));
+		if (hdev->ibh_mrs == NULL) {
+			CERROR("Failed to allocate MRs table\n");
+			return -ENOMEM;
+		}
 
-	hdev->ibh_mrs[0] = NULL;
-	hdev->ibh_nmrs   = 1;
+		hdev->ibh_mrs[0] = NULL;
+		hdev->ibh_nmrs   = 1;
 
-	mr = ib_get_dma_mr(hdev->ibh_pd, acflags);
-	if (IS_ERR(mr)) {
-		CERROR("Failed ib_get_dma_mr : %ld\n", PTR_ERR(mr));
-		kiblnd_hdev_cleanup_mrs(hdev);
-		return PTR_ERR(mr);
-	}
+		mr = ib_get_dma_mr(hdev->ibh_pd, acflags);
+		if (IS_ERR(mr)) {
+			CERROR("Failed ib_get_dma_mr : %ld\n", PTR_ERR(mr));
+			kiblnd_hdev_cleanup_mrs(hdev);
+			return PTR_ERR(mr);
+		}
 
-	hdev->ibh_mrs[0] = mr;
+		hdev->ibh_mrs[0] = mr;
 
 	return 0;
 }
@@ -2209,10 +2228,13 @@ static int kiblnd_dev_need_failover(kib_dev_t *dev)
 		return rc;
 	}
 
-	rc = dev->ibd_hdev->ibh_ibdev != cmid->device; /* true for failover */
-	rdma_destroy_id(cmid);
+	if (dev->ibd_hdev->ibh_ibdev == cmid->device) {
+		/* don't need device failover */
+		rdma_destroy_id(cmid);
+		return 0;
+	}
 
-	return rc;
+	return 1;
 }
 
 int kiblnd_dev_failover(kib_dev_t *dev)
@@ -2730,7 +2752,7 @@ int kiblnd_startup(lnet_ni_t *ni)
 	char *ifname;
 	kib_dev_t *ibdev = NULL;
 	kib_net_t *net;
-	struct timespec64 tv;
+	struct timeval tv;
 	unsigned long flags;
 	int rc;
 	int newdev;
@@ -2748,9 +2770,8 @@ int kiblnd_startup(lnet_ni_t *ni)
 	if (net == NULL)
 		goto net_failed;
 
-	ktime_get_real_ts64(&tv);
-	net->ibn_incarnation = tv.tv_sec * USEC_PER_SEC +
-			       tv.tv_nsec / NSEC_PER_USEC;
+	do_gettimeofday(&tv);
+	net->ibn_incarnation = (((__u64)tv.tv_sec) * 1000000) + tv.tv_usec;
 
 	ni->ni_peertimeout    = *kiblnd_tunables.kib_peertimeout;
 	ni->ni_maxtxcredits   = *kiblnd_tunables.kib_credits;
@@ -2846,7 +2867,7 @@ static int __init kiblnd_module_init(void)
 	return 0;
 }
 
-MODULE_AUTHOR("OpenSFS, Inc. <http://www.lustre.org/>");
+MODULE_AUTHOR("Sun Microsystems, Inc. <http://www.lustre.org/>");
 MODULE_DESCRIPTION("Kernel OpenIB gen2 LND v2.00");
 MODULE_LICENSE("GPL");
 

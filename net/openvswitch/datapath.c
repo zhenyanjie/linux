@@ -91,7 +91,8 @@ static bool ovs_must_notify(struct genl_family *family, struct genl_info *info,
 static void ovs_notify(struct genl_family *family,
 		       struct sk_buff *skb, struct genl_info *info)
 {
-	genl_notify(family, skb, info, 0, GFP_KERNEL);
+	genl_notify(family, skb, genl_info_net(info), info->snd_portid,
+		    0, info->nlhdr, GFP_KERNEL);
 }
 
 /**
@@ -1172,7 +1173,7 @@ static int ovs_flow_cmd_set(struct sk_buff *skb, struct genl_info *info)
 						info, OVS_FLOW_CMD_NEW, false,
 						ufid_flags);
 
-		if (IS_ERR(reply)) {
+		if (unlikely(IS_ERR(reply))) {
 			error = PTR_ERR(reply);
 			goto err_unlock_ovs;
 		}

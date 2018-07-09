@@ -29,7 +29,7 @@
 
 #include <asm/io.h>
 #if IS_ENABLED(CONFIG_UCC_GETH)
-#include <soc/fsl/qe/ucc.h>
+#include <asm/ucc.h>	/* for ucc_set_qe_mux_mii_mng() */
 #endif
 
 #include "gianfar.h"
@@ -69,6 +69,7 @@ struct fsl_pq_mdio {
 struct fsl_pq_mdio_priv {
 	void __iomem *map;
 	struct fsl_pq_mii __iomem *regs;
+	int irqs[PHY_MAX_ADDR];
 };
 
 /*
@@ -400,6 +401,7 @@ static int fsl_pq_mdio_probe(struct platform_device *pdev)
 	new_bus->read = &fsl_pq_mdio_read;
 	new_bus->write = &fsl_pq_mdio_write;
 	new_bus->reset = &fsl_pq_mdio_reset;
+	new_bus->irq = priv->irqs;
 
 	err = of_address_to_resource(np, 0, &res);
 	if (err < 0) {
@@ -462,7 +464,7 @@ static int fsl_pq_mdio_probe(struct platform_device *pdev)
 			 * address). Print error message but continue anyway.
 			 */
 			if ((void *)tbipa > priv->map + resource_size(&res) - 4)
-				dev_err(&pdev->dev, "invalid register map (should be at least 0x%04zx to contain TBI address)\n",
+				dev_err(&pdev->dev, "invalid register map (should be at least 0x%04x to contain TBI address)\n",
 					((void *)tbipa - priv->map) + 4);
 
 			iowrite32be(be32_to_cpup(prop), tbipa);

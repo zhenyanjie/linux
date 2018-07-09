@@ -35,7 +35,6 @@
 #include <linux/utsname.h>
 #include <linux/coredump.h>
 #include <linux/sched.h>
-#include <linux/dax.h>
 #include <asm/uaccess.h>
 #include <asm/param.h>
 #include <asm/page.h>
@@ -488,10 +487,9 @@ static inline int arch_elf_pt_proc(struct elfhdr *ehdr,
 }
 
 /**
- * arch_check_elf() - check an ELF executable
+ * arch_check_elf() - check a PT_LOPROC..PT_HIPROC ELF program header
  * @ehdr:	The main ELF header
  * @has_interp:	True if the ELF has an interpreter, else false.
- * @interp_ehdr: The interpreter's ELF header
  * @state:	Architecture-specific state preserved throughout the process
  *		of loading the ELF.
  *
@@ -503,7 +501,6 @@ static inline int arch_elf_pt_proc(struct elfhdr *ehdr,
  *         with that return code.
  */
 static inline int arch_check_elf(struct elfhdr *ehdr, bool has_interp,
-				 struct elfhdr *interp_ehdr,
 				 struct arch_elf_state *state)
 {
 	/* Dummy implementation, always proceed */
@@ -653,7 +650,7 @@ static unsigned long randomize_stack_top(unsigned long stack_top)
 
 	if ((current->flags & PF_RANDOMIZE) &&
 		!(current->personality & ADDR_NO_RANDOMIZE)) {
-		random_variable = get_random_long();
+		random_variable = (unsigned long) get_random_int();
 		random_variable &= STACK_RND_MASK;
 		random_variable <<= PAGE_SHIFT;
 	}
@@ -831,9 +828,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	 * still possible to return an error to the code that invoked
 	 * the exec syscall.
 	 */
-	retval = arch_check_elf(&loc->elf_ex,
-				!!interpreter, &loc->interp_elf_ex,
-				&arch_state);
+	retval = arch_check_elf(&loc->elf_ex, !!interpreter, &arch_state);
 	if (retval)
 		goto out_free_dentry;
 
@@ -1240,15 +1235,6 @@ static unsigned long vma_dump_size(struct vm_area_struct *vma,
 
 	if (vma->vm_flags & VM_DONTDUMP)
 		return 0;
-
-	/* support for DAX */
-	if (vma_is_dax(vma)) {
-		if ((vma->vm_flags & VM_SHARED) && FILTER(DAX_SHARED))
-			goto whole;
-		if (!(vma->vm_flags & VM_SHARED) && FILTER(DAX_PRIVATE))
-			goto whole;
-		return 0;
-	}
 
 	/* Hugetlb memory check */
 	if (vma->vm_flags & VM_HUGETLB) {

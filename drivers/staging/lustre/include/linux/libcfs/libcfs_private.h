@@ -79,7 +79,7 @@ do {									\
 
 #define KLASSERT(e) LASSERT(e)
 
-void __noreturn lbug_with_loc(struct libcfs_debug_msg_data *);
+void lbug_with_loc(struct libcfs_debug_msg_data *)__attribute__((noreturn));
 
 #define LBUG()							  \
 do {								    \
@@ -95,7 +95,7 @@ do {								    \
 do {									    \
 	LASSERT(!in_interrupt() ||					    \
 		((size) <= LIBCFS_VMALLOC_SIZE &&			    \
-		 !gfpflags_allow_blocking(mask)));			    \
+		 ((mask) & __GFP_WAIT) == 0));				    \
 } while (0)
 
 #define LIBCFS_ALLOC_POST(ptr, size)					    \
@@ -151,12 +151,16 @@ do {									    \
 
 #define LIBCFS_FREE(ptr, size)					  \
 do {								    \
+	int s = (size);						 \
 	if (unlikely((ptr) == NULL)) {				  \
 		CERROR("LIBCFS: free NULL '" #ptr "' (%d bytes) at "    \
-		       "%s:%d\n", (int)(size), __FILE__, __LINE__);	\
+		       "%s:%d\n", s, __FILE__, __LINE__);	       \
 		break;						  \
 	}							       \
-	kvfree(ptr);					  \
+	if (unlikely(s > LIBCFS_VMALLOC_SIZE))			  \
+		vfree(ptr);				    \
+	else							    \
+		kfree(ptr);					  \
 } while (0)
 
 /******************************************************************************/
@@ -180,6 +184,8 @@ int libcfs_debug_init(unsigned long bufsize);
 int libcfs_debug_cleanup(void);
 int libcfs_debug_clear_buffer(void);
 int libcfs_debug_mark_buffer(const char *text);
+
+void libcfs_debug_set_level(unsigned int debug_level);
 
 /*
  * allocate per-cpu-partition data, returned value is an array of pointers,

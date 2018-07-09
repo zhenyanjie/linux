@@ -973,15 +973,15 @@ static bool is_string_field(struct ftrace_event_field *field)
 	       field->filter_type == FILTER_PTR_STRING;
 }
 
-static bool is_legal_op(struct ftrace_event_field *field, int op)
+static int is_legal_op(struct ftrace_event_field *field, int op)
 {
 	if (is_string_field(field) &&
 	    (op != OP_EQ && op != OP_NE && op != OP_GLOB))
-		return false;
+		return 0;
 	if (!is_string_field(field) && op == OP_GLOB)
-		return false;
+		return 0;
 
-	return true;
+	return 1;
 }
 
 static filter_pred_fn_t select_comparison_fn(int op, int field_size,
@@ -1043,14 +1043,13 @@ static int init_pred(struct filter_parse_state *ps,
 		return -EINVAL;
 	}
 
-	if (field->filter_type == FILTER_COMM) {
-		filter_build_regex(pred);
-		fn = filter_pred_comm;
-		pred->regex.field_len = TASK_COMM_LEN;
-	} else if (is_string_field(field)) {
+	if (is_string_field(field)) {
 		filter_build_regex(pred);
 
-		if (field->filter_type == FILTER_STATIC_STRING) {
+		if (!strcmp(field->name, "comm")) {
+			fn = filter_pred_comm;
+			pred->regex.field_len = TASK_COMM_LEN;
+		} else if (field->filter_type == FILTER_STATIC_STRING) {
 			fn = filter_pred_string;
 			pred->regex.field_len = field->size;
 		} else if (field->filter_type == FILTER_DYN_STRING)
@@ -1073,7 +1072,7 @@ static int init_pred(struct filter_parse_state *ps,
 		}
 		pred->val = val;
 
-		if (field->filter_type == FILTER_CPU)
+		if (!strcmp(field->name, "cpu"))
 			fn = filter_pred_cpu;
 		else
 			fn = select_comparison_fn(pred->op, field->size,

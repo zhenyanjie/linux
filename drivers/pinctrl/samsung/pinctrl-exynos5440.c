@@ -15,7 +15,7 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/device.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
@@ -107,7 +107,6 @@ struct exynos5440_pmx_func {
  * @nr_groups: number of pin groups available.
  * @pmx_functions: list of pin functions parsed from device tree.
  * @nr_functions: number of pin functions available.
- * @range: gpio range to register with pinctrl
  */
 struct exynos5440_pinctrl_priv_data {
 	void __iomem			*reg_base;
@@ -118,7 +117,6 @@ struct exynos5440_pinctrl_priv_data {
 	unsigned int			nr_groups;
 	const struct exynos5440_pmx_func	*pmx_functions;
 	unsigned int			nr_functions;
-	struct pinctrl_gpio_range	range;
 };
 
 /**
@@ -286,7 +284,7 @@ static void exynos5440_dt_free_map(struct pinctrl_dev *pctldev,
 			if (!idx)
 				kfree(map[idx].data.configs.group_or_pin);
 		}
-	}
+	};
 
 	kfree(map);
 }
@@ -541,7 +539,7 @@ static const struct pinconf_ops exynos5440_pinconf_ops = {
 /* gpiolib gpio_set callback function */
 static void exynos5440_gpio_set(struct gpio_chip *gc, unsigned offset, int value)
 {
-	struct exynos5440_pinctrl_priv_data *priv = gpiochip_get_data(gc);
+	struct exynos5440_pinctrl_priv_data *priv = dev_get_drvdata(gc->dev);
 	void __iomem *base = priv->reg_base;
 	u32 data;
 
@@ -555,7 +553,7 @@ static void exynos5440_gpio_set(struct gpio_chip *gc, unsigned offset, int value
 /* gpiolib gpio_get callback function */
 static int exynos5440_gpio_get(struct gpio_chip *gc, unsigned offset)
 {
-	struct exynos5440_pinctrl_priv_data *priv = gpiochip_get_data(gc);
+	struct exynos5440_pinctrl_priv_data *priv = dev_get_drvdata(gc->dev);
 	void __iomem *base = priv->reg_base;
 	u32 data;
 
@@ -568,7 +566,7 @@ static int exynos5440_gpio_get(struct gpio_chip *gc, unsigned offset)
 /* gpiolib gpio_direction_input callback function */
 static int exynos5440_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 {
-	struct exynos5440_pinctrl_priv_data *priv = gpiochip_get_data(gc);
+	struct exynos5440_pinctrl_priv_data *priv = dev_get_drvdata(gc->dev);
 	void __iomem *base = priv->reg_base;
 	u32 data;
 
@@ -588,7 +586,7 @@ static int exynos5440_gpio_direction_input(struct gpio_chip *gc, unsigned offset
 static int exynos5440_gpio_direction_output(struct gpio_chip *gc, unsigned offset,
 							int value)
 {
-	struct exynos5440_pinctrl_priv_data *priv = gpiochip_get_data(gc);
+	struct exynos5440_pinctrl_priv_data *priv = dev_get_drvdata(gc->dev);
 	void __iomem *base = priv->reg_base;
 	u32 data;
 
@@ -609,7 +607,7 @@ static int exynos5440_gpio_direction_output(struct gpio_chip *gc, unsigned offse
 /* gpiolib gpio_to_irq callback function */
 static int exynos5440_gpio_to_irq(struct gpio_chip *gc, unsigned offset)
 {
-	struct exynos5440_pinctrl_priv_data *priv = gpiochip_get_data(gc);
+	struct exynos5440_pinctrl_priv_data *priv = dev_get_drvdata(gc->dev);
 	unsigned int virq;
 
 	if (offset < 16 || offset > 23)
@@ -744,6 +742,7 @@ static int exynos5440_pinctrl_register(struct platform_device *pdev,
 	struct pinctrl_desc *ctrldesc;
 	struct pinctrl_dev *pctl_dev;
 	struct pinctrl_pin_desc *pindesc, *pdesc;
+	struct pinctrl_gpio_range grange;
 	char *pin_names;
 	int pin, ret;
 
@@ -795,12 +794,12 @@ static int exynos5440_pinctrl_register(struct platform_device *pdev,
 		return PTR_ERR(pctl_dev);
 	}
 
-	priv->range.name = "exynos5440-pctrl-gpio-range";
-	priv->range.id = 0;
-	priv->range.base = 0;
-	priv->range.npins = EXYNOS5440_MAX_PINS;
-	priv->range.gc = priv->gc;
-	pinctrl_add_gpio_range(pctl_dev, &priv->range);
+	grange.name = "exynos5440-pctrl-gpio-range";
+	grange.id = 0;
+	grange.base = 0;
+	grange.npins = EXYNOS5440_MAX_PINS;
+	grange.gc = priv->gc;
+	pinctrl_add_gpio_range(pctl_dev, &grange);
 	return 0;
 }
 
@@ -818,7 +817,7 @@ static int exynos5440_gpiolib_register(struct platform_device *pdev,
 	priv->gc = gc;
 	gc->base = 0;
 	gc->ngpio = EXYNOS5440_MAX_PINS;
-	gc->parent = &pdev->dev;
+	gc->dev = &pdev->dev;
 	gc->set = exynos5440_gpio_set;
 	gc->get = exynos5440_gpio_get;
 	gc->direction_input = exynos5440_gpio_direction_input;
@@ -826,7 +825,7 @@ static int exynos5440_gpiolib_register(struct platform_device *pdev,
 	gc->to_irq = exynos5440_gpio_to_irq;
 	gc->label = "gpiolib-exynos5440";
 	gc->owner = THIS_MODULE;
-	ret = gpiochip_add_data(gc, priv);
+	ret = gpiochip_add(gc);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register gpio_chip %s, error "
 					"code: %d\n", gc->label, ret);

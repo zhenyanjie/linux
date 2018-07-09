@@ -26,16 +26,14 @@
 #include <linux/stat.h>
 #include <linux/uaccess.h>
 
-#include <asm/cpufeature.h>
-#include <asm/cputype.h>
 #include <asm/debug-monitors.h>
+#include <asm/cputype.h>
 #include <asm/system_misc.h>
 
 /* Determine debug architecture. */
 u8 debug_monitors_arch(void)
 {
-	return cpuid_feature_extract_field(read_system_reg(SYS_ID_AA64DFR0_EL1),
-						ID_AA64DFR0_DEBUGVER_SHIFT);
+	return read_cpuid(ID_AA64DFR0_EL1) & 0xf;
 }
 
 /*
@@ -60,7 +58,7 @@ static u32 mdscr_read(void)
  * Allow root to disable self-hosted debug from userspace.
  * This is useful if you want to connect an external JTAG debugger.
  */
-static bool debug_enabled = true;
+static u32 debug_enabled = 1;
 
 static int create_debug_debugfs_entry(void)
 {
@@ -71,7 +69,7 @@ fs_initcall(create_debug_debugfs_entry);
 
 static int __init early_debug_disable(char *buf)
 {
-	debug_enabled = false;
+	debug_enabled = 0;
 	return 0;
 }
 
@@ -186,21 +184,20 @@ static void clear_regs_spsr_ss(struct pt_regs *regs)
 
 /* EL1 Single Step Handler hooks */
 static LIST_HEAD(step_hook);
-static DEFINE_SPINLOCK(step_hook_lock);
+static DEFINE_RWLOCK(step_hook_lock);
 
 void register_step_hook(struct step_hook *hook)
 {
-	spin_lock(&step_hook_lock);
-	list_add_rcu(&hook->node, &step_hook);
-	spin_unlock(&step_hook_lock);
+	write_lock(&step_hook_lock);
+	list_add(&hook->node, &step_hook);
+	write_unlock(&step_hook_lock);
 }
 
 void unregister_step_hook(struct step_hook *hook)
 {
-	spin_lock(&step_hook_lock);
-	list_del_rcu(&hook->node);
-	spin_unlock(&step_hook_lock);
-	synchronize_rcu();
+	write_lock(&step_hook_lock);
+	list_del(&hook->node);
+	write_unlock(&step_hook_lock);
 }
 
 /*
@@ -214,41 +211,24 @@ static int call_step_hook(struct pt_regs *regs, unsigned int esr)
 	struct step_hook *hook;
 	int retval = DBG_HOOK_ERROR;
 
-	rcu_read_lock();
+	read_lock(&step_hook_lock);
 
-	list_for_each_entry_rcu(hook, &step_hook, node)	{
+	list_for_each_entry(hook, &step_hook, node)	{
 		retval = hook->fn(regs, esr);
 		if (retval == DBG_HOOK_HANDLED)
 			break;
 	}
 
-	rcu_read_unlock();
+	read_unlock(&step_hook_lock);
 
 	return retval;
-}
-
-static void send_user_sigtrap(int si_code)
-{
-	struct pt_regs *regs = current_pt_regs();
-	siginfo_t info = {
-		.si_signo	= SIGTRAP,
-		.si_errno	= 0,
-		.si_code	= si_code,
-		.si_addr	= (void __user *)instruction_pointer(regs),
-	};
-
-	if (WARN_ON(!user_mode(regs)))
-		return;
-
-	if (interrupts_enabled(regs))
-		local_irq_enable();
-
-	force_sig_info(SIGTRAP, &info, current);
 }
 
 static int single_step_handler(unsigned long addr, unsigned int esr,
 			       struct pt_regs *regs)
 {
+	siginfo_t info;
+
 	/*
 	 * If we are stepping a pending breakpoint, call the hw_breakpoint
 	 * handler first.
@@ -257,7 +237,11 @@ static int single_step_handler(unsigned long addr, unsigned int esr,
 		return 0;
 
 	if (user_mode(regs)) {
-		send_user_sigtrap(TRAP_HWBKPT);
+		info.si_signo = SIGTRAP;
+		info.si_errno = 0;
+		info.si_code  = TRAP_HWBKPT;
+		info.si_addr  = (void __user *)instruction_pointer(regs);
+		force_sig_info(SIGTRAP, &info, current);
 
 		/*
 		 * ptrace will disable single step unless explicitly
@@ -321,8 +305,17 @@ static int call_break_hook(struct pt_regs *regs, unsigned int esr)
 static int brk_handler(unsigned long addr, unsigned int esr,
 		       struct pt_regs *regs)
 {
+	siginfo_t info;
+
 	if (user_mode(regs)) {
-		send_user_sigtrap(TRAP_BRKPT);
+		info = (siginfo_t) {
+			.si_signo = SIGTRAP,
+			.si_errno = 0,
+			.si_code  = TRAP_BRKPT,
+			.si_addr  = (void __user *)instruction_pointer(regs),
+		};
+
+		force_sig_info(SIGTRAP, &info, current);
 	} else if (call_break_hook(regs, esr) != DBG_HOOK_HANDLED) {
 		pr_warning("Unexpected kernel BRK exception at EL1\n");
 		return -EFAULT;
@@ -333,6 +326,7 @@ static int brk_handler(unsigned long addr, unsigned int esr,
 
 int aarch32_break_handler(struct pt_regs *regs)
 {
+	siginfo_t info;
 	u32 arm_instr;
 	u16 thumb_instr;
 	bool bp = false;
@@ -363,7 +357,14 @@ int aarch32_break_handler(struct pt_regs *regs)
 	if (!bp)
 		return -EFAULT;
 
-	send_user_sigtrap(TRAP_BRKPT);
+	info = (siginfo_t) {
+		.si_signo = SIGTRAP,
+		.si_errno = 0,
+		.si_code  = TRAP_BRKPT,
+		.si_addr  = pc,
+	};
+
+	force_sig_info(SIGTRAP, &info, current);
 	return 0;
 }
 

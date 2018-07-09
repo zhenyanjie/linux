@@ -373,7 +373,7 @@ retry:
 		if (rc)
 			return rc;
 
-		rc = mmc_send_tuning(mmc, opcode, NULL);
+		rc = mmc_send_tuning(mmc);
 		if (!rc) {
 			/* Tuning is successful at this tuning point */
 			tuned_phases[tuned_phase_cnt++] = phase;

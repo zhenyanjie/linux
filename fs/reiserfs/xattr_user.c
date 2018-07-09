@@ -7,8 +7,8 @@
 #include <linux/uaccess.h>
 
 static int
-user_get(const struct xattr_handler *handler, struct dentry *dentry,
-	 const char *name, void *buffer, size_t size)
+user_get(struct dentry *dentry, const char *name, void *buffer, size_t size,
+	 int handler_flags)
 {
 
 	if (strlen(name) < sizeof(XATTR_USER_PREFIX))
@@ -19,8 +19,8 @@ user_get(const struct xattr_handler *handler, struct dentry *dentry,
 }
 
 static int
-user_set(const struct xattr_handler *handler, struct dentry *dentry,
-	 const char *name, const void *buffer, size_t size, int flags)
+user_set(struct dentry *dentry, const char *name, const void *buffer,
+	 size_t size, int flags, int handler_flags)
 {
 	if (strlen(name) < sizeof(XATTR_USER_PREFIX))
 		return -EINVAL;
@@ -30,9 +30,18 @@ user_set(const struct xattr_handler *handler, struct dentry *dentry,
 	return reiserfs_xattr_set(d_inode(dentry), name, buffer, size, flags);
 }
 
-static bool user_list(struct dentry *dentry)
+static size_t user_list(struct dentry *dentry, char *list, size_t list_size,
+			const char *name, size_t name_len, int handler_flags)
 {
-	return reiserfs_xattrs_user(dentry->d_sb);
+	const size_t len = name_len + 1;
+
+	if (!reiserfs_xattrs_user(dentry->d_sb))
+		return 0;
+	if (list && len <= list_size) {
+		memcpy(list, name, name_len);
+		list[name_len] = '\0';
+	}
+	return len;
 }
 
 const struct xattr_handler reiserfs_xattr_user_handler = {

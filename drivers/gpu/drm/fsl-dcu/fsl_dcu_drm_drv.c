@@ -140,7 +140,7 @@ static irqreturn_t fsl_dcu_drm_irq(int irq, void *arg)
 	return IRQ_HANDLED;
 }
 
-static int fsl_dcu_drm_enable_vblank(struct drm_device *dev, unsigned int pipe)
+static int fsl_dcu_drm_enable_vblank(struct drm_device *dev, int crtc)
 {
 	struct fsl_dcu_drm_device *fsl_dev = dev->dev_private;
 	unsigned int value;
@@ -156,8 +156,7 @@ static int fsl_dcu_drm_enable_vblank(struct drm_device *dev, unsigned int pipe)
 	return 0;
 }
 
-static void fsl_dcu_drm_disable_vblank(struct drm_device *dev,
-				       unsigned int pipe)
+static void fsl_dcu_drm_disable_vblank(struct drm_device *dev, int crtc)
 {
 	struct fsl_dcu_drm_device *fsl_dev = dev->dev_private;
 	unsigned int value;
@@ -193,7 +192,7 @@ static struct drm_driver fsl_dcu_drm_driver = {
 	.unload			= fsl_dcu_unload,
 	.preclose		= fsl_dcu_drm_preclose,
 	.irq_handler		= fsl_dcu_drm_irq,
-	.get_vblank_counter	= drm_vblank_no_hw_counter,
+	.get_vblank_counter	= drm_vblank_count,
 	.enable_vblank		= fsl_dcu_drm_enable_vblank,
 	.disable_vblank		= fsl_dcu_drm_disable_vblank,
 	.gem_free_object	= drm_gem_cma_free_object,
@@ -363,6 +362,7 @@ static int fsl_dcu_drm_probe(struct platform_device *pdev)
 	fsl_dev->np = dev->of_node;
 	drm->dev_private = fsl_dev;
 	dev_set_drvdata(dev, fsl_dev);
+	drm_dev_set_unique(drm, dev_name(dev));
 
 	ret = drm_dev_register(drm, 0);
 	if (ret < 0)

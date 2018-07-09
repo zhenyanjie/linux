@@ -95,7 +95,6 @@ config DUMMY_IRQ
 config IBM_ASM
 	tristate "Device driver for IBM RSA service processor"
 	depends on X86 && PCI && INPUT
-	depends on SERIAL_8250 || SERIAL_8250=n
 	---help---
 	  This option enables device driver support for in-band access to the
 	  IBM RSA (Condor) service processor in eServer xSeries systems.
@@ -415,7 +414,7 @@ config TI_DAC7512
 
 config VMWARE_BALLOON
 	tristate "VMware Balloon Driver"
-	depends on VMWARE_VMCI && X86 && HYPERVISOR_GUEST
+	depends on X86 && HYPERVISOR_GUEST
 	help
 	  This is VMware physical memory management driver which acts
 	  like a "balloon" that can be inflated to reclaim physical pages
@@ -440,7 +439,7 @@ config ARM_CHARLCD
 	  still useful.
 
 config BMP085
-	tristate
+	bool
 	depends on SYSFS
 
 config BMP085_I2C

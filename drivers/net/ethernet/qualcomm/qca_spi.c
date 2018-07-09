@@ -811,7 +811,7 @@ qcaspi_netdev_setup(struct net_device *dev)
 	dev->netdev_ops = &qcaspi_netdev_ops;
 	qcaspi_set_ethtool_ops(dev);
 	dev->watchdog_timeo = QCASPI_TX_TIMEOUT;
-	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
+	dev->flags = IFF_MULTICAST;
 	dev->tx_queue_len = 100;
 
 	qca = netdev_priv(dev);
@@ -973,6 +973,7 @@ MODULE_DEVICE_TABLE(spi, qca_spi_id);
 static struct spi_driver qca_spi_driver = {
 	.driver	= {
 		.name	= QCASPI_DRV_NAME,
+		.owner	= THIS_MODULE,
 		.of_match_table = qca_spi_of_match,
 	},
 	.id_table = qca_spi_id,

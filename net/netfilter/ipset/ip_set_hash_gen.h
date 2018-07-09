@@ -72,9 +72,8 @@ struct hbucket {
 	DECLARE_BITMAP(used, AHASH_MAX_TUNED);
 	u8 size;		/* size of the array */
 	u8 pos;			/* position of the first free entry */
-	unsigned char value[0]	/* the array of the values */
-		__aligned(__alignof__(u64));
-};
+	unsigned char value[0];	/* the array of the values */
+} __attribute__ ((aligned));
 
 /* The hash table: the table size stored here in order to make resizing easy */
 struct htable {
@@ -476,7 +475,7 @@ static void
 mtype_expire(struct ip_set *set, struct htype *h, u8 nets_length, size_t dsize)
 {
 	struct htable *t;
-	struct hbucket *n, *tmp;
+	struct hbucket *n;
 	struct mtype_elem *data;
 	u32 i, j, d;
 #ifdef IP_SET_HASH_WITH_NETS
@@ -511,14 +510,9 @@ mtype_expire(struct ip_set *set, struct htype *h, u8 nets_length, size_t dsize)
 			}
 		}
 		if (d >= AHASH_INIT_SIZE) {
-			if (d >= n->size) {
-				rcu_assign_pointer(hbucket(t, i), NULL);
-				kfree_rcu(n, rcu);
-				continue;
-			}
-			tmp = kzalloc(sizeof(*tmp) +
-				      (n->size - AHASH_INIT_SIZE) * dsize,
-				      GFP_ATOMIC);
+			struct hbucket *tmp = kzalloc(sizeof(*tmp) +
+					(n->size - AHASH_INIT_SIZE) * dsize,
+					GFP_ATOMIC);
 			if (!tmp)
 				/* Still try to delete expired elements */
 				continue;
@@ -528,7 +522,7 @@ mtype_expire(struct ip_set *set, struct htype *h, u8 nets_length, size_t dsize)
 					continue;
 				data = ahash_data(n, j, dsize);
 				memcpy(tmp->value + d * dsize, data, dsize);
-				set_bit(d, tmp->used);
+				set_bit(j, tmp->used);
 				d++;
 			}
 			tmp->pos = d;
@@ -1329,14 +1323,12 @@ IPSET_TOKEN(HTYPE, _create)(struct net *net, struct ip_set *set,
 #endif
 		set->variant = &IPSET_TOKEN(HTYPE, 4_variant);
 		set->dsize = ip_set_elem_len(set, tb,
-			sizeof(struct IPSET_TOKEN(HTYPE, 4_elem)),
-			__alignof__(struct IPSET_TOKEN(HTYPE, 4_elem)));
+				sizeof(struct IPSET_TOKEN(HTYPE, 4_elem)));
 #ifndef IP_SET_PROTO_UNDEF
 	} else {
 		set->variant = &IPSET_TOKEN(HTYPE, 6_variant);
 		set->dsize = ip_set_elem_len(set, tb,
-			sizeof(struct IPSET_TOKEN(HTYPE, 6_elem)),
-			__alignof__(struct IPSET_TOKEN(HTYPE, 6_elem)));
+				sizeof(struct IPSET_TOKEN(HTYPE, 6_elem)));
 	}
 #endif
 	if (tb[IPSET_ATTR_TIMEOUT]) {

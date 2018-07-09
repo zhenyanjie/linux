@@ -616,11 +616,32 @@ void scsi_finish_command(struct scsi_cmnd *cmd)
  */
 int scsi_change_queue_depth(struct scsi_device *sdev, int depth)
 {
-	if (depth > 0) {
-		sdev->queue_depth = depth;
-		wmb();
+	unsigned long flags;
+
+	if (depth <= 0)
+		goto out;
+
+	spin_lock_irqsave(sdev->request_queue->queue_lock, flags);
+
+	/*
+	 * Check to see if the queue is managed by the block layer.
+	 * If it is, and we fail to adjust the depth, exit.
+	 *
+	 * Do not resize the tag map if it is a host wide share bqt,
+	 * because the size should be the hosts's can_queue. If there
+	 * is more IO than the LLD's can_queue (so there are not enuogh
+	 * tags) request_fn's host queue ready check will handle it.
+	 */
+	if (!shost_use_blk_mq(sdev->host) && !sdev->host->bqt) {
+		if (blk_queue_tagged(sdev->request_queue) &&
+		    blk_queue_resize_tags(sdev->request_queue, depth) != 0)
+			goto out_unlock;
 	}
 
+	sdev->queue_depth = depth;
+out_unlock:
+	spin_unlock_irqrestore(sdev->request_queue->queue_lock, flags);
+out:
 	return sdev->queue_depth;
 }
 EXPORT_SYMBOL(scsi_change_queue_depth);
@@ -782,11 +803,10 @@ void scsi_attach_vpd(struct scsi_device *sdev)
 	int vpd_len = SCSI_VPD_PG_LEN;
 	int pg80_supported = 0;
 	int pg83_supported = 0;
-	unsigned char __rcu *vpd_buf, *orig_vpd_buf = NULL;
+	unsigned char *vpd_buf;
 
-	if (!scsi_device_supports_vpd(sdev))
+	if (sdev->skip_vpd_pages)
 		return;
-
 retry_pg0:
 	vpd_buf = kmalloc(vpd_len, GFP_KERNEL);
 	if (!vpd_buf)
@@ -829,16 +849,8 @@ retry_pg80:
 			kfree(vpd_buf);
 			goto retry_pg80;
 		}
-		mutex_lock(&sdev->inquiry_mutex);
-		orig_vpd_buf = sdev->vpd_pg80;
 		sdev->vpd_pg80_len = result;
-		rcu_assign_pointer(sdev->vpd_pg80, vpd_buf);
-		mutex_unlock(&sdev->inquiry_mutex);
-		synchronize_rcu();
-		if (orig_vpd_buf) {
-			kfree(orig_vpd_buf);
-			orig_vpd_buf = NULL;
-		}
+		sdev->vpd_pg80 = vpd_buf;
 		vpd_len = SCSI_VPD_PG_LEN;
 	}
 
@@ -858,14 +870,8 @@ retry_pg83:
 			kfree(vpd_buf);
 			goto retry_pg83;
 		}
-		mutex_lock(&sdev->inquiry_mutex);
-		orig_vpd_buf = sdev->vpd_pg83;
 		sdev->vpd_pg83_len = result;
-		rcu_assign_pointer(sdev->vpd_pg83, vpd_buf);
-		mutex_unlock(&sdev->inquiry_mutex);
-		synchronize_rcu();
-		if (orig_vpd_buf)
-			kfree(orig_vpd_buf);
+		sdev->vpd_pg83 = vpd_buf;
 	}
 }
 

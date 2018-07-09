@@ -48,15 +48,21 @@ static void nps_enet_read_rx_fifo(struct net_device *ndev,
 			*reg = nps_enet_reg_get(priv, NPS_ENET_REG_RX_BUF);
 	else { /* !dst_is_aligned */
 		for (i = 0; i < len; i++, reg++) {
-			u32 buf = nps_enet_reg_get(priv, NPS_ENET_REG_RX_BUF);
-			put_unaligned(buf, reg);
+			u32 buf =
+				nps_enet_reg_get(priv, NPS_ENET_REG_RX_BUF);
+
+			/* to accommodate word-unaligned address of "reg"
+			 * we have to do memcpy_toio() instead of simple "=".
+			 */
+			memcpy_toio((void __iomem *)reg, &buf, sizeof(buf));
 		}
 	}
 
 	/* copy last bytes (if any) */
 	if (last) {
 		u32 buf = nps_enet_reg_get(priv, NPS_ENET_REG_RX_BUF);
-		memcpy((u8*)reg, &buf, last);
+
+		memcpy_toio((void __iomem *)reg, &buf, last);
 	}
 }
 
@@ -361,7 +367,7 @@ static void nps_enet_send_frame(struct net_device *ndev,
 	struct nps_enet_tx_ctl tx_ctrl;
 	short length = skb->len;
 	u32 i, len = DIV_ROUND_UP(length, sizeof(u32));
-	u32 *src = (void *)skb->data;
+	u32 *src = (u32 *)virt_to_phys(skb->data);
 	bool src_is_aligned = IS_ALIGNED((unsigned long)src, sizeof(u32));
 
 	tx_ctrl.value = 0;
@@ -369,11 +375,17 @@ static void nps_enet_send_frame(struct net_device *ndev,
 	if (src_is_aligned)
 		for (i = 0; i < len; i++, src++)
 			nps_enet_reg_set(priv, NPS_ENET_REG_TX_BUF, *src);
-	else /* !src_is_aligned */
-		for (i = 0; i < len; i++, src++)
-			nps_enet_reg_set(priv, NPS_ENET_REG_TX_BUF,
-					 get_unaligned(src));
+	else { /* !src_is_aligned */
+		for (i = 0; i < len; i++, src++) {
+			u32 buf;
 
+			/* to accommodate word-unaligned address of "src"
+			 * we have to do memcpy_fromio() instead of simple "="
+			 */
+			memcpy_fromio(&buf, (void __iomem *)src, sizeof(buf));
+			nps_enet_reg_set(priv, NPS_ENET_REG_TX_BUF, buf);
+		}
+	}
 	/* Write the length of the Frame */
 	tx_ctrl.nt = length;
 

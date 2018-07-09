@@ -288,11 +288,7 @@ static int adis16400_initial_setup(struct iio_dev *indio_dev)
 		if (ret)
 			goto err_ret;
 
-		ret = sscanf(indio_dev->name, "adis%u\n", &device_id);
-		if (ret != 1) {
-			ret = -EINVAL;
-			goto err_ret;
-		}
+		sscanf(indio_dev->name, "adis%u\n", &device_id);
 
 		if (prod_id != device_id)
 			dev_warn(&indio_dev->dev, "Device ID(%u) and product ID(%u) do not match.",
@@ -990,6 +986,7 @@ MODULE_DEVICE_TABLE(spi, adis16400_id);
 static struct spi_driver adis16400_driver = {
 	.driver = {
 		.name = "adis16400",
+		.owner = THIS_MODULE,
 	},
 	.id_table = adis16400_id,
 	.probe = adis16400_probe,

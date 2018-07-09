@@ -62,7 +62,7 @@ static inline int gdm_wimax_header(struct sk_buff **pskb)
 		struct sk_buff *skb2;
 
 		skb2 = skb_realloc_headroom(skb, HCI_HEADER_SIZE);
-		if (!skb2)
+		if (skb2 == NULL)
 			return -ENOMEM;
 		if (skb->sk)
 			skb_set_owner_w(skb2, skb->sk);
@@ -82,6 +82,11 @@ static inline int gdm_wimax_header(struct sk_buff **pskb)
 static inline struct evt_entry *alloc_event_entry(void)
 {
 	return kmalloc(sizeof(struct evt_entry), GFP_ATOMIC);
+}
+
+static inline void free_event_entry(struct evt_entry *e)
+{
+	kfree(e);
 }
 
 static struct evt_entry *get_event_entry(void)
@@ -175,11 +180,11 @@ static void gdm_wimax_event_exit(void)
 
 		list_for_each_entry_safe(e, temp, &wm_event.evtq, list) {
 			list_del(&e->list);
-			kfree(e);
+			free_event_entry(e);
 		}
 		list_for_each_entry_safe(e, temp, &wm_event.freeq, list) {
 			list_del(&e->list);
-			kfree(e);
+			free_event_entry(e);
 		}
 
 		spin_unlock_irqrestore(&wm_event.evt_lock, flags);
@@ -334,7 +339,7 @@ static void gdm_wimax_ind_if_updown(struct net_device *dev, int if_up)
 static int gdm_wimax_open(struct net_device *dev)
 {
 	struct nic *nic = netdev_priv(dev);
-	struct fsm_s *fsm = nic->sdk_data[SIOC_DATA_FSM].buf;
+	struct fsm_s *fsm = (struct fsm_s *)nic->sdk_data[SIOC_DATA_FSM].buf;
 
 	netif_start_queue(dev);
 
@@ -346,7 +351,7 @@ static int gdm_wimax_open(struct net_device *dev)
 static int gdm_wimax_close(struct net_device *dev)
 {
 	struct nic *nic = netdev_priv(dev);
-	struct fsm_s *fsm = nic->sdk_data[SIOC_DATA_FSM].buf;
+	struct fsm_s *fsm = (struct fsm_s *)nic->sdk_data[SIOC_DATA_FSM].buf;
 
 	netif_stop_queue(dev);
 
@@ -363,7 +368,7 @@ static void kdelete(void **buf)
 	}
 }
 
-static int gdm_wimax_ioctl_get_data(struct udata_s *dst, struct data_s *src)
+static int gdm_wimax_ioctl_get_data(struct data_s *dst, struct data_s *src)
 {
 	int size;
 
@@ -373,13 +378,13 @@ static int gdm_wimax_ioctl_get_data(struct udata_s *dst, struct data_s *src)
 	if (src->size) {
 		if (!dst->buf)
 			return -EINVAL;
-		if (copy_to_user(dst->buf, src->buf, size))
+		if (copy_to_user((void __user *)dst->buf, src->buf, size))
 			return -EFAULT;
 	}
 	return 0;
 }
 
-static int gdm_wimax_ioctl_set_data(struct data_s *dst, struct udata_s *src)
+static int gdm_wimax_ioctl_set_data(struct data_s *dst, struct data_s *src)
 {
 	if (!src->size) {
 		dst->size = 0;
@@ -392,11 +397,11 @@ static int gdm_wimax_ioctl_set_data(struct data_s *dst, struct udata_s *src)
 	if (!(dst->buf && dst->size == src->size)) {
 		kdelete(&dst->buf);
 		dst->buf = kmalloc(src->size, GFP_KERNEL);
-		if (!dst->buf)
+		if (dst->buf == NULL)
 			return -ENOMEM;
 	}
 
-	if (copy_from_user(dst->buf, src->buf, src->size)) {
+	if (copy_from_user(dst->buf, (void __user *)src->buf, src->size)) {
 		kdelete(&dst->buf);
 		return -EFAULT;
 	}
@@ -430,7 +435,7 @@ static void gdm_wimax_ind_fsm_update(struct net_device *dev, struct fsm_s *fsm)
 static void gdm_update_fsm(struct net_device *dev, struct fsm_s *new_fsm)
 {
 	struct nic *nic = netdev_priv(dev);
-	struct fsm_s *cur_fsm =
+	struct fsm_s *cur_fsm = (struct fsm_s *)
 					nic->sdk_data[SIOC_DATA_FSM].buf;
 
 	if (!cur_fsm)
@@ -455,7 +460,6 @@ static int gdm_wimax_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	struct wm_req_s *req = (struct wm_req_s *)ifr;
 	struct nic *nic = netdev_priv(dev);
 	int ret;
-	struct fsm_s fsm_buf;
 
 	if (cmd != SIOCWMIOCTL)
 		return -EOPNOTSUPP;
@@ -478,11 +482,8 @@ static int gdm_wimax_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				/* NOTE: gdm_update_fsm should be called
 				 * before gdm_wimax_ioctl_set_data is called.
 				 */
-				if (copy_from_user(&fsm_buf, req->data.buf,
-						   sizeof(struct fsm_s)))
-					return -EFAULT;
-
-				gdm_update_fsm(dev, &fsm_buf);
+				gdm_update_fsm(dev,
+					       (struct fsm_s *)req->data.buf);
 			}
 			ret = gdm_wimax_ioctl_set_data(
 				&nic->sdk_data[req->data_id], &req->data);
@@ -580,8 +581,8 @@ static int gdm_wimax_get_prepared_info(struct net_device *dev, char *buf,
 		}
 
 		pos += gdm_wimax_hci_get_tlv(&buf[pos], &T, &L, &V);
-		if (TLV_T(T_MAC_ADDRESS) == T) {
-			if (dev->addr_len != L) {
+		if (T == TLV_T(T_MAC_ADDRESS)) {
+			if (L != dev->addr_len) {
 				netdev_err(dev,
 					   "%s Invalid information result T/L [%x/%d]\n",
 					   __func__, T, L);
@@ -797,7 +798,7 @@ cleanup:
 void unregister_wimax_device(struct phy_dev *phy_dev)
 {
 	struct nic *nic = netdev_priv(phy_dev->netdev);
-	struct fsm_s *fsm = nic->sdk_data[SIOC_DATA_FSM].buf;
+	struct fsm_s *fsm = (struct fsm_s *)nic->sdk_data[SIOC_DATA_FSM].buf;
 
 	if (fsm)
 		fsm->m_status = M_INIT;

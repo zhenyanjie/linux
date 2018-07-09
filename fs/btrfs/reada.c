@@ -265,7 +265,7 @@ static struct reada_zone *reada_find_zone(struct btrfs_fs_info *fs_info,
 	spin_unlock(&fs_info->reada_lock);
 
 	if (ret == 1) {
-		if (logical >= zone->start && logical <= zone->end)
+		if (logical >= zone->start && logical < zone->end)
 			return zone;
 		spin_lock(&fs_info->reada_lock);
 		kref_put(&zone->refcnt, reada_zone_release);
@@ -569,7 +569,7 @@ static int reada_add_block(struct reada_control *rc, u64 logical,
 	rec = kzalloc(sizeof(*rec), GFP_NOFS);
 	if (!rec) {
 		reada_extent_put(root->fs_info, re);
-		return -ENOMEM;
+		return -1;
 	}
 
 	rec->rc = rc;
@@ -679,7 +679,7 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
 	 */
 	ret = radix_tree_gang_lookup(&dev->reada_extents, (void **)&re,
 				     dev->reada_next >> PAGE_CACHE_SHIFT, 1);
-	if (ret == 0 || re->logical > dev->reada_curr_zone->end) {
+	if (ret == 0 || re->logical >= dev->reada_curr_zone->end) {
 		ret = reada_pick_zone(dev);
 		if (!ret) {
 			spin_unlock(&fs_info->reada_lock);
@@ -918,7 +918,6 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
 	u64 start;
 	u64 generation;
 	int level;
-	int ret;
 	struct extent_buffer *node;
 	static struct btrfs_key max_key = {
 		.objectid = (u64)-1,
@@ -944,10 +943,9 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
 	generation = btrfs_header_generation(node);
 	free_extent_buffer(node);
 
-	ret = reada_add_block(rc, start, &max_key, level, generation);
-	if (ret) {
+	if (reada_add_block(rc, start, &max_key, level, generation)) {
 		kfree(rc);
-		return ERR_PTR(ret);
+		return ERR_PTR(-ENOMEM);
 	}
 
 	reada_start_machine(root->fs_info);

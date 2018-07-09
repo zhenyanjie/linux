@@ -95,6 +95,9 @@ mlx4_en_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *drvinfo)
 		(u16) (mdev->dev->caps.fw_ver & 0xffff));
 	strlcpy(drvinfo->bus_info, pci_name(mdev->dev->persist->pdev),
 		sizeof(drvinfo->bus_info));
+	drvinfo->n_stats = 0;
+	drvinfo->regdump_len = 0;
+	drvinfo->eedump_len = 0;
 }
 
 static const char mlx4_en_priv_flags[][ETH_GSTRING_LEN] = {
@@ -337,7 +340,11 @@ static int mlx4_en_get_sset_count(struct net_device *dev, int sset)
 	case ETH_SS_STATS:
 		return bitmap_iterator_count(&it) +
 			(priv->tx_ring_num * 2) +
+#ifdef CONFIG_NET_RX_BUSY_POLL
+			(priv->rx_ring_num * 5);
+#else
 			(priv->rx_ring_num * 2);
+#endif
 	case ETH_SS_TEST:
 		return MLX4_EN_NUM_SELF_TEST - !(priv->mdev->dev->caps.flags
 					& MLX4_DEV_CAP_FLAG_UC_LOOPBACK) * 2;
@@ -404,6 +411,11 @@ static void mlx4_en_get_ethtool_stats(struct net_device *dev,
 	for (i = 0; i < priv->rx_ring_num; i++) {
 		data[index++] = priv->rx_ring[i]->packets;
 		data[index++] = priv->rx_ring[i]->bytes;
+#ifdef CONFIG_NET_RX_BUSY_POLL
+		data[index++] = priv->rx_ring[i]->yields;
+		data[index++] = priv->rx_ring[i]->misses;
+		data[index++] = priv->rx_ring[i]->cleaned;
+#endif
 	}
 	spin_unlock_bh(&priv->stats_lock);
 
@@ -477,6 +489,14 @@ static void mlx4_en_get_strings(struct net_device *dev,
 				"rx%d_packets", i);
 			sprintf(data + (index++) * ETH_GSTRING_LEN,
 				"rx%d_bytes", i);
+#ifdef CONFIG_NET_RX_BUSY_POLL
+			sprintf(data + (index++) * ETH_GSTRING_LEN,
+				"rx%d_napi_yield", i);
+			sprintf(data + (index++) * ETH_GSTRING_LEN,
+				"rx%d_misses", i);
+			sprintf(data + (index++) * ETH_GSTRING_LEN,
+				"rx%d_cleaned", i);
+#endif
 		}
 		break;
 	case ETH_SS_PRIV_FLAGS:

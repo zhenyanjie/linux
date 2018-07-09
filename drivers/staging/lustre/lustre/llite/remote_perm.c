@@ -61,7 +61,7 @@ static inline struct ll_remote_perm *alloc_ll_remote_perm(void)
 {
 	struct ll_remote_perm *lrp;
 
-	lrp = kmem_cache_alloc(ll_remote_perm_cachep, GFP_KERNEL | __GFP_ZERO);
+	OBD_SLAB_ALLOC_PTR_GFP(lrp, ll_remote_perm_cachep, GFP_KERNEL);
 	if (lrp)
 		INIT_HLIST_NODE(&lrp->lrp_list);
 	return lrp;
@@ -74,7 +74,7 @@ static inline void free_ll_remote_perm(struct ll_remote_perm *lrp)
 
 	if (!hlist_unhashed(&lrp->lrp_list))
 		hlist_del(&lrp->lrp_list);
-	kmem_cache_free(ll_remote_perm_cachep, lrp);
+	OBD_SLAB_FREE(lrp, ll_remote_perm_cachep, sizeof(*lrp));
 }
 
 static struct hlist_head *alloc_rmtperm_hash(void)
@@ -82,7 +82,9 @@ static struct hlist_head *alloc_rmtperm_hash(void)
 	struct hlist_head *hash;
 	int i;
 
-	hash = kmem_cache_alloc(ll_rmtperm_hash_cachep, GFP_NOFS | __GFP_ZERO);
+	OBD_SLAB_ALLOC_GFP(hash, ll_rmtperm_hash_cachep,
+			   REMOTE_PERM_HASHSIZE * sizeof(*hash),
+			   GFP_IOFS);
 	if (!hash)
 		return NULL;
 
@@ -104,7 +106,8 @@ void free_rmtperm_hash(struct hlist_head *hash)
 	for (i = 0; i < REMOTE_PERM_HASHSIZE; i++)
 		hlist_for_each_entry_safe(lrp, next, hash + i, lrp_list)
 			free_ll_remote_perm(lrp);
-	kmem_cache_free(ll_rmtperm_hash_cachep, hash);
+	OBD_SLAB_FREE(hash, ll_rmtperm_hash_cachep,
+		      REMOTE_PERM_HASHSIZE * sizeof(*hash));
 }
 
 static inline int remote_perm_hashfunc(uid_t uid)
@@ -246,6 +249,7 @@ int lustre_check_remote_perm(struct inode *inode, int mask)
 	struct ll_sb_info *sbi = ll_i2sbi(inode);
 	struct ptlrpc_request *req = NULL;
 	struct mdt_remote_perm *perm;
+	struct obd_capa *oc;
 	unsigned long save;
 	int i = 0, rc;
 
@@ -272,8 +276,10 @@ int lustre_check_remote_perm(struct inode *inode, int mask)
 			LBUG();
 		}
 
-		rc = md_get_remote_perm(sbi->ll_md_exp, ll_inode2fid(inode),
+		oc = ll_mdscapa_get(inode);
+		rc = md_get_remote_perm(sbi->ll_md_exp, ll_inode2fid(inode), oc,
 					ll_i2suppgid(inode), &req);
+		capa_put(oc);
 		if (rc) {
 			mutex_unlock(&lli->lli_rmtperm_mutex);
 			break;

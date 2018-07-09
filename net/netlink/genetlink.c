@@ -39,7 +39,7 @@ void genl_unlock(void)
 EXPORT_SYMBOL(genl_unlock);
 
 #ifdef CONFIG_LOCKDEP
-bool lockdep_genl_is_held(void)
+int lockdep_genl_is_held(void)
 {
 	return lockdep_is_held(&genl_mutex);
 }
@@ -185,7 +185,7 @@ static int genl_allocate_reserve_groups(int n_groups, int *first_id)
 			}
 		}
 
-		if (id + n_groups > mc_groups_longs * BITS_PER_LONG) {
+		if (id >= mc_groups_longs * BITS_PER_LONG) {
 			unsigned long new_longs = mc_groups_longs +
 						  BITS_TO_LONGS(n_groups);
 			size_t nlen = new_longs * sizeof(unsigned long);
@@ -513,20 +513,6 @@ void *genlmsg_put(struct sk_buff *skb, u32 portid, u32 seq,
 }
 EXPORT_SYMBOL(genlmsg_put);
 
-static int genl_lock_start(struct netlink_callback *cb)
-{
-	/* our ops are always const - netlink API doesn't propagate that */
-	const struct genl_ops *ops = cb->data;
-	int rc = 0;
-
-	if (ops->start) {
-		genl_lock();
-		rc = ops->start(cb);
-		genl_unlock();
-	}
-	return rc;
-}
-
 static int genl_lock_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 {
 	/* our ops are always const - netlink API doesn't propagate that */
@@ -591,7 +577,6 @@ static int genl_family_rcv_msg(struct genl_family *family,
 				.module = family->module,
 				/* we have const, but the netlink API doesn't */
 				.data = (void *)ops,
-				.start = genl_lock_start,
 				.dump = genl_lock_dumpit,
 				.done = genl_lock_done,
 			};
@@ -603,7 +588,6 @@ static int genl_family_rcv_msg(struct genl_family *family,
 		} else {
 			struct netlink_dump_control c = {
 				.module = family->module,
-				.start = ops->start,
 				.dump = ops->dumpit,
 				.done = ops->done,
 			};
@@ -1152,19 +1136,19 @@ int genlmsg_multicast_allns(struct genl_family *family, struct sk_buff *skb,
 }
 EXPORT_SYMBOL(genlmsg_multicast_allns);
 
-void genl_notify(struct genl_family *family, struct sk_buff *skb,
-		 struct genl_info *info, u32 group, gfp_t flags)
+void genl_notify(struct genl_family *family,
+		 struct sk_buff *skb, struct net *net, u32 portid, u32 group,
+		 struct nlmsghdr *nlh, gfp_t flags)
 {
-	struct net *net = genl_info_net(info);
 	struct sock *sk = net->genl_sock;
 	int report = 0;
 
-	if (info->nlhdr)
-		report = nlmsg_report(info->nlhdr);
+	if (nlh)
+		report = nlmsg_report(nlh);
 
 	if (WARN_ON_ONCE(group >= family->n_mcgrps))
 		return;
 	group = family->mcgrp_offset + group;
-	nlmsg_notify(sk, skb, info->snd_portid, group, report, flags);
+	nlmsg_notify(sk, skb, portid, group, report, flags);
 }
 EXPORT_SYMBOL(genl_notify);

@@ -191,12 +191,14 @@ set_failed:
 
 static void
 fsl_dcu_drm_plane_cleanup_fb(struct drm_plane *plane,
+			     struct drm_framebuffer *fb,
 			     const struct drm_plane_state *new_state)
 {
 }
 
 static int
 fsl_dcu_drm_plane_prepare_fb(struct drm_plane *plane,
+			     struct drm_framebuffer *fb,
 			     const struct drm_plane_state *new_state)
 {
 	return 0;
@@ -249,7 +251,7 @@ struct drm_plane *fsl_dcu_drm_primary_create_plane(struct drm_device *dev)
 				       &fsl_dcu_drm_plane_funcs,
 				       fsl_dcu_drm_plane_formats,
 				       ARRAY_SIZE(fsl_dcu_drm_plane_formats),
-				       DRM_PLANE_TYPE_PRIMARY, NULL);
+				       DRM_PLANE_TYPE_PRIMARY);
 	if (ret) {
 		kfree(primary);
 		primary = NULL;

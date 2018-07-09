@@ -806,7 +806,7 @@ int r100_irq_process(struct radeon_device *rdev)
 		status = r100_irq_ack(rdev);
 	}
 	if (queue_hotplug)
-		schedule_delayed_work(&rdev->hotplug_work, 0);
+		schedule_work(&rdev->hotplug_work);
 	if (rdev->msi_enabled) {
 		switch (rdev->family) {
 		case CHIP_RS400:
@@ -3150,8 +3150,7 @@ void r100_bandwidth_update(struct radeon_device *rdev)
 {
 	fixed20_12 trcd_ff, trp_ff, tras_ff, trbs_ff, tcas_ff;
 	fixed20_12 sclk_ff, mclk_ff, sclk_eff_ff, sclk_delay_ff;
-	fixed20_12 peak_disp_bw, mem_bw, pix_clk, pix_clk2, temp_ff;
-	fixed20_12 crit_point_ff = {0};
+	fixed20_12 peak_disp_bw, mem_bw, pix_clk, pix_clk2, temp_ff, crit_point_ff;
 	uint32_t temp, data, mem_trcd, mem_trp, mem_tras;
 	fixed20_12 memtcas_ff[8] = {
 		dfixed_init(1),
@@ -3205,7 +3204,7 @@ void r100_bandwidth_update(struct radeon_device *rdev)
 	fixed20_12 min_mem_eff;
 	fixed20_12 mc_latency_sclk, mc_latency_mclk, k1;
 	fixed20_12 cur_latency_mclk, cur_latency_sclk;
-	fixed20_12 disp_latency, disp_latency_overhead, disp_drain_rate = {0},
+	fixed20_12 disp_latency, disp_latency_overhead, disp_drain_rate,
 		disp_drain_rate2, read_return_rate;
 	fixed20_12 time_disp1_drop_priority;
 	int c;
@@ -3217,9 +3216,6 @@ void r100_bandwidth_update(struct radeon_device *rdev)
 	struct drm_display_mode *mode2 = NULL;
 	uint32_t pixel_bytes1 = 0;
 	uint32_t pixel_bytes2 = 0;
-
-	/* Guess line buffer size to be 8192 pixels */
-	u32 lb_size = 8192;
 
 	if (!rdev->mode_info.mode_config_initialized)
 		return;
@@ -3635,13 +3631,6 @@ void r100_bandwidth_update(struct radeon_device *rdev)
 		DRM_DEBUG_KMS("GRPH2_BUFFER_CNTL from to %x\n",
 			  (unsigned int)RREG32(RADEON_GRPH2_BUFFER_CNTL));
 	}
-
-	/* Save number of lines the linebuffer leads before the scanout */
-	if (mode1)
-	    rdev->mode_info.crtcs[0]->lb_vblank_lead_lines = DIV_ROUND_UP(lb_size, mode1->crtc_hdisplay);
-
-	if (mode2)
-	    rdev->mode_info.crtcs[1]->lb_vblank_lead_lines = DIV_ROUND_UP(lb_size, mode2->crtc_hdisplay);
 }
 
 int r100_ring_test(struct radeon_device *rdev, struct radeon_ring *ring)

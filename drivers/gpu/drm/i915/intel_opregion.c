@@ -26,7 +26,6 @@
  */
 
 #include <linux/acpi.h>
-#include <linux/dmi.h>
 #include <acpi/video.h>
 
 #include <drm/drmP.h>
@@ -47,7 +46,6 @@
 #define OPREGION_SWSCI_OFFSET  0x200
 #define OPREGION_ASLE_OFFSET   0x300
 #define OPREGION_VBT_OFFSET    0x400
-#define OPREGION_ASLE_EXT_OFFSET	0x1C00
 
 #define OPREGION_SIGNATURE "IntelGraphicsMem"
 #define MBOX_ACPI      (1<<0)
@@ -122,16 +120,7 @@ struct opregion_asle {
 	u64 fdss;
 	u32 fdsp;
 	u32 stat;
-	u64 rvda;	/* Physical address of raw vbt data */
-	u32 rvds;	/* Size of raw vbt data */
-	u8 rsvd[58];
-} __packed;
-
-/* OpRegion mailbox #5: ASLE ext */
-struct opregion_asle_ext {
-	u32 phed;	/* Panel Header */
-	u8 bddc[256];	/* Panel EDID */
-	u8 rsvd[764];
+	u8 rsvd[70];
 } __packed;
 
 /* Driver readiness indicator */
@@ -250,7 +239,7 @@ struct opregion_asle_ext {
 static int swsci(struct drm_device *dev, u32 function, u32 parm, u32 *parm_out)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
-	struct opregion_swsci *swsci = dev_priv->opregion.swsci;
+	struct opregion_swsci __iomem *swsci = dev_priv->opregion.swsci;
 	u32 main_function, sub_function, scic;
 	u16 pci_swsci;
 	u32 dslp;
@@ -275,7 +264,7 @@ static int swsci(struct drm_device *dev, u32 function, u32 parm, u32 *parm_out)
 	}
 
 	/* Driver sleep timeout in ms. */
-	dslp = swsci->dslp;
+	dslp = ioread32(&swsci->dslp);
 	if (!dslp) {
 		/* The spec says 2ms should be the default, but it's too small
 		 * for some machines. */
@@ -288,7 +277,7 @@ static int swsci(struct drm_device *dev, u32 function, u32 parm, u32 *parm_out)
 	}
 
 	/* The spec tells us to do this, but we are the only user... */
-	scic = swsci->scic;
+	scic = ioread32(&swsci->scic);
 	if (scic & SWSCI_SCIC_INDICATOR) {
 		DRM_DEBUG_DRIVER("SWSCI request already in progress\n");
 		return -EBUSY;
@@ -296,8 +285,8 @@ static int swsci(struct drm_device *dev, u32 function, u32 parm, u32 *parm_out)
 
 	scic = function | SWSCI_SCIC_INDICATOR;
 
-	swsci->parm = parm;
-	swsci->scic = scic;
+	iowrite32(parm, &swsci->parm);
+	iowrite32(scic, &swsci->scic);
 
 	/* Ensure SCI event is selected and event trigger is cleared. */
 	pci_read_config_word(dev->pdev, PCI_SWSCI, &pci_swsci);
@@ -312,7 +301,7 @@ static int swsci(struct drm_device *dev, u32 function, u32 parm, u32 *parm_out)
 	pci_write_config_word(dev->pdev, PCI_SWSCI, pci_swsci);
 
 	/* Poll for the result. */
-#define C (((scic = swsci->scic) & SWSCI_SCIC_INDICATOR) == 0)
+#define C (((scic = ioread32(&swsci->scic)) & SWSCI_SCIC_INDICATOR) == 0)
 	if (wait_for(C, dslp)) {
 		DRM_DEBUG_DRIVER("SWSCI request timed out\n");
 		return -ETIMEDOUT;
@@ -328,7 +317,7 @@ static int swsci(struct drm_device *dev, u32 function, u32 parm, u32 *parm_out)
 	}
 
 	if (parm_out)
-		*parm_out = swsci->parm;
+		*parm_out = ioread32(&swsci->parm);
 
 	return 0;
 
@@ -352,12 +341,8 @@ int intel_opregion_notify_encoder(struct intel_encoder *intel_encoder,
 	if (!HAS_DDI(dev))
 		return 0;
 
-	if (intel_encoder->type == INTEL_OUTPUT_DSI)
-		port = 0;
-	else
-		port = intel_ddi_get_encoder_port(intel_encoder);
-
-	if (port == PORT_E)  {
+	port = intel_ddi_get_encoder_port(intel_encoder);
+	if (port == PORT_E) {
 		port = 0;
 	} else {
 		parm |= 1 << port;
@@ -378,7 +363,6 @@ int intel_opregion_notify_encoder(struct intel_encoder *intel_encoder,
 		type = DISPLAY_TYPE_EXTERNAL_FLAT_PANEL;
 		break;
 	case INTEL_OUTPUT_EDP:
-	case INTEL_OUTPUT_DSI:
 		type = DISPLAY_TYPE_INTERNAL_FLAT_PANEL;
 		break;
 	default:
@@ -422,8 +406,8 @@ int intel_opregion_notify_adapter(struct drm_device *dev, pci_power_t state)
 static u32 asle_set_backlight(struct drm_device *dev, u32 bclp)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
-	struct intel_connector *connector;
-	struct opregion_asle *asle = dev_priv->opregion.asle;
+	struct intel_connector *intel_connector;
+	struct opregion_asle __iomem *asle = dev_priv->opregion.asle;
 
 	DRM_DEBUG_DRIVER("bclp = 0x%08x\n", bclp);
 
@@ -446,9 +430,9 @@ static u32 asle_set_backlight(struct drm_device *dev, u32 bclp)
 	 * only one).
 	 */
 	DRM_DEBUG_KMS("updating opregion backlight %d/255\n", bclp);
-	for_each_intel_connector(dev, connector)
-		intel_panel_set_backlight_acpi(connector, bclp, 255);
-	asle->cblv = DIV_ROUND_UP(bclp * 100, 255) | ASLE_CBLV_VALID;
+	list_for_each_entry(intel_connector, &dev->mode_config.connector_list, base.head)
+		intel_panel_set_backlight_acpi(intel_connector, bclp, 255);
+	iowrite32(DIV_ROUND_UP(bclp * 100, 255) | ASLE_CBLV_VALID, &asle->cblv);
 
 	drm_modeset_unlock(&dev->mode_config.connection_mutex);
 
@@ -535,14 +519,14 @@ static void asle_work(struct work_struct *work)
 	struct drm_i915_private *dev_priv =
 		container_of(opregion, struct drm_i915_private, opregion);
 	struct drm_device *dev = dev_priv->dev;
-	struct opregion_asle *asle = dev_priv->opregion.asle;
+	struct opregion_asle __iomem *asle = dev_priv->opregion.asle;
 	u32 aslc_stat = 0;
 	u32 aslc_req;
 
 	if (!asle)
 		return;
 
-	aslc_req = asle->aslc;
+	aslc_req = ioread32(&asle->aslc);
 
 	if (!(aslc_req & ASLC_REQ_MSK)) {
 		DRM_DEBUG_DRIVER("No request on ASLC interrupt 0x%08x\n",
@@ -551,34 +535,34 @@ static void asle_work(struct work_struct *work)
 	}
 
 	if (aslc_req & ASLC_SET_ALS_ILLUM)
-		aslc_stat |= asle_set_als_illum(dev, asle->alsi);
+		aslc_stat |= asle_set_als_illum(dev, ioread32(&asle->alsi));
 
 	if (aslc_req & ASLC_SET_BACKLIGHT)
-		aslc_stat |= asle_set_backlight(dev, asle->bclp);
+		aslc_stat |= asle_set_backlight(dev, ioread32(&asle->bclp));
 
 	if (aslc_req & ASLC_SET_PFIT)
-		aslc_stat |= asle_set_pfit(dev, asle->pfit);
+		aslc_stat |= asle_set_pfit(dev, ioread32(&asle->pfit));
 
 	if (aslc_req & ASLC_SET_PWM_FREQ)
-		aslc_stat |= asle_set_pwm_freq(dev, asle->pfmb);
+		aslc_stat |= asle_set_pwm_freq(dev, ioread32(&asle->pfmb));
 
 	if (aslc_req & ASLC_SUPPORTED_ROTATION_ANGLES)
 		aslc_stat |= asle_set_supported_rotation_angles(dev,
-							asle->srot);
+							ioread32(&asle->srot));
 
 	if (aslc_req & ASLC_BUTTON_ARRAY)
-		aslc_stat |= asle_set_button_array(dev, asle->iuer);
+		aslc_stat |= asle_set_button_array(dev, ioread32(&asle->iuer));
 
 	if (aslc_req & ASLC_CONVERTIBLE_INDICATOR)
-		aslc_stat |= asle_set_convertible(dev, asle->iuer);
+		aslc_stat |= asle_set_convertible(dev, ioread32(&asle->iuer));
 
 	if (aslc_req & ASLC_DOCKING_INDICATOR)
-		aslc_stat |= asle_set_docking(dev, asle->iuer);
+		aslc_stat |= asle_set_docking(dev, ioread32(&asle->iuer));
 
 	if (aslc_req & ASLC_ISCT_STATE_CHANGE)
 		aslc_stat |= asle_isct_state(dev);
 
-	asle->aslc = aslc_stat;
+	iowrite32(aslc_stat, &asle->aslc);
 }
 
 void intel_opregion_asle_intr(struct drm_device *dev)
@@ -603,8 +587,8 @@ static int intel_opregion_video_event(struct notifier_block *nb,
 	   Linux, these are handled by the dock, button and video drivers.
 	*/
 
+	struct opregion_acpi __iomem *acpi;
 	struct acpi_bus_event *event = data;
-	struct opregion_acpi *acpi;
 	int ret = NOTIFY_OK;
 
 	if (strcmp(event->device_class, ACPI_VIDEO_CLASS) != 0)
@@ -615,10 +599,11 @@ static int intel_opregion_video_event(struct notifier_block *nb,
 
 	acpi = system_opregion->acpi;
 
-	if (event->type == 0x80 && ((acpi->cevt & 1) == 0))
+	if (event->type == 0x80 &&
+	    (ioread32(&acpi->cevt) & 1) == 0)
 		ret = NOTIFY_BAD;
 
-	acpi->csts = 0;
+	iowrite32(0, &acpi->csts);
 
 	return ret;
 }
@@ -638,14 +623,14 @@ static u32 get_did(struct intel_opregion *opregion, int i)
 	u32 did;
 
 	if (i < ARRAY_SIZE(opregion->acpi->didl)) {
-		did = opregion->acpi->didl[i];
+		did = ioread32(&opregion->acpi->didl[i]);
 	} else {
 		i -= ARRAY_SIZE(opregion->acpi->didl);
 
 		if (WARN_ON(i >= ARRAY_SIZE(opregion->acpi->did2)))
 			return 0;
 
-		did = opregion->acpi->did2[i];
+		did = ioread32(&opregion->acpi->did2[i]);
 	}
 
 	return did;
@@ -654,14 +639,14 @@ static u32 get_did(struct intel_opregion *opregion, int i)
 static void set_did(struct intel_opregion *opregion, int i, u32 val)
 {
 	if (i < ARRAY_SIZE(opregion->acpi->didl)) {
-		opregion->acpi->didl[i] = val;
+		iowrite32(val, &opregion->acpi->didl[i]);
 	} else {
 		i -= ARRAY_SIZE(opregion->acpi->didl);
 
 		if (WARN_ON(i >= ARRAY_SIZE(opregion->acpi->did2)))
 			return;
 
-		opregion->acpi->did2[i] = val;
+		iowrite32(val, &opregion->acpi->did2[i]);
 	}
 }
 
@@ -693,7 +678,7 @@ static void intel_didl_outputs(struct drm_device *dev)
 	}
 
 	if (!acpi_video_bus) {
-		DRM_DEBUG_KMS("No ACPI video bus found\n");
+		DRM_ERROR("No ACPI video bus found\n");
 		return;
 	}
 
@@ -783,7 +768,7 @@ static void intel_setup_cadls(struct drm_device *dev)
 	 * there are less than eight devices. */
 	do {
 		disp_id = get_did(opregion, i);
-		opregion->acpi->cadl[i] = disp_id;
+		iowrite32(disp_id, &opregion->acpi->cadl[i]);
 	} while (++i < 8 && disp_id != 0);
 }
 
@@ -802,16 +787,16 @@ void intel_opregion_init(struct drm_device *dev)
 		/* Notify BIOS we are ready to handle ACPI video ext notifs.
 		 * Right now, all the events are handled by the ACPI video module.
 		 * We don't actually need to do anything with them. */
-		opregion->acpi->csts = 0;
-		opregion->acpi->drdy = 1;
+		iowrite32(0, &opregion->acpi->csts);
+		iowrite32(1, &opregion->acpi->drdy);
 
 		system_opregion = opregion;
 		register_acpi_notifier(&intel_opregion_notifier);
 	}
 
 	if (opregion->asle) {
-		opregion->asle->tche = ASLE_TCHE_BLC_EN;
-		opregion->asle->ardy = ASLE_ARDY_READY;
+		iowrite32(ASLE_TCHE_BLC_EN, &opregion->asle->tche);
+		iowrite32(ASLE_ARDY_READY, &opregion->asle->ardy);
 	}
 }
 
@@ -824,23 +809,19 @@ void intel_opregion_fini(struct drm_device *dev)
 		return;
 
 	if (opregion->asle)
-		opregion->asle->ardy = ASLE_ARDY_NOT_READY;
+		iowrite32(ASLE_ARDY_NOT_READY, &opregion->asle->ardy);
 
 	cancel_work_sync(&dev_priv->opregion.asle_work);
 
 	if (opregion->acpi) {
-		opregion->acpi->drdy = 0;
+		iowrite32(0, &opregion->acpi->drdy);
 
 		system_opregion = NULL;
 		unregister_acpi_notifier(&intel_opregion_notifier);
 	}
 
 	/* just clear all opregion memory pointers now */
-	memunmap(opregion->header);
-	if (opregion->rvda) {
-		memunmap(opregion->rvda);
-		opregion->rvda = NULL;
-	}
+	iounmap(opregion->header);
 	opregion->header = NULL;
 	opregion->acpi = NULL;
 	opregion->swsci = NULL;
@@ -909,39 +890,19 @@ static void swsci_setup(struct drm_device *dev)
 static inline void swsci_setup(struct drm_device *dev) {}
 #endif  /* CONFIG_ACPI */
 
-static int intel_no_opregion_vbt_callback(const struct dmi_system_id *id)
-{
-	DRM_DEBUG_KMS("Falling back to manually reading VBT from "
-		      "VBIOS ROM for %s\n", id->ident);
-	return 1;
-}
-
-static const struct dmi_system_id intel_no_opregion_vbt[] = {
-	{
-		.callback = intel_no_opregion_vbt_callback,
-		.ident = "ThinkCentre A57",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "97027RG"),
-		},
-	},
-	{ }
-};
-
 int intel_opregion_setup(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct intel_opregion *opregion = &dev_priv->opregion;
+	void __iomem *base;
 	u32 asls, mboxes;
 	char buf[sizeof(OPREGION_SIGNATURE)];
 	int err = 0;
-	void *base;
 
 	BUILD_BUG_ON(sizeof(struct opregion_header) != 0x100);
 	BUILD_BUG_ON(sizeof(struct opregion_acpi) != 0x100);
 	BUILD_BUG_ON(sizeof(struct opregion_swsci) != 0x100);
 	BUILD_BUG_ON(sizeof(struct opregion_asle) != 0x100);
-	BUILD_BUG_ON(sizeof(struct opregion_asle_ext) != 0x400);
 
 	pci_read_config_dword(dev->pdev, PCI_ASLS, &asls);
 	DRM_DEBUG_DRIVER("graphic opregion physical addr: 0x%x\n", asls);
@@ -954,11 +915,11 @@ int intel_opregion_setup(struct drm_device *dev)
 	INIT_WORK(&opregion->asle_work, asle_work);
 #endif
 
-	base = memremap(asls, OPREGION_SIZE, MEMREMAP_WB);
+	base = acpi_os_ioremap(asls, OPREGION_SIZE);
 	if (!base)
 		return -ENOMEM;
 
-	memcpy(buf, base, sizeof(buf));
+	memcpy_fromio(buf, base, sizeof(buf));
 
 	if (memcmp(buf, OPREGION_SIGNATURE, 16)) {
 		DRM_DEBUG_DRIVER("opregion signature mismatch\n");
@@ -966,9 +927,11 @@ int intel_opregion_setup(struct drm_device *dev)
 		goto err_out;
 	}
 	opregion->header = base;
+	opregion->vbt = base + OPREGION_VBT_OFFSET;
+
 	opregion->lid_state = base + ACPI_CLID;
 
-	mboxes = opregion->header->mboxes;
+	mboxes = ioread32(&opregion->header->mboxes);
 	if (mboxes & MBOX_ACPI) {
 		DRM_DEBUG_DRIVER("Public ACPI methods supported\n");
 		opregion->acpi = base + OPREGION_ACPI_OFFSET;
@@ -979,48 +942,16 @@ int intel_opregion_setup(struct drm_device *dev)
 		opregion->swsci = base + OPREGION_SWSCI_OFFSET;
 		swsci_setup(dev);
 	}
-
 	if (mboxes & MBOX_ASLE) {
 		DRM_DEBUG_DRIVER("ASLE supported\n");
 		opregion->asle = base + OPREGION_ASLE_OFFSET;
 
-		opregion->asle->ardy = ASLE_ARDY_NOT_READY;
-	}
-
-	if (mboxes & MBOX_ASLE_EXT)
-		DRM_DEBUG_DRIVER("ASLE extension supported\n");
-
-	if (!dmi_check_system(intel_no_opregion_vbt)) {
-		const void *vbt = NULL;
-		u32 vbt_size = 0;
-
-		if (opregion->header->opregion_ver >= 2 && opregion->asle &&
-		    opregion->asle->rvda && opregion->asle->rvds) {
-			opregion->rvda = memremap(opregion->asle->rvda,
-						  opregion->asle->rvds,
-						  MEMREMAP_WB);
-			vbt = opregion->rvda;
-			vbt_size = opregion->asle->rvds;
-		}
-
-		if (intel_bios_is_valid_vbt(vbt, vbt_size)) {
-			DRM_DEBUG_KMS("Found valid VBT in ACPI OpRegion (RVDA)\n");
-			opregion->vbt = vbt;
-			opregion->vbt_size = vbt_size;
-		} else {
-			vbt = base + OPREGION_VBT_OFFSET;
-			vbt_size = OPREGION_ASLE_EXT_OFFSET - OPREGION_VBT_OFFSET;
-			if (intel_bios_is_valid_vbt(vbt, vbt_size)) {
-				DRM_DEBUG_KMS("Found valid VBT in ACPI OpRegion (Mailbox #4)\n");
-				opregion->vbt = vbt;
-				opregion->vbt_size = vbt_size;
-			}
-		}
+		iowrite32(ASLE_ARDY_NOT_READY, &opregion->asle->ardy);
 	}
 
 	return 0;
 
 err_out:
-	memunmap(base);
+	iounmap(base);
 	return err;
 }

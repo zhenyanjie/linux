@@ -55,7 +55,7 @@
 #include <be_roce.h>
 #include "ocrdma_sli.h"
 
-#define OCRDMA_ROCE_DRV_VERSION "11.0.0.0"
+#define OCRDMA_ROCE_DRV_VERSION "10.6.0.0"
 
 #define OCRDMA_ROCE_DRV_DESC "Emulex OneConnect RoCE Driver"
 #define OCRDMA_NODE_DESC "Emulex OneConnect RoCE HCA"
@@ -193,8 +193,6 @@ struct ocrdma_mr {
 	struct ib_mr ibmr;
 	struct ib_umem *umem;
 	struct ocrdma_hw_mr hwmr;
-	u64 *pages;
-	u32 npages;
 };
 
 struct ocrdma_stats {
@@ -230,10 +228,6 @@ struct phy_info {
 	u16 fixed_speeds_supported;
 	u16 phy_type;
 	u16 interface_type;
-};
-
-enum ocrdma_flags {
-	OCRDMA_FLAGS_LINK_STATUS_INIT = 0x01
 };
 
 struct ocrdma_dev {
@@ -284,6 +278,7 @@ struct ocrdma_dev {
 	u32 hba_port_num;
 
 	struct list_head entry;
+	struct rcu_head rcu;
 	int id;
 	u64 *stag_arr;
 	u8 sl; /* service level */
@@ -291,7 +286,6 @@ struct ocrdma_dev {
 	atomic_t update_sl;
 	u16 pvid;
 	u32 asic_id;
-	u32 flags;
 
 	ulong last_stats_time;
 	struct mutex stats_lock; /* provide synch for debugfs operations */
@@ -323,6 +317,9 @@ struct ocrdma_cq {
 			 */
 	u32 max_hw_cqe;
 	bool phase_change;
+	bool deferred_arm, deferred_sol;
+	bool first_arm;
+
 	spinlock_t cq_lock ____cacheline_aligned; /* provide synchronization
 						   * to cq polling
 						   */
@@ -591,11 +588,6 @@ static inline u8 ocrdma_is_enabled_and_synced(u32 state)
 	 */
 	return (state & OCRDMA_STATE_FLAG_ENABLED) &&
 		(state & OCRDMA_STATE_FLAG_SYNC);
-}
-
-static inline u8 ocrdma_get_ae_link_state(u32 ae_state)
-{
-	return ((ae_state & OCRDMA_AE_LSC_LS_MASK) >> OCRDMA_AE_LSC_LS_SHIFT);
 }
 
 #endif

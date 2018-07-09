@@ -81,7 +81,7 @@ int virtio_gpu_fence_emit(struct virtio_gpu_device *vgdev,
 	struct virtio_gpu_fence_driver *drv = &vgdev->fence_drv;
 	unsigned long irq_flags;
 
-	*fence = kmalloc(sizeof(struct virtio_gpu_fence), GFP_ATOMIC);
+	*fence = kmalloc(sizeof(struct virtio_gpu_fence), GFP_KERNEL);
 	if ((*fence) == NULL)
 		return -ENOMEM;
 

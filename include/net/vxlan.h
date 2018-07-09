@@ -152,10 +152,7 @@ struct vxlan_config {
 struct vxlan_dev {
 	struct hlist_node hlist;	/* vni hash table */
 	struct list_head  next;		/* vxlan's per namespace list */
-	struct vxlan_sock *vn4_sock;	/* listening socket for IPv4 */
-#if IS_ENABLED(CONFIG_IPV6)
-	struct vxlan_sock *vn6_sock;	/* listening socket for IPv6 */
-#endif
+	struct vxlan_sock *vn_sock;	/* listening socket */
 	struct net_device *dev;
 	struct net	  *net;		/* netns for packet i/o */
 	struct vxlan_rdst default_dst;	/* default destination */
@@ -198,14 +195,9 @@ struct vxlan_dev {
 struct net_device *vxlan_dev_create(struct net *net, const char *name,
 				    u8 name_assign_type, struct vxlan_config *conf);
 
-static inline __be16 vxlan_dev_dst_port(struct vxlan_dev *vxlan,
-					unsigned short family)
+static inline __be16 vxlan_dev_dst_port(struct vxlan_dev *vxlan)
 {
-#if IS_ENABLED(CONFIG_IPV6)
-	if (family == AF_INET6)
-		return inet_sk(vxlan->vn6_sock->sock->sk)->inet_sport;
-#endif
-	return inet_sk(vxlan->vn4_sock->sock->sk)->inet_sport;
+	return inet_sk(vxlan->vn_sock->sock->sk)->inet_sport;
 }
 
 static inline netdev_features_t vxlan_features_check(struct sk_buff *skb,
@@ -232,7 +224,7 @@ static inline netdev_features_t vxlan_features_check(struct sk_buff *skb,
 	     skb->inner_protocol != htons(ETH_P_TEB) ||
 	     (skb_inner_mac_header(skb) - skb_transport_header(skb) !=
 	      sizeof(struct udphdr) + sizeof(struct vxlanhdr))))
-		return features & ~(NETIF_F_CSUM_MASK | NETIF_F_GSO_MASK);
+		return features & ~(NETIF_F_ALL_CSUM | NETIF_F_GSO_MASK);
 
 	return features;
 }

@@ -18,7 +18,7 @@ static inline void xgifb_reg_and_or(unsigned long port, u8 index,
 	u8 temp;
 
 	temp = xgifb_reg_get(port, index);
-	temp = (u8) ((temp & data_and) | data_or);
+	temp = (temp & data_and) | data_or;
 	xgifb_reg_set(port, index, temp);
 }
 
@@ -27,7 +27,7 @@ static inline void xgifb_reg_and(unsigned long port, u8 index, unsigned data_and
 	u8 temp;
 
 	temp = xgifb_reg_get(port, index);
-	temp = (u8) (temp & data_and);
+	temp &= data_and;
 	xgifb_reg_set(port, index, temp);
 }
 

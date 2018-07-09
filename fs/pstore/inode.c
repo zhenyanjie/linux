@@ -178,7 +178,6 @@ static loff_t pstore_file_llseek(struct file *file, loff_t off, int whence)
 }
 
 static const struct file_operations pstore_file_operations = {
-	.owner		= THIS_MODULE,
 	.open		= pstore_file_open,
 	.read		= pstore_file_read,
 	.llseek		= pstore_file_llseek,
@@ -288,7 +287,7 @@ static const struct super_operations pstore_ops = {
 
 static struct super_block *pstore_sb;
 
-bool pstore_is_mounted(void)
+int pstore_is_mounted(void)
 {
 	return pstore_sb != NULL;
 }
@@ -377,7 +376,7 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 		break;
 	}
 
-	inode_lock(d_inode(root));
+	mutex_lock(&d_inode(root)->i_mutex);
 
 	dentry = d_alloc_name(root, name);
 	if (!dentry)
@@ -397,12 +396,12 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 	list_add(&private->list, &allpstore);
 	spin_unlock_irqrestore(&allpstore_lock, flags);
 
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 
 	return 0;
 
 fail_lockedalloc:
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 	kfree(private);
 fail_alloc:
 	iput(inode);
@@ -457,7 +456,6 @@ static void pstore_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type pstore_fs_type = {
-	.owner          = THIS_MODULE,
 	.name		= "pstore",
 	.mount		= pstore_mount,
 	.kill_sb	= pstore_kill_sb,
@@ -480,13 +478,6 @@ out:
 	return err;
 }
 module_init(init_pstore_fs)
-
-static void __exit exit_pstore_fs(void)
-{
-	unregister_filesystem(&pstore_fs_type);
-	sysfs_remove_mount_point(fs_kobj, "pstore");
-}
-module_exit(exit_pstore_fs)
 
 MODULE_AUTHOR("Tony Luck <tony.luck@intel.com>");
 MODULE_LICENSE("GPL");

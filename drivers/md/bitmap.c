@@ -210,6 +210,10 @@ static int write_sb_page(struct bitmap *bitmap, struct page *page, int wait)
 	struct block_device *bdev;
 	struct mddev *mddev = bitmap->mddev;
 	struct bitmap_storage *store = &bitmap->storage;
+	int node_offset = 0;
+
+	if (mddev_is_clustered(bitmap->mddev))
+		node_offset = bitmap->cluster_slot * store->file_pages;
 
 	while ((rdev = next_active_rdev(rdev, mddev)) != NULL) {
 		int size = PAGE_SIZE;
@@ -609,10 +613,12 @@ re_read:
 	daemon_sleep = le32_to_cpu(sb->daemon_sleep) * HZ;
 	write_behind = le32_to_cpu(sb->write_behind);
 	sectors_reserved = le32_to_cpu(sb->sectors_reserved);
-	/* Setup nodes/clustername only if bitmap version is
-	 * cluster-compatible
+	/* XXX: This is a hack to ensure that we don't use clustering
+	 *  in case:
+	 *	- dm-raid is in use and
+	 *	- the nodes written in bitmap_sb is erroneous.
 	 */
-	if (sb->version == cpu_to_le32(BITMAP_MAJOR_CLUSTERED)) {
+	if (!bitmap->mddev->sync_super) {
 		nodes = le32_to_cpu(sb->nodes);
 		strlcpy(bitmap->mddev->bitmap_info.cluster_name,
 				sb->cluster_name, 64);
@@ -622,7 +628,7 @@ re_read:
 	if (sb->magic != cpu_to_le32(BITMAP_MAGIC))
 		reason = "bad magic";
 	else if (le32_to_cpu(sb->version) < BITMAP_MAJOR_LO ||
-		 le32_to_cpu(sb->version) > BITMAP_MAJOR_CLUSTERED)
+		 le32_to_cpu(sb->version) > BITMAP_MAJOR_HI)
 		reason = "unrecognized superblock version";
 	else if (chunksize < 512)
 		reason = "bitmap chunksize too small";
@@ -1566,7 +1572,7 @@ void bitmap_close_sync(struct bitmap *bitmap)
 }
 EXPORT_SYMBOL(bitmap_close_sync);
 
-void bitmap_cond_end_sync(struct bitmap *bitmap, sector_t sector, bool force)
+void bitmap_cond_end_sync(struct bitmap *bitmap, sector_t sector)
 {
 	sector_t s = 0;
 	sector_t blocks;
@@ -1577,7 +1583,7 @@ void bitmap_cond_end_sync(struct bitmap *bitmap, sector_t sector, bool force)
 		bitmap->last_end_sync = jiffies;
 		return;
 	}
-	if (!force && time_before(jiffies, (bitmap->last_end_sync
+	if (time_before(jiffies, (bitmap->last_end_sync
 				  + bitmap->mddev->bitmap_info.daemon_sleep)))
 		return;
 	wait_event(bitmap->mddev->recovery_wait,

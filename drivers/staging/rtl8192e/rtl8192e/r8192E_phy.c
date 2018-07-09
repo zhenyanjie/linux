@@ -6,6 +6,10 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -13,7 +17,6 @@
  * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 
-#include <linux/bitops.h>
 #include "rtl_core.h"
 #include "r8192E_hw.h"
 #include "r8192E_phyreg.h"
@@ -43,17 +46,22 @@ static u32 RF_CHANNEL_TABLE_ZEBRA[] = {
 
 /*************************Define local function prototype**********************/
 
-static u32 _rtl92e_phy_rf_fw_read(struct net_device *dev,
-				  enum rf90_radio_path eRFPath, u32 Offset);
-static void _rtl92e_phy_rf_fw_write(struct net_device *dev,
-				    enum rf90_radio_path eRFPath, u32 Offset,
-				    u32 Data);
+static u32 phy_FwRFSerialRead(struct net_device *dev,
+			      enum rf90_radio_path eRFPath,
+			      u32 Offset);
+static void phy_FwRFSerialWrite(struct net_device *dev,
+				enum rf90_radio_path eRFPath,
+				u32 Offset, u32 Data);
 
-static u32 _rtl92e_calculate_bit_shift(u32 dwBitMask)
+static u32 rtl8192_CalculateBitShift(u32 dwBitMask)
 {
-	if (!dwBitMask)
-		return 32;
-	return ffs(dwBitMask) - 1;
+	u32 i;
+
+	for (i = 0; i <= 31; i++) {
+		if (((dwBitMask >> i) & 0x1) == 1)
+			break;
+	}
+	return i;
 }
 
 u8 rtl92e_is_legal_rf_path(struct net_device *dev, u32 eRFPath)
@@ -80,7 +88,7 @@ void rtl92e_set_bb_reg(struct net_device *dev, u32 dwRegAddr, u32 dwBitMask,
 
 	if (dwBitMask != bMaskDWord) {
 		OriginalValue = rtl92e_readl(dev, dwRegAddr);
-		BitShift = _rtl92e_calculate_bit_shift(dwBitMask);
+		BitShift = rtl8192_CalculateBitShift(dwBitMask);
 		NewValue = (((OriginalValue) & (~dwBitMask)) |
 			    (dwData << BitShift));
 		rtl92e_writel(dev, dwRegAddr, NewValue);
@@ -90,16 +98,16 @@ void rtl92e_set_bb_reg(struct net_device *dev, u32 dwRegAddr, u32 dwBitMask,
 
 u32 rtl92e_get_bb_reg(struct net_device *dev, u32 dwRegAddr, u32 dwBitMask)
 {
-	u32 OriginalValue, BitShift;
+	u32 Ret = 0, OriginalValue, BitShift;
 
 	OriginalValue = rtl92e_readl(dev, dwRegAddr);
-	BitShift = _rtl92e_calculate_bit_shift(dwBitMask);
+	BitShift = rtl8192_CalculateBitShift(dwBitMask);
+	Ret = (OriginalValue & dwBitMask) >> BitShift;
 
-	return (OriginalValue & dwBitMask) >> BitShift;
+	return Ret;
 }
-
-static u32 _rtl92e_phy_rf_read(struct net_device *dev,
-			       enum rf90_radio_path eRFPath, u32 Offset)
+static u32 rtl8192_phy_RFSerialRead(struct net_device *dev,
+				    enum rf90_radio_path eRFPath, u32 Offset)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	u32 ret = 0;
@@ -155,9 +163,9 @@ static u32 _rtl92e_phy_rf_read(struct net_device *dev,
 
 }
 
-static void _rtl92e_phy_rf_write(struct net_device *dev,
-				 enum rf90_radio_path eRFPath, u32 Offset,
-				 u32 Data)
+static void rtl8192_phy_RFSerialWrite(struct net_device *dev,
+				      enum rf90_radio_path eRFPath, u32 Offset,
+				      u32 Data)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	u32 DataAndAddr = 0, NewOffset = 0;
@@ -220,29 +228,29 @@ void rtl92e_set_rf_reg(struct net_device *dev, enum rf90_radio_path eRFPath,
 	RT_TRACE(COMP_PHY, "FW RF CTRL is not ready now\n");
 	if (priv->Rf_Mode == RF_OP_By_FW) {
 		if (BitMask != bMask12Bits) {
-			Original_Value = _rtl92e_phy_rf_fw_read(dev, eRFPath,
-								RegAddr);
-			BitShift =  _rtl92e_calculate_bit_shift(BitMask);
+			Original_Value = phy_FwRFSerialRead(dev, eRFPath,
+							    RegAddr);
+			BitShift =  rtl8192_CalculateBitShift(BitMask);
 			New_Value = (((Original_Value) & (~BitMask)) |
 				    (Data << BitShift));
 
-			_rtl92e_phy_rf_fw_write(dev, eRFPath, RegAddr,
-						New_Value);
+			phy_FwRFSerialWrite(dev, eRFPath, RegAddr, New_Value);
 		} else
-			_rtl92e_phy_rf_fw_write(dev, eRFPath, RegAddr, Data);
+			phy_FwRFSerialWrite(dev, eRFPath, RegAddr, Data);
 		udelay(200);
 
 	} else {
 		if (BitMask != bMask12Bits) {
-			Original_Value = _rtl92e_phy_rf_read(dev, eRFPath,
-							     RegAddr);
-			BitShift =  _rtl92e_calculate_bit_shift(BitMask);
+			Original_Value = rtl8192_phy_RFSerialRead(dev, eRFPath,
+								  RegAddr);
+			BitShift =  rtl8192_CalculateBitShift(BitMask);
 			New_Value = (((Original_Value) & (~BitMask)) |
 				     (Data << BitShift));
 
-			_rtl92e_phy_rf_write(dev, eRFPath, RegAddr, New_Value);
+			rtl8192_phy_RFSerialWrite(dev, eRFPath, RegAddr,
+						  New_Value);
 		} else
-			_rtl92e_phy_rf_write(dev, eRFPath, RegAddr, Data);
+			rtl8192_phy_RFSerialWrite(dev, eRFPath, RegAddr, Data);
 	}
 }
 
@@ -258,19 +266,20 @@ u32 rtl92e_get_rf_reg(struct net_device *dev, enum rf90_radio_path eRFPath,
 		return	0;
 	down(&priv->rf_sem);
 	if (priv->Rf_Mode == RF_OP_By_FW) {
-		Original_Value = _rtl92e_phy_rf_fw_read(dev, eRFPath, RegAddr);
+		Original_Value = phy_FwRFSerialRead(dev, eRFPath, RegAddr);
 		udelay(200);
 	} else {
-		Original_Value = _rtl92e_phy_rf_read(dev, eRFPath, RegAddr);
+		Original_Value = rtl8192_phy_RFSerialRead(dev, eRFPath,
+							  RegAddr);
 	}
-	BitShift =  _rtl92e_calculate_bit_shift(BitMask);
+	BitShift =  rtl8192_CalculateBitShift(BitMask);
 	Readback_Value = (Original_Value & BitMask) >> BitShift;
 	up(&priv->rf_sem);
 	return Readback_Value;
 }
 
-static u32 _rtl92e_phy_rf_fw_read(struct net_device *dev,
-				  enum rf90_radio_path eRFPath, u32 Offset)
+static u32 phy_FwRFSerialRead(struct net_device *dev,
+			      enum rf90_radio_path eRFPath, u32 Offset)
 {
 	u32		Data = 0;
 	u8		time = 0;
@@ -295,9 +304,9 @@ static u32 _rtl92e_phy_rf_fw_read(struct net_device *dev,
 
 }
 
-static void _rtl92e_phy_rf_fw_write(struct net_device *dev,
-				    enum rf90_radio_path eRFPath, u32 Offset,
-				    u32 Data)
+static void phy_FwRFSerialWrite(struct net_device *dev,
+				enum rf90_radio_path eRFPath,
+				u32 Offset, u32 Data)
 {
 	u8	time = 0;
 
@@ -346,7 +355,7 @@ void rtl92e_config_mac(struct net_device *dev)
 
 }
 
-static void _rtl92e_phy_config_bb(struct net_device *dev, u8 ConfigType)
+static void rtl8192_phyConfigBB(struct net_device *dev, u8 ConfigType)
 {
 	int i;
 	u32 *Rtl819XPHY_REGArray_Table = NULL;
@@ -387,7 +396,7 @@ static void _rtl92e_phy_config_bb(struct net_device *dev, u8 ConfigType)
 	}
 }
 
-static void _rtl92e_init_bb_rf_reg_def(struct net_device *dev)
+static void rtl8192_InitBBRFRegDef(struct net_device *dev)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 
@@ -536,7 +545,7 @@ bool rtl92e_check_bb_and_rf(struct net_device *dev, enum hw90_block CheckBlock,
 	return ret;
 }
 
-static bool _rtl92e_bb_config_para_file(struct net_device *dev)
+static bool rtl8192_BB_Config_ParaFile(struct net_device *dev)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	bool rtStatus = true;
@@ -562,12 +571,12 @@ static bool _rtl92e_bb_config_para_file(struct net_device *dev)
 		}
 	}
 	rtl92e_set_bb_reg(dev, rFPGA0_RFMOD, bCCKEn|bOFDMEn, 0x0);
-	_rtl92e_phy_config_bb(dev, BaseBand_Config_PHY_REG);
+	rtl8192_phyConfigBB(dev, BaseBand_Config_PHY_REG);
 
 	dwRegValue = rtl92e_readl(dev, CPU_GEN);
 	rtl92e_writel(dev, CPU_GEN, (dwRegValue|CPU_GEN_BB_RST));
 
-	_rtl92e_phy_config_bb(dev, BaseBand_Config_AGC_TAB);
+	rtl8192_phyConfigBB(dev, BaseBand_Config_AGC_TAB);
 
 	if (priv->IC_Cut  > VERSION_8190_BD) {
 		if (priv->rf_type == RF_2T4R)
@@ -589,8 +598,8 @@ static bool _rtl92e_bb_config_para_file(struct net_device *dev)
 }
 bool rtl92e_config_bb(struct net_device *dev)
 {
-	_rtl92e_init_bb_rf_reg_def(dev);
-	return _rtl92e_bb_config_para_file(dev);
+	rtl8192_InitBBRFRegDef(dev);
+	return rtl8192_BB_Config_ParaFile(dev);
 }
 
 void rtl92e_get_tx_power(struct net_device *dev)
@@ -748,8 +757,8 @@ u8 rtl92e_config_rf_path(struct net_device *dev, enum rf90_radio_path eRFPath)
 	case RF90_PATH_D:
 		for (i = 0; i < RadioD_ArrayLength; i += 2) {
 			if (Rtl819XRadioD_Array[i] == 0xfe) {
-				msleep(100);
-				continue;
+					msleep(100);
+					continue;
 			}
 			rtl92e_set_rf_reg(dev, eRFPath, Rtl819XRadioD_Array[i],
 					  bMask12Bits,
@@ -764,8 +773,7 @@ u8 rtl92e_config_rf_path(struct net_device *dev, enum rf90_radio_path eRFPath)
 	return 0;
 
 }
-
-static void _rtl92e_set_tx_power_level(struct net_device *dev, u8 channel)
+static void rtl8192_SetTxPowerLevel(struct net_device *dev, u8 channel)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	u8	powerlevel = priv->TxPowerLevelCCK[channel-1];
@@ -788,11 +796,11 @@ static void _rtl92e_set_tx_power_level(struct net_device *dev, u8 channel)
 	}
 }
 
-static u8 _rtl92e_phy_set_sw_chnl_cmd_array(struct net_device *dev,
-					    struct sw_chnl_cmd *CmdTable,
-					    u32 CmdTableIdx, u32 CmdTableSz,
-					    enum sw_chnl_cmd_id CmdID,
-					    u32 Para1, u32 Para2, u32 msDelay)
+static u8 rtl8192_phy_SetSwChnlCmdArray(struct net_device *dev,
+					struct sw_chnl_cmd *CmdTable,
+					u32 CmdTableIdx, u32 CmdTableSz,
+					enum sw_chnl_cmd_id CmdID,
+					u32 Para1, u32 Para2, u32 msDelay)
 {
 	struct sw_chnl_cmd *pCmd;
 
@@ -814,8 +822,8 @@ static u8 _rtl92e_phy_set_sw_chnl_cmd_array(struct net_device *dev,
 	return true;
 }
 
-static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
-					  u8 *stage, u8 *step, u32 *delay)
+static u8 rtl8192_phy_SwChnlStepByStep(struct net_device *dev, u8 channel,
+				       u8 *stage, u8 *step, u32 *delay)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	struct rtllib_device *ieee = priv->rtllib;
@@ -835,22 +843,19 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 
 	{
 		PreCommonCmdCnt = 0;
-		_rtl92e_phy_set_sw_chnl_cmd_array(dev, ieee->PreCommonCmd,
-						  PreCommonCmdCnt++,
-						  MAX_PRECMD_CNT,
-						  CmdID_SetTxPowerLevel,
-						  0, 0, 0);
-		_rtl92e_phy_set_sw_chnl_cmd_array(dev, ieee->PreCommonCmd,
-						  PreCommonCmdCnt++,
-						  MAX_PRECMD_CNT, CmdID_End,
-						  0, 0, 0);
+		rtl8192_phy_SetSwChnlCmdArray(dev, ieee->PreCommonCmd,
+					PreCommonCmdCnt++,
+					MAX_PRECMD_CNT, CmdID_SetTxPowerLevel,
+					0, 0, 0);
+		rtl8192_phy_SetSwChnlCmdArray(dev, ieee->PreCommonCmd,
+					PreCommonCmdCnt++,
+					MAX_PRECMD_CNT, CmdID_End, 0, 0, 0);
 
 		PostCommonCmdCnt = 0;
 
-		_rtl92e_phy_set_sw_chnl_cmd_array(dev, ieee->PostCommonCmd,
-						  PostCommonCmdCnt++,
-						  MAX_POSTCMD_CNT, CmdID_End,
-						  0, 0, 0);
+		rtl8192_phy_SetSwChnlCmdArray(dev, ieee->PostCommonCmd,
+					PostCommonCmdCnt++,
+					MAX_POSTCMD_CNT, CmdID_End, 0, 0, 0);
 
 		RfDependCmdCnt = 0;
 		switch (priv->rf_chip) {
@@ -861,19 +866,13 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 					   channel);
 				return false;
 			}
-			_rtl92e_phy_set_sw_chnl_cmd_array(dev,
-							  ieee->RfDependCmd,
-							  RfDependCmdCnt++,
-							  MAX_RFDEPENDCMD_CNT,
-							  CmdID_RF_WriteReg,
-							  rZebra1_Channel,
-							  RF_CHANNEL_TABLE_ZEBRA[channel],
-							  10);
-			_rtl92e_phy_set_sw_chnl_cmd_array(dev,
-							  ieee->RfDependCmd,
-							  RfDependCmdCnt++,
-							  MAX_RFDEPENDCMD_CNT,
-							  CmdID_End, 0, 0, 0);
+			rtl8192_phy_SetSwChnlCmdArray(dev, ieee->RfDependCmd,
+				RfDependCmdCnt++, MAX_RFDEPENDCMD_CNT,
+				CmdID_RF_WriteReg, rZebra1_Channel,
+				RF_CHANNEL_TABLE_ZEBRA[channel], 10);
+			rtl8192_phy_SetSwChnlCmdArray(dev, ieee->RfDependCmd,
+				RfDependCmdCnt++, MAX_RFDEPENDCMD_CNT,
+				CmdID_End, 0, 0, 0);
 			break;
 
 		case RF_8256:
@@ -883,18 +882,15 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 					   channel);
 				return false;
 			}
-			_rtl92e_phy_set_sw_chnl_cmd_array(dev,
-							  ieee->RfDependCmd,
-							  RfDependCmdCnt++,
-							  MAX_RFDEPENDCMD_CNT,
-							  CmdID_RF_WriteReg,
-							  rZebra1_Channel,
-							  channel, 10);
-			_rtl92e_phy_set_sw_chnl_cmd_array(dev,
-							  ieee->RfDependCmd,
-							  RfDependCmdCnt++,
-							  MAX_RFDEPENDCMD_CNT,
-							  CmdID_End, 0, 0, 0);
+			rtl8192_phy_SetSwChnlCmdArray(dev, ieee->RfDependCmd,
+				 RfDependCmdCnt++, MAX_RFDEPENDCMD_CNT,
+				CmdID_RF_WriteReg, rZebra1_Channel, channel,
+				 10);
+			rtl8192_phy_SetSwChnlCmdArray(dev, ieee->RfDependCmd,
+
+						      RfDependCmdCnt++,
+						      MAX_RFDEPENDCMD_CNT,
+			CmdID_End, 0, 0, 0);
 			break;
 
 		case RF_8258:
@@ -932,8 +928,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 			switch (CurrentCmd->CmdID) {
 			case CmdID_SetTxPowerLevel:
 				if (priv->IC_Cut > (u8)VERSION_8190_BD)
-					_rtl92e_set_tx_power_level(dev,
-								   channel);
+					rtl8192_SetTxPowerLevel(dev, channel);
 				break;
 			case CmdID_WritePortUlong:
 				rtl92e_writel(dev, CurrentCmd->Para1,
@@ -968,22 +963,20 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 	return false;
 }
 
-static void _rtl92e_phy_switch_channel(struct net_device *dev, u8 channel)
+static void rtl8192_phy_FinishSwChnlNow(struct net_device *dev, u8 channel)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	u32 delay = 0;
 
-	while (!_rtl92e_phy_switch_channel_step(dev, channel,
-						&priv->SwChnlStage,
-						&priv->SwChnlStep, &delay)) {
+	while (!rtl8192_phy_SwChnlStepByStep(dev, channel, &priv->SwChnlStage,
+	      &priv->SwChnlStep, &delay)) {
 		if (delay > 0)
 			msleep(delay);
 		if (!priv->up)
 			break;
 	}
 }
-
-static void _rtl92e_phy_switch_channel_work_item(struct net_device *dev)
+static void rtl8192_SwChnl_WorkItem(struct net_device *dev)
 {
 
 	struct r8192_priv *priv = rtllib_priv(dev);
@@ -993,7 +986,7 @@ static void _rtl92e_phy_switch_channel_work_item(struct net_device *dev)
 	RT_TRACE(COMP_TRACE, "=====>--%s(), set chan:%d, priv:%p\n", __func__,
 		 priv->chan, priv);
 
-	_rtl92e_phy_switch_channel(dev, priv->chan);
+	rtl8192_phy_FinishSwChnlNow(dev, priv->chan);
 
 	RT_TRACE(COMP_TRACE, "<== SwChnlCallback819xUsbWorkItem()\n");
 }
@@ -1050,12 +1043,12 @@ u8 rtl92e_set_channel(struct net_device *dev, u8 channel)
 	priv->SwChnlStep = 0;
 
 	if (priv->up)
-		_rtl92e_phy_switch_channel_work_item(dev);
+		rtl8192_SwChnl_WorkItem(dev);
 	priv->SwChnlInProgress = false;
 	return true;
 }
 
-static void _rtl92e_cck_tx_power_track_bw_switch_tssi(struct net_device *dev)
+static void CCK_Tx_Power_Track_BW_Switch_TSSI(struct net_device *dev)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 
@@ -1119,7 +1112,7 @@ static void _rtl92e_cck_tx_power_track_bw_switch_tssi(struct net_device *dev)
 	}
 }
 
-static void _rtl92e_cck_tx_power_track_bw_switch_thermal(struct net_device *dev)
+static void CCK_Tx_Power_Track_BW_Switch_ThermalMeter(struct net_device *dev)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 
@@ -1136,38 +1129,38 @@ static void _rtl92e_cck_tx_power_track_bw_switch_thermal(struct net_device *dev)
 			priv->Record_CCK_20Mindex = 6;
 		priv->CCK_index = priv->Record_CCK_20Mindex;
 		RT_TRACE(COMP_POWER_TRACKING,
-			 "20MHz, _rtl92e_cck_tx_power_track_bw_switch_thermal(),CCK_index = %d\n",
+			 "20MHz, CCK_Tx_Power_Track_BW_Switch_ThermalMeter(),CCK_index = %d\n",
 			 priv->CCK_index);
 	break;
 
 	case HT_CHANNEL_WIDTH_20_40:
 		priv->CCK_index = priv->Record_CCK_40Mindex;
 		RT_TRACE(COMP_POWER_TRACKING,
-			 "40MHz, _rtl92e_cck_tx_power_track_bw_switch_thermal(), CCK_index = %d\n",
+			 "40MHz, CCK_Tx_Power_Track_BW_Switch_ThermalMeter(), CCK_index = %d\n",
 			 priv->CCK_index);
 	break;
 	}
 	rtl92e_dm_cck_txpower_adjust(dev, priv->bcck_in_ch14);
 }
 
-static void _rtl92e_cck_tx_power_track_bw_switch(struct net_device *dev)
+static void CCK_Tx_Power_Track_BW_Switch(struct net_device *dev)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 
 	if (priv->IC_Cut >= IC_VersionCut_D)
-		_rtl92e_cck_tx_power_track_bw_switch_tssi(dev);
+		CCK_Tx_Power_Track_BW_Switch_TSSI(dev);
 	else
-		_rtl92e_cck_tx_power_track_bw_switch_thermal(dev);
+		CCK_Tx_Power_Track_BW_Switch_ThermalMeter(dev);
 }
 
-static void _rtl92e_set_bw_mode_work_item(struct net_device *dev)
+static void rtl8192_SetBWModeWorkItem(struct net_device *dev)
 {
 
 	struct r8192_priv *priv = rtllib_priv(dev);
 	u8 regBwOpMode;
 
 	RT_TRACE(COMP_SWBW,
-		 "==>_rtl92e_set_bw_mode_work_item()  Switch to %s bandwidth\n",
+		 "==>rtl8192_SetBWModeWorkItem()  Switch to %s bandwidth\n",
 		 priv->CurrentChannelBW == HT_CHANNEL_WIDTH_20 ?
 			 "20MHz" : "40MHz");
 
@@ -1209,7 +1202,7 @@ static void _rtl92e_set_bw_mode_work_item(struct net_device *dev)
 			rtl92e_writel(dev, rCCK0_TxFilter2, 0x090e1317);
 			rtl92e_writel(dev, rCCK0_DebugPort, 0x00000204);
 		} else {
-			_rtl92e_cck_tx_power_track_bw_switch(dev);
+			CCK_Tx_Power_Track_BW_Switch(dev);
 		}
 
 		rtl92e_set_bb_reg(dev, rFPGA0_AnalogParameter1, 0x00100000, 1);
@@ -1224,7 +1217,7 @@ static void _rtl92e_set_bw_mode_work_item(struct net_device *dev)
 			rtl92e_writel(dev, rCCK0_TxFilter2, 0x121c252e);
 			rtl92e_writel(dev, rCCK0_DebugPort, 0x00000409);
 		} else {
-			_rtl92e_cck_tx_power_track_bw_switch(dev);
+			CCK_Tx_Power_Track_BW_Switch(dev);
 		}
 
 		rtl92e_set_bb_reg(dev, rCCK0_System, bCCKSideBand,
@@ -1288,7 +1281,7 @@ void rtl92e_set_bw_mode(struct net_device *dev, enum ht_channel_width Bandwidth,
 	else
 		priv->nCur40MhzPrimeSC = HAL_PRIME_CHNL_OFFSET_DONT_CARE;
 
-	_rtl92e_set_bw_mode_work_item(dev);
+	rtl8192_SetBWModeWorkItem(dev);
 
 }
 
@@ -1416,8 +1409,8 @@ void rtl92e_set_rf_off(struct net_device *dev)
 
 }
 
-static bool _rtl92e_set_rf_power_state(struct net_device *dev,
-				       enum rt_rf_power_state eRFPowerState)
+static bool SetRFPowerState8190(struct net_device *dev,
+				enum rt_rf_power_state eRFPowerState)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	struct rt_pwr_save_ctrl *pPSC = (struct rt_pwr_save_ctrl *)
@@ -1428,15 +1421,14 @@ static bool _rtl92e_set_rf_power_state(struct net_device *dev,
 
 	if (priv->SetRFPowerStateInProgress)
 		return false;
-	RT_TRACE(COMP_PS, "===========> _rtl92e_set_rf_power_state()!\n");
+	RT_TRACE(COMP_PS, "===========> SetRFPowerState8190()!\n");
 	priv->SetRFPowerStateInProgress = true;
 
 	switch (priv->rf_chip) {
 	case RF_8256:
 		switch (eRFPowerState) {
 		case eRfOn:
-			RT_TRACE(COMP_PS,
-				 "_rtl92e_set_rf_power_state() eRfOn!\n");
+			RT_TRACE(COMP_PS, "SetRFPowerState8190() eRfOn!\n");
 			if ((priv->rtllib->eRFPowerState == eRfOff) &&
 			     RT_IN_PS_LEVEL(pPSC, RT_RF_OFF_LEVL_HALT_NIC)) {
 				bool rtstatus = true;
@@ -1503,7 +1495,7 @@ static bool _rtl92e_set_rf_power_state(struct net_device *dev,
 
 				if (i >= MAX_DOZE_WAITING_TIMES_9x) {
 					RT_TRACE(COMP_POWER,
-						 "\n\n\n TimeOut!! _rtl92e_set_rf_power_state(): eRfOff: %d times TcbBusyQueue[%d] != 0 !!!\n",
+						 "\n\n\n TimeOut!! SetRFPowerState8190(): eRfOff: %d times TcbBusyQueue[%d] != 0 !!!\n",
 						 MAX_DOZE_WAITING_TIMES_9x,
 						 QueueID);
 					break;
@@ -1514,7 +1506,7 @@ static bool _rtl92e_set_rf_power_state(struct net_device *dev,
 
 		case eRfOff:
 			RT_TRACE(COMP_PS,
-				 "_rtl92e_set_rf_power_state() eRfOff/Sleep !\n");
+				 "SetRFPowerState8190() eRfOff/Sleep !\n");
 
 			for (QueueID = 0, i = 0; QueueID < MAX_TX_QUEUE; ) {
 				ring = &priv->tx_ring[QueueID];
@@ -1579,8 +1571,7 @@ static bool _rtl92e_set_rf_power_state(struct net_device *dev,
 	}
 
 	priv->SetRFPowerStateInProgress = false;
-	RT_TRACE(COMP_PS,
-		 "<=========== _rtl92e_set_rf_power_state() bResult = %d!\n",
+	RT_TRACE(COMP_PS, "<=========== SetRFPowerState8190() bResult = %d!\n",
 		 bResult);
 	return bResult;
 }
@@ -1603,7 +1594,7 @@ bool rtl92e_set_rf_power_state(struct net_device *dev,
 		return bResult;
 	}
 
-	bResult = _rtl92e_set_rf_power_state(dev, eRFPowerState);
+	bResult = SetRFPowerState8190(dev, eRFPowerState);
 
 	RT_TRACE(COMP_PS,
 		 "<--------- rtl92e_set_rf_power_state(): bResult(%d)\n",

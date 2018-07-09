@@ -522,8 +522,6 @@ static dma_cookie_t fsldma_run_tx_complete_actions(struct fsldma_chan *chan,
 			chan_dbg(chan, "LD %p callback\n", desc);
 			txd->callback(txd->callback_param);
 		}
-
-		dma_descriptor_unmap(txd);
 	}
 
 	/* Run any dependencies */
@@ -1514,7 +1512,6 @@ static const struct of_device_id fsldma_of_ids[] = {
 	{ .compatible = "fsl,elo-dma", },
 	{}
 };
-MODULE_DEVICE_TABLE(of, fsldma_of_ids);
 
 static struct platform_driver fsldma_of_driver = {
 	.driver = {

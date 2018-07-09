@@ -59,7 +59,7 @@ static const char ixgbevf_driver_string[] =
 #define DRV_VERSION "2.12.1-k"
 const char ixgbevf_driver_version[] = DRV_VERSION;
 static char ixgbevf_copyright[] =
-	"Copyright (c) 2009 - 2015 Intel Corporation.";
+	"Copyright (c) 2009 - 2012 Intel Corporation.";
 
 static const struct ixgbevf_info *ixgbevf_info_tbl[] = {
 	[board_82599_vf] = &ixgbevf_82599_vf_info,
@@ -96,14 +96,12 @@ static int debug = -1;
 module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
 
-static struct workqueue_struct *ixgbevf_wq;
-
 static void ixgbevf_service_event_schedule(struct ixgbevf_adapter *adapter)
 {
 	if (!test_bit(__IXGBEVF_DOWN, &adapter->state) &&
 	    !test_bit(__IXGBEVF_REMOVING, &adapter->state) &&
 	    !test_and_set_bit(__IXGBEVF_SERVICE_SCHED, &adapter->state))
-		queue_work(ixgbevf_wq, &adapter->service_task);
+		schedule_work(&adapter->service_task);
 }
 
 static void ixgbevf_service_event_complete(struct ixgbevf_adapter *adapter)
@@ -1010,14 +1008,12 @@ static int ixgbevf_poll(struct napi_struct *napi, int budget)
 		container_of(napi, struct ixgbevf_q_vector, napi);
 	struct ixgbevf_adapter *adapter = q_vector->adapter;
 	struct ixgbevf_ring *ring;
-	int per_ring_budget, work_done = 0;
+	int per_ring_budget;
 	bool clean_complete = true;
 
 	ixgbevf_for_each_ring(ring, q_vector->tx)
 		clean_complete &= ixgbevf_clean_tx_irq(q_vector, ring);
 
-	if (budget <= 0)
-		return budget;
 #ifdef CONFIG_NET_RX_BUSY_POLL
 	if (!ixgbevf_qv_lock_napi(q_vector))
 		return budget;
@@ -1031,12 +1027,10 @@ static int ixgbevf_poll(struct napi_struct *napi, int budget)
 	else
 		per_ring_budget = budget;
 
-	ixgbevf_for_each_ring(ring, q_vector->rx) {
-		int cleaned = ixgbevf_clean_rx_irq(q_vector, ring,
-						   per_ring_budget);
-		work_done += cleaned;
-		clean_complete &= (cleaned < per_ring_budget);
-	}
+	ixgbevf_for_each_ring(ring, q_vector->rx)
+		clean_complete &= (ixgbevf_clean_rx_irq(q_vector, ring,
+							per_ring_budget)
+				   < per_ring_budget);
 
 #ifdef CONFIG_NET_RX_BUSY_POLL
 	ixgbevf_qv_unlock_napi(q_vector);
@@ -1046,8 +1040,8 @@ static int ixgbevf_poll(struct napi_struct *napi, int budget)
 	if (!clean_complete)
 		return budget;
 	/* all work done, exit the polling mode */
-	napi_complete_done(napi, work_done);
-	if (adapter->rx_itr_setting == 1)
+	napi_complete(napi);
+	if (adapter->rx_itr_setting & 1)
 		ixgbevf_set_itr(q_vector);
 	if (!test_bit(__IXGBEVF_DOWN, &adapter->state) &&
 	    !test_bit(__IXGBEVF_REMOVING, &adapter->state))
@@ -1142,7 +1136,7 @@ static void ixgbevf_configure_msix(struct ixgbevf_adapter *adapter)
 		if (q_vector->tx.ring && !q_vector->rx.ring) {
 			/* Tx only vector */
 			if (adapter->tx_itr_setting == 1)
-				q_vector->itr = IXGBE_12K_ITR;
+				q_vector->itr = IXGBE_10K_ITR;
 			else
 				q_vector->itr = adapter->tx_itr_setting;
 		} else {
@@ -1200,7 +1194,7 @@ static void ixgbevf_update_itr(struct ixgbevf_q_vector *q_vector,
 	/* simple throttle rate management
 	 *    0-20MB/s lowest (100000 ints/s)
 	 *   20-100MB/s low   (20000 ints/s)
-	 *  100-1249MB/s bulk (12000 ints/s)
+	 *  100-1249MB/s bulk (8000 ints/s)
 	 */
 	/* what was last interrupt timeslice? */
 	timepassed_us = q_vector->itr >> 2;
@@ -1250,9 +1244,8 @@ static void ixgbevf_set_itr(struct ixgbevf_q_vector *q_vector)
 		new_itr = IXGBE_20K_ITR;
 		break;
 	case bulk_latency:
-		new_itr = IXGBE_12K_ITR;
-		break;
 	default:
+		new_itr = IXGBE_8K_ITR;
 		break;
 	}
 
@@ -1293,7 +1286,7 @@ static irqreturn_t ixgbevf_msix_clean_rings(int irq, void *data)
 
 	/* EIAM disabled interrupts (on this vector) for us */
 	if (q_vector->rx.ring || q_vector->tx.ring)
-		napi_schedule_irqoff(&q_vector->napi);
+		napi_schedule(&q_vector->napi);
 
 	return IRQ_HANDLED;
 }
@@ -1337,6 +1330,7 @@ static int ixgbevf_map_rings_to_vectors(struct ixgbevf_adapter *adapter)
 	int txr_remaining = adapter->num_tx_queues;
 	int i, j;
 	int rqpv, tqpv;
+	int err = 0;
 
 	q_vectors = adapter->num_msix_vectors - NON_Q_VECTORS;
 
@@ -1349,7 +1343,7 @@ static int ixgbevf_map_rings_to_vectors(struct ixgbevf_adapter *adapter)
 
 		for (; txr_idx < txr_remaining; v_start++, txr_idx++)
 			map_vector_to_txq(adapter, v_start, txr_idx);
-		return 0;
+		goto out;
 	}
 
 	/* If we don't have enough vectors for a 1-to-1
@@ -1374,7 +1368,8 @@ static int ixgbevf_map_rings_to_vectors(struct ixgbevf_adapter *adapter)
 		}
 	}
 
-	return 0;
+out:
+	return err;
 }
 
 /**
@@ -1472,7 +1467,9 @@ static inline void ixgbevf_reset_q_vectors(struct ixgbevf_adapter *adapter)
  **/
 static int ixgbevf_request_irq(struct ixgbevf_adapter *adapter)
 {
-	int err = ixgbevf_request_msix_irqs(adapter);
+	int err = 0;
+
+	err = ixgbevf_request_msix_irqs(adapter);
 
 	if (err)
 		hw_dbg(&adapter->hw, "request_irq failed, Error %d\n", err);
@@ -1831,7 +1828,7 @@ static int ixgbevf_vlan_rx_kill_vid(struct net_device *netdev,
 {
 	struct ixgbevf_adapter *adapter = netdev_priv(netdev);
 	struct ixgbe_hw *hw = &adapter->hw;
-	int err;
+	int err = -EOPNOTSUPP;
 
 	spin_lock_bh(&adapter->mbx_lock);
 
@@ -1895,16 +1892,8 @@ static void ixgbevf_set_rx_mode(struct net_device *netdev)
 {
 	struct ixgbevf_adapter *adapter = netdev_priv(netdev);
 	struct ixgbe_hw *hw = &adapter->hw;
-	unsigned int flags = netdev->flags;
-	int xcast_mode;
-
-	xcast_mode = (flags & IFF_ALLMULTI) ? IXGBEVF_XCAST_MODE_ALLMULTI :
-		     (flags & (IFF_BROADCAST | IFF_MULTICAST)) ?
-		     IXGBEVF_XCAST_MODE_MULTI : IXGBEVF_XCAST_MODE_NONE;
 
 	spin_lock_bh(&adapter->mbx_lock);
-
-	hw->mac.ops.update_xcast_mode(hw, netdev, xcast_mode);
 
 	/* reprogram multicast list */
 	hw->mac.ops.update_mc_addr_list(hw, netdev);
@@ -2047,7 +2036,7 @@ static void ixgbevf_negotiate_api(struct ixgbevf_adapter *adapter)
 		      ixgbe_mbox_api_11,
 		      ixgbe_mbox_api_10,
 		      ixgbe_mbox_api_unknown };
-	int err, idx = 0;
+	int err = 0, idx = 0;
 
 	spin_lock_bh(&adapter->mbx_lock);
 
@@ -2261,8 +2250,10 @@ void ixgbevf_reset(struct ixgbevf_adapter *adapter)
 	}
 
 	if (is_valid_ether_addr(adapter->hw.mac.addr)) {
-		ether_addr_copy(netdev->dev_addr, adapter->hw.mac.addr);
-		ether_addr_copy(netdev->perm_addr, adapter->hw.mac.addr);
+		memcpy(netdev->dev_addr, adapter->hw.mac.addr,
+		       netdev->addr_len);
+		memcpy(netdev->perm_addr, adapter->hw.mac.addr,
+		       netdev->addr_len);
 	}
 
 	adapter->last_reset = jiffies;
@@ -2420,7 +2411,7 @@ err_allocation:
 static int ixgbevf_set_interrupt_capability(struct ixgbevf_adapter *adapter)
 {
 	struct net_device *netdev = adapter->netdev;
-	int err;
+	int err = 0;
 	int vector, v_budget;
 
 	/* It's easy to be greedy for MSI-X vectors, but it really
@@ -2438,21 +2429,26 @@ static int ixgbevf_set_interrupt_capability(struct ixgbevf_adapter *adapter)
 	 */
 	adapter->msix_entries = kcalloc(v_budget,
 					sizeof(struct msix_entry), GFP_KERNEL);
-	if (!adapter->msix_entries)
-		return -ENOMEM;
+	if (!adapter->msix_entries) {
+		err = -ENOMEM;
+		goto out;
+	}
 
 	for (vector = 0; vector < v_budget; vector++)
 		adapter->msix_entries[vector].entry = vector;
 
 	err = ixgbevf_acquire_msix_vectors(adapter, v_budget);
 	if (err)
-		return err;
+		goto out;
 
 	err = netif_set_real_num_tx_queues(netdev, adapter->num_tx_queues);
 	if (err)
-		return err;
+		goto out;
 
-	return netif_set_real_num_rx_queues(netdev, adapter->num_rx_queues);
+	err = netif_set_real_num_rx_queues(netdev, adapter->num_rx_queues);
+
+out:
+	return err;
 }
 
 /**
@@ -2477,6 +2473,9 @@ static int ixgbevf_alloc_q_vectors(struct ixgbevf_adapter *adapter)
 		q_vector->v_idx = q_idx;
 		netif_napi_add(adapter->netdev, &q_vector->napi,
 			       ixgbevf_poll, 64);
+#ifdef CONFIG_NET_RX_BUSY_POLL
+		napi_hash_add(&q_vector->napi);
+#endif
 		adapter->q_vector[q_idx] = q_vector;
 	}
 
@@ -2653,14 +2652,13 @@ static int ixgbevf_sw_init(struct ixgbevf_adapter *adapter)
 		else if (is_zero_ether_addr(adapter->hw.mac.addr))
 			dev_info(&pdev->dev,
 				 "MAC address not assigned by administrator.\n");
-		ether_addr_copy(netdev->dev_addr, hw->mac.addr);
+		memcpy(netdev->dev_addr, hw->mac.addr, netdev->addr_len);
 	}
 
 	if (!is_valid_ether_addr(netdev->dev_addr)) {
 		dev_info(&pdev->dev, "Assigning random MAC address\n");
 		eth_hw_addr_random(netdev);
-		ether_addr_copy(hw->mac.addr, netdev->dev_addr);
-		ether_addr_copy(hw->mac.perm_addr, netdev->dev_addr);
+		memcpy(hw->mac.addr, netdev->dev_addr, netdev->addr_len);
 	}
 
 	/* Enable dynamic interrupt throttling rates */
@@ -3347,7 +3345,6 @@ static void ixgbevf_tx_csum(struct ixgbevf_ring *tx_ring,
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
 		u8 l4_hdr = 0;
-		__be16 frag_off;
 
 		switch (first->protocol) {
 		case htons(ETH_P_IP):
@@ -3358,16 +3355,13 @@ static void ixgbevf_tx_csum(struct ixgbevf_ring *tx_ring,
 		case htons(ETH_P_IPV6):
 			vlan_macip_lens |= skb_network_header_len(skb);
 			l4_hdr = ipv6_hdr(skb)->nexthdr;
-			if (likely(skb_network_header_len(skb) ==
-				   sizeof(struct ipv6hdr)))
-				break;
-			ipv6_skip_exthdr(skb, skb_network_offset(skb) +
-					      sizeof(struct ipv6hdr),
-					 &l4_hdr, &frag_off);
-			if (unlikely(frag_off))
-				l4_hdr = NEXTHDR_FRAGMENT;
 			break;
 		default:
+			if (unlikely(net_ratelimit())) {
+				dev_warn(tx_ring->dev,
+					 "partial checksum but proto=%x!\n",
+					 first->protocol);
+			}
 			break;
 		}
 
@@ -3389,18 +3383,16 @@ static void ixgbevf_tx_csum(struct ixgbevf_ring *tx_ring,
 		default:
 			if (unlikely(net_ratelimit())) {
 				dev_warn(tx_ring->dev,
-					 "partial checksum, l3 proto=%x, l4 proto=%x\n",
-					 first->protocol, l4_hdr);
+					 "partial checksum but l4 proto=%x!\n",
+					 l4_hdr);
 			}
-			skb_checksum_help(skb);
-			goto no_csum;
+			break;
 		}
 
 		/* update TX checksum flag */
 		first->tx_flags |= IXGBE_TX_FLAGS_CSUM;
 	}
 
-no_csum:
 	/* vlan_macip_lens: MACLEN, VLAN tag */
 	vlan_macip_lens |= skb_network_offset(skb) << IXGBE_ADVTXD_MACLEN_SHIFT;
 	vlan_macip_lens |= first->tx_flags & IXGBE_TX_FLAGS_VLAN_MASK;
@@ -3696,8 +3688,8 @@ static int ixgbevf_set_mac(struct net_device *netdev, void *p)
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	ether_addr_copy(netdev->dev_addr, addr->sa_data);
-	ether_addr_copy(hw->mac.addr, addr->sa_data);
+	memcpy(netdev->dev_addr, addr->sa_data, netdev->addr_len);
+	memcpy(hw->mac.addr, addr->sa_data, netdev->addr_len);
 
 	spin_lock_bh(&adapter->mbx_lock);
 
@@ -3904,7 +3896,6 @@ static const struct net_device_ops ixgbevf_netdev_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= ixgbevf_netpoll,
 #endif
-	.ndo_features_check	= passthru_features_check,
 };
 
 static void ixgbevf_assign_netdev_ops(struct net_device *dev)
@@ -4246,17 +4237,15 @@ static struct pci_driver ixgbevf_driver = {
  **/
 static int __init ixgbevf_init_module(void)
 {
+	int ret;
+
 	pr_info("%s - version %s\n", ixgbevf_driver_string,
 		ixgbevf_driver_version);
 
 	pr_info("%s\n", ixgbevf_copyright);
-	ixgbevf_wq = create_singlethread_workqueue(ixgbevf_driver_name);
-	if (!ixgbevf_wq) {
-		pr_err("%s: Failed to create workqueue\n", ixgbevf_driver_name);
-		return -ENOMEM;
-	}
 
-	return pci_register_driver(&ixgbevf_driver);
+	ret = pci_register_driver(&ixgbevf_driver);
+	return ret;
 }
 
 module_init(ixgbevf_init_module);
@@ -4270,10 +4259,6 @@ module_init(ixgbevf_init_module);
 static void __exit ixgbevf_exit_module(void)
 {
 	pci_unregister_driver(&ixgbevf_driver);
-	if (ixgbevf_wq) {
-		destroy_workqueue(ixgbevf_wq);
-		ixgbevf_wq = NULL;
-	}
 }
 
 #ifdef DEBUG
